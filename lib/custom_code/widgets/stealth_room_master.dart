@@ -46,6 +46,16 @@ class _StealthRoomMasterState extends State<StealthRoomMaster> {
     super.initState();
     StealthRoomMaster.exitCurrentMode =
         () => setState(() => _currentMode = null);
+
+    // Duo 초대 링크로 진입한 경우 메뉴 없이 바로 Duo로 이동
+    if (FFAppState().isGuestSession &&
+        FFAppState().duoRoomId.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          setState(() => _currentMode = 1);
+        }
+      });
+    }
   }
 
   @override
