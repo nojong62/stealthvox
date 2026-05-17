@@ -581,33 +581,45 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   }
 
   Future<void> _joinAsGuest(String roomId) async {
+    // 초대 상태는 진입 시도 직전에 반드시 소비 (좀비 roomId 방지)
+    FFAppState().clearDuoInviteState();
+
     try {
       _duoSessionRef =
           FirebaseFirestore.instance.collection('duo_sessions').doc(roomId);
       final snap = await _duoSessionRef!.get();
       if (!snap.exists) {
         debugPrint('[Duo] _joinAsGuest: session not found ($roomId)');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('초대된 방을 찾을 수 없습니다.')),
+          );
+        }
         return;
       }
       final data = snap.data() as Map<String, dynamic>?;
       if (data == null || data['isDuoEnabled'] != true) {
         debugPrint('[Duo] _joinAsGuest: isDuoEnabled is not true ($roomId)');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('이 방은 현재 사용할 수 없습니다.')),
+          );
+        }
         return;
       }
+
       final String? firebaseUid = FirebaseAuth.instance.currentUser?.uid;
       final String guestUid =
           firebaseUid ?? 'guest_${DateTime.now().millisecondsSinceEpoch}';
+
       await _duoSessionRef!.update({
         'isPartnerJoined': true,
         'partnerUid': guestUid,
         'partnerJoinedAt': FieldValue.serverTimestamp(),
       });
+
       debugPrint('[Duo] _joinAsGuest success — guestUid: $guestUid, roomId: $roomId');
-      FFAppState().isGuestSession = false;
-      FFAppState().duoRoomId = '';
-      FFAppState().inviterUid = '';
-      FFAppState().pendingInviteType = '';
-      FFAppState().update(() {});
+
       if (mounted) {
         setState(() {
           _isConversationActive = true;

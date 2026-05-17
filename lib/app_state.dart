@@ -203,6 +203,7 @@ class FFAppState extends ChangeNotifier {
     prefs.setBool('ff_isGuestSession', false);
     prefs.setString('ff_duoRoomId', '');
     prefs.setString('ff_pendingInviteType', '');
+    debugPrint('[AppState] clearDuoInviteState called');
   }
 }
 

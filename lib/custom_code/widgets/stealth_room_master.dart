@@ -41,18 +41,28 @@ class _StealthRoomMasterState extends State<StealthRoomMaster> {
   // 0: 메뉴 화면, 1: Duo, 2: Clone, 3: Roleplay, 4: Expand
   int? _currentMode;
 
+  // 초대 링크에서 소비한 roomId (1회용 — build에서 Duo 생성자에 전달)
+  String? _pendingDuoRoomId;
+
   @override
   void initState() {
     super.initState();
     StealthRoomMaster.exitCurrentMode =
         () => setState(() => _currentMode = null);
 
-    // Duo 초대 링크로 진입한 경우 메뉴 없이 바로 Duo로 이동
+    // Duo 초대 링크 자동 진입 처리
+    // roomId를 로컬 변수에 옮기고 FFAppState는 즉시 clear → 뒤로가기 루프 방지
     if (FFAppState().isGuestSession &&
         FFAppState().duoRoomId.isNotEmpty) {
+      final String consumedRoomId = FFAppState().duoRoomId;
+      FFAppState().clearDuoInviteState(); // 즉시 소비!
+      debugPrint('[StealthRoom] Duo invite detected — roomId: $consumedRoomId');
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
-          setState(() => _currentMode = 1);
+          setState(() {
+            _pendingDuoRoomId = consumedRoomId;
+            _currentMode = 1;
+          });
         }
       });
     }
@@ -195,7 +205,8 @@ class _StealthRoomMasterState extends State<StealthRoomMaster> {
       return RoutineModeDuo(
           key: const ValueKey('RoutineModeDuo'),
           width: widget.width,
-          height: widget.height);
+          height: widget.height,
+          roomId: _pendingDuoRoomId);
     } else if (_currentMode == 2) {
       return RoutineModeClone(
           key: const ValueKey('RoutineModeClone'),
