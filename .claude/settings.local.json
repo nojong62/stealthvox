@@ -9,7 +9,18 @@
       "Bash(flutter pub *)",
       "PowerShell(Get-ChildItem *)",
       "PowerShell([System.Environment]::GetEnvironmentVariable\\(\"PATH\", \"User\"\\) -split ';' | Where-Object { $_ -ne '' })",
-      "PowerShell([System.Environment]::GetEnvironmentVariable\\(\"PATH\", \"Machine\"\\) -split ';' | Where-Object { $_ -ne '' })"
+      "PowerShell([System.Environment]::GetEnvironmentVariable\\(\"PATH\", \"Machine\"\\) -split ';' | Where-Object { $_ -ne '' })",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\u\\\\AppData\\\\Local\\\\\" -Directory | Select-Object Name | Where-Object { $_.Name -match -join \"Android\" })",
+      "PowerShell(& \"F:\\\\flutter\\\\bin\\\\flutter.bat\" config --android-sdk 2>&1; Get-ChildItem \"F:\\\\\" -Directory | Select-Object Name | Where-Object {$_.Name -match \"Android|android|sdk\"})",
+      "PowerShell(& \"F:\\\\flutter\\\\bin\\\\flutter.bat\" doctor 2>&1)",
+      "Read(//f//**)",
+      "PowerShell(flutter *)",
+      "PowerShell(Get-Command *)",
+      "Read(//usr/local/bin/**)",
+      "Bash(flutter --version)",
+      "PowerShell(Get-ChildItem \"C:\\\\Program Files\\\\FlutterFlow\" | ForEach-Object { $_.Name })",
+      "PowerShell(Get-ChildItem \"C:\\\\Program Files\\\\FlutterFlow\\\\data\" | ForEach-Object { $_.Name } | Select-Object -First 10)",
+      "PowerShell($reg = Get-ItemProperty \"HKCU:\\\\Environment\" -ErrorAction SilentlyContinue; $reg.PATH -split \";\" | Where-Object { $_ -ne \"\" })"
     ]
   }
 }
