@@ -67,6 +67,15 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Duo 초대 pending 상태이면 Lobby 스킵하고 바로 StealthRoom으로
+      debugPrint('[Lobby] isGuestSession=${FFAppState().isGuestSession}, pendingInviteType=${FFAppState().pendingInviteType}, duoRoomId=${FFAppState().duoRoomId}');
+      if (FFAppState().isGuestSession &&
+          FFAppState().pendingInviteType == 'duo' &&
+          FFAppState().duoRoomId.isNotEmpty) {
+        debugPrint('[Lobby] routing to StealthRoom for Duo invite');
+        if (mounted) context.pushReplacementNamed('StealthRoom');
+        return;
+      }
       _initAppState();
       _initializeLobbyData();
     });
@@ -222,9 +231,11 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
       FFAppState().isGuestSession = true;
       FFAppState().inviterUid = inviterId;
       FFAppState().duoRoomId = roomId;
+      FFAppState().pendingInviteType = 'duo';
+      FFAppState().update(() {});
 
       if (!mounted) return;
-      debugPrint('[DeepLink] Success → roomId: $roomId, inviter: $inviterId');
+      debugPrint('[Lobby] routing to StealthRoom for Duo invite');
 
       context.pushReplacementNamed('StealthRoom');
     } on FirebaseAuthException catch (e) {

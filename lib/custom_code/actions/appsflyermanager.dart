@@ -106,10 +106,11 @@ class AppsFlyerManager {
   /// 세 콜백 경로 공통 파싱 + FFAppState 저장
   static void _handlePayload(Map<String, dynamic> params) {
     try {
-      // room_id 우선, 없으면 duo_room_id → deep_link_sub2 순서로 폴백
+      // room_id 우선, 없으면 duo_room_id → deep_link_sub2 → af_sub2 순서로 폴백
       final String roomId = (params['room_id'] ??
               params['duo_room_id'] ??
               params['deep_link_sub2'] ??
+              params['af_sub2'] ??
               '')
           .toString()
           .trim();
@@ -124,15 +125,18 @@ class AppsFlyerManager {
           (params['deep_link_value'] ?? '').toString().trim();
       final String inviteType =
           (params['invite_type'] ?? '').toString().trim();
+      final String afDp = (params['af_dp'] ?? '').toString().trim();
 
-      debugPrint('[AppsFlyer] parsed roomId: $roomId');
+      debugPrint('[AppsFlyer] parsed duo roomId: $roomId');
       debugPrint('[AppsFlyer] parsed inviterUid: $inviterUid');
       debugPrint('[AppsFlyer] parsed deepLinkValue: $deepLinkValue');
       debugPrint('[AppsFlyer] parsed inviteType: $inviteType');
 
-      // Duo 초대 판정
+      // Duo 초대 판정 (deep_link_value, invite_type, af_dp 모두 체크)
       final bool isDuoInvite =
-          deepLinkValue == 'duo_chat' || inviteType == 'duo';
+          deepLinkValue == 'duo_chat' ||
+          inviteType == 'duo' ||
+          afDp.contains('duo');
 
       if (isDuoInvite && roomId.isNotEmpty) {
         FFAppState().isGuestSession = true;
@@ -140,7 +144,7 @@ class AppsFlyerManager {
         FFAppState().inviterUid = inviterUid;
         FFAppState().pendingInviteType = 'duo';
         FFAppState().update(() {});
-        debugPrint('[AppsFlyer] saved duo invite state — roomId: $roomId');
+        debugPrint('[AppsFlyer] saved FFAppState duo invite');
       } else {
         debugPrint(
             '[AppsFlyer] not a duo invite or roomId empty, skipping state save');

@@ -56,13 +56,22 @@ class _IntroMasterState extends State<IntroMaster> {
   }
 
   Future<void> _checkEntryStatus() async {
+    // 1순위: AppsFlyer Duo guest invite pending — 로그인 없이 StealthRoom으로
+    debugPrint('[Intro] isGuestSession=${FFAppState().isGuestSession}, pendingInviteType=${FFAppState().pendingInviteType}, duoRoomId=${FFAppState().duoRoomId}');
+    if (FFAppState().isGuestSession &&
+        FFAppState().pendingInviteType == 'duo' &&
+        FFAppState().duoRoomId.isNotEmpty) {
+      debugPrint('[Intro] routing to StealthRoom for Duo invite');
+      if (mounted) context.pushReplacementNamed('StealthRoom');
+      return;
+    }
+    // 2순위: 이미 로그인된 회원이면 로비로 이동 (로비에서 AppsFlyer 초기화)
     final user = FirebaseAuth.instance.currentUser;
-    // 이미 로그인된 회원이면 무조건 로비로 이동 (로비에서 AppsFlyer 초기화)
     if (user != null) {
       context.goNamed('Lobby');
       return;
     }
-    // 비회원 첫 실행: Duo 초대 딥링크 수신을 위해 AppsFlyer 초기화
+    // 3순위: 비회원 첫 실행: Duo 초대 딥링크 수신을 위해 AppsFlyer 초기화
     _initAppsFlyer();
   }
 
@@ -125,9 +134,11 @@ class _IntroMasterState extends State<IntroMaster> {
       FFAppState().isGuestSession = true;
       FFAppState().inviterUid = inviterId;
       FFAppState().duoRoomId = roomId;
+      FFAppState().pendingInviteType = 'duo';
+      FFAppState().update(() {});
 
       if (!mounted) return;
-      debugPrint('[IntroMaster] DeepLink success → roomId: $roomId');
+      debugPrint('[IntroMaster] routing to StealthRoom for Duo invite');
       context.pushReplacementNamed('StealthRoom');
     } on FirebaseAuthException catch (e) {
       debugPrint('[IntroMaster] Auth error: $e');
