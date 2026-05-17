@@ -1,0 +1,306 @@
+ 각 모드별 API 통신 설정 비교
+
+5/4
+                    ↓
+ 오프닝 흐름 (line 276~311)
+
+  // AI 스트림 → target 텍스트 실시간 + TTS 청킹
+  await for (final chunk in aiStream) {                                                                                     if (!mounted || !_isConversationActive) break;
+    aiText += chunk;                                                                                                        buffer += chunk;
+    if (mounted) setState(() = _localMessages[aiIdx]['target'] = aiText); // 텍스트 실시간
+    _scrollToBottom();
+    final matches = sp.allMatches(buffer).toList();
+    if (matches.isNotEmpty) {
+      final lastIdx = matches.last.end;
+      final toSpeak = buffer.substring(0, lastIdx).trim();
+      buffer = buffer.substring(lastIdx);
+      if (toSpeak.isNotEmpty) tts.addText(toSpeak); // TTS 청킹
+    }
+  }
+  if (buffer.trim().isNotEmpty) tts.addText(buffer.trim());
+
+  // ✅ 스트리밍 완료 즉시 번역 시작 — TTS 재생과 병렬로 실행
+  StepExpandBrain.generateCleanOriginal(
+          apiKey: _openAiKey, englishText: aiText)
+      .then((kor) {
+    if (mounted && _localMessages.length  aiIdx) {
+      setState(() = _localMessages[aiIdx]['original'] = kor); // original 업데이트
+    }
+  });
+
+  // TTS 재생 완료 대기 (최대 10초) ← 번역은 이 대기 중에 이미 진행
+  int ticks = 0;
+  while ((tts.pendingRequests  0 || _ttsQueueManager.isBusy) && mounted) {
+    await Future.delayed(const Duration(milliseconds: 50));
+    if (++ticks  200) break;
+  }
+
+  
+  메인 턴 흐름 — aiGenerationTask (line 1806~1903)
+
+  // AI 생성+청킹을 Future로 (유저 재생과 병렬)
+  final Future<void aiGenerationTask = () async {
+    await for (String chunk in aiStream) {
+      aiTargetText += chunk;
+      aiBuffer += chunk;
+      if (mounted)
+        setState(() = _localMessages[aiIndex]['target'] = aiTargetText); // 텍스트 실시간
+      _scrollToBottom();
+
+      final matches = splitPattern.allMatches(aiBuffer).toList();
+      if (matches.isNotEmpty) {
+        int lastIdx = matches.last.end;
+        String toSpeak = aiBuffer.substring(0, lastIdx).trim();
+        aiBuffer = aiBuffer.substring(lastIdx);
+        if (toSpeak.isNotEmpty) {
+          if (!firstChunkSentToTTS) { _swTTS.start(); firstChunkSentToTTS = true; }
+          aiTtsFetcher.addText(toSpeak); // TTS 청킹
+        }
+      }
+    }
+    if (aiBuffer.trim().isNotEmpty) {
+      if (!firstChunkSentToTTS) { _swTTS.start(); firstChunkSentToTTS = true; }
+      aiTtsFetcher.addText(aiBuffer.trim());
+    }
+    // ✅ 스트리밍 완료 즉시 번역 시작 — 유저 TTS 재생과 병렬로 실행
+    StepExpandBrain.generateCleanOriginal(
+            apiKey: _openAiKey, englishText: aiTargetText)
+        .then((kor) {
+      if (mounted && _localMessages.length  aiIndex) {
+        setState(() = _localMessages[aiIndex]['original'] = kor); // original 업데이트
+      }
+    });
+  }(); // ← Future 즉시 실행 (유저 TTS 대기와 동시 진행)
+
+  // STEP 5~6: 유저 TTS 재생 대기 → 250ms 간격 → AI 큐 개방
+  // ← 이 대기 시간 동안 번역 API가 응답을 받아옴
+  ...
+  _ttsQueueManager.setAiPaused(false); // AI 소리 시작
+
+  await aiGenerationTask; // ← aiGenerationTask 완료 확인 (번역은 .then()으로 독립)
+=====================
+5/2 수정
+네, 간단히 설명드릴게요.
+
+
+
+ ② AI 텍스트 실시간 표시 — 무엇이 바뀌나?
+
+ 현재 상황 (1583번 라인)
+```dart
+if (mounted && !_ttsQueueManager.aiPaused)   // ← 이 조건이 막고 있음
+    setState(() = _localMessages[aiIndex]['target'] = aiTargetText);
+```
+
+GPT가 영어 글자를 토큰 단위로 흘려보내는데, `aiPaused=true`인 동안에는 화면 업데이트를 막아둡니다. 그러다 PIPE07(유저 TTS 끝난 시점)에서 `aiPaused=false`로 바꾸면서 글자를 한 방에 표시합니다.
+
+ 사용자가 보는 화면 (현재)
+```
+[유저 말 끝남]
+   ↓ (잠시 침묵)
+   ↓ (잠시 침묵)
+[AI 글자 와장창 등장 + 소리 동시 시작]
+```
+
+ 변경 후 (조건 제거)
+```dart
+if (mounted)   // ← aiPaused 체크 빼버림
+    setState(() = _localMessages[aiIndex]['target'] = aiTargetText);
+```
+
+ 사용자가 보는 화면 (변경 후)
+```
+[유저 말 끝나기 전]
+   ↓ AI 글자 똑똑똑 흘러나옴 (아직 소리 X)
+   ↓ AI 글자 거의 다 나옴
+[유저 소리 끝]
+[AI 소리 시작 — 글자는 이미 다 보임]
+```
+
+핵심 효과: AI가 "생각하고 있다"는 시각적 피드백이 생겨서 침묵 시간이 짧게 느껴짐. 글자가 미리 보이니까 사용자가 마음의 준비도 됨.
+
+소리는 그대로: AI 소리는 PIPE07까지 대기. 청크 큐 로직(Box 7)은 건드리지 않음 → 안전.
+
+
+
+ ① `generateCleanOriginal` 위치 이동 — 무엇이 바뀌나?
+
+ 현재 위치 (1659번 라인, PIPE07 시점)
+```dart
+// PIPE07: 유저 TTS 재생 완료 직후
+StepExpandBrain.generateCleanOriginal(
+    apiKey: _openAiKey, englishText: aiTargetText  // ⚠️ 이게 완성됐다고 보장 못 함
+).then(...);
+
+await aiGenerationTask;  // ← AI 영어 스트림이 여기서 끝남 (그 전엔 진행 중)
+```
+
+문제점: PIPE07에서 한국어 번역을 시작할 때, AI 영어 스트림이 아직 진행 중일 수 있어요. 즉 잘린 영어를 한국어로 번역하는 사고 발생 가능.
+
+예시:
+ 유저 발화 짧음 ("I went home.")
+ 유저 TTS 1초만에 끝남 → PIPE07 도달
+ 그런데 AI 스트림은 아직 "Where did you" 까지만 도착
+ → "어디서 너" 같은 어색한 한국어 번역됨
+
+ 변경 위치 (1668번 `await aiGenerationTask` 직후)
+```dart
+await aiGenerationTask;  // ← 영어 스트림 100% 완성 보장
+
+// 여기로 이동: 완성된 aiTargetText로 번역 시작
+StepExpandBrain.generateCleanOriginal(
+    apiKey: _openAiKey, englishText: aiTargetText
+).then(...);
+```
+
+효과:
+ 잘린 번역 사고 0%
+ AI 영어 소리가 재생되는 동안 한국어 번역이 백그라운드로 돌아감 → 사용자가 영어 듣는 사이 한국어가 자연스럽게 붙음
+ 레이턴시 손해 없음 (어차피 병렬)
+
+
+
+ 요약 (한 줄씩)
+
+| 변경 | 한 줄 요약 | 위험도 |
+||||
+| ② 실시간 표시 | `if` 조건 한 개 빼기 | 거의 0 |
+| ① 번역 위치 이동 | 코드 블록 한 개 옮기기 | 거의 0 |
+| AI 역번역 자체 삭제 | (이미 합의) GPT 호출 1회 절감 | 0 |
+
+세 개 다 합치면:
+ AI 글자가 일찍 보임 (체감 빠름)
+ 잘린 번역 버그 없음
+ API 호출 1회 절감
+
+이해되시면 코드 작성 진행할까요?
+
+💬 English Tip: "Let's tackle the lowhanging fruit first." — "쉬운 것부터 먼저 처리하죠." 우선순위 정할 때 자주 쓰는 표현 (낮게 달린 과일 = 따기 쉬운 것).
+==========================================
+                                                                                                                             STT (음성 → 텍스트)
+ 현재 설정 평가
+
+ ✅ 잘 된 부분
+ Step Expand `utterance_end_ms=1000ms` — 단답형 유도 앱 특성에 맞게 이미 최적화됨.
+ GPT temperature 다단계 — 모드별 창의성/정확도 균형 잘 잡힘.
+ Duo timeout 10s — 통역 특성상 짧게 잡은 게 맞음.
+
+
+
+ ⚠️ 속도 개선 여지 있는 구간 3곳
+
+① Clone/Roleplay `utterance_end_ms=1200ms` → 900ms 시도 가능
+ 현재 1.2초 침묵 후 턴 종료. 대화 흐름에서 1.2초는 꽤 긺.
+ 900ms로 줄이면 체감 반응속도 확 빨라짐.
+ 리스크: 말하다 잠깐 숨 쉬면 조기 종료. → 테스트 필수.
+
+② TTS speed `1.0` → `1.1` 시도 가능
+ AI 응답 읽는 속도 10% 업. 대화 템포가 자연스럽게 빨라짐.
+ 언어학습 앱이라 너무 빠르면 역효과 — Clone/Roleplay만 적용 권장.
+ Step Expand는 학습자가 따라해야 하니 1.0 유지.
+
+③ GPT streaming timeout Clone `45s` → `30s` 통일
+ 45초는 너무 관대함. 실제로 45초 걸리면 사용자는 이미 앱 껐음.
+ 30s로 줄여도 정상 응답은 다 잡힘. 에러 복구만 빨라짐.
+
+
+
+ 🔴 건드리면 안 되는 구간
+ `endpointing=700ms` — 이미 최소값에 가까움. 줄이면 문장 중간에 끊김.
+ Step Expand `utterance_end_ms=1000ms` — 이미 최적. 더 줄이면 단어 자르기 사고.
+ Duo temperature=0.2 — 통역 정확도용, 올리면 오역 발생.
+ Box 7 — 지시사항대로 금지.
+
+
+
+ 📊 전체 체감 레이턴시 구조 (현재 기준)
+
+```
+유저 발화 종료 감지:  700~1200ms  ← 여기가 가장 큰 체감 지연
+GPT 첫 토큰 도달:     300~800ms
+TTS 첫 청크 도달:     200~400ms
+────────────────────
+총 체감 공백:    약 1.2~2.4초
+```
+
+가장 큰 개선 효과는 `utterance_end_ms` 단축입니다. TTS/GPT 최적화보다 훨씬 체감이 큼. Clone/Roleplay를 1200→900으로 줄이면 0.3초 단축인데, 대화에서 0.3초는 생각보다 크게 느껴져요.
+
+
+
+요약 권장 조정값:
+
+| 항목 | 현재 | 권장 | 효과 |
+|||||
+| Clone/Roleplay `utterance_end_ms` | 1200ms | 900ms | 체감 반응 빠름 |
+| Clone/Roleplay TTS speed | 1.0 | 1.1 | 대화 템포 업 |
+| Clone GPT timeout | 45s | 30s | 에러 복구 빠름 |
+
+조정 원하시면 어느 모드 파일 수정할지 알려주세요. 지시문 드릴게요.
+
+
+
+💡 English tip — 레이턴시 영어
+ "Endtoend latency" — 유저 말 끝 → AI 응답 시작까지 전체 시간.
+ "Time to first byte (TTFB)" — 첫 데이터 도달 시간. GPT 스트리밍에서 "첫 토큰 도달"이 이것.
+ "Perceived latency" — 체감 지연. 실제 ms보다 느리게 느껴지는 정도. `utterance_end_ms`가 perceived latency에 가장 큰 영향.
+
+"The biggest perceived latency comes from utterance_end_ms, not GPT." — 오늘 핵심 포인트를 영어 한 문장으로. 
+
+
+                                                                                                                            ┌────────────┬───────────────────────┬─────────────────┬───────────────────────────────────────────────────┬──────────┐
+  │    모드    │         엔진          │      방식       │                  발화 종료 감지                   │ 타임아웃 │
+  ├────────────┼───────────────────────┼─────────────────┼───────────────────────────────────────────────────┼──────────┤
+  │ Duo        │ OpenAI Whisper        │ HTTP 파일       │ 진폭 25dB 이하 × 15회(1.5초) → 전송 / 50회(5초)  │ 10s      │
+  │ Connect    │ (whisper1)           │ 업로드          │ 무음 → 재시작                                     │          │
+  ├────────────┼───────────────────────┼─────────────────┼───────────────────────────────────────────────────┼──────────┤
+  │ Clone AI   │ Deepgram (wss://)     │ WebSocket       │ endpointing=700ms, utterance_end_ms=1200ms        │ ping 10s │
+  │            │                       │ 스트리밍        │                                                   │          │
+  ├────────────┼───────────────────────┼─────────────────┼───────────────────────────────────────────────────┼──────────┤
+  │ AI         │ Deepgram (wss://)     │ WebSocket       │ endpointing=700ms, utterance_end_ms=1200ms        │ ping 10s │
+  │ Roleplay   │                       │ 스트리밍        │                                                   │          │
+  ├────────────┼───────────────────────┼─────────────────┼───────────────────────────────────────────────────┼──────────┤
+  │ Step       │ Deepgram (wss://)     │ WebSocket       │ endpointing=700ms, utterance_end_ms=1000ms        │ ping 10s │
+  │ Expand     │                       │ 스트리밍        │                                                   │          │
+  └────────────┴───────────────────────┴─────────────────┴───────────────────────────────────────────────────┴──────────┘
+
+  ▎ Step Expand만 utterance_end_ms가 1200→1000ms로 더 짧음 (반응속도 단축 주석 있음)
+
+  
+  AI 응답 (GPT)
+
+  ┌─────────────┬─────────────┬──────────────────────────────────────────────┬────────────────────────────────┐
+  │    모드     │    모델     │              온도(temperature)               │            타임아웃            │
+  ├─────────────┼─────────────┼──────────────────────────────────────────────┼────────────────────────────────┤
+  │ Duo Connect │ gpt4omini │ 0.2 (통역 정확도 고정)                       │ 10s                            │
+  ├─────────────┼─────────────┼──────────────────────────────────────────────┼────────────────────────────────┤
+  │ Clone AI    │ gpt4omini │ 0.0 (주어 추론) / 0.2 / 0.3 / 0.3 (최대 45s) │ 30s (스트리밍 기본) / 최대 45s │
+  ├─────────────┼─────────────┼──────────────────────────────────────────────┼────────────────────────────────┤
+  │ AI Roleplay │ gpt4omini │ 0.0 / 0.2 / 1.1 (창의 대화)                  │ 30s (스트리밍 기본) / 15s      │
+  ├─────────────┼─────────────┼──────────────────────────────────────────────┼────────────────────────────────┤
+  │ Step Expand │ gpt4omini │ 0.0 / 0.1 / 0.3 (재시도 0.8) / 0.4           │ 15s~20s                        │
+  └─────────────┴─────────────┴──────────────────────────────────────────────┴────────────────────────────────┘
+
+  
+  TTS (텍스트 → 음성)
+
+  ┌─────────────┬───────┬────────┬──────┬──────────┐
+  │    모드     │ 모델  │  음성  │ 속도 │ 타임아웃 │
+  ├─────────────┼───────┼────────┼──────┼──────────┤
+  │ Duo Connect │ tts1 │ nova   │ 1.0  │ 15s      │
+  ├─────────────┼───────┼────────┼──────┼──────────┤
+  │ Clone AI    │ tts1 │ (동적) │ 1.0  │ 10s      │
+  ├─────────────┼───────┼────────┼──────┼──────────┤
+  │ AI Roleplay │ tts1 │ (동적) │ 1.0  │ 10s      │
+  ├─────────────┼───────┼────────┼──────┼──────────┤
+  │ Step Expand │ tts1 │ (동적) │ 1.0  │ 12s      │
+  └─────────────┴───────┴────────┴──────┴──────────┘
+
+  
+  핵심 차이점 요약
+
+   Duo — STT 엔진이 다름 (Whisper HTTP, 나머지 3개는 Deepgram WebSocket). 번역 temperature 0.2로 고정, GPT 응답 timeout이
+  가장 짧음(10s) → 통역 특화 최속 파이프라인
+   Clone/Roleplay — Deepgram 동일 설정, utterance_end_ms=1200ms. GPT 스트리밍 기본 timeout 30s. Roleplay만 temperature=1.1
+   구간 존재 (대화 창의성 최대치)
+   Step Expand — Deepgram이지만 utterance_end_ms=1000ms로 가장 빠른 발화 종료 감지. 단계 진행 시 Future.delayed(4s) 의도적
+   대기 있음

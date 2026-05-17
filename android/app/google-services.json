@@ -1,0 +1,98 @@
+{
+  "project_info": {
+    "project_number": "450483026108",
+    "project_id": "stealth-vox-3p3rq3",
+    "storage_bucket": "stealth-vox-3p3rq3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:450483026108:android:a282136c82e71b713db8b9",
+        "android_client_info": {
+          "package_name": "com.aienglishpractice.stealthvox"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "450483026108-jubi7thsmd8i2k7oqk2dus410mg8o8i4.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.aienglishpractice.stealthvox",
+            "certificate_hash": "9bbb3186b2189ef16d8f272bdab59362c395cbb4"
+          }
+        },
+        {
+          "client_id": "450483026108-j5nmgab8pebqlfu2ilm5dfbq78j6jv4r.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDtzi0-6jPvYtqXO7DqWCbwychq0u1ZafQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "450483026108-j5nmgab8pebqlfu2ilm5dfbq78j6jv4r.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "450483026108-ahmpmgpumg1iq9fjle7oip53m6q3qh81.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.aienglishpractice.stealthvox"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:450483026108:android:2d9b0d520a61e0a03db8b9",
+        "android_client_info": {
+          "package_name": "com.mycompany.stealthvox"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "450483026108-t8plu5o31ov2gvqrkglpj3kgl2ndlfvd.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.mycompany.stealthvox",
+            "certificate_hash": "9bbb3186b2189ef16d8f272bdab59362c395cbb4"
+          }
+        },
+        {
+          "client_id": "450483026108-j5nmgab8pebqlfu2ilm5dfbq78j6jv4r.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDtzi0-6jPvYtqXO7DqWCbwychq0u1ZafQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "450483026108-j5nmgab8pebqlfu2ilm5dfbq78j6jv4r.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "450483026108-ahmpmgpumg1iq9fjle7oip53m6q3qh81.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.aienglishpractice.stealthvox"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

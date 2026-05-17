@@ -1,0 +1,19 @@
+숨기는 방법 3가지 (난이도 순):
+
+조건부 표시 (가장 추천)
+
+dart   if (kDebugMode) IconButton(...)  // 디버그 빌드에만 보임
+→ 릴리즈 빌드 자동으로 숨겨짐. 실수 0%.
+
+불투명도 0 (가장 간단, 위치는 살아있음)
+
+dart   Opacity(opacity: 0.0, child: IconButton(...))
+→ 안 보이지만 누르면 작동. 비밀 버튼처럼.
+
+bool 플래그
+
+dart   const bool _showDebugButton = false;  // 출시 시 false
+   if (_showDebugButton) IconButton(...)
+→ 직접 토글 가능.
+가장 추천: 1번(kDebugMode). import 'package:flutter/foundation.dart'; 한 줄만 추가하면 끝. 실수로 출시 빌드에 노출될 일 없고, 디버그 모드에선 자동으로 다시 켜져서 미래의 본인이 또 검증할 때 편합니다.
+로그 인프라(💾🌐💿 라인 + _showDebugPopup + 캐시 스냅샷)는 모두 사용자 눈에 안 보이니 그대로 두세요. 언제든 다시 켜서 쓸 수 있는 자산입니다.

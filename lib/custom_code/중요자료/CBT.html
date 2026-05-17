@@ -1,0 +1,208 @@
+<!-- Palette: Vibrant Tech (Cyan, Magenta, Yellow, Dark Gray) -->
+<!-- NO MERMAID JS OR SVG WERE USED ANYWHERE IN THIS OUTPUT. -->
+<!-- Narrative Plan: 1. Hero (Intro), 2. CBT Mission (KPIs), 3. Core Features (Donut Chart), 4. Onboarding Process (HTML Flow), 5. Guest Invite Process (HTML Flow). -->
+<!-- Visualizations: 1. Target/Duration -> Inform -> Big Number (HTML). 2. Features -> Compare -> Donut Chart (Chart.js, No SVG). 3. Processes -> Organize -> Flowchart/Timeline (HTML/Tailwind, No SVG). -->
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StealthVox CBT Infographic</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            background-color: #0f172a;
+            color: #f8fafc;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 500px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 350px;
+            max-height: 400px;
+        }
+    </style>
+</head>
+<body class="antialiased p-4 md:p-6 bg-slate-900">
+
+    <div class="max-w-3xl mx-auto">
+        
+        <header class="text-center mb-8 mt-4">
+            <span class="bg-cyan-600/20 text-cyan-400 font-bold px-3 py-1 rounded-full text-xs border border-cyan-500/30">AI ENGLISH PRACTICE</span>
+            <h1 class="text-3xl md:text-5xl font-extrabold mt-4 mb-3 text-white tracking-tight">스텔스복스 CBT 모집</h1>
+            <p class="text-slate-400 text-sm md:text-base">핵심 기능을 먼저 경험하고 피드백을 남겨주실 선발대를 모십니다.</p>
+        </header>
+
+        <section class="flex justify-center gap-4 mb-10">
+            <div class="bg-slate-800 rounded-xl p-5 w-32 md:w-40 text-center border border-slate-700 shadow-sm">
+                <div class="text-2xl mb-1">👥</div>
+                <div class="text-sm text-slate-400 mb-1">모집 인원</div>
+                <div class="text-2xl font-black text-cyan-400">20명</div>
+            </div>
+            <div class="bg-slate-800 rounded-xl p-5 w-32 md:w-40 text-center border border-slate-700 shadow-sm">
+                <div class="text-2xl mb-1">⏳</div>
+                <div class="text-sm text-slate-400 mb-1">테스트 기간</div>
+                <div class="text-2xl font-black text-pink-400">14일</div>
+            </div>
+        </section>
+
+        <section class="bg-slate-800 rounded-xl p-6 border border-slate-700 mb-10">
+            <h2 class="text-xl font-bold text-white text-center mb-6">핵심 테스트 항목</h2>
+            <div class="flex flex-col md:flex-row items-center gap-6">
+                <div class="w-full md:w-1/2">
+                    <div class="chart-container" style="height: 250px;">
+                        <canvas id="featuresChart"></canvas>
+                    </div>
+                </div>
+                <div class="w-full md:w-1/2 flex flex-col gap-3">
+                    <div class="bg-slate-900/50 p-3 rounded-lg border border-slate-700 flex items-center gap-3">
+                        <span class="text-2xl">🤖</span>
+                        <div>
+                            <div class="font-bold text-cyan-400 text-sm">AI 대화 연습</div>
+                            <div class="text-xs text-slate-400">부담 없는 실시간 회화</div>
+                        </div>
+                    </div>
+                    <div class="bg-slate-900/50 p-3 rounded-lg border border-slate-700 flex items-center gap-3">
+                        <span class="text-2xl">📻</span>
+                        <div>
+                            <div class="font-bold text-pink-400 text-sm">무전기 통화</div>
+                            <div class="text-xs text-slate-400">독특한 무전기 UX 몰입</div>
+                        </div>
+                    </div>
+                    <div class="bg-slate-900/50 p-3 rounded-lg border border-slate-700 flex items-center gap-3">
+                        <span class="text-2xl">🌐</span>
+                        <div>
+                            <div class="font-bold text-purple-400 text-sm">지인 자동 통역</div>
+                            <div class="text-xs text-slate-400">초대 코드로 지인과 통화</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="mb-10">
+            <h2 class="text-xl font-bold text-white text-center mb-6">참여 방법 (단 2단계!)</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="bg-slate-800 rounded-xl p-6 border border-cyan-500/30 text-center">
+                    <div class="inline-block bg-cyan-500 text-white w-8 h-8 rounded-full font-bold leading-8 mb-3">1</div>
+                    <h3 class="text-cyan-400 font-bold mb-2">테스터 권한 얻기</h3>
+                    <p class="text-xs text-slate-400 mb-4 h-8">스마트폰 구글 계정으로 로그인 후 그룹에 가입하세요.</p>
+                    <a href="https://groups.google.com/g/stealthvox-testers" target="_blank" class="block w-full bg-cyan-600 hover:bg-cyan-500 text-white font-medium py-2 rounded-lg text-sm transition-colors">🔗 그룹 가입 링크</a>
+                </div>
+                <div class="bg-slate-800 rounded-xl p-6 border border-pink-500/30 text-center">
+                    <div class="inline-block bg-pink-500 text-white w-8 h-8 rounded-full font-bold leading-8 mb-3">2</div>
+                    <h3 class="text-pink-400 font-bold mb-2">앱 다운로드</h3>
+                    <p class="text-xs text-slate-400 mb-4 h-8">그룹 가입 완료 후, 테스트 앱을 설치해 주세요.</p>
+                    <a href="https://play.google.com/apps/testing/com.aienglishpractice.stealthvox" target="_blank" class="block w-full bg-pink-600 hover:bg-pink-500 text-white font-medium py-2 rounded-lg text-sm transition-colors">🔗 앱 다운로드 링크</a>
+                </div>
+            </div>
+        </section>
+
+        <section class="bg-slate-800 rounded-xl p-6 border border-slate-700 mb-8">
+            <div class="flex items-center justify-center gap-2 mb-4">
+                <span class="text-2xl">🤝</span>
+                <h2 class="text-lg font-bold text-white">지인과 함께 통화하기</h2>
+            </div>
+            <ol class="text-sm text-slate-300 space-y-3 list-decimal list-inside bg-slate-900/50 p-4 rounded-lg">
+                <li>지인에게 카톡으로 <strong>참여 방법의 1, 2번 링크</strong>를 공유합니다.</li>
+                <li>호스트가 방 생성 후 나타나는 <strong>'초대 코드'</strong>를 지인에게 전달합니다.</li>
+                <li>지인은 앱 설치/가입 후 <strong>[초대코드로 입장하기]</strong>를 통해 연결합니다.</li>
+            </ol>
+        </section>
+
+        <footer class="text-center text-slate-500 text-xs pb-6">
+            <p>📧 문의 및 피드백: <a href="mailto:stealthvox@ubizens.com" class="text-cyan-500 hover:underline">stealthvox@ubizens.com</a> (AI 영어 연습)</p>
+        </footer>
+
+    </div>
+
+    <script>
+        const rawLabels = ['AI Conversation Practice', 'Walkie-Talkie English', 'Friend Auto-Translation'];
+        
+        const processedLabels = rawLabels.map(label => {
+            if (label.length > 16) {
+                const words = label.split(' ');
+                const lines = [];
+                let currentLine = '';
+                words.forEach(word => {
+                    if ((currentLine + word).length > 16) {
+                        lines.push(currentLine.trim());
+                        currentLine = word + ' ';
+                    } else {
+                        currentLine += word + ' ';
+                    }
+                });
+                lines.push(currentLine.trim());
+                return lines;
+            }
+            return label;
+        });
+
+        const ctx = document.getElementById('featuresChart').getContext('2d');
+        new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: processedLabels,
+                datasets: [{
+                    data: [45, 35, 20],
+                    backgroundColor: [
+                        'rgba(6, 182, 212, 0.8)',
+                        'rgba(236, 72, 153, 0.8)',
+                        'rgba(168, 85, 247, 0.8)'
+                    ],
+                    borderColor: [
+                        '#0f172a',
+                        '#0f172a',
+                        '#0f172a'
+                    ],
+                    borderWidth: 4,
+                    hoverOffset: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                color: '#cbd5e1',
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            color: '#e2e8f0',
+                            padding: 20,
+                            font: {
+                                size: 13,
+                                family: "'Segoe UI', sans-serif"
+                            }
+                        }
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(15, 23, 42, 0.9)',
+                        titleColor: '#fff',
+                        bodyColor: '#cbd5e1',
+                        padding: 12,
+                        cornerRadius: 8,
+                        borderColor: 'rgba(56, 189, 248, 0.3)',
+                        borderWidth: 1,
+                        callbacks: {
+                            title: function(tooltipItems) {
+                                const item = tooltipItems[0];
+                                let label = item.chart.data.labels[item.dataIndex];
+                                if (Array.isArray(label)) {
+                                    return label.join(' ');
+                                } else {
+                                    return label;
+                                }
+                            }
+                        }
+                    }
+                },
+                cutout: '65%'
+            }
+        });
+    </script>
+</body>
+</html>

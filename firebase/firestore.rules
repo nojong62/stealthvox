@@ -1,0 +1,73 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if true;
+      allow delete: if false;
+    }
+
+    match /rooms/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if true;
+      allow delete: if false;
+    }
+
+    match /rooms/{parent}/messages/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if true;
+      allow delete: if true;
+    }
+
+    match /{path=**}/messages/{document} {
+      allow read: if true;
+    }
+
+
+    match /users/{parent}/sessions/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if true;
+      allow delete: if false;
+    }
+
+    match /{path=**}/sessions/{document} {
+      allow read: if true;
+    }
+
+
+    match /users/{parent}/chat_history/{document} {
+      allow create: if request.auth.uid == parent;
+      allow read: if true;
+      allow write: if true;
+      allow delete: if true;
+    }
+
+    match /{path=**}/chat_history/{document} {
+      allow read: if true;
+    }
+
+
+    match /users/{parent}/purchases/{document} {
+      allow create: if request.auth.uid == parent;
+      allow read: if request.auth.uid == parent;
+      allow write: if true;
+      allow delete: if true;
+    }
+
+    match /users/{parent}/clones/{document} {
+      allow create: if true;
+      allow read: if true;
+      allow write: if true;
+      allow delete: if true;
+    }
+
+    match /{path=**}/clones/{document} {
+      allow read: if true;
+    }
+
+  }
+}

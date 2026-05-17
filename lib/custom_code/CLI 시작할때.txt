@@ -1,0 +1,479 @@
+Manifest는 FlutterFlow의 AndroidManifest.xml에 이 구조가 들어가면 됩니다.
+
+<meta-data android:name="flutter_deeplinking_enabled" android:value="false" />
+
+<intent-filter android:autoVerify="true">
+    <action android:name="android.intent.action.VIEW" />
+    <category android:name="android.intent.category.DEFAULT" />
+    <category android:name="android.intent.category.BROWSABLE" />
+    <data
+        android:scheme="https"
+        android:host="stealthvox.onelink.me"
+        android:pathPrefix="/31o1" />
+</intent-filter>
+
+<intent-filter>
+    <action android:name="android.intent.action.VIEW" />
+    <category android:name="android.intent.category.DEFAULT" />
+    <category android:name="android.intent.category.BROWSABLE" />
+    <data android:scheme="stealthvox" />
+</intent-filter>
+====================
+AppsFlyer OneLink Management에서 short URL
+https://stealthvox.onelink.me/31o1/fipsp75p
+설정을 점검/수정해줘.
+
+가장 중요:
+1. Android 앱이 `com.aienglishpractice.stealthvox`로 선택되어 있는지 확인.
+2. Android App Links가 `stealthvox.onelink.me` / `/31o1` 템플릿에 연결되어 있는지 확인.
+3. SHA-256 인증서가 실제 배포용 인증서와 일치하는지 확인.
+   - Google Play 배포라면 Play Console > App integrity > App signing key certificate의 SHA-256을 사용.
+   - upload key나 debug key와 혼동하지 말 것.
+4. When app is installed:
+   - Android는 Android App Links로 앱 실행.
+   - fallback URI scheme은 `stealthvox://`.
+5. When app isn't installed:
+   - 앱이 Play Store에 공개 상태면 Google Play로 설정.
+   - 아직 테스트/비공개 상태라면 Google Play 일반 상세 페이지가 아니라 테스트 참여 링크 또는 설치 안내 랜딩 페이지로 설정.
+   - 지금 사용자 화면에 “항목을 찾을 수 없습니다”가 뜨므로 이 항목을 반드시 확인.
+6. Deep link value는 `duo_chat`.
+7. 저장 후 Update link를 클릭.
+===========================
+테스트 링크
+https://stealthvox.onelink.me/31o1/fipsp75p?deep_link_value=duo_chat&deep_link_sub1=rJChsLrIqAhXhLZotYeeLZo6KK42&deep_link_sub2=FCC9y7flJIF4y0C4i6Kb&inviter_id=rJChsLrIqAhXhLZotYeeLZo6KK42&room_id=FCC9y7flJIF4y0C4i6Kb&pid=friend_invite&c=in_app_share&af_dp=stealthvox%3A%2F%2F&af_force_deeplink=true
+===============================
+lib/custom_code/actions/apps_flyer_manager.dart
+lib/custom_code/actions/index.dart
+lib/custom_code/widgets/LobbyMaster.dart
+lib/custom_code/widgets/IntroMaster.dart
+analysis_options.yaml
+핵심은 지금 apps_flyer_manager.dart line 7부터 바로 고치고 재검증입니다.
+
+===================
+관리자 모드로 파워쉘 실행
+
+https://github.com/nojong62/stealthvox
+
+git clone https://github.com/nojong62/stealthvox-app.git
+cd stealthvox-app
+
+
+
+F:
+cd F:\flutter_project\stealthvox
+
+CLAUDE.md 참고해서, 실행해 줘.
+
+수정 전 현재 파일들의 백업 사본을 프로젝트 밖이 아니라 프로젝트 내부 임시 백업 폴더에 만들지 말고, git이 있다면 변경 전 `git status`만 확인해줘.
+절대 git reset/checkout으로 기존 변경을 되돌리지 마.
+
+앱 서명
+35:3E:2B:F1:4B:58:53:16:5C:12:7E:50:2F:C5:D7:77:C9:3F:F3:F8:B3:89:2E:F3:A7:BA:35:30:50:36:D4:90
+
+CLAUDE.md 참고해서, 히스토리 리스트 문제인것 같은데, 사진에 보면 방금 생긴 스탭익스팬드 내용의 이미지 아이콘이 다르고, 스탭익스팬드만 모인 곳에는 빠져있네... 혹시 방 이름이 바껴서 그런 건가? Step.Ex 로 변경 했쟎아.... 변경 이름은 그대로 두고 해결해 줘.
+
+사진은 스탭익스팬드의 마지막 5단계후 Polished Sentence 나오는 장면인데, 이장면은 Polished Sentence 처음 장면이 나오면서 소리를 따라 밑으로 가야지 즉시로 맨 밑을보여주면 안돼지. 그리고 사진에 과녁 표시와 Practice 버튼은 경로와 함께 지워죠.(바로 밑 스터디 룸에서 연습하라는 내용도 같이 지워죠.) 이건 히스토리에서 순서대로 하면되니까.
+
+시작하면 AI가 '관심 있는 주제를 말하세요. 생활 속 주제도 좋아요.' 라고 영어로 먼저 말해죠. 
+
+사진은 히스토리의 스텝익스팬드의 첫 페이지인데, 이름이 짤리니까 여기서는 Step.Ex 로 제목을 바꿔 줘.(지난번 요청이 실행 안된 듯)
+
+다음부터 기존과 마찬가지로 5번의 대화로 확장문장을 완성합니다. 이 내용대로 네가 기획하고 코드 수정을 해 줄레? 이전에 준 예문은 그대로 둬 죠.
+
+스탭익스팬드의 첫 질문을 '최근에 당신에게 종종 생각나는 일이나, 생활에서 발생하는 일이 있다면, 그것은 무엇에 관한 것일가요?' 의 다양한 영어 표현이 코드에 있는것 같은데, 아직도 안 바뀌고 자꾸 직장에서 부딪히는 일에 대해서만 물어....체크해 줘.
+
+히스토리에서 클론과 롤 플레이의 당신의 역할  아이콘을 클릭 하세요를 간단한 영어로 대체해주고 바탕은 투명하게 해주고, 처음 아이콘 선택이 안됐을때는 두 아이콘이 약간 흐릿하게 깜박깝박해서 선택을 유도하는 느낌이 나도록 바꿔 줘. 교대 말하기 끝나고 다시 시작 할때도 선택하라고 깜박이면 좋겠어...
+
+routine_mode_step_expand의 히스토리에서 사진처럼 P3 처음 Expand 문장은 대사를 말하는 부분이 항상 중앙에 잘 나오고, 하단에 AI Voice와 My Voice 도 잘 나와서 전체소리를 들을 수 있어. 그런데 상단 동그란 P를 누르면 Polished 문장이 나오는데 상단 제목옆에는 이제 동그란 E가 나와야 하고 클릭하면 익스팬드 문장으로 이동해야 하는데,  동그란 P가 잘못 나와 있으니까 고춰주고.  유저가 대사를 말할때 그 부분이 화면 중앙에 잘 나오도록, 하단에 AI Voice와 My Voice 도 잘 나와서 전체소리를 들을 수 있도록 해줘.(Expand 구조처럼 해 줘)
+
+chat_history_master 관련, 히스토리 대사 전체 문제인데 말풍선에서 유저(좌측 정렬에는 소리듣기와 튜터링 아이콘을 말품선 바깥쪽 오른쪽에)와 AI 대사(우측 정렬에는 소리듣기와 튜터링 아이콘을 말품선 바깥쪽 왼쪽에)으로 해주면 대사 공간은 넓어지고 대사 좌우 구분이 될 것 같아. 
+
+스탭익스팬드의 첫 질문을 '최근에 당신에게 종종 생각나는 일이나, 생활에서 발생하는 일이 있다면, 그것은 무엇에 관한 것일가요?' 를 다양한 영어 표현으로 말해 줘.
+
+사진을 보면 스탭익스팬드 프렉티스를  P1, P2 P3 잘 구분해 놨는데, P1, P2의 UI와 운영 방식은 클론이나 롤 플레이 Practice와 같아, 내용만 다른데 즉 P1은 AI 질문과 파트1 대답, P2는 AI 질문과 파트2 대답 으로 하는거야. 이해 했으면 히스토리 파일의 클론 Practice 코드 참고해서, 수정할 내용을 클로드코드에게 줄 지시문으로 만들어 줘. 
+
+스탭익스팬드 히스토리 타겟 소리를 들어 보면 약간 의미단위로 읽기 하는듯한 느낌이 나는데...혹시 이것이 통문장과 5단어씩 즉시 올리고 조립하는 과정에서 이런건가? 
+
+chat_history_master 사진은 히스토리의 Step Expand이 글자가 잘리니까 글자 폰트를 줄여서 글자 다 나올수 있도록해 줘.
+
+클론과 롤플레 경우,  대화할 때 현재 말하는 대사가 너무 위로 올라가 있어, 너무 빨리 올라간다는 거지. 다음 소리가 나올 때까지 직전 대사는 화면 중앙에 남아 있어야 돼. 그리고 GPT에게 유저의 발음이 잘 안들려서 문맥과 어울리지 않을 것 같을때, 다시 말해 달라고 영어로 요청하라고 해줘. 클로드 코드에게 줄 지시문 만들어 줘.
+현재 코드 체크하고 수정해 줘.
+
+스탭익스팬드에서 AI의 대사가 타겟글자만 나오는 경우도 있고 타겟하고 오리지널 글자가 같이 나오는 경우도 있고, 같은 대화중에 어떤 경우는 왜 오리지널 언어가 빠지는거지?
+AI가 유저의 대답을 타겟언어로 말을 해 줄때 어떤 때는 1차 대답과 확장문장 모두를 타겟소리로 내 주기도 하고 어떤 때는 확장문장만 타겟소리 내주는데... 코드에는 어떻게 되어 있어? 먼저 체크해서 상황 알려 줘.
+
+
+=============================
+통문장 수정:
+1단계 — 새 통문장 헬퍼 만들기
+
+클래스 이름 예: FullSentenceTtsPlayer (또는 Box 7-G로 번호 부여, Box 7 옆에 두되 내부는 안 건드림)
+기능: text → 캐시 체크 → API 1회 → progressive playback → 저장
+TtsCache 클래스(Line 3462)는 이미 통문장 키 방식이라 그대로 재활용 가능
+검증 목적의 디버그 로그(_swTTS와 동일 기준): API 호출 시간, 첫 바이트 도달, 재생 완료
+
+2단계 — Roleplay에 먼저 시범 적용
+
+모드 4개 중 가장 단순
+ChunkedTtsFetcher.addText(...) 호출하는 자리를 새 헬퍼 호출로 교체
+Stopwatch 로그로 첫 소리 latency 비교: 변경 전 vs 후
+같은 문장 재방문 시 캐시 HIT 확인
+
+3단계 — Clone에 적용 (Roleplay와 동일 구조)
+4단계 — Duo에 적용 (Whisper 입력 + 양방향 통역, 출력은 단일 문장이라 비슷)
+5단계 — Step Expand 적용 (Part1/Part2 분기 처리 추가 후)
+6단계 — 히스토리 마스터의 _AudioDiskCache 폐기 → 통합 TtsCache 사용
+================================
+
+
+
+
+====================
+ 다음에 실장님이 직접 하셔야 할 작업 (코드 외 영역)
+  1. FlutterFlow Custom Pub Dependencies → appsflyer_sdk: ^6.15.2 (또는 최신 안정 버전) 추가
+  2. FFAppState → FlutterFlow 웹 에디터에서 isGuestSession (bool), inviterUid (String) 필드 추가
+  3. Firebase Remote Config 콘솔 → appsFlyerDevKey, appsFlyerAppId 키 값 등록
+  4. iOS Info.plist → NSUserTrackingUsageDescription, AppsFlyer Dev Key, Apple App ID, SKAdNetwork ID 등록
+  5. Android AndroidManifest.xml → AppsFlyer Install Referrer receiver 추가
+  6. 실기기 테스트 → Deferred Deep Link는 시뮬레이터 불가, 반드시 실기기 필요
+==========
+CLAUDE.md 참고해서, 로비 파일에 있는 초대 코드를 빼고, 기존 회원의 초대를 받은 비회원이 AppsFlyer 링크를 통해 앱을 깔고 실행하고, 기존 회원의 고유 ID값을 파라미터로 넘겨서 앱 실행 직후 바로 특정 채팅방으로 연결되게 기획된 것인데 그땐 다른 모드가 없어서 추천코드를 만든거지... 지금은 다른 모드로 터스터를 모을 수 있으니, 초대코드 없애고 직접 AppsFlyer는 주로 딥링크(Deferred Deep Link) 통해서 스텔스룸 Duo 방으로 초대하는 코드를 짜기위한 클로드코드 지시문 만들어 줘.
+
+(c) Anonymous로 일단 입장 → 대화 끝난 후 정식 가입 유도 (추천)
+초대받은 비회은 Anonymous(혹은 임시ID)로 기존 회원의 상대로 무료 통화만 가능
+초대자 A는 보상 없음
+(a) A가 미리 방을 만들어 그 roomId를 링크에 박는다 (A가 라이브 대기)
+AppsFlyer 파라미터 키 네이밍 (지시문에 박을 약속)
+제안: deep_link_value=duo_invite, inviter_uid=xxx, room_id=xxx, mode=duo
+
+(클론과 롤 플레이)의 히스토리 Practice 화면에서, AI와 서로 교대로 말할때, 지금 말하는 대사는 화면 중앙으로 와야 하는데 대사가 올라오도록 코딩 되어있는지 체크해 줘. 잘 안올라오는 것 같은데.
+
+
+(클론과 롤 플레이)의 히스토리 Practice 화면 내용인데, 사진에 보면 서로 교대로 말할때, 지금 말하는 대사는 화면 중앙으로 와야 하는데 대사가 올라오지 않고 있어. 수정해 주고.
+밑의 Play all 버튼이 작동을 안해...이거 크릭하면 방금 AI와 교대로 말한 내용 들을 수 있을까? 원래 캐싱으로 유저 폰에 저장된 소리는 그대로 있지만 방금 내가 녹음한 소리는 이 턴 끝나면 증발하는 것으로 해 줘.  
+
+사진의 스텔스룸의 Study Room(파란색 테두리) 이것을 히스토리 리스트 위에 글자 잘리지 않고 보이게 교체해 줘.
+
+
+chat_history_master의 팝업된 튜터링의 교정 결과인데 어디서 이런 엉뚱한 내용이 나왔는지 모르겠어... 코드 체크하고 클로드 코드에게 줄 지시문 만들어 줘. 
+
+사진처럼 롤플레이 파일에서 AI 상황 추천에서 AI와 YOU옆에 아이콘을 옮겨 줘. 설명 공간을 넓히려고,
+그리고 대화를 하면 시작하는 대사가 위로 조금 올라오는데 다 올라오지 않고 밑에 조금 걸쳐져... 그래서 지금 말하는 대사는 화면 중앙까지 올려서 전체 내용 볼수있게 해줘. (클론, 스탭 익스팬드도 체크하고 바꿔 줘.)
+
+첫 페이지 마지막 대화 밑 기존 2줄짜리 말푼선 지우고, 오른쪽 끝에 휴지통(그 페이지 전체 삭제용)을 만들어 줘. 그리고 그밑에 투명한 말풍선 1개 만들어 줘
+
+routine_mode_step_expand에서 AI의 첫 질문은 '혹시 내일 해야할 일이 있나요?' 혹은 비슷한 의미의 다양한 영어로 질문해 줘. 그리고 유저의 대답을 중심으로 확장문장을 만들어 줍니다.
+
+ (그 페이지 전체 삭제) 
+폰의 시스템 네비게이션 바 높이(보통 34~48px)를 자동으로 감지해서, 기기마다 딱   맞게 버블 전체가 네비게이션 바 위로 올라가게 만들지말고....2줄짜리 투명 말풍선의 윗줄에 휴지통을 만들어 줘
+
+AI의 질문이 중요하기 때문에 다시 수정한 내용을 줄께. AI가 첫 질문으로 유저에게 떠오르는 단어나 어떤 생각 혹은 의견을 말해 보세요 라고 말합니다. 유저가 망설이면(7초까지 기다림. 그런데 유저가 7초때 말을 시작하면 다시 기다려줘.) 그래도 답이 없으면 '편하게 마음에 떠오르는 생각을 말해 보세요'라고 타겟언어로 말하고 계속 기다려 줍니다. 유저가 답변을 하면 거기서부터 확장 문장 시작 합니다. AI는 요점만 말하고 AI 생각을 말하면 안되고(온도 0.2) 어떻게하면 문법적 기교가 들어간 대답을 유도할지 한번 더 생각하고 질문합니다. 
+
+
+chat_history_master 첫 페이지 맨 위 메뉴 (<) 바로 옆에 아주 작은  휴지통 만들어 줘. (전체대사 삭제용) 맨 밑에 대화 삭제 버튼은 지워죠.
+
+
+routine_mode_step_expand에서 AI의 질문이 중요하기 때문에 다시 수정한 내용을 줄께. AI가 첫 질문으로 유저에게 떠오르는 단어나 어떤 생각 혹은 의견을 말해 보세요 라고 말합니다. 유저가 망설이면(7초까지 기다림. 그런데 유저가 7초때 말을 시작하면 다시 기다려줘.) 그래도 답이 없으면 '편하게 마음에 떠오르는 생각을 말해 보세요'라고 타겟언어로 말하고 계속 기다려 줍니다. 유저가 답변을 하면 거기서부터 확장 문장 시작 합니다. AI는 요점만 말하고 AI 생각을 말하면 안되고(온도 0.2) 어떻게하면 문법적 기교가 들어간 대답을 유도할지 한번 더 생각하고 질문합니다. 
+
+
+
+chat_history_master 전체 대사 맨 밑 오른쪽에 작은  휴지통 아이콘 만들어 줘.(그 페이지 전체 삭제용) 그 밑에 투명한 직사각형을 폰 도구 높이만큼 만들어서 휴지통 아이콘이 가리지 않도록 해 줘.
+ 
+
+ 
+
+
+
+chat_history_master에서 전체 대화의 맨 밑 오른쪽 마지막 대사 바로 밑에 작은 빨간 동그라미(휴지통 아이콘) 만들고 삭제 기능 넣어줘. (그 페이지 대화 모두 삭제하는 거야.) 그리고 각 대사마다 삭제하는 작은 휴지통 다 없애죠.
+
+ routine_mode_step_expand에서 AI 대답 글자는(타겟, 오리지널)은 유저 소리가 끝나면 즉시 소리와 함께 등장하는게 좋겠어. 너무 일찍 적혀 있으니까 집중이 안되.
+
+
+롤 플레이 사진인데...문맥이 이상한 답을 들었을때, 다시 잘 물었어....그런데 잘못된 문장을 지우지를 않았어.... 해결해 줘.
+
+사진에 보면 클론에서 갑자가 오리지널(한글) 글이 나오고 타겟글 오리지널글이 등장했어.... 어떻게 이런일이 발생했는지와 재발 방지책 필요해. 그리고 AI의 역할과 유저의 역할을 정확히 이해하고 한국말을 주어 번역을 철저히 하도록 온도 0.2 설정해 줘. 그리고 대화 맥락에 안맞는것 '다시 말씀해 주세요' 철저히 하도록 클로드코드에게 줄 지시문 만들어 줘.
+
+스터디룸 첫 페이지 인데 메뉴 오른쪽 맨위 스토어가는 아이콘을 지우고 스터디룸 사용설명서 아이콘을 작게 만들거야. 내용은 히스토리 페이지를 참고하고 설명 내용은 팝업으로 만들건데, 세세한 부분까지 설명해주고 특히 튜터링은 자세히 설명해주는  사용설명서를 일단 네가 만들어주고, 클로드코드에  히스트리 파일에 넣으라는 지시문을 만들어 줘.
+
+스텝익스팬드에서 AI의 기본적인 질문에 유저가 대답이 없어서 선택 질문을 하나 한건데... 지난번과 같은 질문이야... 이제는 매일 KBS 뉴스 사이트에서 너무 무겁지않은 주제로 질문을 만들어 줘. 그리고 아이디 유저에게 같은 질문을 하면 안돼... 수정 보충해 줘.
+
+히스토리 Practice 처번 문장은 Expanded 문장이 나와야 하는데 Polished문장이 나와서 순서를 바꿔야하고 다음 위 P 글자 누르면 Polished 문장 나와야 하고 각 우미단위 별로 AI말하고 유저가따라 말하는 식이어야 하는데, 지금은 소리 듣기 기능으로 되어 있어 파일을 수정해 줘.
+
+롤플레이에서도 유저 발음을 못 알아 들었거나, 문맥상 이상하다고 판단하면 '다시 말씀해 주세요' 말하고 글자로는 적지말고, 다시 유저의 답변을 기다려 줘. 
+
+클론에서 클론 만들기할 때 클론이름은 같은 이름을 적으면, 중복된다는 경고가 떠야하고, 이름이 정해 지면 AI에게 너는 방금 적은 이름의 클론이라는 점을 온도 0.2로 확정해 줘야 해. 클론 만들기 글 적는 난이 너무 좁게 설정되 있으니까 밑으로 조금 더내려오도록 설정 해 줘.  
+
+[지시사항: Firestore 'clones' 컬렉션 연동 완료하기]
+"플러터플로우에 users/{uid}/clones 컬렉션 설정을 마쳤어. 필드는 name, personality, summary, recent_history, turn_count, created_at이야.
+routine_mode_clone.dart에서 클론을 생성할 때, 이 Firestore 구조에 맞춰 데이터를 저장(add)하도록 코드를 작성해줘.
+대화가 진행될 때마다 recent_history 리스트를 업데이트하고, turn_count가 5의 배수가 될 때마다 요약본(summary)을 갱신해서 Firestore에 update 하도록 해줘.
+앱 시작 시 SharedPreferences가 아닌 Firestore에서 클론 리스트를 불러와서 화면에 보여주도록 수정해줘."
+
+사진보면서 클론에서는 AI는 처음 단순 인사하면 안돼, 유저 관계를 인식하고 관계 인사를 해야해 (예문, 아버지 오늘 몇시에 들어 오세요?) 롤 플레이에서는 자기 역할에 맞게 번역해야 해(사진에 유저는 고객인데 자신이 상인인 것 처럼 번역했어...) 발음이 안 좋거나 못 알아 들을 경우, 다시 말씀해 주세요. 라고 말하고 글자로는 적지말고 다시 유저가 말하기를 기다려야 해.
+
+routine_mode_clone.dart에 다음의 데이터 저장 구조 (Local Storage)가 들어 있는지 체크해 줘.
+shared_preferences를 사용하여 각 클론(ID별)으로 아래 데이터를 관리합니다.
+clone_personality: 클론 생성 시 정해진 성격 특성 및 배경 정보.
+clone_summary: 지금까지의 대화 전체를 압축한 요약본 (최초엔 비어있음).
+recent_history: 가장 최근에 나눈 대화 2세트(User/AI)의 리스트.
+
+Duo에 다른 모드처럼 글자 크게 작게하는 아니콘 바꿔죠. 
+
+클론에서 Manage Clones 누르면 '클론 설정' 대신 Manage Clones 그대로두고 아래 메뉴를 '클론 선택' 과 '클론 만들기'를 영어로 바꿔죠. 그리고 첫 화면에 대화할 클론을 ~글과 그림 다 지워죠.
+
+롤플레이도 해당역할의 AI가 설정되면 원래 마이크 있던 자리에 Start 버튼을 누르면 AI가 상대 역할에게 먼저 자연스럽게 말을 겁니다.
+
+클론도 스탭익스팬드처럼 먼저 AI가 말을 겁니다. AI는 해당 클론의 성격을 파악하고 가볍게 말을 겁니다. 롬 플레이도 해당역할의 AI가 되어서 가볍게 상대 역할에 먼저 말을 겁니다.
+
+스테이픽스 밴드에서 AI의 질문 유도 방식은 그대로 유지하면서 먼저 질문으로 주제를 유도하면 방식을 설명할께. 뭐 간단하게 오늘은 어떤 얘기를 하고 싶으세요? 최근에 관심 있는 일이 생겼나요? 등 유저가 편하게 아무 대답이나 시작하도록 해서 거기서부터 점점 확장 문장을 만들어 갑니다. 첫 질문부터 AI가 선택을 유도하는 질문은 하지 않습니다. 이 부분만 수정해 줘. 그리고 대화 유도 샘플은 그대로 들어 있나?
+
+현재 스텝 익스펜드에서 유저 말을 못 알아듣거나 발음이 이상하거나 그럴 때 다시 말해 주세요라고 말을하거나, 다시 질문하거나 하고 유저의 말이 글로 나오면 방금 했던 질문만 남고 좀 전에 했던 ai 말이나, 직전 대답을 받지 못한 질문은 증발합니다. 이 기능이 아직도 코드에 나와 있나?
+
+클론, 롤플레이, 스탭익스팬드에서 글자 등장하기 전에 thinking... 나오는데  이제부터는 점점점(....) 점 3개만 나오도록 합니다.
+
+히스토리에 오리지널 언어와 타겟언어 같이 볼지 타겟언어만 볼지 스위치하는 아이콘 적용해 줘. 현재 각 모드에는 적용중임... 
+
+사진에 스텔스룸 첫페이지 위 메뉴에서 < 표시는 그대로 두고  << 표시는 로비로 가는 집모양과 연결로 바꿔줘.
+
+routine_mode_step_expand.dart의 AI 시스템 프롬프트를 아래 내용으로 수정하고, 전체 온도를 0.2로 고정해 주세요. (기존 지시문은 충돌되면 안되니까 지워죠.) ...이렇게 네가 수정해 줬는데...첫 질문에 대해서 오리지널 나라를 고려한 질문을 주고, 매번 새로운 질문을 하도록 첫 질문에 대해서만 온도 0.5정도 유지해 줘.
+그리고 아래 내용 잘 적용되었는지 체크해 주고... 
+
+1. 새로운 시스템 프롬프트 전략:
+  1단계 (결론 확보): 중학생 영어로 짧은 이슈 제기 후 "Right or Wrong?" 또는 "Agree or Disagree?"로 유저의 핵심 입장(두괄식 결론)을 먼저 받습니다.
+  2단계 (문법 유도형 질문): 유저의 답변 이후, 문장을 풍성하게 만들기 위해 문법적 기법을 유도하는 질문을 던집니다.
+    유도 기법 예시:  "Why~" (접속사 because, since 유도)
+      "Which specific groups~" (관계대명사 who, which 유도)
+      "Despite what risks~" (양보절 although, despite 유도)
+      "In what specific situation~" (조건절 if, when 유도)
+  3단계 (최종 합성): 유저의 파편화된 답변들을 모아 고급 문법이 적용된 하나의 'Expanded' 및 'Polished' 문장으로 완성합니다.
+2. 지침:
+  AI는 절대로 길게 설명하지 마세요. (질문은 5~8단어 이내)
+  유저가 문장의 '살'을 붙일 수 있도록 문법적 장치를 자극하는 질문을 던지는 데 집중하세요.
+
+ 💡 실제 작동 예시 (이런 식으로 대화가 흘러갑니다) 코드 속 참고용으로 심어 줘. 아직 없다면
+AI:
+Are there any specific tasks on your agenda for today?
+(혹시 오늘 꼭 해야할 일이 있나요?)
+
+User:
+I remembered to call Alex.
+(알렉스에게 전화할 생각이 났어요.)
+
+AI:
+When and how did you remember it?
+(언제, 어떻게 기억이 났나요?)
+
+User:
+Suddenly.
+(갑자기요.)
+
+한칸띄고
+
+I suddenly remembered to call Alex.
+(문득 알렉스에게 전화할 생각이 났어요.)
+
+AI:
+What were you doing at that time?
+(그때 뭘 하고 있었나요?)
+
+User:
+I was checking my emails this morning.
+(오늘 아침에 이메일을 확인하고 있었어요.)
+
+한칸띄고
+
+Checking my emails this morning, I suddenly remembered to call Alex.
+(오늘 아침 이메일을 확인하다가, 문득 알렉스에게 전화할 생각이 났어요.)
+
+AI:
+Who is Alex?
+(알렉스가 누구죠?)
+
+User:
+He is my old friend.
+(제 오랜 친구예요.)
+
+한칸띄고
+
+Checking my emails this morning, I suddenly remembered to call my old friend, Alex.
+(오늘 아침 이메일을 확인하다가, 문득 내 오랜 친구인 알렉스에게 전화할 생각이 났어요.)
+
+AI:
+How is Alex doing these days?
+(알렉스는 요즘 어떻게 지내나요?)
+
+User:
+He recently moved to London.
+(최근에 런던으로 이사 갔어요.)
+
+한칸띄고
+
+Checking my emails this morning, I suddenly remembered to call my old friend, Alex, who recently moved to London.
+(오늘 아침 이메일을 확인하다가, 문득 최근 런던으로 이사 간 내 오랜 친구 알렉스에게 전화할 생각이 났어요.)
+
+AI:
+Why did you want to call him?
+(왜 전화하려고 했나요?)
+
+User:
+To ask him about the restaurant.
+(그 식당에 대해 물어보려고요.)
+
+한칸띄고
+
+Checking my emails this morning, I suddenly remembered to call my old friend, Alex, who recently moved to London, to ask him about the restaurant.
+(오늘 아침 이메일을 확인하다가, 최근 런던으로 이사 간 오랜 친구 알렉스에게 그 식당에 관해 물어보려고 전화할 생각이 났어요.)
+
+AI:
+What kind of restaurant is it?
+(그 식당이 어떤 곳인데요?)
+
+User:
+It's where we had dinner last year.
+(작년에 우리가 저녁을 먹었던 곳이에요.)
+
+한칸띄고
+
+Checking my emails this morning, I suddenly remembered to call my old friend, Alex, who recently moved to London, to ask him about the restaurant where we had dinner last year.
+(오늘 아침 이메일을 확인하다가, 작년에 우리가 저녁을 먹었던 식당에 대해 물어보려고 최근 런던으로 이사 간 오랜 친구 알렉스에게 전화해야 한다는 사실이 문득 떠올랐어요.)
+
+ (최종 합성): 유저의 파편화된 답변들을 모아 고급 문법이 적용된 하나의 'Expanded' 및 'Polished' 문장으로 완성합니다.
+
+이렇게 지시하면 클로드가 단순히 "Why?"만 묻는 게 아니라, 유저가 관계대명사나 조건절 등을 쓰지 않고는 못 배기게 질문을 아주 정교하게(Inductive) 던지도록 세팅될 것입니다.
+
+
+===============
+화면 상단의 글자 크게보기 작게보기 아이콘이 너므 넓으니까.. 오히려 클릭 할때마다
+
+히스토리 안에있는 (<<) 표시는 이 표시와 이동하는 경로까지 다 삭제합니다.
+
+히스토리  첫페이지 제목 옆에 있는 지우기(쓰레기통)을 맨 밑 대사 끝나고 밑 오른쪽 끝에 배치해 줘.
+chat_history_master의 각 페이지에서  싱단의(<<)는 스텔스룸 첫 페이지 '대화 모드 선택' 페이지로 이동하도록 해주고 대화방 문을 표시하는 아이콘으로 바꿔줘.
+chat_history_master의 Practice에서 'Expanded' 제목 오른쪽 바로옆에 'Polished Sentence'로 이동 P자 아이콘을 만들어 줘. 
+'Polished Sentence'도 타겟 문장을 한국어로 직독직해하기 편하도록 의미 단위(Sense Units)별로 끊어서 묶어줘. 특히 접속사, 관계사, 긴 전치사구 앞에서 끊어 줘
+스탭익스팬드의 오리지널 글자는 타겟글자보다 조금 작은 사이즈입니다. AI 글자도 타겟글자
+밑에 오리지널 글자가 있습니다.
+이 내용들 클로드코드에 줄 지시문 만들어 줘.
+
+스탭익스탠드(routine_mode_step_expand) 대화는 대화 끝에 확장문장을 만드는데, 마지막 대사가 끝나면 완성된 확장문장을 그것만 따로 만들어 보여주고 한번 읽어줍니다.
+그리고 Polished 문장으로 자동으로 넘어가고 Polished Sentence 제목으로 나오면 한번 읽어주고 끝나고 Study Room에서 연습 하세요 라는 글을 보여 줍니다.
+
+chat_history_master의 각 페이지에서  싱단의(<<)는 로비에서 엔터 버튼 누른 것과 같아. 즉 스텔스룸 들어가는 것과 같아. '대화 모드 선택' 페이지로 이동입니다.
+
+chat_history_master  속에 있는 '<'(이전 페이지 이동)은 방금 지나온 페이지로의 이동입니다. '<<'는 '대화 모드 선택' 페이지로의 이동입니다. 수정해 줘.
+스텝익스팬드의 chat_history_master의 Practice에서 Expanded에는
+진행되는 대사를 화면 중앙에 두고 지나간 대사는 위로 올려보네.
+대사들 밑에 AI Voice 와 My Voice 버튼과 'Polished Sentence' 버튼이 연결되면 좋겠어. 
+화면 밑에 고정되지 말고(폰 버튼에 걸려서 클릭이 안돼)
+클로드 코드에 줄 지시문 작성해 줘.
+
+chat_history_master에서 각 페이지에 심어놓은 로그 파일 보이지 않도록 해줘. 대신 꾹 누르면 로그 파일 보이도록 해줘. 
+
+routine_mode_step_expand 에서 좋은 질문 예문)인데 코드에 심어 줘.
+User: "I'm going to the market today." (나 오늘 시장 갈 거야.)
+AI:  만약 시장에 가려던 계획이 틀어진다면 대신 무엇을 하실 건가요?
+AI:  시장의 북적이는 분위기를 즐기러 가시는 건가요, 아니면 특별한 식재료를 찾으러 가시는 건가요?
+AI: 가는 길에 음악을 듣거나 다른 일을 병행할 계획이신가요?"
+AI: "만약 오늘 시장이 문을 닫았거나, 비가 억수같이 쏟아진다면 어떻게 하실 건가요?"
+AI: "마트가 아닌 '시장'을 굳이 선택하신 특별한 이유나, 거기서만 느끼고 싶은 분위기가 있나요?"
+AI: "시장에 가는 길에 혹은 장을 보면서 동시에 무엇을 할 계획이신가요?
+
+
+그리고  Expanded 글은 대화방에서 만든 확장된 마지막 문장으로 매번 답변수만큼 나눠줘야 해. 
+그리고. Polished Sentence가 스텝익스팬드 의 마지막 세련된 문장으로 등장하는데 적어도 두번이나 3번정도 의미단위로 나눠서 AI말하고 유저가 따라 읽기 해줘.  
+그리고 대사 표기할때 타겟글자 밑의 오리지널 글자는 크기가 하나 작게 적어 줘.
+
+스텝익스팬드의 대화방인데, AI질문에 유저 답변이 맘에 안들어 새질문 할때 이전 질문을 다 지우는게 아니고 방금전 질문만 지우고 다시 질문하는거야. 그리고 질문 내용은 전체 구성이 짧은 스토리를 구성할수 있도록 유도 질문을 해 줘. 
+
+chat_history_master에서
+히스토리방 첫 페이지에서 그 대화 전체 내용이 맘에 안들면 바로 지우는 아이콘 있으면 좋겠어. 
+맨위 (<<) 바로 옆에 두면 삭제 아이콘 좋겠어
+=====================================
+유저말이 잘 연결 안될 때, 다시 묻는건 좋아. 그런데 가능하면 연결해 주도록 힘쓰고 다시 물은 내용은 마지막 물은 내용만 남기고 이전 것들은 지워죠. 그래야지 나중에 히스토리 방에서 1:1 대화가 가능하지.  
+그리고 유저 대답이 소리는 확장 문장 소리가 나는데, 글자는 AI 물음에 대한 대답만 나와, 대답글과 한줄 띄고 합친 내용이 나와야지...
+그리고 대화 위에 Turn 몇번째인지 표시는 없애줘. 그 공간까지 대사 넓게쓰게.
+그리고 밑에 모드 이름과 마이크도 조금 더 낮추면 대사 공간이 널어 질것 깉은데...가능할까?
+그리고 타겟 글자보다 오리니널 글자는 조금작게 적어 줘. 
+
+chat_history_master만 수정할 데가 있어.
+사진보면 화면 맨 밑에 AI Voice와 My Voice 버튼이 보이지? 여긴 내가 클릭 할 수도 없어....
+이거 해결이 안되나?
+
+그리고 유저가 말하면 thingking...이 먼저 나오는데, 글자 나오기 전에 조그만 까만 박스가 잠간 보이고 타겟, 오리지널 글자가 나와 ,그러면 안되고 글자 나오기  전에는 thinking  ... 만 나와야 해.
+그리고 다른 사진보면 스탭 익스팬드 첫 페이지인데,  유저가 두번 말한게 다 나오고있어. 이러면 안돼, 첫번째 대답만 적혀야 한다고. 두번째 합해진 문장이 나오면 안돼.
+
+=============
+스텝익스팬드 히스토리 첫페이지에: 유저가 간단한 문장 제안을 하고  AI가 질문하고  유저가 답을 하면( 1. 질문에 대한 답만 적고 2. 확장문장은 안적습니다. )
+그리고 소리 듣기 아이콘 밑에 튜터링 아이콘이 있고  지금은 초록색 확장 문장으로 이어지는 아이콘이 있는데 이건 삭제해 줘. 
+
+3개 기본 모드 Practice에서 유저 와 AI 아이콘 클릭시 면적 넓혀죠. 인식 잘되게...일차 완료후 밑에 전체듣기는 'Play all'로 처음부터 다시듣기도 'Start over'로 적어 줘. 
+그리고 당신의 역할 아이콘을 클릭하세요는 말품선으로 나와다 사라지게 해 줘.
+
+스텝익스팬드 Practice 사진에서 맨위 제목 Expanded 로 해주고맨 밑에는 AI Voice와  My Voice 버튼과 Polished라는 버튼도 같이 해줘.  그 밑의 세련문장 연습하기는 너무 밑에 있어서 클릭이 안돼니까, 
+그리고 스텝익스팬드 대화 끝나고 밑에 Practice 버튼 나오는데 이건 Polished 연습으로 가는것 맞지?
+
+그리고 모든 대화에서 유저가 말을 하면,
+Thinking...
+...
+
+이렇게 Thinking... 만있고, 밑에 점 3개(...)는 적히지 않도록 해줘.
+
+========================
+CLAUDE.md 참고해서, routine_mode_step_expand에 있는 대화 예문을 보고 대화 방식을 적절히 네가 프롬프트 짜볼레?
+
+
+==========
+ 더 나은 확장 기법
+
+  1. 의미역 기반 유도 (Semantic Role First)
+
+  문법 구조 타겟보다, 누가 → 무엇을 → 왜 → 어디서 → 어떻게 느꼈나 순으로 의미 역할을 채우는 방식. 문법은 자연스럽게
+  따라옴.
+
+  Turn 1: 행동 (core action)
+  Turn 2: 이유/배경 → 자연히 because 유도
+  Turn 3: 관련 인물/사물 → 자연히 who/which 유도
+  Turn 4: 감정/결과 → naturally although/despite 유도
+  Turn 5: 합성
+
+  2. 앵커 문장 고정 + 가지치기
+
+  현재는 "이전 확장 문장 + 새 정보"를 계속 합침. 대신 핵심 동사구(앵커)를 고정하고, 그 앞뒤로만 확장하면 문장이 더
+  응집력 있음.
+
+  앵커: I remembered to call Alex.
+  ← 앞 확장: Checking my emails this morning, [앵커]
+  → 뒤 확장: [앵커], who had moved to London last spring.
+
+  3. 적응형 문법 타겟 (Adaptive Targeting)
+
+  유저 발화를 먼저 분석해서 이미 자연스럽게 나온 구조는 건너뛰고, 아직 없는 구조만 유도.
+
+  프롬프트 추가 지시:
+  "First, scan the user's last answer.
+  If it already contains [because/since], skip Turn 1 target and advance to Turn 2.
+  Never re-induce a structure the user already used naturally."
+
+  4. 중간 합성 피드백 (Progressive Reveal)
+
+  5턴 마지막에만 합치지 않고, 매 턴마다 현재까지 만들어진 확장 문장을 보여줌. 유저가 자기 문장이 자라는 걸 실시간으로
+  보면 동기부여가 됨. (현재 번역 PART 2가 이 역할을 하긴 하지만 매 턴 보여주는 UI가 약함)
+
+  5. 서사 완결성 체크
+
+  최종 합성 전에 한 가지 검증 단계 추가:
+
+  Before synthesizing, check:
+  ① Is there a clear SUBJECT doing a clear ACTION?
+  ② Is there at least ONE reason (because/since)?
+  ③ Is there at least ONE person/thing (who/which)?
+  If any is missing, ask one more targeted question before synthesizing.
+
+  ---
+  한 줄 요약
+
+  ▎ 현재: 문법 순서 고정 → 유저 발화 수집 → 마지막 합성
+  ▎ 개선: 유저 발화 분석 → 빠진 의미역 파악 → 적응형 유도 → 매 턴 중간 확장 표시
+
+  가장 임팩트 있는 변경은 "적응형 문법 타겟" 쪽이고, 구현 난이도가 낮으면서 효과가 큰 건 "서사 완결성 체크" 추가입니다.
+  어떤 방향으로 발전시켜볼지 말씀해 주시면 바로 프롬프트로 짜드릴게요.

@@ -1,0 +1,73 @@
+패키지 네임(App ID): com.aienglishpractice.stealthvox
+Template ID: 31o1
+OneLink Domain: stealthvox.onelink.me
+최종 Base URL: https://stealthvox.onelink.me/31o1
+Dev key: SQUmDTB2VzuPjrJGiy5SSC
+
+테스트링크
+https://stealthvox.onelink.me/31o1?deep_link_value=duo_chat&inviter_id=test123&room_id=room_abc
+=========================
+
+[AppsFlyer 연동 정보 최종 확정]
+
+Dev Key: SQUmDTB2VzuPjrJGiy5SSC
+
+Template ID: 31o1
+
+URI Scheme: stealthvox (안드로이드 설정 완료)
+
+App ID (Package Name): com.aienglishpractice.stealthvox
+
+OneLink Domain: stealthvox.onelink.me
+
+Base URL: https://stealthvox.onelink.me/31o1
+
+구현 요청:
+
+lobby_master.dart의 AppsFlyerManager를 이 정보들로 초기화해줘.
+
+딥링크 파라미터 중 deep_link_value가 duo_chat이면 inviter_id와 room_id를 읽어서 채팅방으로 자동 진입시켜줘.
+
+------------------------------------------------------------
+준비해야 할 AppsFlyer OneLink   핵심 자료
+1. OneLink 템플릿 ID (Template ID)
+
+AppsFlyer 관리자 화면의 Engage -> OneLink Management에서 생성한 템플릿의 고유 ID입니다.
+
+안드로이드와 iOS 통합 링크를 만들기 위한 '뿌리' 주소입니다. (예: a1b2.onelink.me)
+
+2. 초대자 식별용 커스텀 파라미터 설계
+
+링크 뒤에 붙일 데이터의 이름을 정해야 합니다. 보통 다음과 같이 구성합니다.
+
+deep_link_value: 실행될 화면 이름 (예: chat_room)
+
+inviter_id: 초대한 회원의 고유 ID (예: user_1234)
+
+room_id: 진입할 채팅방의 고유 ID
+
+3. 앱 내 SDK 연동 가이드 (Dev Guide)
+
+FlutterFlow를 사용 중이시라면, AppsFlyer SDK가 앱 안에 심어져 있어야 합니다.
+
+특히 onDeepLinking 콜백 함수를 통해 링크에 담긴 inviter_id와 room_id 값을 앱이 읽어낼 수 있도록 설정하는 가이드 문서가 필요합니다.
+
+4. 리어트리뷰션(Re-attribution) 설정 값
+
+이미 앱이 설치된 기존 회원들끼리도 링크를 눌렀을 때 작동해야 하므로, AppsFlyer 대시보드에서 Re-engagement 기능을 활성화해두어야 합니다.
+
+🛠️ 구현 로직 (개발자에게 전달할 내용)
+링크를 타고 들어왔을 때 앱은 다음과 같이 작동해야 합니다:
+
+링크 클릭: 사용자가 https://yourbrand.onelink.me/abc?inviter_id=123&room_id=99 클릭.
+
+데이터 수신: AppsFlyer SDK가 앱 실행 시 inviter_id=123과 room_id=99를 잡아냄.
+
+자동 진입: 앱 로직에서 이 값을 확인하자마자 로그인 세션을 체크하고, 해당 room_id 채팅방으로 화면을 즉시 이동(Navigate)시킴.
+
+추천코드 자동 적용: 필요하다면 inviter_id를 백엔드로 보내서 "추천인 입력" 과정을 백그라운드에서 자동으로 처리.
+
+💡 대표님이 지금 바로 확인하실 것
+AppsFlyer 대시보드에 로그인하셔서 [OneLink Management] 메뉴에 들어가 보세요. 거기서 "New OneLink Template"을 만드셨는지, 혹은 기존에 만들어진 템플릿이 있는지 확인하는 것이 첫걸음입니다.
+
+"추천 코드를 직접 타이핑하게 하는 것보다 OneLink를 통한 자동 연결이 훨씬 UX가 좋습니다.

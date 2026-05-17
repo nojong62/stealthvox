@@ -1,0 +1,95 @@
+AI:
+Are there any specific tasks on your agenda for today?
+(혹시 오늘 꼭 해야할 일이 있나요?)
+
+User:
+I remembered to call Alex.
+(알렉스에게 전화할 생각이 났어요.)
+
+
+
+AI:
+When and how did you remember it?
+(언제, 어떻게 기억이 났나요?)
+
+User:
+Suddenly.
+(갑자기요.)
+
+한칸띄고
+
+I suddenly remembered to call Alex.
+(문득 알렉스에게 전화할 생각이 났어요.)
+
+
+
+AI:
+What were you doing at that time?
+(그때 뭘 하고 있었나요?)
+
+User:
+I was checking my emails this morning.
+(오늘 아침에 이메일을 확인하고 있었어요.)
+
+한칸띄고
+
+Checking my emails this morning, I suddenly remembered to call Alex.
+(오늘 아침 이메일을 확인하다가, 문득 알렉스에게 전화할 생각이 났어요.)
+
+AI:
+Who is Alex?
+(알렉스가 누구죠?)
+
+User:
+He is my old friend.
+(제 오랜 친구예요.)
+
+한칸띄고
+
+Checking my emails this morning, I suddenly remembered to call my old friend, Alex.
+(오늘 아침 이메일을 확인하다가, 문득 내 오랜 친구인 알렉스에게 전화할 생각이 났어요.)
+
+
+AI:
+How is Alex doing these days?
+(알렉스는 요즘 어떻게 지내나요?)
+
+User:
+He recently moved to London.
+(최근에 런던으로 이사 갔어요.)
+
+한칸띄고
+
+Checking my emails this morning, I suddenly remembered to call my old friend, Alex, who recently moved to London.
+(오늘 아침 이메일을 확인하다가, 문득 최근 런던으로 이사 간 내 오랜 친구 알렉스에게 전화할 생각이 났어요.)
+
+AI:
+Why did you want to call him?
+(왜 전화하려고 했나요?)
+
+User:
+To ask him about the restaurant.
+(그 식당에 대해 물어보려고요.)
+
+한칸띄고
+
+Checking my emails this morning, I suddenly remembered to call my old friend, Alex, who recently moved to London, to ask him about the restaurant.
+(오늘 아침 이메일을 확인하다가, 최근 런던으로 이사 간 오랜 친구 알렉스에게 그 식당에 관해 물어보려고 전화할 생각이 났어요.)
+
+
+AI:
+What kind of restaurant is it?
+(그 식당이 어떤 곳인데요?)
+
+User:
+It's where we had dinner last year.
+(작년에 우리가 저녁을 먹었던 곳이에요.)
+
+한칸띄고
+
+Checking my emails this morning, I suddenly remembered to call my old friend, Alex, who recently moved to London, to ask him about the restaurant where we had dinner last year.
+(오늘 아침 이메일을 확인하다가, 작년에 우리가 저녁을 먹었던 식당에 대해 물어보려고 최근 런던으로 이사 간 오랜 친구 알렉스에게 전화해야 한다는 사실이 문득 떠올랐어요.)
+
+Expanded Sentence:
+
+Polished Sentence:

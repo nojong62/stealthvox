@@ -1,0 +1,105 @@
+돈이 나가는 API를 쓰거나 정기 구독을 받는 AI 앱들은 예외 없이 100% SaaS 구조(서버를 통한 보안 및 통제)
+
+"테스트하고 싶은 분은 구글 이메일 주소를 DM으로 남겨주세요"
+테스트앱 다운로드 https://play.google.com/apps/internaltest/4701441595486020798
+
+구독 tier 연동은 다음 작업
+
+_isAdUser boolean 이 파일에 추가
+Firestore users/{uid}/tier 조회 연결
+무료 유저 → 신규 API 호출 차단, 캐시 hit만 허용
+
+RevenueCat / App Store Connect / Play Console에 stealthvox_10m 상품(₩300, 일회성 소비형) 등록이 선행되어야 결제가 동작합니다. 등록 전에 결제 시도 시 RevenueCat이 에러를 뱉습니다.
+Firestore에 이미 쌓인 last_ad_date, ad_views_today 필드는 새 코드가 더 이상 읽지 않으므로 그대로 두어도 무방. 깔끔하게 비우려면 별도 일회성 마이그레이션 스크립트 필요.
+
+새 기능 준비:기억하고 싶은 표현 저장 기능  클릭 한 번으로 저장소로 저장되고 같은 표현은 두번 저장안됨.
+
+Read BILLING_TIERED_RATE.md and start with Step A.
+
+### Step 3: AppsFlyer 초대 시스템 (별도 작업)
+### Step 4: RevenueCat 결제 시스템 검증 (별도 작업)
+### Step 5: 베타 테스트 → 출시
+## 📁 핵심 파일 위치
+- 메인 지시문: BILLING_TIERED_RATE_v2.md
+- 디버깅 가이드: DEBUGGING_GUIDE.md
+- Cloud Function: firebase/functions/index.js
+- 차감 엔진: lib/custom_code/actions/billing_ticker.dart
+## 🔧 환경
+- Firebase CLI 15.18.0 설치됨, 로그인됨
+- Node.js v24.15.0 (Cloud Functions는 nodejs20 런타임)
+- Git history에 8+ commit 기록 (단계별 롤백 가능)
+=====================
+첫 결제 후 Firestore의 users/{uid}/purchases 컬렉션에 들어가서:
+transaction_id 필드가 잘 들어가 있는지
+product_id, seconds_added, purchased_at이 정상인지 확인
+
+첫 결제 테스트 시 콘솔/로그에 다음 메시지가 뜰 가능성이 매우 높습니다:
+[cloud_firestore/failed-precondition] The query requires an index. 
+You can create it here: 
+https://console.firebase.google.com/v1/r/project/.../indexes?create_composite=...
+이건 에러가 아니라 Firebase가 "복합 인덱스 만들어 줄게~ 링크 누르세요" 라고 알려주는 거예요.
+대처법:
+위 메시지의 링크를 그대로 클릭
+Firebase Console로 이동
+"Create Index" 또는 "색인 만들기" 버튼 클릭
+1~2분 기다리면 인덱스 생성 완료
+그 후로는 결제 정상 작동
+===============파일 분리
+UI와 로직의 분리: 화면을 그리는 코드와 데이터(Firestore, API)를 처리하는 코드를 별도 파일로 뗍니다.
+
+컴포넌트화: _buildHeader, _buildMenu 같은 함수들을 별도의 커스텀 위젯 파일로 독립시킵니다.
+
+공통 유틸리티 추출: API 호출(OpenAI, Deepgram) 로직은 모든 모드에서 공통으로 쓰므로 api_service.dart 하나에 모아 관리합니다.
+
+UI 담당 파일: 화면 레이아웃만 담당 (예: lobby_view.dart)
+
+API 담당 파일: OpenAI, Deepgram 통신만 모아둠 (예: ai_service.dart)
+
+데이터 담당 파일: Firestore 저장/읽기 로직 (예: db_service.dart)
+==============================
+firebase 보안 규칙 - 최종 수정
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // chat_history는 본인만
+    match /users/{uid}/chat_history/{room} {
+      allow read, write: if request.auth.uid == uid;
+      
+      match /messages/{msg} {
+        allow read, write: if request.auth.uid == uid;
+      }
+    }
+    
+    // sessions는 본인만
+    match /users/{uid}/sessions/{session} {
+      allow read, write: if request.auth.uid == uid;
+      allow delete: if false;
+    }
+    
+    // purchases는 본인만 (이미 OK)
+    match /users/{uid}/purchases/{doc} {
+      allow read, write: if request.auth.uid == uid;
+    }
+    
+    // users 본문은 본인만
+    match /users/{uid} {
+      allow read, write: if request.auth.uid == uid;
+    }
+    
+    // rooms는 듀오 모드 게스트가 들어올 수 있어야 하니 일단 인증만 요구
+    match /rooms/{room} {
+      allow read, write: if request.auth != null;
+      
+      match /messages/{msg} {
+        allow read, write: if request.auth != null;
+      }
+    }
+    
+    // 다른 모든 것은 거부
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
