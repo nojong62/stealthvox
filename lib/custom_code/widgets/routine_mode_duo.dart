@@ -603,7 +603,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
         'partnerJoinedAt': FieldValue.serverTimestamp(),
       });
       debugPrint('[Duo] _joinAsGuest success — guestUid: $guestUid, roomId: $roomId');
-      FFAppState().clearDuoInviteState();
+      FFAppState().isGuestSession = false;
+      FFAppState().duoRoomId = '';
+      FFAppState().inviterUid = '';
+      FFAppState().pendingInviteType = '';
+      FFAppState().update(() {});
       if (mounted) {
         setState(() {
           _isConversationActive = true;

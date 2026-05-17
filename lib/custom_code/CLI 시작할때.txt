@@ -1,43 +1,4 @@
-Manifest는 FlutterFlow의 AndroidManifest.xml에 이 구조가 들어가면 됩니다.
 
-<meta-data android:name="flutter_deeplinking_enabled" android:value="false" />
-
-<intent-filter android:autoVerify="true">
-    <action android:name="android.intent.action.VIEW" />
-    <category android:name="android.intent.category.DEFAULT" />
-    <category android:name="android.intent.category.BROWSABLE" />
-    <data
-        android:scheme="https"
-        android:host="stealthvox.onelink.me"
-        android:pathPrefix="/31o1" />
-</intent-filter>
-
-<intent-filter>
-    <action android:name="android.intent.action.VIEW" />
-    <category android:name="android.intent.category.DEFAULT" />
-    <category android:name="android.intent.category.BROWSABLE" />
-    <data android:scheme="stealthvox" />
-</intent-filter>
-====================
-AppsFlyer OneLink Management에서 short URL
-https://stealthvox.onelink.me/31o1/fipsp75p
-설정을 점검/수정해줘.
-
-가장 중요:
-1. Android 앱이 `com.aienglishpractice.stealthvox`로 선택되어 있는지 확인.
-2. Android App Links가 `stealthvox.onelink.me` / `/31o1` 템플릿에 연결되어 있는지 확인.
-3. SHA-256 인증서가 실제 배포용 인증서와 일치하는지 확인.
-   - Google Play 배포라면 Play Console > App integrity > App signing key certificate의 SHA-256을 사용.
-   - upload key나 debug key와 혼동하지 말 것.
-4. When app is installed:
-   - Android는 Android App Links로 앱 실행.
-   - fallback URI scheme은 `stealthvox://`.
-5. When app isn't installed:
-   - 앱이 Play Store에 공개 상태면 Google Play로 설정.
-   - 아직 테스트/비공개 상태라면 Google Play 일반 상세 페이지가 아니라 테스트 참여 링크 또는 설치 안내 랜딩 페이지로 설정.
-   - 지금 사용자 화면에 “항목을 찾을 수 없습니다”가 뜨므로 이 항목을 반드시 확인.
-6. Deep link value는 `duo_chat`.
-7. 저장 후 Update link를 클릭.
 ===========================
 테스트 링크
 https://stealthvox.onelink.me/31o1/fipsp75p?deep_link_value=duo_chat&deep_link_sub1=rJChsLrIqAhXhLZotYeeLZo6KK42&deep_link_sub2=FCC9y7flJIF4y0C4i6Kb&inviter_id=rJChsLrIqAhXhLZotYeeLZo6KK42&room_id=FCC9y7flJIF4y0C4i6Kb&pid=friend_invite&c=in_app_share&af_dp=stealthvox%3A%2F%2F&af_force_deeplink=true
@@ -57,10 +18,10 @@ https://github.com/nojong62/stealthvox
 git clone https://github.com/nojong62/stealthvox-app.git
 cd stealthvox-app
 
-
+(Shot URL)  https://stealthvox.onelink.me/31o1/fipsp75p
 
 F:
-cd F:\flutter_project\stealthvox
+cd F:\flutter_project\stealth_vox
 
 CLAUDE.md 참고해서, 실행해 줘.
 

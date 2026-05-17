@@ -33,5 +33,96 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 
 이 내용을 항상 기억하고 지시문에 포함해 줘.
 =================================
-참고
-claude_code_appsflyer_duo_invite.md
+지시문
+
+# Claude Code 지시문: 스텔스룸 → Duo 자동 라우팅 추가
+
+## 작업 절차
+
+### 1단계: Git 상태 확인 및 브랜치
+```bash
+git status
+git branch
+git checkout -b fix/stealth-room-duo-auto-route
+git add -A
+git commit -m "chore: backup before stealth room duo auto-route fix"
+```
+
+### 2단계: 파일 확인
+```bash
+grep -n "initState\|_currentMode\|exitCurrentMode" lib/custom_code/widgets/stealth_room_master.dart
+```
+아래 패턴이 보여야 한다:
+- `initState` 1회
+- `_currentMode` 여러 회
+- `exitCurrentMode` 2회
+
+파일이 없으면 중단하고 보고하라.
+
+### 3단계: 코드 수정 (1곳만)
+
+아래 기존 코드를 찾아라:
+```dart
+  @override
+  void initState() {
+    super.initState();
+    StealthRoomMaster.exitCurrentMode =
+        () => setState(() => _currentMode = null);
+  }
+```
+
+아래로 교체한다:
+```dart
+  @override
+  void initState() {
+    super.initState();
+    StealthRoomMaster.exitCurrentMode =
+        () => setState(() => _currentMode = null);
+
+    // Duo 초대 링크로 진입한 경우 메뉴 없이 바로 Duo로 이동
+    if (FFAppState().isGuestSession &&
+        FFAppState().duoRoomId.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          setState(() => _currentMode = 1);
+        }
+      });
+    }
+  }
+```
+
+### 4단계: 자가 검증
+```bash
+grep -n "isGuestSession\|duoRoomId\|addPostFrameCallback" lib/custom_code/widgets/stealth_room_master.dart
+```
+세 키워드 모두 1회 이상 출력되어야 한다.
+
+### 5단계: 빌드 검증
+```bash
+flutter pub get
+flutter analyze lib/custom_code/widgets/stealth_room_master.dart
+flutter build apk --debug
+```
+에러 0개, 빌드 성공 필수.
+오류 시 원인 분석 후 수정 반복 (최대 3회).
+
+### 6단계: 최종 커밋
+```bash
+git add -A
+git commit -m "fix: auto-route to Duo when guest invite link is opened"
+git diff HEAD~1
+```
+
+### 7단계: 보고
+- 수정된 파일 및 변경 내용
+- flutter analyze 결과
+- flutter build apk 결과
+- 남은 이슈
+
+---
+
+## 주의사항
+- `stealth_room_master.dart` 외 다른 파일은 건드리지 않는다
+- `_buildMenu()`, `_switchMode()`, `build()` 등 기존 로직은 절대 수정하지 않는다
+- FlutterFlow import 블록(`// DO NOT REMOVE`) 건드리지 않는다
+- 불확실한 부분은 임의 수정하지 말고 보고한다
