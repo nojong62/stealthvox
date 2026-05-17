@@ -9,41 +9,18 @@ import 'package:flutter/material.dart';
 // Begin custom action code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
-import 'package:appsflyer_sdk/appsflyer_sdk.dart';
+import 'appsflyermanager.dart' show AppsFlyerManager;
 
-Future initAppsFlyer(
+/// FlutterFlow에서 호출하는 단일 진입점.
+/// 실제 초기화와 payload 파싱은 AppsFlyerManager로 위임한다.
+Future<void> initAppsFlyer(
   String? devKey,
   String? appId,
 ) async {
-  if (devKey == null || appId == null) {
+  if (devKey == null || devKey.isEmpty || appId == null || appId.isEmpty) {
+    debugPrint('[initAppsFlyer] devKey or appId is null/empty, skipping');
     return;
   }
-
-  final AppsFlyerOptions options = AppsFlyerOptions(
-    afDevKey: devKey,
-    appId: appId,
-    showDebug: true,
-    timeToWaitForATTUserAuthorization: 15,
-  );
-
-  AppsflyerSdk appsflyerSdk = AppsflyerSdk(options);
-
-  // 초기화
-  await appsflyerSdk.initSdk(
-    registerConversionDataCallback: true,
-    registerOnAppOpenAttributionCallback: true,
-    registerOnDeepLinkingCallback: true,
-  );
-
-  // 딥링크 수신 시 로직
-  appsflyerSdk.onDeepLinking((DeepLinkResult res) {
-    if (res.status == Status.FOUND) {
-      final String? inviterId = res.deepLink?.clickEvent['inviter_id'];
-      if (inviterId != null) {
-        // App State 업데이트
-        FFAppState().isGuestSession = true;
-        FFAppState().inviterUid = inviterId;
-      }
-    }
-  });
+  debugPrint('[initAppsFlyer] delegating to AppsFlyerManager.initialize()');
+  await AppsFlyerManager.initialize(devKey: devKey, appId: appId);
 }

@@ -41,6 +41,15 @@ class FFAppState extends ChangeNotifier {
     _safeInit(() {
       _inviterUid = prefs.getString('ff_inviterUid') ?? _inviterUid;
     });
+    _safeInit(() {
+      _isGuestSession = prefs.getBool('ff_isGuestSession') ?? _isGuestSession;
+    });
+    _safeInit(() {
+      _duoRoomId = prefs.getString('ff_duoRoomId') ?? _duoRoomId;
+    });
+    _safeInit(() {
+      _pendingInviteType = prefs.getString('ff_pendingInviteType') ?? _pendingInviteType;
+    });
   }
 
   void update(VoidCallback callback) {
@@ -163,6 +172,7 @@ class FFAppState extends ChangeNotifier {
   bool get isGuestSession => _isGuestSession;
   set isGuestSession(bool value) {
     _isGuestSession = value;
+    prefs.setBool('ff_isGuestSession', value);
   }
 
   String _inviterUid = '';
@@ -176,6 +186,23 @@ class FFAppState extends ChangeNotifier {
   String get duoRoomId => _duoRoomId;
   set duoRoomId(String value) {
     _duoRoomId = value;
+    prefs.setString('ff_duoRoomId', value);
+  }
+
+  String _pendingInviteType = '';
+  String get pendingInviteType => _pendingInviteType;
+  set pendingInviteType(String value) {
+    _pendingInviteType = value;
+    prefs.setString('ff_pendingInviteType', value);
+  }
+
+  void clearDuoInviteState() {
+    _isGuestSession = false;
+    _duoRoomId = '';
+    _pendingInviteType = '';
+    prefs.setBool('ff_isGuestSession', false);
+    prefs.setString('ff_duoRoomId', '');
+    prefs.setString('ff_pendingInviteType', '');
   }
 }
 

@@ -104,9 +104,18 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (FFAppState().isGuestSession == true &&
-          FFAppState().duoRoomId.isNotEmpty) {
-        _joinAsGuest(FFAppState().duoRoomId);
+      // widget.roomId 우선 사용, 없으면 FFAppState 폴백
+      final String? pendingRoomId =
+          (widget.roomId != null && widget.roomId!.isNotEmpty)
+              ? widget.roomId
+              : (FFAppState().isGuestSession &&
+                      FFAppState().duoRoomId.isNotEmpty
+                  ? FFAppState().duoRoomId
+                  : null);
+      if (pendingRoomId != null) {
+        debugPrint(
+            '[Duo] initState — auto joining as guest, roomId: $pendingRoomId');
+        _joinAsGuest(pendingRoomId);
       }
     });
   }
@@ -531,19 +540,24 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
       final String _roomId = _duoSessionRef!.id;
       final Map<String, String> _params = {
         'deep_link_value': 'duo_chat',
+        'invite_type': 'duo',
+        'entry_mode': 'guest',
+        'room_id': _roomId,
+        'duo_room_id': _roomId,
         'deep_link_sub1': user.uid,
         'deep_link_sub2': _roomId,
         'inviter_id': user.uid,
-        'room_id': _roomId,
+        'af_dp': 'stealthvox://duo',
+        'af_force_deeplink': 'true',
         'pid': 'friend_invite',
         'c': 'in_app_share',
-        'af_dp': 'stealthvox://',
-        'af_force_deeplink': 'true',
       };
+      debugPrint('[Duo] inviteLink roomId: $_roomId');
       final String inviteLink =
           Uri.parse('https://stealthvox.onelink.me/31o1/fipsp75p')
               .replace(queryParameters: _params)
               .toString();
+      debugPrint('[Duo] inviteLink: $inviteLink');
       // 5) 클립보드 복사 + 공유 시트
       await Clipboard.setData(ClipboardData(text: inviteLink));
       await Share.share(
@@ -580,13 +594,16 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
         debugPrint('[Duo] _joinAsGuest: isDuoEnabled is not true ($roomId)');
         return;
       }
+      final String? firebaseUid = FirebaseAuth.instance.currentUser?.uid;
+      final String guestUid =
+          firebaseUid ?? 'guest_${DateTime.now().millisecondsSinceEpoch}';
       await _duoSessionRef!.update({
         'isPartnerJoined': true,
-        'partnerUid': FirebaseAuth.instance.currentUser?.uid,
+        'partnerUid': guestUid,
         'partnerJoinedAt': FieldValue.serverTimestamp(),
       });
-      FFAppState().isGuestSession = false;
-      FFAppState().duoRoomId = '';
+      debugPrint('[Duo] _joinAsGuest success — guestUid: $guestUid, roomId: $roomId');
+      FFAppState().clearDuoInviteState();
       if (mounted) {
         setState(() {
           _isConversationActive = true;
