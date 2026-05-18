@@ -1149,7 +1149,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           if (mounted && !_ttsQueueManager.aiPaused)
             setState(() => _localMessages[aiIndex]['target'] = aiTargetText);
 
-          // 하이브리드: 첫 구두점 OR 6단어 도달 시 1회만 firstChunk 즉시 발사
+          // 하이브리드: 첫 구두점 OR 5단어 도달 시 1회만 firstChunk 즉시 발사
           // Rollback: hybridTtsPlayer 제거 후 aiTtsFetcher.addText(toSpeak) 복원
           if (!hybridTtsPlayer.firstChunkFired) {
             final cutIdx =
@@ -2951,7 +2951,7 @@ class HybridTtsPlayer {
   // [Box 7-H] 조기 발사 보충: 구두점 OR firstChunkMinWords 단어 중 먼저 오는 쪽 발사
   // buffer: 현재까지 누적된 AI 텍스트 버퍼 (외부에서 관리)
   // 반환값: buffer에서 자를 인덱스 (>=0이면 발사됨, -1이면 미발사)
-  static const int firstChunkMinWords = 6;
+  static const int firstChunkMinWords = 5;
 
   int onChunk(String buffer, ChunkedTtsFetcher fetcher, Stopwatch swSpeechEnd) {
     if (_firstChunkFired) return -1;
@@ -2978,7 +2978,7 @@ class HybridTtsPlayer {
     lastFirstChunkMs = swSpeechEnd.elapsedMilliseconds;
     fetcher.addText(text);
     onLog?.call('[HYB-01]',
-        '발사(${punctMatch != null ? "구두점" : "6단어"}): "$text" ${lastFirstChunkMs}ms');
+        '발사(${punctMatch != null ? "구두점" : "5단어"}): "$text" ${lastFirstChunkMs}ms');
     return cutIdx;
   }
 
