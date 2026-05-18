@@ -3411,6 +3411,20 @@ User's role: $userRole
   }) async* {
     final client = http.Client();
     try {
+      // 매번 다른 오프닝 스타일을 랜덤 선택 → 같은 상황이어도 첫 대사가 다양해짐
+      final openerStyles = [
+        'Start with a direct question to the user.',
+        'Start with a casual observational comment about the situation.',
+        'Start with a brief action remark (e.g., noticing something, doing something).',
+        'Start with a warm but task-focused greeting.',
+        'Start with a slightly unexpected or surprising opener that fits your role.',
+        'Start with an offer or suggestion relevant to the situation.',
+        'Start with a short statement that sets the scene.',
+        'Start with a friendly but professional icebreaker.',
+      ];
+      final styleHint =
+          openerStyles[Random().nextInt(openerStyles.length)];
+
       final sysPrompt =
           """You are roleplaying as "$aiRole" in a language learning app.
 
@@ -3428,13 +3442,7 @@ The other person: $userRole (has just arrived)
 - Say ONE short, realistic sentence that a real person in your role would actually say.
 - Avoid a generic "Hello!" alone — give a situational opener specific to your role.
 - Under 10 words. Natural everyday speech only.
-
-Examples:
-- Barista at a café: "What can I get for you today?"
-- Doctor at a clinic: "So, what brings you in today?"
-- Store clerk: "Looking for anything specific today?"
-- Gym trainer: "Is this your first time here?"
-- Bank teller: "How can I help you today?"
+- THIS TIME: $styleHint
 
 Output: ONE sentence in $targetLang only.""";
 
@@ -3449,7 +3457,7 @@ Output: ONE sentence in $targetLang only.""";
       request.body = jsonEncode({
         'model': 'gpt-4o-mini',
         'stream': true,
-        'temperature': 0.7,
+        'temperature': 0.9,
         'max_tokens': 60,
         'messages': [
           {'role': 'system', 'content': sysPrompt},
