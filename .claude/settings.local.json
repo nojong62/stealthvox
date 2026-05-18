@@ -24,7 +24,16 @@
       "Bash(flutter analyze *)",
       "Bash(flutter build *)",
       "Bash(Get-Content *)",
-      "Bash(flutter clean *)"
+      "Bash(flutter clean *)",
+      "Bash(taskkill /F /IM \"java.exe\" /T)",
+      "PowerShell(Stop-Process *)",
+      "Bash(git stash *)",
+      "Bash(xargs grep -l -i \"roleplay\\\\|rolplay\\\\|롤플레이\\\\|role_play\\\\|rolePlay\")",
+      "Bash(xargs grep -l -i \"emergency\\\\|situation\\\\|상황\\\\|scenario\")",
+      "Bash(Get-ChildItem -Path \"F:\\\\flutter_project\\\\stealth_vox\\\\lib\" -Directory)",
+      "Bash(Select-Object Name)",
+      "Bash(python -c \"import json; data=json.load\\(open\\('assets/jsons/emergency_situations_200.json', encoding='utf-8'\\)\\); cats={}; [cats.update\\({s['category']: cats.get\\(s['category'],0\\)+1}\\) for s in data['emergency_situations']]; print\\('Total:', len\\(data['emergency_situations']\\)\\); print\\('Categories:', cats\\)\")",
+      "Bash(python -c \"import json; data=json.load\\(open\\('assets/jsons/emergency_situations_200.json', encoding='utf-8'\\)\\); print\\('Total:', len\\(data['emergency_situations']\\)\\); cats={}; [cats.__setitem__\\(s['category'], cats.get\\(s['category'],0\\)+1\\) for s in data['emergency_situations']]; [print\\(k,v\\) for k,v in cats.items\\(\\)]\")"
     ]
   }
 }
