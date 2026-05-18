@@ -66,11 +66,13 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   DocumentReference? _myHistoryRef; // 🔧 [히스토리] chat_history 문서 참조 (Duo 패턴)
 
   // 🔧 [v3.4 발화 합치기] 유저 더듬거림 대응
-  // speech_final 받아도 바로 파이프라인 시작 안 하고 1.2초 대기
+  // speech_final 받아도 바로 파이프라인 시작 안 하고 조건부 대기
   // 대기 중 새 발화 오면 합쳐서 처리 (최종 한 덩어리로)
   String _pendingTranscript = ''; // 대기 중인 유저 발화 누적
   Timer? _commitTimer; // "진짜 끝났는지" 확정 타이머
-  static const int COMMIT_WAIT_MS = 1200; // 발화 합치기 대기 시간
+  static const int COMMIT_WAIT_SPEECH_FINAL_MS = 600; // speechFinal=true 시 빠른 응답
+  static const int COMMIT_WAIT_UNCERTAIN_MS = 1100; // UtteranceEnd/speechFinal=false 시 여유 대기
+  bool _lastTurnWasSpeechFinal = false; // 마지막 onTurnEnded 이벤트 타입 기록
 
   // 🔬 [v3.1 진단] 화면 로그 뷰어 (팝업에 쌓음)
   final List<String> _debugLogs = [];
@@ -685,8 +687,9 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         _swDeepgram.reset();
         _swDeepgram.start();
       },
-      onTurnEnded: (transcript) {
-        _log('🔀 [LISTEN-03]', 'onTurnEnded 콜백 수신: "$transcript"');
+      onTurnEnded: (transcript, {bool speechFinal = false}) {
+        _lastTurnWasSpeechFinal = speechFinal;
+        _log('🔀 [LISTEN-03]', 'onTurnEnded 콜백 수신: "$transcript" speechFinal=$speechFinal');
         _swDeepgram.stop();
         _stopMicAndProcess(transcript);
       },
@@ -700,8 +703,16 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     _log('🎤 [LISTEN-05]', 'connectAndStart 완료');
   }
 
-  // 🔧 [v3.4] Deepgram speech_final 수신 시 호출됨
-  // 1.2초 대기창 안에서 추가 발화 합치기 → 완전히 끝나면 파이프라인 시작
+  // speechFinal 여부에 따른 조건부 commit 대기 시간 계산
+  int _getCommitWaitMs() {
+    if (_lastTurnWasSpeechFinal) {
+      return COMMIT_WAIT_SPEECH_FINAL_MS;
+    }
+    return COMMIT_WAIT_UNCERTAIN_MS;
+  }
+
+  // 🔧 [v3.4] Deepgram speech_final/UtteranceEnd 수신 시 호출됨
+  // 조건부 대기창 안에서 추가 발화 합치기 → 완전히 끝나면 파이프라인 시작
   void _stopMicAndProcess(String transcript) async {
     final clean = transcript.trim();
     _log('🔀 [STOP-01]', 'speech_final 수신: "$clean" (len=${clean.length})');
@@ -711,13 +722,15 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       return;
     }
 
+    final waitMs = _getCommitWaitMs();
+
     // 🔧 기존 대기 중인 발화가 있으면 공백으로 연결 (더듬거림 합치기)
     if (_pendingTranscript.isEmpty) {
       _pendingTranscript = clean;
-      _log('🔀 [STOP-03]', '신규 발화 접수. 1.2초 대기창 시작');
+      _log('🔀 [STOP-03]', '신규 발화 접수. ${waitMs}ms 조건부 대기창 시작 speechFinal=$_lastTurnWasSpeechFinal');
     } else {
       _pendingTranscript = '$_pendingTranscript $clean';
-      _log('🔀 [STOP-04]', '합치기: "$_pendingTranscript" (1.2초 대기창 리셋)');
+      _log('🔀 [STOP-04]', '합치기: "$_pendingTranscript" (${waitMs}ms 조건부 대기창 리셋)');
     }
 
     // UI: 접수된 발화를 HOST_TEMP 풍선에 실시간 반영
@@ -736,9 +749,9 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     // 기존 타이머 취소 (새 발화가 왔으므로 대기창 리셋)
     _commitTimer?.cancel();
 
-    // 1.2초 후 파이프라인 시작 예약
+    // 조건부 대기 후 파이프라인 시작 예약
     _commitTimer = Timer(
-      const Duration(milliseconds: COMMIT_WAIT_MS),
+      Duration(milliseconds: waitMs),
       () => _commitAndProcess(),
     );
   }
@@ -1057,14 +1070,18 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       bool _firstAiChunkLogged = false;
       final Future<void> aiGenerationTask = () async {
         await for (String chunk in aiStream) {
+          final cleanedChunk = chunk;
+          if (cleanedChunk.trim().isEmpty) {
+            continue;
+          }
           if (!_firstAiChunkLogged) {
             _msGptFirstToken = _swSpeechEnd.elapsedMilliseconds;
-            _log('🧠 [PIPE-03]', 'GPT 첫 청크 수신: "$chunk"');
+            _log('🧠 [PIPE-03]', 'GPT 첫 유효 청크 수신: "$cleanedChunk"');
             _firstAiChunkLogged = true;
           }
           if (_swOpenAI.isRunning) _swOpenAI.stop();
-          aiTargetText += chunk;
-          aiBuffer += chunk;
+          aiTargetText += cleanedChunk;
+          aiBuffer += cleanedChunk;
 
           // [RETRY] 신호 감지 — 발음 불명 또는 문맥 이상
           if (aiTargetText.contains('[RETRY]')) {
@@ -1076,7 +1093,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           if (mounted && !_ttsQueueManager.aiPaused)
             setState(() => _localMessages[aiIndex]['target'] = aiTargetText);
 
-          // 하이브리드: 첫 구두점 OR 4단어 도달 시 1회만 firstChunk 즉시 발사
+          // 하이브리드: 첫 구두점 OR 6단어 도달 시 1회만 firstChunk 즉시 발사
           // Rollback: hybridTtsPlayer 제거 후 aiTtsFetcher.addText(toSpeak) 복원
           if (!hybridTtsPlayer.firstChunkFired) {
             final cutIdx =
@@ -1092,7 +1109,16 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           // 이후 청크는 aiBuffer에 누적만 — onStreamEnd에서 remainder 처리
         }
         _msGptStreamEnd = _swSpeechEnd.elapsedMilliseconds;
-        // remainder 발사 및 통문장 캐시 저장은 onStreamEnd에서 처리
+        // AI remainder TTS 큐 적재 — 유저 TTS 재생과 병렬로 준비 (실제 재생은 setAiPaused(false) 후)
+        if (!aiRetry && aiTargetText.trim().isNotEmpty) {
+          await hybridTtsPlayer.onStreamEnd(
+            fullSentence: _cleanText(aiTargetText.trim()),
+            remainderBuffer: aiBuffer,
+            fetcher: aiTtsFetcher,
+            swSpeechEnd: _swSpeechEnd,
+          );
+          _log('🧠 [PIPE-08A]', 'AI stream end + remainder queued. pending=${aiTtsFetcher.pendingRequests}');
+        }
       }();
 
       // ─────────────────────────────────────────────────────
@@ -1156,14 +1182,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       await aiGenerationTask;
       _log('🧠 [PIPE-08]',
           'aiGenerationTask 완료. AI pending=${aiTtsFetcher.pendingRequests}');
-      // [Box 7-H] HybridTtsPlayer: remainder 발사 + 통문장 TtsCache 저장 (백그라운드)
+      // [PIPE-08A] onStreamEnd는 aiGenerationTask 내부에서 완료됨 (중복 호출 없음)
       if (!aiRetry && aiTargetText.trim().isNotEmpty) {
-        await hybridTtsPlayer.onStreamEnd(
-          fullSentence: _cleanText(aiTargetText.trim()),
-          remainderBuffer: aiBuffer,
-          fetcher: aiTtsFetcher,
-          swSpeechEnd: _swSpeechEnd,
-        );
         if (mounted) {
           setState(() {
             _debugResult += '\nGPT 첫 토큰: ${_msGptFirstToken}ms'
@@ -2040,7 +2060,7 @@ class DeepgramV2VoiceManager {
   final String langCode;
   final VoidCallback onConnected;
   final Function(String) onTranscriptUpdate;
-  final Function(String) onTurnEnded;
+  final void Function(String, {bool speechFinal}) onTurnEnded;
   final Function(String) onError;
   final Function(int)? onReconnecting; // 재연결 시도 알림 (선택적)
   final VoidCallback? onGaveUp; // 재연결 포기 알림 (선택적)
@@ -2196,7 +2216,7 @@ class DeepgramV2VoiceManager {
         _lg('📡 [DG-UE]',
             'UtteranceEnd 이벤트 → onTurnEnded. finalText="$finalText"');
         if (!_isDisposed && finalText.isNotEmpty) {
-          onTurnEnded(finalText);
+          onTurnEnded(finalText, speechFinal: false);
         }
         return;
       }
@@ -2228,7 +2248,7 @@ class DeepgramV2VoiceManager {
             'speech_final → onTurnEnded 호출 시도. finalText="$finalText"');
         if (!_isDisposed && finalText.isNotEmpty) {
           _lg('📡 [DG-05]', 'onTurnEnded 실제 호출');
-          onTurnEnded(finalText);
+          onTurnEnded(finalText, speechFinal: true);
         } else {
           _lg('📡 [DG-06]', 'finalText 빈값 → onTurnEnded 스킵');
         }
@@ -2718,7 +2738,7 @@ class RelayPipeline {
     _isSpeaking = false;
   }
 
-  Future<void> _onUserTurnEnded(String userText) async {
+  Future<void> _onUserTurnEnded(String userText, {bool speechFinal = false}) async {
     // 💡 AI가 말하는 중에 유저가 말하면 즉시 중단
     if (_isSpeaking) interruptAi();
 
@@ -2838,9 +2858,11 @@ class HybridTtsPlayer {
     return match.end;
   }
 
-  // [Box 7-H] 4단어 조기 발사 보충: 구두점 OR 4단어 중 먼저 오는 쪽 발사
+  // [Box 7-H] 조기 발사 보충: 구두점 OR firstChunkMinWords 단어 중 먼저 오는 쪽 발사
   // buffer: 현재까지 누적된 AI 텍스트 버퍼 (외부에서 관리)
   // 반환값: buffer에서 자를 인덱스 (>=0이면 발사됨, -1이면 미발사)
+  static const int firstChunkMinWords = 6;
+
   int onChunk(String buffer, ChunkedTtsFetcher fetcher, Stopwatch swSpeechEnd) {
     if (_firstChunkFired) return -1;
 
@@ -2848,7 +2870,7 @@ class HybridTtsPlayer {
     final wordCount =
         buffer.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
 
-    if (punctMatch == null && wordCount < 4) return -1;
+    if (punctMatch == null && wordCount < firstChunkMinWords) return -1;
 
     final int cutIdx;
     final String text;
@@ -2866,7 +2888,7 @@ class HybridTtsPlayer {
     lastFirstChunkMs = swSpeechEnd.elapsedMilliseconds;
     fetcher.addText(text);
     onLog?.call('[HYB-01]',
-        '발사(${punctMatch != null ? "구두점" : "4단어"}): "$text" ${lastFirstChunkMs}ms');
+        '발사(${punctMatch != null ? "구두점" : "6단어"}): "$text" ${lastFirstChunkMs}ms');
     return cutIdx;
   }
 
