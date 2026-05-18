@@ -258,6 +258,10 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   String _scenarioUserRole = "";
   bool _isGeneratingScenario = false;
   bool _isAiOpenerPlaying = false; // AI 첫 발화 재생 중 여부
+
+  // 🚨 긴급 상황 200개 데이터
+  List<Map<String, dynamic>> _emergencySituations = [];
+  String _selectedEmergencyKeyword = ""; // 유저가 선택한 긴급 상황 키워드
   String _lastRawTranscript = ''; // 정정 감지용 직전 유저 발화 원문
 
   // 오디오 및 UI
@@ -341,6 +345,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   }
 
   Future<void> _fetchKeysAndInit() async {
+    await _loadEmergencySituations();
     try {
       await FirebaseRemoteConfig.instance.fetchAndActivate();
       if (mounted) {
@@ -349,33 +354,54 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
               FirebaseRemoteConfig.instance.getString('DeepgramAPIKey');
           _openAiKey = FirebaseRemoteConfig.instance.getString('OpenAIAPIKey');
         });
-        _generateScenario(); // 🎭 방 입장 시 시나리오 자동 생성
+        // 🚨 최초 입장 시 랜덤 긴급 상황으로 시나리오 자동 생성
+        if (_emergencySituations.isNotEmpty) {
+          final rand = _emergencySituations[Random().nextInt(_emergencySituations.length)];
+          _selectedEmergencyKeyword = rand['situation'] as String;
+        }
+        _generateScenario();
       }
     } catch (e) {
       print('❌ Key Load Error: $e');
     }
   }
 
+  Future<void> _loadEmergencySituations() async {
+    try {
+      final jsonStr = await rootBundle.loadString('assets/jsons/emergency_situations_200.json');
+      final data = jsonDecode(jsonStr) as Map<String, dynamic>;
+      final list = (data['emergency_situations'] as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      if (mounted) setState(() => _emergencySituations = list);
+    } catch (e) {
+      print('❌ Emergency JSON Load Error: $e');
+    }
+  }
+
   // ====================================================================
-  // 📦 [Box 4: 시나리오 관리 (AI 자동 생성)]
+  // 📦 [Box 4: 시나리오 관리 (긴급상황 JSON 기반 AI 생성)]
   // ====================================================================
   Future<void> _generateScenario() async {
     if (_openAiKey.isEmpty || _isGeneratingScenario) return;
     setState(() => _isGeneratingScenario = true);
 
     try {
-      final result = await RoleplayBrain.generateScenario(_openAiKey);
+      final keyword = _selectedEmergencyKeyword.isNotEmpty
+          ? _selectedEmergencyKeyword
+          : "공항 여권 분실";
+      final result = await RoleplayBrain.generateEmergencyScenario(_openAiKey, keyword);
       if (mounted && result != null) {
         setState(() {
-          _scenarioKeyword = result['keyword'] ?? "동네 카페 오픈";
-          _scenarioSituation = result['situation'] ?? "새로 생긴 카페 방문";
-          _scenarioAiRole = result['ai_role'] ?? "친절한 바리스타";
-          _scenarioUserRole = result['user_role'] ?? "호기심 많은 손님";
+          _scenarioKeyword = result['keyword'] ?? keyword;
+          _scenarioSituation = result['situation'] ?? keyword;
+          _scenarioAiRole = result['ai_role'] ?? "담당 직원";
+          _scenarioUserRole = result['user_role'] ?? "당황한 여행자";
           // 시나리오 변경 시 세션 리셋
           _sessionDocId = null;
           _myHistoryRef = null;
           _localMessages.clear();
-          _isConversationActive = false; // Start 버튼으로 수동 시작
+          _isConversationActive = false;
         });
       }
     } catch (e) {
@@ -383,6 +409,36 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     } finally {
       if (mounted) setState(() => _isGeneratingScenario = false);
     }
+  }
+
+  // 상황 선택 바텀시트
+  void _showSituationPicker() {
+    final categories = [
+      {'key': '공항_비행기_교통', 'label': '✈️ 교통', 'color': const Color(0xFF0EA5E9)},
+      {'key': '호텔_숙소_주거', 'label': '🏨 숙소', 'color': const Color(0xFF10B981)},
+      {'key': '식당_쇼핑_유흥', 'label': '🛍️ 쇼핑', 'color': const Color(0xFFF59E0B)},
+      {'key': '공공장소_병원_비즈니스', 'label': '🏥 공공', 'color': const Color(0xFFEF4444)},
+      {'key': '레저_관광_자연_기타', 'label': '🏞️ 레저', 'color': const Color(0xFF8B5CF6)},
+    ];
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return _SituationPickerSheet(
+          emergencySituations: _emergencySituations,
+          categories: categories,
+          onSelected: (situationKeyword) {
+            Navigator.pop(ctx);
+            if (!_isConversationActive) {
+              setState(() => _selectedEmergencyKeyword = situationKeyword);
+              _generateScenario();
+            }
+          },
+        );
+      },
+    );
   }
 
 // ====================================================================
@@ -1721,29 +1777,63 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           ),
           if (!_isGeneratingScenario) ...[
             const SizedBox(height: 10),
-            GestureDetector(
-              onTap: () {
-                if (!_isConversationActive) _generateScenario();
-              },
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
-                decoration: BoxDecoration(
-                  color: Colors.transparent,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.white12, width: 1),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                GestureDetector(
+                  onTap: () {
+                    if (!_isConversationActive) _showSituationPicker();
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEF4444).withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                          color: const Color(0xFFEF4444).withOpacity(0.45), width: 1),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: const [
+                        Icon(Icons.list_alt_rounded,
+                            color: Color(0xFFFC8181), size: 14),
+                        SizedBox(width: 6),
+                        Text('상황 선택',
+                            style: TextStyle(
+                                color: Color(0xFFFC8181),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                  ),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: const [
-                    Icon(Icons.refresh_rounded,
-                        color: Colors.white30, size: 14),
-                    SizedBox(width: 6),
-                    Text('새로 추천',
-                        style: TextStyle(color: Colors.white30, fontSize: 12)),
-                  ],
+                const SizedBox(width: 10),
+                GestureDetector(
+                  onTap: () {
+                    if (!_isConversationActive && _selectedEmergencyKeyword.isNotEmpty) {
+                      _generateScenario();
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+                    decoration: BoxDecoration(
+                      color: Colors.transparent,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.white12, width: 1),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: const [
+                        Icon(Icons.refresh_rounded,
+                            color: Colors.white30, size: 14),
+                        SizedBox(width: 6),
+                        Text('다시 생성',
+                            style: TextStyle(color: Colors.white30, fontSize: 12)),
+                      ],
+                    ),
+                  ),
                 ),
-              ),
+              ],
             ),
           ],
         ],
@@ -3307,81 +3397,37 @@ Output: ONE sentence in $targetLang only.""";
   }
 
   // ==================================================================
-  // 📦 [Box 7-1-E] generateScenario — 4필드 JSON 생성
+  // 📦 [Box 7-1-E] generateEmergencyScenario — 긴급상황 키워드 기반 동적 생성
   // ==================================================================
-  static Future<Map<String, String>?> generateScenario(String apiKey) async {
-    // 일상에서 늘 마주치는 장소만 선별
-    const places = [
-      '거실',
-      '주방',
-      '침실',
-      '현관',
-      '아파트 엘리베이터',
-      '동네 카페',
-      '편의점',
-      '대형 마트',
-      '동네 슈퍼',
-      '빵집',
-      '분식집',
-      '패스트푸드점',
-      '패밀리 레스토랑',
-      '배달음식 앱',
-      '피자 가게',
-      '치킨집',
-      '옷가게',
-      '신발 가게',
-      '쇼핑몰',
-      '화장품 매장',
-      '전자제품 매장',
-      '서점',
-      '문구점',
-      '헬스장',
-      '수영장',
-      '요가 스튜디오',
-      '공원',
-      '산책로',
-      '놀이터',
-      '은행',
-      '약국',
-      '병원 대기실',
-      '치과',
-      '미용실',
-      '바버샵',
-      '세탁소',
-      '안경점',
-      '도서관',
-      '학원',
-      '스터디 카페',
-      '사무실',
-      '회의실',
-      '지하철역',
-      '버스 정류장',
-      '주유소',
-      '세차장',
-      '영화관',
-      '노래방',
-      '볼링장',
-      '애견 카페',
-      '고양이 카페',
-      '키즈 카페',
-      '반려동물 용품점',
-      '꽃집',
-      '전통시장',
-      '우체국',
-      '고속도로 휴게소',
+  static Future<Map<String, String>?> generateEmergencyScenario(
+      String apiKey, String emergencyKeyword) async {
+    // 매번 다른 구체적 시나리오를 만들기 위해 랜덤 seed 값 추가
+    final seeds = [
+      '오전 이른 시간대', '늦은 밤', '주말 오후', '출퇴근 혼잡 시간',
+      '비가 오는 날', '눈이 오는 날', '더운 여름날', '크리스마스 연휴',
     ];
-    final selectedPlace = places[Random().nextInt(places.length)];
+    final timeSeed = seeds[Random().nextInt(seeds.length)];
 
-    const systemPrompt =
-        """You generate ultra-short roleplay scenario cards for a language learning app.
+    final systemPrompt =
+        """You are a Korean survival English roleplay scenario generator for a language learning app.
+
+[TASK]
+Given a short Korean emergency keyword and time context, create a vivid, specific roleplay scenario.
+Each call should produce a DIFFERENT variation of the same keyword scenario.
+
+[OUTPUT RULES]
+Output EXACTLY this JSON (Korean only, label-style, short):
+{
+  "situation": "구체적인 상황 묘사 (15자 이내, 장소+디테일)",
+  "ai_role": "AI의 역할 (10자 이내, 예: 당황한 승무원)",
+  "user_role": "유저의 역할 (8자 이내, 예: 해외 여행자)"
+}
 
 [RULES]
-A place is given. Generate 3 Korean fields (very short — like a label, not a sentence):
-- situation: place + one vivid detail (e.g. "헬스장 - 첫 PT 수업") MAX 12 chars
-- ai_role: specific character name (e.g. "엄격한 트레이너") MAX 10 chars — avoid generic "직원/알바"
-- user_role: visitor type (e.g. "초보 회원") MAX 8 chars
-Output EXACTLY this JSON:
-{"situation": "...", "ai_role": "...", "user_role": "..."}""";
+- situation: must include specific detail beyond the keyword (NOT just repeat keyword)
+- ai_role: give the AI a strong personality (예: 깐깐한 경찰관, 다급한 의사, 당황한 직원)
+- user_role: clearly define user's position in the emergency
+- VARY the specific detail each time (different victim, different severity, different location detail)""";
 
     final client = http.Client();
     try {
@@ -3394,7 +3440,7 @@ Output EXACTLY this JSON:
             },
             body: jsonEncode({
               'model': 'gpt-4o-mini',
-              'temperature': 1.1,
+              'temperature': 1.2,
               'response_format': {'type': 'json_object'},
               'max_tokens': 200,
               'messages': [
@@ -3402,7 +3448,7 @@ Output EXACTLY this JSON:
                 {
                   'role': 'user',
                   'content':
-                      '장소: "$selectedPlace"\nJSON 3필드. situation 12자·ai_role 10자·user_role 8자 이내. 라벨처럼 짧고 명확하게.',
+                      '긴급상황 키워드: "$emergencyKeyword"\n시간대: $timeSeed\n\n위 키워드를 기반으로 매번 다른 구체적 롤플레이 상황을 JSON으로 생성하세요.',
                 },
               ],
             }),
@@ -3416,18 +3462,25 @@ Output EXACTLY this JSON:
         final cleanJson = _cleanJsonString(raw);
         final parsed = jsonDecode(cleanJson);
         return {
-          'keyword': '',
-          'situation': parsed['situation']?.toString() ?? '$selectedPlace 방문',
-          'ai_role': parsed['ai_role']?.toString() ?? '담당자',
-          'user_role': parsed['user_role']?.toString() ?? '방문객',
+          'keyword': emergencyKeyword,
+          'situation': parsed['situation']?.toString() ?? emergencyKeyword,
+          'ai_role': parsed['ai_role']?.toString() ?? '담당 직원',
+          'user_role': parsed['user_role']?.toString() ?? '당황한 여행자',
         };
       }
     } catch (e) {
-      print('generateScenario Error: $e');
+      print('generateEmergencyScenario Error: $e');
     } finally {
       client.close();
     }
     return null;
+  }
+
+  // 기존 generateScenario 유지 (하위 호환)
+  static Future<Map<String, String>?> generateScenario(String apiKey) async {
+    const places = ['공항', '호텔', '응급실', '경찰서', '렌터카'];
+    final place = places[Random().nextInt(places.length)];
+    return generateEmergencyScenario(apiKey, '$place 긴급 상황');
   }
 
   // ==================================================================
@@ -3439,6 +3492,198 @@ Output EXACTLY this JSON:
     if (clean.startsWith('```')) clean = clean.substring(3);
     if (clean.endsWith('```')) clean = clean.substring(0, clean.length - 3);
     return clean.trim();
+  }
+}
+
+// ============================================================================
+// 🚨 상황 선택 바텀시트 위젯
+// ============================================================================
+class _SituationPickerSheet extends StatefulWidget {
+  final List<Map<String, dynamic>> emergencySituations;
+  final List<Map<String, dynamic>> categories;
+  final void Function(String situationKeyword) onSelected;
+
+  const _SituationPickerSheet({
+    required this.emergencySituations,
+    required this.categories,
+    required this.onSelected,
+  });
+
+  @override
+  State<_SituationPickerSheet> createState() => _SituationPickerSheetState();
+}
+
+class _SituationPickerSheetState extends State<_SituationPickerSheet>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: widget.categories.length, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  List<Map<String, dynamic>> _getSituationsForCategory(String categoryKey) {
+    return widget.emergencySituations
+        .where((s) => s['category'] == categoryKey)
+        .toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.82,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      builder: (ctx, scrollCtrl) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: Color(0xFF0F0E1A),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            children: [
+              // 핸들
+              Container(
+                margin: const EdgeInsets.only(top: 10, bottom: 6),
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              // 헤더
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 4, 18, 0),
+                child: Row(
+                  children: [
+                    const Icon(Icons.warning_amber_rounded,
+                        color: Color(0xFFEF4444), size: 18),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        '긴급 상황 선택',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '${widget.emergencySituations.length}개 상황',
+                      style: const TextStyle(
+                          color: Colors.white38, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 8),
+              // 카테고리 탭
+              TabBar(
+                controller: _tabController,
+                isScrollable: true,
+                tabAlignment: TabAlignment.start,
+                indicatorColor: const Color(0xFFEF4444),
+                indicatorWeight: 2,
+                labelColor: Colors.white,
+                unselectedLabelColor: Colors.white38,
+                labelStyle: const TextStyle(
+                    fontSize: 12, fontWeight: FontWeight.w600),
+                unselectedLabelStyle:
+                    const TextStyle(fontSize: 12),
+                tabs: widget.categories
+                    .map((c) => Tab(text: c['label'] as String))
+                    .toList(),
+              ),
+              const Divider(color: Colors.white12, height: 1),
+              // 탭 콘텐츠
+              Expanded(
+                child: TabBarView(
+                  controller: _tabController,
+                  children: widget.categories.map((cat) {
+                    final situations =
+                        _getSituationsForCategory(cat['key'] as String);
+                    final color = cat['color'] as Color;
+                    return GridView.builder(
+                      controller: scrollCtrl,
+                      padding: const EdgeInsets.all(12),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 2,
+                        mainAxisSpacing: 8,
+                        crossAxisSpacing: 8,
+                        childAspectRatio: 2.6,
+                      ),
+                      itemCount: situations.length,
+                      itemBuilder: (_, i) {
+                        final item = situations[i];
+                        final keyword = item['situation'] as String;
+                        final id = item['id'] as int;
+                        return GestureDetector(
+                          onTap: () => widget.onSelected(keyword),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: color.withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                  color: color.withOpacity(0.35), width: 1),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 20,
+                                  height: 20,
+                                  alignment: Alignment.center,
+                                  decoration: BoxDecoration(
+                                    color: color.withOpacity(0.25),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    '$id',
+                                    style: TextStyle(
+                                        color: color,
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w700),
+                                  ),
+                                ),
+                                const SizedBox(width: 7),
+                                Expanded(
+                                  child: Text(
+                                    keyword,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w500,
+                                      height: 1.2,
+                                    ),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  }).toList(),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 }
 
