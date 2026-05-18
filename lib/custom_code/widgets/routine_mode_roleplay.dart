@@ -486,6 +486,26 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     });
   }
 
+  // 현재 대사를 화면 맨 위에 고정 (새 턴 시작 시 사용)
+  void _scrollToCurrentTop(int index) {
+    final role = (index >= 0 && index < _localMessages.length)
+        ? (_localMessages[index]['role'] ?? '') : '';
+    _log('🧭 [SCROLL-TOP]', 'index=$index role=$role');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      final key = _itemKeys[index];
+      if (key == null) return;
+      final ctx = key.currentContext;
+      if (ctx == null) return;
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.02,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
   void _stopEverything() {
     _isConversationActive = false;
     _isAiOpenerPlaying = false;
@@ -529,7 +549,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         setState(() {
           _localMessages.add({'role': 'SYSTEM', 'target': '', 'original': ''});
         });
-        _scrollToCurrent(_localMessages.length - 1);
+        _scrollToCurrentTop(_localMessages.length - 1);
       }
       final int aiIndex = _localMessages.length - 1;
 
@@ -746,7 +766,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         _localMessages
             .add({'role': 'HOST_TEMP', 'target': '...', 'type': 'user_input'});
       });
-      _scrollToBottom();
+      _scrollToCurrentTop(_localMessages.length - 1);
     }
 
     _log('🎤 [LISTEN-01]', '_startDeepgramListening 진입, VoiceManager 생성');
@@ -966,7 +986,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
           _removeLastExchange();
         });
-        _scrollToBottom();
+        if (_localMessages.isNotEmpty)
+          _scrollToCurrentTop(_localMessages.length - 1);
       }
       _log('🔄 [CORRECT-02]', '직전 교환 삭제 완료 → 재처리 진행');
     }
@@ -982,7 +1003,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           _removeOrphanedHostBubbles(); // AI 응답 없이 중단된 이전 HOST 버블 제거
           _localMessages.add({'role': 'HOST', 'target': '', 'original': ''});
         });
-        _scrollToBottom();
+        _scrollToCurrentTop(_localMessages.length - 1);
       }
 
       int hostIndex = _localMessages.length - 1;
@@ -1119,7 +1140,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       if (mounted) {
         setState(() => _localMessages
             .add({'role': 'SYSTEM', 'target': '', 'original': ''}));
-        _scrollToCurrent(_localMessages.length - 1);
+        _scrollToCurrentTop(_localMessages.length - 1);
       }
       int aiIndex = _localMessages.length - 1;
 
@@ -1177,6 +1198,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
             _msGptFirstToken = _swSpeechEnd.elapsedMilliseconds;
             _log('🧠 [PIPE-03]', 'GPT 첫 유효 청크 수신: "$cleanedChunk"');
             _firstAiChunkLogged = true;
+            _scrollToCurrentTop(aiIndex);
           }
           if (_swOpenAI.isRunning) _swOpenAI.stop();
           aiTargetText += cleanedChunk;
@@ -1885,10 +1907,10 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   }
 
   Widget _buildChatList() {
-    final double bottomPad = MediaQuery.of(context).size.height * 0.4;
+    final double bottomPad = MediaQuery.of(context).size.height * 0.55;
     return ListView.builder(
       controller: _scrollController,
-      padding: EdgeInsets.fromLTRB(16, 16, 16, bottomPad),
+      padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPad),
       itemCount: _localMessages.length,
       itemBuilder: (context, idx) {
         _itemKeys[idx] ??= GlobalKey();
