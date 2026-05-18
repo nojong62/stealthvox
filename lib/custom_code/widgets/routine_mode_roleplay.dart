@@ -364,7 +364,10 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         // 🚨 최초 입장 시 랜덤 긴급 상황으로 시나리오 자동 생성
         if (_emergencySituations.isNotEmpty) {
           final rand = _emergencySituations[Random().nextInt(_emergencySituations.length)];
-          _selectedEmergencyKeyword = rand['situation'] as String;
+          setState(() => _selectedEmergencyKeyword = rand['situation'] as String);
+        } else {
+          // JSON 로드 실패 시 fallback 키워드로도 "다시 생성" 작동하도록 보장
+          setState(() => _selectedEmergencyKeyword = "공항 여권 분실");
         }
         _generateScenario();
       }
@@ -425,8 +428,14 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     }
   }
 
-  // 상황 선택 바텀시트
-  void _showSituationPicker() {
+  // 상황 선택 바텀시트 — 데이터 미로드 시 재시도 후 표시
+  void _showSituationPicker() async {
+    if (_emergencySituations.isEmpty) {
+      debugPrint('⚠️ _emergencySituations empty, retrying load...');
+      await _loadEmergencySituations();
+    }
+    if (!mounted) return;
+
     final categories = [
       {'key': '공항_비행기_교통', 'label': '✈️ 교통', 'color': const Color(0xFF0EA5E9)},
       {'key': '호텔_숙소_주거', 'label': '🏨 숙소', 'color': const Color(0xFF10B981)},
@@ -1884,9 +1893,15 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                 const SizedBox(width: 10),
                 GestureDetector(
                   onTap: () {
-                    if (!_isConversationActive && _selectedEmergencyKeyword.isNotEmpty) {
-                      _generateScenario();
+                    if (_isConversationActive || _isGeneratingScenario) return;
+                    // 200개 목록에서 새 랜덤 상황 선택 후 생성
+                    if (_emergencySituations.isNotEmpty) {
+                      final rand = _emergencySituations[
+                          Random().nextInt(_emergencySituations.length)];
+                      setState(() =>
+                          _selectedEmergencyKeyword = rand['situation'] as String);
                     }
+                    _generateScenario();
                   },
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
