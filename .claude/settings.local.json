@@ -34,7 +34,10 @@
       "Bash(Select-Object Name)",
       "Bash(python -c \"import json; data=json.load\\(open\\('assets/jsons/emergency_situations_200.json', encoding='utf-8'\\)\\); cats={}; [cats.update\\({s['category']: cats.get\\(s['category'],0\\)+1}\\) for s in data['emergency_situations']]; print\\('Total:', len\\(data['emergency_situations']\\)\\); print\\('Categories:', cats\\)\")",
       "Bash(python -c \"import json; data=json.load\\(open\\('assets/jsons/emergency_situations_200.json', encoding='utf-8'\\)\\); print\\('Total:', len\\(data['emergency_situations']\\)\\); cats={}; [cats.__setitem__\\(s['category'], cats.get\\(s['category'],0\\)+1\\) for s in data['emergency_situations']]; [print\\(k,v\\) for k,v in cats.items\\(\\)]\")",
-      "Bash(git merge *)"
+      "Bash(git merge *)",
+      "Bash(Select-String \"routine_mode_roleplay\")",
+      "Bash(git push *)",
+      "Bash(git remote *)"
     ]
   }
 }
