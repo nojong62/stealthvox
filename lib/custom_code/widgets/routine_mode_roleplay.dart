@@ -377,22 +377,76 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   }
 
   Future<void> _loadEmergencySituations() async {
-    try {
-      final jsonStr = await rootBundle.loadString('assets/jsons/emergency_situations_200.json');
-      final decoded = jsonDecode(jsonStr);
-      final data = decoded as Map<String, dynamic>;
-      final rawList = data['emergency_situations'];
-      if (rawList == null) {
-        debugPrint('❌ Emergency JSON: "emergency_situations" key not found');
+    final paths = [
+      'assets/jsons/emergency_situations_200.json',
+      'assets/emergency_situations_200.json',
+      'assets/jsons/200개 상황설정.json',
+    ];
+
+    Object? lastError;
+
+    for (final path in paths) {
+      try {
+        final jsonStr = await rootBundle.loadString(path);
+        final decoded = jsonDecode(jsonStr);
+
+        final rawList = decoded is Map<String, dynamic>
+            ? decoded['emergency_situations']
+            : null;
+
+        if (rawList is! List) {
+          throw Exception('emergency_situations is not a List');
+        }
+
+        final list = rawList
+            .whereType<Map>()
+            .map((e) {
+              final idRaw = e['id'];
+              final id = idRaw is int
+                  ? idRaw
+                  : int.tryParse(idRaw?.toString() ?? '') ?? 0;
+
+              final category = e['category']?.toString().trim() ?? '';
+              final situation = e['situation']?.toString().trim() ?? '';
+
+              if (id <= 0 || category.isEmpty || situation.isEmpty) {
+                return null;
+              }
+
+              return {
+                'id': id,
+                'category': category,
+                'situation': situation,
+              };
+            })
+            .whereType<Map<String, dynamic>>()
+            .toList();
+
+        if (mounted) {
+          setState(() {
+            _emergencySituations = list;
+          });
+        }
+
+        debugPrint('✅ Emergency situations loaded from $path: ${list.length}');
+
+        if (list.length != 200) {
+          debugPrint('⚠️ Emergency situations count is ${list.length}, expected 200');
+        }
+
         return;
+      } catch (e) {
+        lastError = e;
+        debugPrint('❌ Failed to load emergency situations from $path: $e');
       }
-      final list = (rawList as List)
-          .map((e) => Map<String, dynamic>.from(e as Map))
-          .toList();
-      debugPrint('✅ Emergency situations loaded: ${list.length}');
-      if (mounted) setState(() => _emergencySituations = list);
-    } catch (e, st) {
-      debugPrint('❌ Emergency JSON Load Error: $e\n$st');
+    }
+
+    debugPrint('❌ Emergency JSON Load Error. All paths failed. Last error: $lastError');
+
+    if (mounted) {
+      setState(() {
+        _emergencySituations = [];
+      });
     }
   }
 
@@ -3619,7 +3673,7 @@ class _SituationPickerSheetState extends State<_SituationPickerSheet>
 
   List<Map<String, dynamic>> _getSituationsForCategory(String categoryKey) {
     return widget.emergencySituations
-        .where((s) => s['category'] == categoryKey)
+        .where((s) => (s['category']?.toString().trim() ?? '') == categoryKey.trim())
         .toList();
   }
 
@@ -3703,13 +3757,13 @@ class _SituationPickerSheetState extends State<_SituationPickerSheet>
                                 color: Colors.white38, size: 36),
                             SizedBox(height: 12),
                             Text(
-                              '상황 데이터를 불러오지 못했습니다',
+                              '상황 데이터를 불러오지 못했습니다.',
                               style: TextStyle(
                                   color: Colors.white54, fontSize: 14),
                             ),
                             SizedBox(height: 6),
                             Text(
-                              '앱을 재시작하거나 잠시 후 다시 시도해 주세요',
+                              'JSON asset 경로와 pubspec.yaml 등록을 확인하세요.',
                               style: TextStyle(
                                   color: Colors.white38, fontSize: 12),
                             ),
