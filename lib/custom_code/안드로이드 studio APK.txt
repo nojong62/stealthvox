@@ -1,0 +1,26 @@
+. APK 만드는 방법은 두 가지입니다. 가장 쉬운 건 터미널 명령입니다.
+
+방법 A: Android Studio 터미널에서 만들기
+Android Studio 아래쪽 또는 왼쪽 아래에서 Terminal 탭 열기
+안 보이면 상단 메뉴: View → Tool Windows → Terminal
+터미널에 아래 명령 입력:
+flutter clean
+flutter pub get
+flutter build apk --release
+빌드가 끝나면 APK 위치는 보통 여기입니다:
+build/app/outputs/flutter-apk/app-release.apk
+
+이 파일을 폰으로 옮겨 설치하면 됩니다.
+
+방법 B: Android Studio 메뉴로 만들기
+
+상단 메뉴에서:
+
+Build → Flutter → Build APK
+
+다만 FlutterFlow export 프로젝트는 메뉴보다 터미널 명령이 더 확실합니다.
+
+지금 화면에서 먼저 할 것
+
+오른쪽 아래에 Android Gradle build script found 알림이 보입니다.
+그건 무시해도 됩니다. 지금은 APK 빌드만 할 거니까 Terminal 열고 명령어 실행하세요.

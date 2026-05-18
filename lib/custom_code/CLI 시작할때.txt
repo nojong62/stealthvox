@@ -20,6 +20,8 @@ cd stealthvox-app
 
 (Shot URL)  https://stealthvox.onelink.me/31o1/fipsp75p
 
+F:\flutter_project\stealth_vox\build\app\outputs\flutter-apk\app-debug.apk (APK)
+
 F:
 cd F:\flutter_project\stealth_vox
 

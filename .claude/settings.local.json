@@ -20,7 +20,11 @@
       "Bash(flutter --version)",
       "PowerShell(Get-ChildItem \"C:\\\\Program Files\\\\FlutterFlow\" | ForEach-Object { $_.Name })",
       "PowerShell(Get-ChildItem \"C:\\\\Program Files\\\\FlutterFlow\\\\data\" | ForEach-Object { $_.Name } | Select-Object -First 10)",
-      "PowerShell($reg = Get-ItemProperty \"HKCU:\\\\Environment\" -ErrorAction SilentlyContinue; $reg.PATH -split \";\" | Where-Object { $_ -ne \"\" })"
+      "PowerShell($reg = Get-ItemProperty \"HKCU:\\\\Environment\" -ErrorAction SilentlyContinue; $reg.PATH -split \";\" | Where-Object { $_ -ne \"\" })",
+      "Bash(flutter analyze *)",
+      "Bash(flutter build *)",
+      "Bash(Get-Content *)",
+      "Bash(flutter clean *)"
     ]
   }
 }
