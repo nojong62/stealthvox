@@ -582,7 +582,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
 
   Future<void> _joinAsGuest(String roomId) async {
     // 초대 상태는 진입 시도 직전에 반드시 소비 (좀비 roomId 방지)
-    FFAppState().clearDuoInviteState();
+    FFAppState().isGuestSession = false;
+    FFAppState().duoRoomId = '';
+    debugPrint('[AppState] duo invite state cleared');
 
     try {
       _duoSessionRef =

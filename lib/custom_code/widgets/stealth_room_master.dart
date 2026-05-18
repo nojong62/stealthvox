@@ -55,7 +55,9 @@ class _StealthRoomMasterState extends State<StealthRoomMaster> {
     if (FFAppState().isGuestSession &&
         FFAppState().duoRoomId.isNotEmpty) {
       final String consumedRoomId = FFAppState().duoRoomId;
-      FFAppState().clearDuoInviteState(); // 즉시 소비!
+      FFAppState().isGuestSession = false;
+      FFAppState().duoRoomId = '';
+      debugPrint('[AppState] duo invite state cleared');
       debugPrint('[StealthRoom] Duo invite detected — roomId: $consumedRoomId');
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
