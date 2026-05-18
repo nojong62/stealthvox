@@ -495,31 +495,22 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     });
   }
 
-  // 현재 대사를 화면 맨 위에 고정 — localToGlobal 기반 정확한 offset 계산
+  // 현재 대사를 화면 맨 위에 고정 — Scrollable.ensureVisible 기반
   void _scrollToCurrentTop(int index) {
     final role = (index >= 0 && index < _localMessages.length)
-        ? (_localMessages[index]['role'] ?? '') : '';
+        ? (_localMessages[index]['role'] ?? '')
+        : '';
     _log('🧭 [SCROLL-TOP]', 'index=$index role=$role');
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollController.hasClients) return;
       final key = _itemKeys[index];
       if (key == null) return;
       final ctx = key.currentContext;
       if (ctx == null) return;
-      final box = ctx.findRenderObject() as RenderBox?;
-      if (box == null) return;
-      final scrollableCtx = Scrollable.maybeOf(ctx)?.context;
-      if (scrollableCtx == null) return;
-      final scrollBox = scrollableCtx.findRenderObject() as RenderBox?;
-      if (scrollBox == null) return;
-      final itemOffset = box.localToGlobal(Offset.zero, ancestor: scrollBox);
-      final target = (_scrollController.offset + itemOffset.dy - 12.0)
-          .clamp(0.0, _scrollController.position.maxScrollExtent);
-      _log('🧭 [SCROLL-TOP-EXEC]', 'target=$target itemDy=${itemOffset.dy.toStringAsFixed(0)}');
-      _scrollController.animateTo(
-        target,
-        duration: const Duration(milliseconds: 400),
-        curve: Curves.easeInOut,
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.02,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
       );
     });
   }
@@ -567,7 +558,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         setState(() {
           _localMessages.add({'role': 'SYSTEM', 'target': '', 'original': ''});
         });
-        _scrollToBottom();
+        _scrollToCurrentTop(_localMessages.length - 1);
       }
       final int aiIndex = _localMessages.length - 1;
 
@@ -1005,7 +996,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           _removeLastExchange();
         });
         if (_localMessages.isNotEmpty)
-          _scrollToBottom();
+          _scrollToCurrentTop(_localMessages.length - 1);
       }
       _log('🔄 [CORRECT-02]', '직전 교환 삭제 완료 → 재처리 진행');
     }
@@ -1021,7 +1012,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           _removeOrphanedHostBubbles(); // AI 응답 없이 중단된 이전 HOST 버블 제거
           _localMessages.add({'role': 'HOST', 'target': '', 'original': ''});
         });
-        _scrollToBottom();
+        _scrollToCurrentTop(_localMessages.length - 1);
       }
 
       int hostIndex = _localMessages.length - 1;
@@ -1216,7 +1207,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
             _msGptFirstToken = _swSpeechEnd.elapsedMilliseconds;
             _log('🧠 [PIPE-03]', 'GPT 첫 유효 청크 수신: "$cleanedChunk"');
             _firstAiChunkLogged = true;
-            _scrollToBottom();
+            _scrollToCurrentTop(aiIndex);
           }
           if (_swOpenAI.isRunning) _swOpenAI.stop();
           aiTargetText += cleanedChunk;
@@ -1931,9 +1922,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   }
 
   Widget _buildChatList() {
-    final double bottomPad = _localMessages.length <= 1
-        ? MediaQuery.of(context).size.height * 0.4
-        : 16;
+    final double bottomPad = MediaQuery.of(context).size.height * 0.55;
     return ListView.builder(
       controller: _scrollController,
       padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPad),
