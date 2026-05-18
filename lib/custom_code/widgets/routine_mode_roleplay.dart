@@ -369,13 +369,20 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   Future<void> _loadEmergencySituations() async {
     try {
       final jsonStr = await rootBundle.loadString('assets/jsons/emergency_situations_200.json');
-      final data = jsonDecode(jsonStr) as Map<String, dynamic>;
-      final list = (data['emergency_situations'] as List)
+      final decoded = jsonDecode(jsonStr);
+      final data = decoded as Map<String, dynamic>;
+      final rawList = data['emergency_situations'];
+      if (rawList == null) {
+        debugPrint('❌ Emergency JSON: "emergency_situations" key not found');
+        return;
+      }
+      final list = (rawList as List)
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
+      debugPrint('✅ Emergency situations loaded: ${list.length}');
       if (mounted) setState(() => _emergencySituations = list);
-    } catch (e) {
-      print('❌ Emergency JSON Load Error: $e');
+    } catch (e, st) {
+      debugPrint('❌ Emergency JSON Load Error: $e\n$st');
     }
   }
 
@@ -3606,7 +3613,29 @@ class _SituationPickerSheetState extends State<_SituationPickerSheet>
               const Divider(color: Colors.white12, height: 1),
               // 탭 콘텐츠
               Expanded(
-                child: TabBarView(
+                child: widget.emergencySituations.isEmpty
+                    ? const Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.error_outline,
+                                color: Colors.white38, size: 36),
+                            SizedBox(height: 12),
+                            Text(
+                              '상황 데이터를 불러오지 못했습니다',
+                              style: TextStyle(
+                                  color: Colors.white54, fontSize: 14),
+                            ),
+                            SizedBox(height: 6),
+                            Text(
+                              '앱을 재시작하거나 잠시 후 다시 시도해 주세요',
+                              style: TextStyle(
+                                  color: Colors.white38, fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      )
+                    : TabBarView(
                   controller: _tabController,
                   children: widget.categories.map((cat) {
                     final situations =
