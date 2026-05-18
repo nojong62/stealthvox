@@ -95,6 +95,13 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         .trim();
   }
 
+  // punctuation/공백만 있는 문자열은 TTS 큐에 넣지 않기 위한 필터
+  bool isMeaninglessTtsText(String text) {
+    final t = text.trim();
+    if (t.isEmpty) return true;
+    return RegExp('^[\\s.,!?;:\'"\\[\\]{}()\\-]+\$').hasMatch(t);
+  }
+
   void _showDebugLogDialog() {
     showDialog(
       context: context,
@@ -558,11 +565,24 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           final int lastIdx = matches.last.end;
           final String toSpeak = openerBuffer.substring(0, lastIdx).trim();
           openerBuffer = openerBuffer.substring(lastIdx);
-          if (toSpeak.isNotEmpty) aiTtsFetcher.addText(_cleanText(toSpeak));
+          if (toSpeak.isNotEmpty) {
+            final cleaned = _cleanText(toSpeak);
+            if (isMeaninglessTtsText(cleaned)) {
+              _log('🔊 [TTS-SKIP] [AI]', '의미 없는 TTS 조각 skip: "$cleaned"');
+            } else {
+              aiTtsFetcher.addText(cleaned);
+            }
+          }
         }
       }
-      if (openerBuffer.trim().isNotEmpty)
-        aiTtsFetcher.addText(_cleanText(openerBuffer.trim()));
+      if (openerBuffer.trim().isNotEmpty) {
+        final cleanedOpener = _cleanText(openerBuffer.trim());
+        if (isMeaninglessTtsText(cleanedOpener)) {
+          _log('🔊 [TTS-SKIP] [AI]', '의미 없는 TTS 조각 skip: "$cleanedOpener"');
+        } else {
+          aiTtsFetcher.addText(cleanedOpener);
+        }
+      }
 
       // 역번역 (한국어 자막)
       RoleplayBrain.generateCleanOriginal(
@@ -1029,8 +1049,13 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           String toSpeak = userBuffer.substring(0, lastIdx).trim();
           userBuffer = userBuffer.substring(lastIdx);
           if (toSpeak.isNotEmpty) {
-            userTtsFetcher.addText(_cleanText(toSpeak));
-            firstChunkSent = true;
+            final cleanedChunk = _cleanText(toSpeak);
+            if (isMeaninglessTtsText(cleanedChunk)) {
+              _log('🔊 [TTS-SKIP] [USER]', '의미 없는 TTS 조각 skip: "$cleanedChunk"');
+            } else {
+              userTtsFetcher.addText(cleanedChunk);
+              firstChunkSent = true;
+            }
           }
         }
         if (!firstChunkSent) {
@@ -1040,9 +1065,14 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
               .where((w) => w.isNotEmpty)
               .length;
           if (wordCount >= 4) {
-            userTtsFetcher.addText(_cleanText(userBuffer.trim()));
+            final cleanedBuf = _cleanText(userBuffer.trim());
+            if (isMeaninglessTtsText(cleanedBuf)) {
+              _log('🔊 [TTS-SKIP] [USER]', '의미 없는 TTS 조각 skip: "$cleanedBuf"');
+            } else {
+              userTtsFetcher.addText(cleanedBuf);
+              firstChunkSent = true;
+            }
             userBuffer = "";
-            firstChunkSent = true;
           }
         }
       }
@@ -1056,8 +1086,14 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         return;
       }
 
-      if (userBuffer.trim().isNotEmpty)
-        userTtsFetcher.addText(_cleanText(userBuffer.trim()));
+      if (userBuffer.trim().isNotEmpty) {
+        final cleanedRem = _cleanText(userBuffer.trim());
+        if (isMeaninglessTtsText(cleanedRem)) {
+          _log('🔊 [TTS-SKIP] [USER]', '의미 없는 TTS 조각 skip: "$cleanedRem"');
+        } else {
+          userTtsFetcher.addText(cleanedRem);
+        }
+      }
 
       // 🔧 [v3.7] 유저 통문장 TtsCache 백그라운드 저장 (히스토리 HIT 유도)
       //   - 청크별 캐시만으로는 히스토리에서 통문장 GET이 MISS됨
