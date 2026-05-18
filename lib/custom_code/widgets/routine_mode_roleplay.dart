@@ -486,7 +486,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     });
   }
 
-  // 현재 대사를 화면 맨 위에 고정 (새 턴 시작 시 사용)
+  // 현재 대사를 화면 맨 위에 고정 — localToGlobal 기반 정확한 offset 계산
   void _scrollToCurrentTop(int index) {
     final role = (index >= 0 && index < _localMessages.length)
         ? (_localMessages[index]['role'] ?? '') : '';
@@ -497,11 +497,20 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       if (key == null) return;
       final ctx = key.currentContext;
       if (ctx == null) return;
-      Scrollable.ensureVisible(
-        ctx,
-        alignment: 0.02,
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOut,
+      final box = ctx.findRenderObject() as RenderBox?;
+      if (box == null) return;
+      final scrollableCtx = Scrollable.maybeOf(ctx)?.context;
+      if (scrollableCtx == null) return;
+      final scrollBox = scrollableCtx.findRenderObject() as RenderBox?;
+      if (scrollBox == null) return;
+      final itemOffset = box.localToGlobal(Offset.zero, ancestor: scrollBox);
+      final target = (_scrollController.offset + itemOffset.dy - 12.0)
+          .clamp(0.0, _scrollController.position.maxScrollExtent);
+      _log('🧭 [SCROLL-TOP-EXEC]', 'target=$target itemDy=${itemOffset.dy.toStringAsFixed(0)}');
+      _scrollController.animateTo(
+        target,
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeInOut,
       );
     });
   }
@@ -766,7 +775,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         _localMessages
             .add({'role': 'HOST_TEMP', 'target': '...', 'type': 'user_input'});
       });
-      _scrollToCurrentTop(_localMessages.length - 1);
+      // HOST_TEMP("...")는 스크롤 트리거 없음 — 실제 HOST 버블 등장 시 스크롤
     }
 
     _log('🎤 [LISTEN-01]', '_startDeepgramListening 진입, VoiceManager 생성');
@@ -1140,7 +1149,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       if (mounted) {
         setState(() => _localMessages
             .add({'role': 'SYSTEM', 'target': '', 'original': ''}));
-        _scrollToCurrentTop(_localMessages.length - 1);
+        // 빈 AI 버블은 스크롤 없음 — 첫 유효 청크 시 _scrollToCurrentTop 호출
       }
       int aiIndex = _localMessages.length - 1;
 
