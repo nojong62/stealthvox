@@ -34,6 +34,10 @@ extension BillingRateMultiplier on BillingRate {
     switch (this) {
       case BillingRate.full:
         return 1.0;
+      // AI History Practice Mode:
+      // 0.25 = 25% billing rate (intentional policy — do NOT change).
+      // User can practice 4x longer than normal conversation.
+      // This is intentional policy for history review mode.
       case BillingRate.discounted:
         return 0.25;
     }
