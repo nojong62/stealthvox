@@ -1,4 +1,4 @@
-// Automatic FlutterFlow imports
+﻿// Automatic FlutterFlow imports
 import '/backend/backend.dart';
 import '/backend/schema/structs/index.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
@@ -258,17 +258,13 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     }
   }
 
-  // 🎭 롤플레이 시나리오 (AI가 자동 생성, 4필드)
+  // 🎭 롤플레이 시나리오 (유저 직접 입력)
   String _scenarioKeyword = "";
   String _scenarioSituation = "";
   String _scenarioAiRole = "";
   String _scenarioUserRole = "";
-  bool _isGeneratingScenario = false;
   bool _isAiOpenerPlaying = false; // AI 첫 발화 재생 중 여부
 
-  // 🚨 긴급 상황 200개 데이터
-  List<Map<String, dynamic>> _emergencySituations = [];
-  String _selectedEmergencyKeyword = ""; // 유저가 선택한 긴급 상황 키워드
   String _lastRawTranscript = ''; // 정정 감지용 직전 유저 발화 원문
 
   // 오디오 및 UI
@@ -352,7 +348,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   }
 
   Future<void> _fetchKeysAndInit() async {
-    _loadEmergencySituations();
     try {
       await FirebaseRemoteConfig.instance.fetchAndActivate();
       if (mounted) {
@@ -361,93 +356,145 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
               FirebaseRemoteConfig.instance.getString('DeepgramAPIKey');
           _openAiKey = FirebaseRemoteConfig.instance.getString('OpenAIAPIKey');
         });
-        // 🚨 최초 입장 시 랜덤 긴급 상황으로 시나리오 자동 생성
-        if (_emergencySituations.isNotEmpty) {
-          final rand = _emergencySituations[Random().nextInt(_emergencySituations.length)];
-          setState(() => _selectedEmergencyKeyword = rand['situation'] as String);
-        } else {
-          // JSON 로드 실패 시 fallback 키워드로도 "다시 생성" 작동하도록 보장
-          setState(() => _selectedEmergencyKeyword = "공항 여권 분실");
-        }
-        _generateScenario();
       }
     } catch (e) {
       print('❌ Key Load Error: $e');
     }
   }
 
-  void _loadEmergencySituations() {
-    _emergencySituations = kEmergencySituations
-        .map((e) => Map<String, dynamic>.from(e))
-        .toList();
-    debugPrint('✅ Emergency situations loaded: ${_emergencySituations.length}');
-  }
-
   // ====================================================================
-  // 📦 [Box 4: 시나리오 관리 (긴급상황 JSON 기반 AI 생성)]
+  // 📦 [Box 4: 시나리오 설정 — 유저 직접 입력]
   // ====================================================================
-  Future<void> _generateScenario() async {
-    if (_openAiKey.isEmpty || _isGeneratingScenario) return;
-    setState(() => _isGeneratingScenario = true);
-
-    try {
-      final keyword = _selectedEmergencyKeyword.isNotEmpty
-          ? _selectedEmergencyKeyword
-          : "공항 여권 분실";
-      final result = await RoleplayBrain.generateEmergencyScenario(_openAiKey, keyword);
-      if (mounted && result != null) {
-        setState(() {
-          _scenarioKeyword = result['keyword'] ?? keyword;
-          _scenarioSituation = result['situation'] ?? keyword;
-          _scenarioAiRole = result['ai_role'] ?? "담당 직원";
-          _scenarioUserRole = result['user_role'] ?? "당황한 여행자";
-          // 시나리오 변경 시 세션 리셋
-          _sessionDocId = null;
-          _myHistoryRef = null;
-          _localMessages.clear();
-          _isConversationActive = false;
-        });
-      }
-    } catch (e) {
-      print("❌ 시나리오 생성 에러: $e");
-    } finally {
-      if (mounted) setState(() => _isGeneratingScenario = false);
-    }
-  }
-
-  // 상황 선택 바텀시트 — 데이터 미로드 시 재시도 후 표시
-  void _showSituationPicker() async {
-    if (_emergencySituations.isEmpty) {
-      debugPrint('⚠️ _emergencySituations empty, retrying load...');
-      _loadEmergencySituations();
-    }
-    if (!mounted) return;
-
-    final categories = [
-      {'key': '공항_비행기_교통', 'label': '✈️ 교통', 'color': const Color(0xFF0EA5E9)},
-      {'key': '호텔_숙소_주거', 'label': '🏨 숙소', 'color': const Color(0xFF10B981)},
-      {'key': '식당_쇼핑_유흥', 'label': '🛍️ 쇼핑', 'color': const Color(0xFFF59E0B)},
-      {'key': '공공장소_병원_비즈니스', 'label': '🏥 공공', 'color': const Color(0xFFEF4444)},
-      {'key': '레저_관광_자연_기타', 'label': '🏞️ 레저', 'color': const Color(0xFF8B5CF6)},
-    ];
+  void _showSituationInputSheet() {
+    if (_isConversationActive) return;
+    final situationCtrl = TextEditingController(text: _scenarioSituation);
+    final aiRoleCtrl = TextEditingController(text: _scenarioAiRole);
+    final userRoleCtrl = TextEditingController(text: _scenarioUserRole);
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) {
-        return _SituationPickerSheet(
-          emergencySituations: _emergencySituations,
-          categories: categories,
-          onSelected: (situationKeyword) {
-            Navigator.pop(ctx);
-            if (!_isConversationActive) {
-              setState(() => _selectedEmergencyKeyword = situationKeyword);
-              _generateScenario();
-            }
-          },
+        return Padding(
+          padding: EdgeInsets.only(
+              bottom: MediaQuery.of(ctx).viewInsets.bottom),
+          child: Container(
+            decoration: const BoxDecoration(
+              color: Color(0xFF0F0E1A),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 36, height: 4,
+                    decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(2)),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                const Text('상황 설정',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold)),
+                const SizedBox(height: 4),
+                const Text('상황과 역할을 입력하면 바로 롤플레이가 시작됩니다.',
+                    style: TextStyle(color: Colors.white38, fontSize: 12)),
+                const SizedBox(height: 20),
+                _inputField(situationCtrl, '상황 (10-15자)', '예: 숨겨둔 돈다발 들킴'),
+                const SizedBox(height: 12),
+                _inputField(aiRoleCtrl, 'AI 역할', '예: 화난 배우자'),
+                const SizedBox(height: 12),
+                _inputField(userRoleCtrl, '내 역할', '예: 당황한 남편'),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: GestureDetector(
+                    onTap: () {
+                      final sit = situationCtrl.text.trim();
+                      final ai = aiRoleCtrl.text.trim();
+                      final user = userRoleCtrl.text.trim();
+                      if (sit.isEmpty || ai.isEmpty || user.isEmpty) return;
+                      Navigator.pop(ctx);
+                      setState(() {
+                        _scenarioSituation = sit;
+                        _scenarioAiRole = ai;
+                        _scenarioUserRole = user;
+                        _scenarioKeyword = sit;
+                        _sessionDocId = null;
+                        _myHistoryRef = null;
+                        _localMessages.clear();
+                        _isConversationActive = false;
+                      });
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF7C3AED), Color(0xFF9333EA)],
+                        ),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Center(
+                        child: Text('확인',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         );
       },
+    );
+  }
+
+  Widget _inputField(TextEditingController ctrl, String label, String hint) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style: const TextStyle(
+                color: Color(0xFFA78BFA),
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.8)),
+        const SizedBox(height: 6),
+        TextField(
+          controller: ctrl,
+          style: const TextStyle(color: Colors.white, fontSize: 14),
+          decoration: InputDecoration(
+            hintText: hint,
+            hintStyle: const TextStyle(color: Colors.white24, fontSize: 13),
+            filled: true,
+            fillColor: const Color(0xFF1A1830),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: const BorderSide(color: Colors.white12),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: const BorderSide(color: Colors.white12),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: const BorderSide(color: Color(0xFF7C3AED)),
+            ),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          ),
+        ),
+      ],
     );
   }
 
@@ -1687,222 +1734,177 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   }
 
   Widget _buildTopControls() {
+    final hasScenario = _scenarioSituation.isNotEmpty && _scenarioAiRole.isNotEmpty;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 28),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [Color(0xFF251640), Color(0xFF141230)],
+          GestureDetector(
+            onTap: _isConversationActive ? null : _showSituationInputSheet,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Color(0xFF251640), Color(0xFF141230)],
+                ),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: const Color(0xFF7C3AED).withOpacity(0.35),
+                  width: 1,
+                ),
               ),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: const Color(0xFF7C3AED).withOpacity(0.35),
-                width: 1,
-              ),
-            ),
-            child: _isGeneratingScenario
-                ? const SizedBox(
-                    height: 60,
-                    child: Center(
-                      child: CircularProgressIndicator(
-                        color: Color(0xFF9333EA),
-                        strokeWidth: 2,
-                      ),
-                    ),
-                  )
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // 상황 헤더
-                      Row(children: const [
-                        Icon(Icons.theater_comedy_rounded,
-                            color: Color(0xFFA78BFA), size: 13),
-                        SizedBox(width: 5),
-                        Text(
-                          'SITUATION',
-                          style: TextStyle(
-                            color: Color(0xFFA78BFA),
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 1.6,
-                          ),
-                        ),
-                      ]),
-                      const SizedBox(height: 8),
-                      Text(
-                        _scenarioSituation,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 17,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: -0.4,
-                          height: 1.3,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      // AI 역할 박스
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 12),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF7C3AED).withOpacity(0.18),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: const Color(0xFF7C3AED).withOpacity(0.40),
-                            width: 1,
-                          ),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: const [
-                                Icon(Icons.smart_toy_rounded,
-                                    color: Color(0xFFD8B4FE), size: 13),
-                                SizedBox(width: 4),
-                                Text('AI',
-                                    style: TextStyle(
-                                      color: Color(0xFFA78BFA),
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: 1.4,
-                                    )),
-                              ],
-                            ),
-                            const SizedBox(height: 2),
-                            Text(_scenarioAiRole,
-                                style: const TextStyle(
-                                  color: Color(0xFFEDE9FE),
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w600,
-                                )),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      // YOU 역할 박스
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 12),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF0EA5E9).withOpacity(0.12),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: const Color(0xFF0EA5E9).withOpacity(0.32),
-                            width: 1,
-                          ),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: const [
-                                Icon(Icons.person_rounded,
-                                    color: Color(0xFF7DD3FC), size: 13),
-                                SizedBox(width: 4),
-                                Text('YOU',
-                                    style: TextStyle(
-                                      color: Color(0xFF7DD3FC),
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: 1.4,
-                                    )),
-                              ],
-                            ),
-                            const SizedBox(height: 2),
-                            Text(_scenarioUserRole,
-                                style: const TextStyle(
-                                  color: Color(0xFFE0F2FE),
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w600,
-                                )),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-          ),
-          if (!_isGeneratingScenario) ...[
-            const SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                GestureDetector(
-                  onTap: () {
-                    if (!_isConversationActive) _showSituationPicker();
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFEF4444).withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                          color: const Color(0xFFEF4444).withOpacity(0.45), width: 1),
-                    ),
-                    child: Row(
+              child: hasScenario
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
-                      children: const [
-                        Icon(Icons.list_alt_rounded,
-                            color: Color(0xFFFC8181), size: 14),
-                        SizedBox(width: 6),
-                        Text('상황 선택',
+                      children: [
+                        Row(children: const [
+                          Icon(Icons.theater_comedy_rounded,
+                              color: Color(0xFFA78BFA), size: 13),
+                          SizedBox(width: 5),
+                          Text(
+                            'SITUATION',
                             style: TextStyle(
-                                color: Color(0xFFFC8181),
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600)),
+                              color: Color(0xFFA78BFA),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 1.6,
+                            ),
+                          ),
+                        ]),
+                        const SizedBox(height: 8),
+                        Text(
+                          _scenarioSituation,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.4,
+                            height: 1.3,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF7C3AED).withOpacity(0.18),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: const Color(0xFF7C3AED).withOpacity(0.40),
+                              width: 1,
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: const [
+                                  Icon(Icons.smart_toy_rounded,
+                                      color: Color(0xFFD8B4FE), size: 13),
+                                  SizedBox(width: 4),
+                                  Text('AI',
+                                      style: TextStyle(
+                                        color: Color(0xFFA78BFA),
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: 1.4,
+                                      )),
+                                ],
+                              ),
+                              const SizedBox(height: 2),
+                              Text(_scenarioAiRole,
+                                  style: const TextStyle(
+                                    color: Color(0xFFEDE9FE),
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600,
+                                  )),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0EA5E9).withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: const Color(0xFF0EA5E9).withOpacity(0.32),
+                              width: 1,
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: const [
+                                  Icon(Icons.person_rounded,
+                                      color: Color(0xFF7DD3FC), size: 13),
+                                  SizedBox(width: 4),
+                                  Text('YOU',
+                                      style: TextStyle(
+                                        color: Color(0xFF7DD3FC),
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: 1.4,
+                                      )),
+                                ],
+                              ),
+                              const SizedBox(height: 2),
+                              Text(_scenarioUserRole,
+                                  style: const TextStyle(
+                                    color: Color(0xFFE0F2FE),
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600,
+                                  )),
+                            ],
+                          ),
+                        ),
+                        if (!_isConversationActive) ...[
+                          const SizedBox(height: 14),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: const [
+                              Icon(Icons.edit_outlined,
+                                  color: Colors.white24, size: 13),
+                              SizedBox(width: 4),
+                              Text('탭하여 수정',
+                                  style: TextStyle(
+                                      color: Colors.white24, fontSize: 11)),
+                            ],
+                          ),
+                        ],
                       ],
+                    )
+                  : Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: const [
+                          Icon(Icons.add_circle_outline_rounded,
+                              color: Color(0xFFA78BFA), size: 20),
+                          SizedBox(width: 8),
+                          Text('상황 설정하기',
+                              style: TextStyle(
+                                  color: Color(0xFFA78BFA),
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600)),
+                        ],
+                      ),
                     ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                GestureDetector(
-                  onTap: () {
-                    if (_isConversationActive || _isGeneratingScenario) return;
-                    // 200개 목록에서 새 랜덤 상황 선택 후 생성
-                    if (_emergencySituations.isNotEmpty) {
-                      final rand = _emergencySituations[
-                          Random().nextInt(_emergencySituations.length)];
-                      setState(() =>
-                          _selectedEmergencyKeyword = rand['situation'] as String);
-                    }
-                    _generateScenario();
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-                    decoration: BoxDecoration(
-                      color: Colors.transparent,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: Colors.white12, width: 1),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: const [
-                        Icon(Icons.refresh_rounded,
-                            color: Colors.white30, size: 14),
-                        SizedBox(width: 6),
-                        Text('다시 생성',
-                            style: TextStyle(color: Colors.white30, fontSize: 12)),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
             ),
-          ],
+          ),
         ],
       ),
     );
@@ -3286,32 +3288,23 @@ Step 3. TRANSLATE: Produce natural $targetLang speech that fits${userRole.isNotE
   }) async* {
     final client = http.Client();
     try {
-      // 🎯 [롤플레이 AI 응답 언어 규칙] — 원칙 2
-      // - AI는 타겟 언어($myTarget)로만 말한다.
-      // - ai_role / user_role 이름이 한글이어도 실제 대사는 반드시 $myTarget.
-      // - 한국어 등 모국어를 절대 섞지 않는다.
-      final sysPrompt =
-          """You are a roleplay partner in a language learning app.
-
-[ROLEPLAY SCENARIO]
-Situation: $situation
-Your role: $aiRole
-User's role: $userRole
-
-[CRITICAL LANGUAGE RULE]
-- Respond in $myTarget ONLY. NEVER use Korean or any other language.
-- Even though role names "$aiRole" / "$userRole" are written in Korean, your actual dialogue must be 100% in $myTarget.
-- Mixing Korean into your response = failure.
-
-[CONVERSATION RULES]
-- Stay fully in character as "$aiRole". Treat the user as "$userRole".
-- MAXIMUM 2 short sentences. Often 1 sentence is enough.
-- Keep each sentence under 8 words when possible.
-- Stay in the scenario. Do not break character.
-- No greetings, no "I understand", no meta-comments. Just respond naturally.
-- Respond in natural, concise everyday conversational style.
-- If the user's message is completely unclear, nonsensical, or impossible to understand in context (likely a speech recognition error), output EXACTLY: [RETRY] (nothing else). Do NOT attempt a confused or apologetic response.
-- If the user's input is unclear (possible speech recognition error), ask them politely to repeat in $myTarget.""";
+      final sysPrompt = 'You are a master actor playing "$aiRole" in a high-immersion dramatic roleplay.\n'
+          '\n'
+          '[SCENARIO]\n'
+          'Situation: $situation\n'
+          'Your role: $aiRole\n'
+          "User's role: $userRole\n"
+          '\n'
+          '[LANGUAGE RULE]\n'
+          '- Respond in $myTarget ONLY. Role names may be Korean but your dialogue is 100% $myTarget.\n'
+          '\n'
+          '[CHARACTER RULES]\n'
+          '- Stay FULLY in character as "$aiRole" at all times. Never break character.\n'
+          '- Respond with the raw emotion, personality, and subtext that "$aiRole" would have in this situation.\n'
+          '- NO greetings, NO meta-comments. Pure in-character dialogue.\n'
+          '- MAXIMUM 2 short sentences. 1 sentence preferred. Under 15 words per sentence.\n'
+          '- Drive the scene forward — pressure, question, or react to force the user to respond.\n'
+          '- If the user\'s input is completely unintelligible (speech recognition error), output EXACTLY: [RETRY]';
 
       final request = http.Request(
         'POST',
@@ -3389,40 +3382,22 @@ User's role: $userRole
   }) async* {
     final client = http.Client();
     try {
-      // 매번 다른 오프닝 스타일을 랜덤 선택 → 같은 상황이어도 첫 대사가 다양해짐
-      final openerStyles = [
-        'Start with a direct question to the user.',
-        'Start with a casual observational comment about the situation.',
-        'Start with a brief action remark (e.g., noticing something, doing something).',
-        'Start with a warm but task-focused greeting.',
-        'Start with a slightly unexpected or surprising opener that fits your role.',
-        'Start with an offer or suggestion relevant to the situation.',
-        'Start with a short statement that sets the scene.',
-        'Start with a friendly but professional icebreaker.',
-      ];
-      final styleHint =
-          openerStyles[Random().nextInt(openerStyles.length)];
-
-      final sysPrompt =
-          """You are roleplaying as "$aiRole" in a language learning app.
-
-[SCENARIO]
-Situation: $situation
-Your role: $aiRole
-The other person: $userRole (has just arrived)
-
-[CRITICAL LANGUAGE RULE]
-- Speak ONLY in $targetLang. Do NOT use Korean or any other language.
-- Even though role names are written in Korean, your dialogue must be 100% in $targetLang.
-
-[OPENING RULES]
-- You speak FIRST to start the conversation.
-- Say ONE short, realistic sentence that a real person in your role would actually say.
-- Avoid a generic "Hello!" alone — give a situational opener specific to your role.
-- Under 10 words. Natural everyday speech only.
-- THIS TIME: $styleHint
-
-Output: ONE sentence in $targetLang only.""";
+      final sysPrompt = 'You are a master actor and an English conversation coach playing "$aiRole".\n'
+          '\n'
+          '[SCENARIO]\n'
+          'Situation: $situation\n'
+          'Your role: $aiRole\n'
+          "The other person's role: $userRole\n"
+          '\n'
+          '[CORE RULES]\n'
+          '1. Start the scene IMMEDIATELY with your first line — no greetings, no meta-commentary.\n'
+          '2. Recognize the deep dramatic conflict and emotional tension behind the situation.\n'
+          '3. Do NOT mention any drama, movie, or show titles. Keep it real and seamless.\n'
+          '4. Your first line must be a compelling, emotionally charged statement or open-ended question that forces the user to respond, defend themselves, or negotiate.\n'
+          '5. Adopt the exact personality of "$aiRole". Use natural spoken $targetLang — NOT textbook dialogue.\n'
+          '6. ONE sentence only. Under 20 words. Maximum immersion, zero filler.\n'
+          '\n'
+          'Output: ONE powerful first line in $targetLang only.';
 
       final request = http.Request(
         'POST',
@@ -3471,318 +3446,8 @@ Output: ONE sentence in $targetLang only.""";
     }
   }
 
-  // ==================================================================
-  // 📦 [Box 7-1-E] generateEmergencyScenario — 긴급상황 키워드 기반 동적 생성
-  // ==================================================================
-  static Future<Map<String, String>?> generateEmergencyScenario(
-      String apiKey, String emergencyKeyword) async {
-    // 매번 다른 구체적 시나리오를 만들기 위해 랜덤 seed 값 추가
-    final seeds = [
-      '오전 이른 시간대', '늦은 밤', '주말 오후', '출퇴근 혼잡 시간',
-      '비가 오는 날', '눈이 오는 날', '더운 여름날', '크리스마스 연휴',
-    ];
-    final timeSeed = seeds[Random().nextInt(seeds.length)];
-
-    final systemPrompt =
-        """You are a Korean survival English roleplay scenario generator for a language learning app.
-
-[TASK]
-Given a short Korean emergency keyword and time context, create a vivid, specific roleplay scenario.
-Each call should produce a DIFFERENT variation of the same keyword scenario.
-
-[OUTPUT RULES]
-Output EXACTLY this JSON (Korean only, label-style, short):
-{
-  "situation": "구체적인 상황 묘사 (15자 이내, 장소+디테일)",
-  "ai_role": "AI의 역할 (10자 이내, 예: 당황한 승무원)",
-  "user_role": "유저의 역할 (8자 이내, 예: 해외 여행자)"
 }
 
-[RULES]
-- situation: must include specific detail beyond the keyword (NOT just repeat keyword)
-- ai_role: give the AI a strong personality (예: 깐깐한 경찰관, 다급한 의사, 당황한 직원)
-- user_role: clearly define user's position in the emergency
-- VARY the specific detail each time (different victim, different severity, different location detail)""";
-
-    final client = http.Client();
-    try {
-      final res = await client
-          .post(
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
-            headers: {
-              'Authorization': 'Bearer $apiKey',
-              'Content-Type': 'application/json; charset=utf-8',
-            },
-            body: jsonEncode({
-              'model': 'gpt-4o-mini',
-              'temperature': 1.2,
-              'response_format': {'type': 'json_object'},
-              'max_tokens': 200,
-              'messages': [
-                {'role': 'system', 'content': systemPrompt},
-                {
-                  'role': 'user',
-                  'content':
-                      '긴급상황 키워드: "$emergencyKeyword"\n시간대: $timeSeed\n\n위 키워드를 기반으로 매번 다른 구체적 롤플레이 상황을 JSON으로 생성하세요.',
-                },
-              ],
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
-
-      if (res.statusCode == 200) {
-        final raw = jsonDecode(utf8.decode(res.bodyBytes))['choices'][0]
-                ['message']['content']
-            .toString();
-        final cleanJson = _cleanJsonString(raw);
-        final parsed = jsonDecode(cleanJson);
-        return {
-          'keyword': emergencyKeyword,
-          'situation': parsed['situation']?.toString() ?? emergencyKeyword,
-          'ai_role': parsed['ai_role']?.toString() ?? '담당 직원',
-          'user_role': parsed['user_role']?.toString() ?? '당황한 여행자',
-        };
-      }
-    } catch (e) {
-      print('generateEmergencyScenario Error: $e');
-    } finally {
-      client.close();
-    }
-    return null;
-  }
-
-  // 기존 generateScenario 유지 (하위 호환)
-  static Future<Map<String, String>?> generateScenario(String apiKey) async {
-    const places = ['공항', '호텔', '응급실', '경찰서', '렌터카'];
-    final place = places[Random().nextInt(places.length)];
-    return generateEmergencyScenario(apiKey, '$place 긴급 상황');
-  }
-
-  // ==================================================================
-  // 📦 [Box 7-1-F] _cleanJsonString
-  // ==================================================================
-  static String _cleanJsonString(String text) {
-    String clean = text.trim();
-    if (clean.startsWith('```json')) clean = clean.substring(7);
-    if (clean.startsWith('```')) clean = clean.substring(3);
-    if (clean.endsWith('```')) clean = clean.substring(0, clean.length - 3);
-    return clean.trim();
-  }
-}
-
-// ============================================================================
-// 🚨 상황 선택 바텀시트 위젯
-// ============================================================================
-class _SituationPickerSheet extends StatefulWidget {
-  final List<Map<String, dynamic>> emergencySituations;
-  final List<Map<String, dynamic>> categories;
-  final void Function(String situationKeyword) onSelected;
-
-  const _SituationPickerSheet({
-    required this.emergencySituations,
-    required this.categories,
-    required this.onSelected,
-  });
-
-  @override
-  State<_SituationPickerSheet> createState() => _SituationPickerSheetState();
-}
-
-class _SituationPickerSheetState extends State<_SituationPickerSheet>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
-
-  @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(length: widget.categories.length, vsync: this);
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
-  }
-
-  List<Map<String, dynamic>> _getSituationsForCategory(String categoryKey) {
-    return widget.emergencySituations
-        .where((s) => (s['category']?.toString().trim() ?? '') == categoryKey.trim())
-        .toList();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return DraggableScrollableSheet(
-      initialChildSize: 0.82,
-      minChildSize: 0.5,
-      maxChildSize: 0.95,
-      builder: (ctx, scrollCtrl) {
-        return Container(
-          decoration: const BoxDecoration(
-            color: Color(0xFF0F0E1A),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-          ),
-          child: Column(
-            children: [
-              // 핸들
-              Container(
-                margin: const EdgeInsets.only(top: 10, bottom: 6),
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.white24,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              // 헤더
-              Padding(
-                padding: const EdgeInsets.fromLTRB(18, 4, 18, 0),
-                child: Row(
-                  children: [
-                    const Icon(Icons.warning_amber_rounded,
-                        color: Color(0xFFEF4444), size: 18),
-                    const SizedBox(width: 8),
-                    const Expanded(
-                      child: Text(
-                        '긴급 상황 선택',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    Text(
-                      '${widget.emergencySituations.length}개 상황',
-                      style: const TextStyle(
-                          color: Colors.white38, fontSize: 12),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 8),
-              // 카테고리 탭
-              TabBar(
-                controller: _tabController,
-                isScrollable: true,
-                tabAlignment: TabAlignment.start,
-                indicatorColor: const Color(0xFFEF4444),
-                indicatorWeight: 2,
-                labelColor: Colors.white,
-                unselectedLabelColor: Colors.white38,
-                labelStyle: const TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w600),
-                unselectedLabelStyle:
-                    const TextStyle(fontSize: 12),
-                tabs: widget.categories
-                    .map((c) => Tab(text: c['label'] as String))
-                    .toList(),
-              ),
-              const Divider(color: Colors.white12, height: 1),
-              // 탭 콘텐츠
-              Expanded(
-                child: widget.emergencySituations.isEmpty
-                    ? const Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.error_outline,
-                                color: Colors.white38, size: 36),
-                            SizedBox(height: 12),
-                            Text(
-                              '상황 데이터를 불러오지 못했습니다.',
-                              style: TextStyle(
-                                  color: Colors.white54, fontSize: 14),
-                            ),
-                            SizedBox(height: 6),
-                            Text(
-                              'JSON asset 경로와 pubspec.yaml 등록을 확인하세요.',
-                              style: TextStyle(
-                                  color: Colors.white38, fontSize: 12),
-                            ),
-                          ],
-                        ),
-                      )
-                    : TabBarView(
-                  controller: _tabController,
-                  children: widget.categories.map((cat) {
-                    final situations =
-                        _getSituationsForCategory(cat['key'] as String);
-                    final color = cat['color'] as Color;
-                    return GridView.builder(
-                      controller: scrollCtrl,
-                      padding: const EdgeInsets.all(12),
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 2,
-                        mainAxisSpacing: 8,
-                        crossAxisSpacing: 8,
-                        childAspectRatio: 2.6,
-                      ),
-                      itemCount: situations.length,
-                      itemBuilder: (_, i) {
-                        final item = situations[i];
-                        final keyword = item['situation'] as String;
-                        final id = item['id'] as int;
-                        return GestureDetector(
-                          onTap: () => widget.onSelected(keyword),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: color.withOpacity(0.12),
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(
-                                  color: color.withOpacity(0.35), width: 1),
-                            ),
-                            child: Row(
-                              children: [
-                                Container(
-                                  width: 20,
-                                  height: 20,
-                                  alignment: Alignment.center,
-                                  decoration: BoxDecoration(
-                                    color: color.withOpacity(0.25),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: Text(
-                                    '$id',
-                                    style: TextStyle(
-                                        color: color,
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.w700),
-                                  ),
-                                ),
-                                const SizedBox(width: 7),
-                                Expanded(
-                                  child: Text(
-                                    keyword,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w500,
-                                      height: 1.2,
-                                    ),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    );
-                  }).toList(),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
 
 class _LangIconPainter extends CustomPainter {
   final bool active;
@@ -3874,208 +3539,3 @@ class _LangIconPainter extends CustomPainter {
   bool shouldRepaint(_LangIconPainter old) => old.active != active;
 }
 
-// ============================================================================
-// 🚨 긴급 상황 200개 하드코딩 데이터
-// ============================================================================
-const List<Map<String, dynamic>> kEmergencySituations = [
-  {'id': 1, 'category': '공항_비행기_교통', 'situation': '기내 의학 환자 발생'},
-  {'id': 2, 'category': '공항_비행기_교통', 'situation': '화장실 갇힘 사고'},
-  {'id': 3, 'category': '공항_비행기_교통', 'situation': '산소마스크 작동됨'},
-  {'id': 4, 'category': '공항_비행기_교통', 'situation': '여권 분실 발견함'},
-  {'id': 5, 'category': '공항_비행기_교통', 'situation': '캐리어 파손 확인'},
-  {'id': 6, 'category': '공항_비행기_교통', 'situation': '위조지폐 의심됨'},
-  {'id': 7, 'category': '공항_비행기_교통', 'situation': '입국 거부 위기'},
-  {'id': 8, 'category': '공항_비행기_교통', 'situation': '소지품 오인 압수'},
-  {'id': 9, 'category': '공항_비행기_교통', 'situation': '결제 오류 지연'},
-  {'id': 10, 'category': '공항_비행기_교통', 'situation': '비행기 놓치기 직전'},
-  {'id': 11, 'category': '공항_비행기_교통', 'situation': '탑승권 분실함'},
-  {'id': 12, 'category': '공항_비행기_교통', 'situation': '미아 발생 신고'},
-  {'id': 13, 'category': '공항_비행기_교통', 'situation': '승무원 부상 발생'},
-  {'id': 14, 'category': '공항_비행기_교통', 'situation': '탑승 거부 당함'},
-  {'id': 15, 'category': '공항_비행기_교통', 'situation': '버스 고장 멈춤'},
-  {'id': 16, 'category': '공항_비행기_교통', 'situation': '잘못된 티켓 발권'},
-  {'id': 17, 'category': '공항_비행기_교통', 'situation': '소매치기 발생'},
-  {'id': 18, 'category': '공항_비행기_교통', 'situation': '짐 오인 교환됨'},
-  {'id': 19, 'category': '공항_비행기_교통', 'situation': '스크린도어 낌'},
-  {'id': 20, 'category': '공항_비행기_교통', 'situation': '비상 정지 발생'},
-  {'id': 21, 'category': '공항_비행기_교통', 'situation': '지갑 두고 내림'},
-  {'id': 22, 'category': '공항_비행기_교통', 'situation': '막차 취소 고립됨'},
-  {'id': 23, 'category': '공항_비행기_교통', 'situation': '급격한 복통 발생'},
-  {'id': 24, 'category': '공항_비행기_교통', 'situation': '부당 요금 요구'},
-  {'id': 25, 'category': '공항_비행기_교통', 'situation': '난폭 운전 공포'},
-  {'id': 26, 'category': '공항_비행기_교통', 'situation': '계약 사기 의심'},
-  {'id': 27, 'category': '공항_비행기_교통', 'situation': '혼유 사고 발생'},
-  {'id': 28, 'category': '공항_비행기_교통', 'situation': '차량 타이어 펑크'},
-  {'id': 29, 'category': '공항_비행기_교통', 'situation': '차량 배터리 방전'},
-  {'id': 30, 'category': '공항_비행기_교통', 'situation': '정산기 고장 멈춤'},
-  {'id': 31, 'category': '공항_비행기_교통', 'situation': '예약 누락 발견'},
-  {'id': 32, 'category': '공항_비행기_교통', 'situation': '선내 화재 경보'},
-  {'id': 33, 'category': '공항_비행기_교통', 'situation': '소지품 바다 빠짐'},
-  {'id': 34, 'category': '공항_비행기_교통', 'situation': '배 놓치고 고립'},
-  {'id': 35, 'category': '공항_비행기_교통', 'situation': '집단 식중독 증상'},
-  {'id': 36, 'category': '공항_비행기_교통', 'situation': '가방 문 열려있음'},
-  {'id': 37, 'category': '공항_비행기_교통', 'situation': '반납 처리 오류'},
-  {'id': 38, 'category': '공항_비행기_교통', 'situation': '공중 멈춤 사고'},
-  {'id': 39, 'category': '공항_비행기_교통', 'situation': '접촉 사고 후 도주'},
-  {'id': 40, 'category': '공항_비행기_교통', 'situation': '차량 출고 불가'},
-  {'id': 41, 'category': '호텔_숙소_주거', 'situation': '예약 취소 당함'},
-  {'id': 42, 'category': '호텔_숙소_주거', 'situation': '방 내부 몰카 의심'},
-  {'id': 43, 'category': '호텔_숙소_주거', 'situation': '온수 안 나옴'},
-  {'id': 44, 'category': '호텔_숙소_주거', 'situation': '엘리베이터 갇힘'},
-  {'id': 45, 'category': '호텔_숙소_주거', 'situation': '익수 사고 발생'},
-  {'id': 46, 'category': '호텔_숙소_주거', 'situation': '알레르기 발생'},
-  {'id': 47, 'category': '호텔_숙소_주거', 'situation': '취객 시비 걸림'},
-  {'id': 48, 'category': '호텔_숙소_주거', 'situation': '운동 기구 부상'},
-  {'id': 49, 'category': '호텔_숙소_주거', 'situation': '화재 경보 대피'},
-  {'id': 50, 'category': '호텔_숙소_주거', 'situation': '기밀 문서 유출'},
-  {'id': 51, 'category': '호텔_숙소_주거', 'situation': '소지품 도난당함'},
-  {'id': 52, 'category': '호텔_숙소_주거', 'situation': '숙소 사진과 다름'},
-  {'id': 53, 'category': '호텔_숙소_주거', 'situation': '미끄러짐 부상'},
-  {'id': 54, 'category': '호텔_숙소_주거', 'situation': '텐트 무너짐'},
-  {'id': 55, 'category': '호텔_숙소_주거', 'situation': '멧돼지 출현함'},
-  {'id': 56, 'category': '호텔_숙소_주거', 'situation': '텐트 불길 번짐'},
-  {'id': 57, 'category': '호텔_숙소_주거', 'situation': '도어락 고장 갇힘'},
-  {'id': 58, 'category': '호텔_숙소_주거', 'situation': '동파로 누수 발생'},
-  {'id': 59, 'category': '호텔_숙소_주거', 'situation': '층간소음 시비'},
-  {'id': 60, 'category': '호텔_숙소_주거', 'situation': '맹견 진입 위험'},
-  {'id': 61, 'category': '호텔_숙소_주거', 'situation': '계단 실족 부상'},
-  {'id': 62, 'category': '호텔_숙소_주거', 'situation': '저혈압 실신함'},
-  {'id': 63, 'category': '호텔_숙소_주거', 'situation': '주인방 무단 침입'},
-  {'id': 64, 'category': '호텔_숙소_주거', 'situation': '룸메이트 절도'},
-  {'id': 65, 'category': '호텔_숙소_주거', 'situation': '상한 음식 서빙'},
-  {'id': 66, 'category': '호텔_숙소_주거', 'situation': '차량 파손 발견'},
-  {'id': 67, 'category': '호텔_숙소_주거', 'situation': '옥상 문 잠김 갇힘'},
-  {'id': 68, 'category': '호텔_숙소_주거', 'situation': '독충에 물림'},
-  {'id': 69, 'category': '호텔_숙소_주거', 'situation': '무단 주거 침입'},
-  {'id': 70, 'category': '호텔_숙소_주거', 'situation': '신분증 도용 의심'},
-  {'id': 71, 'category': '호텔_숙소_주거', 'situation': '난간 파손 위험'},
-  {'id': 72, 'category': '호텔_숙소_주거', 'situation': '피부 화상 입음'},
-  {'id': 73, 'category': '호텔_숙소_주거', 'situation': '독사 출현 비상'},
-  {'id': 74, 'category': '호텔_숙소_주거', 'situation': '가스 누출 의심'},
-  {'id': 75, 'category': '호텔_숙소_주거', 'situation': '옷 세탁 중 분실'},
-  {'id': 76, 'category': '호텔_숙소_주거', 'situation': '금고 안 열림'},
-  {'id': 77, 'category': '호텔_숙소_주거', 'situation': '지하 침수 발생'},
-  {'id': 78, 'category': '호텔_숙소_주거', 'situation': '택배 분실 항의'},
-  {'id': 79, 'category': '호텔_숙소_주거', 'situation': '유리창 깨짐'},
-  {'id': 80, 'category': '호텔_숙소_주거', 'situation': '샹들리에 추락'},
-  {'id': 81, 'category': '식당_쇼핑_유흥', 'situation': '머리카락 나옴'},
-  {'id': 82, 'category': '식당_쇼핑_유흥', 'situation': '식중독 증상 발현'},
-  {'id': 83, 'category': '식당_쇼핑_유흥', 'situation': '기름 불판 화재'},
-  {'id': 84, 'category': '식당_쇼핑_유흥', 'situation': '주문 오인 대기'},
-  {'id': 85, 'category': '식당_쇼핑_유흥', 'situation': '결제 중복 처리'},
-  {'id': 86, 'category': '식당_쇼핑_유흥', 'situation': '커피 쏟아 화상'},
-  {'id': 87, 'category': '식당_쇼핑_유흥', 'situation': '식판 엎음 사고'},
-  {'id': 88, 'category': '식당_쇼핑_유흥', 'situation': '음식 도중 소진'},
-  {'id': 89, 'category': '식당_쇼핑_유흥', 'situation': '바가지 요금 청구'},
-  {'id': 90, 'category': '식당_쇼핑_유흥', 'situation': '지갑 소매치기'},
-  {'id': 91, 'category': '식당_쇼핑_유흥', 'situation': '명품 훼손 시비'},
-  {'id': 92, 'category': '식당_쇼핑_유흥', 'situation': '피부 부작용 발생'},
-  {'id': 93, 'category': '식당_쇼핑_유흥', 'situation': '몰래카메라 발견'},
-  {'id': 94, 'category': '식당_쇼핑_유흥', 'situation': '카트 충돌 부상'},
-  {'id': 95, 'category': '식당_쇼핑_유흥', 'situation': '거스름돈 사기'},
-  {'id': 96, 'category': '식당_쇼핑_유흥', 'situation': '여권 정보 오류'},
-  {'id': 97, 'category': '식당_쇼핑_유흥', 'situation': '물건 파손 변상'},
-  {'id': 98, 'category': '식당_쇼핑_유흥', 'situation': '지갑 분실 확인'},
-  {'id': 99, 'category': '식당_쇼핑_유흥', 'situation': '휴지 없이 갇힘'},
-  {'id': 100, 'category': '식당_쇼핑_유흥', 'situation': '유통기한 지남'},
-  {'id': 101, 'category': '식당_쇼핑_유흥', 'situation': '취객 싸움 번짐'},
-  {'id': 102, 'category': '식당_쇼핑_유흥', 'situation': '도난 경보 작동'},
-  {'id': 103, 'category': '식당_쇼핑_유흥', 'situation': '소매치기 추격'},
-  {'id': 104, 'category': '식당_쇼핑_유흥', 'situation': '에스컬레이터 낌'},
-  {'id': 105, 'category': '식당_쇼핑_유흥', 'situation': '낙상 사고 발생'},
-  {'id': 106, 'category': '식당_쇼핑_유흥', 'situation': '이물질 치아 파손'},
-  {'id': 107, 'category': '식당_쇼핑_유흥', 'situation': '배달 사고 누락'},
-  {'id': 108, 'category': '식당_쇼핑_유흥', 'situation': '가스통 폭발 위기'},
-  {'id': 109, 'category': '식당_쇼핑_유흥', 'situation': '인파 압사 위험'},
-  {'id': 110, 'category': '식당_쇼핑_유흥', 'situation': '주차 시비 폭행'},
-  {'id': 111, 'category': '식당_쇼핑_유흥', 'situation': '다이아 분실 오해'},
-  {'id': 112, 'category': '식당_쇼핑_유흥', 'situation': '신발 도난당함'},
-  {'id': 113, 'category': '식당_쇼핑_유흥', 'situation': '책장 쓰러짐 사고'},
-  {'id': 114, 'category': '식당_쇼핑_유흥', 'situation': '렌즈 파손 부상'},
-  {'id': 115, 'category': '식당_쇼핑_유흥', 'situation': '잘못된 약 복용'},
-  {'id': 116, 'category': '식당_쇼핑_유흥', 'situation': '교상 사고 발생'},
-  {'id': 117, 'category': '식당_쇼핑_유흥', 'situation': '가방 줄 걸려 파손'},
-  {'id': 118, 'category': '식당_쇼핑_유흥', 'situation': '칼날 부상 사고'},
-  {'id': 119, 'category': '식당_쇼핑_유흥', 'situation': '변질된 음식 판매'},
-  {'id': 120, 'category': '식당_쇼핑_유흥', 'situation': '침대 주저앉음'},
-  {'id': 121, 'category': '공공장소_병원_비즈니스', 'situation': '의료진 공백 지연'},
-  {'id': 122, 'category': '공공장소_병원_비즈니스', 'situation': '오진 가능성 확인'},
-  {'id': 123, 'category': '공공장소_병원_비즈니스', 'situation': '호흡 곤란 환자'},
-  {'id': 124, 'category': '공공장소_병원_비즈니스', 'situation': '수술 지연 항의'},
-  {'id': 125, 'category': '공공장소_병원_비즈니스', 'situation': '잇몸 과다 출혈'},
-  {'id': 126, 'category': '공공장소_병원_비즈니스', 'situation': '보이스피싱 의심'},
-  {'id': 127, 'category': '공공장소_병원_비즈니스', 'situation': '카드 먹통 됨'},
-  {'id': 128, 'category': '공공장소_병원_비즈니스', 'situation': '중요 택배 분실'},
-  {'id': 129, 'category': '공공장소_병원_비즈니스', 'situation': '억울한 누명 씀'},
-  {'id': 130, 'category': '공공장소_병원_비즈니스', 'situation': '긴급 출동 방해'},
-  {'id': 131, 'category': '공공장소_병원_비즈니스', 'situation': '서류 조작 의심'},
-  {'id': 132, 'category': '공공장소_병원_비즈니스', 'situation': '비자 발급 거부'},
-  {'id': 133, 'category': '공공장소_병원_비즈니스', 'situation': '빔프로젝터 폭발'},
-  {'id': 134, 'category': '공공장소_병원_비즈니스', 'situation': '랜섬웨어 감염됨'},
-  {'id': 135, 'category': '공공장소_병원_비즈니스', 'situation': '정수기 누전 화재'},
-  {'id': 136, 'category': '공공장소_병원_비즈니스', 'situation': '면접 서류 분실'},
-  {'id': 137, 'category': '공공장소_병원_비즈니스', 'situation': '무단 침입 시위'},
-  {'id': 138, 'category': '공공장소_병원_비즈니스', 'situation': '인감 도용 발견'},
-  {'id': 139, 'category': '공공장소_병원_비즈니스', 'situation': '세금 폭탄 오류'},
-  {'id': 140, 'category': '공공장소_병원_비즈니스', 'situation': '소송 상대 협박'},
-  {'id': 141, 'category': '공공장소_병원_비즈니스', 'situation': '노트북 도난당함'},
-  {'id': 142, 'category': '공공장소_병원_비즈니스', 'situation': '시험지 유출 비상'},
-  {'id': 143, 'category': '공공장소_병원_비즈니스', 'situation': '화학 약품 누출'},
-  {'id': 144, 'category': '공공장소_병원_비즈니스', 'situation': '등교 미아 발생'},
-  {'id': 145, 'category': '공공장소_병원_비즈니스', 'situation': '셔틀버스 사고'},
-  {'id': 146, 'category': '공공장소_병원_비즈니스', 'situation': '전시 작품 훼손'},
-  {'id': 147, 'category': '공공장소_병원_비즈니스', 'situation': '유물 도난 경보'},
-  {'id': 148, 'category': '공공장소_병원_비즈니스', 'situation': '무대 조명 추락'},
-  {'id': 149, 'category': '공공장소_병원_비즈니스', 'situation': '영사기 화재 발생'},
-  {'id': 150, 'category': '공공장소_병원_비즈니스', 'situation': '암표 사기 당함'},
-  {'id': 151, 'category': '공공장소_병원_비즈니스', 'situation': '맹수 탈출 비상'},
-  {'id': 152, 'category': '공공장소_병원_비즈니스', 'situation': '독초 오접촉 부상'},
-  {'id': 153, 'category': '공공장소_병원_비즈니스', 'situation': '유기견 습격함'},
-  {'id': 154, 'category': '공공장소_병원_비즈니스', 'situation': '열사병 환자 실신'},
-  {'id': 155, 'category': '공공장소_병원_비즈니스', 'situation': '범죄 의심 비명'},
-  {'id': 156, 'category': '공공장소_병원_비즈니스', 'situation': '부당해고 구제 신청'},
-  {'id': 157, 'category': '공공장소_병원_비즈니스', 'situation': '부스 무너짐 사고'},
-  {'id': 158, 'category': '공공장소_병원_비즈니스', 'situation': '생방송 방송 사고'},
-  {'id': 159, 'category': '공공장소_병원_비즈니스', 'situation': '난입 소요 사태'},
-  {'id': 160, 'category': '공공장소_병원_비즈니스', 'situation': '집단 감염 의심'},
-  {'id': 161, 'category': '레저_관광_자연_기타', 'situation': '이식 조류 표류'},
-  {'id': 162, 'category': '레저_관광_자연_기타', 'situation': '산소통 잔량 고갈'},
-  {'id': 163, 'category': '레저_관광_자연_기타', 'situation': '보드 충돌 실신'},
-  {'id': 164, 'category': '레저_관광_자연_기타', 'situation': '쥐가 나서 익수'},
-  {'id': 165, 'category': '레저_관광_자연_기타', 'situation': '갑작스러운 불어남'},
-  {'id': 166, 'category': '레저_관광_자연_기타', 'situation': '슬라이드 충돌'},
-  {'id': 167, 'category': '레저_관광_자연_기타', 'situation': '낚싯바늘 눈 찔림'},
-  {'id': 168, 'category': '레저_관광_자연_기타', 'situation': '실족 고립 조난'},
-  {'id': 169, 'category': '레저_관광_자연_기타', 'situation': '저체온증 발생'},
-  {'id': 170, 'category': '레저_관광_자연_기타', 'situation': '로프 끊어짐 위기'},
-  {'id': 171, 'category': '레저_관광_자연_기타', 'situation': '충돌 골절 부상'},
-  {'id': 172, 'category': '레저_관광_자연_기타', 'situation': '리프트 공중 멈춤'},
-  {'id': 173, 'category': '레저_관광_자연_기타', 'situation': '타구 사고 부상'},
-  {'id': 174, 'category': '레저_관광_자연_기타', 'situation': '파울볼 안면 강타'},
-  {'id': 175, 'category': '레저_관광_자연_기타', 'situation': '심장마비 환자 발생'},
-  {'id': 176, 'category': '레저_관광_자연_기타', 'situation': '바벨 낙하 깔림'},
-  {'id': 177, 'category': '레저_관광_자연_기타', 'situation': '관절 탈구 부상'},
-  {'id': 178, 'category': '레저_관광_자연_기타', 'situation': '레인 진입 기계 낌'},
-  {'id': 179, 'category': '레저_관광_자연_기타', 'situation': '스케이트 날 부상'},
-  {'id': 180, 'category': '레저_관광_자연_기타', 'situation': '롤러코스터 멈춤'},
-  {'id': 181, 'category': '레저_관광_자연_기타', 'situation': '실제 유령 공포'},
-  {'id': 182, 'category': '레저_관광_자연_기타', 'situation': '오발 사고 발생'},
-  {'id': 183, 'category': '레저_관광_자연_기타', 'situation': '카트 전복 사고'},
-  {'id': 184, 'category': '레저_관광_자연_기타', 'situation': '나무 걸려 조난'},
-  {'id': 185, 'category': '레저_관광_자연_기타', 'situation': '줄 풀림 오인 비상'},
-  {'id': 186, 'category': '레저_관광_자연_기타', 'situation': '사막 식수 고갈'},
-  {'id': 187, 'category': '레저_관광_자연_기타', 'situation': '정글 독충 공격'},
-  {'id': 188, 'category': '레저_관광_자연_기타', 'situation': '낙석 낙하 갇힘'},
-  {'id': 189, 'category': '레저_관광_자연_기타', 'situation': '막배 끊겨 고립'},
-  {'id': 190, 'category': '레저_관광_자연_기타', 'situation': '통유리 균열 발견'},
-  {'id': 191, 'category': '레저_관광_자연_기타', 'situation': '낙뢰 사고 발생'},
-  {'id': 192, 'category': '레저_관광_자연_기타', 'situation': '인파 밀집 압사'},
-  {'id': 193, 'category': '레저_관광_자연_기타', 'situation': '캠핑카 일산화탄소'},
-  {'id': 194, 'category': '레저_관광_자연_기타', 'situation': '고온 화상 입음'},
-  {'id': 195, 'category': '레저_관광_자연_기타', 'situation': '음향 장비 감전'},
-  {'id': 196, 'category': '레저_관광_자연_기타', 'situation': '울타리 돌파 충돌'},
-  {'id': 197, 'category': '레저_관광_자연_기타', 'situation': '말에서 추락 부상'},
-  {'id': 198, 'category': '레저_관광_자연_기타', 'situation': '탁구대 무너짐'},
-  {'id': 199, 'category': '레저_관광_자연_기타', 'situation': '당구큐대 시비'},
-  {'id': 200, 'category': '레저_관광_자연_기타', 'situation': '코인기기 화재'},
-];
