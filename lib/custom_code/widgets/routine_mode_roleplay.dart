@@ -272,6 +272,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   final List<Map<String, dynamic>> _localMessages = [];
   final ScrollController _scrollController = ScrollController();
   final Map<int, GlobalKey> _itemKeys = {};
+  DateTime? _lastScrollThrottle;
   DeepgramV2VoiceManager? _voiceManager;
   final AudioRecorder _audioRecorder = AudioRecorder();
   late final TtsQueueManager _ttsQueueManager;
@@ -543,6 +544,16 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
             duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
       }
     });
+  }
+
+  void _scrollToBottomThrottled() {
+    final now = DateTime.now();
+    if (_lastScrollThrottle == null ||
+        now.difference(_lastScrollThrottle!) >=
+            const Duration(milliseconds: 250)) {
+      _lastScrollThrottle = now;
+      _scrollToBottom();
+    }
   }
 
   // 현재 AI 버블을 화면 중앙에 고정 (스트리밍 중 밀림 방지)
@@ -1287,8 +1298,10 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
             break;
           }
 
-          if (mounted && !_ttsQueueManager.aiPaused)
+          if (mounted && !_ttsQueueManager.aiPaused) {
             setState(() => _localMessages[aiIndex]['target'] = aiTargetText);
+            _scrollToBottomThrottled();
+          }
 
           // 하이브리드: 첫 구두점 OR 5단어 도달 시 1회만 firstChunk 즉시 발사
           // Rollback: hybridTtsPlayer 제거 후 aiTtsFetcher.addText(toSpeak) 복원
@@ -1363,8 +1376,10 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       _ttsQueueManager.setAiPaused(false);
       _log('🧠 [PIPE-07]', 'setUserTurn(false) + setAiPaused(false). AI 재생 시작');
       // [v3.6] PIPE-07 시점: 버퍼된 AI 텍스트 일괄 표시
-      if (mounted && aiTargetText.isNotEmpty)
+      if (mounted && aiTargetText.isNotEmpty) {
         setState(() => _localMessages[aiIndex]['target'] = aiTargetText);
+        _scrollToBottom();
+      }
 
       // AI 역번역 (백그라운드, Future 보관 → 저장 시 await)
       final aiOriginalFuture = RoleplayBrain.generateCleanOriginal(
