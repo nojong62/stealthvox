@@ -258,11 +258,12 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     }
   }
 
-  // 🎭 롤플레이 시나리오 (유저 직접 입력)
+  // 🎭 롤플레이 시나리오
   String _scenarioKeyword = "";
   String _scenarioSituation = "";
   String _scenarioAiRole = "";
   String _scenarioUserRole = "";
+  bool _isGeneratingScenario = false;
   bool _isAiOpenerPlaying = false; // AI 첫 발화 재생 중 여부
 
   String _lastRawTranscript = ''; // 정정 감지용 직전 유저 발화 원문
@@ -356,9 +357,37 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
               FirebaseRemoteConfig.instance.getString('DeepgramAPIKey');
           _openAiKey = FirebaseRemoteConfig.instance.getString('OpenAIAPIKey');
         });
+        _generateScenario();
       }
     } catch (e) {
       print('❌ Key Load Error: $e');
+    }
+  }
+
+  // ====================================================================
+  // 📦 [Box 4-A: 드라마/영화 장면 기반 시나리오 자동 생성]
+  // ====================================================================
+  Future<void> _generateScenario() async {
+    if (_openAiKey.isEmpty || _isGeneratingScenario) return;
+    setState(() => _isGeneratingScenario = true);
+    try {
+      final result = await RoleplayBrain.generateDramaticScenario(_openAiKey);
+      if (mounted && result != null) {
+        setState(() {
+          _scenarioKeyword = result['situation'] ?? '';
+          _scenarioSituation = result['situation'] ?? '';
+          _scenarioAiRole = result['ai_role'] ?? '';
+          _scenarioUserRole = result['user_role'] ?? '';
+          _sessionDocId = null;
+          _myHistoryRef = null;
+          _localMessages.clear();
+          _isConversationActive = false;
+        });
+      }
+    } catch (e) {
+      print('❌ 시나리오 생성 에러: $e');
+    } finally {
+      if (mounted) setState(() => _isGeneratingScenario = false);
     }
   }
 
@@ -1741,7 +1770,9 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         mainAxisSize: MainAxisSize.min,
         children: [
           GestureDetector(
-            onTap: _isConversationActive ? null : _showSituationInputSheet,
+            onTap: (_isConversationActive || _isGeneratingScenario)
+                ? null
+                : _showSituationInputSheet,
             child: Container(
               width: double.infinity,
               padding: const EdgeInsets.all(18),
@@ -1757,7 +1788,17 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                   width: 1,
                 ),
               ),
-              child: hasScenario
+              child: _isGeneratingScenario
+                  ? const SizedBox(
+                      height: 60,
+                      child: Center(
+                        child: CircularProgressIndicator(
+                          color: Color(0xFF9333EA),
+                          strokeWidth: 2,
+                        ),
+                      ),
+                    )
+                  : hasScenario
                   ? Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
@@ -1892,10 +1933,10 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: const [
-                          Icon(Icons.add_circle_outline_rounded,
+                          Icon(Icons.movie_outlined,
                               color: Color(0xFFA78BFA), size: 20),
                           SizedBox(width: 8),
-                          Text('상황 설정하기',
+                          Text('시나리오 불러오는 중...',
                               style: TextStyle(
                                   color: Color(0xFFA78BFA),
                                   fontSize: 14,
@@ -1905,6 +1946,65 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                     ),
             ),
           ),
+          if (!_isGeneratingScenario && !_isConversationActive) ...[
+            const SizedBox(height: 10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                GestureDetector(
+                  onTap: _generateScenario,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 9),
+                    decoration: BoxDecoration(
+                      color: Colors.transparent,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.white12, width: 1),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: const [
+                        Icon(Icons.refresh_rounded,
+                            color: Colors.white30, size: 14),
+                        SizedBox(width: 6),
+                        Text('다시 생성',
+                            style: TextStyle(
+                                color: Colors.white30, fontSize: 12)),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                GestureDetector(
+                  onTap: _showSituationInputSheet,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 9),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF7C3AED).withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                          color: const Color(0xFF7C3AED).withOpacity(0.35),
+                          width: 1),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: const [
+                        Icon(Icons.edit_outlined,
+                            color: Color(0xFFA78BFA), size: 14),
+                        SizedBox(width: 6),
+                        Text('직접 입력',
+                            style: TextStyle(
+                                color: Color(0xFFA78BFA),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -3128,6 +3228,86 @@ class HybridTtsPlayer {
 // 🧠 [Box 7-1] RoleplayBrain v3 — 롤플레이 모드 전용 AI 뇌
 // ====================================================================
 class RoleplayBrain {
+  // ==================================================================
+  // 📦 [Box 7-1-0] generateDramaticScenario — 드라마/영화 장면 자동 생성
+  // ==================================================================
+  static Future<Map<String, String>?> generateDramaticScenario(
+      String apiKey) async {
+    final client = http.Client();
+    try {
+      final genres = [
+        '불륜 발각, 부부 갈등',
+        '직장 내 권력 다툼, 해고 위기',
+        '형사 심문, 용의자 취조',
+        '재벌가 상속 분쟁',
+        '비밀 연인 들킴',
+        '정치적 음모, 배신',
+        '법정 증언, 위증 의심',
+        '가족 비밀 폭로',
+        '사기 들통, 협박',
+        '첫사랑 재회, 감정 충돌',
+      ];
+      final pick = genres[Random().nextInt(genres.length)];
+
+      final systemPrompt = 'You are a creative director for a high-immersion English roleplay app.\n'
+          'Your job is to create ONE dramatic scene inspired by famous Netflix series, Korean/American dramas, or movies.\n'
+          '\n'
+          'OUTPUT: Return ONLY valid JSON, no extra text.\n'
+          '{\n'
+          '  "situation": "극적 핵심 요약 (10-15 Korean chars, e.g. 숨겨둔 돈다발 들킴)",\n'
+          '  "ai_role": "AI 캐릭터 (10자 이내, strong personality, e.g. 화난 배우자)",\n'
+          '  "user_role": "유저 캐릭터 (8자 이내, e.g. 당황한 남편)"\n'
+          '}\n'
+          '\n'
+          'RULES:\n'
+          '- situation: emotionally charged, instantly dramatic. Do NOT name any show/character.\n'
+          '- ai_role: fierce personality (furious, cold, desperate, authoritative).\n'
+          '- user_role: the user is the one being confronted, questioned, or pressured.\n'
+          '- Genre hint this round: $pick';
+
+      final res = await client
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 1.1,
+              'response_format': {'type': 'json_object'},
+              'max_tokens': 150,
+              'messages': [
+                {'role': 'system', 'content': systemPrompt},
+                {
+                  'role': 'user',
+                  'content': '지금 바로 JSON 생성해줘.',
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      if (res.statusCode == 200) {
+        final raw = jsonDecode(utf8.decode(res.bodyBytes))['choices'][0]
+                ['message']['content']
+            .toString()
+            .trim();
+        final parsed = jsonDecode(raw);
+        return {
+          'situation': parsed['situation']?.toString() ?? '',
+          'ai_role': parsed['ai_role']?.toString() ?? '',
+          'user_role': parsed['user_role']?.toString() ?? '',
+        };
+      }
+    } catch (e) {
+      print('generateDramaticScenario Error: $e');
+    } finally {
+      client.close();
+    }
+    return null;
+  }
+
   // ==================================================================
   // 📦 [Box 7-1-A] streamUserTranslation — CoT 2단계 번역
   // ==================================================================
