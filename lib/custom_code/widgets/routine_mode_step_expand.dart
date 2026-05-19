@@ -4378,7 +4378,57 @@ I suddenly remembered to call Alex.
       // How / Why / What 으로 시작 → 유저가 자기 이야기를 자연스럽게 꺼냄
       // 첫 질문 이후 유저 대답부터 문장 확장(expand) 시작
       if (isOpening) {
-        yield "Tell me a topic you're interested in. Everyday topics are great too.";
+        const String openingSysPrompt =
+            """You are a warm conversation coach starting a new session.
+
+Ask ONE open-ended question that invites the user to share something from their everyday life — naturally and without pressure.
+
+[RULES]
+- 5 to 8 words only.
+- Open-ended: never yes/no.
+- Warm and casual — like a curious friend, not an interviewer.
+- Everyday topics are perfect: recent events, something they noticed, something on their mind.
+- No grammar terms. No leading phrases ("Tell me about...", "Explain...").
+
+[OUTPUT]
+Output ONLY the English question. Nothing else.""";
+
+        final openReq = http.Request(
+          'POST',
+          Uri.parse('https://api.openai.com/v1/chat/completions'),
+        );
+        openReq.headers.addAll({
+          'Authorization': 'Bearer $apiKey',
+          'Content-Type': 'application/json; charset=utf-8',
+        });
+        openReq.body = jsonEncode({
+          'model': 'gpt-4o-mini',
+          'stream': true,
+          'temperature': 0.7,
+          'max_tokens': 50,
+          'messages': [
+            {'role': 'system', 'content': openingSysPrompt},
+            {'role': 'user', 'content': 'Start the session.'},
+          ],
+        });
+        final openResp = await openReq
+            .send()
+            .timeout(const Duration(seconds: 15));
+        if (openResp.statusCode != 200) {
+          yield "What's something on your mind today?";
+          return;
+        }
+        await for (final chunk in openResp.stream
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())) {
+          if (chunk.startsWith('data: ') && chunk != 'data: [DONE]') {
+            try {
+              final delta = jsonDecode(chunk.substring(6))['choices'][0]
+                  ['delta']['content'];
+              if (delta != null) yield delta.toString();
+            } catch (_) {}
+          }
+        }
         return;
       }
       // ─────────────────────────────────────────────────────────────────
