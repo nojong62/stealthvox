@@ -621,7 +621,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         setState(() {
           _localMessages.add({'role': 'SYSTEM', 'target': '', 'original': ''});
         });
-        _scrollToCurrentTop(_localMessages.length - 1);
+        _scrollToBottom();
       }
       final int aiIndex = _localMessages.length - 1;
 
@@ -1059,7 +1059,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           _removeLastExchange();
         });
         if (_localMessages.isNotEmpty)
-          _scrollToCurrentTop(_localMessages.length - 1);
+          _scrollToBottom();
       }
       _log('🔄 [CORRECT-02]', '직전 교환 삭제 완료 → 재처리 진행');
     }
@@ -1075,7 +1075,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           _removeOrphanedHostBubbles(); // AI 응답 없이 중단된 이전 HOST 버블 제거
           _localMessages.add({'role': 'HOST', 'target': '', 'original': ''});
         });
-        _scrollToCurrentTop(_localMessages.length - 1);
+        _scrollToBottom();
       }
 
       int hostIndex = _localMessages.length - 1;
@@ -1270,7 +1270,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
             _msGptFirstToken = _swSpeechEnd.elapsedMilliseconds;
             _log('🧠 [PIPE-03]', 'GPT 첫 유효 청크 수신: "$cleanedChunk"');
             _firstAiChunkLogged = true;
-            _scrollToCurrentTop(aiIndex);
+            _scrollToBottom();
           }
           if (_swOpenAI.isRunning) _swOpenAI.stop();
           aiTargetText += cleanedChunk;
