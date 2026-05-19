@@ -2015,7 +2015,9 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   }
 
   Widget _buildChatList() {
-    final double bottomPad = MediaQuery.of(context).size.height * 0.55;
+    final double bottomPad = _localMessages.length <= 1
+        ? MediaQuery.of(context).size.height * 0.4
+        : 16;
     return ListView.builder(
       controller: _scrollController,
       padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPad),
