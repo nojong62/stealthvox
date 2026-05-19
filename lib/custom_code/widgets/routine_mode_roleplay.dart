@@ -405,7 +405,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) {
-        return Padding(
+        return StatefulBuilder(
+          builder: (ctx, _) => Padding(
           padding: EdgeInsets.only(
               bottom: MediaQuery.of(ctx).viewInsets.bottom),
           child: Container(
@@ -414,7 +415,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
               borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
             ),
             padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
-            child: Column(
+            child: SingleChildScrollView(
+              child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -483,9 +485,11 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
               ],
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
+  },
+);
   }
 
   Widget _inputField(TextEditingController ctrl, String label, String hint) {
