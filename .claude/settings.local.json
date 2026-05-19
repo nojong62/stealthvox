@@ -37,7 +37,9 @@
       "Bash(git merge *)",
       "Bash(Select-String \"routine_mode_roleplay\")",
       "Bash(git push *)",
-      "Bash(git remote *)"
+      "Bash(git remote *)",
+      "Bash(Get-ChildItem -Path \"F:\\\\flutter_project\\\\stealth_vox\\\\lib\" -Recurse -Directory)",
+      "Bash(Select-Object FullName)"
     ]
   }
 }
