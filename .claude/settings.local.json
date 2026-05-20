@@ -39,7 +39,12 @@
       "Bash(git push *)",
       "Bash(git remote *)",
       "Bash(Get-ChildItem -Path \"F:\\\\flutter_project\\\\stealth_vox\\\\lib\" -Recurse -Directory)",
-      "Bash(Select-Object FullName)"
+      "Bash(Select-Object FullName)",
+      "Bash(Select-String \"intro_widget|error\")",
+      "Bash(dir /a /b)",
+      "Bash(keytool -printcert -jarfile \"F:\\\\flutter_project\\\\stealth_vox\\\\build\\\\app\\\\outputs\\\\bundle\\\\release\\\\app-release.aab\")",
+      "Bash(where keytool *)",
+      "PowerShell($javaHome = $env:JAVA_HOME; if \\($javaHome\\) { \"$javaHome\\\\bin\\\\keytool.exe\" } else { Get-ChildItem \"C:\\\\Program Files\\\\Java\",\"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\\\\bin\",\"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jre\\\\bin\" -Filter keytool.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 3 -ExpandProperty FullName })"
     ]
   }
 }
