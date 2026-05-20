@@ -2,14 +2,6 @@
 ===========================
 테스트 링크
 https://stealthvox.onelink.me/31o1/fipsp75p?deep_link_value=duo_chat&deep_link_sub1=rJChsLrIqAhXhLZotYeeLZo6KK42&deep_link_sub2=FCC9y7flJIF4y0C4i6Kb&inviter_id=rJChsLrIqAhXhLZotYeeLZo6KK42&room_id=FCC9y7flJIF4y0C4i6Kb&pid=friend_invite&c=in_app_share&af_dp=stealthvox%3A%2F%2F&af_force_deeplink=true
-===============================
-lib/custom_code/actions/apps_flyer_manager.dart
-lib/custom_code/actions/index.dart
-lib/custom_code/widgets/LobbyMaster.dart
-lib/custom_code/widgets/IntroMaster.dart
-analysis_options.yaml
-핵심은 지금 apps_flyer_manager.dart line 7부터 바로 고치고 재검증입니다.
-
 ===================
 관리자 모드로 파워쉘 실행
 
@@ -24,6 +16,8 @@ F:\flutter_project\stealth_vox\build\app\outputs\flutter-apk\app-debug.apk (APK)
 
 F:
 cd F:\flutter_project\stealth_vox
+
+(다시 시작 /login · API Error: 401 Invalid authentication credentials)
 
 CLAUDE1.md 참고해서, 실행해 줘.
 
@@ -381,11 +375,7 @@ Thinking...
 
 이렇게 Thinking... 만있고, 밑에 점 3개(...)는 적히지 않도록 해줘.
 
-========================
-CLAUDE.md 참고해서, routine_mode_step_expand에 있는 대화 예문을 보고 대화 방식을 적절히 네가 프롬프트 짜볼레?
-
-
-==========
+=========
  더 나은 확장 기법
 
   1. 의미역 기반 유도 (Semantic Role First)
