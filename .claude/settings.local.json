@@ -39,7 +39,9 @@
       "Bash(git push *)",
       "Bash(git remote *)",
       "Bash(Get-ChildItem -Path \"F:\\\\flutter_project\\\\stealth_vox\\\\lib\" -Recurse -Directory)",
-      "Bash(Select-Object FullName)"
+      "Bash(Select-Object FullName)",
+      "Bash(Select-String \"intro_widget|error\")",
+      "Bash(dir /a /b)"
     ]
   }
 }
