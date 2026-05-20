@@ -1,0 +1,158 @@
+
+# Step Expand 형식 기반 시나리오
+
+주제:
+유저가 “사람 만나는 게 피곤하다”는 이야기를 조금씩 풀어내는 상황
+
+---
+
+## Opening
+
+**AI**
+
+> What has been on your mind lately?
+
+한국어 표시:
+
+> 요즘 무슨 생각이 제일 많이 들어?
+
+---
+
+## Turn 1
+
+**User**
+
+> 요즘 사람 만나는 게 좀 피곤해요. (소리)
+
+**HOST 표시**
+
+> Meeting people feels a little tiring these days.(글)
+> 요즘 사람 만나는 게 좀 피곤해요.(글)
+
+**AI**
+
+> What part feels most tiring?(소리, 글)
+> 어떤 부분이 제일 피곤하게 느껴져? (글)
+
+---
+
+## Turn 2
+
+**User**
+
+> 억지로 분위기를 맞춰야 하는 거요. (소리)
+
+**HOST 표시**
+
+> Having to force myself to match the mood. (글)
+   억지로 분위기를 맞춰야 하는 거요. (글)
+
+빈 줄 후 확장 문장:
+
+> Meeting people feels a little tiring these days, because I have to force myself to match the mood. (소리, 글)
+> 요즘 사람 만나는 게 좀 피곤한데, 억지로 분위기를 맞춰야 해서 더 그렇게 느껴져요. (글)
+
+**AI**
+
+> When does that happen most often? (소리, 글)
+> 그게 언제 제일 자주 그래? (글)
+
+---
+
+## Turn 3
+
+**User**
+
+> 별로 친하지 않은 사람들하고 있을 때요. (소리)
+
+**HOST 표시**
+
+> When I am with people I am not very close to. (글)
+> 별로 친하지 않은 사람들하고 있을 때요. (글)
+
+빈 줄 후 확장 문장:
+
+> Meeting people feels a little tiring these days, especially when I am with people I am not very close to, because I have to force myself to match the mood.  (소리, 글)
+> 요즘 사람 만나는 게 좀 피곤한데, 특히 별로 친하지 않은 사람들과 있을 때 억지로 분위기를 맞춰야 해서 더 지쳐요. (글)
+
+**AI**
+
+> How do you feel afterward? (소리)
+
+한국어 표시:
+
+> 그 후에는 기분이 어때? (글)
+
+---
+
+## Turn 4
+
+**User**
+
+> 집에 오면 아무 말도 하기 싫어요. (소리)
+
+**HOST 표시**
+
+> When I get home, I do not want to say anything.(글)
+> 집에 오면 아무 말도 하기 싫어요. (글)
+
+빈 줄 후 확장 문장:
+
+> Meeting people feels a little tiring these days, especially when I am with people I am not very close to, because I have to force myself to match the mood, and when I get home, I do not want to say anything. (소리, 글)
+> 요즘 사람 만나는 게 좀 피곤한데, 특히 별로 친하지 않은 사람들과 있을 때 억지로 분위기를 맞춰야 해서 지치고, 집에 오면 아무 말도 하기 싫어져요. (글)
+
+**AI**
+
+> What do you usually need then? (소리, 글)
+> 그럴 때 보통 뭐가 필요해? (글)
+
+---
+
+## Turn 5
+
+**User**
+
+> 그냥 혼자 조용히 있는 시간이요. (소리)
+
+**HOST 표시**
+
+> Just some quiet time alone. (글)
+> 그냥 혼자 조용히 있는 시간이요. (글)
+
+빈 줄 후 확장 문장:
+
+> Meeting people feels a little tiring these days, especially when I am with people I am not very close to, because I have to force myself to match the mood, and when I get home, I just need some quiet time alone. (소리, 글)
+> 요즘 사람 만나는 게 좀 피곤한데, 특히 별로 친하지 않은 사람들과 있을 때 억지로 분위기를 맞춰야 해서 지치고, 집에 오면 그냥 혼자 조용히 있는 시간이 필요해요.(글)
+
+---
+
+# Final Expanded Sentence
+
+5턴 완료 후 앱이 별도 카드로 보여줄 문장:
+
+> Meeting people feels a little tiring these days, especially when I am with people I am not very close to, because I have to force myself to match the mood, and when I get home, I just need some quiet time alone.
+
+한국어:
+
+> 요즘 사람 만나는 게 좀 피곤한데, 특히 별로 친하지 않은 사람들과 있을 때 억지로 분위기를 맞춰야 해서 지치고, 집에 오면 그냥 혼자 조용히 있는 시간이 필요해요.
+
+---
+
+# Polished Sentence
+
+그다음 자동 생성되는 세련된 말하기용 문장:
+
+> Lately, being around people has felt a bit draining, especially when I have to adjust myself to people I am not close to, so when I get home, I just need some quiet time alone.
+
+한국어 감각:
+
+> 요즘은 사람들과 있는 게 조금 지치게 느껴져요. 특히 별로 친하지 않은 사람들에게 맞춰야 할 때 더 그렇고, 그래서 집에 오면 그냥 혼자 조용히 있는 시간이 필요해요.
+
+---
+
+이게 지금 코드 형식에 가장 잘 맞는 시나리오야.
+
+핵심은 AI가 상담사처럼 길게 말하지 않고, 매번 **5~8단어 정도의 짧은 질문**만 던지는 것.
+그리고 유저의 답변은 매 턴마다 `새 답변 문장 + 누적 확장 문장`으로 처리되는 구조를 그대로 유지하는 거야.
+
+그런데 처음 한 두번 글로 적지 않는 대화 있을 수 있고, 첫번째 유저 대사를 AI가 정하고 5회 진행하는 거야.

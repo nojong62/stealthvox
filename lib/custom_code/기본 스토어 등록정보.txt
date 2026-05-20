@@ -1,0 +1,70 @@
+StealthVox - 내 말 외국어 연습장
+
+나 중심 외국어 연습 및 통화 그리고 부담없는 반복 연습장
+
+📱 [대화 모드 안내]
+Duo Connect [초청인 대화]
+초청 링크를 통해 파트너와 함께 모국어로 대화하면, 실시간으로 통역해 주는 글로벌 만능 통역 모드입니다.
+
+Clone AI [클론 AI와 대화]
+지인의 카카오톡 대화를 분석하여 완벽하게 복제된 클론 AI 파트너와 실감 나는 롤플레잉 훈련을 진행합니다.
+
+AI Roleplay [상황극 대화]
+창의적이고 구체적인 역할과 상황을 무한히 추천받고, 현실감 넘치는 실전 비즈니스 및 일상 회화를 연습합니다.
+
+Step Expand [점진적 문장 확장]
+짧은 기초 문장부터 시작해 AI의 날카로운 질문에 대답하며, 점점 길고 세련된 문장 구조를 만들어가는 집중 훈련입니다.
+
+🎓 [공부방 밀착 훈련 가이드]
+1. 나에게 맞는 복습 모드 선택하기
+지난 대화 기록을 터치한 후, 오늘 집중하고 싶은 나의 훈련 목표에 따라 모드를 선택합니다.
+
+실전 턴제 모드 [순발력 훈련]: AI와 실제 대화를 나누듯 실시간으로 묻고 답하는 훈련입니다. 대화 맥락 속에서 바로바로 영어를 뱉어내는 순발력을 극대화합니다.
+
+문장 확장 모드 [표현력 훈련]: 원어민들이 쓰는 길고 복잡한 문장을 의미 단위(Chunk)로 쪼개어 따라 말하는 쉐도잉 훈련입니다. 원어민의 문장 구조와 어순을 뇌에 자연스럽게 각인시킵니다.
+
+2. 실전 튜터링: 뇌를 깨우는 4단계 빌드업 (Step 4 Coaching)
+단순히 틀린 문장을 눈으로 읽고 끝내는 죽은 공부가 아닙니다. AI가 설계한 4단계 흐름을 따라가며 완벽하게 내 문장으로 만듭니다.
+
+STEP 1. 응용 (뇌에 자극 주기): 내가 과거에 했던 대화의 맥락을 그대로 살려, AI가 새로운 한국어 상황과 표현 미션을 제시합니다.
+
+STEP 2. 도전 (내 힘으로 뱉기): 제시된 한국어 상황을 보고, 남이 짜준 정답을 보기 전에 내 입으로 직접 영어 문장을 만들어서 외쳐봅니다. 스스로 문장을 엮어내는 힘이 가장 많이 길러지는 단계입니다.
+
+STEP 3. 교정 (정밀 수리): 내가 뱉은 문장을 AI가 실시간으로 분석합니다. 단순 문법 오류는 물론, "뜻은 통하지만 원어민은 잘 쓰지 않는 어색한 표현을 더 자연스럽고 세련된 뉘앙스로 교정해 주고, 왜 고쳐야 하는지 이유를 한국어로 친절하게 짚어줍니다.
+
+STEP 4. 습득하기 (입 근육에 새기기): 최종 교정된 완벽한 문장을 원어민 음성으로 들으며 소리 내어 따라 말합니다. 귀와 입 근육을 동시에 자극해 완전히 나의 무기로 만듭니다.
+
+=========================
+📱 [Practice Modes]
+
+Duo Connect [Partner Talk]
+Share an invite link to talk with your partner in your own languages. The AI translates everything in real time!
+
+Clone AI [Chat with a Twin AI]
+The AI analyzes KakaoTalk chats to create a perfect digital twin of your friend. Enjoy realistic roleplay with them!
+
+AI Roleplay [Scene Acting]
+Get endless suggestions for creative roles and situations. Practice realistic business and everyday conversations.
+
+Step Expand [Sentence Builder]
+Start with short, simple sentences. Answer the AI's sharp questions to build longer and more professional sentences.
+
+🎓 [Study Room: Smart Training Guide]
+
+1. Choose Your Perfect Review Mode
+Open your past chat history and pick a mode based on your goal for today.
+
+Real-time Conversation [Speed Training]: Talk and respond to the AI in real time. This mode maximizes your speed and helps you speak English instantly without thinking too long.
+
+Sentence Expansion [Expression Training]: Break down long, complex native sentences into small chunks and shadow them. This naturally embeds native sentence structures and word orders into your brain.
+
+2. AI Tutoring: 4-Step Brain Workout (Step 4 Coaching)
+This is not passive learning where you just read corrected text. Follow the AI's 4-step flow to truly master each sentence.
+
+STEP 1. Apply (Wake Up Your Brain): Based on your past chat context, the AI gives you a fresh new Korean situation and a speaking mission.
+
+STEP 2. Challenge (Speak on Your Own): Look at the Korean situation and try to speak the English sentence out loud before looking at the answer. This is the best way to build your muscle for making sentences.
+
+STEP 3. Correct (Fine-Tuning): The AI analyzes your sentence in real time. It fixes basic grammar mistakes and upgrades awkward phrasing into natural, native expressions. It also explains the "why" kindly in Korean.
+
+STEP 4. Absorb (Lock It In): Listen to the final, perfectly corrected sentence spoken by a native voice (TTS) and repeat it out loud (shadowing). This stimulates your ears and vocal muscles to make the expression completely yours.

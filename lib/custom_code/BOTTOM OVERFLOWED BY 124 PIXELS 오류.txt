@@ -1,0 +1,106 @@
+수정 대상:
+FlutterFlow export 프로젝트의 로그인/인트로 화면 관련 파일만 수정해라.
+
+문제:
+안드로이드 실기기에서 로그인 화면의 Email/Password 입력창을 누르면 키보드가 올라오면서
+“BOTTOM OVERFLOWED BY 124 PIXELS” 오류가 발생한다.
+
+목표:
+키보드가 올라와도 로그인 화면이 overflow 되지 않고 자연스럽게 스크롤되게 만든다.
+
+중요 제한:
+- routine_mode_roleplay.dart는 건드리지 마라.
+- Duo, AppsFlyer, RevenueCat, Firebase 로직은 건드리지 마라.
+- APK build 명령은 실행하지 마라.
+- 수정 후 flutter analyze만 실행해라.
+
+수정 방향:
+1. 로그인/인트로 페이지 파일을 찾는다.
+   후보:
+   - lib/pages/intro/intro_widget.dart
+   - lib/pages/login/login_widget.dart
+   - lib/auth/... 관련 로그인 페이지
+   - 또는 StealthVox 로고와 Email Address, Password, LOGIN 버튼이 있는 위젯 파일
+
+2. 해당 페이지의 Scaffold에서 키보드 대응이 꺼져 있으면 켠다.
+   resizeToAvoidBottomInset: true
+
+3. body가 고정 Column/Container 구조라면 키보드가 올라왔을 때 overflow가 나지 않도록 감싼다.
+   권장 구조:
+   SafeArea
+   → SingleChildScrollView
+   → Padding
+   → Column
+
+4. 기존 디자인은 최대한 유지한다.
+   - StealthVox 로고 디자인 유지
+   - Email/Password/Login 버튼 디자인 유지
+   - 색상, 폰트, 라운드 값 임의 변경 금지
+
+5. 하단 회원가입 텍스트가 키보드에 가려지더라도 overflow 경고가 뜨면 안 된다.
+   키보드가 올라오면 사용자가 스크롤해서 볼 수 있게 한다.
+
+6. 화면 높이가 작은 기기에서도 깨지지 않도록 한다.
+   필요하면 상단 여백이나 카드 간격만 소폭 줄인다.
+   단, 전체 UI를 재설계하지 마라.
+
+7. 수정 후 확인:
+   flutter analyze 실행.
+   APK build는 하지 마라.
+
+보고 형식:
+- 수정한 파일
+- 적용한 레이아웃 구조
+- resizeToAvoidBottomInset 적용 여부
+- flutter analyze 결과
+===========================intro만 수정
+
+수정 대상:
+lib/pages/intro/intro_widget.dart 만 수정해라.
+
+중요:
+- 다른 파일 수정 금지
+- login_widget.dart 수정 금지
+- auth 관련 공통 위젯 수정 금지
+- routine_mode_roleplay.dart 수정 금지
+- APK build 실행 금지
+- flutter analyze만 실행
+
+문제:
+안드로이드 실기기에서 키보드가 올라오면
+“BOTTOM OVERFLOWED BY xxx PIXELS” 오류가 발생한다.
+
+목표:
+키보드가 올라와도 Intro 화면이 overflow 되지 않고 자연스럽게 스크롤되게 만든다.
+
+수정 방향:
+1. Intro 페이지의 Scaffold에서:
+resizeToAvoidBottomInset: true 적용 확인
+
+2. body가 고정 Column 구조라면:
+SafeArea
+→ SingleChildScrollView
+→ Padding
+→ Column
+구조로 감싸라.
+
+3. 기존 디자인은 유지:
+- StealthVox 로고 유지
+- Email/Password/Login 버튼 디자인 유지
+- 색상/폰트/라운드값 임의 변경 금지
+
+4. 키보드가 올라오면 화면이 스크롤 가능해야 한다.
+하단 회원가입 텍스트가 가려져도 overflow warning은 발생하면 안 된다.
+
+5. 작은 화면에서도 overflow가 없어야 한다.
+필요하면 상단/하단 spacing만 최소 조정 가능.
+
+6. 수정 후:
+flutter analyze만 실행.
+APK build는 절대 실행하지 마라.
+
+보고:
+- 수정한 부분
+- 적용한 scroll 구조
+- resizeToAvoidBottomInset 적용 여부
+- analyze 결과
