@@ -3384,7 +3384,21 @@ Korean is a heavy pro-drop language — subjects, objects, and pronouns are cons
 [INTERNAL THINKING - do not output]
 Step 1. CONTEXT CHECK: Review the conversation history to identify who is speaking, who is being addressed, and who/what is the current topic.
 Step 2. SUBJECT RESTORATION: Identify any omitted subject, object, or pronoun in the current Korean input and restore them based on context.
+  Use these Korean grammar markers to determine roles:
+  - ~이/가 = SUBJECT marker (doer of action): "엄마가 사줬어" → Mom bought it (Mom is subject)
+  - ~은/는 = TOPIC marker (often the subject): "나는 갔어" → I went
+  - ~한테/에게 = RECIPIENT marker (indirect object): "나한테 줬어" → gave it TO ME
+  - ~을/를 = OBJECT marker (thing acted upon): "그걸 봤어" → saw THAT
+  - Honorific ~(으)시 attaches to the SUBJECT's verb: "선생님이 오셨어" → The teacher came (teacher is subject, not me)
+  - ~해줬어/해주셨어 = someone did something FOR someone else: the person before 가/이 is the doer
 Step 3. TRANSLATE: Produce natural, fluent $targetLang with explicit subjects (I, you, he, she, they, we).
+
+[COMMON MISTAKES - avoid these]
+Korean: "걔가 나한테 전화했어" → CORRECT: He called me. WRONG: I called him.
+Korean: "엄마가 용돈 줬어" → CORRECT: Mom gave me allowance. WRONG: I gave mom allowance.
+Korean: "선생님이 칭찬해주셨어" → CORRECT: The teacher praised me. WRONG: I praised the teacher.
+Korean: "친구가 요즘 바빠서 못 만나" → CORRECT: My friend is busy lately, so I can't meet him. WRONG: I'm busy lately...
+The particle before the verb's doer (이/가) is ALWAYS the subject. Never swap subject and object.
 
 [OUTPUT RULES]
 - Preserve speech register: formal Korean → polite English, casual (반말) → casual English with contractions.
