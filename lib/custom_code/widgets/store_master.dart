@@ -38,6 +38,17 @@ class StoreMaster extends StatefulWidget {
 class _StoreMasterState extends State<StoreMaster> {
   bool isProcessing = false;
 
+  final List<String> _debugLogs = [];
+  void _log(String tag, String msg) {
+    final ts = DateTime.now().toIso8601String().substring(11, 23);
+    final line = '[$ts] $tag $msg';
+    print(line);
+    _debugLogs.add(line);
+    if (_debugLogs.length > 500) {
+      _debugLogs.removeRange(0, 50);
+    }
+  }
+
   final List<Map<String, dynamic>> storePlans = [
     {
       'id': 'stealthvox_10m',
@@ -80,6 +91,7 @@ class _StoreMasterState extends State<StoreMaster> {
   @override
   void initState() {
     super.initState();
+    _log('STORE', 'StoreMaster initState');
     // 💡 v3.7 보강: 결제 화면 첫 진입 시 한 번만 RevenueCat 사용자 연결 안전 체크
     _initRevenueCatUser();
   }
@@ -89,14 +101,21 @@ class _StoreMasterState extends State<StoreMaster> {
     try {
       // uid 없으면(비로그인 상태) 스킵
       final uid = currentUserUid;
-      if (uid == null || uid.isEmpty) return;
+      if (uid == null || uid.isEmpty) {
+        _log('RC_INIT', 'uid null or empty → skip');
+        return;
+      }
+      _log('RC_INIT', 'uid=$uid');
 
       // 이미 식별된 사용자면 재로그인 불필요
       final isAnon = await Purchases.isAnonymous;
+      _log('RC_INIT', 'isAnonymous=$isAnon');
       if (isAnon) {
         await Purchases.logIn(uid);
+        _log('RC_INIT', 'Purchases.logIn completed');
       }
     } catch (e) {
+      _log('RC_INIT', 'error: $e');
       // 로그인 실패해도 위젯 렌더링에 영향 없음, 로그만 남김
       print('[RevenueCat] _initRevenueCatUser 오류: $e');
     }
@@ -104,6 +123,8 @@ class _StoreMasterState extends State<StoreMaster> {
 
   Future<void> _executePurchase(Map<String, dynamic> plan) async {
     if (isProcessing) return;
+
+    _log('PURCHASE', 'tap productId=${plan['id']} title=${plan['title']} uid=$currentUserUid ref=${currentUserReference != null}');
 
     if (currentUserReference == null) {
       _showFeedback("로그인 후 이용해 주세요.", const Color(0xFFF87171));
@@ -114,9 +135,17 @@ class _StoreMasterState extends State<StoreMaster> {
     try {
       // RevenueCat 권장 흐름: Offerings → Package 매칭 → purchasePackage
       final offerings = await Purchases.getOfferings();
+      _log('OFFERINGS', 'current=${offerings.current?.identifier}');
+      _log('OFFERINGS', 'default=${offerings.all['default']?.identifier}');
       final offering = offerings.current ?? offerings.all['default'];
+      _log('OFFERINGS', 'selected=${offering?.identifier}');
+      _log('OFFERINGS', 'packageCount=${offering?.availablePackages.length ?? 0}');
+      for (final p in offering?.availablePackages ?? []) {
+        _log('OFFERINGS', 'package=${p.identifier}, product=${p.storeProduct.identifier}, price=${p.storeProduct.priceString}');
+      }
 
       if (offering == null) {
+        _log('OFFERINGS', 'no current or default offering → abort');
         debugPrint('[RevenueCat] No current or default offering found');
         _showFeedback(
             "상품 정보를 아직 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", const Color(0xFFF87171));
@@ -124,6 +153,7 @@ class _StoreMasterState extends State<StoreMaster> {
       }
 
       final targetProductId = plan['id'] as String;
+      _log('MATCH', 'request productId=$targetProductId');
       Package? matchedPackage;
       for (final pkg in offering.availablePackages) {
         if (pkg.storeProduct.identifier == targetProductId) {
@@ -131,8 +161,10 @@ class _StoreMasterState extends State<StoreMaster> {
           break;
         }
       }
+      _log('MATCH', 'matched package=${matchedPackage?.identifier}, product=${matchedPackage?.storeProduct.identifier}');
 
       if (matchedPackage == null) {
+        _log('MATCH', 'package NOT FOUND for productId=$targetProductId → abort');
         debugPrint('[RevenueCat] Package not found — productId: $targetProductId');
         debugPrint('[RevenueCat] current offering: ${offering.identifier}');
         debugPrint(
@@ -144,7 +176,10 @@ class _StoreMasterState extends State<StoreMaster> {
         return;
       }
 
-      await Purchases.purchase(PurchaseParams.package(matchedPackage));
+      _log('PURCHASE', 'purchasePackage start productId=$targetProductId');
+      final purchaseResult = await Purchases.purchase(PurchaseParams.package(matchedPackage));
+      _log('PURCHASE', 'success appUserId=${purchaseResult.customerInfo.originalAppUserId}');
+      _log('PURCHASE', 'activeEntitlements=${purchaseResult.customerInfo.entitlements.active.keys.join(',')}');
 
       // 클라이언트 UUID 생성 (RevenueCat 웹훅 ID와 매핑 가능)
       final uid = currentUserUid ?? 'anon';
@@ -156,6 +191,7 @@ class _StoreMasterState extends State<StoreMaster> {
       _showFeedback("✅ 충전 완료! (${plan['title']})", const Color(0xFF34D399));
     } on PlatformException catch (e) {
       final errorCode = PurchasesErrorHelper.getErrorCode(e);
+      _log('ERROR', 'platform code=$errorCode message=${e.message} details=${e.details}');
       if (errorCode == PurchasesErrorCode.purchaseCancelledError) {
         _showFeedback("결제가 취소되었습니다.", Colors.white54);
       } else if (errorCode == PurchasesErrorCode.purchaseNotAllowedError) {
@@ -170,6 +206,11 @@ class _StoreMasterState extends State<StoreMaster> {
         _showFeedback("결제 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
             const Color(0xFFF87171));
       }
+    } catch (e, stack) {
+      final stackStr = stack.toString();
+      _log('ERROR', 'general: $e');
+      _log('ERROR', 'stack: ${stackStr.substring(0, stackStr.length > 200 ? 200 : stackStr.length)}');
+      _showFeedback("결제 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.", const Color(0xFFF87171));
     } finally {
       if (mounted) setState(() => isProcessing = false);
     }
@@ -182,7 +223,12 @@ class _StoreMasterState extends State<StoreMaster> {
     String planId = plan['id'];
     String planTitle = plan['title'];
 
-    if (currentUserReference == null) return;
+    _log('SYNC', 'start planId=$planId txId=$transactionId earnedSeconds=$earnedSeconds remainingTime=${FFAppState().remainingTime}');
+
+    if (currentUserReference == null) {
+      _log('SYNC', 'currentUserReference null → abort');
+      return;
+    }
 
     // 💡 v3.7.2: 시간 기반 중복 결제 방지 — 동일 product_id가 최근 10초 내에 결제됐으면 스킵
     final tenSecondsAgo = Timestamp.fromDate(
@@ -222,6 +268,7 @@ class _StoreMasterState extends State<StoreMaster> {
       // 💡 v3.7 보강: 중복 방지용 트랜잭션 ID 저장
       'transaction_id': transactionId,
     });
+    _log('SYNC', 'Firestore increment + purchase record success');
   }
 
   Future<void> _runRestore() async {
@@ -411,14 +458,38 @@ class _StoreMasterState extends State<StoreMaster> {
                                 fontWeight: FontWeight.bold,
                                 color: Colors.white,
                                 letterSpacing: 2)),
-                        TextButton.icon(
-                          onPressed: _openReceiptSheet,
-                          icon: const Icon(Icons.receipt_long_rounded,
-                              color: Colors.amber, size: 18),
-                          label: const Text("Receipt",
-                              style: TextStyle(
-                                  color: Colors.amber,
-                                  fontWeight: FontWeight.bold)),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.copy,
+                                  color: Colors.white38, size: 18),
+                              tooltip: '로그 복사',
+                              onPressed: () async {
+                                final text = _debugLogs.join('\n');
+                                await Clipboard.setData(
+                                    ClipboardData(text: text));
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content:
+                                          Text('✅ 스토어 로그가 복사되었습니다'),
+                                      duration: Duration(seconds: 1),
+                                    ),
+                                  );
+                                }
+                              },
+                            ),
+                            TextButton.icon(
+                              onPressed: _openReceiptSheet,
+                              icon: const Icon(Icons.receipt_long_rounded,
+                                  color: Colors.amber, size: 18),
+                              label: const Text("Receipt",
+                                  style: TextStyle(
+                                      color: Colors.amber,
+                                      fontWeight: FontWeight.bold)),
+                            ),
+                          ],
                         ),
                       ],
                     ),
