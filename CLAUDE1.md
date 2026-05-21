@@ -38,57 +38,174 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-routine_mode_step_expand.dart 수정 지시문
+[StealthVox StoreMaster RevenueCat 진단 로그 복사 기능 추가]
+
+대상 파일:
+- lib/custom_code/widgets/store_master.dart
+
+참고 파일:
+- lib/custom_code/widgets/routine_mode_roleplay.dart
 
 목표:
-Step Expand의 기존 대화 형식/UI/턴 처리/TTS/Firestore 저장 구조는 절대 변경하지 말고,
-AI 질문 생성 방식과 문장 확장 프롬프트만 개선한다.
+routine_mode_roleplay.dart에 있는 화면 로그 구조처럼,
+store_master.dart에도 RevenueCat 결제 진단 로그를 쌓고 사용자가 복사할 수 있는 기능을 추가한다.
 
-중요:
-이 파일에는 이미 Step Expand 형식이 구현되어 있다.
-형식은 다음과 같다.
+필수 구현:
+1. store_master.dart에 Clipboard import 추가
+   import 'package:flutter/services.dart';
 
-1. 첫 턴은 유저 발화를 단순 번역하여 기본 문장으로 사용한다.
-2. 2턴부터는 유저 새 답변을 Part1로 표시하고, 기존 문장에 새 정보를 붙인 확장 문장을 Part2로 표시한다.
-3. Part1과 Part2는 빈 줄(\n\n)로 구분한다.
-4. Part2만 TTS로 읽는다.
-5. AI 질문은 영어 Part1 + 한국어 Part2 형식으로 출력한다.
-6. 5턴이 끝나면 AI 질문 없이 최종 Expanded Sentence를 표시하고 낭독한다.
-7. 이후 Polished Sentence를 자동 생성하고 낭독한다.
+2. State 클래스 안에 진단 로그 리스트와 로그 함수 추가
 
-절대 변경 금지:
-- _processRelayPipeline()의 전체 흐름
-- _localMessages 구조
-- _turnCounter / MAX_TURNS 처리
-- HOST / SYSTEM role 구조
-- Part1 + \n\n + Part2 출력 형식
-- TTS 큐 처리
-- Firestore 저장 구조
-- Expanded Sentence / Polished Sentence 자동 흐름
+예시:
+final List<String> _debugLogs = [];
 
-수정 대상:
-- StepExpandBrain.streamGrammarQuestion()의 system prompt
-- 필요 시 StepExpandBrain.streamUserTranslation()의 system prompt 일부
+void _log(String tag, String msg) {
+  final ts = DateTime.now().toIso8601String().substring(11, 23);
+  final line = '[$ts] $tag $msg';
+  print(line);
+  _debugLogs.add(line);
+  if (_debugLogs.length > 500) {
+    _debugLogs.removeRange(0, 50);
+  }
+}
 
-수정 방향:
-기존의 문법 유도형 질문 방식에 “대화 전문가형 유도 방식”을 추가한다.
+3. 화면 상단 또는 Receipt 버튼 근처에 “로그 복사” 버튼 추가
 
-AI 질문 생성 원칙:
-1. AI는 상담사처럼 길게 설명하지 않는다.
-2. AI는 공감 문장을 길게 말하지 않는다.
-3. AI는 유저를 분석하거나 평가하지 않는다.
-4. AI는 유저의 마지막 답변에서 가장 말하기 쉬운 단서 하나만 잡는다.
-5. 질문은 5~8단어의 짧은 영어 질문으로 만든다.
-6. 질문은 반드시 유저의 다음 답변이 기존 확장 문장에 붙을 수 있게 설계한다.
-7. 질문은 부담 없는 방향이어야 한다.
-8. “왜 그랬나요?”처럼 압박이 큰 질문은 피하고, “What part feels hardest?”처럼 가볍게 묻는다.
-9. 유저가 소극적이어도 한 단어 또는 짧은 구로 답할 수 있게 질문한다.
-10. 단, 질문은 너무 단순한 예/아니오 질문이 되면 안 된다.
+버튼 동작:
+- _debugLogs.join('\n') 전체를 Clipboard에 복사
+- 복사 성공 시 SnackBar 표시
+  “✅ 스토어 로그가 복사되었습니다”
 
-대화 전략:
-- 첫 1~2턴은 유저가 편하게 말할 수 있도록 넓고 부드러운 질문을 한다.
-- 유저의 첫 유의미한 답변을 기본 문장으로 삼는다.
-- 이후 매 턴 유저 답변을 이전 확장 문장에 자연스럽게 누적한다.
-- 5턴 후 최종 확장 문장과 Polished Sentence를 만든다.
+버튼 예시:
+ElevatedButton.icon(
+  icon: const Icon(Icons.copy, size: 16),
+  label: const Text('로그 복사'),
+  onPressed: () async {
+    final text = _debugLogs.join('\n');
+    await Clipboard.setData(ClipboardData(text: text));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('✅ 스토어 로그가 복사되었습니다'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+    }
+  },
+)
 
-출력 형식은 기존 코드와 반드시 동일하게 유지한다.
+4. RevenueCat 관련 주요 지점에 _log() 삽입
+
+반드시 로그 찍을 위치:
+
+A. initState
+_log('STORE', 'StoreMaster initState');
+
+B. _initRevenueCatUser 시작/성공/실패
+- currentUserUid
+- Purchases.isAnonymous 결과
+- logIn 실행 여부
+
+예:
+_log('RC_INIT', 'uid=$uid');
+_log('RC_INIT', 'isAnonymous=$isAnon');
+_log('RC_INIT', 'Purchases.logIn completed');
+
+C. 구매 버튼 클릭 시
+- plan id
+- plan title
+- currentUserUid
+- currentUserReference 존재 여부
+
+예:
+_log('PURCHASE', 'tap productId=${plan['id']} title=${plan['title']} uid=$currentUserUid');
+
+D. Purchases.getOfferings() 호출 직후
+- offerings.current 존재 여부
+- current offering identifier
+- availablePackages 개수
+- 각 package.identifier
+- 각 package.storeProduct.identifier
+- 각 package.storeProduct.priceString 가능하면 출력
+
+예:
+final offerings = await Purchases.getOfferings();
+final offering = offerings.current ?? offerings.getOffering('default');
+
+_log('OFFERINGS', 'current=${offerings.current?.identifier}');
+_log('OFFERINGS', 'default=${offerings.getOffering('default')?.identifier}');
+_log('OFFERINGS', 'selected=${offering?.identifier}');
+_log('OFFERINGS', 'packageCount=${offering?.availablePackages.length ?? 0}');
+
+for (final p in offering?.availablePackages ?? []) {
+  _log(
+    'OFFERINGS',
+    'package=${p.identifier}, product=${p.storeProduct.identifier}, price=${p.storeProduct.priceString}',
+  );
+}
+
+E. Package 매칭 결과
+- 요청 productId
+- 매칭 성공/실패
+
+예:
+_log('MATCH', 'request productId=$productId');
+_log('MATCH', 'matched package=${matchedPackage?.identifier}, product=${matchedPackage?.storeProduct.identifier}');
+
+F. 구매 실행 직전
+_log('PURCHASE', 'purchasePackage start productId=$productId');
+
+G. 구매 성공 직후
+- customerInfo originalAppUserId
+- active entitlements keys
+- all purchased product ids 가능하면 출력
+
+예:
+_log('PURCHASE', 'success appUserId=${customerInfo.originalAppUserId}');
+_log('PURCHASE', 'activeEntitlements=${customerInfo.entitlements.active.keys.join(',')}');
+
+H. _syncPurchaseData 시작/성공/실패
+- productId
+- earnedSeconds
+- clientTxId
+- current remainingTime
+- Firestore increment 성공 여부
+
+I. PlatformException catch
+- errorCode
+- e.message
+- e.details
+
+예:
+_log('ERROR', 'platform code=$errorCode message=${e.message} details=${e.details}');
+
+J. 일반 catch
+- error 내용
+- stackTrace 일부
+
+5. 기존 구매 로직 변경 금지
+이번 작업의 목적은 로그 확인이다.
+purchaseProduct → purchasePackage 변경은 아직 하지 말고,
+먼저 현재 로직에서 getOfferings 결과가 실제로 들어오는지 확인할 수 있게 로그만 추가한다.
+
+단, 현재 코드에 이미 getOfferings 진단용 코드가 들어가 있다면 그 결과도 _log에 기록해라.
+
+6. UI 깨지지 않게 로그 복사 버튼은 작게 추가
+- 가능하면 상단 Receipt 오른쪽 근처
+- 또는 스토어 상단 카드 아래
+- 기존 구매 카드 레이아웃을 크게 변경하지 말 것
+
+7. 중요:
+- RevenueCat 초기화 로직 변경 금지
+- AppsFlyer 로직 변경 금지
+- billingTicker 로직 변경 금지
+- 상품 ID/가격 변경 금지
+- remaining_seconds 증가 로직 변경 금지
+- APK/AAB 빌드 명령 실행 금지
+- 수정 후 flutter analyze 또는 FlutterFlow Custom Code Check 수준까지만 확인
+
+완료 후 보고:
+- 수정한 위치
+- 추가된 로그 태그 목록
+- 로그 복사 버튼 위치
+- 컴파일/분석 결과
