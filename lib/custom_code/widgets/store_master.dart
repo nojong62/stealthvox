@@ -19,6 +19,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 // 💡 에러의 원인이었던 외부 패키지 삭제 완료! Firebase로 대체합니다.
 
 class StoreMaster extends StatefulWidget {
@@ -38,6 +39,7 @@ class StoreMaster extends StatefulWidget {
 class _StoreMasterState extends State<StoreMaster> {
   bool isProcessing = false;
   bool _showLogCopyButton = false;
+  String _versionText = '';
 
   final List<String> _debugLogs = [];
   void _log(String tag, String msg) {
@@ -95,6 +97,18 @@ class _StoreMasterState extends State<StoreMaster> {
     _log('STORE', 'StoreMaster initState');
     // 💡 v3.7 보강: 결제 화면 첫 진입 시 한 번만 RevenueCat 사용자 연결 안전 체크
     _initRevenueCatUser();
+    _loadVersion();
+  }
+
+  Future<void> _loadVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (mounted) {
+        setState(() {
+          _versionText = 'v${info.version} (${info.buildNumber})';
+        });
+      }
+    } catch (_) {}
   }
 
   // 💡 v3.7 보강: 결제 화면 최초 진입 시 한 번만 실행 — 매 결제마다 재로그인하지 않음
@@ -629,7 +643,7 @@ class _StoreMasterState extends State<StoreMaster> {
 
                   // 하단 부가 기능 메뉴
                   Padding(
-                    padding: const EdgeInsets.only(bottom: 20, top: 10),
+                    padding: const EdgeInsets.only(bottom: 4, top: 10),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
@@ -657,6 +671,15 @@ class _StoreMasterState extends State<StoreMaster> {
                                   decoration: TextDecoration.underline)),
                         ),
                       ],
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Text(
+                      _versionText,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                          color: Colors.white24, fontSize: 10),
                     ),
                   ),
                 ],
