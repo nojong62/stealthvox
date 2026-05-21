@@ -153,6 +153,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
   final Stopwatch _swOpenAI = Stopwatch();
   final Stopwatch _swTTS = Stopwatch();
   String _debugResult = "⏱️ 대기 중";
+  DateTime? _lastScrollThrottle;
 
   @override
   void initState() {
@@ -1171,6 +1172,33 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
     });
   }
 
+  void _scrollToBottomThrottled() {
+    final now = DateTime.now();
+    if (_lastScrollThrottle == null ||
+        now.difference(_lastScrollThrottle!) >=
+            const Duration(milliseconds: 250)) {
+      _lastScrollThrottle = now;
+      _scrollToBottom();
+    }
+  }
+
+  // 현재 대사를 화면 맨 위에 고정 — Scrollable.ensureVisible 기반
+  void _scrollToCurrentTop(int index) {
+    _log('🧭 [SCROLL-TOP]', 'index=$index');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final key = _itemKeys[index];
+      if (key == null) return;
+      final ctx = key.currentContext;
+      if (ctx == null) return;
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.02,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
   String _cleanText(String text) {
     return text
         .replaceAll(RegExp(r'\[.*?\]'), '')
@@ -1213,7 +1241,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
         setState(() {
           _localMessages.add({'role': 'SYSTEM', 'target': '', 'original': ''});
         });
-        _scrollToCurrent(_localMessages.length - 1);
+        _scrollToBottom();
       }
       final int aiIndex = _localMessages.length - 1;
 
@@ -1819,8 +1847,10 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
           if (_swOpenAI.isRunning) _swOpenAI.stop();
           aiTargetText += chunk;
           // aiBuffer += chunk; // [하이브리드 전환] HybridTtsPlayer 내부에서 처리 (롤백 가능)
-          if (mounted && !_ttsQueueManager.aiPaused)
+          if (mounted && !_ttsQueueManager.aiPaused) {
             setState(() => _localMessages[aiIndex]['target'] = aiTargetText);
+            _scrollToBottomThrottled();
+          }
 
           // [하이브리드 전환] HybridTtsPlayer.onChunk로 대체 (롤백 가능)
           _hybridTtsPlayer!.onChunk(chunk);
@@ -1901,8 +1931,10 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
       _ttsQueueManager.setAiPaused(false);
       _log('🧠 [PIPE-07]', 'setUserTurn(false) + setAiPaused(false). AI 재생 시작');
       // [v3.6] PIPE-07 시점: 버퍼된 AI 텍스트 일괄 표시
-      if (mounted && aiTargetText.isNotEmpty)
+      if (mounted && aiTargetText.isNotEmpty) {
         setState(() => _localMessages[aiIndex]['target'] = aiTargetText);
+        _scrollToCurrentTop(aiIndex);
+      }
 
       // AI 역번역을 AI TTS 재생 전에 미리 시작 (백그라운드)
       CloneBrain.generateCleanOriginal(
@@ -2256,7 +2288,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
         ),
       );
     }
-    final double bottomPad = MediaQuery.of(context).size.height * 0.4;
+    final double bottomPad = MediaQuery.of(context).size.height * 0.55;
     return ListView.builder(
       controller: _scrollController,
       padding: EdgeInsets.fromLTRB(16, 16, 16, bottomPad),
