@@ -38,174 +38,126 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-[StealthVox StoreMaster RevenueCat 진단 로그 복사 기능 추가]
+# Claude Code 지시문 v3.9 — 한국어 주어 판별 강화 (Clone + Roleplay)
 
-대상 파일:
-- lib/custom_code/widgets/store_master.dart
+## 목적
+GPT-4o-mini가 한국어 → 영어 번역 시 주어/목적어를 혼동하는 문제를 개선한다.
+모델은 변경하지 않고, 시스템 프롬프트에 **한국어 조사 기반 판별 규칙(B)** + **틀리기 쉬운 패턴의 Few-shot 예시(C)**를 추가한다.
 
-참고 파일:
-- lib/custom_code/widgets/routine_mode_roleplay.dart
+## 대상 파일 및 위치
 
-목표:
-routine_mode_roleplay.dart에 있는 화면 로그 구조처럼,
-store_master.dart에도 RevenueCat 결제 진단 로그를 쌓고 사용자가 복사할 수 있는 기능을 추가한다.
+| 파일 | 클래스 | 함수 | 줄 번호 (대략) |
+|------|--------|------|----------------|
+| `routine_mode_clone.dart` | `CloneBrain` | `streamUserTranslation` | 3379~3394 (sysPrompt 문자열) |
+| `routine_mode_roleplay.dart` | `RoleplayBrain` | `streamUserTranslation` | 3348~3363 (sysPrompt 문자열) |
 
-필수 구현:
-1. store_master.dart에 Clipboard import 추가
-   import 'package:flutter/services.dart';
+## 변경 원칙
 
-2. State 클래스 안에 진단 로그 리스트와 로그 함수 추가
+1. **코드 구조는 일체 변경하지 않는다** — sysPrompt 문자열 내부의 텍스트만 수정
+2. **기존 섹션은 모두 유지한다** — `[INTERNAL THINKING]`, `[OUTPUT RULES]` 등 기존 구조 보존
+3. **두 개의 새 섹션을 `[INTERNAL THINKING]`과 `[OUTPUT RULES]` 사이에 삽입한다**
+4. 따옴표/이스케이프 주의: 프롬프트 내부 영어 문자열은 큰따옴표(`"`) 사용. Dart 삼중따옴표(`'''` 또는 `"""`) 내부이므로 작은따옴표 이스케이프 문제 없는지 확인할 것
 
-예시:
-final List<String> _debugLogs = [];
+---
 
-void _log(String tag, String msg) {
-  final ts = DateTime.now().toIso8601String().substring(11, 23);
-  final line = '[$ts] $tag $msg';
-  print(line);
-  _debugLogs.add(line);
-  if (_debugLogs.length > 500) {
-    _debugLogs.removeRange(0, 50);
-  }
-}
+## 변경 ①: routine_mode_clone.dart — CloneBrain.streamUserTranslation
 
-3. 화면 상단 또는 Receipt 버튼 근처에 “로그 복사” 버튼 추가
+### 현재 코드 (삭제 대상)
+```
+[INTERNAL THINKING - do not output]
+Step 1. CONTEXT CHECK: Review the conversation history to identify who is speaking, who is being addressed, and who/what is the current topic.
+Step 2. SUBJECT RESTORATION: Identify any omitted subject, object, or pronoun in the current Korean input and restore them based on context.
+Step 3. TRANSLATE: Produce natural, fluent $targetLang with explicit subjects (I, you, he, she, they, we).
 
-버튼 동작:
-- _debugLogs.join('\n') 전체를 Clipboard에 복사
-- 복사 성공 시 SnackBar 표시
-  “✅ 스토어 로그가 복사되었습니다”
+[OUTPUT RULES]
+```
 
-버튼 예시:
-ElevatedButton.icon(
-  icon: const Icon(Icons.copy, size: 16),
-  label: const Text('로그 복사'),
-  onPressed: () async {
-    final text = _debugLogs.join('\n');
-    await Clipboard.setData(ClipboardData(text: text));
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('✅ 스토어 로그가 복사되었습니다'),
-          duration: Duration(seconds: 1),
-        ),
-      );
-    }
-  },
-)
+### 교체할 코드
+```
+[INTERNAL THINKING - do not output]
+Step 1. CONTEXT CHECK: Review the conversation history to identify who is speaking, who is being addressed, and who/what is the current topic.
+Step 2. SUBJECT RESTORATION: Identify any omitted subject, object, or pronoun in the current Korean input and restore them based on context.
+  Use these Korean grammar markers to determine roles:
+  - ~이/가 = SUBJECT marker (doer of action): "엄마가 사줬어" → Mom bought it (Mom is subject)
+  - ~은/는 = TOPIC marker (often the subject): "나는 갔어" → I went
+  - ~한테/에게 = RECIPIENT marker (indirect object): "나한테 줬어" → gave it TO ME
+  - ~을/를 = OBJECT marker (thing acted upon): "그걸 봤어" → saw THAT
+  - Honorific ~(으)시 attaches to the SUBJECT's verb: "선생님이 오셨어" → The teacher came (teacher is subject, not me)
+  - ~해줬어/해주셨어 = someone did something FOR someone else: the person before 가/이 is the doer
+Step 3. TRANSLATE: Produce natural, fluent $targetLang with explicit subjects (I, you, he, she, they, we).
 
-4. RevenueCat 관련 주요 지점에 _log() 삽입
+[COMMON MISTAKES - avoid these]
+Korean: "걔가 나한테 전화했어" → CORRECT: He called me. WRONG: I called him.
+Korean: "엄마가 용돈 줬어" → CORRECT: Mom gave me allowance. WRONG: I gave mom allowance.
+Korean: "선생님이 칭찬해주셨어" → CORRECT: The teacher praised me. WRONG: I praised the teacher.
+Korean: "친구가 요즘 바빠서 못 만나" → CORRECT: My friend is busy lately, so I can't meet him. WRONG: I'm busy lately...
+The particle before the verb's doer (이/가) is ALWAYS the subject. Never swap subject and object.
 
-반드시 로그 찍을 위치:
+[OUTPUT RULES]
+```
 
-A. initState
-_log('STORE', 'StoreMaster initState');
+---
 
-B. _initRevenueCatUser 시작/성공/실패
-- currentUserUid
-- Purchases.isAnonymous 결과
-- logIn 실행 여부
+## 변경 ②: routine_mode_roleplay.dart — RoleplayBrain.streamUserTranslation
 
-예:
-_log('RC_INIT', 'uid=$uid');
-_log('RC_INIT', 'isAnonymous=$isAnon');
-_log('RC_INIT', 'Purchases.logIn completed');
+### 현재 코드 (삭제 대상)
+```
+[INTERNAL THINKING - do not output]
+Step 1. CONTEXT CHECK: Review conversation history.
+Step 2. SUBJECT RESTORATION: The speaker is${userRole.isNotEmpty ? ' a "$userRole"' : ' the user'}. Identify and restore any omitted subject/pronoun from THEIR perspective.
+Step 3. TRANSLATE: Produce natural $targetLang speech that fits${userRole.isNotEmpty ? ' the "$userRole" role' : ' the user'}.
 
-C. 구매 버튼 클릭 시
-- plan id
-- plan title
-- currentUserUid
-- currentUserReference 존재 여부
+[OUTPUT RULES]
+```
 
-예:
-_log('PURCHASE', 'tap productId=${plan['id']} title=${plan['title']} uid=$currentUserUid');
+### 교체할 코드
+```
+[INTERNAL THINKING - do not output]
+Step 1. CONTEXT CHECK: Review conversation history.
+Step 2. SUBJECT RESTORATION: The speaker is${userRole.isNotEmpty ? ' a "$userRole"' : ' the user'}. Identify and restore any omitted subject/pronoun from THEIR perspective.
+  Use these Korean grammar markers to determine roles:
+  - ~이/가 = SUBJECT marker (doer of action): "엄마가 사줬어" → Mom bought it (Mom is subject)
+  - ~은/는 = TOPIC marker (often the subject): "나는 갔어" → I went
+  - ~한테/에게 = RECIPIENT marker (indirect object): "나한테 줬어" → gave it TO ME
+  - ~을/를 = OBJECT marker (thing acted upon): "그걸 봤어" → saw THAT
+  - Honorific ~(으)시 attaches to the SUBJECT's verb: "선생님이 오셨어" → The teacher came (teacher is subject, not me)
+  - ~해줬어/해주셨어 = someone did something FOR someone else: the person before 가/이 is the doer
+Step 3. TRANSLATE: Produce natural $targetLang speech that fits${userRole.isNotEmpty ? ' the "$userRole" role' : ' the user'}.
 
-D. Purchases.getOfferings() 호출 직후
-- offerings.current 존재 여부
-- current offering identifier
-- availablePackages 개수
-- 각 package.identifier
-- 각 package.storeProduct.identifier
-- 각 package.storeProduct.priceString 가능하면 출력
+[COMMON MISTAKES - avoid these]
+Korean: "걔가 나한테 전화했어" → CORRECT: He called me. WRONG: I called him.
+Korean: "엄마가 용돈 줬어" → CORRECT: Mom gave me allowance. WRONG: I gave mom allowance.
+Korean: "선생님이 칭찬해주셨어" → CORRECT: The teacher praised me. WRONG: I praised the teacher.
+Korean: "친구가 요즘 바빠서 못 만나" → CORRECT: My friend is busy lately, so I can't meet him. WRONG: I'm busy lately...
+The particle before the verb's doer (이/가) is ALWAYS the subject. Never swap subject and object.
 
-예:
-final offerings = await Purchases.getOfferings();
-final offering = offerings.current ?? offerings.getOffering('default');
+[OUTPUT RULES]
+```
 
-_log('OFFERINGS', 'current=${offerings.current?.identifier}');
-_log('OFFERINGS', 'default=${offerings.getOffering('default')?.identifier}');
-_log('OFFERINGS', 'selected=${offering?.identifier}');
-_log('OFFERINGS', 'packageCount=${offering?.availablePackages.length ?? 0}');
+---
 
-for (final p in offering?.availablePackages ?? []) {
-  _log(
-    'OFFERINGS',
-    'package=${p.identifier}, product=${p.storeProduct.identifier}, price=${p.storeProduct.priceString}',
-  );
-}
+## 검증 체크리스트 (Claude Code가 완료 후 확인)
 
-E. Package 매칭 결과
-- 요청 productId
-- 매칭 성공/실패
+- [ ] Clone: sysPrompt 내부에 `[COMMON MISTAKES - avoid these]` 섹션이 존재하는가?
+- [ ] Clone: `Step 2. SUBJECT RESTORATION:` 아래에 조사 마커 6줄이 들어갔는가?
+- [ ] Roleplay: sysPrompt 내부에 `[COMMON MISTAKES - avoid these]` 섹션이 존재하는가?
+- [ ] Roleplay: `Step 2. SUBJECT RESTORATION:` 아래에 조사 마커 6줄이 들어갔는가?
+- [ ] 두 파일 모두 `[OUTPUT RULES]` 섹션이 기존 그대로 유지되는가?
+- [ ] Dart 문법 에러 없음 (따옴표 이스케이프, 삼중따옴표 경계 확인)
+- [ ] `$targetLang`, `$userRole` 등 Dart 변수 보간이 깨지지 않았는가?
+- [ ] Roleplay의 `${userRole.isNotEmpty ? ...}` 삼항 표현식이 그대로 유지되는가?
 
-예:
-_log('MATCH', 'request productId=$productId');
-_log('MATCH', 'matched package=${matchedPackage?.identifier}, product=${matchedPackage?.storeProduct.identifier}');
+## 토큰 영향 분석
 
-F. 구매 실행 직전
-_log('PURCHASE', 'purchasePackage start productId=$productId');
+추가되는 프롬프트 텍스트: 약 180 토큰 (각 모드당)
+- 조사 마커 규칙: ~100 토큰
+- Few-shot 틀린 예시: ~80 토큰
+- GPT-4o-mini max_tokens=120은 그대로 유지 (출력 제한이므로 시스템 프롬프트 증가와 무관)
+- 전체 요청 토큰이 약 180 증가하지만, 4o-mini의 128K 컨텍스트 대비 무시 가능
 
-G. 구매 성공 직후
-- customerInfo originalAppUserId
-- active entitlements keys
-- all purchased product ids 가능하면 출력
+## 절대 건드리지 말 것
 
-예:
-_log('PURCHASE', 'success appUserId=${customerInfo.originalAppUserId}');
-_log('PURCHASE', 'activeEntitlements=${customerInfo.entitlements.active.keys.join(',')}');
-
-H. _syncPurchaseData 시작/성공/실패
-- productId
-- earnedSeconds
-- clientTxId
-- current remainingTime
-- Firestore increment 성공 여부
-
-I. PlatformException catch
-- errorCode
-- e.message
-- e.details
-
-예:
-_log('ERROR', 'platform code=$errorCode message=${e.message} details=${e.details}');
-
-J. 일반 catch
-- error 내용
-- stackTrace 일부
-
-5. 기존 구매 로직 변경 금지
-이번 작업의 목적은 로그 확인이다.
-purchaseProduct → purchasePackage 변경은 아직 하지 말고,
-먼저 현재 로직에서 getOfferings 결과가 실제로 들어오는지 확인할 수 있게 로그만 추가한다.
-
-단, 현재 코드에 이미 getOfferings 진단용 코드가 들어가 있다면 그 결과도 _log에 기록해라.
-
-6. UI 깨지지 않게 로그 복사 버튼은 작게 추가
-- 가능하면 상단 Receipt 오른쪽 근처
-- 또는 스토어 상단 카드 아래
-- 기존 구매 카드 레이아웃을 크게 변경하지 말 것
-
-7. 중요:
-- RevenueCat 초기화 로직 변경 금지
-- AppsFlyer 로직 변경 금지
-- billingTicker 로직 변경 금지
-- 상품 ID/가격 변경 금지
-- remaining_seconds 증가 로직 변경 금지
-- APK/AAB 빌드 명령 실행 금지
-- 수정 후 flutter analyze 또는 FlutterFlow Custom Code Check 수준까지만 확인
-
-완료 후 보고:
-- 수정한 위치
-- 추가된 로그 태그 목록
-- 로그 복사 버튼 위치
-- 컴파일/분석 결과
+- sysPrompt 바깥의 Dart 코드 (http.Client, request, response 처리 등)
+- `temperature`, `max_tokens`, `model` 파라미터
+- `[EVAPORATE]` 관련 로직
+- Box 7 (TtsQueueManager, DeepgramV2VoiceManager) 코드 전체
