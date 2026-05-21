@@ -103,10 +103,8 @@ class _StoreMasterState extends State<StoreMaster> {
   }
 
   Future<void> _executePurchase(Map<String, dynamic> plan) async {
-    // 💡 v3.7 보강: 중복 탭 방지 — 처리 중일 때 즉시 리턴
     if (isProcessing) return;
 
-    // 💡 v3.7 보강: 비로그인 사용자 차단
     if (currentUserReference == null) {
       _showFeedback("로그인 후 이용해 주세요.", const Color(0xFFF87171));
       return;
@@ -114,12 +112,41 @@ class _StoreMasterState extends State<StoreMaster> {
 
     setState(() => isProcessing = true);
     try {
-      // 💡 v3.7.2: 결제 호출. 에러 없이 리턴되면 결제 성공으로 간주.
-      // (RevenueCat Flutter SDK가 신뢰할 수 있는 transactionId를 제공하지 않아
-      // 트랜잭션 검증 대신 시간 기반 중복 방지 사용)
-      await Purchases.purchaseProduct(plan['id']);
+      // RevenueCat 권장 흐름: Offerings → Package 매칭 → purchasePackage
+      final offerings = await Purchases.getOfferings();
+      final offering = offerings.current ?? offerings.all['default'];
 
-      // 💡 v3.7.2: 클라이언트 UUID 생성 (향후 RevenueCat 웹훅 ID와 매핑 가능)
+      if (offering == null) {
+        debugPrint('[RevenueCat] No current or default offering found');
+        _showFeedback(
+            "상품 정보를 아직 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", const Color(0xFFF87171));
+        return;
+      }
+
+      final targetProductId = plan['id'] as String;
+      Package? matchedPackage;
+      for (final pkg in offering.availablePackages) {
+        if (pkg.storeProduct.identifier == targetProductId) {
+          matchedPackage = pkg;
+          break;
+        }
+      }
+
+      if (matchedPackage == null) {
+        debugPrint('[RevenueCat] Package not found — productId: $targetProductId');
+        debugPrint('[RevenueCat] current offering: ${offering.identifier}');
+        debugPrint(
+            '[RevenueCat] available package identifiers: ${offering.availablePackages.map((p) => p.identifier).toList()}');
+        debugPrint(
+            '[RevenueCat] available store product identifiers: ${offering.availablePackages.map((p) => p.storeProduct.identifier).toList()}');
+        _showFeedback(
+            "상품 정보를 아직 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", const Color(0xFFF87171));
+        return;
+      }
+
+      await Purchases.purchase(PurchaseParams.package(matchedPackage));
+
+      // 클라이언트 UUID 생성 (RevenueCat 웹훅 ID와 매핑 가능)
       final uid = currentUserUid ?? 'anon';
       final uidPrefix = uid.length >= 6 ? uid.substring(0, 6) : uid;
       final clientTxId =
@@ -128,7 +155,6 @@ class _StoreMasterState extends State<StoreMaster> {
       await _syncPurchaseData(plan, clientTxId);
       _showFeedback("✅ 충전 완료! (${plan['title']})", const Color(0xFF34D399));
     } on PlatformException catch (e) {
-      // 💡 v3.7 보강: 에러 코드별 세분화 안내
       final errorCode = PurchasesErrorHelper.getErrorCode(e);
       if (errorCode == PurchasesErrorCode.purchaseCancelledError) {
         _showFeedback("결제가 취소되었습니다.", Colors.white54);
@@ -140,11 +166,9 @@ class _StoreMasterState extends State<StoreMaster> {
         _showFeedback("네트워크 연결을 확인해 주세요.", const Color(0xFFF87171));
       } else if (errorCode == PurchasesErrorCode.storeProblemError) {
         _showFeedback("스토어 점검 중입니다. 잠시 후 다시 시도해 주세요.", const Color(0xFFF87171));
-      } else if (errorCode ==
-          PurchasesErrorCode.productNotAvailableForPurchaseError) {
-        _showFeedback("현재 구매할 수 없는 상품입니다.", const Color(0xFFF87171));
       } else {
-        _showFeedback("결제 실패: ${e.message}", const Color(0xFFF87171));
+        _showFeedback("결제 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
+            const Color(0xFFF87171));
       }
     } finally {
       if (mounted) setState(() => isProcessing = false);
