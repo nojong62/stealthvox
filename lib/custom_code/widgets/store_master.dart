@@ -37,6 +37,7 @@ class StoreMaster extends StatefulWidget {
 
 class _StoreMasterState extends State<StoreMaster> {
   bool isProcessing = false;
+  bool _showLogCopyButton = false;
 
   final List<String> _debugLogs = [];
   void _log(String tag, String msg) {
@@ -461,25 +462,26 @@ class _StoreMasterState extends State<StoreMaster> {
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            IconButton(
-                              icon: const Icon(Icons.copy,
-                                  color: Colors.white38, size: 18),
-                              tooltip: '로그 복사',
-                              onPressed: () async {
-                                final text = _debugLogs.join('\n');
-                                await Clipboard.setData(
-                                    ClipboardData(text: text));
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content:
-                                          Text('✅ 스토어 로그가 복사되었습니다'),
-                                      duration: Duration(seconds: 1),
-                                    ),
-                                  );
-                                }
-                              },
-                            ),
+                            if (_showLogCopyButton)
+                              IconButton(
+                                icon: const Icon(Icons.copy,
+                                    color: Colors.amber, size: 18),
+                                tooltip: '로그 복사',
+                                onPressed: () async {
+                                  final text = _debugLogs.join('\n');
+                                  await Clipboard.setData(
+                                      ClipboardData(text: text));
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content:
+                                            Text('✅ 스토어 로그가 복사되었습니다'),
+                                        duration: Duration(seconds: 1),
+                                      ),
+                                    );
+                                  }
+                                },
+                              ),
                             TextButton.icon(
                               onPressed: _openReceiptSheet,
                               icon: const Icon(Icons.receipt_long_rounded,
@@ -513,8 +515,12 @@ class _StoreMasterState extends State<StoreMaster> {
                             ),
                             child: Column(
                               children: [
-                                const Icon(Icons.shield_moon_rounded,
-                                    color: Colors.amber, size: 28),
+                                GestureDetector(
+                                  onTap: () => setState(
+                                      () => _showLogCopyButton = !_showLogCopyButton),
+                                  child: const Icon(Icons.shield_moon_rounded,
+                                      color: Colors.amber, size: 28),
+                                ),
                                 const SizedBox(height: 10),
                                 Text("REMAINING TIME",
                                     style: GoogleFonts.orbitron(
