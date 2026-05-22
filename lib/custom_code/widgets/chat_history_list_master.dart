@@ -67,10 +67,13 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
   void initState() {
     super.initState();
     _fetchApiKey();
+    BillingTicker.instance.setRate(BillingRate.discounted);
+    BillingTicker.instance.resume();
   }
 
   @override
   void dispose() {
+    BillingTicker.instance.pause();
     _keeperAudioPlayer?.dispose();
     _keeperCorrectionPlayer?.dispose();
     if (_keeperIsRecording) {
