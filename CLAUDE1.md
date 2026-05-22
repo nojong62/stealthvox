@@ -38,3 +38,115 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
+[StealthVox Keepers 로딩 무한 회전 문제 수정 지시문]
+
+현재 증상:
+ChatHistoryListMaster 화면에서 Keepers 버튼을 누르면 저장된 표현이 없거나 일부 표현이 있어도 CircularProgressIndicator가 계속 돌고 목록/빈 화면이 정상 표시되지 않는다.
+
+대상 파일:
+- lib/custom_code/widgets/chat_history_list_master.dart
+
+핵심 원인으로 의심되는 부분:
+_buildKeepersBody()에서 Firestore 조회를 다음처럼 하고 있다.
+
+currentUserReference!
+  .collection('keepers')
+  .where('is_deleted', isEqualTo: false)
+  .orderBy('pinned_at', descending: true)
+  .orderBy('created_at', descending: true)
+  .snapshots()
+
+이 쿼리는 Firestore 복합 인덱스가 없으면 에러가 나며,
+현재 fallback StreamBuilder에도 fallbackSnap.hasError 처리가 없어 에러 상태에서 계속 로딩 스피너만 보일 수 있다.
+
+수정 목표:
+Keepers 화면은 어떤 경우에도 무한 로딩 상태로 남으면 안 된다.
+
+수정 지시:
+
+1. _buildKeepersBody()의 Firestore 쿼리를 단순화한다.
+
+우선 1차 안정화에서는 아래처럼 조회한다.
+
+- currentUserReference!.collection('keepers')
+- where('is_deleted', isEqualTo: false)
+- orderBy('created_at', descending: true)
+
+pinned_at orderBy는 제거한다.
+
+이유:
+- pinned_at은 모든 Keeper 문서에 존재하지 않을 수 있다.
+- pinned_at + created_at 복합 정렬은 Firestore 인덱스 문제가 생길 수 있다.
+- 우선 created_at 기준으로 안정 조회한 뒤, Dart 쪽에서 pinned_at이 있는 항목을 위로 올리는 방식이 안전하다.
+
+2. 정렬은 Firestore가 아니라 Dart에서 처리한다.
+
+snapshot.data!.docs를 받은 뒤 다음 순서로 정렬한다.
+
+- pinned_at이 있는 문서가 먼저
+- pinned_at이 둘 다 있으면 pinned_at 최신순
+- pinned_at이 없으면 created_at 최신순
+
+즉, Firestore 쿼리는 단순하게 유지하고,
+Keepers 최상단 고정 정렬은 클라이언트에서 처리한다.
+
+3. snapshot.hasError 처리를 반드시 추가한다.
+
+_buildKeepersBody() 안에서 snapshot.hasError가 true이면 무한 스피너를 보여주지 말고 에러 안내 UI를 보여준다.
+
+예:
+- “Keepers를 불러오지 못했습니다.”
+- “잠시 후 다시 시도해 주세요.”
+- debugPrint로 snapshot.error 출력
+
+4. fallback StreamBuilder를 제거하거나, fallback에도 hasError 처리를 추가한다.
+
+추천:
+- fallback StreamBuilder는 제거한다.
+- 단순 쿼리 하나만 사용한다.
+- 에러/로딩/빈 목록/정상 목록 상태를 명확히 분기한다.
+
+상태 분기 순서:
+- if snapshot.hasError → 에러 안내 UI
+- if snapshot.connectionState == ConnectionState.waiting → 로딩
+- if !snapshot.hasData → 빈 목록 UI
+- docs.isEmpty → 빈 목록 UI
+- else → _buildKeepersList(sortedDocs)
+
+5. Keepers 저장 시 모든 문서에 필수 기본 필드를 넣는다.
+
+Keeper 문서 생성 시 반드시 아래 필드를 포함한다.
+
+- is_deleted: false
+- created_at: FieldValue.serverTimestamp()
+- updated_at: FieldValue.serverTimestamp()
+- pinned_at: null 또는 아예 미포함
+
+중요:
+is_deleted 필드가 없으면 where('is_deleted', isEqualTo: false) 쿼리에 잡히지 않는다.
+따라서 기존에 is_deleted가 없는 Keeper 문서가 있다면 보정 마이그레이션도 필요하다.
+
+6. 기존 Keeper 문서 보정 로직을 추가하거나 임시 보정한다.
+
+이미 저장된 keepers 문서 중 is_deleted 필드가 없는 문서가 있으면:
+- is_deleted: false
+- updated_at: FieldValue.serverTimestamp()
+
+를 추가한다.
+
+이 보정은 임시 함수로 한 번 실행하거나,
+Keepers 조회 전에 누락 필드가 있는 문서를 안전하게 처리하는 방식으로 구현한다.
+
+7. _buildKeepersList()에 전달하기 전에 docs 타입 오류가 나지 않도록 확인한다.
+
+현재 _buildKeepersList(List<QueryDocumentSnapshot> docs) 형태라면,
+snapshot.data!.docs 타입과 맞는지 확인하고 필요하면 List<QueryDocumentSnapshot<Object?>> 형태로 맞춘다.
+
+8. 완료 후 보고할 것:
+
+- _buildKeepersBody() 수정 내용
+- Firestore 쿼리 단순화 여부
+- pinned_at 정렬을 Dart 쪽으로 옮겼는지 여부
+- snapshot.hasError 처리 추가 여부
+- is_deleted 누락 문서 대응 여부
+- flutter analyze 결과
