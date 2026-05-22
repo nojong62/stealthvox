@@ -3056,57 +3056,49 @@ RULES — follow exactly:
                     controlButtons,
                     const SizedBox(width: 6),
                   ],
-                  // 말풍선 본체 (탭 → Keepers 저장)
+                  // 말풍선 본체
                   Flexible(
-                    child: GestureDetector(
-                      onTap: () => _saveToKeepers(
-                        messageDocId: docId,
-                        translatedText: translated,
-                        originalText: original,
-                        speakerRole: isHost ? 'HOST' : 'USER',
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      constraints: BoxConstraints(
+                          maxWidth: MediaQuery.of(context).size.width * 0.75),
+                      decoration: BoxDecoration(
+                        color: isHost
+                            ? const Color(0xFF2C2C2E)
+                            : const Color(0xFF2563EB).withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(16),
+                        border: isHost
+                            ? null
+                            : Border.all(
+                                color:
+                                    const Color(0xFF2563EB).withOpacity(0.3)),
                       ),
-                      child: Container(
-                        padding: const EdgeInsets.all(16),
-                        constraints: BoxConstraints(
-                            maxWidth: MediaQuery.of(context).size.width * 0.75),
-                        decoration: BoxDecoration(
-                          color: isHost
-                              ? const Color(0xFF2C2C2E)
-                              : const Color(0xFF2563EB).withOpacity(0.15),
-                          borderRadius: BorderRadius.circular(16),
-                          border: isHost
-                              ? null
-                              : Border.all(
-                                  color:
-                                      const Color(0xFF2563EB).withOpacity(0.3)),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: isHost
-                              ? CrossAxisAlignment.end
-                              : CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(translated,
+                      child: Column(
+                        crossAxisAlignment: isHost
+                            ? CrossAxisAlignment.end
+                            : CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(translated,
+                              textAlign:
+                                  isHost ? TextAlign.right : TextAlign.left,
+                              style: TextStyle(
+                                  color: isHost
+                                      ? Colors.white
+                                      : const Color(0xFF93C5FD),
+                                  fontSize: 16 * _fontScale,
+                                  fontWeight: FontWeight.bold,
+                                  height: 1.4)),
+                          if (_showOriginal && original.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            Text(original,
                                 textAlign:
                                     isHost ? TextAlign.right : TextAlign.left,
                                 style: TextStyle(
-                                    color: isHost
-                                        ? Colors.white
-                                        : const Color(0xFF93C5FD),
-                                    fontSize: 16 * _fontScale,
-                                    fontWeight: FontWeight.bold,
-                                    height: 1.4)),
-                            if (_showOriginal && original.isNotEmpty) ...[
-                              const SizedBox(height: 8),
-                              Text(original,
-                                  textAlign:
-                                      isHost ? TextAlign.right : TextAlign.left,
-                                  style: TextStyle(
-                                      color: Colors.grey,
-                                      fontSize: 12 * _fontScale)),
-                            ],
+                                    color: Colors.grey,
+                                    fontSize: 12 * _fontScale)),
                           ],
-                        ),
+                        ],
                       ),
                     ),
                   ),
@@ -3136,74 +3128,6 @@ RULES — follow exactly:
         );
       },
     );
-  }
-
-  // 📦 [Keepers: 대사 → Keepers 복사 저장 + 중복 방지]
-  Future<void> _saveToKeepers({
-    required String messageDocId,
-    required String translatedText,
-    required String originalText,
-    required String speakerRole,
-  }) async {
-    if (translatedText.trim().isEmpty) return;
-    final userRef = FirebaseAuth.instance.currentUser;
-    if (userRef == null) return;
-    final keepersRef = FirebaseFirestore.instance
-        .collection('users')
-        .doc(userRef.uid)
-        .collection('keepers');
-
-    try {
-      // ── 중복 체크: source_message_id 기준 ──
-      final existing = await keepersRef
-          .where('source_message_id', isEqualTo: messageDocId)
-          .limit(1)
-          .get();
-
-      if (existing.docs.isNotEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text("이미 Keepers에 저장된 표현입니다.",
-                style: TextStyle(fontWeight: FontWeight.bold)),
-            backgroundColor: Color(0xFF6B7280),
-            duration: Duration(seconds: 1),
-          ));
-        }
-        return;
-      }
-
-      // ── 새 Keeper 문서 생성 ──
-      await keepersRef.add({
-        'translated_text': translatedText,
-        'original_text': originalText,
-        'speaker_role': speakerRole,
-        'source_message_id': messageDocId,
-        'source_room_id': widget.historyDoc.id,
-        'source_room_name': roomName,
-        'created_at': FieldValue.serverTimestamp(),
-        'pinned_at': null,
-        'is_deleted': false,
-      });
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("Keepers에 저장되었습니다. ⭐",
-              style: TextStyle(fontWeight: FontWeight.bold)),
-          backgroundColor: Color(0xFFD97706),
-          duration: Duration(seconds: 1),
-        ));
-      }
-    } catch (e) {
-      debugPrint('[saveToKeepers] $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("저장에 실패했습니다.",
-              style: TextStyle(fontWeight: FontWeight.bold)),
-          backgroundColor: Colors.redAccent,
-          duration: Duration(seconds: 1),
-        ));
-      }
-    }
   }
 
   // 📦 [Box 22-B: Variant 선택 화면]

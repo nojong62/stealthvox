@@ -46,7 +46,10 @@
       "Bash(where keytool *)",
       "PowerShell($javaHome = $env:JAVA_HOME; if \\($javaHome\\) { \"$javaHome\\\\bin\\\\keytool.exe\" } else { Get-ChildItem \"C:\\\\Program Files\\\\Java\",\"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jbr\\\\bin\",\"C:\\\\Program Files\\\\Android\\\\Android Studio\\\\jre\\\\bin\" -Filter keytool.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 3 -ExpandProperty FullName })",
       "Bash(Select-String -Pattern \"error\")",
-      "Bash(Select-Object -First 20)"
+      "Bash(Select-Object -First 20)",
+      "Bash(Copy-Item \"F:\\\\flutter_project\\\\stealth_vox\\\\build\\\\app\\\\outputs\\\\bundle\\\\release\\\\app-release.aab\" \"F:\\\\flutter_project\\\\stealth_vox\\\\build\\\\app\\\\outputs\\\\bundle\\\\release\\\\StealthVox_v1.0.26_build26.aab\")",
+      "Bash(Get-Item \"F:\\\\flutter_project\\\\stealth_vox\\\\build\\\\app\\\\outputs\\\\bundle\\\\release\\\\StealthVox_v1.0.26_build26.aab\")",
+      "Bash(Select-Object Name, Length, LastWriteTime)"
     ]
   }
 }
