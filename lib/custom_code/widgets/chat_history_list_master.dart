@@ -78,7 +78,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
     _keeperAudioPlayer?.dispose();
     _keeperCorrectionPlayer?.dispose();
     if (_keeperIsRecording) {
-      _keeperRecorder?.stop().catchError((_) {});
+      _keeperRecorder?.stop().catchError((_) => null);
     }
     _keeperRecorder?.dispose();
     super.dispose();
@@ -968,7 +968,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
       BillingTicker.instance.setRate(BillingRate.discounted);
       _keeperDialogSetState = null;
       if (_keeperIsRecording) {
-        _keeperRecorder?.stop().catchError((_) {});
+        _keeperRecorder?.stop().catchError((_) => null);
       }
       _keeperIsRecording = false;
       _keeperCorrectedAudio = null;
