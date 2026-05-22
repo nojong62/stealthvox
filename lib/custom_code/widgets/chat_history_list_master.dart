@@ -64,6 +64,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
   // Keepers 색상 상수
   static const Color _keepersColor = Color(0xFFD97706); // 앰버/골드
 
+  bool _keepersMigrateOnce = false;
+
   @override
   void initState() {
     super.initState();
@@ -256,36 +258,80 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
   //  Keepers 바디
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Widget _buildKeepersBody() {
+    if (!_keepersMigrateOnce) {
+      _keepersMigrateOnce = true;
+      WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _migrateKeeperMissingIsDeleted());
+    }
     return StreamBuilder<QuerySnapshot>(
       stream: currentUserReference!
           .collection('keepers')
           .where('is_deleted', isEqualTo: false)
-          .orderBy('pinned_at', descending: true)
           .orderBy('created_at', descending: true)
           .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          // Firestore 인덱스 미생성 시 fallback: pinned_at 정렬 없이 조회
-          return StreamBuilder<QuerySnapshot>(
-            stream: currentUserReference!
-                .collection('keepers')
-                .where('is_deleted', isEqualTo: false)
-                .orderBy('created_at', descending: true)
-                .snapshots(),
-            builder: (context, fallbackSnap) {
-              if (!fallbackSnap.hasData) {
-                return const Center(
-                    child: CircularProgressIndicator(color: _keepersColor));
-              }
-              return _buildKeepersList(fallbackSnap.data!.docs);
-            },
+          debugPrint('[Keepers] stream error: ${snapshot.error}');
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.error_outline_rounded,
+                    size: 48, color: Colors.redAccent),
+                const SizedBox(height: 16),
+                Text("Keepers를 불러오지 못했습니다.",
+                    style: GoogleFonts.notoSans(color: Colors.white70)),
+                const SizedBox(height: 8),
+                Text("잠시 후 다시 시도해 주세요.",
+                    style: GoogleFonts.notoSans(
+                        color: Colors.white30, fontSize: 12)),
+              ],
+            ),
           );
         }
-        if (!snapshot.hasData) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(
               child: CircularProgressIndicator(color: _keepersColor));
         }
-        return _buildKeepersList(snapshot.data!.docs);
+        final rawDocs = snapshot.data?.docs ?? [];
+        if (rawDocs.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.bookmark_border_rounded,
+                    size: 60, color: Colors.white24),
+                const SizedBox(height: 20),
+                Text("저장된 표현이 없습니다.",
+                    style: GoogleFonts.notoSans(color: Colors.white54)),
+                const SizedBox(height: 8),
+                Text("대화 기록에서 대사를 탭하면 여기에 저장됩니다.",
+                    style: GoogleFonts.notoSans(
+                        color: Colors.white30, fontSize: 12)),
+              ],
+            ),
+          );
+        }
+        // pinned_at 있는 항목 먼저, 없으면 created_at 최신순 (Dart 정렬)
+        final docs = List<QueryDocumentSnapshot>.from(rawDocs);
+        docs.sort((a, b) {
+          final aData = a.data() as Map<String, dynamic>;
+          final bData = b.data() as Map<String, dynamic>;
+          final aPinned = aData['pinned_at'] as Timestamp?;
+          final bPinned = bData['pinned_at'] as Timestamp?;
+          if (aPinned != null && bPinned != null) {
+            return bPinned.compareTo(aPinned);
+          }
+          if (aPinned != null) return -1;
+          if (bPinned != null) return 1;
+          final aCreated = aData['created_at'] as Timestamp?;
+          final bCreated = bData['created_at'] as Timestamp?;
+          if (aCreated == null && bCreated == null) return 0;
+          if (aCreated == null) return 1;
+          if (bCreated == null) return -1;
+          return bCreated.compareTo(aCreated);
+        });
+        return _buildKeepersList(docs);
       },
     );
   }
@@ -316,6 +362,25 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
       itemCount: docs.length,
       itemBuilder: (context, index) => _buildKeeperTile(docs[index]),
     );
+  }
+
+  // is_deleted 필드 누락 문서 보정 (1회 실행)
+  Future<void> _migrateKeeperMissingIsDeleted() async {
+    try {
+      final snap = await currentUserReference!.collection('keepers').get();
+      for (final doc in snap.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        if (!data.containsKey('is_deleted')) {
+          await doc.reference.update({
+            'is_deleted': false,
+            'updated_at': FieldValue.serverTimestamp(),
+          });
+          debugPrint('[Keepers] migrated ${doc.id}: is_deleted 필드 추가');
+        }
+      }
+    } catch (e) {
+      debugPrint('[Keepers] migrate error: $e');
+    }
   }
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
