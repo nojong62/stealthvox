@@ -1,7 +1,34 @@
+🔗 앱 다운로드 링크: `https://play.google.com/apps/testing/com.aienglishpractice.stealthvox`
+==========================
+테스터 이메일 수집  (`https://groups.google.com/g/stealthvox-testers` 7명 이동 숙제)
+        ↓
+Play Console 테스터 그룹에 추가(수작업)
+        ↓
+테스트 링크 전달
+        ↓
+테스터가 링크 클릭 → Google 인증 → 앱 다운로드
+        ↓
+앱 열고 회원가입 (이때 Firebase Auth에 자동 등록!)
+        ↓
+실장님이 Firebase Auth에서 이메일 확인
+        ↓
+Firestore에 테스트 시간 (수작업) 부여(9999)
+====================
+테스터 기간 중에는 양쪽이 다 테스터야만 Duo 초대 대화 가능
 
-===========================
-테스트 링크
-https://stealthvox.onelink.me/31o1/fipsp75p?deep_link_value=duo_chat&deep_link_sub1=rJChsLrIqAhXhLZotYeeLZo6KK42&deep_link_sub2=FCC9y7flJIF4y0C4i6Kb&inviter_id=rJChsLrIqAhXhLZotYeeLZo6KK42&room_id=FCC9y7flJIF4y0C4i6Kb&pid=friend_invite&c=in_app_share&af_dp=stealthvox%3A%2F%2F&af_force_deeplink=true
+정식 출시 후 Duo 초대 흐름
+호스트가 초대 링크 전송
+        ↓
+게스트가 링크 클릭 → Play Store에서 앱 설치
+        ↓
+아무 이메일로 회원가입
+        ↓
+AppsFlyer가 roomId 기억 → 자동으로 Duo방 입장
+        ↓
+바로 통화!
+===================================
+
+
 ===================
 관리자 모드로 파워쉘 실행
 
@@ -17,7 +44,7 @@ F:\flutter_project\stealth_vox\build\app\outputs\flutter-apk\app-debug.apk (APK)
 F:
 cd F:\flutter_project\stealth_vox
 
-(다시 시작 /login · API Error: 401 Invalid authentication credentials)
+(다시 시작 /login 하고 · API Error: 401 Invalid authentication credentials)
 
 CLAUDE1.md 참고해서, 실행해 줘.
 
@@ -376,57 +403,6 @@ Thinking...
 이렇게 Thinking... 만있고, 밑에 점 3개(...)는 적히지 않도록 해줘.
 
 =========
- 더 나은 확장 기법
-
-  1. 의미역 기반 유도 (Semantic Role First)
-
-  문법 구조 타겟보다, 누가 → 무엇을 → 왜 → 어디서 → 어떻게 느꼈나 순으로 의미 역할을 채우는 방식. 문법은 자연스럽게
-  따라옴.
-
-  Turn 1: 행동 (core action)
-  Turn 2: 이유/배경 → 자연히 because 유도
-  Turn 3: 관련 인물/사물 → 자연히 who/which 유도
-  Turn 4: 감정/결과 → naturally although/despite 유도
-  Turn 5: 합성
-
-  2. 앵커 문장 고정 + 가지치기
-
-  현재는 "이전 확장 문장 + 새 정보"를 계속 합침. 대신 핵심 동사구(앵커)를 고정하고, 그 앞뒤로만 확장하면 문장이 더
-  응집력 있음.
-
-  앵커: I remembered to call Alex.
-  ← 앞 확장: Checking my emails this morning, [앵커]
-  → 뒤 확장: [앵커], who had moved to London last spring.
-
-  3. 적응형 문법 타겟 (Adaptive Targeting)
-
-  유저 발화를 먼저 분석해서 이미 자연스럽게 나온 구조는 건너뛰고, 아직 없는 구조만 유도.
-
-  프롬프트 추가 지시:
-  "First, scan the user's last answer.
-  If it already contains [because/since], skip Turn 1 target and advance to Turn 2.
-  Never re-induce a structure the user already used naturally."
-
-  4. 중간 합성 피드백 (Progressive Reveal)
-
-  5턴 마지막에만 합치지 않고, 매 턴마다 현재까지 만들어진 확장 문장을 보여줌. 유저가 자기 문장이 자라는 걸 실시간으로
-  보면 동기부여가 됨. (현재 번역 PART 2가 이 역할을 하긴 하지만 매 턴 보여주는 UI가 약함)
-
-  5. 서사 완결성 체크
-
-  최종 합성 전에 한 가지 검증 단계 추가:
-
-  Before synthesizing, check:
-  ① Is there a clear SUBJECT doing a clear ACTION?
-  ② Is there at least ONE reason (because/since)?
-  ③ Is there at least ONE person/thing (who/which)?
-  If any is missing, ask one more targeted question before synthesizing.
-
-  ---
-  한 줄 요약
-
-  ▎ 현재: 문법 순서 고정 → 유저 발화 수집 → 마지막 합성
-  ▎ 개선: 유저 발화 분석 → 빠진 의미역 파악 → 적응형 유도 → 매 턴 중간 확장 표시
-
-  가장 임팩트 있는 변경은 "적응형 문법 타겟" 쪽이고, 구현 난이도가 낮으면서 효과가 큰 건 "서사 완결성 체크" 추가입니다.
-  어떤 방향으로 발전시켜볼지 말씀해 주시면 바로 프롬프트로 짜드릴게요.
+===========================
+테스트 링크
+https://stealthvox.onelink.me/31o1/fipsp75p?deep_link_value=duo_chat&deep_link_sub1=rJChsLrIqAhXhLZotYeeLZo6KK42&deep_link_sub2=FCC9y7flJIF4y0C4i6Kb&inviter_id=rJChsLrIqAhXhLZotYeeLZo6KK42&room_id=FCC9y7flJIF4y0C4i6Kb&pid=friend_invite&c=in_app_share&af_dp=stealthvox%3A%2F%2F&af_force_deeplink=true
