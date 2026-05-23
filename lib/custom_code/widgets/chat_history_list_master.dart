@@ -264,14 +264,12 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
           (_) => _migrateKeeperMissingIsDeleted());
     }
     return StreamBuilder<QuerySnapshot>(
-      stream: currentUserReference!
-          .collection('keepers')
-          .where('is_deleted', isEqualTo: false)
-          .orderBy('created_at', descending: true)
-          .snapshots(),
+      // 인덱스/필드 누락 오류를 피하기 위해 필터·정렬 없이 전체 조회 후 Dart에서 처리
+      stream: currentUserReference!.collection('keepers').snapshots(),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           debugPrint('[Keepers] stream error: ${snapshot.error}');
+          debugPrint('[Keepers] stream stackTrace: ${snapshot.stackTrace}');
           return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -281,6 +279,13 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
                 const SizedBox(height: 16),
                 Text("Keepers를 불러오지 못했습니다.",
                     style: GoogleFonts.notoSans(color: Colors.white70)),
+                const SizedBox(height: 8),
+                Text(
+                  "오류: ${snapshot.error}",
+                  style: GoogleFonts.notoSans(
+                      color: Colors.redAccent.withOpacity(0.8), fontSize: 11),
+                  textAlign: TextAlign.center,
+                ),
                 const SizedBox(height: 8),
                 Text("잠시 후 다시 시도해 주세요.",
                     style: GoogleFonts.notoSans(
@@ -293,7 +298,14 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
           return const Center(
               child: CircularProgressIndicator(color: _keepersColor));
         }
-        final rawDocs = snapshot.data?.docs ?? [];
+        final allDocs = snapshot.data?.docs ?? [];
+
+        // is_deleted == true 제외 (Dart 필터)
+        final rawDocs = allDocs.where((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          return data['is_deleted'] != true;
+        }).toList();
+
         if (rawDocs.isEmpty) {
           return Center(
             child: Column(

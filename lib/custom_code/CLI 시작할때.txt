@@ -1,3 +1,11 @@
+F:
+cd F:\flutter_project\stealth_vox
+
+(다시 시작 /login 하고 · API Error: 401 Invalid authentication credentials)
+
+CLAUDE1.md 참고해서, 실행해 줘.
+==================================
+
 🔗 앱 다운로드 링크: `https://play.google.com/apps/testing/com.aienglishpractice.stealthvox`
 ==========================
 테스터 이메일 수집  (`https://groups.google.com/g/stealthvox-testers` 7명 이동 숙제)
@@ -40,14 +48,7 @@ cd stealthvox-app
 (Shot URL)  https://stealthvox.onelink.me/31o1/fipsp75p
 
 F:\flutter_project\stealth_vox\build\app\outputs\flutter-apk\app-debug.apk (APK)
-
-F:
-cd F:\flutter_project\stealth_vox
-
-(다시 시작 /login 하고 · API Error: 401 Invalid authentication credentials)
-
-CLAUDE1.md 참고해서, 실행해 줘.
-
+=================================
 수정 전 현재 파일들의 백업 사본을 프로젝트 밖이 아니라 프로젝트 내부 임시 백업 폴더에 만들지 말고, git이 있다면 변경 전 `git status`만 확인해줘.
 절대 git reset/checkout으로 기존 변경을 되돌리지 마.
 
