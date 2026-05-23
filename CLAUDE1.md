@@ -38,115 +38,326 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-[StealthVox Keepers 로딩 무한 회전 문제 수정 지시문]
+# Claude Code 지시문: Duo 초대 흐름 안정화 (v1)
 
-현재 증상:
-ChatHistoryListMaster 화면에서 Keepers 버튼을 누르면 저장된 표현이 없거나 일부 표현이 있어도 CircularProgressIndicator가 계속 돌고 목록/빈 화면이 정상 표시되지 않는다.
+## 배경
+정식 앱에서 신규 사용자가 초대 링크 → 설치 → Duo 자동 진입하는 흐름에서, FFAppState 초대 상태를 Firestore 성공 확인 전에 삭제하여 실패 시 재시도가 불가능한 문제가 있다. 파싱 방어코드 부족 및 실패 시 UI 복귀 누락도 함께 수정한다.
 
-대상 파일:
-- lib/custom_code/widgets/chat_history_list_master.dart
+## 수정 대상 파일 (4개)
+1. `stealth_room_master.dart`
+2. `routine_mode_duo.dart`
+3. `intro_master.dart`
+4. `lobby_master.dart`
 
-핵심 원인으로 의심되는 부분:
-_buildKeepersBody()에서 Firestore 조회를 다음처럼 하고 있다.
+## 절대 규칙
+- Box 7 (TtsQueueManager, DeepgramV2VoiceManager) 코드는 절대 수정하지 않는다
+- URL을 마크다운 링크 형태 `[text](url)`로 변환하지 않는다
+- 작은따옴표 이스케이프 에러(`\'`) 주의 — 프롬프트 문자열은 큰따옴표 또는 삼중따옴표 사용
+- 수정하지 않는 코드는 원본 그대로 유지한다
 
-currentUserReference!
-  .collection('keepers')
-  .where('is_deleted', isEqualTo: false)
-  .orderBy('pinned_at', descending: true)
-  .orderBy('created_at', descending: true)
-  .snapshots()
+---
 
-이 쿼리는 Firestore 복합 인덱스가 없으면 에러가 나며,
-현재 fallback StreamBuilder에도 fallbackSnap.hasError 처리가 없어 에러 상태에서 계속 로딩 스피너만 보일 수 있다.
+## 변경 블록 ①: stealth_room_master.dart — 초대 상태 삭제 제거
 
-수정 목표:
-Keepers 화면은 어떤 경우에도 무한 로딩 상태로 남으면 안 된다.
+### 위치
+`initState()` 내부, 53~69줄 부근
 
-수정 지시:
+### 현재 코드 (삭제 대상 포함)
+```dart
+    // Duo 초대 링크 자동 진입 처리
+    // roomId를 로컬 변수에 옮기고 FFAppState는 즉시 clear → 뒤로가기 루프 방지
+    if (FFAppState().isGuestSession &&
+        FFAppState().duoRoomId.isNotEmpty) {
+      final String consumedRoomId = FFAppState().duoRoomId;
+      FFAppState().isGuestSession = false;
+      FFAppState().duoRoomId = '';
+      debugPrint('[AppState] duo invite state cleared');
+      debugPrint('[StealthRoom] Duo invite detected — roomId: $consumedRoomId');
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          setState(() {
+            _pendingDuoRoomId = consumedRoomId;
+            _currentMode = 1;
+          });
+        }
+      });
+    }
+```
 
-1. _buildKeepersBody()의 Firestore 쿼리를 단순화한다.
+### 교체 코드
+```dart
+    // Duo 초대 링크 자동 진입 처리
+    // FFAppState 초대 상태는 여기서 지우지 않음 — _joinAsGuest 성공 후에만 삭제
+    if (FFAppState().isGuestSession &&
+        FFAppState().duoRoomId.isNotEmpty) {
+      final String consumedRoomId = FFAppState().duoRoomId;
+      debugPrint('[StealthRoom] Duo invite detected — roomId: $consumedRoomId');
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          setState(() {
+            _pendingDuoRoomId = consumedRoomId;
+            _currentMode = 1;
+          });
+        }
+      });
+    }
+```
 
-우선 1차 안정화에서는 아래처럼 조회한다.
+### 변경 요약
+- `FFAppState().isGuestSession = false;` 삭제
+- `FFAppState().duoRoomId = '';` 삭제
+- `debugPrint('[AppState] duo invite state cleared');` 삭제
+- 주석을 "여기서 지우지 않음 — _joinAsGuest 성공 후에만 삭제"로 변경
+- 나머지 로직(consumedRoomId 추출, postFrameCallback, setState)은 그대로 유지
 
-- currentUserReference!.collection('keepers')
-- where('is_deleted', isEqualTo: false)
-- orderBy('created_at', descending: true)
+---
 
-pinned_at orderBy는 제거한다.
+## 변경 블록 ②: routine_mode_duo.dart — 초대 상태 삭제를 성공 후로 이동
 
-이유:
-- pinned_at은 모든 Keeper 문서에 존재하지 않을 수 있다.
-- pinned_at + created_at 복합 정렬은 Firestore 인덱스 문제가 생길 수 있다.
-- 우선 created_at 기준으로 안정 조회한 뒤, Dart 쪽에서 pinned_at이 있는 항목을 위로 올리는 방식이 안전하다.
+### 위치 A: `_joinAsGuest()` 함수 내부, 583~635줄 부근
 
-2. 정렬은 Firestore가 아니라 Dart에서 처리한다.
+### 현재 코드
+```dart
+  Future<void> _joinAsGuest(String roomId) async {
+    // 초대 상태는 진입 시도 직전에 반드시 소비 (좀비 roomId 방지)
+    FFAppState().isGuestSession = false;
+    FFAppState().duoRoomId = '';
+    debugPrint('[AppState] duo invite state cleared');
 
-snapshot.data!.docs를 받은 뒤 다음 순서로 정렬한다.
+    try {
+      _duoSessionRef =
+          FirebaseFirestore.instance.collection('duo_sessions').doc(roomId);
+      final snap = await _duoSessionRef!.get();
+      if (!snap.exists) {
+        debugPrint('[Duo] _joinAsGuest: session not found ($roomId)');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('초대된 방을 찾을 수 없습니다.')),
+          );
+        }
+        return;
+      }
+      final data = snap.data() as Map<String, dynamic>?;
+      if (data == null || data['isDuoEnabled'] != true) {
+        debugPrint('[Duo] _joinAsGuest: isDuoEnabled is not true ($roomId)');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('이 방은 현재 사용할 수 없습니다.')),
+          );
+        }
+        return;
+      }
 
-- pinned_at이 있는 문서가 먼저
-- pinned_at이 둘 다 있으면 pinned_at 최신순
-- pinned_at이 없으면 created_at 최신순
+      final String? firebaseUid = FirebaseAuth.instance.currentUser?.uid;
+      final String guestUid =
+          firebaseUid ?? 'guest_${DateTime.now().millisecondsSinceEpoch}';
 
-즉, Firestore 쿼리는 단순하게 유지하고,
-Keepers 최상단 고정 정렬은 클라이언트에서 처리한다.
+      await _duoSessionRef!.update({
+        'isPartnerJoined': true,
+        'partnerUid': guestUid,
+        'partnerJoinedAt': FieldValue.serverTimestamp(),
+      });
 
-3. snapshot.hasError 처리를 반드시 추가한다.
+      debugPrint('[Duo] _joinAsGuest success — guestUid: $guestUid, roomId: $roomId');
 
-_buildKeepersBody() 안에서 snapshot.hasError가 true이면 무한 스피너를 보여주지 말고 에러 안내 UI를 보여준다.
+      if (mounted) {
+        setState(() {
+          _isConversationActive = true;
+          _isPartnerOnline = true;
+        });
+      }
+      _startWhisperRecording();
+    } catch (e) {
+      debugPrint('[Duo] Guest join error: $e');
+    }
+  }
+```
 
-예:
-- “Keepers를 불러오지 못했습니다.”
-- “잠시 후 다시 시도해 주세요.”
-- debugPrint로 snapshot.error 출력
+### 교체 코드
+```dart
+  Future<void> _joinAsGuest(String roomId) async {
+    // 초대 상태는 여기서 지우지 않음 — Firestore 업데이트 성공 후에만 삭제
+    try {
+      _duoSessionRef =
+          FirebaseFirestore.instance.collection('duo_sessions').doc(roomId);
+      final snap = await _duoSessionRef!.get();
+      if (!snap.exists) {
+        debugPrint('[Duo] _joinAsGuest: session not found ($roomId)');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('초대된 방을 찾을 수 없습니다.')),
+          );
+          StealthRoomMaster.exitCurrentMode?.call();
+        }
+        return;
+      }
+      final data = snap.data() as Map<String, dynamic>?;
+      if (data == null || data['isDuoEnabled'] != true) {
+        debugPrint('[Duo] _joinAsGuest: isDuoEnabled is not true ($roomId)');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('이 방은 현재 사용할 수 없습니다.')),
+          );
+          StealthRoomMaster.exitCurrentMode?.call();
+        }
+        return;
+      }
 
-4. fallback StreamBuilder를 제거하거나, fallback에도 hasError 처리를 추가한다.
+      final String? firebaseUid = FirebaseAuth.instance.currentUser?.uid;
+      final String guestUid =
+          firebaseUid ?? 'guest_${DateTime.now().millisecondsSinceEpoch}';
 
-추천:
-- fallback StreamBuilder는 제거한다.
-- 단순 쿼리 하나만 사용한다.
-- 에러/로딩/빈 목록/정상 목록 상태를 명확히 분기한다.
+      await _duoSessionRef!.update({
+        'isPartnerJoined': true,
+        'partnerUid': guestUid,
+        'partnerJoinedAt': FieldValue.serverTimestamp(),
+      });
 
-상태 분기 순서:
-- if snapshot.hasError → 에러 안내 UI
-- if snapshot.connectionState == ConnectionState.waiting → 로딩
-- if !snapshot.hasData → 빈 목록 UI
-- docs.isEmpty → 빈 목록 UI
-- else → _buildKeepersList(sortedDocs)
+      // 입장 성공 후에만 초대 상태 정리 (3개 세트)
+      FFAppState().isGuestSession = false;
+      FFAppState().duoRoomId = '';
+      FFAppState().pendingInviteType = '';
+      debugPrint('[AppState] duo invite state cleared (after successful join)');
 
-5. Keepers 저장 시 모든 문서에 필수 기본 필드를 넣는다.
+      debugPrint('[Duo] _joinAsGuest success — guestUid: $guestUid, roomId: $roomId');
 
-Keeper 문서 생성 시 반드시 아래 필드를 포함한다.
+      if (mounted) {
+        setState(() {
+          _isConversationActive = true;
+          _isPartnerOnline = true;
+        });
+      }
+      _startWhisperRecording();
+    } catch (e) {
+      debugPrint('[Duo] Guest join error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('연결 중 오류가 발생했습니다. 다시 시도해주세요.')),
+        );
+        StealthRoomMaster.exitCurrentMode?.call();
+      }
+    }
+  }
+```
 
-- is_deleted: false
-- created_at: FieldValue.serverTimestamp()
-- updated_at: FieldValue.serverTimestamp()
-- pinned_at: null 또는 아예 미포함
+### 변경 요약
+- 함수 시작부의 FFAppState 삭제 3줄 제거 (585~587줄)
+- Firestore `update()` 성공 직후(621줄 뒤)에 3개 세트 삭제 이동:
+  - `FFAppState().isGuestSession = false;`
+  - `FFAppState().duoRoomId = '';`
+  - `FFAppState().pendingInviteType = '';` ← 신규 추가
+- 실패 분기 3곳(snap 없음, isDuoEnabled 아님, catch)에 `StealthRoomMaster.exitCurrentMode?.call()` 추가 → 메뉴 복귀
+- catch 블록에 사용자용 SnackBar 추가
 
-중요:
-is_deleted 필드가 없으면 where('is_deleted', isEqualTo: false) 쿼리에 잡히지 않는다.
-따라서 기존에 is_deleted가 없는 Keeper 문서가 있다면 보정 마이그레이션도 필요하다.
+---
 
-6. 기존 Keeper 문서 보정 로직을 추가하거나 임시 보정한다.
+## 변경 블록 ③: intro_master.dart — roomId 파싱에 duo_room_id 후보 추가
 
-이미 저장된 keepers 문서 중 is_deleted 필드가 없는 문서가 있으면:
-- is_deleted: false
-- updated_at: FieldValue.serverTimestamp()
+### 위치
+`_handleInviteDeepLink()` 내부, 113~118줄 부근
 
-를 추가한다.
+### 현재 코드
+```dart
+    final String? roomId = params['deep_link_sub2']?.toString() ??
+        deepLinkData['deep_link_sub2']?.toString() ??
+        params['room_id']?.toString() ??
+        deepLinkData['room_id']?.toString() ??
+        params['roomId']?.toString() ??
+        params['af_sub2']?.toString();
+```
 
-이 보정은 임시 함수로 한 번 실행하거나,
-Keepers 조회 전에 누락 필드가 있는 문서를 안전하게 처리하는 방식으로 구현한다.
+### 교체 코드
+```dart
+    final String? roomId = params['deep_link_sub2']?.toString() ??
+        deepLinkData['deep_link_sub2']?.toString() ??
+        params['room_id']?.toString() ??
+        deepLinkData['room_id']?.toString() ??
+        params['duo_room_id']?.toString() ??
+        deepLinkData['duo_room_id']?.toString() ??
+        params['duoRoomId']?.toString() ??
+        deepLinkData['duoRoomId']?.toString() ??
+        params['roomId']?.toString() ??
+        params['af_sub2']?.toString();
+```
 
-7. _buildKeepersList()에 전달하기 전에 docs 타입 오류가 나지 않도록 확인한다.
+### 변경 요약
+- `params['roomId']` 앞에 4줄 추가:
+  - `params['duo_room_id']`
+  - `deepLinkData['duo_room_id']`
+  - `params['duoRoomId']`
+  - `deepLinkData['duoRoomId']`
+- 기존 후보 순서는 유지하되, `duo_room_id` 계열을 `room_id` 바로 뒤에 배치
 
-현재 _buildKeepersList(List<QueryDocumentSnapshot> docs) 형태라면,
-snapshot.data!.docs 타입과 맞는지 확인하고 필요하면 List<QueryDocumentSnapshot<Object?>> 형태로 맞춘다.
+---
 
-8. 완료 후 보고할 것:
+## 변경 블록 ④: lobby_master.dart — roomId 파싱에 duo_room_id 후보 추가
 
-- _buildKeepersBody() 수정 내용
-- Firestore 쿼리 단순화 여부
-- pinned_at 정렬을 Dart 쪽으로 옮겼는지 여부
-- snapshot.hasError 처리 추가 여부
-- is_deleted 누락 문서 대응 여부
-- flutter analyze 결과
+### 위치
+`_handleInviteDeepLink()` 내부, 207~212줄 부근
+
+### 현재 코드
+```dart
+    final String? roomId = params['deep_link_sub2']?.toString() ??
+        deepLinkData['deep_link_sub2']?.toString() ??
+        params['room_id']?.toString() ??
+        deepLinkData['room_id']?.toString() ??
+        params['roomId']?.toString() ??
+        params['af_sub2']?.toString();
+```
+
+### 교체 코드
+```dart
+    final String? roomId = params['deep_link_sub2']?.toString() ??
+        deepLinkData['deep_link_sub2']?.toString() ??
+        params['room_id']?.toString() ??
+        deepLinkData['room_id']?.toString() ??
+        params['duo_room_id']?.toString() ??
+        deepLinkData['duo_room_id']?.toString() ??
+        params['duoRoomId']?.toString() ??
+        deepLinkData['duoRoomId']?.toString() ??
+        params['roomId']?.toString() ??
+        params['af_sub2']?.toString();
+```
+
+### 변경 요약
+- 블록 ③과 동일한 4줄 추가
+- 위치만 lobby_master.dart의 해당 함수
+
+---
+
+## 검증 체크리스트
+
+Claude Code가 수정 완료 후 아래 항목을 확인해야 한다:
+
+1. **StealthRoom initState에서 FFAppState 삭제 코드가 없어졌는지 확인**
+   - `FFAppState().isGuestSession = false` 가 initState 안에 없어야 함
+   - `FFAppState().duoRoomId = ''` 가 initState 안에 없어야 함
+
+2. **Duo _joinAsGuest에서 삭제 위치가 update() 성공 직후인지 확인**
+   - `_duoSessionRef!.update({...})` 다음 줄에 3개 세트가 와야 함
+   - 함수 시작부에 삭제 코드가 없어야 함
+
+3. **pendingInviteType 정리가 추가되었는지 확인**
+   - `FFAppState().pendingInviteType = '';` 가 isGuestSession, duoRoomId와 함께 있어야 함
+
+4. **실패 분기 3곳에 exitCurrentMode 호출이 있는지 확인**
+   - `!snap.exists` 분기
+   - `isDuoEnabled != true` 분기
+   - `catch (e)` 블록
+
+5. **Intro와 Lobby 양쪽에서 roomId 파싱에 duo_room_id, duoRoomId가 추가되었는지 확인**
+   - 각 파일의 `_handleInviteDeepLink` 함수 내부
+
+6. **컴파일 에러 없는지 확인**
+   - `StealthRoomMaster.exitCurrentMode` 는 이미 static nullable 함수로 선언되어 있으므로 import만 확인
+   - routine_mode_duo.dart 상단 import에 stealth_room_master 관련 import가 있는지 확인 (같은 index.dart에서 가져오므로 추가 import 불필요)
+
+---
+
+## 이 지시문에서 수정하지 않는 것
+
+- AppsFlyerManager 공용화 (4순위 — 구조 변경이 크므로 별도 작업)
+- Box 7 통신 엔진 전체
+- Duo 모드의 Whisper/TTS/오디오 관련 코드
+- Intro/Lobby의 UI 코드
+- createDuoInviteLink 함수 (링크 생성 쪽은 현재 문제 없음)
