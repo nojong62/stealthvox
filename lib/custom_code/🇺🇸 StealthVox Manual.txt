@@ -1,0 +1,37 @@
+🇺🇸 StealthVox Manual 
+StealthVox - My Personal Foreign Language Playground
+Speak, call, and practice at your own pace—centered entirely around you.
+
+📱 [Practice Modes]
+
+Duo Connect [Partner Talk]
+Share an invite link to talk with your partner in your own languages. The AI translates everything in real time!
+
+Clone AI [Chat with a Twin AI]
+The AI analyzes KakaoTalk chats to create a perfect digital twin of your friend. Enjoy realistic roleplay with them!
+
+AI Roleplay [Scene Acting]
+Get endless suggestions for creative roles and situations. Practice realistic business and everyday conversations.
+
+Step Expand [Sentence Builder]
+Start with short, simple sentences. Answer the AI's sharp questions to build longer and more professional sentences.
+
+🎓 [Study Room: Smart Training Guide]
+
+1. Choose Your Perfect Review Mode
+Open your past chat history and pick a mode based on your goal for today.
+
+Real-time Conversation [Speed Training]: Talk and respond to the AI in real time. This mode maximizes your speed and helps you speak English instantly without thinking too long.
+
+Sentence Expansion [Expression Training]: Break down long, complex native sentences into small chunks and shadow them. This naturally embeds native sentence structures and word orders into your brain.
+
+2. AI Tutoring: 4-Step Brain Workout (Step 4 Coaching)
+This is not passive learning where you just read corrected text. Follow the AI's 4-step flow to truly master each sentence.
+
+STEP 1. Apply (Wake Up Your Brain): Based on your past chat context, the AI gives you a fresh new Korean situation and a speaking mission.
+
+STEP 2. Challenge (Speak on Your Own): Look at the Korean situation and try to speak the English sentence out loud before looking at the answer. This is the best way to build your muscle for making sentences.
+
+STEP 3. Correct (Fine-Tuning): The AI analyzes your sentence in real time. It fixes basic grammar mistakes and upgrades awkward phrasing into natural, native expressions. It also explains the "why" kindly in Korean.
+
+STEP 4. Absorb (Lock It In): Listen to the final, perfectly corrected sentence spoken by a native voice (TTS) and repeat it out loud (shadowing). This stimulates your ears and vocal muscles to make the expression completely yours.
