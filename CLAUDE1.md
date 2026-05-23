@@ -38,326 +38,125 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# Claude Code 지시문: Duo 초대 흐름 안정화 (v1)
+Firestore 인덱스 오류 해결 + 결제 동기화 검증 지시문
 
-## 배경
-정식 앱에서 신규 사용자가 초대 링크 → 설치 → Duo 자동 진입하는 흐름에서, FFAppState 초대 상태를 Firestore 성공 확인 전에 삭제하여 실패 시 재시도가 불가능한 문제가 있다. 파싱 방어코드 부족 및 실패 시 UI 복귀 누락도 함께 수정한다.
+현재 로그 분석 결과:
 
-## 수정 대상 파일 (4개)
-1. `stealth_room_master.dart`
-2. `routine_mode_duo.dart`
-3. `intro_master.dart`
-4. `lobby_master.dart`
+RevenueCat 결제 자체는 정상 성공 상태.
 
-## 절대 규칙
-- Box 7 (TtsQueueManager, DeepgramV2VoiceManager) 코드는 절대 수정하지 않는다
-- URL을 마크다운 링크 형태 `[text](url)`로 변환하지 않는다
-- 작은따옴표 이스케이프 에러(`\'`) 주의 — 프롬프트 문자열은 큰따옴표 또는 삼중따옴표 사용
-- 수정하지 않는 코드는 원본 그대로 유지한다
+로그:
+- PURCHASE success
+- PURCHASE activeEntitlements=time_charge
 
----
+까지 정상 확인됨.
 
-## 변경 블록 ①: stealth_room_master.dart — 초대 상태 삭제 제거
+문제는 이후 Firestore purchases 조회 단계에서 아래 오류가 발생:
 
-### 위치
-`initState()` 내부, 53~69줄 부근
+[cloud_firestore/failed-precondition] The query requires an index
 
-### 현재 코드 (삭제 대상 포함)
-```dart
-    // Duo 초대 링크 자동 진입 처리
-    // roomId를 로컬 변수에 옮기고 FFAppState는 즉시 clear → 뒤로가기 루프 방지
-    if (FFAppState().isGuestSession &&
-        FFAppState().duoRoomId.isNotEmpty) {
-      final String consumedRoomId = FFAppState().duoRoomId;
-      FFAppState().isGuestSession = false;
-      FFAppState().duoRoomId = '';
-      debugPrint('[AppState] duo invite state cleared');
-      debugPrint('[StealthRoom] Duo invite detected — roomId: $consumedRoomId');
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          setState(() {
-            _pendingDuoRoomId = consumedRoomId;
-            _currentMode = 1;
-          });
-        }
-      });
-    }
-```
+원인:
+purchases 컬렉션에서
+product_id + purchased_at 조합 쿼리를 사용 중인데,
+Firestore 복합 인덱스가 없어 결제 후 동기화(SYNC)가 실패 중.
 
-### 교체 코드
-```dart
-    // Duo 초대 링크 자동 진입 처리
-    // FFAppState 초대 상태는 여기서 지우지 않음 — _joinAsGuest 성공 후에만 삭제
-    if (FFAppState().isGuestSession &&
-        FFAppState().duoRoomId.isNotEmpty) {
-      final String consumedRoomId = FFAppState().duoRoomId;
-      debugPrint('[StealthRoom] Duo invite detected — roomId: $consumedRoomId');
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          setState(() {
-            _pendingDuoRoomId = consumedRoomId;
-            _currentMode = 1;
-          });
-        }
-      });
-    }
-```
+==================================================
+1. Firebase Console에서 Firestore 복합 인덱스 생성
+==================================================
 
-### 변경 요약
-- `FFAppState().isGuestSession = false;` 삭제
-- `FFAppState().duoRoomId = '';` 삭제
-- `debugPrint('[AppState] duo invite state cleared');` 삭제
-- 주석을 "여기서 지우지 않음 — _joinAsGuest 성공 후에만 삭제"로 변경
-- 나머지 로직(consumedRoomId 추출, postFrameCallback, setState)은 그대로 유지
+Firebase Console → Firestore Database → Indexes → Composite Indexes
 
----
+Collection ID:
+purchases
 
-## 변경 블록 ②: routine_mode_duo.dart — 초대 상태 삭제를 성공 후로 이동
+Fields:
+- product_id → Ascending
+- purchased_at → Ascending
+- __name__ → Ascending
 
-### 위치 A: `_joinAsGuest()` 함수 내부, 583~635줄 부근
+생성 후 ENABLED 상태까지 기다릴 것.
+(보통 수 분 소요)
 
-### 현재 코드
-```dart
-  Future<void> _joinAsGuest(String roomId) async {
-    // 초대 상태는 진입 시도 직전에 반드시 소비 (좀비 roomId 방지)
-    FFAppState().isGuestSession = false;
-    FFAppState().duoRoomId = '';
-    debugPrint('[AppState] duo invite state cleared');
+==================================================
+2. 테스트 전 사전 확인
+==================================================
 
-    try {
-      _duoSessionRef =
-          FirebaseFirestore.instance.collection('duo_sessions').doc(roomId);
-      final snap = await _duoSessionRef!.get();
-      if (!snap.exists) {
-        debugPrint('[Duo] _joinAsGuest: session not found ($roomId)');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('초대된 방을 찾을 수 없습니다.')),
-          );
-        }
-        return;
-      }
-      final data = snap.data() as Map<String, dynamic>?;
-      if (data == null || data['isDuoEnabled'] != true) {
-        debugPrint('[Duo] _joinAsGuest: isDuoEnabled is not true ($roomId)');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('이 방은 현재 사용할 수 없습니다.')),
-          );
-        }
-        return;
-      }
+Firestore:
 
-      final String? firebaseUid = FirebaseAuth.instance.currentUser?.uid;
-      final String guestUid =
-          firebaseUid ?? 'guest_${DateTime.now().millisecondsSinceEpoch}';
+users/rJChsLrIqAhXhLZotYeeLZo6KK42
 
-      await _duoSessionRef!.update({
-        'isPartnerJoined': true,
-        'partnerUid': guestUid,
-        'partnerJoinedAt': FieldValue.serverTimestamp(),
-      });
+문서 열어서 현재:
 
-      debugPrint('[Duo] _joinAsGuest success — guestUid: $guestUid, roomId: $roomId');
+remaining_seconds
 
-      if (mounted) {
-        setState(() {
-          _isConversationActive = true;
-          _isPartnerOnline = true;
-        });
-      }
-      _startWhisperRecording();
-    } catch (e) {
-      debugPrint('[Duo] Guest join error: $e');
-    }
-  }
-```
+값 미리 메모해둘 것.
 
-### 교체 코드
-```dart
-  Future<void> _joinAsGuest(String roomId) async {
-    // 초대 상태는 여기서 지우지 않음 — Firestore 업데이트 성공 후에만 삭제
-    try {
-      _duoSessionRef =
-          FirebaseFirestore.instance.collection('duo_sessions').doc(roomId);
-      final snap = await _duoSessionRef!.get();
-      if (!snap.exists) {
-        debugPrint('[Duo] _joinAsGuest: session not found ($roomId)');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('초대된 방을 찾을 수 없습니다.')),
-          );
-          StealthRoomMaster.exitCurrentMode?.call();
-        }
-        return;
-      }
-      final data = snap.data() as Map<String, dynamic>?;
-      if (data == null || data['isDuoEnabled'] != true) {
-        debugPrint('[Duo] _joinAsGuest: isDuoEnabled is not true ($roomId)');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('이 방은 현재 사용할 수 없습니다.')),
-          );
-          StealthRoomMaster.exitCurrentMode?.call();
-        }
-        return;
-      }
+==================================================
+3. 인덱스 생성 완료 후 테스트
+==================================================
 
-      final String? firebaseUid = FirebaseAuth.instance.currentUser?.uid;
-      final String guestUid =
-          firebaseUid ?? 'guest_${DateTime.now().millisecondsSinceEpoch}';
+앱 재실행 후:
 
-      await _duoSessionRef!.update({
-        'isPartnerJoined': true,
-        'partnerUid': guestUid,
-        'partnerJoinedAt': FieldValue.serverTimestamp(),
-      });
+10분권(stealthvox_10m) 1회만 테스트 구매.
 
-      // 입장 성공 후에만 초대 상태 정리 (3개 세트)
-      FFAppState().isGuestSession = false;
-      FFAppState().duoRoomId = '';
-      FFAppState().pendingInviteType = '';
-      debugPrint('[AppState] duo invite state cleared (after successful join)');
+==================================================
+4. 테스트 후 로그 확인 항목
+==================================================
 
-      debugPrint('[Duo] _joinAsGuest success — guestUid: $guestUid, roomId: $roomId');
+아래 흐름이 순서대로 떠야 정상:
 
-      if (mounted) {
-        setState(() {
-          _isConversationActive = true;
-          _isPartnerOnline = true;
-        });
-      }
-      _startWhisperRecording();
-    } catch (e) {
-      debugPrint('[Duo] Guest join error: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('연결 중 오류가 발생했습니다. 다시 시도해주세요.')),
-        );
-        StealthRoomMaster.exitCurrentMode?.call();
-      }
-    }
-  }
-```
+PURCHASE success
+SYNC start
+Firestore update success
+remaining_seconds increased
 
-### 변경 요약
-- 함수 시작부의 FFAppState 삭제 3줄 제거 (585~587줄)
-- Firestore `update()` 성공 직후(621줄 뒤)에 3개 세트 삭제 이동:
-  - `FFAppState().isGuestSession = false;`
-  - `FFAppState().duoRoomId = '';`
-  - `FFAppState().pendingInviteType = '';` ← 신규 추가
-- 실패 분기 3곳(snap 없음, isDuoEnabled 아님, catch)에 `StealthRoomMaster.exitCurrentMode?.call()` 추가 → 메뉴 복귀
-- catch 블록에 사용자용 SnackBar 추가
+특히:
+- Firestore update success
+- remaining_seconds increased
 
----
+반드시 확인.
 
-## 변경 블록 ③: intro_master.dart — roomId 파싱에 duo_room_id 후보 추가
+==================================================
+5. remaining_seconds 검증
+==================================================
 
-### 위치
-`_handleInviteDeepLink()` 내부, 113~118줄 부근
+테스트 전 메모해둔 값보다:
 
-### 현재 코드
-```dart
-    final String? roomId = params['deep_link_sub2']?.toString() ??
-        deepLinkData['deep_link_sub2']?.toString() ??
-        params['room_id']?.toString() ??
-        deepLinkData['room_id']?.toString() ??
-        params['roomId']?.toString() ??
-        params['af_sub2']?.toString();
-```
++600초
 
-### 교체 코드
-```dart
-    final String? roomId = params['deep_link_sub2']?.toString() ??
-        deepLinkData['deep_link_sub2']?.toString() ??
-        params['room_id']?.toString() ??
-        deepLinkData['room_id']?.toString() ??
-        params['duo_room_id']?.toString() ??
-        deepLinkData['duo_room_id']?.toString() ??
-        params['duoRoomId']?.toString() ??
-        deepLinkData['duoRoomId']?.toString() ??
-        params['roomId']?.toString() ??
-        params['af_sub2']?.toString();
-```
+증가했는지 확인.
 
-### 변경 요약
-- `params['roomId']` 앞에 4줄 추가:
-  - `params['duo_room_id']`
-  - `deepLinkData['duo_room_id']`
-  - `params['duoRoomId']`
-  - `deepLinkData['duoRoomId']`
-- 기존 후보 순서는 유지하되, `duo_room_id` 계열을 `room_id` 바로 뒤에 배치
+==================================================
+6. 중요 추가 주의사항
+==================================================
 
----
+이전 테스트들:
 
-## 변경 블록 ④: lobby_master.dart — roomId 파싱에 duo_room_id 후보 추가
+600 + 3600 + 600 + 600 + 600
 
-### 위치
-`_handleInviteDeepLink()` 내부, 207~212줄 부근
+총 약 6000초 분량 결제가 이미 성공했지만,
+Firestore 인덱스 오류 때문에 동기화 실패 상태로 남아 있을 가능성이 있음.
 
-### 현재 코드
-```dart
-    final String? roomId = params['deep_link_sub2']?.toString() ??
-        deepLinkData['deep_link_sub2']?.toString() ??
-        params['room_id']?.toString() ??
-        deepLinkData['room_id']?.toString() ??
-        params['roomId']?.toString() ??
-        params['af_sub2']?.toString();
-```
+따라서 인덱스 생성 후 앱 재실행 시:
 
-### 교체 코드
-```dart
-    final String? roomId = params['deep_link_sub2']?.toString() ??
-        deepLinkData['deep_link_sub2']?.toString() ??
-        params['room_id']?.toString() ??
-        deepLinkData['room_id']?.toString() ??
-        params['duo_room_id']?.toString() ??
-        deepLinkData['duo_room_id']?.toString() ??
-        params['duoRoomId']?.toString() ??
-        deepLinkData['duoRoomId']?.toString() ??
-        params['roomId']?.toString() ??
-        params['af_sub2']?.toString();
-```
+pending transaction 재처리
+또는 밀린 동기화 처리
 
-### 변경 요약
-- 블록 ③과 동일한 4줄 추가
-- 위치만 lobby_master.dart의 해당 함수
+가 발생할 수 있음.
 
----
+그 결과:
+remaining_seconds가 한 번에 크게 증가해도 이상하지 않을 수 있음.
 
-## 검증 체크리스트
+==================================================
+7. 코드 수정 관련
+==================================================
 
-Claude Code가 수정 완료 후 아래 항목을 확인해야 한다:
+지금 단계에서는 코드 수정하지 말 것.
 
-1. **StealthRoom initState에서 FFAppState 삭제 코드가 없어졌는지 확인**
-   - `FFAppState().isGuestSession = false` 가 initState 안에 없어야 함
-   - `FFAppState().duoRoomId = ''` 가 initState 안에 없어야 함
+먼저:
+- Firestore 인덱스 생성
+- 동기화 정상 여부 확인
 
-2. **Duo _joinAsGuest에서 삭제 위치가 update() 성공 직후인지 확인**
-   - `_duoSessionRef!.update({...})` 다음 줄에 3개 세트가 와야 함
-   - 함수 시작부에 삭제 코드가 없어야 함
+만 진행.
 
-3. **pendingInviteType 정리가 추가되었는지 확인**
-   - `FFAppState().pendingInviteType = '';` 가 isGuestSession, duoRoomId와 함께 있어야 함
-
-4. **실패 분기 3곳에 exitCurrentMode 호출이 있는지 확인**
-   - `!snap.exists` 분기
-   - `isDuoEnabled != true` 분기
-   - `catch (e)` 블록
-
-5. **Intro와 Lobby 양쪽에서 roomId 파싱에 duo_room_id, duoRoomId가 추가되었는지 확인**
-   - 각 파일의 `_handleInviteDeepLink` 함수 내부
-
-6. **컴파일 에러 없는지 확인**
-   - `StealthRoomMaster.exitCurrentMode` 는 이미 static nullable 함수로 선언되어 있으므로 import만 확인
-   - routine_mode_duo.dart 상단 import에 stealth_room_master 관련 import가 있는지 확인 (같은 index.dart에서 가져오므로 추가 import 불필요)
-
----
-
-## 이 지시문에서 수정하지 않는 것
-
-- AppsFlyerManager 공용화 (4순위 — 구조 변경이 크므로 별도 작업)
-- Box 7 통신 엔진 전체
-- Duo 모드의 Whisper/TTS/오디오 관련 코드
-- Intro/Lobby의 UI 코드
-- createDuoInviteLink 함수 (링크 생성 쪽은 현재 문제 없음)
+APK/AAB 빌드 금지.
+flutter analyze 수준까지만.

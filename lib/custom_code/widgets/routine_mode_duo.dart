@@ -350,11 +350,20 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     if (!_isConversationActive || _turnCounter != currentTurnId) return;
 
     // ⏱️ 2. 화면에 띄워두고 백그라운드에서 동시통역(gpt-4o-mini) 진행
+    // 현재 턴 직전까지의 대화 히스토리(에러 메시지 제외)를 컨텍스트로 전달
+    final recentHistory = _localMessages.length > 1
+        ? _localMessages
+            .sublist(0, _localMessages.length - 1)
+            .where((m) => m['type'] == null)
+            .toList()
+        : <Map<String, dynamic>>[];
+
     Map<String, String>? translationResult = await DuoBrain.processTranslation(
         key: _openAiKey,
         text: finalTranscript,
         targetLang: myTarget,
-        originalLang: myOriginal);
+        originalLang: myOriginal,
+        recentHistory: recentHistory);
 
     if (!_isConversationActive || _turnCounter != currentTurnId) return;
 
@@ -981,20 +990,47 @@ class DuoBrain {
       {required String key,
       required String text,
       required String targetLang,
-      required String originalLang}) async {
+      required String originalLang,
+      List<Map<String, dynamic>> recentHistory = const []}) async {
     try {
       Uri uri = Uri.parse('https://api.openai.com/v1/chat/completions');
 
-      String prompt = "You are a professional bilingual interpreter.\n"
-          "Rule 1: Detect the language of the user's text.\n"
-          "Rule 2: If the text is mainly in $originalLang, translate it naturally to $targetLang.\n"
-          "Rule 3: If the text is mainly in $targetLang, translate it naturally to $originalLang.\n"
-          "Rule 4: Output EXACTLY in this JSON format:\n"
+      // 최근 대화 히스토리를 GPT 컨텍스트로 변환 (최대 6턴)
+      final historyLines = <String>[];
+      for (final msg
+          in recentHistory.reversed.take(6).toList().reversed) {
+        final role = msg['role'] == 'HOST' ? 'User' : 'AI';
+        final content = msg['target']?.toString() ?? '';
+        if (content.isNotEmpty) historyLines.add('[$role]: $content');
+      }
+      final historyContext = historyLines.isEmpty
+          ? '(No prior conversation)'
+          : historyLines.join('\n');
+
+      String prompt = "You are a Duo Mode AI conversation partner.\n"
+          "The user speaks $originalLang. Respond in $targetLang.\n\n"
+          "=== RECENT CONVERSATION ===\n"
+          "$historyContext\n\n"
+          "=== SUBJECT AMBIGUITY GUARD ===\n"
+          "Before responding, determine: is it clear WHO or WHAT the user is asking about?\n"
+          "Trigger clarification if ANY of these apply:\n"
+          "• A person name/role (호진, 아들, 엄마, 선생님, 걔, 그 사람) appears but the referent is unclear\n"
+          "• The question involves scores, exams, schedules, or states — and WHOSE is not established\n"
+          "• Short utterance uses pronouns only (걔, 그거, 이번에) with no context to resolve them\n"
+          "• Examples that MUST trigger clarification: '몇 점 받을 것 같아?', '괜찮을까?', '어떻게 됐어?'\n\n"
+          "Decision rule:\n"
+          "✅ Subject is clear from utterance OR resolved from history → respond naturally in $targetLang\n"
+          "❌ Subject is ambiguous AND history cannot resolve it → ask a SHORT clarification question\n\n"
+          "ABSOLUTE PROHIBITION:\n"
+          "• NEVER assume the speaker ('I/you') is the subject when a third person was mentioned or implied\n"
+          "• NEVER produce: 'I think I'll score…', 'You might get…', '제가 받을 것 같아요'\n\n"
+          "=== OUTPUT (strict JSON) ===\n"
           "{\n"
-          "  \"translated_text\": \"[Your translation]\",\n"
-          "  \"original_input\": \"[The user's original text polished/corrected if needed]\"\n"
-          "}\n"
-          "Text to translate: \"$text\"";
+          "  \"needs_clarification\": <true or false>,\n"
+          "  \"translated_text\": \"<$targetLang: your response OR clarification question>\",\n"
+          "  \"original_input\": \"<Korean: gloss of your response OR clarification note>\"\n"
+          "}\n\n"
+          "User said: \"$text\"";
 
       var res = await client
           .post(uri,
@@ -1004,7 +1040,8 @@ class DuoBrain {
               },
               body: jsonEncode({
                 'model': 'gpt-4o-mini',
-                'temperature': 0.2, // 💡 기계적이고 정확한 통역을 위해 온도 0.2 고정
+                'temperature': 0.3,
+                'max_tokens': 300,
                 'response_format': {'type': 'json_object'},
                 'messages': [
                   {'role': 'user', 'content': prompt}
@@ -1019,7 +1056,9 @@ class DuoBrain {
         var parsed = jsonDecode(cleanJson);
         return {
           'translated_text': parsed['translated_text']?.toString() ?? "",
-          'original_input': parsed['original_input']?.toString() ?? ""
+          'original_input': parsed['original_input']?.toString() ?? "",
+          'needs_clarification':
+              (parsed['needs_clarification'] == true).toString(),
         };
       }
     } catch (e) {
