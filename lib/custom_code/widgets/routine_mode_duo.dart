@@ -63,6 +63,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   final ScrollController _scrollController = ScrollController();
   final List<Map<String, dynamic>> _localMessages = [];
   final Map<int, GlobalKey> _itemKeys = {}; // 상단 고정 렌더링을 위한 추적기
+  DateTime? _lastScrollThrottle; // 스크롤 throttle 타임스탬프 (Roleplay 이식)
 
   DocumentReference? _myHistoryRef;
   DocumentReference? _duoSessionRef;
@@ -293,7 +294,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
           'type': 'error'
         });
       });
-      _scrollToBottom();
+      _scrollToCurrent(_localMessages.length - 1);
     }
     Uint8List? errorTts = await _fetchTTSBytes(fallbackTarget, "nova");
     if (errorTts != null && _isConversationActive) {
@@ -343,7 +344,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
         _localMessages
             .add({'role': 'HOST', 'target': finalTranscript, 'original': ''});
       });
-      _scrollToBottom();
+      // HOST 말풍선은 상단 고정 — 사용자 발화가 화면 안에 안정적으로 보이도록
+      _scrollToCurrentTop(_localMessages.length - 1);
     }
     await _saveHistoryMessage(finalTranscript, "", 'HOST');
 
@@ -387,7 +389,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
             'type': 'error'
           });
         });
-        _scrollToBottom();
+        _scrollToCurrent(_localMessages.length - 1);
       }
       if (_isConversationActive && _turnCounter == currentTurnId)
         _startWhisperRecording();
@@ -405,7 +407,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
           'original': aiReplyOriginal
         });
       });
-      _scrollToBottom();
+      // AI 응답은 중앙 고정 — 읽기 좋은 위치에서 흔들리지 않도록
+      _scrollToCurrent(_localMessages.length - 1);
     }
 
     await _saveHistoryMessage(aiReplyTarget, aiReplyOriginal, 'SYSTEM');
@@ -424,23 +427,66 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   // 📦 [6. 데이터베이스 및 스크롤 관리 (DB & SCROLL)]
   // 히스토리 저장 및 화면 상단 고정 제어
   // ============================================================================
+  // fallback: GlobalKey context를 못 찾을 때만 사용. 첫 메시지는 건너뜀
   void _scrollToBottom() {
-    Future.delayed(const Duration(milliseconds: 100), () {
-      if (!mounted || _localMessages.isEmpty) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      if (_localMessages.length <= 1) return;
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    });
+  }
 
-      // 💡 [수술 핵심] HOST(유저)인지 묻고 따지지 않고, 무조건 가장 마지막 메시지를 타겟으로 잡습니다.
-      int targetIndex = _localMessages.length - 1;
+  // 250ms throttle — 연속 setState 중 스크롤 남발 방지 (Roleplay 이식)
+  void _scrollToBottomThrottled() {
+    final now = DateTime.now();
+    if (_lastScrollThrottle == null ||
+        now.difference(_lastScrollThrottle!) >=
+            const Duration(milliseconds: 250)) {
+      _lastScrollThrottle = now;
+      _scrollToBottom();
+    }
+  }
 
-      final key = _itemKeys[targetIndex];
-      if (key != null && key.currentContext != null) {
-        Scrollable.ensureVisible(key.currentContext!,
-            duration: const Duration(milliseconds: 500),
-            curve: Curves.easeOutCubic,
-            alignment: 0.05);
-      } else if (_scrollController.hasClients) {
-        _scrollController.animateTo(_scrollController.position.maxScrollExtent,
-            duration: const Duration(milliseconds: 400), curve: Curves.easeOut);
+  // 현재 말풍선을 화면 중앙에 고정 — AI 응답 추가 시 사용 (Roleplay 이식)
+  void _scrollToCurrent(int index) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      final key = _itemKeys[index];
+      if (key == null) return;
+      final ctx = key.currentContext;
+      if (ctx == null) {
+        _scrollToBottom();
+        return;
       }
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.5,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
+  // 현재 말풍선을 화면 상단에 고정 — HOST 발화 추가 시 사용 (Roleplay 이식)
+  void _scrollToCurrentTop(int index) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final key = _itemKeys[index];
+      if (key == null) return;
+      final ctx = key.currentContext;
+      if (ctx == null) {
+        _scrollToBottom();
+        return;
+      }
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.02,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+      );
     });
   }
 
