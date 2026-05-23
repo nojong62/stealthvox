@@ -581,11 +581,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   }
 
   Future<void> _joinAsGuest(String roomId) async {
-    // 초대 상태는 진입 시도 직전에 반드시 소비 (좀비 roomId 방지)
-    FFAppState().isGuestSession = false;
-    FFAppState().duoRoomId = '';
-    debugPrint('[AppState] duo invite state cleared');
-
+    // 초대 상태는 여기서 지우지 않음 — Firestore 업데이트 성공 후에만 삭제
     try {
       _duoSessionRef =
           FirebaseFirestore.instance.collection('duo_sessions').doc(roomId);
@@ -596,6 +592,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('초대된 방을 찾을 수 없습니다.')),
           );
+          StealthRoomMaster.exitCurrentMode?.call();
         }
         return;
       }
@@ -606,6 +603,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('이 방은 현재 사용할 수 없습니다.')),
           );
+          StealthRoomMaster.exitCurrentMode?.call();
         }
         return;
       }
@@ -620,6 +618,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
         'partnerJoinedAt': FieldValue.serverTimestamp(),
       });
 
+      // 입장 성공 후에만 초대 상태 정리 (3개 세트)
+      FFAppState().isGuestSession = false;
+      FFAppState().duoRoomId = '';
+      FFAppState().pendingInviteType = '';
+      debugPrint('[AppState] duo invite state cleared (after successful join)');
+
       debugPrint('[Duo] _joinAsGuest success — guestUid: $guestUid, roomId: $roomId');
 
       if (mounted) {
@@ -631,6 +635,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
       _startWhisperRecording();
     } catch (e) {
       debugPrint('[Duo] Guest join error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('연결 중 오류가 발생했습니다. 다시 시도해주세요.')),
+        );
+        StealthRoomMaster.exitCurrentMode?.call();
+      }
     }
   }
 

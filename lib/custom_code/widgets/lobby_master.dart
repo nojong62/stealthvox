@@ -208,6 +208,10 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
         deepLinkData['deep_link_sub2']?.toString() ??
         params['room_id']?.toString() ??
         deepLinkData['room_id']?.toString() ??
+        params['duo_room_id']?.toString() ??
+        deepLinkData['duo_room_id']?.toString() ??
+        params['duoRoomId']?.toString() ??
+        deepLinkData['duoRoomId']?.toString() ??
         params['roomId']?.toString() ??
         params['af_sub2']?.toString();
 
