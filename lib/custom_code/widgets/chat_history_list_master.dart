@@ -65,6 +65,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
   static const Color _keepersColor = Color(0xFFD97706); // 앰버/골드
 
   bool _keepersMigrateOnce = false;
+  final ScrollController _keepersScrollController = ScrollController();
 
   @override
   void initState() {
@@ -77,6 +78,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
   @override
   void dispose() {
     BillingTicker.instance.pause();
+    _keepersScrollController.dispose();
     _keeperAudioPlayer?.dispose();
     _keeperCorrectionPlayer?.dispose();
     if (_keeperIsRecording) {
@@ -369,6 +371,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
     }
 
     return ListView.builder(
+      controller: _keepersScrollController,
       physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.all(16),
       itemCount: docs.length,
@@ -699,7 +702,6 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
     final role = (data['speaker_role'] ?? '').toString();
     final isPinned = data['pinned_at'] != null;
     final sourceRoom = (data['source_room_name'] ?? '').toString();
-    final Timestamp? createdAt = data['created_at'] as Timestamp?;
     final bool isCurrentlyPlaying = _playingKeeperId == doc.id && _isPlayingKeeper;
 
     return Container(
@@ -721,48 +723,20 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── 상단: 역할 뱃지 + 출처 + 날짜 ──
-          Row(
-            children: [
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: role == 'HOST'
-                      ? Colors.deepPurple.withOpacity(0.3)
-                      : const Color(0xFF2563EB).withOpacity(0.3),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  role == 'HOST' ? 'AI' : 'You',
-                  style: TextStyle(
-                    color: role == 'HOST'
-                        ? Colors.deepPurpleAccent
-                        : const Color(0xFF60A5FA),
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              if (sourceRoom.isNotEmpty) ...[
-                const SizedBox(width: 8),
-                Text(sourceRoom,
-                    style:
-                        const TextStyle(color: Colors.white24, fontSize: 10)),
+          // ── 상단: 출처 + 핀 아이콘 ──
+          if (sourceRoom.isNotEmpty || isPinned)
+            Row(
+              children: [
+                if (sourceRoom.isNotEmpty)
+                  Text(sourceRoom,
+                      style:
+                          const TextStyle(color: Colors.white24, fontSize: 10)),
+                const Spacer(),
+                if (isPinned)
+                  const Icon(Icons.push_pin_rounded,
+                      color: _keepersColor, size: 12),
               ],
-              const Spacer(),
-              if (createdAt != null)
-                Text(
-                  DateFormat('MM.dd').format(createdAt.toDate()),
-                  style: const TextStyle(color: Colors.white24, fontSize: 10),
-                ),
-              if (isPinned) ...[
-                const SizedBox(width: 4),
-                const Icon(Icons.push_pin_rounded,
-                    color: _keepersColor, size: 12),
-              ],
-            ],
-          ),
+            ),
           const SizedBox(height: 10),
           // ── 영어 텍스트 (메인) ──
           Text(
