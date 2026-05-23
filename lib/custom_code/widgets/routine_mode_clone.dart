@@ -1440,7 +1440,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
         _debugResult = "⏱️ 듣는 중...";
         _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
       });
-      _scrollToBottom();
+      // HOST_TEMP 버블은 스크롤 트리거 없음 — 실제 HOST 버블 등장 시 스크롤
     }
 
     _log('🎤 [LISTEN-01]', '_startDeepgramListening 진입, VoiceManager 생성');
@@ -1661,10 +1661,11 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
           _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
           _localMessages.add({'role': 'HOST', 'target': '', 'original': ''});
         });
-        _scrollToBottom();
       }
 
       int hostIndex = _localMessages.length - 1;
+      // HOST 말풍선은 상단 고정 — 사용자 발화가 화면 안에 안정적으로 보이도록
+      _scrollToCurrentTop(hostIndex);
 
       // 컨텍스트 구성: 장기 기억(recent_history) 우선, 없으면 localMessages fallback
       String contextStr;
@@ -1849,7 +1850,14 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
           // aiBuffer += chunk; // [하이브리드 전환] HybridTtsPlayer 내부에서 처리 (롤백 가능)
           if (mounted && !_ttsQueueManager.aiPaused) {
             setState(() => _localMessages[aiIndex]['target'] = aiTargetText);
-            _scrollToBottomThrottled();
+            // throttled ensureVisible — 스트리밍 중 현재 AI 버블 중앙 고정
+            final _scrollNow = DateTime.now();
+            if (_lastScrollThrottle == null ||
+                _scrollNow.difference(_lastScrollThrottle!) >=
+                    const Duration(milliseconds: 250)) {
+              _lastScrollThrottle = _scrollNow;
+              _scrollToCurrent(aiIndex);
+            }
           }
 
           // [하이브리드 전환] HybridTtsPlayer.onChunk로 대체 (롤백 가능)
@@ -1930,10 +1938,10 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
       _ttsQueueManager.setUserTurn(false);
       _ttsQueueManager.setAiPaused(false);
       _log('🧠 [PIPE-07]', 'setUserTurn(false) + setAiPaused(false). AI 재생 시작');
-      // [v3.6] PIPE-07 시점: 버퍼된 AI 텍스트 일괄 표시
+      // [v3.6] PIPE-07 시점: 버퍼된 AI 텍스트 일괄 표시 — 중앙 고정으로 안정적 표시
       if (mounted && aiTargetText.isNotEmpty) {
         setState(() => _localMessages[aiIndex]['target'] = aiTargetText);
-        _scrollToCurrentTop(aiIndex);
+        _scrollToCurrent(aiIndex);
       }
 
       // AI 역번역을 AI TTS 재생 전에 미리 시작 (백그라운드)

@@ -458,10 +458,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
       final key = _itemKeys[index];
       if (key == null) return;
       final ctx = key.currentContext;
-      if (ctx == null) {
-        _scrollToBottom();
-        return;
-      }
+      if (ctx == null) return;
       Scrollable.ensureVisible(
         ctx,
         alignment: 0.5,
@@ -477,10 +474,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
       final key = _itemKeys[index];
       if (key == null) return;
       final ctx = key.currentContext;
-      if (ctx == null) {
-        _scrollToBottom();
-        return;
-      }
+      if (ctx == null) return;
       Scrollable.ensureVisible(
         ctx,
         alignment: 0.02,
