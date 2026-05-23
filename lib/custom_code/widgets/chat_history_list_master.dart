@@ -803,14 +803,12 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
                 onTap: () => _showKeeperTutoringPopup(doc.id, translated),
               ),
               const SizedBox(width: 4),
-              // 3) 최상단 이동
+              // 3) 맨 위로 올리기
               _buildKeeperAction(
-                icon: isPinned
-                    ? Icons.vertical_align_bottom_rounded
-                    : Icons.vertical_align_top_rounded,
+                icon: Icons.keyboard_double_arrow_up_rounded,
                 color: _keepersColor,
-                tooltip: isPinned ? '고정 해제' : '맨 위로',
-                onTap: () => _togglePinKeeper(doc, isPinned),
+                tooltip: '맨 위로 올리기',
+                onTap: () => _togglePinKeeper(doc),
               ),
               const SizedBox(width: 4),
               // 4) 삭제
@@ -920,31 +918,20 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
   }
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  //  Keepers 최상단 이동 / 고정 해제
+  //  Keepers 맨 위로 올리기 (단방향)
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Future<void> _togglePinKeeper(DocumentSnapshot doc, bool currentlyPinned) async {
+  Future<void> _togglePinKeeper(DocumentSnapshot doc) async {
     try {
-      if (currentlyPinned) {
-        await doc.reference.update({'pinned_at': FieldValue.delete()});
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text("고정이 해제되었습니다.",
-                  style: TextStyle(fontWeight: FontWeight.bold)),
-              backgroundColor: Colors.grey,
-              duration: Duration(seconds: 1)));
-        }
-      } else {
-        await doc.reference.update({'pinned_at': FieldValue.serverTimestamp()});
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text("맨 위로 이동했습니다.",
-                  style: TextStyle(fontWeight: FontWeight.bold)),
-              backgroundColor: _keepersColor,
-              duration: Duration(seconds: 1)));
-        }
+      await doc.reference.update({'pinned_at': FieldValue.serverTimestamp()});
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text("맨 위로 올렸습니다.",
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            backgroundColor: _keepersColor,
+            duration: Duration(seconds: 1)));
       }
     } catch (e) {
-      debugPrint('[Keepers] togglePin error: $e');
+      debugPrint('[Keepers] moveToTop error: $e');
     }
   }
 
