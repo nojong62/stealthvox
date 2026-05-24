@@ -55,7 +55,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   bool isPracticeMode = false;
   bool isPaused = false;
   double _fontScale = 1.0;
-  bool _showOriginal = true;
+  /// 언어 표시 모드: 0=영어+한글, 1=영어만, 2=한글만
+  int _langDisplayMode = 0;
   bool isLoadingRoom = true;
   String roomName = "";
   String _debugLogs = "";
@@ -2829,10 +2830,16 @@ RULES — follow exactly:
           IconButton(
             icon: CustomPaint(
               size: const Size(26, 26),
-              painter: _LangIconPainter(active: _showOriginal),
+              painter: _LangIconPainter(mode: _langDisplayMode),
             ),
-            tooltip: _showOriginal ? '원어 숨기기' : '원어 보기',
-            onPressed: () => setState(() => _showOriginal = !_showOriginal),
+            tooltip: _langDisplayMode == 0
+                ? '영어만 보기'
+                : _langDisplayMode == 1
+                    ? '한글만 보기'
+                    : '영어+한글 보기',
+            onPressed: () => setState(() {
+              _langDisplayMode = (_langDisplayMode + 1) % 3;
+            }),
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
           ),
@@ -3086,24 +3093,39 @@ RULES — follow exactly:
                               : CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Text(translated,
-                                textAlign:
-                                    isHost ? TextAlign.right : TextAlign.left,
-                                style: TextStyle(
-                                    color: isHost
-                                        ? Colors.white
-                                        : const Color(0xFF93C5FD),
-                                    fontSize: 16 * _fontScale,
-                                    fontWeight: FontWeight.bold,
-                                    height: 1.4)),
-                            if (_showOriginal && original.isNotEmpty) ...[
-                              const SizedBox(height: 8),
+                            // 영어(타겟) 표시: mode 0,1 에서 보임
+                            if (_langDisplayMode != 2) ...[
+                              Text(translated,
+                                  textAlign:
+                                      isHost ? TextAlign.right : TextAlign.left,
+                                  style: TextStyle(
+                                      color: isHost
+                                          ? Colors.white
+                                          : const Color(0xFF93C5FD),
+                                      fontSize: 16 * _fontScale,
+                                      fontWeight: FontWeight.bold,
+                                      height: 1.4)),
+                            ],
+                            // 한글(원어) 표시: mode 0,2 에서 보임
+                            if (_langDisplayMode != 1 &&
+                                original.isNotEmpty) ...[
+                              if (_langDisplayMode == 0)
+                                const SizedBox(height: 8),
                               Text(original,
                                   textAlign:
                                       isHost ? TextAlign.right : TextAlign.left,
                                   style: TextStyle(
-                                      color: Colors.grey,
-                                      fontSize: 12 * _fontScale)),
+                                      color: _langDisplayMode == 2
+                                          ? (isHost
+                                              ? Colors.white
+                                              : const Color(0xFF93C5FD))
+                                          : Colors.grey,
+                                      fontSize: _langDisplayMode == 2
+                                          ? 16 * _fontScale
+                                          : 12 * _fontScale,
+                                      fontWeight: _langDisplayMode == 2
+                                          ? FontWeight.bold
+                                          : FontWeight.normal)),
                             ],
                           ],
                         ),
@@ -5812,8 +5834,9 @@ class _UpTrianglePainter extends CustomPainter {
 }
 
 class _LangIconPainter extends CustomPainter {
-  final bool active;
-  const _LangIconPainter({required this.active});
+  /// 0=영어+한글, 1=영어만, 2=한글만
+  final int mode;
+  const _LangIconPainter({required this.mode});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -5823,13 +5846,12 @@ class _LangIconPainter extends CustomPainter {
     canvas
         .clipPath(Path()..addOval(Rect.fromCircle(center: center, radius: r)));
 
-    // 배경: 활성=파란, 비활성=어두운 회색
-    canvas.drawRect(
-        Rect.fromLTWH(0, 0, size.width, size.height),
-        Paint()
-          ..color = active ? const Color(0xFF1E7DB5) : const Color(0xFF2A2A2A));
-
-    if (active) {
+    // ── 배경 ──
+    // mode 0: 파란 투톤, mode 1: 하단 파란+상단 어둡게, mode 2: 상단 파란+하단 어둡게
+    if (mode == 0) {
+      // 밝은 파란 전체
+      canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height),
+          Paint()..color = const Color(0xFF1E7DB5));
       // 짙은 파란 삼각형 (하단 우측)
       canvas.drawPath(
         Path()
@@ -5839,34 +5861,59 @@ class _LangIconPainter extends CustomPainter {
           ..close(),
         Paint()..color = const Color(0xFF0B4870),
       );
+    } else if (mode == 1) {
+      // 영어만: 상단(원어) 어둡게, 하단(타겟) 파란
+      canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height),
+          Paint()..color = const Color(0xFF2A2A2A));
+      canvas.drawPath(
+        Path()
+          ..moveTo(size.width * 0.05, size.height)
+          ..lineTo(size.width, size.height * 0.05)
+          ..lineTo(size.width, size.height)
+          ..close(),
+        Paint()..color = const Color(0xFF0B4870),
+      );
+    } else {
+      // 한글만: 상단(원어) 파란, 하단(타겟) 어둡게
+      canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height),
+          Paint()..color = const Color(0xFF1E7DB5));
+      canvas.drawPath(
+        Path()
+          ..moveTo(size.width * 0.05, size.height)
+          ..lineTo(size.width, size.height * 0.05)
+          ..lineTo(size.width, size.height)
+          ..close(),
+        Paint()..color = const Color(0xFF2A2A2A),
+      );
     }
 
-    // 대각선: 활성=골드, 비활성=희미
+    // ── 대각선 ──
     canvas.drawLine(
       Offset(size.width * 0.04, size.height * 0.96),
       Offset(size.width * 0.96, size.height * 0.04),
       Paint()
-        ..color = active ? const Color(0xFFD4AF37) : Colors.white12
+        ..color = const Color(0xFFD4AF37)
         ..strokeWidth = 2.0
         ..strokeCap = StrokeCap.round,
     );
 
-    // 원형 테두리: 활성=골드, 비활성=희미
+    // ── 원형 테두리 ──
     canvas.drawCircle(
       center,
       r - 1.5,
       Paint()
-        ..color = active ? const Color(0xFFD4AF37) : Colors.white24
+        ..color = const Color(0xFFD4AF37)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.5,
     );
 
-    // 상단 좌측 "T" (원어): 활성=흰색, 비활성=거의 투명
+    // ── 상단 좌측 "T" (원어/한글) ──
+    final bool origActive = (mode == 0 || mode == 2);
     _drawText(canvas, 'T', Offset(size.width * 0.09, size.height * 0.06),
-        size.width * 0.34, active ? Colors.white : const Color(0x22FFFFFF));
+        size.width * 0.34, origActive ? Colors.white : const Color(0x44FFFFFF));
 
-    if (active) {
-      // 빨간 원형 포인트 (두 언어 구분점)
+    // ── 상단 우측: 빨간 점(활성) 또는 X(비활성) ──
+    if (origActive) {
       final dotC = Offset(size.width * 0.63, size.height * 0.23);
       final dotR = size.width * 0.105;
       canvas.drawCircle(dotC, dotR, Paint()..color = const Color(0xFFE03030));
@@ -5880,7 +5927,7 @@ class _LangIconPainter extends CustomPainter {
             ..style = PaintingStyle.stroke
             ..strokeWidth = 0.8);
     } else {
-      // 원어 숨김 표시 — 소형 X
+      // 원어 숨김 X
       final xPaint = Paint()
         ..color = Colors.redAccent.withOpacity(0.65)
         ..strokeWidth = 1.2
@@ -5891,9 +5938,22 @@ class _LangIconPainter extends CustomPainter {
           Offset(size.width * 0.53, size.height * 0.32), xPaint);
     }
 
-    // 하단 우측 "T" (타겟): 항상 흰색
+    // ── 하단 우측 "T" (타겟/영어) ──
+    final bool targetActive = (mode == 0 || mode == 1);
     _drawText(canvas, 'T', Offset(size.width * 0.55, size.height * 0.58),
-        size.width * 0.34, Colors.white);
+        size.width * 0.34, targetActive ? Colors.white : const Color(0x44FFFFFF));
+
+    // ── 하단 좌측: 타겟 비활성일 때 X 표시 ──
+    if (!targetActive) {
+      final xPaint = Paint()
+        ..color = Colors.redAccent.withOpacity(0.65)
+        ..strokeWidth = 1.2
+        ..strokeCap = StrokeCap.round;
+      canvas.drawLine(Offset(size.width * 0.27, size.height * 0.65),
+          Offset(size.width * 0.48, size.height * 0.86), xPaint);
+      canvas.drawLine(Offset(size.width * 0.48, size.height * 0.65),
+          Offset(size.width * 0.27, size.height * 0.86), xPaint);
+    }
   }
 
   void _drawText(
@@ -5912,5 +5972,5 @@ class _LangIconPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_LangIconPainter old) => old.active != active;
+  bool shouldRepaint(_LangIconPainter old) => old.mode != mode;
 }
