@@ -128,12 +128,20 @@ dev_dependencies:
 
 
 flutter_launcher_icons:
-  android: true
+  android: "launcher_icon"
   ios: true
   remove_alpha_ios: true
+  image_path: 'assets/images/app_launcher_icon.png'
   web:
     generate: true
-  image_path: 'assets/images/app_launcher_icon.png'
+    image_path: 'assets/images/app_launcher_icon.png'
+  # ── Android Adaptive Icon (API 26+) ──────────────────────────────────
+  # 배경: 앱 테마와 동일한 검정 계열
+  adaptive_icon_background: "#000000"
+  # 전경: safe-zone 패딩 적용된 450×450 이미지 (로고 66.7% 영역 내 배치)
+  adaptive_icon_foreground: 'assets/images/stealthvox_adaptive_fg.png'
+  # ── Android 13+ Monochrome (API 33+) ─────────────────────────────────
+  adaptive_icon_monochrome: 'assets/images/stealthvox_adaptive_fg.png'
 
 
 # For information on the generic Dart part of this file, see the

@@ -49,7 +49,11 @@
       "Bash(Select-Object -First 20)",
       "Bash(Copy-Item \"F:\\\\flutter_project\\\\stealth_vox\\\\build\\\\app\\\\outputs\\\\bundle\\\\release\\\\app-release.aab\" \"F:\\\\flutter_project\\\\stealth_vox\\\\build\\\\app\\\\outputs\\\\bundle\\\\release\\\\StealthVox_v1.0.26_build26.aab\")",
       "Bash(Get-Item \"F:\\\\flutter_project\\\\stealth_vox\\\\build\\\\app\\\\outputs\\\\bundle\\\\release\\\\StealthVox_v1.0.26_build26.aab\")",
-      "Bash(Select-Object Name, Length, LastWriteTime)"
+      "Bash(Select-Object Name, Length, LastWriteTime)",
+      "PowerShell(flutter analyze *)",
+      "PowerShell(cd F:\\\\flutter_project\\\\stealth_vox; $img = [System.Drawing.Image]::FromFile\\(\"lib\\\\custom_code\\\\중요자료\\\\로고\\\\stealthvox.png\"\\); Write-Host \"Size: $\\($img.Width\\) x $\\($img.Height\\)\"; $img.Dispose\\(\\))",
+      "PowerShell(cd F:\\\\flutter_project\\\\stealth_vox; $bytes = [System.IO.File]::ReadAllBytes\\(\"lib\\\\custom_code\\\\중요자료\\\\로고\\\\stealthvox.png\"\\); Write-Host \"File size: $\\($bytes.Length\\) bytes\"; $pngHeader = [System.Text.Encoding]::ASCII.GetString\\($bytes[1..3]\\); Write-Host \"Header: $pngHeader\"; $width = [System.BitConverter]::ToInt32\\($bytes[19..16], 0\\); $height = [System.BitConverter]::ToInt32\\($bytes[23..20], 0\\); Write-Host \"Width: $width, Height: $height\")",
+      "PowerShell(New-Item *)"
     ]
   }
 }
