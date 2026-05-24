@@ -49,7 +49,8 @@
       "Bash(Select-Object -First 20)",
       "Bash(Copy-Item \"F:\\\\flutter_project\\\\stealth_vox\\\\build\\\\app\\\\outputs\\\\bundle\\\\release\\\\app-release.aab\" \"F:\\\\flutter_project\\\\stealth_vox\\\\build\\\\app\\\\outputs\\\\bundle\\\\release\\\\StealthVox_v1.0.26_build26.aab\")",
       "Bash(Get-Item \"F:\\\\flutter_project\\\\stealth_vox\\\\build\\\\app\\\\outputs\\\\bundle\\\\release\\\\StealthVox_v1.0.26_build26.aab\")",
-      "Bash(Select-Object Name, Length, LastWriteTime)"
+      "Bash(Select-Object Name, Length, LastWriteTime)",
+      "PowerShell(flutter analyze *)"
     ]
   }
 }
