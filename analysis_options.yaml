@@ -25,5 +25,9 @@ linter:
     # prefer_single_quotes: true  # Uncomment to enable the `prefer_single_quotes` rule
     unnecessary_string_escapes: false
 
+analyzer:
+  exclude:
+    - lib/custom_code/임시/**   # 참고용 백업 파일 — 분석 제외
+
 # Additional information about this file can be found at
 # https://dart.dev/guides/language/analysis-options
