@@ -307,6 +307,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     _fetchKeysAndInit();
     BillingTicker.instance.setRate(BillingRate.full);
     BillingTicker.instance.resume();
+    BillingTicker.instance.logMode('roleplay');
   }
 
   /// 나가는 모든 경로에서 호출: chat_json + last_message 저장 (탐색 없이 순수 저장만)

@@ -25,8 +25,8 @@ Future billingTicker() async {}
 // =============================================================================
 
 enum BillingRate {
-  full, // 1.0x — 1초 사용 시 1초 차감
-  discounted, // 0.25x — 1초 사용 시 0.25초 차감 (4배 더 길게 사용 가능)
+  full,    // 1.0x — 1초 사용 시 1초 차감 (실시간 AI 대화/훈련 모드)
+  quarter, // 0.25x — 1초 사용 시 0.25초 차감 (복습/히스토리 체류 계열, 4배 오래 사용 가능)
 }
 
 extension BillingRateMultiplier on BillingRate {
@@ -34,11 +34,10 @@ extension BillingRateMultiplier on BillingRate {
     switch (this) {
       case BillingRate.full:
         return 1.0;
-      // AI History Practice Mode:
-      // 0.25 = 25% billing rate (intentional policy — do NOT change).
-      // User can practice 4x longer than normal conversation.
-      // This is intentional policy for history review mode.
-      case BillingRate.discounted:
+      // 복습/히스토리 체류 계열:
+      // 0.25 = 25% billing rate (StealthVox 서비스 정책 — 변경 금지).
+      // 사용자가 일반 대화보다 4배 오래 복습 가능.
+      case BillingRate.quarter:
         return 0.25;
     }
   }
@@ -50,21 +49,45 @@ extension BillingRateMultiplier on BillingRate {
 
 const String _kBillingRegion = 'us-central1';
 
-class BillingTicker {
+class BillingTicker with WidgetsBindingObserver {
   static final BillingTicker instance = BillingTicker._();
-  BillingTicker._();
+  BillingTicker._() {
+    WidgetsBinding.instance.addObserver(this);
+  }
 
   final ValueNotifier<int> remainingSecondsNotifier = ValueNotifier<int>(0);
 
   Timer? _tickTimer;
-  BillingRate _rate = BillingRate.discounted;
+  BillingRate _rate = BillingRate.quarter;
   bool _paused = true;
+  bool _wasRunningBeforeBackground = false;
   double _fractionalDebt = 0.0;
   int _unflushedDeducted = 0;
   DateTime _lastFlushAt = DateTime.now();
   String? _lastFlushResult;
   final List<Map<String, dynamic>> _history = [];
   static const int _kMaxHistory = 10;
+
+  // ── BILLING DEBUG LOG ──────────────────────────────────────────────────────
+  static const int _kMaxLogs = 200;
+  final List<String> _billingLogs = [];
+
+  void _addBillingLog(String msg) {
+    final ts = DateTime.now().toIso8601String().substring(11, 19);
+    final line = '[$ts] $msg';
+    _billingLogs.insert(0, line);
+    if (_billingLogs.length > _kMaxLogs) {
+      _billingLogs.removeRange(_kMaxLogs, _billingLogs.length);
+    }
+    debugPrint(msg);
+  }
+
+  /// BILLING DEBUG LOG 전체 목록 (최신순)
+  List<String> get billingLogs => List.unmodifiable(_billingLogs);
+
+  /// BILLING DEBUG LOG 초기화
+  void clearBillingLogs() => _billingLogs.clear();
+  // ──────────────────────────────────────────────────────────────────────────
 
   BillingRate get currentRate => _rate;
   bool get isPaused => _paused;
@@ -74,22 +97,57 @@ class BillingTicker {
   String? get lastFlushResult => _lastFlushResult;
   List<Map<String, dynamic>> get history => List.unmodifiable(_history);
 
+  // ── Foreground / Background Lifecycle ─────────────────────────────────────
+  /// 앱이 백그라운드로 가면 billing 정지 → 포그라운드 복귀 시 이전 상태로 재개
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      if (!_paused) {
+        _wasRunningBeforeBackground = true;
+        _addBillingLog('[BILLING] background paused');
+        pause();
+      } else {
+        // billing이 이미 정지 상태이면 flush만 안전하게 시도
+        flushNow();
+      }
+    } else if (state == AppLifecycleState.resumed) {
+      _addBillingLog('[BILLING] foreground resumed');
+      if (_wasRunningBeforeBackground) {
+        _wasRunningBeforeBackground = false;
+        resume();
+      }
+    }
+  }
+  // ──────────────────────────────────────────────────────────────────────────
+
   void start() {
     _tickTimer?.cancel();
     _tickTimer = Timer.periodic(const Duration(seconds: 1), (_) => _onTick());
   }
 
+  /// 과금 배율 설정. 변경 시 로그 자동 기록.
   void setRate(BillingRate rate) {
     _rate = rate;
+    final rateStr = rate == BillingRate.full ? 'rate=full' : 'rate=quarter';
+    _addBillingLog('[BILLING] $rateStr');
+  }
+
+  /// 현재 모드 로그 기록 (예: 'duo', 'history', 'roleplay')
+  void logMode(String mode) {
+    _addBillingLog('[BILLING] mode=$mode');
   }
 
   void pause() {
     _paused = true;
+    _addBillingLog('[BILLING] pause');
     flushNow();
   }
 
   void resume() {
     _paused = false;
+    _addBillingLog('[BILLING] resume');
   }
 
   void _onTick() {
@@ -99,11 +157,13 @@ class BillingTicker {
     _fractionalDebt += _rate.multiplier;
     final whole = _fractionalDebt.floor();
     if (whole >= 1) {
+      final before = FFAppState().remainingTime;
       _fractionalDebt -= whole;
-      final next = (FFAppState().remainingTime - whole).clamp(0, 1 << 31);
+      final next = (before - whole).clamp(0, 1 << 31);
       FFAppState().remainingTime = next;
       _unflushedDeducted += whole;
       remainingSecondsNotifier.value = next;
+      _addBillingLog('[BILLING] tick before=$before after=$next');
       _addHistory({
         'time': DateTime.now().toIso8601String().substring(11, 19),
         'rate': _rate.name,
@@ -126,6 +186,7 @@ class BillingTicker {
       await _callDeductTime(amount);
     } catch (e) {
       _unflushedDeducted += amount;
+      _addBillingLog('[BILLING] firestore save error: $e');
       debugPrint('[BillingTicker] flush failed: $e');
       _lastFlushResult =
           'FAIL: $e @ ${DateTime.now().toIso8601String().substring(11, 19)}';
@@ -173,6 +234,7 @@ class BillingTicker {
         FFAppState().remainingTime = updated;
         remainingSecondsNotifier.value = updated;
       }
+      _addBillingLog('[BILLING] firestore save success');
       _lastFlushResult =
           'OK (-${seconds}s) @ ${DateTime.now().toIso8601String().substring(11, 19)}';
     }

@@ -175,6 +175,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
     _fetchKeys();
     BillingTicker.instance.setRate(BillingRate.full);
     BillingTicker.instance.resume();
+    BillingTicker.instance.logMode('clone');
   }
 
   @override

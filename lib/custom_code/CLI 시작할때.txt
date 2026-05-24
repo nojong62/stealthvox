@@ -6,8 +6,6 @@ cd F:\flutter_project\stealth_vox
 CLAUDE1.md 참고해서, 실행해 줘.
 
 
-
-
 🔗 앱 다운로드 링크: `https://play.google.com/apps/testing/com.aienglishpractice.stealthvox`
 ==================================
 

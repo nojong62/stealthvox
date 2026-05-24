@@ -71,8 +71,9 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
   void initState() {
     super.initState();
     _fetchApiKey();
-    BillingTicker.instance.setRate(BillingRate.discounted);
+    BillingTicker.instance.setRate(BillingRate.quarter);
     BillingTicker.instance.resume();
+    BillingTicker.instance.logMode('history_list');
   }
 
   @override
@@ -1003,7 +1004,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
         },
       ),
     ).whenComplete(() {
-      BillingTicker.instance.setRate(BillingRate.discounted);
+      BillingTicker.instance.setRate(BillingRate.quarter);
       _keeperDialogSetState = null;
       if (_keeperIsRecording) {
         _keeperRecorder?.stop().catchError((_) => null);

@@ -379,65 +379,116 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     );
   }
 
-  void _showBillingDebugDialog(BuildContext context) {
-    final ticker = BillingTicker.instance;
-    final lines = <String>[
-      '═══ BillingTicker State ═══',
-      'remainingTime (FFAppState): ${FFAppState().remainingTime}s',
-      'notifier.value:             ${ticker.remainingSecondsNotifier.value}s',
-      'currentRate:                ${ticker.currentRate.name} (x${ticker.currentRate.multiplier})',
-      'isPaused:                   ${ticker.isPaused}',
-      'fractionalDebt:             ${ticker.fractionalDebt.toStringAsFixed(3)}',
-      'unflushedDeducted:          ${ticker.unflushedDeducted}s',
-      'lastFlushAt:                ${ticker.lastFlushAt.toIso8601String().substring(11, 19)}',
-      'lastFlushResult:            ${ticker.lastFlushResult ?? "(none)"}',
-      '',
-      '═══ Recent History (최신순) ═══',
-      if (ticker.history.isEmpty) '(no entries yet)',
-      for (final e in ticker.history)
-        '${e['time']}  ${e['rate'].toString().padRight(10)} -${e['deducted']}s → ${e['remaining']}s',
-    ];
-    final text = lines.join('\n');
-
-    showDialog(
+  void _showBillingDebugLog(BuildContext context) {
+    showModalBottomSheet(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF0F172A),
-        title: const Text('🔧 Billing Debug',
-            style: TextStyle(color: Colors.white)),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: SingleChildScrollView(
-            child: SelectableText(
-              text,
-              style: const TextStyle(
-                color: Colors.white,
-                fontFamily: 'monospace',
-                fontSize: 12,
-              ),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Clipboard.setData(ClipboardData(text: text));
-              ScaffoldMessenger.of(ctx).showSnackBar(
-                const SnackBar(
-                  content: Text('📋 클립보드에 복사됨'),
-                  duration: Duration(seconds: 2),
-                ),
-              );
-            },
-            child:
-                const Text('📋 복사', style: TextStyle(color: Color(0xFF60A5FA))),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('닫기', style: TextStyle(color: Colors.white70)),
-          ),
-        ],
+      backgroundColor: const Color(0xFF0F172A),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
+      isScrollControlled: true,
+      builder: (ctx) {
+        final logs = BillingTicker.instance.billingLogs;
+        final text = logs.isEmpty ? null : logs.join('\n');
+
+        return DraggableScrollableSheet(
+          initialChildSize: 0.6,
+          maxChildSize: 0.9,
+          minChildSize: 0.3,
+          expand: false,
+          builder: (_, controller) => Column(
+            children: [
+              Container(
+                margin: const EdgeInsets.symmetric(vertical: 12),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const Text(
+                'BILLING DEBUG LOG',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 2,
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Divider(color: Colors.white12, height: 1),
+              Expanded(
+                child: logs.isEmpty
+                    ? const Center(
+                        child: Text(
+                          '로그가 없습니다.',
+                          style:
+                              TextStyle(color: Colors.white38, fontSize: 14),
+                        ),
+                      )
+                    : ListView.builder(
+                        controller: controller,
+                        padding: const EdgeInsets.all(12),
+                        itemCount: logs.length,
+                        itemBuilder: (_, i) => Text(
+                          logs[i],
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontFamily: 'monospace',
+                            fontSize: 12,
+                            height: 1.6,
+                          ),
+                        ),
+                      ),
+              ),
+              const Divider(color: Colors.white12, height: 1),
+              SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 12),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: text == null
+                            ? Colors.white12
+                            : const Color(0xFF3B82F6),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding:
+                            const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      onPressed: text == null
+                          ? null
+                          : () {
+                              Clipboard.setData(
+                                  ClipboardData(text: text));
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                      '✅ BILLING 로그가 복사되었습니다'),
+                                  duration: Duration(seconds: 2),
+                                ),
+                              );
+                            },
+                      child: const Text(
+                        '로그 복사',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -673,7 +724,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                             children: [
                               GestureDetector(
                                 onLongPress: () =>
-                                    _showBillingDebugDialog(context),
+                                    _showBillingDebugLog(context),
                                 child: _buildGlassContainer(
                                     child: Column(children: [
                                   Text("REMAINING TIME",
