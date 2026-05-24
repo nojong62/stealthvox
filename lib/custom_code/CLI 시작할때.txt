@@ -50,6 +50,7 @@ cd stealthvox-app
 F:\flutter_project\stealth_vox\build\app\outputs\flutter-apk\app-debug.apk (APK)
 
 안드로이드 스튜디오 터미날에 flutter build appbundle  다음버전 abb 만듬
+flutter build appbundle --build-name=1.0.31 --build-number=31
 =================================
 수정 전 현재 파일들의 백업 사본을 프로젝트 밖이 아니라 프로젝트 내부 임시 백업 폴더에 만들지 말고, git이 있다면 변경 전 `git status`만 확인해줘.
 절대 git reset/checkout으로 기존 변경을 되돌리지 마.

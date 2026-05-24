@@ -38,125 +38,234 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-Firestore 인덱스 오류 해결 + 결제 동기화 검증 지시문
+Claude Code 지시문 — 언어 표시 3단 토글 변경
+📋 파일: chat_history_master.dart
+목적
+언어 전환 아이콘 버튼을 2-state(영어+한글 ↔ 영어만)에서 3-state 순환(영어+한글 → 영어만 → 한글만 → 영어+한글…)으로 변경한다.
+모드 정의
 
-현재 로그 분석 결과:
+0 = 영어 + 한글 (기본값, 앱 진입 시)
+1 = 영어만 (한글 숨김)
+2 = 한글만 (영어 숨김)
 
-RevenueCat 결제 자체는 정상 성공 상태.
 
-로그:
-- PURCHASE success
-- PURCHASE activeEntitlements=time_charge
+변경 ① — 상태 변수 선언 (줄 58)
+삭제:
+dart  bool _showOriginal = true;
+교체:
+dart  /// 언어 표시 모드: 0=영어+한글, 1=영어만, 2=한글만
+  int _langDisplayMode = 0;
 
-까지 정상 확인됨.
+변경 ② — 아이콘 버튼 영역 (줄 2829~2838)
+삭제: 줄 2829 IconButton( 부터 줄 2838 ), 까지 (닫는 괄호+쉼표 포함)
+교체:
+dart          IconButton(
+            icon: CustomPaint(
+              size: const Size(26, 26),
+              painter: _LangIconPainter(mode: _langDisplayMode),
+            ),
+            tooltip: _langDisplayMode == 0
+                ? '영어만 보기'
+                : _langDisplayMode == 1
+                    ? '한글만 보기'
+                    : '영어+한글 보기',
+            onPressed: () => setState(() {
+              _langDisplayMode = (_langDisplayMode + 1) % 3;
+            }),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+          ),
 
-문제는 이후 Firestore purchases 조회 단계에서 아래 오류가 발생:
+변경 ③ — 메시지 말풍선 렌더링 (줄 3089~3107 부근)
+삭제: 줄 3089 Text(translated, 부터 줄 3107 ], 까지 (children 내부의 translated Text + _showOriginal 조건부 블록 전체)
+교체:
+dart                            // 영어(타겟) 표시: mode 0,1 에서 보임
+                            if (_langDisplayMode != 2) ...[
+                              Text(translated,
+                                  textAlign:
+                                      isHost ? TextAlign.right : TextAlign.left,
+                                  style: TextStyle(
+                                      color: isHost
+                                          ? Colors.white
+                                          : const Color(0xFF93C5FD),
+                                      fontSize: 16 * _fontScale,
+                                      fontWeight: FontWeight.bold,
+                                      height: 1.4)),
+                            ],
+                            // 한글(원어) 표시: mode 0,2 에서 보임
+                            if (_langDisplayMode != 1 &&
+                                original.isNotEmpty) ...[
+                              if (_langDisplayMode == 0)
+                                const SizedBox(height: 8),
+                              Text(original,
+                                  textAlign:
+                                      isHost ? TextAlign.right : TextAlign.left,
+                                  style: TextStyle(
+                                      color: _langDisplayMode == 2
+                                          ? (isHost
+                                              ? Colors.white
+                                              : const Color(0xFF93C5FD))
+                                          : Colors.grey,
+                                      fontSize: _langDisplayMode == 2
+                                          ? 16 * _fontScale
+                                          : 12 * _fontScale,
+                                      fontWeight: _langDisplayMode == 2
+                                          ? FontWeight.bold
+                                          : FontWeight.normal)),
+                            ],
 
-[cloud_firestore/failed-precondition] The query requires an index
+설명: mode 2(한글만)에서는 한글 텍스트가 주인공이 되므로, 영어 표시 때와 동일한 색상·크기·굵기를 적용. mode 0(둘 다)에서는 기존처럼 회색·작은 폰트.
 
-원인:
-purchases 컬렉션에서
-product_id + purchased_at 조합 쿼리를 사용 중인데,
-Firestore 복합 인덱스가 없어 결제 후 동기화(SYNC)가 실패 중.
 
-==================================================
-1. Firebase Console에서 Firestore 복합 인덱스 생성
-==================================================
+변경 ④ — _LangIconPainter 클래스 전체 교체 (줄 5814~5916)
+삭제: 줄 5814 class _LangIconPainter extends CustomPainter { 부터 줄 5916 파일 끝 } 까지 전체
+교체:
+dartclass _LangIconPainter extends CustomPainter {
+  /// 0=영어+한글, 1=영어만, 2=한글만
+  final int mode;
+  const _LangIconPainter({required this.mode});
 
-Firebase Console → Firestore Database → Indexes → Composite Indexes
+  @override
+  void paint(Canvas canvas, Size size) {
+    final r = size.width / 2;
+    final center = Offset(r, r);
 
-Collection ID:
-purchases
+    canvas
+        .clipPath(Path()..addOval(Rect.fromCircle(center: center, radius: r)));
 
-Fields:
-- product_id → Ascending
-- purchased_at → Ascending
-- __name__ → Ascending
+    // ── 배경 ──
+    // mode 0: 파란 투톤, mode 1: 하단 파란+상단 어둡게, mode 2: 상단 파란+하단 어둡게
+    if (mode == 0) {
+      // 밝은 파란 전체
+      canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height),
+          Paint()..color = const Color(0xFF1E7DB5));
+      // 짙은 파란 삼각형 (하단 우측)
+      canvas.drawPath(
+        Path()
+          ..moveTo(size.width * 0.05, size.height)
+          ..lineTo(size.width, size.height * 0.05)
+          ..lineTo(size.width, size.height)
+          ..close(),
+        Paint()..color = const Color(0xFF0B4870),
+      );
+    } else if (mode == 1) {
+      // 영어만: 상단(원어) 어둡게, 하단(타겟) 파란
+      canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height),
+          Paint()..color = const Color(0xFF2A2A2A));
+      canvas.drawPath(
+        Path()
+          ..moveTo(size.width * 0.05, size.height)
+          ..lineTo(size.width, size.height * 0.05)
+          ..lineTo(size.width, size.height)
+          ..close(),
+        Paint()..color = const Color(0xFF0B4870),
+      );
+    } else {
+      // 한글만: 상단(원어) 파란, 하단(타겟) 어둡게
+      canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height),
+          Paint()..color = const Color(0xFF1E7DB5));
+      canvas.drawPath(
+        Path()
+          ..moveTo(size.width * 0.05, size.height)
+          ..lineTo(size.width, size.height * 0.05)
+          ..lineTo(size.width, size.height)
+          ..close(),
+        Paint()..color = const Color(0xFF2A2A2A),
+      );
+    }
 
-생성 후 ENABLED 상태까지 기다릴 것.
-(보통 수 분 소요)
+    // ── 대각선 ──
+    canvas.drawLine(
+      Offset(size.width * 0.04, size.height * 0.96),
+      Offset(size.width * 0.96, size.height * 0.04),
+      Paint()
+        ..color = const Color(0xFFD4AF37)
+        ..strokeWidth = 2.0
+        ..strokeCap = StrokeCap.round,
+    );
 
-==================================================
-2. 테스트 전 사전 확인
-==================================================
+    // ── 원형 테두리 ──
+    canvas.drawCircle(
+      center,
+      r - 1.5,
+      Paint()
+        ..color = const Color(0xFFD4AF37)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.5,
+    );
 
-Firestore:
+    // ── 상단 좌측 "T" (원어/한글) ──
+    final bool origActive = (mode == 0 || mode == 2);
+    _drawText(canvas, 'T', Offset(size.width * 0.09, size.height * 0.06),
+        size.width * 0.34, origActive ? Colors.white : const Color(0x44FFFFFF));
 
-users/rJChsLrIqAhXhLZotYeeLZo6KK42
+    // ── 상단 우측: 빨간 점(활성) 또는 X(비활성) ──
+    if (origActive) {
+      final dotC = Offset(size.width * 0.63, size.height * 0.23);
+      final dotR = size.width * 0.105;
+      canvas.drawCircle(dotC, dotR, Paint()..color = const Color(0xFFE03030));
+      canvas.drawCircle(
+          dotC, dotR * 0.45, Paint()..color = const Color(0xFFFF6060));
+      canvas.drawCircle(
+          dotC,
+          dotR,
+          Paint()
+            ..color = const Color(0xBBFFFFFF)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 0.8);
+    } else {
+      // 원어 숨김 X
+      final xPaint = Paint()
+        ..color = Colors.redAccent.withOpacity(0.65)
+        ..strokeWidth = 1.2
+        ..strokeCap = StrokeCap.round;
+      canvas.drawLine(Offset(size.width * 0.53, size.height * 0.11),
+          Offset(size.width * 0.74, size.height * 0.32), xPaint);
+      canvas.drawLine(Offset(size.width * 0.74, size.height * 0.11),
+          Offset(size.width * 0.53, size.height * 0.32), xPaint);
+    }
 
-문서 열어서 현재:
+    // ── 하단 우측 "T" (타겟/영어) ──
+    final bool targetActive = (mode == 0 || mode == 1);
+    _drawText(canvas, 'T', Offset(size.width * 0.55, size.height * 0.58),
+        size.width * 0.34, targetActive ? Colors.white : const Color(0x44FFFFFF));
 
-remaining_seconds
+    // ── 하단 좌측: 타겟 비활성일 때 X 표시 ──
+    if (!targetActive) {
+      final xPaint = Paint()
+        ..color = Colors.redAccent.withOpacity(0.65)
+        ..strokeWidth = 1.2
+        ..strokeCap = StrokeCap.round;
+      canvas.drawLine(Offset(size.width * 0.27, size.height * 0.65),
+          Offset(size.width * 0.48, size.height * 0.86), xPaint);
+      canvas.drawLine(Offset(size.width * 0.48, size.height * 0.65),
+          Offset(size.width * 0.27, size.height * 0.86), xPaint);
+    }
+  }
 
-값 미리 메모해둘 것.
+  void _drawText(
+      Canvas canvas, String text, Offset offset, double fontSize, Color color) {
+    final tp = TextPainter(
+      text: TextSpan(
+          text: text,
+          style: TextStyle(
+              color: color,
+              fontSize: fontSize,
+              fontWeight: FontWeight.bold,
+              height: 1.0)),
+      textDirection: ui.TextDirection.ltr,
+    )..layout();
+    tp.paint(canvas, offset);
+  }
 
-==================================================
-3. 인덱스 생성 완료 후 테스트
-==================================================
+  @override
+  bool shouldRepaint(_LangIconPainter old) => old.mode != mode;
+}
 
-앱 재실행 후:
+검증 체크리스트
 
-10분권(stealthvox_10m) 1회만 테스트 구매.
-
-==================================================
-4. 테스트 후 로그 확인 항목
-==================================================
-
-아래 흐름이 순서대로 떠야 정상:
-
-PURCHASE success
-SYNC start
-Firestore update success
-remaining_seconds increased
-
-특히:
-- Firestore update success
-- remaining_seconds increased
-
-반드시 확인.
-
-==================================================
-5. remaining_seconds 검증
-==================================================
-
-테스트 전 메모해둔 값보다:
-
-+600초
-
-증가했는지 확인.
-
-==================================================
-6. 중요 추가 주의사항
-==================================================
-
-이전 테스트들:
-
-600 + 3600 + 600 + 600 + 600
-
-총 약 6000초 분량 결제가 이미 성공했지만,
-Firestore 인덱스 오류 때문에 동기화 실패 상태로 남아 있을 가능성이 있음.
-
-따라서 인덱스 생성 후 앱 재실행 시:
-
-pending transaction 재처리
-또는 밀린 동기화 처리
-
-가 발생할 수 있음.
-
-그 결과:
-remaining_seconds가 한 번에 크게 증가해도 이상하지 않을 수 있음.
-
-==================================================
-7. 코드 수정 관련
-==================================================
-
-지금 단계에서는 코드 수정하지 말 것.
-
-먼저:
-- Firestore 인덱스 생성
-- 동기화 정상 여부 확인
-
-만 진행.
-
-APK/AAB 빌드 금지.
-flutter analyze 수준까지만.
+mode 0 (영어+한글): 기존과 동일하게 영어 큰 글씨 + 한글 작은 회색 글씨
+mode 1 (영어만): 한글 사라짐, 아이콘 상단 T 어둡게+X 표시
+mode 2 (한글만): 영어 사라지고 한글이 큰 글씨+메인 색상으로 승격, 아이콘 하단 T 어둡게+X 표시
+3번 클릭하면 원래(mode 0)로 복귀
+_showOriginal 키워드가 파일 내 0개인지 확인 (전부 _langDisplayMode로 대체됨)
