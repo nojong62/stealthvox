@@ -185,6 +185,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     _fetchKeys();
     BillingTicker.instance.setRate(BillingRate.full);
     BillingTicker.instance.resume();
+    BillingTicker.instance.logMode('study_room');
   }
 
   @override

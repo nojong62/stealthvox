@@ -199,8 +199,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _fetchRemoteConfig();
     _fetchRoomData();
     _initPermissions();
-    BillingTicker.instance.setRate(BillingRate.discounted);
+    BillingTicker.instance.setRate(BillingRate.quarter);
     BillingTicker.instance.resume();
+    BillingTicker.instance.logMode('history');
 
     _playerStateSub = audioPlayer.onPlayerStateChanged.listen((state) {
       if (mounted) setState(() => isPlaying = state == PlayerState.playing);
@@ -2021,7 +2022,7 @@ _deepgramKey: ${_deepgramKey.isEmpty ? '❌ 없음' : '✅ (${_deepgramKey.lengt
       ),
     ).whenComplete(() {
       BillingTicker.instance
-          .setRate(BillingRate.discounted); // 튜터링 종료 → discounted 복귀
+          .setRate(BillingRate.quarter); // 튜터링 종료 → quarter 복귀
       _dialogSetState = null;
       if (_appIsRecording || _appIsShadowRecording) {
         appAudioRecorder.stop().catchError((_) {});

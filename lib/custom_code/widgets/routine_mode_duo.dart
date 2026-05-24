@@ -96,6 +96,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
 
     BillingTicker.instance.setRate(BillingRate.full);
     BillingTicker.instance.resume();
+    BillingTicker.instance.logMode('duo');
 
     _ttsPlayer.onPlayerComplete.listen((_) {
       _isTtsActive = false;
