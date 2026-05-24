@@ -688,7 +688,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                                           color: appState.remainingTime > 60
                                               ? Colors.white
                                               : const Color(0xFFFF453A),
-                                          fontSize: 64,
+                                          fontSize: 48,
                                           fontWeight: FontWeight.bold,
                                           shadows: [
                                             Shadow(
