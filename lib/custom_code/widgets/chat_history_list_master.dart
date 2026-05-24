@@ -149,9 +149,9 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
           children: [
             IconButton(
               padding: EdgeInsets.zero,
-              tooltip: '로비',
-              icon: const Icon(Icons.home_rounded, color: Colors.white70),
-              onPressed: () => context.pushNamed('Lobby'),
+              tooltip: '스토어',
+              icon: const Icon(Icons.storefront_rounded, color: Colors.white70),
+              onPressed: () => context.pushNamed('Store'),
             ),
             IconButton(
               padding: EdgeInsets.zero,
