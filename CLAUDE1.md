@@ -38,44 +38,205 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-Claude Code 지시문 — 로비 잔여 시간 폰트 크기 축소
-📋 파일: lobby_master.dart
-변경 위치: 줄 682~695 (Text("${displayMinutes}m", ...))
-삭제: 줄 682 Text("${displayMinutes}m", 부터 줄 695 )), 까지
-dart                                  Text("${displayMinutes}m",
-                                      style: GoogleFonts.orbitron(
-                                          color: appState.remainingTime > 60
-                                              ? Colors.white
-                                              : const Color(0xFFFF453A),
-                                          fontSize: 64,
-                                          fontWeight: FontWeight.bold,
-                                          shadows: [
-                                            Shadow(
-                                                color: const Color(0xFF3B82F6)
-                                                    .withOpacity(0.5),
-                                                blurRadius: 20)
-                                          ])),
-교체:
-dart                                  Text("${displayMinutes}m",
-                                      style: GoogleFonts.orbitron(
-                                          color: appState.remainingTime > 60
-                                              ? Colors.white
-                                              : const Color(0xFFFF453A),
-                                          fontSize: 48,
-                                          fontWeight: FontWeight.bold,
-                                          shadows: [
-                                            Shadow(
-                                                color: const Color(0xFF3B82F6)
-                                                    .withOpacity(0.5),
-                                                blurRadius: 20)
-                                          ])),
+StealthVox Billing 정책 및 BILLING DEBUG LOG 시스템 수정 지시문
 
-변경 내용: fontSize: 64 → fontSize: 48 (스토어 표시와 동일한 크기 수준)
+목표:
+현재 BillingTicker 기반 시간 차감 시스템을
+StealthVox 실제 서비스 정책 기준으로 정리하고,
+Billing 동작을 실시간 검증 가능한 DEBUG LOG 시스템 추가.
 
+==================================================
+1. 최종 Billing 정책
+==================================================
 
-검증 체크리스트
+[100% 차감]
+실시간 AI 대화/훈련 모드:
 
-fontSize: 64 → fontSize: 48 변경 확인
-색상 조건(remainingTime > 60)·shadow 등 나머지 속성 유지 확인
-실기기에서 1752m 한 줄로 표시되는지 확인
-잔여 시간이 99999m 이상 극단값일 때도 줄 안 넘기는지 확인
+- Duo
+- Roleplay
+- Clone
+- Study Room 실시간 대화
+- History 내부 Tutoring
+- Keepers 내부 Tutoring
+
+의미:
+실제 경과 시간 그대로 차감.
+
+예:
+10분 사용 → 10분 차감
+
+--------------------------------------------------
+
+[25% 차감]
+복습/히스토리 체류 계열:
+
+- 일반 ChatHistory 보기
+- History 재생/복습
+- Keepers 일반 복습
+- 대화 기록 읽기/듣기
+
+의미:
+실제 시간의 25%만 차감.
+즉 4배 오래 사용 가능.
+
+예:
+10분 사용 → 2.5분 차감
+
+--------------------------------------------------
+
+[차감 정지]
+- Lobby
+- Intro
+- Store
+- 앱 백그라운드 상태
+- 화면 OFF 상태
+- 앱 minimized 상태
+
+==================================================
+2. 백그라운드 정책
+==================================================
+
+앱이 foreground를 벗어나면:
+BillingTicker pause()
+
+앱이 다시 foreground 복귀 시:
+이전 모드 기준으로 resume()
+
+즉:
+사용자가 실제 앱을 사용하지 않는 시간은 차감하지 않음.
+
+==================================================
+3. BILLING DEBUG LOG 추가
+==================================================
+
+로그 목적:
+Billing 동작 검증 및 실제 운영 디버깅.
+
+--------------------------------------------------
+로그 UI 위치
+--------------------------------------------------
+
+Lobby 화면:
+REMAINING TIME 카드/숫자 영역 길게 누르기
+
+동작:
+BILLING DEBUG LOG 바텀시트 열기
+
+--------------------------------------------------
+바텀시트 기능
+--------------------------------------------------
+
+- 제목:
+  BILLING DEBUG LOG
+
+- 스크롤 가능
+
+- 로그 없으면:
+  "로그가 없습니다."
+
+- 하단:
+  "로그 복사" 버튼
+
+- Clipboard.setData 지원
+
+- 복사 성공 SnackBar:
+  "✅ BILLING 로그가 복사되었습니다"
+
+==================================================
+4. 반드시 기록할 로그
+==================================================
+
+[BILLING]
+resume
+
+[BILLING]
+pause
+
+[BILLING]
+rate=full
+
+[BILLING]
+rate=quarter
+
+[BILLING]
+tick before=XXXXX after=XXXXX
+
+[BILLING]
+foreground resumed
+
+[BILLING]
+background paused
+
+[BILLING]
+firestore save success
+
+[BILLING]
+firestore save error
+
+[BILLING]
+mode=duo
+
+[BILLING]
+mode=history
+
+==================================================
+5. Billing Rate 구조
+==================================================
+
+현재 구조 점검 후:
+반드시 아래 2개 상태 지원:
+
+BillingRate.full
+BillingRate.quarter
+
+50%/half 제거.
+StealthVox 정책상 사용하지 않음.
+
+==================================================
+6. 현재 코드 점검
+==================================================
+
+현재:
+initState → BillingTicker.resume()
+dispose → BillingTicker.pause()
+
+구조 유지 가능.
+
+다만:
+- foreground/background lifecycle 처리 추가
+- 모드별 BillingRate 정확히 적용
+- History 일반 복습은 quarter 적용
+
+필수 확인.
+
+==================================================
+7. 수정 금지 사항
+==================================================
+
+- RevenueCat 결제 로직 수정 금지
+- Store purchase 로직 수정 금지
+- Firestore purchases 동기화 로직 수정 금지
+
+이번 작업은:
+Billing 정책 + DEBUG LOG만 수정.
+
+==================================================
+8. 작업 후 확인
+==================================================
+
+flutter analyze 실행.
+
+APK/AAB 빌드 금지.
+
+==================================================
+9. 작업 후 보고 항목
+==================================================
+
+반드시 보고:
+
+1. 어떤 화면이 full인지
+2. 어떤 화면이 quarter인지
+3. background pause 정상 여부
+4. 로그 출력 예시
+5. 로그 복사 동작 여부
+6. BillingTicker 변경 내용
