@@ -38,30 +38,44 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-Claude Code 지시문 — 홈 아이콘 → 스토어 아이콘 교체
-📋 파일: chat_history_list_master.dart
-변경 위치: 줄 150~155 (앱바 leading 첫 번째 IconButton)
-삭제: 줄 150 IconButton( 부터 줄 155 ), 까지
-dart            IconButton(
-              padding: EdgeInsets.zero,
-              tooltip: '로비',
-              icon: const Icon(Icons.home_rounded, color: Colors.white70),
-              onPressed: () => context.pushNamed('Lobby'),
-            ),
+Claude Code 지시문 — 로비 잔여 시간 폰트 크기 축소
+📋 파일: lobby_master.dart
+변경 위치: 줄 682~695 (Text("${displayMinutes}m", ...))
+삭제: 줄 682 Text("${displayMinutes}m", 부터 줄 695 )), 까지
+dart                                  Text("${displayMinutes}m",
+                                      style: GoogleFonts.orbitron(
+                                          color: appState.remainingTime > 60
+                                              ? Colors.white
+                                              : const Color(0xFFFF453A),
+                                          fontSize: 64,
+                                          fontWeight: FontWeight.bold,
+                                          shadows: [
+                                            Shadow(
+                                                color: const Color(0xFF3B82F6)
+                                                    .withOpacity(0.5),
+                                                blurRadius: 20)
+                                          ])),
 교체:
-dart            IconButton(
-              padding: EdgeInsets.zero,
-              tooltip: '스토어',
-              icon: const Icon(Icons.storefront_rounded, color: Colors.white70),
-              onPressed: () => context.pushNamed('Store'),
-            ),
+dart                                  Text("${displayMinutes}m",
+                                      style: GoogleFonts.orbitron(
+                                          color: appState.remainingTime > 60
+                                              ? Colors.white
+                                              : const Color(0xFFFF453A),
+                                          fontSize: 48,
+                                          fontWeight: FontWeight.bold,
+                                          shadows: [
+                                            Shadow(
+                                                color: const Color(0xFF3B82F6)
+                                                    .withOpacity(0.5),
+                                                blurRadius: 20)
+                                          ])),
+
+변경 내용: fontSize: 64 → fontSize: 48 (스토어 표시와 동일한 크기 수준)
+
 
 검증 체크리스트
 
-Icons.home_rounded → Icons.storefront_rounded 교체 확인
-tooltip: '로비' → tooltip: '스토어' 교체 확인
-pushNamed('Lobby') → pushNamed('Store') 교체 확인
-스텔스룸 버튼(줄 156~160) 은 변경 없음
-
-
-주의: 'Store'는 FlutterFlow에서 설정된 라우트 이름과 정확히 일치해야 합니다. 프로젝트 내 라우트명이 다를 경우(예: 'StoreMaster') 해당 이름으로 수정해 주세요.
+fontSize: 64 → fontSize: 48 변경 확인
+색상 조건(remainingTime > 60)·shadow 등 나머지 속성 유지 확인
+실기기에서 1752m 한 줄로 표시되는지 확인
+잔여 시간이 99999m 이상 극단값일 때도 줄 안 넘기는지 확인
