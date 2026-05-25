@@ -593,11 +593,12 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   }
 
   Widget _buildSleekLangSelector(
-      String label, String value, Function(String?) onChanged) {
+      String label, String value, Function(String?) onChanged,
+      {Color labelColor = Colors.white54}) {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(label,
-          style: const TextStyle(
-              color: Colors.white54,
+          style: TextStyle(
+              color: labelColor,
               fontSize: 11,
               letterSpacing: 1.5,
               fontWeight: FontWeight.bold)),
@@ -761,18 +762,17 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                                             "ORIGIN",
                                             appState.nativeLang,
                                             (val) => setState(() =>
-                                                appState.nativeLang = val!)),
-                                        const SizedBox(height: 20),
-                                        const Center(
-                                            child: Icon(Icons.sync_alt_rounded,
-                                                color: Colors.white24,
-                                                size: 24)),
+                                                appState.nativeLang = val!),
+                                            labelColor:
+                                                const Color(0xFF93C5FD)),
                                         const SizedBox(height: 20),
                                         _buildSleekLangSelector(
                                             "TARGET",
                                             appState.targetLang,
                                             (val) => setState(() =>
-                                                appState.targetLang = val!)),
+                                                appState.targetLang = val!),
+                                            labelColor:
+                                                const Color(0xFF4ADE80)),
                                         const SizedBox(height: 32),
                                         const Text("AI TONE",
                                             style: TextStyle(
