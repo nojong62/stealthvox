@@ -1994,34 +1994,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                     ),
                   ),
                 ),
-                const SizedBox(width: 10),
-                GestureDetector(
-                  onTap: _showSituationInputSheet,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 9),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF7C3AED).withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                          color: const Color(0xFF7C3AED).withOpacity(0.35),
-                          width: 1),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: const [
-                        Icon(Icons.edit_outlined,
-                            color: Color(0xFFA78BFA), size: 14),
-                        SizedBox(width: 6),
-                        Text('직접 입력',
-                            style: TextStyle(
-                                color: Color(0xFFA78BFA),
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600)),
-                      ],
-                    ),
-                  ),
-                ),
               ],
             ),
           ],
