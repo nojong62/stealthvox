@@ -38,6 +38,9 @@ class IntroMaster extends StatefulWidget {
 class _IntroMasterState extends State<IntroMaster> {
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+  final FocusNode _emailFocusNode = FocusNode();
+  final FocusNode _passwordFocusNode = FocusNode();
 
   bool isLoginMode = true;
   bool isLoading = false;
@@ -45,11 +48,31 @@ class _IntroMasterState extends State<IntroMaster> {
   @override
   void initState() {
     super.initState();
+    _emailFocusNode.addListener(_onFocusChange);
+    _passwordFocusNode.addListener(_onFocusChange);
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkEntryStatus());
+  }
+
+  // 키보드가 올라올 때 로그인 버튼이 보이도록 자동 스크롤
+  void _onFocusChange() {
+    if (_emailFocusNode.hasFocus || _passwordFocusNode.hasFocus) {
+      Future.delayed(const Duration(milliseconds: 350), () {
+        if (mounted && _scrollController.hasClients) {
+          _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        }
+      });
+    }
   }
 
   @override
   void dispose() {
+    _scrollController.dispose();
+    _emailFocusNode.dispose();
+    _passwordFocusNode.dispose();
     emailController.dispose();
     passwordController.dispose();
     super.dispose();
@@ -266,7 +289,10 @@ class _IntroMasterState extends State<IntroMaster> {
                 child: CircularProgressIndicator(color: Colors.amber))
             : SafeArea(
                 child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(24.0),
+                  controller: _scrollController,
+                  padding: EdgeInsets.fromLTRB(
+                      24, 24, 24,
+                      24 + MediaQuery.of(context).viewInsets.bottom),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -301,11 +327,26 @@ class _IntroMasterState extends State<IntroMaster> {
                       _buildBentoCard(
                         child: Column(
                           children: [
-                            _buildTextField(emailController, "Email Address",
-                                Icons.email_outlined, false),
+                            _buildTextField(
+                              emailController,
+                              "Email Address",
+                              Icons.email_outlined,
+                              false,
+                              focusNode: _emailFocusNode,
+                              textInputAction: TextInputAction.next,
+                              onSubmitted: (_) => FocusScope.of(context)
+                                  .requestFocus(_passwordFocusNode),
+                            ),
                             const SizedBox(height: 16),
-                            _buildTextField(passwordController, "Password",
-                                Icons.lock_outline, true),
+                            _buildTextField(
+                              passwordController,
+                              "Password",
+                              Icons.lock_outline,
+                              true,
+                              focusNode: _passwordFocusNode,
+                              textInputAction: TextInputAction.done,
+                              onSubmitted: (_) => _handleAuth(),
+                            ),
                             const SizedBox(height: 24),
                             SizedBox(
                               width: double.infinity,
@@ -410,11 +451,21 @@ class _IntroMasterState extends State<IntroMaster> {
     );
   }
 
-  Widget _buildTextField(TextEditingController controller, String hint,
-      IconData icon, bool isObscure) {
+  Widget _buildTextField(
+    TextEditingController controller,
+    String hint,
+    IconData icon,
+    bool isObscure, {
+    FocusNode? focusNode,
+    TextInputAction? textInputAction,
+    Function(String)? onSubmitted,
+  }) {
     return TextField(
       controller: controller,
       obscureText: isObscure,
+      focusNode: focusNode,
+      textInputAction: textInputAction,
+      onSubmitted: onSubmitted,
       style: const TextStyle(color: Colors.white),
       decoration: InputDecoration(
         prefixIcon: Icon(icon, color: Colors.white38),
