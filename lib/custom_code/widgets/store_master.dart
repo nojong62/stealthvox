@@ -319,6 +319,18 @@ class _StoreMasterState extends State<StoreMaster> {
     }
   }
 
+  /// 초 단위를 보기 좋은 문자열로 변환하는 헬퍼
+  /// 예: 65 → "1m 5s", 3600 → "1h 0m", 0 이하 → "0s"
+  String _formatDurationFromSeconds(int seconds) {
+    if (seconds <= 0) return '0s';
+    final h = seconds ~/ 3600;
+    final m = (seconds % 3600) ~/ 60;
+    final s = seconds % 60;
+    if (h > 0) return '${h}h ${m}m';
+    if (m > 0) return '${m}m ${s}s';
+    return '${s}s';
+  }
+
   void _openReceiptSheet() {
     showModalBottomSheet(
       context: context,
@@ -443,6 +455,217 @@ class _StoreMasterState extends State<StoreMaster> {
     );
   }
 
+  void _openUsageHistorySheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Container(
+          height: MediaQuery.of(context).size.height * 0.70,
+          padding: const EdgeInsets.all(24),
+          decoration: const BoxDecoration(
+            color: Color(0xFF222222),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text("⏱ Time Log",
+                      style: GoogleFonts.orbitron(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold)),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded,
+                        color: Colors.white54),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+              const Divider(color: Colors.white12, height: 30),
+              Expanded(
+                child: currentUserReference == null
+                    ? const Center(
+                        child: Text("접근 권한이 없습니다.",
+                            style: TextStyle(color: Colors.white54)))
+                    : StreamBuilder<QuerySnapshot>(
+                        // TODO: BillingTicker 또는 방 종료 로직에서
+                        // users/{uid}/usage_logs 기록 저장 연결 필요
+                        stream: currentUserReference!
+                            .collection('usage_logs')
+                            .orderBy('created_at', descending: true)
+                            .limit(100)
+                            .snapshots(),
+                        builder: (context, snapshot) {
+                          if (!snapshot.hasData) {
+                            return const Center(
+                                child: CircularProgressIndicator(
+                                    color: Color(0xFF60A5FA)));
+                          }
+                          final records = snapshot.data!.docs;
+                          if (records.isEmpty) {
+                            return const Center(
+                              child: Padding(
+                                padding: EdgeInsets.all(24.0),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.history_rounded,
+                                        color: Colors.white24, size: 48),
+                                    SizedBox(height: 16),
+                                    Text(
+                                      "사용시간 이력이 없습니다.",
+                                      style: TextStyle(
+                                          color: Colors.white54,
+                                          fontSize: 14),
+                                    ),
+                                    SizedBox(height: 8),
+                                    Text(
+                                      "대화방 사용 후 이곳에 차감 기록이 표시됩니다.",
+                                      style: TextStyle(
+                                          color: Colors.white38,
+                                          fontSize: 12),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }
+
+                          return ListView.separated(
+                            itemCount: records.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 12),
+                            itemBuilder: (context, index) {
+                              final data = records[index].data()
+                                  as Map<String, dynamic>;
+
+                              final DateTime ts = data['created_at'] != null
+                                  ? (data['created_at'] as Timestamp)
+                                      .toDate()
+                                  : DateTime.now();
+                              final String dateFormatted =
+                                  DateFormat('yyyy.MM.dd HH:mm').format(ts);
+
+                              final String mode =
+                                  (data['mode'] as String?) ??
+                                      (data['reason'] as String?) ??
+                                      'Unknown';
+                              final int secondsUsed =
+                                  (data['seconds_used'] ?? 0) as int;
+                              final int? beforeSeconds =
+                                  data['before_seconds'] as int?;
+                              final int? afterSeconds =
+                                  data['after_seconds'] as int?;
+                              final dynamic rateRaw = data['rate'];
+                              final double? rate = rateRaw is double
+                                  ? rateRaw
+                                  : (rateRaw is num
+                                      ? rateRaw.toDouble()
+                                      : null);
+                              final String? roomId =
+                                  data['room_id'] as String?;
+
+                              return Container(
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: Colors.black,
+                                  borderRadius: BorderRadius.circular(16),
+                                  border:
+                                      Border.all(color: Colors.white10),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    // 모드명 + 날짜
+                                    Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            mode,
+                                            style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 14,
+                                                fontWeight:
+                                                    FontWeight.bold),
+                                            overflow:
+                                                TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(dateFormatted,
+                                            style: const TextStyle(
+                                                color: Colors.white38,
+                                                fontSize: 11)),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    // 차감 시간 뱃지
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 10, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF60A5FA)
+                                            .withValues(alpha: 0.15),
+                                        borderRadius:
+                                            BorderRadius.circular(12),
+                                      ),
+                                      child: Text(
+                                        (rate != null && rate < 1.0)
+                                            ? "- ${_formatDurationFromSeconds(secondsUsed)} (${rate}x)"
+                                            : "- ${_formatDurationFromSeconds(secondsUsed)}",
+                                        style: const TextStyle(
+                                            color: Color(0xFF60A5FA),
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.bold),
+                                      ),
+                                    ),
+                                    // 잔여 시간 변화 (있을 때만)
+                                    if (beforeSeconds != null &&
+                                        afterSeconds != null) ...[
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        "잔여 ${_formatDurationFromSeconds(beforeSeconds)} → ${_formatDurationFromSeconds(afterSeconds)}",
+                                        style: const TextStyle(
+                                            color: Colors.white54,
+                                            fontSize: 12),
+                                      ),
+                                    ],
+                                    // 방 ID (있을 때만)
+                                    if (roomId != null &&
+                                        roomId.isNotEmpty) ...[
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        "Room: $roomId",
+                                        style: const TextStyle(
+                                            color: Colors.white38,
+                                            fontSize: 11),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              );
+                            },
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     int displayMinutes = FFAppState().remainingTime ~/ 60;
@@ -496,6 +719,15 @@ class _StoreMasterState extends State<StoreMaster> {
                                   }
                                 },
                               ),
+                            TextButton.icon(
+                              onPressed: _openUsageHistorySheet,
+                              icon: const Icon(Icons.history_rounded,
+                                  color: Color(0xFF60A5FA), size: 18),
+                              label: const Text("Time Log",
+                                  style: TextStyle(
+                                      color: Color(0xFF60A5FA),
+                                      fontWeight: FontWeight.bold)),
+                            ),
                             TextButton.icon(
                               onPressed: _openReceiptSheet,
                               icon: const Icon(Icons.receipt_long_rounded,
