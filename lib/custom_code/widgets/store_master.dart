@@ -479,7 +479,8 @@ class _StoreMasterState extends State<StoreMaster> {
     );
   }
 
-  void _openUsageHistorySheet() {
+  // ── 사용자용 Usage 화면 ────────────────────────────────────────────────────
+  void _openUsageSheet() {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -498,7 +499,7 @@ class _StoreMasterState extends State<StoreMaster> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text("⏱ Time Log",
+                  Text("📊 Usage",
                       style: GoogleFonts.orbitron(
                           color: Colors.white,
                           fontSize: 18,
@@ -514,11 +515,9 @@ class _StoreMasterState extends State<StoreMaster> {
               Expanded(
                 child: currentUserReference == null
                     ? const Center(
-                        child: Text("접근 권한이 없습니다.",
+                        child: Text("로그인 후 이용해 주세요.",
                             style: TextStyle(color: Colors.white54)))
                     : StreamBuilder<QuerySnapshot>(
-                        // TODO: BillingTicker 또는 방 종료 로직에서
-                        // users/{uid}/usage_logs 기록 저장 연결 필요
                         stream: currentUserReference!
                             .collection('usage_logs')
                             .orderBy('created_at', descending: true)
@@ -538,18 +537,18 @@ class _StoreMasterState extends State<StoreMaster> {
                                 child: Column(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(Icons.history_rounded,
+                                    Icon(Icons.access_time_rounded,
                                         color: Colors.white24, size: 48),
                                     SizedBox(height: 16),
                                     Text(
-                                      "사용시간 이력이 없습니다.",
+                                      "No usage history yet.",
                                       style: TextStyle(
                                           color: Colors.white54,
                                           fontSize: 14),
                                     ),
                                     SizedBox(height: 8),
                                     Text(
-                                      "대화방 사용 후 이곳에 차감 기록이 표시됩니다.",
+                                      "Your usage will appear here after a session.",
                                       style: TextStyle(
                                           color: Colors.white38,
                                           fontSize: 12),
@@ -580,22 +579,29 @@ class _StoreMasterState extends State<StoreMaster> {
                                   (data['mode'] as String?) ??
                                       (data['reason'] as String?) ??
                                       '';
-                              final String mode =
+                              final String modeName =
                                   _modeDisplayName(modeRaw);
+
+                              // actual_seconds 우선, 없으면 seconds_used로 폴백
+                              final int actualSeconds =
+                                  (data['actual_seconds'] as int?) ??
+                                  (data['seconds_used'] as int?) ??
+                                  0;
                               final int secondsUsed =
-                                  (data['seconds_used'] ?? 0) as int;
-                              final int? beforeSeconds =
-                                  data['before_seconds'] as int?;
-                              final int? afterSeconds =
-                                  data['after_seconds'] as int?;
+                                  (data['seconds_used'] as int?) ?? 0;
+
+                              // rate: 화면에 직접 노출 안 함, 할인 여부만 판단
                               final dynamic rateRaw = data['rate'];
-                              final double? rate = rateRaw is double
+                              final double rateVal = rateRaw is double
                                   ? rateRaw
                                   : (rateRaw is num
                                       ? rateRaw.toDouble()
-                                      : null);
-                              final String? roomId =
-                                  data['room_id'] as String?;
+                                      : 1.0);
+                              final bool isDiscounted = rateVal < 0.99;
+
+                              final String usageText = isDiscounted
+                                  ? "실제 ${_formatDurationFromSeconds(actualSeconds)} 사용  ·  ${_formatDurationFromSeconds(secondsUsed)} 차감"
+                                  : "${_formatDurationFromSeconds(actualSeconds)} 사용";
 
                               return Container(
                                 padding: const EdgeInsets.all(16),
@@ -616,7 +622,7 @@ class _StoreMasterState extends State<StoreMaster> {
                                       children: [
                                         Expanded(
                                           child: Text(
-                                            mode,
+                                            modeName,
                                             style: const TextStyle(
                                                 color: Colors.white,
                                                 fontSize: 14,
@@ -634,30 +640,167 @@ class _StoreMasterState extends State<StoreMaster> {
                                       ],
                                     ),
                                     const SizedBox(height: 8),
-                                    // 차감 시간 뱃지
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 10, vertical: 4),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFF60A5FA)
-                                            .withValues(alpha: 0.15),
-                                        borderRadius:
-                                            BorderRadius.circular(12),
-                                      ),
-                                      child: Text(
-                                        (rate != null && rate < 1.0)
-                                            ? "- ${_formatDurationFromSeconds(secondsUsed)} (${rate}x)"
-                                            : "- ${_formatDurationFromSeconds(secondsUsed)}",
-                                        style: const TextStyle(
-                                            color: Color(0xFF60A5FA),
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.bold),
-                                      ),
+                                    // 사용 시간 (개발자 정보 없음)
+                                    Text(
+                                      usageText,
+                                      style: const TextStyle(
+                                          color: Color(0xFF60A5FA),
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600),
                                     ),
-                                    // 잔여 시간 변화 (있을 때만)
+                                  ],
+                                ),
+                              );
+                            },
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ── 관리자용 Admin Time Log (STORE 제목 long press 진입) ──────────────────
+  void _openAdminTimeLogSheet() {
+    // TODO: 관리자 이메일 또는 isAdmin 플래그 확정 후 접근 제한 적용
+    // 예시: if (currentUserEmail != 'admin@stealthvox.com') return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Container(
+          height: MediaQuery.of(context).size.height * 0.75,
+          padding: const EdgeInsets.all(24),
+          decoration: const BoxDecoration(
+            color: Color(0xFF222222),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text("🔐 Admin Time Log",
+                      style: GoogleFonts.orbitron(
+                          color: Colors.amber,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold)),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded,
+                        color: Colors.white54),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+              const Divider(color: Colors.white12, height: 30),
+              Expanded(
+                child: currentUserReference == null
+                    ? const Center(
+                        child: Text("접근 권한이 없습니다.",
+                            style: TextStyle(color: Colors.white54)))
+                    : StreamBuilder<QuerySnapshot>(
+                        stream: currentUserReference!
+                            .collection('usage_logs')
+                            .orderBy('created_at', descending: true)
+                            .limit(200)
+                            .snapshots(),
+                        builder: (context, snapshot) {
+                          if (!snapshot.hasData) {
+                            return const Center(
+                                child: CircularProgressIndicator(
+                                    color: Colors.amber));
+                          }
+                          final records = snapshot.data!.docs;
+                          if (records.isEmpty) {
+                            return const Center(
+                              child: Text("사용시간 로그가 없습니다.",
+                                  style:
+                                      TextStyle(color: Colors.white54)),
+                            );
+                          }
+
+                          return ListView.separated(
+                            itemCount: records.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 10),
+                            itemBuilder: (context, index) {
+                              final data = records[index].data()
+                                  as Map<String, dynamic>;
+
+                              final DateTime ts = data['created_at'] != null
+                                  ? (data['created_at'] as Timestamp)
+                                      .toDate()
+                                  : DateTime.now();
+                              final String dateFormatted =
+                                  DateFormat('yyyy.MM.dd HH:mm:ss')
+                                      .format(ts);
+
+                              final String modeRaw =
+                                  (data['mode'] as String?) ??
+                                      (data['reason'] as String?) ??
+                                      'unknown';
+                              final int secondsUsed =
+                                  (data['seconds_used'] as int?) ?? 0;
+                              final int actualSeconds =
+                                  (data['actual_seconds'] as int?) ?? 0;
+                              final int? beforeSeconds =
+                                  data['before_seconds'] as int?;
+                              final int? afterSeconds =
+                                  data['after_seconds'] as int?;
+                              final dynamic rateRaw = data['rate'];
+                              final double? rate = rateRaw is double
+                                  ? rateRaw
+                                  : (rateRaw is num
+                                      ? rateRaw.toDouble()
+                                      : null);
+                              final String? roomId =
+                                  data['room_id'] as String?;
+
+                              return Container(
+                                padding: const EdgeInsets.all(14),
+                                decoration: BoxDecoration(
+                                  color: Colors.black,
+                                  borderRadius: BorderRadius.circular(14),
+                                  border:
+                                      Border.all(color: Colors.white10),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(modeRaw,
+                                            style: const TextStyle(
+                                                color: Colors.amber,
+                                                fontSize: 13,
+                                                fontWeight:
+                                                    FontWeight.bold)),
+                                        Text(dateFormatted,
+                                            style: const TextStyle(
+                                                color: Colors.white38,
+                                                fontSize: 10)),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      "차감 ${_formatDurationFromSeconds(secondsUsed)}"
+                                      "  ·  실제 ${_formatDurationFromSeconds(actualSeconds)}"
+                                      "${rate != null ? '  ·  ${rate}x' : ''}",
+                                      style: const TextStyle(
+                                          color: Color(0xFF60A5FA),
+                                          fontSize: 12),
+                                    ),
                                     if (beforeSeconds != null &&
                                         afterSeconds != null) ...[
-                                      const SizedBox(height: 6),
+                                      const SizedBox(height: 4),
                                       Text(
                                         "잔여 ${_formatDurationFromSeconds(beforeSeconds)} → ${_formatDurationFromSeconds(afterSeconds)}",
                                         style: const TextStyle(
@@ -665,12 +808,11 @@ class _StoreMasterState extends State<StoreMaster> {
                                             fontSize: 12),
                                       ),
                                     ],
-                                    // 방 ID (있을 때만)
                                     if (roomId != null &&
                                         roomId.isNotEmpty) ...[
                                       const SizedBox(height: 4),
                                       Text(
-                                        "Room: $roomId",
+                                        "room: $roomId",
                                         style: const TextStyle(
                                             color: Colors.white38,
                                             fontSize: 11),
@@ -716,12 +858,15 @@ class _StoreMasterState extends State<StoreMaster> {
                               color: Colors.white, size: 20),
                           onPressed: () => Navigator.pop(context),
                         ),
-                        Text("STORE",
-                            style: GoogleFonts.orbitron(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                                letterSpacing: 2)),
+                        GestureDetector(
+                          onLongPress: _openAdminTimeLogSheet,
+                          child: Text("STORE",
+                              style: GoogleFonts.orbitron(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                  letterSpacing: 2)),
+                        ),
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -746,10 +891,10 @@ class _StoreMasterState extends State<StoreMaster> {
                                 },
                               ),
                             TextButton.icon(
-                              onPressed: _openUsageHistorySheet,
-                              icon: const Icon(Icons.history_rounded,
+                              onPressed: _openUsageSheet,
+                              icon: const Icon(Icons.access_time_rounded,
                                   color: Color(0xFF60A5FA), size: 18),
-                              label: const Text("Time Log",
+                              label: const Text("Usage",
                                   style: TextStyle(
                                       color: Color(0xFF60A5FA),
                                       fontWeight: FontWeight.bold)),
