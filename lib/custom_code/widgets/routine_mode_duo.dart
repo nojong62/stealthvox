@@ -83,6 +83,83 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   bool _isTtsActive = false;
   Completer<void>? _ttsCompleter;
 
+  // ── Idle Timeout (무반응 자동 일시정지) ────────────────────────────────────
+  Timer? _idlePauseTimer;
+  Timer? _idleAutoReturnTimer;
+  bool _isIdlePaused = false;
+  bool _hasAutoReturnedToModeSelect = false;
+  bool _showIdleBanner = false;
+
+  void _resetIdleTimer() {
+    if (_hasAutoReturnedToModeSelect) return;
+    _idlePauseTimer?.cancel();
+    _idleAutoReturnTimer?.cancel();
+    if (_isIdlePaused) {
+      _isIdlePaused = false;
+      if (mounted) setState(() => _showIdleBanner = false);
+      BillingTicker.instance.resume();
+      BillingTicker.instance.logMode('duo');
+    }
+    _idlePauseTimer = Timer(const Duration(seconds: 30), _handleIdlePause);
+    _idleAutoReturnTimer = Timer(const Duration(seconds: 60), _handleIdleAutoReturn);
+  }
+
+  void _handleIdlePause() {
+    if (!mounted || _hasAutoReturnedToModeSelect || _isIdlePaused) return;
+    _isIdlePaused = true;
+    BillingTicker.instance.pause();
+    if (mounted) setState(() => _showIdleBanner = true);
+  }
+
+  void _handleIdleAutoReturn() {
+    if (!mounted || _hasAutoReturnedToModeSelect) return;
+    _hasAutoReturnedToModeSelect = true;
+    _clearIdleTimers();
+    _silenceTimer?.cancel();
+    _cancelAudio();
+    _turnCounter++;
+    if (_isConversationActive && mounted) {
+      setState(() => _isConversationActive = false);
+    }
+    if (!_isIdlePaused) BillingTicker.instance.pause();
+    if (!mounted) return;
+    if (StealthRoomMaster.exitCurrentMode != null) {
+      StealthRoomMaster.exitCurrentMode!();
+    } else if (Navigator.canPop(context)) {
+      Navigator.pop(context);
+    }
+  }
+
+  void _clearIdleTimers() {
+    _idlePauseTimer?.cancel();
+    _idleAutoReturnTimer?.cancel();
+    _idlePauseTimer = null;
+    _idleAutoReturnTimer = null;
+  }
+
+  Widget _buildIdleBanner() {
+    if (!_showIdleBanner) return const SizedBox.shrink();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      color: const Color(0xFF1C1C1E),
+      child: const Row(
+        children: [
+          Icon(Icons.pause_circle_outline_rounded,
+              color: Colors.amberAccent, size: 16),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '잠시 멈춤 상태입니다. 말하기 버튼을 누르면 다시 시작됩니다.',
+              style: TextStyle(color: Colors.amberAccent, fontSize: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   // ============================================================================
   // 📦 [3. 라이프사이클 (LIFECYCLE)]
   // 위젯의 시작(initState)과 끝(dispose) 및 초기 설정
@@ -119,11 +196,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
             '[Duo] initState — auto joining as guest, roomId: $pendingRoomId');
         _joinAsGuest(pendingRoomId);
       }
+      if (mounted) _resetIdleTimer();
     });
   }
 
   @override
   void dispose() {
+    _clearIdleTimers();
     _partnerJoinedSubscription?.cancel();
     _silenceTimer?.cancel();
     _cancelAudio();
@@ -166,6 +245,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
 
   Future<void> _playAudioAndWait(Uint8List? bytes) async {
     if (bytes == null || !_isConversationActive) return;
+    _resetIdleTimer();
     _isTtsActive = true;
     _ttsCompleter = Completer<void>();
     try {
@@ -222,6 +302,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   // ============================================================================
   Future<void> _stopAndSendToWhisper() async {
     _silenceTimer?.cancel();
+    _resetIdleTimer();
     final path = await _audioRecorder.stop();
     if (path == null) {
       if (_isConversationActive) _startWhisperRecording();
@@ -330,6 +411,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
 
   // 🚀 불필요한 딜레이를 싹 걷어낸 즉시 통역 파이프라인
   Future<void> _processRelayPipeline(String finalTranscript) async {
+    _resetIdleTimer();
     _turnCounter++;
     final int currentTurnId = _turnCounter;
     String myTarget = FFAppState().targetLang.isNotEmpty
@@ -486,6 +568,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   }
 
   void _handleMicTap() {
+    _resetIdleTimer();
     setState(() => _isConversationActive = !_isConversationActive);
     if (_isConversationActive) {
       _startWhisperRecording();
@@ -837,6 +920,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
                             );
                           }),
                 ),
+                _buildIdleBanner(),
                 _buildControlArea(effectiveBottomPadding),
               ],
             ),
