@@ -377,7 +377,7 @@ class _StoreMasterState extends State<StoreMaster> {
                   Text("🧾 Purchase History",
                       style: GoogleFonts.orbitron(
                           color: Colors.white,
-                          fontSize: 18,
+                          fontSize: 14,
                           fontWeight: FontWeight.bold)),
                   IconButton(
                     icon:
@@ -894,23 +894,17 @@ class _StoreMasterState extends State<StoreMaster> {
                                   }
                                 },
                               ),
-                            TextButton.icon(
+                            IconButton(
                               onPressed: _openUsageSheet,
+                              tooltip: 'Usage',
                               icon: const Icon(Icons.access_time_rounded,
-                                  color: Color(0xFF60A5FA), size: 18),
-                              label: const Text("Usage",
-                                  style: TextStyle(
-                                      color: Color(0xFF60A5FA),
-                                      fontWeight: FontWeight.bold)),
+                                  color: Color(0xFF60A5FA), size: 22),
                             ),
-                            TextButton.icon(
+                            IconButton(
                               onPressed: _openReceiptSheet,
+                              tooltip: 'Receipt',
                               icon: const Icon(Icons.receipt_long_rounded,
-                                  color: Colors.amber, size: 18),
-                              label: const Text("Receipt",
-                                  style: TextStyle(
-                                      color: Colors.amber,
-                                      fontWeight: FontWeight.bold)),
+                                  color: Colors.amber, size: 22),
                             ),
                           ],
                         ),
