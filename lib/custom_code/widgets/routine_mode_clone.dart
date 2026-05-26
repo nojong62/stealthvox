@@ -66,6 +66,78 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
   DocumentReference? _myHistoryRef; // 🔧 [히스토리] chat_history 문서 참조 (Duo 패턴)
   bool _isAiOpenerPlaying = false; // AI 첫 발화 재생 중 여부
 
+  // ── Idle Timeout (무반응 자동 일시정지) ────────────────────────────────────
+  Timer? _idlePauseTimer;
+  Timer? _idleAutoReturnTimer;
+  bool _isIdlePaused = false;
+  bool _hasAutoReturnedToModeSelect = false;
+  bool _showIdleBanner = false;
+
+  void _resetIdleTimer() {
+    if (_hasAutoReturnedToModeSelect) return;
+    _idlePauseTimer?.cancel();
+    _idleAutoReturnTimer?.cancel();
+    if (_isIdlePaused) {
+      _isIdlePaused = false;
+      if (mounted) setState(() => _showIdleBanner = false);
+      BillingTicker.instance.resume();
+      BillingTicker.instance.logMode('clone');
+    }
+    _idlePauseTimer = Timer(const Duration(seconds: 30), _handleIdlePause);
+    _idleAutoReturnTimer = Timer(const Duration(seconds: 90), _handleIdleAutoReturn);
+  }
+
+  void _handleIdlePause() {
+    if (!mounted || _hasAutoReturnedToModeSelect || _isIdlePaused) return;
+    _isIdlePaused = true;
+    BillingTicker.instance.pause();
+    if (mounted) setState(() => _showIdleBanner = true);
+  }
+
+  void _handleIdleAutoReturn() {
+    if (!mounted || _hasAutoReturnedToModeSelect) return;
+    _hasAutoReturnedToModeSelect = true;
+    _clearIdleTimers();
+    _stopEverything();
+    if (!_isIdlePaused) BillingTicker.instance.pause();
+    if (!mounted) return;
+    if (StealthRoomMaster.exitCurrentMode != null) {
+      StealthRoomMaster.exitCurrentMode!();
+    } else if (Navigator.canPop(context)) {
+      Navigator.pop(context);
+    }
+  }
+
+  void _clearIdleTimers() {
+    _idlePauseTimer?.cancel();
+    _idleAutoReturnTimer?.cancel();
+    _idlePauseTimer = null;
+    _idleAutoReturnTimer = null;
+  }
+
+  Widget _buildIdleBanner() {
+    if (!_showIdleBanner) return const SizedBox.shrink();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      color: const Color(0xFF1C1C1E),
+      child: const Row(
+        children: [
+          Icon(Icons.pause_circle_outline_rounded,
+              color: Colors.amberAccent, size: 16),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '연습이 잠시 멈췄습니다. 계속하려면 다시 진행해 주세요.',
+              style: TextStyle(color: Colors.amberAccent, fontSize: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   // 🔧 [v3.4 발화 합치기] 유저 더듬거림 대응
   // speech_final 받아도 바로 파이프라인 시작 안 하고 1.2초 대기
   // 대기 중 새 발화 오면 합쳐서 처리 (최종 한 덩어리로)
@@ -176,10 +248,14 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
     BillingTicker.instance.setRate(BillingRate.full);
     BillingTicker.instance.resume();
     BillingTicker.instance.logMode('clone');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _resetIdleTimer();
+    });
   }
 
   @override
   void dispose() {
+    _clearIdleTimers();
     BillingTicker.instance.pause();
     _stopEverything();
     _voiceManager?.dispose();
@@ -1434,7 +1510,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
 
   Future<void> _startDeepgramListening() async {
     if (_deepgramKey.isEmpty || !(await _audioRecorder.hasPermission())) return;
-
+    _resetIdleTimer();
     _isConversationActive = true;
     if (mounted) {
       setState(() {
@@ -1483,6 +1559,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
   // 🔧 [v3.4] Deepgram speech_final 수신 시 호출됨
   // 1.2초 대기창 안에서 추가 발화 합치기 → 완전히 끝나면 파이프라인 시작
   void _stopMicAndProcess(String transcript) async {
+    _resetIdleTimer();
     final clean = transcript.trim();
     _log('🔀 [STOP-01]', 'speech_final 수신: "$clean" (len=${clean.length})');
 
@@ -1599,6 +1676,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
   }
 
   Future<void> _processRelayPipeline(String finalTranscript) async {
+    _resetIdleTimer();
     _turnCounter++;
     final int currentTurnId = _turnCounter;
     _log('🧠 [PIPE-01]',
@@ -2187,6 +2265,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
           _buildTopControls(),
           const SizedBox(height: 10),
           Expanded(child: _buildChatList()),
+          _buildIdleBanner(),
           _buildControlArea(bottomPad),
         ]),
       ),
@@ -2373,6 +2452,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
               GestureDetector(
                 onTap: () {
                   if (_deepgramKey.isEmpty) return;
+                  _resetIdleTimer();
                   setState(
                       () => _isConversationActive = !_isConversationActive);
                   if (_isConversationActive) {

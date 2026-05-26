@@ -183,6 +183,57 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   String? _shadowRecordPath;
   String _appTranscript = "";
 
+  // ── Idle Timeout (무반응 과금 정지, History: 자동 이동 없음) ──────────────
+  Timer? _idlePauseTimer;
+  bool _isIdlePaused = false;
+  bool _showIdleBanner = false;
+
+  void _resetIdleTimer() {
+    _idlePauseTimer?.cancel();
+    if (_isIdlePaused) {
+      _isIdlePaused = false;
+      if (mounted) setState(() => _showIdleBanner = false);
+      BillingTicker.instance.resume();
+      BillingTicker.instance.logMode('history');
+    }
+    _idlePauseTimer = Timer(const Duration(seconds: 30), _handleIdlePause);
+  }
+
+  void _handleIdlePause() {
+    if (!mounted || _isIdlePaused) return;
+    _isIdlePaused = true;
+    BillingTicker.instance.pause();
+    if (mounted) setState(() => _showIdleBanner = true);
+  }
+
+  void _clearIdleTimers() {
+    _idlePauseTimer?.cancel();
+    _idlePauseTimer = null;
+  }
+
+  Widget _buildIdleBanner() {
+    if (!_showIdleBanner) return const SizedBox.shrink();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      color: const Color(0xFF1C1C1E),
+      child: const Row(
+        children: [
+          Icon(Icons.pause_circle_outline_rounded,
+              color: Colors.amberAccent, size: 16),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '복습이 잠시 멈췄습니다. 재생하거나 연습을 시작하면 다시 진행됩니다.',
+              style: TextStyle(color: Colors.amberAccent, fontSize: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   // 📦 [Box 7: 라이프사이클 - initState]
   @override
   void initState() {
@@ -202,6 +253,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     BillingTicker.instance.setRate(BillingRate.quarter);
     BillingTicker.instance.resume();
     BillingTicker.instance.logMode('history');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _resetIdleTimer();
+    });
 
     _playerStateSub = audioPlayer.onPlayerStateChanged.listen((state) {
       if (mounted) setState(() => isPlaying = state == PlayerState.playing);
@@ -215,6 +269,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // 📦 [Box 8: 라이프사이클 - dispose]
   @override
   void dispose() {
+    _clearIdleTimers();
     _utteranceSafetyTimer?.cancel();
     _silenceTimer?.cancel();
     _roleBubbleTimer?.cancel();
@@ -472,6 +527,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // 🆕 [TUTOR] chat_lines 처음부터 끝까지 TTS 자동 재생
   Future<void> _startTutorPlayback() async {
     if (!mounted) return;
+    _resetIdleTimer();
     if (mounted) setState(() => _isTutorPlaying = true);
 
     for (int i = 0; i < _tutorLines.length; i++) {
@@ -555,6 +611,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   // 🆕 [TUTOR] 사용자가 종료/중단할 때 호출
   void _stopTutorPlayback() {
+    _resetIdleTimer();
     _debugLogs += "⏹️ [TUTOR] 사용자 종료 요청\n";
     _tutorAudioPlayer?.stop();
     if (mounted) {
@@ -592,6 +649,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // ============================================================================
 
   void _startTurnPractice() {
+    _resetIdleTimer();
     if (!mounted || _tutorLines.isEmpty) return;
     currentIndex = 0;
     if (mounted) setState(() => _tutorCurrentIdx = 0);
@@ -2612,6 +2670,7 @@ RULES — follow exactly:
             _buildPracticeHeaderIndicator(), // 🆕 [P2-INDICATOR]
             _buildPracticeIconBar(),
             Expanded(child: _buildShadowingPracticeBody()),
+            _buildIdleBanner(),
             _buildPracticeControl(),
           ]),
         ),
@@ -2745,6 +2804,7 @@ RULES — follow exactly:
 
   // 로비 ENTER 버튼과 동일한 로직: 잔여 시간 확인 후 StealthRoom 입장
   void _handleEnterRoom() async {
+    _resetIdleTimer();
     if (_isActionLocked) return;
     _isActionLocked = true;
     try {

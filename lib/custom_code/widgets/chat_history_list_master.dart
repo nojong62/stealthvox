@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 // Begin custom widget code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -40,6 +41,57 @@ class ChatHistoryListMaster extends StatefulWidget {
 class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
   String _selectedFilter = 'All';
   Set<String> _selectedDocIds = {};
+
+  // ── Idle Timeout (무반응 과금 정지, History List: 자동 이동 없음) ──────────
+  Timer? _idlePauseTimer;
+  bool _isIdlePaused = false;
+  bool _showIdleBanner = false;
+
+  void _resetIdleTimer() {
+    _idlePauseTimer?.cancel();
+    if (_isIdlePaused) {
+      _isIdlePaused = false;
+      if (mounted) setState(() => _showIdleBanner = false);
+      BillingTicker.instance.resume();
+      BillingTicker.instance.logMode('history_list');
+    }
+    _idlePauseTimer = Timer(const Duration(seconds: 30), _handleIdlePause);
+  }
+
+  void _handleIdlePause() {
+    if (!mounted || _isIdlePaused) return;
+    _isIdlePaused = true;
+    BillingTicker.instance.pause();
+    if (mounted) setState(() => _showIdleBanner = true);
+  }
+
+  void _clearIdleTimers() {
+    _idlePauseTimer?.cancel();
+    _idlePauseTimer = null;
+  }
+
+  Widget _buildIdleBanner() {
+    if (!_showIdleBanner) return const SizedBox.shrink();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      color: const Color(0xFF1C1C1E),
+      child: const Row(
+        children: [
+          Icon(Icons.pause_circle_outline_rounded,
+              color: Colors.amberAccent, size: 16),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '복습이 잠시 멈췄습니다. 재생하거나 연습을 시작하면 다시 진행됩니다.',
+              style: TextStyle(color: Colors.amberAccent, fontSize: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
   // ── Keepers 전용 상태 ──
   String _apiKey = '';
@@ -74,10 +126,14 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
     BillingTicker.instance.setRate(BillingRate.quarter);
     BillingTicker.instance.resume();
     BillingTicker.instance.logMode('history_list');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _resetIdleTimer();
+    });
   }
 
   @override
   void dispose() {
+    _clearIdleTimers();
     BillingTicker.instance.pause();
     _keepersScrollController.dispose();
     _keeperAudioPlayer?.dispose();
@@ -192,6 +248,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
       body: Column(
         children: [
           _buildFilterBar(),
+          _buildIdleBanner(),
           Expanded(
             child: _selectedFilter == 'Keepers'
                 ? _buildKeepersBody()
@@ -819,6 +876,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
   //  Keepers 소리듣기
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Future<void> _playKeeperAudio(String keeperId, String text) async {
+    _resetIdleTimer();
     if (text.isEmpty || _apiKey.isEmpty) return;
 
     // 이미 재생 중이면 정지

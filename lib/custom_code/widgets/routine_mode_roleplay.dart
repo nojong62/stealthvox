@@ -266,6 +266,78 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   bool _isGeneratingScenario = false;
   bool _isAiOpenerPlaying = false; // AI 첫 발화 재생 중 여부
 
+  // ── Idle Timeout (무반응 자동 일시정지) ────────────────────────────────────
+  Timer? _idlePauseTimer;
+  Timer? _idleAutoReturnTimer;
+  bool _isIdlePaused = false;
+  bool _hasAutoReturnedToModeSelect = false;
+  bool _showIdleBanner = false;
+
+  void _resetIdleTimer() {
+    if (_hasAutoReturnedToModeSelect) return;
+    _idlePauseTimer?.cancel();
+    _idleAutoReturnTimer?.cancel();
+    if (_isIdlePaused) {
+      _isIdlePaused = false;
+      if (mounted) setState(() => _showIdleBanner = false);
+      BillingTicker.instance.resume();
+      BillingTicker.instance.logMode('roleplay');
+    }
+    _idlePauseTimer = Timer(const Duration(seconds: 30), _handleIdlePause);
+    _idleAutoReturnTimer = Timer(const Duration(seconds: 90), _handleIdleAutoReturn);
+  }
+
+  void _handleIdlePause() {
+    if (!mounted || _hasAutoReturnedToModeSelect || _isIdlePaused) return;
+    _isIdlePaused = true;
+    BillingTicker.instance.pause();
+    if (mounted) setState(() => _showIdleBanner = true);
+  }
+
+  void _handleIdleAutoReturn() {
+    if (!mounted || _hasAutoReturnedToModeSelect) return;
+    _hasAutoReturnedToModeSelect = true;
+    _clearIdleTimers();
+    _stopEverything();
+    if (!_isIdlePaused) BillingTicker.instance.pause();
+    if (!mounted) return;
+    if (StealthRoomMaster.exitCurrentMode != null) {
+      StealthRoomMaster.exitCurrentMode!();
+    } else if (Navigator.canPop(context)) {
+      Navigator.pop(context);
+    }
+  }
+
+  void _clearIdleTimers() {
+    _idlePauseTimer?.cancel();
+    _idleAutoReturnTimer?.cancel();
+    _idlePauseTimer = null;
+    _idleAutoReturnTimer = null;
+  }
+
+  Widget _buildIdleBanner() {
+    if (!_showIdleBanner) return const SizedBox.shrink();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      color: const Color(0xFF1C1C1E),
+      child: const Row(
+        children: [
+          Icon(Icons.pause_circle_outline_rounded,
+              color: Colors.amberAccent, size: 16),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '연습이 잠시 멈췄습니다. 계속하려면 다시 진행해 주세요.',
+              style: TextStyle(color: Colors.amberAccent, fontSize: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   String _lastRawTranscript = ''; // 정정 감지용 직전 유저 발화 원문
 
   // 오디오 및 UI
@@ -308,6 +380,9 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     BillingTicker.instance.setRate(BillingRate.full);
     BillingTicker.instance.resume();
     BillingTicker.instance.logMode('roleplay');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _resetIdleTimer();
+    });
   }
 
   /// 나가는 모든 경로에서 호출: chat_json + last_message 저장 (탐색 없이 순수 저장만)
@@ -336,6 +411,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 
   @override
   void dispose() {
+    _clearIdleTimers();
     BillingTicker.instance.pause();
     _forceSaveToFirestore();
     _stopEverything();
@@ -845,7 +921,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 
   Future<void> _startDeepgramListening() async {
     if (_deepgramKey.isEmpty || !(await _audioRecorder.hasPermission())) return;
-
+    _resetIdleTimer();
     _isConversationActive = true;
     if (mounted) {
       setState(() {
@@ -905,6 +981,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   // 🔧 [v3.4] Deepgram speech_final/UtteranceEnd 수신 시 호출됨
   // 조건부 대기창 안에서 추가 발화 합치기 → 완전히 끝나면 파이프라인 시작
   void _stopMicAndProcess(String transcript) async {
+    _resetIdleTimer();
     final clean = transcript.trim();
     _log('🔀 [STOP-01]', 'speech_final 수신: "$clean" (len=${clean.length})');
 
@@ -1027,6 +1104,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   }
 
   Future<void> _processRelayPipeline(String finalTranscript) async {
+    _resetIdleTimer();
     _turnCounter++;
     final int currentTurnId = _turnCounter;
     _log('🧠 [PIPE-01]',
@@ -1700,6 +1778,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                 ],
               ),
             ),
+            _buildIdleBanner(),
             _buildControlArea(bottomPad),
           ]),
         ),
@@ -2135,6 +2214,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                 GestureDetector(
                   onTap: () {
                     if (_openAiKey.isEmpty) return;
+                    _resetIdleTimer();
                     setState(() => _isConversationActive = true);
                     _generateAndPlayAiOpener();
                   },
@@ -2190,6 +2270,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                 GestureDetector(
                   onTap: () {
                     if (_deepgramKey.isEmpty) return;
+                    _resetIdleTimer();
                     setState(
                         () => _isConversationActive = !_isConversationActive);
                     if (_isConversationActive) {
