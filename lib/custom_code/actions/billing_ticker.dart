@@ -68,6 +68,14 @@ class BillingTicker with WidgetsBindingObserver {
   final List<Map<String, dynamic>> _history = [];
   static const int _kMaxHistory = 10;
 
+  // ── Session Tracking (usage_logs 저장용) ──────────────────────────────────
+  String _sessionMode = '';
+  double _sessionRateValue = 1.0;
+  int _sessionBeforeSeconds = 0;
+  DateTime? _sessionStartTime;
+  bool _usageLogSaved = false;
+  // ─────────────────────────────────────────────────────────────────────────
+
   // ── BILLING DEBUG LOG ──────────────────────────────────────────────────────
   static const int _kMaxLogs = 200;
   final List<String> _billingLogs = [];
@@ -107,6 +115,7 @@ class BillingTicker with WidgetsBindingObserver {
       if (!_paused) {
         _wasRunningBeforeBackground = true;
         _addBillingLog('[BILLING] background paused');
+        // pause() 내부에서 saveUsageLog() 가 호출되어 백그라운드 이전 구간 저장
         pause();
       } else {
         // billing이 이미 정지 상태이면 flush만 안전하게 시도
@@ -116,6 +125,14 @@ class BillingTicker with WidgetsBindingObserver {
       _addBillingLog('[BILLING] foreground resumed');
       if (_wasRunningBeforeBackground) {
         _wasRunningBeforeBackground = false;
+        // 포그라운드 복귀: 새 구간 시작 — before_seconds를 현재 잔여시간으로 재설정
+        if (_sessionMode.isNotEmpty) {
+          _sessionBeforeSeconds = FFAppState().remainingTime;
+          _sessionStartTime = DateTime.now();
+          _usageLogSaved = false;
+          _addBillingLog(
+              '[BILLING] session resumed from bg, new before=$_sessionBeforeSeconds');
+        }
         resume();
       }
     }
@@ -134,15 +151,78 @@ class BillingTicker with WidgetsBindingObserver {
     _addBillingLog('[BILLING] $rateStr');
   }
 
-  /// 현재 모드 로그 기록 (예: 'duo', 'history', 'roleplay')
+  /// 현재 모드 로그 기록 + 세션 시작 상태 캡처
+  /// 반드시 setRate() 이후에 호출해야 rate가 정확히 기록됨
   void logMode(String mode) {
-    _addBillingLog('[BILLING] mode=$mode');
+    _sessionMode = mode;
+    _sessionRateValue = _rate.multiplier;
+    _sessionBeforeSeconds = FFAppState().remainingTime;
+    _sessionStartTime = DateTime.now();
+    _usageLogSaved = false;
+    _addBillingLog(
+        '[BILLING] mode=$mode (session start before=$_sessionBeforeSeconds rate=$_sessionRateValue)');
   }
 
   void pause() {
     _paused = true;
     _addBillingLog('[BILLING] pause');
     flushNow();
+    saveUsageLog(); // 세션 종료 시 사용시간 이력 1회 저장 (중복 방지 포함)
+  }
+
+  /// 세션 종료 시 users/{uid}/usage_logs에 사용시간 이력 1회 저장
+  /// - seconds_used <= 0 이면 저장 안 함
+  /// - currentUser == null 이면 저장 안 함
+  /// - before_seconds <= after_seconds 이면 저장 안 함 (차감 없음)
+  /// - _usageLogSaved == true 이면 중복 저장 안 함
+  Future<void> saveUsageLog() async {
+    if (_usageLogSaved) return;
+    if (_sessionMode.isEmpty || _sessionStartTime == null) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      _addBillingLog('[USAGE_LOG] skip: no user');
+      return;
+    }
+
+    final afterSeconds = FFAppState().remainingTime;
+    final beforeSeconds = _sessionBeforeSeconds;
+    final secondsUsed = beforeSeconds - afterSeconds;
+
+    if (secondsUsed <= 0 || beforeSeconds <= afterSeconds) {
+      _addBillingLog(
+          '[USAGE_LOG] skip: no deduction before=$beforeSeconds after=$afterSeconds');
+      return;
+    }
+
+    final actualSeconds =
+        DateTime.now().difference(_sessionStartTime!).inSeconds;
+
+    // 중복 저장 방지: 이 플래그는 await 이전에 true로 설정
+    _usageLogSaved = true;
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('usage_logs')
+          .add({
+        'created_at': FieldValue.serverTimestamp(),
+        'mode': _sessionMode,
+        'seconds_used': secondsUsed,
+        'actual_seconds': actualSeconds,
+        'rate': _sessionRateValue,
+        'before_seconds': beforeSeconds,
+        'after_seconds': afterSeconds,
+      });
+      _addBillingLog(
+          '[USAGE_LOG] saved mode=$_sessionMode seconds_used=${secondsUsed}s actual=${actualSeconds}s before=$beforeSeconds after=$afterSeconds');
+    } catch (e) {
+      // 저장 실패 시 플래그 초기화 → 다음 호출에서 재시도 가능
+      _usageLogSaved = false;
+      _addBillingLog('[USAGE_LOG] error: $e');
+      debugPrint('[BillingTicker] saveUsageLog failed: $e');
+    }
   }
 
   void resume() {
