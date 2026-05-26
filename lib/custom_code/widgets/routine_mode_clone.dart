@@ -379,6 +379,17 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
     }
   }
 
+  // 클론 삭제
+  Future<void> _deleteCloneInFirestore(String cloneId) async {
+    final ref = _clonesRef();
+    if (ref == null || cloneId.isEmpty) return;
+    try {
+      await ref.doc(cloneId).delete();
+    } catch (e) {
+      _log('❌ [CLONE-DELETE]', '클론 삭제 실패: $e');
+    }
+  }
+
   // 🧠 [장기 기억] 클론 진입 시 Firestore에서 메모리 로드
   Future<void> _loadCloneContext(String cloneId) async {
     if (cloneId.isEmpty) return;
@@ -903,6 +914,57 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
                                           constraints: const BoxConstraints(
                                               minWidth: 32, minHeight: 32),
                                         ),
+                                        IconButton(
+                                          icon: const Icon(Icons.delete_outline,
+                                              color: Color(0xFFEF4444), size: 18),
+                                          onPressed: () async {
+                                            // 확인 다이얼로그
+                                            final confirm = await showDialog<bool>(
+                                              context: ctx,
+                                              builder: (c) => AlertDialog(
+                                                backgroundColor: const Color(0xFF2C2C2E),
+                                                shape: RoundedRectangleBorder(
+                                                    borderRadius: BorderRadius.circular(14)),
+                                                title: const Text('클론 삭제',
+                                                    style: TextStyle(color: Colors.white, fontSize: 16)),
+                                                content: Text(
+                                                  '"${clone['name']}" 클론을 삭제하시겠어요?\n삭제 후 복구가 불가능합니다.',
+                                                  style: const TextStyle(
+                                                      color: Colors.white70, fontSize: 13),
+                                                ),
+                                                actions: [
+                                                  TextButton(
+                                                    onPressed: () => Navigator.pop(c, false),
+                                                    child: const Text('취소',
+                                                        style: TextStyle(color: Colors.white38)),
+                                                  ),
+                                                  TextButton(
+                                                    onPressed: () => Navigator.pop(c, true),
+                                                    child: const Text('삭제',
+                                                        style: TextStyle(color: Color(0xFFEF4444))),
+                                                  ),
+                                                ],
+                                              ),
+                                            );
+                                            if (confirm != true) return;
+
+                                            final deleteId = clone['id'] as String;
+                                            await _deleteCloneInFirestore(deleteId);
+
+                                            setState(() {
+                                              _clones.removeWhere((c) => c['id'] == deleteId);
+                                              // 삭제된 클론이 현재 선택 중이면 선택 해제
+                                              if (_selectedCloneId == deleteId) {
+                                                _selectedCloneId = '';
+                                                _selectedCloneContext = '';
+                                                _localMessages.clear();
+                                              }
+                                            });
+                                            setStateDialog(() {});
+                                          },
+                                          padding: EdgeInsets.zero,
+                                          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                        ),
                                       ],
                                     ),
                                   );
@@ -910,9 +972,14 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
                               ),
 
                         // ── Tab 1: 클론 만들기 ──
-                        SingleChildScrollView(
+                        Padding(
+                          padding: EdgeInsets.only(
+                            bottom: MediaQuery.of(ctx).viewInsets.bottom,
+                          ),
+                          child: SingleChildScrollView(
                           padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
                           child: Column(
+                            mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               const Text("클론 이름",
@@ -924,7 +991,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
                                 style: const TextStyle(
                                     color: Colors.white, fontSize: 14),
                                 decoration: InputDecoration(
-                                  hintText: "예: 민준이",
+                                  hintText: "예: 클론(카톡 이름)",
                                   hintStyle:
                                       const TextStyle(color: Colors.white24),
                                   filled: true,
@@ -948,7 +1015,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
                                     color: Colors.white, fontSize: 13),
                                 maxLines: 5,
                                 decoration: InputDecoration(
-                                  hintText: "나와의 관계, 성격이나 특별한 말투 등",
+                                  hintText: "상대방과 이어서 말하고 싶은 카톡 대화를 PC에서 복사해서 붙여 넣기 합니다. - 대화 순서 그대로",
                                   hintStyle: const TextStyle(
                                       color: Colors.white24, fontSize: 12),
                                   filled: true,
@@ -1061,6 +1128,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
                               ),
                             ],
                           ),
+                        ),
                         ),
                       ],
                     ),
