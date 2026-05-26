@@ -319,6 +319,30 @@ class _StoreMasterState extends State<StoreMaster> {
     }
   }
 
+  /// Firestore mode 값을 사용자 친화적 이름으로 변환하는 헬퍼
+  /// billing_ticker.dart의 logMode() 호출값과 매핑
+  String _modeDisplayName(String mode) {
+    switch (mode) {
+      case 'duo':
+        return '🎭 Duo Mode';
+      case 'roleplay':
+        return '🎬 Roleplay';
+      case 'study_room':
+      case 'stealth_room':
+        return '🕵️ Stealth Room';
+      case 'clone':
+        return '🤖 AI Clone';
+      case 'history':
+        return '📖 Chat History';
+      case 'history_list':
+        return '📋 History List';
+      case 'ai_practice':
+        return '🧠 AI Practice';
+      default:
+        return mode.isNotEmpty ? mode : 'Unknown';
+    }
+  }
+
   /// 초 단위를 보기 좋은 문자열로 변환하는 헬퍼
   /// 예: 65 → "1m 5s", 3600 → "1h 0m", 0 이하 → "0s"
   String _formatDurationFromSeconds(int seconds) {
@@ -552,10 +576,12 @@ class _StoreMasterState extends State<StoreMaster> {
                               final String dateFormatted =
                                   DateFormat('yyyy.MM.dd HH:mm').format(ts);
 
-                              final String mode =
+                              final String modeRaw =
                                   (data['mode'] as String?) ??
                                       (data['reason'] as String?) ??
-                                      'Unknown';
+                                      '';
+                              final String mode =
+                                  _modeDisplayName(modeRaw);
                               final int secondsUsed =
                                   (data['seconds_used'] ?? 0) as int;
                               final int? beforeSeconds =
