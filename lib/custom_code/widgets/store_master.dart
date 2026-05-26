@@ -665,8 +665,12 @@ class _StoreMasterState extends State<StoreMaster> {
 
   // ── 관리자용 Admin Time Log (STORE 제목 long press 진입) ──────────────────
   void _openAdminTimeLogSheet() {
-    // TODO: 관리자 이메일 또는 isAdmin 플래그 확정 후 접근 제한 적용
-    // 예시: if (currentUserEmail != 'admin@stealthvox.com') return;
+    // TODO: 관리자 이메일 목록 확정 후 아래 Set에 추가
+    const Set<String> adminEmails = {
+      'nisiekorea@gmail.com',
+    };
+    final String email = currentUserEmail.trim().toLowerCase();
+    if (!adminEmails.contains(email)) return; // 관리자 아니면 아무 반응 없음
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
