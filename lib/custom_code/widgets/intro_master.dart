@@ -260,7 +260,8 @@ class _IntroMasterState extends State<IntroMaster> {
             "• 이전 대화를 복습하고 발음 교정 및 섀도잉 훈련을 진행합니다.\n"
             "• 🔥 꿀팁: 스터디룸에서 연습할 때는 가격의 25%만 차감됩니다! (동일 비용으로 무려 4배 더 오래 훈련 가능)\n\n"
             "4. 💎 스토어: 합리적인 사용량 비례 과금\n"
-            "StealthVox은 사용자가 딱 사용한 만큼만 최소 시간 단위로 과금되어 비용 부담이 없습니다!",
+            "StealthVox은 사용자가 딱 사용한 만큼만 최소 시간 단위로 과금되어 비용 부담이 없습니다!\n"
+            "• ⏸️ Auto Pause: 30초 이상 반응이 없으면 자동으로 일시정지되어 과금이 멈춥니다. 다시 말을 시작하면 자동으로 재개됩니다.",
             style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
           ),
         ),
