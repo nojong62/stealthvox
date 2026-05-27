@@ -56,7 +56,8 @@
       "PowerShell(New-Item *)",
       "PowerShell(Copy-Item *)",
       "PowerShell(git checkout *)",
-      "PowerShell(git *)"
+      "PowerShell(git *)",
+      "PowerShell($dt = Get-Date -Format \"yyyyMMdd_HHmm\"; Write-Output \"파일명: stealth_vox_$dt.apk\")"
     ]
   }
 }
