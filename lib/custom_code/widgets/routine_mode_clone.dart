@@ -1264,15 +1264,9 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
                             },
                           ),
                           const Spacer(),
-                          TextButton(
-                            onPressed: () => Navigator.pop(dialogContext),
-                            child: const Text("취소",
-                                style: TextStyle(color: Colors.white38)),
-                          ),
-                          const SizedBox(width: 8),
                           ElevatedButton.icon(
-                            icon: const Icon(Icons.autorenew_rounded, size: 16),
-                            label: const Text("저장 & 재생성"),
+                            icon: const Icon(Icons.save_rounded, size: 16),
+                            label: const Text("저장"),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: const Color(0xFF10B981),
                               foregroundColor: Colors.white,
