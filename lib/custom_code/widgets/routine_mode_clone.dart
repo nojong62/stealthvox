@@ -68,14 +68,10 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
 
   // ── Idle Timeout (무반응 자동 일시정지) ────────────────────────────────────
   Timer? _idlePauseTimer;
-  Timer? _idleAutoReturnTimer;
   bool _isIdlePaused = false;
-  bool _hasAutoReturnedToModeSelect = false;
 
   void _resetIdleTimer() {
-    if (_hasAutoReturnedToModeSelect) return;
     _idlePauseTimer?.cancel();
-    _idleAutoReturnTimer?.cancel();
     if (_isIdlePaused) {
       _isIdlePaused = false;
       if (mounted) setState(() {});
@@ -83,35 +79,18 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
       BillingTicker.instance.logMode('clone');
     }
     _idlePauseTimer = Timer(const Duration(seconds: 30), _handleIdlePause);
-    _idleAutoReturnTimer = Timer(const Duration(seconds: 90), _handleIdleAutoReturn);
   }
 
   void _handleIdlePause() {
-    if (!mounted || _hasAutoReturnedToModeSelect || _isIdlePaused) return;
+    if (!mounted || _isIdlePaused) return;
     _isIdlePaused = true;
     BillingTicker.instance.pause();
     if (mounted) setState(() {});
   }
 
-  void _handleIdleAutoReturn() {
-    if (!mounted || _hasAutoReturnedToModeSelect) return;
-    _hasAutoReturnedToModeSelect = true;
-    _clearIdleTimers();
-    _stopEverything();
-    if (!_isIdlePaused) BillingTicker.instance.pause();
-    if (!mounted) return;
-    if (StealthRoomMaster.exitCurrentMode != null) {
-      StealthRoomMaster.exitCurrentMode!();
-    } else if (Navigator.canPop(context)) {
-      Navigator.pop(context);
-    }
-  }
-
   void _clearIdleTimers() {
     _idlePauseTimer?.cancel();
-    _idleAutoReturnTimer?.cancel();
     _idlePauseTimer = null;
-    _idleAutoReturnTimer = null;
   }
 
   Widget _buildIdleBanner() => const SizedBox.shrink();
