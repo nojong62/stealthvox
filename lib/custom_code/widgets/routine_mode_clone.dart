@@ -841,7 +841,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
                                         fontWeight: isSelected
                                             ? FontWeight.bold
                                             : FontWeight.normal,
-                                        fontSize: 15,
+                                        fontSize: 14,
                                       ),
                                     ),
                                     subtitle: isSelected
@@ -913,57 +913,6 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
                                           padding: EdgeInsets.zero,
                                           constraints: const BoxConstraints(
                                               minWidth: 32, minHeight: 32),
-                                        ),
-                                        IconButton(
-                                          icon: const Icon(Icons.delete_outline,
-                                              color: Color(0xFFEF4444), size: 18),
-                                          onPressed: () async {
-                                            // 확인 다이얼로그
-                                            final confirm = await showDialog<bool>(
-                                              context: ctx,
-                                              builder: (c) => AlertDialog(
-                                                backgroundColor: const Color(0xFF2C2C2E),
-                                                shape: RoundedRectangleBorder(
-                                                    borderRadius: BorderRadius.circular(14)),
-                                                title: const Text('클론 삭제',
-                                                    style: TextStyle(color: Colors.white, fontSize: 16)),
-                                                content: Text(
-                                                  '"${clone['name']}" 클론을 삭제하시겠어요?\n삭제 후 복구가 불가능합니다.',
-                                                  style: const TextStyle(
-                                                      color: Colors.white70, fontSize: 13),
-                                                ),
-                                                actions: [
-                                                  TextButton(
-                                                    onPressed: () => Navigator.pop(c, false),
-                                                    child: const Text('취소',
-                                                        style: TextStyle(color: Colors.white38)),
-                                                  ),
-                                                  TextButton(
-                                                    onPressed: () => Navigator.pop(c, true),
-                                                    child: const Text('삭제',
-                                                        style: TextStyle(color: Color(0xFFEF4444))),
-                                                  ),
-                                                ],
-                                              ),
-                                            );
-                                            if (confirm != true) return;
-
-                                            final deleteId = clone['id'] as String;
-                                            await _deleteCloneInFirestore(deleteId);
-
-                                            setState(() {
-                                              _clones.removeWhere((c) => c['id'] == deleteId);
-                                              // 삭제된 클론이 현재 선택 중이면 선택 해제
-                                              if (_selectedCloneId == deleteId) {
-                                                _selectedCloneId = '';
-                                                _selectedCloneContext = '';
-                                                _localMessages.clear();
-                                              }
-                                            });
-                                            setStateDialog(() {});
-                                          },
-                                          padding: EdgeInsets.zero,
-                                          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                                         ),
                                       ],
                                     ),
@@ -1224,6 +1173,62 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
+                          // 🗑️ 삭제 버튼
+                          TextButton.icon(
+                            icon: const Icon(Icons.delete_outline,
+                                color: Color(0xFFEF4444), size: 16),
+                            label: const Text("삭제",
+                                style: TextStyle(color: Color(0xFFEF4444))),
+                            onPressed: () async {
+                              final confirm = await showDialog<bool>(
+                                context: dialogContext,
+                                builder: (c) => AlertDialog(
+                                  backgroundColor: const Color(0xFF2C2C2E),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(14)),
+                                  title: const Text('클론 삭제',
+                                      style: TextStyle(
+                                          color: Colors.white, fontSize: 16)),
+                                  content: Text(
+                                    '"$cloneName" 클론을 삭제하시겠어요?\n삭제 후 복구가 불가능합니다.',
+                                    style: const TextStyle(
+                                        color: Colors.white70, fontSize: 13),
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(c, false),
+                                      child: const Text('취소',
+                                          style: TextStyle(
+                                              color: Colors.white38)),
+                                    ),
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(c, true),
+                                      child: const Text('삭제',
+                                          style: TextStyle(
+                                              color: Color(0xFFEF4444))),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              if (confirm != true) return;
+                              await _deleteCloneInFirestore(targetId);
+                              if (!mounted) return;
+                              setState(() {
+                                _clones.removeWhere((c) => c['id'] == targetId);
+                                if (_selectedCloneId == targetId) {
+                                  _selectedCloneId = '';
+                                  _selectedCloneContext = '';
+                                  _localMessages.clear();
+                                }
+                              });
+                              if (dialogContext.mounted) {
+                                Navigator.pop(dialogContext);
+                              }
+                            },
+                          ),
+                          const Spacer(),
                           TextButton(
                             onPressed: () => Navigator.pop(dialogContext),
                             child: const Text("취소",
