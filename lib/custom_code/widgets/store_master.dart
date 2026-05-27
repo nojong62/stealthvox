@@ -343,7 +343,7 @@ class _StoreMasterState extends State<StoreMaster> {
     }
   }
 
-  /// 초 단위를 보기 좋은 문자열로 변환하는 헬퍼
+  /// 초 단위를 보기 좋은 문자열로 변환하는 헬퍼 (관리자용 상세)
   /// 예: 65 → "1m 5s", 3600 → "1h 0m", 0 이하 → "0s"
   String _formatDurationFromSeconds(int seconds) {
     if (seconds <= 0) return '0s';
@@ -353,6 +353,89 @@ class _StoreMasterState extends State<StoreMaster> {
     if (h > 0) return '${h}h ${m}m';
     if (m > 0) return '${m}m ${s}s';
     return '${s}s';
+  }
+
+  /// 사용자용 시간 표시 — 분 단위 중심, 1시간 이상은 h+m
+  /// 예: 45 → "45s", 74 → "1m", 134 → "2m", 3600 → "1h", 4500 → "1h 15m"
+  String _formatUsageDurationForUser(int seconds) {
+    if (seconds <= 0) return '0s';
+    if (seconds < 60) return '${seconds}s';
+    final h = seconds ~/ 3600;
+    final mRaw = (seconds % 3600) ~/ 60;
+    final mRounded = ((seconds % 3600 + 30) ~/ 60);
+    if (h > 0) return mRaw > 0 ? '${h}h ${mRaw}m' : '${h}h';
+    return '${mRounded}m';
+  }
+
+  /// mode 문자열을 'talk' 또는 'study' 그룹으로 분류
+  String _modeGroup(String mode) {
+    const talkModes = {'duo', 'stealth_room'};
+    return talkModes.contains(mode) ? 'talk' : 'study';
+  }
+
+  /// 사용자용 그룹 표시명
+  String _modeGroupName(String mode) =>
+      _modeGroup(mode) == 'talk' ? '대화방' : '공부방';
+
+  /// 사용자 Usage — Today/ThisWeek 요약 카드
+  Widget _buildUsageSummaryCard({
+    required String title,
+    required int talkSeconds,
+    required int studySeconds,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: Colors.black,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title,
+              style: const TextStyle(
+                  color: Colors.white38,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.2)),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('대화방',
+                  style: TextStyle(color: Colors.white70, fontSize: 13)),
+              Text(
+                talkSeconds > 0
+                    ? _formatUsageDurationForUser(talkSeconds)
+                    : '-',
+                style: const TextStyle(
+                    color: Color(0xFF60A5FA),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('공부방',
+                  style: TextStyle(color: Colors.white70, fontSize: 13)),
+              Text(
+                studySeconds > 0
+                    ? _formatUsageDurationForUser(studySeconds)
+                    : '-',
+                style: const TextStyle(
+                    color: Color(0xFF60A5FA),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   void _openReceiptSheet() {
@@ -479,7 +562,7 @@ class _StoreMasterState extends State<StoreMaster> {
     );
   }
 
-  // ── 사용자용 Usage 화면 ────────────────────────────────────────────────────
+  // ── 사용자용 Usage 화면 (요약형) ──────────────────────────────────────────
   void _openUsageSheet() {
     showModalBottomSheet(
       context: context,
@@ -487,7 +570,7 @@ class _StoreMasterState extends State<StoreMaster> {
       backgroundColor: Colors.transparent,
       builder: (context) {
         return Container(
-          height: MediaQuery.of(context).size.height * 0.70,
+          height: MediaQuery.of(context).size.height * 0.75,
           padding: const EdgeInsets.all(24),
           decoration: const BoxDecoration(
             color: Color(0xFF222222),
@@ -511,7 +594,7 @@ class _StoreMasterState extends State<StoreMaster> {
                   ),
                 ],
               ),
-              const Divider(color: Colors.white12, height: 30),
+              const Divider(color: Colors.white12, height: 24),
               Expanded(
                 child: currentUserReference == null
                     ? const Center(
@@ -521,7 +604,7 @@ class _StoreMasterState extends State<StoreMaster> {
                         stream: currentUserReference!
                             .collection('usage_logs')
                             .orderBy('created_at', descending: true)
-                            .limit(100)
+                            .limit(200)
                             .snapshots(),
                         builder: (context, snapshot) {
                           if (!snapshot.hasData) {
@@ -529,7 +612,16 @@ class _StoreMasterState extends State<StoreMaster> {
                                 child: CircularProgressIndicator(
                                     color: Color(0xFF60A5FA)));
                           }
-                          final records = snapshot.data!.docs;
+
+                          // ── 10초 미만 기록 제외 ──────────────────────────
+                          final records = snapshot.data!.docs.where((doc) {
+                            final d = doc.data() as Map<String, dynamic>;
+                            final int sec =
+                                (d['actual_seconds'] as int?) ??
+                                (d['seconds_used'] as int?) ?? 0;
+                            return sec >= 10;
+                          }).toList();
+
                           if (records.isEmpty) {
                             return const Center(
                               child: Padding(
@@ -540,15 +632,13 @@ class _StoreMasterState extends State<StoreMaster> {
                                     Icon(Icons.access_time_rounded,
                                         color: Colors.white24, size: 48),
                                     SizedBox(height: 16),
-                                    Text(
-                                      "No usage history yet.",
-                                      style: TextStyle(
-                                          color: Colors.white54,
-                                          fontSize: 14),
-                                    ),
+                                    Text("아직 사용 내역이 없습니다.",
+                                        style: TextStyle(
+                                            color: Colors.white54,
+                                            fontSize: 14)),
                                     SizedBox(height: 8),
                                     Text(
-                                      "Your usage will appear here after a session.",
+                                      "대화를 시작하면 사용 시간이 이곳에 표시됩니다.",
                                       style: TextStyle(
                                           color: Colors.white38,
                                           fontSize: 12),
@@ -560,98 +650,141 @@ class _StoreMasterState extends State<StoreMaster> {
                             );
                           }
 
-                          return ListView.separated(
-                            itemCount: records.length,
-                            separatorBuilder: (_, __) =>
-                                const SizedBox(height: 12),
-                            itemBuilder: (context, index) {
-                              final data = records[index].data()
-                                  as Map<String, dynamic>;
+                          // ── 날짜 범위 계산 ───────────────────────────────
+                          final now = DateTime.now();
+                          final todayStart =
+                              DateTime(now.year, now.month, now.day);
+                          final weekStart = todayStart.subtract(
+                              Duration(days: todayStart.weekday - 1));
 
-                              final DateTime ts = data['created_at'] != null
-                                  ? (data['created_at'] as Timestamp)
-                                      .toDate()
-                                  : DateTime.now();
-                              final String dateFormatted =
-                                  DateFormat('yyyy.MM.dd HH:mm').format(ts);
+                          // ── 그룹별 합산 헬퍼 ─────────────────────────────
+                          int sumGroup(String group, DateTime rangeStart) {
+                            int total = 0;
+                            for (final doc in records) {
+                              final d =
+                                  doc.data() as Map<String, dynamic>;
+                              final DateTime ts = d['created_at'] != null
+                                  ? (d['created_at'] as Timestamp).toDate()
+                                  : now;
+                              if (ts.isBefore(rangeStart)) continue;
+                              final String mode =
+                                  (d['mode'] as String?) ?? '';
+                              if (_modeGroup(mode) != group) continue;
+                              total += (d['actual_seconds'] as int?) ??
+                                  (d['seconds_used'] as int?) ?? 0;
+                            }
+                            return total;
+                          }
 
-                              final String modeRaw =
-                                  (data['mode'] as String?) ??
-                                      (data['reason'] as String?) ??
-                                      '';
-                              final String modeName =
-                                  _modeDisplayName(modeRaw);
+                          // ── Recent Sessions (최대 5개) ───────────────────
+                          final recentSessions =
+                              records.take(5).toList();
 
-                              // actual_seconds 우선, 없으면 seconds_used로 폴백
-                              final int actualSeconds =
-                                  (data['actual_seconds'] as int?) ??
-                                  (data['seconds_used'] as int?) ??
-                                  0;
-                              final int secondsUsed =
-                                  (data['seconds_used'] as int?) ?? 0;
-
-                              // rate: 화면에 직접 노출 안 함, 할인 여부만 판단
-                              final dynamic rateRaw = data['rate'];
-                              final double rateVal = rateRaw is double
-                                  ? rateRaw
-                                  : (rateRaw is num
-                                      ? rateRaw.toDouble()
-                                      : 1.0);
-                              final bool isDiscounted = rateVal < 0.99;
-
-                              final String usageText = isDiscounted
-                                  ? "실제 ${_formatDurationFromSeconds(actualSeconds)} 사용  ·  ${_formatDurationFromSeconds(secondsUsed)} 차감"
-                                  : "${_formatDurationFromSeconds(actualSeconds)} 사용";
-
-                              return Container(
-                                padding: const EdgeInsets.all(16),
-                                decoration: BoxDecoration(
-                                  color: Colors.black,
-                                  borderRadius: BorderRadius.circular(16),
-                                  border:
-                                      Border.all(color: Colors.white10),
+                          return SingleChildScrollView(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // ── Today 요약 ──────────────────────────────
+                                _buildUsageSummaryCard(
+                                  title: 'Today',
+                                  talkSeconds:
+                                      sumGroup('talk', todayStart),
+                                  studySeconds:
+                                      sumGroup('study', todayStart),
                                 ),
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  children: [
-                                    // 모드명 + 날짜
-                                    Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            modeName,
-                                            style: const TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 14,
-                                                fontWeight:
-                                                    FontWeight.bold),
-                                            overflow:
-                                                TextOverflow.ellipsis,
+                                const SizedBox(height: 10),
+                                // ── This Week 요약 ──────────────────────────
+                                _buildUsageSummaryCard(
+                                  title: 'This Week',
+                                  talkSeconds:
+                                      sumGroup('talk', weekStart),
+                                  studySeconds:
+                                      sumGroup('study', weekStart),
+                                ),
+                                const SizedBox(height: 20),
+                                // ── Recent Sessions ─────────────────────────
+                                const Text(
+                                  'Recent Sessions',
+                                  style: TextStyle(
+                                      color: Colors.white54,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      letterSpacing: 1.1),
+                                ),
+                                const SizedBox(height: 10),
+                                ...recentSessions.map((doc) {
+                                  final d =
+                                      doc.data() as Map<String, dynamic>;
+                                  final DateTime ts =
+                                      d['created_at'] != null
+                                          ? (d['created_at'] as Timestamp)
+                                              .toDate()
+                                          : now;
+                                  final String dateStr =
+                                      DateFormat('yyyy.MM.dd HH:mm')
+                                          .format(ts);
+                                  final String modeRaw =
+                                      (d['mode'] as String?) ?? '';
+                                  final String groupName =
+                                      _modeGroupName(modeRaw);
+                                  final int actualSec =
+                                      (d['actual_seconds'] as int?) ??
+                                      (d['seconds_used'] as int?) ?? 0;
+                                  final int usedSec =
+                                      (d['seconds_used'] as int?) ?? 0;
+                                  final bool isDiff =
+                                      (actualSec - usedSec).abs() > 5 &&
+                                          usedSec > 0;
+
+                                  return Padding(
+                                    padding:
+                                        const EdgeInsets.only(bottom: 10),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 16, vertical: 12),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black,
+                                        borderRadius:
+                                            BorderRadius.circular(14),
+                                        border: Border.all(
+                                            color: Colors.white10),
+                                      ),
+                                      child: Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  isDiff
+                                                      ? '$groupName  ·  실제 ${_formatUsageDurationForUser(actualSec)} 사용  ·  ${_formatUsageDurationForUser(usedSec)} 차감'
+                                                      : '$groupName  ·  ${_formatUsageDurationForUser(actualSec)}',
+                                                  style: const TextStyle(
+                                                      color: Color(
+                                                          0xFF60A5FA),
+                                                      fontSize: 13,
+                                                      fontWeight:
+                                                          FontWeight.w600),
+                                                ),
+                                                const SizedBox(height: 4),
+                                                Text(dateStr,
+                                                    style: const TextStyle(
+                                                        color: Colors
+                                                            .white38,
+                                                        fontSize: 11)),
+                                              ],
+                                            ),
                                           ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Text(dateFormatted,
-                                            style: const TextStyle(
-                                                color: Colors.white38,
-                                                fontSize: 11)),
-                                      ],
+                                        ],
+                                      ),
                                     ),
-                                    const SizedBox(height: 8),
-                                    // 사용 시간 (개발자 정보 없음)
-                                    Text(
-                                      usageText,
-                                      style: const TextStyle(
-                                          color: Color(0xFF60A5FA),
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w600),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            },
+                                  );
+                                }),
+                              ],
+                            ),
                           );
                         },
                       ),
