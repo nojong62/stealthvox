@@ -63,7 +63,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   final ScrollController _scrollController = ScrollController();
   final List<Map<String, dynamic>> _localMessages = [];
   final Map<int, GlobalKey> _itemKeys = {}; // 상단 고정 렌더링을 위한 추적기
-  DateTime? _lastScrollThrottle; // 스크롤 throttle 타임스탬프 (Roleplay 이식)
 
   DocumentReference? _myHistoryRef;
   DocumentReference? _duoSessionRef;
@@ -83,94 +82,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   bool _isTtsActive = false;
   Completer<void>? _ttsCompleter;
 
-  // ── Idle Timeout (무반응 자동 일시정지) ────────────────────────────────────
-  Timer? _idlePauseTimer;
-  Timer? _idleAutoReturnTimer;
-  bool _isIdlePaused = false;
-  bool _hasAutoReturnedToModeSelect = false;
-  bool _showIdleBanner = false;
-
-  void _resetIdleTimer() {
-    if (_hasAutoReturnedToModeSelect) return;
-    _idlePauseTimer?.cancel();
-    _idleAutoReturnTimer?.cancel();
-    if (_isIdlePaused) {
-      _isIdlePaused = false;
-      if (mounted) setState(() => _showIdleBanner = false);
-      BillingTicker.instance.resume();
-      BillingTicker.instance.logMode('duo');
-    }
-    _idlePauseTimer = Timer(const Duration(seconds: 30), _handleIdlePause);
-    _idleAutoReturnTimer = Timer(const Duration(seconds: 60), _handleIdleAutoReturn);
-  }
-
-  void _handleIdlePause() {
-    if (!mounted || _hasAutoReturnedToModeSelect || _isIdlePaused) return;
-    _isIdlePaused = true;
-    BillingTicker.instance.pause();
-    if (mounted) setState(() => _showIdleBanner = true);
-  }
-
-  void _handleIdleAutoReturn() {
-    if (!mounted || _hasAutoReturnedToModeSelect) return;
-    _hasAutoReturnedToModeSelect = true;
-    _clearIdleTimers();
-    _silenceTimer?.cancel();
-    _cancelAudio();
-    _turnCounter++;
-    if (_isConversationActive && mounted) {
-      setState(() => _isConversationActive = false);
-    }
-    if (!_isIdlePaused) BillingTicker.instance.pause();
-    if (!mounted) return;
-    if (StealthRoomMaster.exitCurrentMode != null) {
-      StealthRoomMaster.exitCurrentMode!();
-    } else if (Navigator.canPop(context)) {
-      Navigator.pop(context);
-    }
-  }
-
-  void _clearIdleTimers() {
-    _idlePauseTimer?.cancel();
-    _idleAutoReturnTimer?.cancel();
-    _idlePauseTimer = null;
-    _idleAutoReturnTimer = null;
-  }
-
-  Widget _buildIdleBanner() => const SizedBox.shrink();
-
-  Widget _buildIdleOverlay() {
-    return AnimatedOpacity(
-      opacity: _showIdleBanner ? 1.0 : 0.0,
-      duration: const Duration(milliseconds: 400),
-      child: IgnorePointer(
-        ignoring: !_showIdleBanner,
-        child: Align(
-          alignment: const Alignment(0.0, -0.65),
-          child: GestureDetector(
-            onTap: _resetIdleTimer,
-            child: Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.45),
-                shape: BoxShape.circle,
-                border: Border.all(
-                    color: Colors.amberAccent.withOpacity(0.6), width: 2),
-              ),
-              child: const Icon(
-                Icons.pause_circle_filled_rounded,
-                color: Colors.amberAccent,
-                size: 52,
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-  // ─────────────────────────────────────────────────────────────────────────
-
   // ============================================================================
   // 📦 [3. 라이프사이클 (LIFECYCLE)]
   // 위젯의 시작(initState)과 끝(dispose) 및 초기 설정
@@ -184,7 +95,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
 
     BillingTicker.instance.setRate(BillingRate.full);
     BillingTicker.instance.resume();
-    BillingTicker.instance.logMode('duo');
 
     _ttsPlayer.onPlayerComplete.listen((_) {
       _isTtsActive = false;
@@ -207,13 +117,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
             '[Duo] initState — auto joining as guest, roomId: $pendingRoomId');
         _joinAsGuest(pendingRoomId);
       }
-      if (mounted) _resetIdleTimer();
     });
   }
 
   @override
   void dispose() {
-    _clearIdleTimers();
     _partnerJoinedSubscription?.cancel();
     _silenceTimer?.cancel();
     _cancelAudio();
@@ -256,7 +164,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
 
   Future<void> _playAudioAndWait(Uint8List? bytes) async {
     if (bytes == null || !_isConversationActive) return;
-    _resetIdleTimer();
     _isTtsActive = true;
     _ttsCompleter = Completer<void>();
     try {
@@ -313,7 +220,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   // ============================================================================
   Future<void> _stopAndSendToWhisper() async {
     _silenceTimer?.cancel();
-    _resetIdleTimer();
     final path = await _audioRecorder.stop();
     if (path == null) {
       if (_isConversationActive) _startWhisperRecording();
@@ -387,7 +293,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
           'type': 'error'
         });
       });
-      _scrollToCurrent(_localMessages.length - 1);
+      _scrollToBottom();
     }
     Uint8List? errorTts = await _fetchTTSBytes(fallbackTarget, "nova");
     if (errorTts != null && _isConversationActive) {
@@ -422,7 +328,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
 
   // 🚀 불필요한 딜레이를 싹 걷어낸 즉시 통역 파이프라인
   Future<void> _processRelayPipeline(String finalTranscript) async {
-    _resetIdleTimer();
     _turnCounter++;
     final int currentTurnId = _turnCounter;
     String myTarget = FFAppState().targetLang.isNotEmpty
@@ -438,28 +343,18 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
         _localMessages
             .add({'role': 'HOST', 'target': finalTranscript, 'original': ''});
       });
-      // HOST 말풍선은 상단 고정 — 사용자 발화가 화면 안에 안정적으로 보이도록
-      _scrollToCurrentTop(_localMessages.length - 1);
+      _scrollToBottom();
     }
     await _saveHistoryMessage(finalTranscript, "", 'HOST');
 
     if (!_isConversationActive || _turnCounter != currentTurnId) return;
 
     // ⏱️ 2. 화면에 띄워두고 백그라운드에서 동시통역(gpt-4o-mini) 진행
-    // 현재 턴 직전까지의 대화 히스토리(에러 메시지 제외)를 컨텍스트로 전달
-    final recentHistory = _localMessages.length > 1
-        ? _localMessages
-            .sublist(0, _localMessages.length - 1)
-            .where((m) => m['type'] == null)
-            .toList()
-        : <Map<String, dynamic>>[];
-
     Map<String, String>? translationResult = await DuoBrain.processTranslation(
         key: _openAiKey,
         text: finalTranscript,
         targetLang: myTarget,
-        originalLang: myOriginal,
-        recentHistory: recentHistory);
+        originalLang: myOriginal);
 
     if (!_isConversationActive || _turnCounter != currentTurnId) return;
 
@@ -483,7 +378,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
             'type': 'error'
           });
         });
-        _scrollToCurrent(_localMessages.length - 1);
+        _scrollToBottom();
       }
       if (_isConversationActive && _turnCounter == currentTurnId)
         _startWhisperRecording();
@@ -501,8 +396,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
           'original': aiReplyOriginal
         });
       });
-      // AI 응답은 중앙 고정 — 읽기 좋은 위치에서 흔들리지 않도록
-      _scrollToCurrent(_localMessages.length - 1);
+      _scrollToBottom();
     }
 
     await _saveHistoryMessage(aiReplyTarget, aiReplyOriginal, 'SYSTEM');
@@ -521,65 +415,27 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   // 📦 [6. 데이터베이스 및 스크롤 관리 (DB & SCROLL)]
   // 히스토리 저장 및 화면 상단 고정 제어
   // ============================================================================
-  // fallback: GlobalKey context를 못 찾을 때만 사용. 첫 메시지는 건너뜀
   void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollController.hasClients) return;
-      if (_localMessages.length <= 1) return;
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
-    });
-  }
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (!mounted || _localMessages.isEmpty) return;
 
-  // 250ms throttle — 연속 setState 중 스크롤 남발 방지 (Roleplay 이식)
-  void _scrollToBottomThrottled() {
-    final now = DateTime.now();
-    if (_lastScrollThrottle == null ||
-        now.difference(_lastScrollThrottle!) >=
-            const Duration(milliseconds: 250)) {
-      _lastScrollThrottle = now;
-      _scrollToBottom();
-    }
-  }
+      // 💡 [수술 핵심] HOST(유저)인지 묻고 따지지 않고, 무조건 가장 마지막 메시지를 타겟으로 잡습니다.
+      int targetIndex = _localMessages.length - 1;
 
-  // 현재 말풍선을 화면 중앙에 고정 — AI 응답 추가 시 사용 (Roleplay 이식)
-  void _scrollToCurrent(int index) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollController.hasClients) return;
-      final key = _itemKeys[index];
-      if (key == null) return;
-      final ctx = key.currentContext;
-      if (ctx == null) return;
-      Scrollable.ensureVisible(
-        ctx,
-        alignment: 0.5,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
-    });
-  }
-
-  // 현재 말풍선을 화면 상단에 고정 — HOST 발화 추가 시 사용 (Roleplay 이식)
-  void _scrollToCurrentTop(int index) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final key = _itemKeys[index];
-      if (key == null) return;
-      final ctx = key.currentContext;
-      if (ctx == null) return;
-      Scrollable.ensureVisible(
-        ctx,
-        alignment: 0.02,
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOut,
-      );
+      final key = _itemKeys[targetIndex];
+      if (key != null && key.currentContext != null) {
+        Scrollable.ensureVisible(key.currentContext!,
+            duration: const Duration(milliseconds: 500),
+            curve: Curves.easeOutCubic,
+            alignment: 0.05);
+      } else if (_scrollController.hasClients) {
+        _scrollController.animateTo(_scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 400), curve: Curves.easeOut);
+      }
     });
   }
 
   void _handleMicTap() {
-    _resetIdleTimer();
     setState(() => _isConversationActive = !_isConversationActive);
     if (_isConversationActive) {
       _startWhisperRecording();
@@ -725,7 +581,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   }
 
   Future<void> _joinAsGuest(String roomId) async {
-    // 초대 상태는 여기서 지우지 않음 — Firestore 업데이트 성공 후에만 삭제
+    // 초대 상태는 진입 시도 직전에 반드시 소비 (좀비 roomId 방지)
+    FFAppState().isGuestSession = false;
+    FFAppState().duoRoomId = '';
+    debugPrint('[AppState] duo invite state cleared');
+
     try {
       _duoSessionRef =
           FirebaseFirestore.instance.collection('duo_sessions').doc(roomId);
@@ -736,7 +596,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('초대된 방을 찾을 수 없습니다.')),
           );
-          StealthRoomMaster.exitCurrentMode?.call();
         }
         return;
       }
@@ -747,7 +606,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('이 방은 현재 사용할 수 없습니다.')),
           );
-          StealthRoomMaster.exitCurrentMode?.call();
         }
         return;
       }
@@ -762,12 +620,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
         'partnerJoinedAt': FieldValue.serverTimestamp(),
       });
 
-      // 입장 성공 후에만 초대 상태 정리 (3개 세트)
-      FFAppState().isGuestSession = false;
-      FFAppState().duoRoomId = '';
-      FFAppState().pendingInviteType = '';
-      debugPrint('[AppState] duo invite state cleared (after successful join)');
-
       debugPrint('[Duo] _joinAsGuest success — guestUid: $guestUid, roomId: $roomId');
 
       if (mounted) {
@@ -779,12 +631,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
       _startWhisperRecording();
     } catch (e) {
       debugPrint('[Duo] Guest join error: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('연결 중 오류가 발생했습니다. 다시 시도해주세요.')),
-        );
-        StealthRoomMaster.exitCurrentMode?.call();
-      }
     }
   }
 
@@ -907,33 +753,29 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
               children: [
                 _buildTopBar(),
                 Expanded(
-                  child: Stack(children: [
-                    _localMessages.isEmpty
-                        ? const Center(
-                            child: Text("하단의 마이크 버튼을 눌러 통역을 시작하세요.",
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                    color: Colors.white54, height: 1.5)))
-                        : ListView.builder(
-                            controller: _scrollController,
-                            physics: const BouncingScrollPhysics(),
-                            padding: EdgeInsets.only(
-                                left: 8,
-                                right: 8,
-                                top: 40,
-                                bottom:
-                                    MediaQuery.of(context).size.height * 0.4),
-                            itemCount: _localMessages.length,
-                            itemBuilder: (context, index) {
-                              if (!_itemKeys.containsKey(index))
-                                _itemKeys[index] = GlobalKey();
-                              return Container(
-                                key: _itemKeys[index],
-                                child: _buildTextBlock(_localMessages[index]),
-                              );
-                            }),
-                    _buildIdleOverlay(),
-                  ]),
+                  child: _localMessages.isEmpty
+                      ? const Center(
+                          child: Text("하단의 마이크 버튼을 눌러 통역을 시작하세요.",
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                  color: Colors.white54, height: 1.5)))
+                      : ListView.builder(
+                          controller: _scrollController,
+                          physics: const BouncingScrollPhysics(),
+                          padding: EdgeInsets.only(
+                              left: 8,
+                              right: 8,
+                              top: 40,
+                              bottom: MediaQuery.of(context).size.height * 0.4),
+                          itemCount: _localMessages.length,
+                          itemBuilder: (context, index) {
+                            if (!_itemKeys.containsKey(index))
+                              _itemKeys[index] = GlobalKey();
+                            return Container(
+                              key: _itemKeys[index],
+                              child: _buildTextBlock(_localMessages[index]),
+                            );
+                          }),
                 ),
                 _buildControlArea(effectiveBottomPadding),
               ],
@@ -1129,47 +971,20 @@ class DuoBrain {
       {required String key,
       required String text,
       required String targetLang,
-      required String originalLang,
-      List<Map<String, dynamic>> recentHistory = const []}) async {
+      required String originalLang}) async {
     try {
       Uri uri = Uri.parse('https://api.openai.com/v1/chat/completions');
 
-      // 최근 대화 히스토리를 GPT 컨텍스트로 변환 (최대 6턴)
-      final historyLines = <String>[];
-      for (final msg
-          in recentHistory.reversed.take(6).toList().reversed) {
-        final role = msg['role'] == 'HOST' ? 'User' : 'AI';
-        final content = msg['target']?.toString() ?? '';
-        if (content.isNotEmpty) historyLines.add('[$role]: $content');
-      }
-      final historyContext = historyLines.isEmpty
-          ? '(No prior conversation)'
-          : historyLines.join('\n');
-
-      String prompt = "You are a Duo Mode AI conversation partner.\n"
-          "The user speaks $originalLang. Respond in $targetLang.\n\n"
-          "=== RECENT CONVERSATION ===\n"
-          "$historyContext\n\n"
-          "=== SUBJECT AMBIGUITY GUARD ===\n"
-          "Before responding, determine: is it clear WHO or WHAT the user is asking about?\n"
-          "Trigger clarification if ANY of these apply:\n"
-          "• A person name/role (호진, 아들, 엄마, 선생님, 걔, 그 사람) appears but the referent is unclear\n"
-          "• The question involves scores, exams, schedules, or states — and WHOSE is not established\n"
-          "• Short utterance uses pronouns only (걔, 그거, 이번에) with no context to resolve them\n"
-          "• Examples that MUST trigger clarification: '몇 점 받을 것 같아?', '괜찮을까?', '어떻게 됐어?'\n\n"
-          "Decision rule:\n"
-          "✅ Subject is clear from utterance OR resolved from history → respond naturally in $targetLang\n"
-          "❌ Subject is ambiguous AND history cannot resolve it → ask a SHORT clarification question\n\n"
-          "ABSOLUTE PROHIBITION:\n"
-          "• NEVER assume the speaker ('I/you') is the subject when a third person was mentioned or implied\n"
-          "• NEVER produce: 'I think I'll score…', 'You might get…', '제가 받을 것 같아요'\n\n"
-          "=== OUTPUT (strict JSON) ===\n"
+      String prompt = "You are a professional bilingual interpreter.\n"
+          "Rule 1: Detect the language of the user's text.\n"
+          "Rule 2: If the text is mainly in $originalLang, translate it naturally to $targetLang.\n"
+          "Rule 3: If the text is mainly in $targetLang, translate it naturally to $originalLang.\n"
+          "Rule 4: Output EXACTLY in this JSON format:\n"
           "{\n"
-          "  \"needs_clarification\": <true or false>,\n"
-          "  \"translated_text\": \"<$targetLang: your response OR clarification question>\",\n"
-          "  \"original_input\": \"<Korean: gloss of your response OR clarification note>\"\n"
-          "}\n\n"
-          "User said: \"$text\"";
+          "  \"translated_text\": \"[Your translation]\",\n"
+          "  \"original_input\": \"[The user's original text polished/corrected if needed]\"\n"
+          "}\n"
+          "Text to translate: \"$text\"";
 
       var res = await client
           .post(uri,
@@ -1179,8 +994,7 @@ class DuoBrain {
               },
               body: jsonEncode({
                 'model': 'gpt-4o-mini',
-                'temperature': 0.3,
-                'max_tokens': 300,
+                'temperature': 0.2, // 💡 기계적이고 정확한 통역을 위해 온도 0.2 고정
                 'response_format': {'type': 'json_object'},
                 'messages': [
                   {'role': 'user', 'content': prompt}
@@ -1195,9 +1009,7 @@ class DuoBrain {
         var parsed = jsonDecode(cleanJson);
         return {
           'translated_text': parsed['translated_text']?.toString() ?? "",
-          'original_input': parsed['original_input']?.toString() ?? "",
-          'needs_clarification':
-              (parsed['needs_clarification'] == true).toString(),
+          'original_input': parsed['original_input']?.toString() ?? ""
         };
       }
     } catch (e) {

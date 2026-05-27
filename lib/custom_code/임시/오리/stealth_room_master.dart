@@ -51,10 +51,13 @@ class _StealthRoomMasterState extends State<StealthRoomMaster> {
         () => setState(() => _currentMode = null);
 
     // Duo 초대 링크 자동 진입 처리
-    // FFAppState 초대 상태는 여기서 지우지 않음 — _joinAsGuest 성공 후에만 삭제
+    // roomId를 로컬 변수에 옮기고 FFAppState는 즉시 clear → 뒤로가기 루프 방지
     if (FFAppState().isGuestSession &&
         FFAppState().duoRoomId.isNotEmpty) {
       final String consumedRoomId = FFAppState().duoRoomId;
+      FFAppState().isGuestSession = false;
+      FFAppState().duoRoomId = '';
+      debugPrint('[AppState] duo invite state cleared');
       debugPrint('[StealthRoom] Duo invite detected — roomId: $consumedRoomId');
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
