@@ -1175,6 +1175,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       );
 
       bool evaporated = false;
+      bool clarified = false; // 주어/목적어 모호 → AI 되묻기
       bool firstChunkSent = false;
       await for (String chunk in userStream) {
         userTargetText += chunk;
@@ -1184,6 +1185,13 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         if (userTargetText.contains("[EVAPORATE]")) {
           evaporated = true;
           _log('⚠️ [EVAPORATE]', '증발 감지 → 턴 취소');
+          break;
+        }
+
+        // 되묻기 감지: 주어/목적어 모호 → AI In-Character 되묻기
+        if (userTargetText.contains("[CLARIFY]")) {
+          clarified = true;
+          _log('❓ [CLARIFY]', '되묻기 감지 → clarification 처리');
           break;
         }
         if (mounted)
@@ -1230,6 +1238,42 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
               () => _localMessages.removeWhere((m) => m['role'] == 'HOST'));
         if (_isConversationActive && _turnCounter == currentTurnId)
           _speakRetryAndListen();
+        return;
+      }
+
+      // ❓ [CLARIFY] 유저 발화 주어/목적어 모호 → In-Character 되묻기 + STT 재시작
+      if (clarified) {
+        _turnCounter--;
+        final clarifyText =
+            userTargetText.replaceFirst(RegExp(r'^\[CLARIFY\]\s*'), '');
+        if (mounted) {
+          setState(() {
+            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+            if (hostIndex < _localMessages.length)
+              _localMessages.removeAt(hostIndex);
+            _localMessages.add(
+                {'role': 'SYSTEM', 'target': clarifyText, 'original': ''});
+          });
+          _scrollToBottom();
+        }
+        _ttsQueueManager.stop();
+        _ttsQueueManager.setUserTurn(false);
+        _ttsQueueManager.setAiPaused(false);
+        final clarifyTts = ChunkedTtsFetcher(
+          _openAiKey,
+          _ttsQueueManager,
+          'nova',
+          isUser: false,
+          onLog: _log,
+        );
+        clarifyTts.addText(clarifyText);
+        int waitTicks = 0;
+        while ((clarifyTts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
+            mounted) {
+          await Future.delayed(const Duration(milliseconds: 50));
+          if (++waitTicks > 200) break;
+        }
+        if (mounted && _isConversationActive) _startDeepgramListening();
         return;
       }
 
@@ -3395,6 +3439,23 @@ Korean: "엄마가 용돈 줬어" → CORRECT: Mom gave me allowance. WRONG: I g
 Korean: "선생님이 칭찬해주셨어" → CORRECT: The teacher praised me. WRONG: I praised the teacher.
 Korean: "친구가 요즘 바빠서 못 만나" → CORRECT: My friend is busy lately, so I can't meet him. WRONG: I'm busy lately...
 The particle before the verb's doer (이/가) is ALWAYS the subject. Never swap subject and object.
+
+[CLARIFICATION GUARD — In-Character]
+Before translating, check: is the subject/object clear from the utterance OR resolvable from History?
+If clear → proceed with normal translation.
+If genuinely ambiguous AND History cannot resolve it → output EXACTLY:
+[CLARIFY] <short, in-character clarification question in $targetLang>
+
+The question must sound like the AI's assigned character is asking, not a system message.
+Style pool — pick ONE that fits the character's personality and VARY each time:
+- Terse: "Who are you talking about?"
+- Skeptical: "Who? Be specific."
+- Curious: "Oh — who exactly do you mean?"
+- Playful: "I'm gonna need a name to work with here!"
+- Confirming: "Do you mean [person from history]?"
+
+NEVER output [CLARIFY] if the subject can be inferred from context.
+NEVER break character when asking.
 
 [OUTPUT RULES]
 - The user IS${userRole.isNotEmpty ? ' a "$userRole"' : ' the user'} — translate their words from THAT perspective only.
