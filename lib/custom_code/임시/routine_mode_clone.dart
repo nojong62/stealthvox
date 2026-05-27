@@ -1,4 +1,4 @@
-﻿// Automatic FlutterFlow imports
+// Automatic FlutterFlow imports
 import '/backend/backend.dart';
 import '/backend/schema/structs/index.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
@@ -43,16 +43,16 @@ import '/custom_code/actions/billing_ticker.dart';
 /// ==================================================================== [Box
 /// 2: 클래스 선언부]
 /// ====================================================================
-class RoutineModeRoleplay extends StatefulWidget {
-  const RoutineModeRoleplay({super.key, this.width, this.height});
+class RoutineModeClone extends StatefulWidget {
+  const RoutineModeClone({super.key, this.width, this.height});
   final double? width;
   final double? height;
 
   @override
-  State<RoutineModeRoleplay> createState() => _RoutineModeRoleplayState();
+  State<RoutineModeClone> createState() => _RoutineModeCloneState();
 }
 
-class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
+class _RoutineModeCloneState extends State<RoutineModeClone> {
   // ====================================================================
   // 📦 [Box 3: 상태 변수 및 초기화]
   // ====================================================================
@@ -64,206 +64,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   int _turnCounter = 0;
   String? _sessionDocId; // 🔧 [v3 추가] 첫 대화 후 세션 ID (클론 변경 시 null 리셋)
   DocumentReference? _myHistoryRef; // 🔧 [히스토리] chat_history 문서 참조 (Duo 패턴)
-
-  // 🔧 [v3.4 발화 합치기] 유저 더듬거림 대응
-  // speech_final 받아도 바로 파이프라인 시작 안 하고 조건부 대기
-  // 대기 중 새 발화 오면 합쳐서 처리 (최종 한 덩어리로)
-  String _pendingTranscript = ''; // 대기 중인 유저 발화 누적
-  Timer? _commitTimer; // "진짜 끝났는지" 확정 타이머
-  static const int COMMIT_WAIT_SPEECH_FINAL_MS = 600; // speechFinal=true 시 빠른 응답
-  static const int COMMIT_WAIT_UNCERTAIN_MS = 1100; // UtteranceEnd/speechFinal=false 시 여유 대기
-  bool _lastTurnWasSpeechFinal = false; // 마지막 onTurnEnded 이벤트 타입 기록
-
-  // 🔬 [v3.1 진단] 화면 로그 뷰어 (팝업에 쌓음)
-  final List<String> _debugLogs = [];
-  void _log(String tag, String msg) {
-    final ts = DateTime.now().toIso8601String().substring(11, 23);
-    final line = '[$ts] $tag $msg';
-    print(line);
-    _debugLogs.add(line);
-    if (_debugLogs.length > 500) {
-      _debugLogs.removeRange(0, 50);
-    }
-  }
-
-  // API 응답에서 [Action], (Laughs) 같은 오염 패턴 제거
-  String _cleanText(String text) {
-    return text
-        .replaceAll(RegExp(r'\[.*?\]'), '')
-        .replaceAll(RegExp(r'\(.*?\)'), '')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-  }
-
-  // punctuation/공백만 있는 문자열은 TTS 큐에 넣지 않기 위한 필터
-  bool isMeaninglessTtsText(String text) {
-    final t = text.trim();
-    if (t.isEmpty) return true;
-    return RegExp('^[\\s.,!?;:\'"\\[\\]{}()\\-]+\$').hasMatch(t);
-  }
-
-  void _showDebugLogDialog() {
-    showDialog(
-      context: context,
-      builder: (BuildContext dialogContext) {
-        return StatefulBuilder(
-          builder: (ctx, setDialogState) {
-            return Dialog(
-              backgroundColor: const Color(0xFF1A1A1A),
-              insetPadding: const EdgeInsets.all(12),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
-              child: SizedBox(
-                width: double.maxFinite,
-                height: MediaQuery.of(ctx).size.height * 0.85,
-                child: Column(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.bug_report,
-                              color: Color(0xFFFBBF24)),
-                          const SizedBox(width: 8),
-                          Text('진단 로그 (${_debugLogs.length})',
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold)),
-                          const Spacer(),
-                          IconButton(
-                            icon:
-                                const Icon(Icons.close, color: Colors.white70),
-                            onPressed: () => Navigator.pop(dialogContext),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const Divider(color: Colors.white24, height: 1),
-                    Expanded(
-                      child: Container(
-                        color: const Color(0xFF0A0A0A),
-                        padding: const EdgeInsets.all(8),
-                        child: SingleChildScrollView(
-                          reverse: true,
-                          child: SelectableText(
-                            _debugLogs.isEmpty
-                                ? '(로그 없음)'
-                                : _debugLogs.join('\n'),
-                            style: const TextStyle(
-                              color: Color(0xFFB3E5FC),
-                              fontFamily: 'monospace',
-                              fontSize: 11,
-                              height: 1.35,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const Divider(color: Colors.white24, height: 1),
-                    Padding(
-                      padding: const EdgeInsets.all(8),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              icon: const Icon(Icons.copy, size: 16),
-                              label: const Text('전체 복사'),
-                              style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF10B981)),
-                              onPressed: () async {
-                                final text = _debugLogs.join('\n');
-                                await Clipboard.setData(
-                                    ClipboardData(text: text));
-                                if (ctx.mounted) {
-                                  ScaffoldMessenger.of(ctx).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('✅ 로그 클립보드에 복사됨'),
-                                      duration: Duration(seconds: 1),
-                                    ),
-                                  );
-                                }
-                              },
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              icon: const Icon(Icons.refresh, size: 16),
-                              label: const Text('새로고침'),
-                              style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF3B82F6)),
-                              onPressed: () => setDialogState(() {}),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              icon: const Icon(Icons.delete_outline, size: 16),
-                              label: const Text('지우기'),
-                              style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFFEF4444)),
-                              onPressed: () {
-                                setState(() => _debugLogs.clear());
-                                setDialogState(() {});
-                              },
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  // 🌐 [v3.1] 로비에서 선택한 언어 이름 → Deepgram/OpenAI 언어 코드 매핑
-  String _mapLanguageToCode(String lang) {
-    switch (lang.trim().toLowerCase()) {
-      case 'korean':
-        return 'ko';
-      case 'japanese':
-        return 'ja';
-      case 'chinese':
-        return 'zh';
-      case 'spanish':
-        return 'es';
-      case 'french':
-        return 'fr';
-      case 'german':
-        return 'de';
-      case 'italian':
-        return 'it';
-      case 'portuguese':
-        return 'pt';
-      case 'russian':
-        return 'ru';
-      case 'vietnamese':
-        return 'vi';
-      case 'thai':
-        return 'th';
-      case 'indonesian':
-        return 'id';
-      case 'hindi':
-        return 'hi';
-      case 'arabic':
-        return 'ar';
-      default:
-        return 'en'; // English 포함
-    }
-  }
-
-  // 🎭 롤플레이 시나리오
-  String _scenarioKeyword = "";
-  String _scenarioSituation = "";
-  String _scenarioAiRole = "";
-  String _scenarioUserRole = "";
-  bool _isGeneratingScenario = false;
   bool _isAiOpenerPlaying = false; // AI 첫 발화 재생 중 여부
 
   // ── Idle Timeout (무반응 자동 일시정지) ────────────────────────────────────
@@ -271,6 +71,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   Timer? _idleAutoReturnTimer;
   bool _isIdlePaused = false;
   bool _hasAutoReturnedToModeSelect = false;
+  bool _showIdleBanner = false;
   // ── Idle Pause Toast ──────────────────────────────────────────────────────
   bool _showPauseToast = false;
   Timer? _pauseToastTimer;
@@ -282,9 +83,12 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     if (_isIdlePaused) {
       _isIdlePaused = false;
       _pauseToastTimer?.cancel();
-      if (mounted) setState(() => _showPauseToast = false);
+      if (mounted) setState(() {
+        _showIdleBanner = false;
+        _showPauseToast = false;
+      });
       BillingTicker.instance.resume();
-      BillingTicker.instance.logMode('roleplay');
+      BillingTicker.instance.logMode('clone');
     }
     _idlePauseTimer = Timer(const Duration(seconds: 30), _handleIdlePause);
     _idleAutoReturnTimer = Timer(const Duration(seconds: 90), _handleIdleAutoReturn);
@@ -298,7 +102,10 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     _pauseToastTimer = Timer(const Duration(seconds: 1), () {
       if (mounted) setState(() => _showPauseToast = false);
     });
-    if (mounted) setState(() => _showPauseToast = true);
+    if (mounted) setState(() {
+      _showIdleBanner = true;
+      _showPauseToast = true;
+    });
   }
 
   void _handleIdleAutoReturn() {
@@ -372,27 +179,94 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   }
   // ─────────────────────────────────────────────────────────────────────────
 
+  // 🔧 [v3.4 발화 합치기] 유저 더듬거림 대응
+  // speech_final 받아도 바로 파이프라인 시작 안 하고 1.2초 대기
+  // 대기 중 새 발화 오면 합쳐서 처리 (최종 한 덩어리로)
+  String _pendingTranscript = ''; // 대기 중인 유저 발화 누적
+  Timer? _commitTimer; // "진짜 끝났는지" 확정 타이머
+  static const int COMMIT_WAIT_MS = 1200; // 발화 합치기 대기 시간
   String _lastRawTranscript = ''; // 정정 감지용 직전 유저 발화 원문
+
+  // 🔬 [v3.1 진단] 화면 로그 뷰어 (팝업에 쌓음)
+  final List<String> _debugLogs = [];
+  void _log(String tag, String msg) {
+    final ts = DateTime.now().toIso8601String().substring(11, 23);
+    final line = '[$ts] $tag $msg';
+    print(line);
+    _debugLogs.add(line);
+    // 메모리 폭발 방지: 500줄 초과 시 앞에서 50줄 자르기
+    if (_debugLogs.length > 500) {
+      _debugLogs.removeRange(0, 50);
+    }
+  }
+
+  // 🌐 [v3.1] 로비에서 선택한 언어 이름 → Deepgram/OpenAI 언어 코드 매핑
+  String _mapLanguageToCode(String lang) {
+    switch (lang.trim().toLowerCase()) {
+      case 'korean':
+        return 'ko';
+      case 'japanese':
+        return 'ja';
+      case 'chinese':
+        return 'zh';
+      case 'spanish':
+        return 'es';
+      case 'french':
+        return 'fr';
+      case 'german':
+        return 'de';
+      case 'italian':
+        return 'it';
+      case 'portuguese':
+        return 'pt';
+      case 'russian':
+        return 'ru';
+      case 'vietnamese':
+        return 'vi';
+      case 'thai':
+        return 'th';
+      case 'indonesian':
+        return 'id';
+      case 'hindi':
+        return 'hi';
+      case 'arabic':
+        return 'ar';
+      default:
+        return 'en'; // English 포함
+    }
+  }
+
+  // 클론 데이터 관리
+  String _selectedCloneId = "";
+  String _selectedCloneContext = "";
+  List<Map<String, dynamic>> _clones = [];
+
+  // 🧠 [장기 기억] 클론별 메모리 (SharedPreferences 동기화)
+  String _cloneSummary = '';
+  List<Map<String, String>> _recentHistory = [];
+  int _memoryTurnCount = 0;
+
+  final TextEditingController _cloneNameController = TextEditingController();
+  final TextEditingController _kakaoTextController = TextEditingController();
+  final TextEditingController _editPersonaController = TextEditingController();
+  bool _isCreatingClone = false;
+  bool _isEditingClone = false;
 
   // 오디오 및 UI
   final List<Map<String, dynamic>> _localMessages = [];
   final ScrollController _scrollController = ScrollController();
   final Map<int, GlobalKey> _itemKeys = {};
-  DateTime? _lastScrollThrottle;
   DeepgramV2VoiceManager? _voiceManager;
   final AudioRecorder _audioRecorder = AudioRecorder();
   late final TtsQueueManager _ttsQueueManager;
-  late HybridTtsPlayer hybridTtsPlayer;
+  HybridTtsPlayer? _hybridTtsPlayer; // [하이브리드] 메인 턴 TTS 플레이어
 
   // ⏱️ 성능 측정용 초시계
   final Stopwatch _swDeepgram = Stopwatch();
   final Stopwatch _swOpenAI = Stopwatch();
   final Stopwatch _swTTS = Stopwatch();
-  // ⏱️ latency 세부 측정
-  final Stopwatch _swSpeechEnd = Stopwatch(); // 발화 확정 시점 기준
-  int _msGptFirstToken = 0;
-  int _msGptStreamEnd = 0;
   String _debugResult = "⏱️ 대기 중";
+  DateTime? _lastScrollThrottle;
 
   @override
   void initState() {
@@ -410,37 +284,14 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     });
 
     _initPermissions();
-    _fetchKeysAndInit();
+    _loadClones();
+    _fetchKeys();
     BillingTicker.instance.setRate(BillingRate.full);
     BillingTicker.instance.resume();
-    BillingTicker.instance.logMode('roleplay');
+    BillingTicker.instance.logMode('clone');
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _resetIdleTimer();
     });
-  }
-
-  /// 나가는 모든 경로에서 호출: chat_json + last_message 저장 (탐색 없이 순수 저장만)
-  Future<void> _forceSaveToFirestore() async {
-    if (_myHistoryRef == null) return;
-    String lastMsg = "대화 내역이 없습니다.";
-    for (int i = _localMessages.length - 1; i >= 0; i--) {
-      final t = (_localMessages[i]['target'] ?? '').toString().trim();
-      if (t.isNotEmpty && t != '...') {
-        lastMsg = t;
-        break;
-      }
-    }
-    try {
-      await _myHistoryRef!.update({
-        'last_message': lastMsg,
-        'last_active': FieldValue.serverTimestamp(),
-        'chat_json': jsonEncode(_localMessages),
-        'is_completed': false,
-      });
-      debugPrint("✅ 히스토리 자동 저장 성공");
-    } catch (e) {
-      debugPrint("❌ 히스토리 저장 중 오류: $e");
-    }
   }
 
   @override
@@ -448,12 +299,14 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     _clearIdleTimers();
     _pauseToastTimer?.cancel();
     BillingTicker.instance.pause();
-    _forceSaveToFirestore();
     _stopEverything();
     _voiceManager?.dispose();
     _audioRecorder.dispose();
     _ttsQueueManager.stop();
     _scrollController.dispose();
+    _cloneNameController.dispose();
+    _kakaoTextController.dispose();
+    _editPersonaController.dispose();
     super.dispose();
   }
 
@@ -461,7 +314,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     await [Permission.microphone, Permission.storage].request();
   }
 
-  Future<void> _fetchKeysAndInit() async {
+  Future<void> _fetchKeys() async {
     try {
       await FirebaseRemoteConfig.instance.fetchAndActivate();
       if (mounted) {
@@ -470,7 +323,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
               FirebaseRemoteConfig.instance.getString('DeepgramAPIKey');
           _openAiKey = FirebaseRemoteConfig.instance.getString('OpenAIAPIKey');
         });
-        _generateScenario();
       }
     } catch (e) {
       print('❌ Key Load Error: $e');
@@ -478,169 +330,1007 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   }
 
   // ====================================================================
-  // 📦 [Box 4-A: 드라마/영화 장면 기반 시나리오 자동 생성]
+  // 📦 [Box 4: Clone 관리] — Firestore 기반
   // ====================================================================
-  Future<void> _generateScenario() async {
-    if (_openAiKey.isEmpty || _isGeneratingScenario) return;
-    setState(() => _isGeneratingScenario = true);
+
+  CollectionReference<Map<String, dynamic>>? _clonesRef() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return null;
+    return FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('clones');
+  }
+
+  Future<void> _loadClones() async {
+    final ref = _clonesRef();
+    if (ref == null) {
+      _log('⚠️ [CLONE-LOAD]', '로그인되지 않음 → SharedPreferences fallback');
+      await _loadClonesFromPrefs();
+      return;
+    }
     try {
-      final result = await RoleplayBrain.generateDramaticScenario(_openAiKey);
-      if (mounted && result != null) {
+      final snapshot = await ref.orderBy('created_at').get();
+      if (mounted) {
         setState(() {
-          _scenarioKeyword = result['situation'] ?? '';
-          _scenarioSituation = result['situation'] ?? '';
-          _scenarioAiRole = result['ai_role'] ?? '';
-          _scenarioUserRole = result['user_role'] ?? '';
-          _sessionDocId = null;
-          _myHistoryRef = null;
-          _localMessages.clear();
-          _isConversationActive = false;
+          _clones = snapshot.docs.map((doc) {
+            final d = doc.data();
+            return <String, dynamic>{
+              'id': doc.id,
+              'name': d['name'] ?? '',
+              'characteristics': d['personality'] ?? '',
+              'original_text': d['original_text'] ?? '',
+            };
+          }).toList();
         });
       }
+      _log('✅ [CLONE-LOAD]', '${_clones.length}개 로드 완료');
     } catch (e) {
-      print('❌ 시나리오 생성 에러: $e');
-    } finally {
-      if (mounted) setState(() => _isGeneratingScenario = false);
+      _log('❌ [CLONE-LOAD]', 'Firestore 실패 → SharedPreferences fallback: $e');
+      await _loadClonesFromPrefs();
     }
   }
 
-  // ====================================================================
-  // 📦 [Box 4: 시나리오 설정 — 유저 직접 입력]
-  // ====================================================================
-  void _showSituationInputSheet() {
-    if (_isConversationActive) return;
-    final situationCtrl = TextEditingController(text: _scenarioSituation);
-    final aiRoleCtrl = TextEditingController(text: _scenarioAiRole);
-    final userRoleCtrl = TextEditingController(text: _scenarioUserRole);
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, _) => Padding(
-          padding: EdgeInsets.only(
-              bottom: MediaQuery.of(ctx).viewInsets.bottom),
-          child: Container(
-            decoration: const BoxDecoration(
-              color: Color(0xFF0F0E1A),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-            ),
-            padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
-            child: SingleChildScrollView(
-              child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 36, height: 4,
-                    decoration: BoxDecoration(
-                        color: Colors.white24,
-                        borderRadius: BorderRadius.circular(2)),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                const Text('상황 설정',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold)),
-                const SizedBox(height: 4),
-                const Text('상황과 역할을 입력하면 바로 롤플레이가 시작됩니다.',
-                    style: TextStyle(color: Colors.white38, fontSize: 12)),
-                const SizedBox(height: 20),
-                _inputField(situationCtrl, '상황 (10-15자)', '예: 숨겨둔 돈다발 들킴'),
-                const SizedBox(height: 12),
-                _inputField(aiRoleCtrl, 'AI 역할', '예: 화난 배우자'),
-                const SizedBox(height: 12),
-                _inputField(userRoleCtrl, '내 역할', '예: 당황한 남편'),
-                const SizedBox(height: 24),
-                SizedBox(
-                  width: double.infinity,
-                  child: GestureDetector(
-                    onTap: () {
-                      final sit = situationCtrl.text.trim();
-                      final ai = aiRoleCtrl.text.trim();
-                      final user = userRoleCtrl.text.trim();
-                      if (sit.isEmpty || ai.isEmpty || user.isEmpty) return;
-                      Navigator.pop(ctx);
-                      setState(() {
-                        _scenarioSituation = sit;
-                        _scenarioAiRole = ai;
-                        _scenarioUserRole = user;
-                        _scenarioKeyword = sit;
-                        _sessionDocId = null;
-                        _myHistoryRef = null;
-                        _localMessages.clear();
-                        _isConversationActive = false;
-                      });
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF7C3AED), Color(0xFF9333EA)],
-                        ),
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: const Center(
-                        child: Text('확인',
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold)),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  },
-);
+  Future<void> _loadClonesFromPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final json = prefs.getString('my_ai_clones');
+    if (json != null && mounted) {
+      setState(() {
+        _clones = (jsonDecode(json) as List)
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+      });
+    }
   }
 
-  Widget _inputField(TextEditingController ctrl, String label, String hint) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label,
-            style: const TextStyle(
-                color: Color(0xFFA78BFA),
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.8)),
-        const SizedBox(height: 6),
-        TextField(
-          controller: ctrl,
-          style: const TextStyle(color: Colors.white, fontSize: 14),
-          decoration: InputDecoration(
-            hintText: hint,
-            hintStyle: const TextStyle(color: Colors.white24, fontSize: 13),
-            filled: true,
-            fillColor: const Color(0xFF1A1830),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: Colors.white12),
+  // 클론 생성 시 Firestore에 저장 → doc.id 반환
+  Future<String> _createCloneInFirestore({
+    required String name,
+    required String personality,
+    required String originalText,
+  }) async {
+    final ref = _clonesRef();
+    if (ref == null) {
+      // 비로그인 fallback
+      return 'clone_${DateTime.now().millisecondsSinceEpoch}';
+    }
+    final doc = await ref.add({
+      'name': name,
+      'personality': personality,
+      'original_text': originalText,
+      'summary': '',
+      'recent_history': [],
+      'turn_count': 0,
+      'created_at': FieldValue.serverTimestamp(),
+    });
+    return doc.id;
+  }
+
+  // 클론 편집 시 Firestore 업데이트
+  Future<void> _updateCloneInFirestore(
+      String cloneId, String personality, String originalText) async {
+    final ref = _clonesRef();
+    if (ref == null || cloneId.isEmpty) return;
+    try {
+      await ref.doc(cloneId).update({
+        'personality': personality,
+        'original_text': originalText,
+      });
+    } catch (e) {
+      _log('❌ [CLONE-UPDATE]', 'personality 업데이트 실패: $e');
+    }
+  }
+
+  // 클론 삭제
+  Future<void> _deleteCloneInFirestore(String cloneId) async {
+    final ref = _clonesRef();
+    if (ref == null || cloneId.isEmpty) return;
+    try {
+      await ref.doc(cloneId).delete();
+    } catch (e) {
+      _log('❌ [CLONE-DELETE]', '클론 삭제 실패: $e');
+    }
+  }
+
+  // 🧠 [장기 기억] 클론 진입 시 Firestore에서 메모리 로드
+  Future<void> _loadCloneContext(String cloneId) async {
+    if (cloneId.isEmpty) return;
+    final ref = _clonesRef();
+
+    String personality = '';
+    String summary = '';
+    List<Map<String, String>> history = [];
+    int turnCount = 0;
+
+    if (ref != null) {
+      try {
+        final doc = await ref.doc(cloneId).get();
+        if (doc.exists) {
+          final d = doc.data()!;
+          personality = (d['personality'] as String?) ?? '';
+          summary = (d['summary'] as String?) ?? '';
+          turnCount = (d['turn_count'] as int?) ?? 0;
+          final raw = d['recent_history'] as List<dynamic>? ?? [];
+          history = raw.map((e) => Map<String, String>.from(e as Map)).toList();
+        }
+      } catch (e) {
+        _log('❌ [CLONE-CTX]', 'Firestore 실패 → SharedPreferences fallback: $e');
+        // SharedPreferences fallback
+        final prefs = await SharedPreferences.getInstance();
+        personality = prefs.getString('clone_personality_$cloneId') ?? '';
+        summary = prefs.getString('clone_summary_$cloneId') ?? '';
+        turnCount = prefs.getInt('clone_turn_count_$cloneId') ?? 0;
+        final hJson = prefs.getString('clone_recent_history_$cloneId');
+        if (hJson != null) {
+          try {
+            history = (jsonDecode(hJson) as List)
+                .map((e) => Map<String, String>.from(e))
+                .toList();
+          } catch (_) {}
+        }
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        if (personality.isNotEmpty) _selectedCloneContext = personality;
+        _cloneSummary = summary;
+        _recentHistory = history;
+        _memoryTurnCount = turnCount;
+      });
+    }
+    final preview = summary.length > 50 ? summary.substring(0, 50) : summary;
+    _log('🧠 [MEMORY-LOAD]',
+        'cloneId=$cloneId personality=${personality.length}자 summary="$preview" history=${history.length}개 turns=$turnCount');
+  }
+
+  // 🧠 [장기 기억] 대화 완료 후 Firestore recent_history / turn_count 업데이트
+  Future<void> _saveRecentHistory(String userText, String aiText) async {
+    if (_selectedCloneId.isEmpty) return;
+
+    _recentHistory.add({'role': 'user', 'content': userText});
+    _recentHistory.add({'role': 'assistant', 'content': aiText});
+    while (_recentHistory.length > 4) _recentHistory.removeAt(0);
+    _memoryTurnCount++;
+
+    final ref = _clonesRef();
+    if (ref != null) {
+      ref.doc(_selectedCloneId).update({
+        'recent_history': _recentHistory,
+        'turn_count': _memoryTurnCount,
+      }).catchError((e) => _log('❌ [HIST-SAVE]', 'recent_history 저장 실패: $e'));
+    }
+
+    if (_memoryTurnCount % 5 == 0) _updateCloneSummary();
+  }
+
+  // 🔧 [v3.7] 유저 통문장 TtsCache 백그라운드 저장 헬퍼
+  void _saveUserFullSentenceToCache(String text) {
+    if (text.isEmpty) return;
+    TtsCache.get(text, 'nova').then((existing) {
+      if (existing != null) return;
+      http
+          .post(
+        Uri.parse('https://api.openai.com/v1/audio/speech'),
+        headers: {
+          'Authorization': 'Bearer $_openAiKey',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'model': 'tts-1',
+          'input': text,
+          'voice': 'nova',
+          'speed': 1.0,
+        }),
+      )
+          .then((res) {
+        if (res.statusCode == 200) {
+          TtsCache.put(text, 'nova', res.bodyBytes);
+        }
+      }).catchError((e) {
+        debugPrint('[_saveUserFullSentenceToCache] $e');
+      });
+    });
+  }
+
+  // 🧠 [장기 기억] 5턴마다 GPT-4o-mini로 요약 갱신 → Firestore summary 업데이트
+  Future<void> _updateCloneSummary() async {
+    if (_selectedCloneId.isEmpty ||
+        _openAiKey.isEmpty ||
+        _recentHistory.isEmpty) return;
+    _log('🧠 [SUMMARY-START]', '요약 업데이트 시작 (turn=$_memoryTurnCount)');
+
+    final historyText = _recentHistory
+        .map((m) => '${m['role'] == 'user' ? 'User' : 'AI'}: ${m['content']}')
+        .join('\n');
+    final prevSummary = _cloneSummary;
+
+    final client = http.Client();
+    try {
+      final res = await client
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $_openAiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.3,
+              'max_tokens': 100,
+              'messages': [
+                {
+                  'role': 'system',
+                  'content':
+                      '당신은 대화 요약 전문가입니다. 두 사람의 관계와 주요 사건을 1~2문장으로 업데이트 요약하세요.',
+                },
+                {
+                  'role': 'user',
+                  'content':
+                      '${prevSummary.isNotEmpty ? "이전 요약:\n$prevSummary\n\n" : ""}'
+                          '최근 대화:\n$historyText\n\n'
+                          '두 사람의 관계와 주요 사건을 1~2문장으로 업데이트해줘.',
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(res.bodyBytes));
+        final newSummary =
+            data['choices'][0]['message']['content'].toString().trim();
+        // Firestore에 요약 저장
+        final ref = _clonesRef();
+        if (ref != null) {
+          ref.doc(_selectedCloneId).update({'summary': newSummary}).catchError(
+              (e) => _log('❌ [SUMMARY-SAVE]', 'summary Firestore 저장 실패: $e'));
+        }
+        if (mounted) setState(() => _cloneSummary = newSummary);
+        _log('🧠 [SUMMARY-DONE]', '새 요약: $newSummary');
+      }
+    } catch (e) {
+      _log('❌ [SUMMARY-ERR]', '요약 업데이트 실패: $e');
+    } finally {
+      client.close();
+    }
+  }
+
+  // 🔬 [v3.1 진단] 로그 뷰어 다이얼로그 (복사 가능)
+  void _showDebugLogDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return Dialog(
+              backgroundColor: const Color(0xFF1A1A1A),
+              insetPadding: const EdgeInsets.all(12),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+              child: SizedBox(
+                width: double.maxFinite,
+                height: MediaQuery.of(ctx).size.height * 0.85,
+                child: Column(
+                  children: [
+                    // 헤더
+                    Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.bug_report,
+                              color: Color(0xFFFBBF24)),
+                          const SizedBox(width: 8),
+                          Text('진단 로그 (${_debugLogs.length})',
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold)),
+                          const Spacer(),
+                          IconButton(
+                            icon:
+                                const Icon(Icons.close, color: Colors.white70),
+                            onPressed: () => Navigator.pop(dialogContext),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Divider(color: Colors.white24, height: 1),
+                    // 로그 본문 (선택 가능 텍스트)
+                    Expanded(
+                      child: Container(
+                        color: const Color(0xFF0A0A0A),
+                        padding: const EdgeInsets.all(8),
+                        child: SingleChildScrollView(
+                          reverse: true,
+                          child: SelectableText(
+                            _debugLogs.isEmpty
+                                ? '(로그 없음)'
+                                : _debugLogs.join('\n'),
+                            style: const TextStyle(
+                              color: Color(0xFFB3E5FC),
+                              fontFamily: 'monospace',
+                              fontSize: 11,
+                              height: 1.35,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const Divider(color: Colors.white24, height: 1),
+                    // 하단 버튼들
+                    Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              icon: const Icon(Icons.copy, size: 16),
+                              label: const Text('전체 복사'),
+                              style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF10B981)),
+                              onPressed: () async {
+                                final text = _debugLogs.join('\n');
+                                await Clipboard.setData(
+                                    ClipboardData(text: text));
+                                if (ctx.mounted) {
+                                  ScaffoldMessenger.of(ctx).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('✅ 로그 클립보드에 복사됨'),
+                                      duration: Duration(seconds: 1),
+                                    ),
+                                  );
+                                }
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              icon: const Icon(Icons.refresh, size: 16),
+                              label: const Text('새로고침'),
+                              style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF3B82F6)),
+                              onPressed: () => setDialogState(() {}),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              icon: const Icon(Icons.delete_outline, size: 16),
+                              label: const Text('지우기'),
+                              style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFFEF4444)),
+                              onPressed: () {
+                                setState(() => _debugLogs.clear());
+                                setDialogState(() {});
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showCloneDashboard() {
+    _cloneNameController.clear();
+    _kakaoTextController.clear();
+    _isCreatingClone = false;
+    showDialog(
+      context: context,
+      builder: (BuildContext dialogContext) => StatefulBuilder(
+        builder: (ctx, setStateDialog) {
+          return DefaultTabController(
+            length: 2,
+            child: Dialog(
+              backgroundColor: const Color(0xFF1C1C1E),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20)),
+              insetPadding:
+                  const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // ── 헤더 ──
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 18, 8, 0),
+                    child: Row(children: [
+                      Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF9333EA).withOpacity(0.2),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.person_pin_rounded,
+                            color: Color(0xFFD8B4FE), size: 18),
+                      ),
+                      const SizedBox(width: 10),
+                      const Text("Manage Clones",
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold)),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded,
+                            color: Colors.white38, size: 20),
+                        onPressed: () => Navigator.pop(dialogContext),
+                        padding: EdgeInsets.zero,
+                        constraints:
+                            const BoxConstraints(minWidth: 36, minHeight: 36),
+                      ),
+                    ]),
+                  ),
+                  const SizedBox(height: 4),
+                  // ── 탭 바 ──
+                  const TabBar(
+                    tabs: [
+                      Tab(text: "Select"),
+                      Tab(text: "Create"),
+                    ],
+                    labelColor: Color(0xFFD8B4FE),
+                    unselectedLabelColor: Colors.white38,
+                    indicatorColor: Color(0xFF9333EA),
+                    indicatorSize: TabBarIndicatorSize.tab,
+                    dividerColor: Colors.white12,
+                    labelStyle:
+                        TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                  // ── 탭 내용 ──
+                  SizedBox(
+                    height: 460,
+                    child: TabBarView(
+                      children: [
+                        // ── Tab 0: 대화 상대 선택 ──
+                        _clones.isEmpty
+                            ? Center(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    const Icon(Icons.person_off_outlined,
+                                        color: Colors.white24, size: 48),
+                                    const SizedBox(height: 12),
+                                    const Text("아직 클론이 없어요",
+                                        style: TextStyle(
+                                            color: Colors.white38,
+                                            fontSize: 14)),
+                                    const SizedBox(height: 6),
+                                    const Text("'클론 만들기' 탭에서 새 클론을 추가하세요",
+                                        style: TextStyle(
+                                            color: Colors.white24,
+                                            fontSize: 12)),
+                                  ],
+                                ),
+                              )
+                            : ListView.separated(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 8),
+                                itemCount: _clones.length,
+                                separatorBuilder: (_, __) => const Divider(
+                                    color: Colors.white12,
+                                    height: 1,
+                                    indent: 56),
+                                itemBuilder: (_, i) {
+                                  final clone = _clones[i];
+                                  final isSelected =
+                                      clone['id'] == _selectedCloneId;
+                                  return ListTile(
+                                    contentPadding: const EdgeInsets.symmetric(
+                                        horizontal: 16, vertical: 4),
+                                    leading: GestureDetector(
+                                      onTap: () {
+                                        _stopEverything();
+                                        setState(() {
+                                          _selectedCloneId = clone['id'];
+                                          _selectedCloneContext =
+                                              clone['characteristics'];
+                                          _sessionDocId = null;
+                                          _myHistoryRef = null;
+                                          _localMessages.clear();
+                                          _isConversationActive = true;
+                                          _cloneSummary = '';
+                                          _recentHistory = [];
+                                          _memoryTurnCount = 0;
+                                        });
+                                        _loadCloneContext(clone['id']);
+                                        Navigator.pop(dialogContext);
+                                        Future.delayed(
+                                            const Duration(seconds: 2), () {
+                                          if (mounted)
+                                            _generateAndPlayAiOpener();
+                                        });
+                                      },
+                                      child: Container(
+                                        width: 36,
+                                        height: 36,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: isSelected
+                                              ? const Color(0xFF9333EA)
+                                                  .withOpacity(0.25)
+                                              : Colors.white10,
+                                          border: Border.all(
+                                            color: isSelected
+                                                ? const Color(0xFF9333EA)
+                                                : Colors.transparent,
+                                            width: 2,
+                                          ),
+                                        ),
+                                        child: Icon(
+                                          Icons.person_rounded,
+                                          color: isSelected
+                                              ? const Color(0xFFD8B4FE)
+                                              : Colors.white38,
+                                          size: 20,
+                                        ),
+                                      ),
+                                    ),
+                                    title: Text(
+                                      clone['name'],
+                                      style: TextStyle(
+                                        color: isSelected
+                                            ? const Color(0xFFD8B4FE)
+                                            : Colors.white,
+                                        fontWeight: isSelected
+                                            ? FontWeight.bold
+                                            : FontWeight.normal,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                    subtitle: isSelected
+                                        ? const Text("대화 중",
+                                            style: TextStyle(
+                                                color: Color(0xFF9333EA),
+                                                fontSize: 11))
+                                        : null,
+                                    trailing: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        if (!isSelected)
+                                          GestureDetector(
+                                            onTap: () {
+                                              _stopEverything();
+                                              setState(() {
+                                                _selectedCloneId = clone['id'];
+                                                _selectedCloneContext =
+                                                    clone['characteristics'];
+                                                _sessionDocId = null;
+                                                _myHistoryRef = null;
+                                                _localMessages.clear();
+                                                _isConversationActive = true;
+                                                _cloneSummary = '';
+                                                _recentHistory = [];
+                                                _memoryTurnCount = 0;
+                                              });
+                                              _loadCloneContext(clone['id']);
+                                              Navigator.pop(dialogContext);
+                                              Future.delayed(
+                                                  const Duration(seconds: 2),
+                                                  () {
+                                                if (mounted)
+                                                  _generateAndPlayAiOpener();
+                                              });
+                                            },
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 10,
+                                                      vertical: 5),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFF9333EA)
+                                                    .withOpacity(0.15),
+                                                borderRadius:
+                                                    BorderRadius.circular(20),
+                                                border: Border.all(
+                                                    color:
+                                                        const Color(0xFF9333EA)
+                                                            .withOpacity(0.4)),
+                                              ),
+                                              child: const Text("선택",
+                                                  style: TextStyle(
+                                                      color: Color(0xFFD8B4FE),
+                                                      fontSize: 12,
+                                                      fontWeight:
+                                                          FontWeight.w600)),
+                                            ),
+                                          ),
+                                        const SizedBox(width: 6),
+                                        IconButton(
+                                          icon: const Icon(Icons.edit_outlined,
+                                              color: Colors.white38, size: 18),
+                                          onPressed: () {
+                                            Navigator.pop(dialogContext);
+                                            _showEditCloneDialog(
+                                                cloneId: clone['id']);
+                                          },
+                                          padding: EdgeInsets.zero,
+                                          constraints: const BoxConstraints(
+                                              minWidth: 32, minHeight: 32),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
+
+                        // ── Tab 1: 클론 만들기 ──
+                        Padding(
+                          padding: EdgeInsets.only(
+                            bottom: MediaQuery.of(ctx).viewInsets.bottom,
+                          ),
+                          child: SingleChildScrollView(
+                          padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text("클론 이름",
+                                  style: TextStyle(
+                                      color: Colors.white54, fontSize: 12)),
+                              const SizedBox(height: 6),
+                              TextField(
+                                controller: _cloneNameController,
+                                style: const TextStyle(
+                                    color: Colors.white, fontSize: 14),
+                                decoration: InputDecoration(
+                                  hintText: "예: 클론(카톡 이름)",
+                                  hintStyle:
+                                      const TextStyle(color: Colors.white24),
+                                  filled: true,
+                                  fillColor: Colors.white.withOpacity(0.06),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                    borderSide: BorderSide.none,
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 14, vertical: 12),
+                                ),
+                              ),
+                              const SizedBox(height: 14),
+                              const Text("클론 특징",
+                                  style: TextStyle(
+                                      color: Colors.white54, fontSize: 12)),
+                              const SizedBox(height: 6),
+                              TextField(
+                                controller: _kakaoTextController,
+                                style: const TextStyle(
+                                    color: Colors.white, fontSize: 13),
+                                maxLines: 5,
+                                decoration: InputDecoration(
+                                  hintText: "상대방과 이어서 말하고 싶은 카톡 대화를 PC에서 복사해서 붙여 넣기 합니다. - 대화 순서 그대로",
+                                  hintStyle: const TextStyle(
+                                      color: Colors.white24, fontSize: 12),
+                                  filled: true,
+                                  fillColor: Colors.white.withOpacity(0.06),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                    borderSide: BorderSide.none,
+                                  ),
+                                  contentPadding: const EdgeInsets.all(14),
+                                ),
+                              ),
+                              const SizedBox(height: 18),
+                              SizedBox(
+                                width: double.infinity,
+                                child: _isCreatingClone
+                                    ? const Center(
+                                        child: Padding(
+                                          padding: EdgeInsets.all(8),
+                                          child: CircularProgressIndicator(
+                                              color: Color(0xFF9333EA),
+                                              strokeWidth: 2),
+                                        ),
+                                      )
+                                    : ElevatedButton.icon(
+                                        icon: const Icon(
+                                            Icons.add_circle_outline,
+                                            size: 18),
+                                        label: const Text("Create Clone"),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor:
+                                              const Color(0xFF9333EA),
+                                          foregroundColor: Colors.white,
+                                          padding: const EdgeInsets.symmetric(
+                                              vertical: 13),
+                                          shape: RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.circular(10)),
+                                        ),
+                                        onPressed: () async {
+                                          final newName =
+                                              _cloneNameController.text.trim();
+                                          if (newName.isEmpty ||
+                                              _kakaoTextController.text.isEmpty)
+                                            return;
+                                          // 중복 이름 검사
+                                          final isDuplicate = _clones.any(
+                                            (c) =>
+                                                (c['name'] as String).trim() ==
+                                                newName,
+                                          );
+                                          if (isDuplicate) {
+                                            ScaffoldMessenger.of(ctx)
+                                                .showSnackBar(
+                                              SnackBar(
+                                                content: Text(
+                                                    '⚠️ "$newName" 이름의 클론이 이미 존재합니다.'),
+                                                backgroundColor:
+                                                    const Color(0xFFEF4444),
+                                                duration:
+                                                    const Duration(seconds: 2),
+                                              ),
+                                            );
+                                            return;
+                                          }
+                                          setStateDialog(
+                                              () => _isCreatingClone = true);
+                                          String persona = await CloneBrain
+                                              .generatePersonaFromChat(
+                                            apiKey: _openAiKey,
+                                            chatLog: _kakaoTextController.text,
+                                            cloneName: newName,
+                                          );
+                                          // 온도 0.2로 정체성 확정
+                                          persona = await CloneBrain
+                                              .confirmCloneIdentity(
+                                            apiKey: _openAiKey,
+                                            cloneName: newName,
+                                            persona: persona,
+                                          );
+                                          final String newId =
+                                              await _createCloneInFirestore(
+                                            name: newName,
+                                            personality: persona,
+                                            originalText:
+                                                _kakaoTextController.text,
+                                          );
+                                          setState(() {
+                                            _clones.add({
+                                              'id': newId,
+                                              'name': newName,
+                                              'characteristics': persona,
+                                              'original_text':
+                                                  _kakaoTextController.text,
+                                            });
+                                            _selectedCloneId = newId;
+                                            _selectedCloneContext = persona;
+                                            _cloneSummary = '';
+                                            _recentHistory = [];
+                                            _memoryTurnCount = 0;
+                                            _localMessages.clear();
+                                          });
+                                          Navigator.pop(dialogContext);
+                                          Future.delayed(
+                                              const Duration(seconds: 2), () {
+                                            if (mounted)
+                                              _generateAndPlayAiOpener();
+                                          });
+                                        },
+                                      ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: Colors.white12),
+          );
+        },
+      ),
+    );
+  }
+
+  void _showEditCloneDialog({String? cloneId}) {
+    final targetId = cloneId ?? _selectedCloneId;
+    if (targetId.isEmpty) return;
+    final targetIdx = _clones.indexWhere((c) => c['id'] == targetId);
+    if (targetIdx == -1) return;
+    final currentClone = _clones[targetIdx];
+    final cloneName = currentClone['name'] as String? ?? '';
+    _editPersonaController.text = currentClone['original_text'] ?? "";
+    _isEditingClone = false;
+    showDialog(
+      context: context,
+      builder: (BuildContext dialogContext) => StatefulBuilder(
+        builder: (ctx, setStateDialog) {
+          final bottomInset = MediaQuery.of(ctx).viewInsets.bottom;
+          return Dialog(
+            backgroundColor: const Color(0xFF1C1C1E),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            insetPadding:
+                const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+            child: SingleChildScrollView(
+              padding: EdgeInsets.only(bottom: bottomInset),
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      const Icon(Icons.edit_rounded,
+                          color: Color(0xFFD8B4FE), size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        "$cloneName 수정",
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded,
+                            color: Colors.white38, size: 20),
+                        onPressed: () => Navigator.pop(dialogContext),
+                        padding: EdgeInsets.zero,
+                        constraints:
+                            const BoxConstraints(minWidth: 32, minHeight: 32),
+                      ),
+                    ]),
+                    const SizedBox(height: 4),
+                    const Text(
+                      "대화 로그를 수정하고 저장하면 AI가 페르소나를 재생성합니다.",
+                      style: TextStyle(color: Colors.white38, fontSize: 12),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _editPersonaController,
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                      maxLines: 6,
+                      decoration: InputDecoration(
+                        filled: true,
+                        fillColor: Colors.white.withOpacity(0.06),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.all(14),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    if (_isEditingClone)
+                      const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(8),
+                          child: CircularProgressIndicator(
+                              color: Color(0xFF10B981), strokeWidth: 2),
+                        ),
+                      )
+                    else
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          // 🗑️ 삭제 버튼
+                          TextButton.icon(
+                            icon: const Icon(Icons.delete_outline,
+                                color: Color(0xFFEF4444), size: 16),
+                            label: const Text("삭제",
+                                style: TextStyle(color: Color(0xFFEF4444))),
+                            onPressed: () async {
+                              final confirm = await showDialog<bool>(
+                                context: dialogContext,
+                                builder: (c) => AlertDialog(
+                                  backgroundColor: const Color(0xFF2C2C2E),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(14)),
+                                  title: const Text('클론 삭제',
+                                      style: TextStyle(
+                                          color: Colors.white, fontSize: 16)),
+                                  content: Text(
+                                    '"$cloneName" 클론을 삭제하시겠어요?\n삭제 후 복구가 불가능합니다.',
+                                    style: const TextStyle(
+                                        color: Colors.white70, fontSize: 13),
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(c, false),
+                                      child: const Text('취소',
+                                          style: TextStyle(
+                                              color: Colors.white38)),
+                                    ),
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(c, true),
+                                      child: const Text('삭제',
+                                          style: TextStyle(
+                                              color: Color(0xFFEF4444))),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              if (confirm != true) return;
+                              await _deleteCloneInFirestore(targetId);
+                              if (!mounted) return;
+                              setState(() {
+                                _clones.removeWhere((c) => c['id'] == targetId);
+                                if (_selectedCloneId == targetId) {
+                                  _selectedCloneId = '';
+                                  _selectedCloneContext = '';
+                                  _localMessages.clear();
+                                }
+                              });
+                              if (dialogContext.mounted) {
+                                Navigator.pop(dialogContext);
+                              }
+                            },
+                          ),
+                          const Spacer(),
+                          TextButton(
+                            onPressed: () => Navigator.pop(dialogContext),
+                            child: const Text("취소",
+                                style: TextStyle(color: Colors.white38)),
+                          ),
+                          const SizedBox(width: 8),
+                          ElevatedButton.icon(
+                            icon: const Icon(Icons.autorenew_rounded, size: 16),
+                            label: const Text("저장 & 재생성"),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF10B981),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 10),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8)),
+                            ),
+                            onPressed: () async {
+                              if (_editPersonaController.text.isEmpty) return;
+                              final editedText = _editPersonaController.text;
+                              setStateDialog(() => _isEditingClone = true);
+                              String updatedPersona =
+                                  await CloneBrain.generatePersonaFromChat(
+                                apiKey: _openAiKey,
+                                chatLog: editedText,
+                                cloneName: cloneName,
+                              );
+                              if (!mounted) return;
+                              setState(() {
+                                if (_selectedCloneId == targetId) {
+                                  _selectedCloneContext = updatedPersona;
+                                }
+                                final updateIdx = _clones
+                                    .indexWhere((c) => c['id'] == targetId);
+                                if (updateIdx != -1) {
+                                  _clones[updateIdx]['characteristics'] =
+                                      updatedPersona;
+                                  _clones[updateIdx]['original_text'] =
+                                      editedText;
+                                }
+                              });
+                              _updateCloneInFirestore(
+                                targetId,
+                                updatedPersona,
+                                editedText,
+                              );
+                              if (dialogContext.mounted) {
+                                Navigator.pop(dialogContext);
+                              }
+                            },
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
             ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: Color(0xFF7C3AED)),
-            ),
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          ),
-        ),
-      ],
+          );
+        },
+      ),
     );
   }
 
@@ -650,22 +1340,11 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
-        // 첫 메시지(오프너)일 때는 상단 고정 → 시작 대사 전체가 보이게
         if (_localMessages.length <= 1) return;
         _scrollController.animateTo(_scrollController.position.maxScrollExtent,
             duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
       }
     });
-  }
-
-  void _scrollToBottomThrottled() {
-    final now = DateTime.now();
-    if (_lastScrollThrottle == null ||
-        now.difference(_lastScrollThrottle!) >=
-            const Duration(milliseconds: 250)) {
-      _lastScrollThrottle = now;
-      _scrollToBottom();
-    }
   }
 
   // 현재 AI 버블을 화면 중앙에 고정 (스트리밍 중 밀림 방지)
@@ -685,12 +1364,19 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     });
   }
 
+  void _scrollToBottomThrottled() {
+    final now = DateTime.now();
+    if (_lastScrollThrottle == null ||
+        now.difference(_lastScrollThrottle!) >=
+            const Duration(milliseconds: 250)) {
+      _lastScrollThrottle = now;
+      _scrollToBottom();
+    }
+  }
+
   // 현재 대사를 화면 맨 위에 고정 — Scrollable.ensureVisible 기반
   void _scrollToCurrentTop(int index) {
-    final role = (index >= 0 && index < _localMessages.length)
-        ? (_localMessages[index]['role'] ?? '')
-        : '';
-    _log('🧭 [SCROLL-TOP]', 'index=$index role=$role');
+    _log('🧭 [SCROLL-TOP]', 'index=$index');
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final key = _itemKeys[index];
       if (key == null) return;
@@ -703,6 +1389,14 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         curve: Curves.easeOut,
       );
     });
+  }
+
+  String _cleanText(String text) {
+    return text
+        .replaceAll(RegExp(r'\[.*?\]'), '')
+        .replaceAll(RegExp(r'\(.*?\)'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
   }
 
   void _stopEverything() {
@@ -720,22 +1414,13 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   // ====================================================================
   // 📦 [AI 첫 발화 — AI가 먼저 대화 시작]
   // ====================================================================
-  // 🎯 [롤플레이 대화 시작 3원칙] (코드 정책 요약)
-  //
-  // 원칙 1. AI가 항상 먼저 말을 시작한다.
-  //         유저가 마이크 버튼을 누르면 AI가 오프닝 멘트를 먼저 발화.
-  //         AI 발화 완료 후 마이크 청취가 시작됨.
-  //
-  // 원칙 2. 타겟 언어(targetLang)로만 말한다.
-  //         ai_role / user_role 이름이 한글로 주어져도
-  //         실제 AI 대사는 반드시 targetLang으로만 출력.
-  //         한국어 등 모국어를 절대 섞지 않는다.
-  //
-  // 원칙 3. 해당 역할이 실제 현실에서 가장 먼저 할 법한 자연스러운 말로 시작.
-  //         어색한 학습용 인사 X, 그 역할·상황에 딱 맞는 현실적 구어체 O.
+  // 클론 대화 시작 원칙:
+  //   1. AI가 항상 먼저 말한다 — 화면 진입 시 클론이 자동으로 먼저 발화.
+  //   2. 타겟 언어로만 말한다 — 한국어 절대 혼용 금지.
+  //   3. 클론 페르소나에 충실한 자연스러운 첫 마디 (AI 티 내지 않음).
   // ====================================================================
   Future<void> _generateAndPlayAiOpener() async {
-    if (_isAiOpenerPlaying || _scenarioAiRole.isEmpty) return;
+    if (_isAiOpenerPlaying || _selectedCloneContext.isEmpty) return;
     _isAiOpenerPlaying = true;
     if (mounted) setState(() {});
 
@@ -753,8 +1438,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       final int aiIndex = _localMessages.length - 1;
 
       String openerText = '';
-      String openerBuffer = '';
-      final RegExp splitPattern = RegExp(r'[,\.?!;:。、！？…，；：\n]');
+      // String openerBuffer = ''; // [하이브리드 전환] HybridTtsPlayer.onChunk로 대체 (롤백 가능)
+      // final RegExp splitPattern = RegExp(r'[,\.?!;:。、！？…，；：\n]'); // [하이브리드 전환]
 
       final ChunkedTtsFetcher aiTtsFetcher = ChunkedTtsFetcher(
         _openAiKey,
@@ -763,48 +1448,51 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         isUser: false,
         onLog: _log,
       );
+      final openerHybrid = HybridTtsPlayer(
+        _openAiKey,
+        _ttsQueueManager,
+        aiTtsFetcher,
+        "nova",
+        onLog: _log,
+      );
       _ttsQueueManager.setUserTurn(false);
       _ttsQueueManager.setAiPaused(false);
 
-      await for (final chunk in RoleplayBrain.generateAiOpener(
+      await for (final chunk in CloneBrain.generateCloneOpener(
         apiKey: _openAiKey,
-        situation: _scenarioSituation,
-        aiRole: _scenarioAiRole,
-        userRole: _scenarioUserRole,
+        cloneContext: _selectedCloneContext,
         targetLang: targetLangName,
+        cloneSummary: _cloneSummary,
       )) {
         if (!_isConversationActive) break;
         openerText += chunk;
-        openerBuffer += chunk;
+        // openerBuffer += chunk; // [하이브리드 전환]
         if (mounted)
           setState(() => _localMessages[aiIndex]['target'] = openerText);
 
+        openerHybrid
+            .onChunk(chunk); // [하이브리드 전환] HybridTtsPlayer.onChunk로 대체 (롤백 가능)
+
+        /* [하이브리드 전환] HybridTtsPlayer.onChunk로 대체 (롤백 가능)
         final matches = splitPattern.allMatches(openerBuffer).toList();
         if (matches.isNotEmpty) {
           final int lastIdx = matches.last.end;
           final String toSpeak = openerBuffer.substring(0, lastIdx).trim();
           openerBuffer = openerBuffer.substring(lastIdx);
-          if (toSpeak.isNotEmpty) {
-            final cleaned = _cleanText(toSpeak);
-            if (isMeaninglessTtsText(cleaned)) {
-              _log('🔊 [TTS-SKIP] [AI]', '의미 없는 TTS 조각 skip: "$cleaned"');
-            } else {
-              aiTtsFetcher.addText(cleaned);
-            }
-          }
+          if (toSpeak.isNotEmpty) aiTtsFetcher.addText(_cleanText(toSpeak));
         }
+        */
       }
-      if (openerBuffer.trim().isNotEmpty) {
-        final cleanedOpener = _cleanText(openerBuffer.trim());
-        if (isMeaninglessTtsText(cleanedOpener)) {
-          _log('🔊 [TTS-SKIP] [AI]', '의미 없는 TTS 조각 skip: "$cleanedOpener"');
-        } else {
-          aiTtsFetcher.addText(cleanedOpener);
-        }
-      }
+      // [하이브리드 전환] HybridTtsPlayer.onStreamEnd로 대체 (롤백 가능)
+      await openerHybrid.onStreamEnd(
+          fullSentence: _cleanText(openerText.trim()));
+      /* [하이브리드 전환] HybridTtsPlayer.onChunk로 대체 (롤백 가능)
+      if (openerBuffer.trim().isNotEmpty)
+        aiTtsFetcher.addText(_cleanText(openerBuffer.trim()));
+      */
 
       // 역번역 (한국어 자막)
-      RoleplayBrain.generateCleanOriginal(
+      CloneBrain.generateCleanOriginal(
               apiKey: _openAiKey, englishText: openerText)
           .then((cleanKorean) {
         if (mounted && _localMessages.length > aiIndex) {
@@ -822,7 +1510,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 
       // chat_history 저장
       if (openerText.isNotEmpty) {
-        final String aiOriginal = await RoleplayBrain.generateCleanOriginal(
+        final String aiOriginal = await CloneBrain.generateCleanOriginal(
             apiKey: _openAiKey, englishText: openerText);
         if (mounted && _localMessages.length > aiIndex) {
           setState(() => _localMessages[aiIndex]['original'] = aiOriginal);
@@ -836,7 +1524,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         ]);
       }
     } catch (e) {
-      _log('❌ [OPENER-ERR]', 'AI Opener Error: $e');
+      _log('❌ [OPENER-ERR]', 'Clone Opener Error: $e');
     } finally {
       _isAiOpenerPlaying = false;
       if (mounted && _isConversationActive) {
@@ -851,7 +1539,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   // 감지 조건 1 — 명시적 정정 키워드로 시작하는 경우
   //   예: "아니야", "다시 해봐", "내 말은", "I meant", "No I said" 등
   // 감지 조건 2 — 직전 발화와 단어 겹침이 65% 이상 (재발음 재시도)
-  //   예: AI가 "안녕하세요"를 잘못 들었을 때 유저가 "안녕하세요"를 다시 말하는 경우
+  //   예: AI가 잘못 들었을 때 유저가 같은 말을 다시 말하는 경우
   // 동작: 직전 HOST(유저) + SYSTEM(AI) 버블 쌍을 삭제하고 새로 처리
   // ====================================================================
   bool _hasLastExchange() {
@@ -919,12 +1607,11 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         break;
       }
     }
+    if (lastSystemIdx < 0) return;
 
-    // SYSTEM 앞(없으면 전체 끝)에서 가장 최근 HOST 버블 탐색
+    // SYSTEM 바로 앞의 HOST(유저) 버블 인덱스 탐색
     int lastHostIdx = -1;
-    int searchFrom =
-        lastSystemIdx >= 0 ? lastSystemIdx - 1 : _localMessages.length - 1;
-    for (int i = searchFrom; i >= 0; i--) {
+    for (int i = lastSystemIdx - 1; i >= 0; i--) {
       if (_localMessages[i]['role'] == 'HOST') {
         lastHostIdx = i;
         break;
@@ -932,26 +1619,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     }
 
     // 인덱스가 큰 것부터 제거 (인덱스 밀림 방지)
-    if (lastSystemIdx >= 0) _localMessages.removeAt(lastSystemIdx);
+    _localMessages.removeAt(lastSystemIdx);
     if (lastHostIdx >= 0) _localMessages.removeAt(lastHostIdx);
-  }
-
-  // AI가 응답하기 전에 중단된 "고아 HOST 버블" 제거
-  // 새 턴 시작 전 호출하여 직전 오인식/중단 메시지를 정리
-  void _removeOrphanedHostBubbles() {
-    int lastSystemIdx = -1;
-    for (int i = _localMessages.length - 1; i >= 0; i--) {
-      if (_localMessages[i]['role'] == 'SYSTEM') {
-        lastSystemIdx = i;
-        break;
-      }
-    }
-    // 마지막 SYSTEM 이후(또는 SYSTEM 없으면 전체)의 HOST 버블 역순 제거
-    for (int i = _localMessages.length - 1; i > lastSystemIdx; i--) {
-      if (_localMessages[i]['role'] == 'HOST') {
-        _localMessages.removeAt(i);
-      }
-    }
   }
 
   Future<void> _startDeepgramListening() async {
@@ -962,10 +1631,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       setState(() {
         _debugResult = "⏱️ 듣는 중...";
         _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-        _localMessages
-            .add({'role': 'HOST_TEMP', 'target': '...', 'type': 'user_input'});
       });
-      // HOST_TEMP("...")는 스크롤 트리거 없음 — 실제 HOST 버블 등장 시 스크롤
+      // HOST_TEMP 버블은 스크롤 트리거 없음 — 실제 HOST 버블 등장 시 스크롤
     }
 
     _log('🎤 [LISTEN-01]', '_startDeepgramListening 진입, VoiceManager 생성');
@@ -989,9 +1656,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         _swDeepgram.reset();
         _swDeepgram.start();
       },
-      onTurnEnded: (transcript, {bool speechFinal = false}) {
-        _lastTurnWasSpeechFinal = speechFinal;
-        _log('🔀 [LISTEN-03]', 'onTurnEnded 콜백 수신: "$transcript" speechFinal=$speechFinal');
+      onTurnEnded: (transcript) {
+        _log('🔀 [LISTEN-03]', 'onTurnEnded 콜백 수신: "$transcript"');
         _swDeepgram.stop();
         _stopMicAndProcess(transcript);
       },
@@ -1005,16 +1671,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     _log('🎤 [LISTEN-05]', 'connectAndStart 완료');
   }
 
-  // speechFinal 여부에 따른 조건부 commit 대기 시간 계산
-  int _getCommitWaitMs() {
-    if (_lastTurnWasSpeechFinal) {
-      return COMMIT_WAIT_SPEECH_FINAL_MS;
-    }
-    return COMMIT_WAIT_UNCERTAIN_MS;
-  }
-
-  // 🔧 [v3.4] Deepgram speech_final/UtteranceEnd 수신 시 호출됨
-  // 조건부 대기창 안에서 추가 발화 합치기 → 완전히 끝나면 파이프라인 시작
+  // 🔧 [v3.4] Deepgram speech_final 수신 시 호출됨
+  // 1.2초 대기창 안에서 추가 발화 합치기 → 완전히 끝나면 파이프라인 시작
   void _stopMicAndProcess(String transcript) async {
     _resetIdleTimer();
     final clean = transcript.trim();
@@ -1025,15 +1683,13 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       return;
     }
 
-    final waitMs = _getCommitWaitMs();
-
     // 🔧 기존 대기 중인 발화가 있으면 공백으로 연결 (더듬거림 합치기)
     if (_pendingTranscript.isEmpty) {
       _pendingTranscript = clean;
-      _log('🔀 [STOP-03]', '신규 발화 접수. ${waitMs}ms 조건부 대기창 시작 speechFinal=$_lastTurnWasSpeechFinal');
+      _log('🔀 [STOP-03]', '신규 발화 접수. 1.2초 대기창 시작');
     } else {
       _pendingTranscript = '$_pendingTranscript $clean';
-      _log('🔀 [STOP-04]', '합치기: "$_pendingTranscript" (${waitMs}ms 조건부 대기창 리셋)');
+      _log('🔀 [STOP-04]', '합치기: "$_pendingTranscript" (1.2초 대기창 리셋)');
     }
 
     // UI: 접수된 발화를 HOST_TEMP 풍선에 실시간 반영
@@ -1052,9 +1708,9 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     // 기존 타이머 취소 (새 발화가 왔으므로 대기창 리셋)
     _commitTimer?.cancel();
 
-    // 조건부 대기 후 파이프라인 시작 예약
+    // 1.2초 후 파이프라인 시작 예약
     _commitTimer = Timer(
-      Duration(milliseconds: waitMs),
+      const Duration(milliseconds: COMMIT_WAIT_MS),
       () => _commitAndProcess(),
     );
   }
@@ -1072,8 +1728,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     }
 
     _log('🔀 [COMMIT-01]', '확정: "$committed" → 파이프라인 시작');
-    _swSpeechEnd.reset();
-    _swSpeechEnd.start();
 
     // 마이크/VoiceManager 정리
     await _voiceManager?.dispose();
@@ -1098,8 +1752,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 // ====================================================================
   String _retryPhrase(String lang) {
     switch (lang.toLowerCase()) {
-      case 'korean':
-        return '다시 말씀해 주세요.';
       case 'japanese':
         return 'もう一度お願いします。';
       case 'chinese':
@@ -1168,6 +1820,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         setState(
             () => _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP'));
       if (_isConversationActive) {
+        // 너무 짧아서 인식 실패 → 다시 말해 달라 요청
         if (finalTranscript.length <= 2) {
           _speakRetryAndListen();
         } else {
@@ -1187,8 +1840,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
           _removeLastExchange();
         });
-        if (_localMessages.isNotEmpty)
-          _scrollToBottom();
+        _scrollToBottom();
       }
       _log('🔄 [CORRECT-02]', '직전 교환 삭제 완료 → 재처리 진행');
     }
@@ -1201,25 +1853,34 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       if (mounted) {
         setState(() {
           _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-          _removeOrphanedHostBubbles(); // AI 응답 없이 중단된 이전 HOST 버블 제거
           _localMessages.add({'role': 'HOST', 'target': '', 'original': ''});
         });
-        _scrollToBottom();
       }
 
       int hostIndex = _localMessages.length - 1;
+      // HOST 말풍선은 상단 고정 — 사용자 발화가 화면 안에 안정적으로 보이도록
+      _scrollToCurrentTop(hostIndex);
 
-      // 완성된 턴만 컨텍스트에 포함 (미완성 '...' 제외)
-      var validMsgs = _localMessages.where((m) {
-        if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
-        final target = (m['target'] ?? '').toString().trim();
-        return target.isNotEmpty && target != '...';
-      }).toList();
-      if (validMsgs.length > 10)
-        validMsgs = validMsgs.sublist(validMsgs.length - 10);
-      String contextStr = validMsgs
-          .map((m) => "${m['role'] == 'HOST' ? 'User' : 'AI'}: ${m['target']}")
-          .join("\n");
+      // 컨텍스트 구성: 장기 기억(recent_history) 우선, 없으면 localMessages fallback
+      String contextStr;
+      if (_recentHistory.isNotEmpty) {
+        contextStr = _recentHistory
+            .map((m) =>
+                '${m['role'] == 'user' ? 'User' : 'AI'}: ${m['content']}')
+            .join('\n');
+      } else {
+        var validMsgs = _localMessages.where((m) {
+          if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
+          final target = (m['target'] ?? '').toString().trim();
+          return target.isNotEmpty && target != '...';
+        }).toList();
+        if (validMsgs.length > 10)
+          validMsgs = validMsgs.sublist(validMsgs.length - 10);
+        contextStr = validMsgs
+            .map(
+                (m) => "${m['role'] == 'HOST' ? 'User' : 'AI'}: ${m['target']}")
+            .join("\n");
+      }
 
       String userTargetText = "";
       String userBuffer = "";
@@ -1240,13 +1901,11 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           ? FFAppState().targetLang
           : 'English';
 
-      final userStream = RoleplayBrain.streamUserTranslation(
+      final userStream = CloneBrain.streamUserTranslation(
         apiKey: _openAiKey,
         textOriginal: finalTranscript,
         targetLang: targetLangName,
         contextStr: contextStr,
-        userRole: _scenarioUserRole,
-        situation: _scenarioSituation,
       );
 
       bool evaporated = false;
@@ -1271,13 +1930,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           String toSpeak = userBuffer.substring(0, lastIdx).trim();
           userBuffer = userBuffer.substring(lastIdx);
           if (toSpeak.isNotEmpty) {
-            final cleanedChunk = _cleanText(toSpeak);
-            if (isMeaninglessTtsText(cleanedChunk)) {
-              _log('🔊 [TTS-SKIP] [USER]', '의미 없는 TTS 조각 skip: "$cleanedChunk"');
-            } else {
-              userTtsFetcher.addText(cleanedChunk);
-              firstChunkSent = true;
-            }
+            userTtsFetcher.addText(toSpeak);
+            firstChunkSent = true;
           }
         }
         if (!firstChunkSent) {
@@ -1287,14 +1941,9 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
               .where((w) => w.isNotEmpty)
               .length;
           if (wordCount >= 4) {
-            final cleanedBuf = _cleanText(userBuffer.trim());
-            if (isMeaninglessTtsText(cleanedBuf)) {
-              _log('🔊 [TTS-SKIP] [USER]', '의미 없는 TTS 조각 skip: "$cleanedBuf"');
-            } else {
-              userTtsFetcher.addText(cleanedBuf);
-              firstChunkSent = true;
-            }
+            userTtsFetcher.addText(_cleanText(userBuffer.trim()));
             userBuffer = "";
+            firstChunkSent = true;
           }
         }
       }
@@ -1308,26 +1957,19 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         return;
       }
 
-      if (userBuffer.trim().isNotEmpty) {
-        final cleanedRem = _cleanText(userBuffer.trim());
-        if (isMeaninglessTtsText(cleanedRem)) {
-          _log('🔊 [TTS-SKIP] [USER]', '의미 없는 TTS 조각 skip: "$cleanedRem"');
-        } else {
-          userTtsFetcher.addText(cleanedRem);
-        }
-      }
+      if (userBuffer.trim().isNotEmpty)
+        userTtsFetcher.addText(userBuffer.trim());
 
       // 🔧 [v3.7] 유저 통문장 TtsCache 백그라운드 저장 (히스토리 HIT 유도)
       //   - 청크별 캐시만으로는 히스토리에서 통문장 GET이 MISS됨
       //   - fire-and-forget: 유저 재생 흐름과 무관하게 백그라운드 처리
       //   - voice/speed는 히스토리 _playRhythmAudio와 동일하게 "nova", 1.0 고정
-      //   - _cleanText 적용: translated_text와 동일한 키로 저장
-      _saveUserFullSentenceToCache(_cleanText(userTargetText.trim()));
+      _saveUserFullSentenceToCache(userTargetText.trim());
 
-      // 유저 역번역 (백그라운드, Future 보관 → 저장 시 await)
-      final userOriginalFuture = RoleplayBrain.generateCleanOriginal(
-          apiKey: _openAiKey, englishText: userTargetText);
-      userOriginalFuture.then((cleanKorean) {
+      // 유저 역번역 (백그라운드)
+      CloneBrain.generateCleanOriginal(
+              apiKey: _openAiKey, englishText: userTargetText)
+          .then((cleanKorean) {
         if (mounted && _localMessages.length > hostIndex) {
           setState(() => _localMessages[hostIndex]['original'] = cleanKorean);
         }
@@ -1341,7 +1983,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       if (mounted) {
         setState(() => _localMessages
             .add({'role': 'SYSTEM', 'target': '', 'original': ''}));
-        // 빈 AI 버블은 스크롤 없음 — 첫 유효 청크 시 _scrollToCurrentTop 호출
+        _scrollToCurrent(_localMessages.length - 1);
       }
       int aiIndex = _localMessages.length - 1;
 
@@ -1357,17 +1999,21 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         isUser: false, // AI 큐로 분리
         onLog: _log,
       );
-      hybridTtsPlayer = HybridTtsPlayer(
-        apiKey: _openAiKey,
+      // [하이브리드 전환] 턴 시작 시 리셋 + 새 인스턴스 생성
+      _hybridTtsPlayer?.reset();
+      _hybridTtsPlayer = HybridTtsPlayer(
+        _openAiKey,
+        _ttsQueueManager,
+        aiTtsFetcher,
+        "nova",
         onLog: _log,
       );
-      hybridTtsPlayer.reset();
 
       String latestContextStr = contextStr.isEmpty
           ? "User: $userTargetText"
           : "$contextStr\nUser: $userTargetText";
       String aiTargetText = "";
-      String aiBuffer = "";
+      // String aiBuffer = ""; // [하이브리드 전환] HybridTtsPlayer 내부에서 처리 (삭제 금지)
       bool firstChunkSentToTTS = false;
 
       _swOpenAI.reset();
@@ -1376,73 +2022,70 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 
       _log('🧠 [PIPE-02]', 'AI 스트림 요청: userText="$userTargetText"');
 
-      final aiStream = RoleplayBrain.streamRoleplayResponse(
+      final aiStream = CloneBrain.streamCloneResponse(
         apiKey: _openAiKey,
         userTargetText: userTargetText,
         contextStr: latestContextStr,
-        situation: _scenarioSituation,
-        aiRole: _scenarioAiRole,
-        userRole: _scenarioUserRole,
-        myTarget: targetLangName, // 🌐 [v3.1] 유저가 선택한 타겟 언어
+        cloneContext: _selectedCloneContext,
+        myTarget: targetLangName,
+        cloneSummary: _cloneSummary,
       );
 
       // AI 생성+청킹을 Future로 (유저 재생과 병렬)
-      bool aiRetry = false;
       bool _firstAiChunkLogged = false;
       final Future<void> aiGenerationTask = () async {
         await for (String chunk in aiStream) {
-          final cleanedChunk = chunk;
-          if (cleanedChunk.trim().isEmpty) {
-            continue;
-          }
           if (!_firstAiChunkLogged) {
-            _msGptFirstToken = _swSpeechEnd.elapsedMilliseconds;
-            _log('🧠 [PIPE-03]', 'GPT 첫 유효 청크 수신: "$cleanedChunk"');
+            _log('🧠 [PIPE-03]', 'GPT 첫 청크 수신: "$chunk"');
             _firstAiChunkLogged = true;
-            _scrollToBottom();
           }
           if (_swOpenAI.isRunning) _swOpenAI.stop();
-          aiTargetText += cleanedChunk;
-          aiBuffer += cleanedChunk;
-
-          // [RETRY] 신호 감지 — 발음 불명 또는 문맥 이상
-          if (aiTargetText.contains('[RETRY]')) {
-            aiRetry = true;
-            _log('🔁 [RETRY-DET]', '[RETRY] 감지 → 재청취 모드');
-            break;
-          }
-
+          aiTargetText += chunk;
+          // aiBuffer += chunk; // [하이브리드 전환] HybridTtsPlayer 내부에서 처리 (롤백 가능)
           if (mounted && !_ttsQueueManager.aiPaused) {
             setState(() => _localMessages[aiIndex]['target'] = aiTargetText);
-            _scrollToBottomThrottled();
+            // throttled ensureVisible — 스트리밍 중 현재 AI 버블 중앙 고정
+            final _scrollNow = DateTime.now();
+            if (_lastScrollThrottle == null ||
+                _scrollNow.difference(_lastScrollThrottle!) >=
+                    const Duration(milliseconds: 250)) {
+              _lastScrollThrottle = _scrollNow;
+              _scrollToCurrent(aiIndex);
+            }
           }
 
-          // 하이브리드: 첫 구두점 OR 5단어 도달 시 1회만 firstChunk 즉시 발사
-          // Rollback: hybridTtsPlayer 제거 후 aiTtsFetcher.addText(toSpeak) 복원
-          if (!hybridTtsPlayer.firstChunkFired) {
-            final cutIdx =
-                hybridTtsPlayer.onChunk(aiBuffer, aiTtsFetcher, _swSpeechEnd);
-            if (cutIdx >= 0) {
-              aiBuffer = aiBuffer.substring(cutIdx);
+          // [하이브리드 전환] HybridTtsPlayer.onChunk로 대체 (롤백 가능)
+          _hybridTtsPlayer!.onChunk(chunk);
+          if (!firstChunkSentToTTS && _hybridTtsPlayer!.firstChunkFired) {
+            _swTTS.start();
+            firstChunkSentToTTS = true;
+          }
+
+          /* [하이브리드 전환] HybridTtsPlayer.onChunk로 대체 (롤백 가능)
+          final matches = splitPattern.allMatches(aiBuffer).toList();
+          if (matches.isNotEmpty) {
+            int lastIdx = matches.last.end;
+            String toSpeak = aiBuffer.substring(0, lastIdx).trim();
+            aiBuffer = aiBuffer.substring(lastIdx);
+            if (toSpeak.isNotEmpty) {
               if (!firstChunkSentToTTS) {
                 _swTTS.start();
                 firstChunkSentToTTS = true;
               }
+              aiTtsFetcher.addText(toSpeak);
             }
           }
-          // 이후 청크는 aiBuffer에 누적만 — onStreamEnd에서 remainder 처리
+          */
         }
-        _msGptStreamEnd = _swSpeechEnd.elapsedMilliseconds;
-        // AI remainder TTS 큐 적재 — 유저 TTS 재생과 병렬로 준비 (실제 재생은 setAiPaused(false) 후)
-        if (!aiRetry && aiTargetText.trim().isNotEmpty) {
-          await hybridTtsPlayer.onStreamEnd(
-            fullSentence: _cleanText(aiTargetText.trim()),
-            remainderBuffer: aiBuffer,
-            fetcher: aiTtsFetcher,
-            swSpeechEnd: _swSpeechEnd,
-          );
-          _log('🧠 [PIPE-08A]', 'AI stream end + remainder queued. pending=${aiTtsFetcher.pendingRequests}');
+        /* [하이브리드 전환] HybridTtsPlayer.onStreamEnd로 대체 (롤백 가능)
+        if (aiBuffer.trim().isNotEmpty) {
+          if (!firstChunkSentToTTS) {
+            _swTTS.start();
+            firstChunkSentToTTS = true;
+          }
+          aiTtsFetcher.addText(aiBuffer.trim());
         }
+        */
       }();
 
       // ─────────────────────────────────────────────────────
@@ -1489,16 +2132,16 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       _ttsQueueManager.setUserTurn(false);
       _ttsQueueManager.setAiPaused(false);
       _log('🧠 [PIPE-07]', 'setUserTurn(false) + setAiPaused(false). AI 재생 시작');
-      // [v3.6] PIPE-07 시점: 버퍼된 AI 텍스트 일괄 표시
+      // [v3.6] PIPE-07 시점: 버퍼된 AI 텍스트 일괄 표시 — 중앙 고정으로 안정적 표시
       if (mounted && aiTargetText.isNotEmpty) {
         setState(() => _localMessages[aiIndex]['target'] = aiTargetText);
-        _scrollToBottom();
+        _scrollToCurrent(aiIndex);
       }
 
-      // AI 역번역 (백그라운드, Future 보관 → 저장 시 await)
-      final aiOriginalFuture = RoleplayBrain.generateCleanOriginal(
-          apiKey: _openAiKey, englishText: aiTargetText);
-      aiOriginalFuture.then((cleanKorean) {
+      // AI 역번역을 AI TTS 재생 전에 미리 시작 (백그라운드)
+      CloneBrain.generateCleanOriginal(
+              apiKey: _openAiKey, englishText: aiTargetText)
+          .then((cleanKorean) {
         if (mounted && _localMessages.length > aiIndex) {
           setState(() => _localMessages[aiIndex]['original'] = cleanKorean);
           _log('🔤 [BACK-TRANS]', 'AI 역번역 완료 → UI 반영');
@@ -1508,36 +2151,9 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       await aiGenerationTask;
       _log('🧠 [PIPE-08]',
           'aiGenerationTask 완료. AI pending=${aiTtsFetcher.pendingRequests}');
-      // [PIPE-08A] onStreamEnd는 aiGenerationTask 내부에서 완료됨 (중복 호출 없음)
-      if (!aiRetry && aiTargetText.trim().isNotEmpty) {
-        if (mounted) {
-          setState(() {
-            _debugResult += '\nGPT 첫 토큰: ${_msGptFirstToken}ms'
-                '\nGPT 스트림 종료: ${_msGptStreamEnd}ms'
-                '\n첫 청크 발사: ${hybridTtsPlayer.lastFirstChunkMs}ms'
-                '\n통문장 저장: ${hybridTtsPlayer.lastCacheSaveMs}ms'
-                ' | Cache: ${hybridTtsPlayer.lastCacheHit ? "HIT" : "MISS"}';
-          });
-        }
-      }
-
-      // ─────────────────────────────────────────────────────
-      // [RETRY] 처리 — AI 버블 제거 후 음성으로만 재청취 요청
-      // ─────────────────────────────────────────────────────
-      if (aiRetry) {
-        _ttsQueueManager.stop();
-        if (mounted) {
-          setState(() {
-            if (aiIndex < _localMessages.length)
-              _localMessages.removeAt(aiIndex);
-          });
-        }
-        _log('🔁 [RETRY-ACT]', 'AI 버블 제거 + 재청취 TTS 발화');
-        if (_isConversationActive && _turnCounter == currentTurnId) {
-          _speakRetryAndListen();
-        }
-        return;
-      }
+      // [하이브리드] remainder 발사 + 통문장 TtsCache 저장
+      await _hybridTtsPlayer!
+          .onStreamEnd(fullSentence: _cleanText(aiTargetText.trim()));
 
       waitTicks = 0;
       while (aiTtsFetcher.pendingRequests > 0 || _ttsQueueManager.isBusy) {
@@ -1552,22 +2168,23 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       _log('🧠 [PIPE-09]', 'AI TTS 재생 완료');
 
       // ─────────────────────────────────────────────────────
-      // STEP 7: 역번역 완료 대기 후 Firestore 저장
+      // STEP 7: Firestore 저장
       // ─────────────────────────────────────────────────────
-      final userOriginal = await userOriginalFuture;
-      final aiOriginal = await aiOriginalFuture;
       final hostLine = {
         'role': 'HOST',
-        'original_text': userOriginal,
-        'translated_text': _cleanText(userTargetText),
+        'original_text':
+            (_localMessages[hostIndex]['original'] ?? '').toString(),
+        'translated_text': userTargetText,
       };
       final systemLine = {
         'role': 'SYSTEM',
-        'original_text': aiOriginal,
-        'translated_text': _cleanText(aiTargetText),
+        'original_text': '',
+        'translated_text': aiTargetText,
       };
       _saveTurnToFirestore([hostLine, systemLine]);
-      await _saveHistoryMessages([hostLine, systemLine]);
+      _saveHistoryMessages([hostLine, systemLine]); // 🔧 [히스토리] 병행 저장
+      _saveRecentHistory(
+          userTargetText, aiTargetText); // 🧠 [장기 기억] 백그라운드 메모리 업데이트
       _log('🧠 [PIPE-10]', 'Firestore 저장 호출 완료');
     } catch (e) {
       _log('❌ [PIPE-ERR]', 'Relay Error: $e');
@@ -1581,35 +2198,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         _log('⚠️ [PIPE-NORESTART]', '마이크 재시작 조건 불충족');
       }
     }
-  }
-
-  // 🔧 [v3.7] 유저 통문장 TtsCache 백그라운드 저장 헬퍼
-  void _saveUserFullSentenceToCache(String text) {
-    if (text.isEmpty) return;
-    TtsCache.get(text, 'nova').then((existing) {
-      if (existing != null) return;
-      http
-          .post(
-        Uri.parse('https://api.openai.com/v1/audio/speech'),
-        headers: {
-          'Authorization': 'Bearer $_openAiKey',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'model': 'tts-1',
-          'input': text,
-          'voice': 'nova',
-          'speed': 1.0,
-        }),
-      )
-          .then((res) {
-        if (res.statusCode == 200) {
-          TtsCache.put(text, 'nova', res.bodyBytes);
-        }
-      }).catchError((e) {
-        debugPrint('[_saveUserFullSentenceToCache] $e');
-      });
-    });
   }
 
   /// 한 턴(유저+AI)의 ChatLine 2개를 Firestore에 저장
@@ -1640,13 +2228,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 
         final newSession = await userDocRef.collection('sessions').add({
           'session_no': nextSessionNo,
-          'mode': 'roleplay',
-          'scenario_info': {
-            'keyword': _scenarioKeyword,
-            'situation': _scenarioSituation,
-            'ai_role': _scenarioAiRole,
-            'user_role': _scenarioUserRole,
-          },
+          'mode': 'clone',
+          'clone_id': _selectedCloneId,
           'created_at': FieldValue.serverTimestamp(),
           'transcript': chatLines,
         });
@@ -1687,18 +2270,17 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   Future<void> _ensureHistoryRef() async {
     final user = FirebaseAuth.instance.currentUser;
     if (_myHistoryRef == null && user != null) {
-      final newRef = FirebaseFirestore.instance
+      _myHistoryRef = FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .collection('chat_history')
           .doc();
-      await newRef.set({
+      await _myHistoryRef!.set({
         'created_at': FieldValue.serverTimestamp(),
-        'room_name': "Roleplay Mode",
+        'room_name': "Clone Mode",
         'is_pinned': false,
         'msg_count': 0
       });
-      _myHistoryRef = newRef;
       _log('📚 [HIST-NEW]', 'chat_history 방 생성: ${_myHistoryRef!.id}');
     }
   }
@@ -1762,10 +2344,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
             'last_message_time': FieldValue.serverTimestamp(),
             'msg_count': _localMessages.length,
             'last_active': FieldValue.serverTimestamp(),
-            'chat_json': jsonEncode(_localMessages),
-            'is_completed': false,
           });
-          _log('💾 [HIST-UPD]', 'last_message + chat_json 업데이트 완료');
+          _log('💾 [HIST-UPD]', 'last_message 업데이트 완료');
         }
       }
     } catch (e) {
@@ -1791,32 +2371,22 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     final bottomPad = MediaQuery.of(context).viewPadding.bottom == 0
         ? 24.0
         : MediaQuery.of(context).viewPadding.bottom + 8.0;
-    return PopScope(
-      canPop: false,
-      onPopInvoked: (didPop) async {
-        if (didPop) return;
-        await _handleAutoSaveAndExit();
-      },
-      child: Container(
-        color: const Color(0xFF121212),
-        child: SafeArea(
-          child: Column(children: [
-            _buildTopBar(),
-            Expanded(
-              child: Stack(
-                children: [
-                  _buildChatList(),
-                  if (_localMessages.isEmpty)
-                    Positioned.fill(
-                      child: Center(child: _buildTopControls()),
-                    ),
-                  _buildIdleOverlay(),
-                ],
-              ),
-            ),
-            _buildControlArea(bottomPad),
-          ]),
-        ),
+    return Container(
+      color: const Color(0xFF121212),
+      child: SafeArea(
+        child: Column(children: [
+          _buildTopBar(),
+          const SizedBox(height: 10),
+          _buildTopControls(),
+          const SizedBox(height: 10),
+          Expanded(
+            child: Stack(children: [
+              _buildChatList(),
+              _buildIdleOverlay(),
+            ]),
+          ),
+          _buildControlArea(bottomPad),
+        ]),
       ),
     );
   }
@@ -1828,18 +2398,10 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          GestureDetector(
-            onTap: _handleAutoSaveAndExit, // 🔧 [히스토리] AutoSave 연결
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              width: 72,
-              height: 56,
-              alignment: Alignment.centerLeft,
-              padding: const EdgeInsets.only(left: 4),
-              child: const Icon(Icons.arrow_back_ios_new_rounded,
+          IconButton(
+              icon: const Icon(Icons.arrow_back_ios_new_rounded,
                   color: Colors.white70),
-            ),
-          ),
+              onPressed: _handleAutoSaveAndExit), // 🔧 [히스토리] AutoSave 연결
           Row(children: [
             IconButton(
               icon: Icon(
@@ -1897,232 +2459,46 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   }
 
   Widget _buildTopControls() {
-    final hasScenario = _scenarioSituation.isNotEmpty && _scenarioAiRole.isNotEmpty;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 28),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          GestureDetector(
-            onTap: (_isConversationActive || _isGeneratingScenario)
-                ? null
-                : _showSituationInputSheet,
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0xFF251640), Color(0xFF141230)],
-                ),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: const Color(0xFF7C3AED).withOpacity(0.35),
-                  width: 1,
-                ),
-              ),
-              child: _isGeneratingScenario
-                  ? const SizedBox(
-                      height: 60,
-                      child: Center(
-                        child: CircularProgressIndicator(
-                          color: Color(0xFF9333EA),
-                          strokeWidth: 2,
-                        ),
-                      ),
-                    )
-                  : hasScenario
-                  ? Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Row(children: const [
-                          Icon(Icons.theater_comedy_rounded,
-                              color: Color(0xFFA78BFA), size: 13),
-                          SizedBox(width: 5),
-                          Text(
-                            'SITUATION',
-                            style: TextStyle(
-                              color: Color(0xFFA78BFA),
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 1.6,
-                            ),
-                          ),
-                        ]),
-                        const SizedBox(height: 8),
-                        Text(
-                          _scenarioSituation,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 17,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.4,
-                            height: 1.3,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF7C3AED).withOpacity(0.18),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: const Color(0xFF7C3AED).withOpacity(0.40),
-                              width: 1,
-                            ),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: const [
-                                  Icon(Icons.smart_toy_rounded,
-                                      color: Color(0xFFD8B4FE), size: 13),
-                                  SizedBox(width: 4),
-                                  Text('AI',
-                                      style: TextStyle(
-                                        color: Color(0xFFA78BFA),
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w800,
-                                        letterSpacing: 1.4,
-                                      )),
-                                ],
-                              ),
-                              const SizedBox(height: 2),
-                              Text(_scenarioAiRole,
-                                  style: const TextStyle(
-                                    color: Color(0xFFEDE9FE),
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w600,
-                                  )),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF0EA5E9).withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: const Color(0xFF0EA5E9).withOpacity(0.32),
-                              width: 1,
-                            ),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: const [
-                                  Icon(Icons.person_rounded,
-                                      color: Color(0xFF7DD3FC), size: 13),
-                                  SizedBox(width: 4),
-                                  Text('YOU',
-                                      style: TextStyle(
-                                        color: Color(0xFF7DD3FC),
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w800,
-                                        letterSpacing: 1.4,
-                                      )),
-                                ],
-                              ),
-                              const SizedBox(height: 2),
-                              Text(_scenarioUserRole,
-                                  style: const TextStyle(
-                                    color: Color(0xFFE0F2FE),
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w600,
-                                  )),
-                            ],
-                          ),
-                        ),
-                        if (!_isConversationActive) ...[
-                          const SizedBox(height: 14),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.end,
-                            children: const [
-                              Icon(Icons.edit_outlined,
-                                  color: Colors.white24, size: 13),
-                              SizedBox(width: 4),
-                              Text('탭하여 수정',
-                                  style: TextStyle(
-                                      color: Colors.white24, fontSize: 11)),
-                            ],
-                          ),
-                        ],
-                      ],
-                    )
-                  : Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: const [
-                          Icon(Icons.movie_outlined,
-                              color: Color(0xFFA78BFA), size: 20),
-                          SizedBox(width: 8),
-                          Text('시나리오 불러오는 중...',
-                              style: TextStyle(
-                                  color: Color(0xFFA78BFA),
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600)),
-                        ],
-                      ),
-                    ),
-            ),
-          ),
-          if (!_isGeneratingScenario && !_isConversationActive) ...[
-            const SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                GestureDetector(
-                  onTap: _generateScenario,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 9),
-                    decoration: BoxDecoration(
-                      color: Colors.transparent,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: Colors.white12, width: 1),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: const [
-                        Icon(Icons.refresh_rounded,
-                            color: Colors.white30, size: 14),
-                        SizedBox(width: 6),
-                        Text('다시 생성',
-                            style: TextStyle(
-                                color: Colors.white30, fontSize: 12)),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ],
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: GestureDetector(
+        onTap: _showCloneDashboard,
+        child: Container(
+          height: 52,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(
+              color: const Color(0xFF2C2C2E),
+              borderRadius: BorderRadius.circular(12),
+              border:
+                  Border.all(color: const Color(0xFF9333EA).withOpacity(0.4))),
+          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            const Icon(Icons.manage_accounts, color: Color(0xFFD8B4FE)),
+            const SizedBox(width: 8),
+            Text(
+                _selectedCloneId.isEmpty
+                    ? "Manage Clones"
+                    : "Clone: ${_clones.firstWhere((c) => c['id'] == _selectedCloneId)['name']}",
+                style: const TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.bold)),
+          ]),
+        ),
       ),
     );
   }
 
   Widget _buildChatList() {
-    final double bottomPad = _localMessages.length <= 1
-        ? MediaQuery.of(context).size.height * 0.4
-        : 16;
+    if (_selectedCloneId.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [],
+        ),
+      );
+    }
+    final double bottomPad = MediaQuery.of(context).size.height * 0.55;
     return ListView.builder(
       controller: _scrollController,
-      padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPad),
+      padding: EdgeInsets.fromLTRB(16, 16, 16, bottomPad),
       itemCount: _localMessages.length,
       itemBuilder: (context, idx) {
         _itemKeys[idx] ??= GlobalKey();
@@ -2134,208 +2510,102 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 
   Widget _buildTextBlock(Map<String, dynamic> msg) {
     final role = (msg['role'] ?? '').toString();
-    final bool isHost = role == 'HOST' || role == 'HOST_TEMP';
+    bool isHost = role == 'HOST' || role == 'HOST_TEMP';
     final rawTarget = (msg['target'] ?? '').toString();
     final bool isThinking = (role == 'SYSTEM' && rawTarget.isEmpty) ||
         (role == 'HOST_TEMP' && rawTarget == '...') ||
         (role == 'HOST' && rawTarget.isEmpty);
     final String displayTarget = isThinking ? '...' : rawTarget;
     if (displayTarget.isEmpty) return const SizedBox.shrink();
-
-    // 아이콘 아바타
-    final Widget avatar = Container(
-      width: 32,
-      height: 32,
-      decoration: BoxDecoration(
-        color: isHost
-            ? const Color(0xFF1D4ED8).withOpacity(0.22)
-            : const Color(0xFF7C3AED).withOpacity(0.22),
-        shape: BoxShape.circle,
-        border: Border.all(
-          color: isHost
-              ? const Color(0xFF60A5FA).withOpacity(0.45)
-              : const Color(0xFFA855F7).withOpacity(0.45),
-          width: 1,
-        ),
-      ),
-      child: Icon(
-        isHost ? Icons.person_rounded : Icons.smart_toy_rounded,
-        color: isHost ? const Color(0xFF93C5FD) : const Color(0xFFD8B4FE),
-        size: 17,
-      ),
-    );
-
-    // 말풍선
-    final Widget bubble = ConstrainedBox(
-      constraints:
-          BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.73),
+    return Align(
+      alignment: isHost ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        margin: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: isHost
-              ? const Color(0xFF1E293B)
-              : const Color(0xFF9333EA).withOpacity(0.13),
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(16),
-            topRight: const Radius.circular(16),
-            bottomLeft: Radius.circular(isHost ? 16 : 4),
-            bottomRight: Radius.circular(isHost ? 4 : 16),
-          ),
-          border: Border.all(
             color: isHost
-                ? const Color(0xFF3B82F6).withOpacity(0.18)
-                : const Color(0xFF9333EA).withOpacity(0.25),
-            width: 1,
-          ),
-        ),
+                ? const Color(0xFF2C2C2E)
+                : const Color(0xFF9333EA).withOpacity(0.15),
+            borderRadius: BorderRadius.circular(16)),
+        constraints:
+            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.8),
         child: Column(
-          crossAxisAlignment:
-              isHost ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-          children: [
-            Text(displayTarget,
-                textAlign: isHost ? TextAlign.right : TextAlign.left,
-                style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16 * _fontScale,
-                    fontWeight: FontWeight.bold,
-                    height: 1.4)),
-            if (_showOriginal &&
-                !isThinking &&
-                msg['original'] != null &&
-                msg['original'].toString().isNotEmpty) ...[
-              const SizedBox(height: 5),
-              Text(msg['original'],
+            crossAxisAlignment:
+                isHost ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            children: [
+              Text(displayTarget,
                   textAlign: isHost ? TextAlign.right : TextAlign.left,
-                  style:
-                      TextStyle(color: Colors.grey, fontSize: 12 * _fontScale))
-            ],
-          ],
-        ),
-      ),
-    );
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Row(
-        mainAxisAlignment:
-            isHost ? MainAxisAlignment.end : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: isHost
-            ? [bubble, const SizedBox(width: 8), avatar]
-            : [avatar, const SizedBox(width: 8), bubble],
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16 * _fontScale,
+                      fontWeight: FontWeight.bold)),
+              if (_showOriginal &&
+                  !isThinking &&
+                  msg['original'] != null &&
+                  msg['original'].toString().isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(msg['original'],
+                    textAlign: isHost ? TextAlign.right : TextAlign.left,
+                    style: TextStyle(
+                        color: Colors.grey, fontSize: 12 * _fontScale))
+              ]
+            ]),
       ),
     );
   }
 
   Widget _buildControlArea(double bp) {
     return Container(
-      padding: EdgeInsets.fromLTRB(24, 4, 24, bp),
+      padding: EdgeInsets.fromLTRB(24, 8, 24, bp),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text("AI Roleplay",
+              const Text("Clone AI",
                   style: TextStyle(
                       color: Colors.white54,
                       fontSize: 20,
                       fontWeight: FontWeight.bold)),
-              // Start 버튼: AI 역할 설정 완료 & 대화 미시작 상태
-              if (_scenarioAiRole.isNotEmpty &&
-                  _localMessages.isEmpty &&
-                  !_isAiOpenerPlaying &&
-                  !_isConversationActive)
-                GestureDetector(
-                  onTap: () {
-                    if (_openAiKey.isEmpty) return;
-                    _resetIdleTimer();
-                    setState(() => _isConversationActive = true);
-                    _generateAndPlayAiOpener();
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 20, vertical: 10),
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF7C3AED), Color(0xFF4F46E5)],
-                      ),
-                      borderRadius: BorderRadius.circular(22),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFF7C3AED).withOpacity(0.35),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.play_arrow_rounded,
-                            color: Colors.white, size: 18),
-                        SizedBox(width: 6),
-                        Text('Start',
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold)),
-                      ],
-                    ),
-                  ),
-                )
-              else if (_isAiOpenerPlaying)
-                // AI 첫 발화 재생 중
-                const SizedBox(
+              GestureDetector(
+                onTap: () {
+                  if (_deepgramKey.isEmpty) return;
+                  _resetIdleTimer();
+                  setState(
+                      () => _isConversationActive = !_isConversationActive);
+                  if (_isConversationActive) {
+                    if (_localMessages.isEmpty) {
+                      _generateAndPlayAiOpener();
+                    } else {
+                      _startDeepgramListening();
+                    }
+                  } else {
+                    _stopEverything();
+                  }
+                },
+                child: Container(
                   width: 44,
                   height: 44,
-                  child: Center(
-                    child: SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        color: Color(0xFFA855F7),
-                        strokeWidth: 2,
-                      ),
-                    ),
-                  ),
-                )
-              else
-                // 대화 중 on/off 토글
-                GestureDetector(
-                  onTap: () {
-                    if (_deepgramKey.isEmpty) return;
-                    _resetIdleTimer();
-                    setState(
-                        () => _isConversationActive = !_isConversationActive);
-                    if (_isConversationActive) {
-                      _startDeepgramListening();
-                    } else {
-                      _stopEverything();
-                    }
-                  },
+                  alignment: Alignment.center,
                   child: Container(
-                    width: 44,
-                    height: 44,
-                    alignment: Alignment.center,
-                    child: Container(
-                      width: 12,
-                      height: 12,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
+                    width: 12,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _isConversationActive
+                          ? const Color(0xFFFBBF24)
+                          : Colors.transparent,
+                      border: Border.all(
                         color: _isConversationActive
                             ? const Color(0xFFFBBF24)
-                            : Colors.transparent,
-                        border: Border.all(
-                          color: _isConversationActive
-                              ? const Color(0xFFFBBF24)
-                              : Colors.white24,
-                          width: 1.5,
-                        ),
+                            : Colors.white24,
+                        width: 1.5,
                       ),
                     ),
                   ),
                 ),
+              ),
             ],
           ),
         ],
@@ -2429,7 +2699,7 @@ class DeepgramV2VoiceManager {
   final String langCode;
   final VoidCallback onConnected;
   final Function(String) onTranscriptUpdate;
-  final void Function(String, {bool speechFinal}) onTurnEnded;
+  final Function(String) onTurnEnded;
   final Function(String) onError;
   final Function(int)? onReconnecting; // 재연결 시도 알림 (선택적)
   final VoidCallback? onGaveUp; // 재연결 포기 알림 (선택적)
@@ -2585,7 +2855,7 @@ class DeepgramV2VoiceManager {
         _lg('📡 [DG-UE]',
             'UtteranceEnd 이벤트 → onTurnEnded. finalText="$finalText"');
         if (!_isDisposed && finalText.isNotEmpty) {
-          onTurnEnded(finalText, speechFinal: false);
+          onTurnEnded(finalText);
         }
         return;
       }
@@ -2617,7 +2887,7 @@ class DeepgramV2VoiceManager {
             'speech_final → onTurnEnded 호출 시도. finalText="$finalText"');
         if (!_isDisposed && finalText.isNotEmpty) {
           _lg('📡 [DG-05]', 'onTurnEnded 실제 호출');
-          onTurnEnded(finalText, speechFinal: true);
+          onTurnEnded(finalText);
         } else {
           _lg('📡 [DG-06]', 'finalText 빈값 → onTurnEnded 스킵');
         }
@@ -3107,7 +3377,7 @@ class RelayPipeline {
     _isSpeaking = false;
   }
 
-  Future<void> _onUserTurnEnded(String userText, {bool speechFinal = false}) async {
+  Future<void> _onUserTurnEnded(String userText) async {
     // 💡 AI가 말하는 중에 유저가 말하면 즉시 중단
     if (_isSpeaking) interruptAi();
 
@@ -3176,26 +3446,28 @@ class RelayPipeline {
 // ============================================================================
 
 // ====================================================================
-// 📦 [Box 7-H: HybridTtsPlayer] — 하이브리드 TTS (Roleplay 전용)
+// 📦 [Box 7-H: HybridTtsPlayer] — 하이브리드 TTS (Clone 전용)
 // ====================================================================
-// 설계 원칙: 첫 구두점 즉시 발사(체감 빠름) + 통문장 캐시 저장(히스토리 통합)
-//   → tryFireFirstChunk: 첫 구두점 도달 시 ChunkedTtsFetcher에 1회 발사
+// 설계 원칙: 구두점 OR 4단어 먼저 오는 쪽 즉시 발사(체감 빠름) + 통문장 TtsCache 저장
+//   → onChunk: 청크 수신마다 호출. 구두점 OR 4단어 달성 시 fetcher에 1회 발사.
 //   → onStreamEnd: remainder 순차 발사 + fullSentence TtsCache 저장 (재생 없음)
-//   → Rollback: tryFireFirstChunk 제거 후 aiTtsFetcher.addText(toSpeak) 복원
+//   → reset: 턴 시작 시 상태 초기화 (새 인스턴스 생성 전 호출)
+//   → Rollback: onChunk/onStreamEnd 제거 후 aiTtsFetcher.addText(toSpeak) 복원
 class HybridTtsPlayer {
-  final String apiKey;
-  final String voice;
+  final String _apiKey;
+  final TtsQueueManager _ttsQueueManager;
+  final ChunkedTtsFetcher _fetcher;
+  final String _voice;
   final void Function(String, String)? onLog;
 
   bool _firstChunkFired = false;
+  final StringBuffer _chunkBuffer = StringBuffer();
 
-  int lastFirstChunkMs = 0;
-  int lastCacheSaveMs = 0;
-  bool lastCacheHit = false;
-
-  HybridTtsPlayer({
-    required this.apiKey,
-    this.voice = 'nova',
+  HybridTtsPlayer(
+    this._apiKey,
+    this._ttsQueueManager,
+    this._fetcher,
+    this._voice, {
     this.onLog,
   });
 
@@ -3203,245 +3475,155 @@ class HybridTtsPlayer {
 
   void reset() {
     _firstChunkFired = false;
-    lastFirstChunkMs = 0;
-    lastCacheSaveMs = 0;
-    lastCacheHit = false;
+    _chunkBuffer.clear();
   }
 
-  // 첫 구두점 도달 시 1회 호출. firstChunk를 fetcher에 즉시 발사.
-  // 반환값: buffer에서 자를 인덱스 (>=0이면 발사됨, -1이면 미발사)
-  int tryFireFirstChunk(
-      String buffer, ChunkedTtsFetcher fetcher, Stopwatch swSpeechEnd) {
-    if (_firstChunkFired) return -1;
-    final match = kTtsDelimiterPattern.firstMatch(buffer);
-    if (match == null) return -1;
+  // 구두점 OR 4단어 중 먼저 오는 쪽 1회 발사.
+  // 발사 후에도 이후 청크를 _chunkBuffer에 누적 — onStreamEnd에서 remainder 처리.
+  void onChunk(String chunk) {
+    _chunkBuffer.write(chunk);
+    if (_firstChunkFired) return;
 
-    final text = buffer.substring(0, match.end).trim();
-    if (text.isEmpty) return match.end;
-
-    _firstChunkFired = true;
-    lastFirstChunkMs = swSpeechEnd.elapsedMilliseconds;
-    fetcher.addText(text);
-    onLog?.call(
-        '[HYB-01]', 'firstChunk fired (${text.length}c) ${lastFirstChunkMs}ms');
-    return match.end;
-  }
-
-  // [Box 7-H] 조기 발사 보충: 구두점 OR firstChunkMinWords 단어 중 먼저 오는 쪽 발사
-  // buffer: 현재까지 누적된 AI 텍스트 버퍼 (외부에서 관리)
-  // 반환값: buffer에서 자를 인덱스 (>=0이면 발사됨, -1이면 미발사)
-  static const int firstChunkMinWords = 5;
-
-  int onChunk(String buffer, ChunkedTtsFetcher fetcher, Stopwatch swSpeechEnd) {
-    if (_firstChunkFired) return -1;
-
-    final punctMatch = kTtsDelimiterPattern.firstMatch(buffer);
+    final buf = _chunkBuffer.toString();
+    final punctMatch = kTtsDelimiterPattern.firstMatch(buf);
     final wordCount =
-        buffer.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
+        buf.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
 
-    if (punctMatch == null && wordCount < firstChunkMinWords) return -1;
+    if (punctMatch == null && wordCount < 4) return;
 
-    final int cutIdx;
     final String text;
+    final String unfired;
     if (punctMatch != null) {
-      cutIdx = punctMatch.end;
-      text = buffer.substring(0, cutIdx).trim();
+      text = buf.substring(0, punctMatch.end).trim();
+      unfired = buf.substring(punctMatch.end);
     } else {
-      cutIdx = buffer.length;
-      text = buffer.trim();
+      text = buf.trim();
+      unfired = '';
     }
 
-    if (text.isEmpty) return cutIdx;
+    if (text.isEmpty) return;
 
     _firstChunkFired = true;
-    lastFirstChunkMs = swSpeechEnd.elapsedMilliseconds;
-    fetcher.addText(text);
-    onLog?.call('[HYB-01]',
-        '발사(${punctMatch != null ? "구두점" : "5단어"}): "$text" ${lastFirstChunkMs}ms');
-    return cutIdx;
+    _fetcher.addText(text);
+    onLog?.call(
+        '[HYB-01]', '발사(${punctMatch != null ? "구두점" : "4단어"}): "$text"');
+
+    // 발사된 부분 제거 — 이후 onChunk는 unfired부터 누적
+    _chunkBuffer.clear();
+    if (unfired.isNotEmpty) _chunkBuffer.write(unfired);
   }
 
   // GPT 스트림 종료 시 호출:
-  //   1) remainder 청크 순차 발사 (기존 큐에 이어서)
+  //   1) remainder 청킹 발사 (firstChunk 이후 남은 텍스트)
   //   2) fullSentence TtsCache 저장 (재생 없음 — 히스토리 뷰 HIT 유도)
-  Future<void> onStreamEnd({
-    required String fullSentence,
-    required String remainderBuffer,
-    required ChunkedTtsFetcher fetcher,
-    required Stopwatch swSpeechEnd,
-  }) async {
-    // 1. Remainder 발사
-    final remainder = remainderBuffer.trim();
-    if (!_firstChunkFired && fullSentence.isNotEmpty) {
-      // 구두점 없이 스트림 종료 — 전체 텍스트를 지금 발사
-      fetcher.addText(fullSentence);
+  Future<void> onStreamEnd({String fullSentence = ''}) async {
+    final remainder = _chunkBuffer.toString().trim();
+    if (!_firstChunkFired && remainder.isNotEmpty) {
+      // 구두점/4단어 없이 스트림 종료 — 전체 발사
+      _fetcher.addText(remainder);
       _firstChunkFired = true;
-      lastFirstChunkMs = swSpeechEnd.elapsedMilliseconds;
       onLog?.call(
-          '[HYB-01-LATE]', 'no punctuation — full text fired at stream end');
-    } else if (remainder.isNotEmpty) {
+          '[HYB-01-LATE]', 'no punct/4words — full text fired at stream end');
+    } else if (_firstChunkFired && remainder.isNotEmpty) {
       int lastIdx = 0;
       for (final match in kTtsDelimiterPattern.allMatches(remainder)) {
         final seg = remainder.substring(lastIdx, match.end).trim();
-        if (seg.isNotEmpty) fetcher.addText(seg);
+        if (seg.isNotEmpty) _fetcher.addText(seg);
         lastIdx = match.end;
       }
       final tail = remainder.substring(lastIdx).trim();
-      if (tail.isNotEmpty) fetcher.addText(tail);
+      if (tail.isNotEmpty) _fetcher.addText(tail);
       onLog?.call('[HYB-02]', 'remainder fired (${remainder.length}c)');
     }
 
-    // 2. TtsCache 저장 (재생 없음)
-    if (fullSentence.trim().isEmpty) return;
+    // TtsCache 통문장 백그라운드 저장 (재생 없음)
+    final sentence = fullSentence.trim();
+    if (sentence.isEmpty) return;
     try {
-      final cached = await TtsCache.get(fullSentence, voice);
+      final cached = await TtsCache.get(sentence, _voice);
       if (cached != null && cached.isNotEmpty) {
-        lastCacheHit = true;
-        lastCacheSaveMs = 0;
         onLog?.call('[HYB-03-HIT]', 'TtsCache HIT — 저장 생략');
         return;
       }
-      lastCacheHit = false;
-      final sw = Stopwatch()..start();
       final res = await http
           .post(
             Uri.parse('https://api.openai.com/v1/audio/speech'),
             headers: {
-              'Authorization': 'Bearer $apiKey',
+              'Authorization': 'Bearer $_apiKey',
               'Content-Type': 'application/json',
             },
             body: jsonEncode({
               'model': 'tts-1',
-              'input': fullSentence,
-              'voice': voice,
+              'input': sentence,
+              'voice': _voice,
               'speed': 1.0,
               'response_format': 'mp3',
             }),
           )
           .timeout(const Duration(seconds: 15));
       if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
-        await TtsCache.put(fullSentence, voice, res.bodyBytes);
-        lastCacheSaveMs = sw.elapsedMilliseconds;
-        onLog?.call('[HYB-04-SAVED]',
-            '${lastCacheSaveMs}ms (${res.bodyBytes.length}B)');
+        await TtsCache.put(sentence, _voice, res.bodyBytes);
+        onLog?.call('[HYB-04-SAVED]', '${res.bodyBytes.length}B');
       } else {
         onLog?.call('[HYB-ERR]', 'API status=${res.statusCode}');
       }
-      sw.stop();
     } catch (e) {
       onLog?.call('[HYB-ERR]', 'TtsCache 저장 실패: $e');
     }
   }
 }
 
+// ============================================================================
+
 // ====================================================================
-// 🧠 [Box 7-1] RoleplayBrain v3 — 롤플레이 모드 전용 AI 뇌
+// 🧠 [Box 7-1] CloneBrain v3 — 클론 모드 전용 AI 뇌
 // ====================================================================
-class RoleplayBrain {
+// 📂 서브박스 구성:
+//   [Box 7-1-A] _truncatePersona        — 페르소나 1500자 트림 (컨텍스트 점령 방지)
+//   [Box 7-1-B] streamUserTranslation   — 유저 한→영 번역 (CoT 2단계 주어 복원)
+//   [Box 7-1-C] generateCleanOriginal   — AI 영→한 역번역 (UI 자막)
+//   [Box 7-1-D] streamCloneResponse     — 클론 AI 응답 (2문장 강제, 8단어 제약)
+//   [Box 7-1-E] generatePersonaFromChat — 카톡 로그 → 8차원 페르소나 추출
+// ====================================================================
+class CloneBrain {
   // ==================================================================
-  // 📦 [Box 7-1-0] generateDramaticScenario — 드라마/영화 장면 자동 생성
+  // 📦 [Box 7-1-A] _truncatePersona — 페르소나 토큰 과부하 방지
   // ==================================================================
-  static Future<Map<String, String>?> generateDramaticScenario(
-      String apiKey) async {
-    final client = http.Client();
-    try {
-      final genres = [
-        '불륜 발각, 부부 갈등',
-        '직장 내 권력 다툼, 해고 위기',
-        '형사 심문, 용의자 취조',
-        '재벌가 상속 분쟁',
-        '비밀 연인 들킴',
-        '정치적 음모, 배신',
-        '법정 증언, 위증 의심',
-        '가족 비밀 폭로',
-        '사기 들통, 협박',
-        '첫사랑 재회, 감정 충돌',
-      ];
-      final pick = genres[Random().nextInt(genres.length)];
-
-      final systemPrompt = 'You are a creative director for a high-immersion English roleplay app.\n'
-          'Your job is to create ONE dramatic scene inspired by famous Netflix series, Korean/American dramas, or movies.\n'
-          '\n'
-          'OUTPUT: Return ONLY valid JSON, no extra text.\n'
-          '{\n'
-          '  "situation": "극적 핵심 요약 (10-15 Korean chars, e.g. 숨겨둔 돈다발 들킴)",\n'
-          '  "ai_role": "AI 캐릭터 (10자 이내, strong personality, e.g. 화난 배우자)",\n'
-          '  "user_role": "유저 캐릭터 (8자 이내, e.g. 당황한 남편)"\n'
-          '}\n'
-          '\n'
-          'RULES:\n'
-          '- situation: emotionally charged, instantly dramatic. Do NOT name any show/character.\n'
-          '- ai_role: fierce personality (furious, cold, desperate, authoritative).\n'
-          '- user_role: the user is the one being confronted, questioned, or pressured.\n'
-          '- Genre hint this round: $pick';
-
-      final res = await client
-          .post(
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
-            headers: {
-              'Authorization': 'Bearer $apiKey',
-              'Content-Type': 'application/json; charset=utf-8',
-            },
-            body: jsonEncode({
-              'model': 'gpt-4o-mini',
-              'temperature': 1.1,
-              'response_format': {'type': 'json_object'},
-              'max_tokens': 150,
-              'messages': [
-                {'role': 'system', 'content': systemPrompt},
-                {
-                  'role': 'user',
-                  'content': '지금 바로 JSON 생성해줘.',
-                },
-              ],
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
-
-      if (res.statusCode == 200) {
-        final raw = jsonDecode(utf8.decode(res.bodyBytes))['choices'][0]
-                ['message']['content']
-            .toString()
-            .trim();
-        final parsed = jsonDecode(raw);
-        return {
-          'situation': parsed['situation']?.toString() ?? '',
-          'ai_role': parsed['ai_role']?.toString() ?? '',
-          'user_role': parsed['user_role']?.toString() ?? '',
-        };
-      }
-    } catch (e) {
-      print('generateDramaticScenario Error: $e');
-    } finally {
-      client.close();
+  static String _truncatePersona(String persona, {int maxChars = 1500}) {
+    if (persona.length <= maxChars) return persona;
+    final sentences = persona.split(RegExp(r'(?<=[.!?\n])'));
+    final buffer = StringBuffer();
+    for (final s in sentences) {
+      if (buffer.length + s.length > maxChars) break;
+      buffer.write(s);
     }
-    return null;
+    return buffer.toString().trim();
   }
 
   // ==================================================================
-  // 📦 [Box 7-1-A] streamUserTranslation — CoT 2단계 번역
+  // 📦 [Box 7-1-B] streamUserTranslation — CoT 2단계 번역 스트림
+  // ------------------------------------------------------------------
+  // 핵심: 한국어 주어 생략 → 영어 주어 복원
+  // Step 1: CONTEXT CHECK (이전 대화로 화자 파악)
+  // Step 2: SUBJECT RESTORATION (생략된 주어/목적어 복원)
+  // Step 3: TRANSLATE (구어체 톤 유지 + TTS 쉼표)
   // ==================================================================
   static Stream<String> streamUserTranslation({
     required String apiKey,
     required String textOriginal,
     required String targetLang,
     required String contextStr,
-    String userRole = '',
-    String situation = '',
   }) async* {
     final client = http.Client();
     try {
-      final roleContext = userRole.isNotEmpty
-          ? '\nThe user is playing the role of "$userRole"${situation.isNotEmpty ? ' in a "$situation" scenario' : ''}.'
-          : '';
       final sysPrompt =
-          """You are an expert real-time Korean-to-$targetLang translator for a live roleplay conversation.$roleContext
+          '''You are an expert real-time Korean-to-$targetLang translator specialized in live conversation.
 
-Korean is a heavy pro-drop language - subjects, objects, and pronouns are constantly omitted when clear from context.
+Korean is a heavy pro-drop language — subjects, objects, and pronouns are constantly omitted when clear from context. Your job is to resolve these omissions perfectly.
 
 [INTERNAL THINKING - do not output]
-Step 1. CONTEXT CHECK: Review conversation history.
-Step 2. SUBJECT RESTORATION: The speaker is${userRole.isNotEmpty ? ' a "$userRole"' : ' the user'}. Identify and restore any omitted subject/pronoun from THEIR perspective.
+Step 1. CONTEXT CHECK: Review the conversation history to identify who is speaking, who is being addressed, and who/what is the current topic.
+Step 2. SUBJECT RESTORATION: Identify any omitted subject, object, or pronoun in the current Korean input and restore them based on context.
   Use these Korean grammar markers to determine roles:
   - ~이/가 = SUBJECT marker (doer of action): "엄마가 사줬어" → Mom bought it (Mom is subject)
   - ~은/는 = TOPIC marker (often the subject): "나는 갔어" → I went
@@ -3449,7 +3631,7 @@ Step 2. SUBJECT RESTORATION: The speaker is${userRole.isNotEmpty ? ' a "$userRol
   - ~을/를 = OBJECT marker (thing acted upon): "그걸 봤어" → saw THAT
   - Honorific ~(으)시 attaches to the SUBJECT's verb: "선생님이 오셨어" → The teacher came (teacher is subject, not me)
   - ~해줬어/해주셨어 = someone did something FOR someone else: the person before 가/이 is the doer
-Step 3. TRANSLATE: Produce natural $targetLang speech that fits${userRole.isNotEmpty ? ' the "$userRole" role' : ' the user'}.
+Step 3. TRANSLATE: Produce natural, fluent $targetLang with explicit subjects (I, you, he, she, they, we).
 
 [COMMON MISTAKES - avoid these]
 Korean: "걔가 나한테 전화했어" → CORRECT: He called me. WRONG: I called him.
@@ -3459,11 +3641,11 @@ Korean: "친구가 요즘 바빠서 못 만나" → CORRECT: My friend is busy l
 The particle before the verb's doer (이/가) is ALWAYS the subject. Never swap subject and object.
 
 [OUTPUT RULES]
-- The user IS${userRole.isNotEmpty ? ' a "$userRole"' : ' the user'} — translate their words from THAT perspective only.
-- Preserve speech register appropriate for${userRole.isNotEmpty ? ' a "$userRole"' : ' the user'}.
-- Insert commas (,) for TTS rhythm.
-- Output ONLY the $targetLang translation.
-- If input is noise (under 2 meaningful chars) OR is completely unrecognizable gibberish that cannot be interpreted as a human utterance in any language, output EXACTLY: [EVAPORATE]""";
+- Preserve speech register: formal Korean → polite English, casual (반말) → casual English with contractions.
+- Keep emotional nuance (excitement, sarcasm, hesitation) in tone.
+- Insert commas (,) after each natural phrase to create rhythm for TTS shadowing.
+- Output ONLY the $targetLang translation. No explanation, no Korean text, no prefixes.
+- If the input is meaningless noise or filler (under 2 meaningful chars), output EXACTLY: [EVAPORATE]''';
 
       final request = http.Request(
         'POST',
@@ -3476,14 +3658,14 @@ The particle before the verb's doer (이/가) is ALWAYS the subject. Never swap 
       request.body = jsonEncode({
         'model': 'gpt-4o-mini',
         'stream': true,
-        'temperature': 0.0,
+        'temperature': 0.0, // 주어 추론 일관성 극대화
         'max_tokens': 120,
         'messages': [
           {'role': 'system', 'content': sysPrompt},
           {
             'role': 'user',
             'content':
-                'Conversation so far:\n$contextStr\n\nTranslate: "$textOriginal"',
+                'Conversation so far:\n$contextStr\n\nTranslate this Korean utterance: "$textOriginal"',
           },
         ],
       });
@@ -3514,7 +3696,7 @@ The particle before the verb's doer (이/가) is ALWAYS the subject. Never swap 
   }
 
   // ==================================================================
-  // 📦 [Box 7-1-B] generateCleanOriginal — 영→한 역번역
+  // 📦 [Box 7-1-C] generateCleanOriginal — 영→한 역번역 (UI 자막)
   // ==================================================================
   static Future<String> generateCleanOriginal({
     required String apiKey,
@@ -3575,40 +3757,48 @@ The particle before the verb's doer (이/가) is ALWAYS the subject. Never swap 
         client.close();
       }
     }
-    return englishText;
+    return englishText; // 실패 시 영어 원문 (빈칸 방지)
   }
 
   // ==================================================================
-  // 📦 [Box 7-1-C] streamRoleplayResponse — AI 빙의 응답
+  // 📦 [Box 7-1-D] streamCloneResponse — 클론 AI 응답 스트림
+  // ------------------------------------------------------------------
+  // 🔧 장황함 방지 핵심:
+  //   - max_tokens 80 (모델 레벨에서 2문장 강제)
+  //   - "Under 8 words per sentence" 구체 제약
+  //   - "Often 1 sentence is enough" 간결 유도
+  //   - "Match emotional tone" 제거 (부사 남발 주범)
   // ==================================================================
-  static Stream<String> streamRoleplayResponse({
+  static Stream<String> streamCloneResponse({
     required String apiKey,
     required String userTargetText,
     required String contextStr,
-    required String situation,
-    required String aiRole,
-    required String userRole,
+    required String cloneContext,
     required String myTarget,
+    String cloneSummary = '',
   }) async* {
     final client = http.Client();
     try {
-      final sysPrompt = 'You are a master actor playing "$aiRole" in a high-immersion dramatic roleplay.\n'
-          '\n'
-          '[SCENARIO]\n'
-          'Situation: $situation\n'
-          'Your role: $aiRole\n'
-          "User's role: $userRole\n"
-          '\n'
-          '[LANGUAGE RULE]\n'
-          '- Respond in $myTarget ONLY. Role names may be Korean but your dialogue is 100% $myTarget.\n'
-          '\n'
-          '[CHARACTER RULES]\n'
-          '- Stay FULLY in character as "$aiRole" at all times. Never break character.\n'
-          '- Respond with the raw emotion, personality, and subtext that "$aiRole" would have in this situation.\n'
-          '- NO greetings, NO meta-comments. Pure in-character dialogue.\n'
-          '- MAXIMUM 2 short sentences. 1 sentence preferred. Under 15 words per sentence.\n'
-          '- Drive the scene forward — pressure, question, or react to force the user to respond.\n'
-          '- If the user\'s input is completely unintelligible (speech recognition error), output EXACTLY: [RETRY]';
+      final safePersona = _truncatePersona(cloneContext);
+      final summaryBlock = cloneSummary.isNotEmpty
+          ? '\n\n[MEMORY] 당신은 다음 요약된 과거 내용을 기억하고 있습니다: $cloneSummary'
+          : '';
+
+      final sysPrompt =
+          '''⚠️ ABSOLUTE OUTPUT RULES — these override the persona ⚠️
+1. OUTPUT LANGUAGE: $myTarget ONLY. Zero Korean characters (한글) allowed in output.
+2. If the persona contains Korean signature phrases, translate them to natural $myTarget equivalents. Never quote the Korean text.
+
+$safePersona$summaryBlock
+
+[CONVERSATION RULES]
+- Respond in $myTarget only.
+- MAXIMUM 2 short sentences. Often 1 sentence is enough.
+- Keep each sentence under 8 words when possible.
+- Sound like a real person, not an AI. Stay in character.
+- No greetings, no "I understand", no meta-comments, no prefixes. Just reply.
+- Respond in natural, concise everyday conversational style.
+- If the user's input is completely unclear or impossible to understand in context (likely a speech recognition error), ask them politely to repeat in $myTarget.''';
 
       final request = http.Request(
         'POST',
@@ -3622,13 +3812,13 @@ The particle before the verb's doer (이/가) is ALWAYS the subject. Never swap 
         'model': 'gpt-4o-mini',
         'stream': true,
         'temperature': 0.2,
-        'max_tokens': 80,
+        'max_tokens': 80, // 🔧 핵심: 2문장 모델 레벨 강제
         'messages': [
           {'role': 'system', 'content': sysPrompt},
           {
             'role': 'user',
             'content':
-                'Conversation history:\n$contextStr\n\nUser just said: "$userTargetText"\n\nYour brief reply (in character as $aiRole):',
+                'Conversation history:\n$contextStr\n\nUser just said: "$userTargetText"\n\nYour brief reply:',
           },
         ],
       });
@@ -3659,49 +3849,41 @@ The particle before the verb's doer (이/가) is ALWAYS the subject. Never swap 
   }
 
   // ==================================================================
-  // 📦 [Box 7-1-D] generateAiOpener — AI 첫 발화 생성 (스트리밍)
+  // 📦 [Box 7-1-E2] generateCloneOpener — 클론 AI 첫 발화 생성 (스트리밍)
+  // ------------------------------------------------------------------
+  // 클론 페르소나를 읽고, 해당 인물이 가장 먼저 꺼낼 법한 말 한 마디 생성.
   // ==================================================================
-  // 🎯 [롤플레이 대화 시작 3원칙]
-  //
-  // 원칙 1. AI가 먼저 말을 시작한다.
-  //         유저가 마이크를 누르면 AI가 오프닝 멘트를 먼저 발화하고,
-  //         TTS 재생 완료 후 마이크 청취가 시작된다.
-  //
-  // 원칙 2. 타겟 언어(targetLang)로만 말한다.
-  //         ai_role / user_role 이름이 한글로 주어져도
-  //         실제 AI 대사는 반드시 targetLang으로만 출력.
-  //         한국어 등 모국어를 절대 섞지 않는다.
-  //
-  // 원칙 3. 해당 역할이 실제 현실에서 가장 먼저 할 법한 자연스러운 말로 시작.
-  //         어색한 학습용 인사 X, 그 역할·상황에 딱 맞는 현실적 구어체 O.
-  //         (예: 바리스타 → "What can I get for you?",
-  //              의사 → "So, what brings you in today?",
-  //              트레이너 → "Is this your first session here?")
-  static Stream<String> generateAiOpener({
+  static Stream<String> generateCloneOpener({
     required String apiKey,
-    required String situation,
-    required String aiRole,
-    required String userRole,
+    required String cloneContext,
     required String targetLang,
+    String cloneSummary = '',
   }) async* {
     final client = http.Client();
     try {
-      final sysPrompt = 'You are a master actor and an English conversation coach playing "$aiRole".\n'
-          '\n'
-          '[SCENARIO]\n'
-          'Situation: $situation\n'
-          'Your role: $aiRole\n'
-          "The other person's role: $userRole\n"
-          '\n'
-          '[CORE RULES]\n'
-          '1. Start the scene IMMEDIATELY with your first line — no greetings, no meta-commentary.\n'
-          '2. Recognize the deep dramatic conflict and emotional tension behind the situation.\n'
-          '3. Do NOT mention any drama, movie, or show titles. Keep it real and seamless.\n'
-          '4. Your first line must be a compelling, emotionally charged statement or open-ended question that forces the user to respond, defend themselves, or negotiate.\n'
-          '5. Adopt the exact personality of "$aiRole". Use natural spoken $targetLang — NOT textbook dialogue.\n'
-          '6. ONE sentence only. Under 20 words. Maximum immersion, zero filler.\n'
-          '\n'
-          'Output: ONE powerful first line in $targetLang only.';
+      final safePersona = _truncatePersona(cloneContext, maxChars: 800);
+      final memoryLine = cloneSummary.isNotEmpty
+          ? '\n\n[MEMORY] 당신은 이 사람과의 과거 대화를 기억합니다: $cloneSummary'
+          : '';
+
+      final sysPrompt = """$safePersona$memoryLine
+
+[YOUR TASK]
+Based on the persona above, identify WHO you are to the user (parent, sibling, close friend, partner, coworker, etc.) and open the conversation with something real that reflects that relationship — NOT a generic greeting.
+
+[RULES]
+- Speak ONLY in $targetLang. Do NOT use Korean or any other language.
+- ONE sentence only. Under 10 words.
+- Match the persona's exact tone, energy, and vocabulary.
+- NEVER say bare "Hello", "Hi", "Hey!", or "How have you been?" — these are too generic.
+- Say something situational and relationship-specific:
+  · Parent/elder: "Did you eat yet?", "What time are you coming home?", "Got any plans today?"
+  · Sibling/close friend: "Dude, you won't believe what just happened.", "I was literally just about to text you."
+  · Partner: "You okay? You seemed off earlier.", "Miss me?"
+  · Colleague: "Rough day?", "Did you see the email they sent?"
+- If memory exists, reference it naturally instead of starting fresh.
+
+Output: ONE sentence in $targetLang only.""";
 
       final request = http.Request(
         'POST',
@@ -3714,44 +3896,170 @@ The particle before the verb's doer (이/가) is ALWAYS the subject. Never swap 
       request.body = jsonEncode({
         'model': 'gpt-4o-mini',
         'stream': true,
-        'temperature': 0.9,
-        'max_tokens': 60,
+        'temperature': 0.8,
+        'max_tokens': 40,
         'messages': [
           {'role': 'system', 'content': sysPrompt},
           {
             'role': 'user',
-            'content': 'Speak your opening line as "$aiRole" in $targetLang.',
+            'content':
+                'Start the conversation — say your opening line in $targetLang.',
           },
         ],
       });
 
       final response =
           await client.send(request).timeout(const Duration(seconds: 15));
-      if (response.statusCode != 200) {
-        yield '...';
-        return;
-      }
+      if (response.statusCode != 200) return;
 
-      await for (final chunk in response.stream
+      await for (final line in response.stream
           .transform(utf8.decoder)
           .transform(const LineSplitter())) {
-        if (chunk.startsWith('data: ') && chunk != 'data: [DONE]') {
+        if (line.startsWith('data: ') && line != 'data: [DONE]') {
           try {
-            final delta = jsonDecode(chunk.substring(6))['choices'][0]['delta']
-                ['content'];
+            final delta =
+                jsonDecode(line.substring(6))['choices'][0]['delta']['content'];
             if (delta != null) yield delta.toString();
           } catch (_) {}
         }
       }
     } catch (_) {
-      yield '...';
     } finally {
       client.close();
     }
   }
 
-}
+  // ==================================================================
+  // 📦 [Box 7-1-E1] confirmCloneIdentity — 이름 확정 (temperature 0.2)
+  // ------------------------------------------------------------------
+  // 페르소나 생성 후 "You are [name]." 정체성을 온도 0.2로 고정
+  // ==================================================================
+  static Future<String> confirmCloneIdentity({
+    required String apiKey,
+    required String cloneName,
+    required String persona,
+  }) async {
+    final client = http.Client();
+    try {
+      final res = await client
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.2,
+              'max_tokens': 700,
+              'messages': [
+                {
+                  'role': 'system',
+                  'content':
+                      'You are an AI persona editor. Finalize the identity of a clone character.',
+                },
+                {
+                  'role': 'user',
+                  'content': 'The clone\'s confirmed name is "$cloneName".\n\n'
+                      'Here is the extracted persona:\n$persona\n\n'
+                      'Rewrite this as a final, clean system prompt. '
+                      'It MUST begin with "You are $cloneName." — this is the confirmed identity. '
+                      'Preserve all personality traits. Be concise.',
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 20));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(res.bodyBytes));
+        return data['choices'][0]['message']['content'].toString().trim();
+      }
+    } catch (e) {
+      print('confirmCloneIdentity error: $e');
+    } finally {
+      client.close();
+    }
+    return persona;
+  }
 
+  // ==================================================================
+  // 📦 [Box 7-1-E] generatePersonaFromChat — 8차원 페르소나 추출
+  // ------------------------------------------------------------------
+  // 카톡 로그 → 말투/감정/습관어/관심사/관계/금지어까지 8차원 분석
+  // ==================================================================
+  static Future<String> generatePersonaFromChat({
+    required String apiKey,
+    required String chatLog,
+    String cloneName = '',
+  }) async {
+    final client = http.Client();
+    try {
+      final nameSection = cloneName.isNotEmpty
+          ? '''
+CRITICAL: The clone character is named "$cloneName". Even if the input is written FROM another person's perspective ABOUT "$cloneName" (e.g. a parent describing their child), you must generate the persona FOR "$cloneName" — not for the writer.
+- Start with: "You are $cloneName."
+- Identify who the writer/other party is relative to $cloneName (e.g. father, mother, friend) and include ONE line: "The user you are talking to is your [relationship]." — this tells the AI who it is speaking TO.'''
+          : '';
+      final sysPrompt = '''You are a persona extraction expert.
+Analyze the input and write a detailed persona profile for the clone character.
+This profile will become the system prompt for an AI role-playing as that person.
+
+$nameSection
+
+Write the persona using these 8 dimensions. Quote actual expressions where possible.
+
+1. IDENTITY & TONE - formal or casual? warm or blunt? energetic or laid-back?
+2. SPEAKING STYLE - sentence length? use of ellipses (...), dashes, ALL CAPS?
+3. EMOTIONAL PATTERNS - how do they react to joy, stress, surprise, bad news?
+4. SIGNATURE PHRASES - list 3-5 real phrases or words they use often
+5. INTERESTS - what do they talk about most?
+6. RELATIONSHIP DYNAMIC - how do they treat the user (teasing, caring, respectful, casual)?
+7. ANTI-PATTERNS - phrases that would sound completely wrong for them (e.g. corporate speak, overly polite AI-like phrases)
+8. SELF-INTRODUCTION - a 2-sentence "You are..." opener at the very top, followed by "The user you are talking to is your [relationship]."
+
+Format: Start with "You are [name]..." then cover each dimension briefly (1-3 sentences each).
+Output ONLY the persona profile. No preamble, no meta-commentary.''';
+
+      final res = await client
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.3,
+              'max_tokens': 1000,
+              'messages': [
+                {'role': 'system', 'content': sysPrompt},
+                {
+                  'role': 'user',
+                  'content': 'Chat log to analyze:\n\n$chatLog',
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(res.bodyBytes));
+        return data['choices'][0]['message']['content'].toString().trim();
+      }
+    } catch (e) {
+      print('generatePersonaFromChat error: $e');
+    } finally {
+      client.close();
+    }
+
+    // 실패 시 구체적 폴백 페르소나
+    return '''You are a close friend who chats in a relaxed, casual tone.
+You keep responses short - usually 1 sentence, max 2.
+You\'re warm but not over-the-top. You tease a little, but always with care.
+You use casual language and contractions, never corporate or formal.
+You never sound like an AI - no "I understand", no "Of course!", no "I\'m happy to help".''';
+  }
+}
 
 class _LangIconPainter extends CustomPainter {
   final bool active;
@@ -3842,4 +4150,3 @@ class _LangIconPainter extends CustomPainter {
   @override
   bool shouldRepaint(_LangIconPainter old) => old.active != active;
 }
-

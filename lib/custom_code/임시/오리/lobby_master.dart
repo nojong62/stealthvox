@@ -208,10 +208,6 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
         deepLinkData['deep_link_sub2']?.toString() ??
         params['room_id']?.toString() ??
         deepLinkData['room_id']?.toString() ??
-        params['duo_room_id']?.toString() ??
-        deepLinkData['duo_room_id']?.toString() ??
-        params['duoRoomId']?.toString() ??
-        deepLinkData['duoRoomId']?.toString() ??
         params['roomId']?.toString() ??
         params['af_sub2']?.toString();
 
@@ -379,116 +375,65 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     );
   }
 
-  void _showBillingDebugLog(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF0F172A),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      isScrollControlled: true,
-      builder: (ctx) {
-        final logs = BillingTicker.instance.billingLogs;
-        final text = logs.isEmpty ? null : logs.join('\n');
+  void _showBillingDebugDialog(BuildContext context) {
+    final ticker = BillingTicker.instance;
+    final lines = <String>[
+      '═══ BillingTicker State ═══',
+      'remainingTime (FFAppState): ${FFAppState().remainingTime}s',
+      'notifier.value:             ${ticker.remainingSecondsNotifier.value}s',
+      'currentRate:                ${ticker.currentRate.name} (x${ticker.currentRate.multiplier})',
+      'isPaused:                   ${ticker.isPaused}',
+      'fractionalDebt:             ${ticker.fractionalDebt.toStringAsFixed(3)}',
+      'unflushedDeducted:          ${ticker.unflushedDeducted}s',
+      'lastFlushAt:                ${ticker.lastFlushAt.toIso8601String().substring(11, 19)}',
+      'lastFlushResult:            ${ticker.lastFlushResult ?? "(none)"}',
+      '',
+      '═══ Recent History (최신순) ═══',
+      if (ticker.history.isEmpty) '(no entries yet)',
+      for (final e in ticker.history)
+        '${e['time']}  ${e['rate'].toString().padRight(10)} -${e['deducted']}s → ${e['remaining']}s',
+    ];
+    final text = lines.join('\n');
 
-        return DraggableScrollableSheet(
-          initialChildSize: 0.6,
-          maxChildSize: 0.9,
-          minChildSize: 0.3,
-          expand: false,
-          builder: (_, controller) => Column(
-            children: [
-              Container(
-                margin: const EdgeInsets.symmetric(vertical: 12),
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.white24,
-                  borderRadius: BorderRadius.circular(2),
-                ),
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF0F172A),
+        title: const Text('🔧 Billing Debug',
+            style: TextStyle(color: Colors.white)),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: SelectableText(
+              text,
+              style: const TextStyle(
+                color: Colors.white,
+                fontFamily: 'monospace',
+                fontSize: 12,
               ),
-              const Text(
-                'BILLING DEBUG LOG',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 2,
-                ),
-              ),
-              const SizedBox(height: 12),
-              const Divider(color: Colors.white12, height: 1),
-              Expanded(
-                child: logs.isEmpty
-                    ? const Center(
-                        child: Text(
-                          '로그가 없습니다.',
-                          style:
-                              TextStyle(color: Colors.white38, fontSize: 14),
-                        ),
-                      )
-                    : ListView.builder(
-                        controller: controller,
-                        padding: const EdgeInsets.all(12),
-                        itemCount: logs.length,
-                        itemBuilder: (_, i) => Text(
-                          logs[i],
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontFamily: 'monospace',
-                            fontSize: 12,
-                            height: 1.6,
-                          ),
-                        ),
-                      ),
-              ),
-              const Divider(color: Colors.white12, height: 1),
-              SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 12),
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: text == null
-                            ? Colors.white12
-                            : const Color(0xFF3B82F6),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        padding:
-                            const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                      onPressed: text == null
-                          ? null
-                          : () {
-                              Clipboard.setData(
-                                  ClipboardData(text: text));
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                      '✅ BILLING 로그가 복사되었습니다'),
-                                  duration: Duration(seconds: 2),
-                                ),
-                              );
-                            },
-                      child: const Text(
-                        '로그 복사',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 15,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
-        );
-      },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: text));
+              ScaffoldMessenger.of(ctx).showSnackBar(
+                const SnackBar(
+                  content: Text('📋 클립보드에 복사됨'),
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            },
+            child:
+                const Text('📋 복사', style: TextStyle(color: Color(0xFF60A5FA))),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('닫기', style: TextStyle(color: Colors.white70)),
+          ),
+        ],
+      ),
     );
   }
 
@@ -593,12 +538,11 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   }
 
   Widget _buildSleekLangSelector(
-      String label, String value, Function(String?) onChanged,
-      {Color labelColor = Colors.white54}) {
+      String label, String value, Function(String?) onChanged) {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(label,
-          style: TextStyle(
-              color: labelColor,
+          style: const TextStyle(
+              color: Colors.white54,
               fontSize: 11,
               letterSpacing: 1.5,
               fontWeight: FontWeight.bold)),
@@ -725,7 +669,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                             children: [
                               GestureDetector(
                                 onLongPress: () =>
-                                    _showBillingDebugLog(context),
+                                    _showBillingDebugDialog(context),
                                 child: _buildGlassContainer(
                                     child: Column(children: [
                                   Text("REMAINING TIME",
@@ -740,7 +684,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                                           color: appState.remainingTime > 60
                                               ? Colors.white
                                               : const Color(0xFFFF453A),
-                                          fontSize: 48,
+                                          fontSize: 64,
                                           fontWeight: FontWeight.bold,
                                           shadows: [
                                             Shadow(
@@ -762,17 +706,18 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                                             "ORIGIN",
                                             appState.nativeLang,
                                             (val) => setState(() =>
-                                                appState.nativeLang = val!),
-                                            labelColor:
-                                                const Color(0xFF93C5FD)),
+                                                appState.nativeLang = val!)),
+                                        const SizedBox(height: 20),
+                                        const Center(
+                                            child: Icon(Icons.sync_alt_rounded,
+                                                color: Colors.white24,
+                                                size: 24)),
                                         const SizedBox(height: 20),
                                         _buildSleekLangSelector(
                                             "TARGET",
                                             appState.targetLang,
                                             (val) => setState(() =>
-                                                appState.targetLang = val!),
-                                            labelColor:
-                                                const Color(0xFF4ADE80)),
+                                                appState.targetLang = val!)),
                                         const SizedBox(height: 32),
                                         const Text("AI TONE",
                                             style: TextStyle(

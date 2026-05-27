@@ -70,6 +70,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   Timer? _idleAutoReturnTimer;
   bool _isIdlePaused = false;
   bool _hasAutoReturnedToModeSelect = false;
+  bool _showIdleBanner = false;
   // ── Idle Pause Toast ──────────────────────────────────────────────────────
   bool _showPauseToast = false;
   Timer? _pauseToastTimer;
@@ -81,7 +82,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     if (_isIdlePaused) {
       _isIdlePaused = false;
       _pauseToastTimer?.cancel();
-      if (mounted) setState(() => _showPauseToast = false);
+      if (mounted) setState(() {
+        _showIdleBanner = false;
+        _showPauseToast = false;
+      });
       BillingTicker.instance.resume();
       BillingTicker.instance.logMode('study_room');
     }
@@ -97,7 +101,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     _pauseToastTimer = Timer(const Duration(seconds: 1), () {
       if (mounted) setState(() => _showPauseToast = false);
     });
-    if (mounted) setState(() => _showPauseToast = true);
+    if (mounted) setState(() {
+      _showIdleBanner = true;
+      _showPauseToast = true;
+    });
   }
 
   void _handleIdleAutoReturn() {

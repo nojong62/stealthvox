@@ -48,397 +48,234 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 
 
 
-StealthVox 사용자 Usage 화면 요약형 개편 지시문
 
-수정 대상:
-
-lib/custom_code/widgets/store_master.dart
+StealthVox Idle UI 수정 지시문
 
 목표:
 
-현재 사용자용 Usage 화면이 초 단위 로그처럼 너무 자세하게 보인다.
-정식 앱 기준으로 사용자에게는 상세 로그가 아니라 요약형 사용 내역을 보여주도록 변경한다.
+기존에 만든 큰 무반응 안내 배너 문구를 제거하고, 작은 노란색 pause 아이콘 + 1초짜리 “pause” 팝업 방식으로 변경한다.
 
-단, 관리자용 Admin Time Log는 기존처럼 초 단위 상세 로그를 유지한다.
+수정 대상:
 
-
----
-
-1. 기본 방향
-
-사용자용 Usage는 다음 3개 중심으로 개편한다.
-
-1. 오늘 사용 시간
-2. 이번 주 사용 시간
-3. 최근 세션
-
-그리고 사용 시간을 다음 2개 그룹으로 구분한다.
-
-대화방
-공부방
+routine_mode_duo.dart
+routine_mode_roleplay.dart
+routine_mode_clone.dart
+routine_mode_step_expand.dart
+chat_history_master.dart
+chat_history_list_master.dart
 
 
 ---
 
-2. 그룹 분류 기준
+1. 기존 큰 안내 배너 제거
 
-usage_logs의 mode 값을 기준으로 분류한다.
+각 파일에서 기존 idle 안내 배너를 제거하거나 비활성화한다.
 
-대화방 그룹
+제거 대상 예시:
 
-다음 mode는 대화방으로 분류한다.
-
-duo
-stealth_room
-
-사용자 표시명:
-
-대화방
-
-영어 UI면:
-
-Talk Room
-
-
----
-
-공부방 그룹
-
-다음 mode는 공부방으로 분류한다.
-
-roleplay
-clone
-step_expand
-study_room
-history
-history_list
-chat_history
-ai_practice
-
-사용자 표시명:
-
-공부방
-
-영어 UI면:
-
-Study Room
-
-
----
-
-3. 사용자 Usage에서 숨길 정보
-
-사용자용 Usage에는 아래 정보를 직접 표시하지 않는다.
-
-초 단위 세부 로그
-2s 사용 같은 짧은 기록
-rate
-before_seconds
-after_seconds
-room_id
-mode 원문
-Firestore 경로
-debug 문구
-
-이 정보는 관리자용 Admin Time Log에만 유지한다.
-
-
----
-
-4. 짧은 기록 숨김
-
-사용자용 Usage에서는 너무 짧은 기록을 숨긴다.
-
-기준:
-
-actual_seconds < 10
-
-또는 actual_seconds가 없으면:
-
-seconds_used < 10
-
-이 기록은 사용자 Usage 목록/요약에서 제외한다.
-
-단, 관리자용 Admin Time Log에서는 그대로 보여준다.
-
-
----
-
-5. 오늘 사용 시간 요약
-
-Usage 상단에 오늘 사용 시간 요약 카드를 추가한다.
-
-표시 예:
-
-Today
-대화방 12m
-공부방 28m
-
-영어 UI면:
-
-Today
-Talk Room 12m
-Study Room 28m
-
-계산 기준:
-
-created_at이 오늘인 usage_logs
-actual_seconds 기준 합산
-actual_seconds가 없으면 seconds_used 기준
-10초 미만 기록은 제외
-
-주의:
-
-사용자 입장에서는 “실제 사용 시간” 기준이 자연스럽다.
-차감 시간은 할인 모드 때문에 실제 시간과 다를 수 있으므로, 요약에는 기본적으로 실제 사용 시간을 쓴다.
-
-
----
-
-6. 이번 주 사용 시간 요약
-
-오늘 요약 아래에 이번 주 사용 시간 요약 카드를 추가한다.
-
-표시 예:
-
-This Week
-대화방 1h 10m
-공부방 2h 35m
-
-계산 기준:
-
-이번 주 월요일 00:00부터 현재까지
-actual_seconds 기준 합산
-actual_seconds가 없으면 seconds_used 기준
-10초 미만 기록 제외
-
-
----
-
-7. 최근 세션
-
-요약 아래에 최근 세션을 보여준다.
-
-표시 개수:
-
-최근 5개
-
-표시 예:
-
-Recent Sessions
-
-공부방 · 14m
-2026.05.26 16:33
-
-대화방 · 7m
-2026.05.26 15:10
-
-공부방 · 실제 10m 사용 · 5m 차감
-2026.05.26 14:20
-
-최근 세션 기준:
-
-created_at 최신순
-10초 미만 기록 제외
-최대 5개
-
-
----
-
-8. 할인/차감 시간 표시 방식
-
-일반 세션은 단순히 실제 사용 시간만 표시한다.
-
-공부방 · 14m
-대화방 · 7m
-
-다만 실제 사용 시간과 차감 시간이 다르면 이렇게 표시한다.
-
-공부방 · 실제 10m 사용 · 5m 차감
-
-조건:
-
-actual_seconds != seconds_used
-
-단, 초 단위가 너무 자세히 보이지 않게 1분 이상은 분 단위 중심으로 반올림 또는 자연 표시한다.
-
-예:
-
-29s → 30s
-74s → 1m
-134s → 2m
-3600s → 1h
-
-
----
-
-9. 시간 표시 함수
-
-사용자용 시간 표시 함수는 기존 초 단위 상세 함수와 분리한다.
-
-추가 함수 예:
-
-String _formatUsageDurationForUser(int seconds)
-
-표시 규칙:
-
-0~59초 → 30s, 45s 정도로 표시 가능
-1분 이상 → 1m, 2m, 14m
-1시간 이상 → 1h 20m
-
-단, 10초 미만은 Usage에서 제외하므로 거의 표시되지 않는다.
-
-관리자용 Admin Time Log는 기존 상세 _formatDurationFromSeconds()를 유지한다.
-
-
----
-
-10. UI 구조
-
-사용자용 Usage 시트 구조를 다음처럼 만든다.
-
-📊 Usage
-
-[Today]
-Talk Room    12m
-Study Room   28m
-
-[This Week]
-Talk Room    1h 10m
-Study Room   2h 35m
-
-[Recent Sessions]
-Study Room · 14m
-2026.05.26 16:33
-
-Talk Room · 7m
-2026.05.26 15:10
-
-현재 앱이 한국어 중심이면:
-
-📊 Usage
-
-[Today]
-대화방    12m
-공부방    28m
-
-[This Week]
-대화방    1h 10m
-공부방    2h 35m
-
-[Recent Sessions]
-공부방 · 14m
-2026.05.26 16:33
-
-버튼명은 기존처럼 Usage 유지.
-
-
----
-
-11. 데이터 조회
-
-기존과 동일하게:
-
-users/{uid}/usage_logs
-
-최신순 조회는 유지한다.
-
-요약 계산을 위해 충분한 기간을 가져온다.
-
-권장:
-
-최근 200개 또는 최근 30일
-
-현재 구현이 최신순 100건이면 우선 200건으로 늘려도 된다.
-
-단, 과도한 읽기 비용이 생기지 않도록 무제한 조회 금지.
-
-
----
-
-12. 빈 상태
-
-사용자용 Usage에 표시할 유효 기록이 없으면:
-
-No usage history yet.
-Your usage will appear here after a session.
-
-또는 한국어:
-
-아직 사용 내역이 없습니다.
-대화를 시작하면 사용 시간이 이곳에 표시됩니다.
-
-
----
-
-13. 관리자 Time Log 유지
+_buildIdleBanner()
+복습이 잠시 멈췄습니다...
+연습이 잠시 멈췄습니다...
+잠시 멈춤 상태입니다...
+재생하거나 연습을 시작하면...
 
 중요:
 
-_openAdminTimeLogSheet()는 기존대로 유지한다.
+30초 pause 로직 자체는 유지한다.
 
-관리자용에서는 계속 다음 정보를 볼 수 있어야 한다.
+60초/90초 자동 이동 로직은 기존 정책대로 유지한다.
 
-mode 원문
-rate
-actual_seconds
-seconds_used
-before_seconds
-after_seconds
-room_id
-created_at
-10초 미만 기록
+History / History List는 자동 이동 없음 정책 유지.
 
-사용자용 Usage 개편 때문에 관리자용 검증 기능이 깨지면 안 된다.
+BillingTicker.pause(), resume(), logMode() 흐름은 건드리지 않는다.
 
-
----
-
-14. 완료 기준
-
-1. 사용자 Usage 화면이 초 단위 로그 나열 방식이 아니라 요약형으로 보인다.
-
-
-2. Today 요약에 대화방/공부방 사용 시간이 구분되어 표시된다.
-
-
-3. This Week 요약에 대화방/공부방 사용 시간이 구분되어 표시된다.
-
-
-4. Recent Sessions는 최근 5개만 표시된다.
-
-
-5. 10초 미만 기록은 사용자 Usage에서 숨겨진다.
-
-
-6. 관리자용 Admin Time Log에는 10초 미만 기록도 그대로 보인다.
-
-
-7. 사용자용 Usage에는 rate, before_seconds, after_seconds, room_id, mode 원문이 노출되지 않는다.
-
-
-8. 실제 사용 시간과 차감 시간이 다르면 “실제 Xm 사용 · Ym 차감” 형태로 표시된다.
-
-
-9. 기존 Receipt 기능은 그대로 작동한다.
-
-
-10. BillingTicker와 usage_logs 저장 로직은 건드리지 않는다.
-
-
-11. 신규 flutter analyze 오류가 없어야 한다.
-
-
-12. APK/AAB 빌드는 하지 않는다.
-
+UI 표시 방식만 변경한다.
 
 
 
 ---
 
-핵심은 이겁니다.
+2. 30초 무반응 시 새 UI
 
-사용자 Usage = 요약 리포트
-관리자 Time Log = 상세 검증 로그
+30초 무반응으로 _handleIdlePause()가 실행되면:
 
-이렇게 나누면 정식 앱에서도 부담 없이 유지할 수 있습니다.
+BillingTicker.pause()
+작은 노란색 pause 아이콘 표시
+pause 팝업 1초 표시 후 자동 사라짐
+
+아이콘은 화면을 가리지 않게 작게 표시한다.
+
+권장 아이콘:
+
+Icons.pause_circle_filled_rounded
+
+색상:
+
+Color(0xFFFFD54F)
+
+또는 기존 amber 계열:
+
+Colors.amberAccent
+
+크기:
+
+18~22
+
+
+---
+
+3. pause 팝업
+
+30초 무반응이 감지되는 순간, 화면 중앙 또는 상단 중앙에 작게:
+
+pause
+
+만 표시한다.
+
+조건:
+
+글자는 영어 소문자 pause
+
+표시 시간은 약 1초
+
+1초 후 자동 사라짐
+
+긴 안내문 금지
+
+SnackBar처럼 화면 하단을 크게 차지하지 말 것
+
+콘텐츠 목록이나 대화 자막을 가리지 않게 작게 표시
+
+
+권장 구현:
+
+_showPauseToast = true
+Timer(Duration(seconds: 1), () {
+  if (mounted) setState(() => _showPauseToast = false);
+});
+
+필요 상태값:
+
+bool _showPauseToast = false;
+Timer? _pauseToastTimer;
+
+dispose에서 반드시 정리:
+
+_pauseToastTimer?.cancel();
+
+
+---
+
+4. 작은 pause 아이콘 표시 위치
+
+각 화면에서 공간을 적게 차지하는 위치에 표시한다.
+
+권장 위치:
+
+상단 우측 작은 아이콘 영역
+또는 기존 상단 상태 표시줄 근처
+또는 Stack의 Positioned(top: 8, right: 12)
+
+표시 조건:
+
+_isIdlePaused == true
+
+아이콘만 표시하고 문구는 표시하지 않는다.
+
+예:
+
+if (_isIdlePaused)
+  Icon(
+    Icons.pause_circle_filled_rounded,
+    color: Color(0xFFFFD54F),
+    size: 20,
+  )
+
+
+---
+
+5. 사용자 재조작 시 처리
+
+사용자가 다시 조작하면:
+
+_isIdlePaused = false
+_showPauseToast = false
+_pauseToastTimer?.cancel()
+BillingTicker.resume()
+logMode(...)
+_resetIdleTimer()
+
+그리고 작은 pause 아이콘도 사라져야 한다.
+
+사용자 동작 기준:
+
+말하기 버튼 누름
+재생 버튼 누름
+다음 진행
+터치
+스크롤
+회차 이동
+역할 선택
+
+
+---
+
+6. 기존 자동 이동 정책 유지
+
+UI만 바꾸고 정책은 유지한다.
+
+Duo / Stealth Room
+- 30초: pause + 작은 노란 아이콘 + pause 1초 팝업
+- 60초: 모드 선택 화면 자동 이동
+
+Roleplay / Clone / Step Expand
+- 30초: pause + 작은 노란 아이콘 + pause 1초 팝업
+- 90초: 모드 선택 화면 자동 이동
+
+History / History List
+- 30초: pause + 작은 노란 아이콘 + pause 1초 팝업
+- 자동 이동 없음
+
+
+---
+
+7. 완료 기준
+
+1. 기존 큰 idle 안내 문구가 더 이상 보이지 않는다.
+
+
+2. 30초 무반응 시 작은 노란 pause 아이콘만 표시된다.
+
+
+3. 30초 무반응 순간 pause 팝업이 약 1초만 보이고 사라진다.
+
+
+4. 화면 콘텐츠나 History 목록을 가리지 않는다.
+
+
+5. 사용자가 다시 조작하면 pause 아이콘이 사라진다.
+
+
+6. 기존 BillingTicker pause/resume/logMode 흐름은 유지된다.
+
+
+7. 60초/90초 자동 이동 정책은 기존대로 유지된다.
+
+
+8. History / History List는 자동 이동하지 않는다.
+
+
+9. dispose 시 timer 정리가 되어 setState 오류가 없어야 한다.
+
+
+10. APK/AAB 빌드는 하지 않는다.
+
+
+11. flutter analyze/check 수준까지만 확인한다.
+
+
+
+
+---
+
+핵심은 기능은 유지하고, 경고문 UI만 조용한 Auto Pause 표시로 바꾸는 것입니다.
