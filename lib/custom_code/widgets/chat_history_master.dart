@@ -186,13 +186,16 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // ── Idle Timeout (무반응 과금 정지, History: 자동 이동 없음) ──────────────
   Timer? _idlePauseTimer;
   bool _isIdlePaused = false;
-  bool _showIdleBanner = false;
+  // ── Idle Pause Toast ──────────────────────────────────────────────────────
+  bool _showPauseToast = false;
+  Timer? _pauseToastTimer;
 
   void _resetIdleTimer() {
     _idlePauseTimer?.cancel();
     if (_isIdlePaused) {
       _isIdlePaused = false;
-      if (mounted) setState(() => _showIdleBanner = false);
+      _pauseToastTimer?.cancel();
+      if (mounted) setState(() => _showPauseToast = false);
       BillingTicker.instance.resume();
       BillingTicker.instance.logMode('history');
     }
@@ -203,7 +206,11 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     if (!mounted || _isIdlePaused) return;
     _isIdlePaused = true;
     BillingTicker.instance.pause();
-    if (mounted) setState(() => _showIdleBanner = true);
+    _pauseToastTimer?.cancel();
+    _pauseToastTimer = Timer(const Duration(seconds: 1), () {
+      if (mounted) setState(() => _showPauseToast = false);
+    });
+    if (mounted) setState(() => _showPauseToast = true);
   }
 
   void _clearIdleTimers() {
@@ -214,31 +221,47 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   Widget _buildIdleBanner() => const SizedBox.shrink();
 
   Widget _buildIdleOverlay() {
-    return AnimatedOpacity(
-      opacity: _showIdleBanner ? 1.0 : 0.0,
-      duration: const Duration(milliseconds: 400),
+    return Positioned.fill(
       child: IgnorePointer(
-        ignoring: !_showIdleBanner,
-        child: Align(
-          alignment: const Alignment(0.0, -0.65),
-          child: GestureDetector(
-            onTap: _resetIdleTimer,
-            child: Container(
-              width: 80,
-              height: 80,
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.45),
-                shape: BoxShape.circle,
-                border: Border.all(
-                    color: Colors.amberAccent.withOpacity(0.6), width: 2),
+        child: Stack(
+          children: [
+            // ── 작은 pause 아이콘 (상단 우측) ──
+            if (_isIdlePaused)
+              Positioned(
+                top: 8,
+                right: 12,
+                child: const Icon(
+                  Icons.pause_circle_filled_rounded,
+                  color: Color(0xFFFFD54F),
+                  size: 20,
+                ),
               ),
-              child: const Icon(
-                Icons.pause_circle_filled_rounded,
-                color: Colors.amberAccent,
-                size: 52,
+            // ── 1초 pause 팝업 (상단 중앙) ──
+            if (_showPauseToast)
+              Align(
+                alignment: Alignment.topCenter,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 52),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.55),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Text(
+                      'pause',
+                      style: TextStyle(
+                        color: Color(0xFFFFD54F),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+                  ),
+                ),
               ),
-            ),
-          ),
+          ],
         ),
       ),
     );
@@ -281,6 +304,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   @override
   void dispose() {
     _clearIdleTimers();
+    _pauseToastTimer?.cancel();
     _utteranceSafetyTimer?.cancel();
     _silenceTimer?.cancel();
     _roleBubbleTimer?.cancel();
