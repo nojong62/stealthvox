@@ -268,115 +268,34 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 
   // ── Idle Timeout (무반응 자동 일시정지) ────────────────────────────────────
   Timer? _idlePauseTimer;
-  Timer? _idleAutoReturnTimer;
   bool _isIdlePaused = false;
-  bool _hasAutoReturnedToModeSelect = false;
-  bool _showIdleBanner = false;
-  // ── Idle Pause Toast ──────────────────────────────────────────────────────
-  bool _showPauseToast = false;
-  Timer? _pauseToastTimer;
 
   void _resetIdleTimer() {
-    if (_hasAutoReturnedToModeSelect) return;
     _idlePauseTimer?.cancel();
-    _idleAutoReturnTimer?.cancel();
     if (_isIdlePaused) {
       _isIdlePaused = false;
-      _pauseToastTimer?.cancel();
-      if (mounted) setState(() {
-        _showIdleBanner = false;
-        _showPauseToast = false;
-      });
+      if (mounted) setState(() {});
       BillingTicker.instance.resume();
       BillingTicker.instance.logMode('roleplay');
     }
     _idlePauseTimer = Timer(const Duration(seconds: 30), _handleIdlePause);
-    _idleAutoReturnTimer = Timer(const Duration(seconds: 90), _handleIdleAutoReturn);
   }
 
   void _handleIdlePause() {
-    if (!mounted || _hasAutoReturnedToModeSelect || _isIdlePaused) return;
+    if (!mounted || _isIdlePaused) return;
     _isIdlePaused = true;
     BillingTicker.instance.pause();
-    _pauseToastTimer?.cancel();
-    _pauseToastTimer = Timer(const Duration(seconds: 1), () {
-      if (mounted) setState(() => _showPauseToast = false);
-    });
-    if (mounted) setState(() {
-      _showIdleBanner = true;
-      _showPauseToast = true;
-    });
-  }
-
-  void _handleIdleAutoReturn() {
-    if (!mounted || _hasAutoReturnedToModeSelect) return;
-    _hasAutoReturnedToModeSelect = true;
-    _clearIdleTimers();
-    _stopEverything();
-    if (!_isIdlePaused) BillingTicker.instance.pause();
-    if (!mounted) return;
-    if (StealthRoomMaster.exitCurrentMode != null) {
-      StealthRoomMaster.exitCurrentMode!();
-    } else if (Navigator.canPop(context)) {
-      Navigator.pop(context);
-    }
+    if (mounted) setState(() {});
   }
 
   void _clearIdleTimers() {
     _idlePauseTimer?.cancel();
-    _idleAutoReturnTimer?.cancel();
     _idlePauseTimer = null;
-    _idleAutoReturnTimer = null;
   }
 
   Widget _buildIdleBanner() => const SizedBox.shrink();
 
-  Widget _buildIdleOverlay() {
-    return Positioned.fill(
-      child: IgnorePointer(
-        child: Stack(
-          children: [
-            // ── 작은 pause 아이콘 (상단 우측) ──
-            if (_isIdlePaused)
-              Positioned(
-                top: 8,
-                right: 12,
-                child: const Icon(
-                  Icons.pause_circle_filled_rounded,
-                  color: Color(0xFFFFD54F),
-                  size: 20,
-                ),
-              ),
-            // ── 1초 pause 팝업 (상단 중앙) ──
-            if (_showPauseToast)
-              Align(
-                alignment: Alignment.topCenter,
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 52),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.55),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Text(
-                      'pause',
-                      style: TextStyle(
-                        color: Color(0xFFFFD54F),
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 1.2,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
+  Widget _buildIdleOverlay() => const SizedBox.shrink();
   // ─────────────────────────────────────────────────────────────────────────
 
   String _lastRawTranscript = ''; // 정정 감지용 직전 유저 발화 원문
@@ -453,7 +372,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   @override
   void dispose() {
     _clearIdleTimers();
-    _pauseToastTimer?.cancel();
     BillingTicker.instance.pause();
     _forceSaveToFirestore();
     _stopEverything();
@@ -1848,6 +1766,19 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
             ),
           ),
           Row(children: [
+            // ── Idle pause 아이콘 (T버튼 왼쪽, 클릭 시 pause 해제) ──
+            if (_isIdlePaused)
+              GestureDetector(
+                onTap: _resetIdleTimer,
+                child: const Padding(
+                  padding: EdgeInsets.only(left: 4, right: 6),
+                  child: Icon(
+                    Icons.pause_circle_filled_rounded,
+                    color: Color(0xFFFFD54F),
+                    size: 20,
+                  ),
+                ),
+              ),
             IconButton(
               icon: Icon(
                 Icons.format_size,

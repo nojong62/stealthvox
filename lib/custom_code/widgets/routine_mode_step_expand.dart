@@ -1712,6 +1712,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       bool evaporated = false;
       bool retried = false;
       bool corrected = false; // 유저가 AI의 오해를 정정하는 경우 → 직전 HOST+SYSTEM 쌍 삭제 후 재시작
+      bool clarified = false; // 주어/목적어 모호 → AI 되묻기
       bool _part2Started = false; // \n\n 이후 진입 여부
       bool hasDoubleNewline = false; // 2파트 구조 여부
       bool firstChunkSent = false;
@@ -1739,6 +1740,13 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         if (userTargetText.contains("[CORRECTION]")) {
           corrected = true;
           _log('🔄 [CORRECTION]', '정정 감지 → 직전 HOST+SYSTEM 삭제 후 재시작');
+          break;
+        }
+
+        // 되묻기 감지: 주어/목적어 모호 → AI 되묻기
+        if (userTargetText.contains("[CLARIFY]")) {
+          clarified = true;
+          _log('❓ [CLARIFY]', '되묻기 감지 → clarification 처리');
           break;
         }
 
@@ -1860,6 +1868,41 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         }
         // 정정된 발화로 해당 턴 재처리
         _processRelayPipeline(finalTranscript);
+        return;
+      }
+
+      // ❓ [CLARIFY] 유저 발화 주어/목적어 모호 → AI 되묻기 버블 + TTS + STT 재시작
+      if (clarified) {
+        _turnCounter--;
+        final clarifyText =
+            userTargetText.replaceFirst(RegExp(r'^\[CLARIFY\]\s*'), '');
+        if (mounted) {
+          setState(() {
+            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+            if (hostIndex < _localMessages.length)
+              _localMessages.removeAt(hostIndex);
+            _localMessages.add(
+                {'role': 'SYSTEM', 'target': clarifyText, 'original': ''});
+          });
+          _scrollToBottom();
+        }
+        _ttsQueueManager.setUserTurn(false);
+        _ttsQueueManager.setAiPaused(false);
+        final clarifyTts = ChunkedTtsFetcher(
+          _openAiKey,
+          _ttsQueueManager,
+          'alloy',
+          isUser: false,
+          onLog: _log,
+        );
+        clarifyTts.addText(clarifyText);
+        int waitTicks = 0;
+        while ((clarifyTts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
+            mounted) {
+          await Future.delayed(const Duration(milliseconds: 50));
+          if (++waitTicks > 200) break;
+        }
+        if (mounted && _isConversationActive) _startDeepgramListening();
         return;
       }
 
@@ -4222,6 +4265,21 @@ Output:
 Suddenly.
 
 I suddenly remembered to call Alex.
+
+[CLARIFICATION GUARD]
+Before translating, check: is the subject or object of the utterance clear from the input OR resolvable from History?
+If clear → proceed with normal translation.
+If genuinely ambiguous AND History cannot resolve it → output EXACTLY:
+[CLARIFY] <short, natural clarification question in $targetLang>
+
+Style pool — pick ONE and VARY each time (never repeat the same phrasing twice in a row):
+- Direct: "Who are you talking about?"
+- Gentle: "Just to be sure — who do you mean?"
+- Curious: "Oh — who's that about?"
+- Confirming: "Do you mean [person/thing from history]?"
+- Playful: "I'm gonna need a name to work with here!"
+
+NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
 
 [RULES]
 - CASE 2 output MUST have the empty line (\n\n) between parts.
