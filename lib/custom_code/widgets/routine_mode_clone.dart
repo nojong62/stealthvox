@@ -115,24 +115,35 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
     _idleAutoReturnTimer = null;
   }
 
-  Widget _buildIdleBanner() {
-    if (!_showIdleBanner) return const SizedBox.shrink();
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      color: const Color(0xFF1C1C1E),
-      child: const Row(
-        children: [
-          Icon(Icons.pause_circle_outline_rounded,
-              color: Colors.amberAccent, size: 16),
-          SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              '연습이 잠시 멈췄습니다. 계속하려면 다시 진행해 주세요.',
-              style: TextStyle(color: Colors.amberAccent, fontSize: 12),
+  Widget _buildIdleBanner() => const SizedBox.shrink();
+
+  Widget _buildIdleOverlay() {
+    return AnimatedOpacity(
+      opacity: _showIdleBanner ? 1.0 : 0.0,
+      duration: const Duration(milliseconds: 400),
+      child: IgnorePointer(
+        ignoring: !_showIdleBanner,
+        child: Align(
+          alignment: const Alignment(0.0, -0.65),
+          child: GestureDetector(
+            onTap: _resetIdleTimer,
+            child: Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.45),
+                shape: BoxShape.circle,
+                border: Border.all(
+                    color: Colors.amberAccent.withOpacity(0.6), width: 2),
+              ),
+              child: const Icon(
+                Icons.pause_circle_filled_rounded,
+                color: Colors.amberAccent,
+                size: 52,
+              ),
             ),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -2337,8 +2348,12 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
           const SizedBox(height: 10),
           _buildTopControls(),
           const SizedBox(height: 10),
-          Expanded(child: _buildChatList()),
-          _buildIdleBanner(),
+          Expanded(
+            child: Stack(children: [
+              _buildChatList(),
+              _buildIdleOverlay(),
+            ]),
+          ),
           _buildControlArea(bottomPad),
         ]),
       ),

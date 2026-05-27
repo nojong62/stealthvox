@@ -137,24 +137,35 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     _idleAutoReturnTimer = null;
   }
 
-  Widget _buildIdleBanner() {
-    if (!_showIdleBanner) return const SizedBox.shrink();
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      color: const Color(0xFF1C1C1E),
-      child: const Row(
-        children: [
-          Icon(Icons.pause_circle_outline_rounded,
-              color: Colors.amberAccent, size: 16),
-          SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              '잠시 멈춤 상태입니다. 말하기 버튼을 누르면 다시 시작됩니다.',
-              style: TextStyle(color: Colors.amberAccent, fontSize: 12),
+  Widget _buildIdleBanner() => const SizedBox.shrink();
+
+  Widget _buildIdleOverlay() {
+    return AnimatedOpacity(
+      opacity: _showIdleBanner ? 1.0 : 0.0,
+      duration: const Duration(milliseconds: 400),
+      child: IgnorePointer(
+        ignoring: !_showIdleBanner,
+        child: Align(
+          alignment: const Alignment(0.0, -0.65),
+          child: GestureDetector(
+            onTap: _resetIdleTimer,
+            child: Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.45),
+                shape: BoxShape.circle,
+                border: Border.all(
+                    color: Colors.amberAccent.withOpacity(0.6), width: 2),
+              ),
+              child: const Icon(
+                Icons.pause_circle_filled_rounded,
+                color: Colors.amberAccent,
+                size: 52,
+              ),
             ),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -896,31 +907,34 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
               children: [
                 _buildTopBar(),
                 Expanded(
-                  child: _localMessages.isEmpty
-                      ? const Center(
-                          child: Text("하단의 마이크 버튼을 눌러 통역을 시작하세요.",
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                  color: Colors.white54, height: 1.5)))
-                      : ListView.builder(
-                          controller: _scrollController,
-                          physics: const BouncingScrollPhysics(),
-                          padding: EdgeInsets.only(
-                              left: 8,
-                              right: 8,
-                              top: 40,
-                              bottom: MediaQuery.of(context).size.height * 0.4),
-                          itemCount: _localMessages.length,
-                          itemBuilder: (context, index) {
-                            if (!_itemKeys.containsKey(index))
-                              _itemKeys[index] = GlobalKey();
-                            return Container(
-                              key: _itemKeys[index],
-                              child: _buildTextBlock(_localMessages[index]),
-                            );
-                          }),
+                  child: Stack(children: [
+                    _localMessages.isEmpty
+                        ? const Center(
+                            child: Text("하단의 마이크 버튼을 눌러 통역을 시작하세요.",
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                    color: Colors.white54, height: 1.5)))
+                        : ListView.builder(
+                            controller: _scrollController,
+                            physics: const BouncingScrollPhysics(),
+                            padding: EdgeInsets.only(
+                                left: 8,
+                                right: 8,
+                                top: 40,
+                                bottom:
+                                    MediaQuery.of(context).size.height * 0.4),
+                            itemCount: _localMessages.length,
+                            itemBuilder: (context, index) {
+                              if (!_itemKeys.containsKey(index))
+                                _itemKeys[index] = GlobalKey();
+                              return Container(
+                                key: _itemKeys[index],
+                                child: _buildTextBlock(_localMessages[index]),
+                              );
+                            }),
+                    _buildIdleOverlay(),
+                  ]),
                 ),
-                _buildIdleBanner(),
                 _buildControlArea(effectiveBottomPadding),
               ],
             ),
