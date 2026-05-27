@@ -45,16 +45,12 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
   // ── Idle Timeout (무반응 과금 정지, History List: 자동 이동 없음) ──────────
   Timer? _idlePauseTimer;
   bool _isIdlePaused = false;
-  // ── Idle Pause Toast ──────────────────────────────────────────────────────
-  bool _showPauseToast = false;
-  Timer? _pauseToastTimer;
 
   void _resetIdleTimer() {
     _idlePauseTimer?.cancel();
     if (_isIdlePaused) {
       _isIdlePaused = false;
-      _pauseToastTimer?.cancel();
-      if (mounted) setState(() => _showPauseToast = false);
+      if (mounted) setState(() {});
       BillingTicker.instance.resume();
       BillingTicker.instance.logMode('history_list');
     }
@@ -65,11 +61,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
     if (!mounted || _isIdlePaused) return;
     _isIdlePaused = true;
     BillingTicker.instance.pause();
-    _pauseToastTimer?.cancel();
-    _pauseToastTimer = Timer(const Duration(seconds: 1), () {
-      if (mounted) setState(() => _showPauseToast = false);
-    });
-    if (mounted) setState(() => _showPauseToast = true);
+    if (mounted) setState(() {});
   }
 
   void _clearIdleTimers() {
@@ -79,52 +71,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
 
   Widget _buildIdleBanner() => const SizedBox.shrink();
 
-  Widget _buildIdleOverlay() {
-    return Positioned.fill(
-      child: IgnorePointer(
-        child: Stack(
-          children: [
-            // ── 작은 pause 아이콘 (상단 우측) ──
-            if (_isIdlePaused)
-              Positioned(
-                top: 8,
-                right: 12,
-                child: const Icon(
-                  Icons.pause_circle_filled_rounded,
-                  color: Color(0xFFFFD54F),
-                  size: 20,
-                ),
-              ),
-            // ── 1초 pause 팝업 (상단 중앙) ──
-            if (_showPauseToast)
-              Align(
-                alignment: Alignment.topCenter,
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 52),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.55),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Text(
-                      'pause',
-                      style: TextStyle(
-                        color: Color(0xFFFFD54F),
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 1.2,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
+  Widget _buildIdleOverlay() => const SizedBox.shrink();
   // ─────────────────────────────────────────────────────────────────────────
 
   // ── Keepers 전용 상태 ──
@@ -168,7 +115,6 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
   @override
   void dispose() {
     _clearIdleTimers();
-    _pauseToastTimer?.cancel();
     BillingTicker.instance.pause();
     _keepersScrollController.dispose();
     _keeperAudioPlayer?.dispose();
@@ -270,6 +216,19 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
         centerTitle: true,
         elevation: 0,
         actions: [
+          // ── Idle pause 아이콘 (클릭 시 pause 해제) ──
+          if (_isIdlePaused)
+            GestureDetector(
+              onTap: _resetIdleTimer,
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 8),
+                child: Icon(
+                  Icons.pause_circle_filled_rounded,
+                  color: Color(0xFFFFD54F),
+                  size: 20,
+                ),
+              ),
+            ),
           IconButton(
             icon: Icon(Icons.help_outline_rounded,
                 color: Colors.amber.withOpacity(0.75), size: 20),

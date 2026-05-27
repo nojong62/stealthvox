@@ -88,9 +88,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   Timer? _idleAutoReturnTimer;
   bool _isIdlePaused = false;
   bool _hasAutoReturnedToModeSelect = false;
-  // ── Idle Pause Toast ──────────────────────────────────────────────────────
-  bool _showPauseToast = false;
-  Timer? _pauseToastTimer;
 
   void _resetIdleTimer() {
     if (_hasAutoReturnedToModeSelect) return;
@@ -98,8 +95,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     _idleAutoReturnTimer?.cancel();
     if (_isIdlePaused) {
       _isIdlePaused = false;
-      _pauseToastTimer?.cancel();
-      if (mounted) setState(() => _showPauseToast = false);
+      if (mounted) setState(() {});
       BillingTicker.instance.resume();
       BillingTicker.instance.logMode('duo');
     }
@@ -111,11 +107,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     if (!mounted || _hasAutoReturnedToModeSelect || _isIdlePaused) return;
     _isIdlePaused = true;
     BillingTicker.instance.pause();
-    _pauseToastTimer?.cancel();
-    _pauseToastTimer = Timer(const Duration(seconds: 1), () {
-      if (mounted) setState(() => _showPauseToast = false);
-    });
-    if (mounted) setState(() => _showPauseToast = true);
+    if (mounted) setState(() {});
   }
 
   void _handleIdleAutoReturn() {
@@ -146,52 +138,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
 
   Widget _buildIdleBanner() => const SizedBox.shrink();
 
-  Widget _buildIdleOverlay() {
-    return Positioned.fill(
-      child: IgnorePointer(
-        child: Stack(
-          children: [
-            // ── 작은 pause 아이콘 (상단 우측) ──
-            if (_isIdlePaused)
-              Positioned(
-                top: 8,
-                right: 12,
-                child: const Icon(
-                  Icons.pause_circle_filled_rounded,
-                  color: Color(0xFFFFD54F),
-                  size: 20,
-                ),
-              ),
-            // ── 1초 pause 팝업 (상단 중앙) ──
-            if (_showPauseToast)
-              Align(
-                alignment: Alignment.topCenter,
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 52),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.55),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Text(
-                      'pause',
-                      style: TextStyle(
-                        color: Color(0xFFFFD54F),
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 1.2,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
+  Widget _buildIdleOverlay() => const SizedBox.shrink();
   // ─────────────────────────────────────────────────────────────────────────
 
   // ============================================================================
@@ -237,7 +184,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   @override
   void dispose() {
     _clearIdleTimers();
-    _pauseToastTimer?.cancel();
     _partnerJoinedSubscription?.cancel();
     _silenceTimer?.cancel();
     _cancelAudio();
@@ -1005,6 +951,19 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
             ],
           ),
           Row(children: [
+            // ── Idle pause 아이콘 (T버튼 왼쪽, 클릭 시 pause 해제) ──
+            if (_isIdlePaused)
+              GestureDetector(
+                onTap: _resetIdleTimer,
+                child: const Padding(
+                  padding: EdgeInsets.only(left: 4, right: 6),
+                  child: Icon(
+                    Icons.pause_circle_filled_rounded,
+                    color: Color(0xFFFFD54F),
+                    size: 20,
+                  ),
+                ),
+              ),
             IconButton(
               icon: const Icon(Icons.format_size,
                   color: Colors.white70, size: 26),

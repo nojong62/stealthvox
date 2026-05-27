@@ -1,0 +1,114 @@
+원격 저장소(GitHub 등)에 이미 `push`한 상태라면, 보통은 아래 3가지 중 하나입니다.
+
+---
+
+# 1. 가장 안전한 방법 (추천)
+
+## 특정 시점으로 되돌리는 “복구 커밋” 생성
+
+예:
+
+```bash
+git log --oneline
+```
+
+여기서 복구하고 싶은 커밋 해시 확인:
+
+```bash
+a1b2c3d 안정버전
+e4f5g6h 최근 수정
+```
+
+안정버전으로 되돌리고 싶으면:
+
+```bash
+git revert e4f5g6h
+```
+
+또는 여러 개:
+
+```bash
+git revert HEAD~3..HEAD
+```
+
+그 후:
+
+```bash
+git push origin main
+```
+
+특징:
+
+* Git 기록 안 깨짐
+* 협업 안전
+* 가장 권장
+
+---
+
+# 2. 완전히 과거 상태로 강제 복구
+
+## (진짜 롤백)
+
+원격 저장소까지 강제로 되돌림:
+
+```bash
+git reset --hard a1b2c3d
+git push --force origin main
+```
+
+여기서:
+
+* `a1b2c3d` = 복구할 커밋
+
+이건:
+
+* 이후 커밋들이 원격에서도 사라짐
+* 협업 중이면 위험
+
+하지만 StealthVox처럼 혼자 개발 중이면 자주 쓰는 방식입니다.
+
+---
+
+# 3. 아예 새 브랜치로 복구
+
+## 안전 백업형
+
+```bash
+git checkout a1b2c3d
+git checkout -b recovery_backup
+git push origin recovery_backup
+```
+
+특징:
+
+* 현재 main 안 건드림
+* 안정버전 따로 보관 가능
+
+---
+
+현재 실장님 상황에서는 아마 이 흐름일 가능성이 큽니다:
+
+```bash
+flutter analyze 이슈 증가
+→ 최근 수정 이상
+→ push된 안정버전으로 복구 고민
+```
+
+그렇다면 가장 많이 쓰는 건:
+
+```bash
+git log --oneline
+git reset --hard 안정커밋해시
+git push --force origin main
+```
+
+입니다.
+
+그리고 생활영어 표현 하나 드리면, 개발 협업에서 자주 씁니다:
+
+> “Let's roll back to the last stable commit.”
+
+뜻:
+“마지막 안정 커밋으로 롤백하자.”
+
+실무에서 굉장히 많이 씁니다.
