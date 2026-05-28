@@ -46,132 +46,68 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-routine_mode_roleplay.dart 파일에서 아래 4개 수정을 적용해줘. Box 7 엔진(DeepgramV2VoiceManager, TtsQueueManager, ChunkedTtsFetcher, HybridTtsPlayer 등)은 절대 건드리지 마.
+[Duo 모드 버그 수정] DuoBrain 프롬프트를 "대화 상대"에서 "통역기"로 교체
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-수정 1: generateCleanOriginal 프롬프트 — 번역 생략 방지
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-위치: Box 7-1-B generateCleanOriginal 함수 내부, 'content' 값의 삼중따옴표 시스템 프롬프트.
-대략 3540행 시작 '''당신은 한영 통역 전문가입니다 ~ 3557행 ''', 까지.
+파일: lib/custom_code/widgets/routine_mode_duo.dart
 
-이 프롬프트를 아래로 교체:
+## 배경
+Duo 모드는 호스트와 게스트 사이의 양방향 실시간 통역기인데,
+현재 DuoBrain 프롬프트가 AI를 "conversation partner"로 규정하여
+유저 발화에 대해 번역이 아닌 자기 생각으로 응답/되묻기를 하고 있음.
+예: 유저가 "Share this video with your friends"라고 하면
+AI가 "What video are you referring to?"라고 대답함 (번역 아님).
 
-'''당신은 한영 통역 전문가입니다. 다음 영어 문장을 **자연스러운 한국어 구어체**로 번역하세요.
+## 수정 범위: DuoBrain 클래스의 processTranslation 메서드 내부
 
-[절대 규칙 - 문장 누락 금지]
-- 원문의 모든 문장을 빠짐없이 번역하세요. 요약/축약/생략 절대 금지.
-- 원문이 2문장이면 번역도 반드시 2문장, 3문장이면 3문장.
-- 마침표(.) 또는 물음표(?) 단위로 끊어서 각각 번역하세요.
+### 수정 A: 프롬프트 교체
+약 1106줄부터 1136줄까지의 String prompt = ... 전체를 아래로 교체:
 
-[주어 생략 처리]
-- 한국어는 주어를 자주 생략합니다. 영어의 I/You/He/She/We/They를 무조건 그대로 살리지 마세요.
-- 문맥상 당연한 주어는 과감히 생략하여 자연스럽게 만드세요.
-  예: "I need to go" → "가야겠어요" (✅) / "나는 가야 한다" (❌ 어색)
-  예: "Are you coming?" → "올 거예요?" (✅) / "당신은 오고 있습니까?" (❌)
-- 대화 상대가 명확하면 "너/당신"도 생략 가능합니다.
-- 하지만 의미 혼동 가능성이 있을 때는 주어를 살립니다.
+```dart
+      String prompt = "You are a real-time interpreter/translator.\n"
+          "Your ONLY job is to translate the user's speech.\n"
+          "NEVER respond to the user. NEVER answer questions. NEVER add comments.\n"
+          "NEVER ask clarification questions. Just translate exactly what was said.\n\n"
+          "Source language: $originalLang\n"
+          "Target language: $targetLang\n\n"
+          "=== RECENT CONVERSATION (for context only) ===\n"
+          "$historyContext\n\n"
+          "=== RULES ===\n"
+          "1. Translate the user's speech from $originalLang to $targetLang faithfully.\n"
+          "2. Preserve the speaker's tone, intent, and nuance.\n"
+          "3. If the speech is already in $targetLang, still output it cleaned up.\n"
+          "4. Use the conversation history ONLY to resolve pronouns or context — never to generate your own response.\n\n"
+          "=== OUTPUT (strict JSON, nothing else) ===\n"
+          "{\n"
+          "  \"translated_text\": \"<the translation in $targetLang>\",\n"
+          "  \"original_input\": \"<the original speech cleaned up in $originalLang>\"\n"
+          "}\n\n"
+          "User said: \"$text\"";
+```
 
-[구어체 톤]
-- 문어체 X, 일상 대화체 O
-- "~하였다" X → "~했어요" O
-- "~이다" X → "~이에요/~예요" O
+### 수정 B: temperature 낮추기
+같은 메서드 내 약 1146줄:
+'temperature': 0.3 → 'temperature': 0.2 로 변경
+(통역은 창의성이 아니라 정확성이 중요하므로)
 
-[출력]
-- 번역문만 출력. 설명/주석/따옴표 없음.
-- 원문의 문장 수와 동일하게 출력.
-'''
+### 수정 C: return map에서 needs_clarification 제거
+약 1160~1165줄의 return 블록을 아래로 교체:
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-수정 2: generateDramaticScenario 장르 풀 — 일상 대화 50% 추가
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-위치: Box 7-1-0 generateDramaticScenario 함수 내부, final genres = [...]; 배열.
-대략 3330행 시작 ~ 3341행 ]; 까지.
+```dart
+        return {
+          'translated_text': parsed['translated_text']?.toString() ?? "",
+          'original_input': parsed['original_input']?.toString() ?? "",
+        };
+```
 
-이 배열을 아래로 교체:
+## 수정하면 안 되는 것
+- Box 7 (TtsQueueManager, DeepgramV2VoiceManager 등 통신 엔진)
+- _processRelayPipeline 함수의 구조
+- _cleanJsonString 헬퍼 메서드
+- initState, dispose, UI build 관련 코드
 
-      final genres = [
-        // 일상/긍정 (10개)
-        '카페에서 새 메뉴 추천받기',
-        '해외여행 중 현지인과 길 묻기',
-        '새 이웃에게 인사하며 동네 소개',
-        '옷가게에서 스타일 상담',
-        '회사 점심시간 동료와 맛집 토크',
-        '헬스장 첫날 트레이너와 상담',
-        '공항 체크인 카운터 대화',
-        '호텔 체크인하며 방 업그레이드 요청',
-        '동네 서점에서 책 추천 대화',
-        '반려동물 산책 중 견주끼리 대화',
-        // 드라마틱/갈등 (10개)
-        '불륜 발각, 부부 갈등',
-        '직장 내 권력 다툼, 해고 위기',
-        '형사 심문, 용의자 취조',
-        '재벌가 상속 분쟁',
-        '비밀 연인 들킴',
-        '가족 비밀 폭로',
-        '첫사랑 재회, 감정 충돌',
-        '룸메이트 생활 규칙 갈등',
-        '환불 요청하는데 매장 직원이 거부',
-        '친구가 빌린 돈 안 갚음',
-      ];
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-수정 3: generateDramaticScenario 프롬프트 — 일상 시나리오 대응
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-위치: 같은 함수 내부 systemPrompt 문자열.
-대략 3344행 시작 final systemPrompt = ~ 3358행 Genre hint 끝까지.
-
-이 프롬프트를 아래로 교체:
-
-      final systemPrompt = 'You are a creative director for a high-immersion English roleplay app.\n'
-          'Your job is to create ONE vivid scene inspired by real-life situations, Netflix series, Korean/American dramas, or movies.\n'
-          '\n'
-          'OUTPUT: Return ONLY valid JSON, no extra text.\n'
-          '{\n'
-          '  "situation": "핵심 상황 요약 (10-15 Korean chars, e.g. 카페에서 신메뉴 추천)",\n'
-          '  "ai_role": "AI 캐릭터 (10자 이내, with clear personality, e.g. 친절한 바리스타)",\n'
-          '  "user_role": "유저 캐릭터 (8자 이내, e.g. 단골 손님)"\n'
-          '}\n'
-          '\n'
-          'RULES:\n'
-          '- situation: vivid and specific. Do NOT name any show/character.\n'
-          '- ai_role: give a personality that fits the genre (friendly, enthusiastic, suspicious, furious, etc).\n'
-          '- user_role: the user naturally belongs in the scene.\n'
-          '- For everyday/positive genres: warm, helpful, curious personalities.\n'
-          '- For dramatic/conflict genres: intense, confrontational, emotional personalities.\n'
-          '- Genre hint this round: $pick';
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-수정 4: generateAiOpener 프롬프트 — 일상 시나리오 대응
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-위치: Box 7-1-D generateAiOpener 함수 내부, sysPrompt 문자열.
-대략 3688행 시작 ~ 3703행 끝까지.
-
-이 프롬프트를 아래로 교체:
-
-      final sysPrompt = 'You are a master actor and an English conversation coach playing "$aiRole".\n'
-          '\n'
-          '[SCENARIO]\n'
-          'Situation: $situation\n'
-          'Your role: $aiRole\n'
-          "The other person's role: $userRole\n"
-          '\n'
-          '[CORE RULES]\n'
-          '1. Start the scene IMMEDIATELY with your first line — no greetings, no meta-commentary.\n'
-          '2. Read the emotional tone of the situation: if dramatic, be intense; if everyday, be natural and warm.\n'
-          '3. Do NOT mention any drama, movie, or show titles. Keep it real and seamless.\n'
-          '4. Your first line must be a natural, in-character statement or question that draws the user into the scene.\n'
-          '5. Adopt the exact personality of "$aiRole". Use natural spoken $targetLang — NOT textbook dialogue.\n'
-          '6. ONE sentence only. Under 20 words. Maximum immersion, zero filler.\n'
-          '\n'
-          'Output: ONE natural first line in $targetLang only.';
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-검증
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-수정 완료 후:
-1. dart analyze 실행하여 에러 없는지 확인
-2. grep -n "fierce\|furious, cold, desperate\|deep dramatic conflict\|forces the user to respond, defend" routine_mode_roleplay.dart — 결과가 0건이어야 함 (갈등 편향 표현 제거 확인)
-3. grep -n "카페에서 새 메뉴\|문장 누락 금지" routine_mode_roleplay.dart — 2건 이상 나와야 함 (신규 코드 삽입 확인)
-4. Box 7 클래스(DeepgramV2VoiceManager, TtsQueueManager, ChunkedTtsFetcher, HybridTtsPlayer, AudioCacheManager, TtsCache)에 diff가 없는지 확인
-
-streamRoleplayResponse(Box 7-1-C)의 프롬프트는 수정하지 마. 여기는 이미 $aiRole 기반으로 동적이라 장르에 따라 자동 적응됨.
+## 검증
+1. dart analyze lib/custom_code/widgets/routine_mode_duo.dart — 에러 0
+2. grep -n "conversation partner" lib/custom_code/widgets/routine_mode_duo.dart — 결과 0줄
+3. grep -n "needs_clarification" lib/custom_code/widgets/routine_mode_duo.dart — 결과 0줄
+4. grep -n "AMBIGUITY GUARD" lib/custom_code/widgets/routine_mode_duo.dart — 결과 0줄
+5. grep -c "real-time interpreter" lib/custom_code/widgets/routine_mode_duo.dart — 결과 1줄

@@ -1103,35 +1103,23 @@ class DuoBrain {
           ? '(No prior conversation)'
           : historyLines.join('\n');
 
-      String prompt = "You are a Duo Mode AI conversation partner.\n"
-          "The user speaks $originalLang. Respond in $targetLang.\n\n"
-          "=== RECENT CONVERSATION ===\n"
+      String prompt = "You are a real-time interpreter/translator.\n"
+          "Your ONLY job is to translate the user's speech.\n"
+          "NEVER respond to the user. NEVER answer questions. NEVER add comments.\n"
+          "NEVER ask clarification questions. Just translate exactly what was said.\n\n"
+          "Source language: $originalLang\n"
+          "Target language: $targetLang\n\n"
+          "=== RECENT CONVERSATION (for context only) ===\n"
           "$historyContext\n\n"
-          "=== SUBJECT AMBIGUITY GUARD ===\n"
-          "Before responding, determine: is it clear WHO or WHAT the user is asking about?\n"
-          "Trigger clarification if ANY of these apply:\n"
-          "• A person name/role (호진, 아들, 엄마, 선생님, 걔, 그 사람) appears but the referent is unclear\n"
-          "• The question involves scores, exams, schedules, or states — and WHOSE is not established\n"
-          "• Short utterance uses pronouns only (걔, 그거, 이번에) with no context to resolve them\n"
-          "• Examples that MUST trigger clarification: '몇 점 받을 것 같아?', '괜찮을까?', '어떻게 됐어?'\n\n"
-          "Decision rule:\n"
-          "✅ Subject is clear from utterance OR resolved from history → respond naturally in $targetLang\n"
-          "❌ Subject is ambiguous AND history cannot resolve it →\n"
-          "Ask a SHORT clarification question using ONE of these styles (vary each time):\n"
-          "- Direct: \"Who are you talking about?\"\n"
-          "- Gentle: \"Just to be sure — who do you mean?\"\n"
-          "- Curious: \"Oh — who's that about?\"\n"
-          "- Confirming: \"Do you mean [person from history]?\"\n"
-          "- Playful: \"I'm gonna need a name to work with here!\"\n"
-          "NEVER use the same phrasing twice in a row.\n\n"
-          "ABSOLUTE PROHIBITION:\n"
-          "• NEVER assume the speaker ('I/you') is the subject when a third person was mentioned or implied\n"
-          "• NEVER produce: 'I think I'll score…', 'You might get…', '제가 받을 것 같아요'\n\n"
-          "=== OUTPUT (strict JSON) ===\n"
+          "=== RULES ===\n"
+          "1. Translate the user's speech from $originalLang to $targetLang faithfully.\n"
+          "2. Preserve the speaker's tone, intent, and nuance.\n"
+          "3. If the speech is already in $targetLang, still output it cleaned up.\n"
+          "4. Use the conversation history ONLY to resolve pronouns or context — never to generate your own response.\n\n"
+          "=== OUTPUT (strict JSON, nothing else) ===\n"
           "{\n"
-          "  \"needs_clarification\": <true or false>,\n"
-          "  \"translated_text\": \"<$targetLang: your response OR clarification question>\",\n"
-          "  \"original_input\": \"<Korean: gloss of your response OR clarification note>\"\n"
+          "  \"translated_text\": \"<the translation in $targetLang>\",\n"
+          "  \"original_input\": \"<the original speech cleaned up in $originalLang>\"\n"
           "}\n\n"
           "User said: \"$text\"";
 
@@ -1143,7 +1131,7 @@ class DuoBrain {
               },
               body: jsonEncode({
                 'model': 'gpt-4o-mini',
-                'temperature': 0.3,
+                'temperature': 0.2,
                 'max_tokens': 300,
                 'response_format': {'type': 'json_object'},
                 'messages': [
@@ -1160,8 +1148,6 @@ class DuoBrain {
         return {
           'translated_text': parsed['translated_text']?.toString() ?? "",
           'original_input': parsed['original_input']?.toString() ?? "",
-          'needs_clarification':
-              (parsed['needs_clarification'] == true).toString(),
         };
       }
     } catch (e) {
