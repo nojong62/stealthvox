@@ -60,7 +60,9 @@
       "PowerShell($dt = Get-Date -Format \"yyyyMMdd_HHmm\"; Write-Output \"파일명: stealth_vox_$dt.apk\")",
       "PowerShell(cd F:\\\\flutter_project\\\\stealth_vox; git diff HEAD~1 -- lib/custom_code/widgets/routine_mode_clone.dart | Select-String \"^\\\\+\" | Where-Object { $_ -match \"idlePaused|PauseToast|pauseToast|format_size|pause_circle|resetIdle\" } | Select-Object -First 30)",
       "PowerShell(flutter build *)",
-      "Bash(Get-ChildItem \"lib/custom_code/widgets/\")"
+      "Bash(Get-ChildItem \"lib/custom_code/widgets/\")",
+      "Bash(Get-ChildItem -Path \"F:\\\\flutter_project\\\\stealth_vox\\\\lib\" -Recurse -Filter \"routine_mode_step_expand.dart\")",
+      "Bash(Read \"C:/Users/u/AppData/Local/Temp/claude/F--flutter-project-stealth-vox/11910095-7ce6-4c98-bb71-34c6edccac83/tasks/bdim6demo.output\")"
     ]
   }
 }

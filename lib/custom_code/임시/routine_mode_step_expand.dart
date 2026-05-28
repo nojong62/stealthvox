@@ -1712,6 +1712,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       bool evaporated = false;
       bool retried = false;
       bool corrected = false; // 유저가 AI의 오해를 정정하는 경우 → 직전 HOST+SYSTEM 쌍 삭제 후 재시작
+      bool clarified = false; // 주어/목적어 모호 → AI 되묻기
       bool _part2Started = false; // \n\n 이후 진입 여부
       bool hasDoubleNewline = false; // 2파트 구조 여부
       bool firstChunkSent = false;
@@ -1739,6 +1740,13 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         if (userTargetText.contains("[CORRECTION]")) {
           corrected = true;
           _log('🔄 [CORRECTION]', '정정 감지 → 직전 HOST+SYSTEM 삭제 후 재시작');
+          break;
+        }
+
+        // 되묻기 감지: 주어/목적어 모호 → AI 되묻기
+        if (userTargetText.contains("[CLARIFY]")) {
+          clarified = true;
+          _log('❓ [CLARIFY]', '되묻기 감지 → clarification 처리');
           break;
         }
 
@@ -1860,6 +1868,41 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         }
         // 정정된 발화로 해당 턴 재처리
         _processRelayPipeline(finalTranscript);
+        return;
+      }
+
+      // ❓ [CLARIFY] 유저 발화 주어/목적어 모호 → AI 되묻기 버블 + TTS + STT 재시작
+      if (clarified) {
+        _turnCounter--;
+        final clarifyText =
+            userTargetText.replaceFirst(RegExp(r'^\[CLARIFY\]\s*'), '');
+        if (mounted) {
+          setState(() {
+            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+            if (hostIndex < _localMessages.length)
+              _localMessages.removeAt(hostIndex);
+            _localMessages.add(
+                {'role': 'SYSTEM', 'target': clarifyText, 'original': ''});
+          });
+          _scrollToBottom();
+        }
+        _ttsQueueManager.setUserTurn(false);
+        _ttsQueueManager.setAiPaused(false);
+        final clarifyTts = ChunkedTtsFetcher(
+          _openAiKey,
+          _ttsQueueManager,
+          'alloy',
+          isUser: false,
+          onLog: _log,
+        );
+        clarifyTts.addText(clarifyText);
+        int waitTicks = 0;
+        while ((clarifyTts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
+            mounted) {
+          await Future.delayed(const Duration(milliseconds: 50));
+          if (++waitTicks > 200) break;
+        }
+        if (mounted && _isConversationActive) _startDeepgramListening();
         return;
       }
 
@@ -4223,6 +4266,21 @@ Suddenly.
 
 I suddenly remembered to call Alex.
 
+[CLARIFICATION GUARD]
+Before translating, check: is the subject or object of the utterance clear from the input OR resolvable from History?
+If clear → proceed with normal translation.
+If genuinely ambiguous AND History cannot resolve it → output EXACTLY:
+[CLARIFY] <short, natural clarification question in $targetLang>
+
+Style pool — pick ONE and VARY each time (never repeat the same phrasing twice in a row):
+- Direct: "Who are you talking about?"
+- Gentle: "Just to be sure — who do you mean?"
+- Curious: "Oh — who's that about?"
+- Confirming: "Do you mean [person/thing from history]?"
+- Playful: "I'm gonna need a name to work with here!"
+
+NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
+
 [RULES]
 - CASE 2 output MUST have the empty line (\n\n) between parts.
 - Output ONLY the translation. No labels, no "Part 1:", no meta-comments.
@@ -4492,6 +4550,7 @@ Output ONLY the English question. Nothing else.""";
 
       final String grammarHint = turnNumber == 1
           ? 'GOAL: Draw out a REASON or CAUSE behind the user\'s core statement.\n'
+              'If the user clearly expressed loss of interest, motivation, enjoyment, or willingness to engage, treat that emotion as the cause to explore (see [EMOTIONAL DEPTH RULE]).\n'
               'Invite the user to share WHY — warmly and lightly, without naming grammar. '
               'A short answer like "because I was tired" should attach smoothly to the growing sentence.'
           : turnNumber == 2
@@ -4574,6 +4633,52 @@ Scan the ENTIRE History before choosing your question:
 - If "what" is already answered → NEVER ask "what" again. Dig into REASON or RESULT.
 - If "when" is already answered → do NOT ask "when" again. Focus on IMPACT or REACTION.
 - Always build on the MOST RECENT user statement. Never repeat ground already covered.
+
+[EMOTIONAL DEPTH RULE — HIGHEST PRIORITY]
+Before applying any TURN GOAL, check whether the user's LAST answer clearly expresses loss of interest, motivation, enjoyment, or willingness to engage.
+
+Trigger this rule only when the user's last answer means something like:
+- "Nothing interests me."
+- "I don't find anything interesting."
+- "I don't care about much these days."
+- "Nothing feels fun."
+- "I don't feel like talking."
+- "흥미로운 게 없어."
+- "관심 있는 게 없어."
+- "요즘 재미있는 게 없어."
+- "딱히 말하고 싶은 게 없어."
+
+Do NOT trigger this rule for a vague "I don't know", "maybe", "그냥", or "모르겠어" unless the surrounding context clearly shows emotional withdrawal or loss of interest.
+
+If this rule is triggered, OVERRIDE the normal TURN GOAL and instead:
+1. Do NOT repeat or rephrase the same topic question. Asking "what else interests you?" after "nothing interests me" is robotic and tone-deaf.
+2. Treat the user's disinterest as the story itself.
+3. Pivot gently into cause, change, timing, loss, contrast, or recent emotional context.
+4. Do not sound like a therapist. Keep the question casual, warm, and sentence-building friendly.
+5. The question must still be 5–8 words, open-ended, and answerable in 1–3 words.
+6. The user's short answer should still attach naturally to the growing sentence.
+
+Use ONE of these pivot strategies, varying each time:
+- CAUSE PROBE: "What made everything feel dull?" / "What drained your interest lately?"
+- TIMING PROBE: "When did things start feeling flat?" / "When did this feeling begin?"
+- LOSS PROBE: "What did you enjoy before?" / "What changed for you recently?"
+- CONTRAST PROBE: "What last made you feel excited?" / "When did you last feel curious?"
+- SOFT EVENT PROBE: "What took the spark away?" / "What happened before this feeling started?"
+
+[EXAMPLE — EMOTIONAL PIVOT]
+AI : What's been on your mind lately?
+User: Nothing really. (별로 없어.)
+  → Nothing has really been on my mind.
+AI : When did things start feeling flat?  ← TIMING PROBE (NOT: "What kind of things interest you?")
+User: Since I moved here alone. (여기 혼자 이사 온 뒤로.)
+  → Nothing has really been on my mind since I moved here alone.
+AI : What did you enjoy before? ← LOSS PROBE
+User: Having someone to talk to. (얘기할 사람이 있었던 거.)
+  → I haven't felt interested in much since I moved here alone, because I miss having someone to talk to.
+AI : Who did you talk to most? ← natural follow-up
+User: My college roommate. (대학 룸메이트.)
+  → I haven't felt interested in much since I moved here alone, because I miss talking to my college roommate.
+
 
 [QUESTION PRINCIPLES — MANDATORY]
 1. Be a curious friend, not an interviewer or grammar teacher.
