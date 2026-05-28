@@ -3328,33 +3328,47 @@ class RoleplayBrain {
     final client = http.Client();
     try {
       final genres = [
+        // 일상/긍정 (10개)
+        '카페에서 새 메뉴 추천받기',
+        '해외여행 중 현지인과 길 묻기',
+        '새 이웃에게 인사하며 동네 소개',
+        '옷가게에서 스타일 상담',
+        '회사 점심시간 동료와 맛집 토크',
+        '헬스장 첫날 트레이너와 상담',
+        '공항 체크인 카운터 대화',
+        '호텔 체크인하며 방 업그레이드 요청',
+        '동네 서점에서 책 추천 대화',
+        '반려동물 산책 중 견주끼리 대화',
+        // 드라마틱/갈등 (10개)
         '불륜 발각, 부부 갈등',
         '직장 내 권력 다툼, 해고 위기',
         '형사 심문, 용의자 취조',
         '재벌가 상속 분쟁',
         '비밀 연인 들킴',
-        '정치적 음모, 배신',
-        '법정 증언, 위증 의심',
         '가족 비밀 폭로',
-        '사기 들통, 협박',
         '첫사랑 재회, 감정 충돌',
+        '룸메이트 생활 규칙 갈등',
+        '환불 요청하는데 매장 직원이 거부',
+        '친구가 빌린 돈 안 갚음',
       ];
       final pick = genres[Random().nextInt(genres.length)];
 
       final systemPrompt = 'You are a creative director for a high-immersion English roleplay app.\n'
-          'Your job is to create ONE dramatic scene inspired by famous Netflix series, Korean/American dramas, or movies.\n'
+          'Your job is to create ONE vivid scene inspired by real-life situations, Netflix series, Korean/American dramas, or movies.\n'
           '\n'
           'OUTPUT: Return ONLY valid JSON, no extra text.\n'
           '{\n'
-          '  "situation": "극적 핵심 요약 (10-15 Korean chars, e.g. 숨겨둔 돈다발 들킴)",\n'
-          '  "ai_role": "AI 캐릭터 (10자 이내, strong personality, e.g. 화난 배우자)",\n'
-          '  "user_role": "유저 캐릭터 (8자 이내, e.g. 당황한 남편)"\n'
+          '  "situation": "핵심 상황 요약 (10-15 Korean chars, e.g. 카페에서 신메뉴 추천)",\n'
+          '  "ai_role": "AI 캐릭터 (10자 이내, with clear personality, e.g. 친절한 바리스타)",\n'
+          '  "user_role": "유저 캐릭터 (8자 이내, e.g. 단골 손님)"\n'
           '}\n'
           '\n'
           'RULES:\n'
-          '- situation: emotionally charged, instantly dramatic. Do NOT name any show/character.\n'
-          '- ai_role: fierce personality (furious, cold, desperate, authoritative).\n'
-          '- user_role: the user is the one being confronted, questioned, or pressured.\n'
+          '- situation: vivid and specific. Do NOT name any show/character.\n'
+          '- ai_role: give a personality that fits the genre (friendly, enthusiastic, suspicious, furious, etc).\n'
+          '- user_role: the user naturally belongs in the scene.\n'
+          '- For everyday/positive genres: warm, helpful, curious personalities.\n'
+          '- For dramatic/conflict genres: intense, confrontational, emotional personalities.\n'
           '- Genre hint this round: $pick';
 
       final res = await client
@@ -3539,7 +3553,12 @@ NEVER break character when asking.
                     'content':
                         '''당신은 한영 통역 전문가입니다. 다음 영어 문장을 **자연스러운 한국어 구어체**로 번역하세요.
 
-[중요 규칙 - 주어 생략 처리]
+[절대 규칙 - 문장 누락 금지]
+- 원문의 모든 문장을 빠짐없이 번역하세요. 요약/축약/생략 절대 금지.
+- 원문이 2문장이면 번역도 반드시 2문장, 3문장이면 3문장.
+- 마침표(.) 또는 물음표(?) 단위로 끊어서 각각 번역하세요.
+
+[주어 생략 처리]
 - 한국어는 주어를 자주 생략합니다. 영어의 I/You/He/She/We/They를 무조건 그대로 살리지 마세요.
 - 문맥상 당연한 주어는 과감히 생략하여 자연스럽게 만드세요.
   예: "I need to go" → "가야겠어요" (✅) / "나는 가야 한다" (❌ 어색)
@@ -3553,7 +3572,8 @@ NEVER break character when asking.
 - "~이다" X → "~이에요/~예요" O
 
 [출력]
-- 번역문만 한 줄로 출력. 설명/주석/따옴표 없음.
+- 번역문만 출력. 설명/주석/따옴표 없음.
+- 원문의 문장 수와 동일하게 출력.
 ''',
                   },
                   {'role': 'user', 'content': englishText},
@@ -3694,13 +3714,13 @@ NEVER break character when asking.
           '\n'
           '[CORE RULES]\n'
           '1. Start the scene IMMEDIATELY with your first line — no greetings, no meta-commentary.\n'
-          '2. Recognize the deep dramatic conflict and emotional tension behind the situation.\n'
+          '2. Read the emotional tone of the situation: if dramatic, be intense; if everyday, be natural and warm.\n'
           '3. Do NOT mention any drama, movie, or show titles. Keep it real and seamless.\n'
-          '4. Your first line must be a compelling, emotionally charged statement or open-ended question that forces the user to respond, defend themselves, or negotiate.\n'
+          '4. Your first line must be a natural, in-character statement or question that draws the user into the scene.\n'
           '5. Adopt the exact personality of "$aiRole". Use natural spoken $targetLang — NOT textbook dialogue.\n'
           '6. ONE sentence only. Under 20 words. Maximum immersion, zero filler.\n'
           '\n'
-          'Output: ONE powerful first line in $targetLang only.';
+          'Output: ONE natural first line in $targetLang only.';
 
       final request = http.Request(
         'POST',
