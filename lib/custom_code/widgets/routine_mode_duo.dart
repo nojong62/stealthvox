@@ -69,6 +69,26 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   DocumentReference? _duoSessionRef;
   StreamSubscription? _partnerJoinedSubscription;
 
+  // ── 🆕 [양방향 통역] 역할/메시지 채널 상태 ────────────────────────────────
+  // _amIHost: 게스트로 합류했으면 false, 아니면 호스트(true)
+  bool _amIHost = true;
+  // _myUid: 메시지 발신자 식별용 (호스트=firebase uid, 게스트=합류 시 부여된 uid)
+  String _myUid = '';
+  // 내 역할 문자열 ('HOST' 또는 'GUEST') — 발신/필터 기준
+  String get _myRole => _amIHost ? 'HOST' : 'GUEST';
+  // 공유 메시지 채널(duo_sessions/{roomId}/messages) 구독
+  StreamSubscription? _messageSubscription;
+  // 이미 처리한 메시지 doc id (중복 렌더 방지)
+  final Set<String> _processedMsgIds = {};
+  // 리스너 첫 스냅샷 priming 여부 (기존 메시지 replay 방지)
+  bool _messagesPrimed = false;
+  // 상대 메시지 처리 큐 (순차 처리 — 음성 겹침 방지)
+  final List<Map<String, dynamic>> _incomingQueue = [];
+  bool _isDrainingIncoming = false;
+  // 오디오 재생 직렬화 체인 (내 음성 ↔ 상대 음성 동시재생 방지)
+  Future<void> _audioChain = Future.value();
+  // ──────────────────────────────────────────────────────────────────────────
+
   // ============================================================================
   // 📦 [2. 오디오 컨트롤러 (AUDIO CONTROLLERS)]
   // 녹음, 재생, 타이머 관리를 위한 오디오 변수 모음
@@ -115,6 +135,15 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   Widget _buildIdleOverlay() => const SizedBox.shrink();
   // ─────────────────────────────────────────────────────────────────────────
 
+  // ── 🆕 [양방향 통역] 언어쌍/보이스 헬퍼 (로비 값 매번 참조) ────────────────
+  String _myTarget() =>
+      FFAppState().targetLang.isNotEmpty ? FFAppState().targetLang : 'English';
+  String _myNative() =>
+      FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
+  String _myVoice() =>
+      FFAppState().aiVoice.isNotEmpty ? FFAppState().aiVoice : 'nova';
+  // ──────────────────────────────────────────────────────────────────────────
+
   // ============================================================================
   // 📦 [3. 라이프사이클 (LIFECYCLE)]
   // 위젯의 시작(initState)과 끝(dispose) 및 초기 설정
@@ -125,6 +154,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     _fetchKeys();
     _audioPlayer.setVolume(1.0);
     _ttsPlayer.setVolume(1.0);
+
+    // 🆕 발신자 식별용 uid 확보 (게스트는 _joinAsGuest에서 덮어씀)
+    _myUid = FirebaseAuth.instance.currentUser?.uid ?? '';
 
     BillingTicker.instance.setRate(BillingRate.full);
     BillingTicker.instance.resume();
@@ -159,6 +191,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   void dispose() {
     _clearIdleTimers();
     _partnerJoinedSubscription?.cancel();
+    _messageSubscription?.cancel(); // 🆕 메시지 채널 구독 해제
     _silenceTimer?.cancel();
     _cancelAudio();
     _audioRecorder.dispose();
@@ -211,8 +244,28 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     _isTtsActive = false;
   }
 
+  // 🆕 오디오 재생 직렬화: 내 음성과 상대 음성이 동시에 겹쳐 재생되지 않도록 큐잉
+  Future<void> _playSerialized(Uint8List? bytes) {
+    final Future<void> prev = _audioChain;
+    final Completer<void> done = Completer<void>();
+    _audioChain = done.future;
+    () async {
+      try {
+        await prev;
+      } catch (_) {}
+      try {
+        await _playAudioAndWait(bytes);
+      } finally {
+        if (!done.isCompleted) done.complete();
+      }
+    }();
+    return done.future;
+  }
+
   Future<void> _startWhisperRecording() async {
     if (!_isConversationActive || _openAiKey.isEmpty) return;
+    // 🆕 중복 시작 방지 (내 턴 종료와 상대 메시지 처리가 동시에 재녹음을 호출하는 레이스 차단)
+    if (await _audioRecorder.isRecording()) return;
     if (await _audioRecorder.hasPermission()) {
       _hasSpoken = false;
       _silenceCounter = 0;
@@ -252,8 +305,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   }
 
 // ============================================================================
-  // 📦 [5. 핵심 AI 파이프라인 (CORE AI LOGIC)]
-  // STT(1.5초) -> UI 즉시 출력 -> 동시 통역(gpt-4o-mini) -> TTS 재생 (1초 강제 대기 삭제!)
+  // 📦 [5. 핵심 양방향 통역 파이프라인 (CORE INTERPRETER LOGIC)]
+  // 내 발화: STT → 내 폰 즉시 렌더 → 내 타겟 통역/TTS → 공유 채널 업로드
+  // 상대 발화: 채널 리스너 수신 → 내 언어쌍으로 통역 → 좌측 렌더 + 내 타겟 TTS
   // ============================================================================
   Future<void> _stopAndSendToWhisper() async {
     _silenceTimer?.cancel();
@@ -318,26 +372,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     }
   }
 
-  // 💡 공통 에러 방어 핸들러 추가
+  // 💡 STT 실패/환각 시 조용히 재녹음만 (AI 사과 음성 없음 — 통역기에는 AI 개입 금지)
   Future<void> _handleContextualError() async {
-    String fallbackTarget =
-        "I'm sorry, I didn't quite catch that. Could you say it again?";
-    if (mounted) {
-      setState(() {
-        _localMessages.add({
-          'role': 'SYSTEM',
-          'target': fallbackTarget,
-          'original': '',
-          'type': 'error'
-        });
-      });
-      _scrollToCurrent(_localMessages.length - 1);
-    }
-    Uint8List? errorTts = await _fetchTTSBytes(fallbackTarget, "nova");
-    if (errorTts != null && _isConversationActive) {
-      await _playAudioAndWait(errorTts);
-    }
-    if (mounted) setState(() => _localMessages.removeLast());
     if (_isConversationActive) _startWhisperRecording();
   }
 
@@ -364,99 +400,197 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     return null;
   }
 
-  // 🚀 불필요한 딜레이를 싹 걷어낸 즉시 통역 파이프라인
+  // 🚀 [내 발화 처리] 내가 말한 것을 내 폰에 즉시 띄우고, 내 타겟으로 통역/TTS, 채널 업로드
   Future<void> _processRelayPipeline(String finalTranscript) async {
     _resetIdleTimer();
     _turnCounter++;
     final int currentTurnId = _turnCounter;
-    String myTarget = FFAppState().targetLang.isNotEmpty
-        ? FFAppState().targetLang
-        : 'English';
-    String myOriginal =
-        FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
-    String aiVoice = "nova";
+    final String myTarget = _myTarget();
+    final String myNative = _myNative();
 
-    // 🚀 1. STT 결과물(유저가 한 말)을 화면에 먼저 즉시 띄웁니다!
+    // 1. 내 발화 원문을 우측 말풍선으로 즉시 표시 (스냅한 반응성)
+    int myIndex = -1;
     if (mounted) {
       setState(() {
         _localMessages
             .add({'role': 'HOST', 'target': finalTranscript, 'original': ''});
+        myIndex = _localMessages.length - 1;
       });
-      // HOST 말풍선은 상단 고정 — 사용자 발화가 화면 안에 안정적으로 보이도록
-      _scrollToCurrentTop(_localMessages.length - 1);
+      _scrollToCurrentTop(myIndex);
     }
-    await _saveHistoryMessage(finalTranscript, "", 'HOST');
+
+    // 2. 공유 채널 업로드 — 상대 폰이 이 원문을 받아 자기 언어쌍으로 통역함 (백그라운드)
+    _uploadMyMessage(finalTranscript, myNative);
 
     if (!_isConversationActive || _turnCounter != currentTurnId) return;
 
-    // ⏱️ 2. 화면에 띄워두고 백그라운드에서 동시통역(gpt-4o-mini) 진행
-    // 현재 턴 직전까지의 대화 히스토리(에러 메시지 제외)를 컨텍스트로 전달
-    final recentHistory = _localMessages.length > 1
-        ? _localMessages
-            .sublist(0, _localMessages.length - 1)
-            .where((m) => m['type'] == null)
-            .toList()
-        : <Map<String, dynamic>>[];
-
-    Map<String, String>? translationResult = await DuoBrain.processTranslation(
+    // 3. 내 발화를 내 타겟으로 통역 (+ 내 오리지널 정돈) — 단일 GPT 호출
+    Map<String, String>? result = await DuoBrain.processTranslation(
         key: _openAiKey,
         text: finalTranscript,
-        targetLang: myTarget,
-        originalLang: myOriginal,
-        recentHistory: recentHistory);
+        srcLang: myNative,
+        myTargetLang: myTarget,
+        myNativeLang: myNative);
 
     if (!_isConversationActive || _turnCounter != currentTurnId) return;
 
-    String aiReplyTarget = "🚨 통신 에러가 발생했습니다.";
-    String aiReplyOriginal = finalTranscript;
-    Uint8List? aiTtsBytes;
+    final String tgt =
+        (result != null && (result['target'] ?? '').trim().isNotEmpty)
+            ? result['target']!
+            : finalTranscript;
+    final String org =
+        (result != null && (result['original'] ?? '').trim().isNotEmpty)
+            ? result['original']!
+            : finalTranscript;
 
-    if (translationResult != null) {
-      aiReplyTarget = translationResult['translated_text'] ?? aiReplyTarget;
-      aiReplyOriginal = translationResult['original_input'] ?? finalTranscript;
-      // ⏱️ 3. 통역본을 소리로 읽어주기 위해 TTS 다운로드
-      aiTtsBytes = await _fetchTTSBytes(aiReplyTarget, aiVoice);
-    } else {
-      // 통신 실패 시 빠른 에러 처리
-      if (mounted) {
-        setState(() {
-          _localMessages.add({
-            'role': 'SYSTEM',
-            'target': 'Network Error. Please try again.',
-            'original': '',
-            'type': 'error'
-          });
-        });
-        _scrollToCurrent(_localMessages.length - 1);
-      }
-      if (_isConversationActive && _turnCounter == currentTurnId)
-        _startWhisperRecording();
-      return;
+    // 4. 내 말풍선을 [타겟(큰글자) + 오리지널(작은글자)]로 교체
+    if (mounted && myIndex >= 0 && myIndex < _localMessages.length) {
+      setState(() {
+        _localMessages[myIndex] = {
+          'role': 'HOST',
+          'target': tgt,
+          'original': org
+        };
+      });
+      _scrollToCurrentTop(myIndex);
+    }
+    await _saveHistoryMessage(tgt, org, 'HOST');
+
+    // 5. 내 타겟 소리 재생 (직렬화)
+    final Uint8List? bytes = await _fetchTTSBytes(tgt, _myVoice());
+    if (bytes != null && _isConversationActive && _turnCounter == currentTurnId) {
+      await _playSerialized(bytes);
     }
 
-    if (!_isConversationActive || _turnCounter != currentTurnId) return;
+    // 6. 마이크 다시 켜기
+    if (_isConversationActive && _turnCounter == currentTurnId) {
+      _startWhisperRecording();
+    }
+  }
 
-    // 💡 4. [수술 핵심] 기존에 있던 'await Future.delayed(1초)' 강제 대기를 삭제하여 통역본 즉시 출력!
+  // 🆕 [채널 업로드] 내 원문을 duo_sessions/{roomId}/messages 에 기록
+  Future<void> _uploadMyMessage(String raw, String srcLang) async {
+    if (_duoSessionRef == null || raw.trim().isEmpty) return;
+    try {
+      await _duoSessionRef!.collection('messages').add({
+        'senderUid': _myUid,
+        'senderRole': _myRole,
+        'text': raw,
+        'srcLang': srcLang,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      debugPrint('[Duo] upload message error: $e');
+    }
+  }
+
+  // 🆕 [상대 발화 리스너] 공유 채널 구독 → 상대(senderRole≠나) 메시지만 처리
+  void _listenForMessages() {
+    if (_duoSessionRef == null) return;
+    _messageSubscription?.cancel();
+    _messagesPrimed = false;
+    _messageSubscription = _duoSessionRef!
+        .collection('messages')
+        .orderBy('createdAt')
+        .snapshots()
+        .listen((snap) {
+      if (_isExiting || !mounted) return;
+
+      // 첫 스냅샷: 기존 메시지는 '이미 본 것'으로 처리만 하고 렌더하지 않음 (replay 방지)
+      if (!_messagesPrimed) {
+        for (final d in snap.docs) {
+          _processedMsgIds.add(d.id);
+        }
+        _messagesPrimed = true;
+        return;
+      }
+
+      for (final change in snap.docChanges) {
+        if (change.type != DocumentChangeType.added) continue;
+        final doc = change.doc;
+        if (_processedMsgIds.contains(doc.id)) continue;
+        _processedMsgIds.add(doc.id);
+
+        final data = doc.data() as Map<String, dynamic>?;
+        if (data == null) continue;
+
+        final String msgRole = data['senderRole']?.toString() ?? '';
+        if (msgRole == _myRole) continue; // 내가 올린 것 — 이미 로컬 렌더됨, 스킵
+
+        _enqueueIncoming(data);
+      }
+    });
+  }
+
+  // 🆕 상대 메시지 순차 처리 큐 (음성 겹침/순서 꼬임 방지)
+  void _enqueueIncoming(Map<String, dynamic> data) {
+    _incomingQueue.add(data);
+    _drainIncoming();
+  }
+
+  Future<void> _drainIncoming() async {
+    if (_isDrainingIncoming) return;
+    _isDrainingIncoming = true;
+    while (_incomingQueue.isNotEmpty) {
+      final data = _incomingQueue.removeAt(0);
+      await _handleIncomingMessage(data);
+    }
+    _isDrainingIncoming = false;
+  }
+
+  // 🆕 [상대 발화 처리] 원문을 내 언어쌍으로 통역 → 좌측 말풍선 + 내 타겟 TTS
+  Future<void> _handleIncomingMessage(Map<String, dynamic> data) async {
+    if (!mounted || _isExiting) return;
+    final String raw = data['text']?.toString() ?? '';
+    final String srcLang = data['srcLang']?.toString() ?? 'English';
+    if (raw.trim().isEmpty) return;
+
+    _resetIdleTimer();
+
+    // 상대 발화를 들려주는 동안 내 녹음 일시 정지 (스피커 음성이 마이크에 새는 것 방지)
+    _silenceTimer?.cancel();
+    try {
+      await _audioRecorder.stop();
+    } catch (_) {}
+
+    final String myTarget = _myTarget();
+    final String myNative = _myNative();
+
+    Map<String, String>? result = await DuoBrain.processTranslation(
+        key: _openAiKey,
+        text: raw,
+        srcLang: srcLang,
+        myTargetLang: myTarget,
+        myNativeLang: myNative);
+
+    if (!mounted || _isExiting) return;
+
+    final String tgt =
+        (result != null && (result['target'] ?? '').trim().isNotEmpty)
+            ? result['target']!
+            : raw;
+    final String org =
+        (result != null && (result['original'] ?? '').trim().isNotEmpty)
+            ? result['original']!
+            : '';
+
+    // 상대 말풍선: 좌측 (role='SYSTEM')
     if (mounted) {
       setState(() {
-        _localMessages.add({
-          'role': 'SYSTEM',
-          'target': aiReplyTarget,
-          'original': aiReplyOriginal
-        });
+        _localMessages.add({'role': 'SYSTEM', 'target': tgt, 'original': org});
       });
-      // AI 응답은 중앙 고정 — 읽기 좋은 위치에서 흔들리지 않도록
       _scrollToCurrent(_localMessages.length - 1);
     }
+    await _saveHistoryMessage(tgt, org, 'SYSTEM');
 
-    await _saveHistoryMessage(aiReplyTarget, aiReplyOriginal, 'SYSTEM');
-
-    // 5. TTS 재생 후 마이크 다시 켜기
-    if (aiTtsBytes != null) {
-      await _playAudioAndWait(aiTtsBytes);
+    // 내 타겟 소리로 재생 (직렬화)
+    final Uint8List? bytes = await _fetchTTSBytes(tgt, _myVoice());
+    if (bytes != null && _isConversationActive && !_isExiting) {
+      await _playSerialized(bytes);
     }
 
-    if (_isConversationActive && _turnCounter == currentTurnId) {
+    // 내 녹음 재개
+    if (_isConversationActive && !_isExiting) {
       _startWhisperRecording();
     }
   }
@@ -489,7 +623,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     }
   }
 
-  // 현재 말풍선을 화면 중앙에 고정 — AI 응답 추가 시 사용 (Roleplay 이식)
+  // 현재 말풍선을 화면 중앙에 고정 — 상대 응답 추가 시 사용 (Roleplay 이식)
   void _scrollToCurrent(int index) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
@@ -506,7 +640,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     });
   }
 
-  // 현재 말풍선을 화면 상단에 고정 — HOST 발화 추가 시 사용 (Roleplay 이식)
+  // 현재 말풍선을 화면 상단에 고정 — 내 발화 추가 시 사용 (Roleplay 이식)
   void _scrollToCurrentTop(int index) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final key = _itemKeys[index];
@@ -617,8 +751,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
           'isPartnerJoined': false,
         });
       }
+      // 🆕 호스트 식별 확정 + uid 확보
+      _amIHost = true;
+      _myUid = user.uid;
       // 2) listener 항상 재등록 (cancel 후 재등록으로 중복 구독 방지)
       _listenForPartnerJoined();
+      _listenForMessages(); // 🆕 공유 메시지 채널 리스너 시작
       // 3) 세션 활성화
       await _duoSessionRef!.update({
         'isDuoEnabled': true,
@@ -700,6 +838,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
       final String guestUid =
           firebaseUid ?? 'guest_${DateTime.now().millisecondsSinceEpoch}';
 
+      // 🆕 게스트 식별 확정
+      _amIHost = false;
+      _myUid = guestUid;
+
       await _duoSessionRef!.update({
         'isPartnerJoined': true,
         'partnerUid': guestUid,
@@ -712,7 +854,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
       FFAppState().pendingInviteType = '';
       debugPrint('[AppState] duo invite state cleared (after successful join)');
 
-      debugPrint('[Duo] _joinAsGuest success — guestUid: $guestUid, roomId: $roomId');
+      debugPrint(
+          '[Duo] _joinAsGuest success — guestUid: $guestUid, roomId: $roomId');
+
+      // 🆕 공유 메시지 채널 리스너 시작 (게스트도 상대=호스트 발화 수신)
+      _listenForMessages();
 
       if (mounted) {
         setState(() {
@@ -771,6 +917,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     // listener 즉시 해제 — 본인의 Firestore 업데이트가 listener를 재트리거하지 않도록
     _partnerJoinedSubscription?.cancel();
     _partnerJoinedSubscription = null;
+    _messageSubscription?.cancel(); // 🆕 메시지 채널 구독도 해제
+    _messageSubscription = null;
 
     _cancelAudio();
     _silenceTimer?.cancel();
@@ -1033,7 +1181,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   Widget _buildTextBlock(Map<String, dynamic> msg) {
     String target = msg['target']?.toString() ?? '';
     String original = msg['original']?.toString() ?? '';
-    bool isHost = msg['role'] == 'HOST';
+    bool isHost = msg['role'] == 'HOST'; // 'HOST'=내 말(우측) / 그 외=상대 말(좌측)
 
     if (target.isEmpty) return const SizedBox.shrink();
     return Align(
@@ -1077,51 +1225,41 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
 
 // ============================================================================
 // 📦 [Box 7-1: 듀오 전용 AI 뇌 (DuoBrain)]
-// OpenAI API 호출(양방향 동시 통역) 전용 클래스
+// 통역 전용 클래스 — 원문 1개를 받아 [내 타겟 + 내 오리지널] 동시 생성 (단일 GPT 호출)
+// ⚠️ 절대 대화에 끼어들지 않음. 오직 번역만 수행 (양방향 통역폰 규칙).
 // ============================================================================
 class DuoBrain {
   static final http.Client client = http.Client();
 
-  static Future<Map<String, String>?> processTranslation(
-      {required String key,
-      required String text,
-      required String targetLang,
-      required String originalLang,
-      List<Map<String, dynamic>> recentHistory = const []}) async {
+  static Future<Map<String, String>?> processTranslation({
+    required String key,
+    required String text,
+    required String srcLang,
+    required String myTargetLang,
+    required String myNativeLang,
+  }) async {
     try {
       Uri uri = Uri.parse('https://api.openai.com/v1/chat/completions');
 
-      // 최근 대화 히스토리를 GPT 컨텍스트로 변환 (최대 6턴)
-      final historyLines = <String>[];
-      for (final msg
-          in recentHistory.reversed.take(6).toList().reversed) {
-        final role = msg['role'] == 'HOST' ? 'User' : 'AI';
-        final content = msg['target']?.toString() ?? '';
-        if (content.isNotEmpty) historyLines.add('[$role]: $content');
-      }
-      final historyContext = historyLines.isEmpty
-          ? '(No prior conversation)'
-          : historyLines.join('\n');
-
-      String prompt = "You are a real-time interpreter/translator.\n"
-          "Your ONLY job is to translate the user's speech.\n"
-          "NEVER respond to the user. NEVER answer questions. NEVER add comments.\n"
-          "NEVER ask clarification questions. Just translate exactly what was said.\n\n"
-          "Source language: $originalLang\n"
-          "Target language: $targetLang\n\n"
-          "=== RECENT CONVERSATION (for context only) ===\n"
-          "$historyContext\n\n"
-          "=== RULES ===\n"
-          "1. Translate the user's speech from $originalLang to $targetLang faithfully.\n"
-          "2. Preserve the speaker's tone, intent, and nuance.\n"
-          "3. If the speech is already in $targetLang, still output it cleaned up.\n"
-          "4. Use the conversation history ONLY to resolve pronouns or context — never to generate your own response.\n\n"
-          "=== OUTPUT (strict JSON, nothing else) ===\n"
+      String prompt = "You are a translation engine for a live interpreter app.\n"
+          "You receive ONE utterance and render it into TWO languages.\n"
+          "You are NOT a chat assistant. NEVER reply, comment, answer, or ask questions.\n"
+          "NEVER continue the conversation. Translate the utterance only.\n\n"
+          "Utterance language: $srcLang\n"
+          "Output A (target): $myTargetLang\n"
+          "Output B (native): $myNativeLang\n\n"
+          "Rules:\n"
+          "1. \"target\" = the utterance translated into $myTargetLang.\n"
+          "2. \"original\" = the utterance translated into $myNativeLang.\n"
+          "3. If the utterance is already in one of these languages, just clean it up (fix spacing/typos) for that field.\n"
+          "4. Preserve tone, intent, names, and numbers exactly. Do not add or remove meaning.\n"
+          "5. Output strict JSON only, nothing else.\n\n"
+          "Output format:\n"
           "{\n"
-          "  \"translated_text\": \"<the translation in $targetLang>\",\n"
-          "  \"original_input\": \"<the original speech cleaned up in $originalLang>\"\n"
+          "  \"target\": \"<utterance in $myTargetLang>\",\n"
+          "  \"original\": \"<utterance in $myNativeLang>\"\n"
           "}\n\n"
-          "User said: \"$text\"";
+          "Utterance: \"$text\"";
 
       var res = await client
           .post(uri,
@@ -1132,7 +1270,7 @@ class DuoBrain {
               body: jsonEncode({
                 'model': 'gpt-4o-mini',
                 'temperature': 0.2,
-                'max_tokens': 300,
+                'max_tokens': 400,
                 'response_format': {'type': 'json_object'},
                 'messages': [
                   {'role': 'user', 'content': prompt}
@@ -1146,8 +1284,8 @@ class DuoBrain {
                 ['content']);
         var parsed = jsonDecode(cleanJson);
         return {
-          'translated_text': parsed['translated_text']?.toString() ?? "",
-          'original_input': parsed['original_input']?.toString() ?? "",
+          'target': parsed['target']?.toString() ?? "",
+          'original': parsed['original']?.toString() ?? "",
         };
       }
     } catch (e) {
