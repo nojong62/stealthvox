@@ -4543,20 +4543,78 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
       // How / Why / What 으로 시작 → 유저가 자기 이야기를 자연스럽게 꺼냄
       // 첫 질문 이후 유저 대답부터 문장 확장(expand) 시작
       if (isOpening) {
-        const String openingSysPrompt =
-            """You are a warm conversation coach starting a new session.
+        // ── [STEP 1] 당일 뉴스 헤드라인 가져오기 (non-streaming, 10초 timeout) ──
+        String newsHeadline = '';
+        final newsClient = http.Client();
+        try {
+          final newsRes = await newsClient
+              .post(
+                Uri.parse('https://api.openai.com/v1/chat/completions'),
+                headers: {
+                  'Authorization': 'Bearer $apiKey',
+                  'Content-Type': 'application/json; charset=utf-8',
+                },
+                body: jsonEncode({
+                  'model': 'gpt-4o-mini',
+                  'max_tokens': 40,
+                  'temperature': 0.9,
+                  'messages': [
+                    {
+                      'role': 'system',
+                      'content':
+                          'Output ONLY one short, interesting news topic (max 10 words) that $myNative-speaking people are curious about recently. No explanation. No extra text.',
+                    },
+                    {
+                      'role': 'user',
+                      'content':
+                          'Give me one current news topic people in $myNative-speaking countries find interesting.',
+                    },
+                  ],
+                }),
+              )
+              .timeout(const Duration(seconds: 10));
+          if (newsRes.statusCode == 200) {
+            final newsJson = jsonDecode(newsRes.body);
+            final choices = newsJson['choices'] as List?;
+            if (choices != null && choices.isNotEmpty) {
+              newsHeadline =
+                  (choices[0]['message']?['content'] ?? '').toString().trim();
+            }
+          }
+        } catch (_) {
+          newsHeadline = '';
+        } finally {
+          newsClient.close();
+        }
 
-Ask ONE open-ended question that invites the user to share something from their everyday life — naturally and without pressure.
+        // ── [STEP 2] 뉴스 소재 기반 or 폴백 오프닝 질문 생성 (streaming) ──
+        final String openingSysPrompt = newsHeadline.isNotEmpty
+            ? """You are a warm, friendly conversation coach.
+Today's news topic: "$newsHeadline"
+
+Use this as a casual conversation opener. Ask ONE natural open-ended question in $myTarget that gently invites the user to share their opinion or personal experience related to this topic.
+
+[RULES]
+- Sound like a friend casually bringing it up — not a news anchor.
+- Open-ended: never yes/no.
+- Warm and light — 1 to 2 sentences max.
+- No grammar terms. No leading phrases.
+
+[OUTPUT]
+Output ONLY the question in $myTarget. Nothing else."""
+            : """You are a warm conversation coach starting a new session.
+
+Ask ONE open-ended question in $myTarget that invites the user to share something from their everyday life — naturally and without pressure.
 
 [RULES]
 - 5 to 8 words only.
 - Open-ended: never yes/no.
 - Warm and casual — like a curious friend, not an interviewer.
 - Everyday topics are perfect: recent events, something they noticed, something on their mind.
-- No grammar terms. No leading phrases ("Tell me about...", "Explain...").
+- No grammar terms. No leading phrases.
 
 [OUTPUT]
-Output ONLY the English question. Nothing else.""";
+Output ONLY the question in $myTarget. Nothing else.""";
 
         final openReq = http.Request(
           'POST',
@@ -4570,17 +4628,15 @@ Output ONLY the English question. Nothing else.""";
           'model': 'gpt-4o-mini',
           'stream': true,
           'temperature': 0.7,
-          'max_tokens': 50,
+          'max_tokens': 80,
           'messages': [
             {'role': 'system', 'content': openingSysPrompt},
             {'role': 'user', 'content': 'Start the session.'},
           ],
         });
-        final openResp = await openReq
-            .send()
-            .timeout(const Duration(seconds: 15));
+        final openResp =
+            await openReq.send().timeout(const Duration(seconds: 15));
         if (openResp.statusCode != 200) {
-          yield "What's something on your mind today?";
           return;
         }
         await for (final chunk in openResp.stream
