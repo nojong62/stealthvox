@@ -62,7 +62,8 @@
       "PowerShell(flutter build *)",
       "Bash(Get-ChildItem \"lib/custom_code/widgets/\")",
       "Bash(Get-ChildItem -Path \"F:\\\\flutter_project\\\\stealth_vox\\\\lib\" -Recurse -Filter \"routine_mode_step_expand.dart\")",
-      "Bash(Read \"C:/Users/u/AppData/Local/Temp/claude/F--flutter-project-stealth-vox/11910095-7ce6-4c98-bb71-34c6edccac83/tasks/bdim6demo.output\")"
+      "Bash(Read \"C:/Users/u/AppData/Local/Temp/claude/F--flutter-project-stealth-vox/11910095-7ce6-4c98-bb71-34c6edccac83/tasks/bdim6demo.output\")",
+      "Bash(echo \"=== effectiveOriginal 확인 \\(\\\\\\\\n\\\\\\\\n 분기 없어야 함\\) ===\")"
     ]
   }
 }

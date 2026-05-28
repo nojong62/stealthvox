@@ -2841,15 +2841,9 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         ? '...'
         : targetRaw;
 
-    // 🌱 유저 번역은 \n\n으로 두 파트로 나뉠 수 있음 (2턴+)
-    // Part 1: 짧은 번역 / Part 2: 이전 문장과 합쳐진 확장 문장
-    // → 두 파트 모두 표시 (대답 + 한 줄 띄기 + 확장 문장)
     final targetParts = targetRaw.split(RegExp(r'\n\s*\n'));
-    final String effectiveTarget = (role == 'HOST' && targetParts.length >= 2)
-        ? '${targetParts[0].trim()}\n\n${targetParts.sublist(1).join('\n\n').trim()}'
-        : displayTarget;
-    // 🌱 유저 2턴+: original = Part1(짧은 대답) 한국어만 저장됨 (확장문장 한국어 없음)
-    // → 그대로 표시하면 됨
+    // 🌱 유저 2턴+ (hasUserTwoParts): Part1 영어+한국어 → 한줄띄기 → Part2 영어(한국어 없음)
+    final bool hasUserTwoParts = role == 'HOST' && targetParts.length >= 2;
     final String effectiveOriginal = (role == 'HOST_TEMP') ? '' : originalRaw;
 
     return Align(
@@ -2868,18 +2862,45 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           crossAxisAlignment:
               isHost ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
-            Text(effectiveTarget,
-                textAlign: isHost ? TextAlign.right : TextAlign.left,
-                style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16 * _fontScale,
-                    fontWeight: FontWeight.bold)),
-            if (_showOriginal && effectiveOriginal.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Text(effectiveOriginal,
+            if (hasUserTwoParts) ...[
+              // Part1 영어 (짧은 대답)
+              Text(targetParts[0].trim(),
                   textAlign: isHost ? TextAlign.right : TextAlign.left,
-                  style:
-                      TextStyle(color: Colors.grey, fontSize: 10 * _fontScale)),
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16 * _fontScale,
+                      fontWeight: FontWeight.bold)),
+              // Part1 한국어 (Part1 바로 아래)
+              if (_showOriginal && effectiveOriginal.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(effectiveOriginal,
+                    textAlign: isHost ? TextAlign.right : TextAlign.left,
+                    style: TextStyle(
+                        color: Colors.grey, fontSize: 10 * _fontScale)),
+              ],
+              // 한줄띄기 (Part1 영역과 Part2 영역 분리)
+              const SizedBox(height: 16),
+              // Part2 영어 (확장문장, 한국어 없음)
+              Text(targetParts.sublist(1).join('\n\n').trim(),
+                  textAlign: isHost ? TextAlign.right : TextAlign.left,
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16 * _fontScale,
+                      fontWeight: FontWeight.bold)),
+            ] else ...[
+              Text(displayTarget,
+                  textAlign: isHost ? TextAlign.right : TextAlign.left,
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16 * _fontScale,
+                      fontWeight: FontWeight.bold)),
+              if (_showOriginal && effectiveOriginal.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(effectiveOriginal,
+                    textAlign: isHost ? TextAlign.right : TextAlign.left,
+                    style: TextStyle(
+                        color: Colors.grey, fontSize: 10 * _fontScale)),
+              ],
             ],
           ],
         ),
