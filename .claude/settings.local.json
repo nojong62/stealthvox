@@ -59,7 +59,8 @@
       "PowerShell(git *)",
       "PowerShell($dt = Get-Date -Format \"yyyyMMdd_HHmm\"; Write-Output \"파일명: stealth_vox_$dt.apk\")",
       "PowerShell(cd F:\\\\flutter_project\\\\stealth_vox; git diff HEAD~1 -- lib/custom_code/widgets/routine_mode_clone.dart | Select-String \"^\\\\+\" | Where-Object { $_ -match \"idlePaused|PauseToast|pauseToast|format_size|pause_circle|resetIdle\" } | Select-Object -First 30)",
-      "PowerShell(flutter build *)"
+      "PowerShell(flutter build *)",
+      "Bash(Get-ChildItem \"lib/custom_code/widgets/\")"
     ]
   }
 }
