@@ -1917,13 +1917,24 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         swSpeechEnd: _swTTS,
       );
 
-      // 🌱 유저 첫 번째 답에만 원어(한국어) 표시 (백그라운드)
-      // Future를 저장 → STEP 7 히스토리 저장 직전 await로 original 확정
-      Future<String>? turn1OrigFuture;
+      // 🌱 유저 original(한국어) 역번역
+      // 1턴: 전체 문장 역번역 → 대화방 표시 + Firestore 저장
+      // 2턴+: Part1\n\nPart2 전체를 역번역 → 대화방에서는 Part2 한국어만 표시, Firestore에는 전체 저장
+      Future<String>? userOrigFuture;
       if (currentTurnId == 1) {
-        turn1OrigFuture = StepExpandBrain.generateCleanOriginal(
+        userOrigFuture = StepExpandBrain.generateCleanOriginal(
             apiKey: _openAiKey, englishText: userTargetText);
-        turn1OrigFuture.then((cleanKorean) {
+        userOrigFuture.then((cleanKorean) {
+          if (mounted && _localMessages.length > hostIndex) {
+            setState(() => _localMessages[hostIndex]['original'] = cleanKorean);
+          }
+        });
+      } else if (hasDoubleNewline) {
+        // 2턴+: Part1\n\nPart2 형태의 영어를 통째로 역번역
+        // generateCleanOriginal 프롬프트가 \n\n 구조를 유지하므로 한국어도 Part1한국어\n\nPart2한국어로 나옴
+        userOrigFuture = StepExpandBrain.generateCleanOriginal(
+            apiKey: _openAiKey, englishText: userTargetText);
+        userOrigFuture.then((cleanKorean) {
           if (mounted && _localMessages.length > hostIndex) {
             setState(() => _localMessages[hostIndex]['original'] = cleanKorean);
           }
@@ -2227,12 +2238,12 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       // ─────────────────────────────────────────────────────
       // STEP 7: Firestore 저장
       // ─────────────────────────────────────────────────────
-      // 히스토리 저장 전 turn 1 Korean original 완료 보장
+      // 히스토리 저장 전 Korean original 완료 보장 (1턴 및 2턴+)
       // effectiveOriginal(화면 표시용)과 달리, 저장 payload에는 실제 originalRaw 사용
-      if (turn1OrigFuture != null) {
+      if (userOrigFuture != null) {
         try {
           final cleanKorean =
-              await turn1OrigFuture.timeout(const Duration(seconds: 10));
+              await userOrigFuture.timeout(const Duration(seconds: 10));
           if (hostIndex < _localMessages.length &&
               (_localMessages[hostIndex]['original'] ?? '').toString().isEmpty) {
             _localMessages[hostIndex]['original'] = cleanKorean;
@@ -2835,7 +2846,19 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     final String effectiveTarget = (role == 'HOST' && targetParts.length >= 2)
         ? '${targetParts[0].trim()}\n\n${targetParts.sublist(1).join('\n\n').trim()}'
         : displayTarget;
-    final String effectiveOriginal = (role == 'HOST_TEMP') ? '' : originalRaw;
+    // 🌱 유저 2턴+ original은 "Part1한국어\n\nPart2한국어" 구조
+    // 대화방에서는 Part1 한국어를 숨기고 Part2 한국어만 표시
+    // (공부방/Firestore에는 전체가 저장되어 열람 가능)
+    final String effectiveOriginal;
+    if (role == 'HOST_TEMP') {
+      effectiveOriginal = '';
+    } else if (role == 'HOST' && originalRaw.contains('\n\n')) {
+      // Part2(확장문장) 한국어만 표시
+      final origParts = originalRaw.split(RegExp(r'\n\s*\n'));
+      effectiveOriginal = origParts.sublist(1).join('\n\n').trim();
+    } else {
+      effectiveOriginal = originalRaw;
+    }
 
     return Align(
       alignment: isHost ? Alignment.centerRight : Alignment.centerLeft,
