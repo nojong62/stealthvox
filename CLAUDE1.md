@@ -46,307 +46,132 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# StepExpand 오프닝 질문 — 오늘 뉴스 기반 짧은 질문 + 번역 품질 수정
+routine_mode_roleplay.dart 파일에서 아래 4개 수정을 적용해줘. Box 7 엔진(DeepgramV2VoiceManager, TtsQueueManager, ChunkedTtsFetcher, HybridTtsPlayer 등)은 절대 건드리지 마.
 
-## 현재 문제 (스크린샷 확인)
-1. 첫 질문이 너무 길고 무거움
-   - 뉴스 소재 선정이 "최근 관심 주제" 기반이라 AI 윤리 등 심층 토론 주제 등장
-   - 질문 프롬프트에 "1 to 2 sentences"가 허용되어 두 문장짜리 질문 생성
-2. 한국어 번역이 질문 번역이 아니라 AI가 직접 답변을 서술하는 강의 수준
-   - generateCleanOriginal 프롬프트에 길이/역할 제약이 없어 hallucination 발생
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+수정 1: generateCleanOriginal 프롬프트 — 번역 생략 방지
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+위치: Box 7-1-B generateCleanOriginal 함수 내부, 'content' 값의 삼중따옴표 시스템 프롬프트.
+대략 3540행 시작 '''당신은 한영 통역 전문가입니다 ~ 3557행 ''', 까지.
 
-## 수정 대상 파일
-routine_mode_step_expand.dart (이 파일만 수정)
+이 프롬프트를 아래로 교체:
 
-## 수정 2곳 — 다른 로직 절대 건드리지 말 것
+'''당신은 한영 통역 전문가입니다. 다음 영어 문장을 **자연스러운 한국어 구어체**로 번역하세요.
 
----
+[절대 규칙 - 문장 누락 금지]
+- 원문의 모든 문장을 빠짐없이 번역하세요. 요약/축약/생략 절대 금지.
+- 원문이 2문장이면 번역도 반드시 2문장, 3문장이면 3문장.
+- 마침표(.) 또는 물음표(?) 단위로 끊어서 각각 번역하세요.
 
-### 수정 1: isOpening 분기 — 뉴스 선정 + 질문 생성 프롬프트 교체
-위치: `streamGrammarQuestion` 내 `if (isOpening)` 블록 전체
-라인: 4545~4660 부근 (if (isOpening) { ... return; } 전체)
-
-현재 코드:
-```dart
-      if (isOpening) {
-        // ── [STEP 1] 당일 뉴스 헤드라인 가져오기 (non-streaming, 10초 timeout) ──
-        String newsHeadline = '';
-        final newsClient = http.Client();
-        try {
-          final newsRes = await newsClient
-              .post(
-                Uri.parse('https://api.openai.com/v1/chat/completions'),
-                headers: {
-                  'Authorization': 'Bearer $apiKey',
-                  'Content-Type': 'application/json; charset=utf-8',
-                },
-                body: jsonEncode({
-                  'model': 'gpt-4o-mini',
-                  'max_tokens': 40,
-                  'temperature': 0.9,
-                  'messages': [
-                    {
-                      'role': 'system',
-                      'content':
-                          'Output ONLY one short, interesting news topic (max 10 words) that $myNative-speaking people are curious about recently. No explanation. No extra text.',
-                    },
-                    {
-                      'role': 'user',
-                      'content':
-                          'Give me one current news topic people in $myNative-speaking countries find interesting.',
-                    },
-                  ],
-                }),
-              )
-              .timeout(const Duration(seconds: 10));
-          if (newsRes.statusCode == 200) {
-            final newsJson = jsonDecode(newsRes.body);
-            final choices = newsJson['choices'] as List?;
-            if (choices != null && choices.isNotEmpty) {
-              newsHeadline =
-                  (choices[0]['message']?['content'] ?? '').toString().trim();
-            }
-          }
-        } catch (_) {
-          newsHeadline = '';
-        } finally {
-          newsClient.close();
-        }
-
-        // ── [STEP 2] 뉴스 소재 기반 or 폴백 오프닝 질문 생성 (streaming) ──
-        final String openingSysPrompt = newsHeadline.isNotEmpty
-            ? """You are a warm, friendly conversation coach.
-Today's news topic: "$newsHeadline"
-
-Use this as a casual conversation opener. Ask ONE natural open-ended question in $myTarget that gently invites the user to share their opinion or personal experience related to this topic.
-
-[RULES]
-- Sound like a friend casually bringing it up — not a news anchor.
-- Open-ended: never yes/no.
-- Warm and light — 1 to 2 sentences max.
-- No grammar terms. No leading phrases.
-
-[OUTPUT]
-Output ONLY the question in $myTarget. Nothing else."""
-            : """You are a warm conversation coach starting a new session.
-
-Ask ONE open-ended question in $myTarget that invites the user to share something from their everyday life — naturally and without pressure.
-
-[RULES]
-- 5 to 8 words only.
-- Open-ended: never yes/no.
-- Warm and casual — like a curious friend, not an interviewer.
-- Everyday topics are perfect: recent events, something they noticed, something on their mind.
-- No grammar terms. No leading phrases.
-
-[OUTPUT]
-Output ONLY the question in $myTarget. Nothing else.""";
-
-        final openReq = http.Request(
-          'POST',
-          Uri.parse('https://api.openai.com/v1/chat/completions'),
-        );
-        openReq.headers.addAll({
-          'Authorization': 'Bearer $apiKey',
-          'Content-Type': 'application/json; charset=utf-8',
-        });
-        openReq.body = jsonEncode({
-          'model': 'gpt-4o-mini',
-          'stream': true,
-          'temperature': 0.7,
-          'max_tokens': 80,
-          'messages': [
-            {'role': 'system', 'content': openingSysPrompt},
-            {'role': 'user', 'content': 'Start the session.'},
-          ],
-        });
-        final openResp =
-            await openReq.send().timeout(const Duration(seconds: 15));
-        if (openResp.statusCode != 200) {
-          return;
-```
-
-교체할 코드:
-```dart
-      if (isOpening) {
-        // ── [STEP 1] 오늘 뉴스 헤드라인 1건 선정 ────────────────────────
-        // 가볍고 일상적인 뉴스 (생활/날씨/음식/문화/스포츠)만 선정
-        // 정치·사회·AI윤리 등 무거운 주제 제외
-        String newsHeadline = '';
-        final newsClient = http.Client();
-        try {
-          final newsRes = await newsClient
-              .post(
-                Uri.parse('https://api.openai.com/v1/chat/completions'),
-                headers: {
-                  'Authorization': 'Bearer $apiKey',
-                  'Content-Type': 'application/json; charset=utf-8',
-                },
-                body: jsonEncode({
-                  'model': 'gpt-4o-mini',
-                  'max_tokens': 20,
-                  'temperature': 0.9,
-                  'messages': [
-                    {
-                      'role': 'system',
-                      'content':
-                          'Pick ONE real-feeling everyday news topic from $myNative-speaking countries that would appear in today\'s news feed.\n'
-                          'Topic must be light and relatable — from these categories ONLY: weather, food prices, sports, popular culture, seasonal events, local life.\n'
-                          'FORBIDDEN topics: politics, war, AI ethics, crime, economics, anything heavy or controversial.\n'
-                          'Output format: ONLY a 4-to-8-word English noun phrase. No verb. No question. No punctuation.\n'
-                          'Examples:\n'
-                          'summer heat wave hitting this week\n'
-                          'coffee prices rising at local cafes\n'
-                          'popular drama ending this weekend\n'
-                          'school lunch menu changes next month\n'
-                          'heavy rain forecast for the weekend',
-                    },
-                    {
-                      'role': 'user',
-                      'content': 'Today\'s topic.',
-                    },
-                  ],
-                }),
-              )
-              .timeout(const Duration(seconds: 10));
-          if (newsRes.statusCode == 200) {
-            final newsJson = jsonDecode(utf8.decode(newsRes.bodyBytes));
-            final choices = newsJson['choices'] as List?;
-            if (choices != null && choices.isNotEmpty) {
-              newsHeadline =
-                  (choices[0]['message']?['content'] ?? '').toString().trim();
-            }
-          }
-        } catch (_) {
-          newsHeadline = '';
-        } finally {
-          newsClient.close();
-        }
-
-        // ── [STEP 2] 뉴스 소재 기반 짧은 오프닝 질문 생성 (streaming) ──
-        final String openingSysPrompt = newsHeadline.isNotEmpty
-            ? 'You are starting a casual English conversation.\n'
-              'News topic: "$newsHeadline"\n\n'
-              'Write ONE short open-ended question in $myTarget about this topic.\n'
-              'Rules:\n'
-              '- ONE sentence only. 8 words or fewer.\n'
-              '- Sound like a friend, not a reporter.\n'
-              '- Never yes/no.\n'
-              'Output ONLY the question. Nothing else.'
-            : 'You are starting a casual English conversation.\n'
-              'Write ONE short open-ended question in $myTarget about something from everyday life.\n'
-              'Rules:\n'
-              '- ONE sentence only. 8 words or fewer.\n'
-              '- Sound like a friend, not an interviewer.\n'
-              '- Never yes/no.\n'
-              'Output ONLY the question. Nothing else.';
-
-        final openReq = http.Request(
-          'POST',
-          Uri.parse('https://api.openai.com/v1/chat/completions'),
-        );
-        openReq.headers.addAll({
-          'Authorization': 'Bearer $apiKey',
-          'Content-Type': 'application/json; charset=utf-8',
-        });
-        openReq.body = jsonEncode({
-          'model': 'gpt-4o-mini',
-          'stream': true,
-          'temperature': 0.2,
-          'max_tokens': 30,
-          'messages': [
-            {'role': 'system', 'content': openingSysPrompt},
-            {'role': 'user', 'content': 'Go.'},
-          ],
-        });
-        final openResp =
-            await openReq.send().timeout(const Duration(seconds: 15));
-        if (openResp.statusCode != 200) {
-          return;
-```
-
----
-
-### 수정 2: generateCleanOriginal — 오프닝 질문 번역 시 짧고 정확하게
-위치: `generateCleanOriginal` 메서드 내 system 프롬프트
-라인: 4414~4431 부근
-
-현재 코드:
-```dart
-                    'content':
-                        '''당신은 한영 통역 전문가입니다. 다음 영어 문장을 **자연스러운 한국어 구어체**로 번역하세요.
-
-[중요 규칙 - 주어 생략 처리]
+[주어 생략 처리]
 - 한국어는 주어를 자주 생략합니다. 영어의 I/You/He/She/We/They를 무조건 그대로 살리지 마세요.
 - 문맥상 당연한 주어는 과감히 생략하여 자연스럽게 만드세요.
+  예: "I need to go" → "가야겠어요" (✅) / "나는 가야 한다" (❌ 어색)
+  예: "Are you coming?" → "올 거예요?" (✅) / "당신은 오고 있습니까?" (❌)
+- 대화 상대가 명확하면 "너/당신"도 생략 가능합니다.
 - 하지만 의미 혼동 가능성이 있을 때는 주어를 살립니다.
 
 [구어체 톤]
 - 문어체 X, 일상 대화체 O
-
-[포맷 유지]
-- 원문에 빈 줄(\\n\\n)이 있으면 한국어에도 반드시 그대로 유지하세요.
+- "~하였다" X → "~했어요" O
+- "~이다" X → "~이에요/~예요" O
 
 [출력]
 - 번역문만 출력. 설명/주석/따옴표 없음.
-''',
-```
+- 원문의 문장 수와 동일하게 출력.
+'''
 
-교체할 코드:
-```dart
-                    'content':
-                        '''당신은 영한 번역가입니다. 주어진 영어를 한국어 구어체로 번역하세요.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+수정 2: generateDramaticScenario 장르 풀 — 일상 대화 50% 추가
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+위치: Box 7-1-0 generateDramaticScenario 함수 내부, final genres = [...]; 배열.
+대략 3330행 시작 ~ 3341행 ]; 까지.
 
-[규칙]
-- 원문 내용만 번역. 설명·부연·의견 추가 절대 금지.
-- 짧은 문장은 짧게, 긴 문장은 길게 — 원문 길이에 비례하게.
-- 한국어 주어 생략: 문맥상 명확한 I/You/We/They는 생략.
-- 구어체 (문어체 X).
-- 원문에 빈 줄(\\n\\n)이 있으면 한국어에도 그대로 유지.
-- 번역문만 출력. 설명/주석/따옴표 없음.
-''',
-```
+이 배열을 아래로 교체:
 
-그리고 같은 메서드에서 `temperature`와 `max_tokens`도 수정:
+      final genres = [
+        // 일상/긍정 (10개)
+        '카페에서 새 메뉴 추천받기',
+        '해외여행 중 현지인과 길 묻기',
+        '새 이웃에게 인사하며 동네 소개',
+        '옷가게에서 스타일 상담',
+        '회사 점심시간 동료와 맛집 토크',
+        '헬스장 첫날 트레이너와 상담',
+        '공항 체크인 카운터 대화',
+        '호텔 체크인하며 방 업그레이드 요청',
+        '동네 서점에서 책 추천 대화',
+        '반려동물 산책 중 견주끼리 대화',
+        // 드라마틱/갈등 (10개)
+        '불륜 발각, 부부 갈등',
+        '직장 내 권력 다툼, 해고 위기',
+        '형사 심문, 용의자 취조',
+        '재벌가 상속 분쟁',
+        '비밀 연인 들킴',
+        '가족 비밀 폭로',
+        '첫사랑 재회, 감정 충돌',
+        '룸메이트 생활 규칙 갈등',
+        '환불 요청하는데 매장 직원이 거부',
+        '친구가 빌린 돈 안 갚음',
+      ];
 
-현재 코드:
-```dart
-                'model': 'gpt-4o-mini',
-                'temperature': 0.0,
-                'max_tokens': 200,
-```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+수정 3: generateDramaticScenario 프롬프트 — 일상 시나리오 대응
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+위치: 같은 함수 내부 systemPrompt 문자열.
+대략 3344행 시작 final systemPrompt = ~ 3358행 Genre hint 끝까지.
 
-교체할 코드:
-```dart
-                'model': 'gpt-4o-mini',
-                'temperature': 0.2,
-                'max_tokens': 120,
-```
+이 프롬프트를 아래로 교체:
 
----
+      final systemPrompt = 'You are a creative director for a high-immersion English roleplay app.\n'
+          'Your job is to create ONE vivid scene inspired by real-life situations, Netflix series, Korean/American dramas, or movies.\n'
+          '\n'
+          'OUTPUT: Return ONLY valid JSON, no extra text.\n'
+          '{\n'
+          '  "situation": "핵심 상황 요약 (10-15 Korean chars, e.g. 카페에서 신메뉴 추천)",\n'
+          '  "ai_role": "AI 캐릭터 (10자 이내, with clear personality, e.g. 친절한 바리스타)",\n'
+          '  "user_role": "유저 캐릭터 (8자 이내, e.g. 단골 손님)"\n'
+          '}\n'
+          '\n'
+          'RULES:\n'
+          '- situation: vivid and specific. Do NOT name any show/character.\n'
+          '- ai_role: give a personality that fits the genre (friendly, enthusiastic, suspicious, furious, etc).\n'
+          '- user_role: the user naturally belongs in the scene.\n'
+          '- For everyday/positive genres: warm, helpful, curious personalities.\n'
+          '- For dramatic/conflict genres: intense, confrontational, emotional personalities.\n'
+          '- Genre hint this round: $pick';
 
-## 수정 요약
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+수정 4: generateAiOpener 프롬프트 — 일상 시나리오 대응
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+위치: Box 7-1-D generateAiOpener 함수 내부, sysPrompt 문자열.
+대략 3688행 시작 ~ 3703행 끝까지.
 
-| 항목 | 변경 전 | 변경 후 | 이유 |
-|---|---|---|---|
-| 뉴스 선정 프롬프트 | "recently curious" — 트렌드 주제 | 오늘 생활/날씨/음식/문화만, 무거운 주제 금지 | AI윤리 등 무거운 주제 차단 |
-| 뉴스 선정 max_tokens | 40 | 20 | 4~8단어 명사구만 필요 |
-| 질문 생성 temperature | 0.7 | 0.2 | 짧고 예측 가능하게 |
-| 질문 생성 max_tokens | 80 | 30 | 8단어 이하 강제 |
-| 역번역 프롬프트 | "자연스러운 구어체" — 길이 제약 없음 | 원문 길이 비례, 부연 금지 | 강의 수준 번역 차단 |
-| 역번역 temperature | 0.0 | 0.2 | 약간의 자연스러움 허용 |
-| 역번역 max_tokens | 200 | 120 | 과도한 출력 차단 |
+이 프롬프트를 아래로 교체:
 
-## 절대 금지 사항
-1. Box 7 (TtsQueueManager, DeepgramV2VoiceManager, ChunkedTtsFetcher) 코드 수정 금지
-2. isOpening 이외 `streamGrammarQuestion` 분기 수정 금지
-3. `_startSessionWithAiQuestion` TTS/STT 흐름 변경 금지
-4. Firestore 저장 로직 변경 금지
-5. `streamUserTranslation`, `streamGrammarQuestion` 일반 턴 프롬프트 수정 금지
+      final sysPrompt = 'You are a master actor and an English conversation coach playing "$aiRole".\n'
+          '\n'
+          '[SCENARIO]\n'
+          'Situation: $situation\n'
+          'Your role: $aiRole\n'
+          "The other person's role: $userRole\n"
+          '\n'
+          '[CORE RULES]\n'
+          '1. Start the scene IMMEDIATELY with your first line — no greetings, no meta-commentary.\n'
+          '2. Read the emotional tone of the situation: if dramatic, be intense; if everyday, be natural and warm.\n'
+          '3. Do NOT mention any drama, movie, or show titles. Keep it real and seamless.\n'
+          '4. Your first line must be a natural, in-character statement or question that draws the user into the scene.\n'
+          '5. Adopt the exact personality of "$aiRole". Use natural spoken $targetLang — NOT textbook dialogue.\n'
+          '6. ONE sentence only. Under 20 words. Maximum immersion, zero filler.\n'
+          '\n'
+          'Output: ONE natural first line in $targetLang only.';
 
-## 검증
-1. `dart analyze` — 에러 0건
-2. `grep -n "max_tokens.*80" routine_mode_step_expand.dart` → 0건 (구 질문 max_tokens 제거 확인)
-3. `grep -n "max_tokens.*30" routine_mode_step_expand.dart` → isOpening STEP 2에서 발견
-4. `grep -n "max_tokens.*120" routine_mode_step_expand.dart` → generateCleanOriginal에서 발견
-5. `grep -n "temperature.*0.2" routine_mode_step_expand.dart` → 질문 생성 + 역번역 양쪽에서 발견
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+검증
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+수정 완료 후:
+1. dart analyze 실행하여 에러 없는지 확인
+2. grep -n "fierce\|furious, cold, desperate\|deep dramatic conflict\|forces the user to respond, defend" routine_mode_roleplay.dart — 결과가 0건이어야 함 (갈등 편향 표현 제거 확인)
+3. grep -n "카페에서 새 메뉴\|문장 누락 금지" routine_mode_roleplay.dart — 2건 이상 나와야 함 (신규 코드 삽입 확인)
+4. Box 7 클래스(DeepgramV2VoiceManager, TtsQueueManager, ChunkedTtsFetcher, HybridTtsPlayer, AudioCacheManager, TtsCache)에 diff가 없는지 확인
+
+streamRoleplayResponse(Box 7-1-C)의 프롬프트는 수정하지 마. 여기는 이미 $aiRole 기반으로 동적이라 장르에 따라 자동 적응됨.
