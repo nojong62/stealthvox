@@ -4550,6 +4550,7 @@ Output ONLY the English question. Nothing else.""";
 
       final String grammarHint = turnNumber == 1
           ? 'GOAL: Draw out a REASON or CAUSE behind the user\'s core statement.\n'
+              'If the user clearly expressed loss of interest, motivation, enjoyment, or willingness to engage, treat that emotion as the cause to explore (see [EMOTIONAL DEPTH RULE]).\n'
               'Invite the user to share WHY — warmly and lightly, without naming grammar. '
               'A short answer like "because I was tired" should attach smoothly to the growing sentence.'
           : turnNumber == 2
@@ -4632,6 +4633,52 @@ Scan the ENTIRE History before choosing your question:
 - If "what" is already answered → NEVER ask "what" again. Dig into REASON or RESULT.
 - If "when" is already answered → do NOT ask "when" again. Focus on IMPACT or REACTION.
 - Always build on the MOST RECENT user statement. Never repeat ground already covered.
+
+[EMOTIONAL DEPTH RULE — HIGHEST PRIORITY]
+Before applying any TURN GOAL, check whether the user's LAST answer clearly expresses loss of interest, motivation, enjoyment, or willingness to engage.
+
+Trigger this rule only when the user's last answer means something like:
+- "Nothing interests me."
+- "I don't find anything interesting."
+- "I don't care about much these days."
+- "Nothing feels fun."
+- "I don't feel like talking."
+- "흥미로운 게 없어."
+- "관심 있는 게 없어."
+- "요즘 재미있는 게 없어."
+- "딱히 말하고 싶은 게 없어."
+
+Do NOT trigger this rule for a vague "I don't know", "maybe", "그냥", or "모르겠어" unless the surrounding context clearly shows emotional withdrawal or loss of interest.
+
+If this rule is triggered, OVERRIDE the normal TURN GOAL and instead:
+1. Do NOT repeat or rephrase the same topic question. Asking "what else interests you?" after "nothing interests me" is robotic and tone-deaf.
+2. Treat the user's disinterest as the story itself.
+3. Pivot gently into cause, change, timing, loss, contrast, or recent emotional context.
+4. Do not sound like a therapist. Keep the question casual, warm, and sentence-building friendly.
+5. The question must still be 5–8 words, open-ended, and answerable in 1–3 words.
+6. The user's short answer should still attach naturally to the growing sentence.
+
+Use ONE of these pivot strategies, varying each time:
+- CAUSE PROBE: "What made everything feel dull?" / "What drained your interest lately?"
+- TIMING PROBE: "When did things start feeling flat?" / "When did this feeling begin?"
+- LOSS PROBE: "What did you enjoy before?" / "What changed for you recently?"
+- CONTRAST PROBE: "What last made you feel excited?" / "When did you last feel curious?"
+- SOFT EVENT PROBE: "What took the spark away?" / "What happened before this feeling started?"
+
+[EXAMPLE — EMOTIONAL PIVOT]
+AI : What's been on your mind lately?
+User: Nothing really. (별로 없어.)
+  → Nothing has really been on my mind.
+AI : When did things start feeling flat?  ← TIMING PROBE (NOT: "What kind of things interest you?")
+User: Since I moved here alone. (여기 혼자 이사 온 뒤로.)
+  → Nothing has really been on my mind since I moved here alone.
+AI : What did you enjoy before? ← LOSS PROBE
+User: Having someone to talk to. (얘기할 사람이 있었던 거.)
+  → I haven't felt interested in much since I moved here alone, because I miss having someone to talk to.
+AI : Who did you talk to most? ← natural follow-up
+User: My college roommate. (대학 룸메이트.)
+  → I haven't felt interested in much since I moved here alone, because I miss talking to my college roommate.
+
 
 [QUESTION PRINCIPLES — MANDATORY]
 1. Be a curious friend, not an interviewer or grammar teacher.
