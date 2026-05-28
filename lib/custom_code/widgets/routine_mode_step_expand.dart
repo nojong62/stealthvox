@@ -4407,26 +4407,20 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
               },
               body: jsonEncode({
                 'model': 'gpt-4o-mini',
-                'temperature': 0.0,
-                'max_tokens': 200,
+                'temperature': 0.2,
+                'max_tokens': 120,
                 'messages': [
                   {
                     'role': 'system',
                     'content':
-                        '''당신은 한영 통역 전문가입니다. 다음 영어 문장을 **자연스러운 한국어 구어체**로 번역하세요.
+                        '''당신은 영한 번역가입니다. 주어진 영어를 한국어 구어체로 번역하세요.
 
-[중요 규칙 - 주어 생략 처리]
-- 한국어는 주어를 자주 생략합니다. 영어의 I/You/He/She/We/They를 무조건 그대로 살리지 마세요.
-- 문맥상 당연한 주어는 과감히 생략하여 자연스럽게 만드세요.
-- 하지만 의미 혼동 가능성이 있을 때는 주어를 살립니다.
-
-[구어체 톤]
-- 문어체 X, 일상 대화체 O
-
-[포맷 유지]
-- 원문에 빈 줄(\\n\\n)이 있으면 한국어에도 반드시 그대로 유지하세요.
-
-[출력]
+[규칙]
+- 원문 내용만 번역. 설명·부연·의견 추가 절대 금지.
+- 짧은 문장은 짧게, 긴 문장은 길게 — 원문 길이에 비례하게.
+- 한국어 주어 생략: 문맥상 명확한 I/You/We/They는 생략.
+- 구어체 (문어체 X).
+- 원문에 빈 줄(\\n\\n)이 있으면 한국어에도 그대로 유지.
 - 번역문만 출력. 설명/주석/따옴표 없음.
 ''',
                   },
@@ -4543,7 +4537,9 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
       // How / Why / What 으로 시작 → 유저가 자기 이야기를 자연스럽게 꺼냄
       // 첫 질문 이후 유저 대답부터 문장 확장(expand) 시작
       if (isOpening) {
-        // ── [STEP 1] 당일 뉴스 헤드라인 가져오기 (non-streaming, 10초 timeout) ──
+        // ── [STEP 1] 오늘 뉴스 헤드라인 1건 선정 ────────────────────────
+        // 가볍고 일상적인 뉴스 (생활/날씨/음식/문화/스포츠)만 선정
+        // 정치·사회·AI윤리 등 무거운 주제 제외
         String newsHeadline = '';
         final newsClient = http.Client();
         try {
@@ -4556,25 +4552,33 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
                 },
                 body: jsonEncode({
                   'model': 'gpt-4o-mini',
-                  'max_tokens': 40,
+                  'max_tokens': 20,
                   'temperature': 0.9,
                   'messages': [
                     {
                       'role': 'system',
                       'content':
-                          'Output ONLY one short, interesting news topic (max 10 words) that $myNative-speaking people are curious about recently. No explanation. No extra text.',
+                          'Pick ONE real-feeling everyday news topic from $myNative-speaking countries that would appear in today\'s news feed.\n'
+                          'Topic must be light and relatable — from these categories ONLY: weather, food prices, sports, popular culture, seasonal events, local life.\n'
+                          'FORBIDDEN topics: politics, war, AI ethics, crime, economics, anything heavy or controversial.\n'
+                          'Output format: ONLY a 4-to-8-word English noun phrase. No verb. No question. No punctuation.\n'
+                          'Examples:\n'
+                          'summer heat wave hitting this week\n'
+                          'coffee prices rising at local cafes\n'
+                          'popular drama ending this weekend\n'
+                          'school lunch menu changes next month\n'
+                          'heavy rain forecast for the weekend',
                     },
                     {
                       'role': 'user',
-                      'content':
-                          'Give me one current news topic people in $myNative-speaking countries find interesting.',
+                      'content': 'Today\'s topic.',
                     },
                   ],
                 }),
               )
               .timeout(const Duration(seconds: 10));
           if (newsRes.statusCode == 200) {
-            final newsJson = jsonDecode(newsRes.body);
+            final newsJson = jsonDecode(utf8.decode(newsRes.bodyBytes));
             final choices = newsJson['choices'] as List?;
             if (choices != null && choices.isNotEmpty) {
               newsHeadline =
@@ -4587,34 +4591,23 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
           newsClient.close();
         }
 
-        // ── [STEP 2] 뉴스 소재 기반 or 폴백 오프닝 질문 생성 (streaming) ──
+        // ── [STEP 2] 뉴스 소재 기반 짧은 오프닝 질문 생성 (streaming) ──
         final String openingSysPrompt = newsHeadline.isNotEmpty
-            ? """You are a warm, friendly conversation coach.
-Today's news topic: "$newsHeadline"
-
-Use this as a casual conversation opener. Ask ONE natural open-ended question in $myTarget that gently invites the user to share their opinion or personal experience related to this topic.
-
-[RULES]
-- Sound like a friend casually bringing it up — not a news anchor.
-- Open-ended: never yes/no.
-- Warm and light — 1 to 2 sentences max.
-- No grammar terms. No leading phrases.
-
-[OUTPUT]
-Output ONLY the question in $myTarget. Nothing else."""
-            : """You are a warm conversation coach starting a new session.
-
-Ask ONE open-ended question in $myTarget that invites the user to share something from their everyday life — naturally and without pressure.
-
-[RULES]
-- 5 to 8 words only.
-- Open-ended: never yes/no.
-- Warm and casual — like a curious friend, not an interviewer.
-- Everyday topics are perfect: recent events, something they noticed, something on their mind.
-- No grammar terms. No leading phrases.
-
-[OUTPUT]
-Output ONLY the question in $myTarget. Nothing else.""";
+            ? 'You are starting a casual English conversation.\n'
+              'News topic: "$newsHeadline"\n\n'
+              'Write ONE short open-ended question in $myTarget about this topic.\n'
+              'Rules:\n'
+              '- ONE sentence only. 8 words or fewer.\n'
+              '- Sound like a friend, not a reporter.\n'
+              '- Never yes/no.\n'
+              'Output ONLY the question. Nothing else.'
+            : 'You are starting a casual English conversation.\n'
+              'Write ONE short open-ended question in $myTarget about something from everyday life.\n'
+              'Rules:\n'
+              '- ONE sentence only. 8 words or fewer.\n'
+              '- Sound like a friend, not an interviewer.\n'
+              '- Never yes/no.\n'
+              'Output ONLY the question. Nothing else.';
 
         final openReq = http.Request(
           'POST',
@@ -4627,11 +4620,11 @@ Output ONLY the question in $myTarget. Nothing else.""";
         openReq.body = jsonEncode({
           'model': 'gpt-4o-mini',
           'stream': true,
-          'temperature': 0.7,
-          'max_tokens': 80,
+          'temperature': 0.2,
+          'max_tokens': 30,
           'messages': [
             {'role': 'system', 'content': openingSysPrompt},
-            {'role': 'user', 'content': 'Start the session.'},
+            {'role': 'user', 'content': 'Go.'},
           ],
         });
         final openResp =
