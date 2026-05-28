@@ -1918,10 +1918,12 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       );
 
       // 🌱 유저 첫 번째 답에만 원어(한국어) 표시 (백그라운드)
+      // Future를 저장 → STEP 7 히스토리 저장 직전 await로 original 확정
+      Future<String>? turn1OrigFuture;
       if (currentTurnId == 1) {
-        StepExpandBrain.generateCleanOriginal(
-                apiKey: _openAiKey, englishText: userTargetText)
-            .then((cleanKorean) {
+        turn1OrigFuture = StepExpandBrain.generateCleanOriginal(
+            apiKey: _openAiKey, englishText: userTargetText);
+        turn1OrigFuture.then((cleanKorean) {
           if (mounted && _localMessages.length > hostIndex) {
             setState(() => _localMessages[hostIndex]['original'] = cleanKorean);
           }
@@ -2225,6 +2227,18 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       // ─────────────────────────────────────────────────────
       // STEP 7: Firestore 저장
       // ─────────────────────────────────────────────────────
+      // 히스토리 저장 전 turn 1 Korean original 완료 보장
+      // effectiveOriginal(화면 표시용)과 달리, 저장 payload에는 실제 originalRaw 사용
+      if (turn1OrigFuture != null) {
+        try {
+          final cleanKorean =
+              await turn1OrigFuture.timeout(const Duration(seconds: 10));
+          if (hostIndex < _localMessages.length &&
+              (_localMessages[hostIndex]['original'] ?? '').toString().isEmpty) {
+            _localMessages[hostIndex]['original'] = cleanKorean;
+          }
+        } catch (_) {}
+      }
       final String _hostOriginal = hostIndex < _localMessages.length
           ? ((_localMessages[hostIndex]['original']) ?? '').toString()
           : '';

@@ -46,85 +46,151 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-Claude Code 지시문 — 간단 버전
+# StepExpand 유저 2턴+ 한국어(original) 생성·표시·저장 버그 수정
 
-routine_mode_step_expand.dart에서 Step Expand 유저 첫 대사의 히스토리 저장 문제만 점검/수정해라.
+## 현재 버그 요약
+- `_processRelayPipeline`에서 `generateCleanOriginal` (영→한 역번역)이 `currentTurnId == 1`일 때만 호출됨 (라인 1923)
+- 2턴 이상에서는 역번역 호출이 없어서 `_localMessages[hostIndex]['original']`이 항상 빈 문자열
+- 결과: 대화방에서 확장문장 한국어 안 보임, Firestore에도 빈 값 저장
 
-현재 의도된 동작
+## 기획 의도 (반드시 이 구조를 따를 것)
 
-Step Expand 진행 화면에서는 유저 첫 대사가 이렇게 보이는 것이 맞다.
+### 대화방 표시
+유저 1턴:
+  영어(target) ← 표시
+  한글(original) ← 표시
 
-I'm a little worried.
+유저 2턴+:
+  Part1 짧은 대답 영어 ← 표시
+  (Part1 한국어 ← 대화방에서 숨김)
+  ----한줄띄기----
+  Part2 확장문장 영어 ← 표시
+  Part2 확장문장 한국어 ← 표시
 
-즉, 진행 화면에서는 첫 유저 대사의 한국어 원문:
+AI 전체:
+  영어 ← 표시
+  한글 ← 표시
 
-조금 걱정돼.
+### Firestore 저장 (공부방용)
+유저 2턴+도 Part1 한국어 + Part2 한국어 모두 저장해야 함
+→ 공부방에서는 Part1 한국어도 볼 수 있어야 하므로
 
-가 안 보여도 정상이다.
+## 수정 대상 파일
+routine_mode_step_expand.dart (이 파일만 수정)
 
-하지만 히스토리에 저장될 때는 첫 유저 대사의 target과 original이 모두 저장되어야 한다.
+## 수정 3곳 — 다른 로직 절대 건드리지 말 것
 
-targetText: I'm a little worried.
-originalText: 조금 걱정돼.
+### 수정 1: 2턴+ 역번역 호출 추가
+위치: `_processRelayPipeline` 내부, 라인 1920~1931 부근
 
-그래야 ChatHistory 첫 페이지에서 다시 열었을 때:
+현재 코드:
+```dart
+      // 🌱 유저 첫 번째 답에만 원어(한국어) 표시 (백그라운드)
+      Future<String>? turn1OrigFuture;
+      if (currentTurnId == 1) {
+        turn1OrigFuture = StepExpandBrain.generateCleanOriginal(
+            apiKey: _openAiKey, englishText: userTargetText);
+        turn1OrigFuture.then((cleanKorean) {
+          if (mounted && _localMessages.length > hostIndex) {
+            setState(() => _localMessages[hostIndex]['original'] = cleanKorean);
+          }
+        });
+      }
+```
 
-I'm a little worried.
-조금 걱정돼.
+교체할 코드:
+```dart
+      // 🌱 유저 original(한국어) 역번역
+      // 1턴: 전체 문장 역번역 → 대화방 표시 + Firestore 저장
+      // 2턴+: Part1\n\nPart2 전체를 역번역 → 대화방에서는 Part2 한국어만 표시, Firestore에는 전체 저장
+      Future<String>? userOrigFuture;
+      if (currentTurnId == 1) {
+        userOrigFuture = StepExpandBrain.generateCleanOriginal(
+            apiKey: _openAiKey, englishText: userTargetText);
+        userOrigFuture.then((cleanKorean) {
+          if (mounted && _localMessages.length > hostIndex) {
+            setState(() => _localMessages[hostIndex]['original'] = cleanKorean);
+          }
+        });
+      } else if (hasDoubleNewline) {
+        // 2턴+: Part1\n\nPart2 형태의 영어를 통째로 역번역
+        // generateCleanOriginal 프롬프트가 \n\n 구조를 유지하므로 한국어도 Part1한국어\n\nPart2한국어로 나옴
+        userOrigFuture = StepExpandBrain.generateCleanOriginal(
+            apiKey: _openAiKey, englishText: userTargetText);
+        userOrigFuture.then((cleanKorean) {
+          if (mounted && _localMessages.length > hostIndex) {
+            setState(() => _localMessages[hostIndex]['original'] = cleanKorean);
+          }
+        });
+      }
+```
 
-처럼 target + original이 모두 보여야 한다.
+### 수정 2: STEP 7 Firestore 저장에서 변수명 통일
+위치: 라인 2232 부근
 
-의심 원인
+현재 코드:
+```dart
+      if (turn1OrigFuture != null) {
+        try {
+          final cleanKorean =
+              await turn1OrigFuture.timeout(const Duration(seconds: 10));
+          if (hostIndex < _localMessages.length &&
+              (_localMessages[hostIndex]['original'] ?? '').toString().isEmpty) {
+            _localMessages[hostIndex]['original'] = cleanKorean;
+          }
+        } catch (_) {}
+      }
+```
 
-현재 Step Expand 진행 화면에서 original을 숨기기 위해 사용하는 값이, 히스토리 저장에도 그대로 쓰이는 것 같다.
+교체할 코드:
+```dart
+      if (userOrigFuture != null) {
+        try {
+          final cleanKorean =
+              await userOrigFuture.timeout(const Duration(seconds: 10));
+          if (hostIndex < _localMessages.length &&
+              (_localMessages[hostIndex]['original'] ?? '').toString().isEmpty) {
+            _localMessages[hostIndex]['original'] = cleanKorean;
+          }
+        } catch (_) {}
+      }
+```
 
-특히 아래 같은 로직을 확인해라.
+### 수정 3: _buildTextBlock에서 유저 2턴+ Part1 한국어 숨김 처리
+위치: `_buildTextBlock` 메서드 내부, 라인 2838 부근
 
-final String effectiveOriginal =
-    (role == 'HOST_TEMP') ? '' : originalRaw;
+현재 코드:
+```dart
+    final String effectiveOriginal = (role == 'HOST_TEMP') ? '' : originalRaw;
+```
 
-이런 effectiveOriginal은 화면 표시용이어야 한다.
-히스토리 저장 payload에는 절대 effectiveOriginal을 쓰면 안 된다.
+교체할 코드:
+```dart
+    // 🌱 유저 2턴+ original은 "Part1한국어\n\nPart2한국어" 구조
+    // 대화방에서는 Part1 한국어를 숨기고 Part2 한국어만 표시
+    // (공부방/Firestore에는 전체가 저장되어 열람 가능)
+    final String effectiveOriginal;
+    if (role == 'HOST_TEMP') {
+      effectiveOriginal = '';
+    } else if (role == 'HOST' && originalRaw.contains('\n\n')) {
+      // Part2(확장문장) 한국어만 표시
+      final origParts = originalRaw.split(RegExp(r'\n\s*\n'));
+      effectiveOriginal = origParts.sublist(1).join('\n\n').trim();
+    } else {
+      effectiveOriginal = originalRaw;
+    }
+```
 
-히스토리 저장에는 반드시 실제 원문 값인 originalRaw 또는 originalText를 사용해야 한다.
+## 절대 금지 사항
+1. Box 7 (TtsQueueManager, DeepgramV2VoiceManager, ChunkedTtsFetcher, HybridTtsPlayer) 코드 수정 금지
+2. StepExpandBrain의 프롬프트(streamUserTranslation, streamGrammarQuestion) 수정 금지
+3. 대화 순서/흐름/파이프라인 로직 변경 금지
+4. TTS 발사 로직 변경 금지
+5. Firestore 저장 구조(필드명, 컬렉션 구조) 변경 금지
+6. generateCleanOriginal 프롬프트 수정 금지 — 이미 "\n\n 구조 유지" 규칙이 들어있음
 
-수정 목표
-Step Expand 진행 화면의 기존 표시 방식은 유지한다.
-첫 유저 대사: target만 표시
-이 부분은 고치지 마라.
-히스토리 저장 시에는 original을 빈 값으로 만들지 마라.
-화면에서 숨겨도 저장 데이터에는 original이 있어야 한다.
-HOST_TEMP 때문에 화면에서 original을 숨기는 것은 괜찮다.
-하지만 HOST_TEMP라는 이유로 저장 데이터의 original까지 삭제하면 안 된다.
-수정 금지
-
-아래는 건드리지 마라.
-
-Box 7 엔진 코드
-DeepgramV2VoiceManager
-TtsQueueManager
-ChunkedTtsFetcher
-5턴 확장 구조
-Part1/Part2 출력 형식
-최종 Expanded Sentence 생성 방식
-TTS/STT 로직
-Step Expand 화면 UI 구조
-검증
-
-수정 후 아래를 확인해라.
-
-Step Expand 진행 화면
-첫 유저 대사는 target만 보여도 정상
-히스토리 첫 페이지
-같은 첫 유저 대사가 target + original로 보여야 함
-
-예:
-
-진행 화면:
-I'm a little worried.
-
-히스토리 첫 페이지:
-I'm a little worried.
-조금 걱정돼.
-flutter analyze 또는 정적 점검만 실행해라.
-APK/AAB 빌드는 하지 마라.
+## 검증
+1. `dart analyze` — 에러 0건
+2. `grep -n "turn1OrigFuture" routine_mode_step_expand.dart` → 결과 0건 (변수명 완전 교체)
+3. `grep -n "userOrigFuture" routine_mode_step_expand.dart` → 수정 1, 수정 2 양쪽에서 발견
+4. `grep -n "effectiveOriginal" routine_mode_step_expand.dart` → 수정 3 포함 확인
