@@ -46,72 +46,47 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# StepExpand 유저 2턴+ 한국어(original) 생성·표시·저장 버그 수정
+# StepExpand 유저 2턴+ 한국어(original) 표시 기획 변경
 
-## 현재 버그 요약
-- `_processRelayPipeline`에서 `generateCleanOriginal` (영→한 역번역)이 `currentTurnId == 1`일 때만 호출됨 (라인 1923)
-- 2턴 이상에서는 역번역 호출이 없어서 `_localMessages[hostIndex]['original']`이 항상 빈 문자열
-- 결과: 대화방에서 확장문장 한국어 안 보임, Firestore에도 빈 값 저장
+## 새 기획 (반드시 이 구조를 따를 것)
 
-## 기획 의도 (반드시 이 구조를 따를 것)
-
-### 대화방 표시
 유저 1턴:
-  영어(target) ← 표시
-  한글(original) ← 표시
-
-유저 2턴+:
-  Part1 짧은 대답 영어 ← 표시
-  (Part1 한국어 ← 대화방에서 숨김)
-  ----한줄띄기----
-  Part2 확장문장 영어 ← 표시
-  Part2 확장문장 한국어 ← 표시
-
-AI 전체:
   영어 ← 표시
   한글 ← 표시
 
-### Firestore 저장 (공부방용)
-유저 2턴+도 Part1 한국어 + Part2 한국어 모두 저장해야 함
-→ 공부방에서는 Part1 한국어도 볼 수 있어야 하므로
+AI:
+  영어 ← 표시
+  한글 ← 표시
+
+유저 2턴+:
+  짧은 대답 영어 ← 표시
+  짧은 대답 한글 ← 표시
+  ----한줄띄기----
+  확장문장 영어 ← 표시
+  (확장문장 한글 ← 자체 없음)
+
+AI:
+  영어 ← 표시
+  한글 ← 표시
+
+## 현재 상태 (이전 수정으로 적용된 것)
+- 2턴+에서 Part1\n\nPart2 영어를 통째로 generateCleanOriginal에 보내서 "Part1한국어\n\nPart2한국어" 역번역 생성
+- _buildTextBlock에서 Part2 한국어만 표시하고 Part1 한국어는 숨김
+
+## 변경 이유
+- 확장문장(Part2)에는 한국어가 아예 필요 없음
+- 짧은 대답(Part1)의 한국어는 대화방에서도 보여야 함
 
 ## 수정 대상 파일
 routine_mode_step_expand.dart (이 파일만 수정)
 
-## 수정 3곳 — 다른 로직 절대 건드리지 말 것
+## 수정 2곳 — 다른 로직 절대 건드리지 말 것
 
-### 수정 1: 2턴+ 역번역 호출 추가
-위치: `_processRelayPipeline` 내부, 라인 1920~1931 부근
+### 수정 1: 2턴+ 역번역을 Part1(짧은 대답)만 대상으로 변경
+위치: `_processRelayPipeline` 내부, 라인 1932~1942 부근의 `else if (hasDoubleNewline)` 분기
 
 현재 코드:
 ```dart
-      // 🌱 유저 첫 번째 답에만 원어(한국어) 표시 (백그라운드)
-      Future<String>? turn1OrigFuture;
-      if (currentTurnId == 1) {
-        turn1OrigFuture = StepExpandBrain.generateCleanOriginal(
-            apiKey: _openAiKey, englishText: userTargetText);
-        turn1OrigFuture.then((cleanKorean) {
-          if (mounted && _localMessages.length > hostIndex) {
-            setState(() => _localMessages[hostIndex]['original'] = cleanKorean);
-          }
-        });
-      }
-```
-
-교체할 코드:
-```dart
-      // 🌱 유저 original(한국어) 역번역
-      // 1턴: 전체 문장 역번역 → 대화방 표시 + Firestore 저장
-      // 2턴+: Part1\n\nPart2 전체를 역번역 → 대화방에서는 Part2 한국어만 표시, Firestore에는 전체 저장
-      Future<String>? userOrigFuture;
-      if (currentTurnId == 1) {
-        userOrigFuture = StepExpandBrain.generateCleanOriginal(
-            apiKey: _openAiKey, englishText: userTargetText);
-        userOrigFuture.then((cleanKorean) {
-          if (mounted && _localMessages.length > hostIndex) {
-            setState(() => _localMessages[hostIndex]['original'] = cleanKorean);
-          }
-        });
       } else if (hasDoubleNewline) {
         // 2턴+: Part1\n\nPart2 형태의 영어를 통째로 역번역
         // generateCleanOriginal 프롬프트가 \n\n 구조를 유지하므로 한국어도 Part1한국어\n\nPart2한국어로 나옴
@@ -125,46 +100,27 @@ routine_mode_step_expand.dart (이 파일만 수정)
       }
 ```
 
-### 수정 2: STEP 7 Firestore 저장에서 변수명 통일
-위치: 라인 2232 부근
-
-현재 코드:
+교체할 코드:
 ```dart
-      if (turn1OrigFuture != null) {
-        try {
-          final cleanKorean =
-              await turn1OrigFuture.timeout(const Duration(seconds: 10));
-          if (hostIndex < _localMessages.length &&
-              (_localMessages[hostIndex]['original'] ?? '').toString().isEmpty) {
-            _localMessages[hostIndex]['original'] = cleanKorean;
-          }
-        } catch (_) {}
+      } else if (hasDoubleNewline) {
+        // 2턴+: Part1(짧은 대답)만 역번역 → 확장문장(Part2)은 한국어 불필요
+        final part1English = userTargetText.substring(0, userTargetText.indexOf('\n\n')).trim();
+        if (part1English.isNotEmpty) {
+          userOrigFuture = StepExpandBrain.generateCleanOriginal(
+              apiKey: _openAiKey, englishText: part1English);
+          userOrigFuture.then((cleanKorean) {
+            if (mounted && _localMessages.length > hostIndex) {
+              setState(() => _localMessages[hostIndex]['original'] = cleanKorean);
+            }
+          });
+        }
       }
 ```
 
-교체할 코드:
-```dart
-      if (userOrigFuture != null) {
-        try {
-          final cleanKorean =
-              await userOrigFuture.timeout(const Duration(seconds: 10));
-          if (hostIndex < _localMessages.length &&
-              (_localMessages[hostIndex]['original'] ?? '').toString().isEmpty) {
-            _localMessages[hostIndex]['original'] = cleanKorean;
-          }
-        } catch (_) {}
-      }
-```
-
-### 수정 3: _buildTextBlock에서 유저 2턴+ Part1 한국어 숨김 처리
-위치: `_buildTextBlock` 메서드 내부, 라인 2838 부근
+### 수정 2: _buildTextBlock에서 유저 2턴+ original 표시를 단순화
+위치: `_buildTextBlock` 메서드 내부, 라인 2849~2861 부근
 
 현재 코드:
-```dart
-    final String effectiveOriginal = (role == 'HOST_TEMP') ? '' : originalRaw;
-```
-
-교체할 코드:
 ```dart
     // 🌱 유저 2턴+ original은 "Part1한국어\n\nPart2한국어" 구조
     // 대화방에서는 Part1 한국어를 숨기고 Part2 한국어만 표시
@@ -181,16 +137,24 @@ routine_mode_step_expand.dart (이 파일만 수정)
     }
 ```
 
+교체할 코드:
+```dart
+    // 🌱 유저 2턴+: original = Part1(짧은 대답) 한국어만 저장됨 (확장문장 한국어 없음)
+    // → 그대로 표시하면 됨
+    final String effectiveOriginal = (role == 'HOST_TEMP') ? '' : originalRaw;
+```
+
 ## 절대 금지 사항
 1. Box 7 (TtsQueueManager, DeepgramV2VoiceManager, ChunkedTtsFetcher, HybridTtsPlayer) 코드 수정 금지
-2. StepExpandBrain의 프롬프트(streamUserTranslation, streamGrammarQuestion) 수정 금지
+2. StepExpandBrain의 프롬프트(streamUserTranslation, streamGrammarQuestion, generateCleanOriginal) 수정 금지
 3. 대화 순서/흐름/파이프라인 로직 변경 금지
 4. TTS 발사 로직 변경 금지
 5. Firestore 저장 구조(필드명, 컬렉션 구조) 변경 금지
-6. generateCleanOriginal 프롬프트 수정 금지 — 이미 "\n\n 구조 유지" 규칙이 들어있음
+6. 수정 1의 if (currentTurnId == 1) 분기는 그대로 유지 — 건드리지 말 것
+7. effectiveTarget 로직 변경 금지 — target(영어) 표시는 현재 그대로 정상
 
 ## 검증
 1. `dart analyze` — 에러 0건
-2. `grep -n "turn1OrigFuture" routine_mode_step_expand.dart` → 결과 0건 (변수명 완전 교체)
-3. `grep -n "userOrigFuture" routine_mode_step_expand.dart` → 수정 1, 수정 2 양쪽에서 발견
-4. `grep -n "effectiveOriginal" routine_mode_step_expand.dart` → 수정 3 포함 확인
+2. `grep -n "통째로 역번역" routine_mode_step_expand.dart` → 결과 0건 (이전 주석 제거 확인)
+3. `grep -n "part1English" routine_mode_step_expand.dart` → 수정 1에서 발견
+4. `grep -n "effectiveOriginal" routine_mode_step_expand.dart` → 수정 2 포함 확인, \n\n 분기 로직 없어야 함
