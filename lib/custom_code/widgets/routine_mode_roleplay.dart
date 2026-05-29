@@ -303,7 +303,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       return;
     }
     _idleElapsedSec++;
-    if (_idleElapsedSec >= 30) {
+    if (_idleElapsedSec >= 60) {
       _handleIdlePause();
     }
   }
