@@ -1047,7 +1047,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
                                             icon: const Icon(
                                                 Icons.auto_awesome,
                                                 size: 18),
-                                            label: const Text("추천 클론 생성"),
+                                            label: const Text("Suggested Clone"),
                                             style: OutlinedButton.styleFrom(
                                               foregroundColor:
                                                   const Color(0xFFD8B4FE),
