@@ -46,132 +46,51 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-routine_mode_step_expand.dart 파일의 Box 7-1-C streamGrammarQuestion 프롬프트를 수정합니다.
+routine_mode_step_expand.dart 파일의 Box 7-1-C streamGrammarQuestion 안,
+isOpening 블록의 STEP 1 뉴스 소재 생성 프롬프트를 수정합니다.
+목표: 매번 "조금 바뀐 비슷한 주제"가 아니라 "완전히 다른 영역"의 주제가 나오게 한다.
 
 [절대 건드리지 말 것]
-- 5턴 대화 구조, 최종 합성(isFinalTurn) 로직, Part1/Part2 출력 포맷
-- 최종 합성의 문법 다양성 요구 (Causal/Relative/Concessive/Conditional 2개 이상)
-- 기존 [EMOTIONAL DEPTH RULE] 섹션, [CONTEXT-FIRST RULE], [OUTPUT FORMAT], [EXAMPLE FLOW]
-- STEP 1 뉴스 소재 생성 로직 (temperature 0.9 부분)
-- Box 7 엔진 클래스 (DeepgramV2VoiceManager, TtsQueueManager, ChunkedTtsFetcher)
+- STEP 2 질문 생성부 (temperature 0.7, max_tokens 30)
+- grammarHint, LAYER 1, EMOTIONAL DEPTH RULE 등 턴 1~4 로직
+- 5턴 구조, 최종 합성, Part1/Part2 포맷
+- Box 7 엔진 클래스
 
+[수정] STEP 1 소재 생성의 system content 교체
 
-[수정 1] — 오프닝 질문 생성 STEP 2의 temperature 0.2 → 0.7
+기존 (newsClient.post 안, temperature 0.9 요청의 system content):
+                      'content':
+                          'Pick ONE real-feeling everyday news topic from $myNative-speaking countries that would appear in today\'s news feed.\n'
+                          'Topic must be light and relatable — from these categories ONLY: weather, food prices, sports, popular culture, seasonal events, local life.\n'
+                          'FORBIDDEN topics: politics, war, AI ethics, crime, economics, anything heavy or controversial.\n'
+                          'Output format: ONLY a 4-to-8-word English noun phrase. No verb. No question. No punctuation.\n'
+                          'Examples:\n'
+                          'summer heat wave hitting this week\n'
+                          'coffee prices rising at local cafes\n'
+                          'popular drama ending this weekend\n'
+                          'school lunch menu changes next month\n'
+                          'heavy rain forecast for the weekend',
 
-isOpening 블록 안에서, openingSysPrompt를 보내는 openReq.body의 jsonEncode 부분을 찾습니다.
-(STEP 1 뉴스 소재 생성의 temperature 0.9가 아니라, 그 아래 STEP 2 질문 생성 부분입니다.
- messages에 openingSysPrompt가 들어가고 max_tokens가 30인 요청입니다.)
-
-기존:
-        openReq.body = jsonEncode({
-          'model': 'gpt-4o-mini',
-          'stream': true,
-          'temperature': 0.2,
-          'max_tokens': 30,
-          'messages': [
-            {'role': 'system', 'content': openingSysPrompt},
-            {'role': 'user', 'content': 'Go.'},
-          ],
-        });
-
-수정 (temperature만 0.7로):
-        openReq.body = jsonEncode({
-          'model': 'gpt-4o-mini',
-          'stream': true,
-          'temperature': 0.7,
-          'max_tokens': 30,
-          'messages': [
-            {'role': 'system', 'content': openingSysPrompt},
-            {'role': 'user', 'content': 'Go.'},
-          ],
-        });
-
-⚠️ 주의: STEP 1 뉴스 소재 생성의 temperature 0.9는 절대 건드리지 마세요. 오직 위 STEP 2(max_tokens 30) 요청의 0.2만 0.7로 바꿉니다.
-
-
-[수정 2] — grammarHint 4턴 전체 교체 ("추출 목표" → "느낌 따라가기 렌즈")
-
-기존 grammarHint 전체 블록 (turnNumber == 1 ? ... : '... attach naturally.'; 까지):
-
-      final String grammarHint = turnNumber == 1
-          ? 'GOAL: Draw out a REASON or CAUSE behind the user\'s core statement.\n'
-              'If the user clearly expressed loss of interest, motivation, enjoyment, or willingness to engage, treat that emotion as the cause to explore (see [EMOTIONAL DEPTH RULE]).\n'
-              'Invite the user to share WHY — warmly and lightly, without naming grammar. '
-              'A short answer like "because I was tired" should attach smoothly to the growing sentence.'
-          : turnNumber == 2
-              ? 'GOAL: Draw out a PERSON or THING involved in the user\'s story.\n'
-                  'Ask who or what was part of it — keep it light and curious. '
-                  'A short answer like "my friend Jisu" should attach naturally as a relative clause.'
-              : turnNumber == 3
-                  ? 'GOAL: Draw out a CONTRAST or UNEXPECTED element.\n'
-                      'Gently ask about something surprising, hard, or different from expectations. '
-                      'A short answer like "even though I was nervous" should attach naturally.'
-                  : 'GOAL: Draw out a CONDITION or SPECIFIC SITUATION.\n'
-                      'Ask when it happens or what triggers it — keep it gentle and open. '
-                      'A short answer like "when I have free time" should attach naturally.';
-
-이것을 아래로 전체 교체합니다:
-
-      final String grammarHint = turnNumber == 1
-          ? 'FOCUS: Follow the FEELING or MOTIVATION behind what the user just said.\n'
-              'Silently guess WHY this matters to them or how they feel about it, then ask a light question that follows that thread — not a question that extracts a fixed answer.\n'
-              'If the user clearly expressed loss of interest, motivation, enjoyment, or willingness to engage, follow that emotion instead (see [EMOTIONAL DEPTH RULE]).\n'
-              'Their short answer (e.g. "because it was fun", "I was just curious") should attach smoothly to the growing sentence.'
-          : turnNumber == 2
-              ? 'FOCUS: Follow the PERSON, PLACE, or THING that seems to matter most in their story.\n'
-                  'Guess what detail they would naturally want to share more about, and ask about that — gently and curiously, never like a checklist.\n'
-                  'Their short answer (e.g. "my friend Jisu", "at the cafe") should attach naturally to the growing sentence.'
-              : turnNumber == 3
-                  ? 'FOCUS: Follow how they FELT or what stood out to them.\n'
-                      'Guess the emotion or the surprising/memorable part behind their last answer, and ask about it lightly. Do not force a contrast — let it emerge from their feeling.\n'
-                      'Their short answer (e.g. "it was a relief", "even though I was nervous") should attach naturally to the growing sentence.'
-                  : 'FOCUS: Follow where their story is naturally heading — a moment, a situation, or what it means to them.\n'
-                      'Guess what they would enjoy adding, and invite it gently and openly.\n'
-                      'Their short answer (e.g. "when I have free time", "after work") should attach naturally to the growing sentence.';
-
-
-[수정 3] — LAYER 1 추론 순서 재배치 (감정·동기 추측을 1순위로)
-
-기존 LAYER 1 블록:
-
-LAYER 1 — INTERNAL REASONING (never output, work silently):
-Before writing your question, think through:
-① What is the GOAL this turn? (See [TURN GOAL] below)
-② Look at the growing sentence in History. What ONE detail is still missing?
-   - A reason / cause (because / since)
-   - A person or thing involved (who / which)
-   - A contrast or unexpected element (although / despite)
-   - A condition or situation (if / when)
-③ Of the user's LAST answer, what is the SINGLE easiest detail to follow up on?
-④ What is the most natural, low-pressure 5–8-word question that picks up that one detail?
-   - Can a quiet or hesitant person still answer in 1–3 words?
-   - Does it avoid pressure words ("Why did you do that?", "Explain your reason")?
-   - Does it avoid yes/no answers?
-⑤ Does the question flow from the user's LAST statement and avoid already-covered ground?
-NEVER reveal this reasoning in the output.
-
-이것을 아래로 전체 교체합니다:
-
-LAYER 1 — INTERNAL REASONING (never output, work silently):
-Before writing your question, think through — in THIS order:
-① FEELING FIRST: Read the user's LAST answer. What is the person likely thinking, feeling, or caring about underneath it? What motivated them to say it? Follow THAT thread.
-② Of that feeling/motivation, what is the SINGLE detail they would most naturally enjoy adding next? (You are a curious friend following their heart, not collecting required data.)
-③ See the [TURN GOAL] below only as a soft lens — a direction that often fits, NOT a target you must extract. If following the user's real feeling points elsewhere, follow the feeling.
-④ What is the most natural, low-pressure 5–8-word question that picks up that one detail?
-   - Can a quiet or hesitant person still answer in 1–3 words?
-   - Does it avoid pressure words ("Why did you do that?", "Explain your reason")?
-   - Does it avoid yes/no answers?
-⑤ Does the question flow from the user's LAST statement and avoid already-covered ground?
-   The user's short answer should still attach naturally to the growing sentence (this never changes).
-NEVER reveal this reasoning in the output.
-
+이것을 아래로 교체합니다:
+                      'content':
+                          'Pick ONE light, everyday small-talk topic for an English conversation warm-up.\n'
+                          'STEP A — Silently choose ONE category at random from this WIDE pool (do not always pick the first ones):\n'
+                          '  food & cooking, weather & seasons, travel & places, hobbies & free time, movies & TV, music, books & reading, sports & exercise, technology & gadgets, pets & animals, fashion & style, health & sleep, work & study life, childhood memories, dreams & future plans, local festivals & events, coffee & cafes, shopping & trends, nature & outdoors, holidays & celebrations.\n'
+                          'STEP B — Inside that ONE category, invent a fresh, specific everyday topic.\n'
+                          'Each time you are called, pick a DIFFERENT category than an obvious default — vary widely across the whole pool.\n'
+                          'FORBIDDEN: politics, war, AI ethics, crime, economics, illness, anything heavy or controversial.\n'
+                          'Output format: ONLY a 4-to-8-word English noun phrase. No verb. No question. No punctuation.\n'
+                          'Examples (note how different the categories are):\n'
+                          'a cozy rainy-day movie marathon\n'
+                          'learning to bake sourdough bread\n'
+                          'a weekend hiking trip in autumn\n'
+                          'an old song stuck in your head\n'
+                          'rearranging furniture in your room\n'
+                          'a childhood snack you suddenly miss',
 
 [검증]
-1. dart analyze 로 문법 에러(특히 작은따옴표 이스케이프) 없는지 확인
-2. grep -c "FOCUS: Follow" 로 새 grammarHint가 정확히 4회 나오는지 확인
-3. grep -c "FEELING FIRST" 로 LAYER 1 재배치가 정확히 1회 들어갔는지 확인
-4. grep -c "Draw out a REASON" 로 옛 grammarHint가 완전히 사라졌는지 확인 (0회여야 함)
-5. grep -c "EMOTIONAL DEPTH RULE" 로 기존 섹션이 그대로 2회 유지되는지 확인
-6. grep -c "OUTPUT FORMAT" 로 출력 포맷 섹션이 변경 없이 유지되는지 확인
-7. grep "temperature.*0.9" 로 STEP 1 뉴스 소재 생성 온도가 그대로 0.9인지 확인 (변경되면 안 됨)
-8. Box 7 클래스(DeepgramV2VoiceManager, TtsQueueManager)에 변경이 없는지 diff로 확인
+1. dart analyze 로 문법/이스케이프 에러 없는지 확인
+2. grep -c "WIDE pool" routine_mode_step_expand.dart → 1 이어야 함
+3. grep -c "from these categories ONLY: weather" → 0 이어야 함 (옛 프롬프트 제거 확인)
+4. grep "temperature.*0.9" 로 STEP 1 온도가 그대로 0.9 유지되는지 확인
+5. grep "temperature.*0.7" 로 STEP 2 온도가 그대로 0.7 유지되는지 확인

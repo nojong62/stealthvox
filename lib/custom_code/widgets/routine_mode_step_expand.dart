@@ -4558,16 +4558,20 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
                     {
                       'role': 'system',
                       'content':
-                          'Pick ONE real-feeling everyday news topic from $myNative-speaking countries that would appear in today\'s news feed.\n'
-                          'Topic must be light and relatable — from these categories ONLY: weather, food prices, sports, popular culture, seasonal events, local life.\n'
-                          'FORBIDDEN topics: politics, war, AI ethics, crime, economics, anything heavy or controversial.\n'
+                          'Pick ONE light, everyday small-talk topic for an English conversation warm-up.\n'
+                          'STEP A — Silently choose ONE category at random from this WIDE pool (do not always pick the first ones):\n'
+                          '  food & cooking, weather & seasons, travel & places, hobbies & free time, movies & TV, music, books & reading, sports & exercise, technology & gadgets, pets & animals, fashion & style, health & sleep, work & study life, childhood memories, dreams & future plans, local festivals & events, coffee & cafes, shopping & trends, nature & outdoors, holidays & celebrations.\n'
+                          'STEP B — Inside that ONE category, invent a fresh, specific everyday topic.\n'
+                          'Each time you are called, pick a DIFFERENT category than an obvious default — vary widely across the whole pool.\n'
+                          'FORBIDDEN: politics, war, AI ethics, crime, economics, illness, anything heavy or controversial.\n'
                           'Output format: ONLY a 4-to-8-word English noun phrase. No verb. No question. No punctuation.\n'
-                          'Examples:\n'
-                          'summer heat wave hitting this week\n'
-                          'coffee prices rising at local cafes\n'
-                          'popular drama ending this weekend\n'
-                          'school lunch menu changes next month\n'
-                          'heavy rain forecast for the weekend',
+                          'Examples (note how different the categories are):\n'
+                          'a cozy rainy-day movie marathon\n'
+                          'learning to bake sourdough bread\n'
+                          'a weekend hiking trip in autumn\n'
+                          'an old song stuck in your head\n'
+                          'rearranging furniture in your room\n'
+                          'a childhood snack you suddenly miss',
                     },
                     {
                       'role': 'user',
