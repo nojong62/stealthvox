@@ -330,10 +330,12 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       bool isSeedSourceRoom(Map<String, dynamic> data) {
         final String mode = (data['mode'] ?? '').toString();
         final String roomName = (data['room_name'] ?? '').toString();
-        if (mode == 'step_expand' || mode == 'clone') return true;
-        if (roomName.contains('Step.Ex') || roomName.contains('Clone')) {
-          return true;
-        }
+        // step_expand 발화만 씨앗으로 사용 (유저 본인의 확장 문장이라 회상이 자연스러움).
+        // clone/roleplay/duo 는 화자·맥락이 복잡해 제외.
+        // A 경로: mode 필드가 박힌 새 방
+        if (mode == 'step_expand') return true;
+        // B 경로: mode 없는 기존 방 → room_name 으로 판정
+        if (roomName.contains('Step.Ex')) return true;
         return false;
       }
 
@@ -443,36 +445,77 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     _ttsQueueManager.setUserTurn(false);
     _ttsQueueManager.setAiPaused(false);
 
-    String aiText = '';
-    String buffer = '';
+    // 🌱 [v3.9] 첫 질문도 "PART1(영어)\n\n PART2(한국어)" 구조로 출력됨.
+    //   - 화면 target = PART1(영어), original = PART2(한국어)
+    //   - TTS는 PART1(영어)만 재생. PART2(한국어)는 소리 안 냄.
+    //   - PART2가 한국어 자막을 채우므로 generateCleanOriginal 중복 호출 제거.
+    String aiText = '';        // 전체 누적(영어+\n\n+한국어)
+    String buffer = '';        // TTS 송출용 버퍼 (PART1 영어 구간만)
+    bool part2Started = false; // \n\n 이후(한국어) 진입 여부
     final RegExp sp = RegExp(r'[,\.?!;:。、！？…，；：\n]');
 
     await for (final chunk in aiStream) {
       if (!mounted || !_isConversationActive) break;
       aiText += chunk;
-      buffer += chunk;
-      if (mounted && aiIdx < _localMessages.length) {
-        setState(() => _localMessages[aiIdx]['target'] = aiText);
+
+      // 화면 표시: \n\n 기준으로 PART1→target, PART2→original 분리
+      if (aiText.contains('\n\n')) {
+        final idx = aiText.indexOf('\n\n');
+        final part1 = aiText.substring(0, idx).trim();
+        final part2 = aiText.substring(idx + 2).trim();
+        if (mounted && aiIdx < _localMessages.length) {
+          setState(() {
+            _localMessages[aiIdx]['target'] = part1;
+            _localMessages[aiIdx]['original'] = part2;
+          });
+        }
+      } else {
+        if (mounted && aiIdx < _localMessages.length) {
+          setState(() => _localMessages[aiIdx]['target'] = aiText);
+        }
       }
       _scrollToBottom();
-      final matches = sp.allMatches(buffer).toList();
-      if (matches.isNotEmpty) {
-        final lastIdx = matches.last.end;
-        final toSpeak = buffer.substring(0, lastIdx).trim();
-        buffer = buffer.substring(lastIdx);
-        if (toSpeak.isNotEmpty) tts.addText(toSpeak);
-      }
-    }
-    if (buffer.trim().isNotEmpty) tts.addText(buffer.trim());
 
-    // 🌱 스트리밍 완료 즉시 번역 시작 — TTS 재생과 병렬로 실행
-    StepExpandBrain.generateCleanOriginal(
-            apiKey: _openAiKey, englishText: aiText)
-        .then((kor) {
-      if (mounted && _localMessages.length > aiIdx) {
-        setState(() => _localMessages[aiIdx]['original'] = kor);
+      // TTS: PART1(영어)만 송출. \n\n 감지되면 그 이후(한국어)는 TTS 큐에 안 보냄.
+      if (!part2Started) {
+        if (aiText.contains('\n\n')) {
+          // buffer에 아직 안 보낸 PART1 잔여분 송출하고 PART2 진입
+          final pending = buffer.trim();
+          if (pending.isNotEmpty) tts.addText(pending);
+          buffer = '';
+          part2Started = true;
+          continue;
+        }
+        buffer += chunk;
+        final matches = sp.allMatches(buffer).toList();
+        if (matches.isNotEmpty) {
+          final lastIdx = matches.last.end;
+          final toSpeak = buffer.substring(0, lastIdx).trim();
+          buffer = buffer.substring(lastIdx);
+          if (toSpeak.isNotEmpty) tts.addText(toSpeak);
+        }
       }
-    });
+      // part2Started == true 이후 chunk(한국어)는 화면 자막만, TTS 안 보냄
+    }
+
+    // 루프 종료 후 \n\n 없었던 경우(PART2 미출력) buffer 잔여분 송출
+    if (!part2Started && buffer.trim().isNotEmpty) {
+      tts.addText(buffer.trim());
+    }
+
+    // PART2(한국어)가 original 자막을 채웠으면 번역 불필요.
+    // \n\n 없어 original 이 빈 폴백 상황에서만 번역 보강.
+    if (mounted &&
+        aiIdx < _localMessages.length &&
+        ((_localMessages[aiIdx]['original'] ?? '').toString().trim().isEmpty)) {
+      StepExpandBrain.generateCleanOriginal(
+              apiKey: _openAiKey, englishText: aiText)
+          .then((kor) {
+        if (mounted && _localMessages.length > aiIdx) {
+          setState(() => _localMessages[aiIdx]['original'] = kor);
+        }
+      });
+    }
 
     // TTS 재생 완료 대기 (최대 10초)
     int ticks = 0;
