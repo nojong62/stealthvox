@@ -2346,6 +2346,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
       await _myHistoryRef!.set({
         'created_at': FieldValue.serverTimestamp(),
         'room_name': "Clone Mode",
+        'mode': 'clone',
         'is_pinned': false,
         'msg_count': 0
       });
