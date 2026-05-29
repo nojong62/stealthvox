@@ -46,95 +46,155 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-씨앗 기능이 항상 뉴스 소재로 폴백되는 버그를 수정합니다.
-원인: 씨앗 조회는 chat_history 방 문서에서 'mode' 필드로 필터하는데,
-'mode' 필드는 sessions 컬렉션에만 저장되고 chat_history 방 문서에는 없어서 쿼리 결과가 항상 0개였음.
+routine_mode_step_expand.dart 의 첫 질문(_startSessionWithAiQuestion) 처리와 씨앗 조회를 수정합니다.
 
-해결 (A+B 병행):
-  A) 앞으로 만드는 chat_history 방 문서에 'mode' 필드를 박는다. (step_expand, clone 양쪽)
-  B) 씨앗 조회는 'mode' 필터를 제거하고, mode 또는 room_name 둘 다로 판정하여 기존 방까지 커버한다.
-
-대상 파일: routine_mode_step_expand.dart, routine_mode_clone.dart
+[해결할 문제]
+1. 첫 질문에서 한국어가 두 번 나옴 (PART1/PART2 분리 안 됨 + generateCleanOriginal 중복)
+2. 첫 질문 TTS가 한국어(PART2)까지 읽음 → 영어(PART1)만 읽어야 함
+3. clone 발화가 씨앗으로 오면 화자(주어)가 꼬임 → step_expand 발화만 씨앗 사용
 
 [절대 건드리지 말 것]
-- sessions 컬렉션 저장 로직 (거기 'mode'는 그대로 둠 — 훈련 분석용)
-- 5턴 구조, 최종 합성, Part1/Part2, Box 7 엔진
-- 씨앗 프롬프트(seedSysPrompt, newcomerSysPrompt) 텍스트 자체
+- 일반 턴(turn 1~4) 처리 로직, 최종 합성, 5턴 구조
+- seedSysPrompt / newcomerSysPrompt 텍스트 (PART1 영어 + PART2 한국어 출력 유지)
+- Box 7 엔진 (DeepgramV2VoiceManager, TtsQueueManager, ChunkedTtsFetcher)
+- 뉴스 소재 폴백 로직
 
 ──────────────────────────────────────────────
-[수정 A-1] routine_mode_step_expand.dart — _ensureHistoryRef 방 생성에 mode 추가
+[수정 1+2] 첫 질문 스트림 처리: PART1/PART2 분리 + 영어만 TTS + 한국어 중복 제거
 ──────────────────────────────────────────────
 
-기존 (chat_history 방 set):
-      await _myHistoryRef!.set({
-        'created_at': FieldValue.serverTimestamp(),
-        'room_name': "Step.Ex Mode",
-        'is_pinned': false,
-        'msg_count': 0
-      });
+_startSessionWithAiQuestion() 안에서, aiStream을 await for로 받아 처리하는 블록 전체
+(아래 "기존" 범위)를 교체합니다.
+
+기존 (대략 line 445~476, "String aiText = '';" 부터
+  generateCleanOriginal 호출까지 — 아래 내용과 일치하는 구간):
+
+    String aiText = '';
+    String buffer = '';
+    final RegExp sp = RegExp(r'[,\.?!;:。、！？…，；：\n]');
+
+    await for (final chunk in aiStream) {
+      if (!mounted || !_isConversationActive) break;
+      aiText += chunk;
+      buffer += chunk;
+      if (mounted && aiIdx < _localMessages.length) {
+        setState(() => _localMessages[aiIdx]['target'] = aiText);
+      }
+      _scrollToBottom();
+      final matches = sp.allMatches(buffer).toList();
+      if (matches.isNotEmpty) {
+        final lastIdx = matches.last.end;
+        final toSpeak = buffer.substring(0, lastIdx).trim();
+        buffer = buffer.substring(lastIdx);
+        if (toSpeak.isNotEmpty) tts.addText(toSpeak);
+      }
+    }
+    if (buffer.trim().isNotEmpty) tts.addText(buffer.trim());
+
+    // 🌱 스트리밍 완료 즉시 번역 시작 — TTS 재생과 병렬로 실행
+    StepExpandBrain.generateCleanOriginal(
+            apiKey: _openAiKey, englishText: aiText)
+        .then((kor) {
+      if (mounted && _localMessages.length > aiIdx) {
+        setState(() => _localMessages[aiIdx]['original'] = kor);
+      }
+    });
 
 교체:
-      await _myHistoryRef!.set({
-        'created_at': FieldValue.serverTimestamp(),
-        'room_name': "Step.Ex Mode",
-        'mode': 'step_expand',
-        'is_pinned': false,
-        'msg_count': 0
-      });
 
-──────────────────────────────────────────────
-[수정 A-2] routine_mode_clone.dart — _ensureHistoryRef 방 생성에 mode 추가
-──────────────────────────────────────────────
+    // 🌱 [v3.9] 첫 질문도 "PART1(영어)\n\n PART2(한국어)" 구조로 출력됨.
+    //   - 화면 target = PART1(영어), original = PART2(한국어)
+    //   - TTS는 PART1(영어)만 재생. PART2(한국어)는 소리 안 냄.
+    //   - PART2가 한국어 자막을 채우므로 generateCleanOriginal 중복 호출 제거.
+    String aiText = '';          // 전체 누적(영어+\n\n+한국어)
+    String buffer = '';          // TTS 송출용 버퍼 (PART1 영어 구간만)
+    bool part2Started = false;   // \n\n 이후(한국어) 진입 여부
+    final RegExp sp = RegExp(r'[,\.?!;:。、！？…，；：\n]');
 
-기존:
-      await _myHistoryRef!.set({
-        'created_at': FieldValue.serverTimestamp(),
-        'room_name': "Clone Mode",
-        'is_pinned': false,
-        'msg_count': 0
-      });
+    await for (final chunk in aiStream) {
+      if (!mounted || !_isConversationActive) break;
+      aiText += chunk;
 
-교체:
-      await _myHistoryRef!.set({
-        'created_at': FieldValue.serverTimestamp(),
-        'room_name': "Clone Mode",
-        'mode': 'clone',
-        'is_pinned': false,
-        'msg_count': 0
-      });
+      // 화면 표시: \n\n 기준으로 PART1→target, PART2→original 분리
+      if (aiText.contains('\n\n')) {
+        final idx = aiText.indexOf('\n\n');
+        final part1 = aiText.substring(0, idx).trim();
+        final part2 = aiText.substring(idx + 2).trim();
+        if (mounted && aiIdx < _localMessages.length) {
+          setState(() {
+            _localMessages[aiIdx]['target'] = part1;
+            _localMessages[aiIdx]['original'] = part2;
+          });
+        }
+      } else {
+        if (mounted && aiIdx < _localMessages.length) {
+          setState(() => _localMessages[aiIdx]['target'] = aiText);
+        }
+      }
+      _scrollToBottom();
 
-──────────────────────────────────────────────
-[수정 B] routine_mode_step_expand.dart — _fetchRandomPastUserLine 조회 로직을 mode+room_name 병행 판정으로 교체
-──────────────────────────────────────────────
-
-기존 (whereIn 쿼리 부분):
-      final historySnap = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .collection('chat_history')
-          .where('mode', whereIn: ['step_expand', 'clone'])
-          .limit(20)
-          .get()
-          .timeout(const Duration(seconds: 4));
-
-      final List<String> candidates = [];
-      for (final roomDoc in historySnap.docs) {
-        if (_myHistoryRef != null && roomDoc.reference.id == _myHistoryRef!.id) {
+      // TTS: PART1(영어)만 송출. \n\n 감지되면 그 이후(한국어)는 TTS 큐에 안 보냄.
+      if (!part2Started) {
+        if (aiText.contains('\n\n')) {
+          // \n\n 이전(영어)까지 남은 buffer를 마저 송출하고 종료
+          final idx = aiText.indexOf('\n\n');
+          final part1Full = aiText.substring(0, idx);
+          final remain = part1Full.length > (aiText.length - chunk.length)
+              ? '' // 안전장치
+              : '';
+          // buffer에 아직 안 보낸 PART1 잔여분 송출
+          final pending = buffer.trim();
+          if (pending.isNotEmpty) tts.addText(pending);
+          buffer = '';
+          part2Started = true;
           continue;
         }
+        buffer += chunk;
+        final matches = sp.allMatches(buffer).toList();
+        if (matches.isNotEmpty) {
+          final lastIdx = matches.last.end;
+          final toSpeak = buffer.substring(0, lastIdx).trim();
+          buffer = buffer.substring(lastIdx);
+          if (toSpeak.isNotEmpty) tts.addText(toSpeak);
+        }
+      }
+      // part2Started == true 이후의 chunk(한국어)는 TTS로 보내지 않음 (화면 자막만)
+    }
 
-교체 (mode 필터 제거 → 최근순 가져온 뒤 클라이언트에서 mode/room_name 둘 다로 판정):
-      // 🔧 [SEED-FIX] mode 필드가 없는 과거 방까지 커버하기 위해
-      //   서버 필터 없이 최근 방을 가져와 클라이언트에서 mode 또는 room_name으로 판정
-      final historySnap = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .collection('chat_history')
-          .orderBy('created_at', descending: true)
-          .limit(30)
-          .get()
-          .timeout(const Duration(seconds: 4));
+    // 루프 종료 후, \n\n 가 아예 없었던 경우(=PART2 미출력) buffer 잔여분 송출
+    if (!part2Started && buffer.trim().isNotEmpty) {
+      tts.addText(buffer.trim());
+    }
 
+    // ⚠️ generateCleanOriginal 호출 제거:
+    //   PART2(한국어)가 이미 original 자막을 채우므로 중복 번역 불필요.
+    //   만약 \n\n 가 없어 original 이 비어있는 폴백 상황이면, 그때만 번역 보강:
+    if (mounted &&
+        aiIdx < _localMessages.length &&
+        ((_localMessages[aiIdx]['original'] ?? '').toString().trim().isEmpty)) {
+      StepExpandBrain.generateCleanOriginal(
+              apiKey: _openAiKey, englishText: aiText)
+          .then((kor) {
+        if (mounted && _localMessages.length > aiIdx) {
+          setState(() => _localMessages[aiIdx]['original'] = kor);
+        }
+      });
+    }
+
+⚠️ 구현 노트: 위 교체 블록에서 'remain' 변수는 불필요하면 제거해도 됨(안전장치 흔적).
+   핵심은 (a) \n\n로 PART1/PART2를 화면 분리, (b) part2Started 이후 chunk는 tts.addText 호출 안 함,
+   (c) original 이 PART2로 채워지면 generateCleanOriginal 안 부름.
+   dart analyze 에서 미사용 변수 경고가 나면 remain/part1Full 등 정리할 것.
+
+──────────────────────────────────────────────
+[수정 3] 씨앗 소스를 step_expand 발화로만 한정 (clone 제외)
+──────────────────────────────────────────────
+
+_fetchRandomPastUserLine() 안의 _isSeedSourceRoom 판정 함수를 수정합니다.
+clone을 씨앗 소스에서 제외 — clone의 HOST 발화는 "유저가 클론 캐릭터에게 건넨 말"이라
+회상형 질문("지난번에 네가 ~라고 했지")에서 주어가 꼬이기 때문.
+
+기존:
       bool _isSeedSourceRoom(Map<String, dynamic> data) {
         final String mode = (data['mode'] ?? '').toString();
         final String roomName = (data['room_name'] ?? '').toString();
@@ -147,47 +207,29 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
         return false;
       }
 
-      final List<String> candidates = [];
-      for (final roomDoc in historySnap.docs) {
-        if (_myHistoryRef != null && roomDoc.reference.id == _myHistoryRef!.id) {
-          continue;
-        }
-        // step_expand / clone 방만 씨앗 소스로 사용
-        if (!_isSeedSourceRoom(roomDoc.data())) continue;
-
-(이후 msgSnap 조회 ~ candidates.add ~ shuffle ~ return 부분은 기존 그대로 유지)
-
-⚠️ 주의: orderBy('created_at') 사용 시 created_at 필드가 없는 초기 방은 결과에서 빠질 수 있다.
-   만약 dart analyze나 런타임에서 인덱스/정렬 문제가 나면, orderBy를 제거하고 단순 .limit(30).get() 으로 바꾼다.
-   (정렬은 필수 아님 — 어차피 candidates.shuffle()로 무작위 선택하므로)
-
-──────────────────────────────────────────────
-[수정 B-2] routine_mode_step_expand.dart — SEED 진단 로그 추가 (동작 확인용)
-──────────────────────────────────────────────
-
-_fetchRandomPastUserLine 의 candidates 판정 직후, return 직전에 진단 로그 한 줄 추가:
-
-기존:
-      if (candidates.isEmpty) return null;
-      candidates.shuffle();
-      return candidates.first;
-
-교체:
-      _log('🌱 [SEED]', '씨앗 후보 ${candidates.length}개 수집됨');
-      if (candidates.isEmpty) return null;
-      candidates.shuffle();
-      _log('🌱 [SEED]', '선택된 씨앗: "${candidates.first}"');
-      return candidates.first;
+교체 (step_expand만 허용):
+      bool _isSeedSourceRoom(Map<String, dynamic> data) {
+        final String mode = (data['mode'] ?? '').toString();
+        final String roomName = (data['room_name'] ?? '').toString();
+        // step_expand 발화만 씨앗으로 사용 (유저 본인의 확장 문장이라 회상이 자연스러움).
+        // clone/roleplay/duo 는 화자·맥락이 복잡해 제외.
+        // A 경로: mode 필드가 박힌 새 방
+        if (mode == 'step_expand') return true;
+        // B 경로: mode 없는 기존 방 → room_name 으로 판정
+        if (roomName.contains('Step.Ex')) return true;
+        return false;
+      }
 
 [검증]
-1. dart analyze (두 파일) → 에러 0
-2. step_expand: grep -c "'mode': 'step_expand'" → 2 (sessions 1 + chat_history 1)
-3. clone: grep -c "'mode': 'clone'" → 2 (sessions 1 + chat_history 1)
-4. step_expand: grep -c "_isSeedSourceRoom" → 2 (정의 1 + 호출 1)
-5. step_expand: grep -c "whereIn: \['step_expand', 'clone'\]" → 0 (옛 서버필터 제거 확인)
-6. step_expand: grep -c "씨앗 후보" → 1 (진단 로그 확인)
+1. dart analyze → 에러 0, 미사용 변수 경고 정리
+2. grep -c "part2Started" → 최소 3 (선언 + \n\n 분기 + 잔여 송출 가드)
+3. grep -c "generateCleanOriginal" 첫 질문부 주변 → 폴백 1회만 남았는지 확인
+   (전체 파일에서는 일반 턴용 호출이 따로 있을 수 있으니, _startSessionWithAiQuestion 함수 범위 내에서 1회)
+4. grep -c "mode == 'clone'" → 0 (씨앗 조회에서 clone 제거 확인)
+5. grep -c "roomName.contains('Clone')" → 0
+6. grep -c "mode == 'step_expand'" → 최소 1 (씨앗 조회 step_expand 허용 유지)
 7. 런타임 테스트:
-   (a) 과거 step_expand/clone 방 있고 5단어+ 발화 있음 → 로그 "씨앗 후보 N개" + 회상형 질문 출력
-   (b) 신규 회원(방 0개) → 온보딩형 질문
-   (c) Firestore 오류 → 뉴스 소재 폴백
+   (a) 첫 질문 화면: 영어(큰 글씨) + 한국어(작은 글씨) 각 1회씩, 한국어 중복 없음
+   (b) 첫 질문 소리: 영어만 재생, 한국어 안 읽음
+   (c) 씨앗: step_expand 과거 발화에서만 옴 (clone 발화 안 옴)
 8. Box 7 클래스 diff 변경 0 확인
