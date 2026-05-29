@@ -46,99 +46,265 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-routine_mode_step_expand.dart 의 Box 7-1-C streamGrammarQuestion 프롬프트(삼중따옴표 ''' 블록 내부)를 수정합니다.
-목표: AI가 유저 대답의 "처음 나온 표면 단어"를 기계적으로 되받지 말고,
-(1) 정말 궁금한 점을 자연스럽게 묻거나 (2) 말 밑에 깔린 감정·맥락을 읽어 한 차원 깊이 들어가서,
-결국 유저가 "더 말하고 싶어지게" 만드는 유도 질문을 하게 한다.
-단, 항상 감정선만 따라가라는 뜻은 아니다 — 궁금증과 감정맥락을 상황에 맞게 섞는다.
+routine_mode_step_expand.dart 에 "과거 유저 발화를 첫 질문의 씨앗으로 삼는" 기능을 추가합니다.
+
+[동작 요약]
+- 세션 첫 질문(turnNumber 0) 생성 시:
+  1) 과거 chat_history 중 mode가 'step_expand' 또는 'clone'인 방의 유저(HOST) 발화를 모아 한 줄 무작위 선택
+  2) 씨앗 있음 → "지난번에 '...'라고 했었지, 그때 왜 그렇게 느꼈어?" 식 회상형 첫 질문
+  3) 씨앗 없음(신규 회원) → "앞으로 다른 모드 대화가 여기 재료가 될 거야, 너는 어떻게 생각해?" 식 온보딩 첫 질문
+  4) 조회 실패/타임아웃 → 기존 뉴스 소재 방식으로 안전 폴백
+- 5턴 확장·최종 합성·Part1/Part2 포맷은 기존 그대로.
 
 [절대 건드리지 말 것]
-- 5턴 구조, 최종 합성(isFinalTurn), Part1/Part2 출력 포맷, OUTPUT FORMAT - STRICT
-- [EMOTIONAL DEPTH RULE], [CONTEXT-FIRST RULE], [OUTPUT RULES — STRICT] 금지목록, [SENTENCE GROWTH LENS]
-- grammarHint 4턴 텍스트, 온도(STEP1 0.9 / STEP2 0.7)
-- Box 7 엔진 (DeepgramV2VoiceManager, TtsQueueManager)
-- 작은따옴표가 그대로 들어간 삼중따옴표 ''' 문자열 형식 유지 (절대 \' 이스케이프로 바꾸지 말 것)
+- 5턴 구조, 최종 합성, Part1/Part2 포맷, grammarHint, LAYER 1, EMOTIONAL DEPTH RULE, GO DEEPER 등 턴 1~4 로직
+- Box 7 엔진(DeepgramV2VoiceManager, TtsQueueManager, ChunkedTtsFetcher)
+- 온도(STEP1 0.9 / STEP2 0.7)
+- 기존 뉴스 소재 생성 로직 (폴백으로 그대로 유지)
 
 ──────────────────────────────────────────────
-[수정 1] LAYER 1 ②③ 교체 — "쉬운 디테일 하나 잡기"를 "표면 단어 금지 + 한 차원 위로"로
+[수정 1] State 클래스에 과거 발화 조회 함수 신설
 ──────────────────────────────────────────────
 
-기존 ②③ 두 줄:
+_startSessionWithAiQuestion() 함수 정의 바로 위에 아래 메서드를 새로 추가합니다.
+(FirebaseFirestore, FirebaseAuth 는 파일 상단에서 이미 import되어 있음 — 없으면 추가)
 
-② Of that feeling/motivation, what is the SINGLE detail they would most naturally enjoy adding next? (You are a curious friend following their heart, not collecting required data.)
-③ See the [TURN GOAL] below only as a soft lens — a direction that often fits, NOT a target you must extract. If following the user's real feeling points elsewhere, follow the feeling.
+  // 🌱 [SEED] 과거 step_expand/clone 방의 유저(HOST) 발화 한 줄을 무작위로 가져온다.
+  //   - 실패/없음이면 null 반환 → 호출부에서 기존 뉴스 소재 방식으로 폴백
+  //   - 유저 발화만 사용(role == 'HOST'), 너무 짧은 발화(5단어 미만) 제외
+  //   - 지금 만들고 있는 방(_myHistoryRef)은 제외
+  Future<String?> _fetchRandomPastUserLine() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return null;
 
-이것을 아래로 교체:
+      final historySnap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('chat_history')
+          .where('mode', whereIn: ['step_expand', 'clone'])
+          .limit(20)
+          .get()
+          .timeout(const Duration(seconds: 4));
 
-② DO NOT just grab the first or most concrete noun in their answer and ask "what kind of X?" — that is shallow keyword-echoing and makes the user feel interrogated.
-   Instead, go ONE level deeper than the surface words: their reason, motivation, mood, memory, hope, or the meaning behind what they said. Ask what a genuinely curious friend would actually wonder about.
-③ Balance two moves — do not always use the same one:
-   (a) GENUINE CURIOSITY: ask the real, specific thing you'd want to know about their situation.
-   (b) EMOTIONAL CONTEXT: read the feeling under their words and gently follow it.
-   Use whichever makes the user WANT to keep talking. The [TURN GOAL] below is only a soft lens, never a target you must extract.
+      final List<String> candidates = [];
+      for (final roomDoc in historySnap.docs) {
+        // 지금 만들고 있는 방은 건너뜀
+        if (_myHistoryRef != null && roomDoc.reference.id == _myHistoryRef!.id) {
+          continue;
+        }
+        final msgSnap = await roomDoc.reference
+            .collection('messages')
+            .where('role', isEqualTo: 'HOST')
+            .limit(10)
+            .get()
+            .timeout(const Duration(seconds: 4));
+
+        for (final m in msgSnap.docs) {
+          final d = m.data();
+          final String line =
+              (d['translated_text'] ?? d['original_text'] ?? '')
+                  .toString()
+                  .trim();
+          // 너무 짧은 발화 제외 (5단어 미만)
+          if (line.isEmpty) continue;
+          if (line.split(RegExp(r'\s+')).length < 5) continue;
+          candidates.add(line);
+        }
+      }
+
+      if (candidates.isEmpty) return null;
+      candidates.shuffle();
+      return candidates.first;
+    } catch (e) {
+      _log('🌱 [SEED]', '과거 발화 조회 실패 → 폴백: $e');
+      return null;
+    }
+  }
 
 ──────────────────────────────────────────────
-[수정 2] QUESTION PRINCIPLES 2번 교체
+[수정 2] _startSessionWithAiQuestion() 의 첫 질문 호출부 수정
 ──────────────────────────────────────────────
 
-기존:
-2. Pick the ONE detail from the user's last answer that is easiest to expand on.
+기존 (turnNumber: 0 으로 streamGrammarQuestion 호출하는 부분):
 
-교체:
-2. Do not echo the easiest surface word. Go one level deeper — into the reason, feeling, meaning, or memory behind it — and ask what genuinely makes you curious, so the user feels invited to open up.
+    final aiStream = StepExpandBrain.streamGrammarQuestion(
+      apiKey: _openAiKey,
+      contextStr: '',
+      turnNumber: 0,
+      maxTurns: MAX_TURNS,
+      myTarget: targetLangName,
+      myNative: nativeLangName,
+      isOpening: true,
+    );
+
+이것을 아래로 교체 (앞에 씨앗 조회 한 줄 추가 + seedUserLine 파라미터 전달):
+
+    // 🌱 [SEED] 첫 질문 씨앗: 과거 유저 발화 한 줄 (없으면 null → 뉴스 소재 폴백)
+    final String? seedLine = await _fetchRandomPastUserLine();
+    if (!mounted || !_isConversationActive) return;
+
+    final aiStream = StepExpandBrain.streamGrammarQuestion(
+      apiKey: _openAiKey,
+      contextStr: '',
+      turnNumber: 0,
+      maxTurns: MAX_TURNS,
+      myTarget: targetLangName,
+      myNative: nativeLangName,
+      isOpening: true,
+      seedUserLine: seedLine,
+    );
+
+⚠️ 주의: seedLine 조회는 await이므로, 이 줄 위쪽에서 이미 'SYSTEM' 빈 버블을 add한 뒤
+   aiIdx를 잡는 기존 순서는 그대로 유지할 것. (버블 생성 → await seed → 스트리밍 시작 순서)
+   만약 seed await 도중 화면 이탈 가능성 때문에 mounted 체크가 필요하면 위 코드처럼 가드를 둔다.
 
 ──────────────────────────────────────────────
-[수정 3] 새 섹션 [GO DEEPER, NOT WIDER] 추가
+[수정 3] streamGrammarQuestion 시그니처에 seedUserLine 파라미터 추가
 ──────────────────────────────────────────────
 
-[QUESTION PRINCIPLES — MANDATORY] 블록 바로 뒤, [SENTENCE GROWTH LENS] 바로 앞에 아래 섹션을 삽입:
+streamGrammarQuestion 함수 선언부의 파라미터 목록에 아래를 추가 (기존 isOpening 옆):
 
-[GO DEEPER, NOT WIDER]
-"Wider" = staying on the same surface noun the user just said (shallow, robotic).
-"Deeper" = moving to the feeling, reason, meaning, or story underneath it (what a real friend asks).
-Examples of the SHIFT you must make:
-- User: "I want good food for fall."
-  WIDER (bad): "What kind of food do you like?"
-  DEEPER (good): "What does fall food remind you of?" / "What makes fall feel special to you?"
-- User: "I called my old friend."
-  WIDER (bad): "What is your friend's name?"
-  DEEPER (good): "What made you think of them today?"
-- User: "I went hiking last weekend."
-  WIDER (bad): "Which mountain did you hike?"
-  DEEPER (good): "What did you need to get away from?" / "How did it clear your head?"
-RULE: After drafting your question, check — am I just naming their noun again (WIDER)? If yes, rewrite it to go DEEPER.
-BUT keep balance: a deeper question must still be light, answerable in 1–3 words, and its answer must still attach to the growing sentence. Never become abstract or therapy-like.
+    String? seedUserLine,
 
 ──────────────────────────────────────────────
-[수정 4] EXAMPLE FLOW 교체 — "단어 캐묻기" 예시를 "궁금증+감정맥락 점프" 예시로
+[수정 4] isOpening 프롬프트에 씨앗 분기 추가
 ──────────────────────────────────────────────
 
-기존 [EXAMPLE FLOW] 블록 전체 (AI : Are there any specific tasks... 부터
-  → Checking my emails this morning, ... last year. 까지)를 아래로 교체:
+isOpening == true 블록 안에서, 첫 질문 생성 프롬프트를 만들기 직전에 seedUserLine 분기를 넣는다.
+기존 뉴스 소재(STEP1/STEP2) 로직 전체를 아래 조건으로 감싼다:
 
-[EXAMPLE FLOW]
-(Notice: each question goes DEEPER — into feeling, reason, or meaning — not just naming the last noun.)
-AI : What's something you're looking forward to lately?
-User: A trip to Busan.
-  → I'm looking forward to a trip to Busan.
-AI : What made you pick Busan this time?
-User: I needed the ocean.
-  → I'm looking forward to a trip to Busan because I needed the ocean.
-AI : What does the ocean do for you?
-User: It calms me down after work stress.
-  → I'm looking forward to a trip to Busan because I needed the ocean, which calms me down after work stress.
-AI : What's been weighing on you most?
-User: Too many deadlines piling up.
-  → I'm looking forward to a trip to Busan because I needed the ocean to calm me down, since too many deadlines have been piling up.
+- seedUserLine 이 null 이 아니고 비어있지 않으면 → 아래 [SEED 프롬프트] 또는 [신규 회원 프롬프트] 사용
+- seedUserLine 이 null 이면 → 기존 뉴스 소재 STEP1/STEP2 로직 그대로 실행 (폴백)
+
+isOpening 블록 맨 앞에서 분기:
+
+      if (isOpening) {
+        // ── 🌱 씨앗 분기 ──────────────────────────────────────────────
+        final bool hasSeed =
+            seedUserLine != null && seedUserLine.trim().isNotEmpty;
+
+        if (hasSeed) {
+          // [SEED 프롬프트] 과거 유저 발화를 회상시키는 첫 질문
+          final String seedSysPrompt = '''
+You are a warm, curious English conversation coach starting a NEW session.
+The user previously said this in an earlier conversation:
+"${seedUserLine.trim()}"
+
+Open by gently bringing up what they said before, then ask ONE light question
+that invites them to expand on the FEELING, REASON, or STORY behind it.
+This question will become the seed of a sentence-expansion exercise.
+
+RULES:
+- Output ONE question only, 8 to 14 words, warm and natural.
+- Reference their past words naturally (e.g. "Last time you mentioned ... —").
+- Go DEEPER than the surface words: ask about why, how they felt, or what it meant.
+- The user should be able to answer in 1-3 words, and that answer should attach to a growing sentence.
+- Do NOT use markdown. Keep any reference to their words as plain text.
+
+OUTPUT FORMAT - STRICT:
+Output EXACTLY two parts separated by ONE empty line.
+PART 1: Your English question.
+PART 2: A natural $myNative conversational translation of PART 1.''';
+
+          // ↓↓↓ 기존 STEP2 스트리밍 요청과 동일한 방식으로 호출하되 system content만 seedSysPrompt 사용.
+          //     temperature 0.7, stream true, max_tokens 는 약간 늘려 60 권장 (회상 문장이 더 길어서).
+          //     (기존 STEP2 요청 코드를 복사해 system content와 max_tokens만 교체)
+          // → 여기서 seedSysPrompt 로 OpenAI 스트리밍을 돌리고 yield 한 뒤 return; 하여
+          //    아래 뉴스 소재 로직(STEP1/STEP2)으로 내려가지 않게 한다.
+
+        } else if (/* 과거 발화도 없고, 신규 회원으로 간주할 조건 */ false) {
+          // 이 분기는 호출부에서 seedUserLine=null 일 때 신규/기존을 구분하지 않으므로
+          // 신규 회원 멘트는 아래 [수정 5]에서 별도 처리 (seedUserLine 가 특수값일 때).
+        }
+
+        // seedUserLine == null → 기존 뉴스 소재 STEP1/STEP2 로직 실행 (폴백, 변경 없음)
+        ... 기존 코드 그대로 ...
+      }
+
+⚠️ 구현 노트: 기존 isOpening 블록의 OpenAI 스트리밍 호출 코드(http 요청 + 청크 파싱 + yield)는
+   그대로 재사용한다. seed 분기에서는 그 호출의 system content를 seedSysPrompt로,
+   max_tokens를 60으로만 바꿔 동일하게 스트리밍하고 return 한다.
+   STEP1(뉴스 소재 0.9) 호출은 seed 분기에서는 건너뛴다.
+
+──────────────────────────────────────────────
+[수정 5] 신규 회원(과거 발화 전무) 온보딩 첫 질문 처리
+──────────────────────────────────────────────
+
+호출부(_fetchRandomPastUserLine)가 null을 반환하면 현재는 뉴스 소재로 폴백한다.
+신규 회원에게 "앞으로 다른 모드가 재료가 된다"는 온보딩 멘트를 주려면,
+_fetchRandomPastUserLine 의 결과가 null 일 때 호출부에서 한 번 더 구분한다:
+
+수정 2의 호출부를 아래처럼 보강:
+
+    final String? seedLine = await _fetchRandomPastUserLine();
+    if (!mounted || !_isConversationActive) return;
+
+    // 신규 회원(과거 step_expand/clone 발화 전무) 여부 판단
+    final bool isNewcomer = seedLine == null && await _hasNoPastHistory();
+
+    final aiStream = StepExpandBrain.streamGrammarQuestion(
+      apiKey: _openAiKey,
+      contextStr: '',
+      turnNumber: 0,
+      maxTurns: MAX_TURNS,
+      myTarget: targetLangName,
+      myNative: nativeLangName,
+      isOpening: true,
+      seedUserLine: seedLine,
+      isNewcomer: isNewcomer,
+    );
+
+그리고 _hasNoPastHistory() 헬퍼를 _fetchRandomPastUserLine 아래에 추가:
+
+  // 과거 chat_history 방이 하나도 없으면 true (신규 회원 판단)
+  Future<bool> _hasNoPastHistory() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return false;
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('chat_history')
+          .limit(1)
+          .get()
+          .timeout(const Duration(seconds: 3));
+      return snap.docs.isEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
+streamGrammarQuestion 시그니처에 bool isNewcomer = false 파라미터도 추가하고,
+isOpening 블록에서 hasSeed=false && isNewcomer=true 이면 아래 [신규 회원 프롬프트]로 스트리밍:
+
+          final String newcomerSysPrompt = '''
+You are a warm, friendly English conversation coach greeting a brand-new user
+who has not had any conversations yet.
+
+Briefly and warmly explain (in your ONE opening question) that as they chat in
+the other modes (roleplay, clone, etc.), those conversations will later become
+the material for sentence-expansion practice here. Then ask what they think,
+or what they would like to talk about first.
+
+RULES:
+- Output ONE warm, inviting question, 10 to 16 words.
+- Friendly and encouraging, never robotic.
+- The user should be able to answer in 1-3 words to get started.
+- Do NOT use markdown. Plain text only.
+
+OUTPUT FORMAT - STRICT:
+Output EXACTLY two parts separated by ONE empty line.
+PART 1: Your English opening question.
+PART 2: A natural $myNative conversational translation of PART 1.''';
 
 [검증]
-1. dart analyze → 에러 0 (특히 ''' 블록 내 따옴표/괄호 정상)
-2. grep -c "GO DEEPER, NOT WIDER" routine_mode_step_expand.dart → 1
-3. grep -c "shallow keyword-echoing" → 1 (LAYER 1 ② 삽입 확인)
-4. grep -c "Pick the ONE detail from the user" → 0 (옛 QUESTION PRINCIPLES 2 제거 확인)
-5. grep -c "I remembered to call Alex" → 0 (옛 EXAMPLE FLOW 제거 확인)
-6. grep -c "a trip to Busan" → 최소 1 (새 EXAMPLE FLOW 삽입 확인)
-7. grep -c "EMOTIONAL DEPTH RULE" → 2 (기존 유지 확인)
-8. grep -c "OUTPUT FORMAT - STRICT" → 변경 전과 동일한 횟수 (포맷 섹션 보존 확인)
-9. grep "\\\\'" 로 ''' 블록 안에 잘못된 \' 이스케이프가 새로 생기지 않았는지 확인
-10. Box 7 클래스(TtsQueueManager, DeepgramV2VoiceManager)에 diff 변경 0 확인
+1. dart analyze → 에러 0 (특히 ''' 블록 내 ${} 보간, 따옴표 정상)
+2. grep -c "_fetchRandomPastUserLine" → 최소 2 (정의 1 + 호출 1)
+3. grep -c "seedUserLine" → 최소 3 (시그니처 + 분기 + 호출)
+4. grep -c "newcomerSysPrompt" → 1
+5. grep -c "whereIn: \['step_expand', 'clone'\]" → 1 (모드 필터 확인)
+6. grep "markdown" → seed/newcomer 프롬프트에 "Do NOT use markdown" 포함 확인 (URL 마크다운 금지 룰 준수)
+7. 기존 뉴스 소재 STEP1(temperature 0.9) 폴백 로직이 seedUserLine==null 경로에 그대로 남아있는지 확인
+8. Box 7 클래스에 diff 변경 0 확인
+9. 실제 시나리오 점검: (a) 과거 발화 있는 유저 → 회상형, (b) 신규 회원 → 온보딩형, (c) Firestore 오류 → 뉴스 소재 폴백
