@@ -924,7 +924,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
                                     color: Colors.white, fontSize: 13),
                                 maxLines: 5,
                                 decoration: InputDecoration(
-                                  hintText: "상대방과 이어서 말하고 싶은 카톡 대화를 PC에서 복사해서 붙여 넣기 합니다. - 대화 순서 그대로\n\n추천 클론을 원할 경우 대화 시나리오 성격을 적으면 AI가 30개의 가상 시나리오를 적어 줍니다. 물론 내용 수정 가능합니다.",
+                                  hintText: "상대방과 이어서 말하고 싶은 카톡 대화를 PC에서 복사해서 붙여 넣기 합니다. - 대화 순서 그대로\n\n추천 클론을 원할 경우 대화 시나리오 성격을 적으면 AI가 30개의 가상 시나리오를 적어 줍니다. 물론 내용 수정 가능합니다.\n\n추천 클론을 원할 경우 대화 시나리오 주제를 적으세요. 그러면 AI가 30개의 가상 시나리오를 적어 줍니다. 물론 내용 수정 가능합니다.",
                                   hintStyle: const TextStyle(
                                       color: Colors.white24, fontSize: 12),
                                   filled: true,
