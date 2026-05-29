@@ -46,68 +46,334 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-[Duo 모드 버그 수정] DuoBrain 프롬프트를 "대화 상대"에서 "통역기"로 교체
+대상 파일: lib/.../routine_mode_clone.dart (4077줄 파일)
+목표: Clone 생성 화면에 '추천 클론 생성' 버튼과 30개 가상 시나리오 자동 생성 기능 추가.
+제약: Box 7 통신 엔진(DeepgramV2VoiceManager / TtsQueueManager / ChunkedTtsFetcher)은 절대 수정 금지.
+      모든 URL은 순수 문자열로 유지(마크다운 링크 금지). 프롬프트 문자열은 삼중따옴표(''') 사용, 내부는 큰따옴표 위주로 이스케이프 에러 방지.
 
-파일: lib/custom_code/widgets/routine_mode_duo.dart
+────────────────────────────────────────
+[작업 1] 힌트 텍스트 교체 (line 927 부근)
+아래 한 줄을 찾아서:
+  hintText: "상대방과 이어서 말하고 싶은 카톡 대화를 PC에서 복사해서 붙여 넣기 합니다. - 대화 순서 그대로",
+다음으로 교체:
+  hintText: "상대방과 이어서 말하고 싶은 카톡 대화를 PC에서 복사해서 붙여 넣기 합니다. - 대화 순서 그대로\n\n추천 클론을 원할 경우 대화 시나리오 성격을 적으면 AI가 30개의 가상 시나리오를 적어 줍니다. 물론 내용 수정 가능합니다.",
 
-## 배경
-Duo 모드는 호스트와 게스트 사이의 양방향 실시간 통역기인데,
-현재 DuoBrain 프롬프트가 AI를 "conversation partner"로 규정하여
-유저 발화에 대해 번역이 아닌 자기 생각으로 응답/되묻기를 하고 있음.
-예: 유저가 "Share this video with your friends"라고 하면
-AI가 "What video are you referring to?"라고 대답함 (번역 아님).
+────────────────────────────────────────
+[작업 2] 버튼 영역 교체 (line 940 ~ 1037)
+시작 줄: "SizedBox(" (line 940, child: _isCreatingClone 으로 시작하는 블록)
+끝 줄  : 해당 SizedBox 를 닫는 "),"  (line 1037, 바로 아래가 "]," 인 지점)
+→ 이 SizedBox(...) 블록 전체를 아래 코드로 통째로 교체:
 
-## 수정 범위: DuoBrain 클래스의 processTranslation 메서드 내부
+                              SizedBox(
+                                width: double.infinity,
+                                child: _isCreatingClone
+                                    ? const Center(
+                                        child: Padding(
+                                          padding: EdgeInsets.all(8),
+                                          child: CircularProgressIndicator(
+                                              color: Color(0xFF9333EA),
+                                              strokeWidth: 2),
+                                        ),
+                                      )
+                                    : Column(
+                                        children: [
+                                          // ── 기존: 카톡 붙여넣기 기반 클론 생성 ──
+                                          ElevatedButton.icon(
+                                            icon: const Icon(
+                                                Icons.add_circle_outline,
+                                                size: 18),
+                                            label: const Text("Create Clone"),
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor:
+                                                  const Color(0xFF9333EA),
+                                              foregroundColor: Colors.white,
+                                              minimumSize: const Size(
+                                                  double.infinity, 0),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      vertical: 13),
+                                              shape: RoundedRectangleBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(10)),
+                                            ),
+                                            onPressed: () async {
+                                              final newName =
+                                                  _cloneNameController.text
+                                                      .trim();
+                                              if (newName.isEmpty ||
+                                                  _kakaoTextController
+                                                      .text.isEmpty) return;
+                                              final isDuplicate = _clones.any(
+                                                (c) => (c['name'] as String)
+                                                        .trim() ==
+                                                    newName,
+                                              );
+                                              if (isDuplicate) {
+                                                ScaffoldMessenger.of(ctx)
+                                                    .showSnackBar(
+                                                  SnackBar(
+                                                    content: Text(
+                                                        '⚠️ "$newName" 이름의 클론이 이미 존재합니다.'),
+                                                    backgroundColor:
+                                                        const Color(0xFFEF4444),
+                                                    duration: const Duration(
+                                                        seconds: 2),
+                                                  ),
+                                                );
+                                                return;
+                                              }
+                                              setStateDialog(() =>
+                                                  _isCreatingClone = true);
+                                              String persona = await CloneBrain
+                                                  .generatePersonaFromChat(
+                                                apiKey: _openAiKey,
+                                                chatLog:
+                                                    _kakaoTextController.text,
+                                                cloneName: newName,
+                                              );
+                                              persona = await CloneBrain
+                                                  .confirmCloneIdentity(
+                                                apiKey: _openAiKey,
+                                                cloneName: newName,
+                                                persona: persona,
+                                              );
+                                              final String newId =
+                                                  await _createCloneInFirestore(
+                                                name: newName,
+                                                personality: persona,
+                                                originalText:
+                                                    _kakaoTextController.text,
+                                              );
+                                              setState(() {
+                                                _clones.add({
+                                                  'id': newId,
+                                                  'name': newName,
+                                                  'characteristics': persona,
+                                                  'original_text':
+                                                      _kakaoTextController.text,
+                                                });
+                                                _selectedCloneId = newId;
+                                                _selectedCloneContext = persona;
+                                                _cloneSummary = '';
+                                                _recentHistory = [];
+                                                _memoryTurnCount = 0;
+                                                _localMessages.clear();
+                                              });
+                                              Navigator.pop(dialogContext);
+                                              Future.delayed(
+                                                  const Duration(seconds: 2),
+                                                  () {
+                                                if (mounted)
+                                                  _generateAndPlayAiOpener();
+                                              });
+                                            },
+                                          ),
+                                          const SizedBox(height: 10),
+                                          // ── 신규: 추천 클론 생성 (성격 설명 → 30개 시나리오 자동 생성 → 즉시 채팅) ──
+                                          OutlinedButton.icon(
+                                            icon: const Icon(
+                                                Icons.auto_awesome,
+                                                size: 18),
+                                            label: const Text("추천 클론 생성"),
+                                            style: OutlinedButton.styleFrom(
+                                              foregroundColor:
+                                                  const Color(0xFFD8B4FE),
+                                              side: const BorderSide(
+                                                  color: Color(0xFF9333EA),
+                                                  width: 1.2),
+                                              minimumSize: const Size(
+                                                  double.infinity, 0),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      vertical: 13),
+                                              shape: RoundedRectangleBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(10)),
+                                            ),
+                                            onPressed: () async {
+                                              final newName =
+                                                  _cloneNameController.text
+                                                      .trim();
+                                              final scenarioHint =
+                                                  _kakaoTextController.text
+                                                      .trim();
+                                              if (newName.isEmpty ||
+                                                  scenarioHint.isEmpty) {
+                                                ScaffoldMessenger.of(ctx)
+                                                    .showSnackBar(
+                                                  const SnackBar(
+                                                    content: Text(
+                                                        '클론 이름과 시나리오 성격을 입력해 주세요.'),
+                                                    backgroundColor:
+                                                        Color(0xFFEF4444),
+                                                    duration:
+                                                        Duration(seconds: 2),
+                                                  ),
+                                                );
+                                                return;
+                                              }
+                                              final isDuplicate = _clones.any(
+                                                (c) => (c['name'] as String)
+                                                        .trim() ==
+                                                    newName,
+                                              );
+                                              if (isDuplicate) {
+                                                ScaffoldMessenger.of(ctx)
+                                                    .showSnackBar(
+                                                  SnackBar(
+                                                    content: Text(
+                                                        '⚠️ "$newName" 이름의 클론이 이미 존재합니다.'),
+                                                    backgroundColor:
+                                                        const Color(0xFFEF4444),
+                                                    duration: const Duration(
+                                                        seconds: 2),
+                                                  ),
+                                                );
+                                                return;
+                                              }
+                                              setStateDialog(() =>
+                                                  _isCreatingClone = true);
+                                              // 1) 30개 가상 시나리오 생성
+                                              final String scenarios =
+                                                  await CloneBrain
+                                                      .generateRecommendedScenarios(
+                                                apiKey: _openAiKey,
+                                                scenarioHint: scenarioHint,
+                                                cloneName: newName,
+                                              );
+                                              // 2) 성격 설명 + 시나리오로 페르소나 추출
+                                              String persona = await CloneBrain
+                                                  .generatePersonaFromChat(
+                                                apiKey: _openAiKey,
+                                                chatLog:
+                                                    '성격 설명:\n$scenarioHint\n\n연습 시나리오:\n$scenarios',
+                                                cloneName: newName,
+                                              );
+                                              persona = await CloneBrain
+                                                  .confirmCloneIdentity(
+                                                apiKey: _openAiKey,
+                                                cloneName: newName,
+                                                persona: persona,
+                                              );
+                                              // 3) Firestore 저장 (original_text=30개 시나리오 → Edit에서 수정 가능)
+                                              final String newId =
+                                                  await _createCloneInFirestore(
+                                                name: newName,
+                                                personality: persona,
+                                                originalText: scenarios,
+                                              );
+                                              setState(() {
+                                                _clones.add({
+                                                  'id': newId,
+                                                  'name': newName,
+                                                  'characteristics': persona,
+                                                  'original_text': scenarios,
+                                                });
+                                                _selectedCloneId = newId;
+                                                _selectedCloneContext = persona;
+                                                _cloneSummary = '';
+                                                _recentHistory = [];
+                                                _memoryTurnCount = 0;
+                                                _localMessages.clear();
+                                              });
+                                              Navigator.pop(dialogContext);
+                                              Future.delayed(
+                                                  const Duration(seconds: 2),
+                                                  () {
+                                                if (mounted)
+                                                  _generateAndPlayAiOpener();
+                                              });
+                                            },
+                                          ),
+                                        ],
+                                      ),
+                              ),
 
-### 수정 A: 프롬프트 교체
-약 1106줄부터 1136줄까지의 String prompt = ... 전체를 아래로 교체:
+────────────────────────────────────────
+[작업 3] Brain 함수 추가 (CloneBrain 클래스 내부)
+generatePersonaFromChat 메서드가 끝나는 지점(line 3986, "print('generatePersonaFromChat error: $e');" 이 포함된 메서드의 닫는 '}' 다음)과
+클래스 닫는 '}'(line 3987) 사이에 아래 static 메서드를 추가:
 
-```dart
-      String prompt = "You are a real-time interpreter/translator.\n"
-          "Your ONLY job is to translate the user's speech.\n"
-          "NEVER respond to the user. NEVER answer questions. NEVER add comments.\n"
-          "NEVER ask clarification questions. Just translate exactly what was said.\n\n"
-          "Source language: $originalLang\n"
-          "Target language: $targetLang\n\n"
-          "=== RECENT CONVERSATION (for context only) ===\n"
-          "$historyContext\n\n"
-          "=== RULES ===\n"
-          "1. Translate the user's speech from $originalLang to $targetLang faithfully.\n"
-          "2. Preserve the speaker's tone, intent, and nuance.\n"
-          "3. If the speech is already in $targetLang, still output it cleaned up.\n"
-          "4. Use the conversation history ONLY to resolve pronouns or context — never to generate your own response.\n\n"
-          "=== OUTPUT (strict JSON, nothing else) ===\n"
-          "{\n"
-          "  \"translated_text\": \"<the translation in $targetLang>\",\n"
-          "  \"original_input\": \"<the original speech cleaned up in $originalLang>\"\n"
-          "}\n\n"
-          "User said: \"$text\"";
-```
+  // ==================================================================
+  // 📦 [Box 7-1-F] generateRecommendedScenarios — 추천 클론용 30개 가상 시나리오
+  // ------------------------------------------------------------------
+  // 유저가 적은 "대화 시나리오 성격" + 클론 이름 → 30개 짧은 가상 대화 상황 생성.
+  // 결과는 original_text 로 저장되며 generatePersonaFromChat 의 입력으로도 재사용됨.
+  // ==================================================================
+  static Future<String> generateRecommendedScenarios({
+    required String apiKey,
+    required String scenarioHint,
+    String cloneName = '',
+  }) async {
+    final client = http.Client();
+    try {
+      final nameLine = cloneName.isNotEmpty
+          ? 'The clone character is named "$cloneName".'
+          : '';
+      final sysPrompt = '''You are a creative scenario writer for a Korean language-learning roleplay app.
+$nameLine
+The user gives a short description of the character and the conversation style they want.
+Generate EXACTLY 30 short, varied, realistic everyday conversation scenarios in which the user could practice talking with this character.
 
-### 수정 B: temperature 낮추기
-같은 메서드 내 약 1146줄:
-'temperature': 0.3 → 'temperature': 0.2 로 변경
-(통역은 창의성이 아니라 정확성이 중요하므로)
+Rules:
+- Write in Korean.
+- Number each line from 1 to 30.
+- One scenario per line, concise (about 30 Korean characters or fewer each).
+- Keep them varied: daily life, emotions, plans, small talk, light conflict, fun topics.
+- Make them feel natural for the described character and relationship.
+- Output ONLY the numbered list. No title, no preamble, no closing remarks.''';
 
-### 수정 C: return map에서 needs_clarification 제거
-약 1160~1165줄의 return 블록을 아래로 교체:
+      final res = await client
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.7,
+              'max_tokens': 1500,
+              'messages': [
+                {'role': 'system', 'content': sysPrompt},
+                {
+                  'role': 'user',
+                  'content': 'Character and conversation style:\n\n$scenarioHint',
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 40));
 
-```dart
-        return {
-          'translated_text': parsed['translated_text']?.toString() ?? "",
-          'original_input': parsed['original_input']?.toString() ?? "",
-        };
-```
+      if (res.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(res.bodyBytes));
+        final out =
+            data['choices'][0]['message']['content'].toString().trim();
+        if (out.isNotEmpty) return out;
+      }
+    } catch (e) {
+      print('generateRecommendedScenarios error: $e');
+    } finally {
+      client.close();
+    }
 
-## 수정하면 안 되는 것
-- Box 7 (TtsQueueManager, DeepgramV2VoiceManager 등 통신 엔진)
-- _processRelayPipeline 함수의 구조
-- _cleanJsonString 헬퍼 메서드
-- initState, dispose, UI build 관련 코드
+    // 실패 시 폴백: 클론 생성이 막히지 않도록 최소 시나리오 제공
+    return '''1. 오늘 하루 어땠는지 가볍게 묻기
+2. 주말 계획 이야기하기
+3. 좋아하는 음식 추천받기
+4. 최근에 본 영화나 드라마 이야기
+5. 스트레스 푸는 방법 나누기
+6. 요즘 빠져 있는 취미 소개하기
+7. 가고 싶은 여행지 이야기
+8. 점심 메뉴 같이 정하기
+9. 어제 있었던 웃긴 일 공유하기
+10. 듣고 있는 음악 추천하기''';
+  }
 
-## 검증
-1. dart analyze lib/custom_code/widgets/routine_mode_duo.dart — 에러 0
-2. grep -n "conversation partner" lib/custom_code/widgets/routine_mode_duo.dart — 결과 0줄
-3. grep -n "needs_clarification" lib/custom_code/widgets/routine_mode_duo.dart — 결과 0줄
-4. grep -n "AMBIGUITY GUARD" lib/custom_code/widgets/routine_mode_duo.dart — 결과 0줄
-5. grep -c "real-time interpreter" lib/custom_code/widgets/routine_mode_duo.dart — 결과 1줄
+────────────────────────────────────────
+[검증]
+1. dart analyze 로 에러 0 확인 (특히 괄호/콤마 매칭).
+2. grep -n "generateRecommendedScenarios" 로 함수 1개(정의) + 호출 1개 확인.
+3. grep -n "추천 클론 생성" 로 버튼 라벨 1개 확인.
+4. grep -n "DeepgramV2VoiceManager\|TtsQueueManager\|ChunkedTtsFetcher" 결과가 작업 전후 동일한지(미변경) 확인.
+5. "Create Clone" 버튼과 onPressed 로직이 그대로 보존됐는지 확인.
