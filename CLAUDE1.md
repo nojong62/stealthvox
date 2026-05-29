@@ -46,118 +46,99 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-routine_mode_step_expand.dart, routine_mode_roleplay.dart, routine_mode_clone.dart
-세 파일 모두에 동일 패턴을 적용합니다.
-목표: Auto Pause가 "유저 무음"만 보지 않고, "유저도 AI도 아무 작동이 없을 때"부터 30초 뒤 걸리게 한다.
-
-[핵심 원리]
-- AI가 작동 중인지 = _ttsQueueManager.isBusy (TTS 재생/대기 중) 로 판정
-- 유저가 작동 중인지 = _voiceManager != null (마이크 연결/녹음 중) 로 판정
-- 둘 중 하나라도 true면 "작동 중" → idle 카운트 진행 안 함
-- 둘 다 false인 상태가 연속 30초 지속되면 그때 pause
-- Box 7(TtsQueueManager, DeepgramV2VoiceManager)은 getter만 읽고 절대 수정하지 않는다.
+routine_mode_step_expand.dart 의 Box 7-1-C streamGrammarQuestion 프롬프트(삼중따옴표 ''' 블록 내부)를 수정합니다.
+목표: AI가 유저 대답의 "처음 나온 표면 단어"를 기계적으로 되받지 말고,
+(1) 정말 궁금한 점을 자연스럽게 묻거나 (2) 말 밑에 깔린 감정·맥락을 읽어 한 차원 깊이 들어가서,
+결국 유저가 "더 말하고 싶어지게" 만드는 유도 질문을 하게 한다.
+단, 항상 감정선만 따라가라는 뜻은 아니다 — 궁금증과 감정맥락을 상황에 맞게 섞는다.
 
 [절대 건드리지 말 것]
-- TtsQueueManager, DeepgramV2VoiceManager 클래스 내부 (isBusy getter 등은 읽기만)
-- _resetIdleTimer 호출 지점들 (그대로 둠 — 유저 액션 시 즉시 깨우는 역할 유지)
-- BillingTicker 관련 로직의 의미 (pause/resume 호출 위치)
+- 5턴 구조, 최종 합성(isFinalTurn), Part1/Part2 출력 포맷, OUTPUT FORMAT - STRICT
+- [EMOTIONAL DEPTH RULE], [CONTEXT-FIRST RULE], [OUTPUT RULES — STRICT] 금지목록, [SENTENCE GROWTH LENS]
+- grammarHint 4턴 텍스트, 온도(STEP1 0.9 / STEP2 0.7)
+- Box 7 엔진 (DeepgramV2VoiceManager, TtsQueueManager)
+- 작은따옴표가 그대로 들어간 삼중따옴표 ''' 문자열 형식 유지 (절대 \' 이스케이프로 바꾸지 말 것)
 
 ──────────────────────────────────────────────
-[수정 — 3개 파일 공통] idle 타이머 블록 교체
+[수정 1] LAYER 1 ②③ 교체 — "쉬운 디테일 하나 잡기"를 "표면 단어 금지 + 한 차원 위로"로
 ──────────────────────────────────────────────
 
-각 파일에서 아래 블록을 찾습니다 (logMode 인자만 파일별로 다름:
-  step_expand='study_room', roleplay='roleplay', clone='clone'):
+기존 ②③ 두 줄:
 
-  void _resetIdleTimer() {
-    _idlePauseTimer?.cancel();
-    if (_isIdlePaused) {
-      _isIdlePaused = false;
-      if (mounted) setState(() {});
-      BillingTicker.instance.resume();
-      BillingTicker.instance.logMode('<MODE>');
-    }
-    _idlePauseTimer = Timer(const Duration(seconds: 30), _handleIdlePause);
-  }
+② Of that feeling/motivation, what is the SINGLE detail they would most naturally enjoy adding next? (You are a curious friend following their heart, not collecting required data.)
+③ See the [TURN GOAL] below only as a soft lens — a direction that often fits, NOT a target you must extract. If following the user's real feeling points elsewhere, follow the feeling.
 
-  void _handleIdlePause() {
-    if (!mounted || _isIdlePaused) return;
-    _isIdlePaused = true;
-    BillingTicker.instance.pause();
-    if (mounted) setState(() {});
-  }
+이것을 아래로 교체:
 
-  void _clearIdleTimers() {
-    _idlePauseTimer?.cancel();
-    _idlePauseTimer = null;
-  }
+② DO NOT just grab the first or most concrete noun in their answer and ask "what kind of X?" — that is shallow keyword-echoing and makes the user feel interrogated.
+   Instead, go ONE level deeper than the surface words: their reason, motivation, mood, memory, hope, or the meaning behind what they said. Ask what a genuinely curious friend would actually wonder about.
+③ Balance two moves — do not always use the same one:
+   (a) GENUINE CURIOSITY: ask the real, specific thing you'd want to know about their situation.
+   (b) EMOTIONAL CONTEXT: read the feeling under their words and gently follow it.
+   Use whichever makes the user WANT to keep talking. The [TURN GOAL] below is only a soft lens, never a target you must extract.
 
-이 블록 전체를 아래로 교체합니다 (logMode 인자 '<MODE>'는 각 파일의 기존 값을 그대로 유지할 것):
+──────────────────────────────────────────────
+[수정 2] QUESTION PRINCIPLES 2번 교체
+──────────────────────────────────────────────
 
-  // ── Idle Timeout v2 ───────────────────────────────────────────────
-  // 기준: "유저도 AI도 아무 작동이 없는 상태"가 연속 30초 지속되면 pause.
-  //  - AI 작동 = _ttsQueueManager.isBusy (TTS 재생/대기)
-  //  - 유저 작동 = _voiceManager != null (마이크 연결/녹음)
-  // 1초 주기 감시 타이머가 작동 여부를 보고 idle 누적초를 증감한다.
-  int _idleElapsedSec = 0;
+기존:
+2. Pick the ONE detail from the user's last answer that is easiest to expand on.
 
-  bool get _isSystemBusy {
-    final ttsBusy = _ttsQueueManager.isBusy;
-    final micBusy = _voiceManager != null;
-    return ttsBusy || micBusy;
-  }
+교체:
+2. Do not echo the easiest surface word. Go one level deeper — into the reason, feeling, meaning, or memory behind it — and ask what genuinely makes you curious, so the user feels invited to open up.
 
-  void _resetIdleTimer() {
-    _idleElapsedSec = 0;
-    if (_isIdlePaused) {
-      _isIdlePaused = false;
-      if (mounted) setState(() {});
-      BillingTicker.instance.resume();
-      BillingTicker.instance.logMode('<MODE>');
-    }
-    _idlePauseTimer?.cancel();
-    _idlePauseTimer =
-        Timer.periodic(const Duration(seconds: 1), (_) => _idleTick());
-  }
+──────────────────────────────────────────────
+[수정 3] 새 섹션 [GO DEEPER, NOT WIDER] 추가
+──────────────────────────────────────────────
 
-  void _idleTick() {
-    if (!mounted) return;
-    if (_isIdlePaused) return;
-    // 유저나 AI가 작동 중이면 idle 누적을 멈추고 리셋
-    if (_isSystemBusy) {
-      _idleElapsedSec = 0;
-      return;
-    }
-    _idleElapsedSec++;
-    if (_idleElapsedSec >= 30) {
-      _handleIdlePause();
-    }
-  }
+[QUESTION PRINCIPLES — MANDATORY] 블록 바로 뒤, [SENTENCE GROWTH LENS] 바로 앞에 아래 섹션을 삽입:
 
-  void _handleIdlePause() {
-    if (!mounted || _isIdlePaused) return;
-    _isIdlePaused = true;
-    _idleElapsedSec = 0;
-    BillingTicker.instance.pause();
-    if (mounted) setState(() {});
-  }
+[GO DEEPER, NOT WIDER]
+"Wider" = staying on the same surface noun the user just said (shallow, robotic).
+"Deeper" = moving to the feeling, reason, meaning, or story underneath it (what a real friend asks).
+Examples of the SHIFT you must make:
+- User: "I want good food for fall."
+  WIDER (bad): "What kind of food do you like?"
+  DEEPER (good): "What does fall food remind you of?" / "What makes fall feel special to you?"
+- User: "I called my old friend."
+  WIDER (bad): "What is your friend's name?"
+  DEEPER (good): "What made you think of them today?"
+- User: "I went hiking last weekend."
+  WIDER (bad): "Which mountain did you hike?"
+  DEEPER (good): "What did you need to get away from?" / "How did it clear your head?"
+RULE: After drafting your question, check — am I just naming their noun again (WIDER)? If yes, rewrite it to go DEEPER.
+BUT keep balance: a deeper question must still be light, answerable in 1–3 words, and its answer must still attach to the growing sentence. Never become abstract or therapy-like.
 
-  void _clearIdleTimers() {
-    _idlePauseTimer?.cancel();
-    _idlePauseTimer = null;
-    _idleElapsedSec = 0;
-  }
-  // ──────────────────────────────────────────────────────────────────
+──────────────────────────────────────────────
+[수정 4] EXAMPLE FLOW 교체 — "단어 캐묻기" 예시를 "궁금증+감정맥락 점프" 예시로
+──────────────────────────────────────────────
 
-[검증 — 3개 파일 각각]
-1. dart analyze → 에러 0
-2. grep -c "_isSystemBusy" 각 파일 → 2 (getter 정의 1 + _idleTick 사용 1)
-3. grep -c "Timer.periodic(const Duration(seconds: 1)" 각 파일 → 1
-4. grep -c "Timer(const Duration(seconds: 30), _handleIdlePause)" 각 파일 → 0 (옛 단발 타이머 제거 확인)
-5. grep -c "_ttsQueueManager.isBusy" 각 파일 → 최소 1
-6. logMode 인자가 파일별로 그대로인지 확인:
-   step_expand → grep "logMode('study_room')"
-   roleplay    → grep "logMode('roleplay')"
-   clone       → grep "logMode('clone')"
-7. TtsQueueManager / DeepgramV2VoiceManager 클래스 내부에 diff 변경 0인지 확인 (getter만 읽음)
-8. _resetIdleTimer() 호출 지점(initState, 마이크 시작, 발화 끝, 파이프라인 등)이 그대로 남아있는지 확인 — 유저 액션 시 즉시 깨우는 동작 유지
+기존 [EXAMPLE FLOW] 블록 전체 (AI : Are there any specific tasks... 부터
+  → Checking my emails this morning, ... last year. 까지)를 아래로 교체:
+
+[EXAMPLE FLOW]
+(Notice: each question goes DEEPER — into feeling, reason, or meaning — not just naming the last noun.)
+AI : What's something you're looking forward to lately?
+User: A trip to Busan.
+  → I'm looking forward to a trip to Busan.
+AI : What made you pick Busan this time?
+User: I needed the ocean.
+  → I'm looking forward to a trip to Busan because I needed the ocean.
+AI : What does the ocean do for you?
+User: It calms me down after work stress.
+  → I'm looking forward to a trip to Busan because I needed the ocean, which calms me down after work stress.
+AI : What's been weighing on you most?
+User: Too many deadlines piling up.
+  → I'm looking forward to a trip to Busan because I needed the ocean to calm me down, since too many deadlines have been piling up.
+
+[검증]
+1. dart analyze → 에러 0 (특히 ''' 블록 내 따옴표/괄호 정상)
+2. grep -c "GO DEEPER, NOT WIDER" routine_mode_step_expand.dart → 1
+3. grep -c "shallow keyword-echoing" → 1 (LAYER 1 ② 삽입 확인)
+4. grep -c "Pick the ONE detail from the user" → 0 (옛 QUESTION PRINCIPLES 2 제거 확인)
+5. grep -c "I remembered to call Alex" → 0 (옛 EXAMPLE FLOW 제거 확인)
+6. grep -c "a trip to Busan" → 최소 1 (새 EXAMPLE FLOW 삽입 확인)
+7. grep -c "EMOTIONAL DEPTH RULE" → 2 (기존 유지 확인)
+8. grep -c "OUTPUT FORMAT - STRICT" → 변경 전과 동일한 횟수 (포맷 섹션 보존 확인)
+9. grep "\\\\'" 로 ''' 블록 안에 잘못된 \' 이스케이프가 새로 생기지 않았는지 확인
+10. Box 7 클래스(TtsQueueManager, DeepgramV2VoiceManager)에 diff 변경 0 확인
