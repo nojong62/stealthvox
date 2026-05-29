@@ -102,7 +102,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       return;
     }
     _idleElapsedSec++;
-    if (_idleElapsedSec >= 30) {
+    if (_idleElapsedSec >= 60) {
       _handleIdlePause();
     }
   }

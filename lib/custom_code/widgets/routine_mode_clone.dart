@@ -103,7 +103,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
       return;
     }
     _idleElapsedSec++;
-    if (_idleElapsedSec >= 30) {
+    if (_idleElapsedSec >= 60) {
       _handleIdlePause();
     }
   }

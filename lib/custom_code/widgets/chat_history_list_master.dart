@@ -54,7 +54,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
       BillingTicker.instance.resume();
       BillingTicker.instance.logMode('history_list');
     }
-    _idlePauseTimer = Timer(const Duration(seconds: 30), _handleIdlePause);
+    _idlePauseTimer = Timer(const Duration(seconds: 60), _handleIdlePause);
   }
 
   void _handleIdlePause() {
