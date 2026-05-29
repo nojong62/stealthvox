@@ -266,24 +266,52 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   bool _isGeneratingScenario = false;
   bool _isAiOpenerPlaying = false; // AI 첫 발화 재생 중 여부
 
-  // ── Idle Timeout (무반응 자동 일시정지) ────────────────────────────────────
+  // ── Idle Timeout v2 ───────────────────────────────────────────────
+  // 기준: "유저도 AI도 아무 작동이 없는 상태"가 연속 30초 지속되면 pause.
+  //  - AI 작동 = _ttsQueueManager.isBusy (TTS 재생/대기)
+  //  - 유저 작동 = _voiceManager != null (마이크 연결/녹음)
+  // 1초 주기 감시 타이머가 작동 여부를 보고 idle 누적초를 증감한다.
   Timer? _idlePauseTimer;
   bool _isIdlePaused = false;
+  int _idleElapsedSec = 0;
+
+  bool get _isSystemBusy {
+    final ttsBusy = _ttsQueueManager.isBusy;
+    final micBusy = _voiceManager != null;
+    return ttsBusy || micBusy;
+  }
 
   void _resetIdleTimer() {
-    _idlePauseTimer?.cancel();
+    _idleElapsedSec = 0;
     if (_isIdlePaused) {
       _isIdlePaused = false;
       if (mounted) setState(() {});
       BillingTicker.instance.resume();
       BillingTicker.instance.logMode('roleplay');
     }
-    _idlePauseTimer = Timer(const Duration(seconds: 30), _handleIdlePause);
+    _idlePauseTimer?.cancel();
+    _idlePauseTimer =
+        Timer.periodic(const Duration(seconds: 1), (_) => _idleTick());
+  }
+
+  void _idleTick() {
+    if (!mounted) return;
+    if (_isIdlePaused) return;
+    // 유저나 AI가 작동 중이면 idle 누적을 멈추고 리셋
+    if (_isSystemBusy) {
+      _idleElapsedSec = 0;
+      return;
+    }
+    _idleElapsedSec++;
+    if (_idleElapsedSec >= 30) {
+      _handleIdlePause();
+    }
   }
 
   void _handleIdlePause() {
     if (!mounted || _isIdlePaused) return;
     _isIdlePaused = true;
+    _idleElapsedSec = 0;
     BillingTicker.instance.pause();
     if (mounted) setState(() {});
   }
@@ -291,7 +319,9 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   void _clearIdleTimers() {
     _idlePauseTimer?.cancel();
     _idlePauseTimer = null;
+    _idleElapsedSec = 0;
   }
+  // ──────────────────────────────────────────────────────────────────
 
   Widget _buildIdleBanner() => const SizedBox.shrink();
 
