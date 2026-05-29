@@ -4620,7 +4620,7 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
         openReq.body = jsonEncode({
           'model': 'gpt-4o-mini',
           'stream': true,
-          'temperature': 0.2,
+          'temperature': 0.7,
           'max_tokens': 30,
           'messages': [
             {'role': 'system', 'content': openingSysPrompt},
@@ -4648,21 +4648,21 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
       // ─────────────────────────────────────────────────────────────────
 
       final String grammarHint = turnNumber == 1
-          ? 'GOAL: Draw out a REASON or CAUSE behind the user\'s core statement.\n'
-              'If the user clearly expressed loss of interest, motivation, enjoyment, or willingness to engage, treat that emotion as the cause to explore (see [EMOTIONAL DEPTH RULE]).\n'
-              'Invite the user to share WHY — warmly and lightly, without naming grammar. '
-              'A short answer like "because I was tired" should attach smoothly to the growing sentence.'
+          ? 'FOCUS: Follow the FEELING or MOTIVATION behind what the user just said.\n'
+              'Silently guess WHY this matters to them or how they feel about it, then ask a light question that follows that thread — not a question that extracts a fixed answer.\n'
+              'If the user clearly expressed loss of interest, motivation, enjoyment, or willingness to engage, follow that emotion instead (see [EMOTIONAL DEPTH RULE]).\n'
+              'Their short answer (e.g. "because it was fun", "I was just curious") should attach smoothly to the growing sentence.'
           : turnNumber == 2
-              ? 'GOAL: Draw out a PERSON or THING involved in the user\'s story.\n'
-                  'Ask who or what was part of it — keep it light and curious. '
-                  'A short answer like "my friend Jisu" should attach naturally as a relative clause.'
+              ? 'FOCUS: Follow the PERSON, PLACE, or THING that seems to matter most in their story.\n'
+                  'Guess what detail they would naturally want to share more about, and ask about that — gently and curiously, never like a checklist.\n'
+                  'Their short answer (e.g. "my friend Jisu", "at the cafe") should attach naturally to the growing sentence.'
               : turnNumber == 3
-                  ? 'GOAL: Draw out a CONTRAST or UNEXPECTED element.\n'
-                      'Gently ask about something surprising, hard, or different from expectations. '
-                      'A short answer like "even though I was nervous" should attach naturally.'
-                  : 'GOAL: Draw out a CONDITION or SPECIFIC SITUATION.\n'
-                      'Ask when it happens or what triggers it — keep it gentle and open. '
-                      'A short answer like "when I have free time" should attach naturally.';
+                  ? 'FOCUS: Follow how they FELT or what stood out to them.\n'
+                      'Guess the emotion or the surprising/memorable part behind their last answer, and ask about it lightly. Do not force a contrast — let it emerge from their feeling.\n'
+                      'Their short answer (e.g. "it was a relief", "even though I was nervous") should attach naturally to the growing sentence.'
+                  : 'FOCUS: Follow where their story is naturally heading — a moment, a situation, or what it means to them.\n'
+                      'Guess what they would enjoy adding, and invite it gently and openly.\n'
+                      'Their short answer (e.g. "when I have free time", "after work") should attach naturally to the growing sentence.';
 
       // ── 3단계 (최종 합성): 파편화된 답변 → Expanded Sentence ──────────────
       // ── 2단계 (문법 유도형 질문): 5-8단어 초단형, 구조를 이름 짓지 않고 유도 ──
@@ -4697,19 +4697,16 @@ You are a warm, skilled conversation coach — not a grammar teacher. Your job i
 [TWO-LAYER DESIGN — MANDATORY]
 
 LAYER 1 — INTERNAL REASONING (never output, work silently):
-Before writing your question, think through:
-① What is the GOAL this turn? (See [TURN GOAL] below)
-② Look at the growing sentence in History. What ONE detail is still missing?
-   - A reason / cause (because / since)
-   - A person or thing involved (who / which)
-   - A contrast or unexpected element (although / despite)
-   - A condition or situation (if / when)
-③ Of the user's LAST answer, what is the SINGLE easiest detail to follow up on?
+Before writing your question, think through — in THIS order:
+① FEELING FIRST: Read the user's LAST answer. What is the person likely thinking, feeling, or caring about underneath it? What motivated them to say it? Follow THAT thread.
+② Of that feeling/motivation, what is the SINGLE detail they would most naturally enjoy adding next? (You are a curious friend following their heart, not collecting required data.)
+③ See the [TURN GOAL] below only as a soft lens — a direction that often fits, NOT a target you must extract. If following the user's real feeling points elsewhere, follow the feeling.
 ④ What is the most natural, low-pressure 5–8-word question that picks up that one detail?
    - Can a quiet or hesitant person still answer in 1–3 words?
    - Does it avoid pressure words ("Why did you do that?", "Explain your reason")?
    - Does it avoid yes/no answers?
 ⑤ Does the question flow from the user's LAST statement and avoid already-covered ground?
+   The user's short answer should still attach naturally to the growing sentence (this never changes).
 NEVER reveal this reasoning in the output.
 
 LAYER 2 — OUTPUT (the only thing you say):
