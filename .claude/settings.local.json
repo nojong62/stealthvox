@@ -68,7 +68,8 @@
       "PowerShell($dt = Get-Date -Format \"yyyyMMdd_HHmm\"; Write-Output \"datetime: $dt\")",
       "Bash(date /t)",
       "Bash(time /t)",
-      "Bash(powershell *)"
+      "Bash(powershell *)",
+      "Bash(findstr /i \" error \")"
     ]
   }
 }
