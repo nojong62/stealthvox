@@ -74,7 +74,8 @@
       "Bash(grep -c \"\\\\\\\\\\\\\\\\\\\\'\" lib/custom_code/widgets/routine_mode_step_expand.dart)",
       "Bash(grep -n \"\\\\\\\\\\\\\\\\'\" lib/custom_code/widgets/routine_mode_step_expand.dart)",
       "Bash(dart --version)",
-      "Bash(awk \"/Future<void> _startSessionWithAiQuestion/,/^  \\\\/\\\\/ ====/\" lib/custom_code/widgets/routine_mode_step_expand.dart)"
+      "Bash(awk \"/Future<void> _startSessionWithAiQuestion/,/^  \\\\/\\\\/ ====/\" lib/custom_code/widgets/routine_mode_step_expand.dart)",
+      "Bash(dart analyze *)"
     ]
   }
 }
