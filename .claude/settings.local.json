@@ -69,7 +69,10 @@
       "Bash(date /t)",
       "Bash(time /t)",
       "Bash(powershell *)",
-      "Bash(findstr /i \" error \")"
+      "Bash(findstr /i \" error \")",
+      "Bash(grep -c \"\\\\\\\\\\\\\\\\'\" lib/custom_code/widgets/routine_mode_step_expand.dart)",
+      "Bash(grep -c \"\\\\\\\\\\\\\\\\\\\\'\" lib/custom_code/widgets/routine_mode_step_expand.dart)",
+      "Bash(grep -n \"\\\\\\\\\\\\\\\\'\" lib/custom_code/widgets/routine_mode_step_expand.dart)"
     ]
   }
 }
