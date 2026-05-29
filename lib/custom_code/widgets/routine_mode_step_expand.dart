@@ -316,20 +316,33 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return null;
 
+      // 🔧 [SEED-FIX] mode 필드가 없는 과거 방까지 커버하기 위해
+      //   서버 필터 없이 최근 방을 가져와 클라이언트에서 mode 또는 room_name으로 판정
       final historySnap = await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .collection('chat_history')
-          .where('mode', whereIn: ['step_expand', 'clone'])
-          .limit(20)
+          .orderBy('created_at', descending: true)
+          .limit(30)
           .get()
           .timeout(const Duration(seconds: 4));
+
+      bool isSeedSourceRoom(Map<String, dynamic> data) {
+        final String mode = (data['mode'] ?? '').toString();
+        final String roomName = (data['room_name'] ?? '').toString();
+        if (mode == 'step_expand' || mode == 'clone') return true;
+        if (roomName.contains('Step.Ex') || roomName.contains('Clone')) {
+          return true;
+        }
+        return false;
+      }
 
       final List<String> candidates = [];
       for (final roomDoc in historySnap.docs) {
         if (_myHistoryRef != null && roomDoc.reference.id == _myHistoryRef!.id) {
           continue;
         }
+        if (!isSeedSourceRoom(roomDoc.data())) continue;
         final msgSnap = await roomDoc.reference
             .collection('messages')
             .where('role', isEqualTo: 'HOST')
@@ -349,8 +362,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         }
       }
 
+      _log('🌱 [SEED]', '씨앗 후보 ${candidates.length}개 수집됨');
       if (candidates.isEmpty) return null;
       candidates.shuffle();
+      _log('🌱 [SEED]', '선택된 씨앗: "${candidates.first}"');
       return candidates.first;
     } catch (e) {
       _log('🌱 [SEED]', '과거 발화 조회 실패 → 폴백: $e');
@@ -2477,6 +2492,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       await _myHistoryRef!.set({
         'created_at': FieldValue.serverTimestamp(),
         'room_name': "Step.Ex Mode",
+        'mode': 'step_expand',
         'is_pinned': false,
         'msg_count': 0
       });
