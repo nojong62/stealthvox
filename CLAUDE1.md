@@ -46,94 +46,75 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-routine_mode_step_expand.dart 에서 확장 문장이 매 턴 누적되지 않고 리셋되는 버그를 수정합니다.
+파일: routine_mode_clone.dart
 
-[원인]
-streamUserTranslation 의 CASE 2 프롬프트는 "(a) History의 가장 최근 확장 문장 + (b) 새 정보를 병합"
-하도록 올바르게 설계돼 있다. 그러나 호출부가 넘기는 contextStr(History)에서
-HOST 버블의 target이 "PART1(짧은말)\n\nPART2(확장문장)" 통째로 들어가고 AI 질문도 섞여,
-GPT가 "가장 최근 확장 문장"을 정확히 집어내지 못해 매 턴 새로 짧게 만든다.
+[목적]
+"클론 특징" TextField의 hintText가 실기기(APK)에서 안 보이는 문제를 해결한다.
+hintText를 제거하고, Stack으로 별도 placeholder Text 위젯을 올리는 방식으로 교체한다.
 
-[해결]
-contextStr 구성 시 HOST 버블에서 PART2(확장 문장)만 추출해 History에 명시한다.
-특히 "가장 최근 확장 문장"을 별도 라벨로 강조해, CASE 2의 (a) 지시가 정확히 작동하게 한다.
+[전제 조건]
+_kakaoTextController (line 199) 는 이미 선언되어 있으므로 건드리지 않는다.
+setState 안에서 placeholder 표시/숨김을 제어하기 위해
+_kakaoHasText 라는 bool 상태 변수를 추가한다.
 
-[절대 건드리지 말 것]
-- streamUserTranslation 의 CASE 1 / CASE 2 프롬프트 본문 (이미 올바름)
-- 5턴 구조, 최종 합성, Polished 로직, Part1/Part2 화면/TTS 분리, Box 7 엔진
-- 첫 질문(판단·추측형) 로직, FEELING FIRST / GO DEEPER / EMOTIONAL DEPTH
+[STEP 1] 상태 변수 추가
+위치: line 199 바로 아래 (final TextEditingController _kakaoTextController 다음 줄)
 
-──────────────────────────────────────────────
-[수정] contextStr 구성부 교체 — HOST 버블에서 PART2(확장 문장) 추출 + 최신 확장 문장 라벨링
-──────────────────────────────────────────────
+추가할 코드:
+  bool _kakaoHasText = false;
 
-기존 (line 1740~1749 부근):
+[STEP 2] initState 또는 변수 선언 직후에 리스너 등록
+위치: _kakaoTextController 가 선언된 이후,
+dispose()가 있는 블록(line ~256) 위쪽 initState 내부에 아래 코드를 추가한다.
 
-      var validMsgs = _localMessages.where((m) {
-        if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
-        final target = (m['target'] ?? '').toString().trim();
-        return target.isNotEmpty && target != '...';
-      }).toList();
-      if (validMsgs.length > 10)
-        validMsgs = validMsgs.sublist(validMsgs.length - 10);
-      String contextStr = validMsgs
-          .map((m) => "${m['role'] == 'HOST' ? 'User' : 'AI'}: ${m['target']}")
-          .join("\n");
-
-교체:
-
-      var validMsgs = _localMessages.where((m) {
-        if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
-        final target = (m['target'] ?? '').toString().trim();
-        return target.isNotEmpty && target != '...';
-      }).toList();
-      if (validMsgs.length > 10)
-        validMsgs = validMsgs.sublist(validMsgs.length - 10);
-
-      // 🌱 [EXPAND-FIX] HOST 버블의 target은 "PART1(짧은말)\n\nPART2(확장문장)" 구조.
-      //   History에는 PART2(확장 문장)만 넣어 누적이 명확히 이어지게 한다.
-      //   PART2가 없으면(첫 턴 등) PART1을 그대로 사용.
-      String _extractExpanded(String target) {
-        final t = target.trim();
-        final idx = t.indexOf('\n\n');
-        if (idx < 0) return t; // 분리 없음 → 통째로
-        final part2 = t.substring(idx + 2).trim();
-        return part2.isNotEmpty ? part2 : t.substring(0, idx).trim();
+추가할 코드:
+    _kakaoTextController.addListener(() {
+      final hasText = _kakaoTextController.text.isNotEmpty;
+      if (hasText != _kakaoHasText) {
+        setState(() => _kakaoHasText = hasText);
       }
+    });
 
-      final List<String> lines = [];
-      String latestExpanded = '';
-      for (final m in validMsgs) {
-        if (m['role'] == 'HOST') {
-          final expanded = _extractExpanded((m['target'] ?? '').toString());
-          lines.add("User: $expanded");
-          latestExpanded = expanded; // 마지막 HOST 확장 문장 추적
-        } else {
-          lines.add("AI: ${m['target']}");
-        }
-      }
+[STEP 3] UI 교체
+삭제 범위: line 951 ~ line 968
+  시작: `TextField(`  (line 951)
+  끝:   `),`          (line 968, TextField 닫는 괄호)
 
-      String contextStr = lines.join("\n");
-      // 🌱 가장 최근 확장 문장을 명시적으로 강조 → CASE 2 (a) 지시가 정확히 작동
-      if (latestExpanded.isNotEmpty) {
-        contextStr +=
-            "\n\n[Most recent expanded sentence to grow from]: $latestExpanded";
-      }
+교체할 코드 (전체):
+Stack(
+  children: [
+    TextField(
+      controller: _kakaoTextController,
+      style: const TextStyle(color: Colors.white, fontSize: 13),
+      maxLines: 5,
+      decoration: InputDecoration(
+        hintText: null,
+        filled: true,
+        fillColor: Colors.white.withOpacity(0.06),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide.none,
+        ),
+        contentPadding: const EdgeInsets.all(14),
+      ),
+    ),
+    if (!_kakaoHasText)
+      const IgnorePointer(
+        child: Padding(
+          padding: EdgeInsets.all(14),
+          child: Text(
+            "1. 이어서 나누고 싶은 카톡 대화를 PC에서 복사해 붙여 넣기 합니다. (대화 순서 그대로)\n\n2. AI가 대화 시나리오를 써 드립니다. 클론의 특성을 적어주세요.\n   예) 다정한 연인, 유머러스한 친구, 배려심 많은 선배 등",
+            style: TextStyle(color: Colors.white24, fontSize: 12, height: 1.5),
+          ),
+        ),
+      ),
+  ],
+),
 
-[검증]
-1. dart analyze → 에러 0
-2. grep -c "_extractExpanded" routine_mode_step_expand.dart → 최소 2 (정의 + 호출)
-3. grep -c "Most recent expanded sentence to grow from" → 1
-4. grep -c "latestExpanded" → 최소 3
-5. 기존 CASE 2 프롬프트 보존: grep -c "the most recent expanded sentence from History" → 1
-6. 런타임 테스트 (핵심):
-   (a) 1턴: 짧은 확장
-   (b) 2턴: 1턴 확장 문장 + 새 요소 한 절 추가 (더 길어짐)
-   (c) 3턴: 2턴 확장 문장 유지 + 또 한 절 추가 (더 길어짐) — 이전 내용 사라지지 않음
-   (d) 5턴까지 계속 누적 → Polished에서 긴 확장 문장을 다듬음
-7. Box 7 클래스 diff 변경 0
+[STEP 4] 자가 검증
+1. dart analyze 실행 → 에러 없음 확인
+2. grep -n "_kakaoHasText" routine_mode_clone.dart → 3곳 이상 확인 (선언, 리스너, UI)
+3. grep -n "hintText:" routine_mode_clone.dart → "hintText: null" 또는 hintText 관련 잔여 긴 문자열 없음 확인
 
-⚠️ 주의: latestContextStr (line 2146 부근, "$contextStr\nUser: $userTargetText")는
-   위에서 만든 contextStr을 그대로 받으므로 추가 수정 불필요.
-   단, contextStr 끝에 [Most recent...] 라벨이 붙은 뒤 "\nUser: $userTargetText"가 이어지는
-   순서가 자연스러운지 확인 (라벨 → 새 입력 순서는 GPT가 이해하는 데 문제 없음).
+[STEP 5] 롤백 기준
+dart analyze 에러 발생 시, STEP 3 교체 부분만 원복하고 원본 TextField 블록 복원.
