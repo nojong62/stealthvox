@@ -75,7 +75,8 @@
       "Bash(grep -n \"\\\\\\\\\\\\\\\\'\" lib/custom_code/widgets/routine_mode_step_expand.dart)",
       "Bash(dart --version)",
       "Bash(awk \"/Future<void> _startSessionWithAiQuestion/,/^  \\\\/\\\\/ ====/\" lib/custom_code/widgets/routine_mode_step_expand.dart)",
-      "Bash(dart analyze *)"
+      "Bash(dart analyze *)",
+      "PowerShell($timestamp = Get-Date -Format \"yyyyMMdd_HHmm\"; Write-Output \"APK 파일명: stealth_vox_v1.0.41_$timestamp.apk\")"
     ]
   }
 }
