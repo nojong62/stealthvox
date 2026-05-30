@@ -46,84 +46,94 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-routine_mode_step_expand.dart 의 첫 질문 STEP2 프롬프트(openingSysPrompt)를 수정합니다.
-목표: 첫 질문을 "유저 자신을 캐묻는 회상/설명형"이 아니라,
-가벼운 일상 소재에 대해 "누구나 자기 관점으로 가볍게 판단·추측해서 답할 수 있는" 짧은 질문으로 바꾼다.
+routine_mode_step_expand.dart 에서 확장 문장이 매 턴 누적되지 않고 리셋되는 버그를 수정합니다.
 
-[의도]
-- 자기 자신에 대한 질문(X) → 세상일·일반 상황에 대한 의견·추측 질문(O)
-- 예: "주말에 비 오면 사람들은 보통 뭘 할까?" / "고양이와 강아지 중 어느 쪽이 키우기 쉬울까?"
-- 자기 얘기가 아니라 부담 없이 한마디 보탤 수 있고, 그 판단 안에 성향이 담겨 다음 턴 개인화로 연결됨.
-- 질문은 반드시 짧고 간단. 복잡하거나 길면 안 됨.
+[원인]
+streamUserTranslation 의 CASE 2 프롬프트는 "(a) History의 가장 최근 확장 문장 + (b) 새 정보를 병합"
+하도록 올바르게 설계돼 있다. 그러나 호출부가 넘기는 contextStr(History)에서
+HOST 버블의 target이 "PART1(짧은말)\n\nPART2(확장문장)" 통째로 들어가고 AI 질문도 섞여,
+GPT가 "가장 최근 확장 문장"을 정확히 집어내지 못해 매 턴 새로 짧게 만든다.
+
+[해결]
+contextStr 구성 시 HOST 버블에서 PART2(확장 문장)만 추출해 History에 명시한다.
+특히 "가장 최근 확장 문장"을 별도 라벨로 강조해, CASE 2의 (a) 지시가 정확히 작동하게 한다.
 
 [절대 건드리지 말 것]
-- STEP1 소재 생성 로직 (20개 카테고리 WIDE pool, 온도 0.9) — 소재는 가벼운 일상에서 그대로 가져옴
-- STEP2의 http 요청 구조, 온도 0.7, max_tokens, 스트리밍 파싱
-- LAYER 1 FEELING FIRST / GO DEEPER / EMOTIONAL DEPTH (유저 답변 이후 점진 개인화)
-- 5턴 구조, 최종 합성, Part1/Part2, Box 7 엔진
+- streamUserTranslation 의 CASE 1 / CASE 2 프롬프트 본문 (이미 올바름)
+- 5턴 구조, 최종 합성, Polished 로직, Part1/Part2 화면/TTS 분리, Box 7 엔진
+- 첫 질문(판단·추측형) 로직, FEELING FIRST / GO DEEPER / EMOTIONAL DEPTH
 
 ──────────────────────────────────────────────
-[수정] openingSysPrompt 두 분기 모두 교체
+[수정] contextStr 구성부 교체 — HOST 버블에서 PART2(확장 문장) 추출 + 최신 확장 문장 라벨링
 ──────────────────────────────────────────────
 
-기존:
-        final String openingSysPrompt = newsHeadline.isNotEmpty
-            ? 'You are starting a casual English conversation.\n'
-              'News topic: "$newsHeadline"\n\n'
-              'Write ONE short open-ended question in $myTarget about this topic.\n'
-              'Rules:\n'
-              '- ONE sentence only. 8 words or fewer.\n'
-              '- Sound like a friend, not a reporter.\n'
-              '- Never yes/no.\n'
-              'Output ONLY the question. Nothing else.'
-            : 'You are starting a casual English conversation.\n'
-              'Write ONE short open-ended question in $myTarget about something from everyday life.\n'
-              'Rules:\n'
-              '- ONE sentence only. 8 words or fewer.\n'
-              '- Sound like a friend, not an interviewer.\n'
-              '- Never yes/no.\n'
-              'Output ONLY the question. Nothing else.';
+기존 (line 1740~1749 부근):
+
+      var validMsgs = _localMessages.where((m) {
+        if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
+        final target = (m['target'] ?? '').toString().trim();
+        return target.isNotEmpty && target != '...';
+      }).toList();
+      if (validMsgs.length > 10)
+        validMsgs = validMsgs.sublist(validMsgs.length - 10);
+      String contextStr = validMsgs
+          .map((m) => "${m['role'] == 'HOST' ? 'User' : 'AI'}: ${m['target']}")
+          .join("\n");
 
 교체:
-        final String openingSysPrompt = newsHeadline.isNotEmpty
-            ? 'You are starting a casual English conversation as a warm-up.\n'
-              'Everyday topic: "$newsHeadline"\n\n'
-              'Write ONE short, simple question in $myTarget that asks the user for a LIGHT OPINION or GUESS about this topic in general — NOT about the user personally.\n'
-              'Think: "what do people usually...", "why might...", "which would be...", "what do you think happens when...".\n'
-              'Rules:\n'
-              '- ONE sentence only. 8 words or fewer. Simple and easy.\n'
-              '- Ask for a general judgment or guess anyone can answer in 1-3 words.\n'
-              '- Do NOT ask about the user\'s own life, memories, or feelings yet.\n'
-              '- Do NOT demand explanation or a long answer.\n'
-              '- Avoid yes/no and avoid plain "A or B" either/or questions.\n'
-              '- Sound like a curious friend, not a reporter.\n'
-              'Output ONLY the question. Nothing else.'
-            : 'You are starting a casual English conversation as a warm-up.\n'
-              'Write ONE short, simple question in $myTarget that asks the user for a LIGHT OPINION or GUESS about everyday life in general — NOT about the user personally.\n'
-              'Think: "what do people usually...", "why might...", "which would be...", "what do you think happens when...".\n'
-              'Rules:\n'
-              '- ONE sentence only. 8 words or fewer. Simple and easy.\n'
-              '- Ask for a general judgment or guess anyone can answer in 1-3 words.\n'
-              '- Do NOT ask about the user\'s own life, memories, or feelings yet.\n'
-              '- Do NOT demand explanation or a long answer.\n'
-              '- Avoid yes/no and avoid plain "A or B" either/or questions.\n'
-              '- Sound like a curious friend, not an interviewer.\n'
-              'Output ONLY the question. Nothing else.';
 
-⚠️ 따옴표 주의: 위 문자열은 작은따옴표 문자열이므로 user\'s 의 이스케이프(\')를 정확히 유지할 것.
-   URL 마크다운 변환 금지 규칙도 그대로 적용(이 프롬프트엔 URL 없음).
+      var validMsgs = _localMessages.where((m) {
+        if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
+        final target = (m['target'] ?? '').toString().trim();
+        return target.isNotEmpty && target != '...';
+      }).toList();
+      if (validMsgs.length > 10)
+        validMsgs = validMsgs.sublist(validMsgs.length - 10);
+
+      // 🌱 [EXPAND-FIX] HOST 버블의 target은 "PART1(짧은말)\n\nPART2(확장문장)" 구조.
+      //   History에는 PART2(확장 문장)만 넣어 누적이 명확히 이어지게 한다.
+      //   PART2가 없으면(첫 턴 등) PART1을 그대로 사용.
+      String _extractExpanded(String target) {
+        final t = target.trim();
+        final idx = t.indexOf('\n\n');
+        if (idx < 0) return t; // 분리 없음 → 통째로
+        final part2 = t.substring(idx + 2).trim();
+        return part2.isNotEmpty ? part2 : t.substring(0, idx).trim();
+      }
+
+      final List<String> lines = [];
+      String latestExpanded = '';
+      for (final m in validMsgs) {
+        if (m['role'] == 'HOST') {
+          final expanded = _extractExpanded((m['target'] ?? '').toString());
+          lines.add("User: $expanded");
+          latestExpanded = expanded; // 마지막 HOST 확장 문장 추적
+        } else {
+          lines.add("AI: ${m['target']}");
+        }
+      }
+
+      String contextStr = lines.join("\n");
+      // 🌱 가장 최근 확장 문장을 명시적으로 강조 → CASE 2 (a) 지시가 정확히 작동
+      if (latestExpanded.isNotEmpty) {
+        contextStr +=
+            "\n\n[Most recent expanded sentence to grow from]: $latestExpanded";
+      }
 
 [검증]
-1. dart analyze → 에러 0 (특히 작은따옴표 이스케이프 \' 정상)
-2. grep -c "LIGHT OPINION or GUESS" routine_mode_step_expand.dart → 2 (두 분기 각 1회)
-3. grep -c "Do NOT ask about the user" → 2 (자기 얘기 금지 확인)
-4. grep -c "short open-ended question" → 0 (옛 프롬프트 제거 확인)
-5. grep -c "WIDE pool" → 1 (STEP1 소재 로직 보존)
-6. grep -c "FEELING FIRST" → 1 (점진 개인화 보존)
-7. grep "temperature.*0.9" → STEP1 온도 유지 / grep "temperature.*0.7" → STEP2 온도 유지
-8. 런타임 테스트:
-   (a) 첫 질문: "사람들은 보통 ~할까?" "왜 ~할까?" 류의 가볍게 판단·추측하는 짧은 질문
-   (b) 첫 질문이 유저 자신을 직접 캐묻지 않음 (자기 얘기 강요 X)
-   (c) 매번 다른 일상 소재 (STEP1 풀 유지)
-   (d) 유저 답변 후: 점차 개인적인 질문으로 전개 (FEELING FIRST 동작)
-9. Box 7 클래스 diff 변경 0
+1. dart analyze → 에러 0
+2. grep -c "_extractExpanded" routine_mode_step_expand.dart → 최소 2 (정의 + 호출)
+3. grep -c "Most recent expanded sentence to grow from" → 1
+4. grep -c "latestExpanded" → 최소 3
+5. 기존 CASE 2 프롬프트 보존: grep -c "the most recent expanded sentence from History" → 1
+6. 런타임 테스트 (핵심):
+   (a) 1턴: 짧은 확장
+   (b) 2턴: 1턴 확장 문장 + 새 요소 한 절 추가 (더 길어짐)
+   (c) 3턴: 2턴 확장 문장 유지 + 또 한 절 추가 (더 길어짐) — 이전 내용 사라지지 않음
+   (d) 5턴까지 계속 누적 → Polished에서 긴 확장 문장을 다듬음
+7. Box 7 클래스 diff 변경 0
+
+⚠️ 주의: latestContextStr (line 2146 부근, "$contextStr\nUser: $userTargetText")는
+   위에서 만든 contextStr을 그대로 받으므로 추가 수정 불필요.
+   단, contextStr 끝에 [Most recent...] 라벨이 붙은 뒤 "\nUser: $userTargetText"가 이어지는
+   순서가 자연스러운지 확인 (라벨 → 새 입력 순서는 GPT가 이해하는 데 문제 없음).
