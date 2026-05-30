@@ -1744,9 +1744,36 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       }).toList();
       if (validMsgs.length > 10)
         validMsgs = validMsgs.sublist(validMsgs.length - 10);
-      String contextStr = validMsgs
-          .map((m) => "${m['role'] == 'HOST' ? 'User' : 'AI'}: ${m['target']}")
-          .join("\n");
+
+      // 🌱 [EXPAND-FIX] HOST 버블의 target은 "PART1(짧은말)\n\nPART2(확장문장)" 구조.
+      //   History에는 PART2(확장 문장)만 넣어 누적이 명확히 이어지게 한다.
+      //   PART2가 없으면(첫 턴 등) PART1을 그대로 사용.
+      String extractExpanded(String target) {
+        final t = target.trim();
+        final idx = t.indexOf('\n\n');
+        if (idx < 0) return t;
+        final part2 = t.substring(idx + 2).trim();
+        return part2.isNotEmpty ? part2 : t.substring(0, idx).trim();
+      }
+
+      final List<String> lines = [];
+      String latestExpanded = '';
+      for (final m in validMsgs) {
+        if (m['role'] == 'HOST') {
+          final expanded = extractExpanded((m['target'] ?? '').toString());
+          lines.add("User: $expanded");
+          latestExpanded = expanded;
+        } else {
+          lines.add("AI: ${m['target']}");
+        }
+      }
+
+      String contextStr = lines.join("\n");
+      // 🌱 가장 최근 확장 문장을 명시적으로 강조 → CASE 2 (a) 지시가 정확히 작동
+      if (latestExpanded.isNotEmpty) {
+        contextStr +=
+            "\n\n[Most recent expanded sentence to grow from]: $latestExpanded";
+      }
 
       String userTargetText = "";
       String userBuffer = "";
