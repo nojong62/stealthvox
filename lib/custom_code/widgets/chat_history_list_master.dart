@@ -43,23 +43,49 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
   Set<String> _selectedDocIds = {};
 
   // ── Idle Timeout (무반응 과금 정지, History List: 자동 이동 없음) ──────────
+  // 🔧 틱 방식: 1초마다 활동 여부 확인. 키퍼 재생/튜터링/녹음 중엔 카운터 0 유지.
   Timer? _idlePauseTimer;
   bool _isIdlePaused = false;
+  int _idleElapsedSec = 0;
+
+  // 유저나 AI가 작동 중인지 판단 (활동 중이면 idle 누적 안 함)
+  bool get _isSystemBusy {
+    return _keeperTutoringLoading ||
+        _keeperIsRecording ||
+        _isPlayingKeeper ||
+        _keeperIsPlayingCorrected;
+  }
 
   void _resetIdleTimer() {
-    _idlePauseTimer?.cancel();
+    _idleElapsedSec = 0;
     if (_isIdlePaused) {
       _isIdlePaused = false;
       if (mounted) setState(() {});
       BillingTicker.instance.resume();
       BillingTicker.instance.logMode('history_list');
     }
-    _idlePauseTimer = Timer(const Duration(seconds: 60), _handleIdlePause);
+    _idlePauseTimer?.cancel();
+    _idlePauseTimer =
+        Timer.periodic(const Duration(seconds: 1), (_) => _idleTick());
+  }
+
+  void _idleTick() {
+    if (!mounted) return;
+    if (_isIdlePaused) return;
+    if (_isSystemBusy) {
+      _idleElapsedSec = 0;
+      return;
+    }
+    _idleElapsedSec++;
+    if (_idleElapsedSec >= 60) {
+      _handleIdlePause();
+    }
   }
 
   void _handleIdlePause() {
     if (!mounted || _isIdlePaused) return;
     _isIdlePaused = true;
+    _idleElapsedSec = 0;
     BillingTicker.instance.pause();
     if (mounted) setState(() {});
   }
@@ -67,6 +93,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
   void _clearIdleTimers() {
     _idlePauseTimer?.cancel();
     _idlePauseTimer = null;
+    _idleElapsedSec = 0;
   }
 
   Widget _buildIdleBanner() => const SizedBox.shrink();
