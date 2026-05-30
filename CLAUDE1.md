@@ -46,75 +46,164 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-파일: routine_mode_clone.dart
+[작업] 히스토리 2개 파일 Auto Pause를 "틱 + 활동감지(_isSystemBusy)" 방식으로 교체
+       → 튜터링·키퍼 재생·녹음·오디오 재생 중에는 카운터가 0으로 유지되어 오토포즈 안 걸림.
+       → 정말 1분간 아무 활동 없을 때만 정지. (4개 모드 파일과 동일한 구조로 통일)
 
-[목적]
-"클론 특징" TextField의 hintText가 실기기(APK)에서 안 보이는 문제를 해결한다.
-hintText를 제거하고, Stack으로 별도 placeholder Text 위젯을 올리는 방식으로 교체한다.
+전제: dart:async 이미 import됨(확인 완료). 두 파일 모두 60초는 이미 적용된 상태.
 
-[전제 조건]
-_kakaoTextController (line 199) 는 이미 선언되어 있으므로 건드리지 않는다.
-setState 안에서 placeholder 표시/숨김을 제어하기 위해
-_kakaoHasText 라는 bool 상태 변수를 추가한다.
+══════════════════════════════════════════════════════════
+[파일 1] chat_history_master.dart
+──────────────────────────────────────────────────────────
+■ 삭제 대상 (정확히 186 ~ 216줄)
+  시작줄(186):  // ── Idle Timeout (무반응 과금 정지, History: 자동 이동 없음) ──────────────
+  끝줄(216):    // ─────────────────────────────────────────────────────────────────────────
+  (즉 기존 _idlePauseTimer 선언부터 마지막 구분선 주석까지 블록 전체)
 
-[STEP 1] 상태 변수 추가
-위치: line 199 바로 아래 (final TextEditingController _kakaoTextController 다음 줄)
+■ 위 블록을 아래 전체로 교체:
 
-추가할 코드:
-  bool _kakaoHasText = false;
+  // ── Idle Timeout (무반응 과금 정지, History: 자동 이동 없음) ──────────────
+  // 🔧 틱 방식: 1초마다 활동 여부 확인. 튜터링/녹음/오디오 재생 중엔 카운터 0 유지.
+  Timer? _idlePauseTimer;
+  bool _isIdlePaused = false;
+  int _idleElapsedSec = 0;
 
-[STEP 2] initState 또는 변수 선언 직후에 리스너 등록
-위치: _kakaoTextController 가 선언된 이후,
-dispose()가 있는 블록(line ~256) 위쪽 initState 내부에 아래 코드를 추가한다.
+  // 유저나 AI가 작동 중인지 판단 (활동 중이면 idle 누적 안 함)
+  bool get _isSystemBusy {
+    return _isTutorPlaying ||
+        isPlaying ||
+        _appIsRecording ||
+        _appIsShadowRecording ||
+        _isPlayingAppAudio;
+  }
 
-추가할 코드:
-    _kakaoTextController.addListener(() {
-      final hasText = _kakaoTextController.text.isNotEmpty;
-      if (hasText != _kakaoHasText) {
-        setState(() => _kakaoHasText = hasText);
-      }
-    });
+  void _resetIdleTimer() {
+    _idleElapsedSec = 0;
+    if (_isIdlePaused) {
+      _isIdlePaused = false;
+      if (mounted) setState(() {});
+      BillingTicker.instance.resume();
+      BillingTicker.instance.logMode('history');
+    }
+    _idlePauseTimer?.cancel();
+    _idlePauseTimer =
+        Timer.periodic(const Duration(seconds: 1), (_) => _idleTick());
+  }
 
-[STEP 3] UI 교체
-삭제 범위: line 951 ~ line 968
-  시작: `TextField(`  (line 951)
-  끝:   `),`          (line 968, TextField 닫는 괄호)
+  void _idleTick() {
+    if (!mounted) return;
+    if (_isIdlePaused) return;
+    if (_isSystemBusy) {
+      _idleElapsedSec = 0;
+      return;
+    }
+    _idleElapsedSec++;
+    if (_idleElapsedSec >= 60) {
+      _handleIdlePause();
+    }
+  }
 
-교체할 코드 (전체):
-Stack(
-  children: [
-    TextField(
-      controller: _kakaoTextController,
-      style: const TextStyle(color: Colors.white, fontSize: 13),
-      maxLines: 5,
-      decoration: InputDecoration(
-        hintText: null,
-        filled: true,
-        fillColor: Colors.white.withOpacity(0.06),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide.none,
-        ),
-        contentPadding: const EdgeInsets.all(14),
-      ),
-    ),
-    if (!_kakaoHasText)
-      const IgnorePointer(
-        child: Padding(
-          padding: EdgeInsets.all(14),
-          child: Text(
-            "1. 이어서 나누고 싶은 카톡 대화를 PC에서 복사해 붙여 넣기 합니다. (대화 순서 그대로)\n\n2. AI가 대화 시나리오를 써 드립니다. 클론의 특성을 적어주세요.\n   예) 다정한 연인, 유머러스한 친구, 배려심 많은 선배 등",
-            style: TextStyle(color: Colors.white24, fontSize: 12, height: 1.5),
-          ),
-        ),
-      ),
-  ],
-),
+  void _handleIdlePause() {
+    if (!mounted || _isIdlePaused) return;
+    _isIdlePaused = true;
+    _idleElapsedSec = 0;
+    BillingTicker.instance.pause();
+    if (mounted) setState(() {});
+  }
 
-[STEP 4] 자가 검증
-1. dart analyze 실행 → 에러 없음 확인
-2. grep -n "_kakaoHasText" routine_mode_clone.dart → 3곳 이상 확인 (선언, 리스너, UI)
-3. grep -n "hintText:" routine_mode_clone.dart → "hintText: null" 또는 hintText 관련 잔여 긴 문자열 없음 확인
+  void _clearIdleTimers() {
+    _idlePauseTimer?.cancel();
+    _idlePauseTimer = null;
+    _idleElapsedSec = 0;
+  }
 
-[STEP 5] 롤백 기준
-dart analyze 에러 발생 시, STEP 3 교체 부분만 원복하고 원본 TextField 블록 복원.
+  Widget _buildIdleBanner() => const SizedBox.shrink();
+
+  Widget _buildIdleOverlay() => const SizedBox.shrink();
+  // ─────────────────────────────────────────────────────────────────────────
+
+══════════════════════════════════════════════════════════
+[파일 2] chat_history_list_master.dart
+──────────────────────────────────────────────────────────
+■ 삭제 대상 (정확히 45 ~ 75줄)
+  시작줄(45):  // ── Idle Timeout (무반응 과금 정지, History List: 자동 이동 없음) ──────────
+  끝줄(75):    // ─────────────────────────────────────────────────────────────────────────
+
+■ 위 블록을 아래 전체로 교체:
+
+  // ── Idle Timeout (무반응 과금 정지, History List: 자동 이동 없음) ──────────
+  // 🔧 틱 방식: 1초마다 활동 여부 확인. 키퍼 재생/튜터링/녹음 중엔 카운터 0 유지.
+  Timer? _idlePauseTimer;
+  bool _isIdlePaused = false;
+  int _idleElapsedSec = 0;
+
+  // 유저나 AI가 작동 중인지 판단 (활동 중이면 idle 누적 안 함)
+  bool get _isSystemBusy {
+    return _keeperTutoringLoading ||
+        _keeperIsRecording ||
+        _isPlayingKeeper ||
+        _keeperIsPlayingCorrected;
+  }
+
+  void _resetIdleTimer() {
+    _idleElapsedSec = 0;
+    if (_isIdlePaused) {
+      _isIdlePaused = false;
+      if (mounted) setState(() {});
+      BillingTicker.instance.resume();
+      BillingTicker.instance.logMode('history_list');
+    }
+    _idlePauseTimer?.cancel();
+    _idlePauseTimer =
+        Timer.periodic(const Duration(seconds: 1), (_) => _idleTick());
+  }
+
+  void _idleTick() {
+    if (!mounted) return;
+    if (_isIdlePaused) return;
+    if (_isSystemBusy) {
+      _idleElapsedSec = 0;
+      return;
+    }
+    _idleElapsedSec++;
+    if (_idleElapsedSec >= 60) {
+      _handleIdlePause();
+    }
+  }
+
+  void _handleIdlePause() {
+    if (!mounted || _isIdlePaused) return;
+    _isIdlePaused = true;
+    _idleElapsedSec = 0;
+    BillingTicker.instance.pause();
+    if (mounted) setState(() {});
+  }
+
+  void _clearIdleTimers() {
+    _idlePauseTimer?.cancel();
+    _idlePauseTimer = null;
+    _idleElapsedSec = 0;
+  }
+
+  Widget _buildIdleBanner() => const SizedBox.shrink();
+
+  Widget _buildIdleOverlay() => const SizedBox.shrink();
+  // ─────────────────────────────────────────────────────────────────────────
+
+══════════════════════════════════════════════════════════
+[건드리지 말 것]
+- 기존 _resetIdleTimer() 호출 지점(initState, _startTutorPlayback, _playKeeperAudio,
+  onTap 등)은 그대로 둔다. 이제 시작 시 1번만 호출해도, 틱이 매초 _isSystemBusy를
+  확인하므로 재생 도중 자동 리셋된다. 추가 호출 불필요.
+- _handleIdlePause / _clearIdleTimers 의 호출 위치(dispose 등)는 변경 없음.
+- 나머지 4개 모드 파일은 손대지 않는다(이미 동일 구조).
+
+[검증]
+1. grep -n "_idleElapsedSec"  chat_history_master.dart       → 5건 내외(새 블록)
+2. grep -n "_idleElapsedSec"  chat_history_list_master.dart  → 5건 내외(새 블록)
+3. grep -n "bool get _isSystemBusy" chat_history_master.dart chat_history_list_master.dart → 각 1건
+4. grep -n "Timer.periodic(const Duration(seconds: 1)" chat_history_master.dart chat_history_list_master.dart → 각 1건
+5. grep -n "_idlePauseTimer = Timer(const Duration(seconds: 60)" chat_history_master.dart chat_history_list_master.dart → 0건(원샷 제거됨)
+6. dart analyze → 신규 에러 0건. 특히 _isSystemBusy 안의 변수 미정의 에러가 없어야 함
+   (master: _isTutorPlaying/isPlaying/_appIsRecording/_appIsShadowRecording/_isPlayingAppAudio,
+    list:   _keeperTutoringLoading/_keeperIsRecording/_isPlayingKeeper/_keeperIsPlayingCorrected)
