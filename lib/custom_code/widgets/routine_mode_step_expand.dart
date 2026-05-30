@@ -307,92 +307,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   //    - 화면 하단은 노란 불빛 인디케이터만 표시 → 채팅 공간 최대화
   // ====================================================================
 
-  // ── 🌱 [SEED] 과거 step_expand/clone 방의 유저(HOST) 발화 한 줄을 무작위로 가져온다.
-  //   실패/없음이면 null 반환 → 호출부에서 기존 뉴스 소재 방식으로 폴백
-  //   유저 발화만 사용(role == 'HOST'), 너무 짧은 발화(5단어 미만) 제외
-  //   지금 만들고 있는 방(_myHistoryRef)은 제외
-  Future<String?> _fetchRandomPastUserLine() async {
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return null;
-
-      // 🔧 [SEED-FIX] mode 필드가 없는 과거 방까지 커버하기 위해
-      //   서버 필터 없이 최근 방을 가져와 클라이언트에서 mode 또는 room_name으로 판정
-      final historySnap = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .collection('chat_history')
-          .orderBy('created_at', descending: true)
-          .limit(30)
-          .get()
-          .timeout(const Duration(seconds: 4));
-
-      bool isSeedSourceRoom(Map<String, dynamic> data) {
-        final String mode = (data['mode'] ?? '').toString();
-        final String roomName = (data['room_name'] ?? '').toString();
-        // step_expand 발화만 씨앗으로 사용 (유저 본인의 확장 문장이라 회상이 자연스러움).
-        // clone/roleplay/duo 는 화자·맥락이 복잡해 제외.
-        // A 경로: mode 필드가 박힌 새 방
-        if (mode == 'step_expand') return true;
-        // B 경로: mode 없는 기존 방 → room_name 으로 판정
-        if (roomName.contains('Step.Ex')) return true;
-        return false;
-      }
-
-      final List<String> candidates = [];
-      for (final roomDoc in historySnap.docs) {
-        if (_myHistoryRef != null && roomDoc.reference.id == _myHistoryRef!.id) {
-          continue;
-        }
-        if (!isSeedSourceRoom(roomDoc.data())) continue;
-        final msgSnap = await roomDoc.reference
-            .collection('messages')
-            .where('role', isEqualTo: 'HOST')
-            .limit(10)
-            .get()
-            .timeout(const Duration(seconds: 4));
-
-        for (final m in msgSnap.docs) {
-          final d = m.data();
-          final String line =
-              (d['translated_text'] ?? d['original_text'] ?? '')
-                  .toString()
-                  .trim();
-          if (line.isEmpty) continue;
-          if (line.split(RegExp(r'\s+')).length < 5) continue;
-          candidates.add(line);
-        }
-      }
-
-      _log('🌱 [SEED]', '씨앗 후보 ${candidates.length}개 수집됨');
-      if (candidates.isEmpty) return null;
-      candidates.shuffle();
-      _log('🌱 [SEED]', '선택된 씨앗: "${candidates.first}"');
-      return candidates.first;
-    } catch (e) {
-      _log('🌱 [SEED]', '과거 발화 조회 실패 → 폴백: $e');
-      return null;
-    }
-  }
-
-  // 과거 chat_history 방이 하나도 없으면 true (신규 회원 판단)
-  Future<bool> _hasNoPastHistory() async {
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return false;
-      final snap = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .collection('chat_history')
-          .limit(1)
-          .get()
-          .timeout(const Duration(seconds: 3));
-      return snap.docs.isEmpty;
-    } catch (_) {
-      return false;
-    }
-  }
-
   /// 세션 시작 시 AI가 먼저 개방형 질문을 발화하고, 완료 후 STT 자동 시작
   Future<void> _startSessionWithAiQuestion() async {
     if (_openAiKey.isEmpty || !mounted) return;
@@ -416,13 +330,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     final String nativeLangName =
         FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
 
-    // 🌱 [SEED] 첫 질문 씨앗: 과거 유저 발화 한 줄 (없으면 null → 뉴스 소재 폴백)
-    final String? seedLine = await _fetchRandomPastUserLine();
-    if (!mounted || !_isConversationActive) return;
-
-    final bool isNewcomer = seedLine == null && await _hasNoPastHistory();
-    if (!mounted || !_isConversationActive) return;
-
     final aiStream = StepExpandBrain.streamGrammarQuestion(
       apiKey: _openAiKey,
       contextStr: '',
@@ -431,8 +338,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       myTarget: targetLangName,
       myNative: nativeLangName,
       isOpening: true,
-      seedUserLine: seedLine,
-      isNewcomer: isNewcomer,
     );
 
     final ChunkedTtsFetcher tts = ChunkedTtsFetcher(
@@ -4686,27 +4591,6 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
   //   an old friend who just moved to London—to ask about the restaurant where we dined last year.
   // ==================================================================
 
-  // 🌱 [SEED] 신규 회원 온보딩 첫 질문 프롬프트
-  static String _newcomerSysPrompt(String myNative) =>
-      '''You are a warm, friendly English conversation coach greeting a brand-new user
-who has not had any conversations yet.
-
-Briefly and warmly explain (in your ONE opening question) that as they chat in
-the other modes (roleplay, clone, etc.), those conversations will later become
-the material for sentence-expansion practice here. Then ask what they think,
-or what they would like to talk about first.
-
-RULES:
-- Output ONE warm, inviting question, 10 to 16 words.
-- Friendly and encouraging, never robotic.
-- The user should be able to answer in 1-3 words to get started.
-- Do NOT use markdown. Plain text only.
-
-OUTPUT FORMAT - STRICT:
-Output EXACTLY two parts separated by ONE empty line.
-PART 1: Your English opening question.
-PART 2: A natural $myNative conversational translation of PART 1.''';
-
   static Stream<String> streamGrammarQuestion({
     required String apiKey,
     required String contextStr,
@@ -4716,8 +4600,6 @@ PART 2: A natural $myNative conversational translation of PART 1.''';
     String myNative = '',
     bool isRetry = false,
     bool isOpening = false, // 세션 첫 시작 — AI가 먼저 개방형 질문
-    String? seedUserLine, // 🌱 과거 유저 발화 씨앗 (null이면 뉴스 소재 폴백)
-    bool isNewcomer = false, // 과거 대화 전무 신규 회원
   }) async* {
     final client = http.Client();
     try {
@@ -4728,70 +4610,6 @@ PART 2: A natural $myNative conversational translation of PART 1.''';
       // How / Why / What 으로 시작 → 유저가 자기 이야기를 자연스럽게 꺼냄
       // 첫 질문 이후 유저 대답부터 문장 확장(expand) 시작
       if (isOpening) {
-        // ── 🌱 씨앗 분기 ──────────────────────────────────────────────
-        final bool hasSeed =
-            seedUserLine != null && seedUserLine.trim().isNotEmpty;
-
-        if (hasSeed || isNewcomer) {
-          final String seedSysPrompt = hasSeed
-              ? '''You are a warm, curious English conversation coach starting a NEW session.
-The user previously said this in an earlier conversation:
-"${seedUserLine.trim()}"
-
-Open by gently bringing up what they said before, then ask ONE light question
-that invites them to expand on the FEELING, REASON, or STORY behind it.
-This question will become the seed of a sentence-expansion exercise.
-
-RULES:
-- Output ONE question only, 8 to 14 words, warm and natural.
-- Reference their past words naturally (e.g. "Last time you mentioned ... —").
-- Go DEEPER than the surface words: ask about why, how they felt, or what it meant.
-- The user should be able to answer in 1-3 words, and that answer should attach to a growing sentence.
-- Do NOT use markdown. Keep any reference to their words as plain text.
-
-OUTPUT FORMAT - STRICT:
-Output EXACTLY two parts separated by ONE empty line.
-PART 1: Your English question.
-PART 2: A natural $myNative conversational translation of PART 1.'''
-              : _newcomerSysPrompt(myNative);
-
-          final seedReq = http.Request(
-            'POST',
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
-          );
-          seedReq.headers.addAll({
-            'Authorization': 'Bearer $apiKey',
-            'Content-Type': 'application/json; charset=utf-8',
-          });
-          seedReq.body = jsonEncode({
-            'model': 'gpt-4o-mini',
-            'stream': true,
-            'temperature': 0.7,
-            'max_tokens': 60,
-            'messages': [
-              {'role': 'system', 'content': seedSysPrompt},
-              {'role': 'user', 'content': 'Go.'},
-            ],
-          });
-          final seedResp =
-              await seedReq.send().timeout(const Duration(seconds: 15));
-          if (seedResp.statusCode == 200) {
-            await for (final chunk in seedResp.stream
-                .transform(utf8.decoder)
-                .transform(const LineSplitter())) {
-              if (chunk.startsWith('data: ') && chunk != 'data: [DONE]') {
-                try {
-                  final delta = jsonDecode(chunk.substring(6))['choices'][0]
-                      ['delta']['content'];
-                  if (delta != null) yield delta.toString();
-                } catch (_) {}
-              }
-            }
-            return;
-          }
-          // 씨앗 API 실패 → 아래 뉴스 소재 폴백으로 계속 진행
-        }
-
         // ── [STEP 1] 오늘 뉴스 헤드라인 1건 선정 ────────────────────────
         // 가볍고 일상적인 뉴스 (생활/날씨/음식/문화/스포츠)만 선정
         // 정치·사회·AI윤리 등 무거운 주제 제외
