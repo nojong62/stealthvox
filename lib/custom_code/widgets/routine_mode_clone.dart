@@ -954,7 +954,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
                                     color: Colors.white, fontSize: 13),
                                 maxLines: 5,
                                 decoration: InputDecoration(
-                                  hintText: "상대방과 이어서 말하고 싶은 카톡 대화를 PC에서 복사해서 붙여 넣기 합니다. - 대화 순서 그대로\n\n추천 클론을 원할 경우 대화 시나리오 성격을 적으면 AI가 30개의 가상 시나리오를 적어 줍니다. 물론 내용 수정 가능합니다.\n\n추천 클론을 원할 경우 대화 시나리오 주제를 적으세요. 그러면 AI가 30개의 가상 시나리오를 적어 줍니다. 물론 내용 수정 가능합니다.",
+                                  hintText: "1. 이어서 나누고 싶은 카톡 대화를 PC에서 복사해 붙여 넣기 합니다. (대화 순서 그대로)\n\n2. AI가 대화 시나리오를 써 드립니다. 클론의 특성을 적어주세요.\n   예) 다정한 연인, 유머러스한 친구, 배려심 많은 선배 등",
                                   hintStyle: const TextStyle(
                                       color: Colors.white24, fontSize: 12),
                                   filled: true,
