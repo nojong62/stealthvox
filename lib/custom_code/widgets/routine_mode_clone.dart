@@ -781,55 +781,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
                                       clone['id'] == _selectedCloneId;
                                   return ListTile(
                                     contentPadding: const EdgeInsets.symmetric(
-                                        horizontal: 16, vertical: 4),
-                                    leading: GestureDetector(
-                                      onTap: () {
-                                        _stopEverything();
-                                        setState(() {
-                                          _selectedCloneId = clone['id'];
-                                          _selectedCloneContext =
-                                              clone['characteristics'];
-                                          _sessionDocId = null;
-                                          _myHistoryRef = null;
-                                          _localMessages.clear();
-                                          _isConversationActive = true;
-                                          _cloneSummary = '';
-                                          _recentHistory = [];
-                                          _memoryTurnCount = 0;
-                                        });
-                                        _loadCloneContext(clone['id']);
-                                        Navigator.pop(dialogContext);
-                                        Future.delayed(
-                                            const Duration(seconds: 2), () {
-                                          if (mounted)
-                                            _generateAndPlayAiOpener();
-                                        });
-                                      },
-                                      child: Container(
-                                        width: 36,
-                                        height: 36,
-                                        decoration: BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          color: isSelected
-                                              ? const Color(0xFF9333EA)
-                                                  .withOpacity(0.25)
-                                              : Colors.white10,
-                                          border: Border.all(
-                                            color: isSelected
-                                                ? const Color(0xFF9333EA)
-                                                : Colors.transparent,
-                                            width: 2,
-                                          ),
-                                        ),
-                                        child: Icon(
-                                          Icons.person_rounded,
-                                          color: isSelected
-                                              ? const Color(0xFFD8B4FE)
-                                              : Colors.white38,
-                                          size: 20,
-                                        ),
-                                      ),
-                                    ),
+                                        horizontal: 20, vertical: 4),
                                     title: Text(
                                       clone['name'],
                                       style: TextStyle(
@@ -839,7 +791,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
                                         fontWeight: isSelected
                                             ? FontWeight.bold
                                             : FontWeight.normal,
-                                        fontSize: 14,
+                                        fontSize: 16,
                                       ),
                                     ),
                                     subtitle: isSelected
