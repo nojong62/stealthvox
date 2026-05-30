@@ -197,6 +197,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
 
   final TextEditingController _cloneNameController = TextEditingController();
   final TextEditingController _kakaoTextController = TextEditingController();
+  bool _kakaoHasText = false;
   final TextEditingController _editPersonaController = TextEditingController();
   bool _isCreatingClone = false;
   bool _isEditingClone = false;
@@ -229,6 +230,13 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
                 "⏱️ 확정: ${_swDeepgram.elapsedMilliseconds}ms | 뇌: ${_swOpenAI.elapsedMilliseconds}ms | 입: ${_swTTS.elapsedMilliseconds}ms";
           });
         }
+      }
+    });
+
+    _kakaoTextController.addListener(() {
+      final hasText = _kakaoTextController.text.isNotEmpty;
+      if (hasText != _kakaoHasText) {
+        setState(() => _kakaoHasText = hasText);
       }
     });
 
@@ -948,23 +956,41 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
                                   style: TextStyle(
                                       color: Colors.white54, fontSize: 12)),
                               const SizedBox(height: 6),
-                              TextField(
-                                controller: _kakaoTextController,
-                                style: const TextStyle(
-                                    color: Colors.white, fontSize: 13),
-                                maxLines: 5,
-                                decoration: InputDecoration(
-                                  hintText: "1. 이어서 나누고 싶은 카톡 대화를 PC에서 복사해 붙여 넣기 합니다. (대화 순서 그대로)\n\n2. AI가 대화 시나리오를 써 드립니다. 클론의 특성을 적어주세요.\n   예) 다정한 연인, 유머러스한 친구, 배려심 많은 선배 등",
-                                  hintStyle: const TextStyle(
-                                      color: Colors.white24, fontSize: 12),
-                                  filled: true,
-                                  fillColor: Colors.white.withOpacity(0.06),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                    borderSide: BorderSide.none,
+                              Stack(
+                                children: [
+                                  TextField(
+                                    controller: _kakaoTextController,
+                                    style: const TextStyle(
+                                        color: Colors.white, fontSize: 13),
+                                    maxLines: 5,
+                                    decoration: InputDecoration(
+                                      hintText: null,
+                                      filled: true,
+                                      fillColor:
+                                          Colors.white.withOpacity(0.06),
+                                      border: OutlineInputBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(10),
+                                        borderSide: BorderSide.none,
+                                      ),
+                                      contentPadding:
+                                          const EdgeInsets.all(14),
+                                    ),
                                   ),
-                                  contentPadding: const EdgeInsets.all(14),
-                                ),
+                                  if (!_kakaoHasText)
+                                    const IgnorePointer(
+                                      child: Padding(
+                                        padding: EdgeInsets.all(14),
+                                        child: Text(
+                                          "1. 이어서 나누고 싶은 카톡 대화를 PC에서 복사해 붙여 넣기 합니다. (대화 순서 그대로)\n\n2. AI가 대화 시나리오를 써 드립니다. 클론의 특성을 적어주세요.\n   예) 다정한 연인, 유머러스한 친구, 배려심 많은 선배 등",
+                                          style: TextStyle(
+                                              color: Colors.white24,
+                                              fontSize: 12,
+                                              height: 1.5),
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ),
                               const SizedBox(height: 18),
                               SizedBox(
