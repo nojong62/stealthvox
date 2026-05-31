@@ -46,164 +46,75 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-[작업] 히스토리 2개 파일 Auto Pause를 "틱 + 활동감지(_isSystemBusy)" 방식으로 교체
-       → 튜터링·키퍼 재생·녹음·오디오 재생 중에는 카운터가 0으로 유지되어 오토포즈 안 걸림.
-       → 정말 1분간 아무 활동 없을 때만 정지. (4개 모드 파일과 동일한 구조로 통일)
+[작업 대상] lib/.../routine_mode_step_expand.dart
+[원칙] Box 7(TtsQueueManager, DeepgramV2VoiceManager)은 절대 수정 금지. 아래는 모두 StepExpandBrain 내부 작업.
+       URL은 순수 문자열만(마크다운 [text](url) 금지). 영어 프롬프트 문자열은 큰따옴표 또는 삼중따옴표 사용.
+       각 변경은 적용 전 diff를 먼저 출력하고, 내 승인 후에만 파일에 반영할 것.
 
-전제: dart:async 이미 import됨(확인 완료). 두 파일 모두 60초는 이미 적용된 상태.
+========================================================
+작업 1) 68k.news 가벼운 헤드라인 페처 추가 (기존 KBS 패턴 그대로 미러링)
+========================================================
+- StepExpandBrain 안, 기존 [Box 7-1-E-0] KBS 블록 바로 아래에 새 블록 [Box 7-1-E-0b]를 추가한다.
+- 먼저 raw HTML 구조를 확인할 것: `curl -sL "https://68k.news/index.php?section=technology&loc=US" | head -c 4000`
+  (내가 본 건 마크다운 변환본이므로, 실제 <h3><a> 태그 구조를 직접 보고 정규식을 확정할 것.)
+- 함수 시그니처:
+    static Future<List<String>> _fetch68kNewsTopics() async
+  요구사항:
+    * SharedPreferences 일별 캐시. cacheKey = "news68k_" + 오늘날짜(yyyy-MM-dd). 캐시 있으면 즉시 반환.
+    * 섹션은 가벼운 것만: ["technology", "entertainment", "science", "health"]
+      각 섹션 URL: "https://68k.news/index.php?section=$section&loc=US"  (https 사용, http 금지)
+    * http.get + .timeout(Duration(seconds: 8)) , utf8.decode(res.bodyBytes)
+    * 헤드라인 추출: 각 스토리 클러스터의 대표 제목(<h3> 내부 <a> 텍스트)을 정규식으로 뽑는다.
+      제목 끝의 " - 매체명" 접미사는 제거(마지막 " - " 기준 split 후 앞부분 사용).
+    * 영어 heavy-topic 필터 정규식(대소문자 무시)으로 무거운 주제 제외. 최소 다음 키워드 포함:
+      trump|biden|war|shooting|shoot|killed|dead|death|die|crash|attack|missile|strike|
+      ICE|arrest|charged|lawsuit|court|judge|protest|crime|police|explosion|rocket|
+      hostage|hunger strike|blockade|election|senate|congress|tariff|virus|outbreak
+      (필요하면 보강 가능. 무거우면 버린다.)
+    * 길이 필터: 너무 짧거나(예: 15자 미만) 너무 긴(120자 초과) 제목은 제외.
+    * 결과가 1건 이상이면 캐시에 저장 후 반환. 0건이면 빈 리스트 반환.
+- 중복 방지는 기존 _pickUnaskedTopic을 재사용하되 키 충돌을 피하기 위해,
+  _pickUnaskedTopic을 일반화하거나, _pick68kUnaskedTopic(String userId)을 새로 만들어
+  asked 키를 "asked_68k_$userId"로 쓰고 내부에서 _fetch68kNewsTopics()를 호출한다.
+  (기존 KBS _pickUnaskedTopic 로직 그대로 복제 — 전부 소진 시 이력 초기화 포함.)
 
-══════════════════════════════════════════════════════════
-[파일 1] chat_history_master.dart
-──────────────────────────────────────────────────────────
-■ 삭제 대상 (정확히 186 ~ 216줄)
-  시작줄(186):  // ── Idle Timeout (무반응 과금 정지, History: 자동 이동 없음) ──────────────
-  끝줄(216):    // ─────────────────────────────────────────────────────────────────────────
-  (즉 기존 _idlePauseTimer 선언부터 마지막 구분선 주석까지 블록 전체)
+========================================================
+작업 2) 오프닝 주제 소스를 68k.news 1순위로 교체 (폴백 유지)
+========================================================
+- streamGrammarQuestion의 isOpening 분기, [STEP 1] 구간(현재 GPT가 newsHeadline을 즉석 생성하는 약 4639~4693행)을 수정.
+- 동작 변경:
+    1. 먼저 newsHeadline = (await _pick68kUnaskedTopic(userId)) ?? ''  로 68k 실제 헤드라인을 시도.
+       * userId가 이 함수에 없으면 파라미터로 추가하고, 호출부(약 336행, 1604행, 2196행)에서 현재 유저 uid를 넘기도록 함께 수정.
+    2. 68k 결과가 비어 있을 때만(네트워크 실패/필터로 전멸 시) 기존 GPT 즉석 주제 생성 로직으로 폴백.
+- [STEP 2] 오프닝 질문 생성부(openingSysPrompt)는 그대로 둔다. 이미 newsHeadline을 받아 쓰므로 변경 불필요.
+- UX: 68k fetch는 캐시 덕분에 하루 첫 호출만 네트워크. 8초 timeout + 실패 시 즉시 폴백이라 블로킹 위험 낮음. 그대로 유지.
 
-■ 위 블록을 아래 전체로 교체:
+========================================================
+작업 3) "새 주제(Start with a new topic)" 재시작도 68k로 라우팅
+========================================================
+- 약 2702행의 "Start with a new topic" 호출 경로를 확인하고,
+  새 주제 시작 시에도 작업 2와 동일하게 _pick68kUnaskedTopic 기반 오프닝이 타도록 연결.
+- 단, 대화 "중간" 꼬리질문(turn 1~N, isOpening=false)에는 절대 뉴스 주제를 주입하지 말 것(문장 확장 흐름 보호).
 
-  // ── Idle Timeout (무반응 과금 정지, History: 자동 이동 없음) ──────────────
-  // 🔧 틱 방식: 1초마다 활동 여부 확인. 튜터링/녹음/오디오 재생 중엔 카운터 0 유지.
-  Timer? _idlePauseTimer;
-  bool _isIdlePaused = false;
-  int _idleElapsedSec = 0;
+========================================================
+작업 4) AI 질문의 문법 구조 로테이션 (soft 렌즈)
+========================================================
+- streamGrammarQuestion의 grammarHint(약 4762~4777행) 옆에, 턴마다 순환하는 structureSeed를 추가:
+    turnNumber % 4 == 1 → 관계대명사(who / which / that)
+    turnNumber % 4 == 2 → 관계부사(where / when / why)
+    turnNumber % 4 == 3 → to부정사(to V)
+    turnNumber % 4 == 0 → 분사구문(-ing / -ed)
+- 이 seed를 follow-up용 sysPrompt에 "[STRUCTURE LENS — soft, never forced]" 섹션으로 주입:
+    * 의도: 유저의 짧은 답이 이 구조로 자연스럽게 '확장 문장에 붙도록' 질문 각도를 설계.
+    * 강제 금지: 자연스럽지 않으면 무시. 문법 용어를 유저에게 절대 노출하지 말 것(기존 BANNED 규칙 유지).
+    * 5~8단어, 따뜻한 친구 톤, yes/no 금지 등 기존 규칙 전부 유지.
+- isFinalTurn 합성 프롬프트의 "incorporate at least 2 structures" 목록에 관계부사(where/when/why)도 명시적으로 추가.
 
-  // 유저나 AI가 작동 중인지 판단 (활동 중이면 idle 누적 안 함)
-  bool get _isSystemBusy {
-    return _isTutorPlaying ||
-        isPlaying ||
-        _appIsRecording ||
-        _appIsShadowRecording ||
-        _isPlayingAppAudio;
-  }
-
-  void _resetIdleTimer() {
-    _idleElapsedSec = 0;
-    if (_isIdlePaused) {
-      _isIdlePaused = false;
-      if (mounted) setState(() {});
-      BillingTicker.instance.resume();
-      BillingTicker.instance.logMode('history');
-    }
-    _idlePauseTimer?.cancel();
-    _idlePauseTimer =
-        Timer.periodic(const Duration(seconds: 1), (_) => _idleTick());
-  }
-
-  void _idleTick() {
-    if (!mounted) return;
-    if (_isIdlePaused) return;
-    if (_isSystemBusy) {
-      _idleElapsedSec = 0;
-      return;
-    }
-    _idleElapsedSec++;
-    if (_idleElapsedSec >= 60) {
-      _handleIdlePause();
-    }
-  }
-
-  void _handleIdlePause() {
-    if (!mounted || _isIdlePaused) return;
-    _isIdlePaused = true;
-    _idleElapsedSec = 0;
-    BillingTicker.instance.pause();
-    if (mounted) setState(() {});
-  }
-
-  void _clearIdleTimers() {
-    _idlePauseTimer?.cancel();
-    _idlePauseTimer = null;
-    _idleElapsedSec = 0;
-  }
-
-  Widget _buildIdleBanner() => const SizedBox.shrink();
-
-  Widget _buildIdleOverlay() => const SizedBox.shrink();
-  // ─────────────────────────────────────────────────────────────────────────
-
-══════════════════════════════════════════════════════════
-[파일 2] chat_history_list_master.dart
-──────────────────────────────────────────────────────────
-■ 삭제 대상 (정확히 45 ~ 75줄)
-  시작줄(45):  // ── Idle Timeout (무반응 과금 정지, History List: 자동 이동 없음) ──────────
-  끝줄(75):    // ─────────────────────────────────────────────────────────────────────────
-
-■ 위 블록을 아래 전체로 교체:
-
-  // ── Idle Timeout (무반응 과금 정지, History List: 자동 이동 없음) ──────────
-  // 🔧 틱 방식: 1초마다 활동 여부 확인. 키퍼 재생/튜터링/녹음 중엔 카운터 0 유지.
-  Timer? _idlePauseTimer;
-  bool _isIdlePaused = false;
-  int _idleElapsedSec = 0;
-
-  // 유저나 AI가 작동 중인지 판단 (활동 중이면 idle 누적 안 함)
-  bool get _isSystemBusy {
-    return _keeperTutoringLoading ||
-        _keeperIsRecording ||
-        _isPlayingKeeper ||
-        _keeperIsPlayingCorrected;
-  }
-
-  void _resetIdleTimer() {
-    _idleElapsedSec = 0;
-    if (_isIdlePaused) {
-      _isIdlePaused = false;
-      if (mounted) setState(() {});
-      BillingTicker.instance.resume();
-      BillingTicker.instance.logMode('history_list');
-    }
-    _idlePauseTimer?.cancel();
-    _idlePauseTimer =
-        Timer.periodic(const Duration(seconds: 1), (_) => _idleTick());
-  }
-
-  void _idleTick() {
-    if (!mounted) return;
-    if (_isIdlePaused) return;
-    if (_isSystemBusy) {
-      _idleElapsedSec = 0;
-      return;
-    }
-    _idleElapsedSec++;
-    if (_idleElapsedSec >= 60) {
-      _handleIdlePause();
-    }
-  }
-
-  void _handleIdlePause() {
-    if (!mounted || _isIdlePaused) return;
-    _isIdlePaused = true;
-    _idleElapsedSec = 0;
-    BillingTicker.instance.pause();
-    if (mounted) setState(() {});
-  }
-
-  void _clearIdleTimers() {
-    _idlePauseTimer?.cancel();
-    _idlePauseTimer = null;
-    _idleElapsedSec = 0;
-  }
-
-  Widget _buildIdleBanner() => const SizedBox.shrink();
-
-  Widget _buildIdleOverlay() => const SizedBox.shrink();
-  // ─────────────────────────────────────────────────────────────────────────
-
-══════════════════════════════════════════════════════════
-[건드리지 말 것]
-- 기존 _resetIdleTimer() 호출 지점(initState, _startTutorPlayback, _playKeeperAudio,
-  onTap 등)은 그대로 둔다. 이제 시작 시 1번만 호출해도, 틱이 매초 _isSystemBusy를
-  확인하므로 재생 도중 자동 리셋된다. 추가 호출 불필요.
-- _handleIdlePause / _clearIdleTimers 의 호출 위치(dispose 등)는 변경 없음.
-- 나머지 4개 모드 파일은 손대지 않는다(이미 동일 구조).
-
-[검증]
-1. grep -n "_idleElapsedSec"  chat_history_master.dart       → 5건 내외(새 블록)
-2. grep -n "_idleElapsedSec"  chat_history_list_master.dart  → 5건 내외(새 블록)
-3. grep -n "bool get _isSystemBusy" chat_history_master.dart chat_history_list_master.dart → 각 1건
-4. grep -n "Timer.periodic(const Duration(seconds: 1)" chat_history_master.dart chat_history_list_master.dart → 각 1건
-5. grep -n "_idlePauseTimer = Timer(const Duration(seconds: 60)" chat_history_master.dart chat_history_list_master.dart → 0건(원샷 제거됨)
-6. dart analyze → 신규 에러 0건. 특히 _isSystemBusy 안의 변수 미정의 에러가 없어야 함
-   (master: _isTutorPlaying/isPlaying/_appIsRecording/_appIsShadowRecording/_isPlayingAppAudio,
-    list:   _keeperTutoringLoading/_keeperIsRecording/_isPlayingKeeper/_keeperIsPlayingCorrected)
+========================================================
+자체 검증 (적용 후)
+========================================================
+- `dart analyze` 통과 확인.
+- `grep -n "68k.news" lib/.../routine_mode_step_expand.dart` 로 http:// 없이 https://만 쓰였는지 확인.
+- `grep -n "](http" lib/.../routine_mode_step_expand.dart` 결과 0건(마크다운 URL 없음) 확인.
+- Box 7 클래스(TtsQueueManager / DeepgramV2VoiceManager)에 변경이 없는지 diff로 재확인.
+- 롤백: 변경 전 원본을 routine_mode_step_expand.dart.bak로 백업해 둘 것.
