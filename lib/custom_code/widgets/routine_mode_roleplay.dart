@@ -1831,7 +1831,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
             onTap: _handleAutoSaveAndExit, // 🔧 [히스토리] AutoSave 연결
             behavior: HitTestBehavior.opaque,
             child: Container(
-              width: 72,
+              width: 56,
               height: 56,
               alignment: Alignment.centerLeft,
               padding: const EdgeInsets.only(left: 4),
@@ -1880,24 +1880,27 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 4),
             // [v3.6] 잔여시간 표시 + 길게 누르면 로그 (개발자용)
             GestureDetector(
               onLongPress: _showDebugLogDialog,
               child: Container(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 decoration: BoxDecoration(
                     color: const Color(0xFF2563EB),
                     borderRadius: BorderRadius.circular(20)),
-                child: Row(children: [
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
                   const Icon(Icons.timer_outlined,
                       color: Colors.white, size: 18),
                   const SizedBox(width: 6),
-                  Text(
-                    '${(FFAppState().remainingTime / 60).floor()}m',
-                    style: const TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.bold),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      '${(FFAppState().remainingTime / 60).floor()}m',
+                      style: const TextStyle(
+                          color: Colors.white, fontWeight: FontWeight.bold),
+                    ),
                   ),
                 ]),
               ),
