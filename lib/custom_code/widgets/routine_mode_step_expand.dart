@@ -337,6 +337,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       maxTurns: MAX_TURNS,
       myTarget: targetLangName,
       myNative: nativeLangName,
+      userId: FirebaseAuth.instance.currentUser?.uid ?? '',
       isOpening: true,
     );
 
@@ -1604,6 +1605,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       turnNumber: _turnCounter,
       maxTurns: MAX_TURNS,
       myTarget: targetLangName,
+      userId: FirebaseAuth.instance.currentUser?.uid ?? '',
       isRetry: true,
     );
 
@@ -2196,6 +2198,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         turnNumber: _turnCounter,
         maxTurns: MAX_TURNS,
         myTarget: targetLangName, // 🌐 [v3.1] 유저가 선택한 타겟 언어
+        userId: FirebaseAuth.instance.currentUser?.uid ?? '',
       );
 
       // AI 생성+청킹을 Future로 (유저 재생과 병렬)
@@ -4625,6 +4628,7 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
     required int maxTurns,
     required String myTarget,
     String myNative = '',
+    String userId = '',
     bool isRetry = false,
     bool isOpening = false, // 세션 첫 시작 — AI가 먼저 개방형 질문
   }) async* {
@@ -4637,62 +4641,68 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
       // How / Why / What 으로 시작 → 유저가 자기 이야기를 자연스럽게 꺼냄
       // 첫 질문 이후 유저 대답부터 문장 확장(expand) 시작
       if (isOpening) {
-        // ── [STEP 1] 오늘 뉴스 헤드라인 1건 선정 ────────────────────────
-        // 가볍고 일상적인 뉴스 (생활/날씨/음식/문화/스포츠)만 선정
-        // 정치·사회·AI윤리 등 무거운 주제 제외
+        // ── [STEP 1] 68k.news 실제 헤드라인 1건 선정 (폴백: GPT 즉석 생성) ──
+        // 1순위: 68k.news 일별 캐시에서 뽑은 가벼운 영어 헤드라인
+        // 폴백: 네트워크 실패 또는 필터로 전멸 시 GPT 즉석 생성
         String newsHeadline = '';
-        final newsClient = http.Client();
         try {
-          final newsRes = await newsClient
-              .post(
-                Uri.parse('https://api.openai.com/v1/chat/completions'),
-                headers: {
-                  'Authorization': 'Bearer $apiKey',
-                  'Content-Type': 'application/json; charset=utf-8',
-                },
-                body: jsonEncode({
-                  'model': 'gpt-4o-mini',
-                  'max_tokens': 20,
-                  'temperature': 0.9,
-                  'messages': [
-                    {
-                      'role': 'system',
-                      'content':
-                          'Pick ONE light, everyday small-talk topic for an English conversation warm-up.\n'
-                          'STEP A — Silently choose ONE category at random from this WIDE pool (do not always pick the first ones):\n'
-                          '  food & cooking, weather & seasons, travel & places, hobbies & free time, movies & TV, music, books & reading, sports & exercise, technology & gadgets, pets & animals, fashion & style, health & sleep, work & study life, childhood memories, dreams & future plans, local festivals & events, coffee & cafes, shopping & trends, nature & outdoors, holidays & celebrations.\n'
-                          'STEP B — Inside that ONE category, invent a fresh, specific everyday topic.\n'
-                          'Each time you are called, pick a DIFFERENT category than an obvious default — vary widely across the whole pool.\n'
-                          'FORBIDDEN: politics, war, AI ethics, crime, economics, illness, anything heavy or controversial.\n'
-                          'Output format: ONLY a 4-to-8-word English noun phrase. No verb. No question. No punctuation.\n'
-                          'Examples (note how different the categories are):\n'
-                          'a cozy rainy-day movie marathon\n'
-                          'learning to bake sourdough bread\n'
-                          'a weekend hiking trip in autumn\n'
-                          'an old song stuck in your head\n'
-                          'rearranging furniture in your room\n'
-                          'a childhood snack you suddenly miss',
-                    },
-                    {
-                      'role': 'user',
-                      'content': 'Today\'s topic.',
-                    },
-                  ],
-                }),
-              )
-              .timeout(const Duration(seconds: 10));
-          if (newsRes.statusCode == 200) {
-            final newsJson = jsonDecode(utf8.decode(newsRes.bodyBytes));
-            final choices = newsJson['choices'] as List?;
-            if (choices != null && choices.isNotEmpty) {
-              newsHeadline =
-                  (choices[0]['message']?['content'] ?? '').toString().trim();
+          newsHeadline = (await _pick68kUnaskedTopic(userId)) ?? '';
+        } catch (_) {}
+
+        if (newsHeadline.isEmpty) {
+          final newsClient = http.Client();
+          try {
+            final newsRes = await newsClient
+                .post(
+                  Uri.parse('https://api.openai.com/v1/chat/completions'),
+                  headers: {
+                    'Authorization': 'Bearer $apiKey',
+                    'Content-Type': 'application/json; charset=utf-8',
+                  },
+                  body: jsonEncode({
+                    'model': 'gpt-4o-mini',
+                    'max_tokens': 20,
+                    'temperature': 0.9,
+                    'messages': [
+                      {
+                        'role': 'system',
+                        'content':
+                            'Pick ONE light, everyday small-talk topic for an English conversation warm-up.\n'
+                            'STEP A — Silently choose ONE category at random from this WIDE pool (do not always pick the first ones):\n'
+                            '  food & cooking, weather & seasons, travel & places, hobbies & free time, movies & TV, music, books & reading, sports & exercise, technology & gadgets, pets & animals, fashion & style, health & sleep, work & study life, childhood memories, dreams & future plans, local festivals & events, coffee & cafes, shopping & trends, nature & outdoors, holidays & celebrations.\n'
+                            'STEP B — Inside that ONE category, invent a fresh, specific everyday topic.\n'
+                            'Each time you are called, pick a DIFFERENT category than an obvious default — vary widely across the whole pool.\n'
+                            'FORBIDDEN: politics, war, AI ethics, crime, economics, illness, anything heavy or controversial.\n'
+                            'Output format: ONLY a 4-to-8-word English noun phrase. No verb. No question. No punctuation.\n'
+                            'Examples (note how different the categories are):\n'
+                            'a cozy rainy-day movie marathon\n'
+                            'learning to bake sourdough bread\n'
+                            'a weekend hiking trip in autumn\n'
+                            'an old song stuck in your head\n'
+                            'rearranging furniture in your room\n'
+                            'a childhood snack you suddenly miss',
+                      },
+                      {
+                        'role': 'user',
+                        'content': 'Today\'s topic.',
+                      },
+                    ],
+                  }),
+                )
+                .timeout(const Duration(seconds: 10));
+            if (newsRes.statusCode == 200) {
+              final newsJson = jsonDecode(utf8.decode(newsRes.bodyBytes));
+              final choices = newsJson['choices'] as List?;
+              if (choices != null && choices.isNotEmpty) {
+                newsHeadline =
+                    (choices[0]['message']?['content'] ?? '').toString().trim();
+              }
             }
+          } catch (_) {
+            newsHeadline = '';
+          } finally {
+            newsClient.close();
           }
-        } catch (_) {
-          newsHeadline = '';
-        } finally {
-          newsClient.close();
         }
 
         // ── [STEP 2] 뉴스 소재 기반 짧은 오프닝 질문 생성 (streaming) ──
@@ -4776,6 +4786,16 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
                       'Guess what they would enjoy adding, and invite it gently and openly.\n'
                       'Their short answer (e.g. "when I have free time", "after work") should attach naturally to the growing sentence.';
 
+      // ── 문법 구조 로테이션 (soft lens, 4턴 순환) ─────────────────────
+      final int t4 = turnNumber % 4;
+      final String structureSeed = t4 == 1
+          ? 'relative pronoun (who / which / that)'
+          : t4 == 2
+              ? 'relative adverb (where / when / why)'
+              : t4 == 3
+                  ? 'infinitive (to V)'
+                  : 'participial phrase (-ing / -ed)';
+
       // ── 3단계 (최종 합성): 파편화된 답변 → Expanded Sentence ──────────────
       // ── 2단계 (문법 유도형 질문): 5-8단어 초단형, 구조를 이름 짓지 않고 유도 ──
       final String sysPrompt = isFinalTurn
@@ -4785,7 +4805,7 @@ This is the FINAL turn ($turnNumber of $maxTurns). The user has answered your gr
 [YOUR JOB — Synthesis]
 Read the History carefully. Collect the user's fragmented answers and synthesize them into ONE fluent sentence that naturally incorporates at least 2 of these structures:
 - Causal clause (because / since)
-- Relative clause (who / which)
+- Relative clause (who / which / where / when / why)
 - Concessive clause (although / despite / even though)
 - Conditional clause (if / when)
 
@@ -4847,6 +4867,11 @@ Output the question alone — nothing before it, nothing after it (except the PA
 
 [TURN GOAL]
 $grammarHint
+
+[STRUCTURE LENS — soft, never forced]
+Silently lean the question so the user's short answer could naturally attach using: $structureSeed.
+NEVER name the structure to the user. NEVER force it if unnatural — just angle the question to invite it.
+All existing rules (5–8 words, warm friend tone, no yes/no) take full priority.
 
 [SPEECH RECOGNITION TOLERANCE — READ THIS FIRST]
 The user speaks into a microphone. Speech recognition may produce imperfect text.
@@ -5151,6 +5176,74 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     final unasked = topics.where((t) => !asked.contains(t)).toList();
     if (unasked.isEmpty) {
       await prefs.remove(askedKey); // 전부 소진 → 이력 초기화
+      await prefs.setStringList(askedKey, [topics.first]);
+      return topics.first;
+    }
+    final pick = unasked.first;
+    asked.add(pick);
+    await prefs.setStringList(askedKey, asked.toList());
+    return pick;
+  }
+
+  // ==================================================================
+  // 📦 [Box 7-1-E-0b] 68k.news 헤드라인 일별 캐시 + 유저별 중복 방지
+  // ------------------------------------------------------------------
+  // 섹션: technology / entertainment / science / health (가벼운 것만)
+  // heavy-topic 영어 필터, 길이 필터 (15~120자), 하루 1회 캐시
+  // 폴백용 KBS(_pickUnaskedTopic)와 키 충돌 없이 asked_68k_$userId 사용
+  // ==================================================================
+  static final RegExp _heavy68kRe = RegExp(
+    r'trump|biden|war|shooting|shoot|killed|dead|death|die|crash|attack|missile|strike|'
+    r'ICE|arrest|charged|lawsuit|court|judge|protest|crime|police|explosion|rocket|'
+    r'hostage|hunger strike|blockade|election|senate|congress|tariff|virus|outbreak',
+    caseSensitive: false,
+  );
+
+  static Future<List<String>> _fetch68kNewsTopics() async {
+    final prefs = await SharedPreferences.getInstance();
+    final today = DateTime.now().toIso8601String().substring(0, 10);
+    final cacheKey = 'news68k_$today';
+    final cached = prefs.getStringList(cacheKey);
+    if (cached != null && cached.isNotEmpty) return cached;
+
+    final results = <String>[];
+    for (final section in ['technology', 'entertainment', 'science', 'health']) {
+      try {
+        final res = await http
+            .get(Uri.parse('https://68k.news/index.php?section=$section&loc=US'))
+            .timeout(const Duration(seconds: 8));
+        if (res.statusCode != 200) continue;
+        final body = utf8.decode(res.bodyBytes);
+        final re = RegExp(r'<h3><font[^>]*><a[^>]*>([^<]+)</a>', dotAll: true);
+        for (final m in re.allMatches(body).take(10)) {
+          String title = m.group(1)?.trim() ?? '';
+          if (title.contains(' - ')) {
+            title = title.substring(0, title.lastIndexOf(' - ')).trim();
+          }
+          if (title.length < 15 || title.length > 120) continue;
+          if (_heavy68kRe.hasMatch(title)) continue;
+          results.add(title);
+        }
+      } catch (_) {}
+    }
+    if (results.isNotEmpty) await prefs.setStringList(cacheKey, results);
+    return results;
+  }
+
+  static Future<String?> _pick68kUnaskedTopic(String userId) async {
+    if (userId.isEmpty) {
+      final topics = await _fetch68kNewsTopics();
+      return topics.isNotEmpty ? topics.first : null;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final askedKey = 'asked_68k_$userId';
+    final asked = Set<String>.from(prefs.getStringList(askedKey) ?? []);
+    final topics = await _fetch68kNewsTopics();
+    if (topics.isEmpty) return null;
+
+    final unasked = topics.where((t) => !asked.contains(t)).toList();
+    if (unasked.isEmpty) {
+      await prefs.remove(askedKey);
       await prefs.setStringList(askedKey, [topics.first]);
       return topics.first;
     }
