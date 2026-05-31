@@ -2184,7 +2184,10 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
         _scrollToCurrent(aiIndex);
       }
 
-      // AI 역번역을 AI TTS 재생 전에 미리 시작 (백그라운드)
+      await aiGenerationTask;
+      _log('🧠 [PIPE-08]',
+          'aiGenerationTask 완료. AI pending=${aiTtsFetcher.pendingRequests}');
+      // AI 역번역 — aiGenerationTask 완료 후 aiTargetText 확정된 시점에 호출
       CloneBrain.generateCleanOriginal(
               apiKey: _openAiKey, englishText: aiTargetText)
           .then((cleanKorean) {
@@ -2193,10 +2196,6 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
           _log('🔤 [BACK-TRANS]', 'AI 역번역 완료 → UI 반영');
         }
       });
-
-      await aiGenerationTask;
-      _log('🧠 [PIPE-08]',
-          'aiGenerationTask 완료. AI pending=${aiTtsFetcher.pendingRequests}');
       // [하이브리드] remainder 발사 + 통문장 TtsCache 저장
       await _hybridTtsPlayer!
           .onStreamEnd(fullSentence: _cleanText(aiTargetText.trim()));
