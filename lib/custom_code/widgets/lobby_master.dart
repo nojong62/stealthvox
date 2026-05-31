@@ -668,7 +668,11 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     var appState = FFAppState();
-    int displayMinutes = appState.remainingTime ~/ 60;
+    final int _lobbyTotalSec = appState.remainingTime.toInt().clamp(0, 999999);
+    final int _lobbyH = _lobbyTotalSec ~/ 3600;
+    final int _lobbyM = (_lobbyTotalSec % 3600) ~/ 60;
+    final String displayTime =
+        '${_lobbyH.toString().padLeft(2, '0')}:${_lobbyM.toString().padLeft(2, '0')}';
 
     return Container(
       width: widget.width,
@@ -735,7 +739,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                                           letterSpacing: 3,
                                           fontWeight: FontWeight.bold)),
                                   const SizedBox(height: 8),
-                                  Text("${displayMinutes}m",
+                                  Text(displayTime,
                                       style: GoogleFonts.orbitron(
                                           color: appState.remainingTime > 60
                                               ? Colors.white
