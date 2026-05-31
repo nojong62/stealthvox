@@ -331,30 +331,49 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
 
       if (response.statusCode == 200) {
         String transcript = jsonDecode(responseData)['text'] ?? "";
-        String lowerClean =
-            transcript.trim().toLowerCase().replaceAll(RegExp(r'[^\w\s]'), '');
-        // 💡 듀오 모드 특화 환각 필터 (불필요한 mbc, also 등 제거)
-        List<String> ghostWords = [
-          'thank you',
+        final String trimmed = transcript.trim();
+        final String lowerRaw = trimmed.toLowerCase();
+        // 영문/한글/공백만 남긴 정규화 문자열
+        final String lowerClean = lowerRaw
+            .replaceAll(RegExp(r'[^\w\s가-힣]'), '')
+            .trim();
+        // 공백까지 제거한 비교용 문자열 (짧은 환각 정확매칭용)
+        final String collapsed = lowerClean.replaceAll(' ', '');
+
+        // ① 길이 무관 강제 차단: 전형적 유튜브/자막 환각구 (부분 포함만 돼도 차단)
+        const List<String> hardGhosts = [
+          'thank you so much for watching',
+          'thank you for watching',
           'thanks for watching',
+          'please subscribe',
           'subtitles by',
-          'you',
-          'yeah',
-          'okay',
-          'i',
-          'also',
-          'mbc',
           'share this video',
           '시청해 주셔서',
           '시청해주셔서',
-          '감사합니다',
-          '구독과 좋아요'
+          '구독과 좋아요',
+          '감사합니다 시청',
         ];
-        bool isGhost = ghostWords.any(
-                (ghost) => lowerClean.contains(ghost.replaceAll(' ', ''))) &&
-            transcript.length < 30;
+        final bool isHardGhost = hardGhosts.any((g) => lowerRaw.contains(g));
 
-        if (lowerClean.isEmpty || isGhost || transcript.length <= 2) {
+        // ② 짧은 환각: 30자 미만 + 전체가 환각어와 정확히 일치할 때만 차단
+        //    (contains 부분매칭의 오탐 방지 — "I am at home"의 'i' 같은 오탐 제거)
+        const List<String> shortGhosts = [
+          'thank you',
+          'yeah',
+          'okay',
+          'mbc',
+          'you',
+          'also',
+          'i',
+          '감사합니다',
+        ];
+        final bool isShortGhost = trimmed.length < 30 &&
+            shortGhosts.any((g) => collapsed == g.replaceAll(' ', ''));
+
+        if (lowerClean.isEmpty ||
+            isHardGhost ||
+            isShortGhost ||
+            trimmed.length <= 2) {
           await _handleContextualError();
           return;
         }
