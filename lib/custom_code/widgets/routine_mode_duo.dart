@@ -54,6 +54,32 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   // ============================================================================
   String _openAiKey = "";
   bool _isConversationActive = false;
+
+  // 🆕 [PTT] Duo 무전기 상태기계
+  // idle: 대기 / recording: 녹음 중 / processing: STT·번역 중 / playing: TTS 재생 중 / cooldown: 재생 후 짧은 잠금
+  String _duoState = 'idle';
+  // 🆕 [PTT 에코 차단] 최근 앱이 생성/표시한 문장 보관 (target/original 혼합, 최대 5개)
+  final List<String> _recentGenerated = [];
+  void _rememberGenerated(String s) {
+    final t = s.trim().toLowerCase();
+    if (t.isEmpty) return;
+    _recentGenerated.add(t);
+    while (_recentGenerated.length > 5) _recentGenerated.removeAt(0);
+  }
+  bool _looksLikeEcho(String transcript) {
+    final t = transcript.trim().toLowerCase();
+    if (t.length < 4) return false;
+    for (final g in _recentGenerated) {
+      if (g.isEmpty) continue;
+      if (g == t || g.contains(t) || t.contains(g)) return true;
+    }
+    return false;
+  }
+  void _setDuoState(String s) {
+    if (!mounted) return;
+    setState(() => _duoState = s);
+  }
+
   bool _isPartnerOnline = false;
   bool _isExiting = false;
   int _turnCounter = 0;
@@ -263,8 +289,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   }
 
   Future<void> _startWhisperRecording() async {
-    if (!_isConversationActive || _openAiKey.isEmpty) return;
-    // 🆕 중복 시작 방지 (내 턴 종료와 상대 메시지 처리가 동시에 재녹음을 호출하는 레이스 차단)
+    if (_openAiKey.isEmpty) return;
+    // 🆕 [PTT] idle 상태가 아니면 시작 금지 (TTS·처리·쿨다운·이미 녹음 중 차단)
+    if (_duoState != 'idle') return;
+    if (_isTtsActive || _isDrainingIncoming) return;
     if (await _audioRecorder.isRecording()) return;
     if (await _audioRecorder.hasPermission()) {
       _hasSpoken = false;
@@ -277,7 +305,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
             const RecordConfig(
                 encoder: AudioEncoder.aacLc, sampleRate: 16000, numChannels: 1),
             path: path);
+        _setDuoState('recording');
         _silenceTimer?.cancel();
+        // 침묵 자동 종료만 유지(누른 채로 말 끝나면 자동 전송). 자동 "재시작"은 제거.
         _silenceTimer =
             Timer.periodic(const Duration(milliseconds: 100), (timer) async {
           if (await _audioRecorder.isRecording()) {
@@ -290,17 +320,20 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
               if (_hasSpoken && _silenceCounter >= 15) {
                 timer.cancel();
                 _stopAndSendToWhisper();
-              } else if (!_hasSpoken && _silenceCounter >= 50) {
+              } else if (!_hasSpoken && _silenceCounter >= 80) {
+                // 말이 한 번도 없으면 그냥 종료(재시작 안 함)
                 timer.cancel();
                 await _audioRecorder.stop();
-                _startWhisperRecording();
+                _setDuoState('idle');
               }
             }
           } else {
             timer.cancel();
           }
         });
-      } catch (e) {}
+      } catch (e) {
+        _setDuoState('idle');
+      }
     }
   }
 
@@ -312,35 +345,27 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   Future<void> _stopAndSendToWhisper() async {
     _silenceTimer?.cancel();
     _resetIdleTimer();
+    _setDuoState('processing');
     final path = await _audioRecorder.stop();
     if (path == null) {
-      if (_isConversationActive) _startWhisperRecording();
+      _setDuoState('idle');
       return;
     }
-
     try {
       Uri uri = Uri.parse('https://api.openai.com/v1/audio/transcriptions');
       var request = http.MultipartRequest('POST', uri);
       request.headers['Authorization'] = 'Bearer $_openAiKey';
       request.fields['model'] = 'whisper-1';
       request.files.add(await http.MultipartFile.fromPath('file', path));
-
-      // ⏱️ 타임아웃 10초 적용
       var response = await request.send().timeout(const Duration(seconds: 10));
       var responseData = await response.stream.bytesToString();
-
       if (response.statusCode == 200) {
         String transcript = jsonDecode(responseData)['text'] ?? "";
         final String trimmed = transcript.trim();
         final String lowerRaw = trimmed.toLowerCase();
-        // 영문/한글/공백만 남긴 정규화 문자열
-        final String lowerClean = lowerRaw
-            .replaceAll(RegExp(r'[^\w\s가-힣]'), '')
-            .trim();
-        // 공백까지 제거한 비교용 문자열 (짧은 환각 정확매칭용)
+        final String lowerClean =
+            lowerRaw.replaceAll(RegExp(r'[^\w\s가-힣]'), '').trim();
         final String collapsed = lowerClean.replaceAll(' ', '');
-
-        // ① 길이 무관 강제 차단: 전형적 유튜브/자막 환각구 (부분 포함만 돼도 차단)
         const List<String> hardGhosts = [
           'thank you so much for watching',
           'thank you for watching',
@@ -354,46 +379,36 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
           '감사합니다 시청',
         ];
         final bool isHardGhost = hardGhosts.any((g) => lowerRaw.contains(g));
-
-        // ② 짧은 환각: 30자 미만 + 전체가 환각어와 정확히 일치할 때만 차단
-        //    (contains 부분매칭의 오탐 방지 — "I am at home"의 'i' 같은 오탐 제거)
         const List<String> shortGhosts = [
-          'thank you',
-          'yeah',
-          'okay',
-          'mbc',
-          'you',
-          'also',
-          'i',
-          '감사합니다',
+          'thank you','yeah','okay','mbc','you','also','i','감사합니다',
         ];
         final bool isShortGhost = trimmed.length < 30 &&
             shortGhosts.any((g) => collapsed == g.replaceAll(' ', ''));
-
+        // 🆕 에코 차단: 최근 앱이 만든 문장과 거의 같으면 버림
+        final bool isEcho = _looksLikeEcho(trimmed);
         if (lowerClean.isEmpty ||
             isHardGhost ||
             isShortGhost ||
+            isEcho ||
             trimmed.length <= 2) {
-          await _handleContextualError();
+          _setDuoState('idle'); // 조용히 대기 복귀(자동 재녹음 금지)
           return;
         }
-
-        if (transcript.trim().isNotEmpty) {
-          _processRelayPipeline(transcript);
+        if (trimmed.isNotEmpty) {
+          await _processRelayPipeline(trimmed);
         } else {
-          if (_isConversationActive) _startWhisperRecording();
+          _setDuoState('idle');
         }
       } else {
-        if (_isConversationActive) _startWhisperRecording();
+        _setDuoState('idle');
       }
     } catch (e) {
-      if (_isConversationActive) _startWhisperRecording();
+      _setDuoState('idle');
     }
   }
 
-  // 💡 STT 실패/환각 시 조용히 재녹음만 (AI 사과 음성 없음 — 통역기에는 AI 개입 금지)
   Future<void> _handleContextualError() async {
-    if (_isConversationActive) _startWhisperRecording();
+    _setDuoState('idle'); // AI 사과 없음, 자동 재녹음 없음 — 조용히 대기 복귀
   }
 
   Future<Uint8List?> _fetchTTSBytes(String text, String voice) async {
@@ -476,15 +491,17 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     await _saveHistoryMessage(tgt, org, 'HOST');
 
     // 5. 내 타겟 소리 재생 (직렬화)
+    _rememberGenerated(tgt);
+    _rememberGenerated(org);
     final Uint8List? bytes = await _fetchTTSBytes(tgt, _myVoice());
     if (bytes != null && _isConversationActive && _turnCounter == currentTurnId) {
+      _setDuoState('playing');
       await _playSerialized(bytes);
     }
-
-    // 6. 마이크 다시 켜기
-    if (_isConversationActive && _turnCounter == currentTurnId) {
-      _startWhisperRecording();
-    }
+    // 🆕 [PTT] 자동 재녹음 제거 — 쿨다운 후 대기 상태로 복귀
+    _setDuoState('cooldown');
+    await Future.delayed(const Duration(milliseconds: 800));
+    _setDuoState('idle');
   }
 
   // 🆕 [채널 업로드] 내 원문을 duo_sessions/{roomId}/messages 에 기록
@@ -568,9 +585,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
 
     // 상대 발화를 들려주는 동안 내 녹음 일시 정지 (스피커 음성이 마이크에 새는 것 방지)
     _silenceTimer?.cancel();
-    try {
-      await _audioRecorder.stop();
-    } catch (_) {}
+    try { await _audioRecorder.stop(); } catch (_) {}
+    _setDuoState('processing');
 
     final String myTarget = _myTarget();
     final String myNative = _myNative();
@@ -603,15 +619,17 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     await _saveHistoryMessage(tgt, org, 'SYSTEM');
 
     // 내 타겟 소리로 재생 (직렬화)
+    _rememberGenerated(tgt);
+    _rememberGenerated(org);
     final Uint8List? bytes = await _fetchTTSBytes(tgt, _myVoice());
     if (bytes != null && _isConversationActive && !_isExiting) {
+      _setDuoState('playing');
       await _playSerialized(bytes);
     }
-
-    // 내 녹음 재개
-    if (_isConversationActive && !_isExiting) {
-      _startWhisperRecording();
-    }
+    // 🆕 [PTT] 상대 발화 재생 후에도 자동 재녹음 금지 — 쿨다운 후 대기 복귀
+    _setDuoState('cooldown');
+    await Future.delayed(const Duration(milliseconds: 800));
+    _setDuoState('idle');
   }
 
 // ============================================================================
@@ -675,15 +693,40 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     });
   }
 
-  void _handleMicTap() {
+  // 🆕 [PTT] 버튼 누름 — 녹음 시작
+  void _onPttStart() {
     _resetIdleTimer();
-    setState(() => _isConversationActive = !_isConversationActive);
-    if (_isConversationActive) {
+    if (!_isConversationActive) {
+      setState(() => _isConversationActive = true);
+    }
+    // idle일 때만 시작(재생/처리/쿨다운 중이면 무시)
+    if (_duoState == 'idle') {
       _startWhisperRecording();
-    } else {
+    }
+  }
+
+  // 🆕 [PTT] 버튼 뗌 — 녹음 종료 후 전송
+  void _onPttEnd() {
+    _resetIdleTimer();
+    if (_duoState == 'recording') {
       _silenceTimer?.cancel();
-      _cancelAudio();
-      _turnCounter++;
+      _stopAndSendToWhisper();
+    }
+  }
+
+  // 🆕 [PTT] 버튼 상태별 표시 문구
+  String _pttLabel() {
+    switch (_duoState) {
+      case 'recording':
+        return 'Release to send';
+      case 'processing':
+        return 'Processing…';
+      case 'playing':
+        return 'Playing…';
+      case 'cooldown':
+        return '…';
+      default:
+        return 'Hold to talk';
     }
   }
 
@@ -885,7 +928,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
           _isPartnerOnline = true;
         });
       }
-      _startWhisperRecording();
+      // 🆕 [PTT] 세션만 열고 녹음은 버튼으로 시작 — 자동 녹음 제거
     } catch (e) {
       debugPrint('[Duo] Guest join error: $e');
       if (mounted) {
@@ -922,7 +965,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
           _isPartnerOnline = partnerJoined;
           if (shouldStartRecording) _isConversationActive = true;
         });
-        if (shouldStartRecording) _startWhisperRecording();
+        // 🆕 [PTT] 입장 시 자동 녹음 제거 — 버튼으로만 시작
         // 게스트 퇴장 → 호스트 강제 종료 (1:1 대칭 종료 모델)
         if (guestJustLeft) _handleAutoSaveAndExit();
       }
@@ -1156,41 +1199,42 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   }
 
   Widget _buildControlArea(double bottomPadding) {
+    final bool isRec = _duoState == 'recording';
+    final bool isBusy = _duoState == 'processing' ||
+        _duoState == 'playing' ||
+        _duoState == 'cooldown';
+    final Color accent = isRec
+        ? Colors.redAccent
+        : (isBusy ? Colors.white38 : const Color(0xFF2563EB));
     return Container(
       padding: EdgeInsets.fromLTRB(24, 16, 24, bottomPadding),
       decoration: const BoxDecoration(color: Color(0xFF121212)),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Text("Duo Connect",
-              style: TextStyle(
+          Text(_pttLabel(),
+              style: const TextStyle(
                   color: Colors.white54,
-                  fontSize: 20,
+                  fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  letterSpacing: 1.5)),
+                  letterSpacing: 1.0)),
           GestureDetector(
-            onTap: _handleMicTap,
+            onTapDown: (_) => _onPttStart(),
+            onTapUp: (_) => _onPttEnd(),
+            onTapCancel: () => _onPttEnd(),
+            onLongPressStart: (_) => _onPttStart(),
+            onLongPressEnd: (_) => _onPttEnd(),
             child: Container(
-                width: 64,
-                height: 64,
+                width: 72,
+                height: 72,
                 decoration: BoxDecoration(
-                    color: _isConversationActive
-                        ? Colors.redAccent.withOpacity(0.15)
-                        : const Color(0xFF2563EB).withOpacity(0.15),
+                    color: accent.withOpacity(0.15),
                     shape: BoxShape.circle,
-                    border: Border.all(
-                        color: _isConversationActive
-                            ? Colors.redAccent
-                            : const Color(0xFF2563EB),
-                        width: 2)),
+                    border: Border.all(color: accent, width: 2.5)),
                 child: Icon(
-                    _isConversationActive
-                        ? Icons.stop_rounded
-                        : Icons.mic_rounded,
-                    color: _isConversationActive
-                        ? Colors.redAccent
-                        : const Color(0xFF2563EB),
-                    size: 36)),
+                    isRec ? Icons.mic_rounded : Icons.mic_none_rounded,
+                    color: accent,
+                    size: 38)),
           ),
         ],
       ),
@@ -1272,7 +1316,8 @@ class DuoBrain {
           "2. \"original\" = the utterance translated into $myNativeLang.\n"
           "3. If the utterance is already in one of these languages, just clean it up (fix spacing/typos) for that field.\n"
           "4. Preserve tone, intent, names, and numbers exactly. Do not add or remove meaning.\n"
-          "5. Output strict JSON only, nothing else.\n\n"
+          "5. If the utterance is unclear or empty, output an empty string for both fields. Never invent content.\n"
+          "6. Output strict JSON only, nothing else.\n\n"
           "Output format:\n"
           "{\n"
           "  \"target\": \"<utterance in $myTargetLang>\",\n"
