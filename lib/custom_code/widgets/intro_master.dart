@@ -285,6 +285,7 @@ class _IntroMasterState extends State<IntroMaster> {
       color: Colors.black,
       child: Scaffold(
         backgroundColor: Colors.transparent,
+        resizeToAvoidBottomInset: false,
         body: isLoading
             ? const Center(
                 child: CircularProgressIndicator(color: Colors.amber))
