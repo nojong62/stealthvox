@@ -1,0 +1,353 @@
+Launching lib\main.dart on SM S931N in debug mode...
+Running Gradle task 'assembleDebug'...                            219.6s
+√ Built build\app\outputs\flutter-apk\app-debug.apk
+Installing build\app\outputs\flutter-apk\app-debug.apk...           5.8s
+D/FlutterJNI(27559): Beginning load of flutter...
+D/FlutterJNI(27559): flutter (null) was loaded normally!
+I/flutter (27559): [IMPORTANT:flutter/shell/platform/android/android_context_vk_impeller.cc(62)] Using the Impeller rendering backend (Vulkan).
+D/FlutterRenderer(27559): Width is zero. 0,0
+D/FlutterRenderer(27559): Width is zero. 0,0
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/flutter (27559): [Intro] isGuestSession=false, pendingInviteType=, duoRoomId=
+Syncing files to device SM S931N...                             
+D/ProfileInstaller(27559): Installing profile for com.aienglishpractice.stealthvox
+Syncing files to device SM S931N...                                464ms
+
+Flutter run key commands.
+r Hot reload. 
+R Hot restart.
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+A Dart VM Service on SM S931N is available at: http://127.0.0.1:58770/hmaob6Xpn9I=/
+The Flutter DevTools debugger and profiler on SM S931N is available at: http://127.0.0.1:58770/hmaob6Xpn9I=/devtools/?uri=ws://127.0.0.1:58770/hmaob6Xpn9I=/ws
+D/[Purchases] - DEBUG(27559): API request started: POST /v1/diagnostics
+D/[Purchases] - DEBUG(27559): API request completed with status: POST /v1/diagnostics 304
+I/VRI[MainActivity]@895d0f0(27559): call setFrameRateCategory for touch hint category=high hint, reason=touch, vri=VRI[MainActivity]@895d0f0
+W/tice.stealthvox(27559): userfaultfd: MOVE ioctl seems unsupported: Connection timed out
+I/InputMethodManager_LC(27559): showSoftInput(View,I)
+I/ImeTracker(27559): com.aienglishpractice.stealthvox:2bcaf3d3: onRequestShow at ORIGIN_CLIENT reason SHOW_SOFT_INPUT fromUser false
+I/InputMethodManager_LC(27559): ssi(): flags=0 view=com.aienglishpractice.stealthvox reason=SHOW_SOFT_INPUT
+I/InputMethodManager_LC(27559): ssi() view is not EditText
+D/InputMethodManagerUtils(27559): startInputInner - Id : 0
+I/InputMethodManager(27559): startInputInner - IInputMethodManagerGlobalInvoker.startInputOrWindowGainedFocus
+D/InsetsController(27559): show(ime(), fromIme=false)
+D/InsetsController(27559): Setting requestedVisibleTypes to -1 (was -9)
+I/InsetsController(27559): setRequestedVisibleTypes: visible=true, mask=ime, host=com.aienglishpractice.stealthvox/com.aienglishpractice.stealthvox.MainActivity, from=android.view.InsetsController.controlAnimationUnchecked:1604 android.view.InsetsController.applyAnimation:2416 android.view.InsetsController.applyAnimation:2343 android.view.InsetsController.show:1422 android.view.inputmethod.InputMethodManager.showSoftInput:2659 android.view.inputmethod.InputMethodManager.showSoftInput:2571 android.view.inputmethod.InputMethodManager.showSoftInput:2563 android.view.inputmethod.InputMethodManager.showSoftInput:2491 io.flutter.plugin.editing.TextInputPlugin.showTextInput:433 io.flutter.plugin.editing.TextInputPlugin$2.show:114 
+D/InputTransport(27559): Input channel constructed: 'ClientS', fd=162
+I/VRI[MainActivity]@895d0f0(27559): handleResized, frames=ClientWindowFrames{frame=[0,0][1080,2340] display=[0,0][1080,2340] parentFrame=[0,0][0,0]} displayId=0 dragResizing=false compatScale=1.0 frameChanged=false attachedFrameChanged=false configChanged=false displayChanged=false compatScaleChanged=false dragResizingChanged=false
+I/AssistStructure(27559): Flattened final assist data: 516 bytes, containing 1 windows, 3 views
+D/InputConnectionAdaptor(27559): The input method toggled cursor monitoring on
+I/InsetsController(27559): onStateChanged: host=com.aienglishpractice.stealthvox/com.aienglishpractice.stealthvox.MainActivity, from=android.view.ViewRootImpl.onInsetsStateChanged:3026, state=InsetsState: {mDisplayFrame=Rect(0, 0 - 1080, 2340), mDisplayCutout=DisplayCutout{insets=Rect(0, 91 - 0, 0) waterfall=Insets{left=0, top=0, right=0, bottom=0} boundingRect={Bounds=[Rect(0, 0 - 0, 0), Rect(511, 0 - 569, 91), Rect(0, 0 - 0, 0), Rect(0, 0 - 0, 0)]} cutoutPathParserInfo={CutoutPathParserInfo{displayWidth=1080 displayHeight=2340 physicalDisplayWidth=1080 physicalDisplayHeight=2340 density={3.0} cutoutSpec={M 0,0 H -9.666666666666667 V 30.33333333333333 H 9.666666666666667 V 0 H 0 Z @dp} rotation={0} scale={1.0} physicalPixelDisplaySizeRatio={1.0}}} sideOverrides={}}, mRoundedCorners=RoundedCorners{[RoundedCorner{position=TopLeft, radius=115, center=Point(115, 115)}, RoundedCorner{position=TopRight, radius=115, center=Point(965, 115)}, RoundedCorner{position=BottomRight, radius=115, center=Point(965, 2225)}, RoundedCorner{position=BottomLeft, radius=115, center=Point(115, 2225)}]}  mRoundedCornerFrame=Rect(0, 0 - 1080, 2340), mPrivacyIndicatorBounds=PrivacyIndicatorBounds {static bounds=Rect(931, 0 - 1080, 91) rotation=0}, mDisplayShape=DisplayShape{ spec=-311912193 displayWidth=1080 displayHeight=2340 physicalPixelDisplaySizeRatio=1.0 rotation=0 offsetX=0 offsetY=0 scale=1.0}, mSources= { InsetsSource: {bc720000 mType=statusBars mFrame=[0,0][1080,91] mVisible=true mFlags= mSideHint=TOP mBoundingRects=null}, InsetsSource: {bc720005 mType=mandatorySystemGestures mFrame=[0,0][1080,132] mVisible=true mFlags= mSideHint=TOP mBoundingRects=null}, InsetsSource: {bc720006 mType=tappableElement mFrame=[0,0][1080,91] mVisible=true mFlags= mSideHint=TOP mBoundingRects=null}, InsetsSource: {c0770001 mType=navigationBars mFrame=[0,2178][1080,2340] mVisible=true mFlags= mSideHint=BOTTOM mBoundingRects=null}, InsetsSource: {c0770004 mType=systemGestures mFrame=[0,0][0,0] mVisible=true mFlags= mSideHint=NONE mBoundingRects=null}, InsetsSource: {c0770005 mType=mandatorySystemGestures mFrame=[0,2178][1080,2340] mVisible=true mFlags= mSideHint=BOTTOM mBoundingRects=null}, InsetsSource: {c0770006 mType=tappableElement mFrame=[0,2178][1080,2340] mVisible=true mFlags= mSideHint=BOTTOM mBoundingRects=null}, InsetsSource: {c0770024 mType=systemGestures mFrame=[0,0][0,0] mVisible=true mFlags= mSideHint=NONE mBoundingRects=null}, InsetsSource: {3 mType=ime mFrame=[0,1280][1080,2340] mVisible=true mFlags= mSideHint=BOTTOM mBoundingRects=null}, InsetsSource: {27 mType=displayCutout mFrame=[0,0][1080,91] mVisible=true mFlags= mSideHint=TOP mBoundingRects=null} }
+I/VRI[MainActivity]@895d0f0(27559): handleResized, frames=ClientWindowFrames{frame=[0,0][1080,2340] display=[0,0][1080,2340] parentFrame=[0,0][0,0]} displayId=0 dragResizing=false compatScale=1.0 frameChanged=false attachedFrameChanged=false configChanged=false displayChanged=false compatScaleChanged=false dragResizingChanged=false
+I/InsetsController(27559): onStateChanged: host=com.aienglishpractice.stealthvox/com.aienglishpractice.stealthvox.MainActivity, from=android.view.ViewRootImpl.onInsetsStateChanged:3026, state=InsetsState: {mDisplayFrame=Rect(0, 0 - 1080, 2340), mDisplayCutout=DisplayCutout{insets=Rect(0, 91 - 0, 0) waterfall=Insets{left=0, top=0, right=0, bottom=0} boundingRect={Bounds=[Rect(0, 0 - 0, 0), Rect(511, 0 - 569, 91), Rect(0, 0 - 0, 0), Rect(0, 0 - 0, 0)]} cutoutPathParserInfo={CutoutPathParserInfo{displayWidth=1080 displayHeight=2340 physicalDisplayWidth=1080 physicalDisplayHeight=2340 density={3.0} cutoutSpec={M 0,0 H -9.666666666666667 V 30.33333333333333 H 9.666666666666667 V 0 H 0 Z @dp} rotation={0} scale={1.0} physicalPixelDisplaySizeRatio={1.0}}} sideOverrides={}}, mRoundedCorners=RoundedCorners{[RoundedCorner{position=TopLeft, radius=115, center=Point(115, 115)}, RoundedCorner{position=TopRight, radius=115, center=Point(965, 115)}, RoundedCorner{position=BottomRight, radius=115, center=Point(965, 2225)}, RoundedCorner{position=BottomLeft, radius=115, center=Point(115, 2225)}]}  mRoundedCornerFrame=Rect(0, 0 - 1080, 2340), mPrivacyIndicatorBounds=PrivacyIndicatorBounds {static bounds=Rect(931, 0 - 1080, 91) rotation=0}, mDisplayShape=DisplayShape{ spec=-311912193 displayWidth=1080 displayHeight=2340 physicalPixelDisplaySizeRatio=1.0 rotation=0 offsetX=0 offsetY=0 scale=1.0}, mSources= { InsetsSource: {bc720000 mType=statusBars mFrame=[0,0][1080,91] mVisible=true mFlags= mSideHint=TOP mBoundingRects=null}, InsetsSource: {bc720005 mType=mandatorySystemGestures mFrame=[0,0][1080,132] mVisible=true mFlags= mSideHint=TOP mBoundingRects=null}, InsetsSource: {bc720006 mType=tappableElement mFrame=[0,0][1080,91] mVisible=true mFlags= mSideHint=TOP mBoundingRects=null}, InsetsSource: {c0770001 mType=navigationBars mFrame=[0,2178][1080,2340] mVisible=true mFlags= mSideHint=BOTTOM mBoundingRects=null}, InsetsSource: {c0770004 mType=systemGestures mFrame=[0,0][0,0] mVisible=true mFlags= mSideHint=NONE mBoundingRects=null}, InsetsSource: {c0770005 mType=mandatorySystemGestures mFrame=[0,2178][1080,2340] mVisible=true mFlags= mSideHint=BOTTOM mBoundingRects=null}, InsetsSource: {c0770006 mType=tappableElement mFrame=[0,2178][1080,2340] mVisible=true mFlags= mSideHint=BOTTOM mBoundingRects=null}, InsetsSource: {c0770024 mType=systemGestures mFrame=[0,0][0,0] mVisible=true mFlags= mSideHint=NONE mBoundingRects=null}, InsetsSource: {3 mType=ime mFrame=[0,1280][1080,2340] mVisible=true mFlags= mSideHint=BOTTOM mBoundingRects=null}, InsetsSource: {27 mType=displayCutout mFrame=[0,0][1080,91] mVisible=true mFlags= mSideHint=TOP mBoundingRects=null} }
+I/InsetsController(27559): controlAnimationUncheckedInner: Added types=ime, animType=0, host=com.aienglishpractice.stealthvox/com.aienglishpractice.stealthvox.MainActivity, from=android.view.InsetsController.controlAnimationUnchecked:1608 android.view.InsetsController.applyAnimation:2416 android.view.InsetsController.applyAnimation:2343 
+I/BLASTBufferQueue_Java(27559): update, w= 1080 h= 2340 mName = VRI[MainActivity]@895d0f0 mNativeObject= 0xb40000778311d490 sc.mNativeObject= 0xb4000077d30cf550 format= -3 caller= android.view.ViewRootImpl.updateBlastSurfaceIfNeeded:3574 android.view.ViewRootImpl.relayoutWindow:11685 android.view.ViewRootImpl.performTraversals:4804 android.view.ViewRootImpl.doTraversal:3924 android.view.ViewRootImpl$TraversalRunnable.run:12903 android.view.Choreographer$CallbackRecord.run:1901 
+I/VRI[MainActivity]@895d0f0(27559): Relayout returned: old=(0,0,1080,2340) new=(0,0,1080,2340) relayoutAsync=true req=(1080,2340)0 dur=0 res=0x0 s={true 0xb4000077130fda40} ch=false seqId=0
+W/InteractionJankMonitor(27559): Initializing without READ_DEVICE_CONFIG permission. enabled=false, interval=1, missedFrameThreshold=3, frameTimeThreshold=64, package=com.aienglishpractice.stealthvox
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): registerCallbackForPendingTransactions
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb4000076730ff050 mBlastBufferQueue=0xb40000778311d490 fn= 4 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673148a10 mBlastBufferQueue=0xb40000778311d490 fn= 4 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.ViewRootImpl$10.onFrameDraw:6536 android.view.ViewRootImpl$4.onFrameDraw:2489 android.view.ThreadedRenderer$1.onFrameDraw:718 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673125150 mBlastBufferQueue=0xb40000778311d490 fn= 5 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313aa10 mBlastBufferQueue=0xb40000778311d490 fn= 6 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673140890 mBlastBufferQueue=0xb40000778311d490 fn= 7 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+
+══╡ EXCEPTION CAUGHT BY RENDERING LIBRARY ╞═════════════════════════════════════════════════════════
+The following assertion was thrown during layout:
+A RenderFlex overflowed by 12 pixels on the bottom.
+
+The relevant error-causing widget was:
+  Column Column:file:///F:/flutter_project/stealth_vox/lib/intro/intro_widget.dart:57:15
+
+To inspect this widget in Flutter DevTools, visit:
+http://127.0.0.1:58770/hmaob6Xpn9I=/devtools//#/inspector?uri=http%3A%2F%2F127.0.0.1%3A58770%2Fhmaob6Xpn9I%3D%2F&inspectorRef=inspector-0
+
+The overflowing RenderFlex has an orientation of Axis.vertical.
+The edge of the RenderFlex that is overflowing has been marked in the rendering with a yellow and
+black striped pattern. This is usually caused by the contents being too big for the RenderFlex.
+Consider applying a flex factor (e.g. using an Expanded widget) to force the children of the
+RenderFlex to fit within the available space instead of being sized to their natural size.
+This is considered an error condition because it indicates that there is content that cannot be
+seen. If the content is legitimately bigger than the available space, consider clipping it with a
+ClipRect widget before putting it in the flex, or using a scrollable container rather than a Flex,
+like a ListView.
+The specific RenderFlex in question is: RenderFlex#038fd relayoutBoundary=up1 OVERFLOWING:
+  needs compositing
+  creator: Column ← KeyedSubtree-[GlobalKey#40271] ← _BodyBuilder ← MediaQuery ←
+    LayoutId-[<_ScaffoldSlot.body>] ← CustomMultiChildLayout ← _ActionsScope ← Actions ←
+    AnimatedBuilder ← DefaultTextStyle ← AnimatedDefaultTextStyle ← _InkFeatures-[GlobalKey#9c834 ink
+    renderer] ← ⋯
+  parentData: offset=Offset(0.0, 0.0); id=_ScaffoldSlot.body (can use size)
+  constraints: BoxConstraints(0.0<=w<=320.0, 0.0<=h<=681.8)
+  size: Size(320.0, 681.8)
+  direction: vertical
+  mainAxisAlignment: start
+  mainAxisSize: max
+  crossAxisAlignment: center
+  verticalDirection: down
+  spacing: 0.0
+◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤◢◤
+════════════════════════════════════════════════════════════════════════════════════════════════════
+
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313ec90 mBlastBufferQueue=0xb40000778311d490 fn= 8 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313af50 mBlastBufferQueue=0xb40000778311d490 fn= 9 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673139350 mBlastBufferQueue=0xb40000778311d490 fn= 10 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313bb90 mBlastBufferQueue=0xb40000778311d490 fn= 11 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313c7d0 mBlastBufferQueue=0xb40000778311d490 fn= 12 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313b650 mBlastBufferQueue=0xb40000778311d490 fn= 13 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673136250 mBlastBufferQueue=0xb40000778311d490 fn= 14 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313c990 mBlastBufferQueue=0xb40000778311d490 fn= 15 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb4000076731396d0 mBlastBufferQueue=0xb40000778311d490 fn= 16 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313c290 mBlastBufferQueue=0xb40000778311d490 fn= 17 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb4000076731334d0 mBlastBufferQueue=0xb40000778311d490 fn= 18 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313b2d0 mBlastBufferQueue=0xb40000778311d490 fn= 19 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673142110 mBlastBufferQueue=0xb40000778311d490 fn= 20 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313b810 mBlastBufferQueue=0xb40000778311d490 fn= 21 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673137750 mBlastBufferQueue=0xb40000778311d490 fn= 22 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673137050 mBlastBufferQueue=0xb40000778311d490 fn= 23 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313abd0 mBlastBufferQueue=0xb40000778311d490 fn= 24 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673134f10 mBlastBufferQueue=0xb40000778311d490 fn= 25 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673138550 mBlastBufferQueue=0xb40000778311d490 fn= 26 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673134810 mBlastBufferQueue=0xb40000778311d490 fn= 27 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767310af10 mBlastBufferQueue=0xb40000778311d490 fn= 28 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313a310 mBlastBufferQueue=0xb40000778311d490 fn= 29 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673135d10 mBlastBufferQueue=0xb40000778311d490 fn= 30 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673137ad0 mBlastBufferQueue=0xb40000778311d490 fn= 31 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673138a90 mBlastBufferQueue=0xb40000778311d490 fn= 32 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767311fd50 mBlastBufferQueue=0xb40000778311d490 fn= 33 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb4000076730f4310 mBlastBufferQueue=0xb40000778311d490 fn= 34 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673119ed0 mBlastBufferQueue=0xb40000778311d490 fn= 35 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673123e10 mBlastBufferQueue=0xb40000778311d490 fn= 36 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767311d350 mBlastBufferQueue=0xb40000778311d490 fn= 37 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313d090 mBlastBufferQueue=0xb40000778311d490 fn= 38 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313d950 mBlastBufferQueue=0xb40000778311d490 fn= 39 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb4000076731357d0 mBlastBufferQueue=0xb40000778311d490 fn= 40 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313ad90 mBlastBufferQueue=0xb40000778311d490 fn= 41 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb4000076731406d0 mBlastBufferQueue=0xb40000778311d490 fn= 42 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313cb50 mBlastBufferQueue=0xb40000778311d490 fn= 43 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313cd10 mBlastBufferQueue=0xb40000778311d490 fn= 44 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+I/InsetsController(27559): cancelAnimation: types=ime, animType=0, host=com.aienglishpractice.stealthvox/com.aienglishpractice.stealthvox.MainActivity, from=android.view.InsetsController.notifyFinished:2006 android.view.InsetsAnimationControlImpl.applyChangeInsets:335 android.view.InsetsController.lambda$new$3:957 
+I/ImeTracker(27559): com.aienglishpractice.stealthvox:2bcaf3d3: onShown
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313c450 mBlastBufferQueue=0xb40000778311d490 fn= 45 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+I/VRI[MainActivity]@895d0f0(27559): call setFrameRateCategory for touch hint category=no preference, reason=boost timeout, vri=VRI[MainActivity]@895d0f0
+I/TRuntime.CctTransportBackend(27559): Making request to: https://firebaselogging.googleapis.com/v0cc/log/batch?format=json_proto3
+I/TRuntime.CctTransportBackend(27559): Status Code: 200
+I/VRI[MainActivity]@895d0f0(27559): call setFrameRateCategory for touch hint category=high hint, reason=touch, vri=VRI[MainActivity]@895d0f0
+I/InputMethodManager_LC(27559): showSoftInput(View,I)
+I/ImeTracker(27559): com.aienglishpractice.stealthvox:cb39a0eb: onRequestShow at ORIGIN_CLIENT reason SHOW_SOFT_INPUT fromUser false
+I/InputMethodManager_LC(27559): ssi(): flags=0 view=com.aienglishpractice.stealthvox reason=SHOW_SOFT_INPUT
+I/InputMethodManager_LC(27559): ssi() view is not EditText
+D/InsetsController(27559): show(ime(), fromIme=false)
+I/ImeTracker(27559): com.aienglishpractice.stealthvox:cb39a0eb: onCancelled at PHASE_CLIENT_APPLY_ANIMATION
+I/VRI[MainActivity]@895d0f0(27559): call setFrameRateCategory for touch hint category=no preference, reason=boost timeout, vri=VRI[MainActivity]@895d0f0
+D/InsetsController(27559): Setting requestedVisibleTypes to -9 (was -1)
+I/InsetsController(27559): setRequestedVisibleTypes: visible=false, mask=ime, host=com.aienglishpractice.stealthvox/com.aienglishpractice.stealthvox.MainActivity, from=android.view.InsetsController.controlAnimationUnchecked:1604 android.view.InsetsController.controlWindowInsetsAnimation:1584 android.view.ImeBackAnimationController.onBackStarted:101 android.window.WindowOnBackInvokedDispatcher$OnBackInvokedCallbackWrapper.lambda$onBackStarted$0:551 android.window.WindowOnBackInvokedDispatcher$OnBackInvokedCallbackWrapper.$r8$lambda$4ToXODqn8sufRph7IG5pjjhTGhE:0 android.window.WindowOnBackInvokedDispatcher$OnBackInvokedCallbackWrapper$$ExternalSyntheticLambda3.run:0 android.os.Handler.handleCallback:995 android.os.Handler.dispatchMessage:103 android.os.Looper.loopOnce:273 android.os.Looper.loop:363 
+I/InsetsController(27559): controlAnimationUncheckedInner: Added types=ime, animType=2, host=com.aienglishpractice.stealthvox/com.aienglishpractice.stealthvox.MainActivity, from=android.view.InsetsController.controlAnimationUnchecked:1608 android.view.InsetsController.controlWindowInsetsAnimation:1584 android.view.ImeBackAnimationController.onBackStarted:101 
+I/BLASTBufferQueue_Java(27559): update, w= 1080 h= 2340 mName = VRI[MainActivity]@895d0f0 mNativeObject= 0xb40000778311d490 sc.mNativeObject= 0xb4000077d30cf550 format= -3 caller= android.view.ViewRootImpl.updateBlastSurfaceIfNeeded:3574 android.view.ViewRootImpl.relayoutWindow:11685 android.view.ViewRootImpl.performTraversals:4804 android.view.ViewRootImpl.doTraversal:3924 android.view.ViewRootImpl$TraversalRunnable.run:12903 android.view.Choreographer$CallbackRecord.run:1901 
+I/VRI[MainActivity]@895d0f0(27559): Relayout returned: old=(0,0,1080,2340) new=(0,0,1080,2340) relayoutAsync=true req=(1080,2340)0 dur=0 res=0x0 s={true 0xb4000077130fda40} ch=false seqId=0
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): registerCallbackForPendingTransactions
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313bf10 mBlastBufferQueue=0xb40000778311d490 fn= 46 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313af50 mBlastBufferQueue=0xb40000778311d490 fn= 46 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.ViewRootImpl$10.onFrameDraw:6536 android.view.ViewRootImpl$4.onFrameDraw:2489 android.view.ThreadedRenderer$1.onFrameDraw:718 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673126d50 mBlastBufferQueue=0xb40000778311d490 fn= 47 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673141a10 mBlastBufferQueue=0xb40000778311d490 fn= 48 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313ffd0 mBlastBufferQueue=0xb40000778311d490 fn= 49 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313a310 mBlastBufferQueue=0xb40000778311d490 fn= 50 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb4000076731373d0 mBlastBufferQueue=0xb40000778311d490 fn= 51 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673137050 mBlastBufferQueue=0xb40000778311d490 fn= 52 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673125150 mBlastBufferQueue=0xb40000778311d490 fn= 53 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673122590 mBlastBufferQueue=0xb40000778311d490 fn= 54 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb4000076731246d0 mBlastBufferQueue=0xb40000778311d490 fn= 55 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673147350 mBlastBufferQueue=0xb40000778311d490 fn= 56 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673101a50 mBlastBufferQueue=0xb40000778311d490 fn= 57 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/ImeTracker(27559): com.aienglishpractice.stealthvox:8368e876: onRequestHide at ORIGIN_CLIENT reason HIDE_SOFT_INPUT_REQUEST_HIDE_WITH_CONTROL fromUser true
+I/InputMethodManager_LC(27559): notifyImeHidden: IInputMethodManagerGlobalInvoker.hideSoftInput
+W/WindowOnBackDispatcher(27559): sendCancelIfRunning: isInProgress=false callback=android.view.ImeBackAnimationController@33950ea
+D/WindowOnBackDispatcher(27559): onBackInvoked, callback=android.view.ImeBackAnimationController@33950ea
+I/InputMethodManager(27559): handleMessage: setImeVisibility visible=false
+D/InsetsController(27559): hide(ime(), fromIme=false)
+I/ImeTracker(27559): com.aienglishpractice.stealthvox:8368e876: onCancelled at PHASE_CLIENT_ALREADY_HIDDEN
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673137750 mBlastBufferQueue=0xb40000778311d490 fn= 58 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673147350 mBlastBufferQueue=0xb40000778311d490 fn= 58 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673137050 mBlastBufferQueue=0xb40000778311d490 fn= 59 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313a310 mBlastBufferQueue=0xb40000778311d490 fn= 60 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673141a10 mBlastBufferQueue=0xb40000778311d490 fn= 61 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313cd10 mBlastBufferQueue=0xb40000778311d490 fn= 62 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313d090 mBlastBufferQueue=0xb40000778311d490 fn= 63 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673138a90 mBlastBufferQueue=0xb40000778311d490 fn= 64 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673138e10 mBlastBufferQueue=0xb40000778311d490 fn= 65 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313ad90 mBlastBufferQueue=0xb40000778311d490 fn= 66 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313c290 mBlastBufferQueue=0xb40000778311d490 fn= 67 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673133850 mBlastBufferQueue=0xb40000778311d490 fn= 68 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb4000076730f2710 mBlastBufferQueue=0xb40000778311d490 fn= 69 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767310bd10 mBlastBufferQueue=0xb40000778311d490 fn= 70 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767310ab90 mBlastBufferQueue=0xb40000778311d490 fn= 71 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767310ce90 mBlastBufferQueue=0xb40000778311d490 fn= 72 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673104450 mBlastBufferQueue=0xb40000778311d490 fn= 73 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673140890 mBlastBufferQueue=0xb40000778311d490 fn= 74 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673116350 mBlastBufferQueue=0xb40000778311d490 fn= 75 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673142650 mBlastBufferQueue=0xb40000778311d490 fn= 76 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673138010 mBlastBufferQueue=0xb40000778311d490 fn= 77 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313bb90 mBlastBufferQueue=0xb40000778311d490 fn= 78 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313ffd0 mBlastBufferQueue=0xb40000778311d490 fn= 79 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313c0d0 mBlastBufferQueue=0xb40000778311d490 fn= 80 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb4000076731388d0 mBlastBufferQueue=0xb40000778311d490 fn= 81 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313c610 mBlastBufferQueue=0xb40000778311d490 fn= 82 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673139a50 mBlastBufferQueue=0xb40000778311d490 fn= 83 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767313ead0 mBlastBufferQueue=0xb40000778311d490 fn= 84 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673124350 mBlastBufferQueue=0xb40000778311d490 fn= 85 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/Activity(27559): onBackInvoked, activity=com.aienglishpractice.stealthvox.MainActivity@1462e21, caller=android.app.Activity.$r8$lambda$fMMzRqFB89XgwJjEXdqIB9hd6X4:0 android.app.Activity$$ExternalSyntheticLambda0.onBackInvoked:0 android.window.WindowOnBackInvokedDispatcher$OnBackInvokedCallbackWrapper.lambda$onBackInvoked$4:615 
+D/WindowOnBackDispatcher(27559): onBackInvoked, callback=android.app.Activity$$ExternalSyntheticLambda0@89ece08
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767311f490 mBlastBufferQueue=0xb40000778311d490 fn= 86 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/ImeFocusController(27559): onPreWindowFocus: skipped hasWindowFocus=false mHasImeFocus=true
+I/ImeFocusController(27559): onPostWindowFocus: skipped hasWindowFocus=false mHasImeFocus=true
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb400007673138550 mBlastBufferQueue=0xb40000778311d490 fn= 87 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/InsetsController(27559): cancelAnimation: types=ime, animType=2, host=com.aienglishpractice.stealthvox/com.aienglishpractice.stealthvox.MainActivity, from=android.view.InsetsController.notifyFinished:2006 android.view.InsetsAnimationControlImpl.applyChangeInsets:335 android.view.InsetsController.lambda$new$3:957 
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+D/InputMethodManagerUtils(27559): startInputInner - Id : 0
+I/InputMethodManager(27559): startInputInner - IInputMethodManagerGlobalInvoker.startInputOrWindowGainedFocus
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb4000076731001d0 mBlastBufferQueue=0xb40000778311d490 fn= 88 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb40000767311bc90 mBlastBufferQueue=0xb40000778311d490 fn= 88 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SyncRtSurfaceTransactionApplier.applyTransaction:100 android.view.SyncRtSurfaceTransactionApplier.lambda$scheduleApply$0:73 android.view.SyncRtSurfaceTransactionApplier.$r8$lambda$afI4fXg3U3-nBZQEDQMiNy-B06s:0 
+I/InsetsController(27559): onStateChanged: host=com.aienglishpractice.stealthvox/com.aienglishpractice.stealthvox.MainActivity, from=android.view.ViewRootImpl.onInsetsStateChanged:3026, state=InsetsState: {mDisplayFrame=Rect(0, 0 - 1080, 2340), mDisplayCutout=DisplayCutout{insets=Rect(0, 91 - 0, 0) waterfall=Insets{left=0, top=0, right=0, bottom=0} boundingRect={Bounds=[Rect(0, 0 - 0, 0), Rect(511, 0 - 569, 91), Rect(0, 0 - 0, 0), Rect(0, 0 - 0, 0)]} cutoutPathParserInfo={CutoutPathParserInfo{displayWidth=1080 displayHeight=2340 physicalDisplayWidth=1080 physicalDisplayHeight=2340 density={3.0} cutoutSpec={M 0,0 H -9.666666666666667 V 30.33333333333333 H 9.666666666666667 V 0 H 0 Z @dp} rotation={0} scale={1.0} physicalPixelDisplaySizeRatio={1.0}}} sideOverrides={}}, mRoundedCorners=RoundedCorners{[RoundedCorner{position=TopLeft, radius=115, center=Point(115, 115)}, RoundedCorner{position=TopRight, radius=115, center=Point(965, 115)}, RoundedCorner{position=BottomRight, radius=115, center=Point(965, 2225)}, RoundedCorner{position=BottomLeft, radius=115, center=Point(115, 2225)}]}  mRoundedCornerFrame=Rect(0, 0 - 1080, 2340), mPrivacyIndicatorBounds=PrivacyIndicatorBounds {static bounds=Rect(931, 0 - 1080, 91) rotation=0}, mDisplayShape=DisplayShape{ spec=-311912193 displayWidth=1080 displayHeight=2340 physicalPixelDisplaySizeRatio=1.0 rotation=0 offsetX=0 offsetY=0 scale=1.0}, mSources= { InsetsSource: {bc720000 mType=statusBars mFrame=[0,0][1080,91] mVisible=true mFlags= mSideHint=TOP mBoundingRects=null}, InsetsSource: {bc720005 mType=mandatorySystemGestures mFrame=[0,0][1080,132] mVisible=true mFlags= mSideHint=TOP mBoundingRects=null}, InsetsSource: {bc720006 mType=tappableElement mFrame=[0,0][1080,91] mVisible=true mFlags= mSideHint=TOP mBoundingRects=null}, InsetsSource: {c0770001 mType=navigationBars mFrame=[0,2178][1080,2340] mVisible=true mFlags= mSideHint=BOTTOM mBoundingRects=null}, InsetsSource: {c0770004 mType=systemGestures mFrame=[0,0][0,0] mVisible=true mFlags= mSideHint=NONE mBoundingRects=null}, InsetsSource: {c0770005 mType=mandatorySystemGestures mFrame=[0,2178][1080,2340] mVisible=true mFlags= mSideHint=BOTTOM mBoundingRects=null}, InsetsSource: {c0770006 mType=tappableElement mFrame=[0,2178][1080,2340] mVisible=true mFlags= mSideHint=BOTTOM mBoundingRects=null}, InsetsSource: {c0770024 mType=systemGestures mFrame=[0,0][0,0] mVisible=true mFlags= mSideHint=NONE mBoundingRects=null}, InsetsSource: {3 mType=ime mFrame=[0,1280][1080,2340] mVisible=true mFlags= mSideHint=BOTTOM mBoundingRects=null}, InsetsSource: {27 mType=displayCutout mFrame=[0,0][1080,91] mVisible=true mFlags= mSideHint=TOP mBoundingRects=null} }
+I/ImeTracker(27559): system_server:51dbd3bc: onCancelled at PHASE_CLIENT_ON_CONTROLS_CHANGED
+W/RemoteInputConnectionImpl(27559): requestCursorUpdates on inactive InputConnection
+D/InputTransport(27559): Input channel destroyed: 'ClientS', fd=205
+I/InsetsController(27559): onStateChanged: host=com.aienglishpractice.stealthvox/com.aienglishpractice.stealthvox.MainActivity, from=android.view.ViewRootImpl.onInsetsStateChanged:3026, state=InsetsState: {mDisplayFrame=Rect(0, 0 - 1080, 2340), mDisplayCutout=DisplayCutout{insets=Rect(0, 91 - 0, 0) waterfall=Insets{left=0, top=0, right=0, bottom=0} boundingRect={Bounds=[Rect(0, 0 - 0, 0), Rect(511, 0 - 569, 91), Rect(0, 0 - 0, 0), Rect(0, 0 - 0, 0)]} cutoutPathParserInfo={CutoutPathParserInfo{displayWidth=1080 displayHeight=2340 physicalDisplayWidth=1080 physicalDisplayHeight=2340 density={3.0} cutoutSpec={M 0,0 H -9.666666666666667 V 30.33333333333333 H 9.666666666666667 V 0 H 0 Z @dp} rotation={0} scale={1.0} physicalPixelDisplaySizeRatio={1.0}}} sideOverrides={}}, mRoundedCorners=RoundedCorners{[RoundedCorner{position=TopLeft, radius=115, center=Point(115, 115)}, RoundedCorner{position=TopRight, radius=115, center=Point(965, 115)}, RoundedCorner{position=BottomRight, radius=115, center=Point(965, 2225)}, RoundedCorner{position=BottomLeft, radius=115, center=Point(115, 2225)}]}  mRoundedCornerFrame=Rect(0, 0 - 1080, 2340), mPrivacyIndicatorBounds=PrivacyIndicatorBounds {static bounds=Rect(931, 0 - 1080, 91) rotation=0}, mDisplayShape=DisplayShape{ spec=-311912193 displayWidth=1080 displayHeight=2340 physicalPixelDisplaySizeRatio=1.0 rotation=0 offsetX=0 offsetY=0 scale=1.0}, mSources= { InsetsSource: {bc720000 mType=statusBars mFrame=[0,0][1080,91] mVisible=true mFlags= mSideHint=TOP mBoundingRects=null}, InsetsSource: {bc720005 mType=mandatorySystemGestures mFrame=[0,0][1080,132] mVisible=true mFlags= mSideHint=TOP mBoundingRects=null}, InsetsSource: {bc720006 mType=tappableElement mFrame=[0,0][1080,91] mVisible=true mFlags= mSideHint=TOP mBoundingRects=null}, InsetsSource: {c0770001 mType=navigationBars mFrame=[0,2178][1080,2340] mVisible=true mFlags= mSideHint=BOTTOM mBoundingRects=null}, InsetsSource: {c0770004 mType=systemGestures mFrame=[0,0][0,0] mVisible=true mFlags= mSideHint=NONE mBoundingRects=null}, InsetsSource: {c0770005 mType=mandatorySystemGestures mFrame=[0,2178][1080,2340] mVisible=true mFlags= mSideHint=BOTTOM mBoundingRects=null}, InsetsSource: {c0770006 mType=tappableElement mFrame=[0,2178][1080,2340] mVisible=true mFlags= mSideHint=BOTTOM mBoundingRects=null}, InsetsSource: {c0770024 mType=systemGestures mFrame=[0,0][0,0] mVisible=true mFlags= mSideHint=NONE mBoundingRects=null}, InsetsSource: {3 mType=ime mFrame=[0,1280][1080,2340] mVisible=true mFlags= mSideHint=BOTTOM mBoundingRects=null}, InsetsSource: {27 mType=displayCutout mFrame=[0,0][1080,91] mVisible=true mFlags= mSideHint=TOP mBoundingRects=null} }
+D/FlutterJNI(27559): Sending viewport metrics to the engine.
+I/VRI[MainActivity]@895d0f0(27559): handleAppVisibility mAppVisible = true visible = false
+D/VRI[MainActivity]@895d0f0(27559): visibilityChanged oldVisibility=true newVisibility=false
+I/SV[111942978 MainActivity](27559): onWindowVisibilityChanged(8) false io.flutter.embedding.android.FlutterSurfaceView{6ac1d42 V.E...... ........ 0,0-1080,2340} of VRI[MainActivity]@895d0f0
+I/SurfaceView(27559): 111942978 Changes: creating=false format=false size=false visible=true alpha=false hint=false left=false top=false z=false attached=true lifecycleStrategy=false
+I/SurfaceView(27559): 111942978 Cur surface: Surface(name=null mNativeObject=-5476376635461613840)/@0x1b9f068
+D/SurfaceComposerClient(27559): setCornerRadius ## 6ac1d42 SurfaceView[com.aienglishpractice.stealthvox/com.aienglishpractice.stealthvox.MainActivity]@0#56586 cornerRadius=0.000000
+I/SurfaceView(27559): 111942978 surfaceDestroyed
+I/SV[111942978 MainActivity](27559): surfaceDestroyed callback.size 1 #2 io.flutter.embedding.android.FlutterSurfaceView{6ac1d42 V.E...... ........ 0,0-1080,2340}
+I/SV[111942978 MainActivity](27559): updateSurface: mVisible = false mSurface.isValid() = true
+I/SV[111942978 MainActivity](27559): releaseSurfaces: viewRoot = VRI[MainActivity]@895d0f0
+V/SurfaceView(27559): Layout: x=0 y=0 w=1080 h=2340, frame=Rect(0, 0 - 1080, 2340)
+D/SurfaceView(27559): 6449813 windowPositionLost, frameNr = 0
+D/HWUI    (27559): CacheManager::trimMemory(20)
+I/VRI[MainActivity]@895d0f0(27559): Relayout returned: old=(0,0,1080,2340) new=(0,0,1080,2340) relayoutAsync=false req=(1080,2340)8 dur=2 res=0x2 s={false 0x0} ch=true seqId=0
+I/SV[111942978 MainActivity](27559): windowStopped(true) false io.flutter.embedding.android.FlutterSurfaceView{6ac1d42 V.E...... ........ 0,0-1080,2340} of VRI[MainActivity]@895d0f0
+D/SV[111942978 MainActivity](27559): updateSurface: surface is not valid
+I/SV[111942978 MainActivity](27559): releaseSurfaces: viewRoot = VRI[MainActivity]@895d0f0
+D/VRI[MainActivity]@895d0f0(27559): applyTransactionOnDraw applyImmediately
+D/SV[111942978 MainActivity](27559): updateSurface: surface is not valid
+I/SV[111942978 MainActivity](27559): releaseSurfaces: viewRoot = VRI[MainActivity]@895d0f0
+D/VRI[MainActivity]@895d0f0(27559): applyTransactionOnDraw applyImmediately
+D/VRI[MainActivity]@895d0f0(27559): Not drawing due to not visible. Reason=!mAppVisible && !mForceDecorViewVisibility
+D/VRI[MainActivity]@895d0f0(27559): Pending transaction will not be applied in sync with a draw due to view not visible
+I/VRI[MainActivity]@895d0f0(27559): mWNT: t=0xb4000076730f6b50 mBlastBufferQueue=0xnull fn= 0 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.ViewRootImpl.handleSyncRequestWhenNoAsyncDraw:6733 android.view.ViewRootImpl.performTraversals:5504 android.view.ViewRootImpl.doTraversal:3924 
+D/HWUI    (27559): CacheManager::trimMemory(40)
+I/VRI[MainActivity]@895d0f0(27559): stopped(true) old = false
+D/VRI[MainActivity]@895d0f0(27559): WindowStopped on com.aienglishpractice.stealthvox/com.aienglishpractice.stealthvox.MainActivity set to true
+I/AutofillManager(27559): onInvisibleForAutofill(): expiringResponse
+D/SV[111942978 MainActivity](27559): updateSurface: surface is not valid
+I/SV[111942978 MainActivity](27559): releaseSurfaces: viewRoot = VRI[MainActivity]@895d0f0
+D/VRI[MainActivity]@895d0f0(27559): applyTransactionOnDraw applyImmediately
+W/WindowOnBackDispatcher(27559): sendCancelIfRunning: isInProgress=false callback=android.app.Activity$$ExternalSyntheticLambda0@89ece08
+I/TextToSpeech(27559): Disconnected from TTS engine
+I/SurfaceView(27559): 111942978 Detaching SV
+D/SV[111942978 MainActivity](27559): updateSurface: surface is not valid
+I/SV[111942978 MainActivity](27559): releaseSurfaces: viewRoot = VRI[MainActivity]@895d0f0
+D/VRI[MainActivity]@895d0f0(27559): applyTransactionOnDraw applyImmediately
+I/SV[111942978 MainActivity](27559): onDetachedFromWindow: tryReleaseSurfaces()
+I/SV[111942978 MainActivity](27559): releaseSurfaces: viewRoot = VRI[MainActivity]@895d0f0
+D/VRI[MainActivity]@895d0f0(27559): applyTransactionOnDraw applyImmediately
+D/ViewRootImpl(27559): Skipping stats log for color mode
+I/VRI[MainActivity]@895d0f0(27559): dispatchDetachedFromWindow
+D/InputTransport(27559): Input channel destroyed: 'b9fcd3e', fd=141
+D/BBA2    (27559): setIsFg isFg = false; delayValue 3999ms
+D/[Purchases] - DEBUG(27559): ℹ️ App backgrounded
+D/[Purchases] - DEBUG(27559): ℹ️ No subscriber attributes to synchronize.
+Lost connection to device.
