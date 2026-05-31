@@ -54,7 +54,6 @@ class _IntroWidgetState extends State<IntroWidget> {
       child: Scaffold(
         key: scaffoldKey,
         backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
-        resizeToAvoidBottomInset: false,
         body: Column(
           mainAxisSize: MainAxisSize.max,
           children: [

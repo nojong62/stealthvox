@@ -46,116 +46,101 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-[작업] 오버플로 2건 수정. Box 7(TtsQueueManager/DeepgramV2VoiceManager) 및 다른 로직 수정 금지.
-       각 변경은 적용 전 diff를 보여주고 내 승인 후 반영. 변경 전 각 파일 .bak 백업.
-       수정 후 dart analyze 통과 확인.
+작업: 타이머 표시 형식 변경 — NNNm → HH:MM (5개 지점)
 
-========================================================
-① 로그인 BOTTOM OVERFLOW 215px — intro_master.dart
-========================================================
-- 286행 부근의 Scaffold를 찾는다. 현재:
+공통 HH:MM 표현식 (모드 파일 3개 공통):
+  () {
+    final int s = (FFAppState().remainingTime).toInt().clamp(0, 999999);
+    final int h = s ~/ 3600;
+    final int m = (s % 3600) ~/ 60;
+    return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+  }()
 
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        body: isLoading
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[파일 1] routine_mode_step_expand.dart
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+삭제: 2687줄
+  '${(FFAppState().remainingTime / 60).floor()}m',
 
-- backgroundColor 바로 다음 줄에 resizeToAvoidBottomInset: false, 한 줄을 추가해 아래처럼 만든다:
+교체:
+  () {
+    final int s = (FFAppState().remainingTime).toInt().clamp(0, 999999);
+    final int h = s ~/ 3600;
+    final int m = (s % 3600) ~/ 60;
+    return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+  }(),
 
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        resizeToAvoidBottomInset: false,
-        body: isLoading
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[파일 2] routine_mode_clone.dart
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+삭제: 2507줄
+  '${(FFAppState().remainingTime / 60).floor()}m',
 
-- 근거: body가 이미 SafeArea > SingleChildScrollView + padding(... + MediaQuery.viewInsets.bottom)로
-  키보드를 처리 중. Scaffold가 inset을 또 빼면서 바깥 고정높이 Container와 충돌해 215px가 터짐.
-  false로 두면 스크롤뷰가 단독으로 키보드를 처리.
-- 검증: 디버그 실행 → 이메일/비번 탭하여 키보드 올림 → 노란 바 사라지고 "계정이 없으신가요?"까지
-  스크롤로 닿는지 확인.
+교체: (동일)
+  () {
+    final int s = (FFAppState().remainingTime).toInt().clamp(0, 999999);
+    final int h = s ~/ 3600;
+    final int m = (s % 3600) ~/ 60;
+    return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+  }(),
 
-========================================================
-② 롤플레이 인트로 상단바 RIGHT OVERFLOW 6.6px — routine_mode_roleplay.dart  _buildTopBar()
-========================================================
-구조: Padding(horizontal:16) > Row(spaceBetween, [뒤로가기버튼(width:72), 우측 Row[폰트/언어아이콘 + 타이머 pill]])
-원인: 우측 Row의 타이머 pill('1589m' 등)이 넓어 상단 Row가 6.6px 넘침. 잔여시간 자릿수 커지면 재발.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[파일 3] routine_mode_roleplay.dart
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+삭제: 1900줄
+  '${(FFAppState().remainingTime / 60).floor()}m',
 
-수정 2곳 (둘 다 적용):
+교체: (동일)
+  () {
+    final int s = (FFAppState().remainingTime).toInt().clamp(0, 999999);
+    final int h = s ~/ 3600;
+    final int m = (s % 3600) ~/ 60;
+    return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+  }(),
 
-(2-A) 뒤로가기 버튼 폭 축소 — 현재:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[파일 4] lobby_master.dart  ← 로비 전용 (2곳 동시 수정)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+① 삭제: 671줄
+  int displayMinutes = appState.remainingTime ~/ 60;
 
-          GestureDetector(
-            onTap: _handleAutoSaveAndExit,
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              width: 72,
-              height: 56,
-              alignment: Alignment.centerLeft,
-              padding: const EdgeInsets.only(left: 4),
-              child: const Icon(Icons.arrow_back_ios_new_rounded,
-                  color: Colors.white70),
-            ),
-          ),
+  교체:
+  final int _lobbyTotalSec = appState.remainingTime.toInt().clamp(0, 999999);
+  final int _lobbyH = _lobbyTotalSec ~/ 3600;
+  final int _lobbyM = (_lobbyTotalSec % 3600) ~/ 60;
+  final String displayTime =
+      '${_lobbyH.toString().padLeft(2, '0')}:${_lobbyM.toString().padLeft(2, '0')}';
 
-  → width: 72 를 width: 56 으로 변경 (나머지는 그대로).
+② 삭제: 738줄
+  Text("${displayMinutes}m",
 
-(2-B) 타이머 pill 여백 축소 — 현재 (약 1886~1906행):
+  교체:
+  Text(displayTime,
 
-            const SizedBox(width: 8),
-            // [v3.6] 잔여시간 표시 + 길게 누르면 로그 (개발자용)
-            GestureDetector(
-              onLongPress: _showDebugLogDialog,
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                    color: const Color(0xFF2563EB),
-                    borderRadius: BorderRadius.circular(20)),
-                child: Row(children: [
-                  const Icon(Icons.timer_outlined,
-                      color: Colors.white, size: 18),
-                  const SizedBox(width: 6),
-                  Text(
-                    '${(FFAppState().remainingTime / 60).floor()}m',
-                    style: const TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.bold),
-                  ),
-                ]),
-              ),
-            ),
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[자가검증 — 4개 파일 모두]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+grep -n "floor().*m\|displayMinutes" \
+  routine_mode_step_expand.dart \
+  routine_mode_clone.dart \
+  routine_mode_roleplay.dart \
+  lobby_master.dart
+→ 결과 0건이어야 함
 
-  → 아래로 교체 (SizedBox 8→4, pill padding horizontal 16→10, 텍스트를 FittedBox로 감싸 자릿수 증가 대비):
+grep -n "padLeft" \
+  routine_mode_step_expand.dart \
+  routine_mode_clone.dart \
+  routine_mode_roleplay.dart \
+  lobby_master.dart
+→ 각 파일에 1건씩, lobby는 2건
 
-            const SizedBox(width: 4),
-            // [v3.6] 잔여시간 표시 + 길게 누르면 로그 (개발자용)
-            GestureDetector(
-              onLongPress: _showDebugLogDialog,
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                decoration: BoxDecoration(
-                    color: const Color(0xFF2563EB),
-                    borderRadius: BorderRadius.circular(20)),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  const Icon(Icons.timer_outlined,
-                      color: Colors.white, size: 18),
-                  const SizedBox(width: 6),
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      '${(FFAppState().remainingTime / 60).floor()}m',
-                      style: const TextStyle(
-                          color: Colors.white, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ]),
-              ),
-            ),
+dart analyze routine_mode_step_expand.dart
+dart analyze routine_mode_clone.dart
+dart analyze routine_mode_roleplay.dart
+dart analyze lobby_master.dart
+→ 에러 0건
 
-  → 합산 약 22px 여유 확보로 6.6px 해소 + 자릿수 증가에도 안전.
-- 검증: 디버그 실행 → 롤플레이 인트로 화면에서 노란 바 사라지고 타이머 숫자 안 잘리는지 확인.
-
-========================================================
-공통 마무리
-========================================================
-- dart analyze 통과.
-- 두 화면 모두 디버그에서 노란-검정 오버플로 바가 더 이상 안 뜨는지 육안 확인.
-- STT/TTS/프롬프트 등 로직은 일절 안 건드렸는지 diff로 재확인.
+[롤백 기준]
+모드 3개: '${(FFAppState().remainingTime / 60).floor()}m',
+로비 671: int displayMinutes = appState.remainingTime ~/ 60;
+로비 738: Text("${displayMinutes}m",

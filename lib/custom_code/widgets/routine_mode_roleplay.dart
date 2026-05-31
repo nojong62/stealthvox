@@ -1897,7 +1897,12 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                   FittedBox(
                     fit: BoxFit.scaleDown,
                     child: Text(
-                      '${(FFAppState().remainingTime / 60).floor()}m',
+                      () {
+                        final int s = (FFAppState().remainingTime).toInt().clamp(0, 999999);
+                        final int h = s ~/ 3600;
+                        final int m = (s % 3600) ~/ 60;
+                        return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+                      }(),
                       style: const TextStyle(
                           color: Colors.white, fontWeight: FontWeight.bold),
                     ),
