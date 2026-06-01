@@ -46,226 +46,172 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-[Duo 마무리] 과금 시점 정렬 + PTT 버튼 정리 + 녹음 중단 UX 보완 + 에코 차단 강화
-
-파일: lib/custom_code/widgets/routine_mode_duo.dart
-
-## 참고
-사전 점검 결과, 평가서가 1순위로 지목한 _listenForPartnerJoined() 세미콜론 누락은
-실제로는 존재하지 않음(887/955/994줄 모두 정상). 문법 수정은 하지 말 것.
-아래 4개 항목만 수정한다.
-
-────────────────────────────────────────────────────────
-## 수정 1: Duo 과금 시점 — "게스트 입장 시 시작" 정책 정렬
-정책: 다른 모드는 입장 즉시 과금(60초 무활동 오토포즈 유지). Duo만 예외 —
-호스트가 초대장 만들고 대기하는 동안은 과금 정지, 게스트 입장 확정 시 과금 시작,
-게스트 퇴장/종료 시 정지.
-
-### 1-A. initState 즉시 resume 제거
-위치: 약 187~189줄
-기존:
-    BillingTicker.instance.setRate(BillingRate.full);
-    BillingTicker.instance.resume();
-    BillingTicker.instance.logMode('duo');
+통합 지시문 (routine_mode_roleplay.dart) — 전 5곳
+[변경 0] static 홀더 클래스 추가 (신규)
+위치: Box 1 임포트 블록 맨 아래(현재 41행 import '/custom_code/actions/billing_ticker.dart'; 다음), Box 2 클래스 선언 위에 삽입:
+dart// ====================================================================
+// 🛡️ [v4] 시나리오 재진입 보존용 static 홀더 (App State 대체)
+//   방을 나갔다 다시 들어와도 유저가 세팅/수정한 시나리오를 유지.
+// ====================================================================
+class _RoleplayScenarioStore {
+  static String situation = '';
+  static String aiRole = '';
+  static String userRole = '';
+}
+[변경 1] RoleplayBrain에 200개 상황 const 추가
+위치: class RoleplayBrain { 바로 다음 줄(현재 3361행 // === 주석 위)에 삽입:
+dart  // 📋 [200개 기초 상황 — 카테고리 5종 × 40개] (v4 추가)
+  static const List<String> _baseSituations200 = [
+    // ── 공항_비행기_교통 (40개) ──
+    '기내 의학 환자 발생', '화장실 갇힘 사고', '산소마스크 작동됨', '여권 분실 발견함', '캐리어 파손 확인', '위조지폐 의심됨',
+    '입국 거부 위기', '소지품 오인 압수', '결제 오류 지연', '비행기 놓치기 직전', '탑승권 분실함', '미아 발생 신고',
+    '승무원 부상 발생', '탑승 거부 당함', '버스 고장 멈춤', '잘못된 티켓 발권', '소매치기 발생', '짐 오인 교환됨', '스크린도어 낌',
+    '비상 정지 발생', '지갑 두고 내림', '막차 취소 고립됨', '급격한 복통 발생', '부당 요금 요구', '난폭 운전 공포', '계약 사기 의심',
+    '혼유 사고 발생', '차량 타이어 펑크', '차량 배터리 방전', '정산기 고장 멈춤', '예약 누락 발견', '선내 화재 경보',
+    '소지품 바다 빠짐', '배 놓치고 고립', '집단 식중독 증상', '가방 문 열려있음', '반납 처리 오류', '공중 멈춤 사고',
+    '접촉 사고 후 도주', '차량 출고 불가',
+    // ── 호텔_숙소_주거 (40개) ──
+    '예약 취소 당함', '방 내부 몰카 의심', '온수 안 나옴', '엘리베이터 갇힘', '익수 사고 발생', '알레르기 발생', '취객 시비 걸림',
+    '운동 기구 부상', '화재 경보 대피', '기밀 문서 유출', '소지품 도난당함', '숙소 사진과 다름', '미끄러짐 부상', '텐트 무너짐',
+    '멧돼지 출현함', '텐트 불길 번짐', '도어락 고장 갇힘', '동파로 누수 발생', '층간소음 시비', '맹견 진입 위험', '계단 실족 부상',
+    '저혈압 실신함', '주인방 무단 침입', '룸메이트 절도', '상한 음식 서빙', '차량 파손 발견', '옥상 문 잠김 갇힘', '독충에 물림',
+    '무단 주거 침입', '신분증 도용 의심', '난간 파손 위험', '피부 화상 입음', '독사 출현 비상', '가스 누출 의심', '옷 세탁 중 분실',
+    '금고 안 열림', '지하 침수 발생', '택배 분실 항의', '유리창 깨짐', '샹들리에 추락',
+    // ── 식당_쇼핑_유흥 (40개) ──
+    '머리카락 나옴', '식중독 증상 발현', '기름 불판 화재', '주문 오인 대기', '결제 중복 처리', '커피 쏟아 화상', '식판 엎음 사고',
+    '음식 도중 소진', '바가지 요금 청구', '지갑 소매치기', '명품 훼손 시비', '피부 부작용 발생', '몰래카메라 발견', '카트 충돌 부상',
+    '거스름돈 사기', '여권 정보 오류', '물건 파손 변상', '지갑 분실 확인', '휴지 없이 갇힘', '유통기한 지남', '취객 싸움 번짐',
+    '도난 경보 작동', '소매치기 추격', '에스컬레이터 낌', '낙상 사고 발생', '이물질 치아 파손', '배달 사고 누락', '가스통 폭발 위기',
+    '인파 압사 위험', '주차 시비 폭행', '다이아 분실 오해', '신발 도난당함', '책장 쓰러짐 사고', '렌즈 파손 부상', '잘못된 약 복용',
+    '교상 사고 발생', '가방 줄 걸려 파손', '칼날 부상 사고', '변질된 음식 판매', '침대 주저앉음',
+    // ── 공공장소_병원_비즈니스 (40개) ──
+    '의료진 공백 지연', '오진 가능성 확인', '호흡 곤란 환자', '수술 지연 항의', '잇몸 과다 출혈', '보이스피싱 의심', '카드 먹통 됨',
+    '중요 택배 분실', '억울한 누명 씀', '긴급 출동 방해', '서류 조작 의심', '비자 발급 거부', '빔프로젝터 폭발', '랜섬웨어 감염됨',
+    '정수기 누전 화재', '면접 서류 분실', '무단 침입 시위', '인감 도용 발견', '세금 폭탄 오류', '소송 상대 협박', '노트북 도난당함',
+    '시험지 유출 비상', '화학 약품 누출', '등교 미아 발생', '셔틀버스 사고', '전시 작품 훼손', '유물 도난 경보', '무대 조명 추락',
+    '영사기 화재 발생', '암표 사기 당함', '맹수 탈출 비상', '독초 오접촉 부상', '유기견 습격함', '열사병 환자 실신', '범죄 의심 비명',
+    '부당해고 구제 신청', '부스 무너짐 사고', '생방송 방송 사고', '난입 소요 사태', '집단 감염 의심',
+    // ── 레저_관광_자연_기타 (40개) ──
+    '이식 조류 표류', '산소통 잔량 고갈', '보드 충돌 실신', '쥐가 나서 익수', '갑작스러운 불어남', '슬라이드 충돌', '낚싯바늘 눈 찔림',
+    '실족 고립 조난', '저체온증 발생', '로프 끊어짐 위기', '충돌 골절 부상', '리프트 공중 멈춤', '타구 사고 부상', '파울볼 안면 강타',
+    '심장마비 환자 발생', '바벨 낙하 깔림', '관절 탈구 부상', '레인 진입 기계 낌', '스케이트 날 부상', '롤러코스터 멈춤',
+    '실제 유령 공포', '오발 사고 발생', '카트 전복 사고', '나무 걸려 조난', '줄 풀림 오인 비상', '사막 식수 고갈', '정글 독충 공격',
+    '낙석 낙하 갇힘', '막배 끊겨 고립', '통유리 균열 발견', '낙뢰 사고 발생', '인파 밀집 압사', '캠핑카 일산화탄소', '고온 화상 입음',
+    '음향 장비 감전', '울타리 돌파 충돌', '말에서 추락 부상', '탁구대 무너짐', '당구큐대 시비', '코인기기 화재',
+  ];
+[변경 2] generateDramaticScenario 시드 풀 교체
+삭제 범위: 3368행 final genres = [ ~ 3410행 '- Genre hint this round: $pick';
 교체:
-    // 🆕 [과금정책] Duo는 게스트 입장 시점에 과금 시작 — 진입 시엔 rate만 설정하고 pause 유지
-    BillingTicker.instance.setRate(BillingRate.full);
-    BillingTicker.instance.pause();
-    _billingStarted = false;
+dart      // 🎲 [v4 합본 풀] 200개 기초 상황 + 20개 장르 씨앗 → 변주 폭 확대
+      const genreSeeds = [
+        // 일상/긍정 (10개)
+        '카페에서 새 메뉴 추천받기', '해외여행 중 현지인과 길 묻기', '새 이웃에게 인사하며 동네 소개',
+        '옷가게에서 스타일 상담', '회사 점심시간 동료와 맛집 토크', '헬스장 첫날 트레이너와 상담',
+        '공항 체크인 카운터 대화', '호텔 체크인하며 방 업그레이드 요청', '동네 서점에서 책 추천 대화',
+        '반려동물 산책 중 견주끼리 대화',
+        // 드라마틱/갈등 (10개)
+        '불륜 발각, 부부 갈등', '직장 내 권력 다툼, 해고 위기', '형사 심문, 용의자 취조',
+        '재벌가 상속 분쟁', '비밀 연인 들킴', '가족 비밀 폭로', '첫사랑 재회, 감정 충돌',
+        '룸메이트 생활 규칙 갈등', '환불 요청하는데 매장 직원이 거부', '친구가 빌린 돈 안 갚음',
+      ];
+      final pool = [..._baseSituations200, ...genreSeeds];
+      final pick = pool[Random().nextInt(pool.length)];
+      // 200개 합본에 있으면 "그대로 쓸 구체 상황", 20개 씨앗이면 "확장할 장르 힌트"
+      final bool isConcrete = _baseSituations200.contains(pick);
 
-### 1-B. 과금 시작 플래그 + 헬퍼 추가
-위치: 상태 변수 선언부(_recentGenerated 근처)
-추가:
-```dart
-  // 🆕 [과금정책] 게스트 입장 후에만 과금 시작 (호스트 대기 중 정지)
-  bool _billingStarted = false;
-  void _startDuoBilling() {
-    if (_billingStarted) return;
-    _billingStarted = true;
-    BillingTicker.instance.resume();
-    BillingTicker.instance.logMode('duo');
-  }
-  void _stopDuoBilling() {
-    _billingStarted = false;
-    BillingTicker.instance.pause();
-  }
-```
-
-### 1-C. _resetIdleTimer의 자동 resume 가드
-위치: 약 136~145줄 _resetIdleTimer
-기존 if (_isIdlePaused) 블록 내부:
-      BillingTicker.instance.resume();
-      BillingTicker.instance.logMode('duo');
+      final systemPrompt = "You are a creative director for a high-immersion English roleplay app.\n"
+              "Your job is to create ONE vivid scene inspired by real-life situations, Netflix series, Korean/American dramas, or movies.\n"
+              "\n"
+              "OUTPUT: Return ONLY valid JSON, no extra text.\n"
+              "{\n"
+              '  "situation": "핵심 상황 요약 (10-15 Korean chars, e.g. 카페에서 신메뉴 추천)",\n'
+              '  "ai_role": "AI 캐릭터 (10자 이내, with clear personality, e.g. 친절한 바리스타)",\n'
+              '  "user_role": "유저 캐릭터 (8자 이내, e.g. 단골 손님)"\n'
+              "}\n"
+              "\n"
+              "RULES:\n"
+              "- situation: vivid and specific. Do NOT name any show/character.\n"
+              "- ai_role: give a personality that fits the genre (friendly, enthusiastic, suspicious, furious, etc).\n"
+              "- user_role: the user naturally belongs in the scene.\n"
+              "- For everyday/positive genres: warm, helpful, curious personalities.\n"
+              "- For dramatic/conflict genres: intense, confrontational, emotional personalities.\n" +
+          (isConcrete
+              ? '- USE THIS EXACT SITUATION as-is: "$pick". Do NOT invent a different one. Keep the situation field essentially equal to "$pick" (light wording polish within 10-15 Korean chars OK). Only assign a fitting ai_role and user_role.'
+              : "- Genre hint this round: $pick");
+(이하 final res = await client.post(...) 부분은 그대로 둠)
+[변경 3-A] init 가드 — _fetchKeysAndInit 전체 교체
+삭제 범위: 419행 Future<void> _fetchKeysAndInit() async { ~ 433행 }
 교체:
-      // 🆕 [과금정책] 게스트 입장(과금 시작) 상태일 때만 resume — 대기 중엔 재개 금지
-      if (_billingStarted) {
-        BillingTicker.instance.resume();
-        BillingTicker.instance.logMode('duo');
-      }
-
-### 1-D. 게스트 입장 확정 시 과금 시작 (호스트 측 리스너)
-위치: _listenForPartnerJoined 내부, setState 블록(약 963~971줄)
-기존:
-        // 🆕 [PTT] 입장 시 자동 녹음 제거 — 버튼으로만 시작
-        // 게스트 퇴장 → 호스트 강제 종료 (1:1 대칭 종료 모델)
-        if (guestJustLeft) _handleAutoSaveAndExit();
-교체:
-        // 🆕 [과금정책] 게스트 입장 확정 시 과금 시작 / 퇴장 시 정지
-        if (partnerJoined) {
-          _startDuoBilling();
+dart  Future<void> _fetchKeysAndInit() async {
+    try {
+      await FirebaseRemoteConfig.instance.fetchAndActivate();
+      if (mounted) {
+        setState(() {
+          _deepgramKey =
+              FirebaseRemoteConfig.instance.getString('DeepgramAPIKey');
+          _openAiKey = FirebaseRemoteConfig.instance.getString('OpenAIAPIKey');
+        });
+        // 🛡️ [v4 가드] 세팅된 시나리오가 있으면 재진입 시 보존, 없으면 새 제안
+        if (_RoleplayScenarioStore.situation.isNotEmpty &&
+            _RoleplayScenarioStore.aiRole.isNotEmpty &&
+            _RoleplayScenarioStore.userRole.isNotEmpty) {
+          setState(() {
+            _scenarioSituation = _RoleplayScenarioStore.situation;
+            _scenarioAiRole = _RoleplayScenarioStore.aiRole;
+            _scenarioUserRole = _RoleplayScenarioStore.userRole;
+            _scenarioKeyword = _RoleplayScenarioStore.situation;
+          });
         } else {
-          _stopDuoBilling();
+          _generateScenario();
         }
-        // 🆕 [PTT] 입장 시 자동 녹음 제거 — 버튼으로만 시작
-        // 게스트 퇴장 → 호스트 강제 종료 (1:1 대칭 종료 모델)
-        if (guestJustLeft) _handleAutoSaveAndExit();
-
-### 1-E. 게스트 본인 합류 성공 시 과금 시작 (게스트 측)
-위치: _joinAsGuest 성공부, "_isPartnerOnline = true;" setState 직후(약 930줄, PTT 주석 위)
-추가:
-      // 🆕 [과금정책] 게스트 본인 입장 성공 → 과금 시작
-      _startDuoBilling();
-
-### 1-F. 종료 시 과금 정지
-위치: _handleAutoSaveAndExit 시작부(약 977줄, _isExiting=true 직후)
-추가:
-    _stopDuoBilling();
-
-────────────────────────────────────────────────────────
-## 수정 2: PTT 버튼 이벤트 정리 (tap+longPress 중복 → Listener 포인터 단일화)
-위치: _buildControlArea 내 GestureDetector(약 1221~1230줄)
-변경: GestureDetector의 onTapDown/onTapUp/onTapCancel/onLongPressStart/onLongPressEnd 5개를
-      Listener의 onPointerDown/onPointerUp/onPointerCancel 로 교체(중복 호출 원천 제거).
-기존(예시):
-          GestureDetector(
-            onTapDown: (_) => _onPttStart(),
-            onTapUp: (_) => _onPttEnd(),
-            onTapCancel: () => _onPttEnd(),
-            onLongPressStart: (_) => _onPttStart(),
-            onLongPressEnd: (_) => _onPttEnd(),
-            child: Container( ... ),
-          ),
-교체:
-          Listener(
-            behavior: HitTestBehavior.opaque,
-            onPointerDown: (_) => _onPttStart(),
-            onPointerUp: (_) => _onPttEnd(),
-            onPointerCancel: (_) => _onPttEnd(),
-            child: Container( ... ), // 기존 Container child 그대로 유지
-          ),
-주의: child의 Container(크기/색/아이콘) 코드는 그대로 둘 것. 래퍼 위젯만 교체.
-
-────────────────────────────────────────────────────────
-## 수정 3: 상대 메시지 도착 시 "녹음 중인 내 발화" 보호 (UX)
-문제: 내가 버튼 누르고 말하는 중(_duoState=='recording')에 상대 메시지가 도착하면
-      _handleIncomingMessage가 내 녹음을 즉시 stop시켜 발화가 끊김.
-해결: 내가 recording 중이면 상대 메시지를 큐에 둔 채 처리 보류,
-      내가 손 떼고 idle/cooldown이 된 뒤 처리.
-
-### 3-A. _drainIncoming에 recording 가드 추가
-위치: _drainIncoming 함수(약 567~576줄)
-기존 while 루프 진입부에 조건 추가:
-```dart
-  Future<void> _drainIncoming() async {
-    if (_isDrainingIncoming) return;
-    _isDrainingIncoming = true;
-    while (_incomingQueue.isNotEmpty) {
-      // 🆕 내가 녹음 중이면 상대 메시지 처리 보류 — 내 발화 끊김 방지
-      if (_duoState == 'recording') break;
-      final data = _incomingQueue.removeAt(0);
-      await _handleIncomingMessage(data);
+      }
+    } catch (e) {
+      print('❌ Key Load Error: $e');
     }
-    _isDrainingIncoming = false;
   }
-```
-
-### 3-B. 내 발화 처리 종료 후 보류된 상대 메시지 재가동
-위치: _processRelayPipeline 끝부분, idle 복귀 직후(쿨다운 후 _setDuoState('idle') 다음 줄)
-추가:
-    // 🆕 내 발화 처리 끝 → 보류돼 있던 상대 메시지 처리 재개
-    if (_incomingQueue.isNotEmpty) _drainIncoming();
-
-### 3-C. _onPttEnd에서도 큐 재가동 보장
-위치: _onPttEnd 함수
-_stopAndSendToWhisper() 호출은 그대로 두되, 그 처리 흐름이 idle로 끝난 뒤
-보류 메시지가 처리되도록 _processRelayPipeline 쪽 3-B로 커버됨(추가 변경 불필요).
-단, 녹음이 아니었던 경우(빈 transcript로 즉시 idle)에도 큐가 남아있으면 처리되도록
-_stopAndSendToWhisper의 각 _setDuoState('idle') 직후에 다음 한 줄을 추가:
-    if (_incomingQueue.isNotEmpty) _drainIncoming();
-
-────────────────────────────────────────────────────────
-## 수정 4: 에코 차단 강화 (완전일치 → 정규화 유사도)
-문제: 현재는 같음/포함 관계만 검사. "I haven't checked." vs "I haven't checked yet" 같은
-      변형 에코를 놓침.
-해결: 보관 개수 5→10, 정규화(소문자+구두점/공백 제거) 후 포함관계 + 토큰 자카드 유사도 검사,
-      그리고 TTS 재생 직후 1.2초간은 더 엄격히(낮은 임계값) 필터.
-
-### 4-A. 보관 개수 확대 + 정규화/유사도 헬퍼 교체
-위치: _rememberGenerated / _looksLikeEcho (약 62~80줄)
+[변경 3-B] _generateScenario에 홀더 동기화 추가
+삭제 범위: 443행 if (mounted && result != null) { ~ 454행 }
 교체:
-```dart
-  final List<String> _recentGenerated = [];
-  DateTime? _lastTtsEndAt; // 🆕 마지막 TTS 종료 시각(엄격 필터 윈도우용)
+dart      if (mounted && result != null) {
+        setState(() {
+          _scenarioKeyword = result['situation'] ?? '';
+          _scenarioSituation = result['situation'] ?? '';
+          _scenarioAiRole = result['ai_role'] ?? '';
+          _scenarioUserRole = result['user_role'] ?? '';
+          _sessionDocId = null;
+          _myHistoryRef = null;
+          _localMessages.clear();
+          _isConversationActive = false;
+        });
+        // 🛡️ [v4] 재진입 보존용 홀더 동기화
+        _RoleplayScenarioStore.situation = _scenarioSituation;
+        _RoleplayScenarioStore.aiRole = _scenarioAiRole;
+        _RoleplayScenarioStore.userRole = _scenarioUserRole;
+      }
+[변경 3-C] 바텀시트 "확인" — 수정값 홀더 저장
+삭제 범위: 524행 setState(() { ~ 533행 }); (확인 onTap 안의 setState)
+교체:
+dart                      setState(() {
+                        _scenarioSituation = sit;
+                        _scenarioAiRole = ai;
+                        _scenarioUserRole = user;
+                        _scenarioKeyword = sit;
+                        _sessionDocId = null;
+                        _myHistoryRef = null;
+                        _localMessages.clear();
+                        _isConversationActive = false;
+                      });
+                      // 🛡️ [v4] 유저 수정값 보존용 홀더 동기화
+                      _RoleplayScenarioStore.situation = sit;
+                      _RoleplayScenarioStore.aiRole = ai;
+                      _RoleplayScenarioStore.userRole = user;
 
-  String _normForEcho(String s) =>
-      s.toLowerCase().replaceAll(RegExp(r'[^\w가-힣]'), '');
+✅ 검증
+bashflutter analyze
+grep -c "_baseSituations200\|_RoleplayScenarioStore\|isConcrete" routine_mode_roleplay.dart
 
-  void _rememberGenerated(String s) {
-    final t = s.trim();
-    if (t.isEmpty) return;
-    _recentGenerated.add(t);
-    while (_recentGenerated.length > 10) _recentGenerated.removeAt(0);
-  }
+flutter analyze 에러 0
+grep: _baseSituations200 2회↑, _RoleplayScenarioStore 10회↑(클래스 1 + read 3 + write 6), isConcrete 2회 → 정상.
 
-  // 토큰 자카드 유사도 (0~1)
-  double _jaccard(String a, String b) {
-    final sa = a.toLowerCase().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toSet();
-    final sb = b.toLowerCase().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toSet();
-    if (sa.isEmpty || sb.isEmpty) return 0.0;
-    final inter = sa.intersection(sb).length;
-    final uni = sa.union(sb).length;
-    return uni == 0 ? 0.0 : inter / uni;
-  }
 
-  bool _looksLikeEcho(String transcript) {
-    final t = transcript.trim();
-    if (t.length < 4) return false;
-    final tn = _normForEcho(t);
-
-    // TTS 종료 직후 1.2초는 엄격 모드(임계값 완화 → 더 잘 버림)
-    final bool strict = _lastTtsEndAt != null &&
-        DateTime.now().difference(_lastTtsEndAt!).inMilliseconds < 1200;
-    final double simThreshold = strict ? 0.6 : 0.8;
-
-    for (final g in _recentGenerated) {
-      if (g.isEmpty) continue;
-      final gn = _normForEcho(g);
-      if (gn.isEmpty) continue;
-      // ① 정규화 포함 관계
-      if (gn == tn || gn.contains(tn) || tn.contains(gn)) return true;
-      // ② 토큰 자카드 유사도
-      if (_jaccard(g, t) >= simThreshold) return true;
-    }
-    return false;
-  }
-```
-
-### 4-B. TTS 종료 시각 기록
-위치: _playSerialized 또는 _playAudioAndWait에서 재생 완료 후(_isTtsActive=false로 만드는 지점)
-추가 한 줄(재생이 끝나는 곳):
-    _lastTtsEndAt = DateTime.now();
-(가장 안전한 위치: _playAudioAndWait의 await 종료 직후, _isTtsActive=false 라인 옆)
-
-────────────────────────────────────────────────────────
-## 자기 검증 (flutter analyze 까지만 — APK/AAB 빌드 금지)
-1. flutter analyze lib/custom_code/widgets/routine_mode_duo.dart → 에러 0
-2. grep -c "_billingStarted" routine_mode_duo.dart            → 5 이상
-3. grep -c "_startDuoBilling\|_stopDuoBilling" routine_mode_duo.dart → 5 이상
-4. grep -c "onPointerDown" routine_mode_duo.dart              → 1
-5. grep -c "onLongPressStart\|onTapDown" routine_mode_duo.dart → 0 (구 방식 제거 확인)
-6. grep -c "_jaccard\|_normForEcho\|_lastTtsEndAt" routine_mode_duo.dart → 다수
-7. grep -c "length > 10" routine_mode_duo.dart                → 1 (보관 10개 확인)
-8. grep -c "if (_duoState == 'recording') break;" routine_mode_duo.dart → 1 (녹음보호 확인)
-
-## 롤백
-각 함수 단위 교체이므로 문제 시 해당 함수만 이전 버전으로 복원.
+참고로 나중에 로비 같은 다른 화면에서 상황을 골라 넘기고 싶어지면, 그때 이 static 홀더를 그대로 쓰면 됩니다 — 로비에서 _RoleplayScenarioStore.situation = ... 식으로 세팅만 하면 가드가 알아서 그걸 집어 시작합니다. 지금은 그 경로가 없으니 신경 안 쓰셔도 됩니다.
