@@ -344,7 +344,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     final ChunkedTtsFetcher tts = ChunkedTtsFetcher(
       _openAiKey,
       _ttsQueueManager,
-      'alloy',
+      'nova',
       isUser: false,
       onLog: _log,
     );
@@ -1414,7 +1414,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       final retryTts = ChunkedTtsFetcher(
         _openAiKey,
         _ttsQueueManager,
-        'alloy',
+        'nova',
         isUser: false,
         onLog: _log,
       );
@@ -1547,7 +1547,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     final fallbackTts = ChunkedTtsFetcher(
       _openAiKey,
       _ttsQueueManager,
-      'alloy',
+      'nova',
       isUser: false,
       onLog: _log,
     );
@@ -1580,7 +1580,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     final phraseTts = ChunkedTtsFetcher(
       _openAiKey,
       _ttsQueueManager,
-      "alloy",
+      'nova',
       isUser: false,
       onLog: _log,
     );
@@ -1612,13 +1612,13 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     final questionTts = ChunkedTtsFetcher(
       _openAiKey,
       _ttsQueueManager,
-      "alloy",
+      'nova',
       isUser: false,
       onLog: _log,
     );
     final HybridTtsPlayer questionHybridTts = HybridTtsPlayer(
       apiKey: _openAiKey,
-      voice: 'alloy',
+      voice: 'nova',
       onLog: _log,
     );
     String aiText = "";
@@ -1991,7 +1991,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         final clarifyTts = ChunkedTtsFetcher(
           _openAiKey,
           _ttsQueueManager,
-          'alloy',
+          'nova',
           isUser: false,
           onLog: _log,
         );
@@ -2163,11 +2163,11 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       // TtsQueueManager._processQueue가 'AI 턴이고 paused' 판단하여 유저 마지막 청크까지 멈춰버림
       _ttsQueueManager.setAiPaused(true); // AI 재생 대기 모드 (유저 TTS는 계속 재생)
       // 🔧 [v3.5] AI 전용 큐로 보내기 위해 isUser: false 명시
-      // 🌱 [v3.5 StepExpand] AI 목소리는 alloy 고정 (로비 선택에서 제외)
+      // 🌱 [v4.0 StepExpand] AI 목소리는 nova 고정
       ChunkedTtsFetcher aiTtsFetcher = ChunkedTtsFetcher(
         _openAiKey,
         _ttsQueueManager,
-        "alloy", // 🌱 AI 목소리 alloy 고정
+        'nova', // 🌱 AI 목소리 nova 고정
         isUser: false, // AI 큐로 분리
         onLog: _log,
       );
@@ -2182,7 +2182,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       bool aiHasDoubleNewline = false;
       final HybridTtsPlayer aiHybridTts = HybridTtsPlayer(
         apiKey: _openAiKey,
-        voice: 'alloy',
+        voice: 'nova',
         onLog: _log,
       );
 
