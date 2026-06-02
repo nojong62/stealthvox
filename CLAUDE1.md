@@ -47,76 +47,317 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-[StealthVox History 실전 튜터링 오토포즈 해제 누락 수정 지시문]
+결정 모두 반영하겠습니다 (①-C 하이브리드, ②-라벨 전부 삭제·아이콘 통일, ③-`mode` 기준 교체). 규모가 커서 **파일별 단계 분리**로 갑니다. 부분 적용 위험을 줄이고, 각 단계마다 `flutter analyze` + grep으로 검증하는 기존 워크플로우대로요.
 
-대상 파일:
-- lib/custom_code/widgets/chat_history_master.dart
+먼저 **Phase 1 (chat_history_master.dart)** 지시문을 만들기 위해 라우터의 `mode` 읽는 위치와 헤더 아이콘 anchor 유일성만 확인하겠습니다.확인 끝났습니다. 라우터에 `data`는 있고 `mode`는 아직 안 읽으니 추가하면 됩니다. 헤더 양쪽 아바타 `padding: all(13)`이 2곳이라 각각 구분 컨텍스트가 필요합니다. 사람쪽 헤더 padding 줄만 보고 바로 Phase 1 지시문 작성하겠습니다.마지막으로 메시지 라벨 블록(삭제 대상)만 정확히 보고, Phase 1 지시문을 작성하겠습니다.Phase 1 설계 확정했습니다. 라우터가 `mode` 기준으로 바뀌므로, 이제 Clone/Roleplay 방에 `expanded_sentence`를 저장해도 안전하게 Tutor 모드로 갑니다 — 버튼이 "저장값 우선 → 없으면 전체 대화로 생성+캐시"로 동작합니다.
 
-문제:
-History 화면에서 오토포즈 상태(_isIdlePaused == true)일 때,
-소리듣기 버튼을 누르면 오토포즈가 정상 해제되지만,
-말풍선 옆 보라색 학교 아이콘의 “실전 튜터링”을 누르면 오토포즈가 해제되지 않는다.
+## Phase 1 — chat_history_master.dart 지시 프롬프트
 
-확인된 원인:
-- 오디오 재생 함수 쪽에는 _resumeHistoryFromUserAction() 호출이 들어가 있다.
-- 하지만 실전 튜터링 팝업 진입 함수인 _showTutoringPopup(String docId, String baseText) 시작부에는 _resumeHistoryFromUserAction() 호출이 없다.
-- 현재 _showTutoringPopup() 안에서는 BillingTicker.instance.setRate(BillingRate.full)만 실행되고, BillingTicker resume/logMode 복구는 실행되지 않는다.
-- 따라서 오토포즈 상태에서 튜터링을 열면 과금 rate는 full로 바뀌지만 pause 상태는 그대로 남는다.
+> 전제: 지난 세션에서 추가한 `_isBuildingExpand`, `_buildExpandFromConversation`, `_combineIntoExpandedSentence`, `_polishExpandedSentence`, 하단 footer 버튼이 이미 파일에 있는 상태. 라인 번호는 어긋나 있을 수 있으니 **anchor(고유 코드) 기준**으로 찾을 것.
 
-수정 목표:
-History에서 사용자가 실전 튜터링을 누르는 순간, 오토포즈가 즉시 해제되어야 한다.
-튜터링 팝업 열기, 녹음 시작, 새 문장 생성 같은 실제 활동도 모두 사용자 활동으로 인정해야 한다.
+**절대 보존:** Box 7 일체, `_buildChunkPracticeScreen()`, `_buildChunks()`, `_goToChunkPractice()`, `_polishExpandedSentence()`(그대로 유지).
 
-수정 지점:
+---
 
-1. _showTutoringPopup(String docId, String baseText)
-- 함수 시작 직후, appAudioRecorder 정리보다 먼저 또는 최소한 setState 전에 _resumeHistoryFromUserAction()을 호출하라.
-- 이 함수가 실전 튜터링의 진입점이므로 여기서 반드시 오토포즈를 해제해야 한다.
-- BillingTicker.instance.setRate(BillingRate.full) 전에 호출하는 것이 가장 안전하다.
+### 1) 라우터: `mode` 기준 판별로 교체
 
-적용 의도:
-오토포즈 상태에서 학교 아이콘을 누르는 순간
-_isIdlePaused = false
-BillingTicker.instance.resume()
-BillingTicker.instance.logMode('history')
-_idle timer 재시작
-이 한 번에 실행되어야 한다.
+**찾기 (고유):**
+```dart
+      final polished = (data['polished_sentence'] as String?) ?? '';
+      final expanded = (data['expanded_sentence'] as String?) ?? '';
+```
+**교체:**
+```dart
+      final polished = (data['polished_sentence'] as String?) ?? '';
+      final expanded = (data['expanded_sentence'] as String?) ?? '';
+      final roomMode = (data['mode'] as String?) ?? ''; // 🆕 [ROUTER-FIX]
+```
 
-2. _startAppRecording()
-- 함수 시작 직후 _resumeHistoryFromUserAction()을 호출하라.
-- 튜터링 팝업을 열어둔 상태에서 다시 오토포즈가 걸린 뒤 녹음 버튼을 누르는 경우도 해제되어야 한다.
+**찾기 (고유):**
+```dart
+      if (polished.isNotEmpty || expanded.isNotEmpty) {
+```
+**교체:**
+```dart
+      // 🆕 [ROUTER-FIX] step_expand(또는 mode 없는 구버전+expanded 존재)만 Step Expand 분기.
+      // clone/roleplay는 expanded_sentence가 있어도 아래 Tutor 모드로 진행.
+      if (roomMode == 'step_expand' ||
+          (roomMode.isEmpty && (polished.isNotEmpty || expanded.isNotEmpty))) {
+```
 
-3. _stopAppRecordAndProcess(String targetKo, String targetEn)
-- 함수 시작 직후 _resumeHistoryFromUserAction()을 호출하라.
-- 녹음 종료 후 STT/GPT 교정 처리는 명백한 튜터링 활동이므로 pause 상태로 진행되면 안 된다.
+---
 
-4. _generateAppText(String baseText)
-- 함수 시작 직후 _resumeHistoryFromUserAction()을 호출하라.
-- 실전 튜터링 최초 문장 생성과 Another Sentence 모두 사용자 활동으로 처리되어야 한다.
+### 2) 헤더 아바타 축소 (양쪽) + skip(`>|`) 삭제
 
-5. _startShadowRecord()
-- 함수 시작 직후 _resumeHistoryFromUserAction()을 호출하라.
-- 교정 TTS를 듣고 쉐도잉 녹음에 들어가는 것도 오토포즈 해제 대상이다.
+**유저쪽 padding** — 찾기:
+```dart
+                              padding: const EdgeInsets.all(13),
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: _tutorUserRecording
+```
+→ `EdgeInsets.all(13)` 을 `EdgeInsets.all(9)` 로.
 
-6. _stopShadowRecord()
-- 함수 시작 직후 _resumeHistoryFromUserAction()을 호출하라.
-- 쉐도잉 녹음 종료도 사용자 활동으로 처리한다.
+**유저쪽 아이콘 size** — 찾기:
+```dart
+                                Icons.person_rounded,
+                                size: 24,
+                                color: _tutorUserRecording
+```
+→ `size: 24,` 을 `size: 18,` 로.
 
-주의:
-- 기존 _resumeHistoryFromUserAction() helper는 이미 있으므로 새로 만들 필요 없다.
-- _resetIdleTimer() 로직 자체는 건드리지 말 것.
-- _handleIdlePause() 로직도 건드리지 말 것.
-- 소리듣기 쪽은 이미 정상 동작하므로 불필요하게 수정하지 말 것.
-- 튜터링 종료 시 BillingTicker.instance.setRate(BillingRate.quarter)로 복귀하는 기존 whenComplete 로직은 유지한다.
-- History 화면은 자동 이동이 없어야 하므로 navigation 추가 금지.
-- APK/AAB 빌드 명령은 실행하지 말고, 코드 수정 후 flutter analyze/check 수준까지만 확인한다.
+**AI쪽 padding** — 찾기:
+```dart
+                              padding: const EdgeInsets.all(13),
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: _tutorAiSpeaking
+```
+→ `EdgeInsets.all(13)` 을 `EdgeInsets.all(9)` 로.
 
-검증 시나리오:
-1. History 화면에서 아무 동작 없이 오토포즈가 걸릴 때까지 대기한다.
-2. 상단 pause 아이콘이 보이는 상태에서 말풍선 옆 보라색 학교 아이콘 “실전 튜터링”을 누른다.
-3. 튜터링 팝업이 열리는 즉시 pause 아이콘이 사라지는지 확인한다.
-4. BillingTicker가 resume 되고 history 모드 로그가 다시 찍히는지 확인한다.
-5. 튜터링 팝업을 열어둔 상태에서 다시 오토포즈가 걸리게 둔다.
-6. 녹음 버튼을 누르면 즉시 오토포즈가 해제되는지 확인한다.
-7. Another Sentence 버튼을 눌러도 오토포즈가 해제되는지 확인한다.
-8. Shadow This / 쉐도잉 녹음 시작에서도 오토포즈가 해제되는지 확인한다.
+**AI쪽 아이콘 size** — 찾기:
+```dart
+                                Icons.smart_toy_rounded,
+                                size: 24,
+                                color: _tutorAiSpeaking
+```
+→ `size: 24,` 을 `size: 18,` 로.
+
+**skip 버튼 삭제** — 찾기:
+```dart
+                  IconButton(
+                    icon: const Icon(Icons.skip_next_rounded,
+                        color: Colors.white54),
+                    tooltip: "이번 차례 건너뛰기",
+                    onPressed:
+                        (isComplete || isAwaiting) ? null : _forceNextTurn,
+                  ),
+```
+→ **블록 전체 삭제(빈 문자열)**. (`_forceNextTurn`이 미사용이 되면 analyze에 unused_element 경고만 뜸 — 에러 아님. 메서드는 남겨둘 것.)
+
+---
+
+### 3) 메시지 버블: AI 아바타 로봇으로 + "AI"/"You" 글자 전부 삭제
+
+**아바타 아이콘** — 찾기:
+```dart
+                              child: Icon(
+                                lineIsAi
+                                    ? Icons.volume_up_rounded
+                                    : Icons.person_rounded,
+```
+**교체:**
+```dart
+                              child: Icon(
+                                lineIsAi
+                                    ? Icons.smart_toy_rounded
+                                    : Icons.person_rounded,
+```
+
+**라벨 텍스트 삭제** — 찾기:
+```dart
+                                children: [
+                                  Text(
+                                    lineIsAi ? "AI" : "You",
+                                    style: TextStyle(
+                                      color: isCurrent
+                                          ? roleColor
+                                          : Colors.white38,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    line['text'] as String,
+```
+**교체:**
+```dart
+                                children: [
+                                  Text(
+                                    line['text'] as String,
+```
+
+---
+
+### 4) 하단 버튼 라벨 변경 + 동작 교체(생성→이동/캐시)
+
+**버튼 라벨** — 찾기:
+```dart
+                  label: Text(
+                    _isBuildingExpand ? "만드는 중..." : "✨ 익스팬드 센텐스 만들기",
+```
+**교체:**
+```dart
+                  label: Text(
+                    _isBuildingExpand ? "불러오는 중..." : "✨ Expanded Sentence",
+```
+
+**메서드 교체:** 지난 세션의 `_combineIntoExpandedSentence(...)` **메서드 전체를 아래 `_generateExpandedFromConversation(...)` 로 교체**, 그리고 `_buildExpandFromConversation(...)` **메서드 전체를 아래 새 버전으로 교체**. (`_polishExpandedSentence`는 그대로 둘 것.)
+
+```dart
+  // 🆕 [EXPAND-FROM-CHAT v2] 대화 전체(AI+유저) → 종합 확장 문장 1개 (의미단위 ~5개, 문법 연결)
+  Future<String?> _generateExpandedFromConversation(String transcript) async {
+    if (_apiKey.isEmpty || transcript.trim().isEmpty) return null;
+    try {
+      const sysPrompt = """You are an English speaking coach.
+You are given a short conversation transcript between the user and an AI partner.
+Your job: compose ONE long, natural English sentence that synthesizes the overall
+content and gist of the WHOLE conversation.
+
+[RULES]
+- It must be ONE single sentence (do not split it into multiple sentences).
+- Build it from about 5 meaning units joined with varied grammatical connectives
+  (because, so, while, which, after, even though, and, etc.).
+- Natural, speakable rhythm (commas for breath are fine).
+- Capture the overall situation/idea of the conversation, not just one line.
+- Common everyday vocabulary only. Do not add facts not in the transcript.
+- Output exactly ONE sentence. No quotes, no prefixes, no explanation.""";
+      final response = await http
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $_apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.2,
+              'max_tokens': 250,
+              'messages': [
+                {'role': 'system', 'content': sysPrompt},
+                {
+                  'role': 'user',
+                  'content':
+                      "Conversation:\n$transcript\n\nOne synthesized sentence:"
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) return null;
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      String s =
+          ((body['choices'] as List).first['message']['content'] as String)
+              .trim();
+      if (s.startsWith('"') && s.endsWith('"')) {
+        s = s.substring(1, s.length - 1);
+      }
+      return s.isEmpty ? null : s;
+    } catch (e) {
+      debugPrint("[generateExpandedFromConversation] $e");
+      return null;
+    }
+  }
+
+  // 🆕 [EXPAND-FROM-CHAT v2] 저장된 expanded/polished 우선 → 없으면 전체 대화로 생성+캐시 → P3 이동
+  Future<void> _buildExpandFromConversation() async {
+    if (_isBuildingExpand) return;
+    if (mounted) setState(() => _isBuildingExpand = true);
+    try {
+      audioPlayer.stop();
+      _stopAutoVADRecording();
+
+      // 1순위: 방 문서에 이미 저장된 expanded/polished
+      String expanded = "";
+      String polished = "";
+      try {
+        final snap = await widget.historyDoc.get();
+        final d = snap.data();
+        expanded = (d?['expanded_sentence'] as String?)?.trim() ?? "";
+        polished = (d?['polished_sentence'] as String?)?.trim() ?? "";
+      } catch (e) {
+        debugPrint("[buildExpand] doc fetch $e");
+      }
+      if (!mounted) return;
+
+      // 2순위(fallback): 저장값 없으면 전체 대화로 즉석 생성 후 캐시
+      if (expanded.isEmpty) {
+        if (_apiKey.isEmpty) {
+          setState(() => _isBuildingExpand = false);
+          _showRoomEntryToast("API 키가 없어 생성할 수 없습니다");
+          return;
+        }
+        final transcript = _tutorLines
+            .map((l) {
+              final t = (l['text'] as String? ?? '').trim();
+              if (t.isEmpty) return null;
+              final who = (l['role'] as String?) == 'HOST' ? 'AI' : 'User';
+              return "$who: $t";
+            })
+            .whereType<String>()
+            .join("\n");
+        if (transcript.isEmpty) {
+          setState(() => _isBuildingExpand = false);
+          _showRoomEntryToast("연습할 대화가 없습니다");
+          return;
+        }
+        final gen = await _generateExpandedFromConversation(transcript);
+        if (!mounted) return;
+        if (gen == null || gen.isEmpty) {
+          setState(() => _isBuildingExpand = false);
+          _showRoomEntryToast("확장문장 생성 실패");
+          return;
+        }
+        expanded = gen;
+        final pol = await _polishExpandedSentence(expanded);
+        if (!mounted) return;
+        polished = (pol != null && pol.trim().isNotEmpty) ? pol.trim() : "";
+
+        // 캐시 저장 — mode가 clone/roleplay이므로 라우터가 Step Expand로 오인하지 않음
+        try {
+          await widget.historyDoc.update({
+            'expanded_sentence': expanded,
+            if (polished.isNotEmpty) 'polished_sentence': polished,
+          });
+        } catch (e) {
+          debugPrint("[buildExpand] cache write $e");
+        }
+        if (!mounted) return;
+      }
+
+      // P3 진입 준비
+      _isStepExpandRoom = false;
+      _expandedSentence = expanded;
+      _polishedSentence = polished;
+      _practicingPolished = false;
+      _polishedUnits = [];
+      _polishedUnitIdx = -1;
+
+      await _buildChunks(_expandedSentence);
+      if (!mounted) return;
+
+      setState(() => _isBuildingExpand = false);
+      _goToChunkPractice();
+    } catch (e) {
+      debugPrint("[buildExpandFromConversation] $e");
+      if (mounted) {
+        setState(() => _isBuildingExpand = false);
+        _showRoomEntryToast("오류: $e");
+      }
+    }
+  }
+```
+
+---
+
+### 적용 후 검증
+
+```bash
+flutter analyze
+grep -c "roomMode == 'step_expand'" lib/**/chat_history_master.dart        # 1
+grep -c "_generateExpandedFromConversation" lib/**/chat_history_master.dart # 2 (정의1+호출1)
+grep -c "_combineIntoExpandedSentence" lib/**/chat_history_master.dart      # 0 (제거 확인)
+grep -c "Icons.skip_next_rounded" lib/**/chat_history_master.dart           # 0 (삭제 확인)
+grep -c "Icons.smart_toy_rounded" lib/**/chat_history_master.dart           # 2 이상 (헤더+버블)
+grep -c 'lineIsAi ? "AI" : "You"' lib/**/chat_history_master.dart           # 0 (라벨 삭제 확인)
+grep -c "EdgeInsets.all(9)" lib/**/chat_history_master.dart                 # 2 (헤더 양쪽)
+```
+
+**롤백:** 위 교체분을 역으로 되돌리면 원복. (라우터 조건은 원래 `if (polished.isNotEmpty || expanded.isNotEmpty)` 로)
+
+---
+
+이 Phase 1만 적용해도 **버튼은 완전히 동작**합니다 (저장값 없으면 전체 대화로 fallback 생성). 검증 결과 보고해 주시면, 이어서 **Phase 2(routine_mode_clone.dart) → Phase 3(routine_mode_roleplay.dart)** — 나가기 시점 로딩 오버레이로 미리 생성·저장하는 부분을 같은 형식으로 만들어 드리겠습니다.
+
