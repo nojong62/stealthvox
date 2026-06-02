@@ -973,8 +973,6 @@ class _StoreMasterState extends State<StoreMaster> {
 
   @override
   Widget build(BuildContext context) {
-    int displayMinutes = FFAppState().remainingTime ~/ 60;
-
     return Container(
       color: Colors.black,
       child: Scaffold(
@@ -1076,7 +1074,12 @@ class _StoreMasterState extends State<StoreMaster> {
                                         fontSize: 11,
                                         letterSpacing: 2)),
                                 const SizedBox(height: 6),
-                                Text("${displayMinutes}m",
+                                Text(() {
+                                      final int s = (FFAppState().remainingTime).toInt().clamp(0, 999999);
+                                      final int h = s ~/ 3600;
+                                      final int m = (s % 3600) ~/ 60;
+                                      return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+                                    }(),
                                     style: GoogleFonts.orbitron(
                                         color: Colors.white,
                                         fontSize: 48,
