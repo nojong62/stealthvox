@@ -47,86 +47,228 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-A 지시문 — Phase 1 cache-write 보완 패치
+Phase 2 — routine_mode_clone.dart
+절대 보존: Box 7(TtsQueueManager/DeepgramV2VoiceManager/ChunkedTtsFetcher), generateCleanOriginal, dispose()/_forceSaveToFirestore(AI 생성 넣지 말 것). _handleAutoSaveAndExit 한 곳과 CloneBrain에 메서드 2개만 추가.
+2-1) CloneBrain에 static 메서드 2개 추가
+class CloneBrain { (3664행) 여는 중괄호 바로 다음 줄에 삽입:
+dart  // 🆕 [EXPAND-EXIT] 대화 전체(AI+유저) → 종합 확장 문장 1개 (의미단위 ~5개, 문법 연결)
+  static Future<String?> generateExpandedFromConversation(
+      String apiKey, String transcript) async {
+    if (apiKey.isEmpty || transcript.trim().isEmpty) return null;
+    try {
+      const sysPrompt = """You are an English speaking coach.
+You are given a short conversation transcript between the user and an AI partner.
+Your job: compose ONE long, natural English sentence that synthesizes the overall
+content and gist of the WHOLE conversation.
 
-전제: Phase 1 지시문(지난 턴)이 먼저 적용된 상태여야 합니다. 이 패치는 그 안의 _buildExpandFromConversation() 메서드만 손봅니다. (Phase 1 미적용이면 Phase 1 먼저 적용 후 이 패치를 적용할 것.)
+[RULES]
+- It must be ONE single sentence (do not split it into multiple sentences).
+- Build it from about 5 meaning units joined with varied grammatical connectives
+  (because, so, while, which, after, even though, and, etc.).
+- Natural, speakable rhythm (commas for breath are fine).
+- Capture the overall situation/idea of the conversation, not just one line.
+- Common everyday vocabulary only. Do not add facts not in the transcript.
+- Output exactly ONE sentence. No quotes, no prefixes, no explanation.""";
+      final response = await http
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.2,
+              'max_tokens': 250,
+              'messages': [
+                {'role': 'system', 'content': sysPrompt},
+                {
+                  'role': 'user',
+                  'content':
+                      "Conversation:\n$transcript\n\nOne synthesized sentence:"
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) return null;
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      String s =
+          ((body['choices'] as List).first['message']['content'] as String)
+              .trim();
+      if (s.startsWith('"') && s.endsWith('"')) s = s.substring(1, s.length - 1);
+      return s.isEmpty ? null : s;
+    } catch (e) {
+      debugPrint("[CloneBrain.generateExpandedFromConversation] $e");
+      return null;
+    }
+  }
 
-대상 파일: lib/.../chat_history_master.dart
-절대 보존: Box 7, _buildChunks(), _goToChunkPractice(), _generateExpandedFromConversation(), _polishExpandedSentence() — 건드리지 말 것. 아래 두 곳만 교체.
+  // 🆕 [EXPAND-EXIT] 확장 문장 → 쉽고 세련된 한 문장 (Polished)
+  static Future<String?> polishSentence(
+      String apiKey, String originalSentence) async {
+    if (apiKey.isEmpty || originalSentence.trim().isEmpty) return null;
+    try {
+      const sysPrompt = """You are an English speaking coach.
+Rewrite the given long English sentence as ONE "easy but elegant" spoken sentence.
 
-패치 1) 방 문서 fetch에서 mode / room_name도 함께 읽기
-찾기 (고유):
-dart      // 1순위: 방 문서에 이미 저장된 expanded/polished
-      String expanded = "";
-      String polished = "";
-      try {
-        final snap = await widget.historyDoc.get();
-        final d = snap.data();
-        expanded = (d?['expanded_sentence'] as String?)?.trim() ?? "";
-        polished = (d?['polished_sentence'] as String?)?.trim() ?? "";
-      } catch (e) {
-        debugPrint("[buildExpand] doc fetch $e");
-      }
-교체:
-dart      // 1순위: 방 문서에 이미 저장된 expanded/polished (+ mode/room_name 확보)
-      String expanded = "";
-      String polished = "";
-      String existingMode = "";
-      String roomName = "";
-      try {
-        final snap = await widget.historyDoc.get();
-        final d = snap.data();
-        expanded = (d?['expanded_sentence'] as String?)?.trim() ?? "";
-        polished = (d?['polished_sentence'] as String?)?.trim() ?? "";
-        existingMode = (d?['mode'] as String?)?.trim() ?? "";
-        roomName = (d?['room_name'] as String?)?.trim() ?? "";
-      } catch (e) {
-        debugPrint("[buildExpand] doc fetch $e");
-      }
+[GOALS]
+- Natural spoken rhythm (not written/academic)
+- Common vocabulary (no SAT words, no bookish phrases)
+- Smooth flow (pause-friendly, commas for breath)
+- Same meaning as the original (do not add new facts)
+- Easier to pronounce and say out loud
 
-패치 2) cache-write에 has_practice + mode stamp 추가
-찾기 (고유):
-dart        // 캐시 저장 — mode가 clone/roleplay이므로 라우터가 Step Expand로 오인하지 않음
-        try {
-          await widget.historyDoc.update({
-            'expanded_sentence': expanded,
-            if (polished.isNotEmpty) 'polished_sentence': polished,
-          });
-        } catch (e) {
-          debugPrint("[buildExpand] cache write $e");
-        }
-교체:
-dart        // 캐시 저장 — has_practice + mode stamp(없으면 room_name으로 추론)로
-        // 재입장 시 라우터가 expanded만 있는 모호한 방을 Step Expand로 오인하지 않게 보장
-        String stampMode = existingMode;
-        if (stampMode.isEmpty) {
-          if (roomName == "Clone Mode") {
-            stampMode = "clone";
-          } else if (roomName == "Roleplay Mode") {
-            stampMode = "roleplay";
-          } else {
-            stampMode = "clone"; // 안전 기본값: step_expand만 아니면 Tutor로 라우팅됨
+[OUTPUT]
+- Exactly ONE sentence. No explanation, no quotes, no prefixes.""";
+      final response = await http
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.2,
+              'max_tokens': 150,
+              'messages': [
+                {'role': 'system', 'content': sysPrompt},
+                {
+                  'role': 'user',
+                  'content':
+                      'Original sentence:\n$originalSentence\n\nPolished version:'
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) return originalSentence;
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      String p =
+          ((body['choices'] as List).first['message']['content'] as String)
+              .trim();
+      if (p.startsWith('"') && p.endsWith('"')) p = p.substring(1, p.length - 1);
+      return p.isEmpty ? originalSentence : p;
+    } catch (e) {
+      debugPrint("[CloneBrain.polishSentence] $e");
+      return originalSentence;
+    }
+  }
+2-2) _handleAutoSaveAndExit() 전체 교체
+메서드 전체를 아래로 교체 (기존 delete/마지막메시지 로직 유지 + else 분기에 오버레이·생성·저장 추가):
+dart  Future<void> _handleAutoSaveAndExit() async {
+    bool overlayShown = false;
+    try {
+      if (_myHistoryRef != null) {
+        final hasUserTurn = _localMessages.any((m) => m['role'] == 'HOST');
+        if (!hasUserTurn) {
+          await _myHistoryRef!.delete();
+          _log('🗑️ [HIST-DEL]', '빈 방 삭제 완료');
+        } else {
+          String lastText = "대화 기록 저장";
+          for (int i = _localMessages.length - 1; i >= 0; i--) {
+            final t = (_localMessages[i]['target'] ?? '').toString().trim();
+            if (t.isNotEmpty && t != '...') {
+              lastText = t;
+              break;
+            }
           }
-        }
-        try {
-          await widget.historyDoc.update({
-            'expanded_sentence': expanded,
+
+          // 🆕 [EXPAND-EXIT] 전체 대화 종합 → Expanded + Polished 생성 (오버레이 표시)
+          String expanded = "";
+          String polished = "";
+          final convoLines = _localMessages
+              .where((m) {
+                if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
+                final t = (m['target'] ?? '').toString().trim();
+                return t.isNotEmpty && t != '...';
+              })
+              .map((m) => "${m['role'] == 'HOST' ? 'User' : 'AI'}: ${m['target']}")
+              .toList();
+          final transcript = convoLines.join("\n");
+
+          if (transcript.isNotEmpty && _openAiKey.isNotEmpty && mounted) {
+            showDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (_) => const Center(
+                child: Card(
+                  color: Color(0xFF1E1E1E),
+                  child: Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircularProgressIndicator(color: Colors.amber),
+                        SizedBox(height: 16),
+                        Text("확장 문장 만드는 중...",
+                            style: TextStyle(color: Colors.white70)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+            overlayShown = true;
+
+            final gen = await CloneBrain.generateExpandedFromConversation(
+                _openAiKey, transcript);
+            if (gen != null && gen.isNotEmpty) {
+              expanded = gen;
+              final pol = await CloneBrain.polishSentence(_openAiKey, expanded);
+              polished = (pol != null && pol.trim().isNotEmpty) ? pol.trim() : "";
+            }
+
+            if (overlayShown && mounted &&
+                Navigator.of(context, rootNavigator: true).canPop()) {
+              Navigator.of(context, rootNavigator: true).pop();
+            }
+            overlayShown = false;
+          }
+
+          await _myHistoryRef!.update({
+            'last_message': lastText,
+            'last_message_time': FieldValue.serverTimestamp(),
+            'msg_count': _localMessages.length,
+            'last_active': FieldValue.serverTimestamp(),
+            'mode': 'clone',
+            if (expanded.isNotEmpty) 'expanded_sentence': expanded,
             if (polished.isNotEmpty) 'polished_sentence': polished,
-            'has_practice': true,
-            'expand_source': 'fallback',
-            'expand_generated_at': FieldValue.serverTimestamp(),
-            if (existingMode.isEmpty) 'mode': stampMode,
+            if (expanded.isNotEmpty) 'has_practice': true,
+            if (expanded.isNotEmpty) 'expand_source': 'exit',
+            if (expanded.isNotEmpty)
+              'expand_generated_at': FieldValue.serverTimestamp(),
           });
-        } catch (e) {
-          debugPrint("[buildExpand] cache write $e");
+          _log('💾 [HIST-UPD]',
+              'last_message + expand 저장 (expanded=${expanded.isNotEmpty})');
         }
-
-적용 후 검증
+      }
+    } catch (e) {
+      _log('❌ [HIST-EXIT-ERR]', '$e');
+    } finally {
+      // 오버레이가 남아있으면 정리
+      if (overlayShown &&
+          mounted &&
+          Navigator.of(context, rootNavigator: true).canPop()) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+      if (mounted) {
+        if (StealthRoomMaster.exitCurrentMode != null) {
+          StealthRoomMaster.exitCurrentMode!();
+        } else if (Navigator.canPop(context)) {
+          Navigator.pop(context);
+        } else {
+          context.goNamed('Lobby');
+        }
+      }
+    }
+  }
+Phase 2 검증
 bashflutter analyze
-grep -c "String existingMode" lib/**/chat_history_master.dart        # 1
-grep -c "'has_practice': true" lib/**/chat_history_master.dart        # 1 이상
-grep -c "if (existingMode.isEmpty) 'mode': stampMode" lib/**/chat_history_master.dart   # 1
-롤백: 두 블록을 원래 형태로 되돌리면 원복.
-
-이 패치의 효과는 명확합니다. mode가 없는 구버전 roleplay 방에서 fallback 생성이 일어나도, 캐시 시점에 room_name으로 mode를 추론해 박아두므로 재입장 시 라우터가 절대 Step Expand로 오인하지 않습니다. 동시에 has_practice: true로 버튼 노출 조건도 안정화됩니다.
-검증 결과(특히 flutter analyze 클린 + grep 카운트) 보고해 주시면, 이어서 B 지시문 = Phase 2(clone) + Phase 3(roleplay) 를 드리겠습니다. B에는 리뷰에서 확정된 4가지(roleplay _ensureHistoryRef에 mode:'roleplay' 추가 / _handleAutoSaveAndExit에서 오버레이+생성 / dispose는 최소 저장만 / has_practice:true 저장)가 모두 들어갑니다.
+grep -c "CloneBrain.generateExpandedFromConversation" lib/**/routine_mode_clone.dart  # 2 (정의1+호출1)
+grep -c "static Future<String?> polishSentence" lib/**/routine_mode_clone.dart        # 1
+grep -c "'expand_source': 'exit'" lib/**/routine_mode_clone.dart                      # 1
+grep -c "확장 문장 만드는 중" lib/**/routine_mode_clone.dart                          # 1
