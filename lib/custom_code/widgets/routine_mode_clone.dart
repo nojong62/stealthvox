@@ -1537,7 +1537,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
         aiTtsFetcher.addText(_cleanText(openerBuffer.trim()));
       */
 
-      // 역번역 (한국어 자막)
+      // AI original 생성 (UI 자막 선반영)
       CloneBrain.generateCleanOriginal(
               apiKey: _openAiKey, englishText: openerText)
           .then((cleanKorean) {
@@ -2012,7 +2012,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
       //   - voice/speed는 히스토리 _playRhythmAudio와 동일하게 "nova", 1.0 고정
       _saveUserFullSentenceToCache(userTargetText.trim());
 
-      // 유저 역번역 (백그라운드)
+      // 유저 original 생성 (백그라운드)
       CloneBrain.generateCleanOriginal(
               apiKey: _openAiKey, englishText: userTargetText)
           .then((cleanKorean) {
@@ -2187,15 +2187,6 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
       await aiGenerationTask;
       _log('🧠 [PIPE-08]',
           'aiGenerationTask 완료. AI pending=${aiTtsFetcher.pendingRequests}');
-      // AI 역번역 — aiGenerationTask 완료 후 aiTargetText 확정된 시점에 호출
-      CloneBrain.generateCleanOriginal(
-              apiKey: _openAiKey, englishText: aiTargetText)
-          .then((cleanKorean) {
-        if (mounted && _localMessages.length > aiIndex) {
-          setState(() => _localMessages[aiIndex]['original'] = cleanKorean);
-          _log('🔤 [BACK-TRANS]', 'AI 역번역 완료 → UI 반영');
-        }
-      });
       // [하이브리드] remainder 발사 + 통문장 TtsCache 저장
       await _hybridTtsPlayer!
           .onStreamEnd(fullSentence: _cleanText(aiTargetText.trim()));
@@ -2215,15 +2206,36 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
       // ─────────────────────────────────────────────────────
       // STEP 7: Firestore 저장
       // ─────────────────────────────────────────────────────
+      // AI original 생성 — aiTargetText 확정 후, 저장 전에 생성 (bilingual 저장 보장)
+      String aiOriginalText = '';
+      if (aiTargetText.trim().isNotEmpty) {
+        try {
+          aiOriginalText = await CloneBrain.generateCleanOriginal(
+              apiKey: _openAiKey, englishText: aiTargetText);
+          _log('🔤 [AI-ORIG]', 'AI original 생성 완료 → UI 반영 및 저장');
+          if (mounted && _localMessages.length > aiIndex) {
+            setState(
+                () => _localMessages[aiIndex]['original'] = aiOriginalText);
+          }
+        } catch (e) {
+          _log('❌ [AI-ORIG-ERR]', 'AI original 생성 실패: $e');
+        }
+      }
+
+      // 유저 original — 백그라운드 생성이 완료된 값 사용, 비어 있으면 Deepgram 원문 fallback
+      final String hostOriginal =
+          (_localMessages[hostIndex]['original'] ?? '').toString().trim().isNotEmpty
+              ? (_localMessages[hostIndex]['original'] ?? '').toString()
+              : finalTranscript;
+
       final hostLine = {
         'role': 'HOST',
-        'original_text':
-            (_localMessages[hostIndex]['original'] ?? '').toString(),
+        'original_text': hostOriginal,
         'translated_text': userTargetText,
       };
       final systemLine = {
         'role': 'SYSTEM',
-        'original_text': '',
+        'original_text': aiOriginalText,
         'translated_text': aiTargetText,
       };
       _saveTurnToFirestore([hostLine, systemLine]);
@@ -3645,7 +3657,7 @@ class HybridTtsPlayer {
 // 📂 서브박스 구성:
 //   [Box 7-1-A] _truncatePersona        — 페르소나 1500자 트림 (컨텍스트 점령 방지)
 //   [Box 7-1-B] streamUserTranslation   — 유저 한→영 번역 (CoT 2단계 주어 복원)
-//   [Box 7-1-C] generateCleanOriginal   — AI 영→한 역번역 (UI 자막)
+//   [Box 7-1-C] generateCleanOriginal   — AI original 생성 (오리지널 언어 자막)
 //   [Box 7-1-D] streamCloneResponse     — 클론 AI 응답 (2문장 강제, 8단어 제약)
 //   [Box 7-1-E] generatePersonaFromChat — 카톡 로그 → 8차원 페르소나 추출
 // ====================================================================
@@ -3762,7 +3774,7 @@ The particle before the verb's doer (이/가) is ALWAYS the subject. Never swap 
   }
 
   // ==================================================================
-  // 📦 [Box 7-1-C] generateCleanOriginal — 영→한 역번역 (UI 자막)
+  // 📦 [Box 7-1-C] generateCleanOriginal — AI original 생성 (오리지널 언어 자막)
   // ==================================================================
   static Future<String> generateCleanOriginal({
     required String apiKey,

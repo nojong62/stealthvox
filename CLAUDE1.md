@@ -47,118 +47,92 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-[StealthVox History 오토포즈 자동 해제 수정 지시문]
+클로드코드 수정 지시문
+Clone 히스토리 AI original_text 누락 문제 수정
 
 대상 파일:
-- lib/custom_code/widgets/chat_history_master.dart
 
-문제:
-History 화면에서 60초 무반응으로 오토포즈(_isIdlePaused)가 걸린 뒤,
-사용자가 소리듣기, AI 음성 다시 듣기, 전체 AI 듣기, 유저 녹음 듣기, 튜터링/AI 연습 시작을 눌러도
-오토포즈 상태가 자동으로 해제되지 않고 상단 pause 아이콘/과금 pause 상태가 계속 유지된다.
+lib/custom_code/widgets/routine_mode_clone.dart
 
-현재 구조:
-- _isIdlePaused == true 상태에서 _resetIdleTimer()가 호출되어야
-  _isIdlePaused = false
-  BillingTicker.instance.resume()
-  BillingTicker.instance.logMode('history')
-  가 실행된다.
-- 하지만 일부 재생/튜터링 시작 함수에서 _resetIdleTimer() 호출이 빠져 있어,
-  실제 사용자가 활동을 시작해도 pause 상태가 남는다.
-- _isSystemBusy는 idle 누적 방지용일 뿐, 이미 걸린 _isIdlePaused를 자동 해제하지 않는다.
+문제 설명
 
-수정 목표:
-History 화면에서는 사용자가 다시 실제 활동을 시작하는 순간 오토포즈가 자동 해제되어야 한다.
+클론 모드에서 대화 화면에는 AI 대사의 타겟 글자 + 오리지널 글자가 정상 표시된다.
+하지만 히스토리에 들어가면 AI 두 번째 대사부터 original_text가 사라진다.
 
-반드시 적용할 원칙:
-1. 오토포즈 상태라도 사용자가 아래 동작을 시작하면 즉시 _resetIdleTimer()를 호출한다.
-   - 튜터링/AI 연습 진입
-   - 튜터링 시작 버튼 확정
-   - AI TTS 재생
-   - 청크 AI 다시 듣기
-   - 전체 AI 듣기
-   - 유저 녹음 듣기
-   - 일반 History 오디오 재생
-   - 앱 튜터링/교정 오디오 재생이 있다면 해당 시작 지점
+현재 확인된 문제 지점:
 
-2. 단순히 _isSystemBusy에 항목을 추가하는 방식만으로 해결하지 말 것.
-   이미 _isIdlePaused == true인 경우 _idleTick()은 return하기 때문에,
-   busy 상태가 되어도 pause가 풀리지 않는다.
-   따라서 실제 사용자 액션 시작 함수에서 명시적으로 _resetIdleTimer()를 호출해야 한다.
+_handleFinalTranscript() 내부에서 일반 턴의 AI 응답 저장 시, systemLine을 만들 때 AI의 original_text가 빈 문자열로 저장되고 있다.
 
-3. 새 helper를 하나 만들어 중복을 줄여라.
+현재 구조상 문제:
 
-권장 helper:
-void _markUserActiveForHistory() {
-  _resetIdleTimer();
-}
+translated_text에는 AI 타겟 문장이 들어간다.
+그런데 original_text에는 빈 값이 들어간다.
+그래서 히스토리에서는 AI의 오리지널 글자가 표시되지 않는다.
 
-또는 더 명확히:
-void _resumeHistoryFromUserAction() {
-  _resetIdleTimer();
-}
+중요 개념:
 
-수정 위치:
-A. _enterShadowingFromRoom()
-- 함수 시작 직후 또는 실제 연습 진입이 확정되기 전 _resumeHistoryFromUserAction() 호출.
-- 사용자가 AI 연습 버튼을 눌렀다는 것 자체가 활동 재개이므로 오토포즈 해제 대상이다.
+오리지널 언어 = 사용자가 사용하는 언어. 예: 한국어.
+타겟 언어 = 사용자가 배우려는 언어. 예: 영어.
+유저 대사는 Deepgram STT 원문을 바탕으로 GPT가 타겟문과 오리지널 표시문을 만든다.
+AI 대사는 Deepgram을 거치지 않는다.
+AI 대사는 GPT가 처음부터 타겟문과 오리지널문을 직접 생성하거나, 최소한 저장 전에 같은 의미의 오리지널 언어 문장을 확정해야 한다.
+AI 쪽을 “역번역”이라고 부르지 마라. AI는 자기 대사를 만드는 것이므로 AI bilingual response, 즉 타겟문 + 오리지널문 동시 생성/저장 구조로 봐야 한다.
+수정 목표
 
-B. _confirmStart({required bool swap})
-- 시작 선택 확정 직후 _resumeHistoryFromUserAction() 호출.
-- 역할 선택 화면에서 대기 중 오토포즈가 걸렸더라도, 시작을 누르면 바로 해제되어야 한다.
+AI 일반 턴에서도 첫 오프너처럼 AI의 original_text가 반드시 저장되게 수정하라.
 
-C. _startTurnPractice()
-- 이미 _resetIdleTimer()가 있으면 helper로 통일해도 된다.
-- 이 함수는 유지 필수.
+히스토리 저장 시 구조는 항상 아래 기준을 지켜라.
 
-D. _startTutorPlayback()
-- 이미 _resetIdleTimer()가 있으면 helper로 통일해도 된다.
-- 이 함수는 유지 필수.
+role: SYSTEM
+translated_text: AI가 말하는 타겟 언어 문장
+original_text: 같은 의미의 오리지널 언어 문장
 
-E. _playSmartAudio(String text)
-- 실제 AI TTS 재생 시작 전 _resumeHistoryFromUserAction() 호출.
-- turnPractice에서 AI가 말하는 순간은 명백한 활동 상태다.
+예:
 
-F. _playChunkAI(int idx)
-- 청크 AI 음성 재생 시작 전에 _resumeHistoryFromUserAction() 호출.
-- Step Expand/Shadowing에서 AI 소리듣기 버튼으로 재생하는 경우도 pause가 풀려야 한다.
+타겟 언어가 영어, 오리지널 언어가 한국어인 경우
+translated_text: “How do you think you did on the test?”
+original_text: “시험은 어느 정도 본 것 같아?”
+구체 수정 지시
+_handleFinalTranscript() 내부 STEP 7 Firestore 저장 직전 로직을 수정한다.
+현재 systemLine에서 original_text가 빈 문자열로 들어가는 부분을 제거한다.
+AI 응답 스트리밍이 끝나고 aiTargetText가 확정된 뒤, 저장 전에 AI 오리지널 문장을 확정한다.
+현재 파일에 있는 CloneBrain.generateCleanOriginal() 함수는 이름과 주석이 “역번역”처럼 되어 있지만, 실제 목적은 타겟문에 대응하는 오리지널 언어 표시문 생성이다.
+일단 함수명을 바꾸지 않아도 되지만, 주석과 로그에서는 “AI 역번역”이라는 표현을 쓰지 말고 AI original 생성, AI original_text 생성, AI bilingual original 생성 같은 표현으로 바꿔라.
+aiTargetText.trim()이 비어 있지 않으면 저장 전에 AI original 문장을 생성해서 aiOriginalText 변수에 담는다.
+UI에도 동일한 aiOriginalText를 반영한다.
+systemLine 생성 시 반드시 다음 구조가 되게 한다.
+role: SYSTEM
+original_text: aiOriginalText
+translated_text: aiTargetText
+_saveTurnToFirestore([hostLine, systemLine])와 _saveHistoryMessages([hostLine, systemLine]) 양쪽 모두 같은 systemLine을 사용해야 한다.
+첫 AI 오프너 _generateAndPlayAiOpener()는 이미 AI original을 생성해서 저장하는 구조가 있으므로, 일반 턴도 그 방식과 일관되게 맞춘다.
+AI original 생성이 실패한 경우에도 앱이 멈추면 안 된다.
+실패 시에는 최소한 빈 값 대신 안전한 fallback을 넣어라.
+단, 가능하면 빈 문자열 저장은 피한다.
 
-G. _replayChunkAI(int idx)
-- 사용자가 AI 아이콘을 눌러 다시 듣기를 요청한 직후 _resumeHistoryFromUserAction() 호출.
+유저 쪽 hostLine.original_text도 확인한다.
+현재 유저 original이 UI에는 나중에 들어가고, 저장 시점에는 아직 비어 있을 가능성이 있다.
+유저 original은 정책상 다음 중 하나로 통일한다.
 
-H. _playFullAI()
-- 전체 AI 듣기 시작 직후 _resumeHistoryFromUserAction() 호출.
+Deepgram이 인식한 오리지널 언어 원문을 저장하거나,
+GPT가 정리한 오리지널 표시문을 저장한다.
 
-I. _playFullUser()
-- 전체 유저 녹음 듣기 시작 직후 _resumeHistoryFromUserAction() 호출.
+단, 어떤 방식을 쓰든 hostLine.original_text가 저장 시점에 비어 있지 않게 보장한다.
 
-J. _playUserChunk(int idx)
-- 실제 유저 녹음 파일 재생 전 _resumeHistoryFromUserAction() 호출.
-- 단, path가 null/empty라서 재생하지 않는 경우에는 굳이 호출하지 않아도 된다.
+APK/AAB 빌드 명령은 실행하지 마라.
+코드 수정과 flutter analyze 또는 관련 파일 정적 체크까지만 진행하라.
+검증 기준
+클론 대화 화면에서 AI 첫 대사뿐 아니라 두 번째, 세 번째 AI 대사도 타겟 글자와 오리지널 글자가 함께 보여야 한다.
+히스토리에 들어갔을 때 AI 두 번째 대사부터도 오리지널 글자가 사라지지 않아야 한다.
+Firestore의 chat_history/messages에서 role: SYSTEM 문서의 original_text가 빈 문자열이면 안 된다.
+translated_text에는 타겟 언어 문장이 들어가야 한다.
+original_text에는 오리지널 언어 문장이 들어가야 한다.
+AI TTS 재생 순서, 화면 스크롤, 유저 TTS 후 AI TTS 전환 구조는 변경하지 않는다.
+첫 오프너 저장 구조와 일반 AI 턴 저장 구조가 동일한 필드 정책을 가져야 한다.
+핵심 요약
 
-K. 일반 History 메시지의 오디오 재생 함수가 별도로 있다면
-- audioPlayer.play(...)를 호출하는 모든 사용자 재생 액션 시작점에 _resumeHistoryFromUserAction()을 추가하라.
-- grep 기준:
-  audioPlayer.play(
-  player.play(
-  DeviceFileSource(
-  BytesSource(
-  를 검색해서 사용자 액션 기반 재생 시작점 누락 여부를 확인하라.
+이번 문제는 AI가 오리지널 문장을 못 만드는 문제가 아니라,
+일반 턴 저장 시 SYSTEM.original_text를 빈 문자열로 저장하는 문제다.
 
-주의:
-- dispose()의 BillingTicker.instance.pause()는 유지한다.
-- _handleIdlePause()의 pause 로직은 유지한다.
-- History 화면은 자동 이동이 없어야 하므로 navigation 로직을 추가하지 않는다.
-- pause 아이콘을 탭해서 해제하는 기존 onTap: _resetIdleTimer 동작은 유지한다.
-- APK/AAB 빌드 명령은 실행하지 말고, 코드 수정 후 flutter analyze/check 수준까지만 확인한다.
-
-검증 시나리오:
-1. History 화면 진입.
-2. 아무 동작 없이 60초 이상 대기.
-3. 상단 노란 pause 아이콘이 표시되는지 확인.
-4. pause 아이콘을 직접 누르지 말고, 소리듣기/AI 다시 듣기 버튼을 누른다.
-5. 즉시 pause 아이콘이 사라지고 BillingTicker가 history 모드로 resume 되는지 확인.
-6. 다시 60초 무반응이면 pause가 다시 걸리는지 확인.
-7. pause 상태에서 튜터링/AI 연습 시작 버튼을 누른다.
-8. 역할 선택/시작 확정 후 pause가 자동 해제되고, AI 음성/녹음 턴이 정상 진행되는지 확인.
-9. Step Expand 방의 청크 AI 다시 듣기, 전체 AI 듣기, 유저 녹음 듣기에서도 동일하게 pause가 자동 해제되는지 확인.
+AI는 Deepgram 기반 역번역 대상이 아니다.
+AI는 GPT가 자기 대사를 만들 때 타겟 언어 문장과 오리지널 언어 문장을 함께 확정해서 저장해야 한다.
