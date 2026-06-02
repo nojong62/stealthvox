@@ -2062,6 +2062,7 @@ _deepgramKey: ${_deepgramKey.isEmpty ? '❌ 없음' : '✅ (${_deepgramKey.lengt
 
   // 📦 [Box 17-A-2: 실전 튜터링 - 팝업 바텀시트]
   void _showTutoringPopup(String docId, String baseText) {
+    _resumeHistoryFromUserAction();
     if (_appIsRecording || _appIsShadowRecording) {
       appAudioRecorder.stop().catchError((_) {});
     }
@@ -2393,6 +2394,7 @@ _deepgramKey: ${_deepgramKey.isEmpty ? '❌ 없음' : '✅ (${_deepgramKey.lengt
 
   // 📦 [Box 18: AI 튜터링 - 응용 문장 생성 API 호출]
   Future<void> _generateAppText(String baseText) async {
+    _resumeHistoryFromUserAction();
     if (!mounted) return;
     setState(() => isGeneratingApp = true);
     _dialogSetState?.call(() {});
@@ -2443,6 +2445,7 @@ _deepgramKey: ${_deepgramKey.isEmpty ? '❌ 없음' : '✅ (${_deepgramKey.lengt
 
   // 📦 [Box 18-B: 실전 튜터링 - 녹음 시작]
   Future<void> _startAppRecording() async {
+    _resumeHistoryFromUserAction();
     final hasPermission = await appAudioRecorder.hasPermission();
     if (!hasPermission) return;
     try {
@@ -2464,6 +2467,7 @@ _deepgramKey: ${_deepgramKey.isEmpty ? '❌ 없음' : '✅ (${_deepgramKey.lengt
   // 📦 [Box 18-C: 실전 튜터링 - 녹음 중지 → STT → GPT 교정]
   Future<void> _stopAppRecordAndProcess(
       String targetKo, String targetEn) async {
+    _resumeHistoryFromUserAction();
     final path = await appAudioRecorder.stop();
     if (mounted) setState(() => _appIsRecording = false);
     _dialogSetState?.call(() {});
@@ -2593,6 +2597,7 @@ RULES — follow exactly:
 
   // 📦 [Box 18-E: 실전 튜터링 - 쉐도잉 녹음 시작 (교정 TTS 1회 재생 후 녹음)]
   Future<void> _startShadowRecord() async {
+    _resumeHistoryFromUserAction();
     // Step 4-1: 교정 TTS 먼저 1회 재생 후 완료 대기
     if (_appCorrectedAudio != null && mounted) {
       final completer = Completer<void>();
@@ -2635,6 +2640,7 @@ RULES — follow exactly:
 
   // 📦 [Box 18-F: 실전 튜터링 - 쉐도잉 녹음 중지]
   Future<void> _stopShadowRecord() async {
+    _resumeHistoryFromUserAction();
     final path = await appAudioRecorder.stop();
     if (mounted) {
       setState(() {
