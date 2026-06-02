@@ -47,11 +47,42 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-Phase 2 — routine_mode_clone.dart
-절대 보존: Box 7(TtsQueueManager/DeepgramV2VoiceManager/ChunkedTtsFetcher), generateCleanOriginal, dispose()/_forceSaveToFirestore(AI 생성 넣지 말 것). _handleAutoSaveAndExit 한 곳과 CloneBrain에 메서드 2개만 추가.
-2-1) CloneBrain에 static 메서드 2개 추가
-class CloneBrain { (3664행) 여는 중괄호 바로 다음 줄에 삽입:
-dart  // 🆕 [EXPAND-EXIT] 대화 전체(AI+유저) → 종합 확장 문장 1개 (의미단위 ~5개, 문법 연결)
+Phase 2 깨끗하게 닫혔습니다. Phase 3는 Phase 2와 동일 패턴이지만, **3-2(RoleplayBrain 메서드)에서 "Phase 2와 동일하게 넣어라"는 모호한 지시가 부분 적용 위험**이 있어서, 전체 코드를 명시적으로 드립니다.
+
+---
+
+# Phase 3 — routine_mode_roleplay.dart
+
+**절대 보존:** Box 7 일체, `generateCleanOriginal`, `dispose()`/`_forceSaveToFirestore`(AI 생성 넣지 말 것). 아래 세 곳만 수정.
+
+### 3-1) `_ensureHistoryRef` 방 문서에 `mode: 'roleplay'` 추가
+
+**찾기 (고유):**
+```dart
+      await newRef.set({
+        'created_at': FieldValue.serverTimestamp(),
+        'room_name': "Roleplay Mode",
+        'is_pinned': false,
+        'msg_count': 0
+      });
+```
+**교체:**
+```dart
+      await newRef.set({
+        'created_at': FieldValue.serverTimestamp(),
+        'room_name': "Roleplay Mode",
+        'mode': 'roleplay', // 🆕 [ROUTER-FIX] 라우터가 Step Expand로 오인 방지
+        'is_pinned': false,
+        'msg_count': 0
+      });
+```
+
+### 3-2) RoleplayBrain에 static 메서드 2개 추가
+
+`class RoleplayBrain {` (3390행) 여는 중괄호 **바로 다음 줄**에 삽입:
+
+```dart
+  // 🆕 [EXPAND-EXIT] 대화 전체(AI+유저) → 종합 확장 문장 1개 (의미단위 ~5개, 문법 연결)
   static Future<String?> generateExpandedFromConversation(
       String apiKey, String transcript) async {
     if (apiKey.isEmpty || transcript.trim().isEmpty) return null;
@@ -100,7 +131,7 @@ content and gist of the WHOLE conversation.
       if (s.startsWith('"') && s.endsWith('"')) s = s.substring(1, s.length - 1);
       return s.isEmpty ? null : s;
     } catch (e) {
-      debugPrint("[CloneBrain.generateExpandedFromConversation] $e");
+      debugPrint("[RoleplayBrain.generateExpandedFromConversation] $e");
       return null;
     }
   }
@@ -153,13 +184,17 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
       if (p.startsWith('"') && p.endsWith('"')) p = p.substring(1, p.length - 1);
       return p.isEmpty ? originalSentence : p;
     } catch (e) {
-      debugPrint("[CloneBrain.polishSentence] $e");
+      debugPrint("[RoleplayBrain.polishSentence] $e");
       return originalSentence;
     }
   }
-2-2) _handleAutoSaveAndExit() 전체 교체
-메서드 전체를 아래로 교체 (기존 delete/마지막메시지 로직 유지 + else 분기에 오버레이·생성·저장 추가):
-dart  Future<void> _handleAutoSaveAndExit() async {
+
+```
+
+### 3-3) `_handleAutoSaveAndExit()` 전체 교체
+
+```dart
+  Future<void> _handleAutoSaveAndExit() async {
     bool overlayShown = false;
     try {
       if (_myHistoryRef != null) {
@@ -214,15 +249,17 @@ dart  Future<void> _handleAutoSaveAndExit() async {
             );
             overlayShown = true;
 
-            final gen = await CloneBrain.generateExpandedFromConversation(
+            final gen = await RoleplayBrain.generateExpandedFromConversation(
                 _openAiKey, transcript);
             if (gen != null && gen.isNotEmpty) {
               expanded = gen;
-              final pol = await CloneBrain.polishSentence(_openAiKey, expanded);
+              final pol =
+                  await RoleplayBrain.polishSentence(_openAiKey, expanded);
               polished = (pol != null && pol.trim().isNotEmpty) ? pol.trim() : "";
             }
 
-            if (overlayShown && mounted &&
+            if (overlayShown &&
+                mounted &&
                 Navigator.of(context, rootNavigator: true).canPop()) {
               Navigator.of(context, rootNavigator: true).pop();
             }
@@ -234,7 +271,9 @@ dart  Future<void> _handleAutoSaveAndExit() async {
             'last_message_time': FieldValue.serverTimestamp(),
             'msg_count': _localMessages.length,
             'last_active': FieldValue.serverTimestamp(),
-            'mode': 'clone',
+            'chat_json': jsonEncode(_localMessages),
+            'is_completed': false,
+            'mode': 'roleplay',
             if (expanded.isNotEmpty) 'expanded_sentence': expanded,
             if (polished.isNotEmpty) 'polished_sentence': polished,
             if (expanded.isNotEmpty) 'has_practice': true,
@@ -249,7 +288,6 @@ dart  Future<void> _handleAutoSaveAndExit() async {
     } catch (e) {
       _log('❌ [HIST-EXIT-ERR]', '$e');
     } finally {
-      // 오버레이가 남아있으면 정리
       if (overlayShown &&
           mounted &&
           Navigator.of(context, rootNavigator: true).canPop()) {
@@ -266,9 +304,29 @@ dart  Future<void> _handleAutoSaveAndExit() async {
       }
     }
   }
-Phase 2 검증
-bashflutter analyze
-grep -c "CloneBrain.generateExpandedFromConversation" lib/**/routine_mode_clone.dart  # 2 (정의1+호출1)
-grep -c "static Future<String?> polishSentence" lib/**/routine_mode_clone.dart        # 1
-grep -c "'expand_source': 'exit'" lib/**/routine_mode_clone.dart                      # 1
-grep -c "확장 문장 만드는 중" lib/**/routine_mode_clone.dart                          # 1
+```
+
+---
+
+### Phase 3 검증
+```bash
+flutter analyze
+grep -c "'mode': 'roleplay'" lib/custom_code/widgets/routine_mode_roleplay.dart                    # 2 이상 (_ensureHistoryRef + update)
+grep -c "RoleplayBrain.generateExpandedFromConversation" lib/custom_code/widgets/routine_mode_roleplay.dart  # 2
+grep -c "static Future<String?> polishSentence" lib/custom_code/widgets/routine_mode_roleplay.dart # 1
+grep -c "'chat_json': jsonEncode(_localMessages)" lib/custom_code/widgets/routine_mode_roleplay.dart  # 1 (유지 확인)
+grep -c "'expand_source': 'exit'" lib/custom_code/widgets/routine_mode_roleplay.dart               # 1
+```
+
+특히 `'mode': 'roleplay'`가 **2 이상**인지 꼭 확인하세요 — `_ensureHistoryRef`(방 생성)와 `_handleAutoSaveAndExit`(저장) 양쪽에 다 들어가야 라우터 오인이 완전히 막힙니다.
+
+**롤백:** 세 곳의 추가/교체분을 원형으로 복구.
+
+---
+
+이걸로 B 전체(Phase 2 + 3)가 끝납니다. 적용·검증 후, 다음은 **실제 동작 통합 테스트**를 권합니다.
+
+전체 흐름 점검 포인트는 세 가지입니다. Clone/Roleplay에서 대화 후 나가기 → 오버레이 뜨고 잠깐 후 종료되는지, 히스토리에서 그 방 다시 들어가면 Step Expand가 아닌 **Tutor 화면 + "✨ Expanded Sentence" 버튼**이 보이는지, 그리고 그 버튼을 누르면 **즉시(재생성 없이)** P3 의미단위 따라읽기로 들어가고 상단 P 버튼으로 폴리시 문장 전환이 되는지입니다.
+
+Phase 3 결과 알려주시면 통합 테스트 체크리스트를 표로 정리해 드리겠습니다.
+
