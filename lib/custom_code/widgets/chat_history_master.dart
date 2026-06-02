@@ -134,6 +134,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   // 🆕 [CHUNK-PRACTICE] 의미단위 연습 모드 상태
   bool _practicingPolished = false; // false = expanded, true = polished
+  bool _isBuildingExpand = false; // 🆕 [EXPAND-FROM-CHAT] 확장문장 생성 중 플래그
   bool _isPlayingFullAI = false; // 전체 AI 듣기 진행 중
   int _polishedRevealCount = 0;
   Timer? _polishedRevealTimer;
@@ -4485,6 +4486,44 @@ RULES — follow exactly:
                   ],
                 ),
               ),
+
+            // 🆕 [EXPAND-FROM-CHAT] 항상 고정 하단 footer 버튼
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                20,
+                6,
+                20,
+                (isComplete ? 6 : 12) +
+                    MediaQuery.of(context).viewPadding.bottom,
+              ),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  icon: _isBuildingExpand
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.amber),
+                        )
+                      : const Icon(Icons.auto_awesome_rounded, size: 18),
+                  label: Text(
+                    _isBuildingExpand ? "만드는 중..." : "✨ 익스팬드 센텐스 만들기",
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.amber.withOpacity(0.12),
+                    foregroundColor: Colors.amber,
+                    side: const BorderSide(color: Colors.amber),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16)),
+                  ),
+                  onPressed:
+                      _isBuildingExpand ? null : _buildExpandFromConversation,
+                ),
+              ),
+            ),
           ],
         ),
         // 역할 선택 말풍선 오버레이
@@ -5521,6 +5560,187 @@ RULES — follow exactly:
       });
       WidgetsBinding.instance
           .addPostFrameCallback((_) => _showRoleSelectBubble());
+    }
+  }
+
+  // 🆕 [EXPAND-FROM-CHAT] 유저 발화 여러 개 → 자연스러운 긴 영어 한 문장으로 결합
+  Future<String?> _combineIntoExpandedSentence(List<String> userLines) async {
+    if (_apiKey.isEmpty || userLines.isEmpty) return null;
+    try {
+      final joined = userLines
+          .asMap()
+          .entries
+          .map((e) => "${e.key + 1}. ${e.value}")
+          .join("\n");
+      const sysPrompt = """You are an English speaking coach.
+The user said several short English lines during a conversation.
+Your job: weave them into ONE natural, flowing spoken English sentence.
+
+[RULES]
+- Combine the ideas in the given order into a single coherent sentence.
+- Keep it natural and speakable (commas for breath are fine).
+- Do not add new facts that are not implied by the lines.
+- Common everyday vocabulary only.
+- Output exactly ONE sentence. No quotes, no prefixes, no explanation.""";
+      final response = await http
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $_apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.2,
+              'max_tokens': 200,
+              'messages': [
+                {'role': 'system', 'content': sysPrompt},
+                {
+                  'role': 'user',
+                  'content': "Lines:\n$joined\n\nCombined sentence:"
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) return null;
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      String s =
+          ((body['choices'] as List).first['message']['content'] as String)
+              .trim();
+      if (s.startsWith('"') && s.endsWith('"')) {
+        s = s.substring(1, s.length - 1);
+      }
+      return s.isEmpty ? null : s;
+    } catch (e) {
+      debugPrint("[combineIntoExpandedSentence] $e");
+      return null;
+    }
+  }
+
+  // 🆕 [EXPAND-FROM-CHAT] 확장문장 → 쉽고 세련된 한 문장 (StepExpandBrain.polishSentence 동일 로직 복제)
+  Future<String?> _polishExpandedSentence(String originalSentence) async {
+    if (_apiKey.isEmpty || originalSentence.trim().isEmpty) return null;
+    try {
+      const sysPrompt = """You are an English speaking coach.
+The user has built a long English sentence through step-by-step expansion.
+Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
+
+[GOALS]
+- Natural spoken rhythm (not written/academic)
+- Common vocabulary (no SAT words, no bookish phrases)
+- Smooth flow (pause-friendly, commas for breath)
+- Same meaning as the original (do not add new facts)
+- Slightly more elegant/polished than the original
+- Easier to pronounce and say out loud
+
+[AVOID]
+- Big academic words
+- Formal written phrases
+- Complex nested clauses that are hard to speak
+- Adding information not in the original
+
+[OUTPUT]
+- Exactly ONE sentence.
+- No explanation, no quotes, no prefixes.
+- Just the polished sentence.""";
+      final response = await http
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $_apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.2,
+              'max_tokens': 150,
+              'messages': [
+                {'role': 'system', 'content': sysPrompt},
+                {
+                  'role': 'user',
+                  'content':
+                      'Original sentence:\n$originalSentence\n\nPolished version:'
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) return originalSentence;
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      String polished =
+          ((body['choices'] as List).first['message']['content'] as String)
+              .trim();
+      if (polished.startsWith('"') && polished.endsWith('"')) {
+        polished = polished.substring(1, polished.length - 1);
+      }
+      return polished.isEmpty ? originalSentence : polished;
+    } catch (e) {
+      debugPrint("[polishExpandedSentence] $e");
+      return originalSentence;
+    }
+  }
+
+  // 🆕 [EXPAND-FROM-CHAT] 유저 발화 최대 5개 → 확장문장+폴리시문장 생성 → P3 진입
+  // 주의: 생성 결과는 런타임 상태로만 P3에 전달. Firestore(historyDoc)에 저장 금지.
+  Future<void> _buildExpandFromConversation() async {
+    if (_isBuildingExpand) return;
+    if (_apiKey.isEmpty) {
+      _showRoomEntryToast("API 키가 없어 생성할 수 없습니다");
+      return;
+    }
+    // 유저 발화 추출: raw role != 'HOST'만 (스왑 무관, AI 대사 절대 불포함)
+    // 시간순 전체 중 5개 초과 시 "최근 5개" 사용 + 5개 내부 원래 순서 유지
+    final allUserLines = _tutorLines
+        .where((l) => (l['role'] as String?) != 'HOST')
+        .map((l) => (l['text'] as String? ?? '').trim())
+        .where((t) => t.isNotEmpty)
+        .toList();
+    if (allUserLines.isEmpty) {
+      _showRoomEntryToast("연습할 유저 문장이 없습니다");
+      return;
+    }
+    final userLines = allUserLines.length > 5
+        ? allUserLines.sublist(allUserLines.length - 5)
+        : allUserLines;
+
+    if (mounted) setState(() => _isBuildingExpand = true);
+    try {
+      audioPlayer.stop();
+      _stopAutoVADRecording();
+
+      final expanded = await _combineIntoExpandedSentence(userLines);
+      if (!mounted) return;
+      if (expanded == null || expanded.isEmpty) {
+        setState(() => _isBuildingExpand = false);
+        _showRoomEntryToast("확장문장 생성 실패");
+        return;
+      }
+
+      final polished = await _polishExpandedSentence(expanded);
+      if (!mounted) return;
+
+      _isStepExpandRoom = false; // 🆕 임시 문장이므로 Step Expand 방 아님 (탭바 방지)
+      _expandedSentence = expanded;
+      _polishedSentence =
+          (polished != null && polished.trim().isNotEmpty) ? polished.trim() : "";
+      _practicingPolished = false;
+      _polishedUnits = [];
+      _polishedUnitIdx = -1;
+
+      await _buildChunks(_expandedSentence);
+      if (!mounted) return;
+
+      setState(() => _isBuildingExpand = false);
+      _goToChunkPractice();
+    } catch (e) {
+      debugPrint("[buildExpandFromConversation] $e");
+      if (mounted) {
+        setState(() => _isBuildingExpand = false);
+        _showRoomEntryToast("생성 중 오류: $e");
+      }
     }
   }
 
