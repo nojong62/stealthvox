@@ -431,14 +431,17 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
       final polished = (data['polished_sentence'] as String?) ?? '';
       final expanded = (data['expanded_sentence'] as String?) ?? '';
+      final roomMode = (data['mode'] as String?) ?? ''; // 🆕 [ROUTER-FIX]
 
       _debugLogs +=
           "polished_sentence: ${polished.isEmpty ? '(없음)' : polished}\n";
       _debugLogs +=
           "expanded_sentence: ${expanded.isEmpty ? '(없음)' : expanded}\n\n";
 
-      // Step Expand 방: messages 로드 + _stepExpandTurns 파싱 → variantSelect(3버튼)
-      if (polished.isNotEmpty || expanded.isNotEmpty) {
+      // 🆕 [ROUTER-FIX] step_expand(또는 mode 없는 구버전+expanded 존재)만 Step Expand 분기.
+      // clone/roleplay는 expanded_sentence가 있어도 아래 Tutor 모드로 진행.
+      if (roomMode == 'step_expand' ||
+          (roomMode.isEmpty && (polished.isNotEmpty || expanded.isNotEmpty))) {
         _debugLogs += "✅ Step Expand 방 분기 → messages 로드 + variantSelect\n";
         _polishedSentence = polished;
         _expandedSentence = expanded.isNotEmpty ? expanded : polished;
@@ -4133,7 +4136,7 @@ RULES — follow exactly:
                                 : _onTutorUserIconTap,
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 250),
-                              padding: const EdgeInsets.all(13),
+                              padding: const EdgeInsets.all(9),
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 color: _tutorUserRecording
@@ -4152,7 +4155,7 @@ RULES — follow exactly:
                               ),
                               child: Icon(
                                 Icons.person_rounded,
-                                size: 24,
+                                size: 18,
                                 color: _tutorUserRecording
                                     ? Colors.greenAccent
                                     : isAwaiting
@@ -4192,7 +4195,7 @@ RULES — follow exactly:
                                 : null,
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 250),
-                              padding: const EdgeInsets.all(13),
+                              padding: const EdgeInsets.all(9),
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 color: _tutorAiSpeaking
@@ -4211,7 +4214,7 @@ RULES — follow exactly:
                               ),
                               child: Icon(
                                 Icons.smart_toy_rounded,
-                                size: 24,
+                                size: 18,
                                 color: _tutorAiSpeaking
                                     ? Colors.blue
                                     : isAwaiting
@@ -4223,13 +4226,6 @@ RULES — follow exactly:
                         ),
                       ],
                     ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.skip_next_rounded,
-                        color: Colors.white54),
-                    tooltip: "이번 차례 건너뛰기",
-                    onPressed:
-                        (isComplete || isAwaiting) ? null : _forceNextTurn,
                   ),
                 ],
               ),
@@ -4311,7 +4307,7 @@ RULES — follow exactly:
                               ),
                               child: Icon(
                                 lineIsAi
-                                    ? Icons.volume_up_rounded
+                                    ? Icons.smart_toy_rounded
                                     : Icons.person_rounded,
                                 color: isCurrent ? roleColor : Colors.white38,
                                 size: 17,
@@ -4324,17 +4320,6 @@ RULES — follow exactly:
                                     ? CrossAxisAlignment.end
                                     : CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    lineIsAi ? "AI" : "You",
-                                    style: TextStyle(
-                                      color: isCurrent
-                                          ? roleColor
-                                          : Colors.white38,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 3),
                                   Text(
                                     line['text'] as String,
                                     textAlign: lineIsAi
@@ -4514,7 +4499,7 @@ RULES — follow exactly:
                         )
                       : const Icon(Icons.auto_awesome_rounded, size: 18),
                   label: Text(
-                    _isBuildingExpand ? "만드는 중..." : "✨ 익스팬드 센텐스 만들기",
+                    _isBuildingExpand ? "불러오는 중..." : "✨ Expanded Sentence",
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                   style: ElevatedButton.styleFrom(
@@ -5569,24 +5554,22 @@ RULES — follow exactly:
     }
   }
 
-  // 🆕 [EXPAND-FROM-CHAT] 유저 발화 여러 개 → 자연스러운 긴 영어 한 문장으로 결합
-  Future<String?> _combineIntoExpandedSentence(List<String> userLines) async {
-    if (_apiKey.isEmpty || userLines.isEmpty) return null;
+  // 🆕 [EXPAND-FROM-CHAT v2] 대화 전체(AI+유저) → 종합 확장 문장 1개 (의미단위 ~5개, 문법 연결)
+  Future<String?> _generateExpandedFromConversation(String transcript) async {
+    if (_apiKey.isEmpty || transcript.trim().isEmpty) return null;
     try {
-      final joined = userLines
-          .asMap()
-          .entries
-          .map((e) => "${e.key + 1}. ${e.value}")
-          .join("\n");
       const sysPrompt = """You are an English speaking coach.
-The user said several short English lines during a conversation.
-Your job: weave them into ONE natural, flowing spoken English sentence.
+You are given a short conversation transcript between the user and an AI partner.
+Your job: compose ONE long, natural English sentence that synthesizes the overall
+content and gist of the WHOLE conversation.
 
 [RULES]
-- Combine the ideas in the given order into a single coherent sentence.
-- Keep it natural and speakable (commas for breath are fine).
-- Do not add new facts that are not implied by the lines.
-- Common everyday vocabulary only.
+- It must be ONE single sentence (do not split it into multiple sentences).
+- Build it from about 5 meaning units joined with varied grammatical connectives
+  (because, so, while, which, after, even though, and, etc.).
+- Natural, speakable rhythm (commas for breath are fine).
+- Capture the overall situation/idea of the conversation, not just one line.
+- Common everyday vocabulary only. Do not add facts not in the transcript.
 - Output exactly ONE sentence. No quotes, no prefixes, no explanation.""";
       final response = await http
           .post(
@@ -5598,12 +5581,13 @@ Your job: weave them into ONE natural, flowing spoken English sentence.
             body: jsonEncode({
               'model': 'gpt-4o-mini',
               'temperature': 0.2,
-              'max_tokens': 200,
+              'max_tokens': 250,
               'messages': [
                 {'role': 'system', 'content': sysPrompt},
                 {
                   'role': 'user',
-                  'content': "Lines:\n$joined\n\nCombined sentence:"
+                  'content':
+                      "Conversation:\n$transcript\n\nOne synthesized sentence:"
                 },
               ],
             }),
@@ -5620,7 +5604,7 @@ Your job: weave them into ONE natural, flowing spoken English sentence.
       }
       return s.isEmpty ? null : s;
     } catch (e) {
-      debugPrint("[combineIntoExpandedSentence] $e");
+      debugPrint("[generateExpandedFromConversation] $e");
       return null;
     }
   }
@@ -5689,49 +5673,76 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     }
   }
 
-  // 🆕 [EXPAND-FROM-CHAT] 유저 발화 최대 5개 → 확장문장+폴리시문장 생성 → P3 진입
-  // 주의: 생성 결과는 런타임 상태로만 P3에 전달. Firestore(historyDoc)에 저장 금지.
+  // 🆕 [EXPAND-FROM-CHAT v2] 저장된 expanded/polished 우선 → 없으면 전체 대화로 생성+캐시 → P3 이동
   Future<void> _buildExpandFromConversation() async {
     if (_isBuildingExpand) return;
-    if (_apiKey.isEmpty) {
-      _showRoomEntryToast("API 키가 없어 생성할 수 없습니다");
-      return;
-    }
-    // 유저 발화 추출: raw role != 'HOST'만 (스왑 무관, AI 대사 절대 불포함)
-    // 시간순 전체 중 5개 초과 시 "최근 5개" 사용 + 5개 내부 원래 순서 유지
-    final allUserLines = _tutorLines
-        .where((l) => (l['role'] as String?) != 'HOST')
-        .map((l) => (l['text'] as String? ?? '').trim())
-        .where((t) => t.isNotEmpty)
-        .toList();
-    if (allUserLines.isEmpty) {
-      _showRoomEntryToast("연습할 유저 문장이 없습니다");
-      return;
-    }
-    final userLines = allUserLines.length > 5
-        ? allUserLines.sublist(allUserLines.length - 5)
-        : allUserLines;
-
     if (mounted) setState(() => _isBuildingExpand = true);
     try {
       audioPlayer.stop();
       _stopAutoVADRecording();
 
-      final expanded = await _combineIntoExpandedSentence(userLines);
+      // 1순위: 방 문서에 이미 저장된 expanded/polished
+      String expanded = "";
+      String polished = "";
+      try {
+        final snap = await widget.historyDoc.get();
+        final d = snap.data() as Map<String, dynamic>?;
+        expanded = (d?['expanded_sentence'] as String?)?.trim() ?? "";
+        polished = (d?['polished_sentence'] as String?)?.trim() ?? "";
+      } catch (e) {
+        debugPrint("[buildExpand] doc fetch $e");
+      }
       if (!mounted) return;
-      if (expanded == null || expanded.isEmpty) {
-        setState(() => _isBuildingExpand = false);
-        _showRoomEntryToast("확장문장 생성 실패");
-        return;
+
+      // 2순위(fallback): 저장값 없으면 전체 대화로 즉석 생성 후 캐시
+      if (expanded.isEmpty) {
+        if (_apiKey.isEmpty) {
+          setState(() => _isBuildingExpand = false);
+          _showRoomEntryToast("API 키가 없어 생성할 수 없습니다");
+          return;
+        }
+        final transcript = _tutorLines
+            .map((l) {
+              final t = (l['text'] as String? ?? '').trim();
+              if (t.isEmpty) return null;
+              final who = (l['role'] as String?) == 'HOST' ? 'AI' : 'User';
+              return "$who: $t";
+            })
+            .whereType<String>()
+            .join("\n");
+        if (transcript.isEmpty) {
+          setState(() => _isBuildingExpand = false);
+          _showRoomEntryToast("연습할 대화가 없습니다");
+          return;
+        }
+        final gen = await _generateExpandedFromConversation(transcript);
+        if (!mounted) return;
+        if (gen == null || gen.isEmpty) {
+          setState(() => _isBuildingExpand = false);
+          _showRoomEntryToast("확장문장 생성 실패");
+          return;
+        }
+        expanded = gen;
+        final pol = await _polishExpandedSentence(expanded);
+        if (!mounted) return;
+        polished = (pol != null && pol.trim().isNotEmpty) ? pol.trim() : "";
+
+        // 캐시 저장 — mode가 clone/roleplay이므로 라우터가 Step Expand로 오인하지 않음
+        try {
+          await widget.historyDoc.update({
+            'expanded_sentence': expanded,
+            if (polished.isNotEmpty) 'polished_sentence': polished,
+          });
+        } catch (e) {
+          debugPrint("[buildExpand] cache write $e");
+        }
+        if (!mounted) return;
       }
 
-      final polished = await _polishExpandedSentence(expanded);
-      if (!mounted) return;
-
-      _isStepExpandRoom = false; // 🆕 임시 문장이므로 Step Expand 방 아님 (탭바 방지)
+      // P3 진입 준비
+      _isStepExpandRoom = false;
       _expandedSentence = expanded;
-      _polishedSentence =
-          (polished != null && polished.trim().isNotEmpty) ? polished.trim() : "";
+      _polishedSentence = polished;
       _practicingPolished = false;
       _polishedUnits = [];
       _polishedUnitIdx = -1;
@@ -5745,7 +5756,7 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
       debugPrint("[buildExpandFromConversation] $e");
       if (mounted) {
         setState(() => _isBuildingExpand = false);
-        _showRoomEntryToast("생성 중 오류: $e");
+        _showRoomEntryToast("오류: $e");
       }
     }
   }
