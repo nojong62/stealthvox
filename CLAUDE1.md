@@ -47,298 +47,76 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-## Claude Code 지시 프롬프트 (최종 통합본)
+[StealthVox History 실전 튜터링 오토포즈 해제 누락 수정 지시문]
 
-**대상 파일:** `lib/.../chat_history_master.dart` (단일 파일, 외부 import 추가 없음, 순수 추가형 변경)
+대상 파일:
+- lib/custom_code/widgets/chat_history_master.dart
 
----
+문제:
+History 화면에서 오토포즈 상태(_isIdlePaused == true)일 때,
+소리듣기 버튼을 누르면 오토포즈가 정상 해제되지만,
+말풍선 옆 보라색 학교 아이콘의 “실전 튜터링”을 누르면 오토포즈가 해제되지 않는다.
 
-### 절대 보존 / 주의 (변경 금지)
+확인된 원인:
+- 오디오 재생 함수 쪽에는 _resumeHistoryFromUserAction() 호출이 들어가 있다.
+- 하지만 실전 튜터링 팝업 진입 함수인 _showTutoringPopup(String docId, String baseText) 시작부에는 _resumeHistoryFromUserAction() 호출이 없다.
+- 현재 _showTutoringPopup() 안에서는 BillingTicker.instance.setRate(BillingRate.full)만 실행되고, BillingTicker resume/logMode 복구는 실행되지 않는다.
+- 따라서 오토포즈 상태에서 튜터링을 열면 과금 rate는 full로 바뀌지만 pause 상태는 그대로 남는다.
 
-- Box 7 (`TtsQueueManager`, `DeepgramV2VoiceManager`) 일체.
-- `_buildChunkPracticeScreen()`, `_switchToPolishedPractice()`, `_splitPolishedIntoUnits()`, `_buildChunks()`, `_goToChunkPractice()` — **읽기만** 하고 수정하지 말 것.
-- 기존 `_buildTurnPracticeScreen()`의 기존 children·로직(완료 화면·역할 선택·오버레이)은 전부 유지. **맨 아래 footer에 한 블록만 추가.**
-- 🚫 이 기능은 Clone/Roleplay 히스토리에서 **"임시"** 확장문장을 만들어 Practice3로 연결만 한다. 생성된 expanded/polished 문장을 historyDoc(방 문서)의 `expanded_sentence` / `polished_sentence` 필드에 **절대 저장하지 말 것.** 저장하면 재입장 시 `_enterShadowingFromRoom()` 라우터가 이 방을 Step Expand 방으로 오인한다. (런타임 상태로만 P3에 전달)
-- `_isStepExpandRoom`은 **false로 유지**한다 (P1/P2/P3 탭바가 뜨면 안 됨).
-- 유저 발화 추출은 **raw `role != 'HOST'`만** 사용한다. `_isAiTurn()`은 `_swapRoles`를 반영하므로 추출에 쓰지 말 것 (스왑 상태에서 AI 대사가 섞일 수 있음).
+수정 목표:
+History에서 사용자가 실전 튜터링을 누르는 순간, 오토포즈가 즉시 해제되어야 한다.
+튜터링 팝업 열기, 녹음 시작, 새 문장 생성 같은 실제 활동도 모두 사용자 활동으로 인정해야 한다.
 
----
+수정 지점:
 
-### 수정 1 — 상태 변수 추가 (약 136행 근처)
+1. _showTutoringPopup(String docId, String baseText)
+- 함수 시작 직후, appAudioRecorder 정리보다 먼저 또는 최소한 setState 전에 _resumeHistoryFromUserAction()을 호출하라.
+- 이 함수가 실전 튜터링의 진입점이므로 여기서 반드시 오토포즈를 해제해야 한다.
+- BillingTicker.instance.setRate(BillingRate.full) 전에 호출하는 것이 가장 안전하다.
 
-`bool _practicingPolished = false; // false = expanded, true = polished` 줄 **바로 다음 줄**에 추가:
+적용 의도:
+오토포즈 상태에서 학교 아이콘을 누르는 순간
+_isIdlePaused = false
+BillingTicker.instance.resume()
+BillingTicker.instance.logMode('history')
+_idle timer 재시작
+이 한 번에 실행되어야 한다.
 
-```dart
-  bool _isBuildingExpand = false; // 🆕 [EXPAND-FROM-CHAT] 확장문장 생성 중 플래그
-```
+2. _startAppRecording()
+- 함수 시작 직후 _resumeHistoryFromUserAction()을 호출하라.
+- 튜터링 팝업을 열어둔 상태에서 다시 오토포즈가 걸린 뒤 녹음 버튼을 누르는 경우도 해제되어야 한다.
 
----
+3. _stopAppRecordAndProcess(String targetKo, String targetEn)
+- 함수 시작 직후 _resumeHistoryFromUserAction()을 호출하라.
+- 녹음 종료 후 STT/GPT 교정 처리는 명백한 튜터링 활동이므로 pause 상태로 진행되면 안 된다.
 
-### 수정 2 — 신규 메서드 3개 추가
+4. _generateAppText(String baseText)
+- 함수 시작 직후 _resumeHistoryFromUserAction()을 호출하라.
+- 실전 튜터링 최초 문장 생성과 Another Sentence 모두 사용자 활동으로 처리되어야 한다.
 
-`void _goToChunkPractice() {` 줄 **바로 위**에 아래 3개 메서드 전체를 삽입:
+5. _startShadowRecord()
+- 함수 시작 직후 _resumeHistoryFromUserAction()을 호출하라.
+- 교정 TTS를 듣고 쉐도잉 녹음에 들어가는 것도 오토포즈 해제 대상이다.
 
-```dart
-  // 🆕 [EXPAND-FROM-CHAT] 유저 발화 여러 개 → 자연스러운 긴 영어 한 문장으로 결합
-  Future<String?> _combineIntoExpandedSentence(List<String> userLines) async {
-    if (_apiKey.isEmpty || userLines.isEmpty) return null;
-    try {
-      final joined = userLines
-          .asMap()
-          .entries
-          .map((e) => "${e.key + 1}. ${e.value}")
-          .join("\n");
-      const sysPrompt = """You are an English speaking coach.
-The user said several short English lines during a conversation.
-Your job: weave them into ONE natural, flowing spoken English sentence.
+6. _stopShadowRecord()
+- 함수 시작 직후 _resumeHistoryFromUserAction()을 호출하라.
+- 쉐도잉 녹음 종료도 사용자 활동으로 처리한다.
 
-[RULES]
-- Combine the ideas in the given order into a single coherent sentence.
-- Keep it natural and speakable (commas for breath are fine).
-- Do not add new facts that are not implied by the lines.
-- Common everyday vocabulary only.
-- Output exactly ONE sentence. No quotes, no prefixes, no explanation.""";
-      final response = await http
-          .post(
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
-            headers: {
-              'Authorization': 'Bearer $_apiKey',
-              'Content-Type': 'application/json; charset=utf-8',
-            },
-            body: jsonEncode({
-              'model': 'gpt-4o-mini',
-              'temperature': 0.2,
-              'max_tokens': 200,
-              'messages': [
-                {'role': 'system', 'content': sysPrompt},
-                {
-                  'role': 'user',
-                  'content': "Lines:\n$joined\n\nCombined sentence:"
-                },
-              ],
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode != 200) return null;
-      final body =
-          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-      String s =
-          ((body['choices'] as List).first['message']['content'] as String)
-              .trim();
-      if (s.startsWith('"') && s.endsWith('"')) {
-        s = s.substring(1, s.length - 1);
-      }
-      return s.isEmpty ? null : s;
-    } catch (e) {
-      debugPrint("[combineIntoExpandedSentence] $e");
-      return null;
-    }
-  }
+주의:
+- 기존 _resumeHistoryFromUserAction() helper는 이미 있으므로 새로 만들 필요 없다.
+- _resetIdleTimer() 로직 자체는 건드리지 말 것.
+- _handleIdlePause() 로직도 건드리지 말 것.
+- 소리듣기 쪽은 이미 정상 동작하므로 불필요하게 수정하지 말 것.
+- 튜터링 종료 시 BillingTicker.instance.setRate(BillingRate.quarter)로 복귀하는 기존 whenComplete 로직은 유지한다.
+- History 화면은 자동 이동이 없어야 하므로 navigation 추가 금지.
+- APK/AAB 빌드 명령은 실행하지 말고, 코드 수정 후 flutter analyze/check 수준까지만 확인한다.
 
-  // 🆕 [EXPAND-FROM-CHAT] 확장문장 → 쉽고 세련된 한 문장 (StepExpandBrain.polishSentence 동일 로직 복제)
-  Future<String?> _polishExpandedSentence(String originalSentence) async {
-    if (_apiKey.isEmpty || originalSentence.trim().isEmpty) return null;
-    try {
-      const sysPrompt = """You are an English speaking coach.
-The user has built a long English sentence through step-by-step expansion.
-Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
-
-[GOALS]
-- Natural spoken rhythm (not written/academic)
-- Common vocabulary (no SAT words, no bookish phrases)
-- Smooth flow (pause-friendly, commas for breath)
-- Same meaning as the original (do not add new facts)
-- Slightly more elegant/polished than the original
-- Easier to pronounce and say out loud
-
-[AVOID]
-- Big academic words
-- Formal written phrases
-- Complex nested clauses that are hard to speak
-- Adding information not in the original
-
-[OUTPUT]
-- Exactly ONE sentence.
-- No explanation, no quotes, no prefixes.
-- Just the polished sentence.""";
-      final response = await http
-          .post(
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
-            headers: {
-              'Authorization': 'Bearer $_apiKey',
-              'Content-Type': 'application/json; charset=utf-8',
-            },
-            body: jsonEncode({
-              'model': 'gpt-4o-mini',
-              'temperature': 0.2,
-              'max_tokens': 150,
-              'messages': [
-                {'role': 'system', 'content': sysPrompt},
-                {
-                  'role': 'user',
-                  'content':
-                      'Original sentence:\n$originalSentence\n\nPolished version:'
-                },
-              ],
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode != 200) return originalSentence;
-      final body =
-          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-      String polished =
-          ((body['choices'] as List).first['message']['content'] as String)
-              .trim();
-      if (polished.startsWith('"') && polished.endsWith('"')) {
-        polished = polished.substring(1, polished.length - 1);
-      }
-      return polished.isEmpty ? originalSentence : polished;
-    } catch (e) {
-      debugPrint("[polishExpandedSentence] $e");
-      return originalSentence;
-    }
-  }
-
-  // 🆕 [EXPAND-FROM-CHAT] 유저 발화 최대 5개 → 확장문장+폴리시문장 생성 → P3 진입
-  // 주의: 생성 결과는 런타임 상태로만 P3에 전달. Firestore(historyDoc)에 저장 금지.
-  Future<void> _buildExpandFromConversation() async {
-    if (_isBuildingExpand) return;
-    if (_apiKey.isEmpty) {
-      _showRoomEntryToast("API 키가 없어 생성할 수 없습니다");
-      return;
-    }
-    // 유저 발화 추출: raw role != 'HOST'만 (스왑 무관, AI 대사 절대 불포함)
-    // 시간순 전체 중 5개 초과 시 "최근 5개" 사용 + 5개 내부 원래 순서 유지
-    final allUserLines = _tutorLines
-        .where((l) => (l['role'] as String?) != 'HOST')
-        .map((l) => (l['text'] as String? ?? '').trim())
-        .where((t) => t.isNotEmpty)
-        .toList();
-    if (allUserLines.isEmpty) {
-      _showRoomEntryToast("연습할 유저 문장이 없습니다");
-      return;
-    }
-    final userLines = allUserLines.length > 5
-        ? allUserLines.sublist(allUserLines.length - 5)
-        : allUserLines;
-
-    if (mounted) setState(() => _isBuildingExpand = true);
-    try {
-      audioPlayer.stop();
-      _stopAutoVADRecording();
-
-      final expanded = await _combineIntoExpandedSentence(userLines);
-      if (!mounted) return;
-      if (expanded == null || expanded.isEmpty) {
-        setState(() => _isBuildingExpand = false);
-        _showRoomEntryToast("확장문장 생성 실패");
-        return;
-      }
-
-      final polished = await _polishExpandedSentence(expanded);
-      if (!mounted) return;
-
-      _isStepExpandRoom = false; // 🆕 임시 문장이므로 Step Expand 방 아님 (탭바 방지)
-      _expandedSentence = expanded;
-      _polishedSentence =
-          (polished != null && polished.trim().isNotEmpty) ? polished.trim() : "";
-      _practicingPolished = false;
-      _polishedUnits = [];
-      _polishedUnitIdx = -1;
-
-      await _buildChunks(_expandedSentence);
-      if (!mounted) return;
-
-      setState(() => _isBuildingExpand = false);
-      _goToChunkPractice();
-    } catch (e) {
-      debugPrint("[buildExpandFromConversation] $e");
-      if (mounted) {
-        setState(() => _isBuildingExpand = false);
-        _showRoomEntryToast("생성 중 오류: $e");
-      }
-    }
-  }
-
-```
-
----
-
-### 수정 3 — turnPractice 하단 고정 footer 버튼 추가
-
-`_buildTurnPracticeScreen()` 안에서 버튼을 **스크롤 리스트(`Expanded`) 내부가 아니라 Column의 footer 영역(마지막 child)**에 둔다. 대화 리스트는 `Expanded`로 유지하고, 완료 화면·역할 선택·오버레이 구조는 변경하지 않는다.
-
-`if (isComplete)` Padding 블록이 끝난 직후이자 Column children을 닫는 `],` **바로 앞**에 삽입.
-
-**찾을 컨텍스트 (약 4487~4490행):**
-```dart
-              ),
-          ],
-        ),
-        // 역할 선택 말풍선 오버레이
-```
-
-**변경 후 (`],` 앞에 footer 추가):**
-```dart
-              ),
-
-            // 🆕 [EXPAND-FROM-CHAT] 항상 고정 하단 footer 버튼
-            Padding(
-              padding: EdgeInsets.fromLTRB(
-                20,
-                6,
-                20,
-                (isComplete ? 6 : 12) +
-                    MediaQuery.of(context).viewPadding.bottom,
-              ),
-              child: SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  icon: _isBuildingExpand
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.amber),
-                        )
-                      : const Icon(Icons.auto_awesome_rounded, size: 18),
-                  label: Text(
-                    _isBuildingExpand ? "만드는 중..." : "✨ 익스팬드 센텐스 만들기",
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.amber.withOpacity(0.12),
-                    foregroundColor: Colors.amber,
-                    side: const BorderSide(color: Colors.amber),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16)),
-                  ),
-                  onPressed:
-                      _isBuildingExpand ? null : _buildExpandFromConversation,
-                ),
-              ),
-            ),
-          ],
-        ),
-        // 역할 선택 말풍선 오버레이
-```
-
----
-
-### 적용 후 검증 (필수)
-
-```bash
-flutter analyze
-grep -c "_buildExpandFromConversation" lib/**/chat_history_master.dart   # 2 (정의 1 + onPressed 1)
-grep -c "_combineIntoExpandedSentence" lib/**/chat_history_master.dart   # 2
-grep -c "_polishExpandedSentence"      lib/**/chat_history_master.dart   # 2
-grep -c "_isBuildingExpand"            lib/**/chat_history_master.dart   # 6 이상
-# Firestore 저장이 잘못 들어가지 않았는지 확인 (0이어야 정상)
-grep -c "historyDoc.*expanded_sentence\|update.*expanded_sentence" lib/**/chat_history_master.dart   # 0
-```
-
-**롤백:** 수정 1~3에서 추가한 블록만 제거하면 원복 (기존 코드 삭제분 없음).
-
----
-
+검증 시나리오:
+1. History 화면에서 아무 동작 없이 오토포즈가 걸릴 때까지 대기한다.
+2. 상단 pause 아이콘이 보이는 상태에서 말풍선 옆 보라색 학교 아이콘 “실전 튜터링”을 누른다.
+3. 튜터링 팝업이 열리는 즉시 pause 아이콘이 사라지는지 확인한다.
+4. BillingTicker가 resume 되고 history 모드 로그가 다시 찍히는지 확인한다.
+5. 튜터링 팝업을 열어둔 상태에서 다시 오토포즈가 걸리게 둔다.
+6. 녹음 버튼을 누르면 즉시 오토포즈가 해제되는지 확인한다.
+7. Another Sentence 버튼을 눌러도 오토포즈가 해제되는지 확인한다.
+8. Shadow This / 쉐도잉 녹음 시작에서도 오토포즈가 해제되는지 확인한다.
