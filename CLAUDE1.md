@@ -47,253 +47,298 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-## Claude Code 지시문
+## Claude Code 지시 프롬프트 (최종 통합본)
 
-파일:
-`lib/custom_code/widgets/routine_mode_step_expand.dart`
-
-목표:
-Step Expand의 시작 방식을 **AI가 먼저 질문하는 구조**에서 **유저가 먼저 기본 문장을 제안하는 구조**로 되돌린다.
-
-핵심 요구사항:
-
-1. **대화 방식, 5턴 확장 패턴, 문장 확장 로직, Part1/Part2 구조, 히스토리 저장 구조는 절대 건드리지 않는다.**
-2. 바꿀 것은 오직 **세션 첫 발화 진입 방식**이다.
-3. 기존처럼 AI가 먼저 주제 질문을 만들면 안 된다.
-4. 세션 시작 시 AI는 다음 안내문만 말하고 대기한다.
-
-문구:
-
-> 대화하면서 문장을 늘려가고 싶은 기본 문장을 하나 제안해 주세요.
-
-5. 이 안내문은 “질문 생성”이 아니라 “시작 안내”다.
-6. 안내문 재생 후 바로 STT를 시작해서 유저의 첫 기본 문장을 기다린다.
-7. 유저가 말한 첫 문장을 기존 파이프라인으로 그대로 보내서, 이후 Step Expand의 기존 5턴 확장 흐름이 계속 진행되게 한다.
+**대상 파일:** `lib/.../chat_history_master.dart` (단일 파일, 외부 import 추가 없음, 순수 추가형 변경)
 
 ---
 
-## 수정할 부분
+### 절대 보존 / 주의 (변경 금지)
 
-### 1. `_fetchKeys()` 수정
-
-현재 흐름:
-
-* Firebase Remote Config 키 로드
-* 키 로드 완료 후 `_startSessionWithAiQuestion()` 호출
-* AI가 먼저 개방형 질문 생성
-
-이 구조를 제거한다.
-
-변경 방향:
-
-* 키 로드 완료 후 `_startSessionWaitingForUserSeed()` 같은 새 시작 함수 호출
-* 이 함수는 AI 질문 생성 API를 호출하지 않는다.
-* 안내문 TTS만 재생하고 STT를 시작한다.
-
-주의:
-
-* `_fetchKeys()` 안의 주석 `키 로드 완료 → AI가 먼저 개방형 질문 발화` 같은 문구도 삭제하거나 변경한다.
-* 예: `키 로드 완료 → 시작 안내 후 유저 기본 문장 대기`
+- Box 7 (`TtsQueueManager`, `DeepgramV2VoiceManager`) 일체.
+- `_buildChunkPracticeScreen()`, `_switchToPolishedPractice()`, `_splitPolishedIntoUnits()`, `_buildChunks()`, `_goToChunkPractice()` — **읽기만** 하고 수정하지 말 것.
+- 기존 `_buildTurnPracticeScreen()`의 기존 children·로직(완료 화면·역할 선택·오버레이)은 전부 유지. **맨 아래 footer에 한 블록만 추가.**
+- 🚫 이 기능은 Clone/Roleplay 히스토리에서 **"임시"** 확장문장을 만들어 Practice3로 연결만 한다. 생성된 expanded/polished 문장을 historyDoc(방 문서)의 `expanded_sentence` / `polished_sentence` 필드에 **절대 저장하지 말 것.** 저장하면 재입장 시 `_enterShadowingFromRoom()` 라우터가 이 방을 Step Expand 방으로 오인한다. (런타임 상태로만 P3에 전달)
+- `_isStepExpandRoom`은 **false로 유지**한다 (P1/P2/P3 탭바가 뜨면 안 됨).
+- 유저 발화 추출은 **raw `role != 'HOST'`만** 사용한다. `_isAiTurn()`은 `_swapRoles`를 반영하므로 추출에 쓰지 말 것 (스왑 상태에서 AI 대사가 섞일 수 있음).
 
 ---
 
-### 2. `_startSessionWithAiQuestion()` 제거 또는 대체
+### 수정 1 — 상태 변수 추가 (약 136행 근처)
 
-현재 함수는 다음 일을 하고 있다.
+`bool _practicingPolished = false; // false = expanded, true = polished` 줄 **바로 다음 줄**에 추가:
 
-* SYSTEM 버블 생성
-* `StepExpandBrain.streamGrammarQuestion(... isOpening: true)` 호출
-* AI 오프닝 질문 생성
-* AI 질문 TTS 재생
-* 재생 완료 후 STT 시작
-
-이 함수는 더 이상 맞지 않는다.
-
-변경 방향:
-
-함수명을 새 구조에 맞게 바꾼다.
-
-권장 이름:
-
-`_startSessionWaitingForUserSeed()`
-
-기능:
-
-* `_resetIdleTimer()`
-* `_isConversationActive = true`
-* 안내문을 화면에 표시할지 여부는 선택 가능하나, 표시한다면 SYSTEM 안내 버블로만 표시
-* 이 안내문은 Firestore 대화 턴으로 저장하지 않는다.
-* OpenAI 질문 생성 API 호출 금지
-* TTS로 아래 안내문만 재생
-
-> 대화하면서 문장을 늘려가고 싶은 기본 문장을 하나 제안해 주세요.
-
-* TTS 완료 후 `_startDeepgramListening()` 호출
-* 유저 첫 발화가 들어오면 기존 `_commitTranscriptAndRunPipeline()` 또는 현재 연결된 기존 파이프라인이 그대로 처리하게 한다.
-
-중요:
-
-* 유저의 첫 문장이 `_turnCounter == 0` 상태에서 들어가야 한다.
-* 이 첫 문장이 Step Expand의 “기본 seed 문장”이 된다.
-* 이후 AI는 기존 `streamGrammarQuestion()`의 일반 턴 질문 로직을 사용해서 문장을 확장한다.
+```dart
+  bool _isBuildingExpand = false; // 🆕 [EXPAND-FROM-CHAT] 확장문장 생성 중 플래그
+```
 
 ---
 
-### 3. `streamGrammarQuestion()`의 `isOpening` 분기 제거
+### 수정 2 — 신규 메서드 3개 추가
 
-현재 `StepExpandBrain.streamGrammarQuestion()` 안에 `isOpening = true`일 때 AI가 뉴스/일상 소재를 골라 첫 질문을 생성하는 분기가 있다.
+`void _goToChunkPractice() {` 줄 **바로 위**에 아래 3개 메서드 전체를 삽입:
 
-이제 필요 없다.
+```dart
+  // 🆕 [EXPAND-FROM-CHAT] 유저 발화 여러 개 → 자연스러운 긴 영어 한 문장으로 결합
+  Future<String?> _combineIntoExpandedSentence(List<String> userLines) async {
+    if (_apiKey.isEmpty || userLines.isEmpty) return null;
+    try {
+      final joined = userLines
+          .asMap()
+          .entries
+          .map((e) => "${e.key + 1}. ${e.value}")
+          .join("\n");
+      const sysPrompt = """You are an English speaking coach.
+The user said several short English lines during a conversation.
+Your job: weave them into ONE natural, flowing spoken English sentence.
 
-삭제 대상:
+[RULES]
+- Combine the ideas in the given order into a single coherent sentence.
+- Keep it natural and speakable (commas for breath are fine).
+- Do not add new facts that are not implied by the lines.
+- Common everyday vocabulary only.
+- Output exactly ONE sentence. No quotes, no prefixes, no explanation.""";
+      final response = await http
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $_apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.2,
+              'max_tokens': 200,
+              'messages': [
+                {'role': 'system', 'content': sysPrompt},
+                {
+                  'role': 'user',
+                  'content': "Lines:\n$joined\n\nCombined sentence:"
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) return null;
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      String s =
+          ((body['choices'] as List).first['message']['content'] as String)
+              .trim();
+      if (s.startsWith('"') && s.endsWith('"')) {
+        s = s.substring(1, s.length - 1);
+      }
+      return s.isEmpty ? null : s;
+    } catch (e) {
+      debugPrint("[combineIntoExpandedSentence] $e");
+      return null;
+    }
+  }
 
-* `isOpening` 파라미터
-* `bool isOpening = false` 주석 중 “세션 첫 시작 — AI가 먼저 개방형 질문”
-* `if (isOpening) { ... }` 전체 분기
-* 68k.news 또는 GPT로 오프닝 주제/질문을 만드는 로직
-* “AI가 먼저 개방형 질문” 관련 주석
-* “첫 질문 이후 유저 대답부터 문장 확장 시작” 같은 AI-first 설명
+  // 🆕 [EXPAND-FROM-CHAT] 확장문장 → 쉽고 세련된 한 문장 (StepExpandBrain.polishSentence 동일 로직 복제)
+  Future<String?> _polishExpandedSentence(String originalSentence) async {
+    if (_apiKey.isEmpty || originalSentence.trim().isEmpty) return null;
+    try {
+      const sysPrompt = """You are an English speaking coach.
+The user has built a long English sentence through step-by-step expansion.
+Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
 
-주의:
+[GOALS]
+- Natural spoken rhythm (not written/academic)
+- Common vocabulary (no SAT words, no bookish phrases)
+- Smooth flow (pause-friendly, commas for breath)
+- Same meaning as the original (do not add new facts)
+- Slightly more elegant/polished than the original
+- Easier to pronounce and say out loud
 
-* 일반 턴 질문 생성 로직은 절대 삭제하지 않는다.
-* 턴 1~MAX_TURNS에서 유저 문장을 더 자연스럽게 확장하기 위한 질문 생성 프롬프트는 그대로 유지한다.
-* 최종 확장문장 생성, Polished Sentence 생성, Part1/Part2 출력 규칙도 그대로 유지한다.
+[AVOID]
+- Big academic words
+- Formal written phrases
+- Complex nested clauses that are hard to speak
+- Adding information not in the original
+
+[OUTPUT]
+- Exactly ONE sentence.
+- No explanation, no quotes, no prefixes.
+- Just the polished sentence.""";
+      final response = await http
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $_apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.2,
+              'max_tokens': 150,
+              'messages': [
+                {'role': 'system', 'content': sysPrompt},
+                {
+                  'role': 'user',
+                  'content':
+                      'Original sentence:\n$originalSentence\n\nPolished version:'
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) return originalSentence;
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      String polished =
+          ((body['choices'] as List).first['message']['content'] as String)
+              .trim();
+      if (polished.startsWith('"') && polished.endsWith('"')) {
+        polished = polished.substring(1, polished.length - 1);
+      }
+      return polished.isEmpty ? originalSentence : polished;
+    } catch (e) {
+      debugPrint("[polishExpandedSentence] $e");
+      return originalSentence;
+    }
+  }
+
+  // 🆕 [EXPAND-FROM-CHAT] 유저 발화 최대 5개 → 확장문장+폴리시문장 생성 → P3 진입
+  // 주의: 생성 결과는 런타임 상태로만 P3에 전달. Firestore(historyDoc)에 저장 금지.
+  Future<void> _buildExpandFromConversation() async {
+    if (_isBuildingExpand) return;
+    if (_apiKey.isEmpty) {
+      _showRoomEntryToast("API 키가 없어 생성할 수 없습니다");
+      return;
+    }
+    // 유저 발화 추출: raw role != 'HOST'만 (스왑 무관, AI 대사 절대 불포함)
+    // 시간순 전체 중 5개 초과 시 "최근 5개" 사용 + 5개 내부 원래 순서 유지
+    final allUserLines = _tutorLines
+        .where((l) => (l['role'] as String?) != 'HOST')
+        .map((l) => (l['text'] as String? ?? '').trim())
+        .where((t) => t.isNotEmpty)
+        .toList();
+    if (allUserLines.isEmpty) {
+      _showRoomEntryToast("연습할 유저 문장이 없습니다");
+      return;
+    }
+    final userLines = allUserLines.length > 5
+        ? allUserLines.sublist(allUserLines.length - 5)
+        : allUserLines;
+
+    if (mounted) setState(() => _isBuildingExpand = true);
+    try {
+      audioPlayer.stop();
+      _stopAutoVADRecording();
+
+      final expanded = await _combineIntoExpandedSentence(userLines);
+      if (!mounted) return;
+      if (expanded == null || expanded.isEmpty) {
+        setState(() => _isBuildingExpand = false);
+        _showRoomEntryToast("확장문장 생성 실패");
+        return;
+      }
+
+      final polished = await _polishExpandedSentence(expanded);
+      if (!mounted) return;
+
+      _isStepExpandRoom = false; // 🆕 임시 문장이므로 Step Expand 방 아님 (탭바 방지)
+      _expandedSentence = expanded;
+      _polishedSentence =
+          (polished != null && polished.trim().isNotEmpty) ? polished.trim() : "";
+      _practicingPolished = false;
+      _polishedUnits = [];
+      _polishedUnitIdx = -1;
+
+      await _buildChunks(_expandedSentence);
+      if (!mounted) return;
+
+      setState(() => _isBuildingExpand = false);
+      _goToChunkPractice();
+    } catch (e) {
+      debugPrint("[buildExpandFromConversation] $e");
+      if (mounted) {
+        setState(() => _isBuildingExpand = false);
+        _showRoomEntryToast("생성 중 오류: $e");
+      }
+    }
+  }
+
+```
 
 ---
 
-### 4. 새 주제 / 리셋 / Suggest New Sentence 흐름 수정
+### 수정 3 — turnPractice 하단 고정 footer 버튼 추가
 
-현재 아래 위치들이 `_startSessionWithAiQuestion()`을 다시 호출한다.
+`_buildTurnPracticeScreen()` 안에서 버튼을 **스크롤 리스트(`Expanded`) 내부가 아니라 Column의 footer 영역(마지막 child)**에 둔다. 대화 리스트는 `Expanded`로 유지하고, 완료 화면·역할 선택·오버레이 구조는 변경하지 않는다.
 
-* 5턴 완료 후 새 주제 시작
-* 리셋 버튼
-* 진행 중 새 주제
-* `_suggestNewSentence()` 끝부분
+`if (isComplete)` Padding 블록이 끝난 직후이자 Column children을 닫는 `],` **바로 앞**에 삽입.
 
-모두 새 시작 함수로 교체한다.
+**찾을 컨텍스트 (약 4487~4490행):**
+```dart
+              ),
+          ],
+        ),
+        // 역할 선택 말풍선 오버레이
+```
 
-변경 전 의미:
+**변경 후 (`],` 앞에 footer 추가):**
+```dart
+              ),
 
-* 새 주제 시작 → AI가 먼저 질문
-
-변경 후 의미:
-
-* 새 주제 시작 → 안내문 재생 → 유저 기본 문장 대기
-
-즉, 모든 재시작 지점은 다음 흐름으로 통일한다.
-
-`_resetSession()`
-→ `_startSessionWaitingForUserSeed()`
-
-주석도 함께 수정한다.
-
-예:
-
-* `AI 먼저 질문` 삭제
-* `유저 기본 문장 대기` 또는 `시작 안내 후 유저 seed 문장 대기`로 변경
-
----
-
-### 5. 설계 원칙 주석 수정
-
-현재 상단 주석에 다음 취지의 내용이 있다.
-
-* AI가 먼저 말한다
-* AI-First
-* 개방형 질문 원칙
-* 세션 시작 시 AI가 개방형 질문을 먼저 생성·발화
-* 유저는 듣다가 대답
-
-이 내용은 전부 현재 목표와 반대이므로 삭제 또는 수정한다.
-
-새 설계 원칙:
-
-* Step Expand는 유저가 먼저 기본 문장을 제안한다.
-* AI는 시작 안내만 하고 대기한다.
-* 유저의 첫 문장이 확장 seed가 된다.
-* 이후 AI는 기존 5턴 확장 패턴대로 짧은 유도 질문을 한다.
-* 대화 패턴과 확장 로직은 기존 유지.
-
----
-
-### 6. 침묵/망설임 폴백 문구 정리
-
-현재 침묵 타이머 주석과 로그가 “첫 질문 침묵” 기준으로 되어 있다.
-
-변경 방향:
-
-* “첫 질문 침묵”이 아니라 “기본 문장 입력 대기 중 침묵”으로 표현 변경
-* 폴백 문구도 질문 재생 후 대기하는 느낌이 아니라, 유저가 기본 문장을 말하도록 부드럽게 안내하는 느낌으로 변경
-
-예:
-
-> 짧아도 괜찮아요. 먼저 떠오르는 기본 문장을 하나 말해 주세요.
-
-주의:
-
-* 침묵 폴백 자체는 유지해도 된다.
-* 단, 다시 AI 질문을 생성하면 안 된다.
+            // 🆕 [EXPAND-FROM-CHAT] 항상 고정 하단 footer 버튼
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                20,
+                6,
+                20,
+                (isComplete ? 6 : 12) +
+                    MediaQuery.of(context).viewPadding.bottom,
+              ),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  icon: _isBuildingExpand
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.amber),
+                        )
+                      : const Icon(Icons.auto_awesome_rounded, size: 18),
+                  label: Text(
+                    _isBuildingExpand ? "만드는 중..." : "✨ 익스팬드 센텐스 만들기",
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.amber.withOpacity(0.12),
+                    foregroundColor: Colors.amber,
+                    side: const BorderSide(color: Colors.amber),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16)),
+                  ),
+                  onPressed:
+                      _isBuildingExpand ? null : _buildExpandFromConversation,
+                ),
+              ),
+            ),
+          ],
+        ),
+        // 역할 선택 말풍선 오버레이
+```
 
 ---
 
-### 7. 절대 건드리지 말 것
+### 적용 후 검증 (필수)
 
-아래는 수정 금지:
+```bash
+flutter analyze
+grep -c "_buildExpandFromConversation" lib/**/chat_history_master.dart   # 2 (정의 1 + onPressed 1)
+grep -c "_combineIntoExpandedSentence" lib/**/chat_history_master.dart   # 2
+grep -c "_polishExpandedSentence"      lib/**/chat_history_master.dart   # 2
+grep -c "_isBuildingExpand"            lib/**/chat_history_master.dart   # 6 이상
+# Firestore 저장이 잘못 들어가지 않았는지 확인 (0이어야 정상)
+grep -c "historyDoc.*expanded_sentence\|update.*expanded_sentence" lib/**/chat_history_master.dart   # 0
+```
 
-* 기존 5턴 확장 구조
-* MAX_TURNS
-* `_runPipeline` 계열 처리
-* 유저 발화 STT 처리
-* 유저 문장 → target/original 생성 로직
-* Part1/Part2 분리 규칙
-* Firestore 저장 구조
-* History 저장 구조
-* Polished Sentence 생성
-* Practice 모드
-* 스크롤 방식
-* TTS 큐 구조
-* 문장 확장 프롬프트 중 “턴별 유도 질문” 로직
-
-이번 수정은 **첫 발화의 주도권만 AI에서 유저로 돌리는 작업**이다.
+**롤백:** 수정 1~3에서 추가한 블록만 제거하면 원복 (기존 코드 삭제분 없음).
 
 ---
 
-## 기대 동작
-
-수정 후 Step Expand 진입 시:
-
-1. 화면 진입
-2. API 키 로드
-3. AI가 딱 한 번 안내
-
-> 대화하면서 문장을 늘려가고 싶은 기본 문장을 하나 제안해 주세요.
-
-4. AI는 대기
-5. 마이크/STT 자동 시작
-6. 유저가 예를 들어 “I want to travel.”이라고 말함
-7. 이 문장이 첫 seed가 됨
-8. 이후 기존 Step Expand 방식 그대로 AI가 짧은 유도 질문을 하며 문장을 늘려감
-9. 5턴 완료 후 기존처럼 Expanded Sentence / Polished Sentence / Practice 흐름 유지
-
----
-
-## 검증 기준
-
-수정 후 반드시 확인:
-
-1. Step Expand 진입 직후 AI가 뉴스/일상 주제 질문을 하지 않아야 한다.
-2. 첫 안내문은 정확히 다음 문장이어야 한다.
-
-> 대화하면서 문장을 늘려가고 싶은 기본 문장을 하나 제안해 주세요.
-
-3. 안내문 후 STT가 자동 시작되어야 한다.
-4. 유저 첫 발화가 첫 seed 문장으로 처리되어야 한다.
-5. 이후 AI의 유도 질문/확장 패턴은 기존과 동일해야 한다.
-6. 새 주제, 리셋, Suggest New Sentence 후에도 AI 질문이 아니라 같은 안내문으로 시작해야 한다.
-7. `flutter analyze`에서 새 error가 없어야 한다.
-8. APK/AAB 빌드 명령은 실행하지 말고, 코드 수정과 analyze/check까지만 진행한다.
-
----
-
-핵심은 이겁니다: **AI가 “무슨 이야기를 해볼까요?”라고 주제를 던지는 앱이 아니라, 유저가 “내가 늘리고 싶은 기본 문장”을 먼저 던지고 AI가 그 문장을 확장해주는 앱**으로 되돌리는 수정입니다.
