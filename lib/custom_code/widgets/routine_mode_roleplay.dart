@@ -1724,6 +1724,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       await newRef.set({
         'created_at': FieldValue.serverTimestamp(),
         'room_name': "Roleplay Mode",
+        'mode': 'roleplay', // 🆕 [ROUTER-FIX] 라우터가 Step Expand로 오인 방지
         'is_pinned': false,
         'msg_count': 0
       });
@@ -1771,6 +1772,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 
   /// 뒤로가기 시: 빈 방 폭파 or last_message 업데이트 후 나가기
   Future<void> _handleAutoSaveAndExit() async {
+    bool overlayShown = false;
     try {
       if (_myHistoryRef != null) {
         final hasUserTurn = _localMessages.any((m) => m['role'] == 'HOST');
@@ -1786,6 +1788,61 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
               break;
             }
           }
+
+          // 🆕 [EXPAND-EXIT] 전체 대화 종합 → Expanded + Polished 생성 (오버레이 표시)
+          String expanded = "";
+          String polished = "";
+          final convoLines = _localMessages
+              .where((m) {
+                if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
+                final t = (m['target'] ?? '').toString().trim();
+                return t.isNotEmpty && t != '...';
+              })
+              .map((m) => "${m['role'] == 'HOST' ? 'User' : 'AI'}: ${m['target']}")
+              .toList();
+          final transcript = convoLines.join("\n");
+
+          if (transcript.isNotEmpty && _openAiKey.isNotEmpty && mounted) {
+            showDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (_) => const Center(
+                child: Card(
+                  color: Color(0xFF1E1E1E),
+                  child: Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircularProgressIndicator(color: Colors.amber),
+                        SizedBox(height: 16),
+                        Text("확장 문장 만드는 중...",
+                            style: TextStyle(color: Colors.white70)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+            overlayShown = true;
+
+            final gen = await RoleplayBrain.generateExpandedFromConversation(
+                _openAiKey, transcript);
+            if (gen != null && gen.isNotEmpty) {
+              expanded = gen;
+              final pol =
+                  await RoleplayBrain.polishSentence(_openAiKey, expanded);
+              polished = (pol != null && pol.trim().isNotEmpty) ? pol.trim() : "";
+            }
+
+            if (overlayShown &&
+                mounted &&
+                Navigator.of(context, rootNavigator: true).canPop()) {
+              Navigator.of(context, rootNavigator: true).pop();
+            }
+            overlayShown = false;
+          }
+
           await _myHistoryRef!.update({
             'last_message': lastText,
             'last_message_time': FieldValue.serverTimestamp(),
@@ -1793,13 +1850,26 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
             'last_active': FieldValue.serverTimestamp(),
             'chat_json': jsonEncode(_localMessages),
             'is_completed': false,
+            'mode': 'roleplay',
+            if (expanded.isNotEmpty) 'expanded_sentence': expanded,
+            if (polished.isNotEmpty) 'polished_sentence': polished,
+            if (expanded.isNotEmpty) 'has_practice': true,
+            if (expanded.isNotEmpty) 'expand_source': 'exit',
+            if (expanded.isNotEmpty)
+              'expand_generated_at': FieldValue.serverTimestamp(),
           });
-          _log('💾 [HIST-UPD]', 'last_message + chat_json 업데이트 완료');
+          _log('💾 [HIST-UPD]',
+              'last_message + expand 저장 (expanded=${expanded.isNotEmpty})');
         }
       }
     } catch (e) {
       _log('❌ [HIST-EXIT-ERR]', '$e');
     } finally {
+      if (overlayShown &&
+          mounted &&
+          Navigator.of(context, rootNavigator: true).canPop()) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
       if (mounted) {
         if (StealthRoomMaster.exitCurrentMode != null) {
           StealthRoomMaster.exitCurrentMode!();
@@ -3388,6 +3458,113 @@ class HybridTtsPlayer {
 // 🧠 [Box 7-1] RoleplayBrain v3 — 롤플레이 모드 전용 AI 뇌
 // ====================================================================
 class RoleplayBrain {
+  // 🆕 [EXPAND-EXIT] 대화 전체(AI+유저) → 종합 확장 문장 1개 (의미단위 ~5개, 문법 연결)
+  static Future<String?> generateExpandedFromConversation(
+      String apiKey, String transcript) async {
+    if (apiKey.isEmpty || transcript.trim().isEmpty) return null;
+    try {
+      const sysPrompt = """You are an English speaking coach.
+You are given a short conversation transcript between the user and an AI partner.
+Your job: compose ONE long, natural English sentence that synthesizes the overall
+content and gist of the WHOLE conversation.
+
+[RULES]
+- It must be ONE single sentence (do not split it into multiple sentences).
+- Build it from about 5 meaning units joined with varied grammatical connectives
+  (because, so, while, which, after, even though, and, etc.).
+- Natural, speakable rhythm (commas for breath are fine).
+- Capture the overall situation/idea of the conversation, not just one line.
+- Common everyday vocabulary only. Do not add facts not in the transcript.
+- Output exactly ONE sentence. No quotes, no prefixes, no explanation.""";
+      final response = await http
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.2,
+              'max_tokens': 250,
+              'messages': [
+                {'role': 'system', 'content': sysPrompt},
+                {
+                  'role': 'user',
+                  'content':
+                      "Conversation:\n$transcript\n\nOne synthesized sentence:"
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) return null;
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      String s =
+          ((body['choices'] as List).first['message']['content'] as String)
+              .trim();
+      if (s.startsWith('"') && s.endsWith('"')) s = s.substring(1, s.length - 1);
+      return s.isEmpty ? null : s;
+    } catch (e) {
+      debugPrint("[RoleplayBrain.generateExpandedFromConversation] $e");
+      return null;
+    }
+  }
+
+  // 🆕 [EXPAND-EXIT] 확장 문장 → 쉽고 세련된 한 문장 (Polished)
+  static Future<String?> polishSentence(
+      String apiKey, String originalSentence) async {
+    if (apiKey.isEmpty || originalSentence.trim().isEmpty) return null;
+    try {
+      const sysPrompt = """You are an English speaking coach.
+Rewrite the given long English sentence as ONE "easy but elegant" spoken sentence.
+
+[GOALS]
+- Natural spoken rhythm (not written/academic)
+- Common vocabulary (no SAT words, no bookish phrases)
+- Smooth flow (pause-friendly, commas for breath)
+- Same meaning as the original (do not add new facts)
+- Easier to pronounce and say out loud
+
+[OUTPUT]
+- Exactly ONE sentence. No explanation, no quotes, no prefixes.""";
+      final response = await http
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.2,
+              'max_tokens': 150,
+              'messages': [
+                {'role': 'system', 'content': sysPrompt},
+                {
+                  'role': 'user',
+                  'content':
+                      'Original sentence:\n$originalSentence\n\nPolished version:'
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) return originalSentence;
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      String p =
+          ((body['choices'] as List).first['message']['content'] as String)
+              .trim();
+      if (p.startsWith('"') && p.endsWith('"')) p = p.substring(1, p.length - 1);
+      return p.isEmpty ? originalSentence : p;
+    } catch (e) {
+      debugPrint("[RoleplayBrain.polishSentence] $e");
+      return originalSentence;
+    }
+  }
+
   // 📋 [200개 기초 상황 — 카테고리 5종 × 40개] (v4 추가)
   static const List<String> _baseSituations200 = [
     // ── 공항_비행기_교통 (40개) ──
