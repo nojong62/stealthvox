@@ -5681,14 +5681,18 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
       audioPlayer.stop();
       _stopAutoVADRecording();
 
-      // 1순위: 방 문서에 이미 저장된 expanded/polished
+      // 1순위: 방 문서에 이미 저장된 expanded/polished (+ mode/room_name 확보)
       String expanded = "";
       String polished = "";
+      String existingMode = "";
+      String roomName = "";
       try {
         final snap = await widget.historyDoc.get();
         final d = snap.data() as Map<String, dynamic>?;
         expanded = (d?['expanded_sentence'] as String?)?.trim() ?? "";
         polished = (d?['polished_sentence'] as String?)?.trim() ?? "";
+        existingMode = (d?['mode'] as String?)?.trim() ?? "";
+        roomName = (d?['room_name'] as String?)?.trim() ?? "";
       } catch (e) {
         debugPrint("[buildExpand] doc fetch $e");
       }
@@ -5727,11 +5731,26 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
         if (!mounted) return;
         polished = (pol != null && pol.trim().isNotEmpty) ? pol.trim() : "";
 
-        // 캐시 저장 — mode가 clone/roleplay이므로 라우터가 Step Expand로 오인하지 않음
+        // 캐시 저장 — has_practice + mode stamp(없으면 room_name으로 추론)로
+        // 재입장 시 라우터가 expanded만 있는 모호한 방을 Step Expand로 오인하지 않게 보장
+        String stampMode = existingMode;
+        if (stampMode.isEmpty) {
+          if (roomName == "Clone Mode") {
+            stampMode = "clone";
+          } else if (roomName == "Roleplay Mode") {
+            stampMode = "roleplay";
+          } else {
+            stampMode = "clone"; // 안전 기본값: step_expand만 아니면 Tutor로 라우팅됨
+          }
+        }
         try {
           await widget.historyDoc.update({
             'expanded_sentence': expanded,
             if (polished.isNotEmpty) 'polished_sentence': polished,
+            'has_practice': true,
+            'expand_source': 'fallback',
+            'expand_generated_at': FieldValue.serverTimestamp(),
+            if (existingMode.isEmpty) 'mode': stampMode,
           });
         } catch (e) {
           debugPrint("[buildExpand] cache write $e");
