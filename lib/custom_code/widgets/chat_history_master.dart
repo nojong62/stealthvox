@@ -238,6 +238,11 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _idleElapsedSec = 0;
   }
 
+  // 사용자 실제 활동 시작 시 오토포즈 즉시 해제 (중복 방지 포함)
+  void _resumeHistoryFromUserAction() {
+    _resetIdleTimer();
+  }
+
   Widget _buildIdleBanner() => const SizedBox.shrink();
 
   Widget _buildIdleOverlay() => const SizedBox.shrink();
@@ -408,6 +413,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   //   - polished/expanded 있음 (Step Expand 방) → 기존 Shadowing variantSelect
   //   - polished/expanded 없음 (Clone/Roleplay/Duo 방) → Tutor 모드
   Future<void> _enterShadowingFromRoom() async {
+    _resumeHistoryFromUserAction();
     _debugLogs = "=== ROOM PRACTICE ENTRY ===\n";
     _debugLogs += "시각: ${DateTime.now()}\n";
     _debugLogs += "방 ID: ${widget.historyDoc.id}\n\n";
@@ -536,7 +542,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // 🆕 [TUTOR] chat_lines 처음부터 끝까지 TTS 자동 재생
   Future<void> _startTutorPlayback() async {
     if (!mounted) return;
-    _resetIdleTimer();
+    _resumeHistoryFromUserAction();
     if (mounted) setState(() => _isTutorPlaying = true);
 
     for (int i = 0; i < _tutorLines.length; i++) {
@@ -644,6 +650,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   // 📦 [BOX-30: 시작 화면 - 선택값 반영하여 진행]
   void _confirmStart({required bool swap}) {
+    _resumeHistoryFromUserAction();
     if (mounted) {
       setState(() {
         _swapRoles = swap;
@@ -658,7 +665,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // ============================================================================
 
   void _startTurnPractice() {
-    _resetIdleTimer();
+    _resumeHistoryFromUserAction();
     if (!mounted || _tutorLines.isEmpty) return;
     currentIndex = 0;
     if (mounted) setState(() => _tutorCurrentIdx = 0);
@@ -728,6 +735,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   // 🔧 [v3.7] TtsCache 우선 조회 → MISS 시 API 호출 후 캐시 저장
   Future<void> _playSmartAudio(String text) async {
+    _resumeHistoryFromUserAction();
     if (_apiKey.isEmpty || text.trim().isEmpty) return;
     try {
       Uint8List? audio = await TtsCache.get(text, 'nova');
@@ -1673,6 +1681,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   }
 
   Future<void> _playChunkAI(int idx) async {
+    _resumeHistoryFromUserAction();
     if (idx >= _chunks.length) return;
     if (mounted)
       setState(() {
@@ -1700,6 +1709,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   //   - 진행 중인 모든 동작(녹음/AI재생) 즉시 취소
   //   - 그 청크의 AI 음성만 재생, 끝나면 정지 (마이크 자동 활성 X)
   Future<void> _replayChunkAI(int idx) async {
+    _resumeHistoryFromUserAction();
     _debugLogs += "🔁 [P2-REPLAY] 청크[$idx] 다시 듣기 요청\n";
     if (idx >= _chunks.length) return;
     // 1. 진행 중인 녹음 즉시 취소
@@ -1776,6 +1786,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   // 📦 [Box 16-A: Review 기능]
   Future<void> _playFullAI() async {
+    _resumeHistoryFromUserAction();
     for (int i = 0; i < _chunks.length; i++) {
       if (!mounted || _phase != ShadowingPhase.reviewing) break;
       await _playChunkAI(i);
@@ -1789,6 +1800,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   }
 
   Future<void> _playFullUser() async {
+    _resumeHistoryFromUserAction();
     if (mounted)
       setState(() {
         _isPlayingFullUser = true;
@@ -1818,6 +1830,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       if (_isPlayingFullUser) _advanceFullUserPlay();
       return;
     }
+    _resumeHistoryFromUserAction();
     try {
       await audioPlayer.play(DeviceFileSource(path));
     } catch (e) {
@@ -1833,6 +1846,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   // 메인 뷰의 리듬 듣기 (일반 모드)
   void _playRhythmAudio(String text) async {
+    _resumeHistoryFromUserAction();
     if (text.isEmpty) return;
     final historyId = widget.historyDoc.id;
     final variant =
@@ -1879,6 +1893,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   // 히스토리 말풍선 소리듣기 — msgId 기반 디스크 캐시 우선
   Future<void> _playMsgAudio(String msgId, String text) async {
+    _resumeHistoryFromUserAction();
     if (text.isEmpty || _apiKey.isEmpty) return;
     final historyId = widget.historyDoc.id;
     final cacheKey = 'native_$msgId.mp3';
@@ -2561,6 +2576,7 @@ RULES — follow exactly:
 
   // 📦 [Box 18-D: 실전 튜터링 - 교정 TTS 재생]
   Future<void> _playAppCorrectedAudio() async {
+    _resumeHistoryFromUserAction();
     if (_appCorrectedAudio == null || !mounted) return;
     setState(() => _isPlayingAppAudio = true);
     _dialogSetState?.call(() {});
@@ -4874,6 +4890,7 @@ RULES — follow exactly:
   // 의미단위 AI TTS 재생
   // 🔧 [v3.7] TtsCache 우선 조회 → MISS 시 API 호출 후 캐시 저장
   Future<void> _playPolishedUnit(int idx) async {
+    _resumeHistoryFromUserAction();
     if (!mounted || idx >= _polishedUnits.length) return;
     if (mounted) setState(() => _polishedUnitAIPlaying = true);
     final text = _polishedUnits[idx];
@@ -4897,6 +4914,7 @@ RULES — follow exactly:
 
   // 전체 AI 순차 재생
   Future<void> _playAllAI() async {
+    _resumeHistoryFromUserAction();
     if (_chunks.isEmpty) return;
     if (_isListening) _stopDeepgramListening();
     if (mounted)
