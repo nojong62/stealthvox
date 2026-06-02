@@ -65,24 +65,52 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   String? _sessionDocId; // 🔧 [v3 추가] 첫 대화 후 세션 ID (클론 변경 시 null 리셋)
   DocumentReference? _myHistoryRef; // 🔧 [히스토리] chat_history 문서 참조 (Duo 패턴)
 
-  // ── Idle Timeout (무반응 자동 일시정지) ────────────────────────────────────
+  // ── Idle Timeout v2 ───────────────────────────────────────────────
+  // 기준: "유저도 AI도 아무 작동이 없는 상태"가 연속 30초 지속되면 pause.
+  //  - AI 작동 = _ttsQueueManager.isBusy (TTS 재생/대기)
+  //  - 유저 작동 = _voiceManager != null (마이크 연결/녹음)
+  // 1초 주기 감시 타이머가 작동 여부를 보고 idle 누적초를 증감한다.
   Timer? _idlePauseTimer;
   bool _isIdlePaused = false;
+  int _idleElapsedSec = 0;
+
+  bool get _isSystemBusy {
+    final ttsBusy = _ttsQueueManager.isBusy;
+    final micBusy = _voiceManager != null;
+    return ttsBusy || micBusy;
+  }
 
   void _resetIdleTimer() {
-    _idlePauseTimer?.cancel();
+    _idleElapsedSec = 0;
     if (_isIdlePaused) {
       _isIdlePaused = false;
       if (mounted) setState(() {});
       BillingTicker.instance.resume();
       BillingTicker.instance.logMode('study_room');
     }
-    _idlePauseTimer = Timer(const Duration(seconds: 30), _handleIdlePause);
+    _idlePauseTimer?.cancel();
+    _idlePauseTimer =
+        Timer.periodic(const Duration(seconds: 1), (_) => _idleTick());
+  }
+
+  void _idleTick() {
+    if (!mounted) return;
+    if (_isIdlePaused) return;
+    // 유저나 AI가 작동 중이면 idle 누적을 멈추고 리셋
+    if (_isSystemBusy) {
+      _idleElapsedSec = 0;
+      return;
+    }
+    _idleElapsedSec++;
+    if (_idleElapsedSec >= 60) {
+      _handleIdlePause();
+    }
   }
 
   void _handleIdlePause() {
     if (!mounted || _isIdlePaused) return;
     _isIdlePaused = true;
+    _idleElapsedSec = 0;
     BillingTicker.instance.pause();
     if (mounted) setState(() {});
   }
@@ -90,7 +118,9 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   void _clearIdleTimers() {
     _idlePauseTimer?.cancel();
     _idlePauseTimer = null;
+    _idleElapsedSec = 0;
   }
+  // ──────────────────────────────────────────────────────────────────
 
   Widget _buildIdleBanner() => const SizedBox.shrink();
 
@@ -307,49 +337,91 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       maxTurns: MAX_TURNS,
       myTarget: targetLangName,
       myNative: nativeLangName,
+      userId: FirebaseAuth.instance.currentUser?.uid ?? '',
       isOpening: true,
     );
 
     final ChunkedTtsFetcher tts = ChunkedTtsFetcher(
       _openAiKey,
       _ttsQueueManager,
-      'alloy',
+      'nova',
       isUser: false,
       onLog: _log,
     );
     _ttsQueueManager.setUserTurn(false);
     _ttsQueueManager.setAiPaused(false);
 
-    String aiText = '';
-    String buffer = '';
+    // 🌱 [v3.9] 첫 질문도 "PART1(영어)\n\n PART2(한국어)" 구조로 출력됨.
+    //   - 화면 target = PART1(영어), original = PART2(한국어)
+    //   - TTS는 PART1(영어)만 재생. PART2(한국어)는 소리 안 냄.
+    //   - PART2가 한국어 자막을 채우므로 generateCleanOriginal 중복 호출 제거.
+    String aiText = '';        // 전체 누적(영어+\n\n+한국어)
+    String buffer = '';        // TTS 송출용 버퍼 (PART1 영어 구간만)
+    bool part2Started = false; // \n\n 이후(한국어) 진입 여부
     final RegExp sp = RegExp(r'[,\.?!;:。、！？…，；：\n]');
 
     await for (final chunk in aiStream) {
       if (!mounted || !_isConversationActive) break;
       aiText += chunk;
-      buffer += chunk;
-      if (mounted && aiIdx < _localMessages.length) {
-        setState(() => _localMessages[aiIdx]['target'] = aiText);
+
+      // 화면 표시: \n\n 기준으로 PART1→target, PART2→original 분리
+      if (aiText.contains('\n\n')) {
+        final idx = aiText.indexOf('\n\n');
+        final part1 = aiText.substring(0, idx).trim();
+        final part2 = aiText.substring(idx + 2).trim();
+        if (mounted && aiIdx < _localMessages.length) {
+          setState(() {
+            _localMessages[aiIdx]['target'] = part1;
+            _localMessages[aiIdx]['original'] = part2;
+          });
+        }
+      } else {
+        if (mounted && aiIdx < _localMessages.length) {
+          setState(() => _localMessages[aiIdx]['target'] = aiText);
+        }
       }
       _scrollToBottom();
-      final matches = sp.allMatches(buffer).toList();
-      if (matches.isNotEmpty) {
-        final lastIdx = matches.last.end;
-        final toSpeak = buffer.substring(0, lastIdx).trim();
-        buffer = buffer.substring(lastIdx);
-        if (toSpeak.isNotEmpty) tts.addText(toSpeak);
-      }
-    }
-    if (buffer.trim().isNotEmpty) tts.addText(buffer.trim());
 
-    // 🌱 스트리밍 완료 즉시 번역 시작 — TTS 재생과 병렬로 실행
-    StepExpandBrain.generateCleanOriginal(
-            apiKey: _openAiKey, englishText: aiText)
-        .then((kor) {
-      if (mounted && _localMessages.length > aiIdx) {
-        setState(() => _localMessages[aiIdx]['original'] = kor);
+      // TTS: PART1(영어)만 송출. \n\n 감지되면 그 이후(한국어)는 TTS 큐에 안 보냄.
+      if (!part2Started) {
+        if (aiText.contains('\n\n')) {
+          // buffer에 아직 안 보낸 PART1 잔여분 송출하고 PART2 진입
+          final pending = buffer.trim();
+          if (pending.isNotEmpty) tts.addText(pending);
+          buffer = '';
+          part2Started = true;
+          continue;
+        }
+        buffer += chunk;
+        final matches = sp.allMatches(buffer).toList();
+        if (matches.isNotEmpty) {
+          final lastIdx = matches.last.end;
+          final toSpeak = buffer.substring(0, lastIdx).trim();
+          buffer = buffer.substring(lastIdx);
+          if (toSpeak.isNotEmpty) tts.addText(toSpeak);
+        }
       }
-    });
+      // part2Started == true 이후 chunk(한국어)는 화면 자막만, TTS 안 보냄
+    }
+
+    // 루프 종료 후 \n\n 없었던 경우(PART2 미출력) buffer 잔여분 송출
+    if (!part2Started && buffer.trim().isNotEmpty) {
+      tts.addText(buffer.trim());
+    }
+
+    // PART2(한국어)가 original 자막을 채웠으면 번역 불필요.
+    // \n\n 없어 original 이 빈 폴백 상황에서만 번역 보강.
+    if (mounted &&
+        aiIdx < _localMessages.length &&
+        ((_localMessages[aiIdx]['original'] ?? '').toString().trim().isEmpty)) {
+      StepExpandBrain.generateCleanOriginal(
+              apiKey: _openAiKey, englishText: aiText)
+          .then((kor) {
+        if (mounted && _localMessages.length > aiIdx) {
+          setState(() => _localMessages[aiIdx]['original'] = kor);
+        }
+      });
+    }
 
     // TTS 재생 완료 대기 (최대 10초)
     int ticks = 0;
@@ -1342,7 +1414,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       final retryTts = ChunkedTtsFetcher(
         _openAiKey,
         _ttsQueueManager,
-        'alloy',
+        'nova',
         isUser: false,
         onLog: _log,
       );
@@ -1475,7 +1547,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     final fallbackTts = ChunkedTtsFetcher(
       _openAiKey,
       _ttsQueueManager,
-      'alloy',
+      'nova',
       isUser: false,
       onLog: _log,
     );
@@ -1508,7 +1580,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     final phraseTts = ChunkedTtsFetcher(
       _openAiKey,
       _ttsQueueManager,
-      "alloy",
+      'nova',
       isUser: false,
       onLog: _log,
     );
@@ -1533,19 +1605,20 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       turnNumber: _turnCounter,
       maxTurns: MAX_TURNS,
       myTarget: targetLangName,
+      userId: FirebaseAuth.instance.currentUser?.uid ?? '',
       isRetry: true,
     );
 
     final questionTts = ChunkedTtsFetcher(
       _openAiKey,
       _ttsQueueManager,
-      "alloy",
+      'nova',
       isUser: false,
       onLog: _log,
     );
     final HybridTtsPlayer questionHybridTts = HybridTtsPlayer(
       apiKey: _openAiKey,
-      voice: 'alloy',
+      voice: 'nova',
       onLog: _log,
     );
     String aiText = "";
@@ -1673,9 +1746,36 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       }).toList();
       if (validMsgs.length > 10)
         validMsgs = validMsgs.sublist(validMsgs.length - 10);
-      String contextStr = validMsgs
-          .map((m) => "${m['role'] == 'HOST' ? 'User' : 'AI'}: ${m['target']}")
-          .join("\n");
+
+      // 🌱 [EXPAND-FIX] HOST 버블의 target은 "PART1(짧은말)\n\nPART2(확장문장)" 구조.
+      //   History에는 PART2(확장 문장)만 넣어 누적이 명확히 이어지게 한다.
+      //   PART2가 없으면(첫 턴 등) PART1을 그대로 사용.
+      String extractExpanded(String target) {
+        final t = target.trim();
+        final idx = t.indexOf('\n\n');
+        if (idx < 0) return t;
+        final part2 = t.substring(idx + 2).trim();
+        return part2.isNotEmpty ? part2 : t.substring(0, idx).trim();
+      }
+
+      final List<String> lines = [];
+      String latestExpanded = '';
+      for (final m in validMsgs) {
+        if (m['role'] == 'HOST') {
+          final expanded = extractExpanded((m['target'] ?? '').toString());
+          lines.add("User: $expanded");
+          latestExpanded = expanded;
+        } else {
+          lines.add("AI: ${m['target']}");
+        }
+      }
+
+      String contextStr = lines.join("\n");
+      // 🌱 가장 최근 확장 문장을 명시적으로 강조 → CASE 2 (a) 지시가 정확히 작동
+      if (latestExpanded.isNotEmpty) {
+        contextStr +=
+            "\n\n[Most recent expanded sentence to grow from]: $latestExpanded";
+      }
 
       String userTargetText = "";
       String userBuffer = "";
@@ -1891,7 +1991,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         final clarifyTts = ChunkedTtsFetcher(
           _openAiKey,
           _ttsQueueManager,
-          'alloy',
+          'nova',
           isUser: false,
           onLog: _log,
         );
@@ -1917,17 +2017,30 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         swSpeechEnd: _swTTS,
       );
 
-      // 🌱 유저 첫 번째 답에만 원어(한국어) 표시 (백그라운드)
-      // Future를 저장 → STEP 7 히스토리 저장 직전 await로 original 확정
-      Future<String>? turn1OrigFuture;
+      // 🌱 유저 original(한국어) 역번역
+      // 1턴: 전체 문장 역번역 → 대화방 표시 + Firestore 저장
+      // 2턴+: Part1\n\nPart2 전체를 역번역 → 대화방에서는 Part2 한국어만 표시, Firestore에는 전체 저장
+      Future<String>? userOrigFuture;
       if (currentTurnId == 1) {
-        turn1OrigFuture = StepExpandBrain.generateCleanOriginal(
+        userOrigFuture = StepExpandBrain.generateCleanOriginal(
             apiKey: _openAiKey, englishText: userTargetText);
-        turn1OrigFuture.then((cleanKorean) {
+        userOrigFuture.then((cleanKorean) {
           if (mounted && _localMessages.length > hostIndex) {
             setState(() => _localMessages[hostIndex]['original'] = cleanKorean);
           }
         });
+      } else if (hasDoubleNewline) {
+        // 2턴+: Part1(짧은 대답)만 역번역 → 확장문장(Part2)은 한국어 불필요
+        final part1English = userTargetText.substring(0, userTargetText.indexOf('\n\n')).trim();
+        if (part1English.isNotEmpty) {
+          userOrigFuture = StepExpandBrain.generateCleanOriginal(
+              apiKey: _openAiKey, englishText: part1English);
+          userOrigFuture.then((cleanKorean) {
+            if (mounted && _localMessages.length > hostIndex) {
+              setState(() => _localMessages[hostIndex]['original'] = cleanKorean);
+            }
+          });
+        }
       }
 
       // ─────────────────────────────────────────────────────
@@ -2050,11 +2163,11 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       // TtsQueueManager._processQueue가 'AI 턴이고 paused' 판단하여 유저 마지막 청크까지 멈춰버림
       _ttsQueueManager.setAiPaused(true); // AI 재생 대기 모드 (유저 TTS는 계속 재생)
       // 🔧 [v3.5] AI 전용 큐로 보내기 위해 isUser: false 명시
-      // 🌱 [v3.5 StepExpand] AI 목소리는 alloy 고정 (로비 선택에서 제외)
+      // 🌱 [v4.0 StepExpand] AI 목소리는 nova 고정
       ChunkedTtsFetcher aiTtsFetcher = ChunkedTtsFetcher(
         _openAiKey,
         _ttsQueueManager,
-        "alloy", // 🌱 AI 목소리 alloy 고정
+        'nova', // 🌱 AI 목소리 nova 고정
         isUser: false, // AI 큐로 분리
         onLog: _log,
       );
@@ -2069,7 +2182,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       bool aiHasDoubleNewline = false;
       final HybridTtsPlayer aiHybridTts = HybridTtsPlayer(
         apiKey: _openAiKey,
-        voice: 'alloy',
+        voice: 'nova',
         onLog: _log,
       );
 
@@ -2085,6 +2198,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         turnNumber: _turnCounter,
         maxTurns: MAX_TURNS,
         myTarget: targetLangName, // 🌐 [v3.1] 유저가 선택한 타겟 언어
+        userId: FirebaseAuth.instance.currentUser?.uid ?? '',
       );
 
       // AI 생성+청킹을 Future로 (유저 재생과 병렬)
@@ -2227,12 +2341,12 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       // ─────────────────────────────────────────────────────
       // STEP 7: Firestore 저장
       // ─────────────────────────────────────────────────────
-      // 히스토리 저장 전 turn 1 Korean original 완료 보장
+      // 히스토리 저장 전 Korean original 완료 보장 (1턴 및 2턴+)
       // effectiveOriginal(화면 표시용)과 달리, 저장 payload에는 실제 originalRaw 사용
-      if (turn1OrigFuture != null) {
+      if (userOrigFuture != null) {
         try {
           final cleanKorean =
-              await turn1OrigFuture.timeout(const Duration(seconds: 10));
+              await userOrigFuture.timeout(const Duration(seconds: 10));
           if (hostIndex < _localMessages.length &&
               (_localMessages[hostIndex]['original'] ?? '').toString().isEmpty) {
             _localMessages[hostIndex]['original'] = cleanKorean;
@@ -2356,6 +2470,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       await _myHistoryRef!.set({
         'created_at': FieldValue.serverTimestamp(),
         'room_name': "Step.Ex Mode",
+        'mode': 'step_expand',
         'is_pinned': false,
         'msg_count': 0
       });
@@ -2569,7 +2684,12 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
                       color: Colors.white, size: 18),
                   const SizedBox(width: 6),
                   Text(
-                    '${(FFAppState().remainingTime / 60).floor()}m',
+                    () {
+                      final int s = (FFAppState().remainingTime).toInt().clamp(0, 999999);
+                      final int h = s ~/ 3600;
+                      final int m = (s % 3600) ~/ 60;
+                      return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+                    }(),
                     style: const TextStyle(
                         color: Colors.white, fontWeight: FontWeight.bold),
                   ),
@@ -2828,13 +2948,9 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         ? '...'
         : targetRaw;
 
-    // 🌱 유저 번역은 \n\n으로 두 파트로 나뉠 수 있음 (2턴+)
-    // Part 1: 짧은 번역 / Part 2: 이전 문장과 합쳐진 확장 문장
-    // → 두 파트 모두 표시 (대답 + 한 줄 띄기 + 확장 문장)
     final targetParts = targetRaw.split(RegExp(r'\n\s*\n'));
-    final String effectiveTarget = (role == 'HOST' && targetParts.length >= 2)
-        ? '${targetParts[0].trim()}\n\n${targetParts.sublist(1).join('\n\n').trim()}'
-        : displayTarget;
+    // 🌱 유저 2턴+ (hasUserTwoParts): Part1 영어+한국어 → 한줄띄기 → Part2 영어(한국어 없음)
+    final bool hasUserTwoParts = role == 'HOST' && targetParts.length >= 2;
     final String effectiveOriginal = (role == 'HOST_TEMP') ? '' : originalRaw;
 
     return Align(
@@ -2853,18 +2969,45 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           crossAxisAlignment:
               isHost ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
-            Text(effectiveTarget,
-                textAlign: isHost ? TextAlign.right : TextAlign.left,
-                style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16 * _fontScale,
-                    fontWeight: FontWeight.bold)),
-            if (_showOriginal && effectiveOriginal.isNotEmpty) ...[
-              const SizedBox(height: 6),
-              Text(effectiveOriginal,
+            if (hasUserTwoParts) ...[
+              // Part1 영어 (짧은 대답)
+              Text(targetParts[0].trim(),
                   textAlign: isHost ? TextAlign.right : TextAlign.left,
-                  style:
-                      TextStyle(color: Colors.grey, fontSize: 10 * _fontScale)),
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16 * _fontScale,
+                      fontWeight: FontWeight.bold)),
+              // Part1 한국어 (Part1 바로 아래)
+              if (_showOriginal && effectiveOriginal.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(effectiveOriginal,
+                    textAlign: isHost ? TextAlign.right : TextAlign.left,
+                    style: TextStyle(
+                        color: Colors.grey, fontSize: 10 * _fontScale)),
+              ],
+              // 한줄띄기 (Part1 영역과 Part2 영역 분리)
+              const SizedBox(height: 16),
+              // Part2 영어 (확장문장, 한국어 없음)
+              Text(targetParts.sublist(1).join('\n\n').trim(),
+                  textAlign: isHost ? TextAlign.right : TextAlign.left,
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16 * _fontScale,
+                      fontWeight: FontWeight.bold)),
+            ] else ...[
+              Text(displayTarget,
+                  textAlign: isHost ? TextAlign.right : TextAlign.left,
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16 * _fontScale,
+                      fontWeight: FontWeight.bold)),
+              if (_showOriginal && effectiveOriginal.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(effectiveOriginal,
+                    textAlign: isHost ? TextAlign.right : TextAlign.left,
+                    style: TextStyle(
+                        color: Colors.grey, fontSize: 10 * _fontScale)),
+              ],
             ],
           ],
         ),
@@ -4371,26 +4514,20 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
               },
               body: jsonEncode({
                 'model': 'gpt-4o-mini',
-                'temperature': 0.0,
-                'max_tokens': 200,
+                'temperature': 0.2,
+                'max_tokens': 120,
                 'messages': [
                   {
                     'role': 'system',
                     'content':
-                        '''당신은 한영 통역 전문가입니다. 다음 영어 문장을 **자연스러운 한국어 구어체**로 번역하세요.
+                        '''당신은 영한 번역가입니다. 주어진 영어를 한국어 구어체로 번역하세요.
 
-[중요 규칙 - 주어 생략 처리]
-- 한국어는 주어를 자주 생략합니다. 영어의 I/You/He/She/We/They를 무조건 그대로 살리지 마세요.
-- 문맥상 당연한 주어는 과감히 생략하여 자연스럽게 만드세요.
-- 하지만 의미 혼동 가능성이 있을 때는 주어를 살립니다.
-
-[구어체 톤]
-- 문어체 X, 일상 대화체 O
-
-[포맷 유지]
-- 원문에 빈 줄(\\n\\n)이 있으면 한국어에도 반드시 그대로 유지하세요.
-
-[출력]
+[규칙]
+- 원문 내용만 번역. 설명·부연·의견 추가 절대 금지.
+- 짧은 문장은 짧게, 긴 문장은 길게 — 원문 길이에 비례하게.
+- 한국어 주어 생략: 문맥상 명확한 I/You/We/They는 생략.
+- 구어체 (문어체 X).
+- 원문에 빈 줄(\\n\\n)이 있으면 한국어에도 그대로 유지.
 - 번역문만 출력. 설명/주석/따옴표 없음.
 ''',
                   },
@@ -4488,6 +4625,7 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
   //   While checking my emails this morning, I suddenly thought of calling Alex—
   //   an old friend who just moved to London—to ask about the restaurant where we dined last year.
   // ==================================================================
+
   static Stream<String> streamGrammarQuestion({
     required String apiKey,
     required String contextStr,
@@ -4495,6 +4633,7 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
     required int maxTurns,
     required String myTarget,
     String myNative = '',
+    String userId = '',
     bool isRetry = false,
     bool isOpening = false, // 세션 첫 시작 — AI가 먼저 개방형 질문
   }) async* {
@@ -4507,20 +4646,95 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
       // How / Why / What 으로 시작 → 유저가 자기 이야기를 자연스럽게 꺼냄
       // 첫 질문 이후 유저 대답부터 문장 확장(expand) 시작
       if (isOpening) {
-        const String openingSysPrompt =
-            """You are a warm conversation coach starting a new session.
+        // ── [STEP 1] 68k.news 실제 헤드라인 1건 선정 (폴백: GPT 즉석 생성) ──
+        // 1순위: 68k.news 일별 캐시에서 뽑은 가벼운 영어 헤드라인
+        // 폴백: 네트워크 실패 또는 필터로 전멸 시 GPT 즉석 생성
+        String newsHeadline = '';
+        try {
+          newsHeadline = (await _pick68kUnaskedTopic(userId)) ?? '';
+        } catch (_) {}
 
-Ask ONE open-ended question that invites the user to share something from their everyday life — naturally and without pressure.
+        if (newsHeadline.isEmpty) {
+          final newsClient = http.Client();
+          try {
+            final newsRes = await newsClient
+                .post(
+                  Uri.parse('https://api.openai.com/v1/chat/completions'),
+                  headers: {
+                    'Authorization': 'Bearer $apiKey',
+                    'Content-Type': 'application/json; charset=utf-8',
+                  },
+                  body: jsonEncode({
+                    'model': 'gpt-4o-mini',
+                    'max_tokens': 20,
+                    'temperature': 0.9,
+                    'messages': [
+                      {
+                        'role': 'system',
+                        'content':
+                            'Pick ONE light, everyday small-talk topic for an English conversation warm-up.\n'
+                            'STEP A — Silently choose ONE category at random from this WIDE pool (do not always pick the first ones):\n'
+                            '  food & cooking, weather & seasons, travel & places, hobbies & free time, movies & TV, music, books & reading, sports & exercise, technology & gadgets, pets & animals, fashion & style, health & sleep, work & study life, childhood memories, dreams & future plans, local festivals & events, coffee & cafes, shopping & trends, nature & outdoors, holidays & celebrations.\n'
+                            'STEP B — Inside that ONE category, invent a fresh, specific everyday topic.\n'
+                            'Each time you are called, pick a DIFFERENT category than an obvious default — vary widely across the whole pool.\n'
+                            'FORBIDDEN: politics, war, AI ethics, crime, economics, illness, anything heavy or controversial.\n'
+                            'Output format: ONLY a 4-to-8-word English noun phrase. No verb. No question. No punctuation.\n'
+                            'Examples (note how different the categories are):\n'
+                            'a cozy rainy-day movie marathon\n'
+                            'learning to bake sourdough bread\n'
+                            'a weekend hiking trip in autumn\n'
+                            'an old song stuck in your head\n'
+                            'rearranging furniture in your room\n'
+                            'a childhood snack you suddenly miss',
+                      },
+                      {
+                        'role': 'user',
+                        'content': 'Today\'s topic.',
+                      },
+                    ],
+                  }),
+                )
+                .timeout(const Duration(seconds: 10));
+            if (newsRes.statusCode == 200) {
+              final newsJson = jsonDecode(utf8.decode(newsRes.bodyBytes));
+              final choices = newsJson['choices'] as List?;
+              if (choices != null && choices.isNotEmpty) {
+                newsHeadline =
+                    (choices[0]['message']?['content'] ?? '').toString().trim();
+              }
+            }
+          } catch (_) {
+            newsHeadline = '';
+          } finally {
+            newsClient.close();
+          }
+        }
 
-[RULES]
-- 5 to 8 words only.
-- Open-ended: never yes/no.
-- Warm and casual — like a curious friend, not an interviewer.
-- Everyday topics are perfect: recent events, something they noticed, something on their mind.
-- No grammar terms. No leading phrases ("Tell me about...", "Explain...").
-
-[OUTPUT]
-Output ONLY the English question. Nothing else.""";
+        // ── [STEP 2] 뉴스 소재 기반 짧은 오프닝 질문 생성 (streaming) ──
+        final String openingSysPrompt = newsHeadline.isNotEmpty
+            ? 'You are starting a casual English conversation as a warm-up.\n'
+              'Everyday topic: "$newsHeadline"\n\n'
+              'Write ONE short, simple question in $myTarget that asks the user for a LIGHT OPINION or GUESS about this topic in general — NOT about the user personally.\n'
+              'Think: "what do people usually...", "why might...", "which would be...", "what do you think happens when...".\n'
+              'Rules:\n'
+              '- ONE sentence only. 8 words or fewer. Simple and easy.\n'
+              '- Ask for a general judgment or guess anyone can answer in 1-3 words.\n'
+              '- Do NOT ask about the user\'s own life, memories, or feelings yet.\n'
+              '- Do NOT demand explanation or a long answer.\n'
+              '- Avoid yes/no and avoid plain "A or B" either/or questions.\n'
+              '- Sound like a curious friend, not a reporter.\n'
+              'Output ONLY the question. Nothing else.'
+            : 'You are starting a casual English conversation as a warm-up.\n'
+              'Write ONE short, simple question in $myTarget that asks the user for a LIGHT OPINION or GUESS about everyday life in general — NOT about the user personally.\n'
+              'Think: "what do people usually...", "why might...", "which would be...", "what do you think happens when...".\n'
+              'Rules:\n'
+              '- ONE sentence only. 8 words or fewer. Simple and easy.\n'
+              '- Ask for a general judgment or guess anyone can answer in 1-3 words.\n'
+              '- Do NOT ask about the user\'s own life, memories, or feelings yet.\n'
+              '- Do NOT demand explanation or a long answer.\n'
+              '- Avoid yes/no and avoid plain "A or B" either/or questions.\n'
+              '- Sound like a curious friend, not an interviewer.\n'
+              'Output ONLY the question. Nothing else.';
 
         final openReq = http.Request(
           'POST',
@@ -4534,17 +4748,15 @@ Output ONLY the English question. Nothing else.""";
           'model': 'gpt-4o-mini',
           'stream': true,
           'temperature': 0.7,
-          'max_tokens': 50,
+          'max_tokens': 30,
           'messages': [
             {'role': 'system', 'content': openingSysPrompt},
-            {'role': 'user', 'content': 'Start the session.'},
+            {'role': 'user', 'content': 'Go.'},
           ],
         });
-        final openResp = await openReq
-            .send()
-            .timeout(const Duration(seconds: 15));
+        final openResp =
+            await openReq.send().timeout(const Duration(seconds: 15));
         if (openResp.statusCode != 200) {
-          yield "What's something on your mind today?";
           return;
         }
         await for (final chunk in openResp.stream
@@ -4563,21 +4775,31 @@ Output ONLY the English question. Nothing else.""";
       // ─────────────────────────────────────────────────────────────────
 
       final String grammarHint = turnNumber == 1
-          ? 'GOAL: Draw out a REASON or CAUSE behind the user\'s core statement.\n'
-              'If the user clearly expressed loss of interest, motivation, enjoyment, or willingness to engage, treat that emotion as the cause to explore (see [EMOTIONAL DEPTH RULE]).\n'
-              'Invite the user to share WHY — warmly and lightly, without naming grammar. '
-              'A short answer like "because I was tired" should attach smoothly to the growing sentence.'
+          ? 'FOCUS: Follow the FEELING or MOTIVATION behind what the user just said.\n'
+              'Silently guess WHY this matters to them or how they feel about it, then ask a light question that follows that thread — not a question that extracts a fixed answer.\n'
+              'If the user clearly expressed loss of interest, motivation, enjoyment, or willingness to engage, follow that emotion instead (see [EMOTIONAL DEPTH RULE]).\n'
+              'Their short answer (e.g. "because it was fun", "I was just curious") should attach smoothly to the growing sentence.'
           : turnNumber == 2
-              ? 'GOAL: Draw out a PERSON or THING involved in the user\'s story.\n'
-                  'Ask who or what was part of it — keep it light and curious. '
-                  'A short answer like "my friend Jisu" should attach naturally as a relative clause.'
+              ? 'FOCUS: Follow the PERSON, PLACE, or THING that seems to matter most in their story.\n'
+                  'Guess what detail they would naturally want to share more about, and ask about that — gently and curiously, never like a checklist.\n'
+                  'Their short answer (e.g. "my friend Jisu", "at the cafe") should attach naturally to the growing sentence.'
               : turnNumber == 3
-                  ? 'GOAL: Draw out a CONTRAST or UNEXPECTED element.\n'
-                      'Gently ask about something surprising, hard, or different from expectations. '
-                      'A short answer like "even though I was nervous" should attach naturally.'
-                  : 'GOAL: Draw out a CONDITION or SPECIFIC SITUATION.\n'
-                      'Ask when it happens or what triggers it — keep it gentle and open. '
-                      'A short answer like "when I have free time" should attach naturally.';
+                  ? 'FOCUS: Follow how they FELT or what stood out to them.\n'
+                      'Guess the emotion or the surprising/memorable part behind their last answer, and ask about it lightly. Do not force a contrast — let it emerge from their feeling.\n'
+                      'Their short answer (e.g. "it was a relief", "even though I was nervous") should attach naturally to the growing sentence.'
+                  : 'FOCUS: Follow where their story is naturally heading — a moment, a situation, or what it means to them.\n'
+                      'Guess what they would enjoy adding, and invite it gently and openly.\n'
+                      'Their short answer (e.g. "when I have free time", "after work") should attach naturally to the growing sentence.';
+
+      // ── 문법 구조 로테이션 (soft lens, 4턴 순환) ─────────────────────
+      final int t4 = turnNumber % 4;
+      final String structureSeed = t4 == 1
+          ? 'relative pronoun (who / which / that)'
+          : t4 == 2
+              ? 'relative adverb (where / when / why)'
+              : t4 == 3
+                  ? 'infinitive (to V)'
+                  : 'participial phrase (-ing / -ed)';
 
       // ── 3단계 (최종 합성): 파편화된 답변 → Expanded Sentence ──────────────
       // ── 2단계 (문법 유도형 질문): 5-8단어 초단형, 구조를 이름 짓지 않고 유도 ──
@@ -4588,7 +4810,7 @@ This is the FINAL turn ($turnNumber of $maxTurns). The user has answered your gr
 [YOUR JOB — Synthesis]
 Read the History carefully. Collect the user's fragmented answers and synthesize them into ONE fluent sentence that naturally incorporates at least 2 of these structures:
 - Causal clause (because / since)
-- Relative clause (who / which)
+- Relative clause (who / which / where / when / why)
 - Concessive clause (although / despite / even though)
 - Conditional clause (if / when)
 
@@ -4612,19 +4834,36 @@ You are a warm, skilled conversation coach — not a grammar teacher. Your job i
 [TWO-LAYER DESIGN — MANDATORY]
 
 LAYER 1 — INTERNAL REASONING (never output, work silently):
-Before writing your question, think through:
-① What is the GOAL this turn? (See [TURN GOAL] below)
-② Look at the growing sentence in History. What ONE detail is still missing?
-   - A reason / cause (because / since)
-   - A person or thing involved (who / which)
-   - A contrast or unexpected element (although / despite)
-   - A condition or situation (if / when)
-③ Of the user's LAST answer, what is the SINGLE easiest detail to follow up on?
+Before writing your question, think through — in THIS order:
+① FEELING FIRST: Read the user's LAST answer. What is the person likely thinking, feeling, or caring about underneath it? What motivated them to say it? Follow THAT thread.
+
+   [READ THE EMOTIONAL LINE — before choosing your question]
+   The user's answer carries more than its words. Silently judge WHICH state the
+   last answer most looks like, then choose a question that gently PULLS THEM IN:
+   • READY / EAGER  (quick, specific, detailed answer):
+       They had this ready. Reward it — go one level deeper into the part they
+       seemed most alive about.
+   • STILL ORGANIZING  (short, vague, "음...", "그냥", "not sure how to say it"):
+       They are mid-thought. Do NOT add pressure. Offer an easier on-ramp — a
+       smaller, concrete angle they can answer in 1–2 words.
+   • HOLDING BACK  (very short, deflecting, changing subject, flat tone):
+       They may not want to go there. Do NOT push the same door. Step sideways to
+       a lighter, safer angle that still keeps the sentence growing.
+   In every case the user's short answer must still attach to the growing sentence.
+   Match the question to the STATE, not just the content. A good leader makes a
+   quiet person feel safe to add one more word, and lets an eager person run.
+② DO NOT just grab the first or most concrete noun in their answer and ask "what kind of X?" — that is shallow keyword-echoing and makes the user feel interrogated.
+   Instead, go ONE level deeper than the surface words: their reason, motivation, mood, memory, hope, or the meaning behind what they said. Ask what a genuinely curious friend would actually wonder about.
+③ Balance two moves — do not always use the same one:
+   (a) GENUINE CURIOSITY: ask the real, specific thing you'd want to know about their situation.
+   (b) EMOTIONAL CONTEXT: read the feeling under their words and gently follow it.
+   Use whichever makes the user WANT to keep talking. The [TURN GOAL] below is only a soft lens, never a target you must extract.
 ④ What is the most natural, low-pressure 5–8-word question that picks up that one detail?
    - Can a quiet or hesitant person still answer in 1–3 words?
    - Does it avoid pressure words ("Why did you do that?", "Explain your reason")?
    - Does it avoid yes/no answers?
 ⑤ Does the question flow from the user's LAST statement and avoid already-covered ground?
+   The user's short answer should still attach naturally to the growing sentence (this never changes).
 NEVER reveal this reasoning in the output.
 
 LAYER 2 — OUTPUT (the only thing you say):
@@ -4633,6 +4872,11 @@ Output the question alone — nothing before it, nothing after it (except the PA
 
 [TURN GOAL]
 $grammarHint
+
+[STRUCTURE LENS — soft, never forced]
+Silently lean the question so the user's short answer could naturally attach using: $structureSeed.
+NEVER name the structure to the user. NEVER force it if unnatural — just angle the question to invite it.
+All existing rules (5–8 words, warm friend tone, no yes/no) take full priority.
 
 [SPEECH RECOGNITION TOLERANCE — READ THIS FIRST]
 The user speaks into a microphone. Speech recognition may produce imperfect text.
@@ -4696,12 +4940,28 @@ User: My college roommate. (대학 룸메이트.)
 
 [QUESTION PRINCIPLES — MANDATORY]
 1. Be a curious friend, not an interviewer or grammar teacher.
-2. Pick the ONE detail from the user's last answer that is easiest to expand on.
+2. Do not echo the easiest surface word. Go one level deeper — into the reason, feeling, meaning, or memory behind it — and ask what genuinely makes you curious, so the user feels invited to open up.
 3. Ask so that even a shy or hesitant user can answer with just 1–3 words.
 4. Avoid pressure frames ("Why did you~?", "Explain why~", "Tell me the reason~").
    Use gentle frames instead: "What part~?", "What made it~?", "How did that~?", "What kind of~?"
 5. Never give yes/no questions.
 6. Design the question so the user's answer naturally attaches to the growing sentence.
+
+[GO DEEPER, NOT WIDER]
+"Wider" = staying on the same surface noun the user just said (shallow, robotic).
+"Deeper" = moving to the feeling, reason, meaning, or story underneath it (what a real friend asks).
+Examples of the SHIFT you must make:
+- User: "I want good food for fall."
+  WIDER (bad): "What kind of food do you like?"
+  DEEPER (good): "What does fall food remind you of?" / "What makes fall feel special to you?"
+- User: "I called my old friend."
+  WIDER (bad): "What is your friend's name?"
+  DEEPER (good): "What made you think of them today?"
+- User: "I went hiking last weekend."
+  WIDER (bad): "Which mountain did you hike?"
+  DEEPER (good): "What did you need to get away from?" / "How did it clear your head?"
+RULE: After drafting your question, check — am I just naming their noun again (WIDER)? If yes, rewrite it to go DEEPER.
+BUT keep balance: a deeper question must still be light, answerable in 1–3 words, and its answer must still attach to the growing sentence. Never become abstract or therapy-like.
 
 [SENTENCE GROWTH LENS]
 Before finalizing your question, ask: "If the user answers this in 1–3 words, exactly where does it attach to the growing sentence?" If no clear attachment point exists, revise the question.
@@ -4721,20 +4981,19 @@ BANNED — never output any of the following:
 ${isRetry ? "- [RETRY] The previous question confused the user. Ask a simpler, more direct 5–8-word question." : ""}
 
 [EXAMPLE FLOW]
-AI : Are there any specific tasks on your agenda for today?
-User: I remembered to call Alex.
-AI : When and how did you remember it?
-User: Suddenly.
-  → I suddenly remembered to call Alex.
-AI : What were you doing at that time?
-User: I was checking my emails this morning.
-  → Checking my emails this morning, I suddenly remembered to call Alex.
-AI : Who is Alex to you?
-User: He is my old friend who moved to London.
-  → Checking my emails this morning, I suddenly remembered to call my old friend, Alex, who moved to London.
-AI : Why did you want to reach out?
-User: To ask him about the restaurant where we had dinner last year.
-  → Checking my emails this morning, I suddenly remembered to call my old friend, Alex, who moved to London, to ask about the restaurant where we had dinner last year.
+(Notice: each question goes DEEPER — into feeling, reason, or meaning — not just naming the last noun.)
+AI : What's something you're looking forward to lately?
+User: A trip to Busan.
+  → I'm looking forward to a trip to Busan.
+AI : What made you pick Busan this time?
+User: I needed the ocean.
+  → I'm looking forward to a trip to Busan because I needed the ocean.
+AI : What does the ocean do for you?
+User: It calms me down after work stress.
+  → I'm looking forward to a trip to Busan because I needed the ocean, which calms me down after work stress.
+AI : What's been weighing on you most?
+User: Too many deadlines piling up.
+  → I'm looking forward to a trip to Busan because I needed the ocean to calm me down, since too many deadlines have been piling up.
 
 [OUTPUT FORMAT - STRICT]
 Output EXACTLY two parts separated by ONE empty line.
@@ -4922,6 +5181,74 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     final unasked = topics.where((t) => !asked.contains(t)).toList();
     if (unasked.isEmpty) {
       await prefs.remove(askedKey); // 전부 소진 → 이력 초기화
+      await prefs.setStringList(askedKey, [topics.first]);
+      return topics.first;
+    }
+    final pick = unasked.first;
+    asked.add(pick);
+    await prefs.setStringList(askedKey, asked.toList());
+    return pick;
+  }
+
+  // ==================================================================
+  // 📦 [Box 7-1-E-0b] 68k.news 헤드라인 일별 캐시 + 유저별 중복 방지
+  // ------------------------------------------------------------------
+  // 섹션: technology / entertainment / science / health (가벼운 것만)
+  // heavy-topic 영어 필터, 길이 필터 (15~120자), 하루 1회 캐시
+  // 폴백용 KBS(_pickUnaskedTopic)와 키 충돌 없이 asked_68k_$userId 사용
+  // ==================================================================
+  static final RegExp _heavy68kRe = RegExp(
+    r'trump|biden|war|shooting|shoot|killed|dead|death|die|crash|attack|missile|strike|'
+    r'ICE|arrest|charged|lawsuit|court|judge|protest|crime|police|explosion|rocket|'
+    r'hostage|hunger strike|blockade|election|senate|congress|tariff|virus|outbreak',
+    caseSensitive: false,
+  );
+
+  static Future<List<String>> _fetch68kNewsTopics() async {
+    final prefs = await SharedPreferences.getInstance();
+    final today = DateTime.now().toIso8601String().substring(0, 10);
+    final cacheKey = 'news68k_$today';
+    final cached = prefs.getStringList(cacheKey);
+    if (cached != null && cached.isNotEmpty) return cached;
+
+    final results = <String>[];
+    for (final section in ['technology', 'entertainment', 'science', 'health']) {
+      try {
+        final res = await http
+            .get(Uri.parse('https://68k.news/index.php?section=$section&loc=US'))
+            .timeout(const Duration(seconds: 8));
+        if (res.statusCode != 200) continue;
+        final body = utf8.decode(res.bodyBytes);
+        final re = RegExp(r'<h3><font[^>]*><a[^>]*>([^<]+)</a>', dotAll: true);
+        for (final m in re.allMatches(body).take(10)) {
+          String title = m.group(1)?.trim() ?? '';
+          if (title.contains(' - ')) {
+            title = title.substring(0, title.lastIndexOf(' - ')).trim();
+          }
+          if (title.length < 15 || title.length > 120) continue;
+          if (_heavy68kRe.hasMatch(title)) continue;
+          results.add(title);
+        }
+      } catch (_) {}
+    }
+    if (results.isNotEmpty) await prefs.setStringList(cacheKey, results);
+    return results;
+  }
+
+  static Future<String?> _pick68kUnaskedTopic(String userId) async {
+    if (userId.isEmpty) {
+      final topics = await _fetch68kNewsTopics();
+      return topics.isNotEmpty ? topics.first : null;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final askedKey = 'asked_68k_$userId';
+    final asked = Set<String>.from(prefs.getStringList(askedKey) ?? []);
+    final topics = await _fetch68kNewsTopics();
+    if (topics.isEmpty) return null;
+
+    final unasked = topics.where((t) => !asked.contains(t)).toList();
+    if (unasked.isEmpty) {
+      await prefs.remove(askedKey);
       await prefs.setStringList(askedKey, [topics.first]);
       return topics.first;
     }
