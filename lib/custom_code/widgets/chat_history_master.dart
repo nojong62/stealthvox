@@ -1184,16 +1184,26 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     }
   }
 
-  // [chunkSplit] GPT-4o-mini로 문장을 n조각으로 분할
-  Future<List<String>?> _splitSentenceByTurns(String sentence, int n) async {
-    if (_apiKey.isEmpty || sentence.isEmpty || n <= 0) return null;
+  // [chunkSplit] GPT-4o-mini로 문장을 5~7단어 호흡 단위로 분할
+  Future<List<String>?> _splitByBreathGroupsGpt(String sentence) async {
+    if (_apiKey.isEmpty || sentence.isEmpty) return null;
     try {
-      final prompt =
-          'Split the following English sentence into exactly $n meaningful, '
-          'natural-sounding chunks for speaking practice. '
-          'Return ONLY a JSON array of strings with no extra text or explanation. '
-          'Example for n=3: ["chunk one", "chunk two", "chunk three"]\n\n'
-          'Sentence: "$sentence"';
+      const sysPrompt =
+          'You are a speaking practice assistant. Split the given English sentence '
+          'into natural breath groups for speaking practice.\n'
+          'Return ONLY a JSON array of strings with no extra text or explanation.\n'
+          'Requirements:\n'
+          '- Target 5–7 words per chunk.\n'
+          '- Never exceed 8 words per chunk unless absolutely unavoidable.\n'
+          '- Avoid chunks shorter than 3 words unless it is a very natural phrase.\n'
+          '- Prefer splitting at: commas, conjunctions (and/but/so/because/when/while/'
+          'although/if/since/after/before), relative clauses (who/which/that/where), '
+          'prepositional phrases, infinitive phrases (to + verb).\n'
+          '- Do not rewrite the sentence. Do not omit or add words. '
+          'Preserve the original word order.\n'
+          'Example: ["I wanted to practice English every day", '
+          '"because I felt nervous", "when speaking with foreigners", '
+          '"but I slowly became more confident", "after using the app"]';
       final response = await http
           .post(
             Uri.parse('https://api.openai.com/v1/chat/completions'),
@@ -1204,7 +1214,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
             body: jsonEncode({
               'model': 'gpt-4o-mini',
               'messages': [
-                {'role': 'user', 'content': prompt}
+                {'role': 'system', 'content': sysPrompt},
+                {'role': 'user', 'content': 'Sentence: "$sentence"'},
               ],
               'temperature': 0.0,
               'max_tokens': 400,
@@ -1219,17 +1230,89 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       final jsonMatch = RegExp(r'\[[\s\S]*\]').firstMatch(content);
       if (jsonMatch == null) return null;
       final list = jsonDecode(jsonMatch.group(0)!) as List;
-      return list
+      final raw = list
           .map((e) => e.toString().trim())
           .where((s) => s.isNotEmpty)
           .toList();
+      return _postProcessChunks(raw);
     } catch (e) {
-      debugPrint("[splitSentenceByTurns] $e");
+      debugPrint("[splitByBreathGroupsGpt] $e");
       return null;
     }
   }
 
-  // [chunkSplit] 기존 정규식 분할 (fallback용)
+  // [chunkSplit] 긴 청크(9단어↑)를 자연 분할 위치에서 재분할
+  List<String> _splitLongChunkByWords(List<String> words) {
+    if (words.length <= 8) return [words.join(' ')];
+    const splitWords = {
+      'because', 'when', 'while', 'although', 'if', 'since',
+      'after', 'before', 'who', 'which', 'that', 'where',
+      'and', 'but', 'so', 'to'
+    };
+    // 4~7 위치에서 자연 분할 위치 탐색
+    for (int i = 5; i >= 3; i--) {
+      if (i < words.length) {
+        final w = words[i].toLowerCase().replaceAll(RegExp(r'[.,;:!?]+$'), '');
+        if (splitWords.contains(w)) {
+          return [
+            words.sublist(0, i).join(' '),
+            words.sublist(i).join(' '),
+          ];
+        }
+      }
+    }
+    // 자연 위치 없으면 중간 분할
+    final mid = (words.length / 2).round().clamp(4, words.length - 1);
+    return [words.sublist(0, mid).join(' '), words.sublist(mid).join(' ')];
+  }
+
+  // [chunkSplit] GPT 결과 후처리: 9단어↑ 재분할, 1~2단어 병합
+  List<String> _postProcessChunks(List<String> chunks) {
+    if (chunks.isEmpty) return chunks;
+    // Step 1: 9단어 이상 청크 재분할
+    final List<String> step1 = [];
+    for (final chunk in chunks) {
+      final words = chunk.trim().split(RegExp(r'\s+'));
+      if (words.length >= 9) {
+        step1.addAll(_splitLongChunkByWords(words));
+      } else {
+        step1.add(chunk);
+      }
+    }
+    // Step 2: 1~2단어 청크를 앞 청크에 병합
+    final List<String> step2 = [];
+    for (final chunk in step1) {
+      final wordCount = chunk.trim().split(RegExp(r'\s+')).length;
+      if (wordCount <= 2 && step2.isNotEmpty) {
+        step2[step2.length - 1] = '${step2.last} $chunk';
+      } else {
+        step2.add(chunk);
+      }
+    }
+    return step2.isEmpty ? chunks : step2;
+  }
+
+  // [chunkSplit] 캐시 조회 → GPT → Fallback 통합 분할 (Expanded·Polished 공통)
+  Future<List<String>> _splitSentenceIntoChunks(
+      String sentence, String variant) async {
+    if (sentence.isEmpty) return [];
+    // 1. 디스크 캐시 확인 (v2)
+    final cached = await _readChunkCache(variant, sentence);
+    if (cached != null && cached.isNotEmpty) return cached;
+    _debugLogs += "🌐 [chunkCache] MISS → GPT 호출 시도\n";
+    // 2. GPT 5~7단어 분할
+    final gptChunks = await _splitByBreathGroupsGpt(sentence);
+    if (gptChunks != null && gptChunks.isNotEmpty) {
+      _debugLogs += "✅ [chunkSplit] GPT 완료 chunks=${gptChunks.length}\n";
+      await _writeChunkCache(variant, sentence, gptChunks);
+      return gptChunks;
+    }
+    // 3. Fallback: 정규식 분할
+    _debugLogs += "⚠️ [chunkSplit] GPT 실패 → 정규식 fallback\n";
+    return _buildChunksLegacyList(sentence);
+  }
+
+  // [chunkSplit] 정규식 분할 + 8단어 상한 후처리 (fallback용)
   List<String> _buildChunksLegacyList(String sentence) {
     const abbrevs = ['Mr', 'Mrs', 'Ms', 'Dr', 'Prof', 'Sr', 'Jr', 'St'];
     String temp = sentence;
@@ -1238,7 +1321,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     }
     final splitRe = RegExp(
       r'(?<=[,.!?])\s+|'
-      r'\s+(?=(?:who|whom|whose|which|that|where|when|while|because|since|although|though|if|unless|but|and|so)\b)',
+      r'\s+(?=(?:who|whom|whose|which|that|where|when|while|because|since|although|though|if|unless|but|and|so|for|with|about|after|before|in|on|at|to)\b)',
       caseSensitive: false,
     );
     final rawParts = temp
@@ -1246,6 +1329,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         .map((s) => s.trim().replaceAll('․', '.'))
         .where((s) => s.isNotEmpty)
         .toList();
+    // 1차 병합: 3단어 미만 조각을 앞 청크에 붙이기
     final merged = <String>[];
     for (final part in rawParts) {
       final wordCount = part.trim().split(RegExp(r'\s+')).length;
@@ -1260,7 +1344,27 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       merged[1] = '${merged[0]} ${merged[1]}';
       merged.removeAt(0);
     }
-    return merged;
+    // 2차: 8단어 초과 청크 재분할
+    final List<String> step2 = [];
+    for (final chunk in merged) {
+      final words = chunk.trim().split(RegExp(r'\s+'));
+      if (words.length >= 9) {
+        step2.addAll(_splitLongChunkByWords(words));
+      } else {
+        step2.add(chunk);
+      }
+    }
+    // 3차: 재분할 후 생긴 1~2단어 조각 재병합
+    final List<String> result = [];
+    for (final chunk in step2) {
+      final wc = chunk.trim().split(RegExp(r'\s+')).length;
+      if (wc <= 2 && result.isNotEmpty) {
+        result[result.length - 1] = '${result.last} $chunk';
+      } else {
+        result.add(chunk);
+      }
+    }
+    return result.isEmpty ? merged : result;
   }
 
   // [chunkCache] 문장 내용 기반 8자리 해시 (캐시 키용)
@@ -1273,20 +1377,20 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     return hash.toRadixString(16).padLeft(8, '0').substring(0, 8);
   }
 
-  // [chunkCache] 디스크에서 분할 결과 읽기
+  // [chunkCache] 디스크에서 분할 결과 읽기 (v2: 5~7단어 기준)
   Future<List<String>?> _readChunkCache(String variant, String sentence) async {
     try {
       final dir = await getApplicationDocumentsDirectory();
       final roomId = widget.historyDoc.id;
       final hash = _chunkTextHash(sentence);
       final file = File(
-          '${dir.path}/chunk_cache/chunk_split_${roomId}_${variant}_$hash.json');
+          '${dir.path}/chunk_cache/chunk_split_v2_${roomId}_${variant}_$hash.json');
       if (!await file.exists()) return null;
       final content = await file.readAsString();
       final list = jsonDecode(content) as List;
       final result =
           list.map((e) => e.toString()).where((s) => s.isNotEmpty).toList();
-      _debugLogs += "✅ [chunkCache] HIT chunks=${result.length}\n";
+      _debugLogs += "✅ [chunkCache] HIT (v2) chunks=${result.length}\n";
       return result;
     } catch (e) {
       debugPrint("[readChunkCache] $e");
@@ -1294,7 +1398,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     }
   }
 
-  // [chunkCache] 디스크에 분할 결과 저장
+  // [chunkCache] 디스크에 분할 결과 저장 (v2: 5~7단어 기준)
   Future<void> _writeChunkCache(
       String variant, String sentence, List<String> chunks) async {
     try {
@@ -1304,9 +1408,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       final folder = Directory('${dir.path}/chunk_cache');
       if (!await folder.exists()) await folder.create(recursive: true);
       final file =
-          File('${folder.path}/chunk_split_${roomId}_${variant}_$hash.json');
+          File('${folder.path}/chunk_split_v2_${roomId}_${variant}_$hash.json');
       await file.writeAsString(jsonEncode(chunks));
-      _debugLogs += "💿 [chunkCache] 저장 완료 chunks=${chunks.length}\n";
+      _debugLogs += "💿 [chunkCache] 저장 완료 (v2) chunks=${chunks.length}\n";
     } catch (e) {
       debugPrint("[writeChunkCache] $e");
     }
@@ -1321,35 +1425,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     final isPolished =
         _polishedSentence.isNotEmpty && sentence == _polishedSentence;
     final variant = isPolished ? 'polished' : 'expanded';
-
-    // 1. 디스크 캐시 확인
-    final cached = await _readChunkCache(variant, sentence);
-    if (cached != null && cached.isNotEmpty) {
-      _chunks = cached.map((t) => PracticeChunk(text: t)).toList();
-      _currentChunkIdx = 0;
-      return;
-    }
-    _debugLogs += "🌐 [chunkCache] MISS → GPT 호출 시도\n";
-
-    // 2. HOST 답변 갯수 조회 후 GPT 분할
-    final n = await _fetchUserTurnCount();
-    if (n > 0) {
-      _debugLogs += "📊 [chunkSplit] 답변 갯수 N=$n → GPT 분할 시도\n";
-      final gptChunks = await _splitSentenceByTurns(sentence, n);
-      if (gptChunks != null && gptChunks.isNotEmpty) {
-        final result = gptChunks.take(10).toList();
-        _debugLogs += "✅ [chunkSplit] 완료 chunks=${result.length}\n";
-        _chunks = result.map((t) => PracticeChunk(text: t)).toList();
-        _currentChunkIdx = 0;
-        await _writeChunkCache(variant, sentence, result);
-        return;
-      }
-    }
-
-    // 3. Fallback: 정규식 분할
-    _debugLogs += "⚠️ [chunkSplit] GPT 실패 → 정규식 fallback\n";
-    final legacy = _buildChunksLegacyList(sentence);
-    _chunks = legacy.map((t) => PracticeChunk(text: t)).toList();
+    final result = await _splitSentenceIntoChunks(sentence, variant);
+    _chunks = result.map((t) => PracticeChunk(text: t)).toList();
     _currentChunkIdx = 0;
   }
 
@@ -4667,17 +4744,19 @@ RULES — follow exactly:
     );
   }
 
-  // 세련문장 2-3 의미단위 콜앤리스폰 연습으로 전환
+  // 세련문장 5~7단어 호흡 단위 연습으로 전환 (Expanded와 동일 기준)
   Future<void> _switchToPolishedPractice() async {
     if (_polishedSentence.isEmpty) return;
     if (_isListening) _stopDeepgramListening();
     audioPlayer.stop();
     _polishedRevealTimer?.cancel();
-    final units = _splitPolishedIntoUnits(_polishedSentence);
+    // 로딩 스피너 먼저 표시 (GPT 분할 대기 중)
+    if (mounted) setState(() => _practicingPolished = true);
+    final units =
+        await _splitSentenceIntoChunks(_polishedSentence, 'polished');
     if (mounted) {
       setState(() {
-        _practicingPolished = true;
-        _polishedUnits = units;
+        _polishedUnits = units.isNotEmpty ? units : [_polishedSentence];
         _polishedUnitIdx = 0;
         _polishedUnitAIPlaying = false;
         _isPlayingFullUser = false;
@@ -5565,9 +5644,13 @@ content and gist of the WHOLE conversation.
 
 [RULES]
 - It must be ONE single sentence (do not split it into multiple sentences).
+- Keep it 25–40 words.
 - Build it from about 5 meaning units joined with varied grammatical connectives
   (because, so, while, which, after, even though, and, etc.).
-- Natural, speakable rhythm (commas for breath are fine).
+- Each meaning unit should be speakable in one breath, usually 5–7 words.
+- Use commas or natural connectors to make breath groups clear.
+- Do not create a sentence with one very long clause.
+- Natural, speakable rhythm — common spoken English only.
 - Capture the overall situation/idea of the conversation, not just one line.
 - Common everyday vocabulary only. Do not add facts not in the transcript.
 - Output exactly ONE sentence. No quotes, no prefixes, no explanation.""";

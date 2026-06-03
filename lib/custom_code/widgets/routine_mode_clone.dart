@@ -3742,9 +3742,13 @@ content and gist of the WHOLE conversation.
 
 [RULES]
 - It must be ONE single sentence (do not split it into multiple sentences).
+- Keep it 25–40 words.
 - Build it from about 5 meaning units joined with varied grammatical connectives
   (because, so, while, which, after, even though, and, etc.).
-- Natural, speakable rhythm (commas for breath are fine).
+- Each meaning unit should be speakable in one breath, usually 5–7 words.
+- Use commas or natural connectors to make breath groups clear.
+- Do not create a sentence with one very long clause.
+- Natural, speakable rhythm — common spoken English only.
 - Capture the overall situation/idea of the conversation, not just one line.
 - Common everyday vocabulary only. Do not add facts not in the transcript.
 - Output exactly ONE sentence. No quotes, no prefixes, no explanation.""";
