@@ -651,6 +651,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   void _showRoleSelectBubble() {
     if (!mounted) return;
     setState(() => _showRoleBubble = true);
+    HapticFeedback.mediumImpact();
     _roleBubbleTimer?.cancel();
     _roleBubbleTimer = Timer(const Duration(milliseconds: 2800), () {
       if (mounted) setState(() => _showRoleBubble = false);
@@ -4706,7 +4707,7 @@ RULES — follow exactly:
                         )
                       : const Icon(Icons.auto_awesome_rounded, size: 18),
                   label: Text(
-                    _isBuildingExpand ? "불러오는 중..." : "✨ Expanded Sentence",
+                    _isBuildingExpand ? "불러오는 중..." : "Expanded Sentence",
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                   style: ElevatedButton.styleFrom(
@@ -4738,16 +4739,7 @@ RULES — follow exactly:
 
   // 역할 선택 말풍선 위젯
   Widget _buildRoleSpeechBubble() {
-    return const Text(
-      "Tap your role icon",
-      style: TextStyle(
-        color: Colors.white,
-        fontSize: 14,
-        fontWeight: FontWeight.bold,
-        decoration: TextDecoration.none,
-        shadows: [Shadow(color: Colors.black87, blurRadius: 10)],
-      ),
-    );
+    return const SizedBox.shrink();
   }
 
   // 📦 [Box 23: UI - 하단 Practice 컨트롤 (enum 비교)]
@@ -5783,15 +5775,146 @@ RULES — follow exactly:
   }
 
   // 🆕 [EXPAND-FROM-CHAT v2] 대화 전체(AI+유저) → 종합 확장 문장 1개 (의미단위 ~5개, 문법 연결)
-  Future<String?> _generateExpandedFromConversation(String transcript) async {
+  String _historyString(Map<String, dynamic>? data, String key) {
+    return (data?[key] ?? '').toString().trim();
+  }
+
+  String _inferHistoryMode(Map<String, dynamic>? data) {
+    final mode = _historyString(data, 'mode');
+    if (mode.isNotEmpty) return mode;
+    final room = _historyString(data, 'room_name');
+    if (room == 'Clone Mode') return 'clone';
+    if (room == 'Roleplay Mode') return 'roleplay';
+    return '';
+  }
+
+  Future<String> _fetchCloneNameForHistory(String cloneId) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || cloneId.isEmpty) return '';
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('clones')
+          .doc(cloneId)
+          .get();
+      return (snap.data()?['name'] ?? '').toString().trim();
+    } catch (e) {
+      debugPrint('[historyLabels] clone fetch $e');
+      return '';
+    }
+  }
+
+  Future<Map<String, String>> _resolveHistoryExpandLabels(
+      Map<String, dynamic>? data) async {
+    final mode = _inferHistoryMode(data);
+    if (mode == 'clone') {
+      String partner = _historyString(data, 'partner_label');
+      if (partner.isEmpty) partner = _historyString(data, 'clone_name');
+      if (partner.isEmpty) partner = _historyString(data, 'expand_partner_name');
+      if (partner.isEmpty) {
+        partner =
+            await _fetchCloneNameForHistory(_historyString(data, 'clone_id'));
+      }
+      if (partner.isEmpty) partner = 'the clone';
+      String user = _historyString(data, 'user_label');
+      if (user.isEmpty) user = _historyString(data, 'expand_user_label');
+      if (user.isEmpty) user = 'the user';
+      return {
+        'mode': 'clone',
+        'userLabel': user,
+        'partnerLabel': partner,
+        'partnerType': 'clone',
+        'situation': '',
+      };
+    }
+    if (mode == 'roleplay') {
+      String partner = _historyString(data, 'partner_label');
+      if (partner.isEmpty) partner = _historyString(data, 'ai_role');
+      if (partner.isEmpty) partner = _historyString(data, 'expand_partner_name');
+      if (partner.isEmpty) partner = 'the roleplay partner';
+      String user = _historyString(data, 'user_label');
+      if (user.isEmpty) user = _historyString(data, 'user_role');
+      if (user.isEmpty) user = _historyString(data, 'expand_user_label');
+      if (user.isEmpty) user = 'the user';
+      final situation = _historyString(data, 'scenario_situation').isNotEmpty
+          ? _historyString(data, 'scenario_situation')
+          : _historyString(data, 'scenario_keyword');
+      return {
+        'mode': 'roleplay',
+        'userLabel': user,
+        'partnerLabel': partner,
+        'partnerType': 'roleplay',
+        'situation': situation,
+      };
+    }
+    return {
+      'mode': mode,
+      'userLabel': 'User',
+      'partnerLabel': 'AI',
+      'partnerType': mode,
+      'situation': '',
+    };
+  }
+
+  bool _mentionsGenericAiPartner(String sentence) {
+    return RegExp(r'\b(the\s+AI|AI|assistant|chatbot|bot)\b',
+            caseSensitive: false)
+        .hasMatch(sentence);
+  }
+
+  bool _canUseCachedNamedPartnerExpand(
+    Map<String, dynamic>? data,
+    String expanded,
+    String polished,
+    Map<String, String> labels,
+  ) {
+    final mode = labels['mode'] ?? '';
+    if (mode != 'clone' && mode != 'roleplay') return expanded.isNotEmpty;
+    if (_historyString(data, 'expand_schema_version') != 'named_partner_v1') {
+      return false;
+    }
+    if (_historyString(data, 'expand_partner_type') != mode) return false;
+    final savedPartner = _historyString(data, 'expand_partner_name');
+    if (savedPartner.isNotEmpty && savedPartner != labels['partnerLabel']) {
+      return false;
+    }
+    if (_mentionsGenericAiPartner('$expanded $polished')) return false;
+    return expanded.isNotEmpty;
+  }
+
+  Future<String?> _generateExpandedFromConversation(
+    String transcript, {
+    String userLabel = 'User',
+    String partnerLabel = 'AI',
+    String mode = '',
+    String situation = '',
+  }) async {
     if (_apiKey.isEmpty || transcript.trim().isEmpty) return null;
     try {
-      const sysPrompt = """You are an English speaking coach.
-You are given a short conversation transcript between the user and an AI partner.
+      final safeUserLabel =
+          userLabel.trim().isNotEmpty ? userLabel.trim() : 'the user';
+      final safePartnerLabel =
+          partnerLabel.trim().isNotEmpty ? partnerLabel.trim() : 'the partner';
+      final modeLine = mode == 'clone'
+          ? 'For clone mode: conversation is between $safeUserLabel and $safePartnerLabel, a named clone/persona.'
+          : mode == 'roleplay'
+              ? 'For roleplay mode: conversation is between $safeUserLabel and $safePartnerLabel, a roleplay character.'
+              : 'The transcript labels identify the participants.';
+      final situationLine = situation.trim().isNotEmpty
+          ? 'Situation: ${situation.trim()}. Use it only if supported by the transcript.'
+          : '';
+      final sysPrompt = """You are an English speaking coach.
+You are given a short conversation transcript.
+$modeLine
+$safePartnerLabel is not AI.
+$situationLine
 Your job: compose ONE long, natural English sentence that synthesizes the overall
 content and gist of the WHOLE conversation.
 
 [RULES]
+- Never call $safePartnerLabel AI, assistant, chatbot, or bot.
+- Use $safePartnerLabel or a natural role phrase when referring to the partner.
 - It must be ONE single sentence (do not split it into multiple sentences).
 - Keep it 25–40 words.
 - Build it from about 5 meaning units joined with varied grammatical connectives
@@ -5842,10 +5965,15 @@ content and gist of the WHOLE conversation.
   }
 
   // 🆕 [EXPAND-FROM-CHAT] 확장문장 → 쉽고 세련된 한 문장 (StepExpandBrain.polishSentence 동일 로직 복제)
-  Future<String?> _polishExpandedSentence(String originalSentence) async {
+  Future<String?> _polishExpandedSentence(
+    String originalSentence, {
+    String partnerLabel = 'the partner',
+  }) async {
     if (_apiKey.isEmpty || originalSentence.trim().isEmpty) return null;
     try {
-      const sysPrompt = """You are an English speaking coach.
+      final safePartnerLabel =
+          partnerLabel.trim().isNotEmpty ? partnerLabel.trim() : 'the partner';
+      final sysPrompt = """You are an English speaking coach.
 The user has built a long English sentence through step-by-step expansion.
 Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
 
@@ -5856,6 +5984,8 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
 - Same meaning as the original (do not add new facts)
 - Slightly more elegant/polished than the original
 - Easier to pronounce and say out loud
+- Preserve participant names, clone names, and role labels.
+- Do not replace $safePartnerLabel with AI, assistant, chatbot, or bot.
 
 [AVOID]
 - Big academic words
@@ -5918,17 +6048,33 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
       String polished = "";
       String existingMode = "";
       String roomName = "";
+      Map<String, dynamic>? historyData;
+      Map<String, String> labels = {
+        'mode': '',
+        'userLabel': 'User',
+        'partnerLabel': 'AI',
+        'partnerType': '',
+        'situation': '',
+      };
       try {
         final snap = await widget.historyDoc.get();
         final d = snap.data() as Map<String, dynamic>?;
+        historyData = d;
         expanded = (d?['expanded_sentence'] as String?)?.trim() ?? "";
         polished = (d?['polished_sentence'] as String?)?.trim() ?? "";
         existingMode = (d?['mode'] as String?)?.trim() ?? "";
         roomName = (d?['room_name'] as String?)?.trim() ?? "";
+        labels = await _resolveHistoryExpandLabels(d);
       } catch (e) {
         debugPrint("[buildExpand] doc fetch $e");
       }
       if (!mounted) return;
+
+      if (!_canUseCachedNamedPartnerExpand(
+          historyData, expanded, polished, labels)) {
+        expanded = "";
+        polished = "";
+      }
 
       // 2순위(fallback): 저장값 없으면 전체 대화로 즉석 생성 후 캐시
       if (expanded.isEmpty) {
@@ -5941,7 +6087,14 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
             .map((l) {
               final t = (l['text'] as String? ?? '').trim();
               if (t.isEmpty) return null;
-              final who = (l['role'] as String?) == 'HOST' ? 'AI' : 'User';
+              final role = (l['role'] as String?) ?? '';
+              final namedMode =
+                  labels['mode'] == 'clone' || labels['mode'] == 'roleplay';
+              final who = namedMode
+                  ? (role == 'SYSTEM'
+                      ? labels['partnerLabel']!
+                      : labels['userLabel']!)
+                  : (role == 'HOST' ? 'AI' : 'User');
               return "$who: $t";
             })
             .whereType<String>()
@@ -5951,7 +6104,13 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
           _showRoomEntryToast("연습할 대화가 없습니다");
           return;
         }
-        final gen = await _generateExpandedFromConversation(transcript);
+        final gen = await _generateExpandedFromConversation(
+          transcript,
+          userLabel: labels['userLabel']!,
+          partnerLabel: labels['partnerLabel']!,
+          mode: labels['mode']!,
+          situation: labels['situation']!,
+        );
         if (!mounted) return;
         if (gen == null || gen.isEmpty) {
           setState(() => _isBuildingExpand = false);
@@ -5959,7 +6118,10 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
           return;
         }
         expanded = gen;
-        final pol = await _polishExpandedSentence(expanded);
+        final pol = await _polishExpandedSentence(
+          expanded,
+          partnerLabel: labels['partnerLabel']!,
+        );
         if (!mounted) return;
         polished = (pol != null && pol.trim().isNotEmpty) ? pol.trim() : "";
 
@@ -5982,6 +6144,10 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
             'has_practice': true,
             'expand_source': 'fallback',
             'expand_generated_at': FieldValue.serverTimestamp(),
+            'expand_user_label': labels['userLabel'],
+            'expand_partner_name': labels['partnerLabel'],
+            'expand_partner_type': labels['partnerType'],
+            'expand_schema_version': 'named_partner_v1',
             if (existingMode.isEmpty) 'mode': stampMode,
           });
         } catch (e) {

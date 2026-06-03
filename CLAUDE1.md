@@ -47,395 +47,49 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# [KO-FRAG] 의미단위 읽기 — 청크별 한국어 직독 조각 부착
-
-## 0. 목적 (한 줄)
-`chat_history_master.dart`의 청크 연습 엔진(`_chunks` / `PracticeChunk`)에서, 영어 의미단위 청크 **밑에** 영어어순 한국어 직독 조각("…라고 생각해서", "…이니까")을 1:1로 달아 표시한다. `_langDisplayMode`(0=영+한, 2=한)에서만 보이고 1(영어만)에서는 숨긴다.
-
-## 1. 대상 파일 (단 하나)
-`F:\flutter_project\stealth_vox\lib\...\chat_history_master.dart`
-(이 작업은 이 파일 **한 곳만** 수정한다. 다른 파일·다른 모드 파일은 절대 건드리지 않는다.)
-
-## 2. 절대 건드리지 말 것 (CRITICAL — 손대면 롤백)
-- **Box 7 통신 엔진** 전체: `DeepgramV2VoiceManager`, `TtsQueueManager`, `ChunkedTtsFetcher`, TTS/STT 내부 로직.
-- **기존 영어 청크 분할·캐시**: `_splitSentenceIntoChunks`, `_splitByBreathGroupsGpt`, `_buildChunksLegacyList`, `_postProcessChunks`, `_readChunkCache`, `_writeChunkCache`, `_chunkTextHash`. → 이 작업은 **영어 청크 경로를 일절 변경하지 않는다.** 한국어는 별도 평행 레이어로만 추가한다.
-- 방 나가기 / Firestore 저장 로직 (`_handleAutoSaveAndExit` 류) → 변경 없음.
-- 과금/타이머/녹음(`BillingTicker`, idle timeout, `_audioRecorder`) → 변경 없음.
-
-## 3. 설계 요약
-- `PracticeChunk`에 `String? korean` 필드 **추가**(기존 필드 유지).
-- 신규 GPT 메서드 1개(`_generateKoFragmentsGpt`) + 신규 디스크 캐시 2개(`_readKoFragCache` / `_writeKoFragCache`). **영어 청크 캐시와 파일명 분리**(`kofrag_v1_...`).
-- `_buildChunks`에서 영어 청크 생성 직후, 캐시→GPT로 한국어 조각을 받아 청크에 1:1로 zip. **실패/개수 불일치 시 한국어 없이 영어만 정상 표시.**
-- 렌더 헬퍼 `_buildChunkKoLine` 1개 추가 → 청크 텍스트 3개 렌더 사이트에 한 줄씩 삽입.
-
----
-
-## 4. 변경 작업 (위→아래 순서대로 적용)
-
-### [4-1] PracticeChunk 클래스 — `korean` 필드 추가
-**위치 anchor:** `class PracticeChunk {` (파일 끝부분, 사전 기준 약 6253행)
-아래 블록을 **통째로 교체**:
-
-#### BEFORE
-```dart
-class PracticeChunk {
-  final String text;
-  Uint8List? aiAudio;
-  String? userRecordPath;
-  bool isDone;
-
-  PracticeChunk({
-    required this.text,
-    this.aiAudio,
-    this.userRecordPath,
-    this.isDone = false,
-  });
-}
-```
-
-#### AFTER
-```dart
-class PracticeChunk {
-  final String text;
-  final String? korean; // 🆕 [KO-FRAG] 영어어순 직독 한국어 조각 (없으면 null)
-  Uint8List? aiAudio;
-  String? userRecordPath;
-  bool isDone;
-
-  PracticeChunk({
-    required this.text,
-    this.korean,
-    this.aiAudio,
-    this.userRecordPath,
-    this.isDone = false,
-  });
-}
-```
-
----
-
-### [4-2] 신규 메서드 3개 삽입 (GPT + 캐시 read/write)
-**위치:** `_writeChunkCache(...)` 메서드의 닫는 `}` **바로 다음 줄**, 그리고 `Future<void> _buildChunks(String sentence)` **바로 위**(사전 기준 약 1423행, `_ChatHistoryMasterState` 클래스 내부).
-아래 3개 메서드를 **그 자리에 그대로 추가**(기존 코드 삭제 없음):
-
-```dart
-  // 🆕 [KO-FRAG] 영어 청크 리스트 → 영어어순 직독 한국어 조각 (개수·순서 1:1)
-  Future<List<String>?> _generateKoFragmentsGpt(List<String> enChunks) async {
-    if (_apiKey.isEmpty || enChunks.isEmpty) return null;
-    try {
-      const sysPrompt = """You are a Korean sight-translation (jikdokjikhae) helper.
-You receive an English sentence already split into ordered chunks as a JSON array.
-For EACH chunk, output ONE short Korean reading fragment that follows the English word order.
-These are intentionally incomplete connecting fragments, NOT a polished full translation.
-
-[RULES]
-- Output ONLY a JSON array of Korean strings. No markdown, no extra text, no code fences.
-- The array length MUST equal the number of input chunks, in the same order.
-- Each fragment expresses ONLY that chunk, in English order. Do not reorder across chunks.
-- Use natural Korean connective endings that fit each chunk role
-  (reason: ~이니까/~여서, thinking: ~라고 생각해서, time: ~할 때, contrast: ~지만, purpose: ~하려고).
-- Apply correct particles (이/가, 은/는, 을/를, 한테/에게). Use honorific ~시 only if present in English.
-- Keep each fragment short, one breath. Do not add information not in the chunk.
-- Korean only inside the strings.
-
-Example input: ["I think","that the price","went up","because of the weather"]
-Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때문에"]""";
-      final response = await http
-          .post(
-            Uri.parse("https://api.openai.com/v1/chat/completions"),
-            headers: {
-              "Authorization": "Bearer $_apiKey",
-              "Content-Type": "application/json",
-            },
-            body: jsonEncode({
-              "model": "gpt-4o-mini",
-              "messages": [
-                {"role": "system", "content": sysPrompt},
-                {"role": "user", "content": jsonEncode(enChunks)},
-              ],
-              "temperature": 0.2,
-              "max_tokens": 600,
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode != 200) return null;
-      final body =
-          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-      final content =
-          ((body["choices"] as List).first["message"]["content"] as String)
-              .trim();
-      final jsonMatch = RegExp(r'\[[\s\S]*\]').firstMatch(content);
-      if (jsonMatch == null) return null;
-      final list = jsonDecode(jsonMatch.group(0)!) as List;
-      final ko = list.map((e) => e.toString().trim()).toList();
-      if (ko.length != enChunks.length) {
-        _debugLogs +=
-            "⚠️ [KO-FRAG] 개수 불일치 en=${enChunks.length} ko=${ko.length} → 스킵\n";
-        return null;
-      }
-      _debugLogs += "✅ [KO-FRAG] 조각 생성 완료 n=${ko.length}\n";
-      return ko;
-    } catch (e) {
-      debugPrint("[generateKoFragmentsGpt] $e");
-      return null;
-    }
+Claude Code 지시문
+변경 1: "Tap your role icon" 텍스트 → 시스템 사운드로 교체
+파일: chat_history_master.dart
+[A] _showRoleSelectBubble() 수정 (약 651줄)
+아래 함수를 찾아:
+dartvoid _showRoleSelectBubble() {
+    if (!mounted) return;
+    setState(() => _showRoleBubble = true);
+    _roleBubbleTimer?.cancel();
+    _roleBubbleTimer = Timer(const Duration(milliseconds: 2800), () {
+      if (mounted) setState(() => _showRoleBubble = false);
+    });
   }
+setState(() => _showRoleBubble = true); 바로 아래에 다음 한 줄 추가:
+dartHapticFeedback.mediumImpact();
 
-  // 🆕 [KO-FRAG] 디스크 캐시 읽기 (영어 청크 캐시와 파일명 분리: kofrag_v1)
-  Future<List<String>?> _readKoFragCache(String variant, String sentence) async {
-    try {
-      final dir = await getApplicationDocumentsDirectory();
-      final roomId = widget.historyDoc.id;
-      final hash = _chunkTextHash(sentence);
-      final file = File(
-          '${dir.path}/chunk_cache/kofrag_v1_${roomId}_${variant}_$hash.json');
-      if (!await file.exists()) return null;
-      final list = jsonDecode(await file.readAsString()) as List;
-      return list.map((e) => e.toString()).toList();
-    } catch (e) {
-      debugPrint("[readKoFragCache] $e");
-      return null;
-    }
-  }
+HapticFeedback은 이미 import 'package:flutter/services.dart'로 임포트되어 있음. 별도 임포트 불필요.
 
-  // 🆕 [KO-FRAG] 디스크 캐시 쓰기
-  Future<void> _writeKoFragCache(
-      String variant, String sentence, List<String> ko) async {
-    try {
-      final dir = await getApplicationDocumentsDirectory();
-      final roomId = widget.historyDoc.id;
-      final hash = _chunkTextHash(sentence);
-      final folder = Directory('${dir.path}/chunk_cache');
-      if (!await folder.exists()) await folder.create(recursive: true);
-      final file = File(
-          '${folder.path}/kofrag_v1_${roomId}_${variant}_$hash.json');
-      await file.writeAsString(jsonEncode(ko));
-    } catch (e) {
-      debugPrint("[writeKoFragCache] $e");
-    }
-  }
-```
 
----
-
-### [4-3] `_buildChunks` — 한국어 조각 zip (전체 교체)
-**위치 anchor:** `Future<void> _buildChunks(String sentence) async {` (사전 기준 약 1424행)
-아래 블록을 **통째로 교체**:
-
-#### BEFORE
-```dart
-  Future<void> _buildChunks(String sentence) async {
-    if (sentence.isEmpty) {
-      _chunks = [];
-      _currentChunkIdx = 0;
-      return;
-    }
-    final isPolished =
-        _polishedSentence.isNotEmpty && sentence == _polishedSentence;
-    final variant = isPolished ? 'polished' : 'expanded';
-    final result = await _splitSentenceIntoChunks(sentence, variant);
-    _chunks = result.map((t) => PracticeChunk(text: t)).toList();
-    _currentChunkIdx = 0;
-  }
-```
-
-#### AFTER
-```dart
-  Future<void> _buildChunks(String sentence) async {
-    if (sentence.isEmpty) {
-      _chunks = [];
-      _currentChunkIdx = 0;
-      return;
-    }
-    final isPolished =
-        _polishedSentence.isNotEmpty && sentence == _polishedSentence;
-    final variant = isPolished ? 'polished' : 'expanded';
-    final result = await _splitSentenceIntoChunks(sentence, variant);
-
-    // 🆕 [KO-FRAG] 영어 청크에 1:1 한국어 직독 조각 부착 (캐시 → GPT).
-    //   실패/개수 불일치 시 ko=null → 영어 청크만 정상 표시 (영어 경로 영향 0).
-    List<String>? ko = await _readKoFragCache(variant, sentence);
-    if (ko == null || ko.length != result.length) {
-      ko = await _generateKoFragmentsGpt(result);
-      if (ko != null && ko.length == result.length) {
-        await _writeKoFragCache(variant, sentence, ko);
-      } else {
-        ko = null;
-      }
-    }
-
-    _chunks = List.generate(
-      result.length,
-      (i) => PracticeChunk(
-        text: result[i],
-        korean: (ko != null && i < ko.length) ? ko[i] : null,
-      ),
-    );
-    _currentChunkIdx = 0;
-  }
-```
-
----
-
-### [4-4] 렌더 헬퍼 `_buildChunkKoLine` 추가
-**위치:** `_ChatHistoryMasterState` 클래스 내부 아무 곳(권장: `Widget _buildChunkPracticeScreen() {` 바로 위, 사전 기준 약 5141행).
-아래 메서드를 **그대로 추가**:
-
-```dart
-  // 🆕 [KO-FRAG] 청크 한국어 직독 조각 한 줄 — _langDisplayMode 0(영+한)·2(한)에서만 표시
-  Widget _buildChunkKoLine(PracticeChunk chunk) {
-    if (_langDisplayMode == 1) return const SizedBox.shrink();
-    final ko = chunk.korean;
-    if (ko == null || ko.trim().isEmpty) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(top: 3),
-      child: Text(
-        ko,
-        style: TextStyle(
-          color: Colors.white54,
-          fontSize: 12 * _fontScale,
-          height: 1.3,
-        ),
+[B] _buildRoleSpeechBubble() 텍스트 제거 (약 4739~4751줄)
+아래 함수 전체를:
+dartWidget _buildRoleSpeechBubble() {
+    return const Text(
+      "Tap your role icon",
+      style: TextStyle(
+        color: Colors.white,
+        fontSize: 14,
+        fontWeight: FontWeight.bold,
+        decoration: TextDecoration.none,
+        shadows: [Shadow(color: Colors.black87, blurRadius: 10)],
       ),
     );
   }
-```
+다음으로 교체 (빈 위젯 반환):
+dartWidget _buildRoleSpeechBubble() {
+    return const SizedBox.shrink();
+  }
 
----
+변경 2: "✨ Expanded Sentence" 버튼 이모지 제거
+파일: chat_history_master.dart
+약 4708~4710줄 ElevatedButton.icon의 label 텍스트에서 이모지 제거:
+dart// 변경 전
+_isBuildingExpand ? "불러오는 중..." : "✨ Expanded Sentence",
 
-### [4-5] 렌더 사이트 삽입 ① — `_buildChunkPracticeScreen` (메인 읽기 화면, 약 5461행)
-영어 청크 `Text` 바로 밑에 한 줄 삽입.
-
-#### BEFORE
-```dart
-                                            Text(
-                                              chunk.text,
-                                              style: TextStyle(
-                                                color: textColor,
-                                                fontSize: 16 * _fontScale,
-                                                fontWeight: isCurrent
-                                                    ? FontWeight.bold
-                                                    : FontWeight.normal,
-                                                height: 1.45,
-                                              ),
-                                            ),
-                                            if (isCurrent &&
-                                                _aiChunkLoading) ...[
-```
-
-#### AFTER
-```dart
-                                            Text(
-                                              chunk.text,
-                                              style: TextStyle(
-                                                color: textColor,
-                                                fontSize: 16 * _fontScale,
-                                                fontWeight: isCurrent
-                                                    ? FontWeight.bold
-                                                    : FontWeight.normal,
-                                                height: 1.45,
-                                              ),
-                                            ),
-                                            _buildChunkKoLine(chunk), // 🆕 [KO-FRAG]
-                                            if (isCurrent &&
-                                                _aiChunkLoading) ...[
-```
-
----
-
-### [4-6] 렌더 사이트 삽입 ② — `_buildShadowingPracticeBody` (약 3710행)
-
-#### BEFORE
-```dart
-                    Text(
-                      chunk.text,
-                      style: TextStyle(
-                        color: _chunkTextColor(i), // 🆕 [P2-INDICATOR]
-                        fontSize: 18 * _fontScale,
-                        fontWeight:
-                            isCurrent ? FontWeight.bold : FontWeight.normal,
-                        height: 1.5,
-                      ),
-                    ),
-                    if (isCurrent) ...[
-```
-
-#### AFTER
-```dart
-                    Text(
-                      chunk.text,
-                      style: TextStyle(
-                        color: _chunkTextColor(i), // 🆕 [P2-INDICATOR]
-                        fontSize: 18 * _fontScale,
-                        fontWeight:
-                            isCurrent ? FontWeight.bold : FontWeight.normal,
-                        height: 1.5,
-                      ),
-                    ),
-                    _buildChunkKoLine(chunk), // 🆕 [KO-FRAG]
-                    if (isCurrent) ...[
-```
-
----
-
-### [4-7] 렌더 사이트 삽입 ③ — `_buildReviewScreen` (완료 후 리뷰 리스트, 약 3859행)
-여긴 `Row` 안 `Expanded(child: Text(...))` 구조라 **`Column`으로 감싸서** 한국어를 밑에 붙인다.
-
-#### BEFORE
-```dart
-                    Expanded(
-                      child: Text(
-                        chunk.text,
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 14 * _fontScale,
-                            height: 1.4),
-                      ),
-                    ),
-```
-
-#### AFTER
-```dart
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            chunk.text,
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 14 * _fontScale,
-                                height: 1.4),
-                          ),
-                          _buildChunkKoLine(chunk), // 🆕 [KO-FRAG]
-                        ],
-                      ),
-                    ),
-```
-
----
-
-## 5. 검증 체크리스트 (반드시 전부 통과 후 보고)
-1. `flutter analyze` → **에러 0** (warning 도 신규로 늘지 않을 것).
-2. grep 확인:
-   - `grep -n "korean" chat_history_master.dart` → `PracticeChunk` 필드 + `_buildChunks` 사용 확인.
-   - `grep -nc "_buildChunkKoLine(chunk)" chat_history_master.dart` → **3** (렌더 3곳).
-   - `grep -nc "_buildChunkKoLine(PracticeChunk" chat_history_master.dart` → **1** (헬퍼 정의).
-   - `grep -nc "_generateKoFragmentsGpt" chat_history_master.dart` → **2** (정의 1 + 호출 1).
-   - `grep -nc "kofrag_v1_" chat_history_master.dart` → **2** (read/write 캐시).
-3. 영어 청크 경로 무변경 확인: `grep -nc "_splitByBreathGroupsGpt\|_readChunkCache\|_writeChunkCache" chat_history_master.dart` 의 정의 라인들이 **수정되지 않았는지** 육안 확인(시그니처·본문 동일).
-4. 완료 보고는 표로: [항목 | 적용행 | 통과여부].
-
-## 6. 런타임 기대 동작
-- 히스토리 방 → 연습 진입(확장/세련) → 청크 화면에서 각 영어 청크 밑에 회색 작은 한국어 조각 표시.
-- `_langDisplayMode` 토글: 0(영+한)·2(한) → 보임 / 1(영어만) → 숨김.
-- 첫 진입 시 GPT 1회(~1초), 이후 같은 문장은 `kofrag_v1` 캐시 히트 → 호출 0.
-- GPT 실패/개수 불일치 → 한국어 줄 없이 영어 청크만(에러 없이) 표시.
-
-## 7. 롤백 노트
-- 모든 변경에 `🆕 [KO-FRAG]` 주석. 문제 시:
-  - 렌더 3줄(`_buildChunkKoLine(chunk),`) 제거 + 4-7의 `Column` 래핑 원복.
-  - 4-2/4-4 신규 메서드 4개 삭제.
-  - 4-1 `korean` 필드 / 4-3 `_buildChunks` zip 블록 원복.
-- 디스크 `kofrag_v1_*.json` 파일은 남아도 무해(다음 빌드에서 안 읽힘).
+// 변경 후
+_isBuildingExpand ? "불러오는 중..." : "Expanded Sentence",
