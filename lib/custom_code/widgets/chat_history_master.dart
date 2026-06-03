@@ -1421,6 +1421,102 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     }
   }
 
+  // 🆕 [KO-FRAG] 영어 청크 리스트 → 영어어순 직독 한국어 조각 (개수·순서 1:1)
+  Future<List<String>?> _generateKoFragmentsGpt(List<String> enChunks) async {
+    if (_apiKey.isEmpty || enChunks.isEmpty) return null;
+    try {
+      const sysPrompt = """You are a Korean sight-translation (jikdokjikhae) helper.
+You receive an English sentence already split into ordered chunks as a JSON array.
+For EACH chunk, output ONE short Korean reading fragment that follows the English word order.
+These are intentionally incomplete connecting fragments, NOT a polished full translation.
+
+[RULES]
+- Output ONLY a JSON array of Korean strings. No markdown, no extra text, no code fences.
+- The array length MUST equal the number of input chunks, in the same order.
+- Each fragment expresses ONLY that chunk, in English order. Do not reorder across chunks.
+- Use natural Korean connective endings that fit each chunk role
+  (reason: ~이니까/~여서, thinking: ~라고 생각해서, time: ~할 때, contrast: ~지만, purpose: ~하려고).
+- Apply correct particles (이/가, 은/는, 을/를, 한테/에게). Use honorific ~시 only if present in English.
+- Keep each fragment short, one breath. Do not add information not in the chunk.
+- Korean only inside the strings.
+
+Example input: ["I think","that the price","went up","because of the weather"]
+Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때문에"]""";
+      final response = await http
+          .post(
+            Uri.parse("https://api.openai.com/v1/chat/completions"),
+            headers: {
+              "Authorization": "Bearer $_apiKey",
+              "Content-Type": "application/json",
+            },
+            body: jsonEncode({
+              "model": "gpt-4o-mini",
+              "messages": [
+                {"role": "system", "content": sysPrompt},
+                {"role": "user", "content": jsonEncode(enChunks)},
+              ],
+              "temperature": 0.2,
+              "max_tokens": 600,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) return null;
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      final content =
+          ((body["choices"] as List).first["message"]["content"] as String)
+              .trim();
+      final jsonMatch = RegExp(r'\[[\s\S]*\]').firstMatch(content);
+      if (jsonMatch == null) return null;
+      final list = jsonDecode(jsonMatch.group(0)!) as List;
+      final ko = list.map((e) => e.toString().trim()).toList();
+      if (ko.length != enChunks.length) {
+        _debugLogs +=
+            "⚠️ [KO-FRAG] 개수 불일치 en=${enChunks.length} ko=${ko.length} → 스킵\n";
+        return null;
+      }
+      _debugLogs += "✅ [KO-FRAG] 조각 생성 완료 n=${ko.length}\n";
+      return ko;
+    } catch (e) {
+      debugPrint("[generateKoFragmentsGpt] $e");
+      return null;
+    }
+  }
+
+  // 🆕 [KO-FRAG] 디스크 캐시 읽기 (영어 청크 캐시와 파일명 분리: kofrag_v1)
+  Future<List<String>?> _readKoFragCache(String variant, String sentence) async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final roomId = widget.historyDoc.id;
+      final hash = _chunkTextHash(sentence);
+      final file = File(
+          '${dir.path}/chunk_cache/kofrag_v1_${roomId}_${variant}_$hash.json');
+      if (!await file.exists()) return null;
+      final list = jsonDecode(await file.readAsString()) as List;
+      return list.map((e) => e.toString()).toList();
+    } catch (e) {
+      debugPrint("[readKoFragCache] $e");
+      return null;
+    }
+  }
+
+  // 🆕 [KO-FRAG] 디스크 캐시 쓰기
+  Future<void> _writeKoFragCache(
+      String variant, String sentence, List<String> ko) async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final roomId = widget.historyDoc.id;
+      final hash = _chunkTextHash(sentence);
+      final folder = Directory('${dir.path}/chunk_cache');
+      if (!await folder.exists()) await folder.create(recursive: true);
+      final file = File(
+          '${folder.path}/kofrag_v1_${roomId}_${variant}_$hash.json');
+      await file.writeAsString(jsonEncode(ko));
+    } catch (e) {
+      debugPrint("[writeKoFragCache] $e");
+    }
+  }
+
   Future<void> _buildChunks(String sentence) async {
     if (sentence.isEmpty) {
       _chunks = [];
@@ -1431,7 +1527,26 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         _polishedSentence.isNotEmpty && sentence == _polishedSentence;
     final variant = isPolished ? 'polished' : 'expanded';
     final result = await _splitSentenceIntoChunks(sentence, variant);
-    _chunks = result.map((t) => PracticeChunk(text: t)).toList();
+
+    // 🆕 [KO-FRAG] 영어 청크에 1:1 한국어 직독 조각 부착 (캐시 → GPT).
+    //   실패/개수 불일치 시 ko=null → 영어 청크만 정상 표시 (영어 경로 영향 0).
+    List<String>? ko = await _readKoFragCache(variant, sentence);
+    if (ko == null || ko.length != result.length) {
+      ko = await _generateKoFragmentsGpt(result);
+      if (ko != null && ko.length == result.length) {
+        await _writeKoFragCache(variant, sentence, ko);
+      } else {
+        ko = null;
+      }
+    }
+
+    _chunks = List.generate(
+      result.length,
+      (i) => PracticeChunk(
+        text: result[i],
+        korean: (ko != null && i < ko.length) ? ko[i] : null,
+      ),
+    );
     _currentChunkIdx = 0;
   }
 
@@ -3716,6 +3831,7 @@ RULES — follow exactly:
                         height: 1.5,
                       ),
                     ),
+                    _buildChunkKoLine(chunk), // 🆕 [KO-FRAG]
                     if (isCurrent) ...[
                       const SizedBox(height: 4),
                       Text(
@@ -3857,12 +3973,19 @@ RULES — follow exactly:
                     ),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: Text(
-                        chunk.text,
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 14 * _fontScale,
-                            height: 1.4),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            chunk.text,
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 14 * _fontScale,
+                                height: 1.4),
+                          ),
+                          _buildChunkKoLine(chunk), // 🆕 [KO-FRAG]
+                        ],
                       ),
                     ),
                     IconButton(
@@ -5139,6 +5262,24 @@ RULES — follow exactly:
     );
   }
 
+  // 🆕 [KO-FRAG] 청크 한국어 직독 조각 한 줄 — _langDisplayMode 0(영+한)·2(한)에서만 표시
+  Widget _buildChunkKoLine(PracticeChunk chunk) {
+    if (_langDisplayMode == 1) return const SizedBox.shrink();
+    final ko = chunk.korean;
+    if (ko == null || ko.trim().isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 3),
+      child: Text(
+        ko,
+        style: TextStyle(
+          color: Colors.white54,
+          fontSize: 12 * _fontScale,
+          height: 1.3,
+        ),
+      ),
+    );
+  }
+
   Widget _buildChunkPracticeScreen() {
     const Color colorA = Color(0xFF0F2233);
     const Color colorB = Color(0xFF1A0F2E);
@@ -5469,6 +5610,7 @@ RULES — follow exactly:
                                                 height: 1.45,
                                               ),
                                             ),
+                                            _buildChunkKoLine(chunk), // 🆕 [KO-FRAG]
                                             if (isCurrent &&
                                                 _aiChunkLoading) ...[
                                               const SizedBox(height: 4),
@@ -6252,12 +6394,14 @@ enum SentenceVariant { expanded, polished }
 
 class PracticeChunk {
   final String text;
+  final String? korean; // 🆕 [KO-FRAG] 영어어순 직독 한국어 조각 (없으면 null)
   Uint8List? aiAudio;
   String? userRecordPath;
   bool isDone;
 
   PracticeChunk({
     required this.text,
+    this.korean,
     this.aiAudio,
     this.userRecordPath,
     this.isDone = false,
