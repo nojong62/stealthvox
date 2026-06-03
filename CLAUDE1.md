@@ -47,49 +47,137 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-Claude Code 지시문
-변경 1: "Tap your role icon" 텍스트 → 시스템 사운드로 교체
-파일: chat_history_master.dart
-[A] _showRoleSelectBubble() 수정 (약 651줄)
-아래 함수를 찾아:
-dartvoid _showRoleSelectBubble() {
-    if (!mounted) return;
-    setState(() => _showRoleBubble = true);
-    _roleBubbleTimer?.cancel();
-    _roleBubbleTimer = Timer(const Duration(milliseconds: 2800), () {
-      if (mounted) setState(() => _showRoleBubble = false);
-    });
-  }
-setState(() => _showRoleBubble = true); 바로 아래에 다음 한 줄 추가:
-dartHapticFeedback.mediumImpact();
+---
 
-HapticFeedback은 이미 import 'package:flutter/services.dart'로 임포트되어 있음. 별도 임포트 불필요.
+## Claude Code 지시문
 
+**파일:** `lib/custom_code/widgets/chat_history_master.dart`
 
-[B] _buildRoleSpeechBubble() 텍스트 제거 (약 4739~4751줄)
-아래 함수 전체를:
-dartWidget _buildRoleSpeechBubble() {
-    return const Text(
-      "Tap your role icon",
-      style: TextStyle(
-        color: Colors.white,
-        fontSize: 14,
-        fontWeight: FontWeight.bold,
-        decoration: TextDecoration.none,
-        shadows: [Shadow(color: Colors.black87, blurRadius: 10)],
-      ),
-    );
-  }
-다음으로 교체 (빈 위젯 반환):
-dartWidget _buildRoleSpeechBubble() {
-    return const SizedBox.shrink();
-  }
+---
 
-변경 2: "✨ Expanded Sentence" 버튼 이모지 제거
-파일: chat_history_master.dart
-약 4708~4710줄 ElevatedButton.icon의 label 텍스트에서 이모지 제거:
-dart// 변경 전
-_isBuildingExpand ? "불러오는 중..." : "✨ Expanded Sentence",
+### [변경 1] P/E 버튼 터치 영역 확대
+**위치:** 약 5346~5376줄 — `// P/E 버튼 — Expanded ↔ Polished 전환` 블록의 `child: Container(` 시작부터 닫는 `),`까지
 
-// 변경 후
-_isBuildingExpand ? "불러오는 중..." : "Expanded Sentence",
+**삭제 시작:** 5346줄 `child: Container(`
+**삭제 끝:** 5376줄 `),` (GestureDetector 닫는 괄호 바로 앞)
+
+**교체 코드:**
+```dart
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      margin: const EdgeInsets.only(right: 4),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: _practicingPolished
+                              ? Colors.greenAccent
+                              : (_polishedSentence.isNotEmpty
+                                  ? Colors.amber
+                                  : Colors.white24),
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Center(
+                        child: Text(
+                          _practicingPolished ? 'E' : 'P',
+                          style: TextStyle(
+                            color: _practicingPolished
+                                ? Colors.greenAccent
+                                : (_polishedSentence.isNotEmpty
+                                    ? Colors.amber
+                                    : Colors.white24),
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+```
+
+**변경 요약:** `width/height: 26 → 40`, `fontSize: 12 → 14`
+
+---
+
+### [변경 2] T(글자크기) 버튼 터치 영역 확대 — Chunk Practice 화면
+**위치:** 약 5377~5397줄 — P/E 버튼 바로 아래 `GestureDetector(` 블록 전체
+
+**삭제 시작:** 5377줄 `GestureDetector(`
+**삭제 끝:** 5397줄 닫는 `),`
+
+**교체 코드:**
+```dart
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => setState(() {
+                      _fontScale = _fontScale == 1.0
+                          ? 1.3
+                          : _fontScale == 1.3
+                              ? 0.8
+                              : 1.0;
+                    }),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 8),
+                      child: Icon(
+                        Icons.format_size,
+                        color: _fontScale > 1.0
+                            ? const Color(0xFFFBBF24)
+                            : _fontScale < 1.0
+                                ? Colors.white38
+                                : Colors.white54,
+                        size: 22,
+                      ),
+                    ),
+                  ),
+```
+
+**변경 요약:** `behavior: HitTestBehavior.opaque` 추가, `padding horizontal: 6 → 10 + vertical: 8 추가`, `size: 20 → 22`
+
+---
+
+### [변경 3] T(글자크기) 버튼 터치 영역 확대 — 메인 히스토리 화면
+**위치:** 약 3125~3142줄 — `_buildCustomAppBar` 내부 `IconButton(` (format_size 아이콘)
+
+**삭제 시작:** 3125줄 `IconButton(`
+**삭제 끝:** 3142줄 닫는 `),`
+
+**교체 코드:**
+```dart
+          IconButton(
+            icon: Icon(
+              Icons.format_size,
+              color: _fontScale > 1.0
+                  ? const Color(0xFFFBBF24)
+                  : _fontScale < 1.0
+                      ? Colors.white38
+                      : Colors.white70,
+              size: 24,
+            ),
+            padding: const EdgeInsets.all(10),
+            constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+            onPressed: () => setState(() {
+              _fontScale = _fontScale == 1.0
+                  ? 1.3
+                  : _fontScale == 1.3
+                      ? 0.8
+                      : 1.0;
+            }),
+          ),
+```
+
+**변경 요약:** `padding: all(10)` + `constraints: minWidth/Height 44` 추가, `size: 22 → 24`
+
+---
+
+### 검증 체크리스트
+```
+□ flutter analyze → 0 errors
+□ grep -n "width: 40" chat_history_master.dart   → 5346줄 부근 확인
+□ grep -n "horizontal: 10" chat_history_master.dart → 5377줄 부근 확인
+□ grep -n "minWidth: 44" chat_history_master.dart   → 3125줄 부근 + 기존 LangIcon 버튼(3157줄) 2개 확인
+```
+
+### 절대 건드리지 말 것
+- Box 7 (`TtsQueueManager`, `DeepgramV2VoiceManager`) 관련 코드 일체
+- `GestureDetector`의 `onTap` 로직 내부 (`_switchToPolishedPractice`, `_buildChunks` 호출 등)
