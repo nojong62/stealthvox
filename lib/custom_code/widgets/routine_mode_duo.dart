@@ -190,6 +190,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
 
   void _handleIdlePause() {
     if (!mounted || _isIdlePaused) return;
+    // 🔒 [오토포즈 가드] 최상단이 아니면 일시정지하지 말고 60초 타이머만 다시 건다
+    if (ModalRoute.of(context)?.isCurrent == false) {
+      _resetIdleTimer();
+      return;
+    }
     _isIdlePaused = true;
     BillingTicker.instance.pause();
     if (mounted) setState(() {});
