@@ -651,6 +651,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   void _showRoleSelectBubble() {
     if (!mounted) return;
     setState(() => _showRoleBubble = true);
+    HapticFeedback.mediumImpact();
     _roleBubbleTimer?.cancel();
     _roleBubbleTimer = Timer(const Duration(milliseconds: 2800), () {
       if (mounted) setState(() => _showRoleBubble = false);
@@ -4706,7 +4707,7 @@ RULES — follow exactly:
                         )
                       : const Icon(Icons.auto_awesome_rounded, size: 18),
                   label: Text(
-                    _isBuildingExpand ? "불러오는 중..." : "✨ Expanded Sentence",
+                    _isBuildingExpand ? "불러오는 중..." : "Expanded Sentence",
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                   style: ElevatedButton.styleFrom(
@@ -4738,16 +4739,7 @@ RULES — follow exactly:
 
   // 역할 선택 말풍선 위젯
   Widget _buildRoleSpeechBubble() {
-    return const Text(
-      "Tap your role icon",
-      style: TextStyle(
-        color: Colors.white,
-        fontSize: 14,
-        fontWeight: FontWeight.bold,
-        decoration: TextDecoration.none,
-        shadows: [Shadow(color: Colors.black87, blurRadius: 10)],
-      ),
-    );
+    return const SizedBox.shrink();
   }
 
   // 📦 [Box 23: UI - 하단 Practice 컨트롤 (enum 비교)]
