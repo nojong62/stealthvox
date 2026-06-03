@@ -276,6 +276,26 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   bool _isGeneratingScenario = false;
   bool _isAiOpenerPlaying = false; // AI 첫 발화 재생 중 여부
 
+  String get _roleplayPartnerLabel {
+    final local = _scenarioAiRole.trim();
+    if (local.isNotEmpty) return local;
+    final stored = _RoleplayScenarioStore.aiRole.trim();
+    return stored.isNotEmpty ? stored : 'the roleplay partner';
+  }
+
+  String get _roleplayUserLabel {
+    final local = _scenarioUserRole.trim();
+    if (local.isNotEmpty) return local;
+    final stored = _RoleplayScenarioStore.userRole.trim();
+    return stored.isNotEmpty ? stored : 'the user';
+  }
+
+  String get _roleplaySituationLabel {
+    final situation = _scenarioSituation.trim();
+    if (situation.isNotEmpty) return situation;
+    return _scenarioKeyword.trim();
+  }
+
   // ── Idle Timeout v2 ───────────────────────────────────────────────
   // 기준: "유저도 AI도 아무 작동이 없는 상태"가 연속 30초 지속되면 pause.
   //  - AI 작동 = _ttsQueueManager.isBusy (TTS 재생/대기)
@@ -537,7 +557,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                 const SizedBox(height: 20),
                 _inputField(situationCtrl, '상황 (10-15자)', '예: 숨겨둔 돈다발 들킴'),
                 const SizedBox(height: 12),
-                _inputField(aiRoleCtrl, 'AI 역할', '예: 화난 배우자'),
+                _inputField(aiRoleCtrl, '상대 역할', '예: 화난 배우자'),
                 const SizedBox(height: 12),
                 _inputField(userRoleCtrl, '내 역할', '예: 당황한 남편'),
                 const SizedBox(height: 24),
@@ -1625,6 +1645,12 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
             'ai_role': _scenarioAiRole,
             'user_role': _scenarioUserRole,
           },
+          'scenario_situation': _scenarioSituation,
+          'scenario_keyword': _scenarioKeyword,
+          'user_role': _scenarioUserRole,
+          'ai_role': _scenarioAiRole,
+          'user_label': _roleplayUserLabel,
+          'partner_label': _roleplayPartnerLabel,
           'created_at': FieldValue.serverTimestamp(),
           'transcript': chatLines,
         });
@@ -1674,6 +1700,13 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         'created_at': FieldValue.serverTimestamp(),
         'room_name': "Roleplay Mode",
         'mode': 'roleplay', // 🆕 [ROUTER-FIX] 라우터가 Step Expand로 오인 방지
+        'scenario_situation': _scenarioSituation,
+        'scenario_keyword': _scenarioKeyword,
+        'user_role': _scenarioUserRole,
+        'ai_role': _scenarioAiRole,
+        'user_label': _roleplayUserLabel,
+        'partner_label': _roleplayPartnerLabel,
+        'expand_partner_type': 'roleplay',
         'is_pinned': false,
         'msg_count': 0
       });
@@ -1741,13 +1774,17 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           // 🆕 [EXPAND-EXIT] 전체 대화 종합 → Expanded + Polished 생성 (오버레이 표시)
           String expanded = "";
           String polished = "";
+          final userLabel = _roleplayUserLabel;
+          final partnerLabel = _roleplayPartnerLabel;
+          final situationLabel = _roleplaySituationLabel;
           final convoLines = _localMessages
               .where((m) {
                 if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
                 final t = (m['target'] ?? '').toString().trim();
                 return t.isNotEmpty && t != '...';
               })
-              .map((m) => "${m['role'] == 'HOST' ? 'User' : 'AI'}: ${m['target']}")
+              .map((m) =>
+                  "${m['role'] == 'HOST' ? userLabel : partnerLabel}: ${m['target']}")
               .toList();
           final transcript = convoLines.join("\n");
 
@@ -1776,11 +1813,20 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
             overlayShown = true;
 
             final gen = await RoleplayBrain.generateExpandedFromConversation(
-                _openAiKey, transcript);
+              _openAiKey,
+              transcript,
+              userLabel: userLabel,
+              partnerLabel: partnerLabel,
+              situation: situationLabel,
+            );
             if (gen != null && gen.isNotEmpty) {
               expanded = gen;
               final pol =
-                  await RoleplayBrain.polishSentence(_openAiKey, expanded);
+                  await RoleplayBrain.polishSentence(
+                _openAiKey,
+                expanded,
+                partnerLabel: partnerLabel,
+              );
               polished = (pol != null && pol.trim().isNotEmpty) ? pol.trim() : "";
             }
 
@@ -1800,12 +1846,23 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
             'chat_json': jsonEncode(_localMessages),
             'is_completed': false,
             'mode': 'roleplay',
+            'scenario_situation': _scenarioSituation,
+            'scenario_keyword': _scenarioKeyword,
+            'user_role': _scenarioUserRole,
+            'ai_role': _scenarioAiRole,
+            'user_label': userLabel,
+            'partner_label': partnerLabel,
             if (expanded.isNotEmpty) 'expanded_sentence': expanded,
             if (polished.isNotEmpty) 'polished_sentence': polished,
             if (expanded.isNotEmpty) 'has_practice': true,
             if (expanded.isNotEmpty) 'expand_source': 'exit',
             if (expanded.isNotEmpty)
               'expand_generated_at': FieldValue.serverTimestamp(),
+            if (expanded.isNotEmpty) 'expand_user_label': userLabel,
+            if (expanded.isNotEmpty) 'expand_partner_name': partnerLabel,
+            if (expanded.isNotEmpty) 'expand_partner_type': 'roleplay',
+            if (expanded.isNotEmpty)
+              'expand_schema_version': 'named_partner_v1',
           });
           _log('💾 [HIST-UPD]',
               'last_message + expand 저장 (expanded=${expanded.isNotEmpty})');
@@ -2305,7 +2362,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text("AI Roleplay",
+              const Text("Roleplay",
                   style: TextStyle(
                       color: Colors.white54,
                       fontSize: 20,
@@ -3409,15 +3466,33 @@ class HybridTtsPlayer {
 class RoleplayBrain {
   // 🆕 [EXPAND-EXIT] 대화 전체(AI+유저) → 종합 확장 문장 1개 (의미단위 ~5개, 문법 연결)
   static Future<String?> generateExpandedFromConversation(
-      String apiKey, String transcript) async {
+    String apiKey,
+    String transcript, {
+    String userLabel = 'the user',
+    String partnerLabel = 'the roleplay partner',
+    String situation = '',
+  }) async {
     if (apiKey.isEmpty || transcript.trim().isEmpty) return null;
     try {
-      const sysPrompt = """You are an English speaking coach.
-You are given a short conversation transcript between the user and an AI partner.
+      final safeUserLabel =
+          userLabel.trim().isNotEmpty ? userLabel.trim() : 'the user';
+      final safePartnerLabel = partnerLabel.trim().isNotEmpty
+          ? partnerLabel.trim()
+          : 'the roleplay partner';
+      final situationLine = situation.trim().isNotEmpty
+          ? 'Roleplay situation: ${situation.trim()}. Use it only if supported by the transcript.'
+          : 'Use only the situation supported by the transcript.';
+      final sysPrompt = """You are an English speaking coach.
+You are given a short roleplay conversation transcript.
+This is a roleplay conversation between $safeUserLabel and $safePartnerLabel.
+$safePartnerLabel is the role being played, not AI.
+$situationLine
 Your job: compose ONE long, natural English sentence that synthesizes the overall
 content and gist of the WHOLE conversation.
 
 [RULES]
+- Never call $safePartnerLabel AI, assistant, chatbot, or bot.
+- If the partner must be mentioned, use $safePartnerLabel or a natural role phrase.
 - It must be ONE single sentence (do not split it into multiple sentences).
 - Keep it 25–40 words.
 - Build it from about 5 meaning units joined with varied grammatical connectives
@@ -3467,10 +3542,16 @@ content and gist of the WHOLE conversation.
 
   // 🆕 [EXPAND-EXIT] 확장 문장 → 쉽고 세련된 한 문장 (Polished)
   static Future<String?> polishSentence(
-      String apiKey, String originalSentence) async {
+    String apiKey,
+    String originalSentence, {
+    String partnerLabel = 'the roleplay partner',
+  }) async {
     if (apiKey.isEmpty || originalSentence.trim().isEmpty) return null;
     try {
-      const sysPrompt = """You are an English speaking coach.
+      final safePartnerLabel = partnerLabel.trim().isNotEmpty
+          ? partnerLabel.trim()
+          : 'the roleplay partner';
+      final sysPrompt = """You are an English speaking coach.
 Rewrite the given long English sentence as ONE "easy but elegant" spoken sentence.
 
 [GOALS]
@@ -3479,6 +3560,8 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
 - Smooth flow (pause-friendly, commas for breath)
 - Same meaning as the original (do not add new facts)
 - Easier to pronounce and say out loud
+- Preserve role names and participant labels.
+- Do not replace $safePartnerLabel with AI, assistant, chatbot, or bot.
 
 [OUTPUT]
 - Exactly ONE sentence. No explanation, no quotes, no prefixes.""";

@@ -192,6 +192,29 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
   String _selectedCloneContext = "";
   List<Map<String, dynamic>> _clones = [];
 
+  String get _selectedCloneName {
+    if (_selectedCloneId.isNotEmpty) {
+      for (final clone in _clones) {
+        if ((clone['id'] ?? '').toString() == _selectedCloneId) {
+          final name = (clone['name'] ?? '').toString().trim();
+          if (name.isNotEmpty) return name;
+        }
+      }
+    }
+    return '';
+  }
+
+  String get _cloneUserLabel => 'the user';
+  String get _clonePartnerLabel {
+    final name = _selectedCloneName;
+    return name.isNotEmpty ? name : 'the clone';
+  }
+
+  String get _cloneUiLabel {
+    final name = _selectedCloneName;
+    return name.isNotEmpty ? name : 'Clone';
+  }
+
   // 🧠 [장기 기억] 클론별 메모리 (SharedPreferences 동기화)
   String _cloneSummary = '';
   List<Map<String, String>> _recentHistory = [];
@@ -2241,6 +2264,9 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
           'session_no': nextSessionNo,
           'mode': 'clone',
           'clone_id': _selectedCloneId,
+          'clone_name': _selectedCloneName,
+          'user_label': _cloneUserLabel,
+          'partner_label': _clonePartnerLabel,
           'created_at': FieldValue.serverTimestamp(),
           'transcript': chatLines,
         });
@@ -2290,6 +2316,11 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
         'created_at': FieldValue.serverTimestamp(),
         'room_name': "Clone Mode",
         'mode': 'clone',
+        'clone_id': _selectedCloneId,
+        'clone_name': _selectedCloneName,
+        'user_label': _cloneUserLabel,
+        'partner_label': _clonePartnerLabel,
+        'expand_partner_type': 'clone',
         'is_pinned': false,
         'msg_count': 0
       });
@@ -2356,13 +2387,16 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
           // 🆕 [EXPAND-EXIT] 전체 대화 종합 → Expanded + Polished 생성 (오버레이 표시)
           String expanded = "";
           String polished = "";
+          final userLabel = _cloneUserLabel;
+          final partnerLabel = _clonePartnerLabel;
           final convoLines = _localMessages
               .where((m) {
                 if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
                 final t = (m['target'] ?? '').toString().trim();
                 return t.isNotEmpty && t != '...';
               })
-              .map((m) => "${m['role'] == 'HOST' ? 'User' : 'AI'}: ${m['target']}")
+              .map((m) =>
+                  "${m['role'] == 'HOST' ? userLabel : partnerLabel}: ${m['target']}")
               .toList();
           final transcript = convoLines.join("\n");
 
@@ -2391,10 +2425,18 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
             overlayShown = true;
 
             final gen = await CloneBrain.generateExpandedFromConversation(
-                _openAiKey, transcript);
+              _openAiKey,
+              transcript,
+              userLabel: userLabel,
+              partnerLabel: partnerLabel,
+            );
             if (gen != null && gen.isNotEmpty) {
               expanded = gen;
-              final pol = await CloneBrain.polishSentence(_openAiKey, expanded);
+              final pol = await CloneBrain.polishSentence(
+                _openAiKey,
+                expanded,
+                partnerLabel: partnerLabel,
+              );
               polished = (pol != null && pol.trim().isNotEmpty) ? pol.trim() : "";
             }
 
@@ -2411,12 +2453,21 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
             'msg_count': _localMessages.length,
             'last_active': FieldValue.serverTimestamp(),
             'mode': 'clone',
+            'clone_id': _selectedCloneId,
+            'clone_name': _selectedCloneName,
+            'user_label': userLabel,
+            'partner_label': partnerLabel,
             if (expanded.isNotEmpty) 'expanded_sentence': expanded,
             if (polished.isNotEmpty) 'polished_sentence': polished,
             if (expanded.isNotEmpty) 'has_practice': true,
             if (expanded.isNotEmpty) 'expand_source': 'exit',
             if (expanded.isNotEmpty)
               'expand_generated_at': FieldValue.serverTimestamp(),
+            if (expanded.isNotEmpty) 'expand_user_label': userLabel,
+            if (expanded.isNotEmpty) 'expand_partner_name': partnerLabel,
+            if (expanded.isNotEmpty) 'expand_partner_type': 'clone',
+            if (expanded.isNotEmpty)
+              'expand_schema_version': 'named_partner_v1',
           });
           _log('💾 [HIST-UPD]',
               'last_message + expand 저장 (expanded=${expanded.isNotEmpty})');
@@ -2661,7 +2712,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text("Clone AI",
+              Text(_cloneUiLabel,
                   style: TextStyle(
                       color: Colors.white54,
                       fontSize: 20,
@@ -3686,15 +3737,27 @@ class HybridTtsPlayer {
 class CloneBrain {
   // 🆕 [EXPAND-EXIT] 대화 전체(AI+유저) → 종합 확장 문장 1개 (의미단위 ~5개, 문법 연결)
   static Future<String?> generateExpandedFromConversation(
-      String apiKey, String transcript) async {
+    String apiKey,
+    String transcript, {
+    String userLabel = 'the user',
+    String partnerLabel = 'the clone',
+  }) async {
     if (apiKey.isEmpty || transcript.trim().isEmpty) return null;
     try {
-      const sysPrompt = """You are an English speaking coach.
-You are given a short conversation transcript between the user and an AI partner.
+      final safeUserLabel =
+          userLabel.trim().isNotEmpty ? userLabel.trim() : 'the user';
+      final safePartnerLabel =
+          partnerLabel.trim().isNotEmpty ? partnerLabel.trim() : 'the clone';
+      final sysPrompt = """You are an English speaking coach.
+You are given a short conversation transcript.
+This conversation is between $safeUserLabel and $safePartnerLabel.
+$safePartnerLabel is a named clone/persona, not AI.
 Your job: compose ONE long, natural English sentence that synthesizes the overall
 content and gist of the WHOLE conversation.
 
 [RULES]
+- Never refer to $safePartnerLabel as AI, assistant, chatbot, or bot.
+- If the partner must be mentioned, use $safePartnerLabel.
 - It must be ONE single sentence (do not split it into multiple sentences).
 - Keep it 25–40 words.
 - Build it from about 5 meaning units joined with varied grammatical connectives
@@ -3744,10 +3807,15 @@ content and gist of the WHOLE conversation.
 
   // 🆕 [EXPAND-EXIT] 확장 문장 → 쉽고 세련된 한 문장 (Polished)
   static Future<String?> polishSentence(
-      String apiKey, String originalSentence) async {
+    String apiKey,
+    String originalSentence, {
+    String partnerLabel = 'the clone',
+  }) async {
     if (apiKey.isEmpty || originalSentence.trim().isEmpty) return null;
     try {
-      const sysPrompt = """You are an English speaking coach.
+      final safePartnerLabel =
+          partnerLabel.trim().isNotEmpty ? partnerLabel.trim() : 'the clone';
+      final sysPrompt = """You are an English speaking coach.
 Rewrite the given long English sentence as ONE "easy but elegant" spoken sentence.
 
 [GOALS]
@@ -3756,6 +3824,8 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
 - Smooth flow (pause-friendly, commas for breath)
 - Same meaning as the original (do not add new facts)
 - Easier to pronounce and say out loud
+- Preserve participant names and role labels.
+- Do not replace $safePartnerLabel with AI, assistant, chatbot, or bot.
 
 [OUTPUT]
 - Exactly ONE sentence. No explanation, no quotes, no prefixes.""";
