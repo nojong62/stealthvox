@@ -124,7 +124,8 @@
       "Bash(flutter devices *)",
       "PowerShell(& \"$env:LOCALAPPDATA\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\" devices 2>&1)",
       "PowerShell(flutter devices *)",
-      "PowerShell(flutter install *)"
+      "PowerShell(flutter install *)",
+      "PowerShell(& \"C:\\\\Users\\\\u\\\\AppData\\\\Local\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\" install -r \"build\\\\app\\\\outputs\\\\flutter-apk\\\\app-release.apk\" 2>&1)"
     ]
   }
 }

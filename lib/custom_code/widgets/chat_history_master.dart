@@ -2245,9 +2245,11 @@ _deepgramKey: ${_deepgramKey.isEmpty ? '❌ 없음' : '✅ (${_deepgramKey.lengt
                     fontWeight: FontWeight.bold),
               ),
               const Spacer(),
-              GestureDetector(
-                onTap: closeAccordion,
-                child: const Icon(Icons.close, color: Colors.white38, size: 18),
+              IconButton(
+                onPressed: closeAccordion,
+                icon: const Icon(Icons.close, color: Colors.white70, size: 22),
+                padding: const EdgeInsets.all(12),
+                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
               ),
             ],
           ),
