@@ -47,409 +47,395 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# StealthVox 정정(CORRECTION) 감지 통일 수정 지시문
+# [KO-FRAG] 의미단위 읽기 — 청크별 한국어 직독 조각 부착
 
-## 목표
-유저가 "아까 내 말 잘못 알아들었다, 그게 아니라 X다"라고 정정하면, AI의 직전 응답과
-오해된 유저 발화를 지우고 정정 발화로 다시 응답한다.
+## 0. 목적 (한 줄)
+`chat_history_master.dart`의 청크 연습 엔진(`_chunks` / `PracticeChunk`)에서, 영어 의미단위 청크 **밑에** 영어어순 한국어 직독 조각("…라고 생각해서", "…이니까")을 1:1로 달아 표시한다. `_langDisplayMode`(0=영+한, 2=한)에서만 보이고 1(영어만)에서는 숨긴다.
 
-이 기능은 이미 세 모드에 있으나 방식이 갈려 있다:
-- **StepExpand**: GPT가 `[CASE CORRECTION]` 규칙으로 판단 → `[CORRECTION]` 토큰 (정교, 오탐 가드 있음). ← 정답
-- **Clone / Roleplay**: 클라이언트 키워드 매칭(`_isCorrectionAttempt`). 오탐·미탐 발생. Brain엔 규칙 없음.
+## 1. 대상 파일 (단 하나)
+`F:\flutter_project\stealth_vox\lib\...\chat_history_master.dart`
+(이 작업은 이 파일 **한 곳만** 수정한다. 다른 파일·다른 모드 파일은 절대 건드리지 않는다.)
 
-→ **Clone·Roleplay를 StepExpand 방식(GPT 판단 `[CORRECTION]`)으로 교체한다.** StepExpand는 손대지 않는다.
+## 2. 절대 건드리지 말 것 (CRITICAL — 손대면 롤백)
+- **Box 7 통신 엔진** 전체: `DeepgramV2VoiceManager`, `TtsQueueManager`, `ChunkedTtsFetcher`, TTS/STT 내부 로직.
+- **기존 영어 청크 분할·캐시**: `_splitSentenceIntoChunks`, `_splitByBreathGroupsGpt`, `_buildChunksLegacyList`, `_postProcessChunks`, `_readChunkCache`, `_writeChunkCache`, `_chunkTextHash`. → 이 작업은 **영어 청크 경로를 일절 변경하지 않는다.** 한국어는 별도 평행 레이어로만 추가한다.
+- 방 나가기 / Firestore 저장 로직 (`_handleAutoSaveAndExit` 류) → 변경 없음.
+- 과금/타이머/녹음(`BillingTicker`, idle timeout, `_audioRecorder`) → 변경 없음.
 
-## 이 작업에서 같이 잡는 두 가지 (중요)
-1. **Clone 장기기억 정리**: Clone은 contextStr을 `_recentHistory` 우선으로 만든다. `_removeLastExchange()`는
-   `_localMessages`만 지우므로, 정정 후 재처리 시 `_recentHistory`에 남은 오해가 GPT로 재주입된다.
-   → 정정 시 `_recentHistory`에서도 직전 2개(user+assistant)를 제거한다. (Roleplay는 해당 없음.)
-2. **무한루프 방지**: 재처리 발화에도 "아니 내 말은…"이 남아 또 정정으로 잡힐 수 있다.
-   → `_processRelayPipeline`에 `isCorrectionRetry` 플래그 추가, 재진입 시 `[CORRECTION]` 감지 생략.
-
----
-
-## 절대 건드리지 말 것 (CRITICAL)
-- **Box 7 통신 엔진**: `TtsQueueManager`, `DeepgramV2VoiceManager`, `ChunkedTtsFetcher` 내부 — 수정 금지.
-  (단, 이미 쓰이는 public API `_ttsQueueManager.stop()` / `setUserTurn()` 호출은 허용.)
-- **StepExpand 파일 전체** — 수정 금지(기준 구현이므로 그대로 둠).
-- 프롬프트 문자열 규칙: URL 마크다운 금지, 따옴표 이스케이프 주의(삼중따옴표 내부이므로 안전).
+## 3. 설계 요약
+- `PracticeChunk`에 `String? korean` 필드 **추가**(기존 필드 유지).
+- 신규 GPT 메서드 1개(`_generateKoFragmentsGpt`) + 신규 디스크 캐시 2개(`_readKoFragCache` / `_writeKoFragCache`). **영어 청크 캐시와 파일명 분리**(`kofrag_v1_...`).
+- `_buildChunks`에서 영어 청크 생성 직후, 캐시→GPT로 한국어 조각을 받아 청크에 1:1로 zip. **실패/개수 불일치 시 한국어 없이 영어만 정상 표시.**
+- 렌더 헬퍼 `_buildChunkKoLine` 1개 추가 → 청크 텍스트 3개 렌더 사이트에 한 줄씩 삽입.
 
 ---
 
-# PART 1 — routine_mode_clone.dart
+## 4. 변경 작업 (위→아래 순서대로 적용)
 
-### 1-A. CloneBrain 유저 번역 프롬프트에 [CASE CORRECTION] 추가
-**위치**: `streamUserTranslation`의 `sysPrompt`(3874줄 시작). pro-drop 설명 문단(3877줄) 바로 다음,
-`[INTERNAL THINKING` 앞에 블록 삽입.
+### [4-1] PracticeChunk 클래스 — `korean` 필드 추가
+**위치 anchor:** `class PracticeChunk {` (파일 끝부분, 사전 기준 약 6253행)
+아래 블록을 **통째로 교체**:
 
-**기준 줄(3877) — 이 줄 바로 아래에 삽입:**
-```
-Korean is a heavy pro-drop language — subjects, objects, and pronouns are constantly omitted when clear from context. Your job is to resolve these omissions perfectly.
-```
-
-**삽입할 블록(앞뒤 빈 줄 포함):**
-```
-
-[CASE CORRECTION] — Check this FIRST, only when the conversation history contains at least one "User:" line.
-The user is correcting the AI's misunderstanding or mishearing of their PREVIOUS utterance.
-Signs:
-- Starts with a correction signal: "아니" / "아니요" / "아 그게 아니라" / "다시" / "내 말은" / "그러니까" / "I mean" / "actually" / "no," / "wait,"
-- AND the content is clearly a re-statement or clarification of the LAST "User:" line in the history, NOT new information.
-- The user is essentially saying "that's not what I said — what I said was X."
-If this is a correction, output EXACTLY: [CORRECTION]  (and nothing else)
-Do NOT output [CORRECTION] when the user simply adds new details that happen to start with "아니" etc.
-```
-
----
-
-### 1-B. `_processRelayPipeline` 시그니처에 재진입 플래그 추가
-**위치**: 1839줄.
-
-**Before:**
+#### BEFORE
 ```dart
-  Future<void> _processRelayPipeline(String finalTranscript) async {
+class PracticeChunk {
+  final String text;
+  Uint8List? aiAudio;
+  String? userRecordPath;
+  bool isDone;
+
+  PracticeChunk({
+    required this.text,
+    this.aiAudio,
+    this.userRecordPath,
+    this.isDone = false,
+  });
+}
 ```
-**After:**
+
+#### AFTER
 ```dart
-  Future<void> _processRelayPipeline(String finalTranscript,
-      {bool isCorrectionRetry = false}) async {
+class PracticeChunk {
+  final String text;
+  final String? korean; // 🆕 [KO-FRAG] 영어어순 직독 한국어 조각 (없으면 null)
+  Uint8List? aiAudio;
+  String? userRecordPath;
+  bool isDone;
+
+  PracticeChunk({
+    required this.text,
+    this.korean,
+    this.aiAudio,
+    this.userRecordPath,
+    this.isDone = false,
+  });
+}
 ```
 
 ---
 
-### 1-C. 기존 키워드 정정 블록 삭제
-**삭제 범위**: 1879줄(`    // ─────...` STEP 1.5 구분선) ~ 1892줄(`    }`).
-즉 아래 블록 전체를 삭제한다(STEP 2의 `try {`는 남긴다):
+### [4-2] 신규 메서드 3개 삽입 (GPT + 캐시 read/write)
+**위치:** `_writeChunkCache(...)` 메서드의 닫는 `}` **바로 다음 줄**, 그리고 `Future<void> _buildChunks(String sentence)` **바로 위**(사전 기준 약 1423행, `_ChatHistoryMasterState` 클래스 내부).
+아래 3개 메서드를 **그 자리에 그대로 추가**(기존 코드 삭제 없음):
+
 ```dart
-    // ─────────────────────────────────────────────────────
-    // STEP 1.5: 정정 감지 — AI 오해/오청취 시 직전 교환 삭제
-    // ─────────────────────────────────────────────────────
-    if (_isCorrectionAttempt(finalTranscript)) {
-      _log('🔄 [CORRECT-01]', '정정 감지: "$finalTranscript" → 직전 교환 삭제');
-      if (mounted) {
-        setState(() {
-          _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-          _removeLastExchange();
-        });
-        _scrollToBottom();
+  // 🆕 [KO-FRAG] 영어 청크 리스트 → 영어어순 직독 한국어 조각 (개수·순서 1:1)
+  Future<List<String>?> _generateKoFragmentsGpt(List<String> enChunks) async {
+    if (_apiKey.isEmpty || enChunks.isEmpty) return null;
+    try {
+      const sysPrompt = """You are a Korean sight-translation (jikdokjikhae) helper.
+You receive an English sentence already split into ordered chunks as a JSON array.
+For EACH chunk, output ONE short Korean reading fragment that follows the English word order.
+These are intentionally incomplete connecting fragments, NOT a polished full translation.
+
+[RULES]
+- Output ONLY a JSON array of Korean strings. No markdown, no extra text, no code fences.
+- The array length MUST equal the number of input chunks, in the same order.
+- Each fragment expresses ONLY that chunk, in English order. Do not reorder across chunks.
+- Use natural Korean connective endings that fit each chunk role
+  (reason: ~이니까/~여서, thinking: ~라고 생각해서, time: ~할 때, contrast: ~지만, purpose: ~하려고).
+- Apply correct particles (이/가, 은/는, 을/를, 한테/에게). Use honorific ~시 only if present in English.
+- Keep each fragment short, one breath. Do not add information not in the chunk.
+- Korean only inside the strings.
+
+Example input: ["I think","that the price","went up","because of the weather"]
+Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때문에"]""";
+      final response = await http
+          .post(
+            Uri.parse("https://api.openai.com/v1/chat/completions"),
+            headers: {
+              "Authorization": "Bearer $_apiKey",
+              "Content-Type": "application/json",
+            },
+            body: jsonEncode({
+              "model": "gpt-4o-mini",
+              "messages": [
+                {"role": "system", "content": sysPrompt},
+                {"role": "user", "content": jsonEncode(enChunks)},
+              ],
+              "temperature": 0.2,
+              "max_tokens": 600,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) return null;
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      final content =
+          ((body["choices"] as List).first["message"]["content"] as String)
+              .trim();
+      final jsonMatch = RegExp(r'\[[\s\S]*\]').firstMatch(content);
+      if (jsonMatch == null) return null;
+      final list = jsonDecode(jsonMatch.group(0)!) as List;
+      final ko = list.map((e) => e.toString().trim()).toList();
+      if (ko.length != enChunks.length) {
+        _debugLogs +=
+            "⚠️ [KO-FRAG] 개수 불일치 en=${enChunks.length} ko=${ko.length} → 스킵\n";
+        return null;
       }
-      _log('🔄 [CORRECT-02]', '직전 교환 삭제 완료 → 재처리 진행');
+      _debugLogs += "✅ [KO-FRAG] 조각 생성 완료 n=${ko.length}\n";
+      return ko;
+    } catch (e) {
+      debugPrint("[generateKoFragmentsGpt] $e");
+      return null;
     }
-```
+  }
 
----
-
-### 1-D. 스트림 루프에 `[CORRECTION]` 토큰 감지 추가
-**위치**: `bool evaporated = false;`(1957줄) — 그 다음 줄에 `corrected` 선언 추가.
-
-**Before:**
-```dart
-      bool evaporated = false;
-      bool firstChunkSent = false;
-```
-**After:**
-```dart
-      bool evaporated = false;
-      bool corrected = false; // 유저가 AI의 오해를 정정 → 직전 교환 삭제 후 재처리
-      bool firstChunkSent = false;
-```
-
-**위치**: EVAPORATE 감지 블록(1964~1968줄) 바로 다음에 CORRECTION 감지 추가.
-
-**Before:**
-```dart
-        if (userTargetText.contains("[EVAPORATE]")) {
-          evaporated = true;
-          _log('⚠️ [EVAPORATE]', '증발 감지 → 턴 취소');
-          break;
-        }
-```
-**After:**
-```dart
-        if (userTargetText.contains("[EVAPORATE]")) {
-          evaporated = true;
-          _log('⚠️ [EVAPORATE]', '증발 감지 → 턴 취소');
-          break;
-        }
-        // 🔄 [CORRECTION] 정정 감지 (재진입 시 무시)
-        if (!isCorrectionRetry && userTargetText.contains("[CORRECTION]")) {
-          corrected = true;
-          _log('🔄 [CORRECTION]', '정정 감지 → 직전 교환 삭제 후 재시작');
-          break;
-        }
-```
-
----
-
-### 1-E. post-loop CORRECTION 처리 추가
-**위치**: `evaporated` 처리 블록(1997~2004줄)의 닫는 `}` 다음, `if (userBuffer.trim().isNotEmpty)`(2006줄) 앞.
-
-**Before:**
-```dart
-      if (evaporated) {
-        if (mounted)
-          setState(
-              () => _localMessages.removeWhere((m) => m['role'] == 'HOST'));
-        if (_isConversationActive && _turnCounter == currentTurnId)
-          _speakRetryAndListen();
-        return;
-      }
-
-      if (userBuffer.trim().isNotEmpty)
-```
-**After:**
-```dart
-      if (evaporated) {
-        if (mounted)
-          setState(
-              () => _localMessages.removeWhere((m) => m['role'] == 'HOST'));
-        if (_isConversationActive && _turnCounter == currentTurnId)
-          _speakRetryAndListen();
-        return;
-      }
-
-      // 🔄 [CORRECTION] 유저가 AI의 오해/오청취를 정정 → 직전 교환 삭제 후 재처리
-      if (corrected) {
-        if (mounted) {
-          setState(() {
-            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-            if (hostIndex < _localMessages.length &&
-                _localMessages[hostIndex]['role'] == 'HOST') {
-              _localMessages.removeAt(hostIndex); // 방금 만든 현재 HOST 버블 제거
-            }
-            _removeLastExchange(); // 직전 HOST(오해 발화)+SYSTEM(틀린 응답) 제거
-          });
-          _scrollToBottom();
-        }
-        // 🔑 장기기억에서도 직전 교환 제거 — 안 하면 재처리 시 오해가 contextStr로 재주입됨
-        if (_recentHistory.length >= 2) {
-          _recentHistory.removeRange(
-              _recentHistory.length - 2, _recentHistory.length);
-        }
-        _ttsQueueManager.stop();
-        _ttsQueueManager.setUserTurn(false);
-        // 정정된 발화로 재처리 (재진입이므로 [CORRECTION] 재감지 안 함)
-        _processRelayPipeline(finalTranscript, isCorrectionRetry: true);
-        return;
-      }
-
-      if (userBuffer.trim().isNotEmpty)
-```
-
----
-
-# PART 2 — routine_mode_roleplay.dart
-(Clone과 동일 패턴. 단 `_recentHistory` pop은 **없음** — Roleplay는 `_localMessages`만 사용.)
-
-### 2-A. RoleplayBrain 유저 번역 프롬프트에 [CASE CORRECTION] 추가
-**위치**: `streamUserTranslation`의 `sysPrompt`(3715줄 시작). pro-drop 설명 줄(3718줄) 바로 다음,
-`[INTERNAL THINKING` 앞에 삽입.
-
-**기준 줄(3718) — 이 줄 바로 아래에 삽입:**
-```
-Korean is a heavy pro-drop language - subjects, objects, and pronouns are constantly omitted when clear from context.
-```
-**삽입할 블록(PART 1-A와 동일 텍스트, 앞뒤 빈 줄 포함):**
-```
-
-[CASE CORRECTION] — Check this FIRST, only when the conversation history contains at least one "User:" line.
-The user is correcting the AI's misunderstanding or mishearing of their PREVIOUS utterance.
-Signs:
-- Starts with a correction signal: "아니" / "아니요" / "아 그게 아니라" / "다시" / "내 말은" / "그러니까" / "I mean" / "actually" / "no," / "wait,"
-- AND the content is clearly a re-statement or clarification of the LAST "User:" line in the history, NOT new information.
-- The user is essentially saying "that's not what I said — what I said was X."
-If this is a correction, output EXACTLY: [CORRECTION]  (and nothing else)
-Do NOT output [CORRECTION] when the user simply adds new details that happen to start with "아니" etc.
-```
-
----
-
-### 2-B. `_processRelayPipeline` 시그니처에 재진입 플래그 추가
-**위치**: 1126줄.
-
-**Before:**
-```dart
-  Future<void> _processRelayPipeline(String finalTranscript) async {
-```
-**After:**
-```dart
-  Future<void> _processRelayPipeline(String finalTranscript,
-      {bool isCorrectionRetry = false}) async {
-```
-
----
-
-### 2-C. 기존 키워드 정정 블록 삭제
-**삭제 범위**: 1165줄(`    // ─────...` STEP 1.5 구분선) ~ 1179줄(`    }`).
-아래 블록 전체 삭제(STEP 2의 `try {`는 남김):
-```dart
-    // ─────────────────────────────────────────────────────
-    // STEP 1.5: 정정 감지 — AI 오해/오청취 시 직전 교환 삭제
-    // ─────────────────────────────────────────────────────
-    if (_isCorrectionAttempt(finalTranscript)) {
-      _log('🔄 [CORRECT-01]', '정정 감지: "$finalTranscript" → 직전 교환 삭제');
-      if (mounted) {
-        setState(() {
-          _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-          _removeLastExchange();
-        });
-        if (_localMessages.isNotEmpty)
-          _scrollToBottom();
-      }
-      _log('🔄 [CORRECT-02]', '직전 교환 삭제 완료 → 재처리 진행');
+  // 🆕 [KO-FRAG] 디스크 캐시 읽기 (영어 청크 캐시와 파일명 분리: kofrag_v1)
+  Future<List<String>?> _readKoFragCache(String variant, String sentence) async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final roomId = widget.historyDoc.id;
+      final hash = _chunkTextHash(sentence);
+      final file = File(
+          '${dir.path}/chunk_cache/kofrag_v1_${roomId}_${variant}_$hash.json');
+      if (!await file.exists()) return null;
+      final list = jsonDecode(await file.readAsString()) as List;
+      return list.map((e) => e.toString()).toList();
+    } catch (e) {
+      debugPrint("[readKoFragCache] $e");
+      return null;
     }
+  }
+
+  // 🆕 [KO-FRAG] 디스크 캐시 쓰기
+  Future<void> _writeKoFragCache(
+      String variant, String sentence, List<String> ko) async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final roomId = widget.historyDoc.id;
+      final hash = _chunkTextHash(sentence);
+      final folder = Directory('${dir.path}/chunk_cache');
+      if (!await folder.exists()) await folder.create(recursive: true);
+      final file = File(
+          '${folder.path}/kofrag_v1_${roomId}_${variant}_$hash.json');
+      await file.writeAsString(jsonEncode(ko));
+    } catch (e) {
+      debugPrint("[writeKoFragCache] $e");
+    }
+  }
 ```
 
 ---
 
-### 2-D. 스트림 루프에 `[CORRECTION]` 토큰 감지 추가
-**위치**: `bool clarified = false;`(1238줄) 다음 줄에 `corrected` 선언 추가.
+### [4-3] `_buildChunks` — 한국어 조각 zip (전체 교체)
+**위치 anchor:** `Future<void> _buildChunks(String sentence) async {` (사전 기준 약 1424행)
+아래 블록을 **통째로 교체**:
 
-**Before:**
+#### BEFORE
 ```dart
-      bool evaporated = false;
-      bool clarified = false; // 주어/목적어 모호 → AI 되묻기
-      bool firstChunkSent = false;
-```
-**After:**
-```dart
-      bool evaporated = false;
-      bool clarified = false; // 주어/목적어 모호 → AI 되묻기
-      bool corrected = false; // 유저가 AI의 오해를 정정 → 직전 교환 삭제 후 재처리
-      bool firstChunkSent = false;
-```
-
-**위치**: EVAPORATE 감지 블록(1245~1249줄) 바로 다음에 CORRECTION 감지 추가.
-
-**Before:**
-```dart
-        if (userTargetText.contains("[EVAPORATE]")) {
-          evaporated = true;
-          _log('⚠️ [EVAPORATE]', '증발 감지 → 턴 취소');
-          break;
-        }
-```
-**After:**
-```dart
-        if (userTargetText.contains("[EVAPORATE]")) {
-          evaporated = true;
-          _log('⚠️ [EVAPORATE]', '증발 감지 → 턴 취소');
-          break;
-        }
-        // 🔄 [CORRECTION] 정정 감지 (재진입 시 무시)
-        if (!isCorrectionRetry && userTargetText.contains("[CORRECTION]")) {
-          corrected = true;
-          _log('🔄 [CORRECTION]', '정정 감지 → 직전 교환 삭제 후 재시작');
-          break;
-        }
+  Future<void> _buildChunks(String sentence) async {
+    if (sentence.isEmpty) {
+      _chunks = [];
+      _currentChunkIdx = 0;
+      return;
+    }
+    final isPolished =
+        _polishedSentence.isNotEmpty && sentence == _polishedSentence;
+    final variant = isPolished ? 'polished' : 'expanded';
+    final result = await _splitSentenceIntoChunks(sentence, variant);
+    _chunks = result.map((t) => PracticeChunk(text: t)).toList();
+    _currentChunkIdx = 0;
+  }
 ```
 
----
-
-### 2-E. post-loop CORRECTION 처리 추가
-**위치**: `evaporated` 처리 블록(1295~1302줄)의 닫는 `}` 다음, `// ❓ [CLARIFY]`(1304줄) 앞.
-
-**Before:**
+#### AFTER
 ```dart
-      if (evaporated) {
-        if (mounted)
-          setState(
-              () => _localMessages.removeWhere((m) => m['role'] == 'HOST'));
-        if (_isConversationActive && _turnCounter == currentTurnId)
-          _speakRetryAndListen();
-        return;
+  Future<void> _buildChunks(String sentence) async {
+    if (sentence.isEmpty) {
+      _chunks = [];
+      _currentChunkIdx = 0;
+      return;
+    }
+    final isPolished =
+        _polishedSentence.isNotEmpty && sentence == _polishedSentence;
+    final variant = isPolished ? 'polished' : 'expanded';
+    final result = await _splitSentenceIntoChunks(sentence, variant);
+
+    // 🆕 [KO-FRAG] 영어 청크에 1:1 한국어 직독 조각 부착 (캐시 → GPT).
+    //   실패/개수 불일치 시 ko=null → 영어 청크만 정상 표시 (영어 경로 영향 0).
+    List<String>? ko = await _readKoFragCache(variant, sentence);
+    if (ko == null || ko.length != result.length) {
+      ko = await _generateKoFragmentsGpt(result);
+      if (ko != null && ko.length == result.length) {
+        await _writeKoFragCache(variant, sentence, ko);
+      } else {
+        ko = null;
       }
+    }
 
-      // ❓ [CLARIFY] 유저 발화 주어/목적어 모호 → In-Character 되묻기 + STT 재시작
+    _chunks = List.generate(
+      result.length,
+      (i) => PracticeChunk(
+        text: result[i],
+        korean: (ko != null && i < ko.length) ? ko[i] : null,
+      ),
+    );
+    _currentChunkIdx = 0;
+  }
 ```
-**After:**
+
+---
+
+### [4-4] 렌더 헬퍼 `_buildChunkKoLine` 추가
+**위치:** `_ChatHistoryMasterState` 클래스 내부 아무 곳(권장: `Widget _buildChunkPracticeScreen() {` 바로 위, 사전 기준 약 5141행).
+아래 메서드를 **그대로 추가**:
+
 ```dart
-      if (evaporated) {
-        if (mounted)
-          setState(
-              () => _localMessages.removeWhere((m) => m['role'] == 'HOST'));
-        if (_isConversationActive && _turnCounter == currentTurnId)
-          _speakRetryAndListen();
-        return;
-      }
-
-      // 🔄 [CORRECTION] 유저가 AI의 오해/오청취를 정정 → 직전 교환 삭제 후 재처리
-      if (corrected) {
-        if (mounted) {
-          setState(() {
-            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-            if (hostIndex < _localMessages.length &&
-                _localMessages[hostIndex]['role'] == 'HOST') {
-              _localMessages.removeAt(hostIndex); // 방금 만든 현재 HOST 버블 제거
-            }
-            _removeLastExchange(); // 직전 HOST(오해 발화)+SYSTEM(틀린 응답) 제거
-          });
-          if (_localMessages.isNotEmpty) _scrollToBottom();
-        }
-        _ttsQueueManager.stop();
-        _ttsQueueManager.setUserTurn(false);
-        // 정정된 발화로 재처리 (재진입이므로 [CORRECTION] 재감지 안 함)
-        _processRelayPipeline(finalTranscript, isCorrectionRetry: true);
-        return;
-      }
-
-      // ❓ [CLARIFY] 유저 발화 주어/목적어 모호 → In-Character 되묻기 + STT 재시작
+  // 🆕 [KO-FRAG] 청크 한국어 직독 조각 한 줄 — _langDisplayMode 0(영+한)·2(한)에서만 표시
+  Widget _buildChunkKoLine(PracticeChunk chunk) {
+    if (_langDisplayMode == 1) return const SizedBox.shrink();
+    final ko = chunk.korean;
+    if (ko == null || ko.trim().isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 3),
+      child: Text(
+        ko,
+        style: TextStyle(
+          color: Colors.white54,
+          fontSize: 12 * _fontScale,
+          height: 1.3,
+        ),
+      ),
+    );
+  }
 ```
 
 ---
 
-## 선택적 정리 (Optional cleanup)
-1-C / 2-C로 호출이 사라지면 다음 헬퍼가 미사용이 된다. flutter analyze info 경고만 나므로
-급하지 않으면 둬도 되고, 깔끔히 하려면 제거:
-- Clone: `_isCorrectionAttempt`(1617), `_wordOverlap`(1601), `_hasLastExchange`(1591), `_lastRawTranscript` 대입(1898)
-- Roleplay: `_isCorrectionAttempt`(868), `_hasLastExchange`(842), `_lastRawTranscript` 대입(1185)
-- **주의**: `_removeLastExchange`는 신규 정정 처리에서 계속 사용하므로 **삭제 금지**.
+### [4-5] 렌더 사이트 삽입 ① — `_buildChunkPracticeScreen` (메인 읽기 화면, 약 5461행)
+영어 청크 `Text` 바로 밑에 한 줄 삽입.
+
+#### BEFORE
+```dart
+                                            Text(
+                                              chunk.text,
+                                              style: TextStyle(
+                                                color: textColor,
+                                                fontSize: 16 * _fontScale,
+                                                fontWeight: isCurrent
+                                                    ? FontWeight.bold
+                                                    : FontWeight.normal,
+                                                height: 1.45,
+                                              ),
+                                            ),
+                                            if (isCurrent &&
+                                                _aiChunkLoading) ...[
+```
+
+#### AFTER
+```dart
+                                            Text(
+                                              chunk.text,
+                                              style: TextStyle(
+                                                color: textColor,
+                                                fontSize: 16 * _fontScale,
+                                                fontWeight: isCurrent
+                                                    ? FontWeight.bold
+                                                    : FontWeight.normal,
+                                                height: 1.45,
+                                              ),
+                                            ),
+                                            _buildChunkKoLine(chunk), // 🆕 [KO-FRAG]
+                                            if (isCurrent &&
+                                                _aiChunkLoading) ...[
+```
 
 ---
 
-## 검증 체크리스트
-1. `flutter analyze` → 신규 에러 0개.
-2. 프롬프트 규칙 삽입:
-   ```
-   grep -c "\[CASE CORRECTION\]" routine_mode_clone.dart      # 1
-   grep -c "\[CASE CORRECTION\]" routine_mode_roleplay.dart   # 1
-   ```
-3. 토큰 파싱 + 재진입 플래그:
-   ```
-   grep -c "isCorrectionRetry" routine_mode_clone.dart        # 2 이상 (시그니처+루프)
-   grep -c "isCorrectionRetry" routine_mode_roleplay.dart     # 2 이상
-   grep -c 'contains("\[CORRECTION\]")' routine_mode_clone.dart     # 1
-   grep -c 'contains("\[CORRECTION\]")' routine_mode_roleplay.dart  # 1
-   ```
-4. 키워드 호출 제거:
-   ```
-   grep -c "_isCorrectionAttempt(finalTranscript)" routine_mode_clone.dart    # 0
-   grep -c "_isCorrectionAttempt(finalTranscript)" routine_mode_roleplay.dart # 0
-   ```
-5. Clone 장기기억 정리 존재 / Roleplay엔 없음:
-   ```
-   grep -c "_recentHistory.removeRange" routine_mode_clone.dart     # 1
-   grep -c "_recentHistory.removeRange" routine_mode_roleplay.dart  # 0
-   ```
-6. Box 7 무수정 / StepExpand 무수정:
-   ```
-   grep -c "TtsQueueManager\|DeepgramV2VoiceManager" routine_mode_clone.dart   # 수정 전후 동일
-   git diff --stat routine_mode_step_expand.dart   # 변경 없음
-   ```
+### [4-6] 렌더 사이트 삽입 ② — `_buildShadowingPracticeBody` (약 3710행)
+
+#### BEFORE
+```dart
+                    Text(
+                      chunk.text,
+                      style: TextStyle(
+                        color: _chunkTextColor(i), // 🆕 [P2-INDICATOR]
+                        fontSize: 18 * _fontScale,
+                        fontWeight:
+                            isCurrent ? FontWeight.bold : FontWeight.normal,
+                        height: 1.5,
+                      ),
+                    ),
+                    if (isCurrent) ...[
+```
+
+#### AFTER
+```dart
+                    Text(
+                      chunk.text,
+                      style: TextStyle(
+                        color: _chunkTextColor(i), // 🆕 [P2-INDICATOR]
+                        fontSize: 18 * _fontScale,
+                        fontWeight:
+                            isCurrent ? FontWeight.bold : FontWeight.normal,
+                        height: 1.5,
+                      ),
+                    ),
+                    _buildChunkKoLine(chunk), // 🆕 [KO-FRAG]
+                    if (isCurrent) ...[
+```
 
 ---
 
-## 테스트 시나리오 (실기기)
-1. **Clone 정정**: 발화 → AI가 오해한 응답 → "아니, 내 말은 ○○" → 직전 AI응답+유저발화 사라지고
-   ○○ 기준 새 응답. **그 다음 턴**의 AI 응답이 오해 없이 ○○ 기반이면 성공(=장기기억도 정리됨).
-2. **Roleplay 정정**: 동일.
-3. **오탐 방지(중요)**: "아니야, 그리고 어제 거기서…"처럼 **새 정보**를 "아니"로 시작 →
-   직전 교환이 지워지면 실패(GPT가 `[CORRECTION]`을 내지 말아야 함).
-4. **StepExpand 회귀**: 안 건드렸으니 기존 정정 동작 그대로인지 한 번 확인.
+### [4-7] 렌더 사이트 삽입 ③ — `_buildReviewScreen` (완료 후 리뷰 리스트, 약 3859행)
+여긴 `Row` 안 `Expanded(child: Text(...))` 구조라 **`Column`으로 감싸서** 한국어를 밑에 붙인다.
+
+#### BEFORE
+```dart
+                    Expanded(
+                      child: Text(
+                        chunk.text,
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 14 * _fontScale,
+                            height: 1.4),
+                      ),
+                    ),
+```
+
+#### AFTER
+```dart
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            chunk.text,
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 14 * _fontScale,
+                                height: 1.4),
+                          ),
+                          _buildChunkKoLine(chunk), // 🆕 [KO-FRAG]
+                        ],
+                      ),
+                    ),
+```
 
 ---
 
-## 롤백
-각 파일에서 (A)삽입한 [CASE CORRECTION] 블록, (D)`corrected` 선언+토큰 감지, (E)post-loop 처리 블록을
-제거하고, (B)시그니처를 `(String finalTranscript)`로 원복, (C)삭제했던 STEP 1.5 키워드 블록을 복원한다.
-선택적 정리를 했다면 헬퍼들도 복원.
+## 5. 검증 체크리스트 (반드시 전부 통과 후 보고)
+1. `flutter analyze` → **에러 0** (warning 도 신규로 늘지 않을 것).
+2. grep 확인:
+   - `grep -n "korean" chat_history_master.dart` → `PracticeChunk` 필드 + `_buildChunks` 사용 확인.
+   - `grep -nc "_buildChunkKoLine(chunk)" chat_history_master.dart` → **3** (렌더 3곳).
+   - `grep -nc "_buildChunkKoLine(PracticeChunk" chat_history_master.dart` → **1** (헬퍼 정의).
+   - `grep -nc "_generateKoFragmentsGpt" chat_history_master.dart` → **2** (정의 1 + 호출 1).
+   - `grep -nc "kofrag_v1_" chat_history_master.dart` → **2** (read/write 캐시).
+3. 영어 청크 경로 무변경 확인: `grep -nc "_splitByBreathGroupsGpt\|_readChunkCache\|_writeChunkCache" chat_history_master.dart` 의 정의 라인들이 **수정되지 않았는지** 육안 확인(시그니처·본문 동일).
+4. 완료 보고는 표로: [항목 | 적용행 | 통과여부].
+
+## 6. 런타임 기대 동작
+- 히스토리 방 → 연습 진입(확장/세련) → 청크 화면에서 각 영어 청크 밑에 회색 작은 한국어 조각 표시.
+- `_langDisplayMode` 토글: 0(영+한)·2(한) → 보임 / 1(영어만) → 숨김.
+- 첫 진입 시 GPT 1회(~1초), 이후 같은 문장은 `kofrag_v1` 캐시 히트 → 호출 0.
+- GPT 실패/개수 불일치 → 한국어 줄 없이 영어 청크만(에러 없이) 표시.
+
+## 7. 롤백 노트
+- 모든 변경에 `🆕 [KO-FRAG]` 주석. 문제 시:
+  - 렌더 3줄(`_buildChunkKoLine(chunk),`) 제거 + 4-7의 `Column` 래핑 원복.
+  - 4-2/4-4 신규 메서드 4개 삭제.
+  - 4-1 `korean` 필드 / 4-3 `_buildChunks` zip 블록 원복.
+- 디스크 `kofrag_v1_*.json` 파일은 남아도 무해(다음 빌드에서 안 읽힘).
