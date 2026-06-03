@@ -343,8 +343,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   Widget _buildIdleOverlay() => const SizedBox.shrink();
   // ─────────────────────────────────────────────────────────────────────────
 
-  String _lastRawTranscript = ''; // 정정 감지용 직전 유저 발화 원문
-
   // 오디오 및 UI
   final List<Map<String, dynamic>> _localMessages = [];
   final ScrollController _scrollController = ScrollController();
@@ -835,71 +833,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     }
   }
 
-  // ====================================================================
-  // 📦 [정정 감지] AI 오해/오청취 시 직전 교환 삭제 후 재처리
-  // ====================================================================
-  // 감지 조건 1 — 명시적 정정 키워드로 시작하는 경우
-  //   예: "아니야", "다시 해봐", "내 말은", "I meant", "No I said" 등
-  // 감지 조건 2 — 직전 발화와 단어 겹침이 65% 이상 (재발음 재시도)
-  //   예: AI가 "안녕하세요"를 잘못 들었을 때 유저가 "안녕하세요"를 다시 말하는 경우
-  // 동작: 직전 HOST(유저) + SYSTEM(AI) 버블 쌍을 삭제하고 새로 처리
-  // ====================================================================
-  bool _hasLastExchange() {
-    bool hasHost = false, hasSystem = false;
-    for (final m in _localMessages) {
-      if (m['role'] == 'HOST') hasHost = true;
-      if (m['role'] == 'SYSTEM') hasSystem = true;
-      if (hasHost && hasSystem) return true;
-    }
-    return false;
-  }
-
-  double _wordOverlap(String a, String b) {
-    final wordsA = a
-        .toLowerCase()
-        .split(RegExp(r'\s+'))
-        .where((w) => w.length > 1)
-        .toSet();
-    final wordsB = b
-        .toLowerCase()
-        .split(RegExp(r'\s+'))
-        .where((w) => w.length > 1)
-        .toSet();
-    if (wordsA.isEmpty || wordsB.isEmpty) return 0.0;
-    final common = wordsA.intersection(wordsB).length;
-    return common / min(wordsA.length, wordsB.length);
-  }
-
-  bool _isCorrectionAttempt(String transcript) {
-    if (!_hasLastExchange()) return false;
-
-    final lower = transcript.toLowerCase().trim();
-
-    // 명시적 정정 키워드 (한국어 + 영어)
-    const correctionStarters = [
-      // 한국어
-      '아니야', '아니에요', '아니요', '아니 그게', '아니 그건', '아니 그거',
-      '다시 해', '다시 말', '다시 한번', '다시 해봐',
-      '내 말은', '제 말은', '내가 말한', '제가 말한',
-      '이 뜻이야', '이 뜻은', '이런 뜻', '그 뜻이',
-      '그게 아니라', '그게 아니야', '잘못 들',
-      // English
-      'i said ', 'i meant ', 'what i said', 'no i ', 'no, i ',
-      'not that', 'wait, ', 'actually i said', "i didn't say",
-    ];
-    for (final starter in correctionStarters) {
-      if (lower.startsWith(starter)) return true;
-    }
-
-    // 재발음 감지: 직전 발화와 단어 겹침 65% 이상
-    if (_lastRawTranscript.isNotEmpty &&
-        transcript.split(RegExp(r'\s+')).length >= 2) {
-      if (_wordOverlap(transcript, _lastRawTranscript) >= 0.65) return true;
-    }
-
-    return false;
-  }
-
   void _removeLastExchange() {
     // 가장 최근 SYSTEM(AI) 버블 인덱스 탐색
     int lastSystemIdx = -1;
@@ -1128,7 +1061,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     if (mounted && _isConversationActive) _startDeepgramListening();
   }
 
-  Future<void> _processRelayPipeline(String finalTranscript) async {
+  Future<void> _processRelayPipeline(String finalTranscript,
+      {bool isCorrectionRetry = false}) async {
     _resetIdleTimer();
     _turnCounter++;
     final int currentTurnId = _turnCounter;
@@ -1167,27 +1101,10 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       return;
     }
 
-    // ─────────────────────────────────────────────────────
-    // STEP 1.5: 정정 감지 — AI 오해/오청취 시 직전 교환 삭제
-    // ─────────────────────────────────────────────────────
-    if (_isCorrectionAttempt(finalTranscript)) {
-      _log('🔄 [CORRECT-01]', '정정 감지: "$finalTranscript" → 직전 교환 삭제');
-      if (mounted) {
-        setState(() {
-          _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-          _removeLastExchange();
-        });
-        if (_localMessages.isNotEmpty)
-          _scrollToBottom();
-      }
-      _log('🔄 [CORRECT-02]', '직전 교환 삭제 완료 → 재처리 진행');
-    }
-
     try {
       // ─────────────────────────────────────────────────────
       // STEP 2: HOST 풍선 생성 + 유저 번역 스트리밍
       // ─────────────────────────────────────────────────────
-      _lastRawTranscript = finalTranscript; // 다음 턴 정정 감지용 저장
       if (mounted) {
         setState(() {
           _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
@@ -1241,6 +1158,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 
       bool evaporated = false;
       bool clarified = false; // 주어/목적어 모호 → AI 되묻기
+      bool corrected = false; // 유저가 AI의 오해를 정정 → 직전 교환 삭제 후 재처리
       bool firstChunkSent = false;
       await for (String chunk in userStream) {
         userTargetText += chunk;
@@ -1250,6 +1168,12 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         if (userTargetText.contains("[EVAPORATE]")) {
           evaporated = true;
           _log('⚠️ [EVAPORATE]', '증발 감지 → 턴 취소');
+          break;
+        }
+        // 🔄 [CORRECTION] 정정 감지 (재진입 시 무시)
+        if (!isCorrectionRetry && userTargetText.contains("[CORRECTION]")) {
+          corrected = true;
+          _log('🔄 [CORRECTION]', '정정 감지 → 직전 교환 삭제 후 재시작');
           break;
         }
 
@@ -1303,6 +1227,26 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
               () => _localMessages.removeWhere((m) => m['role'] == 'HOST'));
         if (_isConversationActive && _turnCounter == currentTurnId)
           _speakRetryAndListen();
+        return;
+      }
+
+      // 🔄 [CORRECTION] 유저가 AI의 오해/오청취를 정정 → 직전 교환 삭제 후 재처리
+      if (corrected) {
+        if (mounted) {
+          setState(() {
+            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+            if (hostIndex < _localMessages.length &&
+                _localMessages[hostIndex]['role'] == 'HOST') {
+              _localMessages.removeAt(hostIndex); // 방금 만든 현재 HOST 버블 제거
+            }
+            _removeLastExchange(); // 직전 HOST(오해 발화)+SYSTEM(틀린 응답) 제거
+          });
+          if (_localMessages.isNotEmpty) _scrollToBottom();
+        }
+        _ttsQueueManager.stop();
+        _ttsQueueManager.setUserTurn(false);
+        // 정정된 발화로 재처리 (재진입이므로 [CORRECTION] 재감지 안 함)
+        _processRelayPipeline(finalTranscript, isCorrectionRetry: true);
         return;
       }
 
@@ -3721,6 +3665,15 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
           """You are an expert real-time Korean-to-$targetLang translator for a live roleplay conversation.$roleContext
 
 Korean is a heavy pro-drop language - subjects, objects, and pronouns are constantly omitted when clear from context.
+
+[CASE CORRECTION] — Check this FIRST, only when the conversation history contains at least one "User:" line.
+The user is correcting the AI's misunderstanding or mishearing of their PREVIOUS utterance.
+Signs:
+- Starts with a correction signal: "아니" / "아니요" / "아 그게 아니라" / "다시" / "내 말은" / "그러니까" / "I mean" / "actually" / "no," / "wait,"
+- AND the content is clearly a re-statement or clarification of the LAST "User:" line in the history, NOT new information.
+- The user is essentially saying "that's not what I said — what I said was X."
+If this is a correction, output EXACTLY: [CORRECTION]  (and nothing else)
+Do NOT output [CORRECTION] when the user simply adds new details that happen to start with "아니" etc.
 
 [INTERNAL THINKING - do not output]
 Step 1. CONTEXT CHECK: Review conversation history.
