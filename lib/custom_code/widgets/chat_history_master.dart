@@ -3130,8 +3130,10 @@ RULES — follow exactly:
                   : _fontScale < 1.0
                       ? Colors.white38
                       : Colors.white70,
-              size: 22,
+              size: 24,
             ),
+            padding: const EdgeInsets.all(10),
+            constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
             onPressed: () => setState(() {
               _fontScale = _fontScale == 1.0
                   ? 1.3
@@ -5344,8 +5346,8 @@ RULES — follow exactly:
                             ? _switchToPolishedPractice
                             : null),
                     child: Container(
-                      width: 26,
-                      height: 26,
+                      width: 40,
+                      height: 40,
                       margin: const EdgeInsets.only(right: 4),
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
@@ -5367,7 +5369,7 @@ RULES — follow exactly:
                                 : (_polishedSentence.isNotEmpty
                                     ? Colors.amber
                                     : Colors.white24),
-                            fontSize: 12,
+                            fontSize: 14,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
@@ -5375,6 +5377,7 @@ RULES — follow exactly:
                     ),
                   ),
                   GestureDetector(
+                    behavior: HitTestBehavior.opaque,
                     onTap: () => setState(() {
                       _fontScale = _fontScale == 1.0
                           ? 1.3
@@ -5383,7 +5386,8 @@ RULES — follow exactly:
                               : 1.0;
                     }),
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 8),
                       child: Icon(
                         Icons.format_size,
                         color: _fontScale > 1.0
@@ -5391,7 +5395,7 @@ RULES — follow exactly:
                             : _fontScale < 1.0
                                 ? Colors.white38
                                 : Colors.white54,
-                        size: 20,
+                        size: 22,
                       ),
                     ),
                   ),
