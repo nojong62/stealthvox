@@ -204,6 +204,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   String _expandedFinalSentence = ""; // 완성된 확장 문장 (별도 표시)
   bool _showExpandedFinalCard = false; // 확장 문장 카드 표시 여부
   bool _showStudyRoomPrompt = false; // "Study Room에서 연습 하세요" 표시 여부
+  int _consecutiveRestateCount = 0; // 같은 턴 연속 RESTATE 횟수 (2 이상이면 더 쉬운 문장 유도)
 
   // 🎯 [PRACTICE] 의미단위 반복 연습 모드
   bool _isPracticeMode = false;
@@ -1694,6 +1695,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       bool retried = false;
       bool corrected = false; // 유저가 AI의 오해를 정정하는 경우 → 직전 HOST+SYSTEM 쌍 삭제 후 재시작
       bool clarified = false; // 주어/목적어 모호 → AI 되묻기
+      bool restated = false; // 맥락 어긋남/발음 불확실 → 같은 AI 질문 유지하고 다시 말하기 요청
       bool _part2Started = false; // \n\n 이후 진입 여부
       bool hasDoubleNewline = false; // 2파트 구조 여부
       bool firstChunkSent = false;
@@ -1728,6 +1730,13 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         if (userTargetText.contains("[CLARIFY]")) {
           clarified = true;
           _log('❓ [CLARIFY]', '되묻기 감지 → clarification 처리');
+          break;
+        }
+
+        // 다시 말하기 감지: 맥락 어긋남 OR 발음 불확실 → 같은 AI 질문 유지하고 재청취
+        if (userTargetText.contains("[RESTATE]")) {
+          restated = true;
+          _log('🔁 [RESTATE]', '맥락 불일치/발음 불확실 → 같은 질문 유지, 다시 말하기 요청');
           break;
         }
 
@@ -1886,6 +1895,49 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         if (mounted && _isConversationActive) _startDeepgramListening();
         return;
       }
+
+      // 🔁 [RESTATE] 유저 발화가 맥락에 어긋나거나 발음이 불확실 → AI 질문은 그대로 두고 다시 말하기 요청
+      //   - 턴 카운터 원복(이번 시도 무효 → 다음 발화가 같은 턴으로 재진입)
+      //   - 방금 만든 빈 HOST 버블만 제거. 이전의 좋은 맥락(SYSTEM 질문 포함)은 절대 삭제 안 함
+      //   - 같은 턴에서 2회 연속이면 "더 짧고 쉬운 문장" 유도 멘트로 전환
+      if (restated) {
+        _turnCounter--;
+        final int restateCount = ++_consecutiveRestateCount;
+        if (mounted) {
+          setState(() {
+            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+            if (hostIndex < _localMessages.length) {
+              _localMessages.removeAt(hostIndex);
+            }
+          });
+          _scrollToBottom();
+        }
+        final String restatePhrase = restateCount >= 2
+            ? "조금 더 짧고 쉬운 문장으로 말해 주실래요?"
+            : "방금 건 살짝 놓쳤어요. 다시 한 번만요.";
+        _ttsQueueManager.setUserTurn(false);
+        _ttsQueueManager.setAiPaused(false);
+        final restateTts = ChunkedTtsFetcher(
+          _openAiKey,
+          _ttsQueueManager,
+          'nova',
+          isUser: false,
+          onLog: _log,
+        );
+        restateTts.addText(restatePhrase);
+        int waitTicks = 0;
+        while ((restateTts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
+            mounted) {
+          await Future.delayed(const Duration(milliseconds: 50));
+          if (++waitTicks > 200) break;
+        }
+        // 같은 AI 질문 그대로 유지 → 질문 재생성 없이 STT만 재시작
+        if (mounted && _isConversationActive) _startDeepgramListening();
+        return;
+      }
+
+      // ✅ 정상 발화 통과 → 연속 RESTATE 카운터 초기화
+      _consecutiveRestateCount = 0;
 
       // 🌱 [E-2] 하이브리드: remainder 발사 + 통문장 TtsCache 저장
       final String _part2FullSentence = hasDoubleNewline
@@ -4319,13 +4371,41 @@ Style pool — pick ONE and VARY each time (never repeat the same phrasing twice
 
 NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
 
+[RESTATE GUARD] — hold the center; never invent content
+Stay anchored to the AI's LAST question and the growing sentence. If you cannot do that safely, ask the user to say it again instead of guessing.
+Output EXACTLY: [RESTATE]  in these cases:
+1. OFF-CONTEXT: The user clearly tried to answer, but the utterance does not connect to the AI's last question and cannot be attached to the growing sentence (and it is NOT a correction of a previous answer).
+2. UNRELIABLE PRONUNCIATION: The text is garbled badly enough that the CORE meaning is genuinely uncertain, so translating it would require inventing what the user "probably" meant.
+Do NOT output [RESTATE] when:
+- A minor STT slip exists but the intended meaning is still clearly inferable from context  ->  translate normally (keep tolerating small errors).
+- Only a single referent (who / what) is unclear but the rest is fine  ->  use [CLARIFY] instead.
+- The user is explicitly correcting the AI  ->  use [CORRECTION] instead.
+
+[RESTATE CONTRAST EXAMPLES]
+History:
+AI: What made you pick Busan this time?
+Input: I ate kimchi stew yesterday.
+Output: [RESTATE]
+
+History:
+AI: What made you pick Busan this time?
+Input: i wanna see the the sea  (garbled but clearly means "I wanted to see the sea")
+Output:
+Because I wanted to see the ocean.
+
+History:
+AI: What made you pick Busan this time?
+Input: uh the the it muh suh buh uh  (no recoverable meaning)
+Output: [RESTATE]
+
 [RULES]
 - CASE 2 output MUST have the empty line (\n\n) between parts.
 - Output ONLY the translation. No labels, no "Part 1:", no meta-comments.
 - Insert commas (,) after natural phrases for TTS rhythm.
 - If the input is meaningless noise (random symbols, silence markers, or clearly non-speech artifacts), output EXACTLY: [EVAPORATE]
-- Speech recognition may produce garbled or unusual text when the user's pronunciation is unclear. If the input looks garbled but a plausible meaning can be inferred from the conversation context, make your best interpretation and still produce the normal output — do NOT output [RETRY] in this case.
-- Output [RETRY] ONLY when the input is on a completely unrelated topic AND no reasonable interpretation is possible even with context.""";
+- If the input has minor STT errors but the intended meaning is still clearly inferable from context, make your best interpretation and produce the normal output (keep tolerating small errors).
+- If the input is off-context or too garbled to interpret safely (see [RESTATE GUARD]), output EXACTLY: [RESTATE] — never guess and never invent content the user did not say.
+- Output [RETRY] ONLY when the user's answer shows they did not understand the AI's question itself, so re-asking the same thing would not help.""";
 
       final request = http.Request(
         'POST',

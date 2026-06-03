@@ -47,395 +47,520 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# [KO-FRAG] 의미단위 읽기 — 청크별 한국어 직독 조각 부착
+코드 확인상 롤플레이도 확장문장 만들 때 대화 상대를 실제 역할명으로 넣지 않고, transcript를 `User / AI`로 만들고 있습니다. 게다가 확장문장 프롬프트 자체도 **“user and an AI partner”**라고 되어 있어서 결과가 자연스럽게 “the AI explained…”로 나옵니다.
 
-## 0. 목적 (한 줄)
-`chat_history_master.dart`의 청크 연습 엔진(`_chunks` / `PracticeChunk`)에서, 영어 의미단위 청크 **밑에** 영어어순 한국어 직독 조각("…라고 생각해서", "…이니까")을 1:1로 달아 표시한다. `_langDisplayMode`(0=영+한, 2=한)에서만 보이고 1(영어만)에서는 숨긴다.
-
-## 1. 대상 파일 (단 하나)
-`F:\flutter_project\stealth_vox\lib\...\chat_history_master.dart`
-(이 작업은 이 파일 **한 곳만** 수정한다. 다른 파일·다른 모드 파일은 절대 건드리지 않는다.)
-
-## 2. 절대 건드리지 말 것 (CRITICAL — 손대면 롤백)
-- **Box 7 통신 엔진** 전체: `DeepgramV2VoiceManager`, `TtsQueueManager`, `ChunkedTtsFetcher`, TTS/STT 내부 로직.
-- **기존 영어 청크 분할·캐시**: `_splitSentenceIntoChunks`, `_splitByBreathGroupsGpt`, `_buildChunksLegacyList`, `_postProcessChunks`, `_readChunkCache`, `_writeChunkCache`, `_chunkTextHash`. → 이 작업은 **영어 청크 경로를 일절 변경하지 않는다.** 한국어는 별도 평행 레이어로만 추가한다.
-- 방 나가기 / Firestore 저장 로직 (`_handleAutoSaveAndExit` 류) → 변경 없음.
-- 과금/타이머/녹음(`BillingTicker`, idle timeout, `_audioRecorder`) → 변경 없음.
-
-## 3. 설계 요약
-- `PracticeChunk`에 `String? korean` 필드 **추가**(기존 필드 유지).
-- 신규 GPT 메서드 1개(`_generateKoFragmentsGpt`) + 신규 디스크 캐시 2개(`_readKoFragCache` / `_writeKoFragCache`). **영어 청크 캐시와 파일명 분리**(`kofrag_v1_...`).
-- `_buildChunks`에서 영어 청크 생성 직후, 캐시→GPT로 한국어 조각을 받아 청크에 1:1로 zip. **실패/개수 불일치 시 한국어 없이 영어만 정상 표시.**
-- 렌더 헬퍼 `_buildChunkKoLine` 1개 추가 → 청크 텍스트 3개 렌더 사이트에 한 줄씩 삽입.
+아래 지시문은 **클론 + 롤플레이 + 히스토리 재생성까지 통합 수정**하는 버전입니다.
 
 ---
 
-## 4. 변경 작업 (위→아래 순서대로 적용)
+## Codex 통합 수정 지시문
 
-### [4-1] PracticeChunk 클래스 — `korean` 필드 추가
-**위치 anchor:** `class PracticeChunk {` (파일 끝부분, 사전 기준 약 6253행)
-아래 블록을 **통째로 교체**:
+StealthVox에서 **Clone / Roleplay 모드의 Expanded Sentence / Polished Sentence가 상대를 “AI”라고 부르는 문제**를 통합 수정해 주세요.
 
-#### BEFORE
-```dart
-class PracticeChunk {
-  final String text;
-  Uint8List? aiAudio;
-  String? userRecordPath;
-  bool isDone;
+수정 대상 파일:
 
-  PracticeChunk({
-    required this.text,
-    this.aiAudio,
-    this.userRecordPath,
-    this.isDone = false,
-  });
-}
-```
+* `lib/custom_code/widgets/routine_mode_clone.dart`
+* `lib/custom_code/widgets/routine_mode_roleplay.dart`
+* `lib/custom_code/widgets/chat_history_master.dart`
 
-#### AFTER
-```dart
-class PracticeChunk {
-  final String text;
-  final String? korean; // 🆕 [KO-FRAG] 영어어순 직독 한국어 조각 (없으면 null)
-  Uint8List? aiAudio;
-  String? userRecordPath;
-  bool isDone;
-
-  PracticeChunk({
-    required this.text,
-    this.korean,
-    this.aiAudio,
-    this.userRecordPath,
-    this.isDone = false,
-  });
-}
-```
+APK/AAB 빌드는 하지 마세요. 수정 후 `flutter analyze` 수준까지만 확인해 주세요.
 
 ---
 
-### [4-2] 신규 메서드 3개 삽입 (GPT + 캐시 read/write)
-**위치:** `_writeChunkCache(...)` 메서드의 닫는 `}` **바로 다음 줄**, 그리고 `Future<void> _buildChunks(String sentence)` **바로 위**(사전 기준 약 1423행, `_ChatHistoryMasterState` 클래스 내부).
-아래 3개 메서드를 **그 자리에 그대로 추가**(기존 코드 삭제 없음):
+# 1. 문제 정의
 
-```dart
-  // 🆕 [KO-FRAG] 영어 청크 리스트 → 영어어순 직독 한국어 조각 (개수·순서 1:1)
-  Future<List<String>?> _generateKoFragmentsGpt(List<String> enChunks) async {
-    if (_apiKey.isEmpty || enChunks.isEmpty) return null;
-    try {
-      const sysPrompt = """You are a Korean sight-translation (jikdokjikhae) helper.
-You receive an English sentence already split into ordered chunks as a JSON array.
-For EACH chunk, output ONE short Korean reading fragment that follows the English word order.
-These are intentionally incomplete connecting fragments, NOT a polished full translation.
+현재 Clone / Roleplay 모드에서 대화 종료 후 Expanded Sentence / Polished Sentence를 만들 때 상대가 실제 클론명 또는 역할명이 아니라 `AI`, `AI partner`, `assistant`처럼 표현됩니다.
 
-[RULES]
-- Output ONLY a JSON array of Korean strings. No markdown, no extra text, no code fences.
-- The array length MUST equal the number of input chunks, in the same order.
-- Each fragment expresses ONLY that chunk, in English order. Do not reorder across chunks.
-- Use natural Korean connective endings that fit each chunk role
-  (reason: ~이니까/~여서, thinking: ~라고 생각해서, time: ~할 때, contrast: ~지만, purpose: ~하려고).
-- Apply correct particles (이/가, 은/는, 을/를, 한테/에게). Use honorific ~시 only if present in English.
-- Keep each fragment short, one breath. Do not add information not in the chunk.
-- Korean only inside the strings.
+예시 문제:
 
-Example input: ["I think","that the price","went up","because of the weather"]
-Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때문에"]""";
-      final response = await http
-          .post(
-            Uri.parse("https://api.openai.com/v1/chat/completions"),
-            headers: {
-              "Authorization": "Bearer $_apiKey",
-              "Content-Type": "application/json",
-            },
-            body: jsonEncode({
-              "model": "gpt-4o-mini",
-              "messages": [
-                {"role": "system", "content": sysPrompt},
-                {"role": "user", "content": jsonEncode(enChunks)},
-              ],
-              "temperature": 0.2,
-              "max_tokens": 600,
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode != 200) return null;
-      final body =
-          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-      final content =
-          ((body["choices"] as List).first["message"]["content"] as String)
-              .trim();
-      final jsonMatch = RegExp(r'\[[\s\S]*\]').firstMatch(content);
-      if (jsonMatch == null) return null;
-      final list = jsonDecode(jsonMatch.group(0)!) as List;
-      final ko = list.map((e) => e.toString().trim()).toList();
-      if (ko.length != enChunks.length) {
-        _debugLogs +=
-            "⚠️ [KO-FRAG] 개수 불일치 en=${enChunks.length} ko=${ko.length} → 스킵\n";
-        return null;
-      }
-      _debugLogs += "✅ [KO-FRAG] 조각 생성 완료 n=${ko.length}\n";
-      return ko;
-    } catch (e) {
-      debugPrint("[generateKoFragmentsGpt] $e");
-      return null;
-    }
-  }
+`The user complains about the repair mistake, while the AI apologizes and explains the issue.`
 
-  // 🆕 [KO-FRAG] 디스크 캐시 읽기 (영어 청크 캐시와 파일명 분리: kofrag_v1)
-  Future<List<String>?> _readKoFragCache(String variant, String sentence) async {
-    try {
-      final dir = await getApplicationDocumentsDirectory();
-      final roomId = widget.historyDoc.id;
-      final hash = _chunkTextHash(sentence);
-      final file = File(
-          '${dir.path}/chunk_cache/kofrag_v1_${roomId}_${variant}_$hash.json');
-      if (!await file.exists()) return null;
-      final list = jsonDecode(await file.readAsString()) as List;
-      return list.map((e) => e.toString()).toList();
-    } catch (e) {
-      debugPrint("[readKoFragCache] $e");
-      return null;
-    }
-  }
+이건 앱 내부 구현 설명처럼 들리고, 실제 대화 복습 문장으로는 부자연스럽습니다.
 
-  // 🆕 [KO-FRAG] 디스크 캐시 쓰기
-  Future<void> _writeKoFragCache(
-      String variant, String sentence, List<String> ko) async {
-    try {
-      final dir = await getApplicationDocumentsDirectory();
-      final roomId = widget.historyDoc.id;
-      final hash = _chunkTextHash(sentence);
-      final folder = Directory('${dir.path}/chunk_cache');
-      if (!await folder.exists()) await folder.create(recursive: true);
-      final file = File(
-          '${folder.path}/kofrag_v1_${roomId}_${variant}_$hash.json');
-      await file.writeAsString(jsonEncode(ko));
-    } catch (e) {
-      debugPrint("[writeKoFragCache] $e");
-    }
-  }
-```
+Clone 모드에서는 상대를 **선택된 클론 이름**으로 써야 합니다.
+
+예:
+
+`The user complains about the repair mistake, while Comsuri apologizes and explains the issue.`
+
+Roleplay 모드에서는 상대를 **설정된 역할명**으로 써야 합니다.
+
+예:
+
+`The customer complains about the wrong room, while the hotel clerk apologizes and offers to fix the booking.`
+
+핵심 규칙:
+
+* Clone / Roleplay 확장문장에서 상대를 `AI`, `assistant`, `chatbot`, `bot`으로 부르면 실패입니다.
+* 상대가 실제 AI로 구현되어 있어도, 학습자에게 보여주는 문장에서는 **대화 속 인물/역할**로 표현해야 합니다.
+* 단, 대화 주제 자체가 AI일 때만 일반 명사로 `AI`를 쓸 수 있습니다.
 
 ---
 
-### [4-3] `_buildChunks` — 한국어 조각 zip (전체 교체)
-**위치 anchor:** `Future<void> _buildChunks(String sentence) async {` (사전 기준 약 1424행)
-아래 블록을 **통째로 교체**:
+# 2. 공통 설계: partner label / user label 도입
 
-#### BEFORE
-```dart
-  Future<void> _buildChunks(String sentence) async {
-    if (sentence.isEmpty) {
-      _chunks = [];
-      _currentChunkIdx = 0;
-      return;
-    }
-    final isPolished =
-        _polishedSentence.isNotEmpty && sentence == _polishedSentence;
-    final variant = isPolished ? 'polished' : 'expanded';
-    final result = await _splitSentenceIntoChunks(sentence, variant);
-    _chunks = result.map((t) => PracticeChunk(text: t)).toList();
-    _currentChunkIdx = 0;
-  }
-```
+Clone / Roleplay / History 공통으로 확장문장 생성 시 다음 개념을 사용하세요.
 
-#### AFTER
-```dart
-  Future<void> _buildChunks(String sentence) async {
-    if (sentence.isEmpty) {
-      _chunks = [];
-      _currentChunkIdx = 0;
-      return;
-    }
-    final isPolished =
-        _polishedSentence.isNotEmpty && sentence == _polishedSentence;
-    final variant = isPolished ? 'polished' : 'expanded';
-    final result = await _splitSentenceIntoChunks(sentence, variant);
+## A. userLabel
 
-    // 🆕 [KO-FRAG] 영어 청크에 1:1 한국어 직독 조각 부착 (캐시 → GPT).
-    //   실패/개수 불일치 시 ko=null → 영어 청크만 정상 표시 (영어 경로 영향 0).
-    List<String>? ko = await _readKoFragCache(variant, sentence);
-    if (ko == null || ko.length != result.length) {
-      ko = await _generateKoFragmentsGpt(result);
-      if (ko != null && ko.length == result.length) {
-        await _writeKoFragCache(variant, sentence, ko);
-      } else {
-        ko = null;
-      }
-    }
+* Clone 기본값: `the user`
+* Roleplay 기본값: `_scenarioUserRole`
+* `_scenarioUserRole`이 없으면 `the user`
 
-    _chunks = List.generate(
-      result.length,
-      (i) => PracticeChunk(
-        text: result[i],
-        korean: (ko != null && i < ko.length) ? ko[i] : null,
-      ),
-    );
-    _currentChunkIdx = 0;
-  }
-```
+Roleplay 예:
+
+* `customer`
+* `angry husband`
+* `guest`
+* `passenger`
+* `patient`
+
+한국어 역할명이 들어오면 그대로 쓰되, 영어 문장에 자연스럽게 들어갈 수 있도록 필요하면 GPT 프롬프트에서 “use a natural English role label”로 처리하게 하세요.
+
+## B. partnerLabel
+
+Clone:
+
+* 선택된 클론 이름
+* 없으면 `the clone`
+
+Roleplay:
+
+* `_scenarioAiRole`
+* 없으면 `the roleplay partner`
+
+예:
+
+* `hotel clerk`
+* `angry spouse`
+* `flight attendant`
+* `doctor`
+* `police officer`
+
+절대 fallback을 `AI`로 두지 마세요.
 
 ---
 
-### [4-4] 렌더 헬퍼 `_buildChunkKoLine` 추가
-**위치:** `_ChatHistoryMasterState` 클래스 내부 아무 곳(권장: `Widget _buildChunkPracticeScreen() {` 바로 위, 사전 기준 약 5141행).
-아래 메서드를 **그대로 추가**:
+# 3. `routine_mode_clone.dart` 수정
 
-```dart
-  // 🆕 [KO-FRAG] 청크 한국어 직독 조각 한 줄 — _langDisplayMode 0(영+한)·2(한)에서만 표시
-  Widget _buildChunkKoLine(PracticeChunk chunk) {
-    if (_langDisplayMode == 1) return const SizedBox.shrink();
-    final ko = chunk.korean;
-    if (ko == null || ko.trim().isEmpty) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(top: 3),
-      child: Text(
-        ko,
-        style: TextStyle(
-          color: Colors.white54,
-          fontSize: 12 * _fontScale,
-          height: 1.3,
-        ),
-      ),
-    );
-  }
-```
+## A. 선택된 클론 이름 helper 추가
 
----
+선택된 클론 이름을 안정적으로 반환하는 helper를 추가하세요.
 
-### [4-5] 렌더 사이트 삽입 ① — `_buildChunkPracticeScreen` (메인 읽기 화면, 약 5461행)
-영어 청크 `Text` 바로 밑에 한 줄 삽입.
+우선순위:
 
-#### BEFORE
-```dart
-                                            Text(
-                                              chunk.text,
-                                              style: TextStyle(
-                                                color: textColor,
-                                                fontSize: 16 * _fontScale,
-                                                fontWeight: isCurrent
-                                                    ? FontWeight.bold
-                                                    : FontWeight.normal,
-                                                height: 1.45,
-                                              ),
-                                            ),
-                                            if (isCurrent &&
-                                                _aiChunkLoading) ...[
-```
+1. `_selectedCloneId`가 있는 경우 `_clones`에서 해당 id의 `name`
+2. 없으면 빈 문자열
+3. 최종 fallback은 `the clone`
 
-#### AFTER
-```dart
-                                            Text(
-                                              chunk.text,
-                                              style: TextStyle(
-                                                color: textColor,
-                                                fontSize: 16 * _fontScale,
-                                                fontWeight: isCurrent
-                                                    ? FontWeight.bold
-                                                    : FontWeight.normal,
-                                                height: 1.45,
-                                              ),
-                                            ),
-                                            _buildChunkKoLine(chunk), // 🆕 [KO-FRAG]
-                                            if (isCurrent &&
-                                                _aiChunkLoading) ...[
-```
+이 helper는 아래에서 공통 사용합니다.
 
----
+* history 문서 생성
+* transcript 생성
+* expanded sentence prompt
+* polished sentence prompt
+* UI 표시
 
-### [4-6] 렌더 사이트 삽입 ② — `_buildShadowingPracticeBody` (약 3710행)
+## B. `chat_history` 방 문서 생성 시 클론 정보 저장
 
-#### BEFORE
-```dart
-                    Text(
-                      chunk.text,
-                      style: TextStyle(
-                        color: _chunkTextColor(i), // 🆕 [P2-INDICATOR]
-                        fontSize: 18 * _fontScale,
-                        fontWeight:
-                            isCurrent ? FontWeight.bold : FontWeight.normal,
-                        height: 1.5,
-                      ),
-                    ),
-                    if (isCurrent) ...[
-```
+`_ensureHistoryRef()`에서 새 방 문서 생성 시 다음 필드를 추가하세요.
 
-#### AFTER
-```dart
-                    Text(
-                      chunk.text,
-                      style: TextStyle(
-                        color: _chunkTextColor(i), // 🆕 [P2-INDICATOR]
-                        fontSize: 18 * _fontScale,
-                        fontWeight:
-                            isCurrent ? FontWeight.bold : FontWeight.normal,
-                        height: 1.5,
-                      ),
-                    ),
-                    _buildChunkKoLine(chunk), // 🆕 [KO-FRAG]
-                    if (isCurrent) ...[
-```
+* `mode`: `clone`
+* `clone_id`
+* `clone_name`
+* `user_label`: `the user`
+* `partner_label`: 클론 이름 또는 `the clone`
+* `expand_schema_version`: 가능하면 생성 시점에는 비워도 되지만, 확장문장 생성 후에는 반드시 `named_partner_v1`
+
+기존 필드는 삭제하지 마세요.
+
+## C. 종료 시 transcript 생성 수정
+
+현재 Clone 종료 시 transcript에서 `SYSTEM`을 `AI`로 바꾸는 부분이 있습니다.
+
+수정 기준:
+
+* `HOST` → `User` 또는 `the user`
+* `SYSTEM` → 클론 이름 또는 `partner_label`
+* `AI`라는 단어를 transcript 참여자명으로 쓰지 마세요.
+
+## D. `CloneBrain.generateExpandedFromConversation()` 수정
+
+함수 인자로 다음을 추가하세요.
+
+* `userLabel`
+* `partnerLabel`
+
+프롬프트 핵심 규칙:
+
+* This conversation is between `{userLabel}` and `{partnerLabel}`.
+* `{partnerLabel}` is a named clone/persona, not “AI”.
+* Never refer to `{partnerLabel}` as AI, assistant, chatbot, or bot.
+* If the partner must be mentioned, use `{partnerLabel}`.
+* Keep one sentence, 25–40 words.
+* Keep about 5 breath groups.
+* Each breath group should usually be 5–7 words.
+* Do not add facts.
+
+## E. `CloneBrain.polishSentence()` 수정
+
+Polished 단계에서도 이름이 다시 AI로 바뀌면 안 됩니다.
+
+프롬프트에 다음 규칙을 추가하세요.
+
+* Preserve participant names and role labels.
+* Do not replace the clone name with AI, assistant, chatbot, or bot.
+* Same meaning only.
+* No new facts.
+
+## F. 저장 필드 추가
+
+확장문장 저장 시 다음 필드를 함께 저장하세요.
+
+* `expanded_sentence`
+* `polished_sentence`
+* `has_practice`: true
+* `expand_source`: `exit`
+* `expand_generated_at`
+* `expand_user_label`
+* `expand_partner_name`
+* `expand_partner_type`: `clone`
+* `expand_schema_version`: `named_partner_v1`
+
+## G. UI 표시 수정
+
+하단 또는 카드에 `Clone AI`라고 표시되는 부분은 클론 이름 중심으로 바꾸세요.
+
+* 클론 이름 있으면: 클론 이름
+* 없으면: `Clone`
+* 사용자에게 보이는 라벨에서 `Clone AI`는 쓰지 마세요.
+
+내부 변수명, 큐 이름, 로그 태그의 `AI`는 굳이 전부 바꾸지 않아도 됩니다. 사용자에게 보이는 문장과 history/expanded 생성 로직이 핵심입니다.
 
 ---
 
-### [4-7] 렌더 사이트 삽입 ③ — `_buildReviewScreen` (완료 후 리뷰 리스트, 약 3859행)
-여긴 `Row` 안 `Expanded(child: Text(...))` 구조라 **`Column`으로 감싸서** 한국어를 밑에 붙인다.
+# 4. `routine_mode_roleplay.dart` 수정
 
-#### BEFORE
-```dart
-                    Expanded(
-                      child: Text(
-                        chunk.text,
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 14 * _fontScale,
-                            height: 1.4),
-                      ),
-                    ),
-```
+## A. Roleplay partner label helper 추가
 
-#### AFTER
-```dart
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            chunk.text,
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 14 * _fontScale,
-                                height: 1.4),
-                          ),
-                          _buildChunkKoLine(chunk), // 🆕 [KO-FRAG]
-                        ],
-                      ),
-                    ),
-```
+Roleplay 확장문장용 helper를 추가하세요.
+
+partner label 우선순위:
+
+1. `_scenarioAiRole`
+2. `_RoleplayScenarioStore.aiRole`
+3. `the roleplay partner`
+
+user label 우선순위:
+
+1. `_scenarioUserRole`
+2. `_RoleplayScenarioStore.userRole`
+3. `the user`
+
+situation label도 있으면 같이 보존하세요.
+
+* `_scenarioSituation`
+* `_scenarioKeyword`
+
+## B. `chat_history` 방 문서 생성 시 roleplay 정보 저장
+
+`_ensureHistoryRef()`에서 새 방 문서 생성 시 다음 필드를 추가하세요.
+
+* `mode`: `roleplay`
+* `scenario_situation`
+* `scenario_keyword`
+* `user_role`
+* `ai_role`
+* `user_label`
+* `partner_label`
+* `expand_partner_type`: `roleplay`
+
+기존 `room_name: "Roleplay Mode"`는 유지해도 됩니다.
+
+## C. 종료 시 transcript 생성 수정
+
+현재 종료 저장 로직에서 `_localMessages`를 transcript로 만들 때:
+
+* `HOST` → `User`
+* `SYSTEM` → `AI`
+
+형태로 되어 있습니다.
+
+이걸 다음처럼 바꾸세요.
+
+* `HOST` → user label 또는 user role
+* `SYSTEM` → partner label 또는 ai role
+* 절대 `SYSTEM`을 `AI`로 쓰지 마세요.
+
+예:
+
+`Customer: I booked a room, but the hotel says it is missing.`
+`Hotel clerk: I’m sorry, let me check the booking right away.`
+
+## D. `RoleplayBrain.generateExpandedFromConversation()` 수정
+
+현재 프롬프트에 `between the user and an AI partner`가 들어 있습니다. 이 표현을 제거하세요.
+
+함수 인자로 다음을 추가하세요.
+
+* `userLabel`
+* `partnerLabel`
+* 필요하면 `situation`
+
+프롬프트 핵심 규칙:
+
+* This is a roleplay conversation between `{userLabel}` and `{partnerLabel}`.
+* `{partnerLabel}` is the role being played, not “AI”.
+* Never call `{partnerLabel}` AI, assistant, chatbot, or bot.
+* If the partner must be mentioned, use `{partnerLabel}` or a natural role phrase.
+* Use the roleplay situation only if it is supported by the transcript.
+* Keep one sentence, 25–40 words.
+* About 5 meaning units.
+* 5–7 words per breath group.
+* Spoken, natural English.
+* No added facts.
+
+## E. `RoleplayBrain.polishSentence()` 수정
+
+Polished 단계에도 다음 규칙 추가:
+
+* Preserve role names and participant labels.
+* Do not replace role names with AI, assistant, chatbot, or bot.
+* Same meaning only.
+* No new facts.
+
+## F. 저장 필드 추가
+
+Roleplay 종료 시 expanded/polished 저장과 함께 다음 필드를 저장하세요.
+
+* `expanded_sentence`
+* `polished_sentence`
+* `has_practice`: true
+* `expand_source`: `exit`
+* `expand_generated_at`
+* `expand_user_label`
+* `expand_partner_name`
+* `expand_partner_type`: `roleplay`
+* `expand_schema_version`: `named_partner_v1`
+
+## G. 사용자에게 보이는 Roleplay UI 라벨 정리
+
+현재 화면 일부에 `AI`, `AI Roleplay`, `AI 역할` 같은 표현이 있습니다.
+
+모두 바꿀 필요는 없지만, 사용자가 실제 연습 중 보는 영역에서는 가능한 한 역할 중심으로 바꾸세요.
+
+권장:
+
+* `AI 역할` → `상대 역할`
+* `AI Roleplay` → `Roleplay`
+* 대화 카드의 작은 `AI` 라벨 → `_scenarioAiRole` 또는 `Partner`
+* 내부 로그/변수명은 유지 가능
+
+핵심은 Expanded / Polished 문장에서는 절대 `AI`가 상대명으로 나오지 않게 하는 것입니다.
 
 ---
 
-## 5. 검증 체크리스트 (반드시 전부 통과 후 보고)
-1. `flutter analyze` → **에러 0** (warning 도 신규로 늘지 않을 것).
-2. grep 확인:
-   - `grep -n "korean" chat_history_master.dart` → `PracticeChunk` 필드 + `_buildChunks` 사용 확인.
-   - `grep -nc "_buildChunkKoLine(chunk)" chat_history_master.dart` → **3** (렌더 3곳).
-   - `grep -nc "_buildChunkKoLine(PracticeChunk" chat_history_master.dart` → **1** (헬퍼 정의).
-   - `grep -nc "_generateKoFragmentsGpt" chat_history_master.dart` → **2** (정의 1 + 호출 1).
-   - `grep -nc "kofrag_v1_" chat_history_master.dart` → **2** (read/write 캐시).
-3. 영어 청크 경로 무변경 확인: `grep -nc "_splitByBreathGroupsGpt\|_readChunkCache\|_writeChunkCache" chat_history_master.dart` 의 정의 라인들이 **수정되지 않았는지** 육안 확인(시그니처·본문 동일).
-4. 완료 보고는 표로: [항목 | 적용행 | 통과여부].
+# 5. `chat_history_master.dart` 수정
 
-## 6. 런타임 기대 동작
-- 히스토리 방 → 연습 진입(확장/세련) → 청크 화면에서 각 영어 청크 밑에 회색 작은 한국어 조각 표시.
-- `_langDisplayMode` 토글: 0(영+한)·2(한) → 보임 / 1(영어만) → 숨김.
-- 첫 진입 시 GPT 1회(~1초), 이후 같은 문장은 `kofrag_v1` 캐시 히트 → 호출 0.
-- GPT 실패/개수 불일치 → 한국어 줄 없이 영어 청크만(에러 없이) 표시.
+히스토리에서 Expanded Sentence 버튼을 누르면, 기존 저장값을 그대로 쓰거나 fallback으로 새로 생성합니다. 여기서도 같은 문제가 반복됩니다.
 
-## 7. 롤백 노트
-- 모든 변경에 `🆕 [KO-FRAG]` 주석. 문제 시:
-  - 렌더 3줄(`_buildChunkKoLine(chunk),`) 제거 + 4-7의 `Column` 래핑 원복.
-  - 4-2/4-4 신규 메서드 4개 삭제.
-  - 4-1 `korean` 필드 / 4-3 `_buildChunks` zip 블록 원복.
-- 디스크 `kofrag_v1_*.json` 파일은 남아도 무해(다음 빌드에서 안 읽힘).
+## A. history 문서에서 partner label 읽기
+
+`_buildExpandFromConversation()`에서 history 문서를 읽을 때 다음 필드를 확보하세요.
+
+공통:
+
+* `mode`
+* `room_name`
+* `user_label`
+* `partner_label`
+* `expand_user_label`
+* `expand_partner_name`
+* `expand_partner_type`
+* `expand_schema_version`
+
+Clone 전용:
+
+* `clone_id`
+* `clone_name`
+
+Roleplay 전용:
+
+* `scenario_situation`
+* `scenario_keyword`
+* `user_role`
+* `ai_role`
+
+## B. 모드별 label 결정 규칙
+
+Clone:
+
+1. `partner_label`
+2. `clone_name`
+3. `expand_partner_name`
+4. `clone_id`가 있으면 `users/{uid}/clones/{clone_id}`에서 name 조회
+5. `the clone`
+
+Clone user label:
+
+1. `user_label`
+2. `expand_user_label`
+3. `the user`
+
+Roleplay:
+
+partner label 우선순위:
+
+1. `partner_label`
+2. `ai_role`
+3. `expand_partner_name`
+4. `the roleplay partner`
+
+user label 우선순위:
+
+1. `user_label`
+2. `user_role`
+3. `expand_user_label`
+4. `the user`
+
+Step Expand:
+
+* 기존 로직 유지
+* 단, clone/roleplay용 label 규칙을 step_expand에 강제로 적용하지 마세요.
+
+## C. fallback transcript 생성 로직 수정
+
+현재 `_buildExpandFromConversation()` fallback에서 `_tutorLines`를 transcript로 만들 때 `HOST`를 `AI`, 나머지를 `User`로 바꾸는 위험한 매핑이 있습니다.
+
+이 부분을 반드시 수정하세요.
+
+Clone / Roleplay 기준:
+
+* 저장된 실제 발화 role이 `HOST`면 user label
+* 저장된 실제 발화 role이 `SYSTEM`이면 partner label
+* `USER` / `AI` 등 튜터링용 변환 role이나 `_swapRoles` 기준을 쓰지 마세요.
+* 확장문장 생성용 transcript는 “튜터링에서 누가 연습하느냐”가 아니라 “원래 대화에서 누가 말했느냐”를 기준으로 해야 합니다.
+
+중요:
+
+* `_swapRoles`
+* `_isAiTurn()`
+* 튜터링 역할 선택 상태
+
+이것들은 확장문장 생성 transcript에 영향을 주면 안 됩니다.
+
+## D. 기존 cached expanded 재사용 조건 수정
+
+현재는 `expanded_sentence`가 있으면 우선 사용합니다. 이러면 이미 “AI”로 잘못 생성된 문장이 계속 살아남습니다.
+
+Clone / Roleplay 모드에서는 다음 조건이면 기존 expanded를 무시하고 재생성하세요.
+
+* `expand_schema_version`이 `named_partner_v1`이 아님
+* `expand_partner_name`이 현재 partner label과 다름
+* `expand_partner_type`이 현재 mode와 맞지 않음
+* expanded/polished 안에서 상대를 `the AI`, `AI`, `assistant`, `chatbot`, `bot`으로 부른 흔적이 있음
+
+단, 마지막 조건은 보조 조건으로만 쓰세요. 대화 주제 자체가 AI일 수 있기 때문입니다. 가장 중요한 기준은 `expand_schema_version`입니다.
+
+## E. `_generateExpandedFromConversation()` 수정
+
+현재 프롬프트에 `between the user and an AI partner`가 있습니다. 제거하세요.
+
+함수 인자로 다음을 추가하세요.
+
+* `userLabel`
+* `partnerLabel`
+* `mode`
+* 필요하면 `situation`
+
+프롬프트 핵심 규칙:
+
+* For clone mode: conversation is between `{userLabel}` and `{partnerLabel}`, a named clone/persona.
+* For roleplay mode: conversation is between `{userLabel}` and `{partnerLabel}`, a roleplay character.
+* `{partnerLabel}` is not AI.
+* Never call `{partnerLabel}` AI, assistant, chatbot, or bot.
+* Use `{partnerLabel}` or a natural role phrase when referring to the partner.
+* Keep one sentence, 25–40 words.
+* About 5 breath groups.
+* 5–7 words per breath group.
+* No added facts.
+
+## F. `_polishExpandedSentence()` 수정
+
+Polished prompt에도 다음 규칙 추가:
+
+* Preserve participant names, clone names, and role labels.
+* Do not replace them with AI, assistant, chatbot, or bot.
+* Same meaning only.
+* No new facts.
+
+## G. 재생성 후 history 문서 업데이트
+
+재생성 후 다음 필드를 반드시 업데이트하세요.
+
+* `expanded_sentence`
+* `polished_sentence`
+* `has_practice`: true
+* `expand_source`: `history_regenerated` 또는 `fallback`
+* `expand_generated_at`
+* `expand_user_label`
+* `expand_partner_name`
+* `expand_partner_type`: `clone` 또는 `roleplay`
+* `expand_schema_version`: `named_partner_v1`
+
+---
+
+# 6. 절대 건드리지 말 것
+
+* BillingTicker
+* RevenueCat
+* Usage Log
+* Auto Pause
+* VAD / Deepgram / TTS 큐 구조
+* Step Expand의 기본 대화 흐름
+* APK/AAB 빌드 명령
+
+내부 변수명이나 로그에 있는 `AI`를 전부 바꾸려 하지 마세요. 너무 큰 리팩터링이 됩니다. 이번 수정 범위는 **사용자에게 보이는 문장, history 저장 메타데이터, expanded/polished 생성 프롬프트와 transcript 매핑**입니다.
+
+---
+
+# 7. 테스트 기준
+
+## Clone 테스트
+
+클론 이름: `컴수리` 또는 `Comsuri`
+
+잘못된 결과:
+
+`The user complains about the repair issue, while the AI apologizes and promises to check it.`
+
+정상 결과:
+
+`The user complains about the repair issue, while Comsuri apologizes, explains the situation, and promises to check it.`
+
+## Roleplay 테스트
+
+상황: `호텔 예약 누락`
+내 역할: `customer`
+상대 역할: `hotel clerk`
+
+잘못된 결과:
+
+`The user complains about the missing reservation, while the AI apologizes and checks the booking.`
+
+정상 결과:
+
+`The customer complains about the missing reservation, while the hotel clerk apologizes, checks the booking, and offers another option.`
+
+## History 테스트
+
+1. 기존에 `AI`가 들어간 expanded 기록 열기
+2. Expanded Sentence 버튼 누르기
+3. `expand_schema_version`이 없거나旧버전이면 재생성되는지 확인
+4. 새 문장에 `AI`, `assistant`, `chatbot`, `bot`이 상대 지칭으로 나오지 않는지 확인
+5. 새 필드 `expand_partner_name`, `expand_partner_type`, `expand_schema_version` 저장 확인
+
+---
+
+이 통합 수정이 맞습니다. Clone은 **클론 이름**, Roleplay는 **역할 이름**으로 가야 합니다.
+생활영어 느낌으로도 `the AI apologized`보다 `the hotel clerk apologized`가 훨씬 자연스럽고, 실제 상황 훈련처럼 들립니다.
