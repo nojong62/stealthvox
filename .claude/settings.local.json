@@ -120,7 +120,11 @@
       "PowerShell(& \"C:\\\\Users\\\\u\\\\AppData\\\\Local\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\" install -r \"F:\\\\flutter_project\\\\stealth_vox\\\\build\\\\app\\\\outputs\\\\flutter-apk\\\\app-release.apk\" 2>&1)",
       "PowerShell(& \"C:\\\\Users\\\\u\\\\AppData\\\\Local\\\\Android\\\\Sdk\\\\build-tools\\\\36.0.0\\\\apksigner.bat\" verify --print-certs \"F:\\\\flutter_project\\\\stealth_vox\\\\build\\\\app\\\\outputs\\\\flutter-apk\\\\app-release.apk\" 2>&1 | Select-Object -First 10)",
       "PowerShell(& \"C:\\\\Users\\\\u\\\\AppData\\\\Local\\\\Android\\\\Sdk\\\\build-tools\\\\37.0.0\\\\apksigner.bat\" verify --print-certs \"F:\\\\flutter_project\\\\stealth_vox\\\\build\\\\app\\\\outputs\\\\flutter-apk\\\\app-release.apk\" 2>&1 | Select-Object -First 15)",
-      "PowerShell(& \"C:\\\\Users\\\\u\\\\AppData\\\\Local\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\" uninstall com.aienglishpractice.stealthvox 2>&1)"
+      "PowerShell(& \"C:\\\\Users\\\\u\\\\AppData\\\\Local\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\" uninstall com.aienglishpractice.stealthvox 2>&1)",
+      "Bash(flutter devices *)",
+      "PowerShell(& \"$env:LOCALAPPDATA\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\" devices 2>&1)",
+      "PowerShell(flutter devices *)",
+      "PowerShell(flutter install *)"
     ]
   }
 }

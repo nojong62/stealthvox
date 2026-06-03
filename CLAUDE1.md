@@ -47,286 +47,204 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-Phase 2 깨끗하게 닫혔습니다. Phase 3는 Phase 2와 동일 패턴이지만, **3-2(RoleplayBrain 메서드)에서 "Phase 2와 동일하게 넣어라"는 모호한 지시가 부분 적용 위험**이 있어서, 전체 코드를 명시적으로 드립니다.
+지시문: Expanded / Polished Sentence 의미단위 분할 기준 통일
 
----
+현재 StealthVox의 Step Expand, Clone, Roleplay 3모드 모두 expanded_sentence와 polished_sentence를 생성한다.
+이제 History Practice3에서 확장 문장과 Polished 문장을 읽을 때, 의미단위는 반드시 한 호흡에 말할 수 있는 5~7단어 정도로 끊어야 한다.
 
-# Phase 3 — routine_mode_roleplay.dart
+너무 길게 끊으면 사용자가 한숨에 따라 말하기 어렵고, 너무 짧게 끊으면 영어 리듬이 깨진다.
 
-**절대 보존:** Box 7 일체, `generateCleanOriginal`, `dispose()`/`_forceSaveToFirestore`(AI 생성 넣지 말 것). 아래 세 곳만 수정.
+핵심 수정 목표
 
-### 3-1) `_ensureHistoryRef` 방 문서에 `mode: 'roleplay'` 추가
+chat_history_master.dart의 의미단위 분할 로직을 3모드 공통 기준으로 수정한다.
 
-**찾기 (고유):**
-```dart
-      await newRef.set({
-        'created_at': FieldValue.serverTimestamp(),
-        'room_name': "Roleplay Mode",
-        'is_pinned': false,
-        'msg_count': 0
-      });
-```
-**교체:**
-```dart
-      await newRef.set({
-        'created_at': FieldValue.serverTimestamp(),
-        'room_name': "Roleplay Mode",
-        'mode': 'roleplay', // 🆕 [ROUTER-FIX] 라우터가 Step Expand로 오인 방지
-        'is_pinned': false,
-        'msg_count': 0
-      });
-```
+현재 Expanded Sentence는 _buildChunks() 안에서 _fetchUserTurnCount()로 HOST 메시지 개수를 가져와서 _splitSentenceByTurns(sentence, n)에 넘기고 있다.
+이 방식은 더 이상 적합하지 않다.
 
-### 3-2) RoleplayBrain에 static 메서드 2개 추가
+이제 의미단위 개수는 HOST 메시지 수가 아니라, 문장 자체의 단어 수와 호흡 단위를 기준으로 결정해야 한다.
 
-`class RoleplayBrain {` (3390행) 여는 중괄호 **바로 다음 줄**에 삽입:
+수정 대상 1: Expanded Sentence 분할
 
-```dart
-  // 🆕 [EXPAND-EXIT] 대화 전체(AI+유저) → 종합 확장 문장 1개 (의미단위 ~5개, 문법 연결)
-  static Future<String?> generateExpandedFromConversation(
-      String apiKey, String transcript) async {
-    if (apiKey.isEmpty || transcript.trim().isEmpty) return null;
-    try {
-      const sysPrompt = """You are an English speaking coach.
-You are given a short conversation transcript between the user and an AI partner.
-Your job: compose ONE long, natural English sentence that synthesizes the overall
-content and gist of the WHOLE conversation.
+파일: chat_history_master.dart
 
-[RULES]
-- It must be ONE single sentence (do not split it into multiple sentences).
-- Build it from about 5 meaning units joined with varied grammatical connectives
-  (because, so, while, which, after, even though, and, etc.).
-- Natural, speakable rhythm (commas for breath are fine).
-- Capture the overall situation/idea of the conversation, not just one line.
-- Common everyday vocabulary only. Do not add facts not in the transcript.
-- Output exactly ONE sentence. No quotes, no prefixes, no explanation.""";
-      final response = await http
-          .post(
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
-            headers: {
-              'Authorization': 'Bearer $apiKey',
-              'Content-Type': 'application/json; charset=utf-8',
-            },
-            body: jsonEncode({
-              'model': 'gpt-4o-mini',
-              'temperature': 0.2,
-              'max_tokens': 250,
-              'messages': [
-                {'role': 'system', 'content': sysPrompt},
-                {
-                  'role': 'user',
-                  'content':
-                      "Conversation:\n$transcript\n\nOne synthesized sentence:"
-                },
-              ],
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode != 200) return null;
-      final body =
-          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-      String s =
-          ((body['choices'] as List).first['message']['content'] as String)
-              .trim();
-      if (s.startsWith('"') && s.endsWith('"')) s = s.substring(1, s.length - 1);
-      return s.isEmpty ? null : s;
-    } catch (e) {
-      debugPrint("[RoleplayBrain.generateExpandedFromConversation] $e");
-      return null;
-    }
-  }
+현재 구조:
 
-  // 🆕 [EXPAND-EXIT] 확장 문장 → 쉽고 세련된 한 문장 (Polished)
-  static Future<String?> polishSentence(
-      String apiKey, String originalSentence) async {
-    if (apiKey.isEmpty || originalSentence.trim().isEmpty) return null;
-    try {
-      const sysPrompt = """You are an English speaking coach.
-Rewrite the given long English sentence as ONE "easy but elegant" spoken sentence.
+_buildChunks(sentence)
+_fetchUserTurnCount()
+_splitSentenceByTurns(sentence, n)
+_buildChunksLegacyList(sentence)
 
-[GOALS]
-- Natural spoken rhythm (not written/academic)
-- Common vocabulary (no SAT words, no bookish phrases)
-- Smooth flow (pause-friendly, commas for breath)
-- Same meaning as the original (do not add new facts)
-- Easier to pronounce and say out loud
+수정 방향:
 
-[OUTPUT]
-- Exactly ONE sentence. No explanation, no quotes, no prefixes.""";
-      final response = await http
-          .post(
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
-            headers: {
-              'Authorization': 'Bearer $apiKey',
-              'Content-Type': 'application/json; charset=utf-8',
-            },
-            body: jsonEncode({
-              'model': 'gpt-4o-mini',
-              'temperature': 0.2,
-              'max_tokens': 150,
-              'messages': [
-                {'role': 'system', 'content': sysPrompt},
-                {
-                  'role': 'user',
-                  'content':
-                      'Original sentence:\n$originalSentence\n\nPolished version:'
-                },
-              ],
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode != 200) return originalSentence;
-      final body =
-          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-      String p =
-          ((body['choices'] as List).first['message']['content'] as String)
-              .trim();
-      if (p.startsWith('"') && p.endsWith('"')) p = p.substring(1, p.length - 1);
-      return p.isEmpty ? originalSentence : p;
-    } catch (e) {
-      debugPrint("[RoleplayBrain.polishSentence] $e");
-      return originalSentence;
-    }
-  }
+_fetchUserTurnCount()를 Expanded Sentence 의미단위 분할 기준으로 사용하지 말 것.
+_splitSentenceByTurns(sentence, n)의 “정확히 n개로 나누기” 방식을 폐기하거나 보조용으로만 남길 것.
+새 기준은 다음과 같다.
 
-```
+의미단위 기준:
 
-### 3-3) `_handleAutoSaveAndExit()` 전체 교체
+기본 목표: 한 청크 5~7단어
+허용 범위: 4~8단어
+가능하면 8단어를 넘기지 말 것
+2~3단어짜리 너무 짧은 조각은 앞뒤 청크와 병합
+전치사구, to부정사구, 관계절, because/when/while/although/if 절, and/but/so 앞뒤를 우선 분할 기준으로 사용
+문법적으로 자연스러운 호흡이 단어 수보다 우선이지만, 8단어 초과는 다시 나눌 것
+최종 결과는 List<String>이며, 각 항목이 Practice3에서 한 번에 AI가 읽고 사용자가 따라 읽는 단위가 되어야 함
 
-```dart
-  Future<void> _handleAutoSaveAndExit() async {
-    bool overlayShown = false;
-    try {
-      if (_myHistoryRef != null) {
-        final hasUserTurn = _localMessages.any((m) => m['role'] == 'HOST');
-        if (!hasUserTurn) {
-          await _myHistoryRef!.delete();
-          _log('🗑️ [HIST-DEL]', '빈 방 삭제 완료');
-        } else {
-          String lastText = "대화 기록 저장";
-          for (int i = _localMessages.length - 1; i >= 0; i--) {
-            final t = (_localMessages[i]['target'] ?? '').toString().trim();
-            if (t.isNotEmpty && t != '...') {
-              lastText = t;
-              break;
-            }
-          }
+예시:
 
-          // 🆕 [EXPAND-EXIT] 전체 대화 종합 → Expanded + Polished 생성 (오버레이 표시)
-          String expanded = "";
-          String polished = "";
-          final convoLines = _localMessages
-              .where((m) {
-                if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
-                final t = (m['target'] ?? '').toString().trim();
-                return t.isNotEmpty && t != '...';
-              })
-              .map((m) => "${m['role'] == 'HOST' ? 'User' : 'AI'}: ${m['target']}")
-              .toList();
-          final transcript = convoLines.join("\n");
+문장:
+“I wanted to practice English every day because I felt nervous when speaking with foreigners, but I slowly became more confident after using the app.”
 
-          if (transcript.isNotEmpty && _openAiKey.isNotEmpty && mounted) {
-            showDialog(
-              context: context,
-              barrierDismissible: false,
-              builder: (_) => const Center(
-                child: Card(
-                  color: Color(0xFF1E1E1E),
-                  child: Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        CircularProgressIndicator(color: Colors.amber),
-                        SizedBox(height: 16),
-                        Text("확장 문장 만드는 중...",
-                            style: TextStyle(color: Colors.white70)),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            );
-            overlayShown = true;
+좋은 분할:
 
-            final gen = await RoleplayBrain.generateExpandedFromConversation(
-                _openAiKey, transcript);
-            if (gen != null && gen.isNotEmpty) {
-              expanded = gen;
-              final pol =
-                  await RoleplayBrain.polishSentence(_openAiKey, expanded);
-              polished = (pol != null && pol.trim().isNotEmpty) ? pol.trim() : "";
-            }
+I wanted to practice English every day
+because I felt nervous
+when speaking with foreigners
+but I slowly became more confident
+after using the app
 
-            if (overlayShown &&
-                mounted &&
-                Navigator.of(context, rootNavigator: true).canPop()) {
-              Navigator.of(context, rootNavigator: true).pop();
-            }
-            overlayShown = false;
-          }
+나쁜 분할:
 
-          await _myHistoryRef!.update({
-            'last_message': lastText,
-            'last_message_time': FieldValue.serverTimestamp(),
-            'msg_count': _localMessages.length,
-            'last_active': FieldValue.serverTimestamp(),
-            'chat_json': jsonEncode(_localMessages),
-            'is_completed': false,
-            'mode': 'roleplay',
-            if (expanded.isNotEmpty) 'expanded_sentence': expanded,
-            if (polished.isNotEmpty) 'polished_sentence': polished,
-            if (expanded.isNotEmpty) 'has_practice': true,
-            if (expanded.isNotEmpty) 'expand_source': 'exit',
-            if (expanded.isNotEmpty)
-              'expand_generated_at': FieldValue.serverTimestamp(),
-          });
-          _log('💾 [HIST-UPD]',
-              'last_message + expand 저장 (expanded=${expanded.isNotEmpty})');
-        }
-      }
-    } catch (e) {
-      _log('❌ [HIST-EXIT-ERR]', '$e');
-    } finally {
-      if (overlayShown &&
-          mounted &&
-          Navigator.of(context, rootNavigator: true).canPop()) {
-        Navigator.of(context, rootNavigator: true).pop();
-      }
-      if (mounted) {
-        if (StealthRoomMaster.exitCurrentMode != null) {
-          StealthRoomMaster.exitCurrentMode!();
-        } else if (Navigator.canPop(context)) {
-          Navigator.pop(context);
-        } else {
-          context.goNamed('Lobby');
-        }
-      }
-    }
-  }
-```
+I wanted to practice English every day because I felt nervous when speaking with foreigners
+but I slowly became more confident after using the app
+수정 대상 2: GPT 분할 프롬프트 변경
 
----
+_splitSentenceByTurns()를 계속 사용할 경우, 함수 목적을 바꿔라.
 
-### Phase 3 검증
-```bash
-flutter analyze
-grep -c "'mode': 'roleplay'" lib/custom_code/widgets/routine_mode_roleplay.dart                    # 2 이상 (_ensureHistoryRef + update)
-grep -c "RoleplayBrain.generateExpandedFromConversation" lib/custom_code/widgets/routine_mode_roleplay.dart  # 2
-grep -c "static Future<String?> polishSentence" lib/custom_code/widgets/routine_mode_roleplay.dart # 1
-grep -c "'chat_json': jsonEncode(_localMessages)" lib/custom_code/widgets/routine_mode_roleplay.dart  # 1 (유지 확인)
-grep -c "'expand_source': 'exit'" lib/custom_code/widgets/routine_mode_roleplay.dart               # 1
-```
+기존:
+“Split into exactly n meaningful chunks”
 
-특히 `'mode': 'roleplay'`가 **2 이상**인지 꼭 확인하세요 — `_ensureHistoryRef`(방 생성)와 `_handleAutoSaveAndExit`(저장) 양쪽에 다 들어가야 라우터 오인이 완전히 막힙니다.
+변경:
+“Split into natural speaking chunks of 5–7 words each”
 
-**롤백:** 세 곳의 추가/교체분을 원형으로 복구.
+프롬프트 요구사항:
 
----
+Return ONLY a JSON array of strings.
+Each chunk should be a natural breath group for speaking practice.
+Target 5–7 words per chunk.
+Never exceed 8 words unless absolutely unavoidable.
+Avoid chunks shorter than 3 words unless it is a very natural phrase.
+Prefer splitting at commas, conjunctions, relative clauses, prepositional phrases, infinitive phrases, and adverbial clauses.
+Do not rewrite the sentence.
+Do not omit or add words.
+Preserve the original word order.
 
-이걸로 B 전체(Phase 2 + 3)가 끝납니다. 적용·검증 후, 다음은 **실제 동작 통합 테스트**를 권합니다.
+중요:
 
-전체 흐름 점검 포인트는 세 가지입니다. Clone/Roleplay에서 대화 후 나가기 → 오버레이 뜨고 잠깐 후 종료되는지, 히스토리에서 그 방 다시 들어가면 Step Expand가 아닌 **Tutor 화면 + "✨ Expanded Sentence" 버튼**이 보이는지, 그리고 그 버튼을 누르면 **즉시(재생성 없이)** P3 의미단위 따라읽기로 들어가고 상단 P 버튼으로 폴리시 문장 전환이 되는지입니다.
+GPT가 분할한 결과도 그대로 믿지 말고, 후처리 검증을 추가한다.
 
-Phase 3 결과 알려주시면 통합 테스트 체크리스트를 표로 정리해 드리겠습니다.
+검증 규칙:
 
+9단어 이상 청크가 있으면 규칙 기반으로 다시 분할 시도
+1~2단어 청크가 있으면 앞 또는 뒤 청크와 병합
+결과가 비어 있거나 문장 누락이 의심되면 fallback 사용
+수정 대상 3: Fallback 분할 강화
+
+_buildChunksLegacyList(sentence)도 5~7단어 기준을 반영하도록 수정한다.
+
+현재는 쉼표, 접속사, 관계사 등을 기준으로 나누지만 단어 수 상한이 약하다.
+다음 후처리 단계를 추가한다.
+
+8단어 초과 청크는 내부에서 다시 분할한다.
+우선 분할 위치:
+comma 뒤
+because / when / while / although / if / since / after / before 앞
+who / which / that / where / when 앞
+to + 동사 앞
+and / but / so 앞
+전치사구 시작점: for, with, about, after, before, in, on, at 등
+그래도 8단어를 넘으면 6단어 근처에서 가장 자연스러운 지점으로 분할한다.
+2단어 이하 조각은 앞뒤와 병합한다.
+최종 청크 평균이 5~7단어에 가깝도록 정리한다.
+수정 대상 4: Polished Sentence 분할도 동일 기준 적용
+
+파일: chat_history_master.dart
+
+현재 Polished 문장은 _splitPolishedIntoUnits()에서 따로 분할하고 있다.
+
+수정 방향:
+
+Polished도 Expanded와 같은 “5~7단어 한 호흡” 기준을 적용한다.
+가능하면 Expanded와 Polished가 서로 다른 분할 함수를 쓰지 않도록 공통 유틸 함수로 통합한다.
+_splitPolishedIntoUnits()는 삭제하거나 내부에서 공통 분할 함수를 호출하도록 바꾼다.
+Polished 문장이라고 해서 2~3개 큰 덩어리로만 나누면 안 된다.
+Polished도 사용자가 따라 말하는 문장이므로 5~7단어 단위로 잘라야 한다.
+수정 대상 5: 캐시 버전 갱신
+
+현재 의미단위 분할 결과가 디스크 캐시에 저장된다.
+
+분할 기준이 바뀌면 기존 캐시가 계속 사용될 위험이 있다.
+따라서 chunk cache key에 버전을 추가하거나 기존 캐시 파일명을 변경한다.
+
+예:
+
+기존: chunk_split_${roomId}_${variant}_$hash.json
+변경 방향: chunk_split_v2_${roomId}_${variant}_$hash.json
+
+목표:
+
+기존의 잘못 잘린 청크 캐시가 다시 불러와지지 않도록 한다.
+수정 대상 6: 3모드 생성 프롬프트 보강
+
+아래 파일들의 Expanded Sentence 생성 프롬프트도 보강한다.
+
+routine_mode_step_expand.dart
+routine_mode_clone.dart
+routine_mode_roleplay.dart
+필요하면 chat_history_master.dart 안의 _generateExpandedFromConversation()도 동일하게 보강
+
+현재는 “about 5 meaning units” 정도만 명시되어 있다.
+이제 다음 조건을 추가한다.
+
+Expanded Sentence 생성 조건:
+
+ONE single sentence
+25–40 words 정도 유지
+about 5 meaning units
+each meaning unit should be speakable in one breath, usually 5–7 words
+use commas or natural connectors to make breath groups clear
+do not create a sentence with one very long clause
+common spoken English only
+
+주의:
+
+여기서 문장 자체를 여러 문장으로 나누면 안 된다.
+문장은 하나로 유지하되, 나중에 Practice3에서 5~7단어 의미단위로 잘릴 수 있도록 자연스러운 쉼표와 연결어를 포함한다.
+
+최종 기대 결과
+
+Step Expand, Clone, Roleplay 3모드에서 생성된 Expanded Sentence와 Polished Sentence가 History Practice3에 들어갔을 때:
+
+한 청크가 대체로 5~7단어
+최대 8단어를 거의 넘지 않음
+너무 짧은 1~2단어 조각 없음
+사용자가 한숨에 듣고 따라 말하기 쉬움
+Expanded와 Polished 모두 같은 기준으로 분할됨
+기존 HOST 메시지 개수에 따라 의미단위 수가 결정되지 않음
+수정 후 확인 테스트
+
+다음 문장으로 테스트한다.
+
+“I wanted to practice English every day because I felt nervous when speaking with foreigners, but I slowly became more confident after using the app.”
+
+기대 청크 예시:
+
+I wanted to practice English every day
+because I felt nervous
+when speaking with foreigners
+but I slowly became more confident
+after using the app
+
+또 다른 테스트:
+
+“After talking with the AI, I realized that I could explain my thoughts more clearly if I practiced small sentences every day.”
+
+기대 청크 예시:
+
+After talking with the AI
+I realized that I could explain
+my thoughts more clearly
+if I practiced small sentences
+every day
+
+이 기준으로 chat_history_master.dart의 의미단위 분할 로직을 3모드 공통 Practice3 기준으로 정리해 달라.

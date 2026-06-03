@@ -4559,6 +4559,10 @@ Read the History carefully. Collect the user's fragmented answers and synthesize
 - The user's lines in History may contain speech recognition errors due to unclear pronunciation. Infer the most likely intended meaning from context — do not quote garbled words literally.
 - Reflect the user's intended meaning. Do not invent new facts beyond reasonable inference.
 - Fluent, natural spoken English — not overly academic.
+- Keep the sentence 25–40 words.
+- Each meaning unit should be speakable in one breath, usually 5–7 words.
+- Use commas or natural connectors to make breath groups clear.
+- Do not create a sentence with one very long clause.
 - Label the sentence with "Expanded Sentence:" prefix.
 
 [OUTPUT FORMAT - STRICT]
