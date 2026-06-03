@@ -71,6 +71,11 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
 
   void _idleTick() {
     if (!mounted) return;
+    // 🔒 [오토포즈 가드] 최상단 active route가 아니면(다른 페이지가 위에) idle 누적 금지
+    if (ModalRoute.of(context)?.isCurrent == false) {
+      _idleElapsedSec = 0;
+      return;
+    }
     if (_isIdlePaused) return;
     if (_isSystemBusy) {
       _idleElapsedSec = 0;
