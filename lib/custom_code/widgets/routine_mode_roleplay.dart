@@ -3493,6 +3493,8 @@ content and gist of the WHOLE conversation.
 [RULES]
 - Never call $safePartnerLabel AI, assistant, chatbot, or bot.
 - If the partner must be mentioned, use $safePartnerLabel or a natural role phrase.
+- If any name, role label, or situation appears in Korean, render it in natural English (translate role or description phrases to their English equivalent; romanize real personal names). Never copy Korean text into the sentence.
+- The final sentence must be 100% English and must NOT contain any Korean (Hangul) characters.
 - It must be ONE single sentence (do not split it into multiple sentences).
 - Keep it 25–40 words.
 - Build it from about 5 meaning units joined with varied grammatical connectives
@@ -3560,7 +3562,8 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
 - Smooth flow (pause-friendly, commas for breath)
 - Same meaning as the original (do not add new facts)
 - Easier to pronounce and say out loud
-- Preserve role names and participant labels.
+- Render every participant name, role label, and situation in English (translate role or description phrases; romanize real personal names). Never keep Korean text.
+- The final sentence must be 100% English and must NOT contain any Korean (Hangul) characters.
 - Do not replace $safePartnerLabel with AI, assistant, chatbot, or bot.
 
 [OUTPUT]

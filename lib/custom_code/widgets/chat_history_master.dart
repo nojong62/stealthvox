@@ -5884,6 +5884,9 @@ RULES — follow exactly:
     String polished,
     Map<String, String> labels,
   ) {
+    // 🆕 [HANGUL-GUARD] 캐시된 확장/세련문장에 한글이 섞여 있으면 거부 → 재생성 유도
+    final hangul = RegExp(r'[가-힣ᄀ-ᇿ㄰-㆏]');
+    if (hangul.hasMatch('$expanded $polished')) return false;
     final mode = labels['mode'] ?? '';
     if (mode != 'clone' && mode != 'roleplay') return expanded.isNotEmpty;
     if (_historyString(data, 'expand_schema_version') != 'named_partner_v1') {
@@ -5930,6 +5933,8 @@ content and gist of the WHOLE conversation.
 [RULES]
 - Never call $safePartnerLabel AI, assistant, chatbot, or bot.
 - Use $safePartnerLabel or a natural role phrase when referring to the partner.
+- If any name, role label, or situation appears in Korean, render it in natural English (translate role or description phrases to their English equivalent; romanize real personal names). Never copy Korean text into the sentence.
+- The final sentence must be 100% English and must NOT contain any Korean (Hangul) characters.
 - It must be ONE single sentence (do not split it into multiple sentences).
 - Keep it 25–40 words.
 - Build it from about 5 meaning units joined with varied grammatical connectives
@@ -5999,7 +6004,8 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
 - Same meaning as the original (do not add new facts)
 - Slightly more elegant/polished than the original
 - Easier to pronounce and say out loud
-- Preserve participant names, clone names, and role labels.
+- Render every participant name, clone name, role label, and situation in English (translate role or description phrases; romanize real personal names). Never keep Korean text.
+- The final sentence must be 100% English and must NOT contain any Korean (Hangul) characters.
 - Do not replace $safePartnerLabel with AI, assistant, chatbot, or bot.
 
 [AVOID]
