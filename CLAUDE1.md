@@ -47,227 +47,103 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-[작업 목적]
-클론/롤플레이의 한글 역할·이름·상황 라벨이 확장문장(expanded)·세련문장(polished)에 한글 그대로 박히는 문제를 수정한다. 6개 프롬프트를 "라벨을 영어로 변환 + 한글 금지" 규칙으로 교체하고, chat_history의 캐시 가드에 한글 감지 거부를 추가해 기존 방도 자동 재생성되게 한다.
+## Claude Code 지시문
 
-[공통 주의]
-- Box 7(TtsQueueManager, DeepgramV2VoiceManager) 절대 미접촉.
-- 프롬프트 문자열은 기존 삼중따옴표(""" """) 유지. URL/마크다운 링크 생성 금지.
-- 아래 각 편집은 해당 함수 안의 `final sysPrompt = """` 부터 그 문자열을 닫는 `""";` 까지(한 statement)만 교체한다. 함수의 나머지(http 호출 등)는 건드리지 않는다.
-- 줄 번호는 대략값이며, 각 함수 이름과 앵커 문자열로 위치를 확정할 것.
+**파일:** `routine_mode_step_expand.dart`
+**대상 함수:** `_processRelayPipeline`
+**대상 줄범위:** 약 2212 ~ 2231줄 (STEP 5 "유저 TTS 재생 대기" 루프 ~ STEP 6 진입 직전 250ms 간격)
 
+**Intent:**
+스텝익스팬드에서 유저 확장문장(Part2)이 길 때 AI 소리가 유저 소리 종료 전에 겹쳐 나오는 문제를 수정한다. 원인은 ① 재생 대기 타임아웃이 10초로 짧고 ② `isBusy`가 긴 클립에서 실제 종료보다 일찍 false가 되기 때문이다. `isBusy` 단독 신뢰를 버리고 **단어수 기반 최소 재생시간 바닥값(floor)** 을 함께 강제하며, 타임아웃 ceiling을 60초로 올리고, 전환 간격을 250ms → 500ms로 늘린다. 겹침 0을 최우선으로 하되 floor 계산 시 게이트 이전에 이미 재생된 첫 청크(약 4단어)는 차감해 불필요한 공백을 줄인다.
 
-───────────────────────────────────────────
-편집 1/7 — routine_mode_clone.dart
-함수: CloneBrain.generateExpandedFromConversation (대략 3739줄~)
-삭제 구간: 3751줄 `      final sysPrompt = """You are an English speaking coach.`
-        ~ 3771줄 `- Output exactly ONE sentence. No quotes, no prefixes, no explanation.""";`
-교체 후(전체):
-      final sysPrompt = """You are an English speaking coach.
-You are given a short conversation transcript.
-This conversation is between $safeUserLabel and $safePartnerLabel.
-$safePartnerLabel is a named clone/persona, not AI.
-Your job: compose ONE long, natural English sentence that synthesizes the overall
-content and gist of the WHOLE conversation.
+**삭제할 코드 (시작/끝 기준):**
+- 시작 (약 2212줄): `      waitTicks = 0;` 바로 다음 줄의 `while (_ttsQueueManager.isBusy) {`
+- 끝 (약 2231줄): `      _log('🧠 [PIPE-GAP]', '유저-AI 전환 안전 간격 250ms 완료');`
+- 즉, `waitTicks = 0;` 재할당부터 `isBusy` 루프 전체 + `[PIPE-06]` 로그 + STEP 6 주석 + 250ms `Future.delayed` + `[PIPE-GAP]` 로그까지 한 덩어리를 교체.
 
-[RULES]
-- Never refer to $safePartnerLabel as AI, assistant, chatbot, or bot.
-- If the partner must be mentioned, use $safePartnerLabel.
-- If any name, role label, or situation appears in Korean, render it in natural English (translate role or description phrases to their English equivalent; romanize real personal names). Never copy Korean text into the sentence.
-- The final sentence must be 100% English and must NOT contain any Korean (Hangul) characters.
-- It must be ONE single sentence (do not split it into multiple sentences).
-- Keep it 25–40 words.
-- Build it from about 5 meaning units joined with varied grammatical connectives
-  (because, so, while, which, after, even though, and, etc.).
-- Each meaning unit should be speakable in one breath, usually 5–7 words.
-- Use commas or natural connectors to make breath groups clear.
-- Do not create a sentence with one very long clause.
-- Natural, speakable rhythm — common spoken English only.
-- Capture the overall situation/idea of the conversation, not just one line.
-- Common everyday vocabulary only. Do not add facts not in the transcript.
-- Output exactly ONE sentence. No quotes, no prefixes, no explanation.""";
+**BEFORE (현재 코드, 참조용):**
+```dart
+      waitTicks = 0;
+      while (_ttsQueueManager.isBusy) {
+        await Future.delayed(const Duration(milliseconds: 50));
+        waitTicks++;
+        if (waitTicks > 200) {
+          _log('⚠️ [PIPE-TIMEOUT]', '유저 TTS 재생 10초 초과, 강제 진행');
+          break;
+        }
+      }
+      _log('🧠 [PIPE-06]', '유저 TTS 재생 완료 → AI 큐 개방');
 
+// ─────────────────────────────────────────────────────
+      // STEP 6: AI 큐 개방
+      // ─────────────────────────────────────────────────────
+      // 🔧 [v3.3 안전 간격] 유저 TTS 재생 완료 직후 250ms 대기
+      // 이유: isBusy=false가 되었어도 AudioPlayer 내부에서
+      //       마지막 샘플이 디코딩/재생 꼬리가 남을 수 있어 소리 겹침 발생
+      //       250ms = 체감상 자연스러운 "숨 고르기" + 겹침 방지
+      await Future.delayed(const Duration(milliseconds: 250));
+      _log('🧠 [PIPE-GAP]', '유저-AI 전환 안전 간격 250ms 완료');
+```
 
-───────────────────────────────────────────
-편집 2/7 — routine_mode_clone.dart
-함수: CloneBrain.polishSentence (대략 3809줄~)
-삭제 구간: 3818줄 `      final sysPrompt = """You are an English speaking coach.`
-        ~ 3831줄 `- Exactly ONE sentence. No explanation, no quotes, no prefixes.""";`
-교체 후(전체):
-      final sysPrompt = """You are an English speaking coach.
-Rewrite the given long English sentence as ONE "easy but elegant" spoken sentence.
+**AFTER (교체할 전체 블록):**
+```dart
+      // 🌱 [OVERLAP-FIX] isBusy 단독 신뢰 금지.
+      //   긴 Part2(30~50단어)에서 isBusy가 실제 재생보다 일찍 false가 되어
+      //   AI 소리가 유저 소리 종료 전에 겹치는 문제 → 단어수 기반 floor 병행 강제.
+      //   - tts-1 영어 낭독 속도 ≈ 2.2 wps
+      //   - 게이트 진입 전 이미 재생된 첫 청크(약 4단어)는 차감
+      //   - ceiling 60초 (마지막 5턴 경로와 동일 톤)
+      const double _ttsWordsPerSec = 2.2;
+      final int _userWordCount = _part2FullSentence.trim().isEmpty
+          ? 0
+          : _part2FullSentence
+              .trim()
+              .split(RegExp(r'\s+'))
+              .where((w) => w.isNotEmpty)
+              .length;
+      final int _userPlayFloorMs =
+          ((((_userWordCount - 4).clamp(0, 9999)) / _ttsWordsPerSec) * 1000)
+              .round();
+      final DateTime _userPlayWaitStart = DateTime.now();
+      _log('🧠 [PIPE-FLOOR]',
+          '유저 재생 floor=${_userPlayFloorMs}ms (words=$_userWordCount)');
 
-[GOALS]
-- Natural spoken rhythm (not written/academic)
-- Common vocabulary (no SAT words, no bookish phrases)
-- Smooth flow (pause-friendly, commas for breath)
-- Same meaning as the original (do not add new facts)
-- Easier to pronounce and say out loud
-- Render every participant name, clone name, role label, and situation in English (translate role or description phrases; romanize real personal names). Never keep Korean text.
-- The final sentence must be 100% English and must NOT contain any Korean (Hangul) characters.
-- Do not replace $safePartnerLabel with AI, assistant, chatbot, or bot.
+      waitTicks = 0;
+      while (_ttsQueueManager.isBusy ||
+          DateTime.now().difference(_userPlayWaitStart).inMilliseconds 
+              _userPlayFloorMs) {
+        await Future.delayed(const Duration(milliseconds: 50));
+        waitTicks++;
+        if (waitTicks > 1200) {
+          // 60초 타임아웃 (좀비 방지용 ceiling)
+          _log('⚠️ [PIPE-TIMEOUT]', '유저 TTS 재생 60초 초과, 강제 진행');
+          break;
+        }
+      }
+      _log('🧠 [PIPE-06]',
+          '유저 TTS 재생 완료(floor 포함) → AI 큐 개방. busy=${_ttsQueueManager.isBusy}');
 
-[OUTPUT]
-- Exactly ONE sentence. No explanation, no quotes, no prefixes.""";
+      // ─────────────────────────────────────────────────────
+      // STEP 6: AI 큐 개방
+      // ─────────────────────────────────────────────────────
+      // 🔧 유저 소리 완전 종료 후 0.5초 숨 고르기 → 그 다음 글자+소리 동시 출력.
+      //    유저 소리와 AI 소리는 절대 겹치지 않는다.
+      await Future.delayed(const Duration(milliseconds: 500));
+      _log('🧠 [PIPE-GAP]', '유저-AI 전환 안전 간격 500ms 완료');
+```
 
+**do-not-touch (절대 건드리지 말 것):**
+- Box 7 전체 (`TtsQueueManager`, `ChunkedTtsFetcher`, `DeepgramV2VoiceManager`, `HybridTtsPlayer`). 특히 `estimatedDuration`, `isBusy` getter, `_processQueue`는 그대로 둔다.
+- 2234~2244줄 턴 전환부 (`setUserTurn(false)` / `setAiPaused(false)` + AI 텍스트 setState)는 변경 금지. 글자+소리 동시 출력은 이미 이 구조가 보장한다.
+- Loop A(유저 TTS fetch 대기, 약 2199~2208줄)는 변경하지 않는다.
+- 마지막 5턴 경로(약 1984~2080줄)는 변경하지 않는다.
 
-───────────────────────────────────────────
-편집 3/7 — routine_mode_roleplay.dart
-함수: RoleplayBrain.generateExpandedFromConversation (대략 3468줄~)
-삭제 구간: 3485줄 `      final sysPrompt = """You are an English speaking coach.`
-        ~ 3506줄 `- Output exactly ONE sentence. No quotes, no prefixes, no explanation.""";`
-교체 후(전체):
-      final sysPrompt = """You are an English speaking coach.
-You are given a short roleplay conversation transcript.
-This is a roleplay conversation between $safeUserLabel and $safePartnerLabel.
-$safePartnerLabel is the role being played, not AI.
-$situationLine
-Your job: compose ONE long, natural English sentence that synthesizes the overall
-content and gist of the WHOLE conversation.
+**검증 체크리스트:**
+1. `flutter analyze` → 에러 0
+2. `grep -n "_userPlayFloorMs" routine_mode_step_expand.dart` → 정의 1 + 사용 1
+3. `grep -n "waitTicks > 1200" routine_mode_step_expand.dart` → STEP 5 재생 루프에서 매치 (10초 `> 200`이 사라졌는지 확인)
+4. `grep -c "milliseconds: 250" routine_mode_step_expand.dart` → 이 구간의 250 간격이 500으로 바뀌었는지 (남은 250 매치가 의도된 다른 곳인지 확인)
+5. `grep -n "PIPE-FLOOR" routine_mode_step_expand.dart` → 로그 1건
+6. 실기기: 30단어 이상 확장문장 턴에서 유저 소리 끝난 뒤 약 0.5초 정적 → 글자+AI소리 동시 시작, 겹침 없음 확인
 
-[RULES]
-- Never call $safePartnerLabel AI, assistant, chatbot, or bot.
-- If the partner must be mentioned, use $safePartnerLabel or a natural role phrase.
-- If any name, role label, or situation appears in Korean, render it in natural English (translate role or description phrases to their English equivalent; romanize real personal names). Never copy Korean text into the sentence.
-- The final sentence must be 100% English and must NOT contain any Korean (Hangul) characters.
-- It must be ONE single sentence (do not split it into multiple sentences).
-- Keep it 25–40 words.
-- Build it from about 5 meaning units joined with varied grammatical connectives
-  (because, so, while, which, after, even though, and, etc.).
-- Each meaning unit should be speakable in one breath, usually 5–7 words.
-- Use commas or natural connectors to make breath groups clear.
-- Do not create a sentence with one very long clause.
-- Natural, speakable rhythm — common spoken English only.
-- Capture the overall situation/idea of the conversation, not just one line.
-- Common everyday vocabulary only. Do not add facts not in the transcript.
-- Output exactly ONE sentence. No quotes, no prefixes, no explanation.""";
-
-
-───────────────────────────────────────────
-편집 4/7 — routine_mode_roleplay.dart
-함수: RoleplayBrain.polishSentence (대략 3544줄~)
-삭제 구간: 3554줄 `      final sysPrompt = """You are an English speaking coach.`
-        ~ 3567줄 `- Exactly ONE sentence. No explanation, no quotes, no prefixes.""";`
-교체 후(전체):
-      final sysPrompt = """You are an English speaking coach.
-Rewrite the given long English sentence as ONE "easy but elegant" spoken sentence.
-
-[GOALS]
-- Natural spoken rhythm (not written/academic)
-- Common vocabulary (no SAT words, no bookish phrases)
-- Smooth flow (pause-friendly, commas for breath)
-- Same meaning as the original (do not add new facts)
-- Easier to pronounce and say out loud
-- Render every participant name, role label, and situation in English (translate role or description phrases; romanize real personal names). Never keep Korean text.
-- The final sentence must be 100% English and must NOT contain any Korean (Hangul) characters.
-- Do not replace $safePartnerLabel with AI, assistant, chatbot, or bot.
-
-[OUTPUT]
-- Exactly ONE sentence. No explanation, no quotes, no prefixes.""";
-
-
-───────────────────────────────────────────
-편집 5/7 — chat_history_master.dart
-함수: _generateExpandedFromConversation (대략 5901줄~)
-삭제 구간: 5922줄 `      final sysPrompt = """You are an English speaking coach.`
-        ~ 5943줄 `- Output exactly ONE sentence. No quotes, no prefixes, no explanation.""";`
-교체 후(전체):
-      final sysPrompt = """You are an English speaking coach.
-You are given a short conversation transcript.
-$modeLine
-$safePartnerLabel is not AI.
-$situationLine
-Your job: compose ONE long, natural English sentence that synthesizes the overall
-content and gist of the WHOLE conversation.
-
-[RULES]
-- Never call $safePartnerLabel AI, assistant, chatbot, or bot.
-- Use $safePartnerLabel or a natural role phrase when referring to the partner.
-- If any name, role label, or situation appears in Korean, render it in natural English (translate role or description phrases to their English equivalent; romanize real personal names). Never copy Korean text into the sentence.
-- The final sentence must be 100% English and must NOT contain any Korean (Hangul) characters.
-- It must be ONE single sentence (do not split it into multiple sentences).
-- Keep it 25–40 words.
-- Build it from about 5 meaning units joined with varied grammatical connectives
-  (because, so, while, which, after, even though, and, etc.).
-- Each meaning unit should be speakable in one breath, usually 5–7 words.
-- Use commas or natural connectors to make breath groups clear.
-- Do not create a sentence with one very long clause.
-- Natural, speakable rhythm — common spoken English only.
-- Capture the overall situation/idea of the conversation, not just one line.
-- Common everyday vocabulary only. Do not add facts not in the transcript.
-- Output exactly ONE sentence. No quotes, no prefixes, no explanation.""";
-
-
-───────────────────────────────────────────
-편집 6/7 — chat_history_master.dart
-함수: _polishExpandedSentence (대략 5983줄~)
-삭제 구간: 5991줄 `      final sysPrompt = """You are an English speaking coach.`
-        ~ 6014줄 `- Just the polished sentence.""";`
-교체 후(전체):
-      final sysPrompt = """You are an English speaking coach.
-The user has built a long English sentence through step-by-step expansion.
-Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
-
-[GOALS]
-- Natural spoken rhythm (not written/academic)
-- Common vocabulary (no SAT words, no bookish phrases)
-- Smooth flow (pause-friendly, commas for breath)
-- Same meaning as the original (do not add new facts)
-- Slightly more elegant/polished than the original
-- Easier to pronounce and say out loud
-- Render every participant name, clone name, role label, and situation in English (translate role or description phrases; romanize real personal names). Never keep Korean text.
-- The final sentence must be 100% English and must NOT contain any Korean (Hangul) characters.
-- Do not replace $safePartnerLabel with AI, assistant, chatbot, or bot.
-
-[AVOID]
-- Big academic words
-- Formal written phrases
-- Complex nested clauses that are hard to speak
-- Adding information not in the original
-
-[OUTPUT]
-- Exactly ONE sentence.
-- No explanation, no quotes, no prefixes.
-- Just the polished sentence.""";
-
-
-───────────────────────────────────────────
-편집 7/7 — chat_history_master.dart
-함수: _canUseCachedNamedPartnerExpand (대략 5881줄~5899)
-삭제 구간: 5881줄 `  bool _canUseCachedNamedPartnerExpand(`
-        ~ 5899줄 `  }`   (함수 전체)
-교체 후(전체):
-  bool _canUseCachedNamedPartnerExpand(
-    Map<String, dynamic>? data,
-    String expanded,
-    String polished,
-    Map<String, String> labels,
-  ) {
-    // 🆕 [HANGUL-GUARD] 캐시된 확장/세련문장에 한글이 섞여 있으면 거부 → 재생성 유도
-    final hangul = RegExp(r'[\uAC00-\uD7A3\u1100-\u11FF\u3130-\u318F]');
-    if (hangul.hasMatch('$expanded $polished')) return false;
-    final mode = labels['mode'] ?? '';
-    if (mode != 'clone' && mode != 'roleplay') return expanded.isNotEmpty;
-    if (_historyString(data, 'expand_schema_version') != 'named_partner_v1') {
-      return false;
-    }
-    if (_historyString(data, 'expand_partner_type') != mode) return false;
-    final savedPartner = _historyString(data, 'expand_partner_name');
-    if (savedPartner.isNotEmpty && savedPartner != labels['partnerLabel']) {
-      return false;
-    }
-    if (_mentionsGenericAiPartner('$expanded $polished')) return false;
-    return expanded.isNotEmpty;
-  }
-
-
-───────────────────────────────────────────
-[검증]
-1) flutter analyze → 에러 0 목표
-2) grep -c "must NOT contain any Korean" routine_mode_clone.dart      → 2
-3) grep -c "must NOT contain any Korean" routine_mode_roleplay.dart   → 2
-4) grep -c "must NOT contain any Korean" chat_history_master.dart     → 2
-5) grep -c "Preserve participant names" routine_mode_clone.dart       → 0
-6) grep -c "Preserve role names" routine_mode_roleplay.dart           → 0
-7) grep -c "Preserve participant names, clone names" chat_history_master.dart → 0
-8) grep -n "HANGUL-GUARD" chat_history_master.dart                    → 1줄
+---
