@@ -566,7 +566,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   Future<void> _uploadMyMessage(String raw, String srcLang) async {
     if (_duoSessionRef == null || raw.trim().isEmpty) return;
     try {
-      await _duoSessionRef!.collection('messages').add({
+      // 🆕 내 메시지 doc id를 업로드 전에 _processedMsgIds에 선등록한다.
+      //    → 리스너(605행)가 내 발화를 항상 스킵하므로, 내 글이 절대
+      //      상대(SYSTEM/좌측) 말풍선으로 되돌아오지 않는다. 역할/계정 무관.
+      final docRef = _duoSessionRef!.collection('messages').doc();
+      _processedMsgIds.add(docRef.id);
+      await docRef.set({
         'senderUid': _myUid,
         'senderRole': _myRole,
         'text': raw,

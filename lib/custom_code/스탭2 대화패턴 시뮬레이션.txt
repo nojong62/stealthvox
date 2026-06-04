@@ -1,0 +1,46 @@
+AI:
+Are there any specific tasks on your agenda for today? -소리
+(혹시 오늘 꼭 해야할 일이 있나요?)
+
+User:
+I remembered to call Alex.
+(알렉스에게 전화할 생각이 났어요.) 
+<백 그라운드 -소리만>
+
+AI:
+When and how did you remember it?-소리
+(언제, 어떻게 기억이 났나요?)
+
+<백그라운드- User:  Suddenly.  (갑자기요.)와 소리 >
+
+I suddenly remembered to call Alex.
+(문득 알렉스에게 전화할 생각이 났어요.)
+
+AI:
+What were you doing at that time? -소리
+(그때 뭘 하고 있었나요?)
+
+<백그라운드-User:I was checking my emails this morning.(오늘 아침에 이메일을 확인하고 있었어요.)와 소리>
+
+Checking my emails this morning, I suddenly remembered to call Alex.
+(오늘 아침 이메일을 확인하다가, 문득 알렉스에게 전화할 생각이 났어요.)
+
+AI:
+Who is Alex?  -소리
+(알렉스가 누구죠?)
+
+<백그라운드- User:He is my old friend.(제 오랜 친구예요.) 와 소리>
+
+Checking my emails this morning, I suddenly remembered to call my old friend, Alex.
+(오늘 아침 이메일을 확인하다가, 문득 내 오랜 친구인 알렉스에게 전화할 생각이 났어요.)
+
+
+AI:
+How is Alex doing these days?
+(알렉스는 요즘 어떻게 지내나요?)
+
+......
+
+Expanded Sentence:
+
+Polished Sentence:
