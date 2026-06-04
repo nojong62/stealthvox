@@ -196,7 +196,15 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         isPlaying ||
         _appIsRecording ||
         _appIsShadowRecording ||
-        _isPlayingAppAudio;
+        _isPlayingAppAudio ||
+        _isAutoRecording ||
+        _tutorUserRecording ||
+        _tutorAiSpeaking ||
+        _aiChunkPlaying ||
+        _aiChunkLoading ||
+        _isPlayingFullAI ||
+        _isPlayingFullUser ||
+        _polishedUnitAIPlaying;
   }
 
   void _resetIdleTimer() {
@@ -474,6 +482,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         if (!mounted) return;
 
         if (mounted) {
+          BillingTicker.instance.setRate(BillingRate.full);
           setState(() {
             _isStepExpandRoom = true;
             isPracticeMode = true;
@@ -959,6 +968,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     await _buildChunks(_expandedSentence);
 
     if (mounted) {
+      BillingTicker.instance.setRate(BillingRate.full);
       setState(() {
         isPracticeMode = true;
         _phase = ShadowingPhase.chunkPractice;
@@ -1126,6 +1136,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   void _exitShadowing() {
     _deleteUserRecordings(); // 🆕 Practice 임시 녹음 파일 정리
+    BillingTicker.instance.setRate(BillingRate.quarter);
     _stopTutorPlayback();
     _stopAutoVADRecording();
     _utteranceSafetyTimer?.cancel();

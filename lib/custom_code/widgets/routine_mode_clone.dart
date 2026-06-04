@@ -66,7 +66,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
   bool _isAiOpenerPlaying = false; // AI 첫 발화 재생 중 여부
 
   // ── Idle Timeout v2 ───────────────────────────────────────────────
-  // 기준: "유저도 AI도 아무 작동이 없는 상태"가 연속 30초 지속되면 pause.
+  // 기준: "유저도 AI도 아무 작동이 없는 상태"가 연속 60초 지속되면 pause.
   //  - AI 작동 = _ttsQueueManager.isBusy (TTS 재생/대기)
   //  - 유저 작동 = _voiceManager != null (마이크 연결/녹음)
   // 1초 주기 감시 타이머가 작동 여부를 보고 idle 누적초를 증감한다.
