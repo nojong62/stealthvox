@@ -2209,26 +2209,49 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       _log(
           '🧠 [PIPE-05]', '유저 TTS fetch 완료. isBusy=${_ttsQueueManager.isBusy}');
 
+      // 🌱 [OVERLAP-FIX] isBusy 단독 신뢰 금지.
+      //   긴 Part2(30~50단어)에서 isBusy가 실제 재생보다 일찍 false가 되어
+      //   AI 소리가 유저 소리 종료 전에 겹치는 문제 → 단어수 기반 floor 병행 강제.
+      //   - tts-1 영어 낭독 속도 ≈ 2.2 wps
+      //   - 게이트 진입 전 이미 재생된 첫 청크(약 4단어)는 차감
+      //   - ceiling 60초 (마지막 5턴 경로와 동일 톤)
+      const double _ttsWordsPerSec = 2.2;
+      final int _userWordCount = _part2FullSentence.trim().isEmpty
+          ? 0
+          : _part2FullSentence
+              .trim()
+              .split(RegExp(r'\s+'))
+              .where((w) => w.isNotEmpty)
+              .length;
+      final int _userPlayFloorMs =
+          ((((_userWordCount - 4).clamp(0, 9999)) / _ttsWordsPerSec) * 1000)
+              .round();
+      final DateTime _userPlayWaitStart = DateTime.now();
+      _log('🧠 [PIPE-FLOOR]',
+          '유저 재생 floor=${_userPlayFloorMs}ms (words=$_userWordCount)');
+
       waitTicks = 0;
-      while (_ttsQueueManager.isBusy) {
+      while (_ttsQueueManager.isBusy ||
+          DateTime.now().difference(_userPlayWaitStart).inMilliseconds <
+              _userPlayFloorMs) {
         await Future.delayed(const Duration(milliseconds: 50));
         waitTicks++;
-        if (waitTicks > 200) {
-          _log('⚠️ [PIPE-TIMEOUT]', '유저 TTS 재생 10초 초과, 강제 진행');
+        if (waitTicks > 1200) {
+          // 60초 타임아웃 (좀비 방지용 ceiling)
+          _log('⚠️ [PIPE-TIMEOUT]', '유저 TTS 재생 60초 초과, 강제 진행');
           break;
         }
       }
-      _log('🧠 [PIPE-06]', '유저 TTS 재생 완료 → AI 큐 개방');
+      _log('🧠 [PIPE-06]',
+          '유저 TTS 재생 완료(floor 포함) → AI 큐 개방. busy=${_ttsQueueManager.isBusy}');
 
-// ─────────────────────────────────────────────────────
+      // ─────────────────────────────────────────────────────
       // STEP 6: AI 큐 개방
       // ─────────────────────────────────────────────────────
-      // 🔧 [v3.3 안전 간격] 유저 TTS 재생 완료 직후 250ms 대기
-      // 이유: isBusy=false가 되었어도 AudioPlayer 내부에서
-      //       마지막 샘플이 디코딩/재생 꼬리가 남을 수 있어 소리 겹침 발생
-      //       250ms = 체감상 자연스러운 "숨 고르기" + 겹침 방지
-      await Future.delayed(const Duration(milliseconds: 250));
-      _log('🧠 [PIPE-GAP]', '유저-AI 전환 안전 간격 250ms 완료');
+      // 🔧 유저 소리 완전 종료 후 0.5초 숨 고르기 → 그 다음 글자+소리 동시 출력.
+      //    유저 소리와 AI 소리는 절대 겹치지 않는다.
+      await Future.delayed(const Duration(milliseconds: 500));
+      _log('🧠 [PIPE-GAP]', '유저-AI 전환 안전 간격 500ms 완료');
 
       // 턴 전환
       _ttsQueueManager.setUserTurn(false);
