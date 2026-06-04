@@ -2712,7 +2712,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(_cloneUiLabel,
+              Text("Clone",
                   style: TextStyle(
                       color: Colors.white54,
                       fontSize: 20,
