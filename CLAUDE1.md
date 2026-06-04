@@ -47,137 +47,77 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
----
-
-## Claude Code 지시문
-
-**파일:** `lib/custom_code/widgets/chat_history_master.dart`
+A안 진행하겠습니다. 게이트(`streamUserTranslation`) 한 곳만 강화하는 거라, 핸들러(1899~1937줄)와 Box 7 통신엔진은 손대지 않습니다. 아래를 Claude Code에 그대로 넣으시면 됩니다.
 
 ---
 
-### [변경 1] P/E 버튼 터치 영역 확대
-**위치:** 약 5346~5376줄 — `// P/E 버튼 — Expanded ↔ Polished 전환` 블록의 `child: Container(` 시작부터 닫는 `),`까지
+**[Claude Code 지시문]**
 
-**삭제 시작:** 5346줄 `child: Container(`
-**삭제 끝:** 5376줄 `),` (GestureDetector 닫는 괄호 바로 앞)
+**파일:** `routine_mode_step_expand.dart`
+**위치:** `StepExpandBrain.streamUserTranslation` 내부 시스템 프롬프트 (대략 4374~4399줄)
 
-**교체 코드:**
-```dart
-                    child: Container(
-                      width: 40,
-                      height: 40,
-                      margin: const EdgeInsets.only(right: 4),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: _practicingPolished
-                              ? Colors.greenAccent
-                              : (_polishedSentence.isNotEmpty
-                                  ? Colors.amber
-                                  : Colors.white24),
-                          width: 1.5,
-                        ),
-                      ),
-                      child: Center(
-                        child: Text(
-                          _practicingPolished ? 'E' : 'P',
-                          style: TextStyle(
-                            color: _practicingPolished
-                                ? Colors.greenAccent
-                                : (_polishedSentence.isNotEmpty
-                                    ? Colors.amber
-                                    : Colors.white24),
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ),
+**의도:** RESTATE 판정이 "동떨어짐 / 안 들림" 두 극단만 잡아서, *문법은 멀쩡한데 앞 질문에 대한 답이 아닌* 중간지대 발화가 통과해 AI가 헛소리하는 문제를 막는다. **관련성(relevance) 점검을 번역보다 먼저** 하게 하고, 세 번째 트리거(RELEVANCE MISMATCH)를 추가한다. 토큰 출력은 기존과 동일한 `[RESTATE]`라 핸들러 수정 불필요.
+
+**삭제 범위:**
+- 시작줄 (약 4374): `[RESTATE GUARD] — hold the center; never invent content`
+- 끝줄 (약 4399): `Output: [RESTATE]` (마지막 CONTRAST EXAMPLE의 출력 줄. 그 아래 빈 줄과 `[RULES]`는 **건드리지 말 것**)
+
+**교체할 코드 (위 삭제 범위 전체를 아래로 교체):**
+
+```
+[RELEVANCE CHECK — DO THIS FIRST, before any translation or attaching]
+Look at the AI's LAST question in History. Ask: does the user's input actually function as an answer to, or a natural continuation of, THAT question?
+- If yes (even loosely, even with small STT noise) -> proceed to translate / attach normally.
+- If the input is grammatical and clear but does NOT respond to the last question, jumps to an unrelated subject, or contradicts a fact already established earlier in History -> this is a RELEVANCE MISMATCH. Do NOT force it onto the growing sentence and do NOT invent a connection. Output EXACTLY: [RESTATE]
+Calibration: a natural, on-topic tangent that still belongs to the same story is FINE — translate it. Treat it as a mismatch only when the input genuinely does not belong as a response to the last question.
+
+[RESTATE GUARD] — hold the center; never invent content
+Stay anchored to the AI's LAST question and the growing sentence. If you cannot do that safely, ask the user to say it again instead of guessing.
+Output EXACTLY: [RESTATE]  in these cases:
+1. RELEVANCE MISMATCH: The input is clear but does not answer the AI's last question, switches to an unrelated subject, or contradicts established facts (see [RELEVANCE CHECK] above).
+2. OFF-CONTEXT: The user clearly tried to answer, but the utterance does not connect to the AI's last question and cannot be attached to the growing sentence (and it is NOT a correction of a previous answer).
+3. UNRELIABLE PRONUNCIATION: The text is garbled badly enough that the CORE meaning is genuinely uncertain, so translating it would require inventing what the user "probably" meant.
+Do NOT output [RESTATE] when:
+- A minor STT slip exists but the intended meaning is still clearly inferable from context  ->  translate normally (keep tolerating small errors).
+- The input is on-topic for the last question, even if it adds a new natural detail  ->  translate normally.
+- Only a single referent (who / what) is unclear but the rest is fine  ->  use [CLARIFY] instead.
+- The user is explicitly correcting the AI  ->  use [CORRECTION] instead.
+
+[RESTATE CONTRAST EXAMPLES]
+History:
+AI: What made you pick Busan this time?
+Input: I ate kimchi stew yesterday.
+Output: [RESTATE]
+
+History:
+AI: What made you pick Busan this time?
+Input: My favorite movie is about robots.  (clear English, but does not answer the question at all)
+Output: [RESTATE]
+
+History:
+AI: What made you pick Busan this time?
+Input: i wanna see the the sea  (garbled but clearly means "I wanted to see the sea")
+Output:
+Because I wanted to see the ocean.
+
+History:
+AI: What made you pick Busan this time?
+Input: uh the the it muh suh buh uh  (no recoverable meaning)
+Output: [RESTATE]
 ```
 
-**변경 요약:** `width/height: 26 → 40`, `fontSize: 12 → 14`
+**절대 건드리지 말 것:**
+- RESTATE 핸들러 (약 1899~1937줄) — `[RESTATE]` 토큰만 보고 처리하므로 변경 불필요
+- `streamUserTranslation`의 `temperature: 0.0` — 게이트 판정 일관성 유지, 그대로
+- Box 7 통신엔진(`TtsQueueManager`, `DeepgramV2VoiceManager`)
+- `[CASE 1]`/`[CASE 2]`/`[CLARIFICATION GUARD]`/`[RULES]` 등 다른 블록
+
+**검증 체크리스트:**
+1. `flutter analyze` → 에러 0
+2. `grep -c "RELEVANCE MISMATCH" routine_mode_step_expand.dart` → **2** (CHECK 블록 + GUARD 1번)
+3. `grep -c "\[RESTATE\]" routine_mode_step_expand.dart` → 기존보다 늘어났는지 (CONTRAST 예시 추가분 포함)
+4. `grep -n "RELEVANCE CHECK — DO THIS FIRST" routine_mode_step_expand.dart` → 1건, `[CLARIFICATION GUARD]` 블록 **뒤**, `[RULES]` **앞**에 위치하는지 줄번호로 확인
 
 ---
 
-### [변경 2] T(글자크기) 버튼 터치 영역 확대 — Chunk Practice 화면
-**위치:** 약 5377~5397줄 — P/E 버튼 바로 아래 `GestureDetector(` 블록 전체
-
-**삭제 시작:** 5377줄 `GestureDetector(`
-**삭제 끝:** 5397줄 닫는 `),`
-
-**교체 코드:**
-```dart
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => setState(() {
-                      _fontScale = _fontScale == 1.0
-                          ? 1.3
-                          : _fontScale == 1.3
-                              ? 0.8
-                              : 1.0;
-                    }),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 8),
-                      child: Icon(
-                        Icons.format_size,
-                        color: _fontScale > 1.0
-                            ? const Color(0xFFFBBF24)
-                            : _fontScale < 1.0
-                                ? Colors.white38
-                                : Colors.white54,
-                        size: 22,
-                      ),
-                    ),
-                  ),
-```
-
-**변경 요약:** `behavior: HitTestBehavior.opaque` 추가, `padding horizontal: 6 → 10 + vertical: 8 추가`, `size: 20 → 22`
-
----
-
-### [변경 3] T(글자크기) 버튼 터치 영역 확대 — 메인 히스토리 화면
-**위치:** 약 3125~3142줄 — `_buildCustomAppBar` 내부 `IconButton(` (format_size 아이콘)
-
-**삭제 시작:** 3125줄 `IconButton(`
-**삭제 끝:** 3142줄 닫는 `),`
-
-**교체 코드:**
-```dart
-          IconButton(
-            icon: Icon(
-              Icons.format_size,
-              color: _fontScale > 1.0
-                  ? const Color(0xFFFBBF24)
-                  : _fontScale < 1.0
-                      ? Colors.white38
-                      : Colors.white70,
-              size: 24,
-            ),
-            padding: const EdgeInsets.all(10),
-            constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
-            onPressed: () => setState(() {
-              _fontScale = _fontScale == 1.0
-                  ? 1.3
-                  : _fontScale == 1.3
-                      ? 0.8
-                      : 1.0;
-            }),
-          ),
-```
-
-**변경 요약:** `padding: all(10)` + `constraints: minWidth/Height 44` 추가, `size: 22 → 24`
-
----
-
-### 검증 체크리스트
-```
-□ flutter analyze → 0 errors
-□ grep -n "width: 40" chat_history_master.dart   → 5346줄 부근 확인
-□ grep -n "horizontal: 10" chat_history_master.dart → 5377줄 부근 확인
-□ grep -n "minWidth: 44" chat_history_master.dart   → 3125줄 부근 + 기존 LangIcon 버튼(3157줄) 2개 확인
-```
-
-### 절대 건드리지 말 것
-- Box 7 (`TtsQueueManager`, `DeepgramV2VoiceManager`) 관련 코드 일체
-- `GestureDetector`의 `onTap` 로직 내부 (`_switchToPolishedPractice`, `_buildChunks` 호출 등)
+실행 후 완료 표 주시면 grep + analyze 결과 같이 확인하겠습니다. 프로덕션에서 "이제는 안 막히는데 너무 자주 다시 말하라고 한다" 쪽으로 치우치면, 그때 calibration 줄만 미세조정하면 됩니다.
