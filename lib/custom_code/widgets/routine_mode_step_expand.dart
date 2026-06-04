@@ -1613,7 +1613,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       if (mounted) {
         setState(() {
           _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-          _localMessages.add({'role': 'HOST', 'target': '', 'original': ''});
+          _localMessages.add({'role': 'HOST', 'target': '', 'original': '', 'turnId': currentTurnId});
         });
         _scrollToBottom();
       }
@@ -2905,8 +2905,15 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         : targetRaw;
 
     final targetParts = targetRaw.split(RegExp(r'\n\s*\n'));
-    // 🌱 유저 2턴+ (hasUserTwoParts): Part1 영어+한국어 → 한줄띄기 → Part2 영어(한국어 없음)
-    final bool hasUserTwoParts = role == 'HOST' && targetParts.length >= 2;
+
+    // 🌱 [PART1-HIDE] 2턴+ 유저 버블은 확장문장(Part2)만 화면에 표시한다.
+    //   - Part1(짧은 대답)과 Part1 한국어는 화면에서 숨긴다 (히스토리 저장값은 그대로).
+    //   - 스트리밍 중 Part1만 들어온 구간(아직 \n\n 미도착)은 '...' placeholder만 노출.
+    //   - turnId 우선 판단(스트리밍 깜빡임 방지), 없으면 파트 수로 후방호환.
+    final int turnId = (msg['turnId'] is int) ? msg['turnId'] as int : 0;
+    final bool isExpandTurn =
+        role == 'HOST' && (turnId >= 2 || targetParts.length >= 2);
+
     final String effectiveOriginal = (role == 'HOST_TEMP') ? '' : originalRaw;
 
     return Align(
@@ -2925,26 +2932,13 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           crossAxisAlignment:
               isHost ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
-            if (hasUserTwoParts) ...[
-              // Part1 영어 (짧은 대답)
-              Text(targetParts[0].trim(),
-                  textAlign: isHost ? TextAlign.right : TextAlign.left,
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 16 * _fontScale,
-                      fontWeight: FontWeight.bold)),
-              // Part1 한국어 (Part1 바로 아래)
-              if (_showOriginal && effectiveOriginal.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text(effectiveOriginal,
-                    textAlign: isHost ? TextAlign.right : TextAlign.left,
-                    style: TextStyle(
-                        color: Colors.grey, fontSize: 10 * _fontScale)),
-              ],
-              // 한줄띄기 (Part1 영역과 Part2 영역 분리)
-              const SizedBox(height: 16),
-              // Part2 영어 (확장문장, 한국어 없음)
-              Text(targetParts.sublist(1).join('\n\n').trim(),
+            if (isExpandTurn) ...[
+              // 🌱 [PART1-HIDE] Part2(확장문장)만 표시. Part2 미도착 시 '...' placeholder.
+              //   한국어는 표시하지 않는다 (Part2에는 원래 한국어가 없음).
+              Text(
+                  targetParts.length >= 2
+                      ? targetParts.sublist(1).join('\n\n').trim()
+                      : '...',
                   textAlign: isHost ? TextAlign.right : TextAlign.left,
                   style: TextStyle(
                       color: Colors.white,

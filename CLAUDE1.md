@@ -47,103 +47,124 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-## Claude Code 지시문
+## Claude Code 지시문 — StepExpand 2턴+ 유저 버블 Part1 화면 숨김
 
-**파일:** `routine_mode_step_expand.dart`
-**대상 함수:** `_processRelayPipeline`
-**대상 줄범위:** 약 2212 ~ 2231줄 (STEP 5 "유저 TTS 재생 대기" 루프 ~ STEP 6 진입 직전 250ms 간격)
+**대상 파일:** `routine_mode_step_expand.dart`
 
-**Intent:**
-스텝익스팬드에서 유저 확장문장(Part2)이 길 때 AI 소리가 유저 소리 종료 전에 겹쳐 나오는 문제를 수정한다. 원인은 ① 재생 대기 타임아웃이 10초로 짧고 ② `isBusy`가 긴 클립에서 실제 종료보다 일찍 false가 되기 때문이다. `isBusy` 단독 신뢰를 버리고 **단어수 기반 최소 재생시간 바닥값(floor)** 을 함께 강제하며, 타임아웃 ceiling을 60초로 올리고, 전환 간격을 250ms → 500ms로 늘린다. 겹침 0을 최우선으로 하되 floor 계산 시 게이트 이전에 이미 재생된 첫 청크(약 4단어)는 차감해 불필요한 공백을 줄인다.
-
-**삭제할 코드 (시작/끝 기준):**
-- 시작 (약 2212줄): `      waitTicks = 0;` 바로 다음 줄의 `while (_ttsQueueManager.isBusy) {`
-- 끝 (약 2231줄): `      _log('🧠 [PIPE-GAP]', '유저-AI 전환 안전 간격 250ms 완료');`
-- 즉, `waitTicks = 0;` 재할당부터 `isBusy` 루프 전체 + `[PIPE-06]` 로그 + STEP 6 주석 + 250ms `Future.delayed` + `[PIPE-GAP]` 로그까지 한 덩어리를 교체.
-
-**BEFORE (현재 코드, 참조용):**
-```dart
-      waitTicks = 0;
-      while (_ttsQueueManager.isBusy) {
-        await Future.delayed(const Duration(milliseconds: 50));
-        waitTicks++;
-        if (waitTicks > 200) {
-          _log('⚠️ [PIPE-TIMEOUT]', '유저 TTS 재생 10초 초과, 강제 진행');
-          break;
-        }
-      }
-      _log('🧠 [PIPE-06]', '유저 TTS 재생 완료 → AI 큐 개방');
-
-// ─────────────────────────────────────────────────────
-      // STEP 6: AI 큐 개방
-      // ─────────────────────────────────────────────────────
-      // 🔧 [v3.3 안전 간격] 유저 TTS 재생 완료 직후 250ms 대기
-      // 이유: isBusy=false가 되었어도 AudioPlayer 내부에서
-      //       마지막 샘플이 디코딩/재생 꼬리가 남을 수 있어 소리 겹침 발생
-      //       250ms = 체감상 자연스러운 "숨 고르기" + 겹침 방지
-      await Future.delayed(const Duration(milliseconds: 250));
-      _log('🧠 [PIPE-GAP]', '유저-AI 전환 안전 간격 250ms 완료');
-```
-
-**AFTER (교체할 전체 블록):**
-```dart
-      // 🌱 [OVERLAP-FIX] isBusy 단독 신뢰 금지.
-      //   긴 Part2(30~50단어)에서 isBusy가 실제 재생보다 일찍 false가 되어
-      //   AI 소리가 유저 소리 종료 전에 겹치는 문제 → 단어수 기반 floor 병행 강제.
-      //   - tts-1 영어 낭독 속도 ≈ 2.2 wps
-      //   - 게이트 진입 전 이미 재생된 첫 청크(약 4단어)는 차감
-      //   - ceiling 60초 (마지막 5턴 경로와 동일 톤)
-      const double _ttsWordsPerSec = 2.2;
-      final int _userWordCount = _part2FullSentence.trim().isEmpty
-          ? 0
-          : _part2FullSentence
-              .trim()
-              .split(RegExp(r'\s+'))
-              .where((w) => w.isNotEmpty)
-              .length;
-      final int _userPlayFloorMs =
-          ((((_userWordCount - 4).clamp(0, 9999)) / _ttsWordsPerSec) * 1000)
-              .round();
-      final DateTime _userPlayWaitStart = DateTime.now();
-      _log('🧠 [PIPE-FLOOR]',
-          '유저 재생 floor=${_userPlayFloorMs}ms (words=$_userWordCount)');
-
-      waitTicks = 0;
-      while (_ttsQueueManager.isBusy ||
-          DateTime.now().difference(_userPlayWaitStart).inMilliseconds 
-              _userPlayFloorMs) {
-        await Future.delayed(const Duration(milliseconds: 50));
-        waitTicks++;
-        if (waitTicks > 1200) {
-          // 60초 타임아웃 (좀비 방지용 ceiling)
-          _log('⚠️ [PIPE-TIMEOUT]', '유저 TTS 재생 60초 초과, 강제 진행');
-          break;
-        }
-      }
-      _log('🧠 [PIPE-06]',
-          '유저 TTS 재생 완료(floor 포함) → AI 큐 개방. busy=${_ttsQueueManager.isBusy}');
-
-      // ─────────────────────────────────────────────────────
-      // STEP 6: AI 큐 개방
-      // ─────────────────────────────────────────────────────
-      // 🔧 유저 소리 완전 종료 후 0.5초 숨 고르기 → 그 다음 글자+소리 동시 출력.
-      //    유저 소리와 AI 소리는 절대 겹치지 않는다.
-      await Future.delayed(const Duration(milliseconds: 500));
-      _log('🧠 [PIPE-GAP]', '유저-AI 전환 안전 간격 500ms 완료');
-```
-
-**do-not-touch (절대 건드리지 말 것):**
-- Box 7 전체 (`TtsQueueManager`, `ChunkedTtsFetcher`, `DeepgramV2VoiceManager`, `HybridTtsPlayer`). 특히 `estimatedDuration`, `isBusy` getter, `_processQueue`는 그대로 둔다.
-- 2234~2244줄 턴 전환부 (`setUserTurn(false)` / `setAiPaused(false)` + AI 텍스트 setState)는 변경 금지. 글자+소리 동시 출력은 이미 이 구조가 보장한다.
-- Loop A(유저 TTS fetch 대기, 약 2199~2208줄)는 변경하지 않는다.
-- 마지막 5턴 경로(약 1984~2080줄)는 변경하지 않는다.
-
-**검증 체크리스트:**
-1. `flutter analyze` → 에러 0
-2. `grep -n "_userPlayFloorMs" routine_mode_step_expand.dart` → 정의 1 + 사용 1
-3. `grep -n "waitTicks > 1200" routine_mode_step_expand.dart` → STEP 5 재생 루프에서 매치 (10초 `> 200`이 사라졌는지 확인)
-4. `grep -c "milliseconds: 250" routine_mode_step_expand.dart` → 이 구간의 250 간격이 500으로 바뀌었는지 (남은 250 매치가 의도된 다른 곳인지 확인)
-5. `grep -n "PIPE-FLOOR" routine_mode_step_expand.dart` → 로그 1건
-6. 실기기: 30단어 이상 확장문장 턴에서 유저 소리 끝난 뒤 약 0.5초 정적 → 글자+AI소리 동시 시작, 겹침 없음 확인
+**의도(목표):**
+스텝 익스팬드 라이브 화면에서, 유저의 **2턴째 이후** 버블은 **확장문장(Part2)만** 표시한다. 짧은 1차 대답(Part1)과 Part1 한국어는 화면에서 숨긴다. (1턴째 첫 대답은 지금처럼 그대로 표시.) 저장·TTS 로직은 일절 변경하지 않는다. Part1 글자는 `translated_text`에 그대로 저장되어 히스토리에서 보이고, Part1 음성은 히스토리 첫 재생 시 API가 생성하므로 별도 작업 불필요.
 
 ---
+
+### 수정 1 — HOST 버블 생성 시 turnId 태깅 (약 1616행)
+
+**대상 줄(1줄):**
+- 1616행: `_localMessages.add({'role': 'HOST', 'target': '', 'original': ''});`
+
+**교체 후 (전체):**
+```dart
+          _localMessages.add({'role': 'HOST', 'target': '', 'original': '', 'turnId': currentTurnId});
+```
+> 이유: 스트리밍 중 Part1이 먼저 흘러들어올 때(아직 `\n\n` 미도착) 버블이 한순간 Part1을 노출하는 깜빡임을 막기 위해, 버블 생성 시점에 턴 번호를 박아둔다. `currentTurnId`는 1579행에서 정의되어 이 위치에서 사용 가능.
+
+---
+
+### 수정 2 — `_buildTextBlock` 렌더링 교체 (약 2893~2972행)
+
+**삭제 대상 범위:**
+- 시작 2893행: `  Widget _buildTextBlock(Map<String, dynamic> msg) {`
+- 끝 2972행: `  }` (이 메서드의 닫는 중괄호)
+
+**교체될 코드 (전체):**
+```dart
+  Widget _buildTextBlock(Map<String, dynamic> msg) {
+    final role = (msg['role'] ?? '').toString();
+    bool isHost = role == 'HOST' || role == 'HOST_TEMP';
+    final targetRaw = (msg['target'] ?? '').toString();
+    final originalRaw = (msg['original'] ?? '').toString();
+
+    // Show '...' when AI is generating, user bubble is pending recognition,
+    // or HOST bubble was just created with empty target (before streaming starts)
+    final String displayTarget = ((role == 'SYSTEM' && targetRaw.isEmpty) ||
+            (role == 'HOST_TEMP' && targetRaw == '...') ||
+            (role == 'HOST' && targetRaw.isEmpty))
+        ? '...'
+        : targetRaw;
+
+    final targetParts = targetRaw.split(RegExp(r'\n\s*\n'));
+
+    // 🌱 [PART1-HIDE] 2턴+ 유저 버블은 확장문장(Part2)만 화면에 표시한다.
+    //   - Part1(짧은 대답)과 Part1 한국어는 화면에서 숨긴다 (히스토리 저장값은 그대로).
+    //   - 스트리밍 중 Part1만 들어온 구간(아직 \n\n 미도착)은 '...' placeholder만 노출.
+    //   - turnId 우선 판단(스트리밍 깜빡임 방지), 없으면 파트 수로 후방호환.
+    final int turnId = (msg['turnId'] is int) ? msg['turnId'] as int : 0;
+    final bool isExpandTurn =
+        role == 'HOST' && (turnId >= 2 || targetParts.length >= 2);
+
+    final String effectiveOriginal = (role == 'HOST_TEMP') ? '' : originalRaw;
+
+    return Align(
+      alignment: isHost ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+            color: isHost
+                ? const Color(0xFF2C2C2E)
+                : const Color(0xFF9333EA).withOpacity(0.15),
+            borderRadius: BorderRadius.circular(16)),
+        constraints:
+            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.85),
+        child: Column(
+          crossAxisAlignment:
+              isHost ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          children: [
+            if (isExpandTurn) ...[
+              // 🌱 [PART1-HIDE] Part2(확장문장)만 표시. Part2 미도착 시 '...' placeholder.
+              //   한국어는 표시하지 않는다 (Part2에는 원래 한국어가 없음).
+              Text(
+                  targetParts.length >= 2
+                      ? targetParts.sublist(1).join('\n\n').trim()
+                      : '...',
+                  textAlign: isHost ? TextAlign.right : TextAlign.left,
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16 * _fontScale,
+                      fontWeight: FontWeight.bold)),
+            ] else ...[
+              Text(displayTarget,
+                  textAlign: isHost ? TextAlign.right : TextAlign.left,
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16 * _fontScale,
+                      fontWeight: FontWeight.bold)),
+              if (_showOriginal && effectiveOriginal.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(effectiveOriginal,
+                    textAlign: isHost ? TextAlign.right : TextAlign.left,
+                    style: TextStyle(
+                        color: Colors.grey, fontSize: 10 * _fontScale)),
+              ],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+```
+
+---
+
+### 절대 건드리지 말 것 (CRITICAL)
+- **Box 7** (`TtsQueueManager`, `DeepgramV2VoiceManager`, `ChunkedTtsFetcher`, `TtsCache`) 내부 로직 — 일절 수정 금지.
+- 스트리밍 핸들러의 **Part1 TTS 스킵 / Part2 낭독 로직**(약 1748~1791행), **TtsCache 저장**(약 1942~1951행) — 수정 금지.
+- **Firestore 저장부**(`hostLine`/`hostLineOnly`, `translated_text` 등 2300~2340·2014~2055행) — 수정 금지. (Part1 글자는 계속 통째로 저장되어야 함.)
+- 프롬프트 내부 영어 문자열의 따옴표/URL 마크다운 규칙 — 이번 작업은 해당 없음(렌더링만 변경).
+
+### 검증 체크리스트
+1. `flutter analyze` — 에러 0개.
+2. `grep -n "'turnId': currentTurnId" routine_mode_step_expand.dart` → 1616행 1건.
+3. `grep -n "isExpandTurn" routine_mode_step_expand.dart` → 2건(정의·사용).
+4. `grep -c "hasUserTwoParts" routine_mode_step_expand.dart` → **0** (기존 변수 완전 제거 확인).
+5. 런타임: 1턴째 = 짧은 대답+한국어 표시 / 2턴째부터 = 확장문장만 표시, 스트리밍 중 Part1 비노출('...'만). 히스토리 들어가면 Part1+Part2 둘 다 글자 보이고 재생됨.
+
