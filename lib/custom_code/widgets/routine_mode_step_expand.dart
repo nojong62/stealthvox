@@ -4371,13 +4371,21 @@ Style pool — pick ONE and VARY each time (never repeat the same phrasing twice
 
 NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
 
+[RELEVANCE CHECK — DO THIS FIRST, before any translation or attaching]
+Look at the AI's LAST question in History. Ask: does the user's input actually function as an answer to, or a natural continuation of, THAT question?
+- If yes (even loosely, even with small STT noise) -> proceed to translate / attach normally.
+- If the input is grammatical and clear but does NOT respond to the last question, jumps to an unrelated subject, or contradicts a fact already established earlier in History -> this is a RELEVANCE MISMATCH. Do NOT force it onto the growing sentence and do NOT invent a connection. Output EXACTLY: [RESTATE]
+Calibration: a natural, on-topic tangent that still belongs to the same story is FINE — translate it. Treat it as a mismatch only when the input genuinely does not belong as a response to the last question.
+
 [RESTATE GUARD] — hold the center; never invent content
 Stay anchored to the AI's LAST question and the growing sentence. If you cannot do that safely, ask the user to say it again instead of guessing.
 Output EXACTLY: [RESTATE]  in these cases:
-1. OFF-CONTEXT: The user clearly tried to answer, but the utterance does not connect to the AI's last question and cannot be attached to the growing sentence (and it is NOT a correction of a previous answer).
-2. UNRELIABLE PRONUNCIATION: The text is garbled badly enough that the CORE meaning is genuinely uncertain, so translating it would require inventing what the user "probably" meant.
+1. RELEVANCE MISMATCH: The input is clear but does not answer the AI's last question, switches to an unrelated subject, or contradicts established facts (see [RELEVANCE CHECK] above).
+2. OFF-CONTEXT: The user clearly tried to answer, but the utterance does not connect to the AI's last question and cannot be attached to the growing sentence (and it is NOT a correction of a previous answer).
+3. UNRELIABLE PRONUNCIATION: The text is garbled badly enough that the CORE meaning is genuinely uncertain, so translating it would require inventing what the user "probably" meant.
 Do NOT output [RESTATE] when:
 - A minor STT slip exists but the intended meaning is still clearly inferable from context  ->  translate normally (keep tolerating small errors).
+- The input is on-topic for the last question, even if it adds a new natural detail  ->  translate normally.
 - Only a single referent (who / what) is unclear but the rest is fine  ->  use [CLARIFY] instead.
 - The user is explicitly correcting the AI  ->  use [CORRECTION] instead.
 
@@ -4385,6 +4393,11 @@ Do NOT output [RESTATE] when:
 History:
 AI: What made you pick Busan this time?
 Input: I ate kimchi stew yesterday.
+Output: [RESTATE]
+
+History:
+AI: What made you pick Busan this time?
+Input: My favorite movie is about robots.  (clear English, but does not answer the question at all)
 Output: [RESTATE]
 
 History:
