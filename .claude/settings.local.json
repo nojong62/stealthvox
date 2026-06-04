@@ -126,7 +126,11 @@
       "PowerShell(flutter devices *)",
       "PowerShell(flutter install *)",
       "PowerShell(& \"C:\\\\Users\\\\u\\\\AppData\\\\Local\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\" install -r \"build\\\\app\\\\outputs\\\\flutter-apk\\\\app-release.apk\" 2>&1)",
-      "Bash(flutter install *)"
+      "Bash(flutter install *)",
+      "Bash(findstr /i \"error\\\\|Error\")",
+      "Bash(findstr /v \"deprecated\\\\|unnecessary\\\\|unused\\\\|duplicate\\\\|dead_code\\\\|prefer_const\\\\|withOpacity\")",
+      "Bash(Select-String \"error \" -CaseSensitive)",
+      "PowerShell(cd \"F:\\\\flutter_project\\\\stealth_vox\"; $result = flutter analyze lib/custom_code/widgets/routine_mode_clone.dart lib/custom_code/widgets/routine_mode_roleplay.dart lib/custom_code/widgets/chat_history_master.dart 2>&1 | Out-String; $lines = $result -split \"`n\"; $errors = $lines | Where-Object { $_ -match \"^\\\\s+error \" }; if \\($errors.Count -eq 0\\) { \"NO ERRORS FOUND\" } else { $errors })"
     ]
   }
 }
