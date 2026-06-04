@@ -1262,9 +1262,15 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
                       const Icon(Icons.timer_outlined,
                           color: Colors.white, size: 18),
                       const SizedBox(width: 6),
-                      Text("${remaining ~/ 60}m",
-                          style: const TextStyle(
-                              color: Colors.white, fontWeight: FontWeight.bold))
+                      Text(
+                        () {
+                          final int s = remaining.clamp(0, 999999);
+                          final int h = s ~/ 3600;
+                          final int m = (s % 3600) ~/ 60;
+                          return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+                        }(),
+                        style: const TextStyle(
+                            color: Colors.white, fontWeight: FontWeight.bold))
                     ]));
               }),
         ],
