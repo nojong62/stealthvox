@@ -134,7 +134,11 @@
       "Bash(adb *)",
       "PowerShell(adb *)",
       "PowerShell($r = Get-ChildItem \"$env:LOCALAPPDATA\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\" -ErrorAction SilentlyContinue; if \\($r\\) { $r.FullName } else { \"NOT FOUND\" })",
-      "PowerShell(& \"C:\\\\Users\\\\u\\\\AppData\\\\Local\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\" -s R3CY10DGKJX install -r \"F:\\\\flutter_project\\\\stealth_vox\\\\build\\\\app\\\\outputs\\\\flutter-apk\\\\app-release.apk\")"
+      "PowerShell(& \"C:\\\\Users\\\\u\\\\AppData\\\\Local\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\" -s R3CY10DGKJX install -r \"F:\\\\flutter_project\\\\stealth_vox\\\\build\\\\app\\\\outputs\\\\flutter-apk\\\\app-release.apk\")",
+      "PowerShell([Convert]::ToBase64String\\([System.IO.File]::ReadAllBytes\\(\"F:\\\\flutter_project\\\\stealth_vox\\\\build\\\\app\\\\outputs\\\\flutter-apk\\\\app-release.apk\"\\)\\))",
+      "Bash(curl *)",
+      "PowerShell(\\(Get-Command adb -ErrorAction SilentlyContinue\\).Source; & \"$env:LOCALAPPDATA\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\" version 2>$null; & \"C:\\\\Users\\\\u\\\\AppData\\\\Local\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\" version 2>$null)",
+      "PowerShell(& \"C:\\\\Users\\\\u\\\\AppData\\\\Local\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\" install -r \"F:\\\\flutter_project\\\\stealth_vox\\\\build\\\\app\\\\outputs\\\\flutter-apk\\\\app-release.apk\")"
     ]
   }
 }

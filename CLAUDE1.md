@@ -47,124 +47,36 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-## Claude Code 지시문 — StepExpand 2턴+ 유저 버블 Part1 화면 숨김
+파일: routine_mode_duo.dart
+함수: _uploadMyMessage
 
-**대상 파일:** `routine_mode_step_expand.dart`
+[삭제 대상]
+시작: 566행  Future<void> _uploadMyMessage(String raw, String srcLang) async {
+끝:   579행    }     (← _uploadMyMessage 메서드 닫는 중괄호)
 
-**의도(목표):**
-스텝 익스팬드 라이브 화면에서, 유저의 **2턴째 이후** 버블은 **확장문장(Part2)만** 표시한다. 짧은 1차 대답(Part1)과 Part1 한국어는 화면에서 숨긴다. (1턴째 첫 대답은 지금처럼 그대로 표시.) 저장·TTS 로직은 일절 변경하지 않는다. Part1 글자는 `translated_text`에 그대로 저장되어 히스토리에서 보이고, Part1 음성은 히스토리 첫 재생 시 API가 생성하므로 별도 작업 불필요.
-
----
-
-### 수정 1 — HOST 버블 생성 시 turnId 태깅 (약 1616행)
-
-**대상 줄(1줄):**
-- 1616행: `_localMessages.add({'role': 'HOST', 'target': '', 'original': ''});`
-
-**교체 후 (전체):**
-```dart
-          _localMessages.add({'role': 'HOST', 'target': '', 'original': '', 'turnId': currentTurnId});
-```
-> 이유: 스트리밍 중 Part1이 먼저 흘러들어올 때(아직 `\n\n` 미도착) 버블이 한순간 Part1을 노출하는 깜빡임을 막기 위해, 버블 생성 시점에 턴 번호를 박아둔다. `currentTurnId`는 1579행에서 정의되어 이 위치에서 사용 가능.
-
----
-
-### 수정 2 — `_buildTextBlock` 렌더링 교체 (약 2893~2972행)
-
-**삭제 대상 범위:**
-- 시작 2893행: `  Widget _buildTextBlock(Map<String, dynamic> msg) {`
-- 끝 2972행: `  }` (이 메서드의 닫는 중괄호)
-
-**교체될 코드 (전체):**
-```dart
-  Widget _buildTextBlock(Map<String, dynamic> msg) {
-    final role = (msg['role'] ?? '').toString();
-    bool isHost = role == 'HOST' || role == 'HOST_TEMP';
-    final targetRaw = (msg['target'] ?? '').toString();
-    final originalRaw = (msg['original'] ?? '').toString();
-
-    // Show '...' when AI is generating, user bubble is pending recognition,
-    // or HOST bubble was just created with empty target (before streaming starts)
-    final String displayTarget = ((role == 'SYSTEM' && targetRaw.isEmpty) ||
-            (role == 'HOST_TEMP' && targetRaw == '...') ||
-            (role == 'HOST' && targetRaw.isEmpty))
-        ? '...'
-        : targetRaw;
-
-    final targetParts = targetRaw.split(RegExp(r'\n\s*\n'));
-
-    // 🌱 [PART1-HIDE] 2턴+ 유저 버블은 확장문장(Part2)만 화면에 표시한다.
-    //   - Part1(짧은 대답)과 Part1 한국어는 화면에서 숨긴다 (히스토리 저장값은 그대로).
-    //   - 스트리밍 중 Part1만 들어온 구간(아직 \n\n 미도착)은 '...' placeholder만 노출.
-    //   - turnId 우선 판단(스트리밍 깜빡임 방지), 없으면 파트 수로 후방호환.
-    final int turnId = (msg['turnId'] is int) ? msg['turnId'] as int : 0;
-    final bool isExpandTurn =
-        role == 'HOST' && (turnId >= 2 || targetParts.length >= 2);
-
-    final String effectiveOriginal = (role == 'HOST_TEMP') ? '' : originalRaw;
-
-    return Align(
-      alignment: isHost ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 8),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-            color: isHost
-                ? const Color(0xFF2C2C2E)
-                : const Color(0xFF9333EA).withOpacity(0.15),
-            borderRadius: BorderRadius.circular(16)),
-        constraints:
-            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.85),
-        child: Column(
-          crossAxisAlignment:
-              isHost ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-          children: [
-            if (isExpandTurn) ...[
-              // 🌱 [PART1-HIDE] Part2(확장문장)만 표시. Part2 미도착 시 '...' placeholder.
-              //   한국어는 표시하지 않는다 (Part2에는 원래 한국어가 없음).
-              Text(
-                  targetParts.length >= 2
-                      ? targetParts.sublist(1).join('\n\n').trim()
-                      : '...',
-                  textAlign: isHost ? TextAlign.right : TextAlign.left,
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 16 * _fontScale,
-                      fontWeight: FontWeight.bold)),
-            ] else ...[
-              Text(displayTarget,
-                  textAlign: isHost ? TextAlign.right : TextAlign.left,
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 16 * _fontScale,
-                      fontWeight: FontWeight.bold)),
-              if (_showOriginal && effectiveOriginal.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text(effectiveOriginal,
-                    textAlign: isHost ? TextAlign.right : TextAlign.left,
-                    style: TextStyle(
-                        color: Colors.grey, fontSize: 10 * _fontScale)),
-              ],
-            ],
-          ],
-        ),
-      ),
-    );
+[교체 코드 — 메서드 전체]
+  Future<void> _uploadMyMessage(String raw, String srcLang) async {
+    if (_duoSessionRef == null || raw.trim().isEmpty) return;
+    try {
+      // 🆕 내 메시지 doc id를 업로드 전에 _processedMsgIds에 선등록한다.
+      //    → 리스너(605행)가 내 발화를 항상 스킵하므로, 내 글이 절대
+      //      상대(SYSTEM/좌측) 말풍선으로 되돌아오지 않는다. 역할/계정 무관.
+      final docRef = _duoSessionRef!.collection('messages').doc();
+      _processedMsgIds.add(docRef.id);
+      await docRef.set({
+        'senderUid': _myUid,
+        'senderRole': _myRole,
+        'text': raw,
+        'srcLang': srcLang,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      debugPrint('[Duo] upload message error: $e');
+    }
   }
-```
 
----
-
-### 절대 건드리지 말 것 (CRITICAL)
-- **Box 7** (`TtsQueueManager`, `DeepgramV2VoiceManager`, `ChunkedTtsFetcher`, `TtsCache`) 내부 로직 — 일절 수정 금지.
-- 스트리밍 핸들러의 **Part1 TTS 스킵 / Part2 낭독 로직**(약 1748~1791행), **TtsCache 저장**(약 1942~1951행) — 수정 금지.
-- **Firestore 저장부**(`hostLine`/`hostLineOnly`, `translated_text` 등 2300~2340·2014~2055행) — 수정 금지. (Part1 글자는 계속 통째로 저장되어야 함.)
-- 프롬프트 내부 영어 문자열의 따옴표/URL 마크다운 규칙 — 이번 작업은 해당 없음(렌더링만 변경).
-
-### 검증 체크리스트
-1. `flutter analyze` — 에러 0개.
-2. `grep -n "'turnId': currentTurnId" routine_mode_step_expand.dart` → 1616행 1건.
-3. `grep -n "isExpandTurn" routine_mode_step_expand.dart` → 2건(정의·사용).
-4. `grep -c "hasUserTwoParts" routine_mode_step_expand.dart` → **0** (기존 변수 완전 제거 확인).
-5. 런타임: 1턴째 = 짧은 대답+한국어 표시 / 2턴째부터 = 확장문장만 표시, 스트리밍 중 Part1 비노출('...'만). 히스토리 들어가면 Part1+Part2 둘 다 글자 보이고 재생됨.
-
+[건드리지 말 것] Box 7, 612행 역할 필터(백업으로 그대로 둠), _processRelayPipeline 렌더 로직.
+[검증]
+  1) flutter analyze 0 에러
+  2) grep -n "_processedMsgIds.add(docRef.id)" → 1건 확인
+  3) 두 폰에서 번갈아 4턴 이상 발화 → 각 폰에서 내 글=우측, 상대 글=좌측으로 좌우 교대 유지되는지 확인
