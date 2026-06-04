@@ -47,77 +47,87 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-A안 진행하겠습니다. 게이트(`streamUserTranslation`) 한 곳만 강화하는 거라, 핸들러(1899~1937줄)와 Box 7 통신엔진은 손대지 않습니다. 아래를 Claude Code에 그대로 넣으시면 됩니다.
+=== StealthVox 과금 정책 정비 + 오토포즈 보강 (일괄 작업) ===
 
----
+[전제 / 절대 금지]
+- Box 7(TtsQueueManager, DeepgramV2VoiceManager) 일체 수정 금지
+- 라인 번호는 근사치 → 반드시 현재 파일을 직접 읽고 위치 확정 후 작업
+- 작업 후 flutter analyze 에러 0 확인
 
-**[Claude Code 지시문]**
+────────────────────────────────────────
+파일 1: chat_history_master.dart
+────────────────────────────────────────
 
-**파일:** `routine_mode_step_expand.dart`
-**위치:** `StepExpandBrain.streamUserTranslation` 내부 시스템 프롬프트 (대략 4374~4399줄)
+[작업 1] 확장문장/Polished 연습 진입 시 full(100%) 전환
+- 위치 A: _enterShadowing(...) 함수 (약 920행).
+  setState로 _phase = ShadowingPhase.chunkPractice 를 지정하는 블록(약 960행) 직전에 추가:
+      BillingTicker.instance.setRate(BillingRate.full);
+- 위치 B: _enterShadowingFromRoom() 의 Step Expand 분기
+  (roomMode == 'step_expand' || (roomMode.isEmpty && (polished/expanded 존재)) 블록, 약 447~484행).
+  _phase = ShadowingPhase.variantSelect 를 지정하는 setState 직전에 추가:
+      BillingTicker.instance.setRate(BillingRate.full);
+- 주의: 같은 함수의 "Tutor 모드 분기"(turnPractice, 약 514행)에는 추가 금지.
+  이 경로는 quarter 유지(원문 대화 섀도잉 = 25%).
 
-**의도:** RESTATE 판정이 "동떨어짐 / 안 들림" 두 극단만 잡아서, *문법은 멀쩡한데 앞 질문에 대한 답이 아닌* 중간지대 발화가 통과해 AI가 헛소리하는 문제를 막는다. **관련성(relevance) 점검을 번역보다 먼저** 하게 하고, 세 번째 트리거(RELEVANCE MISMATCH)를 추가한다. 토큰 출력은 기존과 동일한 `[RESTATE]`라 핸들러 수정 불필요.
+[작업 2] 연습 이탈 시 quarter(25%) 복귀
+- 위치: _exitShadowing() 함수 (약 1127행) 시작부, _deleteUserRecordings(); 호출 직후에 추가:
+      BillingTicker.instance.setRate(BillingRate.quarter);
 
-**삭제 범위:**
-- 시작줄 (약 4374): `[RESTATE GUARD] — hold the center; never invent content`
-- 끝줄 (약 4399): `Output: [RESTATE]` (마지막 CONTRAST EXAMPLE의 출력 줄. 그 아래 빈 줄과 `[RULES]`는 **건드리지 말 것**)
+[작업 3] 오토포즈 busy 감지 보강
+- 위치: bool get _isSystemBusy 게터 (약 193~200행).
+- 최종 형태:
+      bool get _isSystemBusy {
+        return _isTutorPlaying ||
+            isPlaying ||
+            _appIsRecording ||
+            _appIsShadowRecording ||
+            _isPlayingAppAudio ||
+            _isAutoRecording ||
+            _tutorUserRecording ||
+            _tutorAiSpeaking ||
+            _aiChunkPlaying ||
+            _aiChunkLoading ||
+            _isPlayingFullAI ||
+            _isPlayingFullUser ||
+            _polishedUnitAIPlaying;
+      }
+- initState의 base quarter, dispose의 pause(), _idleElapsedSec >= 60 임계값은 그대로 유지.
 
-**교체할 코드 (위 삭제 범위 전체를 아래로 교체):**
+────────────────────────────────────────
+파일 2: intro_master.dart
+────────────────────────────────────────
 
-```
-[RELEVANCE CHECK — DO THIS FIRST, before any translation or attaching]
-Look at the AI's LAST question in History. Ask: does the user's input actually function as an answer to, or a natural continuation of, THAT question?
-- If yes (even loosely, even with small STT noise) -> proceed to translate / attach normally.
-- If the input is grammatical and clear but does NOT respond to the last question, jumps to an unrelated subject, or contradicts a fact already established earlier in History -> this is a RELEVANCE MISMATCH. Do NOT force it onto the growing sentence and do NOT invent a connection. Output EXACTLY: [RESTATE]
-Calibration: a natural, on-topic tangent that still belongs to the same story is FINE — translate it. Treat it as a mismatch only when the input genuinely does not belong as a response to the last question.
+[작업 4-A] 오토포즈 안내 문구 30초 → 60초 (약 264행)
+- 변경 전:
+    "• ⏸️ Auto Pause: 30초 이상 반응이 없으면 자동으로 일시정지되어 과금이 멈춥니다. 다시 말을 시작하면 자동으로 재개됩니다.",
+- 변경 후:
+    "• ⏸️ Auto Pause: 60초 이상 반응이 없으면 자동으로 일시정지되어 과금이 멈춥니다. 다시 말을 시작하면 자동으로 재개됩니다.",
 
-[RESTATE GUARD] — hold the center; never invent content
-Stay anchored to the AI's LAST question and the growing sentence. If you cannot do that safely, ask the user to say it again instead of guessing.
-Output EXACTLY: [RESTATE]  in these cases:
-1. RELEVANCE MISMATCH: The input is clear but does not answer the AI's last question, switches to an unrelated subject, or contradicts established facts (see [RELEVANCE CHECK] above).
-2. OFF-CONTEXT: The user clearly tried to answer, but the utterance does not connect to the AI's last question and cannot be attached to the growing sentence (and it is NOT a correction of a previous answer).
-3. UNRELIABLE PRONUNCIATION: The text is garbled badly enough that the CORE meaning is genuinely uncertain, so translating it would require inventing what the user "probably" meant.
-Do NOT output [RESTATE] when:
-- A minor STT slip exists but the intended meaning is still clearly inferable from context  ->  translate normally (keep tolerating small errors).
-- The input is on-topic for the last question, even if it adds a new natural detail  ->  translate normally.
-- Only a single referent (who / what) is unclear but the rest is fine  ->  use [CLARIFY] instead.
-- The user is explicitly correcting the AI  ->  use [CORRECTION] instead.
+────────────────────────────────────────
+파일 3: chat_history_list_master.dart
+────────────────────────────────────────
 
-[RESTATE CONTRAST EXAMPLES]
-History:
-AI: What made you pick Busan this time?
-Input: I ate kimchi stew yesterday.
-Output: [RESTATE]
+[작업 4-B] 안내 문구 30초 → 60초 (약 1850행)
+- 해당 라인의 "30초 이상 반응이 없으면" → "60초 이상 반응이 없으면" 으로만 교체.
+  앞뒤 문장은 그대로 유지.
 
-History:
-AI: What made you pick Busan this time?
-Input: My favorite movie is about robots.  (clear English, but does not answer the question at all)
-Output: [RESTATE]
+────────────────────────────────────────
+파일 4~6: (선택) 코드 주석 정정 — 사용자 영향 없음
+────────────────────────────────────────
 
-History:
-AI: What made you pick Busan this time?
-Input: i wanna see the the sea  (garbled but clearly means "I wanted to see the sea")
-Output:
-Because I wanted to see the ocean.
+[작업 4-C] routine_mode_clone.dart:69, routine_mode_roleplay.dart:300, routine_mode_step_expand.dart:69
+  주석 "연속 30초 지속되면 pause" → "연속 60초 지속되면 pause"
+- 주의: 같은 파일들의 3090/2797/3722행 "30초 타임아웃"은 스트림(네트워크) 타임아웃이라
+  오토포즈와 무관 → 절대 건드리지 말 것.
 
-History:
-AI: What made you pick Busan this time?
-Input: uh the the it muh suh buh uh  (no recoverable meaning)
-Output: [RESTATE]
-```
-
-**절대 건드리지 말 것:**
-- RESTATE 핸들러 (약 1899~1937줄) — `[RESTATE]` 토큰만 보고 처리하므로 변경 불필요
-- `streamUserTranslation`의 `temperature: 0.0` — 게이트 판정 일관성 유지, 그대로
-- Box 7 통신엔진(`TtsQueueManager`, `DeepgramV2VoiceManager`)
-- `[CASE 1]`/`[CASE 2]`/`[CLARIFICATION GUARD]`/`[RULES]` 등 다른 블록
-
-**검증 체크리스트:**
-1. `flutter analyze` → 에러 0
-2. `grep -c "RELEVANCE MISMATCH" routine_mode_step_expand.dart` → **2** (CHECK 블록 + GUARD 1번)
-3. `grep -c "\[RESTATE\]" routine_mode_step_expand.dart` → 기존보다 늘어났는지 (CONTRAST 예시 추가분 포함)
-4. `grep -n "RELEVANCE CHECK — DO THIS FIRST" routine_mode_step_expand.dart` → 1건, `[CLARIFICATION GUARD]` 블록 **뒤**, `[RULES]` **앞**에 위치하는지 줄번호로 확인
-
----
-
-실행 후 완료 표 주시면 grep + analyze 결과 같이 확인하겠습니다. 프로덕션에서 "이제는 안 막히는데 너무 자주 다시 말하라고 한다" 쪽으로 치우치면, 그때 calibration 줄만 미세조정하면 됩니다.
+────────────────────────────────────────
+[최종 검증 체크리스트]
+────────────────────────────────────────
+1. flutter analyze → 에러 0
+2. grep -n "setRate(BillingRate.full)" chat_history_master.dart
+   → 3개 (기존 튜터링 1 + _enterShadowing 1 + step_expand 분기 1)
+3. grep -n "setRate(BillingRate.quarter)" chat_history_master.dart
+   → initState 1 + 튜터링 종료 1 + _exitShadowing 1 (총 3개)
+4. _isSystemBusy 게터 내부에 _polishedUnitAIPlaying 등 신규 8개 플래그 포함 확인
+5. grep -rn "30초 이상 반응" *.dart → 0건
+6. grep -rn "60초 이상 반응" *.dart → 2건 (intro + history_list)
