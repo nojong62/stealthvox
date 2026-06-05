@@ -298,12 +298,36 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
           .orderBy('created_at', descending: true)
           .snapshots(),
       builder: (context, snapshot) {
+        // 🔍 [HIST-DBG] 임시 진단 (확인 후 git restore로 제거)
+        debugPrint(
+            '[HIST-DBG] hasError=${snapshot.hasError} hasData=${snapshot.hasData} err=${snapshot.error}');
         if (!snapshot.hasData) {
           return const Center(
               child: CircularProgressIndicator(color: Colors.amber));
         }
 
         final allDocs = snapshot.data!.docs;
+
+        // 🔍 [HIST-DBG] allDocs 진단
+        final _dbgExpandAll = allDocs.where((d) {
+          final rn =
+              ((d.data() as Map<String, dynamic>)['room_name'] ?? '').toString();
+          return _isExpandRoom(rn);
+        }).toList();
+        debugPrint(
+            '[HIST-DBG] allDocs=${allDocs.length} step_expand_in_all=${_dbgExpandAll.length}');
+        for (final d in _dbgExpandAll) {
+          final data = d.data() as Map<String, dynamic>;
+          final caVal = data['created_at'];
+          final ipVal = data['is_pinned'];
+          final lmSnip = data['last_message']?.toString().replaceAll('\n', ' ') ?? 'null';
+          final lmPreview = lmSnip.length > 30 ? lmSnip.substring(0, 30) : lmSnip;
+          debugPrint(
+              '[HIST-DBG] expand id=${d.id} room_name=${data['room_name']} '
+              'created_at=$caVal (${caVal?.runtimeType}) '
+              'is_pinned=$ipVal (${ipVal?.runtimeType}) '
+              'last_message=$lmPreview');
+        }
 
         final filteredDocs = allDocs.where((doc) {
           Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
@@ -314,6 +338,15 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
           if (_selectedFilter == 'Expand') return _isExpandRoom(rn);
           return rn.contains(_selectedFilter);
         }).toList();
+
+        // 🔍 [HIST-DBG] filteredDocs 진단
+        final _dbgExpandFiltered = filteredDocs.where((d) {
+          final rn =
+              ((d.data() as Map<String, dynamic>)['room_name'] ?? '').toString();
+          return _isExpandRoom(rn);
+        }).toList();
+        debugPrint(
+            '[HIST-DBG] filteredDocs=${filteredDocs.length} step_expand_in_filtered=${_dbgExpandFiltered.length} selectedFilter=$_selectedFilter');
 
         if (filteredDocs.isEmpty) {
           return Center(
