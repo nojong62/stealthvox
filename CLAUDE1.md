@@ -47,36 +47,67 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-파일: routine_mode_duo.dart
-함수: _uploadMyMessage
+대상 파일: routine_mode_step_expand.dart (이 파일만. chat_history_master.dart·chat_history_list_master.dart 수정 금지)
+의도: 표시 로직·저장 payload·TTS·Box 7은 그대로 두고, 히스토리로 가는 자료가 어느 종료 경로에서도 누락 없이 입력되도록 보장한다. (1) 일반 턴 저장을 await 처리, (2) 안드로이드 시스템 뒤로가기도 저장을 거치도록 PopScope 추가, (3) 이중 종료 방지 가드.
+수정 1 — 이중 호출 방지 플래그 선언
+클래스 상태 변수 선언부(다른 bool _...= false; 멤버들이 모여 있는 곳, 예: _isConversationActive 근처)에 아래 한 줄을 추가하라.
+dart  bool _isExiting = false; // 🔧 [EXIT-GUARD] PopScope+버튼 이중 종료 방지
+수정 2 — _handleAutoSaveAndExit 진입부에 가드 추가 (약 2482행)
+삭제 대상 (1줄):
 
-[삭제 대상]
-시작: 566행  Future<void> _uploadMyMessage(String raw, String srcLang) async {
-끝:   579행    }     (← _uploadMyMessage 메서드 닫는 중괄호)
+2482행:   Future<void> _handleAutoSaveAndExit() async {
 
-[교체 코드 — 메서드 전체]
-  Future<void> _uploadMyMessage(String raw, String srcLang) async {
-    if (_duoSessionRef == null || raw.trim().isEmpty) return;
-    try {
-      // 🆕 내 메시지 doc id를 업로드 전에 _processedMsgIds에 선등록한다.
-      //    → 리스너(605행)가 내 발화를 항상 스킵하므로, 내 글이 절대
-      //      상대(SYSTEM/좌측) 말풍선으로 되돌아오지 않는다. 역할/계정 무관.
-      final docRef = _duoSessionRef!.collection('messages').doc();
-      _processedMsgIds.add(docRef.id);
-      await docRef.set({
-        'senderUid': _myUid,
-        'senderRole': _myRole,
-        'text': raw,
-        'srcLang': srcLang,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
-    } catch (e) {
-      debugPrint('[Duo] upload message error: $e');
-    }
+교체될 코드 (전체):
+dart  Future<void> _handleAutoSaveAndExit() async {
+    if (_isExiting) return; // 🔧 [EXIT-GUARD] 이미 종료 처리 중이면 무시
+    _isExiting = true;
+이유: 화면 버튼(2586행)과 PopScope가 동시에 이 함수를 호출하면 저장·종료가 두 번 실행될 수 있다. 진입 즉시 플래그로 차단한다. (try 블록은 다음 줄부터 그대로 이어진다.)
+수정 3 — build()를 PopScope로 감싸기 (약 2554~2573행)
+삭제 대상 범위:
+
+시작 2554행:   Widget build(BuildContext context) {
+끝 2573행: 이 build 메서드의 닫는 } (즉 return Container(...) 전체와 그 닫는 중괄호)
+
+교체될 코드 (전체):
+dart  Widget build(BuildContext context) {
+    final bottomPad = MediaQuery.of(context).viewPadding.bottom == 0
+        ? 24.0
+        : MediaQuery.of(context).viewPadding.bottom + 8.0;
+    return PopScope(
+      // 🔧 [POPSCOPE] 시스템 제스처/하단바 뒤로가기도 AutoSave 경로를 타게 한다.
+      canPop: false,
+      onPopInvokedWithResult: (bool didPop, Object? result) async {
+        if (didPop) return;
+        await _handleAutoSaveAndExit();
+      },
+      child: Container(
+        color: const Color(0xFF121212),
+        child: SafeArea(
+          child: Column(children: [
+            _buildTopBar(),
+            const SizedBox(height: 4),
+            Expanded(
+              child: Stack(children: [
+                _buildChatList(),
+                _buildIdleOverlay(),
+              ]),
+            ),
+            _buildControlArea(bottomPad),
+          ]),
+        ),
+      ),
+    );
   }
+이유: 현재 build는 Container 루트라 시스템 뒤로가기가 저장을 거치지 않는다. canPop: false + onPopInvokedWithResult로 시스템 pop을 가로채 _handleAutoSaveAndExit를 태운다. (가드 덕분에 화면 버튼으로 이미 나가는 중이면 재실행되지 않는다.)
+참고: Flutter 버전이 3.22 미만이라 onPopInvokedWithResult에서 빌드 에러가 나면, 그 줄을 onPopInvoked: (bool didPop) async { 로 바꾸고 시그니처에서 , Object? result를 제거하라. 나머지는 동일하다.
+수정 4 — 일반 턴 저장 await 보강 (약 2325~2327행)
+삭제 대상 (3줄):
 
-[건드리지 말 것] Box 7, 612행 역할 필터(백업으로 그대로 둠), _processRelayPipeline 렌더 로직.
-[검증]
-  1) flutter analyze 0 에러
-  2) grep -n "_processedMsgIds.add(docRef.id)" → 1건 확인
-  3) 두 폰에서 번갈아 4턴 이상 발화 → 각 폰에서 내 글=우측, 상대 글=좌측으로 좌우 교대 유지되는지 확인
+시작 2325행:       _saveTurnToFirestore([hostLine, systemLine]);
+끝 2327행:       _log('🧠 [PIPE-10]', 'Firestore 저장 호출 완료');
+
+교체될 코드 (전체):
+dart      await _saveTurnToFirestore([hostLine, systemLine]);
+      await _saveHistoryMessages([hostLine, systemLine]); // 🔧 [히스토리] 병행 저장 (await 보장)
+      _log('🧠 [PIPE-10]', 'Firestore 저장 완료');
+이유: await가 없으면 마지막 턴 직후 화면 이탈 시 messages·last_message 쓰기가 미완료로 끊긴다. 5턴 완료 경로(2038~2039행)와 동일하게 순차 저장을 보장한다.

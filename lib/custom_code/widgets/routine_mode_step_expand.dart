@@ -59,6 +59,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   String _deepgramKey = "";
   String _openAiKey = "";
   bool _isConversationActive = false;
+  bool _isExiting = false; // 🔧 [EXIT-GUARD] PopScope+버튼 이중 종료 방지
   double _fontScale = 1.0;
   bool _showOriginal = true;
   int _turnCounter = 0;
@@ -2322,9 +2323,9 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         'original_text': aiOriginalText.trim(),
         'translated_text': aiTargetText,
       };
-      _saveTurnToFirestore([hostLine, systemLine]);
-      _saveHistoryMessages([hostLine, systemLine]); // 🔧 [히스토리] 병행 저장
-      _log('🧠 [PIPE-10]', 'Firestore 저장 호출 완료');
+      await _saveTurnToFirestore([hostLine, systemLine]);
+      await _saveHistoryMessages([hostLine, systemLine]); // 🔧 [히스토리] 병행 저장 (await 보장)
+      _log('🧠 [PIPE-10]', 'Firestore 저장 완료');
     } catch (e) {
       _log('❌ [PIPE-ERR]', 'Relay Error: $e');
     } finally {
@@ -2480,6 +2481,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 
   /// 뒤로가기 시: 빈 방 폭파 or last_message 업데이트 후 나가기
   Future<void> _handleAutoSaveAndExit() async {
+    if (_isExiting) return; // 🔧 [EXIT-GUARD] 이미 종료 처리 중이면 무시
+    _isExiting = true;
     try {
       if (_myHistoryRef != null) {
         // 대화가 한 번도 없었으면 방 문서 삭제 (쓰레기 데이터 방지)
@@ -2555,20 +2558,28 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     final bottomPad = MediaQuery.of(context).viewPadding.bottom == 0
         ? 24.0
         : MediaQuery.of(context).viewPadding.bottom + 8.0;
-    return Container(
-      color: const Color(0xFF121212),
-      child: SafeArea(
-        child: Column(children: [
-          _buildTopBar(),
-          const SizedBox(height: 4),
-          Expanded(
-            child: Stack(children: [
-              _buildChatList(),
-              _buildIdleOverlay(),
-            ]),
-          ),
-          _buildControlArea(bottomPad),
-        ]),
+    return PopScope(
+      // 🔧 [POPSCOPE] 시스템 제스처/하단바 뒤로가기도 AutoSave 경로를 타게 한다.
+      canPop: false,
+      onPopInvokedWithResult: (bool didPop, Object? result) async {
+        if (didPop) return;
+        await _handleAutoSaveAndExit();
+      },
+      child: Container(
+        color: const Color(0xFF121212),
+        child: SafeArea(
+          child: Column(children: [
+            _buildTopBar(),
+            const SizedBox(height: 4),
+            Expanded(
+              child: Stack(children: [
+                _buildChatList(),
+                _buildIdleOverlay(),
+              ]),
+            ),
+            _buildControlArea(bottomPad),
+          ]),
+        ),
       ),
     );
   }

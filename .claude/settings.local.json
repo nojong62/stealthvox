@@ -138,7 +138,8 @@
       "PowerShell([Convert]::ToBase64String\\([System.IO.File]::ReadAllBytes\\(\"F:\\\\flutter_project\\\\stealth_vox\\\\build\\\\app\\\\outputs\\\\flutter-apk\\\\app-release.apk\"\\)\\))",
       "Bash(curl *)",
       "PowerShell(\\(Get-Command adb -ErrorAction SilentlyContinue\\).Source; & \"$env:LOCALAPPDATA\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\" version 2>$null; & \"C:\\\\Users\\\\u\\\\AppData\\\\Local\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\" version 2>$null)",
-      "PowerShell(& \"C:\\\\Users\\\\u\\\\AppData\\\\Local\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\" install -r \"F:\\\\flutter_project\\\\stealth_vox\\\\build\\\\app\\\\outputs\\\\flutter-apk\\\\app-release.apk\")"
+      "PowerShell(& \"C:\\\\Users\\\\u\\\\AppData\\\\Local\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\" install -r \"F:\\\\flutter_project\\\\stealth_vox\\\\build\\\\app\\\\outputs\\\\flutter-apk\\\\app-release.apk\")",
+      "Bash(Read \"C:\\\\Users\\\\u\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\F--flutter-project-stealth-vox\\\\1f76e5e2-3d75-4576-afbf-0ab047adb2f1\\\\tasks\\\\bzmfwyk84.output\")"
     ]
   }
 }
