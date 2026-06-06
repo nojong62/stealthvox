@@ -874,7 +874,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
       await _myHistoryRef!.collection('messages').add({
         'role': role,
         'translated_text': target,
-        'original_text': original,
+        'original_text': (FFAppState().nativeLang.isNotEmpty &&
+                FFAppState().nativeLang == FFAppState().targetLang)
+            ? ''
+            : original,
         'created_at': FieldValue.serverTimestamp()
       });
       await _myHistoryRef!.update({

@@ -2342,7 +2342,10 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
         await _myHistoryRef!.collection('messages').add({
           'role': line['role'] ?? '',
           'translated_text': translated,
-          'original_text': (line['original_text'] ?? '').toString(),
+          'original_text': (FFAppState().nativeLang.isNotEmpty &&
+                  FFAppState().nativeLang == FFAppState().targetLang)
+              ? ''
+              : (line['original_text'] ?? '').toString(),
           'created_at': FieldValue.serverTimestamp(),
         });
       }
