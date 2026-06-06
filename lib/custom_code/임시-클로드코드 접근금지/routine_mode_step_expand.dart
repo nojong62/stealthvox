@@ -59,6 +59,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   String _deepgramKey = "";
   String _openAiKey = "";
   bool _isConversationActive = false;
+  bool _isExiting = false; // 🔧 [EXIT-GUARD] PopScope+버튼 이중 종료 방지
   double _fontScale = 1.0;
   bool _showOriginal = true;
   int _turnCounter = 0;
@@ -66,7 +67,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   DocumentReference? _myHistoryRef; // 🔧 [히스토리] chat_history 문서 참조 (Duo 패턴)
 
   // ── Idle Timeout v2 ───────────────────────────────────────────────
-  // 기준: "유저도 AI도 아무 작동이 없는 상태"가 연속 30초 지속되면 pause.
+  // 기준: "유저도 AI도 아무 작동이 없는 상태"가 연속 60초 지속되면 pause.
   //  - AI 작동 = _ttsQueueManager.isBusy (TTS 재생/대기)
   //  - 유저 작동 = _voiceManager != null (마이크 연결/녹음)
   // 1초 주기 감시 타이머가 작동 여부를 보고 idle 누적초를 증감한다.
@@ -95,6 +96,11 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 
   void _idleTick() {
     if (!mounted) return;
+    // 🔒 [오토포즈 가드] 최상단 active route가 아니면(다른 페이지가 위에) idle 누적 금지
+    if (ModalRoute.of(context)?.isCurrent == false) {
+      _idleElapsedSec = 0;
+      return;
+    }
     if (_isIdlePaused) return;
     // 유저나 AI가 작동 중이면 idle 누적을 멈추고 리셋
     if (_isSystemBusy) {
@@ -133,7 +139,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   String _pendingTranscript = ''; // 대기 중인 유저 발화 누적
   Timer? _commitTimer; // "진짜 끝났는지" 확정 타이머
   static const int COMMIT_WAIT_MS = 1200; // 발화 합치기 대기 시간
-  Timer? _silenceTimer; // 첫 질문 침묵/망설임 감지 타이머
+  Timer? _silenceTimer; // 기본 문장 입력 대기 중 침묵/망설임 감지 타이머
   static const int OPENING_SILENCE_SEC = 7; // 침묵 판정 대기 시간(초) — 유저 망설임 7초 대기
   bool _silenceFallbackFired = false; // 폴백 발화 후 재타이머 방지 플래그
 
@@ -199,6 +205,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   String _expandedFinalSentence = ""; // 완성된 확장 문장 (별도 표시)
   bool _showExpandedFinalCard = false; // 확장 문장 카드 표시 여부
   bool _showStudyRoomPrompt = false; // "Study Room에서 연습 하세요" 표시 여부
+  int _consecutiveRestateCount = 0; // 같은 턴 연속 RESTATE 횟수 (2 이상이면 더 쉬운 문장 유도)
 
   // 🎯 [PRACTICE] 의미단위 반복 연습 모드
   bool _isPracticeMode = false;
@@ -279,9 +286,9 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
               FirebaseRemoteConfig.instance.getString('DeepgramAPIKey');
           _openAiKey = FirebaseRemoteConfig.instance.getString('OpenAIAPIKey');
         });
-        // 키 로드 완료 → AI가 먼저 개방형 질문 발화
+        // 키 로드 완료 → 시작 안내 후 유저 기본 문장 대기
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _startSessionWithAiQuestion();
+          if (mounted) _startSessionWaitingForUserSeed();
         });
       }
     } catch (e) {
@@ -292,54 +299,34 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   // ====================================================================
   // 🎯 [스텝익스팬드 대화 설계 원칙]
   // ====================================================================
-  // 1. AI가 먼저 말한다 (AI-First)
-  //    - 세션 시작 시 AI가 개방형 질문을 먼저 생성·발화
-  //    - 유저는 조용히 듣다가 자연스럽게 대답
+  // 1. 유저가 먼저 기본 문장을 제안한다 (User-First)
+  //    - 세션 시작 시 AI는 시작 안내만 하고 대기
+  //    - 유저의 첫 문장이 확장 seed가 됨
   //
-  // 2. 개방형 질문 원칙 (Open-Ended Questions)
-  //    - "예/아니오"로 답할 수 없는 질문만 사용
-  //    - 반드시 "어떻게(How)", "왜(Why)", "어떤 면에서(What/In what way)"로 시작
-  //    - 유저가 자기 생각·이야기를 자유롭게 꺼낼 수 있는 질문
-  //    - 첫 질문 이후 유저의 대답에서부터 문장 확장(expand)이 시작됨
+  // 2. AI는 시작 안내 후 대기 (Guided Waiting)
+  //    - "대화하면서 문장을 늘려가고 싶은 기본 문장을 하나 제안해 주세요."
+  //    - OpenAI 질문 생성 API 호출 없음
+  //    - 안내문 TTS 완료 후 STT 자동 시작
   //
   // 3. 마이크 버튼 없음 (No Mic Button)
-  //    - AI 발화 완료 후 STT 자동 시작 (유저가 버튼 누를 필요 없음)
+  //    - 안내문 발화 완료 후 STT 자동 시작 (유저가 버튼 누를 필요 없음)
   //    - 화면 하단은 노란 불빛 인디케이터만 표시 → 채팅 공간 최대화
+  //
+  // 4. 이후 AI는 기존 5턴 확장 패턴대로 짧은 유도 질문을 한다
+  //    - 대화 패턴과 확장 로직은 기존 유지
   // ====================================================================
 
-  /// 세션 시작 시 AI가 먼저 개방형 질문을 발화하고, 완료 후 STT 자동 시작
-  Future<void> _startSessionWithAiQuestion() async {
+  /// 세션 시작: 안내문 TTS만 재생하고 유저 기본 문장(seed) 대기
+  Future<void> _startSessionWaitingForUserSeed() async {
     if (_openAiKey.isEmpty || !mounted) return;
     if (_isSessionComplete) return;
     _resetIdleTimer();
     _isConversationActive = true;
     if (mounted) setState(() {});
 
-    // AI 질문 버블 생성
-    if (mounted) {
-      setState(() {
-        _localMessages.add({'role': 'SYSTEM', 'target': '', 'original': ''});
-      });
-      _scrollToBottom();
-    }
-    final int aiIdx = _localMessages.length - 1;
-
-    final String targetLangName = FFAppState().targetLang.isNotEmpty
-        ? FFAppState().targetLang
-        : 'English';
-    final String nativeLangName =
-        FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
-
-    final aiStream = StepExpandBrain.streamGrammarQuestion(
-      apiKey: _openAiKey,
-      contextStr: '',
-      turnNumber: 0,
-      maxTurns: MAX_TURNS,
-      myTarget: targetLangName,
-      myNative: nativeLangName,
-      userId: FirebaseAuth.instance.currentUser?.uid ?? '',
-      isOpening: true,
-    );
+    // 시작 안내 TTS 재생 (OpenAI 질문 생성 API 호출 없음)
+    _ttsQueueManager.setUserTurn(false);
+    _ttsQueueManager.setAiPaused(false);
 
     final ChunkedTtsFetcher tts = ChunkedTtsFetcher(
       _openAiKey,
@@ -348,80 +335,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       isUser: false,
       onLog: _log,
     );
-    _ttsQueueManager.setUserTurn(false);
-    _ttsQueueManager.setAiPaused(false);
-
-    // 🌱 [v3.9] 첫 질문도 "PART1(영어)\n\n PART2(한국어)" 구조로 출력됨.
-    //   - 화면 target = PART1(영어), original = PART2(한국어)
-    //   - TTS는 PART1(영어)만 재생. PART2(한국어)는 소리 안 냄.
-    //   - PART2가 한국어 자막을 채우므로 generateCleanOriginal 중복 호출 제거.
-    String aiText = '';        // 전체 누적(영어+\n\n+한국어)
-    String buffer = '';        // TTS 송출용 버퍼 (PART1 영어 구간만)
-    bool part2Started = false; // \n\n 이후(한국어) 진입 여부
-    final RegExp sp = RegExp(r'[,\.?!;:。、！？…，；：\n]');
-
-    await for (final chunk in aiStream) {
-      if (!mounted || !_isConversationActive) break;
-      aiText += chunk;
-
-      // 화면 표시: \n\n 기준으로 PART1→target, PART2→original 분리
-      if (aiText.contains('\n\n')) {
-        final idx = aiText.indexOf('\n\n');
-        final part1 = aiText.substring(0, idx).trim();
-        final part2 = aiText.substring(idx + 2).trim();
-        if (mounted && aiIdx < _localMessages.length) {
-          setState(() {
-            _localMessages[aiIdx]['target'] = part1;
-            _localMessages[aiIdx]['original'] = part2;
-          });
-        }
-      } else {
-        if (mounted && aiIdx < _localMessages.length) {
-          setState(() => _localMessages[aiIdx]['target'] = aiText);
-        }
-      }
-      _scrollToBottom();
-
-      // TTS: PART1(영어)만 송출. \n\n 감지되면 그 이후(한국어)는 TTS 큐에 안 보냄.
-      if (!part2Started) {
-        if (aiText.contains('\n\n')) {
-          // buffer에 아직 안 보낸 PART1 잔여분 송출하고 PART2 진입
-          final pending = buffer.trim();
-          if (pending.isNotEmpty) tts.addText(pending);
-          buffer = '';
-          part2Started = true;
-          continue;
-        }
-        buffer += chunk;
-        final matches = sp.allMatches(buffer).toList();
-        if (matches.isNotEmpty) {
-          final lastIdx = matches.last.end;
-          final toSpeak = buffer.substring(0, lastIdx).trim();
-          buffer = buffer.substring(lastIdx);
-          if (toSpeak.isNotEmpty) tts.addText(toSpeak);
-        }
-      }
-      // part2Started == true 이후 chunk(한국어)는 화면 자막만, TTS 안 보냄
-    }
-
-    // 루프 종료 후 \n\n 없었던 경우(PART2 미출력) buffer 잔여분 송출
-    if (!part2Started && buffer.trim().isNotEmpty) {
-      tts.addText(buffer.trim());
-    }
-
-    // PART2(한국어)가 original 자막을 채웠으면 번역 불필요.
-    // \n\n 없어 original 이 빈 폴백 상황에서만 번역 보강.
-    if (mounted &&
-        aiIdx < _localMessages.length &&
-        ((_localMessages[aiIdx]['original'] ?? '').toString().trim().isEmpty)) {
-      StepExpandBrain.generateCleanOriginal(
-              apiKey: _openAiKey, englishText: aiText)
-          .then((kor) {
-        if (mounted && _localMessages.length > aiIdx) {
-          setState(() => _localMessages[aiIdx]['original'] = kor);
-        }
-      });
-    }
+    tts.addText('대화하면서 문장을 늘려가고 싶은 기본 문장을 하나 제안해 주세요.');
 
     // TTS 재생 완료 대기 (최대 10초)
     int ticks = 0;
@@ -430,7 +344,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       if (++ticks > 200) break;
     }
 
-    // AI 발화 완료 → STT 자동 시작 (유저 버튼 불필요)
+    // 안내 완료 → STT 자동 시작 (유저 기본 문장 대기)
     if (mounted && _isConversationActive && !_isSessionComplete) {
       _startDeepgramListening();
     }
@@ -577,10 +491,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   void _showNewTopicDialog() {
     final hasUserTurn = _localMessages.any((m) => m['role'] == 'HOST');
 
-    // 🔧 5턴 완료 상태면 이미 모두 저장된 상태 → 즉시 리셋 후 AI 먼저 질문
+    // 🔧 5턴 완료 상태면 이미 모두 저장된 상태 → 즉시 리셋 후 유저 기본 문장 대기
     if (_isSessionComplete) {
       _resetSession();
-      _startSessionWithAiQuestion();
+      _startSessionWaitingForUserSeed();
       return;
     }
 
@@ -633,7 +547,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
                         onPressed: () {
                           Navigator.pop(dialogContext);
                           _resetSession();
-                          _startSessionWithAiQuestion();
+                          _startSessionWaitingForUserSeed();
                         },
                         child: const Text("리셋",
                             style: TextStyle(color: Colors.white)),
@@ -692,7 +606,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
                       onPressed: () {
                         Navigator.pop(dialogContext);
                         _resetSession();
-                        _startSessionWithAiQuestion();
+                        _startSessionWaitingForUserSeed();
                       },
                       child: const Text("새 주제",
                           style: TextStyle(color: Colors.white)),
@@ -770,7 +684,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         _silenceFallbackFired = false;
       });
     }
-    _startSessionWithAiQuestion(); // AI가 먼저 새 개방형 질문으로 다음 세션 시작
+    _startSessionWaitingForUserSeed(); // 시작 안내 후 유저 seed 문장 대기
   }
 
   // ====================================================================
@@ -1385,14 +1299,14 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     await _voiceManager!.connectAndStart();
     _log('🎤 [LISTEN-05]', 'connectAndStart 완료');
 
-    // 🌱 첫 질문(턴 0)에서만 침묵/망설임 타이머 시작 — 폴백 발화 후 재설정 방지
+    // 🌱 턴 0(기본 문장 입력 대기 중)에서만 침묵/망설임 타이머 시작 — 폴백 발화 후 재설정 방지
     if (_turnCounter == 0 && _isConversationActive && !_silenceFallbackFired) {
       _silenceTimer?.cancel();
       _silenceTimer = Timer(
         const Duration(seconds: OPENING_SILENCE_SEC),
         _handleOpeningSilenceFallback,
       );
-      _log('⏱️ [SILENCE-01]', '첫질문 침묵 타이머 시작 (${OPENING_SILENCE_SEC}초)');
+      _log('⏱️ [SILENCE-01]', '기본 문장 침묵 타이머 시작 (${OPENING_SILENCE_SEC}초)');
     }
   }
 
@@ -1489,46 +1403,15 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 // ====================================================================
 // 📦 [Box 5-SILENCE: 첫 질문 침묵/망설임 폴백]
 // ====================================================================
-  /// 타겟 언어별 "편하게 마음에 떠오르는 생각을 말해 보세요" 문구
+  /// 기본 문장 입력 대기 중 침묵 시 "짧아도 괜찮아요" 안내 문구 (다시 AI 질문 생성 안 함)
   String _getSilenceFallbackPhrase(String targetLang) {
-    switch (targetLang.trim().toLowerCase()) {
-      case 'english':
-        return 'Feel free to share any thought that comes to mind.';
-      case 'japanese':
-        return '気軽に頭に浮かんだことを話してください。';
-      case 'chinese':
-        return '请随意说出脑海中浮现的任何想法。';
-      case 'spanish':
-        return 'Comparte con tranquilidad cualquier pensamiento que se te venga a la mente.';
-      case 'french':
-        return 'Partagez librement toute pensée qui vous vient à l\'esprit.';
-      case 'german':
-        return 'Teilen Sie ruhig jeden Gedanken mit, der Ihnen in den Sinn kommt.';
-      case 'italian':
-        return 'Condividi liberamente qualsiasi pensiero che ti viene in mente.';
-      case 'portuguese':
-        return 'Sinta-se à vontade para compartilhar qualquer pensamento que lhe vier à mente.';
-      case 'russian':
-        return 'Свободно поделитесь любой мыслью, которая приходит вам в голову.';
-      case 'vietnamese':
-        return 'Hãy thoải mái chia sẻ bất kỳ suy nghĩ nào xuất hiện trong tâm trí bạn.';
-      case 'thai':
-        return 'รู้สึกอิสระที่จะแบ่งปันความคิดใดๆ ที่ผุดขึ้นมาในใจได้เลย';
-      case 'indonesian':
-        return 'Silakan bagikan pikiran apa pun yang terlintas di benak Anda.';
-      case 'hindi':
-        return 'जो भी विचार मन में आए, बेझिझक शेयर करें।';
-      case 'arabic':
-        return 'لا تتردد في مشاركة أي فكرة تخطر على بالك.';
-      default:
-        return 'Feel free to share any thought that comes to mind.';
-    }
+    return '짧아도 괜찮아요. 먼저 떠오르는 기본 문장을 하나 말해 주세요.';
   }
 
-  /// 첫 질문(턴 0)에서 7초 침묵 감지 → 타겟 언어로 격려 문구 발화 후 계속 대기
+  /// 턴 0(기본 문장 입력 대기) 중 7초 침묵 감지 → 부드럽게 안내 후 계속 대기
   Future<void> _handleOpeningSilenceFallback() async {
     if (!mounted || !_isConversationActive || _turnCounter > 0) return;
-    _log('⏱️ [SILENCE-FB]', '침묵/망설임 감지 → 격려 문구 발화 후 대기 유지');
+    _log('⏱️ [SILENCE-FB]', '기본 문장 입력 대기 중 침묵 감지 → 안내 문구 발화 후 대기 유지');
 
     _silenceFallbackFired = true; // 재타이머 방지
 
@@ -1543,7 +1426,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     _ttsQueueManager.setUserTurn(false);
     _ttsQueueManager.setAiPaused(false);
 
-    // 타겟 언어로 "편하게 마음에 떠오르는 생각을 말해 보세요" 발화
+    // "짧아도 괜찮아요. 먼저 떠오르는 기본 문장을 하나 말해 주세요." 안내 발화
     final fallbackTts = ChunkedTtsFetcher(
       _openAiKey,
       _ttsQueueManager,
@@ -1731,7 +1614,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       if (mounted) {
         setState(() {
           _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-          _localMessages.add({'role': 'HOST', 'target': '', 'original': ''});
+          _localMessages.add({'role': 'HOST', 'target': '', 'original': '', 'turnId': currentTurnId});
         });
         _scrollToBottom();
       }
@@ -1813,6 +1696,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       bool retried = false;
       bool corrected = false; // 유저가 AI의 오해를 정정하는 경우 → 직전 HOST+SYSTEM 쌍 삭제 후 재시작
       bool clarified = false; // 주어/목적어 모호 → AI 되묻기
+      bool restated = false; // 맥락 어긋남/발음 불확실 → 같은 AI 질문 유지하고 다시 말하기 요청
       bool _part2Started = false; // \n\n 이후 진입 여부
       bool hasDoubleNewline = false; // 2파트 구조 여부
       bool firstChunkSent = false;
@@ -1847,6 +1731,13 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         if (userTargetText.contains("[CLARIFY]")) {
           clarified = true;
           _log('❓ [CLARIFY]', '되묻기 감지 → clarification 처리');
+          break;
+        }
+
+        // 다시 말하기 감지: 맥락 어긋남 OR 발음 불확실 → 같은 AI 질문 유지하고 재청취
+        if (userTargetText.contains("[RESTATE]")) {
+          restated = true;
+          _log('🔁 [RESTATE]', '맥락 불일치/발음 불확실 → 같은 질문 유지, 다시 말하기 요청');
           break;
         }
 
@@ -2005,6 +1896,49 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         if (mounted && _isConversationActive) _startDeepgramListening();
         return;
       }
+
+      // 🔁 [RESTATE] 유저 발화가 맥락에 어긋나거나 발음이 불확실 → AI 질문은 그대로 두고 다시 말하기 요청
+      //   - 턴 카운터 원복(이번 시도 무효 → 다음 발화가 같은 턴으로 재진입)
+      //   - 방금 만든 빈 HOST 버블만 제거. 이전의 좋은 맥락(SYSTEM 질문 포함)은 절대 삭제 안 함
+      //   - 같은 턴에서 2회 연속이면 "더 짧고 쉬운 문장" 유도 멘트로 전환
+      if (restated) {
+        _turnCounter--;
+        final int restateCount = ++_consecutiveRestateCount;
+        if (mounted) {
+          setState(() {
+            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+            if (hostIndex < _localMessages.length) {
+              _localMessages.removeAt(hostIndex);
+            }
+          });
+          _scrollToBottom();
+        }
+        final String restatePhrase = restateCount >= 2
+            ? "조금 더 짧고 쉬운 문장으로 말해 주실래요?"
+            : "방금 건 살짝 놓쳤어요. 다시 한 번만요.";
+        _ttsQueueManager.setUserTurn(false);
+        _ttsQueueManager.setAiPaused(false);
+        final restateTts = ChunkedTtsFetcher(
+          _openAiKey,
+          _ttsQueueManager,
+          'nova',
+          isUser: false,
+          onLog: _log,
+        );
+        restateTts.addText(restatePhrase);
+        int waitTicks = 0;
+        while ((restateTts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
+            mounted) {
+          await Future.delayed(const Duration(milliseconds: 50));
+          if (++waitTicks > 200) break;
+        }
+        // 같은 AI 질문 그대로 유지 → 질문 재생성 없이 STT만 재시작
+        if (mounted && _isConversationActive) _startDeepgramListening();
+        return;
+      }
+
+      // ✅ 정상 발화 통과 → 연속 RESTATE 카운터 초기화
+      _consecutiveRestateCount = 0;
 
       // 🌱 [E-2] 하이브리드: remainder 발사 + 통문장 TtsCache 저장
       final String _part2FullSentence = hasDoubleNewline
@@ -2276,26 +2210,49 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       _log(
           '🧠 [PIPE-05]', '유저 TTS fetch 완료. isBusy=${_ttsQueueManager.isBusy}');
 
+      // 🌱 [OVERLAP-FIX] isBusy 단독 신뢰 금지.
+      //   긴 Part2(30~50단어)에서 isBusy가 실제 재생보다 일찍 false가 되어
+      //   AI 소리가 유저 소리 종료 전에 겹치는 문제 → 단어수 기반 floor 병행 강제.
+      //   - tts-1 영어 낭독 속도 ≈ 2.2 wps
+      //   - 게이트 진입 전 이미 재생된 첫 청크(약 4단어)는 차감
+      //   - ceiling 60초 (마지막 5턴 경로와 동일 톤)
+      const double _ttsWordsPerSec = 2.2;
+      final int _userWordCount = _part2FullSentence.trim().isEmpty
+          ? 0
+          : _part2FullSentence
+              .trim()
+              .split(RegExp(r'\s+'))
+              .where((w) => w.isNotEmpty)
+              .length;
+      final int _userPlayFloorMs =
+          ((((_userWordCount - 4).clamp(0, 9999)) / _ttsWordsPerSec) * 1000)
+              .round();
+      final DateTime _userPlayWaitStart = DateTime.now();
+      _log('🧠 [PIPE-FLOOR]',
+          '유저 재생 floor=${_userPlayFloorMs}ms (words=$_userWordCount)');
+
       waitTicks = 0;
-      while (_ttsQueueManager.isBusy) {
+      while (_ttsQueueManager.isBusy ||
+          DateTime.now().difference(_userPlayWaitStart).inMilliseconds <
+              _userPlayFloorMs) {
         await Future.delayed(const Duration(milliseconds: 50));
         waitTicks++;
-        if (waitTicks > 200) {
-          _log('⚠️ [PIPE-TIMEOUT]', '유저 TTS 재생 10초 초과, 강제 진행');
+        if (waitTicks > 1200) {
+          // 60초 타임아웃 (좀비 방지용 ceiling)
+          _log('⚠️ [PIPE-TIMEOUT]', '유저 TTS 재생 60초 초과, 강제 진행');
           break;
         }
       }
-      _log('🧠 [PIPE-06]', '유저 TTS 재생 완료 → AI 큐 개방');
+      _log('🧠 [PIPE-06]',
+          '유저 TTS 재생 완료(floor 포함) → AI 큐 개방. busy=${_ttsQueueManager.isBusy}');
 
-// ─────────────────────────────────────────────────────
+      // ─────────────────────────────────────────────────────
       // STEP 6: AI 큐 개방
       // ─────────────────────────────────────────────────────
-      // 🔧 [v3.3 안전 간격] 유저 TTS 재생 완료 직후 250ms 대기
-      // 이유: isBusy=false가 되었어도 AudioPlayer 내부에서
-      //       마지막 샘플이 디코딩/재생 꼬리가 남을 수 있어 소리 겹침 발생
-      //       250ms = 체감상 자연스러운 "숨 고르기" + 겹침 방지
-      await Future.delayed(const Duration(milliseconds: 250));
-      _log('🧠 [PIPE-GAP]', '유저-AI 전환 안전 간격 250ms 완료');
+      // 🔧 유저 소리 완전 종료 후 0.5초 숨 고르기 → 그 다음 글자+소리 동시 출력.
+      //    유저 소리와 AI 소리는 절대 겹치지 않는다.
+      await Future.delayed(const Duration(milliseconds: 500));
+      _log('🧠 [PIPE-GAP]', '유저-AI 전환 안전 간격 500ms 완료');
 
       // 턴 전환
       _ttsQueueManager.setUserTurn(false);
@@ -2366,9 +2323,9 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         'original_text': aiOriginalText.trim(),
         'translated_text': aiTargetText,
       };
-      _saveTurnToFirestore([hostLine, systemLine]);
-      _saveHistoryMessages([hostLine, systemLine]); // 🔧 [히스토리] 병행 저장
-      _log('🧠 [PIPE-10]', 'Firestore 저장 호출 완료');
+      await _saveTurnToFirestore([hostLine, systemLine]);
+      await _saveHistoryMessages([hostLine, systemLine]); // 🔧 [히스토리] 병행 저장 (await 보장)
+      _log('🧠 [PIPE-10]', 'Firestore 저장 완료');
     } catch (e) {
       _log('❌ [PIPE-ERR]', 'Relay Error: $e');
     } finally {
@@ -2524,6 +2481,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 
   /// 뒤로가기 시: 빈 방 폭파 or last_message 업데이트 후 나가기
   Future<void> _handleAutoSaveAndExit() async {
+    if (_isExiting) return; // 🔧 [EXIT-GUARD] 이미 종료 처리 중이면 무시
+    _isExiting = true;
     try {
       if (_myHistoryRef != null) {
         // 대화가 한 번도 없었으면 방 문서 삭제 (쓰레기 데이터 방지)
@@ -2599,20 +2558,28 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     final bottomPad = MediaQuery.of(context).viewPadding.bottom == 0
         ? 24.0
         : MediaQuery.of(context).viewPadding.bottom + 8.0;
-    return Container(
-      color: const Color(0xFF121212),
-      child: SafeArea(
-        child: Column(children: [
-          _buildTopBar(),
-          const SizedBox(height: 4),
-          Expanded(
-            child: Stack(children: [
-              _buildChatList(),
-              _buildIdleOverlay(),
-            ]),
-          ),
-          _buildControlArea(bottomPad),
-        ]),
+    return PopScope(
+      // 🔧 [POPSCOPE] 시스템 제스처/하단바 뒤로가기도 AutoSave 경로를 타게 한다.
+      canPop: false,
+      onPopInvokedWithResult: (bool didPop, Object? result) async {
+        if (didPop) return;
+        await _handleAutoSaveAndExit();
+      },
+      child: Container(
+        color: const Color(0xFF121212),
+        child: SafeArea(
+          child: Column(children: [
+            _buildTopBar(),
+            const SizedBox(height: 4),
+            Expanded(
+              child: Stack(children: [
+                _buildChatList(),
+                _buildIdleOverlay(),
+              ]),
+            ),
+            _buildControlArea(bottomPad),
+          ]),
+        ),
       ),
     );
   }
@@ -2949,8 +2916,15 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         : targetRaw;
 
     final targetParts = targetRaw.split(RegExp(r'\n\s*\n'));
-    // 🌱 유저 2턴+ (hasUserTwoParts): Part1 영어+한국어 → 한줄띄기 → Part2 영어(한국어 없음)
-    final bool hasUserTwoParts = role == 'HOST' && targetParts.length >= 2;
+
+    // 🌱 [PART1-HIDE] 2턴+ 유저 버블은 확장문장(Part2)만 화면에 표시한다.
+    //   - Part1(짧은 대답)과 Part1 한국어는 화면에서 숨긴다 (히스토리 저장값은 그대로).
+    //   - 스트리밍 중 Part1만 들어온 구간(아직 \n\n 미도착)은 '...' placeholder만 노출.
+    //   - turnId 우선 판단(스트리밍 깜빡임 방지), 없으면 파트 수로 후방호환.
+    final int turnId = (msg['turnId'] is int) ? msg['turnId'] as int : 0;
+    final bool isExpandTurn =
+        role == 'HOST' && (turnId >= 2 || targetParts.length >= 2);
+
     final String effectiveOriginal = (role == 'HOST_TEMP') ? '' : originalRaw;
 
     return Align(
@@ -2969,26 +2943,13 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           crossAxisAlignment:
               isHost ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
-            if (hasUserTwoParts) ...[
-              // Part1 영어 (짧은 대답)
-              Text(targetParts[0].trim(),
-                  textAlign: isHost ? TextAlign.right : TextAlign.left,
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 16 * _fontScale,
-                      fontWeight: FontWeight.bold)),
-              // Part1 한국어 (Part1 바로 아래)
-              if (_showOriginal && effectiveOriginal.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text(effectiveOriginal,
-                    textAlign: isHost ? TextAlign.right : TextAlign.left,
-                    style: TextStyle(
-                        color: Colors.grey, fontSize: 10 * _fontScale)),
-              ],
-              // 한줄띄기 (Part1 영역과 Part2 영역 분리)
-              const SizedBox(height: 16),
-              // Part2 영어 (확장문장, 한국어 없음)
-              Text(targetParts.sublist(1).join('\n\n').trim(),
+            if (isExpandTurn) ...[
+              // 🌱 [PART1-HIDE] Part2(확장문장)만 표시. Part2 미도착 시 '...' placeholder.
+              //   한국어는 표시하지 않는다 (Part2에는 원래 한국어가 없음).
+              Text(
+                  targetParts.length >= 2
+                      ? targetParts.sublist(1).join('\n\n').trim()
+                      : '...',
                   textAlign: isHost ? TextAlign.right : TextAlign.left,
                   style: TextStyle(
                       color: Colors.white,
@@ -4438,13 +4399,54 @@ Style pool — pick ONE and VARY each time (never repeat the same phrasing twice
 
 NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
 
+[RELEVANCE CHECK — DO THIS FIRST, before any translation or attaching]
+Look at the AI's LAST question in History. Ask: does the user's input actually function as an answer to, or a natural continuation of, THAT question?
+- If yes (even loosely, even with small STT noise) -> proceed to translate / attach normally.
+- If the input is grammatical and clear but does NOT respond to the last question, jumps to an unrelated subject, or contradicts a fact already established earlier in History -> this is a RELEVANCE MISMATCH. Do NOT force it onto the growing sentence and do NOT invent a connection. Output EXACTLY: [RESTATE]
+Calibration: a natural, on-topic tangent that still belongs to the same story is FINE — translate it. Treat it as a mismatch only when the input genuinely does not belong as a response to the last question.
+
+[RESTATE GUARD] — hold the center; never invent content
+Stay anchored to the AI's LAST question and the growing sentence. If you cannot do that safely, ask the user to say it again instead of guessing.
+Output EXACTLY: [RESTATE]  in these cases:
+1. RELEVANCE MISMATCH: The input is clear but does not answer the AI's last question, switches to an unrelated subject, or contradicts established facts (see [RELEVANCE CHECK] above).
+2. OFF-CONTEXT: The user clearly tried to answer, but the utterance does not connect to the AI's last question and cannot be attached to the growing sentence (and it is NOT a correction of a previous answer).
+3. UNRELIABLE PRONUNCIATION: The text is garbled badly enough that the CORE meaning is genuinely uncertain, so translating it would require inventing what the user "probably" meant.
+Do NOT output [RESTATE] when:
+- A minor STT slip exists but the intended meaning is still clearly inferable from context  ->  translate normally (keep tolerating small errors).
+- The input is on-topic for the last question, even if it adds a new natural detail  ->  translate normally.
+- Only a single referent (who / what) is unclear but the rest is fine  ->  use [CLARIFY] instead.
+- The user is explicitly correcting the AI  ->  use [CORRECTION] instead.
+
+[RESTATE CONTRAST EXAMPLES]
+History:
+AI: What made you pick Busan this time?
+Input: I ate kimchi stew yesterday.
+Output: [RESTATE]
+
+History:
+AI: What made you pick Busan this time?
+Input: My favorite movie is about robots.  (clear English, but does not answer the question at all)
+Output: [RESTATE]
+
+History:
+AI: What made you pick Busan this time?
+Input: i wanna see the the sea  (garbled but clearly means "I wanted to see the sea")
+Output:
+Because I wanted to see the ocean.
+
+History:
+AI: What made you pick Busan this time?
+Input: uh the the it muh suh buh uh  (no recoverable meaning)
+Output: [RESTATE]
+
 [RULES]
 - CASE 2 output MUST have the empty line (\n\n) between parts.
 - Output ONLY the translation. No labels, no "Part 1:", no meta-comments.
 - Insert commas (,) after natural phrases for TTS rhythm.
 - If the input is meaningless noise (random symbols, silence markers, or clearly non-speech artifacts), output EXACTLY: [EVAPORATE]
-- Speech recognition may produce garbled or unusual text when the user's pronunciation is unclear. If the input looks garbled but a plausible meaning can be inferred from the conversation context, make your best interpretation and still produce the normal output — do NOT output [RETRY] in this case.
-- Output [RETRY] ONLY when the input is on a completely unrelated topic AND no reasonable interpretation is possible even with context.""";
+- If the input has minor STT errors but the intended meaning is still clearly inferable from context, make your best interpretation and produce the normal output (keep tolerating small errors).
+- If the input is off-context or too garbled to interpret safely (see [RESTATE GUARD]), output EXACTLY: [RESTATE] — never guess and never invent content the user did not say.
+- Output [RETRY] ONLY when the user's answer shows they did not understand the AI's question itself, so re-asking the same thing would not help.""";
 
       final request = http.Request(
         'POST',
@@ -4632,147 +4634,12 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
     required int turnNumber,
     required int maxTurns,
     required String myTarget,
-    String myNative = '',
     String userId = '',
     bool isRetry = false,
-    bool isOpening = false, // 세션 첫 시작 — AI가 먼저 개방형 질문
   }) async* {
     final client = http.Client();
     try {
       final bool isFinalTurn = turnNumber >= maxTurns;
-
-      // ── 개방형 오프닝 질문 프롬프트 ──────────────────────────────────
-      // "예/아니오"로 답할 수 없는 질문만 허용
-      // How / Why / What 으로 시작 → 유저가 자기 이야기를 자연스럽게 꺼냄
-      // 첫 질문 이후 유저 대답부터 문장 확장(expand) 시작
-      if (isOpening) {
-        // ── [STEP 1] 68k.news 실제 헤드라인 1건 선정 (폴백: GPT 즉석 생성) ──
-        // 1순위: 68k.news 일별 캐시에서 뽑은 가벼운 영어 헤드라인
-        // 폴백: 네트워크 실패 또는 필터로 전멸 시 GPT 즉석 생성
-        String newsHeadline = '';
-        try {
-          newsHeadline = (await _pick68kUnaskedTopic(userId)) ?? '';
-        } catch (_) {}
-
-        if (newsHeadline.isEmpty) {
-          final newsClient = http.Client();
-          try {
-            final newsRes = await newsClient
-                .post(
-                  Uri.parse('https://api.openai.com/v1/chat/completions'),
-                  headers: {
-                    'Authorization': 'Bearer $apiKey',
-                    'Content-Type': 'application/json; charset=utf-8',
-                  },
-                  body: jsonEncode({
-                    'model': 'gpt-4o-mini',
-                    'max_tokens': 20,
-                    'temperature': 0.9,
-                    'messages': [
-                      {
-                        'role': 'system',
-                        'content':
-                            'Pick ONE light, everyday small-talk topic for an English conversation warm-up.\n'
-                            'STEP A — Silently choose ONE category at random from this WIDE pool (do not always pick the first ones):\n'
-                            '  food & cooking, weather & seasons, travel & places, hobbies & free time, movies & TV, music, books & reading, sports & exercise, technology & gadgets, pets & animals, fashion & style, health & sleep, work & study life, childhood memories, dreams & future plans, local festivals & events, coffee & cafes, shopping & trends, nature & outdoors, holidays & celebrations.\n'
-                            'STEP B — Inside that ONE category, invent a fresh, specific everyday topic.\n'
-                            'Each time you are called, pick a DIFFERENT category than an obvious default — vary widely across the whole pool.\n'
-                            'FORBIDDEN: politics, war, AI ethics, crime, economics, illness, anything heavy or controversial.\n'
-                            'Output format: ONLY a 4-to-8-word English noun phrase. No verb. No question. No punctuation.\n'
-                            'Examples (note how different the categories are):\n'
-                            'a cozy rainy-day movie marathon\n'
-                            'learning to bake sourdough bread\n'
-                            'a weekend hiking trip in autumn\n'
-                            'an old song stuck in your head\n'
-                            'rearranging furniture in your room\n'
-                            'a childhood snack you suddenly miss',
-                      },
-                      {
-                        'role': 'user',
-                        'content': 'Today\'s topic.',
-                      },
-                    ],
-                  }),
-                )
-                .timeout(const Duration(seconds: 10));
-            if (newsRes.statusCode == 200) {
-              final newsJson = jsonDecode(utf8.decode(newsRes.bodyBytes));
-              final choices = newsJson['choices'] as List?;
-              if (choices != null && choices.isNotEmpty) {
-                newsHeadline =
-                    (choices[0]['message']?['content'] ?? '').toString().trim();
-              }
-            }
-          } catch (_) {
-            newsHeadline = '';
-          } finally {
-            newsClient.close();
-          }
-        }
-
-        // ── [STEP 2] 뉴스 소재 기반 짧은 오프닝 질문 생성 (streaming) ──
-        final String openingSysPrompt = newsHeadline.isNotEmpty
-            ? 'You are starting a casual English conversation as a warm-up.\n'
-              'Everyday topic: "$newsHeadline"\n\n'
-              'Write ONE short, simple question in $myTarget that asks the user for a LIGHT OPINION or GUESS about this topic in general — NOT about the user personally.\n'
-              'Think: "what do people usually...", "why might...", "which would be...", "what do you think happens when...".\n'
-              'Rules:\n'
-              '- ONE sentence only. 8 words or fewer. Simple and easy.\n'
-              '- Ask for a general judgment or guess anyone can answer in 1-3 words.\n'
-              '- Do NOT ask about the user\'s own life, memories, or feelings yet.\n'
-              '- Do NOT demand explanation or a long answer.\n'
-              '- Avoid yes/no and avoid plain "A or B" either/or questions.\n'
-              '- Sound like a curious friend, not a reporter.\n'
-              'Output ONLY the question. Nothing else.'
-            : 'You are starting a casual English conversation as a warm-up.\n'
-              'Write ONE short, simple question in $myTarget that asks the user for a LIGHT OPINION or GUESS about everyday life in general — NOT about the user personally.\n'
-              'Think: "what do people usually...", "why might...", "which would be...", "what do you think happens when...".\n'
-              'Rules:\n'
-              '- ONE sentence only. 8 words or fewer. Simple and easy.\n'
-              '- Ask for a general judgment or guess anyone can answer in 1-3 words.\n'
-              '- Do NOT ask about the user\'s own life, memories, or feelings yet.\n'
-              '- Do NOT demand explanation or a long answer.\n'
-              '- Avoid yes/no and avoid plain "A or B" either/or questions.\n'
-              '- Sound like a curious friend, not an interviewer.\n'
-              'Output ONLY the question. Nothing else.';
-
-        final openReq = http.Request(
-          'POST',
-          Uri.parse('https://api.openai.com/v1/chat/completions'),
-        );
-        openReq.headers.addAll({
-          'Authorization': 'Bearer $apiKey',
-          'Content-Type': 'application/json; charset=utf-8',
-        });
-        openReq.body = jsonEncode({
-          'model': 'gpt-4o-mini',
-          'stream': true,
-          'temperature': 0.7,
-          'max_tokens': 30,
-          'messages': [
-            {'role': 'system', 'content': openingSysPrompt},
-            {'role': 'user', 'content': 'Go.'},
-          ],
-        });
-        final openResp =
-            await openReq.send().timeout(const Duration(seconds: 15));
-        if (openResp.statusCode != 200) {
-          return;
-        }
-        await for (final chunk in openResp.stream
-            .transform(utf8.decoder)
-            .transform(const LineSplitter())) {
-          if (chunk.startsWith('data: ') && chunk != 'data: [DONE]') {
-            try {
-              final delta = jsonDecode(chunk.substring(6))['choices'][0]
-                  ['delta']['content'];
-              if (delta != null) yield delta.toString();
-            } catch (_) {}
-          }
-        }
-        return;
-      }
-      // ─────────────────────────────────────────────────────────────────
 
       final String grammarHint = turnNumber == 1
           ? 'FOCUS: Follow the FEELING or MOTIVATION behind what the user just said.\n'
@@ -4818,6 +4685,10 @@ Read the History carefully. Collect the user's fragmented answers and synthesize
 - The user's lines in History may contain speech recognition errors due to unclear pronunciation. Infer the most likely intended meaning from context — do not quote garbled words literally.
 - Reflect the user's intended meaning. Do not invent new facts beyond reasonable inference.
 - Fluent, natural spoken English — not overly academic.
+- Keep the sentence 25–40 words.
+- Each meaning unit should be speakable in one breath, usually 5–7 words.
+- Use commas or natural connectors to make breath groups clear.
+- Do not create a sentence with one very long clause.
 - Label the sentence with "Expanded Sentence:" prefix.
 
 [OUTPUT FORMAT - STRICT]
@@ -5181,74 +5052,6 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     final unasked = topics.where((t) => !asked.contains(t)).toList();
     if (unasked.isEmpty) {
       await prefs.remove(askedKey); // 전부 소진 → 이력 초기화
-      await prefs.setStringList(askedKey, [topics.first]);
-      return topics.first;
-    }
-    final pick = unasked.first;
-    asked.add(pick);
-    await prefs.setStringList(askedKey, asked.toList());
-    return pick;
-  }
-
-  // ==================================================================
-  // 📦 [Box 7-1-E-0b] 68k.news 헤드라인 일별 캐시 + 유저별 중복 방지
-  // ------------------------------------------------------------------
-  // 섹션: technology / entertainment / science / health (가벼운 것만)
-  // heavy-topic 영어 필터, 길이 필터 (15~120자), 하루 1회 캐시
-  // 폴백용 KBS(_pickUnaskedTopic)와 키 충돌 없이 asked_68k_$userId 사용
-  // ==================================================================
-  static final RegExp _heavy68kRe = RegExp(
-    r'trump|biden|war|shooting|shoot|killed|dead|death|die|crash|attack|missile|strike|'
-    r'ICE|arrest|charged|lawsuit|court|judge|protest|crime|police|explosion|rocket|'
-    r'hostage|hunger strike|blockade|election|senate|congress|tariff|virus|outbreak',
-    caseSensitive: false,
-  );
-
-  static Future<List<String>> _fetch68kNewsTopics() async {
-    final prefs = await SharedPreferences.getInstance();
-    final today = DateTime.now().toIso8601String().substring(0, 10);
-    final cacheKey = 'news68k_$today';
-    final cached = prefs.getStringList(cacheKey);
-    if (cached != null && cached.isNotEmpty) return cached;
-
-    final results = <String>[];
-    for (final section in ['technology', 'entertainment', 'science', 'health']) {
-      try {
-        final res = await http
-            .get(Uri.parse('https://68k.news/index.php?section=$section&loc=US'))
-            .timeout(const Duration(seconds: 8));
-        if (res.statusCode != 200) continue;
-        final body = utf8.decode(res.bodyBytes);
-        final re = RegExp(r'<h3><font[^>]*><a[^>]*>([^<]+)</a>', dotAll: true);
-        for (final m in re.allMatches(body).take(10)) {
-          String title = m.group(1)?.trim() ?? '';
-          if (title.contains(' - ')) {
-            title = title.substring(0, title.lastIndexOf(' - ')).trim();
-          }
-          if (title.length < 15 || title.length > 120) continue;
-          if (_heavy68kRe.hasMatch(title)) continue;
-          results.add(title);
-        }
-      } catch (_) {}
-    }
-    if (results.isNotEmpty) await prefs.setStringList(cacheKey, results);
-    return results;
-  }
-
-  static Future<String?> _pick68kUnaskedTopic(String userId) async {
-    if (userId.isEmpty) {
-      final topics = await _fetch68kNewsTopics();
-      return topics.isNotEmpty ? topics.first : null;
-    }
-    final prefs = await SharedPreferences.getInstance();
-    final askedKey = 'asked_68k_$userId';
-    final asked = Set<String>.from(prefs.getStringList(askedKey) ?? []);
-    final topics = await _fetch68kNewsTopics();
-    if (topics.isEmpty) return null;
-
-    final unasked = topics.where((t) => !asked.contains(t)).toList();
-    if (unasked.isEmpty) {
-      await prefs.remove(askedKey);
       await prefs.setStringList(askedKey, [topics.first]);
       return topics.first;
     }

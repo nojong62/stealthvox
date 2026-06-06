@@ -1,0 +1,12 @@
+만약 나중에 push된 상태에서 이 수정을 되돌려야 하면, git reset --hard(히스토리 덮어쓰기, force push 필요) 대신 git revert 773e9c9(해당 커밋을 취소하는 새 커밋 생성)가 안전합니다.
+
+왼쪽 7자리가 커밋 해시입니다. 첨부 결과에서도 커밋 완료 메시지에 [feat/stepexpand-exit-guard-popscope 773e9c9] 형태로 찍혔습니다.
+
+# 최근 커밋 목록 (한 줄 요약)
+git log --oneline (엔터)
+
+# 예시 출력
+16c364e Merge feat/stepexpand-exit-guard-popscope
+773e9c9 feat: stepexpand 종료 경로 히스토리 저장 보장
+ba9f901 before: stepexpand 수정 전
+...

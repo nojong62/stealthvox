@@ -43,23 +43,54 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
   Set<String> _selectedDocIds = {};
 
   // ── Idle Timeout (무반응 과금 정지, History List: 자동 이동 없음) ──────────
+  // 🔧 틱 방식: 1초마다 활동 여부 확인. 키퍼 재생/튜터링/녹음 중엔 카운터 0 유지.
   Timer? _idlePauseTimer;
   bool _isIdlePaused = false;
+  int _idleElapsedSec = 0;
+
+  // 유저나 AI가 작동 중인지 판단 (활동 중이면 idle 누적 안 함)
+  bool get _isSystemBusy {
+    return _keeperTutoringLoading ||
+        _keeperIsRecording ||
+        _isPlayingKeeper ||
+        _keeperIsPlayingCorrected;
+  }
 
   void _resetIdleTimer() {
-    _idlePauseTimer?.cancel();
+    _idleElapsedSec = 0;
     if (_isIdlePaused) {
       _isIdlePaused = false;
       if (mounted) setState(() {});
       BillingTicker.instance.resume();
       BillingTicker.instance.logMode('history_list');
     }
-    _idlePauseTimer = Timer(const Duration(seconds: 30), _handleIdlePause);
+    _idlePauseTimer?.cancel();
+    _idlePauseTimer =
+        Timer.periodic(const Duration(seconds: 1), (_) => _idleTick());
+  }
+
+  void _idleTick() {
+    if (!mounted) return;
+    // 🔒 [오토포즈 가드] 최상단 active route가 아니면(다른 페이지가 위에) idle 누적 금지
+    if (ModalRoute.of(context)?.isCurrent == false) {
+      _idleElapsedSec = 0;
+      return;
+    }
+    if (_isIdlePaused) return;
+    if (_isSystemBusy) {
+      _idleElapsedSec = 0;
+      return;
+    }
+    _idleElapsedSec++;
+    if (_idleElapsedSec >= 60) {
+      _handleIdlePause();
+    }
   }
 
   void _handleIdlePause() {
     if (!mounted || _isIdlePaused) return;
     _isIdlePaused = true;
+    _idleElapsedSec = 0;
     BillingTicker.instance.pause();
     if (mounted) setState(() {});
   }
@@ -67,6 +98,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
   void _clearIdleTimers() {
     _idlePauseTimer?.cancel();
     _idlePauseTimer = null;
+    _idleElapsedSec = 0;
   }
 
   Widget _buildIdleBanner() => const SizedBox.shrink();
@@ -266,12 +298,36 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
           .orderBy('created_at', descending: true)
           .snapshots(),
       builder: (context, snapshot) {
+        // 🔍 [HIST-DBG] 임시 진단 (확인 후 git restore로 제거)
+        debugPrint(
+            '[HIST-DBG] hasError=${snapshot.hasError} hasData=${snapshot.hasData} err=${snapshot.error}');
         if (!snapshot.hasData) {
           return const Center(
               child: CircularProgressIndicator(color: Colors.amber));
         }
 
         final allDocs = snapshot.data!.docs;
+
+        // 🔍 [HIST-DBG] allDocs 진단
+        final _dbgExpandAll = allDocs.where((d) {
+          final rn =
+              ((d.data() as Map<String, dynamic>)['room_name'] ?? '').toString();
+          return _isExpandRoom(rn);
+        }).toList();
+        debugPrint(
+            '[HIST-DBG] allDocs=${allDocs.length} step_expand_in_all=${_dbgExpandAll.length}');
+        for (final d in _dbgExpandAll) {
+          final data = d.data() as Map<String, dynamic>;
+          final caVal = data['created_at'];
+          final ipVal = data['is_pinned'];
+          final lmSnip = data['last_message']?.toString().replaceAll('\n', ' ') ?? 'null';
+          final lmPreview = lmSnip.length > 30 ? lmSnip.substring(0, 30) : lmSnip;
+          debugPrint(
+              '[HIST-DBG] expand id=${d.id} room_name=${data['room_name']} '
+              'created_at=$caVal (${caVal?.runtimeType}) '
+              'is_pinned=$ipVal (${ipVal?.runtimeType}) '
+              'last_message=$lmPreview');
+        }
 
         final filteredDocs = allDocs.where((doc) {
           Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
@@ -282,6 +338,15 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
           if (_selectedFilter == 'Expand') return _isExpandRoom(rn);
           return rn.contains(_selectedFilter);
         }).toList();
+
+        // 🔍 [HIST-DBG] filteredDocs 진단
+        final _dbgExpandFiltered = filteredDocs.where((d) {
+          final rn =
+              ((d.data() as Map<String, dynamic>)['room_name'] ?? '').toString();
+          return _isExpandRoom(rn);
+        }).toList();
+        debugPrint(
+            '[HIST-DBG] filteredDocs=${filteredDocs.length} step_expand_in_filtered=${_dbgExpandFiltered.length} selectedFilter=$_selectedFilter');
 
         if (filteredDocs.isEmpty) {
           return Center(
@@ -1815,6 +1880,6 @@ AI 발음을 닮아가는 정밀 훈련입니다.
 
 ────────────────────────
 ⏸️ Auto Pause — 자동 과금 보호
-30초 이상 반응이 없으면 자동으로 일시정지되어 과금이 멈춥니다.
+60초 이상 반응이 없으면 자동으로 일시정지되어 과금이 멈춥니다.
 다시 말을 시작하거나 화면을 터치하면 자동으로 재개됩니다.
 자리를 비워도 요금 걱정 없이 안심하세요.''';

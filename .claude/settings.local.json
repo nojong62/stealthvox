@@ -139,7 +139,16 @@
       "Bash(curl *)",
       "PowerShell(\\(Get-Command adb -ErrorAction SilentlyContinue\\).Source; & \"$env:LOCALAPPDATA\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\" version 2>$null; & \"C:\\\\Users\\\\u\\\\AppData\\\\Local\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\" version 2>$null)",
       "PowerShell(& \"C:\\\\Users\\\\u\\\\AppData\\\\Local\\\\Android\\\\Sdk\\\\platform-tools\\\\adb.exe\" install -r \"F:\\\\flutter_project\\\\stealth_vox\\\\build\\\\app\\\\outputs\\\\flutter-apk\\\\app-release.apk\")",
-      "Bash(Read \"C:\\\\Users\\\\u\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\F--flutter-project-stealth-vox\\\\1f76e5e2-3d75-4576-afbf-0ab047adb2f1\\\\tasks\\\\bzmfwyk84.output\")"
+      "Bash(Read \"C:\\\\Users\\\\u\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\F--flutter-project-stealth-vox\\\\1f76e5e2-3d75-4576-afbf-0ab047adb2f1\\\\tasks\\\\bzmfwyk84.output\")",
+      "Bash(Get-Date *)",
+      "Bash(firebase functions:list)",
+      "Bash(firebase functions:list --project stealth-vox-3p3rq3)",
+      "PowerShell(Compare-Object *)",
+      "PowerShell(node --check \"F:\\\\flutter_project\\\\stealth_vox\\\\firebase\\\\functions\\\\index.js\")",
+      "Bash(node --check index.js)",
+      "Bash(grep -vE \"^\\\\s*//\" index.js)",
+      "Bash(findstr /I \"routine_mode_duo\\\\|routine_mode_clone\\\\|routine_mode_roleplay\\\\|routine_mode_step_expand\")",
+      "Bash(findstr \" error \")"
     ]
   }
 }

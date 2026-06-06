@@ -47,67 +47,80 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-대상 파일: routine_mode_step_expand.dart (이 파일만. chat_history_master.dart·chat_history_list_master.dart 수정 금지)
-의도: 표시 로직·저장 payload·TTS·Box 7은 그대로 두고, 히스토리로 가는 자료가 어느 종료 경로에서도 누락 없이 입력되도록 보장한다. (1) 일반 턴 저장을 await 처리, (2) 안드로이드 시스템 뒤로가기도 저장을 거치도록 PopScope 추가, (3) 이중 종료 방지 가드.
-수정 1 — 이중 호출 방지 플래그 선언
-클래스 상태 변수 선언부(다른 bool _...= false; 멤버들이 모여 있는 곳, 예: _isConversationActive 근처)에 아래 한 줄을 추가하라.
-dart  bool _isExiting = false; // 🔧 [EXIT-GUARD] PopScope+버튼 이중 종료 방지
-수정 2 — _handleAutoSaveAndExit 진입부에 가드 추가 (약 2482행)
-삭제 대상 (1줄):
+[작업 대상] lib/custom_code/widgets/ 아래 4개 모드 파일.
+[목적] 저장 시점에 native==target(단일언어)이면 original_text를 빈 문자열로 저장.
+       → 히스토리 화면(무수정)의 기존 "비어있으면 안 그림" 로직이 알아서 타겟만 표시.
+[성격] 앞으로 저장되는 데이터에만 적용(소급 없음). 과거 문서는 건드리지 않음.
+[금지] 히스토리 화면 파일, TTS/Box 7/Brain, 그 외 라인 변경 금지.
+       각 파일에서 저장 choke point의 'original_text' 쓰기 한 줄만 교체.
+       적용 전 grep -n 으로 앵커 확인, 적용 후 flutter analyze.
 
-2482행:   Future<void> _handleAutoSaveAndExit() async {
+────────────────────────────────────────────────────────
+■ 1) routine_mode_duo.dart  (_saveHistoryMessage 내부)
+────────────────────────────────────────────────────────
+[찾기] grep -n "'original_text': original," lib/custom_code/widgets/routine_mode_duo.dart
+[삭제] 약 862번 줄, 아래 한 줄 (앞 공백 8칸)
 
-교체될 코드 (전체):
-dart  Future<void> _handleAutoSaveAndExit() async {
-    if (_isExiting) return; // 🔧 [EXIT-GUARD] 이미 종료 처리 중이면 무시
-    _isExiting = true;
-이유: 화면 버튼(2586행)과 PopScope가 동시에 이 함수를 호출하면 저장·종료가 두 번 실행될 수 있다. 진입 즉시 플래그로 차단한다. (try 블록은 다음 줄부터 그대로 이어진다.)
-수정 3 — build()를 PopScope로 감싸기 (약 2554~2573행)
-삭제 대상 범위:
+        'original_text': original,
 
-시작 2554행:   Widget build(BuildContext context) {
-끝 2573행: 이 build 메서드의 닫는 } (즉 return Container(...) 전체와 그 닫는 중괄호)
+[교체 블록 전체]
 
-교체될 코드 (전체):
-dart  Widget build(BuildContext context) {
-    final bottomPad = MediaQuery.of(context).viewPadding.bottom == 0
-        ? 24.0
-        : MediaQuery.of(context).viewPadding.bottom + 8.0;
-    return PopScope(
-      // 🔧 [POPSCOPE] 시스템 제스처/하단바 뒤로가기도 AutoSave 경로를 타게 한다.
-      canPop: false,
-      onPopInvokedWithResult: (bool didPop, Object? result) async {
-        if (didPop) return;
-        await _handleAutoSaveAndExit();
-      },
-      child: Container(
-        color: const Color(0xFF121212),
-        child: SafeArea(
-          child: Column(children: [
-            _buildTopBar(),
-            const SizedBox(height: 4),
-            Expanded(
-              child: Stack(children: [
-                _buildChatList(),
-                _buildIdleOverlay(),
-              ]),
-            ),
-            _buildControlArea(bottomPad),
-          ]),
-        ),
-      ),
-    );
-  }
-이유: 현재 build는 Container 루트라 시스템 뒤로가기가 저장을 거치지 않는다. canPop: false + onPopInvokedWithResult로 시스템 pop을 가로채 _handleAutoSaveAndExit를 태운다. (가드 덕분에 화면 버튼으로 이미 나가는 중이면 재실행되지 않는다.)
-참고: Flutter 버전이 3.22 미만이라 onPopInvokedWithResult에서 빌드 에러가 나면, 그 줄을 onPopInvoked: (bool didPop) async { 로 바꾸고 시그니처에서 , Object? result를 제거하라. 나머지는 동일하다.
-수정 4 — 일반 턴 저장 await 보강 (약 2325~2327행)
-삭제 대상 (3줄):
+        'original_text': (FFAppState().nativeLang.isNotEmpty &&
+                FFAppState().nativeLang == FFAppState().targetLang)
+            ? ''
+            : original,
 
-시작 2325행:       _saveTurnToFirestore([hostLine, systemLine]);
-끝 2327행:       _log('🧠 [PIPE-10]', 'Firestore 저장 호출 완료');
+────────────────────────────────────────────────────────
+■ 2) routine_mode_clone.dart  (_saveHistoryMessages 내부)
+────────────────────────────────────────────────────────
+[찾기] grep -n "'original_text': (line\['original_text'\]" lib/custom_code/widgets/routine_mode_clone.dart
+[삭제] 약 2345번 줄, 아래 한 줄 (앞 공백 10칸)
 
-교체될 코드 (전체):
-dart      await _saveTurnToFirestore([hostLine, systemLine]);
-      await _saveHistoryMessages([hostLine, systemLine]); // 🔧 [히스토리] 병행 저장 (await 보장)
-      _log('🧠 [PIPE-10]', 'Firestore 저장 완료');
-이유: await가 없으면 마지막 턴 직후 화면 이탈 시 messages·last_message 쓰기가 미완료로 끊긴다. 5턴 완료 경로(2038~2039행)와 동일하게 순차 저장을 보장한다.
+          'original_text': (line['original_text'] ?? '').toString(),
+
+[교체 블록 전체]
+
+          'original_text': (FFAppState().nativeLang.isNotEmpty &&
+                  FFAppState().nativeLang == FFAppState().targetLang)
+              ? ''
+              : (line['original_text'] ?? '').toString(),
+
+────────────────────────────────────────────────────────
+■ 3) routine_mode_roleplay.dart  (_saveHistoryMessages 내부)
+────────────────────────────────────────────────────────
+[찾기] grep -n "'original_text': (line\['original_text'\]" lib/custom_code/widgets/routine_mode_roleplay.dart
+[삭제] 약 1732번 줄, 아래 한 줄 (앞 공백 10칸)
+
+          'original_text': (line['original_text'] ?? '').toString(),
+
+[교체 블록 전체]
+
+          'original_text': (FFAppState().nativeLang.isNotEmpty &&
+                  FFAppState().nativeLang == FFAppState().targetLang)
+              ? ''
+              : (line['original_text'] ?? '').toString(),
+
+────────────────────────────────────────────────────────
+■ 4) routine_mode_step_expand.dart  (_saveHistoryMessages 내부)
+────────────────────────────────────────────────────────
+[찾기] grep -n "'original_text': (line\['original_text'\]" lib/custom_code/widgets/routine_mode_step_expand.dart
+[삭제] 약 2474번 줄, 아래 한 줄 (앞 공백 10칸)
+      (주의: 바로 아래 'expanded_sentence' 줄은 건드리지 말 것)
+
+          'original_text': (line['original_text'] ?? '').toString(),
+
+[교체 블록 전체]
+
+          'original_text': (FFAppState().nativeLang.isNotEmpty &&
+                  FFAppState().nativeLang == FFAppState().targetLang)
+              ? ''
+              : (line['original_text'] ?? '').toString(),
+
+────────────────────────────────────────────────────────
+■ 검증
+────────────────────────────────────────────────────────
+grep -c "original_text': (FFAppState" lib/custom_code/widgets/routine_mode_duo.dart         # 1
+grep -c "original_text': (FFAppState" lib/custom_code/widgets/routine_mode_clone.dart       # 1
+grep -c "original_text': (FFAppState" lib/custom_code/widgets/routine_mode_roleplay.dart    # 1
+grep -c "original_text': (FFAppState" lib/custom_code/widgets/routine_mode_step_expand.dart # 1
+flutter analyze   # 0 error
