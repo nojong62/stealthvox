@@ -841,8 +841,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
           .doc();
       await _myHistoryRef!.set({
         'created_at': FieldValue.serverTimestamp(),
+        'last_active': FieldValue.serverTimestamp(),
+        'last_message_time': FieldValue.serverTimestamp(),
         'room_name': "Duo Connect Mode",
-        'is_pinned': true,
+        'is_pinned': false,
         'msg_count': 0
       });
     }
@@ -859,6 +861,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
         'translated_text': target,
         'original_text': original,
         'created_at': FieldValue.serverTimestamp()
+      });
+      await _myHistoryRef!.update({
+        'last_message': target,
+        'last_active': FieldValue.serverTimestamp(),
+        'last_message_time': FieldValue.serverTimestamp(),
+        'msg_count': FieldValue.increment(1),
       });
     } catch (e) {}
   }
@@ -1093,7 +1101,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
         await _myHistoryRef!.update({
           'last_message': lastText.isNotEmpty ? lastText : "대화 기록 저장",
           'last_message_time': FieldValue.serverTimestamp(),
-          'msg_count': _localMessages.length,
           'last_active': FieldValue.serverTimestamp()
         });
       }
