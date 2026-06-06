@@ -47,80 +47,44 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-[작업 대상] lib/custom_code/widgets/ 아래 4개 모드 파일.
-[목적] 저장 시점에 native==target(단일언어)이면 original_text를 빈 문자열로 저장.
-       → 히스토리 화면(무수정)의 기존 "비어있으면 안 그림" 로직이 알아서 타겟만 표시.
-[성격] 앞으로 저장되는 데이터에만 적용(소급 없음). 과거 문서는 건드리지 않음.
-[금지] 히스토리 화면 파일, TTS/Box 7/Brain, 그 외 라인 변경 금지.
-       각 파일에서 저장 choke point의 'original_text' 쓰기 한 줄만 교체.
-       적용 전 grep -n 으로 앵커 확인, 적용 후 flutter analyze.
+요약본 주입은 그대로 두고(이미 있음), 하드코딩 예시 약화 + 온도 0.45, 딱 2곳만 수정합니다. 둘 다 routine_mode_clone.dart의 generateCloneOpener 함수(Box 7-1-E2) 안입니다.
 
-────────────────────────────────────────────────────────
-■ 1) routine_mode_duo.dart  (_saveHistoryMessage 내부)
-────────────────────────────────────────────────────────
-[찾기] grep -n "'original_text': original," lib/custom_code/widgets/routine_mode_duo.dart
-[삭제] 약 862번 줄, 아래 한 줄 (앞 공백 8칸)
+수정 ① — sysPrompt 예시 bullet 약화
+삭제 범위
 
-        'original_text': original,
+시작: 4173번 줄       final sysPrompt = """$safePersona$memoryLine
+끝: 4190번 줄 Output: ONE sentence in $targetLang only.""";
 
-[교체 블록 전체]
+교체할 코드 (전체):
+dart      final sysPrompt = """$safePersona$memoryLine
 
-        'original_text': (FFAppState().nativeLang.isNotEmpty &&
-                FFAppState().nativeLang == FFAppState().targetLang)
-            ? ''
-            : original,
+[YOUR TASK]
+Based on the persona above, identify WHO you are to the user (parent, sibling, close friend, partner, coworker, etc.) and open the conversation with something real that reflects that relationship — NOT a generic greeting.
 
-────────────────────────────────────────────────────────
-■ 2) routine_mode_clone.dart  (_saveHistoryMessages 내부)
-────────────────────────────────────────────────────────
-[찾기] grep -n "'original_text': (line\['original_text'\]" lib/custom_code/widgets/routine_mode_clone.dart
-[삭제] 약 2345번 줄, 아래 한 줄 (앞 공백 10칸)
+[RULES]
+- Speak ONLY in $targetLang. Do NOT use Korean or any other language.
+- ONE sentence only. Under 10 words.
+- Match the persona's exact tone, energy, and vocabulary.
+- NEVER open with a bare greeting such as "Hello", "Hi", "Hey", or "How have you been?".
+- If [MEMORY] exists, build the opening line DIRECTLY on one concrete detail from it — pick up where the last conversation left off instead of starting fresh.
+- If no memory exists, say something situational that only your specific relationship to the user would naturally produce (a short remark or question).
 
-          'original_text': (line['original_text'] ?? '').toString(),
+Output: ONE sentence in $targetLang only.""";
 
-[교체 블록 전체]
+핵심: · Parent/elder: "Did you eat yet?"… 등 4줄짜리 구체 예시 묶음을 통째로 제거했습니다. 이게 반복의 실제 원인이었습니다. 대신 메모리가 있으면 그 디테일을 직접 이어받으라는 지시를 강화했습니다.
 
-          'original_text': (FFAppState().nativeLang.isNotEmpty &&
-                  FFAppState().nativeLang == FFAppState().targetLang)
-              ? ''
-              : (line['original_text'] ?? '').toString(),
 
-────────────────────────────────────────────────────────
-■ 3) routine_mode_roleplay.dart  (_saveHistoryMessages 내부)
-────────────────────────────────────────────────────────
-[찾기] grep -n "'original_text': (line\['original_text'\]" lib/custom_code/widgets/routine_mode_roleplay.dart
-[삭제] 약 1732번 줄, 아래 한 줄 (앞 공백 10칸)
+수정 ② — 온도 0.8 → 0.45
+대상: 4203번 줄
+dart        'temperature': 0.8,
+교체할 코드:
+dart        'temperature': 0.45,
 
-          'original_text': (line['original_text'] ?? '').toString(),
+검증 (PowerShell, F:\flutter_project\stealth_vox)
+powershell# 예시 제거 확인 → 0 이 나와야 함
+grep -c "Did you eat yet" lib/custom_code/widgets/routine_mode_clone.dart
 
-[교체 블록 전체]
+# 온도 변경 확인 → 1 이 나와야 함
+grep -c "'temperature': 0.45" lib/custom_code/widgets/routine_mode_clone.dart
 
-          'original_text': (FFAppState().nativeLang.isNotEmpty &&
-                  FFAppState().nativeLang == FFAppState().targetLang)
-              ? ''
-              : (line['original_text'] ?? '').toString(),
-
-────────────────────────────────────────────────────────
-■ 4) routine_mode_step_expand.dart  (_saveHistoryMessages 내부)
-────────────────────────────────────────────────────────
-[찾기] grep -n "'original_text': (line\['original_text'\]" lib/custom_code/widgets/routine_mode_step_expand.dart
-[삭제] 약 2474번 줄, 아래 한 줄 (앞 공백 10칸)
-      (주의: 바로 아래 'expanded_sentence' 줄은 건드리지 말 것)
-
-          'original_text': (line['original_text'] ?? '').toString(),
-
-[교체 블록 전체]
-
-          'original_text': (FFAppState().nativeLang.isNotEmpty &&
-                  FFAppState().nativeLang == FFAppState().targetLang)
-              ? ''
-              : (line['original_text'] ?? '').toString(),
-
-────────────────────────────────────────────────────────
-■ 검증
-────────────────────────────────────────────────────────
-grep -c "original_text': (FFAppState" lib/custom_code/widgets/routine_mode_duo.dart         # 1
-grep -c "original_text': (FFAppState" lib/custom_code/widgets/routine_mode_clone.dart       # 1
-grep -c "original_text': (FFAppState" lib/custom_code/widgets/routine_mode_roleplay.dart    # 1
-grep -c "original_text': (FFAppState" lib/custom_code/widgets/routine_mode_step_expand.dart # 1
-flutter analyze   # 0 error
+flutter analyze

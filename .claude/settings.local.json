@@ -148,7 +148,9 @@
       "Bash(node --check index.js)",
       "Bash(grep -vE \"^\\\\s*//\" index.js)",
       "Bash(findstr /I \"routine_mode_duo\\\\|routine_mode_clone\\\\|routine_mode_roleplay\\\\|routine_mode_step_expand\")",
-      "Bash(findstr \" error \")"
+      "Bash(findstr \" error \")",
+      "Bash(Remove-Item *)",
+      "Bash(Start-Sleep -Seconds 15)"
     ]
   }
 }
