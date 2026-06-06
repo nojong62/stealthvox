@@ -2326,6 +2326,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                     fontWeight: FontWeight.bold,
                     height: 1.4)),
             if (_showOriginal &&
+                !(FFAppState().nativeLang.isNotEmpty &&
+                    FFAppState().nativeLang == FFAppState().targetLang) &&
                 !isThinking &&
                 msg['original'] != null &&
                 msg['original'].toString().isNotEmpty) ...[

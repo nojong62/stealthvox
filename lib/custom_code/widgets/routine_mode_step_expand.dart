@@ -2020,19 +2020,13 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
             ? ((_localMessages[hostIndex]['target']) ?? userTargetText)
                 .toString()
             : userTargetText;
-        final List<String> hostParts = hostFullTarget.split(RegExp(r'\n\s*\n'));
-        final String hostExpanded = hostParts.length >= 2
-            ? hostParts.sublist(1).join('\n\n').trim()
-            : '';
-        final hostLineOnly = {
-          'role': 'HOST',
-          'original_text': _hostValid
+        final String hostExpanded = _extractExpandedSentence(hostFullTarget);
+        final hostLineOnly = _buildHostHistoryLine(
+          originalText: _hostValid
               ? ((_localMessages[hostIndex]['original']) ?? '').toString()
               : '',
-          'translated_text': userTargetText,
-          // 🔧 [PRACTICE-FIX] expanded_sentence 별도 필드 저장 (옵션 B, 후방호환)
-          if (hostExpanded.isNotEmpty) 'expanded_sentence': hostExpanded,
-        };
+          translatedText: hostFullTarget,
+        );
         // 🔧 [PRACTICE-FIX] 순차 await로 race 차단
         //   1) sessions 저장 (이 안에서 session_ref 백링크가 _myHistoryRef에 박힘)
         //   2) chat_history 저장 (이 안에서 _ensureHistoryRef가 _myHistoryRef를 보장)
@@ -2313,11 +2307,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       final String _hostOriginal = hostIndex < _localMessages.length
           ? ((_localMessages[hostIndex]['original']) ?? '').toString()
           : '';
-      final hostLine = {
-        'role': 'HOST',
-        'original_text': _hostOriginal,
-        'translated_text': userTargetText,
-      };
+      final hostLine = _buildHostHistoryLine(
+        originalText: _hostOriginal,
+        translatedText: userTargetText,
+      );
       final systemLine = {
         'role': 'SYSTEM',
         'original_text': aiOriginalText.trim(),
@@ -2340,6 +2333,26 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     }
   }
 
+  // Step Expand HOST 저장 payload를 sessions/chat_history에서 동일하게 유지한다.
+  String _extractExpandedSentence(String translatedText) {
+    final parts = translatedText.split(RegExp(r'\n\s*\n'));
+    if (parts.length < 2) return '';
+    return parts.sublist(1).join('\n\n').trim();
+  }
+
+  Map<String, dynamic> _buildHostHistoryLine({
+    required String originalText,
+    required String translatedText,
+  }) {
+    final expandedSentence = _extractExpandedSentence(translatedText);
+    return {
+      'role': 'HOST',
+      'original_text': originalText,
+      'translated_text': translatedText,
+      if (expandedSentence.isNotEmpty) 'expanded_sentence': expandedSentence,
+    };
+  }
+
   /// 한 턴(유저+AI)의 ChatLine 2개를 Firestore에 저장
   /// - _sessionDocId가 null이면 새 세션 생성
   /// - 있으면 기존 세션의 transcript에 arrayUnion으로 append
@@ -2355,6 +2368,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       final uid = user.uid;
       final firestore = FirebaseFirestore.instance;
       _log('💾 [SAVE-02]', 'uid=$uid, sessionDocId=$_sessionDocId');
+
+      await _ensureHistoryRef();
 
       if (_sessionDocId == null) {
         // 첫 대화 → 새 세션 문서 생성
@@ -2426,9 +2441,12 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           .doc();
       await _myHistoryRef!.set({
         'created_at': FieldValue.serverTimestamp(),
+        'last_active': FieldValue.serverTimestamp(),
         'room_name': "Step.Ex Mode",
         'mode': 'step_expand',
         'is_pinned': false,
+        'has_practice': false,
+        'last_message': '',
         'msg_count': 0
       });
       _log('📚 [HIST-NEW]', 'chat_history 방 생성: ${_myHistoryRef!.id}');
@@ -2466,11 +2484,18 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           .map((l) => (l['translated_text'] ?? '').toString().trim())
           .lastWhere((t) => t.isNotEmpty, orElse: () => '');
       if (lastTranslated.isNotEmpty) {
-        await _myHistoryRef!.update({
+        final updateMap = <String, dynamic>{
           'msg_count': FieldValue.increment(chatLines.length),
           'last_message': lastTranslated,
           'last_active': FieldValue.serverTimestamp(),
-        });
+        };
+        final expandedSentence = chatLines
+            .map((l) => (l['expanded_sentence'] ?? '').toString().trim())
+            .lastWhere((t) => t.isNotEmpty, orElse: () => '');
+        if (expandedSentence.isNotEmpty) {
+          updateMap['expanded_sentence'] = expandedSentence;
+        }
+        await _myHistoryRef!.update(updateMap);
         _log('💾 [HIST-UPD]',
             'msg_count+${chatLines.length}, last="$lastTranslated"');
       }
@@ -2962,7 +2987,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
                       color: Colors.white,
                       fontSize: 16 * _fontScale,
                       fontWeight: FontWeight.bold)),
-              if (_showOriginal && effectiveOriginal.isNotEmpty) ...[
+              if (_showOriginal &&
+                  !(FFAppState().nativeLang.isNotEmpty &&
+                      FFAppState().nativeLang == FFAppState().targetLang) &&
+                  effectiveOriginal.isNotEmpty) ...[
                 const SizedBox(height: 6),
                 Text(effectiveOriginal,
                     textAlign: isHost ? TextAlign.right : TextAlign.left,
