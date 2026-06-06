@@ -1274,12 +1274,14 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
                   const Text("내 언어와 통역받을 언어를 선택하세요.",
                       style: TextStyle(color: Colors.white54, fontSize: 13)),
                   const SizedBox(height: 24),
-                  dropdown("ORIGIN (내 언어)", native, const Color(0xFF93C5FD),
+                  dropdown("ORIGIN (자신이 사용하는 언어)", native,
+                      const Color(0xFF93C5FD),
                       (val) {
                     if (val != null) setState(() => FFAppState().nativeLang = val);
                   }),
                   const SizedBox(height: 18),
-                  dropdown("TARGET (통역받을 언어)", target, const Color(0xFF4ADE80),
+                  dropdown("TARGET (내가 듣고 싶은 언어 혹은 배우고 싶은 언어)", target,
+                      const Color(0xFF4ADE80),
                       (val) {
                     if (val != null) setState(() => FFAppState().targetLang = val);
                   }),
