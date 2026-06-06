@@ -55,12 +55,18 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   String _openAiKey = "";
   bool _isConversationActive = false;
 
+  // 🆕 [게스트 언어 오버레이] 초대 게스트(회원·비회원)가 입장 전 언어쌍 선택
+  bool _showLangOverlay = false;
+  String? _pendingJoinRoomId;
+
   // 🆕 [PTT] Duo 무전기 상태기계
   // idle: 대기 / recording: 녹음 중 / processing: STT·번역 중 / playing: TTS 재생 중 / cooldown: 재생 후 짧은 잠금
   String _duoState = 'idle';
   // 🆕 [과금정책] 게스트 입장 후에만 과금 시작 (호스트 대기 중 정지)
   bool _billingStarted = false;
   void _startDuoBilling() {
+    // 🆕 [과금정책] 게스트(회원·비회원 무관)는 차감 안 함 — 초대한 호스트만 과금
+    if (!_amIHost) return;
     if (_billingStarted) return;
     _billingStarted = true;
     BillingTicker.instance.resume();
@@ -256,8 +262,17 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
                   : null);
       if (pendingRoomId != null) {
         debugPrint(
-            '[Duo] initState — auto joining as guest, roomId: $pendingRoomId');
-        _joinAsGuest(pendingRoomId);
+            '[Duo] initState — guest entry, show lang overlay: $pendingRoomId');
+        // 🆕 입장 전 언어 선택 오버레이 — 기본값 보정 후 표시
+        if (FFAppState().nativeLang.isEmpty) FFAppState().nativeLang = 'Korean';
+        if (FFAppState().targetLang.isEmpty)
+          FFAppState().targetLang = 'English';
+        if (mounted) {
+          setState(() {
+            _pendingJoinRoomId = pendingRoomId;
+            _showLangOverlay = true;
+          });
+        }
       }
       if (mounted) _resetIdleTimer();
     });
@@ -1133,7 +1148,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
           if (didPop) return;
           await _handleAutoSaveAndExit();
         },
-        child: Container(
+        child: Stack(children: [
+          Container(
           width: widget.width,
           height: widget.height,
           color: const Color(0xFF121212),
@@ -1174,7 +1190,129 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
               ],
             ),
           ),
-        ));
+          ),
+          if (_showLangOverlay) _buildGuestLangOverlay(),
+        ]));
+  }
+
+  // 🆕 [게스트 언어 오버레이] 초대 게스트 입장 전 ORIGIN/TARGET 선택 게이트
+  Widget _buildGuestLangOverlay() {
+    const List<String> langs = [
+      'English',
+      'Japanese',
+      'Chinese',
+      'Spanish',
+      'French',
+      'German',
+      'Korean'
+    ];
+    String native =
+        langs.contains(FFAppState().nativeLang) ? FFAppState().nativeLang : 'Korean';
+    String target =
+        langs.contains(FFAppState().targetLang) ? FFAppState().targetLang : 'English';
+
+    Widget dropdown(
+        String label, String value, Color labelColor, ValueChanged<String?> onChanged) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label,
+              style: TextStyle(
+                  color: labelColor,
+                  fontSize: 12,
+                  letterSpacing: 1,
+                  fontWeight: FontWeight.bold)),
+          const SizedBox(height: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.5),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.white24)),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                isExpanded: true,
+                value: value,
+                dropdownColor: const Color(0xFF1E1E1E),
+                icon: const Icon(Icons.unfold_more_rounded,
+                    color: Colors.white54, size: 20),
+                style: const TextStyle(
+                    color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
+                items: langs
+                    .map((l) => DropdownMenuItem<String>(value: l, child: Text(l)))
+                    .toList(),
+                onChanged: onChanged,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Positioned.fill(
+      child: Container(
+        color: Colors.black.withOpacity(0.78),
+        child: Center(
+          child: SingleChildScrollView(
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 28),
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                  color: const Color(0xFF1C1C1E),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: const Color(0xFF2563EB), width: 1.5)),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text("대화 언어 설정",
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  const Text("내 언어와 통역받을 언어를 선택하세요.",
+                      style: TextStyle(color: Colors.white54, fontSize: 13)),
+                  const SizedBox(height: 24),
+                  dropdown("ORIGIN (내 언어)", native, const Color(0xFF93C5FD),
+                      (val) {
+                    if (val != null) setState(() => FFAppState().nativeLang = val);
+                  }),
+                  const SizedBox(height: 18),
+                  dropdown("TARGET (통역받을 언어)", target, const Color(0xFF4ADE80),
+                      (val) {
+                    if (val != null) setState(() => FFAppState().targetLang = val);
+                  }),
+                  const SizedBox(height: 28),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2563EB),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12))),
+                    onPressed: () {
+                      final String? roomId = _pendingJoinRoomId;
+                      setState(() {
+                        _showLangOverlay = false;
+                        _pendingJoinRoomId = null;
+                      });
+                      if (roomId != null && roomId.isNotEmpty) {
+                        _joinAsGuest(roomId);
+                      }
+                    },
+                    child: const Text("입장하기",
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildPartnerIndicator() {
