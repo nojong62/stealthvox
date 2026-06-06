@@ -2689,6 +2689,8 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
                       fontSize: 16 * _fontScale,
                       fontWeight: FontWeight.bold)),
               if (_showOriginal &&
+                  !(FFAppState().nativeLang.isNotEmpty &&
+                      FFAppState().nativeLang == FFAppState().targetLang) &&
                   !isThinking &&
                   msg['original'] != null &&
                   msg['original'].toString().isNotEmpty) ...[

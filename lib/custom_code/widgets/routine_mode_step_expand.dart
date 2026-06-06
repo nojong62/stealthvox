@@ -2987,7 +2987,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
                       color: Colors.white,
                       fontSize: 16 * _fontScale,
                       fontWeight: FontWeight.bold)),
-              if (_showOriginal && effectiveOriginal.isNotEmpty) ...[
+              if (_showOriginal &&
+                  !(FFAppState().nativeLang.isNotEmpty &&
+                      FFAppState().nativeLang == FFAppState().targetLang) &&
+                  effectiveOriginal.isNotEmpty) ...[
                 const SizedBox(height: 6),
                 Text(effectiveOriginal,
                     textAlign: isHost ? TextAlign.right : TextAlign.left,

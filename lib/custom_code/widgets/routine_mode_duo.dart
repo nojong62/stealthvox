@@ -1497,7 +1497,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
                       fontSize: 16 * _fontScale,
                       fontWeight: FontWeight.w600,
                       height: 1.3)),
-              if (_showOriginal && original.trim().isNotEmpty) ...[
+              if (_showOriginal &&
+                  !(FFAppState().nativeLang.isNotEmpty &&
+                      FFAppState().nativeLang == FFAppState().targetLang) &&
+                  original.trim().isNotEmpty) ...[
                 const SizedBox(height: 6),
                 Text(original,
                     textAlign: isHost ? TextAlign.right : TextAlign.left,
