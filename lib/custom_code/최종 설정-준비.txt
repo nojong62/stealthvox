@@ -1,4 +1,3 @@
-돈이 나가는 API를 쓰거나 정기 구독을 받는 AI 앱들은 예외 없이 100% SaaS 구조(서버를 통한 보안 및 통제)
 
 "테스트하고 싶은 분은 구글 이메일 주소를 DM으로 남겨주세요"
 테스트앱 다운로드 https://play.google.com/apps/internaltest/4701441595486020798
@@ -11,9 +10,6 @@ Firestore users/{uid}/tier 조회 연결
 
 RevenueCat / App Store Connect / Play Console에 stealthvox_10m 상품(₩300, 일회성 소비형) 등록이 선행되어야 결제가 동작합니다. 등록 전에 결제 시도 시 RevenueCat이 에러를 뱉습니다.
 Firestore에 이미 쌓인 last_ad_date, ad_views_today 필드는 새 코드가 더 이상 읽지 않으므로 그대로 두어도 무방. 깔끔하게 비우려면 별도 일회성 마이그레이션 스크립트 필요.
-
-새 기능 준비:기억하고 싶은 표현 저장 기능  클릭 한 번으로 저장소로 저장되고 같은 표현은 두번 저장안됨.
-(히스토리 첫페이지 대사들 중에서 기억하고 싶은 표현들을 저장하는 Keepers를 만들어야 겠어. Keepers로 옮겨진 표현들은 원래 있던 것과는 별도로 저장이되야 해. 원래 히스토리방이 지워져도 Keepers에있는 대사는 남는 거지. Keepers에서도 소리듣기, 튜터링 가능해야하고. 히스토리의 대사를 한번 클릭하면 Keepers로 이동하고(한번만 이동됨), Keepers에서 각 대사는 최 상단으로 옮기는 아이콘 있어야하고, 삭제 아이콘도 있어야 해. 히스토리 리스에 현재 4개 모드 버튼 옆에 Keepers는 같은모양 다른 칼러로 만들어 줘)
 
 Read BILLING_TIERED_RATE.md and start with Step A.
 
@@ -39,6 +35,7 @@ product_id, seconds_added, purchased_at이 정상인지 확인
 You can create it here: 
 https://console.firebase.google.com/v1/r/project/.../indexes?create_composite=...
 이건 에러가 아니라 Firebase가 "복합 인덱스 만들어 줄게~ 링크 누르세요" 라고 알려주는 거예요.
+
 대처법:
 위 메시지의 링크를 그대로 클릭
 Firebase Console로 이동

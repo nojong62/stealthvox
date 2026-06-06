@@ -2471,7 +2471,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         await _myHistoryRef!.collection('messages').add({
           'role': line['role'] ?? '',
           'translated_text': translated,
-          'original_text': (line['original_text'] ?? '').toString(),
+          'original_text': (FFAppState().nativeLang.isNotEmpty &&
+                  FFAppState().nativeLang == FFAppState().targetLang)
+              ? ''
+              : (line['original_text'] ?? '').toString(),
           if (expandedSent.isNotEmpty) 'expanded_sentence': expandedSent,
           'created_at': FieldValue.serverTimestamp(),
         });

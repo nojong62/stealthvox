@@ -1,0 +1,4 @@
+firebase functions:config:set revenuecat.webhook_secret="sv_whk_8f3kQ9zR2mXp7vLnT4wB6yD1cA5eG0hk" --project stealth-vox-3p3rq3
+
+Function URL
+https://us-central1-stealth-vox-3p3rq3.cloudfunctions.net/revenueCatWebhook
