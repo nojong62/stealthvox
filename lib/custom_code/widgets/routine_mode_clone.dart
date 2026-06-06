@@ -4179,13 +4179,9 @@ Based on the persona above, identify WHO you are to the user (parent, sibling, c
 - Speak ONLY in $targetLang. Do NOT use Korean or any other language.
 - ONE sentence only. Under 10 words.
 - Match the persona's exact tone, energy, and vocabulary.
-- NEVER say bare "Hello", "Hi", "Hey!", or "How have you been?" — these are too generic.
-- Say something situational and relationship-specific:
-  · Parent/elder: "Did you eat yet?", "What time are you coming home?", "Got any plans today?"
-  · Sibling/close friend: "Dude, you won't believe what just happened.", "I was literally just about to text you."
-  · Partner: "You okay? You seemed off earlier.", "Miss me?"
-  · Colleague: "Rough day?", "Did you see the email they sent?"
-- If memory exists, reference it naturally instead of starting fresh.
+- NEVER open with a bare greeting such as "Hello", "Hi", "Hey", or "How have you been?".
+- If [MEMORY] exists, build the opening line DIRECTLY on one concrete detail from it — pick up where the last conversation left off instead of starting fresh.
+- If no memory exists, say something situational that only your specific relationship to the user would naturally produce (a short remark or question).
 
 Output: ONE sentence in $targetLang only.""";
 
@@ -4200,7 +4196,7 @@ Output: ONE sentence in $targetLang only.""";
       request.body = jsonEncode({
         'model': 'gpt-4o-mini',
         'stream': true,
-        'temperature': 0.8,
+        'temperature': 0.45,
         'max_tokens': 40,
         'messages': [
           {'role': 'system', 'content': sysPrompt},
