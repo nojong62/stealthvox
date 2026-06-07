@@ -594,14 +594,46 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
 
   Widget _buildSleekLangSelector(
       String label, String value, Function(String?) onChanged,
-      {Color labelColor = Colors.white54}) {
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(label,
+      {Color labelColor = Colors.white54,
+      String? subtitle,
+      bool subtitleBelow = false}) {
+    Widget labelWidget;
+    if (subtitle != null && !subtitleBelow) {
+      labelWidget = Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
+        Text(label,
+            style: TextStyle(
+                color: labelColor,
+                fontSize: 11,
+                letterSpacing: 1.5,
+                fontWeight: FontWeight.bold)),
+        const SizedBox(width: 6),
+        Text(subtitle,
+            style: const TextStyle(
+                color: Colors.white38, fontSize: 9, letterSpacing: 0.5)),
+      ]);
+    } else if (subtitle != null && subtitleBelow) {
+      labelWidget = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label,
+            style: TextStyle(
+                color: labelColor,
+                fontSize: 11,
+                letterSpacing: 1.5,
+                fontWeight: FontWeight.bold)),
+        const SizedBox(height: 2),
+        Text(subtitle,
+            style: const TextStyle(
+                color: Colors.white38, fontSize: 9, letterSpacing: 0.3)),
+      ]);
+    } else {
+      labelWidget = Text(label,
           style: TextStyle(
               color: labelColor,
               fontSize: 11,
               letterSpacing: 1.5,
-              fontWeight: FontWeight.bold)),
+              fontWeight: FontWeight.bold));
+    }
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      labelWidget,
       const SizedBox(height: 10),
       Container(
           height: 54,
@@ -768,7 +800,9 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                                             (val) => setState(() =>
                                                 appState.nativeLang = val!),
                                             labelColor:
-                                                const Color(0xFF93C5FD)),
+                                                const Color(0xFF93C5FD),
+                                            subtitle: "(My Language)",
+                                            subtitleBelow: false),
                                         const SizedBox(height: 20),
                                         _buildSleekLangSelector(
                                             "TARGET",
@@ -776,7 +810,9 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                                             (val) => setState(() =>
                                                 appState.targetLang = val!),
                                             labelColor:
-                                                const Color(0xFF4ADE80)),
+                                                const Color(0xFF4ADE80),
+                                            subtitle: "(Listening Language or Learning Language)",
+                                            subtitleBelow: true),
                                         const SizedBox(height: 32),
                                         const Text("AI TONE",
                                             style: TextStyle(
