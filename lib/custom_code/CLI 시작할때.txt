@@ -6,6 +6,7 @@ cd F:\flutter_project\stealth_vox
 CLAUDE1.md 참고해서, 실행해 줘.
 
 
+
 🔗 앱 다운로드 링크: `https://play.google.com/apps/testing/com.aienglishpractice.stealthvox`
 ==================================
 
@@ -52,7 +53,10 @@ flutter build appbundle --build-name=1.0.31 --build-number=31
 =================================
 
 
-
+듀오 초대링크로 들어온 사람이 언어 선택을 위해 마주하는 오버
+레이에도  
+ORIGIN 옆에 조금 작은 글씨로 (My Language) 라고 적어주고
+TARGET 옆에 조금 작은 글씨로 (Listening Language or Learning Language)로 적어 줘.
 
 클론의 AI의 첫 번째 대사 대사가 지난번 대화에 내용 마지막 부분을 고려해서 질문할 수 있게 할 수 있을까? 그러니까 클론 설명에 콜론의 묘사하는 대사 속에 마지막 대화 내용을 한마디 정도 넣는다면 가능하지 않을까. 그리고 첫 번째 대사는 중복해서 같은 질문을 하지 않도록
 온도 0.2로 잡아줘
