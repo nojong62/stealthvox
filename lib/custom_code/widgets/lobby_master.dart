@@ -311,7 +311,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
         ]),
         content: const SingleChildScrollView(
           child: Text(
-            "1. 서비스 목적\n본 약관은 Routine이 제공하는 AI 통역 및 통화 서비스의 이용 조건 및 절차를 규정합니다.\n\n"
+            "1. 서비스 목적\n본 약관은 StealthVox이 제공하는 AI 통역 및 통화 서비스의 이용 조건 및 절차를 규정합니다.\n\n"
             "2. 요금 및 환불\n• 본 서비스는 유료 시간제(분 단위 차감)로 운영됩니다.\n\n"
             "3. 사용자의 의무\n• 타인에게 피해를 주는 불법적인 사용을 금지합니다.\n\n"
             "4. 면책 조항\n• AI 번역은 100% 정확성을 보장하지 않습니다.",
