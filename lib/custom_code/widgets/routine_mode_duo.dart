@@ -1214,17 +1214,51 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     String target =
         langs.contains(FFAppState().targetLang) ? FFAppState().targetLang : 'English';
 
-    Widget dropdown(
-        String label, String value, Color labelColor, ValueChanged<String?> onChanged) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+    Widget dropdown(String label, String value, Color labelColor,
+        ValueChanged<String?> onChanged,
+        {String? subtitle, bool subtitleBelow = false}) {
+      Widget labelWidget;
+      if (subtitle != null && !subtitleBelow) {
+        labelWidget = Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(label,
+                  style: TextStyle(
+                      color: labelColor,
+                      fontSize: 12,
+                      letterSpacing: 1,
+                      fontWeight: FontWeight.bold)),
+              const SizedBox(width: 6),
+              Text(subtitle,
+                  style: const TextStyle(
+                      color: Colors.white38, fontSize: 10, letterSpacing: 0.5)),
+            ]);
+      } else if (subtitle != null && subtitleBelow) {
+        labelWidget = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(label,
               style: TextStyle(
                   color: labelColor,
                   fontSize: 12,
                   letterSpacing: 1,
                   fontWeight: FontWeight.bold)),
+          const SizedBox(height: 2),
+          Text(subtitle,
+              style: const TextStyle(
+                  color: Colors.white38, fontSize: 10, letterSpacing: 0.3)),
+        ]);
+      } else {
+        labelWidget = Text(label,
+            style: TextStyle(
+                color: labelColor,
+                fontSize: 12,
+                letterSpacing: 1,
+                fontWeight: FontWeight.bold));
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          labelWidget,
           const SizedBox(height: 6),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -1277,17 +1311,15 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
                   const Text("내 언어와 통역받을 언어를 선택하세요.",
                       style: TextStyle(color: Colors.white54, fontSize: 13)),
                   const SizedBox(height: 24),
-                  dropdown("ORIGIN (자신이 사용하는 언어)", native,
-                      const Color(0xFF93C5FD),
-                      (val) {
+                  dropdown("ORIGIN", native, const Color(0xFF93C5FD), (val) {
                     if (val != null) setState(() => FFAppState().nativeLang = val);
-                  }),
+                  }, subtitle: "(My Language)", subtitleBelow: false),
                   const SizedBox(height: 18),
-                  dropdown("TARGET (내가 듣고 싶은 언어 혹은 배우고 싶은 언어)", target,
-                      const Color(0xFF4ADE80),
-                      (val) {
+                  dropdown("TARGET", target, const Color(0xFF4ADE80), (val) {
                     if (val != null) setState(() => FFAppState().targetLang = val);
-                  }),
+                  },
+                      subtitle: "(Listening Language or Learning Language)",
+                      subtitleBelow: true),
                   const SizedBox(height: 28),
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(
