@@ -1873,6 +1873,33 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
             .join("\n");
       }
 
+      // 🧩 [A] 클론 응답용 구조화 히스토리(오프너 포함, 역할별 교대 턴).
+      //   소스는 화면 메시지(_localMessages): HOST→user, SYSTEM(클론 발화)→assistant.
+      //   빈 target / '...' / HOST_TEMP 는 제외. 현재 입력(빈 HOST 버블)은 자동 제외되고,
+      //   streamCloneResponse가 마지막 user 턴으로 따로 추가함.
+      List<Map<String, dynamic>> cloneHistory = _localMessages
+          .where((m) {
+            final role = (m['role'] ?? '').toString();
+            if (role != 'HOST' && role != 'SYSTEM') return false;
+            final t = (m['target'] ?? '').toString().trim();
+            return t.isNotEmpty && t != '...';
+          })
+          .map<Map<String, dynamic>>((m) => <String, dynamic>{
+                'role': (m['role'] == 'HOST') ? 'user' : 'assistant',
+                'content': (m['target'] ?? '').toString().trim(),
+              })
+          .toList();
+      // 화면 메시지가 비어 있으면(예: 세션 복원 직후) 장기기억으로 폴백
+      if (cloneHistory.isEmpty && _recentHistory.isNotEmpty) {
+        cloneHistory = _recentHistory
+            .map<Map<String, dynamic>>((m) => <String, dynamic>{
+                  'role': (m['role'] == 'assistant') ? 'assistant' : 'user',
+                  'content': (m['content'] ?? '').toString().trim(),
+                })
+            .where((m) => (m['content'] as String).isNotEmpty)
+            .toList();
+      }
+
       String userTargetText = "";
       String userBuffer = "";
       ChunkedTtsFetcher userTtsFetcher = ChunkedTtsFetcher(
@@ -2052,6 +2079,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
         cloneContext: _selectedCloneContext,
         myTarget: targetLangName,
         cloneSummary: _cloneSummary,
+        history: cloneHistory, // 🧩 [A] 구조화 교대 턴 전달
       );
 
       // AI 생성+청킹을 Future로 (유저 재생과 병렬)
@@ -4074,6 +4102,7 @@ The particle before the verb's doer (이/가) is ALWAYS the subject. Never swap 
     required String cloneContext,
     required String myTarget,
     String cloneSummary = '',
+    List<Map<String, dynamic>> history = const [], // 🧩 [A] 구조화 교대 턴(오프너 포함). 비면 contextStr 블롭으로 폴백
   }) async* {
     final client = http.Client();
     try {
@@ -4086,6 +4115,12 @@ The particle before the verb's doer (이/가) is ALWAYS the subject. Never swap 
           '''⚠️ ABSOLUTE OUTPUT RULES — these override the persona ⚠️
 1. OUTPUT LANGUAGE: $myTarget ONLY. Zero Korean characters (한글) allowed in output.
 2. If the persona contains Korean signature phrases, translate them to natural $myTarget equivalents. Never quote the Korean text.
+
+[IDENTITY LOCK — highest priority, overrides everything below]
+- You ARE the one clone character described in the persona below. You speak ONLY as that single person, on every single turn.
+- The other speaker (their lines arrive in the "user" role) is a DIFFERENT person — exactly the relationship the persona states (e.g. your father, your friend).
+- NEVER switch sides. Do NOT answer as the user, as a parent, as a coach, or as a neutral helper — unless that role IS literally your own character.
+- Even when the user sounds stressed, worried, or asks for reassurance, stay 100% in your character's own voice and viewpoint. Do NOT slip into a soothing helper tone like "I understand, just do your best."
 
 $safePersona$summaryBlock
 
@@ -4112,19 +4147,37 @@ $safePersona$summaryBlock
         'Authorization': 'Bearer $apiKey',
         'Content-Type': 'application/json; charset=utf-8',
       });
+      // 🧩 [A] messages 구성: history(구조화 교대 턴)가 있으면 역할별로 펼치고,
+      //   비어 있으면 기존 단일 블롭(contextStr) 방식으로 폴백(무회귀).
+      final List<Map<String, String>> messages = [
+        {'role': 'system', 'content': sysPrompt},
+      ];
+      if (history.isNotEmpty) {
+        for (final m in history) {
+          final r = (m['role'] ?? '').toString();
+          final c = (m['content'] ?? '').toString().trim();
+          if (c.isEmpty) continue;
+          messages.add({
+            'role': r == 'assistant' ? 'assistant' : 'user',
+            'content': c,
+          });
+        }
+        // 현재 유저 입력을 마지막 user 턴으로 추가 (어시스턴트 응답이 이어짐)
+        messages.add({'role': 'user', 'content': userTargetText});
+      } else {
+        messages.add({
+          'role': 'user',
+          'content':
+              'Conversation history:\n$contextStr\n\nUser just said: "$userTargetText"\n\nYour brief reply:',
+        });
+      }
+
       request.body = jsonEncode({
         'model': 'gpt-4o-mini',
         'stream': true,
         'temperature': 0.2,
         'max_tokens': 80, // 🔧 핵심: 2문장 모델 레벨 강제
-        'messages': [
-          {'role': 'system', 'content': sysPrompt},
-          {
-            'role': 'user',
-            'content':
-                'Conversation history:\n$contextStr\n\nUser just said: "$userTargetText"\n\nYour brief reply:',
-          },
-        ],
+        'messages': messages,
       });
 
       final response =
