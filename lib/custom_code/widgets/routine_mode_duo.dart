@@ -1164,7 +1164,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
                   child: Stack(children: [
                     _localMessages.isEmpty
                         ? const Center(
-                            child: Text("하단의 마이크 버튼을 눌러 통역을 시작하세요.",
+                            child: Text("마이크는 말하는 동안만 누르세요.",
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
                                     color: Colors.white54, height: 1.5)))
