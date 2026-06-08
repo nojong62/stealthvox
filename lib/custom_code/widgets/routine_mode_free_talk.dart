@@ -1710,15 +1710,36 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
 
   Widget _buildChatList() {
     final double bottomPad = MediaQuery.of(context).size.height * 0.55;
-    return ListView.builder(
-      controller: _scrollController,
-      padding: EdgeInsets.fromLTRB(16, 16, 16, bottomPad),
-      itemCount: _localMessages.length,
-      itemBuilder: (context, idx) {
-        _itemKeys[idx] ??= GlobalKey();
-        return Container(
-            key: _itemKeys[idx], child: _buildTextBlock(_localMessages[idx]));
-      },
+    return Stack(
+      children: [
+        // 🆕 바탕 연한 안내 (대화 시작 전에만 표시)
+        if (_localMessages.isEmpty)
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 40),
+              child: Text(
+                '타겟 언어로만 프리톡 하려면\n타겟과 오리지널 언어를 같게 하세요',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.18),
+                  fontSize: 13,
+                  height: 1.5,
+                ),
+              ),
+            ),
+          ),
+        ListView.builder(
+          controller: _scrollController,
+          padding: EdgeInsets.fromLTRB(16, 16, 16, bottomPad),
+          itemCount: _localMessages.length,
+          itemBuilder: (context, idx) {
+            _itemKeys[idx] ??= GlobalKey();
+            return Container(
+                key: _itemKeys[idx],
+                child: _buildTextBlock(_localMessages[idx]));
+          },
+        ),
+      ],
     );
   }
 
