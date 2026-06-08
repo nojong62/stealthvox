@@ -290,12 +290,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     return stored.isNotEmpty ? stored : 'the user';
   }
 
-  String get _roleplaySituationLabel {
-    final situation = _scenarioSituation.trim();
-    if (situation.isNotEmpty) return situation;
-    return _scenarioKeyword.trim();
-  }
-
   // ── Idle Timeout v2 ───────────────────────────────────────────────
   // 기준: "유저도 AI도 아무 작동이 없는 상태"가 연속 60초 지속되면 pause.
   //  - AI 작동 = _ttsQueueManager.isBusy (TTS 재생/대기)
@@ -1706,7 +1700,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         'ai_role': _scenarioAiRole,
         'user_label': _roleplayUserLabel,
         'partner_label': _roleplayPartnerLabel,
-        'expand_partner_type': 'roleplay',
         'is_pinned': false,
         'msg_count': 0
       });
@@ -1757,7 +1750,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 
   /// 뒤로가기 시: 빈 방 폭파 or last_message 업데이트 후 나가기
   Future<void> _handleAutoSaveAndExit() async {
-    bool overlayShown = false;
     try {
       if (_myHistoryRef != null) {
         final hasUserTurn = _localMessages.any((m) => m['role'] == 'HOST');
@@ -1774,72 +1766,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
             }
           }
 
-          // 🆕 [EXPAND-EXIT] 전체 대화 종합 → Expanded + Polished 생성 (오버레이 표시)
-          String expanded = "";
-          String polished = "";
           final userLabel = _roleplayUserLabel;
           final partnerLabel = _roleplayPartnerLabel;
-          final situationLabel = _roleplaySituationLabel;
-          final convoLines = _localMessages
-              .where((m) {
-                if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
-                final t = (m['target'] ?? '').toString().trim();
-                return t.isNotEmpty && t != '...';
-              })
-              .map((m) =>
-                  "${m['role'] == 'HOST' ? userLabel : partnerLabel}: ${m['target']}")
-              .toList();
-          final transcript = convoLines.join("\n");
-
-          if (transcript.isNotEmpty && _openAiKey.isNotEmpty && mounted) {
-            showDialog(
-              context: context,
-              barrierDismissible: false,
-              builder: (_) => const Center(
-                child: Card(
-                  color: Color(0xFF1E1E1E),
-                  child: Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        CircularProgressIndicator(color: Colors.amber),
-                        SizedBox(height: 16),
-                        Text("확장 문장 만드는 중...",
-                            style: TextStyle(color: Colors.white70)),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            );
-            overlayShown = true;
-
-            final gen = await RoleplayBrain.generateExpandedFromConversation(
-              _openAiKey,
-              transcript,
-              userLabel: userLabel,
-              partnerLabel: partnerLabel,
-              situation: situationLabel,
-            );
-            if (gen != null && gen.isNotEmpty) {
-              expanded = gen;
-              final pol =
-                  await RoleplayBrain.polishSentence(
-                _openAiKey,
-                expanded,
-                partnerLabel: partnerLabel,
-              );
-              polished = (pol != null && pol.trim().isNotEmpty) ? pol.trim() : "";
-            }
-
-            if (overlayShown &&
-                mounted &&
-                Navigator.of(context, rootNavigator: true).canPop()) {
-              Navigator.of(context, rootNavigator: true).pop();
-            }
-            overlayShown = false;
-          }
 
           await _myHistoryRef!.update({
             'last_message': lastText,
@@ -1855,30 +1783,13 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
             'ai_role': _scenarioAiRole,
             'user_label': userLabel,
             'partner_label': partnerLabel,
-            if (expanded.isNotEmpty) 'expanded_sentence': expanded,
-            if (polished.isNotEmpty) 'polished_sentence': polished,
-            if (expanded.isNotEmpty) 'has_practice': true,
-            if (expanded.isNotEmpty) 'expand_source': 'exit',
-            if (expanded.isNotEmpty)
-              'expand_generated_at': FieldValue.serverTimestamp(),
-            if (expanded.isNotEmpty) 'expand_user_label': userLabel,
-            if (expanded.isNotEmpty) 'expand_partner_name': partnerLabel,
-            if (expanded.isNotEmpty) 'expand_partner_type': 'roleplay',
-            if (expanded.isNotEmpty)
-              'expand_schema_version': 'named_partner_v1',
           });
-          _log('💾 [HIST-UPD]',
-              'last_message + expand 저장 (expanded=${expanded.isNotEmpty})');
+          _log('💾 [HIST-UPD]', 'last_message 저장');
         }
       }
     } catch (e) {
       _log('❌ [HIST-EXIT-ERR]', '$e');
     } finally {
-      if (overlayShown &&
-          mounted &&
-          Navigator.of(context, rootNavigator: true).canPop()) {
-        Navigator.of(context, rootNavigator: true).pop();
-      }
       if (mounted) {
         if (StealthRoomMaster.exitCurrentMode != null) {
           StealthRoomMaster.exitCurrentMode!();

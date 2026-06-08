@@ -47,100 +47,270 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# Claude Code 지시문 — Clone 모드 페르소나 역할 뒤집힘 수정 (A + B②)
+# Free Talk 모드 전환 작업 지시서 (v1)
 
-## 0. 목표
-Clone 모드에서 클론(예: 호진=아들)이 대화 중간에 부모/코치 말투로 뒤집히는 문제 해결.
-원인은 ① 대화 히스토리를 `User:`/`AI:` 라벨의 통짜 `user` 블롭으로 넣어 턴 신호가 사라진 것, ② 정체성 고정이 약한 것.
-
-수정 전략:
-- **A. 구조화 턴**: `streamCloneResponse`의 messages 배열을 역할별 교대 턴(user/assistant)으로 재구성. 히스토리 소스는 화면 메시지(`_localMessages`, 오프너 포함).
-- **B②. 강한 정체성 앵커**: 시스템 프롬프트 최상단에 `[IDENTITY LOCK]` 블록 추가.
-
-> **Box 7 / TTS / Deepgram 엔진은 절대 건드리지 않음.** 수정 범위는 `CloneBrain.streamCloneResponse`와 그 호출부 1곳뿐.
+> 클론(`routine_mode_clone.dart`)을 복사해 **Free Talk 모드**(`routine_mode_free_talk.dart`)로 만든다.
+> 클론 원본은 **건드리지 않고 그대로 보존**(롤백 안전). 라우팅만 Free Talk로 돌린다.
+> Free Talk = AI와의 자유 대화. 초청/페르소나/클론 선택 없음. 통신 골격은 클론과 동일.
 
 ---
 
-## 1. 대상 파일 (단 하나)
-```
-lib/custom_code/widgets/routine_mode_clone.dart
-```
-⚠️ `lib/custom_code/임시/` 의 프리뷰 복사본은 절대 수정하지 말 것. 빌드 타깃은 `widgets/` 뿐.
+## 0. 절대 원칙 (CRITICAL)
 
-수정 지점은 총 **4곳**입니다. 각 지점은 `str_replace`로 처리하며, 줄 번호는 참고용(앵커 문자열로 위치 식별).
+1. **Box 7(통신 엔진), Box 5 / Box 5-A(파이프라인), 번역/원문 생성 메서드는 손대지 않는다.**
+2. **STEP 4의 새 파일 내부 편집은 반드시 "아래(큰 줄번호) → 위(작은 줄번호)" 순서로 적용**한다. (위부터 지우면 아래 줄번호가 밀려 앵커가 어긋남.)
+3. 줄번호는 **갓 복사한 새 파일 = 클론 원본과 동일**한 상태 기준이다. 각 편집에 첫 줄/끝 줄 내용 앵커를 함께 표기했다.
+4. 작업 파일은 `lib/custom_code/widgets/` 에만 둔다. `lib/custom_code/임시/` 는 빌드 대상 아님.
+5. 모든 영어 프롬프트 문자열은 큰따옴표 / 삼중 큰따옴표(`"""`) 기반 — 작은따옴표 이스케이프 사고 방지. URL 마크다운 변환 금지(해당 없음).
 
 ---
 
-## 2. 수정 #1 — `streamCloneResponse` 시그니처에 `history` 파라미터 추가
+## STEP 0 — 파일 복사 + 전역 식별자 리네임
 
-**삭제 범위:** 약 4070줄 `static Stream<String> streamCloneResponse({` 부터 4077줄 `}) async* {` 까지.
+PowerShell (`F:\flutter_project\stealth_vox`):
 
-**str_replace old_str:**
+```powershell
+Copy-Item lib\custom_code\widgets\routine_mode_clone.dart lib\custom_code\widgets\routine_mode_free_talk.dart
+
+# 새 파일 내부에서만 위젯/브레인 클래스명 변경 (클론 원본은 그대로 둠)
+$p = 'lib\custom_code\widgets\routine_mode_free_talk.dart'
+(Get-Content $p -Raw) `
+  -replace 'RoutineModeClone','RoutineModeFreeTalk' `
+  -replace 'CloneBrain','FreeTalkBrain' `
+  | Set-Content $p -NoNewline
+```
+
+- `RoutineModeClone` → `RoutineModeFreeTalk` 는 `_RoutineModeCloneState` → `_RoutineModeFreeTalkState` 도 함께 처리됨(부분 문자열 포함).
+- Box 7 클래스명(`TtsQueueManager`, `DeepgramV2VoiceManager`, `ChunkedTtsFetcher`, `TtsCache`, `HybridTtsPlayer`, `ConversationHistory`, `UnifiedBrain`)은 **변경하지 않는다.** 다른 모드 파일과 동일 이름이 중복돼도, 서로 다른 라이브러리이고 동시에 참조되지 않으므로 충돌 없음(기존 4개 모드가 이미 같은 패턴).
+- 새 파일을 Android Studio에서 커스텀 위젯으로 인식시킨다(`widgets/` 폴더 자동 포함).
+
+검증:
+```powershell
+Select-String -Path lib\custom_code\widgets\routine_mode_free_talk.dart -Pattern 'class RoutineModeFreeTalk|class _RoutineModeFreeTalkState|class FreeTalkBrain' | Measure-Object  # 3
+Select-String -Path lib\custom_code\widgets\routine_mode_free_talk.dart -Pattern 'RoutineModeClone|CloneBrain' | Measure-Object  # 0
+```
+
+---
+
+## STEP 1 — `stealth_room_master.dart` (라우팅)
+
+**1-1. import 추가** (파일 상단 import 블록):
 ```dart
-  static Stream<String> streamCloneResponse({
+import 'routine_mode_free_talk.dart';
+```
+
+**1-2. mode 2 분기 교체** — 현재 209~213줄:
+```dart
+    } else if (_currentMode == 2) {
+      return RoutineModeClone(
+          key: const ValueKey('RoutineModeClone'),
+          width: widget.width,
+          height: widget.height);
+```
+↓ 교체:
+```dart
+    } else if (_currentMode == 2) {
+      return RoutineModeFreeTalk(
+          key: const ValueKey('RoutineModeFreeTalk'),
+          width: widget.width,
+          height: widget.height);
+```
+
+**1-3. 메뉴 카드 라벨** — 291줄:
+```dart
+            _buildMenuCard(2, "Clone AI", "클론 AI와 대화", Icons.face,
+```
+↓ 교체:
+```dart
+            _buildMenuCard(2, "Free Talk", "AI와 자유 대화", Icons.forum,
+```
+
+**1-4. 수동 안내 항목** — 131줄:
+```dart
+                          _buildManualItem('Clone AI', '클론 AI와 대화',
+```
+↓ 교체:
+```dart
+                          _buildManualItem('Free Talk', 'AI와 자유 대화',
+```
+
+---
+
+## STEP 2 — `store_master.dart` (사용 내역 라벨)
+
+`_modeDisplayName` switch — 333~334줄 `case 'clone'` 바로 위에 `free_talk` 케이스 추가:
+```dart
+      case 'free_talk':
+        return '💬 Free Talk';
+      case 'clone':
+        return '🤖 AI Clone';
+```
+(클론 케이스는 과거 데이터 표시용으로 남겨둠.)
+
+---
+
+## STEP 3 — `chat_history_list_master.dart` (필터칩)
+
+660줄:
+```dart
+                  _buildFilterChip('Clone', 'Clone', Icons.face),
+```
+↓ 교체:
+```dart
+                  _buildFilterChip('Free Talk', 'Free Talk', Icons.forum),
+```
+(아이콘/색상은 이미 `room_name`에 "Free Talk" 포함 기준으로 들어가 있어 자동 적용됨 — 299·310줄.)
+
+---
+
+## STEP 4 — 새 파일 `routine_mode_free_talk.dart` 내부 (반드시 아래→위 순서)
+
+> STEP 0 직후 줄번호 기준. **4A → 4O 순서대로(=파일 하단부터) 적용.**
+
+---
+
+### 4A. (삭제) FreeTalkBrain의 클론 전용 메서드 3개
+
+`confirmCloneIdentity` ~ `generateRecommendedScenarios` 통째 삭제.
+
+- **시작**: 4232줄 — `  // 📦 [Box 7-1-E1] confirmCloneIdentity — 이름 확정 (temperature 0.2)`
+- **끝**: 4437줄 — `10. 듣고 있는 음악 추천하기''';` 의 닫힘 `  }` (generateRecommendedScenarios 의 닫는 중괄호, 4437줄)
+
+즉 **4232~4437줄 전체 삭제**. 바로 아래 4438줄 `}`(= FreeTalkBrain 클래스 닫힘)는 **남긴다.**
+
+검증: `Select-String 'generatePersonaFromChat|confirmCloneIdentity|generateRecommendedScenarios'` → **0건**.
+
+---
+
+### 4B. (교체) `generateCloneOpener` → `generateFreeTalkOpener`
+
+4155줄 `static Stream<String> generateCloneOpener({` 부터 4231줄(메서드 닫는 `}`)까지 — **메서드 전체** 교체:
+
+```dart
+  static Stream<String> generateFreeTalkOpener({
     required String apiKey,
-    required String userTargetText,
-    required String contextStr,
-    required String cloneContext,
-    required String myTarget,
-    String cloneSummary = '',
+    required String targetLang,
+    String level = "Intermediate",
   }) async* {
-```
+    final client = http.Client();
+    try {
+      final sysPrompt =
+          """You are a warm, friendly conversation partner starting a casual chat.
+Open with ONE short, natural line that invites the user to talk — like a friend would.
 
-**str_replace new_str (교체 전문):**
-```dart
-  static Stream<String> streamCloneResponse({
-    required String apiKey,
-    required String userTargetText,
-    required String contextStr,
-    required String cloneContext,
-    required String myTarget,
-    String cloneSummary = '',
-    List<Map<String, dynamic>> history = const [], // 🧩 [A] 구조화 교대 턴(오프너 포함). 비면 contextStr 블롭으로 폴백
-  }) async* {
-```
+RULES:
+- Speak ONLY in $targetLang. Do NOT use Korean or any other language.
+- ONE sentence only. Under 12 words.
+- Sound natural and friendly, never like an AI or a survey.
+- Avoid a bare "Hello" or "Hi". Say something that invites a reply, for example: "Hey, how's your day going so far?" or "So, what have you been up to lately?"
+- ${_freeTalkLevelInstruction(level)}
 
----
+Output: ONE sentence in $targetLang only.""";
 
-## 3. 수정 #2 — 시스템 프롬프트 최상단에 IDENTITY LOCK 추가 (B②)
-
-**삭제 범위:** 약 4088줄 `2. If the persona contains Korean signature phrases...` 부터 4090줄 `$safePersona$summaryBlock` 까지(중간 빈 줄 포함).
-
-**str_replace old_str:**
-```dart
-2. If the persona contains Korean signature phrases, translate them to natural $myTarget equivalents. Never quote the Korean text.
-
-$safePersona$summaryBlock
-```
-
-**str_replace new_str (교체 전문):**
-```dart
-2. If the persona contains Korean signature phrases, translate them to natural $myTarget equivalents. Never quote the Korean text.
-
-[IDENTITY LOCK — highest priority, overrides everything below]
-- You ARE the one clone character described in the persona below. You speak ONLY as that single person, on every single turn.
-- The other speaker (their lines arrive in the "user" role) is a DIFFERENT person — exactly the relationship the persona states (e.g. your father, your friend).
-- NEVER switch sides. Do NOT answer as the user, as a parent, as a coach, or as a neutral helper — unless that role IS literally your own character.
-- Even when the user sounds stressed, worried, or asks for reassurance, stay 100% in your character's own voice and viewpoint. Do NOT slip into a soothing helper tone like "I understand, just do your best."
-
-$safePersona$summaryBlock
-```
-
-> 이 블록이 실제 관찰된 실패 패턴("I understand, just do your best")을 직접 금지합니다.
-
----
-
-## 4. 수정 #3 — messages 배열을 구조화 교대 턴으로 재구성 (A)
-
-**삭제 범위:** 약 4115줄 `request.body = jsonEncode({` 부터 4128줄 `});` 까지(messages 블롭 포함 전체).
-
-**str_replace old_str:**
-```dart
+      final request = http.Request(
+        'POST',
+        Uri.parse('https://api.openai.com/v1/chat/completions'),
+      );
+      request.headers.addAll({
+        'Authorization': 'Bearer $apiKey',
+        'Content-Type': 'application/json; charset=utf-8',
+      });
       request.body = jsonEncode({
         'model': 'gpt-4o-mini',
         'stream': true,
-        'temperature': 0.2,
-        'max_tokens': 80, // 🔧 핵심: 2문장 모델 레벨 강제
+        'temperature': 0.8,
+        'max_tokens': 40,
+        'messages': [
+          {'role': 'system', 'content': sysPrompt},
+          {
+            'role': 'user',
+            'content':
+                'Start the conversation — say your friendly opening line in $targetLang.',
+          },
+        ],
+      });
+
+      final response =
+          await client.send(request).timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) return;
+
+      await for (final line in response.stream
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())) {
+        if (line.startsWith('data: ') && line != 'data: [DONE]') {
+          try {
+            final delta =
+                jsonDecode(line.substring(6))['choices'][0]['delta']['content'];
+            if (delta != null) yield delta.toString();
+          } catch (_) {}
+        }
+      }
+    } catch (_) {
+    } finally {
+      client.close();
+    }
+  }
+```
+
+---
+
+### 4C. (교체) `streamCloneResponse` → `streamFreeTalkResponse` + 레벨 헬퍼
+
+4064줄 `static Stream<String> streamCloneResponse({` 부터 4150줄(메서드 닫는 `}`)까지 — **메서드 전체** 교체. 레벨 분기 헬퍼도 함께 추가:
+
+```dart
+  // 📦 Free Talk 언어 수준별 어휘 지침
+  static String _freeTalkLevelInstruction(String level) {
+    switch (level) {
+      case "Beginner":
+        return "Use very simple, common words and short sentences. Avoid idioms and difficult grammar.";
+      case "Advanced":
+        return "Use rich, natural vocabulary including idioms and nuanced expressions, as with a fluent speaker.";
+      case "Intermediate":
+      default:
+        return "Use everyday vocabulary with some variety. Common phrasal verbs and natural expressions are fine.";
+    }
+  }
+
+  // 📦 [Box 7-1-D] streamFreeTalkResponse — Free Talk AI 응답 스트림
+  static Stream<String> streamFreeTalkResponse({
+    required String apiKey,
+    required String userTargetText,
+    required String contextStr,
+    required String myTarget,
+    String level = "Intermediate",
+  }) async* {
+    final client = http.Client();
+    try {
+      final sysPrompt =
+          """You are a warm, friendly $myTarget conversation partner.
+Keep every reply to 2 short sentences maximum.
+Talk like a real friend — sound natural, show interest, and keep the chat flowing.
+Match your vocabulary and grammar to the learner's level below.
+Never say that you are an AI or a language model.
+
+OUTPUT LANGUAGE: $myTarget ONLY. Zero Korean characters in output.
+
+[RULES]
+- Respond in $myTarget only. MAXIMUM 2 short sentences. Often 1 sentence is enough.
+- No greetings, no "I understand", no meta-comments, no prefixes. Just reply.
+- If the audio is garbled or impossible to make out (a speech recognition error), politely ask them to repeat in $myTarget.
+
+Learner level: ${_freeTalkLevelInstruction(level)}""";
+
+      final request = http.Request(
+        'POST',
+        Uri.parse('https://api.openai.com/v1/chat/completions'),
+      );
+      request.headers.addAll({
+        'Authorization': 'Bearer $apiKey',
+        'Content-Type': 'application/json; charset=utf-8',
+      });
+      request.body = jsonEncode({
+        'model': 'gpt-4o-mini',
+        'stream': true,
+        'temperature': 0.5,
+        'max_tokens': 90,
         'messages': [
           {'role': 'system', 'content': sysPrompt},
           {
@@ -150,104 +320,199 @@ $safePersona$summaryBlock
           },
         ],
       });
-```
 
-**str_replace new_str (교체 전문):**
-```dart
-      // 🧩 [A] messages 구성: history(구조화 교대 턴)가 있으면 역할별로 펼치고,
-      //   비어 있으면 기존 단일 블롭(contextStr) 방식으로 폴백(무회귀).
-      final List<Map<String, String>> messages = [
-        {'role': 'system', 'content': sysPrompt},
-      ];
-      if (history.isNotEmpty) {
-        for (final m in history) {
-          final r = (m['role'] ?? '').toString();
-          final c = (m['content'] ?? '').toString().trim();
-          if (c.isEmpty) continue;
-          messages.add({
-            'role': r == 'assistant' ? 'assistant' : 'user',
-            'content': c,
-          });
+      final response =
+          await client.send(request).timeout(const Duration(seconds: 20));
+      if (response.statusCode != 200) {
+        yield '...';
+        return;
+      }
+
+      await for (final chunk in response.stream
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())) {
+        if (chunk.startsWith('data: ') && chunk != 'data: [DONE]') {
+          try {
+            final delta = jsonDecode(chunk.substring(6))['choices'][0]['delta']
+                ['content'];
+            if (delta != null) yield delta.toString();
+          } catch (_) {}
         }
-        // 현재 유저 입력을 마지막 user 턴으로 추가 (어시스턴트 응답이 이어짐)
-        messages.add({'role': 'user', 'content': userTargetText});
-      } else {
-        messages.add({
-          'role': 'user',
-          'content':
-              'Conversation history:\n$contextStr\n\nUser just said: "$userTargetText"\n\nYour brief reply:',
-        });
       }
-
-      request.body = jsonEncode({
-        'model': 'gpt-4o-mini',
-        'stream': true,
-        'temperature': 0.2,
-        'max_tokens': 80, // 🔧 핵심: 2문장 모델 레벨 강제
-        'messages': messages,
-      });
+    } catch (_) {
+      yield '...';
+    } finally {
+      client.close();
+    }
+  }
 ```
 
 ---
 
-## 5. 수정 #4 — 호출부에서 구조화 히스토리 빌드 후 전달
+### 4D. (삭제) `_truncatePersona` (이제 미사용)
 
-이 수정은 두 부분입니다: (4-a) `cloneHistory` 빌드 블록 삽입, (4-b) 호출부에 `history:` 인자 추가.
+3872줄 `  // 📦 [Box 7-1-A] _truncatePersona — 페르소나 토큰 과부하 방지` 부터,
+`_truncatePersona` 메서드 닫힘 `  }`(3892줄 부근, `streamUserTranslation` 시작 3893줄 바로 위)까지 삭제.
 
-### 4-a. `cloneHistory` 빌드 블록 삽입
+검증: `Select-String '_truncatePersona'` → **0건**.
 
-**위치:** contextStr 빌드가 끝나는 지점(약 1874줄 `}`) 과 약 1876줄 `String userTargetText = "";` 사이에 삽입.
+> ⚠️ `streamUserTranslation`(3893~), `generateCleanOriginal`(3994~), `generateExpandedFromConversation`, `polishSentence`는 **유지**(범용 번역/원문/확장 — 손대지 않음).
 
-**str_replace old_str:**
+---
+
+### 4E. (교체) 대화 영역 라벨 "Clone" → "Free Talk"
+
+2718줄:
 ```dart
-            .join("\n");
-      }
-
-      String userTargetText = "";
+              Text("Clone",
+```
+↓
+```dart
+              Text("Free Talk",
 ```
 
-**str_replace new_str (교체 전문):**
+---
+
+### 4F. (삭제) 채팅 리스트 클론 선택 게이트
+
+`_buildChatList` 진입부 — 2639~2645줄:
 ```dart
-            .join("\n");
-      }
-
-      // 🧩 [A] 클론 응답용 구조화 히스토리(오프너 포함, 역할별 교대 턴).
-      //   소스는 화면 메시지(_localMessages): HOST→user, SYSTEM(클론 발화)→assistant.
-      //   빈 target / '...' / HOST_TEMP 는 제외. 현재 입력(빈 HOST 버블)은 자동 제외되고,
-      //   streamCloneResponse가 마지막 user 턴으로 따로 추가함.
-      List<Map<String, dynamic>> cloneHistory = _localMessages
-          .where((m) {
-            final role = (m['role'] ?? '').toString();
-            if (role != 'HOST' && role != 'SYSTEM') return false;
-            final t = (m['target'] ?? '').toString().trim();
-            return t.isNotEmpty && t != '...';
-          })
-          .map<Map<String, dynamic>>((m) => <String, dynamic>{
-                'role': (m['role'] == 'HOST') ? 'user' : 'assistant',
-                'content': (m['target'] ?? '').toString().trim(),
-              })
-          .toList();
-      // 화면 메시지가 비어 있으면(예: 세션 복원 직후) 장기기억으로 폴백
-      if (cloneHistory.isEmpty && _recentHistory.isNotEmpty) {
-        cloneHistory = _recentHistory
-            .map<Map<String, dynamic>>((m) => <String, dynamic>{
-                  'role': (m['role'] == 'assistant') ? 'assistant' : 'user',
-                  'content': (m['content'] ?? '').toString().trim(),
-                })
-            .where((m) => (m['content'] as String).isNotEmpty)
-            .toList();
-      }
-
-      String userTargetText = "";
+  Widget _buildChatList() {
+    if (_selectedCloneId.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [],
+        ),
+      );
+    }
+```
+↓ 교체 (게이트 제거, 시그니처만 유지):
+```dart
+  Widget _buildChatList() {
 ```
 
-### 4-b. 호출부에 `history:` 인자 추가
+---
 
-**삭제 범위:** 약 2048줄 `final aiStream = CloneBrain.streamCloneResponse(` 부터 2055줄 `);` 까지.
+### 4G. (교체) `_buildTopControls` → 언어수준 선택기
 
-**str_replace old_str:**
+"Manage Clones" 버튼(2610~2636줄, `Widget _buildTopControls() {` 부터 닫힘 `}`까지) **전체** 교체:
+
 ```dart
-      final aiStream = CloneBrain.streamCloneResponse(
+  Widget _buildTopControls() {
+    const levels = ["Beginner", "Intermediate", "Advanced"];
+    const labels = ["초급", "중급", "고급"];
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        height: 44,
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          color: const Color(0xFF2C2C2E),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: List.generate(levels.length, (i) {
+            final bool selected = _freeTalkLevel == levels[i];
+            return Expanded(
+              child: GestureDetector(
+                onTap: () => _setFreeTalkLevel(levels[i]),
+                child: Container(
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color:
+                        selected ? const Color(0xFF9333EA) : Colors.transparent,
+                    borderRadius: BorderRadius.circular(9),
+                  ),
+                  child: Text(
+                    "${labels[i]} ${levels[i]}",
+                    style: TextStyle(
+                      color: selected ? Colors.white : Colors.white54,
+                      fontSize: 12,
+                      fontWeight:
+                          selected ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }),
+        ),
+      ),
+    );
+  }
+```
+> 대화 중 레벨 변경 시 다음 AI 응답부터 즉시 반영됨(`streamFreeTalkResponse`가 `_freeTalkLevel`을 매 호출 읽음).
+
+---
+
+### 4H. (교체) 세션/히스토리 저장 3곳 — `mode`/`room_name`/`clone_*` 정리
+
+**4H-③ (가장 아래 먼저)** — `_myHistoryRef!.update` 블록, 2455~2459줄:
+```dart
+            'mode': 'clone',
+            'clone_id': _selectedCloneId,
+            'clone_name': _selectedCloneName,
+            'user_label': userLabel,
+            'partner_label': partnerLabel,
+```
+↓
+```dart
+            'mode': 'free_talk',
+            'user_label': userLabel,
+            'partner_label': partnerLabel,
+```
+
+**4H-②** — `userLabel`/`partnerLabel` 지역변수 정의, 2390~2391줄:
+```dart
+          final userLabel = _cloneUserLabel;
+          final partnerLabel = _clonePartnerLabel;
+```
+↓
+```dart
+          final userLabel = 'the user';
+          final partnerLabel = 'AI partner';
+```
+
+**4H-①b** — `_myHistoryRef!.set` 블록, 2317~2322줄:
+```dart
+        'room_name': "Clone Mode",
+        'mode': 'clone',
+        'clone_id': _selectedCloneId,
+        'clone_name': _selectedCloneName,
+        'user_label': _cloneUserLabel,
+        'partner_label': _clonePartnerLabel,
+```
+↓
+```dart
+        'room_name': "Free Talk",
+        'mode': 'free_talk',
+        'user_label': 'the user',
+        'partner_label': 'AI partner',
+```
+
+**4H-①a** — `sessions.add` 블록, 2265~2269줄:
+```dart
+          'mode': 'clone',
+          'clone_id': _selectedCloneId,
+          'clone_name': _selectedCloneName,
+          'user_label': _cloneUserLabel,
+          'partner_label': _clonePartnerLabel,
+```
+↓
+```dart
+          'mode': 'free_talk',
+          'user_label': 'the user',
+          'partner_label': 'AI partner',
+```
+
+---
+
+### 4I. (교체) AI 응답 호출부
+
+2048~2055줄:
+```dart
+      final aiStream = FreeTalkBrain.streamCloneResponse(
         apiKey: _openAiKey,
         userTargetText: userTargetText,
         contextStr: latestContextStr,
@@ -256,64 +521,247 @@ $safePersona$summaryBlock
         cloneSummary: _cloneSummary,
       );
 ```
-
-**str_replace new_str (교체 전문):**
+> (STEP 0 리네임으로 이미 `FreeTalkBrain.`로 바뀐 상태)
+↓ 교체:
 ```dart
-      final aiStream = CloneBrain.streamCloneResponse(
+      final aiStream = FreeTalkBrain.streamFreeTalkResponse(
         apiKey: _openAiKey,
         userTargetText: userTargetText,
         contextStr: latestContextStr,
-        cloneContext: _selectedCloneContext,
         myTarget: targetLangName,
-        cloneSummary: _cloneSummary,
-        history: cloneHistory, // 🧩 [A] 구조화 교대 턴 전달
+        level: _freeTalkLevel,
       );
 ```
 
 ---
 
-## 6. 검증 (반드시 실행)
+### 4J. (교체) AI 오프너 호출부 + 가드
 
-### 6-1. grep 카운트
-```powershell
-# 작업 디렉토리: F:\flutter_project\stealth_vox
-$f = "lib\custom_code\widgets\routine_mode_clone.dart"
-
-Select-String -Path $f -Pattern "IDENTITY LOCK" | Measure-Object        # 기대값: 1
-Select-String -Path $f -Pattern "List<Map<String, dynamic>> history"    # 기대값: 1 (시그니처)
-Select-String -Path $f -Pattern "cloneHistory" | Measure-Object         # 기대값: 4
-Select-String -Path $f -Pattern "history: cloneHistory"                 # 기대값: 1
-Select-String -Path $f -Pattern "'messages': messages,"                 # 기대값: 1
-Select-String -Path $f -Pattern "Your brief reply:" | Measure-Object    # 기대값: 1 (폴백 분기에만 잔존)
+**4J-b** — 오프너 스트림 호출, 1532~1537줄:
+```dart
+      await for (final chunk in FreeTalkBrain.generateCloneOpener(
+        apiKey: _openAiKey,
+        cloneContext: _selectedCloneContext,
+        targetLang: targetLangName,
+        cloneSummary: _cloneSummary,
+      )) {
+```
+↓
+```dart
+      await for (final chunk in FreeTalkBrain.generateFreeTalkOpener(
+        apiKey: _openAiKey,
+        targetLang: targetLangName,
+        level: _freeTalkLevel,
+      )) {
 ```
 
-### 6-2. 정적 분석
-```powershell
-flutter analyze lib\custom_code\widgets\routine_mode_clone.dart
+**4J-a** — 오프너 가드, 1494줄:
+```dart
+    if (_isAiOpenerPlaying || _selectedCloneContext.isEmpty) return;
 ```
-- 신규 에러/경고 0 이어야 함.
-- 특히 타입: `cloneHistory`(`List<Map<String,dynamic>>`)와 파라미터 `history`(`List<Map<String,dynamic>>`) 타입 일치 확인.
-
-### 6-3. 런타임 동작 확인 (스테일 빌드 먼저 배제)
-1. `flutter clean` 후 재빌드 (UI/로직 변경 미반영은 스테일 빌드가 1순위 원인).
-2. Clone(호진) 새 방 진입 → 오프너 수신 → 아빠 입장으로 응답 → **클론이 아들 말투를 유지하는지** 확인.
-3. 로그에서 GPT 첫 청크(`🧠 [PIPE-03]`)가 코치 말투("I understand...")가 아닌 캐릭터 발화인지 점검.
+↓
+```dart
+    if (_isAiOpenerPlaying) return;
+```
 
 ---
 
-## 7. 롤백 절차
-4개 str_replace를 역순으로 되돌리면 됨(모두 new_str↔old_str 교체):
-1. 4-b 호출부에서 `history: cloneHistory,` 줄 제거
-2. 4-a `cloneHistory` 빌드 블록 제거
-3. 수정 #3 messages 블록을 원래 단일 블롭으로 복원
-4. 수정 #2 `[IDENTITY LOCK]` 블록 제거
-5. 수정 #1 시그니처에서 `history` 파라미터 줄 제거
+### 4K. (삭제) Box 4 — 대시보드 + 편집 다이얼로그
 
-> Git: `git checkout -- lib/custom_code/widgets/routine_mode_clone.dart` 로 일괄 복원 가능.
+- **시작**: 704줄 — `  void _showCloneDashboard() {`
+- **끝**: 1406줄 — `_showEditCloneDialog` 메서드 닫힘 `  }` (바로 아래 1408줄 `// 📦 [Box 5: Deepgram + Relay Pipeline]` 주석 위)
+
+**704~1406줄 전체 삭제.**
+
+> ⚠️ 그 위 `_showDebugLogDialog`(580~702줄)는 **삭제 금지** — 잔여시간 롱프레스(2581줄 `onLongPress: _showDebugLogDialog`)에서 쓰는 공통 기능.
 
 ---
 
-## 8. 적용 후 기대 동작
-- 모델이 OpenAI 네이티브 턴 신호로 "assistant = 나 = 호진" 을 인식 → 코치/부모 말투로 빠지지 않음.
-- `[IDENTITY LOCK]` 이 "I understand, just do your best" 류 위로 톤을 명시적으로 차단.
-- 오프너 문맥이 첫 유저 턴부터 살아있어, 화면 속 그 뒤집힘 턴이 재현되지 않음.
+### 4L. (삭제) Box 4 — 클론 Firestore CRUD / 메모리 메서드
+
+- **시작**: 314줄 — `  // 📦 [Box 4: Clone 관리] — Firestore 기반`
+- **끝**: 578줄 — 클론 summary 갱신 메서드의 닫힘 `  }` (바로 아래 580줄 `// 🔬 [v3.1 진단] 로그 뷰어 다이얼로그` 주석 위)
+
+**314~578줄 전체 삭제.** (`_clonesRef`, `_loadClones`, `_loadClonesFromPrefs`, `_createCloneInFirestore`, `_updateCloneInFirestore`, `_deleteCloneInFirestore`, `_loadCloneContext`, 클론 summary 동기화까지.)
+
+---
+
+### 4M. (삭제) dispose 컨트롤러 정리
+
+288~290줄:
+```dart
+    _cloneNameController.dispose();
+    _kakaoTextController.dispose();
+    _editPersonaController.dispose();
+```
+**3줄 삭제.**
+
+---
+
+### 4N. (수정) initState — 리스너/로드/빌링
+
+**4N-c** — kakao 리스너 블록, 261~266줄:
+```dart
+    _kakaoTextController.addListener(() {
+      final hasText = _kakaoTextController.text.isNotEmpty;
+      if (hasText != _kakaoHasText) {
+        setState(() => _kakaoHasText = hasText);
+      }
+    });
+```
+**삭제.**
+
+**4N-b** — 269줄 `    _loadClones();` → 교체:
+```dart
+    _loadFreeTalkLevel();
+```
+
+**4N-a** — 273줄(initState 내, 들여쓰기 4칸):
+```dart
+    BillingTicker.instance.setRate(BillingRate.full);
+    BillingTicker.instance.resume();
+    BillingTicker.instance.logMode('clone');
+```
+↓
+```dart
+    BillingTicker.instance.setRate(BillingRate.full);
+    BillingTicker.instance.resume();
+    BillingTicker.instance.logMode('free_talk');
+```
+
+**4N-a2** — 88~89줄(`_resetIdleTimer` 내, 들여쓰기 6칸):
+```dart
+      BillingTicker.instance.resume();
+      BillingTicker.instance.logMode('clone');
+```
+↓
+```dart
+      BillingTicker.instance.resume();
+      BillingTicker.instance.logMode('free_talk');
+```
+
+---
+
+### 4O. (교체) 상태변수 블록 — 클론 변수 제거, 레벨 변수 추가
+
+190~228줄 전체:
+```dart
+  // 클론 데이터 관리
+  String _selectedCloneId = "";
+  String _selectedCloneContext = "";
+  List<Map<String, dynamic>> _clones = [];
+
+  String get _selectedCloneName {
+    if (_selectedCloneId.isNotEmpty) {
+      for (final clone in _clones) {
+        if ((clone['id'] ?? '').toString() == _selectedCloneId) {
+          final name = (clone['name'] ?? '').toString().trim();
+          if (name.isNotEmpty) return name;
+        }
+      }
+    }
+    return '';
+  }
+
+  String get _cloneUserLabel => 'the user';
+  String get _clonePartnerLabel {
+    final name = _selectedCloneName;
+    return name.isNotEmpty ? name : 'the clone';
+  }
+
+  String get _cloneUiLabel {
+    final name = _selectedCloneName;
+    return name.isNotEmpty ? name : 'Clone';
+  }
+
+  // 🧠 [장기 기억] 클론별 메모리 (SharedPreferences 동기화)
+  String _cloneSummary = '';
+  List<Map<String, String>> _recentHistory = [];
+  int _memoryTurnCount = 0;
+
+  final TextEditingController _cloneNameController = TextEditingController();
+  final TextEditingController _kakaoTextController = TextEditingController();
+  bool _kakaoHasText = false;
+  final TextEditingController _editPersonaController = TextEditingController();
+  bool _isCreatingClone = false;
+  bool _isEditingClone = false;
+```
+↓ 교체 (`_recentHistory`는 파이프라인에서 쓰므로 **유지**, 나머지 제거):
+```dart
+  // Free Talk 언어 수준 (대화 중 토글 가능: Beginner / Intermediate / Advanced)
+  String _freeTalkLevel = "Intermediate";
+
+  // 대화 컨텍스트용 슬라이딩 히스토리 (파이프라인 1857·1972줄에서 사용 — 유지)
+  List<Map<String, String>> _recentHistory = [];
+
+  // 언어 수준 로드/저장 (SharedPreferences, 커스텀 코드)
+  Future<void> _loadFreeTalkLevel() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString('free_talk_level');
+    if (saved != null && saved.isNotEmpty && mounted) {
+      setState(() => _freeTalkLevel = saved);
+    }
+  }
+
+  Future<void> _setFreeTalkLevel(String level) async {
+    if (mounted) setState(() => _freeTalkLevel = level);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('free_talk_level', level);
+  }
+```
+
+---
+
+## 5. 최종 검증 (새 파일 기준)
+
+```powershell
+cd F:\flutter_project\stealth_vox
+$f = 'lib\custom_code\widgets\routine_mode_free_talk.dart'
+
+# 클론 잔재 0건이어야 함
+Select-String -Path $f -Pattern '_selectedClone|_showCloneDashboard|_showEditCloneDialog|_loadClones|generatePersonaFromChat|generateCloneOpener|streamCloneResponse|_truncatePersona|_cloneSummary|_cloneNameController|_kakaoTextController|_editPersonaController|CloneBrain' | Measure-Object   # → 0
+
+# 신규 심볼 존재 확인
+Select-String -Path $f -Pattern "logMode\('free_talk'\)" | Measure-Object        # → 2
+Select-String -Path $f -Pattern 'streamFreeTalkResponse|generateFreeTalkOpener|_freeTalkLevel|_freeTalkLevelInstruction' | Measure-Object  # → 다수(>5)
+Select-String -Path $f -Pattern "'mode': 'free_talk'" | Measure-Object           # → 3
+
+# _recentHistory 는 유지되어야 함
+Select-String -Path $f -Pattern '_recentHistory' | Measure-Object               # → 3 이상
+
+flutter analyze
+```
+
+`flutter analyze` 무경고/무에러 목표. (`_recentHistory`가 read-only로만 남아 "could be final" 류 info가 뜨면 무시 가능.)
+
+빌드 후 확인 사항:
+- StealthRoom 메뉴 → "Free Talk" 카드 진입.
+- 상단: 글자크기 / 언어(원문) / 잔여시간(기존) + **언어수준 3분할 토글**(신규).
+- 시작 점 탭 → AI가 친근한 한 마디로 먼저 발화 → 자유 대화.
+- 레벨 변경 시 다음 AI 응답부터 어휘 난이도 변화.
+- 뒤로가기 시 대화 있으면 "Free Talk" room_name으로 히스토리 저장, 빈 방이면 삭제.
+- 히스토리 리스트에서 "Free Talk" 필터/아이콘 정상.
+
+---
+
+## 6. 롤백
+
+```powershell
+# 새 파일 제거
+Remove-Item lib\custom_code\widgets\routine_mode_free_talk.dart
+```
+- `stealth_room_master.dart` STEP 1 변경 4곳 되돌림(`RoutineModeClone` 복귀, import 제거, 라벨 복귀).
+- `store_master.dart` `free_talk` 케이스 제거.
+- `chat_history_list_master.dart` 필터칩 'Clone' 복귀.
+- 클론 원본(`routine_mode_clone.dart`)은 처음부터 미변경이므로 그대로 사용 가능.
+- `billing_ticker.dart` / Cloud Functions / RevenueCat: **변경 없음** → 롤백 불필요.
+
+---
+
+## 부록 — 빌링/Firebase 영향 요약
+
+- `billing_ticker.dart`: **변경 없음.** 모드→요율 화이트리스트가 없고, 요율은 `setRate(BillingRate.full)`로 결정됨(복사 시 자동 승계 → Free Talk도 100%). `logMode('free_talk')`는 `usage_logs` 라벨일 뿐.
+- Cloud Functions(`deductRemainingTime`, `revenueCatWebhook`): 모드 무관 → **변경 없음.**
+- RevenueCat: 시간 크레딧 상품/적립만 관여 → **변경 없음.**
+- Firestore: schemaless → 마이그레이션/인덱스 불필요. 쓰는 필드 값만 바뀜(`mode`,`room_name`, `clone_*` 제거).
+- `users/{uid}/clones` 서브컬렉션: 미사용 상태로 남음(무해, 추후 정리 가능).
