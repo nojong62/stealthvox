@@ -47,456 +47,244 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# StepExpand 첫 질문 = 프리톡 기록 기반 + 프리톡 연한 안내 (v1)
+# FREETALK_USER_FIRST_v1 — 유저 먼저(2초 grace) + 오프너 발화
 
-> 목표 ① StepExpand 세션 시작 시, 저장된 **프리톡 유저 발화**에서 주제를 골라 **기본 문장을 유도하는 첫 질문**을 AI가 먼저 던진다. 기록 없으면 **지금처럼** 고정 안내로 시작.
-> 목표 ② 프리톡 기반 질문이 나갈 때는 "기본 문장 말하세요" 안내를 **생략**(질문이 그 역할 대체).
-> 목표 ③ 변주는 **입력 랜덤화 + 최근 안 쓴 방 우선**으로 — 온도는 0.2 유지.
-> 목표 ④ 질문은 **타겟 언어로 발화 + 타겟/오리지널 자막**(다른 AI 발화와 동일). 타겟==오리지널이면 타겟만.
-> 목표 ⑤ 프리톡 화면 빈 채팅 영역에 **연한 안내문** 추가.
+## 목표
+프리톡 불빛 ON 시 **유저가 먼저 말할 수 있게 마이크부터 켜고**, 2초 동안 침묵하면 AI가
+**타겟 언어로 "자유롭게 대화하자"** 한마디를 발화한다. (StepExpand의 User-First 패턴 응용)
 
-대상 파일: `routine_mode_step_expand.dart`, `routine_mode_free_talk.dart`.
-적용 원칙: 텍스트 앵커 기준(줄번호는 드리프트 가능). Box 7·파이프라인 무변경.
+## 대상 파일 (반드시 이 경로만)
+```
+lib/custom_code/widgets/routine_mode_free_talk.dart
+```
+> `lib/custom_code/임시/` 는 FlutterFlow 프리뷰 전용 — 절대 수정 금지.
+
+## 사전 작업 (세이브 포인트)
+```
+git add -A && git commit -m "save before FREETALK_USER_FIRST_v1"
+```
 
 ---
 
-## STEP 1 — `routine_mode_free_talk.dart` : 빈 화면 연한 안내
+## 편집 (반드시 아래→위 순서로, 줄밀림 방지)
 
-`_buildChatList()` 전체 교체.
+### EDIT 1 — 오프너 프롬프트 교체 (약 3276~3283행)
+삭제 시작: `          """You are a warm, friendly conversation partner starting a casual chat.`
+삭제 끝:   `- Avoid a bare "Hello" or "Hi". Say something that invites a reply, for example: "Hey, how's your day going so far?" or "So, what have you been up to lately?"`
 
-before:
+**BEFORE**
 ```dart
-  Widget _buildChatList() {
-    final double bottomPad = MediaQuery.of(context).size.height * 0.55;
-    return ListView.builder(
-      controller: _scrollController,
-      padding: EdgeInsets.fromLTRB(16, 16, 16, bottomPad),
-      itemCount: _localMessages.length,
-      itemBuilder: (context, idx) {
-        _itemKeys[idx] ??= GlobalKey();
-        return Container(
-            key: _itemKeys[idx], child: _buildTextBlock(_localMessages[idx]));
+          """You are a warm, friendly conversation partner starting a casual chat.
+Open with ONE short, natural line that invites the user to talk — like a friend would.
+
+RULES:
+- Speak ONLY in $targetLang. Do NOT use Korean or any other language.
+- ONE sentence only. Under 12 words.
+- Sound natural and friendly, never like an AI or a survey.
+- Avoid a bare "Hello" or "Hi". Say something that invites a reply, for example: "Hey, how's your day going so far?" or "So, what have you been up to lately?"
+```
+
+**AFTER**
+```dart
+          """You are a warm, friendly conversation partner kicking off a casual, no-pressure chat.
+Open with ONE short, natural line that invites the user to chat freely about anything.
+
+RULES:
+- Speak ONLY in $targetLang. Do NOT use Korean or any other language.
+- ONE sentence only. Under 12 words.
+- Relaxed and friendly, like a close friend — never like an AI or a survey.
+- Convey the feeling of "let's just chat freely about whatever you like." For example: "Let's just chat freely — what's on your mind?" or "We can talk about anything you like, so what's up?"
+```
+> `- ${_freeTalkLevelInstruction(level)}` 와 `Output: ...""";` 줄은 그대로 둔다.
+
+---
+
+### EDIT 2 — 탭 핸들러 단순화 (약 1868~1876행)
+삭제 시작: `                  if (_isConversationActive) {`
+삭제 끝:   `                  }`  (else { _stopEverything(); } 닫는 중괄호)
+
+**BEFORE**
+```dart
+                  if (_isConversationActive) {
+                    if (_localMessages.isEmpty) {
+                      _generateAndPlayAiOpener();
+                    } else {
+                      _startDeepgramListening();
+                    }
+                  } else {
+                    _stopEverything();
+                  }
+```
+
+**AFTER**
+```dart
+                  if (_isConversationActive) {
+                    // 🆕 [유저 먼저] 항상 마이크부터 켠다. 첫 턴 2초 grace는
+                    //     _startDeepgramListening 내부에서 처리.
+                    _userHasSpoken = false;
+                    _startDeepgramListening();
+                  } else {
+                    _stopEverything();
+                  }
+```
+
+---
+
+### EDIT 3 — connectAndStart 직후 nudge 가동 + 새 메서드 추가 (약 711~714행)
+삭제 시작: `    _log('🎤 [LISTEN-04]', 'connectAndStart 호출 직전');`
+삭제 끝:   `  }`  (`_startDeepgramListening` 닫는 중괄호, 714행)
+
+**BEFORE**
+```dart
+    _log('🎤 [LISTEN-04]', 'connectAndStart 호출 직전');
+    await _voiceManager!.connectAndStart();
+    _log('🎤 [LISTEN-05]', 'connectAndStart 완료');
+  }
+```
+
+**AFTER**
+```dart
+    _log('🎤 [LISTEN-04]', 'connectAndStart 호출 직전');
+    await _voiceManager!.connectAndStart();
+    _log('🎤 [LISTEN-05]', 'connectAndStart 완료');
+
+    // 🆕 [유저 먼저] 첫 턴이고 유저가 아직 말 안 했으면 2초 grace 후 AI가 운을 뗌
+    if (_localMessages.isEmpty && !_userHasSpoken) {
+      _armOpenerNudge();
+    }
+  }
+
+  // 🆕 [유저 먼저 → 2초 침묵 시 AI 오프너]
+  // 마이크가 살아있는 상태에서 2초 grace. 그 안에 유저가 말하면
+  // (onTranscriptUpdate에서 _userHasSpoken=true + 타이머 취소) 오프너는 안 나가고,
+  // 침묵하면 마이크를 잠깐 내리고 AI가 "자유롭게 대화하자" 한마디.
+  // (오프너 finally에서 _startDeepgramListening으로 청취 재개)
+  void _armOpenerNudge() {
+    _openerNudgeTimer?.cancel();
+    _openerNudgeTimer = Timer(const Duration(seconds: 2), () {
+      if (!mounted || !_isConversationActive) return;
+      if (_userHasSpoken || _localMessages.isNotEmpty) return;
+      _log('💡 [NUDGE]', '2초 침묵 → AI 오프너 발화');
+      _voiceManager?.dispose();
+      _voiceManager = null;
+      _generateAndPlayAiOpener();
+    });
+  }
+```
+
+---
+
+### EDIT 4 — onTranscriptUpdate에서 nudge 취소 (약 697~700행)
+삭제 시작: `      onTranscriptUpdate: (transcript) {`
+삭제 끝:   `      },`
+
+**BEFORE**
+```dart
+      onTranscriptUpdate: (transcript) {
+        _swDeepgram.reset();
+        _swDeepgram.start();
       },
-    );
-  }
-```
-after:
-```dart
-  Widget _buildChatList() {
-    final double bottomPad = MediaQuery.of(context).size.height * 0.55;
-    return Stack(
-      children: [
-        // 🆕 바탕 연한 안내 (대화 시작 전에만 표시)
-        if (_localMessages.isEmpty)
-          Center(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 40),
-              child: Text(
-                '타겟 언어로만 프리톡 하려면\n타겟과 오리지널 언어를 같게 하세요',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.18),
-                  fontSize: 13,
-                  height: 1.5,
-                ),
-              ),
-            ),
-          ),
-        ListView.builder(
-          controller: _scrollController,
-          padding: EdgeInsets.fromLTRB(16, 16, 16, bottomPad),
-          itemCount: _localMessages.length,
-          itemBuilder: (context, idx) {
-            _itemKeys[idx] ??= GlobalKey();
-            return Container(
-                key: _itemKeys[idx],
-                child: _buildTextBlock(_localMessages[idx]));
-          },
-        ),
-      ],
-    );
-  }
 ```
 
----
-
-## STEP 2 — `routine_mode_step_expand.dart`
-
-### 2A. (신규) `StepExpandBrain.streamFreeTalkSeedQuestion` — 온도 0.2
-
-`StepExpandBrain` 클래스 안, `streamOpeningFallbackQuestion` 메서드 **바로 위(또는 아래)** 에 추가.
-출력 계약은 기존 질문들과 동일: **타겟 텍스트 → `\n\n` → 오리지널(모국어) 자막**. 타겟==모국어면 타겟만.
-
+**AFTER**
 ```dart
-  // ==================================================================
-  // 📦 streamFreeTalkSeedQuestion — 프리톡 기록 기반 첫 질문 (온도 0.2)
-  // ------------------------------------------------------------------
-  // 유저의 과거 프리톡 발화 몇 개를 받아, 그중 한 주제로 "기본 문장(seed)"을
-  // 유도하는 질문 1개를 타겟 언어로 생성. 변주는 입력 랜덤화로 확보(온도 0.2).
-  // 출력: <타겟 질문>\n\n<모국어 번역>  (타겟==모국어면 타겟만)
-  // ==================================================================
-  static Stream<String> streamFreeTalkSeedQuestion({
-    required String apiKey,
-    required String myTarget,
-    required List<String> snippets,
-    String myNative = '',
-  }) async* {
-    final client = http.Client();
-    try {
-      final String snippetsBlock =
-          snippets.map((s) => '- $s').join('\n');
-      final String sameLangNote = (myNative.isNotEmpty && myNative == myTarget)
-          ? 'NOTE: $myTarget and the user\'s language are the same — output ONLY the question, with NO blank line and NO translation.\n'
-          : '';
-
-      final String sysPrompt = 'You are a Step Expand grammar coach opening a session.\n'
-          'The user has had earlier free-talk conversations. Here are a few things they said before:\n'
-          '$snippetsBlock\n'
-          '\n'
-          'Choose ONE of these topics and ask ONE short, friendly opening question — in $myTarget — '
-          'that naturally leads the user to say a simple basic sentence about it. '
-          'That basic sentence becomes the SEED they will expand.\n'
-          '\n'
-          '[RULES]\n'
-          '- Reference their past topic naturally so it feels personal (e.g. "Last time you mentioned ...").\n'
-          '- The question must invite a short, simple statement — NOT yes/no, NOT a list.\n'
-          '- Middle-school level vocabulary. Warm and conversational.\n'
-          '- Do NOT give meta-instructions like "make a sentence" or "expand". Just ask the question.\n'
-          '- ONE question only, under 25 words.\n'
-          '$sameLangNote'
-          '\n'
-          '[OUTPUT FORMAT — follow EXACTLY]\n'
-          '- First: the question in $myTarget only.\n'
-          '- Then a blank line (two newlines).\n'
-          '- Then: the same question translated into $myNative.\n'
-          '- No labels, no quotes, no prefixes.';
-
-      final request = http.Request(
-        'POST',
-        Uri.parse('https://api.openai.com/v1/chat/completions'),
-      );
-      request.headers.addAll({
-        'Authorization': 'Bearer $apiKey',
-        'Content-Type': 'application/json; charset=utf-8',
-      });
-      request.body = jsonEncode({
-        'model': 'gpt-4o-mini',
-        'stream': true,
-        'temperature': 0.2,
-        'max_tokens': 160,
-        'messages': [
-          {'role': 'system', 'content': sysPrompt},
-          {
-            'role': 'user',
-            'content':
-                'Ask your opening question now (output in the exact format above).',
-          },
-        ],
-      });
-
-      final response =
-          await client.send(request).timeout(const Duration(seconds: 15));
-      if (response.statusCode != 200) return;
-
-      await for (final line in response.stream
-          .transform(utf8.decoder)
-          .transform(const LineSplitter())) {
-        if (line.startsWith('data: ') && line != 'data: [DONE]') {
-          try {
-            final delta =
-                jsonDecode(line.substring(6))['choices'][0]['delta']['content'];
-            if (delta != null) yield delta.toString();
-          } catch (_) {}
+      onTranscriptUpdate: (transcript) {
+        // 🆕 [유저 먼저] 유저가 입을 떼는 순간 오프너 nudge 취소
+        if (!_userHasSpoken) {
+          _userHasSpoken = true;
+          _openerNudgeTimer?.cancel();
         }
-      }
-    } catch (_) {
-    } finally {
-      client.close();
-    }
-  }
+        _swDeepgram.reset();
+        _swDeepgram.start();
+      },
 ```
 
 ---
 
-### 2B. (신규) `_fetchFreeTalkUserSnippets` — 프리톡 유저 발화 수집 + 중복 회피
+### EDIT 5 — 오프너 무음 방지 가드 (약 530~532행)
+삭제 시작: `  Future<void> _generateAndPlayAiOpener() async {`
+삭제 끝:   `    _isAiOpenerPlaying = true;`
 
-상태 클래스(`_RoutineModeStepExpandState`) 안, `_startSessionWaitingForUserSeed` **바로 위**에 추가.
-
+**BEFORE**
 ```dart
-  // 🆕 프리톡 기록에서 유저(HOST) 발화 2~3개를 랜덤 샘플로 가져온다.
-  //   - 최근 chat_history를 받아 client-side로 free_talk만 필터 (복합 인덱스 회피)
-  //   - 최근에 안 쓴 방 우선 (SharedPreferences로 중복 회피)
-  //   - 기록 없으면 빈 리스트 → 호출부에서 고정 안내로 폴백
-  Future<List<String>> _fetchFreeTalkUserSnippets() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return [];
-    try {
-      final roomsSnap = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .collection('chat_history')
-          .orderBy('created_at', descending: true)
-          .limit(30)
-          .get();
-      final freeTalkRooms = roomsSnap.docs
-          .where((d) => ((d.data()['mode'] ?? '').toString()) == 'free_talk')
-          .take(5)
-          .toList();
-      if (freeTalkRooms.isEmpty) return [];
+  Future<void> _generateAndPlayAiOpener() async {
+    if (_isAiOpenerPlaying) return;
+    _isAiOpenerPlaying = true;
+```
 
-      // 중복 회피: 최근에 안 쓴 방 우선
-      final prefs = await SharedPreferences.getInstance();
-      final usedKey = 'freetalk_seed_used_${user.uid}';
-      final used = Set<String>.from(prefs.getStringList(usedKey) ?? []);
-      var pool = freeTalkRooms.where((d) => !used.contains(d.id)).toList();
-      if (pool.isEmpty) {
-        pool = List.of(freeTalkRooms);
-        await prefs.remove(usedKey); // 전부 소진 → 이력 초기화
-      }
-      pool.shuffle();
-      final room = pool.first;
-      final newUsed = Set<String>.from(prefs.getStringList(usedKey) ?? [])
-        ..add(room.id);
-      await prefs.setStringList(usedKey, newUsed.toList());
-
-      // 해당 방의 HOST(유저) 발화 수집 (원문 우선, 없으면 번역문)
-      final msgSnap = await room.reference.collection('messages').get();
-      final hostTexts = msgSnap.docs
-          .where((d) => ((d.data()['role'] ?? '').toString()) == 'HOST')
-          .map((d) {
-            final data = d.data();
-            final orig = (data['original_text'] ?? '').toString().trim();
-            final tgt = (data['translated_text'] ?? '').toString().trim();
-            return orig.isNotEmpty ? orig : tgt;
-          })
-          .where((s) => s.isNotEmpty)
-          .toList();
-      if (hostTexts.isEmpty) return [];
-
-      hostTexts.shuffle();
-      return hostTexts.take(3).toList(); // 2~3개 랜덤 샘플
-    } catch (e) {
-      _log('⚠️ [FT-SEED]', 'fetch 실패: $e');
-      return [];
+**AFTER**
+```dart
+  Future<void> _generateAndPlayAiOpener() async {
+    if (_isAiOpenerPlaying) return;
+    // 🆕 키 미로딩 상태에서 발화 시도 → 무음 방지
+    if (_openAiKey.isEmpty) {
+      _log('⚠️ [OPENER]', 'OpenAI key not ready — skip opener');
+      return;
     }
-  }
+    _isAiOpenerPlaying = true;
 ```
 
 ---
 
-### 2C. (신규) `_generateAndPlayFreeTalkSeedQuestion` — AI 질문 버블 + 타겟 TTS
+### EDIT 6 — _stopEverything에서 nudge 타이머 정리 (약 513~514행)
+삭제 시작: `    _commitTimer?.cancel(); // 🔧 [v3.4] 대기 중 타이머 정리`
+삭제 끝:   `    _commitTimer = null;`
 
-상태 클래스 안, `_fetchFreeTalkUserSnippets` 바로 아래에 추가.
-렌더 방식은 기존 그래머 질문 경로(HybridTtsPlayer `onChunk`/`onStreamEnd`)와 동일.
-
+**BEFORE**
 ```dart
-  // 🆕 프리톡 기반 첫 질문을 AI 버블로 렌더 + 타겟 TTS 재생 (그래머 질문과 동일 패턴)
-  Future<void> _generateAndPlayFreeTalkSeedQuestion(
-      List<String> snippets) async {
-    final String targetLangName = FFAppState().targetLang.isNotEmpty
-        ? FFAppState().targetLang
-        : 'English';
-    final String nativeLangName =
-        FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : '';
+    _commitTimer?.cancel(); // 🔧 [v3.4] 대기 중 타이머 정리
+    _commitTimer = null;
+```
 
-    if (mounted) {
-      setState(() {
-        _localMessages.add({'role': 'SYSTEM', 'target': '', 'original': ''});
-      });
-      _scrollToBottom();
-    }
-    final int aiIdx = _localMessages.length - 1;
+**AFTER**
+```dart
+    _commitTimer?.cancel(); // 🔧 [v3.4] 대기 중 타이머 정리
+    _commitTimer = null;
+    _openerNudgeTimer?.cancel(); // 🆕 [유저 먼저] 오프너 nudge 정리
+    _openerNudgeTimer = null;
+```
+> `dispose()`는 내부에서 `_stopEverything()`를 호출하므로 별도 수정 불필요.
 
-    final aiStream = StepExpandBrain.streamFreeTalkSeedQuestion(
-      apiKey: _openAiKey,
-      myTarget: targetLangName,
-      myNative: nativeLangName,
-      snippets: snippets,
-    );
+---
 
-    final questionTts = ChunkedTtsFetcher(
-      _openAiKey,
-      _ttsQueueManager,
-      'nova',
-      isUser: false,
-      onLog: _log,
-    );
-    final HybridTtsPlayer questionHybridTts = HybridTtsPlayer(
-      apiKey: _openAiKey,
-      voice: 'nova',
-      onLog: _log,
-    );
-    _ttsQueueManager.setUserTurn(false);
-    _ttsQueueManager.setAiPaused(false);
+### EDIT 7 — 상태 변수 추가 (66행 바로 아래)
+삭제 시작: `  bool _isAiOpenerPlaying = false; // AI 첫 발화 재생 중 여부`
+삭제 끝:   (동일 줄)
 
-    String aiText = "";
-    String aiOriginal = "";
-    String aiBuffer = "";
-    bool hasDoubleNewline = false;
+**BEFORE**
+```dart
+  bool _isAiOpenerPlaying = false; // AI 첫 발화 재생 중 여부
+```
 
-    await for (final chunk in aiStream) {
-      if (!hasDoubleNewline) {
-        aiText += chunk;
-        aiBuffer += chunk;
-        if (aiText.contains('\n\n')) {
-          hasDoubleNewline = true;
-          final sepIdx = aiText.indexOf('\n\n');
-          final afterSep = aiText.substring(sepIdx + 2);
-          aiText = aiText.substring(0, sepIdx);
-          final bufSepIdx = aiBuffer.indexOf('\n\n');
-          if (bufSepIdx >= 0) aiBuffer = aiBuffer.substring(0, bufSepIdx);
-          if (afterSep.isNotEmpty) aiOriginal += afterSep;
-        } else {
-          if (!questionHybridTts.firstChunkFired) {
-            final cutIdx =
-                questionHybridTts.onChunk(aiBuffer, questionTts, _swTTS);
-            if (cutIdx >= 0) aiBuffer = aiBuffer.substring(cutIdx);
-          }
-        }
-      } else {
-        aiOriginal += chunk; // Part2 (모국어) — TTS 금지
-      }
-      if (mounted && aiIdx < _localMessages.length) {
-        setState(() {
-          _localMessages[aiIdx]['target'] = aiText;
-          _localMessages[aiIdx]['original'] = aiOriginal;
-        });
-      }
-      _scrollToBottom();
-    }
+**AFTER**
+```dart
+  bool _isAiOpenerPlaying = false; // AI 첫 발화 재생 중 여부
 
-    await questionHybridTts.onStreamEnd(
-      fullSentence: aiText.trim(),
-      remainderBuffer: aiBuffer,
-      fetcher: questionTts,
-      swSpeechEnd: _swTTS,
-    );
-
-    int ticks = 0;
-    while (questionTts.pendingRequests > 0 || _ttsQueueManager.isBusy) {
-      await Future.delayed(const Duration(milliseconds: 50));
-      if (++ticks > 300) break;
-    }
-  }
+  // 🆕 [유저 먼저] 2초 grace 동안 유저가 말 안 하면 AI가 오프너 발화
+  Timer? _openerNudgeTimer;
+  bool _userHasSpoken = false;
 ```
 
 ---
 
-### 2D. (교체) `_startSessionWaitingForUserSeed` — 프리톡 분기
-
-메서드 전체 교체. 프리톡 기록 있으면 2C로 질문(안내 생략), 없으면 기존 고정 안내.
-
-before:
-```dart
-  Future<void> _startSessionWaitingForUserSeed() async {
-    if (_openAiKey.isEmpty || !mounted) return;
-    if (_isSessionComplete) return;
-    _resetIdleTimer();
-    _isConversationActive = true;
-    if (mounted) setState(() {});
-
-    // 시작 안내 TTS 재생 (OpenAI 질문 생성 API 호출 없음)
-    _ttsQueueManager.setUserTurn(false);
-    _ttsQueueManager.setAiPaused(false);
-
-    final ChunkedTtsFetcher tts = ChunkedTtsFetcher(
-      _openAiKey,
-      _ttsQueueManager,
-      'nova',
-      isUser: false,
-      onLog: _log,
-    );
-    tts.addText('대화하면서 문장을 늘려가고 싶은 기본 문장을 하나 제안해 주세요.');
-
-    // TTS 재생 완료 대기 (최대 10초)
-    int ticks = 0;
-    while ((tts.pendingRequests > 0 || _ttsQueueManager.isBusy) && mounted) {
-      await Future.delayed(const Duration(milliseconds: 50));
-      if (++ticks > 200) break;
-    }
-
-    // 안내 완료 → STT 자동 시작 (유저 기본 문장 대기)
-    if (mounted && _isConversationActive && !_isSessionComplete) {
-      _startDeepgramListening();
-    }
-  }
+## 검증
 ```
-after:
-```dart
-  Future<void> _startSessionWaitingForUserSeed() async {
-    if (_openAiKey.isEmpty || !mounted) return;
-    if (_isSessionComplete) return;
-    _resetIdleTimer();
-    _isConversationActive = true;
-    if (mounted) setState(() {});
-
-    _ttsQueueManager.setUserTurn(false);
-    _ttsQueueManager.setAiPaused(false);
-
-    // 🆕 프리톡 기록 기반 첫 질문 (있으면) — 없으면 고정 안내
-    final List<String> ftSnippets = await _fetchFreeTalkUserSnippets();
-
-    if (ftSnippets.isNotEmpty && mounted && _isConversationActive) {
-      // 프리톡 주제로 AI가 먼저 질문 → "기본 문장 말하세요" 안내 생략
-      await _generateAndPlayFreeTalkSeedQuestion(ftSnippets);
-    } else {
-      // 기존: 고정 안내 TTS
-      final ChunkedTtsFetcher tts = ChunkedTtsFetcher(
-        _openAiKey,
-        _ttsQueueManager,
-        'nova',
-        isUser: false,
-        onLog: _log,
-      );
-      tts.addText('대화하면서 문장을 늘려가고 싶은 기본 문장을 하나 제안해 주세요.');
-      int ticks = 0;
-      while ((tts.pendingRequests > 0 || _ttsQueueManager.isBusy) && mounted) {
-        await Future.delayed(const Duration(milliseconds: 50));
-        if (++ticks > 200) break;
-      }
-    }
-
-    // 안내/질문 완료 → STT 자동 시작 (유저 기본 문장 대기)
-    if (mounted && _isConversationActive && !_isSessionComplete) {
-      _startDeepgramListening();
-    }
-  }
-```
-
----
-
-## 3. 검증
-
-```powershell
-cd F:\flutter_project\stealth_vox
-$s = 'lib\custom_code\widgets\routine_mode_step_expand.dart'
-$f = 'lib\custom_code\widgets\routine_mode_free_talk.dart'
-
-# StepExpand 신규 심볼
-Select-String -Path $s -Pattern 'streamFreeTalkSeedQuestion'    | Measure-Object   # 정의1 + 호출1 = 2
-Select-String -Path $s -Pattern '_fetchFreeTalkUserSnippets'    | Measure-Object   # 정의1 + 호출1 = 2
-Select-String -Path $s -Pattern '_generateAndPlayFreeTalkSeedQuestion' | Measure-Object  # 정의1 + 호출1 = 2
-Select-String -Path $s -Pattern "'temperature': 0.2" | Measure-Object              # 신규 메서드 포함 (>=1)
-Select-String -Path $s -Pattern "mode.*free_talk|isEqualTo|free_talk" | Measure-Object
-
-# 프리톡 안내
-Select-String -Path $f -Pattern '타겟과 오리지널 언어를 같게' | Measure-Object        # 1
-
+grep -c "_openerNudgeTimer" lib/custom_code/widgets/routine_mode_free_talk.dart   # 기대값: 6
+grep -c "_userHasSpoken"     lib/custom_code/widgets/routine_mode_free_talk.dart   # 기대값: 6
+grep -c "_armOpenerNudge"    lib/custom_code/widgets/routine_mode_free_talk.dart   # 기대값: 2
+grep -c "_generateAndPlayAiOpener" lib/custom_code/widgets/routine_mode_free_talk.dart  # 기대값: 2
+grep -c "chat freely"        lib/custom_code/widgets/routine_mode_free_talk.dart   # 기대값: 2
 flutter analyze
 ```
+- `flutter analyze`: 신규 에러 0건이어야 함.
 
-기능 확인:
-- 프리톡 기록 **있을 때** StepExpand 진입 → AI가 과거 주제로 타겟 언어 질문 먼저(자막 동반), "기본 문장 말하세요" 안내 안 나옴. 재진입 시 다른 방/발화로 질문이 **매번 달라짐**.
-- 프리톡 기록 **없을 때** → 기존처럼 "대화하면서 문장을 늘려가고 싶은 기본 문장을 하나 제안해 주세요" 고정 안내.
-- 타겟==오리지널 언어면 질문이 타겟만(자막 없음).
-- 프리톡 화면 대화 시작 전 빈 영역에 연한 안내문 표시 → 대화 시작되면 사라짐.
+## 롤백
+```
+git restore lib/custom_code/widgets/routine_mode_free_talk.dart
+```
 
----
-
-## 4. 롤백
-
-- StepExpand: 추가한 3개(`streamFreeTalkSeedQuestion`, `_fetchFreeTalkUserSnippets`, `_generateAndPlayFreeTalkSeedQuestion`) 삭제 + `_startSessionWaitingForUserSeed` before 블록으로 복귀.
-- Free Talk: `_buildChatList` before 블록으로 복귀.
-- Firestore/RevenueCat/Cloud Functions: **변경 없음**(읽기 전용 조회 + SharedPreferences만 사용).
-
-> 참고: 프리톡 방 조회는 `orderBy('created_at')` 단일 필드 + client-side `mode` 필터라 **복합 인덱스 불필요**. 메시지도 전체 조회 후 `role=='HOST'` client-side 필터라 인덱스 불필요.
+## 동작 체크리스트
+1. 불빛 ON → 즉시 마이크 청취(노란 불빛), 소리 없음.
+2. 2초 안에 말하면 → 오프너 안 나오고 바로 유저 턴 처리.
+3. 2초 침묵하면 → AI가 타겟 언어로 "자유롭게 대화하자" 한마디 → 끝나면 다시 청취.
+4. 키 로딩 전 빠르게 탭 시 → 무음으로 죽지 않고 오프너 스킵(로그만).
