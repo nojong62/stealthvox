@@ -657,7 +657,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
           children: _selectedFilter == 'All' || _selectedFilter == 'Keepers'
               ? [
                   _buildFilterChip('Duo', 'Duo', Icons.people),
-                  _buildFilterChip('Clone', 'Clone', Icons.face),
+                  _buildFilterChip('Free Talk', 'Free Talk', Icons.forum),
                   _buildFilterChip('Roleplay', 'Roleplay', Icons.smart_toy),
                   _buildFilterChip('Expand', 'Expand', Icons.trending_up),
                   _buildKeepersChip(),

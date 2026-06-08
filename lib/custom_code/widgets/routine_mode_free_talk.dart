@@ -22,7 +22,6 @@ import 'package:flutter/services.dart'; // 🔬 [v3.1] Clipboard용
 // ====================================================================
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
 import 'dart:typed_data';
 import 'package:record/record.dart';
 import 'package:web_socket_channel/io.dart';
@@ -40,29 +39,19 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
 
-// ====================================================================
-// 🛡️ [v4] 시나리오 재진입 보존용 static 홀더 (App State 대체)
-//   방을 나갔다 다시 들어와도 유저가 세팅/수정한 시나리오를 유지.
-// ====================================================================
-class _RoleplayScenarioStore {
-  static String situation = '';
-  static String aiRole = '';
-  static String userRole = '';
-}
-
 /// ==================================================================== [Box
 /// 2: 클래스 선언부]
 /// ====================================================================
-class RoutineModeRoleplay extends StatefulWidget {
-  const RoutineModeRoleplay({super.key, this.width, this.height});
+class RoutineModeFreeTalk extends StatefulWidget {
+  const RoutineModeFreeTalk({super.key, this.width, this.height});
   final double? width;
   final double? height;
 
   @override
-  State<RoutineModeRoleplay> createState() => _RoutineModeRoleplayState();
+  State<RoutineModeFreeTalk> createState() => _RoutineModeFreeTalkState();
 }
 
-class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
+class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
   // ====================================================================
   // 📦 [Box 3: 상태 변수 및 초기화]
   // ====================================================================
@@ -74,16 +63,81 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   int _turnCounter = 0;
   String? _sessionDocId; // 🔧 [v3 추가] 첫 대화 후 세션 ID (클론 변경 시 null 리셋)
   DocumentReference? _myHistoryRef; // 🔧 [히스토리] chat_history 문서 참조 (Duo 패턴)
+  bool _isAiOpenerPlaying = false; // AI 첫 발화 재생 중 여부
+
+  // ── Idle Timeout v2 ───────────────────────────────────────────────
+  // 기준: "유저도 AI도 아무 작동이 없는 상태"가 연속 60초 지속되면 pause.
+  //  - AI 작동 = _ttsQueueManager.isBusy (TTS 재생/대기)
+  //  - 유저 작동 = _voiceManager != null (마이크 연결/녹음)
+  // 1초 주기 감시 타이머가 작동 여부를 보고 idle 누적초를 증감한다.
+  Timer? _idlePauseTimer;
+  bool _isIdlePaused = false;
+  int _idleElapsedSec = 0;
+
+  bool get _isSystemBusy {
+    final ttsBusy = _ttsQueueManager.isBusy;
+    final micBusy = _voiceManager != null;
+    return ttsBusy || micBusy;
+  }
+
+  void _resetIdleTimer() {
+    _idleElapsedSec = 0;
+    if (_isIdlePaused) {
+      _isIdlePaused = false;
+      if (mounted) setState(() {});
+      BillingTicker.instance.resume();
+      BillingTicker.instance.logMode('free_talk');
+    }
+    _idlePauseTimer?.cancel();
+    _idlePauseTimer =
+        Timer.periodic(const Duration(seconds: 1), (_) => _idleTick());
+  }
+
+  void _idleTick() {
+    if (!mounted) return;
+    // 🔒 [오토포즈 가드] 최상단 active route가 아니면(다른 페이지가 위에) idle 누적 금지
+    if (ModalRoute.of(context)?.isCurrent == false) {
+      _idleElapsedSec = 0;
+      return;
+    }
+    if (_isIdlePaused) return;
+    // 유저나 AI가 작동 중이면 idle 누적을 멈추고 리셋
+    if (_isSystemBusy) {
+      _idleElapsedSec = 0;
+      return;
+    }
+    _idleElapsedSec++;
+    if (_idleElapsedSec >= 60) {
+      _handleIdlePause();
+    }
+  }
+
+  void _handleIdlePause() {
+    if (!mounted || _isIdlePaused) return;
+    _isIdlePaused = true;
+    _idleElapsedSec = 0;
+    BillingTicker.instance.pause();
+    if (mounted) setState(() {});
+  }
+
+  void _clearIdleTimers() {
+    _idlePauseTimer?.cancel();
+    _idlePauseTimer = null;
+    _idleElapsedSec = 0;
+  }
+  // ──────────────────────────────────────────────────────────────────
+
+  Widget _buildIdleBanner() => const SizedBox.shrink();
+
+  Widget _buildIdleOverlay() => const SizedBox.shrink();
+  // ─────────────────────────────────────────────────────────────────────────
 
   // 🔧 [v3.4 발화 합치기] 유저 더듬거림 대응
-  // speech_final 받아도 바로 파이프라인 시작 안 하고 조건부 대기
+  // speech_final 받아도 바로 파이프라인 시작 안 하고 1.2초 대기
   // 대기 중 새 발화 오면 합쳐서 처리 (최종 한 덩어리로)
   String _pendingTranscript = ''; // 대기 중인 유저 발화 누적
   Timer? _commitTimer; // "진짜 끝났는지" 확정 타이머
-  static const int COMMIT_WAIT_SPEECH_FINAL_MS = 600; // speechFinal=true 시 빠른 응답
-  static const int COMMIT_WAIT_UNCERTAIN_MS = 1100; // UtteranceEnd/speechFinal=false 시 여유 대기
-  bool _lastTurnWasSpeechFinal = false; // 마지막 onTurnEnded 이벤트 타입 기록
-
+  static const int COMMIT_WAIT_MS = 1200; // 발화 합치기 대기 시간
   // 🔬 [v3.1 진단] 화면 로그 뷰어 (팝업에 쌓음)
   final List<String> _debugLogs = [];
   void _log(String tag, String msg) {
@@ -91,27 +145,179 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     final line = '[$ts] $tag $msg';
     print(line);
     _debugLogs.add(line);
+    // 메모리 폭발 방지: 500줄 초과 시 앞에서 50줄 자르기
     if (_debugLogs.length > 500) {
       _debugLogs.removeRange(0, 50);
     }
   }
 
-  // API 응답에서 [Action], (Laughs) 같은 오염 패턴 제거
-  String _cleanText(String text) {
-    return text
-        .replaceAll(RegExp(r'\[.*?\]'), '')
-        .replaceAll(RegExp(r'\(.*?\)'), '')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
+  // 🌐 [v3.1] 로비에서 선택한 언어 이름 → Deepgram/OpenAI 언어 코드 매핑
+  String _mapLanguageToCode(String lang) {
+    switch (lang.trim().toLowerCase()) {
+      case 'korean':
+        return 'ko';
+      case 'japanese':
+        return 'ja';
+      case 'chinese':
+        return 'zh';
+      case 'spanish':
+        return 'es';
+      case 'french':
+        return 'fr';
+      case 'german':
+        return 'de';
+      case 'italian':
+        return 'it';
+      case 'portuguese':
+        return 'pt';
+      case 'russian':
+        return 'ru';
+      case 'vietnamese':
+        return 'vi';
+      case 'thai':
+        return 'th';
+      case 'indonesian':
+        return 'id';
+      case 'hindi':
+        return 'hi';
+      case 'arabic':
+        return 'ar';
+      default:
+        return 'en'; // English 포함
+    }
   }
 
-  // punctuation/공백만 있는 문자열은 TTS 큐에 넣지 않기 위한 필터
-  bool isMeaninglessTtsText(String text) {
-    final t = text.trim();
-    if (t.isEmpty) return true;
-    return RegExp('^[\\s.,!?;:\'"\\[\\]{}()\\-]+\$').hasMatch(t);
+  // Free Talk 언어 수준 (대화 중 토글 가능: Beginner / Intermediate / Advanced)
+  String _freeTalkLevel = "Intermediate";
+
+  // 대화 컨텍스트용 슬라이딩 히스토리 (파이프라인에서 사용 — 유지)
+  List<Map<String, String>> _recentHistory = [];
+
+  // 언어 수준 로드/저장 (SharedPreferences)
+  Future<void> _loadFreeTalkLevel() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString('free_talk_level');
+    if (saved != null && saved.isNotEmpty && mounted) {
+      setState(() => _freeTalkLevel = saved);
+    }
   }
 
+  Future<void> _setFreeTalkLevel(String level) async {
+    if (mounted) setState(() => _freeTalkLevel = level);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('free_talk_level', level);
+  }
+
+  // 오디오 및 UI
+  final List<Map<String, dynamic>> _localMessages = [];
+  final ScrollController _scrollController = ScrollController();
+  final Map<int, GlobalKey> _itemKeys = {};
+  DeepgramV2VoiceManager? _voiceManager;
+  final AudioRecorder _audioRecorder = AudioRecorder();
+  late final TtsQueueManager _ttsQueueManager;
+  HybridTtsPlayer? _hybridTtsPlayer; // [하이브리드] 메인 턴 TTS 플레이어
+
+  // ⏱️ 성능 측정용 초시계
+  final Stopwatch _swDeepgram = Stopwatch();
+  final Stopwatch _swOpenAI = Stopwatch();
+  final Stopwatch _swTTS = Stopwatch();
+  String _debugResult = "⏱️ 대기 중";
+  DateTime? _lastScrollThrottle;
+
+  @override
+  void initState() {
+    super.initState();
+    _ttsQueueManager = TtsQueueManager(onPlayStart: () {
+      if (_swTTS.isRunning) {
+        _swTTS.stop();
+        if (mounted) {
+          setState(() {
+            _debugResult =
+                "⏱️ 확정: ${_swDeepgram.elapsedMilliseconds}ms | 뇌: ${_swOpenAI.elapsedMilliseconds}ms | 입: ${_swTTS.elapsedMilliseconds}ms";
+          });
+        }
+      }
+    });
+
+    _initPermissions();
+    _loadFreeTalkLevel();
+    _fetchKeys();
+    BillingTicker.instance.setRate(BillingRate.full);
+    BillingTicker.instance.resume();
+    BillingTicker.instance.logMode('free_talk');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _resetIdleTimer();
+    });
+  }
+
+  @override
+  void dispose() {
+    _clearIdleTimers();
+    BillingTicker.instance.pause();
+    _stopEverything();
+    _voiceManager?.dispose();
+    _audioRecorder.dispose();
+    _ttsQueueManager.stop();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _initPermissions() async {
+    await [Permission.microphone, Permission.storage].request();
+  }
+
+  Future<void> _fetchKeys() async {
+    try {
+      await FirebaseRemoteConfig.instance.fetchAndActivate();
+      if (mounted) {
+        setState(() {
+          _deepgramKey =
+              FirebaseRemoteConfig.instance.getString('DeepgramAPIKey');
+          _openAiKey = FirebaseRemoteConfig.instance.getString('OpenAIAPIKey');
+        });
+      }
+    } catch (e) {
+      print('❌ Key Load Error: $e');
+    }
+  }
+
+  // ====================================================================
+
+  void _saveRecentHistory(String userText, String aiText) {
+    _recentHistory.add({'role': 'user', 'content': userText});
+    _recentHistory.add({'role': 'assistant', 'content': aiText});
+    while (_recentHistory.length > 4) _recentHistory.removeAt(0);
+  }
+
+  void _saveUserFullSentenceToCache(String text) {
+    if (text.isEmpty) return;
+    TtsCache.get(text, 'nova').then((existing) {
+      if (existing != null) return;
+      http
+          .post(
+        Uri.parse('https://api.openai.com/v1/audio/speech'),
+        headers: {
+          'Authorization': 'Bearer $_openAiKey',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'model': 'tts-1',
+          'input': text,
+          'voice': 'nova',
+          'speed': 1.0,
+        }),
+      )
+          .then((res) {
+        if (res.statusCode == 200) {
+          TtsCache.put(text, 'nova', res.bodyBytes);
+        }
+      }).catchError((e) {
+        debugPrint('[_saveUserFullSentenceToCache] $e');
+      });
+    });
+  }
+
+  // 🔬 [v3.1 진단] 로그 뷰어 다이얼로그 (복사 가능)
   void _showDebugLogDialog() {
     showDialog(
       context: context,
@@ -128,6 +334,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                 height: MediaQuery.of(ctx).size.height * 0.85,
                 child: Column(
                   children: [
+                    // 헤더
                     Padding(
                       padding: const EdgeInsets.all(12),
                       child: Row(
@@ -150,6 +357,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                       ),
                     ),
                     const Divider(color: Colors.white24, height: 1),
+                    // 로그 본문 (선택 가능 텍스트)
                     Expanded(
                       child: Container(
                         color: const Color(0xFF0A0A0A),
@@ -171,6 +379,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                       ),
                     ),
                     const Divider(color: Colors.white24, height: 1),
+                    // 하단 버튼들
                     Padding(
                       padding: const EdgeInsets.all(8),
                       child: Row(
@@ -232,419 +441,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     );
   }
 
-  // 🌐 [v3.1] 로비에서 선택한 언어 이름 → Deepgram/OpenAI 언어 코드 매핑
-  String _mapLanguageToCode(String lang) {
-    switch (lang.trim().toLowerCase()) {
-      case 'korean':
-        return 'ko';
-      case 'japanese':
-        return 'ja';
-      case 'chinese':
-        return 'zh';
-      case 'spanish':
-        return 'es';
-      case 'french':
-        return 'fr';
-      case 'german':
-        return 'de';
-      case 'italian':
-        return 'it';
-      case 'portuguese':
-        return 'pt';
-      case 'russian':
-        return 'ru';
-      case 'vietnamese':
-        return 'vi';
-      case 'thai':
-        return 'th';
-      case 'indonesian':
-        return 'id';
-      case 'hindi':
-        return 'hi';
-      case 'arabic':
-        return 'ar';
-      default:
-        return 'en'; // English 포함
-    }
-  }
-
-  // 🎭 롤플레이 시나리오
-  String _scenarioKeyword = "";
-  String _scenarioSituation = "";
-  String _scenarioAiRole = "";
-  String _scenarioUserRole = "";
-  bool _isGeneratingScenario = false;
-  bool _isAiOpenerPlaying = false; // AI 첫 발화 재생 중 여부
-
-  String get _roleplayPartnerLabel {
-    final local = _scenarioAiRole.trim();
-    if (local.isNotEmpty) return local;
-    final stored = _RoleplayScenarioStore.aiRole.trim();
-    return stored.isNotEmpty ? stored : 'the roleplay partner';
-  }
-
-  String get _roleplayUserLabel {
-    final local = _scenarioUserRole.trim();
-    if (local.isNotEmpty) return local;
-    final stored = _RoleplayScenarioStore.userRole.trim();
-    return stored.isNotEmpty ? stored : 'the user';
-  }
-
-  // ── Idle Timeout v2 ───────────────────────────────────────────────
-  // 기준: "유저도 AI도 아무 작동이 없는 상태"가 연속 60초 지속되면 pause.
-  //  - AI 작동 = _ttsQueueManager.isBusy (TTS 재생/대기)
-  //  - 유저 작동 = _voiceManager != null (마이크 연결/녹음)
-  // 1초 주기 감시 타이머가 작동 여부를 보고 idle 누적초를 증감한다.
-  Timer? _idlePauseTimer;
-  bool _isIdlePaused = false;
-  int _idleElapsedSec = 0;
-
-  bool get _isSystemBusy {
-    final ttsBusy = _ttsQueueManager.isBusy;
-    final micBusy = _voiceManager != null;
-    return ttsBusy || micBusy;
-  }
-
-  void _resetIdleTimer() {
-    _idleElapsedSec = 0;
-    if (_isIdlePaused) {
-      _isIdlePaused = false;
-      if (mounted) setState(() {});
-      BillingTicker.instance.resume();
-      BillingTicker.instance.logMode('roleplay');
-    }
-    _idlePauseTimer?.cancel();
-    _idlePauseTimer =
-        Timer.periodic(const Duration(seconds: 1), (_) => _idleTick());
-  }
-
-  void _idleTick() {
-    if (!mounted) return;
-    // 🔒 [오토포즈 가드] 최상단 active route가 아니면(다른 페이지가 위에) idle 누적 금지
-    if (ModalRoute.of(context)?.isCurrent == false) {
-      _idleElapsedSec = 0;
-      return;
-    }
-    if (_isIdlePaused) return;
-    // 유저나 AI가 작동 중이면 idle 누적을 멈추고 리셋
-    if (_isSystemBusy) {
-      _idleElapsedSec = 0;
-      return;
-    }
-    _idleElapsedSec++;
-    if (_idleElapsedSec >= 60) {
-      _handleIdlePause();
-    }
-  }
-
-  void _handleIdlePause() {
-    if (!mounted || _isIdlePaused) return;
-    _isIdlePaused = true;
-    _idleElapsedSec = 0;
-    BillingTicker.instance.pause();
-    if (mounted) setState(() {});
-  }
-
-  void _clearIdleTimers() {
-    _idlePauseTimer?.cancel();
-    _idlePauseTimer = null;
-    _idleElapsedSec = 0;
-  }
-  // ──────────────────────────────────────────────────────────────────
-
-  Widget _buildIdleBanner() => const SizedBox.shrink();
-
-  Widget _buildIdleOverlay() => const SizedBox.shrink();
-  // ─────────────────────────────────────────────────────────────────────────
-
-  // 오디오 및 UI
-  final List<Map<String, dynamic>> _localMessages = [];
-  final ScrollController _scrollController = ScrollController();
-  final Map<int, GlobalKey> _itemKeys = {};
-  DateTime? _lastScrollThrottle;
-  DeepgramV2VoiceManager? _voiceManager;
-  final AudioRecorder _audioRecorder = AudioRecorder();
-  late final TtsQueueManager _ttsQueueManager;
-  late HybridTtsPlayer hybridTtsPlayer;
-
-  // ⏱️ 성능 측정용 초시계
-  final Stopwatch _swDeepgram = Stopwatch();
-  final Stopwatch _swOpenAI = Stopwatch();
-  final Stopwatch _swTTS = Stopwatch();
-  // ⏱️ latency 세부 측정
-  final Stopwatch _swSpeechEnd = Stopwatch(); // 발화 확정 시점 기준
-  int _msGptFirstToken = 0;
-  int _msGptStreamEnd = 0;
-  String _debugResult = "⏱️ 대기 중";
-
-  @override
-  void initState() {
-    super.initState();
-    _ttsQueueManager = TtsQueueManager(onPlayStart: () {
-      if (_swTTS.isRunning) {
-        _swTTS.stop();
-        if (mounted) {
-          setState(() {
-            _debugResult =
-                "⏱️ 확정: ${_swDeepgram.elapsedMilliseconds}ms | 뇌: ${_swOpenAI.elapsedMilliseconds}ms | 입: ${_swTTS.elapsedMilliseconds}ms";
-          });
-        }
-      }
-    });
-
-    _initPermissions();
-    _fetchKeysAndInit();
-    BillingTicker.instance.setRate(BillingRate.full);
-    BillingTicker.instance.resume();
-    BillingTicker.instance.logMode('roleplay');
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _resetIdleTimer();
-    });
-  }
-
-  /// 나가는 모든 경로에서 호출: chat_json + last_message 저장 (탐색 없이 순수 저장만)
-  Future<void> _forceSaveToFirestore() async {
-    if (_myHistoryRef == null) return;
-    String lastMsg = "대화 내역이 없습니다.";
-    for (int i = _localMessages.length - 1; i >= 0; i--) {
-      final t = (_localMessages[i]['target'] ?? '').toString().trim();
-      if (t.isNotEmpty && t != '...') {
-        lastMsg = t;
-        break;
-      }
-    }
-    try {
-      await _myHistoryRef!.update({
-        'last_message': lastMsg,
-        'last_active': FieldValue.serverTimestamp(),
-        'chat_json': jsonEncode(_localMessages),
-        'is_completed': false,
-      });
-      debugPrint("✅ 히스토리 자동 저장 성공");
-    } catch (e) {
-      debugPrint("❌ 히스토리 저장 중 오류: $e");
-    }
-  }
-
-  @override
-  void dispose() {
-    _clearIdleTimers();
-    BillingTicker.instance.pause();
-    _forceSaveToFirestore();
-    _stopEverything();
-    _voiceManager?.dispose();
-    _audioRecorder.dispose();
-    _ttsQueueManager.stop();
-    _scrollController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _initPermissions() async {
-    await [Permission.microphone, Permission.storage].request();
-  }
-
-  Future<void> _fetchKeysAndInit() async {
-    try {
-      await FirebaseRemoteConfig.instance.fetchAndActivate();
-      if (mounted) {
-        setState(() {
-          _deepgramKey =
-              FirebaseRemoteConfig.instance.getString('DeepgramAPIKey');
-          _openAiKey = FirebaseRemoteConfig.instance.getString('OpenAIAPIKey');
-        });
-        // 🛡️ [v4 가드] 세팅된 시나리오가 있으면 재진입 시 보존, 없으면 새 제안
-        if (_RoleplayScenarioStore.situation.isNotEmpty &&
-            _RoleplayScenarioStore.aiRole.isNotEmpty &&
-            _RoleplayScenarioStore.userRole.isNotEmpty) {
-          setState(() {
-            _scenarioSituation = _RoleplayScenarioStore.situation;
-            _scenarioAiRole = _RoleplayScenarioStore.aiRole;
-            _scenarioUserRole = _RoleplayScenarioStore.userRole;
-            _scenarioKeyword = _RoleplayScenarioStore.situation;
-          });
-        } else {
-          _generateScenario();
-        }
-      }
-    } catch (e) {
-      print('❌ Key Load Error: $e');
-    }
-  }
-
-  // ====================================================================
-  // 📦 [Box 4-A: 드라마/영화 장면 기반 시나리오 자동 생성]
-  // ====================================================================
-  Future<void> _generateScenario() async {
-    if (_openAiKey.isEmpty || _isGeneratingScenario) return;
-    setState(() => _isGeneratingScenario = true);
-    try {
-      final result = await RoleplayBrain.generateDramaticScenario(_openAiKey);
-      if (mounted && result != null) {
-        setState(() {
-          _scenarioKeyword = result['situation'] ?? '';
-          _scenarioSituation = result['situation'] ?? '';
-          _scenarioAiRole = result['ai_role'] ?? '';
-          _scenarioUserRole = result['user_role'] ?? '';
-          _sessionDocId = null;
-          _myHistoryRef = null;
-          _localMessages.clear();
-          _isConversationActive = false;
-        });
-        // 🛡️ [v4] 재진입 보존용 홀더 동기화
-        _RoleplayScenarioStore.situation = _scenarioSituation;
-        _RoleplayScenarioStore.aiRole = _scenarioAiRole;
-        _RoleplayScenarioStore.userRole = _scenarioUserRole;
-      }
-    } catch (e) {
-      print('❌ 시나리오 생성 에러: $e');
-    } finally {
-      if (mounted) setState(() => _isGeneratingScenario = false);
-    }
-  }
-
-  // ====================================================================
-  // 📦 [Box 4: 시나리오 설정 — 유저 직접 입력]
-  // ====================================================================
-  void _showSituationInputSheet() {
-    if (_isConversationActive) return;
-    final situationCtrl = TextEditingController(text: _scenarioSituation);
-    final aiRoleCtrl = TextEditingController(text: _scenarioAiRole);
-    final userRoleCtrl = TextEditingController(text: _scenarioUserRole);
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, _) => Padding(
-          padding: EdgeInsets.only(
-              bottom: MediaQuery.of(ctx).viewInsets.bottom),
-          child: Container(
-            decoration: const BoxDecoration(
-              color: Color(0xFF0F0E1A),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-            ),
-            padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
-            child: SingleChildScrollView(
-              child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 36, height: 4,
-                    decoration: BoxDecoration(
-                        color: Colors.white24,
-                        borderRadius: BorderRadius.circular(2)),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                const Text('상황 설정',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold)),
-                const SizedBox(height: 4),
-                const Text('상황과 역할을 입력하면 바로 롤플레이가 시작됩니다.',
-                    style: TextStyle(color: Colors.white38, fontSize: 12)),
-                const SizedBox(height: 20),
-                _inputField(situationCtrl, '상황 (10-15자)', '예: 숨겨둔 돈다발 들킴'),
-                const SizedBox(height: 12),
-                _inputField(aiRoleCtrl, '상대 역할', '예: 화난 배우자'),
-                const SizedBox(height: 12),
-                _inputField(userRoleCtrl, '내 역할', '예: 당황한 남편'),
-                const SizedBox(height: 24),
-                SizedBox(
-                  width: double.infinity,
-                  child: GestureDetector(
-                    onTap: () {
-                      final sit = situationCtrl.text.trim();
-                      final ai = aiRoleCtrl.text.trim();
-                      final user = userRoleCtrl.text.trim();
-                      if (sit.isEmpty || ai.isEmpty || user.isEmpty) return;
-                      Navigator.pop(ctx);
-                      setState(() {
-                        _scenarioSituation = sit;
-                        _scenarioAiRole = ai;
-                        _scenarioUserRole = user;
-                        _scenarioKeyword = sit;
-                        _sessionDocId = null;
-                        _myHistoryRef = null;
-                        _localMessages.clear();
-                        _isConversationActive = false;
-                      });
-                      // 🛡️ [v4] 유저 수정값 보존용 홀더 동기화
-                      _RoleplayScenarioStore.situation = sit;
-                      _RoleplayScenarioStore.aiRole = ai;
-                      _RoleplayScenarioStore.userRole = user;
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF7C3AED), Color(0xFF9333EA)],
-                        ),
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: const Center(
-                        child: Text('확인',
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold)),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  },
-);
-  }
-
-  Widget _inputField(TextEditingController ctrl, String label, String hint) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label,
-            style: const TextStyle(
-                color: Color(0xFFA78BFA),
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.8)),
-        const SizedBox(height: 6),
-        TextField(
-          controller: ctrl,
-          style: const TextStyle(color: Colors.white, fontSize: 14),
-          decoration: InputDecoration(
-            hintText: hint,
-            hintStyle: const TextStyle(color: Colors.white24, fontSize: 13),
-            filled: true,
-            fillColor: const Color(0xFF1A1830),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: Colors.white12),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: Colors.white12),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: Color(0xFF7C3AED)),
-            ),
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          ),
-        ),
-      ],
-    );
-  }
 
 // ====================================================================
 // 📦 [Box 5: Deepgram + Relay Pipeline] ← 통신로직 박스코드와 완전 일치
@@ -652,22 +448,11 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
-        // 첫 메시지(오프너)일 때는 상단 고정 → 시작 대사 전체가 보이게
         if (_localMessages.length <= 1) return;
         _scrollController.animateTo(_scrollController.position.maxScrollExtent,
             duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
       }
     });
-  }
-
-  void _scrollToBottomThrottled() {
-    final now = DateTime.now();
-    if (_lastScrollThrottle == null ||
-        now.difference(_lastScrollThrottle!) >=
-            const Duration(milliseconds: 250)) {
-      _lastScrollThrottle = now;
-      _scrollToBottom();
-    }
   }
 
   // 현재 AI 버블을 화면 중앙에 고정 (스트리밍 중 밀림 방지)
@@ -687,12 +472,19 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     });
   }
 
+  void _scrollToBottomThrottled() {
+    final now = DateTime.now();
+    if (_lastScrollThrottle == null ||
+        now.difference(_lastScrollThrottle!) >=
+            const Duration(milliseconds: 250)) {
+      _lastScrollThrottle = now;
+      _scrollToBottom();
+    }
+  }
+
   // 현재 대사를 화면 맨 위에 고정 — Scrollable.ensureVisible 기반
   void _scrollToCurrentTop(int index) {
-    final role = (index >= 0 && index < _localMessages.length)
-        ? (_localMessages[index]['role'] ?? '')
-        : '';
-    _log('🧭 [SCROLL-TOP]', 'index=$index role=$role');
+    _log('🧭 [SCROLL-TOP]', 'index=$index');
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final key = _itemKeys[index];
       if (key == null) return;
@@ -705,6 +497,14 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         curve: Curves.easeOut,
       );
     });
+  }
+
+  String _cleanText(String text) {
+    return text
+        .replaceAll(RegExp(r'\[.*?\]'), '')
+        .replaceAll(RegExp(r'\(.*?\)'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
   }
 
   void _stopEverything() {
@@ -722,22 +522,13 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   // ====================================================================
   // 📦 [AI 첫 발화 — AI가 먼저 대화 시작]
   // ====================================================================
-  // 🎯 [롤플레이 대화 시작 3원칙] (코드 정책 요약)
-  //
-  // 원칙 1. AI가 항상 먼저 말을 시작한다.
-  //         유저가 마이크 버튼을 누르면 AI가 오프닝 멘트를 먼저 발화.
-  //         AI 발화 완료 후 마이크 청취가 시작됨.
-  //
-  // 원칙 2. 타겟 언어(targetLang)로만 말한다.
-  //         ai_role / user_role 이름이 한글로 주어져도
-  //         실제 AI 대사는 반드시 targetLang으로만 출력.
-  //         한국어 등 모국어를 절대 섞지 않는다.
-  //
-  // 원칙 3. 해당 역할이 실제 현실에서 가장 먼저 할 법한 자연스러운 말로 시작.
-  //         어색한 학습용 인사 X, 그 역할·상황에 딱 맞는 현실적 구어체 O.
+  // 클론 대화 시작 원칙:
+  //   1. AI가 항상 먼저 말한다 — 화면 진입 시 클론이 자동으로 먼저 발화.
+  //   2. 타겟 언어로만 말한다 — 한국어 절대 혼용 금지.
+  //   3. 클론 페르소나에 충실한 자연스러운 첫 마디 (AI 티 내지 않음).
   // ====================================================================
   Future<void> _generateAndPlayAiOpener() async {
-    if (_isAiOpenerPlaying || _scenarioAiRole.isEmpty) return;
+    if (_isAiOpenerPlaying) return;
     _isAiOpenerPlaying = true;
     if (mounted) setState(() {});
 
@@ -755,8 +546,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       final int aiIndex = _localMessages.length - 1;
 
       String openerText = '';
-      String openerBuffer = '';
-      final RegExp splitPattern = RegExp(r'[,\.?!;:。、！？…，；：\n]');
+      // String openerBuffer = ''; // [하이브리드 전환] HybridTtsPlayer.onChunk로 대체 (롤백 가능)
+      // final RegExp splitPattern = RegExp(r'[,\.?!;:。、！？…，；：\n]'); // [하이브리드 전환]
 
       final ChunkedTtsFetcher aiTtsFetcher = ChunkedTtsFetcher(
         _openAiKey,
@@ -765,48 +556,50 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         isUser: false,
         onLog: _log,
       );
+      final openerHybrid = HybridTtsPlayer(
+        _openAiKey,
+        _ttsQueueManager,
+        aiTtsFetcher,
+        "nova",
+        onLog: _log,
+      );
       _ttsQueueManager.setUserTurn(false);
       _ttsQueueManager.setAiPaused(false);
 
-      await for (final chunk in RoleplayBrain.generateAiOpener(
+      await for (final chunk in FreeTalkBrain.generateFreeTalkOpener(
         apiKey: _openAiKey,
-        situation: _scenarioSituation,
-        aiRole: _scenarioAiRole,
-        userRole: _scenarioUserRole,
         targetLang: targetLangName,
+        level: _freeTalkLevel,
       )) {
         if (!_isConversationActive) break;
         openerText += chunk;
-        openerBuffer += chunk;
+        // openerBuffer += chunk; // [하이브리드 전환]
         if (mounted)
           setState(() => _localMessages[aiIndex]['target'] = openerText);
 
+        openerHybrid
+            .onChunk(chunk); // [하이브리드 전환] HybridTtsPlayer.onChunk로 대체 (롤백 가능)
+
+        /* [하이브리드 전환] HybridTtsPlayer.onChunk로 대체 (롤백 가능)
         final matches = splitPattern.allMatches(openerBuffer).toList();
         if (matches.isNotEmpty) {
           final int lastIdx = matches.last.end;
           final String toSpeak = openerBuffer.substring(0, lastIdx).trim();
           openerBuffer = openerBuffer.substring(lastIdx);
-          if (toSpeak.isNotEmpty) {
-            final cleaned = _cleanText(toSpeak);
-            if (isMeaninglessTtsText(cleaned)) {
-              _log('🔊 [TTS-SKIP] [AI]', '의미 없는 TTS 조각 skip: "$cleaned"');
-            } else {
-              aiTtsFetcher.addText(cleaned);
-            }
-          }
+          if (toSpeak.isNotEmpty) aiTtsFetcher.addText(_cleanText(toSpeak));
         }
+        */
       }
-      if (openerBuffer.trim().isNotEmpty) {
-        final cleanedOpener = _cleanText(openerBuffer.trim());
-        if (isMeaninglessTtsText(cleanedOpener)) {
-          _log('🔊 [TTS-SKIP] [AI]', '의미 없는 TTS 조각 skip: "$cleanedOpener"');
-        } else {
-          aiTtsFetcher.addText(cleanedOpener);
-        }
-      }
+      // [하이브리드 전환] HybridTtsPlayer.onStreamEnd로 대체 (롤백 가능)
+      await openerHybrid.onStreamEnd(
+          fullSentence: _cleanText(openerText.trim()));
+      /* [하이브리드 전환] HybridTtsPlayer.onChunk로 대체 (롤백 가능)
+      if (openerBuffer.trim().isNotEmpty)
+        aiTtsFetcher.addText(_cleanText(openerBuffer.trim()));
+      */
 
-      // 역번역 (한국어 자막)
-      RoleplayBrain.generateCleanOriginal(
+      // AI original 생성 (UI 자막 선반영)
+      FreeTalkBrain.generateCleanOriginal(
               apiKey: _openAiKey, englishText: openerText)
           .then((cleanKorean) {
         if (mounted && _localMessages.length > aiIndex) {
@@ -824,7 +617,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 
       // chat_history 저장
       if (openerText.isNotEmpty) {
-        final String aiOriginal = await RoleplayBrain.generateCleanOriginal(
+        final String aiOriginal = await FreeTalkBrain.generateCleanOriginal(
             apiKey: _openAiKey, englishText: openerText);
         if (mounted && _localMessages.length > aiIndex) {
           setState(() => _localMessages[aiIndex]['original'] = aiOriginal);
@@ -838,7 +631,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         ]);
       }
     } catch (e) {
-      _log('❌ [OPENER-ERR]', 'AI Opener Error: $e');
+      _log('❌ [OPENER-ERR]', 'Clone Opener Error: $e');
     } finally {
       _isAiOpenerPlaying = false;
       if (mounted && _isConversationActive) {
@@ -856,12 +649,11 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         break;
       }
     }
+    if (lastSystemIdx < 0) return;
 
-    // SYSTEM 앞(없으면 전체 끝)에서 가장 최근 HOST 버블 탐색
+    // SYSTEM 바로 앞의 HOST(유저) 버블 인덱스 탐색
     int lastHostIdx = -1;
-    int searchFrom =
-        lastSystemIdx >= 0 ? lastSystemIdx - 1 : _localMessages.length - 1;
-    for (int i = searchFrom; i >= 0; i--) {
+    for (int i = lastSystemIdx - 1; i >= 0; i--) {
       if (_localMessages[i]['role'] == 'HOST') {
         lastHostIdx = i;
         break;
@@ -869,26 +661,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     }
 
     // 인덱스가 큰 것부터 제거 (인덱스 밀림 방지)
-    if (lastSystemIdx >= 0) _localMessages.removeAt(lastSystemIdx);
+    _localMessages.removeAt(lastSystemIdx);
     if (lastHostIdx >= 0) _localMessages.removeAt(lastHostIdx);
-  }
-
-  // AI가 응답하기 전에 중단된 "고아 HOST 버블" 제거
-  // 새 턴 시작 전 호출하여 직전 오인식/중단 메시지를 정리
-  void _removeOrphanedHostBubbles() {
-    int lastSystemIdx = -1;
-    for (int i = _localMessages.length - 1; i >= 0; i--) {
-      if (_localMessages[i]['role'] == 'SYSTEM') {
-        lastSystemIdx = i;
-        break;
-      }
-    }
-    // 마지막 SYSTEM 이후(또는 SYSTEM 없으면 전체)의 HOST 버블 역순 제거
-    for (int i = _localMessages.length - 1; i > lastSystemIdx; i--) {
-      if (_localMessages[i]['role'] == 'HOST') {
-        _localMessages.removeAt(i);
-      }
-    }
   }
 
   Future<void> _startDeepgramListening() async {
@@ -899,10 +673,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       setState(() {
         _debugResult = "⏱️ 듣는 중...";
         _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-        _localMessages
-            .add({'role': 'HOST_TEMP', 'target': '...', 'type': 'user_input'});
       });
-      // HOST_TEMP("...")는 스크롤 트리거 없음 — 실제 HOST 버블 등장 시 스크롤
+      // HOST_TEMP 버블은 스크롤 트리거 없음 — 실제 HOST 버블 등장 시 스크롤
     }
 
     _log('🎤 [LISTEN-01]', '_startDeepgramListening 진입, VoiceManager 생성');
@@ -926,9 +698,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         _swDeepgram.reset();
         _swDeepgram.start();
       },
-      onTurnEnded: (transcript, {bool speechFinal = false}) {
-        _lastTurnWasSpeechFinal = speechFinal;
-        _log('🔀 [LISTEN-03]', 'onTurnEnded 콜백 수신: "$transcript" speechFinal=$speechFinal');
+      onTurnEnded: (transcript) {
+        _log('🔀 [LISTEN-03]', 'onTurnEnded 콜백 수신: "$transcript"');
         _swDeepgram.stop();
         _stopMicAndProcess(transcript);
       },
@@ -942,16 +713,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     _log('🎤 [LISTEN-05]', 'connectAndStart 완료');
   }
 
-  // speechFinal 여부에 따른 조건부 commit 대기 시간 계산
-  int _getCommitWaitMs() {
-    if (_lastTurnWasSpeechFinal) {
-      return COMMIT_WAIT_SPEECH_FINAL_MS;
-    }
-    return COMMIT_WAIT_UNCERTAIN_MS;
-  }
-
-  // 🔧 [v3.4] Deepgram speech_final/UtteranceEnd 수신 시 호출됨
-  // 조건부 대기창 안에서 추가 발화 합치기 → 완전히 끝나면 파이프라인 시작
+  // 🔧 [v3.4] Deepgram speech_final 수신 시 호출됨
+  // 1.2초 대기창 안에서 추가 발화 합치기 → 완전히 끝나면 파이프라인 시작
   void _stopMicAndProcess(String transcript) async {
     _resetIdleTimer();
     final clean = transcript.trim();
@@ -962,15 +725,13 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       return;
     }
 
-    final waitMs = _getCommitWaitMs();
-
     // 🔧 기존 대기 중인 발화가 있으면 공백으로 연결 (더듬거림 합치기)
     if (_pendingTranscript.isEmpty) {
       _pendingTranscript = clean;
-      _log('🔀 [STOP-03]', '신규 발화 접수. ${waitMs}ms 조건부 대기창 시작 speechFinal=$_lastTurnWasSpeechFinal');
+      _log('🔀 [STOP-03]', '신규 발화 접수. 1.2초 대기창 시작');
     } else {
       _pendingTranscript = '$_pendingTranscript $clean';
-      _log('🔀 [STOP-04]', '합치기: "$_pendingTranscript" (${waitMs}ms 조건부 대기창 리셋)');
+      _log('🔀 [STOP-04]', '합치기: "$_pendingTranscript" (1.2초 대기창 리셋)');
     }
 
     // UI: 접수된 발화를 HOST_TEMP 풍선에 실시간 반영
@@ -989,9 +750,9 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     // 기존 타이머 취소 (새 발화가 왔으므로 대기창 리셋)
     _commitTimer?.cancel();
 
-    // 조건부 대기 후 파이프라인 시작 예약
+    // 1.2초 후 파이프라인 시작 예약
     _commitTimer = Timer(
-      Duration(milliseconds: waitMs),
+      const Duration(milliseconds: COMMIT_WAIT_MS),
       () => _commitAndProcess(),
     );
   }
@@ -1009,8 +770,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     }
 
     _log('🔀 [COMMIT-01]', '확정: "$committed" → 파이프라인 시작');
-    _swSpeechEnd.reset();
-    _swSpeechEnd.start();
 
     // 마이크/VoiceManager 정리
     await _voiceManager?.dispose();
@@ -1035,8 +794,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 // ====================================================================
   String _retryPhrase(String lang) {
     switch (lang.toLowerCase()) {
-      case 'korean':
-        return '다시 말씀해 주세요.';
       case 'japanese':
         return 'もう一度お願いします。';
       case 'chinese':
@@ -1106,6 +863,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         setState(
             () => _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP'));
       if (_isConversationActive) {
+        // 너무 짧아서 인식 실패 → 다시 말해 달라 요청
         if (finalTranscript.length <= 2) {
           _speakRetryAndListen();
         } else {
@@ -1122,25 +880,60 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       if (mounted) {
         setState(() {
           _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-          _removeOrphanedHostBubbles(); // AI 응답 없이 중단된 이전 HOST 버블 제거
           _localMessages.add({'role': 'HOST', 'target': '', 'original': ''});
         });
-        _scrollToBottom();
       }
 
       int hostIndex = _localMessages.length - 1;
+      // HOST 말풍선은 상단 고정 — 사용자 발화가 화면 안에 안정적으로 보이도록
+      _scrollToCurrentTop(hostIndex);
 
-      // 완성된 턴만 컨텍스트에 포함 (미완성 '...' 제외)
-      var validMsgs = _localMessages.where((m) {
-        if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
-        final target = (m['target'] ?? '').toString().trim();
-        return target.isNotEmpty && target != '...';
-      }).toList();
-      if (validMsgs.length > 10)
-        validMsgs = validMsgs.sublist(validMsgs.length - 10);
-      String contextStr = validMsgs
-          .map((m) => "${m['role'] == 'HOST' ? 'User' : 'AI'}: ${m['target']}")
-          .join("\n");
+      // 컨텍스트 구성: 장기 기억(recent_history) 우선, 없으면 localMessages fallback
+      String contextStr;
+      if (_recentHistory.isNotEmpty) {
+        contextStr = _recentHistory
+            .map((m) =>
+                '${m['role'] == 'user' ? 'User' : 'AI'}: ${m['content']}')
+            .join('\n');
+      } else {
+        var validMsgs = _localMessages.where((m) {
+          if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
+          final target = (m['target'] ?? '').toString().trim();
+          return target.isNotEmpty && target != '...';
+        }).toList();
+        if (validMsgs.length > 10)
+          validMsgs = validMsgs.sublist(validMsgs.length - 10);
+        contextStr = validMsgs
+            .map(
+                (m) => "${m['role'] == 'HOST' ? 'User' : 'AI'}: ${m['target']}")
+            .join("\n");
+      }
+
+      // 🧩 [A] 클론 응답용 구조화 히스토리(오프너 포함, 역할별 교대 턴).
+      //   소스는 화면 메시지(_localMessages): HOST→user, SYSTEM(클론 발화)→assistant.
+      //   빈 target / '...' / HOST_TEMP 는 제외. 현재 입력(빈 HOST 버블)은 자동 제외되고,
+      List<Map<String, dynamic>> cloneHistory = _localMessages
+          .where((m) {
+            final role = (m['role'] ?? '').toString();
+            if (role != 'HOST' && role != 'SYSTEM') return false;
+            final t = (m['target'] ?? '').toString().trim();
+            return t.isNotEmpty && t != '...';
+          })
+          .map<Map<String, dynamic>>((m) => <String, dynamic>{
+                'role': (m['role'] == 'HOST') ? 'user' : 'assistant',
+                'content': (m['target'] ?? '').toString().trim(),
+              })
+          .toList();
+      // 화면 메시지가 비어 있으면(예: 세션 복원 직후) 장기기억으로 폴백
+      if (cloneHistory.isEmpty && _recentHistory.isNotEmpty) {
+        cloneHistory = _recentHistory
+            .map<Map<String, dynamic>>((m) => <String, dynamic>{
+                  'role': (m['role'] == 'assistant') ? 'assistant' : 'user',
+                  'content': (m['content'] ?? '').toString().trim(),
+                })
+            .where((m) => (m['content'] as String).isNotEmpty)
+            .toList();
+      }
 
       String userTargetText = "";
       String userBuffer = "";
@@ -1161,17 +954,14 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           ? FFAppState().targetLang
           : 'English';
 
-      final userStream = RoleplayBrain.streamUserTranslation(
+      final userStream = FreeTalkBrain.streamUserTranslation(
         apiKey: _openAiKey,
         textOriginal: finalTranscript,
         targetLang: targetLangName,
         contextStr: contextStr,
-        userRole: _scenarioUserRole,
-        situation: _scenarioSituation,
       );
 
       bool evaporated = false;
-      bool clarified = false; // 주어/목적어 모호 → AI 되묻기
       bool corrected = false; // 유저가 AI의 오해를 정정 → 직전 교환 삭제 후 재처리
       bool firstChunkSent = false;
       await for (String chunk in userStream) {
@@ -1190,13 +980,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           _log('🔄 [CORRECTION]', '정정 감지 → 직전 교환 삭제 후 재시작');
           break;
         }
-
-        // 되묻기 감지: 주어/목적어 모호 → AI In-Character 되묻기
-        if (userTargetText.contains("[CLARIFY]")) {
-          clarified = true;
-          _log('❓ [CLARIFY]', '되묻기 감지 → clarification 처리');
-          break;
-        }
         if (mounted)
           setState(() => _localMessages[hostIndex]['target'] = userTargetText);
 
@@ -1207,13 +990,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           String toSpeak = userBuffer.substring(0, lastIdx).trim();
           userBuffer = userBuffer.substring(lastIdx);
           if (toSpeak.isNotEmpty) {
-            final cleanedChunk = _cleanText(toSpeak);
-            if (isMeaninglessTtsText(cleanedChunk)) {
-              _log('🔊 [TTS-SKIP] [USER]', '의미 없는 TTS 조각 skip: "$cleanedChunk"');
-            } else {
-              userTtsFetcher.addText(cleanedChunk);
-              firstChunkSent = true;
-            }
+            userTtsFetcher.addText(toSpeak);
+            firstChunkSent = true;
           }
         }
         if (!firstChunkSent) {
@@ -1223,14 +1001,9 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
               .where((w) => w.isNotEmpty)
               .length;
           if (wordCount >= 4) {
-            final cleanedBuf = _cleanText(userBuffer.trim());
-            if (isMeaninglessTtsText(cleanedBuf)) {
-              _log('🔊 [TTS-SKIP] [USER]', '의미 없는 TTS 조각 skip: "$cleanedBuf"');
-            } else {
-              userTtsFetcher.addText(cleanedBuf);
-              firstChunkSent = true;
-            }
+            userTtsFetcher.addText(_cleanText(userBuffer.trim()));
             userBuffer = "";
+            firstChunkSent = true;
           }
         }
       }
@@ -1255,7 +1028,12 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
             }
             _removeLastExchange(); // 직전 HOST(오해 발화)+SYSTEM(틀린 응답) 제거
           });
-          if (_localMessages.isNotEmpty) _scrollToBottom();
+          _scrollToBottom();
+        }
+        // 🔑 장기기억에서도 직전 교환 제거 — 안 하면 재처리 시 오해가 contextStr로 재주입됨
+        if (_recentHistory.length >= 2) {
+          _recentHistory.removeRange(
+              _recentHistory.length - 2, _recentHistory.length);
         }
         _ttsQueueManager.stop();
         _ttsQueueManager.setUserTurn(false);
@@ -1264,62 +1042,19 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         return;
       }
 
-      // ❓ [CLARIFY] 유저 발화 주어/목적어 모호 → In-Character 되묻기 + STT 재시작
-      if (clarified) {
-        _turnCounter--;
-        final clarifyText =
-            userTargetText.replaceFirst(RegExp(r'^\[CLARIFY\]\s*'), '');
-        if (mounted) {
-          setState(() {
-            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-            if (hostIndex < _localMessages.length)
-              _localMessages.removeAt(hostIndex);
-            _localMessages.add(
-                {'role': 'SYSTEM', 'target': clarifyText, 'original': ''});
-          });
-          _scrollToBottom();
-        }
-        _ttsQueueManager.stop();
-        _ttsQueueManager.setUserTurn(false);
-        _ttsQueueManager.setAiPaused(false);
-        final clarifyTts = ChunkedTtsFetcher(
-          _openAiKey,
-          _ttsQueueManager,
-          'nova',
-          isUser: false,
-          onLog: _log,
-        );
-        clarifyTts.addText(clarifyText);
-        int waitTicks = 0;
-        while ((clarifyTts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
-            mounted) {
-          await Future.delayed(const Duration(milliseconds: 50));
-          if (++waitTicks > 200) break;
-        }
-        if (mounted && _isConversationActive) _startDeepgramListening();
-        return;
-      }
-
-      if (userBuffer.trim().isNotEmpty) {
-        final cleanedRem = _cleanText(userBuffer.trim());
-        if (isMeaninglessTtsText(cleanedRem)) {
-          _log('🔊 [TTS-SKIP] [USER]', '의미 없는 TTS 조각 skip: "$cleanedRem"');
-        } else {
-          userTtsFetcher.addText(cleanedRem);
-        }
-      }
+      if (userBuffer.trim().isNotEmpty)
+        userTtsFetcher.addText(userBuffer.trim());
 
       // 🔧 [v3.7] 유저 통문장 TtsCache 백그라운드 저장 (히스토리 HIT 유도)
       //   - 청크별 캐시만으로는 히스토리에서 통문장 GET이 MISS됨
       //   - fire-and-forget: 유저 재생 흐름과 무관하게 백그라운드 처리
       //   - voice/speed는 히스토리 _playRhythmAudio와 동일하게 "nova", 1.0 고정
-      //   - _cleanText 적용: translated_text와 동일한 키로 저장
-      _saveUserFullSentenceToCache(_cleanText(userTargetText.trim()));
+      _saveUserFullSentenceToCache(userTargetText.trim());
 
-      // 유저 역번역 (백그라운드, Future 보관 → 저장 시 await)
-      final userOriginalFuture = RoleplayBrain.generateCleanOriginal(
-          apiKey: _openAiKey, englishText: userTargetText);
-      userOriginalFuture.then((cleanKorean) {
+      // 유저 original 생성 (백그라운드)
+      FreeTalkBrain.generateCleanOriginal(
+              apiKey: _openAiKey, englishText: userTargetText)
+          .then((cleanKorean) {
         if (mounted && _localMessages.length > hostIndex) {
           setState(() => _localMessages[hostIndex]['original'] = cleanKorean);
         }
@@ -1333,7 +1068,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       if (mounted) {
         setState(() => _localMessages
             .add({'role': 'SYSTEM', 'target': '', 'original': ''}));
-        // 빈 AI 버블은 스크롤 없음 — 첫 유효 청크 시 _scrollToCurrentTop 호출
+        _scrollToCurrent(_localMessages.length - 1);
       }
       int aiIndex = _localMessages.length - 1;
 
@@ -1349,17 +1084,21 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         isUser: false, // AI 큐로 분리
         onLog: _log,
       );
-      hybridTtsPlayer = HybridTtsPlayer(
-        apiKey: _openAiKey,
+      // [하이브리드 전환] 턴 시작 시 리셋 + 새 인스턴스 생성
+      _hybridTtsPlayer?.reset();
+      _hybridTtsPlayer = HybridTtsPlayer(
+        _openAiKey,
+        _ttsQueueManager,
+        aiTtsFetcher,
+        "nova",
         onLog: _log,
       );
-      hybridTtsPlayer.reset();
 
       String latestContextStr = contextStr.isEmpty
           ? "User: $userTargetText"
           : "$contextStr\nUser: $userTargetText";
       String aiTargetText = "";
-      String aiBuffer = "";
+      // String aiBuffer = ""; // [하이브리드 전환] HybridTtsPlayer 내부에서 처리 (삭제 금지)
       bool firstChunkSentToTTS = false;
 
       _swOpenAI.reset();
@@ -1368,73 +1107,69 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 
       _log('🧠 [PIPE-02]', 'AI 스트림 요청: userText="$userTargetText"');
 
-      final aiStream = RoleplayBrain.streamRoleplayResponse(
+      final aiStream = FreeTalkBrain.streamFreeTalkResponse(
         apiKey: _openAiKey,
         userTargetText: userTargetText,
         contextStr: latestContextStr,
-        situation: _scenarioSituation,
-        aiRole: _scenarioAiRole,
-        userRole: _scenarioUserRole,
-        myTarget: targetLangName, // 🌐 [v3.1] 유저가 선택한 타겟 언어
+        myTarget: targetLangName,
+        level: _freeTalkLevel,
       );
 
       // AI 생성+청킹을 Future로 (유저 재생과 병렬)
-      bool aiRetry = false;
       bool _firstAiChunkLogged = false;
       final Future<void> aiGenerationTask = () async {
         await for (String chunk in aiStream) {
-          final cleanedChunk = chunk;
-          if (cleanedChunk.trim().isEmpty) {
-            continue;
-          }
           if (!_firstAiChunkLogged) {
-            _msGptFirstToken = _swSpeechEnd.elapsedMilliseconds;
-            _log('🧠 [PIPE-03]', 'GPT 첫 유효 청크 수신: "$cleanedChunk"');
+            _log('🧠 [PIPE-03]', 'GPT 첫 청크 수신: "$chunk"');
             _firstAiChunkLogged = true;
-            _scrollToBottom();
           }
           if (_swOpenAI.isRunning) _swOpenAI.stop();
-          aiTargetText += cleanedChunk;
-          aiBuffer += cleanedChunk;
-
-          // [RETRY] 신호 감지 — 발음 불명 또는 문맥 이상
-          if (aiTargetText.contains('[RETRY]')) {
-            aiRetry = true;
-            _log('🔁 [RETRY-DET]', '[RETRY] 감지 → 재청취 모드');
-            break;
-          }
-
+          aiTargetText += chunk;
+          // aiBuffer += chunk; // [하이브리드 전환] HybridTtsPlayer 내부에서 처리 (롤백 가능)
           if (mounted && !_ttsQueueManager.aiPaused) {
             setState(() => _localMessages[aiIndex]['target'] = aiTargetText);
-            _scrollToBottomThrottled();
+            // throttled ensureVisible — 스트리밍 중 현재 AI 버블 중앙 고정
+            final _scrollNow = DateTime.now();
+            if (_lastScrollThrottle == null ||
+                _scrollNow.difference(_lastScrollThrottle!) >=
+                    const Duration(milliseconds: 250)) {
+              _lastScrollThrottle = _scrollNow;
+              _scrollToCurrent(aiIndex);
+            }
           }
 
-          // 하이브리드: 첫 구두점 OR 5단어 도달 시 1회만 firstChunk 즉시 발사
-          // Rollback: hybridTtsPlayer 제거 후 aiTtsFetcher.addText(toSpeak) 복원
-          if (!hybridTtsPlayer.firstChunkFired) {
-            final cutIdx =
-                hybridTtsPlayer.onChunk(aiBuffer, aiTtsFetcher, _swSpeechEnd);
-            if (cutIdx >= 0) {
-              aiBuffer = aiBuffer.substring(cutIdx);
+          // [하이브리드 전환] HybridTtsPlayer.onChunk로 대체 (롤백 가능)
+          _hybridTtsPlayer!.onChunk(chunk);
+          if (!firstChunkSentToTTS && _hybridTtsPlayer!.firstChunkFired) {
+            _swTTS.start();
+            firstChunkSentToTTS = true;
+          }
+
+          /* [하이브리드 전환] HybridTtsPlayer.onChunk로 대체 (롤백 가능)
+          final matches = splitPattern.allMatches(aiBuffer).toList();
+          if (matches.isNotEmpty) {
+            int lastIdx = matches.last.end;
+            String toSpeak = aiBuffer.substring(0, lastIdx).trim();
+            aiBuffer = aiBuffer.substring(lastIdx);
+            if (toSpeak.isNotEmpty) {
               if (!firstChunkSentToTTS) {
                 _swTTS.start();
                 firstChunkSentToTTS = true;
               }
+              aiTtsFetcher.addText(toSpeak);
             }
           }
-          // 이후 청크는 aiBuffer에 누적만 — onStreamEnd에서 remainder 처리
+          */
         }
-        _msGptStreamEnd = _swSpeechEnd.elapsedMilliseconds;
-        // AI remainder TTS 큐 적재 — 유저 TTS 재생과 병렬로 준비 (실제 재생은 setAiPaused(false) 후)
-        if (!aiRetry && aiTargetText.trim().isNotEmpty) {
-          await hybridTtsPlayer.onStreamEnd(
-            fullSentence: _cleanText(aiTargetText.trim()),
-            remainderBuffer: aiBuffer,
-            fetcher: aiTtsFetcher,
-            swSpeechEnd: _swSpeechEnd,
-          );
-          _log('🧠 [PIPE-08A]', 'AI stream end + remainder queued. pending=${aiTtsFetcher.pendingRequests}');
+        /* [하이브리드 전환] HybridTtsPlayer.onStreamEnd로 대체 (롤백 가능)
+        if (aiBuffer.trim().isNotEmpty) {
+          if (!firstChunkSentToTTS) {
+            _swTTS.start();
+            firstChunkSentToTTS = true;
+          }
+          aiTtsFetcher.addText(aiBuffer.trim());
         }
+        */
       }();
 
       // ─────────────────────────────────────────────────────
@@ -1481,55 +1216,18 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       _ttsQueueManager.setUserTurn(false);
       _ttsQueueManager.setAiPaused(false);
       _log('🧠 [PIPE-07]', 'setUserTurn(false) + setAiPaused(false). AI 재생 시작');
-      // [v3.6] PIPE-07 시점: 버퍼된 AI 텍스트 일괄 표시
+      // [v3.6] PIPE-07 시점: 버퍼된 AI 텍스트 일괄 표시 — 중앙 고정으로 안정적 표시
       if (mounted && aiTargetText.isNotEmpty) {
         setState(() => _localMessages[aiIndex]['target'] = aiTargetText);
-        _scrollToBottom();
+        _scrollToCurrent(aiIndex);
       }
-
-      // AI 역번역 (백그라운드, Future 보관 → 저장 시 await)
-      final aiOriginalFuture = RoleplayBrain.generateCleanOriginal(
-          apiKey: _openAiKey, englishText: aiTargetText);
-      aiOriginalFuture.then((cleanKorean) {
-        if (mounted && _localMessages.length > aiIndex) {
-          setState(() => _localMessages[aiIndex]['original'] = cleanKorean);
-          _log('🔤 [BACK-TRANS]', 'AI 역번역 완료 → UI 반영');
-        }
-      });
 
       await aiGenerationTask;
       _log('🧠 [PIPE-08]',
           'aiGenerationTask 완료. AI pending=${aiTtsFetcher.pendingRequests}');
-      // [PIPE-08A] onStreamEnd는 aiGenerationTask 내부에서 완료됨 (중복 호출 없음)
-      if (!aiRetry && aiTargetText.trim().isNotEmpty) {
-        if (mounted) {
-          setState(() {
-            _debugResult += '\nGPT 첫 토큰: ${_msGptFirstToken}ms'
-                '\nGPT 스트림 종료: ${_msGptStreamEnd}ms'
-                '\n첫 청크 발사: ${hybridTtsPlayer.lastFirstChunkMs}ms'
-                '\n통문장 저장: ${hybridTtsPlayer.lastCacheSaveMs}ms'
-                ' | Cache: ${hybridTtsPlayer.lastCacheHit ? "HIT" : "MISS"}';
-          });
-        }
-      }
-
-      // ─────────────────────────────────────────────────────
-      // [RETRY] 처리 — AI 버블 제거 후 음성으로만 재청취 요청
-      // ─────────────────────────────────────────────────────
-      if (aiRetry) {
-        _ttsQueueManager.stop();
-        if (mounted) {
-          setState(() {
-            if (aiIndex < _localMessages.length)
-              _localMessages.removeAt(aiIndex);
-          });
-        }
-        _log('🔁 [RETRY-ACT]', 'AI 버블 제거 + 재청취 TTS 발화');
-        if (_isConversationActive && _turnCounter == currentTurnId) {
-          _speakRetryAndListen();
-        }
-        return;
-      }
+      // [하이브리드] remainder 발사 + 통문장 TtsCache 저장
+      await _hybridTtsPlayer!
+          .onStreamEnd(fullSentence: _cleanText(aiTargetText.trim()));
 
       waitTicks = 0;
       while (aiTtsFetcher.pendingRequests > 0 || _ttsQueueManager.isBusy) {
@@ -1544,22 +1242,44 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       _log('🧠 [PIPE-09]', 'AI TTS 재생 완료');
 
       // ─────────────────────────────────────────────────────
-      // STEP 7: 역번역 완료 대기 후 Firestore 저장
+      // STEP 7: Firestore 저장
       // ─────────────────────────────────────────────────────
-      final userOriginal = await userOriginalFuture;
-      final aiOriginal = await aiOriginalFuture;
+      // AI original 생성 — aiTargetText 확정 후, 저장 전에 생성 (bilingual 저장 보장)
+      String aiOriginalText = '';
+      if (aiTargetText.trim().isNotEmpty) {
+        try {
+          aiOriginalText = await FreeTalkBrain.generateCleanOriginal(
+              apiKey: _openAiKey, englishText: aiTargetText);
+          _log('🔤 [AI-ORIG]', 'AI original 생성 완료 → UI 반영 및 저장');
+          if (mounted && _localMessages.length > aiIndex) {
+            setState(
+                () => _localMessages[aiIndex]['original'] = aiOriginalText);
+          }
+        } catch (e) {
+          _log('❌ [AI-ORIG-ERR]', 'AI original 생성 실패: $e');
+        }
+      }
+
+      // 유저 original — 백그라운드 생성이 완료된 값 사용, 비어 있으면 Deepgram 원문 fallback
+      final String hostOriginal =
+          (_localMessages[hostIndex]['original'] ?? '').toString().trim().isNotEmpty
+              ? (_localMessages[hostIndex]['original'] ?? '').toString()
+              : finalTranscript;
+
       final hostLine = {
         'role': 'HOST',
-        'original_text': userOriginal,
-        'translated_text': _cleanText(userTargetText),
+        'original_text': hostOriginal,
+        'translated_text': userTargetText,
       };
       final systemLine = {
         'role': 'SYSTEM',
-        'original_text': aiOriginal,
-        'translated_text': _cleanText(aiTargetText),
+        'original_text': aiOriginalText,
+        'translated_text': aiTargetText,
       };
       _saveTurnToFirestore([hostLine, systemLine]);
-      await _saveHistoryMessages([hostLine, systemLine]);
+      _saveHistoryMessages([hostLine, systemLine]); // 🔧 [히스토리] 병행 저장
+      _saveRecentHistory(
+          userTargetText, aiTargetText); // 🧠 [장기 기억] 백그라운드 메모리 업데이트
       _log('🧠 [PIPE-10]', 'Firestore 저장 호출 완료');
     } catch (e) {
       _log('❌ [PIPE-ERR]', 'Relay Error: $e');
@@ -1573,35 +1293,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         _log('⚠️ [PIPE-NORESTART]', '마이크 재시작 조건 불충족');
       }
     }
-  }
-
-  // 🔧 [v3.7] 유저 통문장 TtsCache 백그라운드 저장 헬퍼
-  void _saveUserFullSentenceToCache(String text) {
-    if (text.isEmpty) return;
-    TtsCache.get(text, 'nova').then((existing) {
-      if (existing != null) return;
-      http
-          .post(
-        Uri.parse('https://api.openai.com/v1/audio/speech'),
-        headers: {
-          'Authorization': 'Bearer $_openAiKey',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'model': 'tts-1',
-          'input': text,
-          'voice': 'nova',
-          'speed': 1.0,
-        }),
-      )
-          .then((res) {
-        if (res.statusCode == 200) {
-          TtsCache.put(text, 'nova', res.bodyBytes);
-        }
-      }).catchError((e) {
-        debugPrint('[_saveUserFullSentenceToCache] $e');
-      });
-    });
   }
 
   /// 한 턴(유저+AI)의 ChatLine 2개를 Firestore에 저장
@@ -1632,19 +1323,9 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 
         final newSession = await userDocRef.collection('sessions').add({
           'session_no': nextSessionNo,
-          'mode': 'roleplay',
-          'scenario_info': {
-            'keyword': _scenarioKeyword,
-            'situation': _scenarioSituation,
-            'ai_role': _scenarioAiRole,
-            'user_role': _scenarioUserRole,
-          },
-          'scenario_situation': _scenarioSituation,
-          'scenario_keyword': _scenarioKeyword,
-          'user_role': _scenarioUserRole,
-          'ai_role': _scenarioAiRole,
-          'user_label': _roleplayUserLabel,
-          'partner_label': _roleplayPartnerLabel,
+          'mode': 'free_talk',
+          'user_label': 'the user',
+          'partner_label': 'AI partner',
           'created_at': FieldValue.serverTimestamp(),
           'transcript': chatLines,
         });
@@ -1685,25 +1366,21 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   Future<void> _ensureHistoryRef() async {
     final user = FirebaseAuth.instance.currentUser;
     if (_myHistoryRef == null && user != null) {
-      final newRef = FirebaseFirestore.instance
+      _myHistoryRef = FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .collection('chat_history')
           .doc();
-      await newRef.set({
+      await _myHistoryRef!.set({
         'created_at': FieldValue.serverTimestamp(),
-        'room_name': "Roleplay Mode",
-        'mode': 'roleplay', // 🆕 [ROUTER-FIX] 라우터가 Step Expand로 오인 방지
-        'scenario_situation': _scenarioSituation,
-        'scenario_keyword': _scenarioKeyword,
-        'user_role': _scenarioUserRole,
-        'ai_role': _scenarioAiRole,
-        'user_label': _roleplayUserLabel,
-        'partner_label': _roleplayPartnerLabel,
+        'room_name': "Free Talk",
+        'mode': 'free_talk',
+        'user_label': 'the user',
+        'partner_label': 'AI partner',
+        'expand_partner_type': 'free_talk',
         'is_pinned': false,
         'msg_count': 0
       });
-      _myHistoryRef = newRef;
       _log('📚 [HIST-NEW]', 'chat_history 방 생성: ${_myHistoryRef!.id}');
     }
   }
@@ -1750,6 +1427,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 
   /// 뒤로가기 시: 빈 방 폭파 or last_message 업데이트 후 나가기
   Future<void> _handleAutoSaveAndExit() async {
+    bool overlayShown = false;
     try {
       if (_myHistoryRef != null) {
         final hasUserTurn = _localMessages.any((m) => m['role'] == 'HOST');
@@ -1766,30 +1444,102 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
             }
           }
 
-          final userLabel = _roleplayUserLabel;
-          final partnerLabel = _roleplayPartnerLabel;
+          // 🆕 [EXPAND-EXIT] 전체 대화 종합 → Expanded + Polished 생성 (오버레이 표시)
+          String expanded = "";
+          String polished = "";
+          final userLabel = 'the user';
+          final partnerLabel = 'AI partner';
+          final convoLines = _localMessages
+              .where((m) {
+                if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
+                final t = (m['target'] ?? '').toString().trim();
+                return t.isNotEmpty && t != '...';
+              })
+              .map((m) =>
+                  "${m['role'] == 'HOST' ? userLabel : partnerLabel}: ${m['target']}")
+              .toList();
+          final transcript = convoLines.join("\n");
+
+          if (transcript.isNotEmpty && _openAiKey.isNotEmpty && mounted) {
+            showDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (_) => const Center(
+                child: Card(
+                  color: Color(0xFF1E1E1E),
+                  child: Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircularProgressIndicator(color: Colors.amber),
+                        SizedBox(height: 16),
+                        Text("확장 문장 만드는 중...",
+                            style: TextStyle(color: Colors.white70)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+            overlayShown = true;
+
+            final gen = await FreeTalkBrain.generateExpandedFromConversation(
+              _openAiKey,
+              transcript,
+              userLabel: userLabel,
+              partnerLabel: partnerLabel,
+            );
+            if (gen != null && gen.isNotEmpty) {
+              expanded = gen;
+              final pol = await FreeTalkBrain.polishSentence(
+                _openAiKey,
+                expanded,
+                partnerLabel: partnerLabel,
+              );
+              polished = (pol != null && pol.trim().isNotEmpty) ? pol.trim() : "";
+            }
+
+            if (overlayShown && mounted &&
+                Navigator.of(context, rootNavigator: true).canPop()) {
+              Navigator.of(context, rootNavigator: true).pop();
+            }
+            overlayShown = false;
+          }
 
           await _myHistoryRef!.update({
             'last_message': lastText,
             'last_message_time': FieldValue.serverTimestamp(),
             'msg_count': _localMessages.length,
             'last_active': FieldValue.serverTimestamp(),
-            'chat_json': jsonEncode(_localMessages),
-            'is_completed': false,
-            'mode': 'roleplay',
-            'scenario_situation': _scenarioSituation,
-            'scenario_keyword': _scenarioKeyword,
-            'user_role': _scenarioUserRole,
-            'ai_role': _scenarioAiRole,
+            'mode': 'free_talk',
             'user_label': userLabel,
             'partner_label': partnerLabel,
+            if (expanded.isNotEmpty) 'expanded_sentence': expanded,
+            if (polished.isNotEmpty) 'polished_sentence': polished,
+            if (expanded.isNotEmpty) 'has_practice': true,
+            if (expanded.isNotEmpty) 'expand_source': 'exit',
+            if (expanded.isNotEmpty)
+              'expand_generated_at': FieldValue.serverTimestamp(),
+            if (expanded.isNotEmpty) 'expand_user_label': userLabel,
+            if (expanded.isNotEmpty) 'expand_partner_name': partnerLabel,
+            if (expanded.isNotEmpty) 'expand_partner_type': 'clone',
+            if (expanded.isNotEmpty)
+              'expand_schema_version': 'named_partner_v1',
           });
-          _log('💾 [HIST-UPD]', 'last_message 저장');
+          _log('💾 [HIST-UPD]',
+              'last_message + expand 저장 (expanded=${expanded.isNotEmpty})');
         }
       }
     } catch (e) {
       _log('❌ [HIST-EXIT-ERR]', '$e');
     } finally {
+      // 오버레이가 남아있으면 정리
+      if (overlayShown &&
+          mounted &&
+          Navigator.of(context, rootNavigator: true).canPop()) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
       if (mounted) {
         if (StealthRoomMaster.exitCurrentMode != null) {
           StealthRoomMaster.exitCurrentMode!();
@@ -1810,32 +1560,22 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     final bottomPad = MediaQuery.of(context).viewPadding.bottom == 0
         ? 24.0
         : MediaQuery.of(context).viewPadding.bottom + 8.0;
-    return PopScope(
-      canPop: false,
-      onPopInvoked: (didPop) async {
-        if (didPop) return;
-        await _handleAutoSaveAndExit();
-      },
-      child: Container(
-        color: const Color(0xFF121212),
-        child: SafeArea(
-          child: Column(children: [
-            _buildTopBar(),
-            Expanded(
-              child: Stack(
-                children: [
-                  _buildChatList(),
-                  if (_localMessages.isEmpty)
-                    Positioned.fill(
-                      child: Center(child: _buildTopControls()),
-                    ),
-                  _buildIdleOverlay(),
-                ],
-              ),
-            ),
-            _buildControlArea(bottomPad),
-          ]),
-        ),
+    return Container(
+      color: const Color(0xFF121212),
+      child: SafeArea(
+        child: Column(children: [
+          _buildTopBar(),
+          const SizedBox(height: 10),
+          _buildTopControls(),
+          const SizedBox(height: 10),
+          Expanded(
+            child: Stack(children: [
+              _buildChatList(),
+              _buildIdleOverlay(),
+            ]),
+          ),
+          _buildControlArea(bottomPad),
+        ]),
       ),
     );
   }
@@ -1847,18 +1587,10 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          GestureDetector(
-            onTap: _handleAutoSaveAndExit, // 🔧 [히스토리] AutoSave 연결
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              width: 56,
-              height: 56,
-              alignment: Alignment.centerLeft,
-              padding: const EdgeInsets.only(left: 4),
-              child: const Icon(Icons.arrow_back_ios_new_rounded,
+          IconButton(
+              icon: const Icon(Icons.arrow_back_ios_new_rounded,
                   color: Colors.white70),
-            ),
-          ),
+              onPressed: _handleAutoSaveAndExit), // 🔧 [히스토리] AutoSave 연결
           Row(children: [
             // ── Idle pause 아이콘 (T버튼 왼쪽, 클릭 시 pause 해제) ──
             if (_isIdlePaused)
@@ -1900,32 +1632,29 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: 8),
             // [v3.6] 잔여시간 표시 + 길게 누르면 로그 (개발자용)
             GestureDetector(
               onLongPress: _showDebugLogDialog,
               child: Container(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 decoration: BoxDecoration(
                     color: const Color(0xFF2563EB),
                     borderRadius: BorderRadius.circular(20)),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                child: Row(children: [
                   const Icon(Icons.timer_outlined,
                       color: Colors.white, size: 18),
                   const SizedBox(width: 6),
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      () {
-                        final int s = (FFAppState().remainingTime).toInt().clamp(0, 999999);
-                        final int h = s ~/ 3600;
-                        final int m = (s % 3600) ~/ 60;
-                        return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
-                      }(),
-                      style: const TextStyle(
-                          color: Colors.white, fontWeight: FontWeight.bold),
-                    ),
+                  Text(
+                    () {
+                      final int s = (FFAppState().remainingTime).toInt().clamp(0, 999999);
+                      final int h = s ~/ 3600;
+                      final int m = (s % 3600) ~/ 60;
+                      return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+                    }(),
+                    style: const TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.bold),
                   ),
                 ]),
               ),
@@ -1937,232 +1666,53 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   }
 
   Widget _buildTopControls() {
-    final hasScenario = _scenarioSituation.isNotEmpty && _scenarioAiRole.isNotEmpty;
+    const levels = ["Beginner", "Intermediate", "Advanced"];
+    const labels = ["초급", "중급", "고급"];
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 28),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          GestureDetector(
-            onTap: (_isConversationActive || _isGeneratingScenario)
-                ? null
-                : _showSituationInputSheet,
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0xFF251640), Color(0xFF141230)],
-                ),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: const Color(0xFF7C3AED).withOpacity(0.35),
-                  width: 1,
-                ),
-              ),
-              child: _isGeneratingScenario
-                  ? const SizedBox(
-                      height: 60,
-                      child: Center(
-                        child: CircularProgressIndicator(
-                          color: Color(0xFF9333EA),
-                          strokeWidth: 2,
-                        ),
-                      ),
-                    )
-                  : hasScenario
-                  ? Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Row(children: const [
-                          Icon(Icons.theater_comedy_rounded,
-                              color: Color(0xFFA78BFA), size: 13),
-                          SizedBox(width: 5),
-                          Text(
-                            'SITUATION',
-                            style: TextStyle(
-                              color: Color(0xFFA78BFA),
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 1.6,
-                            ),
-                          ),
-                        ]),
-                        const SizedBox(height: 8),
-                        Text(
-                          _scenarioSituation,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 17,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.4,
-                            height: 1.3,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF7C3AED).withOpacity(0.18),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: const Color(0xFF7C3AED).withOpacity(0.40),
-                              width: 1,
-                            ),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: const [
-                                  Icon(Icons.smart_toy_rounded,
-                                      color: Color(0xFFD8B4FE), size: 13),
-                                  SizedBox(width: 4),
-                                  Text('AI',
-                                      style: TextStyle(
-                                        color: Color(0xFFA78BFA),
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w800,
-                                        letterSpacing: 1.4,
-                                      )),
-                                ],
-                              ),
-                              const SizedBox(height: 2),
-                              Text(_scenarioAiRole,
-                                  style: const TextStyle(
-                                    color: Color(0xFFEDE9FE),
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w600,
-                                  )),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF0EA5E9).withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: const Color(0xFF0EA5E9).withOpacity(0.32),
-                              width: 1,
-                            ),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: const [
-                                  Icon(Icons.person_rounded,
-                                      color: Color(0xFF7DD3FC), size: 13),
-                                  SizedBox(width: 4),
-                                  Text('YOU',
-                                      style: TextStyle(
-                                        color: Color(0xFF7DD3FC),
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w800,
-                                        letterSpacing: 1.4,
-                                      )),
-                                ],
-                              ),
-                              const SizedBox(height: 2),
-                              Text(_scenarioUserRole,
-                                  style: const TextStyle(
-                                    color: Color(0xFFE0F2FE),
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w600,
-                                  )),
-                            ],
-                          ),
-                        ),
-                        if (!_isConversationActive) ...[
-                          const SizedBox(height: 14),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.end,
-                            children: const [
-                              Icon(Icons.edit_outlined,
-                                  color: Colors.white24, size: 13),
-                              SizedBox(width: 4),
-                              Text('탭하여 수정',
-                                  style: TextStyle(
-                                      color: Colors.white24, fontSize: 11)),
-                            ],
-                          ),
-                        ],
-                      ],
-                    )
-                  : Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: const [
-                          Icon(Icons.movie_outlined,
-                              color: Color(0xFFA78BFA), size: 20),
-                          SizedBox(width: 8),
-                          Text('시나리오 불러오는 중...',
-                              style: TextStyle(
-                                  color: Color(0xFFA78BFA),
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600)),
-                        ],
-                      ),
-                    ),
-            ),
-          ),
-          if (!_isGeneratingScenario && !_isConversationActive) ...[
-            const SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                GestureDetector(
-                  onTap: _generateScenario,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 9),
-                    decoration: BoxDecoration(
-                      color: Colors.transparent,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: Colors.white12, width: 1),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: const [
-                        Icon(Icons.refresh_rounded,
-                            color: Colors.white30, size: 14),
-                        SizedBox(width: 6),
-                        Text('다시 생성',
-                            style: TextStyle(
-                                color: Colors.white30, fontSize: 12)),
-                      ],
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        height: 44,
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          color: const Color(0xFF2C2C2E),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: List.generate(levels.length, (i) {
+            final bool selected = _freeTalkLevel == levels[i];
+            return Expanded(
+              child: GestureDetector(
+                onTap: () => _setFreeTalkLevel(levels[i]),
+                child: Container(
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color:
+                        selected ? const Color(0xFF9333EA) : Colors.transparent,
+                    borderRadius: BorderRadius.circular(9),
+                  ),
+                  child: Text(
+                    "${labels[i]} ${levels[i]}",
+                    style: TextStyle(
+                      color: selected ? Colors.white : Colors.white54,
+                      fontSize: 12,
+                      fontWeight:
+                          selected ? FontWeight.bold : FontWeight.normal,
                     ),
                   ),
                 ),
-              ],
-            ),
-          ],
-        ],
+              ),
+            );
+          }),
+        ),
       ),
     );
   }
 
   Widget _buildChatList() {
-    final double bottomPad = _localMessages.length <= 1
-        ? MediaQuery.of(context).size.height * 0.4
-        : 16;
+    final double bottomPad = MediaQuery.of(context).size.height * 0.55;
     return ListView.builder(
       controller: _scrollController,
-      padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPad),
+      padding: EdgeInsets.fromLTRB(16, 16, 16, bottomPad),
       itemCount: _localMessages.length,
       itemBuilder: (context, idx) {
         _itemKeys[idx] ??= GlobalKey();
@@ -2174,210 +1724,104 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 
   Widget _buildTextBlock(Map<String, dynamic> msg) {
     final role = (msg['role'] ?? '').toString();
-    final bool isHost = role == 'HOST' || role == 'HOST_TEMP';
+    bool isHost = role == 'HOST' || role == 'HOST_TEMP';
     final rawTarget = (msg['target'] ?? '').toString();
     final bool isThinking = (role == 'SYSTEM' && rawTarget.isEmpty) ||
         (role == 'HOST_TEMP' && rawTarget == '...') ||
         (role == 'HOST' && rawTarget.isEmpty);
     final String displayTarget = isThinking ? '...' : rawTarget;
     if (displayTarget.isEmpty) return const SizedBox.shrink();
-
-    // 아이콘 아바타
-    final Widget avatar = Container(
-      width: 32,
-      height: 32,
-      decoration: BoxDecoration(
-        color: isHost
-            ? const Color(0xFF1D4ED8).withOpacity(0.22)
-            : const Color(0xFF7C3AED).withOpacity(0.22),
-        shape: BoxShape.circle,
-        border: Border.all(
-          color: isHost
-              ? const Color(0xFF60A5FA).withOpacity(0.45)
-              : const Color(0xFFA855F7).withOpacity(0.45),
-          width: 1,
-        ),
-      ),
-      child: Icon(
-        isHost ? Icons.person_rounded : Icons.smart_toy_rounded,
-        color: isHost ? const Color(0xFF93C5FD) : const Color(0xFFD8B4FE),
-        size: 17,
-      ),
-    );
-
-    // 말풍선
-    final Widget bubble = ConstrainedBox(
-      constraints:
-          BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.73),
+    return Align(
+      alignment: isHost ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        margin: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: isHost
-              ? const Color(0xFF1E293B)
-              : const Color(0xFF9333EA).withOpacity(0.13),
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(16),
-            topRight: const Radius.circular(16),
-            bottomLeft: Radius.circular(isHost ? 16 : 4),
-            bottomRight: Radius.circular(isHost ? 4 : 16),
-          ),
-          border: Border.all(
             color: isHost
-                ? const Color(0xFF3B82F6).withOpacity(0.18)
-                : const Color(0xFF9333EA).withOpacity(0.25),
-            width: 1,
-          ),
-        ),
+                ? const Color(0xFF2C2C2E)
+                : const Color(0xFF9333EA).withOpacity(0.15),
+            borderRadius: BorderRadius.circular(16)),
+        constraints:
+            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.8),
         child: Column(
-          crossAxisAlignment:
-              isHost ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-          children: [
-            Text(displayTarget,
-                textAlign: isHost ? TextAlign.right : TextAlign.left,
-                style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16 * _fontScale,
-                    fontWeight: FontWeight.bold,
-                    height: 1.4)),
-            if (_showOriginal &&
-                !(FFAppState().nativeLang.isNotEmpty &&
-                    FFAppState().nativeLang == FFAppState().targetLang) &&
-                !isThinking &&
-                msg['original'] != null &&
-                msg['original'].toString().isNotEmpty) ...[
-              const SizedBox(height: 5),
-              Text(msg['original'],
+            crossAxisAlignment:
+                isHost ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            children: [
+              Text(displayTarget,
                   textAlign: isHost ? TextAlign.right : TextAlign.left,
-                  style:
-                      TextStyle(color: Colors.grey, fontSize: 12 * _fontScale))
-            ],
-          ],
-        ),
-      ),
-    );
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
-      child: Row(
-        mainAxisAlignment:
-            isHost ? MainAxisAlignment.end : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: isHost
-            ? [bubble, const SizedBox(width: 8), avatar]
-            : [avatar, const SizedBox(width: 8), bubble],
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16 * _fontScale,
+                      fontWeight: FontWeight.bold)),
+              if (_showOriginal &&
+                  !(FFAppState().nativeLang.isNotEmpty &&
+                      FFAppState().nativeLang == FFAppState().targetLang) &&
+                  !isThinking &&
+                  msg['original'] != null &&
+                  msg['original'].toString().isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(msg['original'],
+                    textAlign: isHost ? TextAlign.right : TextAlign.left,
+                    style: TextStyle(
+                        color: Colors.grey, fontSize: 12 * _fontScale))
+              ]
+            ]),
       ),
     );
   }
 
   Widget _buildControlArea(double bp) {
     return Container(
-      padding: EdgeInsets.fromLTRB(24, 4, 24, bp),
+      padding: EdgeInsets.fromLTRB(24, 8, 24, bp),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text("Roleplay",
+              Text("Free Talk",
                   style: TextStyle(
                       color: Colors.white54,
                       fontSize: 20,
                       fontWeight: FontWeight.bold)),
-              // Start 버튼: AI 역할 설정 완료 & 대화 미시작 상태
-              if (_scenarioAiRole.isNotEmpty &&
-                  _localMessages.isEmpty &&
-                  !_isAiOpenerPlaying &&
-                  !_isConversationActive)
-                GestureDetector(
-                  onTap: () {
-                    if (_openAiKey.isEmpty) return;
-                    _resetIdleTimer();
-                    setState(() => _isConversationActive = true);
-                    _generateAndPlayAiOpener();
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 20, vertical: 10),
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF7C3AED), Color(0xFF4F46E5)],
-                      ),
-                      borderRadius: BorderRadius.circular(22),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(0xFF7C3AED).withOpacity(0.35),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.play_arrow_rounded,
-                            color: Colors.white, size: 18),
-                        SizedBox(width: 6),
-                        Text('Start',
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold)),
-                      ],
-                    ),
-                  ),
-                )
-              else if (_isAiOpenerPlaying)
-                // AI 첫 발화 재생 중
-                const SizedBox(
+              GestureDetector(
+                onTap: () {
+                  if (_deepgramKey.isEmpty) return;
+                  _resetIdleTimer();
+                  setState(
+                      () => _isConversationActive = !_isConversationActive);
+                  if (_isConversationActive) {
+                    if (_localMessages.isEmpty) {
+                      _generateAndPlayAiOpener();
+                    } else {
+                      _startDeepgramListening();
+                    }
+                  } else {
+                    _stopEverything();
+                  }
+                },
+                child: Container(
                   width: 44,
                   height: 44,
-                  child: Center(
-                    child: SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        color: Color(0xFFA855F7),
-                        strokeWidth: 2,
-                      ),
-                    ),
-                  ),
-                )
-              else
-                // 대화 중 on/off 토글
-                GestureDetector(
-                  onTap: () {
-                    if (_deepgramKey.isEmpty) return;
-                    _resetIdleTimer();
-                    setState(
-                        () => _isConversationActive = !_isConversationActive);
-                    if (_isConversationActive) {
-                      _startDeepgramListening();
-                    } else {
-                      _stopEverything();
-                    }
-                  },
+                  alignment: Alignment.center,
                   child: Container(
-                    width: 44,
-                    height: 44,
-                    alignment: Alignment.center,
-                    child: Container(
-                      width: 12,
-                      height: 12,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
+                    width: 12,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _isConversationActive
+                          ? const Color(0xFFFBBF24)
+                          : Colors.transparent,
+                      border: Border.all(
                         color: _isConversationActive
                             ? const Color(0xFFFBBF24)
-                            : Colors.transparent,
-                        border: Border.all(
-                          color: _isConversationActive
-                              ? const Color(0xFFFBBF24)
-                              : Colors.white24,
-                          width: 1.5,
-                        ),
+                            : Colors.white24,
+                        width: 1.5,
                       ),
                     ),
                   ),
                 ),
+              ),
             ],
           ),
         ],
@@ -2471,7 +1915,7 @@ class DeepgramV2VoiceManager {
   final String langCode;
   final VoidCallback onConnected;
   final Function(String) onTranscriptUpdate;
-  final void Function(String, {bool speechFinal}) onTurnEnded;
+  final Function(String) onTurnEnded;
   final Function(String) onError;
   final Function(int)? onReconnecting; // 재연결 시도 알림 (선택적)
   final VoidCallback? onGaveUp; // 재연결 포기 알림 (선택적)
@@ -2627,7 +2071,7 @@ class DeepgramV2VoiceManager {
         _lg('📡 [DG-UE]',
             'UtteranceEnd 이벤트 → onTurnEnded. finalText="$finalText"');
         if (!_isDisposed && finalText.isNotEmpty) {
-          onTurnEnded(finalText, speechFinal: false);
+          onTurnEnded(finalText);
         }
         return;
       }
@@ -2659,7 +2103,7 @@ class DeepgramV2VoiceManager {
             'speech_final → onTurnEnded 호출 시도. finalText="$finalText"');
         if (!_isDisposed && finalText.isNotEmpty) {
           _lg('📡 [DG-05]', 'onTurnEnded 실제 호출');
-          onTurnEnded(finalText, speechFinal: true);
+          onTurnEnded(finalText);
         } else {
           _lg('📡 [DG-06]', 'finalText 빈값 → onTurnEnded 스킵');
         }
@@ -3149,7 +2593,7 @@ class RelayPipeline {
     _isSpeaking = false;
   }
 
-  Future<void> _onUserTurnEnded(String userText, {bool speechFinal = false}) async {
+  Future<void> _onUserTurnEnded(String userText) async {
     // 💡 AI가 말하는 중에 유저가 말하면 즉시 중단
     if (_isSpeaking) interruptAi();
 
@@ -3218,26 +2662,28 @@ class RelayPipeline {
 // ============================================================================
 
 // ====================================================================
-// 📦 [Box 7-H: HybridTtsPlayer] — 하이브리드 TTS (Roleplay 전용)
+// 📦 [Box 7-H: HybridTtsPlayer] — 하이브리드 TTS (Clone 전용)
 // ====================================================================
-// 설계 원칙: 첫 구두점 즉시 발사(체감 빠름) + 통문장 캐시 저장(히스토리 통합)
-//   → tryFireFirstChunk: 첫 구두점 도달 시 ChunkedTtsFetcher에 1회 발사
+// 설계 원칙: 구두점 OR 4단어 먼저 오는 쪽 즉시 발사(체감 빠름) + 통문장 TtsCache 저장
+//   → onChunk: 청크 수신마다 호출. 구두점 OR 4단어 달성 시 fetcher에 1회 발사.
 //   → onStreamEnd: remainder 순차 발사 + fullSentence TtsCache 저장 (재생 없음)
-//   → Rollback: tryFireFirstChunk 제거 후 aiTtsFetcher.addText(toSpeak) 복원
+//   → reset: 턴 시작 시 상태 초기화 (새 인스턴스 생성 전 호출)
+//   → Rollback: onChunk/onStreamEnd 제거 후 aiTtsFetcher.addText(toSpeak) 복원
 class HybridTtsPlayer {
-  final String apiKey;
-  final String voice;
+  final String _apiKey;
+  final TtsQueueManager _ttsQueueManager;
+  final ChunkedTtsFetcher _fetcher;
+  final String _voice;
   final void Function(String, String)? onLog;
 
   bool _firstChunkFired = false;
+  final StringBuffer _chunkBuffer = StringBuffer();
 
-  int lastFirstChunkMs = 0;
-  int lastCacheSaveMs = 0;
-  bool lastCacheHit = false;
-
-  HybridTtsPlayer({
-    required this.apiKey,
-    this.voice = 'nova',
+  HybridTtsPlayer(
+    this._apiKey,
+    this._ttsQueueManager,
+    this._fetcher,
+    this._voice, {
     this.onLog,
   });
 
@@ -3245,170 +2691,137 @@ class HybridTtsPlayer {
 
   void reset() {
     _firstChunkFired = false;
-    lastFirstChunkMs = 0;
-    lastCacheSaveMs = 0;
-    lastCacheHit = false;
+    _chunkBuffer.clear();
   }
 
-  // 첫 구두점 도달 시 1회 호출. firstChunk를 fetcher에 즉시 발사.
-  // 반환값: buffer에서 자를 인덱스 (>=0이면 발사됨, -1이면 미발사)
-  int tryFireFirstChunk(
-      String buffer, ChunkedTtsFetcher fetcher, Stopwatch swSpeechEnd) {
-    if (_firstChunkFired) return -1;
-    final match = kTtsDelimiterPattern.firstMatch(buffer);
-    if (match == null) return -1;
+  // 구두점 OR 4단어 중 먼저 오는 쪽 1회 발사.
+  // 발사 후에도 이후 청크를 _chunkBuffer에 누적 — onStreamEnd에서 remainder 처리.
+  void onChunk(String chunk) {
+    _chunkBuffer.write(chunk);
+    if (_firstChunkFired) return;
 
-    final text = buffer.substring(0, match.end).trim();
-    if (text.isEmpty) return match.end;
-
-    _firstChunkFired = true;
-    lastFirstChunkMs = swSpeechEnd.elapsedMilliseconds;
-    fetcher.addText(text);
-    onLog?.call(
-        '[HYB-01]', 'firstChunk fired (${text.length}c) ${lastFirstChunkMs}ms');
-    return match.end;
-  }
-
-  // [Box 7-H] 조기 발사 보충: 구두점 OR firstChunkMinWords 단어 중 먼저 오는 쪽 발사
-  // buffer: 현재까지 누적된 AI 텍스트 버퍼 (외부에서 관리)
-  // 반환값: buffer에서 자를 인덱스 (>=0이면 발사됨, -1이면 미발사)
-  static const int firstChunkMinWords = 5;
-
-  int onChunk(String buffer, ChunkedTtsFetcher fetcher, Stopwatch swSpeechEnd) {
-    if (_firstChunkFired) return -1;
-
-    final punctMatch = kTtsDelimiterPattern.firstMatch(buffer);
+    final buf = _chunkBuffer.toString();
+    final punctMatch = kTtsDelimiterPattern.firstMatch(buf);
     final wordCount =
-        buffer.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
+        buf.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
 
-    if (punctMatch == null && wordCount < firstChunkMinWords) return -1;
+    if (punctMatch == null && wordCount < 4) return;
 
-    final int cutIdx;
     final String text;
+    final String unfired;
     if (punctMatch != null) {
-      cutIdx = punctMatch.end;
-      text = buffer.substring(0, cutIdx).trim();
+      text = buf.substring(0, punctMatch.end).trim();
+      unfired = buf.substring(punctMatch.end);
     } else {
-      cutIdx = buffer.length;
-      text = buffer.trim();
+      text = buf.trim();
+      unfired = '';
     }
 
-    if (text.isEmpty) return cutIdx;
+    if (text.isEmpty) return;
 
     _firstChunkFired = true;
-    lastFirstChunkMs = swSpeechEnd.elapsedMilliseconds;
-    fetcher.addText(text);
-    onLog?.call('[HYB-01]',
-        '발사(${punctMatch != null ? "구두점" : "5단어"}): "$text" ${lastFirstChunkMs}ms');
-    return cutIdx;
+    _fetcher.addText(text);
+    onLog?.call(
+        '[HYB-01]', '발사(${punctMatch != null ? "구두점" : "4단어"}): "$text"');
+
+    // 발사된 부분 제거 — 이후 onChunk는 unfired부터 누적
+    _chunkBuffer.clear();
+    if (unfired.isNotEmpty) _chunkBuffer.write(unfired);
   }
 
   // GPT 스트림 종료 시 호출:
-  //   1) remainder 청크 순차 발사 (기존 큐에 이어서)
+  //   1) remainder 청킹 발사 (firstChunk 이후 남은 텍스트)
   //   2) fullSentence TtsCache 저장 (재생 없음 — 히스토리 뷰 HIT 유도)
-  Future<void> onStreamEnd({
-    required String fullSentence,
-    required String remainderBuffer,
-    required ChunkedTtsFetcher fetcher,
-    required Stopwatch swSpeechEnd,
-  }) async {
-    // 1. Remainder 발사
-    final remainder = remainderBuffer.trim();
-    if (!_firstChunkFired && fullSentence.isNotEmpty) {
-      // 구두점 없이 스트림 종료 — 전체 텍스트를 지금 발사
-      fetcher.addText(fullSentence);
+  Future<void> onStreamEnd({String fullSentence = ''}) async {
+    final remainder = _chunkBuffer.toString().trim();
+    if (!_firstChunkFired && remainder.isNotEmpty) {
+      // 구두점/4단어 없이 스트림 종료 — 전체 발사
+      _fetcher.addText(remainder);
       _firstChunkFired = true;
-      lastFirstChunkMs = swSpeechEnd.elapsedMilliseconds;
       onLog?.call(
-          '[HYB-01-LATE]', 'no punctuation — full text fired at stream end');
-    } else if (remainder.isNotEmpty) {
+          '[HYB-01-LATE]', 'no punct/4words — full text fired at stream end');
+    } else if (_firstChunkFired && remainder.isNotEmpty) {
       int lastIdx = 0;
       for (final match in kTtsDelimiterPattern.allMatches(remainder)) {
         final seg = remainder.substring(lastIdx, match.end).trim();
-        if (seg.isNotEmpty) fetcher.addText(seg);
+        if (seg.isNotEmpty) _fetcher.addText(seg);
         lastIdx = match.end;
       }
       final tail = remainder.substring(lastIdx).trim();
-      if (tail.isNotEmpty) fetcher.addText(tail);
+      if (tail.isNotEmpty) _fetcher.addText(tail);
       onLog?.call('[HYB-02]', 'remainder fired (${remainder.length}c)');
     }
 
-    // 2. TtsCache 저장 (재생 없음)
-    if (fullSentence.trim().isEmpty) return;
+    // TtsCache 통문장 백그라운드 저장 (재생 없음)
+    final sentence = fullSentence.trim();
+    if (sentence.isEmpty) return;
     try {
-      final cached = await TtsCache.get(fullSentence, voice);
+      final cached = await TtsCache.get(sentence, _voice);
       if (cached != null && cached.isNotEmpty) {
-        lastCacheHit = true;
-        lastCacheSaveMs = 0;
         onLog?.call('[HYB-03-HIT]', 'TtsCache HIT — 저장 생략');
         return;
       }
-      lastCacheHit = false;
-      final sw = Stopwatch()..start();
       final res = await http
           .post(
             Uri.parse('https://api.openai.com/v1/audio/speech'),
             headers: {
-              'Authorization': 'Bearer $apiKey',
+              'Authorization': 'Bearer $_apiKey',
               'Content-Type': 'application/json',
             },
             body: jsonEncode({
               'model': 'tts-1',
-              'input': fullSentence,
-              'voice': voice,
+              'input': sentence,
+              'voice': _voice,
               'speed': 1.0,
               'response_format': 'mp3',
             }),
           )
           .timeout(const Duration(seconds: 15));
       if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
-        await TtsCache.put(fullSentence, voice, res.bodyBytes);
-        lastCacheSaveMs = sw.elapsedMilliseconds;
-        onLog?.call('[HYB-04-SAVED]',
-            '${lastCacheSaveMs}ms (${res.bodyBytes.length}B)');
+        await TtsCache.put(sentence, _voice, res.bodyBytes);
+        onLog?.call('[HYB-04-SAVED]', '${res.bodyBytes.length}B');
       } else {
         onLog?.call('[HYB-ERR]', 'API status=${res.statusCode}');
       }
-      sw.stop();
     } catch (e) {
       onLog?.call('[HYB-ERR]', 'TtsCache 저장 실패: $e');
     }
   }
 }
 
+// ============================================================================
+
 // ====================================================================
-// 🧠 [Box 7-1] RoleplayBrain v3 — 롤플레이 모드 전용 AI 뇌
+// 🧠 [Box 7-1] FreeTalkBrain v3 — 클론 모드 전용 AI 뇌
 // ====================================================================
-class RoleplayBrain {
+// 📂 서브박스 구성:
+//   [Box 7-1-B] streamUserTranslation   — 유저 한→영 번역 (CoT 2단계 주어 복원)
+//   [Box 7-1-C] generateCleanOriginal   — AI original 생성 (오리지널 언어 자막)
+// ====================================================================
+class FreeTalkBrain {
   // 🆕 [EXPAND-EXIT] 대화 전체(AI+유저) → 종합 확장 문장 1개 (의미단위 ~5개, 문법 연결)
   static Future<String?> generateExpandedFromConversation(
     String apiKey,
     String transcript, {
     String userLabel = 'the user',
-    String partnerLabel = 'the roleplay partner',
-    String situation = '',
+    String partnerLabel = 'the clone',
   }) async {
     if (apiKey.isEmpty || transcript.trim().isEmpty) return null;
     try {
       final safeUserLabel =
           userLabel.trim().isNotEmpty ? userLabel.trim() : 'the user';
-      final safePartnerLabel = partnerLabel.trim().isNotEmpty
-          ? partnerLabel.trim()
-          : 'the roleplay partner';
-      final situationLine = situation.trim().isNotEmpty
-          ? 'Roleplay situation: ${situation.trim()}. Use it only if supported by the transcript.'
-          : 'Use only the situation supported by the transcript.';
+      final safePartnerLabel =
+          partnerLabel.trim().isNotEmpty ? partnerLabel.trim() : 'the clone';
       final sysPrompt = """You are an English speaking coach.
-You are given a short roleplay conversation transcript.
-This is a roleplay conversation between $safeUserLabel and $safePartnerLabel.
-$safePartnerLabel is the role being played, not AI.
-$situationLine
+You are given a short conversation transcript.
+This conversation is between $safeUserLabel and $safePartnerLabel.
+$safePartnerLabel is a named clone/persona, not AI.
 Your job: compose ONE long, natural English sentence that synthesizes the overall
 content and gist of the WHOLE conversation.
 
 [RULES]
-- Never call $safePartnerLabel AI, assistant, chatbot, or bot.
-- If the partner must be mentioned, use $safePartnerLabel or a natural role phrase.
+- Never refer to $safePartnerLabel as AI, assistant, chatbot, or bot.
+- If the partner must be mentioned, use $safePartnerLabel.
 - If any name, role label, or situation appears in Korean, render it in natural English (translate role or description phrases to their English equivalent; romanize real personal names). Never copy Korean text into the sentence.
 - The final sentence must be 100% English and must NOT contain any Korean (Hangul) characters.
 - It must be ONE single sentence (do not split it into multiple sentences).
@@ -3453,7 +2866,7 @@ content and gist of the WHOLE conversation.
       if (s.startsWith('"') && s.endsWith('"')) s = s.substring(1, s.length - 1);
       return s.isEmpty ? null : s;
     } catch (e) {
-      debugPrint("[RoleplayBrain.generateExpandedFromConversation] $e");
+      debugPrint("[FreeTalkBrain.generateExpandedFromConversation] $e");
       return null;
     }
   }
@@ -3462,13 +2875,12 @@ content and gist of the WHOLE conversation.
   static Future<String?> polishSentence(
     String apiKey,
     String originalSentence, {
-    String partnerLabel = 'the roleplay partner',
+    String partnerLabel = 'the clone',
   }) async {
     if (apiKey.isEmpty || originalSentence.trim().isEmpty) return null;
     try {
-      final safePartnerLabel = partnerLabel.trim().isNotEmpty
-          ? partnerLabel.trim()
-          : 'the roleplay partner';
+      final safePartnerLabel =
+          partnerLabel.trim().isNotEmpty ? partnerLabel.trim() : 'the clone';
       final sysPrompt = """You are an English speaking coach.
 Rewrite the given long English sentence as ONE "easy but elegant" spoken sentence.
 
@@ -3478,7 +2890,7 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
 - Smooth flow (pause-friendly, commas for breath)
 - Same meaning as the original (do not add new facts)
 - Easier to pronounce and say out loud
-- Render every participant name, role label, and situation in English (translate role or description phrases; romanize real personal names). Never keep Korean text.
+- Render every participant name, clone name, role label, and situation in English (translate role or description phrases; romanize real personal names). Never keep Korean text.
 - The final sentence must be 100% English and must NOT contain any Korean (Hangul) characters.
 - Do not replace $safePartnerLabel with AI, assistant, chatbot, or bot.
 
@@ -3515,158 +2927,32 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
       if (p.startsWith('"') && p.endsWith('"')) p = p.substring(1, p.length - 1);
       return p.isEmpty ? originalSentence : p;
     } catch (e) {
-      debugPrint("[RoleplayBrain.polishSentence] $e");
+      debugPrint("[FreeTalkBrain.polishSentence] $e");
       return originalSentence;
     }
   }
 
-  // 📋 [200개 기초 상황 — 카테고리 5종 × 40개] (v4 추가)
-  static const List<String> _baseSituations200 = [
-    // ── 공항_비행기_교통 (40개) ──
-    '기내 의학 환자 발생', '화장실 갇힘 사고', '산소마스크 작동됨', '여권 분실 발견함', '캐리어 파손 확인', '위조지폐 의심됨',
-    '입국 거부 위기', '소지품 오인 압수', '결제 오류 지연', '비행기 놓치기 직전', '탑승권 분실함', '미아 발생 신고',
-    '승무원 부상 발생', '탑승 거부 당함', '버스 고장 멈춤', '잘못된 티켓 발권', '소매치기 발생', '짐 오인 교환됨', '스크린도어 낌',
-    '비상 정지 발생', '지갑 두고 내림', '막차 취소 고립됨', '급격한 복통 발생', '부당 요금 요구', '난폭 운전 공포', '계약 사기 의심',
-    '혼유 사고 발생', '차량 타이어 펑크', '차량 배터리 방전', '정산기 고장 멈춤', '예약 누락 발견', '선내 화재 경보',
-    '소지품 바다 빠짐', '배 놓치고 고립', '집단 식중독 증상', '가방 문 열려있음', '반납 처리 오류', '공중 멈춤 사고',
-    '접촉 사고 후 도주', '차량 출고 불가',
-    // ── 호텔_숙소_주거 (40개) ──
-    '예약 취소 당함', '방 내부 몰카 의심', '온수 안 나옴', '엘리베이터 갇힘', '익수 사고 발생', '알레르기 발생', '취객 시비 걸림',
-    '운동 기구 부상', '화재 경보 대피', '기밀 문서 유출', '소지품 도난당함', '숙소 사진과 다름', '미끄러짐 부상', '텐트 무너짐',
-    '멧돼지 출현함', '텐트 불길 번짐', '도어락 고장 갇힘', '동파로 누수 발생', '층간소음 시비', '맹견 진입 위험', '계단 실족 부상',
-    '저혈압 실신함', '주인방 무단 침입', '룸메이트 절도', '상한 음식 서빙', '차량 파손 발견', '옥상 문 잠김 갇힘', '독충에 물림',
-    '무단 주거 침입', '신분증 도용 의심', '난간 파손 위험', '피부 화상 입음', '독사 출현 비상', '가스 누출 의심', '옷 세탁 중 분실',
-    '금고 안 열림', '지하 침수 발생', '택배 분실 항의', '유리창 깨짐', '샹들리에 추락',
-    // ── 식당_쇼핑_유흥 (40개) ──
-    '머리카락 나옴', '식중독 증상 발현', '기름 불판 화재', '주문 오인 대기', '결제 중복 처리', '커피 쏟아 화상', '식판 엎음 사고',
-    '음식 도중 소진', '바가지 요금 청구', '지갑 소매치기', '명품 훼손 시비', '피부 부작용 발생', '몰래카메라 발견', '카트 충돌 부상',
-    '거스름돈 사기', '여권 정보 오류', '물건 파손 변상', '지갑 분실 확인', '휴지 없이 갇힘', '유통기한 지남', '취객 싸움 번짐',
-    '도난 경보 작동', '소매치기 추격', '에스컬레이터 낌', '낙상 사고 발생', '이물질 치아 파손', '배달 사고 누락', '가스통 폭발 위기',
-    '인파 압사 위험', '주차 시비 폭행', '다이아 분실 오해', '신발 도난당함', '책장 쓰러짐 사고', '렌즈 파손 부상', '잘못된 약 복용',
-    '교상 사고 발생', '가방 줄 걸려 파손', '칼날 부상 사고', '변질된 음식 판매', '침대 주저앉음',
-    // ── 공공장소_병원_비즈니스 (40개) ──
-    '의료진 공백 지연', '오진 가능성 확인', '호흡 곤란 환자', '수술 지연 항의', '잇몸 과다 출혈', '보이스피싱 의심', '카드 먹통 됨',
-    '중요 택배 분실', '억울한 누명 씀', '긴급 출동 방해', '서류 조작 의심', '비자 발급 거부', '빔프로젝터 폭발', '랜섬웨어 감염됨',
-    '정수기 누전 화재', '면접 서류 분실', '무단 침입 시위', '인감 도용 발견', '세금 폭탄 오류', '소송 상대 협박', '노트북 도난당함',
-    '시험지 유출 비상', '화학 약품 누출', '등교 미아 발생', '셔틀버스 사고', '전시 작품 훼손', '유물 도난 경보', '무대 조명 추락',
-    '영사기 화재 발생', '암표 사기 당함', '맹수 탈출 비상', '독초 오접촉 부상', '유기견 습격함', '열사병 환자 실신', '범죄 의심 비명',
-    '부당해고 구제 신청', '부스 무너짐 사고', '생방송 방송 사고', '난입 소요 사태', '집단 감염 의심',
-    // ── 레저_관광_자연_기타 (40개) ──
-    '이식 조류 표류', '산소통 잔량 고갈', '보드 충돌 실신', '쥐가 나서 익수', '갑작스러운 불어남', '슬라이드 충돌', '낚싯바늘 눈 찔림',
-    '실족 고립 조난', '저체온증 발생', '로프 끊어짐 위기', '충돌 골절 부상', '리프트 공중 멈춤', '타구 사고 부상', '파울볼 안면 강타',
-    '심장마비 환자 발생', '바벨 낙하 깔림', '관절 탈구 부상', '레인 진입 기계 낌', '스케이트 날 부상', '롤러코스터 멈춤',
-    '실제 유령 공포', '오발 사고 발생', '카트 전복 사고', '나무 걸려 조난', '줄 풀림 오인 비상', '사막 식수 고갈', '정글 독충 공격',
-    '낙석 낙하 갇힘', '막배 끊겨 고립', '통유리 균열 발견', '낙뢰 사고 발생', '인파 밀집 압사', '캠핑카 일산화탄소', '고온 화상 입음',
-    '음향 장비 감전', '울타리 돌파 충돌', '말에서 추락 부상', '탁구대 무너짐', '당구큐대 시비', '코인기기 화재',
-  ];
-
   // ==================================================================
-  // 📦 [Box 7-1-0] generateDramaticScenario — 드라마/영화 장면 자동 생성
   // ==================================================================
-  static Future<Map<String, String>?> generateDramaticScenario(
-      String apiKey) async {
-    final client = http.Client();
-    try {
-      // 🎲 [v4 합본 풀] 200개 기초 상황 + 20개 장르 씨앗 → 변주 폭 확대
-      const genreSeeds = [
-        // 일상/긍정 (10개)
-        '카페에서 새 메뉴 추천받기', '해외여행 중 현지인과 길 묻기', '새 이웃에게 인사하며 동네 소개',
-        '옷가게에서 스타일 상담', '회사 점심시간 동료와 맛집 토크', '헬스장 첫날 트레이너와 상담',
-        '공항 체크인 카운터 대화', '호텔 체크인하며 방 업그레이드 요청', '동네 서점에서 책 추천 대화',
-        '반려동물 산책 중 견주끼리 대화',
-        // 드라마틱/갈등 (10개)
-        '불륜 발각, 부부 갈등', '직장 내 권력 다툼, 해고 위기', '형사 심문, 용의자 취조',
-        '재벌가 상속 분쟁', '비밀 연인 들킴', '가족 비밀 폭로', '첫사랑 재회, 감정 충돌',
-        '룸메이트 생활 규칙 갈등', '환불 요청하는데 매장 직원이 거부', '친구가 빌린 돈 안 갚음',
-      ];
-      final pool = [..._baseSituations200, ...genreSeeds];
-      final pick = pool[Random().nextInt(pool.length)];
-      // 200개 합본에 있으면 "그대로 쓸 구체 상황", 20개 씨앗이면 "확장할 장르 힌트"
-      final bool isConcrete = _baseSituations200.contains(pick);
-
-      final systemPrompt = "You are a creative director for a high-immersion English roleplay app.\n"
-              "Your job is to create ONE vivid scene inspired by real-life situations, Netflix series, Korean/American dramas, or movies.\n"
-              "\n"
-              "OUTPUT: Return ONLY valid JSON, no extra text.\n"
-              "{\n"
-              '  "situation": "핵심 상황 요약 (10-15 Korean chars, e.g. 카페에서 신메뉴 추천)",\n'
-              '  "ai_role": "AI 캐릭터 (10자 이내, with clear personality, e.g. 친절한 바리스타)",\n'
-              '  "user_role": "유저 캐릭터 (8자 이내, e.g. 단골 손님)"\n'
-              "}\n"
-              "\n"
-              "RULES:\n"
-              "- situation: vivid and specific. Do NOT name any show/character.\n"
-              "- ai_role: give a personality that fits the genre (friendly, enthusiastic, suspicious, furious, etc).\n"
-              "- user_role: the user naturally belongs in the scene.\n"
-              "- For everyday/positive genres: warm, helpful, curious personalities.\n"
-              "- For dramatic/conflict genres: intense, confrontational, emotional personalities.\n" +
-          (isConcrete
-              ? '- USE THIS EXACT SITUATION as-is: "$pick". Do NOT invent a different one. Keep the situation field essentially equal to "$pick" (light wording polish within 10-15 Korean chars OK). Only assign a fitting ai_role and user_role.'
-              : "- Genre hint this round: $pick");
-
-      final res = await client
-          .post(
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
-            headers: {
-              'Authorization': 'Bearer $apiKey',
-              'Content-Type': 'application/json; charset=utf-8',
-            },
-            body: jsonEncode({
-              'model': 'gpt-4o-mini',
-              'temperature': 1.1,
-              'response_format': {'type': 'json_object'},
-              'max_tokens': 150,
-              'messages': [
-                {'role': 'system', 'content': systemPrompt},
-                {
-                  'role': 'user',
-                  'content': '지금 바로 JSON 생성해줘.',
-                },
-              ],
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
-
-      if (res.statusCode == 200) {
-        final raw = jsonDecode(utf8.decode(res.bodyBytes))['choices'][0]
-                ['message']['content']
-            .toString()
-            .trim();
-        final parsed = jsonDecode(raw);
-        return {
-          'situation': parsed['situation']?.toString() ?? '',
-          'ai_role': parsed['ai_role']?.toString() ?? '',
-          'user_role': parsed['user_role']?.toString() ?? '',
-        };
-      }
-    } catch (e) {
-      print('generateDramaticScenario Error: $e');
-    } finally {
-      client.close();
-    }
-    return null;
-  }
-
-  // ==================================================================
-  // 📦 [Box 7-1-A] streamUserTranslation — CoT 2단계 번역
+  // 📦 [Box 7-1-B] streamUserTranslation — CoT 2단계 번역 스트림
+  // ------------------------------------------------------------------
+  // 핵심: 한국어 주어 생략 → 영어 주어 복원
+  // Step 1: CONTEXT CHECK (이전 대화로 화자 파악)
+  // Step 2: SUBJECT RESTORATION (생략된 주어/목적어 복원)
+  // Step 3: TRANSLATE (구어체 톤 유지 + TTS 쉼표)
   // ==================================================================
   static Stream<String> streamUserTranslation({
     required String apiKey,
     required String textOriginal,
     required String targetLang,
     required String contextStr,
-    String userRole = '',
-    String situation = '',
   }) async* {
     final client = http.Client();
     try {
-      final roleContext = userRole.isNotEmpty
-          ? '\nThe user is playing the role of "$userRole"${situation.isNotEmpty ? ' in a "$situation" scenario' : ''}.'
-          : '';
       final sysPrompt =
-          """You are an expert real-time Korean-to-$targetLang translator for a live roleplay conversation.$roleContext
+          '''You are an expert real-time Korean-to-$targetLang translator specialized in live conversation.
 
-Korean is a heavy pro-drop language - subjects, objects, and pronouns are constantly omitted when clear from context.
+Korean is a heavy pro-drop language — subjects, objects, and pronouns are constantly omitted when clear from context. Your job is to resolve these omissions perfectly.
 
 [CASE CORRECTION] — Check this FIRST, only when the conversation history contains at least one "User:" line.
 The user is correcting the AI's misunderstanding or mishearing of their PREVIOUS utterance.
@@ -3678,8 +2964,8 @@ If this is a correction, output EXACTLY: [CORRECTION]  (and nothing else)
 Do NOT output [CORRECTION] when the user simply adds new details that happen to start with "아니" etc.
 
 [INTERNAL THINKING - do not output]
-Step 1. CONTEXT CHECK: Review conversation history.
-Step 2. SUBJECT RESTORATION: The speaker is${userRole.isNotEmpty ? ' a "$userRole"' : ' the user'}. Identify and restore any omitted subject/pronoun from THEIR perspective.
+Step 1. CONTEXT CHECK: Review the conversation history to identify who is speaking, who is being addressed, and who/what is the current topic.
+Step 2. SUBJECT RESTORATION: Identify any omitted subject, object, or pronoun in the current Korean input and restore them based on context.
   Use these Korean grammar markers to determine roles:
   - ~이/가 = SUBJECT marker (doer of action): "엄마가 사줬어" → Mom bought it (Mom is subject)
   - ~은/는 = TOPIC marker (often the subject): "나는 갔어" → I went
@@ -3687,38 +2973,23 @@ Step 2. SUBJECT RESTORATION: The speaker is${userRole.isNotEmpty ? ' a "$userRol
   - ~을/를 = OBJECT marker (thing acted upon): "그걸 봤어" → saw THAT
   - Honorific ~(으)시 attaches to the SUBJECT's verb: "선생님이 오셨어" → The teacher came (teacher is subject, not me)
   - ~해줬어/해주셨어 = someone did something FOR someone else: the person before 가/이 is the doer
-Step 3. TRANSLATE: Produce natural $targetLang speech that fits${userRole.isNotEmpty ? ' the "$userRole" role' : ' the user'}.
+Step 3. TRANSLATE: Produce natural, fluent $targetLang with explicit subjects (I, you, he, she, they, we).
 
 [COMMON MISTAKES - avoid these]
 Korean: "걔가 나한테 전화했어" → CORRECT: He called me. WRONG: I called him.
 Korean: "엄마가 용돈 줬어" → CORRECT: Mom gave me allowance. WRONG: I gave mom allowance.
 Korean: "선생님이 칭찬해주셨어" → CORRECT: The teacher praised me. WRONG: I praised the teacher.
 Korean: "친구가 요즘 바빠서 못 만나" → CORRECT: My friend is busy lately, so I can't meet him. WRONG: I'm busy lately...
+Korean: "호진이 시험 몇 점 받을 것 같아?" → CORRECT: What score do you think Hojin will get on the exam? WRONG: What score do you think you/I will get?
+NAMED PEOPLE (proper nouns like 호진, 민수, 엄마, 선생님) must stay as that exact person. NEVER collapse a named subject into "I" or "you".
 The particle before the verb's doer (이/가) is ALWAYS the subject. Never swap subject and object.
 
-[CLARIFICATION GUARD — In-Character]
-Before translating, check: is the subject/object clear from the utterance OR resolvable from History?
-If clear → proceed with normal translation.
-If genuinely ambiguous AND History cannot resolve it → output EXACTLY:
-[CLARIFY] <short, in-character clarification question in $targetLang>
-
-The question must sound like the AI's assigned character is asking, not a system message.
-Style pool — pick ONE that fits the character's personality and VARY each time:
-- Terse: "Who are you talking about?"
-- Skeptical: "Who? Be specific."
-- Curious: "Oh — who exactly do you mean?"
-- Playful: "I'm gonna need a name to work with here!"
-- Confirming: "Do you mean [person from history]?"
-
-NEVER output [CLARIFY] if the subject can be inferred from context.
-NEVER break character when asking.
-
 [OUTPUT RULES]
-- The user IS${userRole.isNotEmpty ? ' a "$userRole"' : ' the user'} — translate their words from THAT perspective only.
-- Preserve speech register appropriate for${userRole.isNotEmpty ? ' a "$userRole"' : ' the user'}.
-- Insert commas (,) for TTS rhythm.
-- Output ONLY the $targetLang translation.
-- If input is noise (under 2 meaningful chars) OR is completely unrecognizable gibberish that cannot be interpreted as a human utterance in any language, output EXACTLY: [EVAPORATE]""";
+- Preserve speech register: formal Korean → polite English, casual (반말) → casual English with contractions.
+- Keep emotional nuance (excitement, sarcasm, hesitation) in tone.
+- Insert commas (,) after each natural phrase to create rhythm for TTS shadowing.
+- Output ONLY the $targetLang translation. No explanation, no Korean text, no prefixes.
+- If the input is meaningless noise or filler (under 2 meaningful chars), output EXACTLY: [EVAPORATE]''';
 
       final request = http.Request(
         'POST',
@@ -3731,14 +3002,14 @@ NEVER break character when asking.
       request.body = jsonEncode({
         'model': 'gpt-4o-mini',
         'stream': true,
-        'temperature': 0.0,
+        'temperature': 0.0, // 주어 추론 일관성 극대화
         'max_tokens': 120,
         'messages': [
           {'role': 'system', 'content': sysPrompt},
           {
             'role': 'user',
             'content':
-                'Conversation so far:\n$contextStr\n\nTranslate: "$textOriginal"',
+                'Conversation so far:\n$contextStr\n\nTranslate this Korean utterance: "$textOriginal"',
           },
         ],
       });
@@ -3769,7 +3040,7 @@ NEVER break character when asking.
   }
 
   // ==================================================================
-  // 📦 [Box 7-1-B] generateCleanOriginal — 영→한 역번역
+  // 📦 [Box 7-1-C] generateCleanOriginal — AI original 생성 (오리지널 언어 자막)
   // ==================================================================
   static Future<String> generateCleanOriginal({
     required String apiKey,
@@ -3795,12 +3066,7 @@ NEVER break character when asking.
                     'content':
                         '''당신은 한영 통역 전문가입니다. 다음 영어 문장을 **자연스러운 한국어 구어체**로 번역하세요.
 
-[절대 규칙 - 문장 누락 금지]
-- 원문의 모든 문장을 빠짐없이 번역하세요. 요약/축약/생략 절대 금지.
-- 원문이 2문장이면 번역도 반드시 2문장, 3문장이면 3문장.
-- 마침표(.) 또는 물음표(?) 단위로 끊어서 각각 번역하세요.
-
-[주어 생략 처리]
+[중요 규칙 - 주어 생략 처리]
 - 한국어는 주어를 자주 생략합니다. 영어의 I/You/He/She/We/They를 무조건 그대로 살리지 마세요.
 - 문맥상 당연한 주어는 과감히 생략하여 자연스럽게 만드세요.
   예: "I need to go" → "가야겠어요" (✅) / "나는 가야 한다" (❌ 어색)
@@ -3814,8 +3080,7 @@ NEVER break character when asking.
 - "~이다" X → "~이에요/~예요" O
 
 [출력]
-- 번역문만 출력. 설명/주석/따옴표 없음.
-- 원문의 문장 수와 동일하게 출력.
+- 번역문만 한 줄로 출력. 설명/주석/따옴표 없음.
 ''',
                   },
                   {'role': 'user', 'content': englishText},
@@ -3836,40 +3101,48 @@ NEVER break character when asking.
         client.close();
       }
     }
-    return englishText;
+    return englishText; // 실패 시 영어 원문 (빈칸 방지)
   }
 
   // ==================================================================
-  // 📦 [Box 7-1-C] streamRoleplayResponse — AI 빙의 응답
-  // ==================================================================
-  static Stream<String> streamRoleplayResponse({
+  // 📦 Free Talk 언어 수준별 어휘 지침
+  static String _freeTalkLevelInstruction(String level) {
+    switch (level) {
+      case "Beginner":
+        return "Use very simple, common words and short sentences. Avoid idioms and difficult grammar.";
+      case "Advanced":
+        return "Use rich, natural vocabulary including idioms and nuanced expressions, as with a fluent speaker.";
+      case "Intermediate":
+      default:
+        return "Use everyday vocabulary with some variety. Common phrasal verbs and natural expressions are fine.";
+    }
+  }
+
+  // 📦 [Box 7-1-D] streamFreeTalkResponse — Free Talk AI 응답 스트림
+  static Stream<String> streamFreeTalkResponse({
     required String apiKey,
     required String userTargetText,
     required String contextStr,
-    required String situation,
-    required String aiRole,
-    required String userRole,
     required String myTarget,
+    String level = "Intermediate",
   }) async* {
     final client = http.Client();
     try {
-      final sysPrompt = 'You are a master actor playing "$aiRole" in a high-immersion dramatic roleplay.\n'
-          '\n'
-          '[SCENARIO]\n'
-          'Situation: $situation\n'
-          'Your role: $aiRole\n'
-          "User's role: $userRole\n"
-          '\n'
-          '[LANGUAGE RULE]\n'
-          '- Respond in $myTarget ONLY. Role names may be Korean but your dialogue is 100% $myTarget.\n'
-          '\n'
-          '[CHARACTER RULES]\n'
-          '- Stay FULLY in character as "$aiRole" at all times. Never break character.\n'
-          '- Respond with the raw emotion, personality, and subtext that "$aiRole" would have in this situation.\n'
-          '- NO greetings, NO meta-comments. Pure in-character dialogue.\n'
-          '- MAXIMUM 2 short sentences. 1 sentence preferred. Under 15 words per sentence.\n'
-          '- Drive the scene forward — pressure, question, or react to force the user to respond.\n'
-          '- If the user\'s input is completely unintelligible (speech recognition error), output EXACTLY: [RETRY]';
+      final sysPrompt =
+          """You are a warm, friendly $myTarget conversation partner.
+Keep every reply to 2 short sentences maximum.
+Talk like a real friend — sound natural, show interest, and keep the chat flowing.
+Match your vocabulary and grammar to the learner's level below.
+Never say that you are an AI or a language model.
+
+OUTPUT LANGUAGE: $myTarget ONLY. Zero Korean characters in output.
+
+[RULES]
+- Respond in $myTarget only. MAXIMUM 2 short sentences. Often 1 sentence is enough.
+- No greetings, no "I understand", no meta-comments, no prefixes. Just reply.
+- If the audio is garbled or impossible to make out (a speech recognition error), politely ask them to repeat in $myTarget.
+
+Learner level: ${_freeTalkLevelInstruction(level)}""";
 
       final request = http.Request(
         'POST',
@@ -3882,14 +3155,14 @@ NEVER break character when asking.
       request.body = jsonEncode({
         'model': 'gpt-4o-mini',
         'stream': true,
-        'temperature': 0.2,
-        'max_tokens': 80,
+        'temperature': 0.5,
+        'max_tokens': 90,
         'messages': [
           {'role': 'system', 'content': sysPrompt},
           {
             'role': 'user',
             'content':
-                'Conversation history:\n$contextStr\n\nUser just said: "$userTargetText"\n\nYour brief reply (in character as $aiRole):',
+                'Conversation history:\n$contextStr\n\nUser just said: "$userTargetText"\n\nYour brief reply:',
           },
         ],
       });
@@ -3920,49 +3193,25 @@ NEVER break character when asking.
   }
 
   // ==================================================================
-  // 📦 [Box 7-1-D] generateAiOpener — AI 첫 발화 생성 (스트리밍)
-  // ==================================================================
-  // 🎯 [롤플레이 대화 시작 3원칙]
-  //
-  // 원칙 1. AI가 먼저 말을 시작한다.
-  //         유저가 마이크를 누르면 AI가 오프닝 멘트를 먼저 발화하고,
-  //         TTS 재생 완료 후 마이크 청취가 시작된다.
-  //
-  // 원칙 2. 타겟 언어(targetLang)로만 말한다.
-  //         ai_role / user_role 이름이 한글로 주어져도
-  //         실제 AI 대사는 반드시 targetLang으로만 출력.
-  //         한국어 등 모국어를 절대 섞지 않는다.
-  //
-  // 원칙 3. 해당 역할이 실제 현실에서 가장 먼저 할 법한 자연스러운 말로 시작.
-  //         어색한 학습용 인사 X, 그 역할·상황에 딱 맞는 현실적 구어체 O.
-  //         (예: 바리스타 → "What can I get for you?",
-  //              의사 → "So, what brings you in today?",
-  //              트레이너 → "Is this your first session here?")
-  static Stream<String> generateAiOpener({
+  static Stream<String> generateFreeTalkOpener({
     required String apiKey,
-    required String situation,
-    required String aiRole,
-    required String userRole,
     required String targetLang,
+    String level = "Intermediate",
   }) async* {
     final client = http.Client();
     try {
-      final sysPrompt = 'You are a master actor and an English conversation coach playing "$aiRole".\n'
-          '\n'
-          '[SCENARIO]\n'
-          'Situation: $situation\n'
-          'Your role: $aiRole\n'
-          "The other person's role: $userRole\n"
-          '\n'
-          '[CORE RULES]\n'
-          '1. Start the scene IMMEDIATELY with your first line — no greetings, no meta-commentary.\n'
-          '2. Read the emotional tone of the situation: if dramatic, be intense; if everyday, be natural and warm.\n'
-          '3. Do NOT mention any drama, movie, or show titles. Keep it real and seamless.\n'
-          '4. Your first line must be a natural, in-character statement or question that draws the user into the scene.\n'
-          '5. Adopt the exact personality of "$aiRole". Use natural spoken $targetLang — NOT textbook dialogue.\n'
-          '6. ONE sentence only. Under 20 words. Maximum immersion, zero filler.\n'
-          '\n'
-          'Output: ONE natural first line in $targetLang only.';
+      final sysPrompt =
+          """You are a warm, friendly conversation partner starting a casual chat.
+Open with ONE short, natural line that invites the user to talk — like a friend would.
+
+RULES:
+- Speak ONLY in $targetLang. Do NOT use Korean or any other language.
+- ONE sentence only. Under 12 words.
+- Sound natural and friendly, never like an AI or a survey.
+- Avoid a bare "Hello" or "Hi". Say something that invites a reply, for example: "Hey, how's your day going so far?" or "So, what have you been up to lately?"
+- ${_freeTalkLevelInstruction(level)}
+
+Output: ONE sentence in $targetLang only.""";
 
       final request = http.Request(
         'POST',
@@ -3975,44 +3224,40 @@ NEVER break character when asking.
       request.body = jsonEncode({
         'model': 'gpt-4o-mini',
         'stream': true,
-        'temperature': 0.9,
-        'max_tokens': 60,
+        'temperature': 0.8,
+        'max_tokens': 40,
         'messages': [
           {'role': 'system', 'content': sysPrompt},
           {
             'role': 'user',
-            'content': 'Speak your opening line as "$aiRole" in $targetLang.',
+            'content':
+                'Start the conversation — say your friendly opening line in $targetLang.',
           },
         ],
       });
 
       final response =
           await client.send(request).timeout(const Duration(seconds: 15));
-      if (response.statusCode != 200) {
-        yield '...';
-        return;
-      }
+      if (response.statusCode != 200) return;
 
-      await for (final chunk in response.stream
+      await for (final line in response.stream
           .transform(utf8.decoder)
           .transform(const LineSplitter())) {
-        if (chunk.startsWith('data: ') && chunk != 'data: [DONE]') {
+        if (line.startsWith('data: ') && line != 'data: [DONE]') {
           try {
-            final delta = jsonDecode(chunk.substring(6))['choices'][0]['delta']
-                ['content'];
+            final delta =
+                jsonDecode(line.substring(6))['choices'][0]['delta']['content'];
             if (delta != null) yield delta.toString();
           } catch (_) {}
         }
       }
     } catch (_) {
-      yield '...';
     } finally {
       client.close();
     }
   }
 
 }
-
 
 class _LangIconPainter extends CustomPainter {
   final bool active;
@@ -4103,4 +3348,3 @@ class _LangIconPainter extends CustomPainter {
   @override
   bool shouldRepaint(_LangIconPainter old) => old.active != active;
 }
-
