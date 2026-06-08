@@ -2804,23 +2804,21 @@ class FreeTalkBrain {
     String apiKey,
     String transcript, {
     String userLabel = 'the user',
-    String partnerLabel = 'the clone',
+    String partnerLabel = 'AI partner',
   }) async {
     if (apiKey.isEmpty || transcript.trim().isEmpty) return null;
     try {
       final safeUserLabel =
           userLabel.trim().isNotEmpty ? userLabel.trim() : 'the user';
       final safePartnerLabel =
-          partnerLabel.trim().isNotEmpty ? partnerLabel.trim() : 'the clone';
+          partnerLabel.trim().isNotEmpty ? partnerLabel.trim() : 'AI partner';
       final sysPrompt = """You are an English speaking coach.
 You are given a short conversation transcript.
 This conversation is between $safeUserLabel and $safePartnerLabel.
-$safePartnerLabel is a named clone/persona, not AI.
 Your job: compose ONE long, natural English sentence that synthesizes the overall
 content and gist of the WHOLE conversation.
 
 [RULES]
-- Never refer to $safePartnerLabel as AI, assistant, chatbot, or bot.
 - If the partner must be mentioned, use $safePartnerLabel.
 - If any name, role label, or situation appears in Korean, render it in natural English (translate role or description phrases to their English equivalent; romanize real personal names). Never copy Korean text into the sentence.
 - The final sentence must be 100% English and must NOT contain any Korean (Hangul) characters.
@@ -2875,12 +2873,12 @@ content and gist of the WHOLE conversation.
   static Future<String?> polishSentence(
     String apiKey,
     String originalSentence, {
-    String partnerLabel = 'the clone',
+    String partnerLabel = 'AI partner',
   }) async {
     if (apiKey.isEmpty || originalSentence.trim().isEmpty) return null;
     try {
       final safePartnerLabel =
-          partnerLabel.trim().isNotEmpty ? partnerLabel.trim() : 'the clone';
+          partnerLabel.trim().isNotEmpty ? partnerLabel.trim() : 'AI partner';
       final sysPrompt = """You are an English speaking coach.
 Rewrite the given long English sentence as ONE "easy but elegant" spoken sentence.
 
@@ -2890,9 +2888,8 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
 - Smooth flow (pause-friendly, commas for breath)
 - Same meaning as the original (do not add new facts)
 - Easier to pronounce and say out loud
-- Render every participant name, clone name, role label, and situation in English (translate role or description phrases; romanize real personal names). Never keep Korean text.
+- Render every participant name, role label, and situation in English (translate role or description phrases; romanize real personal names). Never keep Korean text.
 - The final sentence must be 100% English and must NOT contain any Korean (Hangul) characters.
-- Do not replace $safePartnerLabel with AI, assistant, chatbot, or bot.
 
 [OUTPUT]
 - Exactly ONE sentence. No explanation, no quotes, no prefixes.""";
