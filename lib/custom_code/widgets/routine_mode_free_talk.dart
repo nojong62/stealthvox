@@ -65,6 +65,10 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
   DocumentReference? _myHistoryRef; // 🔧 [히스토리] chat_history 문서 참조 (Duo 패턴)
   bool _isAiOpenerPlaying = false; // AI 첫 발화 재생 중 여부
 
+  // 🆕 [유저 먼저] 2초 grace 동안 유저가 말 안 하면 AI가 오프너 발화
+  Timer? _openerNudgeTimer;
+  bool _userHasSpoken = false;
+
   // ── Idle Timeout v2 ───────────────────────────────────────────────
   // 기준: "유저도 AI도 아무 작동이 없는 상태"가 연속 60초 지속되면 pause.
   //  - AI 작동 = _ttsQueueManager.isBusy (TTS 재생/대기)
@@ -512,6 +516,8 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
     _isAiOpenerPlaying = false;
     _commitTimer?.cancel(); // 🔧 [v3.4] 대기 중 타이머 정리
     _commitTimer = null;
+    _openerNudgeTimer?.cancel(); // 🆕 [유저 먼저] 오프너 nudge 정리
+    _openerNudgeTimer = null;
     _pendingTranscript = ''; // 대기 중 발화도 버림
     _voiceManager?.dispose();
     _voiceManager = null;
@@ -529,6 +535,11 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
   // ====================================================================
   Future<void> _generateAndPlayAiOpener() async {
     if (_isAiOpenerPlaying) return;
+    // 🆕 키 미로딩 상태에서 발화 시도 → 무음 방지
+    if (_openAiKey.isEmpty) {
+      _log('⚠️ [OPENER]', 'OpenAI key not ready — skip opener');
+      return;
+    }
     _isAiOpenerPlaying = true;
     if (mounted) setState(() {});
 
@@ -695,6 +706,11 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
         _log('✅ [LISTEN-02]', 'onConnected 콜백 실행');
       },
       onTranscriptUpdate: (transcript) {
+        // 🆕 [유저 먼저] 유저가 입을 떼는 순간 오프너 nudge 취소
+        if (!_userHasSpoken) {
+          _userHasSpoken = true;
+          _openerNudgeTimer?.cancel();
+        }
         _swDeepgram.reset();
         _swDeepgram.start();
       },
@@ -711,6 +727,28 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
     _log('🎤 [LISTEN-04]', 'connectAndStart 호출 직전');
     await _voiceManager!.connectAndStart();
     _log('🎤 [LISTEN-05]', 'connectAndStart 완료');
+
+    // 🆕 [유저 먼저] 첫 턴이고 유저가 아직 말 안 했으면 2초 grace 후 AI가 운을 뗌
+    if (_localMessages.isEmpty && !_userHasSpoken) {
+      _armOpenerNudge();
+    }
+  }
+
+  // 🆕 [유저 먼저 → 2초 침묵 시 AI 오프너]
+  // 마이크가 살아있는 상태에서 2초 grace. 그 안에 유저가 말하면
+  // (onTranscriptUpdate에서 _userHasSpoken=true + 타이머 취소) 오프너는 안 나가고,
+  // 침묵하면 마이크를 잠깐 내리고 AI가 "자유롭게 대화하자" 한마디.
+  // (오프너 finally에서 _startDeepgramListening으로 청취 재개)
+  void _armOpenerNudge() {
+    _openerNudgeTimer?.cancel();
+    _openerNudgeTimer = Timer(const Duration(seconds: 2), () {
+      if (!mounted || !_isConversationActive) return;
+      if (_userHasSpoken || _localMessages.isNotEmpty) return;
+      _log('💡 [NUDGE]', '2초 침묵 → AI 오프너 발화');
+      _voiceManager?.dispose();
+      _voiceManager = null;
+      _generateAndPlayAiOpener();
+    });
   }
 
   // 🔧 [v3.4] Deepgram speech_final 수신 시 호출됨
@@ -1866,11 +1904,10 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
                   setState(
                       () => _isConversationActive = !_isConversationActive);
                   if (_isConversationActive) {
-                    if (_localMessages.isEmpty) {
-                      _generateAndPlayAiOpener();
-                    } else {
-                      _startDeepgramListening();
-                    }
+                    // 🆕 [유저 먼저] 항상 마이크부터 켠다. 첫 턴 2초 grace는
+                    //     _startDeepgramListening 내부에서 처리.
+                    _userHasSpoken = false;
+                    _startDeepgramListening();
                   } else {
                     _stopEverything();
                   }
@@ -3273,14 +3310,14 @@ Learner level: ${_freeTalkLevelInstruction(level)}""";
     final client = http.Client();
     try {
       final sysPrompt =
-          """You are a warm, friendly conversation partner starting a casual chat.
-Open with ONE short, natural line that invites the user to talk — like a friend would.
+          """You are a warm, friendly conversation partner kicking off a casual, no-pressure chat.
+Open with ONE short, natural line that invites the user to chat freely about anything.
 
 RULES:
 - Speak ONLY in $targetLang. Do NOT use Korean or any other language.
 - ONE sentence only. Under 12 words.
-- Sound natural and friendly, never like an AI or a survey.
-- Avoid a bare "Hello" or "Hi". Say something that invites a reply, for example: "Hey, how's your day going so far?" or "So, what have you been up to lately?"
+- Relaxed and friendly, like a close friend — never like an AI or a survey.
+- Convey the feeling of "let's just chat freely about whatever you like." For example: "Let's just chat freely — what's on your mind?" or "We can talk about anything you like, so what's up?"
 - ${_freeTalkLevelInstruction(level)}
 
 Output: ONE sentence in $targetLang only.""";
