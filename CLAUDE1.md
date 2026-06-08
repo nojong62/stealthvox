@@ -47,165 +47,129 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# Free Talk 모드 전환 작업 지시서 (v1)
+# StepExpand 첫 질문 = 프리톡 기록 기반 + 프리톡 연한 안내 (v1)
 
-> 클론(`routine_mode_clone.dart`)을 복사해 **Free Talk 모드**(`routine_mode_free_talk.dart`)로 만든다.
-> 클론 원본은 **건드리지 않고 그대로 보존**(롤백 안전). 라우팅만 Free Talk로 돌린다.
-> Free Talk = AI와의 자유 대화. 초청/페르소나/클론 선택 없음. 통신 골격은 클론과 동일.
+> 목표 ① StepExpand 세션 시작 시, 저장된 **프리톡 유저 발화**에서 주제를 골라 **기본 문장을 유도하는 첫 질문**을 AI가 먼저 던진다. 기록 없으면 **지금처럼** 고정 안내로 시작.
+> 목표 ② 프리톡 기반 질문이 나갈 때는 "기본 문장 말하세요" 안내를 **생략**(질문이 그 역할 대체).
+> 목표 ③ 변주는 **입력 랜덤화 + 최근 안 쓴 방 우선**으로 — 온도는 0.2 유지.
+> 목표 ④ 질문은 **타겟 언어로 발화 + 타겟/오리지널 자막**(다른 AI 발화와 동일). 타겟==오리지널이면 타겟만.
+> 목표 ⑤ 프리톡 화면 빈 채팅 영역에 **연한 안내문** 추가.
 
----
-
-## 0. 절대 원칙 (CRITICAL)
-
-1. **Box 7(통신 엔진), Box 5 / Box 5-A(파이프라인), 번역/원문 생성 메서드는 손대지 않는다.**
-2. **STEP 4의 새 파일 내부 편집은 반드시 "아래(큰 줄번호) → 위(작은 줄번호)" 순서로 적용**한다. (위부터 지우면 아래 줄번호가 밀려 앵커가 어긋남.)
-3. 줄번호는 **갓 복사한 새 파일 = 클론 원본과 동일**한 상태 기준이다. 각 편집에 첫 줄/끝 줄 내용 앵커를 함께 표기했다.
-4. 작업 파일은 `lib/custom_code/widgets/` 에만 둔다. `lib/custom_code/임시/` 는 빌드 대상 아님.
-5. 모든 영어 프롬프트 문자열은 큰따옴표 / 삼중 큰따옴표(`"""`) 기반 — 작은따옴표 이스케이프 사고 방지. URL 마크다운 변환 금지(해당 없음).
+대상 파일: `routine_mode_step_expand.dart`, `routine_mode_free_talk.dart`.
+적용 원칙: 텍스트 앵커 기준(줄번호는 드리프트 가능). Box 7·파이프라인 무변경.
 
 ---
 
-## STEP 0 — 파일 복사 + 전역 식별자 리네임
+## STEP 1 — `routine_mode_free_talk.dart` : 빈 화면 연한 안내
 
-PowerShell (`F:\flutter_project\stealth_vox`):
+`_buildChatList()` 전체 교체.
 
-```powershell
-Copy-Item lib\custom_code\widgets\routine_mode_clone.dart lib\custom_code\widgets\routine_mode_free_talk.dart
-
-# 새 파일 내부에서만 위젯/브레인 클래스명 변경 (클론 원본은 그대로 둠)
-$p = 'lib\custom_code\widgets\routine_mode_free_talk.dart'
-(Get-Content $p -Raw) `
-  -replace 'RoutineModeClone','RoutineModeFreeTalk' `
-  -replace 'CloneBrain','FreeTalkBrain' `
-  | Set-Content $p -NoNewline
-```
-
-- `RoutineModeClone` → `RoutineModeFreeTalk` 는 `_RoutineModeCloneState` → `_RoutineModeFreeTalkState` 도 함께 처리됨(부분 문자열 포함).
-- Box 7 클래스명(`TtsQueueManager`, `DeepgramV2VoiceManager`, `ChunkedTtsFetcher`, `TtsCache`, `HybridTtsPlayer`, `ConversationHistory`, `UnifiedBrain`)은 **변경하지 않는다.** 다른 모드 파일과 동일 이름이 중복돼도, 서로 다른 라이브러리이고 동시에 참조되지 않으므로 충돌 없음(기존 4개 모드가 이미 같은 패턴).
-- 새 파일을 Android Studio에서 커스텀 위젯으로 인식시킨다(`widgets/` 폴더 자동 포함).
-
-검증:
-```powershell
-Select-String -Path lib\custom_code\widgets\routine_mode_free_talk.dart -Pattern 'class RoutineModeFreeTalk|class _RoutineModeFreeTalkState|class FreeTalkBrain' | Measure-Object  # 3
-Select-String -Path lib\custom_code\widgets\routine_mode_free_talk.dart -Pattern 'RoutineModeClone|CloneBrain' | Measure-Object  # 0
-```
-
----
-
-## STEP 1 — `stealth_room_master.dart` (라우팅)
-
-**1-1. import 추가** (파일 상단 import 블록):
+before:
 ```dart
-import 'routine_mode_free_talk.dart';
+  Widget _buildChatList() {
+    final double bottomPad = MediaQuery.of(context).size.height * 0.55;
+    return ListView.builder(
+      controller: _scrollController,
+      padding: EdgeInsets.fromLTRB(16, 16, 16, bottomPad),
+      itemCount: _localMessages.length,
+      itemBuilder: (context, idx) {
+        _itemKeys[idx] ??= GlobalKey();
+        return Container(
+            key: _itemKeys[idx], child: _buildTextBlock(_localMessages[idx]));
+      },
+    );
+  }
 ```
-
-**1-2. mode 2 분기 교체** — 현재 209~213줄:
+after:
 ```dart
-    } else if (_currentMode == 2) {
-      return RoutineModeClone(
-          key: const ValueKey('RoutineModeClone'),
-          width: widget.width,
-          height: widget.height);
-```
-↓ 교체:
-```dart
-    } else if (_currentMode == 2) {
-      return RoutineModeFreeTalk(
-          key: const ValueKey('RoutineModeFreeTalk'),
-          width: widget.width,
-          height: widget.height);
-```
-
-**1-3. 메뉴 카드 라벨** — 291줄:
-```dart
-            _buildMenuCard(2, "Clone AI", "클론 AI와 대화", Icons.face,
-```
-↓ 교체:
-```dart
-            _buildMenuCard(2, "Free Talk", "AI와 자유 대화", Icons.forum,
-```
-
-**1-4. 수동 안내 항목** — 131줄:
-```dart
-                          _buildManualItem('Clone AI', '클론 AI와 대화',
-```
-↓ 교체:
-```dart
-                          _buildManualItem('Free Talk', 'AI와 자유 대화',
+  Widget _buildChatList() {
+    final double bottomPad = MediaQuery.of(context).size.height * 0.55;
+    return Stack(
+      children: [
+        // 🆕 바탕 연한 안내 (대화 시작 전에만 표시)
+        if (_localMessages.isEmpty)
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 40),
+              child: Text(
+                '타겟 언어로만 프리톡 하려면\n타겟과 오리지널 언어를 같게 하세요',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.18),
+                  fontSize: 13,
+                  height: 1.5,
+                ),
+              ),
+            ),
+          ),
+        ListView.builder(
+          controller: _scrollController,
+          padding: EdgeInsets.fromLTRB(16, 16, 16, bottomPad),
+          itemCount: _localMessages.length,
+          itemBuilder: (context, idx) {
+            _itemKeys[idx] ??= GlobalKey();
+            return Container(
+                key: _itemKeys[idx],
+                child: _buildTextBlock(_localMessages[idx]));
+          },
+        ),
+      ],
+    );
+  }
 ```
 
 ---
 
-## STEP 2 — `store_master.dart` (사용 내역 라벨)
+## STEP 2 — `routine_mode_step_expand.dart`
 
-`_modeDisplayName` switch — 333~334줄 `case 'clone'` 바로 위에 `free_talk` 케이스 추가:
-```dart
-      case 'free_talk':
-        return '💬 Free Talk';
-      case 'clone':
-        return '🤖 AI Clone';
-```
-(클론 케이스는 과거 데이터 표시용으로 남겨둠.)
+### 2A. (신규) `StepExpandBrain.streamFreeTalkSeedQuestion` — 온도 0.2
 
----
-
-## STEP 3 — `chat_history_list_master.dart` (필터칩)
-
-660줄:
-```dart
-                  _buildFilterChip('Clone', 'Clone', Icons.face),
-```
-↓ 교체:
-```dart
-                  _buildFilterChip('Free Talk', 'Free Talk', Icons.forum),
-```
-(아이콘/색상은 이미 `room_name`에 "Free Talk" 포함 기준으로 들어가 있어 자동 적용됨 — 299·310줄.)
-
----
-
-## STEP 4 — 새 파일 `routine_mode_free_talk.dart` 내부 (반드시 아래→위 순서)
-
-> STEP 0 직후 줄번호 기준. **4A → 4O 순서대로(=파일 하단부터) 적용.**
-
----
-
-### 4A. (삭제) FreeTalkBrain의 클론 전용 메서드 3개
-
-`confirmCloneIdentity` ~ `generateRecommendedScenarios` 통째 삭제.
-
-- **시작**: 4232줄 — `  // 📦 [Box 7-1-E1] confirmCloneIdentity — 이름 확정 (temperature 0.2)`
-- **끝**: 4437줄 — `10. 듣고 있는 음악 추천하기''';` 의 닫힘 `  }` (generateRecommendedScenarios 의 닫는 중괄호, 4437줄)
-
-즉 **4232~4437줄 전체 삭제**. 바로 아래 4438줄 `}`(= FreeTalkBrain 클래스 닫힘)는 **남긴다.**
-
-검증: `Select-String 'generatePersonaFromChat|confirmCloneIdentity|generateRecommendedScenarios'` → **0건**.
-
----
-
-### 4B. (교체) `generateCloneOpener` → `generateFreeTalkOpener`
-
-4155줄 `static Stream<String> generateCloneOpener({` 부터 4231줄(메서드 닫는 `}`)까지 — **메서드 전체** 교체:
+`StepExpandBrain` 클래스 안, `streamOpeningFallbackQuestion` 메서드 **바로 위(또는 아래)** 에 추가.
+출력 계약은 기존 질문들과 동일: **타겟 텍스트 → `\n\n` → 오리지널(모국어) 자막**. 타겟==모국어면 타겟만.
 
 ```dart
-  static Stream<String> generateFreeTalkOpener({
+  // ==================================================================
+  // 📦 streamFreeTalkSeedQuestion — 프리톡 기록 기반 첫 질문 (온도 0.2)
+  // ------------------------------------------------------------------
+  // 유저의 과거 프리톡 발화 몇 개를 받아, 그중 한 주제로 "기본 문장(seed)"을
+  // 유도하는 질문 1개를 타겟 언어로 생성. 변주는 입력 랜덤화로 확보(온도 0.2).
+  // 출력: <타겟 질문>\n\n<모국어 번역>  (타겟==모국어면 타겟만)
+  // ==================================================================
+  static Stream<String> streamFreeTalkSeedQuestion({
     required String apiKey,
-    required String targetLang,
-    String level = "Intermediate",
+    required String myTarget,
+    required List<String> snippets,
+    String myNative = '',
   }) async* {
     final client = http.Client();
     try {
-      final sysPrompt =
-          """You are a warm, friendly conversation partner starting a casual chat.
-Open with ONE short, natural line that invites the user to talk — like a friend would.
+      final String snippetsBlock =
+          snippets.map((s) => '- $s').join('\n');
+      final String sameLangNote = (myNative.isNotEmpty && myNative == myTarget)
+          ? 'NOTE: $myTarget and the user\'s language are the same — output ONLY the question, with NO blank line and NO translation.\n'
+          : '';
 
-RULES:
-- Speak ONLY in $targetLang. Do NOT use Korean or any other language.
-- ONE sentence only. Under 12 words.
-- Sound natural and friendly, never like an AI or a survey.
-- Avoid a bare "Hello" or "Hi". Say something that invites a reply, for example: "Hey, how's your day going so far?" or "So, what have you been up to lately?"
-- ${_freeTalkLevelInstruction(level)}
-
-Output: ONE sentence in $targetLang only.""";
+      final String sysPrompt = 'You are a Step Expand grammar coach opening a session.\n'
+          'The user has had earlier free-talk conversations. Here are a few things they said before:\n'
+          '$snippetsBlock\n'
+          '\n'
+          'Choose ONE of these topics and ask ONE short, friendly opening question — in $myTarget — '
+          'that naturally leads the user to say a simple basic sentence about it. '
+          'That basic sentence becomes the SEED they will expand.\n'
+          '\n'
+          '[RULES]\n'
+          '- Reference their past topic naturally so it feels personal (e.g. "Last time you mentioned ...").\n'
+          '- The question must invite a short, simple statement — NOT yes/no, NOT a list.\n'
+          '- Middle-school level vocabulary. Warm and conversational.\n'
+          '- Do NOT give meta-instructions like "make a sentence" or "expand". Just ask the question.\n'
+          '- ONE question only, under 25 words.\n'
+          '$sameLangNote'
+          '\n'
+          '[OUTPUT FORMAT — follow EXACTLY]\n'
+          '- First: the question in $myTarget only.\n'
+          '- Then a blank line (two newlines).\n'
+          '- Then: the same question translated into $myNative.\n'
+          '- No labels, no quotes, no prefixes.';
 
       final request = http.Request(
         'POST',
@@ -218,14 +182,14 @@ Output: ONE sentence in $targetLang only.""";
       request.body = jsonEncode({
         'model': 'gpt-4o-mini',
         'stream': true,
-        'temperature': 0.8,
-        'max_tokens': 40,
+        'temperature': 0.2,
+        'max_tokens': 160,
         'messages': [
           {'role': 'system', 'content': sysPrompt},
           {
             'role': 'user',
             'content':
-                'Start the conversation — say your friendly opening line in $targetLang.',
+                'Ask your opening question now (output in the exact format above).',
           },
         ],
       });
@@ -254,514 +218,285 @@ Output: ONE sentence in $targetLang only.""";
 
 ---
 
-### 4C. (교체) `streamCloneResponse` → `streamFreeTalkResponse` + 레벨 헬퍼
+### 2B. (신규) `_fetchFreeTalkUserSnippets` — 프리톡 유저 발화 수집 + 중복 회피
 
-4064줄 `static Stream<String> streamCloneResponse({` 부터 4150줄(메서드 닫는 `}`)까지 — **메서드 전체** 교체. 레벨 분기 헬퍼도 함께 추가:
+상태 클래스(`_RoutineModeStepExpandState`) 안, `_startSessionWaitingForUserSeed` **바로 위**에 추가.
 
 ```dart
-  // 📦 Free Talk 언어 수준별 어휘 지침
-  static String _freeTalkLevelInstruction(String level) {
-    switch (level) {
-      case "Beginner":
-        return "Use very simple, common words and short sentences. Avoid idioms and difficult grammar.";
-      case "Advanced":
-        return "Use rich, natural vocabulary including idioms and nuanced expressions, as with a fluent speaker.";
-      case "Intermediate":
-      default:
-        return "Use everyday vocabulary with some variety. Common phrasal verbs and natural expressions are fine.";
-    }
-  }
-
-  // 📦 [Box 7-1-D] streamFreeTalkResponse — Free Talk AI 응답 스트림
-  static Stream<String> streamFreeTalkResponse({
-    required String apiKey,
-    required String userTargetText,
-    required String contextStr,
-    required String myTarget,
-    String level = "Intermediate",
-  }) async* {
-    final client = http.Client();
+  // 🆕 프리톡 기록에서 유저(HOST) 발화 2~3개를 랜덤 샘플로 가져온다.
+  //   - 최근 chat_history를 받아 client-side로 free_talk만 필터 (복합 인덱스 회피)
+  //   - 최근에 안 쓴 방 우선 (SharedPreferences로 중복 회피)
+  //   - 기록 없으면 빈 리스트 → 호출부에서 고정 안내로 폴백
+  Future<List<String>> _fetchFreeTalkUserSnippets() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return [];
     try {
-      final sysPrompt =
-          """You are a warm, friendly $myTarget conversation partner.
-Keep every reply to 2 short sentences maximum.
-Talk like a real friend — sound natural, show interest, and keep the chat flowing.
-Match your vocabulary and grammar to the learner's level below.
-Never say that you are an AI or a language model.
+      final roomsSnap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('chat_history')
+          .orderBy('created_at', descending: true)
+          .limit(30)
+          .get();
+      final freeTalkRooms = roomsSnap.docs
+          .where((d) => ((d.data()['mode'] ?? '').toString()) == 'free_talk')
+          .take(5)
+          .toList();
+      if (freeTalkRooms.isEmpty) return [];
 
-OUTPUT LANGUAGE: $myTarget ONLY. Zero Korean characters in output.
-
-[RULES]
-- Respond in $myTarget only. MAXIMUM 2 short sentences. Often 1 sentence is enough.
-- No greetings, no "I understand", no meta-comments, no prefixes. Just reply.
-- If the audio is garbled or impossible to make out (a speech recognition error), politely ask them to repeat in $myTarget.
-
-Learner level: ${_freeTalkLevelInstruction(level)}""";
-
-      final request = http.Request(
-        'POST',
-        Uri.parse('https://api.openai.com/v1/chat/completions'),
-      );
-      request.headers.addAll({
-        'Authorization': 'Bearer $apiKey',
-        'Content-Type': 'application/json; charset=utf-8',
-      });
-      request.body = jsonEncode({
-        'model': 'gpt-4o-mini',
-        'stream': true,
-        'temperature': 0.5,
-        'max_tokens': 90,
-        'messages': [
-          {'role': 'system', 'content': sysPrompt},
-          {
-            'role': 'user',
-            'content':
-                'Conversation history:\n$contextStr\n\nUser just said: "$userTargetText"\n\nYour brief reply:',
-          },
-        ],
-      });
-
-      final response =
-          await client.send(request).timeout(const Duration(seconds: 20));
-      if (response.statusCode != 200) {
-        yield '...';
-        return;
+      // 중복 회피: 최근에 안 쓴 방 우선
+      final prefs = await SharedPreferences.getInstance();
+      final usedKey = 'freetalk_seed_used_${user.uid}';
+      final used = Set<String>.from(prefs.getStringList(usedKey) ?? []);
+      var pool = freeTalkRooms.where((d) => !used.contains(d.id)).toList();
+      if (pool.isEmpty) {
+        pool = List.of(freeTalkRooms);
+        await prefs.remove(usedKey); // 전부 소진 → 이력 초기화
       }
+      pool.shuffle();
+      final room = pool.first;
+      final newUsed = Set<String>.from(prefs.getStringList(usedKey) ?? [])
+        ..add(room.id);
+      await prefs.setStringList(usedKey, newUsed.toList());
 
-      await for (final chunk in response.stream
-          .transform(utf8.decoder)
-          .transform(const LineSplitter())) {
-        if (chunk.startsWith('data: ') && chunk != 'data: [DONE]') {
-          try {
-            final delta = jsonDecode(chunk.substring(6))['choices'][0]['delta']
-                ['content'];
-            if (delta != null) yield delta.toString();
-          } catch (_) {}
-        }
-      }
-    } catch (_) {
-      yield '...';
-    } finally {
-      client.close();
+      // 해당 방의 HOST(유저) 발화 수집 (원문 우선, 없으면 번역문)
+      final msgSnap = await room.reference.collection('messages').get();
+      final hostTexts = msgSnap.docs
+          .where((d) => ((d.data()['role'] ?? '').toString()) == 'HOST')
+          .map((d) {
+            final data = d.data();
+            final orig = (data['original_text'] ?? '').toString().trim();
+            final tgt = (data['translated_text'] ?? '').toString().trim();
+            return orig.isNotEmpty ? orig : tgt;
+          })
+          .where((s) => s.isNotEmpty)
+          .toList();
+      if (hostTexts.isEmpty) return [];
+
+      hostTexts.shuffle();
+      return hostTexts.take(3).toList(); // 2~3개 랜덤 샘플
+    } catch (e) {
+      _log('⚠️ [FT-SEED]', 'fetch 실패: $e');
+      return [];
     }
   }
 ```
 
 ---
 
-### 4D. (삭제) `_truncatePersona` (이제 미사용)
+### 2C. (신규) `_generateAndPlayFreeTalkSeedQuestion` — AI 질문 버블 + 타겟 TTS
 
-3872줄 `  // 📦 [Box 7-1-A] _truncatePersona — 페르소나 토큰 과부하 방지` 부터,
-`_truncatePersona` 메서드 닫힘 `  }`(3892줄 부근, `streamUserTranslation` 시작 3893줄 바로 위)까지 삭제.
+상태 클래스 안, `_fetchFreeTalkUserSnippets` 바로 아래에 추가.
+렌더 방식은 기존 그래머 질문 경로(HybridTtsPlayer `onChunk`/`onStreamEnd`)와 동일.
 
-검증: `Select-String '_truncatePersona'` → **0건**.
-
-> ⚠️ `streamUserTranslation`(3893~), `generateCleanOriginal`(3994~), `generateExpandedFromConversation`, `polishSentence`는 **유지**(범용 번역/원문/확장 — 손대지 않음).
-
----
-
-### 4E. (교체) 대화 영역 라벨 "Clone" → "Free Talk"
-
-2718줄:
 ```dart
-              Text("Clone",
-```
-↓
-```dart
-              Text("Free Talk",
-```
+  // 🆕 프리톡 기반 첫 질문을 AI 버블로 렌더 + 타겟 TTS 재생 (그래머 질문과 동일 패턴)
+  Future<void> _generateAndPlayFreeTalkSeedQuestion(
+      List<String> snippets) async {
+    final String targetLangName = FFAppState().targetLang.isNotEmpty
+        ? FFAppState().targetLang
+        : 'English';
+    final String nativeLangName =
+        FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : '';
 
----
-
-### 4F. (삭제) 채팅 리스트 클론 선택 게이트
-
-`_buildChatList` 진입부 — 2639~2645줄:
-```dart
-  Widget _buildChatList() {
-    if (_selectedCloneId.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [],
-        ),
-      );
+    if (mounted) {
+      setState(() {
+        _localMessages.add({'role': 'SYSTEM', 'target': '', 'original': ''});
+      });
+      _scrollToBottom();
     }
-```
-↓ 교체 (게이트 제거, 시그니처만 유지):
-```dart
-  Widget _buildChatList() {
-```
+    final int aiIdx = _localMessages.length - 1;
 
----
-
-### 4G. (교체) `_buildTopControls` → 언어수준 선택기
-
-"Manage Clones" 버튼(2610~2636줄, `Widget _buildTopControls() {` 부터 닫힘 `}`까지) **전체** 교체:
-
-```dart
-  Widget _buildTopControls() {
-    const levels = ["Beginner", "Intermediate", "Advanced"];
-    const labels = ["초급", "중급", "고급"];
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Container(
-        height: 44,
-        padding: const EdgeInsets.all(4),
-        decoration: BoxDecoration(
-          color: const Color(0xFF2C2C2E),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          children: List.generate(levels.length, (i) {
-            final bool selected = _freeTalkLevel == levels[i];
-            return Expanded(
-              child: GestureDetector(
-                onTap: () => _setFreeTalkLevel(levels[i]),
-                child: Container(
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color:
-                        selected ? const Color(0xFF9333EA) : Colors.transparent,
-                    borderRadius: BorderRadius.circular(9),
-                  ),
-                  child: Text(
-                    "${labels[i]} ${levels[i]}",
-                    style: TextStyle(
-                      color: selected ? Colors.white : Colors.white54,
-                      fontSize: 12,
-                      fontWeight:
-                          selected ? FontWeight.bold : FontWeight.normal,
-                    ),
-                  ),
-                ),
-              ),
-            );
-          }),
-        ),
-      ),
+    final aiStream = StepExpandBrain.streamFreeTalkSeedQuestion(
+      apiKey: _openAiKey,
+      myTarget: targetLangName,
+      myNative: nativeLangName,
+      snippets: snippets,
     );
-  }
-```
-> 대화 중 레벨 변경 시 다음 AI 응답부터 즉시 반영됨(`streamFreeTalkResponse`가 `_freeTalkLevel`을 매 호출 읽음).
 
----
+    final questionTts = ChunkedTtsFetcher(
+      _openAiKey,
+      _ttsQueueManager,
+      'nova',
+      isUser: false,
+      onLog: _log,
+    );
+    final HybridTtsPlayer questionHybridTts = HybridTtsPlayer(
+      apiKey: _openAiKey,
+      voice: 'nova',
+      onLog: _log,
+    );
+    _ttsQueueManager.setUserTurn(false);
+    _ttsQueueManager.setAiPaused(false);
 
-### 4H. (교체) 세션/히스토리 저장 3곳 — `mode`/`room_name`/`clone_*` 정리
+    String aiText = "";
+    String aiOriginal = "";
+    String aiBuffer = "";
+    bool hasDoubleNewline = false;
 
-**4H-③ (가장 아래 먼저)** — `_myHistoryRef!.update` 블록, 2455~2459줄:
-```dart
-            'mode': 'clone',
-            'clone_id': _selectedCloneId,
-            'clone_name': _selectedCloneName,
-            'user_label': userLabel,
-            'partner_label': partnerLabel,
-```
-↓
-```dart
-            'mode': 'free_talk',
-            'user_label': userLabel,
-            'partner_label': partnerLabel,
-```
-
-**4H-②** — `userLabel`/`partnerLabel` 지역변수 정의, 2390~2391줄:
-```dart
-          final userLabel = _cloneUserLabel;
-          final partnerLabel = _clonePartnerLabel;
-```
-↓
-```dart
-          final userLabel = 'the user';
-          final partnerLabel = 'AI partner';
-```
-
-**4H-①b** — `_myHistoryRef!.set` 블록, 2317~2322줄:
-```dart
-        'room_name': "Clone Mode",
-        'mode': 'clone',
-        'clone_id': _selectedCloneId,
-        'clone_name': _selectedCloneName,
-        'user_label': _cloneUserLabel,
-        'partner_label': _clonePartnerLabel,
-```
-↓
-```dart
-        'room_name': "Free Talk",
-        'mode': 'free_talk',
-        'user_label': 'the user',
-        'partner_label': 'AI partner',
-```
-
-**4H-①a** — `sessions.add` 블록, 2265~2269줄:
-```dart
-          'mode': 'clone',
-          'clone_id': _selectedCloneId,
-          'clone_name': _selectedCloneName,
-          'user_label': _cloneUserLabel,
-          'partner_label': _clonePartnerLabel,
-```
-↓
-```dart
-          'mode': 'free_talk',
-          'user_label': 'the user',
-          'partner_label': 'AI partner',
-```
-
----
-
-### 4I. (교체) AI 응답 호출부
-
-2048~2055줄:
-```dart
-      final aiStream = FreeTalkBrain.streamCloneResponse(
-        apiKey: _openAiKey,
-        userTargetText: userTargetText,
-        contextStr: latestContextStr,
-        cloneContext: _selectedCloneContext,
-        myTarget: targetLangName,
-        cloneSummary: _cloneSummary,
-      );
-```
-> (STEP 0 리네임으로 이미 `FreeTalkBrain.`로 바뀐 상태)
-↓ 교체:
-```dart
-      final aiStream = FreeTalkBrain.streamFreeTalkResponse(
-        apiKey: _openAiKey,
-        userTargetText: userTargetText,
-        contextStr: latestContextStr,
-        myTarget: targetLangName,
-        level: _freeTalkLevel,
-      );
-```
-
----
-
-### 4J. (교체) AI 오프너 호출부 + 가드
-
-**4J-b** — 오프너 스트림 호출, 1532~1537줄:
-```dart
-      await for (final chunk in FreeTalkBrain.generateCloneOpener(
-        apiKey: _openAiKey,
-        cloneContext: _selectedCloneContext,
-        targetLang: targetLangName,
-        cloneSummary: _cloneSummary,
-      )) {
-```
-↓
-```dart
-      await for (final chunk in FreeTalkBrain.generateFreeTalkOpener(
-        apiKey: _openAiKey,
-        targetLang: targetLangName,
-        level: _freeTalkLevel,
-      )) {
-```
-
-**4J-a** — 오프너 가드, 1494줄:
-```dart
-    if (_isAiOpenerPlaying || _selectedCloneContext.isEmpty) return;
-```
-↓
-```dart
-    if (_isAiOpenerPlaying) return;
-```
-
----
-
-### 4K. (삭제) Box 4 — 대시보드 + 편집 다이얼로그
-
-- **시작**: 704줄 — `  void _showCloneDashboard() {`
-- **끝**: 1406줄 — `_showEditCloneDialog` 메서드 닫힘 `  }` (바로 아래 1408줄 `// 📦 [Box 5: Deepgram + Relay Pipeline]` 주석 위)
-
-**704~1406줄 전체 삭제.**
-
-> ⚠️ 그 위 `_showDebugLogDialog`(580~702줄)는 **삭제 금지** — 잔여시간 롱프레스(2581줄 `onLongPress: _showDebugLogDialog`)에서 쓰는 공통 기능.
-
----
-
-### 4L. (삭제) Box 4 — 클론 Firestore CRUD / 메모리 메서드
-
-- **시작**: 314줄 — `  // 📦 [Box 4: Clone 관리] — Firestore 기반`
-- **끝**: 578줄 — 클론 summary 갱신 메서드의 닫힘 `  }` (바로 아래 580줄 `// 🔬 [v3.1 진단] 로그 뷰어 다이얼로그` 주석 위)
-
-**314~578줄 전체 삭제.** (`_clonesRef`, `_loadClones`, `_loadClonesFromPrefs`, `_createCloneInFirestore`, `_updateCloneInFirestore`, `_deleteCloneInFirestore`, `_loadCloneContext`, 클론 summary 동기화까지.)
-
----
-
-### 4M. (삭제) dispose 컨트롤러 정리
-
-288~290줄:
-```dart
-    _cloneNameController.dispose();
-    _kakaoTextController.dispose();
-    _editPersonaController.dispose();
-```
-**3줄 삭제.**
-
----
-
-### 4N. (수정) initState — 리스너/로드/빌링
-
-**4N-c** — kakao 리스너 블록, 261~266줄:
-```dart
-    _kakaoTextController.addListener(() {
-      final hasText = _kakaoTextController.text.isNotEmpty;
-      if (hasText != _kakaoHasText) {
-        setState(() => _kakaoHasText = hasText);
-      }
-    });
-```
-**삭제.**
-
-**4N-b** — 269줄 `    _loadClones();` → 교체:
-```dart
-    _loadFreeTalkLevel();
-```
-
-**4N-a** — 273줄(initState 내, 들여쓰기 4칸):
-```dart
-    BillingTicker.instance.setRate(BillingRate.full);
-    BillingTicker.instance.resume();
-    BillingTicker.instance.logMode('clone');
-```
-↓
-```dart
-    BillingTicker.instance.setRate(BillingRate.full);
-    BillingTicker.instance.resume();
-    BillingTicker.instance.logMode('free_talk');
-```
-
-**4N-a2** — 88~89줄(`_resetIdleTimer` 내, 들여쓰기 6칸):
-```dart
-      BillingTicker.instance.resume();
-      BillingTicker.instance.logMode('clone');
-```
-↓
-```dart
-      BillingTicker.instance.resume();
-      BillingTicker.instance.logMode('free_talk');
-```
-
----
-
-### 4O. (교체) 상태변수 블록 — 클론 변수 제거, 레벨 변수 추가
-
-190~228줄 전체:
-```dart
-  // 클론 데이터 관리
-  String _selectedCloneId = "";
-  String _selectedCloneContext = "";
-  List<Map<String, dynamic>> _clones = [];
-
-  String get _selectedCloneName {
-    if (_selectedCloneId.isNotEmpty) {
-      for (final clone in _clones) {
-        if ((clone['id'] ?? '').toString() == _selectedCloneId) {
-          final name = (clone['name'] ?? '').toString().trim();
-          if (name.isNotEmpty) return name;
+    await for (final chunk in aiStream) {
+      if (!hasDoubleNewline) {
+        aiText += chunk;
+        aiBuffer += chunk;
+        if (aiText.contains('\n\n')) {
+          hasDoubleNewline = true;
+          final sepIdx = aiText.indexOf('\n\n');
+          final afterSep = aiText.substring(sepIdx + 2);
+          aiText = aiText.substring(0, sepIdx);
+          final bufSepIdx = aiBuffer.indexOf('\n\n');
+          if (bufSepIdx >= 0) aiBuffer = aiBuffer.substring(0, bufSepIdx);
+          if (afterSep.isNotEmpty) aiOriginal += afterSep;
+        } else {
+          if (!questionHybridTts.firstChunkFired) {
+            final cutIdx =
+                questionHybridTts.onChunk(aiBuffer, questionTts, _swTTS);
+            if (cutIdx >= 0) aiBuffer = aiBuffer.substring(cutIdx);
+          }
         }
+      } else {
+        aiOriginal += chunk; // Part2 (모국어) — TTS 금지
       }
+      if (mounted && aiIdx < _localMessages.length) {
+        setState(() {
+          _localMessages[aiIdx]['target'] = aiText;
+          _localMessages[aiIdx]['original'] = aiOriginal;
+        });
+      }
+      _scrollToBottom();
     }
-    return '';
-  }
 
-  String get _cloneUserLabel => 'the user';
-  String get _clonePartnerLabel {
-    final name = _selectedCloneName;
-    return name.isNotEmpty ? name : 'the clone';
-  }
+    await questionHybridTts.onStreamEnd(
+      fullSentence: aiText.trim(),
+      remainderBuffer: aiBuffer,
+      fetcher: questionTts,
+      swSpeechEnd: _swTTS,
+    );
 
-  String get _cloneUiLabel {
-    final name = _selectedCloneName;
-    return name.isNotEmpty ? name : 'Clone';
-  }
-
-  // 🧠 [장기 기억] 클론별 메모리 (SharedPreferences 동기화)
-  String _cloneSummary = '';
-  List<Map<String, String>> _recentHistory = [];
-  int _memoryTurnCount = 0;
-
-  final TextEditingController _cloneNameController = TextEditingController();
-  final TextEditingController _kakaoTextController = TextEditingController();
-  bool _kakaoHasText = false;
-  final TextEditingController _editPersonaController = TextEditingController();
-  bool _isCreatingClone = false;
-  bool _isEditingClone = false;
-```
-↓ 교체 (`_recentHistory`는 파이프라인에서 쓰므로 **유지**, 나머지 제거):
-```dart
-  // Free Talk 언어 수준 (대화 중 토글 가능: Beginner / Intermediate / Advanced)
-  String _freeTalkLevel = "Intermediate";
-
-  // 대화 컨텍스트용 슬라이딩 히스토리 (파이프라인 1857·1972줄에서 사용 — 유지)
-  List<Map<String, String>> _recentHistory = [];
-
-  // 언어 수준 로드/저장 (SharedPreferences, 커스텀 코드)
-  Future<void> _loadFreeTalkLevel() async {
-    final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getString('free_talk_level');
-    if (saved != null && saved.isNotEmpty && mounted) {
-      setState(() => _freeTalkLevel = saved);
+    int ticks = 0;
+    while (questionTts.pendingRequests > 0 || _ttsQueueManager.isBusy) {
+      await Future.delayed(const Duration(milliseconds: 50));
+      if (++ticks > 300) break;
     }
-  }
-
-  Future<void> _setFreeTalkLevel(String level) async {
-    if (mounted) setState(() => _freeTalkLevel = level);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('free_talk_level', level);
   }
 ```
 
 ---
 
-## 5. 최종 검증 (새 파일 기준)
+### 2D. (교체) `_startSessionWaitingForUserSeed` — 프리톡 분기
+
+메서드 전체 교체. 프리톡 기록 있으면 2C로 질문(안내 생략), 없으면 기존 고정 안내.
+
+before:
+```dart
+  Future<void> _startSessionWaitingForUserSeed() async {
+    if (_openAiKey.isEmpty || !mounted) return;
+    if (_isSessionComplete) return;
+    _resetIdleTimer();
+    _isConversationActive = true;
+    if (mounted) setState(() {});
+
+    // 시작 안내 TTS 재생 (OpenAI 질문 생성 API 호출 없음)
+    _ttsQueueManager.setUserTurn(false);
+    _ttsQueueManager.setAiPaused(false);
+
+    final ChunkedTtsFetcher tts = ChunkedTtsFetcher(
+      _openAiKey,
+      _ttsQueueManager,
+      'nova',
+      isUser: false,
+      onLog: _log,
+    );
+    tts.addText('대화하면서 문장을 늘려가고 싶은 기본 문장을 하나 제안해 주세요.');
+
+    // TTS 재생 완료 대기 (최대 10초)
+    int ticks = 0;
+    while ((tts.pendingRequests > 0 || _ttsQueueManager.isBusy) && mounted) {
+      await Future.delayed(const Duration(milliseconds: 50));
+      if (++ticks > 200) break;
+    }
+
+    // 안내 완료 → STT 자동 시작 (유저 기본 문장 대기)
+    if (mounted && _isConversationActive && !_isSessionComplete) {
+      _startDeepgramListening();
+    }
+  }
+```
+after:
+```dart
+  Future<void> _startSessionWaitingForUserSeed() async {
+    if (_openAiKey.isEmpty || !mounted) return;
+    if (_isSessionComplete) return;
+    _resetIdleTimer();
+    _isConversationActive = true;
+    if (mounted) setState(() {});
+
+    _ttsQueueManager.setUserTurn(false);
+    _ttsQueueManager.setAiPaused(false);
+
+    // 🆕 프리톡 기록 기반 첫 질문 (있으면) — 없으면 고정 안내
+    final List<String> ftSnippets = await _fetchFreeTalkUserSnippets();
+
+    if (ftSnippets.isNotEmpty && mounted && _isConversationActive) {
+      // 프리톡 주제로 AI가 먼저 질문 → "기본 문장 말하세요" 안내 생략
+      await _generateAndPlayFreeTalkSeedQuestion(ftSnippets);
+    } else {
+      // 기존: 고정 안내 TTS
+      final ChunkedTtsFetcher tts = ChunkedTtsFetcher(
+        _openAiKey,
+        _ttsQueueManager,
+        'nova',
+        isUser: false,
+        onLog: _log,
+      );
+      tts.addText('대화하면서 문장을 늘려가고 싶은 기본 문장을 하나 제안해 주세요.');
+      int ticks = 0;
+      while ((tts.pendingRequests > 0 || _ttsQueueManager.isBusy) && mounted) {
+        await Future.delayed(const Duration(milliseconds: 50));
+        if (++ticks > 200) break;
+      }
+    }
+
+    // 안내/질문 완료 → STT 자동 시작 (유저 기본 문장 대기)
+    if (mounted && _isConversationActive && !_isSessionComplete) {
+      _startDeepgramListening();
+    }
+  }
+```
+
+---
+
+## 3. 검증
 
 ```powershell
 cd F:\flutter_project\stealth_vox
+$s = 'lib\custom_code\widgets\routine_mode_step_expand.dart'
 $f = 'lib\custom_code\widgets\routine_mode_free_talk.dart'
 
-# 클론 잔재 0건이어야 함
-Select-String -Path $f -Pattern '_selectedClone|_showCloneDashboard|_showEditCloneDialog|_loadClones|generatePersonaFromChat|generateCloneOpener|streamCloneResponse|_truncatePersona|_cloneSummary|_cloneNameController|_kakaoTextController|_editPersonaController|CloneBrain' | Measure-Object   # → 0
+# StepExpand 신규 심볼
+Select-String -Path $s -Pattern 'streamFreeTalkSeedQuestion'    | Measure-Object   # 정의1 + 호출1 = 2
+Select-String -Path $s -Pattern '_fetchFreeTalkUserSnippets'    | Measure-Object   # 정의1 + 호출1 = 2
+Select-String -Path $s -Pattern '_generateAndPlayFreeTalkSeedQuestion' | Measure-Object  # 정의1 + 호출1 = 2
+Select-String -Path $s -Pattern "'temperature': 0.2" | Measure-Object              # 신규 메서드 포함 (>=1)
+Select-String -Path $s -Pattern "mode.*free_talk|isEqualTo|free_talk" | Measure-Object
 
-# 신규 심볼 존재 확인
-Select-String -Path $f -Pattern "logMode\('free_talk'\)" | Measure-Object        # → 2
-Select-String -Path $f -Pattern 'streamFreeTalkResponse|generateFreeTalkOpener|_freeTalkLevel|_freeTalkLevelInstruction' | Measure-Object  # → 다수(>5)
-Select-String -Path $f -Pattern "'mode': 'free_talk'" | Measure-Object           # → 3
-
-# _recentHistory 는 유지되어야 함
-Select-String -Path $f -Pattern '_recentHistory' | Measure-Object               # → 3 이상
+# 프리톡 안내
+Select-String -Path $f -Pattern '타겟과 오리지널 언어를 같게' | Measure-Object        # 1
 
 flutter analyze
 ```
 
-`flutter analyze` 무경고/무에러 목표. (`_recentHistory`가 read-only로만 남아 "could be final" 류 info가 뜨면 무시 가능.)
-
-빌드 후 확인 사항:
-- StealthRoom 메뉴 → "Free Talk" 카드 진입.
-- 상단: 글자크기 / 언어(원문) / 잔여시간(기존) + **언어수준 3분할 토글**(신규).
-- 시작 점 탭 → AI가 친근한 한 마디로 먼저 발화 → 자유 대화.
-- 레벨 변경 시 다음 AI 응답부터 어휘 난이도 변화.
-- 뒤로가기 시 대화 있으면 "Free Talk" room_name으로 히스토리 저장, 빈 방이면 삭제.
-- 히스토리 리스트에서 "Free Talk" 필터/아이콘 정상.
+기능 확인:
+- 프리톡 기록 **있을 때** StepExpand 진입 → AI가 과거 주제로 타겟 언어 질문 먼저(자막 동반), "기본 문장 말하세요" 안내 안 나옴. 재진입 시 다른 방/발화로 질문이 **매번 달라짐**.
+- 프리톡 기록 **없을 때** → 기존처럼 "대화하면서 문장을 늘려가고 싶은 기본 문장을 하나 제안해 주세요" 고정 안내.
+- 타겟==오리지널 언어면 질문이 타겟만(자막 없음).
+- 프리톡 화면 대화 시작 전 빈 영역에 연한 안내문 표시 → 대화 시작되면 사라짐.
 
 ---
 
-## 6. 롤백
+## 4. 롤백
 
-```powershell
-# 새 파일 제거
-Remove-Item lib\custom_code\widgets\routine_mode_free_talk.dart
-```
-- `stealth_room_master.dart` STEP 1 변경 4곳 되돌림(`RoutineModeClone` 복귀, import 제거, 라벨 복귀).
-- `store_master.dart` `free_talk` 케이스 제거.
-- `chat_history_list_master.dart` 필터칩 'Clone' 복귀.
-- 클론 원본(`routine_mode_clone.dart`)은 처음부터 미변경이므로 그대로 사용 가능.
-- `billing_ticker.dart` / Cloud Functions / RevenueCat: **변경 없음** → 롤백 불필요.
+- StepExpand: 추가한 3개(`streamFreeTalkSeedQuestion`, `_fetchFreeTalkUserSnippets`, `_generateAndPlayFreeTalkSeedQuestion`) 삭제 + `_startSessionWaitingForUserSeed` before 블록으로 복귀.
+- Free Talk: `_buildChatList` before 블록으로 복귀.
+- Firestore/RevenueCat/Cloud Functions: **변경 없음**(읽기 전용 조회 + SharedPreferences만 사용).
 
----
-
-## 부록 — 빌링/Firebase 영향 요약
-
-- `billing_ticker.dart`: **변경 없음.** 모드→요율 화이트리스트가 없고, 요율은 `setRate(BillingRate.full)`로 결정됨(복사 시 자동 승계 → Free Talk도 100%). `logMode('free_talk')`는 `usage_logs` 라벨일 뿐.
-- Cloud Functions(`deductRemainingTime`, `revenueCatWebhook`): 모드 무관 → **변경 없음.**
-- RevenueCat: 시간 크레딧 상품/적립만 관여 → **변경 없음.**
-- Firestore: schemaless → 마이그레이션/인덱스 불필요. 쓰는 필드 값만 바뀜(`mode`,`room_name`, `clone_*` 제거).
-- `users/{uid}/clones` 서브컬렉션: 미사용 상태로 남음(무해, 추후 정리 가능).
+> 참고: 프리톡 방 조회는 `orderBy('created_at')` 단일 필드 + client-side `mode` 필터라 **복합 인덱스 불필요**. 메시지도 전체 조회 후 `role=='HOST'` client-side 필터라 인덱스 불필요.
