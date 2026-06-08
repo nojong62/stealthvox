@@ -128,7 +128,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster> {
                           _buildManualItem('Duo Connect', '초청인 대화',
                               '초청 링크를 통해 파트너와 함께 모국어로 대화하면, 실시간으로 통역해주는 글로벌 만능 통역 모드입니다.'),
                           const Divider(color: Colors.white12, height: 24),
-                          _buildManualItem('Clone AI', '클론 AI와 대화',
+                          _buildManualItem('Free Talk', 'AI와 자유 대화',
                               '지인의 카카오톡 대화를 분석하여 완벽하게 복제된 클론 AI 파트너와 실감나는 롤플레잉 훈련을 진행합니다.'),
                           const Divider(color: Colors.white12, height: 24),
                           _buildManualItem('AI Roleplay', '상황극 대화',
@@ -207,8 +207,8 @@ class _StealthRoomMasterState extends State<StealthRoomMaster> {
           height: widget.height,
           roomId: _pendingDuoRoomId);
     } else if (_currentMode == 2) {
-      return RoutineModeClone(
-          key: const ValueKey('RoutineModeClone'),
+      return RoutineModeFreeTalk(
+          key: const ValueKey('RoutineModeFreeTalk'),
           width: widget.width,
           height: widget.height);
     } else if (_currentMode == 3) {
@@ -288,7 +288,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster> {
             const SizedBox(height: 30),
             _buildMenuCard(1, "Duo Connect", "초청인 대화\n만능 통역", Icons.people,
                 const Color(0xFF2563EB)),
-            _buildMenuCard(2, "Clone AI", "클론 AI와 대화", Icons.face,
+            _buildMenuCard(2, "Free Talk", "AI와 자유 대화", Icons.forum,
                 const Color(0xFF9333EA)),
             _buildMenuCard(3, "AI Roleplay", "상황극 대화", Icons.smart_toy,
                 const Color(0xFF16A34A)),

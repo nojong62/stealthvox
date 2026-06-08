@@ -7,5 +7,6 @@ export 'store_master.dart' show StoreMaster;
 export 'onboarding_master.dart' show OnboardingMaster;
 export 'routine_mode_roleplay.dart' show RoutineModeRoleplay;
 export 'routine_mode_clone.dart' show RoutineModeClone;
+export 'routine_mode_free_talk.dart' show RoutineModeFreeTalk;
 export 'routine_mode_duo.dart' show RoutineModeDuo;
 export 'routine_mode_step_expand.dart' show RoutineModeStepExpand;
