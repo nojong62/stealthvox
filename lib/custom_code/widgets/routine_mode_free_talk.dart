@@ -279,10 +279,24 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
               FirebaseRemoteConfig.instance.getString('DeepgramAPIKey');
           _openAiKey = FirebaseRemoteConfig.instance.getString('OpenAIAPIKey');
         });
+        // 🆕 첫 로드 완료 후 세션 자동 시작 (StepExpand 패턴). race 제거.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _startFreeTalkSession();
+        });
       }
     } catch (e) {
       print('❌ Key Load Error: $e');
     }
+  }
+
+  /// 🆕 세션 자동 시작: 표시등 ON + 마이크 먼저(유저 먼저 말하게).
+  /// 마이크 첫 청취가 시작되면 _isConversationActive=true 로 자동 점등.
+  /// 첫 턴 2초 침묵 시 _armOpenerNudge가 AI 오프너를 발화(v1 로직).
+  Future<void> _startFreeTalkSession() async {
+    if (_deepgramKey.isEmpty || !mounted) return;
+    if (_isConversationActive) return; // 중복 시작 방지
+    _userHasSpoken = false;
+    _startDeepgramListening();
   }
 
   // ====================================================================
@@ -1881,39 +1895,24 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
                       color: Colors.white54,
                       fontSize: 20,
                       fontWeight: FontWeight.bold)),
-              GestureDetector(
-                onTap: () {
-                  if (_deepgramKey.isEmpty) return;
-                  _resetIdleTimer();
-                  setState(
-                      () => _isConversationActive = !_isConversationActive);
-                  if (_isConversationActive) {
-                    // 🆕 [유저 먼저] 항상 마이크부터 켠다. 첫 턴 2초 grace는
-                    //     _startDeepgramListening 내부에서 처리.
-                    _userHasSpoken = false;
-                    _startDeepgramListening();
-                  } else {
-                    _stopEverything();
-                  }
-                },
+              // 🆕 작동 표시등(패시브). 버튼 아님 - 세션 시작 시 자동 점등.
+              Container(
+                width: 44,
+                height: 44,
+                alignment: Alignment.center,
                 child: Container(
-                  width: 44,
-                  height: 44,
-                  alignment: Alignment.center,
-                  child: Container(
-                    width: 12,
-                    height: 12,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
+                  width: 12,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _isConversationActive
+                        ? const Color(0xFFFBBF24)
+                        : Colors.transparent,
+                    border: Border.all(
                       color: _isConversationActive
                           ? const Color(0xFFFBBF24)
-                          : Colors.transparent,
-                      border: Border.all(
-                        color: _isConversationActive
-                            ? const Color(0xFFFBBF24)
-                            : Colors.white24,
-                        width: 1.5,
-                      ),
+                          : Colors.white24,
+                      width: 1.5,
                     ),
                   ),
                 ),
