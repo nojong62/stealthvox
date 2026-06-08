@@ -1667,15 +1667,16 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
 
   Widget _buildTopControls() {
     const levels = ["Beginner", "Intermediate", "Advanced"];
-    const labels = ["초급", "중급", "고급"];
+    const subtitles = ["초급", "중급", "고급"];
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Container(
-        height: 44,
+        height: 48,
         padding: const EdgeInsets.all(4),
         decoration: BoxDecoration(
-          color: const Color(0xFF2C2C2E),
-          borderRadius: BorderRadius.circular(12),
+          color: const Color(0xFF1C1C1E),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.white.withOpacity(0.06)),
         ),
         child: Row(
           children: List.generate(levels.length, (i) {
@@ -1683,21 +1684,53 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
             return Expanded(
               child: GestureDetector(
                 onTap: () => _setFreeTalkLevel(levels[i]),
-                child: Container(
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeInOut,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color:
-                        selected ? const Color(0xFF9333EA) : Colors.transparent,
-                    borderRadius: BorderRadius.circular(9),
+                    color: selected
+                        ? const Color(0xFF9333EA)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(10),
+                    boxShadow: selected
+                        ? [
+                            BoxShadow(
+                              color:
+                                  const Color(0xFF9333EA).withOpacity(0.4),
+                              blurRadius: 10,
+                              offset: const Offset(0, 2),
+                            )
+                          ]
+                        : [],
                   ),
-                  child: Text(
-                    "${labels[i]} ${levels[i]}",
-                    style: TextStyle(
-                      color: selected ? Colors.white : Colors.white54,
-                      fontSize: 12,
-                      fontWeight:
-                          selected ? FontWeight.bold : FontWeight.normal,
-                    ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        levels[i],
+                        style: TextStyle(
+                          color:
+                              selected ? Colors.white : Colors.white38,
+                          fontSize: 11.5,
+                          fontWeight: selected
+                              ? FontWeight.w700
+                              : FontWeight.w400,
+                          letterSpacing: -0.2,
+                        ),
+                      ),
+                      Text(
+                        subtitles[i],
+                        style: TextStyle(
+                          color: selected
+                              ? Colors.white.withOpacity(0.65)
+                              : Colors.white.withOpacity(0.2),
+                          fontSize: 9,
+                          fontWeight: FontWeight.w400,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -1716,15 +1749,36 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
         if (_localMessages.isEmpty)
           Center(
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 40),
-              child: Text(
-                '타겟 언어로만 프리톡 하려면\n타겟과 오리지널 언어를 같게 하세요',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.18),
-                  fontSize: 13,
-                  height: 1.5,
-                ),
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.language_rounded,
+                    size: 28,
+                    color: Colors.white.withOpacity(0.12),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    '타겟 언어로만 프리톡하려면',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.22),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      height: 1.6,
+                    ),
+                  ),
+                  Text(
+                    '타겟과 오리지널 언어를 같게 하세요',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.14),
+                      fontSize: 12,
+                      height: 1.6,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
