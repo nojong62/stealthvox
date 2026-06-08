@@ -1705,11 +1705,10 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
 
   Widget _buildTopControls() {
     const levels = ["Beginner", "Intermediate", "Advanced"];
-    const subtitles = ["초급", "중급", "고급"];
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Container(
-        height: 48,
+        height: 44,
         padding: const EdgeInsets.all(4),
         decoration: BoxDecoration(
           color: const Color(0xFF1C1C1E),
@@ -1726,49 +1725,34 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
                   duration: const Duration(milliseconds: 180),
                   curve: Curves.easeInOut,
                   alignment: Alignment.center,
+                  margin: const EdgeInsets.symmetric(horizontal: 2),
                   decoration: BoxDecoration(
-                    color: selected
-                        ? const Color(0xFF9333EA)
-                        : Colors.transparent,
+                    color: Colors.transparent,
                     borderRadius: BorderRadius.circular(10),
-                    boxShadow: selected
-                        ? [
-                            BoxShadow(
-                              color:
-                                  const Color(0xFF9333EA).withOpacity(0.4),
-                              blurRadius: 10,
-                              offset: const Offset(0, 2),
-                            )
-                          ]
-                        : [],
+                    border: Border.all(
+                      color: selected
+                          ? const Color(0xFF9333EA)
+                          : Colors.transparent,
+                      width: 1.5,
+                    ),
                   ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: Text(
                         levels[i],
+                        maxLines: 1,
+                        softWrap: false,
                         style: TextStyle(
-                          color:
-                              selected ? Colors.white : Colors.white38,
-                          fontSize: 11.5,
-                          fontWeight: selected
-                              ? FontWeight.w700
-                              : FontWeight.w400,
+                          color: selected ? Colors.white : Colors.white38,
+                          fontSize: 13,
+                          fontWeight:
+                              selected ? FontWeight.w700 : FontWeight.w400,
                           letterSpacing: -0.2,
                         ),
                       ),
-                      Text(
-                        subtitles[i],
-                        style: TextStyle(
-                          color: selected
-                              ? Colors.white.withOpacity(0.65)
-                              : Colors.white.withOpacity(0.2),
-                          fontSize: 9,
-                          fontWeight: FontWeight.w400,
-                          letterSpacing: 0.3,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ),
