@@ -47,244 +47,109 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# FREETALK_USER_FIRST_v1 — 유저 먼저(2초 grace) + 오프너 발화
+# FREETALK_LEVEL_UI_v1 — 레벨 토글: 영어만 + 선택 시 테두리만 색
 
 ## 목표
-프리톡 불빛 ON 시 **유저가 먼저 말할 수 있게 마이크부터 켜고**, 2초 동안 침묵하면 AI가
-**타겟 언어로 "자유롭게 대화하자"** 한마디를 발화한다. (StepExpand의 User-First 패턴 응용)
+- Beginner / Intermediate / Advanced **영어 라벨만** 표시 (초급/중급/고급 한글 자막 제거)
+- 선택된 칸은 **보라색 테두리만** 표시 (배경 채움·그림자 글로우 제거)
+- 라벨이 두 줄로 깨지던(`Intermedia te`) 문제 해결 (FittedBox로 1줄 고정)
 
-## 대상 파일 (반드시 이 경로만)
+## 대상 파일 (이 경로만)
 ```
 lib/custom_code/widgets/routine_mode_free_talk.dart
 ```
-> `lib/custom_code/임시/` 는 FlutterFlow 프리뷰 전용 — 절대 수정 금지.
 
-## 사전 작업 (세이브 포인트)
+## 사전 작업
 ```
-git add -A && git commit -m "save before FREETALK_USER_FIRST_v1"
-```
-
----
-
-## 편집 (반드시 아래→위 순서로, 줄밀림 방지)
-
-### EDIT 1 — 오프너 프롬프트 교체 (약 3276~3283행)
-삭제 시작: `          """You are a warm, friendly conversation partner starting a casual chat.`
-삭제 끝:   `- Avoid a bare "Hello" or "Hi". Say something that invites a reply, for example: "Hey, how's your day going so far?" or "So, what have you been up to lately?"`
-
-**BEFORE**
-```dart
-          """You are a warm, friendly conversation partner starting a casual chat.
-Open with ONE short, natural line that invites the user to talk — like a friend would.
-
-RULES:
-- Speak ONLY in $targetLang. Do NOT use Korean or any other language.
-- ONE sentence only. Under 12 words.
-- Sound natural and friendly, never like an AI or a survey.
-- Avoid a bare "Hello" or "Hi". Say something that invites a reply, for example: "Hey, how's your day going so far?" or "So, what have you been up to lately?"
-```
-
-**AFTER**
-```dart
-          """You are a warm, friendly conversation partner kicking off a casual, no-pressure chat.
-Open with ONE short, natural line that invites the user to chat freely about anything.
-
-RULES:
-- Speak ONLY in $targetLang. Do NOT use Korean or any other language.
-- ONE sentence only. Under 12 words.
-- Relaxed and friendly, like a close friend — never like an AI or a survey.
-- Convey the feeling of "let's just chat freely about whatever you like." For example: "Let's just chat freely — what's on your mind?" or "We can talk about anything you like, so what's up?"
-```
-> `- ${_freeTalkLevelInstruction(level)}` 와 `Output: ...""";` 줄은 그대로 둔다.
-
----
-
-### EDIT 2 — 탭 핸들러 단순화 (약 1868~1876행)
-삭제 시작: `                  if (_isConversationActive) {`
-삭제 끝:   `                  }`  (else { _stopEverything(); } 닫는 중괄호)
-
-**BEFORE**
-```dart
-                  if (_isConversationActive) {
-                    if (_localMessages.isEmpty) {
-                      _generateAndPlayAiOpener();
-                    } else {
-                      _startDeepgramListening();
-                    }
-                  } else {
-                    _stopEverything();
-                  }
-```
-
-**AFTER**
-```dart
-                  if (_isConversationActive) {
-                    // 🆕 [유저 먼저] 항상 마이크부터 켠다. 첫 턴 2초 grace는
-                    //     _startDeepgramListening 내부에서 처리.
-                    _userHasSpoken = false;
-                    _startDeepgramListening();
-                  } else {
-                    _stopEverything();
-                  }
+git add -A && git commit -m "save before FREETALK_LEVEL_UI_v1"
 ```
 
 ---
 
-### EDIT 3 — connectAndStart 직후 nudge 가동 + 새 메서드 추가 (약 711~714행)
-삭제 시작: `    _log('🎤 [LISTEN-04]', 'connectAndStart 호출 직전');`
-삭제 끝:   `  }`  (`_startDeepgramListening` 닫는 중괄호, 714행)
+## EDIT — `_buildTopControls()` 전체 교체 (1706~1780행)
+삭제 시작: `  Widget _buildTopControls() {`  (1706행)
+삭제 끝:   `  }`  (1780행, `_buildTopControls` 닫는 중괄호 — 바로 다음 줄이 `Widget _buildChatList() {`)
 
-**BEFORE**
+**AFTER (이 블록 전체로 교체)**
 ```dart
-    _log('🎤 [LISTEN-04]', 'connectAndStart 호출 직전');
-    await _voiceManager!.connectAndStart();
-    _log('🎤 [LISTEN-05]', 'connectAndStart 완료');
+  Widget _buildTopControls() {
+    const levels = ["Beginner", "Intermediate", "Advanced"];
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        height: 44,
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1C1C1E),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.white.withOpacity(0.06)),
+        ),
+        child: Row(
+          children: List.generate(levels.length, (i) {
+            final bool selected = _freeTalkLevel == levels[i];
+            return Expanded(
+              child: GestureDetector(
+                onTap: () => _setFreeTalkLevel(levels[i]),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeInOut,
+                  alignment: Alignment.center,
+                  margin: const EdgeInsets.symmetric(horizontal: 2),
+                  decoration: BoxDecoration(
+                    // 🆕 배경 채움 없음 — 선택 시 테두리만 색
+                    color: Colors.transparent,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: selected
+                          ? const Color(0xFF9333EA)
+                          : Colors.transparent,
+                      width: 1.5,
+                    ),
+                  ),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: Text(
+                        levels[i], // 🆕 영어 라벨만 (한글 자막 제거)
+                        maxLines: 1,
+                        softWrap: false,
+                        style: TextStyle(
+                          color: selected ? Colors.white : Colors.white38,
+                          fontSize: 13,
+                          fontWeight:
+                              selected ? FontWeight.w700 : FontWeight.w400,
+                          letterSpacing: -0.2,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }),
+        ),
+      ),
+    );
   }
-```
-
-**AFTER**
-```dart
-    _log('🎤 [LISTEN-04]', 'connectAndStart 호출 직전');
-    await _voiceManager!.connectAndStart();
-    _log('🎤 [LISTEN-05]', 'connectAndStart 완료');
-
-    // 🆕 [유저 먼저] 첫 턴이고 유저가 아직 말 안 했으면 2초 grace 후 AI가 운을 뗌
-    if (_localMessages.isEmpty && !_userHasSpoken) {
-      _armOpenerNudge();
-    }
-  }
-
-  // 🆕 [유저 먼저 → 2초 침묵 시 AI 오프너]
-  // 마이크가 살아있는 상태에서 2초 grace. 그 안에 유저가 말하면
-  // (onTranscriptUpdate에서 _userHasSpoken=true + 타이머 취소) 오프너는 안 나가고,
-  // 침묵하면 마이크를 잠깐 내리고 AI가 "자유롭게 대화하자" 한마디.
-  // (오프너 finally에서 _startDeepgramListening으로 청취 재개)
-  void _armOpenerNudge() {
-    _openerNudgeTimer?.cancel();
-    _openerNudgeTimer = Timer(const Duration(seconds: 2), () {
-      if (!mounted || !_isConversationActive) return;
-      if (_userHasSpoken || _localMessages.isNotEmpty) return;
-      _log('💡 [NUDGE]', '2초 침묵 → AI 오프너 발화');
-      _voiceManager?.dispose();
-      _voiceManager = null;
-      _generateAndPlayAiOpener();
-    });
-  }
-```
-
----
-
-### EDIT 4 — onTranscriptUpdate에서 nudge 취소 (약 697~700행)
-삭제 시작: `      onTranscriptUpdate: (transcript) {`
-삭제 끝:   `      },`
-
-**BEFORE**
-```dart
-      onTranscriptUpdate: (transcript) {
-        _swDeepgram.reset();
-        _swDeepgram.start();
-      },
-```
-
-**AFTER**
-```dart
-      onTranscriptUpdate: (transcript) {
-        // 🆕 [유저 먼저] 유저가 입을 떼는 순간 오프너 nudge 취소
-        if (!_userHasSpoken) {
-          _userHasSpoken = true;
-          _openerNudgeTimer?.cancel();
-        }
-        _swDeepgram.reset();
-        _swDeepgram.start();
-      },
-```
-
----
-
-### EDIT 5 — 오프너 무음 방지 가드 (약 530~532행)
-삭제 시작: `  Future<void> _generateAndPlayAiOpener() async {`
-삭제 끝:   `    _isAiOpenerPlaying = true;`
-
-**BEFORE**
-```dart
-  Future<void> _generateAndPlayAiOpener() async {
-    if (_isAiOpenerPlaying) return;
-    _isAiOpenerPlaying = true;
-```
-
-**AFTER**
-```dart
-  Future<void> _generateAndPlayAiOpener() async {
-    if (_isAiOpenerPlaying) return;
-    // 🆕 키 미로딩 상태에서 발화 시도 → 무음 방지
-    if (_openAiKey.isEmpty) {
-      _log('⚠️ [OPENER]', 'OpenAI key not ready — skip opener');
-      return;
-    }
-    _isAiOpenerPlaying = true;
-```
-
----
-
-### EDIT 6 — _stopEverything에서 nudge 타이머 정리 (약 513~514행)
-삭제 시작: `    _commitTimer?.cancel(); // 🔧 [v3.4] 대기 중 타이머 정리`
-삭제 끝:   `    _commitTimer = null;`
-
-**BEFORE**
-```dart
-    _commitTimer?.cancel(); // 🔧 [v3.4] 대기 중 타이머 정리
-    _commitTimer = null;
-```
-
-**AFTER**
-```dart
-    _commitTimer?.cancel(); // 🔧 [v3.4] 대기 중 타이머 정리
-    _commitTimer = null;
-    _openerNudgeTimer?.cancel(); // 🆕 [유저 먼저] 오프너 nudge 정리
-    _openerNudgeTimer = null;
-```
-> `dispose()`는 내부에서 `_stopEverything()`를 호출하므로 별도 수정 불필요.
-
----
-
-### EDIT 7 — 상태 변수 추가 (66행 바로 아래)
-삭제 시작: `  bool _isAiOpenerPlaying = false; // AI 첫 발화 재생 중 여부`
-삭제 끝:   (동일 줄)
-
-**BEFORE**
-```dart
-  bool _isAiOpenerPlaying = false; // AI 첫 발화 재생 중 여부
-```
-
-**AFTER**
-```dart
-  bool _isAiOpenerPlaying = false; // AI 첫 발화 재생 중 여부
-
-  // 🆕 [유저 먼저] 2초 grace 동안 유저가 말 안 하면 AI가 오프너 발화
-  Timer? _openerNudgeTimer;
-  bool _userHasSpoken = false;
 ```
 
 ---
 
 ## 검증
 ```
-grep -c "_openerNudgeTimer" lib/custom_code/widgets/routine_mode_free_talk.dart   # 기대값: 6
-grep -c "_userHasSpoken"     lib/custom_code/widgets/routine_mode_free_talk.dart   # 기대값: 6
-grep -c "_armOpenerNudge"    lib/custom_code/widgets/routine_mode_free_talk.dart   # 기대값: 2
-grep -c "_generateAndPlayAiOpener" lib/custom_code/widgets/routine_mode_free_talk.dart  # 기대값: 2
-grep -c "chat freely"        lib/custom_code/widgets/routine_mode_free_talk.dart   # 기대값: 2
+grep -c "초급\|중급\|고급" lib/custom_code/widgets/routine_mode_free_talk.dart   # 기대값: 0
+grep -c "subtitles"        lib/custom_code/widgets/routine_mode_free_talk.dart   # 기대값: 0
+grep -c "0xFF9333EA"       lib/custom_code/widgets/routine_mode_free_talk.dart   # 기대값: 2 (토글 테두리 1 + 기타 1)
 flutter analyze
 ```
-- `flutter analyze`: 신규 에러 0건이어야 함.
+- `flutter analyze`: 신규 에러 0건.
 
 ## 롤백
 ```
 git restore lib/custom_code/widgets/routine_mode_free_talk.dart
 ```
 
-## 동작 체크리스트
-1. 불빛 ON → 즉시 마이크 청취(노란 불빛), 소리 없음.
-2. 2초 안에 말하면 → 오프너 안 나오고 바로 유저 턴 처리.
-3. 2초 침묵하면 → AI가 타겟 언어로 "자유롭게 대화하자" 한마디 → 끝나면 다시 청취.
-4. 키 로딩 전 빠르게 탭 시 → 무음으로 죽지 않고 오프너 스킵(로그만).
+## 결과
+- 라벨 영어 1줄 (Beginner / Intermediate / Advanced), 줄바꿈 깨짐 없음.
+- 선택 칸: 보라 테두리만, 배경/그림자 없음.
