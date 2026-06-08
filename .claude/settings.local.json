@@ -150,7 +150,15 @@
       "Bash(findstr /I \"routine_mode_duo\\\\|routine_mode_clone\\\\|routine_mode_roleplay\\\\|routine_mode_step_expand\")",
       "Bash(findstr \" error \")",
       "Bash(Remove-Item *)",
-      "Bash(Start-Sleep -Seconds 15)"
+      "Bash(Start-Sleep -Seconds 15)",
+      "Bash(awk -F: '$1>4490')",
+      "Bash(awk 'NR>=4208 && /^  \\\\}$/ {print NR; exit}' lib/custom_code/widgets/routine_mode_free_talk.dart)",
+      "Bash(awk 'NR>=4089 && /^  \\\\}$/ {print NR; exit}' lib/custom_code/widgets/routine_mode_free_talk.dart)",
+      "Bash(awk 'NR>=2641 && /^  \\\\}$/ {print NR; exit}' lib/custom_code/widgets/routine_mode_free_talk.dart)",
+      "Bash(awk '{print $NF}')",
+      "Bash(awk 'NR>=4417 && /^  \\\\}$/ {print NR; exit}' lib/custom_code/widgets/routine_mode_free_talk.dart)",
+      "Bash(awk 'NR>=4209 && /^  \\\\}$/ {print NR; exit}' lib/custom_code/widgets/routine_mode_free_talk.dart)",
+      "Bash(awk 'NR>=4090 && /^  \\\\}$/ {print NR; exit}' lib/custom_code/widgets/routine_mode_free_talk.dart)"
     ]
   }
 }

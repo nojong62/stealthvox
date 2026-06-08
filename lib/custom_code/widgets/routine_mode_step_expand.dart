@@ -316,6 +316,153 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   //    - 대화 패턴과 확장 로직은 기존 유지
   // ====================================================================
 
+  // 🆕 프리톡 기록에서 유저(HOST) 발화 2~3개를 랜덤 샘플로 가져온다.
+  //   - 최근 chat_history를 받아 client-side로 free_talk만 필터 (복합 인덱스 회피)
+  //   - 최근에 안 쓴 방 우선 (SharedPreferences로 중복 회피)
+  //   - 기록 없으면 빈 리스트 → 호출부에서 고정 안내로 폴백
+  Future<List<String>> _fetchFreeTalkUserSnippets() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return [];
+    try {
+      final roomsSnap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('chat_history')
+          .orderBy('created_at', descending: true)
+          .limit(30)
+          .get();
+      final freeTalkRooms = roomsSnap.docs
+          .where((d) => ((d.data()['mode'] ?? '').toString()) == 'free_talk')
+          .take(5)
+          .toList();
+      if (freeTalkRooms.isEmpty) return [];
+
+      // 중복 회피: 최근에 안 쓴 방 우선
+      final prefs = await SharedPreferences.getInstance();
+      final usedKey = 'freetalk_seed_used_${user.uid}';
+      final used = Set<String>.from(prefs.getStringList(usedKey) ?? []);
+      var pool = freeTalkRooms.where((d) => !used.contains(d.id)).toList();
+      if (pool.isEmpty) {
+        pool = List.of(freeTalkRooms);
+        await prefs.remove(usedKey); // 전부 소진 → 이력 초기화
+      }
+      pool.shuffle();
+      final room = pool.first;
+      final newUsed = Set<String>.from(prefs.getStringList(usedKey) ?? [])
+        ..add(room.id);
+      await prefs.setStringList(usedKey, newUsed.toList());
+
+      // 해당 방의 HOST(유저) 발화 수집 (원문 우선, 없으면 번역문)
+      final msgSnap = await room.reference.collection('messages').get();
+      final hostTexts = msgSnap.docs
+          .where((d) => ((d.data()['role'] ?? '').toString()) == 'HOST')
+          .map((d) {
+            final data = d.data();
+            final orig = (data['original_text'] ?? '').toString().trim();
+            final tgt = (data['translated_text'] ?? '').toString().trim();
+            return orig.isNotEmpty ? orig : tgt;
+          })
+          .where((s) => s.isNotEmpty)
+          .toList();
+      if (hostTexts.isEmpty) return [];
+
+      hostTexts.shuffle();
+      return hostTexts.take(3).toList(); // 2~3개 랜덤 샘플
+    } catch (e) {
+      _log('⚠️ [FT-SEED]', 'fetch 실패: $e');
+      return [];
+    }
+  }
+
+  // 🆕 프리톡 기반 첫 질문을 AI 버블로 렌더 + 타겟 TTS 재생 (그래머 질문과 동일 패턴)
+  Future<void> _generateAndPlayFreeTalkSeedQuestion(
+      List<String> snippets) async {
+    final String targetLangName = FFAppState().targetLang.isNotEmpty
+        ? FFAppState().targetLang
+        : 'English';
+    final String nativeLangName =
+        FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : '';
+
+    if (mounted) {
+      setState(() {
+        _localMessages.add({'role': 'SYSTEM', 'target': '', 'original': ''});
+      });
+      _scrollToBottom();
+    }
+    final int aiIdx = _localMessages.length - 1;
+
+    final aiStream = StepExpandBrain.streamFreeTalkSeedQuestion(
+      apiKey: _openAiKey,
+      myTarget: targetLangName,
+      myNative: nativeLangName,
+      snippets: snippets,
+    );
+
+    final questionTts = ChunkedTtsFetcher(
+      _openAiKey,
+      _ttsQueueManager,
+      'nova',
+      isUser: false,
+      onLog: _log,
+    );
+    final HybridTtsPlayer questionHybridTts = HybridTtsPlayer(
+      apiKey: _openAiKey,
+      voice: 'nova',
+      onLog: _log,
+    );
+    _ttsQueueManager.setUserTurn(false);
+    _ttsQueueManager.setAiPaused(false);
+
+    String aiText = "";
+    String aiOriginal = "";
+    String aiBuffer = "";
+    bool hasDoubleNewline = false;
+
+    await for (final chunk in aiStream) {
+      if (!hasDoubleNewline) {
+        aiText += chunk;
+        aiBuffer += chunk;
+        if (aiText.contains('\n\n')) {
+          hasDoubleNewline = true;
+          final sepIdx = aiText.indexOf('\n\n');
+          final afterSep = aiText.substring(sepIdx + 2);
+          aiText = aiText.substring(0, sepIdx);
+          final bufSepIdx = aiBuffer.indexOf('\n\n');
+          if (bufSepIdx >= 0) aiBuffer = aiBuffer.substring(0, bufSepIdx);
+          if (afterSep.isNotEmpty) aiOriginal += afterSep;
+        } else {
+          if (!questionHybridTts.firstChunkFired) {
+            final cutIdx =
+                questionHybridTts.onChunk(aiBuffer, questionTts, _swTTS);
+            if (cutIdx >= 0) aiBuffer = aiBuffer.substring(cutIdx);
+          }
+        }
+      } else {
+        aiOriginal += chunk; // Part2 (모국어) — TTS 금지
+      }
+      if (mounted && aiIdx < _localMessages.length) {
+        setState(() {
+          _localMessages[aiIdx]['target'] = aiText;
+          _localMessages[aiIdx]['original'] = aiOriginal;
+        });
+      }
+      _scrollToBottom();
+    }
+
+    await questionHybridTts.onStreamEnd(
+      fullSentence: aiText.trim(),
+      remainderBuffer: aiBuffer,
+      fetcher: questionTts,
+      swSpeechEnd: _swTTS,
+    );
+
+    int ticks = 0;
+    while (questionTts.pendingRequests > 0 || _ttsQueueManager.isBusy) {
+      await Future.delayed(const Duration(milliseconds: 50));
+      if (++ticks > 300) break;
+    }
+  }
+
   /// 세션 시작: 안내문 TTS만 재생하고 유저 기본 문장(seed) 대기
   Future<void> _startSessionWaitingForUserSeed() async {
     if (_openAiKey.isEmpty || !mounted) return;
@@ -324,27 +471,33 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     _isConversationActive = true;
     if (mounted) setState(() {});
 
-    // 시작 안내 TTS 재생 (OpenAI 질문 생성 API 호출 없음)
     _ttsQueueManager.setUserTurn(false);
     _ttsQueueManager.setAiPaused(false);
 
-    final ChunkedTtsFetcher tts = ChunkedTtsFetcher(
-      _openAiKey,
-      _ttsQueueManager,
-      'nova',
-      isUser: false,
-      onLog: _log,
-    );
-    tts.addText('대화하면서 문장을 늘려가고 싶은 기본 문장을 하나 제안해 주세요.');
+    // 🆕 프리톡 기록 기반 첫 질문 (있으면) — 없으면 고정 안내
+    final List<String> ftSnippets = await _fetchFreeTalkUserSnippets();
 
-    // TTS 재생 완료 대기 (최대 10초)
-    int ticks = 0;
-    while ((tts.pendingRequests > 0 || _ttsQueueManager.isBusy) && mounted) {
-      await Future.delayed(const Duration(milliseconds: 50));
-      if (++ticks > 200) break;
+    if (ftSnippets.isNotEmpty && mounted && _isConversationActive) {
+      // 프리톡 주제로 AI가 먼저 질문 → "기본 문장 말하세요" 안내 생략
+      await _generateAndPlayFreeTalkSeedQuestion(ftSnippets);
+    } else {
+      // 기존: 고정 안내 TTS
+      final ChunkedTtsFetcher tts = ChunkedTtsFetcher(
+        _openAiKey,
+        _ttsQueueManager,
+        'nova',
+        isUser: false,
+        onLog: _log,
+      );
+      tts.addText('대화하면서 문장을 늘려가고 싶은 기본 문장을 하나 제안해 주세요.');
+      int ticks = 0;
+      while ((tts.pendingRequests > 0 || _ttsQueueManager.isBusy) && mounted) {
+        await Future.delayed(const Duration(milliseconds: 50));
+        if (++ticks > 200) break;
+      }
     }
 
-    // 안내 완료 → STT 자동 시작 (유저 기본 문장 대기)
+    // 안내/질문 완료 → STT 자동 시작 (유저 기본 문장 대기)
     if (mounted && _isConversationActive && !_isSessionComplete) {
       _startDeepgramListening();
     }
@@ -5090,6 +5243,93 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     asked.add(pick);
     await prefs.setStringList(askedKey, asked.toList());
     return pick;
+  }
+
+  // ==================================================================
+  // 📦 streamFreeTalkSeedQuestion — 프리톡 기록 기반 첫 질문 (온도 0.2)
+  // ------------------------------------------------------------------
+  // 유저의 과거 프리톡 발화 몇 개를 받아, 그중 한 주제로 "기본 문장(seed)"을
+  // 유도하는 질문 1개를 타겟 언어로 생성. 변주는 입력 랜덤화로 확보(온도 0.2).
+  // 출력: <타겟 질문>\n\n<모국어 번역>  (타겟==모국어면 타겟만)
+  // ==================================================================
+  static Stream<String> streamFreeTalkSeedQuestion({
+    required String apiKey,
+    required String myTarget,
+    required List<String> snippets,
+    String myNative = '',
+  }) async* {
+    final client = http.Client();
+    try {
+      final String snippetsBlock =
+          snippets.map((s) => '- $s').join('\n');
+      final String sameLangNote = (myNative.isNotEmpty && myNative == myTarget)
+          ? 'NOTE: $myTarget and the user\'s language are the same — output ONLY the question, with NO blank line and NO translation.\n'
+          : '';
+
+      final String sysPrompt = 'You are a Step Expand grammar coach opening a session.\n'
+          'The user has had earlier free-talk conversations. Here are a few things they said before:\n'
+          '$snippetsBlock\n'
+          '\n'
+          'Choose ONE of these topics and ask ONE short, friendly opening question — in $myTarget — '
+          'that naturally leads the user to say a simple basic sentence about it. '
+          'That basic sentence becomes the SEED they will expand.\n'
+          '\n'
+          '[RULES]\n'
+          '- Reference their past topic naturally so it feels personal (e.g. "Last time you mentioned ...").\n'
+          '- The question must invite a short, simple statement — NOT yes/no, NOT a list.\n'
+          '- Middle-school level vocabulary. Warm and conversational.\n'
+          '- Do NOT give meta-instructions like "make a sentence" or "expand". Just ask the question.\n'
+          '- ONE question only, under 25 words.\n'
+          '$sameLangNote'
+          '\n'
+          '[OUTPUT FORMAT — follow EXACTLY]\n'
+          '- First: the question in $myTarget only.\n'
+          '- Then a blank line (two newlines).\n'
+          '- Then: the same question translated into $myNative.\n'
+          '- No labels, no quotes, no prefixes.';
+
+      final request = http.Request(
+        'POST',
+        Uri.parse('https://api.openai.com/v1/chat/completions'),
+      );
+      request.headers.addAll({
+        'Authorization': 'Bearer $apiKey',
+        'Content-Type': 'application/json; charset=utf-8',
+      });
+      request.body = jsonEncode({
+        'model': 'gpt-4o-mini',
+        'stream': true,
+        'temperature': 0.2,
+        'max_tokens': 160,
+        'messages': [
+          {'role': 'system', 'content': sysPrompt},
+          {
+            'role': 'user',
+            'content':
+                'Ask your opening question now (output in the exact format above).',
+          },
+        ],
+      });
+
+      final response =
+          await client.send(request).timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) return;
+
+      await for (final line in response.stream
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())) {
+        if (line.startsWith('data: ') && line != 'data: [DONE]') {
+          try {
+            final delta =
+                jsonDecode(line.substring(6))['choices'][0]['delta']['content'];
+            if (delta != null) yield delta.toString();
+          } catch (_) {}
+        }
+      }
+    } catch (_) {
+    } finally {
+      client.close();
+    }
   }
 
   // ==================================================================
