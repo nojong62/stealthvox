@@ -1,4 +1,4 @@
-﻿// Automatic FlutterFlow imports
+// Automatic FlutterFlow imports
 import '/backend/backend.dart';
 import '/backend/schema/structs/index.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
@@ -39,6 +39,15 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
 
+const int kFreeTalkCommitWaitMs = 900;
+const int kFreeTalkDeepgramEndpointingMs = 700;
+const int kFreeTalkDeepgramUtteranceEndMs = 900;
+const int kFreeTalkUserTtsFetchTimeoutMs = 15000;
+const int kFreeTalkUserTtsPlaybackTimeoutMs = 15000;
+const int kFreeTalkAiTtsWaitTimeoutMs = 20000;
+const int kFreeTalkOpenAiTtsHttpTimeoutSeconds = 18;
+const int kFreeTalkAiResponseMaxTokens = 70;
+
 /// ==================================================================== [Box
 /// 2: 클래스 선언부]
 /// ====================================================================
@@ -58,6 +67,10 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
   String _deepgramKey = "";
   String _openAiKey = "";
   bool _isConversationActive = false;
+  bool _isStartingListening = false;
+  bool _isPipelineRunning = false;
+  int _listenGeneration = 0;
+  DateTime? _lastListenStartAt;
   double _fontScale = 1.0;
   bool _showOriginal = true;
   int _turnCounter = 0;
@@ -137,11 +150,11 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
   // ─────────────────────────────────────────────────────────────────────────
 
   // 🔧 [v3.4 발화 합치기] 유저 더듬거림 대응
-  // speech_final 받아도 바로 파이프라인 시작 안 하고 1.2초 대기
+  // speech_final 받아도 바로 파이프라인 시작 안 하고 900ms 대기
   // 대기 중 새 발화 오면 합쳐서 처리 (최종 한 덩어리로)
   String _pendingTranscript = ''; // 대기 중인 유저 발화 누적
   Timer? _commitTimer; // "진짜 끝났는지" 확정 타이머
-  static const int COMMIT_WAIT_MS = 1200; // 발화 합치기 대기 시간
+  static const int COMMIT_WAIT_MS = kFreeTalkCommitWaitMs; // 발화 합치기 대기 시간
   // 🔬 [v3.1 진단] 화면 로그 뷰어 (팝업에 쌓음)
   final List<String> _debugLogs = [];
   void _log(String tag, String msg) {
@@ -459,7 +472,6 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
     );
   }
 
-
 // ====================================================================
 // 📦 [Box 5: Deepgram + Relay Pipeline] ← 통신로직 박스코드와 완전 일치
 // ====================================================================
@@ -528,6 +540,9 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
   void _stopEverything() {
     _isConversationActive = false;
     _isAiOpenerPlaying = false;
+    _isStartingListening = false;
+    _isPipelineRunning = false;
+    _listenGeneration++;
     _commitTimer?.cancel(); // 🔧 [v3.4] 대기 중 타이머 정리
     _commitTimer = null;
     _openerNudgeTimer?.cancel(); // 🆕 [유저 먼저] 오프너 nudge 정리
@@ -691,60 +706,137 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
   }
 
   Future<void> _startDeepgramListening() async {
-    if (_deepgramKey.isEmpty || !(await _audioRecorder.hasPermission())) return;
-    _resetIdleTimer();
-    _isConversationActive = true;
-    if (mounted) {
-      setState(() {
-        _debugResult = "⏱️ 듣는 중...";
-        _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-      });
-      // HOST_TEMP 버블은 스크롤 트리거 없음 — 실제 HOST 버블 등장 시 스크롤
+    if (_isStartingListening) {
+      _log('🎤 [LISTEN-SKIP]', 'already starting');
+      return;
+    }
+    if (_isPipelineRunning) {
+      _log('🎤 [LISTEN-SKIP]', 'pipeline running');
+      return;
+    }
+    if (_ttsQueueManager.isBusy) {
+      _log('🎤 [LISTEN-SKIP]', 'tts busy');
+      return;
+    }
+    final now = DateTime.now();
+    if (_lastListenStartAt != null &&
+        now.difference(_lastListenStartAt!) < const Duration(seconds: 1)) {
+      _log('🎤 [LISTEN-SKIP]', 'called again within 1s');
+      return;
     }
 
-    _log('🎤 [LISTEN-01]', '_startDeepgramListening 진입, VoiceManager 생성');
+    _isStartingListening = true;
+    _lastListenStartAt = now;
+    final int listenGeneration = ++_listenGeneration;
+    _log('🎤 [LISTEN-GEN]', 'start generation=$listenGeneration');
 
-    // 🌐 [v3.1] 로비에서 유저가 선택한 모국어(nativeLang)로 Deepgram 인식
-    // 유저가 한국어로 말하면 Deepgram이 한국어로 인식 → Brain이 영어로 번역
-    final String nativeLang =
-        FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
-    final String dgLangCode = _mapLanguageToCode(nativeLang);
-    _log('🌐 [LANG]', 'nativeLang="$nativeLang" → Deepgram code="$dgLangCode"');
+    try {
+      if (_deepgramKey.isEmpty || !(await _audioRecorder.hasPermission())) {
+        return;
+      }
+      if (!mounted || listenGeneration != _listenGeneration) return;
+      _resetIdleTimer();
+      _isConversationActive = true;
+      if (mounted) {
+        setState(() {
+          _debugResult = "⏱️ 듣는 중...";
+          _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+        });
+        // HOST_TEMP 버블은 스크롤 트리거 없음 — 실제 HOST 버블 등장 시 스크롤
+      }
 
-    _voiceManager = DeepgramV2VoiceManager(
-      apiKey: _deepgramKey,
-      audioRecorder: _audioRecorder,
-      langCode: dgLangCode,
-      onLog: _log, // 🔬 로그 훅 주입
-      onConnected: () {
-        _log('✅ [LISTEN-02]', 'onConnected 콜백 실행');
-      },
-      onTranscriptUpdate: (transcript) {
-        // 🆕 [유저 먼저] 유저가 입을 떼는 순간 오프너 nudge 취소
-        if (!_userHasSpoken) {
-          _userHasSpoken = true;
-          _openerNudgeTimer?.cancel();
-        }
-        _swDeepgram.reset();
-        _swDeepgram.start();
-      },
-      onTurnEnded: (transcript) {
-        _log('🔀 [LISTEN-03]', 'onTurnEnded 콜백 수신: "$transcript"');
-        _swDeepgram.stop();
-        _stopMicAndProcess(transcript);
-      },
-      onError: (err) {
-        _log('❌ [LISTEN-ERR]', 'Deepgram Error: $err');
-        _stopEverything();
-      },
-    );
-    _log('🎤 [LISTEN-04]', 'connectAndStart 호출 직전');
-    await _voiceManager!.connectAndStart();
-    _log('🎤 [LISTEN-05]', 'connectAndStart 완료');
+      _log('🎤 [LISTEN-01]', '_startDeepgramListening 진입, VoiceManager 생성');
+      if (_voiceManager != null) {
+        await _voiceManager?.dispose();
+        _voiceManager = null;
+      }
 
-    // 🆕 [유저 먼저] 첫 턴이고 유저가 아직 말 안 했으면 2초 grace 후 AI가 운을 뗌
-    if (_localMessages.isEmpty && !_userHasSpoken) {
-      _armOpenerNudge();
+      // 🌐 [v3.1] 로비에서 유저가 선택한 모국어(nativeLang)로 Deepgram 인식
+      // 유저가 한국어로 말하면 Deepgram이 한국어로 인식 → Brain이 영어로 번역
+      final String nativeLang = FFAppState().nativeLang.isNotEmpty
+          ? FFAppState().nativeLang
+          : 'Korean';
+      final String dgLangCode = _mapLanguageToCode(nativeLang);
+      _log('🌐 [LANG]',
+          'nativeLang="$nativeLang" → Deepgram code="$dgLangCode"');
+
+      bool isCurrentGeneration() =>
+          mounted && listenGeneration == _listenGeneration;
+
+      _voiceManager = DeepgramV2VoiceManager(
+        apiKey: _deepgramKey,
+        audioRecorder: _audioRecorder,
+        langCode: dgLangCode,
+        onLog: _log, // 🔬 로그 훅 주입
+        shouldReconnect: () =>
+            isCurrentGeneration() &&
+            _isConversationActive &&
+            !_isPipelineRunning &&
+            !_ttsQueueManager.isBusy,
+        onConnected: () {
+          if (!isCurrentGeneration()) {
+            _log('🎤 [LISTEN-STALE]', 'onConnected ignored');
+            return;
+          }
+          _log('✅ [LISTEN-02]', 'onConnected 콜백 실행');
+        },
+        onTranscriptUpdate: (transcript) {
+          if (!isCurrentGeneration()) {
+            _log('🎤 [LISTEN-STALE]', 'onTranscriptUpdate ignored');
+            return;
+          }
+          // 🆕 [유저 먼저] 유저가 입을 떼는 순간 오프너 nudge 취소
+          if (!_userHasSpoken) {
+            _userHasSpoken = true;
+            _openerNudgeTimer?.cancel();
+          }
+          _swDeepgram.reset();
+          _swDeepgram.start();
+        },
+        onTurnEnded: (transcript) {
+          if (!isCurrentGeneration()) {
+            _log('🎤 [LISTEN-STALE]', 'onTurnEnded ignored');
+            return;
+          }
+          _log('🔀 [LISTEN-03]', 'onTurnEnded 콜백 수신: "$transcript"');
+          _swDeepgram.stop();
+          _stopMicAndProcess(transcript);
+        },
+        onError: (err) {
+          if (!isCurrentGeneration()) {
+            _log('🎤 [LISTEN-STALE]', 'onError ignored');
+            return;
+          }
+          _log('❌ [LISTEN-ERR]', 'Deepgram Error: $err');
+          _stopEverything();
+        },
+        onReconnecting: (attempt) {
+          if (!isCurrentGeneration()) {
+            _log('🎤 [LISTEN-STALE]', 'onReconnecting ignored');
+            return;
+          }
+          _log('🎤 [LISTEN-RETRY]', 'Deepgram 재연결 시도 $attempt');
+        },
+        onGaveUp: () {
+          if (!isCurrentGeneration()) {
+            _log('🎤 [LISTEN-STALE]', 'onGaveUp ignored');
+            return;
+          }
+          _log('❌ [LISTEN-GIVEUP]', 'Deepgram 재연결 포기');
+        },
+      );
+      _log('🎤 [LISTEN-04]', 'connectAndStart 호출 직전');
+      await _voiceManager!.connectAndStart();
+      _log('🎤 [LISTEN-05]', 'connectAndStart 완료');
+
+      // 🆕 [유저 먼저] 첫 턴이고 유저가 아직 말 안 했으면 2초 grace 후 AI가 운을 뗌
+      if (_localMessages.isEmpty && !_userHasSpoken) {
+        _armOpenerNudge();
+      }
+    } finally {
+      if (listenGeneration == _listenGeneration) {
+        _isStartingListening = false;
+      }
     }
   }
 
@@ -780,10 +872,10 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
     // 🔧 기존 대기 중인 발화가 있으면 공백으로 연결 (더듬거림 합치기)
     if (_pendingTranscript.isEmpty) {
       _pendingTranscript = clean;
-      _log('🔀 [STOP-03]', '신규 발화 접수. 1.2초 대기창 시작');
+      _log('🔀 [STOP-03]', '신규 발화 접수. 900ms 대기창 시작');
     } else {
       _pendingTranscript = '$_pendingTranscript $clean';
-      _log('🔀 [STOP-04]', '합치기: "$_pendingTranscript" (1.2초 대기창 리셋)');
+      _log('🔀 [STOP-04]', '합치기: "$_pendingTranscript" (900ms 대기창 리셋)');
     }
 
     // UI: 접수된 발화를 HOST_TEMP 풍선에 실시간 반영
@@ -802,14 +894,14 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
     // 기존 타이머 취소 (새 발화가 왔으므로 대기창 리셋)
     _commitTimer?.cancel();
 
-    // 1.2초 후 파이프라인 시작 예약
+    // 900ms 후 파이프라인 시작 예약
     _commitTimer = Timer(
       const Duration(milliseconds: COMMIT_WAIT_MS),
       () => _commitAndProcess(),
     );
   }
 
-  // 🔧 [v3.4] 1.2초 대기 후 더 이상 발화 없으면 확정 → 파이프라인 시작
+  // 🔧 [v3.4] 900ms 대기 후 더 이상 발화 없으면 확정 → 파이프라인 시작
   void _commitAndProcess() async {
     final committed = _pendingTranscript.trim();
     _pendingTranscript = '';
@@ -889,6 +981,7 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
     _resetIdleTimer();
     _turnCounter++;
     final int currentTurnId = _turnCounter;
+    bool skipFinallyRestart = false;
     _log('🧠 [PIPE-01]',
         'Pipeline 시작 turn=$_turnCounter input="$finalTranscript"');
 
@@ -925,6 +1018,7 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
       return;
     }
 
+    _isPipelineRunning = true;
     try {
       // ─────────────────────────────────────────────────────
       // STEP 2: HOST 풍선 생성 + 유저 번역 스트리밍
@@ -990,9 +1084,8 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
       String userTargetText = "";
       String userBuffer = "";
       // 🆕 유저 목소리 = 로비에서 고른 값(FFAppState().aiVoice). AI는 nova 고정.
-      final String userVoice = FFAppState().aiVoice.isNotEmpty
-          ? FFAppState().aiVoice
-          : 'onyx';
+      final String userVoice =
+          FFAppState().aiVoice.isNotEmpty ? FFAppState().aiVoice : 'onyx';
       ChunkedTtsFetcher userTtsFetcher = ChunkedTtsFetcher(
         _openAiKey,
         _ttsQueueManager,
@@ -1068,8 +1161,11 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
         if (mounted)
           setState(
               () => _localMessages.removeWhere((m) => m['role'] == 'HOST'));
-        if (_isConversationActive && _turnCounter == currentTurnId)
-          _speakRetryAndListen();
+        if (_isConversationActive && _turnCounter == currentTurnId) {
+          skipFinallyRestart = true;
+          _isPipelineRunning = false;
+          await _speakRetryAndListen();
+        }
         return;
       }
 
@@ -1094,7 +1190,10 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
         _ttsQueueManager.stop();
         _ttsQueueManager.setUserTurn(false);
         // 정정된 발화로 재처리 (재진입이므로 [CORRECTION] 재감지 안 함)
-        _processRelayPipeline(finalTranscript, isCorrectionRetry: true);
+        skipFinallyRestart = true;
+        _isPipelineRunning = false;
+        unawaited(
+            _processRelayPipeline(finalTranscript, isCorrectionRetry: true));
         return;
       }
 
@@ -1244,9 +1343,9 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
       while (userTtsFetcher.pendingRequests > 0) {
         await Future.delayed(const Duration(milliseconds: 50));
         waitTicks++;
-        if (waitTicks > 200) {
-          // 10초 타임아웃
-          _log('⚠️ [PIPE-TIMEOUT]', '유저 TTS fetch 10초 초과, 강제 진행');
+        if (waitTicks * 50 >= kFreeTalkUserTtsFetchTimeoutMs) {
+          userTtsFetcher.cancel(dropBuffered: false);
+          _log('⚠️ [PIPE-TIMEOUT]', '유저 TTS fetch 15초 초과, 강제 진행');
           break;
         }
       }
@@ -1257,8 +1356,8 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
       while (_ttsQueueManager.isBusy) {
         await Future.delayed(const Duration(milliseconds: 50));
         waitTicks++;
-        if (waitTicks > 200) {
-          _log('⚠️ [PIPE-TIMEOUT]', '유저 TTS 재생 10초 초과, 강제 진행');
+        if (waitTicks * 50 >= kFreeTalkUserTtsPlaybackTimeoutMs) {
+          _log('⚠️ [PIPE-TIMEOUT]', '유저 TTS 재생 15초 초과, 강제 진행');
           break;
         }
       }
@@ -1287,6 +1386,11 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
       await aiGenerationTask;
       _log('🧠 [PIPE-08]',
           'aiGenerationTask 완료. AI pending=${aiTtsFetcher.pendingRequests}');
+      Future<String>? aiOriginalFuture;
+      if (aiTargetText.trim().isNotEmpty) {
+        aiOriginalFuture = FreeTalkBrain.generateCleanOriginal(
+            apiKey: _openAiKey, englishText: aiTargetText);
+      }
       // [하이브리드] remainder 발사 + 통문장 TtsCache 저장
       await _hybridTtsPlayer!
           .onStreamEnd(fullSentence: _cleanText(aiTargetText.trim()));
@@ -1295,9 +1399,8 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
       while (aiTtsFetcher.pendingRequests > 0 || _ttsQueueManager.isBusy) {
         await Future.delayed(const Duration(milliseconds: 50));
         waitTicks++;
-        if (waitTicks > 300) {
-          // 15초 타임아웃
-          _log('⚠️ [PIPE-TIMEOUT]', 'AI TTS 15초 초과, 강제 진행');
+        if (waitTicks * 50 >= kFreeTalkAiTtsWaitTimeoutMs) {
+          _log('⚠️ [PIPE-TIMEOUT]', 'AI TTS 20초 초과, 강제 진행');
           break;
         }
       }
@@ -1310,8 +1413,9 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
       String aiOriginalText = '';
       if (aiTargetText.trim().isNotEmpty) {
         try {
-          aiOriginalText = await FreeTalkBrain.generateCleanOriginal(
-              apiKey: _openAiKey, englishText: aiTargetText);
+          aiOriginalText = await (aiOriginalFuture ??
+              FreeTalkBrain.generateCleanOriginal(
+                  apiKey: _openAiKey, englishText: aiTargetText));
           _log('🔤 [AI-ORIG]', 'AI original 생성 완료 → UI 반영 및 저장');
           if (mounted && _localMessages.length > aiIndex) {
             setState(
@@ -1323,10 +1427,12 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
       }
 
       // 유저 original — 백그라운드 생성이 완료된 값 사용, 비어 있으면 Deepgram 원문 fallback
-      final String hostOriginal =
-          (_localMessages[hostIndex]['original'] ?? '').toString().trim().isNotEmpty
-              ? (_localMessages[hostIndex]['original'] ?? '').toString()
-              : finalTranscript;
+      final String hostOriginal = (_localMessages[hostIndex]['original'] ?? '')
+              .toString()
+              .trim()
+              .isNotEmpty
+          ? (_localMessages[hostIndex]['original'] ?? '').toString()
+          : finalTranscript;
 
       final hostLine = {
         'role': 'HOST',
@@ -1346,9 +1452,16 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
     } catch (e) {
       _log('❌ [PIPE-ERR]', 'Relay Error: $e');
     } finally {
+      if (!skipFinallyRestart) {
+        _isPipelineRunning = false;
+      }
       _log('🧠 [PIPE-END]',
-          'finally 진입. active=$_isConversationActive turn=$_turnCounter/current=$currentTurnId mounted=$mounted');
-      if (mounted && _isConversationActive && _turnCounter == currentTurnId) {
+          'finally 진입. active=$_isConversationActive turn=$_turnCounter/current=$currentTurnId mounted=$mounted skipRestart=$skipFinallyRestart');
+      if (skipFinallyRestart) {
+        _log('⚠️ [PIPE-NORESTART]', 'handoff flow already restarted mic');
+      } else if (mounted &&
+          _isConversationActive &&
+          _turnCounter == currentTurnId) {
         _log('🧠 [PIPE-RESTART]', '마이크 재시작 시도');
         _startDeepgramListening();
       } else {
@@ -1629,7 +1742,8 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
                   const SizedBox(width: 6),
                   Text(
                     () {
-                      final int s = (FFAppState().remainingTime).toInt().clamp(0, 999999);
+                      final int s =
+                          (FFAppState().remainingTime).toInt().clamp(0, 999999);
                       final int h = s ~/ 3600;
                       final int m = (s % 3600) ~/ 60;
                       return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
@@ -1943,6 +2057,7 @@ class DeepgramV2VoiceManager {
   final Function(String) onError;
   final Function(int)? onReconnecting; // 재연결 시도 알림 (선택적)
   final VoidCallback? onGaveUp; // 재연결 포기 알림 (선택적)
+  final bool Function()? shouldReconnect;
   final void Function(String tag, String msg)? onLog; // 🔬 [v3.1] 로그 훅
 
   IOWebSocketChannel? _channel;
@@ -1964,6 +2079,7 @@ class DeepgramV2VoiceManager {
     required this.onError,
     this.onReconnecting,
     this.onGaveUp,
+    this.shouldReconnect,
     this.onLog,
   });
 
@@ -1985,8 +2101,8 @@ class DeepgramV2VoiceManager {
         '?model=nova-3'
         '&language=$langCode'
         '&smart_format=true'
-        '&endpointing=700' // 🔧 [v3.4] 500→700ms: 더듬거림에 덜 민감하게
-        '&utterance_end_ms=1200' // 🔧 [v3.4] 1000→1200ms: UtteranceEnd도 여유있게
+        '&endpointing=$kFreeTalkDeepgramEndpointingMs' // 🔧 Free Talk: 더듬거림에 덜 민감하게
+        '&utterance_end_ms=$kFreeTalkDeepgramUtteranceEndMs' // 🔧 Free Talk: 900ms로 반응속도 개선
         '&interim_results=true'
         '&encoding=linear16'
         '&sample_rate=16000'
@@ -2139,6 +2255,10 @@ class DeepgramV2VoiceManager {
 
   Future<void> _handleDisconnect() async {
     if (_isDisposed) return;
+    if (shouldReconnect != null && !shouldReconnect!()) {
+      _lg('🎤 [DG-RETRY-SKIP]', '재연결 조건 불충족');
+      return;
+    }
     _isConnected = false;
     if (_retryCount < _maxRetries) {
       _retryCount++;
@@ -2146,7 +2266,11 @@ class DeepgramV2VoiceManager {
       onReconnecting?.call(_retryCount); // 🔧 선택적 콜백 호출
       final delay = Duration(milliseconds: 500 * (1 << (_retryCount - 1)));
       await Future.delayed(delay);
-      if (!_isDisposed) await _connect();
+      if (!_isDisposed && (shouldReconnect == null || shouldReconnect!())) {
+        await _connect();
+      } else {
+        _lg('🎤 [DG-RETRY-SKIP]', '재연결 지연 중 상태 변경');
+      }
     } else {
       _lg('❌ [DG-GIVEUP]', '재연결 최대치 도달');
       onGaveUp?.call(); // 🔧 선택적 콜백 호출
@@ -2475,6 +2599,8 @@ class ChunkedTtsFetcher {
   int _readyCounter = 0;
   final Map<int, Uint8List> _buffer = {};
   int _pendingCount = 0;
+  int _generation = 0;
+  bool _cancelled = false;
   int get pendingRequests => _pendingCount;
   VoidCallback? onAllComplete;
 
@@ -2490,14 +2616,20 @@ class ChunkedTtsFetcher {
 
   void addText(String text) {
     if (text.trim().isEmpty) return;
+    if (_cancelled) {
+      final turnTag = isUser ? 'USER' : 'AI';
+      onLog?.call('🔊 [TTS-DROP-LATE]',
+          '[$turnTag] addText ignored after cancel: "$text"');
+      return;
+    }
     _pendingCount++;
     final turnTag = isUser ? 'USER' : 'AI';
     onLog?.call(
         '🔊 [TTS-01]', '[$turnTag] addText: "$text" (pending=$_pendingCount)');
-    _fetch(_requestCounter++, text);
+    _fetch(_requestCounter++, text, _generation);
   }
 
-  Future<void> _fetch(int id, String text) async {
+  Future<void> _fetch(int id, String text, int generation) async {
     // 🔧 [B 수정] 모든 경로(캐시 히트/API 성공/실패/예외)에서
     // _pendingCount가 정확히 1회 감소하도록 try/finally로 보장.
     Uint8List result = Uint8List(0);
@@ -2527,7 +2659,8 @@ class ChunkedTtsFetcher {
                   'response_format': 'mp3',
                 }),
               )
-              .timeout(const Duration(seconds: 10));
+              .timeout(const Duration(
+                  seconds: kFreeTalkOpenAiTtsHttpTimeoutSeconds));
 
           if (res.statusCode == 200) {
             result = res.bodyBytes;
@@ -2549,10 +2682,15 @@ class ChunkedTtsFetcher {
     } catch (_) {
       // 예외가 나도 finally에서 pending 정리 후 게이트 영구 대기를 방지.
     } finally {
-      _buffer[id] = result;
-      _pendingCount--;
-      _pushReady();
-      if (_pendingCount == 0) onAllComplete?.call();
+      if (_cancelled || generation != _generation) {
+        final turnTag = isUser ? 'USER' : 'AI';
+        onLog?.call('🔊 [TTS-DROP-LATE]', '[$turnTag] stale user TTS ignored');
+      } else {
+        _buffer[id] = result;
+        _pendingCount--;
+        _pushReady();
+        if (_pendingCount == 0) onAllComplete?.call();
+      }
     }
   }
 
@@ -2560,12 +2698,23 @@ class ChunkedTtsFetcher {
     while (_buffer.containsKey(_readyCounter)) {
       final data = _buffer.remove(_readyCounter)!;
       // 🔧 [v3.5] isUser 플래그로 큐 선택
-      if (data.isNotEmpty) audioQueue.addAudio(data, isUser: isUser);
+      if (!_cancelled && data.isNotEmpty) {
+        audioQueue.addAudio(data, isUser: isUser);
+      }
       _readyCounter++;
     }
   }
 
+  void cancel({bool dropBuffered = true}) {
+    _generation++;
+    _cancelled = true;
+    _pendingCount = 0;
+    if (dropBuffered) _buffer.clear();
+  }
+
   void reset() {
+    _generation++;
+    _cancelled = false;
     _requestCounter = 0;
     _readyCounter = 0;
     _buffer.clear();
@@ -2824,7 +2973,8 @@ class HybridTtsPlayer {
               'response_format': 'mp3',
             }),
           )
-          .timeout(const Duration(seconds: 15));
+          .timeout(
+              const Duration(seconds: kFreeTalkOpenAiTtsHttpTimeoutSeconds));
       if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
         await TtsCache.put(sentence, _voice, res.bodyBytes);
         onLog?.call('[HYB-04-SAVED]', '${res.bodyBytes.length}B');
@@ -2909,7 +3059,8 @@ content and gist of the WHOLE conversation.
       String s =
           ((body['choices'] as List).first['message']['content'] as String)
               .trim();
-      if (s.startsWith('"') && s.endsWith('"')) s = s.substring(1, s.length - 1);
+      if (s.startsWith('"') && s.endsWith('"'))
+        s = s.substring(1, s.length - 1);
       return s.isEmpty ? null : s;
     } catch (e) {
       debugPrint("[FreeTalkBrain.generateExpandedFromConversation] $e");
@@ -2969,7 +3120,8 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
       String p =
           ((body['choices'] as List).first['message']['content'] as String)
               .trim();
-      if (p.startsWith('"') && p.endsWith('"')) p = p.substring(1, p.length - 1);
+      if (p.startsWith('"') && p.endsWith('"'))
+        p = p.substring(1, p.length - 1);
       return p.isEmpty ? originalSentence : p;
     } catch (e) {
       debugPrint("[FreeTalkBrain.polishSentence] $e");
@@ -3175,7 +3327,7 @@ The particle before the verb's doer (이/가) is ALWAYS the subject. Never swap 
     try {
       final sysPrompt =
           """You are a warm, friendly $myTarget conversation partner.
-Keep every reply to 2 short sentences maximum.
+Keep every reply brief and easy to answer.
 Talk like a real friend — sound natural, show interest, and keep the chat flowing.
 Match your vocabulary and grammar to the learner's level below.
 Never say that you are an AI or a language model.
@@ -3183,7 +3335,10 @@ Never say that you are an AI or a language model.
 OUTPUT LANGUAGE: $myTarget ONLY. Zero Korean characters in output.
 
 [RULES]
-- Respond in $myTarget only. MAXIMUM 2 short sentences. Often 1 sentence is enough.
+- Respond in $myTarget only. Usually ONE short sentence; use two only when truly needed.
+- Ask at most ONE question.
+- Avoid long explanations, lists, teaching notes, and multi-part answers.
+- Leave room for the user to speak next.
 - No greetings, no "I understand", no meta-comments, no prefixes. Just reply.
 - If the audio is garbled or impossible to make out (a speech recognition error), politely ask them to repeat in $myTarget.
 
@@ -3201,7 +3356,7 @@ Learner level: ${_freeTalkLevelInstruction(level)}""";
         'model': 'gpt-4o-mini',
         'stream': true,
         'temperature': 0.5,
-        'max_tokens': 90,
+        'max_tokens': kFreeTalkAiResponseMaxTokens,
         'messages': [
           {'role': 'system', 'content': sysPrompt},
           {
@@ -3301,7 +3456,6 @@ Output: ONE sentence in $targetLang only.""";
       client.close();
     }
   }
-
 }
 
 class _LangIconPainter extends CustomPainter {

@@ -47,14 +47,20 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# StealthVox — Free Talk AI 텍스트 실시간 표시 (5/2 개선 ②)
+# StealthVox — Free Talk Deepgram 400 무한 재연결 수정
 
-## 목적
-유저 TTS 재생 중(`aiPaused=true`)에는 AI 영어 글자가 화면에 안 뜨다가 PIPE-07에서 한꺼번에 등장한다("와장창"). 이 때문에 침묵 동안 화면이 비어 보여 체감 흐름이 끊긴다.
+## 증상
+앱 실행 시 Deepgram WebSocket이 계속 끊기며 무한 재연결("DG-WS-ERR / DG-RETRY" 반복). STT가 전혀 동작하지 않음.
 
-`!aiPaused` 조건을 제거해 **AI 영어 텍스트가 유저 말하는 동안에도 실시간으로 흘러나오게** 한다. 소리/게이트/병렬 준비 시간(10초 게이트)은 일절 건드리지 않으므로 동작 타이밍은 동일하고, 체감 침묵만 짧아진다.
+로그:
+```
+❌ [DG-WS-ERR] ... Connection to '...utterance_end_ms=900...' was not upgraded to websocket, HTTP status code: 400
+```
 
-> 근거: 첨부 문서 `현_통신로직_및_개선.txt` 의 "② AI 텍스트 실시간 표시" 항목. 현재 코드에 미적용 상태(1181번 줄에 `!aiPaused` 조건 잔존).
+## 원인 (확정)
+**Deepgram `utterance_end_ms` 파라미터는 최소 1000ms 이상이어야 한다.** 현재 값이 `900`이라 Deepgram이 연결 요청을 `400 Bad Request`로 거부하고, 400은 재연결해도 동일하게 거부되므로 무한 루프에 빠진다.
+
+원본(정상 동작)에서는 이 값이 `1200`이었고, Codex 수정 과정에서 `900`으로 낮아지면서 깨졌다. URL의 나머지 파라미터·괄호·상수는 모두 정상이다.
 
 ## 대상 파일 (정확히 이 경로만)
 ```
@@ -62,93 +68,48 @@ lib/custom_code/widgets/routine_mode_free_talk.dart
 ```
 **`lib/custom_code/임시/` 아래 파일은 절대 건드리지 말 것.**
 
-## 작업 전 필수
-- `git commit -am "save point before FREETALK_AI_TEXT_REALTIME_v1"` (세이브 포인트).
+## 작업 전
+- `git commit -am "save point before FREETALK_DEEPGRAM_400_FIX"`
 
-## 절대 건드리지 말 것 (Do NOT touch)
-- `TtsQueueManager` (`setAiPaused` / `aiPaused` getter / 큐 로직) — 그대로 둔다.
-- `DeepgramV2VoiceManager`, `HybridTtsPlayer`, `ChunkedTtsFetcher`, `TtsCache` — 직전 C+B 수정 포함, 추가 변경 없음.
-- PIPE-04 유저 TTS 게이트 타임아웃(10초) — **유지**. 이 대기 동안 AI 번역·TTS가 병렬로 익으므로 줄이지 않는다.
-- PIPE-07 일괄 표시 블록(약 1272~1275, `// [v3.6] PIPE-07 시점: 버퍼된 AI 텍스트 일괄 표시`) — **유지**. 최종 동기화 + AI 차례 스크롤 역할.
-- 이 수정 블록(아래 1곳) 외 다른 곳.
-
----
-
-## 수정 — aiGenerationTask 내 AI 텍스트 표시 조건 분리 (약 1181번 줄)
-
-### 삭제 범위
-- **시작**: `          if (mounted && !_ttsQueueManager.aiPaused) {` (약 1181번 줄)
-- **끝**: 위 `if` 블록을 닫는 `          }` — 바로 위 줄이 `              _scrollToCurrent(aiIndex);` 와 `            }` (약 1191번 줄)
-
-이 `if` 블록 **하나**를 아래로 교체한다.
+## 수정 — 상수 한 줄 (약 44번 줄)
 
 ### str_replace
 
-**old_str** (현재 코드):
+**old_str**:
 ```dart
-          if (mounted && !_ttsQueueManager.aiPaused) {
-            setState(() => _localMessages[aiIndex]['target'] = aiTargetText);
-            // throttled ensureVisible — 스트리밍 중 현재 AI 버블 중앙 고정
-            final _scrollNow = DateTime.now();
-            if (_lastScrollThrottle == null ||
-                _scrollNow.difference(_lastScrollThrottle!) >=
-                    const Duration(milliseconds: 250)) {
-              _lastScrollThrottle = _scrollNow;
-              _scrollToCurrent(aiIndex);
-            }
-          }
+const int kFreeTalkDeepgramUtteranceEndMs = 900;
 ```
 
-**new_str** (교체 코드):
+**new_str**:
 ```dart
-          // 🔧 [5/2 개선 ②] AI 영어 텍스트는 aiPaused와 무관하게 실시간 표시.
-          // 유저 TTS 재생 중(aiPaused=true)에도 AI 글자가 화면에 흘러나와
-          // 체감 침묵을 단축. 소리/게이트/병렬 준비 시간은 그대로 둔다.
-          if (mounted) {
-            setState(() => _localMessages[aiIndex]['target'] = aiTargetText);
-            // 스크롤은 AI 차례(!aiPaused)에만 — 유저가 자기 버블을 보는 중
-            // AI 버블로 화면이 튀는 것을 방지.
-            if (!_ttsQueueManager.aiPaused) {
-              final _scrollNow = DateTime.now();
-              if (_lastScrollThrottle == null ||
-                  _scrollNow.difference(_lastScrollThrottle!) >=
-                      const Duration(milliseconds: 250)) {
-                _lastScrollThrottle = _scrollNow;
-                _scrollToCurrent(aiIndex);
-              }
-            }
-          }
+const int kFreeTalkDeepgramUtteranceEndMs = 1000; // 🔧 Deepgram 최소 허용값 1000ms (900은 400 거부 → 무한 재연결)
 ```
 
----
+> 참고: `endpointing=700`(2104번 줄)은 1000ms 제한이 없는 별개 파라미터이고 정상이므로 건드리지 않는다. 반응속도는 주로 `endpointing`이 좌우하므로 `utterance_end_ms`를 1000으로 올려도 체감 반응속도 손해는 거의 없다. 더 빠르게 하고 싶으면 추후 `endpointing` 값을 조정한다.
 
-## 검증 (수정 후 순서대로)
+## 절대 건드리지 말 것 (Do NOT touch)
+- Deepgram URL의 다른 파라미터(`model`, `language`, `endpointing`, `encoding`, `sample_rate`, `channels`, `filler_words`) — 전부 정상.
+- 재연결 로직(`_handleDisconnect`, `DG-RETRY`) — utterance_end_ms를 고치면 400이 사라져 루프도 멈춘다. 이번엔 손대지 않는다.
+- 그 외 모든 로직.
 
-### 1) grep 카운트
+## 검증
+
+### 1) grep
 ```powershell
-# 새 주석 앵커 1개
-grep -c "5/2 개선 ②" lib/custom_code/widgets/routine_mode_free_talk.dart            # 기대값: 1
-
-# 위젯 코드 내 aiPaused getter 호출은 여전히 1곳(텍스트 조건 → 스크롤 조건으로 이동)
-grep -c "_ttsQueueManager.aiPaused" lib/custom_code/widgets/routine_mode_free_talk.dart  # 기대값: 1
+grep -c "kFreeTalkDeepgramUtteranceEndMs = 1000" lib/custom_code/widgets/routine_mode_free_talk.dart   # 기대값: 1
+grep -c "kFreeTalkDeepgramUtteranceEndMs = 900"  lib/custom_code/widgets/routine_mode_free_talk.dart   # 기대값: 0
 ```
 
 ### 2) flutter analyze
 ```powershell
 flutter analyze lib/custom_code/widgets/routine_mode_free_talk.dart
 ```
-- 수정 전 대비 **신규 error 0건**.
-
----
+- 신규 error 0건.
 
 ## 롤백
-- 로컬: `git restore lib/custom_code/widgets/routine_mode_free_talk.dart`
-- push 후: `git revert <commit-hash>`
+- `git restore lib/custom_code/widgets/routine_mode_free_talk.dart`
 
----
-
-## 실기기 확인 포인트
-1. 유저가 말하는 동안(또는 유저 TTS 재생 중) **AI 영어 글자가 화면에 똑똑똑 흘러나오는지**.
-2. 그때 화면이 **유저 버블에서 AI 버블로 튀지 않는지** (스크롤은 AI 차례에만 움직여야 함).
-3. **소리 타이밍은 이전과 동일한지** (AI 음성은 여전히 유저 TTS 끝난 뒤 시작 — 게이트 그대로).
-4. 전체적으로 침묵 구간이 "비어 보이지" 않고 화면이 살아있게 느껴지는지.
+## 실기기 확인
+1. 앱 실행 시 `❌ [DG-WS-ERR] ... HTTP status code: 400` 이 **더 이상 안 뜨는지**.
+2. `📡 [DG-02] Metadata 수신 → onConnected` 가 정상적으로 뜨고 STT(음성 인식)가 동작하는지.
+3. 무한 `DG-RETRY` 루프가 사라졌는지.
