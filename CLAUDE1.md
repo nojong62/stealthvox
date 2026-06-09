@@ -47,12 +47,12 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# FREETALK_LEVEL_UI_v1 — 레벨 토글: 영어만 + 선택 시 테두리만 색
+# FREETALK_VOICE_NOEXPAND_v1 — 유저 목소리 분리 + 확장 문장 제거
 
 ## 목표
-- Beginner / Intermediate / Advanced **영어 라벨만** 표시 (초급/중급/고급 한글 자막 제거)
-- 선택된 칸은 **보라색 테두리만** 표시 (배경 채움·그림자 글로우 제거)
-- 라벨이 두 줄로 깨지던(`Intermedia te`) 문제 해결 (FittedBox로 1줄 고정)
+1. **목소리 분리**: AI TTS는 `nova` 고정, **유저 TTS는 로비 선택값(`FFAppState().aiVoice`)** 사용.
+2. **확장 문장 제거**: 종료 시 확장/다듬기 생성(`[EXPAND-EXIT]`)을 없애고, 히스토리엔 대화 기록만 저장.
+   (대화 본문은 이미 턴마다 `chat_history/messages` 서브컬렉션에 저장되므로 영향 없음)
 
 ## 대상 파일 (이 경로만)
 ```
@@ -61,95 +61,125 @@ lib/custom_code/widgets/routine_mode_free_talk.dart
 
 ## 사전 작업
 ```
-git add -A && git commit -m "save before FREETALK_LEVEL_UI_v1"
+git add -A && git commit -m "save before FREETALK_VOICE_NOEXPAND_v1"
 ```
 
 ---
 
-## EDIT — `_buildTopControls()` 전체 교체 (1706~1780행)
-삭제 시작: `  Widget _buildTopControls() {`  (1706행)
-삭제 끝:   `  }`  (1780행, `_buildTopControls` 닫는 중괄호 — 바로 다음 줄이 `Widget _buildChatList() {`)
+## 편집 (아래→위 순서)
 
-**AFTER (이 블록 전체로 교체)**
+### EDIT 1 — 확장 문장 제거: `_handleAutoSaveAndExit()` 전체 교체 (1481~1605행)
+삭제 시작: `  Future<void> _handleAutoSaveAndExit() async {`  (1481행)
+삭제 끝:   `  }`  (1605행, 이 메서드의 닫는 중괄호 — 바로 다음이 빈 줄/주석)
+
+> 제거 대상: `overlayShown` 변수, `[EXPAND-EXIT]` 블록(다이얼로그 "확장 문장 만드는 중..." +
+> `generateExpandedFromConversation` + `polishSentence` 호출), `update()`의
+> `expanded_sentence`/`polished_sentence`/`has_practice`/`expand_*` 필드, finally의 오버레이 pop.
+
+**교체 코드 (전체)**
 ```dart
-  Widget _buildTopControls() {
-    const levels = ["Beginner", "Intermediate", "Advanced"];
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Container(
-        height: 44,
-        padding: const EdgeInsets.all(4),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1C1C1E),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.white.withOpacity(0.06)),
-        ),
-        child: Row(
-          children: List.generate(levels.length, (i) {
-            final bool selected = _freeTalkLevel == levels[i];
-            return Expanded(
-              child: GestureDetector(
-                onTap: () => _setFreeTalkLevel(levels[i]),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  curve: Curves.easeInOut,
-                  alignment: Alignment.center,
-                  margin: const EdgeInsets.symmetric(horizontal: 2),
-                  decoration: BoxDecoration(
-                    // 🆕 배경 채움 없음 — 선택 시 테두리만 색
-                    color: Colors.transparent,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: selected
-                          ? const Color(0xFF9333EA)
-                          : Colors.transparent,
-                      width: 1.5,
-                    ),
-                  ),
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: Text(
-                        levels[i], // 🆕 영어 라벨만 (한글 자막 제거)
-                        maxLines: 1,
-                        softWrap: false,
-                        style: TextStyle(
-                          color: selected ? Colors.white : Colors.white38,
-                          fontSize: 13,
-                          fontWeight:
-                              selected ? FontWeight.w700 : FontWeight.w400,
-                          letterSpacing: -0.2,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            );
-          }),
-        ),
-      ),
-    );
+  Future<void> _handleAutoSaveAndExit() async {
+    try {
+      if (_myHistoryRef != null) {
+        final hasUserTurn = _localMessages.any((m) => m['role'] == 'HOST');
+        if (!hasUserTurn) {
+          await _myHistoryRef!.delete();
+          _log('🗑️ [HIST-DEL]', '빈 방 삭제 완료');
+        } else {
+          String lastText = "대화 기록 저장";
+          for (int i = _localMessages.length - 1; i >= 0; i--) {
+            final t = (_localMessages[i]['target'] ?? '').toString().trim();
+            if (t.isNotEmpty && t != '...') {
+              lastText = t;
+              break;
+            }
+          }
+
+          // 🆕 프리톡은 확장 문장 생성 안 함 → 대화 기록만 저장
+          await _myHistoryRef!.update({
+            'last_message': lastText,
+            'last_message_time': FieldValue.serverTimestamp(),
+            'msg_count': _localMessages.length,
+            'last_active': FieldValue.serverTimestamp(),
+            'mode': 'free_talk',
+            'user_label': 'the user',
+            'partner_label': 'AI partner',
+          });
+          _log('💾 [HIST-UPD]', 'last_message 저장 (free_talk, no expand)');
+        }
+      }
+    } catch (e) {
+      _log('❌ [HIST-EXIT-ERR]', '$e');
+    } finally {
+      if (mounted) {
+        if (StealthRoomMaster.exitCurrentMode != null) {
+          StealthRoomMaster.exitCurrentMode!();
+        } else if (Navigator.canPop(context)) {
+          Navigator.pop(context);
+        } else {
+          context.goNamed('Lobby');
+        }
+      }
+    }
   }
 ```
+> `FreeTalkBrain.generateExpandedFromConversation` / `polishSentence` 메서드 정의는
+> **그대로 둬도 무방**(roleplay도 정의만 남기고 미사용). 호출만 사라지면 됨.
+> 미사용 경고(info)는 에러 아님.
+
+---
+
+### EDIT 2 — 유저 목소리를 로비 선택값으로 (992~997행)
+삭제 시작: `      ChunkedTtsFetcher userTtsFetcher = ChunkedTtsFetcher(`  (992행)
+삭제 끝:   `      );`  (997행, 이 fetcher 닫힘)
+
+**BEFORE**
+```dart
+      ChunkedTtsFetcher userTtsFetcher = ChunkedTtsFetcher(
+        _openAiKey,
+        _ttsQueueManager,
+        "nova",
+        onLog: _log,
+      );
+```
+
+**AFTER**
+```dart
+      // 🆕 유저 목소리 = 로비에서 고른 값(FFAppState().aiVoice). AI는 nova 고정.
+      final String userVoice = FFAppState().aiVoice.isNotEmpty
+          ? FFAppState().aiVoice
+          : 'onyx';
+      ChunkedTtsFetcher userTtsFetcher = ChunkedTtsFetcher(
+        _openAiKey,
+        _ttsQueueManager,
+        userVoice,
+        onLog: _log,
+      );
+```
+> AI측 TTS(580/872/1135행의 `"nova"`)는 **건드리지 않음** — nova 고정 유지.
+> 히스토리 캐시 재생(875행)도 이번 범위 밖(요청은 라이브 유저 목소리 분리).
 
 ---
 
 ## 검증
 ```
-grep -c "초급\|중급\|고급" lib/custom_code/widgets/routine_mode_free_talk.dart   # 기대값: 0
-grep -c "subtitles"        lib/custom_code/widgets/routine_mode_free_talk.dart   # 기대값: 0
-grep -c "0xFF9333EA"       lib/custom_code/widgets/routine_mode_free_talk.dart   # 기대값: 2 (토글 테두리 1 + 기타 1)
-flutter analyze
+grep -c "FFAppState().aiVoice" lib/custom_code/widgets/routine_mode_free_talk.dart   # 기대값: 2
+grep -c "generateExpandedFromConversation" lib/custom_code/widgets/routine_mode_free_talk.dart  # 기대값: 1 (정의만)
+grep -c "overlayShown"            lib/custom_code/widgets/routine_mode_free_talk.dart   # 기대값: 0
+grep -c "확장 문장 만드는 중"      lib/custom_code/widgets/routine_mode_free_talk.dart   # 기대값: 0
+grep -c "expanded_sentence\|has_practice\|expand_source" lib/custom_code/widgets/routine_mode_free_talk.dart  # 기대값: 0
+dart analyze lib/custom_code/widgets/routine_mode_free_talk.dart   # error 0 (unused method info만 허용)
 ```
-- `flutter analyze`: 신규 에러 0건.
 
 ## 롤백
 ```
 git restore lib/custom_code/widgets/routine_mode_free_talk.dart
 ```
 
-## 결과
-- 라벨 영어 1줄 (Beginner / Intermediate / Advanced), 줄바꿈 깨짐 없음.
-- 선택 칸: 보라 테두리만, 배경/그림자 없음.
+---
+
+## 적용 후 동작
+1. AI 응답은 `nova`, **내(유저) 문장 읽어주는 목소리는 로비에서 고른 목소리**로 달라짐.
+   (로비 미경유로 `aiVoice`가 비면 `onyx`로 폴백)
+2. 대화 종료 시 "확장 문장 만드는 중..." 다이얼로그/지연 사라짐 → 즉시 나가기.
+3. 히스토리엔 프리톡 대화 기록만 남고 확장/연습(`has_practice`) 데이터는 안 생김.
