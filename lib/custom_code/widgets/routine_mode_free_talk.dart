@@ -1182,15 +1182,21 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
           if (_swOpenAI.isRunning) _swOpenAI.stop();
           aiTargetText += chunk;
           // aiBuffer += chunk; // [하이브리드 전환] HybridTtsPlayer 내부에서 처리 (롤백 가능)
-          if (mounted && !_ttsQueueManager.aiPaused) {
+          // 🔧 [5/2 개선] AI 영어 텍스트는 aiPaused와 무관하게 실시간 표시.
+          // 유저 TTS 재생 중(aiPaused=true)에도 AI 글자가 화면에 흘러나와
+          // 체감 침묵을 줄인다. 소리/게이트 병렬 준비 시간은 그대로 둔다.
+          if (mounted) {
             setState(() => _localMessages[aiIndex]['target'] = aiTargetText);
-            // throttled ensureVisible — 스트리밍 중 현재 AI 버블 중앙 고정
-            final _scrollNow = DateTime.now();
-            if (_lastScrollThrottle == null ||
-                _scrollNow.difference(_lastScrollThrottle!) >=
-                    const Duration(milliseconds: 250)) {
-              _lastScrollThrottle = _scrollNow;
-              _scrollToCurrent(aiIndex);
+            // 스크롤은 AI 차례(!aiPaused)에만 수행해 유저가 자기 버블을 보는 중
+            // AI 버블로 화면이 이동하는 것을 방지.
+            if (!_ttsQueueManager.aiPaused) {
+              final _scrollNow = DateTime.now();
+              if (_lastScrollThrottle == null ||
+                  _scrollNow.difference(_lastScrollThrottle!) >=
+                      const Duration(milliseconds: 250)) {
+                _lastScrollThrottle = _scrollNow;
+                _scrollToCurrent(aiIndex);
+              }
             }
           }
 
