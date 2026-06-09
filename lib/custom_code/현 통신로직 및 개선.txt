@@ -189,7 +189,7 @@ StepExpandBrain.generateCleanOriginal(
 
  ⚠️ 속도 개선 여지 있는 구간 3곳
 
-① Clone/Roleplay `utterance_end_ms=1200ms` → 900ms 시도 가능
+① Free Talk/ Roleplay `utterance_end_ms=1200ms` → 900ms 시도 가능
  현재 1.2초 침묵 후 턴 종료. 대화 흐름에서 1.2초는 꽤 긺.
  900ms로 줄이면 체감 반응속도 확 빨라짐.
  리스크: 말하다 잠깐 숨 쉬면 조기 종료. → 테스트 필수.
@@ -236,15 +236,6 @@ TTS 첫 청크 도달:     200~400ms
 | Clone GPT timeout | 45s | 30s | 에러 복구 빠름 |
 
 조정 원하시면 어느 모드 파일 수정할지 알려주세요. 지시문 드릴게요.
-
-
-
-💡 English tip — 레이턴시 영어
- "Endtoend latency" — 유저 말 끝 → AI 응답 시작까지 전체 시간.
- "Time to first byte (TTFB)" — 첫 데이터 도달 시간. GPT 스트리밍에서 "첫 토큰 도달"이 이것.
- "Perceived latency" — 체감 지연. 실제 ms보다 느리게 느껴지는 정도. `utterance_end_ms`가 perceived latency에 가장 큰 영향.
-
-"The biggest perceived latency comes from utterance_end_ms, not GPT." — 오늘 핵심 포인트를 영어 한 문장으로. 
 
 
                                                                                                                             ┌────────────┬───────────────────────┬─────────────────┬───────────────────────────────────────────────────┬──────────┐
@@ -300,7 +291,7 @@ TTS 첫 청크 도달:     200~400ms
 
    Duo — STT 엔진이 다름 (Whisper HTTP, 나머지 3개는 Deepgram WebSocket). 번역 temperature 0.2로 고정, GPT 응답 timeout이
   가장 짧음(10s) → 통역 특화 최속 파이프라인
-   Clone/Roleplay — Deepgram 동일 설정, utterance_end_ms=1200ms. GPT 스트리밍 기본 timeout 30s. Roleplay만 temperature=1.1
+   Roleplay — Deepgram 동일 설정, utterance_end_ms=1200ms. GPT 스트리밍 기본 timeout 30s. Roleplay만 temperature=1.1
    구간 존재 (대화 창의성 최대치)
    Step Expand — Deepgram이지만 utterance_end_ms=1000ms로 가장 빠른 발화 종료 감지. 단계 진행 시 Future.delayed(4s) 의도적
    대기 있음
