@@ -2273,22 +2273,37 @@ class TtsCache {
     return _cacheDirPath!;
   }
 
+  // 🔧 [B 수정] 디스크 I/O 경합으로 hang되는 것을 막기 위해 2초 타임아웃.
+  // 타임아웃/예외 시 캐시 미스로 처리(null)해 호출 측은 API 경로로 진행.
   static Future<Uint8List?> get(String text, String voice) async {
     try {
-      final path = '${await _getDir()}/${_key(text, voice)}.mp3';
-      final file = File(path);
-      if (await file.exists()) {
-        return await file.readAsBytes();
-      }
-    } catch (_) {}
+      return await _getInternal(text, voice)
+          .timeout(const Duration(seconds: 2));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<Uint8List?> _getInternal(String text, String voice) async {
+    final path = '${await _getDir()}/${_key(text, voice)}.mp3';
+    final file = File(path);
+    if (await file.exists()) {
+      return await file.readAsBytes();
+    }
     return null;
   }
 
+  // 🔧 [B 수정] 저장도 2초 타임아웃. 실패해도 캐시는 best-effort로 조용히 무시.
   static Future<void> put(String text, String voice, Uint8List data) async {
     try {
-      final path = '${await _getDir()}/${_key(text, voice)}.mp3';
-      await File(path).writeAsBytes(data);
+      await _putInternal(text, voice, data).timeout(const Duration(seconds: 2));
     } catch (_) {}
+  }
+
+  static Future<void> _putInternal(
+      String text, String voice, Uint8List data) async {
+    final path = '${await _getDir()}/${_key(text, voice)}.mp3';
+    await File(path).writeAsBytes(data);
   }
 
   /// 캐시 용량 관리 (100MB 초과 시 오래된 파일부터 제거)
@@ -2477,59 +2492,62 @@ class ChunkedTtsFetcher {
   }
 
   Future<void> _fetch(int id, String text) async {
-    // [1단계] 로컬 캐시 확인 (히트 시 즉시 반환)
-    final cached = await TtsCache.get(text, voice);
-    if (cached != null && cached.isNotEmpty) {
-      _buffer[id] = cached;
+    // 🔧 [B 수정] 모든 경로(캐시 히트/API 성공/실패/예외)에서
+    // _pendingCount가 정확히 1회 감소하도록 try/finally로 보장.
+    Uint8List result = Uint8List(0);
+    try {
+      // [1단계] 로컬 캐시 확인 (히트 시 result에 담고 finally에서 큐 적재)
+      final cached = await TtsCache.get(text, voice);
+      if (cached != null && cached.isNotEmpty) {
+        result = cached;
+        return;
+      }
+
+      // [2단계] API 호출 (재시도 1회)
+      for (int attempt = 0; attempt < 2; attempt++) {
+        try {
+          final res = await http
+              .post(
+                Uri.parse('https://api.openai.com/v1/audio/speech'),
+                headers: {
+                  'Authorization': 'Bearer $apiKey',
+                  'Content-Type': 'application/json',
+                },
+                body: jsonEncode({
+                  'model': 'tts-1',
+                  'input': text,
+                  'voice': voice,
+                  'speed': 1.0,
+                  'response_format': 'mp3',
+                }),
+              )
+              .timeout(const Duration(seconds: 10));
+
+          if (res.statusCode == 200) {
+            result = res.bodyBytes;
+            final turnTag = isUser ? 'USER' : 'AI';
+            onLog?.call('🔊 [TTS-02]',
+                '[$turnTag] API OK (${result.length}B) for "$text"');
+            // [3단계] 캐시 저장 (백그라운드, await 없음)
+            unawaited(TtsCache.put(text, voice, result));
+            break;
+          } else {
+            onLog?.call('❌ [TTS-API-ERR]', 'statusCode=${res.statusCode}');
+          }
+        } catch (_) {
+          if (attempt == 0) {
+            await Future.delayed(const Duration(milliseconds: 500));
+          }
+        }
+      }
+    } catch (_) {
+      // 예외가 나도 finally에서 pending 정리 후 게이트 영구 대기를 방지.
+    } finally {
+      _buffer[id] = result;
       _pendingCount--;
       _pushReady();
       if (_pendingCount == 0) onAllComplete?.call();
-      return;
     }
-
-    // [2단계] API 호출 (재시도 1회)
-    Uint8List result = Uint8List(0);
-    for (int attempt = 0; attempt < 2; attempt++) {
-      try {
-        final res = await http
-            .post(
-              Uri.parse('https://api.openai.com/v1/audio/speech'),
-              headers: {
-                'Authorization': 'Bearer $apiKey',
-                'Content-Type': 'application/json',
-              },
-              body: jsonEncode({
-                'model': 'tts-1',
-                'input': text,
-                'voice': voice,
-                'speed': 1.0,
-                'response_format': 'mp3',
-              }),
-            )
-            .timeout(const Duration(seconds: 10));
-
-        if (res.statusCode == 200) {
-          result = res.bodyBytes;
-          final turnTag = isUser ? 'USER' : 'AI';
-          onLog?.call('🔊 [TTS-02]',
-              '[$turnTag] API OK (${result.length}B) for "$text"');
-          // [3단계] 캐시 저장 (백그라운드)
-          TtsCache.put(text, voice, result);
-          break;
-        } else {
-          onLog?.call('❌ [TTS-API-ERR]', 'statusCode=${res.statusCode}');
-        }
-      } catch (_) {
-        if (attempt == 0) {
-          await Future.delayed(const Duration(milliseconds: 500));
-        }
-      }
-    }
-
-    _buffer[id] = result;
-    _pendingCount--;
-    _pushReady();
-    if (_pendingCount == 0) onAllComplete?.call();
   }
 
   void _pushReady() {
@@ -2770,9 +2788,15 @@ class HybridTtsPlayer {
       onLog?.call('[HYB-02]', 'remainder fired (${remainder.length}c)');
     }
 
-    // TtsCache 통문장 백그라운드 저장 (재생 없음)
+    // 🔧 [C 수정] 통문장 TtsCache 저장을 백그라운드로 분리해 파이프라인을 막지 않음.
     final sentence = fullSentence.trim();
-    if (sentence.isEmpty) return;
+    if (sentence.isNotEmpty) {
+      unawaited(_cacheFullSentenceInBackground(sentence));
+    }
+  }
+
+  // 🔧 [C 수정] 통문장 캐시 저장은 onStreamEnd에서 await하지 않는 fire-and-forget 작업.
+  Future<void> _cacheFullSentenceInBackground(String sentence) async {
     try {
       final cached = await TtsCache.get(sentence, _voice);
       if (cached != null && cached.isNotEmpty) {
