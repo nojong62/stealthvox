@@ -989,10 +989,14 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
 
       String userTargetText = "";
       String userBuffer = "";
+      // 🆕 유저 목소리 = 로비에서 고른 값(FFAppState().aiVoice). AI는 nova 고정.
+      final String userVoice = FFAppState().aiVoice.isNotEmpty
+          ? FFAppState().aiVoice
+          : 'onyx';
       ChunkedTtsFetcher userTtsFetcher = ChunkedTtsFetcher(
         _openAiKey,
         _ttsQueueManager,
-        "nova",
+        userVoice,
         onLog: _log,
       );
       _ttsQueueManager.setUserTurn(true);
@@ -1479,7 +1483,6 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
 
   /// 뒤로가기 시: 빈 방 폭파 or last_message 업데이트 후 나가기
   Future<void> _handleAutoSaveAndExit() async {
-    bool overlayShown = false;
     try {
       if (_myHistoryRef != null) {
         final hasUserTurn = _localMessages.any((m) => m['role'] == 'HOST');
@@ -1496,102 +1499,22 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
             }
           }
 
-          // 🆕 [EXPAND-EXIT] 전체 대화 종합 → Expanded + Polished 생성 (오버레이 표시)
-          String expanded = "";
-          String polished = "";
-          final userLabel = 'the user';
-          final partnerLabel = 'AI partner';
-          final convoLines = _localMessages
-              .where((m) {
-                if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
-                final t = (m['target'] ?? '').toString().trim();
-                return t.isNotEmpty && t != '...';
-              })
-              .map((m) =>
-                  "${m['role'] == 'HOST' ? userLabel : partnerLabel}: ${m['target']}")
-              .toList();
-          final transcript = convoLines.join("\n");
-
-          if (transcript.isNotEmpty && _openAiKey.isNotEmpty && mounted) {
-            showDialog(
-              context: context,
-              barrierDismissible: false,
-              builder: (_) => const Center(
-                child: Card(
-                  color: Color(0xFF1E1E1E),
-                  child: Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        CircularProgressIndicator(color: Colors.amber),
-                        SizedBox(height: 16),
-                        Text("확장 문장 만드는 중...",
-                            style: TextStyle(color: Colors.white70)),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            );
-            overlayShown = true;
-
-            final gen = await FreeTalkBrain.generateExpandedFromConversation(
-              _openAiKey,
-              transcript,
-              userLabel: userLabel,
-              partnerLabel: partnerLabel,
-            );
-            if (gen != null && gen.isNotEmpty) {
-              expanded = gen;
-              final pol = await FreeTalkBrain.polishSentence(
-                _openAiKey,
-                expanded,
-                partnerLabel: partnerLabel,
-              );
-              polished = (pol != null && pol.trim().isNotEmpty) ? pol.trim() : "";
-            }
-
-            if (overlayShown && mounted &&
-                Navigator.of(context, rootNavigator: true).canPop()) {
-              Navigator.of(context, rootNavigator: true).pop();
-            }
-            overlayShown = false;
-          }
-
+          // 🆕 프리톡은 확장 문장 생성 안 함 → 대화 기록만 저장
           await _myHistoryRef!.update({
             'last_message': lastText,
             'last_message_time': FieldValue.serverTimestamp(),
             'msg_count': _localMessages.length,
             'last_active': FieldValue.serverTimestamp(),
             'mode': 'free_talk',
-            'user_label': userLabel,
-            'partner_label': partnerLabel,
-            if (expanded.isNotEmpty) 'expanded_sentence': expanded,
-            if (polished.isNotEmpty) 'polished_sentence': polished,
-            if (expanded.isNotEmpty) 'has_practice': true,
-            if (expanded.isNotEmpty) 'expand_source': 'exit',
-            if (expanded.isNotEmpty)
-              'expand_generated_at': FieldValue.serverTimestamp(),
-            if (expanded.isNotEmpty) 'expand_user_label': userLabel,
-            if (expanded.isNotEmpty) 'expand_partner_name': partnerLabel,
-            if (expanded.isNotEmpty) 'expand_partner_type': 'clone',
-            if (expanded.isNotEmpty)
-              'expand_schema_version': 'named_partner_v1',
+            'user_label': 'the user',
+            'partner_label': 'AI partner',
           });
-          _log('💾 [HIST-UPD]',
-              'last_message + expand 저장 (expanded=${expanded.isNotEmpty})');
+          _log('💾 [HIST-UPD]', 'last_message 저장 (free_talk, no expand)');
         }
       }
     } catch (e) {
       _log('❌ [HIST-EXIT-ERR]', '$e');
     } finally {
-      // 오버레이가 남아있으면 정리
-      if (overlayShown &&
-          mounted &&
-          Navigator.of(context, rootNavigator: true).canPop()) {
-        Navigator.of(context, rootNavigator: true).pop();
-      }
       if (mounted) {
         if (StealthRoomMaster.exitCurrentMode != null) {
           StealthRoomMaster.exitCurrentMode!();
