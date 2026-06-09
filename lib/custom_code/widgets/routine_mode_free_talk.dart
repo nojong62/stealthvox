@@ -41,7 +41,7 @@ import '/custom_code/actions/billing_ticker.dart';
 
 const int kFreeTalkCommitWaitMs = 900;
 const int kFreeTalkDeepgramEndpointingMs = 700;
-const int kFreeTalkDeepgramUtteranceEndMs = 900;
+const int kFreeTalkDeepgramUtteranceEndMs = 1000; // Deepgram minimum allowed value; 900 returns HTTP 400.
 const int kFreeTalkUserTtsFetchTimeoutMs = 15000;
 const int kFreeTalkUserTtsPlaybackTimeoutMs = 15000;
 const int kFreeTalkAiTtsWaitTimeoutMs = 20000;
