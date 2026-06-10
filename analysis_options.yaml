@@ -28,6 +28,7 @@ linter:
 analyzer:
   exclude:
     - lib/custom_code/임시-클로드코드 접근금지/**
+    - lib/custom_code/widgets/보류/**
 
 # Additional information about this file can be found at
 # https://dart.dev/guides/language/analysis-options
