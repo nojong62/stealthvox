@@ -27,7 +27,7 @@ linter:
 
 analyzer:
   exclude:
-    - lib/custom_code/임시/**   # 참고용 백업 파일 — 분석 제외
+    - lib/custom_code/임시-클로드코드 접근금지/**
 
 # Additional information about this file can be found at
 # https://dart.dev/guides/language/analysis-options

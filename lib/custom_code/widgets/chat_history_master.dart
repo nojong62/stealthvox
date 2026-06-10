@@ -135,6 +135,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // 🆕 [CHUNK-PRACTICE] 의미단위 연습 모드 상태
   bool _practicingPolished = false; // false = expanded, true = polished
   bool _isBuildingExpand = false; // 🆕 [EXPAND-FROM-CHAT] 확장문장 생성 중 플래그
+  String _cachedRoomMode = ''; // 🔧 [FREE-TALK-BTN] 버튼 표시 조건용 mode 캐시
   bool _isPlayingFullAI = false; // 전체 AI 듣기 진행 중
   int _polishedRevealCount = 0;
   Timer? _polishedRevealTimer;
@@ -445,6 +446,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       final polished = (data['polished_sentence'] as String?) ?? '';
       final expanded = (data['expanded_sentence'] as String?) ?? '';
       final roomMode = (data['mode'] as String?) ?? ''; // 🆕 [ROUTER-FIX]
+      _cachedRoomMode = roomMode; // 버튼 표시 조건용 mode 캐시
 
       _debugLogs +=
           "polished_sentence: ${polished.isEmpty ? '(없음)' : polished}\n";
@@ -4699,43 +4701,44 @@ RULES — follow exactly:
                 ),
               ),
 
-            // 🆕 [EXPAND-FROM-CHAT] 항상 고정 하단 footer 버튼
-            Padding(
-              padding: EdgeInsets.fromLTRB(
-                20,
-                6,
-                20,
-                (isComplete ? 6 : 12) +
-                    MediaQuery.of(context).viewPadding.bottom,
-              ),
-              child: SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  icon: _isBuildingExpand
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.amber),
-                        )
-                      : const Icon(Icons.auto_awesome_rounded, size: 18),
-                  label: Text(
-                    _isBuildingExpand ? "불러오는 중..." : "Expanded Sentence",
-                    style: const TextStyle(fontWeight: FontWeight.bold),
+            // 🔧 [FREE-TALK-BTN] Free Talk 방은 확장문장이 없으므로 버튼 숨김
+            if (_cachedRoomMode != 'free_talk')
+              Padding(
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  6,
+                  20,
+                  (isComplete ? 6 : 12) +
+                      MediaQuery.of(context).viewPadding.bottom,
+                ),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    icon: _isBuildingExpand
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.amber),
+                          )
+                        : const Icon(Icons.auto_awesome_rounded, size: 18),
+                    label: Text(
+                      _isBuildingExpand ? "불러오는 중..." : "Expanded Sentence",
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.amber.withOpacity(0.12),
+                      foregroundColor: Colors.amber,
+                      side: const BorderSide(color: Colors.amber),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16)),
+                    ),
+                    onPressed:
+                        _isBuildingExpand ? null : _buildExpandFromConversation,
                   ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.amber.withOpacity(0.12),
-                    foregroundColor: Colors.amber,
-                    side: const BorderSide(color: Colors.amber),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16)),
-                  ),
-                  onPressed:
-                      _isBuildingExpand ? null : _buildExpandFromConversation,
                 ),
               ),
-            ),
           ],
         ),
         // 역할 선택 말풍선 오버레이

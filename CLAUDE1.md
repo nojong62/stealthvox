@@ -47,108 +47,240 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# StealthVox — Free Talk AI 텍스트 실시간 표시 (5/2 개선 ②)
+# [지시문] ChunkedTtsFetcher TTS 타임아웃 튜닝 (옵션 A) — 4개 모드 일괄 적용
 
-## 목적
-유저 TTS 재생 중(`aiPaused=true`)에는 AI 영어 글자가 화면에 안 뜨다가 PIPE-07에서 한꺼번에 등장한다("와장창"). 이 때문에 침묵 동안 화면이 비어 보여 체감 흐름이 끊긴다.
+## 0. 배경 및 목적
 
-`!aiPaused` 조건을 제거해 **AI 영어 텍스트가 유저 말하는 동안에도 실시간으로 흘러나오게** 한다. 소리/게이트/병렬 준비 시간(10초 게이트)은 일절 건드리지 않으므로 동작 타이밍은 동일하고, 체감 침묵만 짧아진다.
+OpenAI TTS-1 API가 간헐적으로 10초 이상 지연되는 스파이크가 발생하며,
+현재 `ChunkedTtsFetcher._fetch`의 timeout 10초 + 재시도 1회(무음 catch) 설정 때문에
+사용자가 첫 청크 재생 후 최대 10.5초 이상의 공백을 듣게 되는 문제가 확인됨
+(로그 증거: 22:48:05 addText → 22:48:17 API OK = 11.6초 등 3건).
 
-> 근거: 첨부 문서 `현_통신로직_및_개선.txt` 의 "② AI 텍스트 실시간 표시" 항목. 현재 코드에 미적용 상태(1181번 줄에 `!aiPaused` 조건 잔존).
+**변경 내용 (이것만 변경, 다른 것 일절 금지):**
+- HTTP timeout: `10초 → 5초`
+- 총 시도 횟수: `2회 → 3회`
+- 재시도 간 딜레이: `500ms → 300ms`
+- 타임아웃/예외/최종실패 로그 추가 (기존 무음 `catch (_)` 제거)
 
-## 대상 파일 (정확히 이 경로만)
-```
-lib/custom_code/widgets/routine_mode_free_talk.dart
-```
-**`lib/custom_code/임시/` 아래 파일은 절대 건드리지 말 것.**
-
-## 작업 전 필수
-- `git commit -am "save point before FREETALK_AI_TEXT_REALTIME_v1"` (세이브 포인트).
-
-## 절대 건드리지 말 것 (Do NOT touch)
-- `TtsQueueManager` (`setAiPaused` / `aiPaused` getter / 큐 로직) — 그대로 둔다.
-- `DeepgramV2VoiceManager`, `HybridTtsPlayer`, `ChunkedTtsFetcher`, `TtsCache` — 직전 C+B 수정 포함, 추가 변경 없음.
-- PIPE-04 유저 TTS 게이트 타임아웃(10초) — **유지**. 이 대기 동안 AI 번역·TTS가 병렬로 익으므로 줄이지 않는다.
-- PIPE-07 일괄 표시 블록(약 1272~1275, `// [v3.6] PIPE-07 시점: 버퍼된 AI 텍스트 일괄 표시`) — **유지**. 최종 동기화 + AI 차례 스크롤 역할.
-- 이 수정 블록(아래 1곳) 외 다른 곳.
+**절대 건드리지 말 것:**
+- `_pushReady()` 순서 보장 로직
+- `_pendingCount` 증감 위치 (`_buffer[id] = result; _pendingCount--;` 이하 4줄은 원형 유지)
+- `addText`, `reset`, 캐시 1단계 로직
+- `HybridTtsPlayer.onStreamEnd`의 15초 타임아웃 (백그라운드 캐시 저장용 — 별개)
+- Brain 클래스 내부의 다른 `attempt < 2` 루프 (GPT 호출용 — 수정 대상 아님)
+- PIPE-04 10초 게이트 (의도된 설계 — `현_통신로직_및_개선.txt` 참조)
 
 ---
 
-## 수정 — aiGenerationTask 내 AI 텍스트 표시 조건 분리 (약 1181번 줄)
+## 1. 대상 파일 (4개)
 
-### 삭제 범위
-- **시작**: `          if (mounted && !_ttsQueueManager.aiPaused) {` (약 1181번 줄)
-- **끝**: 위 `if` 블록을 닫는 `          }` — 바로 위 줄이 `              _scrollToCurrent(aiIndex);` 와 `            }` (약 1191번 줄)
+| # | 파일 | 삭제 블록 위치 (참고용) |
+|---|------|------------------------|
+| 1 | `lib/custom_code/widgets/routine_mode_step_expand.dart` | 약 4290줄 ~ 4327줄 |
+| 2 | `lib/custom_code/widgets/routine_mode_free_talk.dart` | 약 2567줄 ~ 2604줄 |
+| 3 | `lib/custom_code/widgets/routine_mode_roleplay.dart` | 약 3028줄 ~ 3065줄 |
+| 4 | `lib/custom_code/widgets/routine_mode_clone.dart` | grep으로 위치 확인 (3단계 참조) |
 
-이 `if` 블록 **하나**를 아래로 교체한다.
+⚠️ 줄번호는 참고용. 실제 편집은 반드시 아래 str_replace 앵커 텍스트 기준으로 수행.
+⚠️ `lib/custom_code/임시/` 폴더는 절대 건드리지 말 것. 모든 편집은 `lib/custom_code/widgets/` 대상.
 
-### str_replace
+---
 
-**old_str** (현재 코드):
+## 2. 사전 작업: git 세이브 포인트
+
+```bash
+cd F:\flutter_project\stealth_vox
+git add -A
+git commit -m "save point: before TTS timeout tuning (Option A)"
+```
+
+---
+
+## 3. 사전 검증 (편집 전 필수 — 하나라도 불일치 시 중단하고 보고)
+
+각 파일에서 수정 대상 블록이 정확히 1개씩 존재하는지 확인:
+
+```bash
+grep -c "\[2단계\] API 호출 (재시도 1회)" lib/custom_code/widgets/routine_mode_step_expand.dart
+grep -c "\[2단계\] API 호출 (재시도 1회)" lib/custom_code/widgets/routine_mode_free_talk.dart
+grep -c "\[2단계\] API 호출 (재시도 1회)" lib/custom_code/widgets/routine_mode_roleplay.dart
+grep -c "\[2단계\] API 호출 (재시도 1회)" lib/custom_code/widgets/routine_mode_clone.dart
+```
+
+**기대값: 4개 파일 모두 `1`.**
+- 0이면: 해당 파일은 이미 패치됐거나 구조가 다름 → 중단, 보고.
+- 2 이상이면: 앵커가 유일하지 않음 → 중단, 보고.
+
+추가로 clone 파일의 블록 내용이 다른 3개와 동일한지 확인:
+
+```bash
+grep -n "attempt < 2" lib/custom_code/widgets/routine_mode_clone.dart
+```
+
+`attempt < 2`가 2건 나와야 정상 (1건은 TTS용=수정 대상, 1건은 Brain GPT 호출용=수정 금지).
+TTS용은 반드시 `[2단계] API 호출` 주석 직후의 루프만 해당됨.
+
+---
+
+## 4. 편집 내용 (str_replace — 4개 파일에 동일하게 적용)
+
+파일당 편집은 1곳뿐이므로 줄번호 드리프트 없음.
+적용 순서: ① step_expand → ② free_talk → ③ roleplay → ④ clone.
+**파일 1개 편집 완료 시마다 5단계 검증을 통과한 후 다음 파일로 진행.**
+
+### 삭제할 코드 (old_str)
+
+시작: `    // [2단계] API 호출 (재시도 1회)`
+끝: for 루프 닫는 중괄호 `    }` (catch 블록 닫힘 직후)
+
 ```dart
-          if (mounted && !_ttsQueueManager.aiPaused) {
-            setState(() => _localMessages[aiIndex]['target'] = aiTargetText);
-            // throttled ensureVisible — 스트리밍 중 현재 AI 버블 중앙 고정
-            final _scrollNow = DateTime.now();
-            if (_lastScrollThrottle == null ||
-                _scrollNow.difference(_lastScrollThrottle!) >=
-                    const Duration(milliseconds: 250)) {
-              _lastScrollThrottle = _scrollNow;
-              _scrollToCurrent(aiIndex);
-            }
-          }
+    // [2단계] API 호출 (재시도 1회)
+    Uint8List result = Uint8List(0);
+    for (int attempt = 0; attempt < 2; attempt++) {
+      try {
+        final res = await http
+            .post(
+              Uri.parse('https://api.openai.com/v1/audio/speech'),
+              headers: {
+                'Authorization': 'Bearer $apiKey',
+                'Content-Type': 'application/json',
+              },
+              body: jsonEncode({
+                'model': 'tts-1',
+                'input': text,
+                'voice': voice,
+                'speed': 1.0,
+                'response_format': 'mp3',
+              }),
+            )
+            .timeout(const Duration(seconds: 10));
+
+        if (res.statusCode == 200) {
+          result = res.bodyBytes;
+          final turnTag = isUser ? 'USER' : 'AI';
+          onLog?.call('🔊 [TTS-02]',
+              '[$turnTag] API OK (${result.length}B) for "$text"');
+          // [3단계] 캐시 저장 (백그라운드)
+          TtsCache.put(text, voice, result);
+          break;
+        } else {
+          onLog?.call('❌ [TTS-API-ERR]', 'statusCode=${res.statusCode}');
+        }
+      } catch (_) {
+        if (attempt == 0) {
+          await Future.delayed(const Duration(milliseconds: 500));
+        }
+      }
+    }
 ```
 
-**new_str** (교체 코드):
+### 교체할 코드 (new_str)
+
 ```dart
-          // 🔧 [5/2 개선 ②] AI 영어 텍스트는 aiPaused와 무관하게 실시간 표시.
-          // 유저 TTS 재생 중(aiPaused=true)에도 AI 글자가 화면에 흘러나와
-          // 체감 침묵을 단축. 소리/게이트/병렬 준비 시간은 그대로 둔다.
-          if (mounted) {
-            setState(() => _localMessages[aiIndex]['target'] = aiTargetText);
-            // 스크롤은 AI 차례(!aiPaused)에만 — 유저가 자기 버블을 보는 중
-            // AI 버블로 화면이 튀는 것을 방지.
-            if (!_ttsQueueManager.aiPaused) {
-              final _scrollNow = DateTime.now();
-              if (_lastScrollThrottle == null ||
-                  _scrollNow.difference(_lastScrollThrottle!) >=
-                      const Duration(milliseconds: 250)) {
-                _lastScrollThrottle = _scrollNow;
-                _scrollToCurrent(aiIndex);
-              }
-            }
-          }
+    // [2단계] API 호출 (5초 타임아웃, 최대 3회 시도) — TTS 지연 스파이크 대응
+    Uint8List result = Uint8List(0);
+    for (int attempt = 0; attempt < 3; attempt++) {
+      try {
+        final res = await http
+            .post(
+              Uri.parse('https://api.openai.com/v1/audio/speech'),
+              headers: {
+                'Authorization': 'Bearer $apiKey',
+                'Content-Type': 'application/json',
+              },
+              body: jsonEncode({
+                'model': 'tts-1',
+                'input': text,
+                'voice': voice,
+                'speed': 1.0,
+                'response_format': 'mp3',
+              }),
+            )
+            .timeout(const Duration(seconds: 5));
+
+        if (res.statusCode == 200) {
+          result = res.bodyBytes;
+          final turnTag = isUser ? 'USER' : 'AI';
+          onLog?.call('🔊 [TTS-02]',
+              '[$turnTag] API OK (${result.length}B) for "$text"');
+          // [3단계] 캐시 저장 (백그라운드)
+          TtsCache.put(text, voice, result);
+          break;
+        } else {
+          onLog?.call('❌ [TTS-API-ERR]',
+              'statusCode=${res.statusCode} (attempt=${attempt + 1}/3)');
+        }
+      } catch (e) {
+        onLog?.call('⚠️ [TTS-RETRY]',
+            'attempt=${attempt + 1}/3 실패 (${e.runtimeType}) for "$text"');
+        if (attempt < 2) {
+          await Future.delayed(const Duration(milliseconds: 300));
+        }
+      }
+    }
+    if (result.isEmpty) {
+      onLog?.call('❌ [TTS-FAIL]', '3회 모두 실패 — 청크 스킵: "$text"');
+    }
 ```
+
+**주의사항:**
+- old_str/new_str 직후의 `    _buffer[id] = result;` ~ `if (_pendingCount == 0) onAllComplete?.call();` 4줄은 **절대 포함하지도, 수정하지도 말 것** (pending 카운트 보장 로직).
+- `result.isEmpty` 시 빈 데이터는 기존 `_pushReady()`의 `data.isNotEmpty` 가드가 자동으로 재생 스킵 처리하므로 추가 처리 불필요 — 순서 카운터(`_readyCounter`)는 정상 진행됨.
+- 프롬프트/문자열 내 URL은 순수 텍스트 유지 (마크다운 링크 변환 금지).
+- PowerShell로 파일을 직접 쓸 경우 `[IO.File]::WriteAllText` + UTF-8 명시 필수 (한글 주석 깨짐 방지).
 
 ---
 
-## 검증 (수정 후 순서대로)
+## 5. 편집 후 검증 (파일별)
 
-### 1) grep 카운트
-```powershell
-# 새 주석 앵커 1개
-grep -c "5/2 개선 ②" lib/custom_code/widgets/routine_mode_free_talk.dart            # 기대값: 1
+각 파일 편집 직후 아래 3개 grep 실행:
 
-# 위젯 코드 내 aiPaused getter 호출은 여전히 1곳(텍스트 조건 → 스크롤 조건으로 이동)
-grep -c "_ttsQueueManager.aiPaused" lib/custom_code/widgets/routine_mode_free_talk.dart  # 기대값: 1
+```bash
+# (a) 새 블록 적용 확인 — 기대값 1
+grep -c "5초 타임아웃, 최대 3회 시도" lib/custom_code/widgets/routine_mode_step_expand.dart
+
+# (b) 구 블록 잔존 확인 — 기대값 0
+grep -c "\[2단계\] API 호출 (재시도 1회)" lib/custom_code/widgets/routine_mode_step_expand.dart
+
+# (c) TTS-RETRY 로그 추가 확인 — 기대값 1
+grep -c "TTS-RETRY" lib/custom_code/widgets/routine_mode_step_expand.dart
 ```
 
-### 2) flutter analyze
-```powershell
-flutter analyze lib/custom_code/widgets/routine_mode_free_talk.dart
+(free_talk, roleplay, clone도 파일명만 바꿔 동일 실행)
+
+**4개 파일 전부 완료 후 전체 분석:**
+
+```bash
+flutter analyze
 ```
-- 수정 전 대비 **신규 error 0건**.
+
+에러 0건이어야 함. 에러 발생 시 즉시 중단하고 에러 전문 보고.
 
 ---
 
-## 롤백
-- 로컬: `git restore lib/custom_code/widgets/routine_mode_free_talk.dart`
-- push 후: `git revert <commit-hash>`
+## 6. 기대 효과 및 실기기 검증 포인트
+
+- 최악 공백: 기존 10.5초+ → 약 5.3~6초 (1차 재시도 성공 시).
+- 스파이크 발생 시 로그에 `⚠️ [TTS-RETRY]`가 찍혀 향후 추적 가능해짐.
+- 비용: 평상시 변화 없음. 스파이크 순간에만 타임아웃된 요청 + 재시도 요청이 중복 과금될 수 있으나 미미함.
+
+**실기기 테스트 (Step Expand 기준):**
+1. 5턴 대화 진행 → AI 질문이 "몇 단어 후 장시간 침묵" 없이 이어지는지 확인.
+2. 로그에서 `[TTS-RETRY]` 발생 시 후속 `API OK`까지의 간격이 6초 이내인지 확인.
+3. `[PIPE-TIMEOUT] 유저 TTS fetch 10초 초과` 발생 빈도가 줄었는지 확인.
+4. 확장문장 반복 낭독(캐시 히트 경로)이 기존과 동일하게 즉시 재생되는지 확인.
 
 ---
 
-## 실기기 확인 포인트
-1. 유저가 말하는 동안(또는 유저 TTS 재생 중) **AI 영어 글자가 화면에 똑똑똑 흘러나오는지**.
-2. 그때 화면이 **유저 버블에서 AI 버블로 튀지 않는지** (스크롤은 AI 차례에만 움직여야 함).
-3. **소리 타이밍은 이전과 동일한지** (AI 음성은 여전히 유저 TTS 끝난 뒤 시작 — 게이트 그대로).
-4. 전체적으로 침묵 구간이 "비어 보이지" 않고 화면이 살아있게 느껴지는지.
+## 7. 롤백 절차
+
+```bash
+# 커밋 전이면:
+git restore lib/custom_code/widgets/routine_mode_step_expand.dart
+git restore lib/custom_code/widgets/routine_mode_free_talk.dart
+git restore lib/custom_code/widgets/routine_mode_roleplay.dart
+git restore lib/custom_code/widgets/routine_mode_clone.dart
+
+# 커밋 후라면:
+git revert <패치 커밋 해시>
+```
