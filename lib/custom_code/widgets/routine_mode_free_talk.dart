@@ -45,7 +45,8 @@ const int kFreeTalkDeepgramUtteranceEndMs = 1000; // Deepgram minimum allowed va
 const int kFreeTalkUserTtsFetchTimeoutMs = 15000;
 const int kFreeTalkUserTtsPlaybackTimeoutMs = 15000;
 const int kFreeTalkAiTtsWaitTimeoutMs = 20000;
-const int kFreeTalkOpenAiTtsHttpTimeoutSeconds = 18;
+const int kFreeTalkOpenAiTtsHttpTimeoutSeconds = 18; // Long-form cache save path.
+const int kFreeTalkChunkTtsHttpTimeoutSeconds = 8; // Chunk TTS retry timeout.
 const int kFreeTalkAiResponseMaxTokens = 70;
 
 /// ==================================================================== [Box
@@ -1082,7 +1083,6 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
       }
 
       String userTargetText = "";
-      String userBuffer = "";
       // 🆕 유저 목소리 = 로비에서 고른 값(FFAppState().aiVoice). AI는 nova 고정.
       final String userVoice =
           FFAppState().aiVoice.isNotEmpty ? FFAppState().aiVoice : 'onyx';
@@ -1112,10 +1112,9 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
 
       bool evaporated = false;
       bool corrected = false; // 유저가 AI의 오해를 정정 → 직전 교환 삭제 후 재처리
-      bool firstChunkSent = false;
+      // [USER-FULL-TTS] firstChunkSent removed; user TTS fires once after stream end.
       await for (String chunk in userStream) {
         userTargetText += chunk;
-        userBuffer += chunk;
 
         // 🔧 [v3.3] 누적된 전체 텍스트에서 EVAPORATE 감지 (스트림 조각 분할 대응)
         if (userTargetText.contains("[EVAPORATE]")) {
@@ -1132,29 +1131,8 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
         if (mounted)
           setState(() => _localMessages[hostIndex]['target'] = userTargetText);
 
-        // 구두점 도달 즉시 TTS 청크 발사
-        final matches = splitPattern.allMatches(userBuffer).toList();
-        if (matches.isNotEmpty) {
-          int lastIdx = matches.last.end;
-          String toSpeak = userBuffer.substring(0, lastIdx).trim();
-          userBuffer = userBuffer.substring(lastIdx);
-          if (toSpeak.isNotEmpty) {
-            userTtsFetcher.addText(toSpeak);
-            firstChunkSent = true;
-          }
-        }
-        if (!firstChunkSent) {
-          final wordCount = userBuffer
-              .trim()
-              .split(RegExp(r'\s+'))
-              .where((w) => w.isNotEmpty)
-              .length;
-          if (wordCount >= 4) {
-            userTtsFetcher.addText(_cleanText(userBuffer.trim()));
-            userBuffer = "";
-            firstChunkSent = true;
-          }
-        }
+        // [USER-FULL-TTS] no chunk TTS during user translation streaming.
+        // Text still streams to the screen through setState above.
       }
 
       if (evaporated) {
@@ -1197,8 +1175,11 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
         return;
       }
 
-      if (userBuffer.trim().isNotEmpty)
-        userTtsFetcher.addText(userBuffer.trim());
+      // [USER-FULL-TTS] fire the complete translated user sentence once.
+      final String fullUserTts = _cleanText(userTargetText.trim());
+      if (fullUserTts.isNotEmpty) {
+        userTtsFetcher.addText(fullUserTts);
+      }
 
       // 🔧 [v3.7] 유저 통문장 TtsCache 백그라운드 저장 (히스토리 HIT 유도)
       //   - 청크별 캐시만으로는 히스토리에서 통문장 GET이 MISS됨
@@ -1281,10 +1262,9 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
           if (_swOpenAI.isRunning) _swOpenAI.stop();
           aiTargetText += chunk;
           // aiBuffer += chunk; // [하이브리드 전환] HybridTtsPlayer 내부에서 처리 (롤백 가능)
-          // 🔧 [5/2 개선] AI 영어 텍스트는 aiPaused와 무관하게 실시간 표시.
-          // 유저 TTS 재생 중(aiPaused=true)에도 AI 글자가 화면에 흘러나와
-          // 체감 침묵을 줄인다. 소리/게이트 병렬 준비 시간은 그대로 둔다.
-          if (mounted) {
+          // 🔧 [요청1] AI 영어 텍스트는 유저 TTS 재생 완료 후에만 표시.
+          // 유저가 말하는 중에는 AI 글자가 먼저 노출되지 않게 막는다.
+          if (mounted && !_ttsQueueManager.aiPaused) {
             setState(() => _localMessages[aiIndex]['target'] = aiTargetText);
             // 스크롤은 AI 차례(!aiPaused)에만 수행해 유저가 자기 버블을 보는 중
             // AI 버블로 화면이 이동하는 것을 방지.
@@ -2641,8 +2621,8 @@ class ChunkedTtsFetcher {
         return;
       }
 
-      // [2단계] API 호출 (재시도 1회)
-      for (int attempt = 0; attempt < 2; attempt++) {
+      // [2단계] API 호출 (재시도 2회, chunk timeout 8초)
+      for (int attempt = 0; attempt < 3; attempt++) {
         try {
           final res = await http
               .post(
@@ -2660,7 +2640,7 @@ class ChunkedTtsFetcher {
                 }),
               )
               .timeout(const Duration(
-                  seconds: kFreeTalkOpenAiTtsHttpTimeoutSeconds));
+                  seconds: kFreeTalkChunkTtsHttpTimeoutSeconds));
 
           if (res.statusCode == 200) {
             result = res.bodyBytes;
@@ -2674,8 +2654,8 @@ class ChunkedTtsFetcher {
             onLog?.call('❌ [TTS-API-ERR]', 'statusCode=${res.statusCode}');
           }
         } catch (_) {
-          if (attempt == 0) {
-            await Future.delayed(const Duration(milliseconds: 500));
+          if (attempt < 2) {
+            await Future.delayed(const Duration(milliseconds: 300));
           }
         }
       }

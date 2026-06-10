@@ -307,7 +307,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
     if (_isExpandRoom(roomName)) return const Color(0xFFEA580C);
     if (roomName.contains("Shadowing")) return Colors.greenAccent;
     if (roomName.contains("NativeSync")) return Colors.orangeAccent;
-    if (roomName.contains("Free Talk")) return Colors.pinkAccent;
+    if (roomName.contains("Free Talk")) return const Color(0xFF9333EA);
     return Colors.white54;
   }
 

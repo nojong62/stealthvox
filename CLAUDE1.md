@@ -47,69 +47,224 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# StealthVox — Free Talk Deepgram 400 무한 재연결 수정
+# StealthVox — Free Talk/Roleplay: 유저 TTS 통문장화 (조각 분할 제거)
 
-## 증상
-앱 실행 시 Deepgram WebSocket이 계속 끊기며 무한 재연결("DG-WS-ERR / DG-RETRY" 반복). STT가 전혀 동작하지 않음.
+## 목적
+유저 영어 TTS가 2~3조각으로 분할되어 각각 별도 API 호출로 나가는 구조에서, **한 조각의 API stall(8~10초)이 유저 문장 중간 침묵**이 되고, stall이 게이트(15초)를 넘기면 **유저 소리가 마무리되지 않은 채 AI로 전환**된다.
 
-로그:
-```
-❌ [DG-WS-ERR] ... Connection to '...utterance_end_ms=900...' was not upgraded to websocket, HTTP status code: 400
-```
+유저 TTS를 **번역 스트림 종료 후 통문장 1회 발사**로 변경한다. Step Expand의 `HYB-01-LATE` 경로(실기기 검증 완료, 매끈함)와 동일 패턴이다.
 
-## 원인 (확정)
-**Deepgram `utterance_end_ms` 파라미터는 최소 1000ms 이상이어야 한다.** 현재 값이 `900`이라 Deepgram이 연결 요청을 `400 Bad Request`로 거부하고, 400은 재연결해도 동일하게 거부되므로 무한 루프에 빠진다.
+- **AI TTS의 하이브리드(첫 청크 빠른 발사)는 변경하지 않는다** — AI는 첫 반응 속도가 중요.
+- 텍스트 화면 표시는 기존대로 스트리밍 유지 (글자는 똑같이 흐름, 소리만 통문장).
+- EVAPORATE/CORRECTION/CLARIFY 감지 로직은 그대로 유지.
+- v3.7 유저 통문장 캐시(`_saveUserFullSentenceToCache`)와 키가 일치 → 반복 문장 캐시 HIT.
+- 트레이드오프: 유저 첫 오디오 시작이 약 0.5~1.5초 늦어짐 (번역 스트림 완료 대기). 문장 중간 침묵 제거와 맞바꿈.
 
-원본(정상 동작)에서는 이 값이 `1200`이었고, Codex 수정 과정에서 `900`으로 낮아지면서 깨졌다. URL의 나머지 파라미터·괄호·상수는 모두 정상이다.
+작업 전: `git commit -am "save point before USER_FULL_TTS"`
 
-## 대상 파일 (정확히 이 경로만)
-```
-lib/custom_code/widgets/routine_mode_free_talk.dart
-```
 **`lib/custom_code/임시/` 아래 파일은 절대 건드리지 말 것.**
+**각 파일 안에서는 반드시 아래(라인 큰 것)부터 위로 적용한다.**
 
-## 작업 전
-- `git commit -am "save point before FREETALK_DEEPGRAM_400_FIX"`
+---
 
-## 수정 — 상수 한 줄 (약 44번 줄)
+# PART A — routine_mode_free_talk.dart
 
-### str_replace
+## A-1 — 잔여 발사를 통문장 1회 발사로 교체 (약 1201~1202번)
 
-**old_str**:
+### old_str
 ```dart
-const int kFreeTalkDeepgramUtteranceEndMs = 900;
+      if (userBuffer.trim().isNotEmpty)
+        userTtsFetcher.addText(userBuffer.trim());
 ```
 
-**new_str**:
+### new_str
 ```dart
-const int kFreeTalkDeepgramUtteranceEndMs = 1000; // 🔧 Deepgram 최소 허용값 1000ms (900은 400 거부 → 무한 재연결)
+      // 🔧 [USER-FULL-TTS] 유저 통문장 1회 발사.
+      // 조각 분할 시 한 조각의 API stall이 문장 중간 침묵/미완료 전환을
+      // 유발하므로, Step Expand의 HYB-01-LATE 경로와 동일하게 통문장으로 보낸다.
+      // v3.7 통문장 캐시와 키가 일치해 반복 문장은 캐시 HIT로 즉시 재생.
+      final String fullUserTts = _cleanText(userTargetText.trim());
+      if (fullUserTts.isNotEmpty) {
+        userTtsFetcher.addText(fullUserTts);
+      }
 ```
 
-> 참고: `endpointing=700`(2104번 줄)은 1000ms 제한이 없는 별개 파라미터이고 정상이므로 건드리지 않는다. 반응속도는 주로 `endpointing`이 좌우하므로 `utterance_end_ms`를 1000으로 올려도 체감 반응속도 손해는 거의 없다. 더 빠르게 하고 싶으면 추후 `endpointing` 값을 조정한다.
+## A-2 — 루프 내 조각 발사 블록 제거 (약 1136~1159번)
+
+### old_str
+```dart
+        // 구두점 도달 즉시 TTS 청크 발사
+        final matches = splitPattern.allMatches(userBuffer).toList();
+        if (matches.isNotEmpty) {
+          int lastIdx = matches.last.end;
+          String toSpeak = userBuffer.substring(0, lastIdx).trim();
+          userBuffer = userBuffer.substring(lastIdx);
+          if (toSpeak.isNotEmpty) {
+            userTtsFetcher.addText(toSpeak);
+            firstChunkSent = true;
+          }
+        }
+        if (!firstChunkSent) {
+          final wordCount = userBuffer
+              .trim()
+              .split(RegExp(r'\s+'))
+              .where((w) => w.isNotEmpty)
+              .length;
+          if (wordCount >= 4) {
+            userTtsFetcher.addText(_cleanText(userBuffer.trim()));
+            userBuffer = "";
+            firstChunkSent = true;
+          }
+        }
+```
+
+### new_str
+```dart
+        // 🔧 [USER-FULL-TTS] 유저 TTS 조각 발사 제거 — 스트림 종료 후 통문장 1회 발사.
+        // (텍스트 화면 표시는 위 setState로 기존대로 스트리밍 유지)
+```
+
+## A-3 — 미사용 firstChunkSent 선언 제거 (약 1116번)
+
+### old_str
+```dart
+      bool firstChunkSent = false;
+```
+
+### new_str
+```dart
+      // 🔧 [USER-FULL-TTS] firstChunkSent 제거 (조각 발사 폐지로 미사용)
+```
+
+> 참고: `splitPattern`(약 1100번)이 미사용이 되어 analyzer가 info/warning을 낼 수 있으나 error는 아니므로 그대로 둔다. 거슬리면 선언 줄만 추가로 삭제해도 된다(다른 곳에서 사용하지 않는 것 확인 후).
+
+---
+
+# PART B — routine_mode_roleplay.dart
+
+## B-1 — 잔여 발사를 통문장 1회 발사로 교체 (약 1303~1310번)
+
+### old_str
+```dart
+      if (userBuffer.trim().isNotEmpty) {
+        final cleanedRem = _cleanText(userBuffer.trim());
+        if (isMeaninglessTtsText(cleanedRem)) {
+          _log('🔊 [TTS-SKIP] [USER]', '의미 없는 TTS 조각 skip: "$cleanedRem"');
+        } else {
+          userTtsFetcher.addText(cleanedRem);
+        }
+      }
+```
+
+### new_str
+```dart
+      // 🔧 [USER-FULL-TTS] 유저 통문장 1회 발사 (조각 stall로 인한
+      // 문장 중간 침묵/미완료 전환 제거 — Step Expand HYB-01-LATE 패턴).
+      final String fullUserTts = _cleanText(userTargetText.trim());
+      if (fullUserTts.isNotEmpty) {
+        if (isMeaninglessTtsText(fullUserTts)) {
+          _log('🔊 [TTS-SKIP] [USER]', '의미 없는 TTS 조각 skip: "$fullUserTts"');
+        } else {
+          userTtsFetcher.addText(fullUserTts);
+        }
+      }
+```
+
+## B-2 — 루프 내 조각 발사 블록 제거 (약 1203~1235번)
+
+### old_str
+```dart
+        // 구두점 도달 즉시 TTS 청크 발사
+        final matches = splitPattern.allMatches(userBuffer).toList();
+        if (matches.isNotEmpty) {
+          int lastIdx = matches.last.end;
+          String toSpeak = userBuffer.substring(0, lastIdx).trim();
+          userBuffer = userBuffer.substring(lastIdx);
+          if (toSpeak.isNotEmpty) {
+            final cleanedChunk = _cleanText(toSpeak);
+            if (isMeaninglessTtsText(cleanedChunk)) {
+              _log('🔊 [TTS-SKIP] [USER]', '의미 없는 TTS 조각 skip: "$cleanedChunk"');
+            } else {
+              userTtsFetcher.addText(cleanedChunk);
+              firstChunkSent = true;
+            }
+          }
+        }
+        if (!firstChunkSent) {
+          final wordCount = userBuffer
+              .trim()
+              .split(RegExp(r'\s+'))
+              .where((w) => w.isNotEmpty)
+              .length;
+          if (wordCount >= 4) {
+            final cleanedBuf = _cleanText(userBuffer.trim());
+            if (isMeaninglessTtsText(cleanedBuf)) {
+              _log('🔊 [TTS-SKIP] [USER]', '의미 없는 TTS 조각 skip: "$cleanedBuf"');
+            } else {
+              userTtsFetcher.addText(cleanedBuf);
+              firstChunkSent = true;
+            }
+            userBuffer = "";
+          }
+        }
+```
+
+### new_str
+```dart
+        // 🔧 [USER-FULL-TTS] 유저 TTS 조각 발사 제거 — 스트림 종료 후 통문장 1회 발사.
+        // (텍스트 화면 표시는 위 setState로 기존대로 스트리밍 유지)
+```
+
+## B-3 — 미사용 firstChunkSent 선언 제거 (약 1176번)
+
+### old_str
+```dart
+      bool firstChunkSent = false;
+```
+
+### new_str
+```dart
+      // 🔧 [USER-FULL-TTS] firstChunkSent 제거 (조각 발사 폐지로 미사용)
+```
+
+> 주의: roleplay에는 `firstChunkSentToTTS`(약 1363번, AI 쪽)라는 별개 변수가 있다. **절대 건드리지 말 것.** old_str의 `bool firstChunkSent = false;`는 정확히 이 문자열만 매칭된다.
+
+---
 
 ## 절대 건드리지 말 것 (Do NOT touch)
-- Deepgram URL의 다른 파라미터(`model`, `language`, `endpointing`, `encoding`, `sample_rate`, `channels`, `filler_words`) — 전부 정상.
-- 재연결 로직(`_handleDisconnect`, `DG-RETRY`) — utterance_end_ms를 고치면 400이 사라져 루프도 멈춘다. 이번엔 손대지 않는다.
-- 그 외 모든 로직.
+- AI 쪽 하이브리드 발사(`HybridTtsPlayer`, `firstChunkSentToTTS`, HYB-01/02) — AI는 첫 청크 빠른 발사 유지.
+- EVAPORATE / CORRECTION / CLARIFY 감지와 그 처리 블록 — 그대로 유지.
+- 텍스트 화면 스트리밍 setState — 그대로 유지.
+- PIPE-04 게이트(15초), 조각 TTS http timeout(8초)·재시도(3회) — 그대로.
+- `_saveUserFullSentenceToCache`(v3.7) — 그대로 (이제 재생 캐시와도 정합).
+- `DeepgramV2VoiceManager`, `TtsQueueManager`, `TtsCache`, opener 청킹(roleplay 759·784) — 그대로.
 
 ## 검증
 
-### 1) grep
+### free_talk
 ```powershell
-grep -c "kFreeTalkDeepgramUtteranceEndMs = 1000" lib/custom_code/widgets/routine_mode_free_talk.dart   # 기대값: 1
-grep -c "kFreeTalkDeepgramUtteranceEndMs = 900"  lib/custom_code/widgets/routine_mode_free_talk.dart   # 기대값: 0
-```
-
-### 2) flutter analyze
-```powershell
+grep -c "USER-FULL-TTS" lib/custom_code/widgets/routine_mode_free_talk.dart          # 기대값: 3
+grep -c "bool firstChunkSent = false" lib/custom_code/widgets/routine_mode_free_talk.dart  # 기대값: 0
 flutter analyze lib/custom_code/widgets/routine_mode_free_talk.dart
 ```
-- 신규 error 0건.
+
+### roleplay
+```powershell
+grep -c "USER-FULL-TTS" lib/custom_code/widgets/routine_mode_roleplay.dart           # 기대값: 3
+grep -c "bool firstChunkSent = false" lib/custom_code/widgets/routine_mode_roleplay.dart   # 기대값: 0
+grep -c "firstChunkSentToTTS" lib/custom_code/widgets/routine_mode_roleplay.dart     # 기대값: 변경 전과 동일 (AI 쪽 미변경 확인)
+flutter analyze lib/custom_code/widgets/routine_mode_roleplay.dart
+```
+- 두 파일 모두 신규 error 0건 (미사용 변수 info/warning은 허용).
 
 ## 롤백
-- `git restore lib/custom_code/widgets/routine_mode_free_talk.dart`
+```powershell
+git restore lib/custom_code/widgets/routine_mode_free_talk.dart lib/custom_code/widgets/routine_mode_roleplay.dart
+```
 
 ## 실기기 확인
-1. 앱 실행 시 `❌ [DG-WS-ERR] ... HTTP status code: 400` 이 **더 이상 안 뜨는지**.
-2. `📡 [DG-02] Metadata 수신 → onConnected` 가 정상적으로 뜨고 STT(음성 인식)가 동작하는지.
-3. 무한 `DG-RETRY` 루프가 사라졌는지.
+1. 유저 영어 음성이 **처음부터 끝까지 한 호흡으로** 재생되는지 (문장 중간 침묵 없음).
+2. 유저 소리가 끝까지 나온 뒤에 AI 소리가 시작되는지 (미완료 전환 사라짐).
+3. 로그에서 `[TTS-01] [USER] addText` 가 턴당 **1회만** 찍히는지 (`pending=1`).
+4. 유저 첫 오디오 시작이 이전보다 0.5~1.5초 늦는 것이 체감상 허용 범위인지.
+5. 같은 문장 반복 시 `[TTS-CACHE-HIT]`/즉시 재생되는지 (v3.7 캐시 정합 확인).

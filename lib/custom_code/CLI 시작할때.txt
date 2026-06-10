@@ -7,6 +7,10 @@ CLAUDE1.md 참고해서, 실행해 줘.
 
 
 
+
+그리고 유저가 AI 질문 내용에 불만을 표시하면 '좀전에 질문을 다시  드릴까요' 라고 하고 동의하면 좀전 질문을 삭제하고 다시 질문하는 로직을 추ㅏ가해줘.
+
+
 🔗 앱 다운로드 링크: `https://play.google.com/apps/testing/com.aienglishpractice.stealthvox`
 ==================================
 
@@ -52,6 +56,7 @@ F:\flutter_project\stealth_vox\build\app\outputs\flutter-apk\app-debug.apk (APK)
 flutter build appbundle --build-name=1.0.31 --build-number=31
 =================================
 
+스탭 익스팬드에서 AI 첫 질문후 바로 유저가 답변하면 녹음이 잘 안되는것 같아...코드 확인해 줘.
 
 듀오 초대링크로 들어온 사람이 언어 선택을 위해 마주하는 오버
 레이에도  

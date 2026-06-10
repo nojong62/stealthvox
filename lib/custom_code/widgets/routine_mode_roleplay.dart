@@ -1143,7 +1143,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           .join("\n");
 
       String userTargetText = "";
-      String userBuffer = "";
       ChunkedTtsFetcher userTtsFetcher = ChunkedTtsFetcher(
         _openAiKey,
         _ttsQueueManager,
@@ -1152,9 +1151,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       );
       _ttsQueueManager.setUserTurn(true);
       _ttsQueueManager.setAiPaused(false); // 유저 청크는 즉시 재생
-
-      // 다국어 구두점 단위 쪼개기
-      final RegExp splitPattern = RegExp(r'[,\.?!;:。、！？…，；：\n]');
 
       // 🌐 [v3.1] 로비에서 유저가 선택한 타겟 언어로 번역
       final String targetLangName = FFAppState().targetLang.isNotEmpty
@@ -1173,10 +1169,9 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       bool evaporated = false;
       bool clarified = false; // 주어/목적어 모호 → AI 되묻기
       bool corrected = false; // 유저가 AI의 오해를 정정 → 직전 교환 삭제 후 재처리
-      bool firstChunkSent = false;
+      // [USER-FULL-TTS] firstChunkSent removed; user TTS fires once after stream end.
       await for (String chunk in userStream) {
         userTargetText += chunk;
-        userBuffer += chunk;
 
         // 🔧 [v3.3] 누적된 전체 텍스트에서 EVAPORATE 감지 (스트림 조각 분할 대응)
         if (userTargetText.contains("[EVAPORATE]")) {
@@ -1200,39 +1195,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         if (mounted)
           setState(() => _localMessages[hostIndex]['target'] = userTargetText);
 
-        // 구두점 도달 즉시 TTS 청크 발사
-        final matches = splitPattern.allMatches(userBuffer).toList();
-        if (matches.isNotEmpty) {
-          int lastIdx = matches.last.end;
-          String toSpeak = userBuffer.substring(0, lastIdx).trim();
-          userBuffer = userBuffer.substring(lastIdx);
-          if (toSpeak.isNotEmpty) {
-            final cleanedChunk = _cleanText(toSpeak);
-            if (isMeaninglessTtsText(cleanedChunk)) {
-              _log('🔊 [TTS-SKIP] [USER]', '의미 없는 TTS 조각 skip: "$cleanedChunk"');
-            } else {
-              userTtsFetcher.addText(cleanedChunk);
-              firstChunkSent = true;
-            }
-          }
-        }
-        if (!firstChunkSent) {
-          final wordCount = userBuffer
-              .trim()
-              .split(RegExp(r'\s+'))
-              .where((w) => w.isNotEmpty)
-              .length;
-          if (wordCount >= 4) {
-            final cleanedBuf = _cleanText(userBuffer.trim());
-            if (isMeaninglessTtsText(cleanedBuf)) {
-              _log('🔊 [TTS-SKIP] [USER]', '의미 없는 TTS 조각 skip: "$cleanedBuf"');
-            } else {
-              userTtsFetcher.addText(cleanedBuf);
-              firstChunkSent = true;
-            }
-            userBuffer = "";
-          }
-        }
+        // [USER-FULL-TTS] no chunk TTS during user translation streaming.
+        // Text still streams to the screen through setState above.
       }
 
       if (evaporated) {
@@ -1300,12 +1264,13 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         return;
       }
 
-      if (userBuffer.trim().isNotEmpty) {
-        final cleanedRem = _cleanText(userBuffer.trim());
-        if (isMeaninglessTtsText(cleanedRem)) {
-          _log('🔊 [TTS-SKIP] [USER]', '의미 없는 TTS 조각 skip: "$cleanedRem"');
+      // [USER-FULL-TTS] fire the complete translated user sentence once.
+      final String fullUserTts = _cleanText(userTargetText.trim());
+      if (fullUserTts.isNotEmpty) {
+        if (isMeaninglessTtsText(fullUserTts)) {
+          _log('🔊 [TTS-SKIP] [USER]', '의미 없는 TTS 조각 skip: "$fullUserTts"');
         } else {
-          userTtsFetcher.addText(cleanedRem);
+          userTtsFetcher.addText(fullUserTts);
         }
       }
 
@@ -3025,9 +2990,9 @@ class ChunkedTtsFetcher {
       return;
     }
 
-    // [2단계] API 호출 (재시도 1회)
+    // [2단계] API 호출 (재시도 2회, timeout 8초)
     Uint8List result = Uint8List(0);
-    for (int attempt = 0; attempt < 2; attempt++) {
+    for (int attempt = 0; attempt < 3; attempt++) {
       try {
         final res = await http
             .post(
@@ -3044,7 +3009,7 @@ class ChunkedTtsFetcher {
                 'response_format': 'mp3',
               }),
             )
-            .timeout(const Duration(seconds: 10));
+            .timeout(const Duration(seconds: 8));
 
         if (res.statusCode == 200) {
           result = res.bodyBytes;
@@ -3058,8 +3023,8 @@ class ChunkedTtsFetcher {
           onLog?.call('❌ [TTS-API-ERR]', 'statusCode=${res.statusCode}');
         }
       } catch (_) {
-        if (attempt == 0) {
-          await Future.delayed(const Duration(milliseconds: 500));
+        if (attempt < 2) {
+          await Future.delayed(const Duration(milliseconds: 300));
         }
       }
     }
