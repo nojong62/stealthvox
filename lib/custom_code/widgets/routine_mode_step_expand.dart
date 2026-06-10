@@ -499,7 +499,12 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 
     // 안내/질문 완료 → STT 자동 시작 (유저 기본 문장 대기)
     if (mounted && _isConversationActive && !_isSessionComplete) {
-      _startDeepgramListening();
+      _log('🌬️ [BREATH]', 'AI 첫 질문 완료 후 8초 여유 시간 시작');
+      await Future.delayed(const Duration(seconds: 8));
+      // 딜레이 중 상태 변경 가능성 재검증
+      if (mounted && _isConversationActive && !_isSessionComplete) {
+        _startDeepgramListening();
+      }
     }
   }
 
@@ -4946,6 +4951,25 @@ Scan the ENTIRE History before choosing your question:
 - If "what" is already answered → NEVER ask "what" again. Dig into REASON or RESULT.
 - If "when" is already answered → do NOT ask "when" again. Focus on IMPACT or REACTION.
 - Always build on the MOST RECENT user statement. Never repeat ground already covered.
+
+[NARRATIVE THREAD RULE — MANDATORY]
+Your questions must form ONE coherent story, not a series of disconnected word-extractions.
+Before choosing your question, re-read the FIRST AI question in the History. That question set the topic and emotional direction of this entire conversation.
+Every follow-up question must:
+1. Stay connected to the original topic thread started by the FIRST question.
+2. Build on the user's answer in a way that DEEPENS that thread — not jump sideways to an unrelated detail the user happened to mention.
+3. Feel like the next natural thing a curious friend would ask in the SAME conversation — not a new interview question about a different noun.
+
+BAD pattern (word-hopping — BANNED):
+  AI: What do you enjoy doing on weekends? → User: I go to a cafe with my friend.
+  AI: What kind of cafe is it? → grabbed "cafe" as isolated keyword, lost the thread about weekend enjoyment
+  AI: What does your friend do? → grabbed "friend" as isolated keyword, equally disconnected
+GOOD pattern (narrative thread):
+  AI: What do you enjoy doing on weekends? → User: I go to a cafe with my friend.
+  AI: What makes that time feel special? → follows the ENJOYMENT thread from the first question + user's answer
+  AI: When did that become your weekend routine? → deepens the story naturally
+
+RULE: After drafting your question, check — does this question connect back to the THEME the first question introduced? If it only latches onto a surface noun from the last answer, rewrite it to follow the emotional or thematic thread instead.
 
 [EMOTIONAL DEPTH RULE — HIGHEST PRIORITY]
 Before applying any TURN GOAL, check whether the user's LAST answer clearly expresses loss of interest, motivation, enjoyment, or willingness to engage.
