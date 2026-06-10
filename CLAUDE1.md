@@ -47,224 +47,341 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# StealthVox — Free Talk/Roleplay: 유저 TTS 통문장화 (조각 분할 제거)
+# StealthVox — Step Expand: 질문 불만 시 확인 후 재질문
 
-## 목적
-유저 영어 TTS가 2~3조각으로 분할되어 각각 별도 API 호출로 나가는 구조에서, **한 조각의 API stall(8~10초)이 유저 문장 중간 침묵**이 되고, stall이 게이트(15초)를 넘기면 **유저 소리가 마무리되지 않은 채 AI로 전환**된다.
+## 기능
+유저가 AI 질문 내용에 불만을 표시하면:
+1. AI: "좀전에 질문을 취소하고 다른 질문을 드릴까요?"
+2. 유저가 동의 → 이전 질문 삭제(화면에서도 제거) + 새 질문 생성
+3. 유저가 거부 → "알겠어요, 다시 대답해 주세요" + 기존 질문 유지, 재청취
 
-유저 TTS를 **번역 스트림 종료 후 통문장 1회 발사**로 변경한다. Step Expand의 `HYB-01-LATE` 경로(실기기 검증 완료, 매끈함)와 동일 패턴이다.
+기존 `[RETRY]`(유저가 질문을 못 알아들었을 때 → 즉시 재질문)와 구분되는 별도 흐름.
+기존 `_handleRetryQuestion`을 동의 시 재활용한다.
 
-- **AI TTS의 하이브리드(첫 청크 빠른 발사)는 변경하지 않는다** — AI는 첫 반응 속도가 중요.
-- 텍스트 화면 표시는 기존대로 스트리밍 유지 (글자는 똑같이 흐름, 소리만 통문장).
-- EVAPORATE/CORRECTION/CLARIFY 감지 로직은 그대로 유지.
-- v3.7 유저 통문장 캐시(`_saveUserFullSentenceToCache`)와 키가 일치 → 반복 문장 캐시 HIT.
-- 트레이드오프: 유저 첫 오디오 시작이 약 0.5~1.5초 늦어짐 (번역 스트림 완료 대기). 문장 중간 침묵 제거와 맞바꿈.
-
-작업 전: `git commit -am "save point before USER_FULL_TTS"`
-
+## 대상 파일
+```
+lib/custom_code/widgets/routine_mode_step_expand.dart
+```
 **`lib/custom_code/임시/` 아래 파일은 절대 건드리지 말 것.**
-**각 파일 안에서는 반드시 아래(라인 큰 것)부터 위로 적용한다.**
+
+작업 전: `git commit -am "save point before STEP_EXPAND_DISSATISFIED"`
+
+**반드시 아래(라인 큰 것)부터 위로 적용한다.**
 
 ---
 
-# PART A — routine_mode_free_talk.dart
+## 수정 ⑥ — Brain 프롬프트에 [DISSATISFIED] 태그 추가 (약 4635번)
 
-## A-1 — 잔여 발사를 통문장 1회 발사로 교체 (약 1201~1202번)
+### str_replace
 
-### old_str
+**old_str**:
 ```dart
-      if (userBuffer.trim().isNotEmpty)
-        userTtsFetcher.addText(userBuffer.trim());
+- Output [RETRY] ONLY when the user's answer shows they did not understand the AI's question itself, so re-asking the same thing would not help.""";
 ```
 
-### new_str
+**new_str**:
 ```dart
-      // 🔧 [USER-FULL-TTS] 유저 통문장 1회 발사.
-      // 조각 분할 시 한 조각의 API stall이 문장 중간 침묵/미완료 전환을
-      // 유발하므로, Step Expand의 HYB-01-LATE 경로와 동일하게 통문장으로 보낸다.
-      // v3.7 통문장 캐시와 키가 일치해 반복 문장은 캐시 HIT로 즉시 재생.
-      final String fullUserTts = _cleanText(userTargetText.trim());
-      if (fullUserTts.isNotEmpty) {
-        userTtsFetcher.addText(fullUserTts);
-      }
+- Output [RETRY] ONLY when the user's answer shows they did not understand the AI's question itself, so re-asking the same thing would not help.
+- Output [DISSATISFIED] when the user expresses dissatisfaction, complaint, or rejection about the AI's QUESTION itself (not about the topic). Signs: "다른 질문 해줘" / "그 질문 싫어" / "질문 바꿔" / "별로야" / "그건 좀" / "다른 거 물어봐" / "change the question" / "ask something else" / "I don't like that question". Do NOT output [DISSATISFIED] when the user is simply answering negatively (e.g., "아니, 안 갔어" = a valid negative answer).""";
 ```
-
-## A-2 — 루프 내 조각 발사 블록 제거 (약 1136~1159번)
-
-### old_str
-```dart
-        // 구두점 도달 즉시 TTS 청크 발사
-        final matches = splitPattern.allMatches(userBuffer).toList();
-        if (matches.isNotEmpty) {
-          int lastIdx = matches.last.end;
-          String toSpeak = userBuffer.substring(0, lastIdx).trim();
-          userBuffer = userBuffer.substring(lastIdx);
-          if (toSpeak.isNotEmpty) {
-            userTtsFetcher.addText(toSpeak);
-            firstChunkSent = true;
-          }
-        }
-        if (!firstChunkSent) {
-          final wordCount = userBuffer
-              .trim()
-              .split(RegExp(r'\s+'))
-              .where((w) => w.isNotEmpty)
-              .length;
-          if (wordCount >= 4) {
-            userTtsFetcher.addText(_cleanText(userBuffer.trim()));
-            userBuffer = "";
-            firstChunkSent = true;
-          }
-        }
-```
-
-### new_str
-```dart
-        // 🔧 [USER-FULL-TTS] 유저 TTS 조각 발사 제거 — 스트림 종료 후 통문장 1회 발사.
-        // (텍스트 화면 표시는 위 setState로 기존대로 스트리밍 유지)
-```
-
-## A-3 — 미사용 firstChunkSent 선언 제거 (약 1116번)
-
-### old_str
-```dart
-      bool firstChunkSent = false;
-```
-
-### new_str
-```dart
-      // 🔧 [USER-FULL-TTS] firstChunkSent 제거 (조각 발사 폐지로 미사용)
-```
-
-> 참고: `splitPattern`(약 1100번)이 미사용이 되어 analyzer가 info/warning을 낼 수 있으나 error는 아니므로 그대로 둔다. 거슬리면 선언 줄만 추가로 삭제해도 된다(다른 곳에서 사용하지 않는 것 확인 후).
 
 ---
 
-# PART B — routine_mode_roleplay.dart
+## 수정 ⑤ — 새 함수 _handleDissatisfiedConfirmation (기존 _handleRetryQuestion 바로 위, 약 1609번)
 
-## B-1 — 잔여 발사를 통문장 1회 발사로 교체 (약 1303~1310번)
+### str_replace
 
-### old_str
+**old_str**:
 ```dart
-      if (userBuffer.trim().isNotEmpty) {
-        final cleanedRem = _cleanText(userBuffer.trim());
-        if (isMeaninglessTtsText(cleanedRem)) {
-          _log('🔊 [TTS-SKIP] [USER]', '의미 없는 TTS 조각 skip: "$cleanedRem"');
-        } else {
-          userTtsFetcher.addText(cleanedRem);
-        }
-      }
+// 📦 [Box 5-RETRY: 재질문 처리]
 ```
 
-### new_str
+**new_str**:
 ```dart
-      // 🔧 [USER-FULL-TTS] 유저 통문장 1회 발사 (조각 stall로 인한
-      // 문장 중간 침묵/미완료 전환 제거 — Step Expand HYB-01-LATE 패턴).
-      final String fullUserTts = _cleanText(userTargetText.trim());
-      if (fullUserTts.isNotEmpty) {
-        if (isMeaninglessTtsText(fullUserTts)) {
-          _log('🔊 [TTS-SKIP] [USER]', '의미 없는 TTS 조각 skip: "$fullUserTts"');
-        } else {
-          userTtsFetcher.addText(fullUserTts);
-        }
-      }
+// 📦 [Box 5-DISSATISFIED: 질문 불만 확인 후 재질문]
+// ====================================================================
+  Future<void> _handleDissatisfiedConfirmation() async {
+    _log('😤 [DISSATISFIED]', '질문 불만 감지 → 확인 단계 진입');
+    _ttsQueueManager.setUserTurn(false);
+    _ttsQueueManager.setAiPaused(false);
+
+    // 확인 멘트 TTS
+    final confirmTts = ChunkedTtsFetcher(
+      _openAiKey,
+      _ttsQueueManager,
+      'nova',
+      isUser: false,
+      onLog: _log,
+    );
+    confirmTts.addText('좀전에 질문을 취소하고 다른 질문을 드릴까요?');
+    int ticks = 0;
+    while ((confirmTts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
+        mounted) {
+      await Future.delayed(const Duration(milliseconds: 50));
+      if (++ticks > 200) break;
+    }
+
+    // 유저 응답 대기 (마이크 ON)
+    if (mounted && _isConversationActive && !_isSessionComplete) {
+      _awaitingDissatisfiedConfirm = true;
+      _startDeepgramListening();
+    }
+  }
+
+  // 🔧 [DISSATISFIED] 유저 응답이 동의인지 판단 (한국어/영어 패턴)
+  bool _isDissatisfiedAgreement(String raw) {
+    final lower = raw.toLowerCase().trim();
+    final agreePatterns = [
+      '응', '예', '어', '그래', '맞아', '좋아', '해줘', '부탁', '바꿔',
+      '다른', '네', '그렇게', 'yes', 'yeah', 'sure', 'okay', 'ok',
+      'please', 'change',
+    ];
+    for (final p in agreePatterns) {
+      if (lower.contains(p)) return true;
+    }
+    return false;
+  }
+
+// 📦 [Box 5-RETRY: 재질문 처리]
 ```
 
-## B-2 — 루프 내 조각 발사 블록 제거 (약 1203~1235번)
+---
 
-### old_str
+## 수정 ④ — _commitAndProcess에 확인 응답 분기 추가 (약 1539번)
+
+`_commitAndProcess` 함수 안, `_log('🔀 [COMMIT-01]', ...)` 줄 바로 **뒤**에 분기를 추가한다.
+
+### str_replace
+
+**old_str**:
 ```dart
-        // 구두점 도달 즉시 TTS 청크 발사
-        final matches = splitPattern.allMatches(userBuffer).toList();
-        if (matches.isNotEmpty) {
-          int lastIdx = matches.last.end;
-          String toSpeak = userBuffer.substring(0, lastIdx).trim();
-          userBuffer = userBuffer.substring(lastIdx);
-          if (toSpeak.isNotEmpty) {
-            final cleanedChunk = _cleanText(toSpeak);
-            if (isMeaninglessTtsText(cleanedChunk)) {
-              _log('🔊 [TTS-SKIP] [USER]', '의미 없는 TTS 조각 skip: "$cleanedChunk"');
-            } else {
-              userTtsFetcher.addText(cleanedChunk);
-              firstChunkSent = true;
+    _log('🔀 [COMMIT-01]', '확정: "$committed" → 파이프라인 시작');
+
+    // 마이크/VoiceManager 정리
+    await _voiceManager?.dispose();
+    _voiceManager = null;
+    _log('🔀 [COMMIT-02]', 'VoiceManager dispose 완료');
+
+    _log('🔀 [COMMIT-03]', '_processRelayPipeline 호출');
+    _processRelayPipeline(committed);
+```
+
+**new_str**:
+```dart
+    _log('🔀 [COMMIT-01]', '확정: "$committed" → 파이프라인 시작');
+
+    // 🔧 [DISSATISFIED] 확인 응답 대기 중이면 동의/거부 분기
+    if (_awaitingDissatisfiedConfirm) {
+      _awaitingDissatisfiedConfirm = false;
+      await _voiceManager?.dispose();
+      _voiceManager = null;
+
+      if (_isDissatisfiedAgreement(committed)) {
+        _log('😤 [DISSATISFIED-YES]', '동의 → 이전 질문 삭제 + 새 질문 생성');
+        _turnCounter--; // 불만 턴 카운트 취소
+        // 직전 AI 질문(SYSTEM) 삭제 — _handleRetryQuestion이 다시 지움+생성
+        await _handleRetryQuestion(
+            _dissatisfiedContextStr, _dissatisfiedTargetLangName);
+      } else {
+        _log('😤 [DISSATISFIED-NO]', '거부 → 기존 질문 유지, 재청취');
+        _ttsQueueManager.setUserTurn(false);
+        _ttsQueueManager.setAiPaused(false);
+        final noTts = ChunkedTtsFetcher(
+          _openAiKey, _ttsQueueManager, 'nova',
+          isUser: false, onLog: _log);
+        noTts.addText('알겠어요, 다시 대답해 주세요.');
+        int t = 0;
+        while ((noTts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
+            mounted) {
+          await Future.delayed(const Duration(milliseconds: 50));
+          if (++t > 200) break;
+        }
+        if (mounted && _isConversationActive) _startDeepgramListening();
+      }
+      return;
+    }
+
+    // 마이크/VoiceManager 정리
+    await _voiceManager?.dispose();
+    _voiceManager = null;
+    _log('🔀 [COMMIT-02]', 'VoiceManager dispose 완료');
+
+    _log('🔀 [COMMIT-03]', '_processRelayPipeline 호출');
+    _processRelayPipeline(committed);
+```
+
+---
+
+## 수정 ③ — 파이프라인 처리 분기 추가 (retried 처리 블록 뒤, 약 1977번)
+
+기존 `if (retried) {...}` 블록 바로 뒤에 dissatisfied 분기를 추가한다.
+
+### str_replace
+
+**old_str**:
+```dart
+      if (retried) {
+        _turnCounter--; // 실패한 턴은 카운트 취소
+        if (mounted) {
+          setState(() {
+            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+            if (hostIndex < _localMessages.length) {
+              _localMessages.removeAt(hostIndex);
             }
-          }
+          });
         }
-        if (!firstChunkSent) {
-          final wordCount = userBuffer
-              .trim()
-              .split(RegExp(r'\s+'))
-              .where((w) => w.isNotEmpty)
-              .length;
-          if (wordCount >= 4) {
-            final cleanedBuf = _cleanText(userBuffer.trim());
-            if (isMeaninglessTtsText(cleanedBuf)) {
-              _log('🔊 [TTS-SKIP] [USER]', '의미 없는 TTS 조각 skip: "$cleanedBuf"');
-            } else {
-              userTtsFetcher.addText(cleanedBuf);
-              firstChunkSent = true;
+        await _handleRetryQuestion(contextStr, targetLangName);
+        return;
+      }
+
+      // 🔄 [CORRECTION] 유저가 AI의 오해를 정정
+```
+
+**new_str**:
+```dart
+      if (retried) {
+        _turnCounter--; // 실패한 턴은 카운트 취소
+        if (mounted) {
+          setState(() {
+            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+            if (hostIndex < _localMessages.length) {
+              _localMessages.removeAt(hostIndex);
             }
-            userBuffer = "";
-          }
+          });
         }
+        await _handleRetryQuestion(contextStr, targetLangName);
+        return;
+      }
+
+      // 😤 [DISSATISFIED] 유저가 질문 내용에 불만 → 확인 단계
+      if (dissatisfied) {
+        if (mounted) {
+          setState(() {
+            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+            // 불만 발화(HOST) 화면에서 제거 — AI 질문(SYSTEM)은 아직 유지
+            if (hostIndex < _localMessages.length) {
+              _localMessages.removeAt(hostIndex);
+            }
+          });
+        }
+        // 확인 단계에서 쓸 context 저장
+        _dissatisfiedContextStr = contextStr;
+        _dissatisfiedTargetLangName = targetLangName;
+        await _handleDissatisfiedConfirmation();
+        return;
+      }
+
+      // 🔄 [CORRECTION] 유저가 AI의 오해를 정정
 ```
-
-### new_str
-```dart
-        // 🔧 [USER-FULL-TTS] 유저 TTS 조각 발사 제거 — 스트림 종료 후 통문장 1회 발사.
-        // (텍스트 화면 표시는 위 setState로 기존대로 스트리밍 유지)
-```
-
-## B-3 — 미사용 firstChunkSent 선언 제거 (약 1176번)
-
-### old_str
-```dart
-      bool firstChunkSent = false;
-```
-
-### new_str
-```dart
-      // 🔧 [USER-FULL-TTS] firstChunkSent 제거 (조각 발사 폐지로 미사용)
-```
-
-> 주의: roleplay에는 `firstChunkSentToTTS`(약 1363번, AI 쪽)라는 별개 변수가 있다. **절대 건드리지 말 것.** old_str의 `bool firstChunkSent = false;`는 정확히 이 문자열만 매칭된다.
 
 ---
 
-## 절대 건드리지 말 것 (Do NOT touch)
-- AI 쪽 하이브리드 발사(`HybridTtsPlayer`, `firstChunkSentToTTS`, HYB-01/02) — AI는 첫 청크 빠른 발사 유지.
-- EVAPORATE / CORRECTION / CLARIFY 감지와 그 처리 블록 — 그대로 유지.
-- 텍스트 화면 스트리밍 setState — 그대로 유지.
-- PIPE-04 게이트(15초), 조각 TTS http timeout(8초)·재시도(3회) — 그대로.
-- `_saveUserFullSentenceToCache`(v3.7) — 그대로 (이제 재생 캐시와도 정합).
-- `DeepgramV2VoiceManager`, `TtsQueueManager`, `TtsCache`, opener 청킹(roleplay 759·784) — 그대로.
+## 수정 ② — 파이프라인 감지 플래그 + 태그 체크 추가
+
+### 수정 ②-a — 플래그 선언 (약 1854번)
+
+#### str_replace
+
+**old_str**:
+```dart
+      bool restated = false; // 맥락 어긋남/발음 불확실 → 같은 AI 질문 유지하고 다시 말하기 요청
+```
+
+**new_str**:
+```dart
+      bool restated = false; // 맥락 어긋남/발음 불확실 → 같은 AI 질문 유지하고 다시 말하기 요청
+      bool dissatisfied = false; // 🔧 [DISSATISFIED] 유저가 AI 질문에 불만 → 확인 후 재질문
+```
+
+### 수정 ②-b — 태그 감지 (RETRY 감지 뒤, 약 1876번)
+
+#### str_replace
+
+**old_str**:
+```dart
+        if (userTargetText.contains("[RETRY]")) {
+          retried = true;
+          _log('⚠️ [RETRY]', '재질문 감지 → 다른 질문 생성');
+          break;
+        }
+
+        // 정정 감지: 유저가 AI의 오해를 바로잡는 경우
+```
+
+**new_str**:
+```dart
+        if (userTargetText.contains("[RETRY]")) {
+          retried = true;
+          _log('⚠️ [RETRY]', '재질문 감지 → 다른 질문 생성');
+          break;
+        }
+
+        // 🔧 [DISSATISFIED] 유저가 AI 질문에 불만 표시
+        if (userTargetText.contains("[DISSATISFIED]")) {
+          dissatisfied = true;
+          _log('😤 [DISSATISFIED]', '질문 불만 감지 → 확인 단계로');
+          break;
+        }
+
+        // 정정 감지: 유저가 AI의 오해를 바로잡는 경우
+```
+
+---
+
+## 수정 ① — 멤버 변수 추가 (약 208번)
+
+### str_replace
+
+**old_str**:
+```dart
+  int _consecutiveRestateCount = 0; // 같은 턴 연속 RESTATE 횟수 (2 이상이면 더 쉬운 문장 유도)
+```
+
+**new_str**:
+```dart
+  int _consecutiveRestateCount = 0; // 같은 턴 연속 RESTATE 횟수 (2 이상이면 더 쉬운 문장 유도)
+  bool _awaitingDissatisfiedConfirm = false; // 🔧 [DISSATISFIED] 확인 응답 대기 중
+  String _dissatisfiedContextStr = ''; // 🔧 [DISSATISFIED] 재질문에 쓸 context
+  String _dissatisfiedTargetLangName = ''; // 🔧 [DISSATISFIED] 재질문에 쓸 targetLang
+```
+
+---
+
+## 절대 건드리지 말 것
+- `_handleRetryQuestion` — 그대로 재활용 (동의 시 호출).
+- `_stopMicAndProcess` — 변경 없음 (기존 흐름 유지).
+- Brain 프롬프트의 기존 태그(`[RETRY]`, `[RESTATE]`, `[CORRECTION]`, `[CLARIFY]`, `[EVAPORATE]`) 정의 — 추가만.
+- `DeepgramV2VoiceManager`, `TtsQueueManager`, `HybridTtsPlayer`, `ChunkedTtsFetcher` — Box 7 불변.
+- `_startDeepgramListening`, `_processRelayPipeline`의 기존 분기 — 위치만 뒤에 끼워넣기.
 
 ## 검증
 
-### free_talk
 ```powershell
-grep -c "USER-FULL-TTS" lib/custom_code/widgets/routine_mode_free_talk.dart          # 기대값: 3
-grep -c "bool firstChunkSent = false" lib/custom_code/widgets/routine_mode_free_talk.dart  # 기대값: 0
-flutter analyze lib/custom_code/widgets/routine_mode_free_talk.dart
-```
+# 멤버 변수 3개
+grep -c "_awaitingDissatisfiedConfirm" lib/custom_code/widgets/routine_mode_step_expand.dart   # 기대값: 4 (선언1+set true 1+set false 1+check 1)
+grep -c "_dissatisfiedContextStr" lib/custom_code/widgets/routine_mode_step_expand.dart         # 기대값: 3 (선언1+저장1+사용1)
 
-### roleplay
-```powershell
-grep -c "USER-FULL-TTS" lib/custom_code/widgets/routine_mode_roleplay.dart           # 기대값: 3
-grep -c "bool firstChunkSent = false" lib/custom_code/widgets/routine_mode_roleplay.dart   # 기대값: 0
-grep -c "firstChunkSentToTTS" lib/custom_code/widgets/routine_mode_roleplay.dart     # 기대값: 변경 전과 동일 (AI 쪽 미변경 확인)
-flutter analyze lib/custom_code/widgets/routine_mode_roleplay.dart
+# 새 함수
+grep -c "_handleDissatisfiedConfirmation" lib/custom_code/widgets/routine_mode_step_expand.dart # 기대값: 2 (정의1+호출1)
+grep -c "_isDissatisfiedAgreement" lib/custom_code/widgets/routine_mode_step_expand.dart        # 기대값: 2 (정의1+호출1)
+
+# Brain 프롬프트 태그
+grep -c "DISSATISFIED" lib/custom_code/widgets/routine_mode_step_expand.dart                    # 기대값: 8 이상 (프롬프트+감지+처리+로그)
+
+# 기존 RETRY 미변경
+grep -c "_handleRetryQuestion" lib/custom_code/widgets/routine_mode_step_expand.dart            # 기대값: 변경 전 + 1 (DISSATISFIED-YES에서 호출)
+
+flutter analyze lib/custom_code/widgets/routine_mode_step_expand.dart
 ```
-- 두 파일 모두 신규 error 0건 (미사용 변수 info/warning은 허용).
+- 신규 error 0건.
 
 ## 롤백
 ```powershell
-git restore lib/custom_code/widgets/routine_mode_free_talk.dart lib/custom_code/widgets/routine_mode_roleplay.dart
+git restore lib/custom_code/widgets/routine_mode_step_expand.dart
 ```
 
 ## 실기기 확인
-1. 유저 영어 음성이 **처음부터 끝까지 한 호흡으로** 재생되는지 (문장 중간 침묵 없음).
-2. 유저 소리가 끝까지 나온 뒤에 AI 소리가 시작되는지 (미완료 전환 사라짐).
-3. 로그에서 `[TTS-01] [USER] addText` 가 턴당 **1회만** 찍히는지 (`pending=1`).
-4. 유저 첫 오디오 시작이 이전보다 0.5~1.5초 늦는 것이 체감상 허용 범위인지.
-5. 같은 문장 반복 시 `[TTS-CACHE-HIT]`/즉시 재생되는지 (v3.7 캐시 정합 확인).
+1. AI 질문 후 "다른 질문 해줘" → AI: "좀전에 질문을 취소하고 다른 질문을 드릴까요?" → "응" → **이전 질문 삭제 + 새 질문 등장**
+2. AI 질문 후 "그 질문 별로야" → 확인 → "아니 됐어" → **기존 질문 유지 + "알겠어요, 다시 대답해 주세요"**
+3. AI 질문 후 정상 답변("아니, 안 갔어" 같은 부정 대답) → `[DISSATISFIED]`가 뜨지 **않고** 정상 번역 진행
+4. 기존 `[RETRY]`·`[RESTATE]`·`[CORRECTION]`·`[CLARIFY]` 동작 그대로인지

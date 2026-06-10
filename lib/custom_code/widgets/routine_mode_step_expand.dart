@@ -497,14 +497,11 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       }
     }
 
-    // 안내/질문 완료 → STT 자동 시작 (유저 기본 문장 대기)
+    // 안내/질문 완료  STT 즉시 시작 (유저 기본 문장 대기)
+    // 🔧 [MIC-INSTANT] 8초 딜레이 제거  AI 말 끝나자마자 마이크 ON.
+    // 침묵 시 안내는 _startDeepgramListening() 내부의 7초 타이머가 담당.
     if (mounted && _isConversationActive && !_isSessionComplete) {
-      _log('🌬️ [BREATH]', 'AI 첫 질문 완료 후 8초 여유 시간 시작');
-      await Future.delayed(const Duration(seconds: 8));
-      // 딜레이 중 상태 변경 가능성 재검증
-      if (mounted && _isConversationActive && !_isSessionComplete) {
-        _startDeepgramListening();
-      }
+      _startDeepgramListening();
     }
   }
 
