@@ -1,0 +1,657 @@
+[18:33:38.558] 🎤 [LISTEN-01] _startDeepgramListening 진입, VoiceManager 생성
+[18:33:38.558] 🌐 [LANG] nativeLang="Korean" → Deepgram code="ko"
+[18:33:38.558] 🎤 [LISTEN-04] connectAndStart 호출 직전
+[18:33:38.559] 🎤 [DG-00] connectAndStart 진입
+[18:33:38.559] 🎤 [MIC-01] _connect 진입
+[18:33:38.559] 🎤 [DG-01] WebSocket 연결 요청 전송
+[18:33:38.559] 🎤 [MIC-02] 마이크 시작 시퀀스 진입
+[18:33:38.559] 🎤 [MIC-03] 기존 _audioSub 구독 해제 완료
+[18:33:38.559] 🎤 [MIC-04] audioRecorder.isRecording()=false
+[18:33:38.582] 🎤 [MIC-06] startStream 성공
+[18:33:38.582] 🎤 [MIC-10] stream.listen 구독 완료 — 마이크 완전 활성화
+[18:33:38.582] 🎤 [LISTEN-05] connectAndStart 완료
+[18:33:38.703] 🎤 [MIC-07] 첫 오디오 패킷 수신 (2560B)
+[18:33:40.583] 💡 [NUDGE] 2초 침묵 → AI 오프너 발화
+[18:33:40.583] 🎤 [DG-DISPOSE] dispose 진입
+[18:33:41.469] 🔊 [TTS-01] [AI] addText: "What's on your mind" (pending=1)
+[18:33:41.469] [HYB-01] 발사(4단어): "What's on your mind"
+[18:33:41.556] 🔊 [TTS-01] [AI] addText: "today?" (pending=2)
+[18:33:41.556] 🔊 [TTS-01] [AI] addText: "Let's just chat!" (pending=3)
+[18:33:41.556] [HYB-02] remainder fired (23c)
+[18:33:42.518] 🔊 [TTS-02] [AI] API OK (21600B) for "What's on your mind"
+[18:33:42.721] 🔊 [TTS-02] [AI] API OK (21120B) for "Let's just chat!"
+[18:33:43.992] [HYB-04-SAVED] 45600B
+[18:33:46.790] 📚 [HIST-NEW] chat_history 방 생성: JBAnYcETxWa3zYNQ2nIq
+[18:33:46.917] 💾 [HIST-UPD] msg_count+1, last="What's on your mind today? Let's just chat!"
+[18:33:46.917] 🎤 [LISTEN-01] _startDeepgramListening 진입, VoiceManager 생성
+[18:33:46.917] 🌐 [LANG] nativeLang="Korean" → Deepgram code="ko"
+[18:33:46.917] 🎤 [LISTEN-04] connectAndStart 호출 직전
+[18:33:46.917] 🎤 [DG-00] connectAndStart 진입
+[18:33:46.917] 🎤 [MIC-01] _connect 진입
+[18:33:46.917] 🎤 [DG-01] WebSocket 연결 요청 전송
+[18:33:46.917] 🎤 [MIC-02] 마이크 시작 시퀀스 진입
+[18:33:46.917] 🎤 [MIC-03] 기존 _audioSub 구독 해제 완료
+[18:33:46.918] 🎤 [MIC-04] audioRecorder.isRecording()=true
+[18:33:46.943] 🎤 [MIC-05] 기존 녹음 강제 중단 완료
+[18:33:46.964] 🎤 [MIC-06] startStream 성공
+[18:33:46.964] 🎤 [MIC-10] stream.listen 구독 완료 — 마이크 완전 활성화
+[18:33:46.964] 🎤 [LISTEN-05] connectAndStart 완료
+[18:33:47.055] 🎤 [MIC-07] 첫 오디오 패킷 수신 (2560B)
+[18:33:50.974] 🎤 [MIC-08] 패킷 50개 송신 중 (마이크 정상 동작)
+[18:33:52.214] 📡 [DG-03] isFinal=true speechFinal=false chunk="오늘 친구를 만날까?"
+[18:33:53.207] 📡 [DG-UE] UtteranceEnd 이벤트 → onTurnEnded. finalText="오늘 친구를 만날까?"
+[18:33:53.207] 🔀 [LISTEN-03] onTurnEnded 콜백 수신: "오늘 친구를 만날까?"
+[18:33:53.207] 🔀 [STOP-01] speech_final 수신: "오늘 친구를 만날까?" (len=11)
+[18:33:53.207] 🔀 [STOP-03] 신규 발화 접수. 1.2초 대기창 시작
+[18:33:54.408] 🔀 [COMMIT-01] 확정: "오늘 친구를 만날까?" → 파이프라인 시작
+[18:33:54.408] 🎤 [DG-DISPOSE] dispose 진입
+[18:33:54.409] 🔀 [COMMIT-02] VoiceManager dispose 완료
+[18:33:54.409] 🔀 [COMMIT-03] _processRelayPipeline 호출
+[18:33:54.409] 🧠 [PIPE-01] Pipeline 시작 turn=1 input="오늘 친구를 만날까?"
+[18:33:54.409] 🧭 [SCROLL-TOP] index=1
+[18:33:54.986] 🔊 [TTS-01] [USER] addText: "Should I meet my" (pending=1)
+[18:33:54.993] 🔊 [TTS-01] [USER] addText: "friend today?" (pending=2)
+[18:33:54.993] 🧠 [PIPE-02] AI 스트림 요청: userText="Should I meet my friend today?"
+[18:33:54.993] 🧠 [PIPE-04] 유저 TTS 대기 시작. pending=2
+[18:33:55.494] 🧠 [PIPE-03] GPT 첫 청크 수신: ""
+[18:33:55.496] 🔊 [TTS-01] [AI] addText: "Do you want to" (pending=1)
+[18:33:55.496] [HYB-01] 발사(4단어): "Do you want to"
+[18:33:56.110] 🔊 [TTS-02] [USER] API OK (17280B) for "friend today?"
+[18:33:56.202] 🔊 [TTS-02] [USER] API OK (20640B) for "Should I meet my"
+[18:33:56.220] 🧠 [PIPE-05] 유저 TTS fetch 완료. isBusy=true
+[18:33:56.944] 🔊 [TTS-02] [AI] API OK (15840B) for "Do you want to"
+[18:33:58.517] 🧠 [PIPE-06] 유저 TTS 재생 완료 → AI 큐 개방
+[18:33:58.768] 🧠 [PIPE-GAP] 유저-AI 전환 안전 간격 250ms 완료
+[18:33:58.768] 🧠 [PIPE-07] setUserTurn(false) + setAiPaused(false). AI 재생 시작
+[18:33:58.769] 🧠 [PIPE-08] aiGenerationTask 완료. AI pending=0
+[18:33:58.769] 🔊 [TTS-01] [AI] addText: "see your friend?" (pending=1)
+[18:33:58.769] 🔊 [TTS-01] [AI] addText: "If yes," (pending=2)
+[18:33:58.769] 🔊 [TTS-01] [AI] addText: "then go for it!" (pending=3)
+[18:33:58.769] [HYB-02] remainder fired (40c)
+[18:33:59.863] 🔊 [TTS-02] [AI] API OK (21120B) for "see your friend?"
+[18:34:00.190] 🔊 [TTS-02] [AI] API OK (20160B) for "then go for it!"
+[18:34:00.953] [HYB-04-SAVED] 59520B
+[18:34:01.928] 🔊 [TTS-02] [AI] API OK (10080B) for "If yes,"
+[18:34:03.819] 🧠 [PIPE-09] AI TTS 재생 완료
+[18:34:04.616] 🔤 [AI-ORIG] AI original 생성 완료 → UI 반영 및 저장
+[18:34:04.616] 💾 [SAVE-01] 저장 시작. chatLines=2개
+[18:34:04.617] 💾 [SAVE-02] uid=rJChsLrIqAhXhLZotYeeLZo6KK42, sessionDocId=null
+[18:34:04.617] 💾 [SAVE-03] 첫 대화 → 새 세션 생성 시도
+[18:34:04.617] 🧠 [PIPE-10] Firestore 저장 호출 완료
+[18:34:04.617] 🧠 [PIPE-END] finally 진입. active=true turn=1/current=1 mounted=true
+[18:34:04.617] 🧠 [PIPE-RESTART] 마이크 재시작 시도
+[18:34:04.618] 🎤 [LISTEN-01] _startDeepgramListening 진입, VoiceManager 생성
+[18:34:04.619] 🌐 [LANG] nativeLang="Korean" → Deepgram code="ko"
+[18:34:04.619] 🎤 [LISTEN-04] connectAndStart 호출 직전
+[18:34:04.619] 🎤 [DG-00] connectAndStart 진입
+[18:34:04.619] 🎤 [MIC-01] _connect 진입
+[18:34:04.619] 🎤 [DG-01] WebSocket 연결 요청 전송
+[18:34:04.619] 🎤 [MIC-02] 마이크 시작 시퀀스 진입
+[18:34:04.619] 🎤 [MIC-03] 기존 _audioSub 구독 해제 완료
+[18:34:04.620] 🎤 [MIC-04] audioRecorder.isRecording()=true
+[18:34:04.620] 💾 [SAVE-04] total_sessions=383 → next=384
+[18:34:04.650] 🎤 [MIC-05] 기존 녹음 강제 중단 완료
+[18:34:04.666] 🎤 [MIC-06] startStream 성공
+[18:34:04.666] 🎤 [MIC-10] stream.listen 구독 완료 — 마이크 완전 활성화
+[18:34:04.666] 🎤 [LISTEN-05] connectAndStart 완료
+[18:34:04.696] 💾 [SAVE-05] 새 세션 생성 완료. docId=6rhRdeuGI1mtA0e2UUxi
+[18:34:04.762] 🎤 [MIC-07] 첫 오디오 패킷 수신 (2560B)
+[18:34:04.771] 💾 [SAVE-06] users 문서 total_sessions 업데이트 완료
+[18:34:04.781] 💾 [HIST-UPD] msg_count+2, last="Do you want to see your friend? If yes, then go for it!"
+[18:34:08.684] 🎤 [MIC-08] 패킷 50개 송신 중 (마이크 정상 동작)
+[18:34:09.877] 📡 [DG-03] isFinal=true speechFinal=false chunk="그래 우리간만에 십 년 만에 만나는 친구를 위해서 준비하자"
+[18:34:11.135] 📡 [DG-UE] UtteranceEnd 이벤트 → onTurnEnded. finalText="그래 우리간만에 십 년 만에 만나는 친구를 위해서 준비하자"
+[18:34:11.135] 🔀 [LISTEN-03] onTurnEnded 콜백 수신: "그래 우리간만에 십 년 만에 만나는 친구를 위해서 준비하자"
+[18:34:11.135] 🔀 [STOP-01] speech_final 수신: "그래 우리간만에 십 년 만에 만나는 친구를 위해서 준비하자" (len=32)
+[18:34:11.135] 🔀 [STOP-03] 신규 발화 접수. 1.2초 대기창 시작
+[18:34:12.336] 🔀 [COMMIT-01] 확정: "그래 우리간만에 십 년 만에 만나는 친구를 위해서 준비하자" → 파이프라인 시작
+[18:34:12.337] 🎤 [DG-DISPOSE] dispose 진입
+[18:34:12.337] 🔀 [COMMIT-02] VoiceManager dispose 완료
+[18:34:12.338] 🔀 [COMMIT-03] _processRelayPipeline 호출
+[18:34:12.338] 🧠 [PIPE-01] Pipeline 시작 turn=2 input="그래 우리간만에 십 년 만에 만나는 친구를 위해서 준비하자"
+[18:34:12.338] 🧭 [SCROLL-TOP] index=3
+[18:34:13.008] 🔊 [TTS-01] [USER] addText: "Sure," (pending=1)
+[18:34:13.250] 🔊 [TTS-01] [USER] addText: "let's prepare for the friend we haven't seen in ten years!" (pending=2)
+[18:34:13.267] 🧠 [PIPE-02] AI 스트림 요청: userText="Sure, let's prepare for the friend we haven't seen in ten years!"
+[18:34:13.267] 🧠 [PIPE-04] 유저 TTS 대기 시작. pending=2
+[18:34:13.826] 🧠 [PIPE-03] GPT 첫 청크 수신: ""
+[18:34:13.836] 🔊 [TTS-01] [AI] addText: "That sounds exciting!" (pending=1)
+[18:34:13.836] [HYB-01] 발사(구두점): "That sounds exciting!"
+[18:34:14.318] 🔊 [TTS-02] [USER] API OK (10560B) for "Sure,"
+[18:34:18.436] 🔊 [TTS-02] [AI] API OK (21600B) for "That sounds exciting!"
+[18:34:23.526] ⚠️ [PIPE-TIMEOUT] 유저 TTS fetch 10초 초과, 강제 진행
+[18:34:23.526] 🧠 [PIPE-05] 유저 TTS fetch 완료. isBusy=false
+[18:34:23.526] 🧠 [PIPE-06] 유저 TTS 재생 완료 → AI 큐 개방
+[18:34:23.779] 🧠 [PIPE-GAP] 유저-AI 전환 안전 간격 250ms 완료
+[18:34:23.779] 🧠 [PIPE-07] setUserTurn(false) + setAiPaused(false). AI 재생 시작
+[18:34:23.780] 🧠 [PIPE-08] aiGenerationTask 완료. AI pending=0
+[18:34:23.780] 🔊 [TTS-01] [AI] addText: "What do you want to do when you meet?" (pending=1)
+[18:34:23.780] [HYB-02] remainder fired (37c)
+[18:34:25.397] 🔊 [TTS-02] [USER] API OK (73920B) for "let's prepare for the friend we haven't seen in ten years!"
+[18:34:25.886] 🔊 [TTS-02] [AI] API OK (36000B) for "What do you want to do when you meet?"
+[18:34:29.029] [HYB-04-SAVED] 67200B
+[18:34:31.284] 🧠 [PIPE-09] AI TTS 재생 완료
+[18:34:31.972] 🔤 [AI-ORIG] AI original 생성 완료 → UI 반영 및 저장
+[18:34:31.972] 💾 [SAVE-01] 저장 시작. chatLines=2개
+[18:34:31.972] 💾 [SAVE-02] uid=rJChsLrIqAhXhLZotYeeLZo6KK42, sessionDocId=6rhRdeuGI1mtA0e2UUxi
+[18:34:31.972] 💾 [SAVE-07] 기존 세션에 append 시도. docId=6rhRdeuGI1mtA0e2UUxi
+[18:34:31.972] 🧠 [PIPE-10] Firestore 저장 호출 완료
+[18:34:31.972] 🧠 [PIPE-END] finally 진입. active=true turn=2/current=2 mounted=true
+[18:34:31.972] 🧠 [PIPE-RESTART] 마이크 재시작 시도
+[18:34:31.973] 🎤 [LISTEN-01] _startDeepgramListening 진입, VoiceManager 생성
+[18:34:31.973] 🌐 [LANG] nativeLang="Korean" → Deepgram code="ko"
+[18:34:31.973] 🎤 [LISTEN-04] connectAndStart 호출 직전
+[18:34:31.973] 🎤 [DG-00] connectAndStart 진입
+[18:34:31.973] 🎤 [MIC-01] _connect 진입
+[18:34:31.973] 🎤 [DG-01] WebSocket 연결 요청 전송
+[18:34:31.973] 🎤 [MIC-02] 마이크 시작 시퀀스 진입
+[18:34:31.973] 🎤 [MIC-03] 기존 _audioSub 구독 해제 완료
+[18:34:31.973] 🎤 [MIC-04] audioRecorder.isRecording()=true
+[18:34:31.997] 🎤 [MIC-05] 기존 녹음 강제 중단 완료
+[18:34:32.014] 🎤 [MIC-06] startStream 성공
+[18:34:32.014] 🎤 [MIC-10] stream.listen 구독 완료 — 마이크 완전 활성화
+[18:34:32.015] 🎤 [LISTEN-05] connectAndStart 완료
+[18:34:32.033] 💾 [SAVE-08] arrayUnion 완료
+[18:34:32.109] 🎤 [MIC-07] 첫 오디오 패킷 수신 (2560B)
+[18:34:32.155] 💾 [HIST-UPD] msg_count+2, last="That sounds exciting! What do you want to do when you meet?"
+[18:34:36.030] 🎤 [MIC-08] 패킷 50개 송신 중 (마이크 정상 동작)
+[18:34:37.266] 📡 [DG-03] isFinal=true speechFinal=false chunk=""
+[18:34:40.340] 📡 [DG-03] isFinal=true speechFinal=false chunk=""
+[18:34:44.160] 📡 [DG-03] isFinal=true speechFinal=false chunk=""
+[18:34:46.582] 📡 [DG-03] isFinal=true speechFinal=true chunk="같이 영화라도 볼까?"
+[18:34:46.582] 📡 [DG-04] speech_final → onTurnEnded 호출 시도. finalText="같이 영화라도 볼까?"
+[18:34:46.582] 📡 [DG-05] onTurnEnded 실제 호출
+[18:34:46.582] 🔀 [LISTEN-03] onTurnEnded 콜백 수신: "같이 영화라도 볼까?"
+[18:34:46.582] 🔀 [STOP-01] speech_final 수신: "같이 영화라도 볼까?" (len=11)
+[18:34:46.582] 🔀 [STOP-03] 신규 발화 접수. 1.2초 대기창 시작
+[18:34:47.675] 📡 [DG-UE] UtteranceEnd 이벤트 → onTurnEnded. finalText=""
+[18:34:47.783] 🔀 [COMMIT-01] 확정: "같이 영화라도 볼까?" → 파이프라인 시작
+[18:34:47.783] 🎤 [DG-DISPOSE] dispose 진입
+[18:34:47.784] 🔀 [COMMIT-02] VoiceManager dispose 완료
+[18:34:47.784] 🔀 [COMMIT-03] _processRelayPipeline 호출
+[18:34:47.784] 🧠 [PIPE-01] Pipeline 시작 turn=3 input="같이 영화라도 볼까?"
+[18:34:47.784] 🧭 [SCROLL-TOP] index=5
+[18:34:50.472] 🔊 [TTS-01] [USER] addText: "Should we watch a" (pending=1)
+[18:34:50.815] 🔊 [TTS-01] [USER] addText: "movie together?" (pending=2)
+[18:34:50.822] 🧠 [PIPE-02] AI 스트림 요청: userText="Should we watch a movie together?"
+[18:34:50.822] 🧠 [PIPE-04] 유저 TTS 대기 시작. pending=2
+[18:34:51.511] 🧠 [PIPE-03] GPT 첫 청크 수신: ""
+[18:34:51.511] 🔊 [TTS-01] [AI] addText: "Yes," (pending=1)
+[18:34:51.511] [HYB-01] 발사(구두점): "Yes,"
+[18:34:52.636] 🔊 [TTS-02] [USER] API OK (20160B) for "movie together?"
+[18:34:52.737] 🔊 [TTS-02] [USER] API OK (22560B) for "Should we watch a"
+[18:34:52.761] 🧠 [PIPE-05] 유저 TTS fetch 완료. isBusy=true
+[18:34:53.078] 🔊 [TTS-02] [AI] API OK (10560B) for "Yes,"
+[18:34:55.261] 🧠 [PIPE-06] 유저 TTS 재생 완료 → AI 큐 개방
+[18:34:55.512] 🧠 [PIPE-GAP] 유저-AI 전환 안전 간격 250ms 완료
+[18:34:55.512] 🧠 [PIPE-07] setUserTurn(false) + setAiPaused(false). AI 재생 시작
+[18:34:55.512] 🧠 [PIPE-08] aiGenerationTask 완료. AI pending=0
+[18:34:55.513] 🔊 [TTS-01] [AI] addText: "that sounds fun!" (pending=1)
+[18:34:55.513] 🔊 [TTS-01] [AI] addText: "What movie do you want to watch?" (pending=2)
+[18:34:55.513] [HYB-02] remainder fired (49c)
+[18:34:56.740] [HYB-04-SAVED] 66240B
+[18:34:57.085] 🔊 [TTS-02] [AI] API OK (33600B) for "What movie do you want to watch?"
+[18:35:10.870] ⚠️ [PIPE-TIMEOUT] AI TTS 15초 초과, 강제 진행
+[18:35:10.870] 🧠 [PIPE-09] AI TTS 재생 완료
+[18:35:12.134] 🔤 [AI-ORIG] AI original 생성 완료 → UI 반영 및 저장
+[18:35:12.134] 💾 [SAVE-01] 저장 시작. chatLines=2개
+[18:35:12.134] 💾 [SAVE-02] uid=rJChsLrIqAhXhLZotYeeLZo6KK42, sessionDocId=6rhRdeuGI1mtA0e2UUxi
+[18:35:12.135] 💾 [SAVE-07] 기존 세션에 append 시도. docId=6rhRdeuGI1mtA0e2UUxi
+[18:35:12.135] 🧠 [PIPE-10] Firestore 저장 호출 완료
+[18:35:12.135] 🧠 [PIPE-END] finally 진입. active=true turn=3/current=3 mounted=true
+[18:35:12.135] 🧠 [PIPE-RESTART] 마이크 재시작 시도
+[18:35:12.136] 🎤 [LISTEN-01] _startDeepgramListening 진입, VoiceManager 생성
+[18:35:12.137] 🌐 [LANG] nativeLang="Korean" → Deepgram code="ko"
+[18:35:12.137] 🎤 [LISTEN-04] connectAndStart 호출 직전
+[18:35:12.137] 🎤 [DG-00] connectAndStart 진입
+[18:35:12.137] 🎤 [MIC-01] _connect 진입
+[18:35:12.137] 🎤 [DG-01] WebSocket 연결 요청 전송
+[18:35:12.137] 🎤 [MIC-02] 마이크 시작 시퀀스 진입
+[18:35:12.137] 🎤 [MIC-03] 기존 _audioSub 구독 해제 완료
+[18:35:12.137] 🎤 [MIC-04] audioRecorder.isRecording()=true
+[18:35:12.174] 💾 [SAVE-08] arrayUnion 완료
+[18:35:12.198] 🎤 [MIC-05] 기존 녹음 강제 중단 완료
+[18:35:12.214] 🎤 [MIC-06] startStream 성공
+[18:35:12.214] 🎤 [MIC-10] stream.listen 구독 완료 — 마이크 완전 활성화
+[18:35:12.214] 🎤 [LISTEN-05] connectAndStart 완료
+[18:35:12.340] 🎤 [MIC-07] 첫 오디오 패킷 수신 (2560B)
+[18:35:12.344] 💾 [HIST-UPD] msg_count+2, last="Yes, that sounds fun! What movie do you want to watch?"
+
+
+===========================================
+[18:31:17.607] 🎤 [LISTEN-01] _startDeepgramListening 진입, VoiceManager 생성
+[18:31:17.607] 🌐 [LANG] nativeLang="Korean" → Deepgram code="ko"
+[18:31:17.607] 🎤 [LISTEN-04] connectAndStart 호출 직전
+[18:31:17.607] 🎤 [DG-00] connectAndStart 진입
+[18:31:17.607] 🎤 [MIC-01] _connect 진입
+[18:31:17.607] 🎤 [DG-01] WebSocket 연결 요청 전송
+[18:31:17.608] 🎤 [MIC-02] 마이크 시작 시퀀스 진입
+[18:31:17.608] 🎤 [MIC-03] 기존 _audioSub 구독 해제 완료
+[18:31:17.608] 🎤 [MIC-04] audioRecorder.isRecording()=false
+[18:31:17.635] 🎤 [MIC-06] startStream 성공
+[18:31:17.635] 🎤 [MIC-10] stream.listen 구독 완료 — 마이크 완전 활성화
+[18:31:17.635] 🎤 [LISTEN-05] connectAndStart 완료
+[18:31:17.732] 🎤 [MIC-07] 첫 오디오 패킷 수신 (2560B)
+[18:31:19.635] 💡 [NUDGE] 2초 침묵 → AI 오프너 발화
+[18:31:19.635] 🎤 [DG-DISPOSE] dispose 진입
+[18:31:20.155] 🔊 [TTS-01] [AI] addText: "Hey!" (pending=1)
+[18:31:20.155] [HYB-01] 발사(구두점): "Hey!"
+[18:31:20.302] 🔊 [TTS-01] [AI] addText: "What’s on your mind today?" (pending=2)
+[18:31:20.302] [HYB-02] remainder fired (26c)
+[18:31:21.964] 🔊 [TTS-02] [AI] API OK (27840B) for "What’s on your mind today?"
+[18:31:22.083] [HYB-04-SAVED] 32160B
+[18:31:22.098] 🔊 [TTS-02] [AI] API OK (8160B) for "Hey!"
+[18:31:25.012] 📚 [HIST-NEW] chat_history 방 생성: mRQnCWBKbGnH8IQTcFMt
+[18:31:25.088] 💾 [HIST-UPD] msg_count+1, last="Hey! What’s on your mind today?"
+[18:31:25.088] 🎤 [LISTEN-01] _startDeepgramListening 진입, VoiceManager 생성
+[18:31:25.088] 🌐 [LANG] nativeLang="Korean" → Deepgram code="ko"
+[18:31:25.088] 🎤 [LISTEN-04] connectAndStart 호출 직전
+[18:31:25.088] 🎤 [DG-00] connectAndStart 진입
+[18:31:25.088] 🎤 [MIC-01] _connect 진입
+[18:31:25.089] 🎤 [DG-01] WebSocket 연결 요청 전송
+[18:31:25.089] 🎤 [MIC-02] 마이크 시작 시퀀스 진입
+[18:31:25.089] 🎤 [MIC-03] 기존 _audioSub 구독 해제 완료
+[18:31:25.089] 🎤 [MIC-04] audioRecorder.isRecording()=true
+[18:31:25.116] 🎤 [MIC-05] 기존 녹음 강제 중단 완료
+[18:31:25.133] 🎤 [MIC-06] startStream 성공
+[18:31:25.133] 🎤 [MIC-10] stream.listen 구독 완료 — 마이크 완전 활성화
+[18:31:25.133] 🎤 [LISTEN-05] connectAndStart 완료
+[18:31:25.227] 🎤 [MIC-07] 첫 오디오 패킷 수신 (2560B)
+[18:31:29.148] 🎤 [MIC-08] 패킷 50개 송신 중 (마이크 정상 동작)
+[18:31:29.592] 📡 [DG-03] isFinal=true speechFinal=true chunk="오늘 등산 갈까?"
+[18:31:29.592] 📡 [DG-04] speech_final → onTurnEnded 호출 시도. finalText="오늘 등산 갈까?"
+[18:31:29.592] 📡 [DG-05] onTurnEnded 실제 호출
+[18:31:29.592] 🔀 [LISTEN-03] onTurnEnded 콜백 수신: "오늘 등산 갈까?"
+[18:31:29.592] 🔀 [STOP-01] speech_final 수신: "오늘 등산 갈까?" (len=9)
+[18:31:29.592] 🔀 [STOP-03] 신규 발화 접수. 1.2초 대기창 시작
+[18:31:30.652] 📡 [DG-UE] UtteranceEnd 이벤트 → onTurnEnded. finalText=""
+[18:31:30.793] 🔀 [COMMIT-01] 확정: "오늘 등산 갈까?" → 파이프라인 시작
+[18:31:30.793] 🎤 [DG-DISPOSE] dispose 진입
+[18:31:30.794] 🔀 [COMMIT-02] VoiceManager dispose 완료
+[18:31:30.794] 🔀 [COMMIT-03] _processRelayPipeline 호출
+[18:31:30.794] 🧠 [PIPE-01] Pipeline 시작 turn=1 input="오늘 등산 갈까?"
+[18:31:30.794] 🧭 [SCROLL-TOP] index=1
+[18:31:31.253] 🔊 [TTS-01] [USER] addText: "Should we go hiking" (pending=1)
+[18:31:31.295] 🔊 [TTS-01] [USER] addText: "today?" (pending=2)
+[18:31:31.301] 🧠 [PIPE-02] AI 스트림 요청: userText="Should we go hiking today?"
+[18:31:31.302] 🧠 [PIPE-04] 유저 TTS 대기 시작. pending=2
+[18:31:31.930] 🧠 [PIPE-03] GPT 첫 청크 수신: ""
+[18:31:31.931] 🔊 [TTS-01] [AI] addText: "That sounds great!" (pending=1)
+[18:31:31.932] [HYB-01] 발사(구두점): "That sounds great!"
+[18:31:32.343] 🔊 [TTS-02] [USER] API OK (11040B) for "today?"
+[18:31:32.348] 🔊 [TTS-02] [USER] API OK (21120B) for "Should we go hiking"
+[18:31:32.373] 🧠 [PIPE-05] 유저 TTS fetch 완료. isBusy=true
+[18:31:34.067] 🔊 [TTS-02] [AI] API OK (22560B) for "That sounds great!"
+[18:31:34.313] 🧠 [PIPE-06] 유저 TTS 재생 완료 → AI 큐 개방
+[18:31:34.565] 🧠 [PIPE-GAP] 유저-AI 전환 안전 간격 250ms 완료
+[18:31:34.565] 🧠 [PIPE-07] setUserTurn(false) + setAiPaused(false). AI 재생 시작
+[18:31:34.565] 🧠 [PIPE-08] aiGenerationTask 완료. AI pending=0
+[18:31:34.565] 🔊 [TTS-01] [AI] addText: "Do you have a place in mind?" (pending=1)
+[18:31:34.565] [HYB-02] remainder fired (28c)
+[18:31:35.626] 🔊 [TTS-02] [AI] API OK (26400B) for "Do you have a place in mind?"
+[18:31:35.746] [HYB-04-SAVED] 45600B
+[18:31:37.373] 🧠 [PIPE-09] AI TTS 재생 완료
+[18:31:38.176] 🔤 [AI-ORIG] AI original 생성 완료 → UI 반영 및 저장
+[18:31:38.176] 💾 [SAVE-01] 저장 시작. chatLines=2개
+[18:31:38.176] 💾 [SAVE-02] uid=rJChsLrIqAhXhLZotYeeLZo6KK42, sessionDocId=null
+[18:31:38.176] 💾 [SAVE-03] 첫 대화 → 새 세션 생성 시도
+[18:31:38.177] 🧠 [PIPE-10] Firestore 저장 호출 완료
+[18:31:38.177] 🧠 [PIPE-END] finally 진입. active=true turn=1/current=1 mounted=true
+[18:31:38.177] 🧠 [PIPE-RESTART] 마이크 재시작 시도
+[18:31:38.179] 🎤 [LISTEN-01] _startDeepgramListening 진입, VoiceManager 생성
+[18:31:38.179] 🌐 [LANG] nativeLang="Korean" → Deepgram code="ko"
+[18:31:38.179] 🎤 [LISTEN-04] connectAndStart 호출 직전
+[18:31:38.179] 🎤 [DG-00] connectAndStart 진입
+[18:31:38.179] 🎤 [MIC-01] _connect 진입
+[18:31:38.179] 🎤 [DG-01] WebSocket 연결 요청 전송
+[18:31:38.179] 🎤 [MIC-02] 마이크 시작 시퀀스 진입
+[18:31:38.179] 🎤 [MIC-03] 기존 _audioSub 구독 해제 완료
+[18:31:38.180] 🎤 [MIC-04] audioRecorder.isRecording()=true
+[18:31:38.186] 💾 [SAVE-04] total_sessions=382 → next=383
+[18:31:38.204] 🎤 [MIC-05] 기존 녹음 강제 중단 완료
+[18:31:38.221] 🎤 [MIC-06] startStream 성공
+[18:31:38.221] 🎤 [MIC-10] stream.listen 구독 완료 — 마이크 완전 활성화
+[18:31:38.221] 🎤 [LISTEN-05] connectAndStart 완료
+[18:31:38.238] 💾 [SAVE-05] 새 세션 생성 완료. docId=9ybOcqhdWKkrhcCWpJ78
+[18:31:38.283] 💾 [SAVE-06] users 문서 total_sessions 업데이트 완료
+[18:31:38.293] 💾 [HIST-UPD] msg_count+2, last="That sounds great! Do you have a place in mind?"
+[18:31:38.316] 🎤 [MIC-07] 첫 오디오 패킷 수신 (2560B)
+[18:31:40.977] 📡 [DG-03] isFinal=true speechFinal=true chunk="북한산호 때"
+[18:31:40.978] 📡 [DG-04] speech_final → onTurnEnded 호출 시도. finalText="북한산호 때"
+[18:31:40.978] 📡 [DG-05] onTurnEnded 실제 호출
+[18:31:40.978] 🔀 [LISTEN-03] onTurnEnded 콜백 수신: "북한산호 때"
+[18:31:40.978] 🔀 [STOP-01] speech_final 수신: "북한산호 때" (len=6)
+[18:31:40.978] 🔀 [STOP-03] 신규 발화 접수. 1.2초 대기창 시작
+[18:31:42.010] 📡 [DG-UE] UtteranceEnd 이벤트 → onTurnEnded. finalText=""
+[18:31:42.178] 🔀 [COMMIT-01] 확정: "북한산호 때" → 파이프라인 시작
+[18:31:42.178] 🎤 [DG-DISPOSE] dispose 진입
+[18:31:42.179] 🔀 [COMMIT-02] VoiceManager dispose 완료
+[18:31:42.179] 🔀 [COMMIT-03] _processRelayPipeline 호출
+[18:31:42.179] 🧠 [PIPE-01] Pipeline 시작 turn=2 input="북한산호 때"
+[18:31:42.179] 🧭 [SCROLL-TOP] index=3
+[18:31:42.654] ⚠️ [EVAPORATE] 증발 감지 → 턴 취소
+[18:31:42.654] 🔊 [TTS-01] [AI] addText: "Pardon?" (pending=1)
+[18:31:42.654] 🧠 [PIPE-END] finally 진입. active=true turn=2/current=2 mounted=true
+[18:31:42.654] 🧠 [PIPE-RESTART] 마이크 재시작 시도
+[18:31:42.657] 🎤 [LISTEN-01] _startDeepgramListening 진입, VoiceManager 생성
+[18:31:42.657] 🌐 [LANG] nativeLang="Korean" → Deepgram code="ko"
+[18:31:42.657] 🎤 [LISTEN-04] connectAndStart 호출 직전
+[18:31:42.657] 🎤 [DG-00] connectAndStart 진입
+[18:31:42.657] 🎤 [MIC-01] _connect 진입
+[18:31:42.657] 🎤 [DG-01] WebSocket 연결 요청 전송
+[18:31:42.658] 🎤 [MIC-02] 마이크 시작 시퀀스 진입
+[18:31:42.658] 🎤 [MIC-03] 기존 _audioSub 구독 해제 완료
+[18:31:42.658] 🎤 [MIC-04] audioRecorder.isRecording()=true
+[18:31:42.796] 🎤 [MIC-05] 기존 녹음 강제 중단 완료
+[18:31:42.810] 🎤 [MIC-06] startStream 성공
+[18:31:42.811] 🎤 [MIC-10] stream.listen 구독 완료 — 마이크 완전 활성화
+[18:31:42.811] 🎤 [LISTEN-05] connectAndStart 완료
+[18:31:42.942] 🎤 [MIC-07] 첫 오디오 패킷 수신 (2560B)
+[18:31:46.863] 🎤 [MIC-08] 패킷 50개 송신 중 (마이크 정상 동작)
+[18:31:48.218] 📡 [DG-03] isFinal=true speechFinal=false chunk="북한산으로 등산 가자"
+[18:31:49.124] 📡 [DG-UE] UtteranceEnd 이벤트 → onTurnEnded. finalText="북한산으로 등산 가자"
+[18:31:49.124] 🔀 [LISTEN-03] onTurnEnded 콜백 수신: "북한산으로 등산 가자"
+[18:31:49.124] 🔀 [STOP-01] speech_final 수신: "북한산으로 등산 가자" (len=11)
+[18:31:49.124] 🔀 [STOP-03] 신규 발화 접수. 1.2초 대기창 시작
+[18:31:50.325] 🔀 [COMMIT-01] 확정: "북한산으로 등산 가자" → 파이프라인 시작
+[18:31:50.325] 🎤 [DG-DISPOSE] dispose 진입
+[18:31:50.326] 🔀 [COMMIT-02] VoiceManager dispose 완료
+[18:31:50.326] 🔀 [COMMIT-03] _processRelayPipeline 호출
+[18:31:50.326] 🧠 [PIPE-01] Pipeline 시작 turn=3 input="북한산으로 등산 가자"
+[18:31:50.326] 🧭 [SCROLL-TOP] index=2
+[18:31:50.833] 🔊 [TTS-01] [USER] addText: "Let's go hiking to" (pending=1)
+[18:31:51.023] 🔊 [TTS-01] [USER] addText: "Bukhansan." (pending=2)
+[18:31:51.025] 🧠 [PIPE-02] AI 스트림 요청: userText="Let's go hiking to Bukhansan."
+[18:31:51.025] 🧠 [PIPE-04] 유저 TTS 대기 시작. pending=2
+[18:31:51.492] 🧠 [PIPE-03] GPT 첫 청크 수신: ""
+[18:31:51.522] 🔊 [TTS-01] [AI] addText: "Bukhansan is a beautiful" (pending=1)
+[18:31:51.522] [HYB-01] 발사(4단어): "Bukhansan is a beautiful"
+[18:31:52.581] 🔊 [TTS-02] [USER] API OK (13920B) for "Bukhansan."
+[18:31:52.877] 🔊 [TTS-02] [AI] API OK (29760B) for "Bukhansan is a beautiful"
+[18:31:54.157] 🔊 [TTS-02] [USER] API OK (23520B) for "Let's go hiking to"
+[18:31:54.190] 🧠 [PIPE-05] 유저 TTS fetch 완료. isBusy=true
+[18:31:55.280] 🔊 [TTS-02] [AI] API OK (9600B) for "Pardon?"
+[18:31:56.437] 🧠 [PIPE-06] 유저 TTS 재생 완료 → AI 큐 개방
+[18:31:56.498] 🎤 [LISTEN-01] _startDeepgramListening 진입, VoiceManager 생성
+[18:31:56.498] 🌐 [LANG] nativeLang="Korean" → Deepgram code="ko"
+[18:31:56.498] 🎤 [LISTEN-04] connectAndStart 호출 직전
+[18:31:56.498] 🎤 [DG-00] connectAndStart 진입
+[18:31:56.498] 🎤 [MIC-01] _connect 진입
+[18:31:56.499] 🎤 [DG-01] WebSocket 연결 요청 전송
+[18:31:56.499] 🎤 [MIC-02] 마이크 시작 시퀀스 진입
+[18:31:56.499] 🎤 [MIC-03] 기존 _audioSub 구독 해제 완료
+[18:31:56.500] 🎤 [MIC-04] audioRecorder.isRecording()=true
+[18:31:56.524] 🎤 [MIC-05] 기존 녹음 강제 중단 완료
+[18:31:56.543] 🎤 [MIC-06] startStream 성공
+[18:31:56.543] 🎤 [MIC-10] stream.listen 구독 완료 — 마이크 완전 활성화
+[18:31:56.543] 🎤 [LISTEN-05] connectAndStart 완료
+[18:31:56.638] 🎤 [MIC-07] 첫 오디오 패킷 수신 (2560B)
+[18:31:56.688] 🧠 [PIPE-GAP] 유저-AI 전환 안전 간격 250ms 완료
+[18:31:56.688] 🧠 [PIPE-07] setUserTurn(false) + setAiPaused(false). AI 재생 시작
+[18:31:56.689] 🧠 [PIPE-08] aiGenerationTask 완료. AI pending=0
+[18:31:56.689] 🔊 [TTS-01] [AI] addText: "choice!" (pending=1)
+[18:31:56.689] 🔊 [TTS-01] [AI] addText: "Do you know the best trail to take?" (pending=2)
+[18:31:56.689] [HYB-02] remainder fired (43c)
+[18:31:58.005] 🔊 [TTS-02] [AI] API OK (41280B) for "Do you know the best trail to take?"
+[18:31:58.657] 🔊 [TTS-02] [AI] API OK (11040B) for "choice!"
+[18:31:59.619] [HYB-04-SAVED] 82080B
+[18:32:01.953] 🧠 [PIPE-09] AI TTS 재생 완료
+[18:32:02.750] 🔤 [AI-ORIG] AI original 생성 완료 → UI 반영 및 저장
+[18:32:02.750] 💾 [SAVE-01] 저장 시작. chatLines=2개
+[18:32:02.750] 💾 [SAVE-02] uid=rJChsLrIqAhXhLZotYeeLZo6KK42, sessionDocId=9ybOcqhdWKkrhcCWpJ78
+[18:32:02.750] 💾 [SAVE-07] 기존 세션에 append 시도. docId=9ybOcqhdWKkrhcCWpJ78
+[18:32:02.750] 🧠 [PIPE-10] Firestore 저장 호출 완료
+[18:32:02.750] 🧠 [PIPE-END] finally 진입. active=true turn=3/current=3 mounted=true
+[18:32:02.750] 🧠 [PIPE-RESTART] 마이크 재시작 시도
+[18:32:02.751] 🎤 [LISTEN-01] _startDeepgramListening 진입, VoiceManager 생성
+[18:32:02.751] 🌐 [LANG] nativeLang="Korean" → Deepgram code="ko"
+[18:32:02.751] 🎤 [LISTEN-04] connectAndStart 호출 직전
+[18:32:02.751] 🎤 [DG-00] connectAndStart 진입
+[18:32:02.751] 🎤 [MIC-01] _connect 진입
+[18:32:02.751] 🎤 [DG-01] WebSocket 연결 요청 전송
+[18:32:02.751] 🎤 [MIC-02] 마이크 시작 시퀀스 진입
+[18:32:02.751] 🎤 [MIC-03] 기존 _audioSub 구독 해제 완료
+[18:32:02.752] 🎤 [MIC-04] audioRecorder.isRecording()=true
+[18:32:02.775] 🎤 [MIC-09] 오디오 스트림 종료 (총 2 패킷)
+[18:32:02.775] 🎤 [MIC-05] 기존 녹음 강제 중단 완료
+[18:32:02.791] 🎤 [MIC-06] startStream 성공
+[18:32:02.791] 🎤 [MIC-10] stream.listen 구독 완료 — 마이크 완전 활성화
+[18:32:02.791] 🎤 [LISTEN-05] connectAndStart 완료
+[18:32:02.817] 💾 [SAVE-08] arrayUnion 완료
+[18:32:02.887] 🎤 [MIC-07] 첫 오디오 패킷 수신 (2560B)
+[18:32:02.954] 💾 [HIST-UPD] msg_count+2, last="Bukhansan is a beautiful choice! Do you know the best trail to take?"
+[18:32:06.807] 🎤 [MIC-08] 패킷 50개 송신 중 (마이크 정상 동작)
+[18:32:07.807] 📡 [DG-03] isFinal=true speechFinal=true chunk=""
+[18:32:07.807] 📡 [DG-04] speech_final → onTurnEnded 호출 시도. finalText=""
+[18:32:07.807] 📡 [DG-06] finalText 빈값 → onTurnEnded 스킵
+[18:32:11.656] 📡 [DG-03] isFinal=true speechFinal=true chunk="건강코 들어가지 뭐."
+[18:32:11.657] 📡 [DG-04] speech_final → onTurnEnded 호출 시도. finalText="건강코 들어가지 뭐."
+[18:32:11.657] 📡 [DG-05] onTurnEnded 실제 호출
+[18:32:11.657] 🔀 [LISTEN-03] onTurnEnded 콜백 수신: "건강코 들어가지 뭐."
+[18:32:11.657] 🔀 [STOP-01] speech_final 수신: "건강코 들어가지 뭐." (len=11)
+[18:32:11.657] 🔀 [STOP-03] 신규 발화 접수. 1.2초 대기창 시작
+[18:32:12.640] 📡 [DG-UE] UtteranceEnd 이벤트 → onTurnEnded. finalText=""
+[18:32:12.858] 🔀 [COMMIT-01] 확정: "건강코 들어가지 뭐." → 파이프라인 시작
+[18:32:12.859] 🎤 [DG-DISPOSE] dispose 진입
+[18:32:12.859] 🔀 [COMMIT-02] VoiceManager dispose 완료
+[18:32:12.859] 🔀 [COMMIT-03] _processRelayPipeline 호출
+[18:32:12.859] 🧠 [PIPE-01] Pipeline 시작 turn=4 input="건강코 들어가지 뭐."
+[18:32:12.859] 🧭 [SCROLL-TOP] index=4
+[18:32:13.547] ⚠️ [EVAPORATE] 증발 감지 → 턴 취소
+[18:32:13.547] 🔊 [TTS-01] [AI] addText: "Pardon?" (pending=1)
+[18:32:13.547] 🧠 [PIPE-END] finally 진입. active=true turn=4/current=4 mounted=true
+[18:32:13.547] 🧠 [PIPE-RESTART] 마이크 재시작 시도
+[18:32:13.549] 🎤 [LISTEN-01] _startDeepgramListening 진입, VoiceManager 생성
+[18:32:13.549] 🌐 [LANG] nativeLang="Korean" → Deepgram code="ko"
+[18:32:13.549] 🎤 [LISTEN-04] connectAndStart 호출 직전
+[18:32:13.549] 🎤 [DG-00] connectAndStart 진입
+[18:32:13.549] 🎤 [MIC-01] _connect 진입
+[18:32:13.549] 🎤 [DG-01] WebSocket 연결 요청 전송
+[18:32:13.550] 🎤 [MIC-02] 마이크 시작 시퀀스 진입
+[18:32:13.550] 🎤 [MIC-03] 기존 _audioSub 구독 해제 완료
+[18:32:13.550] 🎤 [MIC-04] audioRecorder.isRecording()=true
+[18:32:13.697] 🎤 [MIC-05] 기존 녹음 강제 중단 완료
+[18:32:13.712] 🎤 [MIC-06] startStream 성공
+[18:32:13.712] 🎤 [MIC-10] stream.listen 구독 완료 — 마이크 완전 활성화
+[18:32:13.712] 🎤 [LISTEN-05] connectAndStart 완료
+[18:32:13.896] 🎤 [MIC-07] 첫 오디오 패킷 수신 (2560B)
+[18:32:14.356] 🎤 [LISTEN-01] _startDeepgramListening 진입, VoiceManager 생성
+[18:32:14.357] 🌐 [LANG] nativeLang="Korean" → Deepgram code="ko"
+[18:32:14.357] 🎤 [LISTEN-04] connectAndStart 호출 직전
+[18:32:14.357] 🎤 [DG-00] connectAndStart 진입
+[18:32:14.357] 🎤 [MIC-01] _connect 진입
+[18:32:14.357] 🎤 [DG-01] WebSocket 연결 요청 전송
+[18:32:14.357] 🎤 [MIC-02] 마이크 시작 시퀀스 진입
+[18:32:14.357] 🎤 [MIC-03] 기존 _audioSub 구독 해제 완료
+[18:32:14.358] 🎤 [MIC-04] audioRecorder.isRecording()=true
+[18:32:14.423] 🎤 [MIC-09] 오디오 스트림 종료 (총 7 패킷)
+[18:32:14.423] 🎤 [MIC-05] 기존 녹음 강제 중단 완료
+[18:32:14.438] 🎤 [MIC-06] startStream 성공
+[18:32:14.438] 🎤 [MIC-10] stream.listen 구독 완료 — 마이크 완전 활성화
+[18:32:14.438] 🎤 [LISTEN-05] connectAndStart 완료
+[18:32:14.539] 🎤 [MIC-07] 첫 오디오 패킷 수신 (2560B)
+[18:32:18.459] 🎤 [MIC-08] 패킷 50개 송신 중 (마이크 정상 동작)
+[18:32:19.721] 📡 [DG-03] isFinal=true speechFinal=false chunk="사람들이 제일 좋아하는 길로 가자"
+[18:32:20.232] 📡 [DG-03] isFinal=true speechFinal=true chunk=""
+[18:32:20.232] 📡 [DG-04] speech_final → onTurnEnded 호출 시도. finalText="사람들이 제일 좋아하는 길로 가자"
+[18:32:20.232] 📡 [DG-05] onTurnEnded 실제 호출
+[18:32:20.232] 🔀 [LISTEN-03] onTurnEnded 콜백 수신: "사람들이 제일 좋아하는 길로 가자"
+[18:32:20.232] 🔀 [STOP-01] speech_final 수신: "사람들이 제일 좋아하는 길로 가자" (len=18)
+[18:32:20.232] 🔀 [STOP-03] 신규 발화 접수. 1.2초 대기창 시작
+[18:32:20.232] 📡 [DG-UE] UtteranceEnd 이벤트 → onTurnEnded. finalText=""
+[18:32:21.433] 🔀 [COMMIT-01] 확정: "사람들이 제일 좋아하는 길로 가자" → 파이프라인 시작
+[18:32:21.433] 🎤 [DG-DISPOSE] dispose 진입
+[18:32:21.434] 🔀 [COMMIT-02] VoiceManager dispose 완료
+[18:32:21.434] 🔀 [COMMIT-03] _processRelayPipeline 호출
+[18:32:21.434] 🧠 [PIPE-01] Pipeline 시작 turn=5 input="사람들이 제일 좋아하는 길로 가자"
+[18:32:21.434] 🧭 [SCROLL-TOP] index=3
+[18:32:22.421] 🔊 [TTS-01] [USER] addText: "Let's go on the" (pending=1)
+[18:32:22.545] 🔊 [TTS-01] [USER] addText: "trail that people like the most." (pending=2)
+[18:32:22.557] 🧠 [PIPE-02] AI 스트림 요청: userText="Let's go on the trail that people like the most."
+[18:32:22.557] 🧠 [PIPE-04] 유저 TTS 대기 시작. pending=2
+[18:32:23.026] 🧠 [PIPE-03] GPT 첫 청크 수신: ""
+[18:32:23.028] 🔊 [TTS-01] [AI] addText: "That sounds perfect!" (pending=1)
+[18:32:23.028] [HYB-01] 발사(구두점): "That sounds perfect!"
+[18:32:24.328] 🔊 [TTS-02] [USER] API OK (19680B) for "Let's go on the"
+[18:32:24.582] 🔊 [TTS-02] [USER] API OK (41760B) for "trail that people like the most."
+[18:32:24.597] 🧠 [PIPE-05] 유저 TTS fetch 완료. isBusy=true
+[18:32:25.212] 🔊 [TTS-02] [AI] API OK (24000B) for "That sounds perfect!"
+[18:32:27.123] 📡 [DG-02] Metadata 수신 → onConnected 호출
+[18:32:27.123] ✅ [LISTEN-02] onConnected 콜백 실행
+[18:32:27.123] 🎤 [DG-WS-DONE] WebSocket onDone
+[18:32:27.123] 🎤 [DG-RETRY] 재연결 시도 1/5
+[18:32:27.624] 🎤 [MIC-01] _connect 진입
+[18:32:27.624] 🎤 [DG-01] WebSocket 연결 요청 전송
+[18:32:27.625] 🎤 [MIC-02] 마이크 시작 시퀀스 진입
+[18:32:27.625] 🎤 [MIC-03] 기존 _audioSub 구독 해제 완료
+[18:32:27.625] 🎤 [MIC-04] audioRecorder.isRecording()=true
+[18:32:27.672] 🎤 [MIC-05] 기존 녹음 강제 중단 완료
+[18:32:27.687] 🎤 [MIC-06] startStream 성공
+[18:32:27.687] 🎤 [MIC-10] stream.listen 구독 완료 — 마이크 완전 활성화
+[18:32:27.762] 🧠 [PIPE-06] 유저 TTS 재생 완료 → AI 큐 개방
+[18:32:27.788] 🎤 [MIC-07] 첫 오디오 패킷 수신 (2560B)
+[18:32:28.013] 🧠 [PIPE-GAP] 유저-AI 전환 안전 간격 250ms 완료
+[18:32:28.013] 🧠 [PIPE-07] setUserTurn(false) + setAiPaused(false). AI 재생 시작
+[18:32:28.014] 🧠 [PIPE-08] aiGenerationTask 완료. AI pending=0
+[18:32:28.014] 🔊 [TTS-01] [AI] addText: "I can't wait to see the views." (pending=1)
+[18:32:28.014] [HYB-02] remainder fired (30c)
+[18:32:29.238] [HYB-04-SAVED] 56160B
+[18:32:29.786] 🔊 [TTS-02] [AI] API OK (34560B) for "I can't wait to see the views."
+[18:32:31.738] 🧠 [PIPE-09] AI TTS 재생 완료
+[18:32:32.419] 🔤 [AI-ORIG] AI original 생성 완료 → UI 반영 및 저장
+[18:32:32.419] 💾 [SAVE-01] 저장 시작. chatLines=2개
+[18:32:32.419] 💾 [SAVE-02] uid=rJChsLrIqAhXhLZotYeeLZo6KK42, sessionDocId=9ybOcqhdWKkrhcCWpJ78
+[18:32:32.419] 💾 [SAVE-07] 기존 세션에 append 시도. docId=9ybOcqhdWKkrhcCWpJ78
+[18:32:32.419] 🧠 [PIPE-10] Firestore 저장 호출 완료
+[18:32:32.419] 🧠 [PIPE-END] finally 진입. active=true turn=5/current=5 mounted=true
+[18:32:32.419] 🧠 [PIPE-RESTART] 마이크 재시작 시도
+[18:32:32.421] 🎤 [LISTEN-01] _startDeepgramListening 진입, VoiceManager 생성
+[18:32:32.421] 🌐 [LANG] nativeLang="Korean" → Deepgram code="ko"
+[18:32:32.421] 🎤 [LISTEN-04] connectAndStart 호출 직전
+[18:32:32.421] 🎤 [DG-00] connectAndStart 진입
+[18:32:32.421] 🎤 [MIC-01] _connect 진입
+[18:32:32.421] 🎤 [DG-01] WebSocket 연결 요청 전송
+[18:32:32.421] 🎤 [MIC-02] 마이크 시작 시퀀스 진입
+[18:32:32.421] 🎤 [MIC-03] 기존 _audioSub 구독 해제 완료
+[18:32:32.421] 🎤 [MIC-04] audioRecorder.isRecording()=true
+[18:32:32.443] 🎤 [MIC-09] 오디오 스트림 종료 (총 5 패킷)
+[18:32:32.443] 🎤 [MIC-05] 기존 녹음 강제 중단 완료
+[18:32:32.458] 🎤 [MIC-06] startStream 성공
+[18:32:32.458] 🎤 [MIC-10] stream.listen 구독 완료 — 마이크 완전 활성화
+[18:32:32.458] 🎤 [LISTEN-05] connectAndStart 완료
+[18:32:32.467] 💾 [SAVE-08] arrayUnion 완료
+[18:32:32.554] 🎤 [MIC-07] 첫 오디오 패킷 수신 (2560B)
+[18:32:32.563] 💾 [HIST-UPD] msg_count+2, last="That sounds perfect! I can't wait to see the views."
+[18:32:36.475] 🎤 [MIC-08] 패킷 50개 송신 중 (마이크 정상 동작)
+[18:32:37.724] 📡 [DG-03] isFinal=true speechFinal=false chunk="단풍이 여름 털까?"
+[18:32:38.684] 📡 [DG-UE] UtteranceEnd 이벤트 → onTurnEnded. finalText="단풍이 여름 털까?"
+[18:32:38.684] 🔀 [LISTEN-03] onTurnEnded 콜백 수신: "단풍이 여름 털까?"
+[18:32:38.684] 🔀 [STOP-01] speech_final 수신: "단풍이 여름 털까?" (len=10)
+[18:32:38.684] 🔀 [STOP-03] 신규 발화 접수. 1.2초 대기창 시작
+[18:32:39.885] 🔀 [COMMIT-01] 확정: "단풍이 여름 털까?" → 파이프라인 시작
+[18:32:39.885] 🎤 [DG-DISPOSE] dispose 진입
+[18:32:39.886] 🔀 [COMMIT-02] VoiceManager dispose 완료
+[18:32:39.886] 🔀 [COMMIT-03] _processRelayPipeline 호출
+[18:32:39.886] 🧠 [PIPE-01] Pipeline 시작 turn=6 input="단풍이 여름 털까?"
+[18:32:39.886] 🧭 [SCROLL-TOP] index=5
+[18:32:40.501] ⚠️ [EVAPORATE] 증발 감지 → 턴 취소
+[18:32:40.503] 🔊 [TTS-01] [AI] addText: "Pardon?" (pending=1)
+[18:32:40.503] 🧠 [PIPE-END] finally 진입. active=true turn=6/current=6 mounted=true
+[18:32:40.503] 🧠 [PIPE-RESTART] 마이크 재시작 시도
+[18:32:40.505] 🎤 [LISTEN-01] _startDeepgramListening 진입, VoiceManager 생성
+[18:32:40.505] 🌐 [LANG] nativeLang="Korean" → Deepgram code="ko"
+[18:32:40.505] 🎤 [LISTEN-04] connectAndStart 호출 직전
+[18:32:40.505] 🎤 [DG-00] connectAndStart 진입
+[18:32:40.505] 🎤 [MIC-01] _connect 진입
+[18:32:40.505] 🎤 [DG-01] WebSocket 연결 요청 전송
+[18:32:40.506] 🎤 [MIC-02] 마이크 시작 시퀀스 진입
+[18:32:40.506] 🎤 [MIC-03] 기존 _audioSub 구독 해제 완료
+[18:32:40.506] 🎤 [MIC-04] audioRecorder.isRecording()=true
+[18:32:40.651] 🎤 [MIC-05] 기존 녹음 강제 중단 완료
+[18:32:40.666] 🎤 [MIC-06] startStream 성공
+[18:32:40.666] 🎤 [MIC-10] stream.listen 구독 완료 — 마이크 완전 활성화
+[18:32:40.666] 🎤 [LISTEN-05] connectAndStart 완료
+[18:32:40.851] 🎤 [MIC-07] 첫 오디오 패킷 수신 (2560B)
+[18:32:41.312] 🎤 [LISTEN-01] _startDeepgramListening 진입, VoiceManager 생성
+[18:32:41.312] 🌐 [LANG] nativeLang="Korean" → Deepgram code="ko"
+[18:32:41.312] 🎤 [LISTEN-04] connectAndStart 호출 직전
+[18:32:41.312] 🎤 [DG-00] connectAndStart 진입
+[18:32:41.312] 🎤 [MIC-01] _connect 진입
+[18:32:41.312] 🎤 [DG-01] WebSocket 연결 요청 전송
+[18:32:41.312] 🎤 [MIC-02] 마이크 시작 시퀀스 진입
+[18:32:41.312] 🎤 [MIC-03] 기존 _audioSub 구독 해제 완료
+[18:32:41.313] 🎤 [MIC-04] audioRecorder.isRecording()=true
+[18:32:41.378] 🎤 [MIC-09] 오디오 스트림 종료 (총 7 패킷)
+[18:32:41.378] 🎤 [MIC-05] 기존 녹음 강제 중단 완료
+[18:32:41.393] 🎤 [MIC-06] startStream 성공
+[18:32:41.393] 🎤 [MIC-10] stream.listen 구독 완료 — 마이크 완전 활성화
+[18:32:41.393] 🎤 [LISTEN-05] connectAndStart 완료
+[18:32:41.493] 🎤 [MIC-07] 첫 오디오 패킷 수신 (2560B)
+[18:32:44.412] 📡 [DG-02] Metadata 수신 → onConnected 호출
+[18:32:44.412] ✅ [LISTEN-02] onConnected 콜백 실행
+[18:32:44.413] 🎤 [DG-WS-DONE] WebSocket onDone
+[18:32:44.413] 🎤 [DG-RETRY] 재연결 시도 1/5
+[18:32:44.914] 🎤 [MIC-01] _connect 진입
+[18:32:44.915] 🎤 [DG-01] WebSocket 연결 요청 전송
+[18:32:44.915] 🎤 [MIC-02] 마이크 시작 시퀀스 진입
+[18:32:44.915] 🎤 [MIC-03] 기존 _audioSub 구독 해제 완료
+[18:32:44.916] 🎤 [MIC-04] audioRecorder.isRecording()=true
+[18:32:45.014] 🎤 [MIC-09] 오디오 스트림 종료 (총 44 패킷)
+[18:32:45.014] 🎤 [MIC-05] 기존 녹음 강제 중단 완료
+[18:32:45.028] 🎤 [MIC-06] startStream 성공
+[18:32:45.028] 🎤 [MIC-10] stream.listen 구독 완료 — 마이크 완전 활성화
+[18:32:45.157] 🎤 [MIC-07] 첫 오디오 패킷 수신 (2560B)
+[18:32:49.076] 🎤 [MIC-08] 패킷 50개 송신 중 (마이크 정상 동작)
+[18:32:50.266] 📡 [DG-03] isFinal=true speechFinal=false chunk=""
+[18:32:54.476] 📡 [DG-03] isFinal=true speechFinal=false chunk=""
+[18:32:58.372] 📡 [DG-02] Metadata 수신 → onConnected 호출
+[18:32:58.372] ✅ [LISTEN-02] onConnected 콜백 실행
+[18:32:58.373] 🎤 [DG-WS-DONE] WebSocket onDone
+[18:32:58.373] 🎤 [DG-RETRY] 재연결 시도 1/5
+[18:32:58.873] 🎤 [MIC-01] _connect 진입
+[18:32:58.874] 🎤 [DG-01] WebSocket 연결 요청 전송
+[18:32:58.874] 🎤 [MIC-02] 마이크 시작 시퀀스 진입
+[18:32:58.874] 🎤 [MIC-03] 기존 _audioSub 구독 해제 완료
+[18:32:58.875] 🎤 [MIC-04] audioRecorder.isRecording()=true
+[18:32:59.006] 🎤 [MIC-09] 오디오 스트림 종료 (총 173 패킷)
+[18:32:59.006] 🎤 [MIC-05] 기존 녹음 강제 중단 완료
+[18:32:59.021] 🎤 [MIC-06] startStream 성공
+[18:32:59.021] 🎤 [MIC-10] stream.listen 구독 완료 — 마이크 완전 활성화
+[18:32:59.157] 🎤 [MIC-07] 첫 오디오 패킷 수신 (2560B)
+[18:33:03.076] 🎤 [MIC-08] 패킷 50개 송신 중 (마이크 정상 동작)
+[18:33:04.337] 📡 [DG-03] isFinal=true speechFinal=false chunk=""
+[18:33:07.440] 📡 [DG-03] isFinal=true speechFinal=true chunk=""
+[18:33:07.440] 📡 [DG-04] speech_final → onTurnEnded 호출 시도. finalText=""
+[18:33:07.440] 📡 [DG-06] finalText 빈값 → onTurnEnded 스킵
+[18:33:11.157] 📡 [DG-02] Metadata 수신 → onConnected 호출
+[18:33:11.157] ✅ [LISTEN-02] onConnected 콜백 실행
+[18:33:11.158] 🎤 [DG-WS-DONE] WebSocket onDone
+[18:33:11.158] 🎤 [DG-RETRY] 재연결 시도 1/5
+[18:33:11.659] 🎤 [MIC-01] _connect 진입
+[18:33:11.660] 🎤 [DG-01] WebSocket 연결 요청 전송
+[18:33:11.660] 🎤 [MIC-02] 마이크 시작 시퀀스 진입
+[18:33:11.660] 🎤 [MIC-03] 기존 _audioSub 구독 해제 완료
+[18:33:11.660] 🎤 [MIC-04] audioRecorder.isRecording()=true
+[18:33:11.803] 🎤 [MIC-09] 오디오 스트림 종료 (총 158 패킷)
+[18:33:11.803] 🎤 [MIC-05] 기존 녹음 강제 중단 완료
+[18:33:11.818] 🎤 [MIC-06] startStream 성공
+[18:33:11.818] 🎤 [MIC-10] stream.listen 구독 완료 — 마이크 완전 활성화
+[18:33:11.950] 🎤 [MIC-07] 첫 오디오 패킷 수신 (2560B)
+[18:33:15.047] 📡 [DG-02] Metadata 수신 → onConnected 호출
+[18:33:15.047] ✅ [LISTEN-02] onConnected 콜백 실행
+[18:33:15.048] 🎤 [DG-WS-DONE] WebSocket onDone
+[18:33:15.048] 🎤 [DG-RETRY] 재연결 시도 1/5
+[18:33:15.549] 🎤 [MIC-01] _connect 진입
+[18:33:15.550] 🎤 [DG-01] WebSocket 연결 요청 전송
+[18:33:15.550] 🎤 [MIC-02] 마이크 시작 시퀀스 진입
+[18:33:15.550] 🎤 [MIC-03] 기존 _audioSub 구독 해제 완료
+[18:33:15.552] 🎤 [MIC-04] audioRecorder.isRecording()=true
+[18:33:15.717] 🎤 [MIC-09] 오디오 스트림 종료 (총 47 패킷)
+[18:33:15.717] 🎤 [MIC-05] 기존 녹음 강제 중단 완료
+[18:33:15.733] 🎤 [MIC-06] startStream 성공
+[18:33:15.733] 🎤 [MIC-10] stream.listen 구독 완료 — 마이크 완전 활성화
+[18:33:15.877] 🎤 [MIC-07] 첫 오디오 패킷 수신 (2560B)
+[18:33:19.229] 📡 [DG-03] isFinal=true speechFinal=true chunk=""
+[18:33:19.229] 📡 [DG-04] speech_final → onTurnEnded 호출 시도. finalText=""
+[18:33:19.229] 📡 [DG-06] finalText 빈값 → onTurnEnded 스킵
+[18:33:19.796] 🎤 [MIC-08] 패킷 50개 송신 중 (마이크 정상 동작)

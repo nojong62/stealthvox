@@ -47,240 +47,1041 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# [지시문] ChunkedTtsFetcher TTS 타임아웃 튜닝 (옵션 A) — 4개 모드 일괄 적용
+# 지시문: 오인식·불만 발화 → 직전 대사 삭제 후 재질문/재대답 (3개 모드)
 
-## 0. 배경 및 목적
+## 0. 목적
 
-OpenAI TTS-1 API가 간헐적으로 10초 이상 지연되는 스파이크가 발생하며,
-현재 `ChunkedTtsFetcher._fetch`의 timeout 10초 + 재시도 1회(무음 catch) 설정 때문에
-사용자가 첫 청크 재생 후 최대 10.5초 이상의 공백을 듣게 되는 문제가 확인됨
-(로그 증거: 22:48:05 addText → 22:48:17 API OK = 11.6초 등 3건).
+유저가 **재진술 없이 불만만 말하는 경우**를 새로 처리한다.
 
-**변경 내용 (이것만 변경, 다른 것 일절 금지):**
-- HTTP timeout: `10초 → 5초`
-- 총 시도 횟수: `2회 → 3회`
-- 재시도 간 딜레이: `500ms → 300ms`
-- 타임아웃/예외/최종실패 로그 추가 (기존 무음 `catch (_)` 제거)
+| 불만 유형 | 신규 마커 | 동작 |
+|---|---|---|
+| "내 말이 그런 뜻이 아니야" / "잘못 들었어(적었어)" | `[MISHEARD]` | 잘못 적힌 직전 교환 삭제 → 스텝익스팬드: "아, 제가 잘못 들었네요. 다시 질문할게요." + 새 질문 낭독 / 프리톡·롤플레이: "다시 한 번 말씀해 주세요." + 재청취 |
+| "무슨 질문(대답)이 그래" 등 AI 발화 자체 불만 | `[DISSATISFIED]` | 스텝익스팬드: 기존 구현 유지(신호어만 보강) / 프리톡·롤플레이: **신규** — 거절된 AI 응답만 삭제 → "그럼 다시 대답해 볼게요." + 같은 유저 발화에 다른 응답 재생성·낭독 |
 
-**절대 건드리지 말 것:**
-- `_pushReady()` 순서 보장 로직
-- `_pendingCount` 증감 위치 (`_buffer[id] = result; _pendingCount--;` 이하 4줄은 원형 유지)
-- `addText`, `reset`, 캐시 1단계 로직
-- `HybridTtsPlayer.onStreamEnd`의 15초 타임아웃 (백그라운드 캐시 저장용 — 별개)
-- Brain 클래스 내부의 다른 `attempt < 2` 루프 (GPT 호출용 — 수정 대상 아님)
-- PIPE-04 10초 게이트 (의도된 설계 — `현_통신로직_및_개선.txt` 참조)
+기존 `[CORRECTION]`(재진술 포함 정정)은 **우선순위 최상위로 유지, 로직 무변경**.
 
----
+## 1. 절대 규칙
 
-## 1. 대상 파일 (4개)
-
-| # | 파일 | 삭제 블록 위치 (참고용) |
-|---|------|------------------------|
-| 1 | `lib/custom_code/widgets/routine_mode_step_expand.dart` | 약 4290줄 ~ 4327줄 |
-| 2 | `lib/custom_code/widgets/routine_mode_free_talk.dart` | 약 2567줄 ~ 2604줄 |
-| 3 | `lib/custom_code/widgets/routine_mode_roleplay.dart` | 약 3028줄 ~ 3065줄 |
-| 4 | `lib/custom_code/widgets/routine_mode_clone.dart` | grep으로 위치 확인 (3단계 참조) |
-
-⚠️ 줄번호는 참고용. 실제 편집은 반드시 아래 str_replace 앵커 텍스트 기준으로 수행.
-⚠️ `lib/custom_code/임시/` 폴더는 절대 건드리지 말 것. 모든 편집은 `lib/custom_code/widgets/` 대상.
+1. **Box 7 무수정**: `TtsQueueManager`, `DeepgramV2VoiceManager`, `ChunkedTtsFetcher`, `HybridTtsPlayer` 클래스 본문은 절대 수정 금지. 본 지시문의 변경은 모드 파이프라인 핸들러와 Brain(Box 7-1) 프롬프트에만 국한된다.
+2. **작업 대상 경로**: `F:\flutter_project\stealth_vox\lib\custom_code\widgets\` 의 3개 파일. `lib\custom_code\임시\` 폴더는 절대 건드리지 말 것.
+3. URL을 마크다운 링크로 변환 금지. 프롬프트 문자열 내 따옴표 이스케이프 주의(기존 스타일 유지).
+4. 각 파일 내 수정은 **아래(큰 줄 번호) → 위(작은 줄 번호)** 순서로 진행해 줄 번호 밀림을 방지한다.
+5. 시작 전 세이브포인트: `git add -A && git commit -m "savepoint before MISHEARD/DISSATISFIED"`
+6. 아래 줄 번호는 참고용이다. **str_replace 앵커(OLD 블록)가 정확히 1회 일치하는지 grep으로 먼저 확인**하고, 일치하지 않으면 작업을 중단하고 보고할 것.
 
 ---
 
-## 2. 사전 작업: git 세이브 포인트
+# 파일 A: routine_mode_step_expand.dart (수정 9건, 아래→위)
 
-```bash
-cd F:\flutter_project\stealth_vox
-git add -A
-git commit -m "save point: before TTS timeout tuning (Option A)"
+## A-1. [DISSATISFIED] 신호어 보강
+
+- 위치: 약 4686행, `- Output [DISSATISFIED] when the user expresses...` 로 시작하는 한 줄 내부 일부 교체
+
+OLD (부분 문자열, 파일 내 1회 존재 확인: `grep -c '질문 바꿔' 파일` → 1):
+```
+Signs: "다른 질문 해줘" / "그 질문 싫어" / "질문 바꿔" / "별로야"
 ```
 
----
-
-## 3. 사전 검증 (편집 전 필수 — 하나라도 불일치 시 중단하고 보고)
-
-각 파일에서 수정 대상 블록이 정확히 1개씩 존재하는지 확인:
-
-```bash
-grep -c "\[2단계\] API 호출 (재시도 1회)" lib/custom_code/widgets/routine_mode_step_expand.dart
-grep -c "\[2단계\] API 호출 (재시도 1회)" lib/custom_code/widgets/routine_mode_free_talk.dart
-grep -c "\[2단계\] API 호출 (재시도 1회)" lib/custom_code/widgets/routine_mode_roleplay.dart
-grep -c "\[2단계\] API 호출 (재시도 1회)" lib/custom_code/widgets/routine_mode_clone.dart
+NEW:
+```
+Signs: "다른 질문 해줘" / "그 질문 싫어" / "질문 바꿔" / "무슨 질문이 그래" / "별로야"
 ```
 
-**기대값: 4개 파일 모두 `1`.**
-- 0이면: 해당 파일은 이미 패치됐거나 구조가 다름 → 중단, 보고.
-- 2 이상이면: 앵커가 유일하지 않음 → 중단, 보고.
+## A-2. [RESTATE] 예외 목록에 MISHEARD 분기 추가
 
-추가로 clone 파일의 블록 내용이 다른 3개와 동일한지 확인:
+- 위치: 약 4653행 (`- Only a single referent ...` 줄) 바로 다음에 한 줄 삽입
 
-```bash
-grep -n "attempt < 2" lib/custom_code/widgets/routine_mode_clone.dart
+OLD:
+```
+- Only a single referent (who / what) is unclear but the rest is fine  ->  use [CLARIFY] instead.
 ```
 
-`attempt < 2`가 2건 나와야 정상 (1건은 TTS용=수정 대상, 1건은 Brain GPT 호출용=수정 금지).
-TTS용은 반드시 `[2단계] API 호출` 주석 직후의 루프만 해당됨.
+NEW:
+```
+- Only a single referent (who / what) is unclear but the rest is fine  ->  use [CLARIFY] instead.
+${disableCorrection ? "" : "- The user is ONLY complaining that they were misheard or misunderstood, without restating the content  ->  use [MISHEARD] instead."}
+```
 
----
+## A-3. correctionBlock에 [CASE MISHEARD] 추가
 
-## 4. 편집 내용 (str_replace — 4개 파일에 동일하게 적용)
+- 위치: 약 4575~4585행 (`final String correctionBlock = disableCorrection` 시작 ~ `"아니" etc.""";` 끝) 블록 전체 교체
 
-파일당 편집은 1곳뿐이므로 줄번호 드리프트 없음.
-적용 순서: ① step_expand → ② free_talk → ③ roleplay → ④ clone.
-**파일 1개 편집 완료 시마다 5단계 검증을 통과한 후 다음 파일로 진행.**
-
-### 삭제할 코드 (old_str)
-
-시작: `    // [2단계] API 호출 (재시도 1회)`
-끝: for 루프 닫는 중괄호 `    }` (catch 블록 닫힘 직후)
-
+OLD:
 ```dart
-    // [2단계] API 호출 (재시도 1회)
-    Uint8List result = Uint8List(0);
-    for (int attempt = 0; attempt < 2; attempt++) {
-      try {
-        final res = await http
-            .post(
-              Uri.parse('https://api.openai.com/v1/audio/speech'),
-              headers: {
-                'Authorization': 'Bearer $apiKey',
-                'Content-Type': 'application/json',
-              },
-              body: jsonEncode({
-                'model': 'tts-1',
-                'input': text,
-                'voice': voice,
-                'speed': 1.0,
-                'response_format': 'mp3',
-              }),
-            )
-            .timeout(const Duration(seconds: 10));
-
-        if (res.statusCode == 200) {
-          result = res.bodyBytes;
-          final turnTag = isUser ? 'USER' : 'AI';
-          onLog?.call('🔊 [TTS-02]',
-              '[$turnTag] API OK (${result.length}B) for "$text"');
-          // [3단계] 캐시 저장 (백그라운드)
-          TtsCache.put(text, voice, result);
-          break;
-        } else {
-          onLog?.call('❌ [TTS-API-ERR]', 'statusCode=${res.statusCode}');
-        }
-      } catch (_) {
-        if (attempt == 0) {
-          await Future.delayed(const Duration(milliseconds: 500));
-        }
-      }
-    }
+      final String correctionBlock = disableCorrection
+          ? "Never output [CORRECTION]. Treat the input as normal content."
+          : """[CASE CORRECTION] — Check this FIRST, but only when History contains at least one 'User:' line
+The user is correcting the AI's misunderstanding of a previous answer.
+Signs:
+- Starts with correction signals: "아니" / "아니요" / "아 그게 아니라" / "다시" / "내 말은" / "그러니까" / "I mean" / "actually" / "no," / "wait,"
+- AND the content is clearly a re-statement or clarification of the LAST 'User:' line in History (not new story info)
+- The user is essentially saying "that's not what I said — what I said was X"
+If this is a correction, output EXACTLY: [CORRECTION]
+Do NOT output [CORRECTION] when the user simply adds new details that happen to start with "아니" etc.""";
 ```
 
-### 교체할 코드 (new_str)
-
+NEW:
 ```dart
-    // [2단계] API 호출 (5초 타임아웃, 최대 3회 시도) — TTS 지연 스파이크 대응
-    Uint8List result = Uint8List(0);
-    for (int attempt = 0; attempt < 3; attempt++) {
-      try {
-        final res = await http
-            .post(
-              Uri.parse('https://api.openai.com/v1/audio/speech'),
-              headers: {
-                'Authorization': 'Bearer $apiKey',
-                'Content-Type': 'application/json',
-              },
-              body: jsonEncode({
-                'model': 'tts-1',
-                'input': text,
-                'voice': voice,
-                'speed': 1.0,
-                'response_format': 'mp3',
-              }),
-            )
-            .timeout(const Duration(seconds: 5));
+      final String correctionBlock = disableCorrection
+          ? "Never output [CORRECTION] or [MISHEARD]. Treat the input as normal content."
+          : """[CASE CORRECTION] — Check this FIRST, but only when History contains at least one 'User:' line
+The user is correcting the AI's misunderstanding of a previous answer.
+Signs:
+- Starts with correction signals: "아니" / "아니요" / "아 그게 아니라" / "다시" / "내 말은" / "그러니까" / "I mean" / "actually" / "no," / "wait,"
+- AND the content is clearly a re-statement or clarification of the LAST 'User:' line in History (not new story info)
+- The user is essentially saying "that's not what I said — what I said was X"
+If this is a correction, output EXACTLY: [CORRECTION]
+Do NOT output [CORRECTION] when the user simply adds new details that happen to start with "아니" etc.
 
-        if (res.statusCode == 200) {
-          result = res.bodyBytes;
-          final turnTag = isUser ? 'USER' : 'AI';
-          onLog?.call('🔊 [TTS-02]',
-              '[$turnTag] API OK (${result.length}B) for "$text"');
-          // [3단계] 캐시 저장 (백그라운드)
-          TtsCache.put(text, voice, result);
-          break;
-        } else {
-          onLog?.call('❌ [TTS-API-ERR]',
-              'statusCode=${res.statusCode} (attempt=${attempt + 1}/3)');
-        }
-      } catch (e) {
-        onLog?.call('⚠️ [TTS-RETRY]',
-            'attempt=${attempt + 1}/3 실패 (${e.runtimeType}) for "$text"');
-        if (attempt < 2) {
-          await Future.delayed(const Duration(milliseconds: 300));
-        }
-      }
-    }
-    if (result.isEmpty) {
-      onLog?.call('❌ [TTS-FAIL]', '3회 모두 실패 — 청크 스킵: "$text"');
-    }
+[CASE MISHEARD] — Check this SECOND, only when History contains at least one 'User:' line
+The user is COMPLAINING that their previous words were misheard or misunderstood, WITHOUT restating what they actually said.
+Signs:
+- The utterance is essentially ONLY a complaint: "내 말이 그런 뜻이 아니야" / "그런 뜻 아니야" / "내 말은 그게 아니야" / "잘못 들었어" / "잘못 적었어" / "잘못 알아들었네" / "that's not what I meant" / "you misheard me" / "you got my words wrong"
+- AND it contains NO restated content (no actual answer, no new story info).
+If this is a bare mishearing complaint, output EXACTLY: [MISHEARD]
+If the complaint INCLUDES the corrected content, use [CORRECTION] instead.""";
 ```
 
-**주의사항:**
-- old_str/new_str 직후의 `    _buffer[id] = result;` ~ `if (_pendingCount == 0) onAllComplete?.call();` 4줄은 **절대 포함하지도, 수정하지도 말 것** (pending 카운트 보장 로직).
-- `result.isEmpty` 시 빈 데이터는 기존 `_pushReady()`의 `data.isNotEmpty` 가드가 자동으로 재생 스킵 처리하므로 추가 처리 불필요 — 순서 카운터(`_readyCounter`)는 정상 진행됨.
-- 프롬프트/문자열 내 URL은 순수 텍스트 유지 (마크다운 링크 변환 금지).
-- PowerShell로 파일을 직접 쓸 경우 `[IO.File]::WriteAllText` + UTF-8 명시 필수 (한글 주석 깨짐 방지).
+## A-4. misheard 핸들러 삽입
+
+- 위치: 약 2049~2052행, `[CORRECTION]` 핸들러 끝(`_processRelayPipeline(finalTranscript, isCorrectionRetry: true); / return; / }`)과 약 2054행 `// ❓ [CLARIFY] ...` 주석 사이에 삽입
+
+OLD:
+```dart
+        // 정정된 발화로 해당 턴 재처리 (재진입이므로 [CORRECTION] 재감지 안 함)
+        _processRelayPipeline(finalTranscript, isCorrectionRetry: true);
+        return;
+      }
+
+      // ❓ [CLARIFY] 유저 발화 주어/목적어 모호 → AI 되묻기 버블 + TTS + STT 재시작
+```
+
+NEW:
+```dart
+        // 정정된 발화로 해당 턴 재처리 (재진입이므로 [CORRECTION] 재감지 안 함)
+        _processRelayPipeline(finalTranscript, isCorrectionRetry: true);
+        return;
+      }
+
+      // 🙉 [MISHEARD] 유저가 "잘못 들었어/그런 뜻 아니야"만 말함 (재진술 없음)
+      //   → 잘못 적힌 직전 HOST를 지우고, 직전 SYSTEM(나쁜 질문)은 _handleRetryQuestion이 교체.
+      //   "아, 제가 잘못 들었네요. 다시 질문할게요." 멘트 + 정리된 문맥으로 새 질문 생성
+      if (misheard) {
+        // 지울 직전 교환이 없으면 (1번째 턴) 일반 재질문으로 폴백
+        if (_turnCounter < 2) {
+          _turnCounter--;
+          if (mounted) {
+            setState(() {
+              _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+              if (hostIndex < _localMessages.length) {
+                _localMessages.removeAt(hostIndex);
+              }
+            });
+          }
+          await _handleRetryQuestion(contextStr, targetLangName,
+              isMisheard: true);
+          return;
+        }
+        _turnCounter -= 2; // 불만 턴 + 잘못 적힌 턴 카운트 취소
+        if (mounted) {
+          setState(() {
+            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+            // 방금 생성한 불만 HOST 버블 제거
+            if (hostIndex < _localMessages.length) {
+              _localMessages.removeAt(hostIndex);
+            }
+            // 잘못 적힌 직전 HOST(유저 발화) 제거
+            // (직전 SYSTEM 질문은 _handleRetryQuestion이 교체하므로 여기서 안 지움)
+            final lastHostIdx =
+                _localMessages.lastIndexWhere((m) => m['role'] == 'HOST');
+            if (lastHostIdx != -1) _localMessages.removeAt(lastHostIdx);
+          });
+          _scrollToBottom();
+        }
+        // 삭제 후 남은 메시지로 문맥 재구성 (잘못 적힌 발화/나쁜 질문이 새 질문에 재주입되는 것 방지)
+        var cleanMsgs = _localMessages.where((m) {
+          if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
+          final target = (m['target'] ?? '').toString().trim();
+          return target.isNotEmpty && target != '...';
+        }).toList();
+        if (cleanMsgs.length > 10)
+          cleanMsgs = cleanMsgs.sublist(cleanMsgs.length - 10);
+        // 마지막 SYSTEM(잘못 적힌 발화 기반의 나쁜 질문)은 문맥에서 제외
+        final lastBadSysIdx =
+            cleanMsgs.lastIndexWhere((m) => m['role'] == 'SYSTEM');
+        if (lastBadSysIdx != -1) cleanMsgs.removeAt(lastBadSysIdx);
+        final List<String> cleanLines = [];
+        String cleanLatestExpanded = '';
+        for (final m in cleanMsgs) {
+          final t = (m['target'] ?? '').toString().trim();
+          if (m['role'] == 'HOST') {
+            final idx = t.indexOf('\n\n');
+            final expanded = idx < 0
+                ? t
+                : (t.substring(idx + 2).trim().isNotEmpty
+                    ? t.substring(idx + 2).trim()
+                    : t.substring(0, idx).trim());
+            cleanLines.add("User: $expanded");
+            cleanLatestExpanded = expanded;
+          } else {
+            cleanLines.add("AI: $t");
+          }
+        }
+        String cleanContextStr = cleanLines.join("\n");
+        if (cleanLatestExpanded.isNotEmpty) {
+          cleanContextStr +=
+              "\n\n[Most recent expanded sentence to grow from]: $cleanLatestExpanded";
+        }
+        await _handleRetryQuestion(cleanContextStr, targetLangName,
+            isMisheard: true);
+        return;
+      }
+
+      // ❓ [CLARIFY] 유저 발화 주어/목적어 모호 → AI 되묻기 버블 + TTS + STT 재시작
+```
+
+## A-5. 스트림 루프에 [MISHEARD] 감지 추가
+
+- 위치: 약 1893~1899행, `[CORRECTION]` 감지 블록 바로 뒤에 삽입
+
+OLD:
+```dart
+        // 정정 감지: 유저가 AI의 오해를 바로잡는 경우
+        // → 직전 HOST(오해된 유저 발화) + SYSTEM(잘못된 AI 응답) 삭제 후 정정 발화로 재시작
+        if (!isCorrectionRetry && userTargetText.contains("[CORRECTION]")) {
+          corrected = true;
+          _log('🔄 [CORRECTION]', '정정 감지 → 직전 HOST+SYSTEM 삭제 후 재시작');
+          break;
+        }
+```
+
+NEW:
+```dart
+        // 정정 감지: 유저가 AI의 오해를 바로잡는 경우
+        // → 직전 HOST(오해된 유저 발화) + SYSTEM(잘못된 AI 응답) 삭제 후 정정 발화로 재시작
+        if (!isCorrectionRetry && userTargetText.contains("[CORRECTION]")) {
+          corrected = true;
+          _log('🔄 [CORRECTION]', '정정 감지 → 직전 HOST+SYSTEM 삭제 후 재시작');
+          break;
+        }
+
+        // 🙉 [MISHEARD] 잘못 들었다는 불만만 (재진술 없음) → 직전 교환 삭제 후 재질문
+        if (!isCorrectionRetry && userTargetText.contains("[MISHEARD]")) {
+          misheard = true;
+          _log('🙉 [MISHEARD]', '오인식 불만 감지 → 직전 교환 삭제 후 재질문');
+          break;
+        }
+```
+
+## A-6. bool 플래그 추가
+
+- 위치: 약 1860행
+
+OLD:
+```dart
+      bool corrected = false; // 유저가 AI의 오해를 정정하는 경우 → 직전 HOST+SYSTEM 쌍 삭제 후 재시작
+```
+
+NEW:
+```dart
+      bool corrected = false; // 유저가 AI의 오해를 정정하는 경우 → 직전 HOST+SYSTEM 쌍 삭제 후 재시작
+      bool misheard = false; // 잘못 들었다는 불만만 (재진술 없음) → 직전 교환 삭제 후 재질문
+```
+
+## A-7. _handleRetryQuestion: isRetry 계산 수정
+
+- 위치: 약 1647행
+
+OLD:
+```dart
+      isRetry: !isDifferent,
+```
+
+NEW:
+```dart
+      isRetry: !isDifferent && !isMisheard,
+```
+
+## A-8. _handleRetryQuestion: 안내 멘트 분기
+
+- 위치: 약 1625행
+
+OLD:
+```dart
+    phraseTts.addText(isDifferent ? "그럼 다른 질문 드릴게요." : "다시 질문할게요.");
+```
+
+NEW:
+```dart
+    phraseTts.addText(isMisheard
+        ? "아, 제가 잘못 들었네요. 다시 질문할게요."
+        : (isDifferent ? "그럼 다른 질문 드릴게요." : "다시 질문할게요."));
+```
+
+## A-9. _handleRetryQuestion: 시그니처에 isMisheard 추가
+
+- 위치: 약 1611~1613행
+
+OLD:
+```dart
+  Future<void> _handleRetryQuestion(String contextStr, String targetLangName,
+      {bool isDifferent = false}) async {
+    _log('🔄 [RETRY]', isDifferent ? '다른 질문 모드 진입' : '재질문 모드 진입');
+```
+
+NEW:
+```dart
+  Future<void> _handleRetryQuestion(String contextStr, String targetLangName,
+      {bool isDifferent = false, bool isMisheard = false}) async {
+    _log(
+        '🔄 [RETRY]',
+        isMisheard
+            ? '오인식 재질문 모드 진입'
+            : (isDifferent ? '다른 질문 모드 진입' : '재질문 모드 진입'));
+```
 
 ---
 
-## 5. 편집 후 검증 (파일별)
+# 파일 B: routine_mode_free_talk.dart (수정 7건, 아래→위)
 
-각 파일 편집 직후 아래 3개 grep 실행:
+## B-1. streamFreeTalkResponse 프롬프트에 거절 응답 회피 규칙 주입
 
-```bash
-# (a) 새 블록 적용 확인 — 기대값 1
-grep -c "5초 타임아웃, 최대 3회 시도" lib/custom_code/widgets/routine_mode_step_expand.dart
+- 위치: 약 3364행
 
-# (b) 구 블록 잔존 확인 — 기대값 0
-grep -c "\[2단계\] API 호출 (재시도 1회)" lib/custom_code/widgets/routine_mode_step_expand.dart
-
-# (c) TTS-RETRY 로그 추가 확인 — 기대값 1
-grep -c "TTS-RETRY" lib/custom_code/widgets/routine_mode_step_expand.dart
+OLD:
+```
+- If the audio is garbled or impossible to make out (a speech recognition error), politely ask them to repeat in $myTarget.
 ```
 
-(free_talk, roleplay, clone도 파일명만 바꿔 동일 실행)
+NEW:
+```
+- If the audio is garbled or impossible to make out (a speech recognition error), politely ask them to repeat in $myTarget.$rejectedBlock
+```
 
-**4개 파일 전부 완료 후 전체 분석:**
+## B-2. streamFreeTalkResponse 시그니처 + rejectedBlock 정의
+
+- 위치: 약 3340~3349행
+
+OLD:
+```dart
+  static Stream<String> streamFreeTalkResponse({
+    required String apiKey,
+    required String userTargetText,
+    required String contextStr,
+    required String myTarget,
+    String level = "Intermediate",
+  }) async* {
+    final client = http.Client();
+    try {
+      final sysPrompt =
+```
+
+NEW:
+```dart
+  static Stream<String> streamFreeTalkResponse({
+    required String apiKey,
+    required String userTargetText,
+    required String contextStr,
+    required String myTarget,
+    String level = "Intermediate",
+    String rejectedReply = '',
+  }) async* {
+    final client = http.Client();
+    try {
+      final String rejectedBlock = rejectedReply.trim().isEmpty
+          ? ""
+          : "\n- IMPORTANT: The user disliked your previous reply: \"${rejectedReply.trim()}\". Give a COMPLETELY DIFFERENT reply this time — different angle, different wording. Do NOT repeat or rephrase it.";
+      final sysPrompt =
+```
+
+## B-3. correctionBlock에 [CASE MISHEARD] + [CASE DISSATISFIED] 추가
+
+- 위치: 약 3166~3175행 블록 전체 교체
+
+OLD:
+```dart
+      final String correctionBlock = disableCorrection
+          ? "Never output [CORRECTION]. Treat the input as normal content to translate."
+          : '''[CASE CORRECTION] — Check this FIRST, only when the conversation history contains at least one "User:" line.
+The user is correcting the AI's misunderstanding or mishearing of their PREVIOUS utterance.
+Signs:
+- Starts with a correction signal: "아니" / "아니요" / "아 그게 아니라" / "다시" / "내 말은" / "그러니까" / "I mean" / "actually" / "no," / "wait,"
+- AND the content is clearly a re-statement or clarification of the LAST "User:" line in the history, NOT new information.
+- The user is essentially saying "that's not what I said — what I said was X."
+If this is a correction, output EXACTLY: [CORRECTION]  (and nothing else)
+Do NOT output [CORRECTION] when the user simply adds new details that happen to start with "아니" etc.''';
+```
+
+NEW:
+```dart
+      final String correctionBlock = disableCorrection
+          ? "Never output [CORRECTION] or [MISHEARD]. Treat the input as normal content to translate."
+          : '''[CASE CORRECTION] — Check this FIRST, only when the conversation history contains at least one "User:" line.
+The user is correcting the AI's misunderstanding or mishearing of their PREVIOUS utterance.
+Signs:
+- Starts with a correction signal: "아니" / "아니요" / "아 그게 아니라" / "다시" / "내 말은" / "그러니까" / "I mean" / "actually" / "no," / "wait,"
+- AND the content is clearly a re-statement or clarification of the LAST "User:" line in the history, NOT new information.
+- The user is essentially saying "that's not what I said — what I said was X."
+If this is a correction, output EXACTLY: [CORRECTION]  (and nothing else)
+Do NOT output [CORRECTION] when the user simply adds new details that happen to start with "아니" etc.
+
+[CASE MISHEARD] — Check this SECOND, only when the history contains at least one "User:" line.
+The user is COMPLAINING that their previous words were misheard or misunderstood, WITHOUT restating what they actually said.
+Signs: "내 말이 그런 뜻이 아니야" / "그런 뜻 아니야" / "내 말은 그게 아니야" / "잘못 들었어" / "잘못 적었어" / "잘못 알아들었네" / "that's not what I meant" / "you misheard me" / "you got my words wrong"
+- AND the utterance contains NO restated content (no actual new statement).
+If so, output EXACTLY: [MISHEARD]  (and nothing else)
+If the complaint INCLUDES the corrected content, use [CORRECTION] instead.
+
+[CASE DISSATISFIED] — Check this THIRD, only when the history contains at least one "AI:" line.
+The user is complaining about the AI's LAST reply itself and wants a different one.
+Signs: "무슨 대답이 그래" / "무슨 질문이 그래" / "대답이 이상해" / "다른 말 해봐" / "다시 대답해 봐" / "그 대답 별로야" / "say something else" / "that's a weird reply" / "answer again"
+Do NOT output this when the user is simply answering negatively (e.g., "아니, 안 갔어" is a valid negative answer).
+If so, output EXACTLY: [DISSATISFIED]  (and nothing else)''';
+```
+
+## B-4. CORRECTION-GUARD를 3개 태그로 확장
+
+- 위치: 약 1184~1185행
+
+OLD:
+```dart
+      if (userTargetText.contains('[CORRECTION]')) {
+        userTargetText = userTargetText.replaceAll('[CORRECTION]', '').trim();
+```
+
+NEW:
+```dart
+      if (userTargetText.contains('[CORRECTION]') ||
+          userTargetText.contains('[MISHEARD]') ||
+          userTargetText.contains('[DISSATISFIED]')) {
+        userTargetText = userTargetText
+            .replaceAll('[CORRECTION]', '')
+            .replaceAll('[MISHEARD]', '')
+            .replaceAll('[DISSATISFIED]', '')
+            .trim();
+```
+
+## B-5. misheard + dissatisfiedReply 핸들러 삽입
+
+- 위치: 약 1176~1181행, `[CORRECTION]` 핸들러 끝과 CORRECTION-GUARD 주석 사이에 삽입
+
+OLD:
+```dart
+        unawaited(
+            _processRelayPipeline(finalTranscript, isCorrectionRetry: true));
+        return;
+      }
+
+      // 🛡️ [CORRECTION-GUARD] 태그가 번역 결과로 화면/TTS에 남는 것 차단
+```
+
+NEW:
+```dart
+        unawaited(
+            _processRelayPipeline(finalTranscript, isCorrectionRetry: true));
+        return;
+      }
+
+      // 🙉 [MISHEARD] 잘못 들었다는 불만만 → 직전 교환(잘못 적힌 발화+틀린 응답) 삭제 후 재청취
+      if (misheard) {
+        if (mounted) {
+          setState(() {
+            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+            if (hostIndex < _localMessages.length &&
+                _localMessages[hostIndex]['role'] == 'HOST') {
+              _localMessages.removeAt(hostIndex); // 불만 HOST 버블 제거
+            }
+            _removeLastExchange(); // 직전 HOST(잘못 적힌 발화)+SYSTEM(틀린 응답) 제거
+          });
+          _scrollToBottom();
+        }
+        // 장기기억에서도 직전 교환 제거 (잘못 적힌 발화가 문맥으로 재주입되는 것 방지)
+        if (_recentHistory.length >= 2) {
+          _recentHistory.removeRange(
+              _recentHistory.length - 2, _recentHistory.length);
+        }
+        _ttsQueueManager.stop();
+        _ttsQueueManager.setUserTurn(false);
+        _ttsQueueManager.setAiPaused(false);
+        final misheardTts = ChunkedTtsFetcher(
+          _openAiKey,
+          _ttsQueueManager,
+          'nova',
+          isUser: false,
+          onLog: _log,
+        );
+        misheardTts.addText("아, 제가 잘못 들었네요. 다시 한 번 말씀해 주세요.");
+        int misheardTicks = 0;
+        while ((misheardTts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
+            mounted) {
+          await Future.delayed(const Duration(milliseconds: 50));
+          if (++misheardTicks > 200) break;
+        }
+        skipFinallyRestart = true;
+        _isPipelineRunning = false;
+        if (mounted && _isConversationActive) _startDeepgramListening();
+        return;
+      }
+
+      // 🟠 [DISSATISFIED] AI 직전 응답에 대한 불만 → 직전 SYSTEM만 삭제하고 같은 발화에 다시 대답
+      if (dissatisfiedReply) {
+        String rejectedReply = '';
+        String lastUserTarget = '';
+        if (mounted) {
+          setState(() {
+            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+            if (hostIndex < _localMessages.length &&
+                _localMessages[hostIndex]['role'] == 'HOST') {
+              _localMessages.removeAt(hostIndex); // 불만 HOST 버블 제거
+            }
+            final lastSysIdx =
+                _localMessages.lastIndexWhere((m) => m['role'] == 'SYSTEM');
+            if (lastSysIdx != -1) {
+              rejectedReply =
+                  (_localMessages[lastSysIdx]['target'] ?? '').toString();
+              _localMessages.removeAt(lastSysIdx); // 거절된 AI 응답 제거
+            }
+            final lastHostIdx =
+                _localMessages.lastIndexWhere((m) => m['role'] == 'HOST');
+            if (lastHostIdx != -1) {
+              lastUserTarget =
+                  (_localMessages[lastHostIdx]['target'] ?? '').toString();
+            }
+          });
+          _scrollToBottom();
+        }
+        // 장기기억에서 거절된 assistant 항목만 제거 (유저 발화는 유지)
+        if (_recentHistory.isNotEmpty &&
+            _recentHistory.last['role'] == 'assistant') {
+          _recentHistory.removeLast();
+        }
+        // 다시 대답할 유저 발화가 없으면 재청취로 폴백
+        if (lastUserTarget.trim().isEmpty) {
+          _ttsQueueManager.stop();
+          skipFinallyRestart = true;
+          _isPipelineRunning = false;
+          await _speakRetryAndListen();
+          return;
+        }
+        _ttsQueueManager.stop();
+        _ttsQueueManager.setUserTurn(false);
+        _ttsQueueManager.setAiPaused(false);
+        // 안내 멘트 (GPT 재생성과 병렬 재생)
+        final regenPhraseTts = ChunkedTtsFetcher(
+          _openAiKey,
+          _ttsQueueManager,
+          'nova',
+          isUser: false,
+          onLog: _log,
+        );
+        regenPhraseTts.addText("그럼 다시 대답해 볼게요.");
+        // 거절된 응답을 제외한 문맥 재구성
+        String regenContextStr;
+        if (_recentHistory.isNotEmpty) {
+          regenContextStr = _recentHistory
+              .map((m) =>
+                  '${m['role'] == 'user' ? 'User' : 'AI'}: ${m['content']}')
+              .join('\n');
+        } else {
+          var regenMsgs = _localMessages.where((m) {
+            if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
+            final target = (m['target'] ?? '').toString().trim();
+            return target.isNotEmpty && target != '...';
+          }).toList();
+          if (regenMsgs.length > 10)
+            regenMsgs = regenMsgs.sublist(regenMsgs.length - 10);
+          regenContextStr = regenMsgs
+              .map((m) =>
+                  "${m['role'] == 'HOST' ? 'User' : 'AI'}: ${m['target']}")
+              .join("\n");
+        }
+        // 새 AI 응답 버블 + 스트리밍 재생성
+        if (mounted) {
+          setState(() => _localMessages
+              .add({'role': 'SYSTEM', 'target': '', 'original': ''}));
+          _scrollToBottom();
+        }
+        final int regenAiIndex = _localMessages.length - 1;
+        final regenTts = ChunkedTtsFetcher(
+          _openAiKey,
+          _ttsQueueManager,
+          'nova',
+          isUser: false,
+          onLog: _log,
+        );
+        String regenText = "";
+        final regenStream = FreeTalkBrain.streamFreeTalkResponse(
+          apiKey: _openAiKey,
+          userTargetText: lastUserTarget,
+          contextStr: regenContextStr,
+          myTarget: targetLangName,
+          level: _freeTalkLevel,
+          rejectedReply: rejectedReply,
+        );
+        await for (final chunk in regenStream) {
+          regenText += chunk;
+          if (mounted && regenAiIndex < _localMessages.length) {
+            setState(
+                () => _localMessages[regenAiIndex]['target'] = regenText);
+          }
+        }
+        // 안내 멘트가 재생되는 동안 생성이 끝나므로 통문장 1회 발사로 단순 처리
+        final String regenClean = _cleanText(regenText.trim());
+        if (regenClean.isNotEmpty) regenTts.addText(regenClean);
+        // 한국어 original 백그라운드 생성 + 장기기억 반영
+        if (regenText.trim().isNotEmpty) {
+          FreeTalkBrain.generateCleanOriginal(
+                  apiKey: _openAiKey, englishText: regenText)
+              .then((cleanKorean) {
+            if (mounted && _localMessages.length > regenAiIndex) {
+              setState(() =>
+                  _localMessages[regenAiIndex]['original'] = cleanKorean);
+            }
+          });
+          _recentHistory.add({'role': 'assistant', 'content': regenText});
+          while (_recentHistory.length > 4) _recentHistory.removeAt(0);
+        }
+        int regenTicks = 0;
+        while ((regenPhraseTts.pendingRequests > 0 ||
+                regenTts.pendingRequests > 0 ||
+                _ttsQueueManager.isBusy) &&
+            mounted) {
+          await Future.delayed(const Duration(milliseconds: 50));
+          if (++regenTicks > 400) break;
+        }
+        skipFinallyRestart = true;
+        _isPipelineRunning = false;
+        if (mounted && _isConversationActive) _startDeepgramListening();
+        return;
+      }
+
+      // 🛡️ [CORRECTION-GUARD] 태그가 번역 결과로 화면/TTS에 남는 것 차단
+```
+
+## B-6. 스트림 루프에 감지 2개 추가
+
+- 위치: 약 1128~1133행, `[CORRECTION]` 감지 블록 바로 뒤에 삽입
+
+OLD:
+```dart
+        // 🔄 [CORRECTION] 정정 감지 (재진입 시 무시)
+        if (!isCorrectionRetry && userTargetText.contains("[CORRECTION]")) {
+          corrected = true;
+          _log('🔄 [CORRECTION]', '정정 감지 → 직전 교환 삭제 후 재시작');
+          break;
+        }
+```
+
+NEW:
+```dart
+        // 🔄 [CORRECTION] 정정 감지 (재진입 시 무시)
+        if (!isCorrectionRetry && userTargetText.contains("[CORRECTION]")) {
+          corrected = true;
+          _log('🔄 [CORRECTION]', '정정 감지 → 직전 교환 삭제 후 재시작');
+          break;
+        }
+        // 🙉 [MISHEARD] 잘못 들었다는 불만만 (재진술 없음)
+        if (!isCorrectionRetry && userTargetText.contains("[MISHEARD]")) {
+          misheard = true;
+          _log('🙉 [MISHEARD]', '오인식 불만 감지 → 직전 교환 삭제 후 재청취');
+          break;
+        }
+        // 🟠 [DISSATISFIED] AI 직전 응답에 대한 불만 → 다른 대답 재생성
+        if (userTargetText.contains("[DISSATISFIED]")) {
+          dissatisfiedReply = true;
+          _log('🟠 [DISSATISFIED]', '응답 불만 감지 → 직전 응답 삭제 후 재대답');
+          break;
+        }
+```
+
+## B-7. bool 플래그 2개 추가
+
+- 위치: 약 1116~1117행
+
+OLD:
+```dart
+      bool evaporated = false;
+      bool corrected = false; // 유저가 AI의 오해를 정정 → 직전 교환 삭제 후 재처리
+```
+
+NEW:
+```dart
+      bool evaporated = false;
+      bool corrected = false; // 유저가 AI의 오해를 정정 → 직전 교환 삭제 후 재처리
+      bool misheard = false; // 잘못 들었다는 불만만 (재진술 없음) → 직전 교환 삭제 후 재청취
+      bool dissatisfiedReply = false; // AI 직전 응답 불만 → 직전 응답 삭제 후 재대답
+```
+
+---
+
+# 파일 C: routine_mode_roleplay.dart (수정 5건, 아래→위)
+
+## C-1. streamRoleplayResponse: rejectedReply 규칙 연결
+
+- 위치: 약 3843행 (sysPrompt 마지막 줄)
+
+OLD:
+```dart
+          '- If the user\'s input is completely unintelligible (speech recognition error), output EXACTLY: [RETRY]';
+```
+
+NEW:
+```dart
+          '- If the user\'s input is completely unintelligible (speech recognition error), output EXACTLY: [RETRY]' +
+          (rejectedReply.trim().isEmpty
+              ? ''
+              : '\n- IMPORTANT: The user disliked your previous reply: "${rejectedReply.trim()}". Give a COMPLETELY DIFFERENT in-character reply this time — different angle, different wording. Do NOT repeat or rephrase it.');
+```
+
+## C-2. streamRoleplayResponse 시그니처에 파라미터 추가
+
+- 위치: 약 3816~3824행
+
+OLD:
+```dart
+  static Stream<String> streamRoleplayResponse({
+    required String apiKey,
+    required String userTargetText,
+    required String contextStr,
+    required String situation,
+    required String aiRole,
+    required String userRole,
+    required String myTarget,
+  }) async* {
+```
+
+NEW:
+```dart
+  static Stream<String> streamRoleplayResponse({
+    required String apiKey,
+    required String userTargetText,
+    required String contextStr,
+    required String situation,
+    required String aiRole,
+    required String userRole,
+    required String myTarget,
+    String rejectedReply = '',
+  }) async* {
+```
+
+## C-3. streamUserTranslation 프롬프트에 [CASE MISHEARD] + [CASE DISSATISFIED] 삽입
+
+- 위치: 약 3648~3651행, CORRECTION 블록 끝과 `[INTERNAL THINKING]` 사이
+
+OLD:
+```
+If this is a correction, output EXACTLY: [CORRECTION]  (and nothing else)
+Do NOT output [CORRECTION] when the user simply adds new details that happen to start with "아니" etc.
+
+[INTERNAL THINKING - do not output]
+```
+
+NEW:
+```
+If this is a correction, output EXACTLY: [CORRECTION]  (and nothing else)
+Do NOT output [CORRECTION] when the user simply adds new details that happen to start with "아니" etc.
+
+[CASE MISHEARD] — Check this SECOND, only when the history contains at least one "User:" line.
+The user is COMPLAINING that their previous words were misheard or misunderstood, WITHOUT restating what they actually said.
+Signs: "내 말이 그런 뜻이 아니야" / "그런 뜻 아니야" / "내 말은 그게 아니야" / "잘못 들었어" / "잘못 적었어" / "잘못 알아들었네" / "that's not what I meant" / "you misheard me" / "you got my words wrong"
+- AND the utterance contains NO restated content (no actual new statement).
+If so, output EXACTLY: [MISHEARD]  (and nothing else)
+If the complaint INCLUDES the corrected content, use [CORRECTION] instead.
+
+[CASE DISSATISFIED] — Check this THIRD, only when the history contains at least one "AI:" line.
+The user is stepping OUT of the roleplay to complain about the AI's LAST reply itself and wants a different one.
+Signs: "무슨 대답이 그래" / "무슨 질문이 그래" / "대답이 이상해" / "다른 말 해봐" / "다시 대답해 봐" / "그 대답 별로야" / "say something else" / "that's a weird reply" / "answer again"
+Do NOT output this when the user is answering negatively IN CHARACTER (e.g., refusing an offer inside the roleplay is a valid in-character answer).
+If so, output EXACTLY: [DISSATISFIED]  (and nothing else)
+
+[INTERNAL THINKING - do not output]
+```
+
+## C-4. misheard + dissatisfiedReply 핸들러 삽입
+
+- 위치: 약 1226~1231행, `[CORRECTION]` 핸들러 끝과 `// ❓ [CLARIFY]` 주석 사이에 삽입
+
+OLD:
+```dart
+        // 정정된 발화로 재처리 (재진입이므로 [CORRECTION] 재감지 안 함)
+        _processRelayPipeline(finalTranscript, isCorrectionRetry: true);
+        return;
+      }
+
+      // ❓ [CLARIFY] 유저 발화 주어/목적어 모호 → In-Character 되묻기 + STT 재시작
+```
+
+NEW:
+```dart
+        // 정정된 발화로 재처리 (재진입이므로 [CORRECTION] 재감지 안 함)
+        _processRelayPipeline(finalTranscript, isCorrectionRetry: true);
+        return;
+      }
+
+      // 🙉 [MISHEARD] 잘못 들었다는 불만만 → 직전 교환 삭제 후 재청취
+      if (misheard) {
+        _turnCounter--; // finally의 마이크 재시작 가드 차단 (수동 재시작)
+        if (mounted) {
+          setState(() {
+            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+            if (hostIndex < _localMessages.length &&
+                _localMessages[hostIndex]['role'] == 'HOST') {
+              _localMessages.removeAt(hostIndex); // 불만 HOST 버블 제거
+            }
+            _removeLastExchange(); // 직전 HOST(잘못 적힌 발화)+SYSTEM(틀린 응답) 제거
+          });
+          if (_localMessages.isNotEmpty) _scrollToBottom();
+        }
+        _ttsQueueManager.stop();
+        _ttsQueueManager.setUserTurn(false);
+        _ttsQueueManager.setAiPaused(false);
+        final misheardTts = ChunkedTtsFetcher(
+          _openAiKey,
+          _ttsQueueManager,
+          'nova',
+          isUser: false,
+          onLog: _log,
+        );
+        misheardTts.addText("아, 제가 잘못 들었네요. 다시 한 번 말씀해 주세요.");
+        int misheardTicks = 0;
+        while ((misheardTts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
+            mounted) {
+          await Future.delayed(const Duration(milliseconds: 50));
+          if (++misheardTicks > 200) break;
+        }
+        if (mounted && _isConversationActive) _startDeepgramListening();
+        return;
+      }
+
+      // 🟠 [DISSATISFIED] AI 직전 응답 불만 → 직전 SYSTEM만 삭제하고 같은 발화에 다시 대답
+      if (dissatisfiedReply) {
+        _turnCounter--; // finally의 마이크 재시작 가드 차단 (수동 재시작)
+        String rejectedReply = '';
+        String lastUserTarget = '';
+        if (mounted) {
+          setState(() {
+            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+            if (hostIndex < _localMessages.length &&
+                _localMessages[hostIndex]['role'] == 'HOST') {
+              _localMessages.removeAt(hostIndex); // 불만 HOST 버블 제거
+            }
+            final lastSysIdx =
+                _localMessages.lastIndexWhere((m) => m['role'] == 'SYSTEM');
+            if (lastSysIdx != -1) {
+              rejectedReply =
+                  (_localMessages[lastSysIdx]['target'] ?? '').toString();
+              _localMessages.removeAt(lastSysIdx); // 거절된 AI 응답 제거
+            }
+            final lastHostIdx =
+                _localMessages.lastIndexWhere((m) => m['role'] == 'HOST');
+            if (lastHostIdx != -1) {
+              lastUserTarget =
+                  (_localMessages[lastHostIdx]['target'] ?? '').toString();
+            }
+          });
+          if (_localMessages.isNotEmpty) _scrollToBottom();
+        }
+        // 다시 대답할 유저 발화가 없으면 재청취로 폴백
+        if (lastUserTarget.trim().isEmpty) {
+          _ttsQueueManager.stop();
+          _speakRetryAndListen();
+          return;
+        }
+        _ttsQueueManager.stop();
+        _ttsQueueManager.setUserTurn(false);
+        _ttsQueueManager.setAiPaused(false);
+        // 안내 멘트 (GPT 재생성과 병렬 재생)
+        final regenPhraseTts = ChunkedTtsFetcher(
+          _openAiKey,
+          _ttsQueueManager,
+          'nova',
+          isUser: false,
+          onLog: _log,
+        );
+        regenPhraseTts.addText("그럼 다시 대답해 볼게요.");
+        // 거절된 응답을 제외한 문맥 재구성
+        var regenMsgs = _localMessages.where((m) {
+          if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
+          final target = (m['target'] ?? '').toString().trim();
+          return target.isNotEmpty && target != '...';
+        }).toList();
+        if (regenMsgs.length > 10)
+          regenMsgs = regenMsgs.sublist(regenMsgs.length - 10);
+        final String regenContextStr = regenMsgs
+            .map((m) =>
+                "${m['role'] == 'HOST' ? 'User' : 'AI'}: ${m['target']}")
+            .join("\n");
+        // 새 AI 응답 버블 + 스트리밍 재생성
+        if (mounted) {
+          setState(() => _localMessages
+              .add({'role': 'SYSTEM', 'target': '', 'original': ''}));
+          _scrollToBottom();
+        }
+        final int regenAiIndex = _localMessages.length - 1;
+        final regenTts = ChunkedTtsFetcher(
+          _openAiKey,
+          _ttsQueueManager,
+          'nova',
+          isUser: false,
+          onLog: _log,
+        );
+        String regenText = "";
+        final regenStream = RoleplayBrain.streamRoleplayResponse(
+          apiKey: _openAiKey,
+          userTargetText: lastUserTarget,
+          contextStr: regenContextStr,
+          situation: _scenarioSituation,
+          aiRole: _scenarioAiRole,
+          userRole: _scenarioUserRole,
+          myTarget: targetLangName,
+          rejectedReply: rejectedReply,
+        );
+        await for (final chunk in regenStream) {
+          regenText += chunk;
+          if (regenText.contains('[RETRY]')) break;
+          if (mounted && regenAiIndex < _localMessages.length) {
+            setState(
+                () => _localMessages[regenAiIndex]['target'] = regenText);
+          }
+        }
+        // [RETRY] 가드: 재생성도 실패하면 버블 제거 후 재청취 폴백
+        if (regenText.contains('[RETRY]') || regenText.trim().isEmpty) {
+          if (mounted && regenAiIndex < _localMessages.length) {
+            setState(() => _localMessages.removeAt(regenAiIndex));
+          }
+          _speakRetryAndListen();
+          return;
+        }
+        // 안내 멘트가 재생되는 동안 생성이 끝나므로 통문장 1회 발사로 단순 처리
+        final String regenClean = _cleanText(regenText.trim());
+        if (regenClean.isNotEmpty) regenTts.addText(regenClean);
+        // 한국어 original 백그라운드 생성
+        RoleplayBrain.generateCleanOriginal(
+                apiKey: _openAiKey, englishText: regenText)
+            .then((cleanKorean) {
+          if (mounted && _localMessages.length > regenAiIndex) {
+            setState(() =>
+                _localMessages[regenAiIndex]['original'] = cleanKorean);
+          }
+        });
+        int regenTicks = 0;
+        while ((regenPhraseTts.pendingRequests > 0 ||
+                regenTts.pendingRequests > 0 ||
+                _ttsQueueManager.isBusy) &&
+            mounted) {
+          await Future.delayed(const Duration(milliseconds: 50));
+          if (++regenTicks > 400) break;
+        }
+        if (mounted && _isConversationActive) _startDeepgramListening();
+        return;
+      }
+
+      // ❓ [CLARIFY] 유저 발화 주어/목적어 모호 → In-Character 되묻기 + STT 재시작
+```
+
+## C-5. 스트림 루프 감지 2개 + bool 2개 추가
+
+### C-5a. 감지 (위치: 약 1182~1187행, CORRECTION 감지 뒤)
+
+OLD:
+```dart
+        // 🔄 [CORRECTION] 정정 감지 (재진입 시 무시)
+        if (!isCorrectionRetry && userTargetText.contains("[CORRECTION]")) {
+          corrected = true;
+          _log('🔄 [CORRECTION]', '정정 감지 → 직전 교환 삭제 후 재시작');
+          break;
+        }
+```
+
+NEW:
+```dart
+        // 🔄 [CORRECTION] 정정 감지 (재진입 시 무시)
+        if (!isCorrectionRetry && userTargetText.contains("[CORRECTION]")) {
+          corrected = true;
+          _log('🔄 [CORRECTION]', '정정 감지 → 직전 교환 삭제 후 재시작');
+          break;
+        }
+        // 🙉 [MISHEARD] 잘못 들었다는 불만만 (재진술 없음)
+        if (!isCorrectionRetry && userTargetText.contains("[MISHEARD]")) {
+          misheard = true;
+          _log('🙉 [MISHEARD]', '오인식 불만 감지 → 직전 교환 삭제 후 재청취');
+          break;
+        }
+        // 🟠 [DISSATISFIED] AI 직전 응답에 대한 불만 → 다른 대답 재생성
+        if (userTargetText.contains("[DISSATISFIED]")) {
+          dissatisfiedReply = true;
+          _log('🟠 [DISSATISFIED]', '응답 불만 감지 → 직전 응답 삭제 후 재대답');
+          break;
+        }
+```
+
+### C-5b. bool (위치: 약 1169~1171행)
+
+OLD:
+```dart
+      bool evaporated = false;
+      bool clarified = false; // 주어/목적어 모호 → AI 되묻기
+      bool corrected = false; // 유저가 AI의 오해를 정정 → 직전 교환 삭제 후 재처리
+```
+
+NEW:
+```dart
+      bool evaporated = false;
+      bool clarified = false; // 주어/목적어 모호 → AI 되묻기
+      bool corrected = false; // 유저가 AI의 오해를 정정 → 직전 교환 삭제 후 재처리
+      bool misheard = false; // 잘못 들었다는 불만만 (재진술 없음) → 직전 교환 삭제 후 재청취
+      bool dissatisfiedReply = false; // AI 직전 응답 불만 → 직전 응답 삭제 후 재대답
+```
+
+---
+
+# 검증
+
+작업 디렉터리 `F:\flutter_project\stealth_vox` 에서:
 
 ```bash
+# 1) 마커 배치 확인 — 기대값과 다르면 중단하고 보고
+grep -c "CASE MISHEARD" lib/custom_code/widgets/routine_mode_step_expand.dart    # 1
+grep -c "CASE MISHEARD" lib/custom_code/widgets/routine_mode_free_talk.dart      # 1
+grep -c "CASE MISHEARD" lib/custom_code/widgets/routine_mode_roleplay.dart       # 1
+grep -c "CASE DISSATISFIED" lib/custom_code/widgets/routine_mode_free_talk.dart  # 1
+grep -c "CASE DISSATISFIED" lib/custom_code/widgets/routine_mode_roleplay.dart   # 1
+grep -c "misheard = true" lib/custom_code/widgets/routine_mode_step_expand.dart  # 1
+grep -c "misheard = true" lib/custom_code/widgets/routine_mode_free_talk.dart    # 1
+grep -c "misheard = true" lib/custom_code/widgets/routine_mode_roleplay.dart     # 1
+grep -c "if (misheard)" lib/custom_code/widgets/routine_mode_step_expand.dart    # 1
+grep -c "if (misheard)" lib/custom_code/widgets/routine_mode_free_talk.dart      # 1
+grep -c "if (misheard)" lib/custom_code/widgets/routine_mode_roleplay.dart       # 1
+grep -c "if (dissatisfiedReply)" lib/custom_code/widgets/routine_mode_free_talk.dart  # 1
+grep -c "if (dissatisfiedReply)" lib/custom_code/widgets/routine_mode_roleplay.dart   # 1
+grep -c "isMisheard" lib/custom_code/widgets/routine_mode_step_expand.dart       # 6
+grep -c "rejectedReply" lib/custom_code/widgets/routine_mode_free_talk.dart      # 6
+grep -c "rejectedReply" lib/custom_code/widgets/routine_mode_roleplay.dart       # 6
+
+# 2) Box 7 무변경 확인 — 결과가 비어 있어야 함
+git diff --stat | grep -i "deepgram\|tts_queue" || echo "OK"
+
+# 3) 정적 분석 — 신규 에러 0이어야 함
 flutter analyze
 ```
 
-에러 0건이어야 함. 에러 발생 시 즉시 중단하고 에러 전문 보고.
+# 실기기 테스트 체크리스트
 
----
+1. **스텝익스팬드**: 2턴 이상 진행 → "내 말 잘못 적었어"라고 말함 → 잘못 적힌 내 발화 버블 + 그 뒤 AI 질문이 사라지고, "아, 제가 잘못 들었네요. 다시 질문할게요." 후 새 질문 낭독 → 새 질문에 답하면 확장 문장이 잘못 적힌 내용 없이 이어지는지 확인.
+2. **스텝익스팬드 1턴째**: 첫 질문에 답한 척하다 "잘못 들었어" → 폴백으로 재질문되는지.
+3. **스텝익스팬드 기존 기능 회귀**: "다른 질문 해줘"([DISSATISFIED]), "아니 그게 아니라 ~라고 했어"([CORRECTION]) 모두 기존대로 동작하는지.
+4. **프리톡**: 대화 중 "그런 뜻 아니야"만 말함 → 직전 교환 삭제 + "다시 한 번 말씀해 주세요" → 재발화에 정상 대답. / "무슨 대답이 그래" → 내 발화는 남고 AI 대답만 교체("그럼 다시 대답해 볼게요." + 새 대답 낭독), 새 대답이 이전과 다른 내용인지.
+5. **롤플레이**: 4번과 동일 시나리오 + 재생성 대답이 캐릭터를 유지하는지.
+6. 각 모드에서 `[MISHEARD]`/`[DISSATISFIED]` 태그 텍스트가 화면이나 TTS로 새지 않는지.
 
-## 6. 기대 효과 및 실기기 검증 포인트
+# 알려진 트레이드오프 (이번 범위 외)
 
-- 최악 공백: 기존 10.5초+ → 약 5.3~6초 (1차 재시도 성공 시).
-- 스파이크 발생 시 로그에 `⚠️ [TTS-RETRY]`가 찍혀 향후 추적 가능해짐.
-- 비용: 평상시 변화 없음. 스파이크 순간에만 타임아웃된 요청 + 재시도 요청이 중복 과금될 수 있으나 미미함.
+기존 [CORRECTION]과 동일하게, 화면·문맥에서 삭제된 교환이 **이미 Firestore에 저장된 경우 히스토리에는 남는다**. 재생성된 새 대답도 별도 저장하지 않는다(중복 저장 방지). Firestore 히스토리 동기화는 별도 작업으로 분리.
 
-**실기기 테스트 (Step Expand 기준):**
-1. 5턴 대화 진행 → AI 질문이 "몇 단어 후 장시간 침묵" 없이 이어지는지 확인.
-2. 로그에서 `[TTS-RETRY]` 발생 시 후속 `API OK`까지의 간격이 6초 이내인지 확인.
-3. `[PIPE-TIMEOUT] 유저 TTS fetch 10초 초과` 발생 빈도가 줄었는지 확인.
-4. 확장문장 반복 낭독(캐시 히트 경로)이 기존과 동일하게 즉시 재생되는지 확인.
-
----
-
-## 7. 롤백 절차
+# 롤백
 
 ```bash
-# 커밋 전이면:
-git restore lib/custom_code/widgets/routine_mode_step_expand.dart
-git restore lib/custom_code/widgets/routine_mode_free_talk.dart
-git restore lib/custom_code/widgets/routine_mode_roleplay.dart
-git restore lib/custom_code/widgets/routine_mode_clone.dart
-
-# 커밋 후라면:
-git revert <패치 커밋 해시>
+git restore lib/custom_code/widgets/routine_mode_step_expand.dart lib/custom_code/widgets/routine_mode_free_talk.dart lib/custom_code/widgets/routine_mode_roleplay.dart
+# 또는 커밋 후라면
+git revert <해당 커밋 해시>
 ```
