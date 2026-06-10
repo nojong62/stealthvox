@@ -1608,13 +1608,13 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 // ====================================================================
 // 📦 [Box 5-RETRY: 재질문 처리]
 // ====================================================================
-  Future<void> _handleRetryQuestion(
-      String contextStr, String targetLangName) async {
-    _log('🔄 [RETRY]', '재질문 모드 진입');
+  Future<void> _handleRetryQuestion(String contextStr, String targetLangName,
+      {bool isDifferent = false}) async {
+    _log('🔄 [RETRY]', isDifferent ? '다른 질문 모드 진입' : '재질문 모드 진입');
     _ttsQueueManager.setUserTurn(false);
     _ttsQueueManager.setAiPaused(false);
 
-    // "다시 질문할게요." 먼저 TTS
+    // 안내 멘트 먼저 TTS
     final phraseTts = ChunkedTtsFetcher(
       _openAiKey,
       _ttsQueueManager,
@@ -1622,7 +1622,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       isUser: false,
       onLog: _log,
     );
-    phraseTts.addText("다시 질문할게요.");
+    phraseTts.addText(isDifferent ? "그럼 다른 질문 드릴게요." : "다시 질문할게요.");
 
     // 새 AI 질문 버블
     if (mounted) {
@@ -1644,7 +1644,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       maxTurns: MAX_TURNS,
       myTarget: targetLangName,
       userId: FirebaseAuth.instance.currentUser?.uid ?? '',
-      isRetry: true,
+      isRetry: !isDifferent,
+      isDifferent: isDifferent,
     );
 
     final questionTts = ChunkedTtsFetcher(
@@ -1729,7 +1730,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 //   STEP 6: AI 역번역 + Firestore 저장 (백그라운드)
 //   STEP 7: 마이크 재개방
 // ====================================================================
-  Future<void> _processRelayPipeline(String finalTranscript) async {
+  Future<void> _processRelayPipeline(String finalTranscript,
+      {bool isCorrectionRetry = false}) async {
     _resetIdleTimer();
     _turnCounter++;
     final int currentTurnId = _turnCounter;
@@ -1769,7 +1771,12 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       if (mounted) {
         setState(() {
           _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-          _localMessages.add({'role': 'HOST', 'target': '', 'original': '', 'turnId': currentTurnId});
+          _localMessages.add({
+            'role': 'HOST',
+            'target': '',
+            'original': '',
+            'turnId': currentTurnId
+          });
         });
         _scrollToBottom();
       }
@@ -1841,6 +1848,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         textOriginal: finalTranscript,
         targetLang: targetLangName,
         contextStr: contextStr,
+        disableCorrection: isCorrectionRetry,
       );
 
       // 🌱 [StepExpand Part2만 TTS] 첫 턴은 단순 번역 (Part 구분 없음)
@@ -1852,6 +1860,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       bool corrected = false; // 유저가 AI의 오해를 정정하는 경우 → 직전 HOST+SYSTEM 쌍 삭제 후 재시작
       bool clarified = false; // 주어/목적어 모호 → AI 되묻기
       bool restated = false; // 맥락 어긋남/발음 불확실 → 같은 AI 질문 유지하고 다시 말하기 요청
+      bool dissatisfied = false; // [DISSATISFIED] 유저가 AI 질문에 불만 → 확인 후 재질문
       bool _part2Started = false; // \n\n 이후 진입 여부
       bool hasDoubleNewline = false; // 2파트 구조 여부
       bool firstChunkSent = false;
@@ -1874,9 +1883,16 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           break;
         }
 
+        // [DISSATISFIED] 유저가 AI 질문에 불만 표시
+        if (userTargetText.contains("[DISSATISFIED]")) {
+          dissatisfied = true;
+          _log('🟠 [DISSATISFIED]', '질문 불만 감지 → 즉시 다른 질문 생성');
+          break;
+        }
+
         // 정정 감지: 유저가 AI의 오해를 바로잡는 경우
         // → 직전 HOST(오해된 유저 발화) + SYSTEM(잘못된 AI 응답) 삭제 후 정정 발화로 재시작
-        if (userTargetText.contains("[CORRECTION]")) {
+        if (!isCorrectionRetry && userTargetText.contains("[CORRECTION]")) {
           corrected = true;
           _log('🔄 [CORRECTION]', '정정 감지 → 직전 HOST+SYSTEM 삭제 후 재시작');
           break;
@@ -1975,6 +1991,23 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         return;
       }
 
+      // [DISSATISFIED] 유저가 질문 내용에 불만 → 확인 없이 즉시 다른 질문 생성
+      if (dissatisfied) {
+        _turnCounter--; // 불만 발화 턴 카운트 취소
+        if (mounted) {
+          setState(() {
+            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+            // 불만 발화(HOST) 버블 제거 (이전 질문 버블은 _handleRetryQuestion이 교체)
+            if (hostIndex < _localMessages.length) {
+              _localMessages.removeAt(hostIndex);
+            }
+          });
+        }
+        await _handleRetryQuestion(contextStr, targetLangName,
+            isDifferent: true);
+        return;
+      }
+
       // 🔄 [CORRECTION] 유저가 AI의 오해를 정정
       // 직전 HOST(잘못 인식된 유저 발화) + SYSTEM(잘못된 AI 응답)을 함께 삭제하고
       // 정정된 발화(_finalTranscript)로 해당 턴을 처음부터 다시 처리
@@ -2012,8 +2045,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           });
           _scrollToBottom();
         }
-        // 정정된 발화로 해당 턴 재처리
-        _processRelayPipeline(finalTranscript);
+        // 정정된 발화로 해당 턴 재처리 (재진입이므로 [CORRECTION] 재감지 안 함)
+        _processRelayPipeline(finalTranscript, isCorrectionRetry: true);
         return;
       }
 
@@ -2027,8 +2060,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
             _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
             if (hostIndex < _localMessages.length)
               _localMessages.removeAt(hostIndex);
-            _localMessages.add(
-                {'role': 'SYSTEM', 'target': clarifyText, 'original': ''});
+            _localMessages
+                .add({'role': 'SYSTEM', 'target': clarifyText, 'original': ''});
           });
           _scrollToBottom();
         }
@@ -2120,13 +2153,15 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         });
       } else if (hasDoubleNewline) {
         // 2턴+: Part1(짧은 대답)만 역번역 → 확장문장(Part2)은 한국어 불필요
-        final part1English = userTargetText.substring(0, userTargetText.indexOf('\n\n')).trim();
+        final part1English =
+            userTargetText.substring(0, userTargetText.indexOf('\n\n')).trim();
         if (part1English.isNotEmpty) {
           userOrigFuture = StepExpandBrain.generateCleanOriginal(
               apiKey: _openAiKey, englishText: part1English);
           userOrigFuture.then((cleanKorean) {
             if (mounted && _localMessages.length > hostIndex) {
-              setState(() => _localMessages[hostIndex]['original'] = cleanKorean);
+              setState(
+                  () => _localMessages[hostIndex]['original'] = cleanKorean);
             }
           });
         }
@@ -2454,7 +2489,9 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           final cleanKorean =
               await userOrigFuture.timeout(const Duration(seconds: 10));
           if (hostIndex < _localMessages.length &&
-              (_localMessages[hostIndex]['original'] ?? '').toString().isEmpty) {
+              (_localMessages[hostIndex]['original'] ?? '')
+                  .toString()
+                  .isEmpty) {
             _localMessages[hostIndex]['original'] = cleanKorean;
           }
         } catch (_) {}
@@ -2472,7 +2509,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         'translated_text': aiTargetText,
       };
       await _saveTurnToFirestore([hostLine, systemLine]);
-      await _saveHistoryMessages([hostLine, systemLine]); // 🔧 [히스토리] 병행 저장 (await 보장)
+      await _saveHistoryMessages(
+          [hostLine, systemLine]); // 🔧 [히스토리] 병행 저장 (await 보장)
       _log('🧠 [PIPE-10]', 'Firestore 저장 완료');
     } catch (e) {
       _log('❌ [PIPE-ERR]', 'Relay Error: $e');
@@ -2835,7 +2873,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
                   const SizedBox(width: 6),
                   Text(
                     () {
-                      final int s = (FFAppState().remainingTime).toInt().clamp(0, 999999);
+                      final int s =
+                          (FFAppState().remainingTime).toInt().clamp(0, 999999);
                       final int h = s ~/ 3600;
                       final int m = (s % 3600) ~/ 60;
                       return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
@@ -4523,23 +4562,28 @@ class StepExpandBrain {
     required String textOriginal,
     required String targetLang,
     required String contextStr,
+    bool disableCorrection = false,
   }) async* {
     final client = http.Client();
     try {
-      final sysPrompt =
-          """You are a [Step Expand Translator] translating Korean to $targetLang.
-You help the user grow ONE English sentence across multiple turns, adding details each turn.
-
-Read the 'History' carefully to determine the user's current turn.
-
-[CASE CORRECTION] — Check this FIRST, but only when History contains at least one 'User:' line
+      final String correctionBlock = disableCorrection
+          ? "Never output [CORRECTION]. Treat the input as normal content."
+          : """[CASE CORRECTION] — Check this FIRST, but only when History contains at least one 'User:' line
 The user is correcting the AI's misunderstanding of a previous answer.
 Signs:
 - Starts with correction signals: "아니" / "아니요" / "아 그게 아니라" / "다시" / "내 말은" / "그러니까" / "I mean" / "actually" / "no," / "wait,"
 - AND the content is clearly a re-statement or clarification of the LAST 'User:' line in History (not new story info)
 - The user is essentially saying "that's not what I said — what I said was X"
 If this is a correction, output EXACTLY: [CORRECTION]
-Do NOT output [CORRECTION] when the user simply adds new details that happen to start with "아니" etc.
+Do NOT output [CORRECTION] when the user simply adds new details that happen to start with "아니" etc.""";
+
+      final sysPrompt =
+          """You are a [Step Expand Translator] translating Korean to $targetLang.
+You help the user grow ONE English sentence across multiple turns, adding details each turn.
+
+Read the 'History' carefully to determine the user's current turn.
+
+$correctionBlock
 
 [CASE 1] History is empty (USER'S FIRST TURN)
 - Simply translate the user's Korean input into ONE natural English sentence.
@@ -4601,7 +4645,7 @@ Do NOT output [RESTATE] when:
 - A minor STT slip exists but the intended meaning is still clearly inferable from context  ->  translate normally (keep tolerating small errors).
 - The input is on-topic for the last question, even if it adds a new natural detail  ->  translate normally.
 - Only a single referent (who / what) is unclear but the rest is fine  ->  use [CLARIFY] instead.
-- The user is explicitly correcting the AI  ->  use [CORRECTION] instead.
+${disableCorrection ? "" : "- The user is explicitly correcting the AI  ->  use [CORRECTION] instead."}
 
 [RESTATE CONTRAST EXAMPLES]
 History:
@@ -4632,7 +4676,8 @@ Output: [RESTATE]
 - If the input is meaningless noise (random symbols, silence markers, or clearly non-speech artifacts), output EXACTLY: [EVAPORATE]
 - If the input has minor STT errors but the intended meaning is still clearly inferable from context, make your best interpretation and produce the normal output (keep tolerating small errors).
 - If the input is off-context or too garbled to interpret safely (see [RESTATE GUARD]), output EXACTLY: [RESTATE] — never guess and never invent content the user did not say.
-- Output [RETRY] ONLY when the user's answer shows they did not understand the AI's question itself, so re-asking the same thing would not help.""";
+- Output [RETRY] ONLY when the user's answer shows they did not understand the AI's question itself, so re-asking the same thing would not help.
+- Output [DISSATISFIED] when the user expresses dissatisfaction, complaint, or rejection about the AI's QUESTION itself (not about the topic). Signs: "다른 질문 해줘" / "그 질문 싫어" / "질문 바꿔" / "별로야" / "그건 좀" / "다른 거 물어봐" / "change the question" / "ask something else" / "I don't like that question". Do NOT output [DISSATISFIED] when the user is simply answering negatively (e.g., "아니, 안 갔어" = a valid negative answer).""";
 
       final request = http.Request(
         'POST',
@@ -4707,8 +4752,7 @@ Output: [RESTATE]
                 'messages': [
                   {
                     'role': 'system',
-                    'content':
-                        '''당신은 영한 번역가입니다. 주어진 영어를 한국어 구어체로 번역하세요.
+                    'content': '''당신은 영한 번역가입니다. 주어진 영어를 한국어 구어체로 번역하세요.
 
 [규칙]
 - 원문 내용만 번역. 설명·부연·의견 추가 절대 금지.
@@ -4822,6 +4866,7 @@ Output: [RESTATE]
     required String myTarget,
     String userId = '',
     bool isRetry = false,
+    bool isDifferent = false,
   }) async* {
     final client = http.Client();
     try {
@@ -5054,7 +5099,7 @@ BANNED — never output any of the following:
   - Summary / recap of user's answer ("So you mean...", "In other words...", "So what you're saying is...")
   - Two questions at once
   - Pressure-heavy interrogation ("Why did you do that?", "What was your reason?", "Explain why~")
-${isRetry ? "- [RETRY] The previous question confused the user. Ask a simpler, more direct 5–8-word question." : ""}
+${isDifferent ? "- [NEW QUESTION] The user rejected the last AI question shown in the History. Discard that question completely. Ask ONE new question that explores a DIFFERENT aspect of the conversation — a different angle, detail, or meaning. Do NOT rephrase, simplify, or reuse the rejected question. Every other rule above still applies." : (isRetry ? "- [RETRY] The previous question confused the user. Ask a simpler, more direct 5–8-word question." : "")}
 
 [EXAMPLE FLOW]
 (Notice: each question goes DEEPER — into feeling, reason, or meaning — not just naming the last noun.)
@@ -5281,13 +5326,13 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
   }) async* {
     final client = http.Client();
     try {
-      final String snippetsBlock =
-          snippets.map((s) => '- $s').join('\n');
+      final String snippetsBlock = snippets.map((s) => '- $s').join('\n');
       final String sameLangNote = (myNative.isNotEmpty && myNative == myTarget)
           ? 'NOTE: $myTarget and the user\'s language are the same — output ONLY the question, with NO blank line and NO translation.\n'
           : '';
 
-      final String sysPrompt = 'You are a Step Expand grammar coach opening a session.\n'
+      final String sysPrompt =
+          'You are a Step Expand grammar coach opening a session.\n'
           'The user has had earlier free-talk conversations. Here are a few things they said before:\n'
           '$snippetsBlock\n'
           '\n'
