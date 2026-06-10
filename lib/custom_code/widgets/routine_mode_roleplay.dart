@@ -2990,7 +2990,7 @@ class ChunkedTtsFetcher {
       return;
     }
 
-    // [2단계] API 호출 (재시도 2회, timeout 8초)
+    // [2단계] API 호출 (5초 타임아웃, 최대 3회 시도) — TTS 지연 스파이크 대응
     Uint8List result = Uint8List(0);
     for (int attempt = 0; attempt < 3; attempt++) {
       try {
@@ -3009,7 +3009,7 @@ class ChunkedTtsFetcher {
                 'response_format': 'mp3',
               }),
             )
-            .timeout(const Duration(seconds: 8));
+            .timeout(const Duration(seconds: 5));
 
         if (res.statusCode == 200) {
           result = res.bodyBytes;
@@ -3020,13 +3020,19 @@ class ChunkedTtsFetcher {
           TtsCache.put(text, voice, result);
           break;
         } else {
-          onLog?.call('❌ [TTS-API-ERR]', 'statusCode=${res.statusCode}');
+          onLog?.call('❌ [TTS-API-ERR]',
+              'statusCode=${res.statusCode} (attempt=${attempt + 1}/3)');
         }
-      } catch (_) {
+      } catch (e) {
+        onLog?.call('⚠️ [TTS-RETRY]',
+            'attempt=${attempt + 1}/3 실패 (${e.runtimeType}) for "$text"');
         if (attempt < 2) {
           await Future.delayed(const Duration(milliseconds: 300));
         }
       }
+    }
+    if (result.isEmpty) {
+      onLog?.call('❌ [TTS-FAIL]', '3회 모두 실패 — 청크 스킵: "$text"');
     }
 
     _buffer[id] = result;
