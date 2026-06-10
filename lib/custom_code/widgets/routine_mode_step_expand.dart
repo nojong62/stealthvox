@@ -1609,8 +1609,12 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 // 📦 [Box 5-RETRY: 재질문 처리]
 // ====================================================================
   Future<void> _handleRetryQuestion(String contextStr, String targetLangName,
-      {bool isDifferent = false}) async {
-    _log('🔄 [RETRY]', isDifferent ? '다른 질문 모드 진입' : '재질문 모드 진입');
+      {bool isDifferent = false, bool isMisheard = false}) async {
+    _log(
+        '🔄 [RETRY]',
+        isMisheard
+            ? '오청취 재질문 모드 진입'
+            : (isDifferent ? '다른 질문 모드 진입' : '재질문 모드 진입'));
     _ttsQueueManager.setUserTurn(false);
     _ttsQueueManager.setAiPaused(false);
 
@@ -1622,7 +1626,9 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       isUser: false,
       onLog: _log,
     );
-    phraseTts.addText(isDifferent ? "그럼 다른 질문 드릴게요." : "다시 질문할게요.");
+    phraseTts.addText(isMisheard
+        ? "아 제가 잘못 들었어요. 다시 질문할게요."
+        : (isDifferent ? "그럼 다른 질문 드릴게요." : "다시 질문할게요."));
 
     // 새 AI 질문 버블
     if (mounted) {
@@ -1644,7 +1650,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       maxTurns: MAX_TURNS,
       myTarget: targetLangName,
       userId: FirebaseAuth.instance.currentUser?.uid ?? '',
-      isRetry: !isDifferent,
+      isRetry: !isDifferent && !isMisheard,
       isDifferent: isDifferent,
     );
 
@@ -1858,6 +1864,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       bool evaporated = false;
       bool retried = false;
       bool corrected = false; // 유저가 AI의 오해를 정정하는 경우 → 직전 HOST+SYSTEM 쌍 삭제 후 재시작
+      bool misheard = false; // 잘못 들었다는 불만만 있음 → 직전 교환 삭제 후 재질문
       bool clarified = false; // 주어/목적어 모호 → AI 되묻기
       bool restated = false; // 맥락 어긋남/발음 불확실 → 같은 AI 질문 유지하고 다시 말하기 요청
       bool dissatisfied = false; // [DISSATISFIED] 유저가 AI 질문에 불만 → 확인 후 재질문
@@ -1895,6 +1902,13 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         if (!isCorrectionRetry && userTargetText.contains("[CORRECTION]")) {
           corrected = true;
           _log('🔄 [CORRECTION]', '정정 감지 → 직전 HOST+SYSTEM 삭제 후 재시작');
+          break;
+        }
+
+        // [MISHEARD] 잘못 들었다는 불만만 있음 → 직전 교환 삭제 후 재질문
+        if (!isCorrectionRetry && userTargetText.contains("[MISHEARD]")) {
+          misheard = true;
+          _log('👂 [MISHEARD]', '오청취 불만 감지 → 직전 교환 삭제 후 재질문');
           break;
         }
 
@@ -2047,6 +2061,72 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         }
         // 정정된 발화로 해당 턴 재처리 (재진입이므로 [CORRECTION] 재감지 안 함)
         _processRelayPipeline(finalTranscript, isCorrectionRetry: true);
+        return;
+      }
+
+      // 👂 [MISHEARD] 유저가 "잘못 들었다"는 불만만 말함 (정정 내용 없음)
+      if (misheard) {
+        if (_turnCounter < 2) {
+          _turnCounter--;
+          if (mounted) {
+            setState(() {
+              _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+              if (hostIndex < _localMessages.length) {
+                _localMessages.removeAt(hostIndex);
+              }
+            });
+          }
+          await _handleRetryQuestion(contextStr, targetLangName,
+              isMisheard: true);
+          return;
+        }
+        _turnCounter -= 2; // 현재 불만 턴 + 이전 오청취 턴 카운트 취소
+        if (mounted) {
+          setState(() {
+            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+            if (hostIndex < _localMessages.length) {
+              _localMessages.removeAt(hostIndex);
+            }
+            final lastHostIdx =
+                _localMessages.lastIndexWhere((m) => m['role'] == 'HOST');
+            if (lastHostIdx != -1) _localMessages.removeAt(lastHostIdx);
+          });
+          _scrollToBottom();
+        }
+        var cleanMsgs = _localMessages.where((m) {
+          if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
+          final target = (m['target'] ?? '').toString().trim();
+          return target.isNotEmpty && target != '...';
+        }).toList();
+        if (cleanMsgs.length > 10)
+          cleanMsgs = cleanMsgs.sublist(cleanMsgs.length - 10);
+        final lastBadSysIdx =
+            cleanMsgs.lastIndexWhere((m) => m['role'] == 'SYSTEM');
+        if (lastBadSysIdx != -1) cleanMsgs.removeAt(lastBadSysIdx);
+        final List<String> cleanLines = [];
+        String cleanLatestExpanded = '';
+        for (final m in cleanMsgs) {
+          final t = (m['target'] ?? '').toString().trim();
+          if (m['role'] == 'HOST') {
+            final idx = t.indexOf('\n\n');
+            final expanded = idx < 0
+                ? t
+                : (t.substring(idx + 2).trim().isNotEmpty
+                    ? t.substring(idx + 2).trim()
+                    : t.substring(0, idx).trim());
+            cleanLines.add("User: $expanded");
+            cleanLatestExpanded = expanded;
+          } else {
+            cleanLines.add("AI: $t");
+          }
+        }
+        String cleanContextStr = cleanLines.join("\n");
+        if (cleanLatestExpanded.isNotEmpty) {
+          cleanContextStr +=
+              "\n\n[Most recent expanded sentence to grow from]: $cleanLatestExpanded";
+        }
+        await _handleRetryQuestion(cleanContextStr, targetLangName,
+            isMisheard: true);
         return;
       }
 
@@ -4573,7 +4653,7 @@ class StepExpandBrain {
     final client = http.Client();
     try {
       final String correctionBlock = disableCorrection
-          ? "Never output [CORRECTION]. Treat the input as normal content."
+          ? "Never output [CORRECTION] or [MISHEARD]. Treat the input as normal content."
           : """[CASE CORRECTION] — Check this FIRST, but only when History contains at least one 'User:' line
 The user is correcting the AI's misunderstanding of a previous answer.
 Signs:
@@ -4581,7 +4661,15 @@ Signs:
 - AND the content is clearly a re-statement or clarification of the LAST 'User:' line in History (not new story info)
 - The user is essentially saying "that's not what I said — what I said was X"
 If this is a correction, output EXACTLY: [CORRECTION]
-Do NOT output [CORRECTION] when the user simply adds new details that happen to start with "아니" etc.""";
+Do NOT output [CORRECTION] when the user simply adds new details that happen to start with "아니" etc.
+
+[CASE MISHEARD] — Check this SECOND, only when History contains at least one 'User:' line
+The user is COMPLAINING that their previous words were misheard or misunderstood, WITHOUT restating what they actually said.
+Signs:
+- The utterance is essentially ONLY a complaint: "내 말이 그런 뜻이 아니야" / "그런 거 아니야" / "내 말은 그게 아니야" / "잘못 들었어" / "잘못 적었어" / "잘못 알아들었어" / "that's not what I meant" / "you misheard me" / "you got my words wrong"
+- AND it contains NO restated content (no actual answer, no new story info).
+If this is a bare mishearing complaint, output EXACTLY: [MISHEARD]
+If the complaint INCLUDES the corrected content, use [CORRECTION] instead.""";
 
       final sysPrompt =
           """You are a [Step Expand Translator] translating Korean to $targetLang.
@@ -4652,6 +4740,7 @@ Do NOT output [RESTATE] when:
 - The input is on-topic for the last question, even if it adds a new natural detail  ->  translate normally.
 - Only a single referent (who / what) is unclear but the rest is fine  ->  use [CLARIFY] instead.
 ${disableCorrection ? "" : "- The user is explicitly correcting the AI  ->  use [CORRECTION] instead."}
+${disableCorrection ? "" : "- The user is ONLY complaining that they were misheard or misunderstood, without restating the content  ->  use [MISHEARD] instead."}
 
 [RESTATE CONTRAST EXAMPLES]
 History:
@@ -4683,7 +4772,7 @@ Output: [RESTATE]
 - If the input has minor STT errors but the intended meaning is still clearly inferable from context, make your best interpretation and produce the normal output (keep tolerating small errors).
 - If the input is off-context or too garbled to interpret safely (see [RESTATE GUARD]), output EXACTLY: [RESTATE] — never guess and never invent content the user did not say.
 - Output [RETRY] ONLY when the user's answer shows they did not understand the AI's question itself, so re-asking the same thing would not help.
-- Output [DISSATISFIED] when the user expresses dissatisfaction, complaint, or rejection about the AI's QUESTION itself (not about the topic). Signs: "다른 질문 해줘" / "그 질문 싫어" / "질문 바꿔" / "별로야" / "그건 좀" / "다른 거 물어봐" / "change the question" / "ask something else" / "I don't like that question". Do NOT output [DISSATISFIED] when the user is simply answering negatively (e.g., "아니, 안 갔어" = a valid negative answer).""";
+- Output [DISSATISFIED] when the user expresses dissatisfaction, complaint, or rejection about the AI's QUESTION itself (not about the topic). Signs: "다른 질문 해줘" / "그 질문 싫어" / "질문 바꿔" / "무슨 질문이 그래" / "별로야" / "그건 좀" / "다른 거 물어봐" / "change the question" / "ask something else" / "I don't like that question". Do NOT output [DISSATISFIED] when the user is simply answering negatively (e.g., "아니, 안 갔어" = a valid negative answer).""";
 
       final request = http.Request(
         'POST',
