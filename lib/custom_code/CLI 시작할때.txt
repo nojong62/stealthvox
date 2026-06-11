@@ -6,7 +6,7 @@ cd F:\flutter_project\stealth_vox
 CLAUDE1.md 참고해서, 실행해 줘.
 
 
-
+ Step Expand, Free Talk·Roleplay 이 3개만 수정하면 되고, 완료했나?
 
 
 🔗 앱 다운로드 링크: `https://play.google.com/apps/testing/com.aienglishpractice.stealthvox`
