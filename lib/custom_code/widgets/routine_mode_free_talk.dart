@@ -2682,6 +2682,11 @@ class TtsQueueManager {
   // UI 상태 표시용 (레거시 호환)
   bool _isUserTurn = true;
 
+  // 🔒 [Box 7 USER-DRAIN-SIGNAL] 유저 큐 완전 drain 감지용
+  bool _userStreamSealed = false;
+  Completer<void>? _userDrainedCompleter;
+  bool _currentChunkIsUser = false;
+
   /// 유저 재생 중이거나 유저 큐에 남은 게 있으면 busy
   bool get isBusy =>
       _isPlaying ||
@@ -2721,6 +2726,37 @@ class TtsQueueManager {
     if (!_isPlaying) _processQueue();
   }
 
+  // 🔒 [Box 7 USER-DRAIN-SIGNAL] 유저 청크 스트림 봉인.
+  // 호출 시점 = "더 이상 유저 청크가 들어오지 않음" 선언.
+  void sealUserStream() {
+    _userStreamSealed = true;
+    if (_userQueue.isEmpty && !_currentChunkIsUser) {
+      if (_userDrainedCompleter != null &&
+          !_userDrainedCompleter!.isCompleted) {
+        _userDrainedCompleter!.complete();
+      }
+    }
+  }
+
+  // 🔒 [Box 7 USER-DRAIN-SIGNAL] 유저 큐가 완전히 비고 마지막 청크 재생이 끝날 때까지 대기.
+  Future<void> waitUserDrained({
+    Duration timeout = const Duration(seconds: 45),
+  }) async {
+    if (_userQueue.isEmpty && !_currentChunkIsUser) {
+      _userStreamSealed = false;
+      return;
+    }
+    _userDrainedCompleter ??= Completer<void>();
+    try {
+      await _userDrainedCompleter!.future.timeout(timeout);
+    } catch (_) {
+      // Timeout은 강제 진행해 호출부가 막히지 않도록 한다.
+    } finally {
+      _userDrainedCompleter = null;
+      _userStreamSealed = false;
+    }
+  }
+
   Future<void> _processQueue() async {
     if (_isPlaying) return;
     _isPlaying = true;
@@ -2733,8 +2769,10 @@ class TtsQueueManager {
       Uint8List bytes;
       if (_userQueue.isNotEmpty) {
         bytes = _userQueue.removeAt(0);
+        _currentChunkIsUser = true; // 🔒 [Box 7 USER-DRAIN-SIGNAL]
       } else if (!_aiPaused && _aiQueue.isNotEmpty) {
         bytes = _aiQueue.removeAt(0);
+        _currentChunkIsUser = false; // 🔒 [Box 7 USER-DRAIN-SIGNAL]
       } else {
         break;
       }
@@ -2755,6 +2793,15 @@ class TtsQueueManager {
           _completer!.complete();
         }
       }
+
+      // 🔒 [Box 7 USER-DRAIN-SIGNAL] 유저 청크 재생 완료 직후 sealed 상태면 drain 신호.
+      if (_currentChunkIsUser && _userStreamSealed && _userQueue.isEmpty) {
+        if (_userDrainedCompleter != null &&
+            !_userDrainedCompleter!.isCompleted) {
+          _userDrainedCompleter!.complete();
+        }
+      }
+      _currentChunkIsUser = false;
     }
 
     _isPlaying = false;
@@ -2770,6 +2817,13 @@ class TtsQueueManager {
     if (_completer != null && !_completer!.isCompleted) {
       _completer!.complete();
     }
+    // 🔒 [Box 7 USER-DRAIN-SIGNAL] drain 대기자 깨우기(deadlock 방지)
+    if (_userDrainedCompleter != null && !_userDrainedCompleter!.isCompleted) {
+      _userDrainedCompleter!.complete();
+    }
+    _userDrainedCompleter = null;
+    _userStreamSealed = false;
+    _currentChunkIsUser = false;
   }
 
   Future<void> dispose() async {
