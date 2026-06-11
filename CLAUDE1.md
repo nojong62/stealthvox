@@ -47,304 +47,451 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-## 핵심 원인
+# 수정 지시문 — Step Expand 로그 분석 후속 4건 (우선순위 순)
 
-1. **“질문이 뭐 그래?”가 `[DISSATISFIED]`로 안 잡히고 `[RESTATE]`로 잡힘**
+## 수정 목록 (이 순서대로 진행)
+1. **[심각]** TtsCache 저장이 파이프라인을 최대 15초 블로킹 → 백그라운드 분리 (프리톡 [C 수정] 포팅)
+2. **[기능]** 불만 재생성이 동일 질문을 또 냄 → 거절된 질문 텍스트를 금지 항목으로 프롬프트에 전달
+3. **[품질]** 시드 풀에 과거 불만/메타 발화 혼입 → 시드 필터에 불만 패턴 추가
+4. **[경미]** (a) FAST 레인 패턴 보강 (b) 재질문 경로 스톱워치 미리셋으로 디버그 ms 왜곡
 
-   * 현재 프롬프트에서 `[DISSATISFIED]` 규칙은 아래쪽에 있고, `[RESTATE]` 관련 “맥락 불일치” 검사가 먼저 강하게 작동합니다.
-   * 그래서 “질문이 뭐 그래?”를 **질문 불만**이 아니라 **맥락 안 맞는 말**로 판단했고, 그 결과 확인 멘트가 나왔습니다.
+## 작업 전 필수
+```bash
+cd F:\flutter_project\stealth_vox
+git add -A && git commit -m "save-point: before log-analysis 4-fix (cache-block/dup-question/seed-filter/fast-lane)"
+```
 
-2. **설령 `[DISSATISFIED]`로 잡혀도 현재 `_handleRetryQuestion()`이 안내 멘트를 먼저 말함**
+**대상 파일 (1개. lib/custom_code/임시/ 절대 금지):**
+- `lib/custom_code/widgets/routine_mode_step_expand.dart`
 
-   * 현재 코드에는 `isDifferent == true`일 때도 `"그럼 다른 질문 드릴게요."`를 TTS로 말하게 되어 있습니다.
-   * 실장님이 원하는 동작은 **그 말도 하지 말고 바로 새 질문만 하는 것**입니다.
-
-3. **첫 질문 히스토리 섞기 로직도 약함**
-
-   * 현재는 FreeTalk 기록이 있을 때만 Roleplay 기록을 가져옵니다.
-   * 즉 FreeTalk가 비어 있으면 Roleplay 기록은 아예 무시됩니다.
-   * 또 `mode == free_talk`, `mode == roleplay`로 딱 맞는 값만 찾기 때문에 실제 저장값이 조금만 다르면 기록을 못 가져옵니다.
-
-아래는 코덱스에 그대로 줄 지시문입니다.
-
-# Codex 지시문 — Step Expand 질문 불만 처리 + 첫 질문 히스토리 시드 개선
-
-대상 파일:
-`lib/custom_code/widgets/routine_mode_step_expand.dart`
-
-## 목표
-
-Step Expand에서 유저가 AI 질문이 마음에 안 든다고 말하면, AI는 확인 질문이나 안내 멘트를 하지 않는다.
-
-예:
-
-* “질문이 뭐 그래?”
-* “그 질문 별로야”
-* “다른 거 물어봐”
-* “뭐야 그게”
-* “그건 좀 아닌데”
-* “재미없어”
-* “별론데”
-
-이런 발화는 `[RESTATE]`나 `[GARBLED]`가 아니라 반드시 `[DISSATISFIED]`로 처리한다.
-
-처리 결과:
-
-1. 방금 유저의 불만 발화 버블은 화면에서 제거한다.
-2. 직전 AI 질문 버블도 제거한다.
-3. “방금 … 라고 말씀하신 건가요?” 같은 확인 멘트 금지.
-4. “그럼 다른 질문 드릴게요.” 같은 안내 멘트도 금지.
-5. 곧바로 이전 질문과 전혀 다른 새 질문만 생성하고 TTS로 재생한다.
-6. 턴 카운트는 불만 발화를 하나의 학습 턴으로 계산하지 않는다.
-7. Firestore 히스토리에도 불만 발화와 제거된 질문이 저장되면 안 된다.
+**절대 규칙:**
+- 수정 ①은 이 파일의 `HybridTtsPlayer`(Box 7 사본)를 건드리는 **유일한** 항목이며,
+  프리톡 `routine_mode_free_talk.dart`에서 이미 검증 완료된 [C 수정]의 그대로 포팅이다.
+  포팅 내용 외에 `HybridTtsPlayer`의 다른 로직(onChunk, remainder 발사 등)은 한 글자도 변경 금지.
+- `TtsQueueManager`, `DeepgramV2VoiceManager`, `ChunkedTtsFetcher`는 일절 수정 금지.
+- 줄번호는 참고용 근사치. **반드시 anchor 문자열로 위치 확정 후, 아래(줄번호 큰 곳)→위 순서로 편집.**
+- `dart:async`는 이미 import되어 있으므로(23줄) `unawaited` 사용 가능 — import 추가 불필요.
 
 ---
 
-## 1. `[DISSATISFIED]` 판정 우선순위 수정
-
-`StepExpandBrain.streamUserTranslation()`의 시스템 프롬프트에서 현재 `[RESTATE]` 관련 검사가 `[DISSATISFIED]`보다 강하게 작동하고 있다.
-
-수정 방향:
-
-* `[DISSATISFIED]` 판정을 `[RELEVANCE CHECK]`, `[RESTATE GUARD]`보다 먼저 수행하도록 프롬프트 구조를 바꾼다.
-* “질문이 뭐 그래?”, “무슨 질문이 그래?”, “뭐야 그게?”, “그 질문 이상해”, “그 질문 별로야”, “다른 질문 해줘”, “다른 거 물어봐”, “그건 좀”, “재미없어”, “별론데”는 무조건 `[DISSATISFIED]`로 출력하도록 명시한다.
-* `[DISSATISFIED]`는 “유저가 대답을 거절하거나 부정 답변을 한 것”과 구분해야 한다.
-
-  * 정상 부정 답변 예: “아니, 안 갔어”, “별로 안 좋아해”, “그건 없어”가 질문에 대한 자연스러운 답이면 정상 번역.
-  * 질문 자체에 대한 불만 예: “그 질문 별로야”, “질문이 뭐 그래?”, “다른 거 물어봐”는 `[DISSATISFIED]`.
-
-추가로 모델 판정만 믿지 말고, `_processRelayPipeline()` 초반에 raw Korean transcript 기준의 로컬 fast-lane 판정도 추가한다.
-
-추가할 helper 개념:
-
-* `_isQuestionDissatisfactionRaw(String text)`
-* 이 함수는 finalTranscript 원문에서 질문 불만 표현을 감지한다.
-* 감지되면 `streamUserTranslation()` 호출 전에 바로 dissatisfied 처리 루트로 보낸다.
-* 단, “아니, 안 갔어”, “별로 안 좋아해”처럼 질문에 대한 정상 부정 답변은 잡지 않도록 “질문”, “물어봐”, “뭐야”, “그게”, “다른 거”, “별로야”, “재미없어”, “이상해” 등 질문 대상 표현이 있는 경우 위주로 판정한다.
-
----
-
-## 2. `_handleRetryQuestion()`에서 불만 처리 시 안내 멘트 금지
-
-현재 `_handleRetryQuestion()`은 `isDifferent == true`일 때도 `"그럼 다른 질문 드릴게요."`를 TTS로 먼저 말한다.
-
-수정 방향:
-
-* `_handleRetryQuestion()`에 `speakIntro` 또는 `silentReplace` 같은 옵션을 추가한다.
-* `[DISSATISFIED]` 처리에서는 이 옵션을 사용해 intro phrase TTS를 완전히 건너뛴다.
-* 이때 AI가 내는 소리는 오직 새 질문 TTS뿐이어야 한다.
-
-기대 로그:
-
-* 불만 감지 후 `"그럼 다른 질문 드릴게요."` TTS 로그가 없어야 한다.
-* `"방금, 질문이 뭐 그래?, 라고 말씀하신 건가요?"` TTS 로그도 없어야 한다.
-* 곧바로 새 AI 질문의 `[TTS-01] [AI] addText:`만 나와야 한다.
-
----
-
-## 3. `[DISSATISFIED]` 분기에서 contextStr도 정리
-
-현재 dissatisfied 분기에서는 UI에서 유저 불만 버블만 제거한 뒤 `_handleRetryQuestion(contextStr, ..., isDifferent: true)`를 호출한다.
-
-문제:
-
-* `contextStr`에는 이미 직전 AI 질문이 포함되어 있다.
-* UI에서는 직전 AI 질문을 지워도, 새 질문 생성 프롬프트에는 거절당한 질문이 남아 있을 수 있다.
-* 그래서 새 질문이 이전 질문과 비슷해질 위험이 있다.
-
-수정 방향:
-
-* dissatisfied 분기에서 새 질문 생성 전에 clean context를 다시 만든다.
-* clean context에는 다음을 포함하지 않는다.
-
-  1. 방금 유저 불만 발화
-  2. 직전 AI 질문, 즉 거절당한 SYSTEM 질문
-* 그 이전의 정상 HOST/SYSTEM 대화 흐름은 유지한다.
-* clean context를 `_handleRetryQuestion()`에 전달한다.
-* `streamGrammarQuestion()`의 `isDifferent == true` 프롬프트도 강화한다.
-
-  * “Rejected question must be treated as banned.”
-  * “Do not ask about the same object/action/time/reason.”
-  * “Choose a different emotional or situational angle.”
-
----
-
-## 4. RESTATE 확인 멘트와 질문 불만을 분리
-
-현재 “질문이 뭐 그래?”가 `[RESTATE]`로 가면서 아래 멘트가 나온다.
-
-`방금, 질문이 뭐 그래?, 라고 말씀하신 건가요? 맞다면 그대로 다시 한 번 말해 주세요.`
-
-이 동작은 질문 불만 상황에서는 절대 나오면 안 된다.
-
-수정 방향:
-
-* `[RESTATE]`는 정말 “유저가 AI 질문과 무관한 새 내용을 말했지만 질문 불만은 아닌 경우”에만 사용한다.
-* 질문 자체를 평가하거나 거부하는 표현은 무조건 `[DISSATISFIED]`.
-* 로컬 fast-lane 판정에서 dissatisfied가 true이면 RESTATE/GARBLED 루트보다 우선 처리한다.
-
-테스트 문장:
-
-* “질문이 뭐 그래?” → `[DISSATISFIED]`
-* “그 질문 별로야” → `[DISSATISFIED]`
-* “다른 거 물어봐” → `[DISSATISFIED]`
-* “뭐야 그게” → `[DISSATISFIED]`
-* “아니, 안 갔어” → 정상 답변
-* “별로 안 좋아해” → 질문에 대한 답이면 정상 답변
-* “커피 한 잔 마시면서 기다리지” → 정상 답변
-
----
-
-## 5. 첫 질문 히스토리 시드 로직 개선
-
-현재 `_startSessionWaitingForUserSeed()`에서:
-
-* FreeTalk snippets를 먼저 가져온다.
-* FreeTalk snippets가 있을 때만 Roleplay snippets를 가져온다.
-* FreeTalk snippets가 없으면 Roleplay snippets는 무시된다.
-* 첫 질문 생성도 `ftSnippets.isNotEmpty`일 때만 실행된다.
-
-이 구조를 바꾼다.
-
-수정 방향:
-
-1. FreeTalk와 Roleplay를 독립적으로 가져온다.
-
-   * FreeTalk가 없어도 Roleplay가 있으면 Roleplay 기반 첫 질문을 생성한다.
-   * Roleplay가 없어도 FreeTalk가 있으면 FreeTalk 기반 첫 질문을 생성한다.
-   * 둘 다 있으면 두 소스를 자연스럽게 섞는다.
-   * 둘 다 없을 때만 기존 고정 안내문으로 폴백한다.
-
-2. mode 필터를 엄격한 단일 문자열 비교에서 alias 기반으로 확장한다.
-
-   * FreeTalk 후보 예:
-
-     * `free_talk`
-     * `freetalk`
-     * `freeTalk`
-     * `ai_free_talk`
-     * `free_talk_mode`
-   * Roleplay 후보 예:
-
-     * `roleplay`
-     * `role_play`
-     * `routine_mode_roleplay`
-   * 실제 저장값을 확인해서 필요한 alias를 추가한다.
-
-3. role 필터도 실제 저장 스키마를 확인해 robust하게 만든다.
-
-   * 현재는 `role == HOST`만 가져온다.
-   * 실제 다른 모드에서 `speaker_role`, `sender`, `user`, `host` 등 다른 필드명을 쓰는지 확인한다.
-   * Roleplay/FreeTalk 메시지 저장 구조에 맞게 fallback을 추가한다.
-
-4. 메시지 필드도 fallback을 둔다.
-
-   * 현재는 `original_text`, `translated_text`만 본다.
-   * 실제 저장 필드가 `original`, `target`, `text`, `message`, `content` 등일 수 있으므로 확인 후 fallback을 추가한다.
-
-5. 한 방에서만 뽑지 말고 최근 여러 방에서 섞는다.
-
-   * FreeTalk 최근 2~3개 방에서 유저 발화 후보 수집.
-   * Roleplay 최근 2~3개 방에서 유저 발화 후보 수집.
-   * 필러 제거 후 FreeTalk 1~2개 + Roleplay 1개 정도를 최종 seed로 사용.
-   * Roleplay 발화는 실제 사용자 사실이 아니라 “주제/분위기/상황 각도”로만 사용한다.
-
-6. seed fetch 로그를 추가한다.
-
-   * `[SEED-FT] rooms=..., candidates=..., picked=...`
-   * `[SEED-RP] rooms=..., candidates=..., picked=...`
-   * `[SEED-MIX] ft=..., rp=..., source=freeTalk+roleplay/freeTalkOnly/roleplayOnly/fallback`
-   * 이 로그로 실제 히스토리를 가져오는지 바로 확인 가능해야 한다.
-
----
-
-## 6. `streamFreeTalkSeedQuestion()` 프롬프트 강화
-
-현재 프롬프트는 “섞어도 되고, 이상하면 한쪽만 골라라”에 가깝다. 그래서 Roleplay가 들어와도 실제 질문에 반영이 약할 수 있다.
-
-수정 방향:
-
-* 함수명을 꼭 바꿀 필요는 없지만, 의미상 FreeTalk-only가 아니라 HistorySeedQuestion으로 동작하게 한다.
-* 프롬프트에서 source를 명확히 구분한다.
-
-  * FreeTalk snippets: 실제 사용자 관심사 후보
-  * Roleplay snippets: 실제 사실이 아닌 상황/역할/분위기 힌트
-* 둘 다 있을 때:
-
-  * “Use FreeTalk as the main personal-interest signal.”
-  * “Use Roleplay only to shape the situation, tone, or practical angle.”
-  * “Create a blended everyday question that does not reveal the source.”
-* 한쪽만 있을 때:
-
-  * 해당 소스만 기반으로 자연스러운 첫 질문 생성.
-* 출력은 기존처럼 유지:
-
-  * target question
-  * blank line
-  * native translation
-
----
-
-## 7. 기대 동작 테스트
-
-테스트 1 — 질문 불만:
-
-1. AI: `What do you enjoy most about that time?`
-2. User: `질문이 뭐 그래?`
-3. 기대:
-
-   * 유저 버블 제거
-   * 직전 AI 질문 제거
-   * 확인 멘트 없음
-   * “그럼 다른 질문 드릴게요” 없음
-   * 바로 완전히 다른 새 질문 재생
-
-테스트 2 — 정상 부정 답변:
-
-1. AI: `Did you go there with friends?`
-2. User: `아니, 안 갔어.`
-3. 기대:
-
-   * `[DISSATISFIED]` 아님
-   * 정상 번역/확장 진행
-
-테스트 3 — Roleplay only:
-
-1. FreeTalk 기록 없음
-2. Roleplay 기록 있음
-3. 기대:
-
-   * 고정 안내문으로 가지 않음
-   * Roleplay theme 기반 첫 질문 생성
-
-테스트 4 — FreeTalk + Roleplay:
-
-1. 둘 다 기록 있음
-2. 기대:
-
-   * seed 로그에 ft/rp 둘 다 표시
-   * 질문이 FreeTalk 관심사 + Roleplay 상황 각도를 자연스럽게 섞음
-
-테스트 5 — 저장:
-
-* 불만 발화와 삭제된 질문은 chat_history/messages에 저장되지 않아야 한다.
-* 정상 새 질문부터 이후 대화만 저장되어야 한다.
+## [L-1] 수정② Brain — isDifferent 프롬프트에 금지 질문 텍스트 주입 (약 5407~5415줄)
+
+**찾기 (anchor):**
+```dart
+${isDifferent ? """- [DISSATISFIED — REPLACEMENT QUESTION REQUIRED]
+  The user rejected the last AI question. That question is now permanently BANNED.
+  Rules:
+  • Rejected question must NEVER be rephrased, simplified, or reused in any form.
+  • Do NOT ask about the same object, action, time, reason, or topic as the banned question.
+  • Choose a completely different emotional or situational angle.
+  • If the context is thin (early turns), ask about a different aspect of what the user mentioned.
+  Every other rule above still applies.""" : (isRetry ? "- [RETRY] The previous question confused the user. Ask a simpler, more direct 5–8-word question." : "")}
+```
+
+**교체:**
+```dart
+${isDifferent ? """- [DISSATISFIED — REPLACEMENT QUESTION REQUIRED]
+  The user rejected the last AI question. That question is now permanently BANNED.
+${rejectedQuestion.trim().isNotEmpty ? '  BANNED QUESTION (verbatim): "${rejectedQuestion.trim()}"' : ''}
+  Rules:
+  • The banned question must NEVER be repeated, rephrased, simplified, or reused in any form.
+  • Do NOT ask about the same object, action, time, reason, or topic as the banned question.
+  • Choose a completely different emotional or situational angle.
+  • If the context is thin (early turns), ask about a different aspect of what the user mentioned.
+  Every other rule above still applies.""" : (isRetry ? "- [RETRY] The previous question confused the user. Ask a simpler, more direct 5–8-word question." : "")}
+```
+
+## [L-2] 수정② Brain — streamGrammarQuestion 시그니처 (약 5166~5175줄)
+
+**찾기 (anchor):**
+```dart
+  static Stream<String> streamGrammarQuestion({
+    required String apiKey,
+    required String contextStr,
+    required int turnNumber,
+    required int maxTurns,
+    required String myTarget,
+    String userId = '',
+    bool isRetry = false,
+    bool isDifferent = false,
+  }) async* {
+```
+
+**교체:**
+```dart
+  static Stream<String> streamGrammarQuestion({
+    required String apiKey,
+    required String contextStr,
+    required int turnNumber,
+    required int maxTurns,
+    required String myTarget,
+    String userId = '',
+    bool isRetry = false,
+    bool isDifferent = false,
+    String rejectedQuestion = '',
+  }) async* {
+```
+
+## [L-3] 수정① HybridTtsPlayer — 캐시 저장 백그라운드 분리 (약 3888~3929줄)
+
+**삭제 범위:** 약 3888줄 `    // 2. TtsCache 저장 (재생 없음)` 부터 약 3929줄 클래스 닫는 `}` 까지를 아래로 교체.
+
+**찾기 (anchor — onStreamEnd 후반부 + 클래스 끝, 정확히 일치):**
+```dart
+    // 2. TtsCache 저장 (재생 없음)
+    if (fullSentence.trim().isEmpty) return;
+    try {
+      final cached = await TtsCache.get(fullSentence, voice);
+      if (cached != null && cached.isNotEmpty) {
+        lastCacheHit = true;
+        lastCacheSaveMs = 0;
+        onLog?.call('[HYB-03-HIT]', 'TtsCache HIT — 저장 생략');
+        return;
+      }
+      lastCacheHit = false;
+      final sw = Stopwatch()..start();
+      final res = await http
+          .post(
+            Uri.parse('https://api.openai.com/v1/audio/speech'),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({
+              'model': 'tts-1',
+              'input': fullSentence,
+              'voice': voice,
+              'speed': 1.0,
+              'response_format': 'mp3',
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
+        await TtsCache.put(fullSentence, voice, res.bodyBytes);
+        lastCacheSaveMs = sw.elapsedMilliseconds;
+        onLog?.call('[HYB-04-SAVED]',
+            '${lastCacheSaveMs}ms (${res.bodyBytes.length}B)');
+      } else {
+        onLog?.call('[HYB-ERR]', 'API status=${res.statusCode}');
+      }
+      sw.stop();
+    } catch (e) {
+      onLog?.call('[HYB-ERR]', 'TtsCache 저장 실패: $e');
+    }
+  }
+}
+```
+
+**교체:**
+```dart
+    // 2. TtsCache 저장 — 🔧 [C 수정 포팅] 백그라운드 fire-and-forget으로 분리.
+    //    기존: 캐시 저장 HTTP(최대 15초)를 await → PIPE-02가 그만큼 블로킹됨 (로그로 확인).
+    //    프리톡에서 검증 완료된 동일 수정의 포팅. remainder 발사 로직은 그대로 유지.
+    final sentence = fullSentence.trim();
+    if (sentence.isEmpty) return;
+    unawaited(_cacheFullSentenceInBackground(sentence));
+  }
+
+  // 🔧 [C 수정 포팅] 통문장 캐시 저장은 await하지 않는 백그라운드 작업.
+  Future<void> _cacheFullSentenceInBackground(String fullSentence) async {
+    try {
+      final cached = await TtsCache.get(fullSentence, voice);
+      if (cached != null && cached.isNotEmpty) {
+        lastCacheHit = true;
+        lastCacheSaveMs = 0;
+        onLog?.call('[HYB-03-HIT]', 'TtsCache HIT — 저장 생략');
+        return;
+      }
+      lastCacheHit = false;
+      final sw = Stopwatch()..start();
+      final res = await http
+          .post(
+            Uri.parse('https://api.openai.com/v1/audio/speech'),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({
+              'model': 'tts-1',
+              'input': fullSentence,
+              'voice': voice,
+              'speed': 1.0,
+              'response_format': 'mp3',
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
+        await TtsCache.put(fullSentence, voice, res.bodyBytes);
+        lastCacheSaveMs = sw.elapsedMilliseconds;
+        onLog?.call('[HYB-04-SAVED]',
+            '${lastCacheSaveMs}ms (${res.bodyBytes.length}B)');
+      } else {
+        onLog?.call('[HYB-ERR]', 'API status=${res.statusCode}');
+      }
+      sw.stop();
+    } catch (e) {
+      onLog?.call('[HYB-ERR]', 'TtsCache 저장 실패: $e');
+    }
+  }
+}
+```
+
+## [L-4] 수정② GPT 레인 — 거절 질문 텍스트 전달 (약 2199~2200줄)
+
+**찾기 (anchor):**
+```dart
+        await _handleRetryQuestion(dissCleanCtx, targetLangName,
+            isDifferent: true, silentReplace: true);
+```
+
+**교체:**
+```dart
+        await _handleRetryQuestion(dissCleanCtx, targetLangName,
+            isDifferent: true, silentReplace: true,
+            rejectedQuestion: dissRejected);
+```
+
+## [L-5] 수정② GPT 레인 — 거절 질문 텍스트 캡처 (약 2168~2169줄)
+
+**찾기 (anchor):**
+```dart
+        final dissLastSysIdx = dissCleanMsgs.lastIndexWhere((m) => m['role'] == 'SYSTEM');
+        if (dissLastSysIdx != -1) dissCleanMsgs.removeAt(dissLastSysIdx);
+```
+
+**교체:**
+```dart
+        final dissLastSysIdx = dissCleanMsgs.lastIndexWhere((m) => m['role'] == 'SYSTEM');
+        // 🔧 거절된 질문 텍스트 보존 → 재생성 프롬프트에 금지 질문으로 전달 (동일 질문 재생성 방지)
+        final String dissRejected = dissLastSysIdx != -1
+            ? (dissCleanMsgs[dissLastSysIdx]['target'] ?? '').toString().trim()
+            : '';
+        if (dissLastSysIdx != -1) dissCleanMsgs.removeAt(dissLastSysIdx);
+```
+
+## [L-6] 수정② FAST 레인 — 거절 질문 텍스트 전달 (약 1906줄)
+
+**찾기 (anchor):**
+```dart
+      await _handleRetryQuestion(_fclCtx, _fclLang, isDifferent: true, silentReplace: true);
+```
+
+**교체:**
+```dart
+      await _handleRetryQuestion(_fclCtx, _fclLang,
+          isDifferent: true, silentReplace: true, rejectedQuestion: _fclRejected);
+```
+
+## [L-7] 수정② FAST 레인 — 거절 질문 텍스트 캡처 (약 1886~1887줄)
+
+**찾기 (anchor):**
+```dart
+      final _fclSysIdx = _fastCleanMsgs.lastIndexWhere((m) => m['role'] == 'SYSTEM');
+      if (_fclSysIdx != -1) _fastCleanMsgs.removeAt(_fclSysIdx);
+```
+
+**교체:**
+```dart
+      final _fclSysIdx = _fastCleanMsgs.lastIndexWhere((m) => m['role'] == 'SYSTEM');
+      // 🔧 거절된 질문 텍스트 보존 → 재생성 프롬프트에 금지 질문으로 전달 (동일 질문 재생성 방지)
+      final String _fclRejected = _fclSysIdx != -1
+          ? (_fastCleanMsgs[_fclSysIdx]['target'] ?? '').toString().trim()
+          : '';
+      if (_fclSysIdx != -1) _fastCleanMsgs.removeAt(_fclSysIdx);
+```
+
+## [L-8] 수정④b — 재질문 경로 스톱워치 리셋 (약 1764~1769줄, _handleRetryQuestion 내부)
+
+**찾기 (anchor):**
+```dart
+    String aiText = "";
+    String aiOriginalRetry = "";
+    String aiBuffer = "";
+    bool aiRetryHasDoubleNewline = false;
+
+    await for (final chunk in aiStream) {
+```
+
+**교체:**
+```dart
+    String aiText = "";
+    String aiOriginalRetry = "";
+    String aiBuffer = "";
+    bool aiRetryHasDoubleNewline = false;
+
+    _swTTS..reset()..start(); // 🔧 재질문 경로 스톱워치 리셋 — 디버그 발사 ms 왜곡(9274ms 등) 방지
+
+    await for (final chunk in aiStream) {
+```
+
+## [L-9] 수정② — _handleRetryQuestion 시그니처 + Brain 전달 (약 1700~1701줄, 1740~1749줄)
+
+**(a) 찾기 (anchor):**
+```dart
+  Future<void> _handleRetryQuestion(String contextStr, String targetLangName,
+      {bool isDifferent = false, bool isMisheard = false, bool silentReplace = false}) async {
+```
+
+**교체:**
+```dart
+  Future<void> _handleRetryQuestion(String contextStr, String targetLangName,
+      {bool isDifferent = false,
+      bool isMisheard = false,
+      bool silentReplace = false,
+      String rejectedQuestion = ''}) async {
+```
+
+**(b) 찾기 (anchor):**
+```dart
+      isRetry: !isDifferent && !isMisheard,
+      isDifferent: isDifferent,
+    );
+```
+
+**교체:**
+```dart
+      isRetry: !isDifferent && !isMisheard,
+      isDifferent: isDifferent,
+      rejectedQuestion: rejectedQuestion,
+    );
+```
+
+## [L-10] 수정③ — 롤플레이 시드 필터에 불만/메타 패턴 추가 (약 476~487줄)
+
+※ 비교 대상 `t`는 공백이 모두 제거된 문자열이므로 패턴도 공백 없이 작성한다.
+※ 과잉 필터링은 안전하다 — 후보가 비면 기존 고정 안내로 폴백된다.
+
+**찾기 (anchor):**
+```dart
+      const fillerPatterns = [
+        '네', '응', '음', '그래', '맞아', '맞아요', '좋아', '좋아요',
+        '글쎄', 'ok', 'okay', '오케이', '아', '어', '그래요', '그럴까',
+        '그렇구나', '고마워', '고맙습니다', 'yes', 'yeah', 'sure',
+        'right', 'thank you', 'thanks',
+      ];
+      bool isFiller(String s) {
+        final t = s.replaceAll(RegExp(r'[\s\.,!?~…]'), '').toLowerCase();
+        if (t.length < 6) return true;
+        return fillerPatterns.contains(t);
+      }
+```
+
+**교체:**
+```dart
+      const fillerPatterns = [
+        '네', '응', '음', '그래', '맞아', '맞아요', '좋아', '좋아요',
+        '글쎄', 'ok', 'okay', '오케이', '아', '어', '그래요', '그럴까',
+        '그렇구나', '고마워', '고맙습니다', 'yes', 'yeah', 'sure',
+        'right', 'thank you', 'thanks',
+      ];
+      // 🧹 과거 불만/메타 발화 제외 — 시드 주제로 부적합 (t는 공백 제거됨 → 패턴도 공백 없음)
+      const complaintPatterns = [
+        '질문', '물어봐', '물어본', '다시말', '이상한', '이상해', '이상하',
+        '별로', '뭐야', '바꿔', '그런거말고', '딴거', '다른거', '다른걸',
+        '마음에안', '맘에안', 'question', 'askme', 'weird',
+      ];
+      bool isFiller(String s) {
+        final t = s.replaceAll(RegExp(r'[\s\.,!?~…]'), '').toLowerCase();
+        if (t.length < 6) return true;
+        if (fillerPatterns.contains(t)) return true;
+        for (final p in complaintPatterns) {
+          if (t.contains(p)) return true;
+        }
+        return false;
+      }
+```
+
+## [L-11] 수정③ — 프리톡 시드 필터에 불만/메타 패턴 추가 (약 385~395줄)
+
+**찾기 (anchor):**
+```dart
+      const fillerPatterns = [
+        '네', '응', '어', '그래', '맞아', '맞아요', '좋아', '좋아요',
+        '글쎄', 'ok', 'okay', '음', '아', '오', '그래요', '그러니까',
+        '그렇구나', '알겠어', '알겠습니다', 'yes', 'yeah', 'sure',
+        'right', 'thank you', 'thanks',
+      ];
+      bool isFiller(String s) {
+        final t = s.replaceAll(RegExp(r'[\s\.,!?~…]'), '').toLowerCase();
+        if (t.length < 6) return true;
+        return fillerPatterns.contains(t);
+      }
+```
+
+**교체:**
+```dart
+      const fillerPatterns = [
+        '네', '응', '어', '그래', '맞아', '맞아요', '좋아', '좋아요',
+        '글쎄', 'ok', 'okay', '음', '아', '오', '그래요', '그러니까',
+        '그렇구나', '알겠어', '알겠습니다', 'yes', 'yeah', 'sure',
+        'right', 'thank you', 'thanks',
+      ];
+      // 🧹 과거 불만/메타 발화 제외 — 시드 주제로 부적합 (t는 공백 제거됨 → 패턴도 공백 없음)
+      const complaintPatterns = [
+        '질문', '물어봐', '물어본', '다시말', '이상한', '이상해', '이상하',
+        '별로', '뭐야', '바꿔', '그런거말고', '딴거', '다른거', '다른걸',
+        '마음에안', '맘에안', 'question', 'askme', 'weird',
+      ];
+      bool isFiller(String s) {
+        final t = s.replaceAll(RegExp(r'[\s\.,!?~…]'), '').toLowerCase();
+        if (t.length < 6) return true;
+        if (fillerPatterns.contains(t)) return true;
+        for (final p in complaintPatterns) {
+          if (t.contains(p)) return true;
+        }
+        return false;
+      }
+```
+
+## [L-12] 수정④a — FAST 레인 패턴 보강 (약 136~145줄)
+
+**찾기 (anchor):**
+```dart
+      '그건 좀 아닌', '그건 별로', '그건 싫어', '그런 거 말고',
+      '질문 바꿔', '바꿔줘', '다른 걸로',
+```
+
+**교체:**
+```dart
+      '그건 좀 아닌', '그건 별로', '그건 싫어', '그런 거 말고',
+      '질문 바꿔', '바꿔줘', '다른 걸로',
+      '마음에 안 드', '맘에 안 드', '같은 질문',
+```
 
 ---
 
 ## 검증
 
-수정 후 아래를 확인한다.
+```bash
+cd F:\flutter_project\stealth_vox
+F=lib/custom_code/widgets/routine_mode_step_expand.dart
+grep -c "unawaited(_cacheFullSentenceInBackground" $F   # 기대값: 1
+grep -c "_cacheFullSentenceInBackground" $F             # 기대값: 3 (호출1 + 주석1 + 정의1)
+grep -c "rejectedQuestion" $F                           # 기대값: 6
+grep -c "_fclRejected" $F                               # 기대값: 2
+grep -c "dissRejected" $F                               # 기대값: 2
+grep -c "BANNED QUESTION" $F                            # 기대값: 1
+grep -c "complaintPatterns" $F                          # 기대값: 4 (정의2 + 루프2)
+grep -c "같은 질문" $F                                   # 기대값: 1
+grep -c "_swTTS..reset()..start();" $F                  # 기대값: 1
 
-1. `flutter analyze`에서 새 error 없음.
-2. 테스트 로그에서 “질문이 뭐 그래?” 입력 시:
+flutter analyze lib/custom_code/widgets/routine_mode_step_expand.dart
+```
+- 에러 0건이어야 함. 기대값 불일치 시 해당 편집 누락/중복을 sed -n 으로 직접 확인.
 
-   * `[DISSATISFIED]` 로그가 나와야 함.
-   * `[RESTATE]` 로그가 나오면 실패.
-   * 확인 멘트 TTS가 나오면 실패.
-   * “그럼 다른 질문 드릴게요” TTS가 나오면 실패.
-3. 첫 질문 시작 시:
+**실기기 테스트 체크리스트 (우선순위 순):**
+1. [수정①] 첫 턴 발화 후 유저 TTS → AI 응답까지 무음 구간이 짧아졌는지. 로그에서 `[HYB-ERR] TtsCache 저장 실패`가 떠도 **PIPE-02가 그보다 먼저** 찍히는지 확인 (기존: HYB-ERR 이후에 PIPE-02)
+2. [수정②] AI 질문에 "질문이 뭐 이래"라고 항의 → 교체 질문이 **다른 주제/각도**인지. 로그에 `[HYB-03-HIT]`(동일 질문 캐시 적중)가 교체 직후 뜨면 실패
+3. [수정②] 같은 턴에서 2회 연속 항의 → 두 번 모두 서로 다른 질문이 나오는지
+4. [수정③] 과거 항의 발화가 많은 계정으로 세션 시작 → `[SEED-FT] picked=...` 로그에 "질문/이상한/다시 물어봐" 류 발화가 안 뽑히는지
+5. [수정④a] "질문이 마음에 안 드는데" → `[FAST-DISSATISFIED]` 로그로 즉시 반응하는지 (기존: GPT 레인 ~5초)
+6. [수정④b] 불만 교체 시 `[HYB-01] 발사` ms가 정상 범위(수백 ms 이내)로 찍히는지
+7. [회귀] 정상 5턴 완주 → 확장문장 → polish 저장까지 기존과 동일하게 동작하는지. 히스토리 재방문 시 TTS 캐시 HIT도 확인 (백그라운드 저장이 여전히 완료되는지)
 
-   * `[SEED-FT]`, `[SEED-RP]`, `[SEED-MIX]` 로그로 실제 히스토리 사용 여부 확인.
+## 롤백
 
-정리하면, 지금은 **불만 판정은 프롬프트 아래쪽에 있고, RESTATE가 먼저 먹는 구조**라서 생긴 문제입니다. 그리고 `[DISSATISFIED]`로 잡혀도 기존 함수가 안내 멘트를 말하게 되어 있으니, **불만 처리 전용 “조용히 질문 교체” 루트**를 만들어야 합니다.
+```bash
+git restore lib/custom_code/widgets/routine_mode_step_expand.dart
+# 또는 커밋했다면
+git revert <hash>
+```
