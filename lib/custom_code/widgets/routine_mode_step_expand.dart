@@ -168,6 +168,67 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     }
     return false;
   }
+
+  /// Seed snippet filter shared by FreeTalk and Roleplay history fetchers.
+  static bool _isSeedFiller(String s) {
+    final t = s.replaceAll(RegExp(r'[\s\.,!?~…]'), '').toLowerCase();
+    if (t.length < 6) return true;
+    const fillerPatterns = [
+      '네',
+      '응',
+      '어',
+      '그래',
+      '맞아',
+      '맞아요',
+      '좋아',
+      '좋아요',
+      '글쎄',
+      'ok',
+      'okay',
+      '음',
+      '아',
+      '오',
+      '그래요',
+      '그러니까',
+      '그럴까',
+      '그렇구나',
+      '알겠어',
+      '알겠습니다',
+      '고마워',
+      '고맙습니다',
+      'yes',
+      'yeah',
+      'sure',
+      'right',
+      'thank you',
+      'thanks',
+    ];
+    if (fillerPatterns.contains(t)) return true;
+    const complaintPatterns = [
+      '질문',
+      '물어봐',
+      '물어보',
+      '다시마',
+      '이상하',
+      '별로',
+      '뭐야',
+      '바꿔',
+      '그런거말고',
+      '그런것말고',
+      '이거',
+      '다른거',
+      '다른걸',
+      '마음에안',
+      '맘에안',
+      'question',
+      'askme',
+      'weird',
+    ];
+    for (final p in complaintPatterns) {
+      if (t.contains(p)) return true;
+    }
+    return false;
+  }
   // ──────────────────────────────────────────────────────────────────
 
   Widget _buildIdleBanner() => const SizedBox.shrink();
@@ -404,65 +465,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         ..addAll(selectedRooms.map((r) => r.id));
       await prefs.setStringList(usedKey, newUsed.toList());
 
-      // 필러 판정
-      const fillerPatterns = [
-        '네',
-        '응',
-        '어',
-        '그래',
-        '맞아',
-        '맞아요',
-        '좋아',
-        '좋아요',
-        '글쎄',
-        'ok',
-        'okay',
-        '음',
-        '아',
-        '오',
-        '그래요',
-        '그러니까',
-        '그렇구나',
-        '알겠어',
-        '알겠습니다',
-        'yes',
-        'yeah',
-        'sure',
-        'right',
-        'thank you',
-        'thanks',
-      ];
-      // 과거 불만/메타 발화는 새 seed 주제로 부적합하다.
-      const complaintPatterns = [
-        '질문',
-        '물어봐',
-        '물어보',
-        '다시마',
-        '이상하',
-        '별로',
-        '뭐야',
-        '바꿔',
-        '그런거말고',
-        '그런것말고',
-        '이거',
-        '다른거',
-        '다른걸',
-        '마음에안',
-        '맘에안',
-        'question',
-        'askme',
-        'weird',
-      ];
-      bool isFiller(String s) {
-        final t = s.replaceAll(RegExp(r'[\s\.,!?~…]'), '').toLowerCase();
-        if (t.length < 6) return true;
-        if (fillerPatterns.contains(t)) return true;
-        for (final p in complaintPatterns) {
-          if (t.contains(p)) return true;
-        }
-        return false;
-      }
-
       // role 판정 fallback: HOST, USER, host, user
       bool isHostRole(Map<String, dynamic> data) {
         final role =
@@ -494,7 +496,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           final texts = msgSnap.docs
               .where((d) => isHostRole(d.data()))
               .map((d) => extractText(d.data()))
-              .where((s) => s.isNotEmpty && !isFiller(s))
+              .where((s) => s.isNotEmpty && !_isSeedFiller(s))
               .toList();
           allCandidates.addAll(texts);
         } catch (_) {}
@@ -556,64 +558,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         ..addAll(selectedRooms.map((r) => r.id));
       await prefs.setStringList(usedKey, newUsed.toList());
 
-      const fillerPatterns = [
-        '네',
-        '응',
-        '음',
-        '그래',
-        '맞아',
-        '맞아요',
-        '좋아',
-        '좋아요',
-        '글쎄',
-        'ok',
-        'okay',
-        '오케이',
-        '아',
-        '어',
-        '그래요',
-        '그럴까',
-        '그렇구나',
-        '고마워',
-        '고맙습니다',
-        'yes',
-        'yeah',
-        'sure',
-        'right',
-        'thank you',
-        'thanks',
-      ];
-      // 과거 불만/메타 발화는 새 seed 주제로 부적합하다.
-      const complaintPatterns = [
-        '질문',
-        '물어봐',
-        '물어보',
-        '다시마',
-        '이상하',
-        '별로',
-        '뭐야',
-        '바꿔',
-        '그런거말고',
-        '그런것말고',
-        '이거',
-        '다른거',
-        '다른걸',
-        '마음에안',
-        '맘에안',
-        'question',
-        'askme',
-        'weird',
-      ];
-      bool isFiller(String s) {
-        final t = s.replaceAll(RegExp(r'[\s\.,!?~…]'), '').toLowerCase();
-        if (t.length < 6) return true;
-        if (fillerPatterns.contains(t)) return true;
-        for (final p in complaintPatterns) {
-          if (t.contains(p)) return true;
-        }
-        return false;
-      }
-
       // role 판정 fallback
       bool isHostRole(Map<String, dynamic> data) {
         final role =
@@ -645,7 +589,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           final texts = msgSnap.docs
               .where((d) => isHostRole(d.data()))
               .map((d) => extractText(d.data()))
-              .where((s) => s.isNotEmpty && !isFiller(s))
+              .where((s) => s.isNotEmpty && !_isSeedFiller(s))
               .toList();
           allCandidates.addAll(texts);
         } catch (_) {}
@@ -1984,6 +1928,63 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 //   STEP 6: AI 역번역 + Firestore 저장 (백그라운드)
 //   STEP 7: 마이크 재개방
 // ====================================================================
+  /// Build clean HOST/SYSTEM context for normal, fast-lane, dissatisfied, and misheard paths.
+  Map<String, String> _buildCleanContext({
+    bool removeLastSystem = false,
+    bool captureRejected = false,
+    int maxMessages = 0,
+  }) {
+    var msgs = _localMessages.where((m) {
+      if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
+      final target = (m['target'] ?? '').toString().trim();
+      return target.isNotEmpty && target != '...';
+    }).toList();
+
+    if (maxMessages > 0 && msgs.length > maxMessages) {
+      msgs = msgs.sublist(msgs.length - maxMessages);
+    }
+
+    String rejected = '';
+    if (removeLastSystem) {
+      final sysIdx = msgs.lastIndexWhere((m) => m['role'] == 'SYSTEM');
+      if (sysIdx != -1) {
+        if (captureRejected) {
+          rejected = (msgs[sysIdx]['target'] ?? '').toString().trim();
+        }
+        msgs.removeAt(sysIdx);
+      }
+    }
+
+    final List<String> lines = [];
+    String latestExp = '';
+    for (final m in msgs) {
+      final t = (m['target'] ?? '').toString().trim();
+      if (m['role'] == 'HOST') {
+        final idx = t.indexOf('\n\n');
+        final exp = idx < 0
+            ? t
+            : (t.substring(idx + 2).trim().isNotEmpty
+                ? t.substring(idx + 2).trim()
+                : t.substring(0, idx).trim());
+        lines.add("User: $exp");
+        latestExp = exp;
+      } else {
+        lines.add("AI: $t");
+      }
+    }
+
+    String ctx = lines.join("\n");
+    if (latestExp.isNotEmpty) {
+      ctx += "\n\n[Most recent expanded sentence to grow from]: $latestExp";
+    }
+
+    return {
+      'contextStr': ctx,
+      'latestExpanded': latestExp,
+      'rejectedQuestion': rejected,
+    };
+  }
+
   Future<void> _processRelayPipeline(String finalTranscript,
       {bool isCorrectionRetry = false}) async {
     _resetIdleTimer();
@@ -2032,47 +2033,18 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         setState(
             () => _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP'));
       }
-      // Clean context: 거절된 질문(마지막 SYSTEM) 제거
-      var _fastCleanMsgs = _localMessages.where((m) {
-        if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
-        final target = (m['target'] ?? '').toString().trim();
-        return target.isNotEmpty && target != '...';
-      }).toList();
-      final _fclSysIdx =
-          _fastCleanMsgs.lastIndexWhere((m) => m['role'] == 'SYSTEM');
-      final String _fclRejected = _fclSysIdx != -1
-          ? (_fastCleanMsgs[_fclSysIdx]['target'] ?? '').toString().trim()
-          : '';
-      if (_fclSysIdx != -1) _fastCleanMsgs.removeAt(_fclSysIdx);
-      final List<String> _fclLines = [];
-      String _fclLatestExp = '';
-      for (final m in _fastCleanMsgs) {
-        final t = (m['target'] ?? '').toString().trim();
-        if (m['role'] == 'HOST') {
-          final idx = t.indexOf('\n\n');
-          final exp = idx < 0
-              ? t
-              : (t.substring(idx + 2).trim().isNotEmpty
-                  ? t.substring(idx + 2).trim()
-                  : t.substring(0, idx).trim());
-          _fclLines.add("User: $exp");
-          _fclLatestExp = exp;
-        } else {
-          _fclLines.add("AI: $t");
-        }
-      }
-      String _fclCtx = _fclLines.join("\n");
-      if (_fclLatestExp.isNotEmpty) {
-        _fclCtx +=
-            "\n\n[Most recent expanded sentence to grow from]: $_fclLatestExp";
-      }
-      final String _fclLang = FFAppState().targetLang.isNotEmpty
+      // Clean context: helper build
+      final fclResult =
+          _buildCleanContext(removeLastSystem: true, captureRejected: true);
+      final String fclCtx = fclResult['contextStr']!;
+      final String fclRejected = fclResult['rejectedQuestion']!;
+      final String fclLang = FFAppState().targetLang.isNotEmpty
           ? FFAppState().targetLang
           : 'English';
-      await _handleRetryQuestion(_fclCtx, _fclLang,
+      await _handleRetryQuestion(fclCtx, fclLang,
           isDifferent: true,
           silentReplace: true,
-          rejectedQuestion: _fclRejected);
+          rejectedQuestion: fclRejected);
       return;
     }
 
@@ -2095,44 +2067,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 
       int hostIndex = _localMessages.length - 1;
 
-      // 완성된 턴만 컨텍스트에 포함 (미완성 '...' 제외)
-      var validMsgs = _localMessages.where((m) {
-        if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
-        final target = (m['target'] ?? '').toString().trim();
-        return target.isNotEmpty && target != '...';
-      }).toList();
-      if (validMsgs.length > 10)
-        validMsgs = validMsgs.sublist(validMsgs.length - 10);
-
-      // 🌱 [EXPAND-FIX] HOST 버블의 target은 "PART1(짧은말)\n\nPART2(확장문장)" 구조.
-      //   History에는 PART2(확장 문장)만 넣어 누적이 명확히 이어지게 한다.
-      //   PART2가 없으면(첫 턴 등) PART1을 그대로 사용.
-      String extractExpanded(String target) {
-        final t = target.trim();
-        final idx = t.indexOf('\n\n');
-        if (idx < 0) return t;
-        final part2 = t.substring(idx + 2).trim();
-        return part2.isNotEmpty ? part2 : t.substring(0, idx).trim();
-      }
-
-      final List<String> lines = [];
-      String latestExpanded = '';
-      for (final m in validMsgs) {
-        if (m['role'] == 'HOST') {
-          final expanded = extractExpanded((m['target'] ?? '').toString());
-          lines.add("User: $expanded");
-          latestExpanded = expanded;
-        } else {
-          lines.add("AI: ${m['target']}");
-        }
-      }
-
-      String contextStr = lines.join("\n");
-      // 🌱 가장 최근 확장 문장을 명시적으로 강조 → CASE 2 (a) 지시가 정확히 작동
-      if (latestExpanded.isNotEmpty) {
-        contextStr +=
-            "\n\n[Most recent expanded sentence to grow from]: $latestExpanded";
-      }
+      final pipeResult = _buildCleanContext(maxMessages: 10);
+      String contextStr = pipeResult['contextStr']!;
 
       String userTargetText = "";
       String userBuffer = "";
@@ -2327,41 +2263,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       // [DISSATISFIED] 유저가 질문 내용에 불만 → 안내 멘트 없이 즉시 다른 질문 생성
       if (dissatisfied) {
         _turnCounter--; // 불만 발화 턴 카운트 취소
-        // Clean context: 거절된 질문(마지막 SYSTEM)과 불만 발화 제외
-        var dissCleanMsgs = _localMessages.where((m) {
-          if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
-          final target = (m['target'] ?? '').toString().trim();
-          return target.isNotEmpty && target != '...';
-        }).toList();
-        // 방금 불만 버블(hostIndex)은 빈 target일 수 있으니 위에서 걸러짐 — 마지막 SYSTEM(거절된 질문) 제거
-        final dissLastSysIdx =
-            dissCleanMsgs.lastIndexWhere((m) => m['role'] == 'SYSTEM');
-        final String dissRejected = dissLastSysIdx != -1
-            ? (dissCleanMsgs[dissLastSysIdx]['target'] ?? '').toString().trim()
-            : '';
-        if (dissLastSysIdx != -1) dissCleanMsgs.removeAt(dissLastSysIdx);
-        final List<String> dissCleanLines = [];
-        String dissLatestExpanded = '';
-        for (final m in dissCleanMsgs) {
-          final t = (m['target'] ?? '').toString().trim();
-          if (m['role'] == 'HOST') {
-            final idx = t.indexOf('\n\n');
-            final exp = idx < 0
-                ? t
-                : (t.substring(idx + 2).trim().isNotEmpty
-                    ? t.substring(idx + 2).trim()
-                    : t.substring(0, idx).trim());
-            dissCleanLines.add("User: $exp");
-            dissLatestExpanded = exp;
-          } else {
-            dissCleanLines.add("AI: $t");
-          }
-        }
-        String dissCleanCtx = dissCleanLines.join("\n");
-        if (dissLatestExpanded.isNotEmpty) {
-          dissCleanCtx +=
-              "\n\n[Most recent expanded sentence to grow from]: $dissLatestExpanded";
-        }
+        final dissResult =
+            _buildCleanContext(removeLastSystem: true, captureRejected: true);
+        final String dissCleanCtx = dissResult['contextStr']!;
+        final String dissRejected = dissResult['rejectedQuestion']!;
         if (mounted) {
           setState(() {
             _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
@@ -2448,38 +2353,9 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           });
           _scrollToBottom();
         }
-        var cleanMsgs = _localMessages.where((m) {
-          if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
-          final target = (m['target'] ?? '').toString().trim();
-          return target.isNotEmpty && target != '...';
-        }).toList();
-        if (cleanMsgs.length > 10)
-          cleanMsgs = cleanMsgs.sublist(cleanMsgs.length - 10);
-        final lastBadSysIdx =
-            cleanMsgs.lastIndexWhere((m) => m['role'] == 'SYSTEM');
-        if (lastBadSysIdx != -1) cleanMsgs.removeAt(lastBadSysIdx);
-        final List<String> cleanLines = [];
-        String cleanLatestExpanded = '';
-        for (final m in cleanMsgs) {
-          final t = (m['target'] ?? '').toString().trim();
-          if (m['role'] == 'HOST') {
-            final idx = t.indexOf('\n\n');
-            final expanded = idx < 0
-                ? t
-                : (t.substring(idx + 2).trim().isNotEmpty
-                    ? t.substring(idx + 2).trim()
-                    : t.substring(0, idx).trim());
-            cleanLines.add("User: $expanded");
-            cleanLatestExpanded = expanded;
-          } else {
-            cleanLines.add("AI: $t");
-          }
-        }
-        String cleanContextStr = cleanLines.join("\n");
-        if (cleanLatestExpanded.isNotEmpty) {
-          cleanContextStr +=
-              "\n\n[Most recent expanded sentence to grow from]: $cleanLatestExpanded";
-        }
+        final mishResult =
+            _buildCleanContext(removeLastSystem: true, maxMessages: 10);
+        final String cleanContextStr = mishResult['contextStr']!;
         await _handleRetryQuestion(cleanContextStr, targetLangName,
             isMisheard: true);
         return;
@@ -2654,7 +2530,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
             ? ((_localMessages[hostIndex]['target']) ?? userTargetText)
                 .toString()
             : userTargetText;
-        final String hostExpanded = _extractExpandedSentence(hostFullTarget);
+        final String hostExpanded =
+            _expandedSentenceFromTranslation(hostFullTarget);
         final hostLineOnly = _buildHostHistoryLine(
           originalText: _hostValid
               ? ((_localMessages[hostIndex]['original']) ?? '').toString()
@@ -2971,7 +2848,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   }
 
   // Step Expand HOST 저장 payload를 sessions/chat_history에서 동일하게 유지한다.
-  String _extractExpandedSentence(String translatedText) {
+  String _expandedSentenceFromTranslation(String translatedText) {
     final parts = translatedText.split(RegExp(r'\n\s*\n'));
     if (parts.length < 2) return '';
     return parts.sublist(1).join('\n\n').trim();
@@ -2981,7 +2858,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     required String originalText,
     required String translatedText,
   }) {
-    final expandedSentence = _extractExpandedSentence(translatedText);
+    final expandedSentence = _expandedSentenceFromTranslation(translatedText);
     return {
       'role': 'HOST',
       'original_text': originalText,
