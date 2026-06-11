@@ -410,9 +410,100 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     }
   }
 
+  // 🆕 roleplay 기록에서 유저(HOST) 발화 1~2개를 샘플로 가져온다.
+  //   - 역할극 중 발화이므로 실제 사용자 사실이 아니라 주제/분위기 재료로만 사용
+  Future<List<String>> _fetchRoleplayUserSnippets() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return [];
+    try {
+      final roomsSnap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('chat_history')
+          .orderBy('created_at', descending: true)
+          .limit(30)
+          .get();
+      final rpRooms = roomsSnap.docs
+          .where((d) => ((d.data()['mode'] ?? '').toString()) == 'roleplay')
+          .take(5)
+          .toList();
+      if (rpRooms.isEmpty) return [];
+
+      final prefs = await SharedPreferences.getInstance();
+      final usedKey = 'roleplay_seed_used_${user.uid}';
+      final used = Set<String>.from(prefs.getStringList(usedKey) ?? []);
+      var pool = rpRooms.where((d) => !used.contains(d.id)).toList();
+      if (pool.isEmpty) {
+        pool = List.of(rpRooms);
+        await prefs.remove(usedKey);
+      }
+      pool.shuffle();
+      final room = pool.first;
+      final newUsed = Set<String>.from(prefs.getStringList(usedKey) ?? [])
+        ..add(room.id);
+      await prefs.setStringList(usedKey, newUsed.toList());
+
+      final msgSnap = await room.reference.collection('messages').get();
+      final hostTexts = msgSnap.docs
+          .where((d) => ((d.data()['role'] ?? '').toString()) == 'HOST')
+          .map((d) {
+            final data = d.data();
+            final orig = (data['original_text'] ?? '').toString().trim();
+            final tgt = (data['translated_text'] ?? '').toString().trim();
+            return orig.isNotEmpty ? orig : tgt;
+          })
+          .where((s) => s.isNotEmpty)
+          .toList();
+      if (hostTexts.isEmpty) return [];
+
+      const fillerPatterns = [
+        '네',
+        '응',
+        '음',
+        '그래',
+        '맞아',
+        '맞아요',
+        '좋아',
+        '좋아요',
+        '글쎄',
+        'ok',
+        'okay',
+        '오케이',
+        '아',
+        '어',
+        '그래요',
+        '그럴까',
+        '그렇구나',
+        '고마워',
+        '고맙습니다',
+        'yes',
+        'yeah',
+        'sure',
+        'right',
+        'thank you',
+        'thanks',
+      ];
+      bool isFiller(String s) {
+        final t = s.replaceAll(RegExp(r'[\s\.,!?~…]'), '').toLowerCase();
+        if (t.length < 6) return true;
+        return fillerPatterns.contains(t);
+      }
+
+      final contentTexts = hostTexts.where((s) => !isFiller(s)).toList();
+      if (contentTexts.isEmpty) return [];
+
+      contentTexts.sort((a, b) => b.length.compareTo(a.length));
+      final seedPool = contentTexts.take(6).toList()..shuffle();
+      return seedPool.take(2).toList();
+    } catch (e) {
+      _log('⚠️ [RP-SEED]', 'fetch 실패: $e');
+      return [];
+    }
+  }
+
   // 🆕 프리톡 기반 첫 질문을 AI 버블로 렌더 + 타겟 TTS 재생 (그래머 질문과 동일 패턴)
   Future<void> _generateAndPlayFreeTalkSeedQuestion(
-      List<String> snippets) async {
+      List<String> snippets, List<String> roleplaySnippets) async {
     final String targetLangName = FFAppState().targetLang.isNotEmpty
         ? FFAppState().targetLang
         : 'English';
@@ -432,6 +523,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       myTarget: targetLangName,
       myNative: nativeLangName,
       snippets: snippets,
+      roleplaySnippets: roleplaySnippets,
     );
 
     final questionTts = ChunkedTtsFetcher(
@@ -512,10 +604,14 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 
     // 🆕 프리톡 기록 기반 첫 질문 (있으면) — 없으면 고정 안내
     final List<String> ftSnippets = await _fetchFreeTalkUserSnippets();
+    // 🆕 roleplaySnippets는 역할극 발화를 실제 사실이 아닌 질문 각도 재료로만 전달한다.
+    // roleplaySnippets stays optional so free-talk-only history keeps the old behavior.
+    final List<String> rpSnippets =
+        ftSnippets.isNotEmpty ? await _fetchRoleplayUserSnippets() : [];
 
     if (ftSnippets.isNotEmpty && mounted && _isConversationActive) {
       // 프리톡 주제로 AI가 먼저 질문 → "기본 문장 말하세요" 안내 생략
-      await _generateAndPlayFreeTalkSeedQuestion(ftSnippets);
+      await _generateAndPlayFreeTalkSeedQuestion(ftSnippets, rpSnippets);
     } else {
       // 기존: 고정 안내 TTS
       final ChunkedTtsFetcher tts = ChunkedTtsFetcher(
@@ -5415,10 +5511,17 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     required String myTarget,
     required List<String> snippets,
     String myNative = '',
+    List<String> roleplaySnippets = const [],
   }) async* {
     final client = http.Client();
     try {
       final String snippetsBlock = snippets.map((s) => '- $s').join('\n');
+      // roleplaySnippets is prompt context only, never a source of user facts.
+      final String roleplayBlock = roleplaySnippets.isEmpty
+          ? ''
+          : 'They also practiced a roleplay before. Here are a few things they said inside that roleplay (IN-CHARACTER PRACTICE LINES - possibly fictional, NOT real facts about the user):\n'
+              '${roleplaySnippets.map((s) => '- $s').join('\n')}\n'
+              '\n';
       final String sameLangNote = (myNative.isNotEmpty && myNative == myTarget)
           ? 'NOTE: $myTarget and the user\'s language are the same — output ONLY the question, with NO blank line and NO translation.\n'
           : '';
@@ -5428,6 +5531,7 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
           'The user has had earlier free-talk conversations. Here are a few things they said before:\n'
           '$snippetsBlock\n'
           '\n'
+          '$roleplayBlock'
           'Use these snippets ONLY as quiet inspiration to sense what the user cares about. '
           'Then create ONE completely NEW, short, friendly opening question — in $myTarget — '
           'that naturally leads the user to say a simple basic sentence. '
@@ -5437,6 +5541,8 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
           '- NEVER mention or quote the past conversation. Do NOT use explicit previous-session phrases or say that the user said something before. Ask as if you simply sense what is on the mind of the user.\n'
           '- IGNORE any snippet that is contentless filler, agreement, or a transition phrase (e.g. short replies like yes, okay, right, so, hmm). Pick only a snippet that contains a concrete topic — an activity, place, person, plan, or opinion.\n'
           '- If NO snippet has real substance, ignore them all and ask a simple, warm everyday-life question instead. Never quote a content-free phrase back to the user.\n'
+          '- If roleplay lines are given: blend their THEME with a free-talk topic ONLY when the mix feels natural. If forcing them together would feel odd, pick ONE side as the main topic and let the other quietly shape the angle of the question.\n'
+          '- Roleplay lines are acting practice. NEVER treat them as real events or real facts about the user, and never ask about them as if they actually happened. Use them only as a theme, mood, or angle.\n'
           '- The question must invite a short, simple statement — NOT yes/no, NOT a list.\n'
           '- Middle-school level vocabulary. Warm and conversational.\n'
           '- Do NOT give meta-instructions like "make a sentence" or "expand". Just ask the question.\n'
