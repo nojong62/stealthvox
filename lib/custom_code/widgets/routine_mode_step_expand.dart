@@ -2715,41 +2715,13 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       _log(
           '🧠 [PIPE-05]', '유저 TTS fetch 완료. isBusy=${_ttsQueueManager.isBusy}');
 
-      // 🌱 [OVERLAP-FIX] isBusy 단독 신뢰 금지.
-      //   긴 Part2(30~50단어)에서 isBusy가 실제 재생보다 일찍 false가 되어
-      //   AI 소리가 유저 소리 종료 전에 겹치는 문제 → 단어수 기반 floor 병행 강제.
-      //   - tts-1 영어 낭독 속도 ≈ 2.2 wps
-      //   - 게이트 진입 전 이미 재생된 첫 청크(약 4단어)는 차감
-      //   - ceiling 60초 (마지막 5턴 경로와 동일 톤)
-      const double _ttsWordsPerSec = 2.2;
-      final int _userWordCount = _part2FullSentence.trim().isEmpty
-          ? 0
-          : _part2FullSentence
-              .trim()
-              .split(RegExp(r'\s+'))
-              .where((w) => w.isNotEmpty)
-              .length;
-      final int _userPlayFloorMs =
-          ((((_userWordCount - 4).clamp(0, 9999)) / _ttsWordsPerSec) * 1000)
-              .round();
-      final DateTime _userPlayWaitStart = DateTime.now();
-      _log('🧠 [PIPE-FLOOR]',
-          '유저 재생 floor=${_userPlayFloorMs}ms (words=$_userWordCount)');
-
-      waitTicks = 0;
-      while (_ttsQueueManager.isBusy ||
-          DateTime.now().difference(_userPlayWaitStart).inMilliseconds <
-              _userPlayFloorMs) {
-        await Future.delayed(const Duration(milliseconds: 50));
-        waitTicks++;
-        if (waitTicks > 1200) {
-          // 60초 타임아웃 (좀비 방지용 ceiling)
-          _log('⚠️ [PIPE-TIMEOUT]', '유저 TTS 재생 60초 초과, 강제 진행');
-          break;
-        }
-      }
+      // 🔒 [Box 7 USER-DRAIN-SIGNAL] 실제 기반 drain 게이트.
+      //   마지막 유저 청크의 마지막 샘플 재생 완료 즉시 해제한다.
+      //   추정치(wps, 단어수, 첫 청크 차감)는 제거하고 Box 7 이벤트 기반으로 기다린다.
+      _ttsQueueManager.sealUserStream();
+      await _ttsQueueManager.waitUserDrained();
       _log('🧠 [PIPE-06]',
-          '유저 TTS 재생 완료(floor 포함) → AI 큐 개방. busy=${_ttsQueueManager.isBusy}');
+          '유저 TTS 재생 완료 → AI 큐 개방. busy=${_ttsQueueManager.isBusy}');
 
       // ─────────────────────────────────────────────────────
       // STEP 6: AI 큐 개방
