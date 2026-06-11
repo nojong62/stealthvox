@@ -47,62 +47,304 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# 수정 지시문 — 고스트 필터 부분일치 버그 (3개 모드 공통)
+# 수정 지시문 (재작성) — Step Expand 시드 질문: 프리톡 대화 + 롤플레이 대화 내용 혼합
 
-## 배경
-파이프라인 STEP 1 증발 검열의 `ghostWords.any((gw) => lowerClean.contains(gw))`가
-한 글자 고스트 단어('네', '응')를 **부분 문자열**로 검사하여,
-"별로네" / "이상하네" / "응 별로야" / "갔다 왔네" 같은 정상 발화·불만 발화를
-GPT 도달 전에 증발시키는 버그. **전체 일치**로 변경한다.
+## 목적
+시드 질문 재료를 2축으로 확대한다.
+- 축 1 (기존): 프리톡 히스토리의 유저 발화 2~3개
+- 축 2 (신규): **롤플레이 히스토리의 유저 발화(HOST 메시지) 1~2개**
+
+두 축의 실제 대화 내용을 섞어 매 세션 새로운 질문을 생성한다.
+시나리오 설정값(scenario_situation 등)은 사용하지 않는다 — **메시지 서브컬렉션의 대화 내용만** 사용.
+
+**핵심 가드:** 롤플레이 발화는 역할극 중의 대사(연기)라서 허구일 수 있다.
+유저의 실제 사실/실제 사건으로 전제하는 질문이 나오면 안 된다.
 
 ## 작업 전 필수
+
+### (0) 이전 버전 적용 여부 확인
+직전 지시문(시나리오 필드 버전)을 이미 적용했다면 먼저 되돌린다:
 ```bash
 cd F:\flutter_project\stealth_vox
-git add -A && git commit -m "save-point: before ghost-filter exact-match fix (3 modes)"
+grep -c "_fetchRoleplayTopic" lib/custom_code/widgets/routine_mode_step_expand.dart
+# 결과가 0이 아니면 → 해당 변경 커밋을 git revert 하거나 git restore로 되돌린 후 진행
+# 결과가 0이면 → 그대로 진행
 ```
 
-**대상 파일 (lib/custom_code/widgets/ 폴더만. lib/custom_code/임시/ 절대 금지):**
-1. `lib/custom_code/widgets/routine_mode_free_talk.dart` (약 1009~1011줄)
-2. `lib/custom_code/widgets/routine_mode_roleplay.dart` (약 1100~1102줄)
-3. `lib/custom_code/widgets/routine_mode_step_expand.dart` (약 1760~1762줄)
+### (1) 세이브 포인트
+```bash
+git add -A && git commit -m "save-point: before seed-question FT+RP conversation blend"
+```
+
+**대상 파일 (1개. lib/custom_code/임시/ 절대 금지):**
+- `lib/custom_code/widgets/routine_mode_step_expand.dart`
 
 **절대 규칙:**
-- Box 7 클래스 내부 수정 금지 (이번 수정은 `_processRelayPipeline` 내부 — Box 7 아님).
-- 줄번호는 참고용. **반드시 anchor로 위치 확정 후 편집.**
-- 세 파일 모두 동일한 코드 블록이며, 각 파일에 **정확히 1곳**씩 존재한다.
-  편집 전 각 파일에서 아래 grep으로 1곳임을 먼저 확인할 것:
-```bash
-grep -c "ghostWords.any((gw) => lowerClean.contains(gw))" lib/custom_code/widgets/routine_mode_free_talk.dart   # 기대값: 1
-grep -c "ghostWords.any((gw) => lowerClean.contains(gw))" lib/custom_code/widgets/routine_mode_roleplay.dart    # 기대값: 1
-grep -c "ghostWords.any((gw) => lowerClean.contains(gw))" lib/custom_code/widgets/routine_mode_step_expand.dart # 기대값: 1
-```
+- Box 7 클래스 내부 수정 금지 (이번 수정은 위젯 함수 + StepExpandBrain — Box 7 아님).
+- 기존 `_fetchFreeTalkUserSnippets`는 **한 줄도 수정하지 않는다** (검증된 동작 보존). 롤플레이용 함수를 별도 신설한다.
+- 온도 0.2, max_tokens 160, timeout 15s 등 기존 API 설정값 변경 금지.
+- 아래 코드의 영어 프롬프트 문자열에는 어퍼스트로피가 없도록 이미 작성됨 — 그대로 사용할 것.
+- 줄번호는 참고용. **반드시 anchor로 위치 확정 후, 아래→위 순서로 편집.**
 
 ---
 
-## 수정 내용 — 세 파일 동일 (각 1건)
+## [E-1] Brain — streamFreeTalkSeedQuestion 시그니처 + roleplayBlock 추가 (약 5410~5418줄)
 
-**삭제 범위:** `bool isGhost = ...` 로 시작하는 3줄
-(시작줄: `    bool isGhost = finalTranscript.length <= 2 ||`
- 끝줄: `            finalTranscript.length < 20);`)
-
-**찾기 (anchor — 세 파일 공통, 정확히 일치):**
+**찾기 (anchor):**
 ```dart
-    bool isGhost = finalTranscript.length <= 2 ||
-        (ghostWords.any((gw) => lowerClean.contains(gw)) &&
-            finalTranscript.length < 20);
+  static Stream<String> streamFreeTalkSeedQuestion({
+    required String apiKey,
+    required String myTarget,
+    required List<String> snippets,
+    String myNative = '',
+  }) async* {
+    final client = http.Client();
+    try {
+      final String snippetsBlock = snippets.map((s) => '- $s').join('\n');
 ```
 
-**교체 (전체):**
+**교체:**
 ```dart
-    // 🛡️ [GHOST-EXACT] 부분일치(contains) → 전체일치로 변경.
-    //   기존: '네'/'응'이 음절로 포함된 정상 발화("별로네", "갔다 왔네")까지 증발시킴.
-    //   변경: 발화 전체가 고스트 단어 그 자체일 때만 증발.
-    //   복합 필러("네 감사합니다")는 통과하되, 프롬프트의 [EVAPORATE] 규칙이 2차로 처리.
-    bool isGhost = finalTranscript.length <= 2 ||
-        ghostWords.contains(lowerClean.trim());
+  static Stream<String> streamFreeTalkSeedQuestion({
+    required String apiKey,
+    required String myTarget,
+    required List<String> snippets,
+    String myNative = '',
+    List<String> roleplaySnippets = const [],
+  }) async* {
+    final client = http.Client();
+    try {
+      final String snippetsBlock = snippets.map((s) => '- $s').join('\n');
+      // 🆕 롤플레이 대화 혼합 재료 (역할극 대사 = 허구 가능 — 실제 사실 전제 금지)
+      final String roleplayBlock = roleplaySnippets.isEmpty
+          ? ''
+          : 'They also practiced a roleplay before. Here are a few things they said inside that roleplay (IN-CHARACTER PRACTICE LINES — possibly fictional, NOT real facts about the user):\n'
+              '${roleplaySnippets.map((s) => '- $s').join('\n')}\n'
+              '\n';
 ```
 
-세 파일에 동일하게 적용한다. `ghostWords` 리스트 자체는 수정하지 않는다.
+## [E-2] Brain — sysPrompt에 roleplayBlock 주입 (약 5424~5428줄)
+
+**찾기 (anchor):**
+```dart
+          'The user has had earlier free-talk conversations. Here are a few things they said before:\n'
+          '$snippetsBlock\n'
+          '\n'
+          'Use these snippets ONLY as quiet inspiration to sense what the user cares about. '
+```
+
+**교체:**
+```dart
+          'The user has had earlier free-talk conversations. Here are a few things they said before:\n'
+          '$snippetsBlock\n'
+          '\n'
+          '$roleplayBlock'
+          'Use these snippets ONLY as quiet inspiration to sense what the user cares about. '
+```
+
+## [E-3] Brain — RULES에 혼합 규칙 2줄 추가 (약 5435~5437줄)
+
+**찾기 (anchor):**
+```dart
+          '- If NO snippet has real substance, ignore them all and ask a simple, warm everyday-life question instead. Never quote a content-free phrase back to the user.\n'
+          '- The question must invite a short, simple statement — NOT yes/no, NOT a list.\n'
+```
+
+**교체:**
+```dart
+          '- If NO snippet has real substance, ignore them all and ask a simple, warm everyday-life question instead. Never quote a content-free phrase back to the user.\n'
+          '- If roleplay lines are given: blend their THEME with a free-talk topic ONLY when the mix feels natural. If forcing them together would feel odd, pick ONE side as the main topic and let the other quietly shape the angle of the question.\n'
+          '- Roleplay lines are acting practice. NEVER treat them as real events or real facts about the user, and never ask about them as if they actually happened. Use them only as a theme, mood, or angle.\n'
+          '- The question must invite a short, simple statement — NOT yes/no, NOT a list.\n'
+```
+
+## [E-4] 위젯 — Brain 호출부에 roleplaySnippets 전달 (약 430~435줄)
+
+**찾기 (anchor):**
+```dart
+    final aiStream = StepExpandBrain.streamFreeTalkSeedQuestion(
+      apiKey: _openAiKey,
+      myTarget: targetLangName,
+      myNative: nativeLangName,
+      snippets: snippets,
+    );
+```
+
+**교체:**
+```dart
+    final aiStream = StepExpandBrain.streamFreeTalkSeedQuestion(
+      apiKey: _openAiKey,
+      myTarget: targetLangName,
+      myNative: nativeLangName,
+      snippets: snippets,
+      roleplaySnippets: roleplaySnippets,
+    );
+```
+
+## [E-5] 위젯 — _generateAndPlayFreeTalkSeedQuestion 시그니처 (약 414~415줄)
+
+**찾기 (anchor):**
+```dart
+  Future<void> _generateAndPlayFreeTalkSeedQuestion(
+      List<String> snippets) async {
+```
+
+**교체:**
+```dart
+  Future<void> _generateAndPlayFreeTalkSeedQuestion(
+      List<String> snippets, List<String> roleplaySnippets) async {
+```
+
+## [E-6] 위젯 — _fetchRoleplayUserSnippets() 함수 신설 (약 411줄, _fetchFreeTalkUserSnippets 닫는 중괄호 직후)
+
+기존 `_fetchFreeTalkUserSnippets`와 동일 패턴(필러 필터, 길이 정렬, 중복 회피)으로
+**mode == 'roleplay'** 방의 HOST(유저) 발화를 1~2개 가져오는 별도 함수를 추가한다.
+
+**찾기 (anchor — _fetchFreeTalkUserSnippets의 끝부분과 다음 함수의 주석 사이):**
+```dart
+    } catch (e) {
+      _log('⚠️ [FT-SEED]', 'fetch 실패: $e');
+      return [];
+    }
+  }
+
+  // 🆕 프리톡 기반 첫 질문을 AI 버블로 렌더 + 타겟 TTS 재생 (그래머 질문과 동일 패턴)
+```
+
+**교체:**
+```dart
+    } catch (e) {
+      _log('⚠️ [FT-SEED]', 'fetch 실패: $e');
+      return [];
+    }
+  }
+
+  // 🆕 롤플레이 기록에서 유저(HOST) 대화 발화 1~2개를 가져온다 (시드 질문 혼합 재료).
+  //   - _fetchFreeTalkUserSnippets와 동일 패턴: 필러 제외, 내용 풍부한 발화 우선
+  //   - 역할극 중 대사이므로 허구 가능 — 프롬프트에서 실제 사실 전제 금지 가드 적용됨
+  //   - 최근에 안 쓴 방 우선 (SharedPreferences로 중복 회피, 전부 소진 시 초기화)
+  //   - 기록 없으면 빈 리스트 → 프리톡 단독 모드로 동작
+  Future<List<String>> _fetchRoleplayUserSnippets() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return [];
+    try {
+      final roomsSnap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('chat_history')
+          .orderBy('created_at', descending: true)
+          .limit(30)
+          .get();
+      final rpRooms = roomsSnap.docs
+          .where((d) => ((d.data()['mode'] ?? '').toString()) == 'roleplay')
+          .take(5)
+          .toList();
+      if (rpRooms.isEmpty) return [];
+
+      // 중복 회피: 최근에 안 쓴 방 우선
+      final prefs = await SharedPreferences.getInstance();
+      final usedKey = 'roleplay_seed_used_${user.uid}';
+      final used = Set<String>.from(prefs.getStringList(usedKey) ?? []);
+      var pool = rpRooms.where((d) => !used.contains(d.id)).toList();
+      if (pool.isEmpty) {
+        pool = List.of(rpRooms);
+        await prefs.remove(usedKey); // 전부 소진 → 이력 초기화
+      }
+      pool.shuffle();
+      final room = pool.first;
+      final newUsed = Set<String>.from(prefs.getStringList(usedKey) ?? [])
+        ..add(room.id);
+      await prefs.setStringList(usedKey, newUsed.toList());
+
+      // 해당 방의 HOST(유저) 발화 수집 (원문 우선, 없으면 번역문)
+      final msgSnap = await room.reference.collection('messages').get();
+      final hostTexts = msgSnap.docs
+          .where((d) => ((d.data()['role'] ?? '').toString()) == 'HOST')
+          .map((d) {
+            final data = d.data();
+            final orig = (data['original_text'] ?? '').toString().trim();
+            final tgt = (data['translated_text'] ?? '').toString().trim();
+            return orig.isNotEmpty ? orig : tgt;
+          })
+          .where((s) => s.isNotEmpty)
+          .toList();
+      if (hostTexts.isEmpty) return [];
+
+      // 필러/연결용 발화 제외 → 구체적인 내용이 있는 발화만 후보로
+      const fillerPatterns = [
+        '네',
+        '응',
+        '어',
+        '그래',
+        '맞아',
+        '맞아요',
+        '좋아',
+        '좋아요',
+        '글쎄',
+        'ok',
+        'okay',
+        '음',
+        '아',
+        '오',
+        '그래요',
+        '그러니까',
+        '그렇구나',
+        '알겠어',
+        '알겠습니다',
+        'yes',
+        'yeah',
+        'sure',
+        'right',
+        'thank you',
+        'thanks',
+      ];
+      bool isFiller(String s) {
+        final t = s.replaceAll(RegExp(r'[\s\.,!?~…]'), '').toLowerCase();
+        if (t.length < 6) return true; // 너무 짧으면 내용 없음으로 간주
+        return fillerPatterns.contains(t);
+      }
+
+      final contentTexts = hostTexts.where((s) => !isFiller(s)).toList();
+      if (contentTexts.isEmpty) return [];
+
+      contentTexts.sort((a, b) => b.length.compareTo(a.length));
+      final seedPool = contentTexts.take(6).toList()..shuffle();
+      return seedPool.take(2).toList(); // 1~2개 샘플
+    } catch (e) {
+      _log('⚠️ [RP-SEED]', 'fetch 실패: $e');
+      return [];
+    }
+  }
+
+  // 🆕 프리톡 기반 첫 질문을 AI 버블로 렌더 + 타겟 TTS 재생 (그래머 질문과 동일 패턴)
+```
+
+## [E-7] 위젯 — 세션 시작 호출부 (약 513~518줄)
+
+**찾기 (anchor):**
+```dart
+    // 🆕 프리톡 기록 기반 첫 질문 (있으면) — 없으면 고정 안내
+    final List<String> ftSnippets = await _fetchFreeTalkUserSnippets();
+
+    if (ftSnippets.isNotEmpty && mounted && _isConversationActive) {
+      // 프리톡 주제로 AI가 먼저 질문 → "기본 문장 말하세요" 안내 생략
+      await _generateAndPlayFreeTalkSeedQuestion(ftSnippets);
+    } else {
+```
+
+**교체:**
+```dart
+    // 🆕 프리톡 기록 기반 첫 질문 (있으면) — 없으면 고정 안내
+    final List<String> ftSnippets = await _fetchFreeTalkUserSnippets();
+    // 🆕 롤플레이 대화 발화 1~2개 혼합 (있으면) — 매 세션 질문 변주 확대
+    final List<String> rpSnippets =
+        ftSnippets.isNotEmpty ? await _fetchRoleplayUserSnippets() : [];
+
+    if (ftSnippets.isNotEmpty && mounted && _isConversationActive) {
+      // 프리톡(+롤플레이 대화) 주제로 AI가 먼저 질문 → "기본 문장 말하세요" 안내 생략
+      await _generateAndPlayFreeTalkSeedQuestion(ftSnippets, rpSnippets);
+    } else {
+```
 
 ---
 
@@ -110,28 +352,28 @@ grep -c "ghostWords.any((gw) => lowerClean.contains(gw))" lib/custom_code/widget
 
 ```bash
 cd F:\flutter_project\stealth_vox
-grep -c "lowerClean.contains(gw)" lib/custom_code/widgets/routine_mode_free_talk.dart   # 기대값: 0
-grep -c "lowerClean.contains(gw)" lib/custom_code/widgets/routine_mode_roleplay.dart    # 기대값: 0
-grep -c "lowerClean.contains(gw)" lib/custom_code/widgets/routine_mode_step_expand.dart # 기대값: 0
-grep -c "GHOST-EXACT" lib/custom_code/widgets/routine_mode_free_talk.dart   # 기대값: 1
-grep -c "GHOST-EXACT" lib/custom_code/widgets/routine_mode_roleplay.dart    # 기대값: 1
-grep -c "GHOST-EXACT" lib/custom_code/widgets/routine_mode_step_expand.dart # 기대값: 1
+grep -c "_fetchRoleplayUserSnippets" lib/custom_code/widgets/routine_mode_step_expand.dart # 기대값: 2 (정의 1 + 호출 1)
+grep -c "roleplaySnippets" lib/custom_code/widgets/routine_mode_step_expand.dart            # 기대값: 8
+grep -c "roleplay_seed_used_" lib/custom_code/widgets/routine_mode_step_expand.dart         # 기대값: 1
+grep -c "IN-CHARACTER PRACTICE LINES" lib/custom_code/widgets/routine_mode_step_expand.dart # 기대값: 1
+grep -c "_fetchRoleplayTopic" lib/custom_code/widgets/routine_mode_step_expand.dart         # 기대값: 0 (이전 버전 잔재 없어야 함)
+grep -c "scenario_situation" lib/custom_code/widgets/routine_mode_step_expand.dart          # 기대값: 0 (시나리오 필드 미사용 확인)
 
-flutter analyze lib/custom_code/widgets/routine_mode_free_talk.dart lib/custom_code/widgets/routine_mode_roleplay.dart lib/custom_code/widgets/routine_mode_step_expand.dart
+flutter analyze lib/custom_code/widgets/routine_mode_step_expand.dart
 ```
-- 에러 0건이어야 함.
+- 에러 0건이어야 함. roleplaySnippets 기대값이 다르면 [E-1]~[E-5] 누락 여부 확인.
 
 **실기기 테스트 체크리스트:**
-1. [3모드 공통] AI 응답 후 "별로네" → 직전 응답 삭제 + 재생성되는지 (기존: 무반응)
-2. [3모드 공통] "이상하네" / "응 별로야" → 동일하게 재생성되는지
-3. [3모드 공통] "갔다 왔네" 같은 정상 발화 → 정상 번역·진행되는지 (기존: 증발)
-4. [회귀 확인] "네" / "응" / "감사합니다" 단독 발화 → 여전히 조용히 증발하고 재청취되는지
-5. [회귀 확인] 2글자 이하 웅얼거림 → 여전히 재청취 요청 나오는지
+1. 프리톡 + 롤플레이 기록이 모두 있는 계정 → 시드 질문에 두 대화의 주제가 자연스럽게 섞이는지 (어색하면 한쪽만 주재료로 쓰는지)
+2. ⚠️ 롤플레이에서 연기로 한 말(예: "환불해 주세요", "사장님 사과 얼마예요")을 **실제 있었던 일처럼 묻지 않는지** — "지난번에 환불하셨을 때" 류가 나오면 실패
+3. 프리톡 기록만 있는 계정 → 기존과 동일하게 프리톡 기반 질문 나오는지
+4. 프리톡 기록 없는 계정 → 기존 고정 안내("기본 문장을 하나 제안해 주세요")로 폴백되는지
+5. 세션을 3~4회 연속 시작 → 매번 다른 조합의 질문이 나오는지 (프리톡 방·롤플레이 방 각각 중복 회피 동작 확인)
 
 ## 롤백
 
 ```bash
-git restore lib/custom_code/widgets/routine_mode_free_talk.dart lib/custom_code/widgets/routine_mode_roleplay.dart lib/custom_code/widgets/routine_mode_step_expand.dart
+git restore lib/custom_code/widgets/routine_mode_step_expand.dart
 # 또는 커밋했다면
 git revert <hash>
 ```
