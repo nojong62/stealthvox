@@ -1097,9 +1097,12 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       '네',
       '응'
     ];
-    bool isGhost = finalTranscript.length <= 2 ||
-        (ghostWords.any((gw) => lowerClean.contains(gw)) &&
-            finalTranscript.length < 20);
+    // [GHOST-EXACT] Change ghost-word detection from substring contains to exact match.
+    //   Before: short ghost words could evaporate normal phrases that merely included them.
+    //   Now: evaporate only when the entire cleaned transcript is itself a ghost word.
+    //   Mixed phrases pass through and are handled later by the [EVAPORATE] rules if needed.
+    bool isGhost =
+        finalTranscript.length <= 2 || ghostWords.contains(lowerClean.trim());
 
     if (isGhost) {
       if (mounted)
