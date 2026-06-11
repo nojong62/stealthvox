@@ -445,8 +445,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
       final polished = (data['polished_sentence'] as String?) ?? '';
       final expanded = (data['expanded_sentence'] as String?) ?? '';
-      final roomMode = (data['mode'] as String?) ?? ''; // 🆕 [ROUTER-FIX]
-      _cachedRoomMode = roomMode; // 버튼 표시 조건용 mode 캐시
+      final roomMode =
+          _inferHistoryMode(data); // 🆕 [ROUTER-FIX] 버튼 표시 조건용 mode 캐시
+      _cachedRoomMode = roomMode;
 
       _debugLogs +=
           "polished_sentence: ${polished.isEmpty ? '(없음)' : polished}\n";
@@ -4701,8 +4702,8 @@ RULES — follow exactly:
                 ),
               ),
 
-            // 🔧 [FREE-TALK-BTN] Free Talk 방은 확장문장이 없으므로 버튼 숨김
-            if (_cachedRoomMode != 'free_talk')
+            // 🔒 Tutor history modes do not generate Expanded Sentence here.
+            if (!_blocksHistoryExpandedSentence(_cachedRoomMode))
               Padding(
                 padding: EdgeInsets.fromLTRB(
                   20,
@@ -5797,12 +5798,23 @@ RULES — follow exactly:
     return (data?[key] ?? '').toString().trim();
   }
 
+  String _normalizeHistoryMode(String mode) {
+    return mode.trim().toLowerCase().replaceAll('-', '_').replaceAll(' ', '_');
+  }
+
+  bool _blocksHistoryExpandedSentence(String mode) {
+    final normalized = _normalizeHistoryMode(mode);
+    return normalized != 'step_expand';
+  }
+
   String _inferHistoryMode(Map<String, dynamic>? data) {
-    final mode = _historyString(data, 'mode');
+    final mode = _normalizeHistoryMode(_historyString(data, 'mode'));
     if (mode.isNotEmpty) return mode;
     final room = _historyString(data, 'room_name');
     if (room == 'Clone Mode') return 'clone';
     if (room == 'Roleplay Mode') return 'roleplay';
+    if (room == 'FreeTalk Mode' || room == 'Free Talk Mode') return 'free_talk';
+    if (room == 'Duo Mode') return 'duo';
     return '';
   }
 
@@ -6086,13 +6098,18 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
         historyData = d;
         expanded = (d?['expanded_sentence'] as String?)?.trim() ?? "";
         polished = (d?['polished_sentence'] as String?)?.trim() ?? "";
-        existingMode = (d?['mode'] as String?)?.trim() ?? "";
+        existingMode = _inferHistoryMode(d);
         roomName = (d?['room_name'] as String?)?.trim() ?? "";
         labels = await _resolveHistoryExpandLabels(d);
       } catch (e) {
         debugPrint("[buildExpand] doc fetch $e");
       }
       if (!mounted) return;
+
+      if (_blocksHistoryExpandedSentence(existingMode)) {
+        if (mounted) setState(() => _isBuildingExpand = false);
+        return;
+      }
 
       if (!_canUseCachedNamedPartnerExpand(
           historyData, expanded, polished, labels)) {

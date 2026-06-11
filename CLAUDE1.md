@@ -47,74 +47,472 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
+# 📦 Box 7 패치 지시서 — USER-DRAIN-SIGNAL 추가
 
-`chat_history_master.dart`, `routine_mode_roleplay.dart`, `routine_mode_free_talk.dart`, `routine_mode_duo.dart`를 확인해서 수정해 주세요.
+**버전:** v1.0
+**작성일:** 2026-06-12
+**대상 파일 (3개, 동일 패치):**
+- `F:\flutter_project\stealth_vox\lib\custom_code\widgets\routine_mode_free_talk.dart`
+- `F:\flutter_project\stealth_vox\lib\custom_code\widgets\routine_mode_roleplay.dart`
+- `F:\flutter_project\stealth_vox\lib\custom_code\widgets\routine_mode_step_expand.dart`
 
-목표는 **History Practice 화면 하단의 “Expanded Sentence / 확장문장 만들기” 버튼을 Roleplay, FreeTalk, Duo에서 완전히 제거**하는 것입니다.
-
-현재 정책:
-
-* Roleplay에서는 대화 전체를 바탕으로 새 확장문장을 만들 필요 없음.
-* FreeTalk에서는 이미 확장문장 생성 기능을 제거한 상태임.
-* Duo에서도 확장문장 생성 버튼은 반드시 숨겨야 함.
-* 현재 프로젝트에는 Clone 파일이 없으므로 Clone 관련 수정이나 언급은 하지 말 것.
-* Step Expand의 기존 확장문장 기능은 건드리지 말 것.
-
-수정 지시:
-
-1. `chat_history_master.dart`에서 History Practice / Tutor Practice 하단에 표시되는 `Expanded Sentence` 버튼을 찾아 제거하세요.
-
-2. 버튼을 완전히 삭제하기 어렵다면 표시 조건을 명확히 제한하세요.
-   다음 mode에서는 반드시 버튼이 보이면 안 됩니다.
-
-   * `roleplay`
-   * `free_talk`
-   * `duo`
-   * mode 값이 null, empty, unknown인 구버전 history 문서
-
-3. 기존 코드에 `free_talk`만 숨기는 조건이 있다면 폐기하세요.
-   이제는 `roleplay`, `free_talk`, `duo`, unknown mode 모두 숨김 처리해야 합니다.
-
-4. `_buildExpandFromConversation()` 함수가 아직 남아 있다면 안전장치를 추가하세요.
-   UI에서 버튼이 사라져도 혹시 다른 경로로 호출될 수 있으므로, 현재 history 문서의 mode가 아래 중 하나이면 즉시 return 하도록 하세요.
-
-   * `roleplay`
-   * `free_talk`
-   * `duo`
-   * null / empty / unknown
-
-5. 위 mode에서는 `_buildExpandFromConversation()` 실행 시 다음 작업이 절대 일어나면 안 됩니다.
-
-   * GPT 호출
-   * 확장문장 생성
-   * polished 문장 생성
-   * Firestore 업데이트
-   * `expanded_sentence` 저장
-   * `polished_sentence` 저장
-   * `has_practice` 변경
-   * `expand_generated_at` 저장
-
-6. `routine_mode_roleplay.dart`, `routine_mode_free_talk.dart`, `routine_mode_duo.dart`에서는 확장문장 생성 관련 호출이 남아 있는지만 확인하세요.
-   호출이 없다면 불필요하게 수정하지 마세요.
-
-7. `routine_mode_roleplay.dart` 안에 `generateExpandedFromConversation()` 또는 `polishSentence()` 같은 미사용 함수가 있어도 이번 작업의 필수 삭제 대상은 아닙니다.
-   삭제하려면 전체 프로젝트 참조 검색 후 안전할 때만 삭제하세요.
-
-8. Step Expand 관련 로직은 절대 건드리지 마세요.
-   Step Expand는 원래 확장문장 기능이 핵심이므로 기존 Expanded Sentence / Polished Sentence 흐름은 유지해야 합니다.
-
-검증 기준:
-
-1. Roleplay History Practice 화면에 `Expanded Sentence` 버튼이 보이지 않아야 합니다.
-2. FreeTalk History Practice 화면에 `Expanded Sentence` 버튼이 보이지 않아야 합니다.
-3. Duo History Practice 화면에 `Expanded Sentence` 버튼이 보이지 않아야 합니다.
-4. mode 값이 없거나 알 수 없는 기존 history 문서에서도 `Expanded Sentence` 버튼이 보이지 않아야 합니다.
-5. Roleplay / FreeTalk / Duo에서 Practice 완료 후 하단에는 기본 제어 버튼만 남아야 합니다.
-6. Roleplay / FreeTalk / Duo에서 새로 `expanded_sentence`, `polished_sentence`, `has_practice`, `expand_generated_at` 등이 생성되면 안 됩니다.
-7. `flutter analyze`에서 이번 수정으로 인한 새 error가 없어야 합니다.
+**Clone 모드는 제외.** (이번 작업 범위 아님)
 
 ---
 
-핵심 한 줄:
+## 1. 작업 목적
 
-> `chat_history_master.dart`에서 History Practice 하단의 `Expanded Sentence` 버튼을 Roleplay, FreeTalk, Duo, unknown mode에서 전부 숨기고, `_buildExpandFromConversation()`도 이 모드들에서는 즉시 return 하도록 수정하세요. Clone 관련 내용은 현재 프로젝트에 없으므로 절대 포함하지 마세요.
+`TtsQueueManager`에 **유저 큐 드레인(drain) 시그널** 기능을 추가합니다.
+
+- **신규 API:** `sealUserStream()` + `waitUserDrained()`
+- **기존 API:** 단 한 줄도 수정/삭제 안 함 — 추가만.
+- **회귀 위험:** 신규 메서드를 호출하지 않으면 동작 100% 동일. 기존 호출부(`addAudio`, `setAiPaused`, `setUserTurn`, `isBusy`, `stop`, `dispose`) 영향 없음.
+
+---
+
+## 2. 사전 준비
+
+### 2.1. 세이브포인트 (필수)
+
+```powershell
+cd F:\flutter_project\stealth_vox
+git status
+git add -A
+git commit -m "save before box7 user-drain-signal patch"
+git log --oneline -1
+```
+
+위 마지막 명령으로 출력된 해시를 메모. 롤백 시 사용.
+
+### 2.2. 원본 클래스 위치 확인 (3개 파일 동일 패치)
+
+```powershell
+grep -n "class TtsQueueManager" lib\custom_code\widgets\routine_mode_free_talk.dart
+grep -n "class TtsQueueManager" lib\custom_code\widgets\routine_mode_roleplay.dart
+grep -n "class TtsQueueManager" lib\custom_code\widgets\routine_mode_step_expand.dart
+```
+
+예상 결과 (현재 시점 기준):
+- routine_mode_free_talk.dart : **2665**
+- routine_mode_roleplay.dart : **2994**
+- routine_mode_step_expand.dart : **4451**
+
+라인 번호가 다르면 정상(파일 수정 이력에 따라). 클래스 본문 내용은 3개 파일 모두 동일하므로 str_replace 앵커는 그대로 적용됨.
+
+---
+
+## 3. 패치 적용 (3개 파일 각각, bottom-to-top 순서)
+
+각 파일에서 **4단계** 적용. 라인 번호 드리프트 방지를 위해 **아래쪽부터 위쪽 순서로** 진행.
+
+### Step 1 — `stop()` 메서드 수정 (deadlock 방지)
+
+**삭제 대상:** 없음 (메서드 내부에 코드 추가)
+
+**위치 식별 (각 파일에서 grep로 확인):**
+
+```powershell
+grep -n "void stop()" lib\custom_code\widgets\routine_mode_step_expand.dart
+```
+
+해당 메서드의 시작줄 부근부터 약 9줄. 내용은 다음 블록(현재 원본):
+
+```dart
+  void stop() {
+    _userQueue.clear();
+    _aiQueue.clear();
+    _isPlaying = false;
+    _aiPaused = false;
+    _player.stop();
+    if (_completer != null && !_completer!.isCompleted) {
+      _completer!.complete();
+    }
+  }
+```
+
+**str_replace 적용:**
+
+`old_str`:
+```dart
+  void stop() {
+    _userQueue.clear();
+    _aiQueue.clear();
+    _isPlaying = false;
+    _aiPaused = false;
+    _player.stop();
+    if (_completer != null && !_completer!.isCompleted) {
+      _completer!.complete();
+    }
+  }
+```
+
+`new_str`:
+```dart
+  void stop() {
+    _userQueue.clear();
+    _aiQueue.clear();
+    _isPlaying = false;
+    _aiPaused = false;
+    _player.stop();
+    if (_completer != null && !_completer!.isCompleted) {
+      _completer!.complete();
+    }
+    // 🌱 [Box 7 USER-DRAIN-SIGNAL] 드레인 대기자 풀어주기 (deadlock 방지)
+    if (_userDrainedCompleter != null && !_userDrainedCompleter!.isCompleted) {
+      _userDrainedCompleter!.complete();
+    }
+    _userDrainedCompleter = null;
+    _userStreamSealed = false;
+    _currentChunkIsUser = false;
+  }
+```
+
+---
+
+### Step 2 — `_processQueue` 메서드 수정 (드레인 신호 발생 지점)
+
+**위치 식별:**
+
+```powershell
+grep -n "Future<void> _processQueue" lib\custom_code\widgets\routine_mode_step_expand.dart
+```
+
+원본 블록(현재):
+
+```dart
+  Future<void> _processQueue() async {
+    if (_isPlaying) return;
+    _isPlaying = true;
+    onPlayStart?.call();
+
+    // 🔧 [v3.5] 재생 우선순위:
+    //   1순위: 유저 큐 (항상 우선)
+    //   2순위: AI 큐 (유저 큐 비고 _aiPaused=false일 때만)
+    while (_userQueue.isNotEmpty || (!_aiPaused && _aiQueue.isNotEmpty)) {
+      Uint8List bytes;
+      if (_userQueue.isNotEmpty) {
+        bytes = _userQueue.removeAt(0);
+      } else if (!_aiPaused && _aiQueue.isNotEmpty) {
+        bytes = _aiQueue.removeAt(0);
+      } else {
+        break;
+      }
+
+      if (bytes.isEmpty) continue;
+
+      _completer = Completer<void>();
+      final estimatedDuration = Duration(
+        seconds: ((bytes.length / 16000) + 3).ceil(),
+      );
+
+      try {
+        await _player.play(BytesSource(bytes));
+        await _completer!.future.timeout(estimatedDuration);
+      } catch (_) {
+      } finally {
+        if (_completer != null && !_completer!.isCompleted) {
+          _completer!.complete();
+        }
+      }
+    }
+
+    _isPlaying = false;
+    if (_userQueue.isEmpty && _aiQueue.isEmpty) onQueueEmpty?.call();
+  }
+```
+
+**str_replace 적용:**
+
+`old_str`: 위 원본 블록 전체
+
+`new_str`:
+```dart
+  Future<void> _processQueue() async {
+    if (_isPlaying) return;
+    _isPlaying = true;
+    onPlayStart?.call();
+
+    // 🔧 [v3.5] 재생 우선순위:
+    //   1순위: 유저 큐 (항상 우선)
+    //   2순위: AI 큐 (유저 큐 비고 _aiPaused=false일 때만)
+    while (_userQueue.isNotEmpty || (!_aiPaused && _aiQueue.isNotEmpty)) {
+      Uint8List bytes;
+      if (_userQueue.isNotEmpty) {
+        bytes = _userQueue.removeAt(0);
+        _currentChunkIsUser = true; // 🌱 [Box 7 USER-DRAIN-SIGNAL]
+      } else if (!_aiPaused && _aiQueue.isNotEmpty) {
+        bytes = _aiQueue.removeAt(0);
+        _currentChunkIsUser = false; // 🌱 [Box 7 USER-DRAIN-SIGNAL]
+      } else {
+        break;
+      }
+
+      if (bytes.isEmpty) continue;
+
+      _completer = Completer<void>();
+      final estimatedDuration = Duration(
+        seconds: ((bytes.length / 16000) + 3).ceil(),
+      );
+
+      try {
+        await _player.play(BytesSource(bytes));
+        await _completer!.future.timeout(estimatedDuration);
+      } catch (_) {
+      } finally {
+        if (_completer != null && !_completer!.isCompleted) {
+          _completer!.complete();
+        }
+      }
+
+      // 🌱 [Box 7 USER-DRAIN-SIGNAL] 유저 청크 재생 완료 직후
+      //   유저 큐가 비었고 sealed면 드레인 신호 발사
+      if (_currentChunkIsUser &&
+          _userStreamSealed &&
+          _userQueue.isEmpty) {
+        if (_userDrainedCompleter != null &&
+            !_userDrainedCompleter!.isCompleted) {
+          _userDrainedCompleter!.complete();
+        }
+      }
+      _currentChunkIsUser = false;
+    }
+
+    _isPlaying = false;
+    if (_userQueue.isEmpty && _aiQueue.isEmpty) onQueueEmpty?.call();
+  }
+```
+
+---
+
+### Step 3 — 신규 메서드 2개 추가 (`sealUserStream`, `waitUserDrained`)
+
+**삽입 위치:** `addAudio` 메서드 바로 다음, `_processQueue` 바로 앞.
+
+원본의 해당 영역(현재):
+
+```dart
+  /// 🔧 [v3.5] isUser=true면 유저 큐, false면 AI 큐에 적재
+  Future<void> addAudio(Uint8List bytes, {required bool isUser}) async {
+    if (isUser) {
+      _userQueue.add(bytes);
+    } else {
+      _aiQueue.add(bytes);
+    }
+    if (!_isPlaying) _processQueue();
+  }
+
+  Future<void> _processQueue() async {
+```
+
+**str_replace 적용:**
+
+`old_str`:
+```dart
+  /// 🔧 [v3.5] isUser=true면 유저 큐, false면 AI 큐에 적재
+  Future<void> addAudio(Uint8List bytes, {required bool isUser}) async {
+    if (isUser) {
+      _userQueue.add(bytes);
+    } else {
+      _aiQueue.add(bytes);
+    }
+    if (!_isPlaying) _processQueue();
+  }
+
+  Future<void> _processQueue() async {
+```
+
+`new_str`:
+```dart
+  /// 🔧 [v3.5] isUser=true면 유저 큐, false면 AI 큐에 적재
+  Future<void> addAudio(Uint8List bytes, {required bool isUser}) async {
+    if (isUser) {
+      _userQueue.add(bytes);
+    } else {
+      _aiQueue.add(bytes);
+    }
+    if (!_isPlaying) _processQueue();
+  }
+
+  // 🌱 [Box 7 USER-DRAIN-SIGNAL] 유저 청크 스트림 봉인.
+  //   호출 시점 = "더 이상 유저 청크 안 들어옴" 선언.
+  //   호출 후 waitUserDrained()와 짝지어 사용.
+  void sealUserStream() {
+    _userStreamSealed = true;
+    // 봉인 시점에 이미 유저 큐가 비고 현재 재생도 유저 청크가 아니면 즉시 신호
+    if (_userQueue.isEmpty && !_currentChunkIsUser) {
+      if (_userDrainedCompleter != null &&
+          !_userDrainedCompleter!.isCompleted) {
+        _userDrainedCompleter!.complete();
+      }
+    }
+  }
+
+  // 🌱 [Box 7 USER-DRAIN-SIGNAL] 유저 큐 완전 비움(마지막 샘플 재생 완료)까지 대기.
+  //   timeout 기본 45초 = 좀비 방지 ceiling.
+  //   정상 동작 시에는 마지막 청크 재생 완료 즉시 반환.
+  //   타임아웃 시에도 예외 없이 정상 반환 — 호출부는 항상 진행 보장.
+  //   호출 후 상태 자동 리셋(다음 턴 대비).
+  Future<void> waitUserDrained({
+    Duration timeout = const Duration(seconds: 45),
+  }) async {
+    // 즉시 조건 만족: 바로 반환
+    if (_userQueue.isEmpty && !_currentChunkIsUser) {
+      _userStreamSealed = false;
+      return;
+    }
+    // completer 생성 (재진입 안전: 기존 것 재사용)
+    _userDrainedCompleter ??= Completer<void>();
+    try {
+      await _userDrainedCompleter!.future.timeout(timeout);
+    } catch (_) {
+      // 타임아웃 — 강제 진행 (좀비 방지)
+    } finally {
+      _userDrainedCompleter = null;
+      _userStreamSealed = false;
+    }
+  }
+
+  Future<void> _processQueue() async {
+```
+
+---
+
+### Step 4 — 필드 3개 추가 (클래스 상단)
+
+**삽입 위치:** `bool _isUserTurn = true;` 다음 줄.
+
+원본 영역(현재):
+
+```dart
+  // 🔧 [v3.6] 외부에서 _aiPaused 상태 조회 (UI 업데이트 보류 판단용)
+  bool get aiPaused => _aiPaused;
+  // UI 상태 표시용 (레거시 호환)
+  bool _isUserTurn = true;
+
+  /// 유저 재생 중이거나 유저 큐에 남은 게 있으면 busy
+```
+
+**str_replace 적용:**
+
+`old_str`:
+```dart
+  // 🔧 [v3.6] 외부에서 _aiPaused 상태 조회 (UI 업데이트 보류 판단용)
+  bool get aiPaused => _aiPaused;
+  // UI 상태 표시용 (레거시 호환)
+  bool _isUserTurn = true;
+
+  /// 유저 재생 중이거나 유저 큐에 남은 게 있으면 busy
+```
+
+`new_str`:
+```dart
+  // 🔧 [v3.6] 외부에서 _aiPaused 상태 조회 (UI 업데이트 보류 판단용)
+  bool get aiPaused => _aiPaused;
+  // UI 상태 표시용 (레거시 호환)
+  bool _isUserTurn = true;
+
+  // 🌱 [Box 7 USER-DRAIN-SIGNAL] 유저 큐 완전 드레인 감지용
+  bool _userStreamSealed = false;
+  Completer<void>? _userDrainedCompleter;
+  bool _currentChunkIsUser = false;
+
+  /// 유저 재생 중이거나 유저 큐에 남은 게 있으면 busy
+```
+
+---
+
+## 4. 검증 (각 파일별로)
+
+### 4.1. grep 카운트 검증
+
+3개 파일 각각에 대해 다음을 실행:
+
+```powershell
+$f = "lib\custom_code\widgets\routine_mode_step_expand.dart"
+# (free_talk, roleplay 도 동일)
+
+# 신규 식별자 출현 횟수 — 모두 0보다 커야 함
+(grep -c "sealUserStream" $f)           # 기대값: 1 (정의만)
+(grep -c "waitUserDrained" $f)          # 기대값: 1 (정의만)
+(grep -c "_userStreamSealed" $f)        # 기대값: 3 (선언1 + 사용2)
+(grep -c "_userDrainedCompleter" $f)    # 기대값: 5 (선언1 + 사용4)
+(grep -c "_currentChunkIsUser" $f)      # 기대값: 5 (선언1 + 사용4)
+(grep -c "USER-DRAIN-SIGNAL" $f)        # 기대값: 6 (주석 6곳)
+```
+
+기대값과 어긋나면 해당 파일 패치 불완전 → Step 1~4 중 누락된 곳 재검토.
+
+### 4.2. 컴파일 검증
+
+```powershell
+cd F:\flutter_project\stealth_vox
+flutter analyze lib\custom_code\widgets\routine_mode_free_talk.dart
+flutter analyze lib\custom_code\widgets\routine_mode_roleplay.dart
+flutter analyze lib\custom_code\widgets\routine_mode_step_expand.dart
+```
+
+새로운 에러/경고 없어야 함. 기존 info-level 경고는 무관.
+
+### 4.3. 동작 검증 (수동)
+
+이 패치만으로는 호출부가 없으므로 **기존 동작 100% 동일**이어야 함:
+
+- 3모드 각각 1턴씩 대화 → 정상 진행 확인
+- 로그에 `🌱 [Box 7 USER-DRAIN-SIGNAL]` 관련 출력은 아직 없음 (정상)
+- `isBusy`, `setAiPaused`, `stop`, `dispose` 모두 기존과 동일하게 동작
+
+---
+
+## 5. 호출부 작업은 별도 지시서
+
+이 패치는 **API 추가만** 하고 호출부는 손대지 않음.
+
+호출부(`routine_mode_*.dart`의 `_processRelayPipeline` 안)에서 `sealUserStream()` + `waitUserDrained()`를 실제 사용하는 작업은 **별도 지시서**로 진행 예정.
+
+순서:
+1. ✅ **이 지시서:** Box 7 API 추가 (3파일 동일 패치)
+2. ⏳ 다음 지시서: Step Expand 호출부 마이그레이션 + floor 로직 제거
+3. ⏳ 그 다음: Free Talk 호출부 마이그레이션
+4. ⏳ 그 다음: Roleplay 호출부 마이그레이션
+
+각 단계마다 별도 git 세이브포인트.
+
+---
+
+## 6. 롤백 절차
+
+이 패치만 되돌리려면:
+
+```powershell
+cd F:\flutter_project\stealth_vox
+git restore lib\custom_code\widgets\routine_mode_free_talk.dart
+git restore lib\custom_code\widgets\routine_mode_roleplay.dart
+git restore lib\custom_code\widgets\routine_mode_step_expand.dart
+```
+
+이미 커밋한 후라면:
+
+```powershell
+git log --oneline -5
+git revert <패치커밋해시>
+```
+
+---
+
+## 7. 체크리스트 요약
+
+각 파일(FT/RP/SE)별로 다음을 모두 통과해야 작업 완료:
+
+- [ ] Step 1: `stop()` 메서드 수정 완료
+- [ ] Step 2: `_processQueue` 메서드 수정 완료
+- [ ] Step 3: `sealUserStream` / `waitUserDrained` 메서드 추가 완료
+- [ ] Step 4: 필드 3개 추가 완료
+- [ ] 검증 4.1: grep 카운트 모두 기대값 일치
+- [ ] 검증 4.2: `flutter analyze` 에러 0
+- [ ] 검증 4.3: 1턴 대화 정상 (기존 동작 무변경)
+
+3개 파일 모두 위 체크리스트 통과 → Box 7 패치 완료.
+
+---
+
+**EOF**
