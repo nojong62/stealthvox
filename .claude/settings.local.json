@@ -158,7 +158,12 @@
       "Bash(awk '{print $NF}')",
       "Bash(awk 'NR>=4417 && /^  \\\\}$/ {print NR; exit}' lib/custom_code/widgets/routine_mode_free_talk.dart)",
       "Bash(awk 'NR>=4209 && /^  \\\\}$/ {print NR; exit}' lib/custom_code/widgets/routine_mode_free_talk.dart)",
-      "Bash(awk 'NR>=4090 && /^  \\\\}$/ {print NR; exit}' lib/custom_code/widgets/routine_mode_free_talk.dart)"
+      "Bash(awk 'NR>=4090 && /^  \\\\}$/ {print NR; exit}' lib/custom_code/widgets/routine_mode_free_talk.dart)",
+      "Bash(Select-String \"error\")",
+      "Bash(Select-String \"routine_mode\")",
+      "PowerShell(Select-String *)",
+      "PowerShell($result = flutter analyze 2>&1; $result | Where-Object { \\($_ -match \"routine_mode_free_talk|routine_mode_step_expand|routine_mode_roleplay\"\\) -and \\($_ -match \"error\"\\) })",
+      "PowerShell($now = Get-Date -Format \"yyyyMMdd_HHmm\"; Write-Output \"filename: stealth_vox_v1.0.50_${now}.apk\")"
     ]
   }
 }

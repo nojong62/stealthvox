@@ -47,350 +47,671 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# [지시문] Free Talk 3종 개선 + TTS 타임아웃 사다리 (4개 모드)
+# 수정 지시문 — Free Talk / Roleplay / Step Expand (5건)
 
-## 0. 배경 및 목적
-
-이전 패치(5초 타임아웃 + 3회 시도)는 정상 작동 확인됨 — 로그에서 `[TTS-RETRY]` 4건 모두
-재시도 1회 만에 1.3~1.7초로 성공. 남은 공백의 정체는 "5초 타임아웃 대기" 그 자체이므로
-타임아웃 사다리(3→5→8초)로 1차 재시도를 앞당긴다. 추가로 Free Talk 전용 개선 2건.
-
-| Fix | 내용 | 대상 파일 |
-|-----|------|----------|
-| 1 | TTS 타임아웃 사다리 [3,5,8]초 + 타임아웃 시 즉시 재시도 | 4개 모드 전부 |
-| 2 | [DISSATISFIED] 감지 신호에 질문-반복 요청 패턴 추가 (프롬프트만) | free_talk |
-| 3 | 레벨 지침 구체화 (CEFR + 문장 길이/문법/숙어 수치 제약) | free_talk |
-
-**절대 건드리지 말 것:**
-- `_pushReady()` 순서 보장, `_pendingCount` 증감, `_buffer[id] = result;` 이하 라인
-- DISSATISFIED **처리 로직**(약 1236줄~) — 이미 정상, 감지 프롬프트만 수정
-- `kFreeTalkOpenAiTtsHttpTimeoutSeconds = 18` (HYB 캐시 저장용 — 별개, 유지)
-- Deepgram utterance_end_ms (1000ms 미만 금지), PIPE 게이트류
-- Brain 내부의 다른 `attempt` 루프 (GPT 호출용 — 수정 금지)
-- 프롬프트 내 URL은 순수 텍스트 유지. PowerShell 파일 쓰기 시 `[IO.File]::WriteAllText` + UTF-8 명시.
-
-⚠️ 모든 편집은 `lib/custom_code/widgets/` 대상. `lib/custom_code/임시/` 금지.
-⚠️ 줄번호는 참고용, 실제 편집은 str_replace 앵커 텍스트 기준.
-
----
-
-## 1. 사전 작업: git 세이브 포인트
-
+## 작업 전 필수
 ```bash
 cd F:\flutter_project\stealth_vox
-git add -A
-git commit -m "save point: before TTS ladder + freetalk dissatisfied/level fix"
+git add -A && git commit -m "save-point: before 3-mode UX patch (dissatisfied/seed/silence)"
 ```
+
+**대상 파일 (lib/custom_code/widgets/ 폴더만. lib/custom_code/임시/ 절대 금지):**
+1. `lib/custom_code/widgets/routine_mode_step_expand.dart` (변경 가장 많음)
+2. `lib/custom_code/widgets/routine_mode_free_talk.dart`
+3. `lib/custom_code/widgets/routine_mode_roleplay.dart`
+
+**절대 규칙:**
+- Box 7 클래스(`TtsQueueManager`, `DeepgramV2VoiceManager`, `ChunkedTtsFetcher`, `HybridTtsPlayer`) 내부는 한 줄도 수정 금지.
+- 모든 URL은 순수 텍스트 유지. 마크다운 링크 변환 금지.
+- 프롬프트 내 영어 문자열에 작은따옴표 이스케이프(`\'`) 발생하지 않도록 작성된 코드를 그대로 사용할 것 (아래 코드에는 어퍼스트로피가 없도록 이미 작성됨).
+- 각 파일 내 편집은 **아래→위(줄번호 큰 곳부터)** 순서로 진행.
+- 줄번호는 참고용 근사치. **반드시 anchor 문자열로 위치를 확정**한 뒤 편집할 것.
 
 ---
 
-## 2. 사전 검증 (하나라도 불일치 시 중단·보고)
+# 파일 1: routine_mode_step_expand.dart (편집 22건, 아래→위)
 
-```bash
-# (a) free_talk — 상수형 블록인지 확인. 기대값 2 (정의+사용처)
-grep -c "kFreeTalkChunkTtsHttpTimeoutSeconds" lib/custom_code/widgets/routine_mode_free_talk.dart
+## [S-1] 시드 질문 프롬프트 교체 (약 5435~5440줄)
 
-# (b) free_talk — DISSATISFIED Signs 줄. 기대값 1
-grep -c "무슨 대답이 그래" lib/custom_code/widgets/routine_mode_free_talk.dart
-
-# (c) free_talk — 레벨 함수. 기대값 1
-grep -c "Use very simple, common words" lib/custom_code/widgets/routine_mode_free_talk.dart
-
-# (d) step_expand / roleplay / clone — 기존 패치 블록. 각각 기대값 1
-grep -c "5초 타임아웃, 최대 3회 시도" lib/custom_code/widgets/routine_mode_step_expand.dart
-grep -c "5초 타임아웃, 최대 3회 시도" lib/custom_code/widgets/routine_mode_roleplay.dart
-grep -c "5초 타임아웃, 최대 3회 시도" lib/custom_code/widgets/routine_mode_clone.dart
-```
-
-⚠️ clone이 free_talk처럼 상수형으로 다르게 패치돼 있으면(기대값 0) 중단하고 실제 블록을 보고할 것.
-
----
-
-## 3. 파일 1: routine_mode_free_talk.dart (편집 4곳, 아래→위 순서)
-
-### [편집 1-1] 레벨 지침 구체화 — 약 3518~3528줄
-
-삭제 시작: `  static String _freeTalkLevelInstruction(String level) {`
-삭제 끝: 함수 닫는 `  }` (약 3528줄, `default:` return 직후)
-
-**old_str:**
+**찾기 (anchor):**
 ```dart
-  static String _freeTalkLevelInstruction(String level) {
-    switch (level) {
-      case "Beginner":
-        return "Use very simple, common words and short sentences. Avoid idioms and difficult grammar.";
-      case "Advanced":
-        return "Use rich, natural vocabulary including idioms and nuanced expressions, as with a fluent speaker.";
-      case "Intermediate":
-      default:
-        return "Use everyday vocabulary with some variety. Common phrasal verbs and natural expressions are fine.";
+          'Choose ONE of these topics and ask ONE short, friendly opening question — in $myTarget — '
+          'that naturally leads the user to say a simple basic sentence about it. '
+          'That basic sentence becomes the SEED they will expand.\n'
+```
+
+**교체:**
+```dart
+          'Use these snippets ONLY as quiet inspiration to sense what the user cares about. '
+          'Then create ONE completely NEW, short, friendly opening question — in $myTarget — '
+          'that naturally leads the user to say a simple basic sentence. '
+          'That basic sentence becomes the SEED they will expand.\n'
+```
+
+## [S-2] 시드 질문 RULES 첫 줄 교체 (약 5440줄)
+
+**찾기 (anchor):**
+```dart
+          '- Reference their past topic naturally so it feels personal (e.g. "Last time you mentioned ...").\n'
+```
+
+**교체 (1줄 → 3줄):**
+```dart
+          '- NEVER mention or quote the past conversation. Do NOT say "Last time you mentioned" or "You said before". Ask as if you simply sense what is on the mind of the user.\n'
+          '- IGNORE any snippet that is contentless filler, agreement, or a transition phrase (e.g. short replies like yes, okay, right, so, hmm). Pick only a snippet that contains a concrete topic — an activity, place, person, plan, or opinion.\n'
+          '- If NO snippet has real substance, ignore them all and ask a simple, warm everyday-life question instead. Never quote a content-free phrase back to the user.\n'
+```
+
+## [S-3] DISSATISFIED 감지 신호 확장 (약 4776줄)
+
+**찾기 (anchor):**
+```dart
+- Output [DISSATISFIED] when the user expresses dissatisfaction, complaint, or rejection about the AI's QUESTION itself (not about the topic). Signs: "다른 질문 해줘" / "그 질문 싫어" / "질문 바꿔" / "무슨 질문이 그래" / "별로야" / "그건 좀" / "다른 거 물어봐" / "change the question" / "ask something else" / "I don't like that question". Do NOT output [DISSATISFIED] when the user is simply answering negatively (e.g., "아니, 안 갔어" = a valid negative answer)."""
+```
+
+**교체:**
+```dart
+- Output [DISSATISFIED] when the user expresses dissatisfaction, complaint, or rejection about the AI's QUESTION itself (not about the topic). Signs: "다른 질문 해줘" / "그 질문 싫어" / "질문 바꿔" / "무슨 질문이 그래" / "별로야" / "그건 좀" / "다른 거 물어봐" / "change the question" / "ask something else" / "I don't like that question". MILD signs ALSO count: "별로네" / "별로다" / "음 그건 좀" / "에이" / "그런 거 말고" / "딴 거 없어" / "재미없어" / "이상하네" / "뭐야 그게" / "meh" / "not really" / "hmm, not that one". Even slight or indirect displeasure aimed at the QUESTION itself counts. Do NOT output [DISSATISFIED] when the user is simply answering negatively (e.g., "아니, 안 갔어" = a valid negative answer)."""
+```
+
+## [S-4] RULES의 RESTATE 출력 규칙 — GARBLED 분리 (약 4774줄)
+
+**찾기 (anchor):**
+```dart
+- If the input is off-context or too garbled to interpret safely (see [RESTATE GUARD]), output EXACTLY: [RESTATE] — never guess and never invent content the user did not say.
+```
+
+**교체:**
+```dart
+- If the input is CLEAR but off-context (see [RESTATE GUARD]), output EXACTLY: [RESTATE]. If it is too GARBLED to interpret safely, output EXACTLY: [GARBLED]. Never guess and never invent content the user did not say.
+```
+
+## [S-5] RESTATE 대조 예시 — 인식불가 케이스 태그 교체 (약 4763~4766줄)
+
+**찾기 (anchor):**
+```dart
+Input: uh the the it muh suh buh uh  (no recoverable meaning)
+Output: [RESTATE]
+```
+
+**교체:**
+```dart
+Input: uh the the it muh suh buh uh  (no recoverable meaning)
+Output: [GARBLED]
+```
+
+## [S-6] RESTATE GUARD 케이스 분리 + 확인 재진입 무력화 (약 4733~4745줄)
+
+**찾기 (anchor — 블록 전체):**
+```dart
+[RESTATE GUARD] — hold the center; never invent content
+Stay anchored to the AI's LAST question and the growing sentence. If you cannot do that safely, ask the user to say it again instead of guessing.
+Output EXACTLY: [RESTATE]  in these cases:
+1. RELEVANCE MISMATCH: The input is clear but does not answer the AI's last question, switches to an unrelated subject, or contradicts established facts (see [RELEVANCE CHECK] above).
+2. OFF-CONTEXT: The user clearly tried to answer, but the utterance does not connect to the AI's last question and cannot be attached to the growing sentence (and it is NOT a correction of a previous answer).
+3. UNRELIABLE PRONUNCIATION: The text is garbled badly enough that the CORE meaning is genuinely uncertain, so translating it would require inventing what the user "probably" meant.
+Do NOT output [RESTATE] when:
+```
+
+**교체:**
+```dart
+[RESTATE GUARD] — hold the center; never invent content
+Stay anchored to the AI's LAST question and the growing sentence. If you cannot do that safely, ask the user to say it again instead of guessing.
+Output EXACTLY: [RESTATE]  in these cases (the speech itself is CLEAR):
+1. RELEVANCE MISMATCH: The input is clear but does not answer the AI's last question, switches to an unrelated subject, or contradicts established facts (see [RELEVANCE CHECK] above).
+2. OFF-CONTEXT: The user clearly tried to answer, but the utterance does not connect to the AI's last question and cannot be attached to the growing sentence (and it is NOT a correction of a previous answer).
+Output EXACTLY: [GARBLED]  in this case ONLY (the speech itself is NOT clear):
+3. UNRELIABLE PRONUNCIATION: The text is garbled badly enough that the CORE meaning is genuinely uncertain, so translating it would require inventing what the user "probably" meant.
+${disableRestate ? "OVERRIDE — the user has just re-stated after a confirmation question. NEVER output [RESTATE] this turn. Translate or attach the input normally even if it still seems off-topic. ([GARBLED] is still allowed if truly unintelligible.)" : ""}
+Do NOT output [RESTATE] or [GARBLED] when:
+```
+
+## [S-7] streamUserTranslation 시그니처에 disableRestate 추가 (약 4647~4652줄)
+
+**찾기 (anchor):**
+```dart
+  static Stream<String> streamUserTranslation({
+    required String apiKey,
+    required String textOriginal,
+    required String targetLang,
+    required String contextStr,
+    bool disableCorrection = false,
+  }) async* {
+```
+
+**교체:**
+```dart
+  static Stream<String> streamUserTranslation({
+    required String apiKey,
+    required String textOriginal,
+    required String targetLang,
+    required String contextStr,
+    bool disableCorrection = false,
+    bool disableRestate = false,
+  }) async* {
+```
+
+## [S-8] restated 핸들러 교체 — 오프토픽 확인질문(음성만) vs 진짜 안들림 분기 (약 2168~2206줄)
+
+**삭제 범위:** 약 2168줄 `      // 🔁 [RESTATE] 유저 발화가 맥락에 어긋나거나 발음이 불확실 → AI 질문은 그대로 두고 다시 말하기 요청` 부터 약 2206줄 `      }` (restated 블록의 닫는 중괄호, 바로 다음 줄이 `      // ✅ 정상 발화 통과 → 연속 RESTATE 카운터 초기화`) 까지.
+
+**찾기 (anchor — 블록 전체, 정확히 일치해야 함):**
+```dart
+      // 🔁 [RESTATE] 유저 발화가 맥락에 어긋나거나 발음이 불확실 → AI 질문은 그대로 두고 다시 말하기 요청
+      //   - 턴 카운터 원복(이번 시도 무효 → 다음 발화가 같은 턴으로 재진입)
+      //   - 방금 만든 빈 HOST 버블만 제거. 이전의 좋은 맥락(SYSTEM 질문 포함)은 절대 삭제 안 함
+      //   - 같은 턴에서 2회 연속이면 "더 짧고 쉬운 문장" 유도 멘트로 전환
+      if (restated) {
+        _turnCounter--;
+        final int restateCount = ++_consecutiveRestateCount;
+        if (mounted) {
+          setState(() {
+            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+            if (hostIndex < _localMessages.length) {
+              _localMessages.removeAt(hostIndex);
+            }
+          });
+          _scrollToBottom();
+        }
+        final String restatePhrase = restateCount >= 2
+            ? "조금 더 짧고 쉬운 문장으로 말해 주실래요?"
+            : "방금 건 살짝 놓쳤어요. 다시 한 번만요.";
+        _ttsQueueManager.setUserTurn(false);
+        _ttsQueueManager.setAiPaused(false);
+        final restateTts = ChunkedTtsFetcher(
+          _openAiKey,
+          _ttsQueueManager,
+          'nova',
+          isUser: false,
+          onLog: _log,
+        );
+        restateTts.addText(restatePhrase);
+        int waitTicks = 0;
+        while ((restateTts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
+            mounted) {
+          await Future.delayed(const Duration(milliseconds: 50));
+          if (++waitTicks > 200) break;
+        }
+        // 같은 AI 질문 그대로 유지 → 질문 재생성 없이 STT만 재시작
+        if (mounted && _isConversationActive) _startDeepgramListening();
+        return;
+      }
+```
+
+**교체 (블록 전체):**
+```dart
+      // 🔁 [RESTATE/GARBLED] AI 질문은 그대로 두고 재청취
+      //   - [GARBLED] 진짜 안 들림 → "다시 말씀해 주세요" (2회 연속이면 더 쉬운 문장 유도)
+      //   - [RESTATE] 또렷하지만 오프토픽 → 들은 내용 그대로 음성으로만 확인 질문 (버블 없음)
+      //     → _restateConfirmPending=true → 다음 발화는 RESTATE 검사 없이 그대로 수용
+      //   - 턴 카운터 원복(이번 시도 무효 → 다음 발화가 같은 턴으로 재진입)
+      //   - 방금 만든 빈 HOST 버블만 제거. 이전의 좋은 맥락(SYSTEM 질문 포함)은 절대 삭제 안 함
+      if (restated || garbled) {
+        _turnCounter--;
+        if (mounted) {
+          setState(() {
+            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+            if (hostIndex < _localMessages.length) {
+              _localMessages.removeAt(hostIndex);
+            }
+          });
+          _scrollToBottom();
+        }
+        String checkPhrase;
+        if (garbled) {
+          // 진짜 안 들린 경우에만 "다시 말씀해 주세요"
+          final int restateCount = ++_consecutiveRestateCount;
+          checkPhrase = restateCount >= 2
+              ? "조금 더 짧고 쉬운 문장으로 말해 주실래요?"
+              : "잘 안 들렸어요. 다시 말씀해 주세요.";
+        } else {
+          // 또렷하지만 오프토픽 → 그런 뜻인지 음성으로만 확인. 글자(버블)로는 남기지 않음
+          _restateConfirmPending = true;
+          final String heard = finalTranscript.trim();
+          checkPhrase =
+              "방금, $heard, 라고 말씀하신 건가요? 맞다면 그대로 다시 한 번 말씀해 주세요.";
+        }
+        _ttsQueueManager.setUserTurn(false);
+        _ttsQueueManager.setAiPaused(false);
+        final restateTts = ChunkedTtsFetcher(
+          _openAiKey,
+          _ttsQueueManager,
+          'nova',
+          isUser: false,
+          onLog: _log,
+        );
+        restateTts.addText(checkPhrase);
+        int waitTicks = 0;
+        while ((restateTts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
+            mounted) {
+          await Future.delayed(const Duration(milliseconds: 50));
+          if (++waitTicks > 200) break;
+        }
+        // 같은 AI 질문 그대로 유지 → 질문 재생성 없이 STT만 재시작
+        if (mounted && _isConversationActive) _startDeepgramListening();
+        return;
+      }
+```
+
+## [S-9] 스트림 파싱 — GARBLED 감지 추가, 확인 재진입 시 RESTATE→GARBLED 강등 (약 1922~1927줄)
+
+**찾기 (anchor):**
+```dart
+        // 다시 말하기 감지: 맥락 어긋남 OR 발음 불확실 → 같은 AI 질문 유지하고 재청취
+        if (userTargetText.contains("[RESTATE]")) {
+          restated = true;
+          _log('🔁 [RESTATE]', '맥락 불일치/발음 불확실 → 같은 질문 유지, 다시 말하기 요청');
+          break;
+        }
+```
+
+**교체:**
+```dart
+        // 다시 말하기 감지: [RESTATE]=또렷하지만 오프토픽 / [GARBLED]=진짜 안 들림
+        // 확인 재진입(isRestateConfirm) 중 모델이 또 [RESTATE]를 내면 GARBLED로 강등 → 확인 루프 방지
+        if (userTargetText.contains("[RESTATE]")) {
+          if (isRestateConfirm) {
+            garbled = true;
+            _log('👂 [GARBLED]', '확인 재진입 중 RESTATE 재발 → 다시 말하기 요청으로 강등');
+          } else {
+            restated = true;
+            _log('🔁 [RESTATE]', '맥락 불일치 → 음성으로만 확인 질문 후 재청취');
+          }
+          break;
+        }
+        if (userTargetText.contains("[GARBLED]")) {
+          garbled = true;
+          _log('👂 [GARBLED]', '발음 불확실 → 다시 말하기 요청');
+          break;
+        }
+```
+
+## [S-10] garbled 플래그 선언 추가 (약 1869줄)
+
+**찾기 (anchor):**
+```dart
+      bool restated = false; // 맥락 어긋남/발음 불확실 → 같은 AI 질문 유지하고 다시 말하기 요청
+```
+
+**교체:**
+```dart
+      bool restated = false; // 또렷하지만 오프토픽 → 음성으로만 확인 질문 후 재청취
+      bool garbled = false; // 진짜 발음 불확실 → "다시 말씀해 주세요" 요청
+```
+
+## [S-11] 콜사이트 — disableRestate 전달 (약 1852~1858줄)
+
+**찾기 (anchor):**
+```dart
+      final userStream = StepExpandBrain.streamUserTranslation(
+        apiKey: _openAiKey,
+        textOriginal: finalTranscript,
+        targetLang: targetLangName,
+        contextStr: contextStr,
+        disableCorrection: isCorrectionRetry,
+      );
+```
+
+**교체:**
+```dart
+      final userStream = StepExpandBrain.streamUserTranslation(
+        apiKey: _openAiKey,
+        textOriginal: finalTranscript,
+        targetLang: targetLangName,
+        contextStr: contextStr,
+        disableCorrection: isCorrectionRetry,
+        disableRestate: isRestateConfirm,
+      );
+```
+
+## [S-12] 파이프라인 시작부 — 확인 플래그 소비 (약 1739~1745줄)
+
+**찾기 (anchor):**
+```dart
+  Future<void> _processRelayPipeline(String finalTranscript,
+      {bool isCorrectionRetry = false}) async {
+    _resetIdleTimer();
+    _turnCounter++;
+    final int currentTurnId = _turnCounter;
+```
+
+**교체:**
+```dart
+  Future<void> _processRelayPipeline(String finalTranscript,
+      {bool isCorrectionRetry = false}) async {
+    _resetIdleTimer();
+    // [RESTATE-CONFIRM] 직전 턴에서 오프토픽 확인 질문을 했다면, 이번 발화는 RESTATE 검사 없이 수용
+    final bool isRestateConfirm = _restateConfirmPending;
+    _restateConfirmPending = false;
+    _turnCounter++;
+    final int currentTurnId = _turnCounter;
+```
+
+## [S-13] Box 5-SILENCE 블록 전체 삭제 (약 1558~1607줄)
+
+**삭제 범위:** 약 1558줄 `// ====================================================================` (바로 아래 줄이 `// 📦 [Box 5-SILENCE: 첫 질문 침묵/망설임 폴백]`) 부터 약 1607줄 `  }` (`_handleOpeningSilenceFallback` 함수의 닫는 중괄호, 바로 다음이 빈 줄 + `// ====================================================================` + `// 📦 [Box 5-RETRY: 재질문 처리]` 헤더) 까지.
+
+**찾기 (anchor — 블록 전체 삭제, new_str은 빈 문자열):**
+```dart
+// ====================================================================
+// 📦 [Box 5-SILENCE: 첫 질문 침묵/망설임 폴백]
+// ====================================================================
+  /// 기본 문장 입력 대기 중 침묵 시 "짧아도 괜찮아요" 안내 문구 (다시 AI 질문 생성 안 함)
+  String _getSilenceFallbackPhrase(String targetLang) {
+    return '짧아도 괜찮아요. 먼저 떠오르는 기본 문장을 하나 말해 주세요.';
+  }
+
+  /// 턴 0(기본 문장 입력 대기) 중 7초 침묵 감지 → 부드럽게 안내 후 계속 대기
+  Future<void> _handleOpeningSilenceFallback() async {
+```
+부터 해당 함수의 닫는 `  }` 까지 **함수 2개 + 헤더 주석 3줄 전체 삭제**. (함수 끝 anchor: `      _startDeepgramListening();` → `    }` → `  }` 로 끝나며, 그 다음 블록은 `[Box 5-RETRY: 재질문 처리]` 헤더)
+
+## [S-14] _stopMicAndProcess 내 타이머 취소 삭제 (약 1470~1473줄)
+
+**찾기 (anchor):**
+```dart
+  void _stopMicAndProcess(String transcript) async {
+    _resetIdleTimer();
+    _silenceTimer?.cancel();
+    _silenceTimer = null;
+    final clean = transcript.trim();
+```
+
+**교체:**
+```dart
+  void _stopMicAndProcess(String transcript) async {
+    _resetIdleTimer();
+    final clean = transcript.trim();
+```
+
+## [S-15] 침묵 타이머 시작 블록 삭제 (약 1457~1465줄)
+
+**찾기 (anchor — new_str은 빈 문자열로 삭제):**
+```dart
+
+    // 🌱 턴 0(기본 문장 입력 대기 중)에서만 침묵/망설임 타이머 시작 — 폴백 발화 후 재설정 방지
+    if (_turnCounter == 0 && _isConversationActive && !_silenceFallbackFired) {
+      _silenceTimer?.cancel();
+      _silenceTimer = Timer(
+        const Duration(seconds: OPENING_SILENCE_SEC),
+        _handleOpeningSilenceFallback,
+      );
+      _log('⏱️ [SILENCE-01]', '기본 문장 침묵 타이머 시작 (${OPENING_SILENCE_SEC}초)');
+    }
+```
+
+## [S-16] onTranscriptUpdate 내 타이머 취소 블록 삭제 (약 1436~1441줄)
+
+**찾기 (anchor):**
+```dart
+      onTranscriptUpdate: (transcript) {
+        _swDeepgram.reset();
+        _swDeepgram.start();
+        // 유저가 말을 시작하는 순간 침묵 타이머 취소 (7초 경계 발화 보호)
+        if (_silenceTimer != null) {
+          _silenceTimer!.cancel();
+          _silenceTimer = null;
+          _log('⏱️ [SILENCE-CANCEL]', '발화 감지 → 침묵 타이머 취소');
+        }
+      },
+```
+
+**교체:**
+```dart
+      onTranscriptUpdate: (transcript) {
+        _swDeepgram.reset();
+        _swDeepgram.start();
+      },
+```
+
+## [S-17] _stopEverything 내 타이머 취소 삭제 (약 1393~1394줄)
+
+**찾기 (anchor):**
+```dart
+    _commitTimer?.cancel();
+    _commitTimer = null;
+    _pendingTranscript = '';
+    _silenceTimer?.cancel();
+    _silenceTimer = null;
+    _voiceManager?.dispose();
+```
+
+**교체:**
+```dart
+    _commitTimer?.cancel();
+    _commitTimer = null;
+    _pendingTranscript = '';
+    _voiceManager?.dispose();
+```
+
+## [S-18] _suggestNewSentence 내 플래그 리셋 삭제 (약 839줄)
+
+**찾기 (anchor — _suggestNewSentence 함수 내부, `_startSessionWaitingForUserSeed()` 호출 직전 블록):**
+```dart
+        _showStudyRoomPrompt = false;
+        _silenceFallbackFired = false;
+      });
+    }
+    _startSessionWaitingForUserSeed(); // 시작 안내 후 유저 seed 문장 대기
+```
+
+**교체:**
+```dart
+        _showStudyRoomPrompt = false;
+      });
+    }
+    _startSessionWaitingForUserSeed(); // 시작 안내 후 유저 seed 문장 대기
+```
+
+## [S-19] 또 다른 리셋 지점 삭제 (약 805줄)
+
+[S-18] 적용 후 `grep -n "_silenceFallbackFired = false;"` 로 남은 1곳(약 805줄, `_showStudyRoomPrompt = false;` 바로 아래)을 확인하고 해당 줄 1줄만 삭제.
+
+**찾기 (anchor):**
+```dart
+        _showStudyRoomPrompt = false;
+        _silenceFallbackFired = false;
+      });
     }
   }
 ```
 
-**new_str:**
+**교체:**
 ```dart
-  static String _freeTalkLevelInstruction(String level) {
-    switch (level) {
-      case "Beginner":
-        return "BEGINNER (CEFR A1-A2). Use only the most common everyday words. "
-            "Keep every sentence to 8 words or fewer. "
-            "Use only simple present and simple past tense. "
-            "No idioms, no phrasal verbs, no slang. "
-            "Speak as if talking to a young child learning the language.";
+        _showStudyRoomPrompt = false;
+      });
+    }
+  }
+```
+
+## [S-20] 세션 시작부 주석 수정 (약 500~502줄)
+
+**찾기 (anchor):**
+```dart
+    // 안내/질문 완료  STT 즉시 시작 (유저 기본 문장 대기)
+    // 🔧 [MIC-INSTANT] 8초 딜레이 제거  AI 말 끝나자마자 마이크 ON.
+    // 침묵 시 안내는 _startDeepgramListening() 내부의 7초 타이머가 담당.
+```
+
+**교체:**
+```dart
+    // 안내/질문 완료  STT 즉시 시작 (유저 기본 문장 대기)
+    // 🔧 [MIC-INSTANT] 8초 딜레이 제거  AI 말 끝나자마자 마이크 ON.
+    // 침묵 시 별도 안내 멘트 없이 그대로 대기 (침묵 폴백 제거됨).
+```
+
+## [S-21] 시드 스니펫 필러/길이 필터 추가 (약 367~370줄)
+
+**찾기 (anchor):**
+```dart
+      if (hostTexts.isEmpty) return [];
+
+      hostTexts.shuffle();
+      return hostTexts.take(3).toList(); // 2~3개 랜덤 샘플
+```
+
+**교체:**
+```dart
+      if (hostTexts.isEmpty) return [];
+
+      // 🧹 필러/연결어 발화 제외 — 구체적 내용이 있는 발화만 시드 후보로
+      const fillerPatterns = [
+        '네', '응', '예', '그래', '맞아', '맞아요', '좋아', '좋아요',
+        '오케이', 'ok', 'okay', '음', '어', '아', '그래서', '그러니까',
+        '그렇구나', '알겠어', '알겠습니다', 'yes', 'yeah', 'sure', 'right',
+        'thank you', 'thanks',
+      ];
+      bool isFiller(String s) {
+        final t = s.replaceAll(RegExp(r'[\s\.,!?~…]'), '').toLowerCase();
+        if (t.length < 6) return true; // 너무 짧으면 내용 없음으로 간주
+        return fillerPatterns.contains(t);
+      }
+
+      final contentTexts = hostTexts.where((s) => !isFiller(s)).toList();
+      if (contentTexts.isEmpty) return []; // 내용 발화 없음 → 고정 안내로 폴백
+
+      // 내용이 풍부한(긴) 발화 우선 풀 구성 후 랜덤 샘플
+      contentTexts.sort((a, b) => b.length.compareTo(a.length));
+      final seedPool = contentTexts.take(8).toList()..shuffle();
+      return seedPool.take(3).toList(); // 2~3개 샘플
+```
+
+## [S-22] 멤버 필드 추가/삭제 (약 142~144줄, 208줄)
+
+**(a) 추가 — 찾기 (anchor, 약 208줄):**
+```dart
+  int _consecutiveRestateCount = 0; // 같은 턴 연속 RESTATE 횟수 (2 이상이면 더 쉬운 문장 유도)
+```
+
+**교체:**
+```dart
+  int _consecutiveRestateCount = 0; // 같은 턴 연속 GARBLED 횟수 (2 이상이면 더 쉬운 문장 유도)
+  bool _restateConfirmPending = false; // 오프토픽 확인 질문 후 다음 발화는 RESTATE 검사 없이 수용
+```
+
+**(b) 삭제 — 찾기 (anchor, 약 142~144줄):**
+```dart
+  Timer? _silenceTimer; // 기본 문장 입력 대기 중 침묵/망설임 감지 타이머
+  static const int OPENING_SILENCE_SEC = 7; // 침묵 판정 대기 시간(초) — 유저 망설임 7초 대기
+  bool _silenceFallbackFired = false; // 폴백 발화 후 재타이머 방지 플래그
+```
+→ 3줄 전체 삭제 (new_str 빈 문자열).
+
+## 파일 1 검증
+```bash
+grep -c "_silenceTimer" lib/custom_code/widgets/routine_mode_step_expand.dart        # 기대값: 0
+grep -c "_silenceFallbackFired" lib/custom_code/widgets/routine_mode_step_expand.dart # 기대값: 0
+grep -c "_handleOpeningSilenceFallback" lib/custom_code/widgets/routine_mode_step_expand.dart # 기대값: 0
+grep -c "OPENING_SILENCE_SEC" lib/custom_code/widgets/routine_mode_step_expand.dart   # 기대값: 0
+grep -c "_getSilenceFallbackPhrase" lib/custom_code/widgets/routine_mode_step_expand.dart # 기대값: 0
+grep -c "Last time you mentioned" lib/custom_code/widgets/routine_mode_step_expand.dart # 기대값: 0
+grep -c "\[GARBLED\]" lib/custom_code/widgets/routine_mode_step_expand.dart           # 기대값: 7 (프롬프트5 + 클라이언트2)
+grep -c "_restateConfirmPending" lib/custom_code/widgets/routine_mode_step_expand.dart # 기대값: 4
+grep -c "disableRestate" lib/custom_code/widgets/routine_mode_step_expand.dart         # 기대값: 3
+grep -c "isRestateConfirm" lib/custom_code/widgets/routine_mode_step_expand.dart       # 기대값: 4
+```
+※ 기대값과 ±1 차이 나면 적용 누락/중복 여부를 sed -n 으로 해당 구간 직접 확인할 것.
+
+---
+
+# 파일 2: routine_mode_free_talk.dart (편집 2건, 아래→위)
+
+## [F-1] Advanced 레벨 지침 교체 — 품위/고급 어휘만, 길이 증가 금지 (약 3532~3536줄)
+
+**찾기 (anchor):**
+```dart
       case "Advanced":
         return "ADVANCED (CEFR C1-C2). Speak exactly like an educated native adult. "
             "Freely use idioms, phrasal verbs, colloquial slang, and witty or nuanced expressions. "
             "Use varied grammar such as conditionals, relative clauses, and perfect tenses. "
             "Do not simplify anything.";
-      case "Intermediate":
-      default:
-        return "INTERMEDIATE (CEFR B1-B2). Use everyday vocabulary with some variety. "
-            "Keep sentences to about 14 words or fewer. "
-            "Common phrasal verbs and natural expressions are fine, "
-            "but avoid rare idioms and slang.";
-    }
-  }
 ```
 
-### [편집 1-2] DISSATISFIED 감지 신호 확장 — 약 3363~3366줄
-
-**old_str:**
+**교체:**
 ```dart
-[CASE DISSATISFIED] — Check this THIRD, only when the history contains at least one "AI:" line.
-The user is complaining about the AI's LAST reply itself and wants a different one.
-Signs: "무슨 대답이 그래" / "무슨 질문이 그래" / "대답이 이상해" / "다른 말 해줘" / "다시 대답해 봐" / "그 대답 별로야" / "say something else" / "that's a weird reply" / "answer again"
-If so, output EXACTLY: [DISSATISFIED]  (and nothing else)''';
+      case "Advanced":
+        return "ADVANCED (CEFR C1-C2). Speak like a refined, well-educated native adult. "
+            "Use sophisticated, precise vocabulary and elegant, polished expressions. "
+            "Refined idioms and nuanced word choice are welcome; NO slang, NO vulgar or overly casual wording. "
+            "Use varied grammar such as conditionals, relative clauses, and perfect tenses. "
+            "CRITICAL: Elevate WORD CHOICE only. NEVER make replies longer — keep the exact same brevity as the other levels (usually ONE short sentence).";
 ```
 
-**new_str:**
+## [F-2] DISSATISFIED 감지 신호 확장 (약 3367~3372줄)
+
+**찾기 (anchor):**
 ```dart
-[CASE DISSATISFIED] — Check this THIRD, only when the history contains at least one "AI:" line.
-The user is complaining about the AI's LAST reply itself and wants a different one,
-OR the user did not catch / did not like the AI's last QUESTION and asks for it to be repeated, rephrased, or replaced.
 Signs: "무슨 대답이 그래" / "무슨 질문이 그래" / "대답이 이상해" / "다른 말 해줘" / "다시 대답해 봐" / "그 대답 별로야" / "say something else" / "that's a weird reply" / "answer again"
 More signs (question complaints): "뭐라고 물었어" / "뭐라고 물은 거야" / "다시 물어봐" / "제대로 다시 물어봐" / "질문 다시 해줘" / "다른 질문 해줘" / "what did you ask" / "ask me again" / "ask a different question"
-If so, output EXACTLY: [DISSATISFIED]  (and nothing else)''';
+If so, output EXACTLY: [DISSATISFIED]  (and nothing else)'''
 ```
 
-### [편집 1-3] 재시도 딜레이 조건 — 약 2866~2872줄 (catch 블록)
-
-타임아웃 예외는 이미 3초를 기다린 상태이므로 0.3초 추가 대기 없이 즉시 재발사.
-
-**old_str:**
+**교체:**
 ```dart
-        } catch (e) {
-          onLog?.call('⚠️ [TTS-RETRY]',
-              'attempt=${attempt + 1}/3 실패 (${e.runtimeType}) for "$text"');
-          if (attempt < 2) {
-            await Future.delayed(const Duration(milliseconds: 300));
-          }
-        }
+Signs: "무슨 대답이 그래" / "무슨 질문이 그래" / "대답이 이상해" / "다른 말 해줘" / "다시 대답해 봐" / "그 대답 별로야" / "say something else" / "that's a weird reply" / "answer again"
+More signs (question complaints): "뭐라고 물었어" / "뭐라고 물은 거야" / "다시 물어봐" / "제대로 다시 물어봐" / "질문 다시 해줘" / "다른 질문 해줘" / "what did you ask" / "ask me again" / "ask a different question"
+More signs (MILD dissatisfaction — these ALSO count): "별로네" / "별로다" / "음 그건 좀" / "에이" / "그런 거 말고" / "딴 거 없어" / "재미없어" / "이상하네" / "뭐야 그게" / "meh" / "not really" / "hmm, not that one"
+Even slight or indirect displeasure aimed at the AI's last reply or question counts as [DISSATISFIED].
+Do NOT confuse this with a negative ANSWER to the question (e.g., "아니, 안 갔어" = a valid answer, NOT dissatisfaction).
+If so, output EXACTLY: [DISSATISFIED]  (and nothing else)'''
 ```
 
-**new_str:**
-```dart
-        } catch (e) {
-          onLog?.call('⚠️ [TTS-RETRY]',
-              'attempt=${attempt + 1}/3 실패 (${e.runtimeType}) for "$text"');
-          if (attempt < 2 && e is! TimeoutException) {
-            await Future.delayed(const Duration(milliseconds: 300));
-          }
-        }
-```
-
-### [편집 1-4] 타임아웃 상수 사용처 — 약 2851~2852줄
-
-**old_str:**
-```dart
-              .timeout(
-                  const Duration(seconds: kFreeTalkChunkTtsHttpTimeoutSeconds));
-```
-
-**new_str:**
-```dart
-              .timeout(Duration(
-                  seconds: kFreeTalkChunkTtsTimeoutLadderSec[attempt]));
-```
-
-### [편집 1-5] 타임아웃 상수 정의 — 약 51줄 (파일 상단, 마지막에 편집)
-
-**old_str:**
-```dart
-const int kFreeTalkChunkTtsHttpTimeoutSeconds = 5; // Chunk TTS retry timeout.
-```
-
-**new_str:**
-```dart
-const List<int> kFreeTalkChunkTtsTimeoutLadderSec = [
-  3,
-  5,
-  8
-]; // Chunk TTS per-attempt timeout ladder.
-```
-
-### 파일 1 검증
-
+## 파일 2 검증
 ```bash
-grep -c "kFreeTalkChunkTtsTimeoutLadderSec" lib/custom_code/widgets/routine_mode_free_talk.dart   # 기대값 2
-grep -c "kFreeTalkChunkTtsHttpTimeoutSeconds" lib/custom_code/widgets/routine_mode_free_talk.dart  # 기대값 0
-grep -c "e is! TimeoutException" lib/custom_code/widgets/routine_mode_free_talk.dart               # 기대값 1
-grep -c "CEFR" lib/custom_code/widgets/routine_mode_free_talk.dart                                 # 기대값 3
-grep -c "뭐라고 물은 거야" lib/custom_code/widgets/routine_mode_free_talk.dart                      # 기대값 1
+grep -c "colloquial slang" lib/custom_code/widgets/routine_mode_free_talk.dart   # 기대값: 0
+grep -c "MILD dissatisfaction" lib/custom_code/widgets/routine_mode_free_talk.dart # 기대값: 1
+grep -c "NEVER make replies longer" lib/custom_code/widgets/routine_mode_free_talk.dart # 기대값: 1
 ```
 
 ---
 
-## 4. 파일 2~4: step_expand / roleplay / clone (파일당 편집 1곳)
+# 파일 3: routine_mode_roleplay.dart (편집 1건)
 
-세 파일 모두 동일한 블록 교체. 적용 순서: step_expand → roleplay → clone.
-(step_expand 약 4370~4410줄 / roleplay 약 3157~3197줄 / clone은 grep으로 위치 확인)
+## [R-1] DISSATISFIED 감지 신호 확장 (약 3823~3828줄)
 
-### 삭제할 코드 (old_str)
-
-시작: `    // [2단계] API 호출 (5초 타임아웃, 최대 3회 시도) — TTS 지연 스파이크 대응`
-끝: for 루프 닫는 `    }` (catch 닫힘 직후, `if (result.isEmpty)` 직전)
-
+**찾기 (anchor):**
 ```dart
-    // [2단계] API 호출 (5초 타임아웃, 최대 3회 시도) — TTS 지연 스파이크 대응
-    Uint8List result = Uint8List(0);
-    for (int attempt = 0; attempt < 3; attempt++) {
-      try {
-        final res = await http
-            .post(
-              Uri.parse('https://api.openai.com/v1/audio/speech'),
-              headers: {
-                'Authorization': 'Bearer $apiKey',
-                'Content-Type': 'application/json',
-              },
-              body: jsonEncode({
-                'model': 'tts-1',
-                'input': text,
-                'voice': voice,
-                'speed': 1.0,
-                'response_format': 'mp3',
-              }),
-            )
-            .timeout(const Duration(seconds: 5));
-
-        if (res.statusCode == 200) {
-          result = res.bodyBytes;
-          final turnTag = isUser ? 'USER' : 'AI';
-          onLog?.call('🔊 [TTS-02]',
-              '[$turnTag] API OK (${result.length}B) for "$text"');
-          // [3단계] 캐시 저장 (백그라운드)
-          TtsCache.put(text, voice, result);
-          break;
-        } else {
-          onLog?.call('❌ [TTS-API-ERR]',
-              'statusCode=${res.statusCode} (attempt=${attempt + 1}/3)');
-        }
-      } catch (e) {
-        onLog?.call('⚠️ [TTS-RETRY]',
-            'attempt=${attempt + 1}/3 실패 (${e.runtimeType}) for "$text"');
-        if (attempt < 2) {
-          await Future.delayed(const Duration(milliseconds: 300));
-        }
-      }
-    }
+Signs: "무슨 대답이 그래" / "무슨 질문이 그래" / "대답이 이상해" / "다른 말 해줘" / "다시 대답해 봐" / "그 대답 별로야" / "say something else" / "that's a weird reply" / "answer again"
+Do NOT output this when the user is answering negatively IN CHARACTER (e.g., refusing an offer inside the roleplay is a valid in-character answer).
+If so, output EXACTLY: [DISSATISFIED]  (and nothing else)
 ```
 
-### 교체할 코드 (new_str)
-
+**교체:**
 ```dart
-    // [2단계] API 호출 (타임아웃 사다리 3/5/8초, 최대 3회 시도) — TTS 지연 스파이크 대응
-    Uint8List result = Uint8List(0);
-    const List<int> timeoutLadderSec = [3, 5, 8];
-    for (int attempt = 0; attempt < 3; attempt++) {
-      try {
-        final res = await http
-            .post(
-              Uri.parse('https://api.openai.com/v1/audio/speech'),
-              headers: {
-                'Authorization': 'Bearer $apiKey',
-                'Content-Type': 'application/json',
-              },
-              body: jsonEncode({
-                'model': 'tts-1',
-                'input': text,
-                'voice': voice,
-                'speed': 1.0,
-                'response_format': 'mp3',
-              }),
-            )
-            .timeout(Duration(seconds: timeoutLadderSec[attempt]));
-
-        if (res.statusCode == 200) {
-          result = res.bodyBytes;
-          final turnTag = isUser ? 'USER' : 'AI';
-          onLog?.call('🔊 [TTS-02]',
-              '[$turnTag] API OK (${result.length}B) for "$text"');
-          // [3단계] 캐시 저장 (백그라운드)
-          TtsCache.put(text, voice, result);
-          break;
-        } else {
-          onLog?.call('❌ [TTS-API-ERR]',
-              'statusCode=${res.statusCode} (attempt=${attempt + 1}/3)');
-        }
-      } catch (e) {
-        onLog?.call('⚠️ [TTS-RETRY]',
-            'attempt=${attempt + 1}/3 실패 (${e.runtimeType}) for "$text"');
-        if (attempt < 2 && e is! TimeoutException) {
-          await Future.delayed(const Duration(milliseconds: 300));
-        }
-      }
-    }
+Signs: "무슨 대답이 그래" / "무슨 질문이 그래" / "대답이 이상해" / "다른 말 해줘" / "다시 대답해 봐" / "그 대답 별로야" / "say something else" / "that's a weird reply" / "answer again"
+More signs (MILD dissatisfaction — these ALSO count when clearly aimed at the AI reply itself, OUT of character): "별로네" / "별로다" / "음 그건 좀" / "에이" / "그런 거 말고" / "재미없어" / "이상하네" / "뭐야 그게" / "meh" / "not really" / "hmm, not that one"
+Even slight or indirect displeasure aimed at the AI's last reply counts.
+Do NOT output this when the user is answering negatively IN CHARACTER (e.g., refusing an offer inside the roleplay is a valid in-character answer).
+If so, output EXACTLY: [DISSATISFIED]  (and nothing else)
 ```
 
-**주의:** old_str/new_str 직후의 `if (result.isEmpty)` 블록과 `_buffer[id] = result;` 이하는 편집 범위에 포함하지 말 것.
-`TimeoutException`은 `dart:async` 소속 — 3개 파일 모두 23줄에 이미 import 확인됨, 추가 import 불필요.
-
-### 파일별 검증 (파일명 바꿔 3회)
-
+## 파일 3 검증
 ```bash
-grep -c "timeoutLadderSec" lib/custom_code/widgets/routine_mode_step_expand.dart        # 기대값 2
-grep -c "5초 타임아웃, 최대 3회 시도" lib/custom_code/widgets/routine_mode_step_expand.dart  # 기대값 0
-grep -c "e is! TimeoutException" lib/custom_code/widgets/routine_mode_step_expand.dart   # 기대값 1
+grep -c "MILD dissatisfaction" lib/custom_code/widgets/routine_mode_roleplay.dart # 기대값: 1
 ```
 
 ---
 
-## 5. 전체 검증
+# 최종 검증
 
 ```bash
-flutter analyze
+cd F:\flutter_project\stealth_vox
+flutter analyze lib/custom_code/widgets/routine_mode_step_expand.dart lib/custom_code/widgets/routine_mode_free_talk.dart lib/custom_code/widgets/routine_mode_roleplay.dart
 ```
+- 에러 0건이어야 함. unused 경고가 silence 관련으로 남으면 잔여 참조 재확인.
 
-에러 0건이어야 함. 에러 발생 시 즉시 중단·전문 보고.
+**실기기 테스트 체크리스트:**
+1. [Step Expand] 세션 시작 후 7초 이상 침묵 → 아무 멘트 없이 계속 대기하는지
+2. [Step Expand] 프리톡 기록이 있는 계정 → 첫 질문이 "전에 ~라고 했죠" 류 표현 없이, 의미있는 새 질문인지 (필러만 있는 기록이면 고정 안내로 폴백)
+3. [Step Expand] 질문과 무관한 또렷한 말 → "방금 ~라고 말씀하신 건가요?" 음성만 나오고 화면에 버블 안 남는지 → 같은 말 반복 시 그대로 수용되는지
+4. [Step Expand] 웅얼거림 → "잘 안 들렸어요. 다시 말씀해 주세요." 나오는지
+5. [3개 모드 공통] "음 별로네" / "에이 그런 거 말고" → 직전 응답 삭제 후 재생성되는지
+6. [Free Talk] Advanced 토글 → 답변 길이는 그대로, 어휘만 고급스러워지는지 (슬랭 없음)
 
----
-
-## 6. 실기기 테스트 포인트
-
-**Fix 1 (공백 단축):**
-1. `[TTS-RETRY]` 발생 시 addText → API OK 간격이 5초 이내인지 (기존 6.5초+ → 약 4.5초 목표).
-2. 1차 타임아웃이 3초로 짧아져 `[TTS-RETRY]` 빈도 자체는 다소 늘 수 있음 — 정상. 중요한 건 공백 길이.
-3. `[TTS-FAIL]`(3회 전멸)이 나오지 않는지.
-
-**Fix 2 (재질문):**
-4. 대화 중 "뭐라고 물은 거야? 다시 물어봐"라고 말하기 → 직전 AI 버블 삭제 + "그럼 다시 답해 볼게요" + 새 응답이 나오는지 (`🟣 [DISSATISFIED]` 로그 확인).
-5. 정상 대화("아니 근데 어제는...")가 오탐으로 DISSATISFIED 처리되지 않는지 2~3턴 확인.
-
-**Fix 3 (레벨):**
-6. Beginner로 3턴 → AI 문장이 8단어 이하, 단순 시제인지.
-7. Advanced로 3턴 → 숙어/구동사가 실제로 섞이는지. Intermediate와 귀로 구분되는지.
-
----
-
-## 7. 롤백 절차
+# 롤백
 
 ```bash
-# 커밋 전:
-git restore lib/custom_code/widgets/routine_mode_free_talk.dart
-git restore lib/custom_code/widgets/routine_mode_step_expand.dart
-git restore lib/custom_code/widgets/routine_mode_roleplay.dart
-git restore lib/custom_code/widgets/routine_mode_clone.dart
-
-# 커밋 후:
-git revert <패치 커밋 해시>
+git restore lib/custom_code/widgets/routine_mode_step_expand.dart lib/custom_code/widgets/routine_mode_free_talk.dart lib/custom_code/widgets/routine_mode_roleplay.dart
+# 또는 커밋했다면
+git revert <hash>
 ```
