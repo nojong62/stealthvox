@@ -1548,15 +1548,11 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
       _log(
           '🧠 [PIPE-05]', '유저 TTS fetch 완료. isBusy=${_ttsQueueManager.isBusy}');
 
-      waitTicks = 0;
-      while (_ttsQueueManager.isBusy) {
-        await Future.delayed(const Duration(milliseconds: 50));
-        waitTicks++;
-        if (waitTicks * 50 >= kFreeTalkUserTtsPlaybackTimeoutMs) {
-          _log('⚠️ [PIPE-TIMEOUT]', '유저 TTS 재생 15초 초과, 강제 진행');
-          break;
-        }
-      }
+      // 🔒 [Box 7 USER-DRAIN-SIGNAL] 실제 기반 drain 게이트.
+      //   마지막 유저 청크의 마지막 샘플 재생 완료 즉시 해제한다.
+      //   isBusy 폴링과 청크 사이 false 위험을 제거한다.
+      _ttsQueueManager.sealUserStream();
+      await _ttsQueueManager.waitUserDrained();
       _log('🧠 [PIPE-06]', '유저 TTS 재생 완료 → AI 큐 개방');
 
 // ─────────────────────────────────────────────────────
