@@ -4367,8 +4367,9 @@ class ChunkedTtsFetcher {
       return;
     }
 
-    // [2단계] API 호출 (5초 타임아웃, 최대 3회 시도) — TTS 지연 스파이크 대응
+    // [2단계] API 호출 (타임아웃 사다리 3/5/8초, 최대 3회 시도) — TTS 지연 스파이크 대응
     Uint8List result = Uint8List(0);
+    const List<int> timeoutLadderSec = [3, 5, 8];
     for (int attempt = 0; attempt < 3; attempt++) {
       try {
         final res = await http
@@ -4386,7 +4387,7 @@ class ChunkedTtsFetcher {
                 'response_format': 'mp3',
               }),
             )
-            .timeout(const Duration(seconds: 5));
+            .timeout(Duration(seconds: timeoutLadderSec[attempt]));
 
         if (res.statusCode == 200) {
           result = res.bodyBytes;
@@ -4403,7 +4404,7 @@ class ChunkedTtsFetcher {
       } catch (e) {
         onLog?.call('⚠️ [TTS-RETRY]',
             'attempt=${attempt + 1}/3 실패 (${e.runtimeType}) for "$text"');
-        if (attempt < 2) {
+        if (attempt < 2 && e is! TimeoutException) {
           await Future.delayed(const Duration(milliseconds: 300));
         }
       }

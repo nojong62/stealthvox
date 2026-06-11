@@ -48,7 +48,11 @@ const int kFreeTalkUserTtsPlaybackTimeoutMs = 15000;
 const int kFreeTalkAiTtsWaitTimeoutMs = 20000;
 const int kFreeTalkOpenAiTtsHttpTimeoutSeconds =
     18; // Long-form cache save path.
-const int kFreeTalkChunkTtsHttpTimeoutSeconds = 5; // Chunk TTS retry timeout.
+const List<int> kFreeTalkChunkTtsTimeoutLadderSec = [
+  3,
+  5,
+  8
+]; // Chunk TTS per-attempt timeout ladder.
 const int kFreeTalkAiResponseMaxTokens = 70;
 
 /// ==================================================================== [Box
@@ -2848,8 +2852,8 @@ class ChunkedTtsFetcher {
                   'response_format': 'mp3',
                 }),
               )
-              .timeout(
-                  const Duration(seconds: kFreeTalkChunkTtsHttpTimeoutSeconds));
+              .timeout(Duration(
+                  seconds: kFreeTalkChunkTtsTimeoutLadderSec[attempt]));
 
           if (res.statusCode == 200) {
             result = res.bodyBytes;
@@ -2866,7 +2870,7 @@ class ChunkedTtsFetcher {
         } catch (e) {
           onLog?.call('⚠️ [TTS-RETRY]',
               'attempt=${attempt + 1}/3 실패 (${e.runtimeType}) for "$text"');
-          if (attempt < 2) {
+          if (attempt < 2 && e is! TimeoutException) {
             await Future.delayed(const Duration(milliseconds: 300));
           }
         }
@@ -3361,8 +3365,10 @@ If so, output EXACTLY: [MISHEARD]  (and nothing else)
 If the complaint INCLUDES the corrected content, use [CORRECTION] instead.
 
 [CASE DISSATISFIED] — Check this THIRD, only when the history contains at least one "AI:" line.
-The user is complaining about the AI's LAST reply itself and wants a different one.
+The user is complaining about the AI's LAST reply itself and wants a different one,
+OR the user did not catch / did not like the AI's last QUESTION and asks for it to be repeated, rephrased, or replaced.
 Signs: "무슨 대답이 그래" / "무슨 질문이 그래" / "대답이 이상해" / "다른 말 해줘" / "다시 대답해 봐" / "그 대답 별로야" / "say something else" / "that's a weird reply" / "answer again"
+More signs (question complaints): "뭐라고 물었어" / "뭐라고 물은 거야" / "다시 물어봐" / "제대로 다시 물어봐" / "질문 다시 해줘" / "다른 질문 해줘" / "what did you ask" / "ask me again" / "ask a different question"
 If so, output EXACTLY: [DISSATISFIED]  (and nothing else)''';
 
       final sysPrompt =
@@ -3518,12 +3524,22 @@ The particle before the verb's doer (이/가) is ALWAYS the subject. Never swap 
   static String _freeTalkLevelInstruction(String level) {
     switch (level) {
       case "Beginner":
-        return "Use very simple, common words and short sentences. Avoid idioms and difficult grammar.";
+        return "BEGINNER (CEFR A1-A2). Use only the most common everyday words. "
+            "Keep every sentence to 8 words or fewer. "
+            "Use only simple present and simple past tense. "
+            "No idioms, no phrasal verbs, no slang. "
+            "Speak as if talking to a young child learning the language.";
       case "Advanced":
-        return "Use rich, natural vocabulary including idioms and nuanced expressions, as with a fluent speaker.";
+        return "ADVANCED (CEFR C1-C2). Speak exactly like an educated native adult. "
+            "Freely use idioms, phrasal verbs, colloquial slang, and witty or nuanced expressions. "
+            "Use varied grammar such as conditionals, relative clauses, and perfect tenses. "
+            "Do not simplify anything.";
       case "Intermediate":
       default:
-        return "Use everyday vocabulary with some variety. Common phrasal verbs and natural expressions are fine.";
+        return "INTERMEDIATE (CEFR B1-B2). Use everyday vocabulary with some variety. "
+            "Keep sentences to about 14 words or fewer. "
+            "Common phrasal verbs and natural expressions are fine, "
+            "but avoid rare idioms and slang.";
     }
   }
 
