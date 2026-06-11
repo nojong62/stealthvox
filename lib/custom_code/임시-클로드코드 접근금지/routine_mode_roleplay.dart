@@ -276,8 +276,22 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   bool _isGeneratingScenario = false;
   bool _isAiOpenerPlaying = false; // AI 첫 발화 재생 중 여부
 
+  String get _roleplayPartnerLabel {
+    final local = _scenarioAiRole.trim();
+    if (local.isNotEmpty) return local;
+    final stored = _RoleplayScenarioStore.aiRole.trim();
+    return stored.isNotEmpty ? stored : 'the roleplay partner';
+  }
+
+  String get _roleplayUserLabel {
+    final local = _scenarioUserRole.trim();
+    if (local.isNotEmpty) return local;
+    final stored = _RoleplayScenarioStore.userRole.trim();
+    return stored.isNotEmpty ? stored : 'the user';
+  }
+
   // ── Idle Timeout v2 ───────────────────────────────────────────────
-  // 기준: "유저도 AI도 아무 작동이 없는 상태"가 연속 30초 지속되면 pause.
+  // 기준: "유저도 AI도 아무 작동이 없는 상태"가 연속 60초 지속되면 pause.
   //  - AI 작동 = _ttsQueueManager.isBusy (TTS 재생/대기)
   //  - 유저 작동 = _voiceManager != null (마이크 연결/녹음)
   // 1초 주기 감시 타이머가 작동 여부를 보고 idle 누적초를 증감한다.
@@ -306,6 +320,11 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 
   void _idleTick() {
     if (!mounted) return;
+    // 🔒 [오토포즈 가드] 최상단 active route가 아니면(다른 페이지가 위에) idle 누적 금지
+    if (ModalRoute.of(context)?.isCurrent == false) {
+      _idleElapsedSec = 0;
+      return;
+    }
     if (_isIdlePaused) return;
     // 유저나 AI가 작동 중이면 idle 누적을 멈추고 리셋
     if (_isSystemBusy) {
@@ -337,8 +356,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 
   Widget _buildIdleOverlay() => const SizedBox.shrink();
   // ─────────────────────────────────────────────────────────────────────────
-
-  String _lastRawTranscript = ''; // 정정 감지용 직전 유저 발화 원문
 
   // 오디오 및 UI
   final List<Map<String, dynamic>> _localMessages = [];
@@ -534,7 +551,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                 const SizedBox(height: 20),
                 _inputField(situationCtrl, '상황 (10-15자)', '예: 숨겨둔 돈다발 들킴'),
                 const SizedBox(height: 12),
-                _inputField(aiRoleCtrl, 'AI 역할', '예: 화난 배우자'),
+                _inputField(aiRoleCtrl, '상대 역할', '예: 화난 배우자'),
                 const SizedBox(height: 12),
                 _inputField(userRoleCtrl, '내 역할', '예: 당황한 남편'),
                 const SizedBox(height: 24),
@@ -830,71 +847,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     }
   }
 
-  // ====================================================================
-  // 📦 [정정 감지] AI 오해/오청취 시 직전 교환 삭제 후 재처리
-  // ====================================================================
-  // 감지 조건 1 — 명시적 정정 키워드로 시작하는 경우
-  //   예: "아니야", "다시 해봐", "내 말은", "I meant", "No I said" 등
-  // 감지 조건 2 — 직전 발화와 단어 겹침이 65% 이상 (재발음 재시도)
-  //   예: AI가 "안녕하세요"를 잘못 들었을 때 유저가 "안녕하세요"를 다시 말하는 경우
-  // 동작: 직전 HOST(유저) + SYSTEM(AI) 버블 쌍을 삭제하고 새로 처리
-  // ====================================================================
-  bool _hasLastExchange() {
-    bool hasHost = false, hasSystem = false;
-    for (final m in _localMessages) {
-      if (m['role'] == 'HOST') hasHost = true;
-      if (m['role'] == 'SYSTEM') hasSystem = true;
-      if (hasHost && hasSystem) return true;
-    }
-    return false;
-  }
-
-  double _wordOverlap(String a, String b) {
-    final wordsA = a
-        .toLowerCase()
-        .split(RegExp(r'\s+'))
-        .where((w) => w.length > 1)
-        .toSet();
-    final wordsB = b
-        .toLowerCase()
-        .split(RegExp(r'\s+'))
-        .where((w) => w.length > 1)
-        .toSet();
-    if (wordsA.isEmpty || wordsB.isEmpty) return 0.0;
-    final common = wordsA.intersection(wordsB).length;
-    return common / min(wordsA.length, wordsB.length);
-  }
-
-  bool _isCorrectionAttempt(String transcript) {
-    if (!_hasLastExchange()) return false;
-
-    final lower = transcript.toLowerCase().trim();
-
-    // 명시적 정정 키워드 (한국어 + 영어)
-    const correctionStarters = [
-      // 한국어
-      '아니야', '아니에요', '아니요', '아니 그게', '아니 그건', '아니 그거',
-      '다시 해', '다시 말', '다시 한번', '다시 해봐',
-      '내 말은', '제 말은', '내가 말한', '제가 말한',
-      '이 뜻이야', '이 뜻은', '이런 뜻', '그 뜻이',
-      '그게 아니라', '그게 아니야', '잘못 들',
-      // English
-      'i said ', 'i meant ', 'what i said', 'no i ', 'no, i ',
-      'not that', 'wait, ', 'actually i said', "i didn't say",
-    ];
-    for (final starter in correctionStarters) {
-      if (lower.startsWith(starter)) return true;
-    }
-
-    // 재발음 감지: 직전 발화와 단어 겹침 65% 이상
-    if (_lastRawTranscript.isNotEmpty &&
-        transcript.split(RegExp(r'\s+')).length >= 2) {
-      if (_wordOverlap(transcript, _lastRawTranscript) >= 0.65) return true;
-    }
-
-    return false;
-  }
-
   void _removeLastExchange() {
     // 가장 최근 SYSTEM(AI) 버블 인덱스 탐색
     int lastSystemIdx = -1;
@@ -1123,7 +1075,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     if (mounted && _isConversationActive) _startDeepgramListening();
   }
 
-  Future<void> _processRelayPipeline(String finalTranscript) async {
+  Future<void> _processRelayPipeline(String finalTranscript,
+      {bool isCorrectionRetry = false}) async {
     _resetIdleTimer();
     _turnCounter++;
     final int currentTurnId = _turnCounter;
@@ -1144,9 +1097,12 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       '네',
       '응'
     ];
-    bool isGhost = finalTranscript.length <= 2 ||
-        (ghostWords.any((gw) => lowerClean.contains(gw)) &&
-            finalTranscript.length < 20);
+    // [GHOST-EXACT] Change ghost-word detection from substring contains to exact match.
+    //   Before: short ghost words could evaporate normal phrases that merely included them.
+    //   Now: evaporate only when the entire cleaned transcript is itself a ghost word.
+    //   Mixed phrases pass through and are handled later by the [EVAPORATE] rules if needed.
+    bool isGhost =
+        finalTranscript.length <= 2 || ghostWords.contains(lowerClean.trim());
 
     if (isGhost) {
       if (mounted)
@@ -1162,27 +1118,10 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       return;
     }
 
-    // ─────────────────────────────────────────────────────
-    // STEP 1.5: 정정 감지 — AI 오해/오청취 시 직전 교환 삭제
-    // ─────────────────────────────────────────────────────
-    if (_isCorrectionAttempt(finalTranscript)) {
-      _log('🔄 [CORRECT-01]', '정정 감지: "$finalTranscript" → 직전 교환 삭제');
-      if (mounted) {
-        setState(() {
-          _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-          _removeLastExchange();
-        });
-        if (_localMessages.isNotEmpty)
-          _scrollToBottom();
-      }
-      _log('🔄 [CORRECT-02]', '직전 교환 삭제 완료 → 재처리 진행');
-    }
-
     try {
       // ─────────────────────────────────────────────────────
       // STEP 2: HOST 풍선 생성 + 유저 번역 스트리밍
       // ─────────────────────────────────────────────────────
-      _lastRawTranscript = finalTranscript; // 다음 턴 정정 감지용 저장
       if (mounted) {
         setState(() {
           _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
@@ -1207,7 +1146,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           .join("\n");
 
       String userTargetText = "";
-      String userBuffer = "";
       ChunkedTtsFetcher userTtsFetcher = ChunkedTtsFetcher(
         _openAiKey,
         _ttsQueueManager,
@@ -1216,9 +1154,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       );
       _ttsQueueManager.setUserTurn(true);
       _ttsQueueManager.setAiPaused(false); // 유저 청크는 즉시 재생
-
-      // 다국어 구두점 단위 쪼개기
-      final RegExp splitPattern = RegExp(r'[,\.?!;:。、！？…，；：\n]');
 
       // 🌐 [v3.1] 로비에서 유저가 선택한 타겟 언어로 번역
       final String targetLangName = FFAppState().targetLang.isNotEmpty
@@ -1236,15 +1171,35 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 
       bool evaporated = false;
       bool clarified = false; // 주어/목적어 모호 → AI 되묻기
-      bool firstChunkSent = false;
+      bool corrected = false; // 유저가 AI의 오해를 정정 → 직전 교환 삭제 후 재처리
+      bool misheard = false; // 잘못 들었다는 불만만 있음 → 직전 교환 삭제 후 재청취
+      bool dissatisfiedReply = false; // AI 직전 응답 불만 → 응답만 재생성
+      // [USER-FULL-TTS] firstChunkSent removed; user TTS fires once after stream end.
       await for (String chunk in userStream) {
         userTargetText += chunk;
-        userBuffer += chunk;
 
         // 🔧 [v3.3] 누적된 전체 텍스트에서 EVAPORATE 감지 (스트림 조각 분할 대응)
         if (userTargetText.contains("[EVAPORATE]")) {
           evaporated = true;
           _log('⚠️ [EVAPORATE]', '증발 감지 → 턴 취소');
+          break;
+        }
+        // 🔄 [CORRECTION] 정정 감지 (재진입 시 무시)
+        if (!isCorrectionRetry && userTargetText.contains("[CORRECTION]")) {
+          corrected = true;
+          _log('🔄 [CORRECTION]', '정정 감지 → 직전 교환 삭제 후 재시작');
+          break;
+        }
+        // 👂 [MISHEARD] 잘못 들었다는 불만만 있음
+        if (!isCorrectionRetry && userTargetText.contains("[MISHEARD]")) {
+          misheard = true;
+          _log('👂 [MISHEARD]', '오청취 불만 감지 → 직전 교환 삭제 후 재청취');
+          break;
+        }
+        // 🟣 [DISSATISFIED] AI 직전 응답에 대한 불만 → 다른 응답 재생성
+        if (userTargetText.contains("[DISSATISFIED]")) {
+          dissatisfiedReply = true;
+          _log('🟣 [DISSATISFIED]', '응답 불만 감지 → 직전 응답 삭제 후 재생성');
           break;
         }
 
@@ -1257,39 +1212,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         if (mounted)
           setState(() => _localMessages[hostIndex]['target'] = userTargetText);
 
-        // 구두점 도달 즉시 TTS 청크 발사
-        final matches = splitPattern.allMatches(userBuffer).toList();
-        if (matches.isNotEmpty) {
-          int lastIdx = matches.last.end;
-          String toSpeak = userBuffer.substring(0, lastIdx).trim();
-          userBuffer = userBuffer.substring(lastIdx);
-          if (toSpeak.isNotEmpty) {
-            final cleanedChunk = _cleanText(toSpeak);
-            if (isMeaninglessTtsText(cleanedChunk)) {
-              _log('🔊 [TTS-SKIP] [USER]', '의미 없는 TTS 조각 skip: "$cleanedChunk"');
-            } else {
-              userTtsFetcher.addText(cleanedChunk);
-              firstChunkSent = true;
-            }
-          }
-        }
-        if (!firstChunkSent) {
-          final wordCount = userBuffer
-              .trim()
-              .split(RegExp(r'\s+'))
-              .where((w) => w.isNotEmpty)
-              .length;
-          if (wordCount >= 4) {
-            final cleanedBuf = _cleanText(userBuffer.trim());
-            if (isMeaninglessTtsText(cleanedBuf)) {
-              _log('🔊 [TTS-SKIP] [USER]', '의미 없는 TTS 조각 skip: "$cleanedBuf"');
-            } else {
-              userTtsFetcher.addText(cleanedBuf);
-              firstChunkSent = true;
-            }
-            userBuffer = "";
-          }
-        }
+        // [USER-FULL-TTS] no chunk TTS during user translation streaming.
+        // Text still streams to the screen through setState above.
       }
 
       if (evaporated) {
@@ -1298,6 +1222,176 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
               () => _localMessages.removeWhere((m) => m['role'] == 'HOST'));
         if (_isConversationActive && _turnCounter == currentTurnId)
           _speakRetryAndListen();
+        return;
+      }
+
+      // 🔄 [CORRECTION] 유저가 AI의 오해/오청취를 정정 → 직전 교환 삭제 후 재처리
+      if (corrected) {
+        if (mounted) {
+          setState(() {
+            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+            if (hostIndex < _localMessages.length &&
+                _localMessages[hostIndex]['role'] == 'HOST') {
+              _localMessages.removeAt(hostIndex); // 방금 만든 현재 HOST 버블 제거
+            }
+            _removeLastExchange(); // 직전 HOST(오해 발화)+SYSTEM(틀린 응답) 제거
+          });
+          if (_localMessages.isNotEmpty) _scrollToBottom();
+        }
+        _ttsQueueManager.stop();
+        _ttsQueueManager.setUserTurn(false);
+        // 정정된 발화로 재처리 (재진입이므로 [CORRECTION] 재감지 안 함)
+        _processRelayPipeline(finalTranscript, isCorrectionRetry: true);
+        return;
+      }
+
+      // 👂 [MISHEARD] 잘못 들었다는 불만만 있음 → 직전 교환 삭제 후 재청취
+      if (misheard) {
+        _turnCounter--;
+        if (mounted) {
+          setState(() {
+            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+            if (hostIndex < _localMessages.length &&
+                _localMessages[hostIndex]['role'] == 'HOST') {
+              _localMessages.removeAt(hostIndex);
+            }
+            _removeLastExchange();
+          });
+          if (_localMessages.isNotEmpty) _scrollToBottom();
+        }
+        _ttsQueueManager.stop();
+        _ttsQueueManager.setUserTurn(false);
+        _ttsQueueManager.setAiPaused(false);
+        final misheardTts = ChunkedTtsFetcher(
+          _openAiKey,
+          _ttsQueueManager,
+          'nova',
+          isUser: false,
+          onLog: _log,
+        );
+        misheardTts.addText("아 제가 잘못 들었어요. 다시 한 번 말해주세요.");
+        int misheardTicks = 0;
+        while ((misheardTts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
+            mounted) {
+          await Future.delayed(const Duration(milliseconds: 50));
+          if (++misheardTicks > 200) break;
+        }
+        if (mounted && _isConversationActive) _startDeepgramListening();
+        return;
+      }
+
+      // 🟣 [DISSATISFIED] AI 직전 응답 불만 → 직전 SYSTEM만 제거하고 같은 발화로 재생성
+      if (dissatisfiedReply) {
+        _turnCounter--;
+        String rejectedReply = '';
+        String lastUserTarget = '';
+        if (mounted) {
+          setState(() {
+            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+            if (hostIndex < _localMessages.length &&
+                _localMessages[hostIndex]['role'] == 'HOST') {
+              _localMessages.removeAt(hostIndex);
+            }
+            final lastSysIdx =
+                _localMessages.lastIndexWhere((m) => m['role'] == 'SYSTEM');
+            if (lastSysIdx != -1) {
+              rejectedReply =
+                  (_localMessages[lastSysIdx]['target'] ?? '').toString();
+              _localMessages.removeAt(lastSysIdx);
+            }
+            final lastHostIdx =
+                _localMessages.lastIndexWhere((m) => m['role'] == 'HOST');
+            if (lastHostIdx != -1) {
+              lastUserTarget =
+                  (_localMessages[lastHostIdx]['target'] ?? '').toString();
+            }
+          });
+          if (_localMessages.isNotEmpty) _scrollToBottom();
+        }
+        if (lastUserTarget.trim().isEmpty) {
+          _ttsQueueManager.stop();
+          _speakRetryAndListen();
+          return;
+        }
+        _ttsQueueManager.stop();
+        _ttsQueueManager.setUserTurn(false);
+        _ttsQueueManager.setAiPaused(false);
+        final regenPhraseTts = ChunkedTtsFetcher(
+          _openAiKey,
+          _ttsQueueManager,
+          'nova',
+          isUser: false,
+          onLog: _log,
+        );
+        regenPhraseTts.addText("그럼 다시 답해 볼게요.");
+        var regenMsgs = _localMessages.where((m) {
+          if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
+          final target = (m['target'] ?? '').toString().trim();
+          return target.isNotEmpty && target != '...';
+        }).toList();
+        if (regenMsgs.length > 10)
+          regenMsgs = regenMsgs.sublist(regenMsgs.length - 10);
+        final String regenContextStr = regenMsgs
+            .map((m) =>
+                "${m['role'] == 'HOST' ? 'User' : 'AI'}: ${m['target']}")
+            .join("\n");
+        if (mounted) {
+          setState(() => _localMessages
+              .add({'role': 'SYSTEM', 'target': '', 'original': ''}));
+          _scrollToBottom();
+        }
+        final int regenAiIndex = _localMessages.length - 1;
+        final regenTts = ChunkedTtsFetcher(
+          _openAiKey,
+          _ttsQueueManager,
+          'nova',
+          isUser: false,
+          onLog: _log,
+        );
+        String regenText = "";
+        final regenStream = RoleplayBrain.streamRoleplayResponse(
+          apiKey: _openAiKey,
+          userTargetText: lastUserTarget,
+          contextStr: regenContextStr,
+          situation: _scenarioSituation,
+          aiRole: _scenarioAiRole,
+          userRole: _scenarioUserRole,
+          myTarget: targetLangName,
+          rejectedReply: rejectedReply,
+        );
+        await for (final chunk in regenStream) {
+          regenText += chunk;
+          if (regenText.contains('[RETRY]')) break;
+          if (mounted && regenAiIndex < _localMessages.length) {
+            setState(() => _localMessages[regenAiIndex]['target'] = regenText);
+          }
+        }
+        if (regenText.contains('[RETRY]') || regenText.trim().isEmpty) {
+          if (mounted && regenAiIndex < _localMessages.length) {
+            setState(() => _localMessages.removeAt(regenAiIndex));
+          }
+          _speakRetryAndListen();
+          return;
+        }
+        final String regenClean = _cleanText(regenText.trim());
+        if (regenClean.isNotEmpty) regenTts.addText(regenClean);
+        RoleplayBrain.generateCleanOriginal(
+                apiKey: _openAiKey, englishText: regenText)
+            .then((cleanKorean) {
+          if (mounted && _localMessages.length > regenAiIndex) {
+            setState(() =>
+                _localMessages[regenAiIndex]['original'] = cleanKorean);
+          }
+        });
+        int regenTicks = 0;
+        while ((regenPhraseTts.pendingRequests > 0 ||
+                regenTts.pendingRequests > 0 ||
+                _ttsQueueManager.isBusy) &&
+            mounted) {
+          await Future.delayed(const Duration(milliseconds: 50));
+          if (++regenTicks > 400) break;
+        }
+        if (mounted && _isConversationActive) _startDeepgramListening();
         return;
       }
 
@@ -1337,12 +1431,13 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         return;
       }
 
-      if (userBuffer.trim().isNotEmpty) {
-        final cleanedRem = _cleanText(userBuffer.trim());
-        if (isMeaninglessTtsText(cleanedRem)) {
-          _log('🔊 [TTS-SKIP] [USER]', '의미 없는 TTS 조각 skip: "$cleanedRem"');
+      // [USER-FULL-TTS] fire the complete translated user sentence once.
+      final String fullUserTts = _cleanText(userTargetText.trim());
+      if (fullUserTts.isNotEmpty) {
+        if (isMeaninglessTtsText(fullUserTts)) {
+          _log('🔊 [TTS-SKIP] [USER]', '의미 없는 TTS 조각 skip: "$fullUserTts"');
         } else {
-          userTtsFetcher.addText(cleanedRem);
+          userTtsFetcher.addText(fullUserTts);
         }
       }
 
@@ -1676,6 +1771,12 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
             'ai_role': _scenarioAiRole,
             'user_role': _scenarioUserRole,
           },
+          'scenario_situation': _scenarioSituation,
+          'scenario_keyword': _scenarioKeyword,
+          'user_role': _scenarioUserRole,
+          'ai_role': _scenarioAiRole,
+          'user_label': _roleplayUserLabel,
+          'partner_label': _roleplayPartnerLabel,
           'created_at': FieldValue.serverTimestamp(),
           'transcript': chatLines,
         });
@@ -1724,6 +1825,13 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       await newRef.set({
         'created_at': FieldValue.serverTimestamp(),
         'room_name': "Roleplay Mode",
+        'mode': 'roleplay', // 🆕 [ROUTER-FIX] 라우터가 Step Expand로 오인 방지
+        'scenario_situation': _scenarioSituation,
+        'scenario_keyword': _scenarioKeyword,
+        'user_role': _scenarioUserRole,
+        'ai_role': _scenarioAiRole,
+        'user_label': _roleplayUserLabel,
+        'partner_label': _roleplayPartnerLabel,
         'is_pinned': false,
         'msg_count': 0
       });
@@ -1746,7 +1854,10 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         await _myHistoryRef!.collection('messages').add({
           'role': line['role'] ?? '',
           'translated_text': translated,
-          'original_text': (line['original_text'] ?? '').toString(),
+          'original_text': (FFAppState().nativeLang.isNotEmpty &&
+                  FFAppState().nativeLang == FFAppState().targetLang)
+              ? ''
+              : (line['original_text'] ?? '').toString(),
           'created_at': FieldValue.serverTimestamp(),
         });
       }
@@ -1786,6 +1897,10 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
               break;
             }
           }
+
+          final userLabel = _roleplayUserLabel;
+          final partnerLabel = _roleplayPartnerLabel;
+
           await _myHistoryRef!.update({
             'last_message': lastText,
             'last_message_time': FieldValue.serverTimestamp(),
@@ -1793,8 +1908,15 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
             'last_active': FieldValue.serverTimestamp(),
             'chat_json': jsonEncode(_localMessages),
             'is_completed': false,
+            'mode': 'roleplay',
+            'scenario_situation': _scenarioSituation,
+            'scenario_keyword': _scenarioKeyword,
+            'user_role': _scenarioUserRole,
+            'ai_role': _scenarioAiRole,
+            'user_label': userLabel,
+            'partner_label': partnerLabel,
           });
-          _log('💾 [HIST-UPD]', 'last_message + chat_json 업데이트 완료');
+          _log('💾 [HIST-UPD]', 'last_message 저장');
         }
       }
     } catch (e) {
@@ -2250,6 +2372,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                     fontWeight: FontWeight.bold,
                     height: 1.4)),
             if (_showOriginal &&
+                !(FFAppState().nativeLang.isNotEmpty &&
+                    FFAppState().nativeLang == FFAppState().targetLang) &&
                 !isThinking &&
                 msg['original'] != null &&
                 msg['original'].toString().isNotEmpty) ...[
@@ -2286,7 +2410,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text("AI Roleplay",
+              const Text("Roleplay",
                   style: TextStyle(
                       color: Colors.white54,
                       fontSize: 20,
@@ -3033,9 +3157,10 @@ class ChunkedTtsFetcher {
       return;
     }
 
-    // [2단계] API 호출 (재시도 1회)
+    // [2단계] API 호출 (타임아웃 사다리 3/5/8초, 최대 3회 시도) — TTS 지연 스파이크 대응
     Uint8List result = Uint8List(0);
-    for (int attempt = 0; attempt < 2; attempt++) {
+    const List<int> timeoutLadderSec = [3, 5, 8];
+    for (int attempt = 0; attempt < 3; attempt++) {
       try {
         final res = await http
             .post(
@@ -3052,7 +3177,7 @@ class ChunkedTtsFetcher {
                 'response_format': 'mp3',
               }),
             )
-            .timeout(const Duration(seconds: 10));
+            .timeout(Duration(seconds: timeoutLadderSec[attempt]));
 
         if (res.statusCode == 200) {
           result = res.bodyBytes;
@@ -3063,13 +3188,19 @@ class ChunkedTtsFetcher {
           TtsCache.put(text, voice, result);
           break;
         } else {
-          onLog?.call('❌ [TTS-API-ERR]', 'statusCode=${res.statusCode}');
+          onLog?.call('❌ [TTS-API-ERR]',
+              'statusCode=${res.statusCode} (attempt=${attempt + 1}/3)');
         }
-      } catch (_) {
-        if (attempt == 0) {
-          await Future.delayed(const Duration(milliseconds: 500));
+      } catch (e) {
+        onLog?.call('⚠️ [TTS-RETRY]',
+            'attempt=${attempt + 1}/3 실패 (${e.runtimeType}) for "$text"');
+        if (attempt < 2 && e is! TimeoutException) {
+          await Future.delayed(const Duration(milliseconds: 300));
         }
       }
+    }
+    if (result.isEmpty) {
+      onLog?.call('❌ [TTS-FAIL]', '3회 모두 실패 — 청크 스킵: "$text"');
     }
 
     _buffer[id] = result;
@@ -3388,6 +3519,146 @@ class HybridTtsPlayer {
 // 🧠 [Box 7-1] RoleplayBrain v3 — 롤플레이 모드 전용 AI 뇌
 // ====================================================================
 class RoleplayBrain {
+  // 🆕 [EXPAND-EXIT] 대화 전체(AI+유저) → 종합 확장 문장 1개 (의미단위 ~5개, 문법 연결)
+  static Future<String?> generateExpandedFromConversation(
+    String apiKey,
+    String transcript, {
+    String userLabel = 'the user',
+    String partnerLabel = 'the roleplay partner',
+    String situation = '',
+  }) async {
+    if (apiKey.isEmpty || transcript.trim().isEmpty) return null;
+    try {
+      final safeUserLabel =
+          userLabel.trim().isNotEmpty ? userLabel.trim() : 'the user';
+      final safePartnerLabel = partnerLabel.trim().isNotEmpty
+          ? partnerLabel.trim()
+          : 'the roleplay partner';
+      final situationLine = situation.trim().isNotEmpty
+          ? 'Roleplay situation: ${situation.trim()}. Use it only if supported by the transcript.'
+          : 'Use only the situation supported by the transcript.';
+      final sysPrompt = """You are an English speaking coach.
+You are given a short roleplay conversation transcript.
+This is a roleplay conversation between $safeUserLabel and $safePartnerLabel.
+$safePartnerLabel is the role being played, not AI.
+$situationLine
+Your job: compose ONE long, natural English sentence that synthesizes the overall
+content and gist of the WHOLE conversation.
+
+[RULES]
+- Never call $safePartnerLabel AI, assistant, chatbot, or bot.
+- If the partner must be mentioned, use $safePartnerLabel or a natural role phrase.
+- If any name, role label, or situation appears in Korean, render it in natural English (translate role or description phrases to their English equivalent; romanize real personal names). Never copy Korean text into the sentence.
+- The final sentence must be 100% English and must NOT contain any Korean (Hangul) characters.
+- It must be ONE single sentence (do not split it into multiple sentences).
+- Keep it 25–40 words.
+- Build it from about 5 meaning units joined with varied grammatical connectives
+  (because, so, while, which, after, even though, and, etc.).
+- Each meaning unit should be speakable in one breath, usually 5–7 words.
+- Use commas or natural connectors to make breath groups clear.
+- Do not create a sentence with one very long clause.
+- Natural, speakable rhythm — common spoken English only.
+- Capture the overall situation/idea of the conversation, not just one line.
+- Common everyday vocabulary only. Do not add facts not in the transcript.
+- Output exactly ONE sentence. No quotes, no prefixes, no explanation.""";
+      final response = await http
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.2,
+              'max_tokens': 250,
+              'messages': [
+                {'role': 'system', 'content': sysPrompt},
+                {
+                  'role': 'user',
+                  'content':
+                      "Conversation:\n$transcript\n\nOne synthesized sentence:"
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) return null;
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      String s =
+          ((body['choices'] as List).first['message']['content'] as String)
+              .trim();
+      if (s.startsWith('"') && s.endsWith('"')) s = s.substring(1, s.length - 1);
+      return s.isEmpty ? null : s;
+    } catch (e) {
+      debugPrint("[RoleplayBrain.generateExpandedFromConversation] $e");
+      return null;
+    }
+  }
+
+  // 🆕 [EXPAND-EXIT] 확장 문장 → 쉽고 세련된 한 문장 (Polished)
+  static Future<String?> polishSentence(
+    String apiKey,
+    String originalSentence, {
+    String partnerLabel = 'the roleplay partner',
+  }) async {
+    if (apiKey.isEmpty || originalSentence.trim().isEmpty) return null;
+    try {
+      final safePartnerLabel = partnerLabel.trim().isNotEmpty
+          ? partnerLabel.trim()
+          : 'the roleplay partner';
+      final sysPrompt = """You are an English speaking coach.
+Rewrite the given long English sentence as ONE "easy but elegant" spoken sentence.
+
+[GOALS]
+- Natural spoken rhythm (not written/academic)
+- Common vocabulary (no SAT words, no bookish phrases)
+- Smooth flow (pause-friendly, commas for breath)
+- Same meaning as the original (do not add new facts)
+- Easier to pronounce and say out loud
+- Render every participant name, role label, and situation in English (translate role or description phrases; romanize real personal names). Never keep Korean text.
+- The final sentence must be 100% English and must NOT contain any Korean (Hangul) characters.
+- Do not replace $safePartnerLabel with AI, assistant, chatbot, or bot.
+
+[OUTPUT]
+- Exactly ONE sentence. No explanation, no quotes, no prefixes.""";
+      final response = await http
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.2,
+              'max_tokens': 150,
+              'messages': [
+                {'role': 'system', 'content': sysPrompt},
+                {
+                  'role': 'user',
+                  'content':
+                      'Original sentence:\n$originalSentence\n\nPolished version:'
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) return originalSentence;
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      String p =
+          ((body['choices'] as List).first['message']['content'] as String)
+              .trim();
+      if (p.startsWith('"') && p.endsWith('"')) p = p.substring(1, p.length - 1);
+      return p.isEmpty ? originalSentence : p;
+    } catch (e) {
+      debugPrint("[RoleplayBrain.polishSentence] $e");
+      return originalSentence;
+    }
+  }
+
   // 📋 [200개 기초 상황 — 카테고리 5종 × 40개] (v4 추가)
   static const List<String> _baseSituations200 = [
     // ── 공항_비행기_교통 (40개) ──
@@ -3535,6 +3806,30 @@ class RoleplayBrain {
           """You are an expert real-time Korean-to-$targetLang translator for a live roleplay conversation.$roleContext
 
 Korean is a heavy pro-drop language - subjects, objects, and pronouns are constantly omitted when clear from context.
+
+[CASE CORRECTION] — Check this FIRST, only when the conversation history contains at least one "User:" line.
+The user is correcting the AI's misunderstanding or mishearing of their PREVIOUS utterance.
+Signs:
+- Starts with a correction signal: "아니" / "아니요" / "아 그게 아니라" / "다시" / "내 말은" / "그러니까" / "I mean" / "actually" / "no," / "wait,"
+- AND the content is clearly a re-statement or clarification of the LAST "User:" line in the history, NOT new information.
+- The user is essentially saying "that's not what I said — what I said was X."
+If this is a correction, output EXACTLY: [CORRECTION]  (and nothing else)
+Do NOT output [CORRECTION] when the user simply adds new details that happen to start with "아니" etc.
+
+[CASE MISHEARD] — Check this SECOND, only when the history contains at least one "User:" line.
+The user is COMPLAINING that their previous words were misheard or misunderstood, WITHOUT restating what they actually said.
+Signs: "내 말이 그런 뜻이 아니야" / "그런 거 아니야" / "내 말은 그게 아니야" / "잘못 들었어" / "잘못 적었어" / "잘못 알아들었어" / "that's not what I meant" / "you misheard me" / "you got my words wrong"
+- AND the utterance contains NO restated content (no actual new statement).
+If so, output EXACTLY: [MISHEARD]  (and nothing else)
+If the complaint INCLUDES the corrected content, use [CORRECTION] instead.
+
+[CASE DISSATISFIED] — Check this THIRD, only when the history contains at least one "AI:" line.
+The user is stepping OUT of the roleplay to complain about the AI's LAST reply itself and wants a different one.
+Signs: "무슨 대답이 그래" / "무슨 질문이 그래" / "대답이 이상해" / "다른 말 해줘" / "다시 대답해 봐" / "그 대답 별로야" / "say something else" / "that's a weird reply" / "answer again"
+More signs (MILD dissatisfaction — these ALSO count when clearly aimed at the AI reply itself, OUT of character): "별로" / "별론데" / "아 그건 좀" / "에이" / "그런 거 말고" / "재미없어" / "이상하네" / "뭐야 그게" / "meh" / "not really" / "hmm, not that one"
+Even slight or indirect displeasure aimed at the AI's last reply counts.
+Do NOT output this when the user is answering negatively IN CHARACTER (e.g., refusing an offer inside the roleplay is a valid in-character answer).
+If so, output EXACTLY: [DISSATISFIED]  (and nothing else)
 
 [INTERNAL THINKING - do not output]
 Step 1. CONTEXT CHECK: Review conversation history.
@@ -3709,6 +4004,7 @@ NEVER break character when asking.
     required String aiRole,
     required String userRole,
     required String myTarget,
+    String rejectedReply = '',
   }) async* {
     final client = http.Client();
     try {
@@ -3728,7 +4024,10 @@ NEVER break character when asking.
           '- NO greetings, NO meta-comments. Pure in-character dialogue.\n'
           '- MAXIMUM 2 short sentences. 1 sentence preferred. Under 15 words per sentence.\n'
           '- Drive the scene forward — pressure, question, or react to force the user to respond.\n'
-          '- If the user\'s input is completely unintelligible (speech recognition error), output EXACTLY: [RETRY]';
+          '- If the user\'s input is completely unintelligible (speech recognition error), output EXACTLY: [RETRY]' +
+          (rejectedReply.trim().isEmpty
+              ? ''
+              : '\n- IMPORTANT: The user disliked your previous reply: "${rejectedReply.trim()}". Give a COMPLETELY DIFFERENT in-character reply this time — different angle, different wording. Do NOT repeat or rephrase it.');
 
       final request = http.Request(
         'POST',

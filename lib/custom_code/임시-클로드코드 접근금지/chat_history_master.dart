@@ -134,6 +134,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   // 🆕 [CHUNK-PRACTICE] 의미단위 연습 모드 상태
   bool _practicingPolished = false; // false = expanded, true = polished
+  bool _isBuildingExpand = false; // 🆕 [EXPAND-FROM-CHAT] 확장문장 생성 중 플래그
+  String _cachedRoomMode = ''; // 🔧 [FREE-TALK-BTN] 버튼 표시 조건용 mode 캐시
   bool _isPlayingFullAI = false; // 전체 AI 듣기 진행 중
   int _polishedRevealCount = 0;
   Timer? _polishedRevealTimer;
@@ -184,23 +186,63 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   String _appTranscript = "";
 
   // ── Idle Timeout (무반응 과금 정지, History: 자동 이동 없음) ──────────────
+  // 🔧 틱 방식: 1초마다 활동 여부 확인. 튜터링/녹음/오디오 재생 중엔 카운터 0 유지.
   Timer? _idlePauseTimer;
   bool _isIdlePaused = false;
+  int _idleElapsedSec = 0;
+
+  // 유저나 AI가 작동 중인지 판단 (활동 중이면 idle 누적 안 함)
+  bool get _isSystemBusy {
+    return _isTutorPlaying ||
+        isPlaying ||
+        _appIsRecording ||
+        _appIsShadowRecording ||
+        _isPlayingAppAudio ||
+        _isAutoRecording ||
+        _tutorUserRecording ||
+        _tutorAiSpeaking ||
+        _aiChunkPlaying ||
+        _aiChunkLoading ||
+        _isPlayingFullAI ||
+        _isPlayingFullUser ||
+        _polishedUnitAIPlaying;
+  }
 
   void _resetIdleTimer() {
-    _idlePauseTimer?.cancel();
+    _idleElapsedSec = 0;
     if (_isIdlePaused) {
       _isIdlePaused = false;
       if (mounted) setState(() {});
       BillingTicker.instance.resume();
       BillingTicker.instance.logMode('history');
     }
-    _idlePauseTimer = Timer(const Duration(seconds: 30), _handleIdlePause);
+    _idlePauseTimer?.cancel();
+    _idlePauseTimer =
+        Timer.periodic(const Duration(seconds: 1), (_) => _idleTick());
+  }
+
+  void _idleTick() {
+    if (!mounted) return;
+    // 🔒 [오토포즈 가드] 최상단 active route가 아니면(다른 페이지가 위에) idle 누적 금지
+    if (ModalRoute.of(context)?.isCurrent == false) {
+      _idleElapsedSec = 0;
+      return;
+    }
+    if (_isIdlePaused) return;
+    if (_isSystemBusy) {
+      _idleElapsedSec = 0;
+      return;
+    }
+    _idleElapsedSec++;
+    if (_idleElapsedSec >= 60) {
+      _handleIdlePause();
+    }
   }
 
   void _handleIdlePause() {
     if (!mounted || _isIdlePaused) return;
     _isIdlePaused = true;
+    _idleElapsedSec = 0;
     BillingTicker.instance.pause();
     if (mounted) setState(() {});
   }
@@ -208,6 +250,12 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   void _clearIdleTimers() {
     _idlePauseTimer?.cancel();
     _idlePauseTimer = null;
+    _idleElapsedSec = 0;
+  }
+
+  // 사용자 실제 활동 시작 시 오토포즈 즉시 해제 (중복 방지 포함)
+  void _resumeHistoryFromUserAction() {
+    _resetIdleTimer();
   }
 
   Widget _buildIdleBanner() => const SizedBox.shrink();
@@ -380,6 +428,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   //   - polished/expanded 있음 (Step Expand 방) → 기존 Shadowing variantSelect
   //   - polished/expanded 없음 (Clone/Roleplay/Duo 방) → Tutor 모드
   Future<void> _enterShadowingFromRoom() async {
+    _resumeHistoryFromUserAction();
     _debugLogs = "=== ROOM PRACTICE ENTRY ===\n";
     _debugLogs += "시각: ${DateTime.now()}\n";
     _debugLogs += "방 ID: ${widget.historyDoc.id}\n\n";
@@ -396,14 +445,18 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
       final polished = (data['polished_sentence'] as String?) ?? '';
       final expanded = (data['expanded_sentence'] as String?) ?? '';
+      final roomMode = (data['mode'] as String?) ?? ''; // 🆕 [ROUTER-FIX]
+      _cachedRoomMode = roomMode; // 버튼 표시 조건용 mode 캐시
 
       _debugLogs +=
           "polished_sentence: ${polished.isEmpty ? '(없음)' : polished}\n";
       _debugLogs +=
           "expanded_sentence: ${expanded.isEmpty ? '(없음)' : expanded}\n\n";
 
-      // Step Expand 방: messages 로드 + _stepExpandTurns 파싱 → variantSelect(3버튼)
-      if (polished.isNotEmpty || expanded.isNotEmpty) {
+      // 🆕 [ROUTER-FIX] step_expand(또는 mode 없는 구버전+expanded 존재)만 Step Expand 분기.
+      // clone/roleplay는 expanded_sentence가 있어도 아래 Tutor 모드로 진행.
+      if (roomMode == 'step_expand' ||
+          (roomMode.isEmpty && (polished.isNotEmpty || expanded.isNotEmpty))) {
         _debugLogs += "✅ Step Expand 방 분기 → messages 로드 + variantSelect\n";
         _polishedSentence = polished;
         _expandedSentence = expanded.isNotEmpty ? expanded : polished;
@@ -431,6 +484,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         if (!mounted) return;
 
         if (mounted) {
+          BillingTicker.instance.setRate(BillingRate.full);
           setState(() {
             _isStepExpandRoom = true;
             isPracticeMode = true;
@@ -508,7 +562,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // 🆕 [TUTOR] chat_lines 처음부터 끝까지 TTS 자동 재생
   Future<void> _startTutorPlayback() async {
     if (!mounted) return;
-    _resetIdleTimer();
+    _resumeHistoryFromUserAction();
     if (mounted) setState(() => _isTutorPlaying = true);
 
     for (int i = 0; i < _tutorLines.length; i++) {
@@ -608,6 +662,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   void _showRoleSelectBubble() {
     if (!mounted) return;
     setState(() => _showRoleBubble = true);
+    HapticFeedback.mediumImpact();
     _roleBubbleTimer?.cancel();
     _roleBubbleTimer = Timer(const Duration(milliseconds: 2800), () {
       if (mounted) setState(() => _showRoleBubble = false);
@@ -616,6 +671,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   // 📦 [BOX-30: 시작 화면 - 선택값 반영하여 진행]
   void _confirmStart({required bool swap}) {
+    _resumeHistoryFromUserAction();
     if (mounted) {
       setState(() {
         _swapRoles = swap;
@@ -630,7 +686,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // ============================================================================
 
   void _startTurnPractice() {
-    _resetIdleTimer();
+    _resumeHistoryFromUserAction();
     if (!mounted || _tutorLines.isEmpty) return;
     currentIndex = 0;
     if (mounted) setState(() => _tutorCurrentIdx = 0);
@@ -700,6 +756,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   // 🔧 [v3.7] TtsCache 우선 조회 → MISS 시 API 호출 후 캐시 저장
   Future<void> _playSmartAudio(String text) async {
+    _resumeHistoryFromUserAction();
     if (_apiKey.isEmpty || text.trim().isEmpty) return;
     try {
       Uint8List? audio = await TtsCache.get(text, 'nova');
@@ -913,6 +970,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     await _buildChunks(_expandedSentence);
 
     if (mounted) {
+      BillingTicker.instance.setRate(BillingRate.full);
       setState(() {
         isPracticeMode = true;
         _phase = ShadowingPhase.chunkPractice;
@@ -1080,6 +1138,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   void _exitShadowing() {
     _deleteUserRecordings(); // 🆕 Practice 임시 녹음 파일 정리
+    BillingTicker.instance.setRate(BillingRate.quarter);
     _stopTutorPlayback();
     _stopAutoVADRecording();
     _utteranceSafetyTimer?.cancel();
@@ -1144,16 +1203,26 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     }
   }
 
-  // [chunkSplit] GPT-4o-mini로 문장을 n조각으로 분할
-  Future<List<String>?> _splitSentenceByTurns(String sentence, int n) async {
-    if (_apiKey.isEmpty || sentence.isEmpty || n <= 0) return null;
+  // [chunkSplit] GPT-4o-mini로 문장을 5~7단어 호흡 단위로 분할
+  Future<List<String>?> _splitByBreathGroupsGpt(String sentence) async {
+    if (_apiKey.isEmpty || sentence.isEmpty) return null;
     try {
-      final prompt =
-          'Split the following English sentence into exactly $n meaningful, '
-          'natural-sounding chunks for speaking practice. '
-          'Return ONLY a JSON array of strings with no extra text or explanation. '
-          'Example for n=3: ["chunk one", "chunk two", "chunk three"]\n\n'
-          'Sentence: "$sentence"';
+      const sysPrompt =
+          'You are a speaking practice assistant. Split the given English sentence '
+          'into natural breath groups for speaking practice.\n'
+          'Return ONLY a JSON array of strings with no extra text or explanation.\n'
+          'Requirements:\n'
+          '- Target 5–7 words per chunk.\n'
+          '- Never exceed 8 words per chunk unless absolutely unavoidable.\n'
+          '- Avoid chunks shorter than 3 words unless it is a very natural phrase.\n'
+          '- Prefer splitting at: commas, conjunctions (and/but/so/because/when/while/'
+          'although/if/since/after/before), relative clauses (who/which/that/where), '
+          'prepositional phrases, infinitive phrases (to + verb).\n'
+          '- Do not rewrite the sentence. Do not omit or add words. '
+          'Preserve the original word order.\n'
+          'Example: ["I wanted to practice English every day", '
+          '"because I felt nervous", "when speaking with foreigners", '
+          '"but I slowly became more confident", "after using the app"]';
       final response = await http
           .post(
             Uri.parse('https://api.openai.com/v1/chat/completions'),
@@ -1164,7 +1233,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
             body: jsonEncode({
               'model': 'gpt-4o-mini',
               'messages': [
-                {'role': 'user', 'content': prompt}
+                {'role': 'system', 'content': sysPrompt},
+                {'role': 'user', 'content': 'Sentence: "$sentence"'},
               ],
               'temperature': 0.0,
               'max_tokens': 400,
@@ -1179,17 +1249,89 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       final jsonMatch = RegExp(r'\[[\s\S]*\]').firstMatch(content);
       if (jsonMatch == null) return null;
       final list = jsonDecode(jsonMatch.group(0)!) as List;
-      return list
+      final raw = list
           .map((e) => e.toString().trim())
           .where((s) => s.isNotEmpty)
           .toList();
+      return _postProcessChunks(raw);
     } catch (e) {
-      debugPrint("[splitSentenceByTurns] $e");
+      debugPrint("[splitByBreathGroupsGpt] $e");
       return null;
     }
   }
 
-  // [chunkSplit] 기존 정규식 분할 (fallback용)
+  // [chunkSplit] 긴 청크(9단어↑)를 자연 분할 위치에서 재분할
+  List<String> _splitLongChunkByWords(List<String> words) {
+    if (words.length <= 8) return [words.join(' ')];
+    const splitWords = {
+      'because', 'when', 'while', 'although', 'if', 'since',
+      'after', 'before', 'who', 'which', 'that', 'where',
+      'and', 'but', 'so', 'to'
+    };
+    // 4~7 위치에서 자연 분할 위치 탐색
+    for (int i = 5; i >= 3; i--) {
+      if (i < words.length) {
+        final w = words[i].toLowerCase().replaceAll(RegExp(r'[.,;:!?]+$'), '');
+        if (splitWords.contains(w)) {
+          return [
+            words.sublist(0, i).join(' '),
+            words.sublist(i).join(' '),
+          ];
+        }
+      }
+    }
+    // 자연 위치 없으면 중간 분할
+    final mid = (words.length / 2).round().clamp(4, words.length - 1);
+    return [words.sublist(0, mid).join(' '), words.sublist(mid).join(' ')];
+  }
+
+  // [chunkSplit] GPT 결과 후처리: 9단어↑ 재분할, 1~2단어 병합
+  List<String> _postProcessChunks(List<String> chunks) {
+    if (chunks.isEmpty) return chunks;
+    // Step 1: 9단어 이상 청크 재분할
+    final List<String> step1 = [];
+    for (final chunk in chunks) {
+      final words = chunk.trim().split(RegExp(r'\s+'));
+      if (words.length >= 9) {
+        step1.addAll(_splitLongChunkByWords(words));
+      } else {
+        step1.add(chunk);
+      }
+    }
+    // Step 2: 1~2단어 청크를 앞 청크에 병합
+    final List<String> step2 = [];
+    for (final chunk in step1) {
+      final wordCount = chunk.trim().split(RegExp(r'\s+')).length;
+      if (wordCount <= 2 && step2.isNotEmpty) {
+        step2[step2.length - 1] = '${step2.last} $chunk';
+      } else {
+        step2.add(chunk);
+      }
+    }
+    return step2.isEmpty ? chunks : step2;
+  }
+
+  // [chunkSplit] 캐시 조회 → GPT → Fallback 통합 분할 (Expanded·Polished 공통)
+  Future<List<String>> _splitSentenceIntoChunks(
+      String sentence, String variant) async {
+    if (sentence.isEmpty) return [];
+    // 1. 디스크 캐시 확인 (v2)
+    final cached = await _readChunkCache(variant, sentence);
+    if (cached != null && cached.isNotEmpty) return cached;
+    _debugLogs += "🌐 [chunkCache] MISS → GPT 호출 시도\n";
+    // 2. GPT 5~7단어 분할
+    final gptChunks = await _splitByBreathGroupsGpt(sentence);
+    if (gptChunks != null && gptChunks.isNotEmpty) {
+      _debugLogs += "✅ [chunkSplit] GPT 완료 chunks=${gptChunks.length}\n";
+      await _writeChunkCache(variant, sentence, gptChunks);
+      return gptChunks;
+    }
+    // 3. Fallback: 정규식 분할
+    _debugLogs += "⚠️ [chunkSplit] GPT 실패 → 정규식 fallback\n";
+    return _buildChunksLegacyList(sentence);
+  }
+
+  // [chunkSplit] 정규식 분할 + 8단어 상한 후처리 (fallback용)
   List<String> _buildChunksLegacyList(String sentence) {
     const abbrevs = ['Mr', 'Mrs', 'Ms', 'Dr', 'Prof', 'Sr', 'Jr', 'St'];
     String temp = sentence;
@@ -1198,7 +1340,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     }
     final splitRe = RegExp(
       r'(?<=[,.!?])\s+|'
-      r'\s+(?=(?:who|whom|whose|which|that|where|when|while|because|since|although|though|if|unless|but|and|so)\b)',
+      r'\s+(?=(?:who|whom|whose|which|that|where|when|while|because|since|although|though|if|unless|but|and|so|for|with|about|after|before|in|on|at|to)\b)',
       caseSensitive: false,
     );
     final rawParts = temp
@@ -1206,6 +1348,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         .map((s) => s.trim().replaceAll('․', '.'))
         .where((s) => s.isNotEmpty)
         .toList();
+    // 1차 병합: 3단어 미만 조각을 앞 청크에 붙이기
     final merged = <String>[];
     for (final part in rawParts) {
       final wordCount = part.trim().split(RegExp(r'\s+')).length;
@@ -1220,7 +1363,27 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       merged[1] = '${merged[0]} ${merged[1]}';
       merged.removeAt(0);
     }
-    return merged;
+    // 2차: 8단어 초과 청크 재분할
+    final List<String> step2 = [];
+    for (final chunk in merged) {
+      final words = chunk.trim().split(RegExp(r'\s+'));
+      if (words.length >= 9) {
+        step2.addAll(_splitLongChunkByWords(words));
+      } else {
+        step2.add(chunk);
+      }
+    }
+    // 3차: 재분할 후 생긴 1~2단어 조각 재병합
+    final List<String> result = [];
+    for (final chunk in step2) {
+      final wc = chunk.trim().split(RegExp(r'\s+')).length;
+      if (wc <= 2 && result.isNotEmpty) {
+        result[result.length - 1] = '${result.last} $chunk';
+      } else {
+        result.add(chunk);
+      }
+    }
+    return result.isEmpty ? merged : result;
   }
 
   // [chunkCache] 문장 내용 기반 8자리 해시 (캐시 키용)
@@ -1233,20 +1396,20 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     return hash.toRadixString(16).padLeft(8, '0').substring(0, 8);
   }
 
-  // [chunkCache] 디스크에서 분할 결과 읽기
+  // [chunkCache] 디스크에서 분할 결과 읽기 (v2: 5~7단어 기준)
   Future<List<String>?> _readChunkCache(String variant, String sentence) async {
     try {
       final dir = await getApplicationDocumentsDirectory();
       final roomId = widget.historyDoc.id;
       final hash = _chunkTextHash(sentence);
       final file = File(
-          '${dir.path}/chunk_cache/chunk_split_${roomId}_${variant}_$hash.json');
+          '${dir.path}/chunk_cache/chunk_split_v2_${roomId}_${variant}_$hash.json');
       if (!await file.exists()) return null;
       final content = await file.readAsString();
       final list = jsonDecode(content) as List;
       final result =
           list.map((e) => e.toString()).where((s) => s.isNotEmpty).toList();
-      _debugLogs += "✅ [chunkCache] HIT chunks=${result.length}\n";
+      _debugLogs += "✅ [chunkCache] HIT (v2) chunks=${result.length}\n";
       return result;
     } catch (e) {
       debugPrint("[readChunkCache] $e");
@@ -1254,7 +1417,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     }
   }
 
-  // [chunkCache] 디스크에 분할 결과 저장
+  // [chunkCache] 디스크에 분할 결과 저장 (v2: 5~7단어 기준)
   Future<void> _writeChunkCache(
       String variant, String sentence, List<String> chunks) async {
     try {
@@ -1264,11 +1427,107 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       final folder = Directory('${dir.path}/chunk_cache');
       if (!await folder.exists()) await folder.create(recursive: true);
       final file =
-          File('${folder.path}/chunk_split_${roomId}_${variant}_$hash.json');
+          File('${folder.path}/chunk_split_v2_${roomId}_${variant}_$hash.json');
       await file.writeAsString(jsonEncode(chunks));
-      _debugLogs += "💿 [chunkCache] 저장 완료 chunks=${chunks.length}\n";
+      _debugLogs += "💿 [chunkCache] 저장 완료 (v2) chunks=${chunks.length}\n";
     } catch (e) {
       debugPrint("[writeChunkCache] $e");
+    }
+  }
+
+  // 🆕 [KO-FRAG] 영어 청크 리스트 → 영어어순 직독 한국어 조각 (개수·순서 1:1)
+  Future<List<String>?> _generateKoFragmentsGpt(List<String> enChunks) async {
+    if (_apiKey.isEmpty || enChunks.isEmpty) return null;
+    try {
+      const sysPrompt = """You are a Korean sight-translation (jikdokjikhae) helper.
+You receive an English sentence already split into ordered chunks as a JSON array.
+For EACH chunk, output ONE short Korean reading fragment that follows the English word order.
+These are intentionally incomplete connecting fragments, NOT a polished full translation.
+
+[RULES]
+- Output ONLY a JSON array of Korean strings. No markdown, no extra text, no code fences.
+- The array length MUST equal the number of input chunks, in the same order.
+- Each fragment expresses ONLY that chunk, in English order. Do not reorder across chunks.
+- Use natural Korean connective endings that fit each chunk role
+  (reason: ~이니까/~여서, thinking: ~라고 생각해서, time: ~할 때, contrast: ~지만, purpose: ~하려고).
+- Apply correct particles (이/가, 은/는, 을/를, 한테/에게). Use honorific ~시 only if present in English.
+- Keep each fragment short, one breath. Do not add information not in the chunk.
+- Korean only inside the strings.
+
+Example input: ["I think","that the price","went up","because of the weather"]
+Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때문에"]""";
+      final response = await http
+          .post(
+            Uri.parse("https://api.openai.com/v1/chat/completions"),
+            headers: {
+              "Authorization": "Bearer $_apiKey",
+              "Content-Type": "application/json",
+            },
+            body: jsonEncode({
+              "model": "gpt-4o-mini",
+              "messages": [
+                {"role": "system", "content": sysPrompt},
+                {"role": "user", "content": jsonEncode(enChunks)},
+              ],
+              "temperature": 0.2,
+              "max_tokens": 600,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) return null;
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      final content =
+          ((body["choices"] as List).first["message"]["content"] as String)
+              .trim();
+      final jsonMatch = RegExp(r'\[[\s\S]*\]').firstMatch(content);
+      if (jsonMatch == null) return null;
+      final list = jsonDecode(jsonMatch.group(0)!) as List;
+      final ko = list.map((e) => e.toString().trim()).toList();
+      if (ko.length != enChunks.length) {
+        _debugLogs +=
+            "⚠️ [KO-FRAG] 개수 불일치 en=${enChunks.length} ko=${ko.length} → 스킵\n";
+        return null;
+      }
+      _debugLogs += "✅ [KO-FRAG] 조각 생성 완료 n=${ko.length}\n";
+      return ko;
+    } catch (e) {
+      debugPrint("[generateKoFragmentsGpt] $e");
+      return null;
+    }
+  }
+
+  // 🆕 [KO-FRAG] 디스크 캐시 읽기 (영어 청크 캐시와 파일명 분리: kofrag_v1)
+  Future<List<String>?> _readKoFragCache(String variant, String sentence) async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final roomId = widget.historyDoc.id;
+      final hash = _chunkTextHash(sentence);
+      final file = File(
+          '${dir.path}/chunk_cache/kofrag_v1_${roomId}_${variant}_$hash.json');
+      if (!await file.exists()) return null;
+      final list = jsonDecode(await file.readAsString()) as List;
+      return list.map((e) => e.toString()).toList();
+    } catch (e) {
+      debugPrint("[readKoFragCache] $e");
+      return null;
+    }
+  }
+
+  // 🆕 [KO-FRAG] 디스크 캐시 쓰기
+  Future<void> _writeKoFragCache(
+      String variant, String sentence, List<String> ko) async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final roomId = widget.historyDoc.id;
+      final hash = _chunkTextHash(sentence);
+      final folder = Directory('${dir.path}/chunk_cache');
+      if (!await folder.exists()) await folder.create(recursive: true);
+      final file = File(
+          '${folder.path}/kofrag_v1_${roomId}_${variant}_$hash.json');
+      await file.writeAsString(jsonEncode(ko));
+    } catch (e) {
+      debugPrint("[writeKoFragCache] $e");
     }
   }
 
@@ -1281,35 +1540,27 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     final isPolished =
         _polishedSentence.isNotEmpty && sentence == _polishedSentence;
     final variant = isPolished ? 'polished' : 'expanded';
+    final result = await _splitSentenceIntoChunks(sentence, variant);
 
-    // 1. 디스크 캐시 확인
-    final cached = await _readChunkCache(variant, sentence);
-    if (cached != null && cached.isNotEmpty) {
-      _chunks = cached.map((t) => PracticeChunk(text: t)).toList();
-      _currentChunkIdx = 0;
-      return;
-    }
-    _debugLogs += "🌐 [chunkCache] MISS → GPT 호출 시도\n";
-
-    // 2. HOST 답변 갯수 조회 후 GPT 분할
-    final n = await _fetchUserTurnCount();
-    if (n > 0) {
-      _debugLogs += "📊 [chunkSplit] 답변 갯수 N=$n → GPT 분할 시도\n";
-      final gptChunks = await _splitSentenceByTurns(sentence, n);
-      if (gptChunks != null && gptChunks.isNotEmpty) {
-        final result = gptChunks.take(10).toList();
-        _debugLogs += "✅ [chunkSplit] 완료 chunks=${result.length}\n";
-        _chunks = result.map((t) => PracticeChunk(text: t)).toList();
-        _currentChunkIdx = 0;
-        await _writeChunkCache(variant, sentence, result);
-        return;
+    // 🆕 [KO-FRAG] 영어 청크에 1:1 한국어 직독 조각 부착 (캐시 → GPT).
+    //   실패/개수 불일치 시 ko=null → 영어 청크만 정상 표시 (영어 경로 영향 0).
+    List<String>? ko = await _readKoFragCache(variant, sentence);
+    if (ko == null || ko.length != result.length) {
+      ko = await _generateKoFragmentsGpt(result);
+      if (ko != null && ko.length == result.length) {
+        await _writeKoFragCache(variant, sentence, ko);
+      } else {
+        ko = null;
       }
     }
 
-    // 3. Fallback: 정규식 분할
-    _debugLogs += "⚠️ [chunkSplit] GPT 실패 → 정규식 fallback\n";
-    final legacy = _buildChunksLegacyList(sentence);
-    _chunks = legacy.map((t) => PracticeChunk(text: t)).toList();
+    _chunks = List.generate(
+      result.length,
+      (i) => PracticeChunk(
+        text: result[i],
+        korean: (ko != null && i < ko.length) ? ko[i] : null,
+      ),
+    );
     _currentChunkIdx = 0;
   }
 
@@ -1645,6 +1896,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   }
 
   Future<void> _playChunkAI(int idx) async {
+    _resumeHistoryFromUserAction();
     if (idx >= _chunks.length) return;
     if (mounted)
       setState(() {
@@ -1672,6 +1924,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   //   - 진행 중인 모든 동작(녹음/AI재생) 즉시 취소
   //   - 그 청크의 AI 음성만 재생, 끝나면 정지 (마이크 자동 활성 X)
   Future<void> _replayChunkAI(int idx) async {
+    _resumeHistoryFromUserAction();
     _debugLogs += "🔁 [P2-REPLAY] 청크[$idx] 다시 듣기 요청\n";
     if (idx >= _chunks.length) return;
     // 1. 진행 중인 녹음 즉시 취소
@@ -1748,6 +2001,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   // 📦 [Box 16-A: Review 기능]
   Future<void> _playFullAI() async {
+    _resumeHistoryFromUserAction();
     for (int i = 0; i < _chunks.length; i++) {
       if (!mounted || _phase != ShadowingPhase.reviewing) break;
       await _playChunkAI(i);
@@ -1761,6 +2015,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   }
 
   Future<void> _playFullUser() async {
+    _resumeHistoryFromUserAction();
     if (mounted)
       setState(() {
         _isPlayingFullUser = true;
@@ -1790,6 +2045,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       if (_isPlayingFullUser) _advanceFullUserPlay();
       return;
     }
+    _resumeHistoryFromUserAction();
     try {
       await audioPlayer.play(DeviceFileSource(path));
     } catch (e) {
@@ -1805,6 +2061,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   // 메인 뷰의 리듬 듣기 (일반 모드)
   void _playRhythmAudio(String text) async {
+    _resumeHistoryFromUserAction();
     if (text.isEmpty) return;
     final historyId = widget.historyDoc.id;
     final variant =
@@ -1851,6 +2108,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   // 히스토리 말풍선 소리듣기 — msgId 기반 디스크 캐시 우선
   Future<void> _playMsgAudio(String msgId, String text) async {
+    _resumeHistoryFromUserAction();
     if (text.isEmpty || _apiKey.isEmpty) return;
     final historyId = widget.historyDoc.id;
     final cacheKey = 'native_$msgId.mp3';
@@ -2018,6 +2276,7 @@ _deepgramKey: ${_deepgramKey.isEmpty ? '❌ 없음' : '✅ (${_deepgramKey.lengt
 
   // 📦 [Box 17-A-2: 실전 튜터링 - 팝업 바텀시트]
   void _showTutoringPopup(String docId, String baseText) {
+    _resumeHistoryFromUserAction();
     if (_appIsRecording || _appIsShadowRecording) {
       appAudioRecorder.stop().catchError((_) {});
     }
@@ -2115,9 +2374,11 @@ _deepgramKey: ${_deepgramKey.isEmpty ? '❌ 없음' : '✅ (${_deepgramKey.lengt
                     fontWeight: FontWeight.bold),
               ),
               const Spacer(),
-              GestureDetector(
-                onTap: closeAccordion,
-                child: const Icon(Icons.close, color: Colors.white38, size: 18),
+              IconButton(
+                onPressed: closeAccordion,
+                icon: const Icon(Icons.close, color: Colors.white70, size: 22),
+                padding: const EdgeInsets.all(12),
+                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
               ),
             ],
           ),
@@ -2349,6 +2610,7 @@ _deepgramKey: ${_deepgramKey.isEmpty ? '❌ 없음' : '✅ (${_deepgramKey.lengt
 
   // 📦 [Box 18: AI 튜터링 - 응용 문장 생성 API 호출]
   Future<void> _generateAppText(String baseText) async {
+    _resumeHistoryFromUserAction();
     if (!mounted) return;
     setState(() => isGeneratingApp = true);
     _dialogSetState?.call(() {});
@@ -2399,6 +2661,7 @@ _deepgramKey: ${_deepgramKey.isEmpty ? '❌ 없음' : '✅ (${_deepgramKey.lengt
 
   // 📦 [Box 18-B: 실전 튜터링 - 녹음 시작]
   Future<void> _startAppRecording() async {
+    _resumeHistoryFromUserAction();
     final hasPermission = await appAudioRecorder.hasPermission();
     if (!hasPermission) return;
     try {
@@ -2420,6 +2683,7 @@ _deepgramKey: ${_deepgramKey.isEmpty ? '❌ 없음' : '✅ (${_deepgramKey.lengt
   // 📦 [Box 18-C: 실전 튜터링 - 녹음 중지 → STT → GPT 교정]
   Future<void> _stopAppRecordAndProcess(
       String targetKo, String targetEn) async {
+    _resumeHistoryFromUserAction();
     final path = await appAudioRecorder.stop();
     if (mounted) setState(() => _appIsRecording = false);
     _dialogSetState?.call(() {});
@@ -2533,6 +2797,7 @@ RULES — follow exactly:
 
   // 📦 [Box 18-D: 실전 튜터링 - 교정 TTS 재생]
   Future<void> _playAppCorrectedAudio() async {
+    _resumeHistoryFromUserAction();
     if (_appCorrectedAudio == null || !mounted) return;
     setState(() => _isPlayingAppAudio = true);
     _dialogSetState?.call(() {});
@@ -2548,6 +2813,7 @@ RULES — follow exactly:
 
   // 📦 [Box 18-E: 실전 튜터링 - 쉐도잉 녹음 시작 (교정 TTS 1회 재생 후 녹음)]
   Future<void> _startShadowRecord() async {
+    _resumeHistoryFromUserAction();
     // Step 4-1: 교정 TTS 먼저 1회 재생 후 완료 대기
     if (_appCorrectedAudio != null && mounted) {
       final completer = Completer<void>();
@@ -2590,6 +2856,7 @@ RULES — follow exactly:
 
   // 📦 [Box 18-F: 실전 튜터링 - 쉐도잉 녹음 중지]
   Future<void> _stopShadowRecord() async {
+    _resumeHistoryFromUserAction();
     final path = await appAudioRecorder.stop();
     if (mounted) {
       setState(() {
@@ -2876,8 +3143,10 @@ RULES — follow exactly:
                   : _fontScale < 1.0
                       ? Colors.white38
                       : Colors.white70,
-              size: 22,
+              size: 24,
             ),
+            padding: const EdgeInsets.all(10),
+            constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
             onPressed: () => setState(() {
               _fontScale = _fontScale == 1.0
                   ? 1.3
@@ -3578,6 +3847,7 @@ RULES — follow exactly:
                         height: 1.5,
                       ),
                     ),
+                    _buildChunkKoLine(chunk), // 🆕 [KO-FRAG]
                     if (isCurrent) ...[
                       const SizedBox(height: 4),
                       Text(
@@ -3719,12 +3989,19 @@ RULES — follow exactly:
                     ),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: Text(
-                        chunk.text,
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 14 * _fontScale,
-                            height: 1.4),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            chunk.text,
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 14 * _fontScale,
+                                height: 1.4),
+                          ),
+                          _buildChunkKoLine(chunk), // 🆕 [KO-FRAG]
+                        ],
                       ),
                     ),
                     IconButton(
@@ -4082,7 +4359,7 @@ RULES — follow exactly:
                                 : _onTutorUserIconTap,
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 250),
-                              padding: const EdgeInsets.all(13),
+                              padding: const EdgeInsets.all(9),
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 color: _tutorUserRecording
@@ -4101,7 +4378,7 @@ RULES — follow exactly:
                               ),
                               child: Icon(
                                 Icons.person_rounded,
-                                size: 24,
+                                size: 18,
                                 color: _tutorUserRecording
                                     ? Colors.greenAccent
                                     : isAwaiting
@@ -4141,7 +4418,7 @@ RULES — follow exactly:
                                 : null,
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 250),
-                              padding: const EdgeInsets.all(13),
+                              padding: const EdgeInsets.all(9),
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 color: _tutorAiSpeaking
@@ -4160,7 +4437,7 @@ RULES — follow exactly:
                               ),
                               child: Icon(
                                 Icons.smart_toy_rounded,
-                                size: 24,
+                                size: 18,
                                 color: _tutorAiSpeaking
                                     ? Colors.blue
                                     : isAwaiting
@@ -4172,13 +4449,6 @@ RULES — follow exactly:
                         ),
                       ],
                     ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.skip_next_rounded,
-                        color: Colors.white54),
-                    tooltip: "이번 차례 건너뛰기",
-                    onPressed:
-                        (isComplete || isAwaiting) ? null : _forceNextTurn,
                   ),
                 ],
               ),
@@ -4260,7 +4530,7 @@ RULES — follow exactly:
                               ),
                               child: Icon(
                                 lineIsAi
-                                    ? Icons.volume_up_rounded
+                                    ? Icons.smart_toy_rounded
                                     : Icons.person_rounded,
                                 color: isCurrent ? roleColor : Colors.white38,
                                 size: 17,
@@ -4273,17 +4543,6 @@ RULES — follow exactly:
                                     ? CrossAxisAlignment.end
                                     : CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    lineIsAi ? "AI" : "You",
-                                    style: TextStyle(
-                                      color: isCurrent
-                                          ? roleColor
-                                          : Colors.white38,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 3),
                                   Text(
                                     line['text'] as String,
                                     textAlign: lineIsAi
@@ -4441,6 +4700,45 @@ RULES — follow exactly:
                   ],
                 ),
               ),
+
+            // 🔧 [FREE-TALK-BTN] Free Talk 방은 확장문장이 없으므로 버튼 숨김
+            if (_cachedRoomMode != 'free_talk')
+              Padding(
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  6,
+                  20,
+                  (isComplete ? 6 : 12) +
+                      MediaQuery.of(context).viewPadding.bottom,
+                ),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    icon: _isBuildingExpand
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.amber),
+                          )
+                        : const Icon(Icons.auto_awesome_rounded, size: 18),
+                    label: Text(
+                      _isBuildingExpand ? "불러오는 중..." : "Expanded Sentence",
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.amber.withOpacity(0.12),
+                      foregroundColor: Colors.amber,
+                      side: const BorderSide(color: Colors.amber),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16)),
+                    ),
+                    onPressed:
+                        _isBuildingExpand ? null : _buildExpandFromConversation,
+                  ),
+                ),
+              ),
           ],
         ),
         // 역할 선택 말풍선 오버레이
@@ -4457,16 +4755,7 @@ RULES — follow exactly:
 
   // 역할 선택 말풍선 위젯
   Widget _buildRoleSpeechBubble() {
-    return const Text(
-      "Tap your role icon",
-      style: TextStyle(
-        color: Colors.white,
-        fontSize: 14,
-        fontWeight: FontWeight.bold,
-        decoration: TextDecoration.none,
-        shadows: [Shadow(color: Colors.black87, blurRadius: 10)],
-      ),
-    );
+    return const SizedBox.shrink();
   }
 
   // 📦 [Box 23: UI - 하단 Practice 컨트롤 (enum 비교)]
@@ -4593,17 +4882,19 @@ RULES — follow exactly:
     );
   }
 
-  // 세련문장 2-3 의미단위 콜앤리스폰 연습으로 전환
+  // 세련문장 5~7단어 호흡 단위 연습으로 전환 (Expanded와 동일 기준)
   Future<void> _switchToPolishedPractice() async {
     if (_polishedSentence.isEmpty) return;
     if (_isListening) _stopDeepgramListening();
     audioPlayer.stop();
     _polishedRevealTimer?.cancel();
-    final units = _splitPolishedIntoUnits(_polishedSentence);
+    // 로딩 스피너 먼저 표시 (GPT 분할 대기 중)
+    if (mounted) setState(() => _practicingPolished = true);
+    final units =
+        await _splitSentenceIntoChunks(_polishedSentence, 'polished');
     if (mounted) {
       setState(() {
-        _practicingPolished = true;
-        _polishedUnits = units;
+        _polishedUnits = units.isNotEmpty ? units : [_polishedSentence];
         _polishedUnitIdx = 0;
         _polishedUnitAIPlaying = false;
         _isPlayingFullUser = false;
@@ -4846,6 +5137,7 @@ RULES — follow exactly:
   // 의미단위 AI TTS 재생
   // 🔧 [v3.7] TtsCache 우선 조회 → MISS 시 API 호출 후 캐시 저장
   Future<void> _playPolishedUnit(int idx) async {
+    _resumeHistoryFromUserAction();
     if (!mounted || idx >= _polishedUnits.length) return;
     if (mounted) setState(() => _polishedUnitAIPlaying = true);
     final text = _polishedUnits[idx];
@@ -4869,6 +5161,7 @@ RULES — follow exactly:
 
   // 전체 AI 순차 재생
   Future<void> _playAllAI() async {
+    _resumeHistoryFromUserAction();
     if (_chunks.isEmpty) return;
     if (_isListening) _stopDeepgramListening();
     if (mounted)
@@ -4977,6 +5270,24 @@ RULES — follow exactly:
     );
   }
 
+  // 🆕 [KO-FRAG] 청크 한국어 직독 조각 한 줄 — _langDisplayMode 0(영+한)·2(한)에서만 표시
+  Widget _buildChunkKoLine(PracticeChunk chunk) {
+    if (_langDisplayMode == 1) return const SizedBox.shrink();
+    final ko = chunk.korean;
+    if (ko == null || ko.trim().isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 3),
+      child: Text(
+        ko,
+        style: TextStyle(
+          color: Colors.white54,
+          fontSize: 12 * _fontScale,
+          height: 1.3,
+        ),
+      ),
+    );
+  }
+
   Widget _buildChunkPracticeScreen() {
     const Color colorA = Color(0xFF0F2233);
     const Color colorB = Color(0xFF1A0F2E);
@@ -5049,8 +5360,8 @@ RULES — follow exactly:
                             ? _switchToPolishedPractice
                             : null),
                     child: Container(
-                      width: 26,
-                      height: 26,
+                      width: 40,
+                      height: 40,
                       margin: const EdgeInsets.only(right: 4),
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
@@ -5072,7 +5383,7 @@ RULES — follow exactly:
                                 : (_polishedSentence.isNotEmpty
                                     ? Colors.amber
                                     : Colors.white24),
-                            fontSize: 12,
+                            fontSize: 14,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
@@ -5080,6 +5391,7 @@ RULES — follow exactly:
                     ),
                   ),
                   GestureDetector(
+                    behavior: HitTestBehavior.opaque,
                     onTap: () => setState(() {
                       _fontScale = _fontScale == 1.0
                           ? 1.3
@@ -5088,7 +5400,8 @@ RULES — follow exactly:
                               : 1.0;
                     }),
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 8),
                       child: Icon(
                         Icons.format_size,
                         color: _fontScale > 1.0
@@ -5096,7 +5409,7 @@ RULES — follow exactly:
                             : _fontScale < 1.0
                                 ? Colors.white38
                                 : Colors.white54,
-                        size: 20,
+                        size: 22,
                       ),
                     ),
                   ),
@@ -5307,6 +5620,7 @@ RULES — follow exactly:
                                                 height: 1.45,
                                               ),
                                             ),
+                                            _buildChunkKoLine(chunk), // 🆕 [KO-FRAG]
                                             if (isCurrent &&
                                                 _aiChunkLoading) ...[
                                               const SizedBox(height: 4),
@@ -5475,6 +5789,416 @@ RULES — follow exactly:
       });
       WidgetsBinding.instance
           .addPostFrameCallback((_) => _showRoleSelectBubble());
+    }
+  }
+
+  // 🆕 [EXPAND-FROM-CHAT v2] 대화 전체(AI+유저) → 종합 확장 문장 1개 (의미단위 ~5개, 문법 연결)
+  String _historyString(Map<String, dynamic>? data, String key) {
+    return (data?[key] ?? '').toString().trim();
+  }
+
+  String _inferHistoryMode(Map<String, dynamic>? data) {
+    final mode = _historyString(data, 'mode');
+    if (mode.isNotEmpty) return mode;
+    final room = _historyString(data, 'room_name');
+    if (room == 'Clone Mode') return 'clone';
+    if (room == 'Roleplay Mode') return 'roleplay';
+    return '';
+  }
+
+  Future<String> _fetchCloneNameForHistory(String cloneId) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || cloneId.isEmpty) return '';
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('clones')
+          .doc(cloneId)
+          .get();
+      return (snap.data()?['name'] ?? '').toString().trim();
+    } catch (e) {
+      debugPrint('[historyLabels] clone fetch $e');
+      return '';
+    }
+  }
+
+  Future<Map<String, String>> _resolveHistoryExpandLabels(
+      Map<String, dynamic>? data) async {
+    final mode = _inferHistoryMode(data);
+    if (mode == 'clone') {
+      String partner = _historyString(data, 'partner_label');
+      if (partner.isEmpty) partner = _historyString(data, 'clone_name');
+      if (partner.isEmpty) partner = _historyString(data, 'expand_partner_name');
+      if (partner.isEmpty) {
+        partner =
+            await _fetchCloneNameForHistory(_historyString(data, 'clone_id'));
+      }
+      if (partner.isEmpty) partner = 'the clone';
+      String user = _historyString(data, 'user_label');
+      if (user.isEmpty) user = _historyString(data, 'expand_user_label');
+      if (user.isEmpty) user = 'the user';
+      return {
+        'mode': 'clone',
+        'userLabel': user,
+        'partnerLabel': partner,
+        'partnerType': 'clone',
+        'situation': '',
+      };
+    }
+    if (mode == 'roleplay') {
+      String partner = _historyString(data, 'partner_label');
+      if (partner.isEmpty) partner = _historyString(data, 'ai_role');
+      if (partner.isEmpty) partner = _historyString(data, 'expand_partner_name');
+      if (partner.isEmpty) partner = 'the roleplay partner';
+      String user = _historyString(data, 'user_label');
+      if (user.isEmpty) user = _historyString(data, 'user_role');
+      if (user.isEmpty) user = _historyString(data, 'expand_user_label');
+      if (user.isEmpty) user = 'the user';
+      final situation = _historyString(data, 'scenario_situation').isNotEmpty
+          ? _historyString(data, 'scenario_situation')
+          : _historyString(data, 'scenario_keyword');
+      return {
+        'mode': 'roleplay',
+        'userLabel': user,
+        'partnerLabel': partner,
+        'partnerType': 'roleplay',
+        'situation': situation,
+      };
+    }
+    return {
+      'mode': mode,
+      'userLabel': 'User',
+      'partnerLabel': 'AI',
+      'partnerType': mode,
+      'situation': '',
+    };
+  }
+
+  bool _mentionsGenericAiPartner(String sentence) {
+    return RegExp(r'\b(the\s+AI|AI|assistant|chatbot|bot)\b',
+            caseSensitive: false)
+        .hasMatch(sentence);
+  }
+
+  bool _canUseCachedNamedPartnerExpand(
+    Map<String, dynamic>? data,
+    String expanded,
+    String polished,
+    Map<String, String> labels,
+  ) {
+    // 🆕 [HANGUL-GUARD] 캐시된 확장/세련문장에 한글이 섞여 있으면 거부 → 재생성 유도
+    final hangul = RegExp(r'[가-힣ᄀ-ᇿ㄰-㆏]');
+    if (hangul.hasMatch('$expanded $polished')) return false;
+    final mode = labels['mode'] ?? '';
+    if (mode != 'clone' && mode != 'roleplay') return expanded.isNotEmpty;
+    if (_historyString(data, 'expand_schema_version') != 'named_partner_v1') {
+      return false;
+    }
+    if (_historyString(data, 'expand_partner_type') != mode) return false;
+    final savedPartner = _historyString(data, 'expand_partner_name');
+    if (savedPartner.isNotEmpty && savedPartner != labels['partnerLabel']) {
+      return false;
+    }
+    if (_mentionsGenericAiPartner('$expanded $polished')) return false;
+    return expanded.isNotEmpty;
+  }
+
+  Future<String?> _generateExpandedFromConversation(
+    String transcript, {
+    String userLabel = 'User',
+    String partnerLabel = 'AI',
+    String mode = '',
+    String situation = '',
+  }) async {
+    if (_apiKey.isEmpty || transcript.trim().isEmpty) return null;
+    try {
+      final safeUserLabel =
+          userLabel.trim().isNotEmpty ? userLabel.trim() : 'the user';
+      final safePartnerLabel =
+          partnerLabel.trim().isNotEmpty ? partnerLabel.trim() : 'the partner';
+      final modeLine = mode == 'clone'
+          ? 'For clone mode: conversation is between $safeUserLabel and $safePartnerLabel, a named clone/persona.'
+          : mode == 'roleplay'
+              ? 'For roleplay mode: conversation is between $safeUserLabel and $safePartnerLabel, a roleplay character.'
+              : 'The transcript labels identify the participants.';
+      final situationLine = situation.trim().isNotEmpty
+          ? 'Situation: ${situation.trim()}. Use it only if supported by the transcript.'
+          : '';
+      final sysPrompt = """You are an English speaking coach.
+You are given a short conversation transcript.
+$modeLine
+$safePartnerLabel is not AI.
+$situationLine
+Your job: compose ONE long, natural English sentence that synthesizes the overall
+content and gist of the WHOLE conversation.
+
+[RULES]
+- Never call $safePartnerLabel AI, assistant, chatbot, or bot.
+- Use $safePartnerLabel or a natural role phrase when referring to the partner.
+- If any name, role label, or situation appears in Korean, render it in natural English (translate role or description phrases to their English equivalent; romanize real personal names). Never copy Korean text into the sentence.
+- The final sentence must be 100% English and must NOT contain any Korean (Hangul) characters.
+- It must be ONE single sentence (do not split it into multiple sentences).
+- Keep it 25–40 words.
+- Build it from about 5 meaning units joined with varied grammatical connectives
+  (because, so, while, which, after, even though, and, etc.).
+- Each meaning unit should be speakable in one breath, usually 5–7 words.
+- Use commas or natural connectors to make breath groups clear.
+- Do not create a sentence with one very long clause.
+- Natural, speakable rhythm — common spoken English only.
+- Capture the overall situation/idea of the conversation, not just one line.
+- Common everyday vocabulary only. Do not add facts not in the transcript.
+- Output exactly ONE sentence. No quotes, no prefixes, no explanation.""";
+      final response = await http
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $_apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.2,
+              'max_tokens': 250,
+              'messages': [
+                {'role': 'system', 'content': sysPrompt},
+                {
+                  'role': 'user',
+                  'content':
+                      "Conversation:\n$transcript\n\nOne synthesized sentence:"
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) return null;
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      String s =
+          ((body['choices'] as List).first['message']['content'] as String)
+              .trim();
+      if (s.startsWith('"') && s.endsWith('"')) {
+        s = s.substring(1, s.length - 1);
+      }
+      return s.isEmpty ? null : s;
+    } catch (e) {
+      debugPrint("[generateExpandedFromConversation] $e");
+      return null;
+    }
+  }
+
+  // 🆕 [EXPAND-FROM-CHAT] 확장문장 → 쉽고 세련된 한 문장 (StepExpandBrain.polishSentence 동일 로직 복제)
+  Future<String?> _polishExpandedSentence(
+    String originalSentence, {
+    String partnerLabel = 'the partner',
+  }) async {
+    if (_apiKey.isEmpty || originalSentence.trim().isEmpty) return null;
+    try {
+      final safePartnerLabel =
+          partnerLabel.trim().isNotEmpty ? partnerLabel.trim() : 'the partner';
+      final sysPrompt = """You are an English speaking coach.
+The user has built a long English sentence through step-by-step expansion.
+Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
+
+[GOALS]
+- Natural spoken rhythm (not written/academic)
+- Common vocabulary (no SAT words, no bookish phrases)
+- Smooth flow (pause-friendly, commas for breath)
+- Same meaning as the original (do not add new facts)
+- Slightly more elegant/polished than the original
+- Easier to pronounce and say out loud
+- Render every participant name, clone name, role label, and situation in English (translate role or description phrases; romanize real personal names). Never keep Korean text.
+- The final sentence must be 100% English and must NOT contain any Korean (Hangul) characters.
+- Do not replace $safePartnerLabel with AI, assistant, chatbot, or bot.
+
+[AVOID]
+- Big academic words
+- Formal written phrases
+- Complex nested clauses that are hard to speak
+- Adding information not in the original
+
+[OUTPUT]
+- Exactly ONE sentence.
+- No explanation, no quotes, no prefixes.
+- Just the polished sentence.""";
+      final response = await http
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $_apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.2,
+              'max_tokens': 150,
+              'messages': [
+                {'role': 'system', 'content': sysPrompt},
+                {
+                  'role': 'user',
+                  'content':
+                      'Original sentence:\n$originalSentence\n\nPolished version:'
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) return originalSentence;
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      String polished =
+          ((body['choices'] as List).first['message']['content'] as String)
+              .trim();
+      if (polished.startsWith('"') && polished.endsWith('"')) {
+        polished = polished.substring(1, polished.length - 1);
+      }
+      return polished.isEmpty ? originalSentence : polished;
+    } catch (e) {
+      debugPrint("[polishExpandedSentence] $e");
+      return originalSentence;
+    }
+  }
+
+  // 🆕 [EXPAND-FROM-CHAT v2] 저장된 expanded/polished 우선 → 없으면 전체 대화로 생성+캐시 → P3 이동
+  Future<void> _buildExpandFromConversation() async {
+    if (_isBuildingExpand) return;
+    if (mounted) setState(() => _isBuildingExpand = true);
+    try {
+      audioPlayer.stop();
+      _stopAutoVADRecording();
+
+      // 1순위: 방 문서에 이미 저장된 expanded/polished (+ mode/room_name 확보)
+      String expanded = "";
+      String polished = "";
+      String existingMode = "";
+      String roomName = "";
+      Map<String, dynamic>? historyData;
+      Map<String, String> labels = {
+        'mode': '',
+        'userLabel': 'User',
+        'partnerLabel': 'AI',
+        'partnerType': '',
+        'situation': '',
+      };
+      try {
+        final snap = await widget.historyDoc.get();
+        final d = snap.data() as Map<String, dynamic>?;
+        historyData = d;
+        expanded = (d?['expanded_sentence'] as String?)?.trim() ?? "";
+        polished = (d?['polished_sentence'] as String?)?.trim() ?? "";
+        existingMode = (d?['mode'] as String?)?.trim() ?? "";
+        roomName = (d?['room_name'] as String?)?.trim() ?? "";
+        labels = await _resolveHistoryExpandLabels(d);
+      } catch (e) {
+        debugPrint("[buildExpand] doc fetch $e");
+      }
+      if (!mounted) return;
+
+      if (!_canUseCachedNamedPartnerExpand(
+          historyData, expanded, polished, labels)) {
+        expanded = "";
+        polished = "";
+      }
+
+      // 2순위(fallback): 저장값 없으면 전체 대화로 즉석 생성 후 캐시
+      if (expanded.isEmpty) {
+        if (_apiKey.isEmpty) {
+          setState(() => _isBuildingExpand = false);
+          _showRoomEntryToast("API 키가 없어 생성할 수 없습니다");
+          return;
+        }
+        final transcript = _tutorLines
+            .map((l) {
+              final t = (l['text'] as String? ?? '').trim();
+              if (t.isEmpty) return null;
+              final role = (l['role'] as String?) ?? '';
+              final namedMode =
+                  labels['mode'] == 'clone' || labels['mode'] == 'roleplay';
+              final who = namedMode
+                  ? (role == 'SYSTEM'
+                      ? labels['partnerLabel']!
+                      : labels['userLabel']!)
+                  : (role == 'HOST' ? 'AI' : 'User');
+              return "$who: $t";
+            })
+            .whereType<String>()
+            .join("\n");
+        if (transcript.isEmpty) {
+          setState(() => _isBuildingExpand = false);
+          _showRoomEntryToast("연습할 대화가 없습니다");
+          return;
+        }
+        final gen = await _generateExpandedFromConversation(
+          transcript,
+          userLabel: labels['userLabel']!,
+          partnerLabel: labels['partnerLabel']!,
+          mode: labels['mode']!,
+          situation: labels['situation']!,
+        );
+        if (!mounted) return;
+        if (gen == null || gen.isEmpty) {
+          setState(() => _isBuildingExpand = false);
+          _showRoomEntryToast("확장문장 생성 실패");
+          return;
+        }
+        expanded = gen;
+        final pol = await _polishExpandedSentence(
+          expanded,
+          partnerLabel: labels['partnerLabel']!,
+        );
+        if (!mounted) return;
+        polished = (pol != null && pol.trim().isNotEmpty) ? pol.trim() : "";
+
+        // 캐시 저장 — has_practice + mode stamp(없으면 room_name으로 추론)로
+        // 재입장 시 라우터가 expanded만 있는 모호한 방을 Step Expand로 오인하지 않게 보장
+        String stampMode = existingMode;
+        if (stampMode.isEmpty) {
+          if (roomName == "Clone Mode") {
+            stampMode = "clone";
+          } else if (roomName == "Roleplay Mode") {
+            stampMode = "roleplay";
+          } else {
+            stampMode = "clone"; // 안전 기본값: step_expand만 아니면 Tutor로 라우팅됨
+          }
+        }
+        try {
+          await widget.historyDoc.update({
+            'expanded_sentence': expanded,
+            if (polished.isNotEmpty) 'polished_sentence': polished,
+            'has_practice': true,
+            'expand_source': 'fallback',
+            'expand_generated_at': FieldValue.serverTimestamp(),
+            'expand_user_label': labels['userLabel'],
+            'expand_partner_name': labels['partnerLabel'],
+            'expand_partner_type': labels['partnerType'],
+            'expand_schema_version': 'named_partner_v1',
+            if (existingMode.isEmpty) 'mode': stampMode,
+          });
+        } catch (e) {
+          debugPrint("[buildExpand] cache write $e");
+        }
+        if (!mounted) return;
+      }
+
+      // P3 진입 준비
+      _isStepExpandRoom = false;
+      _expandedSentence = expanded;
+      _polishedSentence = polished;
+      _practicingPolished = false;
+      _polishedUnits = [];
+      _polishedUnitIdx = -1;
+
+      await _buildChunks(_expandedSentence);
+      if (!mounted) return;
+
+      setState(() => _isBuildingExpand = false);
+      _goToChunkPractice();
+    } catch (e) {
+      debugPrint("[buildExpandFromConversation] $e");
+      if (mounted) {
+        setState(() => _isBuildingExpand = false);
+        _showRoomEntryToast("오류: $e");
+      }
     }
   }
 
@@ -5860,12 +6584,14 @@ enum SentenceVariant { expanded, polished }
 
 class PracticeChunk {
   final String text;
+  final String? korean; // 🆕 [KO-FRAG] 영어어순 직독 한국어 조각 (없으면 null)
   Uint8List? aiAudio;
   String? userRecordPath;
   bool isDone;
 
   PracticeChunk({
     required this.text,
+    this.korean,
     this.aiAudio,
     this.userRecordPath,
     this.isDone = false,

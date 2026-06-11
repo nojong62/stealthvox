@@ -54,6 +54,79 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   // ============================================================================
   String _openAiKey = "";
   bool _isConversationActive = false;
+
+  // 🆕 [게스트 언어 오버레이] 초대 게스트(회원·비회원)가 입장 전 언어쌍 선택
+  bool _showLangOverlay = false;
+  String? _pendingJoinRoomId;
+
+  // 🆕 [PTT] Duo 무전기 상태기계
+  // idle: 대기 / recording: 녹음 중 / processing: STT·번역 중 / playing: TTS 재생 중 / cooldown: 재생 후 짧은 잠금
+  String _duoState = 'idle';
+  // 🆕 [과금정책] 게스트 입장 후에만 과금 시작 (호스트 대기 중 정지)
+  bool _billingStarted = false;
+  void _startDuoBilling() {
+    // 🆕 [과금정책] 게스트(회원·비회원 무관)는 차감 안 함 — 초대한 호스트만 과금
+    if (!_amIHost) return;
+    if (_billingStarted) return;
+    _billingStarted = true;
+    BillingTicker.instance.resume();
+    BillingTicker.instance.logMode('duo');
+  }
+  void _stopDuoBilling() {
+    _billingStarted = false;
+    BillingTicker.instance.pause();
+  }
+
+  // 🆕 [PTT 에코 차단] 최근 앱이 생성/표시한 문장 보관 (target/original 혼합, 최대 10개)
+  final List<String> _recentGenerated = [];
+  DateTime? _lastTtsEndAt; // 🆕 마지막 TTS 종료 시각(엄격 필터 윈도우용)
+
+  String _normForEcho(String s) =>
+      s.toLowerCase().replaceAll(RegExp(r'[^\w가-힣]'), '');
+
+  void _rememberGenerated(String s) {
+    final t = s.trim();
+    if (t.isEmpty) return;
+    _recentGenerated.add(t);
+    while (_recentGenerated.length > 10) _recentGenerated.removeAt(0);
+  }
+
+  // 토큰 자카드 유사도 (0~1)
+  double _jaccard(String a, String b) {
+    final sa = a.toLowerCase().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toSet();
+    final sb = b.toLowerCase().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toSet();
+    if (sa.isEmpty || sb.isEmpty) return 0.0;
+    final inter = sa.intersection(sb).length;
+    final uni = sa.union(sb).length;
+    return uni == 0 ? 0.0 : inter / uni;
+  }
+
+  bool _looksLikeEcho(String transcript) {
+    final t = transcript.trim();
+    if (t.length < 4) return false;
+    final tn = _normForEcho(t);
+
+    // TTS 종료 직후 1.2초는 엄격 모드(임계값 완화 → 더 잘 버림)
+    final bool strict = _lastTtsEndAt != null &&
+        DateTime.now().difference(_lastTtsEndAt!).inMilliseconds < 1200;
+    final double simThreshold = strict ? 0.6 : 0.8;
+
+    for (final g in _recentGenerated) {
+      if (g.isEmpty) continue;
+      final gn = _normForEcho(g);
+      if (gn.isEmpty) continue;
+      // ① 정규화 포함 관계
+      if (gn == tn || gn.contains(tn) || tn.contains(gn)) return true;
+      // ② 토큰 자카드 유사도
+      if (_jaccard(g, t) >= simThreshold) return true;
+    }
+    return false;
+  }
+  void _setDuoState(String s) {
+    if (!mounted) return;
+    setState(() => _duoState = s);
+  }
+
   bool _isPartnerOnline = false;
   bool _isExiting = false;
   int _turnCounter = 0;
@@ -68,6 +141,26 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   DocumentReference? _myHistoryRef;
   DocumentReference? _duoSessionRef;
   StreamSubscription? _partnerJoinedSubscription;
+
+  // ── 🆕 [양방향 통역] 역할/메시지 채널 상태 ────────────────────────────────
+  // _amIHost: 게스트로 합류했으면 false, 아니면 호스트(true)
+  bool _amIHost = true;
+  // _myUid: 메시지 발신자 식별용 (호스트=firebase uid, 게스트=합류 시 부여된 uid)
+  String _myUid = '';
+  // 내 역할 문자열 ('HOST' 또는 'GUEST') — 발신/필터 기준
+  String get _myRole => _amIHost ? 'HOST' : 'GUEST';
+  // 공유 메시지 채널(duo_sessions/{roomId}/messages) 구독
+  StreamSubscription? _messageSubscription;
+  // 이미 처리한 메시지 doc id (중복 렌더 방지)
+  final Set<String> _processedMsgIds = {};
+  // 리스너 첫 스냅샷 priming 여부 (기존 메시지 replay 방지)
+  bool _messagesPrimed = false;
+  // 상대 메시지 처리 큐 (순차 처리 — 음성 겹침 방지)
+  final List<Map<String, dynamic>> _incomingQueue = [];
+  bool _isDrainingIncoming = false;
+  // 오디오 재생 직렬화 체인 (내 음성 ↔ 상대 음성 동시재생 방지)
+  Future<void> _audioChain = Future.value();
+  // ──────────────────────────────────────────────────────────────────────────
 
   // ============================================================================
   // 📦 [2. 오디오 컨트롤러 (AUDIO CONTROLLERS)]
@@ -92,14 +185,22 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     if (_isIdlePaused) {
       _isIdlePaused = false;
       if (mounted) setState(() {});
-      BillingTicker.instance.resume();
-      BillingTicker.instance.logMode('duo');
+      // 🆕 [과금정책] 게스트 입장(과금 시작) 상태일 때만 resume — 대기 중엔 재개 금지
+      if (_billingStarted) {
+        BillingTicker.instance.resume();
+        BillingTicker.instance.logMode('duo');
+      }
     }
-    _idlePauseTimer = Timer(const Duration(seconds: 30), _handleIdlePause);
+    _idlePauseTimer = Timer(const Duration(seconds: 60), _handleIdlePause);
   }
 
   void _handleIdlePause() {
     if (!mounted || _isIdlePaused) return;
+    // 🔒 [오토포즈 가드] 최상단이 아니면 일시정지하지 말고 60초 타이머만 다시 건다
+    if (ModalRoute.of(context)?.isCurrent == false) {
+      _resetIdleTimer();
+      return;
+    }
     _isIdlePaused = true;
     BillingTicker.instance.pause();
     if (mounted) setState(() {});
@@ -115,6 +216,15 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   Widget _buildIdleOverlay() => const SizedBox.shrink();
   // ─────────────────────────────────────────────────────────────────────────
 
+  // ── 🆕 [양방향 통역] 언어쌍/보이스 헬퍼 (로비 값 매번 참조) ────────────────
+  String _myTarget() =>
+      FFAppState().targetLang.isNotEmpty ? FFAppState().targetLang : 'English';
+  String _myNative() =>
+      FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
+  String _myVoice() =>
+      FFAppState().aiVoice.isNotEmpty ? FFAppState().aiVoice : 'nova';
+  // ──────────────────────────────────────────────────────────────────────────
+
   // ============================================================================
   // 📦 [3. 라이프사이클 (LIFECYCLE)]
   // 위젯의 시작(initState)과 끝(dispose) 및 초기 설정
@@ -126,9 +236,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     _audioPlayer.setVolume(1.0);
     _ttsPlayer.setVolume(1.0);
 
+    // 🆕 발신자 식별용 uid 확보 (게스트는 _joinAsGuest에서 덮어씀)
+    _myUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+
+    // 🆕 [과금정책] Duo는 게스트 입장 시점에 과금 시작 — 진입 시엔 rate만 설정하고 pause 유지
     BillingTicker.instance.setRate(BillingRate.full);
-    BillingTicker.instance.resume();
-    BillingTicker.instance.logMode('duo');
+    BillingTicker.instance.pause();
+    _billingStarted = false;
 
     _ttsPlayer.onPlayerComplete.listen((_) {
       _isTtsActive = false;
@@ -148,8 +262,17 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
                   : null);
       if (pendingRoomId != null) {
         debugPrint(
-            '[Duo] initState — auto joining as guest, roomId: $pendingRoomId');
-        _joinAsGuest(pendingRoomId);
+            '[Duo] initState — guest entry, show lang overlay: $pendingRoomId');
+        // 🆕 입장 전 언어 선택 오버레이 — 기본값 보정 후 표시
+        if (FFAppState().nativeLang.isEmpty) FFAppState().nativeLang = 'Korean';
+        if (FFAppState().targetLang.isEmpty)
+          FFAppState().targetLang = 'English';
+        if (mounted) {
+          setState(() {
+            _pendingJoinRoomId = pendingRoomId;
+            _showLangOverlay = true;
+          });
+        }
       }
       if (mounted) _resetIdleTimer();
     });
@@ -159,6 +282,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   void dispose() {
     _clearIdleTimers();
     _partnerJoinedSubscription?.cancel();
+    _messageSubscription?.cancel(); // 🆕 메시지 채널 구독 해제
     _silenceTimer?.cancel();
     _cancelAudio();
     _audioRecorder.dispose();
@@ -209,10 +333,33 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     } catch (e) {}
     _ttsCompleter = null;
     _isTtsActive = false;
+    _lastTtsEndAt = DateTime.now();
+  }
+
+  // 🆕 오디오 재생 직렬화: 내 음성과 상대 음성이 동시에 겹쳐 재생되지 않도록 큐잉
+  Future<void> _playSerialized(Uint8List? bytes) {
+    final Future<void> prev = _audioChain;
+    final Completer<void> done = Completer<void>();
+    _audioChain = done.future;
+    () async {
+      try {
+        await prev;
+      } catch (_) {}
+      try {
+        await _playAudioAndWait(bytes);
+      } finally {
+        if (!done.isCompleted) done.complete();
+      }
+    }();
+    return done.future;
   }
 
   Future<void> _startWhisperRecording() async {
-    if (!_isConversationActive || _openAiKey.isEmpty) return;
+    if (_openAiKey.isEmpty) return;
+    // 🆕 [PTT] idle 상태가 아니면 시작 금지 (TTS·처리·쿨다운·이미 녹음 중 차단)
+    if (_duoState != 'idle') return;
+    if (_isTtsActive || _isDrainingIncoming) return;
+    if (await _audioRecorder.isRecording()) return;
     if (await _audioRecorder.hasPermission()) {
       _hasSpoken = false;
       _silenceCounter = 0;
@@ -224,7 +371,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
             const RecordConfig(
                 encoder: AudioEncoder.aacLc, sampleRate: 16000, numChannels: 1),
             path: path);
+        _setDuoState('recording');
         _silenceTimer?.cancel();
+        // 침묵 자동 종료만 유지(누른 채로 말 끝나면 자동 전송). 자동 "재시작"은 제거.
         _silenceTimer =
             Timer.periodic(const Duration(milliseconds: 100), (timer) async {
           if (await _audioRecorder.isRecording()) {
@@ -237,108 +386,100 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
               if (_hasSpoken && _silenceCounter >= 15) {
                 timer.cancel();
                 _stopAndSendToWhisper();
-              } else if (!_hasSpoken && _silenceCounter >= 50) {
+              } else if (!_hasSpoken && _silenceCounter >= 80) {
+                // 말이 한 번도 없으면 그냥 종료(재시작 안 함)
                 timer.cancel();
                 await _audioRecorder.stop();
-                _startWhisperRecording();
+                _setDuoState('idle');
               }
             }
           } else {
             timer.cancel();
           }
         });
-      } catch (e) {}
+      } catch (e) {
+        _setDuoState('idle');
+      }
     }
   }
 
 // ============================================================================
-  // 📦 [5. 핵심 AI 파이프라인 (CORE AI LOGIC)]
-  // STT(1.5초) -> UI 즉시 출력 -> 동시 통역(gpt-4o-mini) -> TTS 재생 (1초 강제 대기 삭제!)
+  // 📦 [5. 핵심 양방향 통역 파이프라인 (CORE INTERPRETER LOGIC)]
+  // 내 발화: STT → 내 폰 즉시 렌더 → 내 타겟 통역/TTS → 공유 채널 업로드
+  // 상대 발화: 채널 리스너 수신 → 내 언어쌍으로 통역 → 좌측 렌더 + 내 타겟 TTS
   // ============================================================================
   Future<void> _stopAndSendToWhisper() async {
     _silenceTimer?.cancel();
     _resetIdleTimer();
+    _setDuoState('processing');
     final path = await _audioRecorder.stop();
     if (path == null) {
-      if (_isConversationActive) _startWhisperRecording();
+      _setDuoState('idle');
+      if (_incomingQueue.isNotEmpty) _drainIncoming();
       return;
     }
-
     try {
       Uri uri = Uri.parse('https://api.openai.com/v1/audio/transcriptions');
       var request = http.MultipartRequest('POST', uri);
       request.headers['Authorization'] = 'Bearer $_openAiKey';
       request.fields['model'] = 'whisper-1';
       request.files.add(await http.MultipartFile.fromPath('file', path));
-
-      // ⏱️ 타임아웃 10초 적용
       var response = await request.send().timeout(const Duration(seconds: 10));
       var responseData = await response.stream.bytesToString();
-
       if (response.statusCode == 200) {
         String transcript = jsonDecode(responseData)['text'] ?? "";
-        String lowerClean =
-            transcript.trim().toLowerCase().replaceAll(RegExp(r'[^\w\s]'), '');
-        // 💡 듀오 모드 특화 환각 필터 (불필요한 mbc, also 등 제거)
-        List<String> ghostWords = [
-          'thank you',
+        final String trimmed = transcript.trim();
+        final String lowerRaw = trimmed.toLowerCase();
+        final String lowerClean =
+            lowerRaw.replaceAll(RegExp(r'[^\w\s가-힣]'), '').trim();
+        final String collapsed = lowerClean.replaceAll(' ', '');
+        const List<String> hardGhosts = [
+          'thank you so much for watching',
+          'thank you for watching',
           'thanks for watching',
+          'please subscribe',
           'subtitles by',
-          'you',
-          'yeah',
-          'okay',
-          'i',
-          'also',
-          'mbc',
           'share this video',
           '시청해 주셔서',
           '시청해주셔서',
-          '감사합니다',
-          '구독과 좋아요'
+          '구독과 좋아요',
+          '감사합니다 시청',
         ];
-        bool isGhost = ghostWords.any(
-                (ghost) => lowerClean.contains(ghost.replaceAll(' ', ''))) &&
-            transcript.length < 30;
-
-        if (lowerClean.isEmpty || isGhost || transcript.length <= 2) {
-          await _handleContextualError();
+        final bool isHardGhost = hardGhosts.any((g) => lowerRaw.contains(g));
+        const List<String> shortGhosts = [
+          'thank you','yeah','okay','mbc','you','also','i','감사합니다',
+        ];
+        final bool isShortGhost = trimmed.length < 30 &&
+            shortGhosts.any((g) => collapsed == g.replaceAll(' ', ''));
+        // 🆕 에코 차단: 최근 앱이 만든 문장과 거의 같으면 버림
+        final bool isEcho = _looksLikeEcho(trimmed);
+        if (lowerClean.isEmpty ||
+            isHardGhost ||
+            isShortGhost ||
+            isEcho ||
+            trimmed.length <= 2) {
+          _setDuoState('idle'); // 조용히 대기 복귀(자동 재녹음 금지)
+          if (_incomingQueue.isNotEmpty) _drainIncoming();
           return;
         }
-
-        if (transcript.trim().isNotEmpty) {
-          _processRelayPipeline(transcript);
+        if (trimmed.isNotEmpty) {
+          await _processRelayPipeline(trimmed);
         } else {
-          if (_isConversationActive) _startWhisperRecording();
+          _setDuoState('idle');
+          if (_incomingQueue.isNotEmpty) _drainIncoming();
         }
       } else {
-        if (_isConversationActive) _startWhisperRecording();
+        _setDuoState('idle');
+        if (_incomingQueue.isNotEmpty) _drainIncoming();
       }
     } catch (e) {
-      if (_isConversationActive) _startWhisperRecording();
+      _setDuoState('idle');
+      if (_incomingQueue.isNotEmpty) _drainIncoming();
     }
   }
 
-  // 💡 공통 에러 방어 핸들러 추가
   Future<void> _handleContextualError() async {
-    String fallbackTarget =
-        "I'm sorry, I didn't quite catch that. Could you say it again?";
-    if (mounted) {
-      setState(() {
-        _localMessages.add({
-          'role': 'SYSTEM',
-          'target': fallbackTarget,
-          'original': '',
-          'type': 'error'
-        });
-      });
-      _scrollToCurrent(_localMessages.length - 1);
-    }
-    Uint8List? errorTts = await _fetchTTSBytes(fallbackTarget, "nova");
-    if (errorTts != null && _isConversationActive) {
-      await _playAudioAndWait(errorTts);
-    }
-    if (mounted) setState(() => _localMessages.removeLast());
-    if (_isConversationActive) _startWhisperRecording();
+    _setDuoState('idle'); // AI 사과 없음, 자동 재녹음 없음 — 조용히 대기 복귀
   }
 
   Future<Uint8List?> _fetchTTSBytes(String text, String voice) async {
@@ -364,101 +505,211 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     return null;
   }
 
-  // 🚀 불필요한 딜레이를 싹 걷어낸 즉시 통역 파이프라인
+  // 🚀 [내 발화 처리] 내가 말한 것을 내 폰에 즉시 띄우고, 내 타겟으로 통역/TTS, 채널 업로드
   Future<void> _processRelayPipeline(String finalTranscript) async {
     _resetIdleTimer();
     _turnCounter++;
     final int currentTurnId = _turnCounter;
-    String myTarget = FFAppState().targetLang.isNotEmpty
-        ? FFAppState().targetLang
-        : 'English';
-    String myOriginal =
-        FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
-    String aiVoice = "nova";
+    final String myTarget = _myTarget();
+    final String myNative = _myNative();
 
-    // 🚀 1. STT 결과물(유저가 한 말)을 화면에 먼저 즉시 띄웁니다!
+    // 1. 내 발화 원문을 우측 말풍선으로 즉시 표시 (스냅한 반응성)
+    int myIndex = -1;
     if (mounted) {
       setState(() {
         _localMessages
             .add({'role': 'HOST', 'target': finalTranscript, 'original': ''});
+        myIndex = _localMessages.length - 1;
       });
-      // HOST 말풍선은 상단 고정 — 사용자 발화가 화면 안에 안정적으로 보이도록
-      _scrollToCurrentTop(_localMessages.length - 1);
+      _scrollToCurrentTop(myIndex);
     }
-    await _saveHistoryMessage(finalTranscript, "", 'HOST');
+
+    // 2. 공유 채널 업로드 — 상대 폰이 이 원문을 받아 자기 언어쌍으로 통역함 (백그라운드)
+    _uploadMyMessage(finalTranscript, myNative);
 
     if (!_isConversationActive || _turnCounter != currentTurnId) return;
 
-    // ⏱️ 2. 화면에 띄워두고 백그라운드에서 동시통역(gpt-4o-mini) 진행
-    // 현재 턴 직전까지의 대화 히스토리(에러 메시지 제외)를 컨텍스트로 전달
-    final recentHistory = _localMessages.length > 1
-        ? _localMessages
-            .sublist(0, _localMessages.length - 1)
-            .where((m) => m['type'] == null)
-            .toList()
-        : <Map<String, dynamic>>[];
-
-    Map<String, String>? translationResult = await DuoBrain.processTranslation(
+    // 3. 내 발화를 내 타겟으로 통역 (+ 내 오리지널 정돈) — 단일 GPT 호출
+    Map<String, String>? result = await DuoBrain.processTranslation(
         key: _openAiKey,
         text: finalTranscript,
-        targetLang: myTarget,
-        originalLang: myOriginal,
-        recentHistory: recentHistory);
+        srcLang: myNative,
+        myTargetLang: myTarget,
+        myNativeLang: myNative);
 
     if (!_isConversationActive || _turnCounter != currentTurnId) return;
 
-    String aiReplyTarget = "🚨 통신 에러가 발생했습니다.";
-    String aiReplyOriginal = finalTranscript;
-    Uint8List? aiTtsBytes;
+    final String tgt =
+        (result != null && (result['target'] ?? '').trim().isNotEmpty)
+            ? result['target']!
+            : finalTranscript;
+    final String org =
+        (result != null && (result['original'] ?? '').trim().isNotEmpty)
+            ? result['original']!
+            : finalTranscript;
 
-    if (translationResult != null) {
-      aiReplyTarget = translationResult['translated_text'] ?? aiReplyTarget;
-      aiReplyOriginal = translationResult['original_input'] ?? finalTranscript;
-      // ⏱️ 3. 통역본을 소리로 읽어주기 위해 TTS 다운로드
-      aiTtsBytes = await _fetchTTSBytes(aiReplyTarget, aiVoice);
-    } else {
-      // 통신 실패 시 빠른 에러 처리
-      if (mounted) {
-        setState(() {
-          _localMessages.add({
-            'role': 'SYSTEM',
-            'target': 'Network Error. Please try again.',
-            'original': '',
-            'type': 'error'
-          });
-        });
-        _scrollToCurrent(_localMessages.length - 1);
-      }
-      if (_isConversationActive && _turnCounter == currentTurnId)
-        _startWhisperRecording();
-      return;
+    // 4. 내 말풍선을 [타겟(큰글자) + 오리지널(작은글자)]로 교체
+    if (mounted && myIndex >= 0 && myIndex < _localMessages.length) {
+      setState(() {
+        _localMessages[myIndex] = {
+          'role': 'HOST',
+          'target': tgt,
+          'original': org
+        };
+      });
+      _scrollToCurrentTop(myIndex);
     }
+    await _saveHistoryMessage(tgt, org, 'HOST');
 
-    if (!_isConversationActive || _turnCounter != currentTurnId) return;
+    // 5. 내 타겟 소리 재생 (직렬화)
+    _rememberGenerated(tgt);
+    _rememberGenerated(org);
+    final Uint8List? bytes = await _fetchTTSBytes(tgt, _myVoice());
+    if (bytes != null && _isConversationActive && _turnCounter == currentTurnId) {
+      _setDuoState('playing');
+      await _playSerialized(bytes);
+    }
+    // 🆕 [PTT] 자동 재녹음 제거 — 쿨다운 후 대기 상태로 복귀
+    _setDuoState('cooldown');
+    await Future.delayed(const Duration(milliseconds: 800));
+    _setDuoState('idle');
+    // 🆕 내 발화 처리 끝 → 보류돼 있던 상대 메시지 처리 재개
+    if (_incomingQueue.isNotEmpty) _drainIncoming();
+  }
 
-    // 💡 4. [수술 핵심] 기존에 있던 'await Future.delayed(1초)' 강제 대기를 삭제하여 통역본 즉시 출력!
+  // 🆕 [채널 업로드] 내 원문을 duo_sessions/{roomId}/messages 에 기록
+  Future<void> _uploadMyMessage(String raw, String srcLang) async {
+    if (_duoSessionRef == null || raw.trim().isEmpty) return;
+    try {
+      // 🆕 내 메시지 doc id를 업로드 전에 _processedMsgIds에 선등록한다.
+      //    → 리스너(605행)가 내 발화를 항상 스킵하므로, 내 글이 절대
+      //      상대(SYSTEM/좌측) 말풍선으로 되돌아오지 않는다. 역할/계정 무관.
+      final docRef = _duoSessionRef!.collection('messages').doc();
+      _processedMsgIds.add(docRef.id);
+      await docRef.set({
+        'senderUid': _myUid,
+        'senderRole': _myRole,
+        'text': raw,
+        'srcLang': srcLang,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      debugPrint('[Duo] upload message error: $e');
+    }
+  }
+
+  // 🆕 [상대 발화 리스너] 공유 채널 구독 → 상대(senderRole≠나) 메시지만 처리
+  void _listenForMessages() {
+    if (_duoSessionRef == null) return;
+    _messageSubscription?.cancel();
+    _messagesPrimed = false;
+    _messageSubscription = _duoSessionRef!
+        .collection('messages')
+        .orderBy('createdAt')
+        .snapshots()
+        .listen((snap) {
+      if (_isExiting || !mounted) return;
+
+      // 첫 스냅샷: 기존 메시지는 '이미 본 것'으로 처리만 하고 렌더하지 않음 (replay 방지)
+      if (!_messagesPrimed) {
+        for (final d in snap.docs) {
+          _processedMsgIds.add(d.id);
+        }
+        _messagesPrimed = true;
+        return;
+      }
+
+      for (final change in snap.docChanges) {
+        if (change.type != DocumentChangeType.added) continue;
+        final doc = change.doc;
+        if (_processedMsgIds.contains(doc.id)) continue;
+        _processedMsgIds.add(doc.id);
+
+        final data = doc.data() as Map<String, dynamic>?;
+        if (data == null) continue;
+
+        final String msgRole = data['senderRole']?.toString() ?? '';
+        if (msgRole == _myRole) continue; // 내가 올린 것 — 이미 로컬 렌더됨, 스킵
+
+        _enqueueIncoming(data);
+      }
+    });
+  }
+
+  // 🆕 상대 메시지 순차 처리 큐 (음성 겹침/순서 꼬임 방지)
+  void _enqueueIncoming(Map<String, dynamic> data) {
+    _incomingQueue.add(data);
+    _drainIncoming();
+  }
+
+  Future<void> _drainIncoming() async {
+    if (_isDrainingIncoming) return;
+    _isDrainingIncoming = true;
+    while (_incomingQueue.isNotEmpty) {
+      // 🆕 내가 녹음 중이면 상대 메시지 처리 보류 — 내 발화 끊김 방지
+      if (_duoState == 'recording') break;
+      final data = _incomingQueue.removeAt(0);
+      await _handleIncomingMessage(data);
+    }
+    _isDrainingIncoming = false;
+  }
+
+  // 🆕 [상대 발화 처리] 원문을 내 언어쌍으로 통역 → 좌측 말풍선 + 내 타겟 TTS
+  Future<void> _handleIncomingMessage(Map<String, dynamic> data) async {
+    if (!mounted || _isExiting) return;
+    final String raw = data['text']?.toString() ?? '';
+    final String srcLang = data['srcLang']?.toString() ?? 'English';
+    if (raw.trim().isEmpty) return;
+
+    _resetIdleTimer();
+
+    // 상대 발화를 들려주는 동안 내 녹음 일시 정지 (스피커 음성이 마이크에 새는 것 방지)
+    _silenceTimer?.cancel();
+    try { await _audioRecorder.stop(); } catch (_) {}
+    _setDuoState('processing');
+
+    final String myTarget = _myTarget();
+    final String myNative = _myNative();
+
+    Map<String, String>? result = await DuoBrain.processTranslation(
+        key: _openAiKey,
+        text: raw,
+        srcLang: srcLang,
+        myTargetLang: myTarget,
+        myNativeLang: myNative);
+
+    if (!mounted || _isExiting) return;
+
+    final String tgt =
+        (result != null && (result['target'] ?? '').trim().isNotEmpty)
+            ? result['target']!
+            : raw;
+    final String org =
+        (result != null && (result['original'] ?? '').trim().isNotEmpty)
+            ? result['original']!
+            : '';
+
+    // 상대 말풍선: 좌측 (role='SYSTEM')
     if (mounted) {
       setState(() {
-        _localMessages.add({
-          'role': 'SYSTEM',
-          'target': aiReplyTarget,
-          'original': aiReplyOriginal
-        });
+        _localMessages.add({'role': 'SYSTEM', 'target': tgt, 'original': org});
       });
-      // AI 응답은 중앙 고정 — 읽기 좋은 위치에서 흔들리지 않도록
       _scrollToCurrent(_localMessages.length - 1);
     }
+    await _saveHistoryMessage(tgt, org, 'SYSTEM');
 
-    await _saveHistoryMessage(aiReplyTarget, aiReplyOriginal, 'SYSTEM');
-
-    // 5. TTS 재생 후 마이크 다시 켜기
-    if (aiTtsBytes != null) {
-      await _playAudioAndWait(aiTtsBytes);
+    // 내 타겟 소리로 재생 (직렬화)
+    _rememberGenerated(tgt);
+    _rememberGenerated(org);
+    final Uint8List? bytes = await _fetchTTSBytes(tgt, _myVoice());
+    if (bytes != null && _isConversationActive && !_isExiting) {
+      _setDuoState('playing');
+      await _playSerialized(bytes);
     }
-
-    if (_isConversationActive && _turnCounter == currentTurnId) {
-      _startWhisperRecording();
-    }
+    // 🆕 [PTT] 상대 발화 재생 후에도 자동 재녹음 금지 — 쿨다운 후 대기 복귀
+    _setDuoState('cooldown');
+    await Future.delayed(const Duration(milliseconds: 800));
+    _setDuoState('idle');
   }
 
 // ============================================================================
@@ -489,7 +740,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     }
   }
 
-  // 현재 말풍선을 화면 중앙에 고정 — AI 응답 추가 시 사용 (Roleplay 이식)
+  // 현재 말풍선을 화면 중앙에 고정 — 상대 응답 추가 시 사용 (Roleplay 이식)
   void _scrollToCurrent(int index) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
@@ -506,7 +757,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     });
   }
 
-  // 현재 말풍선을 화면 상단에 고정 — HOST 발화 추가 시 사용 (Roleplay 이식)
+  // 현재 말풍선을 화면 상단에 고정 — 내 발화 추가 시 사용 (Roleplay 이식)
   void _scrollToCurrentTop(int index) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final key = _itemKeys[index];
@@ -522,15 +773,40 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     });
   }
 
-  void _handleMicTap() {
+  // 🆕 [PTT] 버튼 누름 — 녹음 시작
+  void _onPttStart() {
     _resetIdleTimer();
-    setState(() => _isConversationActive = !_isConversationActive);
-    if (_isConversationActive) {
+    if (!_isConversationActive) {
+      setState(() => _isConversationActive = true);
+    }
+    // idle일 때만 시작(재생/처리/쿨다운 중이면 무시)
+    if (_duoState == 'idle') {
       _startWhisperRecording();
-    } else {
+    }
+  }
+
+  // 🆕 [PTT] 버튼 뗌 — 녹음 종료 후 전송
+  void _onPttEnd() {
+    _resetIdleTimer();
+    if (_duoState == 'recording') {
       _silenceTimer?.cancel();
-      _cancelAudio();
-      _turnCounter++;
+      _stopAndSendToWhisper();
+    }
+  }
+
+  // 🆕 [PTT] 버튼 상태별 표시 문구
+  String _pttLabel() {
+    switch (_duoState) {
+      case 'recording':
+        return 'Release to send';
+      case 'processing':
+        return 'Processing…';
+      case 'playing':
+        return 'Playing…';
+      case 'cooldown':
+        return '…';
+      default:
+        return 'Hold to talk';
     }
   }
 
@@ -580,8 +856,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
           .doc();
       await _myHistoryRef!.set({
         'created_at': FieldValue.serverTimestamp(),
+        'last_active': FieldValue.serverTimestamp(),
+        'last_message_time': FieldValue.serverTimestamp(),
         'room_name': "Duo Connect Mode",
-        'is_pinned': true,
+        'is_pinned': false,
         'msg_count': 0
       });
     }
@@ -596,8 +874,17 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
       await _myHistoryRef!.collection('messages').add({
         'role': role,
         'translated_text': target,
-        'original_text': original,
+        'original_text': (FFAppState().nativeLang.isNotEmpty &&
+                FFAppState().nativeLang == FFAppState().targetLang)
+            ? ''
+            : original,
         'created_at': FieldValue.serverTimestamp()
+      });
+      await _myHistoryRef!.update({
+        'last_message': target,
+        'last_active': FieldValue.serverTimestamp(),
+        'last_message_time': FieldValue.serverTimestamp(),
+        'msg_count': FieldValue.increment(1),
       });
     } catch (e) {}
   }
@@ -617,8 +904,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
           'isPartnerJoined': false,
         });
       }
+      // 🆕 호스트 식별 확정 + uid 확보
+      _amIHost = true;
+      _myUid = user.uid;
       // 2) listener 항상 재등록 (cancel 후 재등록으로 중복 구독 방지)
       _listenForPartnerJoined();
+      _listenForMessages(); // 🆕 공유 메시지 채널 리스너 시작
       // 3) 세션 활성화
       await _duoSessionRef!.update({
         'isDuoEnabled': true,
@@ -700,6 +991,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
       final String guestUid =
           firebaseUid ?? 'guest_${DateTime.now().millisecondsSinceEpoch}';
 
+      // 🆕 게스트 식별 확정
+      _amIHost = false;
+      _myUid = guestUid;
+
       await _duoSessionRef!.update({
         'isPartnerJoined': true,
         'partnerUid': guestUid,
@@ -712,7 +1007,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
       FFAppState().pendingInviteType = '';
       debugPrint('[AppState] duo invite state cleared (after successful join)');
 
-      debugPrint('[Duo] _joinAsGuest success — guestUid: $guestUid, roomId: $roomId');
+      debugPrint(
+          '[Duo] _joinAsGuest success — guestUid: $guestUid, roomId: $roomId');
+
+      // 🆕 공유 메시지 채널 리스너 시작 (게스트도 상대=호스트 발화 수신)
+      _listenForMessages();
 
       if (mounted) {
         setState(() {
@@ -720,7 +1019,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
           _isPartnerOnline = true;
         });
       }
-      _startWhisperRecording();
+      // 🆕 [과금정책] 게스트 본인 입장 성공 → 과금 시작
+      _startDuoBilling();
+      // 🆕 [PTT] 세션만 열고 녹음은 버튼으로 시작 — 자동 녹음 제거
     } catch (e) {
       debugPrint('[Duo] Guest join error: $e');
       if (mounted) {
@@ -757,7 +1058,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
           _isPartnerOnline = partnerJoined;
           if (shouldStartRecording) _isConversationActive = true;
         });
-        if (shouldStartRecording) _startWhisperRecording();
+        // 🆕 [과금정책] 게스트 입장 확정 시 과금 시작 / 퇴장 시 정지
+        if (partnerJoined) {
+          _startDuoBilling();
+        } else {
+          _stopDuoBilling();
+        }
+        // 🆕 [PTT] 입장 시 자동 녹음 제거 — 버튼으로만 시작
         // 게스트 퇴장 → 호스트 강제 종료 (1:1 대칭 종료 모델)
         if (guestJustLeft) _handleAutoSaveAndExit();
       }
@@ -767,10 +1074,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   Future<void> _handleAutoSaveAndExit() async {
     if (_isExiting) return;
     _isExiting = true;
+    _stopDuoBilling();
 
     // listener 즉시 해제 — 본인의 Firestore 업데이트가 listener를 재트리거하지 않도록
     _partnerJoinedSubscription?.cancel();
     _partnerJoinedSubscription = null;
+    _messageSubscription?.cancel(); // 🆕 메시지 채널 구독도 해제
+    _messageSubscription = null;
 
     _cancelAudio();
     _silenceTimer?.cancel();
@@ -809,7 +1119,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
         await _myHistoryRef!.update({
           'last_message': lastText.isNotEmpty ? lastText : "대화 기록 저장",
           'last_message_time': FieldValue.serverTimestamp(),
-          'msg_count': _localMessages.length,
           'last_active': FieldValue.serverTimestamp()
         });
       }
@@ -842,7 +1151,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
           if (didPop) return;
           await _handleAutoSaveAndExit();
         },
-        child: Container(
+        child: Stack(children: [
+          Container(
           width: widget.width,
           height: widget.height,
           color: const Color(0xFF121212),
@@ -854,7 +1164,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
                   child: Stack(children: [
                     _localMessages.isEmpty
                         ? const Center(
-                            child: Text("하단의 마이크 버튼을 눌러 통역을 시작하세요.",
+                            child: Text("마이크는 말하는 동안만 누르세요.",
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
                                     color: Colors.white54, height: 1.5)))
@@ -883,7 +1193,163 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
               ],
             ),
           ),
-        ));
+          ),
+          if (_showLangOverlay) _buildGuestLangOverlay(),
+        ]));
+  }
+
+  // 🆕 [게스트 언어 오버레이] 초대 게스트 입장 전 ORIGIN/TARGET 선택 게이트
+  Widget _buildGuestLangOverlay() {
+    const List<String> langs = [
+      'English',
+      'Japanese',
+      'Chinese',
+      'Spanish',
+      'French',
+      'German',
+      'Korean'
+    ];
+    String native =
+        langs.contains(FFAppState().nativeLang) ? FFAppState().nativeLang : 'Korean';
+    String target =
+        langs.contains(FFAppState().targetLang) ? FFAppState().targetLang : 'English';
+
+    Widget dropdown(String label, String value, Color labelColor,
+        ValueChanged<String?> onChanged,
+        {String? subtitle, bool subtitleBelow = false}) {
+      Widget labelWidget;
+      if (subtitle != null && !subtitleBelow) {
+        labelWidget = Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(label,
+                  style: TextStyle(
+                      color: labelColor,
+                      fontSize: 12,
+                      letterSpacing: 1,
+                      fontWeight: FontWeight.bold)),
+              const SizedBox(width: 6),
+              Text(subtitle,
+                  style: const TextStyle(
+                      color: Colors.white38, fontSize: 10, letterSpacing: 0.5)),
+            ]);
+      } else if (subtitle != null && subtitleBelow) {
+        labelWidget = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label,
+              style: TextStyle(
+                  color: labelColor,
+                  fontSize: 12,
+                  letterSpacing: 1,
+                  fontWeight: FontWeight.bold)),
+          const SizedBox(height: 2),
+          Text(subtitle,
+              style: const TextStyle(
+                  color: Colors.white38, fontSize: 10, letterSpacing: 0.3)),
+        ]);
+      } else {
+        labelWidget = Text(label,
+            style: TextStyle(
+                color: labelColor,
+                fontSize: 12,
+                letterSpacing: 1,
+                fontWeight: FontWeight.bold));
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          labelWidget,
+          const SizedBox(height: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.5),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.white24)),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                isExpanded: true,
+                value: value,
+                dropdownColor: const Color(0xFF1E1E1E),
+                icon: const Icon(Icons.unfold_more_rounded,
+                    color: Colors.white54, size: 20),
+                style: const TextStyle(
+                    color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
+                items: langs
+                    .map((l) => DropdownMenuItem<String>(value: l, child: Text(l)))
+                    .toList(),
+                onChanged: onChanged,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Positioned.fill(
+      child: Container(
+        color: Colors.black.withOpacity(0.78),
+        child: Center(
+          child: SingleChildScrollView(
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 28),
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                  color: const Color(0xFF1C1C1E),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: const Color(0xFF2563EB), width: 1.5)),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text("대화 언어 설정",
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  const Text("내 언어와 통역받을 언어를 선택하세요.",
+                      style: TextStyle(color: Colors.white54, fontSize: 13)),
+                  const SizedBox(height: 24),
+                  dropdown("ORIGIN", native, const Color(0xFF93C5FD), (val) {
+                    if (val != null) setState(() => FFAppState().nativeLang = val);
+                  }, subtitle: "(My Language)", subtitleBelow: false),
+                  const SizedBox(height: 18),
+                  dropdown("TARGET", target, const Color(0xFF4ADE80), (val) {
+                    if (val != null) setState(() => FFAppState().targetLang = val);
+                  },
+                      subtitle: "(Listening Language or Learning Language)",
+                      subtitleBelow: true),
+                  const SizedBox(height: 28),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2563EB),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12))),
+                    onPressed: () {
+                      final String? roomId = _pendingJoinRoomId;
+                      setState(() {
+                        _showLangOverlay = false;
+                        _pendingJoinRoomId = null;
+                      });
+                      if (roomId != null && roomId.isNotEmpty) {
+                        _joinAsGuest(roomId);
+                      }
+                    },
+                    child: const Text("입장하기",
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildPartnerIndicator() {
@@ -978,9 +1444,15 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
                       const Icon(Icons.timer_outlined,
                           color: Colors.white, size: 18),
                       const SizedBox(width: 6),
-                      Text("${remaining ~/ 60}m",
-                          style: const TextStyle(
-                              color: Colors.white, fontWeight: FontWeight.bold))
+                      Text(
+                        () {
+                          final int s = remaining.clamp(0, 999999);
+                          final int h = s ~/ 3600;
+                          final int m = (s % 3600) ~/ 60;
+                          return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+                        }(),
+                        style: const TextStyle(
+                            color: Colors.white, fontWeight: FontWeight.bold))
                     ]));
               }),
         ],
@@ -989,41 +1461,41 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   }
 
   Widget _buildControlArea(double bottomPadding) {
+    final bool isRec = _duoState == 'recording';
+    final bool isBusy = _duoState == 'processing' ||
+        _duoState == 'playing' ||
+        _duoState == 'cooldown';
+    final Color accent = isRec
+        ? Colors.redAccent
+        : (isBusy ? Colors.white38 : const Color(0xFF2563EB));
     return Container(
       padding: EdgeInsets.fromLTRB(24, 16, 24, bottomPadding),
       decoration: const BoxDecoration(color: Color(0xFF121212)),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Text("Duo Connect",
-              style: TextStyle(
+          Text(_pttLabel(),
+              style: const TextStyle(
                   color: Colors.white54,
-                  fontSize: 20,
+                  fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  letterSpacing: 1.5)),
-          GestureDetector(
-            onTap: _handleMicTap,
+                  letterSpacing: 1.0)),
+          Listener(
+            behavior: HitTestBehavior.opaque,
+            onPointerDown: (_) => _onPttStart(),
+            onPointerUp: (_) => _onPttEnd(),
+            onPointerCancel: (_) => _onPttEnd(),
             child: Container(
-                width: 64,
-                height: 64,
+                width: 72,
+                height: 72,
                 decoration: BoxDecoration(
-                    color: _isConversationActive
-                        ? Colors.redAccent.withOpacity(0.15)
-                        : const Color(0xFF2563EB).withOpacity(0.15),
+                    color: accent.withOpacity(0.15),
                     shape: BoxShape.circle,
-                    border: Border.all(
-                        color: _isConversationActive
-                            ? Colors.redAccent
-                            : const Color(0xFF2563EB),
-                        width: 2)),
+                    border: Border.all(color: accent, width: 2.5)),
                 child: Icon(
-                    _isConversationActive
-                        ? Icons.stop_rounded
-                        : Icons.mic_rounded,
-                    color: _isConversationActive
-                        ? Colors.redAccent
-                        : const Color(0xFF2563EB),
-                    size: 36)),
+                    isRec ? Icons.mic_rounded : Icons.mic_none_rounded,
+                    color: accent,
+                    size: 38)),
           ),
         ],
       ),
@@ -1033,7 +1505,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   Widget _buildTextBlock(Map<String, dynamic> msg) {
     String target = msg['target']?.toString() ?? '';
     String original = msg['original']?.toString() ?? '';
-    bool isHost = msg['role'] == 'HOST';
+    bool isHost = msg['role'] == 'HOST'; // 'HOST'=내 말(우측) / 그 외=상대 말(좌측)
 
     if (target.isEmpty) return const SizedBox.shrink();
     return Align(
@@ -1060,7 +1532,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
                       fontSize: 16 * _fontScale,
                       fontWeight: FontWeight.w600,
                       height: 1.3)),
-              if (_showOriginal && original.trim().isNotEmpty) ...[
+              if (_showOriginal &&
+                  !(FFAppState().nativeLang.isNotEmpty &&
+                      FFAppState().nativeLang == FFAppState().targetLang) &&
+                  original.trim().isNotEmpty) ...[
                 const SizedBox(height: 6),
                 Text(original,
                     textAlign: isHost ? TextAlign.right : TextAlign.left,
@@ -1077,56 +1552,42 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
 
 // ============================================================================
 // 📦 [Box 7-1: 듀오 전용 AI 뇌 (DuoBrain)]
-// OpenAI API 호출(양방향 동시 통역) 전용 클래스
+// 통역 전용 클래스 — 원문 1개를 받아 [내 타겟 + 내 오리지널] 동시 생성 (단일 GPT 호출)
+// ⚠️ 절대 대화에 끼어들지 않음. 오직 번역만 수행 (양방향 통역폰 규칙).
 // ============================================================================
 class DuoBrain {
   static final http.Client client = http.Client();
 
-  static Future<Map<String, String>?> processTranslation(
-      {required String key,
-      required String text,
-      required String targetLang,
-      required String originalLang,
-      List<Map<String, dynamic>> recentHistory = const []}) async {
+  static Future<Map<String, String>?> processTranslation({
+    required String key,
+    required String text,
+    required String srcLang,
+    required String myTargetLang,
+    required String myNativeLang,
+  }) async {
     try {
       Uri uri = Uri.parse('https://api.openai.com/v1/chat/completions');
 
-      // 최근 대화 히스토리를 GPT 컨텍스트로 변환 (최대 6턴)
-      final historyLines = <String>[];
-      for (final msg
-          in recentHistory.reversed.take(6).toList().reversed) {
-        final role = msg['role'] == 'HOST' ? 'User' : 'AI';
-        final content = msg['target']?.toString() ?? '';
-        if (content.isNotEmpty) historyLines.add('[$role]: $content');
-      }
-      final historyContext = historyLines.isEmpty
-          ? '(No prior conversation)'
-          : historyLines.join('\n');
-
-      String prompt = "You are a Duo Mode AI conversation partner.\n"
-          "The user speaks $originalLang. Respond in $targetLang.\n\n"
-          "=== RECENT CONVERSATION ===\n"
-          "$historyContext\n\n"
-          "=== SUBJECT AMBIGUITY GUARD ===\n"
-          "Before responding, determine: is it clear WHO or WHAT the user is asking about?\n"
-          "Trigger clarification if ANY of these apply:\n"
-          "• A person name/role (호진, 아들, 엄마, 선생님, 걔, 그 사람) appears but the referent is unclear\n"
-          "• The question involves scores, exams, schedules, or states — and WHOSE is not established\n"
-          "• Short utterance uses pronouns only (걔, 그거, 이번에) with no context to resolve them\n"
-          "• Examples that MUST trigger clarification: '몇 점 받을 것 같아?', '괜찮을까?', '어떻게 됐어?'\n\n"
-          "Decision rule:\n"
-          "✅ Subject is clear from utterance OR resolved from history → respond naturally in $targetLang\n"
-          "❌ Subject is ambiguous AND history cannot resolve it → ask a SHORT clarification question\n\n"
-          "ABSOLUTE PROHIBITION:\n"
-          "• NEVER assume the speaker ('I/you') is the subject when a third person was mentioned or implied\n"
-          "• NEVER produce: 'I think I'll score…', 'You might get…', '제가 받을 것 같아요'\n\n"
-          "=== OUTPUT (strict JSON) ===\n"
+      String prompt = "You are a translation engine for a live interpreter app.\n"
+          "You receive ONE utterance and render it into TWO languages.\n"
+          "You are NOT a chat assistant. NEVER reply, comment, answer, or ask questions.\n"
+          "NEVER continue the conversation. Translate the utterance only.\n\n"
+          "Utterance language: $srcLang\n"
+          "Output A (target): $myTargetLang\n"
+          "Output B (native): $myNativeLang\n\n"
+          "Rules:\n"
+          "1. \"target\" = the utterance translated into $myTargetLang.\n"
+          "2. \"original\" = the utterance translated into $myNativeLang.\n"
+          "3. If the utterance is already in one of these languages, just clean it up (fix spacing/typos) for that field.\n"
+          "4. Preserve tone, intent, names, and numbers exactly. Do not add or remove meaning.\n"
+          "5. If the utterance is unclear or empty, output an empty string for both fields. Never invent content.\n"
+          "6. Output strict JSON only, nothing else.\n\n"
+          "Output format:\n"
           "{\n"
-          "  \"needs_clarification\": <true or false>,\n"
-          "  \"translated_text\": \"<$targetLang: your response OR clarification question>\",\n"
-          "  \"original_input\": \"<Korean: gloss of your response OR clarification note>\"\n"
+          "  \"target\": \"<utterance in $myTargetLang>\",\n"
+          "  \"original\": \"<utterance in $myNativeLang>\"\n"
           "}\n\n"
-          "User said: \"$text\"";
+          "Utterance: \"$text\"";
 
       var res = await client
           .post(uri,
@@ -1136,8 +1597,8 @@ class DuoBrain {
               },
               body: jsonEncode({
                 'model': 'gpt-4o-mini',
-                'temperature': 0.3,
-                'max_tokens': 300,
+                'temperature': 0.2,
+                'max_tokens': 400,
                 'response_format': {'type': 'json_object'},
                 'messages': [
                   {'role': 'user', 'content': prompt}
@@ -1151,10 +1612,8 @@ class DuoBrain {
                 ['content']);
         var parsed = jsonDecode(cleanJson);
         return {
-          'translated_text': parsed['translated_text']?.toString() ?? "",
-          'original_input': parsed['original_input']?.toString() ?? "",
-          'needs_clarification':
-              (parsed['needs_clarification'] == true).toString(),
+          'target': parsed['target']?.toString() ?? "",
+          'original': parsed['original']?.toString() ?? "",
         };
       }
     } catch (e) {

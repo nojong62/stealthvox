@@ -7,6 +7,7 @@ import 'index.dart'; // Imports other custom widgets
 import '/custom_code/actions/index.dart'; // Imports custom actions
 import '/flutter_flow/custom_functions.dart'; // Imports custom functions
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 // Begin custom widget code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
@@ -41,6 +42,7 @@ class ChatHistoryListMaster extends StatefulWidget {
 class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
   String _selectedFilter = 'All';
   Set<String> _selectedDocIds = {};
+  final List<String> _historyDebugLogs = [];
 
   // ── Idle Timeout (무반응 과금 정지, History List: 자동 이동 없음) ──────────
   // 🔧 틱 방식: 1초마다 활동 여부 확인. 키퍼 재생/튜터링/녹음 중엔 카운터 0 유지.
@@ -54,6 +56,120 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
         _keeperIsRecording ||
         _isPlayingKeeper ||
         _keeperIsPlayingCorrected;
+  }
+
+  void _histDbg(String message) {
+    final timestamp = DateFormat('HH:mm:ss.SSS').format(DateTime.now());
+    final line = '[$timestamp] [HIST-DBG] $message';
+    debugPrint(line);
+    _historyDebugLogs.add(line);
+    if (_historyDebugLogs.length > 500) {
+      _historyDebugLogs.removeRange(0, _historyDebugLogs.length - 500);
+    }
+  }
+
+  void _showHistoryDebugLogDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, dialogSetState) {
+          final logText = _historyDebugLogs.isEmpty
+              ? '(로그 없음)'
+              : _historyDebugLogs.join('\n');
+          return AlertDialog(
+            backgroundColor: const Color(0xFF1C1C1E),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            titlePadding: const EdgeInsets.fromLTRB(20, 16, 8, 0),
+            contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+            title: Row(
+              children: [
+                const Icon(Icons.bug_report_rounded,
+                    color: Colors.amber, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '히스토리 리스트 진단 로그 (${_historyDebugLogs.length})',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16),
+                  ),
+                ),
+                IconButton(
+                  icon:
+                      const Icon(Icons.close, color: Colors.white38, size: 20),
+                  onPressed: () => Navigator.pop(ctx),
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 32, minHeight: 32),
+                ),
+              ],
+            ),
+            content: SizedBox(
+              width: double.maxFinite,
+              height: MediaQuery.of(ctx).size.height * 0.64,
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.24),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: SingleChildScrollView(
+                  child: SelectableText(
+                    logText,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 12,
+                      height: 1.35,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () async {
+                  final messenger = ScaffoldMessenger.of(context);
+                  await Clipboard.setData(
+                      ClipboardData(text: _historyDebugLogs.join('\n')));
+                  if (mounted) {
+                    messenger.showSnackBar(
+                      const SnackBar(
+                        content: Text('히스토리 진단 로그가 복사되었습니다.'),
+                        backgroundColor: Colors.amber,
+                      ),
+                    );
+                  }
+                },
+                child: const Text('전체 복사',
+                    style: TextStyle(
+                        color: Colors.amber, fontWeight: FontWeight.bold)),
+              ),
+              TextButton(
+                onPressed: () => dialogSetState(() {}),
+                child:
+                    const Text('새로고침', style: TextStyle(color: Colors.white70)),
+              ),
+              TextButton(
+                onPressed: () {
+                  _historyDebugLogs.clear();
+                  dialogSetState(() {});
+                },
+                child: const Text('지우기',
+                    style: TextStyle(color: Colors.redAccent)),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('닫기', style: TextStyle(color: Colors.grey)),
+              ),
+            ],
+          );
+        },
+      ),
+    );
   }
 
   void _resetIdleTimer() {
@@ -191,7 +307,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
     if (_isExpandRoom(roomName)) return const Color(0xFFEA580C);
     if (roomName.contains("Shadowing")) return Colors.greenAccent;
     if (roomName.contains("NativeSync")) return Colors.orangeAccent;
-    if (roomName.contains("Free Talk")) return Colors.pinkAccent;
+    if (roomName.contains("Free Talk")) return const Color(0xFF9333EA);
     return Colors.white54;
   }
 
@@ -231,18 +347,23 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
             ),
           ],
         ),
-        title: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: BoxDecoration(
-            color: const Color(0xFF3B82F6).withOpacity(0.15),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-                color: const Color(0xFF3B82F6).withOpacity(0.5), width: 1.5),
-          ),
-          child: const Text(
-            "Study Room",
-            style: TextStyle(
-                color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+        title: GestureDetector(
+          onLongPress: _showHistoryDebugLogDialog,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF3B82F6).withOpacity(0.15),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                  color: const Color(0xFF3B82F6).withOpacity(0.5), width: 1.5),
+            ),
+            child: const Text(
+              "Study Room",
+              style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13),
+            ),
           ),
         ),
         centerTitle: true,
@@ -299,8 +420,10 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
           .snapshots(),
       builder: (context, snapshot) {
         // 🔍 [HIST-DBG] 임시 진단 (확인 후 git restore로 제거)
-        debugPrint(
-            '[HIST-DBG] hasError=${snapshot.hasError} hasData=${snapshot.hasData} err=${snapshot.error}');
+        _histDbg(
+            'uid=${currentUserReference?.id} selectedFilter=$_selectedFilter');
+        _histDbg(
+            'hasError=${snapshot.hasError} hasData=${snapshot.hasData} err=${snapshot.error}');
         if (!snapshot.hasData) {
           return const Center(
               child: CircularProgressIndicator(color: Colors.amber));
@@ -310,20 +433,21 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
 
         // 🔍 [HIST-DBG] allDocs 진단
         final _dbgExpandAll = allDocs.where((d) {
-          final rn =
-              ((d.data() as Map<String, dynamic>)['room_name'] ?? '').toString();
+          final rn = ((d.data() as Map<String, dynamic>)['room_name'] ?? '')
+              .toString();
           return _isExpandRoom(rn);
         }).toList();
-        debugPrint(
-            '[HIST-DBG] allDocs=${allDocs.length} step_expand_in_all=${_dbgExpandAll.length}');
+        _histDbg(
+            'allDocs=${allDocs.length} step_expand_in_all=${_dbgExpandAll.length}');
         for (final d in _dbgExpandAll) {
           final data = d.data() as Map<String, dynamic>;
           final caVal = data['created_at'];
           final ipVal = data['is_pinned'];
-          final lmSnip = data['last_message']?.toString().replaceAll('\n', ' ') ?? 'null';
-          final lmPreview = lmSnip.length > 30 ? lmSnip.substring(0, 30) : lmSnip;
-          debugPrint(
-              '[HIST-DBG] expand id=${d.id} room_name=${data['room_name']} '
+          final lmSnip =
+              data['last_message']?.toString().replaceAll('\n', ' ') ?? 'null';
+          final lmPreview =
+              lmSnip.length > 30 ? lmSnip.substring(0, 30) : lmSnip;
+          _histDbg('expand id=${d.id} room_name=${data['room_name']} '
               'created_at=$caVal (${caVal?.runtimeType}) '
               'is_pinned=$ipVal (${ipVal?.runtimeType}) '
               'last_message=$lmPreview');
@@ -341,12 +465,12 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
 
         // 🔍 [HIST-DBG] filteredDocs 진단
         final _dbgExpandFiltered = filteredDocs.where((d) {
-          final rn =
-              ((d.data() as Map<String, dynamic>)['room_name'] ?? '').toString();
+          final rn = ((d.data() as Map<String, dynamic>)['room_name'] ?? '')
+              .toString();
           return _isExpandRoom(rn);
         }).toList();
-        debugPrint(
-            '[HIST-DBG] filteredDocs=${filteredDocs.length} step_expand_in_filtered=${_dbgExpandFiltered.length} selectedFilter=$_selectedFilter');
+        _histDbg(
+            'filteredDocs=${filteredDocs.length} step_expand_in_filtered=${_dbgExpandFiltered.length} selectedFilter=$_selectedFilter');
 
         if (filteredDocs.isEmpty) {
           return Center(
@@ -533,7 +657,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
           children: _selectedFilter == 'All' || _selectedFilter == 'Keepers'
               ? [
                   _buildFilterChip('Duo', 'Duo', Icons.people),
-                  _buildFilterChip('Clone', 'Clone', Icons.face),
+                  _buildFilterChip('Free Talk', 'Free Talk', Icons.forum),
                   _buildFilterChip('Roleplay', 'Roleplay', Icons.smart_toy),
                   _buildFilterChip('Expand', 'Expand', Icons.trending_up),
                   _buildKeepersChip(),
@@ -1835,25 +1959,10 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
   }
 }
 
-const String _kManualText = r'''[StealthVox 스터디룸 — 내 영어의 비밀 훈련 기지]
+const String _kManualText = r'''
+스터디룸에서는 대화방의 자료를 전달받아, 
+입을 열어 말하는 훈련을 합니다.
 
-말이 나와야 영어가 됩니다.
-StealthVox는 읽고 외우는 영어가 아닌,
-입을 열어 말하는 훈련에만 집중합니다.
-
-────────────────────────
-📂 대화 목록
-- 아이콘으로 모드 구분 (Duo / Clone / Roleplay / Expand)
-- 상단 필터로 원하는 모드만 모아보기
-
-🗣️ 4가지 훈련 모드
-- Expand — 짧은 말을 긴 문장으로 확장하는 훈련
-- Roleplay — 카페, 직장, 일상 속 상황극으로 실전 회화
-- Clone — 내가 좋아하는 사람 말투를 복사해서 대화
-- Duo — 외국인과 실시간 동시통역.
-         비회원도 초대 링크 하나로 바로 입장
-
-────────────────────────
 🎧 소리 듣기 — 쉐도잉 연습
 저장된 대화의 영어 문장을 원어민 발음으로 들으며
 내 발음과 리듬을 맞춰가는 쉐도잉 훈련입니다.
@@ -1873,12 +1982,10 @@ AI와 역할을 바꿔가며 실제 대화처럼 연습합니다.
 AI 발음과 내 발음을 전체 문장으로 비교하며
 AI 발음을 닮아가는 정밀 훈련입니다.
 
-────────────────────────
 💾 Keepers — 내 표현 보관함
 마음에 드는 문장을 탭하면 저장.
 기록을 지워도 Keepers는 남습니다.
 
-────────────────────────
 ⏸️ Auto Pause — 자동 과금 보호
 60초 이상 반응이 없으면 자동으로 일시정지되어 과금이 멈춥니다.
 다시 말을 시작하거나 화면을 터치하면 자동으로 재개됩니다.
