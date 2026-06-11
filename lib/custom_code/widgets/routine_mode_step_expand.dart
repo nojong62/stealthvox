@@ -134,14 +134,34 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   bool _isQuestionDissatisfactionRaw(String text) {
     final t = text.trim().toLowerCase();
     const kws = [
-      '질문이 뭐', '무슨 질문이', '그 질문', '이 질문',
-      '다른 거 물어봐', '다른 질문', '다른 걸 물어봐',
-      '뭐야 그게', '뭐야 이게', '그게 뭐야',
-      '별론데', '재미없어', '이상한 질문', '이상하네',
-      '그건 좀 아닌', '그건 별로', '그건 싫어', '그런 거 말고',
-      '질문 바꿔', '바꿔줘', '다른 걸로',
-      'ask something else', 'change the question',
-      'different question', "don't like that question",
+      '질문이 뭐',
+      '무슨 질문이',
+      '그 질문',
+      '이 질문',
+      '다른 거 물어봐',
+      '다른 질문',
+      '다른 걸 물어봐',
+      '뭐야 그게',
+      '뭐야 이게',
+      '그게 뭐야',
+      '별론데',
+      '재미없어',
+      '이상한 질문',
+      '이상하네',
+      '그건 좀 아닌',
+      '그건 별로',
+      '그건 싫어',
+      '그런 거 말고',
+      '질문 바꿔',
+      '바꿔줘',
+      '다른 걸로',
+      '마음에 안 들어',
+      '맘에 안 들어',
+      '같은 질문',
+      'ask something else',
+      'change the question',
+      'different question',
+      "don't like that question",
     ];
     for (final kw in kws) {
       if (t.contains(kw)) return true;
@@ -355,7 +375,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       // mode alias: free_talk, freetalk, freeTalk, ai_free_talk, free_talk_mode
       bool isFtMode(String m) {
         final n = m.toLowerCase().replaceAll(' ', '_').replaceAll('-', '_');
-        return n == 'free_talk' || n == 'freetalk' || n == 'ai_free_talk' || n == 'free_talk_mode';
+        return n == 'free_talk' ||
+            n == 'freetalk' ||
+            n == 'ai_free_talk' ||
+            n == 'free_talk_mode';
       }
 
       final freeTalkRooms = roomsSnap.docs
@@ -383,27 +406,84 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 
       // 필러 판정
       const fillerPatterns = [
-        '네', '응', '어', '그래', '맞아', '맞아요', '좋아', '좋아요',
-        '글쎄', 'ok', 'okay', '음', '아', '오', '그래요', '그러니까',
-        '그렇구나', '알겠어', '알겠습니다', 'yes', 'yeah', 'sure',
-        'right', 'thank you', 'thanks',
+        '네',
+        '응',
+        '어',
+        '그래',
+        '맞아',
+        '맞아요',
+        '좋아',
+        '좋아요',
+        '글쎄',
+        'ok',
+        'okay',
+        '음',
+        '아',
+        '오',
+        '그래요',
+        '그러니까',
+        '그렇구나',
+        '알겠어',
+        '알겠습니다',
+        'yes',
+        'yeah',
+        'sure',
+        'right',
+        'thank you',
+        'thanks',
+      ];
+      // 과거 불만/메타 발화는 새 seed 주제로 부적합하다.
+      const complaintPatterns = [
+        '질문',
+        '물어봐',
+        '물어보',
+        '다시마',
+        '이상하',
+        '별로',
+        '뭐야',
+        '바꿔',
+        '그런거말고',
+        '그런것말고',
+        '이거',
+        '다른거',
+        '다른걸',
+        '마음에안',
+        '맘에안',
+        'question',
+        'askme',
+        'weird',
       ];
       bool isFiller(String s) {
         final t = s.replaceAll(RegExp(r'[\s\.,!?~…]'), '').toLowerCase();
         if (t.length < 6) return true;
-        return fillerPatterns.contains(t);
+        if (fillerPatterns.contains(t)) return true;
+        for (final p in complaintPatterns) {
+          if (t.contains(p)) return true;
+        }
+        return false;
       }
 
       // role 판정 fallback: HOST, USER, host, user
       bool isHostRole(Map<String, dynamic> data) {
-        final role = (data['role'] ?? data['speaker_role'] ?? data['sender'] ?? '').toString().toUpperCase();
+        final role =
+            (data['role'] ?? data['speaker_role'] ?? data['sender'] ?? '')
+                .toString()
+                .toUpperCase();
         return role == 'HOST' || role == 'USER';
       }
 
       // 메시지 텍스트 추출 fallback
       String extractText(Map<String, dynamic> data) {
-        final orig = (data['original_text'] ?? data['original'] ?? data['text'] ?? data['message'] ?? data['content'] ?? '').toString().trim();
-        final tgt = (data['translated_text'] ?? data['target'] ?? '').toString().trim();
+        final orig = (data['original_text'] ??
+                data['original'] ??
+                data['text'] ??
+                data['message'] ??
+                data['content'] ??
+                '')
+            .toString()
+            .trim();
+        final tgt =
+            (data['translated_text'] ?? data['target'] ?? '').toString().trim();
         return orig.isNotEmpty ? orig : tgt;
       }
 
@@ -448,7 +528,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       // mode alias: roleplay, role_play, routine_mode_roleplay
       bool isRpMode(String m) {
         final n = m.toLowerCase().replaceAll(' ', '_').replaceAll('-', '_');
-        return n == 'roleplay' || n == 'role_play' || n == 'routine_mode_roleplay' || n == 'roleplaying';
+        return n == 'roleplay' ||
+            n == 'role_play' ||
+            n == 'routine_mode_roleplay' ||
+            n == 'roleplaying';
       }
 
       final rpRooms = roomsSnap.docs
@@ -474,27 +557,84 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       await prefs.setStringList(usedKey, newUsed.toList());
 
       const fillerPatterns = [
-        '네', '응', '음', '그래', '맞아', '맞아요', '좋아', '좋아요',
-        '글쎄', 'ok', 'okay', '오케이', '아', '어', '그래요', '그럴까',
-        '그렇구나', '고마워', '고맙습니다', 'yes', 'yeah', 'sure',
-        'right', 'thank you', 'thanks',
+        '네',
+        '응',
+        '음',
+        '그래',
+        '맞아',
+        '맞아요',
+        '좋아',
+        '좋아요',
+        '글쎄',
+        'ok',
+        'okay',
+        '오케이',
+        '아',
+        '어',
+        '그래요',
+        '그럴까',
+        '그렇구나',
+        '고마워',
+        '고맙습니다',
+        'yes',
+        'yeah',
+        'sure',
+        'right',
+        'thank you',
+        'thanks',
+      ];
+      // 과거 불만/메타 발화는 새 seed 주제로 부적합하다.
+      const complaintPatterns = [
+        '질문',
+        '물어봐',
+        '물어보',
+        '다시마',
+        '이상하',
+        '별로',
+        '뭐야',
+        '바꿔',
+        '그런거말고',
+        '그런것말고',
+        '이거',
+        '다른거',
+        '다른걸',
+        '마음에안',
+        '맘에안',
+        'question',
+        'askme',
+        'weird',
       ];
       bool isFiller(String s) {
         final t = s.replaceAll(RegExp(r'[\s\.,!?~…]'), '').toLowerCase();
         if (t.length < 6) return true;
-        return fillerPatterns.contains(t);
+        if (fillerPatterns.contains(t)) return true;
+        for (final p in complaintPatterns) {
+          if (t.contains(p)) return true;
+        }
+        return false;
       }
 
       // role 판정 fallback
       bool isHostRole(Map<String, dynamic> data) {
-        final role = (data['role'] ?? data['speaker_role'] ?? data['sender'] ?? '').toString().toUpperCase();
+        final role =
+            (data['role'] ?? data['speaker_role'] ?? data['sender'] ?? '')
+                .toString()
+                .toUpperCase();
         return role == 'HOST' || role == 'USER';
       }
 
       // 메시지 텍스트 추출 fallback
       String extractText(Map<String, dynamic> data) {
-        final orig = (data['original_text'] ?? data['original'] ?? data['text'] ?? data['message'] ?? data['content'] ?? '').toString().trim();
-        final tgt = (data['translated_text'] ?? data['target'] ?? '').toString().trim();
+        final orig = (data['original_text'] ??
+                data['original'] ??
+                data['text'] ??
+                data['message'] ??
+                data['content'] ??
+                '')
+            .toString()
+            .trim();
+        final tgt =
+            (data['translated_text'] ?? data['target'] ?? '').toString().trim();
         return orig.isNotEmpty ? orig : tgt;
       }
 
@@ -627,8 +767,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     final List<String> rpSnippets = await _fetchRoleplayUserSnippets();
 
     // [SEED 로그]
-    _log('[SEED-FT]', 'count=${ftSnippets.length}, picked=${ftSnippets.join(" | ")}');
-    _log('[SEED-RP]', 'count=${rpSnippets.length}, picked=${rpSnippets.join(" | ")}');
+    _log('[SEED-FT]',
+        'count=${ftSnippets.length}, picked=${ftSnippets.join(" | ")}');
+    _log('[SEED-RP]',
+        'count=${rpSnippets.length}, picked=${rpSnippets.join(" | ")}');
     final String _seedSource = ftSnippets.isNotEmpty && rpSnippets.isNotEmpty
         ? 'freeTalk+roleplay'
         : ftSnippets.isNotEmpty
@@ -636,9 +778,12 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
             : rpSnippets.isNotEmpty
                 ? 'roleplayOnly'
                 : 'fallback';
-    _log('[SEED-MIX]', 'ft=${ftSnippets.length}, rp=${rpSnippets.length}, source=$_seedSource');
+    _log('[SEED-MIX]',
+        'ft=${ftSnippets.length}, rp=${rpSnippets.length}, source=$_seedSource');
 
-    if ((ftSnippets.isNotEmpty || rpSnippets.isNotEmpty) && mounted && _isConversationActive) {
+    if ((ftSnippets.isNotEmpty || rpSnippets.isNotEmpty) &&
+        mounted &&
+        _isConversationActive) {
       // 히스토리 기반 첫 질문 → "기본 문장 말하세요" 안내 생략
       await _generateAndPlayFreeTalkSeedQuestion(ftSnippets, rpSnippets);
     } else {
@@ -1698,7 +1843,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 // 📦 [Box 5-RETRY: 재질문 처리]
 // ====================================================================
   Future<void> _handleRetryQuestion(String contextStr, String targetLangName,
-      {bool isDifferent = false, bool isMisheard = false, bool silentReplace = false}) async {
+      {bool isDifferent = false,
+      bool isMisheard = false,
+      bool silentReplace = false,
+      String rejectedQuestion = ''}) async {
     _log(
         '🔄 [RETRY]',
         isMisheard
@@ -1746,6 +1894,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       userId: FirebaseAuth.instance.currentUser?.uid ?? '',
       isRetry: !isDifferent && !isMisheard,
       isDifferent: isDifferent,
+      rejectedQuestion: rejectedQuestion,
     );
 
     final questionTts = ChunkedTtsFetcher(
@@ -1764,6 +1913,11 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     String aiOriginalRetry = "";
     String aiBuffer = "";
     bool aiRetryHasDoubleNewline = false;
+
+    // _swTTS..reset()..start();
+    _swTTS
+      ..reset()
+      ..start(); // 재질문 경로도 발사 ms를 새로 측정한다.
 
     await for (final chunk in aiStream) {
       if (!aiRetryHasDoubleNewline) {
@@ -1875,7 +2029,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       _log('🟠 [FAST-DISSATISFIED]', '로컬 fast-lane 감지: "$finalTranscript"');
       _turnCounter--; // 불만 발화는 학습 턴 미적용
       if (mounted) {
-        setState(() => _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP'));
+        setState(
+            () => _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP'));
       }
       // Clean context: 거절된 질문(마지막 SYSTEM) 제거
       var _fastCleanMsgs = _localMessages.where((m) {
@@ -1883,7 +2038,11 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         final target = (m['target'] ?? '').toString().trim();
         return target.isNotEmpty && target != '...';
       }).toList();
-      final _fclSysIdx = _fastCleanMsgs.lastIndexWhere((m) => m['role'] == 'SYSTEM');
+      final _fclSysIdx =
+          _fastCleanMsgs.lastIndexWhere((m) => m['role'] == 'SYSTEM');
+      final String _fclRejected = _fclSysIdx != -1
+          ? (_fastCleanMsgs[_fclSysIdx]['target'] ?? '').toString().trim()
+          : '';
       if (_fclSysIdx != -1) _fastCleanMsgs.removeAt(_fclSysIdx);
       final List<String> _fclLines = [];
       String _fclLatestExp = '';
@@ -1891,7 +2050,11 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         final t = (m['target'] ?? '').toString().trim();
         if (m['role'] == 'HOST') {
           final idx = t.indexOf('\n\n');
-          final exp = idx < 0 ? t : (t.substring(idx + 2).trim().isNotEmpty ? t.substring(idx + 2).trim() : t.substring(0, idx).trim());
+          final exp = idx < 0
+              ? t
+              : (t.substring(idx + 2).trim().isNotEmpty
+                  ? t.substring(idx + 2).trim()
+                  : t.substring(0, idx).trim());
           _fclLines.add("User: $exp");
           _fclLatestExp = exp;
         } else {
@@ -1900,10 +2063,16 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       }
       String _fclCtx = _fclLines.join("\n");
       if (_fclLatestExp.isNotEmpty) {
-        _fclCtx += "\n\n[Most recent expanded sentence to grow from]: $_fclLatestExp";
+        _fclCtx +=
+            "\n\n[Most recent expanded sentence to grow from]: $_fclLatestExp";
       }
-      final String _fclLang = FFAppState().targetLang.isNotEmpty ? FFAppState().targetLang : 'English';
-      await _handleRetryQuestion(_fclCtx, _fclLang, isDifferent: true, silentReplace: true);
+      final String _fclLang = FFAppState().targetLang.isNotEmpty
+          ? FFAppState().targetLang
+          : 'English';
+      await _handleRetryQuestion(_fclCtx, _fclLang,
+          isDifferent: true,
+          silentReplace: true,
+          rejectedQuestion: _fclRejected);
       return;
     }
 
@@ -2165,7 +2334,11 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           return target.isNotEmpty && target != '...';
         }).toList();
         // 방금 불만 버블(hostIndex)은 빈 target일 수 있으니 위에서 걸러짐 — 마지막 SYSTEM(거절된 질문) 제거
-        final dissLastSysIdx = dissCleanMsgs.lastIndexWhere((m) => m['role'] == 'SYSTEM');
+        final dissLastSysIdx =
+            dissCleanMsgs.lastIndexWhere((m) => m['role'] == 'SYSTEM');
+        final String dissRejected = dissLastSysIdx != -1
+            ? (dissCleanMsgs[dissLastSysIdx]['target'] ?? '').toString().trim()
+            : '';
         if (dissLastSysIdx != -1) dissCleanMsgs.removeAt(dissLastSysIdx);
         final List<String> dissCleanLines = [];
         String dissLatestExpanded = '';
@@ -2186,7 +2359,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         }
         String dissCleanCtx = dissCleanLines.join("\n");
         if (dissLatestExpanded.isNotEmpty) {
-          dissCleanCtx += "\n\n[Most recent expanded sentence to grow from]: $dissLatestExpanded";
+          dissCleanCtx +=
+              "\n\n[Most recent expanded sentence to grow from]: $dissLatestExpanded";
         }
         if (mounted) {
           setState(() {
@@ -2197,7 +2371,9 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           });
         }
         await _handleRetryQuestion(dissCleanCtx, targetLangName,
-            isDifferent: true, silentReplace: true);
+            isDifferent: true,
+            silentReplace: true,
+            rejectedQuestion: dissRejected);
         return;
       }
 
@@ -2370,8 +2546,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         } else {
           _restateConfirmPending = true;
           final String heard = finalTranscript.trim();
-          checkPhrase =
-              "방금, $heard, 라고 말씀하신 건가요? 맞다면 그대로 다시 한 번 말해 주세요.";
+          checkPhrase = "방금, $heard, 라고 말씀하신 건가요? 맞다면 그대로 다시 한 번 말해 주세요.";
         }
         _ttsQueueManager.setUserTurn(false);
         _ttsQueueManager.setAiPaused(false);
@@ -3885,8 +4060,14 @@ class HybridTtsPlayer {
       onLog?.call('[HYB-02]', 'remainder fired (${remainder.length}c)');
     }
 
-    // 2. TtsCache 저장 (재생 없음)
-    if (fullSentence.trim().isEmpty) return;
+    // 2. TtsCache 저장은 백그라운드 fire-and-forget으로 분리한다.
+    final sentence = fullSentence.trim();
+    if (sentence.isEmpty) return;
+    unawaited(_cacheFullSentenceInBackground(sentence));
+  }
+
+  // _cacheFullSentenceInBackground: 통문장 캐시 저장을 await하지 않는 백그라운드 작업.
+  Future<void> _cacheFullSentenceInBackground(String fullSentence) async {
     try {
       final cached = await TtsCache.get(fullSentence, voice);
       if (cached != null && cached.isNotEmpty) {
@@ -5172,6 +5353,7 @@ Output: [GARBLED]
     String userId = '',
     bool isRetry = false,
     bool isDifferent = false,
+    String rejectedQuestion = '',
   }) async* {
     final client = http.Client();
     try {
@@ -5406,8 +5588,9 @@ BANNED — never output any of the following:
   - Pressure-heavy interrogation ("Why did you do that?", "What was your reason?", "Explain why~")
 ${isDifferent ? """- [DISSATISFIED — REPLACEMENT QUESTION REQUIRED]
   The user rejected the last AI question. That question is now permanently BANNED.
+${rejectedQuestion.trim().isNotEmpty ? '  BANNED QUESTION (verbatim): "${rejectedQuestion.trim()}"' : ''}
   Rules:
-  • Rejected question must NEVER be rephrased, simplified, or reused in any form.
+  • The banned question must NEVER be repeated, rephrased, simplified, or reused in any form.
   • Do NOT ask about the same object, action, time, reason, or topic as the banned question.
   • Choose a completely different emotional or situational angle.
   • If the context is thin (early turns), ask about a different aspect of what the user mentioned.
