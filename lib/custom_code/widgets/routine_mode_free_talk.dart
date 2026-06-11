@@ -3369,6 +3369,9 @@ The user is complaining about the AI's LAST reply itself and wants a different o
 OR the user did not catch / did not like the AI's last QUESTION and asks for it to be repeated, rephrased, or replaced.
 Signs: "무슨 대답이 그래" / "무슨 질문이 그래" / "대답이 이상해" / "다른 말 해줘" / "다시 대답해 봐" / "그 대답 별로야" / "say something else" / "that's a weird reply" / "answer again"
 More signs (question complaints): "뭐라고 물었어" / "뭐라고 물은 거야" / "다시 물어봐" / "제대로 다시 물어봐" / "질문 다시 해줘" / "다른 질문 해줘" / "what did you ask" / "ask me again" / "ask a different question"
+More signs (MILD dissatisfaction — these ALSO count): "별로" / "별론데" / "아 그건 좀" / "에이" / "그런 거 말고" / "그건 없어" / "재미없어" / "이상하네" / "뭐야 그게" / "meh" / "not really" / "hmm, not that one"
+Even slight or indirect displeasure aimed at the AI's last reply or question counts as [DISSATISFIED].
+Do NOT confuse this with a negative ANSWER to the question (e.g., "아니, 안 갔어" = a valid answer, NOT dissatisfaction).
 If so, output EXACTLY: [DISSATISFIED]  (and nothing else)''';
 
       final sysPrompt =
@@ -3530,10 +3533,11 @@ The particle before the verb's doer (이/가) is ALWAYS the subject. Never swap 
             "No idioms, no phrasal verbs, no slang. "
             "Speak as if talking to a young child learning the language.";
       case "Advanced":
-        return "ADVANCED (CEFR C1-C2). Speak exactly like an educated native adult. "
-            "Freely use idioms, phrasal verbs, colloquial slang, and witty or nuanced expressions. "
+        return "ADVANCED (CEFR C1-C2). Speak like a refined, well-educated native adult. "
+            "Use sophisticated, precise vocabulary and elegant, polished expressions. "
+            "Refined idioms and nuanced word choice are welcome; NO slang, NO vulgar or overly casual wording. "
             "Use varied grammar such as conditionals, relative clauses, and perfect tenses. "
-            "Do not simplify anything.";
+            "CRITICAL: Elevate WORD CHOICE only. NEVER make replies longer — keep the exact same brevity as the other levels (usually ONE short sentence).";
       case "Intermediate":
       default:
         return "INTERMEDIATE (CEFR B1-B2). Use everyday vocabulary with some variety. "

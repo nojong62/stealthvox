@@ -139,9 +139,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   String _pendingTranscript = ''; // 대기 중인 유저 발화 누적
   Timer? _commitTimer; // "진짜 끝났는지" 확정 타이머
   static const int COMMIT_WAIT_MS = 1200; // 발화 합치기 대기 시간
-  Timer? _silenceTimer; // 기본 문장 입력 대기 중 침묵/망설임 감지 타이머
-  static const int OPENING_SILENCE_SEC = 7; // 침묵 판정 대기 시간(초) — 유저 망설임 7초 대기
-  bool _silenceFallbackFired = false; // 폴백 발화 후 재타이머 방지 플래그
 
   // 🔬 [v3.1 진단] 화면 로그 뷰어 (팝업에 쌓음)
   final List<String> _debugLogs = [];
@@ -205,7 +202,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   String _expandedFinalSentence = ""; // 완성된 확장 문장 (별도 표시)
   bool _showExpandedFinalCard = false; // 확장 문장 카드 표시 여부
   bool _showStudyRoomPrompt = false; // "Study Room에서 연습 하세요" 표시 여부
-  int _consecutiveRestateCount = 0; // 같은 턴 연속 RESTATE 횟수 (2 이상이면 더 쉬운 문장 유도)
+  int _consecutiveRestateCount = 0; // 같은 턴 연속 GARBLED 횟수 (2 이상이면 더 쉬운 문장 유도)
+  bool _restateConfirmPending = false; // 오프토픽 확인 질문 후 다음 발화는 RESTATE 검사 없이 사용
 
   // 🎯 [PRACTICE] 의미단위 반복 연습 모드
   bool _isPracticeMode = false;
@@ -366,8 +364,46 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           .toList();
       if (hostTexts.isEmpty) return [];
 
-      hostTexts.shuffle();
-      return hostTexts.take(3).toList(); // 2~3개 랜덤 샘플
+      // 필러/연결용 발화 제외 → 구체적인 내용이 있는 발화만 seed 후보로
+      const fillerPatterns = [
+        '네',
+        '응',
+        '어',
+        '그래',
+        '맞아',
+        '맞아요',
+        '좋아',
+        '좋아요',
+        '글쎄',
+        'ok',
+        'okay',
+        '음',
+        '아',
+        '오',
+        '그래요',
+        '그러니까',
+        '그렇구나',
+        '알겠어',
+        '알겠습니다',
+        'yes',
+        'yeah',
+        'sure',
+        'right',
+        'thank you',
+        'thanks',
+      ];
+      bool isFiller(String s) {
+        final t = s.replaceAll(RegExp(r'[\s\.,!?~…]'), '').toLowerCase();
+        if (t.length < 6) return true; // 너무 짧으면 내용 없음으로 간주
+        return fillerPatterns.contains(t);
+      }
+
+      final contentTexts = hostTexts.where((s) => !isFiller(s)).toList();
+      if (contentTexts.isEmpty) return []; // 내용 발화 없음 → 고정 안내로 폴백
+
+      contentTexts.sort((a, b) => b.length.compareTo(a.length));
+      final seedPool = contentTexts.take(8).toList()..shuffle();
+      return seedPool.take(3).toList(); // 2~3개 샘플
     } catch (e) {
       _log('⚠️ [FT-SEED]', 'fetch 실패: $e');
       return [];
@@ -499,7 +535,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 
     // 안내/질문 완료  STT 즉시 시작 (유저 기본 문장 대기)
     // 🔧 [MIC-INSTANT] 8초 딜레이 제거  AI 말 끝나자마자 마이크 ON.
-    // 침묵 시 안내는 _startDeepgramListening() 내부의 7초 타이머가 담당.
+    // 침묵 시 별도 안내 멘트 없이 그대로 대기(침묵 폴백 제거).
     if (mounted && _isConversationActive && !_isSessionComplete) {
       _startDeepgramListening();
     }
@@ -802,7 +838,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         _expandedFinalSentence = "";
         _showExpandedFinalCard = false;
         _showStudyRoomPrompt = false;
-        _silenceFallbackFired = false;
       });
     }
   }
@@ -836,7 +871,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         _expandedFinalSentence = "";
         _showExpandedFinalCard = false;
         _showStudyRoomPrompt = false;
-        _silenceFallbackFired = false;
       });
     }
     _startSessionWaitingForUserSeed(); // 시작 안내 후 유저 seed 문장 대기
@@ -1390,8 +1424,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     _commitTimer?.cancel();
     _commitTimer = null;
     _pendingTranscript = '';
-    _silenceTimer?.cancel();
-    _silenceTimer = null;
     _voiceManager?.dispose();
     _voiceManager = null;
     _ttsQueueManager.setAiPaused(false); // 🔧 [v3.6] TTS 대기 플래그 초기화
@@ -1433,12 +1465,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       onTranscriptUpdate: (transcript) {
         _swDeepgram.reset();
         _swDeepgram.start();
-        // 유저가 말을 시작하는 순간 침묵 타이머 취소 (7초 경계 발화 보호)
-        if (_silenceTimer != null) {
-          _silenceTimer!.cancel();
-          _silenceTimer = null;
-          _log('⏱️ [SILENCE-CANCEL]', '발화 감지 → 침묵 타이머 취소');
-        }
       },
       onTurnEnded: (transcript) {
         _log('🔀 [LISTEN-03]', 'onTurnEnded 콜백 수신: "$transcript"');
@@ -1453,24 +1479,12 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     _log('🎤 [LISTEN-04]', 'connectAndStart 호출 직전');
     await _voiceManager!.connectAndStart();
     _log('🎤 [LISTEN-05]', 'connectAndStart 완료');
-
-    // 🌱 턴 0(기본 문장 입력 대기 중)에서만 침묵/망설임 타이머 시작 — 폴백 발화 후 재설정 방지
-    if (_turnCounter == 0 && _isConversationActive && !_silenceFallbackFired) {
-      _silenceTimer?.cancel();
-      _silenceTimer = Timer(
-        const Duration(seconds: OPENING_SILENCE_SEC),
-        _handleOpeningSilenceFallback,
-      );
-      _log('⏱️ [SILENCE-01]', '기본 문장 침묵 타이머 시작 (${OPENING_SILENCE_SEC}초)');
-    }
   }
 
   // 🔧 [v3.4] Deepgram speech_final 수신 시 호출됨
   // 1.2초 대기창 안에서 추가 발화 합치기 → 완전히 끝나면 파이프라인 시작
   void _stopMicAndProcess(String transcript) async {
     _resetIdleTimer();
-    _silenceTimer?.cancel();
-    _silenceTimer = null;
     final clean = transcript.trim();
     _log('🔀 [STOP-01]', 'speech_final 수신: "$clean" (len=${clean.length})');
 
@@ -1553,56 +1567,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 
     _log('🔀 [COMMIT-03]', '_processRelayPipeline 호출');
     _processRelayPipeline(committed);
-  }
-
-// ====================================================================
-// 📦 [Box 5-SILENCE: 첫 질문 침묵/망설임 폴백]
-// ====================================================================
-  /// 기본 문장 입력 대기 중 침묵 시 "짧아도 괜찮아요" 안내 문구 (다시 AI 질문 생성 안 함)
-  String _getSilenceFallbackPhrase(String targetLang) {
-    return '짧아도 괜찮아요. 먼저 떠오르는 기본 문장을 하나 말해 주세요.';
-  }
-
-  /// 턴 0(기본 문장 입력 대기) 중 7초 침묵 감지 → 부드럽게 안내 후 계속 대기
-  Future<void> _handleOpeningSilenceFallback() async {
-    if (!mounted || !_isConversationActive || _turnCounter > 0) return;
-    _log('⏱️ [SILENCE-FB]', '기본 문장 입력 대기 중 침묵 감지 → 안내 문구 발화 후 대기 유지');
-
-    _silenceFallbackFired = true; // 재타이머 방지
-
-    // 마이크 일시 정지 (TTS 피드백 방지)
-    await _voiceManager?.dispose();
-    _voiceManager = null;
-
-    final String targetLangName = FFAppState().targetLang.isNotEmpty
-        ? FFAppState().targetLang
-        : 'English';
-
-    _ttsQueueManager.setUserTurn(false);
-    _ttsQueueManager.setAiPaused(false);
-
-    // "짧아도 괜찮아요. 먼저 떠오르는 기본 문장을 하나 말해 주세요." 안내 발화
-    final fallbackTts = ChunkedTtsFetcher(
-      _openAiKey,
-      _ttsQueueManager,
-      'nova',
-      isUser: false,
-      onLog: _log,
-    );
-    fallbackTts.addText(_getSilenceFallbackPhrase(targetLangName));
-
-    // TTS 재생 완료 대기
-    int ticks = 0;
-    while ((fallbackTts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
-        mounted) {
-      await Future.delayed(const Duration(milliseconds: 50));
-      if (++ticks > 200) break;
-    }
-
-    // STT 재시작 — 타이머 없이 무한 대기 (_silenceFallbackFired=true 이므로 타이머 미설정)
-    if (mounted && _isConversationActive && !_isSessionComplete) {
-      _startDeepgramListening();
-    }
   }
 
 // ====================================================================
@@ -1739,6 +1703,9 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   Future<void> _processRelayPipeline(String finalTranscript,
       {bool isCorrectionRetry = false}) async {
     _resetIdleTimer();
+    // [RESTATE-CONFIRM] 직전 턴에 오프토픽 확인 질문을 했다면 이번 발화는 RESTATE 검사 없이 사용
+    final bool isRestateConfirm = _restateConfirmPending;
+    _restateConfirmPending = false;
     _turnCounter++;
     final int currentTurnId = _turnCounter;
     _log('🧠 [PIPE-01]',
@@ -1855,6 +1822,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         targetLang: targetLangName,
         contextStr: contextStr,
         disableCorrection: isCorrectionRetry,
+        disableRestate: isRestateConfirm,
       );
 
       // 🌱 [StepExpand Part2만 TTS] 첫 턴은 단순 번역 (Part 구분 없음)
@@ -1866,7 +1834,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       bool corrected = false; // 유저가 AI의 오해를 정정하는 경우 → 직전 HOST+SYSTEM 쌍 삭제 후 재시작
       bool misheard = false; // 잘못 들었다는 불만만 있음 → 직전 교환 삭제 후 재질문
       bool clarified = false; // 주어/목적어 모호 → AI 되묻기
-      bool restated = false; // 맥락 어긋남/발음 불확실 → 같은 AI 질문 유지하고 다시 말하기 요청
+      bool restated = false; // 오프토픽이지만 스피킹 내용 그대로 음성 확인 질문 후 재청취
+      bool garbled = false; // 진짜 발음 불확실 → "다시 말해 주세요" 요청
       bool dissatisfied = false; // [DISSATISFIED] 유저가 AI 질문에 불만 → 확인 후 재질문
       bool _part2Started = false; // \n\n 이후 진입 여부
       bool hasDoubleNewline = false; // 2파트 구조 여부
@@ -1919,10 +1888,21 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           break;
         }
 
-        // 다시 말하기 감지: 맥락 어긋남 OR 발음 불확실 → 같은 AI 질문 유지하고 재청취
+        // 다시 말하기 감지: [RESTATE]=오프토픽 / GARBLED=진짜 안 들림
+        // 확인 재청취(isRestateConfirm) 중 모델이 [RESTATE]를 내면 GARBLED로 강등 → 확인 루프 방지
         if (userTargetText.contains("[RESTATE]")) {
-          restated = true;
-          _log('🔁 [RESTATE]', '맥락 불일치/발음 불확실 → 같은 질문 유지, 다시 말하기 요청');
+          if (isRestateConfirm) {
+            garbled = true;
+            _log('👂 GARBLED', '확인 재청취 중 RESTATE 재반환 → 다시 말하기 요청으로 강등');
+          } else {
+            restated = true;
+            _log('🔁 [RESTATE]', '맥락 불일치 → 음성으로만 확인 질문 후 재청취');
+          }
+          break;
+        }
+        if (userTargetText.contains("[GARBLED]")) {
+          garbled = true;
+          _log('👂 [GARBLED]', '발음 불확실 → 다시 말하기 요청');
           break;
         }
 
@@ -2165,13 +2145,14 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         return;
       }
 
-      // 🔁 [RESTATE] 유저 발화가 맥락에 어긋나거나 발음이 불확실 → AI 질문은 그대로 두고 다시 말하기 요청
+      // 🔁 RESTATE/GARBLED AI 질문은 그대로 두고 재청취
+      //   - GARBLED 진짜 안 들림 → "다시 말해 주세요" (2회 연속이면 더 쉬운 문장 유도)
+      //   - [RESTATE] 어긋나지만 스피킹 내용 그대로 음성으로만 확인 질문 (버블 없음)
+      //     → 확인 대기 플래그를 세우고 다음 발화는 RESTATE 검사 없이 그대로 사용
       //   - 턴 카운터 원복(이번 시도 무효 → 다음 발화가 같은 턴으로 재진입)
       //   - 방금 만든 빈 HOST 버블만 제거. 이전의 좋은 맥락(SYSTEM 질문 포함)은 절대 삭제 안 함
-      //   - 같은 턴에서 2회 연속이면 "더 짧고 쉬운 문장" 유도 멘트로 전환
-      if (restated) {
+      if (restated || garbled) {
         _turnCounter--;
-        final int restateCount = ++_consecutiveRestateCount;
         if (mounted) {
           setState(() {
             _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
@@ -2181,9 +2162,18 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           });
           _scrollToBottom();
         }
-        final String restatePhrase = restateCount >= 2
-            ? "조금 더 짧고 쉬운 문장으로 말해 주실래요?"
-            : "방금 건 살짝 놓쳤어요. 다시 한 번만요.";
+        String checkPhrase;
+        if (garbled) {
+          final int restateCount = ++_consecutiveRestateCount;
+          checkPhrase = restateCount >= 2
+              ? "조금 더 짧고 쉬운 문장으로 말해 주실래요?"
+              : "잘 안 들렸어요. 다시 말해 주세요.";
+        } else {
+          _restateConfirmPending = true;
+          final String heard = finalTranscript.trim();
+          checkPhrase =
+              "방금, $heard, 라고 말씀하신 건가요? 맞다면 그대로 다시 한 번 말해 주세요.";
+        }
         _ttsQueueManager.setUserTurn(false);
         _ttsQueueManager.setAiPaused(false);
         final restateTts = ChunkedTtsFetcher(
@@ -2193,7 +2183,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           isUser: false,
           onLog: _log,
         );
-        restateTts.addText(restatePhrase);
+        restateTts.addText(checkPhrase);
         int waitTicks = 0;
         while ((restateTts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
             mounted) {
@@ -2205,7 +2195,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         return;
       }
 
-      // ✅ 정상 발화 통과 → 연속 RESTATE 카운터 초기화
+      // ✅ 정상 발화 통과 → 연속 GARBLED 카운터 초기화
       _consecutiveRestateCount = 0;
 
       // 🌱 [E-2] 하이브리드: remainder 발사 + 통문장 TtsCache 저장
@@ -4650,6 +4640,7 @@ class StepExpandBrain {
     required String targetLang,
     required String contextStr,
     bool disableCorrection = false,
+    bool disableRestate = false,
   }) async* {
     final client = http.Client();
     try {
@@ -4732,11 +4723,13 @@ Calibration: a natural, on-topic tangent that still belongs to the same story is
 
 [RESTATE GUARD] — hold the center; never invent content
 Stay anchored to the AI's LAST question and the growing sentence. If you cannot do that safely, ask the user to say it again instead of guessing.
-Output EXACTLY: [RESTATE]  in these cases:
+Output EXACTLY: [RESTATE]  in these cases (the speech itself is CLEAR):
 1. RELEVANCE MISMATCH: The input is clear but does not answer the AI's last question, switches to an unrelated subject, or contradicts established facts (see [RELEVANCE CHECK] above).
 2. OFF-CONTEXT: The user clearly tried to answer, but the utterance does not connect to the AI's last question and cannot be attached to the growing sentence (and it is NOT a correction of a previous answer).
+Output EXACTLY: [GARBLED]  in this case ONLY (the speech itself is NOT clear):
 3. UNRELIABLE PRONUNCIATION: The text is garbled badly enough that the CORE meaning is genuinely uncertain, so translating it would require inventing what the user "probably" meant.
-Do NOT output [RESTATE] when:
+${disableRestate ? "OVERRIDE — the user has just re-stated after a confirmation question. NEVER output [RESTATE] this turn. Translate or attach the input normally even if it still seems off-topic. ([GARBLED] is still allowed if truly unintelligible.)" : ""}
+Do NOT output [RESTATE] or [GARBLED] when:
 - A minor STT slip exists but the intended meaning is still clearly inferable from context  ->  translate normally (keep tolerating small errors).
 - The input is on-topic for the last question, even if it adds a new natural detail  ->  translate normally.
 - Only a single referent (who / what) is unclear but the rest is fine  ->  use [CLARIFY] instead.
@@ -4763,7 +4756,7 @@ Because I wanted to see the ocean.
 History:
 AI: What made you pick Busan this time?
 Input: uh the the it muh suh buh uh  (no recoverable meaning)
-Output: [RESTATE]
+Output: [GARBLED]
 
 [RULES]
 - CASE 2 output MUST have the empty line (\n\n) between parts.
@@ -4771,9 +4764,9 @@ Output: [RESTATE]
 - Insert commas (,) after natural phrases for TTS rhythm.
 - If the input is meaningless noise (random symbols, silence markers, or clearly non-speech artifacts), output EXACTLY: [EVAPORATE]
 - If the input has minor STT errors but the intended meaning is still clearly inferable from context, make your best interpretation and produce the normal output (keep tolerating small errors).
-- If the input is off-context or too garbled to interpret safely (see [RESTATE GUARD]), output EXACTLY: [RESTATE] — never guess and never invent content the user did not say.
+- If the input is CLEAR but off-context (see [RESTATE GUARD]), output EXACTLY: [RESTATE]. If it is too GARBLED to interpret safely, output EXACTLY: [GARBLED]. Never guess and never invent content the user did not say.
 - Output [RETRY] ONLY when the user's answer shows they did not understand the AI's question itself, so re-asking the same thing would not help.
-- Output [DISSATISFIED] when the user expresses dissatisfaction, complaint, or rejection about the AI's QUESTION itself (not about the topic). Signs: "다른 질문 해줘" / "그 질문 싫어" / "질문 바꿔" / "무슨 질문이 그래" / "별로야" / "그건 좀" / "다른 거 물어봐" / "change the question" / "ask something else" / "I don't like that question". Do NOT output [DISSATISFIED] when the user is simply answering negatively (e.g., "아니, 안 갔어" = a valid negative answer).""";
+- Output [DISSATISFIED] when the user expresses dissatisfaction, complaint, or rejection about the AI's QUESTION itself (not about the topic). Signs: "다른 질문 해줘" / "그 질문 싫어" / "질문 바꿔" / "무슨 질문이 그래" / "별로야" / "그건 좀" / "다른 거 물어봐" / "change the question" / "ask something else" / "I don't like that question". MILD signs ALSO count: "별로" / "별론데" / "아 그건 좀" / "에이" / "그런 거 말고" / "그건 없어" / "재미없어" / "이상하네" / "뭐야 그게" / "meh" / "not really" / "hmm, not that one". Even slight or indirect displeasure aimed at the QUESTION itself counts. Do NOT output [DISSATISFIED] when the user is simply answering negatively (e.g., "아니, 안 갔어" = a valid negative answer).""";
 
       final request = http.Request(
         'POST',
@@ -5432,12 +5425,15 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
           'The user has had earlier free-talk conversations. Here are a few things they said before:\n'
           '$snippetsBlock\n'
           '\n'
-          'Choose ONE of these topics and ask ONE short, friendly opening question — in $myTarget — '
-          'that naturally leads the user to say a simple basic sentence about it. '
+          'Use these snippets ONLY as quiet inspiration to sense what the user cares about. '
+          'Then create ONE completely NEW, short, friendly opening question — in $myTarget — '
+          'that naturally leads the user to say a simple basic sentence. '
           'That basic sentence becomes the SEED they will expand.\n'
           '\n'
           '[RULES]\n'
-          '- Reference their past topic naturally so it feels personal (e.g. "Last time you mentioned ...").\n'
+          '- NEVER mention or quote the past conversation. Do NOT use explicit previous-session phrases or say that the user said something before. Ask as if you simply sense what is on the mind of the user.\n'
+          '- IGNORE any snippet that is contentless filler, agreement, or a transition phrase (e.g. short replies like yes, okay, right, so, hmm). Pick only a snippet that contains a concrete topic — an activity, place, person, plan, or opinion.\n'
+          '- If NO snippet has real substance, ignore them all and ask a simple, warm everyday-life question instead. Never quote a content-free phrase back to the user.\n'
           '- The question must invite a short, simple statement — NOT yes/no, NOT a list.\n'
           '- Middle-school level vocabulary. Warm and conversational.\n'
           '- Do NOT give meta-instructions like "make a sentence" or "expand". Just ask the question.\n'

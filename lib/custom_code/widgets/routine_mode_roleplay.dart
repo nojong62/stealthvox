@@ -3823,6 +3823,8 @@ If the complaint INCLUDES the corrected content, use [CORRECTION] instead.
 [CASE DISSATISFIED] — Check this THIRD, only when the history contains at least one "AI:" line.
 The user is stepping OUT of the roleplay to complain about the AI's LAST reply itself and wants a different one.
 Signs: "무슨 대답이 그래" / "무슨 질문이 그래" / "대답이 이상해" / "다른 말 해줘" / "다시 대답해 봐" / "그 대답 별로야" / "say something else" / "that's a weird reply" / "answer again"
+More signs (MILD dissatisfaction — these ALSO count when clearly aimed at the AI reply itself, OUT of character): "별로" / "별론데" / "아 그건 좀" / "에이" / "그런 거 말고" / "재미없어" / "이상하네" / "뭐야 그게" / "meh" / "not really" / "hmm, not that one"
+Even slight or indirect displeasure aimed at the AI's last reply counts.
 Do NOT output this when the user is answering negatively IN CHARACTER (e.g., refusing an offer inside the roleplay is a valid in-character answer).
 If so, output EXACTLY: [DISSATISFIED]  (and nothing else)
 
