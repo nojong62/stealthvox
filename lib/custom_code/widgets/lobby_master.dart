@@ -68,7 +68,8 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // Duo 초대 pending 상태이면 Lobby 스킵하고 바로 StealthRoom으로
-      debugPrint('[Lobby] isGuestSession=${FFAppState().isGuestSession}, pendingInviteType=${FFAppState().pendingInviteType}, duoRoomId=${FFAppState().duoRoomId}');
+      debugPrint(
+          '[Lobby] isGuestSession=${FFAppState().isGuestSession}, pendingInviteType=${FFAppState().pendingInviteType}, duoRoomId=${FFAppState().duoRoomId}');
       if (FFAppState().isGuestSession &&
           FFAppState().pendingInviteType == 'duo' &&
           FFAppState().duoRoomId.isNotEmpty) {
@@ -142,8 +143,10 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
       BillingTicker.instance.flushNow();
+      BillingTicker.instance.pause();
     }
   }
 
@@ -423,8 +426,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                     ? const Center(
                         child: Text(
                           '로그가 없습니다.',
-                          style:
-                              TextStyle(color: Colors.white38, fontSize: 14),
+                          style: TextStyle(color: Colors.white38, fontSize: 14),
                         ),
                       )
                     : ListView.builder(
@@ -445,8 +447,8 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
               const Divider(color: Colors.white12, height: 1),
               SafeArea(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 12),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   child: SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
@@ -457,18 +459,15 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        padding:
-                            const EdgeInsets.symmetric(vertical: 14),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
                       ),
                       onPressed: text == null
                           ? null
                           : () {
-                              Clipboard.setData(
-                                  ClipboardData(text: text));
+                              Clipboard.setData(ClipboardData(text: text));
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
-                                  content: Text(
-                                      '✅ BILLING 로그가 복사되었습니다'),
+                                  content: Text('✅ BILLING 로그가 복사되었습니다'),
                                   duration: Duration(seconds: 2),
                                 ),
                               );
@@ -599,20 +598,24 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
       bool subtitleBelow = false}) {
     Widget labelWidget;
     if (subtitle != null && !subtitleBelow) {
-      labelWidget = Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
-        Text(label,
-            style: TextStyle(
-                color: labelColor,
-                fontSize: 11,
-                letterSpacing: 1.5,
-                fontWeight: FontWeight.bold)),
-        const SizedBox(width: 6),
-        Text(subtitle,
-            style: const TextStyle(
-                color: Colors.white38, fontSize: 9, letterSpacing: 0.5)),
-      ]);
+      labelWidget = Row(
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            Text(label,
+                style: TextStyle(
+                    color: labelColor,
+                    fontSize: 11,
+                    letterSpacing: 1.5,
+                    fontWeight: FontWeight.bold)),
+            const SizedBox(width: 6),
+            Text(subtitle,
+                style: const TextStyle(
+                    color: Colors.white38, fontSize: 9, letterSpacing: 0.5)),
+          ]);
     } else if (subtitle != null && subtitleBelow) {
-      labelWidget = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      labelWidget =
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(label,
             style: TextStyle(
                 color: labelColor,
@@ -799,8 +802,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                                             appState.nativeLang,
                                             (val) => setState(() =>
                                                 appState.nativeLang = val!),
-                                            labelColor:
-                                                const Color(0xFF93C5FD),
+                                            labelColor: const Color(0xFF93C5FD),
                                             subtitle: "(My Language)",
                                             subtitleBelow: false),
                                         const SizedBox(height: 20),
@@ -809,9 +811,9 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                                             appState.targetLang,
                                             (val) => setState(() =>
                                                 appState.targetLang = val!),
-                                            labelColor:
-                                                const Color(0xFF4ADE80),
-                                            subtitle: "(Listening Language or Learning Language)",
+                                            labelColor: const Color(0xFF4ADE80),
+                                            subtitle:
+                                                "(Listening Language or Learning Language)",
                                             subtitleBelow: true),
                                         const SizedBox(height: 32),
                                         const Text("AI TONE",

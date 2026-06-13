@@ -1,4 +1,4 @@
-﻿// Automatic FlutterFlow imports
+// Automatic FlutterFlow imports
 import '/backend/backend.dart';
 import '/backend/schema/structs/index.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
@@ -80,8 +80,10 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   // 대기 중 새 발화 오면 합쳐서 처리 (최종 한 덩어리로)
   String _pendingTranscript = ''; // 대기 중인 유저 발화 누적
   Timer? _commitTimer; // "진짜 끝났는지" 확정 타이머
-  static const int COMMIT_WAIT_SPEECH_FINAL_MS = 600; // speechFinal=true 시 빠른 응답
-  static const int COMMIT_WAIT_UNCERTAIN_MS = 1100; // UtteranceEnd/speechFinal=false 시 여유 대기
+  static const int COMMIT_WAIT_SPEECH_FINAL_MS =
+      600; // speechFinal=true 시 빠른 응답
+  static const int COMMIT_WAIT_UNCERTAIN_MS =
+      1100; // UtteranceEnd/speechFinal=false 시 여유 대기
   bool _lastTurnWasSpeechFinal = false; // 마지막 onTurnEnded 이벤트 타입 기록
 
   // 🔬 [v3.1 진단] 화면 로그 뷰어 (팝업에 쌓음)
@@ -518,93 +520,94 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, _) => Padding(
-          padding: EdgeInsets.only(
-              bottom: MediaQuery.of(ctx).viewInsets.bottom),
-          child: Container(
-            decoration: const BoxDecoration(
-              color: Color(0xFF0F0E1A),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-            ),
-            padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
-            child: SingleChildScrollView(
-              child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 36, height: 4,
-                    decoration: BoxDecoration(
-                        color: Colors.white24,
-                        borderRadius: BorderRadius.circular(2)),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                const Text('상황 설정',
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold)),
-                const SizedBox(height: 4),
-                const Text('상황과 역할을 입력하면 바로 롤플레이가 시작됩니다.',
-                    style: TextStyle(color: Colors.white38, fontSize: 12)),
-                const SizedBox(height: 20),
-                _inputField(situationCtrl, '상황 (10-15자)', '예: 숨겨둔 돈다발 들킴'),
-                const SizedBox(height: 12),
-                _inputField(aiRoleCtrl, '상대 역할', '예: 화난 배우자'),
-                const SizedBox(height: 12),
-                _inputField(userRoleCtrl, '내 역할', '예: 당황한 남편'),
-                const SizedBox(height: 24),
-                SizedBox(
-                  width: double.infinity,
-                  child: GestureDetector(
-                    onTap: () {
-                      final sit = situationCtrl.text.trim();
-                      final ai = aiRoleCtrl.text.trim();
-                      final user = userRoleCtrl.text.trim();
-                      if (sit.isEmpty || ai.isEmpty || user.isEmpty) return;
-                      Navigator.pop(ctx);
-                      setState(() {
-                        _scenarioSituation = sit;
-                        _scenarioAiRole = ai;
-                        _scenarioUserRole = user;
-                        _scenarioKeyword = sit;
-                        _sessionDocId = null;
-                        _myHistoryRef = null;
-                        _localMessages.clear();
-                        _isConversationActive = false;
-                      });
-                      // 🛡️ [v4] 유저 수정값 보존용 홀더 동기화
-                      _RoleplayScenarioStore.situation = sit;
-                      _RoleplayScenarioStore.aiRole = ai;
-                      _RoleplayScenarioStore.userRole = user;
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF7C3AED), Color(0xFF9333EA)],
-                        ),
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: const Center(
-                        child: Text('확인',
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold)),
+            padding:
+                EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+            child: Container(
+              decoration: const BoxDecoration(
+                color: Color(0xFF0F0E1A),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+              ),
+              padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 36,
+                        height: 4,
+                        decoration: BoxDecoration(
+                            color: Colors.white24,
+                            borderRadius: BorderRadius.circular(2)),
                       ),
                     ),
-                  ),
+                    const SizedBox(height: 20),
+                    const Text('상황 설정',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 4),
+                    const Text('상황과 역할을 입력하면 바로 롤플레이가 시작됩니다.',
+                        style: TextStyle(color: Colors.white38, fontSize: 12)),
+                    const SizedBox(height: 20),
+                    _inputField(situationCtrl, '상황 (10-15자)', '예: 숨겨둔 돈다발 들킴'),
+                    const SizedBox(height: 12),
+                    _inputField(aiRoleCtrl, '상대 역할', '예: 화난 배우자'),
+                    const SizedBox(height: 12),
+                    _inputField(userRoleCtrl, '내 역할', '예: 당황한 남편'),
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      child: GestureDetector(
+                        onTap: () {
+                          final sit = situationCtrl.text.trim();
+                          final ai = aiRoleCtrl.text.trim();
+                          final user = userRoleCtrl.text.trim();
+                          if (sit.isEmpty || ai.isEmpty || user.isEmpty) return;
+                          Navigator.pop(ctx);
+                          setState(() {
+                            _scenarioSituation = sit;
+                            _scenarioAiRole = ai;
+                            _scenarioUserRole = user;
+                            _scenarioKeyword = sit;
+                            _sessionDocId = null;
+                            _myHistoryRef = null;
+                            _localMessages.clear();
+                            _isConversationActive = false;
+                          });
+                          // 🛡️ [v4] 유저 수정값 보존용 홀더 동기화
+                          _RoleplayScenarioStore.situation = sit;
+                          _RoleplayScenarioStore.aiRole = ai;
+                          _RoleplayScenarioStore.userRole = user;
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(
+                              colors: [Color(0xFF7C3AED), Color(0xFF9333EA)],
+                            ),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: const Center(
+                            child: Text('확인',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
-  },
-);
   }
 
   Widget _inputField(TextEditingController ctrl, String label, String hint) {
@@ -928,7 +931,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       },
       onTurnEnded: (transcript, {bool speechFinal = false}) {
         _lastTurnWasSpeechFinal = speechFinal;
-        _log('🔀 [LISTEN-03]', 'onTurnEnded 콜백 수신: "$transcript" speechFinal=$speechFinal');
+        _log('🔀 [LISTEN-03]',
+            'onTurnEnded 콜백 수신: "$transcript" speechFinal=$speechFinal');
         _swDeepgram.stop();
         _stopMicAndProcess(transcript);
       },
@@ -967,10 +971,12 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     // 🔧 기존 대기 중인 발화가 있으면 공백으로 연결 (더듬거림 합치기)
     if (_pendingTranscript.isEmpty) {
       _pendingTranscript = clean;
-      _log('🔀 [STOP-03]', '신규 발화 접수. ${waitMs}ms 조건부 대기창 시작 speechFinal=$_lastTurnWasSpeechFinal');
+      _log('🔀 [STOP-03]',
+          '신규 발화 접수. ${waitMs}ms 조건부 대기창 시작 speechFinal=$_lastTurnWasSpeechFinal');
     } else {
       _pendingTranscript = '$_pendingTranscript $clean';
-      _log('🔀 [STOP-04]', '합치기: "$_pendingTranscript" (${waitMs}ms 조건부 대기창 리셋)');
+      _log('🔀 [STOP-04]',
+          '합치기: "$_pendingTranscript" (${waitMs}ms 조건부 대기창 리셋)');
     }
 
     // UI: 접수된 발화를 HOST_TEMP 풍선에 실시간 반영
@@ -1332,8 +1338,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         if (regenMsgs.length > 10)
           regenMsgs = regenMsgs.sublist(regenMsgs.length - 10);
         final String regenContextStr = regenMsgs
-            .map((m) =>
-                "${m['role'] == 'HOST' ? 'User' : 'AI'}: ${m['target']}")
+            .map(
+                (m) => "${m['role'] == 'HOST' ? 'User' : 'AI'}: ${m['target']}")
             .join("\n");
         if (mounted) {
           setState(() => _localMessages
@@ -1379,8 +1385,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                 apiKey: _openAiKey, englishText: regenText)
             .then((cleanKorean) {
           if (mounted && _localMessages.length > regenAiIndex) {
-            setState(() =>
-                _localMessages[regenAiIndex]['original'] = cleanKorean);
+            setState(
+                () => _localMessages[regenAiIndex]['original'] = cleanKorean);
           }
         });
         int regenTicks = 0;
@@ -1405,8 +1411,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
             _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
             if (hostIndex < _localMessages.length)
               _localMessages.removeAt(hostIndex);
-            _localMessages.add(
-                {'role': 'SYSTEM', 'target': clarifyText, 'original': ''});
+            _localMessages
+                .add({'role': 'SYSTEM', 'target': clarifyText, 'original': ''});
           });
           _scrollToBottom();
         }
@@ -1565,7 +1571,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
             fetcher: aiTtsFetcher,
             swSpeechEnd: _swSpeechEnd,
           );
-          _log('🧠 [PIPE-08A]', 'AI stream end + remainder queued. pending=${aiTtsFetcher.pendingRequests}');
+          _log('🧠 [PIPE-08A]',
+              'AI stream end + remainder queued. pending=${aiTtsFetcher.pendingRequests}');
         }
       }();
 
@@ -2046,7 +2053,9 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                     fit: BoxFit.scaleDown,
                     child: Text(
                       () {
-                        final int s = (FFAppState().remainingTime).toInt().clamp(0, 999999);
+                        final int s = (FFAppState().remainingTime)
+                            .toInt()
+                            .clamp(0, 999999);
                         final int h = s ~/ 3600;
                         final int m = (s % 3600) ~/ 60;
                         return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
@@ -2065,7 +2074,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   }
 
   Widget _buildTopControls() {
-    final hasScenario = _scenarioSituation.isNotEmpty && _scenarioAiRole.isNotEmpty;
+    final hasScenario =
+        _scenarioSituation.isNotEmpty && _scenarioAiRole.isNotEmpty;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 28),
       child: Column(
@@ -2101,151 +2111,155 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                       ),
                     )
                   : hasScenario
-                  ? Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Row(children: const [
-                          Icon(Icons.theater_comedy_rounded,
-                              color: Color(0xFFA78BFA), size: 13),
-                          SizedBox(width: 5),
-                          Text(
-                            'SITUATION',
-                            style: TextStyle(
-                              color: Color(0xFFA78BFA),
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 1.6,
-                            ),
-                          ),
-                        ]),
-                        const SizedBox(height: 8),
-                        Text(
-                          _scenarioSituation,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 17,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.4,
-                            height: 1.3,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF7C3AED).withOpacity(0.18),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: const Color(0xFF7C3AED).withOpacity(0.40),
-                              width: 1,
-                            ),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: const [
-                                  Icon(Icons.smart_toy_rounded,
-                                      color: Color(0xFFD8B4FE), size: 13),
-                                  SizedBox(width: 4),
-                                  Text('AI',
-                                      style: TextStyle(
-                                        color: Color(0xFFA78BFA),
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w800,
-                                        letterSpacing: 1.4,
-                                      )),
-                                ],
-                              ),
-                              const SizedBox(height: 2),
-                              Text(_scenarioAiRole,
-                                  style: const TextStyle(
-                                    color: Color(0xFFEDE9FE),
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w600,
-                                  )),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 12),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF0EA5E9).withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: const Color(0xFF0EA5E9).withOpacity(0.32),
-                              width: 1,
-                            ),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: const [
-                                  Icon(Icons.person_rounded,
-                                      color: Color(0xFF7DD3FC), size: 13),
-                                  SizedBox(width: 4),
-                                  Text('YOU',
-                                      style: TextStyle(
-                                        color: Color(0xFF7DD3FC),
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w800,
-                                        letterSpacing: 1.4,
-                                      )),
-                                ],
-                              ),
-                              const SizedBox(height: 2),
-                              Text(_scenarioUserRole,
-                                  style: const TextStyle(
-                                    color: Color(0xFFE0F2FE),
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w600,
-                                  )),
-                            ],
-                          ),
-                        ),
-                        if (!_isConversationActive) ...[
-                          const SizedBox(height: 14),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.end,
-                            children: const [
-                              Icon(Icons.edit_outlined,
-                                  color: Colors.white24, size: 13),
-                              SizedBox(width: 4),
-                              Text('탭하여 수정',
-                                  style: TextStyle(
-                                      color: Colors.white24, fontSize: 11)),
-                            ],
-                          ),
-                        ],
-                      ],
-                    )
-                  : Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: const [
-                          Icon(Icons.movie_outlined,
-                              color: Color(0xFFA78BFA), size: 20),
-                          SizedBox(width: 8),
-                          Text('시나리오 불러오는 중...',
-                              style: TextStyle(
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Row(children: const [
+                              Icon(Icons.theater_comedy_rounded,
+                                  color: Color(0xFFA78BFA), size: 13),
+                              SizedBox(width: 5),
+                              Text(
+                                'SITUATION',
+                                style: TextStyle(
                                   color: Color(0xFFA78BFA),
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600)),
-                        ],
-                      ),
-                    ),
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 1.6,
+                                ),
+                              ),
+                            ]),
+                            const SizedBox(height: 8),
+                            Text(
+                              _scenarioSituation,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 17,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: -0.4,
+                                height: 1.3,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 12),
+                              decoration: BoxDecoration(
+                                color:
+                                    const Color(0xFF7C3AED).withOpacity(0.18),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color:
+                                      const Color(0xFF7C3AED).withOpacity(0.40),
+                                  width: 1,
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: const [
+                                      Icon(Icons.smart_toy_rounded,
+                                          color: Color(0xFFD8B4FE), size: 13),
+                                      SizedBox(width: 4),
+                                      Text('AI',
+                                          style: TextStyle(
+                                            color: Color(0xFFA78BFA),
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w800,
+                                            letterSpacing: 1.4,
+                                          )),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(_scenarioAiRole,
+                                      style: const TextStyle(
+                                        color: Color(0xFFEDE9FE),
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w600,
+                                      )),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 12),
+                              decoration: BoxDecoration(
+                                color:
+                                    const Color(0xFF0EA5E9).withOpacity(0.12),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color:
+                                      const Color(0xFF0EA5E9).withOpacity(0.32),
+                                  width: 1,
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: const [
+                                      Icon(Icons.person_rounded,
+                                          color: Color(0xFF7DD3FC), size: 13),
+                                      SizedBox(width: 4),
+                                      Text('YOU',
+                                          style: TextStyle(
+                                            color: Color(0xFF7DD3FC),
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w800,
+                                            letterSpacing: 1.4,
+                                          )),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(_scenarioUserRole,
+                                      style: const TextStyle(
+                                        color: Color(0xFFE0F2FE),
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w600,
+                                      )),
+                                ],
+                              ),
+                            ),
+                            if (!_isConversationActive) ...[
+                              const SizedBox(height: 14),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.end,
+                                children: const [
+                                  Icon(Icons.edit_outlined,
+                                      color: Colors.white24, size: 13),
+                                  SizedBox(width: 4),
+                                  Text('탭하여 수정',
+                                      style: TextStyle(
+                                          color: Colors.white24, fontSize: 11)),
+                                ],
+                              ),
+                            ],
+                          ],
+                        )
+                      : Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: const [
+                              Icon(Icons.movie_outlined,
+                                  color: Color(0xFFA78BFA), size: 20),
+                              SizedBox(width: 8),
+                              Text('시나리오 불러오는 중...',
+                                  style: TextStyle(
+                                      color: Color(0xFFA78BFA),
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600)),
+                            ],
+                          ),
+                        ),
             ),
           ),
           if (!_isGeneratingScenario && !_isConversationActive) ...[
@@ -2256,8 +2270,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                 GestureDetector(
                   onTap: _generateScenario,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 9),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
                     decoration: BoxDecoration(
                       color: Colors.transparent,
                       borderRadius: BorderRadius.circular(20),
@@ -2270,8 +2284,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                             color: Colors.white30, size: 14),
                         SizedBox(width: 6),
                         Text('다시 생성',
-                            style: TextStyle(
-                                color: Colors.white30, fontSize: 12)),
+                            style:
+                                TextStyle(color: Colors.white30, fontSize: 12)),
                       ],
                     ),
                   ),
@@ -3338,7 +3352,8 @@ class RelayPipeline {
     _isSpeaking = false;
   }
 
-  Future<void> _onUserTurnEnded(String userText, {bool speechFinal = false}) async {
+  Future<void> _onUserTurnEnded(String userText,
+      {bool speechFinal = false}) async {
     // 💡 AI가 말하는 중에 유저가 말하면 즉시 중단
     if (_isSpeaking) interruptAi();
 
@@ -3639,7 +3654,8 @@ content and gist of the WHOLE conversation.
       String s =
           ((body['choices'] as List).first['message']['content'] as String)
               .trim();
-      if (s.startsWith('"') && s.endsWith('"')) s = s.substring(1, s.length - 1);
+      if (s.startsWith('"') && s.endsWith('"'))
+        s = s.substring(1, s.length - 1);
       return s.isEmpty ? null : s;
     } catch (e) {
       debugPrint("[RoleplayBrain.generateExpandedFromConversation] $e");
@@ -3701,7 +3717,8 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
       String p =
           ((body['choices'] as List).first['message']['content'] as String)
               .trim();
-      if (p.startsWith('"') && p.endsWith('"')) p = p.substring(1, p.length - 1);
+      if (p.startsWith('"') && p.endsWith('"'))
+        p = p.substring(1, p.length - 1);
       return p.isEmpty ? originalSentence : p;
     } catch (e) {
       debugPrint("[RoleplayBrain.polishSentence] $e");
@@ -3712,40 +3729,62 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
   // 📋 [200개 기초 상황 — 카테고리 5종 × 40개] (v4 추가)
   static const List<String> _baseSituations200 = [
     // ── 공항_비행기_교통 (40개) ──
-    '기내 의학 환자 발생', '화장실 갇힘 사고', '산소마스크 작동됨', '여권 분실 발견함', '캐리어 파손 확인', '위조지폐 의심됨',
+    '기내 의학 환자 발생', '화장실 갇힘 사고', '산소마스크 작동됨', '여권 분실 발견함', '캐리어 파손 확인',
+    '위조지폐 의심됨',
     '입국 거부 위기', '소지품 오인 압수', '결제 오류 지연', '비행기 놓치기 직전', '탑승권 분실함', '미아 발생 신고',
-    '승무원 부상 발생', '탑승 거부 당함', '버스 고장 멈춤', '잘못된 티켓 발권', '소매치기 발생', '짐 오인 교환됨', '스크린도어 낌',
-    '비상 정지 발생', '지갑 두고 내림', '막차 취소 고립됨', '급격한 복통 발생', '부당 요금 요구', '난폭 운전 공포', '계약 사기 의심',
+    '승무원 부상 발생', '탑승 거부 당함', '버스 고장 멈춤', '잘못된 티켓 발권', '소매치기 발생', '짐 오인 교환됨',
+    '스크린도어 낌',
+    '비상 정지 발생', '지갑 두고 내림', '막차 취소 고립됨', '급격한 복통 발생', '부당 요금 요구', '난폭 운전 공포',
+    '계약 사기 의심',
     '혼유 사고 발생', '차량 타이어 펑크', '차량 배터리 방전', '정산기 고장 멈춤', '예약 누락 발견', '선내 화재 경보',
     '소지품 바다 빠짐', '배 놓치고 고립', '집단 식중독 증상', '가방 문 열려있음', '반납 처리 오류', '공중 멈춤 사고',
     '접촉 사고 후 도주', '차량 출고 불가',
     // ── 호텔_숙소_주거 (40개) ──
-    '예약 취소 당함', '방 내부 몰카 의심', '온수 안 나옴', '엘리베이터 갇힘', '익수 사고 발생', '알레르기 발생', '취객 시비 걸림',
-    '운동 기구 부상', '화재 경보 대피', '기밀 문서 유출', '소지품 도난당함', '숙소 사진과 다름', '미끄러짐 부상', '텐트 무너짐',
-    '멧돼지 출현함', '텐트 불길 번짐', '도어락 고장 갇힘', '동파로 누수 발생', '층간소음 시비', '맹견 진입 위험', '계단 실족 부상',
-    '저혈압 실신함', '주인방 무단 침입', '룸메이트 절도', '상한 음식 서빙', '차량 파손 발견', '옥상 문 잠김 갇힘', '독충에 물림',
-    '무단 주거 침입', '신분증 도용 의심', '난간 파손 위험', '피부 화상 입음', '독사 출현 비상', '가스 누출 의심', '옷 세탁 중 분실',
+    '예약 취소 당함', '방 내부 몰카 의심', '온수 안 나옴', '엘리베이터 갇힘', '익수 사고 발생', '알레르기 발생',
+    '취객 시비 걸림',
+    '운동 기구 부상', '화재 경보 대피', '기밀 문서 유출', '소지품 도난당함', '숙소 사진과 다름', '미끄러짐 부상',
+    '텐트 무너짐',
+    '멧돼지 출현함', '텐트 불길 번짐', '도어락 고장 갇힘', '동파로 누수 발생', '층간소음 시비', '맹견 진입 위험',
+    '계단 실족 부상',
+    '저혈압 실신함', '주인방 무단 침입', '룸메이트 절도', '상한 음식 서빙', '차량 파손 발견', '옥상 문 잠김 갇힘',
+    '독충에 물림',
+    '무단 주거 침입', '신분증 도용 의심', '난간 파손 위험', '피부 화상 입음', '독사 출현 비상', '가스 누출 의심',
+    '옷 세탁 중 분실',
     '금고 안 열림', '지하 침수 발생', '택배 분실 항의', '유리창 깨짐', '샹들리에 추락',
     // ── 식당_쇼핑_유흥 (40개) ──
-    '머리카락 나옴', '식중독 증상 발현', '기름 불판 화재', '주문 오인 대기', '결제 중복 처리', '커피 쏟아 화상', '식판 엎음 사고',
-    '음식 도중 소진', '바가지 요금 청구', '지갑 소매치기', '명품 훼손 시비', '피부 부작용 발생', '몰래카메라 발견', '카트 충돌 부상',
-    '거스름돈 사기', '여권 정보 오류', '물건 파손 변상', '지갑 분실 확인', '휴지 없이 갇힘', '유통기한 지남', '취객 싸움 번짐',
-    '도난 경보 작동', '소매치기 추격', '에스컬레이터 낌', '낙상 사고 발생', '이물질 치아 파손', '배달 사고 누락', '가스통 폭발 위기',
-    '인파 압사 위험', '주차 시비 폭행', '다이아 분실 오해', '신발 도난당함', '책장 쓰러짐 사고', '렌즈 파손 부상', '잘못된 약 복용',
+    '머리카락 나옴', '식중독 증상 발현', '기름 불판 화재', '주문 오인 대기', '결제 중복 처리', '커피 쏟아 화상',
+    '식판 엎음 사고',
+    '음식 도중 소진', '바가지 요금 청구', '지갑 소매치기', '명품 훼손 시비', '피부 부작용 발생', '몰래카메라 발견',
+    '카트 충돌 부상',
+    '거스름돈 사기', '여권 정보 오류', '물건 파손 변상', '지갑 분실 확인', '휴지 없이 갇힘', '유통기한 지남',
+    '취객 싸움 번짐',
+    '도난 경보 작동', '소매치기 추격', '에스컬레이터 낌', '낙상 사고 발생', '이물질 치아 파손', '배달 사고 누락',
+    '가스통 폭발 위기',
+    '인파 압사 위험', '주차 시비 폭행', '다이아 분실 오해', '신발 도난당함', '책장 쓰러짐 사고', '렌즈 파손 부상',
+    '잘못된 약 복용',
     '교상 사고 발생', '가방 줄 걸려 파손', '칼날 부상 사고', '변질된 음식 판매', '침대 주저앉음',
     // ── 공공장소_병원_비즈니스 (40개) ──
-    '의료진 공백 지연', '오진 가능성 확인', '호흡 곤란 환자', '수술 지연 항의', '잇몸 과다 출혈', '보이스피싱 의심', '카드 먹통 됨',
-    '중요 택배 분실', '억울한 누명 씀', '긴급 출동 방해', '서류 조작 의심', '비자 발급 거부', '빔프로젝터 폭발', '랜섬웨어 감염됨',
-    '정수기 누전 화재', '면접 서류 분실', '무단 침입 시위', '인감 도용 발견', '세금 폭탄 오류', '소송 상대 협박', '노트북 도난당함',
-    '시험지 유출 비상', '화학 약품 누출', '등교 미아 발생', '셔틀버스 사고', '전시 작품 훼손', '유물 도난 경보', '무대 조명 추락',
-    '영사기 화재 발생', '암표 사기 당함', '맹수 탈출 비상', '독초 오접촉 부상', '유기견 습격함', '열사병 환자 실신', '범죄 의심 비명',
+    '의료진 공백 지연', '오진 가능성 확인', '호흡 곤란 환자', '수술 지연 항의', '잇몸 과다 출혈', '보이스피싱 의심',
+    '카드 먹통 됨',
+    '중요 택배 분실', '억울한 누명 씀', '긴급 출동 방해', '서류 조작 의심', '비자 발급 거부', '빔프로젝터 폭발',
+    '랜섬웨어 감염됨',
+    '정수기 누전 화재', '면접 서류 분실', '무단 침입 시위', '인감 도용 발견', '세금 폭탄 오류', '소송 상대 협박',
+    '노트북 도난당함',
+    '시험지 유출 비상', '화학 약품 누출', '등교 미아 발생', '셔틀버스 사고', '전시 작품 훼손', '유물 도난 경보',
+    '무대 조명 추락',
+    '영사기 화재 발생', '암표 사기 당함', '맹수 탈출 비상', '독초 오접촉 부상', '유기견 습격함', '열사병 환자 실신',
+    '범죄 의심 비명',
     '부당해고 구제 신청', '부스 무너짐 사고', '생방송 방송 사고', '난입 소요 사태', '집단 감염 의심',
     // ── 레저_관광_자연_기타 (40개) ──
-    '이식 조류 표류', '산소통 잔량 고갈', '보드 충돌 실신', '쥐가 나서 익수', '갑작스러운 불어남', '슬라이드 충돌', '낚싯바늘 눈 찔림',
-    '실족 고립 조난', '저체온증 발생', '로프 끊어짐 위기', '충돌 골절 부상', '리프트 공중 멈춤', '타구 사고 부상', '파울볼 안면 강타',
+    '이식 조류 표류', '산소통 잔량 고갈', '보드 충돌 실신', '쥐가 나서 익수', '갑작스러운 불어남', '슬라이드 충돌',
+    '낚싯바늘 눈 찔림',
+    '실족 고립 조난', '저체온증 발생', '로프 끊어짐 위기', '충돌 골절 부상', '리프트 공중 멈춤', '타구 사고 부상',
+    '파울볼 안면 강타',
     '심장마비 환자 발생', '바벨 낙하 깔림', '관절 탈구 부상', '레인 진입 기계 낌', '스케이트 날 부상', '롤러코스터 멈춤',
-    '실제 유령 공포', '오발 사고 발생', '카트 전복 사고', '나무 걸려 조난', '줄 풀림 오인 비상', '사막 식수 고갈', '정글 독충 공격',
-    '낙석 낙하 갇힘', '막배 끊겨 고립', '통유리 균열 발견', '낙뢰 사고 발생', '인파 밀집 압사', '캠핑카 일산화탄소', '고온 화상 입음',
+    '실제 유령 공포', '오발 사고 발생', '카트 전복 사고', '나무 걸려 조난', '줄 풀림 오인 비상', '사막 식수 고갈',
+    '정글 독충 공격',
+    '낙석 낙하 갇힘', '막배 끊겨 고립', '통유리 균열 발견', '낙뢰 사고 발생', '인파 밀집 압사', '캠핑카 일산화탄소',
+    '고온 화상 입음',
     '음향 장비 감전', '울타리 돌파 충돌', '말에서 추락 부상', '탁구대 무너짐', '당구큐대 시비', '코인기기 화재',
   ];
 
@@ -3773,25 +3812,26 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
       // 200개 합본에 있으면 "그대로 쓸 구체 상황", 20개 씨앗이면 "확장할 장르 힌트"
       final bool isConcrete = _baseSituations200.contains(pick);
 
-      final systemPrompt = "You are a creative director for a high-immersion English roleplay app.\n"
-              "Your job is to create ONE vivid scene inspired by real-life situations, Netflix series, Korean/American dramas, or movies.\n"
-              "\n"
-              "OUTPUT: Return ONLY valid JSON, no extra text.\n"
-              "{\n"
-              '  "situation": "핵심 상황 요약 (10-15 Korean chars, e.g. 카페에서 신메뉴 추천)",\n'
-              '  "ai_role": "AI 캐릭터 (10자 이내, with clear personality, e.g. 친절한 바리스타)",\n'
-              '  "user_role": "유저 캐릭터 (8자 이내, e.g. 단골 손님)"\n'
-              "}\n"
-              "\n"
-              "RULES:\n"
-              "- situation: vivid and specific. Do NOT name any show/character.\n"
-              "- ai_role: give a personality that fits the genre (friendly, enthusiastic, suspicious, furious, etc).\n"
-              "- user_role: the user naturally belongs in the scene.\n"
-              "- For everyday/positive genres: warm, helpful, curious personalities.\n"
-              "- For dramatic/conflict genres: intense, confrontational, emotional personalities.\n" +
-          (isConcrete
-              ? '- USE THIS EXACT SITUATION as-is: "$pick". Do NOT invent a different one. Keep the situation field essentially equal to "$pick" (light wording polish within 10-15 Korean chars OK). Only assign a fitting ai_role and user_role.'
-              : "- Genre hint this round: $pick");
+      final systemPrompt =
+          "You are a creative director for a high-immersion English roleplay app.\n"
+                  "Your job is to create ONE vivid scene inspired by real-life situations, Netflix series, Korean/American dramas, or movies.\n"
+                  "\n"
+                  "OUTPUT: Return ONLY valid JSON, no extra text.\n"
+                  "{\n"
+                  '  "situation": "핵심 상황 요약 (10-15 Korean chars, e.g. 카페에서 신메뉴 추천)",\n'
+                  '  "ai_role": "AI 캐릭터 (10자 이내, with clear personality, e.g. 친절한 바리스타)",\n'
+                  '  "user_role": "유저 캐릭터 (8자 이내, e.g. 단골 손님)"\n'
+                  "}\n"
+                  "\n"
+                  "RULES:\n"
+                  "- situation: vivid and specific. Do NOT name any show/character.\n"
+                  "- ai_role: give a personality that fits the genre (friendly, enthusiastic, suspicious, furious, etc).\n"
+                  "- user_role: the user naturally belongs in the scene.\n"
+                  "- For everyday/positive genres: warm, helpful, curious personalities.\n"
+                  "- For dramatic/conflict genres: intense, confrontational, emotional personalities.\n" +
+              (isConcrete
+                  ? '- USE THIS EXACT SITUATION as-is: "$pick". Do NOT invent a different one. Keep the situation field essentially equal to "$pick" (light wording polish within 10-15 Korean chars OK). Only assign a fitting ai_role and user_role.'
+                  : "- Genre hint this round: $pick");
 
       final res = await client
           .post(
@@ -3979,6 +4019,9 @@ NEVER break character when asking.
     required String apiKey,
     required String englishText,
   }) async {
+    // 빈 입력 가드: GPT에 빈 문장을 보내 메타 응답을 받는 것을 방지.
+    if (englishText.trim().isEmpty) return englishText;
+
     for (int attempt = 0; attempt < 2; attempt++) {
       final client = http.Client();
       try {
@@ -4030,7 +4073,20 @@ NEVER break character when asking.
 
         if (res.statusCode == 200) {
           final data = jsonDecode(utf8.decode(res.bodyBytes));
-          return data['choices'][0]['message']['content'].toString().trim();
+          final result =
+              data['choices'][0]['message']['content'].toString().trim();
+          // 응답 검증: 번역 대신 안내/메타 응답이 오면 재시도 후 fallback.
+          final lower = result.toLowerCase();
+          if (lower.contains('번역할 문장') ||
+              lower.contains('문장이 필요') ||
+              lower.contains('문장을 제공') ||
+              lower.contains('please provide') ||
+              lower.contains('i need a sentence') ||
+              lower.contains('no text') ||
+              result.isEmpty) {
+            continue;
+          }
+          return result;
         }
       } catch (_) {
         if (attempt == 0) {
@@ -4058,26 +4114,27 @@ NEVER break character when asking.
   }) async* {
     final client = http.Client();
     try {
-      final sysPrompt = 'You are a master actor playing "$aiRole" in a high-immersion dramatic roleplay.\n'
-          '\n'
-          '[SCENARIO]\n'
-          'Situation: $situation\n'
-          'Your role: $aiRole\n'
-          "User's role: $userRole\n"
-          '\n'
-          '[LANGUAGE RULE]\n'
-          '- Respond in $myTarget ONLY. Role names may be Korean but your dialogue is 100% $myTarget.\n'
-          '\n'
-          '[CHARACTER RULES]\n'
-          '- Stay FULLY in character as "$aiRole" at all times. Never break character.\n'
-          '- Respond with the raw emotion, personality, and subtext that "$aiRole" would have in this situation.\n'
-          '- NO greetings, NO meta-comments. Pure in-character dialogue.\n'
-          '- MAXIMUM 2 short sentences. 1 sentence preferred. Under 15 words per sentence.\n'
-          '- Drive the scene forward — pressure, question, or react to force the user to respond.\n'
-          '- If the user\'s input is completely unintelligible (speech recognition error), output EXACTLY: [RETRY]' +
-          (rejectedReply.trim().isEmpty
-              ? ''
-              : '\n- IMPORTANT: The user disliked your previous reply: "${rejectedReply.trim()}". Give a COMPLETELY DIFFERENT in-character reply this time — different angle, different wording. Do NOT repeat or rephrase it.');
+      final sysPrompt =
+          'You are a master actor playing "$aiRole" in a high-immersion dramatic roleplay.\n'
+                  '\n'
+                  '[SCENARIO]\n'
+                  'Situation: $situation\n'
+                  'Your role: $aiRole\n'
+                  "User's role: $userRole\n"
+                  '\n'
+                  '[LANGUAGE RULE]\n'
+                  '- Respond in $myTarget ONLY. Role names may be Korean but your dialogue is 100% $myTarget.\n'
+                  '\n'
+                  '[CHARACTER RULES]\n'
+                  '- Stay FULLY in character as "$aiRole" at all times. Never break character.\n'
+                  '- Respond with the raw emotion, personality, and subtext that "$aiRole" would have in this situation.\n'
+                  '- NO greetings, NO meta-comments. Pure in-character dialogue.\n'
+                  '- MAXIMUM 2 short sentences. 1 sentence preferred. Under 15 words per sentence.\n'
+                  '- Drive the scene forward — pressure, question, or react to force the user to respond.\n'
+                  '- If the user\'s input is completely unintelligible (speech recognition error), output EXACTLY: [RETRY]' +
+              (rejectedReply.trim().isEmpty
+                  ? ''
+                  : '\n- IMPORTANT: The user disliked your previous reply: "${rejectedReply.trim()}". Give a COMPLETELY DIFFERENT in-character reply this time — different angle, different wording. Do NOT repeat or rephrase it.');
 
       final request = http.Request(
         'POST',
@@ -4155,7 +4212,8 @@ NEVER break character when asking.
   }) async* {
     final client = http.Client();
     try {
-      final sysPrompt = 'You are a master actor and an English conversation coach playing "$aiRole".\n'
+      final sysPrompt =
+          'You are a master actor and an English conversation coach playing "$aiRole".\n'
           '\n'
           '[SCENARIO]\n'
           'Situation: $situation\n'
@@ -4218,9 +4276,7 @@ NEVER break character when asking.
       client.close();
     }
   }
-
 }
-
 
 class _LangIconPainter extends CustomPainter {
   final bool active;
@@ -4311,4 +4367,3 @@ class _LangIconPainter extends CustomPainter {
   @override
   bool shouldRepaint(_LangIconPainter old) => old.active != active;
 }
-

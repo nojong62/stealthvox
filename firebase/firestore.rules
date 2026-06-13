@@ -1,73 +1,69 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /users/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if true;
+
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isAuth() && request.auth.uid == uid;
+    }
+
+    // User profile and user-owned subcollections.
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid);
+
+      // remainingTime and remaining_seconds are server-owned billing fields.
+      allow update: if isOwner(uid)
+        && !request.resource.data.diff(resource.data).affectedKeys()
+          .hasAny(['remainingTime', 'remaining_seconds']);
+
       allow delete: if false;
+
+      match /chat_history/{docId} {
+        allow read, write: if isOwner(uid);
+
+        match /messages/{msgId} {
+          allow read, write: if isOwner(uid);
+        }
+      }
+
+      match /purchases/{purchaseId} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+
+      match /sessions/{sessionId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      match /keepers/{keeperId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      match /clones/{cloneId} {
+        allow read, write: if isOwner(uid);
+      }
+
+      match /usage_logs/{logId} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
     }
 
-    match /rooms/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if true;
-      allow delete: if false;
+    // Duo shared sessions. Anonymous users pass this after signInAnonymously().
+    match /duo_sessions/{roomId} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update: if isAuth();
+      allow delete: if isAuth()
+        && resource.data.hostUid == request.auth.uid;
+
+      match /messages/{msgId} {
+        allow read, write: if isAuth();
+      }
     }
-
-    match /rooms/{parent}/messages/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if true;
-      allow delete: if true;
-    }
-
-    match /{path=**}/messages/{document} {
-      allow read: if true;
-    }
-
-
-    match /users/{parent}/sessions/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if true;
-      allow delete: if false;
-    }
-
-    match /{path=**}/sessions/{document} {
-      allow read: if true;
-    }
-
-
-    match /users/{parent}/chat_history/{document} {
-      allow create: if request.auth.uid == parent;
-      allow read: if true;
-      allow write: if true;
-      allow delete: if true;
-    }
-
-    match /{path=**}/chat_history/{document} {
-      allow read: if true;
-    }
-
-
-    match /users/{parent}/purchases/{document} {
-      allow create: if request.auth.uid == parent;
-      allow read: if request.auth.uid == parent;
-      allow write: if true;
-      allow delete: if true;
-    }
-
-    match /users/{parent}/clones/{document} {
-      allow create: if true;
-      allow read: if true;
-      allow write: if true;
-      allow delete: if true;
-    }
-
-    match /{path=**}/clones/{document} {
-      allow read: if true;
-    }
-
   }
 }

@@ -24,7 +24,14 @@ admin.initializeApp();
 exports.onUserDeleted = functions.auth.user().onDelete(async (user) => {
   const firestore = admin.firestore();
   const userRef = firestore.doc("users/" + user.uid);
-  // (existing cleanup logic preserved as-is)
+
+  try {
+    // Delete the user document and all nested collections.
+    await firestore.recursiveDelete(userRef);
+    console.log(`[onUserDeleted] Deleted all data for uid=${user.uid}`);
+  } catch (err) {
+    console.error(`[onUserDeleted] Error deleting data for uid=${user.uid}:`, err);
+  }
 });
 
 // ----------------------------------------------------------------------------
@@ -207,12 +214,11 @@ exports.revenueCatWebhook = functions
             : 0;
         const updated = current + seconds;
 
-        // Write both canonical and legacy fields to stay consistent with client.
+        // Write only the canonical remainingTime field.
         tx.set(
           userRef,
           {
             remainingTime: updated,
-            remaining_seconds: updated,
           },
           { merge: true }
         );

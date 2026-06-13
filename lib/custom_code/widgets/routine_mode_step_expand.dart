@@ -158,10 +158,31 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       '마음에 안 들어',
       '맘에 안 들어',
       '같은 질문',
+      // 이미 답한 내용을 다시 묻는 반복 질문 불만
+      '아까 말했',
+      '이미 말했',
+      '방금 말했',
+      '이미 대답',
+      '아까 대답',
+      '그거 말했',
+      '말했잖아',
+      '대답했잖아',
+      '물어봤잖아',
+      '같은 걸',
+      '또 물어',
+      '반복',
+      '똑같은 질문',
+      '아까 얘기',
+      '이미 얘기',
       'ask something else',
       'change the question',
       'different question',
       "don't like that question",
+      'already said',
+      'already answered',
+      'already told you',
+      'asked that already',
+      'same question',
     ];
     for (final kw in kws) {
       if (t.contains(kw)) return true;
@@ -306,8 +327,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   bool _showExpandedFinalCard = false; // 확장 문장 카드 표시 여부
   bool _showStudyRoomPrompt = false; // "Study Room에서 연습 하세요" 표시 여부
   int _consecutiveRestateCount = 0; // 같은 턴 연속 GARBLED 횟수 (2 이상이면 더 쉬운 문장 유도)
-  bool _restateConfirmPending = false; // 오프토픽 확인 질문 후 다음 발화는 RESTATE 검사 없이 사용
-
   // 🎯 [PRACTICE] 의미단위 반복 연습 모드
   bool _isPracticeMode = false;
   List<String> _practiceUnits = [];
@@ -320,6 +339,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   bool _isSplittingUnits = false;
   final AudioPlayer _practicePlayer = AudioPlayer();
   List<int> _userPcmAccumulator = [];
+  Set<String> _practiceRecognizedWords = {};
   String? _userWavPath;
 
   // 오디오 및 UI
@@ -1053,6 +1073,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         _showExpandedFinalCard = false;
         _showStudyRoomPrompt = false;
       });
+      _practiceRecognizedWords.clear();
     }
   }
 
@@ -1087,6 +1108,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         _showStudyRoomPrompt = false;
       });
     }
+    _practiceRecognizedWords.clear();
     _startSessionWaitingForUserSeed(); // 시작 안내 후 유저 seed 문장 대기
   }
 
@@ -1407,10 +1429,41 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       _isPracticeAiSpeaking = false;
       _isPracticeUserListening = true;
     });
+    _practiceRecognizedWords.clear();
     _startPracticeListening();
   }
 
   /// 유저 따라 말하기 STT 시작 (target 언어로 인식)
+  /// [PRACTICE-RATIO] Advance when recognized words cover 60% of the unit.
+  void _checkPracticeWordRatio(String transcript) {
+    if (!_isPracticeUserListening || _currentUnitIdx >= _practiceUnits.length) {
+      return;
+    }
+    final incomingWords = transcript
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^\w\s]'), '')
+        .split(RegExp(r'\s+'))
+        .where((w) => w.isNotEmpty);
+    _practiceRecognizedWords.addAll(incomingWords);
+
+    final unitText = _practiceUnits[_currentUnitIdx];
+    final unitWords = unitText
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^\w\s]'), '')
+        .split(RegExp(r'\s+'))
+        .where((w) => w.isNotEmpty)
+        .toSet();
+    if (unitWords.isEmpty) {
+      _practiceAdvanceUnit();
+      return;
+    }
+    final matchCount =
+        unitWords.where((w) => _practiceRecognizedWords.contains(w)).length;
+    if (matchCount / unitWords.length >= 0.6) {
+      _practiceAdvanceUnit();
+    }
+  }
+
   void _startPracticeListening() {
     if (_deepgramKey.isEmpty) {
       Future.delayed(const Duration(seconds: 4), _practiceAdvanceUnit);
@@ -1427,10 +1480,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       langCode: dgCode,
       onLog: _log,
       onConnected: () {},
-      onTranscriptUpdate: (_) {},
-      onTurnEnded: (transcript) {
-        if (transcript.trim().length >= 2) _practiceAdvanceUnit();
-      },
+      onTranscriptUpdate: (transcript) => _checkPracticeWordRatio(transcript),
+      onTurnEnded: (transcript) => _checkPracticeWordRatio(transcript),
       onError: (_) => _practiceAdvanceUnit(),
       onAudioData: (bytes) => _userPcmAccumulator.addAll(bytes),
     );
@@ -1988,9 +2039,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   Future<void> _processRelayPipeline(String finalTranscript,
       {bool isCorrectionRetry = false}) async {
     _resetIdleTimer();
-    // [RESTATE-CONFIRM] 직전 턴에 오프토픽 확인 질문을 했다면 이번 발화는 RESTATE 검사 없이 사용
-    final bool isRestateConfirm = _restateConfirmPending;
-    _restateConfirmPending = false;
     _turnCounter++;
     final int currentTurnId = _turnCounter;
     _log('🧠 [PIPE-01]',
@@ -2097,7 +2145,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         targetLang: targetLangName,
         contextStr: contextStr,
         disableCorrection: isCorrectionRetry,
-        disableRestate: isRestateConfirm,
       );
 
       // 🌱 [StepExpand Part2만 TTS] 첫 턴은 단순 번역 (Part 구분 없음)
@@ -2157,22 +2204,16 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         }
 
         // 되묻기 감지: 주어/목적어 모호 → AI 되묻기
-        if (userTargetText.contains("[CLARIFY]")) {
+        if (!clarified && userTargetText.contains("[CLARIFY]")) {
           clarified = true;
-          _log('❓ [CLARIFY]', '되묻기 감지 → clarification 처리');
-          break;
+          _log('❓ [CLARIFY]', '되묻기 감지 → 스트림 완료 후 처리 예정');
         }
 
         // 다시 말하기 감지: [RESTATE]=오프토픽 / GARBLED=진짜 안 들림
-        // 확인 재청취(isRestateConfirm) 중 모델이 [RESTATE]를 내면 GARBLED로 강등 → 확인 루프 방지
+        // RESTATE는 간단 안내 후 재청취(문맥 확인 루프 제거)
         if (userTargetText.contains("[RESTATE]")) {
-          if (isRestateConfirm) {
-            garbled = true;
-            _log('👂 GARBLED', '확인 재청취 중 RESTATE 재반환 → 다시 말하기 요청으로 강등');
-          } else {
-            restated = true;
-            _log('🔁 [RESTATE]', '맥락 불일치 → 음성으로만 확인 질문 후 재청취');
-          }
+          restated = true;
+          _log('🔁 [RESTATE]', '맥락 불일치 → 간단 안내 후 재청취');
           break;
         }
         if (userTargetText.contains("[GARBLED]")) {
@@ -2398,8 +2439,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 
       // 🔁 RESTATE/GARBLED AI 질문은 그대로 두고 재청취
       //   - GARBLED 진짜 안 들림 → "다시 말해 주세요" (2회 연속이면 더 쉬운 문장 유도)
-      //   - [RESTATE] 어긋나지만 스피킹 내용 그대로 음성으로만 확인 질문 (버블 없음)
-      //     → 확인 대기 플래그를 세우고 다음 발화는 RESTATE 검사 없이 그대로 사용
+      //   - RESTATE 오프토픽 → "질문에 맞게 다시 말해 주세요" (문맥 확인 없이 동일 패턴)
       //   - 턴 카운터 원복(이번 시도 무효 → 다음 발화가 같은 턴으로 재진입)
       //   - 방금 만든 빈 HOST 버블만 제거. 이전의 좋은 맥락(SYSTEM 질문 포함)은 절대 삭제 안 함
       if (restated || garbled) {
@@ -2413,16 +2453,14 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           });
           _scrollToBottom();
         }
+        final int restateCount = ++_consecutiveRestateCount;
         String checkPhrase;
-        if (garbled) {
-          final int restateCount = ++_consecutiveRestateCount;
-          checkPhrase = restateCount >= 2
-              ? "조금 더 짧고 쉬운 문장으로 말해 주실래요?"
-              : "잘 안 들렸어요. 다시 말해 주세요.";
+        if (restateCount >= 2) {
+          checkPhrase = "조금 더 짧고 쉬운 문장으로 말해 주실래요?";
+        } else if (restated) {
+          checkPhrase = "질문에 맞게 다시 말해 주세요.";
         } else {
-          _restateConfirmPending = true;
-          final String heard = finalTranscript.trim();
-          checkPhrase = "방금, $heard, 라고 말씀하신 건가요? 맞다면 그대로 다시 한 번 말해 주세요.";
+          checkPhrase = "잘 안 들렸어요. 다시 말해 주세요.";
         }
         _ttsQueueManager.setUserTurn(false);
         _ttsQueueManager.setAiPaused(false);
@@ -4961,6 +4999,7 @@ Definite [DISSATISFIED] triggers (even mild or indirect displeasure toward the q
 - Requests a different question: "다른 거 물어봐" / "다른 질문 해줘" / "질문 바꿔" / "다른 걸 물어봐줘"
 - Dismisses the question: "뭐야 그게" / "그게 뭐야" / "뭐야 이게" / "그건 좀" / "그건 아닌데" / "그건 별로야"
 - Expresses boredom or displeasure: "재미없어" / "별론데" / "별로야" / "이상하네"
+- Points out already-answered content: "아까 말했잖아" / "이미 대답했잖아" / "방금 말했는데" / "이미 얘기했어" / "그거 말했어" / "아까 대답했어" / "말했잖아" / "똑같은 질문" / "같은 걸 또 물어봐" / "already said" / "already answered" / "I already told you" / "asked that already"
 - English: "ask something else" / "change the question" / "not that question" / "different question" / "meh" / "not really" (when aimed at the question itself)
 
 DO NOT output [DISSATISFIED] for normal negative answers to the question:
@@ -4970,6 +5009,18 @@ DO NOT output [DISSATISFIED] for normal negative answers to the question:
 Key test: Is the user rejecting/evaluating the QUESTION (→ [DISSATISFIED])? Or giving a negative ANSWER to it (→ translate normally)?
 
 $correctionBlock
+
+[KOREAN BODY IDIOM GUIDE — physical, not emotional]
+Korean uses body-part expressions for PHYSICAL sensations. Never translate them as emotional/psychological states:
+- 속이 불편하다 → "my stomach feels uncomfortable" / "I have an upset stomach" (NOT "feeling uneasy")
+- 속이 편안하다 → "my stomach feels comfortable" / "it settles my stomach" (NOT "feeling at ease")
+- 속이 쓰리다 → "my stomach burns" / "I have a burning stomach" (NOT "feeling bitter")
+- 속이 더부룩하다 → "my stomach feels bloated" (NOT "feeling heavy")
+- 머리가 아프다 → "I have a headache" (NOT "it hurts my feelings")
+- 몸이 안 좋다 → "I'm not feeling well physically" / "I feel sick" (NOT "I feel bad emotionally")
+- 눈이 침침하다 → "my eyesight is blurry" (NOT "I feel gloomy")
+- 기운이 없다 → "I have no energy" / "I feel drained" (NOT "I'm unmotivated")
+Context determines: "불편하다" after a body part = physical; after 마음/기분 = emotional. Default to PHYSICAL when the body part is explicit.
 
 [CASE 1] History is empty (USER'S FIRST TURN)
 - Simply translate the user's Korean input into ONE natural English sentence.
@@ -5066,7 +5117,7 @@ Output: [GARBLED]
 - If the input has minor STT errors but the intended meaning is still clearly inferable from context, make your best interpretation and produce the normal output (keep tolerating small errors).
 - If the input is CLEAR but off-context (see [RESTATE GUARD]), output EXACTLY: [RESTATE]. If it is too GARBLED to interpret safely, output EXACTLY: [GARBLED]. Never guess and never invent content the user did not say.
 - Output [RETRY] ONLY when the user's answer shows they did not understand the AI's question itself, so re-asking the same thing would not help.
-- Output [DISSATISFIED] when the user expresses dissatisfaction, complaint, or rejection about the AI's QUESTION itself (not about the topic). Signs: "다른 질문 해줘" / "그 질문 싫어" / "질문 바꿔" / "무슨 질문이 그래" / "별로야" / "그건 좀" / "다른 거 물어봐" / "change the question" / "ask something else" / "I don't like that question". MILD signs ALSO count: "별로" / "별론데" / "아 그건 좀" / "에이" / "그런 거 말고" / "그건 없어" / "재미없어" / "이상하네" / "뭐야 그게" / "meh" / "not really" / "hmm, not that one". Even slight or indirect displeasure aimed at the QUESTION itself counts. Do NOT output [DISSATISFIED] when the user is simply answering negatively (e.g., "아니, 안 갔어" = a valid negative answer).""";
+- Output [DISSATISFIED] when the user expresses dissatisfaction, complaint, or rejection about the AI's QUESTION itself (not about the topic). Signs: "다른 질문 해줘" / "그 질문 싫어" / "질문 바꿔" / "무슨 질문이 그래" / "별로야" / "그건 좀" / "다른 거 물어봐" / "change the question" / "ask something else" / "I don't like that question". MILD signs ALSO count: "별로" / "별론데" / "아 그건 좀" / "에이" / "그런 거 말고" / "그건 없어" / "재미없어" / "이상하네" / "뭐야 그게" / "meh" / "not really" / "hmm, not that one". REPETITION COMPLAINT signs ALSO count: "아까 말했잖아" / "이미 대답했잖아" / "방금 말했는데" / "이미 얘기했어" / "똑같은 질문" / "같은 걸 또" / "already said" / "already answered" / "I already told you". Even slight or indirect displeasure aimed at the QUESTION itself counts. Do NOT output [DISSATISFIED] when the user is simply answering negatively (e.g., "아니, 안 갔어" = a valid negative answer).""";
 
       final request = http.Request(
         'POST',
@@ -5474,6 +5525,22 @@ Examples of the SHIFT you must make:
 RULE: After drafting your question, check — am I just naming their noun again (WIDER)? If yes, rewrite it to go DEEPER.
 BUT keep balance: a deeper question must still be light, answerable in 1–3 words, and its answer must still attach to the growing sentence. Never become abstract or therapy-like.
 
+[IMAGINATIVE RANGE — expand the conversation circle]
+When the user talks about X, do NOT limit your next question to X itself.
+Instead, imagine the WORLD AROUND X and pick one thread:
+- PEOPLE: Who is involved? Who introduced them to X? Who shares X with them?
+- PLACE/SETTING: Where does X happen? What makes that place matter?
+- HABIT/ROUTINE: How did X become part of their life? How often?
+- MEMORY: What first experience with X do they remember? What changed?
+- SOCIAL REACTION: How do others feel about X? Any funny or surprising reactions?
+- LIFE IMPACT: What did X change in their daily life? What would be different without it?
+
+Example — User says "I like vegetable meals":
+BAD (trapped on X): "What kind of vegetables?" / "What's your favorite vegetable dish?"
+GOOD (world around X): "Who got you into eating that way?" / "How did your friends react?" / "When did that habit start?"
+
+RULE: Before finalizing your question, check — does this question ask about X itself, or about something AROUND X? If it asks about X itself, shift to one of the threads above.
+
 [SENTENCE GROWTH LENS]
 Before finalizing your question, ask: "If the user answers this in 1–3 words, exactly where does it attach to the growing sentence?" If no clear attachment point exists, revise the question.
 
@@ -5495,7 +5562,8 @@ ${rejectedQuestion.trim().isNotEmpty ? '  BANNED QUESTION (verbatim): "${rejecte
   Rules:
   • The banned question must NEVER be repeated, rephrased, simplified, or reused in any form.
   • Do NOT ask about the same object, action, time, reason, or topic as the banned question.
-  • Choose a completely different emotional or situational angle.
+  • [AXIS SHIFT — MANDATORY] Identify the THEME AXIS of the banned question (e.g., "food preference", "physical discomfort", "daily routine"). Your replacement question must leave that axis entirely. Shift to a different dimension of the user's story: the PEOPLE involved, the PLACE or SETTING, a HABIT or ROUTINE it connects to, a MEMORY or PAST EXPERIENCE, HOW OTHERS REACT, or what CHANGE it brought to their life.
+  • Think: "What would a curious friend ask that is inspired by — but NOT about — the same subject?"
   • If the context is thin (early turns), ask about a different aspect of what the user mentioned.
   Every other rule above still applies.""" : (isRetry ? "- [RETRY] The previous question confused the user. Ask a simpler, more direct 5–8-word question." : "")}
 
@@ -5530,7 +5598,7 @@ PART 2: A natural Korean conversational translation of PART 1.""";
       request.body = jsonEncode({
         'model': 'gpt-4o-mini',
         'stream': true,
-        'temperature': 0.2,
+        'temperature': 0.45,
         'max_tokens': 300,
         'messages': [
           {'role': 'system', 'content': sysPrompt},

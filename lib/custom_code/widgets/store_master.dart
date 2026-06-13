@@ -20,6 +20,9 @@ import 'package:intl/intl.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'dart:async';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 // 💡 에러의 원인이었던 외부 패키지 삭제 완료! Firebase로 대체합니다.
 
 class StoreMaster extends StatefulWidget {
@@ -40,6 +43,60 @@ class _StoreMasterState extends State<StoreMaster> {
   bool isProcessing = false;
   bool _showLogCopyButton = false;
   String _versionText = '';
+
+  // [v4.0] 서버 증액 감지용 Firestore 리스너
+  StreamSubscription? _remainingTimeSub;
+  bool _waitingForServerCredit = false;
+
+  @override
+  void dispose() {
+    _remainingTimeSub?.cancel();
+    _remainingTimeSub = null;
+    super.dispose();
+  }
+
+  /// 결제 성공 후 서버(웹훅)가 remainingTime을 증액할 때까지 Firestore를 감시한다.
+  /// 최대 20초 대기하며, 실제 시간 증가는 서버에서 반영된다.
+  void _listenForServerCredit(String planTitle) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    _remainingTimeSub?.cancel();
+    _waitingForServerCredit = true;
+
+    final userDocRef = FirebaseFirestore.instance.collection('users').doc(uid);
+
+    final int beforeTime = FFAppState().remainingTime.toInt();
+    _log('LISTEN', 'waiting for server credit beforeTime=$beforeTime');
+
+    _remainingTimeSub = userDocRef.snapshots().listen((snap) {
+      if (!mounted || !_waitingForServerCredit) return;
+      final data = snap.data();
+      if (data == null) return;
+      final int serverTime = (data['remainingTime'] as int?) ?? 0;
+      if (serverTime > beforeTime) {
+        _log('LISTEN', 'server credit detected serverTime=$serverTime');
+        _waitingForServerCredit = false;
+        _remainingTimeSub?.cancel();
+        if (mounted) {
+          setState(() {
+            FFAppState().remainingTime = serverTime;
+          });
+          BillingTicker.instance.remainingSecondsNotifier.value = serverTime;
+        }
+        _showFeedback("✅ 충전 완료! ($planTitle)", const Color(0xFF34D399));
+      }
+    });
+
+    Future.delayed(const Duration(seconds: 20), () {
+      if (!mounted || !_waitingForServerCredit) return;
+      _waitingForServerCredit = false;
+      _remainingTimeSub?.cancel();
+      _log('LISTEN', 'timeout server credit not detected within 20s');
+      _showFeedback("결제 완료! 시간 반영이 지연될 수 있습니다. 잠시 후 다시 확인해 주세요.",
+          const Color(0xFFFBBF24));
+    });
+  }
 
   final List<String> _debugLogs = [];
   void _log(String tag, String msg) {
@@ -95,6 +152,8 @@ class _StoreMasterState extends State<StoreMaster> {
   void initState() {
     super.initState();
     _log('STORE', 'StoreMaster initState');
+    // Store 화면에서는 학습이 아니므로 과금 중단
+    BillingTicker.instance.pause();
     // 💡 v3.7 보강: 결제 화면 첫 진입 시 한 번만 RevenueCat 사용자 연결 안전 체크
     _initRevenueCatUser();
     _loadVersion();
@@ -139,7 +198,8 @@ class _StoreMasterState extends State<StoreMaster> {
   Future<void> _executePurchase(Map<String, dynamic> plan) async {
     if (isProcessing) return;
 
-    _log('PURCHASE', 'tap productId=${plan['id']} title=${plan['title']} uid=$currentUserUid ref=${currentUserReference != null}');
+    _log('PURCHASE',
+        'tap productId=${plan['id']} title=${plan['title']} uid=$currentUserUid ref=${currentUserReference != null}');
 
     if (currentUserReference == null) {
       _showFeedback("로그인 후 이용해 주세요.", const Color(0xFFF87171));
@@ -154,9 +214,11 @@ class _StoreMasterState extends State<StoreMaster> {
       _log('OFFERINGS', 'default=${offerings.all['default']?.identifier}');
       final offering = offerings.current ?? offerings.all['default'];
       _log('OFFERINGS', 'selected=${offering?.identifier}');
-      _log('OFFERINGS', 'packageCount=${offering?.availablePackages.length ?? 0}');
+      _log('OFFERINGS',
+          'packageCount=${offering?.availablePackages.length ?? 0}');
       for (final p in offering?.availablePackages ?? []) {
-        _log('OFFERINGS', 'package=${p.identifier}, product=${p.storeProduct.identifier}, price=${p.storeProduct.priceString}');
+        _log('OFFERINGS',
+            'package=${p.identifier}, product=${p.storeProduct.identifier}, price=${p.storeProduct.priceString}');
       }
 
       if (offering == null) {
@@ -176,11 +238,14 @@ class _StoreMasterState extends State<StoreMaster> {
           break;
         }
       }
-      _log('MATCH', 'matched package=${matchedPackage?.identifier}, product=${matchedPackage?.storeProduct.identifier}');
+      _log('MATCH',
+          'matched package=${matchedPackage?.identifier}, product=${matchedPackage?.storeProduct.identifier}');
 
       if (matchedPackage == null) {
-        _log('MATCH', 'package NOT FOUND for productId=$targetProductId → abort');
-        debugPrint('[RevenueCat] Package not found — productId: $targetProductId');
+        _log('MATCH',
+            'package NOT FOUND for productId=$targetProductId → abort');
+        debugPrint(
+            '[RevenueCat] Package not found — productId: $targetProductId');
         debugPrint('[RevenueCat] current offering: ${offering.identifier}');
         debugPrint(
             '[RevenueCat] available package identifiers: ${offering.availablePackages.map((p) => p.identifier).toList()}');
@@ -192,9 +257,12 @@ class _StoreMasterState extends State<StoreMaster> {
       }
 
       _log('PURCHASE', 'purchasePackage start productId=$targetProductId');
-      final purchaseResult = await Purchases.purchase(PurchaseParams.package(matchedPackage));
-      _log('PURCHASE', 'success appUserId=${purchaseResult.customerInfo.originalAppUserId}');
-      _log('PURCHASE', 'activeEntitlements=${purchaseResult.customerInfo.entitlements.active.keys.join(',')}');
+      final purchaseResult =
+          await Purchases.purchase(PurchaseParams.package(matchedPackage));
+      _log('PURCHASE',
+          'success appUserId=${purchaseResult.customerInfo.originalAppUserId}');
+      _log('PURCHASE',
+          'activeEntitlements=${purchaseResult.customerInfo.entitlements.active.keys.join(',')}');
 
       // 클라이언트 UUID 생성 (RevenueCat 웹훅 ID와 매핑 가능)
       final uid = currentUserUid ?? 'anon';
@@ -202,11 +270,12 @@ class _StoreMasterState extends State<StoreMaster> {
       final clientTxId =
           'client_${DateTime.now().millisecondsSinceEpoch}_$uidPrefix';
 
-      await _syncPurchaseData(plan, clientTxId);
-      _showFeedback("✅ 충전 완료! (${plan['title']})", const Color(0xFF34D399));
+      _onPurchaseSuccess(plan, clientTxId);
+      _showFeedback("✅ 결제 완료 - 충전 반영 중...", const Color(0xFF60A5FA));
     } on PlatformException catch (e) {
       final errorCode = PurchasesErrorHelper.getErrorCode(e);
-      _log('ERROR', 'platform code=$errorCode message=${e.message} details=${e.details}');
+      _log('ERROR',
+          'platform code=$errorCode message=${e.message} details=${e.details}');
       if (errorCode == PurchasesErrorCode.purchaseCancelledError) {
         _showFeedback("결제가 취소되었습니다.", Colors.white54);
       } else if (errorCode == PurchasesErrorCode.purchaseNotAllowedError) {
@@ -218,72 +287,34 @@ class _StoreMasterState extends State<StoreMaster> {
       } else if (errorCode == PurchasesErrorCode.storeProblemError) {
         _showFeedback("스토어 점검 중입니다. 잠시 후 다시 시도해 주세요.", const Color(0xFFF87171));
       } else {
-        _showFeedback("결제 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
-            const Color(0xFFF87171));
+        _showFeedback(
+            "결제 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.", const Color(0xFFF87171));
       }
     } catch (e, stack) {
       final stackStr = stack.toString();
       _log('ERROR', 'general: $e');
-      _log('ERROR', 'stack: ${stackStr.substring(0, stackStr.length > 200 ? 200 : stackStr.length)}');
-      _showFeedback("결제 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.", const Color(0xFFF87171));
+      _log('ERROR',
+          'stack: ${stackStr.substring(0, stackStr.length > 200 ? 200 : stackStr.length)}');
+      _showFeedback(
+          "결제 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.", const Color(0xFFF87171));
     } finally {
       if (mounted) setState(() => isProcessing = false);
     }
   }
 
-  // 💡 v3.7 보강: transactionId 파라미터 추가 — 중복 결제 방지용
-  Future<void> _syncPurchaseData(
-      Map<String, dynamic> plan, String transactionId) async {
-    int earnedSeconds = plan['seconds'];
-    String planId = plan['id'];
-    String planTitle = plan['title'];
+  // [v4.0] 서버 전용 증액: 클라이언트는 Firestore 시간을 직접 올리지 않는다.
+  // RevenueCat 웹훅(Cloud Function)이 purchases 기록과 remainingTime 증액을 수행한다.
+  // 클라이언트는 Firestore 리스너로 변경을 감지해 UI만 갱신한다.
+  void _onPurchaseSuccess(Map<String, dynamic> plan, String transactionId) {
+    final planId = plan['id'] as String;
+    final planTitle = plan['title'] as String;
+    final earnedSeconds = plan['seconds'] as int;
 
-    _log('SYNC', 'start planId=$planId txId=$transactionId earnedSeconds=$earnedSeconds remainingTime=${FFAppState().remainingTime}');
+    _log('SYNC',
+        'purchase success planId=$planId txId=$transactionId expectedSeconds=$earnedSeconds');
+    _log('SYNC', 'waiting for server webhook to credit remainingTime...');
 
-    if (currentUserReference == null) {
-      _log('SYNC', 'currentUserReference null → abort');
-      return;
-    }
-
-    // 💡 v3.7.2: 시간 기반 중복 결제 방지 — 동일 product_id가 최근 10초 내에 결제됐으면 스킵
-    final tenSecondsAgo = Timestamp.fromDate(
-        DateTime.now().subtract(const Duration(seconds: 10)));
-
-    final recentDuplicates = await currentUserReference!
-        .collection('purchases')
-        .where('product_id', isEqualTo: planId)
-        .where('purchased_at', isGreaterThan: tenSecondsAgo)
-        .limit(1)
-        .get();
-
-    if (recentDuplicates.docs.isNotEmpty) {
-      _showFeedback("잠시 후 다시 시도해 주세요.", Colors.white54);
-      return;
-    }
-
-    // 중복 없음 확인 후 증액 처리
-    // 💡 v3.7.1 보강: 위젯 dispose 후 setState 호출 방지 (결제 도중 뒤로가기 케이스)
-    if (mounted) {
-      setState(() {
-        FFAppState().remainingTime += earnedSeconds;
-      });
-      BillingTicker.instance.remainingSecondsNotifier.value =
-          FFAppState().remainingTime;
-    }
-
-    await currentUserReference!.update({
-      'remaining_seconds': FieldValue.increment(earnedSeconds),
-      'remainingTime': FieldValue.increment(earnedSeconds),
-    });
-    await currentUserReference!.collection('purchases').add({
-      'product_id': planId,
-      'product_title': planTitle,
-      'seconds_added': earnedSeconds,
-      'purchased_at': FieldValue.serverTimestamp(),
-      // 💡 v3.7 보강: 중복 방지용 트랜잭션 ID 저장
-      'transaction_id': transactionId,
-    });
-    _log('SYNC', 'Firestore increment + purchase record success');
+    _listenForServerCredit(planTitle);
   }
 
   Future<void> _runRestore() async {
@@ -590,8 +621,8 @@ class _StoreMasterState extends State<StoreMaster> {
                           fontSize: 18,
                           fontWeight: FontWeight.bold)),
                   IconButton(
-                    icon: const Icon(Icons.close_rounded,
-                        color: Colors.white54),
+                    icon:
+                        const Icon(Icons.close_rounded, color: Colors.white54),
                     onPressed: () => Navigator.pop(context),
                   ),
                 ],
@@ -618,9 +649,9 @@ class _StoreMasterState extends State<StoreMaster> {
                           // ── 10초 미만 기록 제외 ──────────────────────────
                           final records = snapshot.data!.docs.where((doc) {
                             final d = doc.data() as Map<String, dynamic>;
-                            final int sec =
-                                (d['actual_seconds'] as int?) ??
-                                (d['seconds_used'] as int?) ?? 0;
+                            final int sec = (d['actual_seconds'] as int?) ??
+                                (d['seconds_used'] as int?) ??
+                                0;
                             return sec >= 10;
                           }).toList();
 
@@ -642,8 +673,7 @@ class _StoreMasterState extends State<StoreMaster> {
                                     Text(
                                       "대화를 시작하면 사용 시간이 이곳에 표시됩니다.",
                                       style: TextStyle(
-                                          color: Colors.white38,
-                                          fontSize: 12),
+                                          color: Colors.white38, fontSize: 12),
                                       textAlign: TextAlign.center,
                                     ),
                                   ],
@@ -656,31 +686,29 @@ class _StoreMasterState extends State<StoreMaster> {
                           final now = DateTime.now();
                           final todayStart =
                               DateTime(now.year, now.month, now.day);
-                          final weekStart = todayStart.subtract(
-                              Duration(days: todayStart.weekday - 1));
+                          final weekStart = todayStart
+                              .subtract(Duration(days: todayStart.weekday - 1));
 
                           // ── 그룹별 합산 헬퍼 ─────────────────────────────
                           int sumGroup(String group, DateTime rangeStart) {
                             int total = 0;
                             for (final doc in records) {
-                              final d =
-                                  doc.data() as Map<String, dynamic>;
+                              final d = doc.data() as Map<String, dynamic>;
                               final DateTime ts = d['created_at'] != null
                                   ? (d['created_at'] as Timestamp).toDate()
                                   : now;
                               if (ts.isBefore(rangeStart)) continue;
-                              final String mode =
-                                  (d['mode'] as String?) ?? '';
+                              final String mode = (d['mode'] as String?) ?? '';
                               if (_modeGroup(mode) != group) continue;
                               total += (d['actual_seconds'] as int?) ??
-                                  (d['seconds_used'] as int?) ?? 0;
+                                  (d['seconds_used'] as int?) ??
+                                  0;
                             }
                             return total;
                           }
 
                           // ── Recent Sessions (최대 5개) ───────────────────
-                          final recentSessions =
-                              records.take(5).toList();
+                          final recentSessions = records.take(5).toList();
 
                           return SingleChildScrollView(
                             child: Column(
@@ -689,19 +717,15 @@ class _StoreMasterState extends State<StoreMaster> {
                                 // ── Today 요약 ──────────────────────────────
                                 _buildUsageSummaryCard(
                                   title: 'Today',
-                                  talkSeconds:
-                                      sumGroup('talk', todayStart),
-                                  studySeconds:
-                                      sumGroup('study', todayStart),
+                                  talkSeconds: sumGroup('talk', todayStart),
+                                  studySeconds: sumGroup('study', todayStart),
                                 ),
                                 const SizedBox(height: 10),
                                 // ── This Week 요약 ──────────────────────────
                                 _buildUsageSummaryCard(
                                   title: 'This Week',
-                                  talkSeconds:
-                                      sumGroup('talk', weekStart),
-                                  studySeconds:
-                                      sumGroup('study', weekStart),
+                                  talkSeconds: sumGroup('talk', weekStart),
+                                  studySeconds: sumGroup('study', weekStart),
                                 ),
                                 const SizedBox(height: 20),
                                 // ── Recent Sessions ─────────────────────────
@@ -715,23 +739,20 @@ class _StoreMasterState extends State<StoreMaster> {
                                 ),
                                 const SizedBox(height: 10),
                                 ...recentSessions.map((doc) {
-                                  final d =
-                                      doc.data() as Map<String, dynamic>;
-                                  final DateTime ts =
-                                      d['created_at'] != null
-                                          ? (d['created_at'] as Timestamp)
-                                              .toDate()
-                                          : now;
+                                  final d = doc.data() as Map<String, dynamic>;
+                                  final DateTime ts = d['created_at'] != null
+                                      ? (d['created_at'] as Timestamp).toDate()
+                                      : now;
                                   final String dateStr =
-                                      DateFormat('yyyy.MM.dd HH:mm')
-                                          .format(ts);
+                                      DateFormat('yyyy.MM.dd HH:mm').format(ts);
                                   final String modeRaw =
                                       (d['mode'] as String?) ?? '';
                                   final String groupName =
                                       _modeGroupName(modeRaw);
                                   final int actualSec =
                                       (d['actual_seconds'] as int?) ??
-                                      (d['seconds_used'] as int?) ?? 0;
+                                          (d['seconds_used'] as int?) ??
+                                          0;
                                   final int usedSec =
                                       (d['seconds_used'] as int?) ?? 0;
                                   final bool isDiff =
@@ -739,17 +760,15 @@ class _StoreMasterState extends State<StoreMaster> {
                                           usedSec > 0;
 
                                   return Padding(
-                                    padding:
-                                        const EdgeInsets.only(bottom: 10),
+                                    padding: const EdgeInsets.only(bottom: 10),
                                     child: Container(
                                       padding: const EdgeInsets.symmetric(
                                           horizontal: 16, vertical: 12),
                                       decoration: BoxDecoration(
                                         color: Colors.black,
-                                        borderRadius:
-                                            BorderRadius.circular(14),
-                                        border: Border.all(
-                                            color: Colors.white10),
+                                        borderRadius: BorderRadius.circular(14),
+                                        border:
+                                            Border.all(color: Colors.white10),
                                       ),
                                       child: Row(
                                         mainAxisAlignment:
@@ -765,8 +784,7 @@ class _StoreMasterState extends State<StoreMaster> {
                                                       ? '$groupName  ·  실제 ${_formatUsageDurationForUser(actualSec)} 사용  ·  ${_formatUsageDurationForUser(usedSec)} 차감'
                                                       : '$groupName  ·  ${_formatUsageDurationForUser(actualSec)}',
                                                   style: const TextStyle(
-                                                      color: Color(
-                                                          0xFF60A5FA),
+                                                      color: Color(0xFF60A5FA),
                                                       fontSize: 13,
                                                       fontWeight:
                                                           FontWeight.w600),
@@ -774,8 +792,7 @@ class _StoreMasterState extends State<StoreMaster> {
                                                 const SizedBox(height: 4),
                                                 Text(dateStr,
                                                     style: const TextStyle(
-                                                        color: Colors
-                                                            .white38,
+                                                        color: Colors.white38,
                                                         fontSize: 11)),
                                               ],
                                             ),
@@ -830,8 +847,8 @@ class _StoreMasterState extends State<StoreMaster> {
                           fontSize: 16,
                           fontWeight: FontWeight.bold)),
                   IconButton(
-                    icon: const Icon(Icons.close_rounded,
-                        color: Colors.white54),
+                    icon:
+                        const Icon(Icons.close_rounded, color: Colors.white54),
                     onPressed: () => Navigator.pop(context),
                   ),
                 ],
@@ -858,8 +875,7 @@ class _StoreMasterState extends State<StoreMaster> {
                           if (records.isEmpty) {
                             return const Center(
                               child: Text("사용시간 로그가 없습니다.",
-                                  style:
-                                      TextStyle(color: Colors.white54)),
+                                  style: TextStyle(color: Colors.white54)),
                             );
                           }
 
@@ -868,16 +884,14 @@ class _StoreMasterState extends State<StoreMaster> {
                             separatorBuilder: (_, __) =>
                                 const SizedBox(height: 10),
                             itemBuilder: (context, index) {
-                              final data = records[index].data()
-                                  as Map<String, dynamic>;
+                              final data =
+                                  records[index].data() as Map<String, dynamic>;
 
                               final DateTime ts = data['created_at'] != null
-                                  ? (data['created_at'] as Timestamp)
-                                      .toDate()
+                                  ? (data['created_at'] as Timestamp).toDate()
                                   : DateTime.now();
                               final String dateFormatted =
-                                  DateFormat('yyyy.MM.dd HH:mm:ss')
-                                      .format(ts);
+                                  DateFormat('yyyy.MM.dd HH:mm:ss').format(ts);
 
                               final String modeRaw =
                                   (data['mode'] as String?) ??
@@ -897,20 +911,17 @@ class _StoreMasterState extends State<StoreMaster> {
                                   : (rateRaw is num
                                       ? rateRaw.toDouble()
                                       : null);
-                              final String? roomId =
-                                  data['room_id'] as String?;
+                              final String? roomId = data['room_id'] as String?;
 
                               return Container(
                                 padding: const EdgeInsets.all(14),
                                 decoration: BoxDecoration(
                                   color: Colors.black,
                                   borderRadius: BorderRadius.circular(14),
-                                  border:
-                                      Border.all(color: Colors.white10),
+                                  border: Border.all(color: Colors.white10),
                                 ),
                                 child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Row(
                                       mainAxisAlignment:
@@ -920,8 +931,7 @@ class _StoreMasterState extends State<StoreMaster> {
                                             style: const TextStyle(
                                                 color: Colors.amber,
                                                 fontSize: 13,
-                                                fontWeight:
-                                                    FontWeight.bold)),
+                                                fontWeight: FontWeight.bold)),
                                         Text(dateFormatted,
                                             style: const TextStyle(
                                                 color: Colors.white38,
@@ -1019,8 +1029,7 @@ class _StoreMasterState extends State<StoreMaster> {
                                   if (mounted) {
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       const SnackBar(
-                                        content:
-                                            Text('✅ 스토어 로그가 복사되었습니다'),
+                                        content: Text('✅ 스토어 로그가 복사되었습니다'),
                                         duration: Duration(seconds: 1),
                                       ),
                                     );
@@ -1064,8 +1073,8 @@ class _StoreMasterState extends State<StoreMaster> {
                             child: Column(
                               children: [
                                 GestureDetector(
-                                  onTap: () => setState(
-                                      () => _showLogCopyButton = !_showLogCopyButton),
+                                  onTap: () => setState(() =>
+                                      _showLogCopyButton = !_showLogCopyButton),
                                   child: const Icon(Icons.shield_moon_rounded,
                                       color: Colors.amber, size: 28),
                                 ),
@@ -1077,11 +1086,13 @@ class _StoreMasterState extends State<StoreMaster> {
                                         letterSpacing: 2)),
                                 const SizedBox(height: 6),
                                 Text(() {
-                                      final int s = (FFAppState().remainingTime).toInt().clamp(0, 999999);
-                                      final int h = s ~/ 3600;
-                                      final int m = (s % 3600) ~/ 60;
-                                      return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
-                                    }(),
+                                  final int s = (FFAppState().remainingTime)
+                                      .toInt()
+                                      .clamp(0, 999999);
+                                  final int h = s ~/ 3600;
+                                  final int m = (s % 3600) ~/ 60;
+                                  return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+                                }(),
                                     style: GoogleFonts.orbitron(
                                         color: Colors.white,
                                         fontSize: 48,
@@ -1217,8 +1228,8 @@ class _StoreMasterState extends State<StoreMaster> {
                     child: Text(
                       _versionText,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(
-                          color: Colors.white24, fontSize: 10),
+                      style:
+                          const TextStyle(color: Colors.white24, fontSize: 10),
                     ),
                   ),
                 ],

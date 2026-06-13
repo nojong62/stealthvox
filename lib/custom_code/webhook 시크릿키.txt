@@ -1,4 +1,10 @@
-firebase functions:config:set revenuecat.webhook_secret="sv_whk_8f3kQ9zR2mXp7vLnT4wB6yD1cA5eG0hk" --project stealth-vox-3p3rq3
+firebase functions:config:set revenuecat.webhook_secret=stealthvox2026 --project stealth-vox-3p3rq3
+
+stealthvox2026
 
 Function URL
 https://us-central1-stealth-vox-3p3rq3.cloudfunctions.net/revenueCatWebhook
+
+Google Play 내부 테스트 트랙에서 설치한 앱에서 Store 화면 → 10분 체험권 구매
+Firebase Console → users/{본인uid} 문서에서 remainingTime 값이 600 증가했는지 확인
+같은 문서의 purchases 서브컬렉션에 새 항목 생성됐는지 확인

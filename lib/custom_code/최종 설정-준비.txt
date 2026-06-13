@@ -1,3 +1,4 @@
+⚠️ 경고 2개 보이는데 (Node.js 20 deprecated 2026-10-30, firebase-functions SDK 4.9.0 outdated) — 이건 🟢 NICE TO HAVE 항목이라 지금은 무시해도 됩니다. 10월 전에만 처리하면 됩니다.
 
 "테스트하고 싶은 분은 구글 이메일 주소를 DM으로 남겨주세요"
 테스트앱 다운로드 https://play.google.com/apps/internaltest/4701441595486020798

@@ -47,472 +47,115 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# 📦 Box 7 패치 지시서 — USER-DRAIN-SIGNAL 추가
+# 📋 최종 커밋 + 검증 — Claude Code 지시서
 
-**버전:** v1.0
-**작성일:** 2026-06-12
-**대상 파일 (3개, 동일 패치):**
-- `F:\flutter_project\stealth_vox\lib\custom_code\widgets\routine_mode_free_talk.dart`
-- `F:\flutter_project\stealth_vox\lib\custom_code\widgets\routine_mode_roleplay.dart`
-- `F:\flutter_project\stealth_vox\lib\custom_code\widgets\routine_mode_step_expand.dart`
-
-**Clone 모드는 제외.** (이번 작업 범위 아님)
+> **사전 조건:** `firebase deploy --only functions` 완료 (실장 수동, 1단계)
+> **이 지시서 범위:** Git 커밋 + 정적 검증만. 실제 앱 실행 테스트는 불가 (기기 필요) → 체크리스트로 별도 안내.
 
 ---
 
-## 1. 작업 목적
-
-`TtsQueueManager`에 **유저 큐 드레인(drain) 시그널** 기능을 추가합니다.
-
-- **신규 API:** `sealUserStream()` + `waitUserDrained()`
-- **기존 API:** 단 한 줄도 수정/삭제 안 함 — 추가만.
-- **회귀 위험:** 신규 메서드를 호출하지 않으면 동작 100% 동일. 기존 호출부(`addAudio`, `setAiPaused`, `setUserTurn`, `isBusy`, `stop`, `dispose`) 영향 없음.
-
----
-
-## 2. 사전 준비
-
-### 2.1. 세이브포인트 (필수)
+## 1. 현재 상태 확인
 
 ```powershell
 cd F:\flutter_project\stealth_vox
 git status
+git branch --show-current
+```
+
+현재 브랜치(`claude1-part-b-20260613` 등)와 변경된 파일 목록을 보여줄 것.
+
+---
+
+## 2. 변경 파일 diff 요약 확인
+
+아래 파일들이 이번 작업에서 수정된 대상입니다. 각각 `git diff --stat`으로 변경 라인 수만 확인:
+
+```powershell
+git diff --stat -- lib/custom_code/widgets/stealth_room_master.dart lib/custom_code/widgets/lobby_master.dart lib/custom_code/widgets/store_master.dart lib/custom_code/widgets/intro_master.dart firebase/functions/index.js firebase/firestore.rules
+```
+
+---
+
+## 3. 최종 정적 검증 (배포 후 재확인)
+
+### 3-1. Flutter 전체 analyze (변경 파일만)
+
+```powershell
+flutter analyze lib/custom_code/widgets/stealth_room_master.dart lib/custom_code/widgets/lobby_master.dart lib/custom_code/widgets/store_master.dart lib/custom_code/widgets/intro_master.dart
+```
+
+`error` 키워드 포함 라인이 없는지 확인. (warning/info는 무시)
+
+### 3-2. index.js 문법 + export 재확인
+
+```powershell
+node --check firebase\functions\index.js
+grep -c "exports.onUserDeleted" firebase\functions\index.js
+grep -c "exports.deductRemainingTime" firebase\functions\index.js
+grep -c "exports.revenueCatWebhook" firebase\functions\index.js
+grep -c "remaining_seconds" firebase\functions\index.js
+grep -c "recursiveDelete" firebase\functions\index.js
+```
+
+기대값: 위 3개 export 각 1, `remaining_seconds` 0, `recursiveDelete` 1.
+
+### 3-3. Firestore Rules 컴파일 확인 (배포는 이미 됐으므로 재확인만)
+
+```powershell
+type firebase\firestore.rules | Select-String "allow read, write: if true"
+```
+
+→ 결과가 **없어야** 함 (전체 개방 규칙 제거 확인).
+
+---
+
+## 4. Git 커밋
+
+위 3번 검증이 모두 통과하면 커밋:
+
+```powershell
 git add -A
-git commit -m "save before box7 user-drain-signal patch"
-git log --oneline -1
+git commit -m "Phase 2: 서버전용 증액 + Firestore Rules 강화 + 백그라운드/Store pause + 계정탈퇴 데이터 완전삭제 + Anonymous 계정연결"
 ```
 
-위 마지막 명령으로 출력된 해시를 메모. 롤백 시 사용.
+커밋 해시와 변경 파일 수를 보고할 것.
 
-### 2.2. 원본 클래스 위치 확인 (3개 파일 동일 패치)
+---
+
+## 5. 커밋 후 보고 형식
+
+```
+브랜치: <branch명>
+커밋 해시: <hash>
+변경 파일: <N>개
+3-1 analyze: error 0개 ✅/❌
+3-2 index.js: <표>
+3-3 rules: "if true" 없음 ✅/❌
+```
+
+---
+
+## ⚠️ 이 지시서가 하지 않는 것 (실장 수동 진행)
+
+아래는 Claude Code가 할 수 없으므로 **실장님이 직접** 진행:
+
+| # | 항목 | 방법 |
+|---|------|------|
+| 1 | `flutter build appbundle` | PowerShell에서 직접 빌드 |
+| 2 | Google Play 내부 테스트 업로드 | Play Console |
+| 3 | 앱 실행 후 1분 대화 → `remainingTime` 60초 감소 확인 | Firebase Console에서 `users/{uid}.remainingTime` 관찰 |
+| 4 | 대화 중 백그라운드 전환 → 시간 안 줄어드는지 확인 | 앱을 홈으로 보냈다가 복귀 |
+| 5 | Store 화면 진입 후 30초 대기 → `remainingTime` 변화 없음 확인 | Firebase Console |
+| 6 (선택) | 테스트 계정으로 회원탈퇴 → `users/{uid}` 문서 + 하위 컬렉션 전체 삭제 확인 | Firebase Console Firestore |
+
+---
+
+## 🔄 롤백
 
 ```powershell
-grep -n "class TtsQueueManager" lib\custom_code\widgets\routine_mode_free_talk.dart
-grep -n "class TtsQueueManager" lib\custom_code\widgets\routine_mode_roleplay.dart
-grep -n "class TtsQueueManager" lib\custom_code\widgets\routine_mode_step_expand.dart
+git reset --soft HEAD~1   # 커밋만 취소, 변경사항은 유지
+# 또는
+git restore <file>          # 특정 파일만 되돌리기
 ```
 
-예상 결과 (현재 시점 기준):
-- routine_mode_free_talk.dart : **2665**
-- routine_mode_roleplay.dart : **2994**
-- routine_mode_step_expand.dart : **4451**
-
-라인 번호가 다르면 정상(파일 수정 이력에 따라). 클래스 본문 내용은 3개 파일 모두 동일하므로 str_replace 앵커는 그대로 적용됨.
-
----
-
-## 3. 패치 적용 (3개 파일 각각, bottom-to-top 순서)
-
-각 파일에서 **4단계** 적용. 라인 번호 드리프트 방지를 위해 **아래쪽부터 위쪽 순서로** 진행.
-
-### Step 1 — `stop()` 메서드 수정 (deadlock 방지)
-
-**삭제 대상:** 없음 (메서드 내부에 코드 추가)
-
-**위치 식별 (각 파일에서 grep로 확인):**
-
-```powershell
-grep -n "void stop()" lib\custom_code\widgets\routine_mode_step_expand.dart
-```
-
-해당 메서드의 시작줄 부근부터 약 9줄. 내용은 다음 블록(현재 원본):
-
-```dart
-  void stop() {
-    _userQueue.clear();
-    _aiQueue.clear();
-    _isPlaying = false;
-    _aiPaused = false;
-    _player.stop();
-    if (_completer != null && !_completer!.isCompleted) {
-      _completer!.complete();
-    }
-  }
-```
-
-**str_replace 적용:**
-
-`old_str`:
-```dart
-  void stop() {
-    _userQueue.clear();
-    _aiQueue.clear();
-    _isPlaying = false;
-    _aiPaused = false;
-    _player.stop();
-    if (_completer != null && !_completer!.isCompleted) {
-      _completer!.complete();
-    }
-  }
-```
-
-`new_str`:
-```dart
-  void stop() {
-    _userQueue.clear();
-    _aiQueue.clear();
-    _isPlaying = false;
-    _aiPaused = false;
-    _player.stop();
-    if (_completer != null && !_completer!.isCompleted) {
-      _completer!.complete();
-    }
-    // 🌱 [Box 7 USER-DRAIN-SIGNAL] 드레인 대기자 풀어주기 (deadlock 방지)
-    if (_userDrainedCompleter != null && !_userDrainedCompleter!.isCompleted) {
-      _userDrainedCompleter!.complete();
-    }
-    _userDrainedCompleter = null;
-    _userStreamSealed = false;
-    _currentChunkIsUser = false;
-  }
-```
-
----
-
-### Step 2 — `_processQueue` 메서드 수정 (드레인 신호 발생 지점)
-
-**위치 식별:**
-
-```powershell
-grep -n "Future<void> _processQueue" lib\custom_code\widgets\routine_mode_step_expand.dart
-```
-
-원본 블록(현재):
-
-```dart
-  Future<void> _processQueue() async {
-    if (_isPlaying) return;
-    _isPlaying = true;
-    onPlayStart?.call();
-
-    // 🔧 [v3.5] 재생 우선순위:
-    //   1순위: 유저 큐 (항상 우선)
-    //   2순위: AI 큐 (유저 큐 비고 _aiPaused=false일 때만)
-    while (_userQueue.isNotEmpty || (!_aiPaused && _aiQueue.isNotEmpty)) {
-      Uint8List bytes;
-      if (_userQueue.isNotEmpty) {
-        bytes = _userQueue.removeAt(0);
-      } else if (!_aiPaused && _aiQueue.isNotEmpty) {
-        bytes = _aiQueue.removeAt(0);
-      } else {
-        break;
-      }
-
-      if (bytes.isEmpty) continue;
-
-      _completer = Completer<void>();
-      final estimatedDuration = Duration(
-        seconds: ((bytes.length / 16000) + 3).ceil(),
-      );
-
-      try {
-        await _player.play(BytesSource(bytes));
-        await _completer!.future.timeout(estimatedDuration);
-      } catch (_) {
-      } finally {
-        if (_completer != null && !_completer!.isCompleted) {
-          _completer!.complete();
-        }
-      }
-    }
-
-    _isPlaying = false;
-    if (_userQueue.isEmpty && _aiQueue.isEmpty) onQueueEmpty?.call();
-  }
-```
-
-**str_replace 적용:**
-
-`old_str`: 위 원본 블록 전체
-
-`new_str`:
-```dart
-  Future<void> _processQueue() async {
-    if (_isPlaying) return;
-    _isPlaying = true;
-    onPlayStart?.call();
-
-    // 🔧 [v3.5] 재생 우선순위:
-    //   1순위: 유저 큐 (항상 우선)
-    //   2순위: AI 큐 (유저 큐 비고 _aiPaused=false일 때만)
-    while (_userQueue.isNotEmpty || (!_aiPaused && _aiQueue.isNotEmpty)) {
-      Uint8List bytes;
-      if (_userQueue.isNotEmpty) {
-        bytes = _userQueue.removeAt(0);
-        _currentChunkIsUser = true; // 🌱 [Box 7 USER-DRAIN-SIGNAL]
-      } else if (!_aiPaused && _aiQueue.isNotEmpty) {
-        bytes = _aiQueue.removeAt(0);
-        _currentChunkIsUser = false; // 🌱 [Box 7 USER-DRAIN-SIGNAL]
-      } else {
-        break;
-      }
-
-      if (bytes.isEmpty) continue;
-
-      _completer = Completer<void>();
-      final estimatedDuration = Duration(
-        seconds: ((bytes.length / 16000) + 3).ceil(),
-      );
-
-      try {
-        await _player.play(BytesSource(bytes));
-        await _completer!.future.timeout(estimatedDuration);
-      } catch (_) {
-      } finally {
-        if (_completer != null && !_completer!.isCompleted) {
-          _completer!.complete();
-        }
-      }
-
-      // 🌱 [Box 7 USER-DRAIN-SIGNAL] 유저 청크 재생 완료 직후
-      //   유저 큐가 비었고 sealed면 드레인 신호 발사
-      if (_currentChunkIsUser &&
-          _userStreamSealed &&
-          _userQueue.isEmpty) {
-        if (_userDrainedCompleter != null &&
-            !_userDrainedCompleter!.isCompleted) {
-          _userDrainedCompleter!.complete();
-        }
-      }
-      _currentChunkIsUser = false;
-    }
-
-    _isPlaying = false;
-    if (_userQueue.isEmpty && _aiQueue.isEmpty) onQueueEmpty?.call();
-  }
-```
-
----
-
-### Step 3 — 신규 메서드 2개 추가 (`sealUserStream`, `waitUserDrained`)
-
-**삽입 위치:** `addAudio` 메서드 바로 다음, `_processQueue` 바로 앞.
-
-원본의 해당 영역(현재):
-
-```dart
-  /// 🔧 [v3.5] isUser=true면 유저 큐, false면 AI 큐에 적재
-  Future<void> addAudio(Uint8List bytes, {required bool isUser}) async {
-    if (isUser) {
-      _userQueue.add(bytes);
-    } else {
-      _aiQueue.add(bytes);
-    }
-    if (!_isPlaying) _processQueue();
-  }
-
-  Future<void> _processQueue() async {
-```
-
-**str_replace 적용:**
-
-`old_str`:
-```dart
-  /// 🔧 [v3.5] isUser=true면 유저 큐, false면 AI 큐에 적재
-  Future<void> addAudio(Uint8List bytes, {required bool isUser}) async {
-    if (isUser) {
-      _userQueue.add(bytes);
-    } else {
-      _aiQueue.add(bytes);
-    }
-    if (!_isPlaying) _processQueue();
-  }
-
-  Future<void> _processQueue() async {
-```
-
-`new_str`:
-```dart
-  /// 🔧 [v3.5] isUser=true면 유저 큐, false면 AI 큐에 적재
-  Future<void> addAudio(Uint8List bytes, {required bool isUser}) async {
-    if (isUser) {
-      _userQueue.add(bytes);
-    } else {
-      _aiQueue.add(bytes);
-    }
-    if (!_isPlaying) _processQueue();
-  }
-
-  // 🌱 [Box 7 USER-DRAIN-SIGNAL] 유저 청크 스트림 봉인.
-  //   호출 시점 = "더 이상 유저 청크 안 들어옴" 선언.
-  //   호출 후 waitUserDrained()와 짝지어 사용.
-  void sealUserStream() {
-    _userStreamSealed = true;
-    // 봉인 시점에 이미 유저 큐가 비고 현재 재생도 유저 청크가 아니면 즉시 신호
-    if (_userQueue.isEmpty && !_currentChunkIsUser) {
-      if (_userDrainedCompleter != null &&
-          !_userDrainedCompleter!.isCompleted) {
-        _userDrainedCompleter!.complete();
-      }
-    }
-  }
-
-  // 🌱 [Box 7 USER-DRAIN-SIGNAL] 유저 큐 완전 비움(마지막 샘플 재생 완료)까지 대기.
-  //   timeout 기본 45초 = 좀비 방지 ceiling.
-  //   정상 동작 시에는 마지막 청크 재생 완료 즉시 반환.
-  //   타임아웃 시에도 예외 없이 정상 반환 — 호출부는 항상 진행 보장.
-  //   호출 후 상태 자동 리셋(다음 턴 대비).
-  Future<void> waitUserDrained({
-    Duration timeout = const Duration(seconds: 45),
-  }) async {
-    // 즉시 조건 만족: 바로 반환
-    if (_userQueue.isEmpty && !_currentChunkIsUser) {
-      _userStreamSealed = false;
-      return;
-    }
-    // completer 생성 (재진입 안전: 기존 것 재사용)
-    _userDrainedCompleter ??= Completer<void>();
-    try {
-      await _userDrainedCompleter!.future.timeout(timeout);
-    } catch (_) {
-      // 타임아웃 — 강제 진행 (좀비 방지)
-    } finally {
-      _userDrainedCompleter = null;
-      _userStreamSealed = false;
-    }
-  }
-
-  Future<void> _processQueue() async {
-```
-
----
-
-### Step 4 — 필드 3개 추가 (클래스 상단)
-
-**삽입 위치:** `bool _isUserTurn = true;` 다음 줄.
-
-원본 영역(현재):
-
-```dart
-  // 🔧 [v3.6] 외부에서 _aiPaused 상태 조회 (UI 업데이트 보류 판단용)
-  bool get aiPaused => _aiPaused;
-  // UI 상태 표시용 (레거시 호환)
-  bool _isUserTurn = true;
-
-  /// 유저 재생 중이거나 유저 큐에 남은 게 있으면 busy
-```
-
-**str_replace 적용:**
-
-`old_str`:
-```dart
-  // 🔧 [v3.6] 외부에서 _aiPaused 상태 조회 (UI 업데이트 보류 판단용)
-  bool get aiPaused => _aiPaused;
-  // UI 상태 표시용 (레거시 호환)
-  bool _isUserTurn = true;
-
-  /// 유저 재생 중이거나 유저 큐에 남은 게 있으면 busy
-```
-
-`new_str`:
-```dart
-  // 🔧 [v3.6] 외부에서 _aiPaused 상태 조회 (UI 업데이트 보류 판단용)
-  bool get aiPaused => _aiPaused;
-  // UI 상태 표시용 (레거시 호환)
-  bool _isUserTurn = true;
-
-  // 🌱 [Box 7 USER-DRAIN-SIGNAL] 유저 큐 완전 드레인 감지용
-  bool _userStreamSealed = false;
-  Completer<void>? _userDrainedCompleter;
-  bool _currentChunkIsUser = false;
-
-  /// 유저 재생 중이거나 유저 큐에 남은 게 있으면 busy
-```
-
----
-
-## 4. 검증 (각 파일별로)
-
-### 4.1. grep 카운트 검증
-
-3개 파일 각각에 대해 다음을 실행:
-
-```powershell
-$f = "lib\custom_code\widgets\routine_mode_step_expand.dart"
-# (free_talk, roleplay 도 동일)
-
-# 신규 식별자 출현 횟수 — 모두 0보다 커야 함
-(grep -c "sealUserStream" $f)           # 기대값: 1 (정의만)
-(grep -c "waitUserDrained" $f)          # 기대값: 1 (정의만)
-(grep -c "_userStreamSealed" $f)        # 기대값: 3 (선언1 + 사용2)
-(grep -c "_userDrainedCompleter" $f)    # 기대값: 5 (선언1 + 사용4)
-(grep -c "_currentChunkIsUser" $f)      # 기대값: 5 (선언1 + 사용4)
-(grep -c "USER-DRAIN-SIGNAL" $f)        # 기대값: 6 (주석 6곳)
-```
-
-기대값과 어긋나면 해당 파일 패치 불완전 → Step 1~4 중 누락된 곳 재검토.
-
-### 4.2. 컴파일 검증
-
-```powershell
-cd F:\flutter_project\stealth_vox
-flutter analyze lib\custom_code\widgets\routine_mode_free_talk.dart
-flutter analyze lib\custom_code\widgets\routine_mode_roleplay.dart
-flutter analyze lib\custom_code\widgets\routine_mode_step_expand.dart
-```
-
-새로운 에러/경고 없어야 함. 기존 info-level 경고는 무관.
-
-### 4.3. 동작 검증 (수동)
-
-이 패치만으로는 호출부가 없으므로 **기존 동작 100% 동일**이어야 함:
-
-- 3모드 각각 1턴씩 대화 → 정상 진행 확인
-- 로그에 `🌱 [Box 7 USER-DRAIN-SIGNAL]` 관련 출력은 아직 없음 (정상)
-- `isBusy`, `setAiPaused`, `stop`, `dispose` 모두 기존과 동일하게 동작
-
----
-
-## 5. 호출부 작업은 별도 지시서
-
-이 패치는 **API 추가만** 하고 호출부는 손대지 않음.
-
-호출부(`routine_mode_*.dart`의 `_processRelayPipeline` 안)에서 `sealUserStream()` + `waitUserDrained()`를 실제 사용하는 작업은 **별도 지시서**로 진행 예정.
-
-순서:
-1. ✅ **이 지시서:** Box 7 API 추가 (3파일 동일 패치)
-2. ⏳ 다음 지시서: Step Expand 호출부 마이그레이션 + floor 로직 제거
-3. ⏳ 그 다음: Free Talk 호출부 마이그레이션
-4. ⏳ 그 다음: Roleplay 호출부 마이그레이션
-
-각 단계마다 별도 git 세이브포인트.
-
----
-
-## 6. 롤백 절차
-
-이 패치만 되돌리려면:
-
-```powershell
-cd F:\flutter_project\stealth_vox
-git restore lib\custom_code\widgets\routine_mode_free_talk.dart
-git restore lib\custom_code\widgets\routine_mode_roleplay.dart
-git restore lib\custom_code\widgets\routine_mode_step_expand.dart
-```
-
-이미 커밋한 후라면:
-
-```powershell
-git log --oneline -5
-git revert <패치커밋해시>
-```
-
----
-
-## 7. 체크리스트 요약
-
-각 파일(FT/RP/SE)별로 다음을 모두 통과해야 작업 완료:
-
-- [ ] Step 1: `stop()` 메서드 수정 완료
-- [ ] Step 2: `_processQueue` 메서드 수정 완료
-- [ ] Step 3: `sealUserStream` / `waitUserDrained` 메서드 추가 완료
-- [ ] Step 4: 필드 3개 추가 완료
-- [ ] 검증 4.1: grep 카운트 모두 기대값 일치
-- [ ] 검증 4.2: `flutter analyze` 에러 0
-- [ ] 검증 4.3: 1턴 대화 정상 (기존 동작 무변경)
-
-3개 파일 모두 위 체크리스트 통과 → Box 7 패치 완료.
-
----
-
-**EOF**
+functions 배포 롤백은 이전 버전 재배포 필요 — 문제 발생 시 보고.

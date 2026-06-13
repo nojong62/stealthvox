@@ -3517,6 +3517,9 @@ The particle before the verb's doer (이/가) is ALWAYS the subject. Never swap 
     required String apiKey,
     required String englishText,
   }) async {
+    // 빈 입력 가드: GPT에 빈 문장을 보내 메타 응답을 받는 것을 방지.
+    if (englishText.trim().isEmpty) return englishText;
+
     for (int attempt = 0; attempt < 2; attempt++) {
       final client = http.Client();
       try {
@@ -3562,7 +3565,20 @@ The particle before the verb's doer (이/가) is ALWAYS the subject. Never swap 
 
         if (res.statusCode == 200) {
           final data = jsonDecode(utf8.decode(res.bodyBytes));
-          return data['choices'][0]['message']['content'].toString().trim();
+          final result =
+              data['choices'][0]['message']['content'].toString().trim();
+          // 응답 검증: 번역 대신 안내/메타 응답이 오면 재시도 후 fallback.
+          final lower = result.toLowerCase();
+          if (lower.contains('번역할 문장') ||
+              lower.contains('문장이 필요') ||
+              lower.contains('문장을 제공') ||
+              lower.contains('please provide') ||
+              lower.contains('i need a sentence') ||
+              lower.contains('no text') ||
+              result.isEmpty) {
+            continue;
+          }
+          return result;
         }
       } catch (_) {
         if (attempt == 0) {

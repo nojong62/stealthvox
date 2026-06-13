@@ -80,7 +80,8 @@ class _IntroMasterState extends State<IntroMaster> {
 
   Future<void> _checkEntryStatus() async {
     // 1순위: AppsFlyer Duo guest invite pending — 로그인 없이 StealthRoom으로
-    debugPrint('[Intro] isGuestSession=${FFAppState().isGuestSession}, pendingInviteType=${FFAppState().pendingInviteType}, duoRoomId=${FFAppState().duoRoomId}');
+    debugPrint(
+        '[Intro] isGuestSession=${FFAppState().isGuestSession}, pendingInviteType=${FFAppState().pendingInviteType}, duoRoomId=${FFAppState().duoRoomId}');
     if (FFAppState().isGuestSession &&
         FFAppState().pendingInviteType == 'duo' &&
         FFAppState().duoRoomId.isNotEmpty) {
@@ -183,10 +184,21 @@ class _IntroMasterState extends State<IntroMaster> {
           password: passwordController.text.trim(),
         );
       } else {
-        await FirebaseAuth.instance.createUserWithEmailAndPassword(
-          email: emailController.text.trim(),
-          password: passwordController.text.trim(),
-        );
+        final email = emailController.text.trim();
+        final password = passwordController.text.trim();
+        final currentUser = FirebaseAuth.instance.currentUser;
+        if (currentUser != null && currentUser.isAnonymous) {
+          final credential = EmailAuthProvider.credential(
+            email: email,
+            password: password,
+          );
+          await currentUser.linkWithCredential(credential);
+        } else {
+          await FirebaseAuth.instance.createUserWithEmailAndPassword(
+            email: email,
+            password: password,
+          );
+        }
       }
       if (mounted) context.goNamed('Lobby');
     } on FirebaseAuthException catch (e) {
@@ -292,8 +304,7 @@ class _IntroMasterState extends State<IntroMaster> {
             : SafeArea(
                 child: SingleChildScrollView(
                   controller: _scrollController,
-                  padding: EdgeInsets.fromLTRB(
-                      24, 24, 24,
+                  padding: EdgeInsets.fromLTRB(24, 24, 24,
                       24 + MediaQuery.of(context).viewInsets.bottom),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,

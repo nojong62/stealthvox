@@ -17,6 +17,7 @@ import '/custom_code/actions/index.dart';
 
 import 'dart:ui';
 import 'package:google_fonts/google_fonts.dart';
+import '/custom_code/actions/billing_ticker.dart';
 
 class StealthRoomMaster extends StatefulWidget {
   const StealthRoomMaster({
@@ -33,7 +34,8 @@ class StealthRoomMaster extends StatefulWidget {
   _StealthRoomMasterState createState() => _StealthRoomMasterState();
 }
 
-class _StealthRoomMasterState extends State<StealthRoomMaster> {
+class _StealthRoomMasterState extends State<StealthRoomMaster>
+    with WidgetsBindingObserver {
   // ============================================================================
   // 📦 [1. 상태 변수 및 모드 제어 (STATE & MODE CONTROL)]
   // 현재 선택된 모드(Duo, Clone, Roleplay, Expand)를 기억하고 전환하는 역할
@@ -47,13 +49,13 @@ class _StealthRoomMasterState extends State<StealthRoomMaster> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     StealthRoomMaster.exitCurrentMode =
         () => setState(() => _currentMode = null);
 
     // Duo 초대 링크 자동 진입 처리
     // FFAppState 초대 상태는 여기서 지우지 않음 — _joinAsGuest 성공 후에만 삭제
-    if (FFAppState().isGuestSession &&
-        FFAppState().duoRoomId.isNotEmpty) {
+    if (FFAppState().isGuestSession && FFAppState().duoRoomId.isNotEmpty) {
       final String consumedRoomId = FFAppState().duoRoomId;
       debugPrint('[StealthRoom] Duo invite detected — roomId: $consumedRoomId');
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -69,8 +71,18 @@ class _StealthRoomMasterState extends State<StealthRoomMaster> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     StealthRoomMaster.exitCurrentMode = null;
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      BillingTicker.instance.flushNow();
+      BillingTicker.instance.pause();
+    }
   }
 
   void _switchMode(int newMode) {
