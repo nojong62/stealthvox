@@ -10,12 +10,9 @@ import 'package:flutter/material.dart';
 // Begin custom widget code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
-import 'index.dart'; // Imports other custom widgets
-
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:appsflyer_sdk/appsflyer_sdk.dart';
-import 'dart:convert';
 import 'dart:io';
 import 'package:android_id/android_id.dart';
 import 'package:device_info_plus/device_info_plus.dart';
@@ -23,12 +20,12 @@ import 'package:http/http.dart' as http;
 
 class IntroMaster extends StatefulWidget {
   const IntroMaster({
-    Key? key,
+    super.key,
     this.width,
     this.height,
     this.roomId,
     this.primaryColor,
-  }) : super(key: key);
+  });
 
   final double? width;
   final double? height;
@@ -312,6 +309,7 @@ class _IntroMasterState extends State<IntroMaster> {
       await FirebaseAuth.instance.sendPasswordResetEmail(
         email: emailController.text.trim(),
       );
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("재설정 메일을 보냈습니다! 메일함(혹시 스팸함)을 확인하세요.",
@@ -320,6 +318,7 @@ class _IntroMasterState extends State<IntroMaster> {
         ),
       );
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("전송 실패: ${e.toString()}")),
       );
@@ -333,8 +332,8 @@ class _IntroMasterState extends State<IntroMaster> {
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF222222),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
-          children: const [
+        title: const Row(
+          children: [
             Icon(Icons.lightbulb, color: Colors.amber),
             SizedBox(width: 8),
             Text("[ 사용 가이드 ]",
@@ -344,8 +343,8 @@ class _IntroMasterState extends State<IntroMaster> {
                     fontWeight: FontWeight.bold)),
           ],
         ),
-        content: SingleChildScrollView(
-          child: const Text(
+        content: const SingleChildScrollView(
+          child: Text(
             "1. 실전 AI 대화 🤖\n"
             "• [AI Roleplay] 무작위 직업과 상황을 부여받고, 예측 불가한 실전 회화를 연습하세요.\n"
             "• [Free Talk] AI와 자유롭게 영어 대화를 나누며 실전 회화를 연습하세요.\n\n"
@@ -508,9 +507,9 @@ class _IntroMasterState extends State<IntroMaster> {
                             child: GestureDetector(
                               onTap: _resetPassword,
                               child: _buildBentoCard(
-                                child: Column(
+                                child: const Column(
                                   mainAxisAlignment: MainAxisAlignment.center,
-                                  children: const [
+                                  children: [
                                     Icon(Icons.lock_reset,
                                         color: Colors.amber, size: 26),
                                     SizedBox(height: 8),
@@ -529,9 +528,9 @@ class _IntroMasterState extends State<IntroMaster> {
                             child: GestureDetector(
                               onTap: () => _showGuideDialog(context),
                               child: _buildBentoCard(
-                                child: Column(
+                                child: const Column(
                                   mainAxisAlignment: MainAxisAlignment.center,
-                                  children: const [
+                                  children: [
                                     Icon(Icons.help_outline,
                                         color: Colors.amber, size: 26),
                                     SizedBox(height: 8),
@@ -562,7 +561,7 @@ class _IntroMasterState extends State<IntroMaster> {
       decoration: BoxDecoration(
         color: const Color(0xFF222222),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withOpacity(0.08)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
       ),
       child: child,
     );
@@ -589,7 +588,7 @@ class _IntroMasterState extends State<IntroMaster> {
         hintText: hint,
         hintStyle: const TextStyle(color: Colors.white30),
         filled: true,
-        fillColor: Colors.black.withOpacity(0.5),
+        fillColor: Colors.black.withValues(alpha: 0.5),
         border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
             borderSide: BorderSide.none),
