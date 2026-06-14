@@ -16,6 +16,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:appsflyer_sdk/appsflyer_sdk.dart';
 import 'dart:convert';
+import 'dart:io';
+import 'package:android_id/android_id.dart';
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:http/http.dart' as http;
 
 class IntroMaster extends StatefulWidget {
   const IntroMaster({
@@ -199,9 +203,11 @@ class _IntroMasterState extends State<IntroMaster> {
             password: password,
           );
         }
+        await _claimWelcomeBonus();
       }
       if (mounted) context.goNamed('Lobby');
     } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(e.message ?? "오류가 발생했습니다.",
@@ -213,6 +219,84 @@ class _IntroMasterState extends State<IntroMaster> {
     } finally {
       if (mounted) setState(() => isLoading = false);
     }
+  }
+
+  Future<void> _claimWelcomeBonus() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      final deviceId = await _getDeviceId();
+      if (deviceId.isEmpty) {
+        debugPrint('[IntroMaster] welcome bonus skipped: empty deviceId');
+        return;
+      }
+
+      final idToken = await user.getIdToken();
+      final projectId = FirebaseFirestore.instance.app.options.projectId;
+      final response = await http
+          .post(
+            Uri.parse(
+              'https://us-central1-$projectId.cloudfunctions.net/claimWelcomeBonus',
+            ),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $idToken',
+            },
+            body: jsonEncode({
+              'data': {'deviceId': deviceId},
+            }),
+          )
+          .timeout(const Duration(seconds: 10));
+
+      if (response.statusCode != 200) {
+        debugPrint(
+          '[IntroMaster] welcome bonus HTTP ${response.statusCode}: ${response.body}',
+        );
+        return;
+      }
+
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final result = body['result'] as Map<String, dynamic>?;
+      final granted = result?['granted'] as bool? ?? false;
+
+      if (!granted) {
+        debugPrint('[IntroMaster] welcome bonus skipped: ${result?['reason']}');
+        return;
+      }
+
+      final remainingTime = (result?['remainingTime'] as num?)?.toInt() ?? 600;
+      FFAppState().remainingTime = remainingTime;
+      FFAppState().update(() {});
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              "신규 회원 10분 무료 체험이 지급되었습니다!",
+              style:
+                  TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+            ),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('[IntroMaster] claimWelcomeBonus error: $e');
+    }
+  }
+
+  Future<String> _getDeviceId() async {
+    if (Platform.isAndroid) {
+      const androidIdPlugin = AndroidId();
+      return await androidIdPlugin.getId() ?? '';
+    }
+    if (Platform.isIOS) {
+      final iosInfo = await DeviceInfoPlugin().iosInfo;
+      return iosInfo.identifierForVendor ?? '';
+    }
+    return '';
   }
 
   Future<void> _resetPassword() async {
@@ -264,9 +348,9 @@ class _IntroMasterState extends State<IntroMaster> {
           child: const Text(
             "1. 실전 AI 대화 🤖\n"
             "• [AI Roleplay] 무작위 직업과 상황을 부여받고, 예측 불가한 실전 회화를 연습하세요.\n"
-            "• [Clone AI] 지인의 카톡을 분석해 완벽하게 성격을 복제한 AI와 편하게 대화해 보세요.\n\n"
+            "• [Free Talk] AI와 자유롭게 영어 대화를 나누며 실전 회화를 연습하세요.\n\n"
             "2. 심화 훈련 모드 📈\n"
-            "• [Duo Connect] 글로벌 파트너와 각자의 모국어로 대화하면 딜레이 없이 동시통역해 줍니다.\n"
+            "• [Duo Connect] 글로벌 파트너와 각자의 모국어로 대화하면 딜레이 없이 동시통역해 줍니다. 초청받은 비회원이나 회원은 대화 시간 동안 구독료 차감이 없으며, 초청하는 회원만 차감됩니다.\n"
             "• [Step Expand] 짧은 기초 문장에서 시작해, AI의 유도에 따라 고급 문법을 더하며 원어민처럼 유창하고 긴 문장을 완성하세요.\n\n"
             "3. 스터디 룸 (History & Practice) 📚\n"
             "• 이전 대화를 복습하고 발음 교정 및 섀도잉 훈련을 진행합니다.\n"
@@ -331,6 +415,26 @@ class _IntroMasterState extends State<IntroMaster> {
                             Text("Real-Life Shadowing",
                                 style: GoogleFonts.roboto(
                                     fontSize: 14, color: Colors.white54)),
+                            const SizedBox(height: 12),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: Colors.amber.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: Colors.amber.withValues(alpha: 0.4),
+                                ),
+                              ),
+                              child: const Text(
+                                "신규 회원가입 시 10분 무료 체험",
+                                style: TextStyle(
+                                  color: Colors.amber,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
                           ],
                         ),
                       ),

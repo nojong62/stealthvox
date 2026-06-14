@@ -97,6 +97,77 @@ exports.deductRemainingTime = functions.https.onCall(async (data, context) => {
 
   return { remainingTime: newValue };
 });
+
+// ----------------------------------------------------------------------------
+// claimWelcomeBonus
+// Type:   HTTPS Callable
+// Input:  { deviceId: string }
+// Output: { granted: boolean, remainingTime?: number, reason?: string }
+//
+// Grants 600 seconds once per physical device and once per user. The duplicate
+// guard is enforced server-side in a Firestore transaction.
+// ----------------------------------------------------------------------------
+exports.claimWelcomeBonus = functions.region("us-central1").https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      "unauthenticated",
+      "Request must be authenticated."
+    );
+  }
+
+  const uid = context.auth.uid;
+  const deviceId = data.deviceId;
+  if (!deviceId || typeof deviceId !== "string" || deviceId.trim().length < 4) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "deviceId must be a non-empty string."
+    );
+  }
+
+  const normalizedDeviceId = deviceId.trim();
+  const firestore = admin.firestore();
+  const deviceRef = firestore.collection("welcome_devices").doc(normalizedDeviceId);
+  const userRef = firestore.collection("users").doc(uid);
+  const bonusSeconds = 600;
+
+  const result = await firestore.runTransaction(async (tx) => {
+    const deviceDoc = await tx.get(deviceRef);
+    if (deviceDoc.exists) {
+      return { granted: false, reason: "device_already_claimed" };
+    }
+
+    const userDoc = await tx.get(userRef);
+    if (userDoc.exists && userDoc.data().welcomeBonusGranted === true) {
+      return { granted: false, reason: "user_already_claimed" };
+    }
+
+    const currentTime = userDoc.exists ? userDoc.data().remainingTime || 0 : 0;
+    const remainingTime = currentTime + bonusSeconds;
+
+    tx.set(deviceRef, {
+      uid: uid,
+      claimed_at: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    tx.set(userRef, {
+      remainingTime: remainingTime,
+      remaining_seconds: remainingTime,
+      welcomeBonusGranted: true,
+      welcomeBonusAt: admin.firestore.FieldValue.serverTimestamp(),
+      welcomeDeviceId: normalizedDeviceId,
+    }, { merge: true });
+
+    return { granted: true, remainingTime: remainingTime };
+  });
+
+  functions.logger.info("claimWelcomeBonus", {
+    uid: uid,
+    devicePrefix: normalizedDeviceId.substring(0, 8),
+    result: result,
+  });
+
+  return result;
+});
 // ----------------------------------------------------------------------------
 // revenueCatWebhook
 // Type:   HTTPS Request (called by RevenueCat, NOT a Firebase callable)
