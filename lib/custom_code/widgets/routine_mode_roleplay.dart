@@ -524,7 +524,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                 EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
             child: Container(
               decoration: const BoxDecoration(
-                color: Color(0xFF0F0E1A),
+                color: Color(0xFF0A1A0D),
                 borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
               ),
               padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
@@ -586,7 +586,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           decoration: BoxDecoration(
                             gradient: const LinearGradient(
-                              colors: [Color(0xFF7C3AED), Color(0xFF9333EA)],
+                              colors: [Color(0xFF16A34A), Color(0xFF22C55E)],
                             ),
                             borderRadius: BorderRadius.circular(14),
                           ),
@@ -616,7 +616,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       children: [
         Text(label,
             style: const TextStyle(
-                color: Color(0xFFA78BFA),
+                color: Color(0xFF86EFAC),
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
                 letterSpacing: 0.8)),
@@ -628,7 +628,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
             hintText: hint,
             hintStyle: const TextStyle(color: Colors.white24, fontSize: 13),
             filled: true,
-            fillColor: const Color(0xFF1A1830),
+            fillColor: const Color(0xFF0D200F),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
               borderSide: const BorderSide(color: Colors.white12),
@@ -639,7 +639,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: Color(0xFF7C3AED)),
+              borderSide: const BorderSide(color: Color(0xFF16A34A)),
             ),
             contentPadding:
                 const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -2092,11 +2092,11 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                 gradient: const LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
-                  colors: [Color(0xFF251640), Color(0xFF141230)],
+                  colors: [Color(0xFF0D2417), Color(0xFF071A0F)],
                 ),
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
-                  color: const Color(0xFF7C3AED).withOpacity(0.35),
+                  color: const Color(0xFF16A34A).withOpacity(0.35),
                   width: 1,
                 ),
               ),
@@ -2105,7 +2105,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                       height: 60,
                       child: Center(
                         child: CircularProgressIndicator(
-                          color: Color(0xFF9333EA),
+                          color: Color(0xFF22C55E),
                           strokeWidth: 2,
                         ),
                       ),
@@ -2117,12 +2117,12 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                           children: [
                             Row(children: const [
                               Icon(Icons.theater_comedy_rounded,
-                                  color: Color(0xFFA78BFA), size: 13),
+                                  color: Color(0xFF86EFAC), size: 13),
                               SizedBox(width: 5),
                               Text(
                                 'SITUATION',
                                 style: TextStyle(
-                                  color: Color(0xFFA78BFA),
+                                  color: Color(0xFF86EFAC),
                                   fontSize: 10,
                                   fontWeight: FontWeight.w700,
                                   letterSpacing: 1.6,
@@ -2147,11 +2147,11 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                                   horizontal: 14, vertical: 12),
                               decoration: BoxDecoration(
                                 color:
-                                    const Color(0xFF7C3AED).withOpacity(0.18),
+                                    const Color(0xFF16A34A).withOpacity(0.18),
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
                                   color:
-                                      const Color(0xFF7C3AED).withOpacity(0.40),
+                                      const Color(0xFF16A34A).withOpacity(0.40),
                                   width: 1,
                                 ),
                               ),
@@ -2163,11 +2163,11 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                                     mainAxisSize: MainAxisSize.min,
                                     children: const [
                                       Icon(Icons.smart_toy_rounded,
-                                          color: Color(0xFFD8B4FE), size: 13),
+                                          color: Color(0xFFBBF7D0), size: 13),
                                       SizedBox(width: 4),
                                       Text('AI',
                                           style: TextStyle(
-                                            color: Color(0xFFA78BFA),
+                                            color: Color(0xFF86EFAC),
                                             fontSize: 10,
                                             fontWeight: FontWeight.w800,
                                             letterSpacing: 1.4,
@@ -2177,7 +2177,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                                   const SizedBox(height: 2),
                                   Text(_scenarioAiRole,
                                       style: const TextStyle(
-                                        color: Color(0xFFEDE9FE),
+                                        color: Color(0xFFDCFCE7),
                                         fontSize: 15,
                                         fontWeight: FontWeight.w600,
                                       )),
@@ -2250,11 +2250,11 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: const [
                               Icon(Icons.movie_outlined,
-                                  color: Color(0xFFA78BFA), size: 20),
+                                  color: Color(0xFF86EFAC), size: 20),
                               SizedBox(width: 8),
                               Text('시나리오 불러오는 중...',
                                   style: TextStyle(
-                                      color: Color(0xFFA78BFA),
+                                      color: Color(0xFF86EFAC),
                                       fontSize: 14,
                                       fontWeight: FontWeight.w600)),
                             ],
@@ -2331,18 +2331,18 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       decoration: BoxDecoration(
         color: isHost
             ? const Color(0xFF1D4ED8).withOpacity(0.22)
-            : const Color(0xFF7C3AED).withOpacity(0.22),
+            : const Color(0xFF16A34A).withOpacity(0.22),
         shape: BoxShape.circle,
         border: Border.all(
           color: isHost
               ? const Color(0xFF60A5FA).withOpacity(0.45)
-              : const Color(0xFFA855F7).withOpacity(0.45),
+              : const Color(0xFF4ADE80).withOpacity(0.45),
           width: 1,
         ),
       ),
       child: Icon(
         isHost ? Icons.person_rounded : Icons.smart_toy_rounded,
-        color: isHost ? const Color(0xFF93C5FD) : const Color(0xFFD8B4FE),
+        color: isHost ? const Color(0xFF93C5FD) : const Color(0xFFBBF7D0),
         size: 17,
       ),
     );
@@ -2356,7 +2356,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         decoration: BoxDecoration(
           color: isHost
               ? const Color(0xFF1E293B)
-              : const Color(0xFF9333EA).withOpacity(0.13),
+              : const Color(0xFF22C55E).withOpacity(0.13),
           borderRadius: BorderRadius.only(
             topLeft: const Radius.circular(16),
             topRight: const Radius.circular(16),
@@ -2366,7 +2366,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           border: Border.all(
             color: isHost
                 ? const Color(0xFF3B82F6).withOpacity(0.18)
-                : const Color(0xFF9333EA).withOpacity(0.25),
+                : const Color(0xFF22C55E).withOpacity(0.25),
             width: 1,
           ),
         ),
@@ -2442,12 +2442,12 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                         horizontal: 20, vertical: 10),
                     decoration: BoxDecoration(
                       gradient: const LinearGradient(
-                        colors: [Color(0xFF7C3AED), Color(0xFF4F46E5)],
+                        colors: [Color(0xFF16A34A), Color(0xFF15803D)],
                       ),
                       borderRadius: BorderRadius.circular(22),
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(0xFF7C3AED).withOpacity(0.35),
+                          color: const Color(0xFF16A34A).withOpacity(0.35),
                           blurRadius: 10,
                           offset: const Offset(0, 4),
                         ),
@@ -2478,7 +2478,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                       width: 20,
                       height: 20,
                       child: CircularProgressIndicator(
-                        color: Color(0xFFA855F7),
+                        color: Color(0xFF4ADE80),
                         strokeWidth: 2,
                       ),
                     ),

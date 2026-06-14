@@ -47,115 +47,335 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# 📋 최종 커밋 + 검증 — Claude Code 지시서
+# 🔧 TTS 엣지케이스 3건 통합 수정
 
-> **사전 조건:** `firebase deploy --only functions` 완료 (실장 수동, 1단계)
-> **이 지시서 범위:** Git 커밋 + 정적 검증만. 실제 앱 실행 테스트는 불가 (기기 필요) → 체크리스트로 별도 안내.
+## 개요
+| # | 문제 | 수정 위치 | 영향 |
+|---|------|----------|------|
+| 1 | `"!"` 단독 구두점 → TTS 타임아웃 | ChunkedTtsFetcher.addText | 모든 모드 |
+| 2 | 긴 문장 TTS 3회 실패 → 유저 음성 스킵 | ChunkedTtsFetcher._fetch 타임아웃 사다리 | step_expand, roleplay |
+| 3 | TtsCache 백그라운드 저장 타임아웃 | HybridTtsPlayer._cacheFullSentenceInBackground | 모든 모드 |
 
----
-
-## 1. 현재 상태 확인
-
-```powershell
-cd F:\flutter_project\stealth_vox
-git status
-git branch --show-current
-```
-
-현재 브랜치(`claude1-part-b-20260613` 등)와 변경된 파일 목록을 보여줄 것.
+## 대상 파일 (Box 7 엔진은 모드별 독립)
+- `lib/custom_code/widgets/routine_mode_free_talk.dart`
+- `lib/custom_code/widgets/routine_mode_step_expand.dart`
+- `lib/custom_code/widgets/routine_mode_roleplay.dart`
 
 ---
 
-## 2. 변경 파일 diff 요약 확인
+## 사전 준비
 
-아래 파일들이 이번 작업에서 수정된 대상입니다. 각각 `git diff --stat`으로 변경 라인 수만 확인:
-
-```powershell
-git diff --stat -- lib/custom_code/widgets/stealth_room_master.dart lib/custom_code/widgets/lobby_master.dart lib/custom_code/widgets/store_master.dart lib/custom_code/widgets/intro_master.dart firebase/functions/index.js firebase/firestore.rules
+```bash
+git add -A && git commit -m "save: before TTS edge case fixes"
 ```
 
 ---
 
-## 3. 최종 정적 검증 (배포 후 재확인)
+# Fix 1: 단독 구두점 가드 (ChunkedTtsFetcher.addText)
 
-### 3-1. Flutter 전체 analyze (변경 파일만)
+> `"!"`, `","` 같은 단어 없는 순수 구두점 → TTS API가 불안정하므로 스킵
 
-```powershell
-flutter analyze lib/custom_code/widgets/stealth_room_master.dart lib/custom_code/widgets/lobby_master.dart lib/custom_code/widgets/store_master.dart lib/custom_code/widgets/intro_master.dart
+### 3개 파일 모두 동일 패턴 적용
+
+**step_expand + roleplay** (동일 구조):
+
+```
+<<<<<<< OLD
+  void addText(String text) {
+    if (text.trim().isEmpty) return;
+    _pendingCount++;
+=======
+  void addText(String text) {
+    if (text.trim().isEmpty) return;
+    // 🔧 단독 구두점 가드: 알파벳/숫자/한글 없이 구두점만 → TTS 스킵
+    if (!RegExp(r'[a-zA-Z0-9가-힣]').hasMatch(text)) {
+      onLog?.call('🔊 [TTS-SKIP]', 'punctuation-only skipped: "$text"');
+      return;
+    }
+    _pendingCount++;
+>>>>>>> NEW
 ```
 
-`error` 키워드 포함 라인이 없는지 확인. (warning/info는 무시)
+**free_talk** (_cancelled 가드가 있는 버전):
 
-### 3-2. index.js 문법 + export 재확인
-
-```powershell
-node --check firebase\functions\index.js
-grep -c "exports.onUserDeleted" firebase\functions\index.js
-grep -c "exports.deductRemainingTime" firebase\functions\index.js
-grep -c "exports.revenueCatWebhook" firebase\functions\index.js
-grep -c "remaining_seconds" firebase\functions\index.js
-grep -c "recursiveDelete" firebase\functions\index.js
+```
+<<<<<<< OLD
+  void addText(String text) {
+    if (text.trim().isEmpty) return;
+    if (_cancelled) {
+=======
+  void addText(String text) {
+    if (text.trim().isEmpty) return;
+    // 🔧 단독 구두점 가드: 알파벳/숫자/한글 없이 구두점만 → TTS 스킵
+    if (!RegExp(r'[a-zA-Z0-9가-힣]').hasMatch(text)) {
+      onLog?.call('🔊 [TTS-SKIP]', 'punctuation-only skipped: "$text"');
+      return;
+    }
+    if (_cancelled) {
+>>>>>>> NEW
 ```
 
-기대값: 위 3개 export 각 1, `remaining_seconds` 0, `recursiveDelete` 1.
+### 검증
 
-### 3-3. Firestore Rules 컴파일 확인 (배포는 이미 됐으므로 재확인만)
-
-```powershell
-type firebase\firestore.rules | Select-String "allow read, write: if true"
+```bash
+grep -c "TTS-SKIP" lib/custom_code/widgets/routine_mode_free_talk.dart
+# 예상: 1
+grep -c "TTS-SKIP" lib/custom_code/widgets/routine_mode_step_expand.dart
+# 예상: 1
+grep -c "TTS-SKIP" lib/custom_code/widgets/routine_mode_roleplay.dart
+# 예상: 1
 ```
-
-→ 결과가 **없어야** 함 (전체 개방 규칙 제거 확인).
 
 ---
 
-## 4. Git 커밋
+# Fix 2: 타임아웃 사다리 확대 (ChunkedTtsFetcher._fetch)
 
-위 3번 검증이 모두 통과하면 커밋:
+> 긴 문장 TTS가 3초 안에 못 오면 3회 모두 실패 → `[3,5,8]` → `[5,8,12]`로 완화
 
-```powershell
-git add -A
-git commit -m "Phase 2: 서버전용 증액 + Firestore Rules 강화 + 백그라운드/Store pause + 계정탈퇴 데이터 완전삭제 + Anonymous 계정연결"
+### step_expand + roleplay (동일 구조)
+
+```
+<<<<<<< OLD
+    const List<int> timeoutLadderSec = [3, 5, 8];
+=======
+    const List<int> timeoutLadderSec = [5, 8, 12];
+>>>>>>> NEW
 ```
 
-커밋 해시와 변경 파일 수를 보고할 것.
+> **free_talk는 수정 불필요** — 별도 상수 `kFreeTalkChunkTtsTimeoutLadderSec`를 사용하며
+> 이미 적절한 값으로 설정되어 있음.
+
+### 검증
+
+```bash
+grep "timeoutLadderSec = \[5, 8, 12\]" lib/custom_code/widgets/routine_mode_step_expand.dart
+# 예상: 1줄
+grep "timeoutLadderSec = \[5, 8, 12\]" lib/custom_code/widgets/routine_mode_roleplay.dart
+# 예상: 1줄
+```
 
 ---
 
-## 5. 커밋 후 보고 형식
+# Fix 3: TtsCache 백그라운드 저장 타임아웃 완화
+
+> `_cacheFullSentenceInBackground`에서 15초 타임아웃 → 25초 + 1회 재시도
+
+### step_expand + roleplay (동일 구조)
 
 ```
-브랜치: <branch명>
-커밋 해시: <hash>
-변경 파일: <N>개
-3-1 analyze: error 0개 ✅/❌
-3-2 index.js: <표>
-3-3 rules: "if true" 없음 ✅/❌
+<<<<<<< OLD
+  Future<void> _cacheFullSentenceInBackground(String fullSentence) async {
+    try {
+      final cached = await TtsCache.get(fullSentence, voice);
+      if (cached != null && cached.isNotEmpty) {
+        lastCacheHit = true;
+        lastCacheSaveMs = 0;
+        onLog?.call('[HYB-03-HIT]', 'TtsCache HIT — 저장 생략');
+        return;
+      }
+      lastCacheHit = false;
+      final sw = Stopwatch()..start();
+      final res = await http
+          .post(
+            Uri.parse('https://api.openai.com/v1/audio/speech'),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({
+              'model': 'tts-1',
+              'input': fullSentence,
+              'voice': voice,
+              'speed': 1.0,
+              'response_format': 'mp3',
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
+        await TtsCache.put(fullSentence, voice, res.bodyBytes);
+        lastCacheSaveMs = sw.elapsedMilliseconds;
+        onLog?.call('[HYB-04-SAVED]',
+            '${lastCacheSaveMs}ms (${res.bodyBytes.length}B)');
+      } else {
+        onLog?.call('[HYB-ERR]', 'API status=${res.statusCode}');
+      }
+      sw.stop();
+    } catch (e) {
+      onLog?.call('[HYB-ERR]', 'TtsCache 저장 실패: $e');
+    }
+  }
+=======
+  Future<void> _cacheFullSentenceInBackground(String fullSentence) async {
+    try {
+      final cached = await TtsCache.get(fullSentence, voice);
+      if (cached != null && cached.isNotEmpty) {
+        lastCacheHit = true;
+        lastCacheSaveMs = 0;
+        onLog?.call('[HYB-03-HIT]', 'TtsCache HIT — 저장 생략');
+        return;
+      }
+      lastCacheHit = false;
+      final sw = Stopwatch()..start();
+      // 🔧 25초 타임아웃 + 1회 재시도 (긴 문장 캐시 저장 실패 방지)
+      Uint8List? bytes;
+      for (int attempt = 0; attempt < 2; attempt++) {
+        try {
+          final res = await http
+              .post(
+                Uri.parse('https://api.openai.com/v1/audio/speech'),
+                headers: {
+                  'Authorization': 'Bearer $apiKey',
+                  'Content-Type': 'application/json',
+                },
+                body: jsonEncode({
+                  'model': 'tts-1',
+                  'input': fullSentence,
+                  'voice': voice,
+                  'speed': 1.0,
+                  'response_format': 'mp3',
+                }),
+              )
+              .timeout(const Duration(seconds: 25));
+          if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
+            bytes = res.bodyBytes;
+            break;
+          }
+        } catch (e) {
+          if (attempt == 0) {
+            onLog?.call('[HYB-CACHE-RETRY]', '캐시 저장 재시도 (${e.runtimeType})');
+          }
+        }
+      }
+      if (bytes != null) {
+        await TtsCache.put(fullSentence, voice, bytes);
+        lastCacheSaveMs = sw.elapsedMilliseconds;
+        onLog?.call('[HYB-04-SAVED]',
+            '${lastCacheSaveMs}ms (${bytes.length}B)');
+      } else {
+        onLog?.call('[HYB-ERR]', 'TtsCache 저장 2회 실패 — 스킵');
+      }
+      sw.stop();
+    } catch (e) {
+      onLog?.call('[HYB-ERR]', 'TtsCache 저장 실패: $e');
+    }
+  }
+>>>>>>> NEW
+```
+
+### free_talk (구조 약간 다름 — _voice, _apiKey 사용)
+
+```
+<<<<<<< OLD
+  Future<void> _cacheFullSentenceInBackground(String sentence) async {
+    try {
+      final cached = await TtsCache.get(sentence, _voice);
+      if (cached != null && cached.isNotEmpty) {
+        onLog?.call('[HYB-03-HIT]', 'TtsCache HIT — 저장 생략');
+        return;
+      }
+      final res = await http
+          .post(
+            Uri.parse('https://api.openai.com/v1/audio/speech'),
+            headers: {
+              'Authorization': 'Bearer $_apiKey',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({
+              'model': 'tts-1',
+              'input': sentence,
+              'voice': _voice,
+              'speed': 1.0,
+              'response_format': 'mp3',
+            }),
+          )
+          .timeout(
+              const Duration(seconds: kFreeTalkOpenAiTtsHttpTimeoutSeconds));
+      if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
+        await TtsCache.put(sentence, _voice, res.bodyBytes);
+        onLog?.call('[HYB-04-SAVED]', '${res.bodyBytes.length}B');
+      } else {
+        onLog?.call('[HYB-ERR]', 'API status=${res.statusCode}');
+      }
+    } catch (e) {
+      onLog?.call('[HYB-ERR]', 'TtsCache 저장 실패: $e');
+    }
+  }
+=======
+  Future<void> _cacheFullSentenceInBackground(String sentence) async {
+    try {
+      final cached = await TtsCache.get(sentence, _voice);
+      if (cached != null && cached.isNotEmpty) {
+        onLog?.call('[HYB-03-HIT]', 'TtsCache HIT — 저장 생략');
+        return;
+      }
+      // 🔧 25초 타임아웃 + 1회 재시도 (긴 문장 캐시 저장 실패 방지)
+      Uint8List? bytes;
+      for (int attempt = 0; attempt < 2; attempt++) {
+        try {
+          final res = await http
+              .post(
+                Uri.parse('https://api.openai.com/v1/audio/speech'),
+                headers: {
+                  'Authorization': 'Bearer $_apiKey',
+                  'Content-Type': 'application/json',
+                },
+                body: jsonEncode({
+                  'model': 'tts-1',
+                  'input': sentence,
+                  'voice': _voice,
+                  'speed': 1.0,
+                  'response_format': 'mp3',
+                }),
+              )
+              .timeout(const Duration(seconds: 25));
+          if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
+            bytes = res.bodyBytes;
+            break;
+          }
+        } catch (e) {
+          if (attempt == 0) {
+            onLog?.call('[HYB-CACHE-RETRY]', '캐시 저장 재시도 (${e.runtimeType})');
+          }
+        }
+      }
+      if (bytes != null) {
+        await TtsCache.put(sentence, _voice, bytes);
+        onLog?.call('[HYB-04-SAVED]', '${bytes.length}B');
+      } else {
+        onLog?.call('[HYB-ERR]', 'TtsCache 저장 2회 실패 — 스킵');
+      }
+    } catch (e) {
+      onLog?.call('[HYB-ERR]', 'TtsCache 저장 실패: $e');
+    }
+  }
+>>>>>>> NEW
 ```
 
 ---
 
-## ⚠️ 이 지시서가 하지 않는 것 (실장 수동 진행)
+## 검증
 
-아래는 Claude Code가 할 수 없으므로 **실장님이 직접** 진행:
-
-| # | 항목 | 방법 |
-|---|------|------|
-| 1 | `flutter build appbundle` | PowerShell에서 직접 빌드 |
-| 2 | Google Play 내부 테스트 업로드 | Play Console |
-| 3 | 앱 실행 후 1분 대화 → `remainingTime` 60초 감소 확인 | Firebase Console에서 `users/{uid}.remainingTime` 관찰 |
-| 4 | 대화 중 백그라운드 전환 → 시간 안 줄어드는지 확인 | 앱을 홈으로 보냈다가 복귀 |
-| 5 | Store 화면 진입 후 30초 대기 → `remainingTime` 변화 없음 확인 | Firebase Console |
-| 6 (선택) | 테스트 계정으로 회원탈퇴 → `users/{uid}` 문서 + 하위 컬렉션 전체 삭제 확인 | Firebase Console Firestore |
+```bash
+flutter analyze lib/custom_code/widgets/routine_mode_free_talk.dart
+flutter analyze lib/custom_code/widgets/routine_mode_step_expand.dart
+flutter analyze lib/custom_code/widgets/routine_mode_roleplay.dart
+# 각각 에러 0 확인
+```
 
 ---
 
-## 🔄 롤백
+## Git 저장
 
-```powershell
-git reset --soft HEAD~1   # 커밋만 취소, 변경사항은 유지
-# 또는
-git restore <file>          # 특정 파일만 되돌리기
+```bash
+git add -A && git commit -m "fix: TTS edge cases — punct guard + timeout ladder + cache retry"
 ```
 
-functions 배포 롤백은 이전 버전 재배포 필요 — 문제 발생 시 보고.
+---
+
+## 효과 요약
+
+| Before | After |
+|--------|-------|
+| `"!"` TTS 호출 → 타임아웃 재시도 | 구두점만 → 즉시 스킵 (API 호출 0) |
+| 긴 문장 3/5/8초 사다리 → 3회 실패 | 5/8/12초 사다리 → 여유 확보 |
+| 캐시 저장 15초 1회 시도 → 실패 | 25초 2회 시도 → 성공률 대폭 향상 |
