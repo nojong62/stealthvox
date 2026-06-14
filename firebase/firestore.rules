@@ -65,5 +65,10 @@ service cloud.firestore {
         allow read, write: if isAuth();
       }
     }
+
+    // Welcome bonus device guard. Only Cloud Functions Admin SDK should access it.
+    match /welcome_devices/{deviceId} {
+      allow read, write: if false;
+    }
   }
 }
