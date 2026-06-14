@@ -3965,29 +3965,43 @@ class HybridTtsPlayer {
       }
       lastCacheHit = false;
       final sw = Stopwatch()..start();
-      final res = await http
-          .post(
-            Uri.parse('https://api.openai.com/v1/audio/speech'),
-            headers: {
-              'Authorization': 'Bearer $apiKey',
-              'Content-Type': 'application/json',
-            },
-            body: jsonEncode({
-              'model': 'tts-1',
-              'input': fullSentence,
-              'voice': voice,
-              'speed': 1.0,
-              'response_format': 'mp3',
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
-        await TtsCache.put(fullSentence, voice, res.bodyBytes);
+      // Longer timeout + one retry for long full-sentence cache writes.
+      Uint8List? bytes;
+      for (int attempt = 0; attempt < 2; attempt++) {
+        try {
+          final res = await http
+              .post(
+                Uri.parse('https://api.openai.com/v1/audio/speech'),
+                headers: {
+                  'Authorization': 'Bearer $apiKey',
+                  'Content-Type': 'application/json',
+                },
+                body: jsonEncode({
+                  'model': 'tts-1',
+                  'input': fullSentence,
+                  'voice': voice,
+                  'speed': 1.0,
+                  'response_format': 'mp3',
+                }),
+              )
+              .timeout(const Duration(seconds: 25));
+          if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
+            bytes = res.bodyBytes;
+            break;
+          }
+        } catch (e) {
+          if (attempt == 0) {
+            onLog?.call('[HYB-CACHE-RETRY]', '캐시 저장 재시도(${e.runtimeType})');
+          }
+        }
+      }
+      if (bytes != null) {
+        await TtsCache.put(fullSentence, voice, bytes);
         lastCacheSaveMs = sw.elapsedMilliseconds;
-        onLog?.call('[HYB-04-SAVED]',
-            '${lastCacheSaveMs}ms (${res.bodyBytes.length}B)');
+        onLog?.call(
+            '[HYB-04-SAVED]', '${lastCacheSaveMs}ms (${bytes.length}B)');
       } else {
-        onLog?.call('[HYB-ERR]', 'API status=${res.statusCode}');
+        onLog?.call('[HYB-ERR]', 'TtsCache 저장 2회 실패 후 스킵');
       }
       sw.stop();
     } catch (e) {
@@ -4660,6 +4674,11 @@ class ChunkedTtsFetcher {
 
   void addText(String text) {
     if (text.trim().isEmpty) return;
+    // TTS API is unreliable for punctuation-only chunks like "!" or ",".
+    if (!RegExp(r'[a-zA-Z0-9가-힣]').hasMatch(text)) {
+      onLog?.call('🔊 [TTS-SKIP]', 'punctuation-only skipped: "$text"');
+      return;
+    }
     _pendingCount++;
     final turnTag = isUser ? 'USER' : 'AI';
     onLog?.call(
@@ -4678,9 +4697,9 @@ class ChunkedTtsFetcher {
       return;
     }
 
-    // [2단계] API 호출 (타임아웃 사다리 3/5/8초, 최대 3회 시도) — TTS 지연 스파이크 대응
+    // [2단계] API 호출 (타임아웃 사다리 5/8/12초, 최대 3회 시도) — TTS 지연 스파이크 대응
     Uint8List result = Uint8List(0);
-    const List<int> timeoutLadderSec = [3, 5, 8];
+    const List<int> timeoutLadderSec = [5, 8, 12];
     for (int attempt = 0; attempt < 3; attempt++) {
       try {
         final res = await http
