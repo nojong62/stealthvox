@@ -222,6 +222,27 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
   Widget _buildIdleOverlay() => const SizedBox.shrink();
   // ─────────────────────────────────────────────────────────────────────────
 
+  // ── 필터 전환 + Keepers 과금 경계 제어 ──
+  void _switchFilter(String newFilter) {
+    final wasKeepers = _selectedFilter == 'Keepers';
+    setState(() {
+      _selectedFilter = newFilter;
+      _selectedDocIds.clear();
+    });
+
+    final isKeepers = newFilter == 'Keepers';
+    if (isKeepers && !wasKeepers) {
+      BillingTicker.instance.setRate(BillingRate.quarter);
+      BillingTicker.instance.resume();
+      BillingTicker.instance.logMode('history_list');
+      _resetIdleTimer();
+    } else if (!isKeepers && wasKeepers) {
+      _clearIdleTimers();
+      _isIdlePaused = false;
+      BillingTicker.instance.pause();
+    }
+  }
+
   // ── Keepers 전용 상태 ──
   String _apiKey = '';
   AudioPlayer? _keeperAudioPlayer;
@@ -252,12 +273,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
   void initState() {
     super.initState();
     _fetchApiKey();
-    BillingTicker.instance.setRate(BillingRate.quarter);
-    BillingTicker.instance.resume();
-    BillingTicker.instance.logMode('history_list');
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _resetIdleTimer();
-    });
+    // 과금은 Keepers 필터 진입 시에만 시작한다.
   }
 
   @override
@@ -505,8 +521,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
   Widget _buildKeepersBody() {
     if (!_keepersMigrateOnce) {
       _keepersMigrateOnce = true;
-      WidgetsBinding.instance.addPostFrameCallback(
-          (_) => _migrateKeeperMissingIsDeleted());
+      WidgetsBinding.instance
+          .addPostFrameCallback((_) => _migrateKeeperMissingIsDeleted());
     }
     return StreamBuilder<QuerySnapshot>(
       // 인덱스/필드 누락 오류를 피하기 위해 필터·정렬 없이 전체 조회 후 Dart에서 처리
@@ -606,8 +622,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
                 style: GoogleFonts.notoSans(color: Colors.white54)),
             const SizedBox(height: 8),
             Text("대화 기록에서 대사를 탭하면 여기에 저장됩니다.",
-                style: GoogleFonts.notoSans(
-                    color: Colors.white30, fontSize: 12)),
+                style:
+                    GoogleFonts.notoSans(color: Colors.white30, fontSize: 12)),
           ],
         ),
       );
@@ -677,19 +693,15 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
     final bool isSelected = _selectedFilter == 'Keepers';
     return GestureDetector(
       onTap: () {
-        setState(() {
-          _selectedFilter = isSelected ? 'All' : 'Keepers';
-          _selectedDocIds.clear();
-        });
+        _switchFilter(isSelected ? 'All' : 'Keepers');
       },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         margin: const EdgeInsets.only(right: 10),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected
-              ? _keepersColor.withOpacity(0.2)
-              : Colors.transparent,
+          color:
+              isSelected ? _keepersColor.withOpacity(0.2) : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
             color: isSelected ? _keepersColor : Colors.white24,
@@ -700,8 +712,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.bookmark_rounded,
-                size: 16,
-                color: isSelected ? _keepersColor : Colors.white54),
+                size: 16, color: isSelected ? _keepersColor : Colors.white54),
             const SizedBox(width: 6),
             Text(
               'Keepers',
@@ -776,14 +787,10 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
 
     return GestureDetector(
       onTap: () {
-        setState(() {
-          if (_selectedFilter == filterKey && filterKey != 'All') {
-            _selectedFilter = 'All';
-          } else {
-            _selectedFilter = filterKey;
-          }
-          _selectedDocIds.clear();
-        });
+        final newFilter = (_selectedFilter == filterKey && filterKey != 'All')
+            ? 'All'
+            : filterKey;
+        _switchFilter(newFilter);
       },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
@@ -945,7 +952,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
     final role = (data['speaker_role'] ?? '').toString();
     final isPinned = data['pinned_at'] != null;
     final sourceRoom = (data['source_room_name'] ?? '').toString();
-    final bool isCurrentlyPlaying = _playingKeeperId == doc.id && _isPlayingKeeper;
+    final bool isCurrentlyPlaying =
+        _playingKeeperId == doc.id && _isPlayingKeeper;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -1067,10 +1075,11 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
     // 이미 재생 중이면 정지
     if (_isPlayingKeeper && _playingKeeperId == keeperId) {
       await _keeperAudioPlayer?.stop();
-      if (mounted) setState(() {
-        _isPlayingKeeper = false;
-        _playingKeeperId = null;
-      });
+      if (mounted)
+        setState(() {
+          _isPlayingKeeper = false;
+          _playingKeeperId = null;
+        });
       return;
     }
 
@@ -1089,25 +1098,28 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
       final player = AudioPlayer();
       _keeperAudioPlayer = player;
 
-      if (mounted) setState(() {
-        _isPlayingKeeper = true;
-        _playingKeeperId = keeperId;
-      });
+      if (mounted)
+        setState(() {
+          _isPlayingKeeper = true;
+          _playingKeeperId = keeperId;
+        });
 
       player.onPlayerComplete.listen((_) {
-        if (mounted) setState(() {
-          _isPlayingKeeper = false;
-          _playingKeeperId = null;
-        });
+        if (mounted)
+          setState(() {
+            _isPlayingKeeper = false;
+            _playingKeeperId = null;
+          });
       });
 
       await player.play(BytesSource(audio));
     } catch (e) {
       debugPrint('[Keepers] playAudio error: $e');
-      if (mounted) setState(() {
-        _isPlayingKeeper = false;
-        _playingKeeperId = null;
-      });
+      if (mounted)
+        setState(() {
+          _isPlayingKeeper = false;
+          _playingKeeperId = null;
+        });
     }
   }
 
@@ -1174,8 +1186,10 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
               onPressed: () async {
                 Navigator.pop(context);
                 try {
-                  await doc.reference
-                      .update({'is_deleted': true, 'deleted_at': FieldValue.serverTimestamp()});
+                  await doc.reference.update({
+                    'is_deleted': true,
+                    'deleted_at': FieldValue.serverTimestamp()
+                  });
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                         content: Text("삭제되었습니다.",
@@ -1311,8 +1325,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
           // 헤더
           Row(
             children: [
-              const Icon(Icons.school_rounded,
-                  color: _keepersColor, size: 20),
+              const Icon(Icons.school_rounded, color: _keepersColor, size: 20),
               const SizedBox(width: 8),
               const Expanded(
                 child: Text("Keepers 실전 튜터링",
@@ -1325,8 +1338,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
                 icon: const Icon(Icons.close, color: Colors.white38, size: 20),
                 onPressed: onClose,
                 padding: EdgeInsets.zero,
-                constraints:
-                    const BoxConstraints(minWidth: 32, minHeight: 32),
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
               ),
             ],
           ),
@@ -1362,8 +1374,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
               decoration: BoxDecoration(
                 color: Colors.cyanAccent.withOpacity(0.08),
                 borderRadius: BorderRadius.circular(10),
-                border:
-                    Border.all(color: Colors.cyanAccent.withOpacity(0.2)),
+                border: Border.all(color: Colors.cyanAccent.withOpacity(0.2)),
               ),
               child: Text(_keeperTutoringKo,
                   style: const TextStyle(
@@ -1384,8 +1395,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
                     ? _stopKeeperRecording
                     : _startKeeperRecording,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 24, vertical: 12),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                   decoration: BoxDecoration(
                     color: _keeperIsRecording
                         ? Colors.redAccent.withOpacity(0.2)
@@ -1448,8 +1459,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
               decoration: BoxDecoration(
                 color: Colors.greenAccent.withOpacity(0.08),
                 borderRadius: BorderRadius.circular(10),
-                border:
-                    Border.all(color: Colors.greenAccent.withOpacity(0.2)),
+                border: Border.all(color: Colors.greenAccent.withOpacity(0.2)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1464,9 +1474,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
                     const SizedBox(height: 8),
                     Text(_keeperTutoringCorrection,
                         style: const TextStyle(
-                            color: Colors.white54,
-                            fontSize: 12,
-                            height: 1.4)),
+                            color: Colors.white54, fontSize: 12, height: 1.4)),
                   ],
                 ],
               ),
@@ -1482,13 +1490,12 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
               child: GestureDetector(
                 onTap: _playKeeperCorrectedAudio,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 24, vertical: 12),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                   decoration: BoxDecoration(
                     color: Colors.amberAccent.withOpacity(0.15),
                     borderRadius: BorderRadius.circular(24),
-                    border:
-                        Border.all(color: Colors.amberAccent, width: 1.5),
+                    border: Border.all(color: Colors.amberAccent, width: 1.5),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,

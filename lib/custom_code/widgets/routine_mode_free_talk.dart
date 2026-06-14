@@ -1929,8 +1929,17 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
                     color: const Color(0xFF2563EB),
                     borderRadius: BorderRadius.circular(20)),
                 child: Row(children: [
-                  const Icon(Icons.timer_outlined,
-                      color: Colors.white, size: 18),
+                  ValueListenableBuilder<Color>(
+                    valueListenable: BillingTicker.instance.billingDotColor,
+                    builder: (_, dotColor, __) => Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: dotColor,
+                      ),
+                    ),
+                  ),
                   const SizedBox(width: 6),
                   Text(
                     () {

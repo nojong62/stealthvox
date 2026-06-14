@@ -25,7 +25,7 @@ Future billingTicker() async {}
 // =============================================================================
 
 enum BillingRate {
-  full,    // 1.0x — 1초 사용 시 1초 차감 (실시간 AI 대화/훈련 모드)
+  full, // 1.0x — 1초 사용 시 1초 차감 (실시간 AI 대화/훈련 모드)
   quarter, // 0.25x — 1초 사용 시 0.25초 차감 (복습/히스토리 체류 계열, 4배 오래 사용 가능)
 }
 
@@ -56,6 +56,21 @@ class BillingTicker with WidgetsBindingObserver {
   }
 
   final ValueNotifier<int> remainingSecondsNotifier = ValueNotifier<int>(0);
+
+  /// 과금 상태 색상 인디케이터 (UI 타이머 위젯의 동그라미 색상)
+  /// gray=paused, blue=full rate, green=quarter rate
+  final ValueNotifier<Color> billingDotColor =
+      ValueNotifier(const Color(0xFF6B7280));
+
+  void _updateDotColor() {
+    if (_paused) {
+      billingDotColor.value = const Color(0xFF6B7280);
+    } else if (_rate == BillingRate.full) {
+      billingDotColor.value = const Color(0xFF3B82F6);
+    } else {
+      billingDotColor.value = const Color(0xFF34D399);
+    }
+  }
 
   Timer? _tickTimer;
   BillingRate _rate = BillingRate.quarter;
@@ -149,6 +164,7 @@ class BillingTicker with WidgetsBindingObserver {
     _rate = rate;
     final rateStr = rate == BillingRate.full ? 'rate=full' : 'rate=quarter';
     _addBillingLog('[BILLING] $rateStr');
+    _updateDotColor();
   }
 
   /// 현재 모드 로그 기록 + 세션 시작 상태 캡처
@@ -166,6 +182,7 @@ class BillingTicker with WidgetsBindingObserver {
   void pause() {
     _paused = true;
     _addBillingLog('[BILLING] pause');
+    _updateDotColor();
     flushNow();
     saveUsageLog(); // 세션 종료 시 사용시간 이력 1회 저장 (중복 방지 포함)
   }
@@ -228,6 +245,7 @@ class BillingTicker with WidgetsBindingObserver {
   void resume() {
     _paused = false;
     _addBillingLog('[BILLING] resume');
+    _updateDotColor();
   }
 
   void _onTick() {
