@@ -47,307 +47,521 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# 🔧 TTS 엣지케이스 3건 통합 수정
+# 오토포즈 과금정책 수정 + 과금 상태 인디케이터
 
-## 개요
-| # | 문제 | 수정 위치 | 영향 |
-|---|------|----------|------|
-| 1 | `"!"` 단독 구두점 → TTS 타임아웃 | ChunkedTtsFetcher.addText | 모든 모드 |
-| 2 | 긴 문장 TTS 3회 실패 → 유저 음성 스킵 | ChunkedTtsFetcher._fetch 타임아웃 사다리 | step_expand, roleplay |
-| 3 | TtsCache 백그라운드 저장 타임아웃 | HybridTtsPlayer._cacheFullSentenceInBackground | 모든 모드 |
-
-## 대상 파일 (Box 7 엔진은 모드별 독립)
-- `lib/custom_code/widgets/routine_mode_free_talk.dart`
-- `lib/custom_code/widgets/routine_mode_step_expand.dart`
-- `lib/custom_code/widgets/routine_mode_roleplay.dart`
+## 목적
+1. **Duo**: 오토포즈 전체 제거 (과금은 `_startDuoBilling`/`_stopDuoBilling`만)
+2. **History List**: 화면 진입 시 과금 제거 → Keepers 탭 진입 시에만 quarter 과금 + 오토포즈
+3. **과금 상태 인디케이터**: 4개 대화모드의 타이머 아이콘(`Icons.timer_outlined`)을 색깔 동그라미로 교체
+   - 🔵 파란색 `0xFF3B82F6`: full rate 과금 중
+   - 🟢 초록색 `0xFF34D399`: quarter rate 과금 중
+   - ⚫ 회색 `0xFF6B7280`: 과금 정지 (오토포즈 / 대기)
 
 ---
 
 ## 사전 준비
 
 ```bash
-git add -A && git commit -m "save: before TTS edge case fixes"
+cd F:\flutter_project\stealth_vox
+git add -A && git commit -m "save: before autopause policy fix + billing dot"
 ```
 
 ---
 
-# Fix 1: 단독 구두점 가드 (ChunkedTtsFetcher.addText)
+## Part 0: billing_ticker.dart — 과금 상태 색상 노출
 
-> `"!"`, `","` 같은 단어 없는 순수 구두점 → TTS API가 불안정하므로 스킵
+> 파일 위치: `lib/custom_code/actions/billing_ticker.dart`
+> 편집 순서: bottom-to-top
 
-### 3개 파일 모두 동일 패턴 적용
-
-**step_expand + roleplay** (동일 구조):
+### Edit 0-1: resume()에 _updateDotColor() 호출 추가
 
 ```
 <<<<<<< OLD
-  void addText(String text) {
-    if (text.trim().isEmpty) return;
-    _pendingCount++;
+  void resume() {
+    _paused = false;
+    _addBillingLog('[BILLING] resume');
+  }
 =======
-  void addText(String text) {
-    if (text.trim().isEmpty) return;
-    // 🔧 단독 구두점 가드: 알파벳/숫자/한글 없이 구두점만 → TTS 스킵
-    if (!RegExp(r'[a-zA-Z0-9가-힣]').hasMatch(text)) {
-      onLog?.call('🔊 [TTS-SKIP]', 'punctuation-only skipped: "$text"');
+  void resume() {
+    _paused = false;
+    _addBillingLog('[BILLING] resume');
+    _updateDotColor();
+  }
+>>>>>>> NEW
+```
+
+### Edit 0-2: pause()에 _updateDotColor() 호출 추가
+
+```
+<<<<<<< OLD
+  void pause() {
+    _paused = true;
+    _addBillingLog('[BILLING] pause');
+    flushNow();
+    saveUsageLog(); // 세션 종료 시 사용시간 이력 1회 저장 (중복 방지 포함)
+  }
+=======
+  void pause() {
+    _paused = true;
+    _addBillingLog('[BILLING] pause');
+    _updateDotColor();
+    flushNow();
+    saveUsageLog(); // 세션 종료 시 사용시간 이력 1회 저장 (중복 방지 포함)
+  }
+>>>>>>> NEW
+```
+
+### Edit 0-3: setRate()에 _updateDotColor() 호출 추가
+
+```
+<<<<<<< OLD
+  void setRate(BillingRate rate) {
+    _rate = rate;
+    final rateStr = rate == BillingRate.full ? 'rate=full' : 'rate=quarter';
+    _addBillingLog('[BILLING] $rateStr');
+  }
+=======
+  void setRate(BillingRate rate) {
+    _rate = rate;
+    final rateStr = rate == BillingRate.full ? 'rate=full' : 'rate=quarter';
+    _addBillingLog('[BILLING] $rateStr');
+    _updateDotColor();
+  }
+>>>>>>> NEW
+```
+
+### Edit 0-4: billingDotColor 선언 + _updateDotColor 헬퍼 추가 (remainingSecondsNotifier 바로 아래)
+
+```
+<<<<<<< OLD
+  final ValueNotifier<int> remainingSecondsNotifier = ValueNotifier<int>(0);
+
+  Timer? _tickTimer;
+=======
+  final ValueNotifier<int> remainingSecondsNotifier = ValueNotifier<int>(0);
+
+  /// 과금 상태 색상 인디케이터 (UI 타이머 위젯의 동그라미 색상)
+  /// gray=정지, blue=full rate, green=quarter rate
+  final ValueNotifier<Color> billingDotColor =
+      ValueNotifier(const Color(0xFF6B7280));
+
+  void _updateDotColor() {
+    if (_paused) {
+      billingDotColor.value = const Color(0xFF6B7280); // gray — 정지
+    } else if (_rate == BillingRate.full) {
+      billingDotColor.value = const Color(0xFF3B82F6); // blue — full
+    } else {
+      billingDotColor.value = const Color(0xFF34D399); // green — quarter
+    }
+  }
+
+  Timer? _tickTimer;
+>>>>>>> NEW
+```
+
+---
+
+## Part 1: routine_mode_duo.dart — 오토포즈 전체 제거 + 타이머 아이콘 교체
+
+> 편집 순서: bottom-to-top
+
+### Edit 1-1: 타이머 아이콘 → 과금 상태 동그라미 (line ~1444)
+
+```
+<<<<<<< OLD
+                      const Icon(Icons.timer_outlined,
+                          color: Colors.white, size: 18),
+                      const SizedBox(width: 6),
+=======
+                      ValueListenableBuilder<Color>(
+                        valueListenable: BillingTicker.instance.billingDotColor,
+                        builder: (_, dotColor, __) => Container(
+                          width: 10,
+                          height: 10,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: dotColor,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+>>>>>>> NEW
+```
+
+### Edit 1-2: idle pause 아이콘 UI 제거 (line ~1401)
+
+```
+<<<<<<< OLD
+          Row(children: [
+            // ── Idle pause 아이콘 (T버튼 왼쪽, 클릭 시 pause 해제) ──
+            if (_isIdlePaused)
+              GestureDetector(
+                onTap: _resetIdleTimer,
+                child: const Padding(
+                  padding: EdgeInsets.only(left: 4, right: 6),
+                  child: Icon(
+                    Icons.pause_circle_filled_rounded,
+                    color: Color(0xFFFFD54F),
+                    size: 20,
+                  ),
+                ),
+              ),
+            IconButton(
+=======
+          Row(children: [
+            IconButton(
+>>>>>>> NEW
+```
+
+### Edit 1-3: _buildIdleOverlay() 호출 제거 (line ~1189)
+
+```
+<<<<<<< OLD
+                    _buildIdleOverlay(),
+                  ]),
+=======
+                  ]),
+>>>>>>> NEW
+```
+
+### Edit 1-4: _onPttEnd에서 _resetIdleTimer 제거 (line ~789)
+
+```
+<<<<<<< OLD
+  void _onPttEnd() {
+    _resetIdleTimer();
+    if (_duoState == 'recording') {
+=======
+  void _onPttEnd() {
+    if (_duoState == 'recording') {
+>>>>>>> NEW
+```
+
+### Edit 1-5: _onPttStart에서 _resetIdleTimer 제거 (line ~777)
+
+```
+<<<<<<< OLD
+  void _onPttStart() {
+    _resetIdleTimer();
+    if (!_isConversationActive) {
+=======
+  void _onPttStart() {
+    if (!_isConversationActive) {
+>>>>>>> NEW
+```
+
+### Edit 1-6: _handleIncomingMessage에서 _resetIdleTimer 제거 (line ~664)
+
+```
+<<<<<<< OLD
+    if (raw.trim().isEmpty) return;
+
+    _resetIdleTimer();
+
+    // 상대 발화를 들려주는 동안 내 녹음 일시 정지 (스피커 음성이 마이크에 새는 것 방지)
+=======
+    if (raw.trim().isEmpty) return;
+
+    // 상대 발화를 들려주는 동안 내 녹음 일시 정지 (스피커 음성이 마이크에 새는 것 방지)
+>>>>>>> NEW
+```
+
+### Edit 1-7: _processRelayPipeline에서 _resetIdleTimer 제거 (line ~510)
+
+```
+<<<<<<< OLD
+  Future<void> _processRelayPipeline(String finalTranscript) async {
+    _resetIdleTimer();
+    _turnCounter++;
+=======
+  Future<void> _processRelayPipeline(String finalTranscript) async {
+    _turnCounter++;
+>>>>>>> NEW
+```
+
+### Edit 1-8: _stopAndSendToWhisper에서 _resetIdleTimer 제거 (line ~413)
+
+```
+<<<<<<< OLD
+  Future<void> _stopAndSendToWhisper() async {
+    _silenceTimer?.cancel();
+    _resetIdleTimer();
+    _setDuoState('processing');
+=======
+  Future<void> _stopAndSendToWhisper() async {
+    _silenceTimer?.cancel();
+    _setDuoState('processing');
+>>>>>>> NEW
+```
+
+### Edit 1-9: _playAudioAndWait에서 _resetIdleTimer 제거 (line ~327)
+
+```
+<<<<<<< OLD
+  Future<void> _playAudioAndWait(Uint8List? bytes) async {
+    if (bytes == null || !_isConversationActive) return;
+    _resetIdleTimer();
+    _isTtsActive = true;
+=======
+  Future<void> _playAudioAndWait(Uint8List? bytes) async {
+    if (bytes == null || !_isConversationActive) return;
+    _isTtsActive = true;
+>>>>>>> NEW
+```
+
+### Edit 1-10: dispose에서 _clearIdleTimers 제거 (line ~283)
+
+```
+<<<<<<< OLD
+  void dispose() {
+    _clearIdleTimers();
+    _partnerJoinedSubscription?.cancel();
+=======
+  void dispose() {
+    _partnerJoinedSubscription?.cancel();
+>>>>>>> NEW
+```
+
+### Edit 1-11: initState postFrameCallback에서 _resetIdleTimer 제거 (line ~277)
+
+```
+<<<<<<< OLD
+      if (mounted) _resetIdleTimer();
+    });
+  }
+=======
+    });
+  }
+>>>>>>> NEW
+```
+
+### Edit 1-12: idle timer 변수/메서드 블록 전체 제거 (line ~179-217)
+
+```
+<<<<<<< OLD
+  // ── Idle Timeout (무반응 자동 일시정지) ────────────────────────────────────
+  Timer? _idlePauseTimer;
+  bool _isIdlePaused = false;
+
+  void _resetIdleTimer() {
+    _idlePauseTimer?.cancel();
+    if (_isIdlePaused) {
+      _isIdlePaused = false;
+      if (mounted) setState(() {});
+      // 🆕 [과금정책] 게스트 입장(과금 시작) 상태일 때만 resume — 대기 중엔 재개 금지
+      if (_billingStarted) {
+        BillingTicker.instance.resume();
+        BillingTicker.instance.logMode('duo');
+      }
+    }
+    _idlePauseTimer = Timer(const Duration(seconds: 60), _handleIdlePause);
+  }
+
+  void _handleIdlePause() {
+    if (!mounted || _isIdlePaused) return;
+    // 🔒 [오토포즈 가드] 최상단이 아니면 일시정지하지 말고 60초 타이머만 다시 건다
+    if (ModalRoute.of(context)?.isCurrent == false) {
+      _resetIdleTimer();
       return;
     }
-    _pendingCount++;
->>>>>>> NEW
-```
+    _isIdlePaused = true;
+    BillingTicker.instance.pause();
+    if (mounted) setState(() {});
+  }
 
-**free_talk** (_cancelled 가드가 있는 버전):
+  void _clearIdleTimers() {
+    _idlePauseTimer?.cancel();
+    _idlePauseTimer = null;
+  }
 
-```
-<<<<<<< OLD
-  void addText(String text) {
-    if (text.trim().isEmpty) return;
-    if (_cancelled) {
+  Widget _buildIdleBanner() => const SizedBox.shrink();
+
+  Widget _buildIdleOverlay() => const SizedBox.shrink();
+  // ─────────────────────────────────────────────────────────────────────────
 =======
-  void addText(String text) {
-    if (text.trim().isEmpty) return;
-    // 🔧 단독 구두점 가드: 알파벳/숫자/한글 없이 구두점만 → TTS 스킵
-    if (!RegExp(r'[a-zA-Z0-9가-힣]').hasMatch(text)) {
-      onLog?.call('🔊 [TTS-SKIP]', 'punctuation-only skipped: "$text"');
-      return;
-    }
-    if (_cancelled) {
 >>>>>>> NEW
-```
-
-### 검증
-
-```bash
-grep -c "TTS-SKIP" lib/custom_code/widgets/routine_mode_free_talk.dart
-# 예상: 1
-grep -c "TTS-SKIP" lib/custom_code/widgets/routine_mode_step_expand.dart
-# 예상: 1
-grep -c "TTS-SKIP" lib/custom_code/widgets/routine_mode_roleplay.dart
-# 예상: 1
 ```
 
 ---
 
-# Fix 2: 타임아웃 사다리 확대 (ChunkedTtsFetcher._fetch)
+## Part 2: chat_history_list_master.dart — Keepers 탭 기준 과금 경계
 
-> 긴 문장 TTS가 3초 안에 못 오면 3회 모두 실패 → `[3,5,8]` → `[5,8,12]`로 완화
+> 편집 순서: bottom-to-top
 
-### step_expand + roleplay (동일 구조)
+### Edit 2-1: 일반 필터칩 onTap → _switchFilter 호출 (line ~778)
 
 ```
 <<<<<<< OLD
-    const List<int> timeoutLadderSec = [3, 5, 8];
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          if (_selectedFilter == filterKey && filterKey != 'All') {
+            _selectedFilter = 'All';
+          } else {
+            _selectedFilter = filterKey;
+          }
+          _selectedDocIds.clear();
+        });
+      },
 =======
-    const List<int> timeoutLadderSec = [5, 8, 12];
+    return GestureDetector(
+      onTap: () {
+        final newFilter = (_selectedFilter == filterKey && filterKey != 'All')
+            ? 'All'
+            : filterKey;
+        _switchFilter(newFilter);
+      },
 >>>>>>> NEW
 ```
 
-> **free_talk는 수정 불필요** — 별도 상수 `kFreeTalkChunkTtsTimeoutLadderSec`를 사용하며
-> 이미 적절한 값으로 설정되어 있음.
+### Edit 2-2: Keepers칩 onTap → _switchFilter 호출 (line ~679)
 
-### 검증
+```
+<<<<<<< OLD
+      onTap: () {
+        setState(() {
+          _selectedFilter = isSelected ? 'All' : 'Keepers';
+          _selectedDocIds.clear();
+        });
+      },
+=======
+      onTap: () {
+        _switchFilter(isSelected ? 'All' : 'Keepers');
+      },
+>>>>>>> NEW
+```
 
-```bash
-grep "timeoutLadderSec = \[5, 8, 12\]" lib/custom_code/widgets/routine_mode_step_expand.dart
-# 예상: 1줄
-grep "timeoutLadderSec = \[5, 8, 12\]" lib/custom_code/widgets/routine_mode_roleplay.dart
-# 예상: 1줄
+### Edit 2-3: initState에서 과금 시작 제거 (line ~252)
+
+```
+<<<<<<< OLD
+  void initState() {
+    super.initState();
+    _fetchApiKey();
+    BillingTicker.instance.setRate(BillingRate.quarter);
+    BillingTicker.instance.resume();
+    BillingTicker.instance.logMode('history_list');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _resetIdleTimer();
+    });
+  }
+=======
+  void initState() {
+    super.initState();
+    _fetchApiKey();
+    // 과금은 Keepers 탭 진입 시에만 시작 (_switchFilter에서 제어)
+  }
+>>>>>>> NEW
+```
+
+### Edit 2-4: _switchFilter 헬퍼 메서드 추가 (line ~223 부근)
+
+```
+<<<<<<< OLD
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // ── Keepers 전용 상태 ──
+=======
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // ── 필터 전환 + Keepers 과금 경계 제어 ──
+  void _switchFilter(String newFilter) {
+    final wasKeepers = _selectedFilter == 'Keepers';
+    setState(() {
+      _selectedFilter = newFilter;
+      _selectedDocIds.clear();
+    });
+    final isKeepers = newFilter == 'Keepers';
+    if (isKeepers && !wasKeepers) {
+      // Keepers 진입 → quarter 과금 + 오토포즈 시작
+      BillingTicker.instance.setRate(BillingRate.quarter);
+      BillingTicker.instance.resume();
+      BillingTicker.instance.logMode('history_list');
+      _resetIdleTimer();
+    } else if (!isKeepers && wasKeepers) {
+      // Keepers 이탈 → 과금 정지 + 오토포즈 해제
+      _clearIdleTimers();
+      _isIdlePaused = false;
+      BillingTicker.instance.pause();
+    }
+  }
+
+  // ── Keepers 전용 상태 ──
+>>>>>>> NEW
 ```
 
 ---
 
-# Fix 3: TtsCache 백그라운드 저장 타임아웃 완화
+## Part 3: 나머지 3모드 — 타이머 아이콘 → 과금 상태 동그라미
 
-> `_cacheFullSentenceInBackground`에서 15초 타임아웃 → 25초 + 1회 재시도
+> 3개 파일 동일 패턴 적용
 
-### step_expand + roleplay (동일 구조)
+### Edit 3-1: routine_mode_free_talk.dart (line ~1932)
 
 ```
 <<<<<<< OLD
-  Future<void> _cacheFullSentenceInBackground(String fullSentence) async {
-    try {
-      final cached = await TtsCache.get(fullSentence, voice);
-      if (cached != null && cached.isNotEmpty) {
-        lastCacheHit = true;
-        lastCacheSaveMs = 0;
-        onLog?.call('[HYB-03-HIT]', 'TtsCache HIT — 저장 생략');
-        return;
-      }
-      lastCacheHit = false;
-      final sw = Stopwatch()..start();
-      final res = await http
-          .post(
-            Uri.parse('https://api.openai.com/v1/audio/speech'),
-            headers: {
-              'Authorization': 'Bearer $apiKey',
-              'Content-Type': 'application/json',
-            },
-            body: jsonEncode({
-              'model': 'tts-1',
-              'input': fullSentence,
-              'voice': voice,
-              'speed': 1.0,
-              'response_format': 'mp3',
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
-        await TtsCache.put(fullSentence, voice, res.bodyBytes);
-        lastCacheSaveMs = sw.elapsedMilliseconds;
-        onLog?.call('[HYB-04-SAVED]',
-            '${lastCacheSaveMs}ms (${res.bodyBytes.length}B)');
-      } else {
-        onLog?.call('[HYB-ERR]', 'API status=${res.statusCode}');
-      }
-      sw.stop();
-    } catch (e) {
-      onLog?.call('[HYB-ERR]', 'TtsCache 저장 실패: $e');
-    }
-  }
+                  const Icon(Icons.timer_outlined,
+                      color: Colors.white, size: 18),
+                  const SizedBox(width: 6),
 =======
-  Future<void> _cacheFullSentenceInBackground(String fullSentence) async {
-    try {
-      final cached = await TtsCache.get(fullSentence, voice);
-      if (cached != null && cached.isNotEmpty) {
-        lastCacheHit = true;
-        lastCacheSaveMs = 0;
-        onLog?.call('[HYB-03-HIT]', 'TtsCache HIT — 저장 생략');
-        return;
-      }
-      lastCacheHit = false;
-      final sw = Stopwatch()..start();
-      // 🔧 25초 타임아웃 + 1회 재시도 (긴 문장 캐시 저장 실패 방지)
-      Uint8List? bytes;
-      for (int attempt = 0; attempt < 2; attempt++) {
-        try {
-          final res = await http
-              .post(
-                Uri.parse('https://api.openai.com/v1/audio/speech'),
-                headers: {
-                  'Authorization': 'Bearer $apiKey',
-                  'Content-Type': 'application/json',
-                },
-                body: jsonEncode({
-                  'model': 'tts-1',
-                  'input': fullSentence,
-                  'voice': voice,
-                  'speed': 1.0,
-                  'response_format': 'mp3',
-                }),
-              )
-              .timeout(const Duration(seconds: 25));
-          if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
-            bytes = res.bodyBytes;
-            break;
-          }
-        } catch (e) {
-          if (attempt == 0) {
-            onLog?.call('[HYB-CACHE-RETRY]', '캐시 저장 재시도 (${e.runtimeType})');
-          }
-        }
-      }
-      if (bytes != null) {
-        await TtsCache.put(fullSentence, voice, bytes);
-        lastCacheSaveMs = sw.elapsedMilliseconds;
-        onLog?.call('[HYB-04-SAVED]',
-            '${lastCacheSaveMs}ms (${bytes.length}B)');
-      } else {
-        onLog?.call('[HYB-ERR]', 'TtsCache 저장 2회 실패 — 스킵');
-      }
-      sw.stop();
-    } catch (e) {
-      onLog?.call('[HYB-ERR]', 'TtsCache 저장 실패: $e');
-    }
-  }
+                  ValueListenableBuilder<Color>(
+                    valueListenable: BillingTicker.instance.billingDotColor,
+                    builder: (_, dotColor, __) => Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: dotColor,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
 >>>>>>> NEW
 ```
 
-### free_talk (구조 약간 다름 — _voice, _apiKey 사용)
+### Edit 3-2: routine_mode_roleplay.dart (line ~2049)
 
 ```
 <<<<<<< OLD
-  Future<void> _cacheFullSentenceInBackground(String sentence) async {
-    try {
-      final cached = await TtsCache.get(sentence, _voice);
-      if (cached != null && cached.isNotEmpty) {
-        onLog?.call('[HYB-03-HIT]', 'TtsCache HIT — 저장 생략');
-        return;
-      }
-      final res = await http
-          .post(
-            Uri.parse('https://api.openai.com/v1/audio/speech'),
-            headers: {
-              'Authorization': 'Bearer $_apiKey',
-              'Content-Type': 'application/json',
-            },
-            body: jsonEncode({
-              'model': 'tts-1',
-              'input': sentence,
-              'voice': _voice,
-              'speed': 1.0,
-              'response_format': 'mp3',
-            }),
-          )
-          .timeout(
-              const Duration(seconds: kFreeTalkOpenAiTtsHttpTimeoutSeconds));
-      if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
-        await TtsCache.put(sentence, _voice, res.bodyBytes);
-        onLog?.call('[HYB-04-SAVED]', '${res.bodyBytes.length}B');
-      } else {
-        onLog?.call('[HYB-ERR]', 'API status=${res.statusCode}');
-      }
-    } catch (e) {
-      onLog?.call('[HYB-ERR]', 'TtsCache 저장 실패: $e');
-    }
-  }
+                  const Icon(Icons.timer_outlined,
+                      color: Colors.white, size: 18),
+                  const SizedBox(width: 6),
 =======
-  Future<void> _cacheFullSentenceInBackground(String sentence) async {
-    try {
-      final cached = await TtsCache.get(sentence, _voice);
-      if (cached != null && cached.isNotEmpty) {
-        onLog?.call('[HYB-03-HIT]', 'TtsCache HIT — 저장 생략');
-        return;
-      }
-      // 🔧 25초 타임아웃 + 1회 재시도 (긴 문장 캐시 저장 실패 방지)
-      Uint8List? bytes;
-      for (int attempt = 0; attempt < 2; attempt++) {
-        try {
-          final res = await http
-              .post(
-                Uri.parse('https://api.openai.com/v1/audio/speech'),
-                headers: {
-                  'Authorization': 'Bearer $_apiKey',
-                  'Content-Type': 'application/json',
-                },
-                body: jsonEncode({
-                  'model': 'tts-1',
-                  'input': sentence,
-                  'voice': _voice,
-                  'speed': 1.0,
-                  'response_format': 'mp3',
-                }),
-              )
-              .timeout(const Duration(seconds: 25));
-          if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
-            bytes = res.bodyBytes;
-            break;
-          }
-        } catch (e) {
-          if (attempt == 0) {
-            onLog?.call('[HYB-CACHE-RETRY]', '캐시 저장 재시도 (${e.runtimeType})');
-          }
-        }
-      }
-      if (bytes != null) {
-        await TtsCache.put(sentence, _voice, bytes);
-        onLog?.call('[HYB-04-SAVED]', '${bytes.length}B');
-      } else {
-        onLog?.call('[HYB-ERR]', 'TtsCache 저장 2회 실패 — 스킵');
-      }
-    } catch (e) {
-      onLog?.call('[HYB-ERR]', 'TtsCache 저장 실패: $e');
-    }
-  }
+                  ValueListenableBuilder<Color>(
+                    valueListenable: BillingTicker.instance.billingDotColor,
+                    builder: (_, dotColor, __) => Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: dotColor,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+>>>>>>> NEW
+```
+
+### Edit 3-3: routine_mode_step_expand.dart (line ~3202)
+
+```
+<<<<<<< OLD
+                  const Icon(Icons.timer_outlined,
+                      color: Colors.white, size: 18),
+                  const SizedBox(width: 6),
+=======
+                  ValueListenableBuilder<Color>(
+                    valueListenable: BillingTicker.instance.billingDotColor,
+                    builder: (_, dotColor, __) => Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: dotColor,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
 >>>>>>> NEW
 ```
 
@@ -355,27 +569,94 @@ grep "timeoutLadderSec = \[5, 8, 12\]" lib/custom_code/widgets/routine_mode_role
 
 ## 검증
 
+### Grep 카운트 확인
+
 ```bash
+# ── billing_ticker: billingDotColor 정의 확인 ──
+echo "=== billingDotColor 정의 (expect: 2 — 선언 + _updateDotColor 내부) ==="
+grep -c 'billingDotColor' lib/custom_code/actions/billing_ticker.dart
+
+echo "=== _updateDotColor 호출 (expect: 4 — setRate/pause/resume + 정의) ==="
+grep -c '_updateDotColor' lib/custom_code/actions/billing_ticker.dart
+
+# ── Duo: 오토포즈 완전 제거 ──
+echo "=== Duo _resetIdleTimer (expect: 0) ==="
+grep -c '_resetIdleTimer' lib/custom_code/widgets/routine_mode_duo.dart
+
+echo "=== Duo _isIdlePaused (expect: 0) ==="
+grep -c '_isIdlePaused' lib/custom_code/widgets/routine_mode_duo.dart
+
+echo "=== Duo _idlePauseTimer (expect: 0) ==="
+grep -c '_idlePauseTimer' lib/custom_code/widgets/routine_mode_duo.dart
+
+echo "=== Duo _startDuoBilling 유지 (expect: ≥1) ==="
+grep -c '_startDuoBilling' lib/custom_code/widgets/routine_mode_duo.dart
+
+# ── History List: _switchFilter 추가 ──
+echo "=== HistList _switchFilter (expect: ≥3) ==="
+grep -c '_switchFilter' lib/custom_code/widgets/chat_history_list_master.dart
+
+echo "=== HistList initState에 resume 없음 (expect: 0) ==="
+grep -A5 'void initState' lib/custom_code/widgets/chat_history_list_master.dart | grep -c 'resume'
+
+# ── 타이머 아이콘 교체 확인 ──
+echo "=== Icons.timer_outlined 잔존 (expect: 각 0) ==="
+grep -c 'Icons.timer_outlined' lib/custom_code/widgets/routine_mode_duo.dart
+grep -c 'Icons.timer_outlined' lib/custom_code/widgets/routine_mode_free_talk.dart
+grep -c 'Icons.timer_outlined' lib/custom_code/widgets/routine_mode_roleplay.dart
+grep -c 'Icons.timer_outlined' lib/custom_code/widgets/routine_mode_step_expand.dart
+
+echo "=== billingDotColor 사용 (expect: 각 1) ==="
+grep -c 'billingDotColor' lib/custom_code/widgets/routine_mode_duo.dart
+grep -c 'billingDotColor' lib/custom_code/widgets/routine_mode_free_talk.dart
+grep -c 'billingDotColor' lib/custom_code/widgets/routine_mode_roleplay.dart
+grep -c 'billingDotColor' lib/custom_code/widgets/routine_mode_step_expand.dart
+```
+
+### flutter analyze
+
+```bash
+flutter analyze lib/custom_code/actions/billing_ticker.dart
+flutter analyze lib/custom_code/widgets/routine_mode_duo.dart
 flutter analyze lib/custom_code/widgets/routine_mode_free_talk.dart
-flutter analyze lib/custom_code/widgets/routine_mode_step_expand.dart
 flutter analyze lib/custom_code/widgets/routine_mode_roleplay.dart
-# 각각 에러 0 확인
+flutter analyze lib/custom_code/widgets/routine_mode_step_expand.dart
+flutter analyze lib/custom_code/widgets/chat_history_list_master.dart
 ```
 
----
-
-## Git 저장
+### 저장
 
 ```bash
-git add -A && git commit -m "fix: TTS edge cases — punct guard + timeout ladder + cache retry"
+git add -A && git commit -m "fix: Duo 오토포즈 제거 + HistList Keepers과금경계 + 과금상태 dot indicator"
 ```
 
 ---
 
-## 효과 요약
+## 변경 요약
 
-| Before | After |
-|--------|-------|
-| `"!"` TTS 호출 → 타임아웃 재시도 | 구두점만 → 즉시 스킵 (API 호출 0) |
-| 긴 문장 3/5/8초 사다리 → 3회 실패 | 5/8/12초 사다리 → 여유 확보 |
-| 캐시 저장 15초 1회 시도 → 실패 | 25초 2회 시도 → 성공률 대폭 향상 |
+| 파일 | 변경 내용 |
+|---|---|
+| `billing_ticker.dart` | `billingDotColor` ValueNotifier + `_updateDotColor()` 추가, resume/pause/setRate에서 색상 자동 갱신 |
+| `routine_mode_duo.dart` | 오토포즈 전체 제거 (12곳) + 타이머 아이콘→동그라미 |
+| `routine_mode_free_talk.dart` | 타이머 아이콘→동그라미 |
+| `routine_mode_roleplay.dart` | 타이머 아이콘→동그라미 |
+| `routine_mode_step_expand.dart` | 타이머 아이콘→동그라미 |
+| `chat_history_list_master.dart` | initState 과금 제거 + `_switchFilter()` Keepers 경계 제어 |
+
+### 유저 시각적 변화
+
+| 상황 | 동그라미 색 |
+|---|---|
+| 대화 3모드 진입 | 🔵 파란색 (full rate 과금 중) |
+| 대화 3모드 오토포즈 | ⚫ 회색 (과금 정지됨) |
+| 오토포즈 해제 (탭) | 🔵 파란색 (과금 재개) |
+| Duo 호스트 대기 | ⚫ 회색 (아직 과금 안 됨) |
+| Duo 게스트 입장 | 🔵 파란색 (과금 시작) |
+| Duo 상대 퇴장 | ⚫ 회색 (과금 정지) |
+
+### 롤백
+
+```bash
+git log --oneline -3
+git revert HEAD
+```
