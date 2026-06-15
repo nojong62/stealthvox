@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:appsflyer_sdk/appsflyer_sdk.dart';
+import 'dart:async';
 import 'dart:io';
 import 'package:android_id/android_id.dart';
 import 'package:device_info_plus/device_info_plus.dart';
@@ -46,12 +47,24 @@ class _IntroMasterState extends State<IntroMaster> {
   bool isLoginMode = true;
   bool isLoading = false;
 
+  // ── Promo popup ──
+  bool _promoVisible = true;
+  bool _promoMounted = true;
+  Timer? _promoFadeTimer;
+  Timer? _promoRemoveTimer;
+
   @override
   void initState() {
     super.initState();
     _emailFocusNode.addListener(_onFocusChange);
     _passwordFocusNode.addListener(_onFocusChange);
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkEntryStatus());
+    _promoFadeTimer = Timer(const Duration(milliseconds: 2400), () {
+      if (mounted) setState(() => _promoVisible = false);
+    });
+    _promoRemoveTimer = Timer(const Duration(milliseconds: 3000), () {
+      if (mounted) setState(() => _promoMounted = false);
+    });
   }
 
   // 키보드가 올라올 때 로그인 버튼이 보이도록 자동 스크롤
@@ -71,6 +84,8 @@ class _IntroMasterState extends State<IntroMaster> {
 
   @override
   void dispose() {
+    _promoFadeTimer?.cancel();
+    _promoRemoveTimer?.cancel();
     _scrollController.dispose();
     _emailFocusNode.dispose();
     _passwordFocusNode.dispose();
@@ -374,6 +389,15 @@ class _IntroMasterState extends State<IntroMaster> {
 
   @override
   Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        _buildMain(context),
+        if (_promoMounted) _buildPromoPopup(),
+      ],
+    );
+  }
+
+  Widget _buildMain(BuildContext context) {
     return Container(
       width: widget.width,
       height: widget.height,
@@ -550,6 +574,156 @@ class _IntroMasterState extends State<IntroMaster> {
                   ),
                 ),
               ),
+      ),
+    );
+  }
+
+  Widget _buildPromoPopup() {
+    return AnimatedOpacity(
+      opacity: _promoVisible ? 1.0 : 0.0,
+      duration: const Duration(milliseconds: 500),
+      child: Container(
+        width: double.infinity,
+        height: double.infinity,
+        color: Colors.black.withValues(alpha: 0.80),
+        child: Center(
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 36),
+            padding: const EdgeInsets.fromLTRB(28, 28, 28, 24),
+            decoration: BoxDecoration(
+              color: const Color(0xFF161616),
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(
+                color: Colors.amber.withValues(alpha: 0.55),
+                width: 1.5,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.amber.withValues(alpha: 0.20),
+                  blurRadius: 48,
+                  spreadRadius: 6,
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // ── NEW MEMBER badge ──
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: Colors.amber,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    'NEW MEMBER',
+                    style: GoogleFonts.orbitron(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black,
+                      letterSpacing: 2.5,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 22),
+                // ── Gift icon ──
+                Container(
+                  width: 72,
+                  height: 72,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.amber.withValues(alpha: 0.10),
+                    border: Border.all(
+                      color: Colors.amber.withValues(alpha: 0.35),
+                      width: 1.2,
+                    ),
+                  ),
+                  child: const Icon(Icons.card_giftcard_rounded,
+                      size: 34, color: Colors.amber),
+                ),
+                const SizedBox(height: 20),
+                // ── FREE / 10분 / TRIAL ──
+                Text(
+                  'FREE',
+                  style: GoogleFonts.orbitron(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white38,
+                    letterSpacing: 5,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                ShaderMask(
+                  shaderCallback: (bounds) => const LinearGradient(
+                    colors: [Color(0xFFFFD740), Color(0xFFFFA000)],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                  ).createShader(bounds),
+                  child: Text(
+                    '10분',
+                    style: GoogleFonts.orbitron(
+                      fontSize: 60,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                      height: 1.05,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'TRIAL',
+                  style: GoogleFonts.orbitron(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white38,
+                    letterSpacing: 5,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  '신규 회원가입 즉시 지급',
+                  style: GoogleFonts.roboto(
+                    fontSize: 13,
+                    color: Colors.white60,
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                // ── 3초 countdown bar ──
+                TweenAnimationBuilder<double>(
+                  tween: Tween(begin: 1.0, end: 0.0),
+                  duration: const Duration(milliseconds: 3000),
+                  builder: (context, value, _) {
+                    final secLeft = (value * 3).ceil();
+                    return Column(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: LinearProgressIndicator(
+                            value: value,
+                            minHeight: 3,
+                            backgroundColor:
+                                Colors.white.withValues(alpha: 0.08),
+                            valueColor:
+                                const AlwaysStoppedAnimation(Colors.amber),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '$secLeft초 후 사라집니다',
+                          style: const TextStyle(
+                              color: Colors.white30, fontSize: 11),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
