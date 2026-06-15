@@ -148,6 +148,8 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
                           const Divider(color: Colors.white12, height: 24),
                           _buildManualItem('Step Expand', '점진적 문장 확장',
                               '짧은 기초 문장부터 시작해, AI의 날카로운 질문에 대답하며 점점 길고 세련된 문장 구조를 만들어가는 집중 훈련입니다.'),
+                          const Divider(color: Colors.white12, height: 32),
+                          _buildBillingLegend(),
                         ],
                       ),
                     ),
@@ -202,6 +204,65 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
         Text(desc,
             style: const TextStyle(
                 color: Colors.white70, fontSize: 13, height: 1.4)),
+      ],
+    );
+  }
+
+  Widget _buildBillingLegend() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          '과금 인디케이터',
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 15,
+          ),
+        ),
+        const SizedBox(height: 12),
+        _buildBillingDotRow(2, '1초 사용 → 1초 차감', 'AI 대화 중 (Full Rate)'),
+        const SizedBox(height: 10),
+        _buildBillingDotRow(1, '4초 사용 → 1초 차감', '복습 / 히스토리 체류 (0.25x)'),
+        const SizedBox(height: 10),
+        _buildBillingDotRow(0, '과금 정지', '오토포즈 — 마이크 대기 시 자동 정지'),
+      ],
+    );
+  }
+
+  Widget _buildBillingDotRow(int state, String timeLabel, String desc) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        CustomPaint(
+          size: const Size(22, 22),
+          painter: BillingDotPainter(state),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: RichText(
+            text: TextSpan(
+              children: [
+                TextSpan(
+                  text: '$timeLabel  ',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                TextSpan(
+                  text: desc,
+                  style: const TextStyle(
+                    color: Colors.white54,
+                    fontSize: 11,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ],
     );
   }
