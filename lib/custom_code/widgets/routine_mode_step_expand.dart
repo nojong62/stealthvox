@@ -76,9 +76,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   int _idleElapsedSec = 0;
 
   bool get _isSystemBusy {
-    final ttsBusy = _ttsQueueManager.isBusy;
-    final micBusy = _voiceManager != null;
-    return ttsBusy || micBusy;
+    return _ttsQueueManager.isBusy;
   }
 
   void _resetIdleTimer() {
