@@ -1995,19 +1995,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
             ),
           ),
           Row(children: [
-            // ── Idle pause 아이콘 (T버튼 왼쪽, 클릭 시 pause 해제) ──
-            if (_isIdlePaused)
-              GestureDetector(
-                onTap: _resetIdleTimer,
-                child: const Padding(
-                  padding: EdgeInsets.only(left: 4, right: 6),
-                  child: Icon(
-                    Icons.pause_circle_filled_rounded,
-                    color: Color(0xFFFFD54F),
-                    size: 20,
-                  ),
-                ),
-              ),
             IconButton(
               icon: Icon(
                 Icons.format_size,
@@ -2046,14 +2033,13 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                     color: const Color(0xFF2563EB),
                     borderRadius: BorderRadius.circular(20)),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  ValueListenableBuilder<Color>(
-                    valueListenable: BillingTicker.instance.billingDotColor,
-                    builder: (_, dotColor, __) => Container(
-                      width: 10,
-                      height: 10,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: dotColor,
+                  ValueListenableBuilder<int>(
+                    valueListenable: BillingTicker.instance.billingState,
+                    builder: (_, s, __) => GestureDetector(
+                      onTap: s == 0 ? _resetIdleTimer : null,
+                      child: CustomPaint(
+                        size: const Size(14, 14),
+                        painter: BillingDotPainter(s),
                       ),
                     ),
                   ),

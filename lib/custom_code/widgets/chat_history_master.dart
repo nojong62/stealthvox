@@ -3269,19 +3269,19 @@ RULES — follow exactly:
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          // ── Idle pause 아이콘 (T버튼 왼쪽, 클릭 시 pause 해제) ──
-          if (_isIdlePaused)
-            GestureDetector(
-              onTap: _resetIdleTimer,
-              child: const Padding(
-                padding: EdgeInsets.only(left: 4, right: 6),
-                child: Icon(
-                  Icons.pause_circle_filled_rounded,
-                  color: Color(0xFFFFD54F),
-                  size: 20,
+          ValueListenableBuilder<int>(
+            valueListenable: BillingTicker.instance.billingState,
+            builder: (_, s, __) => GestureDetector(
+              onTap: s == 0 ? _resetIdleTimer : null,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 4, right: 6),
+                child: CustomPaint(
+                  size: const Size(16, 16),
+                  painter: BillingDotPainter(s),
                 ),
               ),
             ),
+          ),
           IconButton(
             icon: Icon(
               Icons.format_size,

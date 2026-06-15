@@ -57,18 +57,16 @@ class BillingTicker with WidgetsBindingObserver {
 
   final ValueNotifier<int> remainingSecondsNotifier = ValueNotifier<int>(0);
 
-  /// 과금 상태 색상 인디케이터 (UI 타이머 위젯의 동그라미 색상)
-  /// gray=paused, blue=full rate, green=quarter rate
-  final ValueNotifier<Color> billingDotColor =
-      ValueNotifier(const Color(0xFF6B7280));
+  /// 과금 상태 인디케이터 (0=paused, 1=quarter, 2=full)
+  final ValueNotifier<int> billingState = ValueNotifier<int>(0);
 
-  void _updateDotColor() {
+  void _updateBillingState() {
     if (_paused) {
-      billingDotColor.value = const Color(0xFF6B7280);
+      billingState.value = 0;
     } else if (_rate == BillingRate.full) {
-      billingDotColor.value = const Color(0xFF3B82F6);
+      billingState.value = 2;
     } else {
-      billingDotColor.value = const Color(0xFF34D399);
+      billingState.value = 1;
     }
   }
 
@@ -164,7 +162,7 @@ class BillingTicker with WidgetsBindingObserver {
     _rate = rate;
     final rateStr = rate == BillingRate.full ? 'rate=full' : 'rate=quarter';
     _addBillingLog('[BILLING] $rateStr');
-    _updateDotColor();
+    _updateBillingState();
   }
 
   /// 현재 모드 로그 기록 + 세션 시작 상태 캡처
@@ -182,7 +180,7 @@ class BillingTicker with WidgetsBindingObserver {
   void pause() {
     _paused = true;
     _addBillingLog('[BILLING] pause');
-    _updateDotColor();
+    _updateBillingState();
     flushNow();
     saveUsageLog(); // 세션 종료 시 사용시간 이력 1회 저장 (중복 방지 포함)
   }
@@ -245,7 +243,7 @@ class BillingTicker with WidgetsBindingObserver {
   void resume() {
     _paused = false;
     _addBillingLog('[BILLING] resume');
-    _updateDotColor();
+    _updateBillingState();
   }
 
   void _onTick() {
@@ -337,4 +335,70 @@ class BillingTicker with WidgetsBindingObserver {
           'OK (-${seconds}s) @ ${DateTime.now().toIso8601String().substring(11, 19)}';
     }
   }
+}
+
+// =============================================================================
+// BillingDotPainter (과금 상태 인디케이터 아이콘)
+// =============================================================================
+// state 0: paused - green outline + gray core
+// state 1: quarter rate - dark core + 1/4 green pie
+// state 2: full rate - solid green
+
+class BillingDotPainter extends CustomPainter {
+  final int state;
+  const BillingDotPainter(this.state);
+
+  static const _green = Color(0xFF34D399);
+  static const _gray = Color(0xFF4B5563);
+  static const _dark = Color(0xFF1E293B);
+  static const _border = Color(0xFF475569);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = Offset(size.width / 2, size.height / 2);
+    final r = size.shortestSide / 2;
+
+    switch (state) {
+      case 2:
+        canvas.drawCircle(c, r, Paint()..color = _green);
+        break;
+      case 1:
+        canvas.drawCircle(c, r, Paint()..color = _dark);
+        final path = Path()
+          ..moveTo(c.dx, c.dy)
+          ..lineTo(c.dx, c.dy - r)
+          ..arcTo(
+            Rect.fromCircle(center: c, radius: r),
+            -1.5707963,
+            1.5707963,
+            false,
+          )
+          ..close();
+        canvas.drawPath(path, Paint()..color = _green);
+        canvas.drawCircle(
+          c,
+          r,
+          Paint()
+            ..color = _border
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 0.5,
+        );
+        break;
+      default:
+        canvas.drawCircle(c, r * 0.75, Paint()..color = _gray);
+        canvas.drawCircle(
+          c,
+          r,
+          Paint()
+            ..color = _green
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = r * 0.3,
+        );
+        break;
+    }
+  }
+
+  @override
+  bool shouldRepaint(BillingDotPainter oldDelegate) =>
+      oldDelegate.state != state;
 }

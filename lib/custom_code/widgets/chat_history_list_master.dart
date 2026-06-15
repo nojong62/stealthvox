@@ -385,19 +385,21 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
         centerTitle: true,
         elevation: 0,
         actions: [
-          // ── Idle pause 아이콘 (클릭 시 pause 해제) ──
-          if (_isIdlePaused)
-            GestureDetector(
-              onTap: _resetIdleTimer,
-              child: const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 8),
-                child: Icon(
-                  Icons.pause_circle_filled_rounded,
-                  color: Color(0xFFFFD54F),
-                  size: 20,
+          ValueListenableBuilder<int>(
+            valueListenable: BillingTicker.instance.billingState,
+            builder: (_, s, __) => GestureDetector(
+              onTap: s == 0 && _selectedFilter == 'Keepers'
+                  ? _resetIdleTimer
+                  : null,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: CustomPaint(
+                  size: const Size(16, 16),
+                  painter: BillingDotPainter(s),
                 ),
               ),
             ),
+          ),
           IconButton(
             icon: Icon(Icons.help_outline_rounded,
                 color: Colors.amber.withOpacity(0.75), size: 20),

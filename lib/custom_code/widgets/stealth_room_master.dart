@@ -141,7 +141,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
                               '초청 링크를 통해 파트너와 함께 모국어로 대화하면, 실시간으로 통역해주는 글로벌 만능 통역 모드입니다.'),
                           const Divider(color: Colors.white12, height: 24),
                           _buildManualItem('Free Talk', 'AI와 자유 대화',
-                              '지인의 카카오톡 대화를 분석하여 완벽하게 복제된 클론 AI 파트너와 실감나는 롤플레잉 훈련을 진행합니다.'),
+                              'AI와 자유롭게 영어 대화를 나누며 실전 회화를 연습합니다.'),
                           const Divider(color: Colors.white12, height: 24),
                           _buildManualItem('AI Roleplay', '상황극 대화',
                               '창의적이고 구체적인 역할과 상황을 무한히 추천받고, 현실감 넘치는 실전 비즈니스 및 일상 회화를 연습합니다.'),

@@ -1407,15 +1407,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
                         color: const Color(0xFF2563EB),
                         borderRadius: BorderRadius.circular(20)),
                     child: Row(children: [
-                      ValueListenableBuilder<Color>(
-                        valueListenable: BillingTicker.instance.billingDotColor,
-                        builder: (_, dotColor, __) => Container(
-                          width: 10,
-                          height: 10,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: dotColor,
-                          ),
+                      ValueListenableBuilder<int>(
+                        valueListenable: BillingTicker.instance.billingState,
+                        builder: (_, s, __) => CustomPaint(
+                          size: const Size(14, 14),
+                          painter: BillingDotPainter(s),
                         ),
                       ),
                       const SizedBox(width: 6),
