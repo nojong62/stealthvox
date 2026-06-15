@@ -18,6 +18,7 @@ import 'dart:io';
 import 'package:android_id/android_id.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 class IntroMaster extends StatefulWidget {
   const IntroMaster({
@@ -48,10 +49,11 @@ class _IntroMasterState extends State<IntroMaster> {
   bool isLoading = false;
 
   // ── Promo popup ──
-  bool _promoVisible = true;
-  bool _promoMounted = true;
+  bool _promoVisible = false;
+  bool _promoMounted = false;
   Timer? _promoFadeTimer;
   Timer? _promoRemoveTimer;
+  static const _promoShownKey = 'promo_free_trial_shown';
 
   @override
   void initState() {
@@ -59,10 +61,33 @@ class _IntroMasterState extends State<IntroMaster> {
     _emailFocusNode.addListener(_onFocusChange);
     _passwordFocusNode.addListener(_onFocusChange);
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkEntryStatus());
-    _promoFadeTimer = Timer(const Duration(milliseconds: 2400), () {
+    _initPromoPopup();
+  }
+
+  Future<void> _initPromoPopup() async {
+    final prefs = await SharedPreferences.getInstance();
+    final shown = prefs.getBool(_promoShownKey) ?? false;
+    if (shown || !mounted) return;
+    await prefs.setBool(_promoShownKey, true);
+    if (!mounted) return;
+    setState(() {
+      _promoMounted = true;
+      _promoVisible = true;
+    });
+    _promoFadeTimer = Timer(const Duration(milliseconds: 4400), () {
       if (mounted) setState(() => _promoVisible = false);
     });
-    _promoRemoveTimer = Timer(const Duration(milliseconds: 3000), () {
+    _promoRemoveTimer = Timer(const Duration(milliseconds: 5000), () {
+      if (mounted) setState(() => _promoMounted = false);
+    });
+  }
+
+  void _dismissPromo() {
+    _promoFadeTimer?.cancel();
+    _promoRemoveTimer?.cancel();
+    if (!mounted) return;
+    setState(() => _promoVisible = false);
+    Future.delayed(const Duration(milliseconds: 500), () {
       if (mounted) setState(() => _promoMounted = false);
     });
   }
@@ -438,26 +463,6 @@ class _IntroMasterState extends State<IntroMaster> {
                             Text("Real-Life Shadowing",
                                 style: GoogleFonts.roboto(
                                     fontSize: 14, color: Colors.white54)),
-                            const SizedBox(height: 12),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: Colors.amber.withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                  color: Colors.amber.withValues(alpha: 0.4),
-                                ),
-                              ),
-                              child: const Text(
-                                "신규 회원가입 시 10분 무료 체험",
-                                style: TextStyle(
-                                  color: Colors.amber,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
                           ],
                         ),
                       ),
@@ -579,15 +584,19 @@ class _IntroMasterState extends State<IntroMaster> {
   }
 
   Widget _buildPromoPopup() {
-    return AnimatedOpacity(
-      opacity: _promoVisible ? 1.0 : 0.0,
-      duration: const Duration(milliseconds: 500),
-      child: Container(
-        width: double.infinity,
-        height: double.infinity,
-        color: Colors.black.withValues(alpha: 0.80),
-        child: Center(
-          child: Container(
+    return GestureDetector(
+      onTap: _dismissPromo,
+      child: AnimatedOpacity(
+        opacity: _promoVisible ? 1.0 : 0.0,
+        duration: const Duration(milliseconds: 500),
+        child: Container(
+          width: double.infinity,
+          height: double.infinity,
+          color: Colors.black.withValues(alpha: 0.80),
+          child: Center(
+            child: GestureDetector(
+              onTap: _dismissPromo,
+              child: Container(
             margin: const EdgeInsets.symmetric(horizontal: 36),
             padding: const EdgeInsets.fromLTRB(28, 28, 28, 24),
             decoration: BoxDecoration(
@@ -691,12 +700,12 @@ class _IntroMasterState extends State<IntroMaster> {
                   ),
                 ),
                 const SizedBox(height: 24),
-                // ── 3초 countdown bar ──
+                // ── 5초 countdown bar ──
                 TweenAnimationBuilder<double>(
                   tween: Tween(begin: 1.0, end: 0.0),
-                  duration: const Duration(milliseconds: 3000),
+                  duration: const Duration(milliseconds: 5000),
                   builder: (context, value, _) {
-                    final secLeft = (value * 3).ceil();
+                    final secLeft = (value * 5).ceil();
                     return Column(
                       children: [
                         ClipRRect(
@@ -712,7 +721,7 @@ class _IntroMasterState extends State<IntroMaster> {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          '$secLeft초 후 사라집니다',
+                          '$secLeft초 후 사라집니다  •  탭하면 닫힘',
                           style: const TextStyle(
                               color: Colors.white30, fontSize: 11),
                         ),
@@ -725,7 +734,9 @@ class _IntroMasterState extends State<IntroMaster> {
           ),
         ),
       ),
-    );
+    ),
+  ),
+);
   }
 
   Widget _buildBentoCard({required Widget child}) {
