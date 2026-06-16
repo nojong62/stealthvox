@@ -341,8 +341,8 @@ class BillingTicker with WidgetsBindingObserver {
 // BillingDotPainter (과금 상태 인디케이터 아이콘)
 // =============================================================================
 // state 0: paused - green outline + gray core
-// state 1: quarter rate - dark core + 1/4 green pie
-// state 2: full rate - solid green
+// state 1: billing active - solid green
+// state 2: billing active - solid green
 
 class BillingDotPainter extends CustomPainter {
   final int state;
@@ -350,8 +350,6 @@ class BillingDotPainter extends CustomPainter {
 
   static const _green = Color(0xFF34D399);
   static const _gray = Color(0xFF4B5563);
-  static const _dark = Color(0xFF1E293B);
-  static const _border = Color(0xFF475569);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -359,30 +357,9 @@ class BillingDotPainter extends CustomPainter {
     final r = size.shortestSide / 2;
 
     switch (state) {
+      case 1:
       case 2:
         canvas.drawCircle(c, r, Paint()..color = _green);
-        break;
-      case 1:
-        canvas.drawCircle(c, r, Paint()..color = _dark);
-        final path = Path()
-          ..moveTo(c.dx, c.dy)
-          ..lineTo(c.dx, c.dy - r)
-          ..arcTo(
-            Rect.fromCircle(center: c, radius: r),
-            -1.5707963,
-            1.5707963,
-            false,
-          )
-          ..close();
-        canvas.drawPath(path, Paint()..color = _green);
-        canvas.drawCircle(
-          c,
-          r,
-          Paint()
-            ..color = _border
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 0.5,
-        );
         break;
       default:
         canvas.drawCircle(c, r * 0.75, Paint()..color = _gray);
