@@ -66,6 +66,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    AppsFlyerManager.duoInviteSignal.addListener(_onDuoInviteSignal);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // Duo 초대 pending 상태이면 Lobby 스킵하고 바로 StealthRoom으로
       debugPrint(
@@ -80,6 +81,16 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
       _initAppState();
       _initializeLobbyData();
     });
+  }
+
+  void _onDuoInviteSignal() {
+    if (!mounted) return;
+    if (FFAppState().isGuestSession &&
+        FFAppState().pendingInviteType == 'duo' &&
+        FFAppState().duoRoomId.isNotEmpty) {
+      debugPrint('[Lobby] duoInviteSignal - routing to StealthRoom');
+      context.pushReplacementNamed('StealthRoom');
+    }
   }
 
   void _initAppState() {
@@ -119,13 +130,10 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
         _showForceUpdateDialog();
       }
 
-      // 3. AppsFlyer SDK 초기화 (하드코딩 값 사용)
+      // 3. AppsFlyer SDK 초기화 (전역 딥링크 핸들러 사용)
       await AppsFlyerManager.initialize(
         devKey: 'SQUmDTB2VzuPjrJGiy5SSC',
         appId: 'com.aienglishpractice.stealthvox',
-        onDeepLink: (params) {
-          if (mounted) _handleInviteDeepLink(params);
-        },
       );
       if (!mounted) return;
     } catch (e) {
@@ -137,6 +145,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    AppsFlyerManager.duoInviteSignal.removeListener(_onDuoInviteSignal);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -171,94 +180,6 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
               'historyRef':
                   serializeParam(newHistoryRef, ParamType.DocumentReference)
             }.withoutNulls);
-      }
-    } finally {
-      _isActionLocked = false;
-    }
-  }
-
-  // 📦 [Box 5 추가: Duo 초대 Deep Link 처리]
-  Future<void> _handleInviteDeepLink(Map<String, dynamic> params) async {
-    if (_isActionLocked) return;
-
-    // deepLink가 JSON string으로 내포된 경우 파싱
-    Map<String, dynamic> deepLinkData = {};
-    if (params['deepLink'] is String) {
-      try {
-        deepLinkData =
-            jsonDecode(params['deepLink'] as String) as Map<String, dynamic>;
-      } catch (_) {}
-    } else if (params['deepLink'] is Map) {
-      deepLinkData = Map<String, dynamic>.from(params['deepLink'] as Map);
-    }
-
-    final String? deepLinkValue = params['deep_link_value']?.toString() ??
-        deepLinkData['deep_link_value']?.toString();
-
-    if (deepLinkValue != 'duo_chat') {
-      debugPrint('[DeepLink] Not duo_chat: $deepLinkValue');
-      return;
-    }
-
-    final String? inviterId = params['deep_link_sub1']?.toString() ??
-        deepLinkData['deep_link_sub1']?.toString() ??
-        params['inviter_id']?.toString() ??
-        deepLinkData['inviter_id']?.toString() ??
-        params['inviterId']?.toString() ??
-        params['af_sub1']?.toString();
-
-    final String? roomId = params['deep_link_sub2']?.toString() ??
-        deepLinkData['deep_link_sub2']?.toString() ??
-        params['room_id']?.toString() ??
-        deepLinkData['room_id']?.toString() ??
-        params['duo_room_id']?.toString() ??
-        deepLinkData['duo_room_id']?.toString() ??
-        params['duoRoomId']?.toString() ??
-        deepLinkData['duoRoomId']?.toString() ??
-        params['roomId']?.toString() ??
-        params['af_sub2']?.toString();
-
-    if (inviterId == null ||
-        inviterId.isEmpty ||
-        roomId == null ||
-        roomId.isEmpty) {
-      debugPrint('[DeepLink] Missing parameters');
-      return;
-    }
-
-    _isActionLocked = true;
-    final bool isGuest = FirebaseAuth.instance.currentUser == null;
-
-    try {
-      if (isGuest) {
-        await FirebaseAuth.instance.signInAnonymously();
-        if (!mounted) return;
-      }
-
-      FFAppState().isGuestSession = true;
-      FFAppState().inviterUid = inviterId;
-      FFAppState().duoRoomId = roomId;
-      FFAppState().pendingInviteType = 'duo';
-      FFAppState().update(() {});
-
-      if (!mounted) return;
-      debugPrint('[Lobby] routing to StealthRoom for Duo invite');
-
-      context.pushReplacementNamed('StealthRoom');
-    } on FirebaseAuthException catch (e) {
-      debugPrint('[DeepLink] Auth error: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text("네트워크를 확인해주세요",
-                style: TextStyle(fontWeight: FontWeight.bold)),
-            backgroundColor: Color(0xFFFF453A)));
-      }
-    } catch (e) {
-      debugPrint('[DeepLink] Unexpected error: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text("초대 처리 중 오류가 발생했습니다."),
-            backgroundColor: Color(0xFFFF453A)));
       }
     } finally {
       _isActionLocked = false;
@@ -1002,20 +923,21 @@ class LobbyBrain {
 }
 
 // =======================================================
-// 📦 [Box 10: AppsFlyerManager — Deferred/Direct Deep Link]
+// 📦 [Box 10: AppsFlyerManager — Global Deep Link Handler]
+// 화면 mounted 여부에 의존하지 않고 Duo 초대 딥링크를 전역 처리한다.
+// FFAppState 세팅 후 duoInviteSignal을 발동해 현재 활성 화면이 라우팅한다.
 // =======================================================
 class AppsFlyerManager {
   static AppsflyerSdk? _instance;
   static bool _isInitialized = false;
-  // Callback replaced per screen without re-creating the SDK instance.
-  static Function(Map<String, dynamic>)? _onDeepLink;
+
+  /// Duo 초대 딥링크 처리 완료 후 증가하는 신호.
+  static final ValueNotifier<int> duoInviteSignal = ValueNotifier<int>(0);
 
   static Future<void> initialize({
     required String devKey,
     required String appId,
-    required Function(Map<String, dynamic>) onDeepLink,
   }) async {
-    _onDeepLink = onDeepLink;
     if (_isInitialized) return;
     try {
       final AppsFlyerOptions options = AppsFlyerOptions(
@@ -1027,15 +949,8 @@ class AppsFlyerManager {
 
       _instance = AppsflyerSdk(options);
 
-      _instance!.onInstallConversionData((res) {
-        final cb = _onDeepLink;
-        if (cb != null) _routeCallback(res, cb);
-      });
-
-      _instance!.onAppOpenAttribution((res) {
-        final cb = _onDeepLink;
-        if (cb != null) _routeCallback(res, cb);
-      });
+      _instance!.onInstallConversionData((res) => _routeCallback(res));
+      _instance!.onAppOpenAttribution((res) => _routeCallback(res));
 
       _instance!.onDeepLinking((DeepLinkResult dp) {
         if (dp.status == Status.FOUND) {
@@ -1047,7 +962,7 @@ class AppsFlyerManager {
             if (dp.deepLink?.deepLinkValue != null) {
               params['deep_link_value'] = dp.deepLink!.deepLinkValue!;
             }
-            _onDeepLink?.call(params);
+            handleDuoDeepLink(params);
           } catch (e) {
             debugPrint('[AppsFlyerManager] onDeepLinking error: $e');
           }
@@ -1066,19 +981,75 @@ class AppsFlyerManager {
     }
   }
 
-  static void _routeCallback(
-    dynamic res,
-    Function(Map<String, dynamic>) onDeepLink,
-  ) {
+  static void _routeCallback(dynamic res) {
     try {
       if (res == null) return;
       final Map<dynamic, dynamic> raw = res as Map<dynamic, dynamic>;
       if ((raw['status']?.toString() ?? '') != 'success') return;
       final dynamic payload = raw['data'] ?? raw;
       if (payload == null) return;
-      onDeepLink(Map<String, dynamic>.from(payload as Map));
+      handleDuoDeepLink(Map<String, dynamic>.from(payload as Map));
     } catch (e) {
       debugPrint('[AppsFlyerManager] callback error: $e');
+    }
+  }
+
+  /// Duo 초대 딥링크를 전역 처리한다.
+  static Future<void> handleDuoDeepLink(Map<String, dynamic> params) async {
+    Map<String, dynamic> deepLinkData = {};
+    if (params['deepLink'] is String) {
+      try {
+        deepLinkData =
+            jsonDecode(params['deepLink'] as String) as Map<String, dynamic>;
+      } catch (_) {}
+    } else if (params['deepLink'] is Map) {
+      deepLinkData = Map<String, dynamic>.from(params['deepLink'] as Map);
+    }
+
+    final String? deepLinkValue = params['deep_link_value']?.toString() ??
+        deepLinkData['deep_link_value']?.toString();
+    if (deepLinkValue != 'duo_chat') return;
+
+    final String? inviterId = params['deep_link_sub1']?.toString() ??
+        deepLinkData['deep_link_sub1']?.toString() ??
+        params['inviter_id']?.toString() ??
+        deepLinkData['inviter_id']?.toString() ??
+        params['inviterId']?.toString() ??
+        params['af_sub1']?.toString();
+
+    final String? roomId = params['deep_link_sub2']?.toString() ??
+        deepLinkData['deep_link_sub2']?.toString() ??
+        params['room_id']?.toString() ??
+        deepLinkData['room_id']?.toString() ??
+        params['duo_room_id']?.toString() ??
+        deepLinkData['duo_room_id']?.toString() ??
+        params['duoRoomId']?.toString() ??
+        deepLinkData['duoRoomId']?.toString() ??
+        params['roomId']?.toString() ??
+        params['af_sub2']?.toString();
+
+    if (inviterId == null ||
+        inviterId.isEmpty ||
+        roomId == null ||
+        roomId.isEmpty) {
+      debugPrint('[AppsFlyerManager] handleDuoDeepLink: missing params');
+      return;
+    }
+
+    try {
+      if (FirebaseAuth.instance.currentUser == null) {
+        await FirebaseAuth.instance.signInAnonymously();
+      }
+      FFAppState().isGuestSession = true;
+      FFAppState().inviterUid = inviterId;
+      FFAppState().duoRoomId = roomId;
+      FFAppState().pendingInviteType = 'duo';
+      FFAppState().update(() {});
+      debugPrint(
+          '[AppsFlyerManager] Duo invite ready - roomId: $roomId, signal++');
+      duoInviteSignal.value++;
+    } catch (e) {
+      debugPrint('[AppsFlyerManager] handleDuoDeepLink error: $e');
     }
   }
 }

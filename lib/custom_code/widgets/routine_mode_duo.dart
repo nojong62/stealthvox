@@ -484,16 +484,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     final String myTarget = _myTarget();
     final String myNative = _myNative();
 
-    // 1. 내 발화 원문을 우측 말풍선으로 즉시 표시 (스냅한 반응성)
-    int myIndex = -1;
-    if (mounted) {
-      setState(() {
-        _localMessages
-            .add({'role': 'HOST', 'target': finalTranscript, 'original': ''});
-        myIndex = _localMessages.length - 1;
-      });
-      _scrollToCurrentTop(myIndex);
-    }
+    // 1. 즉시 표시 제거 - 번역 완료 후 단계 4에서 새 말풍선으로 표시
 
     // 2. 공유 채널 업로드 — 상대 폰이 이 원문을 받아 자기 언어쌍으로 통역함 (백그라운드)
     _uploadMyMessage(finalTranscript, myNative);
@@ -519,16 +510,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
             ? result['original']!
             : finalTranscript;
 
-    // 4. 내 말풍선을 [타겟(큰글자) + 오리지널(작은글자)]로 교체
-    if (mounted && myIndex >= 0 && myIndex < _localMessages.length) {
+    // 4. 번역 완료 후 내 말풍선을 [타겟 + 오리지널]로 새 말풍선에 표시
+    if (mounted) {
       setState(() {
-        _localMessages[myIndex] = {
-          'role': 'HOST',
-          'target': tgt,
-          'original': org
-        };
+        _localMessages.add({'role': 'HOST', 'target': tgt, 'original': org});
       });
-      _scrollToCurrentTop(myIndex);
+      _scrollToCurrentTop(_localMessages.length - 1);
     }
     await _saveHistoryMessage(tgt, org, 'HOST');
 

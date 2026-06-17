@@ -52,6 +52,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     WidgetsBinding.instance.addObserver(this);
     StealthRoomMaster.exitCurrentMode =
         () => setState(() => _currentMode = null);
+    AppsFlyerManager.duoInviteSignal.addListener(_onDuoInviteSignal);
 
     // Duo 초대 링크 자동 진입 처리
     // FFAppState 초대 상태는 여기서 지우지 않음 — _joinAsGuest 성공 후에만 삭제
@@ -69,8 +70,23 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     }
   }
 
+  /// 딥링크 신호 수신 후 StealthRoom 메뉴에서 Duo로 진입한다.
+  void _onDuoInviteSignal() {
+    if (!mounted) return;
+    if (FFAppState().isGuestSession &&
+        FFAppState().pendingInviteType == 'duo' &&
+        FFAppState().duoRoomId.isNotEmpty) {
+      debugPrint('[StealthRoom] duoInviteSignal - entering Duo mode');
+      setState(() {
+        _pendingDuoRoomId = FFAppState().duoRoomId;
+        _currentMode = 1;
+      });
+    }
+  }
+
   @override
   void dispose() {
+    AppsFlyerManager.duoInviteSignal.removeListener(_onDuoInviteSignal);
     WidgetsBinding.instance.removeObserver(this);
     StealthRoomMaster.exitCurrentMode = null;
     super.dispose();
