@@ -67,13 +67,19 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   void _startDuoBilling() {
     // 🆕 [과금정책] 게스트(회원·비회원 무관)는 차감 안 함 — 초대한 호스트만 과금
     if (!_amIHost) return;
-    if (_billingStarted) return;
-    _billingStarted = true;
-    BillingTicker.instance.resume();
-    BillingTicker.instance.logMode('duo');
+    BillingTicker.instance.setRate(BillingRate.full);
+    BillingTicker.instance.start();
+    if (!_billingStarted) {
+      _billingStarted = true;
+      BillingTicker.instance.logMode('duo');
+    }
+    if (BillingTicker.instance.isPaused) {
+      BillingTicker.instance.resume();
+    }
   }
 
   void _stopDuoBilling() {
+    if (!_amIHost) return;
     _billingStarted = false;
     BillingTicker.instance.pause();
   }
@@ -211,7 +217,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
 
     // 🆕 [과금정책] Duo는 게스트 입장 시점에 과금 시작 — 진입 시엔 rate만 설정하고 pause 유지
     BillingTicker.instance.setRate(BillingRate.full);
-    BillingTicker.instance.pause();
+    _stopDuoBilling();
     _billingStarted = false;
 
     _ttsPlayer.onPlayerComplete.listen((_) {
@@ -977,8 +983,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
           _isPartnerOnline = true;
         });
       }
-      // 🆕 [과금정책] 게스트 본인 입장 성공 → 과금 시작
-      _startDuoBilling();
+      // 🆕 [과금정책] 게스트 본인 입장 성공 — 과금은 호스트 리스너에서만 시작
       // 🆕 [PTT] 세션만 열고 녹음은 버튼으로 시작 — 자동 녹음 제거
     } catch (e) {
       debugPrint('[Duo] Guest join error: $e');
@@ -1006,6 +1011,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
       final data = snap.data() as Map<String, dynamic>?;
       if (data == null) return;
       final bool partnerJoined = data['isPartnerJoined'] == true;
+      debugPrint(
+          '[Duo][Billing] partnerJoined=$partnerJoined amIHost=$_amIHost '
+          'paused=${BillingTicker.instance.isPaused} '
+          'billingState=${BillingTicker.instance.billingState.value} '
+          'billingStarted=$_billingStarted');
 
       // 게스트 퇴장 감지: _isPartnerOnline이 true → false로 떨어지는 순간
       final bool guestJustLeft = _isPartnerOnline && !partnerJoined;
