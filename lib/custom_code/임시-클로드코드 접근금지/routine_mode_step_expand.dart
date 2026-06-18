@@ -76,9 +76,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   int _idleElapsedSec = 0;
 
   bool get _isSystemBusy {
-    final ttsBusy = _ttsQueueManager.isBusy;
-    final micBusy = _voiceManager != null;
-    return ttsBusy || micBusy;
+    return _ttsQueueManager.isBusy;
   }
 
   void _resetIdleTimer() {
@@ -158,13 +156,95 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       '마음에 안 들어',
       '맘에 안 들어',
       '같은 질문',
+      // 이미 답한 내용을 다시 묻는 반복 질문 불만
+      '아까 말했',
+      '이미 말했',
+      '방금 말했',
+      '이미 대답',
+      '아까 대답',
+      '그거 말했',
+      '말했잖아',
+      '대답했잖아',
+      '물어봤잖아',
+      '같은 걸',
+      '또 물어',
+      '반복',
+      '똑같은 질문',
+      '아까 얘기',
+      '이미 얘기',
       'ask something else',
       'change the question',
       'different question',
       "don't like that question",
+      'already said',
+      'already answered',
+      'already told you',
+      'asked that already',
+      'same question',
     ];
     for (final kw in kws) {
       if (t.contains(kw)) return true;
+    }
+    return false;
+  }
+
+  /// Seed snippet filter shared by FreeTalk and Roleplay history fetchers.
+  static bool _isSeedFiller(String s) {
+    final t = s.replaceAll(RegExp(r'[\s\.,!?~…]'), '').toLowerCase();
+    if (t.length < 6) return true;
+    const fillerPatterns = [
+      '네',
+      '응',
+      '어',
+      '그래',
+      '맞아',
+      '맞아요',
+      '좋아',
+      '좋아요',
+      '글쎄',
+      'ok',
+      'okay',
+      '음',
+      '아',
+      '오',
+      '그래요',
+      '그러니까',
+      '그럴까',
+      '그렇구나',
+      '알겠어',
+      '알겠습니다',
+      '고마워',
+      '고맙습니다',
+      'yes',
+      'yeah',
+      'sure',
+      'right',
+      'thank you',
+      'thanks',
+    ];
+    if (fillerPatterns.contains(t)) return true;
+    const complaintPatterns = [
+      '질문',
+      '물어봐',
+      '물어보',
+      '다시마',
+      '이상하',
+      '별로',
+      '뭐야',
+      '바꿔',
+      '그런거말고',
+      '그런것말고',
+      '이거',
+      '다른거',
+      '다른걸',
+      '마음에안',
+      '맘에안',
+      'question',
+      'askme',
+      'weird',
+    ];
+    for (final p in complaintPatterns) {
+      if (t.contains(p)) return true;
     }
     return false;
   }
@@ -245,8 +325,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   bool _showExpandedFinalCard = false; // 확장 문장 카드 표시 여부
   bool _showStudyRoomPrompt = false; // "Study Room에서 연습 하세요" 표시 여부
   int _consecutiveRestateCount = 0; // 같은 턴 연속 GARBLED 횟수 (2 이상이면 더 쉬운 문장 유도)
-  bool _restateConfirmPending = false; // 오프토픽 확인 질문 후 다음 발화는 RESTATE 검사 없이 사용
-
   // 🎯 [PRACTICE] 의미단위 반복 연습 모드
   bool _isPracticeMode = false;
   List<String> _practiceUnits = [];
@@ -259,6 +337,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   bool _isSplittingUnits = false;
   final AudioPlayer _practicePlayer = AudioPlayer();
   List<int> _userPcmAccumulator = [];
+  Set<String> _practiceRecognizedWords = {};
   String? _userWavPath;
 
   // 오디오 및 UI
@@ -404,65 +483,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         ..addAll(selectedRooms.map((r) => r.id));
       await prefs.setStringList(usedKey, newUsed.toList());
 
-      // 필러 판정
-      const fillerPatterns = [
-        '네',
-        '응',
-        '어',
-        '그래',
-        '맞아',
-        '맞아요',
-        '좋아',
-        '좋아요',
-        '글쎄',
-        'ok',
-        'okay',
-        '음',
-        '아',
-        '오',
-        '그래요',
-        '그러니까',
-        '그렇구나',
-        '알겠어',
-        '알겠습니다',
-        'yes',
-        'yeah',
-        'sure',
-        'right',
-        'thank you',
-        'thanks',
-      ];
-      // 과거 불만/메타 발화는 새 seed 주제로 부적합하다.
-      const complaintPatterns = [
-        '질문',
-        '물어봐',
-        '물어보',
-        '다시마',
-        '이상하',
-        '별로',
-        '뭐야',
-        '바꿔',
-        '그런거말고',
-        '그런것말고',
-        '이거',
-        '다른거',
-        '다른걸',
-        '마음에안',
-        '맘에안',
-        'question',
-        'askme',
-        'weird',
-      ];
-      bool isFiller(String s) {
-        final t = s.replaceAll(RegExp(r'[\s\.,!?~…]'), '').toLowerCase();
-        if (t.length < 6) return true;
-        if (fillerPatterns.contains(t)) return true;
-        for (final p in complaintPatterns) {
-          if (t.contains(p)) return true;
-        }
-        return false;
-      }
-
       // role 판정 fallback: HOST, USER, host, user
       bool isHostRole(Map<String, dynamic> data) {
         final role =
@@ -494,7 +514,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           final texts = msgSnap.docs
               .where((d) => isHostRole(d.data()))
               .map((d) => extractText(d.data()))
-              .where((s) => s.isNotEmpty && !isFiller(s))
+              .where((s) => s.isNotEmpty && !_isSeedFiller(s))
               .toList();
           allCandidates.addAll(texts);
         } catch (_) {}
@@ -556,64 +576,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         ..addAll(selectedRooms.map((r) => r.id));
       await prefs.setStringList(usedKey, newUsed.toList());
 
-      const fillerPatterns = [
-        '네',
-        '응',
-        '음',
-        '그래',
-        '맞아',
-        '맞아요',
-        '좋아',
-        '좋아요',
-        '글쎄',
-        'ok',
-        'okay',
-        '오케이',
-        '아',
-        '어',
-        '그래요',
-        '그럴까',
-        '그렇구나',
-        '고마워',
-        '고맙습니다',
-        'yes',
-        'yeah',
-        'sure',
-        'right',
-        'thank you',
-        'thanks',
-      ];
-      // 과거 불만/메타 발화는 새 seed 주제로 부적합하다.
-      const complaintPatterns = [
-        '질문',
-        '물어봐',
-        '물어보',
-        '다시마',
-        '이상하',
-        '별로',
-        '뭐야',
-        '바꿔',
-        '그런거말고',
-        '그런것말고',
-        '이거',
-        '다른거',
-        '다른걸',
-        '마음에안',
-        '맘에안',
-        'question',
-        'askme',
-        'weird',
-      ];
-      bool isFiller(String s) {
-        final t = s.replaceAll(RegExp(r'[\s\.,!?~…]'), '').toLowerCase();
-        if (t.length < 6) return true;
-        if (fillerPatterns.contains(t)) return true;
-        for (final p in complaintPatterns) {
-          if (t.contains(p)) return true;
-        }
-        return false;
-      }
-
       // role 판정 fallback
       bool isHostRole(Map<String, dynamic> data) {
         final role =
@@ -645,7 +607,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           final texts = msgSnap.docs
               .where((d) => isHostRole(d.data()))
               .map((d) => extractText(d.data()))
-              .where((s) => s.isNotEmpty && !isFiller(s))
+              .where((s) => s.isNotEmpty && !_isSeedFiller(s))
               .toList();
           allCandidates.addAll(texts);
         } catch (_) {}
@@ -748,6 +710,29 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     while (questionTts.pendingRequests > 0 || _ttsQueueManager.isBusy) {
       await Future.delayed(const Duration(milliseconds: 50));
       if (++ticks > 300) break;
+    }
+
+    // 첫 질문 후 사용자가 직접 이어서 말할 수 있도록 한국어 안내를 덧붙이고 재생한다.
+    const String inviteMsg = '하고 싶은 이야기가 있으시면 먼저 말씀해 주세요.';
+    aiOriginal = aiOriginal.isEmpty ? inviteMsg : '$aiOriginal\n$inviteMsg';
+    if (mounted && aiIdx < _localMessages.length) {
+      setState(() {
+        _localMessages[aiIdx]['original'] = aiOriginal;
+      });
+    }
+    final inviteTts = ChunkedTtsFetcher(
+      _openAiKey,
+      _ttsQueueManager,
+      'nova',
+      isUser: false,
+      onLog: _log,
+    );
+    inviteTts.addText(inviteMsg);
+    ticks = 0;
+    while ((inviteTts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
+        mounted) {
+      await Future.delayed(const Duration(milliseconds: 50));
+      if (++ticks > 200) break;
     }
   }
 
@@ -1109,6 +1094,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         _showExpandedFinalCard = false;
         _showStudyRoomPrompt = false;
       });
+      _practiceRecognizedWords.clear();
     }
   }
 
@@ -1143,6 +1129,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         _showStudyRoomPrompt = false;
       });
     }
+    _practiceRecognizedWords.clear();
     _startSessionWaitingForUserSeed(); // 시작 안내 후 유저 seed 문장 대기
   }
 
@@ -1463,10 +1450,41 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       _isPracticeAiSpeaking = false;
       _isPracticeUserListening = true;
     });
+    _practiceRecognizedWords.clear();
     _startPracticeListening();
   }
 
   /// 유저 따라 말하기 STT 시작 (target 언어로 인식)
+  /// [PRACTICE-RATIO] Advance when recognized words cover 60% of the unit.
+  void _checkPracticeWordRatio(String transcript) {
+    if (!_isPracticeUserListening || _currentUnitIdx >= _practiceUnits.length) {
+      return;
+    }
+    final incomingWords = transcript
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^\w\s]'), '')
+        .split(RegExp(r'\s+'))
+        .where((w) => w.isNotEmpty);
+    _practiceRecognizedWords.addAll(incomingWords);
+
+    final unitText = _practiceUnits[_currentUnitIdx];
+    final unitWords = unitText
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^\w\s]'), '')
+        .split(RegExp(r'\s+'))
+        .where((w) => w.isNotEmpty)
+        .toSet();
+    if (unitWords.isEmpty) {
+      _practiceAdvanceUnit();
+      return;
+    }
+    final matchCount =
+        unitWords.where((w) => _practiceRecognizedWords.contains(w)).length;
+    if (matchCount / unitWords.length >= 0.6) {
+      _practiceAdvanceUnit();
+    }
+  }
+
   void _startPracticeListening() {
     if (_deepgramKey.isEmpty) {
       Future.delayed(const Duration(seconds: 4), _practiceAdvanceUnit);
@@ -1483,10 +1501,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       langCode: dgCode,
       onLog: _log,
       onConnected: () {},
-      onTranscriptUpdate: (_) {},
-      onTurnEnded: (transcript) {
-        if (transcript.trim().length >= 2) _practiceAdvanceUnit();
-      },
+      onTranscriptUpdate: (transcript) => _checkPracticeWordRatio(transcript),
+      onTurnEnded: (transcript) => _checkPracticeWordRatio(transcript),
       onError: (_) => _practiceAdvanceUnit(),
       onAudioData: (bytes) => _userPcmAccumulator.addAll(bytes),
     );
@@ -1984,12 +2000,66 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 //   STEP 6: AI 역번역 + Firestore 저장 (백그라운드)
 //   STEP 7: 마이크 재개방
 // ====================================================================
+  /// Build clean HOST/SYSTEM context for normal, fast-lane, dissatisfied, and misheard paths.
+  Map<String, String> _buildCleanContext({
+    bool removeLastSystem = false,
+    bool captureRejected = false,
+    int maxMessages = 0,
+  }) {
+    var msgs = _localMessages.where((m) {
+      if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
+      final target = (m['target'] ?? '').toString().trim();
+      return target.isNotEmpty && target != '...';
+    }).toList();
+
+    if (maxMessages > 0 && msgs.length > maxMessages) {
+      msgs = msgs.sublist(msgs.length - maxMessages);
+    }
+
+    String rejected = '';
+    if (removeLastSystem) {
+      final sysIdx = msgs.lastIndexWhere((m) => m['role'] == 'SYSTEM');
+      if (sysIdx != -1) {
+        if (captureRejected) {
+          rejected = (msgs[sysIdx]['target'] ?? '').toString().trim();
+        }
+        msgs.removeAt(sysIdx);
+      }
+    }
+
+    final List<String> lines = [];
+    String latestExp = '';
+    for (final m in msgs) {
+      final t = (m['target'] ?? '').toString().trim();
+      if (m['role'] == 'HOST') {
+        final idx = t.indexOf('\n\n');
+        final exp = idx < 0
+            ? t
+            : (t.substring(idx + 2).trim().isNotEmpty
+                ? t.substring(idx + 2).trim()
+                : t.substring(0, idx).trim());
+        lines.add("User: $exp");
+        latestExp = exp;
+      } else {
+        lines.add("AI: $t");
+      }
+    }
+
+    String ctx = lines.join("\n");
+    if (latestExp.isNotEmpty) {
+      ctx += "\n\n[Most recent expanded sentence to grow from]: $latestExp";
+    }
+
+    return {
+      'contextStr': ctx,
+      'latestExpanded': latestExp,
+      'rejectedQuestion': rejected,
+    };
+  }
+
   Future<void> _processRelayPipeline(String finalTranscript,
       {bool isCorrectionRetry = false}) async {
     _resetIdleTimer();
-    // [RESTATE-CONFIRM] 직전 턴에 오프토픽 확인 질문을 했다면 이번 발화는 RESTATE 검사 없이 사용
-    final bool isRestateConfirm = _restateConfirmPending;
-    _restateConfirmPending = false;
     _turnCounter++;
     final int currentTurnId = _turnCounter;
     _log('🧠 [PIPE-01]',
@@ -2032,47 +2102,18 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         setState(
             () => _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP'));
       }
-      // Clean context: 거절된 질문(마지막 SYSTEM) 제거
-      var _fastCleanMsgs = _localMessages.where((m) {
-        if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
-        final target = (m['target'] ?? '').toString().trim();
-        return target.isNotEmpty && target != '...';
-      }).toList();
-      final _fclSysIdx =
-          _fastCleanMsgs.lastIndexWhere((m) => m['role'] == 'SYSTEM');
-      final String _fclRejected = _fclSysIdx != -1
-          ? (_fastCleanMsgs[_fclSysIdx]['target'] ?? '').toString().trim()
-          : '';
-      if (_fclSysIdx != -1) _fastCleanMsgs.removeAt(_fclSysIdx);
-      final List<String> _fclLines = [];
-      String _fclLatestExp = '';
-      for (final m in _fastCleanMsgs) {
-        final t = (m['target'] ?? '').toString().trim();
-        if (m['role'] == 'HOST') {
-          final idx = t.indexOf('\n\n');
-          final exp = idx < 0
-              ? t
-              : (t.substring(idx + 2).trim().isNotEmpty
-                  ? t.substring(idx + 2).trim()
-                  : t.substring(0, idx).trim());
-          _fclLines.add("User: $exp");
-          _fclLatestExp = exp;
-        } else {
-          _fclLines.add("AI: $t");
-        }
-      }
-      String _fclCtx = _fclLines.join("\n");
-      if (_fclLatestExp.isNotEmpty) {
-        _fclCtx +=
-            "\n\n[Most recent expanded sentence to grow from]: $_fclLatestExp";
-      }
-      final String _fclLang = FFAppState().targetLang.isNotEmpty
+      // Clean context: helper build
+      final fclResult =
+          _buildCleanContext(removeLastSystem: true, captureRejected: true);
+      final String fclCtx = fclResult['contextStr']!;
+      final String fclRejected = fclResult['rejectedQuestion']!;
+      final String fclLang = FFAppState().targetLang.isNotEmpty
           ? FFAppState().targetLang
           : 'English';
-      await _handleRetryQuestion(_fclCtx, _fclLang,
+      await _handleRetryQuestion(fclCtx, fclLang,
           isDifferent: true,
           silentReplace: true,
-          rejectedQuestion: _fclRejected);
+          rejectedQuestion: fclRejected);
       return;
     }
 
@@ -2095,44 +2136,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 
       int hostIndex = _localMessages.length - 1;
 
-      // 완성된 턴만 컨텍스트에 포함 (미완성 '...' 제외)
-      var validMsgs = _localMessages.where((m) {
-        if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
-        final target = (m['target'] ?? '').toString().trim();
-        return target.isNotEmpty && target != '...';
-      }).toList();
-      if (validMsgs.length > 10)
-        validMsgs = validMsgs.sublist(validMsgs.length - 10);
-
-      // 🌱 [EXPAND-FIX] HOST 버블의 target은 "PART1(짧은말)\n\nPART2(확장문장)" 구조.
-      //   History에는 PART2(확장 문장)만 넣어 누적이 명확히 이어지게 한다.
-      //   PART2가 없으면(첫 턴 등) PART1을 그대로 사용.
-      String extractExpanded(String target) {
-        final t = target.trim();
-        final idx = t.indexOf('\n\n');
-        if (idx < 0) return t;
-        final part2 = t.substring(idx + 2).trim();
-        return part2.isNotEmpty ? part2 : t.substring(0, idx).trim();
-      }
-
-      final List<String> lines = [];
-      String latestExpanded = '';
-      for (final m in validMsgs) {
-        if (m['role'] == 'HOST') {
-          final expanded = extractExpanded((m['target'] ?? '').toString());
-          lines.add("User: $expanded");
-          latestExpanded = expanded;
-        } else {
-          lines.add("AI: ${m['target']}");
-        }
-      }
-
-      String contextStr = lines.join("\n");
-      // 🌱 가장 최근 확장 문장을 명시적으로 강조 → CASE 2 (a) 지시가 정확히 작동
-      if (latestExpanded.isNotEmpty) {
-        contextStr +=
-            "\n\n[Most recent expanded sentence to grow from]: $latestExpanded";
-      }
+      final pipeResult = _buildCleanContext(maxMessages: 10);
+      String contextStr = pipeResult['contextStr']!;
 
       String userTargetText = "";
       String userBuffer = "";
@@ -2161,7 +2166,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         targetLang: targetLangName,
         contextStr: contextStr,
         disableCorrection: isCorrectionRetry,
-        disableRestate: isRestateConfirm,
       );
 
       // 🌱 [StepExpand Part2만 TTS] 첫 턴은 단순 번역 (Part 구분 없음)
@@ -2221,22 +2225,16 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         }
 
         // 되묻기 감지: 주어/목적어 모호 → AI 되묻기
-        if (userTargetText.contains("[CLARIFY]")) {
+        if (!clarified && userTargetText.contains("[CLARIFY]")) {
           clarified = true;
-          _log('❓ [CLARIFY]', '되묻기 감지 → clarification 처리');
-          break;
+          _log('❓ [CLARIFY]', '되묻기 감지 → 스트림 완료 후 처리 예정');
         }
 
         // 다시 말하기 감지: [RESTATE]=오프토픽 / GARBLED=진짜 안 들림
-        // 확인 재청취(isRestateConfirm) 중 모델이 [RESTATE]를 내면 GARBLED로 강등 → 확인 루프 방지
+        // RESTATE는 간단 안내 후 재청취(문맥 확인 루프 제거)
         if (userTargetText.contains("[RESTATE]")) {
-          if (isRestateConfirm) {
-            garbled = true;
-            _log('👂 GARBLED', '확인 재청취 중 RESTATE 재반환 → 다시 말하기 요청으로 강등');
-          } else {
-            restated = true;
-            _log('🔁 [RESTATE]', '맥락 불일치 → 음성으로만 확인 질문 후 재청취');
-          }
+          restated = true;
+          _log('🔁 [RESTATE]', '맥락 불일치 → 간단 안내 후 재청취');
           break;
         }
         if (userTargetText.contains("[GARBLED]")) {
@@ -2327,41 +2325,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       // [DISSATISFIED] 유저가 질문 내용에 불만 → 안내 멘트 없이 즉시 다른 질문 생성
       if (dissatisfied) {
         _turnCounter--; // 불만 발화 턴 카운트 취소
-        // Clean context: 거절된 질문(마지막 SYSTEM)과 불만 발화 제외
-        var dissCleanMsgs = _localMessages.where((m) {
-          if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
-          final target = (m['target'] ?? '').toString().trim();
-          return target.isNotEmpty && target != '...';
-        }).toList();
-        // 방금 불만 버블(hostIndex)은 빈 target일 수 있으니 위에서 걸러짐 — 마지막 SYSTEM(거절된 질문) 제거
-        final dissLastSysIdx =
-            dissCleanMsgs.lastIndexWhere((m) => m['role'] == 'SYSTEM');
-        final String dissRejected = dissLastSysIdx != -1
-            ? (dissCleanMsgs[dissLastSysIdx]['target'] ?? '').toString().trim()
-            : '';
-        if (dissLastSysIdx != -1) dissCleanMsgs.removeAt(dissLastSysIdx);
-        final List<String> dissCleanLines = [];
-        String dissLatestExpanded = '';
-        for (final m in dissCleanMsgs) {
-          final t = (m['target'] ?? '').toString().trim();
-          if (m['role'] == 'HOST') {
-            final idx = t.indexOf('\n\n');
-            final exp = idx < 0
-                ? t
-                : (t.substring(idx + 2).trim().isNotEmpty
-                    ? t.substring(idx + 2).trim()
-                    : t.substring(0, idx).trim());
-            dissCleanLines.add("User: $exp");
-            dissLatestExpanded = exp;
-          } else {
-            dissCleanLines.add("AI: $t");
-          }
-        }
-        String dissCleanCtx = dissCleanLines.join("\n");
-        if (dissLatestExpanded.isNotEmpty) {
-          dissCleanCtx +=
-              "\n\n[Most recent expanded sentence to grow from]: $dissLatestExpanded";
-        }
+        final dissResult =
+            _buildCleanContext(removeLastSystem: true, captureRejected: true);
+        final String dissCleanCtx = dissResult['contextStr']!;
+        final String dissRejected = dissResult['rejectedQuestion']!;
         if (mounted) {
           setState(() {
             _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
@@ -2448,38 +2415,9 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           });
           _scrollToBottom();
         }
-        var cleanMsgs = _localMessages.where((m) {
-          if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
-          final target = (m['target'] ?? '').toString().trim();
-          return target.isNotEmpty && target != '...';
-        }).toList();
-        if (cleanMsgs.length > 10)
-          cleanMsgs = cleanMsgs.sublist(cleanMsgs.length - 10);
-        final lastBadSysIdx =
-            cleanMsgs.lastIndexWhere((m) => m['role'] == 'SYSTEM');
-        if (lastBadSysIdx != -1) cleanMsgs.removeAt(lastBadSysIdx);
-        final List<String> cleanLines = [];
-        String cleanLatestExpanded = '';
-        for (final m in cleanMsgs) {
-          final t = (m['target'] ?? '').toString().trim();
-          if (m['role'] == 'HOST') {
-            final idx = t.indexOf('\n\n');
-            final expanded = idx < 0
-                ? t
-                : (t.substring(idx + 2).trim().isNotEmpty
-                    ? t.substring(idx + 2).trim()
-                    : t.substring(0, idx).trim());
-            cleanLines.add("User: $expanded");
-            cleanLatestExpanded = expanded;
-          } else {
-            cleanLines.add("AI: $t");
-          }
-        }
-        String cleanContextStr = cleanLines.join("\n");
-        if (cleanLatestExpanded.isNotEmpty) {
-          cleanContextStr +=
-              "\n\n[Most recent expanded sentence to grow from]: $cleanLatestExpanded";
-        }
+        final mishResult =
+            _buildCleanContext(removeLastSystem: true, maxMessages: 10);
+        final String cleanContextStr = mishResult['contextStr']!;
         await _handleRetryQuestion(cleanContextStr, targetLangName,
             isMisheard: true);
         return;
@@ -2522,8 +2460,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 
       // 🔁 RESTATE/GARBLED AI 질문은 그대로 두고 재청취
       //   - GARBLED 진짜 안 들림 → "다시 말해 주세요" (2회 연속이면 더 쉬운 문장 유도)
-      //   - [RESTATE] 어긋나지만 스피킹 내용 그대로 음성으로만 확인 질문 (버블 없음)
-      //     → 확인 대기 플래그를 세우고 다음 발화는 RESTATE 검사 없이 그대로 사용
+      //   - RESTATE 오프토픽 → "질문에 맞게 다시 말해 주세요" (문맥 확인 없이 동일 패턴)
       //   - 턴 카운터 원복(이번 시도 무효 → 다음 발화가 같은 턴으로 재진입)
       //   - 방금 만든 빈 HOST 버블만 제거. 이전의 좋은 맥락(SYSTEM 질문 포함)은 절대 삭제 안 함
       if (restated || garbled) {
@@ -2537,16 +2474,14 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           });
           _scrollToBottom();
         }
+        final int restateCount = ++_consecutiveRestateCount;
         String checkPhrase;
-        if (garbled) {
-          final int restateCount = ++_consecutiveRestateCount;
-          checkPhrase = restateCount >= 2
-              ? "조금 더 짧고 쉬운 문장으로 말해 주실래요?"
-              : "잘 안 들렸어요. 다시 말해 주세요.";
+        if (restateCount >= 2) {
+          checkPhrase = "조금 더 짧고 쉬운 문장으로 말해 주실래요?";
+        } else if (restated) {
+          checkPhrase = "질문에 맞게 다시 말해 주세요.";
         } else {
-          _restateConfirmPending = true;
-          final String heard = finalTranscript.trim();
-          checkPhrase = "방금, $heard, 라고 말씀하신 건가요? 맞다면 그대로 다시 한 번 말해 주세요.";
+          checkPhrase = "잘 안 들렸어요. 다시 말해 주세요.";
         }
         _ttsQueueManager.setUserTurn(false);
         _ttsQueueManager.setAiPaused(false);
@@ -2654,7 +2589,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
             ? ((_localMessages[hostIndex]['target']) ?? userTargetText)
                 .toString()
             : userTargetText;
-        final String hostExpanded = _extractExpandedSentence(hostFullTarget);
+        final String hostExpanded =
+            _expandedSentenceFromTranslation(hostFullTarget);
         final hostLineOnly = _buildHostHistoryLine(
           originalText: _hostValid
               ? ((_localMessages[hostIndex]['original']) ?? '').toString()
@@ -2838,41 +2774,13 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       _log(
           '🧠 [PIPE-05]', '유저 TTS fetch 완료. isBusy=${_ttsQueueManager.isBusy}');
 
-      // 🌱 [OVERLAP-FIX] isBusy 단독 신뢰 금지.
-      //   긴 Part2(30~50단어)에서 isBusy가 실제 재생보다 일찍 false가 되어
-      //   AI 소리가 유저 소리 종료 전에 겹치는 문제 → 단어수 기반 floor 병행 강제.
-      //   - tts-1 영어 낭독 속도 ≈ 2.2 wps
-      //   - 게이트 진입 전 이미 재생된 첫 청크(약 4단어)는 차감
-      //   - ceiling 60초 (마지막 5턴 경로와 동일 톤)
-      const double _ttsWordsPerSec = 2.2;
-      final int _userWordCount = _part2FullSentence.trim().isEmpty
-          ? 0
-          : _part2FullSentence
-              .trim()
-              .split(RegExp(r'\s+'))
-              .where((w) => w.isNotEmpty)
-              .length;
-      final int _userPlayFloorMs =
-          ((((_userWordCount - 4).clamp(0, 9999)) / _ttsWordsPerSec) * 1000)
-              .round();
-      final DateTime _userPlayWaitStart = DateTime.now();
-      _log('🧠 [PIPE-FLOOR]',
-          '유저 재생 floor=${_userPlayFloorMs}ms (words=$_userWordCount)');
-
-      waitTicks = 0;
-      while (_ttsQueueManager.isBusy ||
-          DateTime.now().difference(_userPlayWaitStart).inMilliseconds <
-              _userPlayFloorMs) {
-        await Future.delayed(const Duration(milliseconds: 50));
-        waitTicks++;
-        if (waitTicks > 1200) {
-          // 60초 타임아웃 (좀비 방지용 ceiling)
-          _log('⚠️ [PIPE-TIMEOUT]', '유저 TTS 재생 60초 초과, 강제 진행');
-          break;
-        }
-      }
+      // 🔒 [Box 7 USER-DRAIN-SIGNAL] 실제 기반 drain 게이트.
+      //   마지막 유저 청크의 마지막 샘플 재생 완료 즉시 해제한다.
+      //   추정치(wps, 단어수, 첫 청크 차감)는 제거하고 Box 7 이벤트 기반으로 기다린다.
+      _ttsQueueManager.sealUserStream();
+      await _ttsQueueManager.waitUserDrained();
       _log('🧠 [PIPE-06]',
-          '유저 TTS 재생 완료(floor 포함) → AI 큐 개방. busy=${_ttsQueueManager.isBusy}');
+          '유저 TTS 재생 완료 → AI 큐 개방. busy=${_ttsQueueManager.isBusy}');
 
       // ─────────────────────────────────────────────────────
       // STEP 6: AI 큐 개방
@@ -2971,7 +2879,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   }
 
   // Step Expand HOST 저장 payload를 sessions/chat_history에서 동일하게 유지한다.
-  String _extractExpandedSentence(String translatedText) {
+  String _expandedSentenceFromTranslation(String translatedText) {
     final parts = translatedText.split(RegExp(r'\n\s*\n'));
     if (parts.length < 2) return '';
     return parts.sublist(1).join('\n\n').trim();
@@ -2981,7 +2889,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     required String originalText,
     required String translatedText,
   }) {
-    final expandedSentence = _extractExpandedSentence(translatedText);
+    final expandedSentence = _expandedSentenceFromTranslation(translatedText);
     return {
       'role': 'HOST',
       'original_text': originalText,
@@ -3261,19 +3169,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
                   color: Colors.white70),
               onPressed: _handleAutoSaveAndExit), // 🔧 [히스토리] AutoSave 연결
           Row(children: [
-            // ── Idle pause 아이콘 (T버튼 왼쪽, 클릭 시 pause 해제) ──
-            if (_isIdlePaused)
-              GestureDetector(
-                onTap: _resetIdleTimer,
-                child: const Padding(
-                  padding: EdgeInsets.only(left: 4, right: 6),
-                  child: Icon(
-                    Icons.pause_circle_filled_rounded,
-                    color: Color(0xFFFFD54F),
-                    size: 20,
-                  ),
-                ),
-              ),
             IconButton(
               icon: Icon(
                 Icons.format_size,
@@ -3312,8 +3207,16 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
                     color: const Color(0xFF2563EB),
                     borderRadius: BorderRadius.circular(20)),
                 child: Row(children: [
-                  const Icon(Icons.timer_outlined,
-                      color: Colors.white, size: 18),
+                  ValueListenableBuilder<int>(
+                    valueListenable: BillingTicker.instance.billingState,
+                    builder: (_, s, __) => GestureDetector(
+                      onTap: s == 0 ? _resetIdleTimer : null,
+                      child: CustomPaint(
+                        size: const Size(14, 14),
+                        painter: BillingDotPainter(s),
+                      ),
+                    ),
+                  ),
                   const SizedBox(width: 6),
                   Text(
                     () {
@@ -4078,29 +3981,43 @@ class HybridTtsPlayer {
       }
       lastCacheHit = false;
       final sw = Stopwatch()..start();
-      final res = await http
-          .post(
-            Uri.parse('https://api.openai.com/v1/audio/speech'),
-            headers: {
-              'Authorization': 'Bearer $apiKey',
-              'Content-Type': 'application/json',
-            },
-            body: jsonEncode({
-              'model': 'tts-1',
-              'input': fullSentence,
-              'voice': voice,
-              'speed': 1.0,
-              'response_format': 'mp3',
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
-      if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
-        await TtsCache.put(fullSentence, voice, res.bodyBytes);
+      // Longer timeout + one retry for long full-sentence cache writes.
+      Uint8List? bytes;
+      for (int attempt = 0; attempt < 2; attempt++) {
+        try {
+          final res = await http
+              .post(
+                Uri.parse('https://api.openai.com/v1/audio/speech'),
+                headers: {
+                  'Authorization': 'Bearer $apiKey',
+                  'Content-Type': 'application/json',
+                },
+                body: jsonEncode({
+                  'model': 'tts-1',
+                  'input': fullSentence,
+                  'voice': voice,
+                  'speed': 1.0,
+                  'response_format': 'mp3',
+                }),
+              )
+              .timeout(const Duration(seconds: 25));
+          if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
+            bytes = res.bodyBytes;
+            break;
+          }
+        } catch (e) {
+          if (attempt == 0) {
+            onLog?.call('[HYB-CACHE-RETRY]', '캐시 저장 재시도(${e.runtimeType})');
+          }
+        }
+      }
+      if (bytes != null) {
+        await TtsCache.put(fullSentence, voice, bytes);
         lastCacheSaveMs = sw.elapsedMilliseconds;
-        onLog?.call('[HYB-04-SAVED]',
-            '${lastCacheSaveMs}ms (${res.bodyBytes.length}B)');
+        onLog?.call(
+            '[HYB-04-SAVED]', '${lastCacheSaveMs}ms (${bytes.length}B)');
       } else {
-        onLog?.call('[HYB-ERR]', 'API status=${res.statusCode}');
+        onLog?.call('[HYB-ERR]', 'TtsCache 저장 2회 실패 후 스킵');
       }
       sw.stop();
     } catch (e) {
@@ -4591,6 +4508,11 @@ class TtsQueueManager {
   // UI 상태 표시용 (레거시 호환)
   bool _isUserTurn = true;
 
+  // 🔒 [Box 7 USER-DRAIN-SIGNAL] 유저 큐 완전 drain 감지용
+  bool _userStreamSealed = false;
+  Completer<void>? _userDrainedCompleter;
+  bool _currentChunkIsUser = false;
+
   /// 유저 재생 중이거나 유저 큐에 남은 게 있으면 busy
   bool get isBusy =>
       _isPlaying ||
@@ -4630,6 +4552,37 @@ class TtsQueueManager {
     if (!_isPlaying) _processQueue();
   }
 
+  // 🔒 [Box 7 USER-DRAIN-SIGNAL] 유저 청크 스트림 봉인.
+  // 호출 시점 = "더 이상 유저 청크가 들어오지 않음" 선언.
+  void sealUserStream() {
+    _userStreamSealed = true;
+    if (_userQueue.isEmpty && !_currentChunkIsUser) {
+      if (_userDrainedCompleter != null &&
+          !_userDrainedCompleter!.isCompleted) {
+        _userDrainedCompleter!.complete();
+      }
+    }
+  }
+
+  // 🔒 [Box 7 USER-DRAIN-SIGNAL] 유저 큐가 완전히 비고 마지막 청크 재생이 끝날 때까지 대기.
+  Future<void> waitUserDrained({
+    Duration timeout = const Duration(seconds: 45),
+  }) async {
+    if (_userQueue.isEmpty && !_currentChunkIsUser) {
+      _userStreamSealed = false;
+      return;
+    }
+    _userDrainedCompleter ??= Completer<void>();
+    try {
+      await _userDrainedCompleter!.future.timeout(timeout);
+    } catch (_) {
+      // Timeout은 강제 진행해 호출부가 막히지 않도록 한다.
+    } finally {
+      _userDrainedCompleter = null;
+      _userStreamSealed = false;
+    }
+  }
+
   Future<void> _processQueue() async {
     if (_isPlaying) return;
     _isPlaying = true;
@@ -4642,8 +4595,10 @@ class TtsQueueManager {
       Uint8List bytes;
       if (_userQueue.isNotEmpty) {
         bytes = _userQueue.removeAt(0);
+        _currentChunkIsUser = true; // 🔒 [Box 7 USER-DRAIN-SIGNAL]
       } else if (!_aiPaused && _aiQueue.isNotEmpty) {
         bytes = _aiQueue.removeAt(0);
+        _currentChunkIsUser = false; // 🔒 [Box 7 USER-DRAIN-SIGNAL]
       } else {
         break;
       }
@@ -4664,6 +4619,15 @@ class TtsQueueManager {
           _completer!.complete();
         }
       }
+
+      // 🔒 [Box 7 USER-DRAIN-SIGNAL] 유저 청크 재생 완료 직후 sealed 상태면 drain 신호.
+      if (_currentChunkIsUser && _userStreamSealed && _userQueue.isEmpty) {
+        if (_userDrainedCompleter != null &&
+            !_userDrainedCompleter!.isCompleted) {
+          _userDrainedCompleter!.complete();
+        }
+      }
+      _currentChunkIsUser = false;
     }
 
     _isPlaying = false;
@@ -4679,6 +4643,13 @@ class TtsQueueManager {
     if (_completer != null && !_completer!.isCompleted) {
       _completer!.complete();
     }
+    // 🔒 [Box 7 USER-DRAIN-SIGNAL] drain 대기자 깨우기(deadlock 방지)
+    if (_userDrainedCompleter != null && !_userDrainedCompleter!.isCompleted) {
+      _userDrainedCompleter!.complete();
+    }
+    _userDrainedCompleter = null;
+    _userStreamSealed = false;
+    _currentChunkIsUser = false;
   }
 
   Future<void> dispose() async {
@@ -4719,6 +4690,11 @@ class ChunkedTtsFetcher {
 
   void addText(String text) {
     if (text.trim().isEmpty) return;
+    // TTS API is unreliable for punctuation-only chunks like "!" or ",".
+    if (!RegExp(r'[a-zA-Z0-9가-힣]').hasMatch(text)) {
+      onLog?.call('🔊 [TTS-SKIP]', 'punctuation-only skipped: "$text"');
+      return;
+    }
     _pendingCount++;
     final turnTag = isUser ? 'USER' : 'AI';
     onLog?.call(
@@ -4737,9 +4713,9 @@ class ChunkedTtsFetcher {
       return;
     }
 
-    // [2단계] API 호출 (타임아웃 사다리 3/5/8초, 최대 3회 시도) — TTS 지연 스파이크 대응
+    // [2단계] API 호출 (타임아웃 사다리 5/8/12초, 최대 3회 시도) — TTS 지연 스파이크 대응
     Uint8List result = Uint8List(0);
-    const List<int> timeoutLadderSec = [3, 5, 8];
+    const List<int> timeoutLadderSec = [5, 8, 12];
     for (int attempt = 0; attempt < 3; attempt++) {
       try {
         final res = await http
@@ -5058,6 +5034,7 @@ Definite [DISSATISFIED] triggers (even mild or indirect displeasure toward the q
 - Requests a different question: "다른 거 물어봐" / "다른 질문 해줘" / "질문 바꿔" / "다른 걸 물어봐줘"
 - Dismisses the question: "뭐야 그게" / "그게 뭐야" / "뭐야 이게" / "그건 좀" / "그건 아닌데" / "그건 별로야"
 - Expresses boredom or displeasure: "재미없어" / "별론데" / "별로야" / "이상하네"
+- Points out already-answered content: "아까 말했잖아" / "이미 대답했잖아" / "방금 말했는데" / "이미 얘기했어" / "그거 말했어" / "아까 대답했어" / "말했잖아" / "똑같은 질문" / "같은 걸 또 물어봐" / "already said" / "already answered" / "I already told you" / "asked that already"
 - English: "ask something else" / "change the question" / "not that question" / "different question" / "meh" / "not really" (when aimed at the question itself)
 
 DO NOT output [DISSATISFIED] for normal negative answers to the question:
@@ -5067,6 +5044,18 @@ DO NOT output [DISSATISFIED] for normal negative answers to the question:
 Key test: Is the user rejecting/evaluating the QUESTION (→ [DISSATISFIED])? Or giving a negative ANSWER to it (→ translate normally)?
 
 $correctionBlock
+
+[KOREAN BODY IDIOM GUIDE — physical, not emotional]
+Korean uses body-part expressions for PHYSICAL sensations. Never translate them as emotional/psychological states:
+- 속이 불편하다 → "my stomach feels uncomfortable" / "I have an upset stomach" (NOT "feeling uneasy")
+- 속이 편안하다 → "my stomach feels comfortable" / "it settles my stomach" (NOT "feeling at ease")
+- 속이 쓰리다 → "my stomach burns" / "I have a burning stomach" (NOT "feeling bitter")
+- 속이 더부룩하다 → "my stomach feels bloated" (NOT "feeling heavy")
+- 머리가 아프다 → "I have a headache" (NOT "it hurts my feelings")
+- 몸이 안 좋다 → "I'm not feeling well physically" / "I feel sick" (NOT "I feel bad emotionally")
+- 눈이 침침하다 → "my eyesight is blurry" (NOT "I feel gloomy")
+- 기운이 없다 → "I have no energy" / "I feel drained" (NOT "I'm unmotivated")
+Context determines: "불편하다" after a body part = physical; after 마음/기분 = emotional. Default to PHYSICAL when the body part is explicit.
 
 [CASE 1] History is empty (USER'S FIRST TURN)
 - Simply translate the user's Korean input into ONE natural English sentence.
@@ -5163,7 +5152,7 @@ Output: [GARBLED]
 - If the input has minor STT errors but the intended meaning is still clearly inferable from context, make your best interpretation and produce the normal output (keep tolerating small errors).
 - If the input is CLEAR but off-context (see [RESTATE GUARD]), output EXACTLY: [RESTATE]. If it is too GARBLED to interpret safely, output EXACTLY: [GARBLED]. Never guess and never invent content the user did not say.
 - Output [RETRY] ONLY when the user's answer shows they did not understand the AI's question itself, so re-asking the same thing would not help.
-- Output [DISSATISFIED] when the user expresses dissatisfaction, complaint, or rejection about the AI's QUESTION itself (not about the topic). Signs: "다른 질문 해줘" / "그 질문 싫어" / "질문 바꿔" / "무슨 질문이 그래" / "별로야" / "그건 좀" / "다른 거 물어봐" / "change the question" / "ask something else" / "I don't like that question". MILD signs ALSO count: "별로" / "별론데" / "아 그건 좀" / "에이" / "그런 거 말고" / "그건 없어" / "재미없어" / "이상하네" / "뭐야 그게" / "meh" / "not really" / "hmm, not that one". Even slight or indirect displeasure aimed at the QUESTION itself counts. Do NOT output [DISSATISFIED] when the user is simply answering negatively (e.g., "아니, 안 갔어" = a valid negative answer).""";
+- Output [DISSATISFIED] when the user expresses dissatisfaction, complaint, or rejection about the AI's QUESTION itself (not about the topic). Signs: "다른 질문 해줘" / "그 질문 싫어" / "질문 바꿔" / "무슨 질문이 그래" / "별로야" / "그건 좀" / "다른 거 물어봐" / "change the question" / "ask something else" / "I don't like that question". MILD signs ALSO count: "별로" / "별론데" / "아 그건 좀" / "에이" / "그런 거 말고" / "그건 없어" / "재미없어" / "이상하네" / "뭐야 그게" / "meh" / "not really" / "hmm, not that one". REPETITION COMPLAINT signs ALSO count: "아까 말했잖아" / "이미 대답했잖아" / "방금 말했는데" / "이미 얘기했어" / "똑같은 질문" / "같은 걸 또" / "already said" / "already answered" / "I already told you". Even slight or indirect displeasure aimed at the QUESTION itself counts. Do NOT output [DISSATISFIED] when the user is simply answering negatively (e.g., "아니, 안 갔어" = a valid negative answer).""";
 
       final request = http.Request(
         'POST',
@@ -5571,6 +5560,22 @@ Examples of the SHIFT you must make:
 RULE: After drafting your question, check — am I just naming their noun again (WIDER)? If yes, rewrite it to go DEEPER.
 BUT keep balance: a deeper question must still be light, answerable in 1–3 words, and its answer must still attach to the growing sentence. Never become abstract or therapy-like.
 
+[IMAGINATIVE RANGE — expand the conversation circle]
+When the user talks about X, do NOT limit your next question to X itself.
+Instead, imagine the WORLD AROUND X and pick one thread:
+- PEOPLE: Who is involved? Who introduced them to X? Who shares X with them?
+- PLACE/SETTING: Where does X happen? What makes that place matter?
+- HABIT/ROUTINE: How did X become part of their life? How often?
+- MEMORY: What first experience with X do they remember? What changed?
+- SOCIAL REACTION: How do others feel about X? Any funny or surprising reactions?
+- LIFE IMPACT: What did X change in their daily life? What would be different without it?
+
+Example — User says "I like vegetable meals":
+BAD (trapped on X): "What kind of vegetables?" / "What's your favorite vegetable dish?"
+GOOD (world around X): "Who got you into eating that way?" / "How did your friends react?" / "When did that habit start?"
+
+RULE: Before finalizing your question, check — does this question ask about X itself, or about something AROUND X? If it asks about X itself, shift to one of the threads above.
+
 [SENTENCE GROWTH LENS]
 Before finalizing your question, ask: "If the user answers this in 1–3 words, exactly where does it attach to the growing sentence?" If no clear attachment point exists, revise the question.
 
@@ -5592,7 +5597,8 @@ ${rejectedQuestion.trim().isNotEmpty ? '  BANNED QUESTION (verbatim): "${rejecte
   Rules:
   • The banned question must NEVER be repeated, rephrased, simplified, or reused in any form.
   • Do NOT ask about the same object, action, time, reason, or topic as the banned question.
-  • Choose a completely different emotional or situational angle.
+  • [AXIS SHIFT — MANDATORY] Identify the THEME AXIS of the banned question (e.g., "food preference", "physical discomfort", "daily routine"). Your replacement question must leave that axis entirely. Shift to a different dimension of the user's story: the PEOPLE involved, the PLACE or SETTING, a HABIT or ROUTINE it connects to, a MEMORY or PAST EXPERIENCE, HOW OTHERS REACT, or what CHANGE it brought to their life.
+  • Think: "What would a curious friend ask that is inspired by — but NOT about — the same subject?"
   • If the context is thin (early turns), ask about a different aspect of what the user mentioned.
   Every other rule above still applies.""" : (isRetry ? "- [RETRY] The previous question confused the user. Ask a simpler, more direct 5–8-word question." : "")}
 
@@ -5627,7 +5633,7 @@ PART 2: A natural Korean conversational translation of PART 1.""";
       request.body = jsonEncode({
         'model': 'gpt-4o-mini',
         'stream': true,
-        'temperature': 0.2,
+        'temperature': 0.45,
         'max_tokens': 300,
         'messages': [
           {'role': 'system', 'content': sysPrompt},
@@ -5743,70 +5749,6 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
   }
 
   // ==================================================================
-  // 📦 [Box 7-1-E-0] KBS 뉴스 RSS 일별 캐시 + 유저별 중복 방지
-  // ------------------------------------------------------------------
-  // 가벼운 주제만 필터링 (정치·사고·재난 제외)
-  // 하루 1회 RSS fetch 후 SharedPreferences에 캐시
-  // 유저 ID별로 출제 이력 관리 → 중복 질문 방지
-  // ==================================================================
-  static final RegExp _heavyTopicRe = RegExp(
-    r'사고|범죄|화재|총격|전쟁|폭발|폭력|사망|붕괴|재난|지진|태풍|홍수|참사|대통령|국회|선거|탄핵|부패|비리',
-    caseSensitive: false,
-  );
-
-  static Future<List<String>> _fetchKbsNewsTopics() async {
-    final prefs = await SharedPreferences.getInstance();
-    final today = DateTime.now().toIso8601String().substring(0, 10);
-    final cacheKey = 'kbs_news_$today';
-    final cached = prefs.getStringList(cacheKey);
-    if (cached != null && cached.isNotEmpty) return cached;
-
-    final results = <String>[];
-    for (final src in ['culture', 'economy', 'world', 'society']) {
-      try {
-        final res = await http
-            .get(Uri.parse('https://news.kbs.co.kr/rss/rss.do?source=$src'))
-            .timeout(const Duration(seconds: 8));
-        if (res.statusCode != 200) continue;
-        final body = utf8.decode(res.bodyBytes);
-        final re =
-            RegExp(r'<title><!\[CDATA\[(.*?)\]\]></title>', dotAll: true);
-        for (final m in re.allMatches(body).skip(1).take(8)) {
-          final title = m.group(1)?.trim() ?? '';
-          if (title.isNotEmpty && !_heavyTopicRe.hasMatch(title)) {
-            results.add(title);
-          }
-        }
-      } catch (_) {}
-    }
-    if (results.isNotEmpty) await prefs.setStringList(cacheKey, results);
-    return results;
-  }
-
-  static Future<String?> _pickUnaskedTopic(String userId) async {
-    if (userId.isEmpty) {
-      final topics = await _fetchKbsNewsTopics();
-      return topics.isNotEmpty ? topics.first : null;
-    }
-    final prefs = await SharedPreferences.getInstance();
-    final askedKey = 'asked_fallback_$userId';
-    final asked = Set<String>.from(prefs.getStringList(askedKey) ?? []);
-    final topics = await _fetchKbsNewsTopics();
-    if (topics.isEmpty) return null;
-
-    final unasked = topics.where((t) => !asked.contains(t)).toList();
-    if (unasked.isEmpty) {
-      await prefs.remove(askedKey); // 전부 소진 → 이력 초기화
-      await prefs.setStringList(askedKey, [topics.first]);
-      return topics.first;
-    }
-    final pick = unasked.first;
-    asked.add(pick);
-    await prefs.setStringList(askedKey, asked.toList());
-    return pick;
-  }
-
-  // ==================================================================
   // 📦 streamFreeTalkSeedQuestion — 프리톡 기록 기반 첫 질문 (온도 0.2)
   // ------------------------------------------------------------------
   // 유저의 과거 프리톡 발화 몇 개를 받아, 그중 한 주제로 "기본 문장(seed)"을
@@ -5904,116 +5846,6 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
         }
       }
     } catch (_) {
-    } finally {
-      client.close();
-    }
-  }
-
-  // ==================================================================
-  // 📦 [Box 7-1-E] streamOpeningFallbackQuestion — 침묵 폴백용 KBS 뉴스 질문
-  // ------------------------------------------------------------------
-  // 첫 질문에 답 없거나 망설일 때: KBS 뉴스 가벼운 주제로 의견 질문
-  // userId로 유저별 중복 방지 / 하루 1회 RSS 자동 갱신
-  // ==================================================================
-  static Stream<String> streamOpeningFallbackQuestion({
-    required String apiKey,
-    required String myTarget,
-    String myNative = '',
-    String userId = '',
-  }) async* {
-    String? newsTopic;
-    try {
-      newsTopic = await _pickUnaskedTopic(userId);
-    } catch (_) {}
-
-    final client = http.Client();
-    try {
-      final String nativeHint = myNative.isNotEmpty
-          ? 'The user is from a $myNative-speaking background.\n'
-          : '';
-      final String topicHint = newsTopic != null
-          ? 'KBS news headline (for reference only): "$newsTopic"\n'
-              'From this headline, identify ONE concrete everyday WORD — a trend, technology, activity, habit, or concept.\n'
-              'Do NOT use a proper noun, person\'s name, or political figure as the word.\n'
-              'Ask ONLY about that single word — do NOT summarize or ask judgment on the full news event.\n'
-          : 'Pick ONE simple everyday word related to a recent trend or daily life topic.\n';
-
-      final String sysPrompt = 'You are a Step Expand grammar coach.\n'
-          'The user hesitated on the opening question. You have already said "다시 질문 할께요" in Korean — '
-          'do NOT repeat any intro phrase. Jump straight into the topic.\n'
-          '\n'
-          '${topicHint}'
-          '${nativeHint}'
-          '\n'
-          '[NO PERSONAL OPINION — STRICT]\n'
-          'NEVER express your own feelings, views, or preferences in the question.\n'
-          'Your role is a neutral facilitator — you ask, the user speaks.\n'
-          'Wrong: "I think [word] is really important these days — what about you?"\n'
-          'Right: "These days, [word] keeps coming up for a lot of people. What do you think about it?"\n'
-          '\n'
-          '[OUTPUT STRUCTURE — follow exactly]\n'
-          '1. Mention the ONE chosen word in ONE short neutral sentence that states a general trend, NOT your opinion.\n'
-          '   (e.g. "These days, [word] keeps coming up." / "A lot of people have been talking about [word] lately.")\n'
-          '2. End with a simple open question inviting the user\'s view on that word only:\n'
-          '   "What do you think about [word]?" / "How do you feel about it?" / "Has [word] come up in your life?"\n'
-          '   → Do NOT describe or summarize the full news story.\n'
-          '   → Do NOT ask the user to judge or agree/disagree with a news event.\n'
-          '\n'
-          '[GRAMMAR SEED DESIGN — critical]\n'
-          'The user\'s response to your question is the SEED for sentence expansion.\n'
-          'Design the question angle so that the user\'s natural answer will contain:\n'
-          '  • A REASON (because / since) — e.g. "What do you think about [word]?" invites "I think... because..."\n'
-          '  • A PERSON or THING (who / which) — e.g. "Has [word] affected anyone you know?"\n'
-          '  • A CONDITION (if / when) — e.g. "When does [word] matter most to you?"\n'
-          'Pick the angle that best matches the chosen word so the answer seeds the richest expand chain.\n'
-          '\n'
-          '[RULES]\n'
-          '- NO intro phrase (do NOT start with "Let me ask you" or "Here\'s something").\n'
-          '- Middle-school level vocabulary — simple, natural, conversational.\n'
-          '- Light topics only: NO politics, NO accidents, NO disasters, NO crime.\n'
-          '- Output ONLY in $myTarget. No labels, no prefixes.\n'
-          '- Total output: under 45 words.';
-
-      final request = http.Request(
-        'POST',
-        Uri.parse('https://api.openai.com/v1/chat/completions'),
-      );
-      request.headers.addAll({
-        'Authorization': 'Bearer $apiKey',
-        'Content-Type': 'application/json; charset=utf-8',
-      });
-      request.body = jsonEncode({
-        'model': 'gpt-4o-mini',
-        'stream': true,
-        'temperature': 0.7,
-        'max_tokens': 70,
-        'messages': [
-          {'role': 'system', 'content': sysPrompt},
-          {
-            'role': 'user',
-            'content': 'Ask about the news topic now.',
-          },
-        ],
-      });
-      final response =
-          await client.send(request).timeout(const Duration(seconds: 20));
-      if (response.statusCode != 200) {
-        yield 'Let me ask you this. These days, more people enjoy cooking at home. What do you think?';
-        return;
-      }
-      await for (final chunk in response.stream
-          .transform(utf8.decoder)
-          .transform(const LineSplitter())) {
-        if (chunk.startsWith('data: ') && chunk != 'data: [DONE]') {
-          try {
-            final delta = jsonDecode(chunk.substring(6))['choices'][0]['delta']
-                ['content'];
-            if (delta != null) yield delta.toString();
-          } catch (_) {}
-        }
-      }
-    } catch (e) {
-      yield 'Let me ask you this. These days, more people enjoy cooking at home. What do you think?';
     } finally {
       client.close();
     }

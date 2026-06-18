@@ -5,14 +5,93 @@ cd F:\flutter_project\stealth_vox
 
 CLAUDE1.md 참고해서, 실행해 줘.
 
-
+히스토리 P3 Shadowing만 딥그램 Flux 적용✅ 가능 — 영어 에코잉 전용, 영어 free talk
 =============
-StealthVox 테스터로 참여하실 분은 구글 이메일 알려주시고, 
-아래 링크로 테스트앱 다운후 (구글 플레이 스토어는 참여한 구글 이메일로 설정되어 있어야 합니다.)
-회원가입 하시면 사용시간 10시간 부여해 드립니다. 
-(테스트 기간중 초청인대화(Duo Connect)는 초청인 G메일도 알려주셔서 등록해야 통화 하실수 있습니다.)
+내부테스트 앱 다운   https://play.google.com/apps/internaltest/4701441595486020798
+=====================
+📢 StealthVox 비공개 테스터 모집
+Google 그룹스 가입
+
+https://groups.google.com/g/stealthvox-testers
+
+※ Google 계정(Gmail)으로 로그인 후 가입해 주세요.
+
+📌 참여 방법
+1. 비공개 테스트 참여
+
+아래 링크를 통해 비공개 테스터 등록을 진행해 주세요.
+
+https://play.google.com/apps/testing/com.aienglishpractice.stealthvox
+
+※ Gmail 계정이 여러 개라면 Google Play에 로그인된 Gmail 계정으로 참여해 주세요.
+
+2. 테스터 등록
+
+"테스터 되기"를 선택한 후 Play Store에서 StealthVox를 설치해 주세요.
+
+3. 회원가입 완료
+
+앱 설치 후 회원가입을 완료해 주시면
+
+✅ 기본 무료 사용시간 10분
+
+추가로
+
+🎁 사용시간 5시간 무료 제공
+
+(운영자가 확인 후 직접 지급)
+
+📞 Duo Connect(초청 대화) 안내
+Duo Connect를 이용하려면 초청한 상대방도 비공개 테스트에 참여해야 합니다.
+필요 시 Google 그룹스 가입을 도와드리겠습니다.
+⚠️ 참고 사항
+Google Play Store 로그인 계정과 테스트 참여 계정은 동일해야 합니다.
+앱 설치만으로는 사용시간이 지급되지 않습니다.
+반드시 회원가입까지 완료해 주셔야 추가 사용시간이 지급됩니다.
+회원가입 후 운영자가 확인하여 5시간을 추가 지급해 드립니다.
+
+감사합니다.
+
+StealthVox 개발팀
+
+===========================
+구글 그룹스 등록: https://
 
 🔗 앱 다운로드 링크: `https://play.google.com/apps/testing/com.aienglishpractice.stealthvox`
+(구글 플레이스토어는 같은 구글 이메일로 설정되어 있어야 합니다.)
+
+테스트 앱 설치했고 앱 회원가입까지 하면  → Firebase users에 들어가 있으니 시간 18,000초 부여해주면 됨
+===============
+📢 StealthVox 비공개 테스터 모집
+
+Google 그룹스 가입
+https://groups.google.com/g/stealthvox-testers
+※ Google 계정(Gmail)으로 로그인 후 가입해 주세요.
+
+📌 참여 방법
+구글 그룹스 등록 후,
+1. 아래 링크를 통해 **비공개 테스터 등록**을 진행해 주세요.
+   (Gmail 계정이 여러개 있다면, Google Play 계정을 등록한 Gmail 계정으로 맞춰주세요.)
+
+[비공개 테스트 참여 링크]
+https://play.google.com/apps/testing/com.aienglishpractice.stealthvox
+
+2. "테스터 되기"를 선택한 후 Play Store에서 앱을 설치해 주세요.
+
+3. 앱 설치 후 회원가입을 완료해 주시면 무료 10분 외에 추가로 **사용시간 5시간**을 무료로 제공해 드립니다.(운영자가 확인후 직접 5시간 추가해 드림)
+
+📞 Duo Connect(초청인 대화) 기능 안내
+
+* Duo Connect를 이용하려면 초청한 상대방도 비공개 테스트에 참여해야 합니다.
+* 필요 시 Google 그룹스 등록을 도와드리겠습니다.
+
+⚠️ 참고 사항
+
+* Google Play Store에 로그인된 계정과 테스트 참여에 사용한 Gmail 계정이 동일해야 합니다.
+
+감사합니다!
+StealthVox 개발팀
+
 ==================================
 
 테스터 이메일 수집  (`https://groups.google.com/g/stealthvox-testers` 7명 이동 숙제)

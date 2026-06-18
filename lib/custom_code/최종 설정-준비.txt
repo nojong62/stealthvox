@@ -1,5 +1,7 @@
 ⚠️ 경고 2개 보이는데 (Node.js 20 deprecated 2026-10-30, firebase-functions SDK 4.9.0 outdated) — 이건 🟢 NICE TO HAVE 항목이라 지금은 무시해도 됩니다. 10월 전에만 처리하면 됩니다.
 
+Deepgram Flux 한국어 지원 추가 시점 모니터링 (Japanese가 들어간 걸 보면 Korean도 머지않아 추가될 가능성) ,영어 프리톡 신설/ 일본어 판 Flux로 만들기
+
 "테스트하고 싶은 분은 구글 이메일 주소를 DM으로 남겨주세요"
 테스트앱 다운로드 https://play.google.com/apps/internaltest/4701441595486020798
 
@@ -27,6 +29,14 @@ Read BILLING_TIERED_RATE.md and start with Step A.
 - Node.js v24.15.0 (Cloud Functions는 nodejs20 런타임)
 - Git history에 8+ commit 기록 (단계별 롤백 가능)
 =====================
+관리자가 통합 로그를 보는 법
+
+관리자 이메일(nisiekorea@gmail.com)로 앱 로그인
+Store 화면으로 진입
+화면 맨 아래 버전 텍스트(예: v1.0.0 (5))를 길게 누름
+관리자면 통합 로그 시트가 열림 — 일반 유저는 길게 눌러도 아무 반응 없음
+우측 상단 📋 전체 복사 → 카톡·이메일에 붙여넣어 전송, 🗑 비우기로 초기화
+=========
 첫 결제 후 Firestore의 users/{uid}/purchases 컬렉션에 들어가서:
 transaction_id 필드가 잘 들어가 있는지
 product_id, seconds_added, purchased_at이 정상인지 확인
@@ -43,18 +53,36 @@ Firebase Console로 이동
 "Create Index" 또는 "색인 만들기" 버튼 클릭
 1~2분 기다리면 인덱스 생성 완료
 그 후로는 결제 정상 작동
-===============파일 분리
-UI와 로직의 분리: 화면을 그리는 코드와 데이터(Firestore, API)를 처리하는 코드를 별도 파일로 뗍니다.
+===============백엔드 서버에서 할 토큰 검증 로직
+## Play Integrity API 토큰 검증 구조
 
-컴포넌트화: _buildHeader, _buildMenu 같은 함수들을 별도의 커스텀 위젯 파일로 독립시킵니다.
+**직접 구축해야 합니다** — 단, Google이 검증 API를 제공해줘서 로직 자체는 단순합니다.
+### 흐름 구조
 
-공통 유틸리티 추출: API 호출(OpenAI, Deepgram) 로직은 모든 모드에서 공통으로 쓰므로 api_service.dart 하나에 모아 관리합니다.
+```
+앱(Flutter) → Google 서버 → 토큰 발급
+     ↓
+개발자 백엔드(Cloud Functions) → Google API로 토큰 검증
+     ↓
+결과 반환 → 앱에서 허용/차단 처리
+```
 
-UI 담당 파일: 화면 레이아웃만 담당 (예: lobby_view.dart)
+---
 
-API 담당 파일: OpenAI, Deepgram 통신만 모아둠 (예: ai_service.dart)
+### 역할 분담
 
-데이터 담당 파일: Firestore 저장/읽기 로직 (예: db_service.dart)
+| 주체 | 역할 |
+|------|------|
+| **Google** | 토큰 생성 API, 토큰 검증 API 제공 |
+| **개발자 (Cloud Functions)** | 검증 요청 보내고 결과 해석하는 로직 작성 |
+| **Flutter 앱** | 토큰 요청 → 백엔드로 전송 |
+
+### StealthVox 기준 체감 난이도
+
+StealthVox는 이미 **Cloud Functions 인프라가 갖춰져 있어서** 추가 서버 구축 없이 함수 하나만 추가하면 됩니다. `revenueCatWebhook`이나 `claimWelcomeBonus` 같은 기존 패턴 그대로 적용 가능.
+### 지금 당장 필요한가?
+
+런칭 초기엔 **불필요**합니다. 크레딧 조작 시도나 비정상 사용 패턴이 실제로 나타날 때 추가하는 게 현실적입니다. Firestore 보안 규칙 강화가 더 우선순위가 높습니다.
 ==============================
 firebase 보안 규칙 - 최종 수정
 

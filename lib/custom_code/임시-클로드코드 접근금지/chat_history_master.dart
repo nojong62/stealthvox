@@ -124,6 +124,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   List<Map<String, dynamic>> _stepExpandTurns = [];
   // P1/P2 "Please try again" 힌트 표시 여부
   bool _showRetryHint = false;
+  int _turnPracticeRetryCount = 0;
 
   // 🆕 [P2-INDICATOR] AI 청크 발화 중 여부 (인디케이터 빛남용)
   bool _aiChunkPlaying = false;
@@ -704,6 +705,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         setState(() {
           currentIndex = next;
           _tutorCurrentIdx = next;
+          _turnPracticeRetryCount = 0;
+          _showRetryHint = false;
         });
         // 🆕 [BOX-34] 완료: 자동 종료 대신 완료 화면 표시
         WidgetsBinding.instance.addPostFrameCallback(
@@ -715,6 +718,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       setState(() {
         currentIndex = next;
         _tutorCurrentIdx = next;
+        _turnPracticeRetryCount = 0;
+        _showRetryHint = false;
       });
     WidgetsBinding.instance
         .addPostFrameCallback((_) => _scrollPracticeToIndex(next));
@@ -758,13 +763,28 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // 🔧 [v3.7] TtsCache 우선 조회 → MISS 시 API 호출 후 캐시 저장
   Future<void> _playSmartAudio(String text) async {
     _resumeHistoryFromUserAction();
-    if (_apiKey.isEmpty || text.trim().isEmpty) return;
+    text = text.trim();
+    if (text.isEmpty) {
+      if (mounted && isPracticeMode) {
+        setState(() => _tutorAiSpeaking = false);
+        _nextTurn();
+      }
+      return;
+    }
     try {
       Uint8List? audio = await TtsCache.get(text, 'nova');
       if (audio != null) {
-        _debugLogs += "💾 [캐시 HIT-TTS공유] _playSmartAudio\n";
+        _debugLogs += "💾 [캐시 HIT-TTS공유] _playSmartAudio apiKeyEmpty=${_apiKey.isEmpty}\n";
       } else {
         _debugLogs += "🌐 [캐시 MISS→API] _playSmartAudio\n";
+        if (_apiKey.isEmpty) {
+          _debugLogs += "⚠️ [TTS fallback] API key empty, cache MISS → next turn\n";
+          if (mounted && isPracticeMode) {
+            setState(() => _tutorAiSpeaking = false);
+            _nextTurn();
+          }
+          return;
+        }
         audio = await _fetchOpenAITTS(text, 1.0, 'nova');
         if (audio != null) {
           TtsCache.put(text, 'nova', audio);
@@ -779,11 +799,16 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         }
         await audioPlayer.play(BytesSource(audio));
       } else {
+        if (mounted) setState(() => _tutorAiSpeaking = false);
         _nextTurn();
       }
     } catch (e) {
       debugPrint("[playSmartAudio] $e");
-      if (mounted && isPracticeMode) _nextTurn();
+      _debugLogs += "💥 [TTS fallback] _playSmartAudio error=$e → next turn\n";
+      if (mounted && isPracticeMode) {
+        setState(() => _tutorAiSpeaking = false);
+        _nextTurn();
+      }
     }
   }
 
@@ -874,6 +899,110 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       });
   }
 
+  String _normalizePracticeMatchText(String text) {
+    var normalized = text
+        .toLowerCase()
+        .replaceAll(RegExp(r"[’`´]"), "'")
+        .replaceAll(RegExp(r"\bi'm\b"), "i am")
+        .replaceAll(RegExp(r"\byou're\b"), "you are")
+        .replaceAll(RegExp(r"\bwe're\b"), "we are")
+        .replaceAll(RegExp(r"\bthey're\b"), "they are")
+        .replaceAll(RegExp(r"\bhe's\b"), "he is")
+        .replaceAll(RegExp(r"\bshe's\b"), "she is")
+        .replaceAll(RegExp(r"\bit's\b"), "it is")
+        .replaceAll(RegExp(r"\bdon't\b"), "do not")
+        .replaceAll(RegExp(r"\bdoesn't\b"), "does not")
+        .replaceAll(RegExp(r"\bdidn't\b"), "did not")
+        .replaceAll(RegExp(r"\bcan't\b"), "cannot")
+        .replaceAll(RegExp(r"\bcannot\b"), "can not")
+        .replaceAll(RegExp(r"\bwon't\b"), "will not")
+        .replaceAll(RegExp(r"\bwouldn't\b"), "would not")
+        .replaceAll(RegExp(r"\bcouldn't\b"), "could not")
+        .replaceAll(RegExp(r"\bshouldn't\b"), "should not")
+        .replaceAll(RegExp(r"\bisn't\b"), "is not")
+        .replaceAll(RegExp(r"\baren't\b"), "are not")
+        .replaceAll(RegExp(r"\bwasn't\b"), "was not")
+        .replaceAll(RegExp(r"\bweren't\b"), "were not")
+        .replaceAll(RegExp(r"\bi've\b"), "i have")
+        .replaceAll(RegExp(r"\byou've\b"), "you have")
+        .replaceAll(RegExp(r"\bi'll\b"), "i will")
+        .replaceAll(RegExp(r"\byou'll\b"), "you will")
+        .replaceAll(RegExp(r"\bi'd\b"), "i would")
+        .replaceAll(RegExp(r"\byou'd\b"), "you would");
+    normalized = normalized.replaceAll(RegExp(r"[^a-z0-9\s]"), " ");
+    return normalized.replaceAll(RegExp(r"\s+"), " ").trim();
+  }
+
+  Set<String> _practiceMatchWords(String text) {
+    const weakWords = {'a', 'the', 'to', 'of', 'in', 'on'};
+    return _normalizePracticeMatchText(text)
+        .split(' ')
+        .where((word) => word.length > 1 && !weakWords.contains(word))
+        .toSet();
+  }
+
+  String _practicePhoneticKey(String word) {
+    return word
+        .replaceAll('th', 't')
+        .replaceAll(RegExp(r'[rl]'), 'l')
+        .replaceAll(RegExp(r'[bv]'), 'b')
+        .replaceAll(RegExp(r'[pf]'), 'p')
+        .replaceAll(RegExp(r'[tds]'), 't')
+        .replaceAll(RegExp(r'[zj]'), 'j');
+  }
+
+  bool _practiceWordsMatch(String target, String spoken) {
+    if (target == spoken) return true;
+    if ((target.length - spoken.length).abs() > 2) return false;
+    return _practicePhoneticKey(target) == _practicePhoneticKey(spoken);
+  }
+
+  double _practiceSimilarity(Set<String> targetWords, Set<String> spokenWords) {
+    if (targetWords.isEmpty || spokenWords.isEmpty) return 0.0;
+    var matched = 0;
+    for (final target in targetWords) {
+      if (spokenWords.any((spoken) => _practiceWordsMatch(target, spoken))) {
+        matched++;
+      }
+    }
+    return matched / targetWords.length;
+  }
+
+  Future<void> _playRetryPrompt() async {
+    const prompt = 'Please try again';
+    try {
+      Uint8List? audio = await TtsCache.get(prompt, 'nova');
+      if (audio != null) {
+        _debugLogs += "💾 [캐시 HIT-TTS공유] retry prompt\n";
+      } else if (_apiKey.isNotEmpty) {
+        _debugLogs += "🌐 [캐시 MISS→API] retry prompt\n";
+        audio = await _fetchOpenAITTS(prompt, 1.0, 'nova');
+        if (audio != null) TtsCache.put(prompt, 'nova', audio);
+      } else {
+        _debugLogs += "⚠️ [retry prompt] cache MISS + API key empty → audio skipped\n";
+      }
+      if (audio == null || !mounted || !isPracticeMode) return;
+      final player = AudioPlayer();
+      final completer = Completer<void>();
+      late StreamSubscription sub;
+      sub = player.onPlayerComplete.listen((_) {
+        if (!completer.isCompleted) completer.complete();
+        sub.cancel();
+      });
+      try {
+        await player.play(BytesSource(audio));
+        await completer.future
+            .timeout(const Duration(milliseconds: 1800), onTimeout: () {});
+      } finally {
+        sub.cancel();
+        await player.dispose();
+      }
+    } catch (e) {
+      debugPrint("[playRetryPrompt] $e");
+      _debugLogs += "💥 [retry prompt] audio failed: $e\n";
+    }
+  }
+
   Future<void> _processAutoVADRecording(String path) async {
     if (!mounted || !isPracticeMode || currentIndex >= _tutorLines.length)
       return;
@@ -890,40 +1019,57 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       if (!mounted || !isPracticeMode) return;
       if (streamed.statusCode == 200) {
         final transcript = (jsonDecode(body)['text'] as String? ?? '').trim();
-        final tWords = targetText
-            .toLowerCase()
-            .split(RegExp(r'\W+'))
-            .where((w) => w.length > 1)
-            .toSet();
-        final sWords = transcript
-            .toLowerCase()
-            .split(RegExp(r'\W+'))
-            .where((w) => w.length > 1)
-            .toSet();
-        final similarity = tWords.isEmpty
-            ? 1.0
-            : tWords.intersection(sWords).length / tWords.length;
-        if (similarity >= 0.5) {
+        final tWords = _practiceMatchWords(targetText);
+        final sWords = _practiceMatchWords(transcript);
+        final similarity = _practiceSimilarity(tWords, sWords);
+        final pass = transcript.isNotEmpty && sWords.isNotEmpty && similarity >= 0.5;
+        _debugLogs +=
+            "🎙️ [Practice STT] phase=$_phase index=$currentIndex\n"
+            "targetText=$targetText\n"
+            "transcript=$transcript\n"
+            "targetWords=${tWords.join(',')}\n"
+            "spokenWords=${sWords.join(',')}\n"
+            "similarity=${similarity.toStringAsFixed(2)}\n"
+            "retryCount=$_turnPracticeRetryCount\n"
+            "result=${pass ? 'pass' : 'fail'}\n";
+        if (pass) {
+          _turnPracticeRetryCount = 0;
           // 🆕 [BOX-34] 유저 녹음 경로 캐시
           if (currentIndex < _tutorLines.length) {
             _tutorLines[currentIndex]['user_record_path'] = path;
           }
           _nextTurn();
         } else {
-          if ((_phase == ShadowingPhase.part1Practice ||
+          _turnPracticeRetryCount++;
+          final exceeded = _turnPracticeRetryCount >= 3;
+          _debugLogs += exceeded
+              ? "⚠️ [Practice STT] retry count exceeded → force next turn\n"
+              : "🔁 [Practice STT] retry count=$_turnPracticeRetryCount → retry recording\n";
+          if ((_phase == ShadowingPhase.turnPractice ||
+                  _phase == ShadowingPhase.part1Practice ||
                   _phase == ShadowingPhase.part2Practice) &&
               mounted) {
             setState(() => _showRetryHint = true);
-            await Future.delayed(const Duration(milliseconds: 1800));
+            await _playRetryPrompt();
+            await Future.delayed(const Duration(milliseconds: 1200));
             if (mounted) setState(() => _showRetryHint = false);
           }
-          if (isPracticeMode && !isPaused) _startAutoVADRecording();
+          if (!mounted || !isPracticeMode || isPaused) return;
+          if (exceeded) {
+            _turnPracticeRetryCount = 0;
+            _nextTurn();
+          } else {
+            _startAutoVADRecording();
+          }
         }
       } else {
+        _debugLogs +=
+            "⚠️ [Practice STT] status=${streamed.statusCode} body=$body → retry recording\n";
         if (isPracticeMode && !isPaused) _startAutoVADRecording();
       }
     } catch (e) {
       debugPrint("[processAutoVADRecording] $e");
+      _debugLogs += "💥 [Practice STT] exception=$e → retry recording\n";
       if (mounted && isPracticeMode && !isPaused) _startAutoVADRecording();
     }
   }
@@ -1662,7 +1808,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
 
       _dgSocket = await WebSocket.connect(
         'wss://api.deepgram.com/v1/listen'
-        '?model=nova-2'
+        '?model=nova-3'
         '&language=en-US'
         '&encoding=linear16'
         '&sample_rate=16000'
@@ -3123,19 +3269,19 @@ RULES — follow exactly:
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          // ── Idle pause 아이콘 (T버튼 왼쪽, 클릭 시 pause 해제) ──
-          if (_isIdlePaused)
-            GestureDetector(
-              onTap: _resetIdleTimer,
-              child: const Padding(
-                padding: EdgeInsets.only(left: 4, right: 6),
-                child: Icon(
-                  Icons.pause_circle_filled_rounded,
-                  color: Color(0xFFFFD54F),
-                  size: 20,
+          ValueListenableBuilder<int>(
+            valueListenable: BillingTicker.instance.billingState,
+            builder: (_, s, __) => GestureDetector(
+              onTap: s == 0 ? _resetIdleTimer : null,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 4, right: 6),
+                child: CustomPaint(
+                  size: const Size(16, 16),
+                  painter: BillingDotPainter(s),
                 ),
               ),
             ),
+          ),
           IconButton(
             icon: Icon(
               Icons.format_size,
@@ -4210,10 +4356,14 @@ RULES — follow exactly:
   }
 
   // 📦 [BOX-32: 역할 스왑 - 동적 판정 헬퍼]
-  // 원래 line.role을 _swapRoles 값에 따라 동적으로 뒤집어 반환.
+  // 일반 History Practice는 HOST=사용자, SYSTEM=AI 기준으로 판정하고,
+  // Step Expand P1/P2는 생성된 _tutorLines 구조(HOST=AI)를 유지한다.
   bool _isAiTurn(Map<String, dynamic> line) {
-    final original = (line['role'] as String) == 'HOST';
-    return _swapRoles ? !original : original;
+    final role = line['role'] as String;
+    if (_phase == ShadowingPhase.turnPractice) {
+      return _swapRoles ? role == 'HOST' : role == 'SYSTEM';
+    }
+    return role == 'HOST';
   }
 
   // 📦 [BOX-33: 유저 재녹음 핸들러]
@@ -4449,6 +4599,20 @@ RULES — follow exactly:
                           ),
                         ),
                       ],
+                    ),
+                  ),
+                  // 빌링 상태 인디케이터
+                  ValueListenableBuilder<int>(
+                    valueListenable: BillingTicker.instance.billingState,
+                    builder: (_, s, __) => GestureDetector(
+                      onTap: s == 0 ? _resetIdleTimer : null,
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 4, right: 6),
+                        child: CustomPaint(
+                          size: const Size(16, 16),
+                          painter: BillingDotPainter(s),
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -5336,6 +5500,20 @@ RULES — follow exactly:
                             fontSize: 17,
                             fontWeight: FontWeight.bold,
                           ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  // 빌링 상태 인디케이터
+                  ValueListenableBuilder<int>(
+                    valueListenable: BillingTicker.instance.billingState,
+                    builder: (_, s, __) => GestureDetector(
+                      onTap: s == 0 ? _resetIdleTimer : null,
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 4, right: 6),
+                        child: CustomPaint(
+                          size: const Size(16, 16),
+                          painter: BillingDotPainter(s),
                         ),
                       ),
                     ),

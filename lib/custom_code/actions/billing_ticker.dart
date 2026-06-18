@@ -101,6 +101,7 @@ class BillingTicker with WidgetsBindingObserver {
       _billingLogs.removeRange(_kMaxLogs, _billingLogs.length);
     }
     debugPrint(msg);
+    AppLogLedger.instance.add('BILLING', msg);
   }
 
   /// BILLING DEBUG LOG 전체 목록 (최신순)
@@ -341,8 +342,8 @@ class BillingTicker with WidgetsBindingObserver {
 // BillingDotPainter (과금 상태 인디케이터 아이콘)
 // =============================================================================
 // state 0: paused - green outline + gray core
-// state 1: quarter rate - dark core + 1/4 green pie
-// state 2: full rate - solid green
+// state 1: billing active - solid green
+// state 2: billing active - solid green
 
 class BillingDotPainter extends CustomPainter {
   final int state;
@@ -350,8 +351,6 @@ class BillingDotPainter extends CustomPainter {
 
   static const _green = Color(0xFF34D399);
   static const _gray = Color(0xFF4B5563);
-  static const _dark = Color(0xFF1E293B);
-  static const _border = Color(0xFF475569);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -359,30 +358,9 @@ class BillingDotPainter extends CustomPainter {
     final r = size.shortestSide / 2;
 
     switch (state) {
+      case 1:
       case 2:
         canvas.drawCircle(c, r, Paint()..color = _green);
-        break;
-      case 1:
-        canvas.drawCircle(c, r, Paint()..color = _dark);
-        final path = Path()
-          ..moveTo(c.dx, c.dy)
-          ..lineTo(c.dx, c.dy - r)
-          ..arcTo(
-            Rect.fromCircle(center: c, radius: r),
-            -1.5707963,
-            1.5707963,
-            false,
-          )
-          ..close();
-        canvas.drawPath(path, Paint()..color = _green);
-        canvas.drawCircle(
-          c,
-          r,
-          Paint()
-            ..color = _border
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 0.5,
-        );
         break;
       default:
         canvas.drawCircle(c, r * 0.75, Paint()..color = _gray);
@@ -401,4 +379,29 @@ class BillingDotPainter extends CustomPainter {
   @override
   bool shouldRepaint(BillingDotPainter oldDelegate) =>
       oldDelegate.state != state;
+}
+
+// =============================================================================
+// AppLogLedger (global debug log collector for admin-only inspection)
+// =============================================================================
+class AppLogLedger {
+  static final AppLogLedger instance = AppLogLedger._();
+  AppLogLedger._();
+
+  static const int _kMax = 1000;
+  final List<String> _lines = [];
+
+  void add(String tag, String message) {
+    final ts = DateTime.now().toIso8601String().substring(11, 23);
+    _lines.add('[$ts] [$tag] $message');
+    if (_lines.length > _kMax) {
+      _lines.removeRange(0, _lines.length - _kMax);
+    }
+  }
+
+  List<String> get lines => List.unmodifiable(_lines);
+
+  String get joined => _lines.join('\n');
+
+  void clear() => _lines.clear();
 }

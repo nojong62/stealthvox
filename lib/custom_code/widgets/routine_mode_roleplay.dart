@@ -93,6 +93,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     final line = '[$ts] $tag $msg';
     print(line);
     _debugLogs.add(line);
+    AppLogLedger.instance.add('ROLEPLAY', '$tag $msg');
     if (_debugLogs.length > 500) {
       _debugLogs.removeRange(0, 50);
     }
@@ -440,7 +441,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   }
 
   Future<void> _initPermissions() async {
-    await [Permission.microphone, Permission.storage].request();
+    await [Permission.microphone].request();
   }
 
   Future<void> _fetchKeysAndInit() async {
@@ -650,14 +651,36 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 // ====================================================================
 // 📦 [Box 5: Deepgram + Relay Pipeline] ← 통신로직 박스코드와 완전 일치
 // ====================================================================
+  // [텔레프롬프터 v1] 현재 버블을 화면 중앙(0.45)으로 부드럽게 이동.
+  //   텍스트 길이 기반 동적 duration: 짧으면 느긋(700ms), 길면 빠르게(150ms).
+  //   key/context 미확보 시 기존 maxScrollExtent fallback.
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        // 첫 메시지(오프너)일 때는 상단 고정 → 시작 대사 전체가 보이게
-        if (_localMessages.length <= 1) return;
-        _scrollController.animateTo(_scrollController.position.maxScrollExtent,
-            duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+      if (!_scrollController.hasClients) return;
+      if (_localMessages.length <= 1) return;
+
+      final lastIdx = _localMessages.length - 1;
+      final key = _itemKeys[lastIdx];
+      final ctx = key?.currentContext;
+
+      if (ctx == null) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+        return;
       }
+
+      final text = (_localMessages[lastIdx]['target'] ?? '').toString();
+      final ms = (800 - text.length * 3).clamp(150, 700);
+
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.45,
+        duration: Duration(milliseconds: ms),
+        curve: Curves.easeOut,
+      );
     });
   }
 

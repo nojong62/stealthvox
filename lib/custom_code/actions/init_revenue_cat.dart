@@ -17,7 +17,7 @@ Future initRevenueCat() async {
   final String androidApiKey = 'goog_XfTPcusZVFeDsZEkFHYiFgUUUIK';
 
   if (Platform.isAndroid) {
-    await Purchases.setLogLevel(LogLevel.debug);
+    await Purchases.setLogLevel(LogLevel.error);
     PurchasesConfiguration configuration =
         PurchasesConfiguration(androidApiKey);
     await Purchases.configure(configuration);

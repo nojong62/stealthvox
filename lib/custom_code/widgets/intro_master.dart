@@ -12,7 +12,6 @@ import 'package:flutter/material.dart';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:appsflyer_sdk/appsflyer_sdk.dart';
 import 'dart:async';
 import 'dart:io';
 import 'package:android_id/android_id.dart';
@@ -60,8 +59,19 @@ class _IntroMasterState extends State<IntroMaster> {
     super.initState();
     _emailFocusNode.addListener(_onFocusChange);
     _passwordFocusNode.addListener(_onFocusChange);
+    AppsFlyerManager.duoInviteSignal.addListener(_onDuoInviteSignal);
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkEntryStatus());
     _initPromoPopup();
+  }
+
+  void _onDuoInviteSignal() {
+    if (!mounted) return;
+    if (FFAppState().isGuestSession &&
+        FFAppState().pendingInviteType == 'duo' &&
+        FFAppState().duoRoomId.isNotEmpty) {
+      debugPrint('[Intro] duoInviteSignal - routing to StealthRoom');
+      context.pushReplacementNamed('StealthRoom');
+    }
   }
 
   Future<void> _initPromoPopup() async {
@@ -109,6 +119,7 @@ class _IntroMasterState extends State<IntroMaster> {
 
   @override
   void dispose() {
+    AppsFlyerManager.duoInviteSignal.removeListener(_onDuoInviteSignal);
     _promoFadeTimer?.cancel();
     _promoRemoveTimer?.cancel();
     _scrollController.dispose();
@@ -120,7 +131,7 @@ class _IntroMasterState extends State<IntroMaster> {
   }
 
   Future<void> _checkEntryStatus() async {
-    // 1순위: AppsFlyer Duo guest invite pending — 로그인 없이 StealthRoom으로
+    // 1순위: FFAppState에 pending invite가 있으면 바로 StealthRoom
     debugPrint(
         '[Intro] isGuestSession=${FFAppState().isGuestSession}, pendingInviteType=${FFAppState().pendingInviteType}, duoRoomId=${FFAppState().duoRoomId}');
     if (FFAppState().isGuestSession &&
@@ -130,90 +141,23 @@ class _IntroMasterState extends State<IntroMaster> {
       if (mounted) context.pushReplacementNamed('StealthRoom');
       return;
     }
-    // 2순위: 이미 로그인된 회원이면 로비로 이동 (로비에서 AppsFlyer 초기화)
+    // 2순위: 항상 AppsFlyer 초기화 (로그인 여부와 무관하게 딥링크 콜백 등록)
+    await _initAppsFlyer();
+    if (!mounted) return;
+    // 3순위: 이미 로그인된 회원이면 로비로 이동
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       context.goNamed('Lobby');
       return;
     }
-    // 3순위: 비회원 첫 실행: Duo 초대 딥링크 수신을 위해 AppsFlyer 초기화
-    _initAppsFlyer();
+    // 4순위: 비회원은 Intro에서 로그인 가능 상태로 대기
   }
 
   Future<void> _initAppsFlyer() async {
-    // AppsFlyerManager의 static _isInitialized로 중복 초기화 방지
-    // 이미 초기화된 경우 콜백만 현재 화면(IntroMaster)으로 교체됨
     await AppsFlyerManager.initialize(
       devKey: 'SQUmDTB2VzuPjrJGiy5SSC',
       appId: 'com.aienglishpractice.stealthvox',
-      onDeepLink: (params) {
-        if (mounted) _handleInviteDeepLink(params);
-      },
     );
-  }
-
-  Future<void> _handleInviteDeepLink(Map<String, dynamic> params) async {
-    Map<String, dynamic> deepLinkData = {};
-    if (params['deepLink'] is String) {
-      try {
-        deepLinkData =
-            jsonDecode(params['deepLink'] as String) as Map<String, dynamic>;
-      } catch (_) {}
-    } else if (params['deepLink'] is Map) {
-      deepLinkData = Map<String, dynamic>.from(params['deepLink'] as Map);
-    }
-
-    final String? deepLinkValue = params['deep_link_value']?.toString() ??
-        deepLinkData['deep_link_value']?.toString();
-
-    if (deepLinkValue != 'duo_chat') return;
-
-    final String? inviterId = params['deep_link_sub1']?.toString() ??
-        deepLinkData['deep_link_sub1']?.toString() ??
-        params['inviter_id']?.toString() ??
-        deepLinkData['inviter_id']?.toString() ??
-        params['inviterId']?.toString() ??
-        params['af_sub1']?.toString();
-
-    final String? roomId = params['deep_link_sub2']?.toString() ??
-        deepLinkData['deep_link_sub2']?.toString() ??
-        params['room_id']?.toString() ??
-        deepLinkData['room_id']?.toString() ??
-        params['duo_room_id']?.toString() ??
-        deepLinkData['duo_room_id']?.toString() ??
-        params['duoRoomId']?.toString() ??
-        deepLinkData['duoRoomId']?.toString() ??
-        params['roomId']?.toString() ??
-        params['af_sub2']?.toString();
-
-    if (inviterId == null ||
-        inviterId.isEmpty ||
-        roomId == null ||
-        roomId.isEmpty) {
-      debugPrint('[IntroMaster] DeepLink: missing parameters');
-      return;
-    }
-
-    try {
-      if (FirebaseAuth.instance.currentUser == null) {
-        await FirebaseAuth.instance.signInAnonymously();
-        if (!mounted) return;
-      }
-
-      FFAppState().isGuestSession = true;
-      FFAppState().inviterUid = inviterId;
-      FFAppState().duoRoomId = roomId;
-      FFAppState().pendingInviteType = 'duo';
-      FFAppState().update(() {});
-
-      if (!mounted) return;
-      debugPrint('[IntroMaster] routing to StealthRoom for Duo invite');
-      context.pushReplacementNamed('StealthRoom');
-    } on FirebaseAuthException catch (e) {
-      debugPrint('[IntroMaster] Auth error: $e');
-    } catch (e) {
-      debugPrint('[IntroMaster] DeepLink error: $e');
-    }
   }
 
   Future<void> _handleAuth() async {
@@ -393,7 +337,7 @@ class _IntroMasterState extends State<IntroMaster> {
             "• [Step Expand] 짧은 기초 문장에서 시작해, AI의 유도에 따라 고급 문법을 더하며 원어민처럼 유창하고 긴 문장을 완성하세요.\n\n"
             "3. 스터디 룸 (History & Practice) 📚\n"
             "• 이전 대화를 복습하고 발음 교정 및 섀도잉 훈련을 진행합니다.\n"
-            "• 🔥 꿀팁: 스터디룸에서 연습할 때는 가격의 25%만 차감됩니다! (동일 비용으로 무려 4배 더 오래 훈련 가능)\n\n"
+            "• 스터디룸의 일부 메뉴는 가격의 25%만 차감됩니다. (동일 비용으로 4배 더 오래 훈련 가능)\n\n"
             "4. 💎 스토어: 합리적인 사용량 비례 과금\n"
             "StealthVox은 사용자가 딱 사용한 만큼만 최소 시간 단위로 과금되어 비용 부담이 없습니다!\n"
             "• ⏸️ Auto Pause: 60초 이상 반응이 없으면 자동으로 일시정지되어 과금이 멈춥니다. 다시 말을 시작하면 자동으로 재개됩니다.",
@@ -597,146 +541,146 @@ class _IntroMasterState extends State<IntroMaster> {
             child: GestureDetector(
               onTap: _dismissPromo,
               child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 36),
-            padding: const EdgeInsets.fromLTRB(28, 28, 28, 24),
-            decoration: BoxDecoration(
-              color: const Color(0xFF161616),
-              borderRadius: BorderRadius.circular(28),
-              border: Border.all(
-                color: Colors.amber.withValues(alpha: 0.55),
-                width: 1.5,
+                margin: const EdgeInsets.symmetric(horizontal: 36),
+                padding: const EdgeInsets.fromLTRB(28, 28, 28, 24),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF161616),
+                  borderRadius: BorderRadius.circular(28),
+                  border: Border.all(
+                    color: Colors.amber.withValues(alpha: 0.55),
+                    width: 1.5,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.amber.withValues(alpha: 0.20),
+                      blurRadius: 48,
+                      spreadRadius: 6,
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // ── NEW MEMBER badge ──
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: Colors.amber,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        'NEW MEMBER',
+                        style: GoogleFonts.orbitron(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black,
+                          letterSpacing: 2.5,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 22),
+                    // ── Gift icon ──
+                    Container(
+                      width: 72,
+                      height: 72,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.amber.withValues(alpha: 0.10),
+                        border: Border.all(
+                          color: Colors.amber.withValues(alpha: 0.35),
+                          width: 1.2,
+                        ),
+                      ),
+                      child: const Icon(Icons.card_giftcard_rounded,
+                          size: 34, color: Colors.amber),
+                    ),
+                    const SizedBox(height: 20),
+                    // ── FREE / 10분 / TRIAL ──
+                    Text(
+                      'FREE',
+                      style: GoogleFonts.orbitron(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white38,
+                        letterSpacing: 5,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    ShaderMask(
+                      shaderCallback: (bounds) => const LinearGradient(
+                        colors: [Color(0xFFFFD740), Color(0xFFFFA000)],
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                      ).createShader(bounds),
+                      child: Text(
+                        '10분',
+                        style: GoogleFonts.orbitron(
+                          fontSize: 60,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          height: 1.05,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'TRIAL',
+                      style: GoogleFonts.orbitron(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white38,
+                        letterSpacing: 5,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      '신규 회원가입 즉시 지급',
+                      style: GoogleFonts.roboto(
+                        fontSize: 13,
+                        color: Colors.white60,
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    // ── 5초 countdown bar ──
+                    TweenAnimationBuilder<double>(
+                      tween: Tween(begin: 1.0, end: 0.0),
+                      duration: const Duration(milliseconds: 5000),
+                      builder: (context, value, _) {
+                        final secLeft = (value * 5).ceil();
+                        return Column(
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(4),
+                              child: LinearProgressIndicator(
+                                value: value,
+                                minHeight: 3,
+                                backgroundColor:
+                                    Colors.white.withValues(alpha: 0.08),
+                                valueColor:
+                                    const AlwaysStoppedAnimation(Colors.amber),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              '$secLeft초 후 사라집니다  •  탭하면 닫힘',
+                              style: const TextStyle(
+                                  color: Colors.white30, fontSize: 11),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ],
+                ),
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.amber.withValues(alpha: 0.20),
-                  blurRadius: 48,
-                  spreadRadius: 6,
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // ── NEW MEMBER badge ──
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: Colors.amber,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    'NEW MEMBER',
-                    style: GoogleFonts.orbitron(
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black,
-                      letterSpacing: 2.5,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 22),
-                // ── Gift icon ──
-                Container(
-                  width: 72,
-                  height: 72,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Colors.amber.withValues(alpha: 0.10),
-                    border: Border.all(
-                      color: Colors.amber.withValues(alpha: 0.35),
-                      width: 1.2,
-                    ),
-                  ),
-                  child: const Icon(Icons.card_giftcard_rounded,
-                      size: 34, color: Colors.amber),
-                ),
-                const SizedBox(height: 20),
-                // ── FREE / 10분 / TRIAL ──
-                Text(
-                  'FREE',
-                  style: GoogleFonts.orbitron(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white38,
-                    letterSpacing: 5,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                ShaderMask(
-                  shaderCallback: (bounds) => const LinearGradient(
-                    colors: [Color(0xFFFFD740), Color(0xFFFFA000)],
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                  ).createShader(bounds),
-                  child: Text(
-                    '10분',
-                    style: GoogleFonts.orbitron(
-                      fontSize: 60,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                      height: 1.05,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'TRIAL',
-                  style: GoogleFonts.orbitron(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white38,
-                    letterSpacing: 5,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  '신규 회원가입 즉시 지급',
-                  style: GoogleFonts.roboto(
-                    fontSize: 13,
-                    color: Colors.white60,
-                    fontWeight: FontWeight.w500,
-                    letterSpacing: 0.3,
-                  ),
-                ),
-                const SizedBox(height: 24),
-                // ── 5초 countdown bar ──
-                TweenAnimationBuilder<double>(
-                  tween: Tween(begin: 1.0, end: 0.0),
-                  duration: const Duration(milliseconds: 5000),
-                  builder: (context, value, _) {
-                    final secLeft = (value * 5).ceil();
-                    return Column(
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(4),
-                          child: LinearProgressIndicator(
-                            value: value,
-                            minHeight: 3,
-                            backgroundColor:
-                                Colors.white.withValues(alpha: 0.08),
-                            valueColor:
-                                const AlwaysStoppedAnimation(Colors.amber),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          '$secLeft초 후 사라집니다  •  탭하면 닫힘',
-                          style: const TextStyle(
-                              color: Colors.white30, fontSize: 11),
-                        ),
-                      ],
-                    );
-                  },
-                ),
-              ],
             ),
           ),
         ),
       ),
-    ),
-  ),
-);
+    );
   }
 
   Widget _buildBentoCard({required Widget child}) {
@@ -779,87 +723,5 @@ class _IntroMasterState extends State<IntroMaster> {
             borderSide: BorderSide.none),
       ),
     );
-  }
-}
-
-// =======================================================
-// AppsFlyerManager — IntroMaster 전용 (self-contained)
-// =======================================================
-class AppsFlyerManager {
-  static AppsflyerSdk? _instance;
-  static bool _isInitialized = false;
-  // Callback replaced per screen without re-creating the SDK instance.
-  static Function(Map<String, dynamic>)? _onDeepLink;
-
-  static Future<void> initialize({
-    required String devKey,
-    required String appId,
-    required Function(Map<String, dynamic>) onDeepLink,
-  }) async {
-    _onDeepLink = onDeepLink;
-    if (_isInitialized) return;
-    try {
-      final AppsFlyerOptions options = AppsFlyerOptions(
-        afDevKey: devKey,
-        appId: appId,
-        showDebug: false,
-        timeToWaitForATTUserAuthorization: 60,
-      );
-
-      _instance = AppsflyerSdk(options);
-
-      _instance!.onInstallConversionData((res) {
-        final cb = _onDeepLink;
-        if (cb != null) _routeCallback(res, cb);
-      });
-
-      _instance!.onAppOpenAttribution((res) {
-        final cb = _onDeepLink;
-        if (cb != null) _routeCallback(res, cb);
-      });
-
-      _instance!.onDeepLinking((DeepLinkResult dp) {
-        if (dp.status == Status.FOUND) {
-          try {
-            final clickEvent = dp.deepLink?.clickEvent;
-            final params = clickEvent == null
-                ? <String, dynamic>{}
-                : Map<String, dynamic>.from(clickEvent);
-            if (dp.deepLink?.deepLinkValue != null) {
-              params['deep_link_value'] = dp.deepLink!.deepLinkValue!;
-            }
-            _onDeepLink?.call(params);
-          } catch (e) {
-            debugPrint('[AppsFlyerManager] onDeepLinking error: $e');
-          }
-        }
-      });
-
-      await _instance!.initSdk(
-        registerConversionDataCallback: true,
-        registerOnAppOpenAttributionCallback: true,
-        registerOnDeepLinkingCallback: true,
-      );
-
-      _isInitialized = true;
-    } catch (e) {
-      debugPrint('[AppsFlyerManager] init error: $e');
-    }
-  }
-
-  static void _routeCallback(
-    dynamic res,
-    Function(Map<String, dynamic>) onDeepLink,
-  ) {
-    try {
-      if (res == null) return;
-      final Map<dynamic, dynamic> raw = res as Map<dynamic, dynamic>;
-      if ((raw['status']?.toString() ?? '') != 'success') return;
-      final dynamic payload = raw['data'] ?? raw;
-      if (payload == null) return;
-      onDeepLink(Map<String, dynamic>.from(payload as Map));
-    } catch (e) {
-      debugPrint('[AppsFlyerManager] callback error: $e');
-    }
   }
 }

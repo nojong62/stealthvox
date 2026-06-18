@@ -269,6 +269,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     final line = '[$ts] $tag $msg';
     print(line);
     _debugLogs.add(line);
+    AppLogLedger.instance.add('STEPEXPAND', '$tag $msg');
     // 메모리 폭발 방지: 500줄 초과 시 앞에서 50줄 자르기
     if (_debugLogs.length > 500) {
       _debugLogs.removeRange(0, 50);
@@ -393,7 +394,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   }
 
   Future<void> _initPermissions() async {
-    await [Permission.microphone, Permission.storage].request();
+    await [Permission.microphone].request();
   }
 
   Future<void> _fetchKeys() async {
@@ -710,6 +711,29 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     while (questionTts.pendingRequests > 0 || _ttsQueueManager.isBusy) {
       await Future.delayed(const Duration(milliseconds: 50));
       if (++ticks > 300) break;
+    }
+
+    // 첫 질문 후 사용자가 직접 이어서 말할 수 있도록 한국어 안내를 덧붙이고 재생한다.
+    const String inviteMsg = '하고 싶은 이야기가 있으시면 먼저 말씀해 주세요.';
+    aiOriginal = aiOriginal.isEmpty ? inviteMsg : '$aiOriginal\n$inviteMsg';
+    if (mounted && aiIdx < _localMessages.length) {
+      setState(() {
+        _localMessages[aiIdx]['original'] = aiOriginal;
+      });
+    }
+    final inviteTts = ChunkedTtsFetcher(
+      _openAiKey,
+      _ttsQueueManager,
+      'nova',
+      isUser: false,
+      onLog: _log,
+    );
+    inviteTts.addText(inviteMsg);
+    ticks = 0;
+    while (
+        (inviteTts.pendingRequests > 0 || _ttsQueueManager.isBusy) && mounted) {
+      await Future.delayed(const Duration(milliseconds: 50));
+      if (++ticks > 200) break;
     }
   }
 
@@ -1672,13 +1696,36 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 // ====================================================================
 // 📦 [Box 5: Deepgram + Relay Pipeline] ← 통신로직 박스코드와 완전 일치
 // ====================================================================
+  // [텔레프롬프터 v1] 현재 버블을 화면 중앙(0.45)으로 부드럽게 이동.
+  //   텍스트 길이 기반 동적 duration: 짧으면 느긋(700ms), 길면 빠르게(150ms).
+  //   key/context 미확보 시 기존 maxScrollExtent fallback.
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        if (_localMessages.length <= 1) return;
-        _scrollController.animateTo(_scrollController.position.maxScrollExtent,
-            duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+      if (!_scrollController.hasClients) return;
+      if (_localMessages.length <= 1) return;
+
+      final lastIdx = _localMessages.length - 1;
+      final key = _itemKeys[lastIdx];
+      final ctx = key?.currentContext;
+
+      if (ctx == null) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+        return;
       }
+
+      final text = (_localMessages[lastIdx]['target'] ?? '').toString();
+      final ms = (800 - text.length * 3).clamp(150, 700);
+
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.45,
+        duration: Duration(milliseconds: ms),
+        curve: Curves.easeOut,
+      );
     });
   }
 
@@ -3273,7 +3320,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       itemCount: _localMessages.length + extras.length,
       itemBuilder: (context, idx) {
         if (idx < _localMessages.length) {
-          return _buildTextBlock(_localMessages[idx]);
+          _itemKeys[idx] ??= GlobalKey(); // [텔레프롬프터 v1] ensureVisible 타겟
+          return Container(
+              key: _itemKeys[idx],
+              child: _buildTextBlock(_localMessages[idx]));
         }
         final extraIdx = idx - _localMessages.length;
         if (extraIdx < extras.length) return extras[extraIdx]();

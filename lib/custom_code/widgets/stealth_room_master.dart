@@ -40,7 +40,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   // 📦 [1. 상태 변수 및 모드 제어 (STATE & MODE CONTROL)]
   // 현재 선택된 모드(Duo, Clone, Roleplay, Expand)를 기억하고 전환하는 역할
   // ============================================================================
-  // 0: 메뉴 화면, 1: Duo, 2: Clone, 3: Roleplay, 4: Expand
+  // 0: 메뉴 화면, 1: Duo, 2: Free Talk, 3: Roleplay, 4: Expand
   int? _currentMode;
 
   // 초대 링크에서 소비한 roomId (1회용 — build에서 Duo 생성자에 전달)
@@ -52,6 +52,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     WidgetsBinding.instance.addObserver(this);
     StealthRoomMaster.exitCurrentMode =
         () => setState(() => _currentMode = null);
+    AppsFlyerManager.duoInviteSignal.addListener(_onDuoInviteSignal);
 
     // Duo 초대 링크 자동 진입 처리
     // FFAppState 초대 상태는 여기서 지우지 않음 — _joinAsGuest 성공 후에만 삭제
@@ -69,8 +70,23 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     }
   }
 
+  /// 딥링크 신호 수신 후 StealthRoom 메뉴에서 Duo로 진입한다.
+  void _onDuoInviteSignal() {
+    if (!mounted) return;
+    if (FFAppState().isGuestSession &&
+        FFAppState().pendingInviteType == 'duo' &&
+        FFAppState().duoRoomId.isNotEmpty) {
+      debugPrint('[StealthRoom] duoInviteSignal - entering Duo mode');
+      setState(() {
+        _pendingDuoRoomId = FFAppState().duoRoomId;
+        _currentMode = 1;
+      });
+    }
+  }
+
   @override
   void dispose() {
+    AppsFlyerManager.duoInviteSignal.removeListener(_onDuoInviteSignal);
     WidgetsBinding.instance.removeObserver(this);
     StealthRoomMaster.exitCurrentMode = null;
     super.dispose();
@@ -221,45 +237,44 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
           ),
         ),
         const SizedBox(height: 12),
-        _buildBillingDotRow(2, '1초 사용 → 1초 차감', 'AI 대화 중 (Full Rate)'),
+        _buildBillingDotRow(
+          2,
+          'AI 대화 중 1초 차감, 복습·히스토리 체류 시 4초당 1초 차감',
+        ),
         const SizedBox(height: 10),
-        _buildBillingDotRow(1, '4초 사용 → 1초 차감', '복습 / 히스토리 체류 (0.25x)'),
-        const SizedBox(height: 10),
-        _buildBillingDotRow(0, '과금 정지', '오토포즈 — 마이크 대기 시 자동 정지'),
+        _buildBillingDotRow(
+          0,
+          '과금 정지 — 마이크 대기(오토포즈) 시 자동 정지',
+        ),
       ],
     );
   }
 
-  Widget _buildBillingDotRow(int state, String timeLabel, String desc) {
+  Widget _buildBillingDotRow(int state, String label) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        CustomPaint(
-          size: const Size(22, 22),
-          painter: BillingDotPainter(state),
+        SizedBox(
+          width: 28,
+          height: 28,
+          child: Center(
+            child: SizedBox(
+              width: 22,
+              height: 22,
+              child: CustomPaint(
+                painter: BillingDotPainter(state),
+              ),
+            ),
+          ),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: 10),
         Expanded(
-          child: RichText(
-            text: TextSpan(
-              children: [
-                TextSpan(
-                  text: '$timeLabel  ',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                TextSpan(
-                  text: desc,
-                  style: const TextStyle(
-                    color: Colors.white54,
-                    fontSize: 11,
-                    height: 1.4,
-                  ),
-                ),
-              ],
+          child: Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 12,
+              height: 1.4,
             ),
           ),
         ),

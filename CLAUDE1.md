@@ -47,102 +47,187 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# _isSystemBusy 오토포즈 버그 수정
+# 텔레프롬프터 스크롤 수정 지시문 — Roleplay & Step Expand
 
-## 원인
-`_voiceManager != null` → 대화 시작 후 항상 true → idle 카운터 영구 리셋 → 오토포즈 불가
+**목표:** "글 많으면 빠르게 / 적으면 천천히 / 현재 말하는 부분이 화면 중앙을 지나가도록" — 텔레프롬프터 방식 스크롤 적용.
 
-## 사전 준비
+**원리:** `_scrollToBottom()` 메서드 **정의 자체를 교체**하여, `animateTo(maxScrollExtent)` → `Scrollable.ensureVisible(alignment: 0.45)` + 텍스트 길이 기반 동적 duration. 기존 10+곳의 호출부는 수정 없이 자동 전파.
 
+**대상 파일:**
+- `lib/custom_code/widgets/routine_mode_roleplay.dart` (1편집)
+- `lib/custom_code/widgets/routine_mode_step_expand.dart` (2편집)
+
+**하단→상단 순서 적용. Box 7 미수정.**
+
+---
+
+## 파일 1) routine_mode_roleplay.dart — 1편집
+
+### R-1: `_scrollToBottom()` 메서드 본문 교체
+
+> 사전 검증: `grep -c "void _scrollToBottom()" routine_mode_roleplay.dart` → **1** 확인
+
+```
+OLD:
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        // 첫 메시지(오프너)일 때는 상단 고정 → 시작 대사 전체가 보이게
+        if (_localMessages.length <= 1) return;
+        _scrollController.animateTo(_scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+      }
+    });
+  }
+```
+```
+NEW:
+  // [텔레프롬프터 v1] 현재 버블을 화면 중앙(0.45)으로 부드럽게 이동.
+  //   텍스트 길이 기반 동적 duration: 짧으면 느긋(700ms), 길면 빠르게(150ms).
+  //   key/context 미확보 시 기존 maxScrollExtent fallback.
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      if (_localMessages.length <= 1) return;
+
+      final lastIdx = _localMessages.length - 1;
+      final key = _itemKeys[lastIdx];
+      final ctx = key?.currentContext;
+
+      if (ctx == null) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+        return;
+      }
+
+      final text = (_localMessages[lastIdx]['target'] ?? '').toString();
+      final ms = (800 - text.length * 3).clamp(150, 700);
+
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.45,
+        duration: Duration(milliseconds: ms),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+```
+
+**Roleplay 적용 후 검증:**
 ```bash
-cd F:\flutter_project\stealth_vox
-git add -A && git commit -m "save: before isSystemBusy fix"
+grep -c "alignment: 0.45" routine_mode_roleplay.dart                # 1 기대
+grep -c "text.length \* 3" routine_mode_roleplay.dart               # 1 기대
+grep -c "animateTo(_scrollController.position.maxScrollExtent" routine_mode_roleplay.dart  # 1 기대 (fallback)
 ```
 
 ---
 
-## Edit 1: routine_mode_step_expand.dart (line ~78)
+## 파일 2) routine_mode_step_expand.dart — 2편집 (하단→상단)
+
+### S-1 (하단): ListView 항목에 GlobalKey 부여 — ensureVisible 타겟 확보
+
+> 사전 검증: `grep -c "return _buildTextBlock(_localMessages\[idx\]);" routine_mode_step_expand.dart` → **1** 확인
 
 ```
-<<<<<<< OLD
-  bool get _isSystemBusy {
-    final ttsBusy = _ttsQueueManager.isBusy;
-    final micBusy = _voiceManager != null;
-    return ttsBusy || micBusy;
-  }
-=======
-  bool get _isSystemBusy {
-    return _ttsQueueManager.isBusy;
-  }
->>>>>>> NEW
+OLD:
+      itemBuilder: (context, idx) {
+        if (idx < _localMessages.length) {
+          return _buildTextBlock(_localMessages[idx]);
+        }
+```
+```
+NEW:
+      itemBuilder: (context, idx) {
+        if (idx < _localMessages.length) {
+          _itemKeys[idx] ??= GlobalKey(); // [텔레프롬프터 v1] ensureVisible 타겟
+          return Container(
+              key: _itemKeys[idx],
+              child: _buildTextBlock(_localMessages[idx]));
+        }
 ```
 
-## Edit 2: routine_mode_roleplay.dart
+### S-2 (상단): `_scrollToBottom()` 메서드 본문 교체
+
+> 사전 검증: `grep -c "void _scrollToBottom()" routine_mode_step_expand.dart` → **1** 확인
 
 ```
-<<<<<<< OLD
-  bool get _isSystemBusy {
-    final ttsBusy = _ttsQueueManager.isBusy;
-    final micBusy = _voiceManager != null;
-    return ttsBusy || micBusy;
+OLD:
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        if (_localMessages.length <= 1) return;
+        _scrollController.animateTo(_scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+      }
+    });
   }
-=======
-  bool get _isSystemBusy {
-    return _ttsQueueManager.isBusy;
+```
+```
+NEW:
+  // [텔레프롬프터 v1] 현재 버블을 화면 중앙(0.45)으로 부드럽게 이동.
+  //   텍스트 길이 기반 동적 duration: 짧으면 느긋(700ms), 길면 빠르게(150ms).
+  //   key/context 미확보 시 기존 maxScrollExtent fallback.
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      if (_localMessages.length <= 1) return;
+
+      final lastIdx = _localMessages.length - 1;
+      final key = _itemKeys[lastIdx];
+      final ctx = key?.currentContext;
+
+      if (ctx == null) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+        return;
+      }
+
+      final text = (_localMessages[lastIdx]['target'] ?? '').toString();
+      final ms = (800 - text.length * 3).clamp(150, 700);
+
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.45,
+        duration: Duration(milliseconds: ms),
+        curve: Curves.easeOut,
+      );
+    });
   }
->>>>>>> NEW
 ```
 
-## Edit 3: routine_mode_free_talk.dart
-
-```
-<<<<<<< OLD
-  bool get _isSystemBusy {
-    final ttsBusy = _ttsQueueManager.isBusy;
-    final micBusy = _voiceManager != null;
-    return ttsBusy || micBusy;
-  }
-=======
-  bool get _isSystemBusy {
-    return _ttsQueueManager.isBusy;
-  }
->>>>>>> NEW
+**Step Expand 적용 후 검증:**
+```bash
+grep -c "alignment: 0.45" routine_mode_step_expand.dart                # 1 기대
+grep -c "key: _itemKeys\[idx\]" routine_mode_step_expand.dart          # 1 기대
+grep -c "text.length \* 3" routine_mode_step_expand.dart               # 1 기대
 ```
 
 ---
 
-## 검증
-
+## 마무리 검증 (공통)
 ```bash
-echo "=== _voiceManager != null 잔존 (expect: 모두 0) ==="
-grep -c '_voiceManager != null' lib/custom_code/widgets/routine_mode_step_expand.dart
-grep -c '_voiceManager != null' lib/custom_code/widgets/routine_mode_roleplay.dart
-grep -c '_voiceManager != null' lib/custom_code/widgets/routine_mode_free_talk.dart
-
-echo "=== _ttsQueueManager.isBusy 유지 (expect: 각 ≥1) ==="
-grep -c '_ttsQueueManager.isBusy' lib/custom_code/widgets/routine_mode_step_expand.dart
-grep -c '_ttsQueueManager.isBusy' lib/custom_code/widgets/routine_mode_roleplay.dart
-grep -c '_ttsQueueManager.isBusy' lib/custom_code/widgets/routine_mode_free_talk.dart
-
-flutter analyze lib/custom_code/widgets/routine_mode_step_expand.dart
 flutter analyze lib/custom_code/widgets/routine_mode_roleplay.dart
-flutter analyze lib/custom_code/widgets/routine_mode_free_talk.dart
+flutter analyze lib/custom_code/widgets/routine_mode_step_expand.dart
 ```
 
-## 테스트
+## 실기기 체감 테스트 체크리스트
+1. AI 짧은 대사(1~2문장): 느긋하게 중앙으로 올라오는가
+2. AI 긴 대사(3문장+): 빠르게 중앙을 지나가는가
+3. 사용자 발화 표시: 버블이 중앙에 안정적으로 위치하는가
+4. 오프너(첫 발화): 화면 상단에 머무는가 (<=1 가드)
+5. 대화 5턴 이상 축적 시: 이전 버블이 위로 자연스럽게 밀려나는가
 
-1. 아무 대화모드 진입 → AI 질문 듣기
-2. AI 질문 끝난 후 **60초간 아무 말 안 함**
-3. 과금 dot이 초록 원 → 초록 테두리+회색으로 바뀌면 **PASS**
-
-## 저장
-
-```bash
-git add -A && git commit -m "fix: _isSystemBusy remove _voiceManager null check — autopause now works"
-```
+## duration 튜닝 가이드
+체감이 아직 느리면 → `800`을 `600`으로, `clamp(150, 700)`를 `clamp(120, 500)`으로 줄이기.
+중앙보다 약간 위를 원하면 → `alignment: 0.45`를 `0.35`로 변경.
+이 값들은 `_scrollToBottom()` 메서드 안 한 곳에만 있으므로, 한 줄 수정으로 즉시 반영.
 
 ## 롤백
-
-```bash
-git revert HEAD
-```
+- OLD 블록 복원 (3곳).
+- 또는 `git revert <hash>`.

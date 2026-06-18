@@ -67,13 +67,19 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   void _startDuoBilling() {
     // 🆕 [과금정책] 게스트(회원·비회원 무관)는 차감 안 함 — 초대한 호스트만 과금
     if (!_amIHost) return;
-    if (_billingStarted) return;
-    _billingStarted = true;
-    BillingTicker.instance.resume();
-    BillingTicker.instance.logMode('duo');
+    BillingTicker.instance.setRate(BillingRate.full);
+    BillingTicker.instance.start();
+    if (!_billingStarted) {
+      _billingStarted = true;
+      BillingTicker.instance.logMode('duo');
+    }
+    if (BillingTicker.instance.isPaused) {
+      BillingTicker.instance.resume();
+    }
   }
 
   void _stopDuoBilling() {
+    if (!_amIHost) return;
     _billingStarted = false;
     BillingTicker.instance.pause();
   }
@@ -211,7 +217,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
 
     // 🆕 [과금정책] Duo는 게스트 입장 시점에 과금 시작 — 진입 시엔 rate만 설정하고 pause 유지
     BillingTicker.instance.setRate(BillingRate.full);
-    BillingTicker.instance.pause();
+    _stopDuoBilling();
     _billingStarted = false;
 
     _ttsPlayer.onPlayerComplete.listen((_) {
@@ -273,7 +279,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   }
 
   Future<void> _initPermissions() async {
-    await [Permission.microphone, Permission.storage].request();
+    await [Permission.microphone].request();
   }
 
   // ============================================================================
@@ -484,16 +490,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     final String myTarget = _myTarget();
     final String myNative = _myNative();
 
-    // 1. 내 발화 원문을 우측 말풍선으로 즉시 표시 (스냅한 반응성)
-    int myIndex = -1;
-    if (mounted) {
-      setState(() {
-        _localMessages
-            .add({'role': 'HOST', 'target': finalTranscript, 'original': ''});
-        myIndex = _localMessages.length - 1;
-      });
-      _scrollToCurrentTop(myIndex);
-    }
+    // 1. 즉시 표시 제거 - 번역 완료 후 단계 4에서 새 말풍선으로 표시
 
     // 2. 공유 채널 업로드 — 상대 폰이 이 원문을 받아 자기 언어쌍으로 통역함 (백그라운드)
     _uploadMyMessage(finalTranscript, myNative);
@@ -519,16 +516,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
             ? result['original']!
             : finalTranscript;
 
-    // 4. 내 말풍선을 [타겟(큰글자) + 오리지널(작은글자)]로 교체
-    if (mounted && myIndex >= 0 && myIndex < _localMessages.length) {
+    // 4. 번역 완료 후 내 말풍선을 [타겟 + 오리지널]로 새 말풍선에 표시
+    if (mounted) {
       setState(() {
-        _localMessages[myIndex] = {
-          'role': 'HOST',
-          'target': tgt,
-          'original': org
-        };
+        _localMessages.add({'role': 'HOST', 'target': tgt, 'original': org});
       });
-      _scrollToCurrentTop(myIndex);
+      _scrollToCurrentTop(_localMessages.length - 1);
     }
     await _saveHistoryMessage(tgt, org, 'HOST');
 
@@ -990,8 +983,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
           _isPartnerOnline = true;
         });
       }
-      // 🆕 [과금정책] 게스트 본인 입장 성공 → 과금 시작
-      _startDuoBilling();
+      // 🆕 [과금정책] 게스트 본인 입장 성공 — 과금은 호스트 리스너에서만 시작
       // 🆕 [PTT] 세션만 열고 녹음은 버튼으로 시작 — 자동 녹음 제거
     } catch (e) {
       debugPrint('[Duo] Guest join error: $e');
@@ -1019,6 +1011,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
       final data = snap.data() as Map<String, dynamic>?;
       if (data == null) return;
       final bool partnerJoined = data['isPartnerJoined'] == true;
+      debugPrint(
+          '[Duo][Billing] partnerJoined=$partnerJoined amIHost=$_amIHost '
+          'paused=${BillingTicker.instance.isPaused} '
+          'billingState=${BillingTicker.instance.billingState.value} '
+          'billingStarted=$_billingStarted');
 
       // 게스트 퇴장 감지: _isPartnerOnline이 true → false로 떨어지는 순간
       final bool guestJustLeft = _isPartnerOnline && !partnerJoined;
