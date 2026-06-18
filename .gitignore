@@ -26,3 +26,12 @@ macos/.symlinks/
 *.swp
 .idea/
 .vscode/
+
+# Downloaded webpage/build artifacts
+*.다운로드
+API 호출_files/
+*_files/
+files/index-*.js
+dist/
+.env
+*.env
