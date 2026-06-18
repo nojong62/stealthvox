@@ -101,6 +101,7 @@ class BillingTicker with WidgetsBindingObserver {
       _billingLogs.removeRange(_kMaxLogs, _billingLogs.length);
     }
     debugPrint(msg);
+    AppLogLedger.instance.add('BILLING', msg);
   }
 
   /// BILLING DEBUG LOG 전체 목록 (최신순)
@@ -378,4 +379,29 @@ class BillingDotPainter extends CustomPainter {
   @override
   bool shouldRepaint(BillingDotPainter oldDelegate) =>
       oldDelegate.state != state;
+}
+
+// =============================================================================
+// AppLogLedger (global debug log collector for admin-only inspection)
+// =============================================================================
+class AppLogLedger {
+  static final AppLogLedger instance = AppLogLedger._();
+  AppLogLedger._();
+
+  static const int _kMax = 1000;
+  final List<String> _lines = [];
+
+  void add(String tag, String message) {
+    final ts = DateTime.now().toIso8601String().substring(11, 23);
+    _lines.add('[$ts] [$tag] $message');
+    if (_lines.length > _kMax) {
+      _lines.removeRange(0, _lines.length - _kMax);
+    }
+  }
+
+  List<String> get lines => List.unmodifiable(_lines);
+
+  String get joined => _lines.join('\n');
+
+  void clear() => _lines.clear();
 }

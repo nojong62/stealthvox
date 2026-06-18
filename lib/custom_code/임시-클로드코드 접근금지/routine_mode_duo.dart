@@ -67,12 +67,19 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   void _startDuoBilling() {
     // 🆕 [과금정책] 게스트(회원·비회원 무관)는 차감 안 함 — 초대한 호스트만 과금
     if (!_amIHost) return;
-    if (_billingStarted) return;
-    _billingStarted = true;
-    BillingTicker.instance.resume();
-    BillingTicker.instance.logMode('duo');
+    BillingTicker.instance.setRate(BillingRate.full);
+    BillingTicker.instance.start();
+    if (!_billingStarted) {
+      _billingStarted = true;
+      BillingTicker.instance.logMode('duo');
+    }
+    if (BillingTicker.instance.isPaused) {
+      BillingTicker.instance.resume();
+    }
   }
+
   void _stopDuoBilling() {
+    if (!_amIHost) return;
     _billingStarted = false;
     BillingTicker.instance.pause();
   }
@@ -93,8 +100,16 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
 
   // 토큰 자카드 유사도 (0~1)
   double _jaccard(String a, String b) {
-    final sa = a.toLowerCase().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toSet();
-    final sb = b.toLowerCase().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toSet();
+    final sa = a
+        .toLowerCase()
+        .split(RegExp(r'\s+'))
+        .where((w) => w.isNotEmpty)
+        .toSet();
+    final sb = b
+        .toLowerCase()
+        .split(RegExp(r'\s+'))
+        .where((w) => w.isNotEmpty)
+        .toSet();
     if (sa.isEmpty || sb.isEmpty) return 0.0;
     final inter = sa.intersection(sb).length;
     final uni = sa.union(sb).length;
@@ -122,6 +137,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     }
     return false;
   }
+
   void _setDuoState(String s) {
     if (!mounted) return;
     setState(() => _duoState = s);
@@ -176,46 +192,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   bool _isTtsActive = false;
   Completer<void>? _ttsCompleter;
 
-  // ── Idle Timeout (무반응 자동 일시정지) ────────────────────────────────────
-  Timer? _idlePauseTimer;
-  bool _isIdlePaused = false;
-
-  void _resetIdleTimer() {
-    _idlePauseTimer?.cancel();
-    if (_isIdlePaused) {
-      _isIdlePaused = false;
-      if (mounted) setState(() {});
-      // 🆕 [과금정책] 게스트 입장(과금 시작) 상태일 때만 resume — 대기 중엔 재개 금지
-      if (_billingStarted) {
-        BillingTicker.instance.resume();
-        BillingTicker.instance.logMode('duo');
-      }
-    }
-    _idlePauseTimer = Timer(const Duration(seconds: 60), _handleIdlePause);
-  }
-
-  void _handleIdlePause() {
-    if (!mounted || _isIdlePaused) return;
-    // 🔒 [오토포즈 가드] 최상단이 아니면 일시정지하지 말고 60초 타이머만 다시 건다
-    if (ModalRoute.of(context)?.isCurrent == false) {
-      _resetIdleTimer();
-      return;
-    }
-    _isIdlePaused = true;
-    BillingTicker.instance.pause();
-    if (mounted) setState(() {});
-  }
-
-  void _clearIdleTimers() {
-    _idlePauseTimer?.cancel();
-    _idlePauseTimer = null;
-  }
-
-  Widget _buildIdleBanner() => const SizedBox.shrink();
-
-  Widget _buildIdleOverlay() => const SizedBox.shrink();
-  // ─────────────────────────────────────────────────────────────────────────
-
   // ── 🆕 [양방향 통역] 언어쌍/보이스 헬퍼 (로비 값 매번 참조) ────────────────
   String _myTarget() =>
       FFAppState().targetLang.isNotEmpty ? FFAppState().targetLang : 'English';
@@ -241,7 +217,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
 
     // 🆕 [과금정책] Duo는 게스트 입장 시점에 과금 시작 — 진입 시엔 rate만 설정하고 pause 유지
     BillingTicker.instance.setRate(BillingRate.full);
-    BillingTicker.instance.pause();
+    _stopDuoBilling();
     _billingStarted = false;
 
     _ttsPlayer.onPlayerComplete.listen((_) {
@@ -253,13 +229,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // widget.roomId 우선 사용, 없으면 FFAppState 폴백
-      final String? pendingRoomId =
-          (widget.roomId != null && widget.roomId!.isNotEmpty)
-              ? widget.roomId
-              : (FFAppState().isGuestSession &&
-                      FFAppState().duoRoomId.isNotEmpty
-                  ? FFAppState().duoRoomId
-                  : null);
+      final String? pendingRoomId = (widget.roomId != null &&
+              widget.roomId!.isNotEmpty)
+          ? widget.roomId
+          : (FFAppState().isGuestSession && FFAppState().duoRoomId.isNotEmpty
+              ? FFAppState().duoRoomId
+              : null);
       if (pendingRoomId != null) {
         debugPrint(
             '[Duo] initState — guest entry, show lang overlay: $pendingRoomId');
@@ -274,13 +249,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
           });
         }
       }
-      if (mounted) _resetIdleTimer();
     });
   }
 
   @override
   void dispose() {
-    _clearIdleTimers();
     _partnerJoinedSubscription?.cancel();
     _messageSubscription?.cancel(); // 🆕 메시지 채널 구독 해제
     _silenceTimer?.cancel();
@@ -324,7 +297,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
 
   Future<void> _playAudioAndWait(Uint8List? bytes) async {
     if (bytes == null || !_isConversationActive) return;
-    _resetIdleTimer();
     _isTtsActive = true;
     _ttsCompleter = Completer<void>();
     try {
@@ -410,7 +382,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   // ============================================================================
   Future<void> _stopAndSendToWhisper() async {
     _silenceTimer?.cancel();
-    _resetIdleTimer();
     _setDuoState('processing');
     final path = await _audioRecorder.stop();
     if (path == null) {
@@ -447,7 +418,14 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
         ];
         final bool isHardGhost = hardGhosts.any((g) => lowerRaw.contains(g));
         const List<String> shortGhosts = [
-          'thank you','yeah','okay','mbc','you','also','i','감사합니다',
+          'thank you',
+          'yeah',
+          'okay',
+          'mbc',
+          'you',
+          'also',
+          'i',
+          '감사합니다',
         ];
         final bool isShortGhost = trimmed.length < 30 &&
             shortGhosts.any((g) => collapsed == g.replaceAll(' ', ''));
@@ -507,22 +485,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
 
   // 🚀 [내 발화 처리] 내가 말한 것을 내 폰에 즉시 띄우고, 내 타겟으로 통역/TTS, 채널 업로드
   Future<void> _processRelayPipeline(String finalTranscript) async {
-    _resetIdleTimer();
     _turnCounter++;
     final int currentTurnId = _turnCounter;
     final String myTarget = _myTarget();
     final String myNative = _myNative();
 
-    // 1. 내 발화 원문을 우측 말풍선으로 즉시 표시 (스냅한 반응성)
-    int myIndex = -1;
-    if (mounted) {
-      setState(() {
-        _localMessages
-            .add({'role': 'HOST', 'target': finalTranscript, 'original': ''});
-        myIndex = _localMessages.length - 1;
-      });
-      _scrollToCurrentTop(myIndex);
-    }
+    // 1. 즉시 표시 제거 - 번역 완료 후 단계 4에서 새 말풍선으로 표시
 
     // 2. 공유 채널 업로드 — 상대 폰이 이 원문을 받아 자기 언어쌍으로 통역함 (백그라운드)
     _uploadMyMessage(finalTranscript, myNative);
@@ -548,16 +516,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
             ? result['original']!
             : finalTranscript;
 
-    // 4. 내 말풍선을 [타겟(큰글자) + 오리지널(작은글자)]로 교체
-    if (mounted && myIndex >= 0 && myIndex < _localMessages.length) {
+    // 4. 번역 완료 후 내 말풍선을 [타겟 + 오리지널]로 새 말풍선에 표시
+    if (mounted) {
       setState(() {
-        _localMessages[myIndex] = {
-          'role': 'HOST',
-          'target': tgt,
-          'original': org
-        };
+        _localMessages.add({'role': 'HOST', 'target': tgt, 'original': org});
       });
-      _scrollToCurrentTop(myIndex);
+      _scrollToCurrentTop(_localMessages.length - 1);
     }
     await _saveHistoryMessage(tgt, org, 'HOST');
 
@@ -565,7 +529,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     _rememberGenerated(tgt);
     _rememberGenerated(org);
     final Uint8List? bytes = await _fetchTTSBytes(tgt, _myVoice());
-    if (bytes != null && _isConversationActive && _turnCounter == currentTurnId) {
+    if (bytes != null &&
+        _isConversationActive &&
+        _turnCounter == currentTurnId) {
       _setDuoState('playing');
       await _playSerialized(bytes);
     }
@@ -661,11 +627,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     final String srcLang = data['srcLang']?.toString() ?? 'English';
     if (raw.trim().isEmpty) return;
 
-    _resetIdleTimer();
-
     // 상대 발화를 들려주는 동안 내 녹음 일시 정지 (스피커 음성이 마이크에 새는 것 방지)
     _silenceTimer?.cancel();
-    try { await _audioRecorder.stop(); } catch (_) {}
+    try {
+      await _audioRecorder.stop();
+    } catch (_) {}
     _setDuoState('processing');
 
     final String myTarget = _myTarget();
@@ -775,7 +741,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
 
   // 🆕 [PTT] 버튼 누름 — 녹음 시작
   void _onPttStart() {
-    _resetIdleTimer();
     if (!_isConversationActive) {
       setState(() => _isConversationActive = true);
     }
@@ -787,7 +752,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
 
   // 🆕 [PTT] 버튼 뗌 — 녹음 종료 후 전송
   void _onPttEnd() {
-    _resetIdleTimer();
     if (_duoState == 'recording') {
       _silenceTimer?.cancel();
       _stopAndSendToWhisper();
@@ -1019,8 +983,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
           _isPartnerOnline = true;
         });
       }
-      // 🆕 [과금정책] 게스트 본인 입장 성공 → 과금 시작
-      _startDuoBilling();
+      // 🆕 [과금정책] 게스트 본인 입장 성공 — 과금은 호스트 리스너에서만 시작
       // 🆕 [PTT] 세션만 열고 녹음은 버튼으로 시작 — 자동 녹음 제거
     } catch (e) {
       debugPrint('[Duo] Guest join error: $e');
@@ -1048,6 +1011,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
       final data = snap.data() as Map<String, dynamic>?;
       if (data == null) return;
       final bool partnerJoined = data['isPartnerJoined'] == true;
+      debugPrint(
+          '[Duo][Billing] partnerJoined=$partnerJoined amIHost=$_amIHost '
+          'paused=${BillingTicker.instance.isPaused} '
+          'billingState=${BillingTicker.instance.billingState.value} '
+          'billingStarted=$_billingStarted');
 
       // 게스트 퇴장 감지: _isPartnerOnline이 true → false로 떨어지는 순간
       final bool guestJustLeft = _isPartnerOnline && !partnerJoined;
@@ -1153,46 +1121,45 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
         },
         child: Stack(children: [
           Container(
-          width: widget.width,
-          height: widget.height,
-          color: const Color(0xFF121212),
-          child: SafeArea(
-            child: Column(
-              children: [
-                _buildTopBar(),
-                Expanded(
-                  child: Stack(children: [
-                    _localMessages.isEmpty
-                        ? const Center(
-                            child: Text("마이크는 말하는 동안만 누르세요.",
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                    color: Colors.white54, height: 1.5)))
-                        : ListView.builder(
-                            controller: _scrollController,
-                            physics: const BouncingScrollPhysics(),
-                            padding: EdgeInsets.only(
-                                left: 8,
-                                right: 8,
-                                top: 40,
-                                bottom:
-                                    MediaQuery.of(context).size.height * 0.4),
-                            itemCount: _localMessages.length,
-                            itemBuilder: (context, index) {
-                              if (!_itemKeys.containsKey(index))
-                                _itemKeys[index] = GlobalKey();
-                              return Container(
-                                key: _itemKeys[index],
-                                child: _buildTextBlock(_localMessages[index]),
-                              );
-                            }),
-                    _buildIdleOverlay(),
-                  ]),
-                ),
-                _buildControlArea(effectiveBottomPadding),
-              ],
+            width: widget.width,
+            height: widget.height,
+            color: const Color(0xFF121212),
+            child: SafeArea(
+              child: Column(
+                children: [
+                  _buildTopBar(),
+                  Expanded(
+                    child: Stack(children: [
+                      _localMessages.isEmpty
+                          ? const Center(
+                              child: Text("마이크는 말하는 동안만 누르세요.",
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                      color: Colors.white54, height: 1.5)))
+                          : ListView.builder(
+                              controller: _scrollController,
+                              physics: const BouncingScrollPhysics(),
+                              padding: EdgeInsets.only(
+                                  left: 8,
+                                  right: 8,
+                                  top: 40,
+                                  bottom:
+                                      MediaQuery.of(context).size.height * 0.4),
+                              itemCount: _localMessages.length,
+                              itemBuilder: (context, index) {
+                                if (!_itemKeys.containsKey(index))
+                                  _itemKeys[index] = GlobalKey();
+                                return Container(
+                                  key: _itemKeys[index],
+                                  child: _buildTextBlock(_localMessages[index]),
+                                );
+                              }),
+                    ]),
+                  ),
+                  _buildControlArea(effectiveBottomPadding),
+                ],
+              ),
             ),
-          ),
           ),
           if (_showLangOverlay) _buildGuestLangOverlay(),
         ]));
@@ -1209,10 +1176,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
       'German',
       'Korean'
     ];
-    String native =
-        langs.contains(FFAppState().nativeLang) ? FFAppState().nativeLang : 'Korean';
-    String target =
-        langs.contains(FFAppState().targetLang) ? FFAppState().targetLang : 'English';
+    String native = langs.contains(FFAppState().nativeLang)
+        ? FFAppState().nativeLang
+        : 'Korean';
+    String target = langs.contains(FFAppState().targetLang)
+        ? FFAppState().targetLang
+        : 'English';
 
     Widget dropdown(String label, String value, Color labelColor,
         ValueChanged<String?> onChanged,
@@ -1235,7 +1204,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
                       color: Colors.white38, fontSize: 10, letterSpacing: 0.5)),
             ]);
       } else if (subtitle != null && subtitleBelow) {
-        labelWidget = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        labelWidget =
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(label,
               style: TextStyle(
                   color: labelColor,
@@ -1274,9 +1244,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
                 icon: const Icon(Icons.unfold_more_rounded,
                     color: Colors.white54, size: 20),
                 style: const TextStyle(
-                    color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600),
                 items: langs
-                    .map((l) => DropdownMenuItem<String>(value: l, child: Text(l)))
+                    .map((l) =>
+                        DropdownMenuItem<String>(value: l, child: Text(l)))
                     .toList(),
                 onChanged: onChanged,
               ),
@@ -1297,7 +1270,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
               decoration: BoxDecoration(
                   color: const Color(0xFF1C1C1E),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: const Color(0xFF2563EB), width: 1.5)),
+                  border:
+                      Border.all(color: const Color(0xFF2563EB), width: 1.5)),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1312,11 +1286,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
                       style: TextStyle(color: Colors.white54, fontSize: 13)),
                   const SizedBox(height: 24),
                   dropdown("ORIGIN", native, const Color(0xFF93C5FD), (val) {
-                    if (val != null) setState(() => FFAppState().nativeLang = val);
+                    if (val != null)
+                      setState(() => FFAppState().nativeLang = val);
                   }, subtitle: "(My Language)", subtitleBelow: false),
                   const SizedBox(height: 18),
                   dropdown("TARGET", target, const Color(0xFF4ADE80), (val) {
-                    if (val != null) setState(() => FFAppState().targetLang = val);
+                    if (val != null)
+                      setState(() => FFAppState().targetLang = val);
                   },
                       subtitle: "(Listening Language or Learning Language)",
                       subtitleBelow: true),
@@ -1387,23 +1363,18 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
                   icon: const Icon(Icons.arrow_back_ios_new_rounded,
                       color: Colors.white70),
                   onPressed: _handleAutoSaveAndExit),
+              IconButton(
+                icon: const Icon(Icons.person_add_alt_1,
+                    color: Colors.white70, size: 22),
+                tooltip: 'Duo 초대장 발행',
+                onPressed: _shareInviteCode,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+              ),
               _buildPartnerIndicator(),
             ],
           ),
           Row(children: [
-            // ── Idle pause 아이콘 (T버튼 왼쪽, 클릭 시 pause 해제) ──
-            if (_isIdlePaused)
-              GestureDetector(
-                onTap: _resetIdleTimer,
-                child: const Padding(
-                  padding: EdgeInsets.only(left: 4, right: 6),
-                  child: Icon(
-                    Icons.pause_circle_filled_rounded,
-                    color: Color(0xFFFFD54F),
-                    size: 20,
-                  ),
-                ),
-              ),
             IconButton(
               icon: const Icon(Icons.format_size,
                   color: Colors.white70, size: 26),
@@ -1422,14 +1393,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
             ),
-            IconButton(
-              icon: const Icon(Icons.person_add_alt_1,
-                  color: Colors.white70, size: 22),
-              tooltip: 'Duo 초대장 발행',
-              onPressed: _shareInviteCode,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-            ),
           ]),
           ValueListenableBuilder<int>(
               valueListenable: BillingTicker.instance.remainingSecondsNotifier,
@@ -1441,18 +1404,22 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
                         color: const Color(0xFF2563EB),
                         borderRadius: BorderRadius.circular(20)),
                     child: Row(children: [
-                      const Icon(Icons.timer_outlined,
-                          color: Colors.white, size: 18),
+                      ValueListenableBuilder<int>(
+                        valueListenable: BillingTicker.instance.billingState,
+                        builder: (_, s, __) => CustomPaint(
+                          size: const Size(14, 14),
+                          painter: BillingDotPainter(s),
+                        ),
+                      ),
                       const SizedBox(width: 6),
-                      Text(
-                        () {
-                          final int s = remaining.clamp(0, 999999);
-                          final int h = s ~/ 3600;
-                          final int m = (s % 3600) ~/ 60;
-                          return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
-                        }(),
-                        style: const TextStyle(
-                            color: Colors.white, fontWeight: FontWeight.bold))
+                      Text(() {
+                        final int s = remaining.clamp(0, 999999);
+                        final int h = s ~/ 3600;
+                        final int m = (s % 3600) ~/ 60;
+                        return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+                      }(),
+                          style: const TextStyle(
+                              color: Colors.white, fontWeight: FontWeight.bold))
                     ]));
               }),
         ],
@@ -1492,10 +1459,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
                     color: accent.withOpacity(0.15),
                     shape: BoxShape.circle,
                     border: Border.all(color: accent, width: 2.5)),
-                child: Icon(
-                    isRec ? Icons.mic_rounded : Icons.mic_none_rounded,
-                    color: accent,
-                    size: 38)),
+                child: Icon(isRec ? Icons.mic_rounded : Icons.mic_none_rounded,
+                    color: accent, size: 38)),
           ),
         ],
       ),
@@ -1568,7 +1533,8 @@ class DuoBrain {
     try {
       Uri uri = Uri.parse('https://api.openai.com/v1/chat/completions');
 
-      String prompt = "You are a translation engine for a live interpreter app.\n"
+      String prompt =
+          "You are a translation engine for a live interpreter app.\n"
           "You receive ONE utterance and render it into TWO languages.\n"
           "You are NOT a chat assistant. NEVER reply, comment, answer, or ask questions.\n"
           "NEVER continue the conversation. Translate the utterance only.\n\n"

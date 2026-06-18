@@ -279,7 +279,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   }
 
   Future<void> _initPermissions() async {
-    await [Permission.microphone, Permission.storage].request();
+    await [Permission.microphone].request();
   }
 
   // ============================================================================

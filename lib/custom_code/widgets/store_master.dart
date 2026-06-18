@@ -104,6 +104,7 @@ class _StoreMasterState extends State<StoreMaster> {
     final line = '[$ts] $tag $msg';
     print(line);
     _debugLogs.add(line);
+    AppLogLedger.instance.add('STORE', '$tag $msg');
     if (_debugLogs.length > 500) {
       _debugLogs.removeRange(0, 50);
     }
@@ -816,6 +817,105 @@ class _StoreMasterState extends State<StoreMaster> {
   }
 
   // ── 관리자용 Admin Time Log (STORE 제목 long press 진입) ──────────────────
+  void _openAdminLogLedgerSheet() {
+    const Set<String> adminEmails = {
+      'nisiekorea@gmail.com',
+    };
+    final String email = currentUserEmail.trim().toLowerCase();
+    if (!adminEmails.contains(email)) return;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        final lines = AppLogLedger.instance.lines;
+        return Container(
+          height: MediaQuery.of(context).size.height * 0.8,
+          padding: const EdgeInsets.all(20),
+          decoration: const BoxDecoration(
+            color: Color(0xFF161616),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Unified Log (${lines.length})',
+                      style: GoogleFonts.orbitron(
+                          color: Colors.amber,
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold)),
+                  Row(
+                    children: [
+                      IconButton(
+                        tooltip: 'Copy all',
+                        icon: const Icon(Icons.copy_all_rounded,
+                            color: Colors.amber, size: 20),
+                        onPressed: () async {
+                          await Clipboard.setData(ClipboardData(
+                              text: AppLogLedger.instance.joined));
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Unified log copied.'),
+                                duration: Duration(seconds: 1),
+                              ),
+                            );
+                          }
+                        },
+                      ),
+                      IconButton(
+                        tooltip: 'Clear log',
+                        icon: const Icon(Icons.delete_outline_rounded,
+                            color: Colors.white38, size: 20),
+                        onPressed: () {
+                          AppLogLedger.instance.clear();
+                          Navigator.pop(context);
+                        },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close_rounded,
+                            color: Colors.white54),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const Divider(color: Colors.white12, height: 24),
+              Expanded(
+                child: lines.isEmpty
+                    ? const Center(
+                        child: Text('No logs.',
+                            style:
+                                TextStyle(color: Colors.white38, fontSize: 13)))
+                    : ListView.builder(
+                        reverse: false,
+                        itemCount: lines.length,
+                        itemBuilder: (_, i) => Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          child: Text(
+                            lines[i],
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontFamily: 'monospace',
+                              fontSize: 11,
+                              height: 1.5,
+                            ),
+                          ),
+                        ),
+                      ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   void _openAdminTimeLogSheet() {
     // TODO: 관리자 이메일 목록 확정 후 아래 Set에 추가
     const Set<String> adminEmails = {
@@ -1220,16 +1320,34 @@ class _StoreMasterState extends State<StoreMaster> {
                                   fontSize: 11,
                                   decoration: TextDecoration.underline)),
                         ),
+                        const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 12.0),
+                          child: Text("|",
+                              style: TextStyle(
+                                  color: Colors.white24, fontSize: 10)),
+                        ),
+                        InkWell(
+                          onTap: () => _launchURL(
+                              'https://www.ubizens.com/stealthvox/terms.html'),
+                          child: const Text("Terms of Service",
+                              style: TextStyle(
+                                  color: Colors.white38,
+                                  fontSize: 11,
+                                  decoration: TextDecoration.underline)),
+                        ),
                       ],
                     ),
                   ),
                   Padding(
                     padding: const EdgeInsets.only(bottom: 16),
-                    child: Text(
-                      _versionText,
-                      textAlign: TextAlign.center,
-                      style:
-                          const TextStyle(color: Colors.white24, fontSize: 10),
+                    child: GestureDetector(
+                      onLongPress: _openAdminLogLedgerSheet,
+                      child: Text(
+                        _versionText,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            color: Colors.white24, fontSize: 10),
+                      ),
                     ),
                   ),
                 ],

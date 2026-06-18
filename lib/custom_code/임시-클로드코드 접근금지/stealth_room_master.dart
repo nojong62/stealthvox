@@ -17,6 +17,7 @@ import '/custom_code/actions/index.dart';
 
 import 'dart:ui';
 import 'package:google_fonts/google_fonts.dart';
+import '/custom_code/actions/billing_ticker.dart';
 
 class StealthRoomMaster extends StatefulWidget {
   const StealthRoomMaster({
@@ -33,12 +34,13 @@ class StealthRoomMaster extends StatefulWidget {
   _StealthRoomMasterState createState() => _StealthRoomMasterState();
 }
 
-class _StealthRoomMasterState extends State<StealthRoomMaster> {
+class _StealthRoomMasterState extends State<StealthRoomMaster>
+    with WidgetsBindingObserver {
   // ============================================================================
   // 📦 [1. 상태 변수 및 모드 제어 (STATE & MODE CONTROL)]
   // 현재 선택된 모드(Duo, Clone, Roleplay, Expand)를 기억하고 전환하는 역할
   // ============================================================================
-  // 0: 메뉴 화면, 1: Duo, 2: Clone, 3: Roleplay, 4: Expand
+  // 0: 메뉴 화면, 1: Duo, 2: Free Talk, 3: Roleplay, 4: Expand
   int? _currentMode;
 
   // 초대 링크에서 소비한 roomId (1회용 — build에서 Duo 생성자에 전달)
@@ -47,13 +49,14 @@ class _StealthRoomMasterState extends State<StealthRoomMaster> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     StealthRoomMaster.exitCurrentMode =
         () => setState(() => _currentMode = null);
+    AppsFlyerManager.duoInviteSignal.addListener(_onDuoInviteSignal);
 
     // Duo 초대 링크 자동 진입 처리
     // FFAppState 초대 상태는 여기서 지우지 않음 — _joinAsGuest 성공 후에만 삭제
-    if (FFAppState().isGuestSession &&
-        FFAppState().duoRoomId.isNotEmpty) {
+    if (FFAppState().isGuestSession && FFAppState().duoRoomId.isNotEmpty) {
       final String consumedRoomId = FFAppState().duoRoomId;
       debugPrint('[StealthRoom] Duo invite detected — roomId: $consumedRoomId');
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -67,10 +70,35 @@ class _StealthRoomMasterState extends State<StealthRoomMaster> {
     }
   }
 
+  /// 딥링크 신호 수신 후 StealthRoom 메뉴에서 Duo로 진입한다.
+  void _onDuoInviteSignal() {
+    if (!mounted) return;
+    if (FFAppState().isGuestSession &&
+        FFAppState().pendingInviteType == 'duo' &&
+        FFAppState().duoRoomId.isNotEmpty) {
+      debugPrint('[StealthRoom] duoInviteSignal - entering Duo mode');
+      setState(() {
+        _pendingDuoRoomId = FFAppState().duoRoomId;
+        _currentMode = 1;
+      });
+    }
+  }
+
   @override
   void dispose() {
+    AppsFlyerManager.duoInviteSignal.removeListener(_onDuoInviteSignal);
+    WidgetsBinding.instance.removeObserver(this);
     StealthRoomMaster.exitCurrentMode = null;
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      BillingTicker.instance.flushNow();
+      BillingTicker.instance.pause();
+    }
   }
 
   void _switchMode(int newMode) {
@@ -129,13 +157,15 @@ class _StealthRoomMasterState extends State<StealthRoomMaster> {
                               '초청 링크를 통해 파트너와 함께 모국어로 대화하면, 실시간으로 통역해주는 글로벌 만능 통역 모드입니다.'),
                           const Divider(color: Colors.white12, height: 24),
                           _buildManualItem('Free Talk', 'AI와 자유 대화',
-                              '지인의 카카오톡 대화를 분석하여 완벽하게 복제된 클론 AI 파트너와 실감나는 롤플레잉 훈련을 진행합니다.'),
+                              'AI와 자유롭게 영어 대화를 나누며 실전 회화를 연습합니다.'),
                           const Divider(color: Colors.white12, height: 24),
                           _buildManualItem('AI Roleplay', '상황극 대화',
                               '창의적이고 구체적인 역할과 상황을 무한히 추천받고, 현실감 넘치는 실전 비즈니스 및 일상 회화를 연습합니다.'),
                           const Divider(color: Colors.white12, height: 24),
                           _buildManualItem('Step Expand', '점진적 문장 확장',
                               '짧은 기초 문장부터 시작해, AI의 날카로운 질문에 대답하며 점점 길고 세련된 문장 구조를 만들어가는 집중 훈련입니다.'),
+                          const Divider(color: Colors.white12, height: 32),
+                          _buildBillingLegend(),
                         ],
                       ),
                     ),
@@ -190,6 +220,59 @@ class _StealthRoomMasterState extends State<StealthRoomMaster> {
         Text(desc,
             style: const TextStyle(
                 color: Colors.white70, fontSize: 13, height: 1.4)),
+      ],
+    );
+  }
+
+  Widget _buildBillingLegend() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          '과금 인디케이터',
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 15,
+          ),
+        ),
+        const SizedBox(height: 12),
+        _buildBillingDotRow(
+          2,
+          'AI 대화 중 1초 차감, 복습·히스토리 체류 시 4초당 1초 차감',
+        ),
+        const SizedBox(height: 10),
+        _buildBillingDotRow(
+          0,
+          '과금 정지 — 마이크 대기(오토포즈) 시 자동 정지',
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBillingDotRow(int state, String label) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        SizedBox(
+          width: 28,
+          height: 28,
+          child: CustomPaint(
+            size: const Size(22, 22),
+            painter: BillingDotPainter(state),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 12,
+              height: 1.4,
+            ),
+          ),
+        ),
       ],
     );
   }

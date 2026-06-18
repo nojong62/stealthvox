@@ -55,6 +55,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   bool isPracticeMode = false;
   bool isPaused = false;
   double _fontScale = 1.0;
+
   /// 언어 표시 모드: 0=영어+한글, 1=영어만, 2=한글만
   int _langDisplayMode = 0;
   bool isLoadingRoom = true;
@@ -421,7 +422,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   // 📦 [Box 10: 헬퍼 - 권한 요청]
   Future<void> _initPermissions() async {
-    await [Permission.microphone, Permission.storage].request();
+    await [Permission.microphone].request();
   }
 
   // 📦 [Box 11-Room: 방 단위 진입 라우터]
@@ -774,11 +775,13 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     try {
       Uint8List? audio = await TtsCache.get(text, 'nova');
       if (audio != null) {
-        _debugLogs += "💾 [캐시 HIT-TTS공유] _playSmartAudio apiKeyEmpty=${_apiKey.isEmpty}\n";
+        _debugLogs +=
+            "💾 [캐시 HIT-TTS공유] _playSmartAudio apiKeyEmpty=${_apiKey.isEmpty}\n";
       } else {
         _debugLogs += "🌐 [캐시 MISS→API] _playSmartAudio\n";
         if (_apiKey.isEmpty) {
-          _debugLogs += "⚠️ [TTS fallback] API key empty, cache MISS → next turn\n";
+          _debugLogs +=
+              "⚠️ [TTS fallback] API key empty, cache MISS → next turn\n";
           if (mounted && isPracticeMode) {
             setState(() => _tutorAiSpeaking = false);
             _nextTurn();
@@ -979,7 +982,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         audio = await _fetchOpenAITTS(prompt, 1.0, 'nova');
         if (audio != null) TtsCache.put(prompt, 'nova', audio);
       } else {
-        _debugLogs += "⚠️ [retry prompt] cache MISS + API key empty → audio skipped\n";
+        _debugLogs +=
+            "⚠️ [retry prompt] cache MISS + API key empty → audio skipped\n";
       }
       if (audio == null || !mounted || !isPracticeMode) return;
       final player = AudioPlayer();
@@ -1022,9 +1026,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         final tWords = _practiceMatchWords(targetText);
         final sWords = _practiceMatchWords(transcript);
         final similarity = _practiceSimilarity(tWords, sWords);
-        final pass = transcript.isNotEmpty && sWords.isNotEmpty && similarity >= 0.5;
-        _debugLogs +=
-            "🎙️ [Practice STT] phase=$_phase index=$currentIndex\n"
+        final pass =
+            transcript.isNotEmpty && sWords.isNotEmpty && similarity >= 0.5;
+        _debugLogs += "🎙️ [Practice STT] phase=$_phase index=$currentIndex\n"
             "targetText=$targetText\n"
             "transcript=$transcript\n"
             "targetWords=${tWords.join(',')}\n"
@@ -1411,9 +1415,22 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   List<String> _splitLongChunkByWords(List<String> words) {
     if (words.length <= 8) return [words.join(' ')];
     const splitWords = {
-      'because', 'when', 'while', 'although', 'if', 'since',
-      'after', 'before', 'who', 'which', 'that', 'where',
-      'and', 'but', 'so', 'to'
+      'because',
+      'when',
+      'while',
+      'although',
+      'if',
+      'since',
+      'after',
+      'before',
+      'who',
+      'which',
+      'that',
+      'where',
+      'and',
+      'but',
+      'so',
+      'to'
     };
     // 4~7 위치에서 자연 분할 위치 탐색
     for (int i = 5; i >= 3; i--) {
@@ -1586,7 +1603,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   Future<List<String>?> _generateKoFragmentsGpt(List<String> enChunks) async {
     if (_apiKey.isEmpty || enChunks.isEmpty) return null;
     try {
-      const sysPrompt = """You are a Korean sight-translation (jikdokjikhae) helper.
+      const sysPrompt =
+          """You are a Korean sight-translation (jikdokjikhae) helper.
 You receive an English sentence already split into ordered chunks as a JSON array.
 For EACH chunk, output ONE short Korean reading fragment that follows the English word order.
 These are intentionally incomplete connecting fragments, NOT a polished full translation.
@@ -1645,7 +1663,8 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
   }
 
   // 🆕 [KO-FRAG] 디스크 캐시 읽기 (영어 청크 캐시와 파일명 분리: kofrag_v1)
-  Future<List<String>?> _readKoFragCache(String variant, String sentence) async {
+  Future<List<String>?> _readKoFragCache(
+      String variant, String sentence) async {
     try {
       final dir = await getApplicationDocumentsDirectory();
       final roomId = widget.historyDoc.id;
@@ -1670,8 +1689,8 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
       final hash = _chunkTextHash(sentence);
       final folder = Directory('${dir.path}/chunk_cache');
       if (!await folder.exists()) await folder.create(recursive: true);
-      final file = File(
-          '${folder.path}/kofrag_v1_${roomId}_${variant}_$hash.json');
+      final file =
+          File('${folder.path}/kofrag_v1_${roomId}_${variant}_$hash.json');
       await file.writeAsString(jsonEncode(ko));
     } catch (e) {
       debugPrint("[writeKoFragCache] $e");
@@ -1808,7 +1827,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
 
       _dgSocket = await WebSocket.connect(
         'wss://api.deepgram.com/v1/listen'
-        '?model=nova-2'
+        '?model=nova-3'
         '&language=en-US'
         '&encoding=linear16'
         '&sample_rate=16000'
@@ -4601,6 +4620,20 @@ RULES — follow exactly:
                       ],
                     ),
                   ),
+                  // 빌링 상태 인디케이터
+                  ValueListenableBuilder<int>(
+                    valueListenable: BillingTicker.instance.billingState,
+                    builder: (_, s, __) => GestureDetector(
+                      onTap: s == 0 ? _resetIdleTimer : null,
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 4, right: 6),
+                        child: CustomPaint(
+                          size: const Size(16, 16),
+                          painter: BillingDotPainter(s),
+                        ),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -5041,8 +5074,7 @@ RULES — follow exactly:
     _polishedRevealTimer?.cancel();
     // 로딩 스피너 먼저 표시 (GPT 분할 대기 중)
     if (mounted) setState(() => _practicingPolished = true);
-    final units =
-        await _splitSentenceIntoChunks(_polishedSentence, 'polished');
+    final units = await _splitSentenceIntoChunks(_polishedSentence, 'polished');
     if (mounted) {
       setState(() {
         _polishedUnits = units.isNotEmpty ? units : [_polishedSentence];
@@ -5490,6 +5522,20 @@ RULES — follow exactly:
                       ),
                     ),
                   ),
+                  // 빌링 상태 인디케이터
+                  ValueListenableBuilder<int>(
+                    valueListenable: BillingTicker.instance.billingState,
+                    builder: (_, s, __) => GestureDetector(
+                      onTap: s == 0 ? _resetIdleTimer : null,
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 4, right: 6),
+                        child: CustomPaint(
+                          size: const Size(16, 16),
+                          painter: BillingDotPainter(s),
+                        ),
+                      ),
+                    ),
+                  ),
                   // P/E 버튼 — Expanded ↔ Polished 전환
                   GestureDetector(
                     onTap: _practicingPolished
@@ -5771,7 +5817,8 @@ RULES — follow exactly:
                                                 height: 1.45,
                                               ),
                                             ),
-                                            _buildChunkKoLine(chunk), // 🆕 [KO-FRAG]
+                                            _buildChunkKoLine(
+                                                chunk), // 🆕 [KO-FRAG]
                                             if (isCurrent &&
                                                 _aiChunkLoading) ...[
                                               const SizedBox(height: 4),
@@ -5991,7 +6038,8 @@ RULES — follow exactly:
     if (mode == 'clone') {
       String partner = _historyString(data, 'partner_label');
       if (partner.isEmpty) partner = _historyString(data, 'clone_name');
-      if (partner.isEmpty) partner = _historyString(data, 'expand_partner_name');
+      if (partner.isEmpty)
+        partner = _historyString(data, 'expand_partner_name');
       if (partner.isEmpty) {
         partner =
             await _fetchCloneNameForHistory(_historyString(data, 'clone_id'));
@@ -6011,7 +6059,8 @@ RULES — follow exactly:
     if (mode == 'roleplay') {
       String partner = _historyString(data, 'partner_label');
       if (partner.isEmpty) partner = _historyString(data, 'ai_role');
-      if (partner.isEmpty) partner = _historyString(data, 'expand_partner_name');
+      if (partner.isEmpty)
+        partner = _historyString(data, 'expand_partner_name');
       if (partner.isEmpty) partner = 'the roleplay partner';
       String user = _historyString(data, 'user_label');
       if (user.isEmpty) user = _historyString(data, 'user_role');
@@ -6892,8 +6941,12 @@ class _LangIconPainter extends CustomPainter {
 
     // ── 하단 우측 "T" (타겟/영어) ──
     final bool targetActive = (mode == 0 || mode == 1);
-    _drawText(canvas, 'T', Offset(size.width * 0.55, size.height * 0.58),
-        size.width * 0.34, targetActive ? Colors.white : const Color(0x44FFFFFF));
+    _drawText(
+        canvas,
+        'T',
+        Offset(size.width * 0.55, size.height * 0.58),
+        size.width * 0.34,
+        targetActive ? Colors.white : const Color(0x44FFFFFF));
 
     // ── 하단 좌측: 타겟 비활성일 때 X 표시 ──
     if (!targetActive) {

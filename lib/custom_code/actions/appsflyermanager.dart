@@ -34,7 +34,7 @@ class AppsFlyerManager {
       final AppsFlyerOptions options = AppsFlyerOptions(
         afDevKey: devKey,
         appId: appId,
-        showDebug: true, // 테스트 기간 동안 true 유지
+        showDebug: false, // Release: disable debug logs
         timeToWaitForATTUserAuthorization: 15,
       );
 
@@ -123,8 +123,7 @@ class AppsFlyerManager {
 
       final String deepLinkValue =
           (params['deep_link_value'] ?? '').toString().trim();
-      final String inviteType =
-          (params['invite_type'] ?? '').toString().trim();
+      final String inviteType = (params['invite_type'] ?? '').toString().trim();
       final String afDp = (params['af_dp'] ?? '').toString().trim();
 
       debugPrint('[AppsFlyer] parsed duo roomId: $roomId');
@@ -133,8 +132,7 @@ class AppsFlyerManager {
       debugPrint('[AppsFlyer] parsed inviteType: $inviteType');
 
       // Duo 초대 판정 (deep_link_value, invite_type, af_dp 모두 체크)
-      final bool isDuoInvite =
-          deepLinkValue == 'duo_chat' ||
+      final bool isDuoInvite = deepLinkValue == 'duo_chat' ||
           inviteType == 'duo' ||
           afDp.contains('duo');
 

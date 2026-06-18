@@ -269,6 +269,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     final line = '[$ts] $tag $msg';
     print(line);
     _debugLogs.add(line);
+    AppLogLedger.instance.add('STEPEXPAND', '$tag $msg');
     // 메모리 폭발 방지: 500줄 초과 시 앞에서 50줄 자르기
     if (_debugLogs.length > 500) {
       _debugLogs.removeRange(0, 50);
@@ -393,7 +394,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   }
 
   Future<void> _initPermissions() async {
-    await [Permission.microphone, Permission.storage].request();
+    await [Permission.microphone].request();
   }
 
   Future<void> _fetchKeys() async {
@@ -710,6 +711,29 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     while (questionTts.pendingRequests > 0 || _ttsQueueManager.isBusy) {
       await Future.delayed(const Duration(milliseconds: 50));
       if (++ticks > 300) break;
+    }
+
+    // 첫 질문 후 사용자가 직접 이어서 말할 수 있도록 한국어 안내를 덧붙이고 재생한다.
+    const String inviteMsg = '하고 싶은 이야기가 있으시면 먼저 말씀해 주세요.';
+    aiOriginal = aiOriginal.isEmpty ? inviteMsg : '$aiOriginal\n$inviteMsg';
+    if (mounted && aiIdx < _localMessages.length) {
+      setState(() {
+        _localMessages[aiIdx]['original'] = aiOriginal;
+      });
+    }
+    final inviteTts = ChunkedTtsFetcher(
+      _openAiKey,
+      _ttsQueueManager,
+      'nova',
+      isUser: false,
+      onLog: _log,
+    );
+    inviteTts.addText(inviteMsg);
+    ticks = 0;
+    while (
+        (inviteTts.pendingRequests > 0 || _ttsQueueManager.isBusy) && mounted) {
+      await Future.delayed(const Duration(milliseconds: 50));
+      if (++ticks > 200) break;
     }
   }
 

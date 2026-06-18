@@ -292,7 +292,7 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
   }
 
   Future<void> _initPermissions() async {
-    await [Permission.microphone, Permission.storage].request();
+    await [Permission.microphone].request();
   }
 
   Future<void> _fetchKeys() async {
@@ -901,302 +901,312 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
                             bottom: MediaQuery.of(ctx).viewInsets.bottom,
                           ),
                           child: SingleChildScrollView(
-                          padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text("클론 이름",
-                                  style: TextStyle(
-                                      color: Colors.white54, fontSize: 12)),
-                              const SizedBox(height: 6),
-                              TextField(
-                                controller: _cloneNameController,
-                                style: const TextStyle(
-                                    color: Colors.white, fontSize: 14),
-                                decoration: InputDecoration(
-                                  hintText: "예: 클론(카톡 이름)",
-                                  hintStyle:
-                                      const TextStyle(color: Colors.white24),
-                                  filled: true,
-                                  fillColor: Colors.white.withOpacity(0.06),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                    borderSide: BorderSide.none,
+                            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text("클론 이름",
+                                    style: TextStyle(
+                                        color: Colors.white54, fontSize: 12)),
+                                const SizedBox(height: 6),
+                                TextField(
+                                  controller: _cloneNameController,
+                                  style: const TextStyle(
+                                      color: Colors.white, fontSize: 14),
+                                  decoration: InputDecoration(
+                                    hintText: "예: 클론(카톡 이름)",
+                                    hintStyle:
+                                        const TextStyle(color: Colors.white24),
+                                    filled: true,
+                                    fillColor: Colors.white.withOpacity(0.06),
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                      borderSide: BorderSide.none,
+                                    ),
+                                    contentPadding: const EdgeInsets.symmetric(
+                                        horizontal: 14, vertical: 12),
                                   ),
-                                  contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 14, vertical: 12),
                                 ),
-                              ),
-                              const SizedBox(height: 14),
-                              const Text("클론 특징",
-                                  style: TextStyle(
-                                      color: Colors.white54, fontSize: 12)),
-                              const SizedBox(height: 6),
-                              Stack(
-                                children: [
-                                  TextField(
-                                    controller: _kakaoTextController,
-                                    style: const TextStyle(
-                                        color: Colors.white, fontSize: 13),
-                                    maxLines: 5,
-                                    decoration: InputDecoration(
-                                      hintText: null,
-                                      filled: true,
-                                      fillColor:
-                                          Colors.white.withOpacity(0.06),
-                                      border: OutlineInputBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(10),
-                                        borderSide: BorderSide.none,
-                                      ),
-                                      contentPadding:
-                                          const EdgeInsets.all(14),
-                                    ),
-                                  ),
-                                  if (!_kakaoHasText)
-                                    const IgnorePointer(
-                                      child: Padding(
-                                        padding: EdgeInsets.all(14),
-                                        child: Text(
-                                          "1. 이어서 나누고 싶은 카톡 대화를 PC에서 복사해 붙여 넣기 합니다. (대화 순서 그대로)\n\n2. AI가 대화 시나리오를 써 드립니다. 클론의 특성을 적어주세요.\n   예) 다정한 연인, 유머러스한 친구, 배려심 많은 선배 등",
-                                          style: TextStyle(
-                                              color: Colors.white24,
-                                              fontSize: 12,
-                                              height: 1.5),
+                                const SizedBox(height: 14),
+                                const Text("클론 특징",
+                                    style: TextStyle(
+                                        color: Colors.white54, fontSize: 12)),
+                                const SizedBox(height: 6),
+                                Stack(
+                                  children: [
+                                    TextField(
+                                      controller: _kakaoTextController,
+                                      style: const TextStyle(
+                                          color: Colors.white, fontSize: 13),
+                                      maxLines: 5,
+                                      decoration: InputDecoration(
+                                        hintText: null,
+                                        filled: true,
+                                        fillColor:
+                                            Colors.white.withOpacity(0.06),
+                                        border: OutlineInputBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(10),
+                                          borderSide: BorderSide.none,
                                         ),
+                                        contentPadding:
+                                            const EdgeInsets.all(14),
                                       ),
                                     ),
-                                ],
-                              ),
-                              const SizedBox(height: 18),
-                              SizedBox(
-                                width: double.infinity,
-                                child: _isCreatingClone
-                                    ? const Center(
+                                    if (!_kakaoHasText)
+                                      const IgnorePointer(
                                         child: Padding(
-                                          padding: EdgeInsets.all(8),
-                                          child: CircularProgressIndicator(
-                                              color: Color(0xFF9333EA),
-                                              strokeWidth: 2),
+                                          padding: EdgeInsets.all(14),
+                                          child: Text(
+                                            "1. 이어서 나누고 싶은 카톡 대화를 PC에서 복사해 붙여 넣기 합니다. (대화 순서 그대로)\n\n2. AI가 대화 시나리오를 써 드립니다. 클론의 특성을 적어주세요.\n   예) 다정한 연인, 유머러스한 친구, 배려심 많은 선배 등",
+                                            style: TextStyle(
+                                                color: Colors.white24,
+                                                fontSize: 12,
+                                                height: 1.5),
+                                          ),
                                         ),
-                                      )
-                                    : Column(
-                                        children: [
-                                          // ── 기존: 카톡 붙여넣기 기반 클론 생성 ──
-                                          ElevatedButton.icon(
-                                            icon: const Icon(
-                                                Icons.add_circle_outline,
-                                                size: 18),
-                                            label: const Text("Create Clone"),
-                                            style: ElevatedButton.styleFrom(
-                                              backgroundColor:
-                                                  const Color(0xFF9333EA),
-                                              foregroundColor: Colors.white,
-                                              minimumSize: const Size(
-                                                  double.infinity, 0),
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                      vertical: 13),
-                                              shape: RoundedRectangleBorder(
-                                                  borderRadius:
-                                                      BorderRadius.circular(10)),
-                                            ),
-                                            onPressed: () async {
-                                              final newName =
-                                                  _cloneNameController.text
-                                                      .trim();
-                                              if (newName.isEmpty ||
-                                                  _kakaoTextController
-                                                      .text.isEmpty) return;
-                                              final isDuplicate = _clones.any(
-                                                (c) => (c['name'] as String)
-                                                        .trim() ==
-                                                    newName,
-                                              );
-                                              if (isDuplicate) {
-                                                ScaffoldMessenger.of(ctx)
-                                                    .showSnackBar(
-                                                  SnackBar(
-                                                    content: Text(
-                                                        '⚠️ "$newName" 이름의 클론이 이미 존재합니다.'),
-                                                    backgroundColor:
-                                                        const Color(0xFFEF4444),
-                                                    duration: const Duration(
-                                                        seconds: 2),
-                                                  ),
-                                                );
-                                                return;
-                                              }
-                                              setStateDialog(() =>
-                                                  _isCreatingClone = true);
-                                              String persona = await CloneBrain
-                                                  .generatePersonaFromChat(
-                                                apiKey: _openAiKey,
-                                                chatLog:
-                                                    _kakaoTextController.text,
-                                                cloneName: newName,
-                                              );
-                                              persona = await CloneBrain
-                                                  .confirmCloneIdentity(
-                                                apiKey: _openAiKey,
-                                                cloneName: newName,
-                                                persona: persona,
-                                              );
-                                              final String newId =
-                                                  await _createCloneInFirestore(
-                                                name: newName,
-                                                personality: persona,
-                                                originalText:
-                                                    _kakaoTextController.text,
-                                              );
-                                              setState(() {
-                                                _clones.add({
-                                                  'id': newId,
-                                                  'name': newName,
-                                                  'characteristics': persona,
-                                                  'original_text':
-                                                      _kakaoTextController.text,
-                                                });
-                                                _selectedCloneId = newId;
-                                                _selectedCloneContext = persona;
-                                                _cloneSummary = '';
-                                                _recentHistory = [];
-                                                _memoryTurnCount = 0;
-                                                _localMessages.clear();
-                                              });
-                                              Navigator.pop(dialogContext);
-                                              Future.delayed(
-                                                  const Duration(seconds: 2),
-                                                  () {
-                                                if (mounted)
-                                                  _generateAndPlayAiOpener();
-                                              });
-                                            },
-                                          ),
-                                          const SizedBox(height: 10),
-                                          // ── 신규: 추천 클론 생성 (성격 설명 → 30개 시나리오 자동 생성 → 즉시 채팅) ──
-                                          OutlinedButton.icon(
-                                            icon: const Icon(
-                                                Icons.auto_awesome,
-                                                size: 18),
-                                            label: const Text("Suggested Clone"),
-                                            style: OutlinedButton.styleFrom(
-                                              foregroundColor:
-                                                  const Color(0xFFD8B4FE),
-                                              side: const BorderSide(
-                                                  color: Color(0xFF9333EA),
-                                                  width: 1.2),
-                                              minimumSize: const Size(
-                                                  double.infinity, 0),
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                      vertical: 13),
-                                              shape: RoundedRectangleBorder(
-                                                  borderRadius:
-                                                      BorderRadius.circular(10)),
-                                            ),
-                                            onPressed: () async {
-                                              final newName =
-                                                  _cloneNameController.text
-                                                      .trim();
-                                              final scenarioHint =
-                                                  _kakaoTextController.text
-                                                      .trim();
-                                              if (newName.isEmpty ||
-                                                  scenarioHint.isEmpty) {
-                                                ScaffoldMessenger.of(ctx)
-                                                    .showSnackBar(
-                                                  const SnackBar(
-                                                    content: Text(
-                                                        '클론 이름과 시나리오 성격을 입력해 주세요.'),
-                                                    backgroundColor:
-                                                        Color(0xFFEF4444),
-                                                    duration:
-                                                        Duration(seconds: 2),
-                                                  ),
-                                                );
-                                                return;
-                                              }
-                                              final isDuplicate = _clones.any(
-                                                (c) => (c['name'] as String)
-                                                        .trim() ==
-                                                    newName,
-                                              );
-                                              if (isDuplicate) {
-                                                ScaffoldMessenger.of(ctx)
-                                                    .showSnackBar(
-                                                  SnackBar(
-                                                    content: Text(
-                                                        '⚠️ "$newName" 이름의 클론이 이미 존재합니다.'),
-                                                    backgroundColor:
-                                                        const Color(0xFFEF4444),
-                                                    duration: const Duration(
-                                                        seconds: 2),
-                                                  ),
-                                                );
-                                                return;
-                                              }
-                                              setStateDialog(() =>
-                                                  _isCreatingClone = true);
-                                              // 1) 30개 가상 시나리오 생성
-                                              final String scenarios =
-                                                  await CloneBrain
-                                                      .generateRecommendedScenarios(
-                                                apiKey: _openAiKey,
-                                                scenarioHint: scenarioHint,
-                                                cloneName: newName,
-                                              );
-                                              // 2) 성격 설명 + 시나리오로 페르소나 추출
-                                              String persona = await CloneBrain
-                                                  .generatePersonaFromChat(
-                                                apiKey: _openAiKey,
-                                                chatLog:
-                                                    '성격 설명:\n$scenarioHint\n\n연습 시나리오:\n$scenarios',
-                                                cloneName: newName,
-                                              );
-                                              persona = await CloneBrain
-                                                  .confirmCloneIdentity(
-                                                apiKey: _openAiKey,
-                                                cloneName: newName,
-                                                persona: persona,
-                                              );
-                                              // 3) Firestore 저장 (original_text=30개 시나리오 → Edit에서 수정 가능)
-                                              final String newId =
-                                                  await _createCloneInFirestore(
-                                                name: newName,
-                                                personality: persona,
-                                                originalText: scenarios,
-                                              );
-                                              setState(() {
-                                                _clones.add({
-                                                  'id': newId,
-                                                  'name': newName,
-                                                  'characteristics': persona,
-                                                  'original_text': scenarios,
-                                                });
-                                                _selectedCloneId = newId;
-                                                _selectedCloneContext = persona;
-                                                _cloneSummary = '';
-                                                _recentHistory = [];
-                                                _memoryTurnCount = 0;
-                                                _localMessages.clear();
-                                              });
-                                              Navigator.pop(dialogContext);
-                                              Future.delayed(
-                                                  const Duration(seconds: 2),
-                                                  () {
-                                                if (mounted)
-                                                  _generateAndPlayAiOpener();
-                                              });
-                                            },
-                                          ),
-                                        ],
                                       ),
-                              ),
-                            ],
+                                  ],
+                                ),
+                                const SizedBox(height: 18),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: _isCreatingClone
+                                      ? const Center(
+                                          child: Padding(
+                                            padding: EdgeInsets.all(8),
+                                            child: CircularProgressIndicator(
+                                                color: Color(0xFF9333EA),
+                                                strokeWidth: 2),
+                                          ),
+                                        )
+                                      : Column(
+                                          children: [
+                                            // ── 기존: 카톡 붙여넣기 기반 클론 생성 ──
+                                            ElevatedButton.icon(
+                                              icon: const Icon(
+                                                  Icons.add_circle_outline,
+                                                  size: 18),
+                                              label: const Text("Create Clone"),
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor:
+                                                    const Color(0xFF9333EA),
+                                                foregroundColor: Colors.white,
+                                                minimumSize: const Size(
+                                                    double.infinity, 0),
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        vertical: 13),
+                                                shape: RoundedRectangleBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            10)),
+                                              ),
+                                              onPressed: () async {
+                                                final newName =
+                                                    _cloneNameController.text
+                                                        .trim();
+                                                if (newName.isEmpty ||
+                                                    _kakaoTextController
+                                                        .text.isEmpty) return;
+                                                final isDuplicate = _clones.any(
+                                                  (c) =>
+                                                      (c['name'] as String)
+                                                          .trim() ==
+                                                      newName,
+                                                );
+                                                if (isDuplicate) {
+                                                  ScaffoldMessenger.of(ctx)
+                                                      .showSnackBar(
+                                                    SnackBar(
+                                                      content: Text(
+                                                          '⚠️ "$newName" 이름의 클론이 이미 존재합니다.'),
+                                                      backgroundColor:
+                                                          const Color(
+                                                              0xFFEF4444),
+                                                      duration: const Duration(
+                                                          seconds: 2),
+                                                    ),
+                                                  );
+                                                  return;
+                                                }
+                                                setStateDialog(() =>
+                                                    _isCreatingClone = true);
+                                                String persona = await CloneBrain
+                                                    .generatePersonaFromChat(
+                                                  apiKey: _openAiKey,
+                                                  chatLog:
+                                                      _kakaoTextController.text,
+                                                  cloneName: newName,
+                                                );
+                                                persona = await CloneBrain
+                                                    .confirmCloneIdentity(
+                                                  apiKey: _openAiKey,
+                                                  cloneName: newName,
+                                                  persona: persona,
+                                                );
+                                                final String newId =
+                                                    await _createCloneInFirestore(
+                                                  name: newName,
+                                                  personality: persona,
+                                                  originalText:
+                                                      _kakaoTextController.text,
+                                                );
+                                                setState(() {
+                                                  _clones.add({
+                                                    'id': newId,
+                                                    'name': newName,
+                                                    'characteristics': persona,
+                                                    'original_text':
+                                                        _kakaoTextController
+                                                            .text,
+                                                  });
+                                                  _selectedCloneId = newId;
+                                                  _selectedCloneContext =
+                                                      persona;
+                                                  _cloneSummary = '';
+                                                  _recentHistory = [];
+                                                  _memoryTurnCount = 0;
+                                                  _localMessages.clear();
+                                                });
+                                                Navigator.pop(dialogContext);
+                                                Future.delayed(
+                                                    const Duration(seconds: 2),
+                                                    () {
+                                                  if (mounted)
+                                                    _generateAndPlayAiOpener();
+                                                });
+                                              },
+                                            ),
+                                            const SizedBox(height: 10),
+                                            // ── 신규: 추천 클론 생성 (성격 설명 → 30개 시나리오 자동 생성 → 즉시 채팅) ──
+                                            OutlinedButton.icon(
+                                              icon: const Icon(
+                                                  Icons.auto_awesome,
+                                                  size: 18),
+                                              label:
+                                                  const Text("Suggested Clone"),
+                                              style: OutlinedButton.styleFrom(
+                                                foregroundColor:
+                                                    const Color(0xFFD8B4FE),
+                                                side: const BorderSide(
+                                                    color: Color(0xFF9333EA),
+                                                    width: 1.2),
+                                                minimumSize: const Size(
+                                                    double.infinity, 0),
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        vertical: 13),
+                                                shape: RoundedRectangleBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            10)),
+                                              ),
+                                              onPressed: () async {
+                                                final newName =
+                                                    _cloneNameController.text
+                                                        .trim();
+                                                final scenarioHint =
+                                                    _kakaoTextController.text
+                                                        .trim();
+                                                if (newName.isEmpty ||
+                                                    scenarioHint.isEmpty) {
+                                                  ScaffoldMessenger.of(ctx)
+                                                      .showSnackBar(
+                                                    const SnackBar(
+                                                      content: Text(
+                                                          '클론 이름과 시나리오 성격을 입력해 주세요.'),
+                                                      backgroundColor:
+                                                          Color(0xFFEF4444),
+                                                      duration:
+                                                          Duration(seconds: 2),
+                                                    ),
+                                                  );
+                                                  return;
+                                                }
+                                                final isDuplicate = _clones.any(
+                                                  (c) =>
+                                                      (c['name'] as String)
+                                                          .trim() ==
+                                                      newName,
+                                                );
+                                                if (isDuplicate) {
+                                                  ScaffoldMessenger.of(ctx)
+                                                      .showSnackBar(
+                                                    SnackBar(
+                                                      content: Text(
+                                                          '⚠️ "$newName" 이름의 클론이 이미 존재합니다.'),
+                                                      backgroundColor:
+                                                          const Color(
+                                                              0xFFEF4444),
+                                                      duration: const Duration(
+                                                          seconds: 2),
+                                                    ),
+                                                  );
+                                                  return;
+                                                }
+                                                setStateDialog(() =>
+                                                    _isCreatingClone = true);
+                                                // 1) 30개 가상 시나리오 생성
+                                                final String scenarios =
+                                                    await CloneBrain
+                                                        .generateRecommendedScenarios(
+                                                  apiKey: _openAiKey,
+                                                  scenarioHint: scenarioHint,
+                                                  cloneName: newName,
+                                                );
+                                                // 2) 성격 설명 + 시나리오로 페르소나 추출
+                                                String persona = await CloneBrain
+                                                    .generatePersonaFromChat(
+                                                  apiKey: _openAiKey,
+                                                  chatLog:
+                                                      '성격 설명:\n$scenarioHint\n\n연습 시나리오:\n$scenarios',
+                                                  cloneName: newName,
+                                                );
+                                                persona = await CloneBrain
+                                                    .confirmCloneIdentity(
+                                                  apiKey: _openAiKey,
+                                                  cloneName: newName,
+                                                  persona: persona,
+                                                );
+                                                // 3) Firestore 저장 (original_text=30개 시나리오 → Edit에서 수정 가능)
+                                                final String newId =
+                                                    await _createCloneInFirestore(
+                                                  name: newName,
+                                                  personality: persona,
+                                                  originalText: scenarios,
+                                                );
+                                                setState(() {
+                                                  _clones.add({
+                                                    'id': newId,
+                                                    'name': newName,
+                                                    'characteristics': persona,
+                                                    'original_text': scenarios,
+                                                  });
+                                                  _selectedCloneId = newId;
+                                                  _selectedCloneContext =
+                                                      persona;
+                                                  _cloneSummary = '';
+                                                  _recentHistory = [];
+                                                  _memoryTurnCount = 0;
+                                                  _localMessages.clear();
+                                                });
+                                                Navigator.pop(dialogContext);
+                                                Future.delayed(
+                                                    const Duration(seconds: 2),
+                                                    () {
+                                                  if (mounted)
+                                                    _generateAndPlayAiOpener();
+                                                });
+                                              },
+                                            ),
+                                          ],
+                                        ),
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
                         ),
                       ],
                     ),
@@ -1315,15 +1325,13 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
                                   ),
                                   actions: [
                                     TextButton(
-                                      onPressed: () =>
-                                          Navigator.pop(c, false),
+                                      onPressed: () => Navigator.pop(c, false),
                                       child: const Text('취소',
-                                          style: TextStyle(
-                                              color: Colors.white38)),
+                                          style:
+                                              TextStyle(color: Colors.white38)),
                                     ),
                                     TextButton(
-                                      onPressed: () =>
-                                          Navigator.pop(c, true),
+                                      onPressed: () => Navigator.pop(c, true),
                                       child: const Text('삭제',
                                           style: TextStyle(
                                               color: Color(0xFFEF4444))),
@@ -2228,10 +2236,12 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
       }
 
       // 유저 original — 백그라운드 생성이 완료된 값 사용, 비어 있으면 Deepgram 원문 fallback
-      final String hostOriginal =
-          (_localMessages[hostIndex]['original'] ?? '').toString().trim().isNotEmpty
-              ? (_localMessages[hostIndex]['original'] ?? '').toString()
-              : finalTranscript;
+      final String hostOriginal = (_localMessages[hostIndex]['original'] ?? '')
+              .toString()
+              .trim()
+              .isNotEmpty
+          ? (_localMessages[hostIndex]['original'] ?? '').toString()
+          : finalTranscript;
 
       final hostLine = {
         'role': 'HOST',
@@ -2468,10 +2478,12 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
                 expanded,
                 partnerLabel: partnerLabel,
               );
-              polished = (pol != null && pol.trim().isNotEmpty) ? pol.trim() : "";
+              polished =
+                  (pol != null && pol.trim().isNotEmpty) ? pol.trim() : "";
             }
 
-            if (overlayShown && mounted &&
+            if (overlayShown &&
+                mounted &&
                 Navigator.of(context, rootNavigator: true).canPop()) {
               Navigator.of(context, rootNavigator: true).pop();
             }
@@ -2621,7 +2633,8 @@ class _RoutineModeCloneState extends State<RoutineModeClone> {
                   const SizedBox(width: 6),
                   Text(
                     () {
-                      final int s = (FFAppState().remainingTime).toInt().clamp(0, 999999);
+                      final int s =
+                          (FFAppState().remainingTime).toInt().clamp(0, 999999);
                       final int h = s ~/ 3600;
                       final int m = (s % 3600) ~/ 60;
                       return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
@@ -3832,7 +3845,8 @@ content and gist of the WHOLE conversation.
       String s =
           ((body['choices'] as List).first['message']['content'] as String)
               .trim();
-      if (s.startsWith('"') && s.endsWith('"')) s = s.substring(1, s.length - 1);
+      if (s.startsWith('"') && s.endsWith('"'))
+        s = s.substring(1, s.length - 1);
       return s.isEmpty ? null : s;
     } catch (e) {
       debugPrint("[CloneBrain.generateExpandedFromConversation] $e");
@@ -3893,7 +3907,8 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
       String p =
           ((body['choices'] as List).first['message']['content'] as String)
               .trim();
-      if (p.startsWith('"') && p.endsWith('"')) p = p.substring(1, p.length - 1);
+      if (p.startsWith('"') && p.endsWith('"'))
+        p = p.substring(1, p.length - 1);
       return p.isEmpty ? originalSentence : p;
     } catch (e) {
       debugPrint("[CloneBrain.polishSentence] $e");
@@ -4102,7 +4117,8 @@ The particle before the verb's doer (이/가) is ALWAYS the subject. Never swap 
     required String cloneContext,
     required String myTarget,
     String cloneSummary = '',
-    List<Map<String, dynamic>> history = const [], // 🧩 [A] 구조화 교대 턴(오프너 포함). 비면 contextStr 블롭으로 폴백
+    List<Map<String, dynamic>> history =
+        const [], // 🧩 [A] 구조화 교대 턴(오프너 포함). 비면 contextStr 블롭으로 폴백
   }) async* {
     final client = http.Client();
     try {
@@ -4458,7 +4474,8 @@ Rules:
                 {'role': 'system', 'content': sysPrompt},
                 {
                   'role': 'user',
-                  'content': 'Character and conversation style:\n\n$scenarioHint',
+                  'content':
+                      'Character and conversation style:\n\n$scenarioHint',
                 },
               ],
             }),
@@ -4467,8 +4484,7 @@ Rules:
 
       if (res.statusCode == 200) {
         final data = jsonDecode(utf8.decode(res.bodyBytes));
-        final out =
-            data['choices'][0]['message']['content'].toString().trim();
+        final out = data['choices'][0]['message']['content'].toString().trim();
         if (out.isNotEmpty) return out;
       }
     } catch (e) {

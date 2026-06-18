@@ -93,6 +93,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     final line = '[$ts] $tag $msg';
     print(line);
     _debugLogs.add(line);
+    AppLogLedger.instance.add('ROLEPLAY', '$tag $msg');
     if (_debugLogs.length > 500) {
       _debugLogs.removeRange(0, 50);
     }
@@ -440,7 +441,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   }
 
   Future<void> _initPermissions() async {
-    await [Permission.microphone, Permission.storage].request();
+    await [Permission.microphone].request();
   }
 
   Future<void> _fetchKeysAndInit() async {

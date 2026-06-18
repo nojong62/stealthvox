@@ -167,6 +167,7 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
     final line = '[$ts] $tag $msg';
     print(line);
     _debugLogs.add(line);
+    AppLogLedger.instance.add('FREETALK', '$tag $msg');
     // 메모리 폭발 방지: 500줄 초과 시 앞에서 50줄 자르기
     if (_debugLogs.length > 500) {
       _debugLogs.removeRange(0, 50);
@@ -285,7 +286,7 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
   }
 
   Future<void> _initPermissions() async {
-    await [Permission.microphone, Permission.storage].request();
+    await [Permission.microphone].request();
   }
 
   Future<void> _fetchKeys() async {
@@ -660,21 +661,10 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
         if (++waitTicks > 200) break;
       }
 
-      // chat_history 저장
-      if (openerText.isNotEmpty) {
-        final String aiOriginal = await FreeTalkBrain.generateCleanOriginal(
-            apiKey: _openAiKey, englishText: openerText);
-        if (mounted && _localMessages.length > aiIndex) {
-          setState(() => _localMessages[aiIndex]['original'] = aiOriginal);
-        }
-        await _saveHistoryMessages([
-          {
-            'role': 'SYSTEM',
-            'original_text': aiOriginal,
-            'translated_text': _cleanText(openerText),
-          }
-        ]);
-      }
+      // 🧩 [HIST-POLICY] AI 오프너는 chat_history에 저장하지 않음.
+      //   - 유저 무응답 퇴장 시 빈 방 및 고아 messages 방지
+      //   - 히스토리는 유저 첫 저장 턴부터 시작 (line 1638의 저장에서 처리)
+      //   - UI original은 line 646~653의 .then()에서 이미 처리
     } catch (e) {
       _log('❌ [OPENER-ERR]', 'Clone Opener Error: $e');
     } finally {

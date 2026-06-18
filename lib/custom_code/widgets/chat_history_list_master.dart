@@ -63,6 +63,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
     final line = '[$timestamp] [HIST-DBG] $message';
     debugPrint(line);
     _historyDebugLogs.add(line);
+    AppLogLedger.instance.add('HISTORY_LIST', message);
     if (_historyDebugLogs.length > 500) {
       _historyDebugLogs.removeRange(0, _historyDebugLogs.length - 500);
     }
