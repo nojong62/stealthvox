@@ -123,7 +123,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // 📦 [Box 4-C: Step Expand Practice 1 & 2 상태]
   bool _isStepExpandRoom = false;
   List<Map<String, dynamic>> _stepExpandTurns = [];
-  // P1/P2 "Please try again" 힌트 표시 여부
+  // P1/P2 retry hint visibility
   bool _showRetryHint = false;
   int _turnPracticeRetryCount = 0;
 
@@ -972,7 +972,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   }
 
   Future<void> _playRetryPrompt() async {
-    const prompt = 'Please try again';
+    const prompt = '끝까지 다시 읽어 주세요';
     try {
       Uint8List? audio = await TtsCache.get(prompt, 'nova');
       if (audio != null) {
@@ -1016,6 +1016,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       final request = http.MultipartRequest('POST', uri);
       request.headers['Authorization'] = 'Bearer $_apiKey';
       request.fields['model'] = 'whisper-1';
+      request.fields['language'] = 'en';
+      request.fields['prompt'] = targetText;
       request.files.add(await http.MultipartFile.fromPath('file', path));
       final streamed =
           await request.send().timeout(const Duration(seconds: 10));
@@ -1026,14 +1028,23 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         final tWords = _practiceMatchWords(targetText);
         final sWords = _practiceMatchWords(transcript);
         final similarity = _practiceSimilarity(tWords, sWords);
-        final pass =
-            transcript.isNotEmpty && sWords.isNotEmpty && similarity >= 0.5;
+        // [READ-THROUGH] 전체를 끝까지 읽었는지 판정
+        // 8단어 미만: 음성 인식되면 통과
+        // 8단어 이상: 60% 이상 매칭 필요
+        final bool pass;
+        if (tWords.length < 8) {
+          pass = transcript.isNotEmpty && sWords.isNotEmpty;
+        } else {
+          pass =
+              transcript.isNotEmpty && sWords.isNotEmpty && similarity >= 0.6;
+        }
         _debugLogs += "🎙️ [Practice STT] phase=$_phase index=$currentIndex\n"
             "targetText=$targetText\n"
             "transcript=$transcript\n"
-            "targetWords=${tWords.join(',')}\n"
-            "spokenWords=${sWords.join(',')}\n"
+            "targetWords(${tWords.length})=${tWords.join(',')}\n"
+            "spokenWords(${sWords.length})=${sWords.join(',')}\n"
             "similarity=${similarity.toStringAsFixed(2)}\n"
+            "threshold=${tWords.length < 8 ? 'any' : '0.60'}\n"
             "retryCount=$_turnPracticeRetryCount\n"
             "result=${pass ? 'pass' : 'fail'}\n";
         if (pass) {
@@ -2073,7 +2084,23 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
       final audio = await _getOrFetchChunkAudio(idx);
       if (!mounted) return;
       if (mounted) setState(() => _aiChunkLoading = false);
-      if (audio != null) await audioPlayer.play(BytesSource(audio));
+      if (audio != null) {
+        await audioPlayer.play(BytesSource(audio));
+      } else {
+        // [NULL-FALLBACK] Continue to the next chunk when TTS returns no audio.
+        _debugLogs +=
+            "🔁 [playChunkAI] audio=null idx=$idx -> next chunk fallback\n";
+        if (_phase == ShadowingPhase.chunkPractice && !_isReplayMode) {
+          final nextIdx = idx + 1;
+          if (nextIdx < _chunks.length) {
+            Future.delayed(const Duration(milliseconds: 400), () {
+              if (mounted && _phase == ShadowingPhase.chunkPractice) {
+                _onChunkTapped(nextIdx);
+              }
+            });
+          }
+        }
+      }
     } catch (e) {
       debugPrint("[playChunkAI] $e");
       _debugLogs += "💥 [AI재생] 예외: $e\n";
@@ -2294,15 +2321,21 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
       String text, double speed, String voice) async {
     if (_apiKey.isEmpty || text.trim().isEmpty) return null;
     try {
-      var response = await http.post(
-        Uri.parse('https://api.openai.com/v1/audio/speech'),
-        headers: {
-          'Authorization': 'Bearer $_apiKey',
-          'Content-Type': 'application/json'
-        },
-        body: jsonEncode(
-            {'model': 'tts-1', 'input': text, 'voice': voice, 'speed': speed}),
-      );
+      var response = await http
+          .post(
+            Uri.parse('https://api.openai.com/v1/audio/speech'),
+            headers: {
+              'Authorization': 'Bearer $_apiKey',
+              'Content-Type': 'application/json'
+            },
+            body: jsonEncode({
+              'model': 'tts-1',
+              'input': text,
+              'voice': voice,
+              'speed': speed
+            }),
+          )
+          .timeout(const Duration(seconds: 10));
       return response.statusCode == 200 ? response.bodyBytes : null;
     } catch (e) {
       debugPrint("[fetchOpenAITTS] $e");
@@ -4765,7 +4798,7 @@ RULES — follow exactly:
                                       Icon(Icons.mic_off,
                                           color: Colors.orange, size: 15),
                                       SizedBox(width: 5),
-                                      Text("Please try again 🎙",
+                                      Text("끝까지 다시 읽어 주세요 🎙",
                                           style: TextStyle(
                                               color: Colors.orange,
                                               fontSize: 11)),
@@ -4886,7 +4919,9 @@ RULES — follow exactly:
               ),
 
             // 🔒 Tutor history modes do not generate Expanded Sentence here.
-            if (!_blocksHistoryExpandedSentence(_cachedRoomMode))
+            if (!_blocksHistoryExpandedSentence(_cachedRoomMode) &&
+                _phase != ShadowingPhase.part1Practice &&
+                _phase != ShadowingPhase.part2Practice)
               Padding(
                 padding: EdgeInsets.fromLTRB(
                   20,
