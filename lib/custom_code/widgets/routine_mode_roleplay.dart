@@ -677,7 +677,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 
       Scrollable.ensureVisible(
         ctx,
-        alignment: 0.45,
+        alignment: 0.1,
         duration: Duration(milliseconds: ms),
         curve: Curves.easeOut,
       );
