@@ -86,17 +86,11 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       1100; // UtteranceEnd/speechFinal=false 시 여유 대기
   bool _lastTurnWasSpeechFinal = false; // 마지막 onTurnEnded 이벤트 타입 기록
 
-  // 🔬 [v3.1 진단] 화면 로그 뷰어 (팝업에 쌓음)
-  final List<String> _debugLogs = [];
   void _log(String tag, String msg) {
     final ts = DateTime.now().toIso8601String().substring(11, 23);
     final line = '[$ts] $tag $msg';
     print(line);
-    _debugLogs.add(line);
     AppLogLedger.instance.add('ROLEPLAY', '$tag $msg');
-    if (_debugLogs.length > 500) {
-      _debugLogs.removeRange(0, 50);
-    }
   }
 
   // API 응답에서 [Action], (Laughs) 같은 오염 패턴 제거
@@ -113,126 +107,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     final t = text.trim();
     if (t.isEmpty) return true;
     return RegExp('^[\\s.,!?;:\'"\\[\\]{}()\\-]+\$').hasMatch(t);
-  }
-
-  void _showDebugLogDialog() {
-    showDialog(
-      context: context,
-      builder: (BuildContext dialogContext) {
-        return StatefulBuilder(
-          builder: (ctx, setDialogState) {
-            return Dialog(
-              backgroundColor: const Color(0xFF1A1A1A),
-              insetPadding: const EdgeInsets.all(12),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
-              child: SizedBox(
-                width: double.maxFinite,
-                height: MediaQuery.of(ctx).size.height * 0.85,
-                child: Column(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.bug_report,
-                              color: Color(0xFFFBBF24)),
-                          const SizedBox(width: 8),
-                          Text('진단 로그 (${_debugLogs.length})',
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold)),
-                          const Spacer(),
-                          IconButton(
-                            icon:
-                                const Icon(Icons.close, color: Colors.white70),
-                            onPressed: () => Navigator.pop(dialogContext),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const Divider(color: Colors.white24, height: 1),
-                    Expanded(
-                      child: Container(
-                        color: const Color(0xFF0A0A0A),
-                        padding: const EdgeInsets.all(8),
-                        child: SingleChildScrollView(
-                          reverse: true,
-                          child: SelectableText(
-                            _debugLogs.isEmpty
-                                ? '(로그 없음)'
-                                : _debugLogs.join('\n'),
-                            style: const TextStyle(
-                              color: Color(0xFFB3E5FC),
-                              fontFamily: 'monospace',
-                              fontSize: 11,
-                              height: 1.35,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const Divider(color: Colors.white24, height: 1),
-                    Padding(
-                      padding: const EdgeInsets.all(8),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              icon: const Icon(Icons.copy, size: 16),
-                              label: const Text('전체 복사'),
-                              style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF10B981)),
-                              onPressed: () async {
-                                final text = _debugLogs.join('\n');
-                                await Clipboard.setData(
-                                    ClipboardData(text: text));
-                                if (ctx.mounted) {
-                                  ScaffoldMessenger.of(ctx).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('✅ 로그 클립보드에 복사됨'),
-                                      duration: Duration(seconds: 1),
-                                    ),
-                                  );
-                                }
-                              },
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              icon: const Icon(Icons.refresh, size: 16),
-                              label: const Text('새로고침'),
-                              style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF3B82F6)),
-                              onPressed: () => setDialogState(() {}),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              icon: const Icon(Icons.delete_outline, size: 16),
-                              label: const Text('지우기'),
-                              style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFFEF4444)),
-                              onPressed: () {
-                                setState(() => _debugLogs.clear());
-                                setDialogState(() {});
-                              },
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
   }
 
   // 🌐 [v3.1] 로비에서 선택한 언어 이름 → Deepgram/OpenAI 언어 코드 매핑
@@ -266,6 +140,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         return 'hi';
       case 'arabic':
         return 'ar';
+      case 'dutch':
+        return 'nl';
       default:
         return 'en'; // English 포함
     }
@@ -653,34 +529,13 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 // ====================================================================
   // [텔레프롬프터 v1] 현재 버블을 화면 중앙(0.45)으로 부드럽게 이동.
   //   텍스트 길이 기반 동적 duration: 짧으면 느긋(700ms), 길면 빠르게(150ms).
-  //   key/context 미확보 시 기존 maxScrollExtent fallback.
+  //   reverse list uses position 0 as the latest-message anchor.
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollController.hasClients) return;
-      if (_localMessages.length <= 1) return;
-
-      final lastIdx = _localMessages.length - 1;
-      final key = _itemKeys[lastIdx];
-      final ctx = key?.currentContext;
-
-      if (ctx == null) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-        return;
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(0,
+            duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
       }
-
-      final text = (_localMessages[lastIdx]['target'] ?? '').toString();
-      final ms = (800 - text.length * 3).clamp(150, 700);
-
-      Scrollable.ensureVisible(
-        ctx,
-        alignment: 0.1,
-        duration: Duration(milliseconds: ms),
-        curve: Curves.easeOut,
-      );
     });
   }
 
@@ -724,7 +579,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       if (ctx == null) return;
       Scrollable.ensureVisible(
         ctx,
-        alignment: 0.02,
+        alignment: 0.98, // reverse: true top anchoring
         duration: const Duration(milliseconds: 220),
         curve: Curves.easeOut,
       );
@@ -947,10 +802,12 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         _log('✅ [LISTEN-02]', 'onConnected 콜백 실행');
       },
       onTranscriptUpdate: (transcript) {
+        BillingTicker.instance.resumeFromActivity('roleplay_stt_partial');
         _swDeepgram.reset();
         _swDeepgram.start();
       },
       onTurnEnded: (transcript, {bool speechFinal = false}) {
+        BillingTicker.instance.resumeFromActivity('roleplay_stt_result');
         _lastTurnWasSpeechFinal = speechFinal;
         _log('🔀 [LISTEN-03]',
             'onTurnEnded 콜백 수신: "$transcript" speechFinal=$speechFinal');
@@ -964,6 +821,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     );
     _log('🎤 [LISTEN-04]', 'connectAndStart 호출 직전');
     await _voiceManager!.connectAndStart();
+    BillingTicker.instance.resumeFromActivity('roleplay_mic_start');
     _log('🎤 [LISTEN-05]', 'connectAndStart 완료');
   }
 
@@ -1238,6 +1096,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         }
         if (mounted)
           setState(() => _localMessages[hostIndex]['target'] = userTargetText);
+        _scrollToCurrentTop(hostIndex);
 
         // [USER-FULL-TTS] no chunk TTS during user translation streaming.
         // Text still streams to the screen through setState above.
@@ -1906,6 +1765,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 
   /// 뒤로가기 시: 빈 방 폭파 or last_message 업데이트 후 나가기
   Future<void> _handleAutoSaveAndExit() async {
+    BillingTicker.instance.pause();
     try {
       if (_myHistoryRef != null) {
         final hasUserTurn = _localMessages.any((m) => m['role'] == 'HOST');
@@ -2046,7 +1906,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
             const SizedBox(width: 4),
             // [v3.6] 잔여시간 표시 + 길게 누르면 로그 (개발자용)
             GestureDetector(
-              onLongPress: _showDebugLogDialog,
               child: Container(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -2315,17 +2174,18 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   }
 
   Widget _buildChatList() {
-    final double bottomPad = _localMessages.length <= 1
-        ? MediaQuery.of(context).size.height * 0.4
-        : 16;
+    final double bottomPad = MediaQuery.of(context).size.height * 0.55;
     return ListView.builder(
+      reverse: true,
       controller: _scrollController,
-      padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPad),
+      padding: EdgeInsets.fromLTRB(16, bottomPad, 16, 12),
       itemCount: _localMessages.length,
       itemBuilder: (context, idx) {
-        _itemKeys[idx] ??= GlobalKey();
+        final realIdx = _localMessages.length - 1 - idx;
+        _itemKeys[realIdx] ??= GlobalKey();
         return Container(
-            key: _itemKeys[idx], child: _buildTextBlock(_localMessages[idx]));
+            key: _itemKeys[realIdx],
+            child: _buildTextBlock(_localMessages[realIdx]));
       },
     );
   }
@@ -3140,8 +3000,14 @@ class TtsQueueManager {
       );
 
       try {
+        BillingTicker.instance.resumeFromActivity(_currentChunkIsUser
+            ? 'roleplay_user_tts_start'
+            : 'roleplay_ai_tts_start');
         await _player.play(BytesSource(bytes));
         await _completer!.future.timeout(estimatedDuration);
+        BillingTicker.instance.resumeFromActivity(_currentChunkIsUser
+            ? 'roleplay_user_tts_end'
+            : 'roleplay_ai_tts_end');
       } catch (_) {
       } finally {
         if (_completer != null && !_completer!.isCompleted) {

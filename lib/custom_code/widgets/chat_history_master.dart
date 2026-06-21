@@ -60,7 +60,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   int _langDisplayMode = 0;
   bool isLoadingRoom = true;
   String roomName = "";
-  String _debugLogs = "";
   bool _isActionLocked = false;
 
   // 📦 [Box 4: 상태 변수 - Shadowing 상태 머신]
@@ -258,6 +257,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // 사용자 실제 활동 시작 시 오토포즈 즉시 해제 (중복 방지 포함)
   void _resumeHistoryFromUserAction() {
     _resetIdleTimer();
+    BillingTicker.instance.resumeFromActivity('history_user_action');
   }
 
   Widget _buildIdleBanner() => const SizedBox.shrink();
@@ -431,16 +431,12 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   //   - polished/expanded 없음 (Clone/Roleplay/Duo 방) → Tutor 모드
   Future<void> _enterShadowingFromRoom() async {
     _resumeHistoryFromUserAction();
-    _debugLogs = "=== ROOM PRACTICE ENTRY ===\n";
-    _debugLogs += "시각: ${DateTime.now()}\n";
-    _debugLogs += "방 ID: ${widget.historyDoc.id}\n\n";
     try {
       final snap = await widget.historyDoc.get();
       if (!mounted) return;
       final data = snap.data() as Map<String, dynamic>?;
 
       if (data == null) {
-        _debugLogs += "❌ 방 데이터 없음 → 진입 차단\n";
         _showRoomEntryToast("연습할 대화가 없습니다");
         return;
       }
@@ -451,16 +447,10 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
           _inferHistoryMode(data); // 🆕 [ROUTER-FIX] 버튼 표시 조건용 mode 캐시
       _cachedRoomMode = roomMode;
 
-      _debugLogs +=
-          "polished_sentence: ${polished.isEmpty ? '(없음)' : polished}\n";
-      _debugLogs +=
-          "expanded_sentence: ${expanded.isEmpty ? '(없음)' : expanded}\n\n";
-
       // 🆕 [ROUTER-FIX] step_expand(또는 mode 없는 구버전+expanded 존재)만 Step Expand 분기.
       // clone/roleplay는 expanded_sentence가 있어도 아래 Tutor 모드로 진행.
       if (roomMode == 'step_expand' ||
           (roomMode.isEmpty && (polished.isNotEmpty || expanded.isNotEmpty))) {
-        _debugLogs += "✅ Step Expand 방 분기 → messages 로드 + variantSelect\n";
         _polishedSentence = polished;
         _expandedSentence = expanded.isNotEmpty ? expanded : polished;
         _polishedLoadDone = true;
@@ -475,11 +465,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
               .get();
           if (mounted) {
             _stepExpandTurns = _parseStepExpandTurns(msgSnap.docs);
-            _debugLogs += "Step Expand 턴 수: ${_stepExpandTurns.length}\n";
           }
-        } catch (e) {
-          _debugLogs += "⚠️ messages 로드 실패: $e\n";
-        }
+        } catch (e) {}
         if (!mounted) return;
 
         // P3 즉시 진입을 위해 chunks 미리 빌드
@@ -499,7 +486,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       }
 
       // Clone / Roleplay / Duo 방: messages 서브컬렉션 → Tutor 모드
-      _debugLogs += "✅ Tutor 모드 분기 → messages 서브컬렉션 조회\n";
       final messagesSnap = await widget.historyDoc
           .collection('messages')
           .orderBy('created_at', descending: false)
@@ -519,12 +505,10 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
           .toList();
 
       if (tutorLines.isEmpty) {
-        _debugLogs += "❌ chat_lines 없음 → 진입 차단\n";
         _showRoomEntryToast("아직 연습할 대화가 없습니다");
         return;
       }
 
-      _debugLogs += "✅ 턴제 연습 진입: ${tutorLines.length}줄 로드\n";
       _tutorLines = tutorLines;
       if (mounted) {
         setState(() {
@@ -545,7 +529,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
             .addPostFrameCallback((_) => _showRoleSelectBubble());
       }
     } catch (e) {
-      _debugLogs += "💥 예외: $e\n";
       _showRoomEntryToast("연습 진입 실패: $e");
     }
   }
@@ -604,9 +587,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     try {
       Uint8List? audio = await TtsCache.get(text, voice);
       if (audio != null) {
-        _debugLogs += "💾 [캐시 HIT-TTS공유] _playTutorLineTTS\n";
       } else {
-        _debugLogs += "🌐 [캐시 MISS→API] _playTutorLineTTS\n";
         audio = await _fetchOpenAITTS(text, 1.0, voice);
         if (audio != null) {
           TtsCache.put(text, voice, audio);
@@ -633,9 +614,11 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       });
 
       try {
+        BillingTicker.instance.resumeFromActivity('history_tutor_tts_start');
         await player.play(BytesSource(audio));
         await completer.future
             .timeout(const Duration(seconds: 30), onTimeout: () {});
+        BillingTicker.instance.resumeFromActivity('history_tutor_tts_end');
       } finally {
         stateSub.cancel();
         completeSub.cancel();
@@ -650,7 +633,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // 🆕 [TUTOR] 사용자가 종료/중단할 때 호출
   void _stopTutorPlayback() {
     _resetIdleTimer();
-    _debugLogs += "⏹️ [TUTOR] 사용자 종료 요청\n";
     _tutorAudioPlayer?.stop();
     if (mounted) {
       setState(() {
@@ -699,6 +681,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   }
 
   void _nextTurn() {
+    BillingTicker.instance.resumeFromActivity('history_practice_next');
     if (!mounted || !isPracticeMode || isPaused) return;
     final next = currentIndex + 1;
     if (next >= _tutorLines.length) {
@@ -775,13 +758,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     try {
       Uint8List? audio = await TtsCache.get(text, 'nova');
       if (audio != null) {
-        _debugLogs +=
-            "💾 [캐시 HIT-TTS공유] _playSmartAudio apiKeyEmpty=${_apiKey.isEmpty}\n";
       } else {
-        _debugLogs += "🌐 [캐시 MISS→API] _playSmartAudio\n";
         if (_apiKey.isEmpty) {
-          _debugLogs +=
-              "⚠️ [TTS fallback] API key empty, cache MISS → next turn\n";
           if (mounted && isPracticeMode) {
             setState(() => _tutorAiSpeaking = false);
             _nextTurn();
@@ -807,7 +785,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       }
     } catch (e) {
       debugPrint("[playSmartAudio] $e");
-      _debugLogs += "💥 [TTS fallback] _playSmartAudio error=$e → next turn\n";
       if (mounted && isPracticeMode) {
         setState(() => _tutorAiSpeaking = false);
         _nextTurn();
@@ -878,6 +855,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   Future<void> _stopAutoVADRecordingAndProcess() async {
     _silenceTimer?.cancel();
     final path = await appAudioRecorder.stop();
+    BillingTicker.instance.resumeFromActivity('history_practice_stt_result');
     if (mounted)
       setState(() {
         _isAutoRecording = false;
@@ -976,15 +954,10 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     try {
       Uint8List? audio = await TtsCache.get(prompt, 'nova');
       if (audio != null) {
-        _debugLogs += "💾 [캐시 HIT-TTS공유] retry prompt\n";
       } else if (_apiKey.isNotEmpty) {
-        _debugLogs += "🌐 [캐시 MISS→API] retry prompt\n";
         audio = await _fetchOpenAITTS(prompt, 1.0, 'nova');
         if (audio != null) TtsCache.put(prompt, 'nova', audio);
-      } else {
-        _debugLogs +=
-            "⚠️ [retry prompt] cache MISS + API key empty → audio skipped\n";
-      }
+      } else {}
       if (audio == null || !mounted || !isPracticeMode) return;
       final player = AudioPlayer();
       final completer = Completer<void>();
@@ -1003,7 +976,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       }
     } catch (e) {
       debugPrint("[playRetryPrompt] $e");
-      _debugLogs += "💥 [retry prompt] audio failed: $e\n";
     }
   }
 
@@ -1025,6 +997,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       if (!mounted || !isPracticeMode) return;
       if (streamed.statusCode == 200) {
         final transcript = (jsonDecode(body)['text'] as String? ?? '').trim();
+        BillingTicker.instance
+            .resumeFromActivity('history_practice_stt_result');
         final tWords = _practiceMatchWords(targetText);
         final sWords = _practiceMatchWords(transcript);
         final similarity = _practiceSimilarity(tWords, sWords);
@@ -1038,15 +1012,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
           pass =
               transcript.isNotEmpty && sWords.isNotEmpty && similarity >= 0.6;
         }
-        _debugLogs += "🎙️ [Practice STT] phase=$_phase index=$currentIndex\n"
-            "targetText=$targetText\n"
-            "transcript=$transcript\n"
-            "targetWords(${tWords.length})=${tWords.join(',')}\n"
-            "spokenWords(${sWords.length})=${sWords.join(',')}\n"
-            "similarity=${similarity.toStringAsFixed(2)}\n"
-            "threshold=${tWords.length < 8 ? 'any' : '0.60'}\n"
-            "retryCount=$_turnPracticeRetryCount\n"
-            "result=${pass ? 'pass' : 'fail'}\n";
         if (pass) {
           _turnPracticeRetryCount = 0;
           // 🆕 [BOX-34] 유저 녹음 경로 캐시
@@ -1057,9 +1022,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         } else {
           _turnPracticeRetryCount++;
           final exceeded = _turnPracticeRetryCount >= 3;
-          _debugLogs += exceeded
-              ? "⚠️ [Practice STT] retry count exceeded → force next turn\n"
-              : "🔁 [Practice STT] retry count=$_turnPracticeRetryCount → retry recording\n";
           if ((_phase == ShadowingPhase.turnPractice ||
                   _phase == ShadowingPhase.part1Practice ||
                   _phase == ShadowingPhase.part2Practice) &&
@@ -1078,13 +1040,10 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
           }
         }
       } else {
-        _debugLogs +=
-            "⚠️ [Practice STT] status=${streamed.statusCode} body=$body → retry recording\n";
         if (isPracticeMode && !isPaused) _startAutoVADRecording();
       }
     } catch (e) {
       debugPrint("[processAutoVADRecording] $e");
-      _debugLogs += "💥 [Practice STT] exception=$e → retry recording\n";
       if (mounted && isPracticeMode && !isPaused) _startAutoVADRecording();
     }
   }
@@ -1097,34 +1056,15 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         (data['expanded_sentence'] ?? '').toString().trim();
 
     // 디버그 로그 초기화 및 기록
-    _debugLogs = "=== PRACTICE ENTRY DEBUG ===\n";
-    _debugLogs += "시각: ${DateTime.now()}\n";
-    _debugLogs += "DocId: $docId\n\n";
-    _debugLogs += "[메시지 문서 필드]\n";
-    _debugLogs +=
-        "translated_text: ${rawText.length > 100 ? rawText.substring(0, 100) + '...' : rawText}\n";
-    _debugLogs +=
-        "expanded_sentence (직접): ${directExpanded.isEmpty ? '(없음/비어있음)' : directExpanded}\n\n";
 
     if (directExpanded.isNotEmpty) {
       _expandedSentence = directExpanded;
-      _debugLogs += "✅ [진입조건] 1순위: expanded_sentence 직접 사용\n";
-      _debugLogs += "_expandedSentence 확정값: $_expandedSentence\n";
     } else {
       final parts = rawText.split(RegExp(r'\n\s*\n'));
       _expandedSentence = parts.length >= 2
           ? parts.sublist(1).join('\n\n').trim()
           : rawText.trim();
-      _debugLogs += "⚠️ [진입조건] expanded_sentence 없음 → fallback\n";
-      _debugLogs += "split 결과 파트 수: ${parts.length}\n";
-      _debugLogs += "_expandedSentence fallback 값: $_expandedSentence\n";
     }
-
-    _debugLogs += "\n[Practice 진입 가능 여부]\n";
-    _debugLogs += "_expandedSentence 비어있음: ${_expandedSentence.isEmpty}\n";
-    _debugLogs +=
-        "→ ${_expandedSentence.isNotEmpty ? '✅ 진입 허용' : '❌ 차단: expanded 없음'}\n";
-    _debugLogs += "\n[polished_sentence 로딩 시작 전]\n";
 
     _polishedSentence = "";
     _entryMessageDocId = docId;
@@ -1164,17 +1104,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
       // ── 1순위: polished_sentence 직접 읽기 ──────────────────────
       final directPolished = roomData['polished_sentence'] as String?;
-      _debugLogs += "[historyDoc 필드 목록]\n";
-      _debugLogs +=
-          "polished_sentence: ${directPolished == null ? '(null)' : directPolished.isEmpty ? '(빈 문자열)' : directPolished}\n";
-      _debugLogs +=
-          "expanded_sentence: ${roomData['expanded_sentence'] ?? '(null)'}\n";
-      _debugLogs += "session_ref: ${roomData['session_ref'] ?? '(null)'}\n\n";
 
       if (directPolished != null && directPolished.isNotEmpty) {
         debugPrint("[loadPolishedSentence] 1순위: polished_sentence 직접 읽기 성공");
-        _debugLogs += "✅ [polished 로딩] 1순위: polished_sentence 직접 읽기 성공\n";
-        _debugLogs += "polished 확정값: $directPolished\n";
         if (mounted)
           setState(() {
             _polishedSentence = directPolished;
@@ -1188,32 +1120,24 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       if (directExpanded != null && directExpanded.isNotEmpty) {
         debugPrint(
             "[loadPolishedSentence] 2순위: expanded_sentence → _expandedSentence 보정");
-        _debugLogs += "⚠️ [polished 로딩] 1순위 실패 → 2순위: expanded_sentence 보정\n";
-        _debugLogs += "expanded 보정값: $directExpanded\n";
         if (mounted) setState(() => _expandedSentence = directExpanded);
-      } else {
-        _debugLogs += "⚠️ [polished 로딩] 1순위 실패, 2순위 expanded도 없음\n";
-      }
+      } else {}
 
       // ── 3순위: session_ref로 refined_sentence fallback 조회 ──────
       final sessionRef = roomData['session_ref'] as String?;
       if (sessionRef == null || sessionRef.isEmpty) {
         debugPrint("[loadPolishedSentence] 3순위: session_ref 없음 → 종료");
-        _debugLogs +=
-            "❌ [polished 로딩] 3순위: session_ref 없음 → polished 없음으로 종료\n";
         if (mounted) setState(() => _polishedLoadDone = true);
         return;
       }
 
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
-        _debugLogs += "❌ [polished 로딩] 3순위: currentUser null → 종료\n";
         if (mounted) setState(() => _polishedLoadDone = true);
         return;
       }
 
       debugPrint("[loadPolishedSentence] 3순위: session_ref=$sessionRef 조회 시도");
-      _debugLogs += "[polished 로딩] 3순위: session_ref=$sessionRef 조회 시도\n";
       final sessionDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
@@ -1226,21 +1150,16 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
           sessionDoc.data()?['refined_sentence'] as String?;
       if (fallbackPolished != null && fallbackPolished.isNotEmpty) {
         debugPrint("[loadPolishedSentence] 3순위: refined_sentence fallback 성공");
-        _debugLogs += "✅ [polished 로딩] 3순위: refined_sentence fallback 성공\n";
-        _debugLogs += "polished fallback값: $fallbackPolished\n";
         setState(() {
           _polishedSentence = fallbackPolished;
           _polishedLoadDone = true;
         });
       } else {
         debugPrint("[loadPolishedSentence] 3순위: refined_sentence 없음");
-        _debugLogs +=
-            "❌ [polished 로딩] 3순위: refined_sentence도 없음 → polished 최종 없음\n";
         setState(() => _polishedLoadDone = true);
       }
     } catch (e) {
       debugPrint("[loadPolishedSentence] 예외: $e");
-      _debugLogs += "💥 [polished 로딩] 예외 발생: $e\n";
       if (mounted) setState(() => _polishedLoadDone = true);
     }
   }
@@ -1253,29 +1172,13 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
             : _expandedSentence;
     _formattedFullSentence = sentence;
 
-    _debugLogs += "\n=== VARIANT 선택 ===\n";
-    _debugLogs +=
-        "선택: ${variant == SentenceVariant.polished ? 'Polished' : 'Expanded'}\n";
-    _debugLogs += "사용 문장(${sentence.length}자): $sentence\n";
-    _debugLogs +=
-        "_apiKey: ${_apiKey.isEmpty ? '❌ 비어있음 → TTS 전체 실패' : '✅ 로드됨 (${_apiKey.length}자)'}\n";
-    _debugLogs +=
-        "_deepgramKey: ${_deepgramKey.isEmpty ? '❌ 비어있음 → 마이크 녹음 차단' : '✅ 로드됨 (${_deepgramKey.length}자)'}\n";
-
     try {
       final dir = await getApplicationDocumentsDirectory();
       final folder = Directory('${dir.path}/tts_cache/${widget.historyDoc.id}');
-      _debugLogs += "\n=== 캐시 디렉토리 스냅샷 ===\n";
-      _debugLogs += "경로: ${folder.path}\n";
       if (await folder.exists()) {
         final files = await folder.list().toList();
-        _debugLogs += "파일 ${files.length}개:\n";
-        for (final f in files) {
-          _debugLogs += "  ${f.path.split('/').last}\n";
-        }
-      } else {
-        _debugLogs += "디렉토리 없음 (첫 진입)\n";
-      }
+        for (final f in files) {}
+      } else {}
     } catch (e) {
       debugPrint("[cacheSnapshot] $e");
     }
@@ -1283,15 +1186,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
     await _buildChunks(sentence);
 
-    _debugLogs += "\n=== CHUNKS 생성 결과 ===\n";
-    _debugLogs += "청크 수: ${_chunks.length}개\n";
     if (_chunks.isEmpty) {
-      _debugLogs += "❌ 청크 0개 → Practice 화면 스피너만 표시됨\n";
-      _debugLogs += "원인: 문장에 [,.!?] 구분자 없거나 문장 자체가 비어있음\n";
     } else {
-      for (int i = 0; i < _chunks.length; i++) {
-        _debugLogs += "  [${i + 1}] ${_chunks[i].text}\n";
-      }
+      for (int i = 0; i < _chunks.length; i++) {}
     }
 
     if (mounted) setState(() => _phase = ShadowingPhase.practicing);
@@ -1356,11 +1253,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         return ((doc.data()['role'] ?? '') as String) == 'HOST';
       }).length;
       final n = hostCount.clamp(1, 10);
-      _debugLogs += "📊 [chunkSplit] 답변 갯수 N=$n (HOST 메시지 ${hostCount}개)\n";
       return n;
     } catch (e) {
       debugPrint("[fetchUserTurnCount] $e");
-      _debugLogs += "⚠️ [chunkSplit] 답변 갯수 조회 실패 → fallback\n";
       return 0;
     }
   }
@@ -1493,16 +1388,13 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     // 1. 디스크 캐시 확인 (v2)
     final cached = await _readChunkCache(variant, sentence);
     if (cached != null && cached.isNotEmpty) return cached;
-    _debugLogs += "🌐 [chunkCache] MISS → GPT 호출 시도\n";
     // 2. GPT 5~7단어 분할
     final gptChunks = await _splitByBreathGroupsGpt(sentence);
     if (gptChunks != null && gptChunks.isNotEmpty) {
-      _debugLogs += "✅ [chunkSplit] GPT 완료 chunks=${gptChunks.length}\n";
       await _writeChunkCache(variant, sentence, gptChunks);
       return gptChunks;
     }
     // 3. Fallback: 정규식 분할
-    _debugLogs += "⚠️ [chunkSplit] GPT 실패 → 정규식 fallback\n";
     return _buildChunksLegacyList(sentence);
   }
 
@@ -1584,7 +1476,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       final list = jsonDecode(content) as List;
       final result =
           list.map((e) => e.toString()).where((s) => s.isNotEmpty).toList();
-      _debugLogs += "✅ [chunkCache] HIT (v2) chunks=${result.length}\n";
       return result;
     } catch (e) {
       debugPrint("[readChunkCache] $e");
@@ -1604,7 +1495,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       final file =
           File('${folder.path}/chunk_split_v2_${roomId}_${variant}_$hash.json');
       await file.writeAsString(jsonEncode(chunks));
-      _debugLogs += "💿 [chunkCache] 저장 완료 (v2) chunks=${chunks.length}\n";
     } catch (e) {
       debugPrint("[writeChunkCache] $e");
     }
@@ -1661,11 +1551,8 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
       final list = jsonDecode(jsonMatch.group(0)!) as List;
       final ko = list.map((e) => e.toString().trim()).toList();
       if (ko.length != enChunks.length) {
-        _debugLogs +=
-            "⚠️ [KO-FRAG] 개수 불일치 en=${enChunks.length} ko=${ko.length} → 스킵\n";
         return null;
       }
-      _debugLogs += "✅ [KO-FRAG] 조각 생성 완료 n=${ko.length}\n";
       return ko;
     } catch (e) {
       debugPrint("[generateKoFragmentsGpt] $e");
@@ -1751,29 +1638,22 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
   }
 
   Future<void> _prefetchAllChunkAI() async {
-    _debugLogs += "\n=== TTS PREFETCH 시작 ===\n";
-    if (_apiKey.isEmpty) {
-      _debugLogs += "❌ _apiKey 없음 → prefetch 전체 스킵됨\n";
-    }
+    if (_apiKey.isEmpty) {}
     for (int i = 0; i < _chunks.length; i++) {
       if (!mounted ||
           (_phase != ShadowingPhase.practicing &&
               _phase != ShadowingPhase.chunkPractice)) {
-        _debugLogs += "⚠️ prefetch 중단 (phase 변경 또는 unmount) at i=$i\n";
         break;
       }
       if (_chunks[i].aiAudio != null) {
-        _debugLogs += "💾 [캐시 HIT-메모리] prefetch idx=$i\n";
         continue;
       }
       try {
         await _getOrFetchChunkAudio(i);
       } catch (e) {
         debugPrint("[prefetchAllChunkAI] $e");
-        _debugLogs += "💥 청크[$i] TTS 예외: $e\n";
       }
     }
-    _debugLogs += "=== TTS PREFETCH 완료 ===\n";
   }
 
   void _onAudioComplete() {
@@ -1810,13 +1690,10 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
 
   // 📦 [Box 13: 듀얼 캡처 - Deepgram + WAV 파일]
   Future<void> _startDualCapture() async {
-    _debugLogs += "\n=== 마이크 녹음 시도 ===\n";
     if (_deepgramKey.isEmpty) {
-      _debugLogs += "❌ _deepgramKey 없음 → 녹음 차단\n";
       return;
     }
     if (_isListening) {
-      _debugLogs += "⚠️ 이미 녹음 중 → 중복 호출 무시\n";
       return;
     }
     _pcmBuffer = BytesBuilder();
@@ -1824,17 +1701,13 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
       if (mounted) setState(() => _isListening = true);
 
       final micStatus = await Permission.microphone.status;
-      _debugLogs += "마이크 권한: $micStatus\n";
-      if (!micStatus.isGranted) {
-        _debugLogs += "❌ 마이크 권한 없음 → 녹음 실패 원인\n";
-      }
+      if (!micStatus.isGranted) {}
 
       final stream = await appAudioRecorder.startStream(const RecordConfig(
         encoder: AudioEncoder.pcm16bits,
         sampleRate: 16000,
         numChannels: 1,
       ));
-      _debugLogs += "✅ AudioRecorder startStream 성공\n";
 
       _dgSocket = await WebSocket.connect(
         'wss://api.deepgram.com/v1/listen'
@@ -1847,7 +1720,6 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
         '&interim_results=true',
         headers: {'Authorization': 'Token $_deepgramKey'},
       );
-      _debugLogs += "✅ Deepgram WebSocket 연결 성공\n";
 
       _micStreamSub = stream.listen((data) {
         if (_dgSocket?.readyState == WebSocket.open) {
@@ -1862,31 +1734,26 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
           try {
             final json = jsonDecode(event) as Map<String, dynamic>;
             if (json['type'] == 'UtteranceEnd') {
-              _debugLogs += "🎙 UtteranceEnd 감지 → 녹음 종료 처리\n";
               _onUserUtteranceEnd();
             }
           } catch (_) {}
         },
         onError: (e) {
           debugPrint("[Deepgram] error: $e");
-          _debugLogs += "💥 Deepgram 소켓 오류: $e\n";
         },
         onDone: () {
           debugPrint("[Deepgram] socket closed");
-          _debugLogs += "⚠️ Deepgram 소켓 closed\n";
         },
       );
 
       _utteranceSafetyTimer?.cancel();
       _utteranceSafetyTimer = Timer(const Duration(seconds: 10), () {
         if (mounted && _isListening) {
-          _debugLogs += "⏱ 10초 safety timer 발동 → 강제 종료\n";
           _onUserUtteranceEnd();
         }
       });
     } catch (e) {
       debugPrint("[startDualCapture] $e");
-      _debugLogs += "💥 startDualCapture 예외: $e\n";
       if (mounted) setState(() => _isListening = false);
     }
   }
@@ -2020,7 +1887,6 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
   // 🔧 [STAMPEDE-FIX] in-flight 잠금: 같은 청크 동시 API 호출을 1회로 합침
   Future<Uint8List?> _getOrFetchChunkAudio(int idx) {
     if (_inFlightChunkFetch.containsKey(idx)) {
-      _debugLogs += "[chunkFetch] in-flight 재사용 idx=$idx\n";
       return _inFlightChunkFetch[idx]!;
     }
     final future = _fetchChunkAudioInternal(idx);
@@ -2037,18 +1903,15 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
         _selectedVariant == SentenceVariant.polished ? 'pol' : 'exp';
     final cacheKey = 'chunk_${variant}_$idx.mp3';
     if (chunk.aiAudio != null) {
-      _debugLogs += "💾 [캐시 HIT-메모리] fetchInternal idx=$idx\n";
       return chunk.aiAudio;
     }
     if (_phase != ShadowingPhase.turnPractice) {
       final diskHit = await _AudioDiskCache.read(historyId, cacheKey);
       if (diskHit != null && mounted && idx < _chunks.length) {
         setState(() => _chunks[idx].aiAudio = diskHit);
-        _debugLogs += "💾 [캐시 HIT-디스크] fetchInternal key=$cacheKey\n";
         return diskHit;
       }
     }
-    _debugLogs += "🌐 [캐시 MISS→API] fetchInternal key=$cacheKey\n";
     // 🔧 [정상속도] formatForSlowRhythm 제거 → 텍스트 그대로 TTS
     final audio = await _fetchOpenAITTS(chunk.text, 1.0, 'nova');
     if (!mounted) return null;
@@ -2056,13 +1919,8 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
       setState(() => _chunks[idx].aiAudio = audio);
       if (_phase != ShadowingPhase.turnPractice) {
         await _AudioDiskCache.write(historyId, cacheKey, audio);
-        _debugLogs +=
-            "💿 [디스크 저장] fetchInternal key=$cacheKey (${audio.length}b)\n";
       }
-      _debugLogs += "✅ 청크[$idx] TTS 성공 (${audio.length} bytes)\n";
-    } else {
-      _debugLogs += "❌ 청크[$idx] TTS 실패: audio=null\n";
-    }
+    } else {}
     return audio;
   }
 
@@ -2086,10 +1944,9 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
       if (mounted) setState(() => _aiChunkLoading = false);
       if (audio != null) {
         await audioPlayer.play(BytesSource(audio));
+        BillingTicker.instance.resumeFromActivity('history_practice_tts_end');
       } else {
         // [NULL-FALLBACK] Continue to the next chunk when TTS returns no audio.
-        _debugLogs +=
-            "🔁 [playChunkAI] audio=null idx=$idx -> next chunk fallback\n";
         if (_phase == ShadowingPhase.chunkPractice && !_isReplayMode) {
           final nextIdx = idx + 1;
           if (nextIdx < _chunks.length) {
@@ -2103,7 +1960,6 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
       }
     } catch (e) {
       debugPrint("[playChunkAI] $e");
-      _debugLogs += "💥 [AI재생] 예외: $e\n";
     } finally {
       if (mounted)
         setState(() {
@@ -2118,12 +1974,10 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
   //   - 그 청크의 AI 음성만 재생, 끝나면 정지 (마이크 자동 활성 X)
   Future<void> _replayChunkAI(int idx) async {
     _resumeHistoryFromUserAction();
-    _debugLogs += "🔁 [P2-REPLAY] 청크[$idx] 다시 듣기 요청\n";
     if (idx >= _chunks.length) return;
     // 1. 진행 중인 녹음 즉시 취소
     if (_isListening) {
       _stopDeepgramListening();
-      _debugLogs += "🔁 [P2-REPLAY] 녹음 중단됨\n";
     }
     // 2. 진행 중인 AI 재생 중지
     await audioPlayer.stop();
@@ -2139,13 +1993,11 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     }
     // 4. AI 음성만 재생
     await _playChunkAI(idx);
-    _debugLogs += "🔁 [P2-REPLAY] AI 재생 완료 — 마이크 대기 (사용자 누를 때까지)\n";
   }
 
   // 🆕 [P2-REPLAY] 사용자가 마이크 버튼을 명시적으로 눌렀을 때 호출
   //   - Replay 모드 해제 후 일반 녹음 시작
   void _userTriggeredRecord() {
-    _debugLogs += "🎤 [P2-USER-REC] 사용자 녹음 버튼 클릭\n";
     if (mounted) {
       setState(() {
         _isReplayMode = false;
@@ -2262,14 +2114,12 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     final cacheKey = 'full_${variant}_${_hashText(text)}.mp3';
     // TODO: LRU 정리 — 30개 초과 시 가장 오래된 것부터 제거
     if (_fullAIAudioCache.containsKey(cacheKey)) {
-      _debugLogs += "💾 [캐시 HIT-메모리] _playRhythmAudio key=$cacheKey\n";
       await audioPlayer.play(BytesSource(_fullAIAudioCache[cacheKey]!));
       return;
     }
     // 대화방 공유 캐시(TtsCache) 확인 — 같은 문장을 대화방에서 들었으면 API 0회
     final ttsHit = await TtsCache.get(text, _selectedPracticeVoice);
     if (ttsHit != null && mounted) {
-      _debugLogs += "💾 [캐시 HIT-TTS공유] _playRhythmAudio key=$cacheKey\n";
       _fullAIAudioCache[cacheKey] = ttsHit;
       await audioPlayer.play(BytesSource(ttsHit));
       return;
@@ -2277,13 +2127,11 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     if (_phase != ShadowingPhase.turnPractice) {
       final diskHit = await _AudioDiskCache.read(historyId, cacheKey);
       if (diskHit != null && mounted) {
-        _debugLogs += "💾 [캐시 HIT-디스크] _playRhythmAudio key=$cacheKey\n";
         _fullAIAudioCache[cacheKey] = diskHit;
         await audioPlayer.play(BytesSource(diskHit));
         return;
       }
     }
-    _debugLogs += "🌐 [캐시 MISS→API] _playRhythmAudio key=$cacheKey\n";
     // 🔧 [정상속도] formatForSlowRhythm 제거 → 텍스트 그대로 TTS
     Uint8List? audio = await _fetchOpenAITTS(text, 1.0, _selectedPracticeVoice);
     if (!mounted) return;
@@ -2292,8 +2140,6 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
       await TtsCache.put(text, _selectedPracticeVoice, audio);
       if (_phase != ShadowingPhase.turnPractice) {
         await _AudioDiskCache.write(historyId, cacheKey, audio);
-        _debugLogs +=
-            "💿 [디스크 저장] _playRhythmAudio key=$cacheKey (${audio.length}b)\n";
       }
       await audioPlayer.play(BytesSource(audio));
     }
@@ -2341,121 +2187,6 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
       debugPrint("[fetchOpenAITTS] $e");
       return null;
     }
-  }
-
-  // 📦 [Box 16-C: 통합 디버그 팝업 — 🐛 버튼 탭 또는 롱프레스로 호출]
-  Future<void> _showDebugPopup() async {
-    // ── 1. Firestore 상태 조회 ──────────────────────────────
-    String firestoreSection = "=== [1] Firestore 데이터 상태 ===\n";
-    firestoreSection += "시각: ${DateTime.now()}\n";
-    firestoreSection += "문서 ID: ${widget.historyDoc.id}\n\n";
-
-    try {
-      final snap = await widget.historyDoc.get();
-      final data = snap.data() as Map<String, dynamic>?;
-
-      final expandedSentence = (data?['expanded_sentence'] as String?) ?? '';
-      final polishedSentence = (data?['polished_sentence'] as String?) ?? '';
-      final hasPractice = data?['has_practice']?.toString() ?? 'false';
-      final canEnterPractice = polishedSentence.isNotEmpty;
-
-      firestoreSection += "expanded_sentence:\n"
-          "${expandedSentence.isEmpty ? '없음' : expandedSentence}\n\n";
-      firestoreSection += "polished_sentence:\n"
-          "${polishedSentence.isEmpty ? '없음' : polishedSentence}\n\n";
-      firestoreSection += "has_practice: $hasPractice\n\n";
-      firestoreSection += "연습 모드 진입 가능 여부:\n"
-          "${canEnterPractice ? '✅ 가능 (polished_sentence 존재)' : '❌ 불가 (polished_sentence 없음)'}\n";
-    } catch (e) {
-      firestoreSection += "❌ 데이터 로딩 실패: $e\n";
-    }
-
-    // ── 2. 메모리 상태 (현재 위젯 상태 변수) ───────────────
-    final memorySection = """
-=== [2] 메모리 상태 ===
-isPracticeMode: $isPracticeMode
-_phase: $_phase
-_expandedSentence(${_expandedSentence.length}자): ${_expandedSentence.isEmpty ? '없음' : _expandedSentence}
-_polishedSentence(${_polishedSentence.length}자): ${_polishedSentence.isEmpty ? '없음' : _polishedSentence}
-_polishedLoadDone: $_polishedLoadDone
-_chunks: ${_chunks.length}개
-_currentChunkIdx: $_currentChunkIdx
-_apiKey: ${_apiKey.isEmpty ? '❌ 없음' : '✅ (${_apiKey.length}자)'}
-_deepgramKey: ${_deepgramKey.isEmpty ? '❌ 없음' : '✅ (${_deepgramKey.length}자)'}
-""";
-
-    // ── 3. 누적 흐름 로그 ──────────────────────────────────
-    final flowSection = "=== [3] 누적 흐름 로그 ===\n"
-        "${_debugLogs.isEmpty ? '(아직 Practice 진입 기록 없음)' : _debugLogs}";
-
-    final fullLog = "$firestoreSection\n$memorySection\n$flowSection";
-
-    if (!mounted) return;
-
-    showDialog(
-      context: context,
-      builder: (BuildContext dialogContext) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF1C1C1E),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Row(
-            children: [
-              Icon(Icons.bug_report, color: Colors.amber, size: 20),
-              SizedBox(width: 8),
-              Text("Debug 상태 확인",
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold)),
-            ],
-          ),
-          content: SizedBox(
-            width: double.maxFinite,
-            height: 420,
-            child: SingleChildScrollView(
-              child: SelectableText(
-                fullLog,
-                style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 11,
-                    fontFamily: 'monospace',
-                    height: 1.6),
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text("닫기", style: TextStyle(color: Colors.white38)),
-            ),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.copy, size: 16),
-              label: const Text("로그 전체 복사",
-                  style: TextStyle(fontWeight: FontWeight.bold)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.amber,
-                foregroundColor: const Color(0xFF121212),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
-              ),
-              onPressed: () async {
-                await Clipboard.setData(ClipboardData(text: fullLog));
-                Navigator.pop(dialogContext);
-                if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text("로그가 복사되었습니다"),
-                    duration: Duration(seconds: 2),
-                    backgroundColor: Color(0xFF2C2C2E),
-                  ),
-                );
-              },
-            ),
-          ],
-        );
-      },
-    );
   }
 
   // 📦 [Box 17-A: 실전 튜터링 - 말풍선 옆 버튼]
@@ -2902,6 +2633,7 @@ _deepgramKey: ${_deepgramKey.isEmpty ? '❌ 없음' : '✅ (${_deepgramKey.lengt
       final body = await streamed.stream.bytesToString();
       if (!mounted) return;
       final transcript = (jsonDecode(body)['text'] as String? ?? '').trim();
+      BillingTicker.instance.resumeFromActivity('history_tutoring_stt_result');
 
       if (mounted) {
         setState(() => _appTranscript = transcript);
@@ -2947,8 +2679,6 @@ RULES — follow exactly:
         final jr = jsonDecode(rd['choices'][0]['message']['content']);
         final correctedEn = (jr['corrected_en'] as String? ?? '').trim();
         final reasonKo = (jr['reason_ko'] as String? ?? '').trim();
-        _debugLogs += "[튜터링-교정] TARGET_EN_FIXED = \"$targetEn\"\n";
-        _debugLogs += "[튜터링-교정] USER_SPEECH     = \"$transcript\"\n";
         if (mounted)
           setState(() => _appCorrection = "$correctedEn\n\n$reasonKo");
         _dialogSetState?.call(() {});
@@ -2960,18 +2690,13 @@ RULES — follow exactly:
           if (_phase != ShadowingPhase.turnPractice) {
             cachedAudio =
                 await _AudioDiskCache.read(widget.historyDoc.id, corrCacheKey);
-            if (cachedAudio != null)
-              _debugLogs += "💾 [캐시 HIT-디스크] correction key=$corrCacheKey\n";
           }
           final ttsAudio =
               cachedAudio ?? await _fetchOpenAITTS(correctedEn, 1.0, 'nova');
           if (cachedAudio == null && ttsAudio != null) {
-            _debugLogs += "🌐 [캐시 MISS→API] correction key=$corrCacheKey\n";
             if (_phase != ShadowingPhase.turnPractice) {
               await _AudioDiskCache.write(
                   widget.historyDoc.id, corrCacheKey, ttsAudio);
-              _debugLogs +=
-                  "💿 [디스크 저장] correction key=$corrCacheKey (${ttsAudio.length}b)\n";
             }
           }
           if (mounted && ttsAudio != null) {
@@ -2980,7 +2705,11 @@ RULES — follow exactly:
               _isPlayingAppAudio = true;
             });
             _dialogSetState?.call(() {});
+            BillingTicker.instance
+                .resumeFromActivity('history_tutoring_tts_start');
             await audioPlayer.play(BytesSource(ttsAudio));
+            BillingTicker.instance
+                .resumeFromActivity('history_tutoring_tts_end');
             if (mounted) setState(() => _isPlayingAppAudio = false);
             _dialogSetState?.call(() {});
           }
@@ -3001,7 +2730,9 @@ RULES — follow exactly:
     setState(() => _isPlayingAppAudio = true);
     _dialogSetState?.call(() {});
     try {
+      BillingTicker.instance.resumeFromActivity('history_tutoring_tts_start');
       await audioPlayer.play(BytesSource(_appCorrectedAudio!));
+      BillingTicker.instance.resumeFromActivity('history_tutoring_tts_end');
     } catch (e) {
       debugPrint("[playAppCorrectedAudio] $e");
     } finally {
@@ -3023,9 +2754,11 @@ RULES — follow exactly:
       });
       if (mounted) setState(() => _isPlayingAppAudio = true);
       try {
+        BillingTicker.instance.resumeFromActivity('history_tutoring_tts_start');
         await audioPlayer.play(BytesSource(_appCorrectedAudio!));
         await completer.future
             .timeout(const Duration(seconds: 20), onTimeout: () {});
+        BillingTicker.instance.resumeFromActivity('history_tutoring_tts_end');
       } catch (e) {
         debugPrint("[startShadowRecord TTS] $e");
       } finally {
@@ -3057,6 +2790,8 @@ RULES — follow exactly:
   Future<void> _stopShadowRecord() async {
     _resumeHistoryFromUserAction();
     final path = await appAudioRecorder.stop();
+    BillingTicker.instance
+        .resumeFromActivity('history_tutoring_shadow_recorded');
     if (mounted) {
       setState(() {
         _appIsShadowRecording = false;
@@ -3084,7 +2819,6 @@ RULES — follow exactly:
               right: 8,
               child: SafeArea(
                   child: GestureDetector(
-                onLongPress: _showDebugPopup,
                 child: const SizedBox(width: 40, height: 40),
               ))),
         ]),
@@ -3101,7 +2835,6 @@ RULES — follow exactly:
               right: 8,
               child: SafeArea(
                   child: GestureDetector(
-                onLongPress: _showDebugPopup,
                 child: const SizedBox(width: 40, height: 40),
               ))),
         ]),
@@ -3138,7 +2871,6 @@ RULES — follow exactly:
               right: 8,
               child: SafeArea(
                   child: GestureDetector(
-                onLongPress: _showDebugPopup,
                 child: const SizedBox(width: 40, height: 40),
               ))),
         ]),
@@ -3155,7 +2887,6 @@ RULES — follow exactly:
               right: 8,
               child: SafeArea(
                   child: GestureDetector(
-                onLongPress: _showDebugPopup,
                 child: const SizedBox(width: 40, height: 40),
               ))),
         ]),
@@ -3172,7 +2903,6 @@ RULES — follow exactly:
               right: 8,
               child: SafeArea(
                   child: GestureDetector(
-                onLongPress: _showDebugPopup,
                 child: const SizedBox(width: 40, height: 40),
               ))),
         ]),
@@ -3189,7 +2919,6 @@ RULES — follow exactly:
               right: 8,
               child: SafeArea(
                   child: GestureDetector(
-                onLongPress: _showDebugPopup,
                 child: const SizedBox(width: 40, height: 40),
               ))),
         ]),
@@ -3206,7 +2935,6 @@ RULES — follow exactly:
               right: 8,
               child: SafeArea(
                   child: GestureDetector(
-                onLongPress: _showDebugPopup,
                 child: const SizedBox(width: 40, height: 40),
               ))),
         ]),
@@ -3371,9 +3099,7 @@ RULES — follow exactly:
             constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
           ),
           GestureDetector(
-            onLongPress: () {
-              _showDebugPopup();
-            },
+            onLongPress: () {},
             child: IconButton(
               icon: Icon(
                 isPracticeMode ? Icons.close : Icons.record_voice_over,
@@ -4423,10 +4149,8 @@ RULES — follow exactly:
     if (_tutorAwaitingStart || currentIndex >= _tutorLines.length) return;
     final line = _tutorLines[currentIndex];
     if (_isAiTurn(line)) {
-      _debugLogs += "🚫 [BOX-33] 유저 아이콘 탭 — AI 차례라 무시\n";
       return;
     }
-    _debugLogs += "🔁 [BOX-33] 유저 재녹음 트리거\n";
     try {
       _stopAutoVADRecording();
     } catch (_) {}
@@ -4457,15 +4181,12 @@ RULES — follow exactly:
         if (isAi) {
           Uint8List? audio = line['ai_audio_bytes'] as Uint8List?;
           if (audio != null) {
-            _debugLogs += "💾 [캐시 HIT-메모리] tutor key=tutor_$i.mp3\n";
           } else {
             // 🔧 [v3.7] TtsCache 우선 조회 → MISS 시 API 호출 후 캐시+메모리 저장
             audio = await TtsCache.get(text, 'nova');
             if (audio != null) {
-              _debugLogs += "💾 [캐시 HIT-TTS공유] tutor line=$i\n";
               line['ai_audio_bytes'] = audio;
             } else {
-              _debugLogs += "🌐 [캐시 MISS→API] tutor line=$i\n";
               audio = await _fetchOpenAITTS(text, 1.0, 'nova');
               if (audio != null) {
                 line['ai_audio_bytes'] = audio;
@@ -5361,9 +5082,7 @@ RULES — follow exactly:
     final text = _polishedUnits[idx];
     Uint8List? audio = await TtsCache.get(text, _selectedPracticeVoice);
     if (audio != null) {
-      _debugLogs += "💾 [캐시 HIT-TTS공유] _playPolishedUnit idx=$idx\n";
     } else {
-      _debugLogs += "🌐 [캐시 MISS→API] _playPolishedUnit idx=$idx\n";
       audio = await _fetchOpenAITTS(text, 1.0, _selectedPracticeVoice);
       if (audio != null) {
         TtsCache.put(text, _selectedPracticeVoice, audio);

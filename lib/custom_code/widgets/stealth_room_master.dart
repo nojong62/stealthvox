@@ -97,7 +97,6 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
       BillingTicker.instance.flushNow();
-      BillingTicker.instance.pause();
     }
   }
 

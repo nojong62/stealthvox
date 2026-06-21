@@ -47,52 +47,312 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# alignment 상단 조정 지시문 — Roleplay & Step Expand
+# 프리톡 + 듀오 — `reverse: true` 카톡 방식 적용
 
-**목표:** 텔레프롬프터 속도 로직(동적 duration)은 유지하고, 현재 대사 위치를 화면 중앙(0.45) → 상단(0.1)으로 올린다.
-
-**대상 파일:**
-- `lib/custom_code/widgets/routine_mode_roleplay.dart`
-- `lib/custom_code/widgets/routine_mode_step_expand.dart`
-
----
-
-## 편집 1) routine_mode_roleplay.dart
-
-> 사전 검증: `grep -c "alignment: 0.45" routine_mode_roleplay.dart` → **1** 확인
-
-```
-OLD:
-        alignment: 0.45,
-```
-```
-NEW:
-        alignment: 0.1,
-```
-
-## 편집 2) routine_mode_step_expand.dart
-
-> 사전 검증: `grep -c "alignment: 0.45" routine_mode_step_expand.dart` → **1** 확인
-
-```
-OLD:
-        alignment: 0.45,
-```
-```
-NEW:
-        alignment: 0.1,
-```
+> 롤플레이·스탭익스팬드는 이미 적용 완료.
+> 이 지시문은 **프리톡**과 **듀오** 2개 파일만 대상.
+>
+> 원칙:
+> - `ListView.builder(reverse: true)` — 최신 메시지 하단 고정
+> - `_scrollToBottom()` → `animateTo(0)` — position 0 = 하단
+> - `_scrollToCurrentTop` alignment `0.02` → `0.98` — reverse에서 화면 상단
+> - `_scrollToCurrent` alignment `0.5` — 변경 없음 (센터는 모드 무관)
+> - 패딩 top ↔ bottom 교환
 
 ---
 
-## 적용 후 검증
+## 1. routine_mode_free_talk.dart (3건, bottom-to-top)
+
+### 1-3. ListView.builder — `reverse: true` + 인덱스 역전 + 패딩 교환
+
+```
+str_replace
+OLD >>>
+        ListView.builder(
+          controller: _scrollController,
+          padding: EdgeInsets.fromLTRB(16, 16, 16, bottomPad),
+          itemCount: _localMessages.length,
+          itemBuilder: (context, idx) {
+            _itemKeys[idx] ??= GlobalKey();
+            return Container(
+                key: _itemKeys[idx],
+                child: _buildTextBlock(_localMessages[idx]));
+          },
+        ),
+<<< OLD
+
+NEW >>>
+        ListView.builder(
+          reverse: true,
+          controller: _scrollController,
+          padding: EdgeInsets.fromLTRB(16, bottomPad, 16, 16),
+          itemCount: _localMessages.length,
+          itemBuilder: (context, idx) {
+            final realIdx = _localMessages.length - 1 - idx;
+            _itemKeys[realIdx] ??= GlobalKey();
+            return Container(
+                key: _itemKeys[realIdx],
+                child: _buildTextBlock(_localMessages[realIdx]));
+          },
+        ),
+<<< NEW
+```
+
+### 1-2. `_scrollToCurrentTop` alignment 변경 (0.02 → 0.98)
+
+```
+str_replace
+OLD >>>
+  void _scrollToCurrentTop(int index) {
+    _log('🧭 [SCROLL-TOP]', 'index=$index');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final key = _itemKeys[index];
+      if (key == null) return;
+      final ctx = key.currentContext;
+      if (ctx == null) return;
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.02,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+<<< OLD
+
+NEW >>>
+  void _scrollToCurrentTop(int index) {
+    _log('🧭 [SCROLL-TOP]', 'index=$index');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final key = _itemKeys[index];
+      if (key == null) return;
+      final ctx = key.currentContext;
+      if (ctx == null) return;
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.98, // reverse: true에서 화면 상단
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+<<< NEW
+```
+
+### 1-1. `_scrollToBottom` 교체
+
+```
+str_replace
+OLD >>>
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        if (_localMessages.length <= 1) return;
+        _scrollController.animateTo(_scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+      }
+    });
+  }
+<<< OLD
+
+NEW >>>
+  // [reverse: true] 최신 메시지(position 0 = 하단)로 스크롤
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(0,
+            duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+      }
+    });
+  }
+<<< NEW
+```
+
+---
+
+## 2. routine_mode_duo.dart (3건, bottom-to-top)
+
+### 2-3. ListView.builder — `reverse: true` + 인덱스 역전 + 패딩 교환
+
+```
+str_replace
+OLD >>>
+                          : ListView.builder(
+                              controller: _scrollController,
+                              physics: const BouncingScrollPhysics(),
+                              padding: EdgeInsets.only(
+                                  left: 8,
+                                  right: 8,
+                                  top: 40,
+                                  bottom:
+                                      MediaQuery.of(context).size.height * 0.4),
+                              itemCount: _localMessages.length,
+                              itemBuilder: (context, index) {
+                                if (!_itemKeys.containsKey(index))
+                                  _itemKeys[index] = GlobalKey();
+                                return Container(
+                                  key: _itemKeys[index],
+                                  child: _buildTextBlock(_localMessages[index]),
+                                );
+                              }),
+<<< OLD
+
+NEW >>>
+                          : ListView.builder(
+                              reverse: true,
+                              controller: _scrollController,
+                              physics: const BouncingScrollPhysics(),
+                              padding: EdgeInsets.only(
+                                  left: 8,
+                                  right: 8,
+                                  top:
+                                      MediaQuery.of(context).size.height * 0.4,
+                                  bottom: 40),
+                              itemCount: _localMessages.length,
+                              itemBuilder: (context, index) {
+                                final realIdx =
+                                    _localMessages.length - 1 - index;
+                                if (!_itemKeys.containsKey(realIdx))
+                                  _itemKeys[realIdx] = GlobalKey();
+                                return Container(
+                                  key: _itemKeys[realIdx],
+                                  child:
+                                      _buildTextBlock(_localMessages[realIdx]),
+                                );
+                              }),
+<<< NEW
+```
+
+### 2-2. `_scrollToCurrentTop` alignment 변경 (0.02 → 0.98)
+
+```
+str_replace
+OLD >>>
+  // 현재 말풍선을 화면 상단에 고정 — 내 발화 추가 시 사용 (Roleplay 이식)
+  void _scrollToCurrentTop(int index) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final key = _itemKeys[index];
+      if (key == null) return;
+      final ctx = key.currentContext;
+      if (ctx == null) return;
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.02,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+<<< OLD
+
+NEW >>>
+  // 현재 말풍선을 화면 상단에 고정 — 내 발화 추가 시 사용 (Roleplay 이식)
+  // reverse: true에서 alignment 0.98 ≈ 화면 상단 2%
+  void _scrollToCurrentTop(int index) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final key = _itemKeys[index];
+      if (key == null) return;
+      final ctx = key.currentContext;
+      if (ctx == null) return;
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.98,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+<<< NEW
+```
+
+### 2-1. `_scrollToBottom` 교체
+
+```
+str_replace
+OLD >>>
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      if (_localMessages.length <= 1) return;
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+<<< OLD
+
+NEW >>>
+  // [reverse: true] 최신 메시지(position 0 = 하단)로 스크롤
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(0,
+            duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+      }
+    });
+  }
+<<< NEW
+```
+
+---
+
+## 검증
+
 ```bash
-grep -c "alignment: 0.1," routine_mode_roleplay.dart      # 1 기대
-grep -c "alignment: 0.1," routine_mode_step_expand.dart    # 1 기대
-grep -c "alignment: 0.45" routine_mode_roleplay.dart       # 0 기대
-grep -c "alignment: 0.45" routine_mode_step_expand.dart    # 0 기대
+# reverse: true 4개 파일 전부 확인
+for f in routine_mode_free_talk routine_mode_roleplay routine_mode_step_expand routine_mode_duo; do
+  echo "=== $f ==="
+  grep -c "reverse: true" lib/custom_code/widgets/$f.dart
+done
+# → 각 1건씩, 총 4건
+
+# maxScrollExtent 완전 제거 확인
+for f in routine_mode_free_talk routine_mode_roleplay routine_mode_step_expand routine_mode_duo; do
+  echo "=== $f ==="
+  grep -c "maxScrollExtent" lib/custom_code/widgets/$f.dart
+done
+# → 각 0건
+
+# animateTo(0) 확인
+for f in routine_mode_free_talk routine_mode_roleplay routine_mode_step_expand routine_mode_duo; do
+  echo "=== $f ==="
+  grep -c "animateTo(0" lib/custom_code/widgets/$f.dart
+done
+# → 각 1건
+
+# alignment: 0.98 확인 (_scrollToCurrentTop 안)
+for f in routine_mode_free_talk routine_mode_roleplay routine_mode_step_expand routine_mode_duo; do
+  echo "=== $f ==="
+  grep -c "alignment: 0.98" lib/custom_code/widgets/$f.dart
+done
+# → 각 1건
+
+# alignment: 0.5 잔존 확인 (_scrollToCurrent 안, 변경 불필요)
+for f in routine_mode_free_talk routine_mode_roleplay routine_mode_duo; do
+  echo "=== $f ==="
+  grep -n "alignment: 0.5" lib/custom_code/widgets/$f.dart
+done
+# → 각 1건 (_scrollToCurrent 안, 정상)
+
+flutter analyze lib/custom_code/widgets/routine_mode_free_talk.dart
+flutter analyze lib/custom_code/widgets/routine_mode_duo.dart
 ```
 
-## 튜닝
-- 더 올리기: 0.1 → 0.05
-- 살짝 내리기: 0.1 → 0.15
+## 변경하지 않는 것
+
+- `_scrollToCurrent(alignment: 0.5)` — 센터 정렬은 reverse 무관, 변경 없음
+- `_scrollToBottomThrottled()` — `_scrollToBottom()` 호출하므로 자동 반영
+- `_scrollToCurrentTop` 호출 지점 — 프리톡·듀오 기존 호출 위치 유지
+- 롤플레이·스탭익스팬드 — 이미 적용 완료, 이번 지시문 대상 아님
+- Box 7 — 변경 금지
+- `billing_ticker.dart` — 변경 없음
+
+## 디바이스 테스트 (4개 모드 전체)
+
+- [ ] 프리톡: 3턴 대화 → 메시지가 화면 하단에 자연스럽게 쌓이는지
+- [ ] 프리톡: AI 응답 후 유저 대사 + AI 대사 모두 화면 안에 보이는지
+- [ ] 듀오: PTT 3회 → 메시지가 하단에 쌓이는지
+- [ ] 롤플레이: 기존 v4 동작 유지 확인
+- [ ] 스탭익스팬드: 기존 v4 동작 유지 확인 (4턴 긴 문장 처음부터 보이는지)

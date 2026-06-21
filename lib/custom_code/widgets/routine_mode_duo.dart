@@ -333,6 +333,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     if (_isTtsActive || _isDrainingIncoming) return;
     if (await _audioRecorder.isRecording()) return;
     if (await _audioRecorder.hasPermission()) {
+      BillingTicker.instance.resumeFromActivity('duo_mic_start');
       _hasSpoken = false;
       _silenceCounter = 0;
       try {
@@ -384,6 +385,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     _silenceTimer?.cancel();
     _setDuoState('processing');
     final path = await _audioRecorder.stop();
+    BillingTicker.instance.resumeFromActivity('duo_mic_stop');
     if (path == null) {
       _setDuoState('idle');
       if (_incomingQueue.isNotEmpty) _drainIncoming();
@@ -399,6 +401,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
       var responseData = await response.stream.bytesToString();
       if (response.statusCode == 200) {
         String transcript = jsonDecode(responseData)['text'] ?? "";
+        BillingTicker.instance.resumeFromActivity('duo_stt_result');
         final String trimmed = transcript.trim();
         final String lowerRaw = trimmed.toLowerCase();
         final String lowerClean =
@@ -533,7 +536,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
         _isConversationActive &&
         _turnCounter == currentTurnId) {
       _setDuoState('playing');
+      BillingTicker.instance.resumeFromActivity('duo_tts_start');
       await _playSerialized(bytes);
+      BillingTicker.instance.resumeFromActivity('duo_tts_end');
     }
     // 🆕 [PTT] 자동 재녹음 제거 — 쿨다운 후 대기 상태로 복귀
     _setDuoState('cooldown');
@@ -597,6 +602,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
         final String msgRole = data['senderRole']?.toString() ?? '';
         if (msgRole == _myRole) continue; // 내가 올린 것 — 이미 로컬 렌더됨, 스킵
 
+        BillingTicker.instance.resumeFromActivity('duo_message_received');
         _enqueueIncoming(data);
       }
     });
@@ -670,7 +676,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     final Uint8List? bytes = await _fetchTTSBytes(tgt, _myVoice());
     if (bytes != null && _isConversationActive && !_isExiting) {
       _setDuoState('playing');
+      BillingTicker.instance.resumeFromActivity('duo_tts_start');
       await _playSerialized(bytes);
+      BillingTicker.instance.resumeFromActivity('duo_tts_end');
     }
     // 🆕 [PTT] 상대 발화 재생 후에도 자동 재녹음 금지 — 쿨다운 후 대기 복귀
     _setDuoState('cooldown');
@@ -682,16 +690,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   // 📦 [6. 데이터베이스 및 스크롤 관리 (DB & SCROLL)]
   // 히스토리 저장 및 화면 상단 고정 제어
   // ============================================================================
-  // fallback: GlobalKey context를 못 찾을 때만 사용. 첫 메시지는 건너뜀
+  // 최신 메시지(position 0 = 하단)로 스크롤
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollController.hasClients) return;
-      if (_localMessages.length <= 1) return;
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(0,
+            duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+      }
     });
   }
 
@@ -724,6 +729,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   }
 
   // 현재 말풍선을 화면 상단에 고정 — 내 발화 추가 시 사용 (Roleplay 이식)
+  // reversed list에서 alignment 0.98 = 화면 상단 2%
   void _scrollToCurrentTop(int index) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final key = _itemKeys[index];
@@ -732,7 +738,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
       if (ctx == null) return;
       Scrollable.ensureVisible(
         ctx,
-        alignment: 0.02,
+        alignment: 0.98,
         duration: const Duration(milliseconds: 220),
         curve: Curves.easeOut,
       );
@@ -1137,21 +1143,24 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
                                   style: TextStyle(
                                       color: Colors.white54, height: 1.5)))
                           : ListView.builder(
+                              reverse: true,
                               controller: _scrollController,
                               physics: const BouncingScrollPhysics(),
                               padding: EdgeInsets.only(
                                   left: 8,
                                   right: 8,
-                                  top: 40,
-                                  bottom:
-                                      MediaQuery.of(context).size.height * 0.4),
+                                  top: MediaQuery.of(context).size.height * 0.4,
+                                  bottom: 40),
                               itemCount: _localMessages.length,
                               itemBuilder: (context, index) {
-                                if (!_itemKeys.containsKey(index))
-                                  _itemKeys[index] = GlobalKey();
+                                final realIdx =
+                                    _localMessages.length - 1 - index;
+                                if (!_itemKeys.containsKey(realIdx))
+                                  _itemKeys[realIdx] = GlobalKey();
                                 return Container(
-                                  key: _itemKeys[index],
-                                  child: _buildTextBlock(_localMessages[index]),
+                                  key: _itemKeys[realIdx],
+                                  child:
+                                      _buildTextBlock(_localMessages[realIdx]),
                                 );
                               }),
                     ]),
@@ -1174,7 +1183,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
       'Spanish',
       'French',
       'German',
-      'Korean'
+      'Korean',
+      'Hindi',
+      'Russian',
+      'Portuguese',
+      'Italian',
+      'Dutch'
     ];
     String native = langs.contains(FFAppState().nativeLang)
         ? FFAppState().nativeLang

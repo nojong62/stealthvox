@@ -51,7 +51,12 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     'Spanish',
     'French',
     'German',
-    'Korean'
+    'Korean',
+    'Hindi',
+    'Russian',
+    'Portuguese',
+    'Italian',
+    'Dutch'
   ];
 
   bool isLoading = false;
@@ -60,6 +65,12 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
 
   // 💡 [핵심 뼈대] 버튼 연속 클릭 방지용 잠금장치
   bool _isActionLocked = false;
+
+  // 🧭 Duo 초대 pending 상태 시 Lobby UI 차단용
+  bool get _isDuoInvitePending =>
+      FFAppState().isGuestSession &&
+      FFAppState().pendingInviteType == 'duo' &&
+      FFAppState().duoRoomId.isNotEmpty;
 
   // 📦 [Box 4: 라이프사이클 및 초기화 (LobbyBrain 분리)]
   @override
@@ -155,7 +166,6 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
       BillingTicker.instance.flushNow();
-      BillingTicker.instance.pause();
     }
   }
 
@@ -300,115 +310,6 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           ),
         ],
       ),
-    );
-  }
-
-  void _showBillingDebugLog(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF0F172A),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      isScrollControlled: true,
-      builder: (ctx) {
-        final logs = BillingTicker.instance.billingLogs;
-        final text = logs.isEmpty ? null : logs.join('\n');
-
-        return DraggableScrollableSheet(
-          initialChildSize: 0.6,
-          maxChildSize: 0.9,
-          minChildSize: 0.3,
-          expand: false,
-          builder: (_, controller) => Column(
-            children: [
-              Container(
-                margin: const EdgeInsets.symmetric(vertical: 12),
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.white24,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const Text(
-                'BILLING DEBUG LOG',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 2,
-                ),
-              ),
-              const SizedBox(height: 12),
-              const Divider(color: Colors.white12, height: 1),
-              Expanded(
-                child: logs.isEmpty
-                    ? const Center(
-                        child: Text(
-                          '로그가 없습니다.',
-                          style: TextStyle(color: Colors.white38, fontSize: 14),
-                        ),
-                      )
-                    : ListView.builder(
-                        controller: controller,
-                        padding: const EdgeInsets.all(12),
-                        itemCount: logs.length,
-                        itemBuilder: (_, i) => Text(
-                          logs[i],
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontFamily: 'monospace',
-                            fontSize: 12,
-                            height: 1.6,
-                          ),
-                        ),
-                      ),
-              ),
-              const Divider(color: Colors.white12, height: 1),
-              SafeArea(
-                child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: text == null
-                            ? Colors.white12
-                            : const Color(0xFF3B82F6),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                      onPressed: text == null
-                          ? null
-                          : () {
-                              Clipboard.setData(ClipboardData(text: text));
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('✅ BILLING 로그가 복사되었습니다'),
-                                  duration: Duration(seconds: 2),
-                                ),
-                              );
-                            },
-                      child: const Text(
-                        '로그 복사',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 15,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
     );
   }
 
@@ -642,7 +543,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
       child: Scaffold(
         backgroundColor: Colors.transparent,
         body: SafeArea(
-            child: isLoading
+            child: (isLoading || _isDuoInvitePending)
                 ? const Center(
                     child: CircularProgressIndicator(color: Color(0xFF3B82F6)))
                 : Column(children: [
@@ -683,33 +584,29 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                         child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              GestureDetector(
-                                onLongPress: () =>
-                                    _showBillingDebugLog(context),
-                                child: _buildGlassContainer(
-                                    child: Column(children: [
-                                  Text("REMAINING TIME",
-                                      style: GoogleFonts.orbitron(
-                                          color: const Color(0xFF60A5FA),
-                                          fontSize: 12,
-                                          letterSpacing: 3,
-                                          fontWeight: FontWeight.bold)),
-                                  const SizedBox(height: 8),
-                                  Text(displayTime,
-                                      style: GoogleFonts.orbitron(
-                                          color: appState.remainingTime > 60
-                                              ? Colors.white
-                                              : const Color(0xFFFF453A),
-                                          fontSize: 48,
-                                          fontWeight: FontWeight.bold,
-                                          shadows: [
-                                            Shadow(
-                                                color: const Color(0xFF3B82F6)
-                                                    .withOpacity(0.5),
-                                                blurRadius: 20)
-                                          ])),
-                                ])),
-                              ),
+                              _buildGlassContainer(
+                                  child: Column(children: [
+                                Text("REMAINING TIME",
+                                    style: GoogleFonts.orbitron(
+                                        color: const Color(0xFF60A5FA),
+                                        fontSize: 12,
+                                        letterSpacing: 3,
+                                        fontWeight: FontWeight.bold)),
+                                const SizedBox(height: 8),
+                                Text(displayTime,
+                                    style: GoogleFonts.orbitron(
+                                        color: appState.remainingTime > 60
+                                            ? Colors.white
+                                            : const Color(0xFFFF453A),
+                                        fontSize: 48,
+                                        fontWeight: FontWeight.bold,
+                                        shadows: [
+                                          Shadow(
+                                              color: const Color(0xFF3B82F6)
+                                                  .withOpacity(0.5),
+                                              blurRadius: 20)
+                                        ])),
+                              ])),
                               const SizedBox(height: 20),
                               _buildGlassContainer(
                                   borderColor:
