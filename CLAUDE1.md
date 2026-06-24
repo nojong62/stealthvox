@@ -47,135 +47,342 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# 히스토리 리스트 삭제 모드 색상 → 차분한 회색 변경
+# 지시문 — Anyone 모드: 이용방법 팝업 잘림 수정 + 초/중/고급 UI 제거 (A안)
 
-## 목적
-삭제 모드(선택삭제 버튼 + 선택 항목 테두리·체크박스)의 빨강/주황 색상이
-StepExpand 주황색과 겹쳐 혼란스러움 → **차분한 회색 톤**으로 통일.
-
-## 색상 기준 (회색 팔레트)
-| 용도 | 변경 후 색상 |
-|---|---|
-| 선택삭제 버튼 배경 | `Color(0xFF4A4A4A)` (진회색) |
-| 선택삭제 버튼 테두리/텍스트/아이콘 | `Color(0xFF9E9E9E)` (밝은 회색) |
-| 선택 항목 테두리(체크됨) | `Color(0xFF9E9E9E)` |
-| 체크박스 활성 색 | `Color(0xFF757575)` |
-
-> StepExpand/Expand 버튼의 주황색(`Colors.orange` 계열)은 **그대로 유지**. 삭제 관련만 변경.
-
-## 사전 준비
-```bash
-cd F:\flutter_project\stealth_vox
-git add -A && git commit -m "savepoint: before delete-mode color change"
-```
-
-## 대상 파일
-`lib/custom_code/chat_history_list_master.dart`
+**대상 파일:** `routine_mode_anyone.dart`
+**작업 성격:** 외관/UI 변경 (cosmetic). brain·프롬프트 파이프라인 무손상.
+**핵심 원칙:** 최소 diff · 아래→위 편집 순서 · 앵커 문자열 기반 · `dart format`은 **이 파일 단독으로만**.
 
 ---
 
-## Phase 1: 색상 위치 전수 조사 (먼저 실행, 수정 금지)
+## 무엇을 / 왜
 
-삭제 모드 UI가 어떤 색상 상수를 쓰는지 먼저 파악한다.
+1. **이용방법 팝업 하단 잘림 수정**
+   - 원인: 말풍선 오버레이(`_buildUsageGuide`)가 `Expanded > Stack` 안의 `Positioned.fill`이라 높이가 채팅영역으로 제한 → 본문이 가용 높이를 넘기면 하단 클리핑.
+   - 해결: 말풍선 바깥 `Column`을 `SingleChildScrollView`로 래핑 → 작은 화면/폰트 확대에서도 넘치는 만큼 스크롤.
 
-```bash
-# 선택삭제 버튼 텍스트 주변 코드 확인
-grep -n "선택삭제" lib/custom_code/chat_history_list_master.dart
-```
-
-```bash
-# 빨강 계열 색상 사용처 (선택삭제 버튼 후보)
-grep -n -E "Colors\.red|0xFF[Ee][0-9A-Fa-f]|0xFF[Dd][0-9A-Fa-f]|0xFF[Ff][0-5]" lib/custom_code/chat_history_list_master.dart
-```
-
-```bash
-# 주황 계열 색상 사용처 (선택 항목 테두리/체크박스 후보)
-grep -n -E "Colors\.orange|0xFF[Ff][Ff]?[6-9A]" lib/custom_code/chat_history_list_master.dart
-```
-
-```bash
-# 체크박스 / 선택 상태 변수
-grep -n -E "Checkbox|activeColor|isSelected|selected|Border\.all" lib/custom_code/chat_history_list_master.dart
-```
-
-**위 4개 grep 결과를 모두 출력한 뒤**, 아래에 해당하는 줄을 식별:
-- (A) "선택삭제" 버튼의 **배경색**
-- (B) "선택삭제" 버튼의 **테두리/텍스트/아이콘 색**
-- (C) 선택된 카드의 **Border.all 색** (현재 주황)
-- (D) 체크박스 **activeColor** (현재 주황)
-
-> ⚠️ 식별된 줄번호·실제 색상 코드를 먼저 보고하고, 내가 확인하면 Phase 2 진행.
-> (기존 색상 코드가 위 표의 예상과 다를 수 있으므로 실제 값 기준으로 str_replace 작성)
+2. **초급/중급/고급 선택 UI 제거 (A안)**
+   - 선택바 위젯·호출·load/save 메서드만 제거. `_freeTalkLevel`은 `"Intermediate"`로 **고정 상수**.
+   - 프롬프트 파이프라인(`level: _freeTalkLevel` 3곳, `_freeTalkLevelInstruction`)은 **건드리지 않음**.
+   - 엣지케이스 차단: 예전에 Beginner 등을 저장한 사용자가 `_loadFreeTalkLevel()` 때문에 그 값에 영구 고정되는 것을 막기 위해 load/save 호출·메서드도 함께 제거.
 
 ---
 
-## Phase 2: 색상 치환 (Phase 1 식별 결과 기준, 4건)
-
-각 위치에 대해 text-content 앵커로 str_replace. **아래는 패턴 예시이며, 실제 grep 결과의 정확한 문자열로 치환할 것.**
-
-### (A) 선택삭제 버튼 배경 → 진회색
-```
-OLD: <식별된 빨강 배경색 코드, 예: Color(0xFFE53935) 또는 Colors.red.withValues(alpha: ...)>
-NEW: Color(0xFF4A4A4A)
-```
-
-### (B) 선택삭제 버튼 테두리/텍스트/아이콘 → 밝은 회색
-```
-OLD: <식별된 빨강 강조색 코드>
-NEW: Color(0xFF9E9E9E)
-```
-
-### (C) 선택 카드 Border.all 색 → 회색
-```
-OLD: Border.all(color: <식별된 주황 코드>, ...)
-NEW: Border.all(color: Color(0xFF9E9E9E), ...)
-```
-
-### (D) 체크박스 activeColor → 회색
-```
-OLD: activeColor: <식별된 주황 코드>
-NEW: activeColor: Color(0xFF757575)
-```
-
-> 동일 색상 코드가 삭제 UI 외(예: Expand 버튼)에도 쓰인다면 **str_replace가 유일하지 않아 실패**한다.
-> 이 경우 해당 색상 줄을 포함한 **앞뒤 문맥(위젯 식별 가능한 범위)**을 OLD에 포함해 유일성 확보.
-> Expand/StepExpand 주황은 절대 건드리지 말 것.
-
----
-
-## Phase 3: 검증
+## 0. Git 세이브포인트 (실행 전 필수)
 
 ```bash
-# 삭제 버튼/선택 UI 영역에 빨강·주황이 남아있지 않은지 육안 확인
-grep -n -E "선택삭제" lib/custom_code/chat_history_list_master.dart
-# → 위 줄 주변 ±15줄 view로 회색 적용 확인
-```
-
-```bash
-# 새 회색 코드가 의도한 횟수만큼 들어갔는지
-grep -c "0xFF4A4A4A" lib/custom_code/chat_history_list_master.dart   # 기대: 1
-grep -c "0xFF9E9E9E" lib/custom_code/chat_history_list_master.dart   # 기대: 2 (B, C)
-grep -c "0xFF757575" lib/custom_code/chat_history_list_master.dart   # 기대: 1
-```
-
-```bash
-# Expand 주황이 그대로인지 (실수로 안 바뀌었는지) 확인
-grep -n -E "Colors\.orange|Expand" lib/custom_code/chat_history_list_master.dart
-```
-
-```bash
-dart format lib/custom_code/chat_history_list_master.dart
-flutter analyze lib/custom_code/chat_history_list_master.dart
+git add -A
+git commit -m "savepoint: before anyone usageguide-scroll + remove level UI"
 ```
 
 ---
 
-## 빌드 후 눈으로 확인할 것
-- 선택삭제 버튼: 진회색 배경 + 밝은 회색 글자
-- 항목 체크 시: 회색 테두리 + 회색 체크박스
-- Expand 버튼 / StepExpand 아이콘: **주황 그대로**
+## 편집 (아래→위 순서, 라인 드리프트 방지)
+
+### [E1] `_buildTopControls()` 메서드 전체 삭제 (≈1896~1954)
+
+`_buildChatList()` 앵커로 메서드 전체 + 후행 빈 줄 제거.
+
+**OLD:**
+```dart
+  Widget _buildTopControls() {
+    const levels = ["Beginner", "Intermediate", "Advanced"];
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        height: 44,
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1C1C1E),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+        ),
+        child: Row(
+          children: List.generate(levels.length, (i) {
+            final bool selected = _freeTalkLevel == levels[i];
+            return Expanded(
+              child: GestureDetector(
+                onTap: () => _setFreeTalkLevel(levels[i]),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeInOut,
+                  alignment: Alignment.center,
+                  margin: const EdgeInsets.symmetric(horizontal: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.transparent,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: selected
+                          ? const Color(0xFF9333EA)
+                          : Colors.transparent,
+                      width: 1.5,
+                    ),
+                  ),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: Text(
+                        levels[i],
+                        maxLines: 1,
+                        softWrap: false,
+                        style: TextStyle(
+                          color: selected ? Colors.white : Colors.white38,
+                          fontSize: 13,
+                          fontWeight:
+                              selected ? FontWeight.w700 : FontWeight.w400,
+                          letterSpacing: -0.2,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChatList() {
+```
+
+**NEW:**
+```dart
+  Widget _buildChatList() {
+```
+
+---
+
+### [E2] 스테일 주석에서 `_buildTopControls` 제거 (≈1809)
+
+**OLD:**
+```dart
+  // ... (_buildTopBar, _buildTopControls, _buildChatList, _buildTextBlock, _buildControlArea는 기존과 동일하게 유지) ...
+```
+
+**NEW:**
+```dart
+  // ... (_buildTopBar, _buildChatList, _buildTextBlock, _buildControlArea는 기존과 동일하게 유지) ...
+```
+
+---
+
+### [E3] 팝업: `SingleChildScrollView` 닫는 괄호 추가 (≈1803, _buildUsageGuide 끝부분)
+
+> 닫는 괄호를 **먼저** 추가(아래쪽이므로). 외부 `Column` 닫힘 `),` 바로 다음에 `          ),` 한 줄 삽입.
+
+**OLD:**
+```dart
+                    const Align(
+                      alignment: Alignment.centerRight,
+                      child: Text("(말풍선을 톡 누르면 닫혀요)",
+                          style:
+                              TextStyle(color: Colors.white38, fontSize: 11)),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+```
+
+**NEW:**
+```dart
+                    const Align(
+                      alignment: Alignment.centerRight,
+                      child: Text("(말풍선을 톡 누르면 닫혀요)",
+                          style:
+                              TextStyle(color: Colors.white38, fontSize: 11)),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          ),
+        ),
+      ),
+    );
+  }
+```
+
+---
+
+### [E4] 팝업: 바깥 `Column`을 `SingleChildScrollView`로 래핑 시작 (≈1742)
+
+`fromLTRB(20, 6, 20, 20)` 앵커(파일 내 유일).
+
+**OLD:**
+```dart
+          padding: const EdgeInsets.fromLTRB(20, 6, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+```
+
+**NEW:**
+```dart
+          padding: const EdgeInsets.fromLTRB(20, 6, 20, 20),
+          child: SingleChildScrollView(
+            child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+```
+
+> 들여쓰기가 어긋나 보이지만 정상입니다. 마지막 `dart format`(단일 파일)에서 자동 정렬됩니다.
+
+---
+
+### [E5] `build()` 내 `_buildTopControls()` 호출 + 인접 SizedBox 삭제 (≈1719~1720)
+
+**OLD:**
+```dart
+          _buildTopBar(),
+          const SizedBox(height: 10),
+          _buildTopControls(),
+          const SizedBox(height: 10),
+          Expanded(
+```
+
+**NEW:**
+```dart
+          _buildTopBar(),
+          const SizedBox(height: 10),
+          Expanded(
+```
+
+---
+
+### [E6] `initState`의 `_loadFreeTalkLevel()` 호출 삭제 (≈262)
+
+**OLD:**
+```dart
+    _initPermissions();
+    _loadFreeTalkLevel();
+    _fetchKeys();
+```
+
+**NEW:**
+```dart
+    _initPermissions();
+    _fetchKeys();
+```
+
+---
+
+### [E7] `_loadFreeTalkLevel` + `_setFreeTalkLevel` 메서드 삭제 (≈215~228)
+
+`// 오디오 및 UI` 앵커로 두 메서드 + 후행 빈 줄 제거.
+
+**OLD:**
+```dart
+  // 언어 수준 로드/저장 (SharedPreferences)
+  Future<void> _loadFreeTalkLevel() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString('free_talk_level');
+    if (saved != null && saved.isNotEmpty && mounted) {
+      setState(() => _freeTalkLevel = saved);
+    }
+  }
+
+  Future<void> _setFreeTalkLevel(String level) async {
+    if (mounted) setState(() => _freeTalkLevel = level);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('free_talk_level', level);
+  }
+
+  // 오디오 및 UI
+```
+
+**NEW:**
+```dart
+  // 오디오 및 UI
+```
+
+---
+
+### [E8] `_freeTalkLevel` 필드 주석 갱신 + `final` 고정 (≈209~210)
+
+**OLD:**
+```dart
+  // Free Talk 언어 수준 (대화 중 토글 가능: Beginner / Intermediate / Advanced)
+  String _freeTalkLevel = "Intermediate";
+```
+
+**NEW:**
+```dart
+  // 언어 수준 고정값 (초/중/고급 선택 UI 제거 — 내부 프롬프트 파이프라인용 Intermediate 고정)
+  final String _freeTalkLevel = "Intermediate";
+```
+
+---
+
+## 검증 (편집 후, 이 파일 기준)
+
+```bash
+# 1) 제거 대상 — 모두 0이어야 함
+grep -c "_buildTopControls"   routine_mode_anyone.dart   # 기대: 0
+grep -c "_setFreeTalkLevel"   routine_mode_anyone.dart   # 기대: 0
+grep -c "_loadFreeTalkLevel"  routine_mode_anyone.dart   # 기대: 0
+grep -c "free_talk_level"     routine_mode_anyone.dart   # 기대: 0
+grep -c "Beginner"            routine_mode_anyone.dart   # 기대: 0
+
+# 2) 보존 대상 — 그대로 유지
+grep -c "level: _freeTalkLevel"        routine_mode_anyone.dart   # 기대: 3
+grep -cE "_freeTalkLevel\b"            routine_mode_anyone.dart   # 기대: 4 (필드1 + 사용처3)
+grep -c "_freeTalkLevelInstruction"    routine_mode_anyone.dart   # 기대: 3 (변동 없음)
+
+# 3) 팝업 래핑 확인 — fromLTRB 다음 줄에 SingleChildScrollView
+grep -n -A2 "fromLTRB(20, 6, 20, 20)" routine_mode_anyone.dart
+#   기대: child: SingleChildScrollView( 가 보일 것
+
+# 4) 정적 분석 (괄호 균형/미사용 심볼 최종 확인)
+flutter analyze
+#   기대: No issues found  (최소한 본 파일 관련 error/warning 0)
+```
+
+> `flutter analyze`가 통과하면 `SingleChildScrollView` 괄호 균형이 맞은 것입니다(불균형 시 컴파일 에러로 즉시 검출).
+
+---
+
+## 포맷 (반드시 단일 파일)
+
+```bash
+dart format routine_mode_anyone.dart
+```
+⚠️ **폴더 대상 금지** — 한글 문자열 UTF-8 손상 위험. 항상 이 파일만 지정.
+
+---
 
 ## 롤백
+
 ```bash
-git checkout HEAD -- lib/custom_code/chat_history_list_master.dart
+# 전체 되돌리기
+git checkout HEAD -- routine_mode_anyone.dart
+# 또는 커밋했다면
+git revert <commit-hash>
 ```
+
+---
+
+## (선택) 빌드/설치
+
+```bash
+flutter build appbundle
+# 또는 단말 직접 설치
+flutter build apk --release && adb install -r build/app/outputs/flutter-apk/app-release.apk
+```
+
+---
+
+## 기대 결과
+
+- 이용방법 팝업: 본문이 길거나 폰트를 키워도 잘리지 않고 필요 시 스크롤됨.
+- 상단 초/중/고급 선택바 사라짐. 세로 공간 약 54px 추가 확보.
+- 대화 동작/난이도: 내부적으로 Intermediate 고정 유지 → 사용자 체감 변화 없음.
