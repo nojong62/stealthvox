@@ -97,7 +97,6 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
       BillingTicker.instance.flushNow();
-      BillingTicker.instance.pause();
     }
   }
 
@@ -295,8 +294,8 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
           height: widget.height,
           roomId: _pendingDuoRoomId);
     } else if (_currentMode == 2) {
-      return RoutineModeFreeTalk(
-          key: const ValueKey('RoutineModeFreeTalk'),
+      return RoutineModeAnyone(
+          key: const ValueKey('RoutineModeAnyone'),
           width: widget.width,
           height: widget.height);
     } else if (_currentMode == 3) {
@@ -347,10 +346,11 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
                     padding:
                         const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                     decoration: BoxDecoration(
-                        color: const Color(0xFF3B82F6).withOpacity(0.15),
+                        color: const Color(0xFF3B82F6).withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                            color: const Color(0xFF3B82F6).withOpacity(0.5))),
+                            color: const Color(0xFF3B82F6)
+                                .withValues(alpha: 0.5))),
                     child: const Text("Study Room",
                         style: TextStyle(
                             color: Colors.white,
@@ -376,7 +376,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
             const SizedBox(height: 30),
             _buildMenuCard(1, "Duo Connect", "초청인 대화\n만능 통역", Icons.people,
                 const Color(0xFF2563EB)),
-            _buildMenuCard(2, "Free Talk", "AI와 자유 대화", Icons.forum,
+            _buildMenuCard(2, "Anyone", "누구든 그 사람이 되어요", Icons.theater_comedy,
                 const Color(0xFF9333EA)),
             _buildMenuCard(3, "AI Roleplay", "상황극 대화", Icons.smart_toy,
                 const Color(0xFF16A34A)),

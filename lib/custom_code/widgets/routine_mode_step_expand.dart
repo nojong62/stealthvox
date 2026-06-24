@@ -65,6 +65,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   int _turnCounter = 0;
   String? _sessionDocId; // 🔧 [v3 추가] 첫 대화 후 세션 ID (클론 변경 시 null 리셋)
   DocumentReference? _myHistoryRef; // 🔧 [히스토리] chat_history 문서 참조 (Duo 패턴)
+  bool _showSeedHint = false; // 합성 문장 안내 말풍선 표시 여부
+  Timer? _seedHintTimer; // 합성 말풍선 3초 자동 숨김 타이머
 
   // ── Idle Timeout v2 ───────────────────────────────────────────────
   // 기준: "유저도 AI도 아무 작동이 없는 상태"가 연속 60초 지속되면 pause.
@@ -262,18 +264,11 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   Timer? _commitTimer; // "진짜 끝났는지" 확정 타이머
   static const int COMMIT_WAIT_MS = 1200; // 발화 합치기 대기 시간
 
-  // 🔬 [v3.1 진단] 화면 로그 뷰어 (팝업에 쌓음)
-  final List<String> _debugLogs = [];
   void _log(String tag, String msg) {
     final ts = DateTime.now().toIso8601String().substring(11, 23);
     final line = '[$ts] $tag $msg';
     print(line);
-    _debugLogs.add(line);
     AppLogLedger.instance.add('STEPEXPAND', '$tag $msg');
-    // 메모리 폭발 방지: 500줄 초과 시 앞에서 50줄 자르기
-    if (_debugLogs.length > 500) {
-      _debugLogs.removeRange(0, 50);
-    }
   }
 
   // 🌐 [v3.1] 로비에서 선택한 언어 이름 → Deepgram/OpenAI 언어 코드 매핑
@@ -307,6 +302,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         return 'hi';
       case 'arabic':
         return 'ar';
+      case 'dutch':
+        return 'nl';
       default:
         return 'en'; // English 포함
     }
@@ -382,6 +379,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 
   @override
   void dispose() {
+    _seedHintTimer?.cancel();
     _clearIdleTimers();
     BillingTicker.instance.pause();
     _stopEverything();
@@ -737,6 +735,16 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     }
   }
 
+  // 합성 문장 안내 말풍선을 표시 후 3초 뒤 자동 숨김
+  void _showSeedHintBalloon() {
+    if (!mounted) return;
+    setState(() => _showSeedHint = true);
+    _seedHintTimer?.cancel();
+    _seedHintTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) setState(() => _showSeedHint = false);
+    });
+  }
+
   /// 세션 시작: 안내문 TTS만 재생하고 유저 기본 문장(seed) 대기
   Future<void> _startSessionWaitingForUserSeed() async {
     if (_openAiKey.isEmpty || !mounted) return;
@@ -792,136 +800,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     // 안내/질문 완료  STT 즉시 시작 (유저 기본 문장 대기)
     // 🔧 [MIC-INSTANT] 8초 딜레이 제거  AI 말 끝나자마자 마이크 ON.
     // 침묵 시 별도 안내 멘트 없이 그대로 대기(침묵 폴백 제거).
+    _showSeedHintBalloon();
     if (mounted && _isConversationActive && !_isSessionComplete) {
       _startDeepgramListening();
     }
-  }
-
-// ====================================================================
-  // 📦 [Box 3-B: 로그 뷰어 다이얼로그]
-  // ====================================================================
-  // 🔬 [v3.1 진단] 실시간 로그를 팝업으로 보기 (복사/새로고침/지우기)
-  void _showDebugLogDialog() {
-    showDialog(
-      context: context,
-      builder: (BuildContext dialogContext) {
-        return StatefulBuilder(
-          builder: (ctx, setDialogState) {
-            return Dialog(
-              backgroundColor: const Color(0xFF1A1A1A),
-              insetPadding: const EdgeInsets.all(12),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
-              child: SizedBox(
-                width: double.maxFinite,
-                height: MediaQuery.of(ctx).size.height * 0.85,
-                child: Column(
-                  children: [
-                    // 헤더
-                    Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.bug_report,
-                              color: Color(0xFFFBBF24)),
-                          const SizedBox(width: 8),
-                          Text('진단 로그 (${_debugLogs.length})',
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold)),
-                          const Spacer(),
-                          IconButton(
-                            icon:
-                                const Icon(Icons.close, color: Colors.white70),
-                            onPressed: () => Navigator.pop(dialogContext),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const Divider(color: Colors.white24, height: 1),
-                    // 로그 본문 (선택 가능)
-                    Expanded(
-                      child: Container(
-                        color: const Color(0xFF0A0A0A),
-                        padding: const EdgeInsets.all(8),
-                        child: SingleChildScrollView(
-                          reverse: true,
-                          child: SelectableText(
-                            _debugLogs.isEmpty
-                                ? '(로그 없음)'
-                                : _debugLogs.join('\n'),
-                            style: const TextStyle(
-                              color: Color(0xFFB3E5FC),
-                              fontFamily: 'monospace',
-                              fontSize: 11,
-                              height: 1.35,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const Divider(color: Colors.white24, height: 1),
-                    // 하단 3버튼
-                    Padding(
-                      padding: const EdgeInsets.all(8),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              icon: const Icon(Icons.copy, size: 16),
-                              label: const Text('전체 복사'),
-                              style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF10B981)),
-                              onPressed: () async {
-                                final text = _debugLogs.join('\n');
-                                await Clipboard.setData(
-                                    ClipboardData(text: text));
-                                if (ctx.mounted) {
-                                  ScaffoldMessenger.of(ctx).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('✅ 로그 클립보드에 복사됨'),
-                                      duration: Duration(seconds: 1),
-                                    ),
-                                  );
-                                }
-                              },
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              icon: const Icon(Icons.refresh, size: 16),
-                              label: const Text('새로고침'),
-                              style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF3B82F6)),
-                              onPressed: () => setDialogState(() {}),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              icon: const Icon(Icons.delete_outline, size: 16),
-                              label: const Text('지우기'),
-                              style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFFEF4444)),
-                              onPressed: () {
-                                setState(() => _debugLogs.clear());
-                                setDialogState(() {});
-                              },
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
   }
 
   // ====================================================================
@@ -1071,8 +953,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   /// 세션 UI 리셋 (Firestore 저장은 이미 매 턴 완료됨)
   void _resetSession() {
     _stopEverything();
+    _seedHintTimer?.cancel();
     if (mounted) {
       setState(() {
+        _showSeedHint = false;
         _localMessages.clear();
         _turnCounter = 0;
         _sessionDocId = null;
@@ -1502,12 +1386,19 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       langCode: dgCode,
       onLog: _log,
       onConnected: () {},
-      onTranscriptUpdate: (transcript) => _checkPracticeWordRatio(transcript),
-      onTurnEnded: (transcript) => _checkPracticeWordRatio(transcript),
+      onTranscriptUpdate: (transcript) {
+        BillingTicker.instance.resumeFromActivity('step_expand_practice_stt');
+        _checkPracticeWordRatio(transcript);
+      },
+      onTurnEnded: (transcript) {
+        BillingTicker.instance.resumeFromActivity('step_expand_practice_stt');
+        _checkPracticeWordRatio(transcript);
+      },
       onError: (_) => _practiceAdvanceUnit(),
       onAudioData: (bytes) => _userPcmAccumulator.addAll(bytes),
     );
     _voiceManager!.connectAndStart();
+    BillingTicker.instance.resumeFromActivity('step_expand_practice_start');
   }
 
   /// 특정 의미단위로 점프 (의미단위 탭 시 호출)
@@ -1698,32 +1589,29 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 // ====================================================================
   // [텔레프롬프터 v1] 현재 버블을 화면 중앙(0.45)으로 부드럽게 이동.
   //   텍스트 길이 기반 동적 duration: 짧으면 느긋(700ms), 길면 빠르게(150ms).
-  //   key/context 미확보 시 기존 maxScrollExtent fallback.
+  //   reverse list uses position 0 as the latest-message anchor.
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollController.hasClients) return;
-      if (_localMessages.length <= 1) return;
-
-      final lastIdx = _localMessages.length - 1;
-      final key = _itemKeys[lastIdx];
-      final ctx = key?.currentContext;
-
-      if (ctx == null) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-        return;
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(0,
+            duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
       }
+    });
+  }
 
-      final text = (_localMessages[lastIdx]['target'] ?? '').toString();
-      final ms = (800 - text.length * 3).clamp(150, 700);
-
+  // 현재 유저 확장 문장을 화면 상단에 고정해 처음부터 보이게 유지.
+  void _scrollToCurrentTop(int index) {
+    _log('🧭 [SCROLL-TOP]', 'index=$index');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      final key = _itemKeys[index];
+      if (key == null) return;
+      final ctx = key.currentContext;
+      if (ctx == null) return;
       Scrollable.ensureVisible(
         ctx,
-        alignment: 0.1,
-        duration: Duration(milliseconds: ms),
+        alignment: 0.98,
+        duration: const Duration(milliseconds: 220),
         curve: Curves.easeOut,
       );
     });
@@ -1773,11 +1661,13 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         _log('✅ [LISTEN-02]', 'onConnected 콜백 실행');
       },
       onTranscriptUpdate: (transcript) {
+        BillingTicker.instance.resumeFromActivity('step_expand_stt_partial');
         _swDeepgram.reset();
         _swDeepgram.start();
       },
       onTurnEnded: (transcript) {
         _log('🔀 [LISTEN-03]', 'onTurnEnded 콜백 수신: "$transcript"');
+        BillingTicker.instance.resumeFromActivity('step_expand_stt_result');
         _swDeepgram.stop();
         _stopMicAndProcess(transcript);
       },
@@ -1788,6 +1678,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     );
     _log('🎤 [LISTEN-04]', 'connectAndStart 호출 직전');
     await _voiceManager!.connectAndStart();
+    BillingTicker.instance.resumeFromActivity('step_expand_mic_start');
     _log('🎤 [LISTEN-05]', 'connectAndStart 완료');
   }
 
@@ -2270,7 +2161,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         if (mounted && hostIndex < _localMessages.length) {
           setState(() => _localMessages[hostIndex]['target'] = userTargetText);
         }
-        _scrollToBottom();
+        _scrollToCurrentTop(hostIndex);
 
         // 🌱 \n\n 최초 감지: Part1 버퍼 폐기, Part2만 TTS
         if (!hasDoubleNewline && userTargetText.contains('\n\n')) {
@@ -3080,6 +2971,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   Future<void> _handleAutoSaveAndExit() async {
     if (_isExiting) return; // 🔧 [EXIT-GUARD] 이미 종료 처리 중이면 무시
     _isExiting = true;
+    BillingTicker.instance.pause();
     try {
       if (_myHistoryRef != null) {
         // 대화가 한 번도 없었으면 방 문서 삭제 (쓰레기 데이터 방지)
@@ -3172,6 +3064,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
               child: Stack(children: [
                 _buildChatList(),
                 _buildIdleOverlay(),
+                _buildSeedHintBalloon(),
               ]),
             ),
             _buildControlArea(bottomPad),
@@ -3223,7 +3116,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
             const SizedBox(width: 8),
             // [v3.6] 잔여시간 표시 + 길게 누르면 로그 (개발자용)
             GestureDetector(
-              onLongPress: _showDebugLogDialog,
               child: Container(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -3311,22 +3203,25 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       }
     }
 
-    final double bottomPad = _localMessages.length <= 1
-        ? MediaQuery.of(context).size.height * 0.4
-        : 16;
+    final double bottomPad = MediaQuery.of(context).size.height * 0.55;
     return ListView.builder(
+      reverse: true,
       controller: _scrollController,
-      padding: EdgeInsets.fromLTRB(16, 16, 16, bottomPad),
+      padding: EdgeInsets.fromLTRB(16, bottomPad, 16, 16),
       itemCount: _localMessages.length + extras.length,
       itemBuilder: (context, idx) {
-        if (idx < _localMessages.length) {
-          _itemKeys[idx] ??= GlobalKey(); // [텔레프롬프터 v1] ensureVisible 타겟
-          return Container(
-              key: _itemKeys[idx],
-              child: _buildTextBlock(_localMessages[idx]));
+        if (idx < extras.length) {
+          final extraIdx = extras.length - 1 - idx;
+          return extras[extraIdx]();
         }
-        final extraIdx = idx - _localMessages.length;
-        if (extraIdx < extras.length) return extras[extraIdx]();
+        final msgReverseIdx = idx - extras.length;
+        final realIdx = _localMessages.length - 1 - msgReverseIdx;
+        if (realIdx >= 0 && realIdx < _localMessages.length) {
+          _itemKeys[realIdx] ??= GlobalKey();
+          return Container(
+              key: _itemKeys[realIdx],
+              child: _buildTextBlock(_localMessages[realIdx]));
+        }
         return const SizedBox.shrink();
       },
     );
@@ -3497,6 +3392,55 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     );
   }
 
+  Widget _buildSeedHintBalloon() {
+    return Positioned(
+      bottom: 8,
+      left: 24,
+      right: 24,
+      child: IgnorePointer(
+        ignoring: !_showSeedHint,
+        child: AnimatedOpacity(
+          opacity: _showSeedHint ? 1.0 : 0.0,
+          duration: const Duration(milliseconds: 300),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFF3B3B3D),
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.3),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.lightbulb_outline,
+                    color: Color(0xFFFBBF24), size: 16),
+                SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    '질문과 다른 합성 문장을 말하셔도 됩니다.',
+                    style: TextStyle(
+                      color: Color(0xFFFBBF24),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildTextBlock(Map<String, dynamic> msg) {
     final role = (msg['role'] ?? '').toString();
     bool isHost = role == 'HOST' || role == 'HOST_TEMP';
@@ -3521,7 +3465,9 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     final bool isExpandTurn =
         role == 'HOST' && (turnId >= 2 || targetParts.length >= 2);
 
-    final String effectiveOriginal = (role == 'HOST_TEMP') ? '' : originalRaw;
+    // HOST bubbles only show the target sentence; original stays available for history saves.
+    final String effectiveOriginal =
+        (role == 'HOST_TEMP' || role == 'HOST') ? '' : originalRaw;
 
     return Align(
       alignment: isHost ? Alignment.centerRight : Alignment.centerLeft,
@@ -4638,8 +4584,14 @@ class TtsQueueManager {
       );
 
       try {
+        BillingTicker.instance.resumeFromActivity(_currentChunkIsUser
+            ? 'step_expand_user_tts_start'
+            : 'step_expand_ai_tts_start');
         await _player.play(BytesSource(bytes));
         await _completer!.future.timeout(estimatedDuration);
+        BillingTicker.instance.resumeFromActivity(_currentChunkIsUser
+            ? 'step_expand_user_tts_end'
+            : 'step_expand_ai_tts_end');
       } catch (_) {
       } finally {
         if (_completer != null && !_completer!.isCompleted) {
@@ -5469,6 +5421,18 @@ Before writing your question, think through — in THIS order:
    - Does it avoid yes/no answers?
 ⑤ Does the question flow from the user's LAST statement and avoid already-covered ground?
    The user's short answer should still attach naturally to the growing sentence (this never changes).
+⑥ [QUESTION SELECTION - MANDATORY INTERNAL PROCESS]
+   Before outputting your question, you MUST:
+   a) Silently generate THREE distinct candidate questions (each 5-8 words).
+      - Candidate A: follows the FEELING / MOTIVATION thread
+      - Candidate B: follows a PERSON / PLACE / THING thread
+      - Candidate C: follows a MEMORY / HABIT / CONTRAST thread
+   b) For each candidate, silently evaluate:
+      - How naturally does the user's 1-3 word answer attach to the growing sentence?
+      - How much does it DEEPEN the story (not just widen it)?
+      - Does it avoid already-covered ground?
+   c) Select the ONE candidate that best expands the conversation - the one whose expected answer adds the most meaningful content to the growing sentence.
+   d) Output ONLY the selected question. Never reveal the other candidates or your reasoning.
 NEVER reveal this reasoning in the output.
 
 LAYER 2 — OUTPUT (the only thing you say):
@@ -5660,7 +5624,7 @@ PART 2: A natural Korean conversational translation of PART 1.""";
       request.body = jsonEncode({
         'model': 'gpt-4o-mini',
         'stream': true,
-        'temperature': 0.45,
+        'temperature': 0.2,
         'max_tokens': 300,
         'messages': [
           {'role': 'system', 'content': sysPrompt},

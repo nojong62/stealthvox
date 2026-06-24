@@ -41,7 +41,6 @@ class StoreMaster extends StatefulWidget {
 
 class _StoreMasterState extends State<StoreMaster> {
   bool isProcessing = false;
-  bool _showLogCopyButton = false;
   String _versionText = '';
 
   // [v4.0] 서버 증액 감지용 Firestore 리스너
@@ -98,16 +97,11 @@ class _StoreMasterState extends State<StoreMaster> {
     });
   }
 
-  final List<String> _debugLogs = [];
   void _log(String tag, String msg) {
     final ts = DateTime.now().toIso8601String().substring(11, 23);
     final line = '[$ts] $tag $msg';
     print(line);
-    _debugLogs.add(line);
     AppLogLedger.instance.add('STORE', '$tag $msg');
-    if (_debugLogs.length > 500) {
-      _debugLogs.removeRange(0, 50);
-    }
   }
 
   final List<Map<String, dynamic>> storePlans = [
@@ -573,7 +567,8 @@ class _StoreMasterState extends State<StoreMaster> {
                                       padding: const EdgeInsets.symmetric(
                                           horizontal: 12, vertical: 6),
                                       decoration: BoxDecoration(
-                                        color: Colors.green.withOpacity(0.15),
+                                        color: Colors.green
+                                            .withValues(alpha: 0.15),
                                         borderRadius: BorderRadius.circular(20),
                                       ),
                                       child: Text("+ ${addedMinutes}m",
@@ -869,8 +864,8 @@ class _StoreMasterState extends State<StoreMaster> {
                       ),
                       IconButton(
                         tooltip: 'Clear log',
-                        icon: const Icon(Icons.delete_outline_rounded,
-                            color: Colors.white38, size: 20),
+                        icon: const Icon(Icons.delete_sweep_rounded,
+                            color: Colors.redAccent, size: 20),
                         onPressed: () {
                           AppLogLedger.instance.clear();
                           Navigator.pop(context);
@@ -1117,25 +1112,6 @@ class _StoreMasterState extends State<StoreMaster> {
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            if (_showLogCopyButton)
-                              IconButton(
-                                icon: const Icon(Icons.copy,
-                                    color: Colors.amber, size: 18),
-                                tooltip: '로그 복사',
-                                onPressed: () async {
-                                  final text = _debugLogs.join('\n');
-                                  await Clipboard.setData(
-                                      ClipboardData(text: text));
-                                  if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text('✅ 스토어 로그가 복사되었습니다'),
-                                        duration: Duration(seconds: 1),
-                                      ),
-                                    );
-                                  }
-                                },
-                              ),
                             IconButton(
                               onPressed: _openUsageSheet,
                               tooltip: 'Usage',
@@ -1172,12 +1148,8 @@ class _StoreMasterState extends State<StoreMaster> {
                             ),
                             child: Column(
                               children: [
-                                GestureDetector(
-                                  onTap: () => setState(() =>
-                                      _showLogCopyButton = !_showLogCopyButton),
-                                  child: const Icon(Icons.shield_moon_rounded,
-                                      color: Colors.amber, size: 28),
-                                ),
+                                const Icon(Icons.shield_moon_rounded,
+                                    color: Colors.amber, size: 28),
                                 const SizedBox(height: 10),
                                 Text("REMAINING TIME",
                                     style: GoogleFonts.orbitron(
@@ -1228,7 +1200,7 @@ class _StoreMasterState extends State<StoreMaster> {
                                         padding: const EdgeInsets.all(12),
                                         decoration: BoxDecoration(
                                           color: plan['theme_color']
-                                              .withOpacity(0.15),
+                                              .withValues(alpha: 0.15),
                                           shape: BoxShape.circle,
                                         ),
                                         child: Icon(plan['icon'],
@@ -1269,7 +1241,7 @@ class _StoreMasterState extends State<StoreMaster> {
                                               horizontal: 12, vertical: 10),
                                           decoration: BoxDecoration(
                                             color: plan['theme_color']
-                                                .withOpacity(0.15),
+                                                .withValues(alpha: 0.15),
                                             borderRadius:
                                                 BorderRadius.circular(12),
                                           ),

@@ -74,6 +74,8 @@ class BillingTicker with WidgetsBindingObserver {
   BillingRate _rate = BillingRate.quarter;
   bool _paused = true;
   bool _wasRunningBeforeBackground = false;
+  bool _recoverableLifecyclePause = false;
+  Timer? _lifecyclePauseTimer;
   double _fractionalDebt = 0.0;
   int _unflushedDeducted = 0;
   DateTime _lastFlushAt = DateTime.now();
@@ -89,27 +91,12 @@ class BillingTicker with WidgetsBindingObserver {
   bool _usageLogSaved = false;
   // ─────────────────────────────────────────────────────────────────────────
 
-  // ── BILLING DEBUG LOG ──────────────────────────────────────────────────────
-  static const int _kMaxLogs = 200;
-  final List<String> _billingLogs = [];
-
   void _addBillingLog(String msg) {
-    final ts = DateTime.now().toIso8601String().substring(11, 19);
-    final line = '[$ts] $msg';
-    _billingLogs.insert(0, line);
-    if (_billingLogs.length > _kMaxLogs) {
-      _billingLogs.removeRange(_kMaxLogs, _billingLogs.length);
-    }
     debugPrint(msg);
-    AppLogLedger.instance.add('BILLING', msg);
+    if (!msg.contains('tick before=')) {
+      AppLogLedger.instance.add('BILLING', msg);
+    }
   }
-
-  /// BILLING DEBUG LOG 전체 목록 (최신순)
-  List<String> get billingLogs => List.unmodifiable(_billingLogs);
-
-  /// BILLING DEBUG LOG 초기화
-  void clearBillingLogs() => _billingLogs.clear();
-  // ──────────────────────────────────────────────────────────────────────────
 
   BillingRate get currentRate => _rate;
   bool get isPaused => _paused;
@@ -123,19 +110,27 @@ class BillingTicker with WidgetsBindingObserver {
   /// 앱이 백그라운드로 가면 billing 정지 → 포그라운드 복귀 시 이전 상태로 재개
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused ||
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden ||
         state == AppLifecycleState.detached) {
+      _lifecyclePauseTimer?.cancel();
       if (!_paused) {
         _wasRunningBeforeBackground = true;
-        _addBillingLog('[BILLING] background paused');
-        // pause() 내부에서 saveUsageLog() 가 호출되어 백그라운드 이전 구간 저장
-        pause();
+        _addBillingLog('[BILLING] lifecycle pause pending: 3s grace started');
+        _lifecyclePauseTimer = Timer(const Duration(seconds: 3), () {
+          _lifecyclePauseTimer = null;
+          if (_wasRunningBeforeBackground && !_paused) {
+            _addBillingLog('[BILLING] lifecycle pause confirmed');
+            _pauseFromLifecycle();
+          }
+        });
       } else {
         // billing이 이미 정지 상태이면 flush만 안전하게 시도
         flushNow();
       }
     } else if (state == AppLifecycleState.resumed) {
+      _cancelLifecyclePause('lifecycle_resumed');
       _addBillingLog('[BILLING] foreground resumed');
       if (_wasRunningBeforeBackground) {
         _wasRunningBeforeBackground = false;
@@ -169,6 +164,7 @@ class BillingTicker with WidgetsBindingObserver {
   /// 현재 모드 로그 기록 + 세션 시작 상태 캡처
   /// 반드시 setRate() 이후에 호출해야 rate가 정확히 기록됨
   void logMode(String mode) {
+    AppLogLedger.instance.onSessionStart(mode);
     _sessionMode = mode;
     _sessionRateValue = _rate.multiplier;
     _sessionBeforeSeconds = FFAppState().remainingTime;
@@ -179,6 +175,9 @@ class BillingTicker with WidgetsBindingObserver {
   }
 
   void pause() {
+    if (_paused) return; // 이중 호출 방지
+    _cancelLifecyclePause('manual_pause');
+    _recoverableLifecyclePause = false;
     _paused = true;
     _addBillingLog('[BILLING] pause');
     _updateBillingState();
@@ -242,9 +241,60 @@ class BillingTicker with WidgetsBindingObserver {
   }
 
   void resume() {
+    _cancelLifecyclePause('manual_resume');
+    _recoverableLifecyclePause = false;
     _paused = false;
+    if (_tickTimer == null) start();
     _addBillingLog('[BILLING] resume');
     _updateBillingState();
+  }
+
+  void resumeFromActivity(String reason) {
+    final hadPendingLifecyclePause = _lifecyclePauseTimer?.isActive == true;
+    _cancelLifecyclePause(reason);
+
+    if (!_canResumeFromActivity ||
+        (_paused && !_recoverableLifecyclePause && !hadPendingLifecyclePause)) {
+      _addBillingLog('[BILLING-RECOVER-SKIP] reason=$reason');
+      return;
+    }
+
+    if (!_paused) {
+      if (hadPendingLifecyclePause) {
+        _addBillingLog('[BILLING-RECOVER] reason=$reason');
+      }
+      return;
+    }
+
+    _sessionBeforeSeconds = FFAppState().remainingTime;
+    _sessionStartTime = DateTime.now();
+    _usageLogSaved = false;
+    _addBillingLog('[BILLING-RECOVER] reason=$reason');
+    resume();
+  }
+
+  bool get _canResumeFromActivity =>
+      _sessionMode.isNotEmpty &&
+      _sessionStartTime != null &&
+      FFAppState().remainingTime > 0;
+
+  void _pauseFromLifecycle() {
+    if (_paused) return;
+    _recoverableLifecyclePause = true;
+    _paused = true;
+    _addBillingLog('[BILLING] pause');
+    _updateBillingState();
+    flushNow();
+    saveUsageLog();
+  }
+
+  void _cancelLifecyclePause(String reason) {
+    if (_lifecyclePauseTimer?.isActive == true) {
+      _lifecyclePauseTimer?.cancel();
+      _addBillingLog('[BILLING] lifecycle pause canceled by $reason');
+    }
+    _lifecyclePauseTimer = null;
+    _wasRunningBeforeBackground = false;
   }
 
   void _onTick() {
@@ -291,6 +341,8 @@ class BillingTicker with WidgetsBindingObserver {
   }
 
   Future<void> disposeTicker() async {
+    _lifecyclePauseTimer?.cancel();
+    _lifecyclePauseTimer = null;
     _tickTimer?.cancel();
     await flushNow();
   }
@@ -388,8 +440,13 @@ class AppLogLedger {
   static final AppLogLedger instance = AppLogLedger._();
   AppLogLedger._();
 
-  static const int _kMax = 1000;
+  static const int _kMax = 300;
   final List<String> _lines = [];
+
+  void onSessionStart(String mode) {
+    _lines.clear();
+    add('SYSTEM', '---- session start: $mode ----');
+  }
 
   void add(String tag, String message) {
     final ts = DateTime.now().toIso8601String().substring(11, 23);
