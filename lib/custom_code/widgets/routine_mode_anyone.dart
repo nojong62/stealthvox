@@ -1587,7 +1587,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone> {
           .doc();
       await _myHistoryRef!.set({
         'created_at': FieldValue.serverTimestamp(),
-        'room_name': "Free Talk",
+        'room_name': "Anyone",
         'mode': 'free_talk',
         'user_label': 'the user',
         'partner_label': 'AI partner',

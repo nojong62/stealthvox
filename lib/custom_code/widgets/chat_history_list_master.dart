@@ -199,6 +199,9 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
   bool _isExpandRoom(String roomName) =>
       roomName.contains("Expand") || roomName.contains("Step.Ex");
 
+  bool _isAnyoneRoom(String roomName) =>
+      roomName.contains("Anyone") || roomName.contains("Free Talk");
+
   IconData _getIconForRoom(String roomName) {
     if (roomName.contains("Duo")) return Icons.people;
     if (roomName.contains("Clone")) return Icons.face;
@@ -206,7 +209,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
     if (_isExpandRoom(roomName)) return Icons.trending_up;
     if (roomName.contains("Shadowing")) return Icons.smart_toy;
     if (roomName.contains("NativeSync")) return Icons.mic_external_on;
-    if (roomName.contains("Free Talk")) return Icons.forum;
+    if (_isAnyoneRoom(roomName)) return Icons.forum;
     return Icons.chat_bubble_outline;
   }
 
@@ -217,7 +220,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
     if (_isExpandRoom(roomName)) return const Color(0xFFEA580C);
     if (roomName.contains("Shadowing")) return Colors.greenAccent;
     if (roomName.contains("NativeSync")) return Colors.orangeAccent;
-    if (roomName.contains("Free Talk")) return const Color(0xFF9333EA);
+    if (_isAnyoneRoom(roomName)) return const Color(0xFF9333EA);
     return Colors.white54;
   }
 
@@ -341,6 +344,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
           if (data['room_name'] == null) return false;
           final rn = data['room_name'].toString();
           if (_selectedFilter == 'Expand') return _isExpandRoom(rn);
+          if (_selectedFilter == 'Anyone') return _isAnyoneRoom(rn);
           return rn.contains(_selectedFilter);
         }).toList();
 
@@ -530,7 +534,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
           children: _selectedFilter == 'All' || _selectedFilter == 'Keepers'
               ? [
                   _buildFilterChip('Duo', 'Duo', Icons.people),
-                  _buildFilterChip('Free Talk', 'Free Talk', Icons.forum),
+                  _buildFilterChip('Anyone', 'Anyone', Icons.forum),
                   _buildFilterChip('Roleplay', 'Roleplay', Icons.smart_toy),
                   _buildFilterChip('Expand', 'Expand', Icons.trending_up),
                   _buildKeepersChip(),
@@ -731,8 +735,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
               ? Border.all(
                   color: Colors.amber.withValues(alpha: 0.6), width: 1.5)
               : Border.all(
-                  color:
-                      isChecked ? const Color(0xFF9E9E9E) : Colors.white10,
+                  color: isChecked ? const Color(0xFF9E9E9E) : Colors.white10,
                   width: isChecked ? 1.5 : 1.0),
           boxShadow: [
             BoxShadow(
