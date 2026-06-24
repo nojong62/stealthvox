@@ -704,6 +704,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       fetcher: questionTts,
       swSpeechEnd: _swTTS,
     );
+    _revealForReading(aiIdx, aiText.trim()); // 🆕 긴 대사 텔레프롬프터
 
     int ticks = 0;
     while (questionTts.pendingRequests > 0 || _ttsQueueManager.isBusy) {
@@ -1600,6 +1601,50 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     });
   }
 
+  // 🆕 긴 대사 텔레프롬프터: 화면보다 길면 첫 줄을 상단에 고정한 뒤,
+  //    읽는 시간(추정) 동안 서서히 맨 아래(끝줄)로 선형 글라이드.
+  //    화면에 다 들어오면 기존 카톡식(_scrollToBottom) 유지.
+  void _revealForReading(int index, String spokenText) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      final ctx = _itemKeys[index]?.currentContext;
+      if (ctx == null) {
+        _scrollToBottom();
+        return;
+      }
+      final renderObj = ctx.findRenderObject();
+      final double itemH = (renderObj is RenderBox) ? renderObj.size.height : 0;
+      final double viewH = _scrollController.position.viewportDimension;
+      // 화면에 다 들어오면 기존 동작
+      if (itemH <= 0 || itemH <= viewH * 0.85) {
+        _scrollToBottom();
+        return;
+      }
+      // 1) 첫 줄을 화면 상단에 고정 (즉시)
+      Scrollable.ensureVisible(ctx, alignment: 0.98, duration: Duration.zero);
+      // 2) 읽는 시간 동안 끝줄까지 선형 글라이드
+      //    (reverse 리스트에서 offset 0 = 맨 아래)
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!_scrollController.hasClients) return;
+        _scrollController.animateTo(
+          0,
+          duration: Duration(milliseconds: _estimateReadMs(spokenText)),
+          curve: Curves.linear,
+        );
+      });
+    });
+  }
+
+  // 읽는 시간 추정 (OpenAI TTS-1 영어 ≈ 14자/초). 살짝 짧게 잡아 끝줄이 약간 먼저 도착.
+  // 글라이드가 너무 빠르면 값을 낮추고, 너무 느리면 값을 올린다.
+  static const double _kReadCharsPerSec = 14.0;
+  int _estimateReadMs(String text) {
+    final int n = text.trim().length;
+    if (n <= 0) return 1500;
+    final int ms = (n / _kReadCharsPerSec * 1000).round();
+    return ms.clamp(1500, 25000);
+  }
+
   void _stopEverything() {
     _isConversationActive = false;
     _commitTimer?.cancel();
@@ -1873,6 +1918,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       fetcher: questionTts,
       swSpeechEnd: _swTTS,
     );
+    _revealForReading(aiIdx, aiText.trim()); // 🆕 긴 대사 텔레프롬프터
 
     // TTS 재생 완료 대기
     int ticks = 0;
@@ -2415,6 +2461,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         fetcher: userTtsFetcher,
         swSpeechEnd: _swTTS,
       );
+      _revealForReading(hostIndex, _part2FullSentence); // 🆕 긴 대사 텔레프롬프터
 
       // 🌱 유저 original(한국어) 역번역
       // 1턴: 전체 문장 역번역 → 대화방 표시 + Firestore 저장
@@ -2698,7 +2745,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           _localMessages[aiIndex]['target'] = aiTargetText;
           _localMessages[aiIndex]['original'] = aiOriginalText;
         });
-        _scrollToBottom();
+        _revealForReading(aiIndex, aiTargetText); // 🆕 긴 대사 텔레프롬프터
       }
       // [v3.8] AI 한국어 단일 호출 통합
       //   streamGrammarQuestion 프롬프트가 "영어 \n\n 한국어" 두 파트를 한 스트림으로 출력
@@ -2712,7 +2759,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           _localMessages[aiIndex]['target'] = aiTargetText;
           _localMessages[aiIndex]['original'] = aiOriginalText;
         });
-        _scrollToBottom();
+        _revealForReading(aiIndex, aiTargetText); // 🆕 긴 대사 텔레프롬프터
       }
       _log('🧠 [PIPE-08]',
           'aiGenerationTask 완료. AI pending=${aiTtsFetcher.pendingRequests}');
@@ -3377,7 +3424,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 
   Widget _buildSeedHintBalloon() {
     return Positioned(
-      bottom: 8,
+      top: 8,
       left: 24,
       right: 24,
       child: IgnorePointer(
