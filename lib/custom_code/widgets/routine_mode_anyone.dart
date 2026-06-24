@@ -206,26 +206,11 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone> {
     }
   }
 
-  // Free Talk 언어 수준 (대화 중 토글 가능: Beginner / Intermediate / Advanced)
-  String _freeTalkLevel = "Intermediate";
+  // 언어 수준 고정값 (초/중/고급 선택 UI 제거 — 내부 프롬프트 파이프라인용 Intermediate 고정)
+  final String _freeTalkLevel = "Intermediate";
 
   // 대화 컨텍스트용 슬라이딩 히스토리 (파이프라인에서 사용 — 유지)
   List<Map<String, String>> _recentHistory = [];
-
-  // 언어 수준 로드/저장 (SharedPreferences)
-  Future<void> _loadFreeTalkLevel() async {
-    final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getString('free_talk_level');
-    if (saved != null && saved.isNotEmpty && mounted) {
-      setState(() => _freeTalkLevel = saved);
-    }
-  }
-
-  Future<void> _setFreeTalkLevel(String level) async {
-    if (mounted) setState(() => _freeTalkLevel = level);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('free_talk_level', level);
-  }
 
   // 오디오 및 UI
   final List<Map<String, dynamic>> _localMessages = [];
@@ -259,7 +244,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone> {
     });
 
     _initPermissions();
-    _loadFreeTalkLevel();
     _fetchKeys();
     BillingTicker.instance.setRate(BillingRate.full);
     BillingTicker.instance.resume();
@@ -1716,8 +1700,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone> {
         child: Column(children: [
           _buildTopBar(),
           const SizedBox(height: 10),
-          _buildTopControls(),
-          const SizedBox(height: 10),
           Expanded(
             child: Stack(children: [
               _buildChatList(),
@@ -1741,72 +1723,74 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone> {
           color: Colors.black.withValues(alpha: 0.55),
           alignment: Alignment.topCenter,
           padding: const EdgeInsets.fromLTRB(20, 6, 20, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Align(
-                alignment: Alignment.topRight,
-                child: Padding(
-                  padding: const EdgeInsets.only(right: 22),
-                  child: CustomPaint(
-                    size: const Size(22, 11),
-                    painter: _BubbleTailPainter(),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Align(
+                  alignment: Alignment.topRight,
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 22),
+                    child: CustomPaint(
+                      size: const Size(22, 11),
+                      painter: _BubbleTailPainter(),
+                    ),
                   ),
                 ),
-              ),
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF2A2A2E),
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(
-                      color: Colors.amberAccent.withValues(alpha: 0.6),
-                      width: 1.2),
-                  boxShadow: [
-                    BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.4),
-                        blurRadius: 16,
-                        offset: const Offset(0, 6)),
-                  ],
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2A2A2E),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                        color: Colors.amberAccent.withValues(alpha: 0.6),
+                        width: 1.2),
+                    boxShadow: [
+                      BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.4),
+                          blurRadius: 16,
+                          offset: const Offset(0, 6)),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(children: const [
+                        Icon(Icons.lightbulb_outline,
+                            color: Colors.amberAccent, size: 20),
+                        SizedBox(width: 8),
+                        Text("이용 방법",
+                            style: TextStyle(
+                                color: Colors.amberAccent,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15)),
+                      ]),
+                      const SizedBox(height: 12),
+                      const Text(
+                        '대화하고 싶은 사람을 한 명 마음속에 떠올려 보세요. 그리고 그 사람이 바로 지금 눈앞에 있다고 생각하고, 하고 싶었던 말을 편하게 꺼내보세요. AI가 그 사람과 다르게 반응한다면, 그냥 넘기지 말고 "왜 그렇게 느껴?"하고 되물어 보세요. 묻고 답하다 보면, AI는 점점 더 그 사람에 가까워집니다. 진짜 그 사람과 마주 앉은 것처럼요.',
+                        style: TextStyle(
+                            color: Colors.white, fontSize: 14, height: 1.6),
+                      ),
+                      const SizedBox(height: 10),
+                      const Align(
+                        alignment: Alignment.centerRight,
+                        child: Text("(말풍선을 톡 누르면 닫혀요)",
+                            style:
+                                TextStyle(color: Colors.white38, fontSize: 11)),
+                      ),
+                    ],
+                  ),
                 ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(children: const [
-                      Icon(Icons.lightbulb_outline,
-                          color: Colors.amberAccent, size: 20),
-                      SizedBox(width: 8),
-                      Text("이용 방법",
-                          style: TextStyle(
-                              color: Colors.amberAccent,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15)),
-                    ]),
-                    const SizedBox(height: 12),
-                    const Text(
-                      '대화하고 싶은 사람을 한 명 마음속에 떠올려 보세요. 그리고 그 사람이 바로 지금 눈앞에 있다고 생각하고, 하고 싶었던 말을 편하게 꺼내보세요. AI가 그 사람과 다르게 반응한다면, 그냥 넘기지 말고 "왜 그렇게 느껴?"하고 되물어 보세요. 묻고 답하다 보면, AI는 점점 더 그 사람에 가까워집니다. 진짜 그 사람과 마주 앉은 것처럼요.',
-                      style: TextStyle(
-                          color: Colors.white, fontSize: 14, height: 1.6),
-                    ),
-                    const SizedBox(height: 10),
-                    const Align(
-                      alignment: Alignment.centerRight,
-                      child: Text("(말풍선을 톡 누르면 닫혀요)",
-                          style:
-                              TextStyle(color: Colors.white38, fontSize: 11)),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  // ... (_buildTopBar, _buildTopControls, _buildChatList, _buildTextBlock, _buildControlArea는 기존과 동일하게 유지) ...
+  // ... (_buildTopBar, _buildChatList, _buildTextBlock, _buildControlArea는 기존과 동일하게 유지) ...
   Widget _buildTopBar() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -1889,66 +1873,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone> {
             ),
           ]),
         ],
-      ),
-    );
-  }
-
-  Widget _buildTopControls() {
-    const levels = ["Beginner", "Intermediate", "Advanced"];
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Container(
-        height: 44,
-        padding: const EdgeInsets.all(4),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1C1C1E),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
-        ),
-        child: Row(
-          children: List.generate(levels.length, (i) {
-            final bool selected = _freeTalkLevel == levels[i];
-            return Expanded(
-              child: GestureDetector(
-                onTap: () => _setFreeTalkLevel(levels[i]),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  curve: Curves.easeInOut,
-                  alignment: Alignment.center,
-                  margin: const EdgeInsets.symmetric(horizontal: 2),
-                  decoration: BoxDecoration(
-                    color: Colors.transparent,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: selected
-                          ? const Color(0xFF9333EA)
-                          : Colors.transparent,
-                      width: 1.5,
-                    ),
-                  ),
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: Text(
-                        levels[i],
-                        maxLines: 1,
-                        softWrap: false,
-                        style: TextStyle(
-                          color: selected ? Colors.white : Colors.white38,
-                          fontSize: 13,
-                          fontWeight:
-                              selected ? FontWeight.w700 : FontWeight.w400,
-                          letterSpacing: -0.2,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            );
-          }),
-        ),
       ),
     );
   }
