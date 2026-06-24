@@ -711,9 +711,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       if (++ticks > 300) break;
     }
 
-    // 첫 질문 후 사용자가 직접 이어서 말할 수 있도록 한국어 안내를 덧붙이고 재생한다.
-    const String inviteMsg = '하고 싶은 이야기가 있으시면 먼저 말씀해 주세요.';
-    aiOriginal = aiOriginal.isEmpty ? inviteMsg : '$aiOriginal\n$inviteMsg';
     if (mounted && aiIdx < _localMessages.length) {
       setState(() {
         _localMessages[aiIdx]['original'] = aiOriginal;
@@ -3424,7 +3421,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
                 SizedBox(width: 6),
                 Flexible(
                   child: Text(
-                    '질문과 다른 합성 문장을 말하셔도 됩니다.',
+                    '질문과 다른 씨앗 문장을 말씀하셔도 됩니다.',
                     style: TextStyle(
                       color: Color(0xFFFBBF24),
                       fontSize: 13,
