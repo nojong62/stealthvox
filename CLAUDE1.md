@@ -47,23 +47,22 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# 지시문 — Anyone 모드 1차 (구조 리네임 + 이용방법 말풍선 UI)
+# 지시문 — Anyone 모드 2차 (AI 대화 프롬프트 = "빙의" 로직)
 
 > 대상 에이전트: **Claude Code**
 > 작업 폴더: `F:\flutter_project\stealth_vox`
-> 위젯 경로: `lib/custom_code/widgets/`
-> 본 지시문 범위: **FreeTalk → Anyone 구조 리네임 + 이용방법 아이콘/말풍선 추가 + 연결 파일 갱신**
-> **제외**: AI 대화 프롬프트(대화 방식) 재작성 → 별도 2차 지시문에서 처리 (이번 단계에서 손대지 말 것)
+> 대상 파일: **`lib/custom_code/widgets/routine_mode_anyone.dart`** (1차에서 생성된 파일)
+> 범위: `FreeTalkBrain` 내부 **두 개의 시스템 프롬프트만 교체**. 그 외 로직·변수·구조 일절 변경 금지.
 
 ---
 
 ## 0. 확정된 설계 결정 (변경 금지)
 
-- 외부 위젯 클래스만 리네임: `RoutineModeFreeTalk → RoutineModeAnyone` / `_RoutineModeFreeTalkState → _RoutineModeAnyoneState`
-- **내부 클래스/상수는 그대로 유지**: `FreeTalkBrain`, `kFreeTalk*`, `TtsCache`, `TtsQueueManager` 등 일절 변경 금지
-- **히스토리 저장 라벨 유지**: `mode:'free_talk'`, `room_name:"Free Talk"` 그대로 (수정 금지)
-- **구 `routine_mode_free_talk.dart`는 삭제하지 않음** → index.dart export·stealth_room 라우팅만 끊어 휴면(orphan)화. git 안전망으로 보존
-- 새 모드 표시명: **Anyone / "누구든 그 사람이 되어요" / `Icons.theater_comedy`**
+- 교체 대상: ① 메인 응답 프롬프트(`streamFreeTalkResponse`의 `sysPrompt`) ② 오프너 프롬프트(`generateFreeTalkOpener`의 `sysPrompt`)
+- 빙의 원칙: **유저 발화에서 관계·성격·감정·호칭 단서를 내부적으로만 추정, 추정/분석은 절대 출력하지 말고 오직 그 인물로서 자연스럽게 응답**. 누군지 맞히려 들거나 관계를 명시하지 않음
+- 오프너: 아직 누군지 모르므로 **무색 중립** — 유저가 먼저 말하도록 여는 한마디
+- temperature `0.5` 유지, 출력 길이 "한 문장 위주" 정책 유지 (이번 교체로 건드리지 않음)
+- **변수 보간 유지 필수**: `$myTarget`, `$targetLang`, `$rejectedBlock`, `${_freeTalkLevelInstruction(level)}` — 누락 시 기능 손상
 
 ---
 
@@ -72,410 +71,159 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 ```bash
 cd F:\flutter_project\stealth_vox
 git add -A
-git commit -m "savepoint: before Anyone mode phase1"
+git commit -m "savepoint: before Anyone mode phase2 (prompt)"
+```
+
+사전 확인 (교체 대상이 현재 free_talk 프롬프트 그대로인지):
+```bash
+findstr /C:"Keep every reply brief and easy to answer" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
+:: 기대: 1  (구 메인 프롬프트 존재)
+findstr /C:"kicking off a casual" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
+:: 기대: 1  (구 오프너 프롬프트 존재)
 ```
 
 ---
 
-## 2. STEP A — 파일 복제 (free_talk → anyone)
+## 2. STEP A — 오프너 프롬프트 교체 (하단 먼저)
+
+`generateFreeTalkOpener` 내부 `sysPrompt`. **OLD 전체를 NEW로 교체.**
+
+**OLD**
+```dart
+      final sysPrompt =
+          """You are a warm, friendly conversation partner kicking off a casual, no-pressure chat.
+Open with ONE short, natural line that invites the user to chat freely about anything.
+
+RULES:
+- Speak ONLY in $targetLang. Do NOT use Korean or any other language.
+- ONE sentence only. Under 12 words.
+- Relaxed and friendly, like a close friend — never like an AI or a survey.
+- Convey the feeling of "let's just chat freely about whatever you like." For example: "Let's just chat freely — what's on your mind?" or "We can talk about anything you like, so what's up?"
+- ${_freeTalkLevelInstruction(level)}
+
+Output: ONE sentence in $targetLang only.""";
+```
+
+**NEW**
+```dart
+      final sysPrompt =
+          """You are about to be spoken to by the user, as if you are a specific person they have in mind — but you do not know who yet.
+Open with ONE short, warm line that simply lets them begin, as if you happen to be right there in front of them.
+
+RULES:
+- Speak ONLY in $targetLang. Do NOT use Korean or any other language.
+- ONE sentence only. Under 12 words.
+- Neutral and natural — do NOT assume any relationship, mood, or role yet. No names, no labels.
+- Just open the door for them to speak first. For example: "Hey... I'm right here. What did you want to say?" or "I'm listening — go ahead."
+- ${_freeTalkLevelInstruction(level)}
+
+Output: ONE sentence in $targetLang only.""";
+```
+
+---
+
+## 3. STEP B — 메인 응답 프롬프트 교체 (상단)
+
+`streamFreeTalkResponse` 내부 `sysPrompt`. **OLD 전체를 NEW로 교체.**
+
+**OLD**
+```dart
+      final sysPrompt =
+          """You are a warm, friendly $myTarget conversation partner.
+Keep every reply brief and easy to answer.
+Talk like a real friend — sound natural, show interest, and keep the chat flowing.
+Match your vocabulary and grammar to the learner's level below.
+Never say that you are an AI or a language model.
+
+OUTPUT LANGUAGE: $myTarget ONLY. Zero Korean characters in output.
+
+[RULES]
+- Respond in $myTarget only. Usually ONE short sentence; use two only when truly needed.
+- Ask at most ONE question.
+- Avoid long explanations, lists, teaching notes, and multi-part answers.
+- Leave room for the user to speak next.
+- No greetings, no "I understand", no meta-comments, no prefixes. Just reply.
+- If the audio is garbled or impossible to make out (a speech recognition error), politely ask them to repeat in $myTarget.$rejectedBlock
+
+Learner level: ${_freeTalkLevelInstruction(level)}""";
+```
+
+**NEW**
+```dart
+      final sysPrompt =
+          """You are role-playing as the specific person the user has in mind and is speaking to.
+You do NOT know who that person is — a partner, a parent, a boss, an old friend, someone they drifted apart from. Work it out silently from how they speak.
+From their tone, what they call you, the topic, the emotion, the history they assume — quietly infer who you are to them, and become that person.
+
+OUTPUT LANGUAGE: $myTarget ONLY. Zero Korean characters in output.
+
+[ABSOLUTE RULES]
+- NEVER reveal you are guessing or analyzing. Never name the relationship, never ask "who am I to you?", never say things like "we go way back" or "as your ___". No meta-comments about who they might be talking to.
+- Just respond AS that person would — their likely tone, attitude, and feelings. Stay fully in character.
+- As the conversation continues, become more consistent and more precisely that person.
+- If the user pushes back because your reaction feels off (e.g. "why would you say that?"), answer in character and naturally shift toward the person they seem to be speaking to.
+- Never say you are an AI or a language model.
+
+[STYLE]
+- Respond in $myTarget only. Usually ONE short sentence; use two only when truly needed.
+- Ask at most ONE question. Leave room for the user to speak next.
+- No greetings, no "I understand", no prefixes. Just speak as that person.
+- If the audio is garbled or impossible to make out (a speech recognition error), ask them to repeat, in character, in $myTarget.$rejectedBlock
+
+Learner level: ${_freeTalkLevelInstruction(level)}""";
+```
+
+---
+
+## 4. 사후 검증 (필수)
 
 ```bash
-copy "lib\custom_code\widgets\routine_mode_free_talk.dart" "lib\custom_code\widgets\routine_mode_anyone.dart"
-```
+:: 1) 신규 프롬프트 적용 확인
+findstr /C:"role-playing as the specific person" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
+:: 기대: 1  (신규 메인)
+findstr /C:"happen to be right there" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
+:: 기대: 1  (신규 오프너)
 
-복제 직후 사전 검증 (기대값 표기):
-
-```bash
-findstr /C:"RoutineModeFreeTalk" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
-:: 기대: 4  (클래스 선언/생성자/State 참조/State 클래스 선언)
-findstr /C:"_RoutineModeFreeTalkState" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
-:: 기대: 2
-```
-
-> 이후 STEP B의 모든 편집은 **새 파일 `routine_mode_anyone.dart`** 에만 적용한다. (free_talk.dart는 절대 건드리지 않는다.)
-
----
-
-## 3. STEP B — `routine_mode_anyone.dart` 편집 (하단→상단 순서)
-
-### B-1. 파일 맨 끝: 말풍선 꼬리 페인터 클래스 추가
-
-`_LangIconPainter`의 마지막 닫는 중괄호 뒤(파일 끝)에 새 클래스를 **추가**한다.
-
-**OLD**
-```dart
-  @override
-  bool shouldRepaint(_LangIconPainter old) => old.active != active;
-}
-```
-
-**NEW**
-```dart
-  @override
-  bool shouldRepaint(_LangIconPainter old) => old.active != active;
-}
-
-// 🆕 [Anyone] 이용방법 말풍선 꼬리 페인터
-class _BubbleTailPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = const Color(0xFF2A2A2E)
-      ..style = PaintingStyle.fill;
-    final path = Path()
-      ..moveTo(0, size.height)
-      ..lineTo(size.width / 2, 0)
-      ..lineTo(size.width, size.height)
-      ..close();
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-```
-
----
-
-### B-2. `_buildTopBar()` 우측 아이콘 그룹에 "이용방법" 아이콘 추가
-
-**OLD**
-```dart
-          Row(children: [
-            IconButton(
-              icon: Icon(
-                Icons.format_size,
-```
-
-**NEW**
-```dart
-          Row(children: [
-            // 🆕 [Anyone] 이용방법 말풍선 토글
-            IconButton(
-              icon: const Icon(Icons.help_outline,
-                  color: Colors.amberAccent, size: 22),
-              onPressed: () =>
-                  setState(() => _showUsageGuide = !_showUsageGuide),
-            ),
-            IconButton(
-              icon: Icon(
-                Icons.format_size,
-```
-
----
-
-### B-3. `_buildUsageGuide()` 메서드 추가 (`_buildTopBar` 바로 앞)
-
-**OLD**
-```dart
-  // ... (_buildTopBar, _buildTopControls, _buildChatList, _buildTextBlock, _buildControlArea는 기존과 동일하게 유지) ...
-  Widget _buildTopBar() {
-```
-
-**NEW**
-```dart
-  // 🆕 [Anyone] 이용방법 말풍선 (배경/말풍선 어디든 톡 누르면 닫힘)
-  Widget _buildUsageGuide() {
-    return Positioned.fill(
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () => setState(() => _showUsageGuide = false),
-        child: Container(
-          color: Colors.black.withValues(alpha: 0.55),
-          alignment: Alignment.topCenter,
-          padding: const EdgeInsets.fromLTRB(20, 6, 20, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Align(
-                alignment: Alignment.topRight,
-                child: Padding(
-                  padding: const EdgeInsets.only(right: 22),
-                  child: CustomPaint(
-                    size: const Size(22, 11),
-                    painter: _BubbleTailPainter(),
-                  ),
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF2A2A2E),
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(
-                      color: Colors.amberAccent.withValues(alpha: 0.6),
-                      width: 1.2),
-                  boxShadow: [
-                    BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.4),
-                        blurRadius: 16,
-                        offset: const Offset(0, 6)),
-                  ],
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(children: const [
-                      Icon(Icons.lightbulb_outline,
-                          color: Colors.amberAccent, size: 20),
-                      SizedBox(width: 8),
-                      Text("이용 방법",
-                          style: TextStyle(
-                              color: Colors.amberAccent,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15)),
-                    ]),
-                    const SizedBox(height: 12),
-                    const Text(
-                      '대화하고 싶은 사람을 한 명 마음속에 떠올려 보세요. 그리고 그 사람이 바로 지금 눈앞에 있다고 생각하고, 하고 싶었던 말을 편하게 꺼내보세요. AI가 그 사람과 다르게 반응한다면, 그냥 넘기지 말고 "왜 그렇게 느껴?"하고 되물어 보세요. 묻고 답하다 보면, AI는 점점 더 그 사람에 가까워집니다. 진짜 그 사람과 마주 앉은 것처럼요.',
-                      style: TextStyle(
-                          color: Colors.white, fontSize: 14, height: 1.6),
-                    ),
-                    const SizedBox(height: 10),
-                    const Align(
-                      alignment: Alignment.centerRight,
-                      child: Text("(말풍선을 톡 누르면 닫혀요)",
-                          style:
-                              TextStyle(color: Colors.white38, fontSize: 11)),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ... (_buildTopBar, _buildTopControls, _buildChatList, _buildTextBlock, _buildControlArea는 기존과 동일하게 유지) ...
-  Widget _buildTopBar() {
-```
-
----
-
-### B-4. `build()`의 Stack에 말풍선 오버레이 연결
-
-**OLD**
-```dart
-          Expanded(
-            child: Stack(children: [
-              _buildChatList(),
-              _buildIdleOverlay(),
-            ]),
-          ),
-```
-
-**NEW**
-```dart
-          Expanded(
-            child: Stack(children: [
-              _buildChatList(),
-              _buildIdleOverlay(),
-              if (_showUsageGuide) _buildUsageGuide(), // 🆕 [Anyone] 이용방법 말풍선
-            ]),
-          ),
-```
-
----
-
-### B-5. 상태 변수 `_showUsageGuide` 추가
-
-**OLD**
-```dart
-  double _fontScale = 1.0;
-  bool _showOriginal = true;
-```
-
-**NEW**
-```dart
-  double _fontScale = 1.0;
-  bool _showOriginal = true;
-  bool _showUsageGuide = false; // 🆕 [Anyone] 이용방법 말풍선 토글
-```
-
----
-
-### B-6. 외부 위젯 클래스 리네임 (이 파일의 마지막 편집)
-
-**OLD**
-```dart
-class RoutineModeFreeTalk extends StatefulWidget {
-  const RoutineModeFreeTalk({super.key, this.width, this.height});
-  final double? width;
-  final double? height;
-
-  @override
-  State<RoutineModeFreeTalk> createState() => _RoutineModeFreeTalkState();
-}
-
-class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
-```
-
-**NEW**
-```dart
-class RoutineModeAnyone extends StatefulWidget {
-  const RoutineModeAnyone({super.key, this.width, this.height});
-  final double? width;
-  final double? height;
-
-  @override
-  State<RoutineModeAnyone> createState() => _RoutineModeAnyoneState();
-}
-
-class _RoutineModeAnyoneState extends State<RoutineModeAnyone> {
-```
-
----
-
-## 4. STEP C — `lib/custom_code/widgets/stealth_room_master.dart` 편집 (하단→상단)
-
-### C-1. 메뉴 카드 라벨 (라인 ~379)
-
-**OLD**
-```dart
-            _buildMenuCard(2, "Free Talk", "AI와 자유 대화", Icons.forum,
-                const Color(0xFF9333EA)),
-```
-
-**NEW**
-```dart
-            _buildMenuCard(2, "Anyone", "누구든 그 사람이 되어요",
-                Icons.theater_comedy, const Color(0xFF9333EA)),
-```
-
-### C-2. 모드 라우팅 진입점 (라인 ~297)
-
-**OLD**
-```dart
-      return RoutineModeFreeTalk(
-          key: const ValueKey('RoutineModeFreeTalk'),
-          width: widget.width,
-          height: widget.height);
-```
-
-**NEW**
-```dart
-      return RoutineModeAnyone(
-          key: const ValueKey('RoutineModeAnyone'),
-          width: widget.width,
-          height: widget.height);
-```
-
----
-
-## 5. STEP D — `lib/custom_code/widgets/index.dart` export 교체
-
-> 이 파일은 미업로드 상태. 아래 패턴을 찾아 **교체**한다. (추가 아님 — 중복 Box7 클래스 충돌 방지)
-
-먼저 확인:
-```bash
-findstr /N "routine_mode_free_talk" "lib\custom_code\widgets\index.dart"
-```
-
-해당 export 줄을 다음과 같이 교체한다.
-
-**OLD**
-```dart
-export 'routine_mode_free_talk.dart';
-```
-
-**NEW**
-```dart
-export 'routine_mode_anyone.dart';
-```
-
-> 만약 export 표기가 `export '/custom_code/widgets/routine_mode_free_talk.dart';` 처럼 절대경로 형식이면, 그 형식을 그대로 유지하며 파일명만 `routine_mode_anyone.dart`로 바꾼다.
-
----
-
-## 6. STEP E (선택) — `lib/custom_code/widgets/intro_master.dart` 도움말 문구 (라인 ~335)
-
-> 메뉴가 "Anyone"으로 바뀌므로 도움말의 "[Free Talk]" 안내도 일치시키는 것을 권장. **선택 사항** — 실장 승인 시에만 적용.
-
-**OLD**
-```dart
-            "• [Free Talk] AI와 자유롭게 영어 대화를 나누며 실전 회화를 연습하세요.\n\n"
-```
-
-**NEW**
-```dart
-            "• [Anyone] 마음속에 떠올린 그 사람에게 말하듯 대화하면, AI가 점점 그 사람이 되어 응답합니다.\n\n"
-```
-
----
-
-## 7. 사후 검증 (필수)
-
-```bash
-:: 1) anyone 파일에 구 클래스명이 0이어야 함
-findstr /C:"RoutineModeFreeTalk" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
+:: 2) 구 프롬프트 제거 확인
+findstr /C:"Keep every reply brief and easy to answer" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
 :: 기대: 0
-findstr /C:"_RoutineModeFreeTalkState" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
+findstr /C:"kicking off a casual" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
 :: 기대: 0
 
-:: 2) 새 클래스명 정상 존재
-findstr /C:"RoutineModeAnyone" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
-:: 기대: 4
-
-:: 3) UI 추가 요소 확인
-findstr /C:"_showUsageGuide" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
-:: 기대: 4  (선언 1 + 토글 onPressed 1 + build의 if 1 + _buildUsageGuide 내부 onTap 1)
-findstr /C:"_buildUsageGuide" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
-:: 기대: 2  (정의 1 + 호출 1)
-findstr /C:"_BubbleTailPainter" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
-:: 기대: 2  (정의 1 + 사용 1)
-
-:: 4) stealth_room 라우팅/메뉴 갱신 확인
-findstr /C:"RoutineModeAnyone" "lib\custom_code\widgets\stealth_room_master.dart" | find /c /v ""
-:: 기대: 2
-findstr /C:"RoutineModeFreeTalk" "lib\custom_code\widgets\stealth_room_master.dart" | find /c /v ""
-:: 기대: 0
-
-:: 5) index.dart export 교체 확인
-findstr /C:"routine_mode_anyone" "lib\custom_code\widgets\index.dart" | find /c /v ""
-:: 기대: 1
-findstr /C:"routine_mode_free_talk" "lib\custom_code\widgets\index.dart" | find /c /v ""
-:: 기대: 0
+:: 3) 변수 보간 무결성 (누락 시 기능 손상)
+findstr /C:"$rejectedBlock" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
+:: 기대: 신규 메인 sysPrompt 내 1회 포함 (정의/사용부 합산은 교체 전과 동일해야 함 — 감소 없으면 정상)
+findstr /C:"_freeTalkLevelInstruction(level)" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
+:: 기대: 교체 전과 동일 (메인 1 + 오프너 1 유지 — 두 NEW 블록 모두 포함되어 있으므로 감소하면 안 됨)
 ```
 
 포맷 + 분석 (**폴더 전체 금지, 개별 파일만**):
-
 ```bash
 dart format "lib\custom_code\widgets\routine_mode_anyone.dart"
-dart format "lib\custom_code\widgets\stealth_room_master.dart"
-dart format "lib\custom_code\widgets\index.dart"
 flutter analyze
 ```
-
-- `flutter analyze`: **errors 0** 목표 (기존 warning 잔존은 허용)
-- 특히 `Duplicate definition` / `is defined in libraries` 류 에러가 없는지 확인 → 있으면 index.dart export 교체(STEP D)가 누락된 것
+- `flutter analyze`: **errors 0** 목표. 특히 `$myTarget` / `$targetLang` / `$rejectedBlock` / `${_freeTalkLevelInstruction(level)}` 미정의·보간 오류가 없는지 확인 (있으면 NEW 블록 변수 누락)
 
 ---
 
-## 8. 동작 확인 (수동)
+## 5. 동작 확인 (수동)
 
-1. 앱 실행 → StealthRoom 메뉴에 **Anyone / "누구든 그 사람이 되어요"** 카드(연극가면 아이콘) 표시
-2. Anyone 진입 → 상단 우측에 **전구(?) 아이콘** 표시
-3. 아이콘 탭 → 상단에서 **말풍선 가이드** 펼쳐짐(꼬리가 아이콘 쪽을 향함)
-4. 말풍선/배경 아무 곳이나 탭 → 사라짐
-5. 대화 시작/종료/히스토리 저장이 기존 FreeTalk와 동일하게 동작(이번 단계는 로직 무변경)
+1. Anyone 진입 → 오프너가 **무색의 짧은 한마디**(예: "Hey... I'm right here. What did you want to say?")로 시작하는지
+2. 유저가 마음속 인물에게 말을 걸면, AI가 **누군지 추측/분석하는 멘트 없이** 그 인물처럼 자연스럽게 반응하는지
+3. "왜 그렇게 말해?"류로 되물으면, AI가 캐릭터를 유지한 채 유저가 기대하는 인물 쪽으로 조정되는지
+4. 출력은 영어 only, 한 문장 위주, 한국어 0
+5. 히스토리 저장·빌링·autopause 등 기존 동작 정상(이번 교체로 무변경)
 
 ---
 
-## 9. 롤백
-
-문제 발생 시:
+## 6. 롤백
 ```bash
 git reset --hard HEAD~1
 ```
-(STEP 1 savepoint 커밋으로 복귀. 새로 생성된 `routine_mode_anyone.dart`도 함께 제거됨)
+(STEP 1 savepoint로 복귀)
 
 ---
 
-## 10. 다음 단계 (2차 지시문 예고 — 이번엔 미실행)
-
-- `routine_mode_anyone.dart`의 대화 프롬프트(응답: ~L3517 / 오프너: ~L3592) 재작성
-- 핵심 원칙: **"유저 발화에서 관계·성격·감정·호칭 단서를 내부적으로만 누적 추정, 추론은 절대 출력하지 말고 오직 그 인물의 자연스러운 반응으로만 응답"**
-- 프롬프트 문구 확정 후 별도 지시문으로 진행
+## 7. 비고
+- 본 교체는 프롬프트 문구 한정. `temperature(0.5)`, `max_tokens`, user 메시지(`Conversation history:...`), 스트림/네트워크 로직은 의도적으로 그대로 둔다.
+- 추후 튜닝 여지(이번엔 미실행): 인물 일관성이 약하면 메인 temperature 0.5→0.6 소폭 상향, 또는 user 메시지 말미를 "Your reply, fully in character:" 로 강화 검토.
