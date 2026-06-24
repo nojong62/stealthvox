@@ -594,12 +594,12 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
           color: _selectedDocIds.isNotEmpty
-              ? Colors.redAccent.withValues(alpha: 0.2)
+              ? const Color(0xFF4A4A4A)
               : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
               color: _selectedDocIds.isNotEmpty
-                  ? Colors.redAccent
+                  ? const Color(0xFF9E9E9E)
                   : Colors.white24,
               width: 1.5),
         ),
@@ -609,13 +609,13 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
             Icon(Icons.delete_sweep,
                 size: 16,
                 color: _selectedDocIds.isNotEmpty
-                    ? Colors.redAccent
+                    ? const Color(0xFF9E9E9E)
                     : Colors.white54),
             const SizedBox(width: 6),
             Text("선택삭제",
                 style: TextStyle(
                     color: _selectedDocIds.isNotEmpty
-                        ? Colors.redAccent
+                        ? const Color(0xFF9E9E9E)
                         : Colors.white54,
                     fontSize: 13,
                     fontWeight: FontWeight.bold)),
@@ -624,7 +624,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
               Container(
                 padding: const EdgeInsets.all(5),
                 decoration: const BoxDecoration(
-                    color: Colors.redAccent, shape: BoxShape.circle),
+                    color: Color(0xFF9E9E9E), shape: BoxShape.circle),
                 child: Text('${_selectedDocIds.length}',
                     style: const TextStyle(
                         color: Colors.white,
@@ -732,7 +732,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
                   color: Colors.amber.withValues(alpha: 0.6), width: 1.5)
               : Border.all(
                   color:
-                      isChecked ? _getColorForRoom(roomName) : Colors.white10,
+                      isChecked ? const Color(0xFF9E9E9E) : Colors.white10,
                   width: isChecked ? 1.5 : 1.0),
           boxShadow: [
             BoxShadow(
@@ -748,7 +748,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
                 padding: const EdgeInsets.only(right: 12),
                 child: Checkbox(
                   value: isChecked,
-                  activeColor: _getColorForRoom(roomName),
+                  activeColor: const Color(0xFF757575),
                   checkColor: Colors.white,
                   side: const BorderSide(color: Colors.white54, width: 1.5),
                   shape: RoundedRectangleBorder(
