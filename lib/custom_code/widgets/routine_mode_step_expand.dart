@@ -716,20 +716,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         _localMessages[aiIdx]['original'] = aiOriginal;
       });
     }
-    final inviteTts = ChunkedTtsFetcher(
-      _openAiKey,
-      _ttsQueueManager,
-      'nova',
-      isUser: false,
-      onLog: _log,
-    );
-    inviteTts.addText(inviteMsg);
-    ticks = 0;
-    while (
-        (inviteTts.pendingRequests > 0 || _ttsQueueManager.isBusy) && mounted) {
-      await Future.delayed(const Duration(milliseconds: 50));
-      if (++ticks > 200) break;
-    }
   }
 
   // 합성 문장 안내 말풍선을 표시 후 3초 뒤 자동 숨김
