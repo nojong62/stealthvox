@@ -5318,21 +5318,9 @@ RULES — follow exactly:
                         : (_polishedSentence.isNotEmpty
                             ? _switchToPolishedPractice
                             : null),
-                    child: Container(
-                      width: 40,
-                      height: 40,
-                      margin: const EdgeInsets.only(right: 4),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: _practicingPolished
-                              ? Colors.greenAccent
-                              : (_polishedSentence.isNotEmpty
-                                  ? Colors.amber
-                                  : Colors.white24),
-                          width: 1.5,
-                        ),
-                      ),
+                    // [P-PULSE] Glow the available P button in Expanded mode.
+                    child: AnimatedBuilder(
+                      animation: _blinkController,
                       child: Center(
                         child: Text(
                           _practicingPolished ? 'E' : 'P',
@@ -5347,6 +5335,39 @@ RULES — follow exactly:
                           ),
                         ),
                       ),
+                      builder: (context, child) {
+                        // [P-PULSE] Pulse only when polished practice is available.
+                        final bool pPulse = !_practicingPolished &&
+                            _polishedSentence.isNotEmpty;
+                        final double t = _blinkOpacity.value;
+                        return Container(
+                          width: 40,
+                          height: 40,
+                          margin: const EdgeInsets.only(right: 4),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: _practicingPolished
+                                  ? Colors.greenAccent
+                                  : (_polishedSentence.isNotEmpty
+                                      ? Colors.amber
+                                      : Colors.white24),
+                              width: 1.5,
+                            ),
+                            boxShadow: pPulse
+                                ? [
+                                    BoxShadow(
+                                      color: Colors.amber
+                                          .withValues(alpha: 0.15 + 0.5 * t),
+                                      blurRadius: 6 + 10 * t,
+                                      spreadRadius: 1 + 2 * t,
+                                    ),
+                                  ]
+                                : null,
+                          ),
+                          child: child,
+                        );
+                      },
                     ),
                   ),
                   GestureDetector(
