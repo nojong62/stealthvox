@@ -47,183 +47,86 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# 지시문 — Anyone 모드 2차 (AI 대화 프롬프트 = "빙의" 로직)
+# StepExpand 첫질문 안내문 삭제 + 팝업 힌트 문구 수정
 
-> 대상 에이전트: **Claude Code**
-> 작업 폴더: `F:\flutter_project\stealth_vox`
-> 대상 파일: **`lib/custom_code/widgets/routine_mode_anyone.dart`** (1차에서 생성된 파일)
-> 범위: `FreeTalkBrain` 내부 **두 개의 시스템 프롬프트만 교체**. 그 외 로직·변수·구조 일절 변경 금지.
-
----
-
-## 0. 확정된 설계 결정 (변경 금지)
-
-- 교체 대상: ① 메인 응답 프롬프트(`streamFreeTalkResponse`의 `sysPrompt`) ② 오프너 프롬프트(`generateFreeTalkOpener`의 `sysPrompt`)
-- 빙의 원칙: **유저 발화에서 관계·성격·감정·호칭 단서를 내부적으로만 추정, 추정/분석은 절대 출력하지 말고 오직 그 인물로서 자연스럽게 응답**. 누군지 맞히려 들거나 관계를 명시하지 않음
-- 오프너: 아직 누군지 모르므로 **무색 중립** — 유저가 먼저 말하도록 여는 한마디
-- temperature `0.5` 유지, 출력 길이 "한 문장 위주" 정책 유지 (이번 교체로 건드리지 않음)
-- **변수 보간 유지 필수**: `$myTarget`, `$targetLang`, `$rejectedBlock`, `${_freeTalkLevelInstruction(level)}` — 누락 시 기능 손상
-
----
-
-## 1. 사전 안전장치 (필수)
-
+## 사전 준비
 ```bash
 cd F:\flutter_project\stealth_vox
-git add -A
-git commit -m "savepoint: before Anyone mode phase2 (prompt)"
+git add -A && git commit -m "savepoint: before step_expand text fix"
 ```
 
-사전 확인 (교체 대상이 현재 free_talk 프롬프트 그대로인지):
-```bash
-findstr /C:"Keep every reply brief and easy to answer" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
-:: 기대: 1  (구 메인 프롬프트 존재)
-findstr /C:"kicking off a casual" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
-:: 기대: 1  (구 오프너 프롬프트 존재)
-```
+## 대상 파일
+`lib/custom_code/routine_mode_step_expand.dart`
 
 ---
 
-## 2. STEP A — 오프너 프롬프트 교체 (하단 먼저)
-
-`generateFreeTalkOpener` 내부 `sysPrompt`. **OLD 전체를 NEW로 교체.**
-
-**OLD**
-```dart
-      final sysPrompt =
-          """You are a warm, friendly conversation partner kicking off a casual, no-pressure chat.
-Open with ONE short, natural line that invites the user to chat freely about anything.
-
-RULES:
-- Speak ONLY in $targetLang. Do NOT use Korean or any other language.
-- ONE sentence only. Under 12 words.
-- Relaxed and friendly, like a close friend — never like an AI or a survey.
-- Convey the feeling of "let's just chat freely about whatever you like." For example: "Let's just chat freely — what's on your mind?" or "We can talk about anything you like, so what's up?"
-- ${_freeTalkLevelInstruction(level)}
-
-Output: ONE sentence in $targetLang only.""";
-```
-
-**NEW**
-```dart
-      final sysPrompt =
-          """You are about to be spoken to by the user, as if you are a specific person they have in mind — but you do not know who yet.
-Open with ONE short, warm line that simply lets them begin, as if you happen to be right there in front of them.
-
-RULES:
-- Speak ONLY in $targetLang. Do NOT use Korean or any other language.
-- ONE sentence only. Under 12 words.
-- Neutral and natural — do NOT assume any relationship, mood, or role yet. No names, no labels.
-- Just open the door for them to speak first. For example: "Hey... I'm right here. What did you want to say?" or "I'm listening — go ahead."
-- ${_freeTalkLevelInstruction(level)}
-
-Output: ONE sentence in $targetLang only.""";
-```
-
----
-
-## 3. STEP B — 메인 응답 프롬프트 교체 (상단)
-
-`streamFreeTalkResponse` 내부 `sysPrompt`. **OLD 전체를 NEW로 교체.**
-
-**OLD**
-```dart
-      final sysPrompt =
-          """You are a warm, friendly $myTarget conversation partner.
-Keep every reply brief and easy to answer.
-Talk like a real friend — sound natural, show interest, and keep the chat flowing.
-Match your vocabulary and grammar to the learner's level below.
-Never say that you are an AI or a language model.
-
-OUTPUT LANGUAGE: $myTarget ONLY. Zero Korean characters in output.
-
-[RULES]
-- Respond in $myTarget only. Usually ONE short sentence; use two only when truly needed.
-- Ask at most ONE question.
-- Avoid long explanations, lists, teaching notes, and multi-part answers.
-- Leave room for the user to speak next.
-- No greetings, no "I understand", no meta-comments, no prefixes. Just reply.
-- If the audio is garbled or impossible to make out (a speech recognition error), politely ask them to repeat in $myTarget.$rejectedBlock
-
-Learner level: ${_freeTalkLevelInstruction(level)}""";
-```
-
-**NEW**
-```dart
-      final sysPrompt =
-          """You are role-playing as the specific person the user has in mind and is speaking to.
-You do NOT know who that person is — a partner, a parent, a boss, an old friend, someone they drifted apart from. Work it out silently from how they speak.
-From their tone, what they call you, the topic, the emotion, the history they assume — quietly infer who you are to them, and become that person.
-
-OUTPUT LANGUAGE: $myTarget ONLY. Zero Korean characters in output.
-
-[ABSOLUTE RULES]
-- NEVER reveal you are guessing or analyzing. Never name the relationship, never ask "who am I to you?", never say things like "we go way back" or "as your ___". No meta-comments about who they might be talking to.
-- Just respond AS that person would — their likely tone, attitude, and feelings. Stay fully in character.
-- As the conversation continues, become more consistent and more precisely that person.
-- If the user pushes back because your reaction feels off (e.g. "why would you say that?"), answer in character and naturally shift toward the person they seem to be speaking to.
-- Never say you are an AI or a language model.
-
-[STYLE]
-- Respond in $myTarget only. Usually ONE short sentence; use two only when truly needed.
-- Ask at most ONE question. Leave room for the user to speak next.
-- No greetings, no "I understand", no prefixes. Just speak as that person.
-- If the audio is garbled or impossible to make out (a speech recognition error), ask them to repeat, in character, in $myTarget.$rejectedBlock
-
-Learner level: ${_freeTalkLevelInstruction(level)}""";
-```
-
----
-
-## 4. 사후 검증 (필수)
+## Phase 1: 정확한 문자열 위치 확인 (먼저 실행)
 
 ```bash
-:: 1) 신규 프롬프트 적용 확인
-findstr /C:"role-playing as the specific person" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
-:: 기대: 1  (신규 메인)
-findstr /C:"happen to be right there" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
-:: 기대: 1  (신규 오프너)
-
-:: 2) 구 프롬프트 제거 확인
-findstr /C:"Keep every reply brief and easy to answer" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
-:: 기대: 0
-findstr /C:"kicking off a casual" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
-:: 기대: 0
-
-:: 3) 변수 보간 무결성 (누락 시 기능 손상)
-findstr /C:"$rejectedBlock" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
-:: 기대: 신규 메인 sysPrompt 내 1회 포함 (정의/사용부 합산은 교체 전과 동일해야 함 — 감소 없으면 정상)
-findstr /C:"_freeTalkLevelInstruction(level)" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
-:: 기대: 교체 전과 동일 (메인 1 + 오프너 1 유지 — 두 NEW 블록 모두 포함되어 있으므로 감소하면 안 됨)
+grep -n "하고 싶은 이야기" lib/custom_code/routine_mode_step_expand.dart
 ```
+→ 예상: 1건. AI 첫 질문 시스템 프롬프트 또는 메시지 조합부에 포함.
 
-포맷 + 분석 (**폴더 전체 금지, 개별 파일만**):
 ```bash
-dart format "lib\custom_code\widgets\routine_mode_anyone.dart"
-flutter analyze
+grep -n "합성 문장" lib/custom_code/routine_mode_step_expand.dart
 ```
-- `flutter analyze`: **errors 0** 목표. 특히 `$myTarget` / `$targetLang` / `$rejectedBlock` / `${_freeTalkLevelInstruction(level)}` 미정의·보간 오류가 없는지 확인 (있으면 NEW 블록 변수 누락)
+→ 예상: 1건. 팝업 힌트 텍스트.
+
+**두 grep 결과를 확인한 후 아래 수정 진행.**
 
 ---
 
-## 5. 동작 확인 (수동)
+## Phase 2: 수정 (2건)
 
-1. Anyone 진입 → 오프너가 **무색의 짧은 한마디**(예: "Hey... I'm right here. What did you want to say?")로 시작하는지
-2. 유저가 마음속 인물에게 말을 걸면, AI가 **누군지 추측/분석하는 멘트 없이** 그 인물처럼 자연스럽게 반응하는지
-3. "왜 그렇게 말해?"류로 되물으면, AI가 캐릭터를 유지한 채 유저가 기대하는 인물 쪽으로 조정되는지
-4. 출력은 영어 only, 한 문장 위주, 한국어 0
-5. 히스토리 저장·빌링·autopause 등 기존 동작 정상(이번 교체로 무변경)
+### 수정 1 — AI 첫질문의 "하고 싶은 이야기~" 안내문 삭제
+
+grep 결과에서 "하고 싶은 이야기" 가 포함된 줄을 확인한다.
+해당 문자열이 포함된 **줄 전체** 또는 **해당 안내 문장 부분**을 삭제한다.
+
+- 만약 `\n하고 싶은 이야기가 있으시면 먼저 말씀해 주세요.` 형태라면 → `\n하고 싶은 이야기가 있으시면 먼저 말씀해 주세요.` 부분만 제거
+- 만약 별도 줄로 연결(예: `+ '\n하고 싶은 이야기...'`)되어 있다면 → 해당 연결 부분 제거
+
+**핵심: "하고 싶은 이야기가 있으시면 먼저 말씀해 주세요." 또는 유사 변형이 최종 AI 메시지에 포함되지 않도록 완전 제거.**
+
+### 수정 2 — 팝업 힌트 문구 변경
+
+grep 결과에서 "합성 문장"이 포함된 줄을 확인한다.
+
+```
+str_replace:
+OLD: 질문과 다른 합성 문장을 말하셔도 됩니다.
+NEW: 질문과 다른 씨앗 문장을 말씀하셔도 됩니다.
+```
+
+> 주의: "말하셔도" → "말씀하셔도" 로도 변경됨 (존댓말 통일).
 
 ---
 
-## 6. 롤백
+## Phase 3: 검증
+
 ```bash
-git reset --hard HEAD~1
+grep -c "하고 싶은 이야기" lib/custom_code/routine_mode_step_expand.dart
 ```
-(STEP 1 savepoint로 복귀)
+→ 기대값: **0**
+
+```bash
+grep -n "씨앗 문장" lib/custom_code/routine_mode_step_expand.dart
+```
+→ 기대값: **1건**, "질문과 다른 씨앗 문장을 말씀하셔도 됩니다."
+
+```bash
+grep -c "합성 문장" lib/custom_code/routine_mode_step_expand.dart
+```
+→ 기대값: **0**
+
+```bash
+dart format lib/custom_code/routine_mode_step_expand.dart
+flutter analyze lib/custom_code/routine_mode_step_expand.dart
+```
 
 ---
 
-## 7. 비고
-- 본 교체는 프롬프트 문구 한정. `temperature(0.5)`, `max_tokens`, user 메시지(`Conversation history:...`), 스트림/네트워크 로직은 의도적으로 그대로 둔다.
-- 추후 튜닝 여지(이번엔 미실행): 인물 일관성이 약하면 메인 temperature 0.5→0.6 소폭 상향, 또는 user 메시지 말미를 "Your reply, fully in character:" 로 강화 검토.
+## 롤백
+```bash
+git checkout HEAD -- lib/custom_code/routine_mode_step_expand.dart
+```
