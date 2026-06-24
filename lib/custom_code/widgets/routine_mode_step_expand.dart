@@ -2572,16 +2572,17 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
                 _lastTurnTimedOut ? "🎉 5턴 완료! (긴 문장으로 일부 강제 종료)" : "🎉 5턴 완료!";
           });
         }
-        _log('🌱 [DONE]', '5턴 완료 → 확장문장 표시 및 낭독 시작');
-
-        // ── AUTO-FLOW 1: 완성된 확장 문장 별도 표시 후 낭독 ──
+        _log('🌱 [DONE]', '5턴 완료 → 확장문장 카드 표시 (낭독은 유저 턴에서 완료)');
+        // 🔁 AUTO-FLOW 1: 완성된 확장 문장 별도 표시 (방안1: 중복 낭독 제거) 🔁
+        // ✅ [방안1-중복제거] 유저 턴에서 이미 동일 확장문장을 nova 음성으로
+        //   낭독했으므로 완성 카드에는 화면 표시만 하고 낭독하지 않는다.
+        //   (글자는 버블 + 카드 2회 노출 유지 = 결과 강조용 카드 유지)
         if (hostExpanded.isNotEmpty && mounted) {
           setState(() {
             _expandedFinalSentence = hostExpanded;
             _showExpandedFinalCard = true;
           });
           _scrollToBottom();
-          await _practiceSpeakText(hostExpanded, 'nova');
         }
 
         // ── AUTO-FLOW 2: Polished Sentence 자동 생성 → 낭독 → Study Room 안내 ──
