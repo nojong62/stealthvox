@@ -797,16 +797,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     return d.clamp(140, 1100);
   }
 
-  void _replayShadowLine() {
-    if (_phase != ShadowingPhase.part2Practice ||
-        currentIndex >= _tutorLines.length ||
-        _isAiTurn(_tutorLines[currentIndex])) {
-      return;
-    }
-    _resumeHistoryFromUserAction();
-    _startShadowHighlight();
-  }
-
   Future<void> _checkAndPlayAILine() async {
     if (!mounted || !isPracticeMode || currentIndex >= _tutorLines.length)
       return;
@@ -4640,40 +4630,6 @@ RULES — follow exactly:
                                     Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        GestureDetector(
-                                          onTap: _replayShadowLine,
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(
-                                                horizontal: 12, vertical: 6),
-                                            decoration: BoxDecoration(
-                                              color: Colors.greenAccent
-                                                  .withValues(alpha: 0.12),
-                                              borderRadius:
-                                                  BorderRadius.circular(20),
-                                              border: Border.all(
-                                                color: Colors.greenAccent
-                                                    .withValues(alpha: 0.5),
-                                              ),
-                                            ),
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: const [
-                                                Icon(Icons.replay,
-                                                    color: Colors.greenAccent,
-                                                    size: 16),
-                                                SizedBox(width: 5),
-                                                Text(
-                                                  "\uB2E4\uC2DC",
-                                                  style: TextStyle(
-                                                    color: Colors.greenAccent,
-                                                    fontSize: 12,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 10),
                                         GestureDetector(
                                           onTap: () => setState(
                                               () => _shadowFast = !_shadowFast),
