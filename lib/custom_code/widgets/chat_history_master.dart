@@ -126,6 +126,13 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   bool _showRetryHint = false;
   int _turnPracticeRetryCount = 0;
 
+  // [P2-SHADOW] Highlight read-along state. P2 only, no recording.
+  List<String> _shadowWords = [];
+  int _shadowWordIdx = -1;
+  Timer? _shadowHighlightTimer;
+  Timer? _shadowAdvanceTimer;
+  bool _shadowFast = false;
+
   // 🆕 [P2-INDICATOR] AI 청크 발화 중 여부 (인디케이터 빛남용)
   bool _aiChunkPlaying = false;
   // AI TTS 로딩 중 (재생 전 Thinking... 표시용)
@@ -307,6 +314,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _blinkController.dispose();
     _echoingOverlayTimer?.cancel();
     _polishedRevealTimer?.cancel();
+    _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
+    _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
     _chunkScrollController.dispose();
     _practiceScrollController.dispose();
     _playerStateSub?.cancel();
@@ -723,6 +732,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     final bool isAiTurn = _isAiTurn(line); // 🆕 [BOX-32]
     if (isAiTurn) {
       _checkAndPlayAILine();
+    } else if (_phase == ShadowingPhase.part2Practice) {
+      _startShadowHighlight(); // [P2-SHADOW]
     } else {
       Future.delayed(const Duration(milliseconds: 300), () {
         if (mounted && isPracticeMode && !isPaused && !_isAutoRecording) {
@@ -730,6 +741,70 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         }
       });
     }
+  }
+
+  // ============================================================================
+  // [P2-SHADOW] Highlight read-along. P2 only, no recording.
+  // ============================================================================
+  void _startShadowHighlight() {
+    _shadowHighlightTimer?.cancel();
+    _shadowAdvanceTimer?.cancel();
+    if (!mounted || !isPracticeMode || currentIndex >= _tutorLines.length) {
+      return;
+    }
+    final text = (_tutorLines[currentIndex]['text'] as String).trim();
+    final words =
+        text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+    if (words.isEmpty) {
+      _nextTurn();
+      return;
+    }
+    if (mounted) {
+      setState(() {
+        _shadowWords = words;
+        _shadowWordIdx = -1;
+      });
+    }
+    _stepShadowHighlight(0);
+  }
+
+  void _stepShadowHighlight(int idx) {
+    if (!mounted || _phase != ShadowingPhase.part2Practice || isPaused) return;
+    if (idx >= _shadowWords.length) {
+      if (mounted) setState(() => _shadowWordIdx = _shadowWords.length);
+      _shadowAdvanceTimer?.cancel();
+      _shadowAdvanceTimer = Timer(const Duration(milliseconds: 1500), () {
+        if (mounted && _phase == ShadowingPhase.part2Practice && !isPaused) {
+          _nextTurn();
+        }
+      });
+      return;
+    }
+    if (mounted) setState(() => _shadowWordIdx = idx);
+    _shadowHighlightTimer?.cancel();
+    _shadowHighlightTimer = Timer(
+      Duration(milliseconds: _shadowWordDuration(_shadowWords[idx])),
+      () => _stepShadowHighlight(idx + 1),
+    );
+  }
+
+  int _shadowWordDuration(String w) {
+    final clean = w.replaceAll(RegExp(r'[^A-Za-z]'), '');
+    int d = 220 + clean.length * 55;
+    if (RegExp(r'[,;:]$').hasMatch(w)) d += 160;
+    if (RegExp(r'[.!?]$').hasMatch(w)) d += 320;
+    d = (d * (_shadowFast ? 0.8 : 1.0)).round();
+    return d.clamp(140, 1100);
+  }
+
+  void _replayShadowLine() {
+    if (_phase != ShadowingPhase.part2Practice ||
+        currentIndex >= _tutorLines.length ||
+        _isAiTurn(_tutorLines[currentIndex])) {
+      return;
+    }
+    _resumeHistoryFromUserAction();
+    _startShadowHighlight();
   }
 
   Future<void> _checkAndPlayAILine() async {
@@ -1202,6 +1277,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _stopAutoVADRecording();
     _utteranceSafetyTimer?.cancel();
     _polishedRevealTimer?.cancel();
+    _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
+    _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
     _stopDeepgramListening();
     audioPlayer.stop();
     if (mounted) {
@@ -4150,6 +4227,7 @@ RULES — follow exactly:
   // 📦 [BOX-33: 유저 재녹음 핸들러]
   void _onTutorUserIconTap() {
     if (_tutorAwaitingStart || currentIndex >= _tutorLines.length) return;
+    if (_phase == ShadowingPhase.part2Practice) return; // [P2-SHADOW]
     final line = _tutorLines[currentIndex];
     if (_isAiTurn(line)) {
       return;
@@ -4251,6 +4329,44 @@ RULES — follow exactly:
   }
 
   // 📦 [Box 22-E: 양방향 턴제 연습 화면]
+  // [P2-SHADOW] Highlight current user line word-by-word in P2.
+  Widget _buildPracticeLineText(
+      Map<String, dynamic> line, bool isCurrent, bool lineIsAi) {
+    final bool isShadowLine =
+        _phase == ShadowingPhase.part2Practice && isCurrent && !lineIsAi;
+    if (isShadowLine && _shadowWords.isNotEmpty) {
+      return Wrap(
+        alignment: WrapAlignment.start,
+        spacing: 6,
+        runSpacing: 2,
+        children: List.generate(_shadowWords.length, (j) {
+          final bool done = j < _shadowWordIdx;
+          final bool now = j == _shadowWordIdx;
+          return Text(
+            _shadowWords[j],
+            style: TextStyle(
+              color:
+                  now ? Colors.amber : (done ? Colors.white38 : Colors.white),
+              fontSize: (now ? 15 : 14) * _fontScale,
+              height: 1.5,
+              fontWeight: now ? FontWeight.bold : FontWeight.normal,
+            ),
+          );
+        }),
+      );
+    }
+    return Text(
+      line['text'] as String,
+      textAlign: lineIsAi ? TextAlign.right : TextAlign.left,
+      style: TextStyle(
+        color: isCurrent ? Colors.white : Colors.white60,
+        fontSize: 14 * _fontScale,
+        height: 1.5,
+        fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
+      ),
+    );
+  }
+
   Widget _buildTurnPracticeScreen() {
     final bool isAwaiting = _tutorAwaitingStart;
     final bool isComplete = currentIndex >= _tutorLines.length;
@@ -4487,22 +4603,8 @@ RULES — follow exactly:
                                     ? CrossAxisAlignment.end
                                     : CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    line['text'] as String,
-                                    textAlign: lineIsAi
-                                        ? TextAlign.right
-                                        : TextAlign.left,
-                                    style: TextStyle(
-                                      color: isCurrent
-                                          ? Colors.white
-                                          : Colors.white60,
-                                      fontSize: 14 * _fontScale,
-                                      height: 1.5,
-                                      fontWeight: isCurrent
-                                          ? FontWeight.bold
-                                          : FontWeight.normal,
-                                    ),
-                                  ),
+                                  _buildPracticeLineText(
+                                      line, isCurrent, lineIsAi),
                                   if (isCurrent &&
                                       !lineIsAi &&
                                       _isAutoRecording) ...[
@@ -4530,6 +4632,97 @@ RULES — follow exactly:
                                               color: Colors.orange,
                                               fontSize: 11)),
                                     ]),
+                                  ],
+                                  if (_phase == ShadowingPhase.part2Practice &&
+                                      isCurrent &&
+                                      !lineIsAi) ...[
+                                    const SizedBox(height: 10),
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        GestureDetector(
+                                          onTap: _replayShadowLine,
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 12, vertical: 6),
+                                            decoration: BoxDecoration(
+                                              color: Colors.greenAccent
+                                                  .withValues(alpha: 0.12),
+                                              borderRadius:
+                                                  BorderRadius.circular(20),
+                                              border: Border.all(
+                                                color: Colors.greenAccent
+                                                    .withValues(alpha: 0.5),
+                                              ),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: const [
+                                                Icon(Icons.replay,
+                                                    color: Colors.greenAccent,
+                                                    size: 16),
+                                                SizedBox(width: 5),
+                                                Text(
+                                                  "\uB2E4\uC2DC",
+                                                  style: TextStyle(
+                                                    color: Colors.greenAccent,
+                                                    fontSize: 12,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        GestureDetector(
+                                          onTap: () => setState(
+                                              () => _shadowFast = !_shadowFast),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 12, vertical: 6),
+                                            decoration: BoxDecoration(
+                                              color: _shadowFast
+                                                  ? Colors.amber
+                                                      .withValues(alpha: 0.18)
+                                                  : Colors.white
+                                                      .withValues(alpha: 0.06),
+                                              borderRadius:
+                                                  BorderRadius.circular(20),
+                                              border: Border.all(
+                                                color: _shadowFast
+                                                    ? Colors.amber
+                                                        .withValues(alpha: 0.6)
+                                                    : Colors.white24,
+                                              ),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Icon(
+                                                  Icons.speed,
+                                                  color: _shadowFast
+                                                      ? Colors.amber
+                                                      : Colors.white54,
+                                                  size: 16,
+                                                ),
+                                                const SizedBox(width: 5),
+                                                Text(
+                                                  _shadowFast
+                                                      ? "\uBE60\uB974\uAC8C"
+                                                      : "\uBCF4\uD1B5",
+                                                  style: TextStyle(
+                                                    color: _shadowFast
+                                                        ? Colors.amber
+                                                        : Colors.white54,
+                                                    fontSize: 12,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ],
                                   if (isCurrent && lineIsAi && isPlaying) ...[
                                     const SizedBox(height: 6),
@@ -5761,15 +5954,18 @@ RULES — follow exactly:
         currentIndex = 0;
         _tutorCurrentIdx = 0;
         _isAutoRecording = false;
-        _tutorAwaitingStart = true;
+        _tutorAwaitingStart = false; // [P2-SHADOW]
         _swapRoles = false;
         _tutorAiSpeaking = false;
         _tutorUserRecording = false;
         _tutorPlayingFullback = false;
         _showRetryHint = false;
+        _shadowWords = []; // [P2-SHADOW]
+        _shadowWordIdx = -1; // [P2-SHADOW]
       });
-      WidgetsBinding.instance
-          .addPostFrameCallback((_) => _showRoleSelectBubble());
+      _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
+      _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
+      _startTurnPractice(); // [P2-SHADOW]
     }
   }
 
@@ -6231,6 +6427,8 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     if (!mounted) return;
     _stopAutoVADRecording();
     audioPlayer.stop();
+    _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
+    _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
     if (practiceNum == 1) {
       _startPart1Practice();
     } else if (practiceNum == 2) {
