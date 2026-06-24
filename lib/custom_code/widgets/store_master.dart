@@ -567,7 +567,8 @@ class _StoreMasterState extends State<StoreMaster> {
                                       padding: const EdgeInsets.symmetric(
                                           horizontal: 12, vertical: 6),
                                       decoration: BoxDecoration(
-                                        color: Colors.green.withOpacity(0.15),
+                                        color: Colors.green
+                                            .withValues(alpha: 0.15),
                                         borderRadius: BorderRadius.circular(20),
                                       ),
                                       child: Text("+ ${addedMinutes}m",
@@ -1199,7 +1200,7 @@ class _StoreMasterState extends State<StoreMaster> {
                                         padding: const EdgeInsets.all(12),
                                         decoration: BoxDecoration(
                                           color: plan['theme_color']
-                                              .withOpacity(0.15),
+                                              .withValues(alpha: 0.15),
                                           shape: BoxShape.circle,
                                         ),
                                         child: Icon(plan['icon'],
@@ -1240,7 +1241,7 @@ class _StoreMasterState extends State<StoreMaster> {
                                               horizontal: 12, vertical: 10),
                                           decoration: BoxDecoration(
                                             color: plan['theme_color']
-                                                .withOpacity(0.15),
+                                                .withValues(alpha: 0.15),
                                             borderRadius:
                                                 BorderRadius.circular(12),
                                           ),

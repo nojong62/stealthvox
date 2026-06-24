@@ -48,7 +48,8 @@ class FFAppState extends ChangeNotifier {
       _duoRoomId = prefs.getString('ff_duoRoomId') ?? _duoRoomId;
     });
     _safeInit(() {
-      _pendingInviteType = prefs.getString('ff_pendingInviteType') ?? _pendingInviteType;
+      _pendingInviteType =
+          prefs.getString('ff_pendingInviteType') ?? _pendingInviteType;
     });
   }
 
@@ -134,7 +135,7 @@ class FFAppState extends ChangeNotifier {
     _secureApiKey = value;
   }
 
-  String _aiVoice = 'nova';
+  String _aiVoice = 'echo';
   String get aiVoice => _aiVoice;
   set aiVoice(String value) {
     _aiVoice = value;
@@ -195,7 +196,6 @@ class FFAppState extends ChangeNotifier {
     _pendingInviteType = value;
     prefs.setString('ff_pendingInviteType', value);
   }
-
 }
 
 void _safeInit(Function() initializeField) {

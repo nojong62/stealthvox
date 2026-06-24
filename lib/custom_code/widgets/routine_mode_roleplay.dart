@@ -1971,7 +1971,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                 ),
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
-                  color: const Color(0xFF16A34A).withOpacity(0.35),
+                  color: const Color(0xFF16A34A).withValues(alpha: 0.35),
                   width: 1,
                 ),
               ),
@@ -2021,12 +2021,12 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 14, vertical: 12),
                               decoration: BoxDecoration(
-                                color:
-                                    const Color(0xFF16A34A).withOpacity(0.18),
+                                color: const Color(0xFF16A34A)
+                                    .withValues(alpha: 0.18),
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
-                                  color:
-                                      const Color(0xFF16A34A).withOpacity(0.40),
+                                  color: const Color(0xFF16A34A)
+                                      .withValues(alpha: 0.40),
                                   width: 1,
                                 ),
                               ),
@@ -2065,12 +2065,12 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 14, vertical: 12),
                               decoration: BoxDecoration(
-                                color:
-                                    const Color(0xFF0EA5E9).withOpacity(0.12),
+                                color: const Color(0xFF0EA5E9)
+                                    .withValues(alpha: 0.12),
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
-                                  color:
-                                      const Color(0xFF0EA5E9).withOpacity(0.32),
+                                  color: const Color(0xFF0EA5E9)
+                                      .withValues(alpha: 0.32),
                                   width: 1,
                                 ),
                               ),
@@ -2206,13 +2206,13 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       height: 32,
       decoration: BoxDecoration(
         color: isHost
-            ? const Color(0xFF1D4ED8).withOpacity(0.22)
-            : const Color(0xFF16A34A).withOpacity(0.22),
+            ? const Color(0xFF1D4ED8).withValues(alpha: 0.22)
+            : const Color(0xFF16A34A).withValues(alpha: 0.22),
         shape: BoxShape.circle,
         border: Border.all(
           color: isHost
-              ? const Color(0xFF60A5FA).withOpacity(0.45)
-              : const Color(0xFF4ADE80).withOpacity(0.45),
+              ? const Color(0xFF60A5FA).withValues(alpha: 0.45)
+              : const Color(0xFF4ADE80).withValues(alpha: 0.45),
           width: 1,
         ),
       ),
@@ -2232,7 +2232,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         decoration: BoxDecoration(
           color: isHost
               ? const Color(0xFF1E293B)
-              : const Color(0xFF22C55E).withOpacity(0.13),
+              : const Color(0xFF22C55E).withValues(alpha: 0.13),
           borderRadius: BorderRadius.only(
             topLeft: const Radius.circular(16),
             topRight: const Radius.circular(16),
@@ -2241,8 +2241,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           ),
           border: Border.all(
             color: isHost
-                ? const Color(0xFF3B82F6).withOpacity(0.18)
-                : const Color(0xFF22C55E).withOpacity(0.25),
+                ? const Color(0xFF3B82F6).withValues(alpha: 0.18)
+                : const Color(0xFF22C55E).withValues(alpha: 0.25),
             width: 1,
           ),
         ),
@@ -2323,7 +2323,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                       borderRadius: BorderRadius.circular(22),
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(0xFF16A34A).withOpacity(0.35),
+                          color:
+                              const Color(0xFF16A34A).withValues(alpha: 0.35),
                           blurRadius: 10,
                           offset: const Offset(0, 4),
                         ),

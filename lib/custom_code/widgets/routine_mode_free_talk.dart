@@ -956,7 +956,7 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
       String userTargetText = "";
       // 🆕 유저 목소리 = 로비에서 고른 값(FFAppState().aiVoice). AI는 nova 고정.
       final String userVoice =
-          FFAppState().aiVoice.isNotEmpty ? FFAppState().aiVoice : 'onyx';
+          FFAppState().aiVoice.isNotEmpty ? FFAppState().aiVoice : 'echo';
       ChunkedTtsFetcher userTtsFetcher = ChunkedTtsFetcher(
         _openAiKey,
         _ttsQueueManager,
@@ -1819,7 +1819,7 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
         decoration: BoxDecoration(
           color: const Color(0xFF1C1C1E),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.white.withOpacity(0.06)),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
         ),
         child: Row(
           children: List.generate(levels.length, (i) {
@@ -1884,14 +1884,14 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
                   Icon(
                     Icons.language_rounded,
                     size: 28,
-                    color: Colors.white.withOpacity(0.12),
+                    color: Colors.white.withValues(alpha: 0.12),
                   ),
                   const SizedBox(height: 12),
                   Text(
                     '타겟 언어로만 프리톡하려면',
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.22),
+                      color: Colors.white.withValues(alpha: 0.22),
                       fontSize: 13,
                       fontWeight: FontWeight.w500,
                       height: 1.6,
@@ -1901,7 +1901,7 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
                     '타겟과 오리지널 언어를 같게 하세요',
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.14),
+                      color: Colors.white.withValues(alpha: 0.14),
                       fontSize: 12,
                       height: 1.6,
                     ),
@@ -1944,7 +1944,7 @@ class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
         decoration: BoxDecoration(
             color: isHost
                 ? const Color(0xFF2C2C2E)
-                : const Color(0xFF9333EA).withOpacity(0.15),
+                : const Color(0xFF9333EA).withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(16)),
         constraints:
             BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.8),

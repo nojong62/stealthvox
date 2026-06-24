@@ -2286,7 +2286,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
       decoration: BoxDecoration(
         color: const Color(0xFF1C1C1E),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.amber.withOpacity(0.25)),
+        border: Border.all(color: Colors.amber.withValues(alpha: 0.25)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2329,9 +2329,9 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
               width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.amber.withOpacity(0.1),
+                color: Colors.amber.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.amber.withOpacity(0.35)),
+                border: Border.all(color: Colors.amber.withValues(alpha: 0.35)),
               ),
               child: Text(
                 appOriginalText,
@@ -2371,8 +2371,8 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           color: _appIsRecording
-                              ? Colors.redAccent.withOpacity(0.15)
-                              : Colors.white.withOpacity(0.05),
+                              ? Colors.redAccent.withValues(alpha: 0.15)
+                              : Colors.white.withValues(alpha: 0.05),
                           border: Border.all(
                             color: _appIsRecording
                                 ? Colors.redAccent
@@ -2382,7 +2382,8 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
                           boxShadow: _appIsRecording
                               ? [
                                   BoxShadow(
-                                      color: Colors.redAccent.withOpacity(0.3),
+                                      color: Colors.redAccent
+                                          .withValues(alpha: 0.3),
                                       blurRadius: 14,
                                       spreadRadius: 2)
                                 ]
@@ -2469,7 +2470,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
                 style: OutlinedButton.styleFrom(
                   side: BorderSide(
                       color: _isPlayingAppAudio
-                          ? Colors.greenAccent.withOpacity(0.6)
+                          ? Colors.greenAccent.withValues(alpha: 0.6)
                           : Colors.white24),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10)),
@@ -3149,8 +3150,8 @@ RULES — follow exactly:
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: isUserActive
-                        ? Colors.greenAccent.withOpacity(0.15)
-                        : Colors.white.withOpacity(0.05),
+                        ? Colors.greenAccent.withValues(alpha: 0.15)
+                        : Colors.white.withValues(alpha: 0.05),
                     border: Border.all(
                       color: isUserActive ? Colors.greenAccent : Colors.white24,
                       width: isUserActive ? 2.5 : 1.0,
@@ -3158,7 +3159,8 @@ RULES — follow exactly:
                     boxShadow: isUserActive
                         ? [
                             BoxShadow(
-                                color: Colors.greenAccent.withOpacity(0.35),
+                                color:
+                                    Colors.greenAccent.withValues(alpha: 0.35),
                                 blurRadius: 16,
                                 spreadRadius: 2)
                           ]
@@ -3225,8 +3227,8 @@ RULES — follow exactly:
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: isAIActive
-                        ? Colors.amber.withOpacity(0.15)
-                        : Colors.white.withOpacity(0.05),
+                        ? Colors.amber.withValues(alpha: 0.15)
+                        : Colors.white.withValues(alpha: 0.05),
                     border: Border.all(
                       color: isAIActive ? Colors.amber : Colors.white24,
                       width: isAIActive ? 2.5 : 1.0,
@@ -3234,7 +3236,7 @@ RULES — follow exactly:
                     boxShadow: isAIActive
                         ? [
                             BoxShadow(
-                                color: Colors.amber.withOpacity(0.35),
+                                color: Colors.amber.withValues(alpha: 0.35),
                                 blurRadius: 16,
                                 spreadRadius: 2)
                           ]
@@ -3332,13 +3334,13 @@ RULES — follow exactly:
                         decoration: BoxDecoration(
                           color: isHost
                               ? const Color(0xFF2C2C2E)
-                              : const Color(0xFF2563EB).withOpacity(0.15),
+                              : const Color(0xFF2563EB).withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(16),
                           border: isHost
                               ? null
                               : Border.all(
-                                  color:
-                                      const Color(0xFF2563EB).withOpacity(0.3)),
+                                  color: const Color(0xFF2563EB)
+                                      .withValues(alpha: 0.3)),
                         ),
                         child: Column(
                           crossAxisAlignment: isHost
@@ -3519,7 +3521,8 @@ RULES — follow exactly:
                 color: const Color(0xFF1C2E1C),
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
-                    color: Colors.greenAccent.withOpacity(0.5), width: 1.5),
+                    color: Colors.greenAccent.withValues(alpha: 0.5),
+                    width: 1.5),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -3567,7 +3570,7 @@ RULES — follow exactly:
                   color: const Color(0xFF1A1A2E),
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
-                      color: Colors.amber.withOpacity(0.5), width: 1.5),
+                      color: Colors.amber.withValues(alpha: 0.5), width: 1.5),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -3653,8 +3656,8 @@ RULES — follow exactly:
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: userActive
-                  ? Colors.greenAccent.withOpacity(0.15)
-                  : Colors.white.withOpacity(0.05),
+                  ? Colors.greenAccent.withValues(alpha: 0.15)
+                  : Colors.white.withValues(alpha: 0.05),
               border: Border.all(
                 color: userActive ? Colors.greenAccent : Colors.white24,
                 width: userActive ? 2 : 1,
@@ -3662,7 +3665,7 @@ RULES — follow exactly:
               boxShadow: userActive
                   ? [
                       BoxShadow(
-                          color: Colors.greenAccent.withOpacity(0.4),
+                          color: Colors.greenAccent.withValues(alpha: 0.4),
                           blurRadius: 12,
                           spreadRadius: 2)
                     ]
@@ -3693,8 +3696,8 @@ RULES — follow exactly:
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: aiActive
-                  ? Colors.blue.withOpacity(0.15)
-                  : Colors.white.withOpacity(0.05),
+                  ? Colors.blue.withValues(alpha: 0.15)
+                  : Colors.white.withValues(alpha: 0.05),
               border: Border.all(
                 color: aiActive ? Colors.blue : Colors.white24,
                 width: aiActive ? 2 : 1,
@@ -3702,7 +3705,7 @@ RULES — follow exactly:
               boxShadow: aiActive
                   ? [
                       BoxShadow(
-                          color: Colors.blue.withOpacity(0.4),
+                          color: Colors.blue.withValues(alpha: 0.4),
                           blurRadius: 12,
                           spreadRadius: 2)
                     ]
@@ -3855,7 +3858,7 @@ RULES — follow exactly:
                   icon: const Icon(Icons.volume_up, size: 16),
                   label: const Text("AI Voice"),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.amber.withOpacity(0.15),
+                    backgroundColor: Colors.amber.withValues(alpha: 0.15),
                     foregroundColor: Colors.amber,
                     side: const BorderSide(color: Colors.amber),
                   ),
@@ -3868,7 +3871,7 @@ RULES — follow exactly:
                   icon: const Icon(Icons.person, size: 16),
                   label: const Text("My Voice"),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.greenAccent.withOpacity(0.1),
+                    backgroundColor: Colors.greenAccent.withValues(alpha: 0.1),
                     foregroundColor: Colors.greenAccent,
                     side: const BorderSide(color: Colors.greenAccent),
                   ),
@@ -3898,7 +3901,7 @@ RULES — follow exactly:
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
                   color: isCurrentUser
-                      ? Colors.greenAccent.withOpacity(0.1)
+                      ? Colors.greenAccent.withValues(alpha: 0.1)
                       : const Color(0xFF1C1C1E),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
@@ -4038,7 +4041,7 @@ RULES — follow exactly:
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
                     color: isCurrent
-                        ? highlightColor.withOpacity(0.15)
+                        ? highlightColor.withValues(alpha: 0.15)
                         : const Color(0xFF1C1C1E),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
@@ -4056,8 +4059,8 @@ RULES — follow exactly:
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           color: isCurrent
-                              ? highlightColor.withOpacity(0.2)
-                              : Colors.white.withOpacity(0.05),
+                              ? highlightColor.withValues(alpha: 0.2)
+                              : Colors.white.withValues(alpha: 0.05),
                           border: Border.all(
                               color:
                                   isCurrent ? highlightColor : Colors.white24,
@@ -4103,7 +4106,7 @@ RULES — follow exactly:
                     label: const Text("중지",
                         style: TextStyle(fontWeight: FontWeight.bold)),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red.withOpacity(0.8),
+                      backgroundColor: Colors.red.withValues(alpha: 0.8),
                       foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16)),
@@ -4287,15 +4290,17 @@ RULES — follow exactly:
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 color: _tutorUserRecording
-                                    ? Colors.greenAccent.withOpacity(0.15)
+                                    ? Colors.greenAccent.withValues(alpha: 0.15)
                                     : isAwaiting
-                                        ? Colors.greenAccent.withOpacity(0.08)
-                                        : Colors.white.withOpacity(0.04),
+                                        ? Colors.greenAccent
+                                            .withValues(alpha: 0.08)
+                                        : Colors.white.withValues(alpha: 0.04),
                                 border: Border.all(
                                   color: _tutorUserRecording
                                       ? Colors.greenAccent
                                       : isAwaiting
-                                          ? Colors.greenAccent.withOpacity(0.65)
+                                          ? Colors.greenAccent
+                                              .withValues(alpha: 0.65)
                                           : Colors.white24,
                                   width: _tutorUserRecording ? 2 : 1.5,
                                 ),
@@ -4306,7 +4311,8 @@ RULES — follow exactly:
                                 color: _tutorUserRecording
                                     ? Colors.greenAccent
                                     : isAwaiting
-                                        ? Colors.greenAccent.withOpacity(0.85)
+                                        ? Colors.greenAccent
+                                            .withValues(alpha: 0.85)
                                         : Colors.white38,
                               ),
                             ),
@@ -4346,15 +4352,15 @@ RULES — follow exactly:
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 color: _tutorAiSpeaking
-                                    ? Colors.blue.withOpacity(0.15)
+                                    ? Colors.blue.withValues(alpha: 0.15)
                                     : isAwaiting
-                                        ? Colors.blue.withOpacity(0.08)
-                                        : Colors.white.withOpacity(0.04),
+                                        ? Colors.blue.withValues(alpha: 0.08)
+                                        : Colors.white.withValues(alpha: 0.04),
                                 border: Border.all(
                                   color: _tutorAiSpeaking
                                       ? Colors.blue
                                       : isAwaiting
-                                          ? Colors.blue.withOpacity(0.65)
+                                          ? Colors.blue.withValues(alpha: 0.65)
                                           : Colors.white24,
                                   width: _tutorAiSpeaking ? 2 : 1.5,
                                 ),
@@ -4365,7 +4371,7 @@ RULES — follow exactly:
                                 color: _tutorAiSpeaking
                                     ? Colors.blue
                                     : isAwaiting
-                                        ? Colors.blue.withOpacity(0.85)
+                                        ? Colors.blue.withValues(alpha: 0.85)
                                         : Colors.white38,
                               ),
                             ),
@@ -4440,7 +4446,7 @@ RULES — follow exactly:
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
                           color: isCurrent
-                              ? roleColor.withOpacity(0.1)
+                              ? roleColor.withValues(alpha: 0.1)
                               : const Color(0xFF1C1C1E),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
@@ -4459,8 +4465,8 @@ RULES — follow exactly:
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
                                 color: isCurrent
-                                    ? roleColor.withOpacity(0.2)
-                                    : Colors.white.withOpacity(0.05),
+                                    ? roleColor.withValues(alpha: 0.2)
+                                    : Colors.white.withValues(alpha: 0.05),
                                 border: Border.all(
                                   color: isCurrent ? roleColor : Colors.white24,
                                   width: isCurrent ? 2 : 1,
@@ -4573,7 +4579,8 @@ RULES — follow exactly:
                                   const TextStyle(fontWeight: FontWeight.bold),
                             ),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blue.withOpacity(0.15),
+                              backgroundColor:
+                                  Colors.blue.withValues(alpha: 0.15),
                               foregroundColor: Colors.blue,
                               side: const BorderSide(color: Colors.blue),
                               padding: const EdgeInsets.symmetric(vertical: 14),
@@ -4591,7 +4598,7 @@ RULES — follow exactly:
                                 style: TextStyle(fontWeight: FontWeight.bold)),
                             style: ElevatedButton.styleFrom(
                               backgroundColor:
-                                  Colors.greenAccent.withOpacity(0.1),
+                                  Colors.greenAccent.withValues(alpha: 0.1),
                               foregroundColor: Colors.greenAccent,
                               side: const BorderSide(color: Colors.greenAccent),
                               padding: const EdgeInsets.symmetric(vertical: 14),
@@ -4667,7 +4674,7 @@ RULES — follow exactly:
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.amber.withOpacity(0.12),
+                      backgroundColor: Colors.amber.withValues(alpha: 0.12),
                       foregroundColor: Colors.amber,
                       side: const BorderSide(color: Colors.amber),
                       padding: const EdgeInsets.symmetric(vertical: 14),
@@ -5150,8 +5157,9 @@ RULES — follow exactly:
                     style: const TextStyle(color: Colors.amber, fontSize: 13),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.amber.withOpacity(0.1),
-                    side: BorderSide(color: Colors.amber.withOpacity(0.6)),
+                    backgroundColor: Colors.amber.withValues(alpha: 0.1),
+                    side:
+                        BorderSide(color: Colors.amber.withValues(alpha: 0.6)),
                     padding: const EdgeInsets.symmetric(vertical: 10),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10)),
@@ -5183,9 +5191,9 @@ RULES — follow exactly:
                         color: Colors.greenAccent, fontSize: 13),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.greenAccent.withOpacity(0.08),
-                    side:
-                        BorderSide(color: Colors.greenAccent.withOpacity(0.5)),
+                    backgroundColor: Colors.greenAccent.withValues(alpha: 0.08),
+                    side: BorderSide(
+                        color: Colors.greenAccent.withValues(alpha: 0.5)),
                     padding: const EdgeInsets.symmetric(vertical: 10),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10)),
@@ -5398,7 +5406,7 @@ RULES — follow exactly:
                                     : _isListening
                                         ? Colors.greenAccent
                                         : Colors.amber)
-                                : Colors.amber.withOpacity(0.35);
+                                : Colors.amber.withValues(alpha: 0.35);
                             final Color textColor =
                                 isCurrent ? Colors.white : Colors.white70;
                             return GestureDetector(
@@ -5419,8 +5427,8 @@ RULES — follow exactly:
                                   boxShadow: isCurrent
                                       ? [
                                           BoxShadow(
-                                              color:
-                                                  borderColor.withOpacity(0.3),
+                                              color: borderColor.withValues(
+                                                  alpha: 0.3),
                                               blurRadius: 10,
                                               spreadRadius: 1)
                                         ]
@@ -5433,8 +5441,8 @@ RULES — follow exactly:
                                       width: 20,
                                       child: Text('${i + 1}',
                                           style: TextStyle(
-                                              color:
-                                                  textColor.withOpacity(0.45),
+                                              color: textColor.withValues(
+                                                  alpha: 0.45),
                                               fontSize: 11,
                                               fontWeight: FontWeight.bold)),
                                     ),
@@ -5496,7 +5504,7 @@ RULES — follow exactly:
                                   ? (isEven ? colorAActive : colorBActive)
                                   : isDone
                                       ? (isEven ? colorA : colorB)
-                                          .withOpacity(0.55)
+                                          .withValues(alpha: 0.55)
                                       : (isEven ? colorA : colorB);
 
                               final Color borderColor = isCurrent
@@ -5533,8 +5541,8 @@ RULES — follow exactly:
                                     boxShadow: isCurrent
                                         ? [
                                             BoxShadow(
-                                                color: borderColor
-                                                    .withOpacity(0.3),
+                                                color: borderColor.withValues(
+                                                    alpha: 0.3),
                                                 blurRadius: 10,
                                                 spreadRadius: 1)
                                           ]
@@ -5548,8 +5556,8 @@ RULES — follow exactly:
                                         width: 20,
                                         child: Text('${i + 1}',
                                             style: TextStyle(
-                                                color:
-                                                    textColor.withOpacity(0.45),
+                                                color: textColor.withValues(
+                                                    alpha: 0.45),
                                                 fontSize: 11,
                                                 fontWeight: FontWeight.bold)),
                                       ),
@@ -5620,11 +5628,11 @@ RULES — follow exactly:
                 padding:
                     const EdgeInsets.symmetric(horizontal: 32, vertical: 22),
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.80),
+                  color: Colors.black.withValues(alpha: 0.80),
                   borderRadius: BorderRadius.circular(18),
                   boxShadow: [
                     BoxShadow(
-                        color: Colors.amber.withOpacity(0.18),
+                        color: Colors.amber.withValues(alpha: 0.18),
                         blurRadius: 24,
                         spreadRadius: 2)
                   ],
@@ -6250,7 +6258,9 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
         decoration: BoxDecoration(
-          color: isActive ? Colors.amber.withOpacity(0.18) : Colors.transparent,
+          color: isActive
+              ? Colors.amber.withValues(alpha: 0.18)
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
             color: isActive ? Colors.amber : Colors.white24,
@@ -6346,9 +6356,9 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
         child: Container(
           padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
-            color: color.withOpacity(0.08),
+            color: color.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: color.withOpacity(0.5), width: 1.5),
+            border: Border.all(color: color.withValues(alpha: 0.5), width: 1.5),
           ),
           child: Row(
             children: [
@@ -6357,8 +6367,8 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
                 height: 44,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: color.withOpacity(0.15),
-                  border: Border.all(color: color.withOpacity(0.5)),
+                  color: color.withValues(alpha: 0.15),
+                  border: Border.all(color: color.withValues(alpha: 0.5)),
                 ),
                 child: Icon(icon, color: color, size: 22),
               ),
@@ -6380,7 +6390,7 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
                 ),
               ),
               Icon(Icons.chevron_right_rounded,
-                  color: color.withOpacity(0.6), size: 22),
+                  color: color.withValues(alpha: 0.6), size: 22),
             ],
           ),
         ),
@@ -6420,8 +6430,8 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: _isListening
-                    ? Colors.greenAccent.withOpacity(0.2)
-                    : Colors.white.withOpacity(0.08),
+                    ? Colors.greenAccent.withValues(alpha: 0.2)
+                    : Colors.white.withValues(alpha: 0.08),
                 border: Border.all(
                     color: _isListening ? Colors.greenAccent : Colors.white38,
                     width: _isListening ? 2.5 : 1.5),
@@ -6684,7 +6694,7 @@ class _LangIconPainter extends CustomPainter {
     } else {
       // 원어 숨김 X
       final xPaint = Paint()
-        ..color = Colors.redAccent.withOpacity(0.65)
+        ..color = Colors.redAccent.withValues(alpha: 0.65)
         ..strokeWidth = 1.2
         ..strokeCap = StrokeCap.round;
       canvas.drawLine(Offset(size.width * 0.53, size.height * 0.11),
@@ -6705,7 +6715,7 @@ class _LangIconPainter extends CustomPainter {
     // ── 하단 좌측: 타겟 비활성일 때 X 표시 ──
     if (!targetActive) {
       final xPaint = Paint()
-        ..color = Colors.redAccent.withOpacity(0.65)
+        ..color = Colors.redAccent.withValues(alpha: 0.65)
         ..strokeWidth = 1.2
         ..strokeCap = StrokeCap.round;
       canvas.drawLine(Offset(size.width * 0.27, size.height * 0.65),

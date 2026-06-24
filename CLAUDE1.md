@@ -47,312 +47,435 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# 프리톡 + 듀오 — `reverse: true` 카톡 방식 적용
+# 지시문 — Anyone 모드 1차 (구조 리네임 + 이용방법 말풍선 UI)
 
-> 롤플레이·스탭익스팬드는 이미 적용 완료.
-> 이 지시문은 **프리톡**과 **듀오** 2개 파일만 대상.
->
-> 원칙:
-> - `ListView.builder(reverse: true)` — 최신 메시지 하단 고정
-> - `_scrollToBottom()` → `animateTo(0)` — position 0 = 하단
-> - `_scrollToCurrentTop` alignment `0.02` → `0.98` — reverse에서 화면 상단
-> - `_scrollToCurrent` alignment `0.5` — 변경 없음 (센터는 모드 무관)
-> - 패딩 top ↔ bottom 교환
+> 대상 에이전트: **Claude Code**
+> 작업 폴더: `F:\flutter_project\stealth_vox`
+> 위젯 경로: `lib/custom_code/widgets/`
+> 본 지시문 범위: **FreeTalk → Anyone 구조 리네임 + 이용방법 아이콘/말풍선 추가 + 연결 파일 갱신**
+> **제외**: AI 대화 프롬프트(대화 방식) 재작성 → 별도 2차 지시문에서 처리 (이번 단계에서 손대지 말 것)
 
 ---
 
-## 1. routine_mode_free_talk.dart (3건, bottom-to-top)
+## 0. 확정된 설계 결정 (변경 금지)
 
-### 1-3. ListView.builder — `reverse: true` + 인덱스 역전 + 패딩 교환
-
-```
-str_replace
-OLD >>>
-        ListView.builder(
-          controller: _scrollController,
-          padding: EdgeInsets.fromLTRB(16, 16, 16, bottomPad),
-          itemCount: _localMessages.length,
-          itemBuilder: (context, idx) {
-            _itemKeys[idx] ??= GlobalKey();
-            return Container(
-                key: _itemKeys[idx],
-                child: _buildTextBlock(_localMessages[idx]));
-          },
-        ),
-<<< OLD
-
-NEW >>>
-        ListView.builder(
-          reverse: true,
-          controller: _scrollController,
-          padding: EdgeInsets.fromLTRB(16, bottomPad, 16, 16),
-          itemCount: _localMessages.length,
-          itemBuilder: (context, idx) {
-            final realIdx = _localMessages.length - 1 - idx;
-            _itemKeys[realIdx] ??= GlobalKey();
-            return Container(
-                key: _itemKeys[realIdx],
-                child: _buildTextBlock(_localMessages[realIdx]));
-          },
-        ),
-<<< NEW
-```
-
-### 1-2. `_scrollToCurrentTop` alignment 변경 (0.02 → 0.98)
-
-```
-str_replace
-OLD >>>
-  void _scrollToCurrentTop(int index) {
-    _log('🧭 [SCROLL-TOP]', 'index=$index');
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final key = _itemKeys[index];
-      if (key == null) return;
-      final ctx = key.currentContext;
-      if (ctx == null) return;
-      Scrollable.ensureVisible(
-        ctx,
-        alignment: 0.02,
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOut,
-      );
-    });
-  }
-<<< OLD
-
-NEW >>>
-  void _scrollToCurrentTop(int index) {
-    _log('🧭 [SCROLL-TOP]', 'index=$index');
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final key = _itemKeys[index];
-      if (key == null) return;
-      final ctx = key.currentContext;
-      if (ctx == null) return;
-      Scrollable.ensureVisible(
-        ctx,
-        alignment: 0.98, // reverse: true에서 화면 상단
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOut,
-      );
-    });
-  }
-<<< NEW
-```
-
-### 1-1. `_scrollToBottom` 교체
-
-```
-str_replace
-OLD >>>
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        if (_localMessages.length <= 1) return;
-        _scrollController.animateTo(_scrollController.position.maxScrollExtent,
-            duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
-      }
-    });
-  }
-<<< OLD
-
-NEW >>>
-  // [reverse: true] 최신 메시지(position 0 = 하단)로 스크롤
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(0,
-            duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
-      }
-    });
-  }
-<<< NEW
-```
+- 외부 위젯 클래스만 리네임: `RoutineModeFreeTalk → RoutineModeAnyone` / `_RoutineModeFreeTalkState → _RoutineModeAnyoneState`
+- **내부 클래스/상수는 그대로 유지**: `FreeTalkBrain`, `kFreeTalk*`, `TtsCache`, `TtsQueueManager` 등 일절 변경 금지
+- **히스토리 저장 라벨 유지**: `mode:'free_talk'`, `room_name:"Free Talk"` 그대로 (수정 금지)
+- **구 `routine_mode_free_talk.dart`는 삭제하지 않음** → index.dart export·stealth_room 라우팅만 끊어 휴면(orphan)화. git 안전망으로 보존
+- 새 모드 표시명: **Anyone / "누구든 그 사람이 되어요" / `Icons.theater_comedy`**
 
 ---
 
-## 2. routine_mode_duo.dart (3건, bottom-to-top)
-
-### 2-3. ListView.builder — `reverse: true` + 인덱스 역전 + 패딩 교환
-
-```
-str_replace
-OLD >>>
-                          : ListView.builder(
-                              controller: _scrollController,
-                              physics: const BouncingScrollPhysics(),
-                              padding: EdgeInsets.only(
-                                  left: 8,
-                                  right: 8,
-                                  top: 40,
-                                  bottom:
-                                      MediaQuery.of(context).size.height * 0.4),
-                              itemCount: _localMessages.length,
-                              itemBuilder: (context, index) {
-                                if (!_itemKeys.containsKey(index))
-                                  _itemKeys[index] = GlobalKey();
-                                return Container(
-                                  key: _itemKeys[index],
-                                  child: _buildTextBlock(_localMessages[index]),
-                                );
-                              }),
-<<< OLD
-
-NEW >>>
-                          : ListView.builder(
-                              reverse: true,
-                              controller: _scrollController,
-                              physics: const BouncingScrollPhysics(),
-                              padding: EdgeInsets.only(
-                                  left: 8,
-                                  right: 8,
-                                  top:
-                                      MediaQuery.of(context).size.height * 0.4,
-                                  bottom: 40),
-                              itemCount: _localMessages.length,
-                              itemBuilder: (context, index) {
-                                final realIdx =
-                                    _localMessages.length - 1 - index;
-                                if (!_itemKeys.containsKey(realIdx))
-                                  _itemKeys[realIdx] = GlobalKey();
-                                return Container(
-                                  key: _itemKeys[realIdx],
-                                  child:
-                                      _buildTextBlock(_localMessages[realIdx]),
-                                );
-                              }),
-<<< NEW
-```
-
-### 2-2. `_scrollToCurrentTop` alignment 변경 (0.02 → 0.98)
-
-```
-str_replace
-OLD >>>
-  // 현재 말풍선을 화면 상단에 고정 — 내 발화 추가 시 사용 (Roleplay 이식)
-  void _scrollToCurrentTop(int index) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final key = _itemKeys[index];
-      if (key == null) return;
-      final ctx = key.currentContext;
-      if (ctx == null) return;
-      Scrollable.ensureVisible(
-        ctx,
-        alignment: 0.02,
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOut,
-      );
-    });
-  }
-<<< OLD
-
-NEW >>>
-  // 현재 말풍선을 화면 상단에 고정 — 내 발화 추가 시 사용 (Roleplay 이식)
-  // reverse: true에서 alignment 0.98 ≈ 화면 상단 2%
-  void _scrollToCurrentTop(int index) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final key = _itemKeys[index];
-      if (key == null) return;
-      final ctx = key.currentContext;
-      if (ctx == null) return;
-      Scrollable.ensureVisible(
-        ctx,
-        alignment: 0.98,
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOut,
-      );
-    });
-  }
-<<< NEW
-```
-
-### 2-1. `_scrollToBottom` 교체
-
-```
-str_replace
-OLD >>>
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollController.hasClients) return;
-      if (_localMessages.length <= 1) return;
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
-    });
-  }
-<<< OLD
-
-NEW >>>
-  // [reverse: true] 최신 메시지(position 0 = 하단)로 스크롤
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(0,
-            duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
-      }
-    });
-  }
-<<< NEW
-```
-
----
-
-## 검증
+## 1. 사전 안전장치 (필수)
 
 ```bash
-# reverse: true 4개 파일 전부 확인
-for f in routine_mode_free_talk routine_mode_roleplay routine_mode_step_expand routine_mode_duo; do
-  echo "=== $f ==="
-  grep -c "reverse: true" lib/custom_code/widgets/$f.dart
-done
-# → 각 1건씩, 총 4건
-
-# maxScrollExtent 완전 제거 확인
-for f in routine_mode_free_talk routine_mode_roleplay routine_mode_step_expand routine_mode_duo; do
-  echo "=== $f ==="
-  grep -c "maxScrollExtent" lib/custom_code/widgets/$f.dart
-done
-# → 각 0건
-
-# animateTo(0) 확인
-for f in routine_mode_free_talk routine_mode_roleplay routine_mode_step_expand routine_mode_duo; do
-  echo "=== $f ==="
-  grep -c "animateTo(0" lib/custom_code/widgets/$f.dart
-done
-# → 각 1건
-
-# alignment: 0.98 확인 (_scrollToCurrentTop 안)
-for f in routine_mode_free_talk routine_mode_roleplay routine_mode_step_expand routine_mode_duo; do
-  echo "=== $f ==="
-  grep -c "alignment: 0.98" lib/custom_code/widgets/$f.dart
-done
-# → 각 1건
-
-# alignment: 0.5 잔존 확인 (_scrollToCurrent 안, 변경 불필요)
-for f in routine_mode_free_talk routine_mode_roleplay routine_mode_duo; do
-  echo "=== $f ==="
-  grep -n "alignment: 0.5" lib/custom_code/widgets/$f.dart
-done
-# → 각 1건 (_scrollToCurrent 안, 정상)
-
-flutter analyze lib/custom_code/widgets/routine_mode_free_talk.dart
-flutter analyze lib/custom_code/widgets/routine_mode_duo.dart
+cd F:\flutter_project\stealth_vox
+git add -A
+git commit -m "savepoint: before Anyone mode phase1"
 ```
 
-## 변경하지 않는 것
+---
 
-- `_scrollToCurrent(alignment: 0.5)` — 센터 정렬은 reverse 무관, 변경 없음
-- `_scrollToBottomThrottled()` — `_scrollToBottom()` 호출하므로 자동 반영
-- `_scrollToCurrentTop` 호출 지점 — 프리톡·듀오 기존 호출 위치 유지
-- 롤플레이·스탭익스팬드 — 이미 적용 완료, 이번 지시문 대상 아님
-- Box 7 — 변경 금지
-- `billing_ticker.dart` — 변경 없음
+## 2. STEP A — 파일 복제 (free_talk → anyone)
 
-## 디바이스 테스트 (4개 모드 전체)
+```bash
+copy "lib\custom_code\widgets\routine_mode_free_talk.dart" "lib\custom_code\widgets\routine_mode_anyone.dart"
+```
 
-- [ ] 프리톡: 3턴 대화 → 메시지가 화면 하단에 자연스럽게 쌓이는지
-- [ ] 프리톡: AI 응답 후 유저 대사 + AI 대사 모두 화면 안에 보이는지
-- [ ] 듀오: PTT 3회 → 메시지가 하단에 쌓이는지
-- [ ] 롤플레이: 기존 v4 동작 유지 확인
-- [ ] 스탭익스팬드: 기존 v4 동작 유지 확인 (4턴 긴 문장 처음부터 보이는지)
+복제 직후 사전 검증 (기대값 표기):
+
+```bash
+findstr /C:"RoutineModeFreeTalk" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
+:: 기대: 4  (클래스 선언/생성자/State 참조/State 클래스 선언)
+findstr /C:"_RoutineModeFreeTalkState" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
+:: 기대: 2
+```
+
+> 이후 STEP B의 모든 편집은 **새 파일 `routine_mode_anyone.dart`** 에만 적용한다. (free_talk.dart는 절대 건드리지 않는다.)
+
+---
+
+## 3. STEP B — `routine_mode_anyone.dart` 편집 (하단→상단 순서)
+
+### B-1. 파일 맨 끝: 말풍선 꼬리 페인터 클래스 추가
+
+`_LangIconPainter`의 마지막 닫는 중괄호 뒤(파일 끝)에 새 클래스를 **추가**한다.
+
+**OLD**
+```dart
+  @override
+  bool shouldRepaint(_LangIconPainter old) => old.active != active;
+}
+```
+
+**NEW**
+```dart
+  @override
+  bool shouldRepaint(_LangIconPainter old) => old.active != active;
+}
+
+// 🆕 [Anyone] 이용방법 말풍선 꼬리 페인터
+class _BubbleTailPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color(0xFF2A2A2E)
+      ..style = PaintingStyle.fill;
+    final path = Path()
+      ..moveTo(0, size.height)
+      ..lineTo(size.width / 2, 0)
+      ..lineTo(size.width, size.height)
+      ..close();
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+```
+
+---
+
+### B-2. `_buildTopBar()` 우측 아이콘 그룹에 "이용방법" 아이콘 추가
+
+**OLD**
+```dart
+          Row(children: [
+            IconButton(
+              icon: Icon(
+                Icons.format_size,
+```
+
+**NEW**
+```dart
+          Row(children: [
+            // 🆕 [Anyone] 이용방법 말풍선 토글
+            IconButton(
+              icon: const Icon(Icons.help_outline,
+                  color: Colors.amberAccent, size: 22),
+              onPressed: () =>
+                  setState(() => _showUsageGuide = !_showUsageGuide),
+            ),
+            IconButton(
+              icon: Icon(
+                Icons.format_size,
+```
+
+---
+
+### B-3. `_buildUsageGuide()` 메서드 추가 (`_buildTopBar` 바로 앞)
+
+**OLD**
+```dart
+  // ... (_buildTopBar, _buildTopControls, _buildChatList, _buildTextBlock, _buildControlArea는 기존과 동일하게 유지) ...
+  Widget _buildTopBar() {
+```
+
+**NEW**
+```dart
+  // 🆕 [Anyone] 이용방법 말풍선 (배경/말풍선 어디든 톡 누르면 닫힘)
+  Widget _buildUsageGuide() {
+    return Positioned.fill(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => setState(() => _showUsageGuide = false),
+        child: Container(
+          color: Colors.black.withValues(alpha: 0.55),
+          alignment: Alignment.topCenter,
+          padding: const EdgeInsets.fromLTRB(20, 6, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Align(
+                alignment: Alignment.topRight,
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 22),
+                  child: CustomPaint(
+                    size: const Size(22, 11),
+                    painter: _BubbleTailPainter(),
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2A2A2E),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                      color: Colors.amberAccent.withValues(alpha: 0.6),
+                      width: 1.2),
+                  boxShadow: [
+                    BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.4),
+                        blurRadius: 16,
+                        offset: const Offset(0, 6)),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: const [
+                      Icon(Icons.lightbulb_outline,
+                          color: Colors.amberAccent, size: 20),
+                      SizedBox(width: 8),
+                      Text("이용 방법",
+                          style: TextStyle(
+                              color: Colors.amberAccent,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15)),
+                    ]),
+                    const SizedBox(height: 12),
+                    const Text(
+                      '대화하고 싶은 사람을 한 명 마음속에 떠올려 보세요. 그리고 그 사람이 바로 지금 눈앞에 있다고 생각하고, 하고 싶었던 말을 편하게 꺼내보세요. AI가 그 사람과 다르게 반응한다면, 그냥 넘기지 말고 "왜 그렇게 느껴?"하고 되물어 보세요. 묻고 답하다 보면, AI는 점점 더 그 사람에 가까워집니다. 진짜 그 사람과 마주 앉은 것처럼요.',
+                      style: TextStyle(
+                          color: Colors.white, fontSize: 14, height: 1.6),
+                    ),
+                    const SizedBox(height: 10),
+                    const Align(
+                      alignment: Alignment.centerRight,
+                      child: Text("(말풍선을 톡 누르면 닫혀요)",
+                          style:
+                              TextStyle(color: Colors.white38, fontSize: 11)),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ... (_buildTopBar, _buildTopControls, _buildChatList, _buildTextBlock, _buildControlArea는 기존과 동일하게 유지) ...
+  Widget _buildTopBar() {
+```
+
+---
+
+### B-4. `build()`의 Stack에 말풍선 오버레이 연결
+
+**OLD**
+```dart
+          Expanded(
+            child: Stack(children: [
+              _buildChatList(),
+              _buildIdleOverlay(),
+            ]),
+          ),
+```
+
+**NEW**
+```dart
+          Expanded(
+            child: Stack(children: [
+              _buildChatList(),
+              _buildIdleOverlay(),
+              if (_showUsageGuide) _buildUsageGuide(), // 🆕 [Anyone] 이용방법 말풍선
+            ]),
+          ),
+```
+
+---
+
+### B-5. 상태 변수 `_showUsageGuide` 추가
+
+**OLD**
+```dart
+  double _fontScale = 1.0;
+  bool _showOriginal = true;
+```
+
+**NEW**
+```dart
+  double _fontScale = 1.0;
+  bool _showOriginal = true;
+  bool _showUsageGuide = false; // 🆕 [Anyone] 이용방법 말풍선 토글
+```
+
+---
+
+### B-6. 외부 위젯 클래스 리네임 (이 파일의 마지막 편집)
+
+**OLD**
+```dart
+class RoutineModeFreeTalk extends StatefulWidget {
+  const RoutineModeFreeTalk({super.key, this.width, this.height});
+  final double? width;
+  final double? height;
+
+  @override
+  State<RoutineModeFreeTalk> createState() => _RoutineModeFreeTalkState();
+}
+
+class _RoutineModeFreeTalkState extends State<RoutineModeFreeTalk> {
+```
+
+**NEW**
+```dart
+class RoutineModeAnyone extends StatefulWidget {
+  const RoutineModeAnyone({super.key, this.width, this.height});
+  final double? width;
+  final double? height;
+
+  @override
+  State<RoutineModeAnyone> createState() => _RoutineModeAnyoneState();
+}
+
+class _RoutineModeAnyoneState extends State<RoutineModeAnyone> {
+```
+
+---
+
+## 4. STEP C — `lib/custom_code/widgets/stealth_room_master.dart` 편집 (하단→상단)
+
+### C-1. 메뉴 카드 라벨 (라인 ~379)
+
+**OLD**
+```dart
+            _buildMenuCard(2, "Free Talk", "AI와 자유 대화", Icons.forum,
+                const Color(0xFF9333EA)),
+```
+
+**NEW**
+```dart
+            _buildMenuCard(2, "Anyone", "누구든 그 사람이 되어요",
+                Icons.theater_comedy, const Color(0xFF9333EA)),
+```
+
+### C-2. 모드 라우팅 진입점 (라인 ~297)
+
+**OLD**
+```dart
+      return RoutineModeFreeTalk(
+          key: const ValueKey('RoutineModeFreeTalk'),
+          width: widget.width,
+          height: widget.height);
+```
+
+**NEW**
+```dart
+      return RoutineModeAnyone(
+          key: const ValueKey('RoutineModeAnyone'),
+          width: widget.width,
+          height: widget.height);
+```
+
+---
+
+## 5. STEP D — `lib/custom_code/widgets/index.dart` export 교체
+
+> 이 파일은 미업로드 상태. 아래 패턴을 찾아 **교체**한다. (추가 아님 — 중복 Box7 클래스 충돌 방지)
+
+먼저 확인:
+```bash
+findstr /N "routine_mode_free_talk" "lib\custom_code\widgets\index.dart"
+```
+
+해당 export 줄을 다음과 같이 교체한다.
+
+**OLD**
+```dart
+export 'routine_mode_free_talk.dart';
+```
+
+**NEW**
+```dart
+export 'routine_mode_anyone.dart';
+```
+
+> 만약 export 표기가 `export '/custom_code/widgets/routine_mode_free_talk.dart';` 처럼 절대경로 형식이면, 그 형식을 그대로 유지하며 파일명만 `routine_mode_anyone.dart`로 바꾼다.
+
+---
+
+## 6. STEP E (선택) — `lib/custom_code/widgets/intro_master.dart` 도움말 문구 (라인 ~335)
+
+> 메뉴가 "Anyone"으로 바뀌므로 도움말의 "[Free Talk]" 안내도 일치시키는 것을 권장. **선택 사항** — 실장 승인 시에만 적용.
+
+**OLD**
+```dart
+            "• [Free Talk] AI와 자유롭게 영어 대화를 나누며 실전 회화를 연습하세요.\n\n"
+```
+
+**NEW**
+```dart
+            "• [Anyone] 마음속에 떠올린 그 사람에게 말하듯 대화하면, AI가 점점 그 사람이 되어 응답합니다.\n\n"
+```
+
+---
+
+## 7. 사후 검증 (필수)
+
+```bash
+:: 1) anyone 파일에 구 클래스명이 0이어야 함
+findstr /C:"RoutineModeFreeTalk" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
+:: 기대: 0
+findstr /C:"_RoutineModeFreeTalkState" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
+:: 기대: 0
+
+:: 2) 새 클래스명 정상 존재
+findstr /C:"RoutineModeAnyone" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
+:: 기대: 4
+
+:: 3) UI 추가 요소 확인
+findstr /C:"_showUsageGuide" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
+:: 기대: 4  (선언 1 + 토글 onPressed 1 + build의 if 1 + _buildUsageGuide 내부 onTap 1)
+findstr /C:"_buildUsageGuide" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
+:: 기대: 2  (정의 1 + 호출 1)
+findstr /C:"_BubbleTailPainter" "lib\custom_code\widgets\routine_mode_anyone.dart" | find /c /v ""
+:: 기대: 2  (정의 1 + 사용 1)
+
+:: 4) stealth_room 라우팅/메뉴 갱신 확인
+findstr /C:"RoutineModeAnyone" "lib\custom_code\widgets\stealth_room_master.dart" | find /c /v ""
+:: 기대: 2
+findstr /C:"RoutineModeFreeTalk" "lib\custom_code\widgets\stealth_room_master.dart" | find /c /v ""
+:: 기대: 0
+
+:: 5) index.dart export 교체 확인
+findstr /C:"routine_mode_anyone" "lib\custom_code\widgets\index.dart" | find /c /v ""
+:: 기대: 1
+findstr /C:"routine_mode_free_talk" "lib\custom_code\widgets\index.dart" | find /c /v ""
+:: 기대: 0
+```
+
+포맷 + 분석 (**폴더 전체 금지, 개별 파일만**):
+
+```bash
+dart format "lib\custom_code\widgets\routine_mode_anyone.dart"
+dart format "lib\custom_code\widgets\stealth_room_master.dart"
+dart format "lib\custom_code\widgets\index.dart"
+flutter analyze
+```
+
+- `flutter analyze`: **errors 0** 목표 (기존 warning 잔존은 허용)
+- 특히 `Duplicate definition` / `is defined in libraries` 류 에러가 없는지 확인 → 있으면 index.dart export 교체(STEP D)가 누락된 것
+
+---
+
+## 8. 동작 확인 (수동)
+
+1. 앱 실행 → StealthRoom 메뉴에 **Anyone / "누구든 그 사람이 되어요"** 카드(연극가면 아이콘) 표시
+2. Anyone 진입 → 상단 우측에 **전구(?) 아이콘** 표시
+3. 아이콘 탭 → 상단에서 **말풍선 가이드** 펼쳐짐(꼬리가 아이콘 쪽을 향함)
+4. 말풍선/배경 아무 곳이나 탭 → 사라짐
+5. 대화 시작/종료/히스토리 저장이 기존 FreeTalk와 동일하게 동작(이번 단계는 로직 무변경)
+
+---
+
+## 9. 롤백
+
+문제 발생 시:
+```bash
+git reset --hard HEAD~1
+```
+(STEP 1 savepoint 커밋으로 복귀. 새로 생성된 `routine_mode_anyone.dart`도 함께 제거됨)
+
+---
+
+## 10. 다음 단계 (2차 지시문 예고 — 이번엔 미실행)
+
+- `routine_mode_anyone.dart`의 대화 프롬프트(응답: ~L3517 / 오프너: ~L3592) 재작성
+- 핵심 원칙: **"유저 발화에서 관계·성격·감정·호칭 단서를 내부적으로만 누적 추정, 추론은 절대 출력하지 말고 오직 그 인물의 자연스러운 반응으로만 응답"**
+- 프롬프트 문구 확정 후 별도 지시문으로 진행

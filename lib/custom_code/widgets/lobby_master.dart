@@ -27,6 +27,8 @@ import 'package:http/http.dart' as http;
 import 'package:appsflyer_sdk/appsflyer_sdk.dart';
 import 'package:flutter/services.dart';
 import '/custom_code/actions/billing_ticker.dart';
+import 'package:purchases_flutter/purchases_flutter.dart';
+import 'dart:io' show Platform;
 
 /// 📦 [Box 2: 클래스 선언부]
 class LobbyMaster extends StatefulWidget {
@@ -111,8 +113,8 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
       setState(() => FFAppState().nativeLang = "Korean");
     if (FFAppState().targetLang == null || FFAppState().targetLang.isEmpty)
       setState(() => FFAppState().targetLang = "English");
-    if (FFAppState().aiVoice.isEmpty)
-      setState(() => FFAppState().aiVoice = "onyx");
+    if (!["echo", "onyx", "fable"].contains(FFAppState().aiVoice))
+      setState(() => FFAppState().aiVoice = "echo");
   }
 
   Future<void> _initializeLobbyData() async {
@@ -141,6 +143,14 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
         _showForceUpdateDialog();
       }
 
+      // 3. RevenueCat 초기화
+      final rcKey = configData['revenueCatAndroidKey'] ?? '';
+      if (rcKey.isNotEmpty && Platform.isAndroid) {
+        await Purchases.setLogLevel(LogLevel.error);
+        await Purchases.configure(PurchasesConfiguration(rcKey));
+        debugPrint('[Lobby] RevenueCat configured');
+      }
+
       // 3. AppsFlyer SDK 초기화 (전역 딥링크 핸들러 사용)
       await AppsFlyerManager.initialize(
         devKey: 'SQUmDTB2VzuPjrJGiy5SSC',
@@ -148,7 +158,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
       );
       if (!mounted) return;
     } catch (e) {
-      print("Init Error: $e");
+      debugPrint("Init Error: $e");
     } finally {
       if (mounted) setState(() => isLoading = false);
     }
@@ -328,16 +338,16 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: [
-                  Colors.white.withOpacity(0.06),
-                  Colors.white.withOpacity(0.02)
+                  Colors.white.withValues(alpha: 0.06),
+                  Colors.white.withValues(alpha: 0.02)
                 ]),
             borderRadius: BorderRadius.circular(24),
             border: Border.all(
-                color: borderColor ?? Colors.white.withOpacity(0.1),
+                color: borderColor ?? Colors.white.withValues(alpha: 0.1),
                 width: 1.5),
             boxShadow: [
               BoxShadow(
-                  color: Colors.black.withOpacity(0.3),
+                  color: Colors.black.withValues(alpha: 0.3),
                   blurRadius: 40,
                   offset: const Offset(0, 10))
             ],
@@ -349,17 +359,17 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   }
 
   Widget _buildSleekVoiceSelector(String value, Function(String?) onChanged) {
-    final List<String> voices = ["shimmer", "echo", "onyx", "fable", "alloy"];
+    final List<String> voices = ["echo", "onyx", "fable"];
     return Container(
       height: 54,
       padding: const EdgeInsets.symmetric(horizontal: 20),
       decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.5),
+          color: Colors.black.withValues(alpha: 0.5),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: Colors.white12)),
       child: DropdownButtonHideUnderline(
           child: DropdownButton<String>(
-        value: voices.contains(value) ? value : "onyx",
+        value: voices.contains(value) ? value : "echo",
         dropdownColor: const Color(0xFF1E1E1E),
         isExpanded: true,
         icon: const Icon(Icons.record_voice_over_rounded,
@@ -387,12 +397,12 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
             color: isHighlight
-                ? const Color(0xFF3B82F6).withOpacity(0.15)
-                : Colors.white.withOpacity(0.05),
+                ? const Color(0xFF3B82F6).withValues(alpha: 0.15)
+                : Colors.white.withValues(alpha: 0.05),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
                 color: isHighlight
-                    ? const Color(0xFF3B82F6).withOpacity(0.5)
+                    ? const Color(0xFF3B82F6).withValues(alpha: 0.5)
                     : Colors.white12)),
         child: Row(
           children: [
@@ -464,7 +474,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           height: 54,
           padding: const EdgeInsets.symmetric(horizontal: 20),
           decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.5),
+              color: Colors.black.withValues(alpha: 0.5),
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: Colors.white12)),
           child: DropdownButtonHideUnderline(
@@ -495,7 +505,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                 decoration: BoxDecoration(
                     color: isSelected
                         ? const Color(0xFF3B82F6)
-                        : Colors.black.withOpacity(0.4),
+                        : Colors.black.withValues(alpha: 0.4),
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
                         color: isSelected
@@ -564,11 +574,11 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                                       horizontal: 14, vertical: 8),
                                   decoration: BoxDecoration(
                                       color: const Color(0xFF3B82F6)
-                                          .withOpacity(0.15),
+                                          .withValues(alpha: 0.15),
                                       borderRadius: BorderRadius.circular(16),
                                       border: Border.all(
                                           color: const Color(0xFF3B82F6)
-                                              .withOpacity(0.5))),
+                                              .withValues(alpha: 0.5))),
                                   child: const Text("Study Room",
                                       style: TextStyle(
                                           color: Colors.white,
@@ -603,14 +613,14 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                                         shadows: [
                                           Shadow(
                                               color: const Color(0xFF3B82F6)
-                                                  .withOpacity(0.5),
+                                                  .withValues(alpha: 0.5),
                                               blurRadius: 20)
                                         ])),
                               ])),
                               const SizedBox(height: 20),
                               _buildGlassContainer(
-                                  borderColor:
-                                      const Color(0xFF3B82F6).withOpacity(0.3),
+                                  borderColor: const Color(0xFF3B82F6)
+                                      .withValues(alpha: 0.3),
                                   child: Column(
                                       crossAxisAlignment:
                                           CrossAxisAlignment.stretch,
@@ -655,7 +665,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                                                   appState.tone = "Casual"))
                                         ]),
                                         const SizedBox(height: 32),
-                                        const Text("MY AI VOICE",
+                                        const Text("MY VOICE",
                                             style: TextStyle(
                                                 color: Colors.white54,
                                                 fontSize: 12,
@@ -690,7 +700,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                                 boxShadow: [
                                   BoxShadow(
                                       color: const Color(0xFF3B82F6)
-                                          .withOpacity(0.4),
+                                          .withValues(alpha: 0.4),
                                       blurRadius: 20,
                                       offset: const Offset(0, 8))
                                 ]),
@@ -744,7 +754,7 @@ class LobbyBrain {
         }
       }
     } catch (e) {
-      print("DB Fetch Error: $e");
+      debugPrint("DB Fetch Error: $e");
     }
     return null;
   }
@@ -761,8 +771,10 @@ class LobbyBrain {
 
       result['apiKey'] = remoteConfig.getString('OpenAIAPIKey');
       result['minBuildNumber'] = remoteConfig.getInt('min_build_number');
+      result['revenueCatAndroidKey'] =
+          remoteConfig.getString('RevenueCatAndroidKey');
     } catch (e) {
-      print("Remote Config Error: $e");
+      debugPrint("Remote Config Error: $e");
     }
     return result;
   }

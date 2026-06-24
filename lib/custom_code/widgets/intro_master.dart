@@ -246,7 +246,8 @@ class _IntroMasterState extends State<IntroMaster> {
         return;
       }
 
-      final remainingTime = (result?['remainingTime'] as num?)?.toInt() ?? 600;
+      final remainingTime =
+          (result?['remainingTime'] as num?)?.toInt() ?? 18000;
       FFAppState().remainingTime = remainingTime;
       FFAppState().update(() {});
 
@@ -254,7 +255,7 @@ class _IntroMasterState extends State<IntroMaster> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              "신규 회원 10분 무료 체험이 지급되었습니다!",
+              "신규 회원 10분 무료 체험이 지급되었습니다!\n테스트 기간 중 참여 테스터에게는 5시간이 부여됩니다.",
               style:
                   TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
             ),
@@ -641,6 +642,17 @@ class _IntroMasterState extends State<IntroMaster> {
                         color: Colors.white60,
                         fontWeight: FontWeight.w500,
                         letterSpacing: 0.3,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '테스트 기간 중 참여 테스터에게 5시간 부여',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.roboto(
+                        fontSize: 12,
+                        color: Colors.amberAccent,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.2,
                       ),
                     ),
                     const SizedBox(height: 24),

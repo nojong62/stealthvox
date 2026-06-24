@@ -198,7 +198,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   String _myNative() =>
       FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
   String _myVoice() =>
-      FFAppState().aiVoice.isNotEmpty ? FFAppState().aiVoice : 'nova';
+      FFAppState().aiVoice.isNotEmpty ? FFAppState().aiVoice : 'echo';
   // ──────────────────────────────────────────────────────────────────────────
 
   // ============================================================================
@@ -1247,7 +1247,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.5),
+                color: Colors.black.withValues(alpha: 0.5),
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(color: Colors.white24)),
             child: DropdownButtonHideUnderline(
@@ -1275,7 +1275,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
 
     return Positioned.fill(
       child: Container(
-        color: Colors.black.withOpacity(0.78),
+        color: Colors.black.withValues(alpha: 0.78),
         child: Center(
           child: SingleChildScrollView(
             child: Container(
@@ -1470,7 +1470,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
                 width: 72,
                 height: 72,
                 decoration: BoxDecoration(
-                    color: accent.withOpacity(0.15),
+                    color: accent.withValues(alpha: 0.15),
                     shape: BoxShape.circle,
                     border: Border.all(color: accent, width: 2.5)),
                 child: Icon(isRec ? Icons.mic_rounded : Icons.mic_none_rounded,
@@ -1495,7 +1495,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
         decoration: BoxDecoration(
           color: isHost
               ? const Color(0xFF2C2C2E)
-              : const Color(0xFF2563EB).withOpacity(0.15),
+              : const Color(0xFF2563EB).withValues(alpha: 0.15),
           borderRadius: BorderRadius.circular(16),
         ),
         constraints:
@@ -1682,7 +1682,7 @@ class _LangIconPainter extends CustomPainter {
     } else {
       // 원어 숨김 표시 — 소형 X
       final xPaint = Paint()
-        ..color = Colors.redAccent.withOpacity(0.65)
+        ..color = Colors.redAccent.withValues(alpha: 0.65)
         ..strokeWidth = 1.2
         ..strokeCap = StrokeCap.round;
       canvas.drawLine(Offset(size.width * 0.53, size.height * 0.11),

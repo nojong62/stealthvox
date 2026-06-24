@@ -5,22 +5,45 @@ cd F:\flutter_project\stealth_vox
 
 CLAUDE1.md 참고해서, 실행해 줘.
 
+
+
 히스토리 P3 Shadowing만 딥그램 Flux 적용✅ 가능 — 영어 에코잉 전용, 영어 free talk
 =============
 내부테스트 앱 다운   https://play.google.com/apps/internaltest/4701441595486020798
 =====================
+StealthVox(AI 영어 훈련 플랫폼)  비공개테스트 부탁드려요!
+아래 링크를 스마트폰(안드로이드)에서 클릭해주세요.
+
+[테스트 순서 입니다. 3단계]
+1. 테스터 등록
+https://groups.google.com/g/stealthvox-testers
+그룹참여 버튼 누르시면 테스터로 등록이 완료됩니다.
+이 단계가 완료되어야 2단계의 링크 클릭 후 테스트 참여하기 버튼이 보입니다.
+
+2. 테스트할 앱 다운로드 및 설치
+https://play.google.com/store/apps/details?id=com.aienglishpractice.stealthvox
+2-1. 링크 클릭 후 [테스트 참여하기] 버튼을 먼저 누르세요.
+2-2. 이후 나타나는 [Google Play에서 설치] 버튼을 눌러 앱을 설치합니다. 
+(※ 만약 '항목을 찾을 수 없음'이 뜨면, 1단계 그룹 가입이 완료되었는지, 
+구글 플레이 스토어 계정이 그룹 가입한 계정과 같은지 확인해주세요!)
+
+3. 테스트 시행
+14일동안 어플을 삭제하지 않고 유지해 주세요, 생각날 때 가끔 실행도 부탁드릴게요! 
+요청 및 개선사항은 카톡으로 편하게 말씀 해 주시거나 
+nisiekorea@gmail.com 으로 보내주시면 큰 도움이 됩니다.
+귀한 시간 내 주셔서 감사합니다.
+===============
 📢 StealthVox 비공개 테스터 모집
 Google 그룹스 가입
 
 https://groups.google.com/g/stealthvox-testers
-
 ※ Google 계정(Gmail)으로 로그인 후 가입해 주세요.
 
 📌 참여 방법
 1. 비공개 테스트 참여
 
 아래 링크를 통해 비공개 테스터 등록을 진행해 주세요.
-
+https://play.google.com/store/apps/details?id=com.aienglishpractice.stealthvox
 https://play.google.com/apps/testing/com.aienglishpractice.stealthvox
 
 ※ Gmail 계정이 여러 개라면 Google Play에 로그인된 Gmail 계정으로 참여해 주세요.

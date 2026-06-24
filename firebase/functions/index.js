@@ -104,7 +104,7 @@ exports.deductRemainingTime = functions.https.onCall(async (data, context) => {
 // Input:  { deviceId: string }
 // Output: { granted: boolean, remainingTime?: number, reason?: string }
 //
-// Grants 600 seconds once per physical device and once per user. The duplicate
+// Grants 18000 seconds once per physical device and once per user. The duplicate
 // guard is enforced server-side in a Firestore transaction.
 // ----------------------------------------------------------------------------
 exports.claimWelcomeBonus = functions.region("us-central1").https.onCall(async (data, context) => {
@@ -128,7 +128,7 @@ exports.claimWelcomeBonus = functions.region("us-central1").https.onCall(async (
   const firestore = admin.firestore();
   const deviceRef = firestore.collection("welcome_devices").doc(normalizedDeviceId);
   const userRef = firestore.collection("users").doc(uid);
-  const bonusSeconds = 600;
+  const bonusSeconds = 18000;
 
   const result = await firestore.runTransaction(async (tx) => {
     const deviceDoc = await tx.get(deviceRef);
