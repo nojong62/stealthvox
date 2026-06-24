@@ -47,342 +47,329 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# 지시문 — Anyone 모드: 이용방법 팝업 잘림 수정 + 초/중/고급 UI 제거 (A안)
+# 지시문 — StepExpand: 씨앗 말풍선 상단 이동 + 긴 대사 텔레프롬프터 스크롤
 
-**대상 파일:** `routine_mode_anyone.dart`
-**작업 성격:** 외관/UI 변경 (cosmetic). brain·프롬프트 파이프라인 무손상.
-**핵심 원칙:** 최소 diff · 아래→위 편집 순서 · 앵커 문자열 기반 · `dart format`은 **이 파일 단독으로만**.
+**대상 파일:** `routine_mode_step_expand.dart`
+**원칙:** 최소 diff · 아래→위 편집 순서 · 텍스트 앵커 기반 · `dart format`은 **이 파일 단독**. Box 7 / TTS 엔진 **무수정**.
 
 ---
 
 ## 무엇을 / 왜
 
-1. **이용방법 팝업 하단 잘림 수정**
-   - 원인: 말풍선 오버레이(`_buildUsageGuide`)가 `Expanded > Stack` 안의 `Positioned.fill`이라 높이가 채팅영역으로 제한 → 본문이 가용 높이를 넘기면 하단 클리핑.
-   - 해결: 말풍선 바깥 `Column`을 `SingleChildScrollView`로 래핑 → 작은 화면/폰트 확대에서도 넘치는 만큼 스크롤.
+### A. 씨앗 안내 말풍선('질문과 다른 씨앗 문장…')을 화면 상단으로
+- 현재 `Positioned(bottom: 8)` → 채팅영역 하단에 떠서 대사를 가림.
+- `top: 8`로 변경 → 상단에 잠깐 떴다 사라짐(3초 자동 숨김·페이드아웃은 기존 그대로).
 
-2. **초급/중급/고급 선택 UI 제거 (A안)**
-   - 선택바 위젯·호출·load/save 메서드만 제거. `_freeTalkLevel`은 `"Intermediate"`로 **고정 상수**.
-   - 프롬프트 파이프라인(`level: _freeTalkLevel` 3곳, `_freeTalkLevelInstruction`)은 **건드리지 않음**.
-   - 엣지케이스 차단: 예전에 Beginner 등을 저장한 사용자가 `_loadFreeTalkLevel()` 때문에 그 값에 영구 고정되는 것을 막기 위해 load/save 호출·메서드도 함께 제거.
+### B. 긴 대사 텔레프롬프터 스크롤 (A안: 추정 동기화 글라이드)
+- 버그 원인: 긴 대사 표시 시 `_scrollToBottom()`(reverse 리스트 offset 0 = 맨 아래) 호출 → 대사가 화면보다 길면 **첫 줄이 위로 밀려 사라짐.**
+- 해결: 새 메서드 `_revealForReading(index, text)`
+  - 메시지 높이 ≤ 화면 → 기존 카톡식(`_scrollToBottom`).
+  - 메시지 높이 > 화면 → **첫 줄을 상단 고정** 후, 글자 수로 추정한 읽는 시간 동안 **선형으로 맨 아래까지 글라이드**(`animateTo(0)`).
+- 적용 범위: **AI 질문 / AI 재질문 / 유저 확장 / AI 확장** 4곳 모두.
+- 제약(수용됨): TTS-1은 단어별 타임스탬프가 없어 *추정* 동기화. 추정이 빗나가도 글라이드는 항상 끝줄(하단)에서 멈춰 결과는 안전. 속도는 `_kReadCharsPerSec` 한 값으로 튜닝.
 
 ---
 
-## 0. Git 세이브포인트 (실행 전 필수)
+## 0. Git 세이브포인트
 
 ```bash
 git add -A
-git commit -m "savepoint: before anyone usageguide-scroll + remove level UI"
+git commit -m "savepoint: before stepexpand seedhint-top + teleprompter scroll"
 ```
 
 ---
 
-## 편집 (아래→위 순서, 라인 드리프트 방지)
+## 편집 (아래→위 순서)
 
-### [E1] `_buildTopControls()` 메서드 전체 삭제 (≈1896~1954)
-
-`_buildChatList()` 앵커로 메서드 전체 + 후행 빈 줄 제거.
+### [E1] 씨앗 말풍선 상단 이동 (≈3380)
 
 **OLD:**
 ```dart
-  Widget _buildTopControls() {
-    const levels = ["Beginner", "Intermediate", "Advanced"];
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Container(
-        height: 44,
-        padding: const EdgeInsets.all(4),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1C1C1E),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
-        ),
-        child: Row(
-          children: List.generate(levels.length, (i) {
-            final bool selected = _freeTalkLevel == levels[i];
-            return Expanded(
-              child: GestureDetector(
-                onTap: () => _setFreeTalkLevel(levels[i]),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  curve: Curves.easeInOut,
-                  alignment: Alignment.center,
-                  margin: const EdgeInsets.symmetric(horizontal: 2),
-                  decoration: BoxDecoration(
-                    color: Colors.transparent,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: selected
-                          ? const Color(0xFF9333EA)
-                          : Colors.transparent,
-                      width: 1.5,
-                    ),
-                  ),
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: Text(
-                        levels[i],
-                        maxLines: 1,
-                        softWrap: false,
-                        style: TextStyle(
-                          color: selected ? Colors.white : Colors.white38,
-                          fontSize: 13,
-                          fontWeight:
-                              selected ? FontWeight.w700 : FontWeight.w400,
-                          letterSpacing: -0.2,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            );
-          }),
-        ),
-      ),
+  Widget _buildSeedHintBalloon() {
+    return Positioned(
+      bottom: 8,
+      left: 24,
+      right: 24,
+```
+
+**NEW:**
+```dart
+  Widget _buildSeedHintBalloon() {
+    return Positioned(
+      top: 8,
+      left: 24,
+      right: 24,
+```
+
+---
+
+### [E2] AI 확장 — 최종 텍스트 지점 (≈2715, `[PIPE-08]` 앵커)
+
+**OLD:**
+```dart
+      if (mounted && aiIndex < _localMessages.length) {
+        setState(() {
+          _localMessages[aiIndex]['target'] = aiTargetText;
+          _localMessages[aiIndex]['original'] = aiOriginalText;
+        });
+        _scrollToBottom();
+      }
+      _log('🧠 [PIPE-08]',
+```
+
+**NEW:**
+```dart
+      if (mounted && aiIndex < _localMessages.length) {
+        setState(() {
+          _localMessages[aiIndex]['target'] = aiTargetText;
+          _localMessages[aiIndex]['original'] = aiOriginalText;
+        });
+        _revealForReading(aiIndex, aiTargetText); // 🆕 긴 대사 텔레프롬프터
+      }
+      _log('🧠 [PIPE-08]',
+```
+
+---
+
+### [E3] AI 확장 — 소리 시작 지점 (≈2701, `[v3.8]` 앵커)
+
+> 소리 시작 시 표시되는 텍스트가 짧으면 자동으로 카톡식, 길면 글라이드. 최종 텍스트는 E2에서 보정.
+
+**OLD:**
+```dart
+      if (mounted && aiIndex < _localMessages.length) {
+        setState(() {
+          _localMessages[aiIndex]['target'] = aiTargetText;
+          _localMessages[aiIndex]['original'] = aiOriginalText;
+        });
+        _scrollToBottom();
+      }
+      // [v3.8] AI 한국어 단일 호출 통합
+```
+
+**NEW:**
+```dart
+      if (mounted && aiIndex < _localMessages.length) {
+        setState(() {
+          _localMessages[aiIndex]['target'] = aiTargetText;
+          _localMessages[aiIndex]['original'] = aiOriginalText;
+        });
+        _revealForReading(aiIndex, aiTargetText); // 🆕 긴 대사 텔레프롬프터
+      }
+      // [v3.8] AI 한국어 단일 호출 통합
+```
+
+---
+
+### [E4] 유저 확장 — onStreamEnd 직후 (≈2417)
+
+**OLD:**
+```dart
+      await userHybridTts.onStreamEnd(
+        fullSentence: _part2FullSentence,
+        remainderBuffer: userBuffer,
+        fetcher: userTtsFetcher,
+        swSpeechEnd: _swTTS,
+      );
+```
+
+**NEW:**
+```dart
+      await userHybridTts.onStreamEnd(
+        fullSentence: _part2FullSentence,
+        remainderBuffer: userBuffer,
+        fetcher: userTtsFetcher,
+        swSpeechEnd: _swTTS,
+      );
+      _revealForReading(hostIndex, _part2FullSentence); // 🆕 긴 대사 텔레프롬프터
+```
+
+---
+
+### [E5] AI 재질문 — onStreamEnd 직후 (≈1875, `// TTS 재생 완료 대기` 앵커)
+
+**OLD:**
+```dart
+    await questionHybridTts.onStreamEnd(
+      fullSentence: aiText.trim(),
+      remainderBuffer: aiBuffer,
+      fetcher: questionTts,
+      swSpeechEnd: _swTTS,
     );
-  }
 
-  Widget _buildChatList() {
+    // TTS 재생 완료 대기
 ```
 
 **NEW:**
 ```dart
-  Widget _buildChatList() {
-```
-
----
-
-### [E2] 스테일 주석에서 `_buildTopControls` 제거 (≈1809)
-
-**OLD:**
-```dart
-  // ... (_buildTopBar, _buildTopControls, _buildChatList, _buildTextBlock, _buildControlArea는 기존과 동일하게 유지) ...
-```
-
-**NEW:**
-```dart
-  // ... (_buildTopBar, _buildChatList, _buildTextBlock, _buildControlArea는 기존과 동일하게 유지) ...
-```
-
----
-
-### [E3] 팝업: `SingleChildScrollView` 닫는 괄호 추가 (≈1803, _buildUsageGuide 끝부분)
-
-> 닫는 괄호를 **먼저** 추가(아래쪽이므로). 외부 `Column` 닫힘 `),` 바로 다음에 `          ),` 한 줄 삽입.
-
-**OLD:**
-```dart
-                    const Align(
-                      alignment: Alignment.centerRight,
-                      child: Text("(말풍선을 톡 누르면 닫혀요)",
-                          style:
-                              TextStyle(color: Colors.white38, fontSize: 11)),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    await questionHybridTts.onStreamEnd(
+      fullSentence: aiText.trim(),
+      remainderBuffer: aiBuffer,
+      fetcher: questionTts,
+      swSpeechEnd: _swTTS,
     );
+    _revealForReading(aiIdx, aiText.trim()); // 🆕 긴 대사 텔레프롬프터
+
+    // TTS 재생 완료 대기
+```
+
+---
+
+### [E6] 새 메서드 추가 — `_scrollToCurrentTop` 바로 뒤 (≈1601)
+
+> `_scrollToCurrentTop`의 꼬리(`alignment: 0.98 ...`)를 앵커로, 그 닫는 `}` 다음에 두 메서드 삽입.
+
+**OLD:**
+```dart
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.98,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+      );
+    });
   }
 ```
 
 **NEW:**
 ```dart
-                    const Align(
-                      alignment: Alignment.centerRight,
-                      child: Text("(말풍선을 톡 누르면 닫혀요)",
-                          style:
-                              TextStyle(color: Colors.white38, fontSize: 11)),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          ),
-        ),
-      ),
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.98,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
+  // 🆕 긴 대사 텔레프롬프터: 화면보다 길면 첫 줄을 상단에 고정한 뒤,
+  //    읽는 시간(추정) 동안 서서히 맨 아래(끝줄)로 선형 글라이드.
+  //    화면에 다 들어오면 기존 카톡식(_scrollToBottom) 유지.
+  void _revealForReading(int index, String spokenText) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      final ctx = _itemKeys[index]?.currentContext;
+      if (ctx == null) {
+        _scrollToBottom();
+        return;
+      }
+      final renderObj = ctx.findRenderObject();
+      final double itemH = (renderObj is RenderBox) ? renderObj.size.height : 0;
+      final double viewH = _scrollController.position.viewportDimension;
+      // 화면에 다 들어오면 기존 동작
+      if (itemH <= 0 || itemH <= viewH * 0.85) {
+        _scrollToBottom();
+        return;
+      }
+      // 1) 첫 줄을 화면 상단에 고정 (즉시)
+      Scrollable.ensureVisible(ctx, alignment: 0.98, duration: Duration.zero);
+      // 2) 읽는 시간 동안 끝줄까지 선형 글라이드
+      //    (reverse 리스트에서 offset 0 = 맨 아래)
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!_scrollController.hasClients) return;
+        _scrollController.animateTo(
+          0,
+          duration: Duration(milliseconds: _estimateReadMs(spokenText)),
+          curve: Curves.linear,
+        );
+      });
+    });
+  }
+
+  // 읽는 시간 추정 (OpenAI TTS-1 영어 ≈ 14자/초). 살짝 짧게 잡아 끝줄이 약간 먼저 도착.
+  // 글라이드가 너무 빠르면 값을 낮추고, 너무 느리면 값을 올린다.
+  static const double _kReadCharsPerSec = 14.0;
+  int _estimateReadMs(String text) {
+    final int n = text.trim().length;
+    if (n <= 0) return 1500;
+    final int ms = (n / _kReadCharsPerSec * 1000).round();
+    return ms.clamp(1500, 25000);
+  }
+```
+
+---
+
+### [E7] 초기 AI 질문 — onStreamEnd 직후 (≈706, `while (questionTts...` 앵커)
+
+**OLD:**
+```dart
+    await questionHybridTts.onStreamEnd(
+      fullSentence: aiText.trim(),
+      remainderBuffer: aiBuffer,
+      fetcher: questionTts,
+      swSpeechEnd: _swTTS,
     );
-  }
-```
 
----
-
-### [E4] 팝업: 바깥 `Column`을 `SingleChildScrollView`로 래핑 시작 (≈1742)
-
-`fromLTRB(20, 6, 20, 20)` 앵커(파일 내 유일).
-
-**OLD:**
-```dart
-          padding: const EdgeInsets.fromLTRB(20, 6, 20, 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
+    int ticks = 0;
+    while (questionTts.pendingRequests > 0 || _ttsQueueManager.isBusy) {
 ```
 
 **NEW:**
 ```dart
-          padding: const EdgeInsets.fromLTRB(20, 6, 20, 20),
-          child: SingleChildScrollView(
-            child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-```
+    await questionHybridTts.onStreamEnd(
+      fullSentence: aiText.trim(),
+      remainderBuffer: aiBuffer,
+      fetcher: questionTts,
+      swSpeechEnd: _swTTS,
+    );
+    _revealForReading(aiIdx, aiText.trim()); // 🆕 긴 대사 텔레프롬프터
 
-> 들여쓰기가 어긋나 보이지만 정상입니다. 마지막 `dart format`(단일 파일)에서 자동 정렬됩니다.
-
----
-
-### [E5] `build()` 내 `_buildTopControls()` 호출 + 인접 SizedBox 삭제 (≈1719~1720)
-
-**OLD:**
-```dart
-          _buildTopBar(),
-          const SizedBox(height: 10),
-          _buildTopControls(),
-          const SizedBox(height: 10),
-          Expanded(
-```
-
-**NEW:**
-```dart
-          _buildTopBar(),
-          const SizedBox(height: 10),
-          Expanded(
+    int ticks = 0;
+    while (questionTts.pendingRequests > 0 || _ttsQueueManager.isBusy) {
 ```
 
 ---
 
-### [E6] `initState`의 `_loadFreeTalkLevel()` 호출 삭제 (≈262)
-
-**OLD:**
-```dart
-    _initPermissions();
-    _loadFreeTalkLevel();
-    _fetchKeys();
-```
-
-**NEW:**
-```dart
-    _initPermissions();
-    _fetchKeys();
-```
-
----
-
-### [E7] `_loadFreeTalkLevel` + `_setFreeTalkLevel` 메서드 삭제 (≈215~228)
-
-`// 오디오 및 UI` 앵커로 두 메서드 + 후행 빈 줄 제거.
-
-**OLD:**
-```dart
-  // 언어 수준 로드/저장 (SharedPreferences)
-  Future<void> _loadFreeTalkLevel() async {
-    final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getString('free_talk_level');
-    if (saved != null && saved.isNotEmpty && mounted) {
-      setState(() => _freeTalkLevel = saved);
-    }
-  }
-
-  Future<void> _setFreeTalkLevel(String level) async {
-    if (mounted) setState(() => _freeTalkLevel = level);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('free_talk_level', level);
-  }
-
-  // 오디오 및 UI
-```
-
-**NEW:**
-```dart
-  // 오디오 및 UI
-```
-
----
-
-### [E8] `_freeTalkLevel` 필드 주석 갱신 + `final` 고정 (≈209~210)
-
-**OLD:**
-```dart
-  // Free Talk 언어 수준 (대화 중 토글 가능: Beginner / Intermediate / Advanced)
-  String _freeTalkLevel = "Intermediate";
-```
-
-**NEW:**
-```dart
-  // 언어 수준 고정값 (초/중/고급 선택 UI 제거 — 내부 프롬프트 파이프라인용 Intermediate 고정)
-  final String _freeTalkLevel = "Intermediate";
-```
-
----
-
-## 검증 (편집 후, 이 파일 기준)
+## 검증
 
 ```bash
-# 1) 제거 대상 — 모두 0이어야 함
-grep -c "_buildTopControls"   routine_mode_anyone.dart   # 기대: 0
-grep -c "_setFreeTalkLevel"   routine_mode_anyone.dart   # 기대: 0
-grep -c "_loadFreeTalkLevel"  routine_mode_anyone.dart   # 기대: 0
-grep -c "free_talk_level"     routine_mode_anyone.dart   # 기대: 0
-grep -c "Beginner"            routine_mode_anyone.dart   # 기대: 0
+# 1) 새 메서드/호출 개수
+grep -c "_revealForReading" routine_mode_step_expand.dart   # 기대: 6 (정의1 + 호출5)
+grep -c "_estimateReadMs"   routine_mode_step_expand.dart   # 기대: 2 (정의1 + 호출1)
 
-# 2) 보존 대상 — 그대로 유지
-grep -c "level: _freeTalkLevel"        routine_mode_anyone.dart   # 기대: 3
-grep -cE "_freeTalkLevel\b"            routine_mode_anyone.dart   # 기대: 4 (필드1 + 사용처3)
-grep -c "_freeTalkLevelInstruction"    routine_mode_anyone.dart   # 기대: 3 (변동 없음)
+# 2) 말풍선 상단 이동 확인
+grep -n -A3 "_buildSeedHintBalloon" routine_mode_step_expand.dart
+#   기대: return Positioned( 다음 줄에 top: 8,
 
-# 3) 팝업 래핑 확인 — fromLTRB 다음 줄에 SingleChildScrollView
-grep -n -A2 "fromLTRB(20, 6, 20, 20)" routine_mode_anyone.dart
-#   기대: child: SingleChildScrollView( 가 보일 것
+# 3) AI 확장 2곳이 교체됐는지 (PIPE-08 / v3.8 앵커 주변)
+grep -n -B1 "_log('🧠 \[PIPE-08\]'" routine_mode_step_expand.dart   # 위에 _revealForReading
+grep -n -B1 "// \[v3.8\] AI 한국어 단일 호출 통합" routine_mode_step_expand.dart  # 위에 _revealForReading
 
-# 4) 정적 분석 (괄호 균형/미사용 심볼 최종 확인)
+# 4) 정적 분석
 flutter analyze
-#   기대: No issues found  (최소한 본 파일 관련 error/warning 0)
+#   기대: No issues found
 ```
 
-> `flutter analyze`가 통과하면 `SingleChildScrollView` 괄호 균형이 맞은 것입니다(불균형 시 컴파일 에러로 즉시 검출).
+> `RenderBox` 미정의 에러가 나면(드뭄) 파일 상단 import에 `import 'package:flutter/rendering.dart';` 한 줄 추가. 보통 `material.dart`/`widgets.dart`가 이미 re-export 하므로 불필요.
 
 ---
 
 ## 포맷 (반드시 단일 파일)
 
 ```bash
-dart format routine_mode_anyone.dart
+dart format routine_mode_step_expand.dart
 ```
-⚠️ **폴더 대상 금지** — 한글 문자열 UTF-8 손상 위험. 항상 이 파일만 지정.
+⚠️ 폴더 대상 금지(한글 문자열 UTF-8 손상 위험).
 
 ---
 
 ## 롤백
 
 ```bash
-# 전체 되돌리기
-git checkout HEAD -- routine_mode_anyone.dart
-# 또는 커밋했다면
-git revert <commit-hash>
+git checkout HEAD -- routine_mode_step_expand.dart
 ```
 
 ---
 
-## (선택) 빌드/설치
+## 기기 테스트 체크리스트 / 튜닝
 
-```bash
-flutter build appbundle
-# 또는 단말 직접 설치
-flutter build apk --release && adb install -r build/app/outputs/flutter-apk/app-release.apk
-```
+1. **짧은 대사**: 평소처럼 카톡식으로 자연스럽게 하단 표시되는지(글라이드 미발동).
+2. **화면보다 긴 대사**(작은 폰): 첫 줄이 화면 최상단에 잡힌 뒤 읽는 동안 서서히 위로 올라가 끝줄에서 멈추는지.
+3. **동기화 미세 조정**: 글라이드가 소리보다 빠르면 `_kReadCharsPerSec`를 **낮추고**(예 12), 느리면 **올린다**(예 16).
+4. **첫 줄 고정 위치**: 너무 위/아래면 `_revealForReading`의 `alignment: 0.98` 값을 조정(0.9~1.0).
+5. **발동 임계값**: 살짝 넘치는 대사도 글라이드시키려면 `viewH * 0.85`의 0.85를 낮춘다.
 
----
+## 알려진 한계 (의도된 동작)
 
-## 기대 결과
-
-- 이용방법 팝업: 본문이 길거나 폰트를 키워도 잘리지 않고 필요 시 스크롤됨.
-- 상단 초/중/고급 선택바 사라짐. 세로 공간 약 54px 추가 확보.
-- 대화 동작/난이도: 내부적으로 Intermediate 고정 유지 → 사용자 체감 변화 없음.
+- 스트리밍 중에는 기존 `_scrollToBottom`이 텍스트를 따라가고, 스트림 완료 시점에 첫 줄 고정→글라이드가 시작됩니다(짧은 점프 1회).
+- AI 확장은 소리가 글자보다 먼저 시작될 수 있어, 생성이 많이 지연되는 긴 답변에선 글라이드가 소리보다 약간 뒤처질 수 있습니다(추정 동기화의 본질적 한계). 끝줄 정렬은 항상 보장됩니다.
