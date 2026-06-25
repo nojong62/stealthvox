@@ -47,175 +47,110 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# 실전 튜터링 시트 — STT 말풍선 잘림 해결 (B안: 패딩 + 말풍선 위치 이동)
+# 실전 튜터링 교정 — "정답 1개 강제 → 허위 오류" 문제 해결 (정답 일치 분기 추가)
 
 ## 목적
-히스토리 실전 튜터링(`showModalBottomSheet` → `DraggableScrollableSheet`) 하단에서
-**유저 STT 결과 말풍선(`_appTranscript`)이 시스템 네비게이션 바 뒤로 잘려** 끝까지 스크롤해도 안 보이는 문제 해결.
+유저가 **문법적으로 완벽히 맞는 다른 표현**을 말해도, 시스템이 미리 만든 정답(`_appAnswerEn`) 1개와
+다르다는 이유로 `어순이 틀렸다` 같은 **허위 교정**을 내보내는 문제 해결.
 
-- 근본 원인 ①: `SingleChildScrollView`에 하단 SafeArea 패딩이 없어 시트 하단(네비바 영역)에서 마지막 자식이 잘림.
-- 근본 원인 ②: 말풍선이 `Close / Another Sentence` 버튼 **아래**(스크롤 최하단)에 있어 구조적으로 항상 숨음.
+- 근본 원인: Box 18-C 교정 프롬프트가 `[TARGET_EN_FIXED]`를 "absolute correct answer"로 박고,
+  RULE 4에서 *"USER_SPEECH를 TARGET 쪽으로 무조건 교정"* 하라고 명령 → 정답이 1개로 고정됨.
+- 영작은 정답이 여러 개인데, "정답과 다름 = 틀림"으로 처리되어 모델이 가짜 사유를 지어냄.
 
-→ 패딩 추가 + 말풍선을 버튼 **위**(교정 결과 아래)로 이동 = 스크롤·잘림 원천 차단.
+→ 프롬프트에 **"정답 일치(self-correct) 분기"** 추가:
+USER_SPEECH가 그 자체로 맞고 자연스러우면 → **유저 문장 그대로 인정 + 칭찬**, TARGET은 참고 예시로만.
+진짜 오류일 때만 교정.
 
 ## 적용 파일 (단 1개)
-`chat_history_master.dart` (Box 17-B `_buildAccordion`, Box 17 `showModalBottomSheet` 부분)
+`chat_history_master.dart` — Box 18-C `_stopAppRecordAndProcess` 내 `corrPrompt` 문자열
 
 ## 건드리지 않는 것 (불변)
-- Box 7 (`TtsQueueManager` / `DeepgramV2VoiceManager` / `ChunkedTtsFetcher` / `HybridTtsPlayer` / `TtsCache`)
-- 빌링(`BillingTicker` / `BillingRate`), STT/교정 로직, GPT 프롬프트
-- P1 / P2 / P3 / turnPractice 분기
-- 말풍선의 스타일·텍스트 자체 (위치만 이동, 디자인 동일)
+- Whisper STT 호출, GPT 호출 파라미터(model/temperature/max_tokens/response_format)
+- JSON 키(`corrected_en`, `reason_ko`) 및 파싱 로직, `_appCorrection` 조립, TTS/쉐도잉/캐시
+- Box 7, 빌링, P1/P2/P3, Box 18(응용문장 생성) — 전부 무관
+- **변경 대상은 오직 `corrPrompt` 문자열 1개**
 
 ---
 
-## 0. SAVEPOINT (필수 — 작업 전 커밋)
+## 0. SAVEPOINT (필수)
 ```bash
 git add -A
-git commit -m "savepoint: 튜터링 말풍선 잘림 수정 직전"
+git commit -m "savepoint: 튜터링 교정 정답일치 분기 추가 직전"
 ```
 
 ---
 
-## Phase 1 — grep 발견 (기대 카운트 확인)
+## Phase 1 — grep 발견 (기대 카운트)
 ```bash
-grep -n "initialChildSize: 0.65" chat_history_master.dart        # → 1
-grep -nc "투명 말풍선" chat_history_master.dart                    # → 1
-grep -nc "화면 최하단" chat_history_master.dart                    # → 1
-grep -n "// 하단 버튼" chat_history_master.dart                    # → 1
-grep -c "_appTranscript" chat_history_master.dart                # → 5 (불변 기준값)
+grep -c "final corrPrompt" chat_history_master.dart                # → 1
+grep -c "TARGET_EN_FIXED" chat_history_master.dart                 # → 7 (전부 corrPrompt 내부)
+grep -c "the absolute correct answer" chat_history_master.dart     # → 1
+grep -c "corrected_en" chat_history_master.dart                    # → 다수(파싱부 포함, 참고용)
 ```
-위 카운트와 다르면 **중단**하고 보고. (특히 `_appTranscript` = 5 는 작업 후에도 그대로 유지되어야 함 — 이동만 하므로 순증감 0)
+`TARGET_EN_FIXED`가 7이 아니면(=다른 곳에도 존재) **중단·보고**.
 
 ---
 
-## Phase 2 — str_replace (아래→위 순서로 적용, 라인 밀림 방지)
+## Phase 2 — str_replace (단일 편집)
 
-### ▶ 편집 ① (파일 하단, ~2654행): 기존 말풍선 제거
-하단 버튼 Row 아래의 "화면 최하단" 말풍선 블록을 삭제. Row 닫힘 `),` 과 spread 닫힘 `],` 만 남긴다.
-
+### ▶ `corrPrompt` 문자열 전체 교체
 **old_str**
 ```dart
-            ),
+      final corrPrompt = '''You are an English pronunciation and grammar coach.
 
-            // 투명 말풍선 (STT 결과) - 화면 최하단
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              decoration: const BoxDecoration(
-                color: Colors.transparent,
-                borderRadius: BorderRadius.all(Radius.circular(16)),
-              ),
-              child: Text(
-                _appTranscript,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                    color: Colors.white54,
-                    fontSize: 13,
-                    height: 1.4,
-                    fontStyle: FontStyle.italic),
-              ),
-            ),
-          ],
+[TARGET_EN_FIXED]: "$targetEn"
+[USER_SPEECH]: "$transcript"
+
+RULES — follow exactly:
+1. [TARGET_EN_FIXED] is the absolute correct answer. You must NEVER rephrase, reword, or replace it with any other sentence.
+2. Compare [USER_SPEECH] against [TARGET_EN_FIXED] only. No other reference exists.
+3. If [USER_SPEECH] matches [TARGET_EN_FIXED] closely (minor STT noise allowed):
+   - Set "corrected_en" to the exact text of [TARGET_EN_FIXED].
+   - Set "reason_ko" to a single short praise sentence in Korean.
+4. If [USER_SPEECH] differs from [TARGET_EN_FIXED]:
+   - Set "corrected_en" to the minimally corrected version that moves [USER_SPEECH] toward [TARGET_EN_FIXED] (fix only what is wrong: pronunciation spelling, grammar, word order, or tense).
+   - Set "reason_ko" to 1-3 Korean sentences explaining what was wrong (specify which of: 발음, 문법, 어순, 시제). Do NOT write sentences that redefine [TARGET_EN_FIXED] as a different sentence.
+5. Output ONLY valid JSON with exactly these two keys: {"corrected_en": "...", "reason_ko": "..."}''';
 ```
 
 **new_str**
 ```dart
-            ),
-          ],
+      final corrPrompt = '''You are an English pronunciation and grammar coach.
+
+[TARGET_EN]: "$targetEn"
+[USER_SPEECH]: "$transcript"
+
+IMPORTANT: English allows MANY correct ways to express the same meaning. [TARGET_EN] is only ONE valid example answer, NOT the single correct answer. Never treat a sentence as wrong just because it differs from [TARGET_EN].
+
+RULES — follow exactly:
+1. First decide: is [USER_SPEECH], on its own, grammatically correct, natural, and does it convey the same meaning as [TARGET_EN]? Ignore minor STT noise such as missing punctuation or capitalization.
+2. If YES — the user's sentence is correct on its own:
+   - Set "corrected_en" to the user's OWN sentence, cleaned of STT noise only. Do NOT replace it with [TARGET_EN].
+   - Set "reason_ko" to one short Korean praise sentence. You MAY optionally append "다른 표현: [TARGET_EN]" as an alternative, but you MUST NOT call the user's sentence wrong.
+3. If NO — there is a genuine error (grammar, tense, word order, word choice, or a real pronunciation/spelling error):
+   - Set "corrected_en" to the minimally corrected version of [USER_SPEECH]. Fix ONLY the actual error and keep every part that is already correct.
+   - Set "reason_ko" to 1-3 Korean sentences naming the REAL problem (specify which of: 발음, 문법, 어순, 시제, 단어선택). Never invent an error that is not actually present.
+4. Output ONLY valid JSON with exactly these two keys: {"corrected_en": "...", "reason_ko": "..."}''';
 ```
 
----
-
-### ▶ 편집 ② (~2620행): 말풍선을 버튼 **위**로 이동 (+ 빈 값 가드)
-`const SizedBox(height: 18),` 와 `// 하단 버튼` 사이에 말풍선 삽입.
-`_appTranscript`가 비었을 땐 렌더 안 되도록 `if ... .isNotEmpty` 가드 추가(녹음 전 빈 여백 방지).
-
-**old_str**
-```dart
-            const SizedBox(height: 18),
-
-            // 하단 버튼
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-```
-
-**new_str**
-```dart
-            const SizedBox(height: 18),
-
-            // 투명 말풍선 (STT 결과) - 교정 결과 아래 고정 노출
-            if (_appTranscript.isNotEmpty) ...[
-              Container(
-                width: double.infinity,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                decoration: const BoxDecoration(
-                  color: Colors.transparent,
-                  borderRadius: BorderRadius.all(Radius.circular(16)),
-                ),
-                child: Text(
-                  _appTranscript,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                      color: Colors.white54,
-                      fontSize: 13,
-                      height: 1.4,
-                      fontStyle: FontStyle.italic),
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
-
-            // 하단 버튼
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-```
-
----
-
-### ▶ 편집 ③ (~2374행): 하단 SafeArea 패딩 + 초기 높이 상향
-`SingleChildScrollView`에 네비바 인셋만큼 하단 패딩을 줘서 마지막 자식이 항상 위로 올라오게 함. 초기 높이 0.65 → 0.72(드래그 없이 더 보이게).
-
-**old_str**
-```dart
-          return DraggableScrollableSheet(
-            initialChildSize: 0.65,
-            minChildSize: 0.45,
-            maxChildSize: 0.95,
-            expand: false,
-            builder: (_, scrollController) => SingleChildScrollView(
-              controller: scrollController,
-              child: _buildAccordion(
-```
-
-**new_str**
-```dart
-          return DraggableScrollableSheet(
-            initialChildSize: 0.72,
-            minChildSize: 0.45,
-            maxChildSize: 0.95,
-            expand: false,
-            builder: (_, scrollController) => SingleChildScrollView(
-              controller: scrollController,
-              padding: EdgeInsets.only(
-                  bottom: MediaQuery.of(ctx).padding.bottom + 24),
-              child: _buildAccordion(
-```
-> 참고: `ctx`는 바로 위 `showModalBottomSheet(builder: (ctx) => ...)`의 컨텍스트로 스코프 내 사용 가능. 새 import 불필요.
+> 핵심 변경점
+> - `[TARGET_EN_FIXED]` → `[TARGET_EN]` (라벨에서 "절대 정답" 프레이밍 제거)
+> - IMPORTANT 한 줄: "정답은 여러 개, TARGET은 예시 1개"
+> - RULE 2(YES 분기): 맞으면 **유저 문장 그대로 유지** + 칭찬, TARGET은 선택적 "다른 표현"으로만
+> - RULE 3(NO 분기): **실제 오류만** 최소 교정, 없는 오류 지어내기 금지 + `단어선택` 사유 추가
+> - JSON 키(`corrected_en`/`reason_ko`)·출력 형식 **그대로** → 파싱부 수정 불필요
 
 ---
 
 ## Phase 3 — grep 검증 (기대 카운트)
 ```bash
-grep -c "화면 최하단" chat_history_master.dart                       # → 0  (구 주석 제거됨)
-grep -c "교정 결과 아래 고정 노출" chat_history_master.dart          # → 1  (신 주석)
-grep -c "if (_appTranscript.isNotEmpty)" chat_history_master.dart   # → 1  (가드 추가)
-grep -c "_appTranscript" chat_history_master.dart                  # → 5  (불변 — 이동만)
-grep -c "MediaQuery.of(ctx).padding.bottom" chat_history_master.dart # → 1
-grep -c "initialChildSize: 0.72" chat_history_master.dart          # → 1
-grep -c "initialChildSize: 0.65" chat_history_master.dart          # → 0
-grep -c "투명 말풍선" chat_history_master.dart                       # → 1
+grep -c "TARGET_EN_FIXED" chat_history_master.dart                 # → 0  (구 라벨 전멸)
+grep -c "the absolute correct answer" chat_history_master.dart     # → 0  (구 문구 제거)
+grep -c "moves \[USER_SPEECH\] toward" chat_history_master.dart     # → 0  (강제 교정 문구 제거)
+grep -c "MANY correct ways" chat_history_master.dart               # → 1  (신 IMPORTANT)
+grep -c "the user's OWN sentence" chat_history_master.dart         # → 1  (신 YES 분기)
+grep -c "단어선택" chat_history_master.dart                         # → 1  (신 사유 토큰)
+grep -c "final corrPrompt" chat_history_master.dart                # → 1
 ```
 하나라도 어긋나면 **롤백** 후 보고.
 
@@ -226,26 +161,33 @@ grep -c "투명 말풍선" chat_history_master.dart                       # → 
 flutter analyze chat_history_master.dart
 dart format chat_history_master.dart
 ```
-> ⚠️ `dart format`은 반드시 **이 파일 하나만** 대상. 폴더 단위 금지(한글 문자열 UTF-8 깨짐).
+> ⚠️ `dart format`은 반드시 **이 파일 하나만**. 폴더 단위 금지(한글 문자열 깨짐).
 
-`flutter analyze`에 신규 error/warning 0 확인.
+문자열만 바꿨으므로 신규 error/warning 0 이어야 함.
 
 ---
 
-## 동작 확인 체크리스트
-1. 히스토리 → 튜터링 진입 시 시트가 약 72% 높이로 열림.
-2. 녹음 → 교정 결과 표시 후, **내가 말한 문장 말풍선이 `Close / Another Sentence` 버튼 바로 위에** 보임.
-3. 시트를 끝까지 드래그/스크롤했을 때 말풍선이 네비게이션 바에 **안 잘림**.
-4. 녹음 전(=transcript 비어있음)에는 말풍선 자리에 빈 여백 없음.
-5. `Another Sentence` 누르면 말풍선 사라짐(`_appTranscript=""` 리셋 정상).
-6. 빌링·TTS·쉐도잉 동작 이상 없음.
+## 실측 검증 (꼭 1회 수동 테스트)
+스샷의 막혔던 케이스로 재현 확인:
+1. 한국어: "방금 지나가는 자동차가 나의 자전거를 부딪혔어."
+2. 유저 발화(영어): **"The car passing by hit my bicycle."**
+3. 기대 결과: **틀렸다고 안 함.**
+   - `corrected_en` ≈ 유저 문장 그대로
+   - `reason_ko` = 칭찬(+선택적으로 "다른 표현: ...")
+4. 반대로 진짜 틀린 발화(예: "Car hit my bicycle yesterday passing")는 여전히 교정 + 정확한 사유.
+5. 교정 TTS("Shadow This!") 정상 생성·재생 확인.
 
 ---
 
 ## 롤백
 ```bash
-# 아직 push 전:
-git reset --hard HEAD~1
-# 이미 push 했다면:
-git revert <savepoint_hash>
+git reset --hard HEAD~1          # push 전
+git revert <savepoint_hash>      # push 후
 ```
+
+---
+
+## 참고 — 더 큰 개선 여지 (이번 범위 아님)
+지금은 정답이 1개라 "다른 표현" 안내가 제한적. 향후 Box 18에서 정답을
+`en` 단일 → `en_examples`(2~3개 배열)로 받으면 모델 판단 근거가 더 풍부해짐.
+단 Box 18 생성 프롬프트 + 호출부 변경 필요(변경 폭 큼) → 별도 결정 사안으로 보류.
