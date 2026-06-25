@@ -132,6 +132,11 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   Timer? _shadowHighlightTimer;
   Timer? _shadowAdvanceTimer;
   bool _shadowFast = false;
+  // [P2-SHADOW-REC] User-line audio captured for Play all. No scoring/STT.
+  bool _shadowRecording = false;
+  int _shadowRecordLineIdx = -1;
+  // [P-PULSE] Softer indigo pulse for the P3 polished button.
+  static const Color _pPulseColor = Color(0xFF818CF8);
 
   // 🆕 [P2-INDICATOR] AI 청크 발화 중 여부 (인디케이터 빛남용)
   bool _aiChunkPlaying = false;
@@ -330,7 +335,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     audioPlayer.dispose();
     _tutorAudioPlayer?.dispose();
     _appCorrectedAudio = null;
-    if (_appIsRecording || _appIsShadowRecording) {
+    if (_appIsRecording || _appIsShadowRecording || _shadowRecording) {
       appAudioRecorder.stop().catchError((_) {});
     }
     appAudioRecorder.dispose();
@@ -765,13 +770,33 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         _shadowWordIdx = -1;
       });
     }
-    _stepShadowHighlight(0);
+    final int lineIdx = currentIndex;
+    _shadowHighlightTimer = Timer(const Duration(seconds: 1), () async {
+      if (!mounted ||
+          _phase != ShadowingPhase.part2Practice ||
+          isPaused ||
+          currentIndex != lineIdx) {
+        return;
+      }
+      await _startShadowRecording(lineIdx);
+      if (!mounted ||
+          _phase != ShadowingPhase.part2Practice ||
+          isPaused ||
+          currentIndex != lineIdx) {
+        return;
+      }
+      _stepShadowHighlight(0);
+    });
   }
 
   void _stepShadowHighlight(int idx) {
     if (!mounted || _phase != ShadowingPhase.part2Practice || isPaused) return;
     if (idx >= _shadowWords.length) {
       if (mounted) setState(() => _shadowWordIdx = _shadowWords.length);
+      Future.delayed(
+        const Duration(milliseconds: 700),
+        () => _stopShadowRecording(),
+      );
       _shadowAdvanceTimer?.cancel();
       _shadowAdvanceTimer = Timer(const Duration(milliseconds: 1500), () {
         if (mounted && _phase == ShadowingPhase.part2Practice && !isPaused) {
@@ -795,6 +820,49 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     if (RegExp(r'[.!?]$').hasMatch(w)) d += 320;
     d = (d * (_shadowFast ? 0.8 : 1.0)).round();
     return d.clamp(140, 1100);
+  }
+
+  // [P2-SHADOW-REC] Capture the user's read-along audio for Play all.
+  Future<void> _startShadowRecording(int lineIdx) async {
+    try {
+      if (!await appAudioRecorder.hasPermission()) return;
+      if (_shadowRecording) {
+        try {
+          await appAudioRecorder.stop();
+        } catch (_) {}
+      }
+      final dir = await getTemporaryDirectory();
+      final path =
+          '${dir.path}/p2shadow_${lineIdx}_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      await appAudioRecorder.start(
+        const RecordConfig(
+          encoder: AudioEncoder.aacLc,
+          sampleRate: 16000,
+          numChannels: 1,
+        ),
+        path: path,
+      );
+      _shadowRecording = true;
+      _shadowRecordLineIdx = lineIdx;
+    } catch (e) {
+      debugPrint('[startShadowRecording] $e');
+      _shadowRecording = false;
+    }
+  }
+
+  Future<void> _stopShadowRecording() async {
+    if (!_shadowRecording) return;
+    _shadowRecording = false;
+    try {
+      final path = await appAudioRecorder.stop();
+      if (path != null &&
+          path.isNotEmpty &&
+          _shadowRecordLineIdx >= 0 &&
+          _shadowRecordLineIdx < _tutorLines.length) {
+        _tutorLines[_shadowRecordLineIdx]['user_record_path'] = path;
+      }
+    } catch (_) {}
+    _shadowRecordLineIdx = -1;
   }
 
   Future<void> _checkAndPlayAILine() async {
@@ -1269,6 +1337,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _polishedRevealTimer?.cancel();
     _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
     _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
+    _stopShadowRecording(); // [P2-SHADOW-REC]
     _stopDeepgramListening();
     audioPlayer.stop();
     if (mounted) {
@@ -4623,63 +4692,6 @@ RULES — follow exactly:
                                               fontSize: 11)),
                                     ]),
                                   ],
-                                  if (_phase == ShadowingPhase.part2Practice &&
-                                      isCurrent &&
-                                      !lineIsAi) ...[
-                                    const SizedBox(height: 10),
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        GestureDetector(
-                                          onTap: () => setState(
-                                              () => _shadowFast = !_shadowFast),
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(
-                                                horizontal: 12, vertical: 6),
-                                            decoration: BoxDecoration(
-                                              color: _shadowFast
-                                                  ? Colors.amber
-                                                      .withValues(alpha: 0.18)
-                                                  : Colors.white
-                                                      .withValues(alpha: 0.06),
-                                              borderRadius:
-                                                  BorderRadius.circular(20),
-                                              border: Border.all(
-                                                color: _shadowFast
-                                                    ? Colors.amber
-                                                        .withValues(alpha: 0.6)
-                                                    : Colors.white24,
-                                              ),
-                                            ),
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                Icon(
-                                                  Icons.speed,
-                                                  color: _shadowFast
-                                                      ? Colors.amber
-                                                      : Colors.white54,
-                                                  size: 16,
-                                                ),
-                                                const SizedBox(width: 5),
-                                                Text(
-                                                  _shadowFast
-                                                      ? "\uBE60\uB974\uAC8C"
-                                                      : "\uBCF4\uD1B5",
-                                                  style: TextStyle(
-                                                    color: _shadowFast
-                                                        ? Colors.amber
-                                                        : Colors.white54,
-                                                    fontSize: 12,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
                                   if (isCurrent && lineIsAi && isPlaying) ...[
                                     const SizedBox(height: 6),
                                     Row(children: const [
@@ -5477,7 +5489,7 @@ RULES — follow exactly:
                             color: _practicingPolished
                                 ? Colors.greenAccent
                                 : (_polishedSentence.isNotEmpty
-                                    ? Colors.amber
+                                    ? _pPulseColor
                                     : Colors.white24),
                             fontSize: 14,
                             fontWeight: FontWeight.bold,
@@ -5499,17 +5511,17 @@ RULES — follow exactly:
                               color: _practicingPolished
                                   ? Colors.greenAccent
                                   : (_polishedSentence.isNotEmpty
-                                      ? Colors.amber
+                                      ? _pPulseColor
                                       : Colors.white24),
                               width: 1.5,
                             ),
                             boxShadow: pPulse
                                 ? [
                                     BoxShadow(
-                                      color: Colors.amber
-                                          .withValues(alpha: 0.15 + 0.5 * t),
-                                      blurRadius: 6 + 10 * t,
-                                      spreadRadius: 1 + 2 * t,
+                                      color: _pPulseColor.withValues(
+                                          alpha: 0.10 + 0.35 * t),
+                                      blurRadius: 5 + 8 * t,
+                                      spreadRadius: 1 + 1.5 * t,
                                     ),
                                   ]
                                 : null,
@@ -5918,10 +5930,15 @@ RULES — follow exactly:
         _showRetryHint = false;
         _shadowWords = []; // [P2-SHADOW]
         _shadowWordIdx = -1; // [P2-SHADOW]
+        _shadowFast = false; // [P2-SHADOW]
       });
       _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
       _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
-      _startTurnPractice(); // [P2-SHADOW]
+      Future.delayed(const Duration(seconds: 1), () {
+        if (mounted && _phase == ShadowingPhase.part2Practice) {
+          _startTurnPractice();
+        }
+      });
     }
   }
 
@@ -6385,6 +6402,7 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     audioPlayer.stop();
     _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
     _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
+    _stopShadowRecording(); // [P2-SHADOW-REC]
     if (practiceNum == 1) {
       _startPart1Practice();
     } else if (practiceNum == 2) {
@@ -6421,6 +6439,7 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     return Column(
       children: [
         _buildPracticeTabBar(),
+        if (_phase == ShadowingPhase.part2Practice) _buildShadowSpeedToggle(),
         Expanded(child: _buildTurnPracticeScreen()),
       ],
     );
@@ -6448,6 +6467,50 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
             color: isActive ? Colors.amber : Colors.white38,
             fontSize: 13,
             fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
+      ),
+    );
+  }
+
+  // [P2-SHADOW] Top speed toggle. Default is normal speed.
+  Widget _buildShadowSpeedToggle() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 2, bottom: 6),
+      child: Center(
+        child: GestureDetector(
+          onTap: () => setState(() => _shadowFast = !_shadowFast),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            decoration: BoxDecoration(
+              color: _shadowFast
+                  ? Colors.amber.withValues(alpha: 0.18)
+                  : Colors.white.withValues(alpha: 0.06),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: _shadowFast
+                    ? Colors.amber.withValues(alpha: 0.6)
+                    : Colors.white24,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.speed,
+                  color: _shadowFast ? Colors.amber : Colors.white54,
+                  size: 16,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  _shadowFast ? "\uBE60\uB974\uAC8C" : "\uBCF4\uD1B5",
+                  style: TextStyle(
+                    color: _shadowFast ? Colors.amber : Colors.white54,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
