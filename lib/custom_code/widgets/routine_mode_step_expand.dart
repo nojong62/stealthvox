@@ -5082,12 +5082,15 @@ Context determines: "불편하다" after a body part = physical; after 마음/�
 - PART 2: A grown/expanded English sentence that naturally merges:
     (a) The most recent expanded sentence from History
     (b) The new information from Part 1
-  Use varied grammatical structures to merge them smoothly:
-    - Relative clauses (who/which/where/that)
-    - Participial phrases (-ing / -ed)
-    - To-infinitives (to V)
-    - Prepositional phrases
-    - Conjunctions (because/when/although)
+  Grow it the way a native speaker actually TALKS — linearly, left to right,
+  by chaining short clauses one after another. Do NOT nest clauses inside clauses.
+  Preferred connectors (use these, and vary them turn to turn):
+    - Coordination: and, but, so, and then
+    - Result / reason links: which is why, that's why, so that, because (keep short)
+    - At most ONE soft spoken marker if it fits naturally: like, you know, I mean
+  AVOID building the sentence on stacked relative clauses, front participial
+  phrases, or chains of to-infinitives. A touch is fine; never make them the spine.
+  Keep it ONE sentence, speakable in short breath groups of 5–7 words.
 
 [EXAMPLE FOR CASE 2]
 History:
@@ -5381,12 +5384,12 @@ Output: [GARBLED]
       // ── 문법 구조 로테이션 (soft lens, 4턴 순환) ─────────────────────
       final int t4 = turnNumber % 4;
       final String structureSeed = t4 == 1
-          ? 'relative pronoun (who / which / that)'
+          ? 'coordination (and / and then / so)'
           : t4 == 2
-              ? 'relative adverb (where / when / why)'
+              ? 'contrast or result (but / so / which is why)'
               : t4 == 3
-                  ? 'infinitive (to V)'
-                  : 'participial phrase (-ing / -ed)';
+                  ? 'short reason link (because / since — never nested)'
+                  : 'a light spoken add-on (like / you know — only if natural)';
 
       // ── 3단계 (최종 합성): 파편화된 답변 → Expanded Sentence ──────────────
       // ── 2단계 (문법 유도형 질문): 5-8단어 초단형, 구조를 이름 짓지 않고 유도 ──
@@ -5395,11 +5398,11 @@ Output: [GARBLED]
 This is the FINAL turn ($turnNumber of $maxTurns). The user has answered your grammar-inducing questions step by step.
 
 [YOUR JOB — Synthesis]
-Read the History carefully. Collect the user's fragmented answers and synthesize them into ONE fluent sentence that naturally incorporates at least 2 of these structures:
-- Causal clause (because / since)
-- Relative clause (who / which / where / when / why)
-- Concessive clause (although / despite / even though)
-- Conditional clause (if / when)
+Read the History carefully. Collect the user's fragmented answers and synthesize them into ONE fluent, natural-SPOKEN sentence — the way an American would actually say it OUT LOUD, chained linearly (left to right), NOT packed with nested clauses. Build it mainly with these linear connectors (use at least 2, and vary them):
+- Coordination: and / and then / so / but
+- Result or reason: which is why / that's why / so that / because (kept short, never nested)
+- Optionally ONE soft spoken marker if it fits: like / you know / I mean
+Do NOT stack relative clauses, front participial phrases, or chains of to-infinitives.
 
 [RULES]
 - The user's lines in History may contain speech recognition errors due to unclear pronunciation. Infer the most likely intended meaning from context — do not quote garbled words literally.
@@ -5413,7 +5416,7 @@ Read the History carefully. Collect the user's fragmented answers and synthesize
 
 [OUTPUT FORMAT - STRICT]
 Output EXACTLY two parts separated by ONE empty line.
-PART 1: "Expanded Sentence: " + your synthesized sentence (25–40 words) + newline + "Grammar used: [list]"
+PART 1: "Expanded Sentence: " + your synthesized sentence (25–40 words) + newline + "Connectors used: [list]"
 PART 2: A natural Korean conversational translation of the synthesized sentence."""
           : """You are a Step Expand conversation guide. You are on turn $turnNumber of $maxTurns.
 
@@ -5725,6 +5728,7 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
 - Big academic words ("nostalgically", "subsequently", "pertaining to")
 - Formal written phrases ("in regards to", "pursuant to")
 - Complex nested clauses that are hard to speak
+- Re-packing the linear, spoken flow back into nested/embedded clauses
 - Adding information not in the original
 
 [OUTPUT]
