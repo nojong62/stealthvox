@@ -1888,7 +1888,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     if (!mounted) return;
     setState(() => _showEchoingOverlay = true);
     _echoingOverlayTimer?.cancel();
-    _echoingOverlayTimer = Timer(const Duration(milliseconds: 1600), () {
+    _echoingOverlayTimer = Timer(const Duration(milliseconds: 2000), () {
       if (!mounted) return;
       setState(() => _showEchoingOverlay = false);
       onDismiss?.call();
@@ -5700,239 +5700,260 @@ RULES — follow exactly:
 
             // 청크 리스트 + 버튼 영역
             Expanded(
-              child: _practicingPolished
-                  // ── Polished 의미단위 카드 ──────────────────────────────
-                  ? (_polishedUnits.isEmpty
-                      ? const Center(
-                          child: CircularProgressIndicator(color: Colors.amber))
-                      : ListView.builder(
-                          controller: _chunkScrollController,
-                          padding: const EdgeInsets.fromLTRB(14, 4, 14, 8),
-                          itemCount: _polishedUnits.length + 1,
-                          itemBuilder: (context, i) {
-                            if (i == _polishedUnits.length) {
-                              return _buildPracticeButtonsInline();
-                            }
-                            final unit = _polishedUnits[i];
-                            final bool isCurrent = i == _polishedUnitIdx;
-                            final bool isEven = i % 2 == 0;
-                            final Color bgColor = isCurrent
-                                ? (isEven ? colorAActive : colorBActive)
-                                : (isEven ? colorA : colorB);
-                            final Color borderColor = isCurrent
-                                ? (_polishedUnitAIPlaying
-                                    ? const Color(0xFF5BB8F5)
-                                    : _isListening
-                                        ? Colors.greenAccent
-                                        : Colors.amber)
-                                : Colors.amber.withValues(alpha: 0.35);
-                            final Color textColor =
-                                isCurrent ? Colors.white : Colors.white70;
-                            return GestureDetector(
-                              key: _polishedItemKeys.putIfAbsent(
-                                  i, () => GlobalKey()),
-                              onTap: () => _onPolishedUnitTapped(i),
-                              child: AnimatedContainer(
-                                duration: const Duration(milliseconds: 220),
-                                margin: const EdgeInsets.only(bottom: 8),
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 14, vertical: 13),
-                                decoration: BoxDecoration(
-                                  color: bgColor,
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                      color: borderColor,
-                                      width: isCurrent ? 2 : 1.5),
-                                  boxShadow: isCurrent
-                                      ? [
-                                          BoxShadow(
-                                              color: borderColor.withValues(
-                                                  alpha: 0.3),
-                                              blurRadius: 10,
-                                              spreadRadius: 1)
-                                        ]
-                                      : [],
-                                ),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.center,
-                                  children: [
-                                    SizedBox(
-                                      width: 20,
-                                      child: Text('${i + 1}',
-                                          style: TextStyle(
-                                              color: textColor.withValues(
-                                                  alpha: 0.45),
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.bold)),
+              // [P3-INTRO] Hide and block only the body/chunk area during intro. Header/tabs stay visible.
+              child: IgnorePointer(
+                ignoring: _showEchoingOverlay,
+                child: AnimatedOpacity(
+                  opacity: _showEchoingOverlay ? 0.0 : 1.0,
+                  duration: const Duration(milliseconds: 500),
+                  child: _practicingPolished
+                      // ── Polished 의미단위 카드 ──────────────────────────────
+                      ? (_polishedUnits.isEmpty
+                          ? const Center(
+                              child: CircularProgressIndicator(
+                                  color: Colors.amber))
+                          : ListView.builder(
+                              controller: _chunkScrollController,
+                              padding: const EdgeInsets.fromLTRB(14, 4, 14, 8),
+                              itemCount: _polishedUnits.length + 1,
+                              itemBuilder: (context, i) {
+                                if (i == _polishedUnits.length) {
+                                  return _buildPracticeButtonsInline();
+                                }
+                                final unit = _polishedUnits[i];
+                                final bool isCurrent = i == _polishedUnitIdx;
+                                final bool isEven = i % 2 == 0;
+                                final Color bgColor = isCurrent
+                                    ? (isEven ? colorAActive : colorBActive)
+                                    : (isEven ? colorA : colorB);
+                                final Color borderColor = isCurrent
+                                    ? (_polishedUnitAIPlaying
+                                        ? const Color(0xFF5BB8F5)
+                                        : _isListening
+                                            ? Colors.greenAccent
+                                            : Colors.amber)
+                                    : Colors.amber.withValues(alpha: 0.35);
+                                final Color textColor =
+                                    isCurrent ? Colors.white : Colors.white70;
+                                return GestureDetector(
+                                  key: _polishedItemKeys.putIfAbsent(
+                                      i, () => GlobalKey()),
+                                  onTap: () => _onPolishedUnitTapped(i),
+                                  child: AnimatedContainer(
+                                    duration: const Duration(milliseconds: 220),
+                                    margin: const EdgeInsets.only(bottom: 8),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 14, vertical: 13),
+                                    decoration: BoxDecoration(
+                                      color: bgColor,
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                          color: borderColor,
+                                          width: isCurrent ? 2 : 1.5),
+                                      boxShadow: isCurrent
+                                          ? [
+                                              BoxShadow(
+                                                  color: borderColor.withValues(
+                                                      alpha: 0.3),
+                                                  blurRadius: 10,
+                                                  spreadRadius: 1)
+                                            ]
+                                          : [],
                                     ),
-                                    const SizedBox(width: 6),
-                                    Expanded(
-                                      child: Text(
-                                        unit,
-                                        style: TextStyle(
-                                          color: textColor,
-                                          fontSize: 16 * _fontScale,
-                                          fontWeight: isCurrent
-                                              ? FontWeight.bold
-                                              : FontWeight.normal,
-                                          height: 1.45,
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    if (isCurrent && _polishedUnitAIPlaying)
-                                      const Icon(Icons.volume_up,
-                                          color: Color(0xFF5BB8F5), size: 22)
-                                    else if (isCurrent && _isListening)
-                                      const Icon(Icons.mic,
-                                          color: Colors.greenAccent, size: 22)
-                                    else if (isCurrent)
-                                      const Icon(Icons.play_arrow_rounded,
-                                          color: Colors.amber, size: 22)
-                                    else
-                                      const Icon(Icons.play_arrow_rounded,
-                                          color: Colors.white24, size: 22),
-                                  ],
-                                ),
-                              ),
-                            );
-                          },
-                        ))
-                  // ── Expanded 청크 카드 (기존 그대로) ────────────────────
-                  : (_chunks.isEmpty
-                      ? const Center(
-                          child: CircularProgressIndicator(color: Colors.amber))
-                      : Builder(builder: (context) {
-                          final int visibleCount = _chunks.length;
-                          final bool showButtons = true;
-                          return ListView.builder(
-                            controller: _chunkScrollController,
-                            cacheExtent: 1500,
-                            padding: const EdgeInsets.fromLTRB(14, 4, 14, 8),
-                            itemCount: visibleCount + (showButtons ? 1 : 0),
-                            itemBuilder: (context, i) {
-                              if (showButtons && i == visibleCount) {
-                                return _buildPracticeButtonsInline();
-                              }
-                              final chunk = _chunks[i];
-                              final bool isCurrent = i == _currentChunkIdx;
-                              final bool isDone = chunk.isDone;
-                              final bool isEven = i % 2 == 0;
-
-                              final Color bgColor = isCurrent
-                                  ? (isEven ? colorAActive : colorBActive)
-                                  : isDone
-                                      ? (isEven ? colorA : colorB)
-                                          .withValues(alpha: 0.55)
-                                      : (isEven ? colorA : colorB);
-
-                              final Color borderColor = isCurrent
-                                  ? (_isListening
-                                      ? Colors.greenAccent
-                                      : _aiChunkPlaying
-                                          ? const Color(0xFF5BB8F5)
-                                          : Colors.amber)
-                                  : isDone
-                                      ? Colors.white12
-                                      : Colors.white10;
-
-                              final Color textColor = isCurrent
-                                  ? Colors.white
-                                  : isDone
-                                      ? Colors.white38
-                                      : Colors.white70;
-
-                              return GestureDetector(
-                                key:
-                                    _itemKeys.putIfAbsent(i, () => GlobalKey()),
-                                onTap: () => _onChunkTapped(i),
-                                child: AnimatedContainer(
-                                  duration: const Duration(milliseconds: 220),
-                                  margin: const EdgeInsets.only(bottom: 8),
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 14, vertical: 13),
-                                  decoration: BoxDecoration(
-                                    color: bgColor,
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                        color: borderColor,
-                                        width: isCurrent ? 2 : 1),
-                                    boxShadow: isCurrent
-                                        ? [
-                                            BoxShadow(
-                                                color: borderColor.withValues(
-                                                    alpha: 0.3),
-                                                blurRadius: 10,
-                                                spreadRadius: 1)
-                                          ]
-                                        : [],
-                                  ),
-                                  child: Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.center,
-                                    children: [
-                                      SizedBox(
-                                        width: 20,
-                                        child: Text('${i + 1}',
-                                            style: TextStyle(
-                                                color: textColor.withValues(
-                                                    alpha: 0.45),
-                                                fontSize: 11,
-                                                fontWeight: FontWeight.bold)),
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Text(
-                                              chunk.text,
+                                    child: Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.center,
+                                      children: [
+                                        SizedBox(
+                                          width: 20,
+                                          child: Text('${i + 1}',
                                               style: TextStyle(
-                                                color: textColor,
-                                                fontSize: 16 * _fontScale,
-                                                fontWeight: isCurrent
-                                                    ? FontWeight.bold
-                                                    : FontWeight.normal,
-                                                height: 1.45,
-                                              ),
-                                            ),
-                                            _buildChunkKoLine(
-                                                chunk), // 🆕 [KO-FRAG]
-                                            if (isCurrent &&
-                                                _aiChunkLoading) ...[
-                                              const SizedBox(height: 4),
-                                              const Text(
-                                                'Thinking...',
-                                                style: TextStyle(
-                                                    color: Color(0xFF5BB8F5),
-                                                    fontSize: 11),
-                                              ),
-                                            ],
-                                          ],
+                                                  color: textColor.withValues(
+                                                      alpha: 0.45),
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.bold)),
                                         ),
-                                      ),
-                                      const SizedBox(width: 10),
-                                      if (isCurrent && _isListening)
-                                        const Icon(Icons.mic,
-                                            color: Colors.greenAccent, size: 22)
-                                      else if (isCurrent && _aiChunkPlaying)
-                                        const Icon(Icons.volume_up,
-                                            color: Color(0xFF5BB8F5), size: 22)
-                                      else if (isDone)
-                                        const Icon(Icons.check_circle,
-                                            color: Colors.greenAccent, size: 20)
-                                      else
-                                        const Icon(Icons.play_arrow_rounded,
-                                            color: Colors.white24, size: 22),
-                                    ],
+                                        const SizedBox(width: 6),
+                                        Expanded(
+                                          child: Text(
+                                            unit,
+                                            style: TextStyle(
+                                              color: textColor,
+                                              fontSize: 16 * _fontScale,
+                                              fontWeight: isCurrent
+                                                  ? FontWeight.bold
+                                                  : FontWeight.normal,
+                                              height: 1.45,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        if (isCurrent && _polishedUnitAIPlaying)
+                                          const Icon(Icons.volume_up,
+                                              color: Color(0xFF5BB8F5),
+                                              size: 22)
+                                        else if (isCurrent && _isListening)
+                                          const Icon(Icons.mic,
+                                              color: Colors.greenAccent,
+                                              size: 22)
+                                        else if (isCurrent)
+                                          const Icon(Icons.play_arrow_rounded,
+                                              color: Colors.amber, size: 22)
+                                        else
+                                          const Icon(Icons.play_arrow_rounded,
+                                              color: Colors.white24, size: 22),
+                                      ],
+                                    ),
                                   ),
-                                ),
+                                );
+                              },
+                            ))
+                      // ── Expanded 청크 카드 (기존 그대로) ────────────────────
+                      : (_chunks.isEmpty
+                          ? const Center(
+                              child: CircularProgressIndicator(
+                                  color: Colors.amber))
+                          : Builder(builder: (context) {
+                              final int visibleCount = _chunks.length;
+                              final bool showButtons = true;
+                              return ListView.builder(
+                                controller: _chunkScrollController,
+                                cacheExtent: 1500,
+                                padding:
+                                    const EdgeInsets.fromLTRB(14, 4, 14, 8),
+                                itemCount: visibleCount + (showButtons ? 1 : 0),
+                                itemBuilder: (context, i) {
+                                  if (showButtons && i == visibleCount) {
+                                    return _buildPracticeButtonsInline();
+                                  }
+                                  final chunk = _chunks[i];
+                                  final bool isCurrent = i == _currentChunkIdx;
+                                  final bool isDone = chunk.isDone;
+                                  final bool isEven = i % 2 == 0;
+
+                                  final Color bgColor = isCurrent
+                                      ? (isEven ? colorAActive : colorBActive)
+                                      : isDone
+                                          ? (isEven ? colorA : colorB)
+                                              .withValues(alpha: 0.55)
+                                          : (isEven ? colorA : colorB);
+
+                                  final Color borderColor = isCurrent
+                                      ? (_isListening
+                                          ? Colors.greenAccent
+                                          : _aiChunkPlaying
+                                              ? const Color(0xFF5BB8F5)
+                                              : Colors.amber)
+                                      : isDone
+                                          ? Colors.white12
+                                          : Colors.white10;
+
+                                  final Color textColor = isCurrent
+                                      ? Colors.white
+                                      : isDone
+                                          ? Colors.white38
+                                          : Colors.white70;
+
+                                  return GestureDetector(
+                                    key: _itemKeys.putIfAbsent(
+                                        i, () => GlobalKey()),
+                                    onTap: () => _onChunkTapped(i),
+                                    child: AnimatedContainer(
+                                      duration:
+                                          const Duration(milliseconds: 220),
+                                      margin: const EdgeInsets.only(bottom: 8),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 14, vertical: 13),
+                                      decoration: BoxDecoration(
+                                        color: bgColor,
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(
+                                            color: borderColor,
+                                            width: isCurrent ? 2 : 1),
+                                        boxShadow: isCurrent
+                                            ? [
+                                                BoxShadow(
+                                                    color: borderColor
+                                                        .withValues(alpha: 0.3),
+                                                    blurRadius: 10,
+                                                    spreadRadius: 1)
+                                              ]
+                                            : [],
+                                      ),
+                                      child: Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.center,
+                                        children: [
+                                          SizedBox(
+                                            width: 20,
+                                            child: Text('${i + 1}',
+                                                style: TextStyle(
+                                                    color: textColor.withValues(
+                                                        alpha: 0.45),
+                                                    fontSize: 11,
+                                                    fontWeight:
+                                                        FontWeight.bold)),
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Text(
+                                                  chunk.text,
+                                                  style: TextStyle(
+                                                    color: textColor,
+                                                    fontSize: 16 * _fontScale,
+                                                    fontWeight: isCurrent
+                                                        ? FontWeight.bold
+                                                        : FontWeight.normal,
+                                                    height: 1.45,
+                                                  ),
+                                                ),
+                                                _buildChunkKoLine(
+                                                    chunk), // 🆕 [KO-FRAG]
+                                                if (isCurrent &&
+                                                    _aiChunkLoading) ...[
+                                                  const SizedBox(height: 4),
+                                                  const Text(
+                                                    'Thinking...',
+                                                    style: TextStyle(
+                                                        color:
+                                                            Color(0xFF5BB8F5),
+                                                        fontSize: 11),
+                                                  ),
+                                                ],
+                                              ],
+                                            ),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          if (isCurrent && _isListening)
+                                            const Icon(Icons.mic,
+                                                color: Colors.greenAccent,
+                                                size: 22)
+                                          else if (isCurrent && _aiChunkPlaying)
+                                            const Icon(Icons.volume_up,
+                                                color: Color(0xFF5BB8F5),
+                                                size: 22)
+                                          else if (isDone)
+                                            const Icon(Icons.check_circle,
+                                                color: Colors.greenAccent,
+                                                size: 20)
+                                          else
+                                            const Icon(Icons.play_arrow_rounded,
+                                                color: Colors.white24,
+                                                size: 22),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                },
                               );
-                            },
-                          );
-                        })),
+                            })),
+                ), // [P3-INTRO] AnimatedOpacity close
+              ), // [P3-INTRO] IgnorePointer close
             ),
           ],
         ),
