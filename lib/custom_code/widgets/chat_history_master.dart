@@ -740,13 +740,14 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   void _checkAndStartTurn() {
     if (!mounted || !isPracticeMode || isPaused) return;
     if (currentIndex >= _tutorLines.length) return;
+    // [P2-START] Do not start either AI playback or user highlight until speed is chosen.
+    if (_phase == ShadowingPhase.part2Practice && !_shadowStarted) return;
     final line = _tutorLines[currentIndex];
     final bool isAiTurn = _isAiTurn(line); // 🆕 [BOX-32]
     if (isAiTurn) {
       _checkAndPlayAILine();
     } else if (_phase == ShadowingPhase.part2Practice) {
-      // [P2-START] Do not start until the user chooses a speed chip.
-      if (_shadowStarted) _startShadowHighlight(); // [P2-SHADOW]
+      _startShadowHighlight(); // [P2-SHADOW]
     } else {
       Future.delayed(const Duration(milliseconds: 300), () {
         if (mounted && isPracticeMode && !isPaused && !_isAutoRecording) {
@@ -6658,14 +6659,15 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
   }
 
   Widget _buildSpeedChip(double v, String label) {
-    final bool sel = _shadowSpeed == v;
-    return GestureDetector(
+    // [P2-START] Before choosing a speed, no chip should look selected.
+    final bool sel = _shadowStarted && _shadowSpeed == v;
+    final Widget chip = GestureDetector(
       onTap: () {
         setState(() => _shadowSpeed = v);
-        // [P2-START] Choosing a speed starts P2; mid-line changes restart at that speed.
+        // [P2-START] Speed selection triggers start; mid-line changes restart current turn.
         if (_phase == ShadowingPhase.part2Practice && !isPaused) {
           _shadowStarted = true;
-          _startShadowHighlight();
+          _checkAndStartTurn(); // AI line plays, user line highlights.
         }
       },
       child: Container(
@@ -6690,6 +6692,18 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
         ),
       ),
     );
+    // [P2-START] Before selection, gently pulse chips to invite choosing one.
+    if (_phase == ShadowingPhase.part2Practice && !_shadowStarted) {
+      return AnimatedBuilder(
+        animation: _blinkController,
+        builder: (_, child) => Transform.scale(
+          scale: 1.0 + 0.06 * _blinkController.value,
+          child: child,
+        ),
+        child: chip,
+      );
+    }
+    return chip;
   }
 
   Widget _buildStepExpandSelectScreen() {
