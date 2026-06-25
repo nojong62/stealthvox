@@ -132,6 +132,13 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   Timer? _shadowHighlightTimer;
   Timer? _shadowAdvanceTimer;
   double _shadowSpeed = 1.0; // [P2-SHADOW] 0.8/1.0/1.2, larger is faster.
+  // [P2-START] Wait for speed selection before starting P2 read-along.
+  bool _shadowStarted = false;
+  // [P2-PROXY] Local amplitude proxy for spoken-ratio checks. No Whisper cost.
+  Timer? _shadowAmpTimer;
+  int _shadowVoicedTicks = 0;
+  int _shadowTotalTicks = 0;
+  int _shadowRereadCount = 0;
   // [P2-SHADOW-REC] User-line audio captured for Play all. No scoring/STT.
   bool _shadowRecording = false;
   int _shadowRecordLineIdx = -1;
@@ -738,7 +745,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     if (isAiTurn) {
       _checkAndPlayAILine();
     } else if (_phase == ShadowingPhase.part2Practice) {
-      _startShadowHighlight(); // [P2-SHADOW]
+      // [P2-START] Do not start until the user chooses a speed chip.
+      if (_shadowStarted) _startShadowHighlight(); // [P2-SHADOW]
     } else {
       Future.delayed(const Duration(milliseconds: 300), () {
         if (mounted && isPracticeMode && !isPaused && !_isAutoRecording) {
@@ -793,15 +801,13 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     if (!mounted || _phase != ShadowingPhase.part2Practice || isPaused) return;
     if (idx >= _shadowWords.length) {
       if (mounted) setState(() => _shadowWordIdx = _shadowWords.length);
-      Future.delayed(
-        const Duration(milliseconds: 700),
-        () => _stopShadowRecording(),
-      );
+      // [P2-PROXY] Stop recording after 700ms, then advance or show retry popup.
       _shadowAdvanceTimer?.cancel();
-      _shadowAdvanceTimer = Timer(const Duration(milliseconds: 1500), () {
-        if (mounted && _phase == ShadowingPhase.part2Practice && !isPaused) {
-          _nextTurn();
+      _shadowAdvanceTimer = Timer(const Duration(milliseconds: 700), () async {
+        if (!mounted || _phase != ShadowingPhase.part2Practice || isPaused) {
+          return;
         }
+        await _stopShadowRecordingAndEvaluate();
       });
       return;
     }
@@ -844,6 +850,26 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       );
       _shadowRecording = true;
       _shadowRecordLineIdx = lineIdx;
+      // [P2-PROXY] Sample amplitude every 100ms to estimate spoken ratio.
+      _shadowVoicedTicks = 0;
+      _shadowTotalTicks = 0;
+      _shadowAmpTimer?.cancel();
+      _shadowAmpTimer =
+          Timer.periodic(const Duration(milliseconds: 100), (t) async {
+        if (!mounted || !_shadowRecording) {
+          t.cancel();
+          return;
+        }
+        try {
+          if (await appAudioRecorder.isRecording()) {
+            final amp = await appAudioRecorder.getAmplitude();
+            _shadowTotalTicks++;
+            if (amp.current > -25.0) _shadowVoicedTicks++;
+          }
+        } catch (_) {
+          t.cancel();
+        }
+      });
     } catch (e) {
       debugPrint('[startShadowRecording] $e');
       _shadowRecording = false;
@@ -863,6 +889,100 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       }
     } catch (_) {}
     _shadowRecordLineIdx = -1;
+  }
+
+  // [P2-PROXY] Evaluate spoken ratio after the read-along recording ends.
+  Future<void> _stopShadowRecordingAndEvaluate() async {
+    _shadowAmpTimer?.cancel();
+    final double ratio =
+        _shadowTotalTicks == 0 ? 0.0 : _shadowVoicedTicks / _shadowTotalTicks;
+    await _stopShadowRecording();
+    if (!mounted || _phase != ShadowingPhase.part2Practice || isPaused) return;
+    if (ratio < 0.5 && _shadowRereadCount < 3) {
+      _showShadowRetryDialog();
+    } else {
+      _shadowRereadCount = 0;
+      Future.delayed(const Duration(milliseconds: 800), () {
+        if (mounted && _phase == ShadowingPhase.part2Practice && !isPaused) {
+          _nextTurn();
+        }
+      });
+    }
+  }
+
+  // [P2-PROXY] Retry popup when the local spoken-ratio proxy is too low.
+  void _showShadowRetryDialog() {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1C2E1C),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+          side: BorderSide(color: Colors.amber.withValues(alpha: 0.5)),
+        ),
+        contentPadding: const EdgeInsets.fromLTRB(20, 24, 20, 12),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              "조금 더 크게 읽어볼까요?",
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white70, fontSize: 14),
+            ),
+            const SizedBox(height: 18),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                GestureDetector(
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    _shadowRereadCount++;
+                    if (mounted &&
+                        _phase == ShadowingPhase.part2Practice &&
+                        !isPaused) {
+                      _startShadowHighlight();
+                    }
+                  },
+                  child: const Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.replay_rounded, color: Colors.amber, size: 34),
+                      SizedBox(height: 6),
+                      Text("다시 말하기",
+                          style: TextStyle(color: Colors.amber, fontSize: 12)),
+                    ],
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    _shadowRereadCount = 0;
+                    if (mounted &&
+                        _phase == ShadowingPhase.part2Practice &&
+                        !isPaused) {
+                      _nextTurn();
+                    }
+                  },
+                  child: const Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.arrow_forward_rounded,
+                          color: Colors.greenAccent, size: 34),
+                      SizedBox(height: 6),
+                      Text("다음 진행",
+                          style: TextStyle(
+                              color: Colors.greenAccent, fontSize: 12)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _checkAndPlayAILine() async {
@@ -5948,6 +6068,8 @@ RULES — follow exactly:
         _shadowWords = []; // [P2-SHADOW]
         _shadowWordIdx = -1; // [P2-SHADOW]
         _shadowSpeed = 1.0; // [P2-SHADOW]
+        _shadowStarted = false; // [P2-START] Wait for speed selection.
+        _shadowRereadCount = 0; // [P2-PROXY]
       });
       _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
       _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
@@ -6500,7 +6622,7 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
           const Icon(Icons.speed, color: Colors.white54, size: 15),
           const SizedBox(width: 5),
           const Text(
-            "\uC18D\uB3C4",
+            "\uC18D\uB3C4 \uC120\uD0DD", // 속도 선택
             style: TextStyle(color: Colors.white54, fontSize: 12),
           ),
           const SizedBox(width: 10),
@@ -6517,7 +6639,14 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
   Widget _buildSpeedChip(double v, String label) {
     final bool sel = _shadowSpeed == v;
     return GestureDetector(
-      onTap: () => setState(() => _shadowSpeed = v),
+      onTap: () {
+        setState(() => _shadowSpeed = v);
+        // [P2-START] Choosing a speed starts P2; mid-line changes restart at that speed.
+        if (_phase == ShadowingPhase.part2Practice && !isPaused) {
+          _shadowStarted = true;
+          _startShadowHighlight();
+        }
+      },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 5),
         decoration: BoxDecoration(
