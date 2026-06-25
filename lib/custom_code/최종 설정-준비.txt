@@ -2,6 +2,8 @@
 
 Deepgram Flux 한국어 지원 추가 시점 모니터링 (Japanese가 들어간 걸 보면 Korean도 머지않아 추가될 가능성) ,영어 프리톡 신설/ 일본어 판 Flux로 만들기
 
+히스토리 P3 Shadowing만 딥그램 Flux 적용✅ 가능 — 영어 에코잉 전용, 영어 Anyone
+
 "테스트하고 싶은 분은 구글 이메일 주소를 DM으로 남겨주세요"
 테스트앱 다운로드 https://play.google.com/apps/internaltest/4701441595486020798
 

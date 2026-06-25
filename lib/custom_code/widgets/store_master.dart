@@ -836,17 +836,28 @@ class _StoreMasterState extends State<StoreMaster> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Unified Log (${lines.length})',
+                  Expanded(
+                    child: Text(
+                      'Unified Log (${lines.length})',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.orbitron(
                           color: Colors.amber,
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold)),
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
                   Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       IconButton(
                         tooltip: 'Copy all',
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints.tightFor(
+                            width: 36, height: 36),
                         icon: const Icon(Icons.copy_all_rounded,
                             color: Colors.amber, size: 20),
                         onPressed: () async {
@@ -864,6 +875,10 @@ class _StoreMasterState extends State<StoreMaster> {
                       ),
                       IconButton(
                         tooltip: 'Clear log',
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints.tightFor(
+                            width: 36, height: 36),
                         icon: const Icon(Icons.delete_sweep_rounded,
                             color: Colors.redAccent, size: 20),
                         onPressed: () {
@@ -872,6 +887,11 @@ class _StoreMasterState extends State<StoreMaster> {
                         },
                       ),
                       IconButton(
+                        tooltip: 'Close',
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints.tightFor(
+                            width: 36, height: 36),
                         icon: const Icon(Icons.close_rounded,
                             color: Colors.white54),
                         onPressed: () => Navigator.pop(context),

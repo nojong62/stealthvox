@@ -47,138 +47,250 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# StepExpand — 마지막 턴 확장문장 "중복 낭독" 제거 (방안1)
+# P3 Echoing 오버레이 — 음성 게이트화 + 문구 변경 지시서
 
-## 목적
-5턴(마지막 턴) 완료 직후, 유저 턴에서 이미 nova 음성으로 낭독한 확장문장을
-**완성 카드에서 한 번 더 낭독**하는 중복을 제거한다.
-- 화면 카드 표시는 그대로 유지 (결과 강조 박스 의도)
-- 오디오 재낭독만 제거 → 같은 문장이 같은 목소리로 연달아 두 번 들리던 문제 해결
-- 폴리시드 낭독(AUTO-FLOW 2)은 손대지 않음
-
-## 영향 범위
-- 단일 파일, 단일 수정 (1개 str_replace 블록)
-- 글자(텍스트) 노출은 의도대로 유지 (버블 + 카드)
-- 히스토리/Firestore 저장 로직 무관 (변경 없음)
-- Box 7 무관
+> 대상 파일: `lib/custom_code/widgets/chat_history_master.dart`
+> 적용 범위: ChatHistory(Study Room) Expanded **P3 / chunkPractice 진입** 시 "Do Echoing!" 오버레이
+> 영향 없음: Box 7, P1, P2, turnPractice, billing 로직 (전부 untouched)
 
 ---
 
-## 0. Git 세이브포인트 (필수, 실행 전)
+## 0. 목적
+
+현재 "Do Echoing!" 오버레이는 **장식**일 뿐이고, 첫 청크 음성은 `Future.delayed(Duration.zero)`로 **즉시** 재생됨 → 팝업이 떠 있는데 소리가 바로 나서 "급하고 복잡한" 느낌.
+
+**변경 후 동작:**
+1. 오버레이 표시 (≈1.6초)
+2. 오버레이가 **사라지는 순간** 첫 청크 음성 시작 (게이트화)
+3. 문구 `Do Echoing!` → `Echo it!`
+
+부수 효과: 중복된 `Future.delayed(Duration.zero)` 블록 2곳 제거 → 코드 정리됨.
+
+---
+
+## 1. Savepoint (필수, 작업 전)
 
 ```bash
+cd F:\flutter_project\stealth_vox
 git add -A
-git commit -m "savepoint: before stepexpand dedup v1"
+git commit -m "savepoint: before P3 echoing gate + wording change"
 ```
+> 이미 push된 상태에서 되돌릴 경우: `git revert <hash>`
 
 ---
 
-## 1. 대상 파일
+## 2. Phase 1 — 사전 grep 확인 (편집 전 현재 상태)
 
+```bash
+grep -c "Do Echoing!" lib/custom_code/widgets/chat_history_master.dart
+# 기대값: 1
+
+grep -c "_triggerEchoingOverlay()" lib/custom_code/widgets/chat_history_master.dart
+# 기대값: 2   (호출부 2곳, 빈 괄호)
+
+grep -c "Future.delayed(Duration.zero" lib/custom_code/widgets/chat_history_master.dart
+# 기대값: (출력값 메모 → Phase 3에서 -2 되어야 함)
+
+grep -n "void _triggerEchoingOverlay" lib/custom_code/widgets/chat_history_master.dart
+# 기대값: 정의부 1곳 (1767 부근)
 ```
-routine_mode_step_expand.dart
-```
+
+위 값이 다르면 **중단하고 보고**. (파일이 이미 수정되었을 수 있음)
 
 ---
 
-## 2. 수정 (str_replace 1건)
+## 3. Phase 2 — str_replace 편집 (아래→위 순서로 적용)
 
-### OLD (정확히 일치)
+> ⚠️ 반드시 **아래(큰 줄번호)부터 위로** 순서대로. 각 anchor는 고유 텍스트로 검증됨.
 
+---
+
+### [편집 1/4] 호출부 ② — `_goToChunkPractice` (≈6396행)
+
+**old_str:**
 ```dart
-        _log('🌱 [DONE]', '5턴 완료 → 확장문장 표시 및 낭독 시작');
-
-        // ── AUTO-FLOW 1: 완성된 확장 문장 별도 표시 후 낭독 ──
-        if (hostExpanded.isNotEmpty && mounted) {
-          setState(() {
-            _expandedFinalSentence = hostExpanded;
-            _showExpandedFinalCard = true;
-          });
-          _scrollToBottom();
-          await _practiceSpeakText(hostExpanded, 'nova');
-        }
+    _triggerEchoingOverlay();
+    Future.delayed(Duration.zero, () {
+      if (mounted &&
+          _phase == ShadowingPhase.chunkPractice &&
+          _chunks.isNotEmpty &&
+          _currentChunkIdx == -1) {
+        _onChunkTapped(0);
+      }
+    });
+  }
 ```
 
-### NEW
-
+**new_str:**
 ```dart
-        _log('🌱 [DONE]', '5턴 완료 → 확장문장 카드 표시 (낭독은 유저 턴에서 완료)');
+    // 오버레이가 사라지는 순간 첫 청크 음성 시작 (게이트화)
+    _triggerEchoingOverlay(onDismiss: () {
+      if (mounted &&
+          _phase == ShadowingPhase.chunkPractice &&
+          _chunks.isNotEmpty &&
+          _currentChunkIdx == -1) {
+        _onChunkTapped(0);
+      }
+    });
+  }
+```
 
-        // ── AUTO-FLOW 1: 완성된 확장 문장 별도 표시 (방안1: 재낭독 제거) ──
-        // 🔧 [방안1-중복제거] 유저 턴에서 이미 동일 확장문장을 nova 음성으로
-        //   낭독했으므로, 완성 카드는 화면 표시만 하고 재낭독하지 않는다.
-        //   (글자는 버블 + 카드 2회 노출 유지 — 결과 강조용 카드 의도)
-        if (hostExpanded.isNotEmpty && mounted) {
-          setState(() {
-            _expandedFinalSentence = hostExpanded;
-            _showExpandedFinalCard = true;
-          });
-          _scrollToBottom();
+---
+
+### [편집 2/4] 문구 변경 (≈5834행)
+
+**old_str:**
+```dart
+                      'Do Echoing!',
+```
+
+**new_str:**
+```dart
+                      'Echo it!',
+```
+
+---
+
+### [편집 3/4] 함수 정의 — `_triggerEchoingOverlay` (≈1767행)
+
+**old_str:**
+```dart
+  void _triggerEchoingOverlay() {
+    if (!mounted) return;
+    setState(() => _showEchoingOverlay = true);
+    _echoingOverlayTimer?.cancel();
+    _echoingOverlayTimer = Timer(const Duration(milliseconds: 1600), () {
+      if (mounted) setState(() => _showEchoingOverlay = false);
+    });
+  }
+```
+
+**new_str:**
+```dart
+  void _triggerEchoingOverlay({VoidCallback? onDismiss}) {
+    if (!mounted) return;
+    setState(() => _showEchoingOverlay = true);
+    _echoingOverlayTimer?.cancel();
+    _echoingOverlayTimer = Timer(const Duration(milliseconds: 1600), () {
+      if (!mounted) return;
+      setState(() => _showEchoingOverlay = false);
+      onDismiss?.call(); // 오버레이 증발 시점에 첫 청크 음성 트리거
+    });
+  }
+```
+
+> 1600ms는 **그대로 유지** (1.6초 요청). `VoidCallback`은 material import에 포함되어 있어 별도 import 불필요.
+
+---
+
+### [편집 4/4] 호출부 ① — chunkPractice 진입부 (≈1214행)
+
+**old_str:**
+```dart
+      _triggerEchoingOverlay();
+    }
+    _loadPolishedSentence();
+    _prefetchAllChunkAI();
+    Future.delayed(Duration.zero, () {
+      if (mounted &&
+          _phase == ShadowingPhase.chunkPractice &&
+          _chunks.isNotEmpty &&
+          _currentChunkIdx == -1) {
+        _onChunkTapped(0);
+      }
+    });
+  }
+```
+
+**new_str:**
+```dart
+      // 오버레이가 사라지는 순간 첫 청크 음성 시작 (게이트화)
+      _triggerEchoingOverlay(onDismiss: () {
+        if (mounted &&
+            _phase == ShadowingPhase.chunkPractice &&
+            _chunks.isNotEmpty &&
+            _currentChunkIdx == -1) {
+          _onChunkTapped(0);
         }
+      });
+    }
+    _loadPolishedSentence();
+    _prefetchAllChunkAI();
+  }
 ```
 
-변경 핵심: `await _practiceSpeakText(hostExpanded, 'nova');` 1줄 제거 + DONE 로그 문구 정정 + 의도 주석 추가.
+> `_prefetchAllChunkAI()`는 그대로 즉시 실행됨 → 오버레이 1.6초 동안 첫 청크 미리 캐시 → 증발 직후 음성이 더 빠르게 나옴 (부수 이득).
 
 ---
 
-## 3. 검증 (수정 후)
+## 4. Phase 3 — 편집 후 grep 검증 (기대 카운트)
 
 ```bash
-# (1) hostExpanded 재낭독 호출이 완전히 사라졌는지 → 기대값 0
-grep -c "_practiceSpeakText(hostExpanded" routine_mode_step_expand.dart
+grep -c "Do Echoing!" lib/custom_code/widgets/chat_history_master.dart
+# 기대값: 0
 
-# (2) _practiceSpeakText 메서드는 살아있어야 함(다른 호출처 유지) → 기대값 4
-grep -c "_practiceSpeakText" routine_mode_step_expand.dart
+grep -c "Echo it!" lib/custom_code/widgets/chat_history_master.dart
+# 기대값: 1
 
-# (3) 완성 카드 표시 플래그는 그대로 유지 → 기대값 1
-grep -c "_showExpandedFinalCard = true" routine_mode_step_expand.dart
+grep -c "_triggerEchoingOverlay(onDismiss:" lib/custom_code/widgets/chat_history_master.dart
+# 기대값: 2   (호출부 2곳 전환 완료)
 
-# (4) 방안1 주석 마커 1개 삽입 확인 → 기대값 1
-grep -c "방안1-중복제거" routine_mode_step_expand.dart
+grep -c "_triggerEchoingOverlay()" lib/custom_code/widgets/chat_history_master.dart
+# 기대값: 0   (빈 괄호 호출 전부 사라짐. 정의부는 '({VoidCallback'이라 매칭 안 됨)
 
-# (5) 폴리시드 낭독은 그대로(AUTO-FLOW 2) → 기대값 1
-grep -c "_practiceSpeakText(polished" routine_mode_step_expand.dart
+grep -c "onDismiss" lib/custom_code/widgets/chat_history_master.dart
+# 기대값: 4   (정의 파라미터 1 + onDismiss?.call() 1 + 호출부 2)
+
+grep -c "Future.delayed(Duration.zero" lib/custom_code/widgets/chat_history_master.dart
+# 기대값: Phase 1 값 - 2
 ```
 
-기대 결과 요약:
-- (1) = 0
-- (2) = 4
-- (3) = 1
-- (4) = 1
-- (5) = 1
-
-### 정적 분석
-
-```bash
-flutter analyze routine_mode_step_expand.dart
-```
-새로운 오류/경고 0건이어야 함. (제거된 `await` 1줄로 인한 unused 변수 없음 — `hostExpanded`는 카드 setState 및 `_autoPolishAndSpeak(hostExpanded)`에서 계속 사용.)
-
-### dart format (개별 파일만)
-
-```bash
-dart format routine_mode_step_expand.dart
-```
-※ 폴더 단위 금지. 반드시 이 파일 하나만.
+하나라도 불일치 → **중단 후 보고**.
 
 ---
 
-## 4. 동작 확인 (실기기/에뮬)
+## 5. 정적 분석 + 포맷 (게이트)
 
-1. StepExpand 5턴까지 완주
-2. 마지막 5턴 발화 후:
-   - 유저 턴에서 확장문장이 **한 번** 낭독되는지
-   - 완성 카드가 화면에 **뜨되, 다시 낭독하지 않는지** (이전엔 같은 문장 재낭독 → 이번엔 무음으로 카드만 등장)
-   - 이어서 폴리시드 문장이 **한 번** 낭독되는지
-3. 로그에서 `[DONE] 5턴 완료 → 확장문장 카드 표시 (낭독은 유저 턴에서 완료)` 확인
-4. 히스토리(Study Room) 진입 → 확장문장/폴리시드 정상 저장·표시 확인 (변경 없음, 회귀만 점검)
+```bash
+flutter analyze lib/custom_code/widgets/chat_history_master.dart
+# 신규 error/warning 0 이어야 함
+
+dart format lib/custom_code/widgets/chat_history_master.dart
+```
+> ⚠️ `dart format`은 **이 파일 하나만** 대상. 폴더 단위 금지 (한글 문자열 깨짐).
 
 ---
 
-## 5. 롤백
+## 6. 동작 확인 (수동)
+
+1. Study Room → 임의 대화 항목 → Expanded **P3** 진입
+2. 확인:
+   - 팝업이 **"Echo it!"** 로 표시
+   - 팝업이 ≈1.6초 보이다 사라짐
+   - 팝업이 **증발하는 순간**에 첫 청크 음성 시작 (팝업 떠 있는 중엔 무음)
+3. 회화 빌드 경로(`buildExpandFromConversation` → `_goToChunkPractice`)로도 동일 동작 확인
+
+---
+
+## 7. 롤백 절차
 
 ```bash
-git checkout HEAD -- routine_mode_step_expand.dart
-# 또는 커밋했다면
-git revert <commit-hash>
+# 커밋 전이면
+git checkout -- lib/custom_code/widgets/chat_history_master.dart
+
+# 이미 커밋했다면
+git revert <commit_hash>
 ```
+
+---
+
+## 변경 요약
+
+| # | 위치 | 내용 |
+|---|------|------|
+| 1 | `_goToChunkPractice` (~6396) | `Future.delayed(Duration.zero)` 제거 → `onDismiss` 콜백으로 이전 |
+| 2 | 오버레이 UI (~5834) | `Do Echoing!` → `Echo it!` |
+| 3 | `_triggerEchoingOverlay` 정의 (~1767) | `onDismiss` 파라미터 추가, 타이머 완료 시 호출 (1600ms 유지) |
+| 4 | chunkPractice 진입부 (~1214) | `Future.delayed(Duration.zero)` 제거 → `onDismiss` 콜백으로 이전 |
+
+**불변(untouched):** Box 7, P1, P2, turnPractice, billing, 오버레이 fade(600ms), 1600ms 노출시간.
