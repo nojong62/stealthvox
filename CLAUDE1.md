@@ -47,250 +47,205 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# P3 Echoing 오버레이 — 음성 게이트화 + 문구 변경 지시서
+# 실전 튜터링 시트 — STT 말풍선 잘림 해결 (B안: 패딩 + 말풍선 위치 이동)
 
-> 대상 파일: `lib/custom_code/widgets/chat_history_master.dart`
-> 적용 범위: ChatHistory(Study Room) Expanded **P3 / chunkPractice 진입** 시 "Do Echoing!" 오버레이
-> 영향 없음: Box 7, P1, P2, turnPractice, billing 로직 (전부 untouched)
+## 목적
+히스토리 실전 튜터링(`showModalBottomSheet` → `DraggableScrollableSheet`) 하단에서
+**유저 STT 결과 말풍선(`_appTranscript`)이 시스템 네비게이션 바 뒤로 잘려** 끝까지 스크롤해도 안 보이는 문제 해결.
+
+- 근본 원인 ①: `SingleChildScrollView`에 하단 SafeArea 패딩이 없어 시트 하단(네비바 영역)에서 마지막 자식이 잘림.
+- 근본 원인 ②: 말풍선이 `Close / Another Sentence` 버튼 **아래**(스크롤 최하단)에 있어 구조적으로 항상 숨음.
+
+→ 패딩 추가 + 말풍선을 버튼 **위**(교정 결과 아래)로 이동 = 스크롤·잘림 원천 차단.
+
+## 적용 파일 (단 1개)
+`chat_history_master.dart` (Box 17-B `_buildAccordion`, Box 17 `showModalBottomSheet` 부분)
+
+## 건드리지 않는 것 (불변)
+- Box 7 (`TtsQueueManager` / `DeepgramV2VoiceManager` / `ChunkedTtsFetcher` / `HybridTtsPlayer` / `TtsCache`)
+- 빌링(`BillingTicker` / `BillingRate`), STT/교정 로직, GPT 프롬프트
+- P1 / P2 / P3 / turnPractice 분기
+- 말풍선의 스타일·텍스트 자체 (위치만 이동, 디자인 동일)
 
 ---
 
-## 0. 목적
-
-현재 "Do Echoing!" 오버레이는 **장식**일 뿐이고, 첫 청크 음성은 `Future.delayed(Duration.zero)`로 **즉시** 재생됨 → 팝업이 떠 있는데 소리가 바로 나서 "급하고 복잡한" 느낌.
-
-**변경 후 동작:**
-1. 오버레이 표시 (≈1.6초)
-2. 오버레이가 **사라지는 순간** 첫 청크 음성 시작 (게이트화)
-3. 문구 `Do Echoing!` → `Echo it!`
-
-부수 효과: 중복된 `Future.delayed(Duration.zero)` 블록 2곳 제거 → 코드 정리됨.
-
----
-
-## 1. Savepoint (필수, 작업 전)
-
+## 0. SAVEPOINT (필수 — 작업 전 커밋)
 ```bash
-cd F:\flutter_project\stealth_vox
 git add -A
-git commit -m "savepoint: before P3 echoing gate + wording change"
+git commit -m "savepoint: 튜터링 말풍선 잘림 수정 직전"
 ```
-> 이미 push된 상태에서 되돌릴 경우: `git revert <hash>`
 
 ---
 
-## 2. Phase 1 — 사전 grep 확인 (편집 전 현재 상태)
-
+## Phase 1 — grep 발견 (기대 카운트 확인)
 ```bash
-grep -c "Do Echoing!" lib/custom_code/widgets/chat_history_master.dart
-# 기대값: 1
-
-grep -c "_triggerEchoingOverlay()" lib/custom_code/widgets/chat_history_master.dart
-# 기대값: 2   (호출부 2곳, 빈 괄호)
-
-grep -c "Future.delayed(Duration.zero" lib/custom_code/widgets/chat_history_master.dart
-# 기대값: (출력값 메모 → Phase 3에서 -2 되어야 함)
-
-grep -n "void _triggerEchoingOverlay" lib/custom_code/widgets/chat_history_master.dart
-# 기대값: 정의부 1곳 (1767 부근)
+grep -n "initialChildSize: 0.65" chat_history_master.dart        # → 1
+grep -nc "투명 말풍선" chat_history_master.dart                    # → 1
+grep -nc "화면 최하단" chat_history_master.dart                    # → 1
+grep -n "// 하단 버튼" chat_history_master.dart                    # → 1
+grep -c "_appTranscript" chat_history_master.dart                # → 5 (불변 기준값)
 ```
-
-위 값이 다르면 **중단하고 보고**. (파일이 이미 수정되었을 수 있음)
+위 카운트와 다르면 **중단**하고 보고. (특히 `_appTranscript` = 5 는 작업 후에도 그대로 유지되어야 함 — 이동만 하므로 순증감 0)
 
 ---
 
-## 3. Phase 2 — str_replace 편집 (아래→위 순서로 적용)
+## Phase 2 — str_replace (아래→위 순서로 적용, 라인 밀림 방지)
 
-> ⚠️ 반드시 **아래(큰 줄번호)부터 위로** 순서대로. 각 anchor는 고유 텍스트로 검증됨.
+### ▶ 편집 ① (파일 하단, ~2654행): 기존 말풍선 제거
+하단 버튼 Row 아래의 "화면 최하단" 말풍선 블록을 삭제. Row 닫힘 `),` 과 spread 닫힘 `],` 만 남긴다.
 
----
-
-### [편집 1/4] 호출부 ② — `_goToChunkPractice` (≈6396행)
-
-**old_str:**
+**old_str**
 ```dart
-    _triggerEchoingOverlay();
-    Future.delayed(Duration.zero, () {
-      if (mounted &&
-          _phase == ShadowingPhase.chunkPractice &&
-          _chunks.isNotEmpty &&
-          _currentChunkIdx == -1) {
-        _onChunkTapped(0);
-      }
-    });
-  }
+            ),
+
+            // 투명 말풍선 (STT 결과) - 화면 최하단
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: const BoxDecoration(
+                color: Colors.transparent,
+                borderRadius: BorderRadius.all(Radius.circular(16)),
+              ),
+              child: Text(
+                _appTranscript,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    color: Colors.white54,
+                    fontSize: 13,
+                    height: 1.4,
+                    fontStyle: FontStyle.italic),
+              ),
+            ),
+          ],
 ```
 
-**new_str:**
+**new_str**
 ```dart
-    // 오버레이가 사라지는 순간 첫 청크 음성 시작 (게이트화)
-    _triggerEchoingOverlay(onDismiss: () {
-      if (mounted &&
-          _phase == ShadowingPhase.chunkPractice &&
-          _chunks.isNotEmpty &&
-          _currentChunkIdx == -1) {
-        _onChunkTapped(0);
-      }
-    });
-  }
+            ),
+          ],
 ```
 
 ---
 
-### [편집 2/4] 문구 변경 (≈5834행)
+### ▶ 편집 ② (~2620행): 말풍선을 버튼 **위**로 이동 (+ 빈 값 가드)
+`const SizedBox(height: 18),` 와 `// 하단 버튼` 사이에 말풍선 삽입.
+`_appTranscript`가 비었을 땐 렌더 안 되도록 `if ... .isNotEmpty` 가드 추가(녹음 전 빈 여백 방지).
 
-**old_str:**
+**old_str**
 ```dart
-                      'Do Echoing!',
+            const SizedBox(height: 18),
+
+            // 하단 버튼
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
 ```
 
-**new_str:**
+**new_str**
 ```dart
-                      'Echo it!',
+            const SizedBox(height: 18),
+
+            // 투명 말풍선 (STT 결과) - 교정 결과 아래 고정 노출
+            if (_appTranscript.isNotEmpty) ...[
+              Container(
+                width: double.infinity,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: const BoxDecoration(
+                  color: Colors.transparent,
+                  borderRadius: BorderRadius.all(Radius.circular(16)),
+                ),
+                child: Text(
+                  _appTranscript,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      color: Colors.white54,
+                      fontSize: 13,
+                      height: 1.4,
+                      fontStyle: FontStyle.italic),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            // 하단 버튼
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
 ```
 
 ---
 
-### [편집 3/4] 함수 정의 — `_triggerEchoingOverlay` (≈1767행)
+### ▶ 편집 ③ (~2374행): 하단 SafeArea 패딩 + 초기 높이 상향
+`SingleChildScrollView`에 네비바 인셋만큼 하단 패딩을 줘서 마지막 자식이 항상 위로 올라오게 함. 초기 높이 0.65 → 0.72(드래그 없이 더 보이게).
 
-**old_str:**
+**old_str**
 ```dart
-  void _triggerEchoingOverlay() {
-    if (!mounted) return;
-    setState(() => _showEchoingOverlay = true);
-    _echoingOverlayTimer?.cancel();
-    _echoingOverlayTimer = Timer(const Duration(milliseconds: 1600), () {
-      if (mounted) setState(() => _showEchoingOverlay = false);
-    });
-  }
+          return DraggableScrollableSheet(
+            initialChildSize: 0.65,
+            minChildSize: 0.45,
+            maxChildSize: 0.95,
+            expand: false,
+            builder: (_, scrollController) => SingleChildScrollView(
+              controller: scrollController,
+              child: _buildAccordion(
 ```
 
-**new_str:**
+**new_str**
 ```dart
-  void _triggerEchoingOverlay({VoidCallback? onDismiss}) {
-    if (!mounted) return;
-    setState(() => _showEchoingOverlay = true);
-    _echoingOverlayTimer?.cancel();
-    _echoingOverlayTimer = Timer(const Duration(milliseconds: 1600), () {
-      if (!mounted) return;
-      setState(() => _showEchoingOverlay = false);
-      onDismiss?.call(); // 오버레이 증발 시점에 첫 청크 음성 트리거
-    });
-  }
+          return DraggableScrollableSheet(
+            initialChildSize: 0.72,
+            minChildSize: 0.45,
+            maxChildSize: 0.95,
+            expand: false,
+            builder: (_, scrollController) => SingleChildScrollView(
+              controller: scrollController,
+              padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(ctx).padding.bottom + 24),
+              child: _buildAccordion(
 ```
-
-> 1600ms는 **그대로 유지** (1.6초 요청). `VoidCallback`은 material import에 포함되어 있어 별도 import 불필요.
+> 참고: `ctx`는 바로 위 `showModalBottomSheet(builder: (ctx) => ...)`의 컨텍스트로 스코프 내 사용 가능. 새 import 불필요.
 
 ---
 
-### [편집 4/4] 호출부 ① — chunkPractice 진입부 (≈1214행)
-
-**old_str:**
-```dart
-      _triggerEchoingOverlay();
-    }
-    _loadPolishedSentence();
-    _prefetchAllChunkAI();
-    Future.delayed(Duration.zero, () {
-      if (mounted &&
-          _phase == ShadowingPhase.chunkPractice &&
-          _chunks.isNotEmpty &&
-          _currentChunkIdx == -1) {
-        _onChunkTapped(0);
-      }
-    });
-  }
-```
-
-**new_str:**
-```dart
-      // 오버레이가 사라지는 순간 첫 청크 음성 시작 (게이트화)
-      _triggerEchoingOverlay(onDismiss: () {
-        if (mounted &&
-            _phase == ShadowingPhase.chunkPractice &&
-            _chunks.isNotEmpty &&
-            _currentChunkIdx == -1) {
-          _onChunkTapped(0);
-        }
-      });
-    }
-    _loadPolishedSentence();
-    _prefetchAllChunkAI();
-  }
-```
-
-> `_prefetchAllChunkAI()`는 그대로 즉시 실행됨 → 오버레이 1.6초 동안 첫 청크 미리 캐시 → 증발 직후 음성이 더 빠르게 나옴 (부수 이득).
-
----
-
-## 4. Phase 3 — 편집 후 grep 검증 (기대 카운트)
-
+## Phase 3 — grep 검증 (기대 카운트)
 ```bash
-grep -c "Do Echoing!" lib/custom_code/widgets/chat_history_master.dart
-# 기대값: 0
-
-grep -c "Echo it!" lib/custom_code/widgets/chat_history_master.dart
-# 기대값: 1
-
-grep -c "_triggerEchoingOverlay(onDismiss:" lib/custom_code/widgets/chat_history_master.dart
-# 기대값: 2   (호출부 2곳 전환 완료)
-
-grep -c "_triggerEchoingOverlay()" lib/custom_code/widgets/chat_history_master.dart
-# 기대값: 0   (빈 괄호 호출 전부 사라짐. 정의부는 '({VoidCallback'이라 매칭 안 됨)
-
-grep -c "onDismiss" lib/custom_code/widgets/chat_history_master.dart
-# 기대값: 4   (정의 파라미터 1 + onDismiss?.call() 1 + 호출부 2)
-
-grep -c "Future.delayed(Duration.zero" lib/custom_code/widgets/chat_history_master.dart
-# 기대값: Phase 1 값 - 2
+grep -c "화면 최하단" chat_history_master.dart                       # → 0  (구 주석 제거됨)
+grep -c "교정 결과 아래 고정 노출" chat_history_master.dart          # → 1  (신 주석)
+grep -c "if (_appTranscript.isNotEmpty)" chat_history_master.dart   # → 1  (가드 추가)
+grep -c "_appTranscript" chat_history_master.dart                  # → 5  (불변 — 이동만)
+grep -c "MediaQuery.of(ctx).padding.bottom" chat_history_master.dart # → 1
+grep -c "initialChildSize: 0.72" chat_history_master.dart          # → 1
+grep -c "initialChildSize: 0.65" chat_history_master.dart          # → 0
+grep -c "투명 말풍선" chat_history_master.dart                       # → 1
 ```
-
-하나라도 불일치 → **중단 후 보고**.
+하나라도 어긋나면 **롤백** 후 보고.
 
 ---
 
-## 5. 정적 분석 + 포맷 (게이트)
-
+## Phase 4 — 정적 분석 / 포맷 (개별 파일만)
 ```bash
-flutter analyze lib/custom_code/widgets/chat_history_master.dart
-# 신규 error/warning 0 이어야 함
-
-dart format lib/custom_code/widgets/chat_history_master.dart
+flutter analyze chat_history_master.dart
+dart format chat_history_master.dart
 ```
-> ⚠️ `dart format`은 **이 파일 하나만** 대상. 폴더 단위 금지 (한글 문자열 깨짐).
+> ⚠️ `dart format`은 반드시 **이 파일 하나만** 대상. 폴더 단위 금지(한글 문자열 UTF-8 깨짐).
+
+`flutter analyze`에 신규 error/warning 0 확인.
 
 ---
 
-## 6. 동작 확인 (수동)
-
-1. Study Room → 임의 대화 항목 → Expanded **P3** 진입
-2. 확인:
-   - 팝업이 **"Echo it!"** 로 표시
-   - 팝업이 ≈1.6초 보이다 사라짐
-   - 팝업이 **증발하는 순간**에 첫 청크 음성 시작 (팝업 떠 있는 중엔 무음)
-3. 회화 빌드 경로(`buildExpandFromConversation` → `_goToChunkPractice`)로도 동일 동작 확인
+## 동작 확인 체크리스트
+1. 히스토리 → 튜터링 진입 시 시트가 약 72% 높이로 열림.
+2. 녹음 → 교정 결과 표시 후, **내가 말한 문장 말풍선이 `Close / Another Sentence` 버튼 바로 위에** 보임.
+3. 시트를 끝까지 드래그/스크롤했을 때 말풍선이 네비게이션 바에 **안 잘림**.
+4. 녹음 전(=transcript 비어있음)에는 말풍선 자리에 빈 여백 없음.
+5. `Another Sentence` 누르면 말풍선 사라짐(`_appTranscript=""` 리셋 정상).
+6. 빌링·TTS·쉐도잉 동작 이상 없음.
 
 ---
 
-## 7. 롤백 절차
-
+## 롤백
 ```bash
-# 커밋 전이면
-git checkout -- lib/custom_code/widgets/chat_history_master.dart
-
-# 이미 커밋했다면
-git revert <commit_hash>
+# 아직 push 전:
+git reset --hard HEAD~1
+# 이미 push 했다면:
+git revert <savepoint_hash>
 ```
-
----
-
-## 변경 요약
-
-| # | 위치 | 내용 |
-|---|------|------|
-| 1 | `_goToChunkPractice` (~6396) | `Future.delayed(Duration.zero)` 제거 → `onDismiss` 콜백으로 이전 |
-| 2 | 오버레이 UI (~5834) | `Do Echoing!` → `Echo it!` |
-| 3 | `_triggerEchoingOverlay` 정의 (~1767) | `onDismiss` 파라미터 추가, 타이머 완료 시 호출 (1600ms 유지) |
-| 4 | chunkPractice 진입부 (~1214) | `Future.delayed(Duration.zero)` 제거 → `onDismiss` 콜백으로 이전 |
-
-**불변(untouched):** Box 7, P1, P2, turnPractice, billing, 오버레이 fade(600ms), 1600ms 노출시간.
