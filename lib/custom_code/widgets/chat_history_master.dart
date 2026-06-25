@@ -4524,24 +4524,33 @@ RULES — follow exactly:
     final bool isShadowLine =
         _phase == ShadowingPhase.part2Practice && isCurrent && !lineIsAi;
     if (isShadowLine && _shadowWords.isNotEmpty) {
-      return Wrap(
-        alignment: WrapAlignment.start,
-        spacing: 6,
-        runSpacing: 2,
-        children: List.generate(_shadowWords.length, (j) {
-          final bool done = j < _shadowWordIdx;
-          final bool now = j == _shadowWordIdx;
-          return Text(
-            _shadowWords[j],
-            style: TextStyle(
-              color:
-                  now ? Colors.amber : (done ? Colors.white38 : Colors.white),
-              fontSize: (now ? 15 : 14) * _fontScale,
-              height: 1.5,
-              fontWeight: now ? FontWeight.bold : FontWeight.normal,
-            ),
-          );
-        }),
+      // [P2-SHADOW] Single Text.rich run. Fixed size/weight for every word so
+      // wrapping NEVER shifts. Current word gets a highlighter-style box only.
+      final Paint hl = Paint()
+        ..color = Colors.amber.withValues(alpha: 0.35)
+        ..strokeJoin = StrokeJoin.round;
+      return Text.rich(
+        TextSpan(
+          children: [
+            for (int j = 0; j < _shadowWords.length; j++) ...[
+              TextSpan(
+                text: _shadowWords[j],
+                style: TextStyle(
+                  color: j == _shadowWordIdx
+                      ? Colors.white
+                      : (j < _shadowWordIdx ? Colors.white38 : Colors.white),
+                  background: j == _shadowWordIdx ? hl : null,
+                ),
+              ),
+              if (j != _shadowWords.length - 1) const TextSpan(text: ' '),
+            ],
+          ],
+        ),
+        style: TextStyle(
+          fontSize: 14 * _fontScale,
+          height: 1.5,
+          fontWeight: FontWeight.normal,
+        ),
       );
     }
     return Text(
@@ -6634,34 +6643,65 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     );
   }
 
-  // [P2-SHADOW] Top speed selector. Larger values read faster.
+  // [P2-SHADOW] Top speed selector - connected segmented toggle bar.
+  // Larger values read faster. Label blinks until a speed is chosen.
   Widget _buildShadowSpeedSelector() {
+    const Color divider = Colors.white24;
+    final bool blink = !_shadowStarted; // [P2] Blink label until speed chosen.
+    const Widget label = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.speed, color: Colors.white54, size: 15),
+        SizedBox(width: 5),
+        Text(
+          "\uC18D\uB3C4 \uC120\uD0DD", // 속도 선택
+          style: TextStyle(color: Colors.white54, fontSize: 12),
+        ),
+      ],
+    );
     return Padding(
       padding: const EdgeInsets.only(top: 2, bottom: 6),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.speed, color: Colors.white54, size: 15),
-          const SizedBox(width: 5),
-          const Text(
-            "\uC18D\uB3C4 \uC120\uD0DD", // 속도 선택
-            style: TextStyle(color: Colors.white54, fontSize: 12),
+          blink
+              ? AnimatedBuilder(
+                  animation: _blinkController,
+                  builder: (_, child) =>
+                      Opacity(opacity: _blinkOpacity.value, child: child),
+                  child: label,
+                )
+              : label,
+          const SizedBox(width: 12),
+          // [P2] Connected segmented bar - visually distinct from P1/P2/P3 pills.
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.04),
+              borderRadius: BorderRadius.circular(15),
+              border: Border.all(color: divider, width: 1),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildSpeedSegment(0.8, "0.8", first: true),
+                Container(width: 1, height: 22, color: divider),
+                _buildSpeedSegment(1.0, "1"),
+                Container(width: 1, height: 22, color: divider),
+                _buildSpeedSegment(1.2, "1.2", last: true),
+              ],
+            ),
           ),
-          const SizedBox(width: 10),
-          _buildSpeedChip(0.8, "0.8"),
-          const SizedBox(width: 6),
-          _buildSpeedChip(1.0, "1"),
-          const SizedBox(width: 6),
-          _buildSpeedChip(1.2, "1.2"),
         ],
       ),
     );
   }
 
-  Widget _buildSpeedChip(double v, String label) {
-    // [P2-START] Before choosing a speed, no chip should look selected.
+  // [P2-SHADOW] One cell of the connected segmented speed toggle bar.
+  Widget _buildSpeedSegment(double v, String label,
+      {bool first = false, bool last = false}) {
+    // [P2-START] Before choosing a speed, no cell should look selected.
     final bool sel = _shadowStarted && _shadowSpeed == v;
-    final Widget chip = GestureDetector(
+    return GestureDetector(
       onTap: () {
         setState(() => _shadowSpeed = v);
         // [P2-START] Speed selection triggers start; mid-line changes restart current turn.
@@ -6671,39 +6711,25 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
         }
       },
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 5),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
         decoration: BoxDecoration(
-          color: sel
-              ? Colors.amber.withValues(alpha: 0.18)
-              : Colors.white.withValues(alpha: 0.05),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: sel ? Colors.amber.withValues(alpha: 0.7) : Colors.white24,
-            width: sel ? 1.5 : 1,
+          color:
+              sel ? Colors.amber.withValues(alpha: 0.22) : Colors.transparent,
+          borderRadius: BorderRadius.horizontal(
+            left: Radius.circular(first ? 15 : 0),
+            right: Radius.circular(last ? 15 : 0),
           ),
         ),
         child: Text(
           label,
           style: TextStyle(
             color: sel ? Colors.amber : Colors.white54,
-            fontSize: 12,
+            fontSize: 13,
             fontWeight: sel ? FontWeight.bold : FontWeight.normal,
           ),
         ),
       ),
     );
-    // [P2-START] Before selection, gently pulse chips to invite choosing one.
-    if (_phase == ShadowingPhase.part2Practice && !_shadowStarted) {
-      return AnimatedBuilder(
-        animation: _blinkController,
-        builder: (_, child) => Transform.scale(
-          scale: 1.0 + 0.06 * _blinkController.value,
-          child: child,
-        ),
-        child: chip,
-      );
-    }
-    return chip;
   }
 
   Widget _buildStepExpandSelectScreen() {
