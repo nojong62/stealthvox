@@ -131,7 +131,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   int _shadowWordIdx = -1;
   Timer? _shadowHighlightTimer;
   Timer? _shadowAdvanceTimer;
-  bool _shadowFast = false;
+  double _shadowSpeed = 1.0; // [P2-SHADOW] 0.8/1.0/1.2, larger is faster.
   // [P2-SHADOW-REC] User-line audio captured for Play all. No scoring/STT.
   bool _shadowRecording = false;
   int _shadowRecordLineIdx = -1;
@@ -818,7 +818,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     int d = 220 + clean.length * 55;
     if (RegExp(r'[,;:]$').hasMatch(w)) d += 160;
     if (RegExp(r'[.!?]$').hasMatch(w)) d += 320;
-    d = (d * (_shadowFast ? 0.8 : 1.0)).round();
+    d = (d / _shadowSpeed).round();
     return d.clamp(140, 1100);
   }
 
@@ -4447,53 +4447,57 @@ RULES — follow exactly:
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        // 좌측: 유저 아이콘 — 역할 선택(대기) 또는 재녹음
-                        AnimatedBuilder(
-                          animation: _blinkController,
-                          builder: (context, child) => Opacity(
-                            opacity: isAwaiting ? _blinkOpacity.value : 1.0,
-                            child: child,
-                          ),
-                          child: GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTap: isAwaiting
-                                ? () => _confirmStart(swap: false)
-                                : _onTutorUserIconTap,
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 250),
-                              padding: const EdgeInsets.all(9),
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: _tutorUserRecording
-                                    ? Colors.greenAccent.withValues(alpha: 0.15)
-                                    : isAwaiting
+                        if (_phase != ShadowingPhase.part2Practice) ...[
+                          // 좌측: 유저 아이콘 — 역할 선택(대기) 또는 재녹음
+                          AnimatedBuilder(
+                            animation: _blinkController,
+                            builder: (context, child) => Opacity(
+                              opacity: isAwaiting ? _blinkOpacity.value : 1.0,
+                              child: child,
+                            ),
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: isAwaiting
+                                  ? () => _confirmStart(swap: false)
+                                  : _onTutorUserIconTap,
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 250),
+                                padding: const EdgeInsets.all(9),
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: _tutorUserRecording
+                                      ? Colors.greenAccent
+                                          .withValues(alpha: 0.15)
+                                      : isAwaiting
+                                          ? Colors.greenAccent
+                                              .withValues(alpha: 0.08)
+                                          : Colors.white
+                                              .withValues(alpha: 0.04),
+                                  border: Border.all(
+                                    color: _tutorUserRecording
                                         ? Colors.greenAccent
-                                            .withValues(alpha: 0.08)
-                                        : Colors.white.withValues(alpha: 0.04),
-                                border: Border.all(
+                                        : isAwaiting
+                                            ? Colors.greenAccent
+                                                .withValues(alpha: 0.65)
+                                            : Colors.white24,
+                                    width: _tutorUserRecording ? 2 : 1.5,
+                                  ),
+                                ),
+                                child: Icon(
+                                  Icons.person_rounded,
+                                  size: 18,
                                   color: _tutorUserRecording
                                       ? Colors.greenAccent
                                       : isAwaiting
                                           ? Colors.greenAccent
-                                              .withValues(alpha: 0.65)
-                                          : Colors.white24,
-                                  width: _tutorUserRecording ? 2 : 1.5,
+                                              .withValues(alpha: 0.85)
+                                          : Colors.white38,
                                 ),
-                              ),
-                              child: Icon(
-                                Icons.person_rounded,
-                                size: 18,
-                                color: _tutorUserRecording
-                                    ? Colors.greenAccent
-                                    : isAwaiting
-                                        ? Colors.greenAccent
-                                            .withValues(alpha: 0.85)
-                                        : Colors.white38,
                               ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
+                          const SizedBox(width: 8),
+                        ],
                         Text(
                           isComplete
                               ? "Practice 완료!"
@@ -4508,50 +4512,54 @@ RULES — follow exactly:
                               fontWeight: FontWeight.bold,
                               letterSpacing: 1.0),
                         ),
-                        const SizedBox(width: 8),
-                        // 우측: AI 아이콘 — 역할 선택(대기)
-                        AnimatedBuilder(
-                          animation: _blinkController,
-                          builder: (context, child) => Opacity(
-                            opacity: isAwaiting ? _blinkOpacity.value : 1.0,
-                            child: child,
-                          ),
-                          child: GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTap: isAwaiting
-                                ? () => _confirmStart(swap: true)
-                                : null,
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 250),
-                              padding: const EdgeInsets.all(9),
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: _tutorAiSpeaking
-                                    ? Colors.blue.withValues(alpha: 0.15)
-                                    : isAwaiting
-                                        ? Colors.blue.withValues(alpha: 0.08)
-                                        : Colors.white.withValues(alpha: 0.04),
-                                border: Border.all(
+                        if (_phase != ShadowingPhase.part2Practice) ...[
+                          const SizedBox(width: 8),
+                          // 우측: AI 아이콘 — 역할 선택(대기)
+                          AnimatedBuilder(
+                            animation: _blinkController,
+                            builder: (context, child) => Opacity(
+                              opacity: isAwaiting ? _blinkOpacity.value : 1.0,
+                              child: child,
+                            ),
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: isAwaiting
+                                  ? () => _confirmStart(swap: true)
+                                  : null,
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 250),
+                                padding: const EdgeInsets.all(9),
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: _tutorAiSpeaking
+                                      ? Colors.blue.withValues(alpha: 0.15)
+                                      : isAwaiting
+                                          ? Colors.blue.withValues(alpha: 0.08)
+                                          : Colors.white
+                                              .withValues(alpha: 0.04),
+                                  border: Border.all(
+                                    color: _tutorAiSpeaking
+                                        ? Colors.blue
+                                        : isAwaiting
+                                            ? Colors.blue
+                                                .withValues(alpha: 0.65)
+                                            : Colors.white24,
+                                    width: _tutorAiSpeaking ? 2 : 1.5,
+                                  ),
+                                ),
+                                child: Icon(
+                                  Icons.smart_toy_rounded,
+                                  size: 18,
                                   color: _tutorAiSpeaking
                                       ? Colors.blue
                                       : isAwaiting
-                                          ? Colors.blue.withValues(alpha: 0.65)
-                                          : Colors.white24,
-                                  width: _tutorAiSpeaking ? 2 : 1.5,
+                                          ? Colors.blue.withValues(alpha: 0.85)
+                                          : Colors.white38,
                                 ),
-                              ),
-                              child: Icon(
-                                Icons.smart_toy_rounded,
-                                size: 18,
-                                color: _tutorAiSpeaking
-                                    ? Colors.blue
-                                    : isAwaiting
-                                        ? Colors.blue.withValues(alpha: 0.85)
-                                        : Colors.white38,
                               ),
                             ),
                           ),
-                        ),
+                        ],
                       ],
                     ),
                   ),
@@ -5930,7 +5938,7 @@ RULES — follow exactly:
         _showRetryHint = false;
         _shadowWords = []; // [P2-SHADOW]
         _shadowWordIdx = -1; // [P2-SHADOW]
-        _shadowFast = false; // [P2-SHADOW]
+        _shadowSpeed = 1.0; // [P2-SHADOW]
       });
       _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
       _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
@@ -6439,7 +6447,7 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     return Column(
       children: [
         _buildPracticeTabBar(),
-        if (_phase == ShadowingPhase.part2Practice) _buildShadowSpeedToggle(),
+        if (_phase == ShadowingPhase.part2Practice) _buildShadowSpeedSelector(),
         Expanded(child: _buildTurnPracticeScreen()),
       ],
     );
@@ -6473,44 +6481,52 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     );
   }
 
-  // [P2-SHADOW] Top speed toggle. Default is normal speed.
-  Widget _buildShadowSpeedToggle() {
+  // [P2-SHADOW] Top speed selector. Larger values read faster.
+  Widget _buildShadowSpeedSelector() {
     return Padding(
       padding: const EdgeInsets.only(top: 2, bottom: 6),
-      child: Center(
-        child: GestureDetector(
-          onTap: () => setState(() => _shadowFast = !_shadowFast),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-            decoration: BoxDecoration(
-              color: _shadowFast
-                  ? Colors.amber.withValues(alpha: 0.18)
-                  : Colors.white.withValues(alpha: 0.06),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: _shadowFast
-                    ? Colors.amber.withValues(alpha: 0.6)
-                    : Colors.white24,
-              ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.speed,
-                  color: _shadowFast ? Colors.amber : Colors.white54,
-                  size: 16,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  _shadowFast ? "\uBE60\uB974\uAC8C" : "\uBCF4\uD1B5",
-                  style: TextStyle(
-                    color: _shadowFast ? Colors.amber : Colors.white54,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.speed, color: Colors.white54, size: 15),
+          const SizedBox(width: 5),
+          const Text(
+            "\uC18D\uB3C4",
+            style: TextStyle(color: Colors.white54, fontSize: 12),
+          ),
+          const SizedBox(width: 10),
+          _buildSpeedChip(0.8, "0.8"),
+          const SizedBox(width: 6),
+          _buildSpeedChip(1.0, "1"),
+          const SizedBox(width: 6),
+          _buildSpeedChip(1.2, "1.2"),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSpeedChip(double v, String label) {
+    final bool sel = _shadowSpeed == v;
+    return GestureDetector(
+      onTap: () => setState(() => _shadowSpeed = v),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 5),
+        decoration: BoxDecoration(
+          color: sel
+              ? Colors.amber.withValues(alpha: 0.18)
+              : Colors.white.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: sel ? Colors.amber.withValues(alpha: 0.7) : Colors.white24,
+            width: sel ? 1.5 : 1,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: sel ? Colors.amber : Colors.white54,
+            fontSize: 12,
+            fontWeight: sel ? FontWeight.bold : FontWeight.normal,
           ),
         ),
       ),
