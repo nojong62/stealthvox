@@ -1211,18 +1211,18 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         _phase = ShadowingPhase.chunkPractice;
         _currentChunkIdx = -1;
       });
-      _triggerEchoingOverlay();
+      // Start the first chunk when the overlay disappears.
+      _triggerEchoingOverlay(onDismiss: () {
+        if (mounted &&
+            _phase == ShadowingPhase.chunkPractice &&
+            _chunks.isNotEmpty &&
+            _currentChunkIdx == -1) {
+          _onChunkTapped(0);
+        }
+      });
     }
     _loadPolishedSentence();
     _prefetchAllChunkAI();
-    Future.delayed(Duration.zero, () {
-      if (mounted &&
-          _phase == ShadowingPhase.chunkPractice &&
-          _chunks.isNotEmpty &&
-          _currentChunkIdx == -1) {
-        _onChunkTapped(0);
-      }
-    });
   }
 
   Future<void> _loadPolishedSentence() async {
@@ -1764,12 +1764,14 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     _currentChunkIdx = 0;
   }
 
-  void _triggerEchoingOverlay() {
+  void _triggerEchoingOverlay({VoidCallback? onDismiss}) {
     if (!mounted) return;
     setState(() => _showEchoingOverlay = true);
     _echoingOverlayTimer?.cancel();
     _echoingOverlayTimer = Timer(const Duration(milliseconds: 1600), () {
-      if (mounted) setState(() => _showEchoingOverlay = false);
+      if (!mounted) return;
+      setState(() => _showEchoingOverlay = false);
+      onDismiss?.call();
     });
   }
 
@@ -5831,7 +5833,7 @@ RULES — follow exactly:
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      'Do Echoing!',
+                      'Echo it!',
                       style: TextStyle(
                         color: Colors.amber,
                         fontSize: 26,
@@ -6393,8 +6395,8 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
         _phase = ShadowingPhase.chunkPractice;
       });
     }
-    _triggerEchoingOverlay();
-    Future.delayed(Duration.zero, () {
+    // Start the first chunk when the overlay disappears.
+    _triggerEchoingOverlay(onDismiss: () {
       if (mounted &&
           _phase == ShadowingPhase.chunkPractice &&
           _chunks.isNotEmpty &&
