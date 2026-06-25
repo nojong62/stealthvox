@@ -1031,10 +1031,13 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           .join("\n");
 
       String userTargetText = "";
+      // User voice follows the lobby My Voice setting; AI remains fixed to nova.
+      final String userVoice =
+          FFAppState().aiVoice.isNotEmpty ? FFAppState().aiVoice : 'echo';
       ChunkedTtsFetcher userTtsFetcher = ChunkedTtsFetcher(
         _openAiKey,
         _ttsQueueManager,
-        "nova",
+        userVoice,
         onLog: _log,
       );
       _ttsQueueManager.setUserTurn(true);

@@ -2085,15 +2085,18 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 
       String userTargetText = "";
       String userBuffer = "";
+      // User voice follows the lobby My Voice setting; AI remains fixed to nova.
+      final String userVoice =
+          FFAppState().aiVoice.isNotEmpty ? FFAppState().aiVoice : 'echo';
       ChunkedTtsFetcher userTtsFetcher = ChunkedTtsFetcher(
         _openAiKey,
         _ttsQueueManager,
-        "nova",
+        userVoice,
         onLog: _log,
       );
       final HybridTtsPlayer userHybridTts = HybridTtsPlayer(
         apiKey: _openAiKey,
-        voice: 'nova',
+        voice: userVoice,
         onLog: _log,
       );
       _ttsQueueManager.setUserTurn(true);

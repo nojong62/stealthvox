@@ -670,10 +670,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     }
     await _saveHistoryMessage(tgt, org, 'SYSTEM');
 
-    // 내 타겟 소리로 재생 (직렬화)
+    // 상대방 말풍선 소리 재생 (직렬화): 상대방은 nova 고정
     _rememberGenerated(tgt);
     _rememberGenerated(org);
-    final Uint8List? bytes = await _fetchTTSBytes(tgt, _myVoice());
+    final Uint8List? bytes = await _fetchTTSBytes(tgt, 'nova');
     if (bytes != null && _isConversationActive && !_isExiting) {
       _setDuoState('playing');
       BillingTicker.instance.resumeFromActivity('duo_tts_start');
