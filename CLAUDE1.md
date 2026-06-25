@@ -47,350 +47,238 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# P2 하이라이트 형광펜 + 속도 선택 세그먼트 토글 지시서
+# StepExpand 선형 확장 지시서 (구어체 전환)
 
-**대상 파일:** `lib/custom_code/widgets/chat_history_master.dart`
-**목적:**
-1. P2 따라읽기 하이라이트에서 **글자 크기·굵기 변동으로 줄바꿈이 들썩이는 현상 제거** → 크기/굵기 완전 고정, 현재 단어에 형광펜 배경박스만 표시 (`Text.rich`/`TextSpan` 단일 런)
-2. **속도 선택 메뉴를 P1/P2/P3 알약과 확연히 다른 "이어진 세그먼트 토글 바"로 교체**
-3. **"속도 선택" 글자를 깜박이게** (속도를 고르기 전까지만 깜박, 고르면 멈춤)
+> **목표**: 매 턴 관계절·분사구·to부정사로 *깊이 쌓는* 문어체 종속 확장을 →
+> 원어민이 실제로 말하듯 *옆으로 잇는* 선형 확장(등위접속 + 가벼운 담화표지)으로 전환.
+>
+> **방향(확정)**: 산출물은 **여전히 ONE 문장 유지**. 종속을 선형 연결로 바꾸기만 함.
+> 따라서 **P2 카라오케·P1·turnPractice·billing·진짜 Box 7(TTS 인프라)은 전혀 건드리지 않음.**
 
-**불변(절대 손대지 않음):** Box 7 / P1 / P3(chunkPractice) / turnPractice / 빌링 / Firestore.
-모든 변경은 `_phase == ShadowingPhase.part2Practice` 경로에만 영향.
+- **대상 파일(단 하나)**: `lib/custom_code/widgets/routine_mode_step_expand.dart`
+- **수정 클래스**: `StepExpandBrain` (GPT 프롬프트 메서드 — TTS 인프라 Box 7과 무관)
+- **수정 메서드 3개**: `streamUserTranslation`, `streamGrammarQuestion`, `polishSentence`
+- **편집 수**: 필수 4 + 선택(코스메틱) 1 = 최대 5
+- **편집 순서**: 라인 드리프트 방지 위해 **아래에서 위로(높은 줄번호 먼저)** 적용
 
 ---
 
-## Phase 0 — 세이브포인트 (필수, 먼저 실행)
+## 0. 세이브포인트 (필수)
 
 ```bash
 cd F:\flutter_project\stealth_vox
 git add -A
-git commit -m "savepoint: P2 하이라이트/속도선택 UI 수정 전"
+git commit -m "savepoint: before StepExpand 선형 확장 전환"
 ```
-
-> 이미 push된 상태에서 되돌리려면 마지막에 `git revert <hash>`.
 
 ---
 
-## Phase 1 — 발견(grep) : 수정 전 카운트 확인
+## Phase 1 — grep 사전 검증 (적용 전, 각 앵커 유일성 확인)
+
+각 명령의 기대 결과는 모두 **1** 이어야 함. 1이 아니면 중단하고 보고.
+
+```bash
+cd F:\flutter_project\stealth_vox\lib\custom_code\widgets
+
+grep -c "Use varied grammatical structures to merge them smoothly:" routine_mode_step_expand.dart   # 기대: 1  (편집①)
+grep -c "relative pronoun (who / which / that)" routine_mode_step_expand.dart                        # 기대: 1  (편집②)
+grep -c "naturally incorporates at least 2 of these structures:" routine_mode_step_expand.dart       # 기대: 1  (편집③)
+grep -c 'Grammar used: \[list\]' routine_mode_step_expand.dart                                       # 기대: 1  (편집③-b, 선택)
+grep -c "Complex nested clauses that are hard to speak" routine_mode_step_expand.dart                # 기대: 1  (편집④)
+```
+
+---
+
+## Phase 2 — str_replace 적용 (아래에서 위로)
+
+### 편집 ④ — `polishSentence` [AVOID]: 선형 흐름을 다시 종속으로 되돌리지 못하게 (라인 ~5727)
+
+폴리시는 이미 구어체 지향이지만, "한 문장으로 재정리"하면서 선형 흐름을 다시 임베딩으로
+되돌릴 여지가 있음. AVOID에 한 줄만 추가해 막는다.
+
+**old_str**
+```
+- Complex nested clauses that are hard to speak
+- Adding information not in the original
+```
+
+**new_str**
+```
+- Complex nested clauses that are hard to speak
+- Re-packing the linear, spoken flow back into nested/embedded clauses
+- Adding information not in the original
+```
+
+---
+
+### 편집 ③-b — (선택·코스메틱) 최종 합성 라벨 "Grammar used" → "Connectors used" (라인 ~5416)
+
+> 다운스트림 파싱 없음(grep 1회뿐, 프롬프트 내부에만 존재). 테마 일관성 + AI가 다시
+> 문법구조 사고로 회귀하는 것 방지용. **진짜 최소 diff를 원하면 이 편집은 건너뛰어도 됨.**
+
+**old_str**
+```
+PART 1: "Expanded Sentence: " + your synthesized sentence (25–40 words) + newline + "Grammar used: [list]"
+```
+
+**new_str**
+```
+PART 1: "Expanded Sentence: " + your synthesized sentence (25–40 words) + newline + "Connectors used: [list]"
+```
+
+---
+
+### 편집 ③ — `streamGrammarQuestion` 최종 합성 프롬프트: 종속 4종 리스트 → 선형 연결 (라인 ~5398)
+
+5턴 끝의 최종 합성이 "Causal/Relative/Concessive/Conditional 중 2개 이상"으로 종속을
+강제하고 있음. 이게 Alex 예시 같은 깊은 임베딩의 직접 원인. 선형 연결로 교체.
+(25–40단어, breath group 5–7단어, "한 문장" 제약은 그대로 유지 → P2 안전)
+
+**old_str**
+```
+Read the History carefully. Collect the user's fragmented answers and synthesize them into ONE fluent sentence that naturally incorporates at least 2 of these structures:
+- Causal clause (because / since)
+- Relative clause (who / which / where / when / why)
+- Concessive clause (although / despite / even though)
+- Conditional clause (if / when)
+```
+
+**new_str**
+```
+Read the History carefully. Collect the user's fragmented answers and synthesize them into ONE fluent, natural-SPOKEN sentence — the way an American would actually say it OUT LOUD, chained linearly (left to right), NOT packed with nested clauses. Build it mainly with these linear connectors (use at least 2, and vary them):
+- Coordination: and / and then / so / but
+- Result or reason: which is why / that's why / so that / because (kept short, never nested)
+- Optionally ONE soft spoken marker if it fits: like / you know / I mean
+Do NOT stack relative clauses, front participial phrases, or chains of to-infinitives.
+```
+
+---
+
+### 편집 ② — `streamGrammarQuestion` structureSeed 로테이션: 임베딩 렌즈 → 선형 렌즈 (라인 ~5383)
+
+질문이 4턴 주기로 유저 답변을 *관계절/분사구로 붙도록* 유도하는 소프트 렌즈.
+이걸 등위·결과·담화표지로 붙도록 바꿈. **삼항 구조/들여쓰기는 그대로, 문자열만 교체** (Dart 안전).
+
+**old_str**
+```
+      final String structureSeed = t4 == 1
+          ? 'relative pronoun (who / which / that)'
+          : t4 == 2
+              ? 'relative adverb (where / when / why)'
+              : t4 == 3
+                  ? 'infinitive (to V)'
+                  : 'participial phrase (-ing / -ed)';
+```
+
+**new_str**
+```
+      final String structureSeed = t4 == 1
+          ? 'coordination (and / and then / so)'
+          : t4 == 2
+              ? 'contrast or result (but / so / which is why)'
+              : t4 == 3
+                  ? 'short reason link (because / since — never nested)'
+                  : 'a light spoken add-on (like / you know — only if natural)';
+```
+
+---
+
+### 편집 ① — `streamUserTranslation` CASE 2 PART 2 머징 규칙: 종속 5종 → 선형 연결 (라인 ~5085)
+
+매 턴 유저 확장 문장을 만드는 핵심. 관계절/분사구/to부정사/전치사구/접속사로 머징하라는
+지시를 선형 체이닝 + 담화표지로 교체. (한 문장·breath group 5–7단어 유지)
+
+**old_str**
+```
+  Use varied grammatical structures to merge them smoothly:
+    - Relative clauses (who/which/where/that)
+    - Participial phrases (-ing / -ed)
+    - To-infinitives (to V)
+    - Prepositional phrases
+    - Conjunctions (because/when/although)
+```
+
+**new_str**
+```
+  Grow it the way a native speaker actually TALKS — linearly, left to right,
+  by chaining short clauses one after another. Do NOT nest clauses inside clauses.
+  Preferred connectors (use these, and vary them turn to turn):
+    - Coordination: and, but, so, and then
+    - Result / reason links: which is why, that's why, so that, because (keep short)
+    - At most ONE soft spoken marker if it fits naturally: like, you know, I mean
+  AVOID building the sentence on stacked relative clauses, front participial
+  phrases, or chains of to-infinitives. A touch is fine; never make them the spine.
+  Keep it ONE sentence, speakable in short breath groups of 5–7 words.
+```
+
+---
+
+## Phase 3 — grep 사후 검증
+
+OLD 문구는 모두 **0**, NEW 문구는 모두 **1** 이어야 함.
+
+```bash
+# OLD (모두 0 기대)
+grep -c "Use varied grammatical structures to merge them smoothly:" routine_mode_step_expand.dart   # 기대: 0
+grep -c "relative pronoun (who / which / that)" routine_mode_step_expand.dart                        # 기대: 0
+grep -c "naturally incorporates at least 2 of these structures:" routine_mode_step_expand.dart       # 기대: 0
+grep -c "Complex nested clauses that are hard to speak" routine_mode_step_expand.dart                # 기대: 1  (이 줄은 유지됨, AVOID에 한 줄만 추가)
+
+# NEW (모두 1 기대)
+grep -c "the way a native speaker actually TALKS" routine_mode_step_expand.dart                      # 기대: 1  (편집①)
+grep -c "coordination (and / and then / so)" routine_mode_step_expand.dart                           # 기대: 1  (편집②)
+grep -c "natural-SPOKEN sentence" routine_mode_step_expand.dart                                      # 기대: 1  (편집③)
+grep -c "Re-packing the linear, spoken flow" routine_mode_step_expand.dart                           # 기대: 1  (편집④)
+# 편집③-b 적용 시:
+grep -c 'Connectors used: \[list\]' routine_mode_step_expand.dart                                    # 기대: 1
+grep -c 'Grammar used: \[list\]' routine_mode_step_expand.dart                                       # 기대: 0
+```
+
+---
+
+## Phase 4 — 분석 & 포맷 게이트
 
 ```bash
 cd F:\flutter_project\stealth_vox
-
-grep -nc "_buildSpeedChip"            lib/custom_code/widgets/chat_history_master.dart   # 기대: 4 (정의1 + 호출3)
-grep -nc "_buildSpeedSegment"         lib/custom_code/widgets/chat_history_master.dart   # 기대: 0
-grep -n  "return Wrap("               lib/custom_code/widgets/chat_history_master.dart   # P2 하이라이트 분기 위치 확인
-grep -nc "Text.rich"                  lib/custom_code/widgets/chat_history_master.dart   # 기존 개수 기록 (변경 후 +1 되어야 함)
-grep -n  "_buildShadowSpeedSelector"  lib/custom_code/widgets/chat_history_master.dart   # 기대: 2 (정의1 + 호출1)
+flutter analyze lib\custom_code\widgets\routine_mode_step_expand.dart
+dart format lib\custom_code\widgets\routine_mode_step_expand.dart   # ★ 반드시 개별 파일만. 폴더 금지(한글 깨짐)
 ```
 
-`return Wrap(` 위치가 `_buildPracticeLineText`(약 4520~4557줄) 안의 `if (isShadowLine && _shadowWords.isNotEmpty)` 분기인지 눈으로 확인. 다른 `Wrap`도 있을 수 있으므로 **반드시 `_shadowWords` 가 가까이 있는 그 블록**을 수정 대상으로 삼는다.
+- `flutter analyze` 0 error 기대 (프롬프트 문자열·삼항 리터럴만 수정 → 타입/구문 변화 없음).
+- error 발생 시 **즉시 중단하고 보고** — 롤백.
 
 ---
 
-## Phase 2 — 수정 (str_replace, 아래→위 순서로 적용)
-
-> 라인 드리프트 방지를 위해 **편집 A(아래) → 편집 B → 편집 C(위)** 순서로 적용한다.
-
----
-
-### 편집 A — `_buildSpeedChip` 함수 전체를 `_buildSpeedSegment`로 교체
-
-세그먼트 한 칸. 첫/끝 칸만 모서리를 둥글게 한다.
-
-**find (old_str):**
-```dart
-  Widget _buildSpeedChip(double v, String label) {
-    // [P2-START] Before choosing a speed, no chip should look selected.
-    final bool sel = _shadowStarted && _shadowSpeed == v;
-    final Widget chip = GestureDetector(
-      onTap: () {
-        setState(() => _shadowSpeed = v);
-        // [P2-START] Speed selection triggers start; mid-line changes restart current turn.
-        if (_phase == ShadowingPhase.part2Practice && !isPaused) {
-          _shadowStarted = true;
-          _checkAndStartTurn(); // AI line plays, user line highlights.
-        }
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 5),
-        decoration: BoxDecoration(
-          color: sel
-              ? Colors.amber.withValues(alpha: 0.18)
-              : Colors.white.withValues(alpha: 0.05),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: sel ? Colors.amber.withValues(alpha: 0.7) : Colors.white24,
-            width: sel ? 1.5 : 1,
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: sel ? Colors.amber : Colors.white54,
-            fontSize: 12,
-            fontWeight: sel ? FontWeight.bold : FontWeight.normal,
-          ),
-        ),
-      ),
-    );
-    // [P2-START] Before selection, gently pulse chips to invite choosing one.
-    if (_phase == ShadowingPhase.part2Practice && !_shadowStarted) {
-      return AnimatedBuilder(
-        animation: _blinkController,
-        builder: (_, child) => Transform.scale(
-          scale: 1.0 + 0.06 * _blinkController.value,
-          child: child,
-        ),
-        child: chip,
-      );
-    }
-    return chip;
-  }
-```
-
-**replace (new_str):**
-```dart
-  // [P2-SHADOW] One cell of the connected segmented speed toggle bar.
-  Widget _buildSpeedSegment(double v, String label,
-      {bool first = false, bool last = false}) {
-    // [P2-START] Before choosing a speed, no cell should look selected.
-    final bool sel = _shadowStarted && _shadowSpeed == v;
-    return GestureDetector(
-      onTap: () {
-        setState(() => _shadowSpeed = v);
-        // [P2-START] Speed selection triggers start; mid-line changes restart current turn.
-        if (_phase == ShadowingPhase.part2Practice && !isPaused) {
-          _shadowStarted = true;
-          _checkAndStartTurn(); // AI line plays, user line highlights.
-        }
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
-        decoration: BoxDecoration(
-          color:
-              sel ? Colors.amber.withValues(alpha: 0.22) : Colors.transparent,
-          borderRadius: BorderRadius.horizontal(
-            left: Radius.circular(first ? 15 : 0),
-            right: Radius.circular(last ? 15 : 0),
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: sel ? Colors.amber : Colors.white54,
-            fontSize: 13,
-            fontWeight: sel ? FontWeight.bold : FontWeight.normal,
-          ),
-        ),
-      ),
-    );
-  }
-```
-
----
-
-### 편집 B — `_buildShadowSpeedSelector` 함수 전체 교체 (세그먼트 바 + 깜박이는 라벨)
-
-**find (old_str):**
-```dart
-  // [P2-SHADOW] Top speed selector. Larger values read faster.
-  Widget _buildShadowSpeedSelector() {
-    return Padding(
-      padding: const EdgeInsets.only(top: 2, bottom: 6),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.speed, color: Colors.white54, size: 15),
-          const SizedBox(width: 5),
-          const Text(
-            "\uC18D\uB3C4 \uC120\uD0DD", // 속도 선택
-            style: TextStyle(color: Colors.white54, fontSize: 12),
-          ),
-          const SizedBox(width: 10),
-          _buildSpeedChip(0.8, "0.8"),
-          const SizedBox(width: 6),
-          _buildSpeedChip(1.0, "1"),
-          const SizedBox(width: 6),
-          _buildSpeedChip(1.2, "1.2"),
-        ],
-      ),
-    );
-  }
-```
-
-**replace (new_str):**
-```dart
-  // [P2-SHADOW] Top speed selector — connected segmented toggle bar.
-  // Larger values read faster. Label blinks until a speed is chosen.
-  Widget _buildShadowSpeedSelector() {
-    const Color divider = Colors.white24;
-    final bool blink = !_shadowStarted; // [P2] Blink label until speed chosen.
-    final Widget label = Row(
-      mainAxisSize: MainAxisSize.min,
-      children: const [
-        Icon(Icons.speed, color: Colors.white54, size: 15),
-        SizedBox(width: 5),
-        Text(
-          "\uC18D\uB3C4 \uC120\uD0DD", // 속도 선택
-          style: TextStyle(color: Colors.white54, fontSize: 12),
-        ),
-      ],
-    );
-    return Padding(
-      padding: const EdgeInsets.only(top: 2, bottom: 6),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          blink
-              ? AnimatedBuilder(
-                  animation: _blinkController,
-                  builder: (_, child) =>
-                      Opacity(opacity: _blinkOpacity.value, child: child),
-                  child: label,
-                )
-              : label,
-          const SizedBox(width: 12),
-          // [P2] Connected segmented bar — visually distinct from P1/P2/P3 pills.
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.04),
-              borderRadius: BorderRadius.circular(15),
-              border: Border.all(color: divider, width: 1),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _buildSpeedSegment(0.8, "0.8", first: true),
-                Container(width: 1, height: 22, color: divider),
-                _buildSpeedSegment(1.0, "1"),
-                Container(width: 1, height: 22, color: divider),
-                _buildSpeedSegment(1.2, "1.2", last: true),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-```
-
----
-
-### 편집 C — P2 하이라이트 분기를 `Text.rich`(형광펜 배경박스)로 교체
-
-크기/굵기를 모든 단어에 동일하게 고정 → 폭 불변 → 줄바꿈 영원히 안정.
-현재 단어에만 `background: Paint()`로 형광펜 박스. 단어 사이 공백은 배경 없는 별도 span.
-
-**find (old_str):**
-```dart
-    if (isShadowLine && _shadowWords.isNotEmpty) {
-      return Wrap(
-        alignment: WrapAlignment.start,
-        spacing: 6,
-        runSpacing: 2,
-        children: List.generate(_shadowWords.length, (j) {
-          final bool done = j < _shadowWordIdx;
-          final bool now = j == _shadowWordIdx;
-          return Text(
-            _shadowWords[j],
-            style: TextStyle(
-              color:
-                  now ? Colors.amber : (done ? Colors.white38 : Colors.white),
-              fontSize: (now ? 15 : 14) * _fontScale,
-              height: 1.5,
-              fontWeight: now ? FontWeight.bold : FontWeight.normal,
-            ),
-          );
-        }),
-      );
-    }
-```
-
-**replace (new_str):**
-```dart
-    if (isShadowLine && _shadowWords.isNotEmpty) {
-      // [P2-SHADOW] Single Text.rich run. Fixed size/weight for every word so
-      // wrapping NEVER shifts. Current word gets a highlighter-style box only.
-      final Paint hl = Paint()
-        ..color = Colors.amber.withValues(alpha: 0.35)
-        ..strokeJoin = StrokeJoin.round;
-      return Text.rich(
-        TextSpan(
-          children: [
-            for (int j = 0; j < _shadowWords.length; j++) ...[
-              TextSpan(
-                text: _shadowWords[j],
-                style: TextStyle(
-                  color: j == _shadowWordIdx
-                      ? Colors.white
-                      : (j < _shadowWordIdx ? Colors.white38 : Colors.white),
-                  background: j == _shadowWordIdx ? hl : null,
-                ),
-              ),
-              if (j != _shadowWords.length - 1) const TextSpan(text: ' '),
-            ],
-          ],
-        ),
-        style: TextStyle(
-          fontSize: 14 * _fontScale,
-          height: 1.5,
-          fontWeight: FontWeight.normal,
-        ),
-      );
-    }
-```
-
----
-
-## Phase 3 — 검증 (grep, 기대 카운트 대조)
-
-```bash
-cd F:\flutter_project\stealth_vox
-set F=lib/custom_code/widgets/chat_history_master.dart
-
-grep -nc "_buildSpeedChip"           %F%   # 기대: 0  (완전 제거)
-grep -nc "_buildSpeedSegment"        %F%   # 기대: 4  (정의1 + 호출3)
-grep -nc "_buildShadowSpeedSelector" %F%   # 기대: 2  (정의1 + 호출1, 변동 없음)
-grep -nc "_blinkOpacity.value"       %F%   # 기대: 기존값 +1
-grep -n  "background: j == _shadowWordIdx ? hl : null" %F%   # 기대: 1줄 (하이라이트 적용 확인)
-grep -nc "return Wrap("              %F%   # P2 분기의 Wrap 제거 확인 (다른 Wrap이 있다면 그 개수만큼만 남아야 함)
-```
-
-> macOS/리눅스 셸이면 `%F%` 대신 변수 없이 파일 경로를 직접 넣거나 `F=...; grep ... "$F"` 사용.
-
----
-
-## Phase 4 — 정적 분석 & 포맷 (게이트)
-
-```bash
-flutter analyze lib/custom_code/widgets/chat_history_master.dart
-dart format lib/custom_code/widgets/chat_history_master.dart
-```
-
-- `flutter analyze`에 **새 에러/경고가 없어야** 통과.
-- `dart format`은 **반드시 이 파일 하나만** 대상으로 (폴더 전체 금지 — 한글 문자열 깨짐 방지).
-
----
-
-## Phase 5 — 런타임 확인 체크리스트 (P2 화면)
-
-1. P2 진입 → "속도 선택" 글자가 깜박인다(opacity 0.3↔1.0).
-2. 속도 바가 P1/P2/P3 알약과 다른 **하나로 이어진 막대**(가운데 구분선 2개)로 보인다.
-3. 속도 한 칸을 누르면 → 글자 깜박임이 멈추고, 누른 칸만 amber로 채워진다.
-4. 사용자 라인 따라읽기 시작 → 현재 단어에 **형광펜 노란 박스**가 칠해지며 단어가 이동.
-5. 하이라이트가 지나가는 동안 **글자 크기 그대로, 줄바꿈 들썩임 없음** (캡처의 three/kilograms 깨짐 현상 사라짐).
-6. 폰트 크기 토글(`_fontScale`)을 바꿔도 P2 하이라이트 줄바꿈 안정 유지.
-7. P1 / P3 / turnPractice / 빌링 동작 이상 없음(회귀 없음).
-
----
-
-## 롤백
+## 롤백 절차
 
 ```bash
 # 아직 push 전:
 git reset --hard HEAD~1
-
-# 이미 push 후:
-git revert <savepoint_커밋_hash>
+# 이미 push 했다면:
+git revert <commit-hash>
 ```
+
+---
+
+## 검증 체크리스트 (적용 후 육안 확인)
+
+1. `streamUserTranslation` PART 2 머징 지시가 선형 연결/담화표지로 바뀌었는가
+2. `structureSeed` 4개 문자열이 coordination/contrast/reason/spoken-marker로 바뀌었는가
+3. 최종 합성 프롬프트가 natural-SPOKEN + 선형 연결 리스트로 바뀌었는가
+4. `polishSentence` AVOID에 "Re-packing..." 한 줄이 추가됐는가
+5. (선택) 라벨이 Connectors used로 바뀌었는가
+6. **건드리지 않았는지 확인**: 진짜 Box 7(TTS 인프라, 3860줄~), P1, P2 카라오케, turnPractice,
+   billing, splitIntoMeaningUnits, generateCleanOriginal — 전부 무변경
+7. 25–40단어 / "한 문장" / breath group 5–7단어 제약은 유지됨 (P2 안전 보장)
+
+---
+
+## 적용 후 실측 테스트 시나리오 (1회 권장)
+
+같은 Alex 흐름을 다시 돌려보고 산출 문장이 아래처럼 *선형*으로 나오는지 확인:
+
+- **전(문어체)**: *"Checking my emails this morning, I suddenly remembered to call my old friend, Alex, who recently moved to London, to ask him about the restaurant where we had dinner last year."*
+- **후(구어체 기대)**: *"This morning I was checking my emails, and it suddenly hit me that I needed to call my old friend Alex, who just moved to London, so I could ask him about that restaurant we went to last year."*
+
+→ 후자가 등위(and/so) 중심으로 옆으로 이어지면 성공. 여전히 관계절이 스파인이면 프롬프트 강도
+(temperature 0.0 → 0.2, 또는 NEW 문구에 "BANNED: relative-clause spine" 추가) 조정 검토.
