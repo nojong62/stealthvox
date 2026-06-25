@@ -47,147 +47,197 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# 실전 튜터링 교정 — "정답 1개 강제 → 허위 오류" 문제 해결 (정답 일치 분기 추가)
+# VOICE_POLICY_FIX_v1 — 라이브 대화 되읽기 보이스 정책 정합화
 
-## 목적
-유저가 **문법적으로 완벽히 맞는 다른 표현**을 말해도, 시스템이 미리 만든 정답(`_appAnswerEn`) 1개와
-다르다는 이유로 `어순이 틀렸다` 같은 **허위 교정**을 내보내는 문제 해결.
+## 목표 (정책)
+- **내 발화 / 호스트 본인 = My Voice = `FFAppState().aiVoice`** (로비 선택값, fallback `'echo'`)
+- **상대역(AI) / 듀오 상대방 = `'nova'` 고정**
+- History · P1/P2/P3(에코잉 리드)는 **이미 정책과 일치** → 손대지 않음
 
-- 근본 원인: Box 18-C 교정 프롬프트가 `[TARGET_EN_FIXED]`를 "absolute correct answer"로 박고,
-  RULE 4에서 *"USER_SPEECH를 TARGET 쪽으로 무조건 교정"* 하라고 명령 → 정답이 1개로 고정됨.
-- 영작은 정답이 여러 개인데, "정답과 다름 = 틀림"으로 처리되어 모델이 가짜 사유를 지어냄.
+## 수정 대상 3건 (전부 호출부 인자 1줄 단위, Box 7 무손상)
+| # | 파일 | 위치 | 변경 |
+|---|---|---|---|
+| 1 | routine_mode_step_expand.dart | 유저턴 fetcher+hybrid | `'nova'` → `userVoice` |
+| 2 | routine_mode_roleplay.dart | 유저턴 fetcher | `'nova'` → `userVoice` |
+| 3 | routine_mode_duo.dart | 상대 말풍선 | `_myVoice()` → `'nova'` |
 
-→ 프롬프트에 **"정답 일치(self-correct) 분기"** 추가:
-USER_SPEECH가 그 자체로 맞고 자연스러우면 → **유저 문장 그대로 인정 + 칭찬**, TARGET은 참고 예시로만.
-진짜 오류일 때만 교정.
-
-## 적용 파일 (단 1개)
-`chat_history_master.dart` — Box 18-C `_stopAppRecordAndProcess` 내 `corrPrompt` 문자열
-
-## 건드리지 않는 것 (불변)
-- Whisper STT 호출, GPT 호출 파라미터(model/temperature/max_tokens/response_format)
-- JSON 키(`corrected_en`, `reason_ko`) 및 파싱 로직, `_appCorrection` 조립, TTS/쉐도잉/캐시
-- Box 7, 빌링, P1/P2/P3, Box 18(응용문장 생성) — 전부 무관
-- **변경 대상은 오직 `corrPrompt` 문자열 1개**
+> ⚠️ Box 7 클래스(`TtsQueueManager`, `DeepgramV2VoiceManager`, `ChunkedTtsFetcher`, `HybridTtsPlayer`, `TtsCache`)는 **절대 수정 금지**. 본 작업은 전부 호출부 **인자값만** 바꾼다.
 
 ---
 
-## 0. SAVEPOINT (필수)
+## PHASE 0 — 세이브포인트
 ```bash
-git add -A
-git commit -m "savepoint: 튜터링 교정 정답일치 분기 추가 직전"
+git add -A && git commit -m "savepoint before VOICE_POLICY_FIX_v1"
 ```
 
 ---
 
-## Phase 1 — grep 발견 (기대 카운트)
+## PHASE 1 — 파일 경로 + 앵커 발견 (편집 전 반드시 카운트 확인)
+
 ```bash
-grep -c "final corrPrompt" chat_history_master.dart                # → 1
-grep -c "TARGET_EN_FIXED" chat_history_master.dart                 # → 7 (전부 corrPrompt 내부)
-grep -c "the absolute correct answer" chat_history_master.dart     # → 1
-grep -c "corrected_en" chat_history_master.dart                    # → 다수(파싱부 포함, 참고용)
+# (a) step_expand / roleplay 유저턴 앵커 — 각 파일에서 1건씩이어야 함
+grep -rn "ChunkedTtsFetcher userTtsFetcher = ChunkedTtsFetcher(" lib/custom_code/
+
+# (b) duo 상대 말풍선 앵커 — duo 파일에서 1건이어야 함
+grep -rn "if (bytes != null && _isConversationActive && !_isExiting) {" lib/custom_code/
+
+# (c) duo _myVoice() 호출 현황 — 편집 전 '3건'( 정의 1 + 내말풍선 1 + 상대말풍선 1 )
+grep -rn "_myVoice()" lib/custom_code/routine_mode_duo.dart
 ```
-`TARGET_EN_FIXED`가 7이 아니면(=다른 곳에도 존재) **중단·보고**.
+
+**진행 조건**: (a)가 step_expand·roleplay에서 각 1건, (b)가 duo에서 1건, (c)가 duo에서 3건이면 OK. 카운트가 다르면 **중단하고 보고**.
 
 ---
 
-## Phase 2 — str_replace (단일 편집)
+## PHASE 2 — 편집 (아래→위 순서로 적용)
 
-### ▶ `corrPrompt` 문자열 전체 교체
+### EDIT 3 — duo 상대 말풍선: `_myVoice()` → `'nova'`
+파일: `lib/custom_code/routine_mode_duo.dart`
+
 **old_str**
 ```dart
-      final corrPrompt = '''You are an English pronunciation and grammar coach.
-
-[TARGET_EN_FIXED]: "$targetEn"
-[USER_SPEECH]: "$transcript"
-
-RULES — follow exactly:
-1. [TARGET_EN_FIXED] is the absolute correct answer. You must NEVER rephrase, reword, or replace it with any other sentence.
-2. Compare [USER_SPEECH] against [TARGET_EN_FIXED] only. No other reference exists.
-3. If [USER_SPEECH] matches [TARGET_EN_FIXED] closely (minor STT noise allowed):
-   - Set "corrected_en" to the exact text of [TARGET_EN_FIXED].
-   - Set "reason_ko" to a single short praise sentence in Korean.
-4. If [USER_SPEECH] differs from [TARGET_EN_FIXED]:
-   - Set "corrected_en" to the minimally corrected version that moves [USER_SPEECH] toward [TARGET_EN_FIXED] (fix only what is wrong: pronunciation spelling, grammar, word order, or tense).
-   - Set "reason_ko" to 1-3 Korean sentences explaining what was wrong (specify which of: 발음, 문법, 어순, 시제). Do NOT write sentences that redefine [TARGET_EN_FIXED] as a different sentence.
-5. Output ONLY valid JSON with exactly these two keys: {"corrected_en": "...", "reason_ko": "..."}''';
+    // 내 타겟 소리로 재생 (직렬화)
+    _rememberGenerated(tgt);
+    _rememberGenerated(org);
+    final Uint8List? bytes = await _fetchTTSBytes(tgt, _myVoice());
+    if (bytes != null && _isConversationActive && !_isExiting) {
 ```
 
 **new_str**
 ```dart
-      final corrPrompt = '''You are an English pronunciation and grammar coach.
-
-[TARGET_EN]: "$targetEn"
-[USER_SPEECH]: "$transcript"
-
-IMPORTANT: English allows MANY correct ways to express the same meaning. [TARGET_EN] is only ONE valid example answer, NOT the single correct answer. Never treat a sentence as wrong just because it differs from [TARGET_EN].
-
-RULES — follow exactly:
-1. First decide: is [USER_SPEECH], on its own, grammatically correct, natural, and does it convey the same meaning as [TARGET_EN]? Ignore minor STT noise such as missing punctuation or capitalization.
-2. If YES — the user's sentence is correct on its own:
-   - Set "corrected_en" to the user's OWN sentence, cleaned of STT noise only. Do NOT replace it with [TARGET_EN].
-   - Set "reason_ko" to one short Korean praise sentence. You MAY optionally append "다른 표현: [TARGET_EN]" as an alternative, but you MUST NOT call the user's sentence wrong.
-3. If NO — there is a genuine error (grammar, tense, word order, word choice, or a real pronunciation/spelling error):
-   - Set "corrected_en" to the minimally corrected version of [USER_SPEECH]. Fix ONLY the actual error and keep every part that is already correct.
-   - Set "reason_ko" to 1-3 Korean sentences naming the REAL problem (specify which of: 발음, 문법, 어순, 시제, 단어선택). Never invent an error that is not actually present.
-4. Output ONLY valid JSON with exactly these two keys: {"corrected_en": "...", "reason_ko": "..."}''';
+    // 🎙️ 상대 말풍선 소리 재생 (직렬화) — 상대방은 nova 고정
+    //    (내 목소리=FFAppState().aiVoice 는 호스트 본인 발화에만 사용)
+    _rememberGenerated(tgt);
+    _rememberGenerated(org);
+    final Uint8List? bytes = await _fetchTTSBytes(tgt, 'nova');
+    if (bytes != null && _isConversationActive && !_isExiting) {
 ```
 
-> 핵심 변경점
-> - `[TARGET_EN_FIXED]` → `[TARGET_EN]` (라벨에서 "절대 정답" 프레이밍 제거)
-> - IMPORTANT 한 줄: "정답은 여러 개, TARGET은 예시 1개"
-> - RULE 2(YES 분기): 맞으면 **유저 문장 그대로 유지** + 칭찬, TARGET은 선택적 "다른 표현"으로만
-> - RULE 3(NO 분기): **실제 오류만** 최소 교정, 없는 오류 지어내기 금지 + `단어선택` 사유 추가
-> - JSON 키(`corrected_en`/`reason_ko`)·출력 형식 **그대로** → 파싱부 수정 불필요
+> 내 말풍선(상단의 `// 5. 내 타겟 소리 재생 (직렬화)` 블록, `_fetchTTSBytes(tgt, _myVoice())`)은 **그대로 둔다.** 위 앵커의 `!_isExiting` 한 줄 `if` 가 상대 말풍선 블록을 유일하게 식별한다.
 
 ---
 
-## Phase 3 — grep 검증 (기대 카운트)
+### EDIT 2 — roleplay 유저턴: `'nova'` → `userVoice`
+파일: `lib/custom_code/routine_mode_roleplay.dart`
+
+**old_str**
+```dart
+      String userTargetText = "";
+      ChunkedTtsFetcher userTtsFetcher = ChunkedTtsFetcher(
+        _openAiKey,
+        _ttsQueueManager,
+        "nova",
+        onLog: _log,
+      );
+      _ttsQueueManager.setUserTurn(true);
+```
+
+**new_str**
+```dart
+      String userTargetText = "";
+      // 🎙️ 유저 목소리 = 로비 선택값(FFAppState().aiVoice). AI는 nova 고정.
+      final String userVoice =
+          FFAppState().aiVoice.isNotEmpty ? FFAppState().aiVoice : 'echo';
+      ChunkedTtsFetcher userTtsFetcher = ChunkedTtsFetcher(
+        _openAiKey,
+        _ttsQueueManager,
+        userVoice,
+        onLog: _log,
+      );
+      _ttsQueueManager.setUserTurn(true);
+```
+
+> roleplay 유저턴에는 `HybridTtsPlayer` 가 없다(확인됨). fetcher 한 곳만 교체.
+
+---
+
+### EDIT 1 — step_expand 유저턴: `'nova'` → `userVoice` (fetcher + hybrid 동시)
+파일: `lib/custom_code/routine_mode_step_expand.dart`
+
+**old_str**
+```dart
+      String userTargetText = "";
+      String userBuffer = "";
+      ChunkedTtsFetcher userTtsFetcher = ChunkedTtsFetcher(
+        _openAiKey,
+        _ttsQueueManager,
+        "nova",
+        onLog: _log,
+      );
+      final HybridTtsPlayer userHybridTts = HybridTtsPlayer(
+        apiKey: _openAiKey,
+        voice: 'nova',
+        onLog: _log,
+      );
+```
+
+**new_str**
+```dart
+      String userTargetText = "";
+      String userBuffer = "";
+      // 🎙️ 유저 목소리 = 로비 선택값(FFAppState().aiVoice). AI는 nova 고정.
+      final String userVoice =
+          FFAppState().aiVoice.isNotEmpty ? FFAppState().aiVoice : 'echo';
+      ChunkedTtsFetcher userTtsFetcher = ChunkedTtsFetcher(
+        _openAiKey,
+        _ttsQueueManager,
+        userVoice,
+        onLog: _log,
+      );
+      final HybridTtsPlayer userHybridTts = HybridTtsPlayer(
+        apiKey: _openAiKey,
+        voice: userVoice,
+        onLog: _log,
+      );
+```
+
+> `String userBuffer = "";` 가 직전에 오는 블록은 이 유저턴 1곳뿐이라 유일하게 식별된다. AI 응답부의 다른 `'nova'` 들은 건드리지 않는다.
+
+---
+
+## PHASE 3 — 검증 (기대 카운트)
+
 ```bash
-grep -c "TARGET_EN_FIXED" chat_history_master.dart                 # → 0  (구 라벨 전멸)
-grep -c "the absolute correct answer" chat_history_master.dart     # → 0  (구 문구 제거)
-grep -c "moves \[USER_SPEECH\] toward" chat_history_master.dart     # → 0  (강제 교정 문구 제거)
-grep -c "MANY correct ways" chat_history_master.dart               # → 1  (신 IMPORTANT)
-grep -c "the user's OWN sentence" chat_history_master.dart         # → 1  (신 YES 분기)
-grep -c "단어선택" chat_history_master.dart                         # → 1  (신 사유 토큰)
-grep -c "final corrPrompt" chat_history_master.dart                # → 1
+# 1) step_expand: userVoice 토큰 3건(선언1 + fetcher1 + hybrid1)
+grep -c "userVoice" lib/custom_code/routine_mode_step_expand.dart        # 기대: 3
+
+# 2) roleplay: userVoice 토큰 2건(선언1 + fetcher1)
+grep -c "userVoice" lib/custom_code/routine_mode_roleplay.dart           # 기대: 2
+
+# 3) duo: 상대 말풍선이 nova가 됐는지 / _myVoice() 호출이 2건으로 줄었는지
+grep -c "_fetchTTSBytes(tgt, 'nova')" lib/custom_code/routine_mode_duo.dart   # 기대: 1
+grep -c "_myVoice()" lib/custom_code/routine_mode_duo.dart                    # 기대: 2 (정의1 + 내말풍선1)
+
+# 4) 유저턴에 'nova' 잔존 없는지 (각 파일 유저턴 라인 주변 육안 확인)
+grep -n "userTtsFetcher = ChunkedTtsFetcher(" -A4 lib/custom_code/routine_mode_step_expand.dart
+grep -n "userTtsFetcher = ChunkedTtsFetcher(" -A4 lib/custom_code/routine_mode_roleplay.dart
 ```
-하나라도 어긋나면 **롤백** 후 보고.
 
----
-
-## Phase 4 — 정적 분석 / 포맷 (개별 파일만)
+이어서 분석 게이트 + 개별 파일 포맷(폴더 금지):
 ```bash
-flutter analyze chat_history_master.dart
-dart format chat_history_master.dart
-```
-> ⚠️ `dart format`은 반드시 **이 파일 하나만**. 폴더 단위 금지(한글 문자열 깨짐).
+flutter analyze lib/custom_code/routine_mode_step_expand.dart
+flutter analyze lib/custom_code/routine_mode_roleplay.dart
+flutter analyze lib/custom_code/routine_mode_duo.dart
 
-문자열만 바꿨으므로 신규 error/warning 0 이어야 함.
+dart format lib/custom_code/routine_mode_step_expand.dart
+dart format lib/custom_code/routine_mode_roleplay.dart
+dart format lib/custom_code/routine_mode_duo.dart
+```
+> ⚠️ `dart format` 은 **반드시 개별 파일만**. 폴더 대상 금지(한글 문자열 UTF-8 손상 위험).
 
 ---
 
-## 실측 검증 (꼭 1회 수동 테스트)
-스샷의 막혔던 케이스로 재현 확인:
-1. 한국어: "방금 지나가는 자동차가 나의 자전거를 부딪혔어."
-2. 유저 발화(영어): **"The car passing by hit my bicycle."**
-3. 기대 결과: **틀렸다고 안 함.**
-   - `corrected_en` ≈ 유저 문장 그대로
-   - `reason_ko` = 칭찬(+선택적으로 "다른 표현: ...")
-4. 반대로 진짜 틀린 발화(예: "Car hit my bicycle yesterday passing")는 여전히 교정 + 정확한 사유.
-5. 교정 TTS("Shadow This!") 정상 생성·재생 확인.
+## 기대 동작 (적용 후)
+- **대화방 Expand / Roleplay**: 내 발화 되읽기 = 로비에서 고른 My Voice(echo/onyx/fable), AI 질문/확장 = nova.
+- **Duo**: 내 말풍선 = My Voice, 상대 말풍선 = nova (양쪽 화자 음성 구분됨).
+- **History / P1·P2·P3**: 변화 없음(기존 정상).
 
 ---
 
 ## 롤백
 ```bash
-git reset --hard HEAD~1          # push 전
-git revert <savepoint_hash>      # push 후
+# 아직 push 전:
+git reset --hard HEAD~1
+# 이미 push 했다면:
+git revert <savepoint_커밋_해시>
 ```
-
----
-
-## 참고 — 더 큰 개선 여지 (이번 범위 아님)
-지금은 정답이 1개라 "다른 표현" 안내가 제한적. 향후 Box 18에서 정답을
-`en` 단일 → `en_examples`(2~3개 배열)로 받으면 모델 판단 근거가 더 풍부해짐.
-단 Box 18 생성 프롬프트 + 호출부 변경 필요(변경 폭 큼) → 별도 결정 사안으로 보류.
