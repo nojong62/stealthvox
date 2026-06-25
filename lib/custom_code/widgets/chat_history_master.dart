@@ -2788,19 +2788,20 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
       // 2. GPT correction + reason (English only, pure pronunciation/grammar evaluation)
       final corrPrompt = '''You are an English pronunciation and grammar coach.
 
-[TARGET_EN_FIXED]: "$targetEn"
+[TARGET_EN]: "$targetEn"
 [USER_SPEECH]: "$transcript"
 
+IMPORTANT: English allows MANY correct ways to express the same meaning. [TARGET_EN] is only ONE valid example answer, NOT the single correct answer. Never treat a sentence as wrong just because it differs from [TARGET_EN].
+
 RULES — follow exactly:
-1. [TARGET_EN_FIXED] is the absolute correct answer. You must NEVER rephrase, reword, or replace it with any other sentence.
-2. Compare [USER_SPEECH] against [TARGET_EN_FIXED] only. No other reference exists.
-3. If [USER_SPEECH] matches [TARGET_EN_FIXED] closely (minor STT noise allowed):
-   - Set "corrected_en" to the exact text of [TARGET_EN_FIXED].
-   - Set "reason_ko" to a single short praise sentence in Korean.
-4. If [USER_SPEECH] differs from [TARGET_EN_FIXED]:
-   - Set "corrected_en" to the minimally corrected version that moves [USER_SPEECH] toward [TARGET_EN_FIXED] (fix only what is wrong: pronunciation spelling, grammar, word order, or tense).
-   - Set "reason_ko" to 1-3 Korean sentences explaining what was wrong (specify which of: 발음, 문법, 어순, 시제). Do NOT write sentences that redefine [TARGET_EN_FIXED] as a different sentence.
-5. Output ONLY valid JSON with exactly these two keys: {"corrected_en": "...", "reason_ko": "..."}''';
+1. First decide: is [USER_SPEECH], on its own, grammatically correct, natural, and does it convey the same meaning as [TARGET_EN]? Ignore minor STT noise such as missing punctuation or capitalization.
+2. If YES — the user's sentence is correct on its own:
+   - Set "corrected_en" to the user's OWN sentence, cleaned of STT noise only. Do NOT replace it with [TARGET_EN].
+   - Set "reason_ko" to one short Korean praise sentence. You MAY optionally append "다른 표현: [TARGET_EN]" as an alternative, but you MUST NOT call the user's sentence wrong.
+3. If NO — there is a genuine error (grammar, tense, word order, word choice, or a real pronunciation/spelling error):
+   - Set "corrected_en" to the minimally corrected version of [USER_SPEECH]. Fix ONLY the actual error and keep every part that is already correct.
+   - Set "reason_ko" to 1-3 Korean sentences naming the REAL problem (specify which of: 발음, 문법, 어순, 시제, 단어선택). Never invent an error that is not actually present.
+4. Output ONLY valid JSON with exactly these two keys: {"corrected_en": "...", "reason_ko": "..."}''';
 
       final resp = await http.post(
         Uri.parse('https://api.openai.com/v1/chat/completions'),
