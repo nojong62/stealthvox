@@ -47,92 +47,138 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# P3_EchoIt_인트로_본문만가림_v2 — History Expand P3 시작 연출 (본문만 가림)
+# P2_속도선택_게이트수정_v2 — 기본선택 제거 + AI음성까지 게이트 + 칩 펄스
 
-> ⚠️ **이전 `P3_EchoIt_인트로스플래시_지시서.md`(v1)는 폐기.** 그건 헤더·탭까지 화면 전체를 덮음.
-> 본 v2는 **본문(청크 대사) 영역만** 가리고 헤더·P1/P2/P3 탭은 계속 보이게 함.
+> 전제: `P2_속도선택_발화량팝업_v1`은 이미 적용됨(`_shadowStarted`, "속도 선택" 라벨, 칩 onTap 존재).
+> 본 v2는 그 위에 얹는 **보정**. 대상 파일: `lib/custom_code/chat_history_master.dart`.
 
-대상 파일: `lib/custom_code/chat_history_master.dart` (단일 파일)
-영향 범위: **P3(`chunkPractice`) 인트로 연출만.** Box 7·P1·P2·빌링·청크 재생 로직 무손상.
+## 문제 (현재 증상)
+1. 속도 칩 선택표시가 `_shadowSpeed == v` 기반 → 기본값 1.0 때문에 **"1"이 항상 선택돼 보임** (디폴트 없어야 함).
+2. `_shadowStarted` 게이트가 **유저 줄(하이라이트)만** 막고, **AI 줄(`_checkAndPlayAILine`)은 즉시 재생** → "AI 소리 바로 시작".
 
 ## 목표
-P3 진입 → **'Echo it!'만 2초** (본문 청크만 숨김, 헤더/탭은 유지) → 페이드인되며 **본 대화 내용 등장 + 첫 청크 시작**.
+- 선택 전엔 **어떤 칩도 선택 표시 안 함**, 칩들이 **은은하게 펄스**(선택 유도).
+- 속도 칩을 고르기 전엔 **AI 음성·유저 하이라이트 모두 시작 안 함**.
+- 칩 탭 → 그 속도로 시작(첫 줄이 AI면 재생, 유저면 하이라이트). 진행 중 재탭 = 새 속도로 현재 줄 재시작.
 
-## 방식
-오버레이(알약)는 그대로 두고, **본문 `Expanded` 만** `IgnorePointer + AnimatedOpacity`로 감싼다.
-인트로 동안 본문 opacity 0(+탭 차단) → 사라지면 페이드인. 알약은 비워진 본문 위에 떠서 'Echo it!'만 보임.
-
-## 변경 2건
-1. 인트로 지속시간 **1600ms → 2000ms**
-2. 본문 `Expanded` child를 `IgnorePointer(ignoring:_showEchoingOverlay) > AnimatedOpacity(opacity:…)`로 래핑 (여는 부분 + 닫는 괄호 2개)
+## 변경 3건 (Box 7·P1·P3·빌링 무손상)
+1. `_checkAndStartTurn`에 P2 게이트를 **맨 위로** 올려 AI/유저 모두 차단
+2. `_buildSpeedChip`: `sel` 기준을 `_shadowStarted && …`로, onTap을 `_checkAndStartTurn()`로
+3. `_buildSpeedChip`: 선택 전 칩에 `_blinkController` 기반 미세 스케일 펄스
 
 ---
 
 ## PHASE 0 — 세이브포인트
 ```bash
-git add -A && git commit -m "savepoint before P3_EchoIt_인트로_본문만가림_v2"
+git add -A && git commit -m "savepoint before P2_속도선택_게이트수정_v2"
 ```
 
-## PHASE 1 — 앵커 발견 (각 1건 확인)
+## PHASE 1 — 앵커 발견 (각 1건)
 ```bash
 F=lib/custom_code/chat_history_master.dart
-grep -n "_echoingOverlayTimer = Timer(const Duration(milliseconds: 1600)" $F   # 1건
-grep -n "child: _practicingPolished$" $F                                       # 1건 (본문 Expanded 시작)
-grep -n "// Do Echoing 팝업 오버레이" $F                                        # 1건 (본문 종료 직후)
+grep -n "// \[P2-START\] Do not start until the user chooses a speed chip." $F   # 1
+grep -n "final bool sel = _shadowSpeed == v;" $F                                  # 1
+grep -n "// \[P2-START\] Choosing a speed starts P2; mid-line changes restart at that speed." $F  # 1
+grep -n "Widget _buildStepExpandSelectScreen() {" $F                             # 1 (EDIT 1 종료 앵커)
 ```
-세 앵커 모두 1건이면 진행. 다르면 **중단·보고**.
+모두 1건이면 진행. 다르면 **중단·보고**.
 
 ---
 
 ## PHASE 2 — 편집 (아래 → 위)
 
-### EDIT 3 — 본문 종료부: 래퍼 닫는 괄호 2개 추가 (≈5815행)
+### EDIT 3 — 칩 종료부: 선택 전 펄스 래퍼 + return (≈6690행)
 **old_str**
 ```dart
-                        })),
-            ),
-          ],
+            fontWeight: sel ? FontWeight.bold : FontWeight.normal,
+          ),
         ),
-        // Do Echoing 팝업 오버레이
+      ),
+    );
+  }
+
+  Widget _buildStepExpandSelectScreen() {
 ```
 **new_str**
 ```dart
-                        })),
-                ), // [P3-INTRO] AnimatedOpacity close
-              ), // [P3-INTRO] IgnorePointer close
-            ),
-          ],
+            fontWeight: sel ? FontWeight.bold : FontWeight.normal,
+          ),
         ),
-        // Do Echoing 팝업 오버레이
+      ),
+    );
+    // [P2-START] 아직 안 골랐으면 칩을 은은하게 펄스시켜 선택을 유도한다.
+    if (_phase == ShadowingPhase.part2Practice && !_shadowStarted) {
+      return AnimatedBuilder(
+        animation: _blinkController,
+        builder: (_, child) => Transform.scale(
+          scale: 1.0 + 0.06 * _blinkController.value,
+          child: child,
+        ),
+        child: chip,
+      );
+    }
+    return chip;
+  }
+
+  Widget _buildStepExpandSelectScreen() {
 ```
 
-### EDIT 2 — 본문 시작부: IgnorePointer + AnimatedOpacity로 래핑 (≈5582행)
+### EDIT 2 — 칩 시작부: sel 기준 + onTap 라우팅 (≈6660행)
 **old_str**
 ```dart
-            Expanded(
-              child: _practicingPolished
+  Widget _buildSpeedChip(double v, String label) {
+    final bool sel = _shadowSpeed == v;
+    return GestureDetector(
+      onTap: () {
+        setState(() => _shadowSpeed = v);
+        // [P2-START] Choosing a speed starts P2; mid-line changes restart at that speed.
+        if (_phase == ShadowingPhase.part2Practice && !isPaused) {
+          _shadowStarted = true;
+          _startShadowHighlight();
+        }
+      },
+      child: Container(
 ```
 **new_str**
 ```dart
-            Expanded(
-              // [P3-INTRO] 인트로 동안 본문(청크 대사)만 숨기고 탭 차단. 헤더/탭은 유지.
-              child: IgnorePointer(
-                ignoring: _showEchoingOverlay,
-                child: AnimatedOpacity(
-                  opacity: _showEchoingOverlay ? 0.0 : 1.0,
-                  duration: const Duration(milliseconds: 500),
-                  child: _practicingPolished
+  Widget _buildSpeedChip(double v, String label) {
+    // [P2-START] 선택 전(_shadowStarted=false)에는 어떤 칩도 선택 표시하지 않는다.
+    final bool sel = _shadowStarted && _shadowSpeed == v;
+    final Widget chip = GestureDetector(
+      onTap: () {
+        setState(() => _shadowSpeed = v);
+        // [P2-START] 속도 선택이 시작 트리거. 진행 중 재탭은 새 속도로 현재 줄 재시작.
+        if (_phase == ShadowingPhase.part2Practice && !isPaused) {
+          _shadowStarted = true;
+          _checkAndStartTurn(); // AI 줄이면 재생, 유저 줄이면 하이라이트
+        }
+      },
+      child: Container(
 ```
-> 본문 ternary 내부는 들여쓰기를 그대로 둔다 → 마지막 `dart format`이 정렬 정리. 괄호 균형만 EDIT 3에서 +2로 맞춤.
 
-### EDIT 1 — 인트로 지속시간 1600ms → 2000ms (≈1771행)
+### EDIT 1 — `_checkAndStartTurn`: P2 게이트를 맨 위로 (AI·유저 모두 차단) (≈743행)
 **old_str**
 ```dart
-    _echoingOverlayTimer = Timer(const Duration(milliseconds: 1600), () {
+    final line = _tutorLines[currentIndex];
+    final bool isAiTurn = _isAiTurn(line); // 🆕 [BOX-32]
+    if (isAiTurn) {
+      _checkAndPlayAILine();
+    } else if (_phase == ShadowingPhase.part2Practice) {
+      // [P2-START] Do not start until the user chooses a speed chip.
+      if (_shadowStarted) _startShadowHighlight(); // [P2-SHADOW]
+    } else {
 ```
 **new_str**
 ```dart
-    _echoingOverlayTimer = Timer(const Duration(milliseconds: 2000), () {
+    // [P2-START] 속도를 고르기 전엔 AI 줄·유저 줄 모두 시작하지 않는다.
+    if (_phase == ShadowingPhase.part2Practice && !_shadowStarted) return;
+    final line = _tutorLines[currentIndex];
+    final bool isAiTurn = _isAiTurn(line); // 🆕 [BOX-32]
+    if (isAiTurn) {
+      _checkAndPlayAILine();
+    } else if (_phase == ShadowingPhase.part2Practice) {
+      _startShadowHighlight(); // [P2-SHADOW]
+    } else {
 ```
 
 ---
@@ -140,25 +186,28 @@ grep -n "// Do Echoing 팝업 오버레이" $F                                  
 ## PHASE 3 — 검증
 ```bash
 F=lib/custom_code/chat_history_master.dart
-grep -c "milliseconds: 1600" $F                          # 기대 0
-grep -c "ignoring: _showEchoingOverlay$" $F              # 기대 1 (신규, '!' 없는 버전)
-grep -c "opacity: _showEchoingOverlay ? 0.0 : 1.0" $F    # 기대 1 (본문 래퍼; 알약은 1.0:0.0이라 구분됨)
-grep -c "\[P3-INTRO\] AnimatedOpacity close" $F          # 기대 1
-grep -c "\[P3-INTRO\] IgnorePointer close" $F            # 기대 1
+grep -c "final bool sel = _shadowStarted && _shadowSpeed == v;" $F                       # 1
+grep -c "if (_phase == ShadowingPhase.part2Practice && !_shadowStarted) return;" $F      # 1
+grep -c "_checkAndStartTurn(); // AI 줄이면" $F                                           # 1
+grep -c "0.06 \* _blinkController.value" $F                                              # 1
+grep -c "final bool sel = _shadowSpeed == v;" $F                                         # 기대 0 (구버전 제거)
+grep -c "if (_shadowStarted) _startShadowHighlight();" $F                                # 기대 0 (게이트가 위로 이동)
 ```
-이어서 (괄호 균형·정렬은 여기서 검증·정리):
+이어서:
 ```bash
-flutter analyze lib/custom_code/chat_history_master.dart   # 에러 0 이어야 함
-dart format lib/custom_code/chat_history_master.dart       # ⚠️ 개별 파일만, 폴더 금지
+flutter analyze lib/custom_code/chat_history_master.dart
+dart format lib/custom_code/chat_history_master.dart   # ⚠️ 개별 파일만, 폴더 금지
 ```
-> `flutter analyze`에서 괄호/구문 에러가 나면 EDIT 3의 닫는 괄호 개수(+2)가 안 맞은 것 → 롤백 후 재적용.
 
 ---
 
 ## 기대 동작 (적용 후)
-1. P3 진입 → **헤더·P1/P2/P3 탭은 그대로**, 본문 청크 영역만 비워지고 가운데 **'Echo it!'** 표시.
-2. 약 2초 후 'Echo it!' 사라지며 **본문 청크가 페이드인** → `_onChunkTapped(0)` 첫 청크 시작.
-3. 인트로 중 본문 탭은 차단(IgnorePointer), 종료 후 정상 조작.
+1. P2 진입 → **어떤 속도도 선택 안 됨**, 0.8/1/1.2 칩이 **은은히 펄스**. 화면은 조용함(AI 음성 X).
+2. 유저가 칩 하나 탭 → 그 속도로 시작. 첫 줄이 AI면 재생 후 자동으로 유저 줄 하이라이트.
+3. 펄스는 선택 즉시 멈추고, 고른 칩만 앰버로 강조.
+4. 진행 중 다른 속도 탭 → 새 속도로 현재 줄 재시작.
+
+> 재탭 동작을 "현재 줄 재시작" 말고 "속도만 바꾸고 이어가기"로 원하면 EDIT 2의 `_checkAndStartTurn()`만 조정하면 됩니다(알려주세요).
 
 ## 롤백
 ```bash
