@@ -47,197 +47,350 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문
 
-# VOICE_POLICY_FIX_v1 — 라이브 대화 되읽기 보이스 정책 정합화
+# P2_속도선택_발화량팝업_v1 — History Expand P2 동작 변경
 
-## 목표 (정책)
-- **내 발화 / 호스트 본인 = My Voice = `FFAppState().aiVoice`** (로비 선택값, fallback `'echo'`)
-- **상대역(AI) / 듀오 상대방 = `'nova'` 고정**
-- History · P1/P2/P3(에코잉 리드)는 **이미 정책과 일치** → 손대지 않음
+대상 파일: `lib/custom_code/chat_history_master.dart` (단일 파일)
+영향 범위: **P2(`part2Practice`) 전용.** Box 7·P1·P3·turnPractice·빌링·History 재생 무손상.
 
-## 수정 대상 3건 (전부 호출부 인자 1줄 단위, Box 7 무손상)
-| # | 파일 | 위치 | 변경 |
-|---|---|---|---|
-| 1 | routine_mode_step_expand.dart | 유저턴 fetcher+hybrid | `'nova'` → `userVoice` |
-| 2 | routine_mode_roleplay.dart | 유저턴 fetcher | `'nova'` → `userVoice` |
-| 3 | routine_mode_duo.dart | 상대 말풍선 | `_myVoice()` → `'nova'` |
+## 변경 요약
+1. **(A) 라벨**: "속도" → "속도 선택"
+2. **(B) 시작 게이트**: P2 진입 시 자동 시작 제거 → **속도 칩(0.8/1/1.2) 탭이 시작 트리거**
+3. **(C) 발화량 50% 팝업**: 녹음 중 진폭 폴링으로 발화 비율 계산 → **50% 미만이면 "다시 말하기 / 다음 진행" 아이콘 팝업**, 다시 말하기 **3회까지**, 초과 시 자동 진행
+   - 측정 = **무료 프록시**(진폭 `getAmplitude() > -25dBFS` 틱 비율, 기존 VAD 임계 재사용). **Whisper·과금 추가 없음.**
 
-> ⚠️ Box 7 클래스(`TtsQueueManager`, `DeepgramV2VoiceManager`, `ChunkedTtsFetcher`, `HybridTtsPlayer`, `TtsCache`)는 **절대 수정 금지**. 본 작업은 전부 호출부 **인자값만** 바꾼다.
+> ⚠️ Box 7 클래스(`TtsQueueManager`/`DeepgramV2VoiceManager`/`ChunkedTtsFetcher`/`HybridTtsPlayer`/`TtsCache`) 수정 금지. 본 작업은 `_ChatHistoryMasterState` 내부 메서드/상태만 변경.
 
 ---
 
 ## PHASE 0 — 세이브포인트
 ```bash
-git add -A && git commit -m "savepoint before VOICE_POLICY_FIX_v1"
+git add -A && git commit -m "savepoint before P2_속도선택_발화량팝업_v1"
 ```
 
----
-
-## PHASE 1 — 파일 경로 + 앵커 발견 (편집 전 반드시 카운트 확인)
-
+## PHASE 1 — 앵커 발견 (편집 전 각 1건 확인)
 ```bash
-# (a) step_expand / roleplay 유저턴 앵커 — 각 파일에서 1건씩이어야 함
-grep -rn "ChunkedTtsFetcher userTtsFetcher = ChunkedTtsFetcher(" lib/custom_code/
-
-# (b) duo 상대 말풍선 앵커 — duo 파일에서 1건이어야 함
-grep -rn "if (bytes != null && _isConversationActive && !_isExiting) {" lib/custom_code/
-
-# (c) duo _myVoice() 호출 현황 — 편집 전 '3건'( 정의 1 + 내말풍선 1 + 상대말풍선 1 )
-grep -rn "_myVoice()" lib/custom_code/routine_mode_duo.dart
+grep -n 'double _shadowSpeed = 1.0; // \[P2-SHADOW\]' lib/custom_code/chat_history_master.dart   # 1
+grep -n 'onTap: () => setState(() => _shadowSpeed = v),' lib/custom_code/chat_history_master.dart  # 1
+grep -n '_shadowAdvanceTimer = Timer(const Duration(milliseconds: 1500)' lib/custom_code/chat_history_master.dart  # 1
+grep -n "debugPrint('\[startShadowRecording\] \$e');" lib/custom_code/chat_history_master.dart    # 1
+grep -n '_startShadowHighlight(); // \[P2-SHADOW\]' lib/custom_code/chat_history_master.dart        # 1 (in _checkAndStartTurn)
 ```
-
-**진행 조건**: (a)가 step_expand·roleplay에서 각 1건, (b)가 duo에서 1건, (c)가 duo에서 3건이면 OK. 카운트가 다르면 **중단하고 보고**.
+다섯 앵커 모두 1건이면 진행. 다르면 **중단·보고**.
 
 ---
 
-## PHASE 2 — 편집 (아래→위 순서로 적용)
+## PHASE 2 — 편집 (아래 → 위 순서)
 
-### EDIT 3 — duo 상대 말풍선: `_myVoice()` → `'nova'`
-파일: `lib/custom_code/routine_mode_duo.dart`
-
+### EDIT 7 — 속도 칩 onTap: 시작 트리거화 (≈6520행)
 **old_str**
 ```dart
-    // 내 타겟 소리로 재생 (직렬화)
-    _rememberGenerated(tgt);
-    _rememberGenerated(org);
-    final Uint8List? bytes = await _fetchTTSBytes(tgt, _myVoice());
-    if (bytes != null && _isConversationActive && !_isExiting) {
+    return GestureDetector(
+      onTap: () => setState(() => _shadowSpeed = v),
+      child: Container(
 ```
-
 **new_str**
 ```dart
-    // 🎙️ 상대 말풍선 소리 재생 (직렬화) — 상대방은 nova 고정
-    //    (내 목소리=FFAppState().aiVoice 는 호스트 본인 발화에만 사용)
-    _rememberGenerated(tgt);
-    _rememberGenerated(org);
-    final Uint8List? bytes = await _fetchTTSBytes(tgt, 'nova');
-    if (bytes != null && _isConversationActive && !_isExiting) {
+    return GestureDetector(
+      onTap: () {
+        setState(() => _shadowSpeed = v);
+        // [P2-START] 속도 선택이 시작 트리거. 진행 중 재탭은 새 속도로 현재 줄 재시작.
+        if (_phase == ShadowingPhase.part2Practice && !isPaused) {
+          _shadowStarted = true;
+          _startShadowHighlight();
+        }
+      },
+      child: Container(
 ```
 
-> 내 말풍선(상단의 `// 5. 내 타겟 소리 재생 (직렬화)` 블록, `_fetchTTSBytes(tgt, _myVoice())`)은 **그대로 둔다.** 위 앵커의 `!_isExiting` 한 줄 `if` 가 상대 말풍선 블록을 유일하게 식별한다.
-
----
-
-### EDIT 2 — roleplay 유저턴: `'nova'` → `userVoice`
-파일: `lib/custom_code/routine_mode_roleplay.dart`
-
+### EDIT 6 — 라벨 "속도" → "속도 선택" (≈6503행)
 **old_str**
 ```dart
-      String userTargetText = "";
-      ChunkedTtsFetcher userTtsFetcher = ChunkedTtsFetcher(
-        _openAiKey,
-        _ttsQueueManager,
-        "nova",
-        onLog: _log,
-      );
-      _ttsQueueManager.setUserTurn(true);
+          const Text(
+            "\uC18D\uB3C4",
+            style: TextStyle(color: Colors.white54, fontSize: 12),
+          ),
 ```
-
 **new_str**
 ```dart
-      String userTargetText = "";
-      // 🎙️ 유저 목소리 = 로비 선택값(FFAppState().aiVoice). AI는 nova 고정.
-      final String userVoice =
-          FFAppState().aiVoice.isNotEmpty ? FFAppState().aiVoice : 'echo';
-      ChunkedTtsFetcher userTtsFetcher = ChunkedTtsFetcher(
-        _openAiKey,
-        _ttsQueueManager,
-        userVoice,
-        onLog: _log,
-      );
-      _ttsQueueManager.setUserTurn(true);
+          const Text(
+            "\uC18D\uB3C4 \uC120\uD0DD", // 속도 선택
+            style: TextStyle(color: Colors.white54, fontSize: 12),
+          ),
 ```
 
-> roleplay 유저턴에는 `HybridTtsPlayer` 가 없다(확인됨). fetcher 한 곳만 교체.
-
----
-
-### EDIT 1 — step_expand 유저턴: `'nova'` → `userVoice` (fetcher + hybrid 동시)
-파일: `lib/custom_code/routine_mode_step_expand.dart`
-
+### EDIT 5 — P2 진입 리셋: 시작 게이트/카운터 초기화 (≈5950행)
 **old_str**
 ```dart
-      String userTargetText = "";
-      String userBuffer = "";
-      ChunkedTtsFetcher userTtsFetcher = ChunkedTtsFetcher(
-        _openAiKey,
-        _ttsQueueManager,
-        "nova",
-        onLog: _log,
-      );
-      final HybridTtsPlayer userHybridTts = HybridTtsPlayer(
-        apiKey: _openAiKey,
-        voice: 'nova',
-        onLog: _log,
-      );
+        _shadowWords = []; // [P2-SHADOW]
+        _shadowWordIdx = -1; // [P2-SHADOW]
+        _shadowSpeed = 1.0; // [P2-SHADOW]
+      });
 ```
-
 **new_str**
 ```dart
-      String userTargetText = "";
-      String userBuffer = "";
-      // 🎙️ 유저 목소리 = 로비 선택값(FFAppState().aiVoice). AI는 nova 고정.
-      final String userVoice =
-          FFAppState().aiVoice.isNotEmpty ? FFAppState().aiVoice : 'echo';
-      ChunkedTtsFetcher userTtsFetcher = ChunkedTtsFetcher(
-        _openAiKey,
-        _ttsQueueManager,
-        userVoice,
-        onLog: _log,
-      );
-      final HybridTtsPlayer userHybridTts = HybridTtsPlayer(
-        apiKey: _openAiKey,
-        voice: userVoice,
-        onLog: _log,
-      );
+        _shadowWords = []; // [P2-SHADOW]
+        _shadowWordIdx = -1; // [P2-SHADOW]
+        _shadowSpeed = 1.0; // [P2-SHADOW]
+        _shadowStarted = false; // [P2-START] 속도 선택 대기 상태로 진입
+        _shadowRereadCount = 0; // [P2-PROXY]
+      });
 ```
 
-> `String userBuffer = "";` 가 직전에 오는 블록은 이 유저턴 1곳뿐이라 유일하게 식별된다. AI 응답부의 다른 `'nova'` 들은 건드리지 않는다.
+### EDIT 4 — `_stopShadowRecording` 뒤에 평가/팝업 메서드 신설 (≈866행)
+**old_str**
+```dart
+    _shadowRecordLineIdx = -1;
+  }
+
+  Future<void> _checkAndPlayAILine() async {
+```
+**new_str**
+```dart
+    _shadowRecordLineIdx = -1;
+  }
+
+  // [P2-PROXY] 녹음 종료 + 발화량(진폭) 50% 판정.
+  //   ratio = 발화 틱 / 전체 틱. 50% 미만이고 다시읽기 3회 미만이면 팝업,
+  //   그 외(통과 또는 3회 초과)는 다음으로 진행.
+  Future<void> _stopShadowRecordingAndEvaluate() async {
+    _shadowAmpTimer?.cancel();
+    final double ratio =
+        _shadowTotalTicks == 0 ? 0.0 : _shadowVoicedTicks / _shadowTotalTicks;
+    await _stopShadowRecording();
+    if (!mounted || _phase != ShadowingPhase.part2Practice || isPaused) return;
+    if (ratio < 0.5 && _shadowRereadCount < 3) {
+      _showShadowRetryDialog();
+    } else {
+      _shadowRereadCount = 0;
+      Future.delayed(const Duration(milliseconds: 800), () {
+        if (mounted && _phase == ShadowingPhase.part2Practice && !isPaused) {
+          _nextTurn();
+        }
+      });
+    }
+  }
+
+  // [P2-PROXY] 발화량 부족 시 아이콘 팝업: 다시 말하기 / 다음 진행
+  void _showShadowRetryDialog() {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1C2E1C),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+          side: BorderSide(color: Colors.amber.withValues(alpha: 0.5)),
+        ),
+        contentPadding: const EdgeInsets.fromLTRB(20, 24, 20, 12),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              "\uC870\uAE08 \uB354 \uD06C\uAC8C \uC77D\uC5B4\uBCFC\uAE4C\uC694?", // 조금 더 크게 읽어볼까요?
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white70, fontSize: 14),
+            ),
+            const SizedBox(height: 18),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                // 다시 말하기
+                GestureDetector(
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    _shadowRereadCount++;
+                    if (mounted &&
+                        _phase == ShadowingPhase.part2Practice &&
+                        !isPaused) {
+                      _startShadowHighlight();
+                    }
+                  },
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      Icon(Icons.replay_rounded, color: Colors.amber, size: 34),
+                      SizedBox(height: 6),
+                      Text("\uB2E4\uC2DC \uB9D0\uD558\uAE30", // 다시 말하기
+                          style: TextStyle(color: Colors.amber, fontSize: 12)),
+                    ],
+                  ),
+                ),
+                // 다음 진행
+                GestureDetector(
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    _shadowRereadCount = 0;
+                    if (mounted &&
+                        _phase == ShadowingPhase.part2Practice &&
+                        !isPaused) {
+                      _nextTurn();
+                    }
+                  },
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      Icon(Icons.arrow_forward_rounded,
+                          color: Colors.greenAccent, size: 34),
+                      SizedBox(height: 6),
+                      Text("\uB2E4\uC74C \uC9C4\uD589", // 다음 진행
+                          style:
+                              TextStyle(color: Colors.greenAccent, fontSize: 12)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _checkAndPlayAILine() async {
+```
+
+### EDIT 3 — `_stepShadowHighlight` 종료 분기: 자동진행 → 판정으로 교체 (≈794행)
+**old_str**
+```dart
+    if (idx >= _shadowWords.length) {
+      if (mounted) setState(() => _shadowWordIdx = _shadowWords.length);
+      Future.delayed(
+        const Duration(milliseconds: 700),
+        () => _stopShadowRecording(),
+      );
+      _shadowAdvanceTimer?.cancel();
+      _shadowAdvanceTimer = Timer(const Duration(milliseconds: 1500), () {
+        if (mounted && _phase == ShadowingPhase.part2Practice && !isPaused) {
+          _nextTurn();
+        }
+      });
+      return;
+    }
+```
+**new_str**
+```dart
+    if (idx >= _shadowWords.length) {
+      if (mounted) setState(() => _shadowWordIdx = _shadowWords.length);
+      // [P2-PROXY] 700ms 후 녹음 종료 + 발화량 판정 → 통과/3회초과면 진행, 아니면 팝업
+      _shadowAdvanceTimer?.cancel();
+      _shadowAdvanceTimer = Timer(const Duration(milliseconds: 700), () async {
+        if (!mounted || _phase != ShadowingPhase.part2Practice || isPaused) {
+          return;
+        }
+        await _stopShadowRecordingAndEvaluate();
+      });
+      return;
+    }
+```
+
+### EDIT 2 — `_startShadowRecording`: 진폭 폴링 추가 (≈845행)
+**old_str**
+```dart
+      _shadowRecording = true;
+      _shadowRecordLineIdx = lineIdx;
+    } catch (e) {
+      debugPrint('[startShadowRecording] $e');
+```
+**new_str**
+```dart
+      _shadowRecording = true;
+      _shadowRecordLineIdx = lineIdx;
+      // [P2-PROXY] 녹음 중 100ms마다 진폭 폴링 → 발화 틱 비율 누적
+      _shadowVoicedTicks = 0;
+      _shadowTotalTicks = 0;
+      _shadowAmpTimer?.cancel();
+      _shadowAmpTimer =
+          Timer.periodic(const Duration(milliseconds: 100), (t) async {
+        if (!mounted || !_shadowRecording) {
+          t.cancel();
+          return;
+        }
+        try {
+          if (await appAudioRecorder.isRecording()) {
+            final amp = await appAudioRecorder.getAmplitude();
+            _shadowTotalTicks++;
+            if (amp.current > -25.0) _shadowVoicedTicks++; // VAD와 동일 임계
+          }
+        } catch (_) {
+          t.cancel();
+        }
+      });
+    } catch (e) {
+      debugPrint('[startShadowRecording] $e');
+```
+
+### EDIT 1 — `_checkAndStartTurn`: 자동 시작 게이트 (≈740행)
+**old_str**
+```dart
+    } else if (_phase == ShadowingPhase.part2Practice) {
+      _startShadowHighlight(); // [P2-SHADOW]
+    } else {
+```
+**new_str**
+```dart
+    } else if (_phase == ShadowingPhase.part2Practice) {
+      // [P2-START] 속도를 고르기 전엔 시작하지 않는다. 칩 탭에서 시작.
+      if (_shadowStarted) _startShadowHighlight(); // [P2-SHADOW]
+    } else {
+```
+
+### EDIT 0 — 상태 필드 신설 (≈134행)
+**old_str**
+```dart
+  double _shadowSpeed = 1.0; // [P2-SHADOW] 0.8/1.0/1.2, larger is faster.
+```
+**new_str**
+```dart
+  double _shadowSpeed = 1.0; // [P2-SHADOW] 0.8/1.0/1.2, larger is faster.
+  // [P2-START] 속도 선택 전에는 시작하지 않는다 (속도 칩 탭이 시작 트리거).
+  bool _shadowStarted = false;
+  // [P2-PROXY] 발화량(진폭) 프록시 — Whisper 없이 50% 판정. 다시읽기 최대 3회.
+  Timer? _shadowAmpTimer;
+  int _shadowVoicedTicks = 0;
+  int _shadowTotalTicks = 0;
+  int _shadowRereadCount = 0;
+```
 
 ---
 
 ## PHASE 3 — 검증 (기대 카운트)
-
 ```bash
-# 1) step_expand: userVoice 토큰 3건(선언1 + fetcher1 + hybrid1)
-grep -c "userVoice" lib/custom_code/routine_mode_step_expand.dart        # 기대: 3
-
-# 2) roleplay: userVoice 토큰 2건(선언1 + fetcher1)
-grep -c "userVoice" lib/custom_code/routine_mode_roleplay.dart           # 기대: 2
-
-# 3) duo: 상대 말풍선이 nova가 됐는지 / _myVoice() 호출이 2건으로 줄었는지
-grep -c "_fetchTTSBytes(tgt, 'nova')" lib/custom_code/routine_mode_duo.dart   # 기대: 1
-grep -c "_myVoice()" lib/custom_code/routine_mode_duo.dart                    # 기대: 2 (정의1 + 내말풍선1)
-
-# 4) 유저턴에 'nova' 잔존 없는지 (각 파일 유저턴 라인 주변 육안 확인)
-grep -n "userTtsFetcher = ChunkedTtsFetcher(" -A4 lib/custom_code/routine_mode_step_expand.dart
-grep -n "userTtsFetcher = ChunkedTtsFetcher(" -A4 lib/custom_code/routine_mode_roleplay.dart
+F=lib/custom_code/chat_history_master.dart
+grep -c "_shadowStarted" $F                    # 기대 4 (선언1+진입1+게이트1+칩1)
+grep -c "_shadowAmpTimer" $F                   # 기대 4 (선언1 + start 2 + evaluate 1)
+grep -c "_shadowVoicedTicks" $F                # 기대 3 (선언1 + start초기화1 + 증가1)
+grep -c "_shadowTotalTicks" $F                 # 기대 4 (선언1 + start초기화1 + 증가1 + ratio1)
+grep -c "_shadowRereadCount" $F                # 기대 6 (선언1+진입1+evaluate2+dialog2)
+grep -c "_stopShadowRecordingAndEvaluate" $F   # 기대 2 (정의1+호출1)
+grep -c "_showShadowRetryDialog" $F            # 기대 2 (정의1+호출1)
+grep -n "uC18D.uB3C4 .uC120.uD0DD" $F          # 라벨 "속도 선택" 1건
+grep -c "Timer(const Duration(milliseconds: 1500)" $F  # 기대 0 (구 자동진행 제거됨)
 ```
-
-이어서 분석 게이트 + 개별 파일 포맷(폴더 금지):
+이어서:
 ```bash
-flutter analyze lib/custom_code/routine_mode_step_expand.dart
-flutter analyze lib/custom_code/routine_mode_roleplay.dart
-flutter analyze lib/custom_code/routine_mode_duo.dart
-
-dart format lib/custom_code/routine_mode_step_expand.dart
-dart format lib/custom_code/routine_mode_roleplay.dart
-dart format lib/custom_code/routine_mode_duo.dart
+flutter analyze lib/custom_code/chat_history_master.dart
+dart format lib/custom_code/chat_history_master.dart   # ⚠️ 개별 파일만, 폴더 금지
 ```
-> ⚠️ `dart format` 은 **반드시 개별 파일만**. 폴더 대상 금지(한글 문자열 UTF-8 손상 위험).
 
 ---
 
 ## 기대 동작 (적용 후)
-- **대화방 Expand / Roleplay**: 내 발화 되읽기 = 로비에서 고른 My Voice(echo/onyx/fable), AI 질문/확장 = nova.
-- **Duo**: 내 말풍선 = My Voice, 상대 말풍선 = nova (양쪽 화자 음성 구분됨).
-- **History / P1·P2·P3**: 변화 없음(기존 정상).
+1. P2 진입 → 자동 시작 안 함. 상단에 **"속도 선택" + 0.8/1/1.2** 표시.
+2. 칩 하나 탭 → 그 속도로 하이라이트 따라읽기 시작(+녹음).
+3. 한 줄 끝 → 발화량 비율 계산. **≥50%면 800ms 후 자동 다음 줄**, **<50%면 팝업**.
+4. 팝업: **다시 말하기**(같은 줄 재실행, 최대 3회) / **다음 진행**(즉시 다음). 4번째 실패 시 자동 진행.
+5. 여러 줄이면 속도는 처음 한 번만 고르고 이후 줄은 동일 속도로 자동 진행.
 
----
+## 비용/빌링
+- Whisper STT **추가 없음** → P2 API 비용 0 추가. 진폭 폴링은 로컬. **빌링 로직 무변경.**
 
 ## 롤백
 ```bash
-# 아직 push 전:
-git reset --hard HEAD~1
-# 이미 push 했다면:
-git revert <savepoint_커밋_해시>
+git reset --hard HEAD~1        # push 전
+# 또는
+git revert <savepoint_해시>    # push 후
 ```
+
+## 참고 (낡은 주석)
+129행·752행의 `// ... P2 only, no recording` 주석은 실제와 불일치(녹음함). EDIT와 무관하나, 원하면 752행 헤더를 `// [P2-SHADOW] Highlight read-along. (녹음 + 발화량 프록시 판정 포함)` 로 정정 가능.
