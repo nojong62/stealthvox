@@ -2371,12 +2371,14 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
         builder: (_, ss) {
           _dialogSetState = ss;
           return DraggableScrollableSheet(
-            initialChildSize: 0.65,
+            initialChildSize: 0.72,
             minChildSize: 0.45,
             maxChildSize: 0.95,
             expand: false,
             builder: (_, scrollController) => SingleChildScrollView(
               controller: scrollController,
+              padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(ctx).padding.bottom + 24),
               child: _buildAccordion(
                 docId,
                 baseText,
@@ -2619,6 +2621,29 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
 
             const SizedBox(height: 18),
 
+            // Show transcript above the bottom action buttons.
+            if (_appTranscript.isNotEmpty) ...[
+              Container(
+                width: double.infinity,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: const BoxDecoration(
+                  color: Colors.transparent,
+                  borderRadius: BorderRadius.all(Radius.circular(16)),
+                ),
+                child: Text(
+                  _appTranscript,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      color: Colors.white54,
+                      fontSize: 13,
+                      height: 1.4,
+                      fontStyle: FontStyle.italic),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+
             // 하단 버튼
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -2651,25 +2676,6 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
                   ),
                 ),
               ],
-            ),
-
-            // 투명 말풍선 (STT 결과) - 화면 최하단
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              decoration: const BoxDecoration(
-                color: Colors.transparent,
-                borderRadius: BorderRadius.all(Radius.circular(16)),
-              ),
-              child: Text(
-                _appTranscript,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                    color: Colors.white54,
-                    fontSize: 13,
-                    height: 1.4,
-                    fontStyle: FontStyle.italic),
-              ),
             ),
           ],
         ],
