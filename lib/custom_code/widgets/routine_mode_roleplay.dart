@@ -3811,11 +3811,11 @@ Korean is a heavy pro-drop language - subjects, objects, and pronouns are consta
 [CASE CORRECTION] — Check this FIRST, only when the conversation history contains at least one "User:" line.
 The user is correcting the AI's misunderstanding or mishearing of their PREVIOUS utterance.
 Signs:
-- Starts with a correction signal: "아니" / "아니요" / "아 그게 아니라" / "다시" / "내 말은" / "그러니까" / "I mean" / "actually" / "no," / "wait,"
+- Starts with a correction signal: "아니" / "아니요" / "아 그게 아니라" / "다시" / "내 말은" / "그러니까" / "내가 말한 건" / "라고 했잖아" / "라고 말했어" / "I mean" / "I said" / "what I said was" / "that's not what I said" / "actually" / "no," / "wait,"
 - AND the content is clearly a re-statement or clarification of the LAST "User:" line in the history, NOT new information.
 - The user is essentially saying "that's not what I said — what I said was X."
 If this is a correction, output EXACTLY: [CORRECTION]  (and nothing else)
-Do NOT output [CORRECTION] when the user simply adds new details that happen to start with "아니" etc.
+Do NOT output [CORRECTION] for genuinely NEW information that merely starts with "아니" etc. BUT if the AI's previous turn clearly captured the user's earlier utterance as DIFFERENT content (a wrong word or a wrong topic) and the user is now restating what they actually meant, output [CORRECTION] even when the restatement also reads like a fresh answer. Test: would the user naturally say "that's not what I said"? If yes -> output [CORRECTION].
 
 [CASE MISHEARD] — Check this SECOND, only when the history contains at least one "User:" line.
 The user is COMPLAINING that their previous words were misheard or misunderstood, WITHOUT restating what they actually said.
