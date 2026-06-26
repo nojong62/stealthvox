@@ -48,282 +48,124 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-# [B-정석 / 코어] usage_logs 서버 전용화 지시서
+# 인스트럭션: CORRECTION 신호 보강 + 가드 완화 (백업 패치)
 
-## 배경 / 목적
-현재 `billing_ticker.saveUsageLog()`가 클라이언트에서 `users/{uid}/usage_logs`에 직접 `.add()` 한다.
-규칙은 `allow write: if false`라 차단되어 `permission-denied`가 난다.
-→ **서버 콜러블 `logUsageSession`**을 신설해 Admin SDK로 기록한다(규칙 우회). 클라 직접쓰기는 제거.
-created_at / after_seconds / before_seconds는 **서버 권위로 확정(정합형)**.
+## 목적
+유저가 **말로** AI의 오해를 정정할 때 `[CORRECTION]` 판정을 더 잘 잡도록 분류 프롬프트를 보강한다.
+- (a) 정정 신호 목록에 결정적 신호 추가: `"라고 했잖아" / "라고 말했어" / "I said" / "that's not what I said"` 등
+- (b) "아니로 시작해도 새 정보면 제외" 가드가 **진짜 정정**까지 잡아먹는 문제 완화
 
-### 설계 요점
-- **규칙 무변경**: `write:false` 유지가 곧 "클라 직접쓰기 영구 차단". Admin SDK는 규칙 우회 → 양립.
-- **store_master 무변경**: 세션당 1줄 모델 유지(Usage / Admin Time Log 화면 그대로).
-- **정합형**: 서버가 `remainingTime` 재조회 = `after`, `before = after + seconds_used`(역산).
-- **식별자 선설계**: 서버가 `room_id`/`session_id`를 옵션(기본 "")으로 받음. 이번엔 클라가 ""로 전송.
-  실제 값 배선(모드 파일)은 **후속 "식별자 보강" 지시서**에서 → 그땐 서버 재배포 불필요(클라 전용).
+> 로직 변경 0. **프롬프트 문자열만** 수정. Box 7 / billing / P1·P2·P3 / turnPractice 무관.
 
-### 영향 범위
-- `firebase/functions/index.js` (함수 1개 **추가**)
-- `lib/custom_code/actions/billing_ticker.dart` (메서드 1개 추가 + saveUsageLog 쓰기 1곳 교체)
-- 무변경: `firestore.rules`, `store_master.dart`, Box 7, 다른 모드 파일
+## 대상 파일 (2개)
+- `routine_mode_roleplay.dart`  ← **CRLF 파일** (줄 끝 `\r\n`)
+- `routine_mode_step_expand.dart` ← LF 파일
+
+> ⚠️ str_replace 앵커는 모두 **단일 라인 내부 텍스트**만 사용한다. 줄 끝 `\r`/`\n`은 앵커에 포함하지 않으므로 CRLF/LF 차이의 영향을 받지 않는다.
 
 ---
 
-## Phase 0 — 세이브포인트
-```bash
-git add -A && git commit -m "savepoint: before usage_logs server-side (logUsageSession)"
+## STEP 0 · Savepoint
 ```
-
-## Phase 1 — 사전 검증
-```bash
-# 서버: 의존성 존재 & 중복 정의 없음
-grep -c "logUsageSession"            firebase/functions/index.js   # 기대값: 0 (아직 없음)
-grep -c "admin.firestore"            firebase/functions/index.js   # 1 이상 (admin 사용 중)
-grep -c "functions.https.onCall"     firebase/functions/index.js   # 1 이상 (패턴 존재)
-
-# 클라: 앵커/기준 카운트
-grep -c "_callLogUsageSession"               lib/custom_code/actions/billing_ticker.dart  # 0
-grep -c "collection('usage_logs')"           lib/custom_code/actions/billing_ticker.dart  # 1 (saveUsageLog의 .add)
-grep -c "firestore save success"             lib/custom_code/actions/billing_ticker.dart  # 1 (EDIT B 앵커 유일성)
-```
-> 위 기준값과 다르면 **중단** 후 보고.
-
----
-
-## Phase 2 — 수정
-
-### 🟦 EDIT 2-S (서버) — index.js **끝에 함수 추가**
-> 파일 **맨 끝(최상위 스코프)** 에 아래 블록을 그대로 append.
-> (top-level `exports.X`는 위치 무관. `admin`/`functions`는 이미 import됨 = Phase 1에서 확인)
-
-```javascript
-
-// 🔧 [B-정석] usage_logs 서버 전용 기록. 클라는 이 콜러블만 호출하고
-//   created_at/after/before는 서버 권위로 확정한다(정합형).
-//   Admin SDK는 Firestore 규칙(write:false)을 우회하므로 클라 직접쓰기 차단과 양립한다.
-exports.logUsageSession = functions.https.onCall(async (data, context) => {
-  if (!context.auth) {
-    throw new functions.https.HttpsError(
-      "unauthenticated",
-      "Request must be authenticated."
-    );
-  }
-  const uid = context.auth.uid;
-
-  const mode = typeof data.mode === "string" ? data.mode : "";
-  const rate = typeof data.rate === "number" ? data.rate : null;
-  const secondsUsed = data.seconds_used;
-  const actualSeconds = data.actual_seconds;
-  const roomId = typeof data.room_id === "string" ? data.room_id : "";
-  const sessionId = typeof data.session_id === "string" ? data.session_id : "";
-
-  if (
-    typeof secondsUsed !== "number" ||
-    !Number.isInteger(secondsUsed) ||
-    secondsUsed <= 0 ||
-    secondsUsed > 86400
-  ) {
-    throw new functions.https.HttpsError(
-      "invalid-argument",
-      "seconds_used must be a positive integer (<= 86400)."
-    );
-  }
-  if (
-    typeof actualSeconds !== "number" ||
-    !Number.isInteger(actualSeconds) ||
-    actualSeconds < 0 ||
-    actualSeconds > 86400
-  ) {
-    throw new functions.https.HttpsError(
-      "invalid-argument",
-      "actual_seconds must be a non-negative integer (<= 86400)."
-    );
-  }
-
-  // 정합형: after = 서버가 현재 remainingTime 재조회, before = 역산.
-  const userRef = admin.firestore().doc("users/" + uid);
-  const snap = await userRef.get();
-  const afterSeconds =
-    snap.exists && typeof snap.data().remainingTime === "number"
-      ? snap.data().remainingTime
-      : 0;
-  const beforeSeconds = afterSeconds + secondsUsed;
-
-  await admin
-    .firestore()
-    .collection("users")
-    .doc(uid)
-    .collection("usage_logs")
-    .add({
-      created_at: admin.firestore.FieldValue.serverTimestamp(),
-      mode: mode,
-      rate: rate,
-      seconds_used: secondsUsed,
-      actual_seconds: actualSeconds,
-      before_seconds: beforeSeconds,
-      after_seconds: afterSeconds,
-      room_id: roomId,
-      session_id: sessionId,
-    });
-
-  functions.logger.info("logUsageSession", {
-    uid: uid,
-    mode: mode,
-    seconds_used: secondsUsed,
-    before: beforeSeconds,
-    after: afterSeconds,
-  });
-
-  return {
-    ok: true,
-    before_seconds: beforeSeconds,
-    after_seconds: afterSeconds,
-  };
-});
+git add -A && git commit -m "savepoint: before CORRECTION signal backup patch"
 ```
 
 ---
 
-### 🟩 클라이언트 — billing_ticker.dart (str_replace, 아래→위 순서)
-
-#### ✅ EDIT 2-B (먼저 / 위쪽 라인) — `_callDeductTime` 뒤에 신규 메서드 추가
-
-**find:** (이 블록은 파일 내 유일 = Phase 1 `firestore save success`=1로 확인)
-```dart
-      _addBillingLog('[BILLING] firestore save success');
-      _lastFlushResult =
-          'OK (-${seconds}s) @ ${DateTime.now().toIso8601String().substring(11, 19)}';
-    }
-  }
+## PHASE 1 · 앵커 유일성 검증 (각 grep 결과가 정확히 1이어야 진행)
+```bash
+grep -c 'Starts with a correction signal:' routine_mode_roleplay.dart        # 기대: 1
+grep -c 'happen to start with "아니" etc.'   routine_mode_roleplay.dart        # 기대: 1
+grep -c 'Starts with correction signals:'  routine_mode_step_expand.dart      # 기대: 1
+grep -c 'happen to start with "아니" etc.'   routine_mode_step_expand.dart      # 기대: 1
 ```
-
-**replace:**
-```dart
-      _addBillingLog('[BILLING] firestore save success');
-      _lastFlushResult =
-          'OK (-${seconds}s) @ ${DateTime.now().toIso8601String().substring(11, 19)}';
-    }
-  }
-
-  /// 🔧 [B-정석] usage_logs 서버 전용 기록 콜러블 호출.
-  ///   created_at/after_seconds/before_seconds는 서버가 권위로 확정(정합형).
-  ///   room_id/session_id는 후속 보강 전까지 빈 문자열로 전송.
-  Future<void> _callLogUsageSession({
-    required int secondsUsed,
-    required int actualSeconds,
-  }) async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    final idToken = await user.getIdToken();
-    final projectId = FirebaseFirestore.instance.app.options.projectId;
-
-    final response = await http
-        .post(
-          Uri.parse(
-              'https://$_kBillingRegion-$projectId.cloudfunctions.net/logUsageSession'),
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $idToken',
-          },
-          body: jsonEncode({
-            'data': {
-              'mode': _sessionMode,
-              'rate': _sessionRateValue,
-              'seconds_used': secondsUsed,
-              'actual_seconds': actualSeconds,
-              'room_id': '', // TODO[plumb]: Duo 방 ID (후속 보강)
-              'session_id': '', // TODO[plumb]: chat_history sessionDocId (후속 보강)
-            }
-          }),
-        )
-        .timeout(const Duration(seconds: 10));
-
-    if (response.statusCode != 200) {
-      throw Exception(
-          'logUsageSession HTTP ${response.statusCode}: ${response.body}');
-    }
-  }
-```
-
-#### ✅ EDIT 2-A (나중 / 아래쪽 라인) — saveUsageLog의 Firestore 직접쓰기 교체
-
-**find:**
-```dart
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .collection('usage_logs')
-          .add({
-        'created_at': FieldValue.serverTimestamp(),
-        'mode': _sessionMode,
-        'seconds_used': secondsUsed,
-        'actual_seconds': actualSeconds,
-        'rate': _sessionRateValue,
-        'before_seconds': beforeSeconds,
-        'after_seconds': afterSeconds,
-      });
-```
-
-**replace:**
-```dart
-      // 🔧 [B-정석] 클라 직접 쓰기 제거 → 서버 콜러블이 권위로 기록.
-      await _callLogUsageSession(
-        secondsUsed: secondsUsed,
-        actualSeconds: actualSeconds,
-      );
-```
-
-> 참고: `beforeSeconds`/`afterSeconds` 지역변수는 로그 출력(`[USAGE_LOG] saved ... before=$beforeSeconds`)에 계속 쓰이므로 **제거하지 말 것**. `FieldValue` 심볼은 이 블록에서만 쓰였지만 `cloud_firestore` import는 `FirebaseFirestore.instance`가 계속 사용하므로 import 제거 불필요.
+하나라도 1이 아니면 **중단하고 보고**.
 
 ---
 
-## Phase 3 — 검증
-```bash
-# 클라
-grep -c "_callLogUsageSession"               lib/custom_code/actions/billing_ticker.dart  # 기대값: 2
-grep -c "cloudfunctions.net/logUsageSession" lib/custom_code/actions/billing_ticker.dart  # 1
-grep -c "collection('usage_logs')"           lib/custom_code/actions/billing_ticker.dart  # 0 (직접쓰기 제거됨)
-grep -c "'before_seconds': beforeSeconds"    lib/custom_code/actions/billing_ticker.dart  # 0 (클라 전송 제거)
-# 중괄호 균형
-echo "{ = $(grep -o '{' lib/custom_code/actions/billing_ticker.dart | wc -l) , } = $(grep -o '}' lib/custom_code/actions/billing_ticker.dart | wc -l)"  # 좌우 동일
+## PHASE 2 · str_replace 편집 (파일별, bottom-to-top)
 
-# 서버
-grep -c "logUsageSession"  firebase/functions/index.js   # 1 이상
-node -e "require('./firebase/functions/index.js')" 2>&1 | head -5   # 문법 로드 에러 없으면 OK (없을 시 무시 가능)
+### 파일 1: routine_mode_roleplay.dart
+
+#### ②-B 먼저 (아래 라인 3818 = 가드 완화)
+- **old_str**
+```
+Do NOT output [CORRECTION] when the user simply adds new details that happen to start with "아니" etc.
+```
+- **new_str**
+```
+Do NOT output [CORRECTION] for genuinely NEW information that merely starts with "아니" etc. BUT if the AI's previous turn clearly captured the user's earlier utterance as DIFFERENT content (a wrong word or a wrong topic) and the user is now restating what they actually meant, output [CORRECTION] even when the restatement also reads like a fresh answer. Test: would the user naturally say "that's not what I said"? If yes -> output [CORRECTION].
 ```
 
-## Phase 4 — 분석 / 포맷 / 배포
-```bash
-flutter analyze lib/custom_code/actions/billing_ticker.dart
-dart format lib/custom_code/actions/billing_ticker.dart   # ⚠️ 이 파일 1개만
-
-cd firebase
-firebase deploy --only functions:logUsageSession   # 신규 함수만 우선 배포 가능
-# (또는) firebase deploy --only functions:functions
+#### ①-A 다음 (위 라인 3814 = 신호 목록 확장)
+- **old_str**
 ```
-> `analyze` 신규 경고/에러 0건이어야 함. 배포 로그에서 `logUsageSession` create/update 확인.
+- Starts with a correction signal: "아니" / "아니요" / "아 그게 아니라" / "다시" / "내 말은" / "그러니까" / "I mean" / "actually" / "no," / "wait,"
+```
+- **new_str**
+```
+- Starts with a correction signal: "아니" / "아니요" / "아 그게 아니라" / "다시" / "내 말은" / "그러니까" / "내가 말한 건" / "라고 했잖아" / "라고 말했어" / "I mean" / "I said" / "what I said was" / "that's not what I said" / "actually" / "no," / "wait,"
+```
 
-## Phase 5 — 롤백
+### 파일 2: routine_mode_step_expand.dart
+
+#### ②-B 먼저 (라인 5054 = 가드 완화)
+- **old_str**
+```
+Do NOT output [CORRECTION] when the user simply adds new details that happen to start with "아니" etc.
+```
+- **new_str**
+```
+Do NOT output [CORRECTION] for genuinely NEW information that merely starts with "아니" etc. BUT if the AI's previous turn clearly captured the user's earlier utterance as DIFFERENT content (a wrong word or a wrong topic) and the user is now restating what they actually meant, output [CORRECTION] even when the restatement also reads like a fresh answer. Test: would the user naturally say "that's not what I said"? If yes -> output [CORRECTION].
+```
+
+#### ①-A 다음 (라인 5050 = 신호 목록 확장)
+- **old_str**
+```
+- Starts with correction signals: "아니" / "아니요" / "아 그게 아니라" / "다시" / "내 말은" / "그러니까" / "I mean" / "actually" / "no," / "wait,"
+```
+- **new_str**
+```
+- Starts with correction signals: "아니" / "아니요" / "아 그게 아니라" / "다시" / "내 말은" / "그러니까" / "내가 말한 건" / "라고 했잖아" / "라고 말했어" / "I mean" / "I said" / "what I said was" / "that's not what I said" / "actually" / "no," / "wait,"
+```
+
+---
+
+## PHASE 3 · 검증 (grep count)
 ```bash
-git checkout -- lib/custom_code/actions/billing_ticker.dart firebase/functions/index.js
+# 신규 신호가 각 파일에 정확히 1번씩 들어갔는지
+grep -c '"that'"'"'s not what I said"' routine_mode_roleplay.dart      # 기대: 1
+grep -c '"that'"'"'s not what I said"' routine_mode_step_expand.dart   # 기대: 1
+# 구 가드 문구가 완전히 사라졌는지
+grep -c 'simply adds new details' routine_mode_roleplay.dart          # 기대: 0
+grep -c 'simply adds new details' routine_mode_step_expand.dart       # 기대: 0
+```
+
+---
+
+## PHASE 4 · analyze + format (단일 파일만)
+```bash
+flutter analyze lib/custom_code/widgets/routine_mode_roleplay.dart
+flutter analyze lib/custom_code/widgets/routine_mode_step_expand.dart
+dart format lib/custom_code/widgets/routine_mode_roleplay.dart
+dart format lib/custom_code/widgets/routine_mode_step_expand.dart
+```
+> ⚠️ **폴더 대상 format 금지** (한글 UTF-8 문자열 손상). 반드시 개별 파일만.
+> (경로는 실제 프로젝트 구조에 맞춰 조정)
+
+---
+
+## ROLLBACK
+문제 시:
+```
 git reset --hard HEAD~1
-# 함수 롤백이 필요하면: 이전 index.js로 되돌린 뒤 재배포, 또는
-#   firebase functions:delete logUsageSession  (신규 함수 제거)
 ```
 
 ---
 
-## 배포 후 실기기 확인
-1. 차감이 발생하는 세션을 1회 진행 후 종료(pause/dispose).
-2. 관리자 로그에서 `[USAGE_LOG] saved mode=... seconds_used=...` 출력 + `permission-denied` **소멸** 확인.
-3. Firestore 콘솔 `users/{uid}/usage_logs` 새 문서: `before_seconds = after_seconds + seconds_used` 정합, `room_id=""`, `session_id=""`, `created_at` 서버시간 확인.
-4. store_master **Usage 화면**(최근 세션/오늘·주 합산)과 **Admin Time Log**가 기존과 동일하게 표시되는지(세션 1줄) 확인.
-
----
-
-## 다음 단계 (별도 지시서)
-**식별자 보강**: 각 모드(Anyone/Roleplay/StepExpand/Duo)에서 `sessionDocId`/`roomId`가 확정되는 시점에
-`BillingTicker.instance`로 전달 → `_callLogUsageSession`의 `room_id`/`session_id` 빈문자열을 실제값으로 교체.
-서버는 이미 두 필드를 수용하므로 **클라 전용 변경**(서버 재배포 불필요). 모드 파일 배선이라 별도 리뷰로 분리.
+## 검증 체크리스트 (실장 확인용)
+- [ ] PHASE 1 grep 4개 모두 1
+- [ ] PHASE 3 신규 신호 카운트 각 1, 구 가드 0
+- [ ] analyze 통과 (신규 경고 없음)
+- [ ] format 후 한글 문자열 깨짐 없음 (git diff로 육안 확인)
+- [ ] 실기기: AI가 오해 → "아니, 나 ~라고 했잖아" → 직전 교환 삭제 후 재처리 동작
