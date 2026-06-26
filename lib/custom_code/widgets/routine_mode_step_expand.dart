@@ -3850,6 +3850,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   // 하단은 노란 불빛 인디케이터만 표시하여 채팅 공간 최대화
   Widget _buildControlArea(double bp) {
     if (_isPracticeMode) return const SizedBox.shrink();
+    final bool showCorrectBtn = !_isSessionComplete && _turnCounter >= 1;
     return Container(
       padding: EdgeInsets.fromLTRB(24, 8, 24, bp),
       child: Row(
@@ -3862,7 +3863,31 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
                 fontSize: 16,
                 fontWeight: FontWeight.bold),
           ),
-          // 작동 중 노란 불빛 인디케이터 (마이크 버튼 대신)
+          // ↺ 원탭 정정 버튼
+          if (showCorrectBtn)
+            GestureDetector(
+              onTap: _oneTapCorrection,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.white24, width: 1),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.replay_rounded,
+                        color: Colors.white54, size: 14),
+                    SizedBox(width: 4),
+                    Text('정정',
+                        style: TextStyle(color: Colors.white54, fontSize: 12)),
+                  ],
+                ),
+              ),
+            ),
+          // 작동 중 노란 불빛 인디케이터
           Container(
             width: 10,
             height: 10,
@@ -3882,6 +3907,37 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         ],
       ),
     );
+  }
+
+  // ====================================================================
+  // 🔄 [원탭 ↺ 정정] 마지막 HOST+SYSTEM 쌍 삭제 후 재질문
+  // ====================================================================
+  Future<void> _oneTapCorrection() async {
+    if (_isSessionComplete || _isPracticeMode || _turnCounter < 1) return;
+
+    _stopEverything();
+
+    if (mounted) {
+      setState(() {
+        _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+        final lastHostIdx =
+            _localMessages.lastIndexWhere((m) => m['role'] == 'HOST');
+        if (lastHostIdx != -1) _localMessages.removeAt(lastHostIdx);
+        final lastSysIdx =
+            _localMessages.lastIndexWhere((m) => m['role'] == 'SYSTEM');
+        if (lastSysIdx != -1) _localMessages.removeAt(lastSysIdx);
+      });
+      _scrollToBottom();
+    }
+
+    _turnCounter--;
+
+    final pipeResult = _buildCleanContext(maxMessages: 10);
+    final contextStr = pipeResult['contextStr']!;
+    final targetLangName =
+        FFAppState().targetLang.isNotEmpty ? FFAppState().targetLang : 'English';
+
+    await _handleRetryQuestion(contextStr, targetLangName, isMisheard: true);
   }
 }
 
