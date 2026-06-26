@@ -341,6 +341,9 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   // 오디오 및 UI
   final List<Map<String, dynamic>> _localMessages = [];
   final ScrollController _scrollController = ScrollController();
+  // [SCROLL-THROTTLE] State for suppressing excessive top-pin scroll calls.
+  DateTime? _lastScrollTopAt;
+  int _lastScrollTopIndex = -1;
   final Map<int, GlobalKey> _itemKeys = {};
   DeepgramV2VoiceManager? _voiceManager;
   final AudioRecorder _audioRecorder = AudioRecorder();
@@ -1585,6 +1588,17 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 
   // 현재 유저 확장 문장을 화면 상단에 고정해 처음부터 보이게 유지.
   void _scrollToCurrentTop(int index) {
+    // [SCROLL-THROTTLE] Streaming GPT chunks can request the same 220ms scroll
+    // animation repeatedly. Let new bubble indexes through immediately, but
+    // suppress repeated calls for the same index inside 150ms.
+    final now = DateTime.now();
+    if (_lastScrollTopIndex == index &&
+        _lastScrollTopAt != null &&
+        now.difference(_lastScrollTopAt!).inMilliseconds < 150) {
+      return;
+    }
+    _lastScrollTopAt = now;
+    _lastScrollTopIndex = index;
     _log('🧭 [SCROLL-TOP]', 'index=$index');
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
