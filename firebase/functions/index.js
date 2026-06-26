@@ -334,3 +334,85 @@ exports.revenueCatWebhook = functions
       res.status(500).send("Internal Error");
     }
   });
+
+// [B-BILLING] Server-owned usage_logs writer. The client only calls this
+// callable; created_at/after/before are derived on the server for consistency.
+// Admin SDK bypasses Firestore rules, so client direct writes remain blocked.
+exports.logUsageSession = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      "unauthenticated",
+      "Request must be authenticated."
+    );
+  }
+  const uid = context.auth.uid;
+
+  const mode = typeof data.mode === "string" ? data.mode : "";
+  const rate = typeof data.rate === "number" ? data.rate : null;
+  const secondsUsed = data.seconds_used;
+  const actualSeconds = data.actual_seconds;
+  const roomId = typeof data.room_id === "string" ? data.room_id : "";
+  const sessionId = typeof data.session_id === "string" ? data.session_id : "";
+
+  if (
+    typeof secondsUsed !== "number" ||
+    !Number.isInteger(secondsUsed) ||
+    secondsUsed <= 0 ||
+    secondsUsed > 86400
+  ) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "seconds_used must be a positive integer (<= 86400)."
+    );
+  }
+  if (
+    typeof actualSeconds !== "number" ||
+    !Number.isInteger(actualSeconds) ||
+    actualSeconds < 0 ||
+    actualSeconds > 86400
+  ) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "actual_seconds must be a non-negative integer (<= 86400)."
+    );
+  }
+
+  const userRef = admin.firestore().doc("users/" + uid);
+  const snap = await userRef.get();
+  const afterSeconds =
+    snap.exists && typeof snap.data().remainingTime === "number"
+      ? snap.data().remainingTime
+      : 0;
+  const beforeSeconds = afterSeconds + secondsUsed;
+
+  await admin
+    .firestore()
+    .collection("users")
+    .doc(uid)
+    .collection("usage_logs")
+    .add({
+      created_at: admin.firestore.FieldValue.serverTimestamp(),
+      mode: mode,
+      rate: rate,
+      seconds_used: secondsUsed,
+      actual_seconds: actualSeconds,
+      before_seconds: beforeSeconds,
+      after_seconds: afterSeconds,
+      room_id: roomId,
+      session_id: sessionId,
+    });
+
+  functions.logger.info("logUsageSession", {
+    uid: uid,
+    mode: mode,
+    seconds_used: secondsUsed,
+    before: beforeSeconds,
+    after: afterSeconds,
+  });
+
+  return {
+    ok: true,
+    before_seconds: beforeSeconds,
+    after_seconds: afterSeconds,
+  };
+});

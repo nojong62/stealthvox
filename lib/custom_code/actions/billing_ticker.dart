@@ -217,19 +217,11 @@ class BillingTicker with WidgetsBindingObserver {
     _usageLogSaved = true;
 
     try {
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .collection('usage_logs')
-          .add({
-        'created_at': FieldValue.serverTimestamp(),
-        'mode': _sessionMode,
-        'seconds_used': secondsUsed,
-        'actual_seconds': actualSeconds,
-        'rate': _sessionRateValue,
-        'before_seconds': beforeSeconds,
-        'after_seconds': afterSeconds,
-      });
+      // [B-BILLING] Remove direct client write; server callable owns the log.
+      await _callLogUsageSession(
+        secondsUsed: secondsUsed,
+        actualSeconds: actualSeconds,
+      );
       _addBillingLog(
           '[USAGE_LOG] saved mode=$_sessionMode seconds_used=${secondsUsed}s actual=${actualSeconds}s before=$beforeSeconds after=$afterSeconds');
     } catch (e) {
@@ -386,6 +378,46 @@ class BillingTicker with WidgetsBindingObserver {
       _addBillingLog('[BILLING] firestore save success');
       _lastFlushResult =
           'OK (-${seconds}s) @ ${DateTime.now().toIso8601String().substring(11, 19)}';
+    }
+  }
+
+  /// [B-BILLING] Calls the server-owned usage_logs writer.
+  /// created_at/after_seconds/before_seconds are derived on the server.
+  /// room_id/session_id are sent empty until mode-level IDs are plumbed.
+  Future<void> _callLogUsageSession({
+    required int secondsUsed,
+    required int actualSeconds,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final idToken = await user.getIdToken();
+    final projectId = FirebaseFirestore.instance.app.options.projectId;
+
+    final response = await http
+        .post(
+          Uri.parse(
+              'https://$_kBillingRegion-$projectId.cloudfunctions.net/logUsageSession'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $idToken',
+          },
+          body: jsonEncode({
+            'data': {
+              'mode': _sessionMode,
+              'rate': _sessionRateValue,
+              'seconds_used': secondsUsed,
+              'actual_seconds': actualSeconds,
+              'room_id': '', // TODO[plumb]: Duo room ID.
+              'session_id': '', // TODO[plumb]: chat history sessionDocId.
+            }
+          }),
+        )
+        .timeout(const Duration(seconds: 10));
+
+    if (response.statusCode != 200) {
+      throw Exception(
+          'logUsageSession HTTP ${response.statusCode}: ${response.body}');
     }
   }
 }
