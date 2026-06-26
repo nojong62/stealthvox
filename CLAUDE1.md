@@ -48,133 +48,282 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-# [StepExpand] SCROLL-TOP 폭주 쓰로틀 지시서
+# [B-정석 / 코어] usage_logs 서버 전용화 지시서
 
 ## 배경 / 목적
-StepExpand에서 `_scrollToCurrentTop(hostIndex)`가 **GPT 스트리밍 `await for` 루프 안**에서
-청크 도착마다 호출된다. 매 호출이 `Scrollable.ensureVisible(... 220ms easeOut)`를 새로 예약해
-**직전 220ms 애니메이션을 취소·재시작**하는 쓰래싱이 발생한다.
-로그상 `🧭 [SCROLL-TOP] index=N`이 ~20ms 간격으로 수백 줄 찍히는 구간이 이것이며,
-텍스트 스트리밍(가장 지연 민감한 순간)에 프레임 예산을 갉아먹어 버벅임으로 체감된다.
+현재 `billing_ticker.saveUsageLog()`가 클라이언트에서 `users/{uid}/usage_logs`에 직접 `.add()` 한다.
+규칙은 `allow write: if false`라 차단되어 `permission-denied`가 난다.
+→ **서버 콜러블 `logUsageSession`**을 신설해 Admin SDK로 기록한다(규칙 우회). 클라 직접쓰기는 제거.
+created_at / after_seconds / before_seconds는 **서버 권위로 확정(정합형)**.
 
-### 해결 방식 (최소 변경)
-`_scrollToCurrentTop` 진입부에 **시간 기반 쓰로틀**을 둔다.
-- 같은 `index` 연속 호출은 **150ms** 이내면 스킵 (스트리밍 폭주 차단).
-- `index`가 바뀌면(새 버블) **즉시 통과** → 위치 정확도 유지.
-- 루프 종료 후 별도 스크롤(`_revealForReading` / `_scrollToBottom`)이 최종 위치를 보정하므로 끝줄 정확도 영향 없음.
+### 설계 요점
+- **규칙 무변경**: `write:false` 유지가 곧 "클라 직접쓰기 영구 차단". Admin SDK는 규칙 우회 → 양립.
+- **store_master 무변경**: 세션당 1줄 모델 유지(Usage / Admin Time Log 화면 그대로).
+- **정합형**: 서버가 `remainingTime` 재조회 = `after`, `before = after + seconds_used`(역산).
+- **식별자 선설계**: 서버가 `room_id`/`session_id`를 옵션(기본 "")으로 받음. 이번엔 클라가 ""로 전송.
+  실제 값 배선(모드 파일)은 **후속 "식별자 보강" 지시서**에서 → 그땐 서버 재배포 불필요(클라 전용).
 
-### 영향 범위 / 불변 보장
-- 대상 파일: **`routine_mode_step_expand.dart` 1개**
-- Box 7(`TtsQueueManager`/`DeepgramV2VoiceManager`/`ChunkedTtsFetcher`/`HybridTtsPlayer`/`TtsCache`) **미변경**
-- 과금(BillingTicker), 파이프라인 순서, P1/P2/P3, Practice **미변경**
-- 추가 위젯·의존성 **없음** (`DateTime` 기본 타입 + 필드 2개만)
+### 영향 범위
+- `firebase/functions/index.js` (함수 1개 **추가**)
+- `lib/custom_code/actions/billing_ticker.dart` (메서드 1개 추가 + saveUsageLog 쓰기 1곳 교체)
+- 무변경: `firestore.rules`, `store_master.dart`, Box 7, 다른 모드 파일
 
 ---
 
 ## Phase 0 — 세이브포인트
 ```bash
-git add -A && git commit -m "savepoint: before SCROLL-TOP throttle (step_expand)"
+git add -A && git commit -m "savepoint: before usage_logs server-side (logUsageSession)"
 ```
-> 이미 push된 상태라면 롤백 시 `git revert <hash>` 사용.
 
-## Phase 1 — 대상/앵커 사전 검증 (grep)
+## Phase 1 — 사전 검증
 ```bash
-# 1) 대상 파일 경로 확인
-grep -rln "_scrollToCurrentTop" lib/
+# 서버: 의존성 존재 & 중복 정의 없음
+grep -c "logUsageSession"            firebase/functions/index.js   # 기대값: 0 (아직 없음)
+grep -c "admin.firestore"            firebase/functions/index.js   # 1 이상 (admin 사용 중)
+grep -c "functions.https.onCall"     firebase/functions/index.js   # 1 이상 (패턴 존재)
 
-# 2) 수정 전 기준 카운트 (반드시 아래 값과 일치해야 함)
-grep -c "_scrollToCurrentTop"  <대상파일>   # 기대값: 2  (정의 1 + 호출 1)
-grep -c "SCROLL-TOP"           <대상파일>   # 기대값: 1
-grep -c "_lastScrollTopAt"     <대상파일>   # 기대값: 0
-grep -c "_lastScrollTopIndex"  <대상파일>   # 기대값: 0
-grep -c "SCROLL-THROTTLE"      <대상파일>   # 기대값: 0
+# 클라: 앵커/기준 카운트
+grep -c "_callLogUsageSession"               lib/custom_code/actions/billing_ticker.dart  # 0
+grep -c "collection('usage_logs')"           lib/custom_code/actions/billing_ticker.dart  # 1 (saveUsageLog의 .add)
+grep -c "firestore save success"             lib/custom_code/actions/billing_ticker.dart  # 1 (EDIT B 앵커 유일성)
 ```
-> 위 5개 기준값이 다르면 **중단**하고 보고. (파일 버전 불일치 가능성)
+> 위 기준값과 다르면 **중단** 후 보고.
 
 ---
 
-## Phase 2 — 수정 (str_replace, 아래→위 순서)
+## Phase 2 — 수정
 
-### ✅ EDIT 1 — 메서드 진입부에 쓰로틀 가드 (위쪽 라인보다 먼저 적용)
+### 🟦 EDIT 2-S (서버) — index.js **끝에 함수 추가**
+> 파일 **맨 끝(최상위 스코프)** 에 아래 블록을 그대로 append.
+> (top-level `exports.X`는 위치 무관. `admin`/`functions`는 이미 import됨 = Phase 1에서 확인)
 
-**find:**
-```dart
-  void _scrollToCurrentTop(int index) {
-    _log('🧭 [SCROLL-TOP]', 'index=$index');
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+```javascript
+
+// 🔧 [B-정석] usage_logs 서버 전용 기록. 클라는 이 콜러블만 호출하고
+//   created_at/after/before는 서버 권위로 확정한다(정합형).
+//   Admin SDK는 Firestore 규칙(write:false)을 우회하므로 클라 직접쓰기 차단과 양립한다.
+exports.logUsageSession = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      "unauthenticated",
+      "Request must be authenticated."
+    );
+  }
+  const uid = context.auth.uid;
+
+  const mode = typeof data.mode === "string" ? data.mode : "";
+  const rate = typeof data.rate === "number" ? data.rate : null;
+  const secondsUsed = data.seconds_used;
+  const actualSeconds = data.actual_seconds;
+  const roomId = typeof data.room_id === "string" ? data.room_id : "";
+  const sessionId = typeof data.session_id === "string" ? data.session_id : "";
+
+  if (
+    typeof secondsUsed !== "number" ||
+    !Number.isInteger(secondsUsed) ||
+    secondsUsed <= 0 ||
+    secondsUsed > 86400
+  ) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "seconds_used must be a positive integer (<= 86400)."
+    );
+  }
+  if (
+    typeof actualSeconds !== "number" ||
+    !Number.isInteger(actualSeconds) ||
+    actualSeconds < 0 ||
+    actualSeconds > 86400
+  ) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "actual_seconds must be a non-negative integer (<= 86400)."
+    );
+  }
+
+  // 정합형: after = 서버가 현재 remainingTime 재조회, before = 역산.
+  const userRef = admin.firestore().doc("users/" + uid);
+  const snap = await userRef.get();
+  const afterSeconds =
+    snap.exists && typeof snap.data().remainingTime === "number"
+      ? snap.data().remainingTime
+      : 0;
+  const beforeSeconds = afterSeconds + secondsUsed;
+
+  await admin
+    .firestore()
+    .collection("users")
+    .doc(uid)
+    .collection("usage_logs")
+    .add({
+      created_at: admin.firestore.FieldValue.serverTimestamp(),
+      mode: mode,
+      rate: rate,
+      seconds_used: secondsUsed,
+      actual_seconds: actualSeconds,
+      before_seconds: beforeSeconds,
+      after_seconds: afterSeconds,
+      room_id: roomId,
+      session_id: sessionId,
+    });
+
+  functions.logger.info("logUsageSession", {
+    uid: uid,
+    mode: mode,
+    seconds_used: secondsUsed,
+    before: beforeSeconds,
+    after: afterSeconds,
+  });
+
+  return {
+    ok: true,
+    before_seconds: beforeSeconds,
+    after_seconds: afterSeconds,
+  };
+});
 ```
 
-**replace:**
+---
+
+### 🟩 클라이언트 — billing_ticker.dart (str_replace, 아래→위 순서)
+
+#### ✅ EDIT 2-B (먼저 / 위쪽 라인) — `_callDeductTime` 뒤에 신규 메서드 추가
+
+**find:** (이 블록은 파일 내 유일 = Phase 1 `firestore save success`=1로 확인)
 ```dart
-  void _scrollToCurrentTop(int index) {
-    // 🔧 [SCROLL-THROTTLE] GPT 스트리밍 청크마다 호출되어 220ms 스크롤 애니메이션이
-    //   매 청크마다 취소/재시작되던 폭주를 방지. 같은 index 연속 호출은 150ms로 제한.
-    //   index가 바뀌면(새 버블) 즉시 통과시켜 위치 정확도는 유지한다.
-    final now = DateTime.now();
-    if (_lastScrollTopIndex == index &&
-        _lastScrollTopAt != null &&
-        now.difference(_lastScrollTopAt!).inMilliseconds < 150) {
-      return;
+      _addBillingLog('[BILLING] firestore save success');
+      _lastFlushResult =
+          'OK (-${seconds}s) @ ${DateTime.now().toIso8601String().substring(11, 19)}';
     }
-    _lastScrollTopAt = now;
-    _lastScrollTopIndex = index;
-    _log('🧭 [SCROLL-TOP]', 'index=$index');
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-```
-
-### ✅ EDIT 2 — 쓰로틀 상태 필드 선언 추가
-
-**find:**
-```dart
-  final ScrollController _scrollController = ScrollController();
-  final Map<int, GlobalKey> _itemKeys = {};
+  }
 ```
 
 **replace:**
 ```dart
-  final ScrollController _scrollController = ScrollController();
-  // 🔧 [SCROLL-THROTTLE] 상단 고정 스크롤 과다 호출 억제용 상태
-  DateTime? _lastScrollTopAt;
-  int _lastScrollTopIndex = -1;
-  final Map<int, GlobalKey> _itemKeys = {};
+      _addBillingLog('[BILLING] firestore save success');
+      _lastFlushResult =
+          'OK (-${seconds}s) @ ${DateTime.now().toIso8601String().substring(11, 19)}';
+    }
+  }
+
+  /// 🔧 [B-정석] usage_logs 서버 전용 기록 콜러블 호출.
+  ///   created_at/after_seconds/before_seconds는 서버가 권위로 확정(정합형).
+  ///   room_id/session_id는 후속 보강 전까지 빈 문자열로 전송.
+  Future<void> _callLogUsageSession({
+    required int secondsUsed,
+    required int actualSeconds,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final idToken = await user.getIdToken();
+    final projectId = FirebaseFirestore.instance.app.options.projectId;
+
+    final response = await http
+        .post(
+          Uri.parse(
+              'https://$_kBillingRegion-$projectId.cloudfunctions.net/logUsageSession'),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $idToken',
+          },
+          body: jsonEncode({
+            'data': {
+              'mode': _sessionMode,
+              'rate': _sessionRateValue,
+              'seconds_used': secondsUsed,
+              'actual_seconds': actualSeconds,
+              'room_id': '', // TODO[plumb]: Duo 방 ID (후속 보강)
+              'session_id': '', // TODO[plumb]: chat_history sessionDocId (후속 보강)
+            }
+          }),
+        )
+        .timeout(const Duration(seconds: 10));
+
+    if (response.statusCode != 200) {
+      throw Exception(
+          'logUsageSession HTTP ${response.statusCode}: ${response.body}');
+    }
+  }
 ```
 
-> 두 find 앵커는 각각 파일 내 **유일**함(사전 검증됨). 둘 다 정확히 1곳에서만 치환되어야 함.
+#### ✅ EDIT 2-A (나중 / 아래쪽 라인) — saveUsageLog의 Firestore 직접쓰기 교체
+
+**find:**
+```dart
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('usage_logs')
+          .add({
+        'created_at': FieldValue.serverTimestamp(),
+        'mode': _sessionMode,
+        'seconds_used': secondsUsed,
+        'actual_seconds': actualSeconds,
+        'rate': _sessionRateValue,
+        'before_seconds': beforeSeconds,
+        'after_seconds': afterSeconds,
+      });
+```
+
+**replace:**
+```dart
+      // 🔧 [B-정석] 클라 직접 쓰기 제거 → 서버 콜러블이 권위로 기록.
+      await _callLogUsageSession(
+        secondsUsed: secondsUsed,
+        actualSeconds: actualSeconds,
+      );
+```
+
+> 참고: `beforeSeconds`/`afterSeconds` 지역변수는 로그 출력(`[USAGE_LOG] saved ... before=$beforeSeconds`)에 계속 쓰이므로 **제거하지 말 것**. `FieldValue` 심볼은 이 블록에서만 쓰였지만 `cloud_firestore` import는 `FirebaseFirestore.instance`가 계속 사용하므로 import 제거 불필요.
 
 ---
 
-## Phase 3 — 수정 후 검증 (grep, 기대 카운트)
+## Phase 3 — 검증
 ```bash
-grep -c "_lastScrollTopAt"     <대상파일>   # 기대값: 4
-grep -c "_lastScrollTopIndex"  <대상파일>   # 기대값: 3
-grep -c "SCROLL-THROTTLE"      <대상파일>   # 기대값: 2
-grep -c "SCROLL-TOP"           <대상파일>   # 기대값: 1  (불변)
-grep -c "_scrollToCurrentTop"  <대상파일>   # 기대값: 2  (불변)
-```
-- 5개 값이 위와 정확히 일치하면 성공.
-- 하나라도 어긋나면 **롤백**(Phase 5) 후 보고.
+# 클라
+grep -c "_callLogUsageSession"               lib/custom_code/actions/billing_ticker.dart  # 기대값: 2
+grep -c "cloudfunctions.net/logUsageSession" lib/custom_code/actions/billing_ticker.dart  # 1
+grep -c "collection('usage_logs')"           lib/custom_code/actions/billing_ticker.dart  # 0 (직접쓰기 제거됨)
+grep -c "'before_seconds': beforeSeconds"    lib/custom_code/actions/billing_ticker.dart  # 0 (클라 전송 제거)
+# 중괄호 균형
+echo "{ = $(grep -o '{' lib/custom_code/actions/billing_ticker.dart | wc -l) , } = $(grep -o '}' lib/custom_code/actions/billing_ticker.dart | wc -l)"  # 좌우 동일
 
-## Phase 4 — 정적 분석 / 포맷
-```bash
-flutter analyze <대상파일>
-dart format <대상파일>     # ⚠️ 폴더 대상 금지, 반드시 이 파일 1개만
+# 서버
+grep -c "logUsageSession"  firebase/functions/index.js   # 1 이상
+node -e "require('./firebase/functions/index.js')" 2>&1 | head -5   # 문법 로드 에러 없으면 OK (없을 시 무시 가능)
 ```
-> `analyze`에서 신규 경고/에러 0건이어야 함.
 
-## Phase 5 — 롤백 절차
+## Phase 4 — 분석 / 포맷 / 배포
 ```bash
-# 커밋만 한 상태(push 전)
-git checkout -- <대상파일>
-# 또는 세이브포인트 전체 복귀
+flutter analyze lib/custom_code/actions/billing_ticker.dart
+dart format lib/custom_code/actions/billing_ticker.dart   # ⚠️ 이 파일 1개만
+
+cd firebase
+firebase deploy --only functions:logUsageSession   # 신규 함수만 우선 배포 가능
+# (또는) firebase deploy --only functions:functions
+```
+> `analyze` 신규 경고/에러 0건이어야 함. 배포 로그에서 `logUsageSession` create/update 확인.
+
+## Phase 5 — 롤백
+```bash
+git checkout -- lib/custom_code/actions/billing_ticker.dart firebase/functions/index.js
 git reset --hard HEAD~1
-# 이미 push된 경우
-git revert <savepoint_hash>
+# 함수 롤백이 필요하면: 이전 index.js로 되돌린 뒤 재배포, 또는
+#   firebase functions:delete logUsageSession  (신규 함수 제거)
 ```
 
 ---
 
-## 실기기 확인 포인트 (수정 후)
-1. StepExpand 한 턴 진행 중 로그에서 `🧭 [SCROLL-TOP]`가 **턴당 수백 줄 → 한 자릿수**로 감소했는가.
-2. 유저/AI 텍스트 스트리밍 중 상단 고정 버블이 **부드럽게** 따라오는가(끊김·튐 없음).
-3. 새 버블 등장 시(인덱스 변경) 스크롤이 **즉시** 반응하는가(150ms 지연 없이).
-4. 5턴 완료 후 확장문장 카드/낭독 위치가 기존과 동일한가.
+## 배포 후 실기기 확인
+1. 차감이 발생하는 세션을 1회 진행 후 종료(pause/dispose).
+2. 관리자 로그에서 `[USAGE_LOG] saved mode=... seconds_used=...` 출력 + `permission-denied` **소멸** 확인.
+3. Firestore 콘솔 `users/{uid}/usage_logs` 새 문서: `before_seconds = after_seconds + seconds_used` 정합, `room_id=""`, `session_id=""`, `created_at` 서버시간 확인.
+4. store_master **Usage 화면**(최근 세션/오늘·주 합산)과 **Admin Time Log**가 기존과 동일하게 표시되는지(세션 1줄) 확인.
+
+---
+
+## 다음 단계 (별도 지시서)
+**식별자 보강**: 각 모드(Anyone/Roleplay/StepExpand/Duo)에서 `sessionDocId`/`roomId`가 확정되는 시점에
+`BillingTicker.instance`로 전달 → `_callLogUsageSession`의 `room_id`/`session_id` 빈문자열을 실제값으로 교체.
+서버는 이미 두 필드를 수용하므로 **클라 전용 변경**(서버 재배포 불필요). 모드 파일 배선이라 별도 리뷰로 분리.
