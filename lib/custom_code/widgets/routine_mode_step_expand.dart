@@ -2038,6 +2038,17 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       return;
     }
 
+    // [CLARIFY-EVAPORATE] If the latest SYSTEM bubble is a pronunciation clarify
+    // prompt marked with 'clarify': true and this is a real user utterance, remove it
+    // before building the next context.
+    if (mounted) {
+      final lastSysIdx =
+          _localMessages.lastIndexWhere((m) => m['role'] == 'SYSTEM');
+      if (lastSysIdx != -1 && _localMessages[lastSysIdx]['clarify'] == true) {
+        setState(() => _localMessages.removeAt(lastSysIdx));
+      }
+    }
+
     // 🔧 [FAST-LANE] 로컬 질문 불만 판정 — streamUserTranslation 호출 전 빠른 처리
     if (_isQuestionDissatisfactionRaw(finalTranscript)) {
       _log('🟠 [FAST-DISSATISFIED]', '로컬 fast-lane 감지: "$finalTranscript"');
@@ -2380,8 +2391,12 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
             _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
             if (hostIndex < _localMessages.length)
               _localMessages.removeAt(hostIndex);
-            _localMessages
-                .add({'role': 'SYSTEM', 'target': clarifyText, 'original': ''});
+            _localMessages.add({
+              'role': 'SYSTEM',
+              'target': clarifyText,
+              'original': '',
+              'clarify': true, // Mark temporary clarify bubble for evaporation.
+            });
           });
           _scrollToBottom();
         }
@@ -5088,8 +5103,11 @@ Context determines: "불편하다" after a body part = physical; after 마음/�
     - Coordination: and, but, so, and then
     - Result / reason links: which is why, that's why, so that, because (keep short)
     - At most ONE soft spoken marker if it fits naturally: like, you know, I mean
-  AVOID building the sentence on stacked relative clauses, front participial
-  phrases, or chains of to-infinitives. A touch is fine; never make them the spine.
+  TRAILING relative clauses are FINE — a sentence-final, comma-led "who/which"
+  (e.g. "...to call my friend Alex, who just moved to London") continues the chain
+  just like "and he/it...". What to AVOID is CENTER-EMBEDDED clauses that split a
+  subject from its verb, front participial phrases, and chains of to-infinitives.
+  Never let nesting interrupt the left-to-right flow.
   Keep it ONE sentence, speakable in short breath groups of 5–7 words.
 
 [EXAMPLE FOR CASE 2]
@@ -5402,7 +5420,7 @@ Read the History carefully. Collect the user's fragmented answers and synthesize
 - Coordination: and / and then / so / but
 - Result or reason: which is why / that's why / so that / because (kept short, never nested)
 - Optionally ONE soft spoken marker if it fits: like / you know / I mean
-Do NOT stack relative clauses, front participial phrases, or chains of to-infinitives.
+TRAILING relative clauses are fine and linear — a sentence-final, comma-led "who / which" (e.g. "...to call my friend Alex, who just moved to London") works just like "and he/it...", so keep using them. AVOID only CENTER-EMBEDDED relative clauses that split a subject from its verb, front participial phrases, and chains of to-infinitives.
 
 [RULES]
 - The user's lines in History may contain speech recognition errors due to unclear pronunciation. Infer the most likely intended meaning from context — do not quote garbled words literally.
