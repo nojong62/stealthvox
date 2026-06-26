@@ -42,24 +42,26 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 - FlutterFlow generated code 구조를 함부로 대규모 변경하지 말 것
 - 앱 실행/빌드 가능성을 최우선으로 할 것
 - 불확실한 부분은 임의 삭제하지 말고 보고할 것
+- 완료후 관리자가 APK 라고 적으면, 날자와 시간이 이름에 들어간 APK만들어 줘. 
 
 이 내용을 항상 기억하고 지시문에 포함해 줘.
 =================================
-지시문
+지시문 
 
-# StepExpand 선형 확장 지시서 (구어체 전환)
+# StepExpand 정밀화 + CLARIFY 증발 지시서
 
-> **목표**: 매 턴 관계절·분사구·to부정사로 *깊이 쌓는* 문어체 종속 확장을 →
-> 원어민이 실제로 말하듯 *옆으로 잇는* 선형 확장(등위접속 + 가벼운 담화표지)으로 전환.
+> **PART A** — 선형확장 정밀화: 관계절을 일괄 금지하지 말고, **후행(trailing) 관계절은 허용**,
+> **중간삽입(center-embedded) 관계절만 회피**하도록 프롬프트 문구 정밀화. (프롬프트 문자열만)
 >
-> **방향(확정)**: 산출물은 **여전히 ONE 문장 유지**. 종속을 선형 연결로 바꾸기만 함.
-> 따라서 **P2 카라오케·P1·turnPractice·billing·진짜 Box 7(TTS 인프라)은 전혀 건드리지 않음.**
+> **PART B** — CLARIFY 증발: 발음 오청취로 뜬 되묻기(CLARIFY) 질문이, 유저가 다시 말하면
+> 화면·컨텍스트에서 **증발**하도록 수정. (마커 기반, 상태변수 없음)
 
-- **대상 파일(단 하나)**: `lib/custom_code/widgets/routine_mode_step_expand.dart`
-- **수정 클래스**: `StepExpandBrain` (GPT 프롬프트 메서드 — TTS 인프라 Box 7과 무관)
-- **수정 메서드 3개**: `streamUserTranslation`, `streamGrammarQuestion`, `polishSentence`
-- **편집 수**: 필수 4 + 선택(코스메틱) 1 = 최대 5
-- **편집 순서**: 라인 드리프트 방지 위해 **아래에서 위로(높은 줄번호 먼저)** 적용
+- **대상 파일(하나)**: `lib/custom_code/widgets/routine_mode_step_expand.dart`
+- **전제**: 이전 "선형확장 지시서"는 **이미 적용된 상태**(grep 확인 완료). 본 지시서는 그 위에 얹음.
+- **편집 수**: PART A 2 + PART B 2 = 총 4
+- **편집 순서**: 라인 드리프트 방지 위해 **아래에서 위로(높은 줄번호 먼저)**: 5405 → 5091 → 2384 → 2040
+- **무관 영역(전부 무변경)**: 진짜 Box 7(TTS 인프라 3860줄~), P1, P2 카라오케, turnPractice, billing,
+  CORRECTION/MISHEARD/RESTATE/GARBLED 경로, generateCleanOriginal
 
 ---
 
@@ -68,171 +70,146 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 ```bash
 cd F:\flutter_project\stealth_vox
 git add -A
-git commit -m "savepoint: before StepExpand 선형 확장 전환"
+git commit -m "savepoint: before StepExpand 관계절 정밀화 + CLARIFY 증발"
 ```
 
 ---
 
-## Phase 1 — grep 사전 검증 (적용 전, 각 앵커 유일성 확인)
-
-각 명령의 기대 결과는 모두 **1** 이어야 함. 1이 아니면 중단하고 보고.
+## Phase 1 — grep 사전 검증 (각 앵커 유일성, 모두 1 기대)
 
 ```bash
 cd F:\flutter_project\stealth_vox\lib\custom_code\widgets
 
-grep -c "Use varied grammatical structures to merge them smoothly:" routine_mode_step_expand.dart   # 기대: 1  (편집①)
-grep -c "relative pronoun (who / which / that)" routine_mode_step_expand.dart                        # 기대: 1  (편집②)
-grep -c "naturally incorporates at least 2 of these structures:" routine_mode_step_expand.dart       # 기대: 1  (편집③)
-grep -c 'Grammar used: \[list\]' routine_mode_step_expand.dart                                       # 기대: 1  (편집③-b, 선택)
-grep -c "Complex nested clauses that are hard to speak" routine_mode_step_expand.dart                # 기대: 1  (편집④)
+grep -c "AVOID building the sentence on stacked relative clauses" routine_mode_step_expand.dart          # 기대: 1 (A-1)
+grep -c "Do NOT stack relative clauses, front participial phrases, or chains of to-infinitives." routine_mode_step_expand.dart  # 기대: 1 (A-2)
+grep -c "'target': clarifyText, 'original': ''" routine_mode_step_expand.dart                            # 기대: 1 (B-1)
+grep -c "if (isGhost) {" routine_mode_step_expand.dart                                                   # 기대: 1 (B-2)
+grep -c "'clarify': true" routine_mode_step_expand.dart                                                  # 기대: 0 (아직 없음)
 ```
 
 ---
 
 ## Phase 2 — str_replace 적용 (아래에서 위로)
 
-### 편집 ④ — `polishSentence` [AVOID]: 선형 흐름을 다시 종속으로 되돌리지 못하게 (라인 ~5727)
-
-폴리시는 이미 구어체 지향이지만, "한 문장으로 재정리"하면서 선형 흐름을 다시 임베딩으로
-되돌릴 여지가 있음. AVOID에 한 줄만 추가해 막는다.
+### A-2 — 최종 합성 프롬프트: 관계절 금지 → 후행 허용/중간삽입만 회피 (라인 ~5405)
 
 **old_str**
 ```
-- Complex nested clauses that are hard to speak
-- Adding information not in the original
-```
-
-**new_str**
-```
-- Complex nested clauses that are hard to speak
-- Re-packing the linear, spoken flow back into nested/embedded clauses
-- Adding information not in the original
-```
-
----
-
-### 편집 ③-b — (선택·코스메틱) 최종 합성 라벨 "Grammar used" → "Connectors used" (라인 ~5416)
-
-> 다운스트림 파싱 없음(grep 1회뿐, 프롬프트 내부에만 존재). 테마 일관성 + AI가 다시
-> 문법구조 사고로 회귀하는 것 방지용. **진짜 최소 diff를 원하면 이 편집은 건너뛰어도 됨.**
-
-**old_str**
-```
-PART 1: "Expanded Sentence: " + your synthesized sentence (25–40 words) + newline + "Grammar used: [list]"
-```
-
-**new_str**
-```
-PART 1: "Expanded Sentence: " + your synthesized sentence (25–40 words) + newline + "Connectors used: [list]"
-```
-
----
-
-### 편집 ③ — `streamGrammarQuestion` 최종 합성 프롬프트: 종속 4종 리스트 → 선형 연결 (라인 ~5398)
-
-5턴 끝의 최종 합성이 "Causal/Relative/Concessive/Conditional 중 2개 이상"으로 종속을
-강제하고 있음. 이게 Alex 예시 같은 깊은 임베딩의 직접 원인. 선형 연결로 교체.
-(25–40단어, breath group 5–7단어, "한 문장" 제약은 그대로 유지 → P2 안전)
-
-**old_str**
-```
-Read the History carefully. Collect the user's fragmented answers and synthesize them into ONE fluent sentence that naturally incorporates at least 2 of these structures:
-- Causal clause (because / since)
-- Relative clause (who / which / where / when / why)
-- Concessive clause (although / despite / even though)
-- Conditional clause (if / when)
-```
-
-**new_str**
-```
-Read the History carefully. Collect the user's fragmented answers and synthesize them into ONE fluent, natural-SPOKEN sentence — the way an American would actually say it OUT LOUD, chained linearly (left to right), NOT packed with nested clauses. Build it mainly with these linear connectors (use at least 2, and vary them):
-- Coordination: and / and then / so / but
-- Result or reason: which is why / that's why / so that / because (kept short, never nested)
-- Optionally ONE soft spoken marker if it fits: like / you know / I mean
 Do NOT stack relative clauses, front participial phrases, or chains of to-infinitives.
 ```
 
----
-
-### 편집 ② — `streamGrammarQuestion` structureSeed 로테이션: 임베딩 렌즈 → 선형 렌즈 (라인 ~5383)
-
-질문이 4턴 주기로 유저 답변을 *관계절/분사구로 붙도록* 유도하는 소프트 렌즈.
-이걸 등위·결과·담화표지로 붙도록 바꿈. **삼항 구조/들여쓰기는 그대로, 문자열만 교체** (Dart 안전).
-
-**old_str**
-```
-      final String structureSeed = t4 == 1
-          ? 'relative pronoun (who / which / that)'
-          : t4 == 2
-              ? 'relative adverb (where / when / why)'
-              : t4 == 3
-                  ? 'infinitive (to V)'
-                  : 'participial phrase (-ing / -ed)';
-```
-
 **new_str**
 ```
-      final String structureSeed = t4 == 1
-          ? 'coordination (and / and then / so)'
-          : t4 == 2
-              ? 'contrast or result (but / so / which is why)'
-              : t4 == 3
-                  ? 'short reason link (because / since — never nested)'
-                  : 'a light spoken add-on (like / you know — only if natural)';
+TRAILING relative clauses are fine and linear — a sentence-final, comma-led "who / which" (e.g. "...to call my friend Alex, who just moved to London") works just like "and he/it...", so keep using them. AVOID only CENTER-EMBEDDED relative clauses that split a subject from its verb, front participial phrases, and chains of to-infinitives.
 ```
 
 ---
 
-### 편집 ① — `streamUserTranslation` CASE 2 PART 2 머징 규칙: 종속 5종 → 선형 연결 (라인 ~5085)
+### A-1 — 머징 규칙 AVOID: 관계절 일괄 회피 → 위치 기준 정밀화 (라인 ~5091–5092)
 
-매 턴 유저 확장 문장을 만드는 핵심. 관계절/분사구/to부정사/전치사구/접속사로 머징하라는
-지시를 선형 체이닝 + 담화표지로 교체. (한 문장·breath group 5–7단어 유지)
+> 현재 문구는 2줄로 줄바꿈되어 있음. 두 줄을 한 블록으로 교체.
 
 **old_str**
 ```
-  Use varied grammatical structures to merge them smoothly:
-    - Relative clauses (who/which/where/that)
-    - Participial phrases (-ing / -ed)
-    - To-infinitives (to V)
-    - Prepositional phrases
-    - Conjunctions (because/when/although)
-```
-
-**new_str**
-```
-  Grow it the way a native speaker actually TALKS — linearly, left to right,
-  by chaining short clauses one after another. Do NOT nest clauses inside clauses.
-  Preferred connectors (use these, and vary them turn to turn):
-    - Coordination: and, but, so, and then
-    - Result / reason links: which is why, that's why, so that, because (keep short)
-    - At most ONE soft spoken marker if it fits naturally: like, you know, I mean
   AVOID building the sentence on stacked relative clauses, front participial
   phrases, or chains of to-infinitives. A touch is fine; never make them the spine.
-  Keep it ONE sentence, speakable in short breath groups of 5–7 words.
+```
+
+**new_str**
+```
+  TRAILING relative clauses are FINE — a sentence-final, comma-led "who/which"
+  (e.g. "...to call my friend Alex, who just moved to London") continues the chain
+  just like "and he/it...". What to AVOID is CENTER-EMBEDDED clauses that split a
+  subject from its verb, front participial phrases, and chains of to-infinitives.
+  Never let nesting interrupt the left-to-right flow.
+```
+
+---
+
+### B-1 — 되묻기(CLARIFY) SYSTEM 버블에 증발 표식 추가 (라인 ~2383–2384)
+
+**old_str**
+```
+            _localMessages
+                .add({'role': 'SYSTEM', 'target': clarifyText, 'original': ''});
+```
+
+**new_str**
+```
+            _localMessages.add({
+              'role': 'SYSTEM',
+              'target': clarifyText,
+              'original': '',
+              'clarify': true, // 💨 증발 표식: 유저가 다음 턴에 답하면 이 되묻기 버블 제거
+            });
+```
+
+---
+
+### B-2 — ghost 검열 직후 CLARIFY 증발 블록 삽입 (라인 ~2033–2040)
+
+> `isGhost` 블록(노이즈 early-return) 바로 다음, FAST-LANE 체크 **이전**에 삽입.
+> 여기 도달 = ghost 통과 = 실제 발화 → 직전 SYSTEM이 되묻기 표식이면 증발.
+> 컨텍스트 빌드(STEP 2)보다 앞이므로, 증발 후의 다음 질문·번역은 깨끗한 맥락을 받음.
+
+**old_str**
+```
+    if (isGhost) {
+      if (mounted)
+        setState(
+            () => _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP'));
+      if (_isConversationActive) _startDeepgramListening();
+      return;
+    }
+
+    // 🔧 [FAST-LANE] 로컬 질문 불만 판정 — streamUserTranslation 호출 전 빠른 처리
+```
+
+**new_str**
+```
+    if (isGhost) {
+      if (mounted)
+        setState(
+            () => _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP'));
+      if (_isConversationActive) _startDeepgramListening();
+      return;
+    }
+
+    // ❓→💨 [CLARIFY-EVAPORATE] 직전 SYSTEM 버블이 발음 오청취로 뜬 되묻기(CLARIFY)이고
+    //   이번 발화가 그 답(재진술)이면, 군더더기 되묻기 버블을 증발시킨다.
+    //   - ghost 노이즈는 위에서 이미 early-return → 여기 도달 = 실제 답일 때만 증발
+    //   - 'clarify' 표식이 있는 SYSTEM만 제거 → 새 주제 시드 질문은 절대 안 지워짐
+    //   - 컨텍스트 빌드 전이므로 다음 AI 질문/번역은 되묻기 흔적 없는 깨끗한 맥락을 받음
+    if (mounted) {
+      final lastSysIdx =
+          _localMessages.lastIndexWhere((m) => m['role'] == 'SYSTEM');
+      if (lastSysIdx != -1 && _localMessages[lastSysIdx]['clarify'] == true) {
+        setState(() => _localMessages.removeAt(lastSysIdx));
+      }
+    }
+
+    // 🔧 [FAST-LANE] 로컬 질문 불만 판정 — streamUserTranslation 호출 전 빠른 처리
 ```
 
 ---
 
 ## Phase 3 — grep 사후 검증
 
-OLD 문구는 모두 **0**, NEW 문구는 모두 **1** 이어야 함.
-
 ```bash
 # OLD (모두 0 기대)
-grep -c "Use varied grammatical structures to merge them smoothly:" routine_mode_step_expand.dart   # 기대: 0
-grep -c "relative pronoun (who / which / that)" routine_mode_step_expand.dart                        # 기대: 0
-grep -c "naturally incorporates at least 2 of these structures:" routine_mode_step_expand.dart       # 기대: 0
-grep -c "Complex nested clauses that are hard to speak" routine_mode_step_expand.dart                # 기대: 1  (이 줄은 유지됨, AVOID에 한 줄만 추가)
+grep -c "AVOID building the sentence on stacked relative clauses" routine_mode_step_expand.dart                              # 기대: 0
+grep -c "Do NOT stack relative clauses, front participial phrases, or chains of to-infinitives." routine_mode_step_expand.dart  # 기대: 0
+grep -c "'target': clarifyText, 'original': ''});" routine_mode_step_expand.dart                                            # 기대: 0
 
-# NEW (모두 1 기대)
-grep -c "the way a native speaker actually TALKS" routine_mode_step_expand.dart                      # 기대: 1  (편집①)
-grep -c "coordination (and / and then / so)" routine_mode_step_expand.dart                           # 기대: 1  (편집②)
-grep -c "natural-SPOKEN sentence" routine_mode_step_expand.dart                                      # 기대: 1  (편집③)
-grep -c "Re-packing the linear, spoken flow" routine_mode_step_expand.dart                           # 기대: 1  (편집④)
-# 편집③-b 적용 시:
-grep -c 'Connectors used: \[list\]' routine_mode_step_expand.dart                                    # 기대: 1
-grep -c 'Grammar used: \[list\]' routine_mode_step_expand.dart                                       # 기대: 0
+# NEW (기대 수치)
+grep -c "TRAILING relative clauses are fine and linear" routine_mode_step_expand.dart        # 기대: 1 (A-2)
+grep -c "TRAILING relative clauses are FINE — a sentence-final" routine_mode_step_expand.dart # 기대: 1 (A-1)
+grep -c "'clarify': true" routine_mode_step_expand.dart                                       # 기대: 2 (B-1 추가분 + B-2 비교문)
+grep -c "CLARIFY-EVAPORATE" routine_mode_step_expand.dart                                     # 기대: 1 (B-2)
 ```
+
+> 참고: `'clarify': true` 가 **2회** 나오는 게 정상 — B-1의 맵 키 추가 1회 + B-2의 비교
+> 조건문(`['clarify'] == true`) 1회.
 
 ---
 
@@ -241,44 +218,39 @@ grep -c 'Grammar used: \[list\]' routine_mode_step_expand.dart                  
 ```bash
 cd F:\flutter_project\stealth_vox
 flutter analyze lib\custom_code\widgets\routine_mode_step_expand.dart
-dart format lib\custom_code\widgets\routine_mode_step_expand.dart   # ★ 반드시 개별 파일만. 폴더 금지(한글 깨짐)
+dart format lib\custom_code\widgets\routine_mode_step_expand.dart   # ★ 반드시 개별 파일만 (폴더 금지)
 ```
 
-- `flutter analyze` 0 error 기대 (프롬프트 문자열·삼항 리터럴만 수정 → 타입/구문 변화 없음).
-- error 발생 시 **즉시 중단하고 보고** — 롤백.
+- PART A는 프롬프트 문자열만 → 구문 영향 없음.
+- PART B는 맵 리터럴 키 추가 + null-safe 비교(`['clarify'] == true`, key 없으면 null → false)
+  → 타입 안전, error 없어야 정상.
+- error 발생 시 즉시 중단·롤백.
 
 ---
 
-## 롤백 절차
+## 롤백
 
 ```bash
-# 아직 push 전:
-git reset --hard HEAD~1
-# 이미 push 했다면:
-git revert <commit-hash>
+git reset --hard HEAD~1            # push 전
+# 또는
+git revert <commit-hash>          # push 후
 ```
 
 ---
 
-## 검증 체크리스트 (적용 후 육안 확인)
+## 검증 체크리스트 (적용 후)
 
-1. `streamUserTranslation` PART 2 머징 지시가 선형 연결/담화표지로 바뀌었는가
-2. `structureSeed` 4개 문자열이 coordination/contrast/reason/spoken-marker로 바뀌었는가
-3. 최종 합성 프롬프트가 natural-SPOKEN + 선형 연결 리스트로 바뀌었는가
-4. `polishSentence` AVOID에 "Re-packing..." 한 줄이 추가됐는가
-5. (선택) 라벨이 Connectors used로 바뀌었는가
-6. **건드리지 않았는지 확인**: 진짜 Box 7(TTS 인프라, 3860줄~), P1, P2 카라오케, turnPractice,
-   billing, splitIntoMeaningUnits, generateCleanOriginal — 전부 무변경
-7. 25–40단어 / "한 문장" / breath group 5–7단어 제약은 유지됨 (P2 안전 보장)
+**PART A (관계절 정밀화)**
+1. 최종 합성·머징 프롬프트가 "trailing 허용 / center-embedded만 회피"로 바뀌었는가
+2. 실측: `", who ..."` 같은 후행 관계절이 다시 등장하되, 주어-동사를 가르는 중간삽입은 안 나오는가
 
----
+**PART B (CLARIFY 증발)**
+3. 일부러 모호하게/오청취 유발 발화 → 되묻기 질문 버블이 뜨는가
+4. 다시 정확히 말하면 → **방금 그 되묻기 버블이 사라지고**, 성장 문장이 되묻기 직전 상태에서
+   자연스럽게 이어지는가
+5. 다음 AI 질문이 "요미지간이 뭐예요?" 같은 죽은 맥락을 참조하지 않는가
+6. **새 주제 시작** 시 첫 발화에서 시드 질문(SYSTEM)이 잘못 지워지지 않는가 (표식 없으므로 안전)
+7. 되묻기 후 발화가 garbled면 → 특정 질문 대신 일반 "다시 말해 주세요"로 가는가 (허용된 엣지)
 
-## 적용 후 실측 테스트 시나리오 (1회 권장)
-
-같은 Alex 흐름을 다시 돌려보고 산출 문장이 아래처럼 *선형*으로 나오는지 확인:
-
-- **전(문어체)**: *"Checking my emails this morning, I suddenly remembered to call my old friend, Alex, who recently moved to London, to ask him about the restaurant where we had dinner last year."*
-- **후(구어체 기대)**: *"This morning I was checking my emails, and it suddenly hit me that I needed to call my old friend Alex, who just moved to London, so I could ask him about that restaurant we went to last year."*
-
-→ 후자가 등위(and/so) 중심으로 옆으로 이어지면 성공. 여전히 관계절이 스파인이면 프롬프트 강도
-(temperature 0.0 → 0.2, 또는 NEW 문구에 "BANNED: relative-clause spine" 추가) 조정 검토.
+**무관 영역 무변경 확인**
+8. 진짜 Box 7, P1, P2 카라오케, billing, CORRECTION/MISHEARD/RESTATE/GARBLED 경로 — 그대로
