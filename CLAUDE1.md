@@ -48,209 +48,133 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-# StepExpand 정밀화 + CLARIFY 증발 지시서
+# [StepExpand] SCROLL-TOP 폭주 쓰로틀 지시서
 
-> **PART A** — 선형확장 정밀화: 관계절을 일괄 금지하지 말고, **후행(trailing) 관계절은 허용**,
-> **중간삽입(center-embedded) 관계절만 회피**하도록 프롬프트 문구 정밀화. (프롬프트 문자열만)
->
-> **PART B** — CLARIFY 증발: 발음 오청취로 뜬 되묻기(CLARIFY) 질문이, 유저가 다시 말하면
-> 화면·컨텍스트에서 **증발**하도록 수정. (마커 기반, 상태변수 없음)
+## 배경 / 목적
+StepExpand에서 `_scrollToCurrentTop(hostIndex)`가 **GPT 스트리밍 `await for` 루프 안**에서
+청크 도착마다 호출된다. 매 호출이 `Scrollable.ensureVisible(... 220ms easeOut)`를 새로 예약해
+**직전 220ms 애니메이션을 취소·재시작**하는 쓰래싱이 발생한다.
+로그상 `🧭 [SCROLL-TOP] index=N`이 ~20ms 간격으로 수백 줄 찍히는 구간이 이것이며,
+텍스트 스트리밍(가장 지연 민감한 순간)에 프레임 예산을 갉아먹어 버벅임으로 체감된다.
 
-- **대상 파일(하나)**: `lib/custom_code/widgets/routine_mode_step_expand.dart`
-- **전제**: 이전 "선형확장 지시서"는 **이미 적용된 상태**(grep 확인 완료). 본 지시서는 그 위에 얹음.
-- **편집 수**: PART A 2 + PART B 2 = 총 4
-- **편집 순서**: 라인 드리프트 방지 위해 **아래에서 위로(높은 줄번호 먼저)**: 5405 → 5091 → 2384 → 2040
-- **무관 영역(전부 무변경)**: 진짜 Box 7(TTS 인프라 3860줄~), P1, P2 카라오케, turnPractice, billing,
-  CORRECTION/MISHEARD/RESTATE/GARBLED 경로, generateCleanOriginal
+### 해결 방식 (최소 변경)
+`_scrollToCurrentTop` 진입부에 **시간 기반 쓰로틀**을 둔다.
+- 같은 `index` 연속 호출은 **150ms** 이내면 스킵 (스트리밍 폭주 차단).
+- `index`가 바뀌면(새 버블) **즉시 통과** → 위치 정확도 유지.
+- 루프 종료 후 별도 스크롤(`_revealForReading` / `_scrollToBottom`)이 최종 위치를 보정하므로 끝줄 정확도 영향 없음.
+
+### 영향 범위 / 불변 보장
+- 대상 파일: **`routine_mode_step_expand.dart` 1개**
+- Box 7(`TtsQueueManager`/`DeepgramV2VoiceManager`/`ChunkedTtsFetcher`/`HybridTtsPlayer`/`TtsCache`) **미변경**
+- 과금(BillingTicker), 파이프라인 순서, P1/P2/P3, Practice **미변경**
+- 추가 위젯·의존성 **없음** (`DateTime` 기본 타입 + 필드 2개만)
 
 ---
 
-## 0. 세이브포인트 (필수)
-
+## Phase 0 — 세이브포인트
 ```bash
-cd F:\flutter_project\stealth_vox
-git add -A
-git commit -m "savepoint: before StepExpand 관계절 정밀화 + CLARIFY 증발"
+git add -A && git commit -m "savepoint: before SCROLL-TOP throttle (step_expand)"
 ```
+> 이미 push된 상태라면 롤백 시 `git revert <hash>` 사용.
 
----
-
-## Phase 1 — grep 사전 검증 (각 앵커 유일성, 모두 1 기대)
-
+## Phase 1 — 대상/앵커 사전 검증 (grep)
 ```bash
-cd F:\flutter_project\stealth_vox\lib\custom_code\widgets
+# 1) 대상 파일 경로 확인
+grep -rln "_scrollToCurrentTop" lib/
 
-grep -c "AVOID building the sentence on stacked relative clauses" routine_mode_step_expand.dart          # 기대: 1 (A-1)
-grep -c "Do NOT stack relative clauses, front participial phrases, or chains of to-infinitives." routine_mode_step_expand.dart  # 기대: 1 (A-2)
-grep -c "'target': clarifyText, 'original': ''" routine_mode_step_expand.dart                            # 기대: 1 (B-1)
-grep -c "if (isGhost) {" routine_mode_step_expand.dart                                                   # 기대: 1 (B-2)
-grep -c "'clarify': true" routine_mode_step_expand.dart                                                  # 기대: 0 (아직 없음)
+# 2) 수정 전 기준 카운트 (반드시 아래 값과 일치해야 함)
+grep -c "_scrollToCurrentTop"  <대상파일>   # 기대값: 2  (정의 1 + 호출 1)
+grep -c "SCROLL-TOP"           <대상파일>   # 기대값: 1
+grep -c "_lastScrollTopAt"     <대상파일>   # 기대값: 0
+grep -c "_lastScrollTopIndex"  <대상파일>   # 기대값: 0
+grep -c "SCROLL-THROTTLE"      <대상파일>   # 기대값: 0
 ```
+> 위 5개 기준값이 다르면 **중단**하고 보고. (파일 버전 불일치 가능성)
 
 ---
 
-## Phase 2 — str_replace 적용 (아래에서 위로)
+## Phase 2 — 수정 (str_replace, 아래→위 순서)
 
-### A-2 — 최종 합성 프롬프트: 관계절 금지 → 후행 허용/중간삽입만 회피 (라인 ~5405)
+### ✅ EDIT 1 — 메서드 진입부에 쓰로틀 가드 (위쪽 라인보다 먼저 적용)
 
-**old_str**
-```
-Do NOT stack relative clauses, front participial phrases, or chains of to-infinitives.
-```
-
-**new_str**
-```
-TRAILING relative clauses are fine and linear — a sentence-final, comma-led "who / which" (e.g. "...to call my friend Alex, who just moved to London") works just like "and he/it...", so keep using them. AVOID only CENTER-EMBEDDED relative clauses that split a subject from its verb, front participial phrases, and chains of to-infinitives.
+**find:**
+```dart
+  void _scrollToCurrentTop(int index) {
+    _log('🧭 [SCROLL-TOP]', 'index=$index');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
 ```
 
----
-
-### A-1 — 머징 규칙 AVOID: 관계절 일괄 회피 → 위치 기준 정밀화 (라인 ~5091–5092)
-
-> 현재 문구는 2줄로 줄바꿈되어 있음. 두 줄을 한 블록으로 교체.
-
-**old_str**
-```
-  AVOID building the sentence on stacked relative clauses, front participial
-  phrases, or chains of to-infinitives. A touch is fine; never make them the spine.
-```
-
-**new_str**
-```
-  TRAILING relative clauses are FINE — a sentence-final, comma-led "who/which"
-  (e.g. "...to call my friend Alex, who just moved to London") continues the chain
-  just like "and he/it...". What to AVOID is CENTER-EMBEDDED clauses that split a
-  subject from its verb, front participial phrases, and chains of to-infinitives.
-  Never let nesting interrupt the left-to-right flow.
-```
-
----
-
-### B-1 — 되묻기(CLARIFY) SYSTEM 버블에 증발 표식 추가 (라인 ~2383–2384)
-
-**old_str**
-```
-            _localMessages
-                .add({'role': 'SYSTEM', 'target': clarifyText, 'original': ''});
-```
-
-**new_str**
-```
-            _localMessages.add({
-              'role': 'SYSTEM',
-              'target': clarifyText,
-              'original': '',
-              'clarify': true, // 💨 증발 표식: 유저가 다음 턴에 답하면 이 되묻기 버블 제거
-            });
-```
-
----
-
-### B-2 — ghost 검열 직후 CLARIFY 증발 블록 삽입 (라인 ~2033–2040)
-
-> `isGhost` 블록(노이즈 early-return) 바로 다음, FAST-LANE 체크 **이전**에 삽입.
-> 여기 도달 = ghost 통과 = 실제 발화 → 직전 SYSTEM이 되묻기 표식이면 증발.
-> 컨텍스트 빌드(STEP 2)보다 앞이므로, 증발 후의 다음 질문·번역은 깨끗한 맥락을 받음.
-
-**old_str**
-```
-    if (isGhost) {
-      if (mounted)
-        setState(
-            () => _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP'));
-      if (_isConversationActive) _startDeepgramListening();
+**replace:**
+```dart
+  void _scrollToCurrentTop(int index) {
+    // 🔧 [SCROLL-THROTTLE] GPT 스트리밍 청크마다 호출되어 220ms 스크롤 애니메이션이
+    //   매 청크마다 취소/재시작되던 폭주를 방지. 같은 index 연속 호출은 150ms로 제한.
+    //   index가 바뀌면(새 버블) 즉시 통과시켜 위치 정확도는 유지한다.
+    final now = DateTime.now();
+    if (_lastScrollTopIndex == index &&
+        _lastScrollTopAt != null &&
+        now.difference(_lastScrollTopAt!).inMilliseconds < 150) {
       return;
     }
-
-    // 🔧 [FAST-LANE] 로컬 질문 불만 판정 — streamUserTranslation 호출 전 빠른 처리
+    _lastScrollTopAt = now;
+    _lastScrollTopIndex = index;
+    _log('🧭 [SCROLL-TOP]', 'index=$index');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
 ```
 
-**new_str**
-```
-    if (isGhost) {
-      if (mounted)
-        setState(
-            () => _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP'));
-      if (_isConversationActive) _startDeepgramListening();
-      return;
-    }
+### ✅ EDIT 2 — 쓰로틀 상태 필드 선언 추가
 
-    // ❓→💨 [CLARIFY-EVAPORATE] 직전 SYSTEM 버블이 발음 오청취로 뜬 되묻기(CLARIFY)이고
-    //   이번 발화가 그 답(재진술)이면, 군더더기 되묻기 버블을 증발시킨다.
-    //   - ghost 노이즈는 위에서 이미 early-return → 여기 도달 = 실제 답일 때만 증발
-    //   - 'clarify' 표식이 있는 SYSTEM만 제거 → 새 주제 시드 질문은 절대 안 지워짐
-    //   - 컨텍스트 빌드 전이므로 다음 AI 질문/번역은 되묻기 흔적 없는 깨끗한 맥락을 받음
-    if (mounted) {
-      final lastSysIdx =
-          _localMessages.lastIndexWhere((m) => m['role'] == 'SYSTEM');
-      if (lastSysIdx != -1 && _localMessages[lastSysIdx]['clarify'] == true) {
-        setState(() => _localMessages.removeAt(lastSysIdx));
-      }
-    }
-
-    // 🔧 [FAST-LANE] 로컬 질문 불만 판정 — streamUserTranslation 호출 전 빠른 처리
+**find:**
+```dart
+  final ScrollController _scrollController = ScrollController();
+  final Map<int, GlobalKey> _itemKeys = {};
 ```
+
+**replace:**
+```dart
+  final ScrollController _scrollController = ScrollController();
+  // 🔧 [SCROLL-THROTTLE] 상단 고정 스크롤 과다 호출 억제용 상태
+  DateTime? _lastScrollTopAt;
+  int _lastScrollTopIndex = -1;
+  final Map<int, GlobalKey> _itemKeys = {};
+```
+
+> 두 find 앵커는 각각 파일 내 **유일**함(사전 검증됨). 둘 다 정확히 1곳에서만 치환되어야 함.
 
 ---
 
-## Phase 3 — grep 사후 검증
-
+## Phase 3 — 수정 후 검증 (grep, 기대 카운트)
 ```bash
-# OLD (모두 0 기대)
-grep -c "AVOID building the sentence on stacked relative clauses" routine_mode_step_expand.dart                              # 기대: 0
-grep -c "Do NOT stack relative clauses, front participial phrases, or chains of to-infinitives." routine_mode_step_expand.dart  # 기대: 0
-grep -c "'target': clarifyText, 'original': ''});" routine_mode_step_expand.dart                                            # 기대: 0
-
-# NEW (기대 수치)
-grep -c "TRAILING relative clauses are fine and linear" routine_mode_step_expand.dart        # 기대: 1 (A-2)
-grep -c "TRAILING relative clauses are FINE — a sentence-final" routine_mode_step_expand.dart # 기대: 1 (A-1)
-grep -c "'clarify': true" routine_mode_step_expand.dart                                       # 기대: 2 (B-1 추가분 + B-2 비교문)
-grep -c "CLARIFY-EVAPORATE" routine_mode_step_expand.dart                                     # 기대: 1 (B-2)
+grep -c "_lastScrollTopAt"     <대상파일>   # 기대값: 4
+grep -c "_lastScrollTopIndex"  <대상파일>   # 기대값: 3
+grep -c "SCROLL-THROTTLE"      <대상파일>   # 기대값: 2
+grep -c "SCROLL-TOP"           <대상파일>   # 기대값: 1  (불변)
+grep -c "_scrollToCurrentTop"  <대상파일>   # 기대값: 2  (불변)
 ```
+- 5개 값이 위와 정확히 일치하면 성공.
+- 하나라도 어긋나면 **롤백**(Phase 5) 후 보고.
 
-> 참고: `'clarify': true` 가 **2회** 나오는 게 정상 — B-1의 맵 키 추가 1회 + B-2의 비교
-> 조건문(`['clarify'] == true`) 1회.
-
----
-
-## Phase 4 — 분석 & 포맷 게이트
-
+## Phase 4 — 정적 분석 / 포맷
 ```bash
-cd F:\flutter_project\stealth_vox
-flutter analyze lib\custom_code\widgets\routine_mode_step_expand.dart
-dart format lib\custom_code\widgets\routine_mode_step_expand.dart   # ★ 반드시 개별 파일만 (폴더 금지)
+flutter analyze <대상파일>
+dart format <대상파일>     # ⚠️ 폴더 대상 금지, 반드시 이 파일 1개만
 ```
+> `analyze`에서 신규 경고/에러 0건이어야 함.
 
-- PART A는 프롬프트 문자열만 → 구문 영향 없음.
-- PART B는 맵 리터럴 키 추가 + null-safe 비교(`['clarify'] == true`, key 없으면 null → false)
-  → 타입 안전, error 없어야 정상.
-- error 발생 시 즉시 중단·롤백.
-
----
-
-## 롤백
-
+## Phase 5 — 롤백 절차
 ```bash
-git reset --hard HEAD~1            # push 전
-# 또는
-git revert <commit-hash>          # push 후
+# 커밋만 한 상태(push 전)
+git checkout -- <대상파일>
+# 또는 세이브포인트 전체 복귀
+git reset --hard HEAD~1
+# 이미 push된 경우
+git revert <savepoint_hash>
 ```
 
 ---
 
-## 검증 체크리스트 (적용 후)
-
-**PART A (관계절 정밀화)**
-1. 최종 합성·머징 프롬프트가 "trailing 허용 / center-embedded만 회피"로 바뀌었는가
-2. 실측: `", who ..."` 같은 후행 관계절이 다시 등장하되, 주어-동사를 가르는 중간삽입은 안 나오는가
-
-**PART B (CLARIFY 증발)**
-3. 일부러 모호하게/오청취 유발 발화 → 되묻기 질문 버블이 뜨는가
-4. 다시 정확히 말하면 → **방금 그 되묻기 버블이 사라지고**, 성장 문장이 되묻기 직전 상태에서
-   자연스럽게 이어지는가
-5. 다음 AI 질문이 "요미지간이 뭐예요?" 같은 죽은 맥락을 참조하지 않는가
-6. **새 주제 시작** 시 첫 발화에서 시드 질문(SYSTEM)이 잘못 지워지지 않는가 (표식 없으므로 안전)
-7. 되묻기 후 발화가 garbled면 → 특정 질문 대신 일반 "다시 말해 주세요"로 가는가 (허용된 엣지)
-
-**무관 영역 무변경 확인**
-8. 진짜 Box 7, P1, P2 카라오케, billing, CORRECTION/MISHEARD/RESTATE/GARBLED 경로 — 그대로
+## 실기기 확인 포인트 (수정 후)
+1. StepExpand 한 턴 진행 중 로그에서 `🧭 [SCROLL-TOP]`가 **턴당 수백 줄 → 한 자릿수**로 감소했는가.
+2. 유저/AI 텍스트 스트리밍 중 상단 고정 버블이 **부드럽게** 따라오는가(끊김·튐 없음).
+3. 새 버블 등장 시(인덱스 변경) 스크롤이 **즉시** 반응하는가(150ms 지연 없이).
+4. 5턴 완료 후 확장문장 카드/낭독 위치가 기존과 동일한가.
