@@ -2891,7 +2891,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
       final uri = Uri.parse('https://api.openai.com/v1/audio/transcriptions');
       final request = http.MultipartRequest('POST', uri);
       request.headers['Authorization'] = 'Bearer $_apiKey';
-      request.fields['model'] = 'whisper-1';
+      request.fields['model'] = 'gpt-4o-mini-transcribe';
       request.fields['language'] = 'en';
       request.files.add(await http.MultipartFile.fromPath('file', path));
       final streamed =

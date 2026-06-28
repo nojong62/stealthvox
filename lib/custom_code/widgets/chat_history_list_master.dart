@@ -1504,7 +1504,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
       var request = http.MultipartRequest(
           'POST', Uri.parse('https://api.openai.com/v1/audio/transcriptions'));
       request.headers['Authorization'] = 'Bearer $_apiKey';
-      request.fields['model'] = 'whisper-1';
+      request.fields['model'] = 'gpt-4o-mini-transcribe';
       request.fields['language'] = 'en';
       request.files.add(http.MultipartFile.fromBytes('file', audioBytes,
           filename: 'audio.m4a'));
