@@ -65,6 +65,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   int _turnCounter = 0;
   String? _sessionDocId; // 🔧 [v3 추가] 첫 대화 후 세션 ID (클론 변경 시 null 리셋)
   DocumentReference? _myHistoryRef; // 🔧 [히스토리] chat_history 문서 참조 (Duo 패턴)
+  List<String> _lastExchangeMsgIds = []; // [??] ?? ?? messages docId
   bool _showSeedHint = false; // 합성 문장 안내 말풍선 표시 여부
   Timer? _seedHintTimer; // 합성 말풍선 3초 자동 숨김 타이머
 
@@ -2015,6 +2016,23 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     };
   }
 
+  // [정정] 직전 잘못된 교환(HOST+SYSTEM)을 chat_history에서 제거
+  Future<void> _deleteLastExchangeFromHistory() async {
+    if (_myHistoryRef == null || _lastExchangeMsgIds.isEmpty) return;
+    final ids = List<String>.from(_lastExchangeMsgIds);
+    _lastExchangeMsgIds = [];
+    try {
+      for (final id in ids) {
+        await _myHistoryRef!.collection('messages').doc(id).delete();
+      }
+      await _myHistoryRef!
+          .update({'msg_count': FieldValue.increment(-ids.length)});
+      _log('[HIST-DEL]', '잘못된 교환 ${ids.length}건 히스토리 제거');
+    } catch (e) {
+      _log('[HIST-DEL-ERR]', '히스토리 제거 실패: $e');
+    }
+  }
+
   Future<void> _processRelayPipeline(String finalTranscript,
       {bool isCorrectionRetry = false}) async {
     _resetIdleTimer();
@@ -2354,6 +2372,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           _scrollToBottom();
         }
         // 정정된 발화로 해당 턴 재처리 (재진입이므로 [CORRECTION] 재감지 안 함)
+        await _deleteLastExchangeFromHistory();
         _processRelayPipeline(finalTranscript, isCorrectionRetry: true);
         return;
       }
@@ -2370,6 +2389,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
               }
             });
           }
+          await _deleteLastExchangeFromHistory();
           await _handleRetryQuestion(contextStr, targetLangName,
               isMisheard: true);
           return;
@@ -2397,6 +2417,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 
       // ❓ [CLARIFY] 유저 발화 주어/목적어 모호 → AI 되묻기 버블 + TTS + STT 재시작
       if (clarified) {
+        await _deleteLastExchangeFromHistory();
         _turnCounter--;
         final clarifyText =
             userTargetText.replaceFirst(RegExp(r'^\[CLARIFY\]\s*'), '');
@@ -2985,13 +3006,14 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       if (_myHistoryRef == null) return;
 
       // messages 서브컬렉션에 각 발화 저장
+      final List<String> savedIds = [];
       for (final line in chatLines) {
         final translated = (line['translated_text'] ?? '').toString().trim();
         if (translated.isEmpty) continue; // 빈 발화 스킵
         // 🔧 [PRACTICE-FIX] expanded_sentence 필드 있으면 함께 저장 (옵션 B 후방호환)
         final String expandedSent =
             (line['expanded_sentence'] ?? '').toString().trim();
-        await _myHistoryRef!.collection('messages').add({
+        final addedRef = await _myHistoryRef!.collection('messages').add({
           'role': line['role'] ?? '',
           'translated_text': translated,
           'original_text': (FFAppState().nativeLang.isNotEmpty &&
@@ -3001,6 +3023,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           if (expandedSent.isNotEmpty) 'expanded_sentence': expandedSent,
           'created_at': FieldValue.serverTimestamp(),
         });
+        savedIds.add(addedRef.id);
+      }
+      if (savedIds.isNotEmpty) {
+        _lastExchangeMsgIds = List<String>.from(savedIds);
       }
 
       // 🔧 [핵심] 턴마다 msg_count/last_message 업데이트
@@ -3850,7 +3876,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   // 하단은 노란 불빛 인디케이터만 표시하여 채팅 공간 최대화
   Widget _buildControlArea(double bp) {
     if (_isPracticeMode) return const SizedBox.shrink();
-    final bool showCorrectBtn = !_isSessionComplete && _turnCounter >= 1;
     return Container(
       padding: EdgeInsets.fromLTRB(24, 8, 24, bp),
       child: Row(
@@ -3863,30 +3888,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
                 fontSize: 16,
                 fontWeight: FontWeight.bold),
           ),
-          // ↺ 원탭 정정 버튼
-          if (showCorrectBtn)
-            GestureDetector(
-              onTap: _oneTapCorrection,
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.06),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.white24, width: 1),
-                ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.replay_rounded,
-                        color: Colors.white54, size: 14),
-                    SizedBox(width: 4),
-                    Text('정정',
-                        style: TextStyle(color: Colors.white54, fontSize: 12)),
-                  ],
-                ),
-              ),
-            ),
           // 작동 중 노란 불빛 인디케이터
           Container(
             width: 10,
@@ -3910,35 +3911,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   }
 
   // ====================================================================
-  // 🔄 [원탭 ↺ 정정] 마지막 HOST+SYSTEM 쌍 삭제 후 재질문
+
   // ====================================================================
-  Future<void> _oneTapCorrection() async {
-    if (_isSessionComplete || _isPracticeMode || _turnCounter < 1) return;
-
-    _stopEverything();
-
-    if (mounted) {
-      setState(() {
-        _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-        final lastHostIdx =
-            _localMessages.lastIndexWhere((m) => m['role'] == 'HOST');
-        if (lastHostIdx != -1) _localMessages.removeAt(lastHostIdx);
-        final lastSysIdx =
-            _localMessages.lastIndexWhere((m) => m['role'] == 'SYSTEM');
-        if (lastSysIdx != -1) _localMessages.removeAt(lastSysIdx);
-      });
-      _scrollToBottom();
-    }
-
-    _turnCounter--;
-
-    final pipeResult = _buildCleanContext(maxMessages: 10);
-    final contextStr = pipeResult['contextStr']!;
-    final targetLangName =
-        FFAppState().targetLang.isNotEmpty ? FFAppState().targetLang : 'English';
-
-    await _handleRetryQuestion(contextStr, targetLangName, isMisheard: true);
-  }
 }
 
 // ====================================================================
@@ -5099,7 +5073,7 @@ class StepExpandBrain {
     final client = http.Client();
     try {
       final String correctionBlock = disableCorrection
-          ? "Never output [CORRECTION] or [MISHEARD]. Treat the input as normal content."
+          ? "NEVER output [CORRECTION] or [MISHEARD] or any bracket token. This input is the user RE-STATING what they actually meant. Output ONLY the actual intended content as natural $targetLang. STRIP all correction framing: lead-ins (\"아니\" / \"아니지\" / \"내 말은\" / \"내 말은요\" / \"그게 아니라\" / \"내가 말한 건\") AND quote-report frames (\"~라고 했어요\" / \"~라고 했어\" / \"~라고 말했어요\" / \"~라고 말했고\" / \"I said\" / \"I also said\" / \"what I said was\"). When multiple quoted statements are reported, merge them into natural connected $targetLang. Examples: \"아니 내 말은요 당신 잘못이라고요\" -> \"It's clearly your fault.\" | \"나는 빨리 구해 주세요라고 했어요 휴지가 없어요라고 말했고\" -> \"Please rescue me quickly, and there's no toilet paper.\""
           : """[CASE CORRECTION] — Check this FIRST, but only when History contains at least one 'User:' line
 The user is correcting the AI's misunderstanding of a previous answer.
 Signs:

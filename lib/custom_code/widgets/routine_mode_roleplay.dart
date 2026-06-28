@@ -175,6 +175,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   //  - 유저 작동 = _voiceManager != null (마이크 연결/녹음)
   // 1초 주기 감시 타이머가 작동 여부를 보고 idle 누적초를 증감한다.
   Timer? _idlePauseTimer;
+  List<String> _lastExchangeMsgIds = []; // [정정] 직전 교환 messages docId
   bool _isIdlePaused = false;
   int _idleElapsedSec = 0;
 
@@ -960,6 +961,23 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     if (mounted && _isConversationActive) _startDeepgramListening();
   }
 
+  // [정정] 직전 잘못된 교환(HOST+SYSTEM)을 chat_history에서 제거
+  Future<void> _deleteLastExchangeFromHistory() async {
+    if (_myHistoryRef == null || _lastExchangeMsgIds.isEmpty) return;
+    final ids = List<String>.from(_lastExchangeMsgIds);
+    _lastExchangeMsgIds = [];
+    try {
+      for (final id in ids) {
+        await _myHistoryRef!.collection('messages').doc(id).delete();
+      }
+      await _myHistoryRef!
+          .update({'msg_count': FieldValue.increment(-ids.length)});
+      _log('[HIST-DEL]', '잘못된 교환 ${ids.length}건 히스토리 제거');
+    } catch (e) {
+      _log('[HIST-DEL-ERR]', '히스토리 제거 실패: $e');
+    }
+  }
+
   Future<void> _processRelayPipeline(String finalTranscript,
       {bool isCorrectionRetry = false}) async {
     _resetIdleTimer();
@@ -1055,6 +1073,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         contextStr: contextStr,
         userRole: _scenarioUserRole,
         situation: _scenarioSituation,
+        isCorrectionRetry: isCorrectionRetry,
       );
 
       bool evaporated = false;
@@ -1098,7 +1117,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           break;
         }
         if (mounted)
-          setState(() => _localMessages[hostIndex]['target'] = userTargetText);
+          setState(() =>
+              _localMessages[hostIndex]['target'] = _cleanText(userTargetText));
         _scrollToCurrentTop(hostIndex);
 
         // [USER-FULL-TTS] no chunk TTS during user translation streaming.
@@ -1130,6 +1150,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         _ttsQueueManager.stop();
         _ttsQueueManager.setUserTurn(false);
         // 정정된 발화로 재처리 (재진입이므로 [CORRECTION] 재감지 안 함)
+        await _deleteLastExchangeFromHistory();
         _processRelayPipeline(finalTranscript, isCorrectionRetry: true);
         return;
       }
@@ -1151,6 +1172,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         _ttsQueueManager.stop();
         _ttsQueueManager.setUserTurn(false);
         _ttsQueueManager.setAiPaused(false);
+        await _deleteLastExchangeFromHistory();
         final misheardTts = ChunkedTtsFetcher(
           _openAiKey,
           _ttsQueueManager,
@@ -1734,10 +1756,11 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       if (_myHistoryRef == null) return;
 
       // messages 서브컬렉션에 각 발화 저장
+      final List<String> savedIds = [];
       for (final line in chatLines) {
         final translated = (line['translated_text'] ?? '').toString().trim();
         if (translated.isEmpty) continue;
-        await _myHistoryRef!.collection('messages').add({
+        final addedRef = await _myHistoryRef!.collection('messages').add({
           'role': line['role'] ?? '',
           'translated_text': translated,
           'original_text': (FFAppState().nativeLang.isNotEmpty &&
@@ -1746,6 +1769,10 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
               : (line['original_text'] ?? '').toString(),
           'created_at': FieldValue.serverTimestamp(),
         });
+        savedIds.add(addedRef.id);
+      }
+      if (savedIds.isNotEmpty) {
+        _lastExchangeMsgIds = List<String>.from(savedIds);
       }
 
       // 🔧 [핵심] 턴마다 msg_count/last_message 업데이트
@@ -3797,6 +3824,7 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
     required String contextStr,
     String userRole = '',
     String situation = '',
+    bool isCorrectionRetry = false,
   }) async* {
     final client = http.Client();
     try {
@@ -3805,6 +3833,20 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
           : '';
       final sysPrompt =
           """You are an expert real-time Korean-to-$targetLang translator for a live roleplay conversation.$roleContext
+${isCorrectionRetry ? '''
+[CORRECTION RESTATEMENT - ABSOLUTE TOP PRIORITY, applies to THIS input]
+This input is the user RE-STATING what they actually meant. The wrong exchange is already deleted.
+RULE 1: NEVER output [CORRECTION], [MISHEARD], [DISSATISFIED], or ANY bracket token. Completely IGNORE the [CASE CORRECTION], [CASE MISHEARD], [CASE DISSATISFIED] sections below; they DO NOT apply now.
+RULE 2: STRIP all correction framing and output ONLY the actual intended content:
+  - lead-ins: 아니 / 아니지 / 내 말은 / 내 말은요 / 그게 아니라 / 내가 말한 건
+  - quote-report frames (CRITICAL): "~라고 했어요" / "~라고 했어" / "~라고 말했어요" / "~라고 말했고" / "~라고 한 거예요" / "I said" / "I also said" / "what I said was"
+  - When the user reports MULTIPLE quoted statements, merge them into natural connected $targetLang (use "and", commas).
+RULE 3: Output natural $targetLang only. No quotation marks around the content unless truly needed.
+Examples:
+  "아니 내 말은요 당신 잘못이라고요" -> "It's clearly your fault."
+  "나는 빨리 구해 주세요라고 했어요 휴지가 없어요라고 말했고" -> "Please rescue me quickly, and there's no toilet paper."
+  "아니지 나는 학교에 간다고 했어" -> "I'm going to school."
+''' : ''}
 
 Korean is a heavy pro-drop language - subjects, objects, and pronouns are constantly omitted when clear from context.
 
@@ -3814,7 +3856,7 @@ Signs:
 - Starts with a correction signal: "아니" / "아니요" / "아 그게 아니라" / "다시" / "내 말은" / "그러니까" / "내가 말한 건" / "라고 했잖아" / "라고 말했어" / "I mean" / "I said" / "what I said was" / "that's not what I said" / "actually" / "no," / "wait,"
 - AND the content is clearly a re-statement or clarification of the LAST "User:" line in the history, NOT new information.
 - The user is essentially saying "that's not what I said — what I said was X."
-If this is a correction, output EXACTLY: [CORRECTION]  (and nothing else)
+${isCorrectionRetry ? 'NOTE: This is a correction RE-PROCESS. Do NOT output [CORRECTION] here; follow the [CORRECTION RESTATEMENT] rule at the top and translate only the core content.' : 'If this is a correction, output EXACTLY: [CORRECTION]  (and nothing else)'}
 Do NOT output [CORRECTION] for genuinely NEW information that merely starts with "아니" etc. BUT if the AI's previous turn clearly captured the user's earlier utterance as DIFFERENT content (a wrong word or a wrong topic) and the user is now restating what they actually meant, output [CORRECTION] even when the restatement also reads like a fresh answer. Test: would the user naturally say "that's not what I said"? If yes -> output [CORRECTION].
 
 [CASE MISHEARD] — Check this SECOND, only when the history contains at least one "User:" line.

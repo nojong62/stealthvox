@@ -346,7 +346,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
             path: path);
         _setDuoState('recording');
         _silenceTimer?.cancel();
-        // 침묵 자동 종료만 유지(누른 채로 말 끝나면 자동 전송). 자동 "재시작"은 제거.
+        // [토글] 침묵 자동 전송 제거. 종료/전송은 버튼 탭으로만 처리한다.
+        // 무발화로 오래 켜져 있으면 안전 종료하여 마이크 점유와 과금을 방지한다.
         _silenceTimer =
             Timer.periodic(const Duration(milliseconds: 100), (timer) async {
           if (await _audioRecorder.isRecording()) {
@@ -356,11 +357,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
               _silenceCounter = 0;
             } else {
               _silenceCounter++;
-              if (_hasSpoken && _silenceCounter >= 15) {
-                timer.cancel();
-                _stopAndSendToWhisper();
-              } else if (!_hasSpoken && _silenceCounter >= 80) {
-                // 말이 한 번도 없으면 그냥 종료(재시작 안 함)
+              if (!_hasSpoken && _silenceCounter >= 150) {
+                // 말이 한 번도 없이 오래 켜져 있으면 안전 종료(전송 안 함)
                 timer.cancel();
                 await _audioRecorder.stop();
                 _setDuoState('idle');
@@ -745,30 +743,25 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     });
   }
 
-  // 🆕 [PTT] 버튼 누름 — 녹음 시작
-  void _onPttStart() {
+  // 🆕 [토글] 마이크 버튼: idle이면 시작 / recording이면 종료·전송
+  void _onMicToggle() {
     if (!_isConversationActive) {
       setState(() => _isConversationActive = true);
     }
-    // idle일 때만 시작(재생/처리/쿨다운 중이면 무시)
     if (_duoState == 'idle') {
-      _startWhisperRecording();
-    }
-  }
-
-  // 🆕 [PTT] 버튼 뗌 — 녹음 종료 후 전송
-  void _onPttEnd() {
-    if (_duoState == 'recording') {
+      _startWhisperRecording(); // 꺼짐 -> 켜기
+    } else if (_duoState == 'recording') {
       _silenceTimer?.cancel();
-      _stopAndSendToWhisper();
+      _stopAndSendToWhisper(); // 켜짐 -> 끄고 전송
     }
+    // processing/playing/cooldown 중에는 무시
   }
 
-  // 🆕 [PTT] 버튼 상태별 표시 문구
+  // 🆕 [토글] 버튼 상태별 표시 문구
   String _pttLabel() {
     switch (_duoState) {
       case 'recording':
-        return 'Release to send';
+        return 'Tap to stop · send';
       case 'processing':
         return 'Processing…';
       case 'playing':
@@ -776,7 +769,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
       case 'cooldown':
         return '…';
       default:
-        return 'Hold to talk';
+        return 'Tap to talk';
     }
   }
 
@@ -1461,20 +1454,28 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                   letterSpacing: 1.0)),
-          Listener(
+          GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onPointerDown: (_) => _onPttStart(),
-            onPointerUp: (_) => _onPttEnd(),
-            onPointerCancel: (_) => _onPttEnd(),
+            // [토글] 처리·재생·쿨다운 중에는 탭 무시
+            onTap: isBusy ? null : _onMicToggle,
             child: Container(
                 width: 72,
                 height: 72,
                 decoration: BoxDecoration(
-                    color: accent.withValues(alpha: 0.15),
+                    // [토글] 녹음 중에는 채운 빨강, 대기 중에는 테두리형
+                    color: isRec ? accent : accent.withValues(alpha: 0.15),
                     shape: BoxShape.circle,
-                    border: Border.all(color: accent, width: 2.5)),
-                child: Icon(isRec ? Icons.mic_rounded : Icons.mic_none_rounded,
-                    color: accent, size: 38)),
+                    border: Border.all(color: accent, width: 2.5),
+                    boxShadow: isRec
+                        ? [
+                            BoxShadow(
+                                color: accent.withValues(alpha: 0.55),
+                                blurRadius: 18,
+                                spreadRadius: 2)
+                          ]
+                        : null),
+                child: Icon(isRec ? Icons.stop_rounded : Icons.mic_none_rounded,
+                    color: isRec ? Colors.white : accent, size: 38)),
           ),
         ],
       ),

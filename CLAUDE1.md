@@ -48,124 +48,123 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-# 인스트럭션: CORRECTION 신호 보강 + 가드 완화 (백업 패치)
+# 지시문서 — STT 모델 교체 (whisper-1 → gpt-4o-mini-transcribe) · 안전 2곳
 
 ## 목적
-유저가 **말로** AI의 오해를 정정할 때 `[CORRECTION]` 판정을 더 잘 잡도록 분류 프롬프트를 보강한다.
-- (a) 정정 신호 목록에 결정적 신호 추가: `"라고 했잖아" / "라고 말했어" / "I said" / "that's not what I said"` 등
-- (b) "아니로 시작해도 새 정보면 제외" 가드가 **진짜 정정**까지 잡아먹는 문제 완화
+타임스탬프/prompt 의존이 없는 **영어 발음 STT 2곳**의 모델 문자열만
+`whisper-1`($0.006/분) → `gpt-4o-mini-transcribe`($0.003/분, 절반)으로 교체한다.
+엔진 클래스·응답 파싱·다운스트림 로직은 일절 건드리지 않는다. (콜사이트 인자 1줄만 변경)
 
-> 로직 변경 0. **프롬프트 문자열만** 수정. Box 7 / billing / P1·P2·P3 / turnPractice 무관.
+## 대상
+| 파일(실제 경로) | 함수 | 줄(업로드 기준) | 비고 |
+|---|---|---|---|
+| `lib/custom_code/widgets/chat_history_master.dart` | `_stopAppRecordAndProcess` (Box 18-C 자유발화) | ~2894 | LF 줄바꿈 |
+| `lib/custom_code/widgets/chat_history_list_master.dart` | `_whisperTranscribe` (Keeper) | ~1507 | **CRLF 줄바꿈** — apply_patch 권장 |
 
-## 대상 파일 (2개)
-- `routine_mode_roleplay.dart`  ← **CRLF 파일** (줄 끝 `\r\n`)
-- `routine_mode_step_expand.dart` ← LF 파일
+## 제외(이번 배치 아님)
+- `chat_history_master.dart` 채점(`1244`): `prompt: targetText` 의존 → 통과율 A/B 후 결정
+- `routine_mode_duo.dart`(`396`): 한국어 자동감지 + 고스트 필터 → 실기기 검증 후 결정
+- `api_calls.dart` `VoiceToTextCall`: FlutterFlow 자동생성 + 사용처 미확인 → 수동편집 금지
 
-> ⚠️ str_replace 앵커는 모두 **단일 라인 내부 텍스트**만 사용한다. 줄 끝 `\r`/`\n`은 앵커에 포함하지 않으므로 CRLF/LF 차이의 영향을 받지 않는다.
-
----
-
-## STEP 0 · Savepoint
-```
-git add -A && git commit -m "savepoint: before CORRECTION signal backup patch"
-```
-
----
-
-## PHASE 1 · 앵커 유일성 검증 (각 grep 결과가 정확히 1이어야 진행)
-```bash
-grep -c 'Starts with a correction signal:' routine_mode_roleplay.dart        # 기대: 1
-grep -c 'happen to start with "아니" etc.'   routine_mode_roleplay.dart        # 기대: 1
-grep -c 'Starts with correction signals:'  routine_mode_step_expand.dart      # 기대: 1
-grep -c 'happen to start with "아니" etc.'   routine_mode_step_expand.dart      # 기대: 1
-```
-하나라도 1이 아니면 **중단하고 보고**.
+## 인코딩/포맷 규칙(절대)
+- PowerShell `-replace` 금지. 적용은 `str_replace` 또는 `apply_patch`만.
+- `dart format`은 **개별 파일만** 대상으로. 폴더 단위 format 절대 금지(한국어 UTF-8 문자열 깨짐).
+- `chat_history_list_master.dart`는 CRLF이므로 앵커 매칭이 어긋나면 `apply_patch`로 전환.
 
 ---
 
-## PHASE 2 · str_replace 편집 (파일별, bottom-to-top)
+## Phase 0 — Savepoint
+```
+git add -A && git commit -m "savepoint: before STT mini-transcribe swap (safe 2 sites)"
+```
+커밋 해시 기록(롤백용): `__________`
 
-### 파일 1: routine_mode_roleplay.dart
+## Phase 1 — 앵커 유일성 검증 (각 명령 결과가 기대값과 일치해야 진행)
+```
+# 자유발화 파일: whisper-1 총 2곳(채점+자유발화) 중 자유발화만 교체 예정
+grep -c "model'\] = 'whisper-1'" lib/custom_code/widgets/chat_history_master.dart        # 기대: 2
 
-#### ②-B 먼저 (아래 라인 3818 = 가드 완화)
-- **old_str**
-```
-Do NOT output [CORRECTION] when the user simply adds new details that happen to start with "아니" etc.
-```
-- **new_str**
-```
-Do NOT output [CORRECTION] for genuinely NEW information that merely starts with "아니" etc. BUT if the AI's previous turn clearly captured the user's earlier utterance as DIFFERENT content (a wrong word or a wrong topic) and the user is now restating what they actually meant, output [CORRECTION] even when the restatement also reads like a fresh answer. Test: would the user naturally say "that's not what I said"? If yes -> output [CORRECTION].
-```
+# Keeper 파일: whisper-1 1곳
+grep -c "model'\] = 'whisper-1'" lib/custom_code/widgets/chat_history_list_master.dart   # 기대: 1
 
-#### ①-A 다음 (위 라인 3814 = 신호 목록 확장)
-- **old_str**
+# 자유발화 앵커가 파일 내 유일한지(prompt 없음 + 15초 타임아웃 조합)
+grep -c "seconds: 15" lib/custom_code/widgets/chat_history_master.dart                   # 기대: 1
 ```
-- Starts with a correction signal: "아니" / "아니요" / "아 그게 아니라" / "다시" / "내 말은" / "그러니까" / "I mean" / "actually" / "no," / "wait,"
-```
-- **new_str**
-```
-- Starts with a correction signal: "아니" / "아니요" / "아 그게 아니라" / "다시" / "내 말은" / "그러니까" / "내가 말한 건" / "라고 했잖아" / "라고 말했어" / "I mean" / "I said" / "what I said was" / "that's not what I said" / "actually" / "no," / "wait,"
-```
+세 결과가 각각 2 / 1 / 1 이 아니면 **중단**하고 보고.
 
-### 파일 2: routine_mode_step_expand.dart
+## Phase 2 — 교체 (파일별 1곳, 바텀업 순서 무관 / 아래 순서대로)
 
-#### ②-B 먼저 (라인 5054 = 가드 완화)
-- **old_str**
+### 2-1) chat_history_master.dart — 자유발화 (앵커: prompt 없음 + seconds:15 → 유일)
+old_str:
 ```
-Do NOT output [CORRECTION] when the user simply adds new details that happen to start with "아니" etc.
+      request.fields['model'] = 'whisper-1';
+      request.fields['language'] = 'en';
+      request.files.add(await http.MultipartFile.fromPath('file', path));
+      final streamed =
+          await request.send().timeout(const Duration(seconds: 15));
 ```
-- **new_str**
+new_str:
 ```
-Do NOT output [CORRECTION] for genuinely NEW information that merely starts with "아니" etc. BUT if the AI's previous turn clearly captured the user's earlier utterance as DIFFERENT content (a wrong word or a wrong topic) and the user is now restating what they actually meant, output [CORRECTION] even when the restatement also reads like a fresh answer. Test: would the user naturally say "that's not what I said"? If yes -> output [CORRECTION].
+      request.fields['model'] = 'gpt-4o-mini-transcribe';
+      request.fields['language'] = 'en';
+      request.files.add(await http.MultipartFile.fromPath('file', path));
+      final streamed =
+          await request.send().timeout(const Duration(seconds: 15));
 ```
+> 채점(1244)은 중간에 `request.fields['prompt'] = targetText;`가 있고 타임아웃이 `seconds: 10`이라 이 앵커에 걸리지 않는다(= 채점은 whisper-1 유지).
 
-#### ①-A 다음 (라인 5050 = 신호 목록 확장)
-- **old_str**
+### 2-2) chat_history_list_master.dart — Keeper (CRLF 주의)
+old_str:
 ```
-- Starts with correction signals: "아니" / "아니요" / "아 그게 아니라" / "다시" / "내 말은" / "그러니까" / "I mean" / "actually" / "no," / "wait,"
+      request.fields['model'] = 'whisper-1';
+      request.fields['language'] = 'en';
+      request.files.add(http.MultipartFile.fromBytes('file', audioBytes,
+          filename: 'audio.m4a'));
 ```
-- **new_str**
+new_str:
 ```
-- Starts with correction signals: "아니" / "아니요" / "아 그게 아니라" / "다시" / "내 말은" / "그러니까" / "내가 말한 건" / "라고 했잖아" / "라고 말했어" / "I mean" / "I said" / "what I said was" / "that's not what I said" / "actually" / "no," / "wait,"
+      request.fields['model'] = 'gpt-4o-mini-transcribe';
+      request.fields['language'] = 'en';
+      request.files.add(http.MultipartFile.fromBytes('file', audioBytes,
+          filename: 'audio.m4a'));
+```
+> str_replace가 CRLF 때문에 "not found"면 `apply_patch`로 동일 변경을 적용.
+
+## Phase 3 — 카운트 검증 (기대값과 정확히 일치)
+```
+grep -c "whisper-1" lib/custom_code/widgets/chat_history_master.dart                 # 기대: 1 (채점만 잔존)
+grep -c "gpt-4o-mini-transcribe" lib/custom_code/widgets/chat_history_master.dart    # 기대: 1
+grep -c "whisper-1" lib/custom_code/widgets/chat_history_list_master.dart            # 기대: 0
+grep -c "gpt-4o-mini-transcribe" lib/custom_code/widgets/chat_history_list_master.dart # 기대: 1
+```
+하나라도 어긋나면 Phase 5 롤백 후 보고.
+
+## Phase 4 — 분석 + 포맷 (개별 파일만)
+```
+flutter analyze lib/custom_code/widgets/chat_history_master.dart lib/custom_code/widgets/chat_history_list_master.dart
+dart format lib/custom_code/widgets/chat_history_master.dart
+dart format lib/custom_code/widgets/chat_history_list_master.dart
+```
+analyze 신규 에러 0 확인. (폴더 format 금지)
+
+## Phase 5 — 행동 검증 체크리스트 (실기기)
+- [ ] 히스토리 **자유발화 튜터링**(Box 18-C): 영어 발화 → transcript 정상 표시 → GPT 교정 정상
+- [ ] **Keeper** 발화: 영어 발화 → transcript 정상 → 교정 정상
+- [ ] 빌링 틱 `history_tutoring_stt_result` 정상 기록
+- [ ] (체감) 인식 지연/정확도가 whisper 대비 동등 이상인지
+- [ ] **채점 모드는 변화 없음**(여전히 whisper-1, 통과율 동일) 확인
+
+### 롤백
+```
+git checkout <Phase0 해시> -- lib/custom_code/widgets/chat_history_master.dart lib/custom_code/widgets/chat_history_list_master.dart
 ```
 
 ---
 
-## PHASE 3 · 검증 (grep count)
-```bash
-# 신규 신호가 각 파일에 정확히 1번씩 들어갔는지
-grep -c '"that'"'"'s not what I said"' routine_mode_roleplay.dart      # 기대: 1
-grep -c '"that'"'"'s not what I said"' routine_mode_step_expand.dart   # 기대: 1
-# 구 가드 문구가 완전히 사라졌는지
-grep -c 'simply adds new details' routine_mode_roleplay.dart          # 기대: 0
-grep -c 'simply adds new details' routine_mode_step_expand.dart       # 기대: 0
-```
-
----
-
-## PHASE 4 · analyze + format (단일 파일만)
-```bash
-flutter analyze lib/custom_code/widgets/routine_mode_roleplay.dart
-flutter analyze lib/custom_code/widgets/routine_mode_step_expand.dart
-dart format lib/custom_code/widgets/routine_mode_roleplay.dart
-dart format lib/custom_code/widgets/routine_mode_step_expand.dart
-```
-> ⚠️ **폴더 대상 format 금지** (한글 UTF-8 문자열 손상). 반드시 개별 파일만.
-> (경로는 실제 프로젝트 구조에 맞춰 조정)
-
----
-
-## ROLLBACK
-문제 시:
-```
-git reset --hard HEAD~1
-```
-
----
-
-## 검증 체크리스트 (실장 확인용)
-- [ ] PHASE 1 grep 4개 모두 1
-- [ ] PHASE 3 신규 신호 카운트 각 1, 구 가드 0
-- [ ] analyze 통과 (신규 경고 없음)
-- [ ] format 후 한글 문자열 깨짐 없음 (git diff로 육안 확인)
-- [ ] 실기기: AI가 오해 → "아니, 나 ~라고 했잖아" → 직전 교환 삭제 후 재처리 동작
+## 후속(별도 작업)
+1. `VoiceToTextCall` 실사용 여부 확인 → dead면 정리 대상, 사용 중이면 FlutterFlow UI에서 처리:
+   ```
+   grep -rn "VoiceToTextCall" lib/
+   ```
+2. 채점(`1244`) prompt 의존 — mini-transcribe 통과율 A/B 후 결정
+3. Duo(`396`) — 한국어 정확도 + 고스트 필터 실기기 검증 후 결정
