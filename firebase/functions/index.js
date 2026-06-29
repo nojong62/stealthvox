@@ -5,6 +5,7 @@
 //   - onUserDeleted:        cleanup when a Firebase Auth user is deleted
 //   - deductRemainingTime:  callable that deducts user's subscription time
 //                           (with auth check, range validation, transaction)
+//   - kakaoCustomAuth:      callable that maps a Kakao account to a Firebase uid
 // Runtime:  Node.js 20
 // Region:   us-central1 (default)
 // ============================================================================
@@ -416,3 +417,93 @@ exports.logUsageSession = functions.https.onCall(async (data, context) => {
     after_seconds: afterSeconds,
   };
 });
+
+// ----------------------------------------------------------------------------
+// kakaoCustomAuth
+// Type:   HTTPS Callable (caller must already be authenticated; anonymous ok)
+// Input:  { kakaoAccessToken: string }
+// Output: { token: string }   // Client uses signInWithCustomToken.
+//
+// Integration policy:
+//   1. Verify the Kakao access token via kapi.kakao.com/v2/user/me.
+//   2. Resolve kakao_uid_map/{kakaoId}.
+//        - Existing map: return that uid for repeat Kakao logins.
+//        - Missing map: bind the current anonymous uid to preserve trial data.
+//   3. Issue a Firebase custom token for the resolved uid.
+// ----------------------------------------------------------------------------
+exports.kakaoCustomAuth = functions
+  .region("us-central1")
+  .https.onCall(async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "Request must be authenticated (anonymous ok)."
+      );
+    }
+    const anonUid = context.auth.uid;
+
+    const accessToken = data && data.kakaoAccessToken;
+    if (!accessToken || typeof accessToken !== "string") {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "kakaoAccessToken (string) is required."
+      );
+    }
+
+    let kakaoId = null;
+    try {
+      const resp = await fetch("https://kapi.kakao.com/v2/user/me", {
+        method: "GET",
+        headers: { Authorization: "Bearer " + accessToken },
+      });
+      if (!resp.ok) {
+        throw new functions.https.HttpsError(
+          "unauthenticated",
+          "Kakao token rejected (status " + resp.status + ")."
+        );
+      }
+      const profile = await resp.json();
+      kakaoId = profile && profile.id != null ? String(profile.id) : null;
+    } catch (e) {
+      if (e instanceof functions.https.HttpsError) throw e;
+      throw new functions.https.HttpsError(
+        "internal",
+        "Kakao verification failed: " + String(e)
+      );
+    }
+    if (!kakaoId) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "No Kakao id found in profile."
+      );
+    }
+
+    const firestore = admin.firestore();
+    const mapRef = firestore.collection("kakao_uid_map").doc(kakaoId);
+
+    const resolvedUid = await firestore.runTransaction(async (tx) => {
+      const mapDoc = await tx.get(mapRef);
+      if (mapDoc.exists && mapDoc.data().uid) {
+        return mapDoc.data().uid;
+      }
+      tx.set(mapRef, {
+        uid: anonUid,
+        kakao_id: kakaoId,
+        created_at: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      return anonUid;
+    });
+
+    const token = await admin
+      .auth()
+      .createCustomToken(resolvedUid, { provider: "kakaocorp.com" });
+
+    functions.logger.info("kakaoCustomAuth", {
+      anonUid: anonUid,
+      resolvedUid: resolvedUid,
+      kakaoIdPrefix: kakaoId.substring(0, 6),
+      returning: resolvedUid !== anonUid,
+    });
+
+    return { token: token };
+  });

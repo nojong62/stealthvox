@@ -70,5 +70,10 @@ service cloud.firestore {
     match /welcome_devices/{deviceId} {
       allow read, write: if false;
     }
+
+    // Kakao account to Firebase uid map. Admin SDK only.
+    match /kakao_uid_map/{kakaoId} {
+      allow read, write: if false;
+    }
   }
 }
