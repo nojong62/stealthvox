@@ -23,6 +23,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '/components/social_login_modal.dart';
 // 💡 에러의 원인이었던 외부 패키지 삭제 완료! Firebase로 대체합니다.
 
 class StoreMaster extends StatefulWidget {
@@ -196,11 +197,16 @@ class _StoreMasterState extends State<StoreMaster> {
     _log('PURCHASE',
         'tap productId=${plan['id']} title=${plan['title']} uid=$currentUserUid ref=${currentUserReference != null}');
 
-    if (currentUserReference == null) {
-      _showFeedback("로그인 후 이용해 주세요.", const Color(0xFFF87171));
-      return;
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null || currentUser.isAnonymous) {
+      final result = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const SocialLoginModal(),
+      );
+      if (result != true || !mounted) return;
+      await _initRevenueCatUser();
     }
-
     setState(() => isProcessing = true);
     try {
       // RevenueCat 권장 흐름: Offerings → Package 매칭 → purchasePackage

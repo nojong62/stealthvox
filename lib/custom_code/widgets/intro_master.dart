@@ -184,7 +184,8 @@ class _IntroMasterState extends State<IntroMaster> {
             password: password,
           );
         }
-        await _claimWelcomeBonus();
+        // [Welcome bonus removed] Replaced by the 30-second free trial flow.
+        // await _claimWelcomeBonus();
       }
       if (mounted) context.goNamed('Lobby');
     } on FirebaseAuthException catch (e) {

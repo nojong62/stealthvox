@@ -61,6 +61,11 @@ android {
         targetSdkVersion 36
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
+        manifestPlaceholders += [
+            kakaoNativeAppKey: project.findProperty("KAKAO_NATIVE_APP_KEY")
+                    ?: System.getenv("KAKAO_NATIVE_APP_KEY")
+                    ?: "YOUR_KAKAO_NATIVE_APP_KEY"
+        ]
     }
 
    signingConfigs {
