@@ -48,248 +48,718 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-# Phase A — 소셜 로그인 통합 (서버 + 의존성)
+# Phase B — 소셜 로그인 클라이언트 통합 (완전 최종본)
+
+"Step 7 실행 전에 먼저 grep -rn "_claimWelcomeBonus\|claimWelcomeBonus" lib/ 결과를 보여줘"
 
 ## 목표
-카카오 · 구글 · 이메일 로그인을 **하나의 Firebase uid** 아래로 통합한다.
-이 문서는 **서버 함수 + 의존성 + 셋업**까지만 다룬다. (클라이언트 UI/모달/Store 게이트/웰컴보너스 제거는 Phase B)
+- 카카오 · 구글 · 이메일 로그인 모달 추가
+- Store 구매 게이트: 익명이면 모달 팝업 → 가입 → 결제 자동 재진행
+- 웰컴보너스 호출 제거
+- 기존 익명 uid 아래 체험 데이터 보존
 
-핵심 원칙: 카카오 로그인 시 **새 계정을 만들지 않고, 현재 익명 uid에 묶는다.** → 30초/1분 체험 데이터(익명 uid 아래 `chat_history`)가 그대로 보존된다.
-
-전제(이미 충족):
-- Blaze 플랜 사용 중 ✓ (외부 호출 가능)
+## 전제 (Phase A 완료 기준)
+- `kakao_flutter_sdk_user` pubspec에 추가됨 ✓
+- `kakaoCustomAuth` Cloud Function 배포됨 ✓
+- `kakao_uid_map` Firestore 규칙 하드닝됨 ✓
 - `google_sign_in` 이미 pubspec에 존재 ✓
-- Cloud Functions 스타일: v1 (`functions.https.onCall` + `defineSecret`), Node 20
 
-작업 디렉터리: 리포 루트(`F:\flutter_project\stealth_vox`). 함수 배포는 `firebase/` 하위에서.
+## 작업 파일 목록
+| 파일 | 작업 |
+|---|---|
+| `pubspec.yaml` | `cloud_functions`, `kakao_flutter_sdk_common` 추가 |
+| `android/app/src/main/AndroidManifest.xml` | 카카오 URL 스킴 Activity 추가 |
+| `lib/main.dart` | import 1줄 + `KakaoSdk.init()` 1줄 |
+| `lib/auth/social_auth_service.dart` | 신규 생성 |
+| `lib/components/social_login_modal.dart` | 신규 생성 |
+| `lib/custom_code/widgets/store_master.dart` | `_executePurchase` 게이트 교체 + import 추가 |
 
-> 이 Phase는 **순수 추가(additive)**다. 기존 동작을 바꾸지 않으므로 배포해도 현재 앱에 영향이 없다.
+> **Box 7 원칙 준수**: store_master.dart는 구매 게이트 분기 1곳만 수정. TTS/STT 관련 코드 일절 미접촉.
 
 ---
 
 ## 0. Savepoint
 
 ```bash
+cd F:/flutter_project/stealth_vox
 git add -A
-git commit -m "savepoint: before Phase A social auth unify"
+git commit -m "savepoint: before Phase B social auth client wiring"
 ```
 
 ---
 
-## 1. [Claude Code · 터미널] 의존성 + IAM 셋업
-
-### 1-1. 카카오 SDK 추가 (pub이 최신 호환 버전 자동 해석)
-```bash
-flutter pub add kakao_flutter_sdk
-```
-> 버전을 수동으로 박지 말 것 — pub이 firebase_auth 5.6.0 등과 호환되는 버전을 해석한다.
-
-### 1-2. createCustomToken용 IAM 권한 (한 번만)
-`createCustomToken`은 서비스 계정의 `signBlob` 권한이 필요하다. gcloud가 설치돼 있으면:
+## 1. 추가 의존성
 
 ```bash
-gcloud services enable iamcredentials.googleapis.com iam.googleapis.com --project stealth-vox-3p3rq3
-
-gcloud projects add-iam-policy-binding stealth-vox-3p3rq3 ^
-  --member="serviceAccount:stealth-vox-3p3rq3@appspot.gserviceaccount.com" ^
-  --role="roles/iam.serviceAccountTokenCreator"
+flutter pub add cloud_functions
+flutter pub add kakao_flutter_sdk_common
 ```
-> Windows cmd는 줄바꿈 `^`, PowerShell이면 백틱 `` ` ``, bash면 `\`로 바꿔서 실행.
-> **gcloud 미설치 시 대안(수동):** Cloud Console → IAM → 주체 `stealth-vox-3p3rq3@appspot.gserviceaccount.com` → 역할 추가 → **Service Account Token Creator**.
-> 첫 배포 후 호출에서 `auth/insufficient-permission`이 나면 이 단계가 누락된 것이니 다시 확인.
 
-### 1-3. (Phase B 준비용 · 병행) 디버그 키해시 추출
-카카오 앱 등록 때 붙여넣을 Android 디버그 키해시. 지금 뽑아두면 실장님이 카카오 콘솔에서 병행 등록 가능.
-```bash
-keytool -exportcert -alias androiddebugkey -keystore %USERPROFILE%\.android\debug.keystore -storepass android -keypass android | openssl sha1 -binary | openssl base64
-```
-> 출력된 한 줄(예: `Xo8WBi6jz...=`)을 실장님께 전달. (릴리즈 키해시는 출시 빌드 키스토어로 동일 방식 추출 — Phase B에서)
+✅ 확인: `pubspec.lock`에 두 항목 존재
 
 ---
 
-## 2. [Claude Code · 편집] `firebase/functions/index.js`에 `kakaoCustomAuth` 추가
+## 2. 카카오 콘솔 + AndroidManifest (병행 가능)
 
-### 2-1. 앵커 확인 (정확히 1이어야 함)
+### 2-1. 카카오 디벨로퍼스 (웹 콘솔, 수동)
+[developers.kakao.com](https://developers.kakao.com) → 내 애플리케이션 → 앱 생성:
+- 플랫폼 → Android: 패키지명 `com.aienglishpractice.stealthvox` + Phase A Step 1-3 **디버그 키해시** 등록
+- 카카오 로그인 → 활성화: **ON**
+- 동의항목: **닉네임만** (이메일 불필요 — uid 바인딩에 이메일 미사용)
+- **네이티브 앱키** 복사 → 이하 `YOUR_KAKAO_NATIVE_APP_KEY` 자리에 사용
+
+### 2-2. AndroidManifest.xml
+
+**앵커 확인**:
 ```bash
-grep -n "after_seconds: afterSeconds," firebase/functions/index.js | wc -l   # 기대값: 1
-grep -n "exports.kakaoCustomAuth" firebase/functions/index.js | wc -l        # 기대값: 0 (아직 없음)
-```
-두 값이 각각 1, 0이 아니면 **중단**하고 보고.
-
-### 2-2. str_replace — 파일 끝(`logUsageSession`)의 return 블록 뒤에 함수 추가
-
-**old_str** (파일 마지막 부분, 유일):
-```js
-  return {
-    ok: true,
-    before_seconds: beforeSeconds,
-    after_seconds: afterSeconds,
-  };
-});
+grep -n "android:name=\"com.kakao" android/app/src/main/AndroidManifest.xml | wc -l
+# 기대값: 0 (아직 없음)
+grep -n "</application>" android/app/src/main/AndroidManifest.xml | wc -l
+# 기대값: 1
 ```
 
-**new_str** (위 블록 + 아래 함수 이어붙임):
-```js
-  return {
-    ok: true,
-    before_seconds: beforeSeconds,
-    after_seconds: afterSeconds,
-  };
-});
+**str_replace**:
 
-// ----------------------------------------------------------------------------
-// kakaoCustomAuth
-// Type:   HTTPS Callable (호출자는 익명 인증 상태여야 함)
-// Input:  { kakaoAccessToken: string }
-// Output: { token: string }   // 클라이언트가 signInWithCustomToken에 사용
+old_str (유일):
+```xml
+        </application>
+```
+
+new_str:
+```xml
+        <!-- 카카오 커스텀 URL 스킴 -->
+        <activity
+            android:name="com.kakao.sdk.auth.AuthCodeHandlerActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="kakaoYOUR_KAKAO_NATIVE_APP_KEY" />
+            </intent-filter>
+        </activity>
+        </application>
+```
+
+> `kakaoYOUR_KAKAO_NATIVE_APP_KEY` → 예: 앱키 `abc123`이면 `kakaoabc123`
+
+**검증**:
+```bash
+grep -n "AuthCodeHandlerActivity" android/app/src/main/AndroidManifest.xml | wc -l
+# 기대값: 1
+```
+
+---
+
+## 3. main.dart 수정
+
+### 3-1. 앵커 확인
+```bash
+grep -n "await initFirebase();" lib/main.dart | wc -l
+# 기대값: 1
+grep -n "KakaoSdk.init" lib/main.dart | wc -l
+# 기대값: 0
+grep -n "kakao_flutter_sdk_common" lib/main.dart | wc -l
+# 기대값: 0
+```
+
+### 3-2. import 추가
+main.dart 상단 import 블록에서 firebase_core import 줄을 찾아 바로 뒤에 추가:
+
+old_str (유일):
+```dart
+import 'package:firebase_core/firebase_core.dart';
+```
+
+new_str:
+```dart
+import 'package:firebase_core/firebase_core.dart';
+import 'package:kakao_flutter_sdk_common/kakao_flutter_sdk_common.dart';
+```
+
+### 3-3. KakaoSdk.init() 삽입
+
+old_str (유일):
+```dart
+  await initFirebase();
+```
+
+new_str:
+```dart
+  await initFirebase();
+  KakaoSdk.init(nativeAppKey: 'YOUR_KAKAO_NATIVE_APP_KEY');
+```
+
+### 3-4. 검증
+```bash
+grep -n "KakaoSdk.init" lib/main.dart | wc -l
+# 기대값: 1
+grep -n "kakao_flutter_sdk_common" lib/main.dart | wc -l
+# 기대값: 1
+```
+
+---
+
+## 4. lib/auth/social_auth_service.dart 신규 생성
+
+```dart
+// lib/auth/social_auth_service.dart
 //
-// 통합 원칙:
-//   1) 카카오 액세스 토큰을 kapi.kakao.com/v2/user/me로 검증 → kakaoId
-//   2) kakao_uid_map/{kakaoId} 조회
-//        - 있으면: 그 uid (복귀 카카오 유저)
-//        - 없으면: 현재 익명 uid에 바인딩 + 매핑 저장 (체험 데이터 보존)
-//   3) 해당 uid로 커스텀 토큰 발급 (provider: "kakaocorp.com")
-// Node 20 전역 fetch 사용 → 추가 npm 의존성 없음.
-// ----------------------------------------------------------------------------
-exports.kakaoCustomAuth = functions
-  .region("us-central1")
-  .https.onCall(async (data, context) => {
-    if (!context.auth) {
-      throw new functions.https.HttpsError(
-        "unauthenticated",
-        "Request must be authenticated (anonymous ok)."
-      );
-    }
-    const anonUid = context.auth.uid;
+// 카카오 · 구글 · 이메일 로그인을 현재 익명 uid에 통합하는 서비스.
+// Phase B: 클라이언트 wiring 전용.
 
-    const accessToken = data && data.kakaoAccessToken;
-    if (!accessToken || typeof accessToken !== "string") {
-      throw new functions.https.HttpsError(
-        "invalid-argument",
-        "kakaoAccessToken (string) is required."
-      );
-    }
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
 
-    // 1. 카카오 토큰 검증 → kakaoId
-    let kakaoId = null;
-    try {
-      const resp = await fetch("https://kapi.kakao.com/v2/user/me", {
-        method: "GET",
-        headers: { Authorization: "Bearer " + accessToken },
-      });
-      if (!resp.ok) {
-        throw new functions.https.HttpsError(
-          "unauthenticated",
-          "Kakao token rejected (status " + resp.status + ")."
-        );
-      }
-      const profile = await resp.json();
-      kakaoId = profile && profile.id != null ? String(profile.id) : null;
-    } catch (e) {
-      if (e instanceof functions.https.HttpsError) throw e;
-      throw new functions.https.HttpsError(
-        "internal",
-        "Kakao verification failed: " + String(e)
-      );
-    }
-    if (!kakaoId) {
-      throw new functions.https.HttpsError(
-        "unauthenticated",
-        "No Kakao id found in profile."
-      );
+class SocialAuthService {
+  static final _auth = FirebaseAuth.instance;
+  static final _functions =
+      FirebaseFunctions.instanceFor(region: 'us-central1');
+
+  // ─────────────────────────────────────────────
+  // 카카오 로그인
+  //   1) 카카오앱/웹으로 OAuth → accessToken
+  //   2) kakaoCustomAuth Cloud Function → customToken
+  //   3) signInWithCustomToken → 익명 uid 보존
+  // ─────────────────────────────────────────────
+  static Future<UserCredential> signInWithKakao() async {
+    OAuthToken token;
+    if (await isKakaoTalkInstalled()) {
+      token = await UserApi.instance.loginWithKakaoTalk();
+    } else {
+      token = await UserApi.instance.loginWithKakaoAccount();
     }
 
-    // 2. 매핑 조회 → 기존 uid 또는 현재 익명 uid에 바인딩
-    const firestore = admin.firestore();
-    const mapRef = firestore.collection("kakao_uid_map").doc(kakaoId);
-
-    const resolvedUid = await firestore.runTransaction(async (tx) => {
-      const mapDoc = await tx.get(mapRef);
-      if (mapDoc.exists && mapDoc.data().uid) {
-        return mapDoc.data().uid; // 복귀 카카오 유저
-      }
-      tx.set(mapRef, {
-        uid: anonUid,
-        kakao_id: kakaoId,
-        created_at: admin.firestore.FieldValue.serverTimestamp(),
-      });
-      return anonUid; // 최초 → 익명 uid 보존
+    final callable = _functions.httpsCallable('kakaoCustomAuth');
+    final result = await callable.call<Map<String, dynamic>>({
+      'kakaoAccessToken': token.accessToken,
     });
 
-    // 3. 커스텀 토큰 발급
-    const token = await admin
-      .auth()
-      .createCustomToken(resolvedUid, { provider: "kakaocorp.com" });
+    final customToken = result.data['token'] as String;
+    return await _auth.signInWithCustomToken(customToken);
+  }
 
-    functions.logger.info("kakaoCustomAuth", {
-      anonUid: anonUid,
-      resolvedUid: resolvedUid,
-      kakaoIdPrefix: kakaoId.substring(0, 6),
-      returning: resolvedUid !== anonUid,
-    });
+  // ─────────────────────────────────────────────
+  // 구글 로그인
+  //   linkWithCredential 시도 → already-in-use면 signInWithCredential
+  // ─────────────────────────────────────────────
+  static Future<UserCredential> signInWithGoogle() async {
+    final googleUser = await GoogleSignIn().signIn();
+    if (googleUser == null) throw Exception('Google sign-in cancelled.');
 
-    return { token: token };
-  });
-```
+    final googleAuth = await googleUser.authentication;
+    final credential = GoogleAuthProvider.credential(
+      accessToken: googleAuth.accessToken,
+      idToken: googleAuth.idToken,
+    );
 
-### 2-3. 추가 검증
-```bash
-grep -n "exports.kakaoCustomAuth" firebase/functions/index.js | wc -l   # 기대값: 1
-node -c firebase/functions/index.js && echo "SYNTAX OK"                  # 문법 오류 없어야 함
-```
+    final currentUser = _auth.currentUser;
+    if (currentUser != null && currentUser.isAnonymous) {
+      try {
+        return await currentUser.linkWithCredential(credential);
+      } on FirebaseAuthException catch (e) {
+        if (e.code == 'credential-already-in-use') {
+          return await _auth.signInWithCredential(credential);
+        }
+        rethrow;
+      }
+    }
+    return await _auth.signInWithCredential(credential);
+  }
 
----
+  // ─────────────────────────────────────────────
+  // 이메일 로그인 / 가입
+  //   linkWithCredential 시도 → already-in-use면 signInWithEmailAndPassword
+  // ─────────────────────────────────────────────
+  static Future<UserCredential> signInWithEmail(
+    String email,
+    String password, {
+    bool isSignUp = false,
+  }) async {
+    final credential =
+        EmailAuthProvider.credential(email: email, password: password);
+    final currentUser = _auth.currentUser;
 
-## 3. [Claude Code · 터미널] 배포
-
-```bash
-cd firebase
-firebase deploy --only functions:functions:kakaoCustomAuth
-cd ..
-```
-> 멀티 코드베이스라 단일 함수 배포는 `functions:functions:함수명` (codebase 이름 반복)이 맞다.
-> 배포 로그에 `kakaoCustomAuth(us-central1)` 생성/업데이트가 보이면 성공.
-
----
-
-## 4. 검증
-
-1. **함수 생성 확인**
-   ```bash
-   firebase functions:list | findstr kakaoCustomAuth
-   ```
-2. **권한 확인** — 다음 단계(Phase B)에서 첫 호출 시 `auth/insufficient-permission`이 안 나야 함. 나오면 1-2 재실행.
-3. **매핑 컬렉션** — 최초 카카오 로그인이 일어나면 Firestore에 `kakao_uid_map/{kakaoId}` 문서가 생기고 `uid`가 그때의 익명 uid와 같아야 함. (Phase B 통합 테스트 시 확인)
-
----
-
-## 5. (선택 · 권장) Firestore 규칙 하드닝
-`kakao_uid_map`은 함수(Admin SDK)만 쓰면 되므로 클라이언트 직접 쓰기를 막는다. `firestore.rules`에 추가:
-```
-match /kakao_uid_map/{kakaoId} {
-  allow read, write: if false;   // Admin SDK만 (규칙 우회)
+    if (isSignUp && currentUser != null && currentUser.isAnonymous) {
+      try {
+        return await currentUser.linkWithCredential(credential);
+      } on FirebaseAuthException catch (e) {
+        if (e.code == 'email-already-in-use') {
+          return await _auth.signInWithEmailAndPassword(
+              email: email, password: password);
+        }
+        rethrow;
+      }
+    }
+    return await _auth.signInWithEmailAndPassword(
+        email: email, password: password);
+  }
 }
 ```
-적용: `firebase deploy --only firestore:rules` (다른 규칙 변경과 충돌 없는지 확인 후).
 
 ---
 
-## 6. 롤백
-```bash
-# 코드 되돌리기
-git revert HEAD            # 또는 git reset --hard <savepoint 커밋>
-# 배포된 함수 제거(원하면)
-firebase functions:delete kakaoCustomAuth --region us-central1
+## 5. lib/components/social_login_modal.dart 신규 생성
+
+```dart
+// lib/components/social_login_modal.dart
+//
+// 카카오 · 구글 · 이메일 로그인 버튼 모달.
+// showDialog()로 호출. 로그인 성공 시 Navigator.pop(true).
+
+import 'package:flutter/material.dart';
+import '../auth/social_auth_service.dart';
+import '/flutter_flow/flutter_flow_theme.dart';
+
+class SocialLoginModal extends StatefulWidget {
+  const SocialLoginModal({super.key});
+
+  @override
+  State<SocialLoginModal> createState() => _SocialLoginModalState();
+}
+
+class _SocialLoginModalState extends State<SocialLoginModal> {
+  bool _isLoading = false;
+  String? _errorMessage;
+
+  bool _showEmailForm = false;
+  bool _isSignUp = false;
+  final _emailCtrl = TextEditingController();
+  final _passwordCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _emailCtrl.dispose();
+    _passwordCtrl.dispose();
+    super.dispose();
+  }
+
+  // Future<dynamic>으로 UserCredential 반환 타입과 호환
+  Future<void> _handleResult(Future<dynamic> Function() action) async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+    try {
+      await action();
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorMessage = _friendlyError(e);
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  String _friendlyError(Object e) {
+    final msg = e.toString();
+    if (msg.contains('cancelled') || msg.contains('cancel')) {
+      return '로그인을 취소했습니다.';
+    }
+    if (msg.contains('network')) return '네트워크 오류가 발생했습니다.';
+    if (msg.contains('wrong-password') ||
+        msg.contains('invalid-credential')) {
+      return '이메일 또는 비밀번호가 올바르지 않습니다.';
+    }
+    if (msg.contains('user-not-found')) return '가입된 계정이 없습니다.';
+    if (msg.contains('weak-password')) return '비밀번호는 6자 이상이어야 합니다.';
+    if (msg.contains('invalid-email')) return '이메일 형식을 확인해주세요.';
+    return '로그인에 실패했습니다. 다시 시도해주세요.';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '진행 상황을 저장하려면\n계정을 만드세요',
+              style: FlutterFlowTheme.of(context).headlineMedium,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '체험 데이터가 그대로 유지됩니다.',
+              style: FlutterFlowTheme.of(context).bodySmall,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            if (_isLoading)
+              const CircularProgressIndicator()
+            else if (_showEmailForm)
+              _buildEmailForm()
+            else
+              _buildButtons(),
+            if (_errorMessage != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                _errorMessage!,
+                style:
+                    TextStyle(color: Colors.red.shade600, fontSize: 13),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildButtons() {
+    return Column(
+      children: [
+        // 카카오 (1순위)
+        _SocialButton(
+          label: '카카오톡으로 계속하기',
+          backgroundColor: const Color(0xFFFEE500),
+          textColor: const Color(0xFF191919),
+          icon: Image.asset(
+            'assets/images/kakao_logo.png',
+            width: 20,
+            height: 20,
+            errorBuilder: (_, __, ___) => const Icon(
+                Icons.chat_bubble,
+                size: 20,
+                color: Color(0xFF191919)),
+          ),
+          onTap: () => _handleResult(SocialAuthService.signInWithKakao),
+        ),
+        const SizedBox(height: 12),
+        // 구글
+        _SocialButton(
+          label: 'Google로 계속하기',
+          backgroundColor: Colors.white,
+          textColor: Colors.black87,
+          border: Border.all(color: Colors.grey.shade300),
+          icon: Image.asset(
+            'assets/images/google_logo.png',
+            width: 20,
+            height: 20,
+            errorBuilder: (_, __, ___) => const Icon(
+                Icons.g_mobiledata,
+                size: 24,
+                color: Colors.blue),
+          ),
+          onTap: () => _handleResult(SocialAuthService.signInWithGoogle),
+        ),
+        const SizedBox(height: 16),
+        // 구분선
+        Row(children: [
+          const Expanded(child: Divider()),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Text('다른 방법으로 가입하기',
+                style: TextStyle(
+                    color: Colors.grey.shade500, fontSize: 12)),
+          ),
+          const Expanded(child: Divider()),
+        ]),
+        const SizedBox(height: 12),
+        // 이메일
+        _SocialButton(
+          label: '이메일로 시작하기',
+          backgroundColor: Colors.grey.shade100,
+          textColor: Colors.black87,
+          icon: const Icon(Icons.email_outlined,
+              size: 20, color: Colors.black54),
+          onTap: () => setState(() => _showEmailForm = true),
+        ),
+        const SizedBox(height: 16),
+        // 로그인 링크
+        GestureDetector(
+          onTap: () => setState(() {
+            _showEmailForm = true;
+            _isSignUp = false;
+          }),
+          child: RichText(
+            text: TextSpan(
+              text: '이미 계정이 있으신가요? ',
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+              children: [
+                TextSpan(
+                  text: '바로 로그인하세요',
+                  style: const TextStyle(
+                      color: Colors.blue,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEmailForm() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            _tabBtn('로그인', !_isSignUp,
+                () => setState(() => _isSignUp = false)),
+            const SizedBox(width: 8),
+            _tabBtn('회원가입', _isSignUp,
+                () => setState(() => _isSignUp = true)),
+          ],
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _emailCtrl,
+          keyboardType: TextInputType.emailAddress,
+          decoration: const InputDecoration(
+              labelText: '이메일', border: OutlineInputBorder()),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _passwordCtrl,
+          obscureText: true,
+          decoration: const InputDecoration(
+              labelText: '비밀번호', border: OutlineInputBorder()),
+        ),
+        const SizedBox(height: 20),
+        ElevatedButton(
+          onPressed: () => _handleResult(
+            () => SocialAuthService.signInWithEmail(
+              _emailCtrl.text.trim(),
+              _passwordCtrl.text,
+              isSignUp: _isSignUp,
+            ),
+          ),
+          child: Text(_isSignUp ? '가입하기' : '로그인'),
+        ),
+        TextButton(
+          onPressed: () => setState(() => _showEmailForm = false),
+          child: const Text('← 뒤로'),
+        ),
+      ],
+    );
+  }
+
+  Widget _tabBtn(String label, bool active, VoidCallback onTap) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(
+                color: active ? Colors.black : Colors.transparent,
+                width: 2,
+              ),
+            ),
+          ),
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontWeight:
+                  active ? FontWeight.bold : FontWeight.normal,
+              color: active ? Colors.black : Colors.grey,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SocialButton extends StatelessWidget {
+  final String label;
+  final Color backgroundColor;
+  final Color textColor;
+  final Widget icon;
+  final VoidCallback onTap;
+  final BoxBorder? border;
+
+  const _SocialButton({
+    required this.label,
+    required this.backgroundColor,
+    required this.textColor,
+    required this.icon,
+    required this.onTap,
+    this.border,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 52,
+        decoration: BoxDecoration(
+          color: backgroundColor,
+          borderRadius: BorderRadius.circular(12),
+          border: border,
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            icon,
+            const SizedBox(width: 10),
+            Text(
+              label,
+              style: TextStyle(
+                  color: textColor,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 15),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 ```
 
 ---
 
-## Phase B 선행 준비 (실장님 · 웹 · 병행 가능)
-Phase A 배포와 무관하게 미리 해두면 Phase B가 빨라짐:
-- **카카오 디벨로퍼스**(developers.kakao.com): 앱 생성 → 네이티브 앱키 복사 → 플랫폼에 Android 등록 + **디버그 키해시(1-3 출력값) 붙여넣기** → 카카오 로그인 활성화. (이메일 동의항목은 불필요 — 우리는 익명 uid에 바인딩하므로 이메일을 안 씀)
-- **Firebase 콘솔** → Authentication → Sign-in method → **Google 사용 설정 ON** + 앱 SHA-1 등록.
+## 6. store_master.dart — 구매 게이트 교체
 
-> 이 둘은 Phase A(서버)에는 영향 없음. Phase B(클라이언트 카카오/구글 버튼 wiring) 때 필요.
+### 6-1. import 추가 앵커 확인
+```bash
+grep -n "social_login_modal" lib/custom_code/widgets/store_master.dart | wc -l
+# 기대값: 0
+grep -n "^import 'package:purchases_flutter" lib/custom_code/widgets/store_master.dart | wc -l
+# 기대값: 1
+```
 
-## Phase B에 필요한 파일
-클라이언트 wiring 지시문서를 쓰려면 **`main.dart`**(KakaoSdk.init·라우트 확인용)만 추가로 주시면 됨.
+### 6-2. import 추가
+
+old_str (유일):
+```dart
+import 'package:purchases_flutter/purchases_flutter.dart';
+```
+
+new_str:
+```dart
+import 'package:purchases_flutter/purchases_flutter.dart';
+import 'package:firebase_auth/firebase_auth.dart' show FirebaseAuth;
+import '/components/social_login_modal.dart';
+```
+
+### 6-3. 구매 게이트 교체 앵커 확인
+```bash
+grep -n "currentUserReference == null" lib/custom_code/widgets/store_master.dart | wc -l
+# 기대값: 1 (또는 2 이상이면 중단 후 알려주세요)
+grep -n "_showFeedback.*로그인 후 이용" lib/custom_code/widgets/store_master.dart | wc -l
+# 기대값: 1
+```
+
+### 6-4. 게이트 교체
+
+old_str (유일):
+```dart
+    if (currentUserReference == null) {
+      _showFeedback("로그인 후 이용해 주세요.", const Color(0xFFF87171));
+      return;
+    }
+```
+
+new_str:
+```dart
+    // 익명 또는 미로그인 → 소셜 로그인 모달
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null || currentUser.isAnonymous) {
+      final result = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const SocialLoginModal(),
+      );
+      if (result != true || !mounted) return; // 취소 or 언마운트 → 중단
+      // 가입 성공 → 구매 계속 진행
+    }
+```
+
+### 6-5. 검증
+```bash
+grep -n "SocialLoginModal" lib/custom_code/widgets/store_master.dart | wc -l
+# 기대값: 1
+grep -n "isAnonymous" lib/custom_code/widgets/store_master.dart | wc -l
+# 기대값: 1
+```
+
+---
+
+## 7. 웰컴보너스 호출 제거
+
+### 7-1. 앵커 확인
+```bash
+grep -rn "_claimWelcomeBonus\|claimWelcomeBonus" lib/ | wc -l
+# 기대값: 2 이상 (호출부 확인)
+```
+
+### 7-2. 호출부 주석 처리
+`_claimWelcomeBonus` 또는 `claimWelcomeBonus`가 호출되는 줄을 찾아 주석 처리:
+```dart
+// [웰컴보너스 제거] 30초 무료 체험으로 대체됨
+// await _claimWelcomeBonus();
+```
+
+> 함수 정의 자체는 삭제하지 않음 — 호출부만 주석. 추후 정리는 별도 커밋.
+
+---
+
+## 8. flutter analyze
+
+```bash
+flutter analyze lib/auth/social_auth_service.dart \
+  lib/components/social_login_modal.dart \
+  lib/custom_code/widgets/store_master.dart \
+  lib/main.dart
+```
+
+**기대값**: 오류 0건 (info/warning은 무시)
+
+---
+
+## 9. 동작 시나리오 검증
+
+| 시나리오 | 기대 동작 |
+|---|---|
+| 익명 유저 구매 탭 | SocialLoginModal 팝업 |
+| 카카오 로그인 성공 | `kakao_uid_map` 문서 생성, 모달 닫힘, 구매 진행 |
+| 구글 로그인 성공 | 익명 uid에 google.com provider 연결, 구매 진행 |
+| 이메일 가입 성공 | 익명 uid에 password provider 연결, 구매 진행 |
+| 모달 취소 | 구매 중단, 스토어 화면 유지 |
+| 이미 정식 가입된 유저 | 모달 건너뛰고 바로 구매 진행 |
+| uid 보존 확인 | 로그인 전후 `FirebaseAuth.instance.currentUser!.uid` 동일 |
+| RC 연동 | 동일 uid로 RC 구독 그대로 유지 |
+
+---
+
+## 10. 마지막 커밋
+
+```bash
+git add -A
+git commit -m "feat: Phase B — social login modal + store gate + kakao/google/email auth"
+```
+
+---
+
+## 롤백
+```bash
+git revert HEAD   # 또는
+git reset --hard <Phase B savepoint 해시>
+```
+
+---
+
+## Phase B 완료 후 병행 사항 (외부 콘솔)
+
+| 항목 | 위치 |
+|---|---|
+| 카카오 키해시 등록 | developers.kakao.com (Phase A Step 1-3 출력값) |
+| Google 로그인 ON + SHA-1 | Firebase Console → Auth → Sign-in method |
+| 로고 이미지 | `assets/images/kakao_logo.png`, `google_logo.png` (없으면 fallback 자동 사용) |
