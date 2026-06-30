@@ -66,6 +66,12 @@ service cloud.firestore {
       }
     }
 
+    // One-device trial guard. Anonymous users are allowed after signInAnonymously().
+    match /trial_devices/{fid} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update, delete: if false;
+    }
     // Welcome bonus device guard. Only Cloud Functions Admin SDK should access it.
     match /welcome_devices/{deviceId} {
       allow read, write: if false;

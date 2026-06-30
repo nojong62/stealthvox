@@ -38,6 +38,10 @@ import 'package:path_provider/path_provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
+import 'trial/trial_flow_state.dart';
+import 'trial/trial_anyone_timer_mixin.dart';
+import 'trial/learning_prep_overlay.dart';
+import 'trial/trial_study_page.dart';
 
 const int kFreeTalkCommitWaitMs = 900;
 const int kFreeTalkDeepgramEndpointingMs = 700;
@@ -67,7 +71,8 @@ class RoutineModeAnyone extends StatefulWidget {
   State<RoutineModeAnyone> createState() => _RoutineModeAnyoneState();
 }
 
-class _RoutineModeAnyoneState extends State<RoutineModeAnyone> {
+class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
+    with TrialAnyoneTimerMixin<RoutineModeAnyone> {
   // ====================================================================
   // 📦 [Box 3: 상태 변수 및 초기화]
   // ====================================================================
@@ -108,8 +113,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone> {
     if (_isIdlePaused) {
       _isIdlePaused = false;
       if (mounted) setState(() {});
-      BillingTicker.instance.resume();
-      BillingTicker.instance.logMode('free_talk');
+      if (!TrialFlowState.instance.isTrial) {
+        BillingTicker.instance.resume();
+        BillingTicker.instance.logMode('free_talk');
+      }
     }
     _idlePauseTimer?.cancel();
     _idlePauseTimer =
@@ -127,6 +134,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone> {
     // 유저나 AI가 작동 중이면 idle 누적을 멈추고 리셋
     if (_isSystemBusy) {
       _idleElapsedSec = 0;
+      return;
+    }
+    if (trialMode && isTrialTimeUp) {
+      unawaited(_handleTrialEnd());
       return;
     }
     _idleElapsedSec++;
@@ -243,11 +254,21 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone> {
       }
     });
 
+    TrialFlowState.instance.restoreFromAppState();
+    if (TrialFlowState.instance.isTrialAnyone) {
+      trialMode = true;
+      trialSeconds = 30;
+      _myHistoryRef = TrialFlowState.instance.myHistoryRef;
+      startTrialTimer();
+    }
+
     _initPermissions();
     _fetchKeys();
     BillingTicker.instance.setRate(BillingRate.full);
-    BillingTicker.instance.resume();
-    BillingTicker.instance.logMode('free_talk');
+    if (!TrialFlowState.instance.isTrial) {
+      BillingTicker.instance.resume();
+      BillingTicker.instance.logMode('free_talk');
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _resetIdleTimer();
     });
@@ -255,6 +276,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone> {
 
   @override
   void dispose() {
+    disposeTrialTimer();
     _clearIdleTimers();
     BillingTicker.instance.pause();
     _stopEverything();
@@ -632,7 +654,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone> {
           _log('✅ [LISTEN-02]', 'onConnected 콜백 실행');
         },
         onTranscriptUpdate: (transcript) {
-          BillingTicker.instance.resumeFromActivity('free_talk_stt_partial');
+          if (!TrialFlowState.instance.isTrial) {
+            BillingTicker.instance.resumeFromActivity('free_talk_stt_partial');
+          }
           if (!isCurrentGeneration()) {
             _log('🎤 [LISTEN-STALE]', 'onTranscriptUpdate ignored');
             return;
@@ -646,7 +670,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone> {
           _swDeepgram.start();
         },
         onTurnEnded: (transcript) {
-          BillingTicker.instance.resumeFromActivity('free_talk_stt_result');
+          if (!TrialFlowState.instance.isTrial) {
+            BillingTicker.instance.resumeFromActivity('free_talk_stt_result');
+          }
           if (!isCurrentGeneration()) {
             _log('🎤 [LISTEN-STALE]', 'onTurnEnded ignored');
             return;
@@ -680,7 +706,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone> {
       );
       _log('🎤 [LISTEN-04]', 'connectAndStart 호출 직전');
       await _voiceManager!.connectAndStart();
-      BillingTicker.instance.resumeFromActivity('free_talk_mic_start');
+      if (!TrialFlowState.instance.isTrial) {
+        BillingTicker.instance.resumeFromActivity('free_talk_mic_start');
+      }
       _log('🎤 [LISTEN-05]', 'connectAndStart 완료');
 
       // 🆕 [유저 먼저] 첫 턴이고 유저가 아직 말 안 했으면 2초 grace 후 AI가 운을 뗌
@@ -1640,6 +1668,44 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone> {
   }
 
   /// 뒤로가기 시: 빈 방 폭파 or last_message 업데이트 후 나가기
+  Future<void> _handleTrialEnd() async {
+    if (!trialMode) return;
+    trialMode = false;
+    disposeTrialTimer();
+    BillingTicker.instance.pause();
+
+    final historyRef = _myHistoryRef ?? TrialFlowState.instance.myHistoryRef;
+    if (historyRef == null) {
+      TrialFlowState.instance.reset();
+      if (mounted) context.pushReplacementNamed('Store');
+      return;
+    }
+
+    TrialFlowState.instance.myHistoryRef = historyRef;
+    TrialFlowState.instance.advanceTo(2);
+
+    try {
+      await historyRef.update({
+        'status': 'completed',
+        'last_active': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {}
+
+    if (!mounted) return;
+    await LearningPrepOverlay.show(
+      context,
+      historyRef: historyRef,
+      onReady: (ref) {
+        TrialFlowState.instance.myHistoryRef = ref;
+        TrialFlowState.instance.advanceTo(3);
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => TrialStudyPage(historyRef: ref)),
+        );
+      },
+    );
+  }
+
   Future<void> _handleAutoSaveAndExit() async {
     BillingTicker.instance.pause();
     try {
@@ -1704,6 +1770,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone> {
             child: Stack(children: [
               _buildChatList(),
               _buildIdleOverlay(),
+              if (trialMode) buildTrialCountdown(),
               if (_showUsageGuide) _buildUsageGuide(), // 🆕 [Anyone] 이용방법 말풍선
             ]),
           ),

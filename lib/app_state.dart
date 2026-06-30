@@ -51,6 +51,13 @@ class FFAppState extends ChangeNotifier {
       _pendingInviteType =
           prefs.getString('ff_pendingInviteType') ?? _pendingInviteType;
     });
+    _safeInit(() {
+      _trialStep = prefs.getInt('ff_trialStep') ?? _trialStep;
+    });
+    _safeInit(() {
+      _trialHistoryPath =
+          prefs.getString('ff_trialHistoryPath') ?? _trialHistoryPath;
+    });
   }
 
   void update(VoidCallback callback) {
@@ -195,6 +202,20 @@ class FFAppState extends ChangeNotifier {
   set pendingInviteType(String value) {
     _pendingInviteType = value;
     prefs.setString('ff_pendingInviteType', value);
+  }
+
+  int _trialStep = 0;
+  int get trialStep => _trialStep;
+  set trialStep(int value) {
+    _trialStep = value;
+    prefs.setInt('ff_trialStep', value);
+  }
+
+  String _trialHistoryPath = '';
+  String get trialHistoryPath => _trialHistoryPath;
+  set trialHistoryPath(String value) {
+    _trialHistoryPath = value;
+    prefs.setString('ff_trialHistoryPath', value);
   }
 }
 

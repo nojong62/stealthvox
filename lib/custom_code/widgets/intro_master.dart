@@ -18,6 +18,9 @@ import 'package:android_id/android_id.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'trial/trial_flow_state.dart';
+import 'trial/trial_device_gate.dart';
+import 'trial/onboarding_guide_overlay.dart';
 
 class IntroMaster extends StatefulWidget {
   const IntroMaster({
@@ -157,6 +160,72 @@ class _IntroMasterState extends State<IntroMaster> {
     await AppsFlyerManager.initialize(
       devKey: 'SQUmDTB2VzuPjrJGiy5SSC',
       appId: 'com.aienglishpractice.stealthvox',
+    );
+  }
+
+  Future<void> _startTrial(BuildContext context) async {
+    setState(() => isLoading = true);
+    try {
+      TrialFlowState.instance.restoreFromAppState();
+      final canTry = await TrialDeviceGate.canTrial();
+      if (!canTry) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text(
+                    'Free trial is available once per device. Please log in.')),
+          );
+        }
+        return;
+      }
+
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        await FirebaseAuth.instance.signInAnonymously();
+      }
+      await TrialDeviceGate.markUsed();
+
+      if (!mounted) return;
+      await OnboardingGuideOverlay.show(
+        context,
+        onStart: () {
+          unawaited(_enterTrialAnyone());
+        },
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Trial could not start: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => isLoading = false);
+    }
+  }
+
+  Future<void> _enterTrialAnyone() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || !mounted) return;
+    final historyRef = FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .collection('chat_history')
+        .doc();
+    await historyRef.set({
+      'created_at': FieldValue.serverTimestamp(),
+      'is_pinned': false,
+    });
+    TrialFlowState.instance.myHistoryRef = historyRef;
+    TrialFlowState.instance.advanceTo(1);
+    if (!mounted) return;
+    context.pushNamed(
+      'StealthRoom',
+      queryParameters: {
+        'historyRef': serializeParam(
+          historyRef,
+          ParamType.DocumentReference,
+        ),
+      }.withoutNulls,
     );
   }
 
@@ -415,6 +484,31 @@ class _IntroMasterState extends State<IntroMaster> {
                       const SizedBox(height: 24),
 
                       // 로그인/회원가입 구역
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 24),
+                        child: SizedBox(
+                          width: double.infinity,
+                          height: 56,
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFFD4AF37),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              elevation: 4,
+                            ),
+                            onPressed: () => _startTrial(context),
+                            child: const Text(
+                              '30초 무료 체험 시작',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                       _buildBentoCard(
                         child: Column(
                           children: [
