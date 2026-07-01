@@ -4,6 +4,7 @@
 
 import 'package:flutter/material.dart';
 
+import '/custom_code/widgets/shared_social_button.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '../auth/social_auth_service.dart';
 
@@ -80,37 +81,39 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
       insetPadding: const EdgeInsets.symmetric(horizontal: 24),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              '진행 상황을 저장하려면\n계정을 만들어 주세요',
-              style: FlutterFlowTheme.of(context).headlineSmall,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '체험 데이터는 그대로 유지됩니다.',
-              style: FlutterFlowTheme.of(context).bodySmall,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            if (_isLoading)
-              const CircularProgressIndicator()
-            else if (_showEmailForm)
-              _buildEmailForm()
-            else
-              _buildButtons(),
-            if (_errorMessage != null) ...[
-              const SizedBox(height: 12),
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
               Text(
-                _errorMessage!,
-                style: TextStyle(color: Colors.red.shade600, fontSize: 13),
+                '진행 상황을 저장하려면\n계정을 만들어 주세요',
+                style: FlutterFlowTheme.of(context).headlineSmall,
                 textAlign: TextAlign.center,
               ),
+              const SizedBox(height: 8),
+              Text(
+                '체험 데이터는 그대로 유지됩니다.',
+                style: FlutterFlowTheme.of(context).bodySmall,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              if (_isLoading)
+                const CircularProgressIndicator()
+              else if (_showEmailForm)
+                _buildEmailForm()
+              else
+                _buildButtons(),
+              if (_errorMessage != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  _errorMessage!,
+                  style: TextStyle(color: Colors.red.shade600, fontSize: 13),
+                  textAlign: TextAlign.center,
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -119,7 +122,7 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
   Widget _buildButtons() {
     return Column(
       children: [
-        _SocialButton(
+        SharedSocialButton(
           label: '카카오톡으로 계속하기',
           backgroundColor: const Color(0xFFFEE500),
           textColor: const Color(0xFF191919),
@@ -136,7 +139,7 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
           onTap: () => _handleResult(SocialAuthService.signInWithKakao),
         ),
         const SizedBox(height: 12),
-        _SocialButton(
+        SharedSocialButton(
           label: 'Google로 계속하기',
           backgroundColor: Colors.white,
           textColor: Colors.black87,
@@ -168,7 +171,7 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
           ],
         ),
         const SizedBox(height: 12),
-        _SocialButton(
+        SharedSocialButton(
           label: '이메일로 시작하기',
           backgroundColor: Colors.grey.shade100,
           textColor: Colors.black87,
@@ -287,54 +290,6 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
               fontWeight: active ? FontWeight.bold : FontWeight.normal,
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SocialButton extends StatelessWidget {
-  const _SocialButton({
-    required this.label,
-    required this.backgroundColor,
-    required this.textColor,
-    required this.icon,
-    required this.onTap,
-    this.border,
-  });
-
-  final String label;
-  final Color backgroundColor;
-  final Color textColor;
-  final Widget icon;
-  final VoidCallback onTap;
-  final BoxBorder? border;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        height: 52,
-        decoration: BoxDecoration(
-          color: backgroundColor,
-          borderRadius: BorderRadius.circular(12),
-          border: border,
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            icon,
-            const SizedBox(width: 10),
-            Text(
-              label,
-              style: TextStyle(
-                color: textColor,
-                fontWeight: FontWeight.w600,
-                fontSize: 15,
-              ),
-            ),
-          ],
         ),
       ),
     );

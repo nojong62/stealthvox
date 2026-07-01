@@ -8,12 +8,6 @@ class OnboardingGuideOverlay {
     BuildContext context, {
     required VoidCallback onStart,
   }) async {
-    String nativeLang =
-        FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
-    String targetLang = FFAppState().targetLang.isNotEmpty
-        ? FFAppState().targetLang
-        : 'English';
-
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -33,8 +27,25 @@ class OnboardingGuideOverlay {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2A2A3E),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Text(
+                      '처음 오셨나요',
+                      style: TextStyle(
+                        color: Color(0xFFD4AF37),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
                   const Text(
-                    'Try a real conversation for 30 seconds.',
+                    '30초 동안 Anyone 모드를\n체험해 보세요',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: Colors.white,
@@ -45,35 +56,9 @@ class OnboardingGuideOverlay {
                   ),
                   const SizedBox(height: 12),
                   const Text(
-                    'After that, StealthVox turns your chat into study material.',
+                    '대화가 끝나면 방금 그 대화가\n영어 교재로 바뀝니다.',
                     textAlign: TextAlign.center,
                     style: TextStyle(color: Color(0xFFB0B0B0), fontSize: 14),
-                  ),
-                  const SizedBox(height: 28),
-                  _langRow(
-                    label: 'Native',
-                    value: nativeLang,
-                    items: const [
-                      'Korean',
-                      'English',
-                      'Japanese',
-                      'Chinese',
-                      'Spanish'
-                    ],
-                    onChanged: (v) => setState(() => nativeLang = v),
-                  ),
-                  const SizedBox(height: 12),
-                  _langRow(
-                    label: 'Learn',
-                    value: targetLang,
-                    items: const [
-                      'English',
-                      'Korean',
-                      'Japanese',
-                      'Chinese',
-                      'Spanish'
-                    ],
-                    onChanged: (v) => setState(() => targetLang = v),
                   ),
                   const SizedBox(height: 32),
                   SizedBox(
@@ -87,14 +72,12 @@ class OnboardingGuideOverlay {
                         ),
                       ),
                       onPressed: () {
-                        FFAppState().nativeLang = nativeLang;
-                        FFAppState().targetLang = targetLang;
                         TrialFlowState.instance.advanceTo(1);
                         Navigator.pop(ctx);
                         onStart();
                       },
                       child: const Text(
-                        'Start',
+                        '시작 →',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 16,
@@ -103,54 +86,17 @@ class OnboardingGuideOverlay {
                       ),
                     ),
                   ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    '🎙 마이크를 사용합니다',
+                    style: TextStyle(color: Color(0xFF999999), fontSize: 12),
+                  ),
                 ],
               ),
             );
           },
         );
       },
-    );
-  }
-
-  static Widget _langRow({
-    required String label,
-    required String value,
-    required List<String> items,
-    required ValueChanged<String> onChanged,
-  }) {
-    final effectiveValue = items.contains(value) ? value : items.first;
-    return Row(
-      children: [
-        SizedBox(
-          width: 72,
-          child: Text(
-            label,
-            style: const TextStyle(color: Color(0xFF999999), fontSize: 13),
-          ),
-        ),
-        Expanded(
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              color: const Color(0xFF2A2A3E),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: DropdownButton<String>(
-              value: effectiveValue,
-              isExpanded: true,
-              dropdownColor: const Color(0xFF2A2A3E),
-              underline: const SizedBox(),
-              style: const TextStyle(color: Colors.white, fontSize: 15),
-              items: items
-                  .map((e) => DropdownMenuItem(value: e, child: Text(e)))
-                  .toList(),
-              onChanged: (v) {
-                if (v != null) onChanged(v);
-              },
-            ),
-          ),
-        ),
-      ],
     );
   }
 }

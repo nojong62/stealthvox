@@ -21,6 +21,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'trial/trial_flow_state.dart';
 import 'trial/trial_device_gate.dart';
 import 'trial/onboarding_guide_overlay.dart';
+import 'shared_social_button.dart';
+import '/auth/social_auth_service.dart';
 
 class IntroMaster extends StatefulWidget {
   const IntroMaster({
@@ -49,6 +51,8 @@ class _IntroMasterState extends State<IntroMaster> {
 
   bool isLoginMode = true;
   bool isLoading = false;
+  bool _isSignupMode = false;
+  bool _showEmailInSignup = false;
 
   // ── Promo popup ──
   bool _promoVisible = false;
@@ -171,9 +175,7 @@ class _IntroMasterState extends State<IntroMaster> {
       if (!canTry) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-                content: Text(
-                    'Free trial is available once per device. Please log in.')),
+            const SnackBar(content: Text('무료 체험은 기기당 1회만 가능합니다. 로그인해 주세요.')),
           );
         }
         return;
@@ -189,13 +191,13 @@ class _IntroMasterState extends State<IntroMaster> {
       await OnboardingGuideOverlay.show(
         context,
         onStart: () {
-          unawaited(_enterTrialAnyone());
+          _showLanguageSettingDialog();
         },
       );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Trial could not start: $e')),
+          SnackBar(content: Text('체험을 시작할 수 없습니다: $e')),
         );
       }
     } finally {
@@ -380,53 +382,6 @@ class _IntroMasterState extends State<IntroMaster> {
     }
   }
 
-  // 💡 [업데이트 완료] 현재 앱 스펙 및 새로운 과금/스토어 정책에 맞춰 가이드 전면 개편
-  void _showGuideDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF222222),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Row(
-          children: [
-            Icon(Icons.lightbulb, color: Colors.amber),
-            SizedBox(width: 8),
-            Text("[ 사용 가이드 ]",
-                style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold)),
-          ],
-        ),
-        content: const SingleChildScrollView(
-          child: Text(
-            "1. 실전 AI 대화 🤖\n"
-            "• [AI Roleplay] 무작위 직업과 상황을 부여받고, 예측 불가한 실전 회화를 연습하세요.\n"
-            "• [Anyone] 마음속에 떠올린 그 사람에게 말하듯 대화하면, AI가 점점 그 사람이 되어 응답합니다.\n\n"
-            "2. 심화 훈련 모드 📈\n"
-            "• [Duo Connect] 글로벌 파트너와 각자의 모국어로 대화하면 딜레이 없이 동시통역해 줍니다. 초청받은 비회원이나 회원은 대화 시간 동안 구독료 차감이 없으며, 초청하는 회원만 차감됩니다.\n"
-            "• [Step Expand] 짧은 기초 문장에서 시작해, AI의 유도에 따라 고급 문법을 더하며 원어민처럼 유창하고 긴 문장을 완성하세요.\n\n"
-            "3. 스터디 룸 (History & Practice) 📚\n"
-            "• 이전 대화를 복습하고 발음 교정 및 섀도잉 훈련을 진행합니다.\n"
-            "• 스터디룸의 일부 메뉴는 가격의 25%만 차감됩니다. (동일 비용으로 4배 더 오래 훈련 가능)\n\n"
-            "4. 💎 스토어: 합리적인 사용량 비례 과금\n"
-            "StealthVox은 사용자가 딱 사용한 만큼만 최소 시간 단위로 과금되어 비용 부담이 없습니다!\n"
-            "• ⏸️ Auto Pause: 60초 이상 반응이 없으면 자동으로 일시정지되어 과금이 멈춥니다. 다시 말을 시작하면 자동으로 재개됩니다.",
-            style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("닫기",
-                style: TextStyle(
-                    color: Colors.amber, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Stack(
@@ -438,6 +393,8 @@ class _IntroMasterState extends State<IntroMaster> {
   }
 
   Widget _buildMain(BuildContext context) {
+    if (_isSignupMode) return _buildSignupView(context);
+
     return Container(
       width: widget.width,
       height: widget.height,
@@ -475,17 +432,15 @@ class _IntroMasterState extends State<IntroMaster> {
                               ),
                             ),
                             const SizedBox(height: 4),
-                            Text("Real-Life Shadowing",
+                            Text("자율 회화 공부의 동반자",
                                 style: GoogleFonts.roboto(
                                     fontSize: 14, color: Colors.white54)),
                           ],
                         ),
                       ),
                       const SizedBox(height: 24),
-
-                      // 로그인/회원가입 구역
                       Padding(
-                        padding: const EdgeInsets.only(bottom: 24),
+                        padding: const EdgeInsets.only(bottom: 10),
                         child: SizedBox(
                           width: double.infinity,
                           height: 56,
@@ -499,7 +454,7 @@ class _IntroMasterState extends State<IntroMaster> {
                             ),
                             onPressed: () => _startTrial(context),
                             child: const Text(
-                              '30초 무료 체험 시작',
+                              '30초 무료 체험 시작 →',
                               style: TextStyle(
                                 color: Colors.white,
                                 fontSize: 18,
@@ -509,111 +464,34 @@ class _IntroMasterState extends State<IntroMaster> {
                           ),
                         ),
                       ),
-                      _buildBentoCard(
-                        child: Column(
-                          children: [
-                            _buildTextField(
-                              emailController,
-                              "Email Address",
-                              Icons.email_outlined,
-                              false,
-                              focusNode: _emailFocusNode,
-                              textInputAction: TextInputAction.next,
-                              onSubmitted: (_) => FocusScope.of(context)
-                                  .requestFocus(_passwordFocusNode),
-                            ),
-                            const SizedBox(height: 16),
-                            _buildTextField(
-                              passwordController,
-                              "Password",
-                              Icons.lock_outline,
-                              true,
-                              focusNode: _passwordFocusNode,
-                              textInputAction: TextInputAction.done,
-                              onSubmitted: (_) => _handleAuth(),
-                            ),
-                            const SizedBox(height: 24),
-                            SizedBox(
-                              width: double.infinity,
-                              height: 52,
-                              child: ElevatedButton(
-                                onPressed: _handleAuth,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.amber,
-                                  shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(14)),
-                                ),
-                                child: Text(
-                                  isLoginMode ? "LOGIN" : "SIGN UP",
-                                  style: const TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black,
-                                      letterSpacing: 1.5),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            TextButton(
-                              onPressed: () =>
-                                  setState(() => isLoginMode = !isLoginMode),
-                              child: Text(
-                                isLoginMode
-                                    ? "계정이 없으신가요? 회원가입"
-                                    : "이미 계정이 있으신가요? 로그인",
-                                style: const TextStyle(
-                                    color: Colors.white54, fontSize: 13),
-                              ),
-                            ),
-                          ],
+                      const Center(
+                        child: Text(
+                          '회원가입 없이 바로 · 기기당 1회',
+                          style: TextStyle(color: Colors.white38, fontSize: 12),
                         ),
                       ),
-                      const SizedBox(height: 16),
-
-                      Row(
-                        children: [
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: _resetPassword,
-                              child: _buildBentoCard(
-                                child: const Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(Icons.lock_reset,
-                                        color: Colors.amber, size: 26),
-                                    SizedBox(height: 8),
-                                    Text("비밀번호 찾기",
-                                        style: TextStyle(
-                                            color: Colors.white70,
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.bold)),
-                                  ],
-                                ),
-                              ),
+                      const SizedBox(height: 18),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 52,
+                        child: OutlinedButton(
+                          onPressed: () => setState(() => _isSignupMode = true),
+                          style: OutlinedButton.styleFrom(
+                            side: BorderSide(
+                                color: Colors.white.withValues(alpha: 0.18)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
                             ),
                           ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: () => _showGuideDialog(context),
-                              child: _buildBentoCard(
-                                child: const Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(Icons.help_outline,
-                                        color: Colors.amber, size: 26),
-                                    SizedBox(height: 8),
-                                    Text("사용 설명서",
-                                        style: TextStyle(
-                                            color: Colors.white70,
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.bold)),
-                                  ],
-                                ),
-                              ),
+                          child: const Text(
+                            '회원 가입',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
-                        ],
+                        ),
                       ),
                     ],
                   ),
@@ -783,6 +661,362 @@ class _IntroMasterState extends State<IntroMaster> {
                   ],
                 ),
               ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showLanguageSettingDialog() async {
+    const languages = ['Korean', 'English', 'Japanese', 'Chinese', 'Spanish'];
+    String nativeLang = languages.contains(FFAppState().nativeLang)
+        ? FFAppState().nativeLang
+        : 'Korean';
+    String targetLang = languages.contains(FFAppState().targetLang)
+        ? FFAppState().targetLang
+        : 'English';
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF222222),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16)),
+              title: const Text(
+                '언어 설정',
+                style:
+                    TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _languageDropdown(
+                    label: '모국어',
+                    value: nativeLang,
+                    items: languages,
+                    onChanged: (value) =>
+                        setDialogState(() => nativeLang = value),
+                  ),
+                  const SizedBox(height: 14),
+                  _languageDropdown(
+                    label: '학습 언어',
+                    value: targetLang,
+                    items: languages,
+                    onChanged: (value) =>
+                        setDialogState(() => targetLang = value),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    FFAppState().nativeLang = nativeLang;
+                    FFAppState().targetLang = targetLang;
+                    Navigator.of(dialogContext).pop();
+                    unawaited(_enterTrialAnyone());
+                  },
+                  child: const Text(
+                    '확인',
+                    style: TextStyle(
+                        color: Colors.amber, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _languageDropdown({
+    required String label,
+    required String value,
+    required List<String> items,
+    required ValueChanged<String> onChanged,
+  }) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 76,
+          child: Text(
+            label,
+            style: const TextStyle(color: Colors.white70, fontSize: 13),
+          ),
+        ),
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.35),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+            ),
+            child: DropdownButton<String>(
+              value: value,
+              isExpanded: true,
+              dropdownColor: const Color(0xFF2A2A2A),
+              underline: const SizedBox(),
+              style: const TextStyle(color: Colors.white, fontSize: 15),
+              items: items
+                  .map((item) => DropdownMenuItem(
+                        value: item,
+                        child: Text(item),
+                      ))
+                  .toList(),
+              onChanged: (value) {
+                if (value != null) onChanged(value);
+              },
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSignupView(BuildContext context) {
+    return Container(
+      width: widget.width,
+      height: widget.height,
+      color: Colors.black,
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        resizeToAvoidBottomInset: true,
+        body: isLoading
+            ? const Center(
+                child: CircularProgressIndicator(color: Colors.amber))
+            : SafeArea(
+                child: SingleChildScrollView(
+                  controller: _scrollController,
+                  padding: EdgeInsets.fromLTRB(24, 18, 24,
+                      24 + MediaQuery.of(context).viewInsets.bottom),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: IconButton(
+                          onPressed: () => setState(() {
+                            _isSignupMode = false;
+                            _showEmailInSignup = false;
+                          }),
+                          icon: const Icon(Icons.arrow_back,
+                              color: Colors.white70),
+                          tooltip: '뒤로',
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text("StealthVox",
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.orbitron(
+                              fontSize: 28,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white)),
+                      Text("자율 회화 공부의 동반자",
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.roboto(
+                              fontSize: 13, color: Colors.white54)),
+                      const SizedBox(height: 28),
+                      const Center(
+                        child: Text('가입 방법 선택',
+                            style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold)),
+                      ),
+                      const SizedBox(height: 16),
+                      SharedSocialButton(
+                        label: '카카오톡으로 가입하기',
+                        backgroundColor: const Color(0xFFFEE500),
+                        textColor: const Color(0xFF191919),
+                        icon: const Icon(Icons.chat_bubble,
+                            size: 20, color: Color(0xFF191919)),
+                        onTap: () => _handleSocialAuth(
+                            SocialAuthService.signInWithKakao),
+                      ),
+                      const SizedBox(height: 12),
+                      SharedSocialButton(
+                        label: 'Google 계정으로 가입하기',
+                        backgroundColor: Colors.white,
+                        textColor: Colors.black87,
+                        border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.15)),
+                        icon: const Icon(Icons.g_mobiledata,
+                            size: 22, color: Colors.blue),
+                        onTap: () => _handleSocialAuth(
+                            SocialAuthService.signInWithGoogle),
+                      ),
+                      const SizedBox(height: 12),
+                      SharedSocialButton(
+                        label: '이메일로 가입하기(비밀번호 필요)',
+                        backgroundColor: const Color(0xFF333333),
+                        textColor: Colors.white,
+                        icon: const Icon(Icons.email_outlined,
+                            size: 20, color: Colors.white70),
+                        onTap: () => setState(
+                            () => _showEmailInSignup = !_showEmailInSignup),
+                      ),
+                      if (_showEmailInSignup) ...[
+                        const SizedBox(height: 16),
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF222222),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.08)),
+                          ),
+                          child: Column(
+                            children: [
+                              Row(
+                                children: [
+                                  _emailTabBtn('로그인', isLoginMode,
+                                      () => setState(() => isLoginMode = true)),
+                                  const SizedBox(width: 8),
+                                  _emailTabBtn(
+                                      '회원가입',
+                                      !isLoginMode,
+                                      () =>
+                                          setState(() => isLoginMode = false)),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              _buildTextField(
+                                emailController,
+                                "이메일",
+                                Icons.email_outlined,
+                                false,
+                                focusNode: _emailFocusNode,
+                                textInputAction: TextInputAction.next,
+                                onSubmitted: (_) => FocusScope.of(context)
+                                    .requestFocus(_passwordFocusNode),
+                              ),
+                              const SizedBox(height: 12),
+                              _buildTextField(
+                                passwordController,
+                                "비밀번호",
+                                Icons.lock_outline,
+                                true,
+                                focusNode: _passwordFocusNode,
+                                textInputAction: TextInputAction.done,
+                                onSubmitted: (_) => _handleAuth(),
+                              ),
+                              const SizedBox(height: 16),
+                              SizedBox(
+                                width: double.infinity,
+                                height: 48,
+                                child: ElevatedButton(
+                                  onPressed: isLoading ? null : _handleAuth,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFFD4AF37),
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(12)),
+                                  ),
+                                  child: Text(
+                                    isLoginMode ? "로그인" : "가입하기",
+                                    style: const TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white),
+                                  ),
+                                ),
+                              ),
+                              if (isLoginMode) ...[
+                                const SizedBox(height: 8),
+                                GestureDetector(
+                                  onTap: _resetPassword,
+                                  child: const Text(
+                                    '비밀번호 찾기',
+                                    style: TextStyle(
+                                        color: Colors.white38, fontSize: 12),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 24),
+                      const Divider(color: Colors.white12),
+                      const SizedBox(height: 16),
+                      const Row(
+                        children: [
+                          Icon(Icons.lightbulb, color: Colors.amber, size: 20),
+                          SizedBox(width: 8),
+                          Text("사용 가이드",
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        "1. 실전 AI 대화\n"
+                        "• [AI Roleplay] 무작위 직업과 상황을 부여받고 예측 불가한 실전 회화를 연습하세요.\n"
+                        "• [Anyone] 마음속에 떠올린 사람에게 말하듯 대화하면 AI가 점점 그 사람이 되어 응답합니다.\n\n"
+                        "2. 심화 훈련 모드\n"
+                        "• [Duo Connect] 글로벌 파트너와 각자의 모국어로 대화하면 동시에 통역해 줍니다.\n"
+                        "• [Step Expand] 짧은 문장에서 시작해 고급 문법을 더하며 긴 문장을 완성하세요.\n\n"
+                        "3. 스터디 룸\n"
+                        "• 이전 대화를 복습하고 발음 교정 및 섀도잉 훈련을 진행합니다.\n"
+                        "• 스터디룸의 일부 메뉴는 가격의 25%만 차감됩니다.\n\n"
+                        "4. 합리적인 사용량 비례 과금\n"
+                        "StealthVox는 사용한 만큼 최소 시간 단위로 과금합니다. 60초 이상 반응이 없으면 자동 일시정지됩니다.",
+                        style: TextStyle(
+                            color: Colors.white70, fontSize: 13, height: 1.6),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+      ),
+    );
+  }
+
+  Future<void> _handleSocialAuth(Future<dynamic> Function() authFn) async {
+    setState(() => isLoading = true);
+    try {
+      await authFn();
+      if (mounted) context.goNamed('Lobby');
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('로그인 실패: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => isLoading = false);
+    }
+  }
+
+  Widget _emailTabBtn(String label, bool active, VoidCallback onTap) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(
+                color: active ? const Color(0xFFD4AF37) : Colors.transparent,
+                width: 2,
+              ),
+            ),
+          ),
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontWeight: active ? FontWeight.bold : FontWeight.normal,
+              color: active ? Colors.white : Colors.white38,
+              fontSize: 14,
             ),
           ),
         ),
