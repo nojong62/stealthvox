@@ -412,77 +412,107 @@ class _IntroMasterState extends State<IntroMaster> {
                       24 + MediaQuery.of(context).viewInsets.bottom),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const SizedBox(height: 40),
-                      _buildBentoCard(
-                        child: Column(
-                          children: [
-                            const Icon(Icons.record_voice_over,
-                                size: 50, color: Colors.amber),
-                            const SizedBox(height: 16),
-                            FittedBox(
-                              fit: BoxFit.scaleDown,
-                              child: Text(
-                                "StealthVox",
-                                style: GoogleFonts.orbitron(
-                                    fontSize: 32,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white),
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text("자율 회화 공부의 동반자",
-                                style: GoogleFonts.roboto(
-                                    fontSize: 14, color: Colors.white54)),
-                          ],
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          const Icon(Icons.record_voice_over,
+                              size: 22, color: Color(0xFFD4AF37)),
+                          const SizedBox(width: 8),
+                          Text("StealthVox",
+                              style: GoogleFonts.orbitron(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white)),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Text("내 이야기로 배우는 영어",
+                          style: GoogleFonts.roboto(
+                              fontSize: 12, color: Colors.white38)),
+                      const SizedBox(height: 28),
+                      const Text(
+                        "당신의 이야기가\n최고의 영어 교재가\n됩니다",
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                          height: 1.3,
                         ),
                       ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        "자율 학습 공부의 동반자",
+                        style: TextStyle(color: Colors.white54, fontSize: 14),
+                      ),
                       const SizedBox(height: 24),
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: SizedBox(
-                          width: double.infinity,
-                          height: 56,
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFFD4AF37),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                              elevation: 4,
+                      Center(child: _buildWaveform()),
+                      const SizedBox(height: 32),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 56,
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFD4AF37),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(30),
                             ),
-                            onPressed: () => _startTrial(context),
-                            child: const Text(
-                              '30초 무료 체험 시작 →',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
+                            elevation: 4,
+                          ),
+                          onPressed: () => _startTrial(context),
+                          child: const Text(
+                            '30초 무료 체험 시작 →',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
                         ),
                       ),
+                      const SizedBox(height: 10),
                       const Center(
                         child: Text(
                           '회원가입 없이 바로 · 기기당 1회',
                           style: TextStyle(color: Colors.white38, fontSize: 12),
                         ),
                       ),
-                      const SizedBox(height: 18),
+                      const SizedBox(height: 8),
+                      Center(
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text("AI는 30초",
+                                style: GoogleFonts.roboto(
+                                    fontSize: 13, color: Colors.white54)),
+                            const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 8),
+                              child: Text("·",
+                                  style: TextStyle(
+                                      color: Color(0xFFD4AF37), fontSize: 13)),
+                            ),
+                            Text("공부방 1분",
+                                style: GoogleFonts.roboto(
+                                    fontSize: 13, color: Colors.white54)),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 28),
                       SizedBox(
                         width: double.infinity,
                         height: 52,
-                        child: OutlinedButton(
-                          onPressed: () => setState(() => _isSignupMode = true),
-                          style: OutlinedButton.styleFrom(
-                            side: BorderSide(
-                                color: Colors.white.withValues(alpha: 0.18)),
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFD4AF37),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(14),
                             ),
                           ),
+                          onPressed: () => setState(() {
+                            _isSignupMode = true;
+                            _showEmailInSignup = false;
+                          }),
                           child: const Text(
                             '회원 가입',
                             style: TextStyle(
@@ -817,7 +847,7 @@ class _IntroMasterState extends State<IntroMaster> {
                               fontSize: 28,
                               fontWeight: FontWeight.bold,
                               color: Colors.white)),
-                      Text("자율 회화 공부의 동반자",
+                      Text("자율 학습 공부의 동반자",
                           textAlign: TextAlign.center,
                           style: GoogleFonts.roboto(
                               fontSize: 13, color: Colors.white54)),
@@ -1021,6 +1051,39 @@ class _IntroMasterState extends State<IntroMaster> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildWaveform() {
+    final heights = [
+      12.0,
+      20.0,
+      30.0,
+      16.0,
+      34.0,
+      26.0,
+      18.0,
+      32.0,
+      14.0,
+      28.0,
+      22.0,
+      10.0,
+    ];
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: heights
+          .map(
+            (height) => Container(
+              width: 4,
+              height: height,
+              margin: const EdgeInsets.symmetric(horizontal: 2.5),
+              decoration: BoxDecoration(
+                color: const Color(0xFFD4AF37),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          )
+          .toList(),
     );
   }
 
