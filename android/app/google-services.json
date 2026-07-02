@@ -30,6 +30,14 @@
           }
         },
         {
+          "client_id": "450483026108-pa1qamg9mlk2c42dnrspvn9r31tlbeep.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.aienglishpractice.stealthvox",
+            "certificate_hash": "f267caccdb6a8de9f7e82fb8a10c0ab7f34fab59"
+          }
+        },
+        {
           "client_id": "450483026108-j5nmgab8pebqlfu2ilm5dfbq78j6jv4r.apps.googleusercontent.com",
           "client_type": 3
         }

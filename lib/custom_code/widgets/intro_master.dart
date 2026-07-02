@@ -475,7 +475,7 @@ class _IntroMasterState extends State<IntroMaster> {
                             ),
                             const SizedBox(height: 10),
                             const Text(
-                              "자율 학습 공부의 동반자",
+                              "",
                               style: TextStyle(
                                 color: Color(0xFFA7A7AE),
                                 fontSize: 12,
@@ -571,7 +571,7 @@ class _IntroMasterState extends State<IntroMaster> {
                             });
                           },
                           child: const Text(
-                            '회원 가입',
+                            '로그인',
                             style: TextStyle(
                               color: Color(0xFFF5F5F7),
                               fontSize: 14,
@@ -934,7 +934,7 @@ class _IntroMasterState extends State<IntroMaster> {
                               fontSize: 28,
                               fontWeight: FontWeight.bold,
                               color: Colors.white)),
-                      Text("자율 학습 공부의 동반자",
+                      Text("자율 어학 연습의 동반자",
                           textAlign: TextAlign.center,
                           style: GoogleFonts.roboto(
                               fontSize: 13, color: Colors.white54)),
@@ -948,7 +948,7 @@ class _IntroMasterState extends State<IntroMaster> {
                       ),
                       const SizedBox(height: 16),
                       SharedSocialButton(
-                        label: '카카오톡으로 가입하기',
+                        label: '카카오톡으로 계속하기',
                         backgroundColor: const Color(0xFFFEE500),
                         textColor: const Color(0xFF191919),
                         icon: const Icon(Icons.chat_bubble,
@@ -958,7 +958,7 @@ class _IntroMasterState extends State<IntroMaster> {
                       ),
                       const SizedBox(height: 12),
                       SharedSocialButton(
-                        label: 'Google 계정으로 가입하기',
+                        label: 'Google 계정으로 계속하기',
                         backgroundColor: Colors.white,
                         textColor: Colors.black87,
                         border: Border.all(
@@ -970,7 +970,7 @@ class _IntroMasterState extends State<IntroMaster> {
                       ),
                       const SizedBox(height: 12),
                       SharedSocialButton(
-                        label: '이메일로 가입하기(비밀번호 필요)',
+                        label: '이메일로 계속하기(비밀번호 필요)',
                         backgroundColor: const Color(0xFF333333),
                         textColor: Colors.white,
                         icon: const Icon(Icons.email_outlined,

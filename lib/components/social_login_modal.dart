@@ -41,6 +41,7 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
       await action();
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
+      debugPrint('[SocialLoginModal] auth error: $e');
       if (!mounted) return;
       setState(() {
         _errorMessage = _friendlyError(e);
