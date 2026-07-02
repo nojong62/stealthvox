@@ -115,10 +115,10 @@ dependencies:
   cupertino_icons: ^1.0.0
   android_id: ^0.5.1
   device_info_plus: ^12.4.0
-  kakao_flutter_sdk: ^2.0.0+1
+  kakao_flutter_sdk: 1.10.0
   cloud_functions: ^5.5.2
-  kakao_flutter_sdk_common: ^2.0.0+1
-  kakao_flutter_sdk_user: ^2.0.0+1
+  kakao_flutter_sdk_common: 1.10.0
+  kakao_flutter_sdk_user: 1.10.0
 
 dependency_overrides:
   http: 1.4.0

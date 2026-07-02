@@ -52,7 +52,7 @@
         <action android:name="android.intent.action.VIEW"/>
         <category android:name="android.intent.category.DEFAULT"/>
         <category android:name="android.intent.category.BROWSABLE"/>
-        <data android:scheme="kakao339271f4dd4676bb030cab2f4de5091"/>
+        <data android:scheme="kakao339271f4dd4676bb030cab2f45de5091"/>
       </intent-filter>
     </activity>
   </application>
