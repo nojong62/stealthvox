@@ -198,13 +198,16 @@ class _StoreMasterState extends State<StoreMaster> {
         'tap productId=${plan['id']} title=${plan['title']} uid=$currentUserUid ref=${currentUserReference != null}');
 
     final currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser == null || currentUser.isAnonymous) {
+    final needsAccount = currentUser == null ||
+        (currentUser.isAnonymous && !FFAppState().hasLinkedAccount);
+    if (needsAccount) {
       final result = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
         builder: (_) => const SocialLoginModal(),
       );
       if (result != true || !mounted) return;
+      FFAppState().hasLinkedAccount = true;
       await _initRevenueCatUser();
     }
     setState(() => isProcessing = true);

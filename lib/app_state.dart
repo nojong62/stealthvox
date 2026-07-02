@@ -45,6 +45,10 @@ class FFAppState extends ChangeNotifier {
       _isGuestSession = prefs.getBool('ff_isGuestSession') ?? _isGuestSession;
     });
     _safeInit(() {
+      _hasLinkedAccount =
+          prefs.getBool('ff_hasLinkedAccount') ?? _hasLinkedAccount;
+    });
+    _safeInit(() {
       _duoRoomId = prefs.getString('ff_duoRoomId') ?? _duoRoomId;
     });
     _safeInit(() {
@@ -181,6 +185,13 @@ class FFAppState extends ChangeNotifier {
   set isGuestSession(bool value) {
     _isGuestSession = value;
     prefs.setBool('ff_isGuestSession', value);
+  }
+
+  bool _hasLinkedAccount = false;
+  bool get hasLinkedAccount => _hasLinkedAccount;
+  set hasLinkedAccount(bool value) {
+    _hasLinkedAccount = value;
+    prefs.setBool('ff_hasLinkedAccount', value);
   }
 
   String _inviterUid = '';

@@ -7,6 +7,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
+import '/flutter_flow/flutter_flow_util.dart';
 
 class SocialAuthService {
   static final _auth = FirebaseAuth.instance;
@@ -31,7 +32,9 @@ class SocialAuthService {
     });
 
     final customToken = result.data['token'] as String;
-    return _auth.signInWithCustomToken(customToken);
+    final credential = await _auth.signInWithCustomToken(customToken);
+    FFAppState().hasLinkedAccount = true;
+    return credential;
   }
 
   static Future<UserCredential> signInWithGoogle() async {
@@ -49,16 +52,22 @@ class SocialAuthService {
     final currentUser = _auth.currentUser;
     if (currentUser != null && currentUser.isAnonymous) {
       try {
-        return await currentUser.linkWithCredential(credential);
+        final linked = await currentUser.linkWithCredential(credential);
+        FFAppState().hasLinkedAccount = true;
+        return linked;
       } on FirebaseAuthException catch (e) {
         if (e.code == 'credential-already-in-use') {
-          return _auth.signInWithCredential(credential);
+          final signedIn = await _auth.signInWithCredential(credential);
+          FFAppState().hasLinkedAccount = true;
+          return signedIn;
         }
         rethrow;
       }
     }
 
-    return _auth.signInWithCredential(credential);
+    final signedIn = await _auth.signInWithCredential(credential);
+    FFAppState().hasLinkedAccount = true;
+    return signedIn;
   }
 
   static Future<UserCredential> signInWithEmail(
@@ -72,28 +81,36 @@ class SocialAuthService {
 
     if (isSignUp && currentUser != null && currentUser.isAnonymous) {
       try {
-        return await currentUser.linkWithCredential(credential);
+        final linked = await currentUser.linkWithCredential(credential);
+        FFAppState().hasLinkedAccount = true;
+        return linked;
       } on FirebaseAuthException catch (e) {
         if (e.code == 'email-already-in-use') {
-          return _auth.signInWithEmailAndPassword(
+          final signedIn = await _auth.signInWithEmailAndPassword(
             email: email,
             password: password,
           );
+          FFAppState().hasLinkedAccount = true;
+          return signedIn;
         }
         rethrow;
       }
     }
 
     if (isSignUp) {
-      return _auth.createUserWithEmailAndPassword(
+      final created = await _auth.createUserWithEmailAndPassword(
         email: email,
         password: password,
       );
+      FFAppState().hasLinkedAccount = true;
+      return created;
     }
 
-    return _auth.signInWithEmailAndPassword(
+    final signedIn = await _auth.signInWithEmailAndPassword(
       email: email,
       password: password,
     );
+    FFAppState().hasLinkedAccount = true;
+    return signedIn;
   }
 }
