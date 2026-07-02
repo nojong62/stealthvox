@@ -22,10 +22,7 @@ void main() async {
   usePathUrlStrategy();
 
   await initFirebase();
-  const kakaoNativeAppKey = String.fromEnvironment('KAKAO_NATIVE_APP_KEY');
-  if (kakaoNativeAppKey.isNotEmpty) {
-    KakaoSdk.init(nativeAppKey: kakaoNativeAppKey);
-  }
+  KakaoSdk.init(nativeAppKey: '339271f4dd4676bb030cab2f4de5091');
 
   await FlutterFlowTheme.initialize();
 
