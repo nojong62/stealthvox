@@ -484,7 +484,7 @@ class _IntroMasterState extends State<IntroMaster> {
                             shadowColor: Colors.transparent,
                             elevation: 0,
                             side: const BorderSide(
-                                color: Color(0xFFEF9F27), width: 1.5),
+                                color: Color(0xFF7F77DD), width: 1.5),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(30),
                             ),
@@ -493,7 +493,7 @@ class _IntroMasterState extends State<IntroMaster> {
                           child: const Text(
                             '30초 무료 체험 시작 →',
                             style: TextStyle(
-                              color: Color(0xFFFAC775),
+                              color: Color(0xFFCECBF6),
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
                             ),
@@ -533,7 +533,7 @@ class _IntroMasterState extends State<IntroMaster> {
                         height: 52,
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFFD4AF37),
+                            backgroundColor: const Color(0xFF7F77DD),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(14),
                             ),
@@ -758,18 +758,16 @@ class _IntroMasterState extends State<IntroMaster> {
           builder: (dialogContext, setDialogState) {
             return AlertDialog(
               backgroundColor: const Color(0xFF161616),
+              insetPadding:
+                  const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(20),
                 side: const BorderSide(color: Color(0xFF2A3A36), width: 1),
               ),
-              title: const Row(
-                children: [
-                  Icon(Icons.translate, color: Color(0xFF5DCAA5), size: 20),
-                  SizedBox(width: 8),
-                  Text('언어 설정',
-                      style: TextStyle(
-                          color: Colors.white, fontWeight: FontWeight.bold)),
-                ],
+              title: const Text(
+                '언어 설정',
+                style:
+                    TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
               ),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -802,7 +800,7 @@ class _IntroMasterState extends State<IntroMaster> {
                       shadowColor: Colors.transparent,
                       elevation: 0,
                       side: const BorderSide(
-                          color: Color(0xFFEF9F27), width: 1.5),
+                          color: Color(0xFF7F77DD), width: 1.5),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
@@ -817,7 +815,7 @@ class _IntroMasterState extends State<IntroMaster> {
                     child: const Text(
                       '확인',
                       style: TextStyle(
-                          color: Color(0xFFFAC775),
+                          color: Color(0xFFCECBF6),
                           fontWeight: FontWeight.bold),
                     ),
                   ),
@@ -839,7 +837,7 @@ class _IntroMasterState extends State<IntroMaster> {
     return Row(
       children: [
         SizedBox(
-          width: 76,
+          width: 92,
           child: Text(
             label,
             style: const TextStyle(color: Colors.white70, fontSize: 13),
@@ -1135,21 +1133,25 @@ class _IntroMasterState extends State<IntroMaster> {
       22.0,
       10.0,
     ];
+    final colors = [
+      const Color(0xFF1D9E75),
+      const Color(0xFF7F77DD),
+      const Color(0xFF5DCAA5),
+      const Color(0xFFAFA9EC),
+    ];
     return Row(
       mainAxisSize: MainAxisSize.min,
-      children: heights
-          .map(
-            (height) => Container(
-              width: 4,
-              height: height,
-              margin: const EdgeInsets.symmetric(horizontal: 2.5),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1D9E75),
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-          )
-          .toList(),
+      children: List.generate(heights.length, (index) {
+        return Container(
+          width: 4,
+          height: heights[index],
+          margin: const EdgeInsets.symmetric(horizontal: 2.5),
+          decoration: BoxDecoration(
+            color: colors[index % colors.length],
+            borderRadius: BorderRadius.circular(2),
+          ),
+        );
+      }),
     );
   }
 
