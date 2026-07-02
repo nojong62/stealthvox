@@ -20,7 +20,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'trial/trial_flow_state.dart';
 import 'trial/trial_device_gate.dart';
-import 'trial/onboarding_guide_overlay.dart';
+import 'trial/onboarding_guide_section.dart';
 import 'shared_social_button.dart';
 import '/auth/social_auth_service.dart';
 
@@ -53,6 +53,8 @@ class _IntroMasterState extends State<IntroMaster> {
   bool isLoading = false;
   bool _isSignupMode = false;
   bool _showEmailInSignup = false;
+  String _trialNativeLang = 'Korean';
+  String _trialTargetLang = 'English';
 
   // ── Promo popup ──
   bool _promoVisible = false;
@@ -69,6 +71,19 @@ class _IntroMasterState extends State<IntroMaster> {
     AppsFlyerManager.duoInviteSignal.addListener(_onDuoInviteSignal);
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkEntryStatus());
     _initPromoPopup();
+    const trialLanguages = [
+      'Korean',
+      'English',
+      'Japanese',
+      'Chinese',
+      'Spanish'
+    ];
+    _trialNativeLang = trialLanguages.contains(FFAppState().nativeLang)
+        ? FFAppState().nativeLang
+        : 'Korean';
+    _trialTargetLang = trialLanguages.contains(FFAppState().targetLang)
+        ? FFAppState().targetLang
+        : 'English';
   }
 
   void _onDuoInviteSignal() {
@@ -187,13 +202,11 @@ class _IntroMasterState extends State<IntroMaster> {
       }
       await TrialDeviceGate.markUsed();
 
+      FFAppState().nativeLang = _trialNativeLang;
+      FFAppState().targetLang = _trialTargetLang;
+
       if (!mounted) return;
-      await OnboardingGuideOverlay.show(
-        context,
-        onStart: () {
-          _showLanguageSettingDialog();
-        },
-      );
+      await _enterTrialAnyone();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -418,7 +431,7 @@ class _IntroMasterState extends State<IntroMaster> {
                       Row(
                         children: [
                           const Icon(Icons.record_voice_over,
-                              size: 22, color: Color(0xFFD4AF37)),
+                              size: 22, color: Color(0xFF5DCAA5)),
                           const SizedBox(width: 8),
                           Text("StealthVox",
                               style: GoogleFonts.orbitron(
@@ -449,22 +462,29 @@ class _IntroMasterState extends State<IntroMaster> {
                       const SizedBox(height: 24),
                       Center(child: _buildWaveform()),
                       const SizedBox(height: 32),
+                      _buildLanguageSettingSection(),
+                      const SizedBox(height: 16),
+                      const OnboardingGuideSection(),
+                      const SizedBox(height: 28),
                       SizedBox(
                         width: double.infinity,
                         height: 56,
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFFD4AF37),
+                            backgroundColor: Colors.transparent,
+                            shadowColor: Colors.transparent,
+                            elevation: 0,
+                            side: const BorderSide(
+                                color: Color(0xFFEF9F27), width: 1.5),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(30),
                             ),
-                            elevation: 4,
                           ),
                           onPressed: () => _startTrial(context),
                           child: const Text(
                             '30초 무료 체험 시작 →',
                             style: TextStyle(
-                              color: Colors.white,
+                              color: Color(0xFFFAC775),
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
                             ),
@@ -698,69 +718,33 @@ class _IntroMasterState extends State<IntroMaster> {
     );
   }
 
-  Future<void> _showLanguageSettingDialog() async {
+  Widget _buildLanguageSettingSection() {
     const languages = ['Korean', 'English', 'Japanese', 'Chinese', 'Spanish'];
-    String nativeLang = languages.contains(FFAppState().nativeLang)
-        ? FFAppState().nativeLang
-        : 'Korean';
-    String targetLang = languages.contains(FFAppState().targetLang)
-        ? FFAppState().targetLang
-        : 'English';
-
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (dialogContext, setDialogState) {
-            return AlertDialog(
-              backgroundColor: const Color(0xFF222222),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16)),
-              title: const Text(
-                '언어 설정',
-                style:
-                    TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _languageDropdown(
-                    label: '모국어',
-                    value: nativeLang,
-                    items: languages,
-                    onChanged: (value) =>
-                        setDialogState(() => nativeLang = value),
-                  ),
-                  const SizedBox(height: 14),
-                  _languageDropdown(
-                    label: '학습 언어',
-                    value: targetLang,
-                    items: languages,
-                    onChanged: (value) =>
-                        setDialogState(() => targetLang = value),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    FFAppState().nativeLang = nativeLang;
-                    FFAppState().targetLang = targetLang;
-                    Navigator.of(dialogContext).pop();
-                    unawaited(_enterTrialAnyone());
-                  },
-                  child: const Text(
-                    '확인',
-                    style: TextStyle(
-                        color: Colors.amber, fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ],
-            );
-          },
-        );
-      },
+    return _buildBentoCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '언어 설정',
+            style: TextStyle(
+                color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 14),
+          _languageDropdown(
+            label: '모국어',
+            value: _trialNativeLang,
+            items: languages,
+            onChanged: (value) => setState(() => _trialNativeLang = value),
+          ),
+          const SizedBox(height: 14),
+          _languageDropdown(
+            label: '학습 언어',
+            value: _trialTargetLang,
+            items: languages,
+            onChanged: (value) => setState(() => _trialTargetLang = value),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1078,7 +1062,7 @@ class _IntroMasterState extends State<IntroMaster> {
               height: height,
               margin: const EdgeInsets.symmetric(horizontal: 2.5),
               decoration: BoxDecoration(
-                color: const Color(0xFFD4AF37),
+                color: const Color(0xFF1D9E75),
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
