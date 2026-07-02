@@ -48,391 +48,243 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-# 인트로 UI 카드 그룹핑(B형) + 언어설정 팝업 복귀 + 스크롤/Anyone 자동진입 통합 지시문
+# Kakao 로그인 후 Store 게이트 오탐 수정 — hasLinkedAccount 플래그 도입
 
-## 목표
-1. **레이아웃(B형)**: 헤드라인+서브텍스트+웨이브폼을 하나의 카드로 묶고, 그 아래 온보딩 가이드 카드를 배치 — 두 카드가 같은 리듬으로 이어지는 구조. 헤드라인 폰트 28→22, 여백도 목업 비율에 맞게 축소.
-2. **언어설정**: 인라인 카드 → 팝업으로 복귀 (틸 아이콘 + 골드 아웃라인 확인 버튼, 12개 언어 — 기존 5개 + Flux 언어 7개)
-3. CTA 탭 → 팝업(언어설정) → 확인 → 팝업 없이 바로 Anyone 방 진입
-4. "회원 가입" 클릭 시 스크롤 최상단부터 보이도록 수정
-5. `StealthRoomMaster`가 트라이얼 Anyone 세션이면 메뉴 화면 없이 바로 Anyone 모드로 진입
+## 원인 요약
+Firebase의 `currentUser.isAnonymous`는 로그인 방법이 아니라 "실제 auth provider가 providerData에 연결돼 있는가"로 판정됩니다. Google/Email은 Firebase 내장 provider라 자동으로 `false`가 되지만, Kakao는 `kakaoCustomAuth` 클라우드 함수의 `createCustomToken()`으로 로그인하기 때문에 로그인 자체는 성공해도 `isAnonymous`가 계속 `true`로 남습니다. `store_master.dart`의 구매 게이트가 이 값만 보고 있어서, 카카오로 가입 완료한 사용자에게도 `SocialLoginModal`이 다시 뜹니다.
+
+## 해결 방향
+Firebase의 `isAnonymous`에 의존하지 않는 자체 플래그 `hasLinkedAccount`를 도입 — 소셜 로그인(카카오/구글/이메일) 성공 시점에 true로 세팅하고, Store 게이트는 이 플래그를 함께 확인.
 
 ## 영향 범위
-- `lib/custom_code/widgets/intro_master.dart` (수정)
-- `lib/custom_code/widgets/stealth_room_master.dart` (수정)
-- `routine_mode_anyone.dart`는 **수정 없음** (이미 `TrialFlowState.instance.isTrialAnyone`을 스스로 체크)
+- FFAppState 정의 파일 (경로 미확인 — Phase 0에서 탐색)
+- `lib/auth/social_auth_service.dart`
+- `lib/custom_code/widgets/store_master.dart`
 
 ---
 
-## Phase 0 — savepoint + 앵커 사전 검증
+## Phase 0 — savepoint + 탐색
 
 ```bash
-git add -A && git commit -m "savepoint: before B-layout card grouping + language popup revert"
+git add -A && git commit -m "savepoint: before hasLinkedAccount flag"
 
-grep -n "const SizedBox(height: 8)," lib/custom_code/widgets/intro_master.dart
-grep -n "Widget _buildLanguageSettingSection() {" lib/custom_code/widgets/intro_master.dart
-grep -n "Future<void> _startTrial(BuildContext context) async {" lib/custom_code/widgets/intro_master.dart
-grep -n "_isSignupMode = true;" lib/custom_code/widgets/intro_master.dart
-grep -n "class _StealthRoomMasterState extends State<StealthRoomMaster>" lib/custom_code/widgets/stealth_room_master.dart
-grep -n "^import 'trial/trial_flow_state.dart';" lib/custom_code/widgets/stealth_room_master.dart
+grep -rn "class FFAppState" lib/
+grep -n "bool isGuestSession" $(grep -rl "class FFAppState" lib/)
 ```
 
-`const SizedBox(height: 8),`는 파일 내 여러 곳에 있을 수 있으니, Phase 1-1의 old_str은 **아래 제시된 여러 줄 블록 전체**로 매칭할 것 (한 줄만 잘라서 매칭하지 말 것). `trial_flow_state.dart` import는 count=0이 정상(이번에 추가).
+두 번째 grep으로 기존 bool 필드가 어떤 스타일로 선언돼 있는지(단순 필드인지, getter/setter + SharedPreferences 영속화가 있는지) 확인하고, 아래 Phase 1을 그 스타일에 맞춰 적용할 것. 스타일이 크게 다르면 진행 전에 실장에게 스타일 예시를 보고할 것.
 
 ---
 
-## Phase 1 — intro_master.dart (줄 번호 큰 것부터)
+## Phase 1 — FFAppState에 필드 추가
 
-### 1-1. `_buildLanguageSettingSection()` → `_showLanguageSettingDialog()` 전체 교체
+`isGuestSession`과 동일한 선언 방식으로 다음을 추가:
 
-```
-old_str:
-  Widget _buildLanguageSettingSection() {
-    const languages = ['Korean', 'English', 'Japanese', 'Chinese', 'Spanish'];
-    return _buildBentoCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            '언어 설정',
-            style: TextStyle(
-                color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 14),
-          _languageDropdown(
-            label: '모국어',
-            value: _trialNativeLang,
-            items: languages,
-            onChanged: (value) => setState(() => _trialNativeLang = value),
-          ),
-          const SizedBox(height: 14),
-          _languageDropdown(
-            label: '학습 언어',
-            value: _trialTargetLang,
-            items: languages,
-            onChanged: (value) => setState(() => _trialTargetLang = value),
-          ),
-        ],
-      ),
-    );
-  }
-
-new_str:
-  Future<void> _showLanguageSettingDialog() async {
-    const languages = [
-      'Korean', 'English', 'Japanese', 'Chinese', 'Spanish',
-      'French', 'German', 'Hindi', 'Russian', 'Portuguese', 'Italian', 'Dutch',
-    ];
-    String nativeLang = _trialNativeLang;
-    String targetLang = _trialTargetLang;
-
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (dialogContext, setDialogState) {
-            return AlertDialog(
-              backgroundColor: const Color(0xFF161616),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-                side: const BorderSide(color: Color(0xFF2A3A36), width: 1),
-              ),
-              title: const Row(
-                children: [
-                  Icon(Icons.translate, color: Color(0xFF5DCAA5), size: 20),
-                  SizedBox(width: 8),
-                  Text('언어 설정',
-                      style: TextStyle(
-                          color: Colors.white, fontWeight: FontWeight.bold)),
-                ],
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _languageDropdown(
-                    label: '모국어',
-                    value: nativeLang,
-                    items: languages,
-                    onChanged: (value) =>
-                        setDialogState(() => nativeLang = value),
-                  ),
-                  const SizedBox(height: 14),
-                  _languageDropdown(
-                    label: '학습 언어',
-                    value: targetLang,
-                    items: languages,
-                    onChanged: (value) =>
-                        setDialogState(() => targetLang = value),
-                  ),
-                ],
-              ),
-              actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-              actions: [
-                SizedBox(
-                  width: double.infinity,
-                  height: 46,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.transparent,
-                      shadowColor: Colors.transparent,
-                      elevation: 0,
-                      side: const BorderSide(
-                          color: Color(0xFFEF9F27), width: 1.5),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        _trialNativeLang = nativeLang;
-                        _trialTargetLang = targetLang;
-                      });
-                      Navigator.of(dialogContext).pop();
-                    },
-                    child: const Text(
-                      '확인',
-                      style: TextStyle(
-                          color: Color(0xFFFAC775),
-                          fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
+```dart
+  bool hasLinkedAccount = false;
 ```
 
-`_languageDropdown()` 메서드는 재사용되므로 삭제하지 말 것.
-
-### 1-2. 헤드라인 영역 → B형 카드 그룹핑으로 재구성 (언어설정 인라인 카드 제거 포함)
-
-```
-old_str:
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          const Icon(Icons.record_voice_over,
-                              size: 22, color: Color(0xFF5DCAA5)),
-                          const SizedBox(width: 8),
-                          Text("StealthVox",
-                              style: GoogleFonts.orbitron(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white)),
-                        ],
-                      ),
-                      const SizedBox(height: 2),
-                      Text("내 이야기로 배우는 영어",
-                          style: GoogleFonts.roboto(
-                              fontSize: 12, color: Colors.white38)),
-                      const SizedBox(height: 28),
-                      const Text(
-                        "당신의 이야기가\n최고의 영어 교재가\n됩니다",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                          height: 1.3,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      const Text(
-                        "자율 학습 공부의 동반자",
-                        style: TextStyle(color: Colors.white54, fontSize: 14),
-                      ),
-                      const SizedBox(height: 24),
-                      Center(child: _buildWaveform()),
-                      const SizedBox(height: 32),
-                      _buildLanguageSettingSection(),
-                      const SizedBox(height: 16),
-                      const OnboardingGuideSection(),
-                      const SizedBox(height: 28),
-
-new_str:
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          const Icon(Icons.record_voice_over,
-                              size: 22, color: Color(0xFF5DCAA5)),
-                          const SizedBox(width: 8),
-                          Text("StealthVox",
-                              style: GoogleFonts.orbitron(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white)),
-                        ],
-                      ),
-                      const SizedBox(height: 2),
-                      Text("내 이야기로 배우는 영어",
-                          style: GoogleFonts.roboto(
-                              fontSize: 12, color: Colors.white38)),
-                      const SizedBox(height: 20),
-                      _buildBentoCard(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              "당신의 이야기가\n최고의 영어 교재가\n됩니다",
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 22,
-                                fontWeight: FontWeight.bold,
-                                height: 1.4,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            const Text(
-                              "자율 학습 공부의 동반자",
-                              style:
-                                  TextStyle(color: Colors.white54, fontSize: 12),
-                            ),
-                            const SizedBox(height: 14),
-                            _buildWaveform(),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      const OnboardingGuideSection(),
-                      const SizedBox(height: 24),
-```
-
-주의: `_buildWaveform()`이 이제 `Center` 없이 카드 안에서 왼쪽 정렬로 보입니다 (B형 목업 기준 의도된 변경). 가운데 정렬을 유지하고 싶으면 `_buildWaveform()`을 `Center(child: _buildWaveform())`로 바꿔서 적용.
-
-### 1-3. `_startTrial()`에 팝업 호출 삽입
-
-```
-old_str:
-      await TrialDeviceGate.markUsed();
-
-      FFAppState().nativeLang = _trialNativeLang;
-      FFAppState().targetLang = _trialTargetLang;
-
-      if (!mounted) return;
-      await _enterTrialAnyone();
-
-new_str:
-      await TrialDeviceGate.markUsed();
-
-      if (!mounted) return;
-      await _showLanguageSettingDialog();
-
-      FFAppState().nativeLang = _trialNativeLang;
-      FFAppState().targetLang = _trialTargetLang;
-
-      if (!mounted) return;
-      await _enterTrialAnyone();
-```
-
-### 1-4. 회원가입 스크롤 top 고정
-
-```
-old_str:
-                          onPressed: () => setState(() {
-                            _isSignupMode = true;
-                            _showEmailInSignup = false;
-                          }),
-
-new_str:
-                          onPressed: () {
-                            if (_scrollController.hasClients) {
-                              _scrollController.jumpTo(0);
-                            }
-                            setState(() {
-                              _isSignupMode = true;
-                              _showEmailInSignup = false;
-                            });
-                          },
-```
+(만약 기존 필드들이 SharedPreferences 영속화 getter/setter 패턴이면, `hasLinkedAccount`도 앱 재시작 후에도 유지되도록 같은 패턴으로 맞출 것 — 카카오로 가입한 사용자가 앱을 껐다 켰을 때도 다시 게이트에 걸리면 안 되기 때문.)
 
 ---
 
-## Phase 2 — stealth_room_master.dart
+## Phase 2 — social_auth_service.dart: 로그인 성공 시 플래그 세팅
 
 ### 2-1. import 추가
 
 ```
 old_str:
-import '/custom_code/actions/billing_ticker.dart';
+import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
 
 new_str:
-import '/custom_code/actions/billing_ticker.dart';
-import 'trial/trial_flow_state.dart';
+import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
+import '/flutter_flow/flutter_flow_util.dart';
 ```
 
-(경로가 다르면 Phase 0 grep 결과 기준으로 상대경로 보정)
-
-### 2-2. initState에 트라이얼 자동진입 로직 추가
+### 2-2. signInWithKakao — 성공 후 플래그 세팅
 
 ```
 old_str:
-    if (FFAppState().isGuestSession && FFAppState().duoRoomId.isNotEmpty) {
-      final String consumedRoomId = FFAppState().duoRoomId;
-      debugPrint('[StealthRoom] Duo invite detected — roomId: $consumedRoomId');
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          setState(() {
-            _pendingDuoRoomId = consumedRoomId;
-            _currentMode = 1;
-          });
-        }
-      });
-    }
+    final customToken = result.data['token'] as String;
+    return _auth.signInWithCustomToken(customToken);
   }
 
 new_str:
-    if (FFAppState().isGuestSession && FFAppState().duoRoomId.isNotEmpty) {
-      final String consumedRoomId = FFAppState().duoRoomId;
-      debugPrint('[StealthRoom] Duo invite detected — roomId: $consumedRoomId');
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          setState(() {
-            _pendingDuoRoomId = consumedRoomId;
-            _currentMode = 1;
-          });
+    final customToken = result.data['token'] as String;
+    final credential = await _auth.signInWithCustomToken(customToken);
+    FFAppState().hasLinkedAccount = true;
+    return credential;
+  }
+```
+
+### 2-3. signInWithGoogle — 두 return 지점 모두에 플래그 세팅
+
+```
+old_str:
+    final currentUser = _auth.currentUser;
+    if (currentUser != null && currentUser.isAnonymous) {
+      try {
+        return await currentUser.linkWithCredential(credential);
+      } on FirebaseAuthException catch (e) {
+        if (e.code == 'credential-already-in-use') {
+          return _auth.signInWithCredential(credential);
         }
-      });
+        rethrow;
+      }
     }
 
-    // 트라이얼 Anyone 자동 진입 — 메뉴 화면을 건너뛰고 바로 Anyone 모드로
-    TrialFlowState.instance.restoreFromAppState();
-    if (TrialFlowState.instance.isTrialAnyone) {
-      _currentMode = 2;
+    return _auth.signInWithCredential(credential);
+  }
+
+new_str:
+    final currentUser = _auth.currentUser;
+    if (currentUser != null && currentUser.isAnonymous) {
+      try {
+        final linked = await currentUser.linkWithCredential(credential);
+        FFAppState().hasLinkedAccount = true;
+        return linked;
+      } on FirebaseAuthException catch (e) {
+        if (e.code == 'credential-already-in-use') {
+          final signedIn = await _auth.signInWithCredential(credential);
+          FFAppState().hasLinkedAccount = true;
+          return signedIn;
+        }
+        rethrow;
+      }
     }
+
+    final signedIn = await _auth.signInWithCredential(credential);
+    FFAppState().hasLinkedAccount = true;
+    return signedIn;
+  }
+```
+
+### 2-4. signInWithEmail — 세 return 지점 모두에 플래그 세팅
+
+```
+old_str:
+    if (isSignUp && currentUser != null && currentUser.isAnonymous) {
+      try {
+        return await currentUser.linkWithCredential(credential);
+      } on FirebaseAuthException catch (e) {
+        if (e.code == 'email-already-in-use') {
+          return _auth.signInWithEmailAndPassword(
+            email: email,
+            password: password,
+          );
+        }
+        rethrow;
+      }
+    }
+
+    if (isSignUp) {
+      return _auth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+    }
+
+    return _auth.signInWithEmailAndPassword(
+      email: email,
+      password: password,
+    );
+  }
+
+new_str:
+    if (isSignUp && currentUser != null && currentUser.isAnonymous) {
+      try {
+        final linked = await currentUser.linkWithCredential(credential);
+        FFAppState().hasLinkedAccount = true;
+        return linked;
+      } on FirebaseAuthException catch (e) {
+        if (e.code == 'email-already-in-use') {
+          final signedIn = await _auth.signInWithEmailAndPassword(
+            email: email,
+            password: password,
+          );
+          FFAppState().hasLinkedAccount = true;
+          return signedIn;
+        }
+        rethrow;
+      }
+    }
+
+    if (isSignUp) {
+      final created = await _auth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+      FFAppState().hasLinkedAccount = true;
+      return created;
+    }
+
+    final signedIn = await _auth.signInWithEmailAndPassword(
+      email: email,
+      password: password,
+    );
+    FFAppState().hasLinkedAccount = true;
+    return signedIn;
   }
 ```
 
 ---
 
-## Phase 3 — 검증
+## Phase 3 — store_master.dart: 게이트 조건 수정
+
+```
+old_str:
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null || currentUser.isAnonymous) {
+      final result = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const SocialLoginModal(),
+      );
+      if (result != true || !mounted) return;
+      await _initRevenueCatUser();
+    }
+
+new_str:
+    final currentUser = FirebaseAuth.instance.currentUser;
+    final needsAccount = currentUser == null ||
+        (currentUser.isAnonymous && !FFAppState().hasLinkedAccount);
+    if (needsAccount) {
+      final result = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const SocialLoginModal(),
+      );
+      if (result != true || !mounted) return;
+      FFAppState().hasLinkedAccount = true;
+      await _initRevenueCatUser();
+    }
+```
+
+(`SocialLoginModal`이 내부적으로 이미 `SocialAuthService`를 호출하므로 Phase 2에서 플래그가 세팅되지만, 방어적으로 여기서도 한 번 더 세팅 — 두 경로 다 안전하게)
+
+---
+
+## Phase 4 — 검증
 
 ```bash
-grep -c "_showLanguageSettingDialog\|_buildLanguageSettingSection" lib/custom_code/widgets/intro_master.dart
-# _showLanguageSettingDialog 2회(정의+호출), _buildLanguageSettingSection 0회
+grep -c "hasLinkedAccount" lib/auth/social_auth_service.dart
+# 5 이상 (카카오 1 + 구글 3 + 이메일 3 중 실제 반영된 개수)
 
-grep -c "_buildBentoCard" lib/custom_code/widgets/intro_master.dart
-# 기존 사용처 + 신규 헤드라인 카드 1개 추가되어 카운트 +1
+grep -c "hasLinkedAccount" lib/custom_code/widgets/store_master.dart
 
-grep -c "TrialFlowState" lib/custom_code/widgets/stealth_room_master.dart
-
-flutter analyze lib/custom_code/widgets/intro_master.dart
-flutter analyze lib/custom_code/widgets/stealth_room_master.dart
-dart format lib/custom_code/widgets/intro_master.dart
-dart format lib/custom_code/widgets/stealth_room_master.dart
+flutter analyze lib/auth/social_auth_service.dart
+flutter analyze lib/custom_code/widgets/store_master.dart
+dart format lib/auth/social_auth_service.dart
+dart format lib/custom_code/widgets/store_master.dart
 ```
 
 ---
 
-## Phase 4 — 실기기 체크리스트
+## Phase 5 — 실기기 체크리스트
 
-- [ ] 헤드라인+서브텍스트+웨이브폼이 하나의 카드 안에 있고, 바로 아래 온보딩 가이드 카드가 같은 톤으로 이어짐
-- [ ] 헤드라인 글자 크기가 이전보다 작아지고 여백이 좁아져서 숏츠 비율에서도 답답해 보이지 않음
-- [ ] CTA 탭 → 팝업(틸 아이콘 + 12개 언어 + 골드 아웃라인 확인 버튼) → 확인 → 팝업 없이 바로 Anyone 대화 화면
-- [ ] "회원 가입" 클릭 시 다음 화면이 스크롤 맨 위부터 보임
-- [ ] Duo 초대링크 진입은 기존처럼 정상 동작 (회귀 확인)
+- [ ] 카카오로 가입 완료 → Lobby 진입 → Store에서 구매 버튼 클릭 → **팝업 안 뜨고 바로 구매 흐름 진행**
+- [ ] 완전 신규(비로그인) 상태로 Store 구매 시도 → 팝업 정상적으로 뜸 (회귀 확인)
+- [ ] 구글/이메일 로그인도 기존처럼 정상 동작 (회귀 확인)
+- [ ] 앱을 완전히 종료했다가 재실행 후에도 카카오 계정 상태에서 팝업이 안 뜨는지 확인 (Phase 1에서 영속화 여부에 따라 결과가 갈림 — 안 되면 Phase 1을 SharedPreferences 영속화 패턴으로 다시 요청)
 
 **롤백**: `git revert <savepoint 이후 커밋>` 또는 `git reset --hard <savepoint>`
