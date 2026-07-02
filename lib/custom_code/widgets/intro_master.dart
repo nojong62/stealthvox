@@ -73,8 +73,7 @@ class _IntroMasterState extends State<IntroMaster> {
 
   void _onDuoInviteSignal() {
     if (!mounted) return;
-    if (FFAppState().isGuestSession &&
-        FFAppState().pendingInviteType == 'duo' &&
+    if (FFAppState().pendingInviteType == 'duo' &&
         FFAppState().duoRoomId.isNotEmpty) {
       debugPrint('[Intro] duoInviteSignal - routing to StealthRoom');
       context.pushReplacementNamed('StealthRoom');
@@ -110,9 +109,8 @@ class _IntroMasterState extends State<IntroMaster> {
   Future<void> _checkEntryStatus() async {
     // 1순위: FFAppState에 pending invite가 있으면 바로 StealthRoom
     debugPrint(
-        '[Intro] isGuestSession=${FFAppState().isGuestSession}, pendingInviteType=${FFAppState().pendingInviteType}, duoRoomId=${FFAppState().duoRoomId}');
-    if (FFAppState().isGuestSession &&
-        FFAppState().pendingInviteType == 'duo' &&
+        '[Intro] pendingInviteType=${FFAppState().pendingInviteType}, duoRoomId=${FFAppState().duoRoomId}');
+    if (FFAppState().pendingInviteType == 'duo' &&
         FFAppState().duoRoomId.isNotEmpty) {
       debugPrint('[Intro] routing to StealthRoom for Duo invite');
       if (mounted) context.pushReplacementNamed('StealthRoom');
@@ -121,13 +119,24 @@ class _IntroMasterState extends State<IntroMaster> {
     // 2순위: 항상 AppsFlyer 초기화 (로그인 여부와 무관하게 딥링크 콜백 등록)
     await _initAppsFlyer();
     if (!mounted) return;
-    // 3순위: 이미 로그인된 회원이면 로비로 이동
+    // 3순위: 이미 로그인된 회원도 pending invite 우선 체크
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
-      context.goNamed('Lobby');
+      _routeAfterAuth();
       return;
     }
     // 4순위: 비회원은 Intro에서 로그인 가능 상태로 대기
+  }
+
+  /// pending Duo 초대가 있으면 StealthRoom, 없으면 Lobby로 라우팅.
+  void _routeAfterAuth() {
+    if (FFAppState().pendingInviteType == 'duo' &&
+        FFAppState().duoRoomId.isNotEmpty) {
+      debugPrint('[Intro] routing -> StealthRoom (pending duo invite)');
+      context.pushReplacementNamed('StealthRoom');
+    } else {
+      context.goNamed('Lobby');
+    }
   }
 
   Future<void> _initAppsFlyer() async {
@@ -227,7 +236,7 @@ class _IntroMasterState extends State<IntroMaster> {
           );
         }
       }
-      if (mounted) context.goNamed('Lobby');
+      if (mounted) _routeAfterAuth();
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -808,7 +817,7 @@ class _IntroMasterState extends State<IntroMaster> {
     setState(() => isLoading = true);
     try {
       await authFn();
-      if (mounted) context.goNamed('Lobby');
+      if (mounted) _routeAfterAuth();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
