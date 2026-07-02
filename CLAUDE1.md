@@ -48,25 +48,25 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-# 지시문: 트라이얼 공부방 종료 → 회원가입(카톡 로그인) 모드 직행
+# 지시문: Duo 초대 라우팅 — isGuestSession 게이트 제거 및 인증 후 pending invite 우선 라우팅
 
-## 개요
-현재 공부방(TrialStudyPage) 1분 종료 후 `Store` 화면으로 이동하는데,
-이를 `intro_master.dart`의 회원가입 모드(Screen 3-2, `_isSignupMode=true` 뷰 — 카카오톡/구글 로그인 버튼)로 바로 이동하도록 변경한다.
+## 목적
+현재 Duo 초대 딥링크 라우팅이 `isGuestSession == true`인 비회원(게스트)에게만 작동합니다.
+구글/카카오/이메일로 가입한 **정식 회원**도 Duo 초대를 받을 수 있으므로,
+`isGuestSession` 조건을 제거하고, 모든 인증 완료 경로에서 pending invite를 먼저 확인하도록 수정합니다.
 
-## 설계 방향
-- 라우터에 파라미터를 넘기는 방식(nav 파일 수정 필요) 대신, 이미 쓰고 있는 `TrialFlowState` 싱글톤에
-  **1회성(consume-once) 플래그**를 추가해서 재사용한다.
-- `trial_study_page.dart`에서 Intro로 넘어가기 직전 플래그를 세팅 → `intro_master.dart`의 `initState`에서
-  플래그를 소비(consume)하여 `_isSignupMode = true`로 시작하고, 기존 `_checkEntryStatus()`(익명 로그인 유저를
-  Lobby로 튕겨버리는 로직) 호출 자체를 건너뛴다. → 별도의 로그인 상태 분기 수정 없이 문제 해결.
-- 관련 없는 파일(라우터/nav, `_checkEntryStatus` 내부 로직)은 건드리지 않는다.
+## 대상 파일
+- `lib/custom_code/widgets/intro_master.dart` (이 파일 1개만 수정)
 
-## 수정 파일 (4개)
-1. `lib/custom_code/widgets/trial/trial_flow_state.dart` — 플래그 필드 + 메서드 2개 추가
-2. `lib/custom_code/widgets/trial/trial_study_page.dart` — onTimeUp에서 플래그 세팅 + 목적지 `Intro`로 변경
-3. `lib/custom_code/widgets/trial/trial_study_timer_overlay.dart` — 안내 문구 "Moving to Store..." → 수정
-4. `lib/custom_code/widgets/intro_master.dart` — initState에서 플래그 소비 분기
+## 수정 요약
+| # | 위치 | 내용 |
+|---|------|------|
+| A | 신규 헬퍼 추가 | `_routeAfterAuth()` — pending duo invite면 StealthRoom, 아니면 Lobby |
+| B | `_onDuoInviteSignal()` | `isGuestSession &&` 조건 제거 |
+| C | `_checkEntryStatus()` 1순위 | `isGuestSession &&` 조건 제거 |
+| D | `_checkEntryStatus()` 3순위 | `context.goNamed('Lobby')` → `_routeAfterAuth()` |
+| E | `_handleAuth()` | `context.goNamed('Lobby')` → `_routeAfterAuth()` |
+| F | `_handleSocialAuth()` | `context.goNamed('Lobby')` → `_routeAfterAuth()` |
 
 ---
 
@@ -74,174 +74,207 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 
 ```bash
 cd F:\flutter_project\stealth_vox
-git add -A
-git commit -m "savepoint: 트라이얼 종료 후 회원가입모드 직행 작업 전"
+git add -A && git commit -m "savepoint: before duo invite routing fix"
 ```
 
-## Phase 1 — grep 앵커 사전 검증 (각 기대값 1)
+---
+
+## Phase 1 — Grep 검증 (각 앵커 count=1 확인)
 
 ```bash
-grep -n "int step = 0;" lib/custom_code/widgets/trial/trial_flow_state.dart
-grep -n "TrialFlowState.instance.advanceTo(4);" lib/custom_code/widgets/trial/trial_study_page.dart
-grep -n "context.pushReplacementNamed('Store');" lib/custom_code/widgets/trial/trial_study_page.dart
-grep -n "'Moving to Store...'," lib/custom_code/widgets/trial/trial_study_timer_overlay.dart
-grep -n "WidgetsBinding.instance.addPostFrameCallback((_) => _checkEntryStatus());" lib/custom_code/widgets/intro_master.dart
+cd F:\flutter_project\stealth_vox
+
+# 앵커 A: 헬퍼 삽입 위치 (initAppsFlyer 닫는 부분)
+grep -n "appId: 'com.aienglishpractice.stealthvox'," lib/custom_code/widgets/intro_master.dart
+# 예상: 1줄 (count=1)
+
+# 앵커 B: _onDuoInviteSignal의 isGuestSession
+grep -n "duoInviteSignal - routing to StealthRoom" lib/custom_code/widgets/intro_master.dart
+# 예상: 1줄 (count=1)
+
+# 앵커 C: _checkEntryStatus 1순위의 isGuestSession
+grep -n "routing to StealthRoom for Duo invite" lib/custom_code/widgets/intro_master.dart
+# 예상: 1줄 (count=1)
+
+# 앵커 D: _checkEntryStatus 3순위
+grep -n "이미 로그인된 회원이면 로비로 이동" lib/custom_code/widgets/intro_master.dart
+# 예상: 1줄 (count=1)
+
+# 앵커 E: _handleAuth 내 goNamed('Lobby')
+grep -n "} on FirebaseAuthException catch (e) {" lib/custom_code/widgets/intro_master.dart
+# 예상: 1줄 (count=1)
+
+# 앵커 F: _handleSocialAuth 내 goNamed('Lobby')
+grep -c "await authFn();" lib/custom_code/widgets/intro_master.dart
+# 예상: 1 (count=1)
 ```
 
-모두 1이 아니면 여기서 중단하고 실장님께 보고.
+**count=1이 아닌 앵커가 있으면 즉시 중단하고 보고할 것.**
 
 ---
 
-## Phase 2 — str_replace 수정 (파일별 bottom-to-top)
+## Phase 2 — str_replace 편집 (⚠️ 반드시 아래→위 순서로 실행)
 
-### 2-1. `trial_flow_state.dart`
+### Edit F (최하단) — `_handleSocialAuth()`: Lobby → 헬퍼
 
-**edit A (아래쪽 먼저) — 플래그 소비 메서드 추가 (`advanceTo` 뒤, 클래스 닫는 `}` 앞)**
+```
+파일: lib/custom_code/widgets/intro_master.dart
 
 old_str:
-```dart
-  void advanceTo(int newStep) {
-    step = newStep;
-    saveToAppState();
-  }
-}
-```
+      await authFn();
+      if (mounted) context.goNamed('Lobby');
 
 new_str:
-```dart
-  void advanceTo(int newStep) {
-    step = newStep;
-    saveToAppState();
-  }
-
-  /// 트라이얼 종료 후 Intro 진입 시 회원가입 모드로 바로 시작하도록 요청.
-  /// 1회성(consume-once) 플래그 — 소비되는 즉시 false로 리셋됨.
-  void requestSignupOnEntry() {
-    _forceSignupOnEntry = true;
-  }
-
-  bool consumeSignupOnEntry() {
-    final requested = _forceSignupOnEntry;
-    _forceSignupOnEntry = false;
-    return requested;
-  }
-}
+      await authFn();
+      if (mounted) _routeAfterAuth();
 ```
 
-**edit B (위쪽) — 플래그 필드 선언**
+### Edit E — `_handleAuth()`: Lobby → 헬퍼
+
+```
+파일: lib/custom_code/widgets/intro_master.dart
 
 old_str:
-```dart
-  DocumentReference? myHistoryRef;
-  int step = 0;
-```
+      if (mounted) context.goNamed('Lobby');
+    } on FirebaseAuthException catch (e) {
 
 new_str:
-```dart
-  DocumentReference? myHistoryRef;
-  int step = 0;
-  bool _forceSignupOnEntry = false;
+      if (mounted) _routeAfterAuth();
+    } on FirebaseAuthException catch (e) {
 ```
 
----
+### Edit D — `_checkEntryStatus()` 3순위: Lobby → 헬퍼
 
-### 2-2. `trial_study_page.dart`
+```
+파일: lib/custom_code/widgets/intro_master.dart
 
 old_str:
-```dart
-            TrialFlowState.instance.advanceTo(4);
-              context.pushReplacementNamed('Store');
-```
-
-new_str:
-```dart
-            TrialFlowState.instance.advanceTo(4);
-              TrialFlowState.instance.requestSignupOnEntry();
-              context.pushReplacementNamed('Intro');
-```
-
-> ⚠️ 원본 파일의 들여쓰기(스페이스 개수)를 그대로 유지할 것. `view`로 재확인 후 old_str 복사 권장.
-
----
-
-### 2-3. `trial_study_timer_overlay.dart`
-
-old_str:
-```dart
-              Text(
-                'Moving to Store...',
-                style: TextStyle(color: Color(0xFFB0B0B0), fontSize: 13),
-              ),
-```
-
-new_str:
-```dart
-              Text(
-                'Moving to sign up...',
-                style: TextStyle(color: Color(0xFFB0B0B0), fontSize: 13),
-              ),
-```
-
----
-
-### 2-4. `intro_master.dart`
-
-old_str:
-```dart
-    AppsFlyerManager.duoInviteSignal.addListener(_onDuoInviteSignal);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _checkEntryStatus());
-    _initPromoPopup();
-```
-
-new_str:
-```dart
-    AppsFlyerManager.duoInviteSignal.addListener(_onDuoInviteSignal);
-    if (TrialFlowState.instance.consumeSignupOnEntry()) {
-      _isSignupMode = true;
-    } else {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _checkEntryStatus());
+    // 3순위: 이미 로그인된 회원이면 로비로 이동
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      context.goNamed('Lobby');
+      return;
     }
-    _initPromoPopup();
+
+new_str:
+    // 3순위: 이미 로그인된 회원 → pending invite 우선 체크
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      _routeAfterAuth();
+      return;
+    }
 ```
 
-(`TrialFlowState`는 이미 `import 'trial/trial_flow_state.dart';`로 import되어 있음 — import 추가 불필요.)
+### Edit C — `_checkEntryStatus()` 1순위: isGuestSession 제거
+
+```
+파일: lib/custom_code/widgets/intro_master.dart
+
+old_str:
+    if (FFAppState().isGuestSession &&
+        FFAppState().pendingInviteType == 'duo' &&
+        FFAppState().duoRoomId.isNotEmpty) {
+      debugPrint('[Intro] routing to StealthRoom for Duo invite');
+
+new_str:
+    if (FFAppState().pendingInviteType == 'duo' &&
+        FFAppState().duoRoomId.isNotEmpty) {
+      debugPrint('[Intro] routing to StealthRoom for Duo invite');
+```
+
+### Edit B — `_onDuoInviteSignal()`: isGuestSession 제거
+
+```
+파일: lib/custom_code/widgets/intro_master.dart
+
+old_str:
+    if (FFAppState().isGuestSession &&
+        FFAppState().pendingInviteType == 'duo' &&
+        FFAppState().duoRoomId.isNotEmpty) {
+      debugPrint('[Intro] duoInviteSignal - routing to StealthRoom');
+
+new_str:
+    if (FFAppState().pendingInviteType == 'duo' &&
+        FFAppState().duoRoomId.isNotEmpty) {
+      debugPrint('[Intro] duoInviteSignal - routing to StealthRoom');
+```
+
+### Edit A (최상단) — `_routeAfterAuth()` 헬퍼 추가
+
+```
+파일: lib/custom_code/widgets/intro_master.dart
+
+old_str:
+  Future<void> _initAppsFlyer() async {
+    await AppsFlyerManager.initialize(
+      devKey: 'SQUmDTB2VzuPjrJGiy5SSC',
+      appId: 'com.aienglishpractice.stealthvox',
+    );
+  }
+
+new_str:
+  /// pending Duo 초대가 있으면 StealthRoom, 없으면 Lobby로 라우팅
+  void _routeAfterAuth() {
+    if (FFAppState().pendingInviteType == 'duo' &&
+        FFAppState().duoRoomId.isNotEmpty) {
+      debugPrint('[Intro] _routeAfterAuth → StealthRoom (pending duo invite)');
+      context.pushReplacementNamed('StealthRoom');
+    } else {
+      context.goNamed('Lobby');
+    }
+  }
+
+  Future<void> _initAppsFlyer() async {
+    await AppsFlyerManager.initialize(
+      devKey: 'SQUmDTB2VzuPjrJGiy5SSC',
+      appId: 'com.aienglishpractice.stealthvox',
+    );
+  }
+```
 
 ---
 
-## Phase 3 — 사후 grep 검증
+## Phase 3 — 사후 Grep 검증
 
 ```bash
-grep -n "_forceSignupOnEntry" lib/custom_code/widgets/trial/trial_flow_state.dart   # 기대: 3
-grep -n "requestSignupOnEntry\|consumeSignupOnEntry" lib/custom_code/widgets/trial/trial_flow_state.dart   # 기대: 4 (선언2+정의2 내부호출포함)
-grep -n "pushReplacementNamed('Intro')" lib/custom_code/widgets/trial/trial_study_page.dart   # 기대: 1
-grep -n "pushReplacementNamed('Store')" lib/custom_code/widgets/trial/trial_study_page.dart   # 기대: 0
-grep -n "Moving to sign up" lib/custom_code/widgets/trial/trial_study_timer_overlay.dart   # 기대: 1
-grep -n "consumeSignupOnEntry()" lib/custom_code/widgets/intro_master.dart   # 기대: 1
+# isGuestSession이 intro_master.dart에서 완전히 제거되었는지 확인
+grep -c "isGuestSession" lib/custom_code/widgets/intro_master.dart
+# 예상: 0
+
+# _routeAfterAuth 호출 횟수 (헬퍼 정의 1 + 호출 3 = 총 4)
+grep -c "_routeAfterAuth" lib/custom_code/widgets/intro_master.dart
+# 예상: 4
+
+# goNamed('Lobby')가 intro_master.dart에서 제거되었는지 확인
+grep -c "goNamed('Lobby')" lib/custom_code/widgets/intro_master.dart
+# 예상: 1 (헬퍼 내부의 1개만 남아야 함)
 ```
 
-## Phase 4 — 검증
+---
+
+## Phase 4 — 빌드 검증
 
 ```bash
-flutter analyze lib/custom_code/widgets/trial/trial_flow_state.dart
-flutter analyze lib/custom_code/widgets/trial/trial_study_page.dart
-flutter analyze lib/custom_code/widgets/trial/trial_study_timer_overlay.dart
+cd F:\flutter_project\stealth_vox
 flutter analyze lib/custom_code/widgets/intro_master.dart
-
-dart format lib/custom_code/widgets/trial/trial_flow_state.dart
-dart format lib/custom_code/widgets/trial/trial_study_page.dart
-dart format lib/custom_code/widgets/trial/trial_study_timer_overlay.dart
 dart format lib/custom_code/widgets/intro_master.dart
 ```
 
-## Phase 5 — 롤백
-
-```bash
-git log --oneline -5   # savepoint 해시 확인
-git reset --hard <savepoint_해시>
-```
-(이미 push된 경우: `git revert <이번_커밋_해시>`)
+⚠️ `dart format`은 반드시 이 **단일 파일**만 대상으로 실행 (폴더 대상 금지 — 한글 UTF-8 깨짐 위험)
 
 ---
 
+## Phase 5 — 롤백
 
+문제 발생 시:
+```bash
+git revert HEAD
+```
 
+---
+
+## 참고: isGuestSession 자체를 삭제하는 건 아님
+
+`isGuestSession`은 `intro_master.dart`의 라우팅 조건에서만 제거합니다.
+이 플래그는 Duo 방 내부(`duo_routine.dart` 등)에서 게스트/호스트 구분, 과금 면제 등
+다른 용도로 사용될 수 있으므로 FFAppState에서 필드 자체를 삭제하지 않습니다.
