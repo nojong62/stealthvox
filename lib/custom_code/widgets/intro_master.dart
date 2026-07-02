@@ -1,23 +1,13 @@
 // Automatic FlutterFlow imports
 import '/backend/backend.dart';
-import '/backend/schema/structs/index.dart';
-import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import 'index.dart'; // Imports other custom widgets
-import '/custom_code/actions/index.dart'; // Imports custom actions
-import '/flutter_flow/custom_functions.dart'; // Imports custom functions
 import 'package:flutter/material.dart';
 // Begin custom widget code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'dart:async';
-import 'dart:io';
-import 'package:android_id/android_id.dart';
-import 'package:device_info_plus/device_info_plus.dart';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
 import 'trial/trial_flow_state.dart';
 import 'trial/trial_device_gate.dart';
 import 'shared_social_button.dart';
@@ -38,7 +28,7 @@ class IntroMaster extends StatefulWidget {
   final Color? primaryColor;
 
   @override
-  _IntroMasterState createState() => _IntroMasterState();
+  State<IntroMaster> createState() => _IntroMasterState();
 }
 
 class _IntroMasterState extends State<IntroMaster> {
@@ -55,13 +45,6 @@ class _IntroMasterState extends State<IntroMaster> {
   String _trialNativeLang = 'Korean';
   String _trialTargetLang = 'English';
 
-  // ── Promo popup ──
-  bool _promoVisible = false;
-  bool _promoMounted = false;
-  Timer? _promoFadeTimer;
-  Timer? _promoRemoveTimer;
-  static const _promoShownKey = 'promo_free_trial_shown';
-
   @override
   void initState() {
     super.initState();
@@ -69,7 +52,6 @@ class _IntroMasterState extends State<IntroMaster> {
     _passwordFocusNode.addListener(_onFocusChange);
     AppsFlyerManager.duoInviteSignal.addListener(_onDuoInviteSignal);
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkEntryStatus());
-    _initPromoPopup();
     const trialLanguages = [
       'Korean',
       'English',
@@ -95,34 +77,6 @@ class _IntroMasterState extends State<IntroMaster> {
     }
   }
 
-  Future<void> _initPromoPopup() async {
-    final prefs = await SharedPreferences.getInstance();
-    final shown = prefs.getBool(_promoShownKey) ?? false;
-    if (shown || !mounted) return;
-    await prefs.setBool(_promoShownKey, true);
-    if (!mounted) return;
-    setState(() {
-      _promoMounted = true;
-      _promoVisible = true;
-    });
-    _promoFadeTimer = Timer(const Duration(milliseconds: 4400), () {
-      if (mounted) setState(() => _promoVisible = false);
-    });
-    _promoRemoveTimer = Timer(const Duration(milliseconds: 5000), () {
-      if (mounted) setState(() => _promoMounted = false);
-    });
-  }
-
-  void _dismissPromo() {
-    _promoFadeTimer?.cancel();
-    _promoRemoveTimer?.cancel();
-    if (!mounted) return;
-    setState(() => _promoVisible = false);
-    Future.delayed(const Duration(milliseconds: 500), () {
-      if (mounted) setState(() => _promoMounted = false);
-    });
-  }
-
   // 키보드가 올라올 때 로그인 버튼이 보이도록 자동 스크롤
   void _onFocusChange() {
     if (_emailFocusNode.hasFocus || _passwordFocusNode.hasFocus) {
@@ -141,8 +95,6 @@ class _IntroMasterState extends State<IntroMaster> {
   @override
   void dispose() {
     AppsFlyerManager.duoInviteSignal.removeListener(_onDuoInviteSignal);
-    _promoFadeTimer?.cancel();
-    _promoRemoveTimer?.cancel();
     _scrollController.dispose();
     _emailFocusNode.dispose();
     _passwordFocusNode.dispose();
@@ -187,7 +139,7 @@ class _IntroMasterState extends State<IntroMaster> {
       TrialFlowState.instance.restoreFromAppState();
       final canTry = await TrialDeviceGate.canTrial();
       if (!canTry) {
-        if (mounted) {
+        if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('무료 체험은 기기당 1회만 가능합니다. 로그인해 주세요.')),
           );
@@ -201,16 +153,16 @@ class _IntroMasterState extends State<IntroMaster> {
       }
       await TrialDeviceGate.markUsed();
 
-      if (!mounted) return;
+      if (!context.mounted) return;
       await _showLanguageSettingDialog();
 
       FFAppState().nativeLang = _trialNativeLang;
       FFAppState().targetLang = _trialTargetLang;
 
-      if (!mounted) return;
-      await _enterTrialAnyone();
+      if (!context.mounted) return;
+      await _enterTrialAnyone(context);
     } catch (e) {
-      if (mounted) {
+      if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('체험을 시작할 수 없습니다: $e')),
         );
@@ -220,9 +172,9 @@ class _IntroMasterState extends State<IntroMaster> {
     }
   }
 
-  Future<void> _enterTrialAnyone() async {
+  Future<void> _enterTrialAnyone(BuildContext context) async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null || !mounted) return;
+    if (user == null || !context.mounted) return;
     final historyRef = FirebaseFirestore.instance
         .collection('users')
         .doc(user.uid)
@@ -234,7 +186,7 @@ class _IntroMasterState extends State<IntroMaster> {
     });
     TrialFlowState.instance.myHistoryRef = historyRef;
     TrialFlowState.instance.advanceTo(1);
-    if (!mounted) return;
+    if (!context.mounted) return;
     context.pushNamed(
       'StealthRoom',
       queryParameters: {
@@ -270,8 +222,6 @@ class _IntroMasterState extends State<IntroMaster> {
             password: password,
           );
         }
-        // [Welcome bonus removed] Replaced by the 30-second free trial flow.
-        // await _claimWelcomeBonus();
       }
       if (mounted) context.goNamed('Lobby');
     } on FirebaseAuthException catch (e) {
@@ -287,85 +237,6 @@ class _IntroMasterState extends State<IntroMaster> {
     } finally {
       if (mounted) setState(() => isLoading = false);
     }
-  }
-
-  Future<void> _claimWelcomeBonus() async {
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return;
-
-      final deviceId = await _getDeviceId();
-      if (deviceId.isEmpty) {
-        debugPrint('[IntroMaster] welcome bonus skipped: empty deviceId');
-        return;
-      }
-
-      final idToken = await user.getIdToken();
-      final projectId = FirebaseFirestore.instance.app.options.projectId;
-      final response = await http
-          .post(
-            Uri.parse(
-              'https://us-central1-$projectId.cloudfunctions.net/claimWelcomeBonus',
-            ),
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer $idToken',
-            },
-            body: jsonEncode({
-              'data': {'deviceId': deviceId},
-            }),
-          )
-          .timeout(const Duration(seconds: 10));
-
-      if (response.statusCode != 200) {
-        debugPrint(
-          '[IntroMaster] welcome bonus HTTP ${response.statusCode}: ${response.body}',
-        );
-        return;
-      }
-
-      final body = jsonDecode(response.body) as Map<String, dynamic>;
-      final result = body['result'] as Map<String, dynamic>?;
-      final granted = result?['granted'] as bool? ?? false;
-
-      if (!granted) {
-        debugPrint('[IntroMaster] welcome bonus skipped: ${result?['reason']}');
-        return;
-      }
-
-      final remainingTime =
-          (result?['remainingTime'] as num?)?.toInt() ?? 18000;
-      FFAppState().remainingTime = remainingTime;
-      FFAppState().update(() {});
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              "신규 회원 10분 무료 체험이 지급되었습니다!\n테스트 기간 중 참여 테스터에게는 5시간이 부여됩니다.",
-              style:
-                  TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
-            ),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 3),
-          ),
-        );
-      }
-    } catch (e) {
-      debugPrint('[IntroMaster] claimWelcomeBonus error: $e');
-    }
-  }
-
-  Future<String> _getDeviceId() async {
-    if (Platform.isAndroid) {
-      const androidIdPlugin = AndroidId();
-      return await androidIdPlugin.getId() ?? '';
-    }
-    if (Platform.isIOS) {
-      final iosInfo = await DeviceInfoPlugin().iosInfo;
-      return iosInfo.identifierForVendor ?? '';
-    }
-    return '';
   }
 
   Future<void> _resetPassword() async {
@@ -402,7 +273,6 @@ class _IntroMasterState extends State<IntroMaster> {
     return Stack(
       children: [
         _buildMain(context),
-        if (_promoMounted) _buildPromoPopup(),
       ],
     );
   }
@@ -584,173 +454,6 @@ class _IntroMasterState extends State<IntroMaster> {
                   ),
                 ),
               ),
-      ),
-    );
-  }
-
-  Widget _buildPromoPopup() {
-    return GestureDetector(
-      onTap: _dismissPromo,
-      child: AnimatedOpacity(
-        opacity: _promoVisible ? 1.0 : 0.0,
-        duration: const Duration(milliseconds: 500),
-        child: Container(
-          width: double.infinity,
-          height: double.infinity,
-          color: Colors.black.withValues(alpha: 0.80),
-          child: Center(
-            child: GestureDetector(
-              onTap: _dismissPromo,
-              child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 36),
-                padding: const EdgeInsets.fromLTRB(28, 28, 28, 24),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF161616),
-                  borderRadius: BorderRadius.circular(28),
-                  border: Border.all(
-                    color: Colors.amber.withValues(alpha: 0.55),
-                    width: 1.5,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.amber.withValues(alpha: 0.20),
-                      blurRadius: 48,
-                      spreadRadius: 6,
-                    ),
-                  ],
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // ── NEW MEMBER badge ──
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: Colors.amber,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        'NEW MEMBER',
-                        style: GoogleFonts.orbitron(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black,
-                          letterSpacing: 2.5,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 22),
-                    // ── Gift icon ──
-                    Container(
-                      width: 72,
-                      height: 72,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Colors.amber.withValues(alpha: 0.10),
-                        border: Border.all(
-                          color: Colors.amber.withValues(alpha: 0.35),
-                          width: 1.2,
-                        ),
-                      ),
-                      child: const Icon(Icons.card_giftcard_rounded,
-                          size: 34, color: Colors.amber),
-                    ),
-                    const SizedBox(height: 20),
-                    // ── FREE / 10분 / TRIAL ──
-                    Text(
-                      'FREE',
-                      style: GoogleFonts.orbitron(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white38,
-                        letterSpacing: 5,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    ShaderMask(
-                      shaderCallback: (bounds) => const LinearGradient(
-                        colors: [Color(0xFFFFD740), Color(0xFFFFA000)],
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                      ).createShader(bounds),
-                      child: Text(
-                        '10분',
-                        style: GoogleFonts.orbitron(
-                          fontSize: 60,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                          height: 1.05,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'TRIAL',
-                      style: GoogleFonts.orbitron(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white38,
-                        letterSpacing: 5,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      '신규 회원가입 즉시 지급',
-                      style: GoogleFonts.roboto(
-                        fontSize: 13,
-                        color: Colors.white60,
-                        fontWeight: FontWeight.w500,
-                        letterSpacing: 0.3,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '테스트 기간 중 참여 테스터에게 5시간 부여',
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.roboto(
-                        fontSize: 12,
-                        color: Colors.amberAccent,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.2,
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    // ── 5초 countdown bar ──
-                    TweenAnimationBuilder<double>(
-                      tween: Tween(begin: 1.0, end: 0.0),
-                      duration: const Duration(milliseconds: 5000),
-                      builder: (context, value, _) {
-                        final secLeft = (value * 5).ceil();
-                        return Column(
-                          children: [
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(4),
-                              child: LinearProgressIndicator(
-                                value: value,
-                                minHeight: 3,
-                                backgroundColor:
-                                    Colors.white.withValues(alpha: 0.08),
-                                valueColor:
-                                    const AlwaysStoppedAnimation(Colors.amber),
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              '$secLeft초 후 사라집니다  •  탭하면 닫힘',
-                              style: const TextStyle(
-                                  color: Colors.white30, fontSize: 11),
-                            ),
-                          ],
-                        );
-                      },
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
       ),
     );
   }

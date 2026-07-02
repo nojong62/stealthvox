@@ -48,214 +48,200 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-작업 대상 파일:
+# 지시문: 트라이얼 공부방 종료 → 회원가입(카톡 로그인) 모드 직행
 
-lib/custom_code/widgets/intro_master.dart
+## 개요
+현재 공부방(TrialStudyPage) 1분 종료 후 `Store` 화면으로 이동하는데,
+이를 `intro_master.dart`의 회원가입 모드(Screen 3-2, `_isSignupMode=true` 뷰 — 카카오톡/구글 로그인 버튼)로 바로 이동하도록 변경한다.
 
-목표:
+## 설계 방향
+- 라우터에 파라미터를 넘기는 방식(nav 파일 수정 필요) 대신, 이미 쓰고 있는 `TrialFlowState` 싱글톤에
+  **1회성(consume-once) 플래그**를 추가해서 재사용한다.
+- `trial_study_page.dart`에서 Intro로 넘어가기 직전 플래그를 세팅 → `intro_master.dart`의 `initState`에서
+  플래그를 소비(consume)하여 `_isSignupMode = true`로 시작하고, 기존 `_checkEntryStatus()`(익명 로그인 유저를
+  Lobby로 튕겨버리는 로직) 호출 자체를 건너뛴다. → 별도의 로그인 상태 분기 수정 없이 문제 해결.
+- 관련 없는 파일(라우터/nav, `_checkEntryStatus` 내부 로직)은 건드리지 않는다.
 
-현재 StealthVox 인트로 화면은 내용은 좋지만 카드 간격, 글자 크기, 줄 간격, 색 대비, 버튼 배치가 조금 무겁고 아마추어처럼 보인다.
-문구와 진입 흐름은 유지하면서, 더 고급스럽고 정돈된 Bento / Premium App 스타일로 UI만 개선하라.
+## 수정 파일 (4개)
+1. `lib/custom_code/widgets/trial/trial_flow_state.dart` — 플래그 필드 + 메서드 2개 추가
+2. `lib/custom_code/widgets/trial/trial_study_page.dart` — onTimeUp에서 플래그 세팅 + 목적지 `Intro`로 변경
+3. `lib/custom_code/widgets/trial/trial_study_timer_overlay.dart` — 안내 문구 "Moving to Store..." → 수정
+4. `lib/custom_code/widgets/intro_master.dart` — initState에서 플래그 소비 분기
 
-중요 제한:
+---
 
-로그인, 회원가입, 30초 무료 체험, 기기당 1회 제한, 라우팅, 상태값, Firebase/Firestore 로직은 절대 변경하지 말 것.
-버튼의 동작 함수, onTap, callback, navigation 이름은 변경하지 말 것.
-텍스트 내용은 의미를 바꾸지 말 것.
-intro_master.dart 외 다른 파일은 수정하지 말 것.
-새 패키지 추가 금지.
-빌드가 깨질 수 있는 복잡한 애니메이션 추가 금지.
-기존 FlutterFlow export 구조와 import 구조를 최대한 유지할 것.
-디자인 방향
+## Phase 0 — Savepoint
 
-현재 화면의 핵심 구성은 유지하되 아래처럼 정리하라.
+```bash
+cd F:\flutter_project\stealth_vox
+git add -A
+git commit -m "savepoint: 트라이얼 종료 후 회원가입모드 직행 작업 전"
+```
 
-1. 전체 배경
+## Phase 1 — grep 앵커 사전 검증 (각 기대값 1)
 
-현재 검은 배경은 유지하되 완전한 단색 블랙보다 조금 깊이감 있게 보이도록 처리한다.
+```bash
+grep -n "int step = 0;" lib/custom_code/widgets/trial/trial_flow_state.dart
+grep -n "TrialFlowState.instance.advanceTo(4);" lib/custom_code/widgets/trial/trial_study_page.dart
+grep -n "context.pushReplacementNamed('Store');" lib/custom_code/widgets/trial/trial_study_page.dart
+grep -n "'Moving to Store...'," lib/custom_code/widgets/trial/trial_study_timer_overlay.dart
+grep -n "WidgetsBinding.instance.addPostFrameCallback((_) => _checkEntryStatus());" lib/custom_code/widgets/intro_master.dart
+```
 
-방향:
+모두 1이 아니면 여기서 중단하고 실장님께 보고.
 
-기본 배경: 거의 검정에 가까운 #050507
-상단에서 아주 약한 보라/민트 glow 느낌
-과한 그라데이션 금지
-앱이 교육앱이지만 너무 학습앱처럼 보이지 않고, 프리미엄 음성앱처럼 보여야 한다.
-2. 상단 로고 영역
+---
 
-현재 StealthVox 로고와 “내 이야기로 배우는 영어” 문구는 유지한다.
+## Phase 2 — str_replace 수정 (파일별 bottom-to-top)
 
-개선 방향:
+### 2-1. `trial_flow_state.dart`
 
-상단 여백을 너무 크지 않게 정리
-로고는 선명하게 유지
-서브 문구 내 이야기로 배우는 영어는 더 얇고 작게, 회색 투명도 낮춰서 고급스럽게
-로고 아래 바로 큰 카드가 붙지 않도록 여백 확보
+**edit A (아래쪽 먼저) — 플래그 소비 메서드 추가 (`advanceTo` 뒤, 클래스 닫는 `}` 앞)**
 
-권장 느낌:
+old_str:
+```dart
+  void advanceTo(int newStep) {
+    step = newStep;
+    saveToAppState();
+  }
+}
+```
 
-로고 영역은 “브랜드 선언”
-첫 카드 영역은 “서비스 가치 설명”
-두 영역이 시각적으로 분리되어야 함
-3. 첫 번째 메인 카드
+new_str:
+```dart
+  void advanceTo(int newStep) {
+    step = newStep;
+    saveToAppState();
+  }
 
-현재 문구:
+  /// 트라이얼 종료 후 Intro 진입 시 회원가입 모드로 바로 시작하도록 요청.
+  /// 1회성(consume-once) 플래그 — 소비되는 즉시 false로 리셋됨.
+  void requestSignupOnEntry() {
+    _forceSignupOnEntry = true;
+  }
 
-당신의 이야기가 최고의 영어 교재가 됩니다
+  bool consumeSignupOnEntry() {
+    final requested = _forceSignupOnEntry;
+    _forceSignupOnEntry = false;
+    return requested;
+  }
+}
+```
 
-자율 학습 공부의 동반자
+**edit B (위쪽) — 플래그 필드 선언**
 
-이 내용은 유지하되 카드 디자인을 더 고급스럽게 바꾼다.
+old_str:
+```dart
+  DocumentReference? myHistoryRef;
+  int step = 0;
+```
 
-개선 방향:
+new_str:
+```dart
+  DocumentReference? myHistoryRef;
+  int step = 0;
+  bool _forceSignupOnEntry = false;
+```
 
-카드 높이는 현재보다 약간 줄이고, 내부 여백을 균형 있게 조정
-큰 문구는 3줄 이내로 자연스럽게 줄바꿈
-글자 크기는 너무 크지 않게 하되, 강한 임팩트는 유지
-줄 간격을 넉넉하게 해서 답답함 제거
-카드 테두리는 거의 보일 듯 말 듯한 얇은 라인
-카드 배경은 #1B1B1F 근처의 딥 그레이
-하단의 음성 바 아이콘은 유지하되 크기를 약간 줄이고, 카드 하단에 여백 있게 배치
-민트와 보라 포인트 컬러는 유지하되 채도를 조금 낮춰 세련되게
-4. 30초 Anyone 체험 카드
+---
 
-현재 문구:
+### 2-2. `trial_study_page.dart`
 
-처음 오셨나요
+old_str:
+```dart
+            TrialFlowState.instance.advanceTo(4);
+              context.pushReplacementNamed('Store');
+```
 
-30초 동안 Anyone 모드를 체험해 보세요
+new_str:
+```dart
+            TrialFlowState.instance.advanceTo(4);
+              TrialFlowState.instance.requestSignupOnEntry();
+              context.pushReplacementNamed('Intro');
+```
 
-대화가 끝나면 방금 그 대화가 영어 교재로 바뀝니다.
+> ⚠️ 원본 파일의 들여쓰기(스페이스 개수)를 그대로 유지할 것. `view`로 재확인 후 old_str 복사 권장.
 
-마이크를 사용합니다
+---
 
-이 내용은 유지한다.
+### 2-3. `trial_study_timer_overlay.dart`
 
-개선 방향:
+old_str:
+```dart
+              Text(
+                'Moving to Store...',
+                style: TextStyle(color: Color(0xFFB0B0B0), fontSize: 13),
+              ),
+```
 
-첫 번째 카드보다 약간 더 실용 안내 카드처럼 보이게 한다.
-처음 오셨나요 배지는 유지하되 크기를 줄이고 pill 형태를 더 세련되게 만든다.
-30초 동안 Anyone 모드를 체험해 보세요는 현재처럼 너무 큰 덩어리로 보이지 않게 줄 간격 조정
-설명 문장은 회색이지만 너무 흐리지 않게 가독성 확보
-마이크를 사용합니다는 작은 permission hint 형태로 정리
-카드 내부 하단 여백 부족 문제를 해결
-카드가 화면 아래로 잘리지 않도록 전체 스크롤/패딩 균형 조정
-5. 무료 체험 버튼
+new_str:
+```dart
+              Text(
+                'Moving to sign up...',
+                style: TextStyle(color: Color(0xFFB0B0B0), fontSize: 13),
+              ),
+```
 
-현재 문구:
+---
 
-30초 무료 체험 시작 →
+### 2-4. `intro_master.dart`
 
-이 내용은 유지한다.
+old_str:
+```dart
+    AppsFlyerManager.duoInviteSignal.addListener(_onDuoInviteSignal);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkEntryStatus());
+    _initPromoPopup();
+```
 
-개선 방향:
+new_str:
+```dart
+    AppsFlyerManager.duoInviteSignal.addListener(_onDuoInviteSignal);
+    if (TrialFlowState.instance.consumeSignupOnEntry()) {
+      _isSignupMode = true;
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _checkEntryStatus());
+    }
+    _initPromoPopup();
+```
 
-버튼은 가장 강한 CTA로 보이게 한다.
-테두리형 버튼은 유지 가능하지만, 현재보다 더 고급스럽게 한다.
-보라색 테두리와 아주 약한 내부 glow 또는 반투명 배경을 적용
-글자 크기는 크지만 과하지 않게
-버튼 높이는 64~72px 정도 권장
-radius는 28~34 정도의 pill 형태
-화살표는 텍스트와 너무 멀리 떨어지지 않게 정렬
-버튼 위아래 여백을 정리해서 “누를 곳”이 명확하게 보이게 한다.
-6. 안내 문구 영역
+(`TrialFlowState`는 이미 `import 'trial/trial_flow_state.dart';`로 import되어 있음 — import 추가 불필요.)
 
-현재 문구:
+---
 
-회원가입 없이 바로 · 기기당 1회
+## Phase 3 — 사후 grep 검증
 
-AI는 30초 · 공부방 1분
+```bash
+grep -n "_forceSignupOnEntry" lib/custom_code/widgets/trial/trial_flow_state.dart   # 기대: 3
+grep -n "requestSignupOnEntry\|consumeSignupOnEntry" lib/custom_code/widgets/trial/trial_flow_state.dart   # 기대: 4 (선언2+정의2 내부호출포함)
+grep -n "pushReplacementNamed('Intro')" lib/custom_code/widgets/trial/trial_study_page.dart   # 기대: 1
+grep -n "pushReplacementNamed('Store')" lib/custom_code/widgets/trial/trial_study_page.dart   # 기대: 0
+grep -n "Moving to sign up" lib/custom_code/widgets/trial/trial_study_timer_overlay.dart   # 기대: 1
+grep -n "consumeSignupOnEntry()" lib/custom_code/widgets/intro_master.dart   # 기대: 1
+```
 
-이 내용은 유지한다.
+## Phase 4 — 검증
 
-개선 방향:
+```bash
+flutter analyze lib/custom_code/widgets/trial/trial_flow_state.dart
+flutter analyze lib/custom_code/widgets/trial/trial_study_page.dart
+flutter analyze lib/custom_code/widgets/trial/trial_study_timer_overlay.dart
+flutter analyze lib/custom_code/widgets/intro_master.dart
 
-버튼 아래 안내 문구는 현재보다 작고 정돈되게
-AI는 30초 · 공부방 1분에서 가운데 점은 포인트 컬러로 유지 가능
-너무 아래로 밀려 보이지 않게 버튼과 회원가입 버튼 사이에 균형 배치
-정보성 문구이므로 CTA보다 약하게
-7. 회원가입 버튼
+dart format lib/custom_code/widgets/trial/trial_flow_state.dart
+dart format lib/custom_code/widgets/trial/trial_study_page.dart
+dart format lib/custom_code/widgets/trial/trial_study_timer_overlay.dart
+dart format lib/custom_code/widgets/intro_master.dart
+```
 
-현재 문구:
+## Phase 5 — 롤백
 
-회원 가입
+```bash
+git log --oneline -5   # savepoint 해시 확인
+git reset --hard <savepoint_해시>
+```
+(이미 push된 경우: `git revert <이번_커밋_해시>`)
 
-이 내용은 유지한다.
+---
 
-개선 방향:
 
-하단 회원가입 버튼은 무료 체험 버튼보다 한 단계 낮은 우선순위로 보이게 한다.
-현재처럼 너무 크고 강한 보라색 덩어리보다는, 프리미엄 앱의 secondary CTA처럼 정돈한다.
-단, 사용자가 명확히 누를 수 있을 정도의 대비는 유지한다.
-가능하면 은은한 보라 그라데이션 또는 단색 보라를 사용하되 과한 밝기 금지
-하단 SafeArea와 겹치지 않도록 충분한 하단 여백 확보
-레이아웃 기준
 
-다음 기준으로 수정하라.
-
-전체 좌우 패딩: 24px 전후
-카드 radius: 28~32px
-카드 내부 padding: 24~28px
-카드 간격: 20~24px
-큰 제목 line height: 약 1.18~1.25
-설명 문장 line height: 약 1.35~1.45
-화면 작은 기기에서도 하단 버튼이 잘리지 않도록 SingleChildScrollView 또는 기존 스크롤 구조를 안정적으로 유지
-상태바/내비게이션 바 영역 침범하지 않게 SafeArea 유지
-컬러 가이드
-
-아래 계열을 참고하되, 기존 코드 구조에 맞춰 적용하라.
-
-Background: 거의 검정 #050507
-Card: 딥 그레이 #1A1A1E
-Card Border: 흰색 6~10% 투명도
-Main Text: #F5F5F7
-Secondary Text: #A7A7AE
-Muted Text: #6F6F78
-Mint Accent: #58D6BD
-Purple Accent: #8B7CFF
-Button Purple: #8176EA 또는 그보다 약간 어두운 톤
-Badge Background: 보라/남색 계열 반투명
-Badge Text: 민트
-타이포그래피 방향
-
-한글이 너무 굵고 커 보이는 문제를 줄여라.
-
-메인 제목은 굵게 유지하되 과도한 크기 금지
-본문은 가볍게
-설명 문장은 letter spacing을 과하게 주지 말 것
-문구 줄바꿈은 사람이 읽기 편하게 직접 조정 가능
-“Anyone”은 영어 단어라서 줄 중간에서 어색하게 깨지지 않도록 조정
-기대 결과
-
-수정 후 화면은 다음 느낌이어야 한다.
-
-기존보다 더 프리미엄하고 정돈된 첫인상
-“음성 기반 AI 영어 앱”이라는 인상이 선명함
-30초 무료 체험 버튼이 자연스럽게 가장 먼저 눈에 들어옴
-회원가입 버튼은 보이지만, 무료 체험보다 덜 강함
-작은 화면에서도 카드 하단이 잘리지 않음
-기존 기능은 100% 그대로 유지
-검증
-
-수정 후 반드시 확인하라.
-
-flutter analyze lib/custom_code/widgets/intro_master.dart 실행
-analyzer 오류가 있으면 수정
-390x844 안드로이드 화면 기준으로 overflow가 없는지 확인
-360px 폭의 작은 화면에서도 하단 버튼과 안내 문구가 잘리지 않는지 확인
-기존 버튼 동작이 바뀌지 않았는지 확인
-30초 무료 체험 시작
-회원 가입
-기존 로그인/라우팅 흐름
-수정 파일 목록에 intro_master.dart만 있는지 확인
-최종 보고 형식
-
-작업 완료 후 아래 형식으로 보고하라.
-
-수정 파일:
-변경 요약:
-유지한 로직:
-UI 개선 포인트:
-검증 결과:
-남은 리스크:
-
-실장님, 이번 지시문은 “이미지처럼 새로 만들라”가 아니라 “현재 화면을 유지하면서 전문 앱처럼 다듬어라” 쪽입니다.
