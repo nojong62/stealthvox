@@ -20,7 +20,6 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'trial/trial_flow_state.dart';
 import 'trial/trial_device_gate.dart';
-import 'trial/onboarding_guide_section.dart';
 import 'shared_social_button.dart';
 import '/auth/social_auth_service.dart';
 
@@ -435,13 +434,13 @@ class _IntroMasterState extends State<IntroMaster> {
             : SafeArea(
                 child: SingleChildScrollView(
                   controller: _scrollController,
-                  padding: EdgeInsets.fromLTRB(24, 22, 24,
-                      34 + MediaQuery.of(context).viewInsets.bottom),
+                  padding: EdgeInsets.fromLTRB(24, 18, 24,
+                      28 + MediaQuery.of(context).viewInsets.bottom),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 4),
                       Row(
                         children: [
                           const Icon(Icons.record_voice_over,
@@ -460,7 +459,7 @@ class _IntroMasterState extends State<IntroMaster> {
                               fontSize: 11,
                               fontWeight: FontWeight.w300,
                               color: const Color(0xFF6F6F78))),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 18),
                       _buildBentoCard(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -469,9 +468,9 @@ class _IntroMasterState extends State<IntroMaster> {
                               "당신의 이야기가\n최고의 영어 교재가\n됩니다",
                               style: TextStyle(
                                 color: Color(0xFFF5F5F7),
-                                fontSize: 21,
+                                fontSize: 19,
                                 fontWeight: FontWeight.w700,
-                                height: 1.22,
+                                height: 1.2,
                               ),
                             ),
                             const SizedBox(height: 10),
@@ -479,30 +478,30 @@ class _IntroMasterState extends State<IntroMaster> {
                               "자율 학습 공부의 동반자",
                               style: TextStyle(
                                 color: Color(0xFFA7A7AE),
-                                fontSize: 13,
-                                height: 1.4,
+                                fontSize: 12,
+                                height: 1.36,
                               ),
                             ),
-                            const SizedBox(height: 18),
+                            const SizedBox(height: 14),
                             _buildWaveform(),
                           ],
                         ),
                       ),
-                      const SizedBox(height: 20),
-                      const OnboardingGuideSection(),
-                      const SizedBox(height: 22),
+                      const SizedBox(height: 16),
+                      _buildTrialGuideCard(),
+                      const SizedBox(height: 18),
                       SizedBox(
                         width: double.infinity,
-                        height: 66,
+                        height: 62,
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0x1A8176EA),
                             shadowColor: Colors.transparent,
                             elevation: 0,
                             side: const BorderSide(
-                                color: Color(0xFF8B7CFF), width: 1.4),
+                                color: Color(0xFF8B7CFF), width: 1.25),
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(32),
+                              borderRadius: BorderRadius.circular(30),
                             ),
                           ),
                           onPressed: () => _startTrial(context),
@@ -510,56 +509,56 @@ class _IntroMasterState extends State<IntroMaster> {
                             '30초 무료 체험 시작 →',
                             style: TextStyle(
                               color: Color(0xFFF5F5F7),
-                              fontSize: 17,
+                              fontSize: 16,
                               fontWeight: FontWeight.w700,
                             ),
                           ),
                         ),
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 10),
                       const Center(
                         child: Text(
                           '회원가입 없이 바로 · 기기당 1회',
                           style: TextStyle(
                             color: Color(0xFF6F6F78),
-                            fontSize: 11,
-                            height: 1.35,
+                            fontSize: 10.5,
+                            height: 1.28,
                           ),
                         ),
                       ),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 4),
                       Center(
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text("AI는 30초",
                                 style: GoogleFonts.roboto(
-                                    fontSize: 12,
+                                    fontSize: 11,
                                     color: const Color(0xFFA7A7AE))),
                             const Padding(
                               padding: EdgeInsets.symmetric(horizontal: 8),
                               child: Text("·",
                                   style: TextStyle(
-                                      color: Color(0xFF8B7CFF), fontSize: 12)),
+                                      color: Color(0xFF8B7CFF), fontSize: 11)),
                             ),
                             Text("공부방 1분",
                                 style: GoogleFonts.roboto(
-                                    fontSize: 12,
+                                    fontSize: 11,
                                     color: const Color(0xFFA7A7AE))),
                           ],
                         ),
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 18),
                       SizedBox(
                         width: double.infinity,
-                        height: 54,
+                        height: 48,
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xCC6F66D8),
+                            backgroundColor: const Color(0x996F66D8),
                             shadowColor: Colors.transparent,
                             elevation: 0,
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(18),
+                              borderRadius: BorderRadius.circular(16),
                             ),
                           ),
                           onPressed: () {
@@ -575,8 +574,8 @@ class _IntroMasterState extends State<IntroMaster> {
                             '회원 가입',
                             style: TextStyle(
                               color: Color(0xFFF5F5F7),
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
                         ),
@@ -1167,9 +1166,9 @@ class _IntroMasterState extends State<IntroMaster> {
       mainAxisSize: MainAxisSize.min,
       children: List.generate(heights.length, (index) {
         return Container(
-          width: 3.5,
-          height: heights[index] * 0.88,
-          margin: const EdgeInsets.symmetric(horizontal: 2.25),
+          width: 3.2,
+          height: heights[index] * 0.78,
+          margin: const EdgeInsets.symmetric(horizontal: 2.1),
           decoration: BoxDecoration(
             color: colors[index % colors.length],
             borderRadius: BorderRadius.circular(2),
@@ -1182,20 +1181,99 @@ class _IntroMasterState extends State<IntroMaster> {
   Widget _buildBentoCard({required Widget child}) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 24),
+      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 22),
       decoration: BoxDecoration(
         color: const Color(0xFF1A1A1E),
-        borderRadius: BorderRadius.circular(30),
+        borderRadius: BorderRadius.circular(28),
         border: Border.all(color: Colors.white.withValues(alpha: 0.075)),
         boxShadow: [
           BoxShadow(
             color: const Color(0xFF8B7CFF).withValues(alpha: 0.06),
-            blurRadius: 26,
-            offset: const Offset(0, 14),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
           ),
         ],
       ),
       child: child,
+    );
+  }
+
+  Widget _buildTrialGuideCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF17171B),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+            decoration: BoxDecoration(
+              color: const Color(0xFF27233C).withValues(alpha: 0.72),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: const Color(0xFF8B7CFF).withValues(alpha: 0.16),
+              ),
+            ),
+            child: const Text(
+              '처음 오셨나요',
+              style: TextStyle(
+                color: Color(0xFF58D6BD),
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                height: 1.1,
+              ),
+            ),
+          ),
+          const SizedBox(height: 11),
+          const Text(
+            '30초 동안\nAnyone 모드를\n체험해 보세요',
+            style: TextStyle(
+              color: Color(0xFFF5F5F7),
+              fontSize: 14.5,
+              fontWeight: FontWeight.w700,
+              height: 1.22,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            '대화가 끝나면\n방금 그 대화가\n영어 교재로 바뀝니다.',
+            style: TextStyle(
+              color: Color(0xFFA7A7AE),
+              fontSize: 12,
+              height: 1.32,
+            ),
+          ),
+          const SizedBox(height: 11),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.035),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.055)),
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.mic_none, size: 13, color: Color(0xFF8D8D96)),
+                SizedBox(width: 5),
+                Text(
+                  '마이크를 사용합니다',
+                  style: TextStyle(
+                    color: Color(0xFF8D8D96),
+                    fontSize: 10.5,
+                    height: 1.1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
