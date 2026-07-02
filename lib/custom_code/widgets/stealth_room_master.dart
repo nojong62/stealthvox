@@ -18,6 +18,7 @@ import '/custom_code/actions/index.dart';
 import 'dart:ui';
 import 'package:google_fonts/google_fonts.dart';
 import '/custom_code/actions/billing_ticker.dart';
+import 'trial/trial_flow_state.dart';
 
 class StealthRoomMaster extends StatefulWidget {
   const StealthRoomMaster({
@@ -67,6 +68,12 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
           });
         }
       });
+    }
+
+    // 트라이얼 Anyone 자동 진입 — 메뉴 화면을 건너뛰고 바로 Anyone 모드로
+    TrialFlowState.instance.restoreFromAppState();
+    if (TrialFlowState.instance.isTrialAnyone) {
+      _currentMode = 2;
     }
   }
 

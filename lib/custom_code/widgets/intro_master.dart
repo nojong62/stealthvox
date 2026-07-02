@@ -202,6 +202,9 @@ class _IntroMasterState extends State<IntroMaster> {
       }
       await TrialDeviceGate.markUsed();
 
+      if (!mounted) return;
+      await _showLanguageSettingDialog();
+
       FFAppState().nativeLang = _trialNativeLang;
       FFAppState().targetLang = _trialTargetLang;
 
@@ -444,28 +447,34 @@ class _IntroMasterState extends State<IntroMaster> {
                       Text("내 이야기로 배우는 영어",
                           style: GoogleFonts.roboto(
                               fontSize: 12, color: Colors.white38)),
-                      const SizedBox(height: 28),
-                      const Text(
-                        "당신의 이야기가\n최고의 영어 교재가\n됩니다",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                          height: 1.3,
+                      const SizedBox(height: 20),
+                      _buildBentoCard(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              "당신의 이야기가\n최고의 영어 교재가\n됩니다",
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                height: 1.4,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            const Text(
+                              "자율 학습 공부의 동반자",
+                              style: TextStyle(
+                                  color: Colors.white54, fontSize: 12),
+                            ),
+                            const SizedBox(height: 14),
+                            _buildWaveform(),
+                          ],
                         ),
                       ),
                       const SizedBox(height: 12),
-                      const Text(
-                        "자율 학습 공부의 동반자",
-                        style: TextStyle(color: Colors.white54, fontSize: 14),
-                      ),
-                      const SizedBox(height: 24),
-                      Center(child: _buildWaveform()),
-                      const SizedBox(height: 32),
-                      _buildLanguageSettingSection(),
-                      const SizedBox(height: 16),
                       const OnboardingGuideSection(),
-                      const SizedBox(height: 28),
+                      const SizedBox(height: 24),
                       SizedBox(
                         width: double.infinity,
                         height: 56,
@@ -529,10 +538,15 @@ class _IntroMasterState extends State<IntroMaster> {
                               borderRadius: BorderRadius.circular(14),
                             ),
                           ),
-                          onPressed: () => setState(() {
-                            _isSignupMode = true;
-                            _showEmailInSignup = false;
-                          }),
+                          onPressed: () {
+                            if (_scrollController.hasClients) {
+                              _scrollController.jumpTo(0);
+                            }
+                            setState(() {
+                              _isSignupMode = true;
+                              _showEmailInSignup = false;
+                            });
+                          },
                           child: const Text(
                             '회원 가입',
                             style: TextStyle(
@@ -718,33 +732,101 @@ class _IntroMasterState extends State<IntroMaster> {
     );
   }
 
-  Widget _buildLanguageSettingSection() {
-    const languages = ['Korean', 'English', 'Japanese', 'Chinese', 'Spanish'];
-    return _buildBentoCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            '언어 설정',
-            style: TextStyle(
-                color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 14),
-          _languageDropdown(
-            label: '모국어',
-            value: _trialNativeLang,
-            items: languages,
-            onChanged: (value) => setState(() => _trialNativeLang = value),
-          ),
-          const SizedBox(height: 14),
-          _languageDropdown(
-            label: '학습 언어',
-            value: _trialTargetLang,
-            items: languages,
-            onChanged: (value) => setState(() => _trialTargetLang = value),
-          ),
-        ],
-      ),
+  Future<void> _showLanguageSettingDialog() async {
+    const languages = [
+      'Korean',
+      'English',
+      'Japanese',
+      'Chinese',
+      'Spanish',
+      'French',
+      'German',
+      'Hindi',
+      'Russian',
+      'Portuguese',
+      'Italian',
+      'Dutch',
+    ];
+    String nativeLang = _trialNativeLang;
+    String targetLang = _trialTargetLang;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF161616),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+                side: const BorderSide(color: Color(0xFF2A3A36), width: 1),
+              ),
+              title: const Row(
+                children: [
+                  Icon(Icons.translate, color: Color(0xFF5DCAA5), size: 20),
+                  SizedBox(width: 8),
+                  Text('언어 설정',
+                      style: TextStyle(
+                          color: Colors.white, fontWeight: FontWeight.bold)),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _languageDropdown(
+                    label: '모국어',
+                    value: nativeLang,
+                    items: languages,
+                    onChanged: (value) =>
+                        setDialogState(() => nativeLang = value),
+                  ),
+                  const SizedBox(height: 14),
+                  _languageDropdown(
+                    label: '학습 언어',
+                    value: targetLang,
+                    items: languages,
+                    onChanged: (value) =>
+                        setDialogState(() => targetLang = value),
+                  ),
+                ],
+              ),
+              actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+              actions: [
+                SizedBox(
+                  width: double.infinity,
+                  height: 46,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.transparent,
+                      shadowColor: Colors.transparent,
+                      elevation: 0,
+                      side: const BorderSide(
+                          color: Color(0xFFEF9F27), width: 1.5),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        _trialNativeLang = nativeLang;
+                        _trialTargetLang = targetLang;
+                      });
+                      Navigator.of(dialogContext).pop();
+                    },
+                    child: const Text(
+                      '확인',
+                      style: TextStyle(
+                          color: Color(0xFFFAC775),
+                          fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
