@@ -1,6 +1,4 @@
 import 'dart:async';
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 
 class TrialStudyTimerOverlay extends StatefulWidget {
@@ -105,7 +103,7 @@ class _TrialStudyTimerOverlayState extends State<TrialStudyTimerOverlay> {
               ),
               SizedBox(height: 8),
               Text(
-                'Moving to Store...',
+                'Moving to sign up...',
                 style: TextStyle(color: Color(0xFFB0B0B0), fontSize: 13),
               ),
             ],

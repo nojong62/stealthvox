@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 
@@ -21,7 +20,8 @@ class TrialStudyPage extends StatelessWidget {
             durationSeconds: 60,
             onTimeUp: () {
               TrialFlowState.instance.advanceTo(4);
-              context.pushReplacementNamed('Store');
+              TrialFlowState.instance.requestSignupOnEntry();
+              context.pushReplacementNamed('Intro');
             },
           ),
         ],

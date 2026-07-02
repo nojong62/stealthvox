@@ -51,7 +51,11 @@ class _IntroMasterState extends State<IntroMaster> {
     _emailFocusNode.addListener(_onFocusChange);
     _passwordFocusNode.addListener(_onFocusChange);
     AppsFlyerManager.duoInviteSignal.addListener(_onDuoInviteSignal);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _checkEntryStatus());
+    if (TrialFlowState.instance.consumeSignupOnEntry()) {
+      _isSignupMode = true;
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _checkEntryStatus());
+    }
     const trialLanguages = [
       'Korean',
       'English',
