@@ -414,7 +414,18 @@ class _IntroMasterState extends State<IntroMaster> {
     return Container(
       width: widget.width,
       height: widget.height,
-      color: Colors.black,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Color(0xFF101017),
+            Color(0xFF050507),
+            Color(0xFF050507),
+          ],
+          stops: [0.0, 0.38, 1.0],
+        ),
+      ),
       child: Scaffold(
         backgroundColor: Colors.transparent,
         resizeToAvoidBottomInset: false,
@@ -424,30 +435,32 @@ class _IntroMasterState extends State<IntroMaster> {
             : SafeArea(
                 child: SingleChildScrollView(
                   controller: _scrollController,
-                  padding: EdgeInsets.fromLTRB(24, 24, 24,
-                      24 + MediaQuery.of(context).viewInsets.bottom),
+                  padding: EdgeInsets.fromLTRB(24, 22, 24,
+                      34 + MediaQuery.of(context).viewInsets.bottom),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 6),
                       Row(
                         children: [
                           const Icon(Icons.record_voice_over,
-                              size: 22, color: Color(0xFF5DCAA5)),
+                              size: 20, color: Color(0xFF58D6BD)),
                           const SizedBox(width: 8),
                           Text("StealthVox",
                               style: GoogleFonts.orbitron(
-                                  fontSize: 16,
+                                  fontSize: 15,
                                   fontWeight: FontWeight.bold,
-                                  color: Colors.white)),
+                                  color: const Color(0xFFF5F5F7))),
                         ],
                       ),
-                      const SizedBox(height: 2),
+                      const SizedBox(height: 5),
                       Text("내 이야기로 배우는 영어",
                           style: GoogleFonts.roboto(
-                              fontSize: 12, color: Colors.white38)),
-                      const SizedBox(height: 20),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w300,
+                              color: const Color(0xFF6F6F78))),
+                      const SizedBox(height: 24),
                       _buildBentoCard(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -455,87 +468,98 @@ class _IntroMasterState extends State<IntroMaster> {
                             const Text(
                               "당신의 이야기가\n최고의 영어 교재가\n됩니다",
                               style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 22,
-                                fontWeight: FontWeight.bold,
-                                height: 1.4,
+                                color: Color(0xFFF5F5F7),
+                                fontSize: 21,
+                                fontWeight: FontWeight.w700,
+                                height: 1.22,
                               ),
                             ),
-                            const SizedBox(height: 8),
+                            const SizedBox(height: 10),
                             const Text(
                               "자율 학습 공부의 동반자",
                               style: TextStyle(
-                                  color: Colors.white54, fontSize: 12),
+                                color: Color(0xFFA7A7AE),
+                                fontSize: 13,
+                                height: 1.4,
+                              ),
                             ),
-                            const SizedBox(height: 14),
+                            const SizedBox(height: 18),
                             _buildWaveform(),
                           ],
                         ),
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 20),
                       const OnboardingGuideSection(),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 22),
                       SizedBox(
                         width: double.infinity,
-                        height: 56,
+                        height: 66,
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.transparent,
+                            backgroundColor: const Color(0x1A8176EA),
                             shadowColor: Colors.transparent,
                             elevation: 0,
                             side: const BorderSide(
-                                color: Color(0xFF7F77DD), width: 1.5),
+                                color: Color(0xFF8B7CFF), width: 1.4),
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(30),
+                              borderRadius: BorderRadius.circular(32),
                             ),
                           ),
                           onPressed: () => _startTrial(context),
                           child: const Text(
                             '30초 무료 체험 시작 →',
                             style: TextStyle(
-                              color: Color(0xFFCECBF6),
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
+                              color: Color(0xFFF5F5F7),
+                              fontSize: 17,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
                         ),
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 12),
                       const Center(
                         child: Text(
                           '회원가입 없이 바로 · 기기당 1회',
-                          style: TextStyle(color: Colors.white38, fontSize: 12),
+                          style: TextStyle(
+                            color: Color(0xFF6F6F78),
+                            fontSize: 11,
+                            height: 1.35,
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 6),
                       Center(
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text("AI는 30초",
                                 style: GoogleFonts.roboto(
-                                    fontSize: 13, color: Colors.white54)),
+                                    fontSize: 12,
+                                    color: const Color(0xFFA7A7AE))),
                             const Padding(
                               padding: EdgeInsets.symmetric(horizontal: 8),
                               child: Text("·",
                                   style: TextStyle(
-                                      color: Color(0xFFD4AF37), fontSize: 13)),
+                                      color: Color(0xFF8B7CFF), fontSize: 12)),
                             ),
                             Text("공부방 1분",
                                 style: GoogleFonts.roboto(
-                                    fontSize: 13, color: Colors.white54)),
+                                    fontSize: 12,
+                                    color: const Color(0xFFA7A7AE))),
                           ],
                         ),
                       ),
-                      const SizedBox(height: 28),
+                      const SizedBox(height: 24),
                       SizedBox(
                         width: double.infinity,
-                        height: 52,
+                        height: 54,
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF7F77DD),
+                            backgroundColor: const Color(0xCC6F66D8),
+                            shadowColor: Colors.transparent,
+                            elevation: 0,
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
+                              borderRadius: BorderRadius.circular(18),
                             ),
                           ),
                           onPressed: () {
@@ -550,9 +574,9 @@ class _IntroMasterState extends State<IntroMaster> {
                           child: const Text(
                             '회원 가입',
                             style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
+                              color: Color(0xFFF5F5F7),
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
                         ),
@@ -1134,18 +1158,18 @@ class _IntroMasterState extends State<IntroMaster> {
       10.0,
     ];
     final colors = [
-      const Color(0xFF1D9E75),
-      const Color(0xFF7F77DD),
-      const Color(0xFF5DCAA5),
-      const Color(0xFFAFA9EC),
+      const Color(0xFF58D6BD),
+      const Color(0xFF8B7CFF),
+      const Color(0xFF45BFA5),
+      const Color(0xFF7167D8),
     ];
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: List.generate(heights.length, (index) {
         return Container(
-          width: 4,
-          height: heights[index],
-          margin: const EdgeInsets.symmetric(horizontal: 2.5),
+          width: 3.5,
+          height: heights[index] * 0.88,
+          margin: const EdgeInsets.symmetric(horizontal: 2.25),
           decoration: BoxDecoration(
             color: colors[index % colors.length],
             borderRadius: BorderRadius.circular(2),
@@ -1158,11 +1182,18 @@ class _IntroMasterState extends State<IntroMaster> {
   Widget _buildBentoCard({required Widget child}) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
+      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 24),
       decoration: BoxDecoration(
-        color: const Color(0xFF222222),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        color: const Color(0xFF1A1A1E),
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.075)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF8B7CFF).withValues(alpha: 0.06),
+            blurRadius: 26,
+            offset: const Offset(0, 14),
+          ),
+        ],
       ),
       child: child,
     );
