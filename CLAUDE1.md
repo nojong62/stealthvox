@@ -48,243 +48,214 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-# Kakao 로그인 후 Store 게이트 오탐 수정 — hasLinkedAccount 플래그 도입
+작업 대상 파일:
 
-## 원인 요약
-Firebase의 `currentUser.isAnonymous`는 로그인 방법이 아니라 "실제 auth provider가 providerData에 연결돼 있는가"로 판정됩니다. Google/Email은 Firebase 내장 provider라 자동으로 `false`가 되지만, Kakao는 `kakaoCustomAuth` 클라우드 함수의 `createCustomToken()`으로 로그인하기 때문에 로그인 자체는 성공해도 `isAnonymous`가 계속 `true`로 남습니다. `store_master.dart`의 구매 게이트가 이 값만 보고 있어서, 카카오로 가입 완료한 사용자에게도 `SocialLoginModal`이 다시 뜹니다.
+lib/custom_code/widgets/intro_master.dart
 
-## 해결 방향
-Firebase의 `isAnonymous`에 의존하지 않는 자체 플래그 `hasLinkedAccount`를 도입 — 소셜 로그인(카카오/구글/이메일) 성공 시점에 true로 세팅하고, Store 게이트는 이 플래그를 함께 확인.
+목표:
 
-## 영향 범위
-- FFAppState 정의 파일 (경로 미확인 — Phase 0에서 탐색)
-- `lib/auth/social_auth_service.dart`
-- `lib/custom_code/widgets/store_master.dart`
+현재 StealthVox 인트로 화면은 내용은 좋지만 카드 간격, 글자 크기, 줄 간격, 색 대비, 버튼 배치가 조금 무겁고 아마추어처럼 보인다.
+문구와 진입 흐름은 유지하면서, 더 고급스럽고 정돈된 Bento / Premium App 스타일로 UI만 개선하라.
 
----
+중요 제한:
 
-## Phase 0 — savepoint + 탐색
+로그인, 회원가입, 30초 무료 체험, 기기당 1회 제한, 라우팅, 상태값, Firebase/Firestore 로직은 절대 변경하지 말 것.
+버튼의 동작 함수, onTap, callback, navigation 이름은 변경하지 말 것.
+텍스트 내용은 의미를 바꾸지 말 것.
+intro_master.dart 외 다른 파일은 수정하지 말 것.
+새 패키지 추가 금지.
+빌드가 깨질 수 있는 복잡한 애니메이션 추가 금지.
+기존 FlutterFlow export 구조와 import 구조를 최대한 유지할 것.
+디자인 방향
 
-```bash
-git add -A && git commit -m "savepoint: before hasLinkedAccount flag"
+현재 화면의 핵심 구성은 유지하되 아래처럼 정리하라.
 
-grep -rn "class FFAppState" lib/
-grep -n "bool isGuestSession" $(grep -rl "class FFAppState" lib/)
-```
+1. 전체 배경
 
-두 번째 grep으로 기존 bool 필드가 어떤 스타일로 선언돼 있는지(단순 필드인지, getter/setter + SharedPreferences 영속화가 있는지) 확인하고, 아래 Phase 1을 그 스타일에 맞춰 적용할 것. 스타일이 크게 다르면 진행 전에 실장에게 스타일 예시를 보고할 것.
+현재 검은 배경은 유지하되 완전한 단색 블랙보다 조금 깊이감 있게 보이도록 처리한다.
 
----
+방향:
 
-## Phase 1 — FFAppState에 필드 추가
+기본 배경: 거의 검정에 가까운 #050507
+상단에서 아주 약한 보라/민트 glow 느낌
+과한 그라데이션 금지
+앱이 교육앱이지만 너무 학습앱처럼 보이지 않고, 프리미엄 음성앱처럼 보여야 한다.
+2. 상단 로고 영역
 
-`isGuestSession`과 동일한 선언 방식으로 다음을 추가:
+현재 StealthVox 로고와 “내 이야기로 배우는 영어” 문구는 유지한다.
 
-```dart
-  bool hasLinkedAccount = false;
-```
+개선 방향:
 
-(만약 기존 필드들이 SharedPreferences 영속화 getter/setter 패턴이면, `hasLinkedAccount`도 앱 재시작 후에도 유지되도록 같은 패턴으로 맞출 것 — 카카오로 가입한 사용자가 앱을 껐다 켰을 때도 다시 게이트에 걸리면 안 되기 때문.)
+상단 여백을 너무 크지 않게 정리
+로고는 선명하게 유지
+서브 문구 내 이야기로 배우는 영어는 더 얇고 작게, 회색 투명도 낮춰서 고급스럽게
+로고 아래 바로 큰 카드가 붙지 않도록 여백 확보
 
----
+권장 느낌:
 
-## Phase 2 — social_auth_service.dart: 로그인 성공 시 플래그 세팅
+로고 영역은 “브랜드 선언”
+첫 카드 영역은 “서비스 가치 설명”
+두 영역이 시각적으로 분리되어야 함
+3. 첫 번째 메인 카드
 
-### 2-1. import 추가
+현재 문구:
 
-```
-old_str:
-import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
+당신의 이야기가 최고의 영어 교재가 됩니다
 
-new_str:
-import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
-import '/flutter_flow/flutter_flow_util.dart';
-```
+자율 학습 공부의 동반자
 
-### 2-2. signInWithKakao — 성공 후 플래그 세팅
+이 내용은 유지하되 카드 디자인을 더 고급스럽게 바꾼다.
 
-```
-old_str:
-    final customToken = result.data['token'] as String;
-    return _auth.signInWithCustomToken(customToken);
-  }
+개선 방향:
 
-new_str:
-    final customToken = result.data['token'] as String;
-    final credential = await _auth.signInWithCustomToken(customToken);
-    FFAppState().hasLinkedAccount = true;
-    return credential;
-  }
-```
+카드 높이는 현재보다 약간 줄이고, 내부 여백을 균형 있게 조정
+큰 문구는 3줄 이내로 자연스럽게 줄바꿈
+글자 크기는 너무 크지 않게 하되, 강한 임팩트는 유지
+줄 간격을 넉넉하게 해서 답답함 제거
+카드 테두리는 거의 보일 듯 말 듯한 얇은 라인
+카드 배경은 #1B1B1F 근처의 딥 그레이
+하단의 음성 바 아이콘은 유지하되 크기를 약간 줄이고, 카드 하단에 여백 있게 배치
+민트와 보라 포인트 컬러는 유지하되 채도를 조금 낮춰 세련되게
+4. 30초 Anyone 체험 카드
 
-### 2-3. signInWithGoogle — 두 return 지점 모두에 플래그 세팅
+현재 문구:
 
-```
-old_str:
-    final currentUser = _auth.currentUser;
-    if (currentUser != null && currentUser.isAnonymous) {
-      try {
-        return await currentUser.linkWithCredential(credential);
-      } on FirebaseAuthException catch (e) {
-        if (e.code == 'credential-already-in-use') {
-          return _auth.signInWithCredential(credential);
-        }
-        rethrow;
-      }
-    }
+처음 오셨나요
 
-    return _auth.signInWithCredential(credential);
-  }
+30초 동안 Anyone 모드를 체험해 보세요
 
-new_str:
-    final currentUser = _auth.currentUser;
-    if (currentUser != null && currentUser.isAnonymous) {
-      try {
-        final linked = await currentUser.linkWithCredential(credential);
-        FFAppState().hasLinkedAccount = true;
-        return linked;
-      } on FirebaseAuthException catch (e) {
-        if (e.code == 'credential-already-in-use') {
-          final signedIn = await _auth.signInWithCredential(credential);
-          FFAppState().hasLinkedAccount = true;
-          return signedIn;
-        }
-        rethrow;
-      }
-    }
+대화가 끝나면 방금 그 대화가 영어 교재로 바뀝니다.
 
-    final signedIn = await _auth.signInWithCredential(credential);
-    FFAppState().hasLinkedAccount = true;
-    return signedIn;
-  }
-```
+마이크를 사용합니다
 
-### 2-4. signInWithEmail — 세 return 지점 모두에 플래그 세팅
+이 내용은 유지한다.
 
-```
-old_str:
-    if (isSignUp && currentUser != null && currentUser.isAnonymous) {
-      try {
-        return await currentUser.linkWithCredential(credential);
-      } on FirebaseAuthException catch (e) {
-        if (e.code == 'email-already-in-use') {
-          return _auth.signInWithEmailAndPassword(
-            email: email,
-            password: password,
-          );
-        }
-        rethrow;
-      }
-    }
+개선 방향:
 
-    if (isSignUp) {
-      return _auth.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
-    }
+첫 번째 카드보다 약간 더 실용 안내 카드처럼 보이게 한다.
+처음 오셨나요 배지는 유지하되 크기를 줄이고 pill 형태를 더 세련되게 만든다.
+30초 동안 Anyone 모드를 체험해 보세요는 현재처럼 너무 큰 덩어리로 보이지 않게 줄 간격 조정
+설명 문장은 회색이지만 너무 흐리지 않게 가독성 확보
+마이크를 사용합니다는 작은 permission hint 형태로 정리
+카드 내부 하단 여백 부족 문제를 해결
+카드가 화면 아래로 잘리지 않도록 전체 스크롤/패딩 균형 조정
+5. 무료 체험 버튼
 
-    return _auth.signInWithEmailAndPassword(
-      email: email,
-      password: password,
-    );
-  }
+현재 문구:
 
-new_str:
-    if (isSignUp && currentUser != null && currentUser.isAnonymous) {
-      try {
-        final linked = await currentUser.linkWithCredential(credential);
-        FFAppState().hasLinkedAccount = true;
-        return linked;
-      } on FirebaseAuthException catch (e) {
-        if (e.code == 'email-already-in-use') {
-          final signedIn = await _auth.signInWithEmailAndPassword(
-            email: email,
-            password: password,
-          );
-          FFAppState().hasLinkedAccount = true;
-          return signedIn;
-        }
-        rethrow;
-      }
-    }
+30초 무료 체험 시작 →
 
-    if (isSignUp) {
-      final created = await _auth.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
-      FFAppState().hasLinkedAccount = true;
-      return created;
-    }
+이 내용은 유지한다.
 
-    final signedIn = await _auth.signInWithEmailAndPassword(
-      email: email,
-      password: password,
-    );
-    FFAppState().hasLinkedAccount = true;
-    return signedIn;
-  }
-```
+개선 방향:
 
----
+버튼은 가장 강한 CTA로 보이게 한다.
+테두리형 버튼은 유지 가능하지만, 현재보다 더 고급스럽게 한다.
+보라색 테두리와 아주 약한 내부 glow 또는 반투명 배경을 적용
+글자 크기는 크지만 과하지 않게
+버튼 높이는 64~72px 정도 권장
+radius는 28~34 정도의 pill 형태
+화살표는 텍스트와 너무 멀리 떨어지지 않게 정렬
+버튼 위아래 여백을 정리해서 “누를 곳”이 명확하게 보이게 한다.
+6. 안내 문구 영역
 
-## Phase 3 — store_master.dart: 게이트 조건 수정
+현재 문구:
 
-```
-old_str:
-    final currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser == null || currentUser.isAnonymous) {
-      final result = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => const SocialLoginModal(),
-      );
-      if (result != true || !mounted) return;
-      await _initRevenueCatUser();
-    }
+회원가입 없이 바로 · 기기당 1회
 
-new_str:
-    final currentUser = FirebaseAuth.instance.currentUser;
-    final needsAccount = currentUser == null ||
-        (currentUser.isAnonymous && !FFAppState().hasLinkedAccount);
-    if (needsAccount) {
-      final result = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => const SocialLoginModal(),
-      );
-      if (result != true || !mounted) return;
-      FFAppState().hasLinkedAccount = true;
-      await _initRevenueCatUser();
-    }
-```
+AI는 30초 · 공부방 1분
 
-(`SocialLoginModal`이 내부적으로 이미 `SocialAuthService`를 호출하므로 Phase 2에서 플래그가 세팅되지만, 방어적으로 여기서도 한 번 더 세팅 — 두 경로 다 안전하게)
+이 내용은 유지한다.
 
----
+개선 방향:
 
-## Phase 4 — 검증
+버튼 아래 안내 문구는 현재보다 작고 정돈되게
+AI는 30초 · 공부방 1분에서 가운데 점은 포인트 컬러로 유지 가능
+너무 아래로 밀려 보이지 않게 버튼과 회원가입 버튼 사이에 균형 배치
+정보성 문구이므로 CTA보다 약하게
+7. 회원가입 버튼
 
-```bash
-grep -c "hasLinkedAccount" lib/auth/social_auth_service.dart
-# 5 이상 (카카오 1 + 구글 3 + 이메일 3 중 실제 반영된 개수)
+현재 문구:
 
-grep -c "hasLinkedAccount" lib/custom_code/widgets/store_master.dart
+회원 가입
 
-flutter analyze lib/auth/social_auth_service.dart
-flutter analyze lib/custom_code/widgets/store_master.dart
-dart format lib/auth/social_auth_service.dart
-dart format lib/custom_code/widgets/store_master.dart
-```
+이 내용은 유지한다.
 
----
+개선 방향:
 
-## Phase 5 — 실기기 체크리스트
+하단 회원가입 버튼은 무료 체험 버튼보다 한 단계 낮은 우선순위로 보이게 한다.
+현재처럼 너무 크고 강한 보라색 덩어리보다는, 프리미엄 앱의 secondary CTA처럼 정돈한다.
+단, 사용자가 명확히 누를 수 있을 정도의 대비는 유지한다.
+가능하면 은은한 보라 그라데이션 또는 단색 보라를 사용하되 과한 밝기 금지
+하단 SafeArea와 겹치지 않도록 충분한 하단 여백 확보
+레이아웃 기준
 
-- [ ] 카카오로 가입 완료 → Lobby 진입 → Store에서 구매 버튼 클릭 → **팝업 안 뜨고 바로 구매 흐름 진행**
-- [ ] 완전 신규(비로그인) 상태로 Store 구매 시도 → 팝업 정상적으로 뜸 (회귀 확인)
-- [ ] 구글/이메일 로그인도 기존처럼 정상 동작 (회귀 확인)
-- [ ] 앱을 완전히 종료했다가 재실행 후에도 카카오 계정 상태에서 팝업이 안 뜨는지 확인 (Phase 1에서 영속화 여부에 따라 결과가 갈림 — 안 되면 Phase 1을 SharedPreferences 영속화 패턴으로 다시 요청)
+다음 기준으로 수정하라.
 
-**롤백**: `git revert <savepoint 이후 커밋>` 또는 `git reset --hard <savepoint>`
+전체 좌우 패딩: 24px 전후
+카드 radius: 28~32px
+카드 내부 padding: 24~28px
+카드 간격: 20~24px
+큰 제목 line height: 약 1.18~1.25
+설명 문장 line height: 약 1.35~1.45
+화면 작은 기기에서도 하단 버튼이 잘리지 않도록 SingleChildScrollView 또는 기존 스크롤 구조를 안정적으로 유지
+상태바/내비게이션 바 영역 침범하지 않게 SafeArea 유지
+컬러 가이드
+
+아래 계열을 참고하되, 기존 코드 구조에 맞춰 적용하라.
+
+Background: 거의 검정 #050507
+Card: 딥 그레이 #1A1A1E
+Card Border: 흰색 6~10% 투명도
+Main Text: #F5F5F7
+Secondary Text: #A7A7AE
+Muted Text: #6F6F78
+Mint Accent: #58D6BD
+Purple Accent: #8B7CFF
+Button Purple: #8176EA 또는 그보다 약간 어두운 톤
+Badge Background: 보라/남색 계열 반투명
+Badge Text: 민트
+타이포그래피 방향
+
+한글이 너무 굵고 커 보이는 문제를 줄여라.
+
+메인 제목은 굵게 유지하되 과도한 크기 금지
+본문은 가볍게
+설명 문장은 letter spacing을 과하게 주지 말 것
+문구 줄바꿈은 사람이 읽기 편하게 직접 조정 가능
+“Anyone”은 영어 단어라서 줄 중간에서 어색하게 깨지지 않도록 조정
+기대 결과
+
+수정 후 화면은 다음 느낌이어야 한다.
+
+기존보다 더 프리미엄하고 정돈된 첫인상
+“음성 기반 AI 영어 앱”이라는 인상이 선명함
+30초 무료 체험 버튼이 자연스럽게 가장 먼저 눈에 들어옴
+회원가입 버튼은 보이지만, 무료 체험보다 덜 강함
+작은 화면에서도 카드 하단이 잘리지 않음
+기존 기능은 100% 그대로 유지
+검증
+
+수정 후 반드시 확인하라.
+
+flutter analyze lib/custom_code/widgets/intro_master.dart 실행
+analyzer 오류가 있으면 수정
+390x844 안드로이드 화면 기준으로 overflow가 없는지 확인
+360px 폭의 작은 화면에서도 하단 버튼과 안내 문구가 잘리지 않는지 확인
+기존 버튼 동작이 바뀌지 않았는지 확인
+30초 무료 체험 시작
+회원 가입
+기존 로그인/라우팅 흐름
+수정 파일 목록에 intro_master.dart만 있는지 확인
+최종 보고 형식
+
+작업 완료 후 아래 형식으로 보고하라.
+
+수정 파일:
+변경 요약:
+유지한 로직:
+UI 개선 포인트:
+검증 결과:
+남은 리스크:
+
+실장님, 이번 지시문은 “이미지처럼 새로 만들라”가 아니라 “현재 화면을 유지하면서 전문 앱처럼 다듬어라” 쪽입니다.
