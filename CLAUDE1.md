@@ -48,19 +48,22 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-# 지시문: 카카오 로그인 플로우 임시 디버그 로그 삽입 (원인 특정용)
+# 지시문: remainingTime 로딩 상태 정석 구현 (remainingTimeLoaded 플래그)
 
 ## 배경
-adb 로그 분석 결과, 카카오 SDK 네이티브 로그인(`TalkAuthCodeActivity`)은 정상 완료되지만
-그 이후 단계(Cloud Function 콜러블 호출 → `signInWithCustomToken`)가 로그에 전혀 나타나지 않음.
-`_handleSocialAuth`/`SocialAuthService.signInWithKakao`에 디버그 출력이 없어서 블랙박스 상태.
+현재 `FFAppState._remainingTime` 기본값이 10000(초)으로 하드코딩되어,
+로비 진입 시 Firestore fetch가 완료되기 전까지 잘못된 숫자가 화면에 표시됨.
+단순히 기본값을 0으로 바꿔도, fetch 완료 전 짧게 "00:00"이 표시됐다가
+실제값으로 바뀌는 문제는 남음 — 사용자에게 "확정된 숫자"처럼 보이는 문제.
 
-**목적**: 임시 `debugPrint`를 추가해 정확히 어느 단계에서 끊기는지 한 번의 재현으로 특정한다.
-**이 변경은 진단 전용이며, 원인 확인 후 제거하거나 정식 로깅으로 정리한다.**
+**해결 방향**: `remainingTime`의 타입은 그대로 두고(다른 9개 파일 영향 없음),
+별도의 `remainingTimeLoaded` boolean 플래그를 추가해서
+"아직 안 불러옴" 상태를 명시적으로 구분한다.
 
 ## 대상 파일
-- `lib/auth/social_auth_service.dart`
-- `lib/custom_code/widgets/intro_master.dart`
+- `lib/app_state.dart`
+- `lib/custom_code/widgets/lobby_master.dart`
+- `lib/auth/firebase_auth/firebase_auth_manager.dart` (로그아웃 시 리셋)
 
 ---
 
@@ -68,192 +71,169 @@ adb 로그 분석 결과, 카카오 SDK 네이티브 로그인(`TalkAuthCodeActi
 
 ```bash
 cd F:\flutter_project\stealth_vox
-git add -A && git commit -m "savepoint: before kakao debug logging"
+git add -A && git commit -m "savepoint: before remainingTimeLoaded state"
 ```
 
 ---
 
-## Phase 1 — social_auth_service.dart 확인 및 디버그 로그 삽입
+## Phase 1 — app_state.dart에 플래그 추가
 
-### 1-A: 파일 확인
-
-```bash
-cat lib/auth/social_auth_service.dart
-```
-
-`signInWithKakao` 함수의 정확한 구조를 파악한다 (아래는 예상 구조 — 실제와 다르면 구조에 맞춰 적용).
-
-### 1-B: 삽입할 디버그 로그 (5개 지점)
-
-`signInWithKakao` 함수 내부에서, 아래 5개 지점에 각각 `debugPrint`를 추가한다.
-**정확한 삽입 위치는 실제 코드 구조에 맞춰 코덱스가 판단**하되, 다음 순서와 의미를 반드시 지킨다:
-
-```dart
-// ① 함수 진입 + 현재 인증 상태
-debugPrint('[KakaoAuth] ① signInWithKakao 시작, currentUser=${FirebaseAuth.instance.currentUser?.uid}, isAnonymous=${FirebaseAuth.instance.currentUser?.isAnonymous}');
-
-// ② 익명 로그인 필요 시 (currentUser == null인 분기 안)
-debugPrint('[KakaoAuth] ② signInAnonymously 실행');
-// ... 기존 signInAnonymously 호출 ...
-debugPrint('[KakaoAuth] ② signInAnonymously 완료, uid=${FirebaseAuth.instance.currentUser?.uid}');
-
-// ③ Kakao SDK 로그인 성공 직후 (accessToken 획득 직후)
-debugPrint('[KakaoAuth] ③ Kakao SDK 로그인 성공, accessToken 길이=${token.accessToken.length}');
-// (Kakao SDK 로그인 실패 시 catch 블록에도 추가)
-debugPrint('[KakaoAuth] ③-실패 Kakao SDK 로그인 실패: $e');
-
-// ④ Cloud Function callable 호출 직전/직후
-debugPrint('[KakaoAuth] ④ kakaoCustomAuth callable 호출 시작');
-// ... 기존 callable 호출 ...
-debugPrint('[KakaoAuth] ④ kakaoCustomAuth 응답 수신, token 존재=${result.data['token'] != null}');
-
-// ⑤ signInWithCustomToken 직전/직후
-debugPrint('[KakaoAuth] ⑤ signInWithCustomToken 호출 시작');
-await FirebaseAuth.instance.signInWithCustomToken(customToken);
-debugPrint('[KakaoAuth] ⑤ signInWithCustomToken 완료, 최종 uid=${FirebaseAuth.instance.currentUser?.uid}');
-```
-
-**전체를 감싸는 try-catch가 있다면, catch 블록에도 반드시 추가:**
-
-```dart
-} catch (e, stack) {
-  debugPrint('[KakaoAuth] ❌ 예외 발생: $e');
-  debugPrint('[KakaoAuth] ❌ 스택: $stack');
-  rethrow; // 또는 기존 동작 유지
-}
-```
-
-⚠️ **주의**: 기존 로직의 흐름(return 값, await 순서, catch 처리)은 절대 변경하지 않는다.
-오직 `debugPrint` 라인만 추가한다.
-
----
-
-## Phase 2 — intro_master.dart의 _handleSocialAuth에도 추가
+### 1-A: 확인
 
 ```bash
-grep -n "_handleSocialAuth" lib/custom_code/widgets/intro_master.dart
+grep -n "_remainingTime" lib/app_state.dart -B 2 -A 5
 ```
 
-기존 함수:
-```dart
-Future<void> _handleSocialAuth(Future<dynamic> Function() authFn) async {
-    setState(() => isLoading = true);
-    try {
-      await authFn();
-      if (mounted) _routeAfterAuth();
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('로그인 실패: $e')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => isLoading = false);
-    }
-  }
-```
-
-다음과 같이 디버그 로그를 추가 (str_replace):
+### 1-B: 수정
 
 ```
+파일: lib/app_state.dart
+
 old_str:
-  Future<void> _handleSocialAuth(Future<dynamic> Function() authFn) async {
-    setState(() => isLoading = true);
-    try {
-      await authFn();
-      if (mounted) _routeAfterAuth();
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('로그인 실패: $e')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => isLoading = false);
-    }
+  /// 남은 시간 (초)
+  int _remainingTime = 10000;
+  int get remainingTime => _remainingTime;
+  set remainingTime(int value) {
+    _remainingTime = value;
   }
 
 new_str:
-  Future<void> _handleSocialAuth(Future<dynamic> Function() authFn) async {
-    debugPrint('[KakaoAuth] _handleSocialAuth 진입');
-    setState(() => isLoading = true);
-    try {
-      await authFn();
-      debugPrint('[KakaoAuth] authFn 완료, currentUser=${FirebaseAuth.instance.currentUser?.uid}, pendingInviteType=${FFAppState().pendingInviteType}');
-      if (mounted) _routeAfterAuth();
-      debugPrint('[KakaoAuth] _routeAfterAuth 호출 완료');
-    } catch (e, stack) {
-      debugPrint('[KakaoAuth] _handleSocialAuth 예외: $e');
-      debugPrint('[KakaoAuth] 스택: $stack');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('로그인 실패: $e')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => isLoading = false);
-    }
+  /// 남은 시간 (초)
+  int _remainingTime = 0;
+  int get remainingTime => _remainingTime;
+  set remainingTime(int value) {
+    _remainingTime = value;
+  }
+
+  /// remainingTime이 Firestore로부터 최초 로드 완료되었는지 여부.
+  /// false인 동안 UI는 숫자 대신 로딩 표시를 해야 한다.
+  bool _remainingTimeLoaded = false;
+  bool get remainingTimeLoaded => _remainingTimeLoaded;
+  set remainingTimeLoaded(bool value) {
+    _remainingTimeLoaded = value;
   }
 ```
 
+⚠️ 실제 코드 구조가 예상과 다르면(예: getter/setter 스타일이 다르면),
+동일한 의미(기본값 0 + 별도 loaded 플래그)를 유지하는 선에서 구조에 맞게 적용.
+
 ---
 
-## Phase 3 — 빌드 검증
+## Phase 2 — lobby_master.dart: fetch 전후로 플래그 설정
+
+### 2-A: 확인
 
 ```bash
-flutter analyze lib/auth/social_auth_service.dart lib/custom_code/widgets/intro_master.dart
-dart format lib/auth/social_auth_service.dart
-dart format lib/custom_code/widgets/intro_master.dart
+grep -n "_initializeLobbyData\|remainingTime" lib/custom_code/widgets/lobby_master.dart -B 2 -A 8
 ```
 
-⚠️ 각각 단일 파일로 format (폴더 대상 금지)
+`_initializeLobbyData()` 함수 안에서 `LobbyBrain.getRemainingTime(...)` 호출
+전후 지점을 정확히 파악한다.
+
+### 2-B: 수정 방향
+
+`_initializeLobbyData()` 함수 시작 부분에서:
+```dart
+FFAppState().remainingTimeLoaded = false;
+```
+
+Firestore fetch 성공 후, `FFAppState().remainingTime = serverRemainingTime;`
+바로 다음 줄에:
+```dart
+FFAppState().remainingTimeLoaded = true;
+```
+
+fetch가 실패하는 catch 블록이 있다면, 거기서도 (기존 값을 0으로 유지한 채)
+`remainingTimeLoaded = true`로 설정할지 여부를 판단한다.
+**권장**: 실패 시에도 `true`로 설정하되 에러 스낵바를 띄워서,
+무한 로딩 상태로 남지 않도록 한다. (실제 코드 구조 확인 후 적용)
+
+### 2-C: UI 표시 부분 수정
+
+"REMAINING TIME" 숫자를 표시하는 위젯 코드를 찾는다:
+
+```bash
+grep -n "REMAINING TIME\|remainingTime" lib/custom_code/widgets/lobby_master.dart
+```
+
+해당 텍스트/타이머 위젯을:
+```dart
+FFAppState().remainingTimeLoaded
+    ? Text(formattedRemainingTime)  // 기존 시간 포맷팅 로직 유지
+    : SizedBox(
+        width: 24,
+        height: 24,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      )
+```
+형태로 조건부 렌더링하도록 감싼다. (기존 스타일/색상 유지, 로딩 위젯만 추가)
+
+⚠️ 실제 위젯 구조(FFAppState 감시 방식이 Provider/ChangeNotifier인지 setState인지)에 맞춰
+로딩 상태 변경 시 화면이 리빌드되도록 확인할 것.
 
 ---
 
-## Phase 4 — 커밋 (진단용 임시 커밋)
+## Phase 3 — 로그아웃 시 플래그 리셋
+
+```bash
+grep -n "remainingTime = 0" lib/auth/firebase_auth/firebase_auth_manager.dart -B 2 -A 2
+grep -n "remainingTime = 0" lib/custom_code/widgets/lobby_master.dart -B 2 -A 2
+```
+
+이전에 로그아웃 시 `FFAppState().remainingTime = 0` 추가했던 두 지점 각각에
+바로 아래 줄로 추가:
+```dart
+FFAppState().remainingTimeLoaded = false;
+```
+
+이렇게 해야 재로그인 시 다시 로딩 상태부터 시작한다.
+
+---
+
+## Phase 4 — 사후 검증
+
+```bash
+grep -rn "remainingTimeLoaded" lib/ --include="*.dart"
+```
+- `app_state.dart`에 정의 1곳
+- `lobby_master.dart`에 false 설정, true 설정, UI 조건부 렌더링 (최소 3곳)
+- `firebase_auth_manager.dart`에 false 리셋 1곳
+총 5곳 이상 나와야 정상.
+
+---
+
+## Phase 5 — 빌드 검증
+
+```bash
+flutter analyze lib/app_state.dart lib/custom_code/widgets/lobby_master.dart lib/auth/firebase_auth/firebase_auth_manager.dart
+dart format lib/app_state.dart
+dart format lib/custom_code/widgets/lobby_master.dart
+dart format lib/auth/firebase_auth/firebase_auth_manager.dart
+```
+
+⚠️ 각 파일 개별로 format (폴더 대상 금지)
+
+---
+
+## Phase 6 — 커밋
 
 ```bash
 git add -A
-git commit -m "debug: temporary kakao auth flow logging"
+git commit -m "feat: add remainingTimeLoaded flag for proper loading state in Lobby"
 ```
 
-이 커밋은 원인 특정 후 되돌리거나(`git revert`) 정식 로깅으로 정리할 예정임을 실장에게 안내.
+---
+
+## Phase 7 — 실기기 테스트 시나리오
+
+1. 로그아웃 → 재로그인 → 로비 진입 순간, 숫자 대신 로딩 스피너가 짧게 보이는지 확인
+2. 로딩 끝나면 실제 Firestore 값으로 정확히 표시되는지 확인
+3. 대화방 사용 후 로비 복귀 시에도 값이 정확히 반영되는지 확인 (기존 정상 동작 유지 여부)
 
 ---
 
-## Phase 5 — 재현 및 로그 캡처 (실장 수행)
-
-1. `flutter run` (또는 이미 빌드된 최신 APK 재설치 후 `adb logcat` 필터링)
-2. 로그아웃 상태에서 카카오 로그인 버튼 탭
-3. 터미널/logcat에서 `[KakaoAuth]` 태그로 필터링:
-   ```bash
-   adb logcat | grep "KakaoAuth"
-   ```
-4. ①→⑤ 중 **어디까지 출력되고 어디서 멈추는지** 캡처
-
----
-
-## Phase 6 — 결과 해석 가이드
-
-| 마지막 출력 지점 | 의미 |
-|---|---|
-| ①에서 멈춤 | 함수 진입 자체가 안 됨 → 버튼 onTap 연결 문제 |
-| ②에서 멈춤 | signInAnonymously 자체가 실패/멈춤 |
-| ③ 성공, ③-실패 없음, 그 다음 없음 | Kakao 토큰은 받았는데 콜러블 호출 코드에 도달 못 함 (코드 흐름 문제) |
-| ④ "호출 시작"만 있고 "응답 수신" 없음 | **Cloud Function 호출이 걸린 채 응답을 못 받음** — 네트워크, App Check, 타임아웃, 또는 리전 설정 불일치 의심 |
-| ④ 완료, ⑤ "호출 시작"만 있고 "완료" 없음 | `signInWithCustomToken` 자체에서 예외 (토큰 형식, 만료 등) |
-| ⑤까지 전부 출력됨 | 로그인은 성공 — 문제는 그 이후 라우팅/캐시 쪽 (별도 조사 필요) |
-| ❌ 예외 로그 출력됨 | 그 예외 메시지와 스택을 그대로 실장에게 전달 |
-
----
-
-## Phase 7 — 정리 (원인 특정 후)
-
-원인이 특정되면 이 디버그 로그들은:
-- 제거하거나
-- 실장 승인 하에 정식 `functions.logger` 스타일 로깅으로 전환
+## Phase 8 — 롤백
 
 ```bash
-git log --oneline -5   # 진단용 커밋 해시 확인
-git revert <해당 커밋 해시>   # 필요 시 되돌리기
+git revert HEAD
 ```
