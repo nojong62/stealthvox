@@ -814,11 +814,17 @@ class _IntroMasterState extends State<IntroMaster> {
   }
 
   Future<void> _handleSocialAuth(Future<dynamic> Function() authFn) async {
+    debugPrint('[KakaoAuth] _handleSocialAuth enter');
     setState(() => isLoading = true);
     try {
       await authFn();
+      debugPrint(
+          '[KakaoAuth] authFn complete, currentUser=${FirebaseAuth.instance.currentUser?.uid}, pendingInviteType=${FFAppState().pendingInviteType}');
       if (mounted) _routeAfterAuth();
-    } catch (e) {
+      debugPrint('[KakaoAuth] _routeAfterAuth call complete');
+    } catch (e, stack) {
+      debugPrint('[KakaoAuth] _handleSocialAuth exception: $e');
+      debugPrint('[KakaoAuth] stack: $stack');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('로그인 실패: $e')),

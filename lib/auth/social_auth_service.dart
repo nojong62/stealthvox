@@ -5,6 +5,7 @@
 
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
 import '/flutter_flow/flutter_flow_util.dart';
@@ -15,26 +16,52 @@ class SocialAuthService {
       FirebaseFunctions.instanceFor(region: 'us-central1');
 
   static Future<UserCredential> signInWithKakao() async {
-    if (_auth.currentUser == null) {
-      await _auth.signInAnonymously();
+    try {
+      debugPrint(
+          '[KakaoAuth] signInWithKakao start, currentUser=${_auth.currentUser?.uid}, isAnonymous=${_auth.currentUser?.isAnonymous}');
+
+      if (_auth.currentUser == null) {
+        debugPrint('[KakaoAuth] signInAnonymously start');
+        await _auth.signInAnonymously();
+        debugPrint(
+            '[KakaoAuth] signInAnonymously complete, uid=${_auth.currentUser?.uid}');
+      }
+
+      OAuthToken token;
+      try {
+        if (await isKakaoTalkInstalled()) {
+          token = await UserApi.instance.loginWithKakaoTalk();
+        } else {
+          token = await UserApi.instance.loginWithKakaoAccount();
+        }
+        debugPrint(
+            '[KakaoAuth] Kakao SDK login success, accessToken length=${token.accessToken.length}');
+      } catch (e, stack) {
+        debugPrint('[KakaoAuth] Kakao SDK login failed: $e');
+        debugPrint('[KakaoAuth] Kakao SDK stack: $stack');
+        rethrow;
+      }
+
+      final callable = _functions.httpsCallable('kakaoCustomAuth');
+      debugPrint('[KakaoAuth] kakaoCustomAuth callable call start');
+      final result = await callable.call<Map<String, dynamic>>({
+        'kakaoAccessToken': token.accessToken,
+      });
+      debugPrint(
+          '[KakaoAuth] kakaoCustomAuth response received, token exists=${result.data['token'] != null}');
+
+      final customToken = result.data['token'] as String;
+      debugPrint('[KakaoAuth] signInWithCustomToken call start');
+      final credential = await _auth.signInWithCustomToken(customToken);
+      debugPrint(
+          '[KakaoAuth] signInWithCustomToken complete, final uid=${_auth.currentUser?.uid}');
+      FFAppState().hasLinkedAccount = true;
+      return credential;
+    } catch (e, stack) {
+      debugPrint('[KakaoAuth] exception: $e');
+      debugPrint('[KakaoAuth] stack: $stack');
+      rethrow;
     }
-
-    OAuthToken token;
-    if (await isKakaoTalkInstalled()) {
-      token = await UserApi.instance.loginWithKakaoTalk();
-    } else {
-      token = await UserApi.instance.loginWithKakaoAccount();
-    }
-
-    final callable = _functions.httpsCallable('kakaoCustomAuth');
-    final result = await callable.call<Map<String, dynamic>>({
-      'kakaoAccessToken': token.accessToken,
-    });
-
-    final customToken = result.data['token'] as String;
-    final credential = await _auth.signInWithCustomToken(customToken);
-    FFAppState().hasLinkedAccount = true;
-    return credential;
   }
 
   static Future<UserCredential> signInWithGoogle() async {
