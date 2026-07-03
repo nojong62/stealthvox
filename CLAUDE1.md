@@ -48,23 +48,21 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-# 지시문: remainingTime 레이스 컨디션 수정 — hasConfirmedZeroTime 캡슐화
+# 지시문: 체험(_startTrial) 시 라우터 자동 리다이렉트 억제
 
 ## 배경
-`remainingTimeLoaded` 도입 이후, 4개 지점에서 로딩 완료 여부를 확인하지 않고
-`remainingTime <= 0`만으로 "시간 없음"을 판단해 Store로 잘못 라우팅하거나
-과금 타이머 판단이 흔들리는 레이스 컨디션이 확인됨.
+`GoRouter`의 `refreshListenable: appStateNotifier` 구조상, `/` 경로(Intro)에
+머무른 채로 `signInAnonymously()`가 실행되면 `appStateNotifier.loggedIn`이
+true로 바뀌고, 초기 라우트 builder(`appStateNotifier.loggedIn ? LobbyWidget() : IntroWidget()`)가
+재평가되어 자동으로 LobbyWidget으로 교체됨. 이 때문에 `_enterTrialAnyone()`의
+명시적 `pushNamed('StealthRoom')`이 무시되고 체험 버튼이 Lobby(0시간)로 새는 현상 발생.
 
-**해결 방향**: "확정된 0"인지 판단하는 로직을 `app_state.dart`의
-getter 하나로 캡슐화해서, 4개 지점 + 향후 추가될 지점 모두
-동일한 안전 규칙을 따르도록 한다.
+**해결**: `AppStateNotifier`에 이미 존재하는 1회성 억제 스위치
+`updateNotifyOnAuthChange(false)`를 익명 로그인 직전에 호출하여,
+이번 인증 상태 변화가 라우터에 전달되지 않도록 한다.
 
 ## 대상 파일
-- `lib/app_state.dart` (getter 추가)
-- `lib/custom_code/widgets/lobby_master.dart:201`
-- `lib/custom_code/widgets/chat_history_master.dart:3259`
-- `lib/custom_code/actions/billing_ticker.dart:271`
-- `lib/custom_code/actions/billing_ticker.dart:294`
+- `lib/custom_code/widgets/intro_master.dart`
 
 ---
 
@@ -72,167 +70,110 @@ getter 하나로 캡슐화해서, 4개 지점 + 향후 추가될 지점 모두
 
 ```bash
 cd F:\flutter_project\stealth_vox
-git add -A && git commit -m "savepoint: before hasConfirmedZeroTime getter"
+git add -A && git commit -m "savepoint: before trial routing redirect suppression fix"
 ```
 
 ---
 
-## Phase 1 — app_state.dart에 getter 추가
-
-### 1-A: 확인
+## Phase 1 — 정확한 삽입 위치 확인
 
 ```bash
-grep -n "remainingTimeLoaded" lib/app_state.dart -B 2 -A 5
+grep -n "_startTrial\|signInAnonymously" lib/custom_code/widgets/intro_master.dart -B 2 -A 10
 ```
 
-### 1-B: 수정
+`_startTrial()` 함수 내부에서 `FirebaseAuth.instance.signInAnonymously()`를
+호출하는 정확한 줄을 찾는다 (지난번 수정으로 non-anonymous 세션 처리 분기가
+추가되었으므로, 그 로직과 겹치지 않게 위치 확인).
 
-`remainingTimeLoaded` getter/setter 바로 아래에 추가:
+## Phase 2 — AppStateNotifier import 확인
+
+```bash
+grep -n "^import" lib/custom_code/widgets/intro_master.dart | grep -i "app_state_notifier\|nav.dart\|flutter_flow"
+```
+
+`AppStateNotifier` 클래스가 이미 import되어 있는지 확인. 없다면 적절한
+import 구문을 추가해야 한다 (파일 위치: `lib/flutter_flow/nav/nav.dart` 또는
+해당 클래스가 정의된 파일 경로를 grep으로 재확인).
+
+```bash
+grep -rn "class AppStateNotifier" lib/ --include="*.dart"
+```
+
+## Phase 3 — 수정
+
+`signInAnonymously()` 호출 직전에 한 줄 추가:
 
 ```dart
-  /// Firestore fetch가 완료된 후 실제로 0(또는 그 이하)임이 확정된 경우에만 true.
-  /// 로딩 중(remainingTimeLoaded == false)에는 절대 true가 되지 않는다.
-  /// "시간이 없다"고 판단해 Store로 보내거나 과금 타이머를 멈추는 모든 곳은
-  /// remainingTime <= 0 대신 이 getter를 사용해야 한다.
-  bool get hasConfirmedZeroTime => remainingTimeLoaded && remainingTime <= 0;
-
-  /// 로딩 완료 + 실제로 잔여 시간이 있는 경우에만 true.
-  bool get hasConfirmedPositiveTime => remainingTimeLoaded && remainingTime > 0;
+AppStateNotifier.instance.updateNotifyOnAuthChange(false);
+await FirebaseAuth.instance.signInAnonymously();
 ```
 
-grep으로 정확한 삽입 지점을 확인한 뒤, 실제 코드 스타일(들여쓰기 등)에 맞춰 추가한다.
+정확한 old_str/new_str은 Phase 1에서 확인한 실제 코드에 맞춰 작성한다.
+예시 형태:
 
----
+```
+old_str:
+      await FirebaseAuth.instance.signInAnonymously();
 
-## Phase 2 — lobby_master.dart 수정
+new_str:
+      AppStateNotifier.instance.updateNotifyOnAuthChange(false);
+      await FirebaseAuth.instance.signInAnonymously();
+```
 
-### 2-A: 확인
+⚠️ **주의**: 지난번 수정으로 `_startTrial()` 안에 non-anonymous 세션일 때
+signOut 후 signInAnonymously하는 분기가 있다. `signInAnonymously()` 호출이
+2곳(또는 조건부 1곳)일 수 있으므로, **모든 signInAnonymously() 호출 직전**에
+동일하게 `updateNotifyOnAuthChange(false)`를 추가해야 한다. grep으로 호출
+지점이 몇 개인지 먼저 정확히 센 뒤 적용할 것.
 
 ```bash
-grep -n "remainingTime <= 0" lib/custom_code/widgets/lobby_master.dart -B 3 -A 3
+grep -c "signInAnonymously()" lib/custom_code/widgets/intro_master.dart
 ```
-
-### 2-B: str_replace
-
-정확한 old_str은 실제 코드 확인 후 결정하되, 핵심 치환은:
-
-```
-appState.remainingTime <= 0
-```
-→
-```
-appState.hasConfirmedZeroTime
-```
-
-(라인 201 주변, `if (appState.remainingTime <= 0) { ... Store로 이동 ... }` 형태)
 
 ---
 
-## Phase 3 — chat_history_master.dart 수정
-
-### 3-A: 확인
+## Phase 4 — 사후 검증
 
 ```bash
-grep -n "remainingTime <= 0" lib/custom_code/widgets/chat_history_master.dart -B 3 -A 3
+grep -n "updateNotifyOnAuthChange\|signInAnonymously" lib/custom_code/widgets/intro_master.dart
 ```
-
-### 3-B: str_replace
-
-라인 3259 주변, 동일하게:
-```
-appState.remainingTime <= 0
-```
-→
-```
-appState.hasConfirmedZeroTime
-```
+`updateNotifyOnAuthChange(false)` 호출 횟수가 `signInAnonymously()` 호출
+횟수와 일치하는지 확인 (각 익명 로그인 앞에 빠짐없이 붙었는지).
 
 ---
 
-## Phase 4 — billing_ticker.dart 수정 (2곳)
-
-### 4-A: 확인
+## Phase 5 — 빌드 검증
 
 ```bash
-grep -n "remainingTime" lib/custom_code/actions/billing_ticker.dart -B 3 -A 3
+flutter analyze lib/custom_code/widgets/intro_master.dart
+dart format lib/custom_code/widgets/intro_master.dart
 ```
 
-### 4-B: 라인 271 근처 — resume 가능 여부 판단
-
-```
-FFAppState().remainingTime > 0
-```
-→
-```
-FFAppState().hasConfirmedPositiveTime
-```
-
-### 4-C: 라인 294 근처 — tick 차감 중단 판단
-
-```
-if (FFAppState().remainingTime <= 0) return;
-```
-→
-```
-if (FFAppState().hasConfirmedZeroTime) return;
-```
-
-⚠️ **주의**: 이 두 지점은 로비 라우팅과 성격이 다르다.
-`hasConfirmedZeroTime`이 false인 상태(로딩 중)에서 tick이 계속 진행되면
-아직 확정 안 된 상태에서 시간이 계속 깎일 수 있다.
-실제 코드 문맥을 반드시 확인해서, "로딩 중에는 아예 tick 자체를 진행하지 않아야
-하는지"도 함께 판단할 것. 필요하면 `if (!FFAppState().remainingTimeLoaded) return;`
-가드를 tick 함수 최상단에 별도로 추가하는 것도 고려 (그 경우 실장에게 별도 보고).
+⚠️ 단일 파일만 format
 
 ---
 
-## Phase 5 — 사후 검증
-
-```bash
-# 남은 위험 패턴이 있는지 재확인
-grep -rn "remainingTime <= 0\|remainingTime > 0" lib/ --include="*.dart"
-# Store 라우팅/과금 판단 관련 지점에서는 더 이상 나오지 않아야 함
-# (단, lobby_master.dart:622의 색상 결정처럼 UI 스타일링 목적은 예외로 남을 수 있음 — 실장 확인)
-
-grep -rn "hasConfirmedZeroTime\|hasConfirmedPositiveTime" lib/ --include="*.dart"
-# app_state.dart 정의 2곳 + 사용처 4곳(또는 5곳, Phase 4 판단에 따라) 나와야 함
-```
-
----
-
-## Phase 6 — 빌드 검증
-
-```bash
-flutter analyze lib/app_state.dart lib/custom_code/widgets/lobby_master.dart lib/custom_code/widgets/chat_history_master.dart lib/custom_code/actions/billing_ticker.dart
-dart format lib/app_state.dart
-dart format lib/custom_code/widgets/lobby_master.dart
-dart format lib/custom_code/widgets/chat_history_master.dart
-dart format lib/custom_code/actions/billing_ticker.dart
-```
-
-⚠️ 각 파일 개별 format (폴더 대상 금지)
-
----
-
-## Phase 7 — 커밋
+## Phase 6 — 커밋
 
 ```bash
 git add -A
-git commit -m "fix: prevent premature Store redirect and billing decisions before remainingTime loads"
+git commit -m "fix: suppress router auto-redirect during trial anonymous sign-in"
 ```
 
 ---
 
-## Phase 8 — 실기기 테스트 시나리오
+## Phase 7 — 실기기 테스트 시나리오
 
-1. 앱 데이터 완전 삭제
-2. 구글 또는 카카오 로그인 → 로비 진입을 **여러 번 반복** (최소 5회, 로그아웃-재로그인 반복)
-3. 매번 Store로 잘못 튕기지 않고 정상적으로 로비/체험이 뜨는지 확인
-4. 정상적으로 시간이 0인 계정(실제 0)으로는 여전히 Store로 잘 유도되는지도 확인 (회귀 방지 확인)
+1. 앱 데이터 완전 삭제 → 재실행 → 체험 버튼 클릭 → **언어선택 화면이 뜨는지** (Lobby로 새지 않는지) 확인
+2. 로그아웃 → 앱 안 끄고 체험 클릭 → 정상 동작 유지 확인 (회귀 없는지)
+3. 로그아웃 → 앱 강제 종료 → 재시작 → 체험 클릭 → 이번엔 언어선택으로 정상 진행되는지 확인 (기존 cold start 버그 재현 여부)
+4. 정식 회원(카카오/구글) 로그인은 여전히 정상적으로 Lobby로 가는지 확인 (`updateNotifyOnAuthChange`가 자동으로 다시 true로 복원되므로 문제없어야 함 — 회귀 확인 차원)
+
+이번엔 반드시 **cold start 케이스(3번)를 여러 번 반복**해서 확인할 것 — 지난번 수정이 이 케이스에서 효과가 없었던 전례가 있음.
 
 ---
 
-## Phase 9 — 롤백
+## Phase 8 — 롤백
 
 ```bash
 git revert HEAD
