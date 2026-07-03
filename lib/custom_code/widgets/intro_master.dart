@@ -160,8 +160,13 @@ class _IntroMasterState extends State<IntroMaster> {
         return;
       }
 
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
+      final existingUser = FirebaseAuth.instance.currentUser;
+      if (existingUser != null && existingUser.isAnonymous != true) {
+        debugPrint(
+            '[Trial] non-anonymous session detected, signing out before trial: ${existingUser.uid}');
+        await FirebaseAuth.instance.signOut();
+      }
+      if (FirebaseAuth.instance.currentUser == null) {
         await FirebaseAuth.instance.signInAnonymously();
       }
       await TrialDeviceGate.markUsed();
