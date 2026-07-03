@@ -414,7 +414,7 @@ class _IntroMasterState extends State<IntroMaster> {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Text("AI는 30초",
+                            Text("Anyone 대화 30초",
                                 style: GoogleFonts.roboto(
                                     fontSize: 11,
                                     color: const Color(0xFFA7A7AE))),
