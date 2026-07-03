@@ -48,22 +48,23 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-# 지시문: remainingTime 로딩 상태 정석 구현 (remainingTimeLoaded 플래그)
+# 지시문: remainingTime 레이스 컨디션 수정 — hasConfirmedZeroTime 캡슐화
 
 ## 배경
-현재 `FFAppState._remainingTime` 기본값이 10000(초)으로 하드코딩되어,
-로비 진입 시 Firestore fetch가 완료되기 전까지 잘못된 숫자가 화면에 표시됨.
-단순히 기본값을 0으로 바꿔도, fetch 완료 전 짧게 "00:00"이 표시됐다가
-실제값으로 바뀌는 문제는 남음 — 사용자에게 "확정된 숫자"처럼 보이는 문제.
+`remainingTimeLoaded` 도입 이후, 4개 지점에서 로딩 완료 여부를 확인하지 않고
+`remainingTime <= 0`만으로 "시간 없음"을 판단해 Store로 잘못 라우팅하거나
+과금 타이머 판단이 흔들리는 레이스 컨디션이 확인됨.
 
-**해결 방향**: `remainingTime`의 타입은 그대로 두고(다른 9개 파일 영향 없음),
-별도의 `remainingTimeLoaded` boolean 플래그를 추가해서
-"아직 안 불러옴" 상태를 명시적으로 구분한다.
+**해결 방향**: "확정된 0"인지 판단하는 로직을 `app_state.dart`의
+getter 하나로 캡슐화해서, 4개 지점 + 향후 추가될 지점 모두
+동일한 안전 규칙을 따르도록 한다.
 
 ## 대상 파일
-- `lib/app_state.dart`
-- `lib/custom_code/widgets/lobby_master.dart`
-- `lib/auth/firebase_auth/firebase_auth_manager.dart` (로그아웃 시 리셋)
+- `lib/app_state.dart` (getter 추가)
+- `lib/custom_code/widgets/lobby_master.dart:201`
+- `lib/custom_code/widgets/chat_history_master.dart:3259`
+- `lib/custom_code/actions/billing_ticker.dart:271`
+- `lib/custom_code/actions/billing_ticker.dart:294`
 
 ---
 
@@ -71,168 +72,167 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 
 ```bash
 cd F:\flutter_project\stealth_vox
-git add -A && git commit -m "savepoint: before remainingTimeLoaded state"
+git add -A && git commit -m "savepoint: before hasConfirmedZeroTime getter"
 ```
 
 ---
 
-## Phase 1 — app_state.dart에 플래그 추가
+## Phase 1 — app_state.dart에 getter 추가
 
 ### 1-A: 확인
 
 ```bash
-grep -n "_remainingTime" lib/app_state.dart -B 2 -A 5
+grep -n "remainingTimeLoaded" lib/app_state.dart -B 2 -A 5
 ```
 
 ### 1-B: 수정
 
-```
-파일: lib/app_state.dart
+`remainingTimeLoaded` getter/setter 바로 아래에 추가:
 
-old_str:
-  /// 남은 시간 (초)
-  int _remainingTime = 10000;
-  int get remainingTime => _remainingTime;
-  set remainingTime(int value) {
-    _remainingTime = value;
-  }
+```dart
+  /// Firestore fetch가 완료된 후 실제로 0(또는 그 이하)임이 확정된 경우에만 true.
+  /// 로딩 중(remainingTimeLoaded == false)에는 절대 true가 되지 않는다.
+  /// "시간이 없다"고 판단해 Store로 보내거나 과금 타이머를 멈추는 모든 곳은
+  /// remainingTime <= 0 대신 이 getter를 사용해야 한다.
+  bool get hasConfirmedZeroTime => remainingTimeLoaded && remainingTime <= 0;
 
-new_str:
-  /// 남은 시간 (초)
-  int _remainingTime = 0;
-  int get remainingTime => _remainingTime;
-  set remainingTime(int value) {
-    _remainingTime = value;
-  }
-
-  /// remainingTime이 Firestore로부터 최초 로드 완료되었는지 여부.
-  /// false인 동안 UI는 숫자 대신 로딩 표시를 해야 한다.
-  bool _remainingTimeLoaded = false;
-  bool get remainingTimeLoaded => _remainingTimeLoaded;
-  set remainingTimeLoaded(bool value) {
-    _remainingTimeLoaded = value;
-  }
+  /// 로딩 완료 + 실제로 잔여 시간이 있는 경우에만 true.
+  bool get hasConfirmedPositiveTime => remainingTimeLoaded && remainingTime > 0;
 ```
 
-⚠️ 실제 코드 구조가 예상과 다르면(예: getter/setter 스타일이 다르면),
-동일한 의미(기본값 0 + 별도 loaded 플래그)를 유지하는 선에서 구조에 맞게 적용.
+grep으로 정확한 삽입 지점을 확인한 뒤, 실제 코드 스타일(들여쓰기 등)에 맞춰 추가한다.
 
 ---
 
-## Phase 2 — lobby_master.dart: fetch 전후로 플래그 설정
+## Phase 2 — lobby_master.dart 수정
 
 ### 2-A: 확인
 
 ```bash
-grep -n "_initializeLobbyData\|remainingTime" lib/custom_code/widgets/lobby_master.dart -B 2 -A 8
+grep -n "remainingTime <= 0" lib/custom_code/widgets/lobby_master.dart -B 3 -A 3
 ```
 
-`_initializeLobbyData()` 함수 안에서 `LobbyBrain.getRemainingTime(...)` 호출
-전후 지점을 정확히 파악한다.
+### 2-B: str_replace
 
-### 2-B: 수정 방향
+정확한 old_str은 실제 코드 확인 후 결정하되, 핵심 치환은:
 
-`_initializeLobbyData()` 함수 시작 부분에서:
-```dart
-FFAppState().remainingTimeLoaded = false;
+```
+appState.remainingTime <= 0
+```
+→
+```
+appState.hasConfirmedZeroTime
 ```
 
-Firestore fetch 성공 후, `FFAppState().remainingTime = serverRemainingTime;`
-바로 다음 줄에:
-```dart
-FFAppState().remainingTimeLoaded = true;
-```
-
-fetch가 실패하는 catch 블록이 있다면, 거기서도 (기존 값을 0으로 유지한 채)
-`remainingTimeLoaded = true`로 설정할지 여부를 판단한다.
-**권장**: 실패 시에도 `true`로 설정하되 에러 스낵바를 띄워서,
-무한 로딩 상태로 남지 않도록 한다. (실제 코드 구조 확인 후 적용)
-
-### 2-C: UI 표시 부분 수정
-
-"REMAINING TIME" 숫자를 표시하는 위젯 코드를 찾는다:
-
-```bash
-grep -n "REMAINING TIME\|remainingTime" lib/custom_code/widgets/lobby_master.dart
-```
-
-해당 텍스트/타이머 위젯을:
-```dart
-FFAppState().remainingTimeLoaded
-    ? Text(formattedRemainingTime)  // 기존 시간 포맷팅 로직 유지
-    : SizedBox(
-        width: 24,
-        height: 24,
-        child: CircularProgressIndicator(strokeWidth: 2),
-      )
-```
-형태로 조건부 렌더링하도록 감싼다. (기존 스타일/색상 유지, 로딩 위젯만 추가)
-
-⚠️ 실제 위젯 구조(FFAppState 감시 방식이 Provider/ChangeNotifier인지 setState인지)에 맞춰
-로딩 상태 변경 시 화면이 리빌드되도록 확인할 것.
+(라인 201 주변, `if (appState.remainingTime <= 0) { ... Store로 이동 ... }` 형태)
 
 ---
 
-## Phase 3 — 로그아웃 시 플래그 리셋
+## Phase 3 — chat_history_master.dart 수정
+
+### 3-A: 확인
 
 ```bash
-grep -n "remainingTime = 0" lib/auth/firebase_auth/firebase_auth_manager.dart -B 2 -A 2
-grep -n "remainingTime = 0" lib/custom_code/widgets/lobby_master.dart -B 2 -A 2
+grep -n "remainingTime <= 0" lib/custom_code/widgets/chat_history_master.dart -B 3 -A 3
 ```
 
-이전에 로그아웃 시 `FFAppState().remainingTime = 0` 추가했던 두 지점 각각에
-바로 아래 줄로 추가:
-```dart
-FFAppState().remainingTimeLoaded = false;
-```
+### 3-B: str_replace
 
-이렇게 해야 재로그인 시 다시 로딩 상태부터 시작한다.
+라인 3259 주변, 동일하게:
+```
+appState.remainingTime <= 0
+```
+→
+```
+appState.hasConfirmedZeroTime
+```
 
 ---
 
-## Phase 4 — 사후 검증
+## Phase 4 — billing_ticker.dart 수정 (2곳)
+
+### 4-A: 확인
 
 ```bash
-grep -rn "remainingTimeLoaded" lib/ --include="*.dart"
+grep -n "remainingTime" lib/custom_code/actions/billing_ticker.dart -B 3 -A 3
 ```
-- `app_state.dart`에 정의 1곳
-- `lobby_master.dart`에 false 설정, true 설정, UI 조건부 렌더링 (최소 3곳)
-- `firebase_auth_manager.dart`에 false 리셋 1곳
-총 5곳 이상 나와야 정상.
+
+### 4-B: 라인 271 근처 — resume 가능 여부 판단
+
+```
+FFAppState().remainingTime > 0
+```
+→
+```
+FFAppState().hasConfirmedPositiveTime
+```
+
+### 4-C: 라인 294 근처 — tick 차감 중단 판단
+
+```
+if (FFAppState().remainingTime <= 0) return;
+```
+→
+```
+if (FFAppState().hasConfirmedZeroTime) return;
+```
+
+⚠️ **주의**: 이 두 지점은 로비 라우팅과 성격이 다르다.
+`hasConfirmedZeroTime`이 false인 상태(로딩 중)에서 tick이 계속 진행되면
+아직 확정 안 된 상태에서 시간이 계속 깎일 수 있다.
+실제 코드 문맥을 반드시 확인해서, "로딩 중에는 아예 tick 자체를 진행하지 않아야
+하는지"도 함께 판단할 것. 필요하면 `if (!FFAppState().remainingTimeLoaded) return;`
+가드를 tick 함수 최상단에 별도로 추가하는 것도 고려 (그 경우 실장에게 별도 보고).
 
 ---
 
-## Phase 5 — 빌드 검증
+## Phase 5 — 사후 검증
 
 ```bash
-flutter analyze lib/app_state.dart lib/custom_code/widgets/lobby_master.dart lib/auth/firebase_auth/firebase_auth_manager.dart
+# 남은 위험 패턴이 있는지 재확인
+grep -rn "remainingTime <= 0\|remainingTime > 0" lib/ --include="*.dart"
+# Store 라우팅/과금 판단 관련 지점에서는 더 이상 나오지 않아야 함
+# (단, lobby_master.dart:622의 색상 결정처럼 UI 스타일링 목적은 예외로 남을 수 있음 — 실장 확인)
+
+grep -rn "hasConfirmedZeroTime\|hasConfirmedPositiveTime" lib/ --include="*.dart"
+# app_state.dart 정의 2곳 + 사용처 4곳(또는 5곳, Phase 4 판단에 따라) 나와야 함
+```
+
+---
+
+## Phase 6 — 빌드 검증
+
+```bash
+flutter analyze lib/app_state.dart lib/custom_code/widgets/lobby_master.dart lib/custom_code/widgets/chat_history_master.dart lib/custom_code/actions/billing_ticker.dart
 dart format lib/app_state.dart
 dart format lib/custom_code/widgets/lobby_master.dart
-dart format lib/auth/firebase_auth/firebase_auth_manager.dart
+dart format lib/custom_code/widgets/chat_history_master.dart
+dart format lib/custom_code/actions/billing_ticker.dart
 ```
 
-⚠️ 각 파일 개별로 format (폴더 대상 금지)
+⚠️ 각 파일 개별 format (폴더 대상 금지)
 
 ---
 
-## Phase 6 — 커밋
+## Phase 7 — 커밋
 
 ```bash
 git add -A
-git commit -m "feat: add remainingTimeLoaded flag for proper loading state in Lobby"
+git commit -m "fix: prevent premature Store redirect and billing decisions before remainingTime loads"
 ```
 
 ---
 
-## Phase 7 — 실기기 테스트 시나리오
+## Phase 8 — 실기기 테스트 시나리오
 
-1. 로그아웃 → 재로그인 → 로비 진입 순간, 숫자 대신 로딩 스피너가 짧게 보이는지 확인
-2. 로딩 끝나면 실제 Firestore 값으로 정확히 표시되는지 확인
-3. 대화방 사용 후 로비 복귀 시에도 값이 정확히 반영되는지 확인 (기존 정상 동작 유지 여부)
+1. 앱 데이터 완전 삭제
+2. 구글 또는 카카오 로그인 → 로비 진입을 **여러 번 반복** (최소 5회, 로그아웃-재로그인 반복)
+3. 매번 Store로 잘못 튕기지 않고 정상적으로 로비/체험이 뜨는지 확인
+4. 정상적으로 시간이 0인 계정(실제 0)으로는 여전히 Store로 잘 유도되는지도 확인 (회귀 방지 확인)
 
 ---
 
-## Phase 8 — 롤백
+## Phase 9 — 롤백
 
 ```bash
 git revert HEAD
