@@ -48,6 +48,8 @@ class _IntroMasterState extends State<IntroMaster> {
   @override
   void initState() {
     super.initState();
+    debugPrint(
+        '[TrialDebug] IntroMaster initState, time=${DateTime.now().toIso8601String()}');
     _emailFocusNode.addListener(_onFocusChange);
     _passwordFocusNode.addListener(_onFocusChange);
     AppsFlyerManager.duoInviteSignal.addListener(_onDuoInviteSignal);
@@ -107,6 +109,8 @@ class _IntroMasterState extends State<IntroMaster> {
   }
 
   Future<void> _checkEntryStatus() async {
+    debugPrint(
+        '[TrialDebug] _checkEntryStatus enter, currentUser=${FirebaseAuth.instance.currentUser?.uid}, isAnonymous=${FirebaseAuth.instance.currentUser?.isAnonymous}, time=${DateTime.now().toIso8601String()}');
     // 1순위: FFAppState에 pending invite가 있으면 바로 StealthRoom
     debugPrint(
         '[Intro] pendingInviteType=${FFAppState().pendingInviteType}, duoRoomId=${FFAppState().duoRoomId}');
@@ -122,6 +126,8 @@ class _IntroMasterState extends State<IntroMaster> {
     // 3순위: 이미 로그인된 회원도 pending invite 우선 체크
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
+      debugPrint(
+          '[TrialDebug] _checkEntryStatus  routing existing user to Lobby via _routeAfterAuth, time=${DateTime.now().toIso8601String()}');
       _routeAfterAuth();
       return;
     }
@@ -147,6 +153,8 @@ class _IntroMasterState extends State<IntroMaster> {
   }
 
   Future<void> _startTrial(BuildContext context) async {
+    debugPrint(
+        '[TrialDebug] _startTrial enter, currentUser=${FirebaseAuth.instance.currentUser?.uid}, isAnonymous=${FirebaseAuth.instance.currentUser?.isAnonymous}, time=${DateTime.now().toIso8601String()}');
     setState(() => isLoading = true);
     try {
       TrialFlowState.instance.restoreFromAppState();
@@ -162,6 +170,8 @@ class _IntroMasterState extends State<IntroMaster> {
 
       final existingUser = FirebaseAuth.instance.currentUser;
       if (existingUser != null && existingUser.isAnonymous != true) {
+        debugPrint(
+            '[TrialDebug] non-anonymous session detected, signing out, time=${DateTime.now().toIso8601String()}');
         debugPrint(
             '[Trial] non-anonymous session detected, signing out before trial: ${existingUser.uid}');
         await FirebaseAuth.instance.signOut();
@@ -392,7 +402,11 @@ class _IntroMasterState extends State<IntroMaster> {
                               borderRadius: BorderRadius.circular(30),
                             ),
                           ),
-                          onPressed: () => _startTrial(context),
+                          onPressed: () {
+                            debugPrint(
+                                '[TrialDebug] trial button tapped, time=${DateTime.now().toIso8601String()}');
+                            _startTrial(context);
+                          },
                           child: const Text(
                             '30초 무료 체험 시작 →',
                             style: TextStyle(
