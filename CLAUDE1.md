@@ -48,25 +48,21 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-# 지시문: Duo 초대 라우팅 — isGuestSession 게이트 제거 및 인증 후 pending invite 우선 라우팅
+# 지시문: 카카오 로그인 매번 새 UID 생성 문제 — 진단 및 수정
 
-## 목적
-현재 Duo 초대 딥링크 라우팅이 `isGuestSession == true`인 비회원(게스트)에게만 작동합니다.
-구글/카카오/이메일로 가입한 **정식 회원**도 Duo 초대를 받을 수 있으므로,
-`isGuestSession` 조건을 제거하고, 모든 인증 완료 경로에서 pending invite를 먼저 확인하도록 수정합니다.
+## 배경
 
-## 대상 파일
-- `lib/custom_code/widgets/intro_master.dart` (이 파일 1개만 수정)
+카카오 로그인할 때마다 새 Firebase Auth UID가 생성되어:
+- 이전 대화 히스토리가 보이지 않음
+- remainingTime이 매번 초기화됨
+- 로비 진입 시 Firestore 실제값(0)과 FFAppState 캐시값(2:46)이 불일치
 
-## 수정 요약
-| # | 위치 | 내용 |
-|---|------|------|
-| A | 신규 헬퍼 추가 | `_routeAfterAuth()` — pending duo invite면 StealthRoom, 아니면 Lobby |
-| B | `_onDuoInviteSignal()` | `isGuestSession &&` 조건 제거 |
-| C | `_checkEntryStatus()` 1순위 | `isGuestSession &&` 조건 제거 |
-| D | `_checkEntryStatus()` 3순위 | `context.goNamed('Lobby')` → `_routeAfterAuth()` |
-| E | `_handleAuth()` | `context.goNamed('Lobby')` → `_routeAfterAuth()` |
-| F | `_handleSocialAuth()` | `context.goNamed('Lobby')` → `_routeAfterAuth()` |
+Cloud Function `kakaoCustomAuth`(index.js)의 `kakao_uid_map` 트랜잭션 로직은 정상.
+**근본 원인은 클라이언트 측 `SocialAuthService.signInWithKakao`에 있을 가능성이 높다.**
+
+## 대상 파일 (진단 후 확정)
+- `lib/auth/social_auth_service.dart` (1차 점검 대상)
+- 로그아웃 로직이 있는 파일 (FFAppState 캐시 초기화)
 
 ---
 
@@ -74,207 +70,148 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 
 ```bash
 cd F:\flutter_project\stealth_vox
-git add -A && git commit -m "savepoint: before duo invite routing fix"
+git add -A && git commit -m "savepoint: before kakao uid duplication fix"
 ```
 
 ---
 
-## Phase 1 — Grep 검증 (각 앵커 count=1 확인)
+## Phase 1 — 진단 (반드시 결과를 실장에게 보고)
+
+### 1-A: SocialAuthService 카카오 플로우 확인
 
 ```bash
 cd F:\flutter_project\stealth_vox
 
-# 앵커 A: 헬퍼 삽입 위치 (initAppsFlyer 닫는 부분)
-grep -n "appId: 'com.aienglishpractice.stealthvox'," lib/custom_code/widgets/intro_master.dart
-# 예상: 1줄 (count=1)
+# SocialAuthService 파일 위치 확인
+find lib -name "social_auth_service*" -type f
 
-# 앵커 B: _onDuoInviteSignal의 isGuestSession
-grep -n "duoInviteSignal - routing to StealthRoom" lib/custom_code/widgets/intro_master.dart
-# 예상: 1줄 (count=1)
-
-# 앵커 C: _checkEntryStatus 1순위의 isGuestSession
-grep -n "routing to StealthRoom for Duo invite" lib/custom_code/widgets/intro_master.dart
-# 예상: 1줄 (count=1)
-
-# 앵커 D: _checkEntryStatus 3순위
-grep -n "이미 로그인된 회원이면 로비로 이동" lib/custom_code/widgets/intro_master.dart
-# 예상: 1줄 (count=1)
-
-# 앵커 E: _handleAuth 내 goNamed('Lobby')
-grep -n "} on FirebaseAuthException catch (e) {" lib/custom_code/widgets/intro_master.dart
-# 예상: 1줄 (count=1)
-
-# 앵커 F: _handleSocialAuth 내 goNamed('Lobby')
-grep -c "await authFn();" lib/custom_code/widgets/intro_master.dart
-# 예상: 1 (count=1)
+# 파일 전체 내용 읽기
+cat lib/auth/social_auth_service.dart
 ```
 
-**count=1이 아닌 앵커가 있으면 즉시 중단하고 보고할 것.**
+**다음 4가지를 확인하고 실장에게 보고:**
 
----
+| 체크 항목 | 확인 방법 | 정상 기대값 |
+|-----------|-----------|-------------|
+| ① signInAnonymously 선행 | kakao 함수 내에서 현재 user가 null이면 `signInAnonymously()` 호출하는지 | 있어야 함 (Cloud Function이 `context.auth` 필요) |
+| ② kakaoCustomAuth callable 호출 | `HttpsCallable`로 `kakaoCustomAuth`를 호출하고 결과의 `token`을 받는지 | 있어야 함 |
+| ③ signInWithCustomToken 호출 | 반환된 token으로 `FirebaseAuth.instance.signInWithCustomToken(token)`을 **await**하는지 | **반드시 있어야 함 — 이것이 없으면 익명 uid로 남는다** |
+| ④ 에러 핸들링 | ③이 try-catch 안에서 에러를 삼키고 있지 않은지 | 에러 시 throw 또는 rethrow |
 
-## Phase 2 — str_replace 편집 (⚠️ 반드시 아래→위 순서로 실행)
+**⚠️ ③이 없거나, await 없이 fire-and-forget이면 → 이것이 근본 원인**
 
-### Edit F (최하단) — `_handleSocialAuth()`: Lobby → 헬퍼
-
-```
-파일: lib/custom_code/widgets/intro_master.dart
-
-old_str:
-      await authFn();
-      if (mounted) context.goNamed('Lobby');
-
-new_str:
-      await authFn();
-      if (mounted) _routeAfterAuth();
-```
-
-### Edit E — `_handleAuth()`: Lobby → 헬퍼
-
-```
-파일: lib/custom_code/widgets/intro_master.dart
-
-old_str:
-      if (mounted) context.goNamed('Lobby');
-    } on FirebaseAuthException catch (e) {
-
-new_str:
-      if (mounted) _routeAfterAuth();
-    } on FirebaseAuthException catch (e) {
-```
-
-### Edit D — `_checkEntryStatus()` 3순위: Lobby → 헬퍼
-
-```
-파일: lib/custom_code/widgets/intro_master.dart
-
-old_str:
-    // 3순위: 이미 로그인된 회원이면 로비로 이동
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      context.goNamed('Lobby');
-      return;
-    }
-
-new_str:
-    // 3순위: 이미 로그인된 회원 → pending invite 우선 체크
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      _routeAfterAuth();
-      return;
-    }
-```
-
-### Edit C — `_checkEntryStatus()` 1순위: isGuestSession 제거
-
-```
-파일: lib/custom_code/widgets/intro_master.dart
-
-old_str:
-    if (FFAppState().isGuestSession &&
-        FFAppState().pendingInviteType == 'duo' &&
-        FFAppState().duoRoomId.isNotEmpty) {
-      debugPrint('[Intro] routing to StealthRoom for Duo invite');
-
-new_str:
-    if (FFAppState().pendingInviteType == 'duo' &&
-        FFAppState().duoRoomId.isNotEmpty) {
-      debugPrint('[Intro] routing to StealthRoom for Duo invite');
-```
-
-### Edit B — `_onDuoInviteSignal()`: isGuestSession 제거
-
-```
-파일: lib/custom_code/widgets/intro_master.dart
-
-old_str:
-    if (FFAppState().isGuestSession &&
-        FFAppState().pendingInviteType == 'duo' &&
-        FFAppState().duoRoomId.isNotEmpty) {
-      debugPrint('[Intro] duoInviteSignal - routing to StealthRoom');
-
-new_str:
-    if (FFAppState().pendingInviteType == 'duo' &&
-        FFAppState().duoRoomId.isNotEmpty) {
-      debugPrint('[Intro] duoInviteSignal - routing to StealthRoom');
-```
-
-### Edit A (최상단) — `_routeAfterAuth()` 헬퍼 추가
-
-```
-파일: lib/custom_code/widgets/intro_master.dart
-
-old_str:
-  Future<void> _initAppsFlyer() async {
-    await AppsFlyerManager.initialize(
-      devKey: 'SQUmDTB2VzuPjrJGiy5SSC',
-      appId: 'com.aienglishpractice.stealthvox',
-    );
-  }
-
-new_str:
-  /// pending Duo 초대가 있으면 StealthRoom, 없으면 Lobby로 라우팅
-  void _routeAfterAuth() {
-    if (FFAppState().pendingInviteType == 'duo' &&
-        FFAppState().duoRoomId.isNotEmpty) {
-      debugPrint('[Intro] _routeAfterAuth → StealthRoom (pending duo invite)');
-      context.pushReplacementNamed('StealthRoom');
-    } else {
-      context.goNamed('Lobby');
-    }
-  }
-
-  Future<void> _initAppsFlyer() async {
-    await AppsFlyerManager.initialize(
-      devKey: 'SQUmDTB2VzuPjrJGiy5SSC',
-      appId: 'com.aienglishpractice.stealthvox',
-    );
-  }
-```
-
----
-
-## Phase 3 — 사후 Grep 검증
+### 1-B: 로그아웃 시 FFAppState 초기화 확인
 
 ```bash
-# isGuestSession이 intro_master.dart에서 완전히 제거되었는지 확인
-grep -c "isGuestSession" lib/custom_code/widgets/intro_master.dart
-# 예상: 0
+# 로그아웃 로직 위치 찾기
+grep -rn "signOut\|로그아웃\|logout\|logOut" lib/ --include="*.dart" -l
 
-# _routeAfterAuth 호출 횟수 (헬퍼 정의 1 + 호출 3 = 총 4)
-grep -c "_routeAfterAuth" lib/custom_code/widgets/intro_master.dart
-# 예상: 4
-
-# goNamed('Lobby')가 intro_master.dart에서 제거되었는지 확인
-grep -c "goNamed('Lobby')" lib/custom_code/widgets/intro_master.dart
-# 예상: 1 (헬퍼 내부의 1개만 남아야 함)
+# remainingTime 초기화 여부 확인
+grep -rn "remainingTime.*=.*0\|remainingTime.*reset" lib/ --include="*.dart"
 ```
+
+**확인:**
+- 로그아웃 시 `FFAppState().remainingTime = 0` (또는 전체 초기화)를 하는지
+- 안 하면 → 이전 세션의 캐시값(2:46)이 다음 로그인에 유령처럼 표시됨
+
+### 1-C: kakao_uid_map 데이터 확인 (참고용 — 코덱스가 직접 못함)
+
+**실장님이 Firebase Console에서 수동 확인:**
+- Firestore → `kakao_uid_map` 컬렉션 → 문서가 있는지
+- 있다면 `uid` 필드값이 Firebase Auth 사용자 목록의 어떤 uid와 일치하는지
+- Functions → 로그 → `kakaoCustomAuth` 검색 → `returning: true`가 나오는지 (한 번이라도 나오면 매핑 자체는 작동하는 것)
 
 ---
 
-## Phase 4 — 빌드 검증
+## Phase 2 — 수정
+
+### Phase 1 진단 결과에 따라 아래 중 해당하는 것을 적용:
+
+### Fix A: signInWithCustomToken 누락 시 (가장 가능성 높음)
+
+`SocialAuthService.signInWithKakao` 함수에서 Cloud Function 호출 후
+반환된 `token`으로 `signInWithCustomToken`을 **반드시 await** 해야 한다.
+
+**정상적인 카카오 로그인 플로우 (이 순서대로 되어 있어야 함):**
+
+```
+1. 현재 user == null이면 → await signInAnonymously()
+2. Kakao SDK 로그인 → accessToken 획득
+3. await kakaoCustomAuth callable 호출 → { token } 수신
+4. await FirebaseAuth.instance.signInWithCustomToken(token)   ← 핵심!
+5. 이 시점에서 currentUser.uid == resolvedUid (매핑된 기존 uid)
+```
+
+**③→④ 사이에 token을 받고도 signInWithCustomToken을 호출하지 않거나,
+await 없이 호출하고 있다면 수정해야 한다.**
+
+수정 시 주의사항:
+- `signInWithCustomToken`은 현재 인증 상태를 완전히 교체한다 (익명 uid → 매핑된 uid)
+- 반드시 `await`해야 한다 — 안 하면 navigate가 먼저 실행되어 익명 uid로 Lobby 진입
+
+### Fix B: signInAnonymously 선행 누락 시
+
+kakaoCustomAuth Cloud Function은 `context.auth`가 필수.
+카카오 로그인 시작 시점에 `FirebaseAuth.instance.currentUser`가 null이면
+먼저 `await FirebaseAuth.instance.signInAnonymously()`를 호출해야 한다.
+
+### Fix C: 로그아웃 시 FFAppState 캐시 초기화 (별도 수정)
+
+로그아웃 함수에서 `FirebaseAuth.instance.signOut()` 직전 또는 직후에
+FFAppState의 시간 관련 캐시를 초기화해야 한다:
+
+```
+FFAppState().remainingTime = 0
+```
+
+이것이 없으면:
+- 로그아웃 → 재로그인 시 이전 세션의 remainingTime 캐시(예: 2:46)가 UI에 표시
+- Firestore 실제값(0)과 불일치 → 대화방 진입 후 로비 복귀 시 갑자기 0으로 변경
+- 사용자 혼란 유발
+
+---
+
+## Phase 3 — 사후 검증
+
+### 3-A: 코드 검증
 
 ```bash
-cd F:\flutter_project\stealth_vox
-flutter analyze lib/custom_code/widgets/intro_master.dart
-dart format lib/custom_code/widgets/intro_master.dart
+flutter analyze lib/auth/social_auth_service.dart
+dart format lib/auth/social_auth_service.dart
 ```
 
-⚠️ `dart format`은 반드시 이 **단일 파일**만 대상으로 실행 (폴더 대상 금지 — 한글 UTF-8 깨짐 위험)
+⚠️ `dart format`은 반드시 단일 파일만 대상 (한글 UTF-8 깨짐 방지)
+
+### 3-B: 실기기 테스트 시나리오 (실장님 수동 테스트)
+
+**시나리오 1 — 최초 카카오 가입:**
+1. 앱 데이터 삭제 (또는 새 기기)
+2. 카카오 로그인 → 로비 진입
+3. Firebase Console → Authentication → 사용자 탭에서 UID 기록 (uid-X)
+4. Firestore → `kakao_uid_map` 컬렉션에 문서가 생겼는지 확인
+5. 대화 모드 진입 → 몇 마디 대화 → 히스토리 확인
+
+**시나리오 2 — 재로그인:**
+1. 앱에서 로그아웃
+2. 앱 완전 종료 후 재시작
+3. 카카오 로그인 → 로비 진입
+4. Firebase Console에서 UID 확인 → uid-X와 동일해야 함
+5. 히스토리에 시나리오 1의 대화가 남아있어야 함
+
+**시나리오 2에서 uid가 다르면 Fix A가 적용되지 않은 것이므로 재확인 필요**
 
 ---
 
-## Phase 5 — 롤백
+## Phase 4 — 롤백
 
-문제 발생 시:
 ```bash
 git revert HEAD
 ```
 
 ---
 
-## 참고: isGuestSession 자체를 삭제하는 건 아님
+## 참고: 스토어 구매 오류 ("항목을 찾을 수 없습니다")
 
-`isGuestSession`은 `intro_master.dart`의 라우팅 조건에서만 제거합니다.
-이 플래그는 Duo 방 내부(`duo_routine.dart` 등)에서 게스트/호스트 구분, 과금 면제 등
-다른 용도로 사용될 수 있으므로 FFAppState에서 필드 자체를 삭제하지 않습니다.
+이 오류는 카카오 UID 문제와 별개.
+Google Play 결제 프로필 조직→개인 마이그레이션이 진행 중(마감 7/16)이라
+상품이 비활성 상태일 수 있음. 마이그레이션 응답 수신 후 상품 활성화 상태 확인 필요.
