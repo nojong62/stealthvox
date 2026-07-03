@@ -721,8 +721,10 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                           _buildFooterLink(
                               "이용 약관", () => _showTermsDialog(context)),
                           _buildFooterLink("로그아웃", () async {
+                            FFAppState().remainingTime = 0;
                             await FirebaseAuth.instance.signOut();
-                            if (mounted) context.goNamed('Intro');
+                            if (!context.mounted) return;
+                            context.goNamed('Intro');
                           }),
                           _buildFooterLink(
                               "회원 탈퇴", () => _showDeleteAccountDialog(context)),
