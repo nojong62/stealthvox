@@ -3256,7 +3256,7 @@ RULES — follow exactly:
     try {
       FocusScope.of(context).unfocus();
       final appState = FFAppState();
-      if (appState.remainingTime <= 0) {
+      if (appState.hasConfirmedZeroTime) {
         context.pushNamed('Store');
         return;
       }

@@ -198,7 +198,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     _isActionLocked = true;
     try {
       FocusScope.of(context).unfocus();
-      if (appState.remainingTime <= 0) {
+      if (appState.hasConfirmedZeroTime) {
         context.pushNamed('Store');
         return;
       }

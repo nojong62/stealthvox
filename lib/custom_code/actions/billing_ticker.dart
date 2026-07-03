@@ -268,7 +268,7 @@ class BillingTicker with WidgetsBindingObserver {
   bool get _canResumeFromActivity =>
       _sessionMode.isNotEmpty &&
       _sessionStartTime != null &&
-      FFAppState().remainingTime > 0;
+      FFAppState().hasConfirmedPositiveTime;
 
   void _pauseFromLifecycle() {
     if (_paused) return;
@@ -291,7 +291,8 @@ class BillingTicker with WidgetsBindingObserver {
 
   void _onTick() {
     if (_paused) return;
-    if (FFAppState().remainingTime <= 0) return;
+    if (!FFAppState().remainingTimeLoaded) return;
+    if (FFAppState().hasConfirmedZeroTime) return;
 
     _fractionalDebt += _rate.multiplier;
     final whole = _fractionalDebt.floor();

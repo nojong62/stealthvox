@@ -148,6 +148,13 @@ class FFAppState extends ChangeNotifier {
     _remainingTimeLoaded = value;
   }
 
+  /// Firestore fetch가 완료되고 실제로 0(또는 그 이하)임이 확정된 경우에만 true.
+  /// 로딩 중에는 이 값이 true가 되지 않아야 한다.
+  bool get hasConfirmedZeroTime => remainingTimeLoaded && remainingTime <= 0;
+
+  /// 로딩 완료 후 실제로 사용할 시간이 있는 경우에만 true.
+  bool get hasConfirmedPositiveTime => remainingTimeLoaded && remainingTime > 0;
+
   String _secureApiKey = '';
   String get secureApiKey => _secureApiKey;
   set secureApiKey(String value) {
