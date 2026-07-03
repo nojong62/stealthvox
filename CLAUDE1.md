@@ -48,21 +48,19 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-# 지시문: 카카오 로그인 매번 새 UID 생성 문제 — 진단 및 수정
+# 지시문: 카카오 로그인 플로우 임시 디버그 로그 삽입 (원인 특정용)
 
 ## 배경
+adb 로그 분석 결과, 카카오 SDK 네이티브 로그인(`TalkAuthCodeActivity`)은 정상 완료되지만
+그 이후 단계(Cloud Function 콜러블 호출 → `signInWithCustomToken`)가 로그에 전혀 나타나지 않음.
+`_handleSocialAuth`/`SocialAuthService.signInWithKakao`에 디버그 출력이 없어서 블랙박스 상태.
 
-카카오 로그인할 때마다 새 Firebase Auth UID가 생성되어:
-- 이전 대화 히스토리가 보이지 않음
-- remainingTime이 매번 초기화됨
-- 로비 진입 시 Firestore 실제값(0)과 FFAppState 캐시값(2:46)이 불일치
+**목적**: 임시 `debugPrint`를 추가해 정확히 어느 단계에서 끊기는지 한 번의 재현으로 특정한다.
+**이 변경은 진단 전용이며, 원인 확인 후 제거하거나 정식 로깅으로 정리한다.**
 
-Cloud Function `kakaoCustomAuth`(index.js)의 `kakao_uid_map` 트랜잭션 로직은 정상.
-**근본 원인은 클라이언트 측 `SocialAuthService.signInWithKakao`에 있을 가능성이 높다.**
-
-## 대상 파일 (진단 후 확정)
-- `lib/auth/social_auth_service.dart` (1차 점검 대상)
-- 로그아웃 로직이 있는 파일 (FFAppState 캐시 초기화)
+## 대상 파일
+- `lib/auth/social_auth_service.dart`
+- `lib/custom_code/widgets/intro_master.dart`
 
 ---
 
@@ -70,148 +68,192 @@ Cloud Function `kakaoCustomAuth`(index.js)의 `kakao_uid_map` 트랜잭션 로�
 
 ```bash
 cd F:\flutter_project\stealth_vox
-git add -A && git commit -m "savepoint: before kakao uid duplication fix"
+git add -A && git commit -m "savepoint: before kakao debug logging"
 ```
 
 ---
 
-## Phase 1 — 진단 (반드시 결과를 실장에게 보고)
+## Phase 1 — social_auth_service.dart 확인 및 디버그 로그 삽입
 
-### 1-A: SocialAuthService 카카오 플로우 확인
+### 1-A: 파일 확인
 
 ```bash
-cd F:\flutter_project\stealth_vox
-
-# SocialAuthService 파일 위치 확인
-find lib -name "social_auth_service*" -type f
-
-# 파일 전체 내용 읽기
 cat lib/auth/social_auth_service.dart
 ```
 
-**다음 4가지를 확인하고 실장에게 보고:**
+`signInWithKakao` 함수의 정확한 구조를 파악한다 (아래는 예상 구조 — 실제와 다르면 구조에 맞춰 적용).
 
-| 체크 항목 | 확인 방법 | 정상 기대값 |
-|-----------|-----------|-------------|
-| ① signInAnonymously 선행 | kakao 함수 내에서 현재 user가 null이면 `signInAnonymously()` 호출하는지 | 있어야 함 (Cloud Function이 `context.auth` 필요) |
-| ② kakaoCustomAuth callable 호출 | `HttpsCallable`로 `kakaoCustomAuth`를 호출하고 결과의 `token`을 받는지 | 있어야 함 |
-| ③ signInWithCustomToken 호출 | 반환된 token으로 `FirebaseAuth.instance.signInWithCustomToken(token)`을 **await**하는지 | **반드시 있어야 함 — 이것이 없으면 익명 uid로 남는다** |
-| ④ 에러 핸들링 | ③이 try-catch 안에서 에러를 삼키고 있지 않은지 | 에러 시 throw 또는 rethrow |
+### 1-B: 삽입할 디버그 로그 (5개 지점)
 
-**⚠️ ③이 없거나, await 없이 fire-and-forget이면 → 이것이 근본 원인**
+`signInWithKakao` 함수 내부에서, 아래 5개 지점에 각각 `debugPrint`를 추가한다.
+**정확한 삽입 위치는 실제 코드 구조에 맞춰 코덱스가 판단**하되, 다음 순서와 의미를 반드시 지킨다:
 
-### 1-B: 로그아웃 시 FFAppState 초기화 확인
+```dart
+// ① 함수 진입 + 현재 인증 상태
+debugPrint('[KakaoAuth] ① signInWithKakao 시작, currentUser=${FirebaseAuth.instance.currentUser?.uid}, isAnonymous=${FirebaseAuth.instance.currentUser?.isAnonymous}');
 
-```bash
-# 로그아웃 로직 위치 찾기
-grep -rn "signOut\|로그아웃\|logout\|logOut" lib/ --include="*.dart" -l
+// ② 익명 로그인 필요 시 (currentUser == null인 분기 안)
+debugPrint('[KakaoAuth] ② signInAnonymously 실행');
+// ... 기존 signInAnonymously 호출 ...
+debugPrint('[KakaoAuth] ② signInAnonymously 완료, uid=${FirebaseAuth.instance.currentUser?.uid}');
 
-# remainingTime 초기화 여부 확인
-grep -rn "remainingTime.*=.*0\|remainingTime.*reset" lib/ --include="*.dart"
+// ③ Kakao SDK 로그인 성공 직후 (accessToken 획득 직후)
+debugPrint('[KakaoAuth] ③ Kakao SDK 로그인 성공, accessToken 길이=${token.accessToken.length}');
+// (Kakao SDK 로그인 실패 시 catch 블록에도 추가)
+debugPrint('[KakaoAuth] ③-실패 Kakao SDK 로그인 실패: $e');
+
+// ④ Cloud Function callable 호출 직전/직후
+debugPrint('[KakaoAuth] ④ kakaoCustomAuth callable 호출 시작');
+// ... 기존 callable 호출 ...
+debugPrint('[KakaoAuth] ④ kakaoCustomAuth 응답 수신, token 존재=${result.data['token'] != null}');
+
+// ⑤ signInWithCustomToken 직전/직후
+debugPrint('[KakaoAuth] ⑤ signInWithCustomToken 호출 시작');
+await FirebaseAuth.instance.signInWithCustomToken(customToken);
+debugPrint('[KakaoAuth] ⑤ signInWithCustomToken 완료, 최종 uid=${FirebaseAuth.instance.currentUser?.uid}');
 ```
 
-**확인:**
-- 로그아웃 시 `FFAppState().remainingTime = 0` (또는 전체 초기화)를 하는지
-- 안 하면 → 이전 세션의 캐시값(2:46)이 다음 로그인에 유령처럼 표시됨
+**전체를 감싸는 try-catch가 있다면, catch 블록에도 반드시 추가:**
 
-### 1-C: kakao_uid_map 데이터 확인 (참고용 — 코덱스가 직접 못함)
+```dart
+} catch (e, stack) {
+  debugPrint('[KakaoAuth] ❌ 예외 발생: $e');
+  debugPrint('[KakaoAuth] ❌ 스택: $stack');
+  rethrow; // 또는 기존 동작 유지
+}
+```
 
-**실장님이 Firebase Console에서 수동 확인:**
-- Firestore → `kakao_uid_map` 컬렉션 → 문서가 있는지
-- 있다면 `uid` 필드값이 Firebase Auth 사용자 목록의 어떤 uid와 일치하는지
-- Functions → 로그 → `kakaoCustomAuth` 검색 → `returning: true`가 나오는지 (한 번이라도 나오면 매핑 자체는 작동하는 것)
+⚠️ **주의**: 기존 로직의 흐름(return 값, await 순서, catch 처리)은 절대 변경하지 않는다.
+오직 `debugPrint` 라인만 추가한다.
 
 ---
 
-## Phase 2 — 수정
+## Phase 2 — intro_master.dart의 _handleSocialAuth에도 추가
 
-### Phase 1 진단 결과에 따라 아래 중 해당하는 것을 적용:
-
-### Fix A: signInWithCustomToken 누락 시 (가장 가능성 높음)
-
-`SocialAuthService.signInWithKakao` 함수에서 Cloud Function 호출 후
-반환된 `token`으로 `signInWithCustomToken`을 **반드시 await** 해야 한다.
-
-**정상적인 카카오 로그인 플로우 (이 순서대로 되어 있어야 함):**
-
-```
-1. 현재 user == null이면 → await signInAnonymously()
-2. Kakao SDK 로그인 → accessToken 획득
-3. await kakaoCustomAuth callable 호출 → { token } 수신
-4. await FirebaseAuth.instance.signInWithCustomToken(token)   ← 핵심!
-5. 이 시점에서 currentUser.uid == resolvedUid (매핑된 기존 uid)
+```bash
+grep -n "_handleSocialAuth" lib/custom_code/widgets/intro_master.dart
 ```
 
-**③→④ 사이에 token을 받고도 signInWithCustomToken을 호출하지 않거나,
-await 없이 호출하고 있다면 수정해야 한다.**
-
-수정 시 주의사항:
-- `signInWithCustomToken`은 현재 인증 상태를 완전히 교체한다 (익명 uid → 매핑된 uid)
-- 반드시 `await`해야 한다 — 안 하면 navigate가 먼저 실행되어 익명 uid로 Lobby 진입
-
-### Fix B: signInAnonymously 선행 누락 시
-
-kakaoCustomAuth Cloud Function은 `context.auth`가 필수.
-카카오 로그인 시작 시점에 `FirebaseAuth.instance.currentUser`가 null이면
-먼저 `await FirebaseAuth.instance.signInAnonymously()`를 호출해야 한다.
-
-### Fix C: 로그아웃 시 FFAppState 캐시 초기화 (별도 수정)
-
-로그아웃 함수에서 `FirebaseAuth.instance.signOut()` 직전 또는 직후에
-FFAppState의 시간 관련 캐시를 초기화해야 한다:
-
-```
-FFAppState().remainingTime = 0
+기존 함수:
+```dart
+Future<void> _handleSocialAuth(Future<dynamic> Function() authFn) async {
+    setState(() => isLoading = true);
+    try {
+      await authFn();
+      if (mounted) _routeAfterAuth();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('로그인 실패: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => isLoading = false);
+    }
+  }
 ```
 
-이것이 없으면:
-- 로그아웃 → 재로그인 시 이전 세션의 remainingTime 캐시(예: 2:46)가 UI에 표시
-- Firestore 실제값(0)과 불일치 → 대화방 진입 후 로비 복귀 시 갑자기 0으로 변경
-- 사용자 혼란 유발
+다음과 같이 디버그 로그를 추가 (str_replace):
+
+```
+old_str:
+  Future<void> _handleSocialAuth(Future<dynamic> Function() authFn) async {
+    setState(() => isLoading = true);
+    try {
+      await authFn();
+      if (mounted) _routeAfterAuth();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('로그인 실패: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => isLoading = false);
+    }
+  }
+
+new_str:
+  Future<void> _handleSocialAuth(Future<dynamic> Function() authFn) async {
+    debugPrint('[KakaoAuth] _handleSocialAuth 진입');
+    setState(() => isLoading = true);
+    try {
+      await authFn();
+      debugPrint('[KakaoAuth] authFn 완료, currentUser=${FirebaseAuth.instance.currentUser?.uid}, pendingInviteType=${FFAppState().pendingInviteType}');
+      if (mounted) _routeAfterAuth();
+      debugPrint('[KakaoAuth] _routeAfterAuth 호출 완료');
+    } catch (e, stack) {
+      debugPrint('[KakaoAuth] _handleSocialAuth 예외: $e');
+      debugPrint('[KakaoAuth] 스택: $stack');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('로그인 실패: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => isLoading = false);
+    }
+  }
+```
 
 ---
 
-## Phase 3 — 사후 검증
-
-### 3-A: 코드 검증
+## Phase 3 — 빌드 검증
 
 ```bash
-flutter analyze lib/auth/social_auth_service.dart
+flutter analyze lib/auth/social_auth_service.dart lib/custom_code/widgets/intro_master.dart
 dart format lib/auth/social_auth_service.dart
+dart format lib/custom_code/widgets/intro_master.dart
 ```
 
-⚠️ `dart format`은 반드시 단일 파일만 대상 (한글 UTF-8 깨짐 방지)
-
-### 3-B: 실기기 테스트 시나리오 (실장님 수동 테스트)
-
-**시나리오 1 — 최초 카카오 가입:**
-1. 앱 데이터 삭제 (또는 새 기기)
-2. 카카오 로그인 → 로비 진입
-3. Firebase Console → Authentication → 사용자 탭에서 UID 기록 (uid-X)
-4. Firestore → `kakao_uid_map` 컬렉션에 문서가 생겼는지 확인
-5. 대화 모드 진입 → 몇 마디 대화 → 히스토리 확인
-
-**시나리오 2 — 재로그인:**
-1. 앱에서 로그아웃
-2. 앱 완전 종료 후 재시작
-3. 카카오 로그인 → 로비 진입
-4. Firebase Console에서 UID 확인 → uid-X와 동일해야 함
-5. 히스토리에 시나리오 1의 대화가 남아있어야 함
-
-**시나리오 2에서 uid가 다르면 Fix A가 적용되지 않은 것이므로 재확인 필요**
+⚠️ 각각 단일 파일로 format (폴더 대상 금지)
 
 ---
 
-## Phase 4 — 롤백
+## Phase 4 — 커밋 (진단용 임시 커밋)
 
 ```bash
-git revert HEAD
+git add -A
+git commit -m "debug: temporary kakao auth flow logging"
 ```
+
+이 커밋은 원인 특정 후 되돌리거나(`git revert`) 정식 로깅으로 정리할 예정임을 실장에게 안내.
 
 ---
 
-## 참고: 스토어 구매 오류 ("항목을 찾을 수 없습니다")
+## Phase 5 — 재현 및 로그 캡처 (실장 수행)
 
-이 오류는 카카오 UID 문제와 별개.
-Google Play 결제 프로필 조직→개인 마이그레이션이 진행 중(마감 7/16)이라
-상품이 비활성 상태일 수 있음. 마이그레이션 응답 수신 후 상품 활성화 상태 확인 필요.
+1. `flutter run` (또는 이미 빌드된 최신 APK 재설치 후 `adb logcat` 필터링)
+2. 로그아웃 상태에서 카카오 로그인 버튼 탭
+3. 터미널/logcat에서 `[KakaoAuth]` 태그로 필터링:
+   ```bash
+   adb logcat | grep "KakaoAuth"
+   ```
+4. ①→⑤ 중 **어디까지 출력되고 어디서 멈추는지** 캡처
+
+---
+
+## Phase 6 — 결과 해석 가이드
+
+| 마지막 출력 지점 | 의미 |
+|---|---|
+| ①에서 멈춤 | 함수 진입 자체가 안 됨 → 버튼 onTap 연결 문제 |
+| ②에서 멈춤 | signInAnonymously 자체가 실패/멈춤 |
+| ③ 성공, ③-실패 없음, 그 다음 없음 | Kakao 토큰은 받았는데 콜러블 호출 코드에 도달 못 함 (코드 흐름 문제) |
+| ④ "호출 시작"만 있고 "응답 수신" 없음 | **Cloud Function 호출이 걸린 채 응답을 못 받음** — 네트워크, App Check, 타임아웃, 또는 리전 설정 불일치 의심 |
+| ④ 완료, ⑤ "호출 시작"만 있고 "완료" 없음 | `signInWithCustomToken` 자체에서 예외 (토큰 형식, 만료 등) |
+| ⑤까지 전부 출력됨 | 로그인은 성공 — 문제는 그 이후 라우팅/캐시 쪽 (별도 조사 필요) |
+| ❌ 예외 로그 출력됨 | 그 예외 메시지와 스택을 그대로 실장에게 전달 |
+
+---
+
+## Phase 7 — 정리 (원인 특정 후)
+
+원인이 특정되면 이 디버그 로그들은:
+- 제거하거나
+- 실장 승인 하에 정식 `functions.logger` 스타일 로깅으로 전환
+
+```bash
+git log --oneline -5   # 진단용 커밋 해시 확인
+git revert <해당 커밋 해시>   # 필요 시 되돌리기
+```
