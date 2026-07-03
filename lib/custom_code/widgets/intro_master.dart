@@ -177,6 +177,7 @@ class _IntroMasterState extends State<IntroMaster> {
         await FirebaseAuth.instance.signOut();
       }
       if (FirebaseAuth.instance.currentUser == null) {
+        AppStateNotifier.instance.updateNotifyOnAuthChange(false);
         await FirebaseAuth.instance.signInAnonymously();
       }
       await TrialDeviceGate.markUsed();
