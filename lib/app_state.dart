@@ -134,10 +134,18 @@ class FFAppState extends ChangeNotifier {
   }
 
   /// 남은 시간 (초)
-  int _remainingTime = 10000;
+  int _remainingTime = 0;
   int get remainingTime => _remainingTime;
   set remainingTime(int value) {
     _remainingTime = value;
+  }
+
+  /// remainingTime을 Firestore에서 최초 로드했는지 여부.
+  /// false인 동안 UI는 숫자 대신 로딩 표시를 해야 한다.
+  bool _remainingTimeLoaded = false;
+  bool get remainingTimeLoaded => _remainingTimeLoaded;
+  set remainingTimeLoaded(bool value) {
+    _remainingTimeLoaded = value;
   }
 
   String _secureApiKey = '';

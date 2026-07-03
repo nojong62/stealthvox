@@ -61,6 +61,7 @@ class FirebaseAuthManager extends AuthManager
   @override
   Future signOut() {
     FFAppState().remainingTime = 0;
+    FFAppState().remainingTimeLoaded = false;
     return FirebaseAuth.instance.signOut();
   }
 

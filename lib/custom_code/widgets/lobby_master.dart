@@ -118,13 +118,23 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   }
 
   Future<void> _initializeLobbyData() async {
-    setState(() => isLoading = true);
+    setState(() {
+      isLoading = true;
+      FFAppState().remainingTimeLoaded = false;
+    });
     try {
       // 1. DB 통신 분리: 서버 시간 및 남은 시간 동기화
       int? serverRemainingTime =
           await LobbyBrain.getRemainingTime(FirebaseAuth.instance.currentUser);
-      if (serverRemainingTime != null && mounted) {
-        setState(() => FFAppState().remainingTime = serverRemainingTime);
+      if (mounted) {
+        setState(() {
+          if (serverRemainingTime != null) {
+            FFAppState().remainingTime = serverRemainingTime;
+          }
+          FFAppState().remainingTimeLoaded = true;
+        });
+      }
+      if (serverRemainingTime != null) {
         BillingTicker.instance.remainingSecondsNotifier.value =
             serverRemainingTime;
         BillingTicker.instance.start();
@@ -159,6 +169,9 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
       if (!mounted) return;
     } catch (e) {
       debugPrint("Init Error: $e");
+      if (mounted) {
+        setState(() => FFAppState().remainingTimeLoaded = true);
+      }
     } finally {
       if (mounted) setState(() => isLoading = false);
     }
@@ -603,19 +616,34 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                                         letterSpacing: 3,
                                         fontWeight: FontWeight.bold)),
                                 const SizedBox(height: 8),
-                                Text(displayTime,
-                                    style: GoogleFonts.orbitron(
-                                        color: appState.remainingTime > 60
-                                            ? Colors.white
-                                            : const Color(0xFFFF453A),
-                                        fontSize: 48,
-                                        fontWeight: FontWeight.bold,
-                                        shadows: [
-                                          Shadow(
-                                              color: const Color(0xFF3B82F6)
-                                                  .withValues(alpha: 0.5),
-                                              blurRadius: 20)
-                                        ])),
+                                appState.remainingTimeLoaded
+                                    ? Text(displayTime,
+                                        style: GoogleFonts.orbitron(
+                                            color: appState.remainingTime > 60
+                                                ? Colors.white
+                                                : const Color(0xFFFF453A),
+                                            fontSize: 48,
+                                            fontWeight: FontWeight.bold,
+                                            shadows: [
+                                              Shadow(
+                                                  color: const Color(0xFF3B82F6)
+                                                      .withValues(alpha: 0.5),
+                                                  blurRadius: 20)
+                                            ]))
+                                    : const SizedBox(
+                                        width: 48,
+                                        height: 48,
+                                        child: Center(
+                                          child: SizedBox(
+                                            width: 24,
+                                            height: 24,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: Color(0xFF60A5FA),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
                               ])),
                               const SizedBox(height: 20),
                               _buildGlassContainer(
@@ -722,6 +750,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                               "이용 약관", () => _showTermsDialog(context)),
                           _buildFooterLink("로그아웃", () async {
                             FFAppState().remainingTime = 0;
+                            FFAppState().remainingTimeLoaded = false;
                             await FirebaseAuth.instance.signOut();
                             if (!context.mounted) return;
                             context.goNamed('Intro');
