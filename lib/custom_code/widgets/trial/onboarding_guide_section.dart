@@ -33,7 +33,7 @@ class OnboardingGuideSection extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           const Text(
-            '30초 동안\nAnyone 모드를\n체험해 보세요',
+            '1분 동안\nAnyone 모드를\n체험해 보세요',
             style: TextStyle(
               color: Colors.white,
               fontSize: 17,

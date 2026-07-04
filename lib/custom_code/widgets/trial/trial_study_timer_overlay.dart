@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 class TrialStudyTimerOverlay extends StatefulWidget {
   const TrialStudyTimerOverlay({
     super.key,
-    this.durationSeconds = 60,
+    this.durationSeconds = 120,
     required this.onTimeUp,
   });
 

@@ -48,133 +48,74 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-# 지시문: 체험(_startTrial) 시 라우터 자동 리다이렉트 억제
-
-## 배경
-`GoRouter`의 `refreshListenable: appStateNotifier` 구조상, `/` 경로(Intro)에
-머무른 채로 `signInAnonymously()`가 실행되면 `appStateNotifier.loggedIn`이
-true로 바뀌고, 초기 라우트 builder(`appStateNotifier.loggedIn ? LobbyWidget() : IntroWidget()`)가
-재평가되어 자동으로 LobbyWidget으로 교체됨. 이 때문에 `_enterTrialAnyone()`의
-명시적 `pushNamed('StealthRoom')`이 무시되고 체험 버튼이 Lobby(0시간)로 새는 현상 발생.
-
-**해결**: `AppStateNotifier`에 이미 존재하는 1회성 억제 스위치
-`updateNotifyOnAuthChange(false)`를 익명 로그인 직전에 호출하여,
-이번 인증 상태 변화가 라우터에 전달되지 않도록 한다.
-
-## 대상 파일
-- `lib/custom_code/widgets/intro_master.dart`
-
----
-
-## Phase 0 — Savepoint
-
-```bash
-cd F:\flutter_project\stealth_vox
-git add -A && git commit -m "savepoint: before trial routing redirect suppression fix"
-```
-
----
-
-## Phase 1 — 정확한 삽입 위치 확인
-
-```bash
-grep -n "_startTrial\|signInAnonymously" lib/custom_code/widgets/intro_master.dart -B 2 -A 10
-```
-
-`_startTrial()` 함수 내부에서 `FirebaseAuth.instance.signInAnonymously()`를
-호출하는 정확한 줄을 찾는다 (지난번 수정으로 non-anonymous 세션 처리 분기가
-추가되었으므로, 그 로직과 겹치지 않게 위치 확인).
-
-## Phase 2 — AppStateNotifier import 확인
-
-```bash
-grep -n "^import" lib/custom_code/widgets/intro_master.dart | grep -i "app_state_notifier\|nav.dart\|flutter_flow"
-```
-
-`AppStateNotifier` 클래스가 이미 import되어 있는지 확인. 없다면 적절한
-import 구문을 추가해야 한다 (파일 위치: `lib/flutter_flow/nav/nav.dart` 또는
-해당 클래스가 정의된 파일 경로를 grep으로 재확인).
-
-```bash
-grep -rn "class AppStateNotifier" lib/ --include="*.dart"
-```
-
-## Phase 3 — 수정
-
-`signInAnonymously()` 호출 직전에 한 줄 추가:
-
-```dart
-AppStateNotifier.instance.updateNotifyOnAuthChange(false);
-await FirebaseAuth.instance.signInAnonymously();
-```
-
-정확한 old_str/new_str은 Phase 1에서 확인한 실제 코드에 맞춰 작성한다.
-예시 형태:
-
-```
-old_str:
-      await FirebaseAuth.instance.signInAnonymously();
-
+지시문: 인트로 화면에 Anyone 이용 방법 안내 카드 추가
+대상 파일: lib/custom_code/widgets/intro_master.dart (프로젝트 내 실제 경로로 대체)
+1. 사전 준비
+powershellgit add -A
+git commit -m "savepoint: before intro usage guide card"
+2. 앵커 유일성 확인 (count=1 필수)
+powershellSelect-String -Path "intro_master.dart" -Pattern "공부방 2분"
+Select-String -Path "intro_master.dart" -Pattern "0x996F66D8"
+→ 두 패턴 모두 정확히 1건씩 나와야 진행. 아니면 중단하고 보고.
+3. str_replace 적용
+old_str (정확히 일치해야 함):
+dart                            Text("공부방 2분",
+                                style: GoogleFonts.roboto(
+                                    fontSize: 11,
+                                    color: const Color(0xFFA7A7AE))),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 48,
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0x996F66D8),
 new_str:
-      AppStateNotifier.instance.updateNotifyOnAuthChange(false);
-      await FirebaseAuth.instance.signInAnonymously();
-```
-
-⚠️ **주의**: 지난번 수정으로 `_startTrial()` 안에 non-anonymous 세션일 때
-signOut 후 signInAnonymously하는 분기가 있다. `signInAnonymously()` 호출이
-2곳(또는 조건부 1곳)일 수 있으므로, **모든 signInAnonymously() 호출 직전**에
-동일하게 `updateNotifyOnAuthChange(false)`를 추가해야 한다. grep으로 호출
-지점이 몇 개인지 먼저 정확히 센 뒤 적용할 것.
-
-```bash
-grep -c "signInAnonymously()" lib/custom_code/widgets/intro_master.dart
-```
-
----
-
-## Phase 4 — 사후 검증
-
-```bash
-grep -n "updateNotifyOnAuthChange\|signInAnonymously" lib/custom_code/widgets/intro_master.dart
-```
-`updateNotifyOnAuthChange(false)` 호출 횟수가 `signInAnonymously()` 호출
-횟수와 일치하는지 확인 (각 익명 로그인 앞에 빠짐없이 붙었는지).
-
----
-
-## Phase 5 — 빌드 검증
-
-```bash
-flutter analyze lib/custom_code/widgets/intro_master.dart
-dart format lib/custom_code/widgets/intro_master.dart
-```
-
-⚠️ 단일 파일만 format
-
----
-
-## Phase 6 — 커밋
-
-```bash
-git add -A
-git commit -m "fix: suppress router auto-redirect during trial anonymous sign-in"
-```
-
----
-
-## Phase 7 — 실기기 테스트 시나리오
-
-1. 앱 데이터 완전 삭제 → 재실행 → 체험 버튼 클릭 → **언어선택 화면이 뜨는지** (Lobby로 새지 않는지) 확인
-2. 로그아웃 → 앱 안 끄고 체험 클릭 → 정상 동작 유지 확인 (회귀 없는지)
-3. 로그아웃 → 앱 강제 종료 → 재시작 → 체험 클릭 → 이번엔 언어선택으로 정상 진행되는지 확인 (기존 cold start 버그 재현 여부)
-4. 정식 회원(카카오/구글) 로그인은 여전히 정상적으로 Lobby로 가는지 확인 (`updateNotifyOnAuthChange`가 자동으로 다시 true로 복원되므로 문제없어야 함 — 회귀 확인 차원)
-
-이번엔 반드시 **cold start 케이스(3번)를 여러 번 반복**해서 확인할 것 — 지난번 수정이 이 케이스에서 효과가 없었던 전례가 있음.
-
----
-
-## Phase 8 — 롤백
-
-```bash
-git revert HEAD
-```
+dart                            Text("공부방 2분",
+                                style: GoogleFonts.roboto(
+                                    fontSize: 11,
+                                    color: const Color(0xFFA7A7AE))),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      const Row(
+                        children: [
+                          Icon(Icons.lightbulb, color: Colors.amber, size: 20),
+                          SizedBox(width: 8),
+                          Text("이용 방법",
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        '대화하고 싶은 사람을 한 명 마음속에 떠올려 보세요. 그리고 그 사람이 바로 지금 눈앞에 있다고 생각하고, 하고 싶었던 말을 편하게 꺼내보세요. AI가 그 사람과 다르게 반응한다면, 그냥 넘기지 말고 "왜 그렇게 느껴?"하고 되물어 보세요. 묻고 답하다 보면, AI는 점점 더 그 사람에 가까워집니다. 진짜 그 사람과 마주 앉은 것처럼요.',
+                        style: TextStyle(
+                            color: Colors.white70, fontSize: 13, height: 1.6),
+                      ),
+                      const SizedBox(height: 22),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 48,
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0x996F66D8),
+4. 사후 grep 검증
+powershellSelect-String -Path "intro_master.dart" -Pattern "이용 방법"
+→ 2건 나와야 정상 (기존 Anyone 모드 다이얼로그 1건 + 새로 추가한 인트로 카드 1건). 1건뿐이면 삽입 실패, 3건 이상이면 중복 삽입 — 둘 다 중단하고 보고.
+5. 포맷 (해당 파일만, 폴더 단위 금지)
+powershelldart format intro_master.dart
+6. 빌드 검증
+powershellflutter analyze
+flutter build apk --debug
+7. 커밋
+powershellgit add intro_master.dart
+git commit -m "feat: intro 화면에 Anyone 이용 방법 안내 카드 추가 (로그인 버튼 위)"
+8. 롤백 (문제 발생 시)
+powershellgit reset --hard HEAD~1

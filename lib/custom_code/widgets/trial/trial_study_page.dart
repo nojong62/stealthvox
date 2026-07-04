@@ -17,7 +17,7 @@ class TrialStudyPage extends StatelessWidget {
         children: [
           ChatHistoryMaster(historyDoc: historyRef),
           TrialStudyTimerOverlay(
-            durationSeconds: 60,
+            durationSeconds: 120,
             onTimeUp: () {
               TrialFlowState.instance.advanceTo(4);
               TrialFlowState.instance.requestSignupOnEntry();

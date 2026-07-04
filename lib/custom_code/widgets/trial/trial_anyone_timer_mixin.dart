@@ -5,10 +5,10 @@ import 'package:flutter/material.dart';
 
 mixin TrialAnyoneTimerMixin<T extends StatefulWidget> on State<T> {
   bool trialMode = false;
-  int trialSeconds = 30;
+  int trialSeconds = 60;
 
   Timer? _trialTimer;
-  int _trialRemaining = 30;
+  int _trialRemaining = 60;
   bool _trialTimeUp = false;
 
   bool get isTrialTimeUp => _trialTimeUp;

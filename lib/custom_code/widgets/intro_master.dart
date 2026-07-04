@@ -409,7 +409,7 @@ class _IntroMasterState extends State<IntroMaster> {
                             _startTrial(context);
                           },
                           child: const Text(
-                            '30초 무료 체험 시작 →',
+                            '1분 무료 체험 시작 →',
                             style: TextStyle(
                               color: Color(0xFFF5F5F7),
                               fontSize: 16,
@@ -421,7 +421,7 @@ class _IntroMasterState extends State<IntroMaster> {
                       const SizedBox(height: 10),
                       const Center(
                         child: Text(
-                          '회원가입 없이 바로 · 기기당 1회',
+                          '회원가입 없이 바로 · 체험 하기',
                           style: TextStyle(
                             color: Color(0xFF6F6F78),
                             fontSize: 10.5,
@@ -434,7 +434,7 @@ class _IntroMasterState extends State<IntroMaster> {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Text("Anyone 대화 30초",
+                            Text("대화 1분",
                                 style: GoogleFonts.roboto(
                                     fontSize: 11,
                                     color: const Color(0xFFA7A7AE))),
@@ -444,7 +444,7 @@ class _IntroMasterState extends State<IntroMaster> {
                                   style: TextStyle(
                                       color: Color(0xFF8B7CFF), fontSize: 11)),
                             ),
-                            Text("공부방 1분",
+                            Text("공부방 2분",
                                 style: GoogleFonts.roboto(
                                     fontSize: 11,
                                     color: const Color(0xFFA7A7AE))),
@@ -973,7 +973,7 @@ class _IntroMasterState extends State<IntroMaster> {
           ),
           const SizedBox(height: 11),
           const Text(
-            '30초 동안\nAnyone 모드를\n체험해 보세요',
+            '1분 동안\nAnyone 모드를\n체험해 보세요',
             style: TextStyle(
               color: Color(0xFFF5F5F7),
               fontSize: 14.5,
