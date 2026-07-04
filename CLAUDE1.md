@@ -42,80 +42,324 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 - FlutterFlow generated code 구조를 함부로 대규모 변경하지 말 것
 - 앱 실행/빌드 가능성을 최우선으로 할 것
 - 불확실한 부분은 임의 삭제하지 말고 보고할 것
-- 완료후 관리자가 APK 라고 적으면, 날자와 시간이 이름에 들어간 APK만들어 줘. 
 
 이 내용을 항상 기억하고 지시문에 포함해 줘.
 =================================
 지시문 
 
-지시문: 인트로 화면에 Anyone 이용 방법 안내 카드 추가
-대상 파일: lib/custom_code/widgets/intro_master.dart (프로젝트 내 실제 경로로 대체)
-1. 사전 준비
-powershellgit add -A
-git commit -m "savepoint: before intro usage guide card"
-2. 앵커 유일성 확인 (count=1 필수)
-powershellSelect-String -Path "intro_master.dart" -Pattern "공부방 2분"
-Select-String -Path "intro_master.dart" -Pattern "0x996F66D8"
-→ 두 패턴 모두 정확히 1건씩 나와야 진행. 아니면 중단하고 보고.
-3. str_replace 적용
-old_str (정확히 일치해야 함):
-dart                            Text("공부방 2분",
-                                style: GoogleFonts.roboto(
-                                    fontSize: 11,
-                                    color: const Color(0xFFA7A7AE))),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 48,
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0x996F66D8),
-new_str:
-dart                            Text("공부방 2분",
-                                style: GoogleFonts.roboto(
-                                    fontSize: 11,
-                                    color: const Color(0xFFA7A7AE))),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      const Row(
-                        children: [
-                          Icon(Icons.lightbulb, color: Colors.amber, size: 20),
-                          SizedBox(width: 8),
-                          Text("이용 방법",
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.bold)),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      const Text(
-                        '대화하고 싶은 사람을 한 명 마음속에 떠올려 보세요. 그리고 그 사람이 바로 지금 눈앞에 있다고 생각하고, 하고 싶었던 말을 편하게 꺼내보세요. AI가 그 사람과 다르게 반응한다면, 그냥 넘기지 말고 "왜 그렇게 느껴?"하고 되물어 보세요. 묻고 답하다 보면, AI는 점점 더 그 사람에 가까워집니다. 진짜 그 사람과 마주 앉은 것처럼요.',
-                        style: TextStyle(
-                            color: Colors.white70, fontSize: 13, height: 1.6),
-                      ),
-                      const SizedBox(height: 22),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 48,
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0x996F66D8),
-4. 사후 grep 검증
-powershellSelect-String -Path "intro_master.dart" -Pattern "이용 방법"
-→ 2건 나와야 정상 (기존 Anyone 모드 다이얼로그 1건 + 새로 추가한 인트로 카드 1건). 1건뿐이면 삽입 실패, 3건 이상이면 중복 삽입 — 둘 다 중단하고 보고.
-5. 포맷 (해당 파일만, 폴더 단위 금지)
-powershelldart format intro_master.dart
-6. 빌드 검증
-powershellflutter analyze
-flutter build apk --debug
-7. 커밋
-powershellgit add intro_master.dart
-git commit -m "feat: intro 화면에 Anyone 이용 방법 안내 카드 추가 (로그인 버튼 위)"
-8. 롤백 (문제 발생 시)
-powershellgit reset --hard HEAD~1
+# 지시문: 애니원 모드 "1초 침묵 안내음" 전환
+
+## 사전 준비 (코드 수정 전에 실행)
+
+### STEP 0. 안내음 mp3 파일 사전 생성 (1회성, 로컬에서 실행)
+
+문구가 고정이므로 런타임 API 호출 없이 **로컬 정적 에셋**으로 번들합니다. 아래 Python 스크립트를 실장님 PC에서 1회만 실행해서 mp3를 만드세요.
+
+```python
+# generate_nudge_audio.py
+import requests
+
+OPENAI_API_KEY = "본인 OpenAI 키"  # Remote Config 콘솔에서 복사해서 임시로 넣고 실행 후 지울 것
+TEXT = "여기, 그 사람이 있어요. 편하게 말 걸어보세요."
+
+resp = requests.post(
+    "https://api.openai.com/v1/audio/speech",
+    headers={
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json",
+    },
+    json={
+        "model": "tts-1",
+        "input": TEXT,
+        "voice": "fable",
+        "speed": 1.0,
+    },
+)
+resp.raise_for_status()
+with open("anyone_nudge_fable.mp3", "wb") as f:
+    f.write(resp.content)
+print("saved:", len(resp.content), "bytes")
+```
+
+실행 후 생성된 `anyone_nudge_fable.mp3`를 다음 경로에 배치:
+```
+F:\flutter_project\stealth_vox\assets\audio\anyone_nudge_fable.mp3
+```
+
+### STEP 0-1. pubspec.yaml 에셋 등록 (별도 파일 — Codex가 직접 확인 후 처리)
+
+`pubspec.yaml`에서 기존 `flutter: assets:` 섹션을 grep으로 찾아 아래 라인이 없으면 추가:
+```yaml
+    - assets/audio/anyone_nudge_fable.mp3
+```
+(만약 `assets/audio/` 폴더 전체를 이미 통째로 등록하는 방식이면 이 단계는 스킵 — Codex가 기존 패턴 확인 후 판단)
+
+---
+
+## 코드 수정 (`routine_mode_anyone.dart`) — 반드시 아래 순서(파일 하단→상단)로 진행
+
+### 사전 조치
+```
+git add -A && git commit -m "savepoint: before anyone-mode nudge sound change"
+```
+
+### Edit 1 (파일 최하단부터) — GPT 기반 오프너 생성 함수 삭제
+
+**grep 확인 (count=1 기대):**
+```
+grep -c "static Stream<String> generateFreeTalkOpener({" routine_mode_anyone.dart
+```
+
+**old_str** (라인 3661~3724, 위 구분선 주석부터 함수 끝까지 통째로):
+```dart
+  // ==================================================================
+  static Stream<String> generateFreeTalkOpener({
+    required String apiKey,
+    required String targetLang,
+    String level = "Intermediate",
+  }) async* {
+    final client = http.Client();
+    try {
+      final sysPrompt =
+          """You are about to be spoken to by the user, as if you are a specific person they have in mind — but you do not know who yet.
+Open with ONE short, warm line that simply lets them begin, as if you happen to be right there in front of them.
+
+RULES:
+- Speak ONLY in $targetLang. Do NOT use Korean or any other language.
+- ONE sentence only. Under 12 words.
+- Neutral and natural — do NOT assume any relationship, mood, or role yet. No names, no labels.
+- Just open the door for them to speak first. For example: "Hey... I'm right here. What did you want to say?" or "I'm listening — go ahead."
+- ${_freeTalkLevelInstruction(level)}
+
+Output: ONE sentence in $targetLang only.""";
+
+      final request = http.Request(
+        'POST',
+        Uri.parse('https://api.openai.com/v1/chat/completions'),
+      );
+      request.headers.addAll({
+        'Authorization': 'Bearer $apiKey',
+        'Content-Type': 'application/json; charset=utf-8',
+      });
+      request.body = jsonEncode({
+        'model': 'gpt-4o-mini',
+        'stream': true,
+        'temperature': 0.8,
+        'max_tokens': 40,
+        'messages': [
+          {'role': 'system', 'content': sysPrompt},
+          {
+            'role': 'user',
+            'content':
+                'Start the conversation — say your friendly opening line in $targetLang.',
+          },
+        ],
+      });
+
+      final response =
+          await client.send(request).timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) return;
+
+      await for (final line in response.stream
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())) {
+        if (line.startsWith('data: ') && line != 'data: [DONE]') {
+          try {
+            final delta =
+                jsonDecode(line.substring(6))['choices'][0]['delta']['content'];
+            if (delta != null) yield delta.toString();
+          } catch (_) {}
+        }
+      }
+    } catch (_) {
+    } finally {
+      client.close();
+    }
+  }
+}
+```
+
+**new_str**:
+```dart
+}
+```
+*(클래스 닫는 중괄호만 남기고 함수 전체 제거)*
+
+---
+
+### Edit 2 — `_generateAndPlayAiOpener` 함수 및 상단 주석 블록 삭제
+
+**grep 확인 (count=1 기대):**
+```
+grep -c "Future<void> _generateAndPlayAiOpener() async {" routine_mode_anyone.dart
+```
+
+**old_str** (라인 441~554, 주석 블록 + 함수 전체):
+```dart
+  // ====================================================================
+  // 📦 [AI 첫 발화 — AI가 먼저 대화 시작]
+  // ====================================================================
+  // 클론 대화 시작 원칙:
+  //   1. AI가 항상 먼저 말한다 — 화면 진입 시 클론이 자동으로 먼저 발화.
+  //   2. 타겟 언어로만 말한다 — 한국어 절대 혼용 금지.
+  //   3. 클론 페르소나에 충실한 자연스러운 첫 마디 (AI 티 내지 않음).
+  // ====================================================================
+  Future<void> _generateAndPlayAiOpener() async {
+```
+*(이하 554라인 `}`까지 전체 — 파일이 길어 str_replace 시 449~554 전체 텍스트를 old_str로 그대로 사용)*
+
+**new_str**:
+```dart
+  // ====================================================================
+  // 📦 [1초 침묵 안내음] — GPT 오프너 대신 사전 생성된 고정 mp3 재생
+  // ====================================================================
+  Future<void> _playNudgeSound() async {
+    if (_hasPlayedNudge) return;
+    _hasPlayedNudge = true;
+    try {
+      await _nudgeAudioPlayer.play(AssetSource('audio/anyone_nudge_fable.mp3'));
+    } catch (e) {
+      _log('❌ [NUDGE-SOUND-ERR]', '$e');
+    }
+  }
+```
+
+> ⚠️ Codex 주의: old_str이 100줄 넘게 길어 grep 앵커만으로 정확히 잘라내기 까다로우면, `view routine_mode_anyone.dart` 449 554로 실제 라인을 재확인한 뒤 그 구간 전체를 old_str에 그대로 복사해서 사용할 것.
+
+---
+
+### Edit 3 — `_armOpenerNudge`: 2초→1초, AI 음성 대신 안내음 재생
+
+**grep 확인 (count=1 기대):**
+```
+grep -c "void _armOpenerNudge() {" routine_mode_anyone.dart
+```
+
+**old_str**:
+```dart
+  void _armOpenerNudge() {
+    _openerNudgeTimer?.cancel();
+    _openerNudgeTimer = Timer(const Duration(seconds: 2), () {
+      if (!mounted || !_isConversationActive) return;
+      if (_userHasSpoken || _localMessages.isNotEmpty) return;
+      _log('💡 [NUDGE]', '2초 침묵 → AI 오프너 발화');
+      _voiceManager?.dispose();
+      _voiceManager = null;
+      _generateAndPlayAiOpener();
+    });
+  }
+```
+
+**new_str**:
+```dart
+  void _armOpenerNudge() {
+    _openerNudgeTimer?.cancel();
+    _openerNudgeTimer = Timer(const Duration(seconds: 1), () {
+      if (!mounted || !_isConversationActive) return;
+      if (_userHasSpoken || _localMessages.isNotEmpty) return;
+      _log('💡 [NUDGE]', '1초 침묵 → 안내음 재생 (마이크 유지)');
+      _playNudgeSound();
+    });
+  }
+```
+
+*(마이크를 끊지 않으므로 `_voiceManager?.dispose()` 호출 제거)*
+
+---
+
+### Edit 4 — `_stopEverything`: 플래그명 교체
+
+**grep 확인 (count=1 기대):**
+```
+grep -c "_isAiOpenerPlaying = false;" routine_mode_anyone.dart
+```
+
+**old_str**:
+```dart
+    _isConversationActive = false;
+    _isAiOpenerPlaying = false;
+    _isStartingListening = false;
+```
+
+**new_str**:
+```dart
+    _isConversationActive = false;
+    _hasPlayedNudge = false;
+    _isStartingListening = false;
+```
+
+---
+
+### Edit 5 — `_startFreeTalkSession`: 안내음 가드 초기화 추가
+
+**grep 확인 (count=1 기대, 문맥 포함):**
+```
+grep -c "if (_isConversationActive) return; // 중복 시작 방지" routine_mode_anyone.dart
+```
+
+**old_str**:
+```dart
+    if (_isConversationActive) return; // 중복 시작 방지
+    _userHasSpoken = false;
+    _startDeepgramListening();
+```
+
+**new_str**:
+```dart
+    if (_isConversationActive) return; // 중복 시작 방지
+    _userHasSpoken = false;
+    _hasPlayedNudge = false;
+    _startDeepgramListening();
+```
+
+---
+
+### Edit 6 — 상단 변수 선언부 교체 (플래그 + 오디오 플레이어)
+
+**grep 확인 (count=1 기대):**
+```
+grep -c "bool _isAiOpenerPlaying = false; // AI 첫 발화 재생 중 여부" routine_mode_anyone.dart
+```
+
+**old_str**:
+```dart
+  bool _isAiOpenerPlaying = false; // AI 첫 발화 재생 중 여부
+```
+
+**new_str**:
+```dart
+  bool _hasPlayedNudge = false; // 🆕 [1초 침묵 안내음] 세션당 1회 재생 가드
+  final AudioPlayer _nudgeAudioPlayer = AudioPlayer(); // 🆕 [1초 침묵 안내음] 전용 플레이어
+```
+
+---
+
+### Edit 7 — dispose()에 안내음 플레이어 정리 추가
+
+**grep 확인 (count=1 기대):**
+```
+grep -c "_audioRecorder.dispose();" routine_mode_anyone.dart
+```
+
+**old_str**:
+```dart
+    _audioRecorder.dispose();
+```
+
+**new_str**:
+```dart
+    _audioRecorder.dispose();
+    _nudgeAudioPlayer.dispose();
+```
+
+---
+
+## 마무리 절차
+
+1. 모든 Edit 후 **post-grep 검증**: `_generateAndPlayAiOpener`, `generateFreeTalkOpener`, `_isAiOpenerPlaying` 세 문자열이 파일에 0건 남아있는지 확인
+2. `dart format routine_mode_anyone.dart` (해당 파일 단독)
+3. 빌드 검증 (`flutter analyze` → `flutter run` 실환경 1회 확인: 마이크 열고 1초 무음 시 안내음만 나오고 마이크 안 끊기는지, 두 번째 트리거 안 나가는지)
+4. 문제 없으면 커밋: `git add -A && git commit -m "feat: anyone mode 1s-silence nudge sound (replaces GPT voice opener)"`
+5. 문제 있으면 `git reset --hard HEAD~1` 로 즉시 롤백
+
+---
