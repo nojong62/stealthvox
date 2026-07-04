@@ -89,12 +89,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   int _turnCounter = 0;
   String? _sessionDocId; // 🔧 [v3 추가] 첫 대화 후 세션 ID (클론 변경 시 null 리셋)
   DocumentReference? _myHistoryRef; // 🔧 [히스토리] chat_history 문서 참조 (Duo 패턴)
-  bool _hasPlayedNudge = false; // 🆕 [1초 침묵 안내음] 세션당 1회 재생 가드
-  final AudioPlayer _nudgeAudioPlayer = AudioPlayer(); // 🆕 [1초 침묵 안내음] 전용 플레이어
-
-  // 🆕 [유저 먼저] 1초 grace 동안 유저가 말 안 하면 안내음 재생
-  Timer? _openerNudgeTimer;
-  bool _userHasSpoken = false;
+  bool _hasShownNudgeBubble = false; // 🆕 [즉시 안내 말풍선] 세션당 1회 노출 가드
+  bool _showNudgeBubble = false; // 🆕 [즉시 안내 말풍선] 현재 표시 여부(페이드 애니메이션 트리거)
 
   // ── Idle Timeout v2 ───────────────────────────────────────────────
   // 기준: "유저도 AI도 아무 작동이 없는 상태"가 연속 60초 지속되면 pause.
@@ -283,7 +279,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     _stopEverything();
     _voiceManager?.dispose();
     _audioRecorder.dispose();
-    _nudgeAudioPlayer.dispose();
     _ttsQueueManager.stop();
     _scrollController.dispose();
     super.dispose();
@@ -314,12 +309,11 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
   /// 🆕 세션 자동 시작: 표시등 ON + 마이크 먼저(유저 먼저 말하게).
   /// 마이크 첫 청취가 시작되면 _isConversationActive=true 로 자동 점등.
-  /// 첫 턴 1초 침묵 시 _armOpenerNudge가 고정 안내음을 재생.
+  /// 마이크 연결 직후 안내 말풍선 1.5초 노출.
   Future<void> _startFreeTalkSession() async {
     if (_deepgramKey.isEmpty || !mounted) return;
     if (_isConversationActive) return; // 중복 시작 방지
-    _userHasSpoken = false;
-    _hasPlayedNudge = false;
+    _hasShownNudgeBubble = false;
     _startDeepgramListening();
   }
 
@@ -426,14 +420,13 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
   void _stopEverything() {
     _isConversationActive = false;
-    _hasPlayedNudge = false;
+    _hasShownNudgeBubble = false;
+    _showNudgeBubble = false;
     _isStartingListening = false;
     _isPipelineRunning = false;
     _listenGeneration++;
     _commitTimer?.cancel(); // 🔧 [v3.4] 대기 중 타이머 정리
     _commitTimer = null;
-    _openerNudgeTimer?.cancel(); // 🆕 [유저 먼저] 오프너 nudge 정리
-    _openerNudgeTimer = null;
     _pendingTranscript = ''; // 대기 중 발화도 버림
     _voiceManager?.dispose();
     _voiceManager = null;
@@ -442,17 +435,15 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   }
 
   // ====================================================================
-  // 📦 [1초 침묵 안내음] — GPT 오프너 대신 사전 생성된 고정 mp3 재생
+  // 📦 [즉시 안내 말풍선] — 소리 대신 화면 텍스트로 1.5초간 표시 후 자동 소멸
   // ====================================================================
-  Future<void> _playNudgeSound() async {
-    if (_hasPlayedNudge) return;
-    _hasPlayedNudge = true;
-    try {
-      await _nudgeAudioPlayer
-          .play(AssetSource('audios/anyone_nudge_fable.mp3'));
-    } catch (e) {
-      _log('❌ [NUDGE-SOUND-ERR]', '$e');
-    }
+  void _showNudgeBubbleOnce() {
+    if (_hasShownNudgeBubble || !mounted) return;
+    _hasShownNudgeBubble = true;
+    setState(() => _showNudgeBubble = true);
+    Timer(const Duration(milliseconds: 1500), () {
+      if (mounted) setState(() => _showNudgeBubble = false);
+    });
   }
 
   void _removeLastExchange() {
@@ -563,11 +554,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
             _log('🎤 [LISTEN-STALE]', 'onTranscriptUpdate ignored');
             return;
           }
-          // 🆕 [유저 먼저] 유저가 입을 떼는 순간 오프너 nudge 취소
-          if (!_userHasSpoken) {
-            _userHasSpoken = true;
-            _openerNudgeTimer?.cancel();
-          }
           _swDeepgram.reset();
           _swDeepgram.start();
         },
@@ -613,28 +599,15 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       }
       _log('🎤 [LISTEN-05]', 'connectAndStart 완료');
 
-      // 🆕 [유저 먼저] 첫 턴이고 유저가 아직 말 안 했으면 2초 grace 후 AI가 운을 뗌
-      if (_localMessages.isEmpty && !_userHasSpoken) {
-        _armOpenerNudge();
+      // 🆕 [즉시 안내 말풍선] 첫 턴이면 마이크 연결 직후 바로 표시 (텍스트라 겹침 걱정 없음)
+      if (_localMessages.isEmpty && !_hasShownNudgeBubble) {
+        _showNudgeBubbleOnce();
       }
     } finally {
       if (listenGeneration == _listenGeneration) {
         _isStartingListening = false;
       }
     }
-  }
-
-  // 🆕 [유저 먼저 → 1초 침묵 시 안내음]
-  // 마이크가 살아있는 상태에서 1초 grace. 그 안에 유저가 말하면
-  // (onTranscriptUpdate에서 _userHasSpoken=true + 타이머 취소) 안내음은 안 나간다.
-  void _armOpenerNudge() {
-    _openerNudgeTimer?.cancel();
-    _openerNudgeTimer = Timer(const Duration(seconds: 1), () {
-      if (!mounted || !_isConversationActive) return;
-      if (_userHasSpoken || _localMessages.isNotEmpty) return;
-      _log('💡 [NUDGE]', '1초 침묵 → 안내음 재생 (마이크 유지)');
-      _playNudgeSound();
-    });
   }
 
   // 🔧 [v3.4] Deepgram speech_final 수신 시 호출됨
@@ -1670,10 +1643,55 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
               _buildIdleOverlay(),
               if (trialMode) buildTrialCountdown(),
               if (_showUsageGuide) _buildUsageGuide(), // 🆕 [Anyone] 이용방법 말풍선
+              _buildNudgeBubble(), // 🆕 [즉시 안내 말풍선] 마이크 켜지면 1.5초 노출 후 소멸
             ]),
           ),
           _buildControlArea(bottomPad),
         ]),
+      ),
+    );
+  }
+
+  // 🆕 [즉시 안내 말풍선] 마이크 켜지는 즉시 표시, 1.5초 후 자동 페이드아웃
+  // 텍스트라서 마이크/재생과 충돌 없음 → 타이밍 로직(대기/취소) 불필요.
+  Widget _buildNudgeBubble() {
+    return IgnorePointer(
+      child: Align(
+        alignment: Alignment.center,
+        child: AnimatedOpacity(
+          opacity: _showNudgeBubble ? 1.0 : 0.0,
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeOut,
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 36),
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E1E22).withValues(alpha: 0.92),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: const Color(0xFF7F77DD).withValues(alpha: 0.55),
+                width: 1.4,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF2DD4BF).withValues(alpha: 0.25),
+                  blurRadius: 20,
+                  spreadRadius: 1,
+                ),
+              ],
+            ),
+            child: const Text(
+              '여기, 그 사람이 있어요. 편하게 말 걸어보세요.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                height: 1.5,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
