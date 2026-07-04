@@ -89,9 +89,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   int _turnCounter = 0;
   String? _sessionDocId; // 🔧 [v3 추가] 첫 대화 후 세션 ID (클론 변경 시 null 리셋)
   DocumentReference? _myHistoryRef; // 🔧 [히스토리] chat_history 문서 참조 (Duo 패턴)
-  bool _isAiOpenerPlaying = false; // AI 첫 발화 재생 중 여부
+  bool _hasPlayedNudge = false; // 🆕 [1초 침묵 안내음] 세션당 1회 재생 가드
+  final AudioPlayer _nudgeAudioPlayer = AudioPlayer(); // 🆕 [1초 침묵 안내음] 전용 플레이어
 
-  // 🆕 [유저 먼저] 2초 grace 동안 유저가 말 안 하면 AI가 오프너 발화
+  // 🆕 [유저 먼저] 1초 grace 동안 유저가 말 안 하면 안내음 재생
   Timer? _openerNudgeTimer;
   bool _userHasSpoken = false;
 
@@ -282,6 +283,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     _stopEverything();
     _voiceManager?.dispose();
     _audioRecorder.dispose();
+    _nudgeAudioPlayer.dispose();
     _ttsQueueManager.stop();
     _scrollController.dispose();
     super.dispose();
@@ -312,11 +314,12 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
   /// 🆕 세션 자동 시작: 표시등 ON + 마이크 먼저(유저 먼저 말하게).
   /// 마이크 첫 청취가 시작되면 _isConversationActive=true 로 자동 점등.
-  /// 첫 턴 2초 침묵 시 _armOpenerNudge가 AI 오프너를 발화(v1 로직).
+  /// 첫 턴 1초 침묵 시 _armOpenerNudge가 고정 안내음을 재생.
   Future<void> _startFreeTalkSession() async {
     if (_deepgramKey.isEmpty || !mounted) return;
     if (_isConversationActive) return; // 중복 시작 방지
     _userHasSpoken = false;
+    _hasPlayedNudge = false;
     _startDeepgramListening();
   }
 
@@ -423,7 +426,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
   void _stopEverything() {
     _isConversationActive = false;
-    _isAiOpenerPlaying = false;
+    _hasPlayedNudge = false;
     _isStartingListening = false;
     _isPipelineRunning = false;
     _listenGeneration++;
@@ -439,117 +442,16 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   }
 
   // ====================================================================
-  // 📦 [AI 첫 발화 — AI가 먼저 대화 시작]
+  // 📦 [1초 침묵 안내음] — GPT 오프너 대신 사전 생성된 고정 mp3 재생
   // ====================================================================
-  // 클론 대화 시작 원칙:
-  //   1. AI가 항상 먼저 말한다 — 화면 진입 시 클론이 자동으로 먼저 발화.
-  //   2. 타겟 언어로만 말한다 — 한국어 절대 혼용 금지.
-  //   3. 클론 페르소나에 충실한 자연스러운 첫 마디 (AI 티 내지 않음).
-  // ====================================================================
-  Future<void> _generateAndPlayAiOpener() async {
-    if (_isAiOpenerPlaying) return;
-    // 🆕 키 미로딩 상태에서 발화 시도 → 무음 방지
-    if (_openAiKey.isEmpty) {
-      _log('⚠️ [OPENER]', 'OpenAI key not ready — skip opener');
-      return;
-    }
-    _isAiOpenerPlaying = true;
-    if (mounted) setState(() {});
-
+  Future<void> _playNudgeSound() async {
+    if (_hasPlayedNudge) return;
+    _hasPlayedNudge = true;
     try {
-      final String targetLangName = FFAppState().targetLang.isNotEmpty
-          ? FFAppState().targetLang
-          : 'English';
-
-      if (mounted) {
-        setState(() {
-          _localMessages.add({'role': 'SYSTEM', 'target': '', 'original': ''});
-        });
-        _scrollToBottom();
-      }
-      final int aiIndex = _localMessages.length - 1;
-
-      String openerText = '';
-      // String openerBuffer = ''; // [하이브리드 전환] HybridTtsPlayer.onChunk로 대체 (롤백 가능)
-      // final RegExp splitPattern = RegExp(r'[,\.?!;:。、！？…，；：\n]'); // [하이브리드 전환]
-
-      final ChunkedTtsFetcher aiTtsFetcher = ChunkedTtsFetcher(
-        _openAiKey,
-        _ttsQueueManager,
-        "nova",
-        isUser: false,
-        onLog: _log,
-      );
-      final openerHybrid = HybridTtsPlayer(
-        _openAiKey,
-        _ttsQueueManager,
-        aiTtsFetcher,
-        "nova",
-        onLog: _log,
-      );
-      _ttsQueueManager.setUserTurn(false);
-      _ttsQueueManager.setAiPaused(false);
-
-      await for (final chunk in FreeTalkBrain.generateFreeTalkOpener(
-        apiKey: _openAiKey,
-        targetLang: targetLangName,
-        level: _freeTalkLevel,
-      )) {
-        if (!_isConversationActive) break;
-        openerText += chunk;
-        // openerBuffer += chunk; // [하이브리드 전환]
-        if (mounted)
-          setState(() => _localMessages[aiIndex]['target'] = openerText);
-
-        openerHybrid
-            .onChunk(chunk); // [하이브리드 전환] HybridTtsPlayer.onChunk로 대체 (롤백 가능)
-
-        /* [하이브리드 전환] HybridTtsPlayer.onChunk로 대체 (롤백 가능)
-        final matches = splitPattern.allMatches(openerBuffer).toList();
-        if (matches.isNotEmpty) {
-          final int lastIdx = matches.last.end;
-          final String toSpeak = openerBuffer.substring(0, lastIdx).trim();
-          openerBuffer = openerBuffer.substring(lastIdx);
-          if (toSpeak.isNotEmpty) aiTtsFetcher.addText(_cleanText(toSpeak));
-        }
-        */
-      }
-      // [하이브리드 전환] HybridTtsPlayer.onStreamEnd로 대체 (롤백 가능)
-      await openerHybrid.onStreamEnd(
-          fullSentence: _cleanText(openerText.trim()));
-      /* [하이브리드 전환] HybridTtsPlayer.onChunk로 대체 (롤백 가능)
-      if (openerBuffer.trim().isNotEmpty)
-        aiTtsFetcher.addText(_cleanText(openerBuffer.trim()));
-      */
-
-      // AI original 생성 (UI 자막 선반영)
-      FreeTalkBrain.generateCleanOriginal(
-              apiKey: _openAiKey, englishText: openerText)
-          .then((cleanKorean) {
-        if (mounted && _localMessages.length > aiIndex) {
-          setState(() => _localMessages[aiIndex]['original'] = cleanKorean);
-        }
-      });
-
-      // TTS 재생 완료 대기
-      int waitTicks = 0;
-      while ((aiTtsFetcher.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
-          _isConversationActive) {
-        await Future.delayed(const Duration(milliseconds: 50));
-        if (++waitTicks > 200) break;
-      }
-
-      // 🧩 [HIST-POLICY] AI 오프너는 chat_history에 저장하지 않음.
-      //   - 유저 무응답 퇴장 시 빈 방 및 고아 messages 방지
-      //   - 히스토리는 유저 첫 저장 턴부터 시작 (line 1638의 저장에서 처리)
-      //   - UI original은 line 646~653의 .then()에서 이미 처리
+      await _nudgeAudioPlayer
+          .play(AssetSource('audios/anyone_nudge_fable.mp3'));
     } catch (e) {
-      _log('❌ [OPENER-ERR]', 'Clone Opener Error: $e');
-    } finally {
-      _isAiOpenerPlaying = false;
-      if (mounted && _isConversationActive) {
-        _startDeepgramListening();
-      }
+      _log('❌ [NUDGE-SOUND-ERR]', '$e');
     }
   }
 
@@ -722,20 +624,16 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     }
   }
 
-  // 🆕 [유저 먼저 → 2초 침묵 시 AI 오프너]
-  // 마이크가 살아있는 상태에서 2초 grace. 그 안에 유저가 말하면
-  // (onTranscriptUpdate에서 _userHasSpoken=true + 타이머 취소) 오프너는 안 나가고,
-  // 침묵하면 마이크를 잠깐 내리고 AI가 "자유롭게 대화하자" 한마디.
-  // (오프너 finally에서 _startDeepgramListening으로 청취 재개)
+  // 🆕 [유저 먼저 → 1초 침묵 시 안내음]
+  // 마이크가 살아있는 상태에서 1초 grace. 그 안에 유저가 말하면
+  // (onTranscriptUpdate에서 _userHasSpoken=true + 타이머 취소) 안내음은 안 나간다.
   void _armOpenerNudge() {
     _openerNudgeTimer?.cancel();
-    _openerNudgeTimer = Timer(const Duration(seconds: 2), () {
+    _openerNudgeTimer = Timer(const Duration(seconds: 1), () {
       if (!mounted || !_isConversationActive) return;
       if (_userHasSpoken || _localMessages.isNotEmpty) return;
-      _log('💡 [NUDGE]', '2초 침묵 → AI 오프너 발화');
-      _voiceManager?.dispose();
-      _voiceManager = null;
-      _generateAndPlayAiOpener();
+      _log('💡 [NUDGE]', '1초 침묵 → 안내음 재생 (마이크 유지)');
+      _playNudgeSound();
     });
   }
 
@@ -3653,71 +3551,6 @@ Learner level: ${_freeTalkLevelInstruction(level)}""";
       }
     } catch (_) {
       yield '...';
-    } finally {
-      client.close();
-    }
-  }
-
-  // ==================================================================
-  static Stream<String> generateFreeTalkOpener({
-    required String apiKey,
-    required String targetLang,
-    String level = "Intermediate",
-  }) async* {
-    final client = http.Client();
-    try {
-      final sysPrompt =
-          """You are about to be spoken to by the user, as if you are a specific person they have in mind — but you do not know who yet.
-Open with ONE short, warm line that simply lets them begin, as if you happen to be right there in front of them.
-
-RULES:
-- Speak ONLY in $targetLang. Do NOT use Korean or any other language.
-- ONE sentence only. Under 12 words.
-- Neutral and natural — do NOT assume any relationship, mood, or role yet. No names, no labels.
-- Just open the door for them to speak first. For example: "Hey... I'm right here. What did you want to say?" or "I'm listening — go ahead."
-- ${_freeTalkLevelInstruction(level)}
-
-Output: ONE sentence in $targetLang only.""";
-
-      final request = http.Request(
-        'POST',
-        Uri.parse('https://api.openai.com/v1/chat/completions'),
-      );
-      request.headers.addAll({
-        'Authorization': 'Bearer $apiKey',
-        'Content-Type': 'application/json; charset=utf-8',
-      });
-      request.body = jsonEncode({
-        'model': 'gpt-4o-mini',
-        'stream': true,
-        'temperature': 0.8,
-        'max_tokens': 40,
-        'messages': [
-          {'role': 'system', 'content': sysPrompt},
-          {
-            'role': 'user',
-            'content':
-                'Start the conversation — say your friendly opening line in $targetLang.',
-          },
-        ],
-      });
-
-      final response =
-          await client.send(request).timeout(const Duration(seconds: 15));
-      if (response.statusCode != 200) return;
-
-      await for (final line in response.stream
-          .transform(utf8.decoder)
-          .transform(const LineSplitter())) {
-        if (line.startsWith('data: ') && line != 'data: [DONE]') {
-          try {
-            final delta =
-                jsonDecode(line.substring(6))['choices'][0]['delta']['content'];
-            if (delta != null) yield delta.toString();
-          } catch (_) {}
-        }
-      }
-    } catch (_) {
     } finally {
       client.close();
     }
