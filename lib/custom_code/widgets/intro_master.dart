@@ -452,6 +452,24 @@ class _IntroMasterState extends State<IntroMaster> {
                         ),
                       ),
                       const SizedBox(height: 18),
+                      const Row(
+                        children: [
+                          Icon(Icons.lightbulb, color: Colors.amber, size: 20),
+                          SizedBox(width: 8),
+                          Text("이용 방법",
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        '대화하고 싶은 사람을 한 명 마음속에 떠올려 보세요. 그리고 그 사람이 바로 지금 눈앞에 있다고 생각하고, 하고 싶었던 말을 편하게 꺼내보세요. AI가 그 사람과 다르게 반응한다면, 그냥 넘기지 말고 "왜 그렇게 느껴?"하고 되물어 보세요. 묻고 답하다 보면, AI는 점점 더 그 사람에 가까워집니다. 진짜 그 사람과 마주 앉은 것처럼요.',
+                        style: TextStyle(
+                            color: Colors.white70, fontSize: 13, height: 1.6),
+                      ),
+                      const SizedBox(height: 22),
                       SizedBox(
                         width: double.infinity,
                         height: 48,
