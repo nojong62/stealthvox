@@ -47,211 +47,83 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-# 지시문: 애니원 모드 "1초 침묵 안내음" 전환
+지시문: 애니원 모드 안내음 → "텍스트 말풍선(1.5초 페이드)" 전환
+사전 조치
+git add -A && git commit -m "savepoint: before nudge sound to text-bubble change"
+Edit 1 (최상단부터, 파일 하단→상단 순서) — build()의 Stack에 말풍선 추가
+grep 확인 (count=1 기대):
+grep -c "if (_showUsageGuide) _buildUsageGuide(), // 🆕 \[Anyone\] 이용방법 말풍선" routine_mode_anyone.dart
+old_str:
+dart              if (trialMode) buildTrialCountdown(),
+              if (_showUsageGuide) _buildUsageGuide(), // 🆕 [Anyone] 이용방법 말풍선
+            ]),
+new_str:
+dart              if (trialMode) buildTrialCountdown(),
+              if (_showUsageGuide) _buildUsageGuide(), // 🆕 [Anyone] 이용방법 말풍선
+              _buildNudgeBubble(), // 🆕 [즉시 안내 말풍선] 마이크 켜지면 1.5초 노출 후 소멸
+            ]),
 
-## 사전 준비 (코드 수정 전에 실행)
-
-### STEP 0. 안내음 mp3 파일 사전 생성 (1회성, 로컬에서 실행)
-
-문구가 고정이므로 런타임 API 호출 없이 **로컬 정적 에셋**으로 번들합니다. 아래 Python 스크립트를 실장님 PC에서 1회만 실행해서 mp3를 만드세요.
-
-```python
-# generate_nudge_audio.py
-import requests
-
-OPENAI_API_KEY = "본인 OpenAI 키"  # Remote Config 콘솔에서 복사해서 임시로 넣고 실행 후 지울 것
-TEXT = "여기, 그 사람이 있어요. 편하게 말 걸어보세요."
-
-resp = requests.post(
-    "https://api.openai.com/v1/audio/speech",
-    headers={
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
-        "Content-Type": "application/json",
-    },
-    json={
-        "model": "tts-1",
-        "input": TEXT,
-        "voice": "fable",
-        "speed": 1.0,
-    },
-)
-resp.raise_for_status()
-with open("anyone_nudge_fable.mp3", "wb") as f:
-    f.write(resp.content)
-print("saved:", len(resp.content), "bytes")
-```
-
-실행 후 생성된 `anyone_nudge_fable.mp3`를 다음 경로에 배치:
-```
-F:\flutter_project\stealth_vox\assets\audio\anyone_nudge_fable.mp3
-```
-
-### STEP 0-1. pubspec.yaml 에셋 등록 (별도 파일 — Codex가 직접 확인 후 처리)
-
-`pubspec.yaml`에서 기존 `flutter: assets:` 섹션을 grep으로 찾아 아래 라인이 없으면 추가:
-```yaml
-    - assets/audio/anyone_nudge_fable.mp3
-```
-(만약 `assets/audio/` 폴더 전체를 이미 통째로 등록하는 방식이면 이 단계는 스킵 — Codex가 기존 패턴 확인 후 판단)
-
----
-
-## 코드 수정 (`routine_mode_anyone.dart`) — 반드시 아래 순서(파일 하단→상단)로 진행
-
-### 사전 조치
-```
-git add -A && git commit -m "savepoint: before anyone-mode nudge sound change"
-```
-
-### Edit 1 (파일 최하단부터) — GPT 기반 오프너 생성 함수 삭제
-
-**grep 확인 (count=1 기대):**
-```
-grep -c "static Stream<String> generateFreeTalkOpener({" routine_mode_anyone.dart
-```
-
-**old_str** (라인 3661~3724, 위 구분선 주석부터 함수 끝까지 통째로):
-```dart
-  // ==================================================================
-  static Stream<String> generateFreeTalkOpener({
-    required String apiKey,
-    required String targetLang,
-    String level = "Intermediate",
-  }) async* {
-    final client = http.Client();
-    try {
-      final sysPrompt =
-          """You are about to be spoken to by the user, as if you are a specific person they have in mind — but you do not know who yet.
-Open with ONE short, warm line that simply lets them begin, as if you happen to be right there in front of them.
-
-RULES:
-- Speak ONLY in $targetLang. Do NOT use Korean or any other language.
-- ONE sentence only. Under 12 words.
-- Neutral and natural — do NOT assume any relationship, mood, or role yet. No names, no labels.
-- Just open the door for them to speak first. For example: "Hey... I'm right here. What did you want to say?" or "I'm listening — go ahead."
-- ${_freeTalkLevelInstruction(level)}
-
-Output: ONE sentence in $targetLang only.""";
-
-      final request = http.Request(
-        'POST',
-        Uri.parse('https://api.openai.com/v1/chat/completions'),
-      );
-      request.headers.addAll({
-        'Authorization': 'Bearer $apiKey',
-        'Content-Type': 'application/json; charset=utf-8',
-      });
-      request.body = jsonEncode({
-        'model': 'gpt-4o-mini',
-        'stream': true,
-        'temperature': 0.8,
-        'max_tokens': 40,
-        'messages': [
-          {'role': 'system', 'content': sysPrompt},
-          {
-            'role': 'user',
-            'content':
-                'Start the conversation — say your friendly opening line in $targetLang.',
-          },
-        ],
-      });
-
-      final response =
-          await client.send(request).timeout(const Duration(seconds: 15));
-      if (response.statusCode != 200) return;
-
-      await for (final line in response.stream
-          .transform(utf8.decoder)
-          .transform(const LineSplitter())) {
-        if (line.startsWith('data: ') && line != 'data: [DONE]') {
-          try {
-            final delta =
-                jsonDecode(line.substring(6))['choices'][0]['delta']['content'];
-            if (delta != null) yield delta.toString();
-          } catch (_) {}
-        }
-      }
-    } catch (_) {
-    } finally {
-      client.close();
-    }
+Edit 2 — _buildUsageGuide 바로 위에 새 말풍선 위젯 추가
+grep 확인 (count=1 기대):
+grep -c "Widget _buildUsageGuide() {" routine_mode_anyone.dart
+old_str:
+dart  // 🆕 [Anyone] 이용방법 말풍선 (배경/말풍선 어디든 톡 누르면 닫힘)
+  Widget _buildUsageGuide() {
+new_str:
+dart  // 🆕 [즉시 안내 말풍선] 마이크 켜지는 즉시 표시, 1.5초 후 자동 페이드아웃
+  // 텍스트라서 마이크/재생과 충돌 없음 → 타이밍 로직(대기/취소) 불필요.
+  Widget _buildNudgeBubble() {
+    return IgnorePointer( // 탭 막지 않음 — 유저가 바로 조작 가능
+      child: Align(
+        alignment: Alignment.center,
+        child: AnimatedOpacity(
+          opacity: _showNudgeBubble ? 1.0 : 0.0,
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeOut,
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 36),
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E1E22).withValues(alpha: 0.92),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: const Color(0xFF7F77DD).withValues(alpha: 0.55),
+                width: 1.4,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF2DD4BF).withValues(alpha: 0.25),
+                  blurRadius: 20,
+                  spreadRadius: 1,
+                ),
+              ],
+            ),
+            child: const Text(
+              '여기, 그 사람이 있어요. 편하게 말 걸어보세요.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                height: 1.5,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
-}
-```
 
-**new_str**:
-```dart
-}
-```
-*(클래스 닫는 중괄호만 남기고 함수 전체 제거)*
+  // 🆕 [Anyone] 이용방법 말풍선 (배경/말풍선 어디든 톡 누르면 닫힘)
+  Widget _buildUsageGuide() {
 
----
-
-### Edit 2 — `_generateAndPlayAiOpener` 함수 및 상단 주석 블록 삭제
-
-**grep 확인 (count=1 기대):**
-```
-grep -c "Future<void> _generateAndPlayAiOpener() async {" routine_mode_anyone.dart
-```
-
-**old_str** (라인 441~554, 주석 블록 + 함수 전체):
-```dart
-  // ====================================================================
-  // 📦 [AI 첫 발화 — AI가 먼저 대화 시작]
-  // ====================================================================
-  // 클론 대화 시작 원칙:
-  //   1. AI가 항상 먼저 말한다 — 화면 진입 시 클론이 자동으로 먼저 발화.
-  //   2. 타겟 언어로만 말한다 — 한국어 절대 혼용 금지.
-  //   3. 클론 페르소나에 충실한 자연스러운 첫 마디 (AI 티 내지 않음).
-  // ====================================================================
-  Future<void> _generateAndPlayAiOpener() async {
-```
-*(이하 554라인 `}`까지 전체 — 파일이 길어 str_replace 시 449~554 전체 텍스트를 old_str로 그대로 사용)*
-
-**new_str**:
-```dart
-  // ====================================================================
-  // 📦 [1초 침묵 안내음] — GPT 오프너 대신 사전 생성된 고정 mp3 재생
-  // ====================================================================
-  Future<void> _playNudgeSound() async {
-    if (_hasPlayedNudge) return;
-    _hasPlayedNudge = true;
-    try {
-      await _nudgeAudioPlayer.play(AssetSource('audio/anyone_nudge_fable.mp3'));
-    } catch (e) {
-      _log('❌ [NUDGE-SOUND-ERR]', '$e');
-    }
-  }
-```
-
-> ⚠️ Codex 주의: old_str이 100줄 넘게 길어 grep 앵커만으로 정확히 잘라내기 까다로우면, `view routine_mode_anyone.dart` 449 554로 실제 라인을 재확인한 뒤 그 구간 전체를 old_str에 그대로 복사해서 사용할 것.
-
----
-
-### Edit 3 — `_armOpenerNudge`: 2초→1초, AI 음성 대신 안내음 재생
-
-**grep 확인 (count=1 기대):**
-```
+Edit 3 — _armOpenerNudge 함수 완전 삭제 (더 이상 대기/타이머 불필요)
+grep 확인 (count=1 기대):
 grep -c "void _armOpenerNudge() {" routine_mode_anyone.dart
-```
-
-**old_str**:
-```dart
-  void _armOpenerNudge() {
-    _openerNudgeTimer?.cancel();
-    _openerNudgeTimer = Timer(const Duration(seconds: 2), () {
-      if (!mounted || !_isConversationActive) return;
-      if (_userHasSpoken || _localMessages.isNotEmpty) return;
-      _log('💡 [NUDGE]', '2초 침묵 → AI 오프너 발화');
-      _voiceManager?.dispose();
-      _voiceManager = null;
-      _generateAndPlayAiOpener();
-    });
-  }
-```
-
-**new_str**:
-```dart
+old_str:
+dart  // 🆕 [유저 먼저 → 1초 침묵 시 안내음]
+  // 마이크가 살아있는 상태에서 1초 grace. 그 안에 유저가 말하면
+  // (onTranscriptUpdate에서 _userHasSpoken=true + 타이머 취소) 안내음은 안 나간다.
   void _armOpenerNudge() {
     _openerNudgeTimer?.cancel();
     _openerNudgeTimer = Timer(const Duration(seconds: 1), () {
@@ -261,105 +133,152 @@ grep -c "void _armOpenerNudge() {" routine_mode_anyone.dart
       _playNudgeSound();
     });
   }
-```
+new_str:
 
-*(마이크를 끊지 않으므로 `_voiceManager?.dispose()` 호출 제거)*
+(통째로 삭제 — 빈 문자열로 교체)
 
----
+Edit 4 — 마이크 연결 성공 직후 트리거를 "즉시 호출"로 변경
+grep 확인 (count=1 기대):
+grep -c "if (_localMessages.isEmpty && !_userHasSpoken) {" routine_mode_anyone.dart
+old_str:
+dart      // 🆕 [유저 먼저] 첫 턴이고 유저가 아직 말 안 했으면 2초 grace 후 AI가 운을 뗌
+      if (_localMessages.isEmpty && !_userHasSpoken) {
+        _armOpenerNudge();
+      }
+new_str:
+dart      // 🆕 [즉시 안내 말풍선] 첫 턴이면 마이크 연결 직후 바로 표시 (텍스트라 겹침 걱정 없음)
+      if (_localMessages.isEmpty && !_hasShownNudgeBubble) {
+        _showNudgeBubbleOnce();
+      }
 
-### Edit 4 — `_stopEverything`: 플래그명 교체
+Edit 5 — onTranscriptUpdate의 오프너 취소 로직 제거 (더 이상 취소할 타이머 없음)
+grep 확인 (count=1 기대):
+grep -c "// 🆕 \[유저 먼저\] 유저가 입을 떼는 순간 오프너 nudge 취소" routine_mode_anyone.dart
+old_str:
+dart          // 🆕 [유저 먼저] 유저가 입을 떼는 순간 오프너 nudge 취소
+          if (!_userHasSpoken) {
+            _userHasSpoken = true;
+            _openerNudgeTimer?.cancel();
+          }
+          _swDeepgram.reset();
+new_str:
+dart          _swDeepgram.reset();
 
-**grep 확인 (count=1 기대):**
-```
-grep -c "_isAiOpenerPlaying = false;" routine_mode_anyone.dart
-```
+Edit 6 — _playNudgeSound() → _showNudgeBubbleOnce()로 교체 (mp3/AudioPlayer 제거)
+grep 확인 (count=1 기대):
+grep -c "Future<void> _playNudgeSound() async {" routine_mode_anyone.dart
+old_str:
+dart  // ====================================================================
+  // 📦 [1초 침묵 안내음] — GPT 오프너 대신 사전 생성된 고정 mp3 재생
+  // ====================================================================
+  Future<void> _playNudgeSound() async {
+    if (_hasPlayedNudge) return;
+    _hasPlayedNudge = true;
+    try {
+      await _nudgeAudioPlayer
+          .play(AssetSource('audios/anyone_nudge_fable.mp3'));
+    } catch (e) {
+      _log('❌ [NUDGE-SOUND-ERR]', '$e');
+    }
+  }
+new_str:
+dart  // ====================================================================
+  // 📦 [즉시 안내 말풍선] — 소리 대신 화면 텍스트로 1.5초간 표시 후 자동 소멸
+  // ====================================================================
+  void _showNudgeBubbleOnce() {
+    if (_hasShownNudgeBubble || !mounted) return;
+    _hasShownNudgeBubble = true;
+    setState(() => _showNudgeBubble = true);
+    Timer(const Duration(milliseconds: 1500), () {
+      if (mounted) setState(() => _showNudgeBubble = false);
+    });
+  }
 
-**old_str**:
-```dart
-    _isConversationActive = false;
-    _isAiOpenerPlaying = false;
-    _isStartingListening = false;
-```
-
-**new_str**:
-```dart
-    _isConversationActive = false;
+Edit 7 — _stopEverything: 플래그명 교체, 타이머 정리 제거
+grep 확인 (count=1 기대):
+grep -c "_hasPlayedNudge = false;" routine_mode_anyone.dart
+old_str:
+dart    _isConversationActive = false;
     _hasPlayedNudge = false;
     _isStartingListening = false;
-```
+    _isPipelineRunning = false;
+    _listenGeneration++;
+    _commitTimer?.cancel(); // 🔧 [v3.4] 대기 중 타이머 정리
+    _commitTimer = null;
+    _openerNudgeTimer?.cancel(); // 🆕 [유저 먼저] 오프너 nudge 정리
+    _openerNudgeTimer = null;
+    _pendingTranscript = ''; // 대기 중 발화도 버림
+new_str:
+dart    _isConversationActive = false;
+    _hasShownNudgeBubble = false;
+    _showNudgeBubble = false;
+    _isStartingListening = false;
+    _isPipelineRunning = false;
+    _listenGeneration++;
+    _commitTimer?.cancel(); // 🔧 [v3.4] 대기 중 타이머 정리
+    _commitTimer = null;
+    _pendingTranscript = ''; // 대기 중 발화도 버림
 
----
-
-### Edit 5 — `_startFreeTalkSession`: 안내음 가드 초기화 추가
-
-**grep 확인 (count=1 기대, 문맥 포함):**
-```
-grep -c "if (_isConversationActive) return; // 중복 시작 방지" routine_mode_anyone.dart
-```
-
-**old_str**:
-```dart
-    if (_isConversationActive) return; // 중복 시작 방지
-    _userHasSpoken = false;
-    _startDeepgramListening();
-```
-
-**new_str**:
-```dart
+Edit 8 — _startFreeTalkSession: 플래그명 교체, 주석 정리
+grep 확인 (count=1 기대):
+grep -c "_userHasSpoken = false;" routine_mode_anyone.dart
+old_str:
+dart  /// 🆕 세션 자동 시작: 표시등 ON + 마이크 먼저(유저 먼저 말하게).
+  /// 마이크 첫 청취가 시작되면 _isConversationActive=true 로 자동 점등.
+  /// 첫 턴 1초 침묵 시 _armOpenerNudge가 고정 안내음을 재생.
+  Future<void> _startFreeTalkSession() async {
+    if (_deepgramKey.isEmpty || !mounted) return;
     if (_isConversationActive) return; // 중복 시작 방지
     _userHasSpoken = false;
     _hasPlayedNudge = false;
     _startDeepgramListening();
-```
+  }
+new_str:
+dart  /// 🆕 세션 자동 시작: 표시등 ON + 마이크 먼저(유저 먼저 말하게).
+  /// 마이크 첫 청취가 시작되면 _isConversationActive=true 로 자동 점등.
+  /// 마이크 연결 직후 안내 말풍선 1.5초 노출.
+  Future<void> _startFreeTalkSession() async {
+    if (_deepgramKey.isEmpty || !mounted) return;
+    if (_isConversationActive) return; // 중복 시작 방지
+    _hasShownNudgeBubble = false;
+    _startDeepgramListening();
+  }
 
----
-
-### Edit 6 — 상단 변수 선언부 교체 (플래그 + 오디오 플레이어)
-
-**grep 확인 (count=1 기대):**
-```
-grep -c "bool _isAiOpenerPlaying = false; // AI 첫 발화 재생 중 여부" routine_mode_anyone.dart
-```
-
-**old_str**:
-```dart
-  bool _isAiOpenerPlaying = false; // AI 첫 발화 재생 중 여부
-```
-
-**new_str**:
-```dart
-  bool _hasPlayedNudge = false; // 🆕 [1초 침묵 안내음] 세션당 1회 재생 가드
-  final AudioPlayer _nudgeAudioPlayer = AudioPlayer(); // 🆕 [1초 침묵 안내음] 전용 플레이어
-```
-
----
-
-### Edit 7 — dispose()에 안내음 플레이어 정리 추가
-
-**grep 확인 (count=1 기대):**
-```
-grep -c "_audioRecorder.dispose();" routine_mode_anyone.dart
-```
-
-**old_str**:
-```dart
-    _audioRecorder.dispose();
-```
-
-**new_str**:
-```dart
-    _audioRecorder.dispose();
+Edit 9 — dispose()에서 AudioPlayer 정리 코드 제거
+grep 확인 (count=1 기대):
+grep -c "_nudgeAudioPlayer.dispose();" routine_mode_anyone.dart
+old_str:
+dart    _audioRecorder.dispose();
     _nudgeAudioPlayer.dispose();
-```
+    _ttsQueueManager.stop();
+new_str:
+dart    _audioRecorder.dispose();
+    _ttsQueueManager.stop();
 
----
+Edit 10 — 변수 선언부 교체 (가장 상단, 마지막에 진행)
+grep 확인 (count=1 기대):
+grep -c "final AudioPlayer _nudgeAudioPlayer = AudioPlayer(); // 🆕 \[1초 침묵 안내음\] 전용 플레이어" routine_mode_anyone.dart
+old_str:
+dart  bool _hasPlayedNudge = false; // 🆕 [1초 침묵 안내음] 세션당 1회 재생 가드
+  final AudioPlayer _nudgeAudioPlayer = AudioPlayer(); // 🆕 [1초 침묵 안내음] 전용 플레이어
 
-## 마무리 절차
+  // 🆕 [유저 먼저] 1초 grace 동안 유저가 말 안 하면 안내음 재생
+  Timer? _openerNudgeTimer;
+  bool _userHasSpoken = false;
+new_str:
+dart  bool _hasShownNudgeBubble = false; // 🆕 [즉시 안내 말풍선] 세션당 1회 노출 가드
+  bool _showNudgeBubble = false; // 🆕 [즉시 안내 말풍선] 현재 표시 여부(페이드 애니메이션 트리거)
 
-1. 모든 Edit 후 **post-grep 검증**: `_generateAndPlayAiOpener`, `generateFreeTalkOpener`, `_isAiOpenerPlaying` 세 문자열이 파일에 0건 남아있는지 확인
-2. `dart format routine_mode_anyone.dart` (해당 파일 단독)
-3. 빌드 검증 (`flutter analyze` → `flutter run` 실환경 1회 확인: 마이크 열고 1초 무음 시 안내음만 나오고 마이크 안 끊기는지, 두 번째 트리거 안 나가는지)
-4. 문제 없으면 커밋: `git add -A && git commit -m "feat: anyone mode 1s-silence nudge sound (replaces GPT voice opener)"`
-5. 문제 있으면 `git reset --hard HEAD~1` 로 즉시 롤백
+마무리 절차 (기존 워크플로우 그대로)
 
----
+post-grep 검증 — 아래 문자열이 전부 0건인지 확인:
+
+   grep -n "_openerNudgeTimer\|_hasPlayedNudge\|_nudgeAudioPlayer\|_userHasSpoken\|_armOpenerNudge\|_playNudgeSound" routine_mode_anyone.dart
+
+dart format routine_mode_anyone.dart (해당 파일 단독)
+flutter analyze — error 없는지 확인
+실기기(또는 에뮬레이터) 확인: 마이크 켜지자마자 말풍선이 뜨는지, 1.5초 후 부드럽게 사라지는지(증발), 탭해도 화면 조작에 방해 안 되는지
+문제 없으면 커밋: git add -A && git commit -m "feat: anyone mode replace nudge sound with instant fading text bubble"
+문제 있으면 git reset --hard HEAD~1
+
+참고 — 정리 대상에서 제외한 것: assets/audios/anyone_nudge_fable.mp3 파일 자체는 저장소에서 지울지 말지는 실장님 판단에 맡겨두겠습니다 (더 이상 코드에서 참조 안 되니 지워도 안전하지만, 급한 건 아닙니다). pubspec.yaml의 assets/audios/ 폴더 등록은 다른 파일(favicon.png 등)도 쓰고 있어서 그대로 두면 됩니다.
