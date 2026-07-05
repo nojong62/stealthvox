@@ -62,6 +62,9 @@ class FFAppState extends ChangeNotifier {
       _trialHistoryPath =
           prefs.getString('ff_trialHistoryPath') ?? _trialHistoryPath;
     });
+    _safeInit(() {
+      _trialCompleted = prefs.getBool('ff_trialCompleted') ?? _trialCompleted;
+    });
   }
 
   void update(VoidCallback callback) {
@@ -242,6 +245,13 @@ class FFAppState extends ChangeNotifier {
   set trialHistoryPath(String value) {
     _trialHistoryPath = value;
     prefs.setString('ff_trialHistoryPath', value);
+  }
+
+  bool _trialCompleted = false;
+  bool get trialCompleted => _trialCompleted;
+  set trialCompleted(bool value) {
+    _trialCompleted = value;
+    prefs.setBool('ff_trialCompleted', value);
   }
 }
 

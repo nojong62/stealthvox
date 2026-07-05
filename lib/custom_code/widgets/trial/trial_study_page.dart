@@ -21,7 +21,7 @@ class TrialStudyPage extends StatelessWidget {
             durationSeconds: 120,
             onTimeUp: () {
               TrialFlowState.instance.advanceTo(4);
-              TrialFlowState.instance.requestSignupOnEntry();
+              FFAppState().trialCompleted = true;
               TrialSignupSheet.show(
                 context,
                 onLoginSuccess: () {

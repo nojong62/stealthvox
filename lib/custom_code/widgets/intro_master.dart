@@ -10,7 +10,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'trial/trial_flow_state.dart';
-import 'trial/trial_device_gate.dart';
 import 'shared_social_button.dart';
 import '/auth/social_auth_service.dart';
 
@@ -54,11 +53,10 @@ class _IntroMasterState extends State<IntroMaster> {
     _emailFocusNode.addListener(_onFocusChange);
     _passwordFocusNode.addListener(_onFocusChange);
     AppsFlyerManager.duoInviteSignal.addListener(_onDuoInviteSignal);
-    if (TrialFlowState.instance.consumeSignupOnEntry()) {
+    if (FFAppState().trialCompleted) {
       _isSignupMode = true;
-    } else {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _checkEntryStatus());
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkEntryStatus());
     const trialLanguages = [
       'Korean',
       'English',
@@ -161,15 +159,6 @@ class _IntroMasterState extends State<IntroMaster> {
     setState(() => isLoading = true);
     try {
       TrialFlowState.instance.restoreFromAppState();
-      final canTry = await TrialDeviceGate.canTrial();
-      if (!canTry) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('무료 체험은 기기당 1회만 가능합니다. 로그인해 주세요.')),
-          );
-        }
-        return;
-      }
 
       final existingUser = FirebaseAuth.instance.currentUser;
       if (existingUser != null && existingUser.isAnonymous != true) {
@@ -183,8 +172,6 @@ class _IntroMasterState extends State<IntroMaster> {
         AppStateNotifier.instance.updateNotifyOnAuthChange(false);
         await FirebaseAuth.instance.signInAnonymously();
       }
-      await TrialDeviceGate.markUsed();
-
       if (!context.mounted) return;
       await _showLanguageSettingDialog();
 
@@ -672,18 +659,19 @@ class _IntroMasterState extends State<IntroMaster> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: IconButton(
-                          onPressed: () => setState(() {
-                            _isSignupMode = false;
-                            _showEmailInSignup = false;
-                          }),
-                          icon: const Icon(Icons.arrow_back,
-                              color: Colors.white70),
-                          tooltip: '뒤로',
+                      if (!FFAppState().trialCompleted)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: IconButton(
+                            onPressed: () => setState(() {
+                              _isSignupMode = false;
+                              _showEmailInSignup = false;
+                            }),
+                            icon: const Icon(Icons.arrow_back,
+                                color: Colors.white70),
+                            tooltip: '뒤로',
+                          ),
                         ),
-                      ),
                       const SizedBox(height: 12),
                       Text("StealthVox",
                           textAlign: TextAlign.center,

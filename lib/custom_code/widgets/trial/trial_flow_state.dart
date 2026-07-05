@@ -7,7 +7,6 @@ class TrialFlowState {
 
   DocumentReference? myHistoryRef;
   int step = 0;
-  bool _forceSignupOnEntry = false;
 
   bool get isTrial => step > 0 && step < 4;
   bool get isTrialAnyone => step == 1;
@@ -39,17 +38,5 @@ class TrialFlowState {
   void advanceTo(int newStep) {
     step = newStep;
     saveToAppState();
-  }
-
-  /// Request signup mode the next time Intro is entered from the trial flow.
-  /// This is consumed once and immediately reset.
-  void requestSignupOnEntry() {
-    _forceSignupOnEntry = true;
-  }
-
-  bool consumeSignupOnEntry() {
-    final requested = _forceSignupOnEntry;
-    _forceSignupOnEntry = false;
-    return requested;
   }
 }
