@@ -3,6 +3,7 @@ import '/flutter_flow/flutter_flow_util.dart';
 
 import '../chat_history_master.dart';
 import 'trial_flow_state.dart';
+import 'trial_signup_sheet.dart';
 import 'trial_study_timer_overlay.dart';
 
 class TrialStudyPage extends StatelessWidget {
@@ -21,7 +22,13 @@ class TrialStudyPage extends StatelessWidget {
             onTimeUp: () {
               TrialFlowState.instance.advanceTo(4);
               TrialFlowState.instance.requestSignupOnEntry();
-              context.pushReplacementNamed('Intro');
+              TrialSignupSheet.show(
+                context,
+                onLoginSuccess: () {
+                  TrialFlowState.instance.reset();
+                  context.pushReplacementNamed('Lobby');
+                },
+              );
             },
           ),
         ],

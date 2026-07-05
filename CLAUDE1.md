@@ -47,387 +47,155 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-# 지시문: 체험 완료 후 로그인 유도 하단 시트 (BottomSheet) 팝업
+# 수정 지시문: 카카오 로그인 후 로비 잔여시간 00:00 플래시 수정
 
-## 목표
-TrialStudyPage(2분 공부방) 완료 시점에 `showModalBottomSheet`로 로그인 유도 팝업을 띄운다.
-첫 줄: **"방금 전에 만든 공부방 내용부터 이어서 연습하기 원하시면"**
-뒤로가기 차단 + 드래그 닫기 차단 (반드시 로그인 버튼으로만 진행).
+## 증상
+- 로그아웃 → 카카오 로그인 → 로비에서 잔여시간이 **00:00으로 잠깐 표시**된 후, 다른 방 이동 시 정상 복구
+- Google 로그인은 정상 (플래시 없음)
+
+## 원인
+`lobby_master.dart`의 `_initializeLobbyData()`가 **`remainingTimeLoaded = false`를 무조건 리셋**하여, `_grantSignupBonusIfPossible()`에서 이미 세팅된 올바른 값을 덮어쓴다. Firestore 조회가 완료될 때까지 UI가 00:00을 표시한다.
+
+## 수정 대상 파일
+- `lib/custom_code/widgets/lobby_master.dart` (1곳)
 
 ---
 
-## Phase 0: Git Savepoint + 진단
+## Phase 1: Git Savepoint
 
 ```powershell
 cd F:\flutter_project\stealth_vox
-git add -A && git commit -m "savepoint: before trial signup bottom sheet"
+git add -A && git commit -m "savepoint: before kakao lobby time flash fix"
 ```
-
-### 0-1. trial_study_page.dart 완료 콜백 앵커 탐색
-
-```powershell
-# 공부방 완료 후 네비게이션 또는 콜백 지점 찾기
-Select-String -Path "lib\custom_code\widgets\trial\trial_study_page.dart" -Pattern "Navigator|goNamed|pushNamed|pushReplacement|pop|onComplete|_onFinish|_handleComplete|Store|Lobby|reset|advanceTo" | ForEach-Object { "$($_.LineNumber): $($_.Line.Trim())" }
-```
-
-> **⚠️ 중단점:** 위 결과를 확인하고, 공부방 타이머 종료 또는 완료 버튼 콜백 위치를 식별한다.
-> 해당 지점이 Phase 2 편집의 타겟이 된다.
-> 만약 결과가 여러 개면, `TrialFlowState.instance.reset()` 또는 `context.pushReplacementNamed('Store')` 등 **체험 종료 직후 네비게이션 라인**을 앵커로 선택한다.
-
-### 0-2. 기존 로그인/회원가입 위젯 확인
-
-```powershell
-# 앱에 이미 있는 로그인 버튼 패턴 확인 (Kakao, Google)
-Select-String -Path "lib\custom_code\widgets\trial\trial_study_page.dart" -Pattern "signIn|SignIn|kakao|google|Auth|login|Login|signup|SignUp" | ForEach-Object { "$($_.LineNumber): $($_.Line.Trim())" }
-```
-
-```powershell
-# 기존 회원가입 페이지 파일 존재 여부
-Get-ChildItem -Path "lib" -Recurse -Filter "*sign*" -Name
-Get-ChildItem -Path "lib" -Recurse -Filter "*login*" -Name
-Get-ChildItem -Path "lib" -Recurse -Filter "*auth*" -Name
-```
-
-> **기록:** 위 결과에서 기존 로그인 함수명(예: `signInWithGoogle()`, `kakaoLogin()` 등)을 메모한다.
-> Phase 1에서 새 파일이 이 함수들을 import/호출해야 한다.
 
 ---
 
-## Phase 1: 새 파일 생성 — `trial_signup_sheet.dart`
-
-**경로:** `lib/custom_code/widgets/trial/trial_signup_sheet.dart`
+## Phase 2: Grep Anchor Validation
 
 ```powershell
-# 파일 미존재 확인
-Test-Path "lib\custom_code\widgets\trial\trial_signup_sheet.dart"
-# 결과: False 여야 함
+Select-String -Path "lib\custom_code\widgets\lobby_master.dart" -Pattern "FFAppState\(\)\.remainingTimeLoaded = false;" | Measure-Object | Select-Object -ExpandProperty Count
 ```
 
-아래 내용으로 **새 파일 생성**:
+**기대값: 1** (line 123 한 곳)
 
-> **⚠️ 주의:** Phase 0-2에서 확인한 실제 로그인 함수명/import 경로로 `【로그인함수】` 부분을 치환할 것.
-> 예: `signInWithGoogle()` → 실제 프로젝트 내 Google 로그인 함수
-> 예: `kakaoLogin()` → 실제 프로젝트 내 Kakao 로그인 함수
+```powershell
+Select-String -Path "lib\custom_code\widgets\lobby_master.dart" -Pattern "isLoading = true;" | Measure-Object | Select-Object -ExpandProperty Count
+```
 
+**기대값: 1 이상** (최소 line 122)
+
+---
+
+## Phase 3: str_replace 편집
+
+### Edit 1: `_initializeLobbyData`에서 `remainingTimeLoaded = false` 리셋 제거 + 디버그 로그 추가
+
+**파일:** `lib/custom_code/widgets/lobby_master.dart`
+
+**BEFORE:**
 ```dart
-// trial_signup_sheet.dart
-// 체험 완료 후 로그인 유도 하단 시트
-import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-
-/// 체험 완료 후 하단에서 올라오는 로그인 유도 시트.
-/// [isDismissible: false] + [enableDrag: false] → 뒤로가기/드래그 닫기 차단.
-/// 로그인 성공 시 [onLoginSuccess] 콜백 호출.
-class TrialSignupSheet extends StatelessWidget {
-  final VoidCallback onLoginSuccess;
-  final VoidCallback? onSkip; // 나중에 하기 (선택적)
-
-  const TrialSignupSheet({
-    super.key,
-    required this.onLoginSuccess,
-    this.onSkip,
-  });
-
-  /// 외부에서 호출하는 편의 메서드
-  static Future<void> show(
-    BuildContext context, {
-    required VoidCallback onLoginSuccess,
-    VoidCallback? onSkip,
-  }) {
-    return showModalBottomSheet(
-      context: context,
-      isDismissible: false,
-      enableDrag: false,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => TrialSignupSheet(
-        onLoginSuccess: onLoginSuccess,
-        onSkip: onSkip,
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final bottomPad = MediaQuery.of(context).viewPadding.bottom;
-    return PopScope(
-      canPop: false, // 뒤로가기 하드웨어 버튼 차단
-      child: Container(
-        padding: EdgeInsets.fromLTRB(24, 32, 24, bottomPad + 24),
-        decoration: const BoxDecoration(
-          color: Color(0xFF1E1E22),
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // ── 드래그 핸들 (시각적 힌트, 실제 드래그는 차단) ──
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.white24,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 24),
-
-            // ── 메인 카피 ──
-            const Text(
-              '방금 전에 만든 공부방 내용부터\n이어서 연습하기 원하시면',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                height: 1.5,
-              ),
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              '무료 회원가입 후 바로 시작할 수 있어요',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Color(0xFF9E9E9E),
-                fontSize: 14,
-                height: 1.4,
-              ),
-            ),
-            const SizedBox(height: 28),
-
-            // ── 카카오 로그인 버튼 ──
-            _buildLoginButton(
-              context: context,
-              label: '카카오로 시작하기',
-              bgColor: const Color(0xFFFEE500),
-              textColor: const Color(0xFF3C1E1E),
-              iconPath: 'assets/images/kakao_icon.png', // 【확인필요】 실제 에셋 경로
-              onTap: () => _handleKakaoLogin(context),
-            ),
-            const SizedBox(height: 12),
-
-            // ── Google 로그인 버튼 ──
-            _buildLoginButton(
-              context: context,
-              label: 'Google로 시작하기',
-              bgColor: Colors.white,
-              textColor: Colors.black87,
-              iconPath: 'assets/images/google_icon.png', // 【확인필요】 실제 에셋 경로
-              onTap: () => _handleGoogleLogin(context),
-            ),
-            const SizedBox(height: 20),
-
-            // ── 나중에 하기 (선택적) ──
-            if (onSkip != null)
-              GestureDetector(
-                onTap: onSkip,
-                child: const Text(
-                  '나중에 할게요',
-                  style: TextStyle(
-                    color: Color(0xFF666666),
-                    fontSize: 13,
-                    decoration: TextDecoration.underline,
-                    decorationColor: Color(0xFF666666),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLoginButton({
-    required BuildContext context,
-    required String label,
-    required Color bgColor,
-    required Color textColor,
-    required String iconPath,
-    required VoidCallback onTap,
-  }) {
-    return SizedBox(
-      width: double.infinity,
-      height: 52,
-      child: ElevatedButton(
-        onPressed: onTap,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: bgColor,
-          foregroundColor: textColor,
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Image.asset(iconPath, width: 22, height: 22,
-                errorBuilder: (_, __, ___) => const SizedBox(width: 22)),
-            const SizedBox(width: 10),
-            Text(label,
-                style: TextStyle(
-                  color: textColor,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                )),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // 【치환필요】 Phase 0-2에서 확인한 실제 로그인 함수로 교체
-  Future<void> _handleKakaoLogin(BuildContext context) async {
+  Future<void> _initializeLobbyData() async {
+    setState(() {
+      isLoading = true;
+      FFAppState().remainingTimeLoaded = false;
+    });
     try {
-      // await 【실제_카카오_로그인_함수】();
-      // 예: await kakaoLogin();
-      final user = FirebaseAuth.instance.currentUser;
-      if (user != null && !user.isAnonymous) {
-        Navigator.pop(context); // 바텀시트 닫기
-        onLoginSuccess();
+      // 1. DB 통신 분리: 서버 시간 및 남은 시간 동기화
+      int? serverRemainingTime =
+          await LobbyBrain.getRemainingTime(FirebaseAuth.instance.currentUser);
+      if (mounted) {
+        setState(() {
+          if (serverRemainingTime != null) {
+            FFAppState().remainingTime = serverRemainingTime;
+          }
+          FFAppState().remainingTimeLoaded = true;
+        });
       }
-    } catch (e) {
-      debugPrint('[TrialSignupSheet] Kakao login error: $e');
-    }
-  }
+```
 
-  Future<void> _handleGoogleLogin(BuildContext context) async {
+**AFTER:**
+```dart
+  Future<void> _initializeLobbyData() async {
+    final alreadyLoaded = FFAppState().remainingTimeLoaded;
+    debugPrint('[Lobby] _initializeLobbyData enter, alreadyLoaded=$alreadyLoaded, remainingTime=${FFAppState().remainingTime}');
+    setState(() {
+      isLoading = true;
+    });
     try {
-      // await 【실제_구글_로그인_함수】();
-      // 예: await signInWithGoogle();
-      final user = FirebaseAuth.instance.currentUser;
-      if (user != null && !user.isAnonymous) {
-        Navigator.pop(context); // 바텀시트 닫기
-        onLoginSuccess();
+      // 1. DB 통신 분리: 서버 시간 및 남은 시간 동기화
+      int? serverRemainingTime =
+          await LobbyBrain.getRemainingTime(FirebaseAuth.instance.currentUser);
+      debugPrint('[Lobby] Firestore remainingTime=$serverRemainingTime');
+      if (mounted) {
+        setState(() {
+          if (serverRemainingTime != null) {
+            FFAppState().remainingTime = serverRemainingTime;
+          }
+          FFAppState().remainingTimeLoaded = true;
+        });
       }
-    } catch (e) {
-      debugPrint('[TrialSignupSheet] Google login error: $e');
-    }
-  }
-}
-```
-
-생성 후 확인:
-
-```powershell
-Test-Path "lib\custom_code\widgets\trial\trial_signup_sheet.dart"
-# 결과: True
 ```
 
 ---
 
-## Phase 2: `trial_study_page.dart` 편집 — 완료 지점에 바텀시트 호출 삽입
+## Phase 4: Grep 검증
 
-### 2-1. import 추가
-
-파일 상단 import 블록 끝에 추가:
-
-```
-import 'trial_signup_sheet.dart';
-```
-
-**grep 검증:**
+### 4-1. 삭제 확인 — `remainingTimeLoaded = false` 가 lobby_master에서 0건
 
 ```powershell
-Select-String -Path "lib\custom_code\widgets\trial\trial_study_page.dart" -Pattern "trial_signup_sheet"
-# 예상: 1건 (방금 추가한 import)
+Select-String -Path "lib\custom_code\widgets\lobby_master.dart" -Pattern "remainingTimeLoaded = false" | Measure-Object | Select-Object -ExpandProperty Count
 ```
 
-### 2-2. 완료 콜백에 바텀시트 호출 삽입
+**기대값: 0**
 
-> **⚠️ Phase 0-1 결과 참조 필수**
-> 아래는 **예시 앵커**입니다. Phase 0-1에서 식별한 실제 완료 지점의 코드를 old_str로 사용하세요.
-
-**패턴 A — 기존에 `context.pushReplacementNamed('Store')` 또는 유사 네비게이션이 있는 경우:**
-
-```
-old_str: 기존_네비게이션_코드_라인 (Phase 0-1에서 확인한 그대로)
-
-new_str:
-    // 🆕 체험 완료 → 로그인 유도 바텀시트
-    if (TrialFlowState.instance.isTrial || TrialFlowState.instance.trialStep >= 3) {
-      if (!mounted) return;
-      await TrialSignupSheet.show(
-        context,
-        onLoginSuccess: () {
-          TrialFlowState.instance.reset();
-          if (mounted) context.pushReplacementNamed('Lobby');
-        },
-        onSkip: () {
-          Navigator.pop(context); // 바텀시트 닫기
-          TrialFlowState.instance.reset();
-          if (mounted) context.pushReplacementNamed('Store');
-        },
-      );
-      return;
-    }
-    기존_네비게이션_코드_라인 (비체험 유저용 기존 로직 유지)
-```
-
-**패턴 B — 타이머 종료 콜백에서 직접 처리하는 경우:**
-
-> 공부방 타이머가 끝나는 함수(예: `_onTimerEnd`, `_handleFinish` 등) 내부의
-> 마지막 네비게이션 라인을 위 `TrialSignupSheet.show(...)` 호출로 교체.
-
-### 2-3. 편집 후 grep 검증
+### 4-2. 추가 확인 — `alreadyLoaded` 변수 존재
 
 ```powershell
-Select-String -Path "lib\custom_code\widgets\trial\trial_study_page.dart" -Pattern "TrialSignupSheet"
-# 예상: 2건 (import 1 + show 호출 1)
-
-# 기존 네비게이션이 비체험 분기로 남아있는지 확인
-Select-String -Path "lib\custom_code\widgets\trial\trial_study_page.dart" -Pattern "pushReplacementNamed|goNamed"
-# 예상: 1건 이상 (비체험 유저용 기존 로직)
+Select-String -Path "lib\custom_code\widgets\lobby_master.dart" -Pattern "alreadyLoaded" | Measure-Object | Select-Object -ExpandProperty Count
 ```
+
+**기대값: 2** (선언 1 + debugPrint 1)
+
+### 4-3. 추가 확인 — `remainingTimeLoaded = true` 유지
+
+```powershell
+Select-String -Path "lib\custom_code\widgets\lobby_master.dart" -Pattern "remainingTimeLoaded = true" | Measure-Object | Select-Object -ExpandProperty Count
+```
+
+**기대값: 2** (try 블록 내 1 + catch 블록 내 1)
 
 ---
 
-## Phase 3: 음성 네거티브 체크
+## Phase 5: 빌드 & 포맷
 
 ```powershell
-# 새 파일에 하드코딩된 API 키 없는지 확인
-Select-String -Path "lib\custom_code\widgets\trial\trial_signup_sheet.dart" -Pattern "sk-|apiKey|Bearer"
-# 예상: 0건
-```
-
----
-
-## Phase 4: 빌드 검증
-
-```powershell
-dart format lib\custom_code\widgets\trial\trial_signup_sheet.dart
-dart format lib\custom_code\widgets\trial\trial_study_page.dart
+dart format lib\custom_code\widgets\lobby_master.dart
 flutter analyze
-flutter build appbundle --build-name=0.0.0 --build-number=1
 ```
 
 ---
 
-## Phase 5: 커밋
+## Phase 6: 커밋 & 푸시
 
 ```powershell
-git add -A && git commit -m "feat: trial signup bottom sheet after study room completion"
+git add -A && git commit -m "fix: remove remainingTimeLoaded=false reset in _initializeLobbyData to prevent 00:00 flash on Kakao login"
 git push origin main
 ```
 
 ---
 
-## Phase 6: 롤백
+## Phase 7: 롤백 절차
 
 ```powershell
-git log --oneline -3
-# savepoint 커밋 해시 확인 후:
-git reset --hard 【savepoint_해시】
+git revert HEAD --no-edit
+git push origin main
 ```
 
 ---
 
-## 【Codex 실행 전 확인사항】
+## 검증 시나리오 (실장 수동 테스트)
 
-| # | 항목 | 상태 |
-|---|------|------|
-| 1 | Phase 0-1 grep 결과로 실제 완료 앵커 식별 | ⬜ |
-| 2 | Phase 0-2 grep 결과로 실제 로그인 함수명 확인 | ⬜ |
-| 3 | `trial_signup_sheet.dart` 내 `【치환필요】` 주석 3곳 실제 함수로 교체 | ⬜ |
-| 4 | `【확인필요】` 아이콘 에셋 경로 실제 경로로 교체 | ⬜ |
-| 5 | Phase 2 old_str을 실제 코드로 확정 | ⬜ |
+1. **카카오 로그인 테스트:** 로그아웃 → 카카오 로그인 → 로비 진입 시 잔여시간이 **00:00 없이 즉시 정상 표시**되는지 확인
+2. **Google 로그인 테스트:** 로그아웃 → Google 로그인 → 로비 진입 시 잔여시간 정상 표시 (기존 동작 유지)
+3. **신규 가입 테스트:** 새 계정으로 가입 → `grantSignupBonus` 후 로비 진입 → 보너스 시간 즉시 표시
+4. **adb logcat 확인:** `[Lobby] _initializeLobbyData enter` 로그에서 `alreadyLoaded=true` 확인
