@@ -118,14 +118,17 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   }
 
   Future<void> _initializeLobbyData() async {
+    final alreadyLoaded = FFAppState().remainingTimeLoaded;
+    debugPrint(
+        '[Lobby] _initializeLobbyData enter, alreadyLoaded=$alreadyLoaded, remainingTime=${FFAppState().remainingTime}');
     setState(() {
       isLoading = true;
-      FFAppState().remainingTimeLoaded = false;
     });
     try {
       // 1. DB 통신 분리: 서버 시간 및 남은 시간 동기화
       int? serverRemainingTime =
           await LobbyBrain.getRemainingTime(FirebaseAuth.instance.currentUser);
+      debugPrint('[Lobby] Firestore remainingTime=$serverRemainingTime');
       if (mounted) {
         setState(() {
           if (serverRemainingTime != null) {
