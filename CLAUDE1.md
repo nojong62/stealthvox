@@ -47,224 +47,426 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-# 근본 개선 지시문: remainingTime 표시 로직에 계정(uid) 인식 가드 도입
+# 지시문: 인트로 A/B 구조 + SharedPreferences 체험 게이트 단순화
 
-## 배경 — 방금 적용한 수정의 잔존 리스크
+## 목적
+체험 완료 여부를 SharedPreferences `trialCompleted` 하나로 판단하여,
+인트로 A(체험+로그인)와 인트로 B(로그인만)를 분기한다.
+TrialDeviceGate(Firebase Installations ID)를 완전 제거한다.
 
-`_initializeLobbyData()`에서 `remainingTimeLoaded = false` 무조건 리셋을 **완전히 제거**하는 방식으로 카카오 플래시 버그는 해결됐습니다. 하지만 이 방식에는 구조적 허점이 하나 남습니다:
+## 흐름도
+```
+앱 실행
+  → FirebaseAuth.currentUser != null (비익명)? → Yes → 로비 직행
+  → No → FFAppState().trialCompleted?
+    → false (또는 키 없음) → 인트로 A (체험 버튼 + 로그인 버튼)
+    → true → 인트로 B (로그인 버튼만, 뒤로가기 버튼 없음)
+```
 
-> **계정을 실제로 전환하는 경우** (로그아웃 → 다른 계정으로 로그인), Firestore 조회가 끝나기 전까지 **직전 계정(A)의 잔여시간이 화면에 잠깐 노출**될 수 있습니다. 리셋을 없앴기 때문에 "이전 값을 지우고 새로 받아온다"는 안전장치가 사라진 것입니다.
-
-지금은 로그아웃 버튼이 `remainingTime = 0` + `remainingTimeLoaded = false`를 명시적으로 세팅하고 있어 일반적인 로그아웃→로그인 경로에서는 큰 문제가 안 되지만, **다음 같은 경로에서는 여전히 취약**합니다:
-- 자동 로그인 세션이 남아있는 상태에서 앱을 재시작하고 곧바로 Lobby에 진입하는 경우
-- 향후 "계정 전환" 기능이 추가되는 경우
-- Duo 초대 등으로 게스트 세션 → 본인 세션 전환이 발생하는 경로
-
-## 근본 해결 방향
-
-**"화면 재진입 시 무조건 리셋"도 아니고 "무조건 유지"도 아닌, `현재 로그인된 uid가 마지막으로 동기화된 uid와 같은지`를 기준으로 판단**합니다.
-
-- **같은 uid** (예: Intro에서 `grantSignupBonus`로 이미 값을 받아온 직후 Lobby 진입) → 기존 값 유지, 화면 안 깜빡임
-- **다른 uid 또는 최초 진입** (예: 실제 계정 전환) → `remainingTimeLoaded = false`로 리셋 후 새로 조회 → 이전 계정 값 노출 방지
-
-이를 위해 `LobbyBrain`(이미 존재하는 정적 유틸리티 클래스)에 `lastSyncedUid`라는 정적 필드 하나를 추가하고, Intro/Lobby/로그아웃 세 지점에서 이 값을 갱신·참조합니다. `LobbyBrain`은 `AppsFlyerManager`와 마찬가지로 `index.dart` 배럴을 통해 이미 `intro_master.dart`에서도 접근 가능한 것으로 확인됩니다 (동일 패턴으로 `AppsFlyerManager.initialize`를 import 없이 사용 중).
-
-## 수정 대상 파일
-- `lib/custom_code/widgets/lobby_master.dart` (3곳)
-- `lib/custom_code/widgets/intro_master.dart` (1곳)
+앱 삭제→재설치 시 SharedPreferences 초기화 → trialCompleted 소실 → 체험 재허용 (의도된 동작).
 
 ---
 
-## Phase 1: Git Savepoint
+## Phase 0 — Git Savepoint
 
 ```powershell
 cd F:\flutter_project\stealth_vox
-git add -A && git commit -m "savepoint: before uid-aware remainingTime sync guard"
+git add -A && git commit -m "savepoint: before intro-ab-simplification"
 ```
 
 ---
 
-## Phase 2: Grep Anchor Validation (사전 확인)
+## Phase 1 — 사전 grep 앵커 확인
+
+아래 각 grep 결과가 기대값과 다르면 **즉시 중단하고 보고**.
+
+### 1-1. consumeSignupOnEntry 선언 (trial_flow_state.dart)
+```powershell
+(Select-String -Path "lib\custom_code\widgets\trial\trial_flow_state.dart" -Pattern "consumeSignupOnEntry" | Measure-Object).Count
+```
+→ 기대값: 2 (메서드 선언 + bool 반환)
+
+### 1-2. requestSignupOnEntry 호출처 (전체 프로젝트)
+```powershell
+Select-String -Path "lib\custom_code\widgets\*.dart" -Pattern "requestSignupOnEntry" -Recurse
+```
+→ 파일명과 라인 번호 모두 기록. 최소 1곳 (trial_flow_state.dart 외부 호출처).
+→ 이 호출을 Phase 2에서 `FFAppState().trialCompleted = true;`로 교체해야 함.
+
+### 1-3. TrialDeviceGate 전체 참조
+```powershell
+Select-String -Path "lib\**\*.dart" -Pattern "TrialDeviceGate" -Recurse
+```
+→ 모든 파일명·라인 기록. Phase 2에서 전부 제거.
+
+### 1-4. _forceSignupOnEntry 참조
+```powershell
+(Select-String -Path "lib\custom_code\widgets\trial\trial_flow_state.dart" -Pattern "_forceSignupOnEntry" | Measure-Object).Count
+```
+→ 기대값: 3 (선언, requestSignupOnEntry 내, consumeSignupOnEntry 내)
+
+### 1-5. intro_master.dart 앵커 확인
+```powershell
+(Select-String -Path "lib\custom_code\widgets\intro_master.dart" -Pattern "consumeSignupOnEntry" | Measure-Object).Count
+```
+→ 기대값: 1
 
 ```powershell
-Select-String -Path "lib\custom_code\widgets\lobby_master.dart" -Pattern "class LobbyBrain \{" | Measure-Object | Select-Object -ExpandProperty Count
-Select-String -Path "lib\custom_code\widgets\lobby_master.dart" -Pattern '_buildFooterLink\("로그아웃"' | Measure-Object | Select-Object -ExpandProperty Count
-Select-String -Path "lib\custom_code\widgets\lobby_master.dart" -Pattern "Future<void> _initializeLobbyData" | Measure-Object | Select-Object -ExpandProperty Count
-Select-String -Path "lib\custom_code\widgets\intro_master.dart" -Pattern "Future<void> _grantSignupBonusIfPossible" | Measure-Object | Select-Object -ExpandProperty Count
+(Select-String -Path "lib\custom_code\widgets\intro_master.dart" -Pattern "trial_device_gate" | Measure-Object).Count
 ```
+→ 기대값: 1 (import 문)
 
-**각 결과 기대값: 1**
+```powershell
+(Select-String -Path "lib\custom_code\widgets\intro_master.dart" -Pattern "TrialDeviceGate" | Measure-Object).Count
+```
+→ 기대값: 3 (canTrial, snackbar 분기, markUsed)
 
-> ⚠️ 직전 커밋(a023685a)에서 `_initializeLobbyData` 내부가 이미 한 차례 수정되었으므로, 아래 BEFORE 코드가 실제 파일과 다를 수 있습니다. str_replace 적용 전 반드시 `view` 도구로 현재 내용을 재확인하고, 다를 경우 문맥에 맞게 조정하세요.
+### 1-6. app_state.dart trialStep 앵커
+```powershell
+(Select-String -Path "lib\app_state.dart" -Pattern "ff_trialStep" | Measure-Object).Count
+```
+→ 기대값: 2 (initializePersistedState + setter)
+
+### 1-7. trial_device_gate.dart 존재 확인
+```powershell
+Test-Path "lib\custom_code\widgets\trial\trial_device_gate.dart"
+```
+→ 기대값: True
 
 ---
 
-## Phase 3: str_replace 편집 (파일 내 bottom-to-top 순서)
+## Phase 2 — 코드 수정
 
-### [lobby_master.dart] Edit 1 — `LobbyBrain`에 계정 추적 필드 추가 (파일 하단, 먼저 적용)
+⚠️ 각 파일 내 편집은 반드시 **아래→위(bottom-to-top)** 순서로 적용.
+⚠️ Box 7 절대 수정 금지.
+⚠️ `lib/custom_code/임시/` 폴더 수정 금지.
+⚠️ `dart format`은 개별 파일 단위로만 실행.
 
-**BEFORE:**
-```dart
-class LobbyBrain {
-  // 💡 서버 남은 시간 동기화
-  static Future<int?> getRemainingTime(User? user) async {
+---
+
+### 2-1. app_state.dart — trialCompleted 필드 추가
+
+#### 2-1a. setter/getter 추가 (trialHistoryPath 블록 바로 아래)
+
+```
+str_replace
+파일: lib\app_state.dart
+
+OLD:
+  String _trialHistoryPath = '';
+  String get trialHistoryPath => _trialHistoryPath;
+  set trialHistoryPath(String value) {
+    _trialHistoryPath = value;
+    prefs.setString('ff_trialHistoryPath', value);
+  }
+
+NEW:
+  String _trialHistoryPath = '';
+  String get trialHistoryPath => _trialHistoryPath;
+  set trialHistoryPath(String value) {
+    _trialHistoryPath = value;
+    prefs.setString('ff_trialHistoryPath', value);
+  }
+
+  bool _trialCompleted = false;
+  bool get trialCompleted => _trialCompleted;
+  set trialCompleted(bool value) {
+    _trialCompleted = value;
+    prefs.setBool('ff_trialCompleted', value);
+  }
 ```
 
-**AFTER:**
-```dart
-class LobbyBrain {
-  // 💡 마지막으로 remainingTime을 동기화한 사용자 uid (계정 전환 감지용)
-  static String? lastSyncedUid;
+#### 2-1b. initializePersistedState에 로딩 추가 (trialHistoryPath 초기화 바로 아래)
 
-  // 💡 서버 남은 시간 동기화
-  static Future<int?> getRemainingTime(User? user) async {
 ```
+str_replace
+파일: lib\app_state.dart
 
-### [lobby_master.dart] Edit 2 — 로그아웃 시 `lastSyncedUid` 초기화
-
-**BEFORE:**
-```dart
-                          _buildFooterLink("로그아웃", () async {
-                            FFAppState().remainingTime = 0;
-                            FFAppState().remainingTimeLoaded = false;
-                            await FirebaseAuth.instance.signOut();
-                            if (!context.mounted) return;
-                            context.goNamed('Intro');
-                          }),
-```
-
-**AFTER:**
-```dart
-                          _buildFooterLink("로그아웃", () async {
-                            FFAppState().remainingTime = 0;
-                            FFAppState().remainingTimeLoaded = false;
-                            LobbyBrain.lastSyncedUid = null;
-                            await FirebaseAuth.instance.signOut();
-                            if (!context.mounted) return;
-                            context.goNamed('Intro');
-                          }),
-```
-
-### [lobby_master.dart] Edit 3 — `_initializeLobbyData`에 uid 비교 가드 적용
-
-먼저 `view` 도구로 `_initializeLobbyData` 현재 코드를 확인한 뒤, 아래 로직을 반영해 수정하세요 (직전 커밋에서 추가된 `alreadyLoaded` 디버그 로그는 유지하고 확장):
-
-**목표 형태 (참고용, 실제 파일 상태에 맞춰 조정):**
-```dart
-  Future<void> _initializeLobbyData() async {
-    final currentUid = FirebaseAuth.instance.currentUser?.uid;
-    final isSameAccountAsLastSync =
-        currentUid != null && currentUid == LobbyBrain.lastSyncedUid;
-    final alreadyLoaded = FFAppState().remainingTimeLoaded;
-    debugPrint(
-        '[Lobby] _initializeLobbyData enter, alreadyLoaded=$alreadyLoaded, sameAccount=$isSameAccountAsLastSync, remainingTime=${FFAppState().remainingTime}');
-    setState(() {
-      isLoading = true;
-      // 계정이 바뀐 경우(다른 uid 또는 최초 동기화)에만 로딩 상태로 되돌린다.
-      // 같은 계정으로 재진입한 경우(예: 로그인 직후 Lobby 진입)에는 이미 세팅된 값을 그대로 유지한다.
-      if (!isSameAccountAsLastSync) {
-        FFAppState().remainingTimeLoaded = false;
-      }
+OLD:
+    _safeInit(() {
+      _trialHistoryPath =
+          prefs.getString('ff_trialHistoryPath') ?? _trialHistoryPath;
     });
-    try {
-      // 1. DB 통신 분리: 서버 시간 및 남은 시간 동기화
-      int? serverRemainingTime =
-          await LobbyBrain.getRemainingTime(FirebaseAuth.instance.currentUser);
-      debugPrint('[Lobby] Firestore remainingTime=$serverRemainingTime');
-      if (mounted) {
-        setState(() {
-          if (serverRemainingTime != null) {
-            FFAppState().remainingTime = serverRemainingTime;
-          }
-          FFAppState().remainingTimeLoaded = true;
-        });
-      }
-      if (currentUid != null) {
-        LobbyBrain.lastSyncedUid = currentUid;
-      }
-      if (serverRemainingTime != null) {
-        BillingTicker.instance.remainingSecondsNotifier.value =
-            serverRemainingTime;
-        BillingTicker.instance.start();
-        BillingTicker.instance.pause(); // 로비는 과금 없음
-      }
-```
-(이후 `// 2. DB 통신 분리: 버전 체크...` 부터는 기존 코드 그대로 유지)
 
-### [intro_master.dart] Edit 4 — `_grantSignupBonusIfPossible`에서 `lastSyncedUid` 세팅
-
-**BEFORE:**
-```dart
-      if (remainingTime != null) {
-        FFAppState().remainingTime = remainingTime;
-        FFAppState().remainingTimeLoaded = true;
-      }
-```
-
-**AFTER:**
-```dart
-      if (remainingTime != null) {
-        FFAppState().remainingTime = remainingTime;
-        FFAppState().remainingTimeLoaded = true;
-        LobbyBrain.lastSyncedUid = FirebaseAuth.instance.currentUser?.uid;
-      }
+NEW:
+    _safeInit(() {
+      _trialHistoryPath =
+          prefs.getString('ff_trialHistoryPath') ?? _trialHistoryPath;
+    });
+    _safeInit(() {
+      _trialCompleted =
+          prefs.getBool('ff_trialCompleted') ?? _trialCompleted;
+    });
 ```
 
 ---
 
-## Phase 4: Grep 검증
+### 2-2. intro_master.dart 수정 (4개 편집, bottom-to-top)
 
-```powershell
-Select-String -Path "lib\custom_code\widgets\lobby_master.dart" -Pattern "lastSyncedUid" | Measure-Object | Select-Object -ExpandProperty Count
-```
-**기대값: 4** (필드 선언 1 + 로그아웃 1 + `_initializeLobbyData` 내부 참조/갱신 2)
+#### 2-2d. (가장 아래 편집) _buildSignupView 뒤로가기 버튼 — 체험 완료 시 숨김
 
-```powershell
-Select-String -Path "lib\custom_code\widgets\intro_master.dart" -Pattern "LobbyBrain.lastSyncedUid" | Measure-Object | Select-Object -ExpandProperty Count
 ```
-**기대값: 1**
+str_replace
+파일: lib\custom_code\widgets\intro_master.dart
 
-```powershell
-Select-String -Path "lib\custom_code\widgets\lobby_master.dart" -Pattern "isSameAccountAsLastSync" | Measure-Object | Select-Object -ExpandProperty Count
+OLD:
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: IconButton(
+                          onPressed: () => setState(() {
+                            _isSignupMode = false;
+                            _showEmailInSignup = false;
+                          }),
+                          icon: const Icon(Icons.arrow_back,
+                              color: Colors.white70),
+                          tooltip: '뒤로',
+                        ),
+                      ),
+
+NEW:
+                      if (!FFAppState().trialCompleted)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: IconButton(
+                            onPressed: () => setState(() {
+                              _isSignupMode = false;
+                              _showEmailInSignup = false;
+                            }),
+                            icon: const Icon(Icons.arrow_back,
+                                color: Colors.white70),
+                            tooltip: '뒤로',
+                          ),
+                        ),
 ```
-**기대값: 2** (선언 1 + setState 내부 조건 1)
+
+#### 2-2c. _startTrial() — TrialDeviceGate 호출 제거
+
+```
+str_replace
+파일: lib\custom_code\widgets\intro_master.dart
+
+OLD:
+      TrialFlowState.instance.restoreFromAppState();
+      final canTry = await TrialDeviceGate.canTrial();
+      if (!canTry) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('무료 체험은 기기당 1회만 가능합니다. 로그인해 주세요.')),
+          );
+        }
+        return;
+      }
+
+NEW:
+      TrialFlowState.instance.restoreFromAppState();
+```
+
+그리고 같은 함수 내에서 `markUsed()` 제거:
+
+```
+str_replace
+파일: lib\custom_code\widgets\intro_master.dart
+
+OLD:
+      await TrialDeviceGate.markUsed();
+
+      if (!context.mounted) return;
+
+NEW:
+      if (!context.mounted) return;
+```
+
+#### 2-2b. initState — consumeSignupOnEntry를 trialCompleted로 교체
+
+```
+str_replace
+파일: lib\custom_code\widgets\intro_master.dart
+
+OLD:
+    if (TrialFlowState.instance.consumeSignupOnEntry()) {
+      _isSignupMode = true;
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _checkEntryStatus());
+    }
+
+NEW:
+    if (FFAppState().trialCompleted) {
+      _isSignupMode = true;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkEntryStatus());
+```
+
+※ 기존에는 consumeSignupOnEntry가 true면 `_checkEntryStatus()`를 건너뛰었음 →
+이미 로그인된 회원이 체험 후 돌아왔을 때 Lobby로 못 가는 버그 가능성이 있었음.
+신규 로직은 `_checkEntryStatus()`를 항상 실행하여 로그인 상태면 로비 직행.
+
+#### 2-2a. (가장 위 편집) import 문 — trial_device_gate 제거
+
+```
+str_replace
+파일: lib\custom_code\widgets\intro_master.dart
+
+OLD:
+import 'trial/trial_flow_state.dart';
+import 'trial/trial_device_gate.dart';
+
+NEW:
+import 'trial/trial_flow_state.dart';
+```
 
 ---
 
-## Phase 5: 빌드 & 포맷
+### 2-3. trial_flow_state.dart — _forceSignupOnEntry 관련 코드 제거
+
+```
+str_replace
+파일: lib\custom_code\widgets\trial\trial_flow_state.dart
+
+OLD:
+  int step = 0;
+  bool _forceSignupOnEntry = false;
+
+NEW:
+  int step = 0;
+```
+
+```
+str_replace
+파일: lib\custom_code\widgets\trial\trial_flow_state.dart
+
+OLD:
+  /// Request signup mode the next time Intro is entered from the trial flow.
+  /// This is consumed once and immediately reset.
+  void requestSignupOnEntry() {
+    _forceSignupOnEntry = true;
+  }
+
+  bool consumeSignupOnEntry() {
+    final requested = _forceSignupOnEntry;
+    _forceSignupOnEntry = false;
+    return requested;
+  }
+
+NEW:
+```
+
+(빈 문자열로 교체 = 해당 블록 삭제)
+
+---
+
+### 2-4. requestSignupOnEntry() 외부 호출처 교체
+
+Phase 1-2에서 찾은 파일에서 아래 패턴을 교체:
+
+```
+OLD: TrialFlowState.instance.requestSignupOnEntry();
+NEW: FFAppState().trialCompleted = true;
+```
+
+※ 해당 파일에 `import '/flutter_flow/flutter_flow_util.dart';`가 없으면 추가.
+※ 해당 파일에 `trial_flow_state.dart` import만 남아있고 다른 TrialFlowState 사용이 없으면 import도 제거.
+
+---
+
+### 2-5. TrialDeviceGate 나머지 참조 제거
+
+Phase 1-3에서 intro_master.dart 외에 추가 참조가 있으면 해당 import와 호출을 모두 제거.
+
+---
+
+### 2-6. trial_device_gate.dart 파일 삭제
 
 ```powershell
-dart format lib\custom_code\widgets\lobby_master.dart
+Remove-Item "lib\custom_code\widgets\trial\trial_device_gate.dart"
+```
+
+---
+
+## Phase 3 — 사후 검증
+
+### 3-1. TrialDeviceGate 완전 제거
+```powershell
+(Select-String -Path "lib\**\*.dart" -Pattern "TrialDeviceGate" -Recurse | Measure-Object).Count
+```
+→ 기대값: 0
+
+### 3-2. _forceSignupOnEntry 완전 제거
+```powershell
+(Select-String -Path "lib\**\*.dart" -Pattern "_forceSignupOnEntry" -Recurse | Measure-Object).Count
+```
+→ 기대값: 0
+
+### 3-3. consumeSignupOnEntry 완전 제거
+```powershell
+(Select-String -Path "lib\**\*.dart" -Pattern "consumeSignupOnEntry" -Recurse | Measure-Object).Count
+```
+→ 기대값: 0
+
+### 3-4. requestSignupOnEntry 완전 제거
+```powershell
+(Select-String -Path "lib\**\*.dart" -Pattern "requestSignupOnEntry" -Recurse | Measure-Object).Count
+```
+→ 기대값: 0
+
+### 3-5. trialCompleted 추가 확인
+```powershell
+(Select-String -Path "lib\app_state.dart" -Pattern "trialCompleted" | Measure-Object).Count
+```
+→ 기대값: 4 (필드 선언, getter, setter, initializePersistedState)
+
+### 3-6. trialCompleted 사용처 확인
+```powershell
+Select-String -Path "lib\**\*.dart" -Pattern "trialCompleted" -Recurse
+```
+→ 최소 3곳: app_state.dart + intro_master.dart(initState 분기 + 뒤로가기 조건) + 외부 호출처(Phase 2-4)
+
+### 3-7. trial_device_gate.dart 삭제 확인
+```powershell
+Test-Path "lib\custom_code\widgets\trial\trial_device_gate.dart"
+```
+→ 기대값: False
+
+---
+
+## Phase 4 — 빌드 검증
+
+```powershell
+dart format lib\app_state.dart
 dart format lib\custom_code\widgets\intro_master.dart
-flutter analyze lib/custom_code/widgets/lobby_master.dart lib/custom_code/widgets/intro_master.dart
+dart format lib\custom_code\widgets\trial\trial_flow_state.dart
 ```
 
-> `LobbyBrain`이 `intro_master.dart`에서 인식되지 않는 오류(`undefined class`)가 발생하면, `index.dart` 배럴에 `LobbyBrain`이 export되어 있는지 확인하거나, `intro_master.dart` 상단에 `import 'lobby_master.dart';`를 명시적으로 추가하세요.
+Phase 2-4에서 수정한 외부 파일도 개별 dart format 실행.
+
+```powershell
+flutter analyze
+flutter build appbundle
+```
 
 ---
 
-## Phase 6: 커밋 & 푸시
+## Phase 5 — 커밋 & 푸시
 
 ```powershell
-git add -A && git commit -m "refactor: add uid-aware guard for remainingTime sync to prevent stale-account flash while preserving Kakao login fix"
+git add -A
+git commit -m "refactor: intro A/B with SharedPreferences trialCompleted, remove TrialDeviceGate"
 git push origin main
 ```
 
 ---
 
-## Phase 7: 롤백 절차
+## Rollback
 
 ```powershell
+git log --oneline -3
 git revert HEAD --no-edit
-git push origin main
 ```
 
 ---
 
-## 검증 시나리오 (실장 수동 테스트)
-
-1. **카카오 로그인** (기존 버그 재발 방지): 로그아웃 → 카카오 로그인 → Lobby 즉시 정상 시간 표시
-2. **구글 로그인**: 기존과 동일하게 정상 동작
-3. **계정 전환 테스트** (신규 시나리오): 계정 A로 로그인해 시간 확인 → 로그아웃 → 계정 B(잔여시간이 다른 계정)로 로그인 → Lobby에서 **A의 잔여시간이 잠깐이라도 보이지 않고** B의 값만 표시되는지 확인
-4. **신규 가입 보너스**: 신규 계정 가입 직후 Lobby 진입 시 보너스 시간 즉시 표시 (플래시 없음)
-5. **adb logcat 확인**: `sameAccount=true`(같은 계정 재진입)와 `sameAccount=false`(계정 전환)가 각각 올바른 시나리오에서 찍히는지 확인
+## ⚠️ 절대 금지 사항
+- Box 7 (TtsQueueManager, DeepgramV2VoiceManager, ChunkedTtsFetcher, HybridTtsPlayer, TtsCache) 수정 금지
+- dart format 폴더 단위 실행 금지 — 개별 파일만
+- lib/custom_code/임시/ 폴더 수정 금지
+- trialStep / trialHistoryPath 삭제 금지 (다른 곳에서 아직 참조 가능)
+- 앵커 grep count가 기대값과 다르면 즉시 중단 후 결과 보고
