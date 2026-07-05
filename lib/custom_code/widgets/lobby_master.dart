@@ -118,11 +118,19 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   }
 
   Future<void> _initializeLobbyData() async {
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
+    final isSameAccountAsLastSync =
+        currentUid != null && currentUid == LobbyBrain.lastSyncedUid;
     final alreadyLoaded = FFAppState().remainingTimeLoaded;
     debugPrint(
-        '[Lobby] _initializeLobbyData enter, alreadyLoaded=$alreadyLoaded, remainingTime=${FFAppState().remainingTime}');
+        '[Lobby] _initializeLobbyData enter, alreadyLoaded=$alreadyLoaded, sameAccount=$isSameAccountAsLastSync, remainingTime=${FFAppState().remainingTime}');
     setState(() {
       isLoading = true;
+      // 계정이 바뀐 경우(다른 uid 또는 최초 동기화)에만 로딩 상태로 되돌린다.
+      // 같은 계정으로 재진입한 경우에는 이미 세팅된 값을 그대로 유지한다.
+      if (!isSameAccountAsLastSync) {
+        FFAppState().remainingTimeLoaded = false;
+      }
     });
     try {
       // 1. DB 통신 분리: 서버 시간 및 남은 시간 동기화
@@ -136,6 +144,9 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           }
           FFAppState().remainingTimeLoaded = true;
         });
+      }
+      if (currentUid != null) {
+        LobbyBrain.lastSyncedUid = currentUid;
       }
       if (serverRemainingTime != null) {
         BillingTicker.instance.remainingSecondsNotifier.value =
@@ -754,6 +765,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                           _buildFooterLink("로그아웃", () async {
                             FFAppState().remainingTime = 0;
                             FFAppState().remainingTimeLoaded = false;
+                            LobbyBrain.lastSyncedUid = null;
                             await FirebaseAuth.instance.signOut();
                             if (!context.mounted) return;
                             context.goNamed('Intro');
@@ -773,6 +785,9 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
 // 📦 [Box 9: DB 매니저 (LobbyBrain) - UI 로직 완벽 분리]
 // =======================================================
 class LobbyBrain {
+  // 💡 마지막으로 remainingTime을 동기화한 사용자 uid (계정 전환 감지용)
+  static String? lastSyncedUid;
+
   // 💡 서버 남은 시간 동기화
   static Future<int?> getRemainingTime(User? user) async {
     if (user == null) return null;

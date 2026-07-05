@@ -887,6 +887,7 @@ class _IntroMasterState extends State<IntroMaster> {
       if (remainingTime != null) {
         FFAppState().remainingTime = remainingTime;
         FFAppState().remainingTimeLoaded = true;
+        LobbyBrain.lastSyncedUid = FirebaseAuth.instance.currentUser?.uid;
       }
       debugPrint(
           '[SignupBonus] grantSignupBonus complete, granted=$granted, remainingTime=$remainingTime');

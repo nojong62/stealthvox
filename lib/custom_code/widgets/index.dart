@@ -1,5 +1,5 @@
 export 'intro_master.dart' show IntroMaster;
-export 'lobby_master.dart' show LobbyMaster, AppsFlyerManager;
+export 'lobby_master.dart' show LobbyMaster, AppsFlyerManager, LobbyBrain;
 export 'stealth_room_master.dart' show StealthRoomMaster;
 export 'chat_history_master.dart' show ChatHistoryMaster;
 export 'chat_history_list_master.dart' show ChatHistoryListMaster;
