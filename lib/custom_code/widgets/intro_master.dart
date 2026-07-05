@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'trial/trial_flow_state.dart';
 import 'trial/trial_device_gate.dart';
@@ -139,6 +140,8 @@ class _IntroMasterState extends State<IntroMaster> {
     if (FFAppState().pendingInviteType == 'duo' &&
         FFAppState().duoRoomId.isNotEmpty) {
       debugPrint('[Intro] routing -> StealthRoom (pending duo invite)');
+      FFAppState().pendingInviteType = '';
+      FFAppState().duoRoomId = '';
       context.pushReplacementNamed('StealthRoom');
     } else {
       context.goNamed('Lobby');
@@ -858,6 +861,7 @@ class _IntroMasterState extends State<IntroMaster> {
       await authFn();
       debugPrint(
           '[KakaoAuth] authFn complete, currentUser=${FirebaseAuth.instance.currentUser?.uid}, pendingInviteType=${FFAppState().pendingInviteType}');
+      await _grantSignupBonusIfPossible();
       if (mounted) _routeAfterAuth();
       debugPrint('[KakaoAuth] _routeAfterAuth call complete');
     } catch (e, stack) {
@@ -870,6 +874,25 @@ class _IntroMasterState extends State<IntroMaster> {
       }
     } finally {
       if (mounted) setState(() => isLoading = false);
+    }
+  }
+
+  Future<void> _grantSignupBonusIfPossible() async {
+    try {
+      final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
+          .httpsCallable('grantSignupBonus');
+      final result = await callable.call<Map<String, dynamic>>({});
+      final remainingTime = (result.data['remainingTime'] as num?)?.toInt();
+      final granted = result.data['granted'] == true;
+      if (remainingTime != null) {
+        FFAppState().remainingTime = remainingTime;
+        FFAppState().remainingTimeLoaded = true;
+      }
+      debugPrint(
+          '[SignupBonus] grantSignupBonus complete, granted=$granted, remainingTime=$remainingTime');
+    } catch (e, stack) {
+      debugPrint('[SignupBonus] grantSignupBonus failed: $e');
+      debugPrint('[SignupBonus] stack: $stack');
     }
   }
 

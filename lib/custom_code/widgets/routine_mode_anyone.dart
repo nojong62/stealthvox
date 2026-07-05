@@ -435,13 +435,13 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   }
 
   // ====================================================================
-  // 📦 [즉시 안내 말풍선] — 소리 대신 화면 텍스트로 1.5초간 표시 후 자동 소멸
+  // 📦 [즉시 안내 말풍선] — 소리 대신 화면 텍스트로 2초간 표시 후 자동 소멸
   // ====================================================================
   void _showNudgeBubbleOnce() {
     if (_hasShownNudgeBubble || !mounted) return;
     _hasShownNudgeBubble = true;
     setState(() => _showNudgeBubble = true);
-    Timer(const Duration(milliseconds: 1500), () {
+    Timer(const Duration(milliseconds: 2000), () {
       if (mounted) setState(() => _showNudgeBubble = false);
     });
   }
@@ -1643,7 +1643,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
               _buildIdleOverlay(),
               if (trialMode) buildTrialCountdown(),
               if (_showUsageGuide) _buildUsageGuide(), // 🆕 [Anyone] 이용방법 말풍선
-              _buildNudgeBubble(), // 🆕 [즉시 안내 말풍선] 마이크 켜지면 1.5초 노출 후 소멸
+              _buildNudgeBubble(), // 🆕 [즉시 안내 말풍선] 마이크 켜지면 2초 노출 후 소멸
             ]),
           ),
           _buildControlArea(bottomPad),
@@ -1652,7 +1652,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     );
   }
 
-  // 🆕 [즉시 안내 말풍선] 마이크 켜지는 즉시 표시, 1.5초 후 자동 페이드아웃
+  // 🆕 [즉시 안내 말풍선] 마이크 켜지는 즉시 표시, 2초 후 자동 페이드아웃
   // 텍스트라서 마이크/재생과 충돌 없음 → 타이밍 로직(대기/취소) 불필요.
   Widget _buildNudgeBubble() {
     return IgnorePointer(

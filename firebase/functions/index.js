@@ -100,6 +100,61 @@ exports.deductRemainingTime = functions.https.onCall(async (data, context) => {
 });
 
 // ----------------------------------------------------------------------------
+// grantSignupBonus
+// Type:   HTTPS Callable
+// Output: { granted: boolean, remainingTime: number }
+//
+// Grants a one-time signup bonus during the test period. The client may call
+// this after Google/Kakao auth, but the server owns the idempotency check.
+// ----------------------------------------------------------------------------
+exports.grantSignupBonus = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      "unauthenticated",
+      "Request must be authenticated."
+    );
+  }
+
+  const uid = context.auth.uid;
+  const userRef = admin.firestore().doc("users/" + uid);
+  const bonusSeconds = 18000;
+
+  const result = await admin.firestore().runTransaction(async (tx) => {
+    const snap = await tx.get(userRef);
+    const userData = snap.exists ? snap.data() : {};
+    const current =
+      userData && typeof userData.remainingTime === "number"
+        ? userData.remainingTime
+        : 0;
+
+    if (userData && userData.signup_bonus_given === true) {
+      return { granted: false, remainingTime: current };
+    }
+
+    const updated = current + bonusSeconds;
+    tx.set(
+      userRef,
+      {
+        remainingTime: updated,
+        signup_bonus_given: true,
+        signup_bonus_granted_at: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    functions.logger.info("grantSignupBonus", {
+      uid: uid,
+      before: current,
+      bonusSeconds: bonusSeconds,
+      after: updated,
+    });
+
+    return { granted: true, remainingTime: updated };
+  });
+
+  return result;
+});
+// ----------------------------------------------------------------------------
 // revenueCatWebhook
 // Type:   HTTPS Request (called by RevenueCat, NOT a Firebase callable)
 // Purpose: Server-side time top-up. Replaces client-side remainingTime writes.
