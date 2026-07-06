@@ -42,6 +42,7 @@ class _IntroMasterState extends State<IntroMaster> {
   bool isLoading = false;
   bool _isSignupMode = false;
   bool _showEmailInSignup = false;
+  bool _trialStarting = false;
   String _trialNativeLang = 'Korean';
   String _trialTargetLang = 'English';
 
@@ -156,18 +157,25 @@ class _IntroMasterState extends State<IntroMaster> {
   Future<void> _startTrial(BuildContext context) async {
     debugPrint(
         '[TrialDebug] _startTrial enter, currentUser=${FirebaseAuth.instance.currentUser?.uid}, isAnonymous=${FirebaseAuth.instance.currentUser?.isAnonymous}, time=${DateTime.now().toIso8601String()}');
+    if (_trialStarting) return;
+    _trialStarting = true;
     setState(() => isLoading = true);
     try {
       TrialFlowState.instance.restoreFromAppState();
 
       final existingUser = FirebaseAuth.instance.currentUser;
       if (existingUser != null && existingUser.isAnonymous != true) {
+        // 정식 회원은 체험 불가 -> signOut 하지 않고 Lobby로 이동
         debugPrint(
-            '[TrialDebug] non-anonymous session detected, signing out, time=${DateTime.now().toIso8601String()}');
-        debugPrint(
-            '[Trial] non-anonymous session detected, signing out before trial: ${existingUser.uid}');
-        await FirebaseAuth.instance.signOut();
+            '[Trial] existing member tried trial, redirecting to Lobby: ${existingUser.uid}');
+        if (mounted) context.goNamed('Lobby');
+        return;
       }
+
+      // 정책 A: 체험 확정 -> pending invite 초기화 (체험과 Duo는 분리)
+      FFAppState().pendingInviteType = '';
+      FFAppState().duoRoomId = '';
+
       if (FirebaseAuth.instance.currentUser == null) {
         AppStateNotifier.instance.updateNotifyOnAuthChange(false);
         await FirebaseAuth.instance.signInAnonymously();
@@ -187,6 +195,7 @@ class _IntroMasterState extends State<IntroMaster> {
         );
       }
     } finally {
+      _trialStarting = false;
       if (mounted) setState(() => isLoading = false);
     }
   }
@@ -234,6 +243,7 @@ class _IntroMasterState extends State<IntroMaster> {
             email: email,
             password: password,
           );
+          await _cleanupTrialSandbox();
           await currentUser.linkWithCredential(credential);
         } else {
           await FirebaseAuth.instance.createUserWithEmailAndPassword(
@@ -241,6 +251,9 @@ class _IntroMasterState extends State<IntroMaster> {
             password: password,
           );
         }
+      }
+      if (!isLoginMode) {
+        await _grantSignupBonusIfPossible();
       }
       if (mounted) _routeAfterAuth();
     } on FirebaseAuthException catch (e) {
@@ -846,6 +859,8 @@ class _IntroMasterState extends State<IntroMaster> {
     debugPrint('[KakaoAuth] _handleSocialAuth enter');
     setState(() => isLoading = true);
     try {
+      // 소셜 로그인 전에 체험 sandbox 삭제 (anonymous 권한 유지 중이라 삭제 가능)
+      await _cleanupTrialSandbox();
       await authFn();
       debugPrint(
           '[KakaoAuth] authFn complete, currentUser=${FirebaseAuth.instance.currentUser?.uid}, pendingInviteType=${FFAppState().pendingInviteType}');
@@ -865,6 +880,47 @@ class _IntroMasterState extends State<IntroMaster> {
     }
   }
 
+  /// 샌드박스 폐기: 체험 중 생성된 임시 데이터를 삭제한다.
+  /// anonymous 권한이 살아있는 상태에서 호출해야 한다 (UID 변경 전).
+  Future<void> _cleanupTrialSandbox() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || !user.isAnonymous) return;
+
+    TrialFlowState.instance.restoreFromAppState();
+    final historyRef = TrialFlowState.instance.myHistoryRef;
+    final hasTrialState = historyRef != null ||
+        TrialFlowState.instance.isTrial ||
+        FFAppState().trialCompleted ||
+        FFAppState().trialStep > 0;
+    if (!hasTrialState) return;
+
+    if (historyRef != null) {
+      try {
+        final subDocs = await historyRef.collection('messages').get();
+        for (final doc in subDocs.docs) {
+          await doc.reference.delete();
+        }
+        await historyRef.delete();
+        debugPrint('[TrialCleanup] deleted trial history: ${historyRef.path}');
+      } catch (e) {
+        // 삭제 실패해도 가입 진행은 막지 않음 (고아 문서는 추후 정리)
+        debugPrint('[TrialCleanup] history delete failed (non-blocking): $e');
+      }
+    }
+
+    // 체험 임시값만 초기화 (trialCompleted는 절대 false로 만들지 않음)
+    TrialFlowState.instance.myHistoryRef = null;
+    TrialFlowState.instance.step = 0;
+    FFAppState().trialStep = 0;
+    FFAppState().trialHistoryPath = '';
+
+    // trialCompleted = true 확정 (재체험 방지)
+    FFAppState().trialCompleted = true;
+
+    debugPrint(
+        '[TrialCleanup] sandbox cleanup complete, trialCompleted remains true');
+  }
+
   Future<void> _grantSignupBonusIfPossible() async {
     try {
       final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
@@ -876,12 +932,19 @@ class _IntroMasterState extends State<IntroMaster> {
         FFAppState().remainingTime = remainingTime;
         FFAppState().remainingTimeLoaded = true;
         LobbyBrain.lastSyncedUid = FirebaseAuth.instance.currentUser?.uid;
+      } else {
+        debugPrint('[SignupBonus] remainingTime null, forcing lobby resync');
+        FFAppState().remainingTimeLoaded = false;
+        LobbyBrain.lastSyncedUid = null;
       }
       debugPrint(
           '[SignupBonus] grantSignupBonus complete, granted=$granted, remainingTime=$remainingTime');
     } catch (e, stack) {
       debugPrint('[SignupBonus] grantSignupBonus failed: $e');
       debugPrint('[SignupBonus] stack: $stack');
+      // 보너스 확인 실패 -> Lobby 진입 시 Firestore 강제 재동기화
+      FFAppState().remainingTimeLoaded = false;
+      LobbyBrain.lastSyncedUid = null;
     }
   }
 

@@ -254,7 +254,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     TrialFlowState.instance.restoreFromAppState();
     if (TrialFlowState.instance.isTrialAnyone) {
       trialMode = true;
-      trialSeconds = 30;
+      trialSeconds = 60;
       _myHistoryRef = TrialFlowState.instance.myHistoryRef;
       startTrialTimer();
     }
@@ -2631,14 +2631,18 @@ class TtsQueueManager {
       );
 
       try {
-        BillingTicker.instance.resumeFromActivity(_currentChunkIsUser
-            ? 'free_talk_user_tts_start'
-            : 'free_talk_ai_tts_start');
+        if (!TrialFlowState.instance.isTrial) {
+          BillingTicker.instance.resumeFromActivity(_currentChunkIsUser
+              ? 'free_talk_user_tts_start'
+              : 'free_talk_ai_tts_start');
+        }
         await _player.play(BytesSource(bytes));
         await _completer!.future.timeout(estimatedDuration);
-        BillingTicker.instance.resumeFromActivity(_currentChunkIsUser
-            ? 'free_talk_user_tts_end'
-            : 'free_talk_ai_tts_end');
+        if (!TrialFlowState.instance.isTrial) {
+          BillingTicker.instance.resumeFromActivity(_currentChunkIsUser
+              ? 'free_talk_user_tts_end'
+              : 'free_talk_ai_tts_end');
+        }
       } catch (_) {
       } finally {
         if (_completer != null && !_completer!.isCompleted) {
