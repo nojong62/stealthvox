@@ -6,6 +6,7 @@
 //   - deductRemainingTime:  callable that deducts user's subscription time
 //                           (with auth check, range validation, transaction)
 //   - kakaoCustomAuth:      callable that maps a Kakao account to a Firebase uid
+//   - linkOrCreateAccount:  callable that resolves accounts by email
 // Runtime:  Node.js 20
 // Region:   us-central1 (default)
 // ============================================================================
@@ -436,6 +437,7 @@ exports.kakaoCustomAuth = functions
     }
 
     let kakaoId = null;
+    let kakaoEmail = null;
     try {
       const resp = await fetch("https://kapi.kakao.com/v2/user/me", {
         method: "GET",
@@ -449,6 +451,10 @@ exports.kakaoCustomAuth = functions
       }
       const profile = await resp.json();
       kakaoId = profile && profile.id != null ? String(profile.id) : null;
+      kakaoEmail =
+        profile && profile.kakao_account && profile.kakao_account.email
+          ? profile.kakao_account.email
+          : null;
     } catch (e) {
       if (e instanceof functions.https.HttpsError) throw e;
       throw new functions.https.HttpsError(
@@ -466,17 +472,40 @@ exports.kakaoCustomAuth = functions
     const firestore = admin.firestore();
     const mapRef = firestore.collection("kakao_uid_map").doc(kakaoId);
 
+    let emailMatchUid = null;
+    if (kakaoEmail) {
+      try {
+        const existingUser = await admin.auth().getUserByEmail(kakaoEmail);
+        if (existingUser && existingUser.uid) {
+          emailMatchUid = existingUser.uid;
+          functions.logger.info("kakaoCustomAuth: email match found", {
+            kakaoEmail: kakaoEmail,
+            existingUid: existingUser.uid,
+          });
+        }
+      } catch (emailErr) {
+        if (emailErr.code !== "auth/user-not-found") {
+          functions.logger.warn("kakaoCustomAuth: getUserByEmail error", {
+            error: String(emailErr),
+          });
+        }
+      }
+    }
+
     const resolvedUid = await firestore.runTransaction(async (tx) => {
       const mapDoc = await tx.get(mapRef);
       if (mapDoc.exists && mapDoc.data().uid) {
         return mapDoc.data().uid;
       }
+
+      const targetUid = emailMatchUid || anonUid;
       tx.set(mapRef, {
-        uid: anonUid,
+        uid: targetUid,
         kakao_id: kakaoId,
+        kakao_email: kakaoEmail || null,
         created_at: admin.firestore.FieldValue.serverTimestamp(),
       });
-      return anonUid;
+      return targetUid;
     });
 
     const token = await admin
@@ -492,3 +521,122 @@ exports.kakaoCustomAuth = functions
 
     return { token: token };
   });
+
+// ----------------------------------------------------------------------------
+// linkOrCreateAccount
+// Type:   HTTPS Callable
+// Input:  { provider: "google" | "email", idToken?: string, email?: string }
+// Output: { token: string, isNewUser: boolean }
+//
+// Email-based account linking:
+//   1. Extract an email from the provider payload.
+//   2. Resolve an existing Firebase Auth account by email.
+//   3. Return a custom token for the existing account, or create a new account.
+// ----------------------------------------------------------------------------
+exports.linkOrCreateAccount = functions
+  .region("us-central1")
+  .https.onCall(async (data, context) => {
+    const provider = data && data.provider;
+    if (!provider || !["google", "email"].includes(provider)) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "provider must be 'google' or 'email'."
+      );
+    }
+
+    let email = null;
+    let displayName = null;
+
+    if (provider === "google") {
+      const idToken = data.idToken;
+      if (!idToken || typeof idToken !== "string") {
+        throw new functions.https.HttpsError(
+          "invalid-argument",
+          "idToken is required for Google provider."
+        );
+      }
+
+      try {
+        const tokenInfoResp = await fetch(
+          "https://oauth2.googleapis.com/tokeninfo?id_token=" +
+            encodeURIComponent(idToken)
+        );
+        if (!tokenInfoResp.ok) {
+          throw new Error("Google token rejected (status " + tokenInfoResp.status + ")");
+        }
+
+        const tokenInfo = await tokenInfoResp.json();
+        if (tokenInfo.email_verified !== "true" && tokenInfo.email_verified !== true) {
+          throw new Error("Google email is not verified.");
+        }
+        email = tokenInfo.email || null;
+        displayName = tokenInfo.name || null;
+      } catch (e) {
+        throw new functions.https.HttpsError(
+          "unauthenticated",
+          "Invalid Google ID token: " + String(e)
+        );
+      }
+    } else if (provider === "email") {
+      email = data.email;
+      if (!email || typeof email !== "string") {
+        throw new functions.https.HttpsError(
+          "invalid-argument",
+          "email is required for email provider."
+        );
+      }
+    }
+
+    if (!email) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Could not extract email from provider data."
+      );
+    }
+
+    let existingUser = null;
+    try {
+      existingUser = await admin.auth().getUserByEmail(email);
+    } catch (e) {
+      if (e.code !== "auth/user-not-found") {
+        throw new functions.https.HttpsError(
+          "internal",
+          "Failed to check existing account: " + String(e)
+        );
+      }
+    }
+
+    if (existingUser) {
+      const token = await admin.auth().createCustomToken(existingUser.uid, {
+        provider: provider,
+        linked: true,
+      });
+
+      functions.logger.info("linkOrCreateAccount: existing user matched", {
+        email: email,
+        uid: existingUser.uid,
+        provider: provider,
+      });
+
+      return { token: token, isNewUser: false };
+    }
+
+    const newUser = await admin.auth().createUser({
+      email: email,
+      displayName: displayName,
+    });
+
+    const token = await admin.auth().createCustomToken(newUser.uid, {
+      provider: provider,
+      linked: false,
+    });
+
+    functions.logger.info("linkOrCreateAccount: new user created", {
+      email: email,
+      uid: newUser.uid,
+      provider: provider,
+    });
+
+    return { token: token, isNewUser: true };
+  });
+
