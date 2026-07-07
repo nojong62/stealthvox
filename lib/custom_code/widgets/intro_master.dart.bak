@@ -11,10 +11,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'trial/trial_flow_state.dart';
 import 'shared_social_button.dart';
-import 'terms_agreement_sheet.dart';
 import '/auth/social_auth_service.dart';
-
-enum IntroScreen { welcome, signUp, logIn }
 
 class IntroMaster extends StatefulWidget {
   const IntroMaster({
@@ -43,8 +40,8 @@ class _IntroMasterState extends State<IntroMaster> {
 
   bool isLoginMode = true;
   bool isLoading = false;
-  IntroScreen _currentScreen = IntroScreen.welcome;
-  bool _showEmailForm = false;
+  bool _isSignupMode = false;
+  bool _showEmailInSignup = false;
   bool _trialStarting = false;
   String _trialNativeLang = 'Korean';
   String _trialTargetLang = 'English';
@@ -58,9 +55,7 @@ class _IntroMasterState extends State<IntroMaster> {
     _passwordFocusNode.addListener(_onFocusChange);
     AppsFlyerManager.duoInviteSignal.addListener(_onDuoInviteSignal);
     if (FFAppState().trialCompleted) {
-      _currentScreen = IntroScreen.signUp;
-    } else {
-      _currentScreen = IntroScreen.welcome;
+      _isSignupMode = true;
     }
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkEntryStatus());
     const trialLanguages = [
@@ -315,17 +310,8 @@ class _IntroMasterState extends State<IntroMaster> {
   }
 
   Widget _buildMain(BuildContext context) {
-    switch (_currentScreen) {
-      case IntroScreen.welcome:
-        return _buildWelcomeView(context);
-      case IntroScreen.signUp:
-        return _buildSignUpView(context);
-      case IntroScreen.logIn:
-        return _buildLogInView(context);
-    }
-  }
+    if (_isSignupMode) return _buildSignupView(context);
 
-  Widget _buildWelcomeView(BuildContext context) {
     return Container(
       width: widget.width,
       height: widget.height,
@@ -504,9 +490,8 @@ class _IntroMasterState extends State<IntroMaster> {
                               _scrollController.jumpTo(0);
                             }
                             setState(() {
-                              _currentScreen = IntroScreen.logIn;
-                              _showEmailForm = false;
-                              isLoginMode = true;
+                              _isSignupMode = true;
+                              _showEmailInSignup = false;
                             });
                           },
                           child: const Text(
@@ -668,190 +653,7 @@ class _IntroMasterState extends State<IntroMaster> {
     );
   }
 
-  Widget _buildSignUpView(BuildContext context) {
-    return _buildAuthScaffold(
-      context: context,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton(
-              onPressed: () => setState(() {
-                _currentScreen = IntroScreen.logIn;
-                _showEmailForm = false;
-                isLoginMode = true;
-              }),
-              child: const Text(
-                '로그인',
-                style: TextStyle(
-                  color: Color(0xFF4A90D9),
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 62),
-          const Text(
-            '계속하시려면 먼저\n가입해주세요',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 22,
-              fontWeight: FontWeight.w800,
-              height: 1.32,
-            ),
-          ),
-          const SizedBox(height: 34),
-          SharedSocialButton(
-            label: '카카오톡으로 계속하기',
-            backgroundColor: const Color(0xFFFEE500),
-            textColor: const Color(0xFF191919),
-            icon: const Icon(
-              Icons.chat_bubble,
-              size: 20,
-              color: Color(0xFF191919),
-            ),
-            onTap: () => _handleSocialSignUp(SocialAuthService.signInWithKakao),
-          ),
-          const SizedBox(height: 30),
-          const Text(
-            '다른 방법으로 가입하기',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Color(0xFF9C9CA6),
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _roundAuthButton(
-                icon: Icons.email_outlined,
-                iconColor: Colors.white,
-                tooltip: '이메일로 가입하기',
-                onTap: () => setState(() {
-                  _showEmailForm = true;
-                  isLoginMode = false;
-                }),
-              ),
-              const SizedBox(width: 14),
-              _roundAuthButton(
-                label: 'G',
-                labelColor: const Color(0xFF4285F4),
-                tooltip: 'Google로 가입하기',
-                onTap: () =>
-                    _handleSocialSignUp(SocialAuthService.signInWithGoogle),
-              ),
-            ],
-          ),
-          if (_showEmailForm) ...[
-            const SizedBox(height: 22),
-            _buildEmailForm(isLogin: false),
-          ],
-          const SizedBox(height: 40),
-          _authFooter(
-            prefix: '이미 계정이 있으신가요? 바로 ',
-            action: '로그인하세요',
-            onTap: () => setState(() {
-              _currentScreen = IntroScreen.logIn;
-              _showEmailForm = false;
-              isLoginMode = true;
-            }),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLogInView(BuildContext context) {
-    return _buildAuthScaffold(
-      context: context,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: IconButton(
-              onPressed: () => setState(() {
-                _currentScreen = FFAppState().trialCompleted
-                    ? IntroScreen.signUp
-                    : IntroScreen.welcome;
-                _showEmailForm = false;
-              }),
-              icon: const Icon(Icons.arrow_back, color: Colors.white),
-              tooltip: '뒤로',
-            ),
-          ),
-          const SizedBox(height: 50),
-          const Text(
-            '로그인하고\n계속하기',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 22,
-              fontWeight: FontWeight.w800,
-              height: 1.32,
-            ),
-          ),
-          const SizedBox(height: 34),
-          SharedSocialButton(
-            label: '카카오톡으로 계속하기',
-            backgroundColor: const Color(0xFFFEE500),
-            textColor: const Color(0xFF191919),
-            icon: const Icon(
-              Icons.chat_bubble,
-              size: 20,
-              color: Color(0xFF191919),
-            ),
-            onTap: () => _handleSocialLogIn(SocialAuthService.signInWithKakao),
-          ),
-          const SizedBox(height: 12),
-          SharedSocialButton(
-            label: 'Google로 계속하기',
-            backgroundColor: Colors.white,
-            textColor: Colors.black87,
-            border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
-            icon: const Icon(Icons.g_mobiledata, size: 24, color: Colors.blue),
-            onTap: () => _handleSocialLogIn(SocialAuthService.signInWithGoogle),
-          ),
-          const SizedBox(height: 12),
-          SharedSocialButton(
-            label: '이메일로 계속하기',
-            backgroundColor: const Color(0xFF33333A),
-            textColor: Colors.white,
-            icon: const Icon(Icons.email_outlined,
-                size: 20, color: Colors.white70),
-            onTap: () => setState(() {
-              _showEmailForm = !_showEmailForm;
-              isLoginMode = true;
-            }),
-          ),
-          if (_showEmailForm) ...[
-            const SizedBox(height: 18),
-            _buildEmailForm(isLogin: true),
-          ],
-          const SizedBox(height: 40),
-          _authFooter(
-            prefix: '계정이 없으신가요? ',
-            action: '가입하기',
-            onTap: () => setState(() {
-              _currentScreen = IntroScreen.signUp;
-              _showEmailForm = false;
-              isLoginMode = false;
-            }),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAuthScaffold({
-    required BuildContext context,
-    required Widget child,
-  }) {
+  Widget _buildSignupView(BuildContext context) {
     return Container(
       width: widget.width,
       height: widget.height,
@@ -865,170 +667,192 @@ class _IntroMasterState extends State<IntroMaster> {
             : SafeArea(
                 child: SingleChildScrollView(
                   controller: _scrollController,
-                  padding: EdgeInsets.fromLTRB(
-                    24,
-                    18,
-                    24,
-                    24 + MediaQuery.of(context).viewInsets.bottom,
+                  padding: EdgeInsets.fromLTRB(24, 18, 24,
+                      24 + MediaQuery.of(context).viewInsets.bottom),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (!FFAppState().trialCompleted)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: IconButton(
+                            onPressed: () => setState(() {
+                              _isSignupMode = false;
+                              _showEmailInSignup = false;
+                            }),
+                            icon: const Icon(Icons.arrow_back,
+                                color: Colors.white70),
+                            tooltip: '뒤로',
+                          ),
+                        ),
+                      const SizedBox(height: 12),
+                      Text("StealthVox",
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.orbitron(
+                              fontSize: 28,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white)),
+                      Text("자율 어학 연습의 동반자",
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.roboto(
+                              fontSize: 13, color: Colors.white54)),
+                      const SizedBox(height: 28),
+                      const Center(
+                        child: Text('가입 방법 선택',
+                            style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold)),
+                      ),
+                      const SizedBox(height: 16),
+                      SharedSocialButton(
+                        label: '카카오톡으로 계속하기',
+                        backgroundColor: const Color(0xFFFEE500),
+                        textColor: const Color(0xFF191919),
+                        icon: const Icon(Icons.chat_bubble,
+                            size: 20, color: Color(0xFF191919)),
+                        onTap: () => _handleSocialAuth(
+                            SocialAuthService.signInWithKakao),
+                      ),
+                      const SizedBox(height: 12),
+                      SharedSocialButton(
+                        label: 'Google 계정으로 계속하기',
+                        backgroundColor: Colors.white,
+                        textColor: Colors.black87,
+                        border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.15)),
+                        icon: const Icon(Icons.g_mobiledata,
+                            size: 22, color: Colors.blue),
+                        onTap: () => _handleSocialAuth(
+                            SocialAuthService.signInWithGoogle),
+                      ),
+                      const SizedBox(height: 12),
+                      SharedSocialButton(
+                        label: '이메일로 계속하기(비밀번호 필요)',
+                        backgroundColor: const Color(0xFF333333),
+                        textColor: Colors.white,
+                        icon: const Icon(Icons.email_outlined,
+                            size: 20, color: Colors.white70),
+                        onTap: () => setState(
+                            () => _showEmailInSignup = !_showEmailInSignup),
+                      ),
+                      if (_showEmailInSignup) ...[
+                        const SizedBox(height: 16),
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF222222),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.08)),
+                          ),
+                          child: Column(
+                            children: [
+                              Row(
+                                children: [
+                                  _emailTabBtn('로그인', isLoginMode,
+                                      () => setState(() => isLoginMode = true)),
+                                  const SizedBox(width: 8),
+                                  _emailTabBtn(
+                                      '회원가입',
+                                      !isLoginMode,
+                                      () =>
+                                          setState(() => isLoginMode = false)),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              _buildTextField(
+                                emailController,
+                                "이메일",
+                                Icons.email_outlined,
+                                false,
+                                focusNode: _emailFocusNode,
+                                textInputAction: TextInputAction.next,
+                                onSubmitted: (_) => FocusScope.of(context)
+                                    .requestFocus(_passwordFocusNode),
+                              ),
+                              const SizedBox(height: 12),
+                              _buildTextField(
+                                passwordController,
+                                "비밀번호",
+                                Icons.lock_outline,
+                                true,
+                                focusNode: _passwordFocusNode,
+                                textInputAction: TextInputAction.done,
+                                onSubmitted: (_) => _handleAuth(),
+                              ),
+                              const SizedBox(height: 16),
+                              SizedBox(
+                                width: double.infinity,
+                                height: 48,
+                                child: ElevatedButton(
+                                  onPressed: isLoading ? null : _handleAuth,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFFD4AF37),
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(12)),
+                                  ),
+                                  child: Text(
+                                    isLoginMode ? "로그인" : "가입하기",
+                                    style: const TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white),
+                                  ),
+                                ),
+                              ),
+                              if (isLoginMode) ...[
+                                const SizedBox(height: 8),
+                                GestureDetector(
+                                  onTap: _resetPassword,
+                                  child: const Text(
+                                    '비밀번호 찾기',
+                                    style: TextStyle(
+                                        color: Colors.white38, fontSize: 12),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 24),
+                      const Divider(color: Colors.white12),
+                      const SizedBox(height: 16),
+                      const Row(
+                        children: [
+                          Icon(Icons.lightbulb, color: Colors.amber, size: 20),
+                          SizedBox(width: 8),
+                          Text("사용 가이드",
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        "1. 실전 AI 대화\n"
+                        "• [AI Roleplay] 무작위 직업과 상황을 부여받고 예측 불가한 실전 회화를 연습하세요.\n"
+                        "• [Anyone] 마음속에 떠올린 사람에게 말하듯 대화하면 AI가 점점 그 사람이 되어 응답합니다.\n\n"
+                        "2. 심화 훈련 모드\n"
+                        "• [Duo Connect] 글로벌 파트너와 각자의 모국어로 대화하면 동시에 통역해 줍니다.\n"
+                        "• [Step Expand] 짧은 문장에서 시작해 고급 문법을 더하며 긴 문장을 완성하세요.\n\n"
+                        "3. 스터디 룸\n"
+                        "• 이전 대화를 복습하고 발음 교정 및 섀도잉 훈련을 진행합니다.\n"
+                        "• 스터디룸의 일부 메뉴는 가격의 25%만 차감됩니다.\n\n"
+                        "4. 합리적인 사용량 비례 과금\n"
+                        "StealthVox는 사용한 만큼 최소 시간 단위로 과금합니다. 60초 이상 반응이 없으면 자동 일시정지됩니다.",
+                        style: TextStyle(
+                            color: Colors.white70, fontSize: 13, height: 1.6),
+                      ),
+                    ],
                   ),
-                  child: child,
                 ),
               ),
       ),
     );
-  }
-
-  Widget _buildEmailForm({required bool isLogin}) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF222226),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
-      child: Column(
-        children: [
-          _buildTextField(
-            emailController,
-            '이메일',
-            Icons.email_outlined,
-            false,
-            focusNode: _emailFocusNode,
-            textInputAction: TextInputAction.next,
-            onSubmitted: (_) =>
-                FocusScope.of(context).requestFocus(_passwordFocusNode),
-          ),
-          const SizedBox(height: 12),
-          _buildTextField(
-            passwordController,
-            '비밀번호',
-            Icons.lock_outline,
-            true,
-            focusNode: _passwordFocusNode,
-            textInputAction: TextInputAction.done,
-            onSubmitted: (_) {
-              isLoginMode = isLogin;
-              _handleAuth();
-            },
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            height: 48,
-            child: ElevatedButton(
-              onPressed: isLoading
-                  ? null
-                  : () {
-                      isLoginMode = isLogin;
-                      _handleAuth();
-                    },
-              style: ElevatedButton.styleFrom(
-                backgroundColor:
-                    isLogin ? const Color(0xFF4A90D9) : const Color(0xFFD4AF37),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-              ),
-              child: Text(
-                isLogin ? '로그인' : '가입하기',
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-          ),
-          if (isLogin) ...[
-            const SizedBox(height: 10),
-            GestureDetector(
-              onTap: _resetPassword,
-              child: const Text(
-                '비밀번호 찾기',
-                style: TextStyle(color: Colors.white38, fontSize: 12),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _roundAuthButton({
-    IconData? icon,
-    Color iconColor = Colors.white,
-    String? label,
-    Color labelColor = Colors.white,
-    required String tooltip,
-    required VoidCallback onTap,
-  }) {
-    return Tooltip(
-      message: tooltip,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(28),
-        child: Container(
-          width: 56,
-          height: 56,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: const Color(0xFF2C2C32),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-          ),
-          child: Center(
-            child: icon != null
-                ? Icon(icon, color: iconColor, size: 23)
-                : Text(
-                    label ?? '',
-                    style: TextStyle(
-                      color: labelColor,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _authFooter({
-    required String prefix,
-    required String action,
-    required VoidCallback onTap,
-  }) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Text(
-          prefix,
-          style: const TextStyle(color: Color(0xFFB0B0B8), fontSize: 13),
-        ),
-        GestureDetector(
-          onTap: onTap,
-          child: Text(
-            action,
-            style: const TextStyle(
-              color: Color(0xFF4A90D9),
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Future<void> _handleSocialSignUp(Future<dynamic> Function() authFn) async {
-    final termsResult = await TermsAgreementSheet.show(context);
-    if (termsResult == null) return;
-
-    await _handleSocialAuth(authFn);
-
-    // TODO: Save termsResult.marketingAccepted to users/{uid}/marketing_consent.
-  }
-
-  Future<void> _handleSocialLogIn(Future<dynamic> Function() authFn) async {
-    await _handleSocialAuth(authFn);
   }
 
   Future<void> _handleSocialAuth(Future<dynamic> Function() authFn) async {
@@ -1124,7 +948,6 @@ class _IntroMasterState extends State<IntroMaster> {
     }
   }
 
-  // ignore: unused_element
   Widget _emailTabBtn(String label, bool active, VoidCallback onTap) {
     return Expanded(
       child: GestureDetector(
