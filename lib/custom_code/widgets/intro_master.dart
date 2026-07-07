@@ -127,13 +127,18 @@ class _IntroMasterState extends State<IntroMaster> {
     // 2순위: 항상 AppsFlyer 초기화 (로그인 여부와 무관하게 딥링크 콜백 등록)
     await _initAppsFlyer();
     if (!mounted) return;
-    // 3순위: 이미 로그인된 회원도 pending invite 우선 체크
+    // 3순위: 정식 회원(non-anonymous)만 Lobby로 라우팅
+    // anonymous 체험 유저는 Intro에 머물러야 함 (Welcome 또는 Auth)
     final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
+    if (user != null && !user.isAnonymous) {
       debugPrint(
-          '[TrialDebug] _checkEntryStatus  routing existing user to Lobby via _routeAfterAuth, time=${DateTime.now().toIso8601String()}');
+          '[TrialDebug] _checkEntryStatus  routing non-anonymous user to Lobby via _routeAfterAuth, time=${DateTime.now().toIso8601String()}');
       _routeAfterAuth();
       return;
+    }
+    if (user != null && user.isAnonymous) {
+      debugPrint(
+          '[TrialDebug] _checkEntryStatus  anonymous user stays on Intro, trialCompleted=${FFAppState().trialCompleted}');
     }
     // 4순위: 비회원은 Intro에서 로그인 가능 상태로 대기
   }
@@ -259,12 +264,10 @@ class _IntroMasterState extends State<IntroMaster> {
       if (!isLoginMode) {
         await _grantSignupBonusIfPossible();
       }
-      // 신규 가입 시 연령 확인
-      if (!isLoginMode && mounted) {
+      // 가입/로그인 모두 연령 정보 확인 (birthYear 있으면 자동 통과)
+      if (mounted) {
         await _checkAgeAndRoute();
-        return;
       }
-      if (mounted) _routeAfterAuth();
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -805,6 +808,18 @@ class _IntroMasterState extends State<IntroMaster> {
       ),
       child: Column(
         children: [
+          // 로그인/가입 탭 전환
+          Row(
+            children: [
+              _emailTabBtn('로그인', isLoginMode, () {
+                setState(() => isLoginMode = true);
+              }),
+              _emailTabBtn('가입하기', !isLoginMode, () {
+                setState(() => isLoginMode = false);
+              }),
+            ],
+          ),
+          const SizedBox(height: 14),
           _buildTextField(
             emailController,
             '이메일',
@@ -1240,7 +1255,6 @@ class _IntroMasterState extends State<IntroMaster> {
     }
   }
 
-  // ignore: unused_element
   Widget _emailTabBtn(String label, bool active, VoidCallback onTap) {
     return Expanded(
       child: GestureDetector(
