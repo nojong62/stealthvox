@@ -40,433 +40,435 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 주의사항:
 - 기존 정상 작동 기능을 깨지 말 것
 - FlutterFlow generated code 구조를 함부로 대규모 변경하지 말 것
-- 앱 실행/빌드 가능성을 최우선으로 할 것
+- 앱 실행/빌드 가능성을 최우선으로 하되, 빌드할지는 먼저 물어 봐.
 - 불확실한 부분은 임의 삭제하지 말고 보고할 것
 
 이 내용을 항상 기억하고 지시문에 포함해 줘.
 =================================
 지시문 
 
-# 지시문: 인트로 A/B 구조 + SharedPreferences 체험 게이트 단순화
+# 지시문 3: Cloud Function — 이메일 기반 자동 계정 통합
 
 ## 목적
-체험 완료 여부를 SharedPreferences `trialCompleted` 하나로 판단하여,
-인트로 A(체험+로그인)와 인트로 B(로그인만)를 분기한다.
-TrialDeviceGate(Firebase Installations ID)를 완전 제거한다.
+사용자가 카카오로 가입한 뒤 앱을 삭제하고, 재설치 후 Google로 로그인하는 경우
+같은 이메일이면 자동으로 기존 계정과 통합되도록 서버측 로직을 추가한다.
 
-## 흐름도
-```
-앱 실행
-  → FirebaseAuth.currentUser != null (비익명)? → Yes → 로비 직행
-  → No → FFAppState().trialCompleted?
-    → false (또는 키 없음) → 인트로 A (체험 버튼 + 로그인 버튼)
-    → true → 인트로 B (로그인 버튼만, 뒤로가기 버튼 없음)
-```
+사용자 눈에는 아무 추가 확인 없이 기존 데이터(시간, 기록)가 그대로 살아있는 것처럼 보여야 한다.
 
-앱 삭제→재설치 시 SharedPreferences 초기화 → trialCompleted 소실 → 체험 재허용 (의도된 동작).
+## 대상 파일
+- **수정**: `firebase/functions/index.js`
+
+## 선행 조건
+- ✅ 지시문 1, 2 완료
+- ✅ 카카오 개발자 콘솔에서 "이메일" 동의항목이 활성화되어 있는지 확인 필요
+  (카카오 비즈앱 등록 시 이메일은 기본 제공, 단 사용자가 동의 거부하면 null)
 
 ---
 
-## Phase 0 — Git Savepoint
+## 핵심 아키텍처
 
-```powershell
-cd F:\flutter_project\stealth_vox
-git add -A && git commit -m "savepoint: before intro-ab-simplification"
+### 현재 구조의 문제점
+
+```
+카카오 로그인 → kakaoCustomAuth → kakao_uid_map 에서 UID 조회/생성
+Google 로그인 → Firebase GoogleAuthProvider → 별도 UID 생성
+이메일 로그인 → Firebase EmailAuthProvider → 별도 UID 생성
+```
+
+세 경로가 완전히 분리되어 있어, 같은 사람이 다른 provider로 로그인하면 별개의 UID가 생성된다.
+
+### 해결 방향
+
+**Google/이메일 로그인 시** 서버에서 이메일 기반 기존 계정 존재 여부를 체크하고,
+기존 계정이 있으면 해당 UID의 custom token을 발급하여 기존 계정으로 로그인시킨다.
+
+```
+Google 로그인 시나리오:
+1. 클라이언트: Google Sign-In SDK → idToken 획득
+2. 클라이언트: linkOrCreateAccount({ provider: 'google', idToken: '...' }) 호출
+3. 서버:
+   a. idToken 검증 → 이메일 추출
+   b. 이메일로 기존 Firebase Auth 사용자 조회 (admin.auth().getUserByEmail)
+   c. 기존 사용자 있음 → 그 UID의 custom token 반환
+   d. 기존 사용자 없음 → 새 사용자 생성 → custom token 반환
+4. 클라이언트: signInWithCustomToken(token)
+```
+
+```
+카카오 로그인 시나리오 (기존 kakaoCustomAuth 확장):
+1. 카카오 API에서 이메일 추출 (profile.kakao_account.email)
+2. 이메일이 있으면 → admin.auth().getUserByEmail 로 기존 계정 체크
+3. 기존 계정 있음 → kakao_uid_map 업데이트 + 그 UID의 custom token 반환
+4. 기존 계정 없음 → 기존 로직대로 anonymous UID 바인딩
 ```
 
 ---
 
-## Phase 1 — 사전 grep 앵커 확인
+## Phase 0: 사전 진단
 
-아래 각 grep 결과가 기대값과 다르면 **즉시 중단하고 보고**.
+```bash
+# 1. 현재 index.js 함수 목록 확인
+grep "^exports\." firebase/functions/index.js
 
-### 1-1. consumeSignupOnEntry 선언 (trial_flow_state.dart)
-```powershell
-(Select-String -Path "lib\custom_code\widgets\trial\trial_flow_state.dart" -Pattern "consumeSignupOnEntry" | Measure-Object).Count
+# 2. kakaoCustomAuth에서 이메일 처리 여부 확인
+grep -n "email" firebase/functions/index.js
+
+# 3. 현재 배포된 함수 목록
+firebase --project stealth-vox-3p3rq3 functions:list
 ```
-→ 기대값: 2 (메서드 선언 + bool 반환)
-
-### 1-2. requestSignupOnEntry 호출처 (전체 프로젝트)
-```powershell
-Select-String -Path "lib\custom_code\widgets\*.dart" -Pattern "requestSignupOnEntry" -Recurse
-```
-→ 파일명과 라인 번호 모두 기록. 최소 1곳 (trial_flow_state.dart 외부 호출처).
-→ 이 호출을 Phase 2에서 `FFAppState().trialCompleted = true;`로 교체해야 함.
-
-### 1-3. TrialDeviceGate 전체 참조
-```powershell
-Select-String -Path "lib\**\*.dart" -Pattern "TrialDeviceGate" -Recurse
-```
-→ 모든 파일명·라인 기록. Phase 2에서 전부 제거.
-
-### 1-4. _forceSignupOnEntry 참조
-```powershell
-(Select-String -Path "lib\custom_code\widgets\trial\trial_flow_state.dart" -Pattern "_forceSignupOnEntry" | Measure-Object).Count
-```
-→ 기대값: 3 (선언, requestSignupOnEntry 내, consumeSignupOnEntry 내)
-
-### 1-5. intro_master.dart 앵커 확인
-```powershell
-(Select-String -Path "lib\custom_code\widgets\intro_master.dart" -Pattern "consumeSignupOnEntry" | Measure-Object).Count
-```
-→ 기대값: 1
-
-```powershell
-(Select-String -Path "lib\custom_code\widgets\intro_master.dart" -Pattern "trial_device_gate" | Measure-Object).Count
-```
-→ 기대값: 1 (import 문)
-
-```powershell
-(Select-String -Path "lib\custom_code\widgets\intro_master.dart" -Pattern "TrialDeviceGate" | Measure-Object).Count
-```
-→ 기대값: 3 (canTrial, snackbar 분기, markUsed)
-
-### 1-6. app_state.dart trialStep 앵커
-```powershell
-(Select-String -Path "lib\app_state.dart" -Pattern "ff_trialStep" | Measure-Object).Count
-```
-→ 기대값: 2 (initializePersistedState + setter)
-
-### 1-7. trial_device_gate.dart 존재 확인
-```powershell
-Test-Path "lib\custom_code\widgets\trial\trial_device_gate.dart"
-```
-→ 기대값: True
 
 ---
 
-## Phase 2 — 코드 수정
+## Phase 1: Savepoint
 
-⚠️ 각 파일 내 편집은 반드시 **아래→위(bottom-to-top)** 순서로 적용.
-⚠️ Box 7 절대 수정 금지.
-⚠️ `lib/custom_code/임시/` 폴더 수정 금지.
-⚠️ `dart format`은 개별 파일 단위로만 실행.
+```bash
+cd firebase/functions
+git add -A && git commit -m "savepoint: before account linking CF"
+```
 
 ---
 
-### 2-1. app_state.dart — trialCompleted 필드 추가
+## Phase 2: 수정 작업
 
-#### 2-1a. setter/getter 추가 (trialHistoryPath 블록 바로 아래)
+### 2-A: kakaoCustomAuth 확장 — 이메일 기반 기존 계정 매칭 추가
 
+**현재 kakaoCustomAuth 로직:**
 ```
-str_replace
-파일: lib\app_state.dart
-
-OLD:
-  String _trialHistoryPath = '';
-  String get trialHistoryPath => _trialHistoryPath;
-  set trialHistoryPath(String value) {
-    _trialHistoryPath = value;
-    prefs.setString('ff_trialHistoryPath', value);
-  }
-
-NEW:
-  String _trialHistoryPath = '';
-  String get trialHistoryPath => _trialHistoryPath;
-  set trialHistoryPath(String value) {
-    _trialHistoryPath = value;
-    prefs.setString('ff_trialHistoryPath', value);
-  }
-
-  bool _trialCompleted = false;
-  bool get trialCompleted => _trialCompleted;
-  set trialCompleted(bool value) {
-    _trialCompleted = value;
-    prefs.setBool('ff_trialCompleted', value);
-  }
+카카오 token → kapi.kakao.com 검증 → kakaoId 추출 → kakao_uid_map 조회 → UID 결정
 ```
 
-#### 2-1b. initializePersistedState에 로딩 추가 (trialHistoryPath 초기화 바로 아래)
-
+**변경 후:**
 ```
-str_replace
-파일: lib\app_state.dart
+카카오 token → kapi.kakao.com 검증 → kakaoId + email 추출
+→ kakao_uid_map에 기존 매핑 있으면 → 기존 UID (변경 없음)
+→ kakao_uid_map에 매핑 없으면:
+   → email로 admin.auth().getUserByEmail 조회
+   → 기존 계정 있으면 → 그 UID로 kakao_uid_map 생성 + custom token
+   → 기존 계정 없으면 → anonymous UID 바인딩 (기존 로직)
+```
 
-OLD:
-    _safeInit(() {
-      _trialHistoryPath =
-          prefs.getString('ff_trialHistoryPath') ?? _trialHistoryPath;
-    });
+#### str_replace 편집
 
-NEW:
-    _safeInit(() {
-      _trialHistoryPath =
-          prefs.getString('ff_trialHistoryPath') ?? _trialHistoryPath;
-    });
-    _safeInit(() {
-      _trialCompleted =
-          prefs.getBool('ff_trialCompleted') ?? _trialCompleted;
+**앵커**: `const profile = await resp.json();`
+**위치**: kakaoCustomAuth 함수 내부
+
+기존:
+```javascript
+      const profile = await resp.json();
+      kakaoId = profile && profile.id != null ? String(profile.id) : null;
+```
+
+변경:
+```javascript
+      const profile = await resp.json();
+      kakaoId = profile && profile.id != null ? String(profile.id) : null;
+      // 이메일 추출 (카카오 동의항목에서 이메일 제공 시)
+      kakaoEmail = profile && profile.kakao_account && profile.kakao_account.email
+        ? profile.kakao_account.email
+        : null;
+```
+
+그리고 `kakaoEmail` 변수 선언을 `kakaoId` 선언 옆에 추가:
+```javascript
+    let kakaoId = null;
+    let kakaoEmail = null;
+```
+
+**앵커**: `const resolvedUid = await firestore.runTransaction(async (tx) => {`
+기존 트랜잭션 내부 로직 변경:
+
+기존:
+```javascript
+    const resolvedUid = await firestore.runTransaction(async (tx) => {
+      const mapDoc = await tx.get(mapRef);
+      if (mapDoc.exists && mapDoc.data().uid) {
+        return mapDoc.data().uid;
+      }
+      tx.set(mapRef, {
+        uid: anonUid,
+        kakao_id: kakaoId,
+        created_at: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      return anonUid;
     });
 ```
 
----
-
-### 2-2. intro_master.dart 수정 (4개 편집, bottom-to-top)
-
-#### 2-2d. (가장 아래 편집) _buildSignupView 뒤로가기 버튼 — 체험 완료 시 숨김
-
-```
-str_replace
-파일: lib\custom_code\widgets\intro_master.dart
-
-OLD:
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: IconButton(
-                          onPressed: () => setState(() {
-                            _isSignupMode = false;
-                            _showEmailInSignup = false;
-                          }),
-                          icon: const Icon(Icons.arrow_back,
-                              color: Colors.white70),
-                          tooltip: '뒤로',
-                        ),
-                      ),
-
-NEW:
-                      if (!FFAppState().trialCompleted)
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: IconButton(
-                            onPressed: () => setState(() {
-                              _isSignupMode = false;
-                              _showEmailInSignup = false;
-                            }),
-                            icon: const Icon(Icons.arrow_back,
-                                color: Colors.white70),
-                            tooltip: '뒤로',
-                          ),
-                        ),
-```
-
-#### 2-2c. _startTrial() — TrialDeviceGate 호출 제거
-
-```
-str_replace
-파일: lib\custom_code\widgets\intro_master.dart
-
-OLD:
-      TrialFlowState.instance.restoreFromAppState();
-      final canTry = await TrialDeviceGate.canTrial();
-      if (!canTry) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('무료 체험은 기기당 1회만 가능합니다. 로그인해 주세요.')),
-          );
-        }
-        return;
+변경:
+```javascript
+    const resolvedUid = await firestore.runTransaction(async (tx) => {
+      const mapDoc = await tx.get(mapRef);
+      if (mapDoc.exists && mapDoc.data().uid) {
+        return mapDoc.data().uid;
       }
 
-NEW:
-      TrialFlowState.instance.restoreFromAppState();
+      // 이메일 기반 기존 계정 매칭 시도
+      let targetUid = anonUid;
+      if (kakaoEmail) {
+        try {
+          const existingUser = await admin.auth().getUserByEmail(kakaoEmail);
+          if (existingUser && existingUser.uid) {
+            targetUid = existingUser.uid;
+            functions.logger.info("kakaoCustomAuth: email match found", {
+              kakaoEmail: kakaoEmail,
+              existingUid: existingUser.uid,
+            });
+          }
+        } catch (emailErr) {
+          // getUserByEmail throws if user not found — this is normal
+          if (emailErr.code !== "auth/user-not-found") {
+            functions.logger.warn("kakaoCustomAuth: getUserByEmail error", {
+              error: String(emailErr),
+            });
+          }
+        }
+      }
+
+      tx.set(mapRef, {
+        uid: targetUid,
+        kakao_id: kakaoId,
+        kakao_email: kakaoEmail || null,
+        created_at: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      return targetUid;
+    });
 ```
 
-그리고 같은 함수 내에서 `markUsed()` 제거:
+### 2-B: linkOrCreateAccount 신규 Cloud Function 추가
 
-```
-str_replace
-파일: lib\custom_code\widgets\intro_master.dart
+Google/이메일 로그인 시 이메일 기반 기존 계정 매칭을 위한 새 callable 함수.
 
-OLD:
-      await TrialDeviceGate.markUsed();
+**index.js 맨 하단에 추가:**
 
-      if (!context.mounted) return;
-
-NEW:
-      if (!context.mounted) return;
-```
-
-#### 2-2b. initState — consumeSignupOnEntry를 trialCompleted로 교체
-
-```
-str_replace
-파일: lib\custom_code\widgets\intro_master.dart
-
-OLD:
-    if (TrialFlowState.instance.consumeSignupOnEntry()) {
-      _isSignupMode = true;
-    } else {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _checkEntryStatus());
-    }
-
-NEW:
-    if (FFAppState().trialCompleted) {
-      _isSignupMode = true;
-    }
-    WidgetsBinding.instance.addPostFrameCallback((_) => _checkEntryStatus());
-```
-
-※ 기존에는 consumeSignupOnEntry가 true면 `_checkEntryStatus()`를 건너뛰었음 →
-이미 로그인된 회원이 체험 후 돌아왔을 때 Lobby로 못 가는 버그 가능성이 있었음.
-신규 로직은 `_checkEntryStatus()`를 항상 실행하여 로그인 상태면 로비 직행.
-
-#### 2-2a. (가장 위 편집) import 문 — trial_device_gate 제거
-
-```
-str_replace
-파일: lib\custom_code\widgets\intro_master.dart
-
-OLD:
-import 'trial/trial_flow_state.dart';
-import 'trial/trial_device_gate.dart';
-
-NEW:
-import 'trial/trial_flow_state.dart';
-```
-
----
-
-### 2-3. trial_flow_state.dart — _forceSignupOnEntry 관련 코드 제거
-
-```
-str_replace
-파일: lib\custom_code\widgets\trial\trial_flow_state.dart
-
-OLD:
-  int step = 0;
-  bool _forceSignupOnEntry = false;
-
-NEW:
-  int step = 0;
-```
-
-```
-str_replace
-파일: lib\custom_code\widgets\trial\trial_flow_state.dart
-
-OLD:
-  /// Request signup mode the next time Intro is entered from the trial flow.
-  /// This is consumed once and immediately reset.
-  void requestSignupOnEntry() {
-    _forceSignupOnEntry = true;
+```javascript
+// ----------------------------------------------------------------------------
+// linkOrCreateAccount
+// Type:   HTTPS Callable
+// Input:  { provider: 'google' | 'email', idToken?: string, email?: string, password?: string }
+// Output: { token: string, isNewUser: boolean }
+//
+// 이메일 기반 계정 통합:
+//   1. provider별로 이메일 추출
+//   2. admin.auth().getUserByEmail 로 기존 계정 조회
+//   3. 기존 계정 있음 → 해당 UID의 custom token 반환
+//   4. 기존 계정 없음 → 새 사용자 생성 → custom token 반환
+//
+// 참고: 이 함수를 사용하면 클라이언트에서 signInWithCredential 대신
+//       signInWithCustomToken을 사용해야 한다.
+// ----------------------------------------------------------------------------
+exports.linkOrCreateAccount = functions.https.onCall(async (data, context) => {
+  const provider = data && data.provider;
+  if (!provider || !["google", "email"].includes(provider)) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "provider must be 'google' or 'email'."
+    );
   }
 
-  bool consumeSignupOnEntry() {
-    final requested = _forceSignupOnEntry;
-    _forceSignupOnEntry = false;
-    return requested;
+  let email = null;
+  let displayName = null;
+
+  if (provider === "google") {
+    const idToken = data.idToken;
+    if (!idToken) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "idToken is required for Google provider."
+      );
+    }
+    // Google ID Token 검증
+    try {
+      const decodedToken = await admin.auth().verifyIdToken(idToken);
+      email = decodedToken.email;
+      displayName = decodedToken.name || null;
+    } catch (e) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "Invalid Google ID token: " + String(e)
+      );
+    }
+  } else if (provider === "email") {
+    email = data.email;
+    if (!email || typeof email !== "string") {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "email is required for email provider."
+      );
+    }
+    // 이메일 로그인의 경우, 기존 Firebase Auth 로직을 사용하므로
+    // 이 함수에서는 기존 계정 존재 여부 확인만 수행
   }
 
-NEW:
-```
+  if (!email) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "Could not extract email from provider data."
+    );
+  }
 
-(빈 문자열로 교체 = 해당 블록 삭제)
+  // 기존 계정 조회
+  let existingUser = null;
+  try {
+    existingUser = await admin.auth().getUserByEmail(email);
+  } catch (e) {
+    if (e.code !== "auth/user-not-found") {
+      throw new functions.https.HttpsError(
+        "internal",
+        "Failed to check existing account: " + String(e)
+      );
+    }
+  }
 
----
+  if (existingUser) {
+    // 기존 계정 발견 → custom token 발급
+    const token = await admin.auth().createCustomToken(existingUser.uid, {
+      provider: provider,
+      linked: true,
+    });
 
-### 2-4. requestSignupOnEntry() 외부 호출처 교체
+    functions.logger.info("linkOrCreateAccount: existing user matched", {
+      email: email,
+      uid: existingUser.uid,
+      provider: provider,
+    });
 
-Phase 1-2에서 찾은 파일에서 아래 패턴을 교체:
+    return { token: token, isNewUser: false };
+  }
 
-```
-OLD: TrialFlowState.instance.requestSignupOnEntry();
-NEW: FFAppState().trialCompleted = true;
-```
+  // 기존 계정 없음 → 새 사용자 생성
+  const newUser = await admin.auth().createUser({
+    email: email,
+    displayName: displayName,
+  });
 
-※ 해당 파일에 `import '/flutter_flow/flutter_flow_util.dart';`가 없으면 추가.
-※ 해당 파일에 `trial_flow_state.dart` import만 남아있고 다른 TrialFlowState 사용이 없으면 import도 제거.
+  const token = await admin.auth().createCustomToken(newUser.uid, {
+    provider: provider,
+    linked: false,
+  });
 
----
+  functions.logger.info("linkOrCreateAccount: new user created", {
+    email: email,
+    uid: newUser.uid,
+    provider: provider,
+  });
 
-### 2-5. TrialDeviceGate 나머지 참조 제거
-
-Phase 1-3에서 intro_master.dart 외에 추가 참조가 있으면 해당 import와 호출을 모두 제거.
-
----
-
-### 2-6. trial_device_gate.dart 파일 삭제
-
-```powershell
-Remove-Item "lib\custom_code\widgets\trial\trial_device_gate.dart"
-```
-
----
-
-## Phase 3 — 사후 검증
-
-### 3-1. TrialDeviceGate 완전 제거
-```powershell
-(Select-String -Path "lib\**\*.dart" -Pattern "TrialDeviceGate" -Recurse | Measure-Object).Count
-```
-→ 기대값: 0
-
-### 3-2. _forceSignupOnEntry 완전 제거
-```powershell
-(Select-String -Path "lib\**\*.dart" -Pattern "_forceSignupOnEntry" -Recurse | Measure-Object).Count
-```
-→ 기대값: 0
-
-### 3-3. consumeSignupOnEntry 완전 제거
-```powershell
-(Select-String -Path "lib\**\*.dart" -Pattern "consumeSignupOnEntry" -Recurse | Measure-Object).Count
-```
-→ 기대값: 0
-
-### 3-4. requestSignupOnEntry 완전 제거
-```powershell
-(Select-String -Path "lib\**\*.dart" -Pattern "requestSignupOnEntry" -Recurse | Measure-Object).Count
-```
-→ 기대값: 0
-
-### 3-5. trialCompleted 추가 확인
-```powershell
-(Select-String -Path "lib\app_state.dart" -Pattern "trialCompleted" | Measure-Object).Count
-```
-→ 기대값: 4 (필드 선언, getter, setter, initializePersistedState)
-
-### 3-6. trialCompleted 사용처 확인
-```powershell
-Select-String -Path "lib\**\*.dart" -Pattern "trialCompleted" -Recurse
-```
-→ 최소 3곳: app_state.dart + intro_master.dart(initState 분기 + 뒤로가기 조건) + 외부 호출처(Phase 2-4)
-
-### 3-7. trial_device_gate.dart 삭제 확인
-```powershell
-Test-Path "lib\custom_code\widgets\trial\trial_device_gate.dart"
-```
-→ 기대값: False
-
----
-
-## Phase 4 — 빌드 검증
-
-```powershell
-dart format lib\app_state.dart
-dart format lib\custom_code\widgets\intro_master.dart
-dart format lib\custom_code\widgets\trial\trial_flow_state.dart
-```
-
-Phase 2-4에서 수정한 외부 파일도 개별 dart format 실행.
-
-```powershell
-flutter analyze
-flutter build appbundle
+  return { token: token, isNewUser: true };
+});
 ```
 
 ---
 
-## Phase 5 — 커밋 & 푸시
+## Phase 3: 검증
 
-```powershell
-git add -A
-git commit -m "refactor: intro A/B with SharedPreferences trialCompleted, remove TrialDeviceGate"
+```bash
+# 1. 문법 오류 확인
+cd firebase/functions
+node -c index.js
+# 기대: "index.js: no syntax error"
+
+# 2. 새 함수 존재 확인
+grep "exports.linkOrCreateAccount" index.js
+# 기대: 1줄
+
+# 3. kakaoEmail 변수 추가 확인
+grep "kakaoEmail" index.js
+# 기대: 4줄 이상
+
+# 4. getUserByEmail 사용 확인
+grep "getUserByEmail" index.js
+# 기대: 2줄 이상 (kakaoCustomAuth + linkOrCreateAccount)
+```
+
+---
+
+## Phase 4: 배포
+
+```bash
+# 주의: 멀티 코드베이스 배포 형식
+# kakaoCustomAuth 수정 + linkOrCreateAccount 신규 → 둘 다 배포
+
+firebase deploy --project stealth-vox-3p3rq3 --only functions:functions:kakaoCustomAuth
+firebase deploy --project stealth-vox-3p3rq3 --only functions:functions:linkOrCreateAccount
+
+# 또는 전체 배포 (다른 함수에 영향 없음을 확인한 경우):
+# firebase deploy --project stealth-vox-3p3rq3 --only functions
+```
+
+---
+
+## Phase 5: 커밋
+
+```bash
+git add -A && git commit -m "feat: add email-based account linking (kakaoAuth + linkOrCreateAccount)"
 git push origin main
 ```
 
 ---
 
-## Rollback
+## Phase 6: 롤백 (문제 발생 시)
 
-```powershell
-git log --oneline -3
+```bash
 git revert HEAD --no-edit
+git push origin main
+
+# Cloud Function 재배포
+firebase deploy --project stealth-vox-3p3rq3 --only functions:functions:kakaoCustomAuth
+firebase deploy --project stealth-vox-3p3rq3 --only functions:functions:linkOrCreateAccount
 ```
 
 ---
 
-## ⚠️ 절대 금지 사항
-- Box 7 (TtsQueueManager, DeepgramV2VoiceManager, ChunkedTtsFetcher, HybridTtsPlayer, TtsCache) 수정 금지
-- dart format 폴더 단위 실행 금지 — 개별 파일만
-- lib/custom_code/임시/ 폴더 수정 금지
-- trialStep / trialHistoryPath 삭제 금지 (다른 곳에서 아직 참조 가능)
-- 앵커 grep count가 기대값과 다르면 즉시 중단 후 결과 보고
+## 클라이언트 측 변경 (별도 지시문 권장)
+
+지시문 3의 서버 로직이 완성되면, 클라이언트 `SocialAuthService`의 Google 로그인 플로우를
+아래와 같이 변경해야 한다:
+
+### 현재 (추정):
+```dart
+// Google Sign-In → signInWithCredential(GoogleAuthProvider)
+final googleUser = await GoogleSignIn().signIn();
+final googleAuth = await googleUser!.authentication;
+final credential = GoogleAuthProvider.credential(
+  idToken: googleAuth.idToken,
+  accessToken: googleAuth.accessToken,
+);
+await FirebaseAuth.instance.signInWithCredential(credential);
+```
+
+### 변경 후:
+```dart
+// Google Sign-In → idToken → linkOrCreateAccount → signInWithCustomToken
+final googleUser = await GoogleSignIn().signIn();
+final googleAuth = await googleUser!.authentication;
+
+final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
+    .httpsCallable('linkOrCreateAccount');
+final result = await callable.call({
+  'provider': 'google',
+  'idToken': googleAuth.idToken,
+});
+
+final token = result.data['token'] as String;
+await FirebaseAuth.instance.signInWithCustomToken(token);
+```
+
+> 이 클라이언트 변경은 별도 지시문 4로 작성하는 것을 권장한다.
+> SocialAuthService.dart 파일을 직접 수정해야 하며, 카카오/이메일 로그인 경로도
+> 동일한 패턴으로 통합해야 한다.
+
+---
+
+## 제한사항 및 향후 과제
+
+1. **카카오 이메일 미제공 케이스**: 사용자가 카카오 동의항목에서 이메일 제공을 거부하면
+   `kakaoEmail = null`이 되어 이메일 매칭이 불가능하다. 이 경우 기존 로직(anonymous UID 바인딩)으로
+   fallback되므로 동작에는 문제 없지만, 계정 통합은 이뤄지지 않는다.
+
+2. **카카오 이메일 ≠ Google 이메일**: 카카오에 `naver.com` 이메일, Google에 `gmail.com` 이메일을
+   사용하는 경우 이메일이 달라서 매칭되지 않는다. 이는 업계 표준에서도 감수하는 한계이다.
+
+3. **기존 사용자 데이터 마이그레이션**: 이미 중복 UID가 생성된 기존 사용자의 경우,
+   이 로직만으로는 자동 통합되지 않는다. 별도의 관리자 스크립트가 필요하다.
+
+4. **Anonymous → 정식 계정 전환**: 현재 `signInAnonymously` → 카카오 로그인 시
+   anonymous UID를 재사용하는 구조(`kakao_uid_map`)는 유지된다.
+   Google 로그인도 `linkOrCreateAccount`를 통해 동일한 패턴으로 동작한다.
