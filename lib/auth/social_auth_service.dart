@@ -71,30 +71,60 @@ class SocialAuthService {
     }
 
     final googleAuth = await googleUser.authentication;
+    final idToken = googleAuth.idToken;
     final credential = GoogleAuthProvider.credential(
       accessToken: googleAuth.accessToken,
-      idToken: googleAuth.idToken,
+      idToken: idToken,
     );
 
     final currentUser = _auth.currentUser;
+
+    // Case 1: anonymous trial user. Preserve anonymous UID only for new accounts.
     if (currentUser != null && currentUser.isAnonymous) {
-      try {
-        final linked = await currentUser.linkWithCredential(credential);
-        FFAppState().hasLinkedAccount = true;
-        return linked;
-      } on FirebaseAuthException catch (e) {
-        if (e.code == 'credential-already-in-use') {
-          final signedIn = await _auth.signInWithCredential(credential);
+      final checkResult = await _callLinkOrCreate('google', idToken: idToken);
+      final isNewUser = checkResult['isNewUser'] as bool;
+      final serverToken = checkResult['token'] as String;
+
+      if (isNewUser) {
+        try {
+          final linked = await currentUser.linkWithCredential(credential);
           FFAppState().hasLinkedAccount = true;
-          return signedIn;
+          return linked;
+        } on FirebaseAuthException catch (e) {
+          if (e.code == 'credential-already-in-use') {
+            final signedIn = await _auth.signInWithCustomToken(serverToken);
+            FFAppState().hasLinkedAccount = true;
+            return signedIn;
+          }
+          rethrow;
         }
-        rethrow;
       }
+
+      final signedIn = await _auth.signInWithCustomToken(serverToken);
+      FFAppState().hasLinkedAccount = true;
+      return signedIn;
     }
 
-    final signedIn = await _auth.signInWithCredential(credential);
+    // Case 2: regular Google login. Server resolves existing/new account by email.
+    final checkResult = await _callLinkOrCreate('google', idToken: idToken);
+    final serverToken = checkResult['token'] as String;
+    final signedIn = await _auth.signInWithCustomToken(serverToken);
     FFAppState().hasLinkedAccount = true;
     return signedIn;
+  }
+
+  static Future<Map<String, dynamic>> _callLinkOrCreate(
+    String provider, {
+    String? idToken,
+    String? email,
+  }) async {
+    final callable = _functions.httpsCallable('linkOrCreateAccount');
+    final result = await callable.call<Map<String, dynamic>>({
+      'provider': provider,
+      if (idToken != null) 'idToken': idToken,
+      if (email != null) 'email': email,
+    });
+    return result.data;
   }
 
   static Future<UserCredential> signInWithEmail(
