@@ -47,41 +47,43 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-# 지시문 6: intro_master.dart — anonymous 분기 + 이메일 가입 UI + 이메일 로그인 birthYear
+# 지시문 7: 카카오 로그인 후 Lobby 00:00 문제 해결
 
 ## 목적
-intro_master.dart에서 확인된 3가지 문제를 최소 변경으로 수정한다.
+카카오 로그인 시 `signInAnonymously()` → GoRouter가 Lobby로 조기 이동 → 보너스 지급 전에 00:00 표시되는 버그를 해결한다.
 
-1. `_checkEntryStatus`에서 anonymous user를 Lobby로 보내지 않기
-2. 이메일 폼에 로그인/가입 탭 전환 UI 추가
-3. 이메일 로그인 후에도 birthYear 확인
+## 근본 원인
+`signInWithKakao()` 내부에서 `signInAnonymously()`를 먼저 호출하면,
+GoRouter의 `loggedIn` getter가 anonymous user도 "로그인됨"으로 판정하여
+카카오 인증 완료 + 보너스 지급 전에 Lobby로 보내버린다.
 
 ## 대상 파일
-- **수정**: `lib/custom_code/widgets/intro_master.dart` (3곳만 수정)
+- **수정**: `lib/flutter_flow/nav/nav.dart` (2곳)
+- **수정**: `lib/custom_code/widgets/intro_master.dart` (1곳)
 
 ## 선행 조건
-- ✅ 지시문 5 완료 (현재 enum IntroScreen { welcome, auth } 구조)
+- ✅ 지시문 1~6 완료
 
 ---
 
 ## Phase 0: 사전 진단
 
 ```bash
-# 1. _checkEntryStatus에서 anonymous 분기 없음 확인
-grep -n "isAnonymous" lib/custom_code/widgets/intro_master.dart
-# _checkEntryStatus 안에서는 나오지 않을 것 (다른 곳에서만 사용)
+# 1. loggedIn getter 현재 구현 확인
+grep -n "get loggedIn" lib/flutter_flow/nav/nav.dart
+# 기대: "bool get loggedIn => user?.loggedIn ?? false;"
 
-# 2. _emailTabBtn 미사용 확인
-grep -n "_emailTabBtn\|unused_element" lib/custom_code/widgets/intro_master.dart
-# 기대: "// ignore: unused_element" + _emailTabBtn 정의만 있고 호출은 없음
+# 2. update() 내부 auto-reset 확인
+grep -n "updateNotifyOnAuthChange(true)" lib/flutter_flow/nav/nav.dart
+# 기대: update() 메서드 안에서 1줄
 
-# 3. _handleAuth의 _checkAgeAndRoute 호출 위치 확인
-grep -n "_checkAgeAndRoute" lib/custom_code/widgets/intro_master.dart
-# 기대: !isLoginMode 조건 안에서만 호출됨
+# 3. _handleUnifiedAuth에서 notifyOnAuthChange 사용 여부
+grep -n "notifyOnAuthChange\|updateNotifyOnAuthChange" lib/custom_code/widgets/intro_master.dart
+# 기대: 0줄 (아직 없음)
 
-# 4. _buildEmailForm 호출부 확인
-grep -n "_buildEmailForm" lib/custom_code/widgets/intro_master.dart
-# 기대: _buildEmailForm(isLogin: isLoginMode) 형태
+# 4. FirebaseAuth import 존재 여부 (nav.dart)
+grep -n "firebase_auth" lib/flutter_flow/nav/nav.dart
+# 있으면 OK, 없으면 import 추가 필요
 ```
 
 ---
@@ -89,207 +91,246 @@ grep -n "_buildEmailForm" lib/custom_code/widgets/intro_master.dart
 ## Phase 1: Savepoint
 
 ```bash
-git add -A && git commit -m "savepoint: before anonymous-gate + email-tab + login-birthYear fix"
+git checkout -b fix/lobby-zero-time
+git add -A && git commit -m "savepoint: before lobby 00:00 fix"
 ```
 
 ---
 
 ## Phase 2: 수정 (3곳)
 
-### 수정 1: _checkEntryStatus — anonymous를 Lobby로 보내지 않기
+### 수정 1: nav.dart — loggedIn에서 anonymous 제외
+
+**파일**: `lib/flutter_flow/nav/nav.dart`
+
+**먼저 import 확인** — 파일 상단에 `firebase_auth` import가 없으면 추가:
+
+```dart
+import 'package:firebase_auth/firebase_auth.dart';
+```
+
+**앵커 (현재 코드):**
+```dart
+  bool get loggedIn => user?.loggedIn ?? false;
+```
+
+**변경:**
+```dart
+  bool get loggedIn {
+    if (!(user?.loggedIn ?? false)) return false;
+    // anonymous 체험 유저는 "로그인 안 됨"으로 취급
+    // → GoRouter가 Lobby로 자동 이동하지 않음
+    // → 체험은 imperative navigation(pushNamed)으로 처리
+    final fbUser = FirebaseAuth.instance.currentUser;
+    return fbUser != null && !fbUser.isAnonymous;
+  }
+```
+
+> **효과**: `signInAnonymously()` 완료 시 `loggedIn = false` → GoRouter가 Lobby로 안 감.
+> 정식 로그인(`signInWithCustomToken`, `signInWithCredential` 등) 완료 시에만 `loggedIn = true`.
+>
+> **체험 플로우 영향 없음**: 체험은 `_startTrial()` → `signInAnonymously()` → `context.pushNamed('StealthRoom')`으로
+> imperative navigation을 쓰므로 GoRouter의 `loggedIn` 판정과 무관.
+
+---
+
+### 수정 2: nav.dart — update()에서 suppressed 상태 auto-reset 방지
+
+**파일**: `lib/flutter_flow/nav/nav.dart`
+
+**앵커 (현재 코드):**
+```dart
+  void update(BaseAuthUser newUser) {
+    final shouldUpdate =
+        user?.uid == null || newUser.uid == null || user?.uid != newUser.uid;
+    initialUser ??= newUser;
+    user = newUser;
+    // Refresh the app on auth change unless explicitly marked otherwise.
+    // No need to update unless the user has changed.
+    if (notifyOnAuthChange && shouldUpdate) {
+      notifyListeners();
+    }
+    // Once again mark the notifier as needing to update on auth change
+    // (in order to catch sign in / out events).
+    updateNotifyOnAuthChange(true);
+  }
+```
+
+**변경:**
+```dart
+  void update(BaseAuthUser newUser) {
+    final shouldUpdate =
+        user?.uid == null || newUser.uid == null || user?.uid != newUser.uid;
+    initialUser ??= newUser;
+    user = newUser;
+    // Refresh the app on auth change unless explicitly marked otherwise.
+    // No need to update unless the user has changed.
+    if (notifyOnAuthChange && shouldUpdate) {
+      notifyListeners();
+    }
+    // Auto-reset only when not explicitly suppressed.
+    // Multi-step auth flows (e.g. anonymous → Kakao custom token → bonus)
+    // suppress notifications and restore them manually after completion.
+    if (notifyOnAuthChange) {
+      updateNotifyOnAuthChange(true);
+    }
+  }
+```
+
+> **효과**: `notifyOnAuthChange = false`로 설정하면, `update()`가 호출되어도
+> 자동으로 `true`로 돌아가지 않음. caller가 명시적으로 `true`로 복원해야 함.
+>
+> **기존 동작 영향 없음**: `notifyOnAuthChange`가 `true`인 정상 상태에서는
+> `if (true) updateNotifyOnAuthChange(true)` → 값 변화 없음 → 기존과 동일.
+
+---
+
+### 수정 3: intro_master.dart — _handleUnifiedAuth에서 라우터 알림 억제
 
 **파일**: `lib/custom_code/widgets/intro_master.dart`
 
 **앵커 (현재 코드):**
 ```dart
-    // 3순위: 이미 로그인된 회원도 pending invite 우선 체크
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      debugPrint(
-          '[TrialDebug] _checkEntryStatus  routing existing user to Lobby via _routeAfterAuth, time=${DateTime.now().toIso8601String()}');
-      _routeAfterAuth();
-      return;
-    }
+  /// 통합 소셜 인증: 약관 시트 없이 바로 소셜 로그인 -> 신규면 연령 확인
+  Future<void> _handleUnifiedAuth(Future<dynamic> Function() authFn) async {
+    debugPrint('[Auth] _handleUnifiedAuth enter');
+    setState(() => isLoading = true);
+    try {
+      await _cleanupTrialSandbox();
+      await authFn();
 ```
 
 **변경:**
 ```dart
-    // 3순위: 정식 회원(non-anonymous)만 Lobby로 라우팅
-    // anonymous 체험 유저는 Intro에 머물러야 함 (Welcome 또는 Auth)
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null && !user.isAnonymous) {
-      debugPrint(
-          '[TrialDebug] _checkEntryStatus  routing non-anonymous user to Lobby via _routeAfterAuth, time=${DateTime.now().toIso8601String()}');
-      _routeAfterAuth();
-      return;
-    }
-    if (user != null && user.isAnonymous) {
-      debugPrint(
-          '[TrialDebug] _checkEntryStatus  anonymous user stays on Intro, trialCompleted=${FFAppState().trialCompleted}');
-    }
+  /// 통합 소셜 인증: 약관 시트 없이 바로 소셜 로그인 -> 신규면 연령 확인
+  Future<void> _handleUnifiedAuth(Future<dynamic> Function() authFn) async {
+    debugPrint('[Auth] _handleUnifiedAuth enter');
+    setState(() => isLoading = true);
+    // Multi-step auth 동안 GoRouter 자동 네비게이션 억제
+    // (anonymous → custom token → bonus 지급 완료까지 Lobby 이동 방지)
+    AppStateNotifier.instance.updateNotifyOnAuthChange(false);
+    try {
+      await _cleanupTrialSandbox();
+      await authFn();
 ```
 
-> **효과**: anonymous 체험 유저는 Intro에 머물고, initState에서 설정한
-> `_currentScreen` (trialCompleted면 auth, 아니면 welcome)이 그대로 표시된다.
-> 정식 회원만 Lobby로 자동 이동.
-
----
-
-### 수정 2: _buildEmailForm — 로그인/가입 탭 전환 추가
-
-**파일**: `lib/custom_code/widgets/intro_master.dart`
-
-**앵커 (현재 코드, _buildEmailForm 메서드 시작):**
-```dart
-  Widget _buildEmailForm({required bool isLogin}) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF222226),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
-      child: Column(
-        children: [
-          _buildTextField(
-```
-
-**변경:**
-```dart
-  Widget _buildEmailForm({required bool isLogin}) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF222226),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
-      child: Column(
-        children: [
-          // 로그인/가입 탭 전환
-          Row(
-            children: [
-              _emailTabBtn('로그인', isLoginMode, () {
-                setState(() => isLoginMode = true);
-              }),
-              _emailTabBtn('가입하기', !isLoginMode, () {
-                setState(() => isLoginMode = false);
-              }),
-            ],
-          ),
-          const SizedBox(height: 14),
-          _buildTextField(
-```
-
-그리고 `_emailTabBtn`의 `// ignore: unused_element` 주석을 제거한다.
-
-**앵커:**
-```dart
-  // ignore: unused_element
-  Widget _emailTabBtn(String label, bool active, VoidCallback onTap) {
-```
-
-**변경:**
-```dart
-  Widget _emailTabBtn(String label, bool active, VoidCallback onTap) {
-```
-
-> **효과**: 이메일 폼 상단에 "로그인 | 가입하기" 탭이 표시된다.
-> 탭을 누르면 isLoginMode가 바뀌고, 버튼 텍스트("로그인" / "가입하기")와
-> 버튼 색상(블루 / 골드)이 자동으로 전환된다.
-> 비밀번호 찾기 링크는 로그인 모드에서만 표시된다 (기존 `if (isLogin)` 유지).
-
----
-
-### 수정 3: _handleAuth — 이메일 로그인 후에도 birthYear 확인
-
-**파일**: `lib/custom_code/widgets/intro_master.dart`
+그리고 같은 메서드의 **finally 블록**:
 
 **앵커 (현재 코드):**
 ```dart
-      // 신규 가입 시 연령 확인
-      if (!isLoginMode && mounted) {
-        await _checkAgeAndRoute();
-        return;
-      }
-      if (mounted) _routeAfterAuth();
+    } finally {
+      if (mounted) setState(() => isLoading = false);
+    }
 ```
 
 **변경:**
 ```dart
-      // 가입/로그인 모두 연령 정보 확인 (birthYear 있으면 자동 통과)
-      if (mounted) {
-        await _checkAgeAndRoute();
-      }
+    } finally {
+      // GoRouter 알림 복원
+      AppStateNotifier.instance.updateNotifyOnAuthChange(true);
+      if (mounted) setState(() => isLoading = false);
+    }
 ```
 
-> **효과**: 이메일 로그인 시에도 `_checkAgeAndRoute()`가 호출된다.
-> 기존 회원은 Firestore에 birthYear가 있으므로 `hasBirthYear=true` → 다이얼로그 스킵 → `_routeAfterAuth()`.
-> birthYear가 없는 구 회원은 다이얼로그가 떠서 연령 확인 후 Lobby 진입.
-> `_checkAgeAndRoute()` 마지막에 `_routeAfterAuth()`를 호출하므로 기존 `if (mounted) _routeAfterAuth();`는 제거.
-
-**주의**: `_checkAgeAndRoute()` 내부(955줄)에 이미 `if (mounted) _routeAfterAuth();`가 있으므로,
-기존의 별도 `_routeAfterAuth()` 호출을 제거해야 이중 호출이 방지된다.
-또한 가입 시 보너스 지급(`_grantSignupBonusIfPossible`)도 `_checkAgeAndRoute` 전에
-이미 실행되므로 순서 충돌 없음.
+> **효과**: `_handleUnifiedAuth` 전체 실행 동안 GoRouter가 auth 변경에 반응하지 않음.
+> `_checkAgeAndRoute()` → `_routeAfterAuth()` → `context.goNamed('Lobby')`로
+> 보너스 지급 완료 후에만 Lobby로 이동.
+> finally에서 복원하므로 이후 정상 auth 이벤트(로그아웃 등)에는 영향 없음.
 
 ---
 
 ## Phase 3: 검증
 
 ```bash
-# 1. 컴파일 확인
+# 1. nav.dart 컴파일 확인
+dart format lib/flutter_flow/nav/nav.dart
+flutter analyze lib/flutter_flow/nav/nav.dart
+
+# 2. intro_master.dart 컴파일 확인
 dart format lib/custom_code/widgets/intro_master.dart
 flutter analyze lib/custom_code/widgets/intro_master.dart
 
-# 2. 수정 1 확인: anonymous 분기
-grep "!user.isAnonymous" lib/custom_code/widgets/intro_master.dart
-# 기대: _checkEntryStatus 내에서 1줄
+# 3. loggedIn 변경 확인
+grep -A5 "get loggedIn" lib/flutter_flow/nav/nav.dart
+# 기대: isAnonymous 체크 포함
 
-# 3. 수정 2 확인: _emailTabBtn 사용
-grep "_emailTabBtn" lib/custom_code/widgets/intro_master.dart
-# 기대: 정의 1줄 + 호출 2줄 (로그인, 가입하기) = 3줄 이상
+# 4. update() auto-reset 변경 확인
+grep -B2 -A1 "updateNotifyOnAuthChange" lib/flutter_flow/nav/nav.dart
+# 기대: "if (notifyOnAuthChange)" 조건 안에서만 호출
 
-# 4. 수정 2 확인: unused_element 주석 제거
-grep "unused_element" lib/custom_code/widgets/intro_master.dart
-# 기대: 0줄
+# 5. _handleUnifiedAuth 알림 억제 확인
+grep "updateNotifyOnAuthChange" lib/custom_code/widgets/intro_master.dart
+# 기대: 2줄 (false 설정 1줄 + true 복원 1줄)
 
-# 5. 수정 3 확인: _checkAgeAndRoute가 isLoginMode 조건 없이 호출
-grep -A2 "grantSignupBonusIfPossible" lib/custom_code/widgets/intro_master.dart | head -5
-# _checkAgeAndRoute가 !isLoginMode 조건 밖에서 호출되는지 확인
+# 6. AppStateNotifier import 확인
+grep "AppStateNotifier" lib/custom_code/widgets/intro_master.dart
+# 기대: 2줄 이상
 
-# 6. 이중 _routeAfterAuth 호출 없음 확인
-grep -c "_routeAfterAuth" lib/custom_code/widgets/intro_master.dart
-# 기존보다 1줄 줄어들었는지 확인 (기존 _handleAuth 내 단독 호출 제거)
+# 7. FirebaseAuth import 확인 (nav.dart)
+grep "firebase_auth" lib/flutter_flow/nav/nav.dart
+# 기대: 1줄
 ```
 
 ---
 
-# Phase 4: 브랜치에서 커밋
-git checkout -b fix/intro-auth-gates
-git add -A && git commit -m "fix: anonymous gate, email tab toggle, login birthYear check"
-
-# 테스트 후 main 머지
-git checkout main
-git merge fix/intro-auth-gates
-git push origin main
----
-
-## Phase 5: 롤백 (문제 발생 시)
+## Phase 4: 빌드 및 테스트
 
 ```bash
+flutter clean
+flutter pub get
+flutter build apk --release
+```
+
+### 테스트 시나리오 (반드시 확인)
+
+**시나리오 A: 신규 카카오 가입**
+1. 앱 데이터 삭제 → 앱 실행 → Welcome
+2. "로그인" → Auth → "카카오톡으로 계속하기"
+3. 카카오 로그인 완료 → birthYear 팝업 → Lobby
+4. **기대**: Lobby 첫 진입부터 05:00 표시 (00:00 아님)
+
+**시나리오 B: 기존 카카오 재로그인**
+1. 앱 데이터 삭제 → 앱 실행 → Auth → 카카오 로그인
+2. **기대**: Lobby 진입 시 기존 잔여시간 표시
+
+**시나리오 C: 체험 → 가입**
+1. Welcome → "1분 무료 체험" → 대화방 진입 (StealthRoom으로 정상 이동하는지)
+2. 체험 완료 → Auth → 카카오 가입
+3. **기대**: 체험은 정상 동작, 가입 후 Lobby 05:00
+
+**시나리오 D: 앱 껐다 켜기 (정식 회원)**
+1. 정식 회원 로그인 상태에서 앱 종료 → 재실행
+2. **기대**: 자동 Lobby 진입 (세션 유지, loggedIn=true)
+
+---
+
+## Phase 5: 커밋 및 머지
+
+```bash
+git add -A && git commit -m "fix: prevent premature Lobby navigation during multi-step auth (00:00 bug)"
+
+# 테스트 통과 후 main 머지
+git checkout main
+git merge fix/lobby-zero-time
+git push origin main
+```
+
+---
+
+## Phase 6: 롤백 (문제 발생 시)
+
+```bash
+git checkout main
 git revert HEAD --no-edit
 git push origin main
 ```
 
 ---
 
-## 수정 영향 범위 확인
+## 수정 영향 범위
 
 | 수정 | 영향 받는 플로우 | 영향 안 받는 플로우 |
 |---|---|---|
-| 수정 1 (anonymous gate) | 체험 후 앱 재진입, 체험 도중 앱 재진입 | 정식 회원 자동 로그인, Duo 초대 |
-| 수정 2 (이메일 탭) | 이메일 가입/로그인 전환 | 카카오/구글 로그인 |
-| 수정 3 (로그인 birthYear) | 이메일 로그인 후 Lobby 진입 | 소셜 로그인 (이미 _handleUnifiedAuth에서 처리) |
-
-3개 수정 모두 서로 독립적이며, 기존 소셜 로그인/Duo 초대 플로우에 영향 없음.
+| loggedIn anonymous 제외 | GoRouter 초기 화면 결정 | 체험 (imperative nav), Duo 초대 |
+| update() auto-reset 방지 | 명시적 suppress 시에만 작동 | 일반 로그인/로그아웃 (suppress 안 할 때) |
+| _handleUnifiedAuth 억제 | 소셜 로그인 플로우 | 이메일 로그인, 자동 Lobby 진입 |
