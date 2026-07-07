@@ -512,6 +512,25 @@ exports.kakaoCustomAuth = functions
       .auth()
       .createCustomToken(resolvedUid, { provider: "kakaocorp.com" });
 
+    // Firebase Auth record email is required for later email-based account linking.
+    if (kakaoEmail) {
+      try {
+        const existingAuthUser = await admin.auth().getUser(resolvedUid);
+        if (!existingAuthUser.email) {
+          await admin.auth().updateUser(resolvedUid, { email: kakaoEmail });
+          functions.logger.info("kakaoCustomAuth: email set on auth record", {
+            uid: resolvedUid,
+            email: kakaoEmail,
+          });
+        }
+      } catch (updateErr) {
+        functions.logger.warn("kakaoCustomAuth: updateUser email failed", {
+          uid: resolvedUid,
+          error: String(updateErr),
+        });
+      }
+    }
+
     functions.logger.info("kakaoCustomAuth", {
       anonUid: anonUid,
       resolvedUid: resolvedUid,
