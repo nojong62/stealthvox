@@ -11,10 +11,9 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'trial/trial_flow_state.dart';
 import 'shared_social_button.dart';
-import 'terms_agreement_sheet.dart';
 import '/auth/social_auth_service.dart';
 
-enum IntroScreen { welcome, signUp, logIn }
+enum IntroScreen { welcome, auth }
 
 class IntroMaster extends StatefulWidget {
   const IntroMaster({
@@ -58,7 +57,7 @@ class _IntroMasterState extends State<IntroMaster> {
     _passwordFocusNode.addListener(_onFocusChange);
     AppsFlyerManager.duoInviteSignal.addListener(_onDuoInviteSignal);
     if (FFAppState().trialCompleted) {
-      _currentScreen = IntroScreen.signUp;
+      _currentScreen = IntroScreen.auth;
     } else {
       _currentScreen = IntroScreen.welcome;
     }
@@ -260,6 +259,11 @@ class _IntroMasterState extends State<IntroMaster> {
       if (!isLoginMode) {
         await _grantSignupBonusIfPossible();
       }
+      // 신규 가입 시 연령 확인
+      if (!isLoginMode && mounted) {
+        await _checkAgeAndRoute();
+        return;
+      }
       if (mounted) _routeAfterAuth();
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
@@ -318,10 +322,8 @@ class _IntroMasterState extends State<IntroMaster> {
     switch (_currentScreen) {
       case IntroScreen.welcome:
         return _buildWelcomeView(context);
-      case IntroScreen.signUp:
-        return _buildSignUpView(context);
-      case IntroScreen.logIn:
-        return _buildLogInView(context);
+      case IntroScreen.auth:
+        return _buildAuthView(context);
     }
   }
 
@@ -504,9 +506,8 @@ class _IntroMasterState extends State<IntroMaster> {
                               _scrollController.jumpTo(0);
                             }
                             setState(() {
-                              _currentScreen = IntroScreen.logIn;
+                              _currentScreen = IntroScreen.auth;
                               _showEmailForm = false;
-                              isLoginMode = true;
                             });
                           },
                           child: const Text(
@@ -668,126 +669,29 @@ class _IntroMasterState extends State<IntroMaster> {
     );
   }
 
-  Widget _buildSignUpView(BuildContext context) {
+  Widget _buildAuthView(BuildContext context) {
     return _buildAuthScaffold(
       context: context,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton(
-              onPressed: () => setState(() {
-                _currentScreen = IntroScreen.logIn;
-                _showEmailForm = false;
-                isLoginMode = true;
-              }),
-              child: const Text(
-                '로그인',
-                style: TextStyle(
-                  color: Color(0xFF4A90D9),
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 62),
-          const Text(
-            '계속하시려면 먼저\n가입해주세요',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 22,
-              fontWeight: FontWeight.w800,
-              height: 1.32,
-            ),
-          ),
-          const SizedBox(height: 34),
-          SharedSocialButton(
-            label: '카카오톡으로 계속하기',
-            backgroundColor: const Color(0xFFFEE500),
-            textColor: const Color(0xFF191919),
-            icon: const Icon(
-              Icons.chat_bubble,
-              size: 20,
-              color: Color(0xFF191919),
-            ),
-            onTap: () => _handleSocialSignUp(SocialAuthService.signInWithKakao),
-          ),
-          const SizedBox(height: 30),
-          const Text(
-            '다른 방법으로 가입하기',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Color(0xFF9C9CA6),
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _roundAuthButton(
-                icon: Icons.email_outlined,
-                iconColor: Colors.white,
-                tooltip: '이메일로 가입하기',
-                onTap: () => setState(() {
-                  _showEmailForm = true;
-                  isLoginMode = false;
+          // 뒤로가기: 체험 완료 전에만 표시
+          if (!FFAppState().trialCompleted)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: IconButton(
+                onPressed: () => setState(() {
+                  _currentScreen = IntroScreen.welcome;
+                  _showEmailForm = false;
                 }),
+                icon: const Icon(Icons.arrow_back, color: Colors.white),
+                tooltip: '뒤로',
               ),
-              const SizedBox(width: 14),
-              _roundAuthButton(
-                label: 'G',
-                labelColor: const Color(0xFF4285F4),
-                tooltip: 'Google로 가입하기',
-                onTap: () =>
-                    _handleSocialSignUp(SocialAuthService.signInWithGoogle),
-              ),
-            ],
-          ),
-          if (_showEmailForm) ...[
-            const SizedBox(height: 22),
-            _buildEmailForm(isLogin: false),
-          ],
-          const SizedBox(height: 40),
-          _authFooter(
-            prefix: '이미 계정이 있으신가요? 바로 ',
-            action: '로그인하세요',
-            onTap: () => setState(() {
-              _currentScreen = IntroScreen.logIn;
-              _showEmailForm = false;
-              isLoginMode = true;
-            }),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLogInView(BuildContext context) {
-    return _buildAuthScaffold(
-      context: context,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: IconButton(
-              onPressed: () => setState(() {
-                _currentScreen = FFAppState().trialCompleted
-                    ? IntroScreen.signUp
-                    : IntroScreen.welcome;
-                _showEmailForm = false;
-              }),
-              icon: const Icon(Icons.arrow_back, color: Colors.white),
-              tooltip: '뒤로',
             ),
-          ),
-          const SizedBox(height: 50),
+          SizedBox(height: FFAppState().trialCompleted ? 60 : 24),
+          // 제목
           const Text(
-            '로그인하고\n계속하기',
+            '계정으로 계속하기',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: Colors.white,
@@ -797,52 +701,65 @@ class _IntroMasterState extends State<IntroMaster> {
             ),
           ),
           const SizedBox(height: 34),
+          // 카카오 버튼
           SharedSocialButton(
             label: '카카오톡으로 계속하기',
             backgroundColor: const Color(0xFFFEE500),
             textColor: const Color(0xFF191919),
-            icon: const Icon(
-              Icons.chat_bubble,
-              size: 20,
-              color: Color(0xFF191919),
+            icon: Image.asset(
+              'assets/images/kakao_logo.png',
+              width: 20,
+              height: 20,
+              errorBuilder: (_, __, ___) => const Icon(
+                Icons.chat_bubble,
+                size: 20,
+                color: Color(0xFF191919),
+              ),
             ),
-            onTap: () => _handleSocialLogIn(SocialAuthService.signInWithKakao),
+            onTap: () => _handleUnifiedAuth(SocialAuthService.signInWithKakao),
           ),
           const SizedBox(height: 12),
+          // Google 버튼
           SharedSocialButton(
             label: 'Google로 계속하기',
             backgroundColor: Colors.white,
             textColor: Colors.black87,
             border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
-            icon: const Icon(Icons.g_mobiledata, size: 24, color: Colors.blue),
-            onTap: () => _handleSocialLogIn(SocialAuthService.signInWithGoogle),
+            icon: Image.asset(
+              'assets/images/google_logo.png',
+              width: 20,
+              height: 20,
+              errorBuilder: (_, __, ___) => const Icon(
+                Icons.g_mobiledata,
+                size: 24,
+                color: Colors.blue,
+              ),
+            ),
+            onTap: () => _handleUnifiedAuth(SocialAuthService.signInWithGoogle),
           ),
           const SizedBox(height: 12),
+          // 이메일 버튼
           SharedSocialButton(
             label: '이메일로 계속하기',
             backgroundColor: const Color(0xFF33333A),
             textColor: Colors.white,
-            icon: const Icon(Icons.email_outlined,
-                size: 20, color: Colors.white70),
+            icon: const Icon(
+              Icons.email_outlined,
+              size: 20,
+              color: Colors.white70,
+            ),
             onTap: () => setState(() {
               _showEmailForm = !_showEmailForm;
-              isLoginMode = true;
             }),
           ),
+          // 이메일 폼
           if (_showEmailForm) ...[
             const SizedBox(height: 18),
-            _buildEmailForm(isLogin: true),
+            _buildEmailForm(isLogin: isLoginMode),
           ],
-          const SizedBox(height: 40),
-          _authFooter(
-            prefix: '계정이 없으신가요? ',
-            action: '가입하기',
-            onTap: () => setState(() {
-              _currentScreen = IntroScreen.signUp;
-              _showEmailForm = false;
-              isLoginMode = false;
-            }),
-          ),
+          const SizedBox(height: 32),
+          // 약관 동의 인라인 텍스트
+          _buildTermsInlineText(),
         ],
       ),
     );
@@ -953,99 +870,59 @@ class _IntroMasterState extends State<IntroMaster> {
     );
   }
 
-  Widget _roundAuthButton({
-    IconData? icon,
-    Color iconColor = Colors.white,
-    String? label,
-    Color labelColor = Colors.white,
-    required String tooltip,
-    required VoidCallback onTap,
-  }) {
-    return Tooltip(
-      message: tooltip,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(28),
-        child: Container(
-          width: 56,
-          height: 56,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: const Color(0xFF2C2C32),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+  Widget _buildTermsInlineText() {
+    return const Padding(
+      padding: EdgeInsets.symmetric(horizontal: 8),
+      child: Text.rich(
+        TextSpan(
+          style: TextStyle(
+            color: Color(0xFF8A8A94),
+            fontSize: 11.5,
+            height: 1.4,
           ),
-          child: Center(
-            child: icon != null
-                ? Icon(icon, color: iconColor, size: 23)
-                : Text(
-                    label ?? '',
-                    style: TextStyle(
-                      color: labelColor,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-          ),
+          children: [
+            TextSpan(text: '가입하면 '),
+            TextSpan(
+              text: '이용약관',
+              style: TextStyle(
+                decoration: TextDecoration.underline,
+                color: Color(0xFFAAAAAA),
+              ),
+              // TODO: recognizer -> URL 연결 (GestureRecognizer)
+            ),
+            TextSpan(text: ' 및 '),
+            TextSpan(
+              text: '개인정보 처리방침',
+              style: TextStyle(
+                decoration: TextDecoration.underline,
+                color: Color(0xFFAAAAAA),
+              ),
+              // TODO: recognizer -> URL 연결 (GestureRecognizer)
+            ),
+            TextSpan(text: '에 동의하는 것으로 간주합니다.'),
+          ],
         ),
+        textAlign: TextAlign.center,
       ),
     );
   }
 
-  Widget _authFooter({
-    required String prefix,
-    required String action,
-    required VoidCallback onTap,
-  }) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Text(
-          prefix,
-          style: const TextStyle(color: Color(0xFFB0B0B8), fontSize: 13),
-        ),
-        GestureDetector(
-          onTap: onTap,
-          child: Text(
-            action,
-            style: const TextStyle(
-              color: Color(0xFF4A90D9),
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Future<void> _handleSocialSignUp(Future<dynamic> Function() authFn) async {
-    final termsResult = await TermsAgreementSheet.show(context);
-    if (termsResult == null) return;
-
-    await _handleSocialAuth(authFn);
-
-    // TODO: Save termsResult.marketingAccepted to users/{uid}/marketing_consent.
-  }
-
-  Future<void> _handleSocialLogIn(Future<dynamic> Function() authFn) async {
-    await _handleSocialAuth(authFn);
-  }
-
-  Future<void> _handleSocialAuth(Future<dynamic> Function() authFn) async {
-    debugPrint('[KakaoAuth] _handleSocialAuth enter');
+  /// 통합 소셜 인증: 약관 시트 없이 바로 소셜 로그인 -> 신규면 연령 확인
+  Future<void> _handleUnifiedAuth(Future<dynamic> Function() authFn) async {
+    debugPrint('[Auth] _handleUnifiedAuth enter');
     setState(() => isLoading = true);
     try {
-      // 소셜 로그인 전에 체험 sandbox 삭제 (anonymous 권한 유지 중이라 삭제 가능)
       await _cleanupTrialSandbox();
       await authFn();
       debugPrint(
-          '[KakaoAuth] authFn complete, currentUser=${FirebaseAuth.instance.currentUser?.uid}, pendingInviteType=${FFAppState().pendingInviteType}');
+          '[Auth] authFn complete, currentUser=${FirebaseAuth.instance.currentUser?.uid}');
       await _grantSignupBonusIfPossible();
-      if (mounted) _routeAfterAuth();
-      debugPrint('[KakaoAuth] _routeAfterAuth call complete');
+
+      if (!mounted) return;
+      await _checkAgeAndRoute();
     } catch (e, stack) {
-      debugPrint('[KakaoAuth] _handleSocialAuth exception: $e');
-      debugPrint('[KakaoAuth] stack: $stack');
+      debugPrint('[Auth] _handleUnifiedAuth exception: $e');
+      debugPrint('[Auth] stack: $stack');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('로그인 실패: $e')),
@@ -1054,6 +931,245 @@ class _IntroMasterState extends State<IntroMaster> {
     } finally {
       if (mounted) setState(() => isLoading = false);
     }
+  }
+
+  /// 연령 확인 후 라우팅 (소셜/이메일 공통)
+  Future<void> _checkAgeAndRoute() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || !mounted) return;
+
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      final hasBirthYear =
+          userDoc.exists && userDoc.data()?['birthYear'] != null;
+      if (!hasBirthYear && mounted) {
+        await _showBirthYearDialog();
+      }
+    } catch (e) {
+      debugPrint('[Auth] birthYear check failed (non-blocking): $e');
+    }
+
+    if (mounted) _routeAfterAuth();
+  }
+
+  /// 신규 가입 시 태어난 해 확인 + 14세 미만 보호자 이메일 수집
+  Future<void> _showBirthYearDialog() async {
+    final currentYear = DateTime.now().year;
+    int selectedYear = currentYear - 20;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF161616),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+                side: const BorderSide(color: Color(0xFF2A3A36), width: 1),
+              ),
+              title: const Text(
+                '태어난 해를 알려주세요',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 18,
+                ),
+              ),
+              content: SizedBox(
+                height: 150,
+                child: ListWheelScrollView.useDelegate(
+                  itemExtent: 42,
+                  physics: const FixedExtentScrollPhysics(),
+                  controller: FixedExtentScrollController(
+                    initialItem: 40,
+                  ),
+                  onSelectedItemChanged: (index) {
+                    setDialogState(
+                        () => selectedYear = (currentYear - 60) + index);
+                  },
+                  childDelegate: ListWheelChildBuilderDelegate(
+                    builder: (context, index) {
+                      final year = (currentYear - 60) + index;
+                      if (year < currentYear - 60 || year > currentYear - 4) {
+                        return null;
+                      }
+                      return Center(
+                        child: Text(
+                          '$year년',
+                          style: TextStyle(
+                            color: year == selectedYear
+                                ? Colors.white
+                                : Colors.white38,
+                            fontSize: year == selectedYear ? 20 : 16,
+                            fontWeight: year == selectedYear
+                                ? FontWeight.bold
+                                : FontWeight.normal,
+                          ),
+                        ),
+                      );
+                    },
+                    childCount: 57,
+                  ),
+                ),
+              ),
+              actions: [
+                SizedBox(
+                  width: double.infinity,
+                  height: 46,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF4A90D9),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    onPressed: () => Navigator.of(dialogContext).pop(true),
+                    child: const Text(
+                      '확인',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final age = currentYear - selectedYear;
+    final userRef =
+        FirebaseFirestore.instance.collection('users').doc(user.uid);
+
+    if (age >= 14) {
+      await userRef.set({'birthYear': selectedYear}, SetOptions(merge: true));
+    } else {
+      final parentEmail = await _showParentEmailDialog();
+      if (parentEmail != null && parentEmail.isNotEmpty) {
+        await userRef.set({
+          'birthYear': selectedYear,
+          'parentEmail': parentEmail,
+          'parentConsentPending': true,
+        }, SetOptions(merge: true));
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                '보호자에게 동의 요청을 보냈습니다.\n보호자가 동의하면 모든 기능을 이용할 수 있습니다.',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              backgroundColor: Color(0xFF4A90D9),
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
+      } else {
+        await userRef.set({'birthYear': selectedYear}, SetOptions(merge: true));
+      }
+    }
+  }
+
+  /// 14세 미만: 보호자 이메일 입력 다이얼로그
+  Future<String?> _showParentEmailDialog() async {
+    final controller = TextEditingController();
+
+    final result = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF161616),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: const BorderSide(color: Color(0xFF2A3A36), width: 1),
+          ),
+          title: const Text(
+            '보호자 동의가 필요합니다',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 17,
+            ),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                '만 14세 미만은 보호자 동의가 필요합니다.\n보호자의 이메일 주소를 입력해 주세요.',
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: 13,
+                  height: 1.5,
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: controller,
+                keyboardType: TextInputType.emailAddress,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: '보호자 이메일',
+                  hintStyle: const TextStyle(color: Colors.white30),
+                  filled: true,
+                  fillColor: Colors.black.withValues(alpha: 0.5),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  prefixIcon:
+                      const Icon(Icons.email_outlined, color: Colors.white38),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(null),
+              child: const Text(
+                '나중에',
+                style: TextStyle(color: Colors.white38),
+              ),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF4A90D9),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              onPressed: () {
+                final email = controller.text.trim();
+                Navigator.of(dialogContext).pop(email.isEmpty ? null : email);
+              },
+              child: const Text(
+                '동의 요청 보내기',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    controller.dispose();
+    return result;
   }
 
   /// 샌드박스 폐기: 체험 중 생성된 임시 데이터를 삭제한다.
