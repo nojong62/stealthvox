@@ -47,343 +47,380 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-# 지시문 2: intro_master.dart 전면 개편
+# 지시문 4: 클라이언트 계정 통합 연동 + kakaoCustomAuth 이메일 보강
 
 ## 목적
-현재 `_isSignupMode` 토글 기반의 2모드 구조를 폐지하고,
-스픽 스타일의 3화면 구조 (Welcome / SignUp / LogIn) + 약관 동의 시트로 전면 개편한다.
+지시문 3에서 배포한 `linkOrCreateAccount` Cloud Function이 실제로 동작하도록
+서버/클라이언트 양쪽을 보강한다.
+
+## 핵심 문제 2가지
+
+### 문제 1: 카카오 계정에 이메일이 없다
+`kakaoCustomAuth`는 custom token으로 Firebase 유저를 생성하지만,
+Firebase Auth 레코드에 **email 필드를 설정하지 않는다.**
+→ 나중에 Google로 로그인할 때 `getUserByEmail`로 카카오 계정을 찾을 수 없다.
+→ 같은 사람인데 별개 UID가 생성된다.
+
+### 문제 2: 체험 데이터 보존과 계정 통합의 양립
+현재 `signInWithGoogle()`은 anonymous 상태에서 `linkWithCredential`로
+anonymous UID에 Google 계정을 연결하여 체험 데이터를 보존한다.
+이걸 단순히 `linkOrCreateAccount`로 교체하면 anonymous UID가 버려진다.
+→ **anonymous 상태에서는 기존 로직 유지, non-anonymous에서만 linkOrCreateAccount 경유**
 
 ## 대상 파일
-- **전면 수정**: `lib/custom_code/widgets/intro_master.dart`
-- **역할 축소**: `lib/custom_code/widgets/trial_signup_sheet.dart` → 더 이상 사용하지 않음 (삭제하지는 않고 import만 제거)
-- **신규 import**: `terms_agreement_sheet.dart` (지시문 1에서 생성)
+- **수정**: `firebase/functions/index.js` (kakaoCustomAuth 보강)
+- **수정**: `lib/auth/social_auth_service.dart` (signInWithGoogle 변경)
 
 ## 선행 조건
-- ✅ 지시문 1 완료 (`terms_agreement_sheet.dart` 존재)
+- ✅ 지시문 1, 2, 3 완료
+- ✅ `linkOrCreateAccount` CF 배포 완료
+- ✅ `kakaoCustomAuth`에 `kakaoEmail` 추출 로직 이미 추가됨 (지시문 3)
 
 ---
 
-## 핵심 설계 변경사항
+## Part A: kakaoCustomAuth — Firebase Auth에 이메일 설정
 
-### A. 상태 모델 변경
+### 현재 상태
+지시문 3에서 `kakaoEmail`을 추출하고 `kakao_uid_map`에 저장하지만,
+Firebase Auth 레코드(`admin.auth().getUser(uid)`)에는 email이 비어있다.
 
-**기존:**
-```dart
-bool isLoginMode = true;       // 이메일 로그인/회원가입 토글
-bool _isSignupMode = false;    // 체험화면 vs 가입화면 토글
-bool _showEmailInSignup = false;
-```
+### 수정 내용
+custom token 발급 직후, `admin.auth().updateUser()`로 이메일을 설정한다.
 
-**변경:**
-```dart
-enum IntroScreen { welcome, signUp, logIn }
-
-IntroScreen _currentScreen = IntroScreen.welcome;
-bool _showEmailForm = false;   // 가입/로그인 모두에서 이메일 폼 토글
-bool isLoginMode = true;       // 이메일 폼 내부의 로그인/회원가입 토글 (유지)
-```
-
-### B. 화면 분기 로직
-
-```dart
-Widget _buildMain(BuildContext context) {
-  switch (_currentScreen) {
-    case IntroScreen.welcome:
-      return _buildWelcomeView(context);    // 체험 버튼 + "로그인하세요" 링크
-    case IntroScreen.signUp:
-      return _buildSignUpView(context);     // 가입 유도 (체험 완료 후)
-    case IntroScreen.logIn:
-      return _buildLogInView(context);      // 로그인 전용
-  }
-}
-```
-
-### C. 초기 화면 결정 로직 (initState)
-
-```dart
-// 기존: if (FFAppState().trialCompleted) _isSignupMode = true;
-// 변경:
-if (FFAppState().trialCompleted) {
-  _currentScreen = IntroScreen.signUp;
-} else {
-  _currentScreen = IntroScreen.welcome;
-}
-```
-
-### D. 체험 완료 기준 변경
-
-**기존**: 공부방 2분까지 모두 마쳐야 완료
-**변경**: 대화방 1분을 끝까지 채운 시점에 `trialCompleted = true`
-
-- 대화방 1분 중간에 나감 → `trialCompleted` 변경 없음 (false 유지) → 재진입 시 Welcome 화면 → 체험 처음부터 다시
-- 대화방 1분 완료 → `trialCompleted = true` 확정 → 공부방 진입 여부와 무관하게 재진입 시 SignUp 화면
-
-> **주의**: 이 변경은 intro_master.dart 자체가 아닌, 대화방 모드 파일(routine_mode_anyone.dart 등)에서
-> 타이머 종료 시 `FFAppState().trialCompleted = true`를 찍는 위치 변경이 필요할 수 있다.
-> 현재 _cleanupTrialSandbox()에서 `FFAppState().trialCompleted = true`를 찍고 있는데,
-> 이 시점을 "대화방 1분 완료 콜백"으로 이동해야 한다.
-> → 이 부분은 Phase 2에서 _cleanupTrialSandbox() 수정 시 함께 처리.
-
----
-
-## Phase 0: 사전 진단
+### Phase 0: 사전 진단
 
 ```bash
-# 1. 현재 파일 줄 수 확인
-wc -l lib/custom_code/widgets/intro_master.dart
+# kakaoEmail 관련 코드 확인
+grep -n "kakaoEmail" firebase/functions/index.js
 
-# 2. _isSignupMode 사용 위치 확인
-grep -n "_isSignupMode" lib/custom_code/widgets/intro_master.dart
+# createCustomToken 위치 확인
+grep -n "createCustomToken" firebase/functions/index.js
 
-# 3. _buildSignupView 사용 위치 확인
-grep -n "_buildSignupView" lib/custom_code/widgets/intro_master.dart
-
-# 4. trialCompleted 설정 위치 확인
-grep -rn "trialCompleted" lib/custom_code/widgets/intro_master.dart
-
-# 5. trial_signup_sheet import 확인
-grep -rn "trial_signup_sheet" lib/custom_code/widgets/
-
-# 6. terms_agreement_sheet 존재 확인 (지시문 1 완료 여부)
-ls lib/custom_code/widgets/terms_agreement_sheet.dart
+# 현재 kakaoCustomAuth에서 updateUser 사용 여부
+grep -n "updateUser" firebase/functions/index.js
+# 기대: 0줄 (아직 없음)
 ```
 
----
-
-## Phase 1: Savepoint
+### Phase 1: Savepoint
 
 ```bash
-git add -A && git commit -m "savepoint: before intro_master overhaul"
+git add -A && git commit -m "savepoint: before kakaoCustomAuth email enrichment"
 ```
 
----
+### Phase 2: 수정
 
-## Phase 2: 수정 작업
+**앵커**: kakaoCustomAuth 함수 내부, custom token 발급 직후 (로깅 직전)
 
-이 파일은 1143줄의 전면 개편이므로, **전체 파일을 새로 작성**하는 방식이 안전하다.
-기존 파일을 백업 후 새 파일로 교체한다.
+기존:
+```javascript
+    const token = await admin
+      .auth()
+      .createCustomToken(resolvedUid, { provider: "kakaocorp.com" });
+
+    functions.logger.info("kakaoCustomAuth", {
+```
+
+변경:
+```javascript
+    const token = await admin
+      .auth()
+      .createCustomToken(resolvedUid, { provider: "kakaocorp.com" });
+
+    // Firebase Auth 레코드에 카카오 이메일 설정 (이메일 기반 계정 통합의 전제 조건)
+    if (kakaoEmail) {
+      try {
+        const existingAuthUser = await admin.auth().getUser(resolvedUid);
+        if (!existingAuthUser.email) {
+          await admin.auth().updateUser(resolvedUid, { email: kakaoEmail });
+          functions.logger.info("kakaoCustomAuth: email set on auth record", {
+            uid: resolvedUid,
+            email: kakaoEmail,
+          });
+        }
+      } catch (updateErr) {
+        // 이메일 설정 실패해도 로그인 자체는 진행 (non-blocking)
+        functions.logger.warn("kakaoCustomAuth: updateUser email failed", {
+          uid: resolvedUid,
+          error: String(updateErr),
+        });
+      }
+    }
+
+    functions.logger.info("kakaoCustomAuth", {
+```
+
+**핵심 포인트:**
+- `getUser`로 먼저 기존 이메일 존재 여부를 확인 → 이미 있으면 덮어쓰지 않음
+- `updateUser` 실패해도 로그인은 진행 (try/catch로 감싸서 non-blocking)
+- 이미 다른 Firebase 유저가 같은 이메일을 쓰고 있으면 `updateUser`가 실패할 수 있음 (이것도 non-blocking 처리)
+
+### Phase 3: 검증
 
 ```bash
-# 백업
-cp lib/custom_code/widgets/intro_master.dart lib/custom_code/widgets/intro_master.dart.bak
-```
+node -c firebase/functions/index.js
+# 기대: 문법 오류 없음
 
-### 새 intro_master.dart 작성 시 반드시 유지해야 할 기존 로직
+grep -c "updateUser" firebase/functions/index.js
+# 기대: 1 이상
 
-아래 함수/로직은 현재 파일에서 그대로 가져와야 한다 (수정 금지 또는 최소 수정):
-
-1. **`_checkEntryStatus()`** — Duo invite 체크 + AppsFlyer 초기화 + 기존 회원 Lobby 라우팅
-2. **`_routeAfterAuth()`** — pending Duo invite → StealthRoom, 그 외 → Lobby
-3. **`_initAppsFlyer()`** — AppsFlyer 초기화
-4. **`_startTrial()`** — 체험 시작 (익명 로그인 + 언어 설정 + 대화방 진입)
-5. **`_enterTrialAnyone()`** — Firestore chat_history 생성 + StealthRoom pushNamed
-6. **`_handleAuth()`** — 이메일 로그인/회원가입 (linkWithCredential 포함)
-7. **`_resetPassword()`** — 비밀번호 재설정
-8. **`_handleSocialAuth()`** — 소셜 로그인 처리
-9. **`_cleanupTrialSandbox()`** — 체험 sandbox 삭제
-10. **`_grantSignupBonusIfPossible()`** — 가입 보너스 지급
-11. **`_showLanguageSettingDialog()`** — 언어 설정 다이얼로그
-12. **`_languageDropdown()`** — 언어 드롭다운 위젯
-13. **`_onDuoInviteSignal()`** — Duo 초대 시그널 리스너
-14. **`_buildTextField()`** — 이메일/비밀번호 입력 필드
-15. **`_buildWaveform()`** — 파형 위젯 (Welcome 화면에서 사용)
-16. **`_buildBentoCard()`** — 벤토 카드 위젯
-17. **`_buildTrialGuideCard()`** — 체험 안내 카드
-18. **`_emailTabBtn()`** — 이메일 탭 버튼
-
-### 삭제할 요소
-
-- `bool _isSignupMode` → `IntroScreen _currentScreen` 으로 대체
-- `bool _showEmailInSignup` → `bool _showEmailForm` 으로 이름 변경
-- `_buildSignupView()` → `_buildSignUpView()` + `_buildLogInView()` 2개로 분리
-
-### 새로 추가할 요소
-
-- `enum IntroScreen { welcome, signUp, logIn }`
-- `import 'terms_agreement_sheet.dart';`
-- `_buildSignUpView()` — 가입 전용 화면
-- `_buildLogInView()` — 로그인 전용 화면
-- `_handleSocialSignUp()` — 약관 동의 → 소셜 로그인 (가입 경로)
-- `_handleSocialLogIn()` — 약관 없이 소셜 로그인 (로그인 경로)
-
-### 화면별 상세 구성
-
-#### 화면 ① Welcome (= 현재 Intro A)
-
-기존 `_buildMain()`의 `!_isSignupMode` 분기 내용을 기반으로 구성.
-**변경사항:**
-- 하단 "로그인" 버튼의 onPressed를 `setState(() => _isSignupMode = true)` 에서
-  `setState(() => _currentScreen = IntroScreen.logIn)` 으로 변경
-- 체험 버튼, 벤토카드, 체험안내카드, 이용방법 등은 그대로 유지
-
-#### 화면 ② SignUp (체험 완료 후 가입 유도)
-
-스픽 이미지 1 참고. 새로 작성:
-```
-[드래그 핸들 없음 — 전체 화면]
-
-[상단 우측] "로그인" 텍스트 링크 → IntroScreen.logIn
-
-[중앙]
-  "계속하시려면 먼저
-   가입해주세요"
-  (흰색, 22px, bold, 중앙 정렬)
-
-[카카오톡으로 계속하기] — 대형 노란색 버튼
-  onTap: _handleSocialSignUp(SocialAuthService.signInWithKakao)
-
-[다른 방법으로 가입하기] — 회색 텍스트
-  [이메일 아이콘] [Google 아이콘]  — 원형 버튼 2개
-  이메일 아이콘 onTap: setState(() => _showEmailForm = true)
-  Google 아이콘 onTap: _handleSocialSignUp(SocialAuthService.signInWithGoogle)
-
-[이메일 폼] — _showEmailForm == true 일 때만 표시
-  이메일 + 비밀번호 + "가입하기" 버튼
-  (기존 _buildTextField 재사용)
-  (isLoginMode = false 고정)
-
-[하단]
-  "이미 계정이 있으신가요? 바로"
-  "로그인하세요" — 파란색 텍스트 링크
-  onTap: setState(() => _currentScreen = IntroScreen.logIn)
-```
-
-#### 화면 ③ LogIn (로그인 전용)
-
-스픽 이미지 3 참고. 새로 작성:
-```
-[상단 좌측] ← 뒤로가기 아이콘
-  onTap: setState(() {
-    _currentScreen = FFAppState().trialCompleted
-        ? IntroScreen.signUp
-        : IntroScreen.welcome;
-  })
-
-[중앙 상단]
-  "로그인하고
-   계속하기"
-  (흰색, 22px, bold, 중앙 정렬)
-
-[카카오톡으로 계속하기] — 대형 노란색 버튼
-[Google로 계속하기] — 흰색 버튼
-[이메일로 계속하기] — 회색 버튼
-  → 각각 _handleSocialLogIn() 또는 이메일 폼 토글
-
-[이메일 폼] — _showEmailForm == true 일 때만
-  이메일 + 비밀번호 + "로그인" 버튼 + "비밀번호 찾기"
-  (isLoginMode = true 고정)
-
-[하단]
-  "계정이 없으신가요?"
-  "가입하기" — 파란색 텍스트 링크
-  onTap: setState(() => _currentScreen = IntroScreen.signUp)
-```
-
-### 핵심 메서드: _handleSocialSignUp
-
-```dart
-/// 회원가입 경로: 약관 동의 → 소셜 로그인
-Future<void> _handleSocialSignUp(Future<dynamic> Function() authFn) async {
-  // 1. 약관 동의 시트 표시
-  final termsResult = await TermsAgreementSheet.show(context);
-  if (termsResult == null) return; // 취소
-
-  // 2. 기존 _handleSocialAuth 로직 실행
-  await _handleSocialAuth(authFn);
-
-  // 3. 마케팅 동의 여부를 Firestore에 저장 (향후)
-  // TODO: termsResult.marketingAccepted → users/{uid}/marketing_consent
-}
-```
-
-### 핵심 메서드: _handleSocialLogIn
-
-```dart
-/// 로그인 경로: 약관 없이 바로 소셜 로그인
-Future<void> _handleSocialLogIn(Future<dynamic> Function() authFn) async {
-  await _handleSocialAuth(authFn);
-}
-```
-
-> 참고: `_handleSocialLogIn`은 사실상 `_handleSocialAuth`의 래퍼이지만,
-> 향후 로그인 전용 로직(기존 계정 없으면 안내 등)을 추가할 여지를 위해 분리해둔다.
-
----
-
-## Phase 3: 검증
-
-```bash
-# 1. 새 파일 컴파일 확인
-dart format lib/custom_code/widgets/intro_master.dart
-flutter analyze lib/custom_code/widgets/intro_master.dart
-
-# 2. enum 사용 확인
-grep -c "IntroScreen" lib/custom_code/widgets/intro_master.dart
-# 기대: 10 이상
-
-# 3. _isSignupMode 완전 제거 확인
-grep -c "_isSignupMode" lib/custom_code/widgets/intro_master.dart
-# 기대: 0
-
-# 4. 3개 화면 빌드 메서드 존재 확인
-grep -c "_buildWelcomeView\|_buildSignUpView\|_buildLogInView" lib/custom_code/widgets/intro_master.dart
-# 기대: 3 이상 (정의 + 호출)
-
-# 5. terms_agreement_sheet import 확인
-grep "terms_agreement_sheet" lib/custom_code/widgets/intro_master.dart
+grep "email set on auth record" firebase/functions/index.js
 # 기대: 1줄
+```
 
-# 6. trial_signup_sheet import 없음 확인
-grep "trial_signup_sheet" lib/custom_code/widgets/intro_master.dart
+### Phase 4: 배포
+
+```bash
+firebase deploy --project stealth-vox-3p3rq3 --only functions:functions:kakaoCustomAuth
+```
+
+### Phase 5: 커밋
+
+```bash
+git add -A && git commit -m "feat: set kakao email on Firebase Auth record for account linking"
+git push origin main
+```
+
+---
+
+## Part B: signInWithGoogle — 계정 통합 연동
+
+### 현재 로직 (social_auth_service.dart)
+
+```
+1. GoogleSignIn → googleAuth (idToken + accessToken)
+2. GoogleAuthProvider.credential 생성
+3. if (currentUser != null && isAnonymous):
+   a. linkWithCredential → 성공: anonymous UID에 Google 연결 (체험 데이터 보존)
+   b. credential-already-in-use → signInWithCredential (기존 Google 계정으로 전환)
+4. else: signInWithCredential
+```
+
+### 변경 로직
+
+```
+1. GoogleSignIn → googleAuth (idToken + accessToken)
+2. GoogleAuthProvider.credential 생성
+3. if (currentUser != null && isAnonymous):
+   a. linkOrCreateAccount({ provider: 'google', idToken }) 호출
+   b. 응답의 isNewUser == true → linkWithCredential (anonymous UID 보존, 체험 데이터 유지)
+   c. 응답의 isNewUser == false → signInWithCustomToken(token) (기존 계정으로 전환)
+4. else (이미 로그인된 상태에서 재로그인 — 앱 삭제 후 재설치 등):
+   a. linkOrCreateAccount({ provider: 'google', idToken }) 호출
+   b. signInWithCustomToken(token) (기존 계정이든 신규든 서버가 결정)
+```
+
+### Phase 0: 사전 진단
+
+```bash
+# 현재 signInWithGoogle 구조 확인
+grep -n "signInWithGoogle\|linkWithCredential\|signInWithCredential\|GoogleAuthProvider" lib/auth/social_auth_service.dart
+
+# linkOrCreateAccount 호출 여부 확인 (아직 없어야 함)
+grep -n "linkOrCreateAccount" lib/auth/social_auth_service.dart
 # 기대: 0줄
 ```
 
----
-
-## Phase 4: 커밋
+### Phase 1: Savepoint
 
 ```bash
-git add -A && git commit -m "feat: overhaul intro_master with 3-screen model (Welcome/SignUp/LogIn)"
+git add -A && git commit -m "savepoint: before signInWithGoogle account linking"
+```
+
+### Phase 2: 수정
+
+`signInWithGoogle()` 메서드 전체를 아래로 교체한다.
+
+기존:
+```dart
+  static Future<UserCredential> signInWithGoogle() async {
+    final googleUser = await GoogleSignIn().signIn();
+    if (googleUser == null) {
+      throw Exception('Google sign-in cancelled.');
+    }
+
+    final googleAuth = await googleUser.authentication;
+    final credential = GoogleAuthProvider.credential(
+      accessToken: googleAuth.accessToken,
+      idToken: googleAuth.idToken,
+    );
+
+    final currentUser = _auth.currentUser;
+    if (currentUser != null && currentUser.isAnonymous) {
+      try {
+        final linked = await currentUser.linkWithCredential(credential);
+        FFAppState().hasLinkedAccount = true;
+        return linked;
+      } on FirebaseAuthException catch (e) {
+        if (e.code == 'credential-already-in-use') {
+          final signedIn = await _auth.signInWithCredential(credential);
+          FFAppState().hasLinkedAccount = true;
+          return signedIn;
+        }
+        rethrow;
+      }
+    }
+
+    final signedIn = await _auth.signInWithCredential(credential);
+    FFAppState().hasLinkedAccount = true;
+    return signedIn;
+  }
+```
+
+변경:
+```dart
+  static Future<UserCredential> signInWithGoogle() async {
+    final googleUser = await GoogleSignIn().signIn();
+    if (googleUser == null) {
+      throw Exception('Google sign-in cancelled.');
+    }
+
+    final googleAuth = await googleUser.authentication;
+    final idToken = googleAuth.idToken;
+    final credential = GoogleAuthProvider.credential(
+      accessToken: googleAuth.accessToken,
+      idToken: idToken,
+    );
+
+    final currentUser = _auth.currentUser;
+
+    // ── Case 1: Anonymous 유저 (체험 후 첫 가입) ──
+    if (currentUser != null && currentUser.isAnonymous) {
+      // 서버에 이메일 기반 기존 계정 존재 여부를 먼저 확인
+      final checkResult = await _callLinkOrCreate('google', idToken: idToken);
+      final isNewUser = checkResult['isNewUser'] as bool;
+      final serverToken = checkResult['token'] as String;
+
+      if (isNewUser) {
+        // 신규 사용자 → anonymous UID에 Google credential 연결 (체험 데이터 보존)
+        try {
+          final linked = await currentUser.linkWithCredential(credential);
+          FFAppState().hasLinkedAccount = true;
+          return linked;
+        } on FirebaseAuthException catch (e) {
+          if (e.code == 'credential-already-in-use') {
+            // 극히 드문 케이스: 서버는 신규라 했는데 Firebase Auth는 이미 존재
+            // → 서버가 만든 계정으로 전환
+            final signedIn = await _auth.signInWithCustomToken(serverToken);
+            FFAppState().hasLinkedAccount = true;
+            return signedIn;
+          }
+          rethrow;
+        }
+      } else {
+        // 기존 사용자 발견 → 서버가 내려준 custom token으로 기존 계정 전환
+        // (anonymous UID는 버려지지만, 기존 계정의 시간/기록이 더 중요)
+        final signedIn = await _auth.signInWithCustomToken(serverToken);
+        FFAppState().hasLinkedAccount = true;
+        return signedIn;
+      }
+    }
+
+    // ── Case 2: 이미 로그인된 상태 또는 로그아웃 후 재로그인 ──
+    // 서버가 이메일로 기존 계정을 찾아주므로 중복 계정 방지
+    final checkResult = await _callLinkOrCreate('google', idToken: idToken);
+    final serverToken = checkResult['token'] as String;
+    final signedIn = await _auth.signInWithCustomToken(serverToken);
+    FFAppState().hasLinkedAccount = true;
+    return signedIn;
+  }
+
+  /// linkOrCreateAccount Cloud Function 호출 헬퍼
+  static Future<Map<String, dynamic>> _callLinkOrCreate(
+    String provider, {
+    String? idToken,
+    String? email,
+  }) async {
+    final callable = _functions.httpsCallable('linkOrCreateAccount');
+    final result = await callable.call<Map<String, dynamic>>({
+      'provider': provider,
+      if (idToken != null) 'idToken': idToken,
+      if (email != null) 'email': email,
+    });
+    return result.data;
+  }
+```
+
+### 변경하지 않는 것
+
+- `signInWithKakao()` — 이미 `kakaoCustomAuth` CF를 경유하고, 지시문 3에서 이메일 매칭 로직을 추가했으므로 변경 불필요
+- `signInWithEmail()` — 이메일 로그인은 이메일 자체가 식별자이므로 `linkOrCreateAccount` 불필요 (Firebase Auth가 자체적으로 이메일 중복 방지)
+
+### Phase 3: 검증
+
+```bash
+dart format lib/auth/social_auth_service.dart
+flutter analyze lib/auth/social_auth_service.dart
+
+# linkOrCreateAccount 호출 확인
+grep -c "linkOrCreateAccount" lib/auth/social_auth_service.dart
+# 기대: 1 (callable 이름)
+
+# _callLinkOrCreate 헬퍼 존재 확인
+grep -c "_callLinkOrCreate" lib/auth/social_auth_service.dart
+# 기대: 3 이상 (정의 1 + 호출 2)
+
+# signInWithCustomToken 사용 확인
+grep -c "signInWithCustomToken" lib/auth/social_auth_service.dart
+# 기대: 2 이상
+```
+
+### Phase 4: 커밋
+
+```bash
+git add -A && git commit -m "feat: integrate linkOrCreateAccount into signInWithGoogle for account linking"
+git push origin main
+```
+
+### Phase 5: 롤백 (문제 발생 시)
+
+```bash
+git revert HEAD --no-edit
 git push origin main
 ```
 
 ---
 
-## Phase 5: 롤백 (문제 발생 시)
+## 통합 테스트 시나리오
 
-```bash
-# 백업 파일에서 복원
-cp lib/custom_code/widgets/intro_master.dart.bak lib/custom_code/widgets/intro_master.dart
-git add -A && git commit -m "rollback: restore intro_master from backup"
-git push origin main
-```
+Part A + B 모두 완료 후, 아래 시나리오를 수동 테스트해야 한다:
+
+### 시나리오 1: 카카오로 가입 → 앱 삭제 → Google로 재로그인 (같은 이메일)
+1. 카카오 로그인 (이메일: user@naver.com)
+2. 시간 충전 → remainingTime 확인
+3. 앱 삭제 → 재설치
+4. Google 로그인 (이메일: user@naver.com — 카카오와 동일)
+5. **기대**: 기존 계정의 remainingTime이 그대로 살아있음
+
+### 시나리오 2: 카카오로 가입 → 앱 삭제 → Google로 재로그인 (다른 이메일)
+1. 카카오 로그인 (이메일: user@naver.com)
+2. 앱 삭제 → 재설치
+3. Google 로그인 (이메일: user@gmail.com — 카카오와 다름)
+4. **기대**: 신규 계정 생성 (이메일이 달라서 매칭 불가 — 업계 표준 한계)
+
+### 시나리오 3: 체험 → Google로 첫 가입 (신규)
+1. 체험 시작 (anonymous)
+2. 체험 완료 → 가입 화면
+3. Google로 가입 (신규 이메일)
+4. **기대**: anonymous UID에 Google 연결, 체험 중 생성된 chat_history 유지
+
+### 시나리오 4: 체험 → Google로 가입 (기존 계정 존재)
+1. 체험 시작 (anonymous)
+2. 체험 완료 → 가입 화면
+3. Google로 가입 (이미 카카오로 가입한 이메일)
+4. **기대**: 기존 카카오 계정으로 전환 (anonymous 체험 데이터는 버려짐, 기존 시간/기록 복원)
 
 ---
 
-## 추가 주의사항
+## 제한사항
 
-### trial_signup_sheet.dart 처리
-- 파일 자체는 삭제하지 않는다 (다른 곳에서 import하고 있을 수 있음)
-- intro_master.dart에서의 import만 제거
-- 추후 전체 프로젝트에서 `trial_signup_sheet` 사용처를 확인 후 안전하게 제거
+1. **카카오 이메일 동의 거부 시**: `kakaoEmail = null` → Firebase Auth에 이메일 미설정 → 이메일 매칭 불가.
+   카카오 개발자 콘솔에서 "이메일" 항목을 **필수 동의**로 설정하면 해결 가능하나,
+   비즈앱 등록이 필요할 수 있음.
 
-### 체험 완료 시점 변경 관련
-- 현재 `_cleanupTrialSandbox()`에서 `FFAppState().trialCompleted = true` 를 설정
-- 이것은 "소셜 로그인 시 sandbox 정리 단계"에서 찍히는 것
-- **대화방 1분 완료 시점**에도 별도로 `FFAppState().trialCompleted = true`를 찍어야 함
-- 이 변경은 `routine_mode_anyone.dart`의 체험 타이머 종료 콜백에서 처리 필요
-- → 별도 지시문으로 분리 권장 (이 지시문 범위 밖)
+2. **기존 카카오 유저**: 이 배포 이전에 가입한 카카오 유저들은 Firebase Auth에 이메일이 없음.
+   → Part A의 `updateUser`는 **새 로그인 시에만** 이메일을 설정하므로,
+   기존 유저가 다시 로그인해야 이메일이 채워진다.
+   → 기존 유저 일괄 처리가 필요하면 별도 마이그레이션 스크립트 작성 권장.
 
-### _checkEntryStatus() 변경사항
-- 기존: `user != null` → `_routeAfterAuth()` (Lobby 이동)
-- 변경 없음: 이미 로그인된 사용자는 여전히 Lobby로 이동
-- IntroScreen 상태는 로그인되지 않은 사용자에게만 의미 있음
-
-지시문 2는 intro_master.dart 1143줄 전면 개편이라 지시문 1, 3과는 규모가 다릅니다. Codex가 전체 파일을 새로 작성하는 방식으로 갈 가능성이 높은데, 그 경우 기존 18개 핵심 메서드가 빠짐없이 포함되었는지 확인이 중요합니다. 특히:
-
-_checkEntryStatus() — Duo invite + 기존 회원 라우팅
-_cleanupTrialSandbox() — 체험 sandbox 삭제
-_handleSocialAuth() — 소셜 로그인 처리
-_onDuoInviteSignal() — Duo 시그널 리스너
-
-이 4개가 빠지면 앱이 깨지니, Codex가 결과를 보여줄 때 이것들이 있는지 확인해주세요.
+3. **시나리오 4에서 체험 데이터 손실**: 기존 계정으로 전환하면 anonymous UID의 체험 데이터는 접근 불가.
+   이건 의도된 동작 — 기존 계정의 시간/기록이 더 중요하므로 트레이드오프로 수용.
