@@ -473,6 +473,34 @@ exports.kakaoCustomAuth = functions
     const firestore = admin.firestore();
     const mapRef = firestore.collection("kakao_uid_map").doc(kakaoId);
 
+    // ------------------------------------------------------------------
+    // Fast path: 재방문자는 이메일 매칭/재확인을 스킵하고 바로 토큰 발급.
+    // authEmailSet=true 는 과거 로그인에서 이메일 확인 절차를 이미
+    // 1회 완료했다는 의미 (카카오 계정에 이메일이 없는 사용자도 포함).
+    // ------------------------------------------------------------------
+    const preCheckDoc = await mapRef.get();
+    if (
+      preCheckDoc.exists &&
+      preCheckDoc.data().uid &&
+      preCheckDoc.data().authEmailSet === true
+    ) {
+      const resolvedUid = preCheckDoc.data().uid;
+      const token = await admin
+        .auth()
+        .createCustomToken(resolvedUid, { provider: "kakaocorp.com" });
+
+      functions.logger.info("kakaoCustomAuth: fast path (returning user)", {
+        anonUid: anonUid,
+        resolvedUid: resolvedUid,
+        kakaoIdPrefix: kakaoId.substring(0, 6),
+      });
+
+      return { token: token };
+    }
+
+    // ------------------------------------------------------------------
+    // Slow path: 신규 가입자 또는 authEmailSet 미완료 사용자 (최초 1회 또는 재시도)
+    // ------------------------------------------------------------------
     let emailMatchUid = null;
     if (kakaoEmail) {
       try {
@@ -530,6 +558,16 @@ exports.kakaoCustomAuth = functions
           error: String(updateErr),
         });
       }
+    }
+
+    // 이메일 확인 절차 완료 표시 -> 다음 로그인부터 fast path 진입
+    try {
+      await mapRef.set({ authEmailSet: true }, { merge: true });
+    } catch (flagErr) {
+      functions.logger.warn("kakaoCustomAuth: authEmailSet flag write failed", {
+        uid: resolvedUid,
+        error: String(flagErr),
+      });
     }
 
     functions.logger.info("kakaoCustomAuth", {
