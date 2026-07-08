@@ -1544,6 +1544,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     trialMode = false;
     disposeTrialTimer();
     BillingTicker.instance.pause();
+    // Anyone 1분 완료 = 체험 완료 확정
+    // 이후 앱 재진입 시 Welcome이 아닌 Auth 화면 표시
+    FFAppState().trialCompleted = true;
 
     final historyRef = _myHistoryRef ?? TrialFlowState.instance.myHistoryRef;
     if (historyRef == null) {
