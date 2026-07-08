@@ -47,228 +47,447 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-# 지시문 7: 카카오 로그인 후 Lobby 00:00 문제 해결
+# 지시문 8: 재방문 사용자 안내 — lastAuthProvider + Auth 화면 개선
 
 ## 목적
-카카오 로그인 시 `signInAnonymously()` → GoRouter가 Lobby로 조기 이동 → 보너스 지급 전에 00:00 표시되는 버그를 해결한다.
-
-## 근본 원인
-`signInWithKakao()` 내부에서 `signInAnonymously()`를 먼저 호출하면,
-GoRouter의 `loggedIn` getter가 anonymous user도 "로그인됨"으로 판정하여
-카카오 인증 완료 + 보너스 지급 전에 Lobby로 보내버린다.
+1. 로그인 성공 시 사용한 provider를 SharedPreferences에 저장
+2. Auth 화면 재진입 시 "이전에 카카오로 가입했습니다" 안내 + 해당 버튼 강조
+3. 이메일 로그인/가입 시에도 `trialCompleted = true` + `lastAuthProvider` 저장
 
 ## 대상 파일
-- **수정**: `lib/flutter_flow/nav/nav.dart` (2곳)
-- **수정**: `lib/custom_code/widgets/intro_master.dart` (1곳)
+- **수정**: `lib/custom_code/widgets/intro_master.dart` (3곳)
 
 ## 선행 조건
-- ✅ 지시문 1~6 완료
+- ✅ 지시문 1~7 완료
 
 ---
 
 ## Phase 0: 사전 진단
 
 ```bash
-# 1. loggedIn getter 현재 구현 확인
-grep -n "get loggedIn" lib/flutter_flow/nav/nav.dart
-# 기대: "bool get loggedIn => user?.loggedIn ?? false;"
+# 1. lastAuthProvider 사용 여부 (아직 없어야 함)
+grep -n "lastAuthProvider" lib/custom_code/widgets/intro_master.dart
+# 기대: 0줄
 
-# 2. update() 내부 auto-reset 확인
-grep -n "updateNotifyOnAuthChange(true)" lib/flutter_flow/nav/nav.dart
-# 기대: update() 메서드 안에서 1줄
+# 2. FFAppState에 lastAuthProvider 필드가 있는지 확인
+grep -rn "lastAuthProvider" lib/
+# 없으면 FFAppState에 추가 필요
 
-# 3. _handleUnifiedAuth에서 notifyOnAuthChange 사용 여부
-grep -n "notifyOnAuthChange\|updateNotifyOnAuthChange" lib/custom_code/widgets/intro_master.dart
-# 기대: 0줄 (아직 없음)
+# 3. _handleUnifiedAuth에서 authFn 호출 직후 위치 확인
+grep -n "await authFn()" lib/custom_code/widgets/intro_master.dart
 
-# 4. FirebaseAuth import 존재 여부 (nav.dart)
-grep -n "firebase_auth" lib/flutter_flow/nav/nav.dart
-# 있으면 OK, 없으면 import 추가 필요
+# 4. _handleAuth에서 _checkAgeAndRoute 호출 위치 확인
+grep -n "_checkAgeAndRoute" lib/custom_code/widgets/intro_master.dart
 ```
+
+> **Phase 0 결과에 따른 분기**:
+> `FFAppState`에 `lastAuthProvider` 필드가 없으면 먼저 추가해야 한다.
+> `FFAppState`는 SharedPreferences 기반이므로 `String` 타입 필드를 추가한다.
+> 
+> ```bash
+> grep -n "class FFAppState" lib/app_state.dart
+> grep -n "trialCompleted" lib/app_state.dart
+> ```
+>
+> `trialCompleted`가 정의된 방식과 동일하게 `lastAuthProvider`를 추가한다.
+> (getter/setter + SharedPreferences 읽기/쓰기)
+>
+> 값: `'kakao'` | `'google'` | `'email'` | `''` (미설정)
 
 ---
 
 ## Phase 1: Savepoint
 
 ```bash
-git checkout -b fix/lobby-zero-time
-git add -A && git commit -m "savepoint: before lobby 00:00 fix"
+git checkout -b feat/last-auth-provider
+git add -A && git commit -m "savepoint: before lastAuthProvider feature"
 ```
 
 ---
 
-## Phase 2: 수정 (3곳)
+## Phase 2: 수정
 
-### 수정 1: nav.dart — loggedIn에서 anonymous 제외
+### 2-0: FFAppState에 lastAuthProvider 추가 (Phase 0에서 없는 경우)
 
-**파일**: `lib/flutter_flow/nav/nav.dart`
+**파일**: `lib/app_state.dart`
 
-**먼저 import 확인** — 파일 상단에 `firebase_auth` import가 없으면 추가:
+`trialCompleted` 필드와 동일한 패턴으로 추가:
 
 ```dart
-import 'package:firebase_auth/firebase_auth.dart';
+// SharedPreferences key
+static const String _kLastAuthProvider = 'ff_lastAuthProvider';
+
+String _lastAuthProvider = '';
+String get lastAuthProvider => _lastAuthProvider;
+set lastAuthProvider(String val) {
+  _lastAuthProvider = val;
+  _safePrefs((prefs) => prefs.setString(_kLastAuthProvider, val));
+}
 ```
+
+그리고 `initializePersistedState()` 또는 유사한 초기화 메서드에:
+```dart
+_lastAuthProvider = prefs.getString(_kLastAuthProvider) ?? '';
+```
+
+> **주의**: FFAppState의 정확한 구조는 프로젝트마다 다르다.
+> Phase 0에서 `trialCompleted`의 패턴을 grep으로 확인하고 동일하게 따라야 한다.
+> `_safePrefs` 같은 헬퍼가 없으면 직접 `SharedPreferences.getInstance()`를 사용.
+
+---
+
+### 2-1: _handleUnifiedAuth — lastAuthProvider 저장
+
+**파일**: `lib/custom_code/widgets/intro_master.dart`
+
+소셜 로그인 시 어떤 provider를 썼는지 알아야 하므로, `_handleUnifiedAuth`에 provider 이름 파라미터를 추가한다.
 
 **앵커 (현재 코드):**
 ```dart
-  bool get loggedIn => user?.loggedIn ?? false;
+  Future<void> _handleUnifiedAuth(Future<dynamic> Function() authFn) async {
 ```
 
 **변경:**
 ```dart
-  bool get loggedIn {
-    if (!(user?.loggedIn ?? false)) return false;
-    // anonymous 체험 유저는 "로그인 안 됨"으로 취급
-    // → GoRouter가 Lobby로 자동 이동하지 않음
-    // → 체험은 imperative navigation(pushNamed)으로 처리
-    final fbUser = FirebaseAuth.instance.currentUser;
-    return fbUser != null && !fbUser.isAnonymous;
-  }
+  Future<void> _handleUnifiedAuth(
+    Future<dynamic> Function() authFn, {
+    String provider = '',
+  }) async {
 ```
 
-> **효과**: `signInAnonymously()` 완료 시 `loggedIn = false` → GoRouter가 Lobby로 안 감.
-> 정식 로그인(`signInWithCustomToken`, `signInWithCredential` 등) 완료 시에만 `loggedIn = true`.
->
-> **체험 플로우 영향 없음**: 체험은 `_startTrial()` → `signInAnonymously()` → `context.pushNamed('StealthRoom')`으로
-> imperative navigation을 쓰므로 GoRouter의 `loggedIn` 판정과 무관.
-
----
-
-### 수정 2: nav.dart — update()에서 suppressed 상태 auto-reset 방지
-
-**파일**: `lib/flutter_flow/nav/nav.dart`
+그리고 `trialCompleted = true` 바로 다음 줄에 추가:
 
 **앵커 (현재 코드):**
 ```dart
-  void update(BaseAuthUser newUser) {
-    final shouldUpdate =
-        user?.uid == null || newUser.uid == null || user?.uid != newUser.uid;
-    initialUser ??= newUser;
-    user = newUser;
-    // Refresh the app on auth change unless explicitly marked otherwise.
-    // No need to update unless the user has changed.
-    if (notifyOnAuthChange && shouldUpdate) {
-      notifyListeners();
-    }
-    // Once again mark the notifier as needing to update on auth change
-    // (in order to catch sign in / out events).
-    updateNotifyOnAuthChange(true);
-  }
+      await authFn();
+      FFAppState().trialCompleted = true;
 ```
 
 **변경:**
 ```dart
-  void update(BaseAuthUser newUser) {
-    final shouldUpdate =
-        user?.uid == null || newUser.uid == null || user?.uid != newUser.uid;
-    initialUser ??= newUser;
-    user = newUser;
-    // Refresh the app on auth change unless explicitly marked otherwise.
-    // No need to update unless the user has changed.
-    if (notifyOnAuthChange && shouldUpdate) {
-      notifyListeners();
-    }
-    // Auto-reset only when not explicitly suppressed.
-    // Multi-step auth flows (e.g. anonymous → Kakao custom token → bonus)
-    // suppress notifications and restore them manually after completion.
-    if (notifyOnAuthChange) {
-      updateNotifyOnAuthChange(true);
-    }
-  }
+      await authFn();
+      FFAppState().trialCompleted = true;
+      if (provider.isNotEmpty) {
+        FFAppState().lastAuthProvider = provider;
+      }
 ```
-
-> **효과**: `notifyOnAuthChange = false`로 설정하면, `update()`가 호출되어도
-> 자동으로 `true`로 돌아가지 않음. caller가 명시적으로 `true`로 복원해야 함.
->
-> **기존 동작 영향 없음**: `notifyOnAuthChange`가 `true`인 정상 상태에서는
-> `if (true) updateNotifyOnAuthChange(true)` → 값 변화 없음 → 기존과 동일.
 
 ---
 
-### 수정 3: intro_master.dart — _handleUnifiedAuth에서 라우터 알림 억제
+### 2-2: _buildAuthView — provider 파라미터 전달 + 호출부 수정
+
+**파일**: `lib/custom_code/widgets/intro_master.dart`
+
+카카오 버튼 onTap:
+
+**앵커:**
+```dart
+            onTap: () => _handleUnifiedAuth(SocialAuthService.signInWithKakao),
+```
+
+**변경:**
+```dart
+            onTap: () => _handleUnifiedAuth(SocialAuthService.signInWithKakao, provider: 'kakao'),
+```
+
+Google 버튼 onTap:
+
+**앵커:**
+```dart
+            onTap: () => _handleUnifiedAuth(SocialAuthService.signInWithGoogle),
+```
+
+**변경:**
+```dart
+            onTap: () => _handleUnifiedAuth(SocialAuthService.signInWithGoogle, provider: 'google'),
+```
+
+---
+
+### 2-3: _handleAuth — 이메일 경로에도 trialCompleted + lastAuthProvider 저장
 
 **파일**: `lib/custom_code/widgets/intro_master.dart`
 
 **앵커 (현재 코드):**
 ```dart
-  /// 통합 소셜 인증: 약관 시트 없이 바로 소셜 로그인 -> 신규면 연령 확인
-  Future<void> _handleUnifiedAuth(Future<dynamic> Function() authFn) async {
-    debugPrint('[Auth] _handleUnifiedAuth enter');
-    setState(() => isLoading = true);
-    try {
-      await _cleanupTrialSandbox();
-      await authFn();
+      if (!isLoginMode) {
+        await _grantSignupBonusIfPossible();
+      }
+      // 가입/로그인 모두 연령 정보 확인 (birthYear 있으면 자동 통과)
 ```
 
 **변경:**
 ```dart
-  /// 통합 소셜 인증: 약관 시트 없이 바로 소셜 로그인 -> 신규면 연령 확인
-  Future<void> _handleUnifiedAuth(Future<dynamic> Function() authFn) async {
-    debugPrint('[Auth] _handleUnifiedAuth enter');
-    setState(() => isLoading = true);
-    // Multi-step auth 동안 GoRouter 자동 네비게이션 억제
-    // (anonymous → custom token → bonus 지급 완료까지 Lobby 이동 방지)
-    AppStateNotifier.instance.updateNotifyOnAuthChange(false);
-    try {
-      await _cleanupTrialSandbox();
-      await authFn();
+      FFAppState().trialCompleted = true;
+      FFAppState().lastAuthProvider = 'email';
+      if (!isLoginMode) {
+        await _grantSignupBonusIfPossible();
+      }
+      // 가입/로그인 모두 연령 정보 확인 (birthYear 있으면 자동 통과)
 ```
 
-그리고 같은 메서드의 **finally 블록**:
+---
 
-**앵커 (현재 코드):**
+### 2-4: _buildAuthView — 재방문 사용자 안내 UI 추가
+
+**파일**: `lib/custom_code/widgets/intro_master.dart`
+
+`_buildAuthView` 메서드를 전면 교체한다. 현재 3개 버튼이 동일 크기로 나열되어 있는데,
+`lastAuthProvider`가 있으면 레이아웃을 변경한다.
+
+**앵커 (현재 코드, 제목 ~ 이메일 버튼 사이 전체):**
 ```dart
-    } finally {
-      if (mounted) setState(() => isLoading = false);
-    }
+          // 제목
+          const Text(
+            '계정으로 계속하기',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              height: 1.32,
+            ),
+          ),
+          const SizedBox(height: 34),
+          // 카카오 버튼
+          SharedSocialButton(
+            label: '카카오톡으로 계속하기',
+            backgroundColor: const Color(0xFFFEE500),
+            textColor: const Color(0xFF191919),
+            icon: Image.asset(
+              'assets/images/kakao_logo.png',
+              width: 20,
+              height: 20,
+              errorBuilder: (_, __, ___) => const Icon(
+                Icons.chat_bubble,
+                size: 20,
+                color: Color(0xFF191919),
+              ),
+            ),
+            onTap: () => _handleUnifiedAuth(SocialAuthService.signInWithKakao),
+          ),
+          const SizedBox(height: 12),
+          // Google 버튼
+          SharedSocialButton(
+            label: 'Google로 계속하기',
+            backgroundColor: Colors.white,
+            textColor: Colors.black87,
+            border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+            icon: Image.asset(
+              'assets/images/google_logo.png',
+              width: 20,
+              height: 20,
+              errorBuilder: (_, __, ___) => const Icon(
+                Icons.g_mobiledata,
+                size: 24,
+                color: Colors.blue,
+              ),
+            ),
+            onTap: () => _handleUnifiedAuth(SocialAuthService.signInWithGoogle),
+          ),
+          const SizedBox(height: 12),
+          // 이메일 버튼
+          SharedSocialButton(
+            label: '이메일로 계속하기',
+            backgroundColor: const Color(0xFF33333A),
+            textColor: Colors.white,
+            icon: const Icon(
+              Icons.email_outlined,
+              size: 20,
+              color: Colors.white70,
+            ),
+            onTap: () => setState(() {
+              _showEmailForm = !_showEmailForm;
+            }),
+          ),
 ```
 
 **변경:**
 ```dart
-    } finally {
-      // GoRouter 알림 복원
-      AppStateNotifier.instance.updateNotifyOnAuthChange(true);
-      if (mounted) setState(() => isLoading = false);
-    }
+          // 제목 + 재방문 안내
+          ..._buildAuthHeader(),
+          const SizedBox(height: 34),
+          // provider 버튼들 (재방문 시 이전 provider 강조)
+          ..._buildProviderButtons(),
 ```
 
-> **효과**: `_handleUnifiedAuth` 전체 실행 동안 GoRouter가 auth 변경에 반응하지 않음.
-> `_checkAgeAndRoute()` → `_routeAfterAuth()` → `context.goNamed('Lobby')`로
-> 보너스 지급 완료 후에만 Lobby로 이동.
-> finally에서 복원하므로 이후 정상 auth 이벤트(로그아웃 등)에는 영향 없음.
+---
+
+### 2-5: _buildAuthHeader 신규 메서드
+
+```dart
+  List<Widget> _buildAuthHeader() {
+    final lastProvider = FFAppState().lastAuthProvider;
+    final providerLabel = switch (lastProvider) {
+      'kakao' => '카카오',
+      'google' => 'Google',
+      'email' => '이메일',
+      _ => '',
+    };
+
+    return [
+      Text(
+        lastProvider.isNotEmpty ? '$providerLabel 계정으로\n계속하기' : '계정으로 계속하기',
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 22,
+          fontWeight: FontWeight.w800,
+          height: 1.32,
+        ),
+      ),
+      if (lastProvider.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        Text(
+          '이전에 $providerLabel 계정으로 가입했습니다',
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: Color(0xFF9C9CA6),
+            fontSize: 13,
+          ),
+        ),
+      ],
+    ];
+  }
+```
+
+---
+
+### 2-6: _buildProviderButtons 신규 메서드
+
+```dart
+  List<Widget> _buildProviderButtons() {
+    final lastProvider = FFAppState().lastAuthProvider;
+
+    // 각 provider 버튼 정의
+    Widget kakaoBtn({bool large = true}) => SharedSocialButton(
+          label: '카카오톡으로 계속하기',
+          backgroundColor: const Color(0xFFFEE500),
+          textColor: const Color(0xFF191919),
+          icon: Image.asset(
+            'assets/images/kakao_logo.png',
+            width: 20,
+            height: 20,
+            errorBuilder: (_, __, ___) => const Icon(
+              Icons.chat_bubble,
+              size: 20,
+              color: Color(0xFF191919),
+            ),
+          ),
+          onTap: () => _handleUnifiedAuth(
+              SocialAuthService.signInWithKakao,
+              provider: 'kakao'),
+        );
+
+    Widget googleBtn({bool large = true}) => SharedSocialButton(
+          label: 'Google로 계속하기',
+          backgroundColor: Colors.white,
+          textColor: Colors.black87,
+          border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+          icon: Image.asset(
+            'assets/images/google_logo.png',
+            width: 20,
+            height: 20,
+            errorBuilder: (_, __, ___) => const Icon(
+              Icons.g_mobiledata,
+              size: 24,
+              color: Colors.blue,
+            ),
+          ),
+          onTap: () => _handleUnifiedAuth(
+              SocialAuthService.signInWithGoogle,
+              provider: 'google'),
+        );
+
+    Widget emailBtn() => SharedSocialButton(
+          label: '이메일로 계속하기',
+          backgroundColor: const Color(0xFF33333A),
+          textColor: Colors.white,
+          icon: const Icon(
+            Icons.email_outlined,
+            size: 20,
+            color: Colors.white70,
+          ),
+          onTap: () => setState(() {
+            _showEmailForm = !_showEmailForm;
+          }),
+        );
+
+    // 이전 provider가 없으면 기본 순서
+    if (lastProvider.isEmpty) {
+      return [
+        kakaoBtn(),
+        const SizedBox(height: 12),
+        googleBtn(),
+        const SizedBox(height: 12),
+        emailBtn(),
+      ];
+    }
+
+    // 이전 provider가 있으면: 해당 버튼을 위에 크게, 나머지는 "다른 계정으로 계속하기" 아래에
+    Widget primaryBtn;
+    List<Widget> secondaryBtns;
+
+    switch (lastProvider) {
+      case 'kakao':
+        primaryBtn = kakaoBtn();
+        secondaryBtns = [googleBtn(), const SizedBox(height: 12), emailBtn()];
+        break;
+      case 'google':
+        primaryBtn = googleBtn();
+        secondaryBtns = [kakaoBtn(), const SizedBox(height: 12), emailBtn()];
+        break;
+      case 'email':
+        primaryBtn = emailBtn();
+        secondaryBtns = [kakaoBtn(), const SizedBox(height: 12), googleBtn()];
+        break;
+      default:
+        primaryBtn = kakaoBtn();
+        secondaryBtns = [googleBtn(), const SizedBox(height: 12), emailBtn()];
+    }
+
+    return [
+      primaryBtn,
+      const SizedBox(height: 24),
+      const Text(
+        '다른 계정으로 계속하기',
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: Color(0xFF9C9CA6),
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      const SizedBox(height: 12),
+      ...secondaryBtns,
+    ];
+  }
+```
 
 ---
 
 ## Phase 3: 검증
 
 ```bash
-# 1. nav.dart 컴파일 확인
-dart format lib/flutter_flow/nav/nav.dart
-flutter analyze lib/flutter_flow/nav/nav.dart
-
-# 2. intro_master.dart 컴파일 확인
+# 1. 컴파일 확인
 dart format lib/custom_code/widgets/intro_master.dart
 flutter analyze lib/custom_code/widgets/intro_master.dart
 
-# 3. loggedIn 변경 확인
-grep -A5 "get loggedIn" lib/flutter_flow/nav/nav.dart
-# 기대: isAnonymous 체크 포함
+# 2. lastAuthProvider 사용 확인
+grep -c "lastAuthProvider" lib/custom_code/widgets/intro_master.dart
+# 기대: 8줄 이상
 
-# 4. update() auto-reset 변경 확인
-grep -B2 -A1 "updateNotifyOnAuthChange" lib/flutter_flow/nav/nav.dart
-# 기대: "if (notifyOnAuthChange)" 조건 안에서만 호출
+# 3. provider 파라미터 전달 확인
+grep "provider: 'kakao'\|provider: 'google'\|provider: 'email'" lib/custom_code/widgets/intro_master.dart
+# 기대: 3줄
 
-# 5. _handleUnifiedAuth 알림 억제 확인
-grep "updateNotifyOnAuthChange" lib/custom_code/widgets/intro_master.dart
-# 기대: 2줄 (false 설정 1줄 + true 복원 1줄)
+# 4. 신규 메서드 존재 확인
+grep "_buildAuthHeader\|_buildProviderButtons" lib/custom_code/widgets/intro_master.dart
+# 기대: 4줄 이상 (정의 2 + 호출 2)
 
-# 6. AppStateNotifier import 확인
-grep "AppStateNotifier" lib/custom_code/widgets/intro_master.dart
-# 기대: 2줄 이상
-
-# 7. FirebaseAuth import 확인 (nav.dart)
-grep "firebase_auth" lib/flutter_flow/nav/nav.dart
-# 기대: 1줄
+# 5. FFAppState lastAuthProvider 존재 확인
+grep "lastAuthProvider" lib/app_state.dart
+# 기대: 3줄 이상 (getter, setter, 초기화)
 ```
 
 ---
@@ -281,37 +500,35 @@ flutter pub get
 flutter build apk --release
 ```
 
-### 테스트 시나리오 (반드시 확인)
+### 테스트 시나리오
 
-**시나리오 A: 신규 카카오 가입**
-1. 앱 데이터 삭제 → 앱 실행 → Welcome
-2. "로그인" → Auth → "카카오톡으로 계속하기"
-3. 카카오 로그인 완료 → birthYear 팝업 → Lobby
-4. **기대**: Lobby 첫 진입부터 05:00 표시 (00:00 아님)
+**시나리오 A: 최초 방문 (lastAuthProvider 없음)**
+1. 앱 데이터 삭제 → 체험 완료 → Auth 화면
+2. **기대**: "계정으로 계속하기" 제목, 3개 버튼 동일 크기
 
-**시나리오 B: 기존 카카오 재로그인**
-1. 앱 데이터 삭제 → 앱 실행 → Auth → 카카오 로그인
-2. **기대**: Lobby 진입 시 기존 잔여시간 표시
+**시나리오 B: 카카오 가입 → 로그아웃 → 재진입**
+1. 카카오로 가입 → Lobby → 로그아웃 → 앱 재실행
+2. **기대**: "카카오 계정으로 계속하기" 제목 + "이전에 카카오 계정으로 가입했습니다" 안내
+3. 카카오 버튼이 위에 크게, 나머지는 "다른 계정으로 계속하기" 아래에
 
-**시나리오 C: 체험 → 가입**
-1. Welcome → "1분 무료 체험" → 대화방 진입 (StealthRoom으로 정상 이동하는지)
-2. 체험 완료 → Auth → 카카오 가입
-3. **기대**: 체험은 정상 동작, 가입 후 Lobby 05:00
+**시나리오 C: Google 가입 → 로그아웃 → 재진입**
+1. 시나리오 B와 동일하되 Google로 진행
+2. **기대**: Google 버튼이 위에 강조
 
-**시나리오 D: 앱 껐다 켜기 (정식 회원)**
-1. 정식 회원 로그인 상태에서 앱 종료 → 재실행
-2. **기대**: 자동 Lobby 진입 (세션 유지, loggedIn=true)
+**시나리오 D: 이메일 가입 → 로그아웃 → 재진입**
+1. 이메일로 가입 → 로그아웃 → 재진입
+2. **기대**: 이메일 버튼이 위에 강조
 
 ---
 
 ## Phase 5: 커밋 및 머지
 
 ```bash
-git add -A && git commit -m "fix: prevent premature Lobby navigation during multi-step auth (00:00 bug)"
+git add -A && git commit -m "feat: show last auth provider on Auth screen for returning users"
 
-# 테스트 통과 후 main 머지
+# 테스트 후
 git checkout main
-git merge fix/lobby-zero-time
+git merge feat/last-auth-provider
 git push origin main
 ```
 
@@ -324,13 +541,3 @@ git checkout main
 git revert HEAD --no-edit
 git push origin main
 ```
-
----
-
-## 수정 영향 범위
-
-| 수정 | 영향 받는 플로우 | 영향 안 받는 플로우 |
-|---|---|---|
-| loggedIn anonymous 제외 | GoRouter 초기 화면 결정 | 체험 (imperative nav), Duo 초대 |
-| update() auto-reset 방지 | 명시적 suppress 시에만 작동 | 일반 로그인/로그아웃 (suppress 안 할 때) |
-| _handleUnifiedAuth 억제 | 소셜 로그인 플로우 | 이메일 로그인, 자동 Lobby 진입 |
