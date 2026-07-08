@@ -15,12 +15,14 @@ class SocialAuthService {
   static final _functions =
       FirebaseFunctions.instanceFor(region: 'us-central1');
 
-  static Future<UserCredential> signInWithKakao() async {
+  static Future<UserCredential> signInWithKakao({
+    bool skipAnonymous = false,
+  }) async {
     try {
       debugPrint(
-          '[KakaoAuth] signInWithKakao start, currentUser=${_auth.currentUser?.uid}, isAnonymous=${_auth.currentUser?.isAnonymous}');
+          '[KakaoAuth] signInWithKakao start, currentUser=${_auth.currentUser?.uid}, isAnonymous=${_auth.currentUser?.isAnonymous}, skipAnonymous=$skipAnonymous');
 
-      if (_auth.currentUser == null) {
+      if (_auth.currentUser == null && !skipAnonymous) {
         debugPrint('[KakaoAuth] signInAnonymously start');
         await _auth.signInAnonymously();
         debugPrint(

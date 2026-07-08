@@ -1014,6 +1014,7 @@ class _IntroMasterState extends State<IntroMaster> {
     String provider = '',
   }) async {
     debugPrint('[Auth] _handleUnifiedAuth enter');
+    final previousAuthProvider = FFAppState().lastAuthProvider;
     setState(() => isLoading = true);
     // Multi-step auth 동안 GoRouter 자동 네비게이션 억제
     // (anonymous -> custom token -> bonus 지급 완료까지 Lobby 이동 방지)
@@ -1027,7 +1028,31 @@ class _IntroMasterState extends State<IntroMaster> {
       }
       debugPrint(
           '[Auth] authFn complete, currentUser=${FirebaseAuth.instance.currentUser?.uid}');
-      await _grantSignupBonusIfPossible();
+      // 이전에 같은 provider로 로그인한 재방문자는 bonus 이미 지급됨 -> 스킵
+      final isReturningUser =
+          provider.isNotEmpty && previousAuthProvider == provider;
+      if (!isReturningUser) {
+        await _grantSignupBonusIfPossible();
+      } else {
+        debugPrint('[Auth] returning user - skip bonus check');
+        // Firestore에서 최신 remainingTime 가져오기
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          try {
+            final doc = await FirebaseFirestore.instance
+                .collection('users')
+                .doc(user.uid)
+                .get();
+            final rt = doc.data()?['remainingTime'] as int?;
+            if (rt != null) {
+              FFAppState().remainingTime = rt;
+              FFAppState().remainingTimeLoaded = true;
+            }
+          } catch (e) {
+            debugPrint('[Auth] returning user time fetch failed: $e');
+          }
+        }
+      }
 
       if (!mounted) return;
       await _checkAgeAndRoute();
