@@ -13,6 +13,7 @@
 
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
+const crypto = require("crypto");
 const { defineSecret } = require("firebase-functions/params");
 const revenueCatWebhookSecret = defineSecret("REVENUECAT_WEBHOOK_SECRET");
 
@@ -661,14 +662,124 @@ exports.linkOrCreateAccount = functions
 
 
 // ----------------------------------------------------------------------------
+// Parent consent email token helpers
+// ----------------------------------------------------------------------------
+const PARENT_CONSENT_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const PARENT_CONSENT_TOKEN_COLLECTION = "parent_consent_tokens";
+
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function maskEmailForLog(email) {
+  const atIndex = email.indexOf("@");
+  if (atIndex <= 1) return "***";
+  return `${email.slice(0, 2)}***${email.slice(atIndex)}`;
+}
+
+function maskTokenForLog(token) {
+  return typeof token === "string" ? `${token.slice(0, 8)}...` : null;
+}
+
+function hashIp(value) {
+  if (!value || typeof value !== "string") return null;
+  return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function renderConsentPage(title, message, type) {
+  const colors = {
+    success: "#2F8F5B",
+    info: "#4A90D9",
+    warning: "#B7791F",
+    error: "#D64545",
+  };
+  const accent = colors[type] || colors.info;
+
+  return `
+    <!DOCTYPE html>
+    <html lang="ko">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>${escapeHtml(title)} - StealthVox</title>
+      <style>
+        * { box-sizing: border-box; }
+        body {
+          margin: 0;
+          min-height: 100vh;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 32px 18px;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          background: #111827;
+          color: #111827;
+        }
+        .card {
+          width: 100%;
+          max-width: 440px;
+          padding: 32px 26px;
+          border-radius: 14px;
+          background: #ffffff;
+          text-align: center;
+          box-shadow: 0 22px 60px rgba(0, 0, 0, 0.28);
+        }
+        .brand {
+          margin: 0 0 18px;
+          color: #6B7280;
+          font-size: 14px;
+          font-weight: 700;
+          letter-spacing: 0;
+        }
+        .mark {
+          width: 48px;
+          height: 48px;
+          margin: 0 auto 18px;
+          border-radius: 50%;
+          background: ${accent};
+        }
+        h1 {
+          margin: 0 0 14px;
+          font-size: 24px;
+          line-height: 1.32;
+          letter-spacing: 0;
+        }
+        p {
+          margin: 0;
+          color: #4B5563;
+          font-size: 16px;
+          line-height: 1.7;
+        }
+      </style>
+    </head>
+    <body>
+      <main class="card">
+        <div class="brand">StealthVox</div>
+        <div class="mark" aria-hidden="true"></div>
+        <h1>${escapeHtml(title)}</h1>
+        <p>${escapeHtml(message)}</p>
+      </main>
+    </body>
+    </html>
+  `;
+}
+
+// ----------------------------------------------------------------------------
 // sendParentConsentEmail
 // Type:   HTTPS Callable
 // Input:  { parentEmail: string }
-// Output: { sent: boolean }
+// Output: { sent: boolean, alreadyApproved?: boolean }
 //
-// 14세 미만 가입자의 보호자에게 동의 요청 이메일을 발송한다.
-// 이메일에 포함된 링크를 클릭하면 confirmParentConsent 엔드포인트가 호출되어
-// Firestore의 parentConsentPending이 false로 업데이트된다.
+// 14세 미만 가입자의 보호자에게 1회성 토큰 기반 동의 요청 이메일을 발송한다.
 // ----------------------------------------------------------------------------
 exports.sendParentConsentEmail = functions
   .region("us-central1")
@@ -680,42 +791,122 @@ exports.sendParentConsentEmail = functions
       );
     }
 
-    const parentEmail = data && data.parentEmail;
-    if (!parentEmail || typeof parentEmail !== "string") {
+    const rawParentEmail = data && data.parentEmail;
+    if (!rawParentEmail || typeof rawParentEmail !== "string") {
       throw new functions.https.HttpsError(
         "invalid-argument",
         "parentEmail is required."
       );
     }
 
+    const parentEmail = rawParentEmail.trim().toLowerCase();
+    if (!isValidEmail(parentEmail)) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "유효한 보호자 이메일을 입력해 주세요."
+      );
+    }
+
     const uid = context.auth.uid;
+    const firestore = admin.firestore();
+    const userRef = firestore.collection("users").doc(uid);
+    const userDoc = await userRef.get();
+
+    if (!userDoc.exists) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "사용자 정보를 찾을 수 없습니다."
+      );
+    }
+
+    const userData = userDoc.data() || {};
+    if (userData.parentConsentPending === false) {
+      functions.logger.info("sendParentConsentEmail: already approved", { uid });
+      return { sent: false, alreadyApproved: true };
+    }
+
+    if (userData.parentConsentPending !== true) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "보호자 동의가 필요한 상태가 아닙니다."
+      );
+    }
+
+    const savedParentEmail =
+      typeof userData.parentEmail === "string"
+        ? userData.parentEmail.trim().toLowerCase()
+        : null;
+
+    if (savedParentEmail && savedParentEmail !== parentEmail) {
+      functions.logger.warn("sendParentConsentEmail: parent email mismatch", {
+        uid,
+        requestedParentEmail: maskEmailForLog(parentEmail),
+        savedParentEmail: maskEmailForLog(savedParentEmail),
+      });
+      throw new functions.https.HttpsError(
+        "permission-denied",
+        "저장된 보호자 이메일과 일치하지 않습니다."
+      );
+    }
+
+    if (!savedParentEmail) {
+      await userRef.set({ parentEmail }, { merge: true });
+      functions.logger.info("sendParentConsentEmail: parent email saved", {
+        uid,
+        parentEmail: maskEmailForLog(parentEmail),
+      });
+    }
+
+    const token = crypto.randomBytes(32).toString("hex");
+    const tokenRef = firestore.collection(PARENT_CONSENT_TOKEN_COLLECTION).doc(token);
+    const expiresAt = admin.firestore.Timestamp.fromMillis(
+      Date.now() + PARENT_CONSENT_TOKEN_TTL_MS
+    );
     const projectId = process.env.GCLOUD_PROJECT || "stealth-vox-3p3rq3";
     const consentUrl =
-      `https://us-central1-${projectId}.cloudfunctions.net/confirmParentConsent?uid=${encodeURIComponent(uid)}`;
+      `https://us-central1-${projectId}.cloudfunctions.net/confirmParentConsent?token=${encodeURIComponent(token)}`;
 
-    const mailRef = admin.firestore().collection("mail").doc();
+    await tokenRef.create({
+      uid,
+      parentEmail,
+      status: "pending",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      expiresAt,
+      approvedAt: null,
+      consumedCount: 0,
+      approvedIpHash: null,
+      userAgent: null,
+      mailDocId: null,
+    });
+
+    const mailRef = firestore.collection("mail").doc();
     await mailRef.set({
-      to: parentEmail,
+      to: [parentEmail],
       message: {
         subject: "StealthVox - 자녀 가입 동의 요청",
         html: `
-          <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 24px;">
-            <h2 style="color: #333;">StealthVox 보호자 동의</h2>
-            <p style="color: #555; line-height: 1.6;">
+          <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px; color: #1f2937;">
+            <h2 style="margin: 0 0 16px; color: #111827;">StealthVox 보호자 동의 안내</h2>
+            <p style="line-height: 1.7; color: #4b5563;">
               자녀가 StealthVox 앱에 가입하려고 합니다.<br>
-              만 14세 미만 사용자는 보호자의 동의가 필요합니다.
+              만 14세 미만 사용자는 보호자 동의가 필요합니다.
             </p>
-            <p style="color: #555; line-height: 1.6;">
-              아래 버튼을 눌러 자녀의 가입에 동의해 주세요.
+            <p style="line-height: 1.7; color: #4b5563;">
+              아래 버튼을 눌러 자녀의 StealthVox 이용에 동의해 주세요.
             </p>
             <a href="${consentUrl}"
-               style="display: inline-block; padding: 14px 32px; background-color: #4A90D9;
-                      color: white; text-decoration: none; border-radius: 8px; font-weight: bold;
-                      margin-top: 16px;">
+               style="display: inline-block; padding: 14px 30px; background-color: #4A90D9;
+                      color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: bold;
+                      margin: 16px 0;">
               동의합니다
             </a>
-            <p style="color: #999; font-size: 12px; margin-top: 24px;">
-              본인이 요청하지 않았다면 이 이메일을 무시하셔도 됩니다.
+            <p style="line-height: 1.7; color: #4b5563;">
+              버튼이 열리지 않으면 아래 링크를 브라우저에 복사해 주세요.<br>
+              <a href="${consentUrl}" style="color: #2563eb; word-break: break-all;">${consentUrl}</a>
+            </p>
+            <p style="line-height: 1.7; color: #6b7280; font-size: 13px;">
+              본인이 요청하지 않았다면 이 이메일을 무시하셔도 됩니다.<br>
+              이 링크는 7일 후 만료됩니다.
             </p>
           </div>
         `,
@@ -723,9 +914,13 @@ exports.sendParentConsentEmail = functions
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
+    await tokenRef.set({ mailDocId: mailRef.id }, { merge: true });
+
     functions.logger.info("sendParentConsentEmail: mail queued", {
-      uid: uid,
-      parentEmail: parentEmail,
+      uid,
+      parentEmail: maskEmailForLog(parentEmail),
+      token: maskTokenForLog(token),
+      mailDocId: mailRef.id,
     });
 
     return { sent: true };
@@ -734,52 +929,213 @@ exports.sendParentConsentEmail = functions
 // ----------------------------------------------------------------------------
 // confirmParentConsent
 // Type:   HTTPS Request (GET)
-// Query:  ?uid=<firebase_uid>
-// Action: Firestore users/{uid}.parentConsentPending = false
-// Response: HTML 확인 페이지
+// Query:  ?token=<random_token>
+// Action: Validates token and grants parent consent on the server only.
+// Response: Mobile-friendly HTML page.
 // ----------------------------------------------------------------------------
 exports.confirmParentConsent = functions
   .region("us-central1")
   .https.onRequest(async (req, res) => {
-    const uid = req.query.uid;
-    if (!uid || typeof uid !== "string") {
-      res.status(400).send("<h1>잘못된 요청입니다.</h1>");
+    res.set("Content-Type", "text/html; charset=utf-8");
+
+    if (req.method !== "GET") {
+      res.status(405).send(renderConsentPage(
+        "유효하지 않은 동의 링크입니다",
+        "허용되지 않은 요청 방식입니다.",
+        "error"
+      ));
       return;
     }
 
-    try {
-      const userRef = admin.firestore().collection("users").doc(uid);
-      const userDoc = await userRef.get();
+    if (req.query.uid) {
+      res.status(400).send(renderConsentPage(
+        "유효하지 않은 동의 링크입니다",
+        "앱에서 보호자 동의 메일을 다시 요청해 주세요.",
+        "error"
+      ));
+      return;
+    }
 
-      if (!userDoc.exists) {
-        res.status(404).send("<h1>사용자를 찾을 수 없습니다.</h1>");
+    const token = req.query.token;
+    if (!token || typeof token !== "string" || token.length < 64) {
+      res.status(400).send(renderConsentPage(
+        "유효하지 않은 동의 링크입니다",
+        "앱에서 보호자 동의 메일을 다시 요청해 주세요.",
+        "error"
+      ));
+      return;
+    }
+
+    const firestore = admin.firestore();
+    const tokenRef = firestore.collection(PARENT_CONSENT_TOKEN_COLLECTION).doc(token);
+
+    try {
+      const tokenDoc = await tokenRef.get();
+      if (!tokenDoc.exists) {
+        res.status(404).send(renderConsentPage(
+          "유효하지 않은 동의 링크입니다",
+          "앱에서 보호자 동의 메일을 다시 요청해 주세요.",
+          "error"
+        ));
         return;
       }
 
-      await userRef.update({ parentConsentPending: false });
+      const tokenData = tokenDoc.data() || {};
+      const expiresAt = tokenData.expiresAt;
+      const now = admin.firestore.Timestamp.now();
+
+      if (!expiresAt || expiresAt.toMillis() <= now.toMillis()) {
+        await tokenRef.set({ status: "expired" }, { merge: true });
+        res.status(410).send(renderConsentPage(
+          "동의 링크가 만료되었습니다",
+          "앱에서 보호자 동의 메일을 다시 요청해 주세요.",
+          "warning"
+        ));
+        return;
+      }
+
+      if (tokenData.status === "approved") {
+        res.status(200).send(renderConsentPage(
+          "이미 동의가 완료되었습니다",
+          "StealthVox 자녀 계정 이용 동의가 이미 완료되었습니다.",
+          "info"
+        ));
+        return;
+      }
+
+      if (tokenData.status !== "pending") {
+        res.status(400).send(renderConsentPage(
+          "유효하지 않은 동의 링크입니다",
+          "사용할 수 없는 동의 링크입니다.",
+          "error"
+        ));
+        return;
+      }
+
+      const uid = tokenData.uid;
+      if (!uid || typeof uid !== "string") {
+        res.status(400).send(renderConsentPage(
+          "유효하지 않은 동의 링크입니다",
+          "사용자 정보를 확인할 수 없습니다.",
+          "error"
+        ));
+        return;
+      }
+
+      const userRef = firestore.collection("users").doc(uid);
+      const userDoc = await userRef.get();
+      if (!userDoc.exists) {
+        res.status(404).send(renderConsentPage(
+          "사용자 정보를 찾을 수 없습니다",
+          "앱에서 보호자 동의 메일을 다시 요청해 주세요.",
+          "error"
+        ));
+        return;
+      }
+
+      const userAgent = req.headers["user-agent"] || null;
+      const forwardedFor = req.headers["x-forwarded-for"];
+      const rawIp = Array.isArray(forwardedFor)
+        ? forwardedFor[0]
+        : (forwardedFor || req.ip || null);
+      const approvedIpHash = hashIp(rawIp);
+
+      await firestore.runTransaction(async (transaction) => {
+        const freshTokenDoc = await transaction.get(tokenRef);
+        if (!freshTokenDoc.exists) {
+          throw new Error("token-not-found");
+        }
+
+        const freshTokenData = freshTokenDoc.data() || {};
+        const freshExpiresAt = freshTokenData.expiresAt;
+        if (!freshExpiresAt || freshExpiresAt.toMillis() <= Date.now()) {
+          transaction.set(tokenRef, { status: "expired" }, { merge: true });
+          throw new Error("token-expired");
+        }
+
+        if (freshTokenData.status === "approved") {
+          throw new Error("token-approved");
+        }
+        if (freshTokenData.status !== "pending") {
+          throw new Error("token-not-pending");
+        }
+
+        const freshUserRef = firestore.collection("users").doc(freshTokenData.uid);
+        const freshUserDoc = await transaction.get(freshUserRef);
+        if (!freshUserDoc.exists) {
+          throw new Error("user-not-found");
+        }
+
+        transaction.set(freshUserRef, {
+          parentConsentPending: false,
+          parentConsentGrantedAt: admin.firestore.FieldValue.serverTimestamp(),
+          parentConsentMethod: "email_link",
+          parentConsentEmail: freshTokenData.parentEmail || null,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+
+        transaction.set(tokenRef, {
+          status: "approved",
+          approvedAt: admin.firestore.FieldValue.serverTimestamp(),
+          consumedCount: admin.firestore.FieldValue.increment(1),
+          userAgent,
+          approvedIpHash,
+        }, { merge: true });
+      });
 
       functions.logger.info("confirmParentConsent: consent granted", {
-        uid: uid,
+        uid,
+        token: maskTokenForLog(token),
       });
 
-      res.status(200).send(`
-        <!DOCTYPE html>
-        <html>
-        <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
-        <body style="font-family: sans-serif; text-align: center; padding: 60px 24px;">
-          <h1 style="color: #4A90D9;">동의가 완료되었습니다</h1>
-          <p style="color: #555; font-size: 16px; line-height: 1.6;">
-            자녀의 StealthVox 가입이 승인되었습니다.<br>
-            이 페이지를 닫아도 됩니다.
-          </p>
-        </body>
-        </html>
-      `);
+      res.status(200).send(renderConsentPage(
+        "보호자 동의가 완료되었습니다",
+        "StealthVox 자녀 계정 이용 동의가 완료되었습니다. 이제 앱에서 정상 이용할 수 있습니다.",
+        "success"
+      ));
     } catch (e) {
+      const code = e && e.message;
+      if (code === "token-expired") {
+        res.status(410).send(renderConsentPage(
+          "동의 링크가 만료되었습니다",
+          "앱에서 보호자 동의 메일을 다시 요청해 주세요.",
+          "warning"
+        ));
+        return;
+      }
+      if (code === "token-approved") {
+        res.status(200).send(renderConsentPage(
+          "이미 동의가 완료되었습니다",
+          "StealthVox 자녀 계정 이용 동의가 이미 완료되었습니다.",
+          "info"
+        ));
+        return;
+      }
+      if (code === "token-not-found" || code === "token-not-pending") {
+        res.status(400).send(renderConsentPage(
+          "유효하지 않은 동의 링크입니다",
+          "앱에서 보호자 동의 메일을 다시 요청해 주세요.",
+          "error"
+        ));
+        return;
+      }
+      if (code === "user-not-found") {
+        res.status(404).send(renderConsentPage(
+          "사용자 정보를 찾을 수 없습니다",
+          "앱에서 보호자 동의 메일을 다시 요청해 주세요.",
+          "error"
+        ));
+        return;
+      }
+
       functions.logger.error("confirmParentConsent: error", {
-        uid: uid,
+        token: maskTokenForLog(token),
         error: String(e),
       });
-      res.status(500).send("<h1>오류가 발생했습니다. 다시 시도해 주세요.</h1>");
+      res.status(500).send(renderConsentPage(
+        "일시적인 오류가 발생했습니다",
+        "잠시 후 다시 시도해 주세요.",
+        "error"
+      ));
     }
   });

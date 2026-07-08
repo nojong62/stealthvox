@@ -13,13 +13,33 @@ service cloud.firestore {
     // User profile and user-owned subcollections.
     match /users/{uid} {
       allow read: if isOwner(uid);
-      allow create: if isOwner(uid);
+      allow create: if isOwner(uid)
+        && !request.resource.data.keys().hasAny([
+          'remainingTime',
+          'remaining_seconds',
+          'parentConsentGrantedAt',
+          'parentConsentMethod',
+          'parentConsentEmail'
+        ])
+        && (
+          !request.resource.data.keys().hasAny(['parentConsentPending'])
+          || request.resource.data.parentConsentPending == true
+        );
 
-      // remainingTime and remaining_seconds are server-owned billing fields.
+      // remainingTime, remaining_seconds, and consent approval fields are server-owned.
       allow update: if isOwner(uid)
         && !request.resource.data.diff(resource.data).affectedKeys()
-          .hasAny(['remainingTime', 'remaining_seconds']);
-
+          .hasAny([
+            'remainingTime',
+            'remaining_seconds',
+            'parentConsentGrantedAt',
+            'parentConsentMethod',
+            'parentConsentEmail'
+          ])
+        && (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['parentConsentPending'])
+          || request.resource.data.parentConsentPending == true
+        );
       allow delete: if false;
 
       match /chat_history/{docId} {
