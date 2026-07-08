@@ -47,274 +47,30 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-# 지시문 8: 재방문 사용자 안내 — lastAuthProvider + Auth 화면 개선
+# 지시문 9: Auth 화면 문구 정리 + 탄생년 범위 확장
 
 ## 목적
-1. 로그인 성공 시 사용한 provider를 SharedPreferences에 저장
-2. Auth 화면 재진입 시 "이전에 카카오로 가입했습니다" 안내 + 해당 버튼 강조
-3. 이메일 로그인/가입 시에도 `trialCompleted = true` + `lastAuthProvider` 저장
+1. 재방문 시 제목 중복 제거: "카카오 계정으로 계속하기" + "이전에 카카오 계정으로 가입했습니다" → "이전에..." 안내만 남기고 제목은 "계정으로 계속하기"로 통일
+2. 탄생년 선택 범위를 1966년(currentYear-60)에서 1940년까지 확장
 
 ## 대상 파일
-- **수정**: `lib/custom_code/widgets/intro_master.dart` (3곳)
-
-## 선행 조건
-- ✅ 지시문 1~7 완료
-
----
-
-## Phase 0: 사전 진단
-
-```bash
-# 1. lastAuthProvider 사용 여부 (아직 없어야 함)
-grep -n "lastAuthProvider" lib/custom_code/widgets/intro_master.dart
-# 기대: 0줄
-
-# 2. FFAppState에 lastAuthProvider 필드가 있는지 확인
-grep -rn "lastAuthProvider" lib/
-# 없으면 FFAppState에 추가 필요
-
-# 3. _handleUnifiedAuth에서 authFn 호출 직후 위치 확인
-grep -n "await authFn()" lib/custom_code/widgets/intro_master.dart
-
-# 4. _handleAuth에서 _checkAgeAndRoute 호출 위치 확인
-grep -n "_checkAgeAndRoute" lib/custom_code/widgets/intro_master.dart
-```
-
-> **Phase 0 결과에 따른 분기**:
-> `FFAppState`에 `lastAuthProvider` 필드가 없으면 먼저 추가해야 한다.
-> `FFAppState`는 SharedPreferences 기반이므로 `String` 타입 필드를 추가한다.
-> 
-> ```bash
-> grep -n "class FFAppState" lib/app_state.dart
-> grep -n "trialCompleted" lib/app_state.dart
-> ```
->
-> `trialCompleted`가 정의된 방식과 동일하게 `lastAuthProvider`를 추가한다.
-> (getter/setter + SharedPreferences 읽기/쓰기)
->
-> 값: `'kakao'` | `'google'` | `'email'` | `''` (미설정)
+- **수정**: `lib/custom_code/widgets/intro_master.dart` (2곳)
 
 ---
 
 ## Phase 1: Savepoint
 
 ```bash
-git checkout -b feat/last-auth-provider
-git add -A && git commit -m "savepoint: before lastAuthProvider feature"
+git add -A && git commit -m "savepoint: before auth title + birthYear range fix"
 ```
 
 ---
 
 ## Phase 2: 수정
 
-### 2-0: FFAppState에 lastAuthProvider 추가 (Phase 0에서 없는 경우)
-
-**파일**: `lib/app_state.dart`
-
-`trialCompleted` 필드와 동일한 패턴으로 추가:
-
-```dart
-// SharedPreferences key
-static const String _kLastAuthProvider = 'ff_lastAuthProvider';
-
-String _lastAuthProvider = '';
-String get lastAuthProvider => _lastAuthProvider;
-set lastAuthProvider(String val) {
-  _lastAuthProvider = val;
-  _safePrefs((prefs) => prefs.setString(_kLastAuthProvider, val));
-}
-```
-
-그리고 `initializePersistedState()` 또는 유사한 초기화 메서드에:
-```dart
-_lastAuthProvider = prefs.getString(_kLastAuthProvider) ?? '';
-```
-
-> **주의**: FFAppState의 정확한 구조는 프로젝트마다 다르다.
-> Phase 0에서 `trialCompleted`의 패턴을 grep으로 확인하고 동일하게 따라야 한다.
-> `_safePrefs` 같은 헬퍼가 없으면 직접 `SharedPreferences.getInstance()`를 사용.
-
----
-
-### 2-1: _handleUnifiedAuth — lastAuthProvider 저장
-
-**파일**: `lib/custom_code/widgets/intro_master.dart`
-
-소셜 로그인 시 어떤 provider를 썼는지 알아야 하므로, `_handleUnifiedAuth`에 provider 이름 파라미터를 추가한다.
+### 수정 1: _buildAuthHeader — 제목 중복 제거
 
 **앵커 (현재 코드):**
-```dart
-  Future<void> _handleUnifiedAuth(Future<dynamic> Function() authFn) async {
-```
-
-**변경:**
-```dart
-  Future<void> _handleUnifiedAuth(
-    Future<dynamic> Function() authFn, {
-    String provider = '',
-  }) async {
-```
-
-그리고 `trialCompleted = true` 바로 다음 줄에 추가:
-
-**앵커 (현재 코드):**
-```dart
-      await authFn();
-      FFAppState().trialCompleted = true;
-```
-
-**변경:**
-```dart
-      await authFn();
-      FFAppState().trialCompleted = true;
-      if (provider.isNotEmpty) {
-        FFAppState().lastAuthProvider = provider;
-      }
-```
-
----
-
-### 2-2: _buildAuthView — provider 파라미터 전달 + 호출부 수정
-
-**파일**: `lib/custom_code/widgets/intro_master.dart`
-
-카카오 버튼 onTap:
-
-**앵커:**
-```dart
-            onTap: () => _handleUnifiedAuth(SocialAuthService.signInWithKakao),
-```
-
-**변경:**
-```dart
-            onTap: () => _handleUnifiedAuth(SocialAuthService.signInWithKakao, provider: 'kakao'),
-```
-
-Google 버튼 onTap:
-
-**앵커:**
-```dart
-            onTap: () => _handleUnifiedAuth(SocialAuthService.signInWithGoogle),
-```
-
-**변경:**
-```dart
-            onTap: () => _handleUnifiedAuth(SocialAuthService.signInWithGoogle, provider: 'google'),
-```
-
----
-
-### 2-3: _handleAuth — 이메일 경로에도 trialCompleted + lastAuthProvider 저장
-
-**파일**: `lib/custom_code/widgets/intro_master.dart`
-
-**앵커 (현재 코드):**
-```dart
-      if (!isLoginMode) {
-        await _grantSignupBonusIfPossible();
-      }
-      // 가입/로그인 모두 연령 정보 확인 (birthYear 있으면 자동 통과)
-```
-
-**변경:**
-```dart
-      FFAppState().trialCompleted = true;
-      FFAppState().lastAuthProvider = 'email';
-      if (!isLoginMode) {
-        await _grantSignupBonusIfPossible();
-      }
-      // 가입/로그인 모두 연령 정보 확인 (birthYear 있으면 자동 통과)
-```
-
----
-
-### 2-4: _buildAuthView — 재방문 사용자 안내 UI 추가
-
-**파일**: `lib/custom_code/widgets/intro_master.dart`
-
-`_buildAuthView` 메서드를 전면 교체한다. 현재 3개 버튼이 동일 크기로 나열되어 있는데,
-`lastAuthProvider`가 있으면 레이아웃을 변경한다.
-
-**앵커 (현재 코드, 제목 ~ 이메일 버튼 사이 전체):**
-```dart
-          // 제목
-          const Text(
-            '계정으로 계속하기',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 22,
-              fontWeight: FontWeight.w800,
-              height: 1.32,
-            ),
-          ),
-          const SizedBox(height: 34),
-          // 카카오 버튼
-          SharedSocialButton(
-            label: '카카오톡으로 계속하기',
-            backgroundColor: const Color(0xFFFEE500),
-            textColor: const Color(0xFF191919),
-            icon: Image.asset(
-              'assets/images/kakao_logo.png',
-              width: 20,
-              height: 20,
-              errorBuilder: (_, __, ___) => const Icon(
-                Icons.chat_bubble,
-                size: 20,
-                color: Color(0xFF191919),
-              ),
-            ),
-            onTap: () => _handleUnifiedAuth(SocialAuthService.signInWithKakao),
-          ),
-          const SizedBox(height: 12),
-          // Google 버튼
-          SharedSocialButton(
-            label: 'Google로 계속하기',
-            backgroundColor: Colors.white,
-            textColor: Colors.black87,
-            border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
-            icon: Image.asset(
-              'assets/images/google_logo.png',
-              width: 20,
-              height: 20,
-              errorBuilder: (_, __, ___) => const Icon(
-                Icons.g_mobiledata,
-                size: 24,
-                color: Colors.blue,
-              ),
-            ),
-            onTap: () => _handleUnifiedAuth(SocialAuthService.signInWithGoogle),
-          ),
-          const SizedBox(height: 12),
-          // 이메일 버튼
-          SharedSocialButton(
-            label: '이메일로 계속하기',
-            backgroundColor: const Color(0xFF33333A),
-            textColor: Colors.white,
-            icon: const Icon(
-              Icons.email_outlined,
-              size: 20,
-              color: Colors.white70,
-            ),
-            onTap: () => setState(() {
-              _showEmailForm = !_showEmailForm;
-            }),
-          ),
-```
-
-**변경:**
-```dart
-          // 제목 + 재방문 안내
-          ..._buildAuthHeader(),
-          const SizedBox(height: 34),
-          // provider 버튼들 (재방문 시 이전 provider 강조)
-          ..._buildProviderButtons(),
-```
-
----
-
-### 2-5: _buildAuthHeader 신규 메서드
-
 ```dart
   List<Widget> _buildAuthHeader() {
     final lastProvider = FFAppState().lastAuthProvider;
@@ -351,117 +107,101 @@ Google 버튼 onTap:
   }
 ```
 
----
-
-### 2-6: _buildProviderButtons 신규 메서드
-
+**변경:**
 ```dart
-  List<Widget> _buildProviderButtons() {
+  List<Widget> _buildAuthHeader() {
     final lastProvider = FFAppState().lastAuthProvider;
-
-    // 각 provider 버튼 정의
-    Widget kakaoBtn({bool large = true}) => SharedSocialButton(
-          label: '카카오톡으로 계속하기',
-          backgroundColor: const Color(0xFFFEE500),
-          textColor: const Color(0xFF191919),
-          icon: Image.asset(
-            'assets/images/kakao_logo.png',
-            width: 20,
-            height: 20,
-            errorBuilder: (_, __, ___) => const Icon(
-              Icons.chat_bubble,
-              size: 20,
-              color: Color(0xFF191919),
-            ),
-          ),
-          onTap: () => _handleUnifiedAuth(
-              SocialAuthService.signInWithKakao,
-              provider: 'kakao'),
-        );
-
-    Widget googleBtn({bool large = true}) => SharedSocialButton(
-          label: 'Google로 계속하기',
-          backgroundColor: Colors.white,
-          textColor: Colors.black87,
-          border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
-          icon: Image.asset(
-            'assets/images/google_logo.png',
-            width: 20,
-            height: 20,
-            errorBuilder: (_, __, ___) => const Icon(
-              Icons.g_mobiledata,
-              size: 24,
-              color: Colors.blue,
-            ),
-          ),
-          onTap: () => _handleUnifiedAuth(
-              SocialAuthService.signInWithGoogle,
-              provider: 'google'),
-        );
-
-    Widget emailBtn() => SharedSocialButton(
-          label: '이메일로 계속하기',
-          backgroundColor: const Color(0xFF33333A),
-          textColor: Colors.white,
-          icon: const Icon(
-            Icons.email_outlined,
-            size: 20,
-            color: Colors.white70,
-          ),
-          onTap: () => setState(() {
-            _showEmailForm = !_showEmailForm;
-          }),
-        );
-
-    // 이전 provider가 없으면 기본 순서
-    if (lastProvider.isEmpty) {
-      return [
-        kakaoBtn(),
-        const SizedBox(height: 12),
-        googleBtn(),
-        const SizedBox(height: 12),
-        emailBtn(),
-      ];
-    }
-
-    // 이전 provider가 있으면: 해당 버튼을 위에 크게, 나머지는 "다른 계정으로 계속하기" 아래에
-    Widget primaryBtn;
-    List<Widget> secondaryBtns;
-
-    switch (lastProvider) {
-      case 'kakao':
-        primaryBtn = kakaoBtn();
-        secondaryBtns = [googleBtn(), const SizedBox(height: 12), emailBtn()];
-        break;
-      case 'google':
-        primaryBtn = googleBtn();
-        secondaryBtns = [kakaoBtn(), const SizedBox(height: 12), emailBtn()];
-        break;
-      case 'email':
-        primaryBtn = emailBtn();
-        secondaryBtns = [kakaoBtn(), const SizedBox(height: 12), googleBtn()];
-        break;
-      default:
-        primaryBtn = kakaoBtn();
-        secondaryBtns = [googleBtn(), const SizedBox(height: 12), emailBtn()];
-    }
+    final providerLabel = switch (lastProvider) {
+      'kakao' => '카카오',
+      'google' => 'Google',
+      'email' => '이메일',
+      _ => '',
+    };
 
     return [
-      primaryBtn,
-      const SizedBox(height: 24),
       const Text(
-        '다른 계정으로 계속하기',
+        '계정으로 계속하기',
         textAlign: TextAlign.center,
         style: TextStyle(
-          color: Color(0xFF9C9CA6),
-          fontSize: 13,
-          fontWeight: FontWeight.w600,
+          color: Colors.white,
+          fontSize: 22,
+          fontWeight: FontWeight.w800,
+          height: 1.32,
         ),
       ),
-      const SizedBox(height: 12),
-      ...secondaryBtns,
+      if (lastProvider.isNotEmpty) ...[
+        const SizedBox(height: 10),
+        Text(
+          '이전에 $providerLabel 계정으로 가입했습니다',
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: Color(0xFF9C9CA6),
+            fontSize: 13,
+          ),
+        ),
+      ],
     ];
   }
+```
+
+> **변경 포인트**: 제목은 항상 "계정으로 계속하기" 고정, lastProvider가 있으면 그 아래에 "이전에 카카오 계정으로 가입했습니다" 안내만 추가.
+
+---
+
+### 수정 2: _showBirthYearDialog — 탄생년 범위 1940년까지 확장
+
+**앵커 (현재 코드, _showBirthYearDialog 내부에서 3곳):**
+
+첫째, initialItem 계산:
+```dart
+                  controller: FixedExtentScrollController(
+                    initialItem: 40, // currentYear-60 기준 +40 → 약 20세
+                  ),
+```
+
+**변경:**
+```dart
+                  controller: FixedExtentScrollController(
+                    initialItem: currentYear - 1940 - 20, // 기본값: 약 20세
+                  ),
+```
+
+둘째, 연도 범위 하한:
+```dart
+                      final year = (currentYear - 60) + index;
+                      if (year < currentYear - 60 || year > currentYear - 4) {
+```
+
+**변경:**
+```dart
+                      final year = 1940 + index;
+                      if (year < 1940 || year > currentYear - 4) {
+```
+
+셋째, childCount:
+```dart
+                    childCount: 57, // currentYear-60 ~ currentYear-4
+```
+
+**변경:**
+```dart
+                    childCount: currentYear - 4 - 1940 + 1, // 1940 ~ currentYear-4
+```
+
+넷째, onSelectedItemChanged:
+```dart
+                  onSelectedItemChanged: (index) {
+                    setDialogState(
+                        () => selectedYear = (currentYear - 60) + index);
+                  },
+```
+
+**변경:**
+```dart
+                  onSelectedItemChanged: (index) {
+                    setDialogState(
+                        () => selectedYear = 1940 + index);
+                  },
 ```
 
 ---
@@ -469,75 +209,25 @@ Google 버튼 onTap:
 ## Phase 3: 검증
 
 ```bash
-# 1. 컴파일 확인
 dart format lib/custom_code/widgets/intro_master.dart
 flutter analyze lib/custom_code/widgets/intro_master.dart
 
-# 2. lastAuthProvider 사용 확인
-grep -c "lastAuthProvider" lib/custom_code/widgets/intro_master.dart
-# 기대: 8줄 이상
+# 중복 제목 제거 확인
+grep "providerLabel.*계정으로.*계속하기" lib/custom_code/widgets/intro_master.dart
+# 기대: 0줄 (provider 이름이 제목에 안 들어감)
 
-# 3. provider 파라미터 전달 확인
-grep "provider: 'kakao'\|provider: 'google'\|provider: 'email'" lib/custom_code/widgets/intro_master.dart
-# 기대: 3줄
-
-# 4. 신규 메서드 존재 확인
-grep "_buildAuthHeader\|_buildProviderButtons" lib/custom_code/widgets/intro_master.dart
-# 기대: 4줄 이상 (정의 2 + 호출 2)
-
-# 5. FFAppState lastAuthProvider 존재 확인
-grep "lastAuthProvider" lib/app_state.dart
-# 기대: 3줄 이상 (getter, setter, 초기화)
+# 1940 적용 확인
+grep "1940" lib/custom_code/widgets/intro_master.dart
+# 기대: 3줄 이상
 ```
 
 ---
 
-## Phase 4: 빌드 및 테스트
+## Phase 4: 커밋 및 머지
 
 ```bash
-flutter clean
-flutter pub get
-flutter build apk --release
-```
-
-### 테스트 시나리오
-
-**시나리오 A: 최초 방문 (lastAuthProvider 없음)**
-1. 앱 데이터 삭제 → 체험 완료 → Auth 화면
-2. **기대**: "계정으로 계속하기" 제목, 3개 버튼 동일 크기
-
-**시나리오 B: 카카오 가입 → 로그아웃 → 재진입**
-1. 카카오로 가입 → Lobby → 로그아웃 → 앱 재실행
-2. **기대**: "카카오 계정으로 계속하기" 제목 + "이전에 카카오 계정으로 가입했습니다" 안내
-3. 카카오 버튼이 위에 크게, 나머지는 "다른 계정으로 계속하기" 아래에
-
-**시나리오 C: Google 가입 → 로그아웃 → 재진입**
-1. 시나리오 B와 동일하되 Google로 진행
-2. **기대**: Google 버튼이 위에 강조
-
-**시나리오 D: 이메일 가입 → 로그아웃 → 재진입**
-1. 이메일로 가입 → 로그아웃 → 재진입
-2. **기대**: 이메일 버튼이 위에 강조
-
----
-
-## Phase 5: 커밋 및 머지
-
-```bash
-git add -A && git commit -m "feat: show last auth provider on Auth screen for returning users"
-
-# 테스트 후
+git add -A && git commit -m "fix: simplify auth title, extend birthYear range to 1940"
 git checkout main
-git merge feat/last-auth-provider
-git push origin main
-```
-
----
-
-## Phase 6: 롤백 (문제 발생 시)
-
-```bash
-git checkout main
-git revert HEAD --no-edit
+git merge fix/intro-auth-gates  # 또는 현재 브랜치 이름
 git push origin main
 ```
