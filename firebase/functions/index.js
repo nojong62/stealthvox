@@ -659,3 +659,127 @@ exports.linkOrCreateAccount = functions
     return { token: token, isNewUser: true };
   });
 
+
+// ----------------------------------------------------------------------------
+// sendParentConsentEmail
+// Type:   HTTPS Callable
+// Input:  { parentEmail: string }
+// Output: { sent: boolean }
+//
+// 14세 미만 가입자의 보호자에게 동의 요청 이메일을 발송한다.
+// 이메일에 포함된 링크를 클릭하면 confirmParentConsent 엔드포인트가 호출되어
+// Firestore의 parentConsentPending이 false로 업데이트된다.
+// ----------------------------------------------------------------------------
+exports.sendParentConsentEmail = functions
+  .region("us-central1")
+  .https.onCall(async (data, context) => {
+    if (!context.auth || !context.auth.uid) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "로그인이 필요합니다."
+      );
+    }
+
+    const parentEmail = data && data.parentEmail;
+    if (!parentEmail || typeof parentEmail !== "string") {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "parentEmail is required."
+      );
+    }
+
+    const uid = context.auth.uid;
+    const projectId = process.env.GCLOUD_PROJECT || "stealth-vox-3p3rq3";
+    const consentUrl =
+      `https://us-central1-${projectId}.cloudfunctions.net/confirmParentConsent?uid=${encodeURIComponent(uid)}`;
+
+    const mailRef = admin.firestore().collection("mail").doc();
+    await mailRef.set({
+      to: parentEmail,
+      message: {
+        subject: "StealthVox - 자녀 가입 동의 요청",
+        html: `
+          <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 24px;">
+            <h2 style="color: #333;">StealthVox 보호자 동의</h2>
+            <p style="color: #555; line-height: 1.6;">
+              자녀가 StealthVox 앱에 가입하려고 합니다.<br>
+              만 14세 미만 사용자는 보호자의 동의가 필요합니다.
+            </p>
+            <p style="color: #555; line-height: 1.6;">
+              아래 버튼을 눌러 자녀의 가입에 동의해 주세요.
+            </p>
+            <a href="${consentUrl}"
+               style="display: inline-block; padding: 14px 32px; background-color: #4A90D9;
+                      color: white; text-decoration: none; border-radius: 8px; font-weight: bold;
+                      margin-top: 16px;">
+              동의합니다
+            </a>
+            <p style="color: #999; font-size: 12px; margin-top: 24px;">
+              본인이 요청하지 않았다면 이 이메일을 무시하셔도 됩니다.
+            </p>
+          </div>
+        `,
+      },
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    functions.logger.info("sendParentConsentEmail: mail queued", {
+      uid: uid,
+      parentEmail: parentEmail,
+    });
+
+    return { sent: true };
+  });
+
+// ----------------------------------------------------------------------------
+// confirmParentConsent
+// Type:   HTTPS Request (GET)
+// Query:  ?uid=<firebase_uid>
+// Action: Firestore users/{uid}.parentConsentPending = false
+// Response: HTML 확인 페이지
+// ----------------------------------------------------------------------------
+exports.confirmParentConsent = functions
+  .region("us-central1")
+  .https.onRequest(async (req, res) => {
+    const uid = req.query.uid;
+    if (!uid || typeof uid !== "string") {
+      res.status(400).send("<h1>잘못된 요청입니다.</h1>");
+      return;
+    }
+
+    try {
+      const userRef = admin.firestore().collection("users").doc(uid);
+      const userDoc = await userRef.get();
+
+      if (!userDoc.exists) {
+        res.status(404).send("<h1>사용자를 찾을 수 없습니다.</h1>");
+        return;
+      }
+
+      await userRef.update({ parentConsentPending: false });
+
+      functions.logger.info("confirmParentConsent: consent granted", {
+        uid: uid,
+      });
+
+      res.status(200).send(`
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+        <body style="font-family: sans-serif; text-align: center; padding: 60px 24px;">
+          <h1 style="color: #4A90D9;">동의가 완료되었습니다</h1>
+          <p style="color: #555; font-size: 16px; line-height: 1.6;">
+            자녀의 StealthVox 가입이 승인되었습니다.<br>
+            이 페이지를 닫아도 됩니다.
+          </p>
+        </body>
+        </html>
+      `);
+    } catch (e) {
+      functions.logger.error("confirmParentConsent: error", {
+        uid: uid,
+        error: String(e),
+      });
+      res.status(500).send("<h1>오류가 발생했습니다. 다시 시도해 주세요.</h1>");
+    }
+  });
