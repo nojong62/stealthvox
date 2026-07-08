@@ -47,187 +47,515 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-# 지시문 9: Auth 화면 문구 정리 + 탄생년 범위 확장
+# 지시문 10: 체험 완료 기준 — Anyone 1분 완료 시 trialCompleted = true
 
 ## 목적
-1. 재방문 시 제목 중복 제거: "카카오 계정으로 계속하기" + "이전에 카카오 계정으로 가입했습니다" → "이전에..." 안내만 남기고 제목은 "계정으로 계속하기"로 통일
-2. 탄생년 선택 범위를 1966년(currentYear-60)에서 1940년까지 확장
+현재 `trialCompleted = true`는 가입 시점에서만 찍힌다.
+대화방 Anyone 1분 완료 시점에도 찍어야, 공부방 중간 이탈 → 앱 재실행 시
+Welcome(체험 버튼)이 아닌 Auth 화면이 뜬다.
 
 ## 대상 파일
-- **수정**: `lib/custom_code/widgets/intro_master.dart` (2곳)
+- **수정**: `lib/custom_code/widgets/routine_mode_anyone.dart` (1곳)
 
 ---
 
 ## Phase 1: Savepoint
 
 ```bash
-git add -A && git commit -m "savepoint: before auth title + birthYear range fix"
+git checkout -b fix/trial-completed-timing
+git add -A && git commit -m "savepoint: before trialCompleted timing fix"
 ```
-
----
 
 ## Phase 2: 수정
 
-### 수정 1: _buildAuthHeader — 제목 중복 제거
+**앵커 — `_handleTrialEnd` 메서드 시작 (현재 1542줄):**
 
-**앵커 (현재 코드):**
 ```dart
-  List<Widget> _buildAuthHeader() {
-    final lastProvider = FFAppState().lastAuthProvider;
-    final providerLabel = switch (lastProvider) {
-      'kakao' => '카카오',
-      'google' => 'Google',
-      'email' => '이메일',
-      _ => '',
-    };
-
-    return [
-      Text(
-        lastProvider.isNotEmpty ? '$providerLabel 계정으로\n계속하기' : '계정으로 계속하기',
-        textAlign: TextAlign.center,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 22,
-          fontWeight: FontWeight.w800,
-          height: 1.32,
-        ),
-      ),
-      if (lastProvider.isNotEmpty) ...[
-        const SizedBox(height: 8),
-        Text(
-          '이전에 $providerLabel 계정으로 가입했습니다',
-          textAlign: TextAlign.center,
-          style: const TextStyle(
-            color: Color(0xFF9C9CA6),
-            fontSize: 13,
-          ),
-        ),
-      ],
-    ];
-  }
+  Future<void> _handleTrialEnd() async {
+    if (!trialMode) return;
+    trialMode = false;
+    disposeTrialTimer();
+    BillingTicker.instance.pause();
 ```
 
 **변경:**
-```dart
-  List<Widget> _buildAuthHeader() {
-    final lastProvider = FFAppState().lastAuthProvider;
-    final providerLabel = switch (lastProvider) {
-      'kakao' => '카카오',
-      'google' => 'Google',
-      'email' => '이메일',
-      _ => '',
-    };
 
-    return [
-      const Text(
-        '계정으로 계속하기',
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          color: Colors.white,
-          fontSize: 22,
-          fontWeight: FontWeight.w800,
-          height: 1.32,
-        ),
-      ),
-      if (lastProvider.isNotEmpty) ...[
-        const SizedBox(height: 10),
-        Text(
-          '이전에 $providerLabel 계정으로 가입했습니다',
-          textAlign: TextAlign.center,
-          style: const TextStyle(
-            color: Color(0xFF9C9CA6),
-            fontSize: 13,
-          ),
-        ),
-      ],
-    ];
-  }
+```dart
+  Future<void> _handleTrialEnd() async {
+    if (!trialMode) return;
+    trialMode = false;
+    disposeTrialTimer();
+    BillingTicker.instance.pause();
+    // Anyone 1분 완료 = 체험 완료 확정
+    // 이후 앱 재진입 시 Welcome이 아닌 Auth 화면 표시
+    FFAppState().trialCompleted = true;
 ```
 
-> **변경 포인트**: 제목은 항상 "계정으로 계속하기" 고정, lastProvider가 있으면 그 아래에 "이전에 카카오 계정으로 가입했습니다" 안내만 추가.
-
----
-
-### 수정 2: _showBirthYearDialog — 탄생년 범위 1940년까지 확장
-
-**앵커 (현재 코드, _showBirthYearDialog 내부에서 3곳):**
-
-첫째, initialItem 계산:
-```dart
-                  controller: FixedExtentScrollController(
-                    initialItem: 40, // currentYear-60 기준 +40 → 약 20세
-                  ),
-```
-
-**변경:**
-```dart
-                  controller: FixedExtentScrollController(
-                    initialItem: currentYear - 1940 - 20, // 기본값: 약 20세
-                  ),
-```
-
-둘째, 연도 범위 하한:
-```dart
-                      final year = (currentYear - 60) + index;
-                      if (year < currentYear - 60 || year > currentYear - 4) {
-```
-
-**변경:**
-```dart
-                      final year = 1940 + index;
-                      if (year < 1940 || year > currentYear - 4) {
-```
-
-셋째, childCount:
-```dart
-                    childCount: 57, // currentYear-60 ~ currentYear-4
-```
-
-**변경:**
-```dart
-                    childCount: currentYear - 4 - 1940 + 1, // 1940 ~ currentYear-4
-```
-
-넷째, onSelectedItemChanged:
-```dart
-                  onSelectedItemChanged: (index) {
-                    setDialogState(
-                        () => selectedYear = (currentYear - 60) + index);
-                  },
-```
-
-**변경:**
-```dart
-                  onSelectedItemChanged: (index) {
-                    setDialogState(
-                        () => selectedYear = 1940 + index);
-                  },
-```
-
----
+> **효과**: 대화방 1분 타이머가 0이 되어 `_handleTrialEnd()`가 호출되는 순간
+> `trialCompleted = true`가 SharedPreferences에 저장된다.
+> 이후 공부방 진입 여부와 무관하게, 앱 재실행 시 Auth 화면이 뜬다.
+>
+> **기존 가입 시점 설정과 충돌 없음**: `_handleUnifiedAuth`와 `_handleAuth`에서도
+> `trialCompleted = true`를 찍지만, 이미 true인 값을 다시 true로 쓰는 것은 무해.
 
 ## Phase 3: 검증
 
 ```bash
+dart format lib/custom_code/widgets/routine_mode_anyone.dart
+flutter analyze lib/custom_code/widgets/routine_mode_anyone.dart
+
+grep "trialCompleted" lib/custom_code/widgets/routine_mode_anyone.dart
+# 기대: 1줄
+```
+
+## Phase 4: 커밋
+
+```bash
+git add -A && git commit -m "fix: set trialCompleted=true on Anyone 1min timer end"
+git checkout main && git merge fix/trial-completed-timing
+git push origin main
+```
+
+---
+---
+
+# 지시문 11: 보호자 동의 이메일 발송 Cloud Function
+
+## 목적
+14세 미만 가입 시 저장된 `parentEmail`로 동의 요청 이메일을 발송하고,
+보호자가 링크를 클릭하면 `parentConsentPending: false`로 업데이트한다.
+
+## 대상 파일
+- **수정**: `firebase/functions/index.js` (함수 2개 추가)
+- **수정**: `lib/custom_code/widgets/intro_master.dart` (1곳 — CF 호출 추가)
+
+---
+
+## Phase 1: Savepoint
+
+```bash
+git checkout -b feat/parent-consent-email
+git add -A && git commit -m "savepoint: before parent consent email CF"
+```
+
+## Phase 2-A: Cloud Function 추가 — sendParentConsentEmail
+
+`firebase/functions/index.js` 맨 하단에 추가:
+
+```javascript
+// ----------------------------------------------------------------------------
+// sendParentConsentEmail
+// Type:   HTTPS Callable
+// Input:  { parentEmail: string }
+// Output: { sent: boolean }
+//
+// 14세 미만 가입자의 보호자에게 동의 요청 이메일을 발송한다.
+// 이메일에 포함된 링크를 클릭하면 confirmParentConsent 엔드포인트가 호출되어
+// Firestore의 parentConsentPending이 false로 업데이트된다.
+// ----------------------------------------------------------------------------
+exports.sendParentConsentEmail = functions
+  .region("us-central1")
+  .https.onCall(async (data, context) => {
+    if (!context.auth || !context.auth.uid) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "로그인이 필요합니다."
+      );
+    }
+
+    const parentEmail = data && data.parentEmail;
+    if (!parentEmail || typeof parentEmail !== "string") {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "parentEmail is required."
+      );
+    }
+
+    const uid = context.auth.uid;
+    const projectId = process.env.GCLOUD_PROJECT || "stealth-vox-3p3rq3";
+
+    // 동의 확인 URL (confirmParentConsent HTTPS endpoint)
+    const consentUrl =
+      `https://us-central1-${projectId}.cloudfunctions.net/confirmParentConsent?uid=${encodeURIComponent(uid)}`;
+
+    // Firebase Auth의 이메일 발송 기능 사용
+    // (별도 이메일 서비스 없이 Admin SDK의 generateEmailVerificationLink를 활용하거나,
+    //  간단히 Firestore에 mail collection을 만들어 Firebase Extensions "Trigger Email"을 사용)
+    //
+    // 가장 간단한 방법: Firestore 'mail' 컬렉션에 문서 생성
+    // → Firebase Extension "Trigger Email from Firestore" 사용 시 자동 발송
+    // → Extension이 없으면 수동으로 nodemailer 등 사용
+
+    const mailRef = admin.firestore().collection("mail").doc();
+    await mailRef.set({
+      to: parentEmail,
+      message: {
+        subject: "StealthVox - 자녀 가입 동의 요청",
+        html: `
+          <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 24px;">
+            <h2 style="color: #333;">StealthVox 보호자 동의</h2>
+            <p style="color: #555; line-height: 1.6;">
+              자녀가 StealthVox 앱에 가입하려고 합니다.<br>
+              만 14세 미만 사용자는 보호자의 동의가 필요합니다.
+            </p>
+            <p style="color: #555; line-height: 1.6;">
+              아래 버튼을 눌러 자녀의 가입에 동의해 주세요.
+            </p>
+            <a href="${consentUrl}"
+               style="display: inline-block; padding: 14px 32px; background-color: #4A90D9;
+                      color: white; text-decoration: none; border-radius: 8px; font-weight: bold;
+                      margin-top: 16px;">
+              동의합니다
+            </a>
+            <p style="color: #999; font-size: 12px; margin-top: 24px;">
+              본인이 요청하지 않았다면 이 이메일을 무시하셔도 됩니다.
+            </p>
+          </div>
+        `,
+      },
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    functions.logger.info("sendParentConsentEmail: mail queued", {
+      uid: uid,
+      parentEmail: parentEmail,
+    });
+
+    return { sent: true };
+  });
+```
+
+## Phase 2-B: Cloud Function 추가 — confirmParentConsent
+
+```javascript
+// ----------------------------------------------------------------------------
+// confirmParentConsent
+// Type:   HTTPS Request (GET)
+// Query:  ?uid=<firebase_uid>
+// Action: Firestore users/{uid}.parentConsentPending = false
+// Response: HTML 확인 페이지
+// ----------------------------------------------------------------------------
+exports.confirmParentConsent = functions
+  .region("us-central1")
+  .https.onRequest(async (req, res) => {
+    const uid = req.query.uid;
+    if (!uid || typeof uid !== "string") {
+      res.status(400).send("<h1>잘못된 요청입니다.</h1>");
+      return;
+    }
+
+    try {
+      const userRef = admin.firestore().collection("users").doc(uid);
+      const userDoc = await userRef.get();
+
+      if (!userDoc.exists) {
+        res.status(404).send("<h1>사용자를 찾을 수 없습니다.</h1>");
+        return;
+      }
+
+      await userRef.update({ parentConsentPending: false });
+
+      functions.logger.info("confirmParentConsent: consent granted", {
+        uid: uid,
+      });
+
+      res.status(200).send(`
+        <!DOCTYPE html>
+        <html>
+        <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+        <body style="font-family: sans-serif; text-align: center; padding: 60px 24px;">
+          <h1 style="color: #4A90D9;">동의가 완료되었습니다</h1>
+          <p style="color: #555; font-size: 16px; line-height: 1.6;">
+            자녀의 StealthVox 가입이 승인되었습니다.<br>
+            이 페이지를 닫아도 됩니다.
+          </p>
+        </body>
+        </html>
+      `);
+    } catch (e) {
+      functions.logger.error("confirmParentConsent: error", {
+        uid: uid,
+        error: String(e),
+      });
+      res.status(500).send("<h1>오류가 발생했습니다. 다시 시도해 주세요.</h1>");
+    }
+  });
+```
+
+## Phase 2-C: intro_master.dart — _showParentEmailDialog에서 CF 호출
+
+**파일**: `lib/custom_code/widgets/intro_master.dart`
+
+보호자 이메일 저장 후 `sendParentConsentEmail` CF를 호출한다.
+
+**앵커 (현재 코드, _showBirthYearDialog 내부):**
+```dart
+        await userRef.set({
+          'birthYear': selectedYear,
+          'parentEmail': parentEmail,
+          'parentConsentPending': true,
+        }, SetOptions(merge: true));
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+```
+
+**변경:**
+```dart
+        await userRef.set({
+          'birthYear': selectedYear,
+          'parentEmail': parentEmail,
+          'parentConsentPending': true,
+        }, SetOptions(merge: true));
+
+        // 보호자에게 동의 요청 이메일 발송
+        try {
+          final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
+              .httpsCallable('sendParentConsentEmail');
+          await callable.call({'parentEmail': parentEmail});
+          debugPrint('[Auth] parent consent email sent to $parentEmail');
+        } catch (e) {
+          debugPrint('[Auth] parent consent email failed (non-blocking): $e');
+        }
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+```
+
+## Phase 3: 검증
+
+```bash
+# index.js 문법 확인
+node -c firebase/functions/index.js
+
+# 새 함수 존재 확인
+grep "sendParentConsentEmail\|confirmParentConsent" firebase/functions/index.js
+# 기대: 2줄 이상
+
+# 클라이언트 호출 확인
+grep "sendParentConsentEmail" lib/custom_code/widgets/intro_master.dart
+# 기대: 1줄
+
 dart format lib/custom_code/widgets/intro_master.dart
 flutter analyze lib/custom_code/widgets/intro_master.dart
+```
 
-# 중복 제목 제거 확인
-grep "providerLabel.*계정으로.*계속하기" lib/custom_code/widgets/intro_master.dart
-# 기대: 0줄 (provider 이름이 제목에 안 들어감)
+## Phase 4: 배포
 
-# 1940 적용 확인
-grep "1940" lib/custom_code/widgets/intro_master.dart
-# 기대: 3줄 이상
+```bash
+# Cloud Functions 배포
+cd firebase
+firebase deploy --project stealth-vox-3p3rq3 --only functions:functions:sendParentConsentEmail
+firebase deploy --project stealth-vox-3p3rq3 --only functions:functions:confirmParentConsent
+cd ..
+
+git add -A && git commit -m "feat: parent consent email CF + client integration"
+git checkout main && git merge feat/parent-consent-email
+git push origin main
+```
+
+> **중요**: `sendParentConsentEmail`은 Firestore `mail` 컬렉션에 문서를 만드는 방식이다.
+> 이 방식이 동작하려면 Firebase Extension "Trigger Email from Firestore"가 설치되어 있어야 한다.
+>
+> Extension 설치: Firebase Console → Extensions → "Trigger Email from Firestore" → Install
+> SMTP 설정: Gmail, SendGrid, Mailgun 등 SMTP 정보 입력 필요
+>
+> Extension 없이 하려면 `sendParentConsentEmail` 내부에 nodemailer를 직접 사용해야 한다.
+> 어느 방식이든 SMTP 설정이 필요하므로, 배포 후 실제 이메일 발송 테스트 필수.
+
+---
+---
+
+# 지시문 12: 카카오 로그인 속도 최적화 — 재방문자 anonymous 스킵
+
+## 목적
+재방문 사용자(`lastAuthProvider` 있음)는 `signInAnonymously()`를 건너뛰고
+바로 카카오 인증을 시작하여 로그인 속도를 개선한다.
+
+## 대상 파일
+- **수정**: `lib/auth/social_auth_service.dart` (signInWithKakao 수정)
+
+---
+
+## Phase 1: Savepoint
+
+```bash
+git checkout -b perf/kakao-skip-anonymous
+git add -A && git commit -m "savepoint: before kakao anonymous skip optimization"
+```
+
+## Phase 2: 수정
+
+### 현재 signInWithKakao 문제점
+
+```dart
+static Future<UserCredential> signInWithKakao() async {
+  // currentUser가 null이면 무조건 signInAnonymously()
+  if (_auth.currentUser == null) {
+    await _auth.signInAnonymously();  // ← 재방문자에게 불필요 (1초 소요)
+  }
+  // Kakao SDK 로그인
+  // kakaoCustomAuth CF 호출 (anonymous UID를 서버에 전달)
+  // signInWithCustomToken
+}
+```
+
+재방문자는 `kakaoCustomAuth`가 `kakao_uid_map`에서 기존 UID를 찾아주므로
+anonymous UID가 필요 없다. 하지만 CF가 `context.auth.uid`를 요구하므로
+인증 없이는 호출할 수 없다.
+
+### 해결: skipAnonymous 파라미터 추가
+
+**앵커 (현재 코드):**
+```dart
+  static Future<UserCredential> signInWithKakao() async {
+    try {
+      debugPrint(
+          '[KakaoAuth] signInWithKakao start, currentUser=${_auth.currentUser?.uid}, isAnonymous=${_auth.currentUser?.isAnonymous}');
+
+      if (_auth.currentUser == null) {
+        debugPrint('[KakaoAuth] signInAnonymously start');
+        await _auth.signInAnonymously();
+        debugPrint(
+            '[KakaoAuth] signInAnonymously complete, uid=${_auth.currentUser?.uid}');
+      }
+```
+
+**변경:**
+```dart
+  static Future<UserCredential> signInWithKakao({
+    bool skipAnonymous = false,
+  }) async {
+    try {
+      debugPrint(
+          '[KakaoAuth] signInWithKakao start, currentUser=${_auth.currentUser?.uid}, isAnonymous=${_auth.currentUser?.isAnonymous}, skipAnonymous=$skipAnonymous');
+
+      if (_auth.currentUser == null && !skipAnonymous) {
+        debugPrint('[KakaoAuth] signInAnonymously start');
+        await _auth.signInAnonymously();
+        debugPrint(
+            '[KakaoAuth] signInAnonymously complete, uid=${_auth.currentUser?.uid}');
+      }
+```
+
+### kakaoCustomAuth CF 호출 시 — 인증 없이 호출할 수 있도록
+
+현재 `kakaoCustomAuth`는 `context.auth.uid`로 anonymous UID를 받는다.
+`skipAnonymous` 시 `currentUser`가 null이므로 CF가 unauthenticated 에러를 낸다.
+
+**해결**: `kakaoCustomAuth` CF가 `anonUid`를 클라이언트에서 직접 받을 수 있도록 변경하거나,
+또는 **재방문자는 `signInAnonymously()`는 하되 라우터 알림을 이미 억제했으므로 Lobby로 안 감**
+→ 사실상 현재 구조(지시문 7)에서 이미 안전하다.
+
+> **재평가**: 지시문 7에서 `_handleUnifiedAuth`가 `notifyOnAuthChange(false)`로
+> 라우터를 이미 억제하고 있다. `signInAnonymously()`가 실행되어도 Lobby로 안 간다.
+> 그러면 `skipAnonymous`의 장점은 순수 1초 절약뿐이다.
+>
+> 하지만 CF 구조를 바꾸지 않고 1초를 절약하려면 `kakaoCustomAuth`에
+> optional `anonUid` 파라미터를 추가해야 하는데, 이건 서버 수정까지 필요하다.
+>
+> **현실적 판단**: 1초 절약을 위해 서버 + 클라이언트 양쪽을 건드리는 건 위험 대비 이득이 작다.
+> 대신, 재방문자에게 **bonus 재지급 체크를 스킵**하는 것이 더 효과적이다.
+
+### 대안: 재방문자 bonus 스킵으로 속도 개선
+
+**파일**: `lib/custom_code/widgets/intro_master.dart`
+
+**앵커 (현재 코드, _handleUnifiedAuth 내부):**
+```dart
+      await authFn();
+      FFAppState().trialCompleted = true;
+```
+
+**변경:**
+```dart
+      await authFn();
+      FFAppState().trialCompleted = true;
+      if (provider.isNotEmpty) {
+        FFAppState().lastAuthProvider = provider;
+      }
+```
+
+위는 이미 지시문 8에서 적용된 부분이므로 변경 불필요.
+
+bonus 스킵을 위해, `_grantSignupBonusIfPossible()` 호출 전에 체크:
+
+**앵커:**
+```dart
+      await _grantSignupBonusIfPossible();
+```
+
+**변경:**
+```dart
+      // 이전에 로그인한 적 있는 재방문자는 bonus 이미 지급됨 → 스킵
+      final isReturningUser = provider.isNotEmpty &&
+          FFAppState().lastAuthProvider == provider;
+      if (!isReturningUser) {
+        await _grantSignupBonusIfPossible();
+      } else {
+        debugPrint('[Auth] returning user — skip bonus check');
+        // Firestore에서 최신 remainingTime 가져오기
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          try {
+            final doc = await FirebaseFirestore.instance
+                .collection('users')
+                .doc(user.uid)
+                .get();
+            final rt = doc.data()?['remainingTime'] as int?;
+            if (rt != null) {
+              FFAppState().remainingTime = rt;
+              FFAppState().remainingTimeLoaded = true;
+            }
+          } catch (e) {
+            debugPrint('[Auth] returning user time fetch failed: $e');
+          }
+        }
+      }
+```
+
+> **효과**: 재방문자는 `grantSignupBonus` CF 호출(서버 왕복 ~2초)을 건너뛰고,
+> Firestore에서 직접 `remainingTime`을 읽는다(~0.5초).
+> 체감 로그인 속도가 약 1.5초 개선된다.
+>
+> **주의**: `isReturningUser` 판별은 `lastAuthProvider`가 현재 provider와
+> **같을 때만** 스킵한다. 다른 provider로 로그인하면(카카오→구글 전환)
+> bonus 체크를 정상 수행한다.
+
+## Phase 3: 검증
+
+```bash
+dart format lib/auth/social_auth_service.dart lib/custom_code/widgets/intro_master.dart
+flutter analyze lib/auth/social_auth_service.dart lib/custom_code/widgets/intro_master.dart
+
+# skipAnonymous 파라미터 확인
+grep "skipAnonymous" lib/auth/social_auth_service.dart
+# 기대: 2줄 (파라미터 정의 + 조건)
+
+# bonus 스킵 로직 확인
+grep "isReturningUser\|skip bonus" lib/custom_code/widgets/intro_master.dart
+# 기대: 2줄 이상
+```
+
+## Phase 4: 커밋
+
+```bash
+git add -A && git commit -m "perf: skip bonus CF for returning users, add skipAnonymous to signInWithKakao"
+git checkout main && git merge perf/kakao-skip-anonymous
+git push origin main
 ```
 
 ---
 
-## Phase 4: 커밋 및 머지
+## 3개 지시문 실행 순서
 
-```bash
-git add -A && git commit -m "fix: simplify auth title, extend birthYear range to 1940"
-git checkout main
-git merge fix/intro-auth-gates  # 또는 현재 브랜치 이름
-git push origin main
 ```
+지시문 10 (F5: trialCompleted 타이밍) → 독립적, 먼저 실행
+  ↓
+지시문 11 (F3: 보호자 이메일 CF) → index.js + intro_master.dart
+  ↓
+지시문 12 (카톡 속도 최적화) → social_auth_service.dart + intro_master.dart
+```
+
+각 지시문은 독립 브랜치에서 작업 후 테스트 → main 머지 순서.
+지시문 12는 11의 intro_master.dart 변경과 겹칠 수 있으므로 11 머지 후 실행 권장.
