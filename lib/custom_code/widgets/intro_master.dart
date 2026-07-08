@@ -723,10 +723,10 @@ class _IntroMasterState extends State<IntroMaster> {
     };
 
     return [
-      Text(
-        lastProvider.isNotEmpty ? '$providerLabel 계정으로\n계속하기' : '계정으로 계속하기',
+      const Text(
+        '계정으로 계속하기',
         textAlign: TextAlign.center,
-        style: const TextStyle(
+        style: TextStyle(
           color: Colors.white,
           fontSize: 22,
           fontWeight: FontWeight.w800,
@@ -734,7 +734,7 @@ class _IntroMasterState extends State<IntroMaster> {
         ),
       ),
       if (lastProvider.isNotEmpty) ...[
-        const SizedBox(height: 8),
+        const SizedBox(height: 10),
         Text(
           '이전에 $providerLabel 계정으로 가입했습니다',
           textAlign: TextAlign.center,
@@ -1099,16 +1099,15 @@ class _IntroMasterState extends State<IntroMaster> {
                   itemExtent: 42,
                   physics: const FixedExtentScrollPhysics(),
                   controller: FixedExtentScrollController(
-                    initialItem: 40,
+                    initialItem: currentYear - 1940 - 20,
                   ),
                   onSelectedItemChanged: (index) {
-                    setDialogState(
-                        () => selectedYear = (currentYear - 60) + index);
+                    setDialogState(() => selectedYear = 1940 + index);
                   },
                   childDelegate: ListWheelChildBuilderDelegate(
                     builder: (context, index) {
-                      final year = (currentYear - 60) + index;
-                      if (year < currentYear - 60 || year > currentYear - 4) {
+                      final year = 1940 + index;
+                      if (year < 1940 || year > currentYear - 4) {
                         return null;
                       }
                       return Center(
@@ -1126,7 +1125,7 @@ class _IntroMasterState extends State<IntroMaster> {
                         ),
                       );
                     },
-                    childCount: 57,
+                    childCount: currentYear - 4 - 1940 + 1,
                   ),
                 ),
               ),
