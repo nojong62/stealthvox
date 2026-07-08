@@ -933,6 +933,7 @@ class _IntroMasterState extends State<IntroMaster> {
     try {
       await _cleanupTrialSandbox();
       await authFn();
+      FFAppState().trialCompleted = true;
       debugPrint(
           '[Auth] authFn complete, currentUser=${FirebaseAuth.instance.currentUser?.uid}');
       await _grantSignupBonusIfPossible();
