@@ -262,6 +262,8 @@ class _IntroMasterState extends State<IntroMaster> {
           );
         }
       }
+      FFAppState().trialCompleted = true;
+      FFAppState().lastAuthProvider = 'email';
       if (!isLoginMode) {
         await _grantSignupBonusIfPossible();
       }
@@ -693,69 +695,11 @@ class _IntroMasterState extends State<IntroMaster> {
               ),
             ),
           SizedBox(height: FFAppState().trialCompleted ? 60 : 24),
-          // 제목
-          const Text(
-            '계정으로 계속하기',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 22,
-              fontWeight: FontWeight.w800,
-              height: 1.32,
-            ),
-          ),
+          // 제목 + 재방문 안내
+          ..._buildAuthHeader(),
           const SizedBox(height: 34),
-          // 카카오 버튼
-          SharedSocialButton(
-            label: '카카오톡으로 계속하기',
-            backgroundColor: const Color(0xFFFEE500),
-            textColor: const Color(0xFF191919),
-            icon: Image.asset(
-              'assets/images/kakao_logo.png',
-              width: 20,
-              height: 20,
-              errorBuilder: (_, __, ___) => const Icon(
-                Icons.chat_bubble,
-                size: 20,
-                color: Color(0xFF191919),
-              ),
-            ),
-            onTap: () => _handleUnifiedAuth(SocialAuthService.signInWithKakao),
-          ),
-          const SizedBox(height: 12),
-          // Google 버튼
-          SharedSocialButton(
-            label: 'Google로 계속하기',
-            backgroundColor: Colors.white,
-            textColor: Colors.black87,
-            border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
-            icon: Image.asset(
-              'assets/images/google_logo.png',
-              width: 20,
-              height: 20,
-              errorBuilder: (_, __, ___) => const Icon(
-                Icons.g_mobiledata,
-                size: 24,
-                color: Colors.blue,
-              ),
-            ),
-            onTap: () => _handleUnifiedAuth(SocialAuthService.signInWithGoogle),
-          ),
-          const SizedBox(height: 12),
-          // 이메일 버튼
-          SharedSocialButton(
-            label: '이메일로 계속하기',
-            backgroundColor: const Color(0xFF33333A),
-            textColor: Colors.white,
-            icon: const Icon(
-              Icons.email_outlined,
-              size: 20,
-              color: Colors.white70,
-            ),
-            onTap: () => setState(() {
-              _showEmailForm = !_showEmailForm;
-            }),
-          ),
+          // provider 버튼들 (재방문 시 이전 provider 강조)
+          ..._buildProviderButtons(),
           // 이메일 폼
           if (_showEmailForm) ...[
             const SizedBox(height: 18),
@@ -767,6 +711,147 @@ class _IntroMasterState extends State<IntroMaster> {
         ],
       ),
     );
+  }
+
+  List<Widget> _buildAuthHeader() {
+    final lastProvider = FFAppState().lastAuthProvider;
+    final providerLabel = switch (lastProvider) {
+      'kakao' => '카카오',
+      'google' => 'Google',
+      'email' => '이메일',
+      _ => '',
+    };
+
+    return [
+      Text(
+        lastProvider.isNotEmpty ? '$providerLabel 계정으로\n계속하기' : '계정으로 계속하기',
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 22,
+          fontWeight: FontWeight.w800,
+          height: 1.32,
+        ),
+      ),
+      if (lastProvider.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        Text(
+          '이전에 $providerLabel 계정으로 가입했습니다',
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: Color(0xFF9C9CA6),
+            fontSize: 13,
+          ),
+        ),
+      ],
+    ];
+  }
+
+  List<Widget> _buildProviderButtons() {
+    final lastProvider = FFAppState().lastAuthProvider;
+
+    // 각 provider 버튼 정의
+    Widget kakaoBtn() => SharedSocialButton(
+          label: '카카오톡으로 계속하기',
+          backgroundColor: const Color(0xFFFEE500),
+          textColor: const Color(0xFF191919),
+          icon: Image.asset(
+            'assets/images/kakao_logo.png',
+            width: 20,
+            height: 20,
+            errorBuilder: (_, __, ___) => const Icon(
+              Icons.chat_bubble,
+              size: 20,
+              color: Color(0xFF191919),
+            ),
+          ),
+          onTap: () => _handleUnifiedAuth(
+            SocialAuthService.signInWithKakao,
+            provider: 'kakao',
+          ),
+        );
+
+    Widget googleBtn() => SharedSocialButton(
+          label: 'Google로 계속하기',
+          backgroundColor: Colors.white,
+          textColor: Colors.black87,
+          border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+          icon: Image.asset(
+            'assets/images/google_logo.png',
+            width: 20,
+            height: 20,
+            errorBuilder: (_, __, ___) => const Icon(
+              Icons.g_mobiledata,
+              size: 24,
+              color: Colors.blue,
+            ),
+          ),
+          onTap: () => _handleUnifiedAuth(
+            SocialAuthService.signInWithGoogle,
+            provider: 'google',
+          ),
+        );
+
+    Widget emailBtn() => SharedSocialButton(
+          label: '이메일로 계속하기',
+          backgroundColor: const Color(0xFF33333A),
+          textColor: Colors.white,
+          icon: const Icon(
+            Icons.email_outlined,
+            size: 20,
+            color: Colors.white70,
+          ),
+          onTap: () => setState(() {
+            _showEmailForm = !_showEmailForm;
+          }),
+        );
+
+    if (lastProvider.isEmpty) {
+      return [
+        kakaoBtn(),
+        const SizedBox(height: 12),
+        googleBtn(),
+        const SizedBox(height: 12),
+        emailBtn(),
+      ];
+    }
+
+    late final Widget primaryBtn;
+    late final List<Widget> secondaryBtns;
+
+    switch (lastProvider) {
+      case 'kakao':
+        primaryBtn = kakaoBtn();
+        secondaryBtns = [googleBtn(), const SizedBox(height: 12), emailBtn()];
+        break;
+      case 'google':
+        primaryBtn = googleBtn();
+        secondaryBtns = [kakaoBtn(), const SizedBox(height: 12), emailBtn()];
+        break;
+      case 'email':
+        primaryBtn = emailBtn();
+        secondaryBtns = [kakaoBtn(), const SizedBox(height: 12), googleBtn()];
+        break;
+      default:
+        primaryBtn = kakaoBtn();
+        secondaryBtns = [googleBtn(), const SizedBox(height: 12), emailBtn()];
+    }
+
+    return [
+      primaryBtn,
+      const SizedBox(height: 24),
+      const Text(
+        '다른 계정으로 계속하기',
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: Color(0xFF9C9CA6),
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      const SizedBox(height: 12),
+      ...secondaryBtns,
+    ];
   }
 
   Widget _buildAuthScaffold({
@@ -924,7 +1009,10 @@ class _IntroMasterState extends State<IntroMaster> {
   }
 
   /// 통합 소셜 인증: 약관 시트 없이 바로 소셜 로그인 -> 신규면 연령 확인
-  Future<void> _handleUnifiedAuth(Future<dynamic> Function() authFn) async {
+  Future<void> _handleUnifiedAuth(
+    Future<dynamic> Function() authFn, {
+    String provider = '',
+  }) async {
     debugPrint('[Auth] _handleUnifiedAuth enter');
     setState(() => isLoading = true);
     // Multi-step auth 동안 GoRouter 자동 네비게이션 억제
@@ -934,6 +1022,9 @@ class _IntroMasterState extends State<IntroMaster> {
       await _cleanupTrialSandbox();
       await authFn();
       FFAppState().trialCompleted = true;
+      if (provider.isNotEmpty) {
+        FFAppState().lastAuthProvider = provider;
+      }
       debugPrint(
           '[Auth] authFn complete, currentUser=${FirebaseAuth.instance.currentUser?.uid}');
       await _grantSignupBonusIfPossible();

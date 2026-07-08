@@ -65,6 +65,10 @@ class FFAppState extends ChangeNotifier {
     _safeInit(() {
       _trialCompleted = prefs.getBool('ff_trialCompleted') ?? _trialCompleted;
     });
+    _safeInit(() {
+      _lastAuthProvider =
+          prefs.getString('ff_lastAuthProvider') ?? _lastAuthProvider;
+    });
   }
 
   void update(VoidCallback callback) {
@@ -252,6 +256,13 @@ class FFAppState extends ChangeNotifier {
   set trialCompleted(bool value) {
     _trialCompleted = value;
     prefs.setBool('ff_trialCompleted', value);
+  }
+
+  String _lastAuthProvider = '';
+  String get lastAuthProvider => _lastAuthProvider;
+  set lastAuthProvider(String value) {
+    _lastAuthProvider = value;
+    prefs.setString('ff_lastAuthProvider', value);
   }
 }
 
