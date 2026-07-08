@@ -204,6 +204,7 @@ class _IntroMasterState extends State<IntroMaster> {
         );
       }
     } finally {
+      AppStateNotifier.instance.updateNotifyOnAuthChange(true);
       _trialStarting = false;
       if (mounted) setState(() => isLoading = false);
     }
@@ -926,6 +927,9 @@ class _IntroMasterState extends State<IntroMaster> {
   Future<void> _handleUnifiedAuth(Future<dynamic> Function() authFn) async {
     debugPrint('[Auth] _handleUnifiedAuth enter');
     setState(() => isLoading = true);
+    // Multi-step auth 동안 GoRouter 자동 네비게이션 억제
+    // (anonymous -> custom token -> bonus 지급 완료까지 Lobby 이동 방지)
+    AppStateNotifier.instance.updateNotifyOnAuthChange(false);
     try {
       await _cleanupTrialSandbox();
       await authFn();
@@ -944,6 +948,8 @@ class _IntroMasterState extends State<IntroMaster> {
         );
       }
     } finally {
+      // GoRouter 알림 복원
+      AppStateNotifier.instance.updateNotifyOnAuthChange(true);
       if (mounted) setState(() => isLoading = false);
     }
   }

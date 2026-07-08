@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:page_transition/page_transition.dart';
@@ -44,7 +45,15 @@ class AppStateNotifier extends ChangeNotifier {
   bool notifyOnAuthChange = true;
 
   bool get loading => user == null || showSplashImage;
-  bool get loggedIn => user?.loggedIn ?? false;
+  bool get loggedIn {
+    if (!(user?.loggedIn ?? false)) return false;
+    // anonymous 체험 유저는 "로그인 안 됨"으로 취급
+    // -> GoRouter가 Lobby로 자동 이동하지 않음
+    // -> 체험은 imperative navigation(pushNamed)으로 처리
+    final fbUser = FirebaseAuth.instance.currentUser;
+    return fbUser != null && !fbUser.isAnonymous;
+  }
+
   bool get initiallyLoggedIn => initialUser?.loggedIn ?? false;
   bool get shouldRedirect => loggedIn && _redirectLocation != null;
 
@@ -67,9 +76,12 @@ class AppStateNotifier extends ChangeNotifier {
     if (notifyOnAuthChange && shouldUpdate) {
       notifyListeners();
     }
-    // Once again mark the notifier as needing to update on auth change
-    // (in order to catch sign in / out events).
-    updateNotifyOnAuthChange(true);
+    // Auto-reset only when not explicitly suppressed.
+    // Multi-step auth flows (e.g. anonymous -> Kakao custom token -> bonus)
+    // suppress notifications and restore them manually after completion.
+    if (notifyOnAuthChange) {
+      updateNotifyOnAuthChange(true);
+    }
   }
 
   void stopShowingSplashImage() {
