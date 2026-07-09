@@ -4,6 +4,7 @@
 
 import 'package:flutter/material.dart';
 
+import '/custom_code/widgets/auth_progress_view.dart';
 import '/custom_code/widgets/shared_social_button.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '../auth/social_auth_service.dart';
@@ -100,7 +101,7 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
               ),
               const SizedBox(height: 24),
               if (_isLoading)
-                const CircularProgressIndicator()
+                const AuthProgressView(compact: true)
               else if (_showEmailForm)
                 _buildEmailForm()
               else

@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '/auth/social_auth_service.dart';
+import '/custom_code/widgets/auth_progress_view.dart';
 import '/custom_code/widgets/shared_social_button.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
@@ -146,8 +147,8 @@ class _TrialSignupSheetState extends State<TrialSignupSheet> {
             const SizedBox(height: 28),
             if (_isLoading)
               const Padding(
-                padding: EdgeInsets.symmetric(vertical: 26),
-                child: CircularProgressIndicator(color: Color(0xFFD4AF37)),
+                padding: EdgeInsets.symmetric(vertical: 6),
+                child: AuthProgressView(compact: true),
               )
             else ...[
               SharedSocialButton(

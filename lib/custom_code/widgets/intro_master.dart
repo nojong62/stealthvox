@@ -10,6 +10,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'trial/trial_flow_state.dart';
+import 'auth_progress_view.dart';
 import 'shared_social_button.dart';
 import '/auth/social_auth_service.dart';
 
@@ -353,8 +354,14 @@ class _IntroMasterState extends State<IntroMaster> {
         backgroundColor: Colors.transparent,
         resizeToAvoidBottomInset: false,
         body: isLoading
-            ? const Center(
-                child: CircularProgressIndicator(color: Colors.amber))
+            ? const SafeArea(
+                child: Center(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 28),
+                    child: AuthProgressView(),
+                  ),
+                ),
+              )
             : SafeArea(
                 child: SingleChildScrollView(
                   controller: _scrollController,
@@ -866,8 +873,14 @@ class _IntroMasterState extends State<IntroMaster> {
         backgroundColor: Colors.transparent,
         resizeToAvoidBottomInset: true,
         body: isLoading
-            ? const Center(
-                child: CircularProgressIndicator(color: Colors.amber))
+            ? const SafeArea(
+                child: Center(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 28),
+                    child: AuthProgressView(),
+                  ),
+                ),
+              )
             : SafeArea(
                 child: SingleChildScrollView(
                   controller: _scrollController,

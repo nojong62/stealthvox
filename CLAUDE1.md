@@ -47,381 +47,135 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-# 지시문: 보호자 동의 링크 보안 강화 — uid 링크 제거 + 1회성 토큰 방식으로 교체
-
-## 목표
-
-현재 StealthVox Firebase Functions에 이미 보호자 동의 이메일 함수가 들어가 있다.
-
-현재 문제:
-- `sendParentConsentEmail`이 이메일 링크를 만들 때 `confirmParentConsent?uid=<uid>` 형식으로 uid를 직접 노출한다.
-- `confirmParentConsent`는 query의 uid만 있으면 `users/{uid}.parentConsentPending = false`로 바꾼다.
-- 이 방식은 링크 위조가 가능하므로 보호자 동의 처리로는 부적절하다.
-
-이번 작업 목표:
-1. uid 직접 링크 방식을 제거한다.
-2. 32바이트 이상 랜덤 토큰 기반 동의 링크로 교체한다.
-3. `parent_consent_tokens/{token}` 컬렉션을 사용한다.
-4. 보호자가 링크를 클릭하면 토큰 검증 후 서버에서만 `parentConsentPending: false`로 업데이트한다.
-5. 기존 앱 호출부 `sendParentConsentEmail(parentEmail)`은 최대한 그대로 유지한다.
+지금 바로 실행 가능한 **전체 지시서**입니다 — placeholder(【치환필요】)는 기존 컨벤션대로 Codex가 Phase 0 grep으로 스스로 찾아 채우는 방식입니다.
 
 ---
 
-## 현재 프로젝트 구조
+# trialCompleted 발동 시점 수정 — Codex 지시서 (최종)
 
-- Functions 파일: `functions/index.js`
-- Runtime: Node.js 20
-- Module style: CommonJS
-- Firebase Functions SDK: firebase-functions v4.x
-- Firebase Admin SDK: firebase-admin v11.x
-- Region: 기존 함수들과 동일하게 `us-central1`
-- `firebase.json` functions source: `functions`
-- Email Extension은 이미 설치 완료
-- Firestore `mail` 컬렉션 테스트 발송 성공 확인됨
-- `mail` 문서 구조는 아래와 같아야 함:
+## Phase S: Savepoint
 
-mail/{autoId}
-- to: array
-- message: map
-  - subject: string
-  - html 또는 text: string
+```bash
+cd F:\flutter_project\stealth_vox
+git status
+git add -A
+git commit -m "savepoint: before trialCompleted trigger point migration"
+git checkout -b fix/trial-completed-trigger-point
+```
 
 ---
 
-## 반드시 수정할 함수
+## Phase 0: 진단 (Diagnostics / Grep)
 
-현재 `functions/index.js` 맨 아래에 있는 두 함수를 교체/강화한다.
+```bash
+# 1. trialCompleted 전체 사용처 검색 (파일:줄번호:내용 형태로 전체 출력)
+grep -rn "trialCompleted" lib/ --include="*.dart"
 
-1. `sendParentConsentEmail`
-2. `confirmParentConsent`
+# 2. 현재 값을 true로 설정하는 지점만 추출
+grep -rn "trialCompleted.*=.*true" lib/ --include="*.dart"
 
-현재 함수명은 앱에서 이미 호출 중일 수 있으므로 함수명은 유지한다.
+# 3. routine_mode_anyone.dart 파일 경로 확정 및 구조 확인
+find lib/ -iname "*routine_mode_anyone*"
+grep -n "class \|void \|Future\|Timer\|dispose\|_endSession\|_completeSession\|onTimerComplete\|remainingTime" lib/【치환필요: 위 find 결과로 확정된 경로】
 
----
+# 4. 타이머 자연 만료를 판단하는 정확한 콜백/조건문 위치 확인
+grep -n "Timer.periodic\|onFinish\|timerFinished\|remainingTime <= 0\|remainingTime == 0" lib/【치환필요: routine_mode_anyone.dart 경로】
+```
 
-## 중요한 기존 앱 연동
-
-앱 쪽 `intro_master.dart`는 14세 미만일 때 아래 흐름을 이미 수행한다.
-
-1. `users/{uid}`에 저장:
-   - birthYear
-   - parentEmail
-   - parentConsentPending: true
-
-2. Firebase Callable:
-   - region: us-central1
-   - function name: sendParentConsentEmail
-   - parameter: { parentEmail: parentEmail }
-
-따라서 이번 작업에서는 앱 쪽 함수명과 파라미터를 바꾸지 말 것.
+**Codex는 아래 항목을 정리해서 보고할 것:**
+1. `trialCompleted = true`가 **현재** 설정되는 정확한 파일명 + 줄 번호 + 함수명 (회원가입 처리 쪽)
+2. `trialCompleted` 저장 방식 — Firestore 필드인지 FFAppState 로컬 필드인지, 정확한 경로/필드명
+3. `routine_mode_anyone.dart`에서 **타이머가 자연 만료되는 시점**(중간 이탈이 아닌, 카운트다운이 0이 되는 시점)을 처리하는 정확한 함수명 + 줄 번호
+4. 위 3번 함수가 이미 Firestore/FFAppState에 다른 값을 쓰고 있는지 (있다면 같은 패턴 재사용)
 
 ---
 
-## 새 Firestore 컬렉션
+## Phase 1: 앵커 검증
 
-### parent_consent_tokens/{token}
+Phase 0 보고 내용을 기반으로, 아래 두 앵커에 대해 grep 결과가 **정확히 1건**인지 확인:
 
-문서 ID 자체를 랜덤 토큰으로 사용한다.
+- **제거 앵커**: 회원가입 로직 내 `trialCompleted = true` 설정 코드
+- **추가 앵커**: `routine_mode_anyone.dart` 내 타이머 자연 만료 처리 함수
 
-필드:
-- uid: string
-- parentEmail: string
-- status: string
-  - pending
-  - approved
-  - expired
-  - revoked
-- createdAt: server timestamp
-- expiresAt: timestamp
-- approvedAt: timestamp | null
-- consumedCount: number
-- approvedIpHash: string | null
-- userAgent: string | null
-- mailDocId: string | null
-
-토큰 요구:
-- Node.js crypto 사용
-- `crypto.randomBytes(32).toString("hex")` 권장
-- query에는 token만 넣는다.
-- uid는 링크에 넣지 않는다.
+1건이 아니면 (즉 동일 패턴이 여러 곳에 있으면) 즉시 중단하고 실장님께 스크린샷/전체 목록 보고 후 지시 대기.
 
 ---
 
-## sendParentConsentEmail 요구사항
+## Phase 2: 파일별 하단→상단 편집
 
-### 타입
+### 2-1. 기존 발동 지점 제거 (회원가입 파일)
 
-기존과 동일:
-- `functions.region("us-central1").https.onCall`
+```
+파일: lib/【치환필요: Phase 0-1에서 확정된 회원가입 파일 경로】
+위치: 【확인필요: Phase 0-1 줄 번호】
 
-### 입력
+기존 "trialCompleted = true" 설정 라인을 제거.
+완전 삭제하지 말고 아래처럼 주석으로 대체하여 이력 남길 것:
 
-기존과 동일:
-- `{ parentEmail: string }`
+// trialCompleted trigger moved to routine_mode_anyone.dart (Anyone 1-min timer natural expiry)
+// see: fix/trial-completed-trigger-point branch
+```
 
-### 인증
+### 2-2. Anyone 1분 타이머 자연 만료 지점에 추가 (신규 발동 지점)
 
-- context.auth 필수
-- uid는 `context.auth.uid`에서만 가져온다.
+```
+파일: lib/【치환필요: routine_mode_anyone.dart 경로】
+위치: 【확인필요: 타이머 자연 만료(카운트다운 0 도달) 처리 함수 내부】
 
-### 검증
+조건: 반드시 "타이머가 자연 만료(0초 도달)"된 경우에만 실행.
+사용자가 중도 이탈(화면 나가기, 뒤로가기 등)한 경우는 절대 트리거되지 않도록 
+기존 dispose()/이탈 처리 로직과는 별개 위치에 작성할 것.
 
-1. `parentEmail`이 string인지 확인
-2. 간단한 이메일 형식 검증 추가
-3. `users/{uid}` 문서를 조회한다.
-4. 사용자의 `parentConsentPending`이 true인지 확인한다.
-   - 이미 false라면 `{ sent: false, alreadyApproved: true }` 반환
-5. user 문서의 `parentEmail`과 callable 입력 parentEmail이 다르면:
-   - user 문서에 parentEmail이 없으면 merge 저장 가능
-   - 이미 다른 parentEmail이 있으면 보안상 `permission-denied` 또는 `failed-precondition` 에러 반환
-   - 단, 기존 운영 흐름을 깨지 않도록 판단 근거를 로그로 남긴다.
+Phase 0-2에서 확인한 것과 동일한 저장 방식(Firestore 필드 경로 또는 
+FFAppState 필드)으로 trialCompleted 값을 true로 설정.
 
-### 토큰 생성
-
-1. 기존 pending token 재사용 여부는 다음 기준으로 처리한다.
-   - 같은 uid, same parentEmail, status == pending, expiresAt > now 인 토큰이 이미 있으면 재사용 가능
-   - 구현이 복잡하면 매번 새 토큰 생성해도 됨
-   - 단, 새 토큰 생성 시 같은 uid의 기존 pending token은 `revoked`로 바꿔도 됨
-2. token 생성:
-   - `const crypto = require("crypto");` 추가
-   - `const token = crypto.randomBytes(32).toString("hex");`
-3. 만료 시간:
-   - 기본 7일 후
-   - `expiresAt = Timestamp.fromMillis(Date.now() + 7 * 24 * 60 * 60 * 1000)`
-
-### 동의 URL
-
-기존 uid URL 제거.
-
-새 URL:
-
-`https://us-central1-${projectId}.cloudfunctions.net/confirmParentConsent?token=${encodeURIComponent(token)}`
-
-projectId는 기존 코드 방식 유지:
-- `process.env.GCLOUD_PROJECT || "stealth-vox-3p3rq3"`
-
-### token 문서 생성
-
-`parent_consent_tokens/{token}` 문서를 생성한다.
-
-필수 필드:
-- uid
-- parentEmail
-- status: "pending"
-- createdAt: serverTimestamp
-- expiresAt
-- approvedAt: null
-- consumedCount: 0
-- approvedIpHash: null
-- userAgent: null
-
-### mail 문서 생성
-
-기존 Email Extension 구조 유지.
-
-주의:
-- `to`는 반드시 array로 저장한다.
-- 현재 테스트 성공 구조와 동일하게 `to: [parentEmail]` 사용.
-- `message.html` 사용 가능.
-- `createdAt` 추가 유지 가능.
-
-메일 제목:
-`StealthVox - 자녀 가입 동의 요청`
-
-메일 본문 필수 포함:
-- StealthVox 보호자 동의 안내
-- 만 14세 미만 사용자는 보호자 동의가 필요하다는 안내
-- “동의합니다” 버튼
-- 동의 URL 텍스트 대체 링크
-- 본인이 요청하지 않았다면 무시하라는 문구
-- 링크는 7일 후 만료된다는 문구
-
-메일 문서 생성 후 token 문서에 `mailDocId`를 merge 업데이트한다.
-
-### 반환값
-
-성공 시:
-- `{ sent: true }`
-
-가능하면 디버그용으로 token 자체는 반환하지 말 것.
-로그에도 전체 token을 찍지 말고 앞 6~8자만 찍을 것.
+기존 코드가 snapshots() 리스너 기반 update()를 쓰고 있다면 동일 패턴 사용.
+일회성 .get()/.set() 방식이면 기존 패턴 그대로 유지.
+```
 
 ---
 
-## confirmParentConsent 요구사항
+## Phase 3: Grep 검증
 
-### 타입
+```bash
+grep -rn "trialCompleted" lib/ --include="*.dart"
+```
 
-기존과 동일:
-- `functions.region("us-central1").https.onRequest`
-
-### 입력
-
-GET:
-`?token=<TOKEN>`
-
-uid query는 더 이상 받지 않는다.
-기존 `?uid=` 방식은 거부해야 한다.
-
-### 처리 순서
-
-1. GET 외 요청은 405 HTML 반환
-2. token query 확인
-3. token이 없으면 “유효하지 않은 동의 링크입니다” HTML 반환
-4. `parent_consent_tokens/{token}` 문서 조회
-5. 문서가 없으면 “유효하지 않은 동의 링크입니다” HTML 반환
-6. expiresAt 확인
-   - 현재 시간보다 과거이면 token status를 `expired`로 update
-   - “동의 링크가 만료되었습니다. 앱에서 다시 요청해 주세요.” HTML 반환
-7. status가 `approved`이면
-   - “이미 동의가 완료되었습니다.” HTML 반환
-8. status가 `pending`이 아니면
-   - “사용할 수 없는 동의 링크입니다.” HTML 반환
-9. token 문서의 uid로 `users/{uid}` 조회
-10. user 문서가 없으면
-   - “사용자 정보를 찾을 수 없습니다.” HTML 반환
-11. Firestore transaction으로 아래를 함께 처리
-
-users/{uid}:
-- parentConsentPending: false
-- parentConsentGrantedAt: serverTimestamp
-- parentConsentMethod: "email_link"
-- parentConsentEmail: parentEmail
-- updatedAt: serverTimestamp
-
-parent_consent_tokens/{token}:
-- status: "approved"
-- approvedAt: serverTimestamp
-- consumedCount: increment(1)
-- userAgent: req.headers["user-agent"] || null
-- approvedIpHash: IP 원문 저장 금지. 가능하면 sha256 hash 저장. 어렵다면 null 유지.
-
-12. 성공 HTML 반환
+**기대 결과:**
+- 회원가입 파일: `= true` 설정 없음 (주석만 존재)
+- `routine_mode_anyone.dart`: `= true` 설정 정확히 1건 (타이머 자연 만료 조건 내부)
 
 ---
 
-## HTML 응답 요구사항
+## Phase 4: 포맷 + 정적 분석
 
-JSON을 반환하지 말고 모바일 브라우저용 HTML을 반환한다.
+```bash
+dart format lib/【치환필요: 회원가입 파일 경로】
+dart format lib/【치환필요: routine_mode_anyone.dart 경로】
+flutter analyze
+```
 
-공통 스타일:
-- UTF-8
-- viewport meta
-- 가운데 카드
-- StealthVox 브랜드명
-- 검은/다크 계열 또는 현재 메일 버튼 색상과 어울리는 정갈한 스타일
-- 외부 이미지 사용 금지
-
-페이지 종류:
-1. 성공:
-   - 제목: 보호자 동의가 완료되었습니다
-   - 본문: StealthVox 자녀 계정 이용 동의가 완료되었습니다. 이제 앱에서 정상 이용할 수 있습니다.
-2. 이미 완료:
-   - 제목: 이미 동의가 완료되었습니다
-3. 만료:
-   - 제목: 동의 링크가 만료되었습니다
-   - 본문: 앱에서 보호자 동의 메일을 다시 요청해 주세요.
-4. 잘못된 링크:
-   - 제목: 유효하지 않은 동의 링크입니다
-5. 서버 오류:
-   - 제목: 일시적인 오류가 발생했습니다
-
-중복 HTML을 줄이기 위해 `renderConsentPage(title, message, type)` 같은 helper 함수를 `index.js` 안에 추가해도 된다.
+`flutter analyze` 결과에 새로운 에러/경고 없어야 함. 있으면 즉시 보고.
 
 ---
 
-## 추가 보안 요구
+## Phase 5: 커밋
 
-1. `confirmParentConsent`에서 uid query를 절대 신뢰하지 말 것.
-2. token 전체를 로그에 찍지 말 것.
-3. parentEmail 전체 로그도 가능하면 최소화하라.
-4. 클라이언트가 `parentConsentPending`을 직접 false로 만들 수 없도록 Firestore rules 확인이 필요하다.
-5. 이번 작업에서 rules 파일이 있으면 확인만 하고, 필요 변경안은 별도 보고하라. 실제 rules 변경은 최소화한다.
-
----
-
-## 배포 전 확인
-
-아래 명령이 가능해야 한다.
-
-- `cd functions`
-- `npm install` 필요 여부 확인
-- `npm run lint`가 현재 프로젝트에서 실패할 수 있으면 실패 원인을 보고하되, 이번 변경과 무관한 기존 lint는 구분하라.
-- Firebase Functions deploy 명령 제안:
-
-`firebase -P stealth-vox-3p3rq3 deploy --only functions:sendParentConsentEmail,functions:confirmParentConsent`
-
-주의:
-firebase.json은 functions codebase 구조를 쓰고 있으므로, 실제 배포 명령에서 codebase 지정이 필요한지 현재 CLI 기준으로 확인하고 보고하라.
+```bash
+git add -A
+git commit -m "fix: move trialCompleted trigger from signup to Anyone timer natural expiry"
+```
 
 ---
 
-## 테스트 절차
+## 롤백 절차
 
-### 테스트 1: 보호자 이메일 발송
-
-1. 테스트 계정으로 로그인
-2. users/{uid}에 아래 값 확인:
-   - parentEmail
-   - parentConsentPending: true
-3. 앱 또는 Functions shell에서 `sendParentConsentEmail({ parentEmail })` 호출
-4. Firestore 확인:
-   - `parent_consent_tokens` 문서 생성
-   - `mail` 문서 생성
-5. Gmail 수신 확인
-
-### 테스트 2: 링크 클릭
-
-1. 이메일의 동의 링크 클릭
-2. HTML 성공 페이지 확인
-3. Firestore 확인:
-   - users/{uid}.parentConsentPending == false
-   - parentConsentGrantedAt 존재
-   - parentConsentMethod == "email_link"
-   - parent_consent_tokens/{token}.status == "approved"
-
-### 테스트 3: 같은 링크 재클릭
-
-1. 같은 링크 다시 클릭
-2. “이미 동의가 완료되었습니다” 페이지 표시
-3. Firestore 값이 깨지지 않아야 함
-
-### 테스트 4: 잘못된 token
-
-1. URL token 일부를 바꿔 접속
-2. “유효하지 않은 동의 링크입니다” 페이지 표시
-
-### 테스트 5: 만료 token
-
-1. expiresAt을 과거로 바꾼 테스트 token 생성
-2. 링크 클릭
-3. “동의 링크가 만료되었습니다” 페이지 표시
-4. token status가 expired로 변경되는지 확인
+```bash
+git checkout main
+git branch -D fix/trial-completed-trigger-point
+```
 
 ---
 
-## 반드시 보고할 것
+Codex가 Phase 0 결과 보고하면, 그걸 붙여서 저한테 주시면 Phase 1~2가 실제로 정확한 지점을 가리키는지 제가 검증해 드리겠습니다.
 
-작업 완료 후 아래를 보고하라.
-
-1. 수정한 파일 목록
-2. 삭제/교체한 기존 위험 로직 설명
-3. 새 token 컬렉션 구조
-4. 배포 명령어
-5. 테스트 방법
-6. 앱 쪽 변경 필요 여부
-7. Firestore rules에서 추가로 막아야 할 필드 목록
-
----
-
-## 완료 기준
-
-아래가 모두 만족되면 완료다.
-
-1. 보호자 이메일 링크에 uid가 노출되지 않는다.
-2. 링크에는 token만 포함된다.
-3. token 검증 성공 시에만 users/{uid}.parentConsentPending이 false가 된다.
-4. 이미 승인된 링크 재클릭이 안전하게 처리된다.
-5. 만료/잘못된 링크가 한국어 HTML 페이지로 표시된다.
-6. 기존 앱의 `sendParentConsentEmail(parentEmail)` 호출 방식은 깨지지 않는다.
-7. `mail` Extension 구조는 기존 성공 구조를 그대로 사용한다.
