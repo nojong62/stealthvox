@@ -263,7 +263,8 @@ class _IntroMasterState extends State<IntroMaster> {
           );
         }
       }
-      FFAppState().trialCompleted = true;
+      // trialCompleted trigger moved to routine_mode_anyone.dart (Anyone 1-min timer natural expiry)
+      // see: fix/trial-completed-trigger-point branch
       FFAppState().lastAuthProvider = 'email';
       if (!isLoginMode) {
         await _grantSignupBonusIfPossible();
@@ -1035,7 +1036,8 @@ class _IntroMasterState extends State<IntroMaster> {
     try {
       await _cleanupTrialSandbox();
       await authFn();
-      FFAppState().trialCompleted = true;
+      // trialCompleted trigger moved to routine_mode_anyone.dart (Anyone 1-min timer natural expiry)
+      // see: fix/trial-completed-trigger-point branch
       if (provider.isNotEmpty) {
         FFAppState().lastAuthProvider = provider;
       }
@@ -1366,11 +1368,10 @@ class _IntroMasterState extends State<IntroMaster> {
     FFAppState().trialStep = 0;
     FFAppState().trialHistoryPath = '';
 
-    // trialCompleted = true 확정 (재체험 방지)
-    FFAppState().trialCompleted = true;
+    // trialCompleted trigger moved to routine_mode_anyone.dart (Anyone 1-min timer natural expiry)
+    // see: fix/trial-completed-trigger-point branch
 
-    debugPrint(
-        '[TrialCleanup] sandbox cleanup complete, trialCompleted remains true');
+    debugPrint('[TrialCleanup] sandbox cleanup complete');
   }
 
   Future<void> _grantSignupBonusIfPossible() async {

@@ -21,7 +21,8 @@ class TrialStudyPage extends StatelessWidget {
             durationSeconds: 120,
             onTimeUp: () {
               TrialFlowState.instance.advanceTo(4);
-              FFAppState().trialCompleted = true;
+              // trialCompleted trigger moved to routine_mode_anyone.dart (Anyone 1-min timer natural expiry)
+              // see: fix/trial-completed-trigger-point branch
               TrialSignupSheet.show(
                 context,
                 onLoginSuccess: () {
