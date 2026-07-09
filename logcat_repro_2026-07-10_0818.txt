@@ -1,0 +1,138 @@
+--------- beginning of main
+07-10 08:22:30.857 I/VRI[MainActivity]@cd1e9cc( 5583): handleAppVisibility mAppVisible = false visible = true
+07-10 08:22:30.862 I/VRI[MainActivity]@cd1e9cc( 5583): stopped(false) old = true
+07-10 08:22:30.863 D/VRI[MainActivity]@cd1e9cc( 5583): WindowStopped on com.aienglishpractice.stealthvox/com.aienglishpractice.stealthvox.MainActivity set to false
+07-10 08:22:30.863 D/ViewRootImpl( 5583): Skipping stats log for color mode
+07-10 08:22:30.864 I/Adreno-UNKNOWN( 5583): Using previously loaded IMapper library.
+07-10 08:22:30.864 V/NativeCrypto( 5583): SSL shutdown failed: ssl=0xb40000775b5fc158: I/O error during system call, Software caused connection abort
+07-10 08:22:30.866 V/NativeCrypto( 5583): SSL shutdown failed: ssl=0xb40000775b609718: I/O error during system call, Software caused connection abort
+07-10 08:22:30.869 V/NativeCrypto( 5583): SSL shutdown failed: ssl=0xb40000775b5f8198: I/O error during system call, Software caused connection abort
+07-10 08:22:30.870 V/NativeCrypto( 5583): SSL shutdown failed: ssl=0xb40000775b605d58: I/O error during system call, Software caused connection abort
+07-10 08:22:30.874 I/Adreno-UNKNOWN( 5583): Using previously loaded IMapper library.
+07-10 08:22:30.877 I/AdrenoVK-0( 5583): QUALCOMM build          : f61dec9117, I68b0a64d7e
+07-10 08:22:30.877 I/AdrenoVK-0( 5583): Build Date              : 03/26/26
+07-10 08:22:30.877 I/AdrenoVK-0( 5583): Shader Compiler Version : E031.47.18.50
+07-10 08:22:30.877 I/AdrenoVK-0( 5583): Local Branch            : 
+07-10 08:22:30.877 I/AdrenoVK-0( 5583): Remote Branch           : refs/tags/AU_LINUX_ANDROID_LA.VENDOR.15.4.0.11.00.00.1088.862
+07-10 08:22:30.877 I/AdrenoVK-0( 5583): Remote Branch           : NONE
+07-10 08:22:30.877 I/AdrenoVK-0( 5583): Reconstruct Branch      : NOTHING
+07-10 08:22:30.877 I/AdrenoVK-0( 5583): Build Config            : S P 18.0.0 AArch64
+07-10 08:22:30.877 I/AdrenoVK-0( 5583): Driver Path             : /vendor/lib64/hw/vulkan.adreno.so
+07-10 08:22:30.877 I/AdrenoVK-0( 5583): Driver Version          : 0800.64.7
+07-10 08:22:30.877 I/AdrenoVK-0( 5583): PFP                     : 0x01500077
+07-10 08:22:30.877 I/AdrenoVK-0( 5583): ME                      : 0x01500014
+07-10 08:22:30.877 I/AdrenoVK-0( 5583): Application Name    : android framework
+07-10 08:22:30.877 I/AdrenoVK-0( 5583): Process Name        : com.aienglishpractice.stealthvox
+07-10 08:22:30.877 I/AdrenoVK-0( 5583): Application Version : 0x00000000
+07-10 08:22:30.877 I/AdrenoVK-0( 5583): Engine Name         : android framework
+07-10 08:22:30.877 I/AdrenoVK-0( 5583): Engine Version      : 0x00000000
+07-10 08:22:30.877 I/AdrenoVK-0( 5583): Api Version         : 0x00401000
+07-10 08:22:30.881 D/SV[164220884 MainActivity]( 5583): updateSurface: surface is not valid
+07-10 08:22:30.881 I/SV[164220884 MainActivity]( 5583): releaseSurfaces: viewRoot = VRI[MainActivity]@cd1e9cc
+07-10 08:22:30.881 D/VRI[MainActivity]@cd1e9cc( 5583): applyTransactionOnDraw applyImmediately
+07-10 08:22:30.892 I/SV[164220884 MainActivity]( 5583): onWindowVisibilityChanged(0) false U3.w{9c9cfd4 V.E...... ......ID 0,0-1080,2340} of VRI[MainActivity]@cd1e9cc
+07-10 08:22:30.892 D/SV[164220884 MainActivity]( 5583): updateSurface: surface is not valid
+07-10 08:22:30.892 I/SV[164220884 MainActivity]( 5583): releaseSurfaces: viewRoot = VRI[MainActivity]@cd1e9cc
+07-10 08:22:30.892 D/VRI[MainActivity]@cd1e9cc( 5583): applyTransactionOnDraw applyImmediately
+07-10 08:22:30.894 I/InsetsSourceConsumer( 5583): applyRequestedVisibilityToControl: visible=true, type=statusBars, host=com.aienglishpractice.stealthvox/com.aienglishpractice.stealthvox.MainActivity
+07-10 08:22:30.894 I/InsetsSourceConsumer( 5583): applyRequestedVisibilityToControl: visible=true, type=navigationBars, host=com.aienglishpractice.stealthvox/com.aienglishpractice.stealthvox.MainActivity
+07-10 08:22:30.895 I/BufferQueueProducer( 5583): [](id:15cf00000003,api:0,p:0,c:5583) setDequeueTimeout:2077252342
+07-10 08:22:30.895 I/BLASTBufferQueue_Java( 5583): new BLASTBufferQueue, mName= VRI[MainActivity]@cd1e9cc mNativeObject= 0xb40000772b5dfcf0 caller= android.view.ViewRootImpl.updateBlastSurfaceIfNeeded:3603 android.view.ViewRootImpl.relayoutWindow:11813 android.view.ViewRootImpl.performTraversals:4840 android.view.ViewRootImpl.doTraversal:3959 android.view.ViewRootImpl$TraversalRunnable.run:13034 android.view.Choreographer$CallbackRecord.run:1961 android.view.Choreographer$CallbackRecord.run:1970 android.view.Choreographer.doCallbacks:1423 android.view.Choreographer.doFrame:1348 android.view.Choreographer$FrameDisplayEventReceiver.run:1930 
+07-10 08:22:30.895 I/BLASTBufferQueue_Java( 5583): update, w= 1080 h= 2340 mName = VRI[MainActivity]@cd1e9cc mNativeObject= 0xb40000772b5dfcf0 sc.mNativeObject= 0xb40000775b5d5450 format= -3 caller= android.view.ViewRootImpl.updateBlastSurfaceIfNeeded:3608 android.view.ViewRootImpl.relayoutWindow:11813 android.view.ViewRootImpl.performTraversals:4840 android.view.ViewRootImpl.doTraversal:3959 android.view.ViewRootImpl$TraversalRunnable.run:13034 android.view.Choreographer$CallbackRecord.run:1961 
+07-10 08:22:30.895 I/VRI[MainActivity]@cd1e9cc( 5583): Relayout returned: old=(0,0,1080,2340) new=(0,0,1080,2340) relayoutAsync=false req=(1080,2340)0 dur=1 res=0x3 s={true 0xb40000771b628850} ch=true seqId=0
+07-10 08:22:30.895 D/VRI[MainActivity]@cd1e9cc( 5583): mThreadedRenderer.initialize() mSurface={isValid=true 0xb40000771b628850} hwInitialized=true
+07-10 08:22:30.895 I/SurfaceView( 5583): 164220884 Changes: creating=false format=false size=false visible=false alpha=false hint=false left=false top=false z=false attached=true lifecycleStrategy=false
+07-10 08:22:30.896 I/SV[164220884 MainActivity]( 5583): windowStopped(false) true U3.w{9c9cfd4 V.E...... ......ID 0,0-1080,2340} of VRI[MainActivity]@cd1e9cc
+07-10 08:22:30.896 I/SurfaceView( 5583): 164220884 Changes: creating=true format=false size=false visible=true alpha=false hint=false left=false top=false z=false attached=true lifecycleStrategy=false
+07-10 08:22:30.896 I/BufferQueueProducer( 5583): [](id:15cf00000004,api:0,p:0,c:5583) setDequeueTimeout:2077252342
+07-10 08:22:30.896 I/BLASTBufferQueue_Java( 5583): new BLASTBufferQueue, mName= 9c9cfd4 SurfaceView[com.aienglishpractice.stealthvox/com.aienglishpractice.stealthvox.MainActivity]@0 mNativeObject= 0xb40000772b603ef0 caller= android.view.SurfaceView.createBlastSurfaceControls:1878 android.view.SurfaceView.updateSurface:1519 android.view.SurfaceView.setWindowStopped:542 android.view.SurfaceView.surfaceCreated:2429 android.view.ViewRootImpl.notifySurfaceCreated:3520 android.view.ViewRootImpl.performTraversals:5350 android.view.ViewRootImpl.doTraversal:3959 android.view.ViewRootImpl$TraversalRunnable.run:13034 android.view.Choreographer$CallbackRecord.run:1961 android.view.Choreographer$CallbackRecord.run:1970 
+07-10 08:22:30.896 I/BLASTBufferQueue_Java( 5583): update, w= 1080 h= 2340 mName = 9c9cfd4 SurfaceView[com.aienglishpractice.stealthvox/com.aienglishpractice.stealthvox.MainActivity]@0 mNativeObject= 0xb40000772b603ef0 sc.mNativeObject= 0xb40000775b609710 format= 4 caller= android.view.SurfaceView.createBlastSurfaceControls:1879 android.view.SurfaceView.updateSurface:1519 android.view.SurfaceView.setWindowStopped:542 android.view.SurfaceView.surfaceCreated:2429 android.view.ViewRootImpl.notifySurfaceCreated:3520 android.view.ViewRootImpl.performTraversals:5350 
+07-10 08:22:30.896 I/SurfaceView( 5583): 164220884 Cur surface: Surface(name=null mNativeObject=0)/@0xd6cf048
+07-10 08:22:30.897 I/SV[164220884 MainActivity]( 5583): pST: sr = Rect(0, 0 - 1080, 2340) sw = 1080 sh = 2340
+07-10 08:22:30.897 D/SurfaceView( 5583): 164220884 performSurfaceTransaction RenderWorker position = [0, 0, 1080, 2340] surfaceSize = 1080x2340
+07-10 08:22:30.897 I/SV[164220884 MainActivity]( 5583): updateSurface: mVisible = true mSurface.isValid() = true
+07-10 08:22:30.897 I/SV[164220884 MainActivity]( 5583): updateSurface: mSurfaceCreated = false surfaceChanged = true visibleChanged = true
+07-10 08:22:30.897 I/SurfaceView( 5583): 164220884 visibleChanged -- surfaceCreated
+07-10 08:22:30.897 I/SV[164220884 MainActivity]( 5583): surfaceCreated 1 #1 U3.w{9c9cfd4 V.E...... ......ID 0,0-1080,2340}
+07-10 08:22:30.906 I/SurfaceView( 5583): 164220884 surfaceChanged -- format=4 w=1080 h=2340
+07-10 08:22:30.906 I/SV[164220884 MainActivity]( 5583): surfaceChanged (1080,2340) 1 #1 U3.w{9c9cfd4 V.E...... ......ID 0,0-1080,2340}
+07-10 08:22:30.907 I/SurfaceView( 5583): 164220884 surfaceRedrawNeeded
+07-10 08:22:30.907 V/SurfaceView( 5583): Layout: x=0 y=0 w=1080 h=2340, frame=Rect(0, 0 - 1080, 2340)
+07-10 08:22:30.907 D/VRI[MainActivity]@cd1e9cc( 5583): reportNextDraw android.view.ViewRootImpl.performTraversals:5507 android.view.ViewRootImpl.doTraversal:3959 android.view.ViewRootImpl$TraversalRunnable.run:13034 android.view.Choreographer$CallbackRecord.run:1961 android.view.Choreographer$CallbackRecord.run:1970 
+07-10 08:22:30.907 D/VRI[MainActivity]@cd1e9cc( 5583): Setup new sync=wmsSync-VRI[MainActivity]@cd1e9cc#6
+07-10 08:22:30.907 I/VRI[MainActivity]@cd1e9cc( 5583): Creating new active sync group VRI[MainActivity]@cd1e9cc#7
+07-10 08:22:30.907 D/VRI[MainActivity]@cd1e9cc( 5583): Start draw after previous draw not visible
+07-10 08:22:30.907 D/VRI[MainActivity]@cd1e9cc( 5583): registerCallbacksForSync syncBuffer=false
+07-10 08:22:30.907 D/SurfaceView( 5583): 164220884 updateSurfacePosition RenderWorker, frameNr = 1, position = [0, 0, 1080, 2340] surfaceSize = 1080x2340
+07-10 08:22:30.907 I/SV[164220884 MainActivity]( 5583): uSP: rtp = Rect(0, 0 - 1080, 2340) rtsw = 1080 rtsh = 2340
+07-10 08:22:30.907 I/SV[164220884 MainActivity]( 5583): onSSPAndSRT: pl = 0 pt = 0 sx = 1.0 sy = 1.0
+07-10 08:22:30.907 I/SV[164220884 MainActivity]( 5583): aOrMT: VRI[MainActivity]@cd1e9cc t = android.view.SurfaceControl$Transaction@f9f7f94 fN = 1 android.view.SurfaceView.-$$Nest$mapplyOrMergeTransaction:0 android.view.SurfaceView$SurfaceViewPositionUpdateListener.positionChanged:2029 android.graphics.RenderNode$CompositePositionUpdateListener.positionChanged:401 
+07-10 08:22:30.907 I/VRI[MainActivity]@cd1e9cc( 5583): mWNT: t=0xb40000779b6de570 mBlastBufferQueue=0xb40000772b5dfcf0 fn= 1 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SurfaceView.applyOrMergeTransaction:1960 android.view.SurfaceView.-$$Nest$mapplyOrMergeTransaction:0 android.view.SurfaceView$SurfaceViewPositionUpdateListener.positionChanged:2029 
+07-10 08:22:30.907 D/VRI[MainActivity]@cd1e9cc( 5583): Received frameDrawingCallback syncResult=0 frameNum=1.
+07-10 08:22:30.907 I/VRI[MainActivity]@cd1e9cc( 5583): mWNT: t=0xb40000779b6da700 mBlastBufferQueue=0xb40000772b5dfcf0 fn= 1 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.ViewRootImpl$12.onFrameDraw:15561 android.view.ThreadedRenderer$1.onFrameDraw:751 <bottom of call stack> 
+07-10 08:22:30.907 I/VRI[MainActivity]@cd1e9cc( 5583): Setting up sync and frameCommitCallback
+07-10 08:22:30.910 I/BLASTBufferQueue( 5583): [VRI[MainActivity]@cd1e9cc#3](f:0,a:0,s:0) onFrameAvailable the first frame is available
+07-10 08:22:30.910 I/SurfaceComposerClient( 5583): apply transaction with the first frame. layerId: 158562, bufferData(ID: 23978802413603, frameNumber: 1)
+07-10 08:22:30.910 I/VRI[MainActivity]@cd1e9cc( 5583): Received frameCommittedCallback lastAttemptedDrawFrameNum=1 didProduceBuffer=true
+07-10 08:22:30.914 D/AppsFlyer_FlutterPlugin( 5583): Calling invokeMethod with: {"status":"NOT_FOUND"}
+07-10 08:22:30.957 I/BLASTBufferQueue( 5583): [9c9cfd4 SurfaceView[com.aienglishpractice.stealthvox/com.aienglishpractice.stealthvox.MainActivity]@0#4](f:0,a:0,s:0) onFrameAvailable the first frame is available
+07-10 08:22:30.957 I/SurfaceComposerClient( 5583): apply transaction with the first frame. layerId: 158565, bufferData(ID: 23978802413598, frameNumber: 1)
+07-10 08:22:30.957 D/VRI[MainActivity]@cd1e9cc( 5583): reportDrawFinished seqId=0
+07-10 08:22:30.957 I/SurfaceView( 5583): 164220884 finishedDrawing
+07-10 08:22:30.970 D/VRI[MainActivity]@cd1e9cc( 5583): mThreadedRenderer.initializeIfNeeded()#2 mSurface={isValid=true 0xb40000771b628850}
+07-10 08:22:30.971 I/flutter ( 5583): [BILLING] foreground resumed
+07-10 08:22:30.972 D/InputMethodManagerUtils( 5583): startInputInner - Id : 0
+07-10 08:22:30.972 I/InputMethodManager( 5583): startInputInner - IInputMethodManagerGlobalInvoker.startInputOrWindowGainedFocus
+--------- beginning of system
+07-10 08:22:30.973 D/InsetsController( 5583): hide(ime())
+07-10 08:22:30.973 I/ImeTracker( 5583): com.aienglishpractice.stealthvox:c68608b7: onCancelled at PHASE_CLIENT_ALREADY_HIDDEN
+07-10 08:22:30.974 D/InputTransport( 5583): Input channel constructed: 'ClientS', fd=200
+07-10 08:22:31.814 D/AppsFlyer_FlutterPlugin( 5583): Calling invokeMethod with: {"install_time":"2026-07-09 23:05:45.070","af_message":"organic install","af_status":"Organic","is_first_launch":false}
+07-10 08:22:36.750 I/VRI[MainActivity]@cd1e9cc( 5583): ViewPostIme pointer 0
+07-10 08:22:36.751 I/VRI[MainActivity]@cd1e9cc( 5583): call setFrameRateCategory for touch hint category=high hint, reason=touch, vri=VRI[MainActivity]@cd1e9cc
+07-10 08:22:36.841 I/VRI[MainActivity]@cd1e9cc( 5583): ViewPostIme pointer 1
+07-10 08:22:36.853 D/FirebaseAuth( 5583): Notifying id token listeners about a sign-out event.
+07-10 08:22:36.853 D/FirebaseAuth( 5583): Notifying auth state listeners about a sign-out event.
+07-10 08:22:36.859 I/flutter ( 5583): [TrialDebug] IntroMaster initState, time=2026-07-10T08:22:36.859034
+07-10 08:22:36.890 I/flutter ( 5583): [TrialDebug] _checkEntryStatus enter, currentUser=null, isAnonymous=null, time=2026-07-10T08:22:36.890939
+07-10 08:22:36.891 I/flutter ( 5583): [Intro] pendingInviteType=, duoRoomId=
+07-10 08:22:36.892 D/WindowOnBackDispatcher( 5583): setTopOnBackInvokedCallback (unwrapped): U3.j$a@456374b
+07-10 08:22:36.908 D/WindowOnBackDispatcher( 5583): setTopOnBackInvokedCallback (unwrapped): android.app.Activity$$ExternalSyntheticLambda0@d54c4d0
+07-10 08:22:38.891 I/ImeFocusController( 5583): onPreWindowFocus: skipped hasWindowFocus=false mHasImeFocus=true
+07-10 08:22:38.891 I/ImeFocusController( 5583): onPostWindowFocus: skipped hasWindowFocus=false mHasImeFocus=true
+07-10 08:22:38.942 D/InputTransport( 5583): Input channel destroyed: 'ClientS', fd=200
+07-10 08:22:39.284 I/VRI[MainActivity]@cd1e9cc( 5583): handleAppVisibility mAppVisible = true visible = false
+07-10 08:22:39.284 D/VRI[MainActivity]@cd1e9cc( 5583): visibilityChanged oldVisibility=true newVisibility=false
+07-10 08:22:39.287 I/SV[164220884 MainActivity]( 5583): onWindowVisibilityChanged(8) false U3.w{9c9cfd4 V.E...... ........ 0,0-1080,2340} of VRI[MainActivity]@cd1e9cc
+07-10 08:22:39.287 I/SurfaceView( 5583): 164220884 Changes: creating=false format=false size=false visible=true alpha=false hint=false left=false top=false z=false attached=true lifecycleStrategy=false
+07-10 08:22:39.287 I/SurfaceView( 5583): 164220884 Cur surface: Surface(name=null mNativeObject=-5476376635320591632)/@0xd6cf048
+07-10 08:22:39.287 I/SurfaceView( 5583): 164220884 surfaceDestroyed
+07-10 08:22:39.287 I/SV[164220884 MainActivity]( 5583): surfaceDestroyed callback.size 1 #2 U3.w{9c9cfd4 V.E...... ........ 0,0-1080,2340}
+07-10 08:22:39.289 I/SV[164220884 MainActivity]( 5583): updateSurface: mVisible = false mSurface.isValid() = true
+07-10 08:22:39.289 I/SV[164220884 MainActivity]( 5583): releaseSurfaces: viewRoot = VRI[MainActivity]@cd1e9cc
+07-10 08:22:39.289 V/SurfaceView( 5583): Layout: x=0 y=0 w=1080 h=2340, frame=Rect(0, 0 - 1080, 2340)
+07-10 08:22:39.289 D/SurfaceView( 5583): 229405507 windowPositionLost, frameNr = 0
+07-10 08:22:39.290 D/HWUI    ( 5583): CacheManager::trimMemory(20)
+07-10 08:22:39.300 I/VRI[MainActivity]@cd1e9cc( 5583): Relayout returned: old=(0,0,1080,2340) new=(0,0,1080,2340) relayoutAsync=false req=(1080,2340)8 dur=9 res=0x2 s={false 0x0} ch=true seqId=0
+07-10 08:22:39.301 I/SV[164220884 MainActivity]( 5583): windowStopped(true) false U3.w{9c9cfd4 V.E...... ........ 0,0-1080,2340} of VRI[MainActivity]@cd1e9cc
+07-10 08:22:39.301 D/SV[164220884 MainActivity]( 5583): updateSurface: surface is not valid
+07-10 08:22:39.301 I/SV[164220884 MainActivity]( 5583): releaseSurfaces: viewRoot = VRI[MainActivity]@cd1e9cc
+07-10 08:22:39.301 D/VRI[MainActivity]@cd1e9cc( 5583): applyTransactionOnDraw applyImmediately
+07-10 08:22:39.301 D/SV[164220884 MainActivity]( 5583): updateSurface: surface is not valid
+07-10 08:22:39.301 I/SV[164220884 MainActivity]( 5583): releaseSurfaces: viewRoot = VRI[MainActivity]@cd1e9cc
+07-10 08:22:39.301 D/VRI[MainActivity]@cd1e9cc( 5583): applyTransactionOnDraw applyImmediately
+07-10 08:22:39.301 D/VRI[MainActivity]@cd1e9cc( 5583): Not drawing due to not visible. Reason=!mAppVisible && !mForceDecorViewVisibility
+07-10 08:22:39.301 D/VRI[MainActivity]@cd1e9cc( 5583): Pending transaction will not be applied in sync with a draw due to view not visible
+07-10 08:22:39.301 I/VRI[MainActivity]@cd1e9cc( 5583): mWNT: t=0xb40000779b5f0e00 mBlastBufferQueue=0xnull fn= 0 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.ViewRootImpl.handleSyncRequestWhenNoAsyncDraw:6812 android.view.ViewRootImpl.performTraversals:5568 android.view.ViewRootImpl.doTraversal:3959 
+07-10 08:22:39.301 I/VRI[MainActivity]@cd1e9cc( 5583): stopped(true) old = false
+07-10 08:22:39.301 D/VRI[MainActivity]@cd1e9cc( 5583): WindowStopped on com.aienglishpractice.stealthvox/com.aienglishpractice.stealthvox.MainActivity set to true
+07-10 08:22:39.301 D/HWUI    ( 5583): CacheManager::trimMemory(20)
+07-10 08:22:39.303 D/SV[164220884 MainActivity]( 5583): updateSurface: surface is not valid
+07-10 08:22:39.303 I/SV[164220884 MainActivity]( 5583): releaseSurfaces: viewRoot = VRI[MainActivity]@cd1e9cc
+07-10 08:22:39.303 D/VRI[MainActivity]@cd1e9cc( 5583): applyTransactionOnDraw applyImmediately
+07-10 08:22:39.304 D/SV[164220884 MainActivity]( 5583): updateSurface: surface is not valid
+07-10 08:22:39.304 I/SV[164220884 MainActivity]( 5583): releaseSurfaces: viewRoot = VRI[MainActivity]@cd1e9cc
+07-10 08:22:39.304 D/VRI[MainActivity]@cd1e9cc( 5583): applyTransactionOnDraw applyImmediately
+07-10 08:22:39.314 D/HWUI    ( 5583): CacheManager::trimMemory(20)
+07-10 08:22:39.319 D/BBA2    ( 5583): setIsFg isFg = false; delayValue 3999ms
+07-10 08:22:41.131 D/WindowOnBackDispatcher( 5583): setTopOnBackInvokedCallback (unwrapped): null

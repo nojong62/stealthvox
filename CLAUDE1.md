@@ -47,6 +47,13 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
+Gap 2-A가 핵심이다. logcat으로 확인한 결과, signInWithGoogle()이 linkOrCreateAccount CF를 호출하지 않고 signInWithCredential로 직접 로그인하고 있다.
+
+lib/auth/social_auth_service.dart의 signInWithGoogle() 메서드를 실제로 열어서 non-anonymous 경로에서 linkOrCreateAccount가 호출되는지 다시 확인해라.
+만약 코드가 있다면 — 해당 분기에 도달하지 못하는 조건을 찾아라 (예: anonymous 체크 로직, 조기 return 등).
+만약 코드가 없다면 — v2 지시문 Phase 2-A대로 수정해라.
+수정 후 반드시 flutter build apk로 새 APK를 빌드해야 한다. 로컬 코드가 바뀌어도 이전 빌드가 기기에 남아있으면 소용없다.
+
 # 지시문: 크로스 프로바이더 계정 통합 — 종합 진단 및 수정 (v2)
 
 ## 배경

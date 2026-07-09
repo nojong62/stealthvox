@@ -1,0 +1,507 @@
+--------- beginning of system
+07-10 08:25:13.496 D/ActivityThread( 8299): com.aienglishpractice.stealthvox will use render engine as VK
+--------- beginning of main
+07-10 08:25:13.496 D/HWUI    ( 8299): HWUI - treat SMPTE_170M as sRGB
+07-10 08:25:13.497 I/DisplayManager( 8299): Choreographer implicitly registered for the refresh rate.
+07-10 08:25:13.497 D/HWUI    ( 8299): CacheManager constructor. deviceInfo=(1080, 1920)
+07-10 08:25:13.498 D/vulkan  ( 8299): searching for layers in '/data/app/~~qx1Af1z3xcs8DDH9_LBr_w==/com.aienglishpractice.stealthvox--qqYRqLHb6WpBtx0ClLULg==/lib/arm64'
+07-10 08:25:13.498 D/vulkan  ( 8299): searching for layers in '/data/app/~~qx1Af1z3xcs8DDH9_LBr_w==/com.aienglishpractice.stealthvox--qqYRqLHb6WpBtx0ClLULg==/base.apk!/lib/arm64-v8a'
+07-10 08:25:13.504 E/Adreno-AppProfiles( 8299): QSPM AIDL service doesn't exist
+07-10 08:25:13.504 I/AdrenoVK-0( 8299): ===== BEGIN DUMP OF OVERRIDDEN SETTINGS =====
+07-10 08:25:13.504 I/AdrenoVK-0( 8299): ===== END DUMP OF OVERRIDDEN SETTINGS =====
+07-10 08:25:13.506 D/qdgralloc( 8299): Fetching IMapper5 from QtiMapper5
+07-10 08:25:13.509 D/nativeloader( 8299): Load /data/app/~~qx1Af1z3xcs8DDH9_LBr_w==/com.aienglishpractice.stealthvox--qqYRqLHb6WpBtx0ClLULg==/base.apk!/lib/arm64-v8a/libflutter.so using class loader ns clns-9 (caller=/data/app/~~qx1Af1z3xcs8DDH9_LBr_w==/com.aienglishpractice.stealthvox--qqYRqLHb6WpBtx0ClLULg==/base.apk): ok
+07-10 08:25:13.518 I/SnapAlloc( 8299): Graphics lib is available
+07-10 08:25:13.524 I/Adreno-UNKNOWN( 8299): Using previously loaded IMapper library.
+07-10 08:25:13.527 I/AdrenoVK-0( 8299): QUALCOMM build          : f61dec9117, I68b0a64d7e
+07-10 08:25:13.527 I/AdrenoVK-0( 8299): Build Date              : 03/26/26
+07-10 08:25:13.527 I/AdrenoVK-0( 8299): Shader Compiler Version : E031.47.18.50
+07-10 08:25:13.527 I/AdrenoVK-0( 8299): Local Branch            : 
+07-10 08:25:13.527 I/AdrenoVK-0( 8299): Remote Branch           : refs/tags/AU_LINUX_ANDROID_LA.VENDOR.15.4.0.11.00.00.1088.862
+07-10 08:25:13.527 I/AdrenoVK-0( 8299): Remote Branch           : NONE
+07-10 08:25:13.527 I/AdrenoVK-0( 8299): Reconstruct Branch      : NOTHING
+07-10 08:25:13.527 I/AdrenoVK-0( 8299): Build Config            : S P 18.0.0 AArch64
+07-10 08:25:13.527 I/AdrenoVK-0( 8299): Driver Path             : /vendor/lib64/hw/vulkan.adreno.so
+07-10 08:25:13.527 I/AdrenoVK-0( 8299): Driver Version          : 0800.64.7
+07-10 08:25:13.527 I/AdrenoVK-0( 8299): PFP                     : 0x01500077
+07-10 08:25:13.527 I/AdrenoVK-0( 8299): ME                      : 0x01500014
+07-10 08:25:13.527 I/AdrenoVK-0( 8299): Application Name    : android framework
+07-10 08:25:13.527 I/AdrenoVK-0( 8299): Process Name        : com.aienglishpractice.stealthvox
+07-10 08:25:13.527 I/AdrenoVK-0( 8299): Application Version : 0x00000000
+07-10 08:25:13.527 I/AdrenoVK-0( 8299): Engine Name         : android framework
+07-10 08:25:13.527 I/AdrenoVK-0( 8299): Engine Version      : 0x00000000
+07-10 08:25:13.527 I/AdrenoVK-0( 8299): Api Version         : 0x00401000
+07-10 08:25:13.527 I/Adreno-UNKNOWN( 8299): Using previously loaded IMapper library.
+07-10 08:25:13.527 D/DesktopExperienceFlags( 8299): Toggle override initialized to: false
+07-10 08:25:13.527 D/DesktopModeFlags( 8299): Toggle override initialized to: OVERRIDE_UNSET
+07-10 08:25:13.529 I/Adreno-UNKNOWN( 8299): Using previously loaded IMapper library.
+07-10 08:25:13.530 I/AdrenoVK-0( 8299): QUALCOMM build          : f61dec9117, I68b0a64d7e
+07-10 08:25:13.530 I/AdrenoVK-0( 8299): Build Date              : 03/26/26
+07-10 08:25:13.530 I/AdrenoVK-0( 8299): Shader Compiler Version : E031.47.18.50
+07-10 08:25:13.530 I/AdrenoVK-0( 8299): Local Branch            : 
+07-10 08:25:13.530 I/AdrenoVK-0( 8299): Remote Branch           : refs/tags/AU_LINUX_ANDROID_LA.VENDOR.15.4.0.11.00.00.1088.862
+07-10 08:25:13.530 I/AdrenoVK-0( 8299): Remote Branch           : NONE
+07-10 08:25:13.530 I/AdrenoVK-0( 8299): Reconstruct Branch      : NOTHING
+07-10 08:25:13.530 I/AdrenoVK-0( 8299): Build Config            : S P 18.0.0 AArch64
+07-10 08:25:13.530 I/AdrenoVK-0( 8299): Driver Path             : /vendor/lib64/hw/vulkan.adreno.so
+07-10 08:25:13.530 I/AdrenoVK-0( 8299): Driver Version          : 0800.64.7
+07-10 08:25:13.530 I/AdrenoVK-0( 8299): PFP                     : 0x01500077
+07-10 08:25:13.530 I/AdrenoVK-0( 8299): ME                      : 0x01500014
+07-10 08:25:13.530 I/AdrenoVK-0( 8299): Application Name    : Impeller
+07-10 08:25:13.530 I/AdrenoVK-0( 8299): Process Name        : com.aienglishpractice.stealthvox
+07-10 08:25:13.530 I/AdrenoVK-0( 8299): Application Version : 0x00800000
+07-10 08:25:13.530 I/AdrenoVK-0( 8299): Engine Name         : Impeller
+07-10 08:25:13.530 I/AdrenoVK-0( 8299): Engine Version      : 0x00400000
+07-10 08:25:13.530 I/AdrenoVK-0( 8299): Api Version         : 0x00401000
+07-10 08:25:13.535 I/flutter ( 8299): [IMPORTANT:flutter/shell/platform/android/android_context_vk_impeller.cc(62)] Using the Impeller rendering backend (Vulkan).
+07-10 08:25:13.540 I/TextToSpeech( 8299): Create TextToSpeech : caller process id[8299] / name[com.aienglishpractice.stealthvox] / target[com.google.android.tts]
+07-10 08:25:13.541 I/TextToSpeech( 8299): Sucessfully bound to com.google.android.tts
+07-10 08:25:13.543 I/TextToSpeech( 8299): Connected to TTS engine
+07-10 08:25:13.544 I/TextToSpeech( 8299): Setting up the connection to TTS engine...
+07-10 08:25:13.546 D/CompatChangeReporter( 8299): Compat change id reported: 377864165; UID 10676; state: ENABLED
+07-10 08:25:13.546 I/DecorView( 8299): setWindowBackground: isPopOver=false color=ffffffff d=android.graphics.drawable.ColorDrawable@de1772
+07-10 08:25:13.548 D/ViewRootImpl( 8299): desktopMode is false
+07-10 08:25:13.549 I/ViewRootImpl( 8299): dVRR is disabled
+07-10 08:25:13.549 D/HardwareRenderer( 8299): onDisplayChanged. displayId=0 current wxh=1080x2340 mLargest wxh=0x0
+07-10 08:25:13.549 D/HardwareRenderer( 8299): Set largestWidth and largestHeight as logical resolution. (1080x2340)
+07-10 08:25:13.549 D/HWUI    ( 8299): setMaxSurfaceArea requested wxh=(1080,2340) requestedSurfaceArea(2527200) mMaxSurfaceArea(2073600)
+07-10 08:25:13.549 D/NativeCustomFrequencyManager( 8299): [NativeCFMS] BpCustomFrequencyManager::BpCustomFrequencyManager()
+07-10 08:25:13.551 E/perf_hint( 8299): Session ID too large, must fit 32-bit integer
+07-10 08:25:13.551 D/InputTransport( 8299): Input channel constructed: '3e08bf9', fd=143
+07-10 08:25:13.551 I/InsetsController( 8299): onStateChanged: host=com.aienglishpractice.stealthvox/com.aienglishpractice.stealthvox.MainActivity, from=android.view.ViewRootImpl.onInsetsStateChanged:3038, state=InsetsState: {mDisplayFrame=Rect(0, 0 - 1080, 2340), mDisplayCutout=DisplayCutout{insets=Rect(0, 103 - 0, 0) waterfall=Insets{left=0, top=0, right=0, bottom=0} boundingRect={Bounds=[Rect(0, 0 - 0, 0), Rect(511, 0 - 569, 103), Rect(0, 0 - 0, 0), Rect(0, 0 - 0, 0)]} cutoutPathParserInfo={CutoutPathParserInfo{displayWidth=1080 displayHeight=2340 physicalDisplayWidth=1080 physicalDisplayHeight=2340 density={3.0} cutoutSpec={M 0,0 H -9.666666666666667 V 34.33333333333333 H 9.666666666666667 V 0 H 0 Z @dp} rotation={0} scale={1.0} physicalPixelDisplaySizeRatio={1.0}}} sideOverrides={}}, mRoundedCorners=RoundedCorners{[RoundedCorner{position=TopLeft, radius=115, center=Point(115, 115)}, RoundedCorner{position=TopRight, radius=115, center=Point(965, 115)}, RoundedCorner{position=BottomRight, radius=115, center=Point(965, 2225)}, RoundedCorner{position=BottomLeft, radius=115, center=Point(115, 2225)}]}  mRoundedCornerFrame=Rect(0, 0 - 1080, 2340), mPrivacyIndicatorBounds=PrivacyIndicatorBounds {static bounds=Rect(931, 0 - 1080, 103) rotation=0}, mDisplayShape=DisplayShape{ spec=-311912193 displayWidth=1080 displayHeight=2340 physicalPixelDisplaySizeRatio=1.0 rotation=0 offsetX=0 offsetY=0 scale=1.0}, mSources= { InsetsSource: {b2950001 mType=navigationBars mFrame=[0,2178][1080,2340] mAttachedInsets=null mVisible=true mFlags= mSideHint=BOTTOM mBoundingRects=null}, InsetsSource: {b2950004 mType=systemGestures mFrame=[0,0][0,0] mAttachedInsets=null mVisible=true mFlags= mSideHint=NONE mBoundingRects=null}, InsetsSource: {b2950005 mType=mandatorySystemGestures mFrame=[0,2178][1080,2340] mAttachedInsets=null mVisible=true mFlags= mSideHint=BOTTOM mBoundingRects=null}, InsetsSource: {b2950006 mType=tappableElement mFrame=[0,2178][1080,2340] mAttachedInsets=null mVisible=true mFlags= mSideHint=BOTTOM mBoundingRects=null}, InsetsSource: {b2950024 mType=systemGestures mFrame=[0,0][0,0] mAttachedInsets=null mVisible=true mFlags= mSideHint=NONE mBoundingRects=null}, InsetsSource: {3 mType=ime mFrame=[0,0][0,0] mAttachedInsets=null mVisible=false mFlags=INVALID mSideHint=NONE mBoundingRects=null}, InsetsSource: {27 mType=displayCutout mFrame=[0,0][1080,103] mAttachedInsets=null mVisible=true mFlags= mSideHint=TOP mBoundingRects=null}, InsetsSource: {1f0000 mType=statusBars mFrame=[0,0][1080,103] mAttachedInsets=null mVisible=true mFlags= mSideHint=TOP mBoundingRects=null}, InsetsSource: {1f0005 mType=mandatorySystemGestures mFrame=[0,0][1080,144] mAttachedInsets=null mVisible=true mFlags= mSideHint=TOP mBoundingRects=null}, InsetsSource: {1f0006 mType=tappableElement mFrame=[0,0][1080,103] mAttachedInsets=null mVisible=true mFlags= mSideHint=TOP mBoundingRects=null} }
+07-10 08:25:13.551 I/VRI[MainActivity]@cbdfa2b( 8299): synced displayState. AttachInfo displayState=2
+07-10 08:25:13.552 I/VRI[MainActivity]@cbdfa2b( 8299): setView = com.android.internal.policy.DecorView@a6636d2 IsHRR=false mFlingFrameRateChange=0 TM=true
+07-10 08:25:13.564 D/HWUI    ( 8299): HWUI - treat SMPTE_170M as sRGB
+07-10 08:25:13.565 D/WindowOnBackDispatcher( 8299): setTopOnBackInvokedCallback (unwrapped): android.app.Activity$$ExternalSyntheticLambda0@5ec8b15
+07-10 08:25:13.565 I/WindowExtensionsImpl( 8299): Initializing Window Extensions, vendor API level=9, activity embedding enabled=true
+07-10 08:25:13.567 I/SV[94856147 MainActivity]( 8299): onWindowVisibilityChanged(0) true U3.w{5a763d3 V.E...... ......I. 0,0-0,0} of VRI[MainActivity]@cbdfa2b
+07-10 08:25:13.567 D/SurfaceView( 8299): 94856147 updateSurface: has no frame
+07-10 08:25:13.567 D/VRI[MainActivity]@cbdfa2b( 8299): WindowInsets changed: 1080x2340 statusBars:[0,103,0,0] navigationBars:[0,0,0,162] mandatorySystemGestures:[0,144,0,162] 
+07-10 08:25:13.569 E/BufferQueueProducer( 8299): Unable to open libpenguin.so: dlopen failed: library "libpenguin.so" not found.
+07-10 08:25:13.569 E/tice.stealthvox( 8299): Unable to open libpenguin.so: dlopen failed: library "libpenguin.so" not found.
+07-10 08:25:13.569 I/BufferQueueProducer( 8299): [](id:206b00000000,api:0,p:459224752,c:8299) setDequeueTimeout:2077252342
+07-10 08:25:13.569 I/BLASTBufferQueue_Java( 8299): new BLASTBufferQueue, mName= VRI[MainActivity]@cbdfa2b mNativeObject= 0xb40000772b5d0010 caller= android.view.ViewRootImpl.updateBlastSurfaceIfNeeded:3603 android.view.ViewRootImpl.relayoutWindow:11813 android.view.ViewRootImpl.performTraversals:4840 android.view.ViewRootImpl.doTraversal:3959 android.view.ViewRootImpl$TraversalRunnable.run:13034 android.view.Choreographer$CallbackRecord.run:1961 android.view.Choreographer$CallbackRecord.run:1970 android.view.Choreographer.doCallbacks:1423 android.view.Choreographer.doFrame:1348 android.view.Choreographer$FrameDisplayEventReceiver.run:1930 
+07-10 08:25:13.569 I/BLASTBufferQueue_Java( 8299): update, w= 1080 h= 2340 mName = VRI[MainActivity]@cbdfa2b mNativeObject= 0xb40000772b5d0010 sc.mNativeObject= 0xb40000775b5cf450 format= -3 caller= android.view.ViewRootImpl.updateBlastSurfaceIfNeeded:3608 android.view.ViewRootImpl.relayoutWindow:11813 android.view.ViewRootImpl.performTraversals:4840 android.view.ViewRootImpl.doTraversal:3959 android.view.ViewRootImpl$TraversalRunnable.run:13034 android.view.Choreographer$CallbackRecord.run:1961 
+07-10 08:25:13.569 I/VRI[MainActivity]@cbdfa2b( 8299): Relayout returned: old=(0,0,1080,2340) new=(0,0,1080,2340) relayoutAsync=false req=(1080,2340)0 dur=2 res=0x3 s={true 0xb40000771b6024c0} ch=true seqId=0
+07-10 08:25:13.570 I/VRI[MainActivity]@cbdfa2b( 8299): performConfigurationChange setNightDimText nightDimLevel=0
+07-10 08:25:13.570 D/VRI[MainActivity]@cbdfa2b( 8299): mThreadedRenderer.initialize() mSurface={isValid=true 0xb40000771b6024c0} hwInitialized=true
+07-10 08:25:13.570 D/SurfaceView( 8299): 94856147 updateSurface: has no frame
+07-10 08:25:13.570 I/SV[94856147 MainActivity]( 8299): windowStopped(false) true U3.w{5a763d3 V.E...... ......ID 0,0-1080,2340} of VRI[MainActivity]@cbdfa2b
+07-10 08:25:13.570 D/SurfaceView( 8299): 94856147 updateSurface: has no frame
+07-10 08:25:13.570 D/VRI[MainActivity]@cbdfa2b( 8299): reportNextDraw android.view.ViewRootImpl.performTraversals:5507 android.view.ViewRootImpl.doTraversal:3959 android.view.ViewRootImpl$TraversalRunnable.run:13034 android.view.Choreographer$CallbackRecord.run:1961 android.view.Choreographer$CallbackRecord.run:1970 
+07-10 08:25:13.570 I/SurfaceView( 8299): 94856147 Changes: creating=true format=true size=true visible=true alpha=false hint=false left=true top=true z=false attached=true lifecycleStrategy=false
+07-10 08:25:13.571 I/BufferQueueProducer( 8299): [](id:206b00000001,api:0,p:0,c:8299) setDequeueTimeout:2077252342
+07-10 08:25:13.571 I/BLASTBufferQueue_Java( 8299): new BLASTBufferQueue, mName= 5a763d3 SurfaceView[com.aienglishpractice.stealthvox/com.aienglishpractice.stealthvox.MainActivity]@0 mNativeObject= 0xb40000772b5f6630 caller= android.view.SurfaceView.createBlastSurfaceControls:1878 android.view.SurfaceView.updateSurface:1519 android.view.SurfaceView.lambda$new$0:283 android.view.SurfaceView.$r8$lambda$NfZyM_TG8F8lqzaOVZ7noREFjzU:0 android.view.SurfaceView$$ExternalSyntheticLambda1.onPreDraw:0 android.view.ViewTreeObserver.dispatchOnPreDraw:1295 android.view.ViewRootImpl.performTraversals:5512 android.view.ViewRootImpl.doTraversal:3959 android.view.ViewRootImpl$TraversalRunnable.run:13034 android.view.Choreographer$CallbackRecord.run:1961 
+07-10 08:25:13.571 I/BLASTBufferQueue_Java( 8299): update, w= 1080 h= 2340 mName = 5a763d3 SurfaceView[com.aienglishpractice.stealthvox/com.aienglishpractice.stealthvox.MainActivity]@0 mNativeObject= 0xb40000772b5f6630 sc.mNativeObject= 0xb40000775b5e8e90 format= 4 caller= android.view.SurfaceView.createBlastSurfaceControls:1879 android.view.SurfaceView.updateSurface:1519 android.view.SurfaceView.lambda$new$0:283 android.view.SurfaceView.$r8$lambda$NfZyM_TG8F8lqzaOVZ7noREFjzU:0 android.view.SurfaceView$$ExternalSyntheticLambda1.onPreDraw:0 android.view.ViewTreeObserver.dispatchOnPreDraw:1295 
+07-10 08:25:13.571 I/SurfaceView( 8299): 94856147 Cur surface: Surface(name=null mNativeObject=0)/@0x90e9c4
+07-10 08:25:13.571 I/SV[94856147 MainActivity]( 8299): pST: sr = Rect(0, 0 - 1080, 2340) sw = 1080 sh = 2340
+07-10 08:25:13.571 D/SurfaceView( 8299): 94856147 performSurfaceTransaction RenderWorker position = [0, 0, 1080, 2340] surfaceSize = 1080x2340
+07-10 08:25:13.571 I/SV[94856147 MainActivity]( 8299): updateSurface: mVisible = true mSurface.isValid() = true
+07-10 08:25:13.571 I/SV[94856147 MainActivity]( 8299): updateSurface: mSurfaceCreated = false surfaceChanged = true visibleChanged = true
+07-10 08:25:13.571 I/SurfaceView( 8299): 94856147 visibleChanged -- surfaceCreated
+07-10 08:25:13.571 I/SV[94856147 MainActivity]( 8299): surfaceCreated 1 #8 U3.w{5a763d3 V.E...... ......ID 0,0-1080,2340}
+07-10 08:25:13.572 I/AdrenoUtils( 8299): <ReadGpuID:366>: Reading chip ID through GSL
+07-10 08:25:13.574 I/SurfaceView( 8299): 94856147 surfaceChanged -- format=4 w=1080 h=2340
+07-10 08:25:13.574 I/SV[94856147 MainActivity]( 8299): surfaceChanged (1080,2340) 1 #8 U3.w{5a763d3 V.E...... ......ID 0,0-1080,2340}
+07-10 08:25:13.577 I/SurfaceView( 8299): 94856147 surfaceRedrawNeeded
+07-10 08:25:13.577 V/SurfaceView( 8299): Layout: x=0 y=0 w=1080 h=2340, frame=Rect(0, 0 - 1080, 2340)
+07-10 08:25:13.577 D/VRI[MainActivity]@cbdfa2b( 8299): Canceling draw. cancelDueToPreDrawListener=true cancelDueToSync=false
+07-10 08:25:13.577 D/WindowLayoutComponentImpl( 8299): Register WindowLayoutInfoListener on Context=com.aienglishpractice.stealthvox.MainActivity@cf864a1, of which baseContext=android.app.ContextImpl@dd95f73
+07-10 08:25:13.579 D/[Purchases] - DEBUG( 8299): ℹ️ Debug logging enabled
+07-10 08:25:13.579 D/[Purchases] - DEBUG( 8299): ℹ️ SDK Version - 9.12.2
+07-10 08:25:13.579 D/[Purchases] - DEBUG( 8299): ℹ️ Package name - com.aienglishpractice.stealthvox
+07-10 08:25:13.579 D/[Purchases] - DEBUG( 8299): 👤 Initial App User ID - null
+07-10 08:25:13.579 D/[Purchases] - DEBUG( 8299): ℹ️ Purchases configured with response verification: DISABLED
+07-10 08:25:13.580 D/[Purchases] - DEBUG( 8299): 👤 Identifying App User ID: $RCAnonymousID:7647ad1c7c264e528e714daf9589d25f
+07-10 08:25:13.580 D/[Purchases] - DEBUG( 8299): ℹ️ Deleting old synced subscriber attributes that don't belong to $RCAnonymousID:7647ad1c7c264e528e714daf9589d25f
+07-10 08:25:13.580 D/[Purchases] - DEBUG( 8299): ℹ️ App foregrounded
+07-10 08:25:13.580 D/[Purchases] - DEBUG( 8299): ℹ️ Listener set
+07-10 08:25:13.580 D/[Purchases] - DEBUG( 8299): ℹ️ CustomerInfo cache is stale, updating from network in foreground.
+07-10 08:25:13.580 D/[Purchases] - DEBUG( 8299): ℹ️ Sending latest CustomerInfo to listener.
+07-10 08:25:13.580 D/[Purchases] - DEBUG( 8299): Retrieving customer info with policy: FETCH_CURRENT
+07-10 08:25:13.580 D/[Purchases] - DEBUG( 8299): ℹ️ Updating pending purchase queue
+07-10 08:25:13.581 D/[Purchases] - DEBUG( 8299): ℹ️ Offerings cache is stale, updating from network in foreground
+07-10 08:25:13.581 D/[Purchases] - DEBUG( 8299): 😻 Start Offerings update from network.
+07-10 08:25:13.581 D/[Purchases] - DEBUG( 8299): ℹ️ Querying purchases
+07-10 08:25:13.581 D/[Purchases] - DEBUG( 8299): Request already scheduled with jitter delay, adding existing callbacks to unjittered request with key: BackgroundAwareCallbackCacheKey(cacheKey=[/v1/subscribers/%24RCAnonymousID%3A7647ad1c7c264e528e714daf9589d25f/offerings], appInBackground=false)
+07-10 08:25:13.581 D/[Purchases] - DEBUG( 8299): ℹ️ Updating pending purchase queue
+07-10 08:25:13.581 D/[Purchases] - DEBUG( 8299): ℹ️ No subscriber attributes to synchronize.
+07-10 08:25:13.581 D/[Purchases] - DEBUG( 8299): Retrieving customer info with policy: CACHED_OR_FETCHED
+07-10 08:25:13.581 D/[Purchases] - DEBUG( 8299): ℹ️ Vending CustomerInfo from cache.
+07-10 08:25:13.581 D/[Purchases] - DEBUG( 8299): ℹ️ Checking if cache is stale AppInBackground false
+07-10 08:25:13.581 D/[Purchases] - DEBUG( 8299): ℹ️ No cached Offerings, fetching from network
+07-10 08:25:13.581 D/[Purchases] - DEBUG( 8299): 😻 Start Offerings update from network.
+07-10 08:25:13.581 D/[Purchases] - DEBUG( 8299): Same call already in progress, adding to callbacks map with key: BackgroundAwareCallbackCacheKey(cacheKey=[/v1/subscribers/%24RCAnonymousID%3A7647ad1c7c264e528e714daf9589d25f/offerings], appInBackground=false)
+07-10 08:25:13.581 D/[Purchases] - DEBUG( 8299): Request already scheduled with jitter delay, adding existing callbacks to unjittered request with key: BackgroundAwareCallbackCacheKey(cacheKey=[/v1/subscribers/%24RCAnonymousID%3A7647ad1c7c264e528e714daf9589d25f/offerings], appInBackground=false)
+07-10 08:25:13.582 D/[Purchases] - DEBUG( 8299): ℹ️ Starting connection for G0.e@2f1b4f2
+07-10 08:25:13.590 I/InsetsSourceConsumer( 8299): applyRequestedVisibilityToControl: visible=true, type=statusBars, host=com.aienglishpractice.stealthvox/com.aienglishpractice.stealthvox.MainActivity
+07-10 08:25:13.590 I/InsetsSourceConsumer( 8299): applyRequestedVisibilityToControl: visible=true, type=navigationBars, host=com.aienglishpractice.stealthvox/com.aienglishpractice.stealthvox.MainActivity
+07-10 08:25:13.598 D/[Purchases] - DEBUG( 8299): ℹ️ Billing Service Setup finished for G0.e@2f1b4f2
+07-10 08:25:13.598 D/[Purchases] - DEBUG( 8299): ℹ️ Updating pending purchase queue
+07-10 08:25:13.624 D/[Purchases] - DEBUG( 8299): ℹ️ Cleaning previously sent tokens
+07-10 08:25:13.625 D/[Purchases] - DEBUG( 8299): ℹ️ Tokens already posted: []
+07-10 08:25:13.625 D/[Purchases] - DEBUG( 8299): ℹ️ Saving tokens []
+07-10 08:25:13.625 D/[Purchases] - DEBUG( 8299): ℹ️ Tokens already posted: []
+07-10 08:25:13.625 D/[Purchases] - DEBUG( 8299): ℹ️ No pending purchases to sync
+07-10 08:25:13.625 D/[Purchases] - DEBUG( 8299): Request already scheduled with jitter delay, adding existing callbacks to unjittered request with key: BackgroundAwareCallbackCacheKey(cacheKey=[/v1/subscribers/%24RCAnonymousID%3A7647ad1c7c264e528e714daf9589d25f], appInBackground=false)
+07-10 08:25:13.665 I/BLASTBufferQueue( 8299): [5a763d3 SurfaceView[com.aienglishpractice.stealthvox/com.aienglishpractice.stealthvox.MainActivity]@0#1](f:0,a:0,s:0) onFrameAvailable the first frame is available
+07-10 08:25:13.665 I/SurfaceComposerClient( 8299): apply transaction with the first frame. layerId: 158742, bufferData(ID: 35643933589514, frameNumber: 1)
+07-10 08:25:13.665 I/SurfaceView( 8299): 94856147 finishedDrawing
+07-10 08:25:13.666 D/VRI[MainActivity]@cbdfa2b( 8299): Setup new sync=wmsSync-VRI[MainActivity]@cbdfa2b#1
+07-10 08:25:13.666 I/VRI[MainActivity]@cbdfa2b( 8299): Creating new active sync group VRI[MainActivity]@cbdfa2b#2
+07-10 08:25:13.666 D/VRI[MainActivity]@cbdfa2b( 8299): Draw frame after cancel
+07-10 08:25:13.666 D/VRI[MainActivity]@cbdfa2b( 8299): registerCallbacksForSync syncBuffer=false
+07-10 08:25:13.667 D/SurfaceView( 8299): 94856147 updateSurfacePosition RenderWorker, frameNr = 1, position = [0, 0, 1080, 2340] surfaceSize = 1080x2340
+07-10 08:25:13.667 I/SV[94856147 MainActivity]( 8299): uSP: rtp = Rect(0, 0 - 1080, 2340) rtsw = 1080 rtsh = 2340
+07-10 08:25:13.667 I/SV[94856147 MainActivity]( 8299): onSSPAndSRT: pl = 0 pt = 0 sx = 1.0 sy = 1.0
+07-10 08:25:13.667 I/SV[94856147 MainActivity]( 8299): aOrMT: VRI[MainActivity]@cbdfa2b t = android.view.SurfaceControl$Transaction@9904f49 fN = 1 android.view.SurfaceView.-$$Nest$mapplyOrMergeTransaction:0 android.view.SurfaceView$SurfaceViewPositionUpdateListener.positionChanged:2029 android.graphics.RenderNode$CompositePositionUpdateListener.positionChanged:401 
+07-10 08:25:13.667 I/VRI[MainActivity]@cbdfa2b( 8299): mWNT: t=0xb40000779b5f8890 mBlastBufferQueue=0xb40000772b5d0010 fn= 1 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SurfaceView.applyOrMergeTransaction:1960 android.view.SurfaceView.-$$Nest$mapplyOrMergeTransaction:0 android.view.SurfaceView$SurfaceViewPositionUpdateListener.positionChanged:2029 
+07-10 08:25:13.667 D/VRI[MainActivity]@cbdfa2b( 8299): Received frameDrawingCallback syncResult=0 frameNum=1.
+07-10 08:25:13.667 I/VRI[MainActivity]@cbdfa2b( 8299): mWNT: t=0xb40000779b5ffc30 mBlastBufferQueue=0xb40000772b5d0010 fn= 1 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.ViewRootImpl$12.onFrameDraw:15561 android.view.ThreadedRenderer$1.onFrameDraw:751 <bottom of call stack> 
+07-10 08:25:13.667 I/VRI[MainActivity]@cbdfa2b( 8299): Setting up sync and frameCommitCallback
+07-10 08:25:13.670 I/BLASTBufferQueue( 8299): [VRI[MainActivity]@cbdfa2b#0](f:0,a:0,s:0) onFrameAvailable the first frame is available
+07-10 08:25:13.670 I/SurfaceComposerClient( 8299): apply transaction with the first frame. layerId: 158737, bufferData(ID: 35643933589519, frameNumber: 1)
+07-10 08:25:13.670 I/VRI[MainActivity]@cbdfa2b( 8299): Received frameCommittedCallback lastAttemptedDrawFrameNum=1 didProduceBuffer=true
+07-10 08:25:13.670 D/HWUI    ( 8299): CFMS:: SetUp Pid : 8299    Tid : 8378
+07-10 08:25:13.670 D/VRI[MainActivity]@cbdfa2b( 8299): reportDrawFinished seqId=0
+07-10 08:25:13.685 D/VRI[MainActivity]@cbdfa2b( 8299): mThreadedRenderer.initializeIfNeeded()#2 mSurface={isValid=true 0xb40000771b6024c0}
+07-10 08:25:13.686 D/InputMethodManagerUtils( 8299): startInputInner - Id : 0
+07-10 08:25:13.686 I/InputMethodManager( 8299): startInputInner - IInputMethodManagerGlobalInvoker.startInputOrWindowGainedFocus
+07-10 08:25:13.687 D/InsetsController( 8299): hide(ime())
+07-10 08:25:13.687 I/ImeTracker( 8299): com.aienglishpractice.stealthvox:197d751a: onCancelled at PHASE_CLIENT_ALREADY_HIDDEN
+07-10 08:25:13.687 D/InputTransport( 8299): Input channel constructed: 'ClientS', fd=192
+07-10 08:25:13.918 D/[Purchases] - DEBUG( 8299): API request started: GET /v1/subscribers/%24RCAnonymousID%3A7647ad1c7c264e528e714daf9589d25f/offerings
+07-10 08:25:13.918 D/[Purchases] - DEBUG( 8299): API request completed with status: GET /v1/subscribers/%24RCAnonymousID%3A7647ad1c7c264e528e714daf9589d25f/offerings 304
+07-10 08:25:13.919 D/[Purchases] - DEBUG( 8299): ℹ️ Requesting products from the store with identifiers: stealthvox_10m, stealthvox_1h, stealthvox_5h, stealthvox_10h
+07-10 08:25:13.919 D/[Purchases] - DEBUG( 8299): ℹ️ Requesting products from the store with identifiers: stealthvox_10m, stealthvox_1h, stealthvox_5h, stealthvox_10h
+07-10 08:25:13.919 D/[Purchases] - DEBUG( 8299): ℹ️ Querying purchases
+07-10 08:25:13.919 D/[Purchases] - DEBUG( 8299): ℹ️ Querying purchases
+07-10 08:25:13.920 D/[Purchases] - DEBUG( 8299): Billing connected with country code: KR
+07-10 08:25:13.922 D/[Purchases] - DEBUG( 8299): ℹ️ Cleaning previously sent tokens
+07-10 08:25:13.922 D/[Purchases] - DEBUG( 8299): ℹ️ Tokens already posted: []
+07-10 08:25:13.922 D/[Purchases] - DEBUG( 8299): ℹ️ Saving tokens []
+07-10 08:25:13.922 D/[Purchases] - DEBUG( 8299): ℹ️ Tokens already posted: []
+07-10 08:25:13.922 D/[Purchases] - DEBUG( 8299): ℹ️ No pending purchases to sync
+07-10 08:25:13.922 D/[Purchases] - DEBUG( 8299): ℹ️ Cleaning previously sent tokens
+07-10 08:25:13.923 D/[Purchases] - DEBUG( 8299): ℹ️ Tokens already posted: []
+07-10 08:25:13.923 D/[Purchases] - DEBUG( 8299): ℹ️ Saving tokens []
+07-10 08:25:13.923 D/[Purchases] - DEBUG( 8299): ℹ️ Tokens already posted: []
+07-10 08:25:13.923 D/[Purchases] - DEBUG( 8299): ℹ️ No pending purchases to sync
+07-10 08:25:13.923 D/[Purchases] - DEBUG( 8299): ℹ️ Products request finished for stealthvox_10m, stealthvox_1h, stealthvox_5h, stealthvox_10h
+07-10 08:25:13.923 D/[Purchases] - DEBUG( 8299): 💰 Retrieved productDetailsList: 
+07-10 08:25:13.923 I/[Purchases] - INFO( 8299): ℹ️ Missing productDetails: UnfetchedProduct{productId='stealthvox_10h', productType='subs', statusCode=3}, UnfetchedProduct{productId='stealthvox_10m', productType='subs', statusCode=3}, UnfetchedProduct{productId='stealthvox_1h', productType='subs', statusCode=3}, UnfetchedProduct{productId='stealthvox_5h', productType='subs', statusCode=3}
+07-10 08:25:13.924 I/[Purchases] - INFO( 8299): ℹ️ Product not found: stealthvox_10h - Product Type: subs, Reason: PRODUCT_NOT_FOUND, Serialized doc ID: 
+07-10 08:25:13.924 I/[Purchases] - INFO( 8299): ℹ️ Product not found: stealthvox_10m - Product Type: subs, Reason: PRODUCT_NOT_FOUND, Serialized doc ID: 
+07-10 08:25:13.924 I/[Purchases] - INFO( 8299): ℹ️ Product not found: stealthvox_1h - Product Type: subs, Reason: PRODUCT_NOT_FOUND, Serialized doc ID: 
+07-10 08:25:13.924 I/[Purchases] - INFO( 8299): ℹ️ Product not found: stealthvox_5h - Product Type: subs, Reason: PRODUCT_NOT_FOUND, Serialized doc ID: 
+07-10 08:25:13.924 D/[Purchases] - DEBUG( 8299): ℹ️ Requesting products from the store with identifiers: stealthvox_10m, stealthvox_1h, stealthvox_5h, stealthvox_10h
+07-10 08:25:13.924 D/[Purchases] - DEBUG( 8299): ℹ️ Products request finished for stealthvox_10m, stealthvox_1h, stealthvox_5h, stealthvox_10h
+07-10 08:25:13.924 D/[Purchases] - DEBUG( 8299): 💰 Retrieved productDetailsList: 
+07-10 08:25:13.924 I/[Purchases] - INFO( 8299): ℹ️ Missing productDetails: UnfetchedProduct{productId='stealthvox_10h', productType='subs', statusCode=3}, UnfetchedProduct{productId='stealthvox_10m', productType='subs', statusCode=3}, UnfetchedProduct{productId='stealthvox_1h', productType='subs', statusCode=3}, UnfetchedProduct{productId='stealthvox_5h', productType='subs', statusCode=3}
+07-10 08:25:13.924 I/[Purchases] - INFO( 8299): ℹ️ Product not found: stealthvox_10h - Product Type: subs, Reason: PRODUCT_NOT_FOUND, Serialized doc ID: 
+07-10 08:25:13.924 I/[Purchases] - INFO( 8299): ℹ️ Product not found: stealthvox_10m - Product Type: subs, Reason: PRODUCT_NOT_FOUND, Serialized doc ID: 
+07-10 08:25:13.924 I/[Purchases] - INFO( 8299): ℹ️ Product not found: stealthvox_1h - Product Type: subs, Reason: PRODUCT_NOT_FOUND, Serialized doc ID: 
+07-10 08:25:13.924 I/[Purchases] - INFO( 8299): ℹ️ Product not found: stealthvox_5h - Product Type: subs, Reason: PRODUCT_NOT_FOUND, Serialized doc ID: 
+07-10 08:25:13.924 D/[Purchases] - DEBUG( 8299): ℹ️ Requesting products from the store with identifiers: stealthvox_10m, stealthvox_1h, stealthvox_5h, stealthvox_10h
+07-10 08:25:13.927 D/[Purchases] - DEBUG( 8299): ℹ️ Products request finished for stealthvox_10m, stealthvox_1h, stealthvox_5h, stealthvox_10h
+07-10 08:25:13.927 D/[Purchases] - DEBUG( 8299): ℹ️ Products request finished for stealthvox_10m, stealthvox_1h, stealthvox_5h, stealthvox_10h
+07-10 08:25:13.927 D/[Purchases] - DEBUG( 8299): 💰 Retrieved productDetailsList: ProductDetails{jsonString='{"productId":"stealthvox_10h","type":"inapp","title":"10시간 이용권 (StealthVox (실전형 AI 영어 훈련 플랫폼))","name":"10시간 이용권","description":"StealthVox 10시간 이용권","localizedIn":["en-US"],"skuDetailsToken":"AEuhp4Lhn8sxWWfyexXHDTZx_IuJ99_bE2JwTvmPMqNjprtUHU-eYDWyb_MQD8EUkCNQ3IPsyroQCnU=","oneTimePurchaseOfferDetails":{},"oneTimePurchaseOfferDetailsList":[{"priceAmountMicros":15000000000,"priceCurrencyCode":"KRW","formattedPrice":"₩15,000","offerIdToken":"ASNjY+9R9iYioYFXzjKXziDxOsar5jZ8r+3VELRFIGlbyUYwTM0WxFLknKI\/6mo5CtN4gv4Cctfe8Tna9r1T","purchaseOptionId":"buy-10h","offerTags":[]}]}', parsedJson={"productId":"stealthvox_10h","type":"inapp","title":"10시간 이용권 (StealthVox (실전형 AI 영어 훈련 플랫폼))","name":"10시간 이용권","description":"StealthVox 10시간 이용권","localizedIn":["en-US"],"skuDetailsToken":"AEuhp4Lhn8sxWWfyexXHDTZx_IuJ99_bE2JwTvmPMqNjprtUHU-eYDWyb_MQD8EUkCNQ3IPsyroQCnU=","oneTimePurchaseOfferDetails":{},"oneTimePurchaseOfferDetailsList":[{"priceAmountMicros":15000000000,"priceCurrencyCode":"KRW","formattedPrice":"₩15,000","offerIdToken":"ASNjY+9R9iYioYFXzjKXziDxOsar5jZ8r+3VELRFIGlbyUYwTM0WxFLknKI\/6mo5CtN4gv4Cctfe8Tna9r1T","purchaseOptionId":"buy-10h","offerTags":[]}]}, productId='stealthvox_10h', productType='inapp', title='10시간 이용권 (StealthVox (실전형 AI 영어 훈련 플랫폼))', productDetailsToken='AEuhp4Lhn8sxWWfyexXHDTZx_IuJ99_bE2JwTvmPMqNjprtUHU-eYDWyb_MQD8EUkCNQ3IPsyroQCnU=', subscriptionOfferDetails=null}, ProductDetails{jsonString='{"productId":"stealthvox_10m","type":"inapp","title":"10분 작전 맛보기 (StealthVox (실전형 AI 영어 훈련 플랫폼))","name":"10분 작전 맛보기","description":"스텔스룸 10분 이용권입니다.","localizedIn":["en-US"],"skuDetailsToken":"AEuhp4L8snok6ZiHo_bjspylSkJhU5kA-KHm7-SgnE160yGFQ4d-DFpV2JJGGiabMJFVFHMpEliVTpo=","oneTimePurchaseOfferDetails":{},"oneTimePurchaseOfferDetailsList":[{"priceAmountMicros":300000000,"priceCurrencyCode":"KRW","formattedPrice":"₩300","offerIdToken":"ASNjY+8U9\/+eCHeo2KSYUQJvrKUpmx8nrgCn7UWcvu8Dv1kPqG5cWgn72nQargVMDUAKyMO06K3qCt2uZazV","purchaseOptionId":"buy-10m","offerTags":[]}]}', parsedJson={"productId":"stealthvox_10m","type":"inapp","title":"10분 작전 맛보기 (StealthVox (실전형 AI 영어 훈련 플랫폼))","name":"10분 작전 맛보기","description":"스텔스룸 10분 이용권입니다.","localizedIn":["en-US"],"skuDetailsToken":"AEuhp4L8snok6ZiHo_bjspylSkJhU5kA-KHm7-SgnE160yGFQ4d-DFpV2JJGGiabMJFVFHMpEliVTpo=","oneTimePurchaseOfferDetails":{},"oneTimePurchaseOfferDetailsList":[{"priceAmountMicros":300000000,"priceCurrencyCode":"KRW","formattedPrice":"₩300","offerIdToken":"ASNjY+8U9\/+eCHeo2KSYUQJvrKUpmx8nrgCn7UWcvu8Dv1kPqG5cWgn72nQargVMDUAKyMO06K3qCt2uZazV","purchaseOptionId":"buy-10m","offerTags":[]}]}, productId='stealthvox_10m', productType='inapp', title='10분 작전 맛보기 (StealthVox (실전형 AI 영어 훈련 플랫폼))', productDetailsToken='AEuhp4L8snok6ZiHo_bjspylSkJhU5kA-KHm7-SgnE160yGFQ4d-DFpV2JJGGiabMJFVFHMpEliVTpo=', subscriptionOfferDetails=null}, ProductDetails{jsonString='{"productId":"stealthvox_1h","type":"inapp","title":"1시간 이용권 (StealthVox (실전형 AI 영어 훈련 플랫폼))","name":"1시간 이용권","description":"스텔스룸 1시간 이용권입니다.","localizedIn":["en-US"],"skuDetailsToken":"AEuhp4IbbiVz8IK2Xl1tcTyeg1Mp20d8Io5AopSptYdYesY8MA0WZ0Zc6fqw0PLWQR96o_AmoU5NoEU=","oneTimePurchaseOfferDetails":{},"oneTimePurchaseOfferDetailsList":[{"priceAmountMicros":1700000000,"priceCurrencyCode":"KRW","formattedPrice":"₩1,700","offerIdToken":"ASNjY+8S0ir4vTa4\/d5nsp5WjpbytaasIAtIsFA9VdGSArfgk2NgND0NBvWhGLcFZ4OzpS39dGON3sk=","purchaseOptionId":"buy-1h","offerTags":[]}]}', parsedJson={"productId":"stealthvox_1h","type":"inapp","title":"1시간 이용권 (StealthVox (실전형 AI 영어 훈련 플랫폼))","name":"1시간 이용권","description":"스텔스
+07-10 08:25:13.927 D/[Purchases] - DEBUG( 8299): 💰 Retrieved productDetailsList: ProductDetails{jsonString='{"productId":"stealthvox_10h","type":"inapp","title":"10시간 이용권 (StealthVox (실전형 AI 영어 훈련 플랫폼))","name":"10시간 이용권","description":"StealthVox 10시간 이용권","localizedIn":["en-US"],"skuDetailsToken":"AEuhp4Lhn8sxWWfyexXHDTZx_IuJ99_bE2JwTvmPMqNjprtUHU-eYDWyb_MQD8EUkCNQ3IPsyroQCnU=","oneTimePurchaseOfferDetails":{},"oneTimePurchaseOfferDetailsList":[{"priceAmountMicros":15000000000,"priceCurrencyCode":"KRW","formattedPrice":"₩15,000","offerIdToken":"ASNjY+9R9iYioYFXzjKXziDxOsar5jZ8r+3VELRFIGlbyUYwTM0WxFLknKI\/6mo5CtN4gv4Cctfe8Tna9r1T","purchaseOptionId":"buy-10h","offerTags":[]}]}', parsedJson={"productId":"stealthvox_10h","type":"inapp","title":"10시간 이용권 (StealthVox (실전형 AI 영어 훈련 플랫폼))","name":"10시간 이용권","description":"StealthVox 10시간 이용권","localizedIn":["en-US"],"skuDetailsToken":"AEuhp4Lhn8sxWWfyexXHDTZx_IuJ99_bE2JwTvmPMqNjprtUHU-eYDWyb_MQD8EUkCNQ3IPsyroQCnU=","oneTimePurchaseOfferDetails":{},"oneTimePurchaseOfferDetailsList":[{"priceAmountMicros":15000000000,"priceCurrencyCode":"KRW","formattedPrice":"₩15,000","offerIdToken":"ASNjY+9R9iYioYFXzjKXziDxOsar5jZ8r+3VELRFIGlbyUYwTM0WxFLknKI\/6mo5CtN4gv4Cctfe8Tna9r1T","purchaseOptionId":"buy-10h","offerTags":[]}]}, productId='stealthvox_10h', productType='inapp', title='10시간 이용권 (StealthVox (실전형 AI 영어 훈련 플랫폼))', productDetailsToken='AEuhp4Lhn8sxWWfyexXHDTZx_IuJ99_bE2JwTvmPMqNjprtUHU-eYDWyb_MQD8EUkCNQ3IPsyroQCnU=', subscriptionOfferDetails=null}, ProductDetails{jsonString='{"productId":"stealthvox_10m","type":"inapp","title":"10분 작전 맛보기 (StealthVox (실전형 AI 영어 훈련 플랫폼))","name":"10분 작전 맛보기","description":"스텔스룸 10분 이용권입니다.","localizedIn":["en-US"],"skuDetailsToken":"AEuhp4L8snok6ZiHo_bjspylSkJhU5kA-KHm7-SgnE160yGFQ4d-DFpV2JJGGiabMJFVFHMpEliVTpo=","oneTimePurchaseOfferDetails":{},"oneTimePurchaseOfferDetailsList":[{"priceAmountMicros":300000000,"priceCurrencyCode":"KRW","formattedPrice":"₩300","offerIdToken":"ASNjY+8U9\/+eCHeo2KSYUQJvrKUpmx8nrgCn7UWcvu8Dv1kPqG5cWgn72nQargVMDUAKyMO06K3qCt2uZazV","purchaseOptionId":"buy-10m","offerTags":[]}]}', parsedJson={"productId":"stealthvox_10m","type":"inapp","title":"10분 작전 맛보기 (StealthVox (실전형 AI 영어 훈련 플랫폼))","name":"10분 작전 맛보기","description":"스텔스룸 10분 이용권입니다.","localizedIn":["en-US"],"skuDetailsToken":"AEuhp4L8snok6ZiHo_bjspylSkJhU5kA-KHm7-SgnE160yGFQ4d-DFpV2JJGGiabMJFVFHMpEliVTpo=","oneTimePurchaseOfferDetails":{},"oneTimePurchaseOfferDetailsList":[{"priceAmountMicros":300000000,"priceCurrencyCode":"KRW","formattedPrice":"₩300","offerIdToken":"ASNjY+8U9\/+eCHeo2KSYUQJvrKUpmx8nrgCn7UWcvu8Dv1kPqG5cWgn72nQargVMDUAKyMO06K3qCt2uZazV","purchaseOptionId":"buy-10m","offerTags":[]}]}, productId='stealthvox_10m', productType='inapp', title='10분 작전 맛보기 (StealthVox (실전형 AI 영어 훈련 플랫폼))', productDetailsToken='AEuhp4L8snok6ZiHo_bjspylSkJhU5kA-KHm7-SgnE160yGFQ4d-DFpV2JJGGiabMJFVFHMpEliVTpo=', subscriptionOfferDetails=null}, ProductDetails{jsonString='{"productId":"stealthvox_1h","type":"inapp","title":"1시간 이용권 (StealthVox (실전형 AI 영어 훈련 플랫폼))","name":"1시간 이용권","description":"스텔스룸 1시간 이용권입니다.","localizedIn":["en-US"],"skuDetailsToken":"AEuhp4IbbiVz8IK2Xl1tcTyeg1Mp20d8Io5AopSptYdYesY8MA0WZ0Zc6fqw0PLWQR96o_AmoU5NoEU=","oneTimePurchaseOfferDetails":{},"oneTimePurchaseOfferDetailsList":[{"priceAmountMicros":1700000000,"priceCurrencyCode":"KRW","formattedPrice":"₩1,700","offerIdToken":"ASNjY+8S0ir4vTa4\/d5nsp5WjpbytaasIAtIsFA9VdGSArfgk2NgND0NBvWhGLcFZ4OzpS39dGON3sk=","purchaseOptionId":"buy-1h","offerTags":[]}]}', parsedJson={"productId":"stealthvox_1h","type":"inapp","title":"1시간 이용권 (StealthVox (실전형 AI 영어 훈련 플랫폼))","name":"1시간 이용권","description":"스텔스
+07-10 08:25:13.927 D/[Purchases] - DEBUG( 8299): 💰 stealthvox_10h - ProductDetails{jsonString='{"productId":"stealthvox_10h","type":"inapp","title":"10시간 이용권 (StealthVox (실전형 AI 영어 훈련 플랫폼))","name":"10시간 이용권","description":"StealthVox 10시간 이용권","localizedIn":["en-US"],"skuDetailsToken":"AEuhp4Lhn8sxWWfyexXHDTZx_IuJ99_bE2JwTvmPMqNjprtUHU-eYDWyb_MQD8EUkCNQ3IPsyroQCnU=","oneTimePurchaseOfferDetails":{},"oneTimePurchaseOfferDetailsList":[{"priceAmountMicros":15000000000,"priceCurrencyCode":"KRW","formattedPrice":"₩15,000","offerIdToken":"ASNjY+9R9iYioYFXzjKXziDxOsar5jZ8r+3VELRFIGlbyUYwTM0WxFLknKI\/6mo5CtN4gv4Cctfe8Tna9r1T","purchaseOptionId":"buy-10h","offerTags":[]}]}', parsedJson={"productId":"stealthvox_10h","type":"inapp","title":"10시간 이용권 (StealthVox (실전형 AI 영어 훈련 플랫폼))","name":"10시간 이용권","description":"StealthVox 10시간 이용권","localizedIn":["en-US"],"skuDetailsToken":"AEuhp4Lhn8sxWWfyexXHDTZx_IuJ99_bE2JwTvmPMqNjprtUHU-eYDWyb_MQD8EUkCNQ3IPsyroQCnU=","oneTimePurchaseOfferDetails":{},"oneTimePurchaseOfferDetailsList":[{"priceAmountMicros":15000000000,"priceCurrencyCode":"KRW","formattedPrice":"₩15,000","offerIdToken":"ASNjY+9R9iYioYFXzjKXziDxOsar5jZ8r+3VELRFIGlbyUYwTM0WxFLknKI\/6mo5CtN4gv4Cctfe8Tna9r1T","purchaseOptionId":"buy-10h","offerTags":[]}]}, productId='stealthvox_10h', productType='inapp', title='10시간 이용권 (StealthVox (실전형 AI 영어 훈련 플랫폼))', productDetailsToken='AEuhp4Lhn8sxWWfyexXHDTZx_IuJ99_bE2JwTvmPMqNjprtUHU-eYDWyb_MQD8EUkCNQ3IPsyroQCnU=', subscriptionOfferDetails=null}
+07-10 08:25:13.927 D/[Purchases] - DEBUG( 8299): 💰 stealthvox_10m - ProductDetails{jsonString='{"productId":"stealthvox_10m","type":"inapp","title":"10분 작전 맛보기 (StealthVox (실전형 AI 영어 훈련 플랫폼))","name":"10분 작전 맛보기","description":"스텔스룸 10분 이용권입니다.","localizedIn":["en-US"],"skuDetailsToken":"AEuhp4L8snok6ZiHo_bjspylSkJhU5kA-KHm7-SgnE160yGFQ4d-DFpV2JJGGiabMJFVFHMpEliVTpo=","oneTimePurchaseOfferDetails":{},"oneTimePurchaseOfferDetailsList":[{"priceAmountMicros":300000000,"priceCurrencyCode":"KRW","formattedPrice":"₩300","offerIdToken":"ASNjY+8U9\/+eCHeo2KSYUQJvrKUpmx8nrgCn7UWcvu8Dv1kPqG5cWgn72nQargVMDUAKyMO06K3qCt2uZazV","purchaseOptionId":"buy-10m","offerTags":[]}]}', parsedJson={"productId":"stealthvox_10m","type":"inapp","title":"10분 작전 맛보기 (StealthVox (실전형 AI 영어 훈련 플랫폼))","name":"10분 작전 맛보기","description":"스텔스룸 10분 이용권입니다.","localizedIn":["en-US"],"skuDetailsToken":"AEuhp4L8snok6ZiHo_bjspylSkJhU5kA-KHm7-SgnE160yGFQ4d-DFpV2JJGGiabMJFVFHMpEliVTpo=","oneTimePurchaseOfferDetails":{},"oneTimePurchaseOfferDetailsList":[{"priceAmountMicros":300000000,"priceCurrencyCode":"KRW","formattedPrice":"₩300","offerIdToken":"ASNjY+8U9\/+eCHeo2KSYUQJvrKUpmx8nrgCn7UWcvu8Dv1kPqG5cWgn72nQargVMDUAKyMO06K3qCt2uZazV","purchaseOptionId":"buy-10m","offerTags":[]}]}, productId='stealthvox_10m', productType='inapp', title='10분 작전 맛보기 (StealthVox (실전형 AI 영어 훈련 플랫폼))', productDetailsToken='AEuhp4L8snok6ZiHo_bjspylSkJhU5kA-KHm7-SgnE160yGFQ4d-DFpV2JJGGiabMJFVFHMpEliVTpo=', subscriptionOfferDetails=null}
+07-10 08:25:13.927 D/[Purchases] - DEBUG( 8299): 💰 stealthvox_10h - ProductDetails{jsonString='{"productId":"stealthvox_10h","type":"inapp","title":"10시간 이용권 (StealthVox (실전형 AI 영어 훈련 플랫폼))","name":"10시간 이용권","description":"StealthVox 10시간 이용권","localizedIn":["en-US"],"skuDetailsToken":"AEuhp4Lhn8sxWWfyexXHDTZx_IuJ99_bE2JwTvmPMqNjprtUHU-eYDWyb_MQD8EUkCNQ3IPsyroQCnU=","oneTimePurchaseOfferDetails":{},"oneTimePurchaseOfferDetailsList":[{"priceAmountMicros":15000000000,"priceCurrencyCode":"KRW","formattedPrice":"₩15,000","offerIdToken":"ASNjY+9R9iYioYFXzjKXziDxOsar5jZ8r+3VELRFIGlbyUYwTM0WxFLknKI\/6mo5CtN4gv4Cctfe8Tna9r1T","purchaseOptionId":"buy-10h","offerTags":[]}]}', parsedJson={"productId":"stealthvox_10h","type":"inapp","title":"10시간 이용권 (StealthVox (실전형 AI 영어 훈련 플랫폼))","name":"10시간 이용권","description":"StealthVox 10시간 이용권","localizedIn":["en-US"],"skuDetailsToken":"AEuhp4Lhn8sxWWfyexXHDTZx_IuJ99_bE2JwTvmPMqNjprtUHU-eYDWyb_MQD8EUkCNQ3IPsyroQCnU=","oneTimePurchaseOfferDetails":{},"oneTimePurchaseOfferDetailsList":[{"priceAmountMicros":15000000000,"priceCurrencyCode":"KRW","formattedPrice":"₩15,000","offerIdToken":"ASNjY+9R9iYioYFXzjKXziDxOsar5jZ8r+3VELRFIGlbyUYwTM0WxFLknKI\/6mo5CtN4gv4Cctfe8Tna9r1T","purchaseOptionId":"buy-10h","offerTags":[]}]}, productId='stealthvox_10h', productType='inapp', title='10시간 이용권 (StealthVox (실전형 AI 영어 훈련 플랫폼))', productDetailsToken='AEuhp4Lhn8sxWWfyexXHDTZx_IuJ99_bE2JwTvmPMqNjprtUHU-eYDWyb_MQD8EUkCNQ3IPsyroQCnU=', subscriptionOfferDetails=null}
+07-10 08:25:13.927 D/[Purchases] - DEBUG( 8299): 💰 stealthvox_1h - ProductDetails{jsonString='{"productId":"stealthvox_1h","type":"inapp","title":"1시간 이용권 (StealthVox (실전형 AI 영어 훈련 플랫폼))","name":"1시간 이용권","description":"스텔스룸 1시간 이용권입니다.","localizedIn":["en-US"],"skuDetailsToken":"AEuhp4IbbiVz8IK2Xl1tcTyeg1Mp20d8Io5AopSptYdYesY8MA0WZ0Zc6fqw0PLWQR96o_AmoU5NoEU=","oneTimePurchaseOfferDetails":{},"oneTimePurchaseOfferDetailsList":[{"priceAmountMicros":1700000000,"priceCurrencyCode":"KRW","formattedPrice":"₩1,700","offerIdToken":"ASNjY+8S0ir4vTa4\/d5nsp5WjpbytaasIAtIsFA9VdGSArfgk2NgND0NBvWhGLcFZ4OzpS39dGON3sk=","purchaseOptionId":"buy-1h","offerTags":[]}]}', parsedJson={"productId":"stealthvox_1h","type":"inapp","title":"1시간 이용권 (StealthVox (실전형 AI 영어 훈련 플랫폼))","name":"1시간 이용권","description":"스텔스룸 1시간 이용권입니다.","localizedIn":["en-US"],"skuDetailsToken":"AEuhp4IbbiVz8IK2Xl1tcTyeg1Mp20d8Io5AopSptYdYesY8MA0WZ0Zc6fqw0PLWQR96o_AmoU5NoEU=","oneTimePurchaseOfferDetails":{},"oneTimePurchaseOfferDetailsList":[{"priceAmountMicros":1700000000,"priceCurrencyCode":"KRW","formattedPrice":"₩1,700","offerIdToken":"ASNjY+8S0ir4vTa4\/d5nsp5WjpbytaasIAtIsFA9VdGSArfgk2NgND0NBvWhGLcFZ4OzpS39dGON3sk=","purchaseOptionId":"buy-1h","offerTags":[]}]}, productId='stealthvox_1h', productType='inapp', title='1시간 이용권 (StealthVox (실전형 AI 영어 훈련 플랫폼))', productDetailsToken='AEuhp4IbbiVz8IK2Xl1tcTyeg1Mp20d8Io5AopSptYdYesY8MA0WZ0Zc6fqw0PLWQR96o_AmoU5NoEU=', subscriptionOfferDetails=null}
+07-10 08:25:13.927 D/[Purchases] - DEBUG( 8299): 💰 stealthvox_10m - ProductDetails{jsonString='{"productId":"stealthvox_10m","type":"inapp","title":"10분 작전 맛보기 (StealthVox (실전형 AI 영어 훈련 플랫폼))","name":"10분 작전 맛보기","description":"스텔스룸 10분 이용권입니다.","localizedIn":["en-US"],"skuDetailsToken":"AEuhp4L8snok6ZiHo_bjspylSkJhU5kA-KHm7-SgnE160yGFQ4d-DFpV2JJGGiabMJFVFHMpEliVTpo=","oneTimePurchaseOfferDetails":{},"oneTimePurchaseOfferDetailsList":[{"priceAmountMicros":300000000,"priceCurrencyCode":"KRW","formattedPrice":"₩300","offerIdToken":"ASNjY+8U9\/+eCHeo2KSYUQJvrKUpmx8nrgCn7UWcvu8Dv1kPqG5cWgn72nQargVMDUAKyMO06K3qCt2uZazV","purchaseOptionId":"buy-10m","offerTags":[]}]}', parsedJson={"productId":"stealthvox_10m","type":"inapp","title":"10분 작전 맛보기 (StealthVox (실전형 AI 영어 훈련 플랫폼))","name":"10분 작전 맛보기","description":"스텔스룸 10분 이용권입니다.","localizedIn":["en-US"],"skuDetailsToken":"AEuhp4L8snok6ZiHo_bjspylSkJhU5kA-KHm7-SgnE160yGFQ4d-DFpV2JJGGiabMJFVFHMpEliVTpo=","oneTimePurchaseOfferDetails":{},"oneTimePurchaseOfferDetailsList":[{"priceAmountMicros":300000000,"priceCurrencyCode":"KRW","formattedPrice":"₩300","offerIdToken":"ASNjY+8U9\/+eCHeo2KSYUQJvrKUpmx8nrgCn7UWcvu8Dv1kPqG5cWgn72nQargVMDUAKyMO06K3qCt2uZazV","purchaseOptionId":"buy-10m","offerTags":[]}]}, productId='stealthvox_10m', productType='inapp', title='10분 작전 맛보기 (StealthVox (실전형 AI 영어 훈련 플랫폼))', productDetailsToken='AEuhp4L8snok6ZiHo_bjspylSkJhU5kA-KHm7-SgnE160yGFQ4d-DFpV2JJGGiabMJFVFHMpEliVTpo=', subscriptionOfferDetails=null}
+07-10 08:25:13.927 D/[Purchases] - DEBUG( 8299): 💰 stealthvox_5h - ProductDetails{jsonString='{"productId":"stealthvox_5h","type":"inapp","title":"5시간 이용권 (StealthVox (실전형 AI 영어 훈련 플랫폼))","name":"5시간 이용권","description":"StealthVox 5시간 이용권","localizedIn":["en-US"],"skuDetailsToken":"AEuhp4I-gwqKAN9fJPuohb1OtSIbPh5aYyXNFnexfpjGwdnpdOnoWfZ2JXhDPuNw_-f3f3fPFFXU7EM=","oneTimePurchaseOfferDetails":{},"oneTimePurchaseOfferDetailsList":[{"priceAmountMicros":8000000000,"priceCurrencyCode":"KRW","formattedPrice":"₩8,000","offerIdToken":"ASNjY+8\/TZuC8TcplVfCf9+\/YUT4KzPrwdeSr9QrRdJ4IsyOAsnVYUjq5WncK5lC4Ycm2ZDBr56YLDw=","purchaseOptionId":"buy-5h","offerTags":[]}]}', parsedJson={"productId":"stealthvox_5h","type":"inapp","title":"5시간 이용권 (StealthVox (실전형 AI 영어 훈련 플랫폼))","name":"5시간 이용권","description":"StealthVox 5시간 이용권","localizedIn":["en-US"],"skuDetailsToken":"AEuhp4I-gwqKAN9fJPuohb1OtSIbPh5aYyXNFnexfpjGwdnpdOnoWfZ2JXhDPuNw_-f3f3fPFFXU7EM=","oneTimePurchaseOfferDetails":{},"oneTimePurchaseOfferDetailsList":[{"priceAmountMicros":8000000000,"priceCurrencyCode":"KRW","formattedPrice":"₩8,000","offerIdToken":"ASNjY+8\/TZuC8TcplVfCf9+\/YUT4KzPrwdeSr9QrRdJ4IsyOAsnVYUjq5WncK5lC4Ycm2ZDBr56YLDw=","purchaseOptionId":"buy-5h","offerTags":[]}]}, productId='stealthvox_5h', productType='inapp', title='5시간 이용권 (StealthVox (실전형 AI 영어 훈련 플랫폼))', productDetailsToken='AEuhp4I-gwqKAN9fJPuohb1OtSIbPh5aYyXNFnexfpjGwdnpdOnoWfZ2JXhDPuNw_-f3f3fPFFXU7EM=', subscriptionOfferDetails=null}
+07-10 08:25:13.928 D/[Purchases] - DEBUG( 8299): 💰 stealthvox_1h - ProductDetails{jsonString='{"productId":"stealthvox_1h","type":"inapp","title":"1시간 이용권 (StealthVox (실전형 AI 영어 훈련 플랫폼))","name":"1시간 이용권","description":"스텔스룸 1시간 이용권입니다.","localizedIn":["en-US"],"skuDetailsToken":"AEuhp4IbbiVz8IK2Xl1tcTyeg1Mp20d8Io5AopSptYdYesY8MA0WZ0Zc6fqw0PLWQR96o_AmoU5NoEU=","oneTimePurchaseOfferDetails":{},"oneTimePurchaseOfferDetailsList":[{"priceAmountMicros":1700000000,"priceCurrencyCode":"KRW","formattedPrice":"₩1,700","offerIdToken":"ASNjY+8S0ir4vTa4\/d5nsp5WjpbytaasIAtIsFA9VdGSArfgk2NgND0NBvWhGLcFZ4OzpS39dGON3sk=","purchaseOptionId":"buy-1h","offerTags":[]}]}', parsedJson={"productId":"stealthvox_1h","type":"inapp","title":"1시간 이용권 (StealthVox (실전형 AI 영어 훈련 플랫폼))","name":"1시간 이용권","description":"스텔스룸 1시간 이용권입니다.","localizedIn":["en-US"],"skuDetailsToken":"AEuhp4IbbiVz8IK2Xl1tcTyeg1Mp20d8Io5AopSptYdYesY8MA0WZ0Zc6fqw0PLWQR96o_AmoU5NoEU=","oneTimePurchaseOfferDetails":{},"oneTimePurchaseOfferDetailsList":[{"priceAmountMicros":1700000000,"priceCurrencyCode":"KRW","formattedPrice":"₩1,700","offerIdToken":"ASNjY+8S0ir4vTa4\/d5nsp5WjpbytaasIAtIsFA9VdGSArfgk2NgND0NBvWhGLcFZ4OzpS39dGON3sk=","purchaseOptionId":"buy-1h","offerTags":[]}]}, productId='stealthvox_1h', productType='inapp', title='1시간 이용권 (StealthVox (실전형 AI 영어 훈련 플랫폼))', productDetailsToken='AEuhp4IbbiVz8IK2Xl1tcTyeg1Mp20d8Io5AopSptYdYesY8MA0WZ0Zc6fqw0PLWQR96o_AmoU5NoEU=', subscriptionOfferDetails=null}
+07-10 08:25:13.928 D/[Purchases] - DEBUG( 8299): 💰 stealthvox_5h - ProductDetails{jsonString='{"productId":"stealthvox_5h","type":"inapp","title":"5시간 이용권 (StealthVox (실전형 AI 영어 훈련 플랫폼))","name":"5시간 이용권","description":"StealthVox 5시간 이용권","localizedIn":["en-US"],"skuDetailsToken":"AEuhp4I-gwqKAN9fJPuohb1OtSIbPh5aYyXNFnexfpjGwdnpdOnoWfZ2JXhDPuNw_-f3f3fPFFXU7EM=","oneTimePurchaseOfferDetails":{},"oneTimePurchaseOfferDetailsList":[{"priceAmountMicros":8000000000,"priceCurrencyCode":"KRW","formattedPrice":"₩8,000","offerIdToken":"ASNjY+8\/TZuC8TcplVfCf9+\/YUT4KzPrwdeSr9QrRdJ4IsyOAsnVYUjq5WncK5lC4Ycm2ZDBr56YLDw=","purchaseOptionId":"buy-5h","offerTags":[]}]}', parsedJson={"productId":"stealthvox_5h","type":"inapp","title":"5시간 이용권 (StealthVox (실전형 AI 영어 훈련 플랫폼))","name":"5시간 이용권","description":"StealthVox 5시간 이용권","localizedIn":["en-US"],"skuDetailsToken":"AEuhp4I-gwqKAN9fJPuohb1OtSIbPh5aYyXNFnexfpjGwdnpdOnoWfZ2JXhDPuNw_-f3f3fPFFXU7EM=","oneTimePurchaseOfferDetails":{},"oneTimePurchaseOfferDetailsList":[{"priceAmountMicros":8000000000,"priceCurrencyCode":"KRW","formattedPrice":"₩8,000","offerIdToken":"ASNjY+8\/TZuC8TcplVfCf9+\/YUT4KzPrwdeSr9QrRdJ4IsyOAsnVYUjq5WncK5lC4Ycm2ZDBr56YLDw=","purchaseOptionId":"buy-5h","offerTags":[]}]}, productId='stealthvox_5h', productType='inapp', title='5시간 이용권 (StealthVox (실전형 AI 영어 훈련 플랫폼))', productDetailsToken='AEuhp4I-gwqKAN9fJPuohb1OtSIbPh5aYyXNFnexfpjGwdnpdOnoWfZ2JXhDPuNw_-f3f3fPFFXU7EM=', subscriptionOfferDetails=null}
+07-10 08:25:13.928 D/[Purchases] - DEBUG( 8299): ℹ️ Building offerings response with 4 products
+07-10 08:25:13.929 D/[Purchases] - DEBUG( 8299): ℹ️ Building offerings response with 4 products
+07-10 08:25:14.136 D/[Purchases] - DEBUG( 8299): API request started: GET /v1/subscribers/%24RCAnonymousID%3A7647ad1c7c264e528e714daf9589d25f
+07-10 08:25:14.136 D/[Purchases] - DEBUG( 8299): API request completed with status: GET /v1/subscribers/%24RCAnonymousID%3A7647ad1c7c264e528e714daf9589d25f 304
+07-10 08:25:14.137 D/[Purchases] - DEBUG( 8299): 😻 CustomerInfo updated from network.
+07-10 08:25:14.658 I/flutter ( 8299): [TrialDebug] IntroMaster initState, time=2026-07-10T08:25:14.658558
+07-10 08:25:14.696 I/flutter ( 8299): [TrialDebug] _checkEntryStatus enter, currentUser=null, isAnonymous=null, time=2026-07-10T08:25:14.696655
+07-10 08:25:14.696 I/flutter ( 8299): [Intro] pendingInviteType=, duoRoomId=
+07-10 08:25:14.700 D/ConnectivityManager( 8299): StackLog: [android.net.ConnectivityManager.sendRequestForNetwork(ConnectivityManager.java:4744)] [android.net.ConnectivityManager.sendRequestForNetwork(ConnectivityManager.java:4912)] [android.net.ConnectivityManager.registerNetworkCallback(ConnectivityManager.java:5329)] [android.net.ConnectivityManager.registerNetworkCallback(ConnectivityManager.java:5299)] [com.appsflyer.internal.AFi1tSDK.<init>(SourceFile:31)] [com.appsflyer.internal.AFa1tSDK.hashCode(SourceFile:65)] [com.appsflyer.internal.AFa1tSDK.getMonetizationNetwork(SourceFile:5)] [com.appsflyer.internal.AFa1tSDK.equals(SourceFile:5)] [com.appsflyer.internal.AFa1tSDK.f(SourceFile:1)] [com.appsflyer.internal.c.run(SourceFile:1)] [java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1100)] [java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:624)] [java.lang.Thread.run(Thread.java:1572)]
+07-10 08:25:15.427 I/VRI[MainActivity]@cbdfa2b( 8299): ViewPostIme pointer 0
+07-10 08:25:15.429 I/VRI[MainActivity]@cbdfa2b( 8299): call setFrameRateCategory for touch hint category=high hint, reason=touch, vri=VRI[MainActivity]@cbdfa2b
+07-10 08:25:15.517 I/VRI[MainActivity]@cbdfa2b( 8299): ViewPostIme pointer 1
+07-10 08:25:15.662 D/AppsFlyer_FlutterPlugin( 8299): Calling invokeMethod with: {"install_time":"2026-07-09 23:05:45.070","af_message":"organic install","af_status":"Organic","is_first_launch":false}
+07-10 08:25:16.233 I/VRI[MainActivity]@cbdfa2b( 8299): ViewPostIme pointer 0
+07-10 08:25:16.334 I/VRI[MainActivity]@cbdfa2b( 8299): ViewPostIme pointer 1
+07-10 08:25:17.608 I/VRI[MainActivity]@cbdfa2b( 8299): ViewPostIme pointer 0
+07-10 08:25:17.708 I/VRI[MainActivity]@cbdfa2b( 8299): ViewPostIme pointer 1
+07-10 08:25:17.709 I/flutter ( 8299): [Auth] _handleUnifiedAuth enter
+07-10 08:25:17.709 I/flutter ( 8299): [KakaoAuth] signInWithKakao start, currentUser=null, isAnonymous=null, skipAnonymous=false
+07-10 08:25:17.709 I/flutter ( 8299): [KakaoAuth] signInAnonymously start
+07-10 08:25:17.712 W/System  ( 8299): Ignoring header X-Firebase-Locale because its value was null.
+07-10 08:25:17.720 W/LocalRequestInterceptor( 8299): Error getting App Check token; using placeholder token instead. Error: T1.m: No AppCheckProvider installed.
+07-10 08:25:18.526 W/System  ( 8299): Ignoring header X-Firebase-Locale because its value was null.
+07-10 08:25:18.531 W/LocalRequestInterceptor( 8299): Error getting App Check token; using placeholder token instead. Error: T1.m: No AppCheckProvider installed.
+07-10 08:25:18.936 D/FirebaseAuth( 8299): Notifying id token listeners about user ( v4h2mZjXh2XnL1BB8yBgmRQXKj63 ).
+07-10 08:25:18.937 D/FirebaseAuth( 8299): Notifying auth state listeners about user ( v4h2mZjXh2XnL1BB8yBgmRQXKj63 ).
+07-10 08:25:18.940 I/flutter ( 8299): [KakaoAuth] signInAnonymously complete, uid=v4h2mZjXh2XnL1BB8yBgmRQXKj63
+07-10 08:25:18.945 D/ConnectivityManager( 8299): StackLog: [android.net.ConnectivityManager.sendRequestForNetwork(ConnectivityManager.java:4744)] [android.net.ConnectivityManager.registerDefaultNetworkCallbackForUid(ConnectivityManager.java:5469)] [android.net.ConnectivityManager.registerDefaultNetworkCallback(ConnectivityManager.java:5436)] [android.net.ConnectivityManager.registerDefaultNetworkCallback(ConnectivityManager.java:5410)] [y2.j.g(SourceFile:13)] [y2.j.<init>(SourceFile:39)] [y2.M.a(SourceFile:5)] [y2.M.k(SourceFile:25)] [s2.j.s(SourceFile:3)] [s2.Q.H(SourceFile:35)] [s2.Q.t(SourceFile:14)] [s2.C.run(SourceFile:1)] [z2.g.b(SourceFile:1)] [z2.d.call(SourceFile:1)] [z2.g$c.a(SourceFile:1)] [z2.k.run(SourceFile:1)] [java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:520)] [java.util.concurrent.FutureTask.run(FutureTask.java:328)] [java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask.run(ScheduledThreadPoolExecutor.java:323)] [java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1100)] [java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:624)] [z2.g$c$b.run(SourceFile:16)] [java.lang.Thread.run(Thread.java:1572)]
+07-10 08:25:18.945 W/DynamiteModule( 8299): Local module descriptor class for com.google.android.gms.providerinstaller.dynamite not found.
+07-10 08:25:18.949 I/DynamiteModule( 8299): Considering local module com.google.android.gms.providerinstaller.dynamite:0 and remote module com.google.android.gms.providerinstaller.dynamite:0
+07-10 08:25:18.949 W/ProviderInstaller( 8299): Failed to load providerinstaller module: No acceptable module com.google.android.gms.providerinstaller.dynamite found. Local version is 0 and remote version is 0.
+07-10 08:25:18.950 D/ApplicationLoaders( 8299): Returning zygote-cached class loader: /system/framework/org.apache.http.legacy.jar
+07-10 08:25:18.953 D/nativeloader( 8299): Configuring clns-10 for other apk /system/system_ext/framework/org.carconnectivity.android.digitalkey.rangingintent.jar. target_sdk_version=37, uses_libraries=ALL, library_path=/data/app/~~hvlvrWfT8JpRaSOISq_6uQ==/com.google.android.gms-vDYONInvbRaYSOoAptDXEw==/lib/arm64:/data/app/~~hvlvrWfT8JpRaSOISq_6uQ==/com.google.android.gms-vDYONInvbRaYSOoAptDXEw==/base.apk!/lib/arm64-v8a, permitted_path=/data:/mnt/expand:/data/user/0/com.google.android.gms
+07-10 08:25:18.953 D/nativeloader( 8299): Extending system_exposed_libraries: libhumantracking.arcsoft.so:libface_recognition.arcsoft.so:libgallery_pic_best.arcsoft.so:libPortraitDistortionCorrection.arcsoft.so:libPortraitDistortionCorrectionCali.arcsoft.so:libface_landmark.arcsoft.so:libFacialStickerEngine.arcsoft.so:libfrtracking_engine.arcsoft.so:libFaceRecognition.arcsoft.so:libveengine.arcsoft.so:lib_pet_detection.arcsoft.so:libae_bracket_hdr.arcsoft.so:libhybrid_high_dynamic_range.arcsoft.so:libimage_enhancement.arcsoft.so:libFacialAttributeDetection.arcsoft.so:libobjectcapture_jni.arcsoft.so:libobjectcapture.arcsoft.so:libmultisourceseparator.audio.samsung.so:libaudiomirroring_jni.audiomirroring.samsung.so:libBeauty_v4.camera.samsung.so:libexifa.camera.samsung.so:libjpega.camera.samsung.so:libOpenCv.camera.samsung.so:libAIDeflicker.camera.samsung.so:libDeflickerHDR.camera.samsung.so:libaifrcInterface.camera.samsung.so:libBestPhoto.camera.samsung.so:libC2paDps.camera.samsung.so:libVideoClassifier.camera.samsung.so:libImageScreener.camera.samsu
+07-10 08:25:18.954 D/nativeloader( 8299): Configuring clns-11 for other apk /system/system_ext/framework/org.carconnectivity.android.digitalkey.secureelement.jar. target_sdk_version=37, uses_libraries=ALL, library_path=/data/app/~~hvlvrWfT8JpRaSOISq_6uQ==/com.google.android.gms-vDYONInvbRaYSOoAptDXEw==/lib/arm64:/data/app/~~hvlvrWfT8JpRaSOISq_6uQ==/com.google.android.gms-vDYONInvbRaYSOoAptDXEw==/base.apk!/lib/arm64-v8a, permitted_path=/data:/mnt/expand:/data/user/0/com.google.android.gms
+07-10 08:25:18.954 D/nativeloader( 8299): Extending system_exposed_libraries: libhumantracking.arcsoft.so:libface_recognition.arcsoft.so:libgallery_pic_best.arcsoft.so:libPortraitDistortionCorrection.arcsoft.so:libPortraitDistortionCorrectionCali.arcsoft.so:libface_landmark.arcsoft.so:libFacialStickerEngine.arcsoft.so:libfrtracking_engine.arcsoft.so:libFaceRecognition.arcsoft.so:libveengine.arcsoft.so:lib_pet_detection.arcsoft.so:libae_bracket_hdr.arcsoft.so:libhybrid_high_dynamic_range.arcsoft.so:libimage_enhancement.arcsoft.so:libFacialAttributeDetection.arcsoft.so:libobjectcapture_jni.arcsoft.so:libobjectcapture.arcsoft.so:libmultisourceseparator.audio.samsung.so:libaudiomirroring_jni.audiomirroring.samsung.so:libBeauty_v4.camera.samsung.so:libexifa.camera.samsung.so:libjpega.camera.samsung.so:libOpenCv.camera.samsung.so:libAIDeflicker.camera.samsung.so:libDeflickerHDR.camera.samsung.so:libaifrcInterface.camera.samsung.so:libBestPhoto.camera.samsung.so:libC2paDps.camera.samsung.so:libVideoClassifier.camera.samsung.so:libImageScreener.camera.samsu
+07-10 08:25:18.955 D/ApplicationLoaders( 8299): Returning zygote-cached class loader: /system/framework/com.android.location.provider.jar
+07-10 08:25:18.955 D/ApplicationLoaders( 8299): Returning zygote-cached class loader: /system/framework/com.android.media.remotedisplay.jar
+07-10 08:25:18.958 D/nativeloader( 8299): Configuring clns-12 for other apk /system_ext/framework/com.android.extensions.appfunctions.jar. target_sdk_version=37, uses_libraries=ALL, library_path=/data/app/~~hvlvrWfT8JpRaSOISq_6uQ==/com.google.android.gms-vDYONInvbRaYSOoAptDXEw==/lib/arm64:/data/app/~~hvlvrWfT8JpRaSOISq_6uQ==/com.google.android.gms-vDYONInvbRaYSOoAptDXEw==/base.apk!/lib/arm64-v8a, permitted_path=/data:/mnt/expand:/data/user/0/com.google.android.gms
+07-10 08:25:18.958 D/nativeloader( 8299): Extending system_exposed_libraries: libhumantracking.arcsoft.so:libface_recognition.arcsoft.so:libgallery_pic_best.arcsoft.so:libPortraitDistortionCorrection.arcsoft.so:libPortraitDistortionCorrectionCali.arcsoft.so:libface_landmark.arcsoft.so:libFacialStickerEngine.arcsoft.so:libfrtracking_engine.arcsoft.so:libFaceRecognition.arcsoft.so:libveengine.arcsoft.so:lib_pet_detection.arcsoft.so:libae_bracket_hdr.arcsoft.so:libhybrid_high_dynamic_range.arcsoft.so:libimage_enhancement.arcsoft.so:libFacialAttributeDetection.arcsoft.so:libobjectcapture_jni.arcsoft.so:libobjectcapture.arcsoft.so:libmultisourceseparator.audio.samsung.so:libaudiomirroring_jni.audiomirroring.samsung.so:libBeauty_v4.camera.samsung.so:libexifa.camera.samsung.so:libjpega.camera.samsung.so:libOpenCv.camera.samsung.so:libAIDeflicker.camera.samsung.so:libDeflickerHDR.camera.samsung.so:libaifrcInterface.camera.samsung.so:libBestPhoto.camera.samsung.so:libC2paDps.camera.samsung.so:libVideoClassifier.camera.samsung.so:libImageScreener.camera.samsu
+07-10 08:25:18.959 D/ActivityThread( 8299): com.aienglishpractice.stealthvox will use render engine as VK
+07-10 08:25:18.960 D/ApplicationLoaders( 8299): Returning zygote-cached class loader: /system_ext/framework/androidx.window.extensions.jar
+07-10 08:25:18.960 D/ApplicationLoaders( 8299): Returning zygote-cached class loader: /system_ext/framework/androidx.window.sidecar.jar
+07-10 08:25:18.962 D/nativeloader( 8299): Configuring clns-13 for other apk /data/app/~~hvlvrWfT8JpRaSOISq_6uQ==/com.google.android.gms-vDYONInvbRaYSOoAptDXEw==/base.apk. target_sdk_version=37, uses_libraries=, library_path=/data/app/~~hvlvrWfT8JpRaSOISq_6uQ==/com.google.android.gms-vDYONInvbRaYSOoAptDXEw==/lib/arm64:/data/app/~~hvlvrWfT8JpRaSOISq_6uQ==/com.google.android.gms-vDYONInvbRaYSOoAptDXEw==/base.apk!/lib/arm64-v8a, permitted_path=/data:/mnt/expand:/data/user/0/com.google.android.gms
+07-10 08:25:18.962 I/DecorView( 8299): setWindowBackground: isPopOver=false color=0 d=android.graphics.drawable.ColorDrawable@b90f253
+07-10 08:25:18.967 W/ProviderInstaller( 8299): Failed to report request stats: com.google.android.gms.common.security.ProviderInstallerImpl.reportRequestStats [class android.content.Context, long, long]
+07-10 08:25:18.971 D/ViewRootImpl( 8299): desktopMode is false
+07-10 08:25:18.971 I/ViewRootImpl( 8299): dVRR is disabled
+07-10 08:25:18.971 D/NativeCustomFrequencyManager( 8299): [NativeCFMS] BpCustomFrequencyManager::BpCustomFrequencyManager()
+07-10 08:25:18.973 D/InputTransport( 8299): Input channel constructed: '9adb856', fd=230
+07-10 08:25:18.974 I/InsetsController( 8299): onStateChanged: host=com.aienglishpractice.stealthvox/com.kakao.sdk.flutter.TalkAuthCodeActivity, from=android.view.ViewRootImpl.onInsetsStateChanged:3038, state=InsetsState: {mDisplayFrame=Rect(0, 0 - 1080, 2340), mDisplayCutout=DisplayCutout{insets=Rect(0, 103 - 0, 0) waterfall=Insets{left=0, top=0, right=0, bottom=0} boundingRect={Bounds=[Rect(0, 0 - 0, 0), Rect(511, 0 - 569, 103), Rect(0, 0 - 0, 0), Rect(0, 0 - 0, 0)]} cutoutPathParserInfo={CutoutPathParserInfo{displayWidth=1080 displayHeight=2340 physicalDisplayWidth=1080 physicalDisplayHeight=2340 density={3.0} cutoutSpec={M 0,0 H -9.666666666666667 V 34.33333333333333 H 9.666666666666667 V 0 H 0 Z @dp} rotation={0} scale={1.0} physicalPixelDisplaySizeRatio={1.0}}} sideOverrides={}}, mRoundedCorners=RoundedCorners{[RoundedCorner{position=TopLeft, radius=115, center=Point(115, 115)}, RoundedCorner{position=TopRight, radius=115, center=Point(965, 115)}, RoundedCorner{position=BottomRight, radius=115, center=Point(965, 2225)}, RoundedCorner{position=BottomLeft, radius=115, center=Point(115, 2225)}]}  mRoundedCornerFrame=Rect(0, 0 - 1080, 2340), mPrivacyIndicatorBounds=PrivacyIndicatorBounds {static bounds=Rect(931, 0 - 1080, 103) rotation=0}, mDisplayShape=DisplayShape{ spec=-311912193 displayWidth=1080 displayHeight=2340 physicalPixelDisplaySizeRatio=1.0 rotation=0 offsetX=0 offsetY=0 scale=1.0}, mSources= { InsetsSource: {b2950001 mType=navigationBars mFrame=[0,2178][1080,2340] mAttachedInsets=null mVisible=true mFlags= mSideHint=BOTTOM mBoundingRects=null}, InsetsSource: {b2950004 mType=systemGestures mFrame=[0,0][0,0] mAttachedInsets=null mVisible=true mFlags= mSideHint=NONE mBoundingRects=null}, InsetsSource: {b2950005 mType=mandatorySystemGestures mFrame=[0,2178][1080,2340] mAttachedInsets=null mVisible=true mFlags= mSideHint=BOTTOM mBoundingRects=null}, InsetsSource: {b2950006 mType=tappableElement mFrame=[0,2178][1080,2340] mAttachedInsets=null mVisible=true mFlags= mSideHint=BOTTOM mBoundingRects=null}, InsetsSource: {b2950024 mType=systemGestures mFrame=[0,0][0,0] mAttachedInsets=null mVisible=true mFlags= mSideHint=NONE mBoundingRects=null}, InsetsSource: {27 mType=displayCutout mFrame=[0,0][1080,103] mAttachedInsets=null mVisible=true mFlags= mSideHint=TOP mBoundingRects=null}, InsetsSource: {1f0000 mType=statusBars mFrame=[0,0][1080,103] mAttachedInsets=null mVisible=true mFlags= mSideHint=TOP mBoundingRects=null}, InsetsSource: {1f0005 mType=mandatorySystemGestures mFrame=[0,0][1080,144] mAttachedInsets=null mVisible=true mFlags= mSideHint=TOP mBoundingRects=null}, InsetsSource: {1f0006 mType=tappableElement mFrame=[0,0][1080,103] mAttachedInsets=null mVisible=true mFlags= mSideHint=TOP mBoundingRects=null} }
+07-10 08:25:18.974 I/VRI[TalkAuthCodeActivity]@a8b1643( 8299): synced displayState. AttachInfo displayState=2
+07-10 08:25:18.974 I/VRI[TalkAuthCodeActivity]@a8b1643( 8299): setView = com.android.internal.policy.DecorView@24c18ab IsHRR=false mFlingFrameRateChange=0 TM=true
+07-10 08:25:18.975 E/perf_hint( 8299): Session ID too large, must fit 32-bit integer
+07-10 08:25:18.976 E/GoogleApiManager( 8299): Failed to get service from broker. 
+07-10 08:25:18.976 E/GoogleApiManager( 8299): java.lang.SecurityException: Unknown calling package name 'com.google.android.gms'.
+07-10 08:25:18.976 E/GoogleApiManager( 8299): 	at android.os.Parcel.createExceptionOrNull(Parcel.java:3388)
+07-10 08:25:18.976 E/GoogleApiManager( 8299): 	at android.os.Parcel.createException(Parcel.java:3372)
+07-10 08:25:18.976 E/GoogleApiManager( 8299): 	at android.os.Parcel.readException(Parcel.java:3355)
+07-10 08:25:18.976 E/GoogleApiManager( 8299): 	at android.os.Parcel.readException(Parcel.java:3297)
+07-10 08:25:18.976 E/GoogleApiManager( 8299): 	at bkss.a(:com.google.android.gms@262434035@26.24.34 (260400-938041327):36)
+07-10 08:25:18.976 E/GoogleApiManager( 8299): 	at bkqo.y(:com.google.android.gms@262434035@26.24.34 (260400-938041327):143)
+07-10 08:25:18.976 E/GoogleApiManager( 8299): 	at bjwq.run(:com.google.android.gms@262434035@26.24.34 (260400-938041327):42)
+07-10 08:25:18.976 E/GoogleApiManager( 8299): 	at android.os.Handler.handleCallback(Handler.java:1070)
+07-10 08:25:18.976 E/GoogleApiManager( 8299): 	at android.os.Handler.dispatchMessage(Handler.java:125)
+07-10 08:25:18.976 E/GoogleApiManager( 8299): 	at dcyq.mF(:com.google.android.gms@262434035@26.24.34 (260400-938041327):1)
+07-10 08:25:18.976 E/GoogleApiManager( 8299): 	at dcyq.dispatchMessage(:com.google.android.gms@262434035@26.24.34 (260400-938041327):5)
+07-10 08:25:18.976 E/GoogleApiManager( 8299): 	at android.os.Looper.dispatchMessage(Looper.java:358)
+07-10 08:25:18.976 E/GoogleApiManager( 8299): 	at android.os.Looper.loopOnce(Looper.java:288)
+07-10 08:25:18.976 E/GoogleApiManager( 8299): 	at android.os.Looper.loop(Looper.java:392)
+07-10 08:25:18.976 E/GoogleApiManager( 8299): 	at android.os.HandlerThread.run(HandlerThread.java:139)
+07-10 08:25:18.976 W/GoogleApiManager( 8299): Not showing notification since connectionResult is not user-facing: ConnectionResult{statusCode=DEVELOPER_ERROR, resolution=null, message=null, clientMethodKey=null}
+07-10 08:25:18.977 W/FlagRegistrar( 8299): Failed to register com.google.android.gms.providerinstaller#com.aienglishpractice.stealthvox
+07-10 08:25:18.977 W/FlagRegistrar( 8299): gpku: 17: 17: API: Phenotype.API is not available on this device. Connection failed with: ConnectionResult{statusCode=DEVELOPER_ERROR, resolution=null, message=null, clientMethodKey=null}
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at gpkw.a(:com.google.android.gms@262434035@26.24.34 (260400-938041327):13)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at hput.d(:com.google.android.gms@262434035@26.24.34 (260400-938041327):3)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at hpuv.run(:com.google.android.gms@262434035@26.24.34 (260400-938041327):139)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at hpxd.execute(:com.google.android.gms@262434035@26.24.34 (260400-938041327):1)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at hpvd.f(:com.google.android.gms@262434035@26.24.34 (260400-938041327):1)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at hpvd.m(:com.google.android.gms@262434035@26.24.34 (260400-938041327):101)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at hpvd.q(:com.google.android.gms@262434035@26.24.34 (260400-938041327):16)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at gitx.hD(:com.google.android.gms@262434035@26.24.34 (260400-938041327):35)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at fuvp.run(:com.google.android.gms@262434035@26.24.34 (260400-938041327):12)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at hpxd.execute(:com.google.android.gms@262434035@26.24.34 (260400-938041327):1)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at fuvq.b(:com.google.android.gms@262434035@26.24.34 (260400-938041327):18)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at fuwf.b(:com.google.android.gms@262434035@26.24.34 (260400-938041327):34)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at fuwh.c(:com.google.android.gms@262434035@26.24.34 (260400-938041327):23)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at bjtx.e(:com.google.android.gms@262434035@26.24.34 (260400-938041327):9)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at bjwo.q(:com.google.android.gms@262434035@26.24.34 (260400-938041327):48)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at bjwo.d(:com.google.android.gms@262434035@26.24.34 (260400-938041327):10)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at bjwo.g(:com.google.android.gms@262434035@26.24.34 (260400-938041327):191)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at bjwo.onConnectionFailed(:com.google.android.gms@262434035@26.24.34 (260400-938041327):2)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at bjwq.run(:com.google.android.gms@262434035@26.24.34 (260400-938041327):70)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at android.os.Handler.handleCallback(Handler.java:1070)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at android.os.Handler.dispatchMessage(Handler.java:125)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at dcyq.mF(:com.google.android.gms@262434035@26.24.34 (260400-938041327):1)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at dcyq.dispatchMessage(:com.google.android.gms@262434035@26.24.34 (260400-938041327):5)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at android.os.Looper.dispatchMessage(Looper.java:358)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at android.os.Looper.loopOnce(Looper.java:288)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at android.os.Looper.loop(Looper.java:392)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at android.os.HandlerThread.run(HandlerThread.java:139)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): Caused by: bjsc: 17: API: Phenotype.API is not available on this device. Connection failed with: ConnectionResult{statusCode=DEVELOPER_ERROR, resolution=null, message=null, clientMethodKey=null}
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at bkqa.a(:com.google.android.gms@262434035@26.24.34 (260400-938041327):15)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at bjua.a(:com.google.android.gms@262434035@26.24.34 (260400-938041327):1)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	at bjtx.e(:com.google.android.gms@262434035@26.24.34 (260400-938041327):5)
+07-10 08:25:18.977 W/FlagRegistrar( 8299): 	... 13 more
+07-10 08:25:18.977 W/FlagStore( 8299): Unable to update local snapshot for com.google.android.gms.providerinstaller#com.aienglishpractice.stealthvox, may result in stale flags.
+07-10 08:25:18.977 W/FlagStore( 8299): java.util.concurrent.ExecutionException: gpku: 17: 17: API: Phenotype.API is not available on this device. Connection failed with: ConnectionResult{statusCode=DEVELOPER_ERROR, resolution=null, message=null, clientMethodKey=null}
+07-10 08:25:18.977 W/FlagStore( 8299): 	at hpvd.j(:com.google.android.gms@262434035@26.24.34 (260400-938041327):21)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at hpvm.t(:com.google.android.gms@262434035@26.24.34 (260400-938041327):24)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at hpvd.get(:com.google.android.gms@262434035@26.24.34 (260400-938041327):1)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at hpzs.a(:com.google.android.gms@262434035@26.24.34 (260400-938041327):2)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at hpyi.s(:com.google.android.gms@262434035@26.24.34 (260400-938041327):10)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at gpqe.d(:com.google.android.gms@262434035@26.24.34 (260400-938041327):1)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at gppi.run(:com.google.android.gms@262434035@26.24.34 (260400-938041327):5)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at java.util.concurrent.Executors$RunnableAdapter.call(Executors.java:520)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at java.util.concurrent.FutureTask.run(FutureTask.java:328)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at java.util.concurrent.ScheduledThreadPoolExecutor$ScheduledFutureTask.run(ScheduledThreadPoolExecutor.java:323)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1100)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:624)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at java.lang.Thread.run(Thread.java:1572)
+07-10 08:25:18.977 W/FlagStore( 8299): Caused by: gpku: 17: 17: API: Phenotype.API is not available on this device. Connection failed with: ConnectionResult{statusCode=DEVELOPER_ERROR, resolution=null, message=null, clientMethodKey=null}
+07-10 08:25:18.977 W/FlagStore( 8299): 	at gpkw.a(:com.google.android.gms@262434035@26.24.34 (260400-938041327):13)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at hput.d(:com.google.android.gms@262434035@26.24.34 (260400-938041327):3)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at hpuv.run(:com.google.android.gms@262434035@26.24.34 (260400-938041327):139)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at hpxd.execute(:com.google.android.gms@262434035@26.24.34 (260400-938041327):1)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at hpvd.f(:com.google.android.gms@262434035@26.24.34 (260400-938041327):1)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at hpvd.m(:com.google.android.gms@262434035@26.24.34 (260400-938041327):101)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at hpvd.q(:com.google.android.gms@262434035@26.24.34 (260400-938041327):16)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at gitx.hD(:com.google.android.gms@262434035@26.24.34 (260400-938041327):35)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at fuvp.run(:com.google.android.gms@262434035@26.24.34 (260400-938041327):12)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at hpxd.execute(:com.google.android.gms@262434035@26.24.34 (260400-938041327):1)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at fuvq.b(:com.google.android.gms@262434035@26.24.34 (260400-938041327):18)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at fuwf.b(:com.google.android.gms@262434035@26.24.34 (260400-938041327):34)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at fuwm.B(:com.google.android.gms@262434035@26.24.34 (260400-938041327):17)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at fuvh.run(:com.google.android.gms@262434035@26.24.34 (260400-938041327):60)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at hpxd.execute(:com.google.android.gms@262434035@26.24.34 (260400-938041327):1)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at fuvi.b(:com.google.android.gms@262434035@26.24.34 (260400-938041327):8)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at fuwf.b(:com.google.android.gms@262434035@26.24.34 (260400-938041327):34)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at fuwh.c(:com.google.android.gms@262434035@26.24.34 (260400-938041327):23)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at bjtx.e(:com.google.android.gms@262434035@26.24.34 (260400-938041327):9)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at bjwo.q(:com.google.android.gms@262434035@26.24.34 (260400-938041327):48)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at bjwo.d(:com.google.android.gms@262434035@26.24.34 (260400-938041327):10)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at bjwo.g(:com.google.android.gms@262434035@26.24.34 (260400-938041327):191)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at bjwo.onConnectionFailed(:com.google.android.gms@262434035@26.24.34 (260400-938041327):2)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at bjwq.run(:com.google.android.gms@262434035@26.24.34 (260400-938041327):70)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at android.os.Handler.handleCallback(Handler.java:1070)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at android.os.Handler.dispatchMessage(Handler.java:125)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at dcyq.mF(:com.google.android.gms@262434035@26.24.34 (260400-938041327):1)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at dcyq.dispatchMessage(:com.google.android.gms@262434035@26.24.34 (260400-938041327):5)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at android.os.Looper.dispatchMessage(Looper.java:358)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at android.os.Looper.loopOnce(Looper.java:288)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at android.os.Looper.loop(Looper.java:392)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at android.os.HandlerThread.run(HandlerThread.java:139)
+07-10 08:25:18.977 W/FlagStore( 8299): Caused by: bjsc: 17: API: Phenotype.API is not available on this device. Connection failed with: ConnectionResult{statusCode=DEVELOPER_ERROR, resolution=null, message=null, clientMethodKey=null}
+07-10 08:25:18.977 W/FlagStore( 8299): 	at bkqa.a(:com.google.android.gms@262434035@26.24.34 (260400-938041327):15)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at bjua.a(:com.google.android.gms@262434035@26.24.34 (260400-938041327):1)
+07-10 08:25:18.977 W/FlagStore( 8299): 	at bjtx.e(:com.google.android.gms@262434035@26.24.34 (260400-938041327):5)
+07-10 08:25:18.977 W/FlagStore( 8299): 	... 13 more
+07-10 08:25:18.978 D/HWUI    ( 8299): HWUI - treat SMPTE_170M as sRGB
+07-10 08:25:18.979 D/nativeloader( 8299): Load /data/app/~~hvlvrWfT8JpRaSOISq_6uQ==/com.google.android.gms-vDYONInvbRaYSOoAptDXEw==/base.apk!/lib/arm64-v8a/libconscrypt_gmscore_jni.so using class loader ns clns-13 (caller=/data/app/~~hvlvrWfT8JpRaSOISq_6uQ==/com.google.android.gms-vDYONInvbRaYSOoAptDXEw==/base.apk): ok
+07-10 08:25:18.979 V/NativeCrypto( 8299): Registering com/google/android/gms/org/conscrypt/NativeCrypto's 337 native methods...
+07-10 08:25:18.980 D/WindowOnBackDispatcher( 8299): setTopOnBackInvokedCallback (unwrapped): android.app.Activity$$ExternalSyntheticLambda0@9400e9e
+07-10 08:25:18.980 D/VRI[TalkAuthCodeActivity]@a8b1643( 8299): WindowInsets changed: 1080x2340 statusBars:[0,103,0,0] navigationBars:[0,0,0,162] mandatorySystemGestures:[0,144,0,162] 
+07-10 08:25:18.980 W/BillingClient( 8299): Unable to launch intent for in-app messaging
+07-10 08:25:18.982 I/InsetsController( 8299): onStateChanged: host=com.aienglishpractice.stealthvox/com.kakao.sdk.flutter.TalkAuthCodeActivity, from=android.view.ViewRootImpl.onInsetsStateChanged:3038, state=InsetsState: {mDisplayFrame=Rect(0, 0 - 1080, 2340), mDisplayCutout=DisplayCutout{insets=Rect(0, 103 - 0, 0) waterfall=Insets{left=0, top=0, right=0, bottom=0} boundingRect={Bounds=[Rect(0, 0 - 0, 0), Rect(511, 0 - 569, 103), Rect(0, 0 - 0, 0), Rect(0, 0 - 0, 0)]} cutoutPathParserInfo={CutoutPathParserInfo{displayWidth=1080 displayHeight=2340 physicalDisplayWidth=1080 physicalDisplayHeight=2340 density={3.0} cutoutSpec={M 0,0 H -9.666666666666667 V 34.33333333333333 H 9.666666666666667 V 0 H 0 Z @dp} rotation={0} scale={1.0} physicalPixelDisplaySizeRatio={1.0}}} sideOverrides={}}, mRoundedCorners=RoundedCorners{[RoundedCorner{position=TopLeft, radius=115, center=Point(115, 115)}, RoundedCorner{position=TopRight, radius=115, center=Point(965, 115)}, RoundedCorner{position=BottomRight, radius=115, center=Point(965, 2225)}, RoundedCorner{position=BottomLeft, radius=115, center=Point(115, 2225)}]}  mRoundedCornerFrame=Rect(0, 0 - 1080, 2340), mPrivacyIndicatorBounds=PrivacyIndicatorBounds {static bounds=Rect(931, 0 - 1080, 103) rotation=0}, mDisplayShape=DisplayShape{ spec=-311912193 displayWidth=1080 displayHeight=2340 physicalPixelDisplaySizeRatio=1.0 rotation=0 offsetX=0 offsetY=0 scale=1.0}, mSources= { InsetsSource: {b2950001 mType=navigationBars mFrame=[0,2178][1080,2340] mAttachedInsets=null mVisible=true mFlags= mSideHint=BOTTOM mBoundingRects=null}, InsetsSource: {b2950004 mType=systemGestures mFrame=[0,0][0,0] mAttachedInsets=null mVisible=true mFlags= mSideHint=NONE mBoundingRects=null}, InsetsSource: {b2950005 mType=mandatorySystemGestures mFrame=[0,2178][1080,2340] mAttachedInsets=null mVisible=true mFlags= mSideHint=BOTTOM mBoundingRects=null}, InsetsSource: {b2950006 mType=tappableElement mFrame=[0,2178][1080,2340] mAttachedInsets=null mVisible=true mFlags= mSideHint=BOTTOM mBoundingRects=null}, InsetsSource: {b2950024 mType=systemGestures mFrame=[0,0][0,0] mAttachedInsets=null mVisible=true mFlags= mSideHint=NONE mBoundingRects=null}, InsetsSource: {3 mType=ime mFrame=[0,0][0,0] mAttachedInsets=null mVisible=false mFlags=INVALID mSideHint=NONE mBoundingRects=null}, InsetsSource: {27 mType=displayCutout mFrame=[0,0][1080,103] mAttachedInsets=null mVisible=true mFlags= mSideHint=TOP mBoundingRects=null}, InsetsSource: {1f0000 mType=statusBars mFrame=[0,0][1080,103] mAttachedInsets=null mVisible=true mFlags= mSideHint=TOP mBoundingRects=null}, InsetsSource: {1f0005 mType=mandatorySystemGestures mFrame=[0,0][1080,144] mAttachedInsets=null mVisible=true mFlags= mSideHint=TOP mBoundingRects=null}, InsetsSource: {1f0006 mType=tappableElement mFrame=[0,0][1080,103] mAttachedInsets=null mVisible=true mFlags= mSideHint=TOP mBoundingRects=null} }
+07-10 08:25:18.983 I/BufferQueueProducer( 8299): [](id:206b00000002,api:0,p:459577456,c:8299) setDequeueTimeout:2077252342
+07-10 08:25:18.983 I/BLASTBufferQueue_Java( 8299): new BLASTBufferQueue, mName= VRI[TalkAuthCodeActivity]@a8b1643 mNativeObject= 0xb40000772b5ff6b0 caller= android.view.ViewRootImpl.updateBlastSurfaceIfNeeded:3603 android.view.ViewRootImpl.relayoutWindow:11813 android.view.ViewRootImpl.performTraversals:4840 android.view.ViewRootImpl.doTraversal:3959 android.view.ViewRootImpl$TraversalRunnable.run:13034 android.view.Choreographer$CallbackRecord.run:1961 android.view.Choreographer$CallbackRecord.run:1970 android.view.Choreographer.doCallbacks:1423 android.view.Choreographer.doFrame:1348 android.view.Choreographer$FrameDisplayEventReceiver.run:1930 
+07-10 08:25:18.983 I/BLASTBufferQueue_Java( 8299): update, w= 1080 h= 2340 mName = VRI[TalkAuthCodeActivity]@a8b1643 mNativeObject= 0xb40000772b5ff6b0 sc.mNativeObject= 0xb40000775b5fdd10 format= -2 caller= android.view.ViewRootImpl.updateBlastSurfaceIfNeeded:3608 android.view.ViewRootImpl.relayoutWindow:11813 android.view.ViewRootImpl.performTraversals:4840 android.view.ViewRootImpl.doTraversal:3959 android.view.ViewRootImpl$TraversalRunnable.run:13034 android.view.Choreographer$CallbackRecord.run:1961 
+07-10 08:25:18.983 I/VRI[TalkAuthCodeActivity]@a8b1643( 8299): Relayout returned: old=(0,0,1080,2340) new=(0,0,1080,2340) relayoutAsync=false req=(1080,2340)0 dur=3 res=0x3 s={true 0xb40000771b775a90} ch=true seqId=0
+07-10 08:25:18.983 I/VRI[TalkAuthCodeActivity]@a8b1643( 8299): performConfigurationChange setNightDimText nightDimLevel=0
+07-10 08:25:18.983 D/VRI[TalkAuthCodeActivity]@a8b1643( 8299): mThreadedRenderer.initialize() mSurface={isValid=true 0xb40000771b775a90} hwInitialized=true
+07-10 08:25:18.983 D/VRI[TalkAuthCodeActivity]@a8b1643( 8299): reportNextDraw android.view.ViewRootImpl.performTraversals:5507 android.view.ViewRootImpl.doTraversal:3959 android.view.ViewRootImpl$TraversalRunnable.run:13034 android.view.Choreographer$CallbackRecord.run:1961 android.view.Choreographer$CallbackRecord.run:1970 
+07-10 08:25:18.983 D/VRI[TalkAuthCodeActivity]@a8b1643( 8299): Setup new sync=wmsSync-VRI[TalkAuthCodeActivity]@a8b1643#3
+07-10 08:25:18.983 I/VRI[TalkAuthCodeActivity]@a8b1643( 8299): Creating new active sync group VRI[TalkAuthCodeActivity]@a8b1643#4
+07-10 08:25:18.984 D/VRI[TalkAuthCodeActivity]@a8b1643( 8299): registerCallbacksForSync syncBuffer=false
+07-10 08:25:18.984 D/VRI[TalkAuthCodeActivity]@a8b1643( 8299): Received frameDrawingCallback syncResult=0 frameNum=1.
+07-10 08:25:18.984 I/VRI[TalkAuthCodeActivity]@a8b1643( 8299): mWNT: t=0xb40000779b6c60f0 mBlastBufferQueue=0xb40000772b5ff6b0 fn= 1 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.ViewRootImpl$12.onFrameDraw:15561 android.view.ThreadedRenderer$1.onFrameDraw:751 <bottom of call stack> 
+07-10 08:25:18.984 I/VRI[TalkAuthCodeActivity]@a8b1643( 8299): Setting up sync and frameCommitCallback
+07-10 08:25:18.985 I/ProviderInstaller( 8299): Installed default security provider GmsCore_OpenSSL
+07-10 08:25:18.985 I/BLASTBufferQueue( 8299): [VRI[TalkAuthCodeActivity]@a8b1643#2](f:0,a:0,s:0) onFrameAvailable the first frame is available
+07-10 08:25:18.985 I/SurfaceComposerClient( 8299): apply transaction with the first frame. layerId: 158749, bufferData(ID: 35643933589520, frameNumber: 1)
+07-10 08:25:18.985 I/VRI[TalkAuthCodeActivity]@a8b1643( 8299): Received frameCommittedCallback lastAttemptedDrawFrameNum=1 didProduceBuffer=true
+07-10 08:25:18.985 D/HWUI    ( 8299): CFMS:: SetUp Pid : 8299    Tid : 8378
+07-10 08:25:18.985 D/VRI[TalkAuthCodeActivity]@a8b1643( 8299): reportDrawFinished seqId=0
+07-10 08:25:18.986 I/ImeFocusController( 8299): onPreWindowFocus: skipped hasWindowFocus=false mHasImeFocus=true
+07-10 08:25:18.986 I/ImeFocusController( 8299): onPostWindowFocus: skipped hasWindowFocus=false mHasImeFocus=true
+07-10 08:25:18.986 D/ConnectivityManager( 8299): StackLog: [android.net.ConnectivityManager.sendRequestForNetwork(ConnectivityManager.java:4744)] [android.net.ConnectivityManager.registerDefaultNetworkCallbackForUid(ConnectivityManager.java:5469)] [android.net.ConnectivityManager.registerDefaultNetworkCallback(ConnectivityManager.java:5436)] [android.net.ConnectivityManager.registerDefaultNetworkCallback(ConnectivityManager.java:5410)] [B4.a$b.s(SourceFile:13)] [B4.a$b.<init>(SourceFile:27)] [B4.a.a(SourceFile:11)] [y2.H.j(SourceFile:65)] [y2.H.g(SourceFile:5)] [y2.A.call(SourceFile:1)] [com.google.android.gms.tasks.zzz.run(SourceFile:5)] [z2.C.a(SourceFile:4)] [z2.B.run(SourceFile:1)] [java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1100)] [java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:624)] [java.lang.Thread.run(Thread.java:1572)]
+07-10 08:25:19.044 D/InputTransport( 8299): Input channel destroyed: 'ClientS', fd=192
+07-10 08:25:19.112 D/ResultReceiver( 8299): Status: Bundle[{key_url=kakao339271f4dd4676bb030cab2f45de5091://oauth?code=B4Usqrcw9d-a47dJfSb8mHzaeKvakxVuinPzHsrook52j7EWMg4paQAAAAQKFyEtAAABn0kzL28e0jm_MNo9Pw}]
+07-10 08:25:19.120 D/VRI[TalkAuthCodeActivity]@a8b1643( 8299): mThreadedRenderer.initializeIfNeeded()#2 mSurface={isValid=true 0xb40000771b775a90}
+07-10 08:25:19.120 D/InputMethodManagerUtils( 8299): startInputInner - Id : 0
+07-10 08:25:19.120 I/InputMethodManager( 8299): startInputInner - IInputMethodManagerGlobalInvoker.startInputOrWindowGainedFocus
+07-10 08:25:19.124 D/InsetsController( 8299): hide(ime())
+07-10 08:25:19.124 I/ImeTracker( 8299): com.aienglishpractice.stealthvox:d374fa4d: onCancelled at PHASE_CLIENT_ALREADY_HIDDEN
+07-10 08:25:19.124 I/InsetsSourceConsumer( 8299): applyRequestedVisibilityToControl: visible=true, type=statusBars, host=com.aienglishpractice.stealthvox/com.aienglishpractice.stealthvox.MainActivity
+07-10 08:25:19.124 I/InsetsSourceConsumer( 8299): applyRequestedVisibilityToControl: visible=true, type=navigationBars, host=com.aienglishpractice.stealthvox/com.aienglishpractice.stealthvox.MainActivity
+07-10 08:25:19.125 I/ImeFocusController( 8299): onPreWindowFocus: skipped hasWindowFocus=false mHasImeFocus=true
+07-10 08:25:19.125 I/ImeFocusController( 8299): onPostWindowFocus: skipped hasWindowFocus=false mHasImeFocus=true
+07-10 08:25:19.126 D/AppsFlyer_FlutterPlugin( 8299): Calling invokeMethod with: {"status":"NOT_FOUND"}
+07-10 08:25:19.128 I/VRI[TalkAuthCodeActivity]@a8b1643( 8299): handleAppVisibility mAppVisible = true visible = false
+07-10 08:25:19.128 D/VRI[TalkAuthCodeActivity]@a8b1643( 8299): visibilityChanged oldVisibility=true newVisibility=false
+07-10 08:25:19.133 D/InputTransport( 8299): Input channel constructed: 'ClientS', fd=237
+07-10 08:25:19.133 I/VRI[TalkAuthCodeActivity]@a8b1643( 8299): Relayout returned: old=(0,0,1080,2340) new=(0,0,1080,2340) relayoutAsync=false req=(1080,2340)8 dur=2 res=0x2 s={false 0x0} ch=true seqId=0
+07-10 08:25:19.133 D/VRI[TalkAuthCodeActivity]@a8b1643( 8299): Not drawing due to not visible. Reason=!mAppVisible && !mForceDecorViewVisibility
+07-10 08:25:19.135 D/VRI[MainActivity]@cbdfa2b( 8299): mThreadedRenderer.initializeIfNeeded()#2 mSurface={isValid=true 0xb40000771b6024c0}
+07-10 08:25:19.135 D/InputMethodManagerUtils( 8299): startInputInner - Id : 0
+07-10 08:25:19.135 I/InputMethodManager( 8299): startInputInner - IInputMethodManagerGlobalInvoker.startInputOrWindowGainedFocus
+07-10 08:25:19.136 D/InsetsController( 8299): hide(ime())
+07-10 08:25:19.136 I/ImeTracker( 8299): com.aienglishpractice.stealthvox:176faa56: onCancelled at PHASE_CLIENT_ALREADY_HIDDEN
+07-10 08:25:19.136 D/InputTransport( 8299): Input channel constructed: 'ClientS', fd=243
+07-10 08:25:19.141 I/VRI[TalkAuthCodeActivity]@a8b1643( 8299): stopped(true) old = false
+07-10 08:25:19.141 D/VRI[TalkAuthCodeActivity]@a8b1643( 8299): WindowStopped on com.aienglishpractice.stealthvox/com.kakao.sdk.flutter.TalkAuthCodeActivity set to true
+07-10 08:25:19.142 D/WindowOnBackDispatcher( 8299): setTopOnBackInvokedCallback (unwrapped): null
+07-10 08:25:19.144 D/ViewRootImpl( 8299): Skipping stats log for color mode
+07-10 08:25:19.144 I/VRI[TalkAuthCodeActivity]@a8b1643( 8299): dispatchDetachedFromWindow
+07-10 08:25:19.144 D/InputTransport( 8299): Input channel destroyed: '9adb856', fd=230
+07-10 08:25:19.232 I/flutter ( 8299): [KakaoAuth] Kakao SDK login success, accessToken length=64
+07-10 08:25:19.232 I/flutter ( 8299): [KakaoAuth] kakaoCustomAuth callable call start
+07-10 08:25:19.235 W/DynamiteModule( 8299): Local module descriptor class for com.google.android.gms.providerinstaller.dynamite not found.
+07-10 08:25:19.236 I/DynamiteModule( 8299): Considering local module com.google.android.gms.providerinstaller.dynamite:0 and remote module com.google.android.gms.providerinstaller.dynamite:0
+07-10 08:25:19.236 W/ProviderInstaller( 8299): Failed to load providerinstaller module: No acceptable module com.google.android.gms.providerinstaller.dynamite found. Local version is 0 and remote version is 0.
+07-10 08:25:19.236 W/ProviderInstaller( 8299): Failed to report request stats: com.google.android.gms.common.security.ProviderInstallerImpl.reportRequestStats [class android.content.Context, long, long]
+07-10 08:25:19.237 W/FirebaseContextProvider( 8299): Error getting App Check token. Error: T1.m: No AppCheckProvider installed.
+07-10 08:25:20.677 I/flutter ( 8299): [KakaoAuth] kakaoCustomAuth response received, token exists=true
+07-10 08:25:20.677 I/flutter ( 8299): [KakaoAuth] signInWithCustomToken call start
+07-10 08:25:20.678 W/System  ( 8299): Ignoring header X-Firebase-Locale because its value was null.
+07-10 08:25:20.682 W/LocalRequestInterceptor( 8299): Error getting App Check token; using placeholder token instead. Error: T1.m: No AppCheckProvider installed.
+07-10 08:25:20.708 I/VRI[MainActivity]@cbdfa2b( 8299): call setFrameRateCategory for touch hint category=no preference, reason=boost timeout, vri=VRI[MainActivity]@cbdfa2b
+07-10 08:25:21.086 W/System  ( 8299): Ignoring header X-Firebase-Locale because its value was null.
+07-10 08:25:21.090 W/LocalRequestInterceptor( 8299): Error getting App Check token; using placeholder token instead. Error: T1.m: No AppCheckProvider installed.
+07-10 08:25:21.393 D/FirebaseAuth( 8299): Notifying id token listeners about user ( Fu9SmfJi5TaZIXmLyJLvcyT28b13 ).
+07-10 08:25:21.393 D/FirebaseAuth( 8299): Notifying auth state listeners about user ( Fu9SmfJi5TaZIXmLyJLvcyT28b13 ).
+07-10 08:25:21.394 I/flutter ( 8299): [KakaoAuth] signInWithCustomToken complete, final uid=Fu9SmfJi5TaZIXmLyJLvcyT28b13
+07-10 08:25:21.395 I/flutter ( 8299): [Auth] authFn complete, currentUser=Fu9SmfJi5TaZIXmLyJLvcyT28b13
+07-10 08:25:21.405 D/[Purchases] - DEBUG( 8299): Block store cached UserID cleared if any
+07-10 08:25:21.405 E/[Purchases] - ERROR( 8299): 😿‼️ PurchasesError(code=InvalidAppUserIdError, underlyingErrorMessage=Error logging in: appUserID can't be null, empty or blank, message='The app user id is not valid.')
+07-10 08:25:21.406 I/flutter ( 8299): Unable to logIn or logOut user in RevenueCat: PlatformException(14, The app user id is not valid., {code: 14, message: The app user id is not valid., readableErrorCode: InvalidAppUserIdError, readable_error_code: InvalidAppUserIdError, underlyingErrorMessage: Error logging in: appUserID can't be null, empty or blank}, null)
+07-10 08:25:21.452 I/flutter ( 8299): [Auth] returning user - skip bonus check
+07-10 08:25:21.474 I/flutter ( 8299): [Lobby] isGuestSession=false, pendingInviteType=, duoRoomId=
+07-10 08:25:21.474 I/flutter ( 8299): [Lobby] _initializeLobbyData enter, alreadyLoaded=true, sameAccount=false, remainingTime=18000
+07-10 08:25:21.475 D/WindowOnBackDispatcher( 8299): setTopOnBackInvokedCallback (unwrapped): U3.j$a@3bb1c77
+07-10 08:25:21.476 I/flutter ( 8299): [Lobby] Firestore remainingTime=18000
+07-10 08:25:21.604 D/InputTransport( 8299): Input channel destroyed: 'ClientS', fd=243
+07-10 08:25:21.916 D/WindowOnBackDispatcher( 8299): setTopOnBackInvokedCallback (unwrapped): android.app.Activity$$ExternalSyntheticLambda0@5ec8b15
+07-10 08:25:22.012 I/flutter ( 8299): [Lobby] RevenueCat configured
+07-10 08:25:23.480 I/VRI[MainActivity]@cbdfa2b( 8299): ViewPostIme pointer 0
+07-10 08:25:23.482 I/VRI[MainActivity]@cbdfa2b( 8299): call setFrameRateCategory for touch hint category=high hint, reason=touch, vri=VRI[MainActivity]@cbdfa2b
+07-10 08:25:23.580 I/VRI[MainActivity]@cbdfa2b( 8299): ViewPostIme pointer 1
+07-10 08:25:23.581 D/FirebaseAuth( 8299): Notifying id token listeners about a sign-out event.
+07-10 08:25:23.581 D/FirebaseAuth( 8299): Notifying auth state listeners about a sign-out event.
+07-10 08:25:23.587 I/flutter ( 8299): [TrialDebug] IntroMaster initState, time=2026-07-10T08:25:23.587496
+07-10 08:25:23.594 I/flutter ( 8299): [TrialDebug] _checkEntryStatus enter, currentUser=null, isAnonymous=null, time=2026-07-10T08:25:23.594234
+07-10 08:25:23.594 I/flutter ( 8299): [Intro] pendingInviteType=, duoRoomId=
+07-10 08:25:23.594 D/WindowOnBackDispatcher( 8299): setTopOnBackInvokedCallback (unwrapped): U3.j$a@3bb1c77
+07-10 08:25:24.048 D/WindowOnBackDispatcher( 8299): setTopOnBackInvokedCallback (unwrapped): android.app.Activity$$ExternalSyntheticLambda0@5ec8b15
+07-10 08:25:24.855 I/ImeFocusController( 8299): onPreWindowFocus: skipped hasWindowFocus=false mHasImeFocus=true
+07-10 08:25:24.855 I/ImeFocusController( 8299): onPostWindowFocus: skipped hasWindowFocus=false mHasImeFocus=true
+07-10 08:25:25.305 I/VRI[MainActivity]@cbdfa2b( 8299): stopped(true) old = false
+07-10 08:25:25.305 D/VRI[MainActivity]@cbdfa2b( 8299): WindowStopped on com.aienglishpractice.stealthvox/com.aienglishpractice.stealthvox.MainActivity set to true
+07-10 08:25:25.306 D/HWUI    ( 8299): CacheManager::trimMemory(20)
+07-10 08:25:25.308 D/SurfaceView( 8299): 189725991 windowPositionLost, frameNr = 0
+07-10 08:25:25.308 I/SV[94856147 MainActivity]( 8299): aOrMT: VRI[MainActivity]@cbdfa2b t = android.view.SurfaceControl$Transaction@4eddbd4 fN = 0 android.view.SurfaceView.-$$Nest$mapplyOrMergeTransaction:0 android.view.SurfaceView$SurfaceViewPositionUpdateListener.positionLost:2122 android.graphics.RenderNode$CompositePositionUpdateListener.positionLost:418 
+07-10 08:25:25.308 I/VRI[MainActivity]@cbdfa2b( 8299): mWNT: t=0xb40000779b5f6390 mBlastBufferQueue=0xb40000772b5d0010 fn= 0 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SurfaceView.applyOrMergeTransaction:1960 android.view.SurfaceView.-$$Nest$mapplyOrMergeTransaction:0 android.view.SurfaceView$SurfaceViewPositionUpdateListener.positionLost:2122 
+07-10 08:25:25.310 I/SV[94856147 MainActivity]( 8299): windowStopped(true) false U3.w{5a763d3 V.E...... ........ 0,0-1080,2340} of VRI[MainActivity]@cbdfa2b
+07-10 08:25:25.310 I/SurfaceView( 8299): 94856147 Changes: creating=false format=false size=false visible=true alpha=false hint=false left=false top=false z=false attached=true lifecycleStrategy=false
+07-10 08:25:25.310 I/SurfaceView( 8299): 94856147 Cur surface: Surface(name=null mNativeObject=-5476376635322132512)/@0x90e9c4
+07-10 08:25:25.310 I/SurfaceView( 8299): 94856147 surfaceDestroyed
+07-10 08:25:25.311 I/SV[94856147 MainActivity]( 8299): surfaceDestroyed callback.size 1 #1 U3.w{5a763d3 V.E...... ........ 0,0-1080,2340}
+07-10 08:25:25.316 I/SV[94856147 MainActivity]( 8299): updateSurface: mVisible = false mSurface.isValid() = true
+07-10 08:25:25.316 I/SV[94856147 MainActivity]( 8299): releaseSurfaces: viewRoot = VRI[MainActivity]@cbdfa2b
+07-10 08:25:25.316 V/SurfaceView( 8299): Layout: x=0 y=0 w=1080 h=2340, frame=Rect(0, 0 - 1080, 2340)
+07-10 08:25:25.317 D/SV[94856147 MainActivity]( 8299): updateSurface: surface is not valid
+07-10 08:25:25.317 I/SV[94856147 MainActivity]( 8299): releaseSurfaces: viewRoot = VRI[MainActivity]@cbdfa2b
+07-10 08:25:25.319 I/SV[94856147 MainActivity]( 8299): onWindowVisibilityChanged(4) false U3.w{5a763d3 G.E...... ......I. 0,0-1080,2340} of VRI[MainActivity]@cbdfa2b
+07-10 08:25:25.319 D/SV[94856147 MainActivity]( 8299): updateSurface: surface is not valid
+07-10 08:25:25.319 I/SV[94856147 MainActivity]( 8299): releaseSurfaces: viewRoot = VRI[MainActivity]@cbdfa2b
+07-10 08:25:25.320 D/HWUI    ( 8299): CacheManager::trimMemory(20)
+07-10 08:25:25.323 I/VRI[MainActivity]@cbdfa2b( 8299): Relayout returned: old=(0,0,1080,2340) new=(0,0,1080,2340) relayoutAsync=false req=(1080,2340)4 dur=1 res=0x2 s={false 0x0} ch=false seqId=0
+07-10 08:25:25.323 D/SV[94856147 MainActivity]( 8299): updateSurface: surface is not valid
+07-10 08:25:25.323 I/SV[94856147 MainActivity]( 8299): releaseSurfaces: viewRoot = VRI[MainActivity]@cbdfa2b
+07-10 08:25:25.323 D/VRI[MainActivity]@cbdfa2b( 8299): applyTransactionOnDraw applyImmediately
+07-10 08:25:25.324 D/VRI[MainActivity]@cbdfa2b( 8299): Not drawing due to not visible. Reason=View.INVISIBLE
+07-10 08:25:25.324 D/VRI[MainActivity]@cbdfa2b( 8299): Pending transaction will not be applied in sync with a draw due to view not visible
+07-10 08:25:25.324 I/VRI[MainActivity]@cbdfa2b( 8299): mWNT: t=0xb40000779b5f73c0 mBlastBufferQueue=0xnull fn= 0 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.ViewRootImpl.handleSyncRequestWhenNoAsyncDraw:6812 android.view.ViewRootImpl.performTraversals:5568 android.view.ViewRootImpl.doTraversal:3959 
+07-10 08:25:25.324 D/HWUI    ( 8299): CacheManager::trimMemory(20)
+07-10 08:25:25.325 D/InputTransport( 8299): Input channel destroyed: 'ClientS', fd=237
+07-10 08:25:25.325 I/VRI[MainActivity]@cbdfa2b( 8299): handleAppVisibility mAppVisible = true visible = false
+07-10 08:25:25.327 D/BBA2    ( 8299): setIsFg isFg = false; delayValue 3999ms
+07-10 08:25:27.922 D/WindowOnBackDispatcher( 8299): setTopOnBackInvokedCallback (unwrapped): null
