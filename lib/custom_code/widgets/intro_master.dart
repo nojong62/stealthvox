@@ -3,6 +3,7 @@ import '/backend/backend.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import 'index.dart'; // Imports other custom widgets
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 // Begin custom widget code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
@@ -44,6 +45,8 @@ class _IntroMasterState extends State<IntroMaster> {
   final ScrollController _scrollController = ScrollController();
   final FocusNode _emailFocusNode = FocusNode();
   final FocusNode _passwordFocusNode = FocusNode();
+  late final TapGestureRecognizer _termsTapRecognizer;
+  late final TapGestureRecognizer _privacyTapRecognizer;
 
   bool isLoginMode = true;
   bool isLoading = false;
@@ -58,6 +61,10 @@ class _IntroMasterState extends State<IntroMaster> {
     super.initState();
     debugPrint(
         '[TrialDebug] IntroMaster initState, time=${DateTime.now().toIso8601String()}');
+    _termsTapRecognizer = TapGestureRecognizer()
+      ..onTap = () => launchURL(_termsUrl);
+    _privacyTapRecognizer = TapGestureRecognizer()
+      ..onTap = () => launchURL(_privacyUrl);
     _emailFocusNode.addListener(_onFocusChange);
     _passwordFocusNode.addListener(_onFocusChange);
     AppsFlyerManager.duoInviteSignal.addListener(_onDuoInviteSignal);
@@ -112,6 +119,8 @@ class _IntroMasterState extends State<IntroMaster> {
     _scrollController.dispose();
     _emailFocusNode.dispose();
     _passwordFocusNode.dispose();
+    _termsTapRecognizer.dispose();
+    _privacyTapRecognizer.dispose();
     emailController.dispose();
     passwordController.dispose();
     super.dispose();
@@ -990,42 +999,33 @@ class _IntroMasterState extends State<IntroMaster> {
   }
 
   Widget _buildTermsInlineText() {
-    const linkStyle = TextStyle(
-      decoration: TextDecoration.underline,
-      color: Color(0xFFAAAAAA),
+    const baseStyle = TextStyle(
+      color: Color(0xFF8A8A94),
       fontSize: 11.5,
       height: 1.4,
+    );
+    final linkStyle = baseStyle.copyWith(
+      decoration: TextDecoration.underline,
+      color: const Color(0xFFAAAAAA),
     );
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Text.rich(
         TextSpan(
-          style: const TextStyle(
-            color: Color(0xFF8A8A94),
-            fontSize: 11.5,
-            height: 1.4,
-          ),
+          style: baseStyle,
           children: [
             const TextSpan(text: '가입하면 '),
-            WidgetSpan(
-              alignment: PlaceholderAlignment.baseline,
-              baseline: TextBaseline.alphabetic,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => launchURL(_termsUrl),
-                child: const Text('이용약관', style: linkStyle),
-              ),
+            TextSpan(
+              text: '이용약관',
+              style: linkStyle,
+              recognizer: _termsTapRecognizer,
             ),
             const TextSpan(text: ' 및 '),
-            WidgetSpan(
-              alignment: PlaceholderAlignment.baseline,
-              baseline: TextBaseline.alphabetic,
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => launchURL(_privacyUrl),
-                child: const Text('개인정보 처리방침', style: linkStyle),
-              ),
+            TextSpan(
+              text: '개인정보 처리방침',
+              style: linkStyle,
+              recognizer: _privacyTapRecognizer,
             ),
             const TextSpan(text: '에 동의하는 것으로 간주합니다.'),
           ],

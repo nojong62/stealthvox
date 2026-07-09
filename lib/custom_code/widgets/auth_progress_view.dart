@@ -23,7 +23,6 @@ class _AuthProgressViewState extends State<AuthProgressView>
   static const _steps = [
     '카카오 계정 확인 중',
     '학습 기록 연결 중',
-    '무료 보너스 준비 중',
   ];
 
   @override

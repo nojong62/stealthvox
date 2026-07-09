@@ -41,6 +41,11 @@ class StoreMaster extends StatefulWidget {
 }
 
 class _StoreMasterState extends State<StoreMaster> {
+  static const String _termsUrl =
+      'https://docs.google.com/document/d/1KE4xrb63SDw1ZkiNQ_wxQjH7iyY6msTuVtazCTnR7KY/edit';
+  static const String _privacyUrl =
+      'https://docs.google.com/document/d/1qz1aCx6ZcxCkANFUSvbnE18H2-SbEhPUWlvZw27-DAQ/edit';
+
   bool isProcessing = false;
   String _versionText = '';
 
@@ -1313,9 +1318,8 @@ class _StoreMasterState extends State<StoreMaster> {
                                   color: Colors.white24, fontSize: 10)),
                         ),
                         InkWell(
-                          onTap: () => _launchURL(
-                              'https://www.ubizens.com/stealthvox/privacy.html'),
-                          child: const Text("Privacy Policy",
+                          onTap: () => _launchURL(_privacyUrl),
+                          child: const Text("개인정보 처리방침",
                               style: TextStyle(
                                   color: Colors.white38,
                                   fontSize: 11,
@@ -1328,9 +1332,8 @@ class _StoreMasterState extends State<StoreMaster> {
                                   color: Colors.white24, fontSize: 10)),
                         ),
                         InkWell(
-                          onTap: () => _launchURL(
-                              'https://www.ubizens.com/stealthvox/terms.html'),
-                          child: const Text("Terms of Service",
+                          onTap: () => _launchURL(_termsUrl),
+                          child: const Text("이용약관",
                               style: TextStyle(
                                   color: Colors.white38,
                                   fontSize: 11,
@@ -1367,3 +1370,4 @@ class _StoreMasterState extends State<StoreMaster> {
     );
   }
 }
+
