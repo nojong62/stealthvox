@@ -74,40 +74,8 @@ class SocialAuthService {
 
     final googleAuth = await googleUser.authentication;
     final idToken = googleAuth.idToken;
-    final credential = GoogleAuthProvider.credential(
-      accessToken: googleAuth.accessToken,
-      idToken: idToken,
-    );
-
-    final currentUser = _auth.currentUser;
-
-    // Case 1: anonymous trial user. Preserve anonymous UID only for new accounts.
-    if (currentUser != null && currentUser.isAnonymous) {
-      final checkResult = await _callLinkOrCreate('google', idToken: idToken);
-      final isNewUser = checkResult['isNewUser'] as bool;
-      final serverToken = checkResult['token'] as String;
-
-      if (isNewUser) {
-        try {
-          final linked = await currentUser.linkWithCredential(credential);
-          FFAppState().hasLinkedAccount = true;
-          return linked;
-        } on FirebaseAuthException catch (e) {
-          if (e.code == 'credential-already-in-use') {
-            final signedIn = await _auth.signInWithCustomToken(serverToken);
-            FFAppState().hasLinkedAccount = true;
-            return signedIn;
-          }
-          rethrow;
-        }
-      }
-
-      final signedIn = await _auth.signInWithCustomToken(serverToken);
-      FFAppState().hasLinkedAccount = true;
-      return signedIn;
-    }
-
-    // Case 2: regular Google login. Server resolves existing/new account by email.
+    // Server resolves the canonical UID. Do not fall back to
+    // signInWithCredential, because that can create a separate Firebase UID.
     final checkResult = await _callLinkOrCreate('google', idToken: idToken);
     final serverToken = checkResult['token'] as String;
     final signedIn = await _auth.signInWithCustomToken(serverToken);

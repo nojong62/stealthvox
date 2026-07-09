@@ -1041,7 +1041,6 @@ class _IntroMasterState extends State<IntroMaster> {
     String provider = '',
   }) async {
     debugPrint('[Auth] _handleUnifiedAuth enter');
-    final previousAuthProvider = FFAppState().lastAuthProvider;
     setState(() => isLoading = true);
     // Multi-step auth 동안 GoRouter 자동 네비게이션 억제
     // (anonymous -> custom token -> bonus 지급 완료까지 Lobby 이동 방지)
@@ -1056,9 +1055,22 @@ class _IntroMasterState extends State<IntroMaster> {
       }
       debugPrint(
           '[Auth] authFn complete, currentUser=${FirebaseAuth.instance.currentUser?.uid}');
-      // 이전에 같은 provider로 로그인한 재방문자는 bonus 이미 지급됨 -> 스킵
-      final isReturningUser =
-          provider.isNotEmpty && previousAuthProvider == provider;
+      // provider가 달라도 같은 계정이면 재방문자.
+      // signup_bonus_given 서버 플래그로 판정 (grantSignupBonus CF의 idempotency 보장).
+      final currentUser = FirebaseAuth.instance.currentUser;
+      bool isReturningUser = false;
+      if (currentUser != null) {
+        try {
+          final userDoc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(currentUser.uid)
+              .get();
+          isReturningUser =
+              userDoc.exists && userDoc.data()?['signup_bonus_given'] == true;
+        } catch (e) {
+          debugPrint('[Auth] returning user check failed: $e');
+        }
+      }
       if (!isReturningUser) {
         await _grantSignupBonusIfPossible();
       } else {
@@ -1080,6 +1092,8 @@ class _IntroMasterState extends State<IntroMaster> {
             debugPrint('[Auth] returning user time fetch failed: $e');
           }
         }
+        // provider 전환 시 UID가 이전 세션과 같더라도 lobby 재동기화 강제
+        LobbyBrain.lastSyncedUid = null;
       }
 
       if (!mounted) return;
