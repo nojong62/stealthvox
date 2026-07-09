@@ -47,7 +47,11 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-# usage log 식별자 보강 — `billing_ticker` sessionDocId/roomId 연결 지시서
+# Node.js 20 → 22 런타임 업그레이드 지시서
+
+---
+
+**먼저 짚어드릴 점:** 지원 종료가 10월 30일이라 아직 여유가 있어 보이지만, 실제로는 **미리 해두는 게 맞는 이유**가 있습니다 — Firebase Functions는 런타임 종료일이 지나면 자동으로 강제 마이그레이션되거나 배포가 막힐 수 있어서, 트래픽 있는 상태에서 급하게 하는 것보다 지금처럼 여유 있을 때 검증하며 넘어가는 게 안전합니다. Node 20 → **Node 22**(현재 Firebase가 지원하는 최신 LTS)로 바로 가는 걸 권장드립니다.
 
 ---
 
@@ -57,8 +61,8 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 cd F:\flutter_project\stealth_vox
 git status
 git add -A
-git commit -m "savepoint: before billing_ticker session identifier linking"
-git checkout -b fix/billing-ticker-session-identifiers
+git commit -m "savepoint: before Node.js 20 to 22 runtime upgrade"
+git checkout -b chore/nodejs-22-upgrade
 ```
 
 ---
@@ -66,96 +70,100 @@ git checkout -b fix/billing-ticker-session-identifiers
 ## Phase 0: 진단 (Diagnostics / Grep)
 
 ```bash
-# 1. billing_ticker 정의 및 사용처 전체 확인
-grep -rn "billing_ticker\|billingTicker" lib/ --include="*.dart"
+# 1. 현재 Functions 런타임 버전 명시 위치 확인
+cat firebase/functions/package.json | grep -A 2 "\"engines\""
 
-# 2. billing_ticker가 기록하는 필드 구조 확인 (현재 sessionDocId/roomId 누락 여부)
-grep -n "class BillingTicker\|sessionDocId\|roomId" lib/【치환필요: billing_ticker 파일 경로】
+# 2. firebase.json에 런타임 관련 설정 있는지 확인
+cat firebase/firebase.json | grep -i "runtime\|nodejs"
 
-# 3. 각 모드 파일에서 BillingTicker를 호출/초기화하는 지점 전부 확인
-grep -rln "BillingTicker(" lib/ --include="*.dart"
+# 3. 현재 로컬 Node 버전 확인 (개발 환경과 배포 환경 버전 불일치 여부 체크)
+node --version
 
-# 4. 각 모드 파일에서 sessionDocId/roomId가 이미 변수로 존재하는지 확인
-grep -rn "sessionDocId\|roomId" lib/custom_code/widgets/routine_mode_*.dart
+# 4. firebase-functions, firebase-admin SDK 버전 확인 (Node 22 호환성 체크용)
+cat firebase/functions/package.json | grep -A 5 "\"dependencies\""
 
-# 5. billing_ticker가 최종적으로 Firestore/함수 어디에 로그를 남기는지 확인
-grep -n "usage_log\|usageLog\|logUsageSession\|FirebaseFirestore.*add\|FirebaseFirestore.*set" lib/【치환필요: billing_ticker 파일 경로】
+# 5. 현재 배포된 함수들의 실제 런타임 확인
+firebase functions:list --project stealth-vox-3p3rq3
 ```
 
 **Codex는 아래 항목을 정리해서 보고할 것:**
-1. `billing_ticker` 클래스/함수의 정확한 파일 경로 + 생성자 시그니처 (현재 파라미터 목록)
-2. `BillingTicker(...)` 호출부가 있는 **모드 파일 전체 목록** (Anyone, Routine, 기타 모드별로 몇 개인지)
-3. 각 모드 파일 내에서 `sessionDocId`(대화방/세션 문서 ID)와 `roomId`가 이미 존재하는 변수명인지, 아니면 새로 가져와야 하는지 — 파일별로 다를 수 있으므로 각각 확인
-4. 최종적으로 usage log가 저장되는 Firestore 컬렉션명 및 현재 문서 구조 (지금 `sessionDocId`/`roomId` 필드가 비어있는지, 아예 없는지)
+1. `package.json`의 `engines.node` 현재 값 (예: `"20"`)
+2. `firebase-functions`, `firebase-admin` SDK 현재 버전 (Node 22와 호환되는 최소 버전인지 확인 필요 — `firebase-functions`는 4.x대는 Node 22 미지원일 수 있어 5.x 이상 필요할 가능성 있음)
+3. 로컬 개발 환경 Node 버전이 22 이상인지 (아니라면 로컬 Node 버전도 업그레이드 필요 — nvm 사용 권장)
+4. 함수 개수 및 이름 목록 (배포 시 한 번에 몇 개나 마이그레이션되는지 파악용)
 
 ---
 
 ## Phase 1: 앵커 검증
 
-Phase 0 결과 기반으로 아래를 확정:
+⚠️ **중요 확인 필요 (실장님 판단):** Phase 0-2에서 `firebase-functions` SDK 버전이 낮게(예: 4.9.0) 나올 가능성이 높습니다. 이전 대화에서 이미 "firebase-functions SDK 업그레이드"가 별도 기술부채 항목으로 남아있었는데, **Node 22로 올리려면 SDK 업그레이드가 선행되어야 할 수도 있습니다.** 즉 이번 작업이 사실상 두 항목을 묶어서 처리하게 될 가능성이 있다는 뜻입니다.
 
-1. **BillingTicker 생성자 수정 지점** — `sessionDocId`, `roomId`를 선택적(nullable) 파라미터로 추가할지, 필수 파라미터로 바꿀지 결정. 기존 호출부가 많으면(모드 파일 여러 개) **선택적 파라미터로 추가**해서 한 파일씩 순차 연결하는 게 안전합니다(한 번에 전부 필수로 바꾸면 컴파일 에러가 모드 파일 개수만큼 터짐).
-2. **모드 파일별 연결 지점** — 각 모드 파일에서 `BillingTicker(...)` 호출하는 정확한 줄
-
-⚠️ **확인 필요 (실장님 판단):** Phase 0-2에서 모드 파일이 몇 개나 나오는지에 따라 이번에 전부 다 연결할지, 우선순위 모드(Anyone 등 트래픽 많은 것)부터 할지 정할 수 있습니다. Phase 0 보고 받으시면 범위 다시 정하는 게 좋습니다.
+Phase 0 결과 보고 받으시면, SDK 버전이 Node 22와 호환 안 되는 걸로 나올 경우 이 지시서에 SDK 업그레이드 단계를 추가해서 다시 드리겠습니다. 우선 아래는 **SDK가 이미 호환된다는 전제**로 작성했습니다.
 
 ---
 
-## Phase 2: 편집 (파일별 하단→상단)
+## Phase 2: 편집
 
-### 2-1. BillingTicker 클래스에 필드 추가
-
-```
-파일: lib/【치환필요: billing_ticker 파일 경로】
-
-생성자에 다음 파라미터 추가 (nullable, 기본값 null):
-  String? sessionDocId,
-  String? roomId,
-
-Firestore/usage_log 기록 로직 부분에서 이 값들을 함께 저장하도록 수정.
-null인 경우에도 에러 없이 필드 자체를 생략하거나 null로 기록되도록 처리
-(기존 호출부가 아직 값을 안 넘기는 동안 깨지지 않게 하기 위함).
-```
-
-### 2-2. 모드 파일별 연결 (Phase 0-2/3 결과 목록 순서대로 반복)
+### 2-1. package.json 런타임 버전 변경
 
 ```
-파일: lib/custom_code/widgets/【치환필요: 각 모드 파일명】
-위치: 【치환필요: BillingTicker(...) 호출 줄】
+파일: firebase/functions/package.json
+위치: "engines" 필드
 
-BillingTicker(...) 호출부에 아래 두 인자 추가:
-  sessionDocId: 【치환필요: 해당 파일 내 세션 문서 ID 변수명】,
-  roomId: 【치환필요: 해당 파일 내 room ID 변수명】,
-
-만약 해당 변수가 파일 내에 없다면, 세션 생성/입장 시점에서 
-받아온 ID를 상위에서 전달받도록 필드 추가 후 연결.
-(이 경우는 파일별로 구조가 다를 수 있어 Codex가 자체 판단하지 말고 
-해당 파일명과 함께 실장님께 보고 후 진행)
+"engines": { "node": "20" } 를
+"engines": { "node": "22" } 로 변경
 ```
 
-> 모드 파일이 여러 개면 **한 파일 수정 → grep 검증 → 다음 파일** 순서로 진행하도록 Codex에게 명시해 주세요. 한 번에 여러 파일을 몰아서 고치면 어디서 깨졌는지 추적이 어렵습니다.
+### 2-2. 로컬 Node 버전 확인 및 전환 (필요시)
+
+```
+로컬 Node 버전이 22 미만이면 nvm으로 전환 필요:
+
+nvm install 22
+nvm use 22
+node --version   # v22.x.x 확인
+
+nvm 미설치 상태라면 이 단계는 Codex가 직접 하지 말고 
+실장님께 "nvm 설치 필요" 보고 후 대기.
+```
+
+### 2-3. 의존성 재설치 및 로컬 빌드 검증
+
+```
+cd firebase/functions
+rm -rf node_modules package-lock.json
+npm install
+node --check index.js
+```
 
 ---
 
-## Phase 3: Grep 검증 (파일별로 매 수정 후 실행)
+## Phase 3: Grep 검증
 
 ```bash
-grep -n "sessionDocId\|roomId" lib/custom_code/widgets/【수정한 파일명】
+grep -A 2 "\"engines\"" firebase/functions/package.json
 ```
 
-기대 결과: `BillingTicker(...)` 호출부에 두 인자가 정확히 연결되어 있는지 확인.
+기대 결과: `"node": "22"` 확인.
 
 ---
 
-## Phase 4: 포맷 및 정적 분석
+## Phase 4: 배포 (단계적 진행 — 중요)
+
+⚠️ **전체 함수를 한 번에 배포하지 말 것.** 먼저 트래픽 적은 함수 1개로 테스트 배포한 뒤 문제 없으면 전체 배포하는 순서로 진행합니다.
 
 ```bash
-dart format lib/【치환필요: billing_ticker 경로】
-dart format lib/custom_code/widgets/【수정한 모든 모드 파일】
-flutter analyze
+# 1단계: 테스트 함수 1개만 배포 (예: 최근 만든 queueParentConsentEmailOnUserWrite)
+firebase deploy --project stealth-vox-3p3rq3 --only functions:queueParentConsentEmailOnUserWrite
+
+# 배포 성공 + 로그 정상 확인 후:
+firebase functions:log --project stealth-vox-3p3rq3 --only queueParentConsentEmailOnUserWrite
+
+# 2단계: 문제 없으면 전체 배포
+firebase deploy --project stealth-vox-3p3rq3 --only functions
 ```
 
-변경 파일 기준으로 새 error 없는지 확인 (기존 FlutterFlow warning 655건은 무시).
+**배포 중 에러 발생 시 (특히 SDK 호환성 에러):** 즉시 중단하고 에러 메시지 전체를 실장님께 보고. 임의로 SDK 버전을 올리거나 코드를 수정하지 말 것.
 
 ---
 
@@ -163,21 +171,26 @@ flutter analyze
 
 ```bash
 git add -A
-git commit -m "fix: link sessionDocId/roomId to billing_ticker usage logs"
-git push origin fix/billing-ticker-session-identifiers
+git commit -m "chore: upgrade Firebase Functions runtime from Node.js 20 to 22"
+git push origin chore/nodejs-22-upgrade
 ```
 
-(전체 모드 파일 다 연결 안 하고 일부만 했다면 main 머지는 나머지 파일까지 마친 뒤 진행 권장)
+(전체 함수 배포까지 정상 확인된 후 main 머지 권장 — 배포 자체가 검증이므로 머지는 마지막에)
 
 ---
 
 ## 롤백 절차
 
 ```bash
+# 코드 롤백
 git checkout main
-git branch -D fix/billing-ticker-session-identifiers
+git branch -D chore/nodejs-22-upgrade
+
+# 배포까지 진행했다면 이전 버전으로 재배포 필요
+git checkout main -- firebase/functions/package.json
+cd firebase && firebase deploy --project stealth-vox-3p3rq3 --only functions
 ```
 
 ---
 
-Phase 0 보고 받으시면, 모드 파일이 몇 개나 나오는지에 따라 Phase 2를 파일별로 쪼개서 다시 드릴 수 있습니다. 필요하시면 알려주세요.
+Phase 0 결과 나오면, SDK 버전 호환성 여부 확인해서 필요시 Phase 2를 보강해 드리겠습니다.
