@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '/flutter_flow/flutter_flow_theme.dart';
+import '/flutter_flow/flutter_flow_util.dart';
 
 class TermsResult {
   const TermsResult({
@@ -35,6 +36,10 @@ class TermsAgreementSheet extends StatefulWidget {
 }
 
 class _TermsAgreementSheetState extends State<TermsAgreementSheet> {
+  static const String _termsUrl =
+      'https://docs.google.com/document/d/1KE4xrb63SDw1ZkiNQ_wxQjH7iyY6msTuVtazCTnR7KY/edit';
+  static const String _privacyUrl =
+      'https://docs.google.com/document/d/1qz1aCx6ZcxCkANFUSvbnE18H2-SbEhPUWlvZw27-DAQ/edit';
   static const Color _backgroundColor = Color(0xFF1E1E22);
   static const Color _brandBlue = Color(0xFF4A90D9);
   static const Color _primaryText = Colors.white;
@@ -140,14 +145,18 @@ class _TermsAgreementSheetState extends State<TermsAgreementSheet> {
               checked: _termsAccepted,
               showTrailingLink: true,
               onChanged: (value) => setState(() => _termsAccepted = value),
-              onTrailingTap: () {},
+              onTrailingTap: () {
+                launchURL(_termsUrl);
+              },
             ),
             _AgreementRow(
               label: '(필수) 개인정보 수집 및 이용 동의',
               checked: _privacyAccepted,
               showTrailingLink: true,
               onChanged: (value) => setState(() => _privacyAccepted = value),
-              onTrailingTap: () {},
+              onTrailingTap: () {
+                launchURL(_privacyUrl);
+              },
             ),
             _AgreementRow(
               label: '(필수) 만 14세 이상입니다',

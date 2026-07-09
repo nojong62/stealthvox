@@ -35,6 +35,10 @@ class IntroMaster extends StatefulWidget {
 }
 
 class _IntroMasterState extends State<IntroMaster> {
+  static const String _termsUrl =
+      'https://docs.google.com/document/d/1KE4xrb63SDw1ZkiNQ_wxQjH7iyY6msTuVtazCTnR7KY/edit';
+  static const String _privacyUrl =
+      'https://docs.google.com/document/d/1qz1aCx6ZcxCkANFUSvbnE18H2-SbEhPUWlvZw27-DAQ/edit';
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -986,35 +990,44 @@ class _IntroMasterState extends State<IntroMaster> {
   }
 
   Widget _buildTermsInlineText() {
-    return const Padding(
-      padding: EdgeInsets.symmetric(horizontal: 8),
+    const linkStyle = TextStyle(
+      decoration: TextDecoration.underline,
+      color: Color(0xFFAAAAAA),
+      fontSize: 11.5,
+      height: 1.4,
+    );
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Text.rich(
         TextSpan(
-          style: TextStyle(
+          style: const TextStyle(
             color: Color(0xFF8A8A94),
             fontSize: 11.5,
             height: 1.4,
           ),
           children: [
-            TextSpan(text: '가입하면 '),
-            TextSpan(
-              text: '이용약관',
-              style: TextStyle(
-                decoration: TextDecoration.underline,
-                color: Color(0xFFAAAAAA),
+            const TextSpan(text: '가입하면 '),
+            WidgetSpan(
+              alignment: PlaceholderAlignment.baseline,
+              baseline: TextBaseline.alphabetic,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => launchURL(_termsUrl),
+                child: const Text('이용약관', style: linkStyle),
               ),
-              // TODO: recognizer -> URL 연결 (GestureRecognizer)
             ),
-            TextSpan(text: ' 및 '),
-            TextSpan(
-              text: '개인정보 처리방침',
-              style: TextStyle(
-                decoration: TextDecoration.underline,
-                color: Color(0xFFAAAAAA),
+            const TextSpan(text: ' 및 '),
+            WidgetSpan(
+              alignment: PlaceholderAlignment.baseline,
+              baseline: TextBaseline.alphabetic,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => launchURL(_privacyUrl),
+                child: const Text('개인정보 처리방침', style: linkStyle),
               ),
-              // TODO: recognizer -> URL 연결 (GestureRecognizer)
             ),
-            TextSpan(text: '에 동의하는 것으로 간주합니다.'),
+            const TextSpan(text: '에 동의하는 것으로 간주합니다.'),
           ],
         ),
         textAlign: TextAlign.center,
