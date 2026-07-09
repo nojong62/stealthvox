@@ -47,11 +47,7 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-지금 바로 실행 가능한 **전체 지시서**입니다 — placeholder(【치환필요】)는 기존 컨벤션대로 Codex가 Phase 0 grep으로 스스로 찾아 채우는 방식입니다.
-
----
-
-# trialCompleted 발동 시점 수정 — Codex 지시서 (최종)
+# 부모 동의 이메일 발송 — Codex 지시서 (확장 설치 완료 반영)
 
 ## Phase S: Savepoint
 
@@ -59,78 +55,84 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 cd F:\flutter_project\stealth_vox
 git status
 git add -A
-git commit -m "savepoint: before trialCompleted trigger point migration"
-git checkout -b fix/trial-completed-trigger-point
+git commit -m "savepoint: before parental consent email trigger function"
+git checkout -b feat/parental-consent-email
 ```
 
 ---
 
-## Phase 0: 진단 (Diagnostics / Grep)
+## Phase 0: 진단
 
 ```bash
-# 1. trialCompleted 전체 사용처 검색 (파일:줄번호:내용 형태로 전체 출력)
-grep -rn "trialCompleted" lib/ --include="*.dart"
+# 1. 부모 동의 Firestore 저장 로직 위치 확인
+grep -rn "parental\|parent_consent\|parentConsent" lib/ --include="*.dart"
 
-# 2. 현재 값을 true로 설정하는 지점만 추출
-grep -rn "trialCompleted.*=.*true" lib/ --include="*.dart"
+# 2. 부모 이메일 필드명 확인
+grep -rn "parentEmail\|parent_email\|guardianEmail" lib/ --include="*.dart"
 
-# 3. routine_mode_anyone.dart 파일 경로 확정 및 구조 확인
-find lib/ -iname "*routine_mode_anyone*"
-grep -n "class \|void \|Future\|Timer\|dispose\|_endSession\|_completeSession\|onTimerComplete\|remainingTime" lib/【치환필요: 위 find 결과로 확정된 경로】
+# 3. 저장 컬렉션 확인
+grep -rn "collection(['\"].*consent" lib/ --include="*.dart"
 
-# 4. 타이머 자연 만료를 판단하는 정확한 콜백/조건문 위치 확인
-grep -n "Timer.periodic\|onFinish\|timerFinished\|remainingTime <= 0\|remainingTime == 0" lib/【치환필요: routine_mode_anyone.dart 경로】
+# 4. 기존 mail 확장 사용 사례 있는지 확인 (참고용 패턴)
+grep -rn "collection(['\"]mail['\"]" firebase/functions/*.js lib/ 2>/dev/null
+
+# 5. 만 14세 미만 판별 → 부모 동의 플로우 분기 로직 확인
+grep -rn "birthYear\|만.*14세\|isMinor" lib/ --include="*.dart"
 ```
 
-**Codex는 아래 항목을 정리해서 보고할 것:**
-1. `trialCompleted = true`가 **현재** 설정되는 정확한 파일명 + 줄 번호 + 함수명 (회원가입 처리 쪽)
-2. `trialCompleted` 저장 방식 — Firestore 필드인지 FFAppState 로컬 필드인지, 정확한 경로/필드명
-3. `routine_mode_anyone.dart`에서 **타이머가 자연 만료되는 시점**(중간 이탈이 아닌, 카운트다운이 0이 되는 시점)을 처리하는 정확한 함수명 + 줄 번호
-4. 위 3번 함수가 이미 Firestore/FFAppState에 다른 값을 쓰고 있는지 (있다면 같은 패턴 재사용)
+**Codex는 아래 항목을 보고할 것:**
+1. 부모 동의 정보 저장 컬렉션명 + 문서 구조 (부모 이메일 필드명 특정)
+2. 이 저장이 일어나는 정확한 파일 + 함수
+3. 자녀 닉네임/이름 필드명 (템플릿에 넣을 항목)
 
 ---
 
 ## Phase 1: 앵커 검증
 
-Phase 0 보고 내용을 기반으로, 아래 두 앵커에 대해 grep 결과가 **정확히 1건**인지 확인:
-
-- **제거 앵커**: 회원가입 로직 내 `trialCompleted = true` 설정 코드
-- **추가 앵커**: `routine_mode_anyone.dart` 내 타이머 자연 만료 처리 함수
-
-1건이 아니면 (즉 동일 패턴이 여러 곳에 있으면) 즉시 중단하고 실장님께 스크린샷/전체 목록 보고 후 지시 대기.
+Phase 0 결과 기반으로, 동의 컬렉션의 `onCreate`를 감지하는 Cloud Function 추가 위치(`firebase/functions/index.js` 최하단)를 확정.
 
 ---
 
-## Phase 2: 파일별 하단→상단 편집
+## Phase 2: 실행
 
-### 2-1. 기존 발동 지점 제거 (회원가입 파일)
+### 2-1. ~~확장 설치~~ → 완료됨, 건너뜀
 
-```
-파일: lib/【치환필요: Phase 0-1에서 확정된 회원가입 파일 경로】
-위치: 【확인필요: Phase 0-1 줄 번호】
+확인된 기존 설정:
+- Email documents collection: `mail`
+- Default FROM: `StealthVox <nisiekorea@gmail.com>`
+- Authentication: UsernamePassword (SMTP URI 설정 완료)
 
-기존 "trialCompleted = true" 설정 라인을 제거.
-완전 삭제하지 말고 아래처럼 주석으로 대체하여 이력 남길 것:
-
-// trialCompleted trigger moved to routine_mode_anyone.dart (Anyone 1-min timer natural expiry)
-// see: fix/trial-completed-trigger-point branch
-```
-
-### 2-2. Anyone 1분 타이머 자연 만료 지점에 추가 (신규 발동 지점)
+### 2-2. 이메일 템플릿 문서 생성 (Firestore `mail_templates` 컬렉션)
 
 ```
-파일: lib/【치환필요: routine_mode_anyone.dart 경로】
-위치: 【확인필요: 타이머 자연 만료(카운트다운 0 도달) 처리 함수 내부】
+Firestore 콘솔에서 mail_templates/parental_consent 문서 생성:
 
-조건: 반드시 "타이머가 자연 만료(0초 도달)"된 경우에만 실행.
-사용자가 중도 이탈(화면 나가기, 뒤로가기 등)한 경우는 절대 트리거되지 않도록 
-기존 dispose()/이탈 처리 로직과는 별개 위치에 작성할 것.
+{
+  subject: "[StealthVox] 자녀 회원가입 부모 동의 요청",
+  html: "<본문: 자녀 닉네임, 서비스 소개 1줄, 안내 문구>"
+}
+```
 
-Phase 0-2에서 확인한 것과 동일한 저장 방식(Firestore 필드 경로 또는 
-FFAppState 필드)으로 trialCompleted 값을 true로 설정.
+> 문구 초안 필요하시면 별도로 작성해 드리겠습니다.
 
-기존 코드가 snapshots() 리스너 기반 update()를 쓰고 있다면 동일 패턴 사용.
-일회성 .get()/.set() 방식이면 기존 패턴 그대로 유지.
+### 2-3. 트리거 Cloud Function 추가
+
+```
+파일: firebase/functions/index.js
+위치: 파일 최하단
+
+【치환필요: Phase 0에서 확인된 정확한 컬렉션명】 컬렉션에 onCreate 트리거 추가:
+
+- 새로 생성된 동의 문서에서 부모 이메일 필드(【치환필요: 정확한 필드명】) 추출
+- mail 컬렉션에 아래 구조로 문서 add():
+  {
+    to: [부모이메일],
+    template: {
+      name: "parental_consent",
+      data: { childNickname: 【필드명】 }
+    }
+  }
+- 에러 핸들링: 필드 없거나 형식 이상 시 logger.error 후 종료 (throw 금지)
 ```
 
 ---
@@ -138,24 +140,19 @@ FFAppState 필드)으로 trialCompleted 값을 true로 설정.
 ## Phase 3: Grep 검증
 
 ```bash
-grep -rn "trialCompleted" lib/ --include="*.dart"
+grep -n "onCreate\|mail_templates" firebase/functions/index.js
 ```
-
-**기대 결과:**
-- 회원가입 파일: `= true` 설정 없음 (주석만 존재)
-- `routine_mode_anyone.dart`: `= true` 설정 정확히 1건 (타이머 자연 만료 조건 내부)
 
 ---
 
-## Phase 4: 포맷 + 정적 분석
+## Phase 4: 배포 및 실측 테스트
 
 ```bash
-dart format lib/【치환필요: 회원가입 파일 경로】
-dart format lib/【치환필요: routine_mode_anyone.dart 경로】
-flutter analyze
+cd firebase
+firebase deploy --project stealth-vox-3p3rq3 --only functions:【신규함수명】
 ```
 
-`flutter analyze` 결과에 새로운 에러/경고 없어야 함. 있으면 즉시 보고.
+배포 후 동의 컬렉션에 테스트 문서 수동 추가 → `mail` 컬렉션에 문서 생성 확인 → 실제 메일함 도착 확인.
 
 ---
 
@@ -163,8 +160,11 @@ flutter analyze
 
 ```bash
 git add -A
-git commit -m "fix: move trialCompleted trigger from signup to Anyone timer natural expiry"
+git commit -m "feat: trigger parental consent email on Firestore document creation"
+git push origin feat/parental-consent-email
 ```
+
+(main 머지는 실제 발송 테스트 확인 후 진행 권장)
 
 ---
 
@@ -172,10 +172,9 @@ git commit -m "fix: move trialCompleted trigger from signup to Anyone timer natu
 
 ```bash
 git checkout main
-git branch -D fix/trial-completed-trigger-point
+git branch -D feat/parental-consent-email
 ```
 
 ---
 
-Codex가 Phase 0 결과 보고하면, 그걸 붙여서 저한테 주시면 Phase 1~2가 실제로 정확한 지점을 가리키는지 제가 검증해 드리겠습니다.
-
+Phase 0 진단 결과 나오면 필드명 확정해서 Phase 2-3 마무리해 드리겠습니다.
