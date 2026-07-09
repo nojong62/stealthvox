@@ -21,7 +21,7 @@ class _AuthProgressViewState extends State<AuthProgressView>
   late final AnimationController _controller;
 
   static const _steps = [
-    '카카오 계정 확인 중',
+    '계정 확인중',
     '학습 기록 연결 중',
   ];
 
