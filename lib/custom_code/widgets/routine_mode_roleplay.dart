@@ -272,6 +272,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 
     _initPermissions();
     _fetchKeysAndInit();
+    BillingTicker.instance.setSessionIdentifiers();
     BillingTicker.instance.setRate(BillingRate.full);
     BillingTicker.instance.resume();
     BillingTicker.instance.logMode('roleplay');
@@ -1689,6 +1690,10 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           'transcript': chatLines,
         });
         _sessionDocId = newSession.id;
+        BillingTicker.instance.setSessionIdentifiers(
+          sessionDocId: _sessionDocId,
+          roomId: _myHistoryRef?.id,
+        );
         _log('💾 [SAVE-05]', '새 세션 생성 완료. docId=$_sessionDocId');
 
         await userDocRef.update({'total_sessions': nextSessionNo});
@@ -1744,6 +1749,10 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         'msg_count': 0
       });
       _myHistoryRef = newRef;
+      BillingTicker.instance.setSessionIdentifiers(
+        sessionDocId: _sessionDocId,
+        roomId: _myHistoryRef?.id,
+      );
       _log('📚 [HIST-NEW]', 'chat_history 방 생성: ${_myHistoryRef!.id}');
     }
   }

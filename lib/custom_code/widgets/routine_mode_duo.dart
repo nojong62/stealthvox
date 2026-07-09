@@ -67,6 +67,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   void _startDuoBilling() {
     // 🆕 [과금정책] 게스트(회원·비회원 무관)는 차감 안 함 — 초대한 호스트만 과금
     if (!_amIHost) return;
+    BillingTicker.instance.setSessionIdentifiers(
+      sessionDocId: _myHistoryRef?.id,
+      roomId: _duoSessionRef?.id ?? widget.roomId,
+    );
     BillingTicker.instance.setRate(BillingRate.full);
     BillingTicker.instance.start();
     if (!_billingStarted) {
@@ -216,6 +220,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     _myUid = FirebaseAuth.instance.currentUser?.uid ?? '';
 
     // 🆕 [과금정책] Duo는 게스트 입장 시점에 과금 시작 — 진입 시엔 rate만 설정하고 pause 유지
+    BillingTicker.instance.setSessionIdentifiers();
     BillingTicker.instance.setRate(BillingRate.full);
     _stopDuoBilling();
     _billingStarted = false;
@@ -825,6 +830,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
         'is_pinned': false,
         'msg_count': 0
       });
+      BillingTicker.instance.setSessionIdentifiers(
+        sessionDocId: _myHistoryRef?.id,
+        roomId: _duoSessionRef?.id ?? widget.roomId ?? _pendingJoinRoomId,
+      );
     }
   }
 
@@ -880,6 +889,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
       });
       // 4) OneLink URL 생성 (roomId 정상 주입)
       final String _roomId = _duoSessionRef!.id;
+      BillingTicker.instance.setSessionIdentifiers(
+        sessionDocId: _myHistoryRef?.id,
+        roomId: _roomId,
+      );
       final Map<String, String> _params = {
         'deep_link_value': 'duo_chat',
         'invite_type': 'duo',
@@ -957,6 +970,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
       // 🆕 게스트 식별 확정
       _amIHost = false;
       _myUid = guestUid;
+      BillingTicker.instance.setSessionIdentifiers(
+        sessionDocId: _myHistoryRef?.id,
+        roomId: roomId,
+      );
 
       await _duoSessionRef!.update({
         'isPartnerJoined': true,

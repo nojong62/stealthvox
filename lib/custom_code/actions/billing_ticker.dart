@@ -89,6 +89,8 @@ class BillingTicker with WidgetsBindingObserver {
   int _sessionBeforeSeconds = 0;
   DateTime? _sessionStartTime;
   bool _usageLogSaved = false;
+  String? _sessionDocIdForUsage;
+  String? _roomIdForUsage;
   // ─────────────────────────────────────────────────────────────────────────
 
   void _addBillingLog(String msg) {
@@ -105,6 +107,22 @@ class BillingTicker with WidgetsBindingObserver {
   DateTime get lastFlushAt => _lastFlushAt;
   String? get lastFlushResult => _lastFlushResult;
   List<Map<String, dynamic>> get history => List.unmodifiable(_history);
+
+  /// usage_logs 식별자 연결. mode 진입 시 null로 초기화하고,
+  /// Firestore 세션/방 문서가 확정되면 각 모드에서 다시 설정한다.
+  void setSessionIdentifiers({String? sessionDocId, String? roomId}) {
+    final normalizedSessionDocId = sessionDocId?.trim();
+    final normalizedRoomId = roomId?.trim();
+    _sessionDocIdForUsage =
+        normalizedSessionDocId != null && normalizedSessionDocId.isNotEmpty
+            ? normalizedSessionDocId
+            : null;
+    _roomIdForUsage = normalizedRoomId != null && normalizedRoomId.isNotEmpty
+        ? normalizedRoomId
+        : null;
+    _addBillingLog(
+        '[BILLING] identifiers session=${_sessionDocIdForUsage ?? ''} room=${_roomIdForUsage ?? ''}');
+  }
 
   // ── Foreground / Background Lifecycle ─────────────────────────────────────
   /// 앱이 백그라운드로 가면 billing 정지 → 포그라운드 복귀 시 이전 상태로 재개
@@ -384,7 +402,7 @@ class BillingTicker with WidgetsBindingObserver {
 
   /// [B-BILLING] Calls the server-owned usage_logs writer.
   /// created_at/after_seconds/before_seconds are derived on the server.
-  /// room_id/session_id are sent empty until mode-level IDs are plumbed.
+  /// room_id/session_id are supplied when the current mode has resolved them.
   Future<void> _callLogUsageSession({
     required int secondsUsed,
     required int actualSeconds,
@@ -409,8 +427,8 @@ class BillingTicker with WidgetsBindingObserver {
               'rate': _sessionRateValue,
               'seconds_used': secondsUsed,
               'actual_seconds': actualSeconds,
-              'room_id': '', // TODO[plumb]: Duo room ID.
-              'session_id': '', // TODO[plumb]: chat history sessionDocId.
+              'room_id': _roomIdForUsage ?? '',
+              'session_id': _sessionDocIdForUsage ?? '',
             }
           }),
         )

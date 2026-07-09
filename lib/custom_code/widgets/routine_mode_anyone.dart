@@ -261,6 +261,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
     _initPermissions();
     _fetchKeys();
+    BillingTicker.instance.setSessionIdentifiers();
     BillingTicker.instance.setRate(BillingRate.full);
     if (!TrialFlowState.instance.isTrial) {
       BillingTicker.instance.resume();
@@ -1443,6 +1444,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           'transcript': chatLines,
         });
         _sessionDocId = newSession.id;
+        BillingTicker.instance.setSessionIdentifiers(
+          sessionDocId: _sessionDocId,
+          roomId: _myHistoryRef?.id,
+        );
         _log('💾 [SAVE-05]', '새 세션 생성 완료. docId=$_sessionDocId');
 
         await userDocRef.update({'total_sessions': nextSessionNo});
@@ -1494,6 +1499,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         'is_pinned': false,
         'msg_count': 0
       });
+      BillingTicker.instance.setSessionIdentifiers(
+        sessionDocId: _sessionDocId,
+        roomId: _myHistoryRef?.id,
+      );
       _log('📚 [HIST-NEW]', 'chat_history 방 생성: ${_myHistoryRef!.id}');
     }
   }

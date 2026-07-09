@@ -373,6 +373,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 
     _initPermissions();
     _fetchKeys();
+    BillingTicker.instance.setSessionIdentifiers();
     BillingTicker.instance.setRate(BillingRate.full);
     BillingTicker.instance.resume();
     BillingTicker.instance.logMode('study_room');
@@ -2933,6 +2934,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           'transcript': chatLines,
         });
         _sessionDocId = newSession.id;
+        BillingTicker.instance.setSessionIdentifiers(
+          sessionDocId: _sessionDocId,
+          roomId: _myHistoryRef?.id,
+        );
         _log('💾 [SAVE-05]', '새 세션 생성 완료. docId=$_sessionDocId');
         // 🔧 [v3.7] chat_history 방에 session_ref 백링크 (Practice 연동용)
         if (_myHistoryRef != null) {
@@ -2993,6 +2998,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         'last_message': '',
         'msg_count': 0
       });
+      BillingTicker.instance.setSessionIdentifiers(
+        sessionDocId: _sessionDocId,
+        roomId: _myHistoryRef?.id,
+      );
       _log('📚 [HIST-NEW]', 'chat_history 방 생성: ${_myHistoryRef!.id}');
     }
   }
