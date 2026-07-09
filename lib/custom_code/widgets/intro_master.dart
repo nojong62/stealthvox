@@ -1230,15 +1230,7 @@ class _IntroMasterState extends State<IntroMaster> {
           'parentConsentPending': true,
         }, SetOptions(merge: true));
 
-        // 보호자에게 동의 요청 이메일 발송
-        try {
-          final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
-              .httpsCallable('sendParentConsentEmail');
-          await callable.call({'parentEmail': parentEmail});
-          debugPrint('[Auth] parent consent email sent to $parentEmail');
-        } catch (e) {
-          debugPrint('[Auth] parent consent email failed (non-blocking): $e');
-        }
+        // 보호자 동의 이메일은 users/{uid} 변경을 감지하는 Cloud Function에서 발송한다.
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
