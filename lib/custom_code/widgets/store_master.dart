@@ -44,7 +44,7 @@ class _StoreMasterState extends State<StoreMaster> {
   static const String _termsUrl =
       'https://docs.google.com/document/d/1KE4xrb63SDw1ZkiNQ_wxQjH7iyY6msTuVtazCTnR7KY/edit';
   static const String _privacyUrl =
-      'https://docs.google.com/document/d/1qz1aCx6ZcxCkANFUSvbnE18H2-SbEhPUWlvZw27-DAQ/edit';
+      'https://docs.google.com/document/d/1geOkp2kwM7BXDsGkuxGuc4oDTAQeFmv660ed4oJX9vY/edit';
 
   bool isProcessing = false;
   String _versionText = '';
