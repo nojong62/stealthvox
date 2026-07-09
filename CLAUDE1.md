@@ -47,56 +47,89 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-# 배포 정리 (orphan 함수 삭제 + 브랜치 merge) — SDK 업그레이드 선행 작업
-
-## Phase 1: `claimWelcomeBonus` Firebase에서 삭제
-
-```bash
-cd F:\flutter_project\stealth_vox\firebase
-
-firebase functions:delete claimWelcomeBonus --project stealth-vox-3p3rq3 --force
-```
-
-삭제 후 확인:
-```bash
-firebase functions:list --project stealth-vox-3p3rq3 | grep claimWelcomeBonus
-```
-결과 없어야 정상.
+1만 8천 개면 확실히 정리가 필요합니다. 지시서 드립니다.
 
 ---
 
-## Phase 2: `feat/parental-consent-email` 브랜치를 현재 작업 브랜치에 반영
+# node_modules Git 추적 제거 지시서
+
+## Phase S: Savepoint
 
 ```bash
 cd F:\flutter_project\stealth_vox
-
-# 현재 SDK 업그레이드 브랜치(chore/sdk-nodejs22-upgrade)로 이동
-git checkout chore/sdk-nodejs22-upgrade
-
-# main에 먼저 병합해두는 게 순서상 깔끔함 (부모 동의 기능은 이미 검증/배포 완료된 것이므로)
-git checkout main
-git merge feat/parental-consent-email
-git push origin main
-
-# 그 다음 SDK 업그레이드 브랜치를 최신 main 기준으로 재정렬
-git checkout chore/sdk-nodejs22-upgrade
-git rebase main
+git status
+git add -A
+git commit -m "savepoint: before removing node_modules from git tracking"
+git checkout -b chore/gitignore-node-modules
 ```
-
-> `git rebase main`이 충돌 없이 끝나야 정상입니다. 충돌 발생 시 Codex는 임의로 해결하지 말고 충돌 파일명과 내용을 그대로 보고 후 대기.
 
 ---
 
-## Phase 3: 정리 후 재검증
+## Phase 0: 진단
 
 ```bash
-grep -n "claimWelcomeBonus\|queueParentConsentEmailOnUserWrite" firebase/functions/index.js
-firebase functions:list --project stealth-vox-3p3rq3
+# node_modules가 정확히 어느 경로들에서 추적되는지 전체 확인
+git ls-files | grep node_modules | sed 's|/node_modules/.*||' | sort -u
+
+# 현재 .gitignore 내용 확인 (루트 + firebase)
+cat .gitignore
+cat firebase/.gitignore 2>/dev/null
+echo "---firebase/functions---"
+cat firebase/functions/.gitignore 2>/dev/null
 ```
 
-**기대 결과:**
-- `claimWelcomeBonus`: 코드에도 배포 목록에도 없음
-- `queueParentConsentEmailOnUserWrite`: 코드(index.js)에도 있고 배포 목록에도 있음 — 이제 일치
+**Codex는 보고할 것:** `node_modules`가 `firebase/functions/` 외에 다른 경로(예: 루트, 다른 하위 프로젝트)에도 있는지.
+
+---
+
+## Phase 1: .gitignore 수정
+
+```
+파일: .gitignore (루트, 없으면 새로 생성)
+
+파일 끝에 추가:
+node_modules/
+**/node_modules/
+```
+
+```
+파일: firebase/functions/.gitignore (없으면 새로 생성)
+
+node_modules/
+```
+
+---
+
+## Phase 2: Git 추적에서만 제거 (실제 파일은 유지)
+
+```bash
+git rm -r --cached firebase/functions/node_modules
+```
+
+> `--cached`가 핵심입니다. 로컬 디스크의 실제 `node_modules` 폴더는 그대로 남고, git 추적 대상에서만 빠집니다. 삭제 아닙니다.
+
+Phase 0에서 다른 경로에도 node_modules가 있었다면 그 경로도 동일하게:
+```bash
+git rm -r --cached 【치환필요: 다른 node_modules 경로】
+```
+
+---
+
+## Phase 3: 검증
+
+```bash
+git status
+# node_modules 관련 파일들이 "deleted" 상태로 잔뜩 나와야 정상 (실제 삭제 아님, staged 상태)
+
+git ls-files | grep node_modules | wc -l
+# 0이어야 함
+```
+
+로컬에 파일이 실제로 남아있는지 확인:
+```bash
+ls firebase/functions/node_modules | head -5
+# 파일들 정상적으로 보여야 함
+```
 
 ---
 
@@ -104,11 +137,32 @@ firebase functions:list --project stealth-vox-3p3rq3
 
 ```bash
 git add -A
-git commit -m "chore: sync branch with parental consent email merge, remove orphaned claimWelcomeBonus" --allow-empty
+git commit -m "chore: stop tracking node_modules, add to gitignore"
+git push origin chore/gitignore-node-modules
 ```
-
-(변경사항이 rebase/merge로만 반영되어 실제 diff 없을 수 있음 — 그 경우 커밋 생략 가능, Codex가 `git status`로 판단)
 
 ---
 
-이 정리가 끝나면 로컬 코드와 Firebase 배포 상태가 일치하니, **이전에 드린 SDK 업그레이드 지시서(Phase 0부터)를 이 정리된 브랜치 위에서 이어서 진행**하시면 됩니다. v1 API import 경로 수정(`require('firebase-functions/v1')`)이 필요하다는 점만 다시 참고해 주세요.
+## Phase 5: main 병합
+
+```bash
+git checkout main
+git merge chore/gitignore-node-modules
+git push origin main
+```
+
+---
+
+## 주의사항 (Codex에게 전달)
+
+- 이 작업 이후 다른 브랜치에서 작업하다 `git checkout`으로 이 브랜치를 오갈 때, node_modules가 사라진 것처럼 보이면 `npm install`로 재생성하면 됩니다 (정상 동작, 걱정할 필요 없음).
+- `git rm -r --cached`는 절대 `git clean` 이나 `rm -rf`와 혼동하면 안 됩니다 — 실제 파일 삭제 명령이 아닙니다.
+
+---
+
+## 롤백 절차
+
+```bash
+git checkout main
+git branch -D chore/gitignore-node-modules
+```
