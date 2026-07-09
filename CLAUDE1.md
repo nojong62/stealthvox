@@ -47,7 +47,9 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-# 부모 동의 이메일 발송 — Codex 지시서 (확장 설치 완료 반영)
+# 이용약관/개인정보처리방침 URL 반영 — Codex 지시서
+
+---
 
 ## Phase S: Savepoint
 
@@ -55,84 +57,56 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 cd F:\flutter_project\stealth_vox
 git status
 git add -A
-git commit -m "savepoint: before parental consent email trigger function"
-git checkout -b feat/parental-consent-email
+git commit -m "savepoint: before terms/privacy URL insertion"
+git checkout -b fix/terms-privacy-url
 ```
 
 ---
 
-## Phase 0: 진단
+## Phase 0: 진단 (Diagnostics / Grep)
 
 ```bash
-# 1. 부모 동의 Firestore 저장 로직 위치 확인
-grep -rn "parental\|parent_consent\|parentConsent" lib/ --include="*.dart"
+# 1. TODO 플레이스홀더 전체 위치 확인
+grep -rn "TODO.*이용약관\|TODO.*개인정보\|TODO.*terms\|TODO.*privacy" lib/ --include="*.dart"
 
-# 2. 부모 이메일 필드명 확인
-grep -rn "parentEmail\|parent_email\|guardianEmail" lib/ --include="*.dart"
-
-# 3. 저장 컬렉션 확인
-grep -rn "collection(['\"].*consent" lib/ --include="*.dart"
-
-# 4. 기존 mail 확장 사용 사례 있는지 확인 (참고용 패턴)
-grep -rn "collection(['\"]mail['\"]" firebase/functions/*.js lib/ 2>/dev/null
-
-# 5. 만 14세 미만 판별 → 부모 동의 플로우 분기 로직 확인
-grep -rn "birthYear\|만.*14세\|isMinor" lib/ --include="*.dart"
+# 2. 혹시 다른 표기(약관, 방침 관련 문자열) 남아있는지 추가 확인
+grep -rln "이용약관\|개인정보처리방침" lib/ --include="*.dart"
 ```
 
 **Codex는 아래 항목을 보고할 것:**
-1. 부모 동의 정보 저장 컬렉션명 + 문서 구조 (부모 이메일 필드명 특정)
-2. 이 저장이 일어나는 정확한 파일 + 함수
-3. 자녀 닉네임/이름 필드명 (템플릿에 넣을 항목)
+1. TODO 플레이스홀더가 있는 정확한 파일명 + 줄 번호 전체 목록 (몇 군데인지)
+2. 각 위치가 어떤 형태로 쓰여있는지 (예: `Uri.parse("TODO")`, `onTap: () {}` 등 코드 패턴)
 
 ---
 
 ## Phase 1: 앵커 검증
 
-Phase 0 결과 기반으로, 동의 컬렉션의 `onCreate`를 감지하는 Cloud Function 추가 위치(`firebase/functions/index.js` 최하단)를 확정.
+Phase 0에서 나온 각 TODO 위치에 대해 grep 매치가 정확히 1건씩인지 확인 후 진행.
 
 ---
 
-## Phase 2: 실행
+## Phase 2: 편집 (파일별 하단→상단)
 
-### 2-1. ~~확장 설치~~ → 완료됨, 건너뜀
-
-확인된 기존 설정:
-- Email documents collection: `mail`
-- Default FROM: `StealthVox <nisiekorea@gmail.com>`
-- Authentication: UsernamePassword (SMTP URI 설정 완료)
-
-### 2-2. 이메일 템플릿 문서 생성 (Firestore `mail_templates` 컬렉션)
+각 TODO 위치마다 아래 URL로 치환:
 
 ```
-Firestore 콘솔에서 mail_templates/parental_consent 문서 생성:
+이용약관 URL:
+https://docs.google.com/document/d/1KE4xrb63SDw1ZkiNQ_wxQjH7iyY6msTuVtazCTnR7KY/edit
 
-{
-  subject: "[StealthVox] 자녀 회원가입 부모 동의 요청",
-  html: "<본문: 자녀 닉네임, 서비스 소개 1줄, 안내 문구>"
-}
+개인정보처리방침 URL:
+https://docs.google.com/document/d/1qz1aCx6ZcxCkANFUSvbnE18H2-SbEhPUWlvZw27-DAQ/edit
 ```
 
-> 문구 초안 필요하시면 별도로 작성해 드리겠습니다.
-
-### 2-3. 트리거 Cloud Function 추가
-
 ```
-파일: firebase/functions/index.js
-위치: 파일 최하단
+파일: lib/【치환필요: Phase 0에서 찾은 각 파일 경로】
+위치: 【치환필요: 해당 줄 번호】
 
-【치환필요: Phase 0에서 확인된 정확한 컬렉션명】 컬렉션에 onCreate 트리거 추가:
-
-- 새로 생성된 동의 문서에서 부모 이메일 필드(【치환필요: 정확한 필드명】) 추출
-- mail 컬렉션에 아래 구조로 문서 add():
-  {
-    to: [부모이메일],
-    template: {
-      name: "parental_consent",
-      data: { childNickname: 【필드명】 }
-    }
-  }
-- 에러 핸들링: 필드 없거나 형식 이상 시 logger.error 후 종료 (throw 금지)
+기존 TODO 플레이스홀더 문자열을 위 URL 중 해당하는 것으로 정확히 치환.
+링크가 실행 중 열리는 방식(url_launcher 등)이 이미 구현되어 있다면 
+URL 문자열만 교체하고 로직은 건드리지 말 것.
+만약 아직 탭 이벤트 자체가 구현 안 되어 있다면 (TODO가 단순 placeholder text인 경우),
+기존 파일 내 다른 외부 링크 열기 패턴(url_launcher launchUrl 등)을 
+동일하게 재사용해서 탭 시 브라우저로 열리도록 구현.
 ```
 
 ---
@@ -140,19 +114,27 @@ Firestore 콘솔에서 mail_templates/parental_consent 문서 생성:
 ## Phase 3: Grep 검증
 
 ```bash
-grep -n "onCreate\|mail_templates" firebase/functions/index.js
+grep -rn "TODO.*이용약관\|TODO.*개인정보\|TODO.*terms\|TODO.*privacy" lib/ --include="*.dart"
 ```
+
+기대 결과: 매치 0건 (전부 실제 URL로 치환 완료).
+
+```bash
+grep -rn "docs.google.com/document/d/1KE4xrb63\|docs.google.com/document/d/1qz1aCx6" lib/ --include="*.dart"
+```
+
+기대 결과: 각 URL이 코드에 정확히 반영된 위치 확인.
 
 ---
 
-## Phase 4: 배포 및 실측 테스트
+## Phase 4: 포맷 및 정적 분석
 
 ```bash
-cd firebase
-firebase deploy --project stealth-vox-3p3rq3 --only functions:【신규함수명】
+dart format lib/【수정한 모든 파일】
+flutter analyze
 ```
 
-배포 후 동의 컬렉션에 테스트 문서 수동 추가 → `mail` 컬렉션에 문서 생성 확인 → 실제 메일함 도착 확인.
+변경 파일 기준 새 error 없는지 확인.
 
 ---
 
@@ -160,11 +142,13 @@ firebase deploy --project stealth-vox-3p3rq3 --only functions:【신규함수명
 
 ```bash
 git add -A
-git commit -m "feat: trigger parental consent email on Firestore document creation"
-git push origin feat/parental-consent-email
+git commit -m "fix: insert terms of service and privacy policy URLs"
+git checkout main
+git merge fix/terms-privacy-url
+git push origin main
 ```
 
-(main 머지는 실제 발송 테스트 확인 후 진행 권장)
+> 단순 URL 치환이고 리스크 낮은 작업이라 바로 main 머지 진행해도 무방합니다.
 
 ---
 
@@ -172,9 +156,9 @@ git push origin feat/parental-consent-email
 
 ```bash
 git checkout main
-git branch -D feat/parental-consent-email
+git branch -D fix/terms-privacy-url
 ```
 
 ---
 
-Phase 0 진단 결과 나오면 필드명 확정해서 Phase 2-3 마무리해 드리겠습니다.
+Phase 0 진단 결과 나오면(TODO가 몇 군데인지), 필요하면 Phase 2를 파일별로 세분화해서 다시 정리해 드리겠습니다.
