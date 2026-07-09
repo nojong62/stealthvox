@@ -47,7 +47,9 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-# 부모 동의 이메일 발송 — Codex 지시서 (확장 설치 완료 반영)
+# usage log 식별자 보강 — `billing_ticker` sessionDocId/roomId 연결 지시서
+
+---
 
 ## Phase S: Savepoint
 
@@ -55,104 +57,105 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 cd F:\flutter_project\stealth_vox
 git status
 git add -A
-git commit -m "savepoint: before parental consent email trigger function"
-git checkout -b feat/parental-consent-email
+git commit -m "savepoint: before billing_ticker session identifier linking"
+git checkout -b fix/billing-ticker-session-identifiers
 ```
 
 ---
 
-## Phase 0: 진단
+## Phase 0: 진단 (Diagnostics / Grep)
 
 ```bash
-# 1. 부모 동의 Firestore 저장 로직 위치 확인
-grep -rn "parental\|parent_consent\|parentConsent" lib/ --include="*.dart"
+# 1. billing_ticker 정의 및 사용처 전체 확인
+grep -rn "billing_ticker\|billingTicker" lib/ --include="*.dart"
 
-# 2. 부모 이메일 필드명 확인
-grep -rn "parentEmail\|parent_email\|guardianEmail" lib/ --include="*.dart"
+# 2. billing_ticker가 기록하는 필드 구조 확인 (현재 sessionDocId/roomId 누락 여부)
+grep -n "class BillingTicker\|sessionDocId\|roomId" lib/【치환필요: billing_ticker 파일 경로】
 
-# 3. 저장 컬렉션 확인
-grep -rn "collection(['\"].*consent" lib/ --include="*.dart"
+# 3. 각 모드 파일에서 BillingTicker를 호출/초기화하는 지점 전부 확인
+grep -rln "BillingTicker(" lib/ --include="*.dart"
 
-# 4. 기존 mail 확장 사용 사례 있는지 확인 (참고용 패턴)
-grep -rn "collection(['\"]mail['\"]" firebase/functions/*.js lib/ 2>/dev/null
+# 4. 각 모드 파일에서 sessionDocId/roomId가 이미 변수로 존재하는지 확인
+grep -rn "sessionDocId\|roomId" lib/custom_code/widgets/routine_mode_*.dart
 
-# 5. 만 14세 미만 판별 → 부모 동의 플로우 분기 로직 확인
-grep -rn "birthYear\|만.*14세\|isMinor" lib/ --include="*.dart"
+# 5. billing_ticker가 최종적으로 Firestore/함수 어디에 로그를 남기는지 확인
+grep -n "usage_log\|usageLog\|logUsageSession\|FirebaseFirestore.*add\|FirebaseFirestore.*set" lib/【치환필요: billing_ticker 파일 경로】
 ```
 
-**Codex는 아래 항목을 보고할 것:**
-1. 부모 동의 정보 저장 컬렉션명 + 문서 구조 (부모 이메일 필드명 특정)
-2. 이 저장이 일어나는 정확한 파일 + 함수
-3. 자녀 닉네임/이름 필드명 (템플릿에 넣을 항목)
+**Codex는 아래 항목을 정리해서 보고할 것:**
+1. `billing_ticker` 클래스/함수의 정확한 파일 경로 + 생성자 시그니처 (현재 파라미터 목록)
+2. `BillingTicker(...)` 호출부가 있는 **모드 파일 전체 목록** (Anyone, Routine, 기타 모드별로 몇 개인지)
+3. 각 모드 파일 내에서 `sessionDocId`(대화방/세션 문서 ID)와 `roomId`가 이미 존재하는 변수명인지, 아니면 새로 가져와야 하는지 — 파일별로 다를 수 있으므로 각각 확인
+4. 최종적으로 usage log가 저장되는 Firestore 컬렉션명 및 현재 문서 구조 (지금 `sessionDocId`/`roomId` 필드가 비어있는지, 아예 없는지)
 
 ---
 
 ## Phase 1: 앵커 검증
 
-Phase 0 결과 기반으로, 동의 컬렉션의 `onCreate`를 감지하는 Cloud Function 추가 위치(`firebase/functions/index.js` 최하단)를 확정.
+Phase 0 결과 기반으로 아래를 확정:
+
+1. **BillingTicker 생성자 수정 지점** — `sessionDocId`, `roomId`를 선택적(nullable) 파라미터로 추가할지, 필수 파라미터로 바꿀지 결정. 기존 호출부가 많으면(모드 파일 여러 개) **선택적 파라미터로 추가**해서 한 파일씩 순차 연결하는 게 안전합니다(한 번에 전부 필수로 바꾸면 컴파일 에러가 모드 파일 개수만큼 터짐).
+2. **모드 파일별 연결 지점** — 각 모드 파일에서 `BillingTicker(...)` 호출하는 정확한 줄
+
+⚠️ **확인 필요 (실장님 판단):** Phase 0-2에서 모드 파일이 몇 개나 나오는지에 따라 이번에 전부 다 연결할지, 우선순위 모드(Anyone 등 트래픽 많은 것)부터 할지 정할 수 있습니다. Phase 0 보고 받으시면 범위 다시 정하는 게 좋습니다.
 
 ---
 
-## Phase 2: 실행
+## Phase 2: 편집 (파일별 하단→상단)
 
-### 2-1. ~~확장 설치~~ → 완료됨, 건너뜀
-
-확인된 기존 설정:
-- Email documents collection: `mail`
-- Default FROM: `StealthVox <nisiekorea@gmail.com>`
-- Authentication: UsernamePassword (SMTP URI 설정 완료)
-
-### 2-2. 이메일 템플릿 문서 생성 (Firestore `mail_templates` 컬렉션)
+### 2-1. BillingTicker 클래스에 필드 추가
 
 ```
-Firestore 콘솔에서 mail_templates/parental_consent 문서 생성:
+파일: lib/【치환필요: billing_ticker 파일 경로】
 
-{
-  subject: "[StealthVox] 자녀 회원가입 부모 동의 요청",
-  html: "<본문: 자녀 닉네임, 서비스 소개 1줄, 안내 문구>"
-}
+생성자에 다음 파라미터 추가 (nullable, 기본값 null):
+  String? sessionDocId,
+  String? roomId,
+
+Firestore/usage_log 기록 로직 부분에서 이 값들을 함께 저장하도록 수정.
+null인 경우에도 에러 없이 필드 자체를 생략하거나 null로 기록되도록 처리
+(기존 호출부가 아직 값을 안 넘기는 동안 깨지지 않게 하기 위함).
 ```
 
-> 문구 초안 필요하시면 별도로 작성해 드리겠습니다.
-
-### 2-3. 트리거 Cloud Function 추가
+### 2-2. 모드 파일별 연결 (Phase 0-2/3 결과 목록 순서대로 반복)
 
 ```
-파일: firebase/functions/index.js
-위치: 파일 최하단
+파일: lib/custom_code/widgets/【치환필요: 각 모드 파일명】
+위치: 【치환필요: BillingTicker(...) 호출 줄】
 
-【치환필요: Phase 0에서 확인된 정확한 컬렉션명】 컬렉션에 onCreate 트리거 추가:
+BillingTicker(...) 호출부에 아래 두 인자 추가:
+  sessionDocId: 【치환필요: 해당 파일 내 세션 문서 ID 변수명】,
+  roomId: 【치환필요: 해당 파일 내 room ID 변수명】,
 
-- 새로 생성된 동의 문서에서 부모 이메일 필드(【치환필요: 정확한 필드명】) 추출
-- mail 컬렉션에 아래 구조로 문서 add():
-  {
-    to: [부모이메일],
-    template: {
-      name: "parental_consent",
-      data: { childNickname: 【필드명】 }
-    }
-  }
-- 에러 핸들링: 필드 없거나 형식 이상 시 logger.error 후 종료 (throw 금지)
+만약 해당 변수가 파일 내에 없다면, 세션 생성/입장 시점에서 
+받아온 ID를 상위에서 전달받도록 필드 추가 후 연결.
+(이 경우는 파일별로 구조가 다를 수 있어 Codex가 자체 판단하지 말고 
+해당 파일명과 함께 실장님께 보고 후 진행)
 ```
+
+> 모드 파일이 여러 개면 **한 파일 수정 → grep 검증 → 다음 파일** 순서로 진행하도록 Codex에게 명시해 주세요. 한 번에 여러 파일을 몰아서 고치면 어디서 깨졌는지 추적이 어렵습니다.
 
 ---
 
-## Phase 3: Grep 검증
+## Phase 3: Grep 검증 (파일별로 매 수정 후 실행)
 
 ```bash
-grep -n "onCreate\|mail_templates" firebase/functions/index.js
+grep -n "sessionDocId\|roomId" lib/custom_code/widgets/【수정한 파일명】
 ```
+
+기대 결과: `BillingTicker(...)` 호출부에 두 인자가 정확히 연결되어 있는지 확인.
 
 ---
 
-## Phase 4: 배포 및 실측 테스트
+## Phase 4: 포맷 및 정적 분석
 
 ```bash
-cd firebase
-firebase deploy --project stealth-vox-3p3rq3 --only functions:【신규함수명】
+dart format lib/【치환필요: billing_ticker 경로】
+dart format lib/custom_code/widgets/【수정한 모든 모드 파일】
+flutter analyze
 ```
 
-배포 후 동의 컬렉션에 테스트 문서 수동 추가 → `mail` 컬렉션에 문서 생성 확인 → 실제 메일함 도착 확인.
+변경 파일 기준으로 새 error 없는지 확인 (기존 FlutterFlow warning 655건은 무시).
 
 ---
 
@@ -160,11 +163,11 @@ firebase deploy --project stealth-vox-3p3rq3 --only functions:【신규함수명
 
 ```bash
 git add -A
-git commit -m "feat: trigger parental consent email on Firestore document creation"
-git push origin feat/parental-consent-email
+git commit -m "fix: link sessionDocId/roomId to billing_ticker usage logs"
+git push origin fix/billing-ticker-session-identifiers
 ```
 
-(main 머지는 실제 발송 테스트 확인 후 진행 권장)
+(전체 모드 파일 다 연결 안 하고 일부만 했다면 main 머지는 나머지 파일까지 마친 뒤 진행 권장)
 
 ---
 
@@ -172,9 +175,9 @@ git push origin feat/parental-consent-email
 
 ```bash
 git checkout main
-git branch -D feat/parental-consent-email
+git branch -D fix/billing-ticker-session-identifiers
 ```
 
 ---
 
-Phase 0 진단 결과 나오면 필드명 확정해서 Phase 2-3 마무리해 드리겠습니다.
+Phase 0 보고 받으시면, 모드 파일이 몇 개나 나오는지에 따라 Phase 2를 파일별로 쪼개서 다시 드릴 수 있습니다. 필요하시면 알려주세요.
