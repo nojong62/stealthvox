@@ -811,6 +811,178 @@ function renderConsentPage(title, message, type) {
   `;
 }
 
+function getChildNickname(userData, uid) {
+  const candidates = [
+    userData.display_name,
+    userData.displayName,
+    userData.nickname,
+    userData.email,
+  ];
+  const value = candidates.find(
+    (candidate) => typeof candidate === "string" && candidate.trim().length > 0
+  );
+  return value ? value.trim() : `user-${uid.slice(0, 6)}`;
+}
+
+async function ensureParentConsentMailTemplate(firestore) {
+  const templateRef = firestore.collection("mail_templates").doc("parental_consent");
+  await templateRef.set(
+    {
+      subject: "[StealthVox] 자녀 회원가입 부모 동의 요청",
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 24px; color: #1f2937;">
+          <h2 style="margin: 0 0 16px; color: #111827;">StealthVox 보호자 동의 안내</h2>
+          <p style="line-height: 1.7; color: #4b5563;">
+            {{childNickname}} 님이 StealthVox 앱에 가입하려고 합니다.<br>
+            StealthVox는 AI 영어 회화 연습을 돕는 서비스입니다.
+          </p>
+          <p style="line-height: 1.7; color: #4b5563;">
+            만 14세 미만 사용자는 보호자 동의가 필요합니다. 아래 버튼을 눌러 자녀의 StealthVox 이용에 동의해 주세요.
+          </p>
+          <a href="{{consentUrl}}"
+             style="display: inline-block; padding: 14px 30px; background-color: #4A90D9;
+                    color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: bold;
+                    margin: 16px 0;">
+            동의합니다
+          </a>
+          <p style="line-height: 1.7; color: #4b5563;">
+            버튼이 열리지 않으면 아래 링크를 브라우저에 복사해 주세요.<br>
+            <a href="{{consentUrl}}" style="color: #2563eb; word-break: break-all;">{{consentUrl}}</a>
+          </p>
+          <p style="line-height: 1.7; color: #6b7280; font-size: 13px;">
+            본인이 요청하지 않았다면 이 이메일을 무시하셔도 됩니다.<br>
+            이 링크는 7일 후 만료됩니다.
+          </p>
+        </div>
+      `,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+}
+
+async function queueParentConsentTemplateMail(firestore, uid, userData) {
+  const rawParentEmail = userData && userData.parentEmail;
+  if (!rawParentEmail || typeof rawParentEmail !== "string") {
+    functions.logger.error("queueParentConsentTemplateMail: missing parentEmail", {
+      uid,
+    });
+    return false;
+  }
+
+  const parentEmail = rawParentEmail.trim().toLowerCase();
+  if (!isValidEmail(parentEmail)) {
+    functions.logger.error("queueParentConsentTemplateMail: invalid parentEmail", {
+      uid,
+      parentEmail: maskEmailForLog(parentEmail),
+    });
+    return false;
+  }
+
+  const token = crypto.randomBytes(32).toString("hex");
+  const tokenRef = firestore.collection(PARENT_CONSENT_TOKEN_COLLECTION).doc(token);
+  const expiresAt = admin.firestore.Timestamp.fromMillis(
+    Date.now() + PARENT_CONSENT_TOKEN_TTL_MS
+  );
+  const projectId = process.env.GCLOUD_PROJECT || "stealth-vox-3p3rq3";
+  const consentUrl =
+    `https://us-central1-${projectId}.cloudfunctions.net/confirmParentConsent?token=${encodeURIComponent(token)}`;
+  const childNickname = getChildNickname(userData, uid);
+
+  await tokenRef.create({
+    uid,
+    parentEmail,
+    status: "pending",
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    expiresAt,
+    approvedAt: null,
+    consumedCount: 0,
+    approvedIpHash: null,
+    userAgent: null,
+    mailDocId: null,
+  });
+
+  await ensureParentConsentMailTemplate(firestore);
+
+  const mailRef = firestore.collection("mail").doc();
+  await mailRef.set({
+    to: [parentEmail],
+    template: {
+      name: "parental_consent",
+      data: {
+        childNickname,
+        consentUrl,
+      },
+    },
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  await tokenRef.set({ mailDocId: mailRef.id }, { merge: true });
+
+  functions.logger.info("queueParentConsentTemplateMail: mail queued", {
+    uid,
+    parentEmail: maskEmailForLog(parentEmail),
+    token: maskTokenForLog(token),
+    mailDocId: mailRef.id,
+  });
+
+  return true;
+}
+
+// ----------------------------------------------------------------------------
+// queueParentConsentEmailOnUserWrite
+// Trigger: users/{uid} write
+// Queues a Firebase Email Extension template mail when a minor user's
+// parentConsentPending flag becomes true with a valid parentEmail.
+// ----------------------------------------------------------------------------
+exports.queueParentConsentEmailOnUserWrite = functions
+  .region("asia-northeast3")
+  .firestore.document("users/{uid}")
+  .onWrite(async (change, context) => {
+    if (!change.after.exists) return;
+
+    const beforeData = change.before.exists ? change.before.data() || {} : {};
+    const afterData = change.after.data() || {};
+    const uid = context.params.uid;
+
+    if (afterData.parentConsentPending !== true) return;
+    if (afterData.parentConsentEmailQueuedAt) return;
+
+    const beforeParentEmail =
+      typeof beforeData.parentEmail === "string"
+        ? beforeData.parentEmail.trim().toLowerCase()
+        : "";
+    const afterParentEmail =
+      typeof afterData.parentEmail === "string"
+        ? afterData.parentEmail.trim().toLowerCase()
+        : "";
+    const becamePending = beforeData.parentConsentPending !== true;
+    const parentEmailChanged = beforeParentEmail !== afterParentEmail;
+    if (!becamePending && !parentEmailChanged) return;
+
+    try {
+      const queued = await queueParentConsentTemplateMail(
+        admin.firestore(),
+        uid,
+        afterData
+      );
+      if (!queued) return;
+
+      await change.after.ref.set(
+        {
+          parentConsentEmailQueuedAt:
+            admin.firestore.FieldValue.serverTimestamp(),
+          parentConsentEmailQueuedBy: "queueParentConsentEmailOnUserWrite",
+        },
+        { merge: true }
+      );
+    } catch (e) {
+      functions.logger.error("queueParentConsentEmailOnUserWrite: error", {
+        uid,
+        error: String(e),
+      });
+    }
+  });
 // ----------------------------------------------------------------------------
 // sendParentConsentEmail
 // Type:   HTTPS Callable
@@ -916,6 +1088,8 @@ exports.sendParentConsentEmail = functions
       userAgent: null,
       mailDocId: null,
     });
+
+    await ensureParentConsentMailTemplate(firestore);
 
     const mailRef = firestore.collection("mail").doc();
     await mailRef.set({
