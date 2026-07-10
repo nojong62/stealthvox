@@ -83,6 +83,48 @@ class SocialAuthService {
     return signedIn;
   }
 
+  static Future<Map<String, dynamic>> linkGoogleToCurrentAccount() async {
+    final currentUser = _auth.currentUser;
+    if (currentUser == null || currentUser.isAnonymous) {
+      throw Exception('A signed-in account is required.');
+    }
+
+    final googleUser = await GoogleSignIn().signIn();
+    if (googleUser == null) {
+      throw Exception('Google sign-in cancelled.');
+    }
+
+    final googleAuth = await googleUser.authentication;
+    final idToken = googleAuth.idToken;
+    final callable = _functions.httpsCallable('linkProviderToCurrentAccount');
+    final result = await callable.call<Map<String, dynamic>>({
+      'provider': 'google',
+      'idToken': idToken,
+    });
+    return result.data;
+  }
+
+  static Future<Map<String, dynamic>> linkKakaoToCurrentAccount() async {
+    final currentUser = _auth.currentUser;
+    if (currentUser == null || currentUser.isAnonymous) {
+      throw Exception('A signed-in account is required.');
+    }
+
+    OAuthToken token;
+    if (await isKakaoTalkInstalled()) {
+      token = await UserApi.instance.loginWithKakaoTalk();
+    } else {
+      token = await UserApi.instance.loginWithKakaoAccount();
+    }
+
+    final callable = _functions.httpsCallable('linkProviderToCurrentAccount');
+    final result = await callable.call<Map<String, dynamic>>({
+      'provider': 'kakao',
+      'kakaoAccessToken': token.accessToken,
+    });
+    return result.data;
+  }
+
   static Future<Map<String, dynamic>> _callLinkOrCreate(
     String provider, {
     String? idToken,

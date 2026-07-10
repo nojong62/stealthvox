@@ -15,6 +15,7 @@ import 'index.dart'; // Imports other custom widgets
 // 📦 [Box 1: Imports 및 패키지]
 import 'dart:ui';
 import '/auth/firebase_auth/auth_util.dart';
+import '/auth/social_auth_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -547,6 +548,80 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                             fontWeight: FontWeight.bold))))));
   }
 
+  // 📦 [Box 7-A: 수동 계정 연결]
+  Future<void> _linkExternalProvider(String provider) async {
+    if (_isActionLocked) return;
+    setState(() {
+      _isActionLocked = true;
+      isLoading = true;
+    });
+
+    try {
+      if (provider == 'google') {
+        await SocialAuthService.linkGoogleToCurrentAccount();
+      } else if (provider == 'kakao') {
+        await SocialAuthService.linkKakaoToCurrentAccount();
+      }
+
+      if (!mounted) return;
+      final label = provider == 'google' ? 'Google' : '카카오';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$label 계정을 현재 계정에 연결했습니다.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('계정 연결 실패: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isActionLocked = false;
+          isLoading = false;
+        });
+      }
+    }
+  }
+
+  void _showAccountLinkDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF111827),
+        title: const Text(
+          '계정 연결',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
+        content: const Text(
+          '현재 로그인된 계정에 다른 로그인 수단을 연결합니다.',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('취소'),
+          ),
+          TextButton.icon(
+            onPressed: () {
+              Navigator.of(dialogContext).pop();
+              _linkExternalProvider('kakao');
+            },
+            icon: const Icon(Icons.chat_bubble_outline),
+            label: const Text('카카오 연결'),
+          ),
+          TextButton.icon(
+            onPressed: () {
+              Navigator.of(dialogContext).pop();
+              _linkExternalProvider('google');
+            },
+            icon: const Icon(FontAwesomeIcons.google, size: 16),
+            label: const Text('Google 연결'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildFooterLink(String label, VoidCallback onTap) {
     return TextButton(
       onPressed: onTap,
@@ -762,6 +837,8 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                         children: [
                           _buildFooterLink(
                               "이용 약관", () => _showTermsDialog(context)),
+                          _buildFooterLink(
+                              "계정 연결", () => _showAccountLinkDialog(context)),
                           _buildFooterLink("로그아웃", () async {
                             FFAppState().remainingTime = 0;
                             FFAppState().remainingTimeLoaded = false;

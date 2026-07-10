@@ -18,6 +18,79 @@ const { defineSecret } = require("firebase-functions/params");
 const revenueCatWebhookSecret = defineSecret("REVENUECAT_WEBHOOK_SECRET");
 
 admin.initializeApp();
+async function verifyGoogleOAuthIdToken(idToken) {
+  if (!idToken || typeof idToken !== "string") {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "idToken is required for Google provider."
+    );
+  }
+
+  try {
+    const tokenInfoResp = await fetch(
+      "https://oauth2.googleapis.com/tokeninfo?id_token=" +
+        encodeURIComponent(idToken)
+    );
+    if (!tokenInfoResp.ok) {
+      throw new Error("Google token rejected (status " + tokenInfoResp.status + ")");
+    }
+
+    const tokenInfo = await tokenInfoResp.json();
+    if (tokenInfo.email_verified !== "true" && tokenInfo.email_verified !== true) {
+      throw new Error("Google email is not verified.");
+    }
+    if (!tokenInfo.sub) {
+      throw new Error("Google subject is missing.");
+    }
+
+    return {
+      providerUid: String(tokenInfo.sub),
+      email: tokenInfo.email || null,
+      displayName: tokenInfo.name || null,
+    };
+  } catch (e) {
+    throw new functions.https.HttpsError(
+      "unauthenticated",
+      "Invalid Google ID token: " + String(e)
+    );
+  }
+}
+
+async function verifyKakaoAccessToken(accessToken) {
+  if (!accessToken || typeof accessToken !== "string") {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "kakaoAccessToken (string) is required."
+    );
+  }
+
+  try {
+    const resp = await fetch("https://kapi.kakao.com/v2/user/me", {
+      method: "GET",
+      headers: { Authorization: "Bearer " + accessToken },
+    });
+    if (!resp.ok) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "Kakao token rejected (status " + resp.status + ")."
+      );
+    }
+    const profile = await resp.json();
+    return {
+      providerUid: profile && profile.id != null ? String(profile.id) : null,
+      email:
+        profile && profile.kakao_account && profile.kakao_account.email
+          ? profile.kakao_account.email
+          : null,
+    };
+  } catch (e) {
+    if (e instanceof functions.https.HttpsError) throw e;
+    throw new functions.https.HttpsError(
+      "internal",
+      "Kakao verification failed: " + String(e)
+    );
+  }
+}
 
 // ----------------------------------------------------------------------------
 // onUserDeleted
@@ -633,37 +706,13 @@ exports.linkOrCreateAccount = functions
 
     let email = null;
     let displayName = null;
+    let providerUid = null;
 
     if (provider === "google") {
-      const idToken = data.idToken;
-      if (!idToken || typeof idToken !== "string") {
-        throw new functions.https.HttpsError(
-          "invalid-argument",
-          "idToken is required for Google provider."
-        );
-      }
-
-      try {
-        const tokenInfoResp = await fetch(
-          "https://oauth2.googleapis.com/tokeninfo?id_token=" +
-            encodeURIComponent(idToken)
-        );
-        if (!tokenInfoResp.ok) {
-          throw new Error("Google token rejected (status " + tokenInfoResp.status + ")");
-        }
-
-        const tokenInfo = await tokenInfoResp.json();
-        if (tokenInfo.email_verified !== "true" && tokenInfo.email_verified !== true) {
-          throw new Error("Google email is not verified.");
-        }
-        email = tokenInfo.email || null;
-        displayName = tokenInfo.name || null;
-      } catch (e) {
-        throw new functions.https.HttpsError(
-          "unauthenticated",
-          "Invalid Google ID token: " + String(e)
-        );
-      }
+      const googleProfile = await verifyGoogleOAuthIdToken(data.idToken);
+      email = googleProfile.email;
+      displayName = googleProfile.displayName;
+      providerUid = googleProfile.providerUid;
     } else if (provider === "email") {
       email = data.email;
       if (!email || typeof email !== "string") {
@@ -679,6 +728,27 @@ exports.linkOrCreateAccount = functions
         "invalid-argument",
         "Could not extract email from provider data."
       );
+    }
+
+    if (provider === "google" && providerUid) {
+      const providerMapRef = admin
+        .firestore()
+        .collection("provider_uid_map")
+        .doc("google:" + providerUid);
+      const providerMapDoc = await providerMapRef.get();
+      if (providerMapDoc.exists && providerMapDoc.data().uid) {
+        const resolvedUid = providerMapDoc.data().uid;
+        const token = await admin.auth().createCustomToken(resolvedUid, {
+          provider: provider,
+          linked: true,
+        });
+        functions.logger.info("linkOrCreateAccount: provider uid map matched", {
+          provider: provider,
+          uid: resolvedUid,
+          email: email,
+        });
+        return { token: token, isNewUser: false, resolvedUid: resolvedUid };
+      }
     }
 
     let existingUser = null;
@@ -699,6 +769,22 @@ exports.linkOrCreateAccount = functions
         linked: true,
       });
 
+      if (provider === "google" && providerUid) {
+        await admin
+          .firestore()
+          .collection("provider_uid_map")
+          .doc("google:" + providerUid)
+          .set(
+            {
+              uid: existingUser.uid,
+              provider: provider,
+              email: email,
+              linked_at: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+      }
+
       functions.logger.info("linkOrCreateAccount: existing user matched", {
         email: email,
         uid: existingUser.uid,
@@ -718,6 +804,22 @@ exports.linkOrCreateAccount = functions
       linked: false,
     });
 
+    if (provider === "google" && providerUid) {
+      await admin
+        .firestore()
+        .collection("provider_uid_map")
+        .doc("google:" + providerUid)
+        .set(
+          {
+            uid: newUser.uid,
+            provider: provider,
+            email: email,
+            linked_at: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+    }
+
     functions.logger.info("linkOrCreateAccount: new user created", {
       email: email,
       uid: newUser.uid,
@@ -727,6 +829,123 @@ exports.linkOrCreateAccount = functions
     return { token: token, isNewUser: true };
   });
 
+
+// ----------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
+// linkProviderToCurrentAccount
+// Type:   HTTPS Callable
+// Input:  { provider: "google" | "kakao", idToken?: string, kakaoAccessToken?: string }
+// Output: { linked: boolean, provider: string, uid: string }
+//
+// Explicit account linking. The user must already be signed in to the target
+// StealthVox account, then prove ownership of the external provider account.
+// ----------------------------------------------------------------------------
+exports.linkProviderToCurrentAccount = functions
+  .region("us-central1")
+  .https.onCall(async (data, context) => {
+    if (!context.auth || !context.auth.uid) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "Sign in before linking an account."
+      );
+    }
+
+    const targetUid = context.auth.uid;
+    const provider = data && data.provider;
+    if (!provider || !["google", "kakao"].includes(provider)) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "provider must be 'google' or 'kakao'."
+      );
+    }
+
+    const firestore = admin.firestore();
+    let providerUid = null;
+    let email = null;
+
+    if (provider === "google") {
+      const googleProfile = await verifyGoogleOAuthIdToken(data.idToken);
+      providerUid = googleProfile.providerUid;
+      email = googleProfile.email;
+    } else if (provider === "kakao") {
+      const kakaoProfile = await verifyKakaoAccessToken(data.kakaoAccessToken);
+      providerUid = kakaoProfile.providerUid;
+      email = kakaoProfile.email;
+      if (!providerUid) {
+        throw new functions.https.HttpsError(
+          "unauthenticated",
+          "No Kakao id found in profile."
+        );
+      }
+    }
+
+    const providerMapRef = firestore
+      .collection("provider_uid_map")
+      .doc(provider + ":" + providerUid);
+    const providerMapDoc = await providerMapRef.get();
+    if (
+      providerMapDoc.exists &&
+      providerMapDoc.data().uid &&
+      providerMapDoc.data().uid !== targetUid
+    ) {
+      functions.logger.info("linkProviderToCurrentAccount: remapping provider", {
+        provider: provider,
+        previousUid: providerMapDoc.data().uid,
+        targetUid: targetUid,
+      });
+    }
+
+    await providerMapRef.set(
+      {
+        uid: targetUid,
+        provider: provider,
+        providerUid: providerUid,
+        email: email || null,
+        linked_at: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    if (provider === "kakao") {
+      await firestore
+        .collection("kakao_uid_map")
+        .doc(providerUid)
+        .set(
+          {
+            uid: targetUid,
+            kakao_id: providerUid,
+            kakao_email: email || null,
+            authEmailSet: true,
+            linked_at: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+    }
+
+    await firestore
+      .collection("users")
+      .doc(targetUid)
+      .set(
+        {
+          linkedProviders: {
+            [provider]: {
+              providerUid: providerUid,
+              email: email || null,
+              linkedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+          },
+        },
+        { merge: true }
+      );
+
+    functions.logger.info("linkProviderToCurrentAccount: linked", {
+      provider: provider,
+      uid: targetUid,
+      email: email || null,
+    });
+
+    return { linked: true, provider: provider, uid: targetUid };
+  });
 
 // ----------------------------------------------------------------------------
 // Parent consent email token helpers
