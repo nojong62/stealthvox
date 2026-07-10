@@ -484,7 +484,36 @@ exports.kakaoCustomAuth = functions
       preCheckDoc.data().uid &&
       preCheckDoc.data().authEmailSet === true
     ) {
-      const resolvedUid = preCheckDoc.data().uid;
+      let resolvedUid = preCheckDoc.data().uid;
+      if (kakaoEmail) {
+        try {
+          const existingUser = await admin.auth().getUserByEmail(kakaoEmail);
+          if (existingUser && existingUser.uid && existingUser.uid !== resolvedUid) {
+            functions.logger.info("kakaoCustomAuth: fast path email remap", {
+              previousUid: resolvedUid,
+              resolvedUid: existingUser.uid,
+              kakaoIdPrefix: kakaoId.substring(0, 6),
+            });
+            resolvedUid = existingUser.uid;
+            await mapRef.set(
+              {
+                uid: resolvedUid,
+                kakao_email: kakaoEmail,
+                authEmailSet: true,
+                remapped_at: admin.firestore.FieldValue.serverTimestamp(),
+              },
+              { merge: true }
+            );
+          }
+        } catch (emailErr) {
+          if (emailErr.code !== "auth/user-not-found") {
+            functions.logger.warn("kakaoCustomAuth: fast path email check failed", {
+              uid: resolvedUid,
+              error: String(emailErr),
+            });
+          }
+        }
+      }
       const token = await admin
         .auth()
         .createCustomToken(resolvedUid, { provider: "kakaocorp.com" });
