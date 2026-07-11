@@ -700,6 +700,282 @@ exports.linkOrCreateAccount = functions
 
 
 // ----------------------------------------------------------------------------
+// Account discovery helpers
+// ----------------------------------------------------------------------------
+const ACCOUNT_DISCOVERY_TICKET_TTL_MS = 10 * 60 * 1000;
+
+function hashAccountDiscoveryTicket(ticket) {
+  return crypto.createHash("sha256").update(ticket).digest("hex");
+}
+
+function maskAccountIdentifier(email) {
+  if (!email || typeof email !== "string") return "";
+  const parts = email.split("@");
+  if (parts.length !== 2) return "";
+  const name = parts[0];
+  const domain = parts[1];
+  const visible = name.slice(0, Math.min(3, name.length));
+  return visible + "***@" + domain;
+}
+
+async function getAccountDiscoverySummary(uid) {
+  const firestore = admin.firestore();
+  const userRef = firestore.collection("users").doc(uid);
+  const userDoc = await userRef.get();
+  if (!userDoc.exists) {
+    return { found: false, reason: "no_user_document" };
+  }
+
+  const userData = userDoc.data() || {};
+  const historyBase = userRef.collection("chat_history");
+
+  let historyCount = 0;
+  try {
+    const countSnap = await historyBase.count().get();
+    historyCount = countSnap.data().count || 0;
+  } catch (e) {
+    functions.logger.warn("accountDiscovery: history count failed", {
+      uid,
+      error: String(e),
+    });
+  }
+
+  let lastUsedAt = null;
+  try {
+    const latestSnap = await historyBase
+      .orderBy("created_at", "desc")
+      .limit(1)
+      .get();
+    if (!latestSnap.empty) {
+      const latestData = latestSnap.docs[0].data() || {};
+      const createdAt = latestData.created_at;
+      if (createdAt && typeof createdAt.toMillis === "function") {
+        lastUsedAt = createdAt.toMillis();
+      }
+    }
+  } catch (e) {
+    functions.logger.warn("accountDiscovery: latest history failed", {
+      uid,
+      error: String(e),
+    });
+  }
+
+  const remainingTime =
+    typeof userData.remainingTime === "number" ? userData.remainingTime : 0;
+  const hasBirthYear = userData.birthYear != null;
+  const parentConsentPending = userData.parentConsentPending === true;
+  const hasMemberData =
+    remainingTime > 0 || historyCount > 0 || hasBirthYear || parentConsentPending;
+
+  return {
+    found: true,
+    hasMemberData,
+    remainingTime,
+    historyCount,
+    lastUsedAt,
+    hasBirthYear,
+    parentConsentPending,
+    maskedIdentifier: maskAccountIdentifier(userData.email),
+  };
+}
+
+async function resolveMappedDiscoveryUid(provider, providerUid) {
+  const firestore = admin.firestore();
+  if (provider === "google") {
+    const mapDoc = await firestore
+      .collection("provider_uid_map")
+      .doc("google:" + providerUid)
+      .get();
+    return mapDoc.exists && mapDoc.data().uid ? mapDoc.data().uid : null;
+  }
+  if (provider === "kakao") {
+    const mapDoc = await firestore.collection("kakao_uid_map").doc(providerUid).get();
+    return mapDoc.exists && mapDoc.data().uid ? mapDoc.data().uid : null;
+  }
+  return null;
+}
+
+async function verifyAccountDiscoveryProvider(data) {
+  const provider = data && data.provider;
+  if (!provider || !["google", "kakao"].includes(provider)) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "provider must be 'google' or 'kakao'."
+    );
+  }
+
+  if (provider === "google") {
+    const profile = await verifyGoogleOAuthIdToken(data.idToken);
+    return {
+      provider,
+      providerUid: profile.providerUid,
+      email: profile.email || null,
+    };
+  }
+
+  const profile = await verifyKakaoAccessToken(data.kakaoAccessToken);
+  if (!profile.providerUid) {
+    throw new functions.https.HttpsError(
+      "unauthenticated",
+      "No Kakao id found in profile."
+    );
+  }
+  return {
+    provider,
+    providerUid: profile.providerUid,
+    email: profile.email || null,
+  };
+}
+
+// ----------------------------------------------------------------------------
+// lookupAccountForRecovery
+// ----------------------------------------------------------------------------
+exports.lookupAccountForRecovery = functions
+  .region("us-central1")
+  .https.onCall(async (data, context) => {
+    const verified = await verifyAccountDiscoveryProvider(data);
+    const mappedUid = await resolveMappedDiscoveryUid(
+      verified.provider,
+      verified.providerUid
+    );
+
+    if (!mappedUid) {
+      return { status: "not_found", provider: verified.provider };
+    }
+
+    const summary = await getAccountDiscoverySummary(mappedUid);
+    if (!summary.found) {
+      return {
+        status: "not_found",
+        provider: verified.provider,
+        reason: summary.reason,
+      };
+    }
+
+    const ticket = crypto.randomBytes(32).toString("base64url");
+    const now = Date.now();
+    const expiresAt = now + ACCOUNT_DISCOVERY_TICKET_TTL_MS;
+
+    await admin
+      .firestore()
+      .collection("account_discovery_tickets")
+      .doc(hashAccountDiscoveryTicket(ticket))
+      .set({
+        provider: verified.provider,
+        provider_uid: verified.providerUid,
+        provider_uid_hash: crypto
+          .createHash("sha256")
+          .update(verified.providerUid)
+          .digest("hex"),
+        uid: mappedUid,
+        created_at: admin.firestore.FieldValue.serverTimestamp(),
+        expires_at: expiresAt,
+        consumed: false,
+      });
+
+    return {
+      status: "found",
+      provider: verified.provider,
+      account: {
+        provider: verified.provider,
+        maskedIdentifier:
+          summary.maskedIdentifier || maskAccountIdentifier(verified.email),
+        remainingTime: summary.remainingTime,
+        historyCount: summary.historyCount,
+        lastUsedAt: summary.lastUsedAt,
+        hasBirthYear: summary.hasBirthYear,
+        parentConsentPending: summary.parentConsentPending,
+        hasMemberData: summary.hasMemberData,
+        ticket,
+        expiresAt,
+      },
+    };
+  });
+
+// ----------------------------------------------------------------------------
+// completeAccountRecoveryLogin
+// ----------------------------------------------------------------------------
+exports.completeAccountRecoveryLogin = functions
+  .region("us-central1")
+  .https.onCall(async (data, context) => {
+    const verified = await verifyAccountDiscoveryProvider(data);
+    const ticket = data && data.ticket;
+    if (!ticket || typeof ticket !== "string") {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "ticket is required."
+      );
+    }
+
+    const ticketRef = admin
+      .firestore()
+      .collection("account_discovery_tickets")
+      .doc(hashAccountDiscoveryTicket(ticket));
+    const ticketDoc = await ticketRef.get();
+    if (!ticketDoc.exists) {
+      throw new functions.https.HttpsError("not-found", "Discovery ticket not found.");
+    }
+
+    const ticketData = ticketDoc.data() || {};
+    if (ticketData.consumed === true || Number(ticketData.expires_at) < Date.now()) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Discovery ticket expired."
+      );
+    }
+    if (ticketData.provider !== verified.provider) {
+      throw new functions.https.HttpsError(
+        "permission-denied",
+        "Discovery provider mismatch."
+      );
+    }
+    if (ticketData.provider_uid !== verified.providerUid) {
+      throw new functions.https.HttpsError(
+        "permission-denied",
+        "Discovery account mismatch."
+      );
+    }
+
+    const mappedUid = await resolveMappedDiscoveryUid(
+      verified.provider,
+      verified.providerUid
+    );
+    if (!mappedUid || mappedUid !== ticketData.uid) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Account mapping changed."
+      );
+    }
+
+    const summary = await getAccountDiscoverySummary(mappedUid);
+    if (!summary.found) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "StealthVox account no longer exists."
+      );
+    }
+
+    await ticketRef.set(
+      {
+        consumed: true,
+        consumed_at: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    const token = await admin.auth().createCustomToken(mappedUid, {
+      provider: verified.provider,
+      accountDiscovery: true,
+    });
+
+    functions.logger.info("completeAccountRecoveryLogin: token issued", {
+      provider: verified.provider,
+      uid: mappedUid,
+    });
+
+    return { token, provider: verified.provider };
+  });
+// ----------------------------------------------------------------------------
 // Parent consent email token helpers
 // ----------------------------------------------------------------------------
 const PARENT_CONSENT_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;

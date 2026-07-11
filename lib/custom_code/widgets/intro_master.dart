@@ -14,8 +14,9 @@ import 'trial/trial_flow_state.dart';
 import 'auth_progress_view.dart';
 import 'shared_social_button.dart';
 import '/auth/social_auth_service.dart';
+import '/auth/account_discovery_service.dart';
 
-enum IntroScreen { welcome, auth }
+enum IntroScreen { welcome, auth, accountDiscovery }
 
 class IntroMaster extends StatefulWidget {
   const IntroMaster({
@@ -55,6 +56,13 @@ class _IntroMasterState extends State<IntroMaster> {
   bool _trialStarting = false;
   String _trialNativeLang = 'Korean';
   String _trialTargetLang = 'English';
+
+  // =======================================================
+  // [Account Discovery] Existing-account lookup state
+  // =======================================================
+  final List<AccountDiscoveryResult> _accountDiscoveryResults = [];
+  String _accountDiscoveryMessage = '';
+  String _accountDiscoveryBusyProvider = '';
 
   @override
   void initState() {
@@ -345,6 +353,8 @@ class _IntroMasterState extends State<IntroMaster> {
         return _buildWelcomeView(context);
       case IntroScreen.auth:
         return _buildAuthView(context);
+      case IntroScreen.accountDiscovery:
+        return _buildAccountDiscoveryView(context);
     }
   }
 
@@ -721,6 +731,8 @@ class _IntroMasterState extends State<IntroMaster> {
           const SizedBox(height: 34),
           // provider 버튼들 (재방문 시 이전 provider 강조)
           ..._buildProviderButtons(),
+          const SizedBox(height: 18),
+          _buildAccountDiscoveryEntryButton(),
           // 이메일 폼
           if (_showEmailForm) ...[
             const SizedBox(height: 18),
@@ -732,6 +744,362 @@ class _IntroMasterState extends State<IntroMaster> {
         ],
       ),
     );
+  }
+
+  Widget _buildAccountDiscoveryEntryButton() {
+    return TextButton.icon(
+      onPressed: isLoading
+          ? null
+          : () => setState(() {
+                _currentScreen = IntroScreen.accountDiscovery;
+                _showEmailForm = false;
+                _accountDiscoveryMessage = '';
+              }),
+      icon: const Icon(Icons.manage_search, size: 18),
+      label: const Text('가입 방법이 기억나지 않나요? 내 계정 찾아보기'),
+      style: TextButton.styleFrom(
+        foregroundColor: const Color(0xFFB9D7FF),
+        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+      ),
+    );
+  }
+
+  Widget _buildAccountDiscoveryView(BuildContext context) {
+    final foundResults =
+        _accountDiscoveryResults.where((r) => r.found).toList();
+    return _buildAuthScaffold(
+      context: context,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: IconButton(
+              onPressed: _accountDiscoveryBusyProvider.isNotEmpty
+                  ? null
+                  : () => setState(() => _currentScreen = IntroScreen.auth),
+              icon: const Icon(Icons.arrow_back, color: Colors.white),
+              tooltip: '뒤로',
+            ),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            '내 계정 찾아보기',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              height: 1.32,
+            ),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            '이전에 사용했던 로그인 방법을 하나씩 확인해 보세요. 계정은 자동으로 합쳐지지 않으며, 남은 시간과 학습 기록은 별도로 유지됩니다.',
+            textAlign: TextAlign.center,
+            style:
+                TextStyle(color: Color(0xFFB7B7C2), fontSize: 13, height: 1.55),
+          ),
+          const SizedBox(height: 28),
+          _buildDiscoveryActionButton(
+            provider: 'google',
+            label: 'Google 계정 확인',
+            icon: Image.asset(
+              'assets/images/google_logo.png',
+              width: 20,
+              height: 20,
+              errorBuilder: (_, __, ___) =>
+                  const Icon(Icons.g_mobiledata, size: 24),
+            ),
+            onTap: () =>
+                _lookupAccount('google', AccountDiscoveryService.lookupGoogle),
+          ),
+          const SizedBox(height: 12),
+          _buildDiscoveryActionButton(
+            provider: 'kakao',
+            label: '카카오 계정 확인',
+            backgroundColor: const Color(0xFFFEE500),
+            foregroundColor: const Color(0xFF191919),
+            icon: Image.asset(
+              'assets/images/kakao_logo.png',
+              width: 20,
+              height: 20,
+              errorBuilder: (_, __, ___) =>
+                  const Icon(Icons.chat_bubble, size: 20),
+            ),
+            onTap: () =>
+                _lookupAccount('kakao', AccountDiscoveryService.lookupKakao),
+          ),
+          const SizedBox(height: 12),
+          _buildDiscoveryActionButton(
+            provider: 'email',
+            label: '이메일 계정 확인',
+            icon: const Icon(Icons.email_outlined, size: 20),
+            onTap: _showEmailDiscoveryGuide,
+          ),
+          if (_accountDiscoveryMessage.isNotEmpty) ...[
+            const SizedBox(height: 18),
+            Text(
+              _accountDiscoveryMessage,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                  color: Color(0xFFD7D7DE), fontSize: 13, height: 1.45),
+            ),
+          ],
+          if (foundResults.isNotEmpty) ...[
+            const SizedBox(height: 28),
+            if (foundResults.length > 1) ...[
+              const Text(
+                '두 개 이상의 기존 계정을 찾았습니다. 각 계정의 남은 시간과 학습 기록은 서로 합쳐지지 않습니다. 사용할 계정을 직접 선택해 주세요.',
+                style: TextStyle(
+                    color: Color(0xFFB7B7C2), fontSize: 13, height: 1.45),
+              ),
+              const SizedBox(height: 12),
+            ],
+            ...foundResults.map(_buildDiscoveredAccountCard),
+          ],
+          const SizedBox(height: 26),
+          OutlinedButton.icon(
+            onPressed: _accountDiscoveryBusyProvider.isNotEmpty
+                ? null
+                : _confirmNewAccountFromDiscovery,
+            icon: const Icon(Icons.person_add_alt_1, size: 18),
+            label: const Text('새 계정 만들기'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.white,
+              side: BorderSide(color: Colors.white.withValues(alpha: 0.22)),
+              padding: const EdgeInsets.symmetric(vertical: 13),
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextButton.icon(
+            onPressed: _accountDiscoveryBusyProvider.isNotEmpty
+                ? null
+                : () => launchURL('mailto:support@stealthvox.app'),
+            icon: const Icon(Icons.support_agent, size: 18),
+            label: const Text('고객지원 문의'),
+            style:
+                TextButton.styleFrom(foregroundColor: const Color(0xFFB9D7FF)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDiscoveryActionButton({
+    required String provider,
+    required String label,
+    required Widget icon,
+    required VoidCallback onTap,
+    Color backgroundColor = const Color(0xFF33333A),
+    Color foregroundColor = Colors.white,
+  }) {
+    final busy = _accountDiscoveryBusyProvider == provider;
+    return SizedBox(
+      height: 50,
+      child: ElevatedButton.icon(
+        onPressed: _accountDiscoveryBusyProvider.isNotEmpty ? null : onTap,
+        icon: busy
+            ? SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: foregroundColor),
+              )
+            : icon,
+        label: Text(label),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: backgroundColor,
+          foregroundColor: foregroundColor,
+          disabledBackgroundColor: backgroundColor.withValues(alpha: 0.55),
+          disabledForegroundColor: foregroundColor.withValues(alpha: 0.65),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDiscoveredAccountCard(AccountDiscoveryResult account) {
+    final minutes = (account.remainingTime / 60).floor();
+    final lastUsed = account.lastUsedAt == null
+        ? '확인 불가'
+        : '${account.lastUsedAt!.year}.${account.lastUsedAt!.month.toString().padLeft(2, '0')}.${account.lastUsedAt!.day.toString().padLeft(2, '0')}';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1F242A),
+        borderRadius: BorderRadius.circular(8),
+        border:
+            Border.all(color: const Color(0xFF4A90D9).withValues(alpha: 0.34)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            account.providerLabel,
+            style: const TextStyle(
+                color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            account.maskedIdentifier.isEmpty
+                ? '인증된 계정'
+                : account.maskedIdentifier,
+            style: const TextStyle(color: Color(0xFFD7D7DE), fontSize: 13),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            '남은 시간: $minutes분\n학습 기록: ${account.historyCount}개\n마지막 사용: $lastUsed',
+            style: const TextStyle(
+                color: Color(0xFFB7B7C2), fontSize: 13, height: 1.55),
+          ),
+          if (account.parentConsentPending) ...[
+            const SizedBox(height: 8),
+            const Text(
+              '보호자 동의 대기 중',
+              style: TextStyle(
+                  color: Color(0xFFFFD166),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700),
+            ),
+          ],
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            height: 44,
+            child: ElevatedButton(
+              onPressed: isLoading
+                  ? null
+                  : () => _continueWithDiscoveredAccount(account),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF4A90D9),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+              child: const Text(
+                '이 계정으로 계속하기',
+                style:
+                    TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _lookupAccount(
+    String provider,
+    Future<AccountDiscoveryResult> Function() lookup,
+  ) async {
+    setState(() {
+      _accountDiscoveryBusyProvider = provider;
+      _accountDiscoveryMessage = '';
+    });
+    try {
+      final result = await lookup();
+      if (!mounted) return;
+      setState(() {
+        _accountDiscoveryResults.removeWhere((item) =>
+            item.provider == result.provider &&
+            item.maskedIdentifier == result.maskedIdentifier);
+        if (result.found) {
+          _accountDiscoveryResults.add(result);
+          _accountDiscoveryMessage =
+              '기존 StealthVox 기록을 찾았습니다. 사용할 계정을 직접 선택해 주세요.';
+        } else {
+          _accountDiscoveryMessage =
+              '이 계정에서는 기존 StealthVox 기록을 찾지 못했습니다. 다른 계정이나 다른 로그인 방법을 확인해 보세요.';
+        }
+      });
+    } on AccountDiscoveryCancelledException {
+      if (!mounted) return;
+      setState(() => _accountDiscoveryMessage = '계정 확인이 취소되었습니다.');
+    } catch (e) {
+      debugPrint('[AccountDiscovery] lookup failed: $e');
+      if (!mounted) return;
+      setState(() {
+        _accountDiscoveryMessage =
+            '계정 정보를 확인하지 못했습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.';
+      });
+    } finally {
+      if (mounted) setState(() => _accountDiscoveryBusyProvider = '');
+    }
+  }
+
+  Future<void> _continueWithDiscoveredAccount(
+      AccountDiscoveryResult account) async {
+    setState(() => isLoading = true);
+    AppStateNotifier.instance.updateNotifyOnAuthChange(false);
+    try {
+      await _cleanupTrialSandbox();
+      await AccountDiscoveryService.signInWithDiscoveredAccount(account);
+      FFAppState().hasLinkedAccount = true;
+      FFAppState().lastAuthProvider = account.provider;
+      FFAppState().remainingTime = account.remainingTime;
+      FFAppState().remainingTimeLoaded = true;
+      LobbyBrain.lastSyncedUid = null;
+      if (!mounted) return;
+      await _checkAgeAndRoute();
+    } catch (e, stack) {
+      debugPrint('[AccountDiscovery] final login failed: $e');
+      debugPrint('[AccountDiscovery] stack: $stack');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('계정으로 계속할 수 없습니다: $e')),
+        );
+      }
+    } finally {
+      AppStateNotifier.instance.updateNotifyOnAuthChange(true);
+      if (mounted) setState(() => isLoading = false);
+    }
+  }
+
+  void _showEmailDiscoveryGuide() {
+    const message =
+        '이메일 계정은 이메일과 비밀번호로 실제 로그인한 뒤에만 확인할 수 있습니다. 기존 이메일 로그인과 비밀번호 재설정 경로를 이용해 주세요.';
+    setState(() {
+      _accountDiscoveryMessage = message;
+      _currentScreen = IntroScreen.auth;
+      _showEmailForm = true;
+      isLoginMode = true;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text(message)),
+    );
+  }
+
+  Future<void> _confirmNewAccountFromDiscovery() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF161616),
+        title: const Text('새 계정을 만들까요?', style: TextStyle(color: Colors.white)),
+        content: const Text(
+          '새 계정을 만들면 이전 계정의 남은 시간과 학습 기록은 자동으로 옮겨지지 않습니다. 현재 선택한 로그인 방법으로 새로 가입하시겠습니까?',
+          style: TextStyle(color: Colors.white70, height: 1.45),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('이전 계정 다시 찾기'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('이 계정으로 새로 가입'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      setState(() {
+        _currentScreen = IntroScreen.auth;
+        _accountDiscoveryMessage = '';
+      });
+    }
   }
 
   List<Widget> _buildAuthHeader() {
