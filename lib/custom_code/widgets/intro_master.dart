@@ -53,6 +53,7 @@ class _IntroMasterState extends State<IntroMaster> {
   IntroScreen _currentScreen = IntroScreen.welcome;
   bool _showEmailForm = false;
   bool _trialStarting = false;
+  bool _authEntryOnly = false;
   String _trialNativeLang = 'Korean';
   String _trialTargetLang = 'English';
 
@@ -68,7 +69,9 @@ class _IntroMasterState extends State<IntroMaster> {
     _emailFocusNode.addListener(_onFocusChange);
     _passwordFocusNode.addListener(_onFocusChange);
     AppsFlyerManager.duoInviteSignal.addListener(_onDuoInviteSignal);
-    if (FFAppState().trialCompleted) {
+    _authEntryOnly =
+        FFAppState().trialCompleted || FFAppState().lastAuthProvider.isNotEmpty;
+    if (_authEntryOnly) {
       _currentScreen = IntroScreen.auth;
     } else {
       _currentScreen = IntroScreen.welcome;
@@ -182,7 +185,6 @@ class _IntroMasterState extends State<IntroMaster> {
         '[TrialDebug] _startTrial enter, currentUser=${FirebaseAuth.instance.currentUser?.uid}, isAnonymous=${FirebaseAuth.instance.currentUser?.isAnonymous}, time=${DateTime.now().toIso8601String()}');
     if (_trialStarting) return;
     _trialStarting = true;
-    setState(() => isLoading = true);
     try {
       TrialFlowState.instance.restoreFromAppState();
 
@@ -199,15 +201,17 @@ class _IntroMasterState extends State<IntroMaster> {
       FFAppState().pendingInviteType = '';
       FFAppState().duoRoomId = '';
 
+      if (!context.mounted) return;
+      final confirmedLanguage = await _showLanguageSettingDialog();
+      if (confirmedLanguage != true) return;
+
+      FFAppState().nativeLang = _trialNativeLang;
+      FFAppState().targetLang = _trialTargetLang;
+
       if (FirebaseAuth.instance.currentUser == null) {
         AppStateNotifier.instance.updateNotifyOnAuthChange(false);
         await FirebaseAuth.instance.signInAnonymously();
       }
-      if (!context.mounted) return;
-      await _showLanguageSettingDialog();
-
-      FFAppState().nativeLang = _trialNativeLang;
-      FFAppState().targetLang = _trialTargetLang;
 
       if (!context.mounted) return;
       await _enterTrialAnyone(context);
@@ -220,7 +224,6 @@ class _IntroMasterState extends State<IntroMaster> {
     } finally {
       AppStateNotifier.instance.updateNotifyOnAuthChange(true);
       _trialStarting = false;
-      if (mounted) setState(() => isLoading = false);
     }
   }
 
@@ -253,29 +256,19 @@ class _IntroMasterState extends State<IntroMaster> {
   Future<void> _handleAuth() async {
     setState(() => isLoading = true);
     try {
-      if (isLoginMode) {
-        await FirebaseAuth.instance.signInWithEmailAndPassword(
-          email: emailController.text.trim(),
-          password: passwordController.text.trim(),
-        );
-      } else {
-        final email = emailController.text.trim();
-        final password = passwordController.text.trim();
+      final email = emailController.text.trim();
+      final password = passwordController.text.trim();
+      if (!isLoginMode) {
         final currentUser = FirebaseAuth.instance.currentUser;
         if (currentUser != null && currentUser.isAnonymous) {
-          final credential = EmailAuthProvider.credential(
-            email: email,
-            password: password,
-          );
           await _cleanupTrialSandbox();
-          await currentUser.linkWithCredential(credential);
-        } else {
-          await FirebaseAuth.instance.createUserWithEmailAndPassword(
-            email: email,
-            password: password,
-          );
         }
       }
+      await SocialAuthService.signInWithEmail(
+        email,
+        password,
+        isSignUp: !isLoginMode,
+      );
       // trialCompleted trigger moved to routine_mode_anyone.dart (Anyone 1-min timer natural expiry)
       // see: fix/trial-completed-trigger-point branch
       FFAppState().lastAuthProvider = 'email';
@@ -555,7 +548,7 @@ class _IntroMasterState extends State<IntroMaster> {
     );
   }
 
-  Future<void> _showLanguageSettingDialog() async {
+  Future<bool?> _showLanguageSettingDialog() async {
     const languages = [
       'Korean',
       'English',
@@ -573,7 +566,7 @@ class _IntroMasterState extends State<IntroMaster> {
     String nativeLang = _trialNativeLang;
     String targetLang = _trialTargetLang;
 
-    await showDialog<void>(
+    return showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) {
@@ -633,7 +626,7 @@ class _IntroMasterState extends State<IntroMaster> {
                         _trialNativeLang = nativeLang;
                         _trialTargetLang = targetLang;
                       });
-                      Navigator.of(dialogContext).pop();
+                      Navigator.of(dialogContext).pop(true);
                     },
                     child: const Text(
                       '확인',
@@ -703,7 +696,7 @@ class _IntroMasterState extends State<IntroMaster> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // 뒤로가기: 체험 완료 전에만 표시
-          if (!FFAppState().trialCompleted)
+          if (!_authEntryOnly)
             Align(
               alignment: Alignment.centerLeft,
               child: IconButton(
@@ -715,7 +708,7 @@ class _IntroMasterState extends State<IntroMaster> {
                 tooltip: '뒤로',
               ),
             ),
-          SizedBox(height: FFAppState().trialCompleted ? 60 : 24),
+          SizedBox(height: _authEntryOnly ? 60 : 24),
           // 제목 + 재방문 안내
           ..._buildAuthHeader(),
           const SizedBox(height: 34),
@@ -757,7 +750,7 @@ class _IntroMasterState extends State<IntroMaster> {
       if (lastProvider.isNotEmpty) ...[
         const SizedBox(height: 10),
         Text(
-          '이전에 $providerLabel 계정으로 가입했습니다',
+          '$providerLabel 계정으로 가입한 이력이 있습니다',
           textAlign: TextAlign.center,
           style: const TextStyle(
             color: Color(0xFF9C9CA6),

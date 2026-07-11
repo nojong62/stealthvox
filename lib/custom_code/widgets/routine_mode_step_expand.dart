@@ -427,7 +427,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   //    - 유저의 첫 문장이 확장 seed가 됨
   //
   // 2. AI는 시작 안내 후 대기 (Guided Waiting)
-  //    - "대화하면서 문장을 늘려가고 싶은 기본 문장을 하나 제안해 주세요."
+  //    - "오늘은 어떤 순간을 영어로 다시 그려볼까요?"
   //    - OpenAI 질문 생성 API 호출 없음
   //    - 안내문 TTS 완료 후 STT 자동 시작
   //
@@ -745,51 +745,40 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     _ttsQueueManager.setUserTurn(false);
     _ttsQueueManager.setAiPaused(false);
 
-    // 🆕 FreeTalk와 Roleplay를 독립적으로 fetch (상호 의존 제거)
-    final List<String> ftSnippets = await _fetchFreeTalkUserSnippets();
-    final List<String> rpSnippets = await _fetchRoleplayUserSnippets();
-
-    // [SEED 로그]
-    _log('[SEED-FT]',
-        'count=${ftSnippets.length}, picked=${ftSnippets.join(" | ")}');
-    _log('[SEED-RP]',
-        'count=${rpSnippets.length}, picked=${rpSnippets.join(" | ")}');
-    final String _seedSource = ftSnippets.isNotEmpty && rpSnippets.isNotEmpty
-        ? 'freeTalk+roleplay'
-        : ftSnippets.isNotEmpty
-            ? 'freeTalkOnly'
-            : rpSnippets.isNotEmpty
-                ? 'roleplayOnly'
-                : 'fallback';
-    _log('[SEED-MIX]',
-        'ft=${ftSnippets.length}, rp=${rpSnippets.length}, source=$_seedSource');
-
-    if ((ftSnippets.isNotEmpty || rpSnippets.isNotEmpty) &&
-        mounted &&
-        _isConversationActive) {
-      // 히스토리 기반 첫 질문 → "기본 문장 말하세요" 안내 생략
-      await _generateAndPlayFreeTalkSeedQuestion(ftSnippets, rpSnippets);
-    } else {
-      // 기존: 고정 안내 TTS
-      final ChunkedTtsFetcher tts = ChunkedTtsFetcher(
-        _openAiKey,
-        _ttsQueueManager,
-        'nova',
-        isUser: false,
-        onLog: _log,
-      );
-      tts.addText('대화하면서 문장을 늘려가고 싶은 기본 문장을 하나 제안해 주세요.');
-      int ticks = 0;
-      while ((tts.pendingRequests > 0 || _ttsQueueManager.isBusy) && mounted) {
-        await Future.delayed(const Duration(milliseconds: 50));
-        if (++ticks > 200) break;
-      }
+    const openingPrompt = '오늘은 어떤 순간을 영어로 다시 그려볼까요?';
+    int aiIdx = -1;
+    if (mounted) {
+      setState(() {
+        _localMessages.add({
+          'role': 'SYSTEM',
+          'target': openingPrompt,
+          'original': '',
+        });
+        aiIdx = _localMessages.length - 1;
+      });
+      _scrollToBottom();
     }
 
-    // 안내/질문 완료  STT 즉시 시작 (유저 기본 문장 대기)
+    final ChunkedTtsFetcher tts = ChunkedTtsFetcher(
+      _openAiKey,
+      _ttsQueueManager,
+      'nova',
+      isUser: false,
+      onLog: _log,
+    );
+    tts.addText(openingPrompt);
+    int ticks = 0;
+    while ((tts.pendingRequests > 0 || _ttsQueueManager.isBusy) && mounted) {
+      await Future.delayed(const Duration(milliseconds: 50));
+      if (++ticks > 200) break;
+    }
+    if (mounted && aiIdx >= 0) {
+      _revealForReading(aiIdx, openingPrompt);
+    }
+
+    // 안내 완료  STT 즉시 시작 (유저 seed 문장 대기)
     // 🔧 [MIC-INSTANT] 8초 딜레이 제거  AI 말 끝나자마자 마이크 ON.
     // 침묵 시 별도 안내 멘트 없이 그대로 대기(침묵 폴백 제거).
-    _showSeedHintBalloon();
     if (mounted && _isConversationActive && !_isSessionComplete) {
       _startDeepgramListening();
     }
@@ -5150,8 +5139,9 @@ Context determines: "불편하다" after a body part = physical; after 마음/�
 - PART 2: A grown/expanded English sentence that naturally merges:
     (a) The most recent expanded sentence from History
     (b) The new information from Part 1
-  Grow it the way a native speaker actually TALKS — linearly, left to right,
-  by chaining short clauses one after another. Do NOT nest clauses inside clauses.
+  Grow it the way a modern American naturally says a longer thought out loud:
+  polished but not formal, linearly left to right, by chaining short clauses
+  one after another. Do NOT nest clauses inside clauses.
   Preferred connectors (use these, and vary them turn to turn):
     - Coordination: and, but, so, and then
     - Result / reason links: which is why, that's why, so that, because (keep short)
@@ -5469,7 +5459,7 @@ Output: [GARBLED]
 This is the FINAL turn ($turnNumber of $maxTurns). The user has answered your grammar-inducing questions step by step.
 
 [YOUR JOB — Synthesis]
-Read the History carefully. Collect the user's fragmented answers and synthesize them into ONE fluent, natural-SPOKEN sentence — the way an American would actually say it OUT LOUD, chained linearly (left to right), NOT packed with nested clauses. Build it mainly with these linear connectors (use at least 2, and vary them):
+Read the History carefully. Collect the user's fragmented answers and synthesize them into ONE fluent, natural-SPOKEN sentence — the way a modern American would actually say a longer thought OUT LOUD: polished but not formal, chained linearly (left to right), and NOT packed with nested clauses. Build it mainly with these linear connectors (use at least 2, and vary them):
 - Coordination: and / and then / so / but
 - Result or reason: which is why / that's why / so that / because (kept short, never nested)
 - Optionally ONE soft spoken marker if it fits: like / you know / I mean

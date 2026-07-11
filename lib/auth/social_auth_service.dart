@@ -54,7 +54,12 @@ class SocialAuthService {
 
       final customToken = result.data['token'] as String;
       debugPrint('[KakaoAuth] signInWithCustomToken call start');
-      final credential = await _auth.signInWithCustomToken(customToken);
+      var credential = await _auth.signInWithCustomToken(customToken);
+      credential = await _consumePendingProviderLink(
+        'kakao',
+        credential,
+        kakaoAccessToken: token.accessToken,
+      );
       debugPrint(
           '[KakaoAuth] signInWithCustomToken complete, final uid=${_auth.currentUser?.uid}');
       FFAppState().hasLinkedAccount = true;
@@ -78,11 +83,108 @@ class SocialAuthService {
     // signInWithCredential, because that can create a separate Firebase UID.
     final checkResult = await _callLinkOrCreate('google', idToken: idToken);
     final serverToken = checkResult['token'] as String;
-    final signedIn = await _auth.signInWithCustomToken(serverToken);
+    var signedIn = await _auth.signInWithCustomToken(serverToken);
+    signedIn = await _consumePendingProviderLink(
+      'google',
+      signedIn,
+      idToken: idToken,
+    );
     FFAppState().hasLinkedAccount = true;
     return signedIn;
   }
 
+  static Future<Map<String, dynamic>?> createProviderLinkTicket() async {
+    final currentUser = _auth.currentUser;
+    if (currentUser == null || currentUser.isAnonymous) {
+      return null;
+    }
+
+    final callable = _functions.httpsCallable('createProviderLinkTicket');
+    final result = await callable.call<Map<String, dynamic>>({});
+    final ticket = result.data['ticket'] as String?;
+    final expiresAt = result.data['expiresAt'] as int?;
+    if (ticket == null || expiresAt == null) {
+      return null;
+    }
+
+    FFAppState().pendingProviderLinkTicket = ticket;
+    FFAppState().pendingProviderLinkExpiresAt = expiresAt;
+    return result.data;
+  }
+
+  static Future<UserCredential> _consumePendingProviderLink(
+    String provider,
+    UserCredential fallbackCredential, {
+    String? idToken,
+    String? kakaoAccessToken,
+  }) async {
+    final appState = FFAppState();
+    final ticket = appState.pendingProviderLinkTicket;
+    final expiresAt = appState.pendingProviderLinkExpiresAt;
+    if (ticket.isEmpty || expiresAt <= DateTime.now().millisecondsSinceEpoch) {
+      appState.clearPendingProviderLinkTicket();
+      return fallbackCredential;
+    }
+
+    try {
+      final callable = _functions.httpsCallable('consumeProviderLinkTicket');
+      final result = await callable.call<Map<String, dynamic>>({
+        'ticket': ticket,
+        'provider': provider,
+        if (idToken != null) 'idToken': idToken,
+        if (kakaoAccessToken != null) 'kakaoAccessToken': kakaoAccessToken,
+      });
+      appState.clearPendingProviderLinkTicket();
+      final linkedToken = result.data['token'] as String?;
+      if (linkedToken == null || linkedToken.isEmpty) {
+        return fallbackCredential;
+      }
+      debugPrint('[AuthLink] provider=$provider linked to previous account');
+      return _auth.signInWithCustomToken(linkedToken);
+    } catch (e) {
+      debugPrint('[AuthLink] pending provider link failed: $e');
+      appState.clearPendingProviderLinkTicket();
+      return fallbackCredential;
+    }
+  }
+
+  static Future<UserCredential?> _consumePendingEmailLink(
+    String email,
+    String password,
+  ) async {
+    final appState = FFAppState();
+    final ticket = appState.pendingProviderLinkTicket;
+    final expiresAt = appState.pendingProviderLinkExpiresAt;
+    if (ticket.isEmpty || expiresAt <= DateTime.now().millisecondsSinceEpoch) {
+      appState.clearPendingProviderLinkTicket();
+      return null;
+    }
+
+    if (_auth.currentUser == null) {
+      await _auth.signInAnonymously();
+    }
+
+    try {
+      final callable = _functions.httpsCallable('consumeProviderLinkTicket');
+      final result = await callable.call<Map<String, dynamic>>({
+        'ticket': ticket,
+        'provider': 'email',
+        'email': email,
+        'password': password,
+      });
+      appState.clearPendingProviderLinkTicket();
+      final linkedToken = result.data['token'] as String?;
+      if (linkedToken == null || linkedToken.isEmpty) {
+        return null;
+      }
+      debugPrint('[AuthLink] email linked to previous account');
+      return _auth.signInWithCustomToken(linkedToken);
+    } catch (e) {
+      debugPrint('[AuthLink] pending email link failed: $e');
+      appState.clearPendingProviderLinkTicket();
+      rethrow;
+    }
+  }
   static Future<Map<String, dynamic>> linkGoogleToCurrentAccount() async {
     final currentUser = _auth.currentUser;
     if (currentUser == null || currentUser.isAnonymous) {
@@ -148,25 +250,31 @@ class SocialAuthService {
         EmailAuthProvider.credential(email: email, password: password);
     final currentUser = _auth.currentUser;
 
-    if (isSignUp && currentUser != null && currentUser.isAnonymous) {
-      try {
-        final linked = await currentUser.linkWithCredential(credential);
-        FFAppState().hasLinkedAccount = true;
-        return linked;
-      } on FirebaseAuthException catch (e) {
-        if (e.code == 'email-already-in-use') {
-          final signedIn = await _auth.signInWithEmailAndPassword(
-            email: email,
-            password: password,
-          );
-          FFAppState().hasLinkedAccount = true;
-          return signedIn;
-        }
-        rethrow;
-      }
-    }
-
     if (isSignUp) {
+      final linkedByTicket = await _consumePendingEmailLink(email, password);
+      if (linkedByTicket != null) {
+        FFAppState().hasLinkedAccount = true;
+        return linkedByTicket;
+      }
+
+      if (currentUser != null && currentUser.isAnonymous) {
+        try {
+          final linked = await currentUser.linkWithCredential(credential);
+          FFAppState().hasLinkedAccount = true;
+          return linked;
+        } on FirebaseAuthException catch (e) {
+          if (e.code == 'email-already-in-use') {
+            final signedIn = await _auth.signInWithEmailAndPassword(
+              email: email,
+              password: password,
+            );
+            FFAppState().hasLinkedAccount = true;
+            return signedIn;
+          }
+          rethrow;
+        }
+      }
+
       final created = await _auth.createUserWithEmailAndPassword(
         email: email,
         password: password,

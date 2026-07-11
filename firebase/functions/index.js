@@ -948,6 +948,220 @@ exports.linkProviderToCurrentAccount = functions
   });
 
 // ----------------------------------------------------------------------------
+// Provider link ticket helpers
+// ----------------------------------------------------------------------------
+function hashProviderLinkTicket(ticket) {
+  return crypto.createHash("sha256").update(ticket).digest("hex");
+}
+
+exports.createProviderLinkTicket = functions
+  .region("us-central1")
+  .https.onCall(async (data, context) => {
+    if (!context.auth || !context.auth.uid) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "Sign in before creating a link ticket."
+      );
+    }
+
+    const ticket = crypto.randomBytes(32).toString("base64url");
+    const ticketHash = hashProviderLinkTicket(ticket);
+    const now = Date.now();
+    const expiresAt = now + 10 * 60 * 1000;
+
+    await admin
+      .firestore()
+      .collection("provider_link_tickets")
+      .doc(ticketHash)
+      .set({
+        uid: context.auth.uid,
+        created_at: admin.firestore.FieldValue.serverTimestamp(),
+        expires_at: expiresAt,
+        consumed: false,
+      });
+
+    return { ticket: ticket, expiresAt: expiresAt };
+  });
+
+exports.consumeProviderLinkTicket = functions
+  .region("us-central1")
+  .https.onCall(async (data, context) => {
+    if (!context.auth || !context.auth.uid) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "Sign in before consuming a link ticket."
+      );
+    }
+
+    const ticket = data && data.ticket;
+    const provider = data && data.provider;
+    if (!ticket || typeof ticket !== "string") {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "ticket is required."
+      );
+    }
+    if (!provider || !["google", "kakao", "email"].includes(provider)) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "provider must be 'google', 'kakao', or 'email'."
+      );
+    }
+
+    let providerUid = null;
+    let email = null;
+    let password = null;
+    if (provider === "google") {
+      const googleProfile = await verifyGoogleOAuthIdToken(data.idToken);
+      providerUid = googleProfile.providerUid;
+      email = googleProfile.email;
+    } else if (provider === "kakao") {
+      const kakaoProfile = await verifyKakaoAccessToken(data.kakaoAccessToken);
+      providerUid = kakaoProfile.providerUid;
+      email = kakaoProfile.email;
+      if (!providerUid) {
+        throw new functions.https.HttpsError(
+          "unauthenticated",
+          "No Kakao id found in profile."
+        );
+      }
+    } else if (provider === "email") {
+      email = typeof data.email === "string" ? data.email.trim().toLowerCase() : null;
+      password = typeof data.password === "string" ? data.password : null;
+      if (!email || !isValidEmail(email)) {
+        throw new functions.https.HttpsError(
+          "invalid-argument",
+          "A valid email is required."
+        );
+      }
+      if (!password || password.length < 6) {
+        throw new functions.https.HttpsError(
+          "invalid-argument",
+          "Password must be at least 6 characters."
+        );
+      }
+      providerUid = email;
+    }
+
+    const firestore = admin.firestore();
+    const ticketRef = firestore
+      .collection("provider_link_tickets")
+      .doc(hashProviderLinkTicket(ticket));
+    const ticketDoc = await ticketRef.get();
+    if (!ticketDoc.exists) {
+      throw new functions.https.HttpsError("not-found", "Link ticket not found.");
+    }
+
+    const ticketData = ticketDoc.data();
+    if (ticketData.consumed === true || Number(ticketData.expires_at) < Date.now()) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Link ticket expired."
+      );
+    }
+
+    const targetUid = ticketData.uid;
+    if (!targetUid || targetUid === context.auth.uid) {
+      await ticketRef.set(
+        { consumed: true, consumed_at: admin.firestore.FieldValue.serverTimestamp() },
+        { merge: true }
+      );
+      return { linked: false, sameUser: true };
+    }
+
+    if (provider === "email") {
+      try {
+        const existingEmailUser = await admin.auth().getUserByEmail(email);
+        if (existingEmailUser.uid !== targetUid) {
+          throw new functions.https.HttpsError(
+            "already-exists",
+            "This email is already used by another account."
+          );
+        }
+      } catch (e) {
+        if (e.code !== "auth/user-not-found") {
+          throw e;
+        }
+      }
+
+      await admin.auth().updateUser(targetUid, {
+        email: email,
+        password: password,
+      });
+    } else {
+      await firestore
+        .collection("provider_uid_map")
+        .doc(provider + ":" + providerUid)
+        .set(
+          {
+            uid: targetUid,
+            provider: provider,
+            providerUid: providerUid,
+            email: email || null,
+            linked_at: admin.firestore.FieldValue.serverTimestamp(),
+            linked_from_uid: context.auth.uid,
+          },
+          { merge: true }
+        );
+    }
+
+    if (provider === "kakao") {
+      await firestore
+        .collection("kakao_uid_map")
+        .doc(providerUid)
+        .set(
+          {
+            uid: targetUid,
+            kakao_id: providerUid,
+            kakao_email: email || null,
+            authEmailSet: true,
+            linked_at: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+    }
+
+    await firestore
+      .collection("users")
+      .doc(targetUid)
+      .set(
+        {
+          linkedProviders: {
+            [provider]: {
+              providerUid: providerUid,
+              email: email || null,
+              linkedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+          },
+        },
+        { merge: true }
+      );
+
+    await ticketRef.set(
+      {
+        consumed: true,
+        consumed_at: admin.firestore.FieldValue.serverTimestamp(),
+        consumed_by_uid: context.auth.uid,
+        provider: provider,
+      },
+      { merge: true }
+    );
+
+    const token = await admin.auth().createCustomToken(targetUid, {
+      provider: provider,
+      linked: true,
+    });
+
+    functions.logger.info("consumeProviderLinkTicket: linked", {
+      provider: provider,
+      targetUid: targetUid,
+      consumedByUid: context.auth.uid,
+      email: email || null,
+    });
+
+    return { linked: true, token: token, uid: targetUid };
+  });
+// ----------------------------------------------------------------------------
 // Parent consent email token helpers
 // ----------------------------------------------------------------------------
 const PARENT_CONSENT_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -1599,3 +1813,4 @@ exports.confirmParentConsent = functions
       ));
     }
   });
+

@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import '/app_state.dart';
 
 class AuthProgressView extends StatefulWidget {
   const AuthProgressView({
@@ -20,8 +21,13 @@ class _AuthProgressViewState extends State<AuthProgressView>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
 
-  static const _steps = [
+  static const _defaultSteps = [
     '계정 확인중',
+    '학습 기록 연결 중',
+  ];
+
+  static const _linkingSteps = [
+    '계정 연결 중입니다',
     '학습 기록 연결 중',
   ];
 
@@ -47,12 +53,17 @@ class _AuthProgressViewState extends State<AuthProgressView>
         widget.compact ? const Color(0xFF6F6F76) : const Color(0xFFB6B6C2);
     final panelColor =
         widget.compact ? const Color(0xFFF8F8F8) : const Color(0xFF18181D);
+    final hasPendingProviderLink =
+        FFAppState().pendingProviderLinkTicket.isNotEmpty &&
+            FFAppState().pendingProviderLinkExpiresAt >
+                DateTime.now().millisecondsSinceEpoch;
+    final steps = hasPendingProviderLink ? _linkingSteps : _defaultSteps;
 
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {
         final stepIndex =
-            (_controller.value * _steps.length).floor() % _steps.length;
+            (_controller.value * steps.length).floor() % steps.length;
         return Container(
           width: double.infinity,
           padding: EdgeInsets.symmetric(
@@ -85,7 +96,7 @@ class _AuthProgressViewState extends State<AuthProgressView>
               AnimatedSwitcher(
                 duration: const Duration(milliseconds: 280),
                 child: Text(
-                  _steps[stepIndex],
+                  steps[stepIndex],
                   key: ValueKey(stepIndex),
                   textAlign: TextAlign.center,
                   style: TextStyle(

@@ -69,6 +69,16 @@ class FFAppState extends ChangeNotifier {
       _lastAuthProvider =
           prefs.getString('ff_lastAuthProvider') ?? _lastAuthProvider;
     });
+    _safeInit(() {
+      _pendingProviderLinkTicket =
+          prefs.getString('ff_pendingProviderLinkTicket') ??
+              _pendingProviderLinkTicket;
+    });
+    _safeInit(() {
+      _pendingProviderLinkExpiresAt =
+          prefs.getInt('ff_pendingProviderLinkExpiresAt') ??
+              _pendingProviderLinkExpiresAt;
+    });
   }
 
   void update(VoidCallback callback) {
@@ -263,6 +273,27 @@ class FFAppState extends ChangeNotifier {
   set lastAuthProvider(String value) {
     _lastAuthProvider = value;
     prefs.setString('ff_lastAuthProvider', value);
+  }
+
+  String _pendingProviderLinkTicket = '';
+  String get pendingProviderLinkTicket => _pendingProviderLinkTicket;
+  set pendingProviderLinkTicket(String value) {
+    _pendingProviderLinkTicket = value;
+    prefs.setString('ff_pendingProviderLinkTicket', value);
+  }
+
+  int _pendingProviderLinkExpiresAt = 0;
+  int get pendingProviderLinkExpiresAt => _pendingProviderLinkExpiresAt;
+  set pendingProviderLinkExpiresAt(int value) {
+    _pendingProviderLinkExpiresAt = value;
+    prefs.setInt('ff_pendingProviderLinkExpiresAt', value);
+  }
+
+  void clearPendingProviderLinkTicket() {
+    _pendingProviderLinkTicket = '';
+    _pendingProviderLinkExpiresAt = 0;
+    prefs.remove('ff_pendingProviderLinkTicket');
+    prefs.remove('ff_pendingProviderLinkExpiresAt');
   }
 }
 

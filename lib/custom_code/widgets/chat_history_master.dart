@@ -129,6 +129,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // [P2-SHADOW] Highlight read-along state. P2 only, no recording.
   List<String> _shadowWords = [];
   int _shadowWordIdx = -1;
+  final Map<int, GlobalKey> _shadowWordKeys = {};
   Timer? _shadowHighlightTimer;
   Timer? _shadowAdvanceTimer;
   double _shadowSpeed = 1.0; // [P2-SHADOW] 0.8/1.0/1.2, larger is faster.
@@ -777,9 +778,15 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       setState(() {
         _shadowWords = words;
         _shadowWordIdx = -1;
+        _shadowWordKeys.clear();
       });
     }
     final int lineIdx = currentIndex;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _phase == ShadowingPhase.part2Practice) {
+        _scrollPracticeToIndex(lineIdx);
+      }
+    });
     _shadowHighlightTimer = Timer(const Duration(seconds: 1), () async {
       if (!mounted ||
           _phase != ShadowingPhase.part2Practice ||
@@ -813,6 +820,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       return;
     }
     if (mounted) setState(() => _shadowWordIdx = idx);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _scrollCurrentShadowWordIntoView(idx);
+    });
     _shadowHighlightTimer?.cancel();
     _shadowHighlightTimer = Timer(
       Duration(milliseconds: _shadowWordDuration(_shadowWords[idx])),
@@ -827,6 +837,20 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     if (RegExp(r'[.!?]$').hasMatch(w)) d += 320;
     d = (d / _shadowSpeed).round();
     return d.clamp(140, 1100);
+  }
+
+  void _scrollCurrentShadowWordIntoView(int idx) {
+    if (_phase != ShadowingPhase.part2Practice || idx < 0) return;
+    final key = _shadowWordKeys[idx];
+    final ctx = key?.currentContext;
+    if (ctx == null) return;
+    Scrollable.ensureVisible(
+      ctx,
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+      alignment: 0.36,
+      alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+    );
   }
 
   // [P2-SHADOW-REC] Capture the user's read-along audio for Play all.
@@ -4524,33 +4548,37 @@ RULES — follow exactly:
     final bool isShadowLine =
         _phase == ShadowingPhase.part2Practice && isCurrent && !lineIsAi;
     if (isShadowLine && _shadowWords.isNotEmpty) {
-      // [P2-SHADOW] Single Text.rich run. Fixed size/weight for every word so
-      // wrapping NEVER shifts. Current word gets a highlighter-style box only.
       final Paint hl = Paint()
         ..color = Colors.amber.withValues(alpha: 0.35)
         ..strokeJoin = StrokeJoin.round;
+      final baseStyle = TextStyle(
+        fontSize: 14 * _fontScale,
+        height: 1.5,
+        fontWeight: FontWeight.normal,
+      );
       return Text.rich(
         TextSpan(
           children: [
             for (int j = 0; j < _shadowWords.length; j++) ...[
-              TextSpan(
-                text: _shadowWords[j],
-                style: TextStyle(
-                  color: j == _shadowWordIdx
-                      ? Colors.white
-                      : (j < _shadowWordIdx ? Colors.white38 : Colors.white),
-                  background: j == _shadowWordIdx ? hl : null,
+              WidgetSpan(
+                alignment: PlaceholderAlignment.baseline,
+                baseline: TextBaseline.alphabetic,
+                child: Text(
+                  _shadowWords[j],
+                  key: _shadowWordKeys.putIfAbsent(j, () => GlobalKey()),
+                  style: baseStyle.copyWith(
+                    color: j == _shadowWordIdx
+                        ? Colors.white
+                        : (j < _shadowWordIdx ? Colors.white38 : Colors.white),
+                    background: j == _shadowWordIdx ? hl : null,
+                  ),
                 ),
               ),
               if (j != _shadowWords.length - 1) const TextSpan(text: ' '),
             ],
           ],
         ),
-        style: TextStyle(
-          fontSize: 14 * _fontScale,
-          height: 1.5,
-          fontWeight: FontWeight.normal,
-        ),
+        style: baseStyle,
       );
     }
     return Text(
