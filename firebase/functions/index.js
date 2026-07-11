@@ -1084,10 +1084,14 @@ exports.consumeProviderLinkTicket = functions
         }
       }
 
-      await admin.auth().updateUser(targetUid, {
-        email: email,
-        password: password,
-      });
+      // [P0] Email ownership is not verified before this point (no
+      // confirmation email / OTP), so linking an arbitrary email+password
+      // onto targetUid here would let a caller claim any unowned email.
+      // Blocked until ownership verification exists (P1).
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Email linking is temporarily disabled."
+      );
     } else {
       await firestore
         .collection("provider_uid_map")

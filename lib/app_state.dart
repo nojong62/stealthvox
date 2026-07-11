@@ -69,15 +69,11 @@ class FFAppState extends ChangeNotifier {
       _lastAuthProvider =
           prefs.getString('ff_lastAuthProvider') ?? _lastAuthProvider;
     });
+    // [P0] Auto-consumption of pending provider-link tickets is disabled
+    // (see social_auth_service.dart). Purge any ticket left over from a
+    // previous app version on every launch instead of loading it.
     _safeInit(() {
-      _pendingProviderLinkTicket =
-          prefs.getString('ff_pendingProviderLinkTicket') ??
-              _pendingProviderLinkTicket;
-    });
-    _safeInit(() {
-      _pendingProviderLinkExpiresAt =
-          prefs.getInt('ff_pendingProviderLinkExpiresAt') ??
-              _pendingProviderLinkExpiresAt;
+      clearPendingProviderLinkTicket();
     });
   }
 

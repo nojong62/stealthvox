@@ -54,12 +54,7 @@ class SocialAuthService {
 
       final customToken = result.data['token'] as String;
       debugPrint('[KakaoAuth] signInWithCustomToken call start');
-      var credential = await _auth.signInWithCustomToken(customToken);
-      credential = await _consumePendingProviderLink(
-        'kakao',
-        credential,
-        kakaoAccessToken: token.accessToken,
-      );
+      final credential = await _auth.signInWithCustomToken(customToken);
       debugPrint(
           '[KakaoAuth] signInWithCustomToken complete, final uid=${_auth.currentUser?.uid}');
       FFAppState().hasLinkedAccount = true;
@@ -83,12 +78,7 @@ class SocialAuthService {
     // signInWithCredential, because that can create a separate Firebase UID.
     final checkResult = await _callLinkOrCreate('google', idToken: idToken);
     final serverToken = checkResult['token'] as String;
-    var signedIn = await _auth.signInWithCustomToken(serverToken);
-    signedIn = await _consumePendingProviderLink(
-      'google',
-      signedIn,
-      idToken: idToken,
-    );
+    final signedIn = await _auth.signInWithCustomToken(serverToken);
     FFAppState().hasLinkedAccount = true;
     return signedIn;
   }
@@ -185,6 +175,7 @@ class SocialAuthService {
       rethrow;
     }
   }
+
   static Future<Map<String, dynamic>> linkGoogleToCurrentAccount() async {
     final currentUser = _auth.currentUser;
     if (currentUser == null || currentUser.isAnonymous) {
@@ -251,12 +242,6 @@ class SocialAuthService {
     final currentUser = _auth.currentUser;
 
     if (isSignUp) {
-      final linkedByTicket = await _consumePendingEmailLink(email, password);
-      if (linkedByTicket != null) {
-        FFAppState().hasLinkedAccount = true;
-        return linkedByTicket;
-      }
-
       if (currentUser != null && currentUser.isAnonymous) {
         try {
           final linked = await currentUser.linkWithCredential(credential);

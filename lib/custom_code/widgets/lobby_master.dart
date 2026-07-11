@@ -15,7 +15,6 @@ import 'index.dart'; // Imports other custom widgets
 // 📦 [Box 1: Imports 및 패키지]
 import 'dart:ui';
 import '/auth/firebase_auth/auth_util.dart';
-import '/auth/social_auth_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -763,13 +762,6 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                           _buildFooterLink(
                               "이용 약관", () => _showTermsDialog(context)),
                           _buildFooterLink("로그아웃", () async {
-                            try {
-                              await SocialAuthService
-                                  .createProviderLinkTicket();
-                            } catch (e) {
-                              debugPrint('[AuthLink] create ticket failed: $e');
-                              FFAppState().clearPendingProviderLinkTicket();
-                            }
                             FFAppState().remainingTime = 0;
                             FFAppState().remainingTimeLoaded = false;
                             LobbyBrain.lastSyncedUid = null;
