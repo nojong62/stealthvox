@@ -75,6 +75,7 @@ class _IntroMasterState extends State<IntroMaster> {
       ..onTap = () => launchURL(_privacyUrl);
     _emailFocusNode.addListener(_onFocusChange);
     _passwordFocusNode.addListener(_onFocusChange);
+    _clearInvalidLastAuthProvider();
     AppsFlyerManager.duoInviteSignal.addListener(_onDuoInviteSignal);
     if (FFAppState().trialCompleted) {
       _currentScreen = IntroScreen.auth;
@@ -731,8 +732,10 @@ class _IntroMasterState extends State<IntroMaster> {
           const SizedBox(height: 34),
           // provider 버튼들 (재방문 시 이전 provider 강조)
           ..._buildProviderButtons(),
-          const SizedBox(height: 18),
-          _buildAccountDiscoveryEntryButton(),
+          if (_validLastAuthProvider() == null) ...[
+            const SizedBox(height: 30),
+            _buildAccountDiscoveryEntrySection(),
+          ],
           // 이메일 폼
           if (_showEmailForm) ...[
             const SizedBox(height: 18),
@@ -746,21 +749,41 @@ class _IntroMasterState extends State<IntroMaster> {
     );
   }
 
-  Widget _buildAccountDiscoveryEntryButton() {
-    return TextButton.icon(
-      onPressed: isLoading
-          ? null
-          : () => setState(() {
-                _currentScreen = IntroScreen.accountDiscovery;
-                _showEmailForm = false;
-                _accountDiscoveryMessage = '';
-              }),
-      icon: const Icon(Icons.manage_search, size: 18),
-      label: const Text('가입 방법이 기억나지 않나요? 내 계정 찾아보기'),
-      style: TextButton.styleFrom(
-        foregroundColor: const Color(0xFFB9D7FF),
-        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-      ),
+  Widget _buildAccountDiscoveryEntrySection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Divider(color: Colors.white.withValues(alpha: 0.12), height: 1),
+        const SizedBox(height: 24),
+        const Text(
+          'StealthVox 계정이 기억 안 나신 분',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 17,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 14),
+        OutlinedButton.icon(
+          onPressed: isLoading
+              ? null
+              : () => setState(() {
+                    _currentScreen = IntroScreen.accountDiscovery;
+                    _showEmailForm = false;
+                    _accountDiscoveryMessage = '';
+                  }),
+          icon: const Icon(Icons.manage_search, size: 18),
+          label: const Text('내 계정 찾아보기'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: const Color(0xFFB9D7FF),
+            side: BorderSide(color: Colors.white.withValues(alpha: 0.22)),
+            padding: const EdgeInsets.symmetric(vertical: 13),
+            textStyle:
+                const TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+          ),
+        ),
+      ],
     );
   }
 
@@ -1102,45 +1125,64 @@ class _IntroMasterState extends State<IntroMaster> {
     }
   }
 
-  List<Widget> _buildAuthHeader() {
-    final lastProvider = FFAppState().lastAuthProvider;
-    final providerLabel = switch (lastProvider) {
-      'kakao' => '카카오',
-      'google' => 'Google',
-      'email' => '이메일',
-      _ => '',
+  String? _validLastAuthProvider() {
+    final provider = FFAppState().lastAuthProvider;
+    return switch (provider) {
+      'kakao' || 'google' || 'email' => provider,
+      _ => null,
     };
+  }
 
-    return [
-      const Text(
-        '계정으로 계속하기',
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          color: Colors.white,
-          fontSize: 22,
-          fontWeight: FontWeight.w800,
-          height: 1.32,
+  void _clearInvalidLastAuthProvider() {
+    final provider = FFAppState().lastAuthProvider;
+    if (provider.isNotEmpty && _validLastAuthProvider() == null) {
+      FFAppState().lastAuthProvider = '';
+    }
+  }
+
+  String _providerDescription(String provider) {
+    return switch (provider) {
+      'kakao' => '이전에 카카오 계정으로 가입했습니다.',
+      'google' => '이전에 Google 계정으로 가입했습니다.',
+      'email' => '이전에 이메일 계정으로 가입했습니다.',
+      _ => '사용할 로그인 방법을 선택해 주세요.',
+    };
+  }
+
+  Widget _authSectionTitle({
+    required String title,
+    required String description,
+  }) {
+    return Column(
+      children: [
+        Text(
+          title,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 22,
+            fontWeight: FontWeight.w800,
+            height: 1.32,
+          ),
         ),
-      ),
-      if (lastProvider.isNotEmpty) ...[
         const SizedBox(height: 10),
         Text(
-          '이전에 $providerLabel 계정으로 가입했습니다',
+          description,
           textAlign: TextAlign.center,
           style: const TextStyle(
             color: Color(0xFF9C9CA6),
             fontSize: 13,
+            height: 1.45,
           ),
         ),
       ],
-    ];
+    );
   }
 
-  List<Widget> _buildProviderButtons() {
-    final lastProvider = FFAppState().lastAuthProvider;
-
-    // 각 provider 버튼 정의
-    Widget kakaoBtn() => SharedSocialButton(
+  Widget _providerButton(String provider) {
+    switch (provider) {
+      case 'kakao':
+        return SharedSocialButton(
           label: '카카오톡으로 계속하기',
           backgroundColor: const Color(0xFFFEE500),
           textColor: const Color(0xFF191919),
@@ -1159,8 +1201,8 @@ class _IntroMasterState extends State<IntroMaster> {
             provider: 'kakao',
           ),
         );
-
-    Widget googleBtn() => SharedSocialButton(
+      case 'google':
+        return SharedSocialButton(
           label: 'Google로 계속하기',
           backgroundColor: Colors.white,
           textColor: Colors.black87,
@@ -1180,8 +1222,8 @@ class _IntroMasterState extends State<IntroMaster> {
             provider: 'google',
           ),
         );
-
-    Widget emailBtn() => SharedSocialButton(
+      case 'email':
+        return SharedSocialButton(
           label: '이메일로 계속하기',
           backgroundColor: const Color(0xFF33333A),
           textColor: Colors.white,
@@ -1194,53 +1236,46 @@ class _IntroMasterState extends State<IntroMaster> {
             _showEmailForm = !_showEmailForm;
           }),
         );
+      default:
+        return const SizedBox.shrink();
+    }
+  }
 
-    if (lastProvider.isEmpty) {
+  List<Widget> _spacedProviderButtons(List<String> providers) {
+    final widgets = <Widget>[];
+    for (final provider in providers) {
+      if (widgets.isNotEmpty) widgets.add(const SizedBox(height: 12));
+      widgets.add(_providerButton(provider));
+    }
+    return widgets;
+  }
+
+  List<Widget> _buildAuthHeader() {
+    final lastProvider = _validLastAuthProvider();
+    if (lastProvider == null) {
       return [
-        kakaoBtn(),
-        const SizedBox(height: 12),
-        googleBtn(),
-        const SizedBox(height: 12),
-        emailBtn(),
+        _authSectionTitle(
+          title: '새로 방문하신 분',
+          description: '사용할 로그인 방법을 선택해 주세요.',
+        ),
       ];
     }
 
-    late final Widget primaryBtn;
-    late final List<Widget> secondaryBtns;
+    return [
+      _authSectionTitle(
+        title: '계정으로 계속하기',
+        description: _providerDescription(lastProvider),
+      ),
+    ];
+  }
 
-    switch (lastProvider) {
-      case 'kakao':
-        primaryBtn = kakaoBtn();
-        secondaryBtns = [googleBtn(), const SizedBox(height: 12), emailBtn()];
-        break;
-      case 'google':
-        primaryBtn = googleBtn();
-        secondaryBtns = [kakaoBtn(), const SizedBox(height: 12), emailBtn()];
-        break;
-      case 'email':
-        primaryBtn = emailBtn();
-        secondaryBtns = [kakaoBtn(), const SizedBox(height: 12), googleBtn()];
-        break;
-      default:
-        primaryBtn = kakaoBtn();
-        secondaryBtns = [googleBtn(), const SizedBox(height: 12), emailBtn()];
+  List<Widget> _buildProviderButtons() {
+    final lastProvider = _validLastAuthProvider();
+    if (lastProvider != null) {
+      return [_providerButton(lastProvider)];
     }
 
-    return [
-      primaryBtn,
-      const SizedBox(height: 24),
-      const Text(
-        '다른 계정으로 계속하기',
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          color: Color(0xFF9C9CA6),
-          fontSize: 13,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-      const SizedBox(height: 12),
-      ...secondaryBtns,
-    ];
+    return _spacedProviderButtons(['kakao', 'google', 'email']);
   }
 
   Widget _buildAuthScaffold({
