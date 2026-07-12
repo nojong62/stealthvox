@@ -47,444 +47,284 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 =================================
 지시문 
 
-# 지시문: 크로스 프로바이더 계정 통합 — 종합 진단 및 수정 (v2)
+StealthVox 로그인 첫 화면 수정 지시문
+lastAuthProvider 기반 단일 로그인 노출 및 신규/복구 화면 분리
+작업 목적
 
-## 배경
+현재 로그인 화면은 마지막 로그인 수단이 확인된 경우에도 다른 로그인 수단과 내 계정 찾아보기가 함께 표시되고 있다.
 
-카카오 → 로그아웃 → Google, 또는 Google → 로그아웃 → 카카오로 로그인 시
-기존 계정과 합쳐지지 않고 새 계정으로 전환되는 문제.
+이를 다음 정책에 맞게 수정한다.
 
-서버 CF(`linkOrCreateAccount`, `kakaoCustomAuth`)에는 이메일 기반 계정 통합 로직이
-구현되어 있고 최신 코드로 배포 완료(2026-07-10)되었으나, 클라이언트 연동이 불완전할 수 있다.
+정책 A — 마지막 로그인 이력이 있는 경우
 
-## 핵심 원칙 (모든 수정에 적용)
+lastAuthProvider 또는 현재 프로젝트에서 동일 역할을 하는 로컬 힌트가 유효하면, 해당 provider의 로그인 버튼 하나만 표시한다.
 
-1. **계정 통합은 서버가 결정한다.** 클라이언트는 서버가 반환한 canonical UID + custom token만 사용한다.
-2. **CF 실패 시 `signInWithCredential` fallback 절대 금지.** fallback하면 별도 UID가 생겨서 문제가 재발한다. 실패하면 사용자에게 에러를 보여주고 재시도하게 한다.
-3. **Google OAuth ID token ≠ Firebase ID token.** CF에서 `admin.auth().verifyIdToken()`을 Google OAuth token에 쓰면 검증 실패한다. 현재 코드가 `tokeninfo` API로 동작 중이면 유지한다.
-4. **`lastAuthProvider`는 UI 표시 용도일 뿐.** 계정 통합이나 재방문자 판정에 사용하면 안 된다.
-5. **모든 provider는 `signInWithCustomToken(token)`으로 통일.** anonymous UID 보존(`linkWithCredential`)은 이번 범위에서 제외한다.
+예:
 
-## 불변 규칙
+lastAuthProvider = kakao → 카카오톡으로 계속하기만 표시
+lastAuthProvider = google → Google로 계속하기만 표시
+lastAuthProvider = email → 이메일로 계속하기만 표시
 
-- Box 7 (`TtsQueueManager`, `DeepgramV2VoiceManager`, `ChunkedTtsFetcher`, `HybridTtsPlayer`, `TtsCache`) 절대 수정 금지
-- `lib/custom_code/임시/` 절대 수정 금지
-- `dart format`은 개별 파일 단위로만 (폴더 X — 한국어 UTF-8 깨짐)
-- Firebase CLI는 `firebase/` 디렉토리에서, 배포: `firebase deploy --project stealth-vox-3p3rq3 --only functions:functions:[함수명]`
-- **코드 수정 전 반드시 Phase 0 전체 진단을 완료하고 사용자에게 보고 → 승인 후 진행**
+이 상태에서는 다음 UI를 표시하지 않는다.
 
----
+다른 계정으로 계속하기
+Google·카카오·이메일의 다른 provider 버튼
+새로 방문하신 분 영역
+내 계정 찾아보기
+StealthVox 계정이 기억 안 나신 분 영역
 
-## Phase S: Savepoint
+안내 문구는 다음처럼 provider에 맞게 표시한다.
 
-```bash
-cd F:\flutter_project\stealth_vox
-git add -A && git commit -m "savepoint: before cross-provider-linking v2"
-```
+카카오:
 
----
+이전에 카카오 계정으로 가입했습니다.
 
-## Phase 0: 종합 진단 (전부 실행 후 결과 보고 → 사용자 승인 대기)
+Google:
 
-### 0-A. SocialAuthService — Google 로그인 흐름
+이전에 Google 계정으로 가입했습니다.
 
-```bash
-cat -n lib/auth/social_auth_service.dart
-```
+이메일:
 
-확인 항목:
+이전에 이메일 계정으로 가입했습니다.
 
-1. `signInWithGoogle()` 메서드에서 `linkOrCreateAccount` CF를 호출하는가?
-2. CF 호출 후 `signInWithCustomToken(token)`으로 로그인하는가?
-   아니면 `signInWithCredential`을 직접 사용하는가?
-3. CF 실패 시 fallback이 있는가? → `signInWithCredential` fallback이면 **제거 대상**
-4. CF에 전달하는 토큰: `googleAuth.idToken` (Google OAuth ID token)인가?
+주요 버튼:
 
-### 0-B. SocialAuthService — 카카오 로그인 흐름
+카카오톡으로 계속하기
+Google로 계속하기
+이메일로 계속하기
 
-같은 파일에서:
+로그인 세션이 살아 있으면 이 화면을 거치지 않고 기존대로 Lobby로 이동한다.
 
-1. `signInWithKakao()` 메서드에서 `kakaoCustomAuth` CF를 호출하는가?
-2. CF 응답의 custom token으로 `signInWithCustomToken(token)`을 하는가?
+정책 B — 마지막 로그인 이력을 확인하지 못한 경우
 
-### 0-C. linkOrCreateAccount CF — Google 처리
+lastAuthProvider가 없거나 유효하지 않으면 화면을 두 영역으로 나눈다.
 
-```bash
-cd firebase/functions
-cat -n index.js | sed -n '/exports\.linkOrCreateAccount/,/^exports\./p' | head -150
-```
+영역 1 — 새로 방문하신 분
 
-확인 항목:
+제목:
 
-1. `provider === 'google'` 분기 존재 여부
-2. Google idToken 검증 방법:
-   - `tokeninfo` API 사용? → 현재 동작 중이면 유지 (교체는 후순위)
-   - `admin.auth().verifyIdToken()` 사용? → **Google OAuth token이면 실패할 수 있음.** 실제로 전달되는 토큰이 Google OAuth ID token인지 Firebase ID token인지 확인
-   - `google-auth-library` 사용? → 가장 안전한 방식
-3. `getUserByEmail(email)` → 기존 유저 발견 시 해당 UID로 custom token 발급
-4. 반환값에 `token`, `isNewUser` 포함 여부
+새로 방문하신 분
 
-### 0-D. kakaoCustomAuth CF — 이메일 기반 기존 유저 탐색
+설명:
 
-```bash
-cat -n index.js | sed -n '/exports\.kakaoCustomAuth/,/^exports\./p' | head -150
-```
+사용할 로그인 방법을 선택해 주세요.
 
-확인 항목:
+버튼:
 
-1. `kakaoEmail` 추출 (`profile.kakao_account.email`)
-2. `kakao_uid_map` 조회 → fast path (`authEmailSet: true`) 시 바로 return
-3. slow path에서 `getUserByEmail(kakaoEmail)` 호출 여부
-4. 기존 유저 발견 시 해당 UID 재사용
-5. `admin.auth().updateUser(resolvedUid, { email: kakaoEmail })` 여부
-6. 반환값 구조: `{ token, ... }`
+카카오톡으로 계속하기
+Google로 계속하기
+이메일로 계속하기
 
-### 0-E. intro_master.dart — isReturningUser 판정
+이 세 버튼은 현재 신규가입 또는 기존 로그인 공용 흐름을 사용하되, 기존 계정이 발견되지 않으면 현재 구현된 신규가입 확인 절차를 그대로 따른다.
 
-```bash
-grep -n "isReturningUser\|previousAuthProvider\|lastAuthProvider\|grantSignupBonus\|signup_bonus_given" lib/custom_code/widgets/intro_master.dart
-```
+영역 2 — StealthVox 계정이 기억 안 나신 분
 
-현재 로직 확인:
-```dart
-final isReturningUser = provider.isNotEmpty && previousAuthProvider == provider;
-```
-이 로직은 provider가 다르면 무조건 신규로 판정 → **수정 대상**
-
-### 0-F. 이메일 가입도 서버 경유 여부
-
-```bash
-grep -n "linkOrCreateAccount\|signInWithCredential\|createUserWithEmailAndPassword\|signInWithCustomToken" lib/auth/social_auth_service.dart
-```
-
-### 진단 보고 형식
-
-```
-=== Phase 0 종합 진단 결과 ===
-
-[A] signInWithGoogle:
-    - linkOrCreateAccount 경유: 예/아니오
-    - 로그인 방식: signInWithCustomToken / signInWithCredential
-    - CF 실패 fallback: signInWithCredential(위험) / 에러 throw(안전) / 없음
-
-[B] signInWithKakao:
-    - kakaoCustomAuth 경유: 예/아니오
-    - 로그인 방식: signInWithCustomToken / signInWithCredential
-
-[C] linkOrCreateAccount CF:
-    - Google 분기: 있음/없음
-    - idToken 검증: tokeninfo / verifyIdToken / google-auth-library
-    - getUserByEmail: 있음/없음
-    - 반환값: { token, isNewUser }
-
-[D] kakaoCustomAuth CF:
-    - kakaoEmail 추출: 있음/없음
-    - getUserByEmail (slow path): 있음/없음
-    - updateUser(email): 있음/없음
-
-[E] intro_master isReturningUser:
-    - 현재 판정: previousAuthProvider == provider (provider 변경 시 신규 취급)
-    - 서버 응답 기반: 사용/미사용
-
-[F] 이메일 가입:
-    - 서버 경유: 예/아니오
-
-=== 발견된 Gap 목록 ===
-(번호 매겨서 나열)
-
-=== 수정 계획 ===
-(Gap별로 어떤 Phase에서 수정할지)
-```
-
-**⚠️ 이 보고를 사용자에게 보여주고 승인을 받은 후에만 Phase 1로 진행한다.**
-
----
-
-## Phase 1: 서버 수정
-
-### Gap 해당 시만 적용. Phase 0에서 이미 구현 확인되면 건너뛴다.
-
-### 1-A: linkOrCreateAccount에 Google 분기가 없는 경우
-
-추가할 때 **주의**: Google OAuth ID token 검증은 현재 코드가 `tokeninfo` 방식이면 유지한다.
-`admin.auth().verifyIdToken()`을 Google OAuth token에 사용하면 안 된다.
-
-```javascript
-if (provider === 'google') {
-  const idToken = data.idToken;
-
-  // ── Google OAuth ID token 검증 ──
-  // tokeninfo 방식 (현재 동작 중이면 유지)
-  const resp = await fetch(
-    'https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(idToken)
-  );
-  const tokenInfo = await resp.json();
-  if (!tokenInfo.email || tokenInfo.email_verified !== 'true') {
-    throw new functions.https.HttpsError('invalid-argument', 'Verified email required');
-  }
-  const email = tokenInfo.email;
-  const displayName = tokenInfo.name || null;
-
-  // ── 이메일로 기존 유저 탐색 ──
-  let existingUser = null;
-  try {
-    existingUser = await admin.auth().getUserByEmail(email);
-  } catch (e) {
-    if (e.code !== 'auth/user-not-found') throw e;
-  }
-
-  if (existingUser) {
-    const token = await admin.auth().createCustomToken(existingUser.uid);
-    return { token, isNewUser: false, resolvedUid: existingUser.uid };
-  } else {
-    const newUser = await admin.auth().createUser({
-      email, displayName, emailVerified: true
-    });
-    const token = await admin.auth().createCustomToken(newUser.uid);
-    return { token, isNewUser: true, resolvedUid: newUser.uid };
-  }
-}
-```
-
-### 1-B: kakaoCustomAuth slow path에 getUserByEmail이 없는 경우
-
-```javascript
-// kakao_uid_map에 매핑 없고 kakaoEmail이 있을 때
-if (!resolvedUid && kakaoEmail) {
-  try {
-    const existing = await admin.auth().getUserByEmail(kakaoEmail);
-    if (existing) {
-      resolvedUid = existing.uid;
-      await admin.firestore().collection('kakao_uid_map').doc(String(kakaoId)).set({
-        firebaseUid: resolvedUid,
-        kakaoEmail: kakaoEmail,
-        authEmailSet: true,
-        linkedAt: admin.firestore.FieldValue.serverTimestamp(),
-      }, { merge: true });
-    }
-  } catch (e) {
-    if (e.code !== 'auth/user-not-found') throw e;
-  }
-}
-```
-
-### 1-C: kakaoCustomAuth에서 Firebase Auth 이메일 미설정
-
-```javascript
-if (kakaoEmail && resolvedUid) {
-  try {
-    await admin.auth().updateUser(resolvedUid, { email: kakaoEmail });
-  } catch (e) {
-    if (e.code !== 'auth/email-already-exists') {
-      functions.logger.error('[kakaoCustomAuth] updateUser email failed:', e);
-    }
-  }
-}
-```
-
----
-
-## Phase 2: 클라이언트 수정
-
-### 2-A: signInWithGoogle — linkOrCreateAccount 경유 + fallback 금지
-
-> Phase 0-A에서 이미 올바르게 구현되어 있으면 건너뛴다.
-> 단, `signInWithCredential` fallback이 있으면 **반드시 제거**한다.
-
-```dart
-static Future<UserCredential> signInWithGoogle() async {
-  final googleUser = await GoogleSignIn().signIn();
-  if (googleUser == null) throw Exception('Google sign-in cancelled.');
-
-  final googleAuth = await googleUser.authentication;
-
-  // ── 서버에서 canonical UID 결정 ──
-  final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
-      .httpsCallable('linkOrCreateAccount');
-  final result = await callable.call<Map<String, dynamic>>({
-    'provider': 'google',
-    'idToken': googleAuth.idToken,
-  });
-
-  final token = result.data['token'] as String;
-
-  // ── 항상 서버가 결정한 UID로 로그인 ──
-  // fallback으로 signInWithCredential을 쓰면 별도 UID가 생길 수 있으므로 금지
-  return await FirebaseAuth.instance.signInWithCustomToken(token);
-}
-```
-
-**핵심:** `try-catch`로 감싸되, catch에서 `signInWithCredential`로 fallback하지 않는다.
-에러는 `_handleUnifiedAuth`의 catch 블록까지 전파되어 사용자에게 "로그인 실패" 메시지를 보여준다.
-
-### 2-B: signInWithKakao — 확인만
-
-카카오는 이미 `kakaoCustomAuth` → `signInWithCustomToken` 흐름일 가능성이 높다.
-Phase 0-B에서 확인하고, 맞으면 수정 없음.
-
-만약 `signInWithCredential` fallback이 있다면 동일하게 제거한다.
-
-### 2-C: intro_master.dart — isReturningUser 판정 수정
-
-파일: `lib/custom_code/widgets/intro_master.dart`
-
-**현재** (line ~1060):
-```dart
-final isReturningUser =
-    provider.isNotEmpty && previousAuthProvider == provider;
-```
-
-**변경:**
-```dart
-// provider가 달라도 같은 계정이면 재방문자.
-// signup_bonus_given 서버 플래그로 판정 (grantSignupBonus CF의 idempotency 보장).
-final currentUser = FirebaseAuth.instance.currentUser;
-bool isReturningUser = false;
-if (currentUser != null) {
-  try {
-    final userDoc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(currentUser.uid)
-        .get();
-    isReturningUser = userDoc.exists &&
-        userDoc.data()?['signup_bonus_given'] == true;
-  } catch (e) {
-    debugPrint('[Auth] returning user check failed: $e');
-  }
-}
-```
-
-그리고 `isReturningUser == true` 블록 끝 (기존 line ~1082 이후)에 추가:
-```dart
-// provider 전환 시 UID가 이전 세션과 같더라도 lobby 재동기화 강제
-LobbyBrain.lastSyncedUid = null;
-```
-
-### 2-D: _cleanupTrialSandbox와의 관계
-
-`_cleanupTrialSandbox()`는 anonymous 체험 데이터를 정리하는 용도로,
-소셜 로그인 전에 호출되는 기존 흐름을 유지한다.
-
-**변경 없음.** anonymous UID 보존(`linkWithCredential`)을 하지 않으므로 충돌 없다.
-체험 → 가입 시: sandbox 정리 → 서버 CF에서 canonical UID 결정 → `signInWithCustomToken`.
-
----
-
-## Phase 3: 검증
-
-```bash
-# 서버 문법
-cd firebase/functions
-node -c index.js
-
-# fallback 제거 확인 — signInWithCredential이 signInWithGoogle 안에 없어야 함
-grep -n "signInWithCredential" lib/auth/social_auth_service.dart
-# 기대: signInWithGoogle 메서드 안에는 0줄
-# (다른 메서드에 있을 수 있으나, signInWithGoogle 안에는 없어야 함)
-
-# linkOrCreateAccount 호출 확인
-grep -n "linkOrCreateAccount" lib/auth/social_auth_service.dart
-# 기대: 1줄 이상
-
-# signInWithCustomToken 확인
-grep -n "signInWithCustomToken" lib/auth/social_auth_service.dart
-# 기대: signInWithGoogle + signInWithKakao 각각 1줄 이상
-
-# isReturningUser 수정 확인
-grep -n "signup_bonus_given\|isReturningUser" lib/custom_code/widgets/intro_master.dart
-
-# 클라이언트 포맷/분석
-dart format lib/auth/social_auth_service.dart
-dart format lib/custom_code/widgets/intro_master.dart
-flutter analyze lib/auth/social_auth_service.dart 2>&1 | head -20
-flutter analyze lib/custom_code/widgets/intro_master.dart 2>&1 | head -20
-```
-
----
-
-## Phase 4: 배포 (서버 수정 있었을 경우만)
-
-```bash
-cd firebase
-firebase deploy --project stealth-vox-3p3rq3 --only functions:functions:linkOrCreateAccount
-firebase deploy --project stealth-vox-3p3rq3 --only functions:functions:kakaoCustomAuth
-```
-
----
-
-## Phase 5: 커밋
-
-```bash
-cd F:\flutter_project\stealth_vox
-git add -A && git commit -m "fix: cross-provider account linking v2 — no fallback, server canonical UID"
-git push origin main
-```
-
----
-
-## Phase 6: 롤백
-
-```bash
-git revert HEAD --no-edit
-git push origin main
-cd firebase
-firebase deploy --project stealth-vox-3p3rq3 --only functions:functions:linkOrCreateAccount
-firebase deploy --project stealth-vox-3p3rq3 --only functions:functions:kakaoCustomAuth
-```
-
----
-
-## 테스트 시나리오
-
-**사전 준비:** 기존 테스트 계정이 중복 UID 상태라면
-회원탈퇴 → 앱 데이터 삭제(설정 → 앱 → StealthVox → 저장공간 → 데이터 삭제) → 앱 재시작.
-운영 계정이나 결제/시간/히스토리가 있는 계정은 삭제하지 않는다.
-
-### A: 카카오 → 로그아웃 → Google (동일 이메일)
-1. 앱 데이터 초기화
-2. 카카오 가입 → birthYear 입력 → Lobby → UID 기록
-3. 로그아웃 → 앱 종료 → 재실행
-4. Google로 계속하기
-5. **확인:**
-   - UID 동일 ✅
-   - birthYear 다이얼로그 안 뜸 ✅
-   - remainingTime 유지 ✅
-   - signup bonus 중복 없음 ✅
-
-### B: Google → 로그아웃 → 카카오 (동일 이메일)
-위와 동일 기준으로 반대 방향 테스트
-
-### C: 다른 이메일
-카카오(naver.com) → 로그아웃 → Google(gmail.com)
-**확인:** 별개 계정 (이메일이 다르므로 정상)
-
-### D: 같은 provider 재로그인
-카카오 → 로그아웃 → 카카오
-**확인:** 같은 UID, birthYear 유지, bonus 중복 없음
-
-### E: 이메일 가입 ↔ 소셜 (동일 이메일)
-이메일 가입 → 로그아웃 → Google(같은 이메일)
-**확인:** 같은 UID로 통합
-
-### F: 카카오 이메일 미제공
-카카오 동의항목에서 이메일 거부 → 로그아웃 → Google
-**확인:** 자동 병합 없이 별개 계정 (이메일 비교 불가이므로 정상)
-
-### G: CF 실패 시 동작
-(Firebase emulator 또는 일시적 네트워크 차단으로 시뮬레이션)
-**확인:** "로그인 실패: ... 다시 시도해 주세요" 메시지 표시.
-signInWithCredential로 빠져서 별도 계정이 생기지 않음 ✅
-
----
-
-## 한계 및 감수 사항
-
-1. **카카오 이메일 미제공:** 동의항목 거부 시 매칭 불가 → 별개 계정 (업계 표준)
-2. **카카오 ≠ Google 이메일:** 다른 이메일은 다른 사람 → 별개 계정
-3. **기존 중복 UID:** 이미 생성된 중복 계정은 이 수정으로 자동 병합 불가.
-   - 테스트 계정: 회원탈퇴 후 재가입 가능
-   - 운영 계정(결제/시간/히스토리 보유): 삭제 금지. 별도 관리자 병합 스크립트 필요
-4. **tokeninfo → google-auth-library 교체:** 보안 강화 차원이며, 현재 동작에 문제 없으면 후순위.
-   `admin.auth().verifyIdToken()`은 Google OAuth token에 사용할 수 없으므로 교체 시 `google-auth-library`를 사용해야 한다.
-5. **anonymous UID 보존:** 이번 수정에서는 범위 밖. 체험 → 가입 시 sandbox 정리 후 서버 UID 사용.
-   필요 시 별도 요구사항으로 처리.
+제목:
+
+StealthVox 계정이 기억 안 나신 분
+
+버튼:
+
+내 계정 찾아보기
+
+이 버튼을 누르면 현재 구현된 계정 찾기 화면으로 이동한다.
+
+상태 분기 기준
+
+화면 진입 시 다음 순서로 판단한다.
+
+Firebase 정식 회원 로그인 세션이 유효한가
+예 → Lobby 이동
+아니오 → 다음 단계
+lastAuthProvider가 유효한가
+예 → 해당 provider 단일 로그인 화면
+아니오 → 신규 사용자 + 계정 찾기 화면
+
+lastAuthProvider는 다음 값만 유효하게 인정한다.
+
+kakao
+google
+email
+
+알 수 없는 값, 빈 문자열, null 또는 지원하지 않는 값이면 신규 사용자 화면으로 분기한다.
+
+카카오 단일 화면 예시
+
+제목:
+
+계정으로 계속하기
+
+설명:
+
+이전에 카카오 계정으로 가입했습니다.
+
+버튼:
+
+카카오톡으로 계속하기
+
+이 화면에는 다른 로그인 수단과 계정 찾기 버튼을 표시하지 않는다.
+
+Google 단일 화면 예시
+
+제목:
+
+계정으로 계속하기
+
+설명:
+
+이전에 Google 계정으로 가입했습니다.
+
+버튼:
+
+Google로 계속하기
+
+이 화면에는 다른 로그인 수단과 계정 찾기 버튼을 표시하지 않는다.
+
+이메일 단일 화면 예시
+
+제목:
+
+계정으로 계속하기
+
+설명:
+
+이전에 이메일 계정으로 가입했습니다.
+
+버튼:
+
+이메일로 계속하기
+
+이메일 입력·비밀번호 입력·비밀번호 재설정 UI는 기존 구현을 재사용한다.
+
+이 화면에는 Google·카카오 버튼과 계정 찾기 버튼을 표시하지 않는다.
+
+신규 사용자 화면 예시
+
+제목:
+
+새로 방문하신 분
+
+버튼:
+
+카카오톡으로 계속하기
+Google로 계속하기
+이메일로 계속하기
+
+그 아래 구분 영역:
+
+StealthVox 계정이 기억 안 나신 분
+
+버튼:
+
+내 계정 찾아보기
+
+중요한 금지 사항
+
+다음은 구현하지 않는다.
+
+lastAuthProvider가 있을 때 다른 provider 버튼 표시
+lastAuthProvider가 있을 때 내 계정 찾아보기 표시
+“다른 계정으로 계속하기” 펼침 버튼
+마지막 로그인 provider와 다른 수단으로 즉시 전환하는 기본 경로
+provider 자동 병합
+자동 동일인 추정
+기존 계정 데이터 자동 이전
+예외 처리
+lastAuthProvider는 있지만 해당 로그인에 실패한 경우
+
+로그인 실패가 곧바로 다른 provider 버튼 표시로 이어지면 안 된다.
+
+오류 메시지만 표시하고 같은 provider 재시도를 제공한다.
+
+예:
+
+카카오 로그인에 실패했습니다. 다시 시도해 주세요.
+
+버튼:
+
+다시 시도
+
+계속 실패할 경우에만 고객지원 안내를 제공할 수 있다.
+
+단, 다른 provider 버튼이나 내 계정 찾아보기를 자동 표시하지 않는다.
+
+lastAuthProvider가 손상된 경우
+
+유효하지 않은 값이면 로컬 힌트를 초기화하고 신규 사용자 화면으로 이동한다.
+
+UI 최소 변경 원칙
+
+현재 intro_master.dart 구조를 전면 재작성하지 않는다.
+
+기존 상태와 위젯을 최대한 재사용한다.
+
+권장 분기 개념:
+
+signedInUser
+knownLastProvider
+unknownProvider
+
+실제 변수명과 구현 방식은 현재 코드 구조에 맞게 선택한다.
+
+테스트 시나리오
+카카오
+카카오로 로그인
+로그아웃
+로그인 화면 재진입
+카카오톡으로 계속하기만 표시
+Google 버튼 없음
+이메일 버튼 없음
+내 계정 찾아보기 없음
+Google
+Google로 로그인
+로그아웃
+Google로 계속하기만 표시
+카카오 버튼 없음
+이메일 버튼 없음
+내 계정 찾아보기 없음
+이메일
+이메일 로그인
+로그아웃
+이메일로 계속하기만 표시
+Google 버튼 없음
+카카오 버튼 없음
+내 계정 찾아보기 없음
+lastAuthProvider 없음
+앱 삭제·재설치 또는 로컬 상태 초기화
+새로 방문하신 분 영역 표시
+카카오·Google·이메일 3개 버튼 표시
+StealthVox 계정이 기억 안 나신 분 영역 표시
+내 계정 찾아보기 버튼 표시
+로그인 유지
+로그인 세션 유지 상태에서 앱 재실행
+로그인 화면 없이 Lobby 이동
+오류
+lastAuthProvider가 알 수 없는 값
+신규 사용자 화면으로 안전하게 분기
+provider 로그인 실패
+같은 provider 재시도만 표시
+완료 조건
+마지막 로그인 provider가 있으면 해당 버튼 하나만 표시
+다른 provider 버튼이 보이지 않음
+내 계정 찾아보기가 보이지 않음
+lastAuthProvider가 없을 때만 신규 사용자 3버튼 표시
+lastAuthProvider가 없을 때만 내 계정 찾아보기 표시
+로그인 유지 사용자는 Lobby로 바로 이동
+기존 계정 찾기 기능은 정상 유지
+기존 가입·보호자 동의·RevenueCat 흐름에 회귀 오류 없음
+flutter analyze에서 신규 error 없음
+실기기에서 카카오·Google·이메일 각각 확인
+작업 보고
+
+수정 후 다음을 보고한다.
+
+변경 파일
+상태 분기 기준
+lastAuthProvider 유효성 처리
+provider별 단일 화면 결과
+신규 사용자 화면 결과
+실기기 테스트 결과
+기존 계정 찾기 기능 회귀 여부
+신규 analyzer 오류 여부
+
+최소 변경으로 구현하고, 로그인 정책 자체를 확대하거나 다른 provider 전환 기능을 임의로 추가하지 말 것.
