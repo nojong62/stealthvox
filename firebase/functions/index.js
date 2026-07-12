@@ -19,6 +19,79 @@ const revenueCatWebhookSecret = defineSecret("REVENUECAT_WEBHOOK_SECRET");
 
 admin.initializeApp();
 
+async function verifyGoogleOAuthIdToken(idToken) {
+  if (!idToken || typeof idToken !== "string") {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "idToken is required for Google provider."
+    );
+  }
+
+  try {
+    const tokenInfoResp = await fetch(
+      "https://oauth2.googleapis.com/tokeninfo?id_token=" +
+        encodeURIComponent(idToken)
+    );
+    if (!tokenInfoResp.ok) {
+      throw new Error("Google token rejected (status " + tokenInfoResp.status + ")");
+    }
+
+    const tokenInfo = await tokenInfoResp.json();
+    if (tokenInfo.email_verified !== "true" && tokenInfo.email_verified !== true) {
+      throw new Error("Google email is not verified.");
+    }
+    if (!tokenInfo.sub) {
+      throw new Error("Google subject is missing.");
+    }
+
+    return {
+      providerUid: String(tokenInfo.sub),
+      email: tokenInfo.email || null,
+      displayName: tokenInfo.name || null,
+    };
+  } catch (e) {
+    throw new functions.https.HttpsError(
+      "unauthenticated",
+      "Invalid Google ID token: " + String(e)
+    );
+  }
+}
+
+async function verifyKakaoAccessToken(accessToken) {
+  if (!accessToken || typeof accessToken !== "string") {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "kakaoAccessToken (string) is required."
+    );
+  }
+
+  try {
+    const resp = await fetch("https://kapi.kakao.com/v2/user/me", {
+      method: "GET",
+      headers: { Authorization: "Bearer " + accessToken },
+    });
+    if (!resp.ok) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "Kakao token rejected (status " + resp.status + ")."
+      );
+    }
+    const profile = await resp.json();
+    return {
+      providerUid: profile && profile.id != null ? String(profile.id) : null,
+      email:
+        profile && profile.kakao_account && profile.kakao_account.email
+          ? profile.kakao_account.email
+          : null,
+    };
+  } catch (e) {
+    if (e instanceof functions.https.HttpsError) throw e;
+    throw new functions.https.HttpsError(
+      "internal",
+      "Kakao verification failed: " + String(e)
+    );
+  }
+}
 // ----------------------------------------------------------------------------
 // onUserDeleted
 // Trigger: Firebase Auth user.delete
