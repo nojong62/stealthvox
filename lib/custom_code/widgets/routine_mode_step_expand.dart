@@ -427,7 +427,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   //    - 유저의 첫 문장이 확장 seed가 됨
   //
   // 2. AI는 시작 안내 후 대기 (Guided Waiting)
-  //    - "대화하면서 문장을 늘려가고 싶은 기본 문장을 하나 제안해 주세요."
+  //    - "오늘의 이야기, 어디서부터 시작해볼까요?"
   //    - OpenAI 질문 생성 API 호출 없음
   //    - 안내문 TTS 완료 후 STT 자동 시작
   //
@@ -778,7 +778,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         isUser: false,
         onLog: _log,
       );
-      tts.addText('대화하면서 문장을 늘려가고 싶은 기본 문장을 하나 제안해 주세요.');
+      tts.addText('오늘의 이야기, 어디서부터 시작해볼까요?');
       int ticks = 0;
       while ((tts.pendingRequests > 0 || _ttsQueueManager.isBusy) && mounted) {
         await Future.delayed(const Duration(milliseconds: 50));
@@ -789,7 +789,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     // 안내/질문 완료  STT 즉시 시작 (유저 기본 문장 대기)
     // 🔧 [MIC-INSTANT] 8초 딜레이 제거  AI 말 끝나자마자 마이크 ON.
     // 침묵 시 별도 안내 멘트 없이 그대로 대기(침묵 폴백 제거).
-    _showSeedHintBalloon();
     if (mounted && _isConversationActive && !_isSessionComplete) {
       _startDeepgramListening();
     }
