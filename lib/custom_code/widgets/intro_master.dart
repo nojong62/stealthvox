@@ -860,6 +860,10 @@ class _IntroMasterState extends State<IntroMaster> {
             icon: const Icon(Icons.email_outlined, size: 20),
             onTap: _showEmailDiscoveryGuide,
           ),
+          if (_showEmailForm) ...[
+            const SizedBox(height: 14),
+            _buildEmailDiscoveryForm(),
+          ],
           if (_accountDiscoveryMessage.isNotEmpty) ...[
             const SizedBox(height: 18),
             Text(
@@ -898,7 +902,7 @@ class _IntroMasterState extends State<IntroMaster> {
           TextButton.icon(
             onPressed: _accountDiscoveryBusyProvider.isNotEmpty
                 ? null
-                : () => launchURL('mailto:support@stealthvox.app'),
+                : () => launchURL('mailto:stealthvox.app@gmail.com'),
             icon: const Icon(Icons.support_agent, size: 18),
             label: const Text('고객지원 문의'),
             style:
@@ -1053,13 +1057,81 @@ class _IntroMasterState extends State<IntroMaster> {
     }
   }
 
+  Future<void> _lookupEmailAccount() async {
+    final email = emailController.text.trim();
+    final password = passwordController.text.trim();
+    if (email.isEmpty || password.isEmpty) {
+      setState(() {
+        _accountDiscoveryMessage = '이메일과 비밀번호를 모두 입력해 주세요.';
+      });
+      return;
+    }
+
+    setState(() {
+      _accountDiscoveryBusyProvider = 'email';
+      _accountDiscoveryMessage = '';
+    });
+    AppStateNotifier.instance.updateNotifyOnAuthChange(false);
+    try {
+      final result = await AccountDiscoveryService.lookupEmail(
+        email: email,
+        password: password,
+      );
+      if (!mounted) return;
+      if (!result.found) {
+        await FirebaseAuth.instance.signOut();
+      }
+      if (!mounted) return;
+      setState(() {
+        _accountDiscoveryResults
+            .removeWhere((item) => item.provider == 'email');
+        if (result.found) {
+          _accountDiscoveryResults.add(result);
+          _accountDiscoveryMessage =
+              '기존 StealthVox 기록을 찾았습니다. 사용할 계정을 직접 선택해 주세요.';
+          _showEmailForm = false;
+        } else {
+          _accountDiscoveryMessage =
+              '이 이메일 계정에서는 기존 StealthVox 기록을 찾지 못했습니다. 다른 계정이나 다른 로그인 방법을 확인해 보세요.';
+        }
+      });
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _accountDiscoveryMessage = switch (e.code) {
+          'invalid-email' => '이메일 형식이 올바르지 않습니다.',
+          'user-not-found' => '이 이메일로 가입된 계정을 찾지 못했습니다.',
+          'wrong-password' || 'invalid-credential' => '이메일 또는 비밀번호가 맞지 않습니다.',
+          _ => e.message ?? '이메일 계정을 확인하지 못했습니다.',
+        };
+      });
+    } catch (e) {
+      debugPrint('[AccountDiscovery] email lookup failed: $e');
+      if (!mounted) return;
+      setState(() {
+        _accountDiscoveryMessage =
+            '이메일 계정을 확인하지 못했습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.';
+      });
+    } finally {
+      AppStateNotifier.instance.updateNotifyOnAuthChange(true);
+      if (mounted) setState(() => _accountDiscoveryBusyProvider = '');
+    }
+  }
+
   Future<void> _continueWithDiscoveredAccount(
       AccountDiscoveryResult account) async {
     setState(() => isLoading = true);
     AppStateNotifier.instance.updateNotifyOnAuthChange(false);
     try {
-      await _cleanupTrialSandbox();
-      await AccountDiscoveryService.signInWithDiscoveredAccount(account);
+      if (account.provider == 'email') {
+        final currentUser = FirebaseAuth.instance.currentUser;
+        if (currentUser == null || currentUser.uid != account.providerToken) {
+          throw Exception('이메일 계정 인증이 만료되었습니다. 다시 확인해 주세요.');
+        }
+      } else {
+        await _cleanupTrialSandbox();
+        await AccountDiscoveryService.signInWithDiscoveredAccount(account);
+      }
       FFAppState().hasLinkedAccount = true;
       FFAppState().lastAuthProvider = account.provider;
       FFAppState().remainingTime = account.remainingTime;
@@ -1082,17 +1154,13 @@ class _IntroMasterState extends State<IntroMaster> {
   }
 
   void _showEmailDiscoveryGuide() {
-    const message =
-        '이메일 계정은 이메일과 비밀번호로 실제 로그인한 뒤에만 확인할 수 있습니다. 기존 이메일 로그인과 비밀번호 재설정 경로를 이용해 주세요.';
     setState(() {
-      _accountDiscoveryMessage = message;
-      _currentScreen = IntroScreen.auth;
-      _showEmailForm = true;
+      _showEmailForm = !_showEmailForm;
       isLoginMode = true;
+      _accountDiscoveryMessage = _showEmailForm
+          ? '이메일과 비밀번호를 입력하면 기존 기록을 확인합니다. 확인 후에도 직접 선택하기 전까지 로비로 이동하지 않습니다.'
+          : '';
     });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text(message)),
-    );
   }
 
   Future<void> _confirmNewAccountFromDiscovery() async {
@@ -1255,7 +1323,7 @@ class _IntroMasterState extends State<IntroMaster> {
     if (lastProvider == null) {
       return [
         _authSectionTitle(
-          title: '새로 방문하신 분',
+          title: '처음 방문하신 분',
           description: '사용할 로그인 방법을 선택해 주세요.',
         ),
       ];
@@ -1310,6 +1378,78 @@ class _IntroMasterState extends State<IntroMaster> {
                   child: child,
                 ),
               ),
+      ),
+    );
+  }
+
+  Widget _buildEmailDiscoveryForm() {
+    final busy = _accountDiscoveryBusyProvider == 'email';
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1F242A),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: const Color(0xFF4A90D9).withValues(alpha: 0.28),
+        ),
+      ),
+      child: Column(
+        children: [
+          _buildTextField(
+            emailController,
+            '이메일',
+            Icons.email_outlined,
+            false,
+            focusNode: _emailFocusNode,
+            textInputAction: TextInputAction.next,
+            onSubmitted: (_) =>
+                FocusScope.of(context).requestFocus(_passwordFocusNode),
+          ),
+          const SizedBox(height: 12),
+          _buildTextField(
+            passwordController,
+            '비밀번호',
+            Icons.lock_outline,
+            true,
+            focusNode: _passwordFocusNode,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _lookupEmailAccount(),
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            height: 46,
+            child: ElevatedButton.icon(
+              onPressed: _accountDiscoveryBusyProvider.isNotEmpty
+                  ? null
+                  : _lookupEmailAccount,
+              icon: busy
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.search, size: 18),
+              label: const Text('이메일 계정 확인'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF4A90D9),
+                foregroundColor: Colors.white,
+                disabledBackgroundColor:
+                    const Color(0xFF4A90D9).withValues(alpha: 0.45),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                textStyle: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1542,6 +1682,9 @@ class _IntroMasterState extends State<IntroMaster> {
   Future<void> _showBirthYearDialog() async {
     final currentYear = DateTime.now().year;
     int selectedYear = currentYear - 20;
+    final yearController = FixedExtentScrollController(
+      initialItem: currentYear - 1940 - 20,
+    );
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -1568,9 +1711,7 @@ class _IntroMasterState extends State<IntroMaster> {
                 child: ListWheelScrollView.useDelegate(
                   itemExtent: 42,
                   physics: const FixedExtentScrollPhysics(),
-                  controller: FixedExtentScrollController(
-                    initialItem: currentYear - 1940 - 20,
-                  ),
+                  controller: yearController,
                   onSelectedItemChanged: (index) {
                     setDialogState(() => selectedYear = 1940 + index);
                   },
@@ -1626,6 +1767,7 @@ class _IntroMasterState extends State<IntroMaster> {
         );
       },
     );
+    yearController.dispose();
 
     if (confirmed != true || !mounted) return;
 
@@ -1670,88 +1812,180 @@ class _IntroMasterState extends State<IntroMaster> {
   /// 14세 미만: 보호자 이메일 입력 다이얼로그
   Future<String?> _showParentEmailDialog() async {
     final controller = TextEditingController();
+    final focusNode = FocusNode();
+    String? errorText;
 
     final result = await showDialog<String>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF161616),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-            side: const BorderSide(color: Color(0xFF2A3A36), width: 1),
-          ),
-          title: const Text(
-            '보호자 동의가 필요합니다',
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: 17,
-            ),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                '만 14세 미만은 보호자 동의가 필요합니다.\n보호자의 이메일 주소를 입력해 주세요.',
-                style: TextStyle(
-                  color: Colors.white70,
-                  fontSize: 13,
-                  height: 1.5,
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: controller,
-                keyboardType: TextInputType.emailAddress,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  hintText: '보호자 이메일',
-                  hintStyle: const TextStyle(color: Colors.white30),
-                  filled: true,
-                  fillColor: Colors.black.withValues(alpha: 0.5),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            final bottomInset = MediaQuery.viewInsetsOf(dialogContext).bottom;
+
+            void submit() {
+              final email = controller.text.trim();
+              final isEmail =
+                  RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email);
+              if (!isEmail) {
+                setDialogState(() {
+                  errorText = '보호자 이메일 주소를 정확히 입력해 주세요.';
+                });
+                focusNode.requestFocus();
+                return;
+              }
+              FocusScope.of(dialogContext).unfocus();
+              Navigator.of(dialogContext).pop(email);
+            }
+
+            return Dialog(
+              insetPadding:
+                  const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+              backgroundColor: Colors.transparent,
+              child: AnimatedPadding(
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOut,
+                padding: EdgeInsets.only(bottom: bottomInset),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 360),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF161616),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: const Color(0xFF2A3A36),
+                        width: 1,
+                      ),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const Text(
+                            '보호자 동의가 필요합니다',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 20,
+                              height: 1.28,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            '만 14세 미만은 보호자 동의가 필요합니다.\n보호자의 이메일 주소를 입력해 주세요.',
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 14,
+                              height: 1.5,
+                            ),
+                          ),
+                          const SizedBox(height: 18),
+                          TextField(
+                            controller: controller,
+                            focusNode: focusNode,
+                            autofocus: true,
+                            keyboardType: TextInputType.emailAddress,
+                            textInputAction: TextInputAction.done,
+                            autocorrect: false,
+                            enableSuggestions: false,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                            ),
+                            onChanged: (_) {
+                              if (errorText != null) {
+                                setDialogState(() => errorText = null);
+                              }
+                            },
+                            onSubmitted: (_) => submit(),
+                            decoration: InputDecoration(
+                              hintText: '보호자 이메일',
+                              hintStyle: const TextStyle(color: Colors.white30),
+                              errorText: errorText,
+                              errorMaxLines: 2,
+                              filled: true,
+                              fillColor: Colors.black.withValues(alpha: 0.55),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 16,
+                              ),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide.none,
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: const BorderSide(
+                                  color: Color(0xFF4A90D9),
+                                  width: 1.4,
+                                ),
+                              ),
+                              prefixIcon: const Icon(
+                                Icons.email_outlined,
+                                color: Colors.white54,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 18),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              TextButton(
+                                onPressed: () {
+                                  FocusScope.of(dialogContext).unfocus();
+                                  Navigator.of(dialogContext).pop(null);
+                                },
+                                child: const Text(
+                                  '나중에',
+                                  style: TextStyle(
+                                    color: Colors.white54,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Flexible(
+                                child: ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF4A90D9),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 12,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    textStyle: const TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  onPressed: submit,
+                                  child: const Text(
+                                    '동의 요청 보내기',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(color: Colors.white),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                  prefixIcon:
-                      const Icon(Icons.email_outlined, color: Colors.white38),
                 ),
               ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(null),
-              child: const Text(
-                '나중에',
-                style: TextStyle(color: Colors.white38),
-              ),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF4A90D9),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-              onPressed: () {
-                final email = controller.text.trim();
-                Navigator.of(dialogContext).pop(email.isEmpty ? null : email);
-              },
-              child: const Text(
-                '동의 요청 보내기',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ],
+            );
+          },
         );
       },
     );
 
+    focusNode.dispose();
     controller.dispose();
     return result;
   }

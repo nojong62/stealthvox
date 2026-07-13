@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:provider/provider.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -29,19 +31,32 @@ void main() async {
   final appState = FFAppState(); // Initialize FFAppState
   await appState.initializePersistedState();
 
-  await revenue_cat.initialize(
-    "",
-    "goog_XfTPcusZVFeDsZEkFHYiFgUUUIK",
-    debugLogEnabled: true,
-    loadDataAfterLaunch: true,
-  );
-
-  await initializeFirebaseRemoteConfig();
-
   runApp(ChangeNotifierProvider(
     create: (context) => appState,
     child: MyApp(),
   ));
+
+  // Network-backed services must never hold the Android launch window open.
+  unawaited(_initializeOptionalServices());
+}
+
+Future<void> _initializeOptionalServices() async {
+  try {
+    await revenue_cat.initialize(
+      "",
+      "goog_XfTPcusZVFeDsZEkFHYiFgUUUIK",
+      debugLogEnabled: true,
+      loadDataAfterLaunch: true,
+    );
+  } catch (error, stackTrace) {
+    debugPrint('RevenueCat startup failed: $error\n$stackTrace');
+  }
+
+  try {
+    await initializeFirebaseRemoteConfig();
+  } catch (error, stackTrace) {
+    debugPrint('Remote Config startup failed: $error\n$stackTrace');
+  }
 }
 
 class MyApp extends StatefulWidget {

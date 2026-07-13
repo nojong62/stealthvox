@@ -1,4 +1,5 @@
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:google_sign_in/google_sign_in.dart';
@@ -46,6 +47,7 @@ class AccountDiscoveryResult {
   String get providerLabel => switch (provider) {
         'google' => 'Google 계정',
         'kakao' => '카카오 계정',
+        'email' => '이메일 계정',
         _ => '계정',
       };
 
@@ -156,6 +158,82 @@ class AccountDiscoveryService {
     );
   }
 
+  static Future<AccountDiscoveryResult> lookupEmail({
+    required String email,
+    required String password,
+  }) async {
+    final credential = await _auth.signInWithEmailAndPassword(
+      email: email.trim(),
+      password: password,
+    );
+    final user = credential.user;
+    if (user == null) {
+      throw Exception('Email login did not return a Firebase user.');
+    }
+
+    final firestore = FirebaseFirestore.instance;
+    final userRef = firestore.collection('users').doc(user.uid);
+    final userDoc = await userRef.get();
+    if (!userDoc.exists) {
+      return AccountDiscoveryResult.notFound(
+        provider: 'email',
+        providerToken: user.uid,
+      );
+    }
+
+    final userData = userDoc.data() ?? {};
+    final historyBase = userRef.collection('chat_history');
+    int historyCount = 0;
+    DateTime? lastUsedAt;
+
+    try {
+      final countSnap = await historyBase.count().get();
+      historyCount = countSnap.count ?? 0;
+    } catch (e) {
+      debugPrint('[AccountDiscovery] email history count failed: $e');
+    }
+
+    try {
+      final latestSnap = await historyBase
+          .orderBy('created_at', descending: true)
+          .limit(1)
+          .get();
+      if (latestSnap.docs.isNotEmpty) {
+        final createdAt = latestSnap.docs.first.data()['created_at'];
+        if (createdAt is Timestamp) {
+          lastUsedAt = createdAt.toDate();
+        }
+      }
+    } catch (e) {
+      debugPrint('[AccountDiscovery] email latest history failed: $e');
+    }
+
+    final remainingTime = (userData['remainingTime'] as num?)?.toInt() ?? 0;
+    final hasBirthYear = userData['birthYear'] != null;
+    final parentConsentPending = userData['parentConsentPending'] == true;
+    final storedEmail = (userData['email'] as String?) ?? user.email ?? email;
+
+    return AccountDiscoveryResult(
+      provider: 'email',
+      status: 'found',
+      maskedIdentifier: _maskEmail(storedEmail),
+      remainingTime: remainingTime,
+      historyCount: historyCount,
+      lastUsedAt: lastUsedAt,
+      hasBirthYear: hasBirthYear,
+      parentConsentPending: parentConsentPending,
+      hasMemberData: remainingTime > 0 ||
+          historyCount > 0 ||
+          hasBirthYear ||
+          parentConsentPending,
+      ticket: 'email-authenticated:${user.uid}',
+      expiresAt: DateTime.now()
+          .add(const Duration(minutes: 10))
+          .millisecondsSinceEpoch,
+      providerToken: user.uid,
+    );
+  }
+
   static Future<UserCredential> signInWithDiscoveredAccount(
     AccountDiscoveryResult account,
   ) async {
@@ -181,5 +259,14 @@ class AccountDiscoveryService {
     debugPrint(
         '[AccountDiscovery] final Firebase login provider=${account.provider}');
     return _auth.signInWithCustomToken(token);
+  }
+
+  static String _maskEmail(String email) {
+    final parts = email.split('@');
+    if (parts.length != 2) return '';
+    final name = parts[0];
+    final domain = parts[1];
+    final visible = name.substring(0, name.length < 3 ? name.length : 3);
+    return '$visible***@$domain';
   }
 }
