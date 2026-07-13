@@ -775,6 +775,16 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       return;
     }
 
+    // [CLARIFY-EVAPORATE] 직전 SYSTEM 버블이 되묻기 질문(clarify:true)이면
+    // 유저의 실제 발화이므로 다음 컨텍스트 구성 전에 제거한다.
+    if (mounted) {
+      final lastSysIdx =
+          _localMessages.lastIndexWhere((m) => m['role'] == 'SYSTEM');
+      if (lastSysIdx != -1 && _localMessages[lastSysIdx]['clarify'] == true) {
+        setState(() => _localMessages.removeAt(lastSysIdx));
+      }
+    }
+
     _isPipelineRunning = true;
     try {
       // ─────────────────────────────────────────────────────
@@ -871,6 +881,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       bool corrected = false; // 유저가 AI의 오해를 정정 → 직전 교환 삭제 후 재처리
       bool misheard = false; // 잘못 들었다는 불만만 있음 → 직전 교환 삭제 후 재청취
       bool dissatisfiedReply = false; // AI 직전 응답 불만 → 응답만 재생성
+      bool clarified = false; // 주어/목적어 모호 → AI 되묻기
       // [USER-FULL-TTS] firstChunkSent removed; user TTS fires once after stream end.
       await for (String chunk in userStream) {
         userTargetText += chunk;
@@ -899,7 +910,12 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           _log('🟣 [DISSATISFIED]', '응답 불만 감지 → 직전 응답 삭제 후 재생성');
           break;
         }
-        if (mounted)
+        // ❓ [CLARIFY] 주어/목적어 모호 → AI 되묻기 (되묻기 문장 전체를 받기 위해 break 안 함)
+        if (!clarified && userTargetText.contains("[CLARIFY]")) {
+          clarified = true;
+          _log('❓ [CLARIFY]', '되묻기 감지 → 스트림 완료 후 처리 예정');
+        }
+        if (mounted && !clarified)
           setState(() => _localMessages[hostIndex]['target'] = userTargetText);
 
         // [USER-FULL-TTS] no chunk TTS during user translation streaming.
@@ -1104,6 +1120,51 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
             mounted) {
           await Future.delayed(const Duration(milliseconds: 50));
           if (++regenTicks > 400) break;
+        }
+        skipFinallyRestart = true;
+        _isPipelineRunning = false;
+        if (mounted && _isConversationActive) _startDeepgramListening();
+        return;
+      }
+
+      // ❓ [CLARIFY] 유저 발화 주어/목적어 모호 → AI 되묻기 버블 + TTS + STT 재시작
+      //   이 교환은 아직 저장되지 않았으므로 현재 HOST 버블만 제거하면 된다.
+      if (clarified) {
+        _turnCounter--;
+        final clarifyText =
+            userTargetText.replaceFirst(RegExp(r'^\[CLARIFY\]\s*'), '').trim();
+        if (mounted) {
+          setState(() {
+            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+            if (hostIndex < _localMessages.length &&
+                _localMessages[hostIndex]['role'] == 'HOST') {
+              _localMessages.removeAt(hostIndex);
+            }
+            _localMessages.add({
+              'role': 'SYSTEM',
+              'target': clarifyText,
+              'original': '',
+              'clarify': true, // 임시 되묻기 버블 — 다음 발화 시 증발 처리
+            });
+          });
+          _scrollToBottom();
+        }
+        _ttsQueueManager.stop();
+        _ttsQueueManager.setUserTurn(false);
+        _ttsQueueManager.setAiPaused(false);
+        final clarifyTts = ChunkedTtsFetcher(
+          _openAiKey,
+          _ttsQueueManager,
+          'nova',
+          isUser: false,
+          onLog: _log,
+        );
+        clarifyTts.addText(clarifyText);
+        int clarifyTicks = 0;
+        while ((clarifyTts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
+            mounted) {
+          await Future.delayed(const Duration(milliseconds: 50));
+          if (++clarifyTicks > 200) break;
         }
         skipFinallyRestart = true;
         _isPipelineRunning = false;
@@ -3344,6 +3405,21 @@ Korean: "친구가 요즘 바빠서 못 만나" → CORRECT: My friend is busy l
 Korean: "호진이 시험 몇 점 받을 것 같아?" → CORRECT: What score do you think Hojin will get on the exam? WRONG: What score do you think you/I will get?
 NAMED PEOPLE (proper nouns like 호진, 민수, 엄마, 선생님) must stay as that exact person. NEVER collapse a named subject into "I" or "you".
 The particle before the verb's doer (이/가) is ALWAYS the subject. Never swap subject and object.
+
+[CLARIFICATION GUARD]
+Before finalizing subject restoration, check: is the subject or object of the utterance clear from the input OR resolvable from the conversation history?
+If clear → proceed with normal translation.
+If genuinely ambiguous AND history cannot resolve it → output EXACTLY:
+[CLARIFY] <short, natural clarification question in $targetLang>
+
+Style pool — pick ONE and VARY each time (never repeat the same phrasing twice in a row):
+- Direct: "Who are you talking about?"
+- Gentle: "Just to be sure — who do you mean?"
+- Curious: "Oh — who's that about?"
+- Confirming: "Do you mean [person/thing from history]?"
+- Playful: "I'm gonna need a name to work with here!"
+
+NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
 
 [OUTPUT RULES]
 - Preserve speech register: formal Korean → polite English, casual (반말) → casual English with contractions.
