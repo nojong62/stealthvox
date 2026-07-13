@@ -236,20 +236,41 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   String _debugResult = "⏱️ 대기 중";
   DateTime? _lastScrollThrottle;
 
+  // 🆕 [WARMUP] 화면 인스턴스당 1회만 실행되도록 하는 가드
+  bool _cacheWarmupStarted = false;
+
+  // 🆕 [WARMUP] 무비용 예열: TtsCache 디렉터리 경로만 선해석.
+  // API 요청/오디오 재생/큐 변경/history·billing·turn 상태 변경 없음.
+  // UI/마이크 시작을 block하지 않는 fire-and-forget로 initState에서 호출.
+  Future<void> _warmupTtsCacheDir() async {
+    if (_cacheWarmupStarted) return;
+    _cacheWarmupStarted = true;
+    _log('🔥 [WARMUP-START]', 'TtsCache 디렉터리 예열 시작');
+    await TtsCache.warmupDir(onLog: _log);
+    if (!mounted) {
+      _log('🔥 [WARMUP-END]', 'dispose 이후 완료 — 결과 무시');
+      return;
+    }
+    _log('🔥 [WARMUP-END]', 'TtsCache 디렉터리 예열 완료');
+  }
+
   @override
   void initState() {
     super.initState();
-    _ttsQueueManager = TtsQueueManager(onPlayStart: () {
-      if (_swTTS.isRunning) {
-        _swTTS.stop();
-        if (mounted) {
-          setState(() {
-            _debugResult =
-                "⏱️ 확정: ${_swDeepgram.elapsedMilliseconds}ms | 뇌: ${_swOpenAI.elapsedMilliseconds}ms | 입: ${_swTTS.elapsedMilliseconds}ms";
-          });
-        }
-      }
-    });
+    _ttsQueueManager = TtsQueueManager(
+        onLog: _log,
+        onPlayStart: () {
+          if (_swTTS.isRunning) {
+            _swTTS.stop();
+            if (mounted) {
+              setState(() {
+                _debugResult =
+                    "⏱️ 확정: ${_swDeepgram.elapsedMilliseconds}ms | 뇌: ${_swOpenAI.elapsedMilliseconds}ms | 입: ${_swTTS.elapsedMilliseconds}ms";
+              });
+            }
+          }
+        });
+    unawaited(_warmupTtsCacheDir());
 
     TrialFlowState.instance.restoreFromAppState();
     if (TrialFlowState.instance.isTrialAnyone) {
@@ -865,6 +886,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         targetLang: targetLangName,
         contextStr: contextStr,
         disableCorrection: isCorrectionRetry,
+        onLog: _log,
       );
 
       bool evaporated = false;
@@ -905,6 +927,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         // [USER-FULL-TTS] no chunk TTS during user translation streaming.
         // Text still streams to the screen through setState above.
       }
+      _log('🌐 [TR-DONE]',
+          '최종 번역 완료: "$userTargetText" (${userTargetText.length}자)');
 
       if (evaporated) {
         if (mounted)
@@ -1796,77 +1820,89 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
               icon: const Icon(Icons.arrow_back_ios_new_rounded,
                   color: Colors.white70),
               onPressed: _handleAutoSaveAndExit), // 🔧 [히스토리] AutoSave 연결
-          Row(children: [
-            // 🆕 [Anyone] 이용방법 말풍선 토글
-            IconButton(
-              icon: const Icon(Icons.help_outline,
-                  color: Colors.amberAccent, size: 22),
-              onPressed: () =>
-                  setState(() => _showUsageGuide = !_showUsageGuide),
-            ),
-            IconButton(
-              icon: Icon(
-                Icons.format_size,
-                color: _fontScale > 1.0
-                    ? const Color(0xFFFBBF24)
-                    : _fontScale < 1.0
-                        ? Colors.white38
-                        : Colors.white70,
-                size: 22,
-              ),
-              onPressed: () => setState(() {
-                _fontScale = _fontScale == 1.0
-                    ? 1.3
-                    : _fontScale == 1.3
-                        ? 0.8
-                        : 1.0;
-              }),
-            ),
-            IconButton(
-              icon: CustomPaint(
-                size: const Size(26, 26),
-                painter: _LangIconPainter(active: _showOriginal),
-              ),
-              onPressed: () => setState(() => _showOriginal = !_showOriginal),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-            ),
-            const SizedBox(width: 8),
-            // [v3.6] 잔여시간 표시 + 길게 누르면 로그 (개발자용)
-            GestureDetector(
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                    color: const Color(0xFF2563EB),
-                    borderRadius: BorderRadius.circular(20)),
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
                 child: Row(children: [
-                  ValueListenableBuilder<int>(
-                    valueListenable: BillingTicker.instance.billingState,
-                    builder: (_, s, __) => GestureDetector(
-                      onTap: s == 0 ? _resetIdleTimer : null,
-                      child: CustomPaint(
-                        size: const Size(14, 14),
-                        painter: BillingDotPainter(s),
-                      ),
-                    ),
+                  // 🆕 [Anyone] 이용방법 말풍선 토글
+                  IconButton(
+                    icon: const Icon(Icons.help_outline,
+                        color: Colors.amberAccent, size: 22),
+                    onPressed: () =>
+                        setState(() => _showUsageGuide = !_showUsageGuide),
                   ),
-                  const SizedBox(width: 6),
-                  Text(
-                    () {
-                      final int s =
-                          (FFAppState().remainingTime).toInt().clamp(0, 999999);
-                      final int h = s ~/ 3600;
-                      final int m = (s % 3600) ~/ 60;
-                      return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
-                    }(),
-                    style: const TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.bold),
+                  IconButton(
+                    icon: Icon(
+                      Icons.format_size,
+                      color: _fontScale > 1.0
+                          ? const Color(0xFFFBBF24)
+                          : _fontScale < 1.0
+                              ? Colors.white38
+                              : Colors.white70,
+                      size: 22,
+                    ),
+                    onPressed: () => setState(() {
+                      _fontScale = _fontScale == 1.0
+                          ? 1.3
+                          : _fontScale == 1.3
+                              ? 0.8
+                              : 1.0;
+                    }),
+                  ),
+                  IconButton(
+                    icon: CustomPaint(
+                      size: const Size(26, 26),
+                      painter: _LangIconPainter(active: _showOriginal),
+                    ),
+                    onPressed: () =>
+                        setState(() => _showOriginal = !_showOriginal),
+                    padding: EdgeInsets.zero,
+                    constraints:
+                        const BoxConstraints(minWidth: 36, minHeight: 36),
+                  ),
+                  const SizedBox(width: 8),
+                  // [v3.6] 잔여시간 표시 + 길게 누르면 로그 (개발자용)
+                  GestureDetector(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                          color: const Color(0xFF2563EB),
+                          borderRadius: BorderRadius.circular(20)),
+                      child: Row(children: [
+                        ValueListenableBuilder<int>(
+                          valueListenable: BillingTicker.instance.billingState,
+                          builder: (_, s, __) => GestureDetector(
+                            onTap: s == 0 ? _resetIdleTimer : null,
+                            child: CustomPaint(
+                              size: const Size(14, 14),
+                              painter: BillingDotPainter(s),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          () {
+                            final int s = (FFAppState().remainingTime)
+                                .toInt()
+                                .clamp(0, 999999);
+                            final int h = s ~/ 3600;
+                            final int m = (s % 3600) ~/ 60;
+                            return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+                          }(),
+                          style: const TextStyle(
+                              color: Colors.white, fontWeight: FontWeight.bold),
+                        ),
+                      ]),
+                    ),
                   ),
                 ]),
               ),
             ),
-          ]),
+          ),
         ],
       ),
     );
@@ -2446,30 +2482,56 @@ class TtsCache {
     return '${h}_${combined.length}';
   }
 
-  static Future<String> _getDir() async {
+  // 🔬 [PERF-INSTRUMENT] 디렉터리 준비 시점 계측 (턴1 vs 턴2+ 비교용)
+  static Future<String> _getDir(
+      {void Function(String tag, String msg)? onLog}) async {
     if (_cacheDirPath != null) return _cacheDirPath!;
+    onLog?.call('📁 [CACHE-DIR]', '준비 시작');
+    final sw = Stopwatch()..start();
     final appDir = await getApplicationDocumentsDirectory();
     final cacheDir = Directory('${appDir.path}/tts_cache');
     if (!await cacheDir.exists()) {
       await cacheDir.create(recursive: true);
     }
     _cacheDirPath = cacheDir.path;
+    onLog?.call('📁 [CACHE-DIR]', '준비 완료 (${sw.elapsedMilliseconds}ms)');
     return _cacheDirPath!;
+  }
+
+  // 🆕 [WARMUP] 무비용 예열: 디렉터리 경로만 선(先)해석. API 요청/오디오 재생 없음.
+  // 실패해도 예외를 삼키고 무시 — 다음 실제 호출에서 _getDir()가 정상 재시도한다.
+  static Future<void> warmupDir(
+      {void Function(String tag, String msg)? onLog}) async {
+    if (_cacheDirPath != null) {
+      onLog?.call('🔥 [WARMUP-ALREADY-DONE]', 'TtsCache 디렉터리 이미 준비됨');
+      return;
+    }
+    try {
+      await _getDir(onLog: onLog);
+    } catch (e) {
+      onLog?.call('🔥 [WARMUP-FAIL]', 'TtsCache 디렉터리 예열 실패(무시): $e');
+    }
   }
 
   // 🔧 [B 수정] 디스크 I/O 경합으로 hang되는 것을 막기 위해 2초 타임아웃.
   // 타임아웃/예외 시 캐시 미스로 처리(null)해 호출 측은 API 경로로 진행.
-  static Future<Uint8List?> get(String text, String voice) async {
+  static Future<Uint8List?> get(String text, String voice,
+      {void Function(String tag, String msg)? onLog}) async {
+    onLog?.call('📁 [CACHE-GET]', '캐시 조회 시작');
     try {
-      return await _getInternal(text, voice)
+      final result = await _getInternal(text, voice, onLog: onLog)
           .timeout(const Duration(seconds: 2));
+      onLog?.call('📁 [CACHE-GET]', result != null ? '캐시 HIT' : '캐시 MISS');
+      return result;
     } catch (_) {
+      onLog?.call('📁 [CACHE-GET]', '캐시 조회 실패/타임아웃');
       return null;
     }
   }
 
-  static Future<Uint8List?> _getInternal(String text, String voice) async {
-    final path = '${await _getDir()}/${_key(text, voice)}.mp3';
+  static Future<Uint8List?> _getInternal(String text, String voice,
+      {void Function(String tag, String msg)? onLog}) async {
+    final path = '${await _getDir(onLog: onLog)}/${_key(text, voice)}.mp3';
     final file = File(path);
     if (await file.exists()) {
       return await file.readAsBytes();
@@ -2478,15 +2540,20 @@ class TtsCache {
   }
 
   // 🔧 [B 수정] 저장도 2초 타임아웃. 실패해도 캐시는 best-effort로 조용히 무시.
-  static Future<void> put(String text, String voice, Uint8List data) async {
+  static Future<void> put(String text, String voice, Uint8List data,
+      {void Function(String tag, String msg)? onLog}) async {
     try {
-      await _putInternal(text, voice, data).timeout(const Duration(seconds: 2));
-    } catch (_) {}
+      await _putInternal(text, voice, data, onLog: onLog)
+          .timeout(const Duration(seconds: 2));
+      onLog?.call('📁 [CACHE-PUT]', '캐시 파일 쓰기 완료 (${data.length}B)');
+    } catch (_) {
+      onLog?.call('📁 [CACHE-PUT]', '캐시 파일 쓰기 실패/타임아웃(무시)');
+    }
   }
 
-  static Future<void> _putInternal(
-      String text, String voice, Uint8List data) async {
-    final path = '${await _getDir()}/${_key(text, voice)}.mp3';
+  static Future<void> _putInternal(String text, String voice, Uint8List data,
+      {void Function(String tag, String msg)? onLog}) async {
+    final path = '${await _getDir(onLog: onLog)}/${_key(text, voice)}.mp3';
     await File(path).writeAsBytes(data);
   }
 
@@ -2529,8 +2596,10 @@ class TtsQueueManager {
   bool _isPlaying = false;
   Completer<void>? _completer;
   StreamSubscription? _completeSub;
+  StreamSubscription? _stateSub; // 🔬 [PERF-INSTRUMENT] 실제 playback 시작 감지
   final VoidCallback? onPlayStart;
   final VoidCallback? onQueueEmpty;
+  final void Function(String tag, String msg)? onLog;
 
   // AI 재생 대기 플래그 (유저 재생 중 또는 유저 재생 직후 안전 간격)
   bool _aiPaused = false;
@@ -2551,10 +2620,17 @@ class TtsQueueManager {
       _userQueue.isNotEmpty ||
       (!_aiPaused && _aiQueue.isNotEmpty);
 
-  TtsQueueManager({this.onPlayStart, this.onQueueEmpty}) {
+  TtsQueueManager({this.onPlayStart, this.onQueueEmpty, this.onLog}) {
     _completeSub = _player.onPlayerComplete.listen((_) {
       if (_completer != null && !_completer!.isCompleted) {
         _completer!.complete();
+      }
+    });
+    // 🔬 [PERF-INSTRUMENT] play() 호출 시각과 실제 재생 시작 시각의 간격 측정
+    _stateSub = _player.onPlayerStateChanged.listen((state) {
+      if (state == PlayerState.playing) {
+        onLog?.call('🔊 [TTS-PLAYBACK-START]',
+            '실제 playback 시작 (${_currentChunkIsUser ? "USER" : "AI"})');
       }
     });
   }
@@ -2648,8 +2724,12 @@ class TtsQueueManager {
               ? 'free_talk_user_tts_start'
               : 'free_talk_ai_tts_start');
         }
+        onLog?.call('🔊 [TTS-PLAYBACK-CALL]',
+            'play() 호출 (${_currentChunkIsUser ? "USER" : "AI"}, ${bytes.length}B)');
         await _player.play(BytesSource(bytes));
         await _completer!.future.timeout(estimatedDuration);
+        onLog?.call('🔊 [TTS-PLAYBACK-DONE]',
+            'playback 완료 (${_currentChunkIsUser ? "USER" : "AI"})');
         if (!TrialFlowState.instance.isTrial) {
           BillingTicker.instance.resumeFromActivity(_currentChunkIsUser
               ? 'free_talk_user_tts_end'
@@ -2697,6 +2777,7 @@ class TtsQueueManager {
   Future<void> dispose() async {
     stop();
     await _completeSub?.cancel();
+    await _stateSub?.cancel();
     await _player.dispose();
   }
 }
@@ -2758,7 +2839,7 @@ class ChunkedTtsFetcher {
     Uint8List result = Uint8List(0);
     try {
       // [1단계] 로컬 캐시 확인 (히트 시 result에 담고 finally에서 큐 적재)
-      final cached = await TtsCache.get(text, voice);
+      final cached = await TtsCache.get(text, voice, onLog: onLog);
       if (cached != null && cached.isNotEmpty) {
         result = cached;
         return;
@@ -2767,6 +2848,9 @@ class ChunkedTtsFetcher {
       // [2단계] API 호출 (5초 타임아웃, 최대 3회 시도) — TTS 지연 스파이크 대응
       for (int attempt = 0; attempt < 3; attempt++) {
         try {
+          final turnTagReq = isUser ? 'USER' : 'AI';
+          onLog?.call('🔊 [TTS-REQ-START]',
+              '[$turnTagReq] TTS 요청 시작 (attempt=${attempt + 1}/3) for "$text"');
           final res = await http
               .post(
                 Uri.parse('https://api.openai.com/v1/audio/speech'),
@@ -2784,6 +2868,8 @@ class ChunkedTtsFetcher {
               )
               .timeout(Duration(
                   seconds: kFreeTalkChunkTtsTimeoutLadderSec[attempt]));
+          onLog?.call('🔊 [TTS-REQ-RESP]',
+              '[$turnTagReq] 응답 수신 status=${res.statusCode} (${res.bodyBytes.length}B)');
 
           if (res.statusCode == 200) {
             result = res.bodyBytes;
@@ -2791,7 +2877,7 @@ class ChunkedTtsFetcher {
             onLog?.call('🔊 [TTS-02]',
                 '[$turnTag] API OK (${result.length}B) for "$text"');
             // [3단계] 캐시 저장 (백그라운드, await 없음)
-            unawaited(TtsCache.put(text, voice, result));
+            unawaited(TtsCache.put(text, voice, result, onLog: onLog));
             break;
           } else {
             onLog?.call('❌ [TTS-API-ERR]',
@@ -3139,6 +3225,52 @@ class HybridTtsPlayer {
 //   [Box 7-1-C] generateCleanOriginal   — AI original 생성 (오리지널 언어 자막)
 // ====================================================================
 class FreeTalkBrain {
+  // 번역 스트림 전용 shared client. 화면 수명과 분리해 Anyone 재진입 및 턴 간
+  // keep-alive 연결을 재사용한다. 실패한 client는 이후 요청에서 교체하고,
+  // 그 client를 사용 중인 요청이 모두 끝난 뒤에만 닫는다.
+  static http.Client _translationClient = http.Client();
+  static int _translationClientGeneration = 1;
+  static final Map<http.Client, int> _translationClientUsers = {};
+  static final Set<http.Client> _retiredTranslationClients = {};
+
+  static (http.Client, int) _acquireTranslationClient() {
+    final client = _translationClient;
+    _translationClientUsers[client] =
+        (_translationClientUsers[client] ?? 0) + 1;
+    return (client, _translationClientGeneration);
+  }
+
+  static void _retireTranslationClient(
+    http.Client failedClient,
+    void Function(String tag, String msg)? onLog,
+  ) {
+    if (identical(failedClient, _translationClient)) {
+      _translationClient = http.Client();
+      _translationClientGeneration++;
+      onLog?.call('🌐 [TR-CLIENT-RECOVER]',
+          '실패 client 교체 → generation=$_translationClientGeneration');
+    }
+    _retiredTranslationClients.add(failedClient);
+  }
+
+  static bool _releaseTranslationClient(
+    http.Client client,
+    void Function(String tag, String msg)? onLog,
+  ) {
+    final remaining = (_translationClientUsers[client] ?? 1) - 1;
+    if (remaining > 0) {
+      _translationClientUsers[client] = remaining;
+      return false;
+    }
+    _translationClientUsers.remove(client);
+    if (_retiredTranslationClients.remove(client)) {
+      client.close();
+      onLog?.call('🌐 [TR-CLIENT-CLOSE]', '실패한 shared client 지연 종료');
+      return true;
+    }
+    return false;
+  }
+
   // 🆕 [EXPAND-EXIT] 대화 전체(AI+유저) → 종합 확장 문장 1개 (의미단위 ~5개, 문법 연결)
   static Future<String?> generateExpandedFromConversation(
     String apiKey,
@@ -3286,8 +3418,11 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
     required String targetLang,
     required String contextStr,
     bool disableCorrection = false,
+    void Function(String tag, String msg)? onLog,
   }) async* {
-    final client = http.Client();
+    final (client, clientGeneration) = _acquireTranslationClient();
+    onLog?.call('🌐 [TR-CLIENT]',
+        'shared HTTP client 준비 generation=$clientGeneration (keep-alive 재사용)');
     try {
       final String correctionBlock = disableCorrection
           ? "Never output [CORRECTION] or [MISHEARD]. Treat the input as normal content to translate."
@@ -3375,13 +3510,17 @@ The particle before the verb's doer (이/가) is ALWAYS the subject. Never swap 
         ],
       });
 
+      onLog?.call('🌐 [TR-REQ-START]', 'HTTP 요청 시작');
       final response =
           await client.send(request).timeout(const Duration(seconds: 20));
+      onLog?.call('🌐 [TR-RESP]',
+          '응답 수신 status=${response.statusCode} headers=${response.headers.length}개');
       if (response.statusCode != 200) {
         yield '[EVAPORATE]';
         return;
       }
 
+      bool firstChunkLogged = false;
       await for (final chunk in response.stream
           .transform(utf8.decoder)
           .transform(const LineSplitter())) {
@@ -3389,14 +3528,27 @@ The particle before the verb's doer (이/가) is ALWAYS the subject. Never swap 
           try {
             final delta = jsonDecode(chunk.substring(6))['choices'][0]['delta']
                 ['content'];
-            if (delta != null) yield delta.toString();
+            if (delta != null) {
+              if (!firstChunkLogged) {
+                firstChunkLogged = true;
+                onLog?.call('🌐 [TR-FIRST-CHUNK]', '첫 stream chunk 수신');
+              }
+              yield delta.toString();
+            }
           } catch (_) {}
         }
       }
-    } catch (_) {
+      onLog?.call('🌐 [TR-STREAM-END]', 'SSE 스트림 종료');
+    } catch (e) {
+      _retireTranslationClient(client, onLog);
+      onLog?.call('🌐 [TR-ERROR]', '번역 요청 실패 generation=$clientGeneration: $e');
       yield '[EVAPORATE]';
     } finally {
-      client.close();
+      final closed = _releaseTranslationClient(client, onLog);
+      if (!closed) {
+        onLog?.call('🌐 [TR-CLIENT-CLOSE]',
+            '요청별 close 없음 (shared client 유지, generation=$clientGeneration)');
+      }
     }
   }
 

@@ -258,6 +258,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   @override
   void initState() {
     super.initState();
+    _restoreStoredScenarioBeforeFirstFrame();
     _ttsQueueManager = TtsQueueManager(onPlayStart: () {
       if (_swTTS.isRunning) {
         _swTTS.stop();
@@ -322,6 +323,20 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     await [Permission.microphone].request();
   }
 
+  /// 재입장 시 첫 프레임부터 완성된 시나리오 카드를 그려 레이아웃 점프를 막는다.
+  /// initState 안에서 호출되므로 setState 없이 로컬 필드만 동기화한다.
+  void _restoreStoredScenarioBeforeFirstFrame() {
+    if (_RoleplayScenarioStore.situation.isEmpty ||
+        _RoleplayScenarioStore.aiRole.isEmpty ||
+        _RoleplayScenarioStore.userRole.isEmpty) {
+      return;
+    }
+    _scenarioSituation = _RoleplayScenarioStore.situation;
+    _scenarioAiRole = _RoleplayScenarioStore.aiRole;
+    _scenarioUserRole = _RoleplayScenarioStore.userRole;
+    _scenarioKeyword = _RoleplayScenarioStore.situation;
+  }
+
   Future<void> _fetchKeysAndInit() async {
     try {
       await FirebaseRemoteConfig.instance.fetchAndActivate();
@@ -332,16 +347,9 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
           _openAiKey = FirebaseRemoteConfig.instance.getString('OpenAIAPIKey');
         });
         // 🛡️ [v4 가드] 세팅된 시나리오가 있으면 재진입 시 보존, 없으면 새 제안
-        if (_RoleplayScenarioStore.situation.isNotEmpty &&
-            _RoleplayScenarioStore.aiRole.isNotEmpty &&
-            _RoleplayScenarioStore.userRole.isNotEmpty) {
-          setState(() {
-            _scenarioSituation = _RoleplayScenarioStore.situation;
-            _scenarioAiRole = _RoleplayScenarioStore.aiRole;
-            _scenarioUserRole = _RoleplayScenarioStore.userRole;
-            _scenarioKeyword = _RoleplayScenarioStore.situation;
-          });
-        } else {
+        if (_scenarioSituation.isEmpty ||
+            _scenarioAiRole.isEmpty ||
+            _scenarioUserRole.isEmpty) {
           _generateScenario();
         }
       }
