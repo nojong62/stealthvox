@@ -66,8 +66,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   String? _sessionDocId; // 🔧 [v3 추가] 첫 대화 후 세션 ID (클론 변경 시 null 리셋)
   DocumentReference? _myHistoryRef; // 🔧 [히스토리] chat_history 문서 참조 (Duo 패턴)
   List<String> _lastExchangeMsgIds = []; // [??] ?? ?? messages docId
-  bool _showSeedHint = false; // 합성 문장 안내 말풍선 표시 여부
-  Timer? _seedHintTimer; // 합성 말풍선 3초 자동 숨김 타이머
 
   // ── Idle Timeout v2 ───────────────────────────────────────────────
   // 기준: "유저도 AI도 아무 작동이 없는 상태"가 연속 60초 지속되면 pause.
@@ -384,7 +382,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 
   @override
   void dispose() {
-    _seedHintTimer?.cancel();
     _clearIdleTimers();
     BillingTicker.instance.pause();
     _stopEverything();
@@ -724,16 +721,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     }
   }
 
-  // 합성 문장 안내 말풍선을 표시 후 3초 뒤 자동 숨김
-  void _showSeedHintBalloon() {
-    if (!mounted) return;
-    setState(() => _showSeedHint = true);
-    _seedHintTimer?.cancel();
-    _seedHintTimer = Timer(const Duration(seconds: 3), () {
-      if (mounted) setState(() => _showSeedHint = false);
-    });
-  }
-
   /// 세션 시작: 안내문 TTS만 재생하고 유저 기본 문장(seed) 대기
   Future<void> _startSessionWaitingForUserSeed() async {
     if (_openAiKey.isEmpty || !mounted) return;
@@ -941,10 +928,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   /// 세션 UI 리셋 (Firestore 저장은 이미 매 턴 완료됨)
   void _resetSession() {
     _stopEverything();
-    _seedHintTimer?.cancel();
     if (mounted) {
       setState(() {
-        _showSeedHint = false;
         _localMessages.clear();
         _turnCounter = 0;
         _sessionDocId = null;
@@ -3161,7 +3146,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
               child: Stack(children: [
                 _buildChatList(),
                 _buildIdleOverlay(),
-                _buildSeedHintBalloon(),
               ]),
             ),
             _buildControlArea(bottomPad),
@@ -3485,55 +3469,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
                   height: 1.6),
             ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildSeedHintBalloon() {
-    return Positioned(
-      top: 8,
-      left: 24,
-      right: 24,
-      child: IgnorePointer(
-        ignoring: !_showSeedHint,
-        child: AnimatedOpacity(
-          opacity: _showSeedHint ? 1.0 : 0.0,
-          duration: const Duration(milliseconds: 300),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(
-              color: const Color(0xFF3B3B3D),
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.3),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: const Row(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.lightbulb_outline,
-                    color: Color(0xFFFBBF24), size: 16),
-                SizedBox(width: 6),
-                Flexible(
-                  child: Text(
-                    '질문과 다른 씨앗 문장을 말씀하셔도 됩니다.',
-                    style: TextStyle(
-                      color: Color(0xFFFBBF24),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
       ),
     );
   }
