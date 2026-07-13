@@ -713,7 +713,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                                             appState.nativeLang,
                                             (val) => setState(() =>
                                                 appState.nativeLang = val!),
-                                            labelColor: const Color(0xFF93C5FD),
+                                            labelColor: const Color(0xFF4ADE80),
                                             subtitle: "(My Language)",
                                             subtitleBelow: false),
                                         const SizedBox(height: 20),
@@ -736,7 +736,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                                         const SizedBox(height: 32),
                                         const Text("AI STYLE",
                                             style: TextStyle(
-                                                color: Colors.white54,
+                                                color: Color(0xFF4ADE80),
                                                 fontSize: 12,
                                                 letterSpacing: 1,
                                                 fontWeight: FontWeight.bold)),
@@ -751,7 +751,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                                         const SizedBox(height: 32),
                                         const Text("AI TONE",
                                             style: TextStyle(
-                                                color: Colors.white54,
+                                                color: Color(0xFF4ADE80),
                                                 fontSize: 12,
                                                 letterSpacing: 1,
                                                 fontWeight: FontWeight.bold)),
@@ -765,7 +765,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                                         const SizedBox(height: 32),
                                         const Text("MY VOICE",
                                             style: TextStyle(
-                                                color: Colors.white54,
+                                                color: Color(0xFF4ADE80),
                                                 fontSize: 12,
                                                 letterSpacing: 1,
                                                 fontWeight: FontWeight.bold)),
