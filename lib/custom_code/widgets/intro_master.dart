@@ -107,19 +107,25 @@ class _IntroMasterState extends State<IntroMaster> {
     }
   }
 
-  // 키보드가 올라올 때 로그인 버튼이 보이도록 자동 스크롤
+  // 키보드가 올라올 때 포커스된 입력창이 보이도록 자동 스크롤
+  // (항상 맨 아래로 스크롤하면 비밀번호 칸이 화면 밖으로 밀려나 다시 끌어내려야 했음 →
+  //  포커스된 필드 자체를 기준으로 스크롤)
   void _onFocusChange() {
-    if (_emailFocusNode.hasFocus || _passwordFocusNode.hasFocus) {
-      Future.delayed(const Duration(milliseconds: 350), () {
-        if (mounted && _scrollController.hasClients) {
-          _scrollController.animateTo(
-            _scrollController.position.maxScrollExtent,
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOut,
-          );
-        }
-      });
-    }
+    final FocusNode? focused = _emailFocusNode.hasFocus
+        ? _emailFocusNode
+        : (_passwordFocusNode.hasFocus ? _passwordFocusNode : null);
+    if (focused == null) return;
+    Future.delayed(const Duration(milliseconds: 350), () {
+      final fieldContext = focused.context;
+      if (mounted && fieldContext != null) {
+        Scrollable.ensureVisible(
+          fieldContext,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+          alignment: 0.5,
+        );
+      }
+    });
   }
 
   @override
@@ -732,14 +738,14 @@ class _IntroMasterState extends State<IntroMaster> {
           const SizedBox(height: 34),
           // provider 버튼들 (재방문 시 이전 provider 강조)
           ..._buildProviderButtons(),
-          if (_validLastAuthProvider() == null) ...[
-            const SizedBox(height: 30),
-            _buildAccountDiscoveryEntrySection(),
-          ],
-          // 이메일 폼
+          // 이메일 폼 (이메일로 계속하기 버튼 바로 아래에 위치)
           if (_showEmailForm) ...[
             const SizedBox(height: 18),
             _buildEmailForm(isLogin: isLoginMode),
+          ],
+          if (_validLastAuthProvider() == null) ...[
+            const SizedBox(height: 30),
+            _buildAccountDiscoveryEntrySection(),
           ],
           const SizedBox(height: 32),
           // 약관 동의 인라인 텍스트
