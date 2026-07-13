@@ -27,6 +27,9 @@ class FFAppState extends ChangeNotifier {
       _tone = prefs.getString('ff_tone') ?? _tone;
     });
     _safeInit(() {
+      _aiStyle = prefs.getString('ff_aiStyle') ?? _aiStyle;
+    });
+    _safeInit(() {
       _aiVoice = prefs.getString('ff_aiVoice') ?? _aiVoice;
     });
     _safeInit(() {
@@ -138,6 +141,14 @@ class FFAppState extends ChangeNotifier {
   set tone(String value) {
     _tone = value;
     prefs.setString('ff_tone', value);
+  }
+
+  /// AI response style selected in the lobby.
+  String _aiStyle = 'Standard';
+  String get aiStyle => _aiStyle;
+  set aiStyle(String value) {
+    _aiStyle = value;
+    prefs.setString('ff_aiStyle', value);
   }
 
   /// 남은 시간 (초)

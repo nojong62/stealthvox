@@ -109,6 +109,10 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   void _initAppState() {
     if (FFAppState().tone == null || FFAppState().tone.isEmpty)
       setState(() => FFAppState().tone = "Casual");
+    if (!["Standard", "American", "British", "Native"]
+        .contains(FFAppState().aiStyle)) {
+      setState(() => FFAppState().aiStyle = "Standard");
+    }
     if (FFAppState().nativeLang == null || FFAppState().nativeLang.isEmpty)
       setState(() => FFAppState().nativeLang = "Korean");
     if (FFAppState().targetLang == null || FFAppState().targetLang.isEmpty)
@@ -547,6 +551,43 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                             fontWeight: FontWeight.bold))))));
   }
 
+  List<String> _availableAiStyles(String targetLanguage) =>
+      targetLanguage == 'English'
+          ? const ['Standard', 'American', 'British', 'Native']
+          : const ['Standard', 'Native'];
+
+  Widget _buildPillToggleGrid(
+    List<String> options,
+    String selectedValue,
+    ValueChanged<String> onSelected,
+  ) {
+    return Column(
+      children: [
+        for (var index = 0; index < options.length; index += 2) ...[
+          if (index > 0) const SizedBox(height: 12),
+          Row(
+            children: [
+              _buildPillToggle(
+                options[index],
+                selectedValue == options[index],
+                () => onSelected(options[index]),
+              ),
+              const SizedBox(width: 12),
+              if (index + 1 < options.length)
+                _buildPillToggle(
+                  options[index + 1],
+                  selectedValue == options[index + 1],
+                  () => onSelected(options[index + 1]),
+                )
+              else
+                const Spacer(),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+
   Widget _buildFooterLink(String label, VoidCallback onTap) {
     return TextButton(
       onPressed: onTap,
@@ -679,12 +720,34 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                                         _buildSleekLangSelector(
                                             "TARGET",
                                             appState.targetLang,
-                                            (val) => setState(() =>
-                                                appState.targetLang = val!),
+                                            (val) => setState(() {
+                                                  appState.targetLang = val!;
+                                                  if (!_availableAiStyles(val)
+                                                      .contains(
+                                                          appState.aiStyle)) {
+                                                    appState.aiStyle =
+                                                        'Standard';
+                                                  }
+                                                }),
                                             labelColor: const Color(0xFF4ADE80),
                                             subtitle:
                                                 "(Listening Language or Learning Language)",
                                             subtitleBelow: true),
+                                        const SizedBox(height: 32),
+                                        const Text("AI STYLE",
+                                            style: TextStyle(
+                                                color: Colors.white54,
+                                                fontSize: 12,
+                                                letterSpacing: 1,
+                                                fontWeight: FontWeight.bold)),
+                                        const SizedBox(height: 12),
+                                        _buildPillToggleGrid(
+                                          _availableAiStyles(
+                                              appState.targetLang),
+                                          appState.aiStyle,
+                                          (style) => setState(
+                                              () => appState.aiStyle = style),
+                                        ),
                                         const SizedBox(height: 32),
                                         const Text("AI TONE",
                                             style: TextStyle(
@@ -693,19 +756,12 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                                                 letterSpacing: 1,
                                                 fontWeight: FontWeight.bold)),
                                         const SizedBox(height: 12),
-                                        Row(children: [
-                                          _buildPillToggle(
-                                              "Formal",
-                                              appState.tone == "Formal",
-                                              () => setState(() =>
-                                                  appState.tone = "Formal")),
-                                          const SizedBox(width: 12),
-                                          _buildPillToggle(
-                                              "Casual",
-                                              appState.tone == "Casual",
-                                              () => setState(() =>
-                                                  appState.tone = "Casual"))
-                                        ]),
+                                        _buildPillToggleGrid(
+                                          const ["Formal", "Casual"],
+                                          appState.tone,
+                                          (tone) => setState(
+                                              () => appState.tone = tone),
+                                        ),
                                         const SizedBox(height: 32),
                                         const Text("MY VOICE",
                                             style: TextStyle(
