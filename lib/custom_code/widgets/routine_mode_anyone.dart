@@ -1932,83 +1932,118 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           IconButton(
-              icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                  color: Colors.white70),
-              onPressed: _handleAutoSaveAndExit), // 🔧 [히스토리] AutoSave 연결
-          Row(children: [
-            // 🆕 [Anyone] 이용방법 말풍선 토글
-            IconButton(
-              icon: const Icon(Icons.help_outline,
-                  color: Colors.amberAccent, size: 22),
-              onPressed: () =>
-                  setState(() => _showUsageGuide = !_showUsageGuide),
+            icon: const Icon(
+              Icons.arrow_back_ios_new_rounded,
+              color: Colors.white70,
             ),
-            IconButton(
-              icon: Icon(
-                Icons.format_size,
-                color: _fontScale > 1.0
-                    ? const Color(0xFFFBBF24)
-                    : _fontScale < 1.0
-                        ? Colors.white38
-                        : Colors.white70,
-                size: 22,
-              ),
-              onPressed: () => setState(() {
-                _fontScale = _fontScale == 1.0
-                    ? 1.3
-                    : _fontScale == 1.3
-                        ? 0.8
-                        : 1.0;
-              }),
-            ),
-            IconButton(
-              icon: CustomPaint(
-                size: const Size(26, 26),
-                painter: _LangIconPainter(active: _showOriginal),
-              ),
-              onPressed: () => setState(() => _showOriginal = !_showOriginal),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-            ),
-            const SizedBox(width: 8),
-            // [v3.6] 잔여시간 표시 + 길게 누르면 로그 (개발자용)
-            GestureDetector(
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                    color: const Color(0xFF2563EB),
-                    borderRadius: BorderRadius.circular(20)),
-                child: Row(children: [
-                  ValueListenableBuilder<int>(
-                    valueListenable: BillingTicker.instance.billingState,
-                    builder: (_, s, __) => GestureDetector(
-                      onTap: s == 0 ? _resetIdleTimer : null,
-                      child: CustomPaint(
-                        size: const Size(14, 14),
-                        painter: BillingDotPainter(s),
+            onPressed: _handleAutoSaveAndExit,
+          ),
+          Expanded(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                // 🆕 [Anyone] 이용방법 말풍선 토글
+                IconButton(
+                  icon: const Icon(
+                    Icons.help_outline,
+                    color: Colors.amberAccent,
+                    size: 22,
+                  ),
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 40, minHeight: 40),
+                  onPressed: () =>
+                      setState(() => _showUsageGuide = !_showUsageGuide),
+                ),
+                IconButton(
+                  icon: Icon(
+                    Icons.format_size,
+                    color: _fontScale > 1.0
+                        ? const Color(0xFFFBBF24)
+                        : _fontScale < 1.0
+                            ? Colors.white38
+                            : Colors.white70,
+                    size: 22,
+                  ),
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 40, minHeight: 40),
+                  onPressed: () => setState(() {
+                    _fontScale = _fontScale == 1.0
+                        ? 1.3
+                        : _fontScale == 1.3
+                            ? 0.8
+                            : 1.0;
+                  }),
+                ),
+                IconButton(
+                  icon: CustomPaint(
+                    size: const Size(26, 26),
+                    painter: _LangIconPainter(active: _showOriginal),
+                  ),
+                  onPressed: () =>
+                      setState(() => _showOriginal = !_showOriginal),
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 36, minHeight: 36),
+                ),
+                const SizedBox(width: 4),
+                // [v3.6] 좁은 화면/큰 글꼴에서도 상단 Row가 넘치지 않도록 축소 허용
+                Flexible(
+                  child: GestureDetector(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF2563EB),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            ValueListenableBuilder<int>(
+                              valueListenable:
+                                  BillingTicker.instance.billingState,
+                              builder: (_, s, __) => GestureDetector(
+                                onTap: s == 0 ? _resetIdleTimer : null,
+                                child: CustomPaint(
+                                  size: const Size(14, 14),
+                                  painter: BillingDotPainter(s),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              () {
+                                final int s =
+                                    (FFAppState().remainingTime)
+                                        .toInt()
+                                        .clamp(0, 999999);
+                                final int h = s ~/ 3600;
+                                final int m = (s % 3600) ~/ 60;
+                                return '${h.toString().padLeft(2, '0')}:'
+                                    '${m.toString().padLeft(2, '0')}';
+                              }(),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 6),
-                  Text(
-                    () {
-                      final int s =
-                          (FFAppState().remainingTime).toInt().clamp(0, 999999);
-                      final int h = s ~/ 3600;
-                      final int m = (s % 3600) ~/ 60;
-                      return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
-                    }(),
-                    style: const TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.bold),
-                  ),
-                ]),
-              ),
+                ),
+              ],
             ),
-          ]),
+          ),
         ],
       ),
     );
