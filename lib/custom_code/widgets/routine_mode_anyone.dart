@@ -44,7 +44,9 @@ import 'trial/trial_anyone_timer_mixin.dart';
 import 'trial/learning_prep_overlay.dart';
 import 'trial/trial_study_page.dart';
 
-const int kFreeTalkCommitWaitMs = 900;
+const int kFreeTalkCommitWaitMs = 900; // speech_final 경로: 안전값 유지
+const int kFreeTalkCommitWaitUncertainMs =
+    500; // UtteranceEnd 경로: 이미 utterance_end_ms 침묵 확인됨 → 짧게
 const int kFreeTalkDeepgramEndpointingMs = 700;
 const int kFreeTalkDeepgramUtteranceEndMs =
     1000; // Deepgram minimum allowed value; 900 returns HTTP 400.
@@ -165,11 +167,14 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   // ─────────────────────────────────────────────────────────────────────────
 
   // 🔧 [v3.4 발화 합치기] 유저 더듬거림 대응
-  // speech_final 받아도 바로 파이프라인 시작 안 하고 900ms 대기
+  // 이벤트 종류에 따라 조건부 대기: speech_final=900ms, UtteranceEnd=500ms
   // 대기 중 새 발화 오면 합쳐서 처리 (최종 한 덩어리로)
   String _pendingTranscript = ''; // 대기 중인 유저 발화 누적
   Timer? _commitTimer; // "진짜 끝났는지" 확정 타이머
-  static const int COMMIT_WAIT_MS = kFreeTalkCommitWaitMs; // 발화 합치기 대기 시간
+  static const int COMMIT_WAIT_SPEECH_FINAL_MS =
+      kFreeTalkCommitWaitMs; // speech_final: 900ms
+  static const int COMMIT_WAIT_UNCERTAIN_MS =
+      kFreeTalkCommitWaitUncertainMs; // UtteranceEnd: 500ms
   // 📦 [Meaning Confidence Probe] Measurement-only state.
   // Never use these values to branch UI, History, Turn, GPT, TTS, or microphone flow.
   static const String _probeMode = 'ANYONE';
@@ -630,7 +635,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           _swDeepgram.start();
         },
         onTurnResult: _onDeepgramTurnResult,
-        onTurnEnded: (transcript) {
+        onTurnEnded: (transcript, {bool speechFinal = false}) {
           if (!TrialFlowState.instance.isTrial) {
             BillingTicker.instance.resumeFromActivity('free_talk_stt_result');
           }
@@ -638,9 +643,11 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
             _log('🎤 [LISTEN-STALE]', 'onTurnEnded ignored');
             return;
           }
-          _log('🔀 [LISTEN-03]', 'onTurnEnded 콜백 수신: "$transcript"');
+          _log('🔀 [LISTEN-03]',
+              'onTurnEnded 콜백 수신: "$transcript" speechFinal=$speechFinal');
           _swDeepgram.stop();
-          _stopMicAndProcess(transcript);
+          // source(speechFinal)를 인자로 직접 전달 → 비동기 다음 이벤트에 상태값이 덮이는 위험 제거
+          _stopMicAndProcess(transcript, speechFinal: speechFinal);
         },
         onError: (err) {
           if (!isCurrentGeneration()) {
@@ -683,12 +690,18 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     }
   }
 
-  // 🔧 [v3.4] Deepgram speech_final 수신 시 호출됨
-  // 1.2초 대기창 안에서 추가 발화 합치기 → 완전히 끝나면 파이프라인 시작
-  void _stopMicAndProcess(String transcript) async {
+  // 🔧 [v3.4] Deepgram speech_final / UtteranceEnd 수신 시 호출됨
+  // 조건부 대기창(speech_final=900ms, UtteranceEnd=500ms) 안에서 추가 발화 합치기
+  // → 완전히 끝나면 파이프라인 시작
+  // speechFinal은 인자로 직접 받아 이 함수 안에서만 사용 (상태 필드 미사용)
+  void _stopMicAndProcess(String transcript, {bool speechFinal = false}) async {
     _resetIdleTimer();
     final clean = transcript.trim();
-    _log('🔀 [STOP-01]', 'speech_final 수신: "$clean" (len=${clean.length})');
+    final source = speechFinal ? 'speech_final' : 'utterance_end';
+    final waitMs =
+        speechFinal ? COMMIT_WAIT_SPEECH_FINAL_MS : COMMIT_WAIT_UNCERTAIN_MS;
+    _log('🔀 [STOP-01]',
+        '$source 수신: "$clean" (len=${clean.length}) waitMs=$waitMs');
 
     if (clean.length < 2) {
       _log('🔀 [STOP-02]', '너무 짧음 → 무시');
@@ -698,10 +711,12 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     // 🔧 기존 대기 중인 발화가 있으면 공백으로 연결 (더듬거림 합치기)
     if (_pendingTranscript.isEmpty) {
       _pendingTranscript = clean;
-      _log('🔀 [STOP-03]', '신규 발화 접수. 900ms 대기창 시작');
+      _log('🔀 [STOP-03]',
+          '신규 발화 접수. ${waitMs}ms 대기창 시작 (source=$source)');
     } else {
       _pendingTranscript = '$_pendingTranscript $clean';
-      _log('🔀 [STOP-04]', '합치기: "$_pendingTranscript" (900ms 대기창 리셋)');
+      _log('🔀 [STOP-04]',
+          '합치기: "$_pendingTranscript" (${waitMs}ms 대기창 리셋, source=$source)');
     }
 
     // UI: 접수된 발화를 HOST_TEMP 풍선에 실시간 반영
@@ -720,9 +735,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     // 기존 타이머 취소 (새 발화가 왔으므로 대기창 리셋)
     _commitTimer?.cancel();
 
-    // 900ms 후 파이프라인 시작 예약
+    // 조건부 대기 후 파이프라인 시작 예약 (source별 waitMs)
     _commitTimer = Timer(
-      const Duration(milliseconds: COMMIT_WAIT_MS),
+      Duration(milliseconds: waitMs),
       () => _commitAndProcess(),
     );
   }
@@ -2284,7 +2299,7 @@ class DeepgramV2VoiceManager {
   final String langCode;
   final VoidCallback onConnected;
   final Function(String) onTranscriptUpdate;
-  final Function(String) onTurnEnded;
+  final void Function(String, {bool speechFinal}) onTurnEnded;
   final Function(DeepgramTurnResult)? onTurnResult;
   final Function(String) onError;
   final Function(int)? onReconnecting; // 재연결 시도 알림 (선택적)
@@ -2440,7 +2455,7 @@ class DeepgramV2VoiceManager {
     if (_isDisposed || finalText.isEmpty) return;
     _lg('📡 [DG-TURN-RESULT]',
         'source=$source words=${result.words.length} finalChunks=${result.chunkTranscriptConfidences.length}');
-    onTurnEnded(finalText);
+    onTurnEnded(finalText, speechFinal: source == 'speech_final');
     if (!_isDisposed) onTurnResult?.call(result);
   }
   void _handleMessage(dynamic msg) {
@@ -3118,7 +3133,8 @@ class RelayPipeline {
     _isSpeaking = false;
   }
 
-  Future<void> _onUserTurnEnded(String userText) async {
+  Future<void> _onUserTurnEnded(String userText,
+      {bool speechFinal = false}) async {
     // 💡 AI가 말하는 중에 유저가 말하면 즉시 중단
     if (_isSpeaking) interruptAi();
 
