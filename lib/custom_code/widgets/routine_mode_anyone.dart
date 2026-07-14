@@ -38,12 +38,15 @@ import 'package:path_provider/path_provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
+import 'deepgram_confidence_probe.dart';
 import 'trial/trial_flow_state.dart';
 import 'trial/trial_anyone_timer_mixin.dart';
 import 'trial/learning_prep_overlay.dart';
 import 'trial/trial_study_page.dart';
 
-const int kFreeTalkCommitWaitMs = 900;
+const int kFreeTalkCommitWaitMs = 900; // speech_final 경로: 안전값 유지
+const int kFreeTalkCommitWaitUncertainMs =
+    500; // UtteranceEnd 경로: 이미 utterance_end_ms 침묵 확인됨 → 짧게
 const int kFreeTalkDeepgramEndpointingMs = 700;
 const int kFreeTalkDeepgramUtteranceEndMs =
     1000; // Deepgram minimum allowed value; 900 returns HTTP 400.
@@ -164,11 +167,21 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   // ─────────────────────────────────────────────────────────────────────────
 
   // 🔧 [v3.4 발화 합치기] 유저 더듬거림 대응
-  // speech_final 받아도 바로 파이프라인 시작 안 하고 900ms 대기
+  // 이벤트 종류에 따라 조건부 대기: speech_final=900ms, UtteranceEnd=500ms
   // 대기 중 새 발화 오면 합쳐서 처리 (최종 한 덩어리로)
   String _pendingTranscript = ''; // 대기 중인 유저 발화 누적
   Timer? _commitTimer; // "진짜 끝났는지" 확정 타이머
-  static const int COMMIT_WAIT_MS = kFreeTalkCommitWaitMs; // 발화 합치기 대기 시간
+  static const int COMMIT_WAIT_SPEECH_FINAL_MS =
+      kFreeTalkCommitWaitMs; // speech_final: 900ms
+  static const int COMMIT_WAIT_UNCERTAIN_MS =
+      kFreeTalkCommitWaitUncertainMs; // UtteranceEnd: 500ms
+  // 📦 [Meaning Confidence Probe] Measurement-only state.
+  // Never use these values to branch UI, History, Turn, GPT, TTS, or microphone flow.
+  static const String _probeMode = 'ANYONE';
+  final List<DeepgramTurnResult> _pendingDeepgramResults = [];
+  DateTime? _activeProbeDgFinalAt;
+  bool _awaitingAiFirstTextProbe = false;
+  bool _awaitingAiFirstAudioProbe = false;
   void _log(String tag, String msg) {
     final ts = DateTime.now().toIso8601String().substring(11, 23);
     final line = '[$ts] $tag $msg';
@@ -176,6 +189,66 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     AppLogLedger.instance.add('FREETALK', '$tag $msg');
   }
 
+  void _onDeepgramTurnResult(DeepgramTurnResult result) {
+    if (result.transcript.trim().length < 2) return;
+    _pendingDeepgramResults.add(result);
+    _log(
+      '⏱️ [DG_FINAL]',
+      'mode=$_probeMode words=${result.words.length} '
+          'finalChunks=${result.chunkTranscriptConfidences.length}',
+    );
+  }
+
+  void _runMeaningProbe(String committedTranscript) {
+    _log('⏱️ [MEANING_PROBE_START]', 'mode=$_probeMode');
+    final probeStopwatch = Stopwatch()..start();
+    final hadDeepgramResult = _pendingDeepgramResults.isNotEmpty;
+    final turn = DeepgramTurnResult.merge(
+      transcript: committedTranscript,
+      results: List<DeepgramTurnResult>.from(_pendingDeepgramResults),
+    );
+    _pendingDeepgramResults.clear();
+    final nativeLanguage =
+        FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
+    final languageCode = _mapLanguageToCode(nativeLanguage);
+    // Decision/classification logic always runs (keeps the probe pathway live).
+    final probe = DeepgramConfidenceProbe.evaluate(
+      turn,
+      languageCode: languageCode,
+    );
+    probeStopwatch.stop();
+    _activeProbeDgFinalAt = hadDeepgramResult ? turn.finalizedAt : null;
+    final meaningProbeMs =
+        (probeStopwatch.elapsedMicroseconds / 1000).toStringAsFixed(3);
+    // Verbose line carries the transcript + per-word confidence (PII):
+    // debug builds or --dart-define=PROBE_DIAGNOSTICS=true only.
+    if (DeepgramConfidenceProbe.detailedLoggingEnabled) {
+      final formattedProbe = DeepgramConfidenceProbe.formatLog(
+        mode: _probeMode,
+        languageCode: languageCode,
+        turn: turn,
+        probe: probe,
+      );
+      _log(
+        '📊 [MEANING-PROBE]',
+        '$formattedProbe meaningProbeMs=$meaningProbeMs',
+      );
+    }
+    _log(
+      '⏱️ [MEANING_PROBE_END]',
+      'mode=$_probeMode meaningProbeMs=$meaningProbeMs',
+    );
+  }
+
+  void _logProbeTiming(String event) {
+    final dgFinalAt = _activeProbeDgFinalAt;
+    if (dgFinalAt == null) return;
+    final elapsed = DateTime.now().difference(dgFinalAt).inMilliseconds;
+    _log(
+      '⏱️ [PERF-PROBE]',
+      'mode=$_probeMode event=$event DG_FINAL_TO_$event=${elapsed < 0 ? 0 : elapsed}',
+    );
+  }
   // 🌐 [v3.1] 로비에서 선택한 언어 이름 → Deepgram/OpenAI 언어 코드 매핑
   String _mapLanguageToCode(String lang) {
     switch (lang.trim().toLowerCase()) {
@@ -240,6 +313,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   void initState() {
     super.initState();
     _ttsQueueManager = TtsQueueManager(onPlayStart: () {
+      if (_awaitingAiFirstAudioProbe) {
+        _awaitingAiFirstAudioProbe = false;
+        _logProbeTiming('AI_FIRST_AUDIO');
+      }
       if (_swTTS.isRunning) {
         _swTTS.stop();
         if (mounted) {
@@ -429,6 +506,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     _commitTimer?.cancel(); // 🔧 [v3.4] 대기 중 타이머 정리
     _commitTimer = null;
     _pendingTranscript = ''; // 대기 중 발화도 버림
+    _pendingDeepgramResults.clear();
+    _activeProbeDgFinalAt = null;
+    _awaitingAiFirstTextProbe = false;
+    _awaitingAiFirstAudioProbe = false;
     _voiceManager?.dispose();
     _voiceManager = null;
     _ttsQueueManager.stop();
@@ -558,7 +639,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           _swDeepgram.reset();
           _swDeepgram.start();
         },
-        onTurnEnded: (transcript) {
+        onTurnResult: _onDeepgramTurnResult,
+        onTurnEnded: (transcript, {bool speechFinal = false}) {
           if (!TrialFlowState.instance.isTrial) {
             BillingTicker.instance.resumeFromActivity('free_talk_stt_result');
           }
@@ -566,9 +648,11 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
             _log('🎤 [LISTEN-STALE]', 'onTurnEnded ignored');
             return;
           }
-          _log('🔀 [LISTEN-03]', 'onTurnEnded 콜백 수신: "$transcript"');
+          _log('🔀 [LISTEN-03]',
+              'onTurnEnded 콜백 수신: "$transcript" speechFinal=$speechFinal');
           _swDeepgram.stop();
-          _stopMicAndProcess(transcript);
+          // source(speechFinal)를 인자로 직접 전달 → 비동기 다음 이벤트에 상태값이 덮이는 위험 제거
+          _stopMicAndProcess(transcript, speechFinal: speechFinal);
         },
         onError: (err) {
           if (!isCurrentGeneration()) {
@@ -611,12 +695,18 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     }
   }
 
-  // 🔧 [v3.4] Deepgram speech_final 수신 시 호출됨
-  // 1.2초 대기창 안에서 추가 발화 합치기 → 완전히 끝나면 파이프라인 시작
-  void _stopMicAndProcess(String transcript) async {
+  // 🔧 [v3.4] Deepgram speech_final / UtteranceEnd 수신 시 호출됨
+  // 조건부 대기창(speech_final=900ms, UtteranceEnd=500ms) 안에서 추가 발화 합치기
+  // → 완전히 끝나면 파이프라인 시작
+  // speechFinal은 인자로 직접 받아 이 함수 안에서만 사용 (상태 필드 미사용)
+  void _stopMicAndProcess(String transcript, {bool speechFinal = false}) async {
     _resetIdleTimer();
     final clean = transcript.trim();
-    _log('🔀 [STOP-01]', 'speech_final 수신: "$clean" (len=${clean.length})');
+    final source = speechFinal ? 'speech_final' : 'utterance_end';
+    final waitMs =
+        speechFinal ? COMMIT_WAIT_SPEECH_FINAL_MS : COMMIT_WAIT_UNCERTAIN_MS;
+    _log('🔀 [STOP-01]',
+        '$source 수신: "$clean" (len=${clean.length}) waitMs=$waitMs');
 
     if (clean.length < 2) {
       _log('🔀 [STOP-02]', '너무 짧음 → 무시');
@@ -626,10 +716,12 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     // 🔧 기존 대기 중인 발화가 있으면 공백으로 연결 (더듬거림 합치기)
     if (_pendingTranscript.isEmpty) {
       _pendingTranscript = clean;
-      _log('🔀 [STOP-03]', '신규 발화 접수. 900ms 대기창 시작');
+      _log('🔀 [STOP-03]',
+          '신규 발화 접수. ${waitMs}ms 대기창 시작 (source=$source)');
     } else {
       _pendingTranscript = '$_pendingTranscript $clean';
-      _log('🔀 [STOP-04]', '합치기: "$_pendingTranscript" (900ms 대기창 리셋)');
+      _log('🔀 [STOP-04]',
+          '합치기: "$_pendingTranscript" (${waitMs}ms 대기창 리셋, source=$source)');
     }
 
     // UI: 접수된 발화를 HOST_TEMP 풍선에 실시간 반영
@@ -648,9 +740,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     // 기존 타이머 취소 (새 발화가 왔으므로 대기창 리셋)
     _commitTimer?.cancel();
 
-    // 900ms 후 파이프라인 시작 예약
+    // 조건부 대기 후 파이프라인 시작 예약 (source별 waitMs)
     _commitTimer = Timer(
-      const Duration(milliseconds: COMMIT_WAIT_MS),
+      Duration(milliseconds: waitMs),
       () => _commitAndProcess(),
     );
   }
@@ -674,6 +766,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     _voiceManager = null;
     _log('🔀 [COMMIT-02]', 'VoiceManager dispose 완료');
 
+    _runMeaningProbe(committed);
     _log('🔀 [COMMIT-03]', '_processRelayPipeline 호출');
     _processRelayPipeline(committed);
   }
@@ -732,6 +825,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
   Future<void> _processRelayPipeline(String finalTranscript,
       {bool isCorrectionRetry = false}) async {
+    _logProbeTiming('PIPELINE_START');
     _resetIdleTimer();
     _turnCounter++;
     final int currentTurnId = _turnCounter;
@@ -1266,6 +1360,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       _swTTS.reset();
 
       _log('🧠 [PIPE-02]', 'AI 스트림 요청: userText="$userTargetText"');
+      _logProbeTiming('AI_REQUEST');
+      _awaitingAiFirstTextProbe = true;
 
       final aiStream = FreeTalkBrain.streamFreeTalkResponse(
         apiKey: _openAiKey,
@@ -1279,6 +1375,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       bool _firstAiChunkLogged = false;
       final Future<void> aiGenerationTask = () async {
         await for (String chunk in aiStream) {
+          if (_awaitingAiFirstTextProbe && chunk.trim().isNotEmpty) {
+            _awaitingAiFirstTextProbe = false;
+            _logProbeTiming('AI_FIRST_TEXT');
+          }
           if (!_firstAiChunkLogged) {
             _log('🧠 [PIPE-03]', 'GPT 첫 청크 수신: "$chunk"');
             _firstAiChunkLogged = true;
@@ -1375,6 +1475,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
       // 턴 전환
       _ttsQueueManager.setUserTurn(false);
+      _awaitingAiFirstAudioProbe = true;
       _ttsQueueManager.setAiPaused(false);
       _log('🧠 [PIPE-07]', 'setUserTurn(false) + setAiPaused(false). AI 재생 시작');
       // [v3.6] PIPE-07 시점: 버퍼된 AI 텍스트 일괄 표시 — 중앙 고정으로 안정적 표시
@@ -1851,83 +1952,118 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           IconButton(
-              icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                  color: Colors.white70),
-              onPressed: _handleAutoSaveAndExit), // 🔧 [히스토리] AutoSave 연결
-          Row(children: [
-            // 🆕 [Anyone] 이용방법 말풍선 토글
-            IconButton(
-              icon: const Icon(Icons.help_outline,
-                  color: Colors.amberAccent, size: 22),
-              onPressed: () =>
-                  setState(() => _showUsageGuide = !_showUsageGuide),
+            icon: const Icon(
+              Icons.arrow_back_ios_new_rounded,
+              color: Colors.white70,
             ),
-            IconButton(
-              icon: Icon(
-                Icons.format_size,
-                color: _fontScale > 1.0
-                    ? const Color(0xFFFBBF24)
-                    : _fontScale < 1.0
-                        ? Colors.white38
-                        : Colors.white70,
-                size: 22,
-              ),
-              onPressed: () => setState(() {
-                _fontScale = _fontScale == 1.0
-                    ? 1.3
-                    : _fontScale == 1.3
-                        ? 0.8
-                        : 1.0;
-              }),
-            ),
-            IconButton(
-              icon: CustomPaint(
-                size: const Size(26, 26),
-                painter: _LangIconPainter(active: _showOriginal),
-              ),
-              onPressed: () => setState(() => _showOriginal = !_showOriginal),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-            ),
-            const SizedBox(width: 8),
-            // [v3.6] 잔여시간 표시 + 길게 누르면 로그 (개발자용)
-            GestureDetector(
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                    color: const Color(0xFF2563EB),
-                    borderRadius: BorderRadius.circular(20)),
-                child: Row(children: [
-                  ValueListenableBuilder<int>(
-                    valueListenable: BillingTicker.instance.billingState,
-                    builder: (_, s, __) => GestureDetector(
-                      onTap: s == 0 ? _resetIdleTimer : null,
-                      child: CustomPaint(
-                        size: const Size(14, 14),
-                        painter: BillingDotPainter(s),
+            onPressed: _handleAutoSaveAndExit,
+          ),
+          Expanded(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                // 🆕 [Anyone] 이용방법 말풍선 토글
+                IconButton(
+                  icon: const Icon(
+                    Icons.help_outline,
+                    color: Colors.amberAccent,
+                    size: 22,
+                  ),
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 40, minHeight: 40),
+                  onPressed: () =>
+                      setState(() => _showUsageGuide = !_showUsageGuide),
+                ),
+                IconButton(
+                  icon: Icon(
+                    Icons.format_size,
+                    color: _fontScale > 1.0
+                        ? const Color(0xFFFBBF24)
+                        : _fontScale < 1.0
+                            ? Colors.white38
+                            : Colors.white70,
+                    size: 22,
+                  ),
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 40, minHeight: 40),
+                  onPressed: () => setState(() {
+                    _fontScale = _fontScale == 1.0
+                        ? 1.3
+                        : _fontScale == 1.3
+                            ? 0.8
+                            : 1.0;
+                  }),
+                ),
+                IconButton(
+                  icon: CustomPaint(
+                    size: const Size(26, 26),
+                    painter: _LangIconPainter(active: _showOriginal),
+                  ),
+                  onPressed: () =>
+                      setState(() => _showOriginal = !_showOriginal),
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 36, minHeight: 36),
+                ),
+                const SizedBox(width: 4),
+                // [v3.6] 좁은 화면/큰 글꼴에서도 상단 Row가 넘치지 않도록 축소 허용
+                Flexible(
+                  child: GestureDetector(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF2563EB),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            ValueListenableBuilder<int>(
+                              valueListenable:
+                                  BillingTicker.instance.billingState,
+                              builder: (_, s, __) => GestureDetector(
+                                onTap: s == 0 ? _resetIdleTimer : null,
+                                child: CustomPaint(
+                                  size: const Size(14, 14),
+                                  painter: BillingDotPainter(s),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              () {
+                                final int s =
+                                    (FFAppState().remainingTime)
+                                        .toInt()
+                                        .clamp(0, 999999);
+                                final int h = s ~/ 3600;
+                                final int m = (s % 3600) ~/ 60;
+                                return '${h.toString().padLeft(2, '0')}:'
+                                    '${m.toString().padLeft(2, '0')}';
+                              }(),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 6),
-                  Text(
-                    () {
-                      final int s =
-                          (FFAppState().remainingTime).toInt().clamp(0, 999999);
-                      final int h = s ~/ 3600;
-                      final int m = (s % 3600) ~/ 60;
-                      return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
-                    }(),
-                    style: const TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.bold),
-                  ),
-                ]),
-              ),
+                ),
+              ],
             ),
-          ]),
+          ),
         ],
       ),
     );
@@ -2168,7 +2304,8 @@ class DeepgramV2VoiceManager {
   final String langCode;
   final VoidCallback onConnected;
   final Function(String) onTranscriptUpdate;
-  final Function(String) onTurnEnded;
+  final void Function(String, {bool speechFinal}) onTurnEnded;
+  final Function(DeepgramTurnResult)? onTurnResult;
   final Function(String) onError;
   final Function(int)? onReconnecting; // 재연결 시도 알림 (선택적)
   final VoidCallback? onGaveUp; // 재연결 포기 알림 (선택적)
@@ -2179,6 +2316,8 @@ class DeepgramV2VoiceManager {
   StreamSubscription? _audioSub;
   StreamSubscription? _wsSub;
   String _currentTranscript = '';
+  final List<DeepgramWordResult> _finalWords = [];
+  final List<double> _chunkTranscriptConfidences = [];
   bool _isConnected = false;
   bool _isDisposed = false;
   int _retryCount = 0;
@@ -2191,6 +2330,7 @@ class DeepgramV2VoiceManager {
     required this.onConnected,
     required this.onTranscriptUpdate,
     required this.onTurnEnded,
+    this.onTurnResult,
     required this.onError,
     this.onReconnecting,
     this.onGaveUp,
@@ -2306,6 +2446,23 @@ class DeepgramV2VoiceManager {
     }
   }
 
+  void _emitTurnResult(String finalText, String source) {
+    final result = DeepgramTurnResult(
+      transcript: finalText,
+      words: List<DeepgramWordResult>.unmodifiable(_finalWords),
+      chunkTranscriptConfidences:
+          List<double>.unmodifiable(_chunkTranscriptConfidences),
+      finalizedAt: DateTime.now(),
+    );
+    _currentTranscript = '';
+    _finalWords.clear();
+    _chunkTranscriptConfidences.clear();
+    if (_isDisposed || finalText.isEmpty) return;
+    _lg('📡 [DG-TURN-RESULT]',
+        'source=$source words=${result.words.length} finalChunks=${result.chunkTranscriptConfidences.length}');
+    onTurnEnded(finalText, speechFinal: source == 'speech_final');
+    if (!_isDisposed) onTurnResult?.call(result);
+  }
   void _handleMessage(dynamic msg) {
     if (_isDisposed) return;
     try {
@@ -2322,22 +2479,20 @@ class DeepgramV2VoiceManager {
       // 이것도 speech_final과 동일하게 턴 종료로 취급
       if (data['type'] == 'UtteranceEnd') {
         final finalText = _currentTranscript.trim();
-        _currentTranscript = '';
         _lg('📡 [DG-UE]',
             'UtteranceEnd 이벤트 → onTurnEnded. finalText="$finalText"');
-        if (!_isDisposed && finalText.isNotEmpty) {
-          onTurnEnded(finalText);
-        }
+        _emitTurnResult(finalText, 'utterance_end');
         return;
       }
-
       final channel = data['channel'];
       if (channel == null) return;
 
       final alt = channel['alternatives'] as List?;
       if (alt == null || alt.isEmpty) return;
 
-      final chunk = (alt[0]['transcript'] as String?) ?? '';
+      final alternative = alt[0] as Map?;
+      if (alternative == null) return;
+      final chunk = (alternative['transcript'] as String?) ?? '';
       final isFinal = data['is_final'] == true;
       final speechFinal = data['speech_final'] == true;
 
@@ -2348,20 +2503,29 @@ class DeepgramV2VoiceManager {
 
       if (isFinal && chunk.isNotEmpty) {
         _currentTranscript += '$chunk ';
+        final rawChunkConfidence = alternative['confidence'];
+        if (rawChunkConfidence is num) {
+          _chunkTranscriptConfidences.add(rawChunkConfidence.toDouble());
+        }
+        final rawWords = alternative['words'] as List?;
+        if (rawWords != null) {
+          for (final rawWord in rawWords) {
+            final word = DeepgramWordResult.fromJson(rawWord);
+            if (word != null) _finalWords.add(word);
+          }
+        }
         if (!_isDisposed) onTranscriptUpdate(_currentTranscript);
       }
-
       if (speechFinal) {
         final finalText = _currentTranscript.trim();
-        _currentTranscript = '';
         _lg('📡 [DG-04]',
             'speech_final → onTurnEnded 호출 시도. finalText="$finalText"');
         if (!_isDisposed && finalText.isNotEmpty) {
           _lg('📡 [DG-05]', 'onTurnEnded 실제 호출');
-          onTurnEnded(finalText);
         } else {
           _lg('📡 [DG-06]', 'finalText 빈값 → onTurnEnded 스킵');
         }
+        _emitTurnResult(finalText, 'speech_final');
       }
     } catch (e) {
       _lg('❌ [DG-PARSE-ERR]', '_handleMessage 파싱 에러: $e');
@@ -2974,7 +3138,8 @@ class RelayPipeline {
     _isSpeaking = false;
   }
 
-  Future<void> _onUserTurnEnded(String userText) async {
+  Future<void> _onUserTurnEnded(String userText,
+      {bool speechFinal = false}) async {
     // 💡 AI가 말하는 중에 유저가 말하면 즉시 중단
     if (_isSpeaking) interruptAi();
 
