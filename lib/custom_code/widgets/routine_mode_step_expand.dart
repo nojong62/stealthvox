@@ -693,6 +693,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   }
 
   // 🆕 프리톡 기반 첫 질문을 AI 버블로 렌더 + 타겟 TTS 재생 (그래머 질문과 동일 패턴)
+  // [FIRST-MENT] 현재 첫 멘트는 고정 문구만 사용 → 미호출 상태로 보존.
+  // ignore: unused_element
   Future<void> _generateAndPlayFreeTalkSeedQuestion(
       List<String> snippets, List<String> roleplaySnippets) async {
     final String targetLangName = FFAppState().targetLang.isNotEmpty
@@ -819,13 +821,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     _log('[SEED-MIX]',
         'ft=${ftSnippets.length}, rp=${rpSnippets.length}, source=$_seedSource');
 
-    if ((ftSnippets.isNotEmpty || rpSnippets.isNotEmpty) &&
-        mounted &&
-        _isConversationActive) {
-      // 히스토리 기반 첫 질문 → "기본 문장 말하세요" 안내 생략
-      await _generateAndPlayFreeTalkSeedQuestion(ftSnippets, rpSnippets);
-    } else {
-      // 기존: 고정 안내 TTS
+    // 🔧 [FIRST-MENT] 히스토리 유무와 무관하게 항상 고정 첫 멘트 재생.
+    //    개인화 seed 질문 경로(_generateAndPlayFreeTalkSeedQuestion)는
+    //    사용하지 않지만, 추후 복구 대비로 메서드는 보존한다.
+    if (mounted && _isConversationActive) {
       final ChunkedTtsFetcher tts = ChunkedTtsFetcher(
         _openAiKey,
         _ttsQueueManager,
