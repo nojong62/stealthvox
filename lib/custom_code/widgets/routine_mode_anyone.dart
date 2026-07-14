@@ -38,6 +38,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
+import 'deepgram_confidence_probe.dart';
 import 'trial/trial_flow_state.dart';
 import 'trial/trial_anyone_timer_mixin.dart';
 import 'trial/learning_prep_overlay.dart';
@@ -169,6 +170,13 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   String _pendingTranscript = ''; // 대기 중인 유저 발화 누적
   Timer? _commitTimer; // "진짜 끝났는지" 확정 타이머
   static const int COMMIT_WAIT_MS = kFreeTalkCommitWaitMs; // 발화 합치기 대기 시간
+  // 📦 [Meaning Confidence Probe] Measurement-only state.
+  // Never use these values to branch UI, History, Turn, GPT, TTS, or microphone flow.
+  static const String _probeMode = 'ANYONE';
+  final List<DeepgramTurnResult> _pendingDeepgramResults = [];
+  DateTime? _activeProbeDgFinalAt;
+  bool _awaitingAiFirstTextProbe = false;
+  bool _awaitingAiFirstAudioProbe = false;
   void _log(String tag, String msg) {
     final ts = DateTime.now().toIso8601String().substring(11, 23);
     final line = '[$ts] $tag $msg';
@@ -176,6 +184,49 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     AppLogLedger.instance.add('FREETALK', '$tag $msg');
   }
 
+  void _onDeepgramTurnResult(DeepgramTurnResult result) {
+    if (result.transcript.trim().length < 2) return;
+    _pendingDeepgramResults.add(result);
+    _log(
+      '⏱️ [DG_FINAL]',
+      'mode=$_probeMode words=${result.words.length} '
+          'finalChunks=${result.chunkTranscriptConfidences.length}',
+    );
+  }
+
+  void _runMeaningProbe(String committedTranscript) {
+    final probeStopwatch = Stopwatch()..start();
+    _log('⏱️ [MEANING_PROBE_START]', 'mode=$_probeMode');
+    final hadDeepgramResult = _pendingDeepgramResults.isNotEmpty;
+    final turn = DeepgramTurnResult.merge(
+      transcript: committedTranscript,
+      results: List<DeepgramTurnResult>.from(_pendingDeepgramResults),
+    );
+    _pendingDeepgramResults.clear();
+    final probe = DeepgramConfidenceProbe.evaluate(turn);
+    probeStopwatch.stop();
+    _activeProbeDgFinalAt = hadDeepgramResult ? turn.finalizedAt : null;
+    _log(
+      '📊 [MEANING-PROBE]',
+      '${DeepgramConfidenceProbe.formatLog(mode: _probeMode, turn: turn, probe: probe)} '
+          'meaningProbeMs=${probeStopwatch.elapsedMicroseconds ~/ 1000}',
+    );
+    _log(
+      '⏱️ [MEANING_PROBE_END]',
+      'mode=$_probeMode meaningProbeMs='
+          '${probeStopwatch.elapsedMicroseconds ~/ 1000}',
+    );
+  }
+
+  void _logProbeTiming(String event) {
+    final dgFinalAt = _activeProbeDgFinalAt;
+    if (dgFinalAt == null) return;
+    final elapsed = DateTime.now().difference(dgFinalAt).inMilliseconds;
+    _log(
+      '⏱️ [PERF-PROBE]',
+      'mode=$_probeMode event=$event DG_FINAL_TO_$event=${elapsed < 0 ? 0 : elapsed}',
+    );
+  }
   // 🌐 [v3.1] 로비에서 선택한 언어 이름 → Deepgram/OpenAI 언어 코드 매핑
   String _mapLanguageToCode(String lang) {
     switch (lang.trim().toLowerCase()) {
@@ -240,6 +291,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   void initState() {
     super.initState();
     _ttsQueueManager = TtsQueueManager(onPlayStart: () {
+      if (_awaitingAiFirstAudioProbe) {
+        _awaitingAiFirstAudioProbe = false;
+        _logProbeTiming('AI_FIRST_AUDIO');
+      }
       if (_swTTS.isRunning) {
         _swTTS.stop();
         if (mounted) {
@@ -429,6 +484,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     _commitTimer?.cancel(); // 🔧 [v3.4] 대기 중 타이머 정리
     _commitTimer = null;
     _pendingTranscript = ''; // 대기 중 발화도 버림
+    _pendingDeepgramResults.clear();
+    _activeProbeDgFinalAt = null;
+    _awaitingAiFirstTextProbe = false;
+    _awaitingAiFirstAudioProbe = false;
     _voiceManager?.dispose();
     _voiceManager = null;
     _ttsQueueManager.stop();
@@ -558,6 +617,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           _swDeepgram.reset();
           _swDeepgram.start();
         },
+        onTurnResult: _onDeepgramTurnResult,
         onTurnEnded: (transcript) {
           if (!TrialFlowState.instance.isTrial) {
             BillingTicker.instance.resumeFromActivity('free_talk_stt_result');
@@ -674,6 +734,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     _voiceManager = null;
     _log('🔀 [COMMIT-02]', 'VoiceManager dispose 완료');
 
+    _runMeaningProbe(committed);
     _log('🔀 [COMMIT-03]', '_processRelayPipeline 호출');
     _processRelayPipeline(committed);
   }
@@ -732,6 +793,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
   Future<void> _processRelayPipeline(String finalTranscript,
       {bool isCorrectionRetry = false}) async {
+    _logProbeTiming('PIPELINE_START');
     _resetIdleTimer();
     _turnCounter++;
     final int currentTurnId = _turnCounter;
@@ -1266,6 +1328,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       _swTTS.reset();
 
       _log('🧠 [PIPE-02]', 'AI 스트림 요청: userText="$userTargetText"');
+      _logProbeTiming('AI_REQUEST');
+      _awaitingAiFirstTextProbe = true;
 
       final aiStream = FreeTalkBrain.streamFreeTalkResponse(
         apiKey: _openAiKey,
@@ -1279,6 +1343,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       bool _firstAiChunkLogged = false;
       final Future<void> aiGenerationTask = () async {
         await for (String chunk in aiStream) {
+          if (_awaitingAiFirstTextProbe && chunk.trim().isNotEmpty) {
+            _awaitingAiFirstTextProbe = false;
+            _logProbeTiming('AI_FIRST_TEXT');
+          }
           if (!_firstAiChunkLogged) {
             _log('🧠 [PIPE-03]', 'GPT 첫 청크 수신: "$chunk"');
             _firstAiChunkLogged = true;
@@ -1375,6 +1443,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
       // 턴 전환
       _ttsQueueManager.setUserTurn(false);
+      _awaitingAiFirstAudioProbe = true;
       _ttsQueueManager.setAiPaused(false);
       _log('🧠 [PIPE-07]', 'setUserTurn(false) + setAiPaused(false). AI 재생 시작');
       // [v3.6] PIPE-07 시점: 버퍼된 AI 텍스트 일괄 표시 — 중앙 고정으로 안정적 표시
@@ -2169,6 +2238,7 @@ class DeepgramV2VoiceManager {
   final VoidCallback onConnected;
   final Function(String) onTranscriptUpdate;
   final Function(String) onTurnEnded;
+  final Function(DeepgramTurnResult)? onTurnResult;
   final Function(String) onError;
   final Function(int)? onReconnecting; // 재연결 시도 알림 (선택적)
   final VoidCallback? onGaveUp; // 재연결 포기 알림 (선택적)
@@ -2179,6 +2249,8 @@ class DeepgramV2VoiceManager {
   StreamSubscription? _audioSub;
   StreamSubscription? _wsSub;
   String _currentTranscript = '';
+  final List<DeepgramWordResult> _finalWords = [];
+  final List<double> _chunkTranscriptConfidences = [];
   bool _isConnected = false;
   bool _isDisposed = false;
   int _retryCount = 0;
@@ -2191,6 +2263,7 @@ class DeepgramV2VoiceManager {
     required this.onConnected,
     required this.onTranscriptUpdate,
     required this.onTurnEnded,
+    this.onTurnResult,
     required this.onError,
     this.onReconnecting,
     this.onGaveUp,
@@ -2306,6 +2379,23 @@ class DeepgramV2VoiceManager {
     }
   }
 
+  void _emitTurnResult(String finalText, String source) {
+    final result = DeepgramTurnResult(
+      transcript: finalText,
+      words: List<DeepgramWordResult>.unmodifiable(_finalWords),
+      chunkTranscriptConfidences:
+          List<double>.unmodifiable(_chunkTranscriptConfidences),
+      finalizedAt: DateTime.now(),
+    );
+    _currentTranscript = '';
+    _finalWords.clear();
+    _chunkTranscriptConfidences.clear();
+    if (_isDisposed || finalText.isEmpty) return;
+    _lg('📡 [DG-TURN-RESULT]',
+        'source=$source words=${result.words.length} finalChunks=${result.chunkTranscriptConfidences.length}');
+    onTurnEnded(finalText);
+    if (!_isDisposed) onTurnResult?.call(result);
+  }
   void _handleMessage(dynamic msg) {
     if (_isDisposed) return;
     try {
@@ -2322,22 +2412,20 @@ class DeepgramV2VoiceManager {
       // 이것도 speech_final과 동일하게 턴 종료로 취급
       if (data['type'] == 'UtteranceEnd') {
         final finalText = _currentTranscript.trim();
-        _currentTranscript = '';
         _lg('📡 [DG-UE]',
             'UtteranceEnd 이벤트 → onTurnEnded. finalText="$finalText"');
-        if (!_isDisposed && finalText.isNotEmpty) {
-          onTurnEnded(finalText);
-        }
+        _emitTurnResult(finalText, 'utterance_end');
         return;
       }
-
       final channel = data['channel'];
       if (channel == null) return;
 
       final alt = channel['alternatives'] as List?;
       if (alt == null || alt.isEmpty) return;
 
-      final chunk = (alt[0]['transcript'] as String?) ?? '';
+      final alternative = alt[0] as Map?;
+      if (alternative == null) return;
+      final chunk = (alternative['transcript'] as String?) ?? '';
       final isFinal = data['is_final'] == true;
       final speechFinal = data['speech_final'] == true;
 
@@ -2348,20 +2436,29 @@ class DeepgramV2VoiceManager {
 
       if (isFinal && chunk.isNotEmpty) {
         _currentTranscript += '$chunk ';
+        final rawChunkConfidence = alternative['confidence'];
+        if (rawChunkConfidence is num) {
+          _chunkTranscriptConfidences.add(rawChunkConfidence.toDouble());
+        }
+        final rawWords = alternative['words'] as List?;
+        if (rawWords != null) {
+          for (final rawWord in rawWords) {
+            final word = DeepgramWordResult.fromJson(rawWord);
+            if (word != null) _finalWords.add(word);
+          }
+        }
         if (!_isDisposed) onTranscriptUpdate(_currentTranscript);
       }
-
       if (speechFinal) {
         final finalText = _currentTranscript.trim();
-        _currentTranscript = '';
         _lg('📡 [DG-04]',
             'speech_final → onTurnEnded 호출 시도. finalText="$finalText"');
         if (!_isDisposed && finalText.isNotEmpty) {
           _lg('📡 [DG-05]', 'onTurnEnded 실제 호출');
-          onTurnEnded(finalText);
         } else {
           _lg('📡 [DG-06]', 'finalText 빈값 → onTurnEnded 스킵');
         }
+        _emitTurnResult(finalText, 'speech_final');
       }
     } catch (e) {
       _lg('❌ [DG-PARSE-ERR]', '_handleMessage 파싱 에러: $e');
