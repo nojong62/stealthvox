@@ -195,26 +195,38 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   }
 
   void _runMeaningProbe(String committedTranscript) {
-    final probeStopwatch = Stopwatch()..start();
     _log('⏱️ [MEANING_PROBE_START]', 'mode=$_probeMode');
+    final probeStopwatch = Stopwatch()..start();
     final hadDeepgramResult = _pendingDeepgramResults.isNotEmpty;
     final turn = DeepgramTurnResult.merge(
       transcript: committedTranscript,
       results: List<DeepgramTurnResult>.from(_pendingDeepgramResults),
     );
     _pendingDeepgramResults.clear();
-    final probe = DeepgramConfidenceProbe.evaluate(turn);
+    final nativeLanguage =
+        FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
+    final languageCode = _mapLanguageToCode(nativeLanguage);
+    final probe = DeepgramConfidenceProbe.evaluate(
+      turn,
+      languageCode: languageCode,
+    );
+    final formattedProbe = DeepgramConfidenceProbe.formatLog(
+      mode: _probeMode,
+      languageCode: languageCode,
+      turn: turn,
+      probe: probe,
+    );
     probeStopwatch.stop();
     _activeProbeDgFinalAt = hadDeepgramResult ? turn.finalizedAt : null;
+    final meaningProbeMs =
+        (probeStopwatch.elapsedMicroseconds / 1000).toStringAsFixed(3);
     _log(
       '📊 [MEANING-PROBE]',
-      '${DeepgramConfidenceProbe.formatLog(mode: _probeMode, turn: turn, probe: probe)} '
-          'meaningProbeMs=${probeStopwatch.elapsedMicroseconds ~/ 1000}',
+      '$formattedProbe meaningProbeMs=$meaningProbeMs',
     );
     _log(
       '⏱️ [MEANING_PROBE_END]',
-      'mode=$_probeMode meaningProbeMs='
-          '${probeStopwatch.elapsedMicroseconds ~/ 1000}',
+      'mode=$_probeMode meaningProbeMs=$meaningProbeMs',
     );
   }
 
