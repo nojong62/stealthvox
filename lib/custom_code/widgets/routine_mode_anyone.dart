@@ -211,24 +211,29 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     final nativeLanguage =
         FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
     final languageCode = _mapLanguageToCode(nativeLanguage);
+    // Decision/classification logic always runs (keeps the probe pathway live).
     final probe = DeepgramConfidenceProbe.evaluate(
       turn,
       languageCode: languageCode,
-    );
-    final formattedProbe = DeepgramConfidenceProbe.formatLog(
-      mode: _probeMode,
-      languageCode: languageCode,
-      turn: turn,
-      probe: probe,
     );
     probeStopwatch.stop();
     _activeProbeDgFinalAt = hadDeepgramResult ? turn.finalizedAt : null;
     final meaningProbeMs =
         (probeStopwatch.elapsedMicroseconds / 1000).toStringAsFixed(3);
-    _log(
-      '📊 [MEANING-PROBE]',
-      '$formattedProbe meaningProbeMs=$meaningProbeMs',
-    );
+    // Verbose line carries the transcript + per-word confidence (PII):
+    // debug builds or --dart-define=PROBE_DIAGNOSTICS=true only.
+    if (DeepgramConfidenceProbe.detailedLoggingEnabled) {
+      final formattedProbe = DeepgramConfidenceProbe.formatLog(
+        mode: _probeMode,
+        languageCode: languageCode,
+        turn: turn,
+        probe: probe,
+      );
+      _log(
+        '📊 [MEANING-PROBE]',
+        '$formattedProbe meaningProbeMs=$meaningProbeMs',
+      );
+    }
     _log(
       '⏱️ [MEANING_PROBE_END]',
       'mode=$_probeMode meaningProbeMs=$meaningProbeMs',

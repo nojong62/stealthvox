@@ -3,6 +3,8 @@
 
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show kDebugMode;
+
 class DeepgramWordResult {
   const DeepgramWordResult(
       {required this.word,
@@ -129,6 +131,18 @@ class _ProbeTokenAssessment {
 
 class DeepgramConfidenceProbe {
   DeepgramConfidenceProbe._();
+
+  // The detailed probe log line exposes the user's full transcript and the
+  // per-word confidence distribution. That is diagnostic PII, so it must stay
+  // out of release logcat by default. The classification logic (evaluate) still
+  // runs unconditionally; only this verbose log line is gated.
+  //
+  // Enabled automatically in debug builds. To capture it from a release build
+  // for diagnosis, build with:  --dart-define=PROBE_DIAGNOSTICS=true
+  static const bool _diagnosticsOverride =
+      bool.fromEnvironment('PROBE_DIAGNOSTICS', defaultValue: false);
+  static bool get detailedLoggingEnabled =>
+      kDebugMode || _diagnosticsOverride;
 
   // Probe-only thresholds. They never control conversation behavior.
   static const double lowWordConfidenceThreshold = 0.65;
