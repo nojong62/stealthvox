@@ -775,7 +775,7 @@ class _IntroMasterState extends State<IntroMaster> {
         Divider(color: Colors.white.withValues(alpha: 0.12), height: 1),
         const SizedBox(height: 24),
         const Text(
-          'StealthVox 계정이 기억 안 나신 분',
+          '회원 계정이\n기억이 안 나신 분',
           textAlign: TextAlign.center,
           style: TextStyle(
             color: Colors.white,
