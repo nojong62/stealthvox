@@ -2979,7 +2979,7 @@ RULES — follow exactly:
 3. If there is a real error (meaning mismatch vs [KOREAN_PROMPT], grammar, tense, word order, word choice, or a real pronunciation/spelling error):
    - "corrected_en" = a corrected English sentence that is BOTH grammatical AND matches [KOREAN_PROMPT]'s meaning. Fix the actual error; keep the parts that are already correct.
    - "reason_ko" = 1-3 Korean sentences naming the REAL problem (구체적으로: 의미/문법/어순/시제/단어선택 중 무엇인지, 그리고 무엇을 무엇으로 잘못 말했는지). Never invent an error that is not present.
-4. "usage_tip_ko": If this sentence's STRUCTURE contains 1-2 genuinely useful, idiom-like or high-frequency patterns/collocations worth learning (this is NOT about making the sentence longer), list them in Korean, each with a short English example. If there is nothing valuable to add, use "".
+4. "usage_tip_ko": Take the sentence in "corrected_en" and suggest 1-2 ways to ENRICH THAT EXACT SENTENCE by ADDING a natural word or short phrase to it (e.g. an adverb, a modifier, an idiomatic add-on) so it becomes more useful or more expressive. For each, show the resulting fuller English sentence, then a brief Korean note on the nuance the added word gives. This is NOT explaining a word already in the sentence, and NOT a generic "make it longer" — it must build on "corrected_en" by adding words. Write in Korean. If there is genuinely nothing valuable to add, use "".
 5. Output ONLY valid JSON with exactly these three keys: {"corrected_en": "...", "reason_ko": "...", "usage_tip_ko": "..."}''';
 
       final resp = await http.post(
