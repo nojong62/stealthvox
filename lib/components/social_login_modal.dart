@@ -6,11 +6,15 @@ import 'package:flutter/material.dart';
 
 import '/custom_code/widgets/auth_progress_view.dart';
 import '/custom_code/widgets/shared_social_button.dart';
-import '/flutter_flow/flutter_flow_theme.dart';
 import '../auth/social_auth_service.dart';
 
 class SocialLoginModal extends StatefulWidget {
-  const SocialLoginModal({super.key});
+  const SocialLoginModal({
+    super.key,
+    this.startWithEmailSignUp = false,
+  });
+
+  final bool startWithEmailSignUp;
 
   @override
   State<SocialLoginModal> createState() => _SocialLoginModalState();
@@ -24,6 +28,15 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
 
   final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.startWithEmailSignUp) {
+      _showEmailForm = true;
+      _isSignUp = true;
+    }
+  }
 
   @override
   void dispose() {
@@ -88,18 +101,6 @@ class _SocialLoginModalState extends State<SocialLoginModal> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                '진행 상황을 저장하려면\n계정을 만들어 주세요',
-                style: FlutterFlowTheme.of(context).headlineSmall,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                '체험 데이터는 그대로 유지됩니다.',
-                style: FlutterFlowTheme.of(context).bodySmall,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 24),
               if (_isLoading)
                 const AuthProgressView(compact: true)
               else if (_showEmailForm)
