@@ -1101,17 +1101,12 @@ class _IntroMasterState extends State<IntroMaster> {
   }
 
   void _showEmailDiscoveryGuide() {
-    const message =
-        '이메일 계정은 이메일과 비밀번호로 실제 로그인한 뒤에만 확인할 수 있습니다. 기존 이메일 로그인과 비밀번호 재설정 경로를 이용해 주세요.';
     setState(() {
-      _accountDiscoveryMessage = message;
+      _accountDiscoveryMessage = '';
       _currentScreen = IntroScreen.auth;
       _showEmailForm = true;
       isLoginMode = true;
     });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text(message)),
-    );
   }
 
   Future<void> _confirmNewAccountFromDiscovery() async {
