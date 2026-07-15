@@ -199,11 +199,14 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   bool _appIsRecording = false;
   String _appAnswerEn = "";
   String _appCorrection = "";
+  String _appUsageTip = ""; // 🆕 활용가치 있는 구문/관용구 팁 (있을 때만)
   Uint8List? _appCorrectedAudio;
   bool _appIsShadowRecording = false;
   bool _isPlayingAppAudio = false;
   String? _shadowRecordPath;
   String _appTranscript = "";
+  // 🆕 Another Sentence 중복 회피: 최근 생성한 한국어 문장(최대 6개) 기억
+  final List<String> _appRecentKoSentences = [];
 
   // ── Idle Timeout (무반응 과금 정지, History: 자동 이동 없음) ──────────────
   // 🔧 틱 방식: 1초마다 활동 여부 확인. 튜터링/녹음/오디오 재생 중엔 카운터 0 유지.
@@ -780,6 +783,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       });
     }
     final int lineIdx = currentIndex;
+    _pinShadowLineToTop(lineIdx);
     _shadowHighlightTimer = Timer(const Duration(seconds: 1), () async {
       if (!mounted ||
           _phase != ShadowingPhase.part2Practice ||
@@ -794,6 +798,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
           currentIndex != lineIdx) {
         return;
       }
+      _startShadowLineGlide(lineIdx, words);
       _stepShadowHighlight(0);
     });
   }
@@ -2705,6 +2710,42 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
                   ],
                 ),
               ),
+
+              // 🆕 활용 구문 팁 (있을 때만)
+              if (_appUsageTip.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(10),
+                    border:
+                        Border.all(color: Colors.amber.withValues(alpha: 0.3)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(children: [
+                        Icon(Icons.lightbulb_outline,
+                            color: Colors.amber, size: 14),
+                        SizedBox(width: 6),
+                        Text("활용 구문 Tip",
+                            style: TextStyle(
+                                color: Colors.amber,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold)),
+                      ]),
+                      const SizedBox(height: 8),
+                      Text(_appUsageTip,
+                          style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 13,
+                              height: 1.5)),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 10),
 
               // Step 3: TTS 재생 버튼
@@ -2780,6 +2821,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
                       : () {
                           setState(() {
                             _appCorrection = "";
+                            _appUsageTip = "";
                             _appCorrectedAudio = null;
                             _appTranscript = "";
                           });
@@ -2820,17 +2862,19 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
         },
         body: jsonEncode({
           'model': 'gpt-4o-mini',
-          'temperature': 0.9,
+          'temperature': 1.0,
           'response_format': {'type': 'json_object'},
           'messages': [
             {
               'role': 'system',
               'content':
-                  r"""You are a grammar application tutor. Keep only the core grammar pattern (tense/structure/word order) of the input English sentence, and create one completely NEW Korean sentence with entirely different words and context, plus one natural English answer for that Korean sentence. reply ONLY in JSON: {"ko": "새 한국어 문장", "en": "영어 정답"}""",
+                  r"""You are a grammar application tutor. Keep ONLY the core grammar pattern (tense / structure / word order) of the input English sentence. Then create ONE completely NEW Korean sentence that uses the SAME structure but an ENTIRELY DIFFERENT topic, vocabulary, and situation from the input — it must not be a paraphrase of the input. Also provide one natural English answer for that new Korean sentence. reply ONLY in JSON: {"ko": "새 한국어 문장", "en": "영어 정답"}""",
             },
             {
               'role': 'user',
-              'content': 'Input English sentence: "$baseText"',
+              'content': _appRecentKoSentences.isEmpty
+                  ? 'Input English sentence: "$baseText"'
+                  : 'Input English sentence: "$baseText"\n\nDo NOT repeat the topic or wording of these recently used Korean sentences — pick a clearly different subject:\n- ${_appRecentKoSentences.join("\n- ")}',
             },
           ],
         }),
@@ -2839,12 +2883,21 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
         final jsonResult = jsonDecode(data['choices'][0]['message']['content']);
+        final newKo = (jsonResult['ko'] as String? ?? '').trim();
         setState(() {
-          appOriginalText = (jsonResult['ko'] as String? ?? '').trim();
+          appOriginalText = newKo;
           _appAnswerEn = (jsonResult['en'] as String? ?? '').trim();
           appCorrectedText = "";
           _appCorrection = "";
+          _appUsageTip = "";
         });
+        // 🆕 최근 문장 기록(중복 회피용, 최대 6개 유지)
+        if (newKo.isNotEmpty) {
+          _appRecentKoSentences.add(newKo);
+          if (_appRecentKoSentences.length > 6) {
+            _appRecentKoSentences.removeAt(0);
+          }
+        }
         _dialogSetState?.call(() {});
       }
     } catch (e) {
@@ -2906,23 +2959,28 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
         _dialogSetState?.call(() {});
       }
 
-      // 2. GPT correction + reason (English only, pure pronunciation/grammar evaluation)
-      final corrPrompt = '''You are an English pronunciation and grammar coach.
+      // 2. GPT correction + reason — 한국어 원문을 "의미 기준"으로 삼아 객관적으로 채점
+      final corrPrompt = '''You are a strict but fair English tutor for a Korean learner.
 
-[TARGET_EN]: "$targetEn"
+[KOREAN_PROMPT] (the meaning the user MUST express): "$targetKo"
+[EXAMPLE_EN] (ONE natural example answer — NOT the only correct answer): "$targetEn"
 [USER_SPEECH]: "$transcript"
 
-IMPORTANT: English allows MANY correct ways to express the same meaning. [TARGET_EN] is only ONE valid example answer, NOT the single correct answer. Never treat a sentence as wrong just because it differs from [TARGET_EN].
+Judge OBJECTIVELY. The [KOREAN_PROMPT] is the source of truth for MEANING.
 
 RULES — follow exactly:
-1. First decide: is [USER_SPEECH], on its own, grammatically correct, natural, and does it convey the same meaning as [TARGET_EN]? Ignore minor STT noise such as missing punctuation or capitalization.
-2. If YES — the user's sentence is correct on its own:
-   - Set "corrected_en" to the user's OWN sentence, cleaned of STT noise only. Do NOT replace it with [TARGET_EN].
-   - Set "reason_ko" to one short Korean praise sentence. You MAY optionally append "다른 표현: [TARGET_EN]" as an alternative, but you MUST NOT call the user's sentence wrong.
-3. If NO — there is a genuine error (grammar, tense, word order, word choice, or a real pronunciation/spelling error):
-   - Set "corrected_en" to the minimally corrected version of [USER_SPEECH]. Fix ONLY the actual error and keep every part that is already correct.
-   - Set "reason_ko" to 1-3 Korean sentences naming the REAL problem (specify which of: 발음, 문법, 어순, 시제, 단어선택). Never invent an error that is not actually present.
-4. Output ONLY valid JSON with exactly these two keys: {"corrected_en": "...", "reason_ko": "..."}''';
+1. MEANING CHECK (most important): Does [USER_SPEECH] express the SAME meaning as [KOREAN_PROMPT]?
+   - Different wording, synonyms, or a different valid structure are FINE as long as the meaning matches [KOREAN_PROMPT]. Do not mark a real paraphrase wrong.
+   - BUT if a content word changes the intended meaning (e.g. said "order" when the prompt means "arrive", wrong verb/noun, or a tense that changes the intent), it is WRONG. Do NOT praise it.
+   - Ignore minor STT noise (punctuation, capitalization).
+2. If the meaning matches [KOREAN_PROMPT] AND the grammar is correct:
+   - "corrected_en" = the user's OWN sentence, cleaned of STT noise only. Do NOT replace it with [EXAMPLE_EN].
+   - "reason_ko" = one short Korean praise line. You MAY append "다른 표현: [EXAMPLE_EN]".
+3. If there is a real error (meaning mismatch vs [KOREAN_PROMPT], grammar, tense, word order, word choice, or a real pronunciation/spelling error):
+   - "corrected_en" = a corrected English sentence that is BOTH grammatical AND matches [KOREAN_PROMPT]'s meaning. Fix the actual error; keep the parts that are already correct.
+   - "reason_ko" = 1-3 Korean sentences naming the REAL problem (구체적으로: 의미/문법/어순/시제/단어선택 중 무엇인지, 그리고 무엇을 무엇으로 잘못 말했는지). Never invent an error that is not present.
+4. "usage_tip_ko": If this sentence's STRUCTURE contains 1-2 genuinely useful, idiom-like or high-frequency patterns/collocations worth learning (this is NOT about making the sentence longer), list them in Korean, each with a short English example. If there is nothing valuable to add, use "".
+5. Output ONLY valid JSON with exactly these three keys: {"corrected_en": "...", "reason_ko": "...", "usage_tip_ko": "..."}''';
 
       final resp = await http.post(
         Uri.parse('https://api.openai.com/v1/chat/completions'),
@@ -2946,8 +3004,12 @@ RULES — follow exactly:
         final jr = jsonDecode(rd['choices'][0]['message']['content']);
         final correctedEn = (jr['corrected_en'] as String? ?? '').trim();
         final reasonKo = (jr['reason_ko'] as String? ?? '').trim();
+        final usageTip = (jr['usage_tip_ko'] as String? ?? '').trim();
         if (mounted)
-          setState(() => _appCorrection = "$correctedEn\n\n$reasonKo");
+          setState(() {
+            _appCorrection = "$correctedEn\n\n$reasonKo";
+            _appUsageTip = usageTip;
+          });
         _dialogSetState?.call(() {});
 
         // Step 3: TTS 생성 → 자동 재생
@@ -5052,7 +5114,53 @@ RULES — follow exactly:
     });
   }
 
-  // 🆕 [BOX-34-SCROLL] Practice 화면에서 현재 인덱스 아이템을 중앙으로 스크롤
+  // [P2-TELEPROMPTER] 긴 대사는 시작할 때 반드시 첫 줄부터 보이게 한다.
+  void _pinShadowLineToTop(int idx) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          _phase != ShadowingPhase.part2Practice ||
+          currentIndex != idx) {
+        return;
+      }
+      final context = _practiceItemKeys[idx]?.currentContext;
+      if (context == null) return;
+      Scrollable.ensureVisible(
+        context,
+        alignment: 0.0,
+        duration: Duration.zero,
+      );
+    });
+  }
+
+  // [P2-TELEPROMPTER] 단어 하이라이트 총시간에 맞춰 마지막 줄까지 선형 이동한다.
+  void _startShadowLineGlide(int idx, List<String> words) {
+    final durationMs = words.fold<int>(
+      0,
+      (total, word) => total + _shadowWordDuration(word),
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          _phase != ShadowingPhase.part2Practice ||
+          currentIndex != idx ||
+          !_practiceScrollController.hasClients) {
+        return;
+      }
+      final context = _practiceItemKeys[idx]?.currentContext;
+      final renderObject = context?.findRenderObject();
+      if (context == null || renderObject is! RenderBox) return;
+      final viewportHeight =
+          _practiceScrollController.position.viewportDimension;
+      if (renderObject.size.height <= viewportHeight * 0.9) return;
+      Scrollable.ensureVisible(
+        context,
+        alignment: 1.0,
+        duration: Duration(milliseconds: durationMs.clamp(1200, 60000)),
+        curve: Curves.linear,
+      );
+    });
+  }
+
+  // 🆕 [BOX-34-SCROLL] Practice 화면에서 현재 인덱스 아이템을 스크롤
   void _scrollPracticeToIndex(int idx) {
     final key = _practiceItemKeys[idx];
     if (key?.currentContext != null) {
@@ -5060,7 +5168,7 @@ RULES — follow exactly:
         key!.currentContext!,
         duration: const Duration(milliseconds: 350),
         curve: Curves.easeOutCubic,
-        alignment: 0.4,
+        alignment: _phase == ShadowingPhase.part2Practice ? 0.0 : 0.4,
       );
     }
   }

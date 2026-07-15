@@ -141,7 +141,10 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
   String _keeperTutoringAnswerEn = '';
   String _keeperTutoringCorrected = '';
   String _keeperTutoringCorrection = '';
+  String _keeperTutoringUsageTip = ''; // 🆕 활용가치 있는 구문/관용구 팁 (있을 때만)
   String _keeperTutoringTranscript = '';
+  // 🆕 Another Sentence 중복 회피: 최근 생성한 한국어 문장(최대 6개) 기억
+  final List<String> _keeperRecentKoSentences = [];
   bool _keeperIsRecording = false;
   AudioRecorder? _keeperRecorder;
   Uint8List? _keeperCorrectedAudio;
@@ -1099,6 +1102,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
     _keeperTutoringAnswerEn = '';
     _keeperTutoringCorrected = '';
     _keeperTutoringCorrection = '';
+    _keeperTutoringUsageTip = '';
     _keeperTutoringTranscript = '';
     _keeperIsRecording = false;
     _keeperCorrectedAudio = null;
@@ -1154,17 +1158,19 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
         },
         body: jsonEncode({
           'model': 'gpt-4o-mini',
-          'temperature': 0.9,
+          'temperature': 1.0,
           'response_format': {'type': 'json_object'},
           'messages': [
             {
               'role': 'system',
               'content':
-                  r"""You are a grammar application tutor. Keep only the core grammar pattern (tense/structure/word order) of the input English sentence, and create one completely NEW Korean sentence with entirely different words and context, plus one natural English answer for that Korean sentence. reply ONLY in JSON: {"ko": "새 한국어 문장", "en": "영어 정답"}""",
+                  r"""You are a grammar application tutor. Keep ONLY the core grammar pattern (tense / structure / word order) of the input English sentence. Then create ONE completely NEW Korean sentence that uses the SAME structure but an ENTIRELY DIFFERENT topic, vocabulary, and situation from the input — it must not be a paraphrase of the input. Also provide one natural English answer for that new Korean sentence. reply ONLY in JSON: {"ko": "새 한국어 문장", "en": "영어 정답"}""",
             },
             {
               'role': 'user',
-              'content': 'Input English sentence: "$baseText"',
+              'content': _keeperRecentKoSentences.isEmpty
+                  ? 'Input English sentence: "$baseText"'
+                  : 'Input English sentence: "$baseText"\n\nDo NOT repeat the topic or wording of these recently used Korean sentences — pick a clearly different subject:\n- ${_keeperRecentKoSentences.join("\n- ")}',
             },
           ],
         }),
@@ -1174,6 +1180,13 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
         final jsonResult = jsonDecode(data['choices'][0]['message']['content']);
         _keeperTutoringKo = (jsonResult['ko'] as String? ?? '').trim();
         _keeperTutoringAnswerEn = (jsonResult['en'] as String? ?? '').trim();
+        // 🆕 최근 문장 기록(중복 회피용, 최대 6개 유지)
+        if (_keeperTutoringKo.isNotEmpty) {
+          _keeperRecentKoSentences.add(_keeperTutoringKo);
+          if (_keeperRecentKoSentences.length > 6) {
+            _keeperRecentKoSentences.removeAt(0);
+          }
+        }
       }
     } catch (e) {
       debugPrint('[Keepers] generateAppText error: $e');
@@ -1354,6 +1367,38 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
                 ],
               ),
             ),
+            // 🆕 활용 구문 팁 (있을 때만)
+            if (_keeperTutoringUsageTip.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.amber.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(children: [
+                      Icon(Icons.lightbulb_outline,
+                          color: Colors.amber, size: 14),
+                      SizedBox(width: 6),
+                      Text("활용 구문 Tip",
+                          style: TextStyle(
+                              color: Colors.amber,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold)),
+                    ]),
+                    const SizedBox(height: 8),
+                    Text(_keeperTutoringUsageTip,
+                        style: const TextStyle(
+                            color: Colors.white70, fontSize: 13, height: 1.5)),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
           ],
 
@@ -1409,6 +1454,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
                   _keeperTutoringAnswerEn = '';
                   _keeperTutoringCorrected = '';
                   _keeperTutoringCorrection = '';
+                  _keeperTutoringUsageTip = '';
                   _keeperTutoringTranscript = '';
                   _keeperCorrectedAudio = null;
                   _keeperDialogSetState?.call(() {});
@@ -1531,18 +1577,29 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
         },
         body: jsonEncode({
           'model': 'gpt-4o-mini',
-          'temperature': 0.3,
+          'temperature': 0.2,
           'response_format': {'type': 'json_object'},
           'messages': [
             {
-              'role': 'system',
-              'content':
-                  r"""You are an English correction tutor for Korean speakers. Compare the user's English answer to the reference answer. Fix grammar and nuance. Reply ONLY JSON: {"corrected": "교정된 영어 문장", "explanation": "한국어로 교정 이유 설명 (1-2줄)"}""",
-            },
-            {
               'role': 'user',
               'content':
-                  'Reference answer: "${_keeperTutoringAnswerEn}"\nUser answer: "$userAnswer"',
+                  '''You are a strict but fair English tutor for a Korean learner.
+
+[KOREAN_PROMPT] (the meaning the user MUST express): "${_keeperTutoringKo}"
+[EXAMPLE_EN] (ONE natural example answer — NOT the only correct answer): "${_keeperTutoringAnswerEn}"
+[USER_SPEECH]: "$userAnswer"
+
+Judge OBJECTIVELY. The [KOREAN_PROMPT] is the source of truth for MEANING.
+
+RULES — follow exactly:
+1. MEANING CHECK (most important): Does [USER_SPEECH] express the SAME meaning as [KOREAN_PROMPT]?
+   - Different wording, synonyms, or a different valid structure are FINE as long as the meaning matches [KOREAN_PROMPT]. Do not mark a real paraphrase wrong.
+   - BUT if a content word changes the intended meaning (e.g. said "order" when the prompt means "arrive", wrong verb/noun, or a tense that changes the intent), it is WRONG. Do NOT praise it.
+   - Ignore minor STT noise (punctuation, capitalization).
+2. If the meaning matches AND grammar is correct: set "corrected" to the user's own sentence cleaned of STT noise only, and "explanation" to one short Korean praise line (you may append "다른 표현: [EXAMPLE_EN]").
+3. If there is a real error: set "corrected" to an English sentence that is BOTH grammatical AND matches [KOREAN_PROMPT]'s meaning, and "explanation" to 1-2 Korean lines naming the REAL problem (구체적으로 무엇을 무엇으로 잘못 말했는지).
+4. "usage_tip_ko": If this sentence's STRUCTURE contains 1-2 genuinely useful, idiom-like or high-frequency patterns/collocations worth learning (NOT about making it longer), list them in Korean with a short English example each. If nothing valuable, use "".
+5. Output ONLY JSON with exactly these keys: {"corrected": "...", "explanation": "...", "usage_tip_ko": "..."}''',
             },
           ],
         }),
@@ -1554,6 +1611,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
             (jsonResult['corrected'] as String? ?? '').trim();
         _keeperTutoringCorrection =
             (jsonResult['explanation'] as String? ?? '').trim();
+        _keeperTutoringUsageTip =
+            (jsonResult['usage_tip_ko'] as String? ?? '').trim();
         _keeperDialogSetState?.call(() {});
 
         // STEP 4: 교정 문장 TTS 생성
