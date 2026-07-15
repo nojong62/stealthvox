@@ -2865,10 +2865,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       // ─────────────────────────────────────────────────────
       // STEP 6: AI 큐 개방
       // ─────────────────────────────────────────────────────
-      // 🔧 유저 소리 완전 종료 후 0.5초 숨 고르기 → 그 다음 글자+소리 동시 출력.
+      // 🔧 유저 소리 완전 종료 후 0.7초 숨 고르기 → 그 다음 글자+소리 동시 출력.
       //    유저 소리와 AI 소리는 절대 겹치지 않는다.
-      await Future.delayed(const Duration(milliseconds: 500));
-      _log('🧠 [PIPE-GAP]', '유저-AI 전환 안전 간격 500ms 완료');
+      await Future.delayed(const Duration(milliseconds: 700));
+      _log('🧠 [PIPE-GAP]', '유저-AI 전환 안전 간격 700ms 완료');
 
       // 턴 전환
       _ttsQueueManager.setUserTurn(false);
