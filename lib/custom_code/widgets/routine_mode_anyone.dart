@@ -302,6 +302,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   final AudioRecorder _audioRecorder = AudioRecorder();
   late final TtsQueueManager _ttsQueueManager;
   HybridTtsPlayer? _hybridTtsPlayer; // [하이브리드] 메인 턴 TTS 플레이어
+  // 🔧 [PREFETCH v1] 현재 턴 AI TTS fetcher 참조. 다음 턴 시작 시 cancel()로
+  //   이전 턴의 늦은 fetch가 공유 큐(_ttsQueueManager)로 유입되는 것을 차단.
+  ChunkedTtsFetcher? _aiTtsFetcher;
 
   // ⏱️ 성능 측정용 초시계
   final Stopwatch _swDeepgram = Stopwatch();
@@ -1350,6 +1353,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       // 현재 시점에서 유저 TTS가 아직 재생 중인데 _isUserTurn=false로 바꾸면
       // TtsQueueManager._processQueue가 'AI 턴이고 paused' 판단하여 유저 마지막 청크까지 멈춰버림
       _ttsQueueManager.setAiPaused(true); // AI 재생 대기 모드 (유저 TTS는 계속 재생)
+      // 🔧 [PREFETCH v1] 이전 턴 AI fetcher에 남은 in-flight fetch를 무효화한다.
+      //   (드레인 타임아웃 등으로 이전 fetch가 늦게 끝나 이번 턴 큐로 유입되는 것 방지)
+      _aiTtsFetcher?.cancel();
       // 🔧 [v3.5] AI 전용 큐로 보내기 위해 isUser: false 명시
       ChunkedTtsFetcher aiTtsFetcher = ChunkedTtsFetcher(
         _openAiKey,
@@ -1358,6 +1364,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         isUser: false, // AI 큐로 분리
         onLog: _log,
       );
+      _aiTtsFetcher = aiTtsFetcher; // 다음 턴에서 취소할 수 있도록 참조 보관
       // [하이브리드 전환] 턴 시작 시 리셋 + 새 인스턴스 생성
       _hybridTtsPlayer?.reset();
       _hybridTtsPlayer = HybridTtsPlayer(
@@ -1455,6 +1462,14 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           aiTtsFetcher.addText(aiBuffer.trim());
         }
         */
+        // 🔧 [PREFETCH v1] GPT 스트림 종료 즉시 remainder 청크(②③…)를 발사한다.
+        //   fetcher는 addText 즉시 fetch를 시작하지만, AI 큐는 아직 setAiPaused(true)
+        //   상태라 재생은 PIPE-07까지 대기한다. 따라서 fetch 시점만 앞당겨져
+        //   유저 TTS 재생 중에 ②③ 오디오가 미리 준비되고, 큐 개방 시 ①②③이
+        //   공백 없이 이어진다. (재생 게이팅/이벤트 로직은 불변)
+        //   onStreamEnd는 내부 가드(_streamEnded)로 이중 호출에 안전하다.
+        await _hybridTtsPlayer!
+            .onStreamEnd(fullSentence: _cleanText(aiTargetText.trim()));
       }();
 
       // ─────────────────────────────────────────────────────
@@ -1512,9 +1527,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         aiOriginalFuture = FreeTalkBrain.generateCleanOriginal(
             apiKey: _openAiKey, englishText: aiTargetText);
       }
-      // [하이브리드] remainder 발사 + 통문장 TtsCache 저장
-      await _hybridTtsPlayer!
-          .onStreamEnd(fullSentence: _cleanText(aiTargetText.trim()));
+      // [하이브리드] remainder 발사 + 통문장 TtsCache 저장은
+      // 🔧 [PREFETCH v1]로 aiGenerationTask 내부(스트림 종료 시점)로 이동했다.
+      // 여기서 중복 호출하면 remainder가 두 번 발사되므로 호출하지 않는다.
+      // (aiGenerationTask는 위에서 이미 await 완료 → onStreamEnd 실행 보장)
 
       waitTicks = 0;
       while (aiTtsFetcher.pendingRequests > 0 || _ttsQueueManager.isBusy) {
@@ -3290,6 +3306,9 @@ class HybridTtsPlayer {
   final void Function(String, String)? onLog;
 
   bool _firstChunkFired = false;
+  // 🔧 [PREFETCH v1] onStreamEnd 이중 호출 방지 가드. remainder는 정확히 1회만
+  //   발사되어야 하므로(2회 호출 시 청크 중복 재생), 종료 후 재호출은 무시한다.
+  bool _streamEnded = false;
   final StringBuffer _chunkBuffer = StringBuffer();
 
   HybridTtsPlayer(
@@ -3304,6 +3323,7 @@ class HybridTtsPlayer {
 
   void reset() {
     _firstChunkFired = false;
+    _streamEnded = false;
     _chunkBuffer.clear();
   }
 
@@ -3346,6 +3366,12 @@ class HybridTtsPlayer {
   //   1) remainder 청킹 발사 (firstChunk 이후 남은 텍스트)
   //   2) fullSentence TtsCache 저장 (재생 없음 — 히스토리 뷰 HIT 유도)
   Future<void> onStreamEnd({String fullSentence = ''}) async {
+    // 🔧 [PREFETCH v1] 이중 호출 방어: 이미 종료 처리됐으면 무시(청크 중복 발사 방지).
+    if (_streamEnded) {
+      onLog?.call('[HYB-END-DUP]', 'onStreamEnd 중복 호출 무시');
+      return;
+    }
+    _streamEnded = true;
     final remainder = _chunkBuffer.toString().trim();
     if (!_firstChunkFired && remainder.isNotEmpty) {
       // 구두점/4단어 없이 스트림 종료 — 전체 발사
