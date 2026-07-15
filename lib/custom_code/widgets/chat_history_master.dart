@@ -2815,27 +2815,33 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
                   child: const Text("Close",
                       style: TextStyle(color: Colors.white54, fontSize: 14)),
                 ),
-                ElevatedButton.icon(
-                  onPressed: (isGeneratingApp || _appIsRecording)
-                      ? null
-                      : () {
-                          setState(() {
-                            _appCorrection = "";
-                            _appUsageTip = "";
-                            _appCorrectedAudio = null;
-                            _appTranscript = "";
-                          });
-                          _generateAppText(baseText);
-                        },
-                  icon: const Icon(Icons.refresh, size: 15),
-                  label: const Text("Another Sentence",
-                      style:
-                          TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.amber,
-                    foregroundColor: const Color(0xFF121212),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
+                Flexible(
+                  child: ElevatedButton.icon(
+                    onPressed: (isGeneratingApp || _appIsRecording)
+                        ? null
+                        : () {
+                            setState(() {
+                              _appCorrection = "";
+                              _appUsageTip = "";
+                              _appCorrectedAudio = null;
+                              _appTranscript = "";
+                            });
+                            _generateAppText(baseText);
+                          },
+                    icon: const Icon(Icons.refresh, size: 15),
+                    label: const Text("Another Sentence",
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 13)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.amber,
+                      foregroundColor: const Color(0xFF121212),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                    ),
                   ),
                 ),
               ],
@@ -2978,7 +2984,7 @@ RULES — follow exactly:
    - "reason_ko" = one short Korean praise line. You MAY append "다른 표현: [EXAMPLE_EN]".
 3. If there is a real error (meaning mismatch vs [KOREAN_PROMPT], grammar, tense, word order, word choice, or a real pronunciation/spelling error):
    - "corrected_en" = a corrected English sentence that is BOTH grammatical AND matches [KOREAN_PROMPT]'s meaning. Fix the actual error; keep the parts that are already correct.
-   - "reason_ko" = 1-3 Korean sentences naming the REAL problem (구체적으로: 의미/문법/어순/시제/단어선택 중 무엇인지, 그리고 무엇을 무엇으로 잘못 말했는지). Never invent an error that is not present.
+   - "reason_ko" = ENCOURAGING, constructive Korean feedback in 2-3 sentences. Do NOT merely say it is wrong. FIRST acknowledge what [USER_SPEECH] actually means as it stands, so the learner sees their attempt made sense. THEN point to the specific small fix and the meaning it unlocks — e.g. "지금 말한 문장은 '...'라는 뜻이에요. 여기서 'X'를 'Y'로 바꾸면 '...'라는 원하던 의미가 됩니다." Be specific, warm, and positive; never scold. Never invent an error that is not present.
 4. "usage_tip_ko": Suggest 1-2 MORE NATURAL, more native-like or idiomatic ways to say the SAME meaning as "corrected_en" (a native-speaker upgrade). For each, put the English expression first, then a short Korean note on the nuance or feel it adds and why a native might prefer it. Aim at real spoken-English naturalness — idioms, natural phrasings, or common conversational add-ons (e.g. "though", "actually", "you know") — NOT a plain synonym swap and NOT just making the sentence longer. Write the notes in Korean. If "corrected_en" is already the most natural way and there is genuinely nothing valuable to add, use "".
 5. Output ONLY valid JSON with exactly these three keys: {"corrected_en": "...", "reason_ko": "...", "usage_tip_ko": "..."}''';
 
