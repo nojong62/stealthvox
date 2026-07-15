@@ -2355,6 +2355,8 @@ class DeepgramV2VoiceManager {
   bool _isDisposed = false;
   int _retryCount = 0;
   static const int _maxRetries = 5;
+  Timer? _micWatchdog; // 🔧 첫 진입 무음(마이크 데드) 감지 워치독
+  int _packetCount = 0; // 🔧 수신 오디오 패킷 수 (워치독 판정용)
 
   DeepgramV2VoiceManager({
     required this.apiKey,
@@ -2382,6 +2384,8 @@ class DeepgramV2VoiceManager {
 
   Future<void> _connect() async {
     if (_isDisposed) return;
+    _micWatchdog?.cancel(); // 🔧 재연결 시 이전 워치독 정리
+    _micWatchdog = null;
     _lg('🎤 [MIC-01]', '_connect 진입');
     try {
       final uri = Uri.parse(
@@ -2435,44 +2439,72 @@ class DeepgramV2VoiceManager {
         _lg('❌ [MIC-ERR-A]', 'isRecording/stop 에러: $e');
       }
 
-      try {
-        final stream = await audioRecorder.startStream(
-          const RecordConfig(
-            encoder: AudioEncoder.pcm16bits,
-            sampleRate: 16000,
-            numChannels: 1,
-          ),
-        );
-        _lg('🎤 [MIC-06]', 'startStream 성공');
-
-        int packetCount = 0;
-        _audioSub = stream.listen(
-          (data) {
-            if (_isDisposed) return;
-            if (data.isNotEmpty) {
-              packetCount++;
-              if (packetCount == 1) {
-                _lg('🎤 [MIC-07]', '첫 오디오 패킷 수신 (${data.length}B)');
-              }
-              if (packetCount == 50) {
-                _lg('🎤 [MIC-08]', '패킷 50개 송신 중 (마이크 정상 동작)');
-              }
-              _channel?.sink.add(Uint8List.fromList(data));
-            }
-          },
-          onError: (e) {
-            _lg('❌ [MIC-ERR-B]', '오디오 스트림 에러: $e');
-          },
-          onDone: () {
-            _lg('🎤 [MIC-09]', '오디오 스트림 종료 (총 $packetCount 패킷)');
-          },
-        );
-        _lg('🎤 [MIC-10]', 'stream.listen 구독 완료 — 마이크 완전 활성화');
-      } catch (e) {
-        _lg('❌ [MIC-ERR-C]', 'startStream 실패: $e');
+      // 🔧 [첫 진입 데드마이크 수정] startStream이 첫 시도에 실패하는 경우
+      //    (오디오 서브시스템 warm-up 전) 대비 최대 3회 재시도.
+      Stream<Uint8List>? stream;
+      for (int attempt = 1; attempt <= 3; attempt++) {
+        if (_isDisposed) return;
+        try {
+          stream = await audioRecorder.startStream(
+            const RecordConfig(
+              encoder: AudioEncoder.pcm16bits,
+              sampleRate: 16000,
+              numChannels: 1,
+            ),
+          );
+          _lg('🎤 [MIC-06]', 'startStream 성공 (attempt=$attempt)');
+          break;
+        } catch (e) {
+          _lg('❌ [MIC-ERR-C]', 'startStream 실패(attempt=$attempt): $e');
+          if (attempt < 3) {
+            await Future.delayed(Duration(milliseconds: 250 * attempt));
+          }
+        }
+      }
+      if (stream == null) {
+        _lg('❌ [MIC-ERR-C2]', 'startStream 3회 실패 → 재연결');
+        if (!_isDisposed) _handleDisconnect();
+        return;
       }
 
-      _retryCount = 0;
+      _packetCount = 0;
+      _audioSub = stream.listen(
+        (data) {
+          if (_isDisposed) return;
+          if (data.isNotEmpty) {
+            _packetCount++;
+            if (_packetCount == 1) {
+              _micWatchdog?.cancel(); // 🔧 첫 패킷 도착 → 워치독 해제
+              _micWatchdog = null;
+              _retryCount = 0; // 🔧 진짜 성공(오디오 수신) 시점에만 백오프 리셋
+              _lg('🎤 [MIC-07]', '첫 오디오 패킷 수신 (${data.length}B)');
+            }
+            if (_packetCount == 50) {
+              _lg('🎤 [MIC-08]', '패킷 50개 송신 중 (마이크 정상 동작)');
+            }
+            _channel?.sink.add(Uint8List.fromList(data));
+          }
+        },
+        onError: (e) {
+          _lg('❌ [MIC-ERR-B]', '오디오 스트림 에러: $e');
+        },
+        onDone: () {
+          _lg('🎤 [MIC-09]', '오디오 스트림 종료 (총 $_packetCount 패킷)');
+        },
+      );
+      _lg('🎤 [MIC-10]', 'stream.listen 구독 완료 — 마이크 완전 활성화');
+
+      // 🔧 [무음 워치독] 2.5초 안에 첫 오디오 패킷이 없으면(마이크 데드) 1회
+      //    자동 재연결 → 유저가 수동으로 재진입하던 동작을 자동화. 정상일 땐
+      //    패킷이 즉시 들어와 위에서 워치독이 취소되므로 오작동하지 않는다.
+      _micWatchdog?.cancel();
+      _micWatchdog = Timer(const Duration(milliseconds: 2500), () {
+        if (_isDisposed) return;
+        if (_packetCount == 0) {
+          _lg('❌ [MIC-WATCHDOG]', '2.5초 무음(마이크 데드) → 자동 재연결');
+          _handleDisconnect();
+        }
+      });
     } catch (e) {
       _lg('❌ [DG-CONN-ERR]', '_connect 전체 실패: $e');
       if (!_isDisposed) _handleDisconnect();
@@ -2593,6 +2625,8 @@ class DeepgramV2VoiceManager {
   Future<void> dispose() async {
     _lg('🎤 [DG-DISPOSE]', 'dispose 진입');
     _isDisposed = true;
+    _micWatchdog?.cancel();
+    _micWatchdog = null;
     await _audioSub?.cancel();
     _audioSub = null;
     await _wsSub?.cancel();
