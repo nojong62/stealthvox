@@ -1385,7 +1385,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
                       Icon(Icons.lightbulb_outline,
                           color: Colors.amber, size: 14),
                       SizedBox(width: 6),
-                      Text("활용 구문 Tip",
+                      Text("더 자연스러운 표현",
                           style: TextStyle(
                               color: Colors.amber,
                               fontSize: 12,
@@ -1598,7 +1598,7 @@ RULES — follow exactly:
    - Ignore minor STT noise (punctuation, capitalization).
 2. If the meaning matches AND grammar is correct: set "corrected" to the user's own sentence cleaned of STT noise only, and "explanation" to one short Korean praise line (you may append "다른 표현: [EXAMPLE_EN]").
 3. If there is a real error: set "corrected" to an English sentence that is BOTH grammatical AND matches [KOREAN_PROMPT]'s meaning, and "explanation" to 1-2 Korean lines naming the REAL problem (구체적으로 무엇을 무엇으로 잘못 말했는지).
-4. "usage_tip_ko": Take the sentence in "corrected" and suggest 1-2 ways to ENRICH THAT EXACT SENTENCE by ADDING a natural word or short phrase to it (e.g. an adverb, a modifier, an idiomatic add-on) so it becomes more useful or more expressive. For each, show the resulting fuller English sentence, then a brief Korean note on the nuance the added word gives. This is NOT explaining a word already in the sentence, and NOT a generic "make it longer" — it must build on "corrected" by adding words. Write in Korean. If there is genuinely nothing valuable to add, use "".
+4. "usage_tip_ko": Suggest 1-2 MORE NATURAL, more native-like or idiomatic ways to say the SAME meaning as "corrected" (a native-speaker upgrade). For each, put the English expression first, then a short Korean note on the nuance or feel it adds and why a native might prefer it. Aim at real spoken-English naturalness — idioms, natural phrasings, or common conversational add-ons (e.g. "though", "actually", "you know") — NOT a plain synonym swap and NOT just making the sentence longer. Write the notes in Korean. If "corrected" is already the most natural way and there is genuinely nothing valuable to add, use "".
 5. Output ONLY JSON with exactly these keys: {"corrected": "...", "explanation": "...", "usage_tip_ko": "..."}''',
             },
           ],
