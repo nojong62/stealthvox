@@ -59,6 +59,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   // ====================================================================
   String _deepgramKey = "";
   String _openAiKey = "";
+  bool _micPermissionReady = false; // 🆕 마이크 권한 준비 여부(첫 진입 race 방지)
+  bool _initialSessionStarted = false; // 🆕 초기 자동 시작 1회성 보장
   bool _isConversationActive = false;
   bool _isExiting = false; // 🔧 [EXIT-GUARD] PopScope+버튼 이중 종료 방지
   double _fontScale = 1.0;
@@ -467,7 +469,11 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   }
 
   Future<void> _initPermissions() async {
-    await [Permission.microphone].request();
+    final statuses = await [Permission.microphone].request();
+    _micPermissionReady =
+        statuses[Permission.microphone]?.isGranted ?? false;
+    // 🆕 권한이 늦게 잡히는 경우(재설치 직후 등) 초기 세션 시작을 재트리거.
+    if (mounted) _startSessionWhenReady();
   }
 
   Future<void> _fetchKeys() async {
@@ -479,14 +485,35 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
               FirebaseRemoteConfig.instance.getString('DeepgramAPIKey');
           _openAiKey = FirebaseRemoteConfig.instance.getString('OpenAIAPIKey');
         });
-        // 키 로드 완료 → 시작 안내 후 유저 기본 문장 대기
+        // 키 로드 완료 → (권한까지 준비됐을 때만) 시작 안내 후 유저 기본 문장 대기
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _startSessionWaitingForUserSeed();
+          if (mounted) _startSessionWhenReady();
         });
       }
     } catch (e) {
       print('❌ Key Load Error: $e');
     }
+  }
+
+  /// 🆕 첫 진입 race 방지: 키(OpenAI+Deepgram)와 마이크 권한이 "둘 다" 준비됐을
+  /// 때만 초기 세션을 1회 시작한다. 준비 안 된 항목이 있으면 조용히 대기 →
+  /// 키 로드 콜백(_fetchKeys) 또는 권한 콜백(_initPermissions) 중 늦게 끝나는
+  /// 쪽이 이 함수를 다시 호출해 시작을 유발한다. (버튼 재시작 경로와는 분리)
+  Future<void> _startSessionWhenReady() async {
+    if (!mounted || _initialSessionStarted) return;
+    if (_openAiKey.isEmpty || _deepgramKey.isEmpty) {
+      _log('🎤 [START-GATE]', '키 미준비 → 시작 보류');
+      return;
+    }
+    bool hasPerm = _micPermissionReady;
+    if (!hasPerm) hasPerm = await _audioRecorder.hasPermission();
+    if (!mounted || _initialSessionStarted) return;
+    if (!hasPerm) {
+      _log('🎤 [START-GATE]', '마이크 권한 미준비 → 시작 보류');
+      return;
+    }
+    _initialSessionStarted = true;
+    _startSessionWaitingForUserSeed();
   }
 
   // ====================================================================
