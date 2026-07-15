@@ -81,6 +81,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   // ====================================================================
   String _deepgramKey = "";
   String _openAiKey = "";
+  bool _micPermissionReady = false; // 🆕 마이크 권한 준비 여부(첫 진입 race 방지)
   bool _isConversationActive = false;
   bool _isStartingListening = false;
   bool _isPipelineRunning = false;
@@ -363,7 +364,12 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   }
 
   Future<void> _initPermissions() async {
-    await [Permission.microphone].request();
+    final statuses = await [Permission.microphone].request();
+    _micPermissionReady =
+        statuses[Permission.microphone]?.isGranted ?? false;
+    // 🆕 권한이 늦게 잡히는 경우(재설치 직후 등) 여기서 세션 시작을 재트리거.
+    //    _startFreeTalkSession 내부 게이트가 키까지 준비됐는지 다시 확인한다.
+    if (mounted) _startFreeTalkSession();
   }
 
   Future<void> _fetchKeys() async {
@@ -389,8 +395,22 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   /// 마이크 첫 청취가 시작되면 _isConversationActive=true 로 자동 점등.
   /// 마이크 연결 직후 안내 말풍선 1.5초 노출.
   Future<void> _startFreeTalkSession() async {
-    if (_deepgramKey.isEmpty || !mounted) return;
+    if (!mounted) return;
     if (_isConversationActive) return; // 중복 시작 방지
+    // 🆕 첫 진입 race 방지: 키와 마이크 권한이 "둘 다" 준비됐을 때만 시작한다.
+    //    준비 안 된 항목이 있으면 조용히 대기 → 키 로드 콜백(_fetchKeys) 또는
+    //    권한 콜백(_initPermissions) 중 늦게 끝나는 쪽이 이 함수를 다시 호출해 시작.
+    if (_deepgramKey.isEmpty) {
+      _log('🎤 [START-GATE]', '키 미준비 → 시작 보류');
+      return;
+    }
+    final bool hasPerm =
+        _micPermissionReady || await _audioRecorder.hasPermission();
+    if (!hasPerm) {
+      _log('🎤 [START-GATE]', '마이크 권한 미준비 → 시작 보류');
+      return;
+    }
+    if (!mounted || _isConversationActive) return;
     _hasShownNudgeBubble = false;
     _startDeepgramListening();
   }
