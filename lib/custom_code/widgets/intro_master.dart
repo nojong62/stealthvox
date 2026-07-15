@@ -519,7 +519,7 @@ class _IntroMasterState extends State<IntroMaster> {
                         children: [
                           Icon(Icons.lightbulb, color: Colors.amber, size: 20),
                           SizedBox(width: 8),
-                          Text("이용 방법",
+                          Text("이용 방법 (Anyone 모드)",
                               style: TextStyle(
                                   color: Colors.white,
                                   fontSize: 15,
@@ -528,7 +528,7 @@ class _IntroMasterState extends State<IntroMaster> {
                       ),
                       const SizedBox(height: 12),
                       const Text(
-                        '대화하고 싶은 사람을 한 명 마음속에 떠올려 보세요. 그리고 그 사람이 바로 지금 눈앞에 있다고 생각하고, 하고 싶었던 말을 편하게 꺼내보세요. AI가 그 사람과 다르게 반응한다면, 그냥 넘기지 말고 "왜 그렇게 느껴?"하고 되물어 보세요. 묻고 답하다 보면, AI는 점점 더 그 사람에 가까워집니다. 진짜 그 사람과 마주 앉은 것처럼요.',
+                        '마음속으로 대화하고 싶은 사람을 한 명 떠올려 보세요. 그 사람이 지금 눈앞에 있다고 상상하며, 하고 싶었던 말을 한국어로든 영어로든 편하게 꺼내면 돼요. AI가 그 사람이 되어 대답합니다. 반응이 기대와 다르면 "왜 그렇게 느껴?"라고 되물어 보세요 — 묻고 답할수록 AI는 점점 그 사람에 가까워집니다. 대화가 끝나면, 방금 나눈 이야기가 그대로 나만의 영어 교재로 바뀝니다.',
                         style: TextStyle(
                             color: Colors.white70, fontSize: 13, height: 1.6),
                       ),
