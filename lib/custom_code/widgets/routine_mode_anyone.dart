@@ -1937,15 +1937,28 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
                         Icon(Icons.lightbulb_outline,
                             color: Colors.amberAccent, size: 20),
                         SizedBox(width: 8),
-                        Text("이용 방법 (Anyone 모드)",
+                        Text.rich(
+                          TextSpan(
+                            text: "이용 방법 ",
                             style: TextStyle(
                                 color: Colors.amberAccent,
                                 fontWeight: FontWeight.bold,
-                                fontSize: 15)),
+                                fontSize: 15),
+                            children: [
+                              TextSpan(
+                                text: "(Anyone 모드)",
+                                style: TextStyle(
+                                    color: Colors.amberAccent,
+                                    fontWeight: FontWeight.w500,
+                                    fontSize: 11),
+                              ),
+                            ],
+                          ),
+                        ),
                       ]),
                       const SizedBox(height: 12),
                       const Text(
-                        '마음속으로 대화하고 싶은 사람을 한 명 떠올려 보세요. 그 사람이 지금 눈앞에 있다고 상상하며, 하고 싶었던 말을 한국어로든 영어로든 편하게 꺼내면 돼요. AI가 그 사람이 되어 대답합니다. 반응이 기대와 다르면 "왜 그렇게 느껴?"라고 되물어 보세요 — 묻고 답할수록 AI는 점점 그 사람에 가까워집니다. 대화가 끝나면, 방금 나눈 이야기가 그대로 나만의 영어 교재로 바뀝니다.',
+                        '대화하고 싶은 사람을 한 명 떠올려 보세요. 그 사람이 눈앞에 있다고 생각하고, 하고 싶었던 말을 편하게 꺼내면 AI가 그 사람이 되어 대답합니다. 반응이 다르게 느껴지면 "왜 그렇게 느껴?"라고 되물어 보세요. 대화가 끝나면 방금 나눈 이야기가 그대로 나만의 영어 교재로 바뀝니다.',
                         style: TextStyle(
                             color: Colors.white, fontSize: 14, height: 1.6),
                       ),
