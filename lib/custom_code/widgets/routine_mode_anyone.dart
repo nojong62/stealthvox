@@ -253,6 +253,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       'mode=$_probeMode event=$event DG_FINAL_TO_$event=${elapsed < 0 ? 0 : elapsed}',
     );
   }
+
   // 🌐 [v3.1] 로비에서 선택한 언어 이름 → Deepgram/OpenAI 언어 코드 매핑
   String _mapLanguageToCode(String lang) {
     switch (lang.trim().toLowerCase()) {
@@ -804,8 +805,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     // 🔧 기존 대기 중인 발화가 있으면 공백으로 연결 (더듬거림 합치기)
     if (_pendingTranscript.isEmpty) {
       _pendingTranscript = clean;
-      _log('🔀 [STOP-03]',
-          '신규 발화 접수. ${waitMs}ms 대기창 시작 (source=$source)');
+      _log('🔀 [STOP-03]', '신규 발화 접수. ${waitMs}ms 대기창 시작 (source=$source)');
     } else {
       _pendingTranscript = '$_pendingTranscript $clean';
       _log('🔀 [STOP-04]',
@@ -2187,10 +2187,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
                             const SizedBox(width: 6),
                             Text(
                               () {
-                                final int s =
-                                    (FFAppState().remainingTime)
-                                        .toInt()
-                                        .clamp(0, 999999);
+                                final int s = (FFAppState().remainingTime)
+                                    .toInt()
+                                    .clamp(0, 999999);
                                 final int h = s ~/ 3600;
                                 final int m = (s % 3600) ~/ 60;
                                 return '${h.toString().padLeft(2, '0')}:'
@@ -2641,6 +2640,7 @@ class DeepgramV2VoiceManager {
     onTurnEnded(finalText, speechFinal: source == 'speech_final');
     if (!_isDisposed) onTurnResult?.call(result);
   }
+
   void _handleMessage(dynamic msg) {
     if (_isDisposed) return;
     try {
