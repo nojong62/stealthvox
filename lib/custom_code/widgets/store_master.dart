@@ -1300,8 +1300,11 @@ class _StoreMasterState extends State<StoreMaster> {
                   // 하단 부가 기능 메뉴
                   Padding(
                     padding: const EdgeInsets.only(bottom: 4, top: 10),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                    child: Wrap(
+                      alignment: WrapAlignment.center,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 20,
+                      runSpacing: 6,
                       children: [
                         InkWell(
                           onTap: _runRestore,
@@ -1311,12 +1314,6 @@ class _StoreMasterState extends State<StoreMaster> {
                                   fontSize: 11,
                                   decoration: TextDecoration.underline)),
                         ),
-                        const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 12.0),
-                          child: Text("|",
-                              style: TextStyle(
-                                  color: Colors.white24, fontSize: 10)),
-                        ),
                         InkWell(
                           onTap: () => _launchURL(_privacyUrl),
                           child: const Text("개인정보 처리방침",
@@ -1324,12 +1321,6 @@ class _StoreMasterState extends State<StoreMaster> {
                                   color: Colors.white38,
                                   fontSize: 11,
                                   decoration: TextDecoration.underline)),
-                        ),
-                        const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 12.0),
-                          child: Text("|",
-                              style: TextStyle(
-                                  color: Colors.white24, fontSize: 10)),
                         ),
                         InkWell(
                           onTap: () => _launchURL(_termsUrl),
@@ -1370,4 +1361,3 @@ class _StoreMasterState extends State<StoreMaster> {
     );
   }
 }
-
