@@ -1040,11 +1040,15 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         userVoice,
         onLog: _log,
       );
+      final HybridTtsPlayer userHybridTts = HybridTtsPlayer(
+        _openAiKey,
+        _ttsQueueManager,
+        userTtsFetcher,
+        userVoice,
+        onLog: _log,
+      );
       _ttsQueueManager.setUserTurn(true);
       _ttsQueueManager.setAiPaused(false); // 유저 청크는 즉시 재생
-
-      // 다국어 구두점 단위 쪼개기
-      final RegExp splitPattern = RegExp(r'[,\.?!;:。、！？…，；：\n]');
 
       // 🌐 [v3.1] 로비에서 유저가 선택한 타겟 언어로 번역
       final String targetLangName = FFAppState().targetLang.isNotEmpty
@@ -1064,7 +1068,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       bool misheard = false; // 잘못 들었다는 불만만 있음 → 직전 교환 삭제 후 재청취
       bool dissatisfiedReply = false; // AI 직전 응답 불만 → 응답만 재생성
       bool clarified = false; // 주어/목적어 모호 → AI 되묻기
-      // [USER-FULL-TTS] firstChunkSent removed; user TTS fires once after stream end.
+      bool userHybridInputStarted = false;
       await for (String chunk in userStream) {
         userTargetText += chunk;
 
@@ -1100,8 +1104,23 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         if (mounted && !clarified)
           setState(() => _localMessages[hostIndex]['target'] = userTargetText);
 
-        // [USER-FULL-TTS] no chunk TTS during user translation streaming.
-        // Text still streams to the screen through setState above.
+        // 정상 번역은 스트림 도중 4단어/구두점이 모이는 즉시 첫 TTS를 요청한다.
+        // 제어 태그가 조각나 도착하는 동안에는 잘못된 안내가 재생되지 않도록 보류한다.
+        final bool containsControlTag = userTargetText.contains('[');
+        if (!clarified && !containsControlTag) {
+          userHybridTts.onChunk(chunk);
+          userHybridInputStarted = true;
+        }
+      }
+
+      // 이미 선발사된 뒤 제어 태그가 도착한 경우 진행 중 요청과 재생을 모두 폐기한다.
+      if (evaporated ||
+          corrected ||
+          misheard ||
+          dissatisfiedReply ||
+          clarified) {
+        userTtsFetcher.cancel();
+        _ttsQueueManager.stop();
       }
 
       if (evaporated) {
@@ -1381,10 +1400,14 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         }
       }
 
-      // [USER-FULL-TTS] fire the complete translated user sentence once.
+      // 스트림 중 첫 청크를 선발사하고, 종료 시 남은 부분만 순서대로 요청한다.
+      // 제어 태그 제거 후에야 정상 문장이 생긴 예외 경로는 여기서 처음 공급한다.
       final String fullUserTts = _cleanText(userTargetText.trim());
       if (fullUserTts.isNotEmpty) {
-        userTtsFetcher.addText(fullUserTts);
+        if (!userHybridInputStarted) {
+          userHybridTts.onChunk(fullUserTts);
+        }
+        await userHybridTts.onStreamEnd();
       }
 
       // 🔧 [v3.7] 유저 통문장 TtsCache 백그라운드 저장 (히스토리 HIT 유도)
