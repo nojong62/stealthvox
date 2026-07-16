@@ -1,4 +1,4 @@
-StealthVox 프로젝트 가이드 (FlutterFlow)
+StealthVox 프로젝트 가이드 (Flutter)
 
  📂 파일 위치 및 위젯 리스트
  모든 화면(Pages): `lib/` 폴더 내 각 이름별 폴더
@@ -30,7 +30,6 @@ StealthVox 프로젝트 가이드 (FlutterFlow)
 
 주의사항:
 - 기존 정상 작동 기능을 깨지 말 것
-- FlutterFlow generated code 구조를 함부로 대규모 변경하지 말 것
 - 앱 실행/빌드 가능성을 최우선으로 할 것
 - 불확실한 부분은 임의 삭제하지 말고 보고할 것
 
