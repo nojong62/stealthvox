@@ -47,21 +47,23 @@ mixin TrialAnyoneTimerMixin<T extends StatefulWidget> on State<T> {
     return Positioned(
       top: 8,
       right: 16,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-        decoration: BoxDecoration(
-          color: _trialRemaining <= 5
-              ? const Color(0xFFFF4444).withValues(alpha: 0.85)
-              : const Color(0xFF000000).withValues(alpha: 0.65),
-          borderRadius: BorderRadius.circular(18),
-        ),
-        child: Text(
-          '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}',
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-            fontFeatures: [FontFeature.tabularFigures()],
+      child: IgnorePointer(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+          decoration: BoxDecoration(
+            color: _trialRemaining <= 5
+                ? const Color(0xFFFF4444).withValues(alpha: 0.85)
+                : const Color(0xFF000000).withValues(alpha: 0.65),
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Text(
+            '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
           ),
         ),
       ),

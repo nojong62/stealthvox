@@ -57,23 +57,26 @@ class _TrialStudyTimerOverlayState extends State<TrialStudyTimerOverlay> {
   Widget build(BuildContext context) {
     if (_showEndMessage) return _buildEndMessage();
     return Positioned(
-      top: MediaQuery.of(context).padding.top + 8,
+      // 히스토리 상단 액션(연습/번역/역할) 아래의 빈 영역에 배치한다.
+      top: MediaQuery.of(context).padding.top + kToolbarHeight + 12,
       right: 16,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-        decoration: BoxDecoration(
-          color: _remaining <= 10
-              ? const Color(0xFFFF4444).withValues(alpha: 0.85)
-              : const Color(0xFF000000).withValues(alpha: 0.55),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Text(
-          '${(_remaining ~/ 60).toString().padLeft(2, '0')}:${(_remaining % 60).toString().padLeft(2, '0')}',
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 14,
-            fontWeight: FontWeight.bold,
-            fontFeatures: [FontFeature.tabularFigures()],
+      child: IgnorePointer(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          decoration: BoxDecoration(
+            color: _remaining <= 10
+                ? const Color(0xFFFF4444).withValues(alpha: 0.85)
+                : const Color(0xFF000000).withValues(alpha: 0.55),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Text(
+            '${(_remaining ~/ 60).toString().padLeft(2, '0')}:${(_remaining % 60).toString().padLeft(2, '0')}',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
           ),
         ),
       ),
