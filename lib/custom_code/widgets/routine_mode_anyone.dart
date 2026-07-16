@@ -2862,9 +2862,16 @@ class TtsQueueManager {
   Completer<void>? _userDrainedCompleter;
   bool _currentChunkIsUser = false;
 
-  // 🔊 [TTS-GAP] 청크 간 공백(gap) 측정용 — 직전 청크 재생이 끝난 시각.
-  //   연속된 AI 청크 사이 gapBeforeMs가 크면 재생이 끊긴(underrun) 지점이다.
+  // 🔊 [TTS-GAP] 청크 재생 계측 (로그 전용 — 동작에 영향 없음).
+  //   직전 '정상완료(ok)' 시각. stop/timeout/error 후 null → 다음 gap 기준 무효화 + 새 세션.
   DateTime? _lastChunkEndAt;
+  // 재생 세션 id. underrun(잠깐 큐 빔 후 같은 응답 이어짐)은 유지, stop/timeout/error로만 증가.
+  int _playbackSessionId = 0;
+  int _chunkSeq = 0; // 현 세션 내 청크 순번(0부터)
+  // stopped 귀속용 generation — 공용 bool의 비동기 경합을 피하고 청크에 정확히 귀속시킨다.
+  int _playGen = 0; // 청크마다 증가하는 고유 세대
+  int? _activePlayGen; // 현재 재생 중 청크의 세대(재생 중 아니면 null)
+  int? _interruptedGen; // stop()이 중단시킨 청크의 세대
 
   void _tlog(String tag, String msg) {
     final ts = DateTime.now().toIso8601String().substring(11, 23);
@@ -2968,15 +2975,24 @@ class TtsQueueManager {
         seconds: ((bytes.length / 16000) + 3).ceil(),
       );
 
-      // 🔊 [TTS-GAP] 재생 시작 로그. gapBeforeMs = 직전 청크 종료 후 경과.
-      //   같은 'ai' 타입 청크가 연속될 때 이 값이 크면 청크 간 끊김이다.
+      // 🔊 [TTS-GAP] _lastChunkEndAt==null 이면 새 재생 세션(최초/ stop·timeout·error 이후).
+      //   정상완료(ok) 후 underrun 재진입은 _lastChunkEndAt 유지 → 같은 세션 → gap 측정됨.
+      if (_lastChunkEndAt == null) {
+        _playbackSessionId++;
+        _chunkSeq = 0;
+      }
       final bool isUserChunk = _currentChunkIsUser;
-      final int gapBeforeMs = _lastChunkEndAt == null
+      final int queueGapMs = _lastChunkEndAt == null
           ? -1
           : DateTime.now().difference(_lastChunkEndAt!).inMilliseconds;
+      final int sessionId = _playbackSessionId;
+      final int chunkIdx = _chunkSeq++;
+      final int myGen = ++_playGen; // 이 청크 고유 세대(stopped 귀속용)
+      _activePlayGen = myGen;
       final DateTime chunkPlayStart = DateTime.now();
+      String result = 'ok';
       _tlog('🔊 [TTS-CHUNK]',
-          'play type=${isUserChunk ? 'user' : 'ai'} bytes=${bytes.length} gapBeforeMs=$gapBeforeMs');
+          'session=$sessionId idx=$chunkIdx type=${isUserChunk ? 'user' : 'ai'} bytes=${bytes.length} queueGapMs=$queueGapMs');
 
       try {
         if (!TrialFlowState.instance.isTrial) {
@@ -2991,15 +3007,26 @@ class TtsQueueManager {
               ? 'free_talk_user_tts_end'
               : 'free_talk_ai_tts_end');
         }
+      } on TimeoutException {
+        result = 'timeout';
       } catch (_) {
+        result = 'error';
       } finally {
         if (_completer != null && !_completer!.isCompleted) {
           _completer!.complete();
         }
-        // 🔊 [TTS-GAP] 재생 종료 시각 기록 + 실제 재생 길이 로그.
-        _lastChunkEndAt = DateTime.now();
+        // stop()이 바로 이 청크(myGen)를 중단시킨 경우에만 stopped로 귀속.
+        if (_interruptedGen == myGen) {
+          result = 'stopped';
+          _interruptedGen = null;
+        }
+        _activePlayGen = null;
+        final int playMs =
+            DateTime.now().difference(chunkPlayStart).inMilliseconds;
+        // 🔊 [TTS-GAP] 정상완료(ok)만 다음 gap 기준으로 사용. 그 외는 null → 다음 청크 새 세션.
+        _lastChunkEndAt = (result == 'ok') ? DateTime.now() : null;
         _tlog('🔊 [TTS-DONE]',
-            'type=${isUserChunk ? 'user' : 'ai'} playMs=${_lastChunkEndAt!.difference(chunkPlayStart).inMilliseconds}');
+            'session=$sessionId idx=$chunkIdx type=${isUserChunk ? 'user' : 'ai'} playMs=$playMs result=$result');
       }
 
       // 🔒 [Box 7 USER-DRAIN-SIGNAL] 유저 청크 재생 완료 직후 sealed 상태면 drain 신호.
@@ -3017,6 +3044,9 @@ class TtsQueueManager {
   }
 
   void stop() {
+    // 🔊 [TTS-GAP] 완료 콜백보다 먼저, 현재 재생 중 청크(있으면)를 stopped로 귀속.
+    //   idle(재생 중 아님)이면 _activePlayGen==null → 다음 청크에 영향 없음.
+    if (_activePlayGen != null) _interruptedGen = _activePlayGen;
     _userQueue.clear();
     _aiQueue.clear();
     _isPlaying = false;
