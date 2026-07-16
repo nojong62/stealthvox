@@ -2862,6 +2862,15 @@ class TtsQueueManager {
   Completer<void>? _userDrainedCompleter;
   bool _currentChunkIsUser = false;
 
+  // 🔊 [TTS-GAP] 청크 간 공백(gap) 측정용 — 직전 청크 재생이 끝난 시각.
+  //   연속된 AI 청크 사이 gapBeforeMs가 크면 재생이 끊긴(underrun) 지점이다.
+  DateTime? _lastChunkEndAt;
+
+  void _tlog(String tag, String msg) {
+    final ts = DateTime.now().toIso8601String().substring(11, 23);
+    print('[$ts] $tag $msg');
+  }
+
   /// 유저 재생 중이거나 유저 큐에 남은 게 있으면 busy
   bool get isBusy =>
       _isPlaying ||
@@ -2959,6 +2968,16 @@ class TtsQueueManager {
         seconds: ((bytes.length / 16000) + 3).ceil(),
       );
 
+      // 🔊 [TTS-GAP] 재생 시작 로그. gapBeforeMs = 직전 청크 종료 후 경과.
+      //   같은 'ai' 타입 청크가 연속될 때 이 값이 크면 청크 간 끊김이다.
+      final bool isUserChunk = _currentChunkIsUser;
+      final int gapBeforeMs = _lastChunkEndAt == null
+          ? -1
+          : DateTime.now().difference(_lastChunkEndAt!).inMilliseconds;
+      final DateTime chunkPlayStart = DateTime.now();
+      _tlog('🔊 [TTS-CHUNK]',
+          'play type=${isUserChunk ? 'user' : 'ai'} bytes=${bytes.length} gapBeforeMs=$gapBeforeMs');
+
       try {
         if (!TrialFlowState.instance.isTrial) {
           BillingTicker.instance.resumeFromActivity(_currentChunkIsUser
@@ -2977,6 +2996,10 @@ class TtsQueueManager {
         if (_completer != null && !_completer!.isCompleted) {
           _completer!.complete();
         }
+        // 🔊 [TTS-GAP] 재생 종료 시각 기록 + 실제 재생 길이 로그.
+        _lastChunkEndAt = DateTime.now();
+        _tlog('🔊 [TTS-DONE]',
+            'type=${isUserChunk ? 'user' : 'ai'} playMs=${_lastChunkEndAt!.difference(chunkPlayStart).inMilliseconds}');
       }
 
       // 🔒 [Box 7 USER-DRAIN-SIGNAL] 유저 청크 재생 완료 직후 sealed 상태면 drain 신호.
@@ -3009,6 +3032,8 @@ class TtsQueueManager {
     _userDrainedCompleter = null;
     _userStreamSealed = false;
     _currentChunkIsUser = false;
+    // 🔊 [TTS-GAP] 턴 종료/barge-in 시 gap 측정 기준 리셋 (턴 간 오측정 방지).
+    _lastChunkEndAt = null;
   }
 
   Future<void> dispose() async {
