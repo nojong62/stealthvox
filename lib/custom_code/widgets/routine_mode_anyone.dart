@@ -1648,8 +1648,17 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         );
         _log('💾 [SAVE-05]', '새 세션 생성 완료. docId=$_sessionDocId');
 
-        await userDocRef.update({'total_sessions': nextSessionNo});
-        _log('💾 [SAVE-06]', 'users 문서 total_sessions 업데이트 완료');
+        // total_sessions는 정식 회원 통계 필드다. 익명 체험 유저는
+        //   (1) users/{uid} 부모 문서를 만들지 않아 update()가 permission-denied로 실패하고,
+        //   (2) 체험 데이터는 가입 시 폐기되므로 통계 갱신 실익이 없다.
+        // → 익명이면 갱신을 생략한다. (정식 회원은 기존 동작 유지)
+        if (!user.isAnonymous) {
+          await userDocRef.update({'total_sessions': nextSessionNo});
+          _log('💾 [SAVE-06]', 'users 문서 total_sessions 업데이트 완료');
+        } else {
+          _log('💾 [SAVE-06-SKIP]',
+              '익명 체험 — total_sessions 갱신 생략 (체험 데이터 폐기 대상)');
+        }
       } else {
         // 기존 세션에 append
         _log('💾 [SAVE-07]', '기존 세션에 append 시도. docId=$_sessionDocId');
