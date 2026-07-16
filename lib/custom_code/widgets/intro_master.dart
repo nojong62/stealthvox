@@ -177,8 +177,8 @@ class _IntroMasterState extends State<IntroMaster> {
     if (FFAppState().pendingInviteType == 'duo' &&
         FFAppState().duoRoomId.isNotEmpty) {
       debugPrint('[Intro] routing -> StealthRoom (pending duo invite)');
-      FFAppState().pendingInviteType = '';
-      FFAppState().duoRoomId = '';
+      // 초대 상태는 여기서 지우지 않음 — StealthRoom initState가 이 값을 보고
+      // Duo 자동 진입을 판단한다. 삭제는 _joinAsGuest 성공 후에만.
       context.pushReplacementNamed('StealthRoom');
     } else {
       context.goNamed('Lobby');
