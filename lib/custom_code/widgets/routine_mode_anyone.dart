@@ -85,6 +85,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   bool _isConversationActive = false;
   bool _isStartingListening = false;
   bool _isPipelineRunning = false;
+  Timer? _startupRetryTimer;
+  int _startupRetryCount = 0;
+  static const int _maxStartupRetries = 12;
   int _listenGeneration = 0;
   DateTime? _lastListenStartAt;
   double _fontScale = 1.0;
@@ -356,6 +359,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   @override
   void dispose() {
     disposeTrialTimer();
+    _startupRetryTimer?.cancel();
     _clearIdleTimers();
     BillingTicker.instance.pause();
     _stopEverything();
@@ -368,30 +372,67 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
   Future<void> _initPermissions() async {
     final statuses = await [Permission.microphone].request();
-    _micPermissionReady =
-        statuses[Permission.microphone]?.isGranted ?? false;
+    _micPermissionReady = statuses[Permission.microphone]?.isGranted ?? false;
     // 🆕 권한이 늦게 잡히는 경우(재설치 직후 등) 여기서 세션 시작을 재트리거.
     //    _startFreeTalkSession 내부 게이트가 키까지 준비됐는지 다시 확인한다.
     if (mounted) _startFreeTalkSession();
   }
 
   Future<void> _fetchKeys() async {
-    try {
-      await FirebaseRemoteConfig.instance.fetchAndActivate();
-      if (mounted) {
-        setState(() {
-          _deepgramKey =
-              FirebaseRemoteConfig.instance.getString('DeepgramAPIKey');
-          _openAiKey = FirebaseRemoteConfig.instance.getString('OpenAIAPIKey');
-        });
-        // 🆕 첫 로드 완료 후 세션 자동 시작 (StepExpand 패턴). race 제거.
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _startFreeTalkSession();
-        });
-      }
-    } catch (e) {
-      print('❌ Key Load Error: $e');
+    final remoteConfig = FirebaseRemoteConfig.instance;
+
+    // 앱 시작 시 이미 활성화된 값을 먼저 사용한다. 네트워크 fetch가 실패하거나
+    // 지연돼도 두 번째 입장까지 기다리지 않고 첫 입장에서 바로 시작할 수 있다.
+    _applyActivatedKeys(remoteConfig);
+    if (_deepgramKey.isNotEmpty) {
+      _scheduleStartupRetry(immediate: true);
     }
+
+    try {
+      await remoteConfig
+          .fetchAndActivate()
+          .timeout(const Duration(seconds: 10));
+    } catch (e) {
+      _log('❌ [KEY-LOAD]', 'Remote Config fetch 실패/지연: $e');
+    } finally {
+      if (mounted) {
+        // fetchAndActivate가 예외여도 이전에 활성화된 캐시 값은 유효하다.
+        _applyActivatedKeys(remoteConfig);
+        _scheduleStartupRetry(immediate: true);
+      }
+    }
+  }
+
+  void _applyActivatedKeys(FirebaseRemoteConfig remoteConfig) {
+    if (!mounted) return;
+    final deepgramKey = remoteConfig.getString('DeepgramAPIKey');
+    final openAiKey = remoteConfig.getString('OpenAIAPIKey');
+    if (deepgramKey == _deepgramKey && openAiKey == _openAiKey) return;
+    setState(() {
+      _deepgramKey = deepgramKey;
+      _openAiKey = openAiKey;
+    });
+    _log('🔑 [KEY-READY]',
+        'deepgram=${deepgramKey.isNotEmpty} openAi=${openAiKey.isNotEmpty}');
+  }
+
+  /// 최초 진입 시 Remote Config/권한/오디오 플러그인 준비 순서가 달라도
+  /// 짧게 재확인한다. 재입장으로 우연히 초기화되는 동작에 의존하지 않는다.
+  void _scheduleStartupRetry({bool immediate = false}) {
+    if (!mounted || _isConversationActive || _isStartingListening) return;
+    _startupRetryTimer?.cancel();
+    final delay = immediate ? Duration.zero : const Duration(milliseconds: 750);
+    _startupRetryTimer = Timer(delay, () async {
+      if (!mounted || _isConversationActive) return;
+      _applyActivatedKeys(FirebaseRemoteConfig.instance);
+      await _startFreeTalkSession();
+      if (!mounted || _isConversationActive) return;
+      if (_startupRetryCount++ < _maxStartupRetries) {
+        _scheduleStartupRetry();
+      } else {
+        _log('❌ [START-GIVEUP]', '첫 세션 준비 재시도 횟수 초과');
+      }
+    });
   }
 
   /// 🆕 세션 자동 시작: 표시등 ON + 마이크 먼저(유저 먼저 말하게).
@@ -400,6 +441,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   Future<void> _startFreeTalkSession() async {
     if (!mounted) return;
     if (_isConversationActive) return; // 중복 시작 방지
+    if (_isStartingListening) return;
     // 🆕 첫 진입 race 방지: 키와 마이크 권한이 "둘 다" 준비됐을 때만 시작한다.
     //    준비 안 된 항목이 있으면 조용히 대기 → 키 로드 콜백(_fetchKeys) 또는
     //    권한 콜백(_initPermissions) 중 늦게 끝나는 쪽이 이 함수를 다시 호출해 시작.
@@ -407,15 +449,24 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       _log('🎤 [START-GATE]', '키 미준비 → 시작 보류');
       return;
     }
-    final bool hasPerm =
-        _micPermissionReady || await _audioRecorder.hasPermission();
+    bool hasPerm = _micPermissionReady;
+    if (!hasPerm) {
+      try {
+        hasPerm = await _audioRecorder
+            .hasPermission()
+            .timeout(const Duration(seconds: 3));
+      } catch (e) {
+        _log('❌ [START-GATE]', '마이크 권한 확인 실패/지연: $e');
+      }
+    }
     if (!hasPerm) {
       _log('🎤 [START-GATE]', '마이크 권한 미준비 → 시작 보류');
       return;
     }
+    _micPermissionReady = true;
     if (!mounted || _isConversationActive) return;
     _hasShownNudgeBubble = false;
-    _startDeepgramListening();
+    await _startDeepgramListening();
   }
 
   // ====================================================================
@@ -602,9 +653,23 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     _log('🎤 [LISTEN-GEN]', 'start generation=$listenGeneration');
 
     try {
-      if (_deepgramKey.isEmpty || !(await _audioRecorder.hasPermission())) {
+      if (_deepgramKey.isEmpty) {
         return;
       }
+      bool hasPermission = _micPermissionReady;
+      if (!hasPermission) {
+        try {
+          hasPermission = await _audioRecorder
+              .hasPermission()
+              .timeout(const Duration(seconds: 3));
+        } catch (e) {
+          _log('❌ [LISTEN-PERM]', '마이크 권한 확인 실패/지연: $e');
+        }
+      }
+      if (!hasPermission) {
+        return;
+      }
+      _micPermissionReady = true;
       if (!mounted || listenGeneration != _listenGeneration) return;
       _resetIdleTimer();
       _isConversationActive = true;
