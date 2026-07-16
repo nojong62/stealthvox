@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '/auth/social_auth_service.dart';
+import '/components/social_login_modal.dart';
 import '/custom_code/widgets/auth_progress_view.dart';
 import '/custom_code/widgets/shared_social_button.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
@@ -123,7 +124,7 @@ class _TrialSignupSheetState extends State<TrialSignupSheet> {
             ),
             const SizedBox(height: 24),
             Text(
-              '방금 전에 만든 공부방 내용부터 이어서 연습하기 원하시면',
+              '회원가입 후 이용해 주세요',
               textAlign: TextAlign.center,
               style: theme.titleMedium.override(
                 fontFamily: theme.titleMediumFamily,
@@ -133,22 +134,14 @@ class _TrialSignupSheetState extends State<TrialSignupSheet> {
                 lineHeight: 1.45,
               ),
             ),
-            const SizedBox(height: 12),
-            Text(
-              '무료 회원가입 후 바로 시작할 수 있어요',
-              textAlign: TextAlign.center,
-              style: theme.bodyMedium.override(
-                fontFamily: theme.bodyMediumFamily,
-                color: const Color(0xFFB0B0B0),
-                fontSize: 14,
-                lineHeight: 1.4,
-              ),
-            ),
             const SizedBox(height: 28),
             if (_isLoading)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 6),
-                child: AuthProgressView(compact: true),
+                child: AuthProgressView(
+                  compact: true,
+                  showStepLabel: false,
+                ),
               )
             else ...[
               SharedSocialButton(
@@ -184,6 +177,29 @@ class _TrialSignupSheetState extends State<TrialSignupSheet> {
                   ),
                 ),
                 onTap: () => _handleLogin(SocialAuthService.signInWithGoogle),
+              ),
+              const SizedBox(height: 12),
+              SharedSocialButton(
+                label: '이메일로 회원가입',
+                backgroundColor: const Color(0xFF2C2C32),
+                textColor: Colors.white,
+                border: Border.all(color: Colors.white24),
+                icon: const Icon(
+                  Icons.email_outlined,
+                  size: 20,
+                  color: Colors.white70,
+                ),
+                onTap: () => _handleLogin(() async {
+                  final success = await showDialog<bool>(
+                    context: context,
+                    builder: (_) => const SocialLoginModal(
+                      startWithEmailSignUp: true,
+                    ),
+                  );
+                  if (success != true) {
+                    throw Exception('cancelled');
+                  }
+                }),
               ),
             ],
             if (_errorMessage != null) ...[

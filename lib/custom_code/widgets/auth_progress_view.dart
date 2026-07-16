@@ -6,10 +6,12 @@ class AuthProgressView extends StatefulWidget {
   const AuthProgressView({
     super.key,
     this.compact = false,
+    this.showStepLabel = true,
     this.accentColor = const Color(0xFFD4AF37),
   });
 
   final bool compact;
+  final bool showStepLabel;
   final Color accentColor;
 
   @override
@@ -82,21 +84,23 @@ class _AuthProgressViewState extends State<AuthProgressView>
                 ),
               ),
               SizedBox(height: widget.compact ? 16 : 22),
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 280),
-                child: Text(
-                  _steps[stepIndex],
-                  key: ValueKey(stepIndex),
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: textColor,
-                    fontSize: widget.compact ? 15 : 17,
-                    fontWeight: FontWeight.w800,
-                    height: 1.3,
+              if (widget.showStepLabel) ...[
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 280),
+                  child: Text(
+                    _steps[stepIndex],
+                    key: ValueKey(stepIndex),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: textColor,
+                      fontSize: widget.compact ? 15 : 17,
+                      fontWeight: FontWeight.w800,
+                      height: 1.3,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 8),
+                const SizedBox(height: 8),
+              ],
               Text(
                 '잠시만 기다려 주세요',
                 textAlign: TextAlign.center,
