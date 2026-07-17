@@ -351,7 +351,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
             path: path);
         _setDuoState('recording');
         _silenceTimer?.cancel();
-        // [토글] 침묵 자동 전송 제거. 종료/전송은 버튼 탭으로만 처리한다.
+        // [토글] 발화 후 1.5초 침묵하면 자동 전송. 버튼 탭으로도 즉시 전송 가능.
         // 무발화로 오래 켜져 있으면 안전 종료하여 마이크 점유와 과금을 방지한다.
         _silenceTimer =
             Timer.periodic(const Duration(milliseconds: 100), (timer) async {
@@ -362,7 +362,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
               _silenceCounter = 0;
             } else {
               _silenceCounter++;
-              if (!_hasSpoken && _silenceCounter >= 150) {
+              if (_hasSpoken && _silenceCounter >= 15) {
+                // 발화 후 1.5초 침묵 → 자동 종료·전송 (버튼 탭과 동일 경로)
+                timer.cancel();
+                await _stopAndSendToWhisper();
+              } else if (!_hasSpoken && _silenceCounter >= 150) {
                 // 말이 한 번도 없이 오래 켜져 있으면 안전 종료(전송 안 함)
                 timer.cancel();
                 await _audioRecorder.stop();
@@ -1148,7 +1152,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
                     child: Stack(children: [
                       _localMessages.isEmpty
                           ? const Center(
-                              child: Text("마이크는 말하는 동안만 누르세요.",
+                              child: Text("마이크를 탭하면 시작됩니다.\n말이 끝나면 자동으로 전송됩니다.",
                                   textAlign: TextAlign.center,
                                   style: TextStyle(
                                       color: Colors.white54, height: 1.5)))
