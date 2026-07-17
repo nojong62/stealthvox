@@ -1746,7 +1746,10 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         'user_label': _roleplayUserLabel,
         'partner_label': _roleplayPartnerLabel,
         'is_pinned': false,
-        'msg_count': 0
+        'msg_count': 0,
+        // 세션 생성 당시 언어 식별값 보존(History 동일 언어 판정용)
+        'native_lang': FFAppState().nativeLang,
+        'target_lang': FFAppState().targetLang,
       });
       _myHistoryRef = newRef;
       BillingTicker.instance.setSessionIdentifiers(

@@ -58,6 +58,31 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   /// 언어 표시 모드: 0=영어+한글, 1=영어만, 2=한글만
   int _langDisplayMode = 0;
+
+  /// 이 History 세션 생성 당시 저장된 언어 식별값.
+  /// 레거시(구버전) 문서엔 없으므로 null → 텍스트 동일성 fallback으로 판정한다.
+  /// 전역 FFAppState 값을 쓰지 않으므로, 이후 언어 설정을 바꿔도 과거 기록은 안전하다.
+  String? _sessionNativeLang;
+  String? _sessionTargetLang;
+
+  /// 언어 식별값 정규화: 대소문자·앞뒤 공백 차이를 흡수한다.
+  String _normLangCode(String v) => v.trim().toLowerCase();
+
+  /// 텍스트 정규화(레거시 fallback 비교용): 대소문자·연속 공백 차이를 흡수한다.
+  String _normLangText(String v) =>
+      v.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+
+  /// 이 세션이 동일 언어(Origin=Target)인지 — 기록별 언어값 기준.
+  /// 기록에 Origin/Target 언어값이 모두 있으면 그것으로 판정하고,
+  /// 없으면 null을 반환해 호출부가 텍스트 동일성 fallback으로 위임하게 한다.
+  bool? get _recordSameLang {
+    final n = _sessionNativeLang;
+    final t = _sessionTargetLang;
+    if (n != null && n.trim().isNotEmpty && t != null && t.trim().isNotEmpty) {
+      return _normLangCode(n) == _normLangCode(t);
+    }
+    return null;
+  }
   bool isLoadingRoom = true;
   String roomName = "";
   bool _isActionLocked = false;
@@ -422,6 +447,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       if (doc.exists && doc.data() != null) {
         var data = doc.data() as Map<String, dynamic>;
         roomName = data['room_name'] ?? "History Master";
+        // 세션 생성 당시 보존된 언어 식별값(있으면 동일 언어 판정에 사용)
+        _sessionNativeLang = data['native_lang'] as String?;
+        _sessionTargetLang = data['target_lang'] as String?;
       }
     } catch (e) {
       debugPrint("[fetchRoomData] $e");
@@ -3617,6 +3645,16 @@ RULES — follow exactly:
         final oParts = original.split(RegExp(r'\n\s*\n'));
         if (oParts.length > 1) original = oParts.first.trim();
 
+        // 동일 언어(Origin=Target) → 같은 문장 중복 방지: Target 한 줄만 표시.
+        //  1) 기록별 언어값이 있으면 그것으로 판정한다.
+        //  2) 언어값이 없는 레거시 기록은 전역 설정이 아니라
+        //     original/translated 텍스트가 정규화 후 완전히 동일할 때만 중복 처리한다.
+        final bool? recSame = _recordSameLang;
+        final bool collapseSame = recSame ??
+            (translated.isNotEmpty &&
+                original.isNotEmpty &&
+                _normLangText(original) == _normLangText(translated));
+
         Widget controlButtons = Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -3681,42 +3719,64 @@ RULES — follow exactly:
                               ? CrossAxisAlignment.end
                               : CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // 영어(타겟) 표시: mode 0,1 에서 보임
-                            if (_langDisplayMode != 2) ...[
-                              Text(translated,
-                                  textAlign:
-                                      isHost ? TextAlign.right : TextAlign.left,
-                                  style: TextStyle(
-                                      color: isHost
-                                          ? Colors.white
-                                          : const Color(0xFF93C5FD),
-                                      fontSize: 16 * _fontScale,
-                                      fontWeight: FontWeight.bold,
-                                      height: 1.4)),
-                            ],
-                            // 한글(원어) 표시: mode 0,2 에서 보임
-                            if (_langDisplayMode != 1 &&
-                                original.isNotEmpty) ...[
-                              if (_langDisplayMode == 0)
-                                const SizedBox(height: 8),
-                              Text(original,
-                                  textAlign:
-                                      isHost ? TextAlign.right : TextAlign.left,
-                                  style: TextStyle(
-                                      color: _langDisplayMode == 2
-                                          ? (isHost
+                          children: collapseSame
+                              // Origin=Target 동일 언어(또는 레거시 동일 텍스트):
+                              // 같은 문장이 두 번 나오지 않도록 Target 한 줄만 표시한다.
+                              // Target이 비어 있으면 Origin을 fallback으로 쓴다.
+                              ? [
+                                  Text(
+                                      translated.isNotEmpty
+                                          ? translated
+                                          : original,
+                                      textAlign: isHost
+                                          ? TextAlign.right
+                                          : TextAlign.left,
+                                      style: TextStyle(
+                                          color: isHost
                                               ? Colors.white
-                                              : const Color(0xFF93C5FD))
-                                          : Colors.grey,
-                                      fontSize: _langDisplayMode == 2
-                                          ? 16 * _fontScale
-                                          : 12 * _fontScale,
-                                      fontWeight: _langDisplayMode == 2
-                                          ? FontWeight.bold
-                                          : FontWeight.normal)),
-                            ],
-                          ],
+                                              : const Color(0xFF93C5FD),
+                                          fontSize: 16 * _fontScale,
+                                          fontWeight: FontWeight.bold,
+                                          height: 1.4)),
+                                ]
+                              : [
+                                  // 영어(타겟) 표시: mode 0,1 에서 보임
+                                  if (_langDisplayMode != 2) ...[
+                                    Text(translated,
+                                        textAlign: isHost
+                                            ? TextAlign.right
+                                            : TextAlign.left,
+                                        style: TextStyle(
+                                            color: isHost
+                                                ? Colors.white
+                                                : const Color(0xFF93C5FD),
+                                            fontSize: 16 * _fontScale,
+                                            fontWeight: FontWeight.bold,
+                                            height: 1.4)),
+                                  ],
+                                  // 한글(원어) 표시: mode 0,2 에서 보임
+                                  if (_langDisplayMode != 1 &&
+                                      original.isNotEmpty) ...[
+                                    if (_langDisplayMode == 0)
+                                      const SizedBox(height: 8),
+                                    Text(original,
+                                        textAlign: isHost
+                                            ? TextAlign.right
+                                            : TextAlign.left,
+                                        style: TextStyle(
+                                            color: _langDisplayMode == 2
+                                                ? (isHost
+                                                    ? Colors.white
+                                                    : const Color(0xFF93C5FD))
+                                                : Colors.grey,
+                                            fontSize: _langDisplayMode == 2
+                                                ? 16 * _fontScale
+                                                : 12 * _fontScale,
+                                            fontWeight: _langDisplayMode == 2
+                                                ? FontWeight.bold
+                                                : FontWeight.normal)),
+                                  ],
+                                ],
                         ),
                       ),
                     ),

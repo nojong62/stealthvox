@@ -250,6 +250,9 @@ class _IntroMasterState extends State<IntroMaster> {
     await historyRef.set({
       'created_at': FieldValue.serverTimestamp(),
       'is_pinned': false,
+      // 세션 생성 당시 언어 식별값 보존(History 동일 언어 판정용)
+      'native_lang': FFAppState().nativeLang,
+      'target_lang': FFAppState().targetLang,
     });
     TrialFlowState.instance.myHistoryRef = historyRef;
     TrialFlowState.instance.advanceTo(1);

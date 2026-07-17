@@ -898,8 +898,13 @@ class LobbyBrain {
   static Future<DocumentReference> createHistoryDoc(
       DocumentReference userRef) async {
     final newHistoryRef = userRef.collection('chat_history').doc();
-    await newHistoryRef
-        .set({'created_at': FieldValue.serverTimestamp(), 'is_pinned': false});
+    await newHistoryRef.set({
+      'created_at': FieldValue.serverTimestamp(),
+      'is_pinned': false,
+      // 세션 생성 당시 언어 식별값 보존(History 동일 언어 판정용)
+      'native_lang': FFAppState().nativeLang,
+      'target_lang': FFAppState().targetLang,
+    });
     return newHistoryRef;
   }
 
