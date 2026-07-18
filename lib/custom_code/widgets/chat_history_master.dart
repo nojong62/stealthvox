@@ -167,6 +167,14 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // [P2-SHADOW-REC] User-line audio captured for Play all. No scoring/STT.
   bool _shadowRecording = false;
   int _shadowRecordLineIdx = -1;
+  // [P2-SHADOW-AI] AI voice read-along: highlight follows audio playback position.
+  AudioPlayer? _shadowAiPlayer;
+  StreamSubscription<Duration>? _shadowPosSub;
+  StreamSubscription<Duration>? _shadowDurSub;
+  StreamSubscription<void>? _shadowCompleteSub;
+  Duration _shadowAudioDuration = Duration.zero;
+  // [P2-SHADOW] "Shadowing 하세요!" popup shown once per P2 entry.
+  bool _shadowPopupShown = false;
   // [P-PULSE] Softer indigo pulse for the P3 polished button.
   static const Color _pPulseColor = Color(0xFF818CF8);
 
@@ -356,6 +364,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _polishedRevealTimer?.cancel();
     _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
     _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
+    _stopShadowAiPlayback(); // [P2-SHADOW-AI]
     _chunkScrollController.dispose();
     _practiceScrollController.dispose();
     _playerStateSub?.cancel();
@@ -765,6 +774,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   void _forceNextTurn() {
     _stopAutoVADRecording();
     audioPlayer.stop();
+    _stopShadowAiPlayback(); // [P2-SHADOW-AI] Stop read-along voice on skip.
     _nextTurn();
   }
 
@@ -810,6 +820,11 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         _shadowWordIdx = -1;
       });
     }
+    // [P2-SHADOW] Show the "Shadowing 하세요!" cue once per P2 entry.
+    if (!_shadowPopupShown) {
+      _shadowPopupShown = true;
+      _showShadowingPopup();
+    }
     final int lineIdx = currentIndex;
     _pinShadowLineToTop(lineIdx);
     _shadowHighlightTimer = Timer(const Duration(seconds: 1), () async {
@@ -827,7 +842,164 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         return;
       }
       _startShadowLineGlide(lineIdx, words);
+      // [P2-SHADOW-AI] Play the AI voice and drive the highlight from the audio
+      // playback position. Falls back to the timer stepping if audio is
+      // unavailable (offline / no API key).
+      await _startShadowAiVoice(lineIdx, words);
+    });
+  }
+
+  // [P2-SHADOW-AI] Fetch + play the AI voice for the current read-along line and
+  // sync the word highlight to the audio position. Speed follows _shadowSpeed.
+  Future<void> _startShadowAiVoice(int lineIdx, List<String> words) async {
+    final text = (_tutorLines[lineIdx]['text'] as String).trim();
+    Uint8List? audio;
+    try {
+      audio = await TtsCache.get(text, 'nova');
+      if (audio == null) {
+        audio = await _fetchOpenAITTS(text, 1.0, 'nova');
+        if (audio != null) TtsCache.put(text, 'nova', audio);
+      }
+    } catch (e) {
+      debugPrint('[startShadowAiVoice] fetch $e');
+    }
+    if (!mounted ||
+        _phase != ShadowingPhase.part2Practice ||
+        isPaused ||
+        currentIndex != lineIdx) {
+      return;
+    }
+    // No audio available → keep the original timer-based read-along.
+    if (audio == null) {
       _stepShadowHighlight(0);
+      return;
+    }
+    await _stopShadowAiPlayback();
+    final player = AudioPlayer();
+    _shadowAiPlayer = player;
+    _shadowAudioDuration = Duration.zero;
+    _shadowDurSub = player.onDurationChanged.listen((d) {
+      if (d > Duration.zero) _shadowAudioDuration = d;
+    });
+    _shadowPosSub = player.onPositionChanged.listen((pos) {
+      if (!mounted ||
+          _phase != ShadowingPhase.part2Practice ||
+          isPaused ||
+          currentIndex != lineIdx) {
+        return;
+      }
+      final total = _shadowAudioDuration.inMilliseconds;
+      if (total <= 0 || words.isEmpty) return;
+      final ratio = (pos.inMilliseconds / total).clamp(0.0, 1.0);
+      final idx = (ratio * words.length).floor().clamp(0, words.length - 1);
+      if (idx != _shadowWordIdx) {
+        setState(() => _shadowWordIdx = idx);
+      }
+    });
+    _shadowCompleteSub =
+        player.onPlayerComplete.listen((_) => _onShadowAiComplete(lineIdx));
+    try {
+      await player.play(BytesSource(audio));
+      await player.setPlaybackRate(_shadowSpeed);
+    } catch (e) {
+      debugPrint('[startShadowAiVoice] play $e');
+      await _stopShadowAiPlayback();
+      if (mounted &&
+          _phase == ShadowingPhase.part2Practice &&
+          !isPaused &&
+          currentIndex == lineIdx) {
+        _stepShadowHighlight(0); // fallback
+      }
+    }
+  }
+
+  // [P2-SHADOW-AI] AI voice finished → mark all words read, then reuse the
+  // existing recording-stop + evaluate/advance flow.
+  void _onShadowAiComplete(int lineIdx) {
+    if (!mounted ||
+        _phase != ShadowingPhase.part2Practice ||
+        isPaused ||
+        currentIndex != lineIdx) {
+      return;
+    }
+    if (mounted) setState(() => _shadowWordIdx = _shadowWords.length);
+    _shadowAdvanceTimer?.cancel();
+    _shadowAdvanceTimer = Timer(const Duration(milliseconds: 700), () async {
+      if (!mounted || _phase != ShadowingPhase.part2Practice || isPaused) {
+        return;
+      }
+      await _stopShadowRecordingAndEvaluate();
+    });
+  }
+
+  // [P2-SHADOW-AI] Stop + dispose the read-along AI player and its listeners.
+  Future<void> _stopShadowAiPlayback() async {
+    _shadowPosSub?.cancel();
+    _shadowPosSub = null;
+    _shadowDurSub?.cancel();
+    _shadowDurSub = null;
+    _shadowCompleteSub?.cancel();
+    _shadowCompleteSub = null;
+    final p = _shadowAiPlayer;
+    _shadowAiPlayer = null;
+    if (p != null) {
+      try {
+        await p.stop();
+      } catch (_) {}
+      try {
+        await p.dispose();
+      } catch (_) {}
+    }
+    _shadowAudioDuration = Duration.zero;
+  }
+
+  // [P2-SHADOW] Center "Shadowing 하세요!" cue: fades in, holds, auto-dismisses
+  // after ~1.5s. Shown once per P2 entry.
+  void _showShadowingPopup() {
+    if (!mounted) return;
+    final overlay = Overlay.of(context);
+    final notifier = ValueNotifier<double>(0.0);
+    late OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (ctx) => Positioned.fill(
+        child: IgnorePointer(
+          child: Center(
+            child: ValueListenableBuilder<double>(
+              valueListenable: notifier,
+              builder: (_, op, __) => AnimatedOpacity(
+                opacity: op,
+                duration: const Duration(milliseconds: 300),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 28, vertical: 18),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.82),
+                    borderRadius: BorderRadius.circular(18),
+                    border:
+                        Border.all(color: Colors.amber.withValues(alpha: 0.6)),
+                  ),
+                  child: const Text(
+                    "Shadowing 하세요!",
+                    style: TextStyle(
+                        color: Colors.amber,
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    overlay.insert(entry);
+    notifier.value = 1.0; // fade in
+    Timer(const Duration(milliseconds: 1200), () => notifier.value = 0.0);
+    Timer(const Duration(milliseconds: 1500), () {
+      try {
+        entry.remove();
+      } catch (_) {}
+      notifier.dispose();
     });
   }
 
@@ -1491,6 +1663,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _polishedRevealTimer?.cancel();
     _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
     _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
+    _stopShadowAiPlayback(); // [P2-SHADOW-AI]
     _stopShadowRecording(); // [P2-SHADOW-REC]
     _stopDeepgramListening();
     audioPlayer.stop();
@@ -6275,9 +6448,11 @@ RULES — follow exactly:
         _shadowSpeed = 1.0; // [P2-SHADOW]
         _shadowStarted = false; // [P2-START] Wait for speed selection.
         _shadowRereadCount = 0; // [P2-PROXY]
+        _shadowPopupShown = false; // [P2-SHADOW] Re-show cue on P2 re-entry.
       });
       _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
       _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
+      _stopShadowAiPlayback(); // [P2-SHADOW-AI]
       Future.delayed(const Duration(seconds: 1), () {
         if (mounted && _phase == ShadowingPhase.part2Practice) {
           _startTurnPractice();
@@ -6746,6 +6921,7 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     audioPlayer.stop();
     _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
     _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
+    _stopShadowAiPlayback(); // [P2-SHADOW-AI]
     _stopShadowRecording(); // [P2-SHADOW-REC]
     if (practiceNum == 1) {
       _startPart1Practice();
