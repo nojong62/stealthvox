@@ -526,7 +526,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   //    - 유저의 첫 문장이 확장 seed가 됨
   //
   // 2. AI는 시작 안내와 동시에 듣기 시작 (Guided Barge-in)
-  //    - "오늘의 이야기, 어디서부터 시작해볼까요?"
+  //    - "오늘은 어떤 순간을 영어로 다시 그려볼까요?"
   //    - OpenAI 질문 생성 API 호출 없음
   //    - STT를 먼저 열고, 유저가 말하면 안내 TTS를 즉시 중단
   //
@@ -831,9 +831,25 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   Future<void> _startSessionWaitingForUserSeed() async {
     if (_openAiKey.isEmpty || !mounted) return;
     if (_isSessionComplete) return;
+    const openingPrompt = '오늘은 어떤 순간을 영어로 다시 그려볼까요?';
     _resetIdleTimer();
     _isConversationActive = true;
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {
+        final hasOpeningHint = _localMessages.any((message) =>
+            message['role'] == 'SYSTEM_HINT' &&
+            message['target'] == openingPrompt);
+        if (!hasOpeningHint) {
+          _localMessages.add({
+            // 화면에는 AI 말풍선으로 보이지만 첫 턴 GPT 문맥에서는 제외한다.
+            'role': 'SYSTEM_HINT',
+            'target': openingPrompt,
+            'original': '',
+          });
+        }
+      });
+      _scrollToBottom();
+    }
 
     _ttsQueueManager.setUserTurn(false);
     _ttsQueueManager.setAiPaused(false);
@@ -855,7 +871,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         isUser: false,
         onLog: _log,
       );
-      tts.addText('오늘의 이야기, 어디서부터 시작해볼까요?');
+      tts.addText(openingPrompt);
       int ticks = 0;
       while (_isInitialGuidePlaying &&
           (tts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&

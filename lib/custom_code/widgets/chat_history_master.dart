@@ -136,6 +136,10 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   bool _showEchoingOverlay = false;
   Timer? _echoingOverlayTimer;
 
+  // P2 샤도잉 시작 팝업 오버레이
+  bool _showShadowingOverlay = false;
+  Timer? _shadowingOverlayTimer;
+
   // 📦 [Box 4-B: 양방향 턴제 연습 엔진 상태]
   int currentIndex = 0;
 
@@ -173,8 +177,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   StreamSubscription<Duration>? _shadowDurSub;
   StreamSubscription<void>? _shadowCompleteSub;
   Duration _shadowAudioDuration = Duration.zero;
-  // [P2-SHADOW] "Shadowing 하세요!" popup shown once per P2 entry.
-  bool _shadowPopupShown = false;
   // [P-PULSE] Softer indigo pulse for the P3 polished button.
   static const Color _pPulseColor = Color(0xFF818CF8);
 
@@ -361,6 +363,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _roleBubbleTimer?.cancel();
     _blinkController.dispose();
     _echoingOverlayTimer?.cancel();
+    _shadowingOverlayTimer?.cancel();
     _polishedRevealTimer?.cancel();
     _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
     _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
@@ -820,11 +823,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         _shadowWordIdx = -1;
       });
     }
-    // [P2-SHADOW] Show the "Shadowing 하세요!" cue once per P2 entry.
-    if (!_shadowPopupShown) {
-      _shadowPopupShown = true;
-      _showShadowingPopup();
-    }
     final int lineIdx = currentIndex;
     _pinShadowLineToTop(lineIdx);
     _shadowHighlightTimer = Timer(const Duration(seconds: 1), () async {
@@ -951,56 +949,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       } catch (_) {}
     }
     _shadowAudioDuration = Duration.zero;
-  }
-
-  // [P2-SHADOW] Center "Shadowing 하세요!" cue: fades in, holds, auto-dismisses
-  // after ~1.5s. Shown once per P2 entry.
-  void _showShadowingPopup() {
-    if (!mounted) return;
-    final overlay = Overlay.of(context);
-    final notifier = ValueNotifier<double>(0.0);
-    late OverlayEntry entry;
-    entry = OverlayEntry(
-      builder: (ctx) => Positioned.fill(
-        child: IgnorePointer(
-          child: Center(
-            child: ValueListenableBuilder<double>(
-              valueListenable: notifier,
-              builder: (_, op, __) => AnimatedOpacity(
-                opacity: op,
-                duration: const Duration(milliseconds: 300),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 28, vertical: 18),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.82),
-                    borderRadius: BorderRadius.circular(18),
-                    border:
-                        Border.all(color: Colors.amber.withValues(alpha: 0.6)),
-                  ),
-                  child: const Text(
-                    "Shadowing 하세요!",
-                    style: TextStyle(
-                        color: Colors.amber,
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-    overlay.insert(entry);
-    notifier.value = 1.0; // fade in
-    Timer(const Duration(milliseconds: 1200), () => notifier.value = 0.0);
-    Timer(const Duration(milliseconds: 1500), () {
-      try {
-        entry.remove();
-      } catch (_) {}
-      notifier.dispose();
-    });
   }
 
   void _stepShadowHighlight(int idx) {
@@ -2126,6 +2074,17 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     _echoingOverlayTimer = Timer(const Duration(milliseconds: 2000), () {
       if (!mounted) return;
       setState(() => _showEchoingOverlay = false);
+      onDismiss?.call();
+    });
+  }
+
+  void _triggerShadowingOverlay({VoidCallback? onDismiss}) {
+    if (!mounted) return;
+    setState(() => _showShadowingOverlay = true);
+    _shadowingOverlayTimer?.cancel();
+    _shadowingOverlayTimer = Timer(const Duration(milliseconds: 2000), () {
+      if (!mounted) return;
+      setState(() => _showShadowingOverlay = false);
       onDismiss?.call();
     });
   }
@@ -6474,18 +6433,16 @@ RULES — follow exactly:
         _shadowWords = []; // [P2-SHADOW]
         _shadowWordIdx = -1; // [P2-SHADOW]
         _shadowSpeed = 1.0; // [P2-SHADOW]
-        _shadowStarted = false; // [P2-START] Wait for speed selection.
+        _shadowStarted = false; // Wait until the learner chooses a speed.
         _shadowRereadCount = 0; // [P2-PROXY]
-        _shadowPopupShown = false; // [P2-SHADOW] Re-show cue on P2 re-entry.
+        _showEchoingOverlay = false;
+        _showShadowingOverlay = false;
       });
+      _echoingOverlayTimer?.cancel();
+      _shadowingOverlayTimer?.cancel();
       _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
       _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
       _stopShadowAiPlayback(); // [P2-SHADOW-AI]
-      Future.delayed(const Duration(seconds: 1), () {
-        if (mounted && _phase == ShadowingPhase.part2Practice) {
-          _startTurnPractice();
-        }
-      });
     }
   }
 
@@ -6924,12 +6881,14 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
       appAudioRecorder.stop();
     } catch (_) {}
     audioPlayer.stop();
+    _shadowingOverlayTimer?.cancel();
     if (mounted) {
       setState(() {
         _isAutoRecording = false;
         _showRetryHint = false;
         _currentChunkIdx = -1;
         _phase = ShadowingPhase.chunkPractice;
+        _showShadowingOverlay = false;
       });
     }
     // Start the first chunk when the overlay disappears.
@@ -6984,11 +6943,62 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
   }
 
   Widget _buildStepPracticeWithTabBar() {
-    return Column(
+    return Stack(
       children: [
-        _buildPracticeTabBar(),
-        if (_phase == ShadowingPhase.part2Practice) _buildShadowSpeedSelector(),
-        Expanded(child: _buildTurnPracticeScreen()),
+        Column(
+          children: [
+            _buildPracticeTabBar(),
+            Expanded(
+              child: IgnorePointer(
+                ignoring: _showShadowingOverlay,
+                child: AnimatedOpacity(
+                  opacity: _showShadowingOverlay ? 0.0 : 1.0,
+                  duration: const Duration(milliseconds: 500),
+                  child: Column(
+                    children: [
+                      if (_phase == ShadowingPhase.part2Practice)
+                        _buildShadowSpeedSelector(),
+                      Expanded(child: _buildTurnPracticeScreen()),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        AnimatedOpacity(
+          opacity: _showShadowingOverlay ? 1.0 : 0.0,
+          duration: const Duration(milliseconds: 600),
+          child: IgnorePointer(
+            ignoring: !_showShadowingOverlay,
+            child: Center(
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 32, vertical: 22),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.80),
+                  borderRadius: BorderRadius.circular(18),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.amber.withValues(alpha: 0.18),
+                      blurRadius: 24,
+                      spreadRadius: 2,
+                    ),
+                  ],
+                ),
+                child: const Text(
+                  'Shadow it!',
+                  style: TextStyle(
+                    color: Colors.amber,
+                    fontSize: 26,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.0,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -7081,12 +7091,24 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     final bool sel = _shadowStarted && _shadowSpeed == v;
     return GestureDetector(
       onTap: () {
-        setState(() => _shadowSpeed = v);
-        // [P2-START] Speed selection triggers start; mid-line changes restart current turn.
-        if (_phase == ShadowingPhase.part2Practice && !isPaused) {
-          _shadowStarted = true;
-          _checkAndStartTurn(); // AI line plays, user line highlights.
+        final bool firstSelection = !_shadowStarted;
+        setState(() {
+          _shadowSpeed = v;
+          if (firstSelection) _shadowStarted = true;
+        });
+        if (_phase != ShadowingPhase.part2Practice || isPaused) return;
+        if (firstSelection) {
+          _triggerShadowingOverlay(onDismiss: () {
+            if (mounted &&
+                _phase == ShadowingPhase.part2Practice &&
+                !isPaused) {
+              _startTurnPractice();
+            }
+          });
+          return;
         }
+        final player = _shadowAiPlayer;
+        if (player != null) unawaited(player.setPlaybackRate(v));
       },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
