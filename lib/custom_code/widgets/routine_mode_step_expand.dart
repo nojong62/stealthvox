@@ -39,6 +39,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
+import '/custom_code/services/openai_connection_pool.dart';
 import 'deepgram_confidence_probe.dart';
 
 /// ==================================================================== [Box
@@ -61,6 +62,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   String _openAiKey = "";
   bool _micPermissionReady = false; // 🆕 마이크 권한 준비 여부(첫 진입 race 방지)
   bool _initialSessionStarted = false; // 🆕 초기 자동 시작 1회성 보장
+  bool _isInitialGuidePlaying = false; // 첫 안내 중 유저 발화 시 즉시 중단(barge-in)
   bool _isConversationActive = false;
   bool _isExiting = false; // 🔧 [EXIT-GUARD] PopScope+버튼 이중 종료 방지
   double _fontScale = 1.0;
@@ -341,6 +343,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       'mode=$_probeMode event=$event DG_FINAL_TO_$event=${elapsed < 0 ? 0 : elapsed}',
     );
   }
+
   // 🌐 [v3.1] 로비에서 선택한 언어 이름 → Deepgram/OpenAI 언어 코드 매핑
   String _mapLanguageToCode(String lang) {
     switch (lang.trim().toLowerCase()) {
@@ -470,8 +473,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 
   Future<void> _initPermissions() async {
     final statuses = await [Permission.microphone].request();
-    _micPermissionReady =
-        statuses[Permission.microphone]?.isGranted ?? false;
+    _micPermissionReady = statuses[Permission.microphone]?.isGranted ?? false;
     // 🆕 권한이 늦게 잡히는 경우(재설치 직후 등) 초기 세션 시작을 재트리거.
     if (mounted) _startSessionWhenReady();
   }
@@ -523,13 +525,13 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   //    - 세션 시작 시 AI는 시작 안내만 하고 대기
   //    - 유저의 첫 문장이 확장 seed가 됨
   //
-  // 2. AI는 시작 안내 후 대기 (Guided Waiting)
+  // 2. AI는 시작 안내와 동시에 듣기 시작 (Guided Barge-in)
   //    - "오늘의 이야기, 어디서부터 시작해볼까요?"
   //    - OpenAI 질문 생성 API 호출 없음
-  //    - 안내문 TTS 완료 후 STT 자동 시작
+  //    - STT를 먼저 열고, 유저가 말하면 안내 TTS를 즉시 중단
   //
   // 3. 마이크 버튼 없음 (No Mic Button)
-  //    - 안내문 발화 완료 후 STT 자동 시작 (유저가 버튼 누를 필요 없음)
+  //    - 안내문 재생 전 STT 자동 시작 (유저가 버튼 누를 필요 없음)
   //    - 화면 하단은 노란 불빛 인디케이터만 표시 → 채팅 공간 최대화
   //
   // 4. 이후 AI는 기존 5턴 확장 패턴대로 짧은 유도 질문을 한다
@@ -540,6 +542,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   //   - mode alias 확장으로 다양한 저장값 커버
   //   - role/field fallback으로 저장 스키마 차이 대응
   //   - 기록 없으면 빈 리스트 → 호출부에서 roleplay 또는 고정 안내로 폴백
+  // ignore: unused_element
   Future<List<String>> _fetchFreeTalkUserSnippets() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return [];
@@ -634,6 +637,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   // 🆕 roleplay 기록에서 유저(HOST) 발화 1~2개를 최근 3개 방에서 수집.
   //   - mode alias 확장 (roleplay, role_play, routine_mode_roleplay)
   //   - 역할극 발화이므로 실제 사실 아님 — 주제/분위기 재료로만 사용
+  // ignore: unused_element
   Future<List<String>> _fetchRoleplayUserSnippets() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return [];
@@ -834,29 +838,16 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     _ttsQueueManager.setUserTurn(false);
     _ttsQueueManager.setAiPaused(false);
 
-    // 🆕 FreeTalk와 Roleplay를 독립적으로 fetch (상호 의존 제거)
-    final List<String> ftSnippets = await _fetchFreeTalkUserSnippets();
-    final List<String> rpSnippets = await _fetchRoleplayUserSnippets();
-
-    // [SEED 로그]
-    _log('[SEED-FT]',
-        'count=${ftSnippets.length}, picked=${ftSnippets.join(" | ")}');
-    _log('[SEED-RP]',
-        'count=${rpSnippets.length}, picked=${rpSnippets.join(" | ")}');
-    final String _seedSource = ftSnippets.isNotEmpty && rpSnippets.isNotEmpty
-        ? 'freeTalk+roleplay'
-        : ftSnippets.isNotEmpty
-            ? 'freeTalkOnly'
-            : rpSnippets.isNotEmpty
-                ? 'roleplayOnly'
-                : 'fallback';
-    _log('[SEED-MIX]',
-        'ft=${ftSnippets.length}, rp=${rpSnippets.length}, source=$_seedSource');
+    // 고정 첫 멘트에서는 개인화 seed 조회 결과를 사용하지 않는다. 네트워크 조회를
+    // 기다리지 않고 마이크부터 열어 첫 발화를 즉시 받을 수 있게 한다.
+    await _startDeepgramListening();
+    if (!mounted || !_isConversationActive || _isSessionComplete) return;
 
     // 🔧 [FIRST-MENT] 히스토리 유무와 무관하게 항상 고정 첫 멘트 재생.
     //    개인화 seed 질문 경로(_generateAndPlayFreeTalkSeedQuestion)는
     //    사용하지 않지만, 추후 복구 대비로 메서드는 보존한다.
     if (mounted && _isConversationActive) {
+      _isInitialGuidePlaying = true;
       final ChunkedTtsFetcher tts = ChunkedTtsFetcher(
         _openAiKey,
         _ttsQueueManager,
@@ -866,17 +857,13 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       );
       tts.addText('오늘의 이야기, 어디서부터 시작해볼까요?');
       int ticks = 0;
-      while ((tts.pendingRequests > 0 || _ttsQueueManager.isBusy) && mounted) {
+      while (_isInitialGuidePlaying &&
+          (tts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
+          mounted) {
         await Future.delayed(const Duration(milliseconds: 50));
         if (++ticks > 200) break;
       }
-    }
-
-    // 안내/질문 완료  STT 즉시 시작 (유저 기본 문장 대기)
-    // 🔧 [MIC-INSTANT] 8초 딜레이 제거  AI 말 끝나자마자 마이크 ON.
-    // 침묵 시 별도 안내 멘트 없이 그대로 대기(침묵 폴백 제거).
-    if (mounted && _isConversationActive && !_isSessionComplete) {
-      _startDeepgramListening();
+      _isInitialGuidePlaying = false;
     }
   }
 
@@ -1794,6 +1781,11 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       },
       onTranscriptUpdate: (transcript) {
         BillingTicker.instance.resumeFromActivity('step_expand_stt_partial');
+        if (_isInitialGuidePlaying && transcript.trim().isNotEmpty) {
+          _isInitialGuidePlaying = false;
+          _ttsQueueManager.stop();
+          _log('🎤 [BARGE-IN]', '첫 유저 발화 감지 → 시작 안내 TTS 즉시 중단');
+        }
         _swDeepgram.reset();
         _swDeepgram.start();
       },
@@ -1859,8 +1851,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     // 🔧 기존 대기 중인 발화가 있으면 공백으로 연결 (더듬거림 합치기)
     if (_pendingTranscript.isEmpty) {
       _pendingTranscript = clean;
-      _log('🔀 [STOP-03]',
-          '신규 발화 접수. ${waitMs}ms 대기창 시작 (source=$source)');
+      _log('🔀 [STOP-03]', '신규 발화 접수. ${waitMs}ms 대기창 시작 (source=$source)');
     } else {
       _pendingTranscript = '$_pendingTranscript $clean';
       _log('🔀 [STOP-04]',
@@ -2360,8 +2351,25 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           continue;
         }
 
-        // Part1 영역: TTS 절대 발사 안 함 (화면 자막만 흐름)
-        if (!_part2Started) continue;
+        // 첫 턴은 Part1 자체가 유저의 완성 문장이다. GPT 토큰이 4단어 또는
+        // 구두점까지 도착하는 즉시 TTS 요청을 발사해 GPT 스트림/TTS/오디오
+        // 큐가 파이프라인으로 동시에 진행되게 한다. 2턴부터는 기존대로
+        // Part1을 읽지 않고 Part2(확장 문장)만 낭독한다.
+        if (!_part2Started) {
+          final bool containsControlTag = userTargetText.contains('[');
+          if (currentTurnId == 1 &&
+              !containsControlTag &&
+              !userHybridTts.firstChunkFired) {
+            final cutIdx =
+                userHybridTts.onChunk(userBuffer, userTtsFetcher, _swTTS);
+            if (cutIdx >= 0) {
+              userBuffer = userBuffer.substring(cutIdx);
+              firstChunkSent = true;
+              _log('🌱 [FIRST-TURN-PIPE]', 'GPT 스트림 중 첫 유저 TTS 청크 발사');
+            }
+          }
+          continue;
+        }
 
         // Part2 하이브리드: 4단어/구두점 도달 시 첫 청크만 발사
         if (!userHybridTts.firstChunkFired) {
@@ -4331,6 +4339,8 @@ class DeepgramV2VoiceManager {
             encoder: AudioEncoder.pcm16bits,
             sampleRate: 16000,
             numChannels: 1,
+            echoCancel: true,
+            noiseSuppress: true,
           ),
         );
         _lg('🎤 [MIC-06]', 'startStream 성공');
@@ -4388,6 +4398,7 @@ class DeepgramV2VoiceManager {
     onTurnEnded(finalText, speechFinal: source == 'speech_final');
     if (!_isDisposed) onTurnResult?.call(result);
   }
+
   void _handleMessage(dynamic msg) {
     if (_isDisposed) return;
     try {
@@ -4888,7 +4899,7 @@ class ChunkedTtsFetcher {
     const List<int> timeoutLadderSec = [5, 8, 12];
     for (int attempt = 0; attempt < 3; attempt++) {
       try {
-        final res = await http
+        final res = await OpenAiConnectionPool.instance.client
             .post(
               Uri.parse('https://api.openai.com/v1/audio/speech'),
               headers: {
@@ -5169,7 +5180,7 @@ class StepExpandBrain {
     bool disableCorrection = false,
     bool disableRestate = false,
   }) async* {
-    final client = http.Client();
+    final client = OpenAiConnectionPool.instance.client;
     try {
       final String correctionBlock = disableCorrection
           ? "NEVER output [CORRECTION] or [MISHEARD] or any bracket token. This input is the user RE-STATING what they actually meant. Output ONLY the actual intended content as natural $targetLang. STRIP all correction framing: lead-ins (\"아니\" / \"아니지\" / \"내 말은\" / \"내 말은요\" / \"그게 아니라\" / \"내가 말한 건\") AND quote-report frames (\"~라고 했어요\" / \"~라고 했어\" / \"~라고 말했어요\" / \"~라고 말했고\" / \"I said\" / \"I also said\" / \"what I said was\"). When multiple quoted statements are reported, merge them into natural connected $targetLang. Examples: \"아니 내 말은요 당신 잘못이라고요\" -> \"It's clearly your fault.\" | \"나는 빨리 구해 주세요라고 했어요 휴지가 없어요라고 말했고\" -> \"Please rescue me quickly, and there's no toilet paper.\""
@@ -5373,8 +5384,6 @@ Output: [GARBLED]
       }
     } catch (_) {
       yield '[EVAPORATE]';
-    } finally {
-      client.close();
     }
   }
 

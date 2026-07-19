@@ -38,6 +38,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
+import '/custom_code/services/openai_connection_pool.dart';
 import 'deepgram_confidence_probe.dart';
 import 'trial/trial_flow_state.dart';
 import 'trial/trial_anyone_timer_mixin.dart';
@@ -56,9 +57,9 @@ const int kFreeTalkAiTtsWaitTimeoutMs = 20000;
 const int kFreeTalkOpenAiTtsHttpTimeoutSeconds =
     18; // Long-form cache save path.
 const List<int> kFreeTalkChunkTtsTimeoutLadderSec = [
-  3,
   5,
-  8
+  8,
+  12
 ]; // Chunk TTS per-attempt timeout ladder.
 const int kFreeTalkAiResponseMaxTokens = 70;
 
@@ -3230,7 +3231,7 @@ class ChunkedTtsFetcher {
       // [2단계] API 호출 (5초 타임아웃, 최대 3회 시도) — TTS 지연 스파이크 대응
       for (int attempt = 0; attempt < 3; attempt++) {
         try {
-          final res = await http
+          final res = await OpenAiConnectionPool.instance.client
               .post(
                 Uri.parse('https://api.openai.com/v1/audio/speech'),
                 headers: {
@@ -3761,7 +3762,7 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
     required String contextStr,
     bool disableCorrection = false,
   }) async* {
-    final client = http.Client();
+    final client = OpenAiConnectionPool.instance.client;
     try {
       final String correctionBlock = disableCorrection
           ? "Never output [CORRECTION] or [MISHEARD]. Treat the input as normal content to translate."
@@ -3884,8 +3885,6 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
       }
     } catch (_) {
       yield '[EVAPORATE]';
-    } finally {
-      client.close();
     }
   }
 

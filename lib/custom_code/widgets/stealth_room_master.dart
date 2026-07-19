@@ -16,8 +16,11 @@ import '/custom_code/actions/index.dart';
 // Imports custom actions
 
 import 'dart:ui';
+import 'dart:async';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:firebase_remote_config/firebase_remote_config.dart';
 import '/custom_code/actions/billing_ticker.dart';
+import '/custom_code/services/openai_connection_pool.dart';
 import 'trial/trial_flow_state.dart';
 
 class StealthRoomMaster extends StatefulWidget {
@@ -54,6 +57,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     StealthRoomMaster.exitCurrentMode =
         () => setState(() => _currentMode = null);
     AppsFlyerManager.duoInviteSignal.addListener(_onDuoInviteSignal);
+    unawaited(_prepareFirstUserResponse());
 
     // Duo 초대 링크 자동 진입 처리
     // FFAppState 초대 상태는 여기서 지우지 않음 — _joinAsGuest 성공 후에만 삭제
@@ -75,6 +79,30 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     if (TrialFlowState.instance.isTrialAnyone) {
       _currentMode = 2;
     }
+  }
+
+  /// StealthRoom 메뉴를 보는 동안 첫 유저 번역/TTS용 OpenAI 연결을 준비한다.
+  /// UI나 모드 진입을 막지 않으며, 준비 실패 시 각 모드의 기존 요청이 동작한다.
+  Future<void> _prepareFirstUserResponse() async {
+    final remoteConfig = FirebaseRemoteConfig.instance;
+    String openAiKey = remoteConfig.getString('OpenAIAPIKey');
+
+    if (openAiKey.isEmpty) {
+      try {
+        await remoteConfig
+            .fetchAndActivate()
+            .timeout(const Duration(seconds: 6));
+        openAiKey = remoteConfig.getString('OpenAIAPIKey');
+      } catch (error) {
+        debugPrint('[OPENAI-WARMUP] key unavailable: ${error.runtimeType}');
+      }
+    }
+
+    if (openAiKey.isEmpty) return;
+    await OpenAiConnectionPool.instance.warmUp(
+      openAiKey,
+      onLog: debugPrint,
+    );
   }
 
   /// 딥링크 신호 수신 후 StealthRoom 메뉴에서 Duo로 진입한다.
