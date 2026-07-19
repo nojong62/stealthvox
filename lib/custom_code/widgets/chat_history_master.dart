@@ -1139,48 +1139,76 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
             ),
             const SizedBox(height: 18),
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                GestureDetector(
-                  onTap: () {
-                    Navigator.of(ctx).pop();
-                    _shadowRereadCount++;
-                    if (mounted &&
-                        _phase == ShadowingPhase.part2Practice &&
-                        !isPaused) {
-                      _startShadowHighlight();
-                    }
-                  },
-                  child: const Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.replay_rounded, color: Colors.amber, size: 34),
-                      SizedBox(height: 6),
-                      Text("다시 말하기",
-                          style: TextStyle(color: Colors.amber, fontSize: 12)),
-                    ],
+                Expanded(
+                  child: Semantics(
+                    button: true,
+                    label: '다시 말하기',
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(14),
+                        onTap: () {
+                          Navigator.of(ctx).pop();
+                          _shadowRereadCount++;
+                          if (mounted &&
+                              _phase == ShadowingPhase.part2Practice &&
+                              !isPaused) {
+                            _startShadowHighlight();
+                          }
+                        },
+                        child: const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 14),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.replay_rounded,
+                                  color: Colors.amber, size: 34),
+                              SizedBox(height: 6),
+                              Text("다시 말하기",
+                                  style: TextStyle(
+                                      color: Colors.amber, fontSize: 12)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-                GestureDetector(
-                  onTap: () {
-                    Navigator.of(ctx).pop();
-                    _shadowRereadCount = 0;
-                    if (mounted &&
-                        _phase == ShadowingPhase.part2Practice &&
-                        !isPaused) {
-                      _nextTurn();
-                    }
-                  },
-                  child: const Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.arrow_forward_rounded,
-                          color: Colors.greenAccent, size: 34),
-                      SizedBox(height: 6),
-                      Text("다음 진행",
-                          style: TextStyle(
-                              color: Colors.greenAccent, fontSize: 12)),
-                    ],
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Semantics(
+                    button: true,
+                    label: '다음 진행',
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(14),
+                        onTap: () {
+                          Navigator.of(ctx).pop();
+                          _shadowRereadCount = 0;
+                          if (mounted &&
+                              _phase == ShadowingPhase.part2Practice &&
+                              !isPaused) {
+                            _nextTurn();
+                          }
+                        },
+                        child: const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 14),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.arrow_forward_rounded,
+                                  color: Colors.greenAccent, size: 34),
+                              SizedBox(height: 6),
+                              Text("다음 진행",
+                                  style: TextStyle(
+                                      color: Colors.greenAccent, fontSize: 12)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
               ],
