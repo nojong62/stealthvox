@@ -21,6 +21,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/openai_connection_pool.dart';
+import 'package:http/http.dart' as http;
 import 'trial/trial_flow_state.dart';
 
 class StealthRoomMaster extends StatefulWidget {
@@ -84,6 +85,11 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   /// StealthRoom 메뉴를 보는 동안 첫 유저 번역/TTS용 OpenAI 연결을 준비한다.
   /// UI나 모드 진입을 막지 않으며, 준비 실패 시 각 모드의 기존 요청이 동작한다.
   Future<void> _prepareFirstUserResponse() async {
+    // 🚀 [DEEPGRAM-WARMUP] 감지(STT) 경로 준비 — Deepgram 호스트 DNS/TLS를 미리 데워
+    //   애니원/스텝익스팬드 진입 시 STT WebSocket 연결 시간을 줄인다.
+    //   녹음/스트리밍은 하지 않는다(프라이버시·과금 없음). 응답 경로(OpenAI)와 병행.
+    unawaited(_warmUpDeepgram());
+
     final remoteConfig = FirebaseRemoteConfig.instance;
     String openAiKey = remoteConfig.getString('OpenAIAPIKey');
 
@@ -103,6 +109,24 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       openAiKey,
       onLog: debugPrint,
     );
+  }
+
+  /// 🚀 [DEEPGRAM-WARMUP] Deepgram 호스트로 가벼운 HTTPS 요청을 1회 보내 DNS/TLS를
+  /// 미리 확립한다. 실제 STT는 WebSocket을 쓰지만, 최소한 DNS 캐시가 데워져
+  /// 진입 시 소켓 연결 지연을 줄인다. 실패해도 무해(기존 진입 경로 그대로).
+  Future<void> _warmUpDeepgram() async {
+    final stopwatch = Stopwatch()..start();
+    try {
+      await http
+          .get(Uri.parse('https://api.deepgram.com/v1/'))
+          .timeout(const Duration(seconds: 5));
+      debugPrint('[DEEPGRAM-WARMUP] ready ${stopwatch.elapsedMilliseconds}ms');
+    } catch (error) {
+      debugPrint(
+          '[DEEPGRAM-WARMUP] skipped ${error.runtimeType} ${stopwatch.elapsedMilliseconds}ms');
+    } finally {
+      stopwatch.stop();
+    }
   }
 
   /// 딥링크 신호 수신 후 StealthRoom 메뉴에서 Duo로 진입한다.

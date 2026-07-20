@@ -48,6 +48,9 @@ import 'trial/trial_study_page.dart';
 const int kFreeTalkCommitWaitMs = 900; // speech_final 경로: 안전값 유지
 const int kFreeTalkCommitWaitUncertainMs =
     500; // UtteranceEnd 경로: 이미 utterance_end_ms 침묵 확인됨 → 짧게
+// 🚀 [FIRST-TURN] 첫 유저 발화에만: 더듬거림 합치기를 포기하고 즉시 반응해
+//   첫 글자/소리를 앞당긴다. 2번째 턴부터는 위 안전값을 그대로 사용.
+const int kFreeTalkFirstTurnCommitWaitMs = 450;
 const int kFreeTalkDeepgramEndpointingMs = 700;
 const int kFreeTalkDeepgramUtteranceEndMs =
     1000; // Deepgram minimum allowed value; 900 returns HTTP 400.
@@ -793,10 +796,14 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     _resetIdleTimer();
     final clean = transcript.trim();
     final source = speechFinal ? 'speech_final' : 'utterance_end';
-    final waitMs =
-        speechFinal ? COMMIT_WAIT_SPEECH_FINAL_MS : COMMIT_WAIT_UNCERTAIN_MS;
+    // 🚀 [FIRST-TURN] 아직 완료된 턴이 없으면(_turnCounter==0) 첫 유저 발화 →
+    //   대기창을 짧게 잡아 파이프라인을 일찍 시작한다. 이후 턴은 기존 안전값.
+    final bool isFirstUtterance = _turnCounter == 0;
+    final waitMs = isFirstUtterance
+        ? kFreeTalkFirstTurnCommitWaitMs
+        : (speechFinal ? COMMIT_WAIT_SPEECH_FINAL_MS : COMMIT_WAIT_UNCERTAIN_MS);
     _log('🔀 [STOP-01]',
-        '$source 수신: "$clean" (len=${clean.length}) waitMs=$waitMs');
+        '$source 수신: "$clean" (len=${clean.length}) waitMs=$waitMs first=$isFirstUtterance');
 
     if (clean.length < 2) {
       _log('🔀 [STOP-02]', '너무 짧음 → 무시');
@@ -1047,6 +1054,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         userTtsFetcher,
         userVoice,
         onLog: _log,
+        // 🚀 [FIRST-TURN] 첫 턴만 2단어에 조기 발사 → 첫 소리를 앞당김.
+        fireWordThreshold: currentTurnId == 1 ? 2 : 4,
       );
       _ttsQueueManager.setUserTurn(true);
       _ttsQueueManager.setAiPaused(false); // 유저 청크는 즉시 재생
@@ -3460,6 +3469,8 @@ class HybridTtsPlayer {
   final ChunkedTtsFetcher _fetcher;
   final String _voice;
   final void Function(String, String)? onLog;
+  // 🚀 [FIRST-TURN] 첫 발사 임계(단어 수). 첫 턴은 2로 낮춰 첫 TTS fetch를 앞당긴다.
+  final int _fireWordThreshold;
 
   bool _firstChunkFired = false;
   // 🔧 [PREFETCH v1] onStreamEnd 이중 호출 방지 가드. remainder는 정확히 1회만
@@ -3473,7 +3484,8 @@ class HybridTtsPlayer {
     this._fetcher,
     this._voice, {
     this.onLog,
-  });
+    int fireWordThreshold = 4,
+  }) : _fireWordThreshold = fireWordThreshold;
 
   bool get firstChunkFired => _firstChunkFired;
 
@@ -3494,7 +3506,7 @@ class HybridTtsPlayer {
     final wordCount =
         buf.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
 
-    if (punctMatch == null && wordCount < 4) return;
+    if (punctMatch == null && wordCount < _fireWordThreshold) return;
 
     final String text;
     final String unfired;
@@ -3510,8 +3522,8 @@ class HybridTtsPlayer {
 
     _firstChunkFired = true;
     _fetcher.addText(text);
-    onLog?.call(
-        '[HYB-01]', '발사(${punctMatch != null ? "구두점" : "4단어"}): "$text"');
+    onLog?.call('[HYB-01]',
+        '발사(${punctMatch != null ? "구두점" : "$_fireWordThreshold단어"}): "$text"');
 
     // 발사된 부분 제거 — 이후 onChunk는 unfired부터 누적
     _chunkBuffer.clear();

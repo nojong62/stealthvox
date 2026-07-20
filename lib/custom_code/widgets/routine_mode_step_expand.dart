@@ -275,6 +275,9 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   Timer? _commitTimer; // "진짜 끝났는지" 확정 타이머
   static const int COMMIT_WAIT_SPEECH_FINAL_MS = 1200; // speech_final: 1200ms
   static const int COMMIT_WAIT_UNCERTAIN_MS = 500; // UtteranceEnd: 500ms
+  // 🚀 [FIRST-TURN] 첫 유저 발화(seed)만: 더듬거림 합치기를 포기하고 즉시 시작해
+  //   첫 글자/소리를 앞당긴다. 2번째 턴부터는 위 안전값을 그대로 사용.
+  static const int COMMIT_WAIT_FIRST_TURN_MS = 450;
 
   // 📦 [Meaning Confidence Probe] Measurement-only state.
   // Never use these values to branch UI, History, Turn, GPT, TTS, or microphone flow.
@@ -1863,10 +1866,14 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     _resetIdleTimer();
     final clean = transcript.trim();
     final source = speechFinal ? 'speech_final' : 'utterance_end';
-    final waitMs =
-        speechFinal ? COMMIT_WAIT_SPEECH_FINAL_MS : COMMIT_WAIT_UNCERTAIN_MS;
+    // 🚀 [FIRST-TURN] 아직 완료된 턴이 없으면(_turnCounter==0) 첫 유저 발화 →
+    //   대기창을 짧게 잡아 파이프라인을 일찍 시작한다. 이후 턴은 기존 안전값.
+    final bool isFirstUtterance = _turnCounter == 0;
+    final waitMs = isFirstUtterance
+        ? COMMIT_WAIT_FIRST_TURN_MS
+        : (speechFinal ? COMMIT_WAIT_SPEECH_FINAL_MS : COMMIT_WAIT_UNCERTAIN_MS);
     _log('🔀 [STOP-01]',
-        '$source 수신: "$clean" (len=${clean.length}) waitMs=$waitMs');
+        '$source 수신: "$clean" (len=${clean.length}) waitMs=$waitMs first=$isFirstUtterance');
 
     if (clean.length < 2) {
       _log('🔀 [STOP-02]', '너무 짧음 → "Please say that again." TTS 후 대기');
@@ -2280,6 +2287,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         apiKey: _openAiKey,
         voice: userVoice,
         onLog: _log,
+        // 🚀 [FIRST-TURN] 첫 턴(seed)만 2단어에 조기 발사 → 첫 소리를 앞당김.
+        fireWordThreshold: currentTurnId == 1 ? 2 : 4,
       );
       _ttsQueueManager.setUserTurn(true);
       _ttsQueueManager.setAiPaused(false); // 유저 청크는 즉시 재생
@@ -4077,10 +4086,14 @@ class HybridTtsPlayer {
   int lastCacheSaveMs = 0;
   bool lastCacheHit = false;
 
+  // 🚀 [FIRST-TURN] 첫 발사 임계(단어 수). 첫 턴은 2로 낮춰 첫 TTS fetch를 앞당긴다.
+  final int fireWordThreshold;
+
   HybridTtsPlayer({
     required this.apiKey,
     this.voice = 'nova',
     this.onLog,
+    this.fireWordThreshold = 4,
   });
 
   bool get firstChunkFired => _firstChunkFired;
@@ -4102,7 +4115,7 @@ class HybridTtsPlayer {
     final wordCount =
         buffer.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
 
-    if (punctMatch == null && wordCount < 4) return -1;
+    if (punctMatch == null && wordCount < fireWordThreshold) return -1;
 
     final int cutIdx;
     final String text;
@@ -4120,7 +4133,7 @@ class HybridTtsPlayer {
     lastFirstChunkMs = swSpeechEnd.elapsedMilliseconds;
     fetcher.addText(text);
     onLog?.call('[HYB-01]',
-        '발사(${punctMatch != null ? "구두점" : "4단어"}): "$text" ${lastFirstChunkMs}ms');
+        '발사(${punctMatch != null ? "구두점" : "$fireWordThreshold단어"}): "$text" ${lastFirstChunkMs}ms');
     return cutIdx;
   }
 
