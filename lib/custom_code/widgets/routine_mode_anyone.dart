@@ -179,6 +179,11 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   // 대기 중 새 발화 오면 합쳐서 처리 (최종 한 덩어리로)
   String _pendingTranscript = ''; // 대기 중인 유저 발화 누적
   Timer? _commitTimer; // "진짜 끝났는지" 확정 타이머
+  // 🚀 [SPEC-FIRST-TURN] 첫 턴 투기적 선시작: 대기창 동안 GPT 번역을 미리 돌려
+  //   토큰을 이 컨트롤러에 버퍼링. 확정 시 파이프라인에 그대로 넘겨 TTFT를 겹쳐 없앤다.
+  StreamController<String>? _specController;
+  StreamSubscription<String>? _specSub;
+  String _specTranscript = '';
   static const int COMMIT_WAIT_SPEECH_FINAL_MS =
       kFreeTalkCommitWaitMs; // speech_final: 900ms
   static const int COMMIT_WAIT_UNCERTAIN_MS =
@@ -584,6 +589,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     _listenGeneration++;
     _commitTimer?.cancel(); // 🔧 [v3.4] 대기 중 타이머 정리
     _commitTimer = null;
+    _cancelSpeculativeTranslation(); // 🚀 [SPEC] 진행 중 투기 번역 정리
     _pendingTranscript = ''; // 대기 중 발화도 버림
     _pendingDeepgramResults.clear();
     _activeProbeDgFinalAt = null;
@@ -836,6 +842,13 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     // 기존 타이머 취소 (새 발화가 왔으므로 대기창 리셋)
     _commitTimer?.cancel();
 
+    // 🚀 [SPEC-FIRST-TURN] 첫 턴이면 대기창 동안 GPT 번역을 미리 시작해 버퍼링한다.
+    //   추가 발화가 오면 이 함수가 다시 호출되며(합쳐진 텍스트로) 이전 투기 번역을
+    //   취소하고 재시작한다 → 짤림 위험 0. 확정 시 텍스트가 일치하면 그대로 사용.
+    if (isFirstUtterance && _pendingTranscript.trim().length >= 2) {
+      _startSpeculativeTranslation(_pendingTranscript.trim());
+    }
+
     // 조건부 대기 후 파이프라인 시작 예약 (source별 waitMs)
     _commitTimer = Timer(
       Duration(milliseconds: waitMs),
@@ -857,6 +870,17 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
     _log('🔀 [COMMIT-01]', '확정: "$committed" → 파이프라인 시작');
 
+    // 🚀 [SPEC-FIRST-TURN] 투기적 번역이 이 확정 텍스트와 일치하면 그 스트림을 그대로
+    //   파이프라인에 넘겨 TTFT를 건너뛴다. 불일치(합쳐짐 등)면 폐기하고 정상 경로.
+    Stream<String>? userOverride;
+    if (_specController != null && _specTranscript == committed) {
+      userOverride = _specController!.stream;
+      _detachSpeculativeTranslation(); // 소유권 이전(컨트롤러를 닫지 않음)
+      _log('🚀 [SPEC-HANDOFF]', '투기 번역 선반영 사용');
+    } else {
+      _cancelSpeculativeTranslation();
+    }
+
     // 마이크/VoiceManager 정리
     await _voiceManager?.dispose();
     _voiceManager = null;
@@ -864,7 +888,64 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
     _runMeaningProbe(committed);
     _log('🔀 [COMMIT-03]', '_processRelayPipeline 호출');
-    _processRelayPipeline(committed);
+    _processRelayPipeline(committed, userStreamOverride: userOverride);
+  }
+
+  // ====================================================================
+  // 🚀 [SPEC-FIRST-TURN] 첫 턴 투기적 선(先)시작
+  // ------------------------------------------------------------------
+  // 대기창(commit wait) 동안 GPT 번역을 미리 돌려 토큰을 StreamController에 버퍼링.
+  // 확정 시 이 버퍼를 파이프라인에 그대로 넘기면 TTFT(첫 토큰 지연)가 대기창에 겹쳐
+  // 사라진다. 마이크/오디오/AI응답 로직은 전혀 건드리지 않아 안전하다.
+  // 추가 발화가 오면(합치기) 투기 번역을 취소하고 재시작하므로 짤림 위험이 없다.
+  // (첫 턴 전용 — _stopMicAndProcess의 isFirstUtterance 가드에서만 호출)
+  // ====================================================================
+  void _startSpeculativeTranslation(String text) {
+    _cancelSpeculativeTranslation(); // 이전 투기 번역 정리 후 재시작
+    _specTranscript = text;
+    final controller = StreamController<String>();
+    _specController = controller;
+    // 첫 턴은 대화 컨텍스트가 없으므로 contextStr은 빈 문자열(파이프라인과 동일).
+    final String targetLangName = FFAppState().targetLang.isNotEmpty
+        ? FFAppState().targetLang
+        : 'English';
+    _log('🚀 [SPEC-START]', 'first-turn 투기 번역 시작: "$text"');
+    _specSub = FreeTalkBrain.streamUserTranslation(
+      apiKey: _openAiKey,
+      textOriginal: text,
+      targetLang: targetLangName,
+      contextStr: '',
+      disableCorrection: false,
+    ).listen(
+      (chunk) {
+        if (!controller.isClosed) controller.add(chunk);
+      },
+      onError: (_) {
+        if (!controller.isClosed) controller.close();
+      },
+      onDone: () {
+        if (!controller.isClosed) controller.close();
+      },
+      cancelOnError: true,
+    );
+  }
+
+  // 소유권 이전: 컨트롤러를 파이프라인이 소비하도록 필드에서만 분리(닫지 않음).
+  //   백그라운드 구독은 계속 add하고 스트림 종료 시 onDone에서 controller를 닫는다.
+  void _detachSpeculativeTranslation() {
+    _specController = null;
+    _specSub = null;
+    _specTranscript = '';
+  }
+
+  void _cancelSpeculativeTranslation() {
+    final sub = _specSub;
+    _specSub = null;
+    final c = _specController;
+    _specController = null;
+    _specTranscript = '';
+    sub?.cancel();
+    if (c != null && !c.isClosed) c.close();
   }
 
 // ====================================================================
@@ -920,7 +1001,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   }
 
   Future<void> _processRelayPipeline(String finalTranscript,
-      {bool isCorrectionRetry = false}) async {
+      {bool isCorrectionRetry = false,
+      Stream<String>? userStreamOverride}) async {
     _logProbeTiming('PIPELINE_START');
     _resetIdleTimer();
     _turnCounter++;
@@ -1065,13 +1147,16 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           ? FFAppState().targetLang
           : 'English';
 
-      final userStream = FreeTalkBrain.streamUserTranslation(
-        apiKey: _openAiKey,
-        textOriginal: finalTranscript,
-        targetLang: targetLangName,
-        contextStr: contextStr,
-        disableCorrection: isCorrectionRetry,
-      );
+      // 🚀 [SPEC-FIRST-TURN] 투기 번역이 넘어오면 그 버퍼 스트림을 그대로 소비한다
+      //   (선반영). 없으면 지금 새로 요청. 소비 방식은 완전히 동일.
+      final userStream = userStreamOverride ??
+          FreeTalkBrain.streamUserTranslation(
+            apiKey: _openAiKey,
+            textOriginal: finalTranscript,
+            targetLang: targetLangName,
+            contextStr: contextStr,
+            disableCorrection: isCorrectionRetry,
+          );
 
       bool evaporated = false;
       bool corrected = false; // 유저가 AI의 오해를 정정 → 직전 교환 삭제 후 재처리
