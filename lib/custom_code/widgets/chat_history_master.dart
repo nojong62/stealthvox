@@ -83,9 +83,12 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     }
     return null;
   }
+
   bool isLoadingRoom = true;
   String roomName = "";
   bool _isActionLocked = false;
+  bool _isEnteringPractice = false;
+  Map<String, dynamic>? _cachedRoomData;
 
   // 📦 [Box 4: 상태 변수 - Shadowing 상태 머신]
   ShadowingPhase _phase = ShadowingPhase.idle;
@@ -151,6 +154,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // 📦 [Box 4-C: Step Expand Practice 1 & 2 상태]
   bool _isStepExpandRoom = false;
   List<Map<String, dynamic>> _stepExpandTurns = [];
+  bool _isPreparingStepP3 = false;
+  String? _stepP3PreparationError;
+  int _stepP3PreparationGeneration = 0;
   // P1/P2 retry hint visibility
   bool _showRetryHint = false;
   int _turnPracticeRetryCount = 0;
@@ -458,6 +464,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       var doc = await widget.historyDoc.get();
       if (doc.exists && doc.data() != null) {
         var data = doc.data() as Map<String, dynamic>;
+        _cachedRoomData = data;
         roomName = data['room_name'] ?? "History Master";
         // 세션 생성 당시 보존된 언어 식별값(있으면 동일 언어 판정에 사용)
         _sessionNativeLang = data['native_lang'] as String?;
@@ -494,11 +501,17 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   //   - polished/expanded 있음 (Step Expand 방) → 기존 Shadowing variantSelect
   //   - polished/expanded 없음 (Clone/Roleplay/Duo 방) → Tutor 모드
   Future<void> _enterShadowingFromRoom() async {
+    if (_isEnteringPractice) return;
     _resumeHistoryFromUserAction();
+    if (mounted) setState(() => _isEnteringPractice = true);
     try {
-      final snap = await widget.historyDoc.get();
-      if (!mounted) return;
-      final data = snap.data() as Map<String, dynamic>?;
+      var data = _cachedRoomData;
+      if (data == null) {
+        final snap = await widget.historyDoc.get();
+        if (!mounted) return;
+        data = snap.data() as Map<String, dynamic>?;
+        _cachedRoomData = data;
+      }
 
       if (data == null) {
         _showRoomEntryToast("연습할 대화가 없습니다");
@@ -521,44 +534,50 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         _entryMessageDocId = null;
         _practicingPolished = false;
 
-        // messages 서브컬렉션 로드 및 _stepExpandTurns 파싱
-        try {
+        // 화면에 이미 로드된 메시지를 재사용하고, 캐시가 없을 때만 다시 조회한다.
+        var messageDocs = _cachedDocs;
+        if (messageDocs.isEmpty) {
           final msgSnap = await widget.historyDoc
               .collection('messages')
               .orderBy('created_at', descending: false)
               .get();
-          if (mounted) {
-            _stepExpandTurns = _parseStepExpandTurns(msgSnap.docs);
-          }
-        } catch (e) {}
-        if (!mounted) return;
-
-        // P3 즉시 진입을 위해 chunks 미리 빌드
-        await _buildChunks(_expandedSentence);
-        if (!mounted) return;
-
-        if (mounted) {
-          BillingTicker.instance.setRate(BillingRate.full);
-          setState(() {
-            _isStepExpandRoom = true;
-            isPracticeMode = true;
-            _phase = ShadowingPhase.variantSelect;
-          });
+          messageDocs = msgSnap.docs;
+          _cachedDocs = messageDocs;
         }
-        _prefetchAllChunkAI();
+        _stepExpandTurns = _parseStepExpandTurns(messageDocs);
+        if (!mounted) return;
+
+        // P1/P2/P3 선택 화면부터 즉시 표시하고, 느린 P3 청크/번역 생성은
+        // 화면 전환 뒤 백그라운드에서 진행한다.
+        final generation = ++_stepP3PreparationGeneration;
+        BillingTicker.instance.setRate(BillingRate.full);
+        setState(() {
+          _isStepExpandRoom = true;
+          isPracticeMode = true;
+          _phase = ShadowingPhase.variantSelect;
+          _chunks = [];
+          _isPreparingStepP3 = true;
+          _stepP3PreparationError = null;
+        });
+        unawaited(_prepareStepP3(_expandedSentence, generation));
         return;
       }
 
       // Clone / Roleplay / Duo 방: messages 서브컬렉션 → Tutor 모드
-      final messagesSnap = await widget.historyDoc
-          .collection('messages')
-          .orderBy('created_at', descending: false)
-          .get();
+      var messageDocs = _cachedDocs;
+      if (messageDocs.isEmpty) {
+        final messagesSnap = await widget.historyDoc
+            .collection('messages')
+            .orderBy('created_at', descending: false)
+            .get();
+        messageDocs = messagesSnap.docs;
+        _cachedDocs = messageDocs;
+      }
       if (!mounted) return;
 
-      final tutorLines = messagesSnap.docs
+      final tutorLines = messageDocs
           .map((doc) {
-            final d = doc.data();
+            final d = doc.data() as Map<String, dynamic>;
             return <String, dynamic>{
               'role': d['role'] ?? 'HOST',
               'text':
@@ -594,7 +613,39 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       }
     } catch (e) {
       _showRoomEntryToast("연습 진입 실패: $e");
+    } finally {
+      if (mounted) setState(() => _isEnteringPractice = false);
     }
+  }
+
+  Future<void> _prepareStepP3(String sentence, int generation) async {
+    try {
+      await _buildChunks(sentence, preparationGeneration: generation);
+      if (!mounted || generation != _stepP3PreparationGeneration) return;
+      setState(() {
+        _isPreparingStepP3 = false;
+        _stepP3PreparationError =
+            _chunks.isEmpty ? 'P3 준비에 실패했습니다. 눌러서 다시 시도하세요.' : null;
+      });
+    } catch (e) {
+      debugPrint('[prepareStepP3] $e');
+      if (!mounted || generation != _stepP3PreparationGeneration) return;
+      setState(() {
+        _isPreparingStepP3 = false;
+        _stepP3PreparationError = 'P3 준비에 실패했습니다. 눌러서 다시 시도하세요.';
+      });
+    }
+  }
+
+  void _retryStepP3Preparation() {
+    if (_isPreparingStepP3 || _expandedSentence.isEmpty) return;
+    final generation = ++_stepP3PreparationGeneration;
+    setState(() {
+      _chunks = [];
+      _isPreparingStepP3 = true;
+      _stepP3PreparationError = null;
+    });
+    unawaited(_prepareStepP3(_expandedSentence, generation));
   }
 
   // 🆕 [TUTOR] 진입/차단 토스트 헬퍼
@@ -1631,6 +1682,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   }
 
   void _exitShadowing() {
+    _stepP3PreparationGeneration++;
     _deleteUserRecordings(); // 🆕 Practice 임시 녹음 파일 정리
     BillingTicker.instance.setRate(BillingRate.quarter);
     _stopTutorPlayback();
@@ -1677,6 +1729,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         // Step Expand 리셋
         _isStepExpandRoom = false;
         _stepExpandTurns = [];
+        _isPreparingStepP3 = false;
+        _stepP3PreparationError = null;
         _showRetryHint = false;
       });
     }
@@ -2034,8 +2088,13 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     }
   }
 
-  Future<void> _buildChunks(String sentence) async {
+  Future<void> _buildChunks(String sentence,
+      {int? preparationGeneration}) async {
+    bool isCurrentPreparation() =>
+        preparationGeneration == null ||
+        preparationGeneration == _stepP3PreparationGeneration;
     if (sentence.isEmpty) {
+      if (!isCurrentPreparation()) return;
       _chunks = [];
       _currentChunkIdx = 0;
       return;
@@ -2057,6 +2116,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
       }
     }
 
+    if (!isCurrentPreparation()) return;
     _chunks = List.generate(
       result.length,
       (i) => PracticeChunk(
@@ -3154,7 +3214,8 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
       }
 
       // 2. GPT correction + reason — 한국어 원문을 "의미 기준"으로 삼아 객관적으로 채점
-      final corrPrompt = '''You are a strict but fair English tutor for a Korean learner.
+      final corrPrompt =
+          '''You are a strict but fair English tutor for a Korean learner.
 
 [KOREAN_PROMPT] (the meaning the user MUST express): "$targetKo"
 [EXAMPLE_EN] (ONE natural example answer — NOT the only correct answer): "$targetEn"
@@ -3624,19 +3685,30 @@ RULES — follow exactly:
           GestureDetector(
             onLongPress: () {},
             child: IconButton(
-              icon: Icon(
-                isPracticeMode ? Icons.close : Icons.record_voice_over,
-                color: Colors.amber,
-                size: 28,
-              ),
+              icon: _isEnteringPractice
+                  ? const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(
+                        color: Colors.amber,
+                        strokeWidth: 2.5,
+                      ),
+                    )
+                  : Icon(
+                      isPracticeMode ? Icons.close : Icons.record_voice_over,
+                      color: Colors.amber,
+                      size: 28,
+                    ),
               tooltip: isPracticeMode ? "연습 종료" : "쉐도잉 연습 시작",
-              onPressed: () {
-                if (isPracticeMode) {
-                  _exitShadowing();
-                } else {
-                  _enterShadowingFromRoom();
-                }
-              },
+              onPressed: _isEnteringPractice
+                  ? null
+                  : () {
+                      if (isPracticeMode) {
+                        _exitShadowing();
+                      } else {
+                        _enterShadowingFromRoom();
+                      }
+                    },
             ),
           ),
         ],
@@ -4806,41 +4878,8 @@ RULES — follow exactly:
   }
 
   // 📦 [Box 22-E: 양방향 턴제 연습 화면]
-  // [P2-SHADOW] Highlight current user line word-by-word in P2.
   Widget _buildPracticeLineText(
       Map<String, dynamic> line, bool isCurrent, bool lineIsAi) {
-    final bool isShadowLine =
-        _phase == ShadowingPhase.part2Practice && isCurrent && !lineIsAi;
-    if (isShadowLine && _shadowWords.isNotEmpty) {
-      // [P2-SHADOW] Single Text.rich run. Fixed size/weight for every word so
-      // wrapping NEVER shifts. Current word gets a highlighter-style box only.
-      final Paint hl = Paint()
-        ..color = Colors.amber.withValues(alpha: 0.35)
-        ..strokeJoin = StrokeJoin.round;
-      return Text.rich(
-        TextSpan(
-          children: [
-            for (int j = 0; j < _shadowWords.length; j++) ...[
-              TextSpan(
-                text: _shadowWords[j],
-                style: TextStyle(
-                  color: j == _shadowWordIdx
-                      ? Colors.white
-                      : (j < _shadowWordIdx ? Colors.white38 : Colors.white),
-                  background: j == _shadowWordIdx ? hl : null,
-                ),
-              ),
-              if (j != _shadowWords.length - 1) const TextSpan(text: ' '),
-            ],
-          ],
-        ),
-        style: TextStyle(
-          fontSize: 14 * _fontScale,
-          height: 1.5,
-          fontWeight: FontWeight.normal,
-        ),
-      );
-    }
     return Text(
       line['text'] as String,
       textAlign: lineIsAi ? TextAlign.right : TextAlign.left,
@@ -6443,6 +6482,9 @@ RULES — follow exactly:
       _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
       _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
       _stopShadowAiPlayback(); // [P2-SHADOW-AI]
+      // 🆕 [P2-ENTER-CUE] P3의 "Echo it!"과 동일한 개념 — P2 진입 즉시 "Shadow it!"
+      //    안내를 2초간 표시. 실제 낭독은 유저가 속도를 고를 때 시작된다.
+      _triggerShadowingOverlay();
     }
   }
 
@@ -7098,13 +7140,11 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
         });
         if (_phase != ShadowingPhase.part2Practice || isPaused) return;
         if (firstSelection) {
-          _triggerShadowingOverlay(onDismiss: () {
-            if (mounted &&
-                _phase == ShadowingPhase.part2Practice &&
-                !isPaused) {
-              _startTurnPractice();
-            }
-          });
+          // 🆕 [P2-ENTER-CUE] "Shadow it!" 안내는 이미 P2 진입 시 1회 표시됨 →
+          //    여기서는 중복 표시 없이 낭독만 바로 시작한다.
+          if (mounted && _phase == ShadowingPhase.part2Practice && !isPaused) {
+            _startTurnPractice();
+          }
           return;
         }
         final player = _shadowAiPlayer;
@@ -7177,10 +7217,17 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
           const SizedBox(height: 12),
           _buildPracticeSelectionCard(
             title: "Practice 3",
-            subtitle: "확장문장 의미단위 따라읽기",
+            subtitle: _isPreparingStepP3
+                ? "P3 준비 중... P1/P2는 바로 시작할 수 있어요"
+                : (_stepP3PreparationError ?? "확장문장 의미단위 따라읽기"),
             color: Colors.amber,
             icon: Icons.music_note_rounded,
-            onTap: _goToChunkPractice,
+            isLoading: _isPreparingStepP3,
+            onTap: _isPreparingStepP3
+                ? null
+                : _stepP3PreparationError != null || _chunks.isEmpty
+                    ? _retryStepP3Preparation
+                    : _goToChunkPractice,
           ),
           const Spacer(),
           TextButton(
@@ -7198,9 +7245,10 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     required String subtitle,
     required Color color,
     required IconData icon,
+    bool isLoading = false,
     VoidCallback? onTap,
   }) {
-    final bool enabled = onTap != null;
+    final bool enabled = onTap != null || isLoading;
     return GestureDetector(
       onTap: onTap,
       child: AnimatedOpacity(
@@ -7242,8 +7290,18 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
                   ],
                 ),
               ),
-              Icon(Icons.chevron_right_rounded,
-                  color: color.withValues(alpha: 0.6), size: 22),
+              if (isLoading)
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    color: color,
+                    strokeWidth: 2.2,
+                  ),
+                )
+              else
+                Icon(Icons.chevron_right_rounded,
+                    color: color.withValues(alpha: 0.6), size: 22),
             ],
           ),
         ),
