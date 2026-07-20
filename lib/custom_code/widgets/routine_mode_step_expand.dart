@@ -280,9 +280,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   String _specTranscript = '';
   static const int COMMIT_WAIT_SPEECH_FINAL_MS = 1200; // speech_final: 1200ms
   static const int COMMIT_WAIT_UNCERTAIN_MS = 500; // UtteranceEnd: 500ms
-  // 🚀 [FIRST-TURN] 첫 유저 발화(seed)만: 더듬거림 합치기를 포기하고 즉시 시작해
-  //   첫 글자/소리를 앞당긴다. 2번째 턴부터는 위 안전값을 그대로 사용.
-  static const int COMMIT_WAIT_FIRST_TURN_MS = 450;
+  // 🚀 [FIRST-TURN] 첫 유저 발화(seed)만: 안전값보다는 짧지만, 말 중간의 짧은 쉼을
+  //   견뎌 이어 말하기를 한 덩어리로 합칠 만큼은 준다(짤림 방지). 속도는 투기적
+  //   선시작(TTFT 은닉)이 담당하므로 이 대기를 과하게 줄일 필요가 없다.
+  static const int COMMIT_WAIT_FIRST_TURN_MS = 650;
 
   // 📦 [Meaning Confidence Probe] Measurement-only state.
   // Never use these values to branch UI, History, Turn, GPT, TTS, or microphone flow.
@@ -2370,8 +2371,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         apiKey: _openAiKey,
         voice: userVoice,
         onLog: _log,
-        // 🚀 [FIRST-TURN] 첫 턴(seed)만 2단어에 조기 발사 → 첫 소리를 앞당김.
-        fireWordThreshold: currentTurnId == 1 ? 2 : 4,
+        // 🚀 [FIRST-TURN] 첫 TTS는 자연스러운 구/구두점 단위(기본 4단어 또는 첫 콤마)로
+        //   발사한다. 2단어 조기발사는 재생이 툭툭 끊겨 되돌림. 속도는 투기적 선시작이 담당.
       );
       _ttsQueueManager.setUserTurn(true);
       _ttsQueueManager.setAiPaused(false); // 유저 청크는 즉시 재생
