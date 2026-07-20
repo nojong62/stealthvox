@@ -72,6 +72,13 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   DocumentReference? _myHistoryRef; // 🔧 [히스토리] chat_history 문서 참조 (Duo 패턴)
   List<String> _lastExchangeMsgIds = []; // [??] ?? ?? messages docId
 
+  // 🆕 [Anyone 형태 진입 안내] 채팅 말풍선/소리 없이 화면 중앙 사각형 텍스트로
+  //    안내만 띄우고 2초 후 자동 페이드아웃. 마이크는 처음부터 열려 있어서
+  //    안내가 떠 있는 동안 유저가 말하면 그 발화가 그대로 파이프라인에 들어간다.
+  static const String _openingNudgeText = '오늘은 어떤 순간을 영어로 다시 그려볼까요?';
+  bool _hasShownNudgeBubble = false; // 세션당 1회 노출 가드
+  bool _showNudgeBubble = false; // 현재 표시 여부(페이드 애니메이션 트리거)
+
   // ── Idle Timeout v2 ───────────────────────────────────────────────
   // 기준: "유저도 AI도 아무 작동이 없는 상태"가 연속 60초 지속되면 pause.
   //  - AI 작동 = _ttsQueueManager.isBusy (TTS 재생/대기)
@@ -831,56 +838,75 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   Future<void> _startSessionWaitingForUserSeed() async {
     if (_openAiKey.isEmpty || !mounted) return;
     if (_isSessionComplete) return;
-    const openingPrompt = '오늘은 어떤 순간을 영어로 다시 그려볼까요?';
     _resetIdleTimer();
     _isConversationActive = true;
-    if (mounted) {
-      setState(() {
-        final hasOpeningHint = _localMessages.any((message) =>
-            message['role'] == 'SYSTEM_HINT' &&
-            message['target'] == openingPrompt);
-        if (!hasOpeningHint) {
-          _localMessages.add({
-            // 화면에는 AI 말풍선으로 보이지만 첫 턴 GPT 문맥에서는 제외한다.
-            'role': 'SYSTEM_HINT',
-            'target': openingPrompt,
-            'original': '',
-          });
-        }
-      });
-      _scrollToBottom();
-    }
 
     _ttsQueueManager.setUserTurn(false);
     _ttsQueueManager.setAiPaused(false);
 
-    // 고정 첫 멘트에서는 개인화 seed 조회 결과를 사용하지 않는다. 네트워크 조회를
-    // 기다리지 않고 마이크부터 열어 첫 발화를 즉시 받을 수 있게 한다.
-    await _startDeepgramListening();
-    if (!mounted || !_isConversationActive || _isSessionComplete) return;
+    // 🆕 [Anyone 형태 진입 안내] 채팅 말풍선/TTS 없이, 화면 중앙 사각형 텍스트로
+    //    안내만 띄우고 2초 후 자동 페이드아웃. (오프닝 멘트 TTS 재생 제거)
+    _showOpeningNudgeOnce();
 
-    // 🔧 [FIRST-MENT] 히스토리 유무와 무관하게 항상 고정 첫 멘트 재생.
-    //    개인화 seed 질문 경로(_generateAndPlayFreeTalkSeedQuestion)는
-    //    사용하지 않지만, 추후 복구 대비로 메서드는 보존한다.
-    if (mounted && _isConversationActive) {
-      _isInitialGuidePlaying = true;
-      final ChunkedTtsFetcher tts = ChunkedTtsFetcher(
-        _openAiKey,
-        _ttsQueueManager,
-        'nova',
-        isUser: false,
-        onLog: _log,
-      );
-      tts.addText(openingPrompt);
-      int ticks = 0;
-      while (_isInitialGuidePlaying &&
-          (tts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
-          mounted) {
-        await Future.delayed(const Duration(milliseconds: 50));
-        if (++ticks > 200) break;
-      }
-      _isInitialGuidePlaying = false;
-    }
+    // 마이크부터 열어 첫 발화를 즉시 받는다. 안내가 떠 있는 동안 유저가 말하면
+    // 그 발화가 그대로 파이프라인에 들어가 글자 + 소리로 실행된다.
+    await _startDeepgramListening();
+  }
+
+  // ====================================================================
+  // 📦 [Anyone 형태 진입 안내] — 소리 대신 화면 중앙 사각형 텍스트, 2초 후 소멸
+  // ====================================================================
+  void _showOpeningNudgeOnce() {
+    if (_hasShownNudgeBubble || !mounted) return;
+    _hasShownNudgeBubble = true;
+    setState(() => _showNudgeBubble = true);
+    Timer(const Duration(milliseconds: 2000), () {
+      if (mounted) setState(() => _showNudgeBubble = false);
+    });
+  }
+
+  // 🆕 [Anyone 형태] 화면 중앙 둥근 사각형 안내 — 색 채움 없이 테두리만 은은히 빛남.
+  //    마이크/재생과 충돌 없는 순수 텍스트라 타이밍 로직(대기/취소) 불필요.
+  Widget _buildNudgeBubble() {
+    return IgnorePointer(
+      child: Align(
+        alignment: Alignment.center,
+        child: AnimatedOpacity(
+          opacity: _showNudgeBubble ? 1.0 : 0.0,
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeOut,
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 36),
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E1E22).withOpacity(0.92),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: const Color(0xFF7F77DD).withOpacity(0.55),
+                width: 1.4,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF2DD4BF).withOpacity(0.25),
+                  blurRadius: 20,
+                  spreadRadius: 1,
+                ),
+              ],
+            ),
+            child: const Text(
+              _openingNudgeText,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                height: 1.5,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   // ====================================================================
@@ -1036,6 +1062,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         _turnCounter = 0;
         _sessionDocId = null;
         _myHistoryRef = null; // 🔧 [히스토리] 새 방 생성 준비
+        _hasShownNudgeBubble = false; // 🆕 새 주제 진입 시 안내 다시 노출
+        _showNudgeBubble = false;
         _isSessionComplete = false;
         _isPolishing = false;
         _polishedSentence = "";
@@ -1070,6 +1098,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         _turnCounter = 0;
         _sessionDocId = null;
         _myHistoryRef = null; // 🔧 [히스토리] 새 방 생성 준비
+        _hasShownNudgeBubble = false; // 🆕 새 문장 진입 시 안내 다시 노출
+        _showNudgeBubble = false;
         _isSessionComplete = false;
         _isPolishing = false;
         _polishedSentence = "";
@@ -3297,6 +3327,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
               child: Stack(children: [
                 _buildChatList(),
                 _buildIdleOverlay(),
+                _buildNudgeBubble(), // 🆕 [Anyone 형태 진입 안내] 2초 노출 후 소멸
               ]),
             ),
             _buildControlArea(bottomPad),
