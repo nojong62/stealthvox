@@ -76,7 +76,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   List<String> _lastExchangeMsgIds = []; // [??] ?? ?? messages docId
 
   // 🆕 [Anyone 형태 진입 안내] 채팅 말풍선/소리 없이 화면 중앙 사각형 텍스트로
-  //    안내만 띄우고 3초 후 자동 페이드아웃. 마이크는 처음부터 열려 있어서
+  //    안내만 띄우고 2초 후 자동 페이드아웃. 마이크는 처음부터 열려 있어서
   //    안내가 떠 있는 동안 유저가 말하면 그 발화가 그대로 파이프라인에 들어간다.
   static const String _openingNudgeText = kStepExpandOpeningNudgeText;
   bool _hasShownNudgeBubble = false; // 세션당 1회 노출 가드
@@ -550,7 +550,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   //    - 유저 첫 발화의 핵심 의미로 짧고 완전한 확장 seed를 생성
   //
   // 2. AI는 시작 안내와 동시에 듣기 시작 (Guided Barge-in)
-  //    - "오늘은 어떤 순간을 영어로 다시 그려볼까요?"
+  //    - "오늘은 어떤 순간을 영어로 풀어 볼까요?"
   //    - OpenAI 질문 생성 API 호출 없음
   //    - STT를 먼저 열고, 유저가 말하면 안내 TTS를 즉시 중단
   //
@@ -862,7 +862,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     _ttsQueueManager.setAiPaused(false);
 
     // 🆕 [Anyone 형태 진입 안내] 채팅 말풍선/TTS 없이, 화면 중앙 사각형 텍스트로
-    //    안내만 띄우고 3초 후 자동 페이드아웃. (오프닝 멘트 TTS 재생 제거)
+    //    안내만 띄우고 2초 후 자동 페이드아웃. (오프닝 멘트 TTS 재생 제거)
     _showOpeningNudgeOnce();
 
     // 마이크부터 열어 첫 발화를 즉시 받는다. 안내가 떠 있는 동안 유저가 말하면
@@ -871,13 +871,13 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   }
 
   // ====================================================================
-  // 📦 [Anyone 형태 진입 안내] — 소리 대신 화면 중앙 사각형 텍스트, 3초 후 소멸
+  // 📦 [Anyone 형태 진입 안내] — 소리 대신 화면 중앙 사각형 텍스트, 2초 후 소멸
   // ====================================================================
   void _showOpeningNudgeOnce() {
     if (_hasShownNudgeBubble || !mounted) return;
     _hasShownNudgeBubble = true;
     setState(() => _showNudgeBubble = true);
-    Timer(const Duration(milliseconds: 3000), () {
+    Timer(const Duration(milliseconds: 2000), () {
       if (mounted) setState(() => _showNudgeBubble = false);
     });
   }
@@ -3520,7 +3520,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
               child: Stack(children: [
                 _buildChatList(),
                 _buildIdleOverlay(),
-                _buildNudgeBubble(), // 🆕 [Anyone 형태 진입 안내] 3초 노출 후 소멸
+                _buildNudgeBubble(), // 🆕 [Anyone 형태 진입 안내] 2초 노출 후 소멸
               ]),
             ),
             _buildControlArea(bottomPad),

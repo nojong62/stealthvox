@@ -316,12 +316,8 @@ void main() {
   });
 
   group('Step Expand first-turn seed policy', () {
-    test('opening text tells the user that AI creates the seed sentence', () {
-      expect(
-        kStepExpandOpeningNudgeText,
-        startsWith('오늘은 어떤 순간을 영어로 다시 그려볼까요?'),
-      );
-      expect(kStepExpandOpeningNudgeText, contains('AI가 간단한 씨앗 문장'));
+    test('opening text stays a single short question', () {
+      expect(kStepExpandOpeningNudgeText, '오늘은 어떤 순간을 영어로 풀어 볼까요?');
     });
 
     test('turns any recoverable first input into a short grounded seed', () {

@@ -13,8 +13,7 @@ enum FirstUtteranceRoute { excluded, judge, bypass }
 
 const Duration kDuplicateFinalTranscriptWindow = Duration(milliseconds: 250);
 
-const String kStepExpandOpeningNudgeText =
-    '오늘은 어떤 순간을 영어로 다시 그려볼까요?\nAI가 간단한 씨앗 문장을 만들어 드려요.';
+const String kStepExpandOpeningNudgeText = '오늘은 어떤 순간을 영어로 풀어 볼까요?';
 
 const String kAnyoneGradualContextResponsePolicy = '''[GRADUAL CONTEXT POLICY]
 - Treat the conversation partner's exact identity and relationship as a provisional hypothesis, not a fact, until the user states it explicitly or several consistent turns support it.
