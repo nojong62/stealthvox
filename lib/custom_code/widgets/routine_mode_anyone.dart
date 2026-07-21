@@ -40,6 +40,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/openai_connection_pool.dart';
 import 'deepgram_confidence_probe.dart';
+import 'first_utterance_context_judge.dart';
 import 'trial/trial_flow_state.dart';
 import 'trial/trial_anyone_timer_mixin.dart';
 import 'trial/learning_prep_overlay.dart';
@@ -99,6 +100,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   bool _showOriginal = true;
   bool _showUsageGuide = false; // 🆕 [Anyone] 이용방법 말풍선 토글
   int _turnCounter = 0;
+  final FirstUtteranceContextJudgeSession _firstUtteranceJudge =
+      FirstUtteranceContextJudgeSession();
   String? _sessionDocId; // 🔧 [v3 추가] 첫 대화 후 세션 ID (클론 변경 시 null 리셋)
   DocumentReference? _myHistoryRef; // 🔧 [히스토리] chat_history 문서 참조 (Duo 패턴)
   bool _hasShownNudgeBubble = false; // 🆕 [즉시 안내 말풍선] 세션당 1회 노출 가드
@@ -179,6 +182,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   // 이벤트 종류에 따라 조건부 대기: speech_final=900ms, UtteranceEnd=500ms
   // 대기 중 새 발화 오면 합쳐서 처리 (최종 한 덩어리로)
   String _pendingTranscript = ''; // 대기 중인 유저 발화 누적
+  DateTime? _lastPendingFinalAt;
   Timer? _commitTimer; // "진짜 끝났는지" 확정 타이머
   // 🚀 [SPEC-FIRST-TURN] 첫 턴 투기적 선시작: 대기창 동안 GPT 번역을 미리 돌려
   //   토큰을 이 컨트롤러에 버퍼링. 확정 시 파이프라인에 그대로 넘겨 TTFT를 겹쳐 없앤다.
@@ -196,6 +200,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   DateTime? _activeProbeDgFinalAt;
   bool _awaitingAiFirstTextProbe = false;
   bool _awaitingAiFirstAudioProbe = false;
+  double? _activeSttConfidence;
+  int _pipelineGeneration = 0;
   void _log(String tag, String msg) {
     final ts = DateTime.now().toIso8601String().substring(11, 23);
     final line = '[$ts] $tag $msg';
@@ -230,6 +236,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       turn,
       languageCode: languageCode,
     );
+    _activeSttConfidence =
+        probe.chunkTranscriptConfidenceMean ?? probe.wordConfidenceMean;
     probeStopwatch.stop();
     _activeProbeDgFinalAt = hadDeepgramResult ? turn.finalizedAt : null;
     final meaningProbeMs =
@@ -582,6 +590,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   }
 
   void _stopEverything() {
+    _pipelineGeneration++;
     _isConversationActive = false;
     _hasShownNudgeBubble = false;
     _showNudgeBubble = false;
@@ -591,7 +600,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     _commitTimer?.cancel(); // 🔧 [v3.4] 대기 중 타이머 정리
     _commitTimer = null;
     _cancelSpeculativeTranslation(); // 🚀 [SPEC] 진행 중 투기 번역 정리
+    _firstUtteranceJudge.cancel();
     _pendingTranscript = ''; // 대기 중 발화도 버림
+    _lastPendingFinalAt = null;
     _pendingDeepgramResults.clear();
     _activeProbeDgFinalAt = null;
     _awaitingAiFirstTextProbe = false;
@@ -749,7 +760,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
             return;
           }
           _log('🔀 [LISTEN-03]',
-              'onTurnEnded 콜백 수신: "$transcript" speechFinal=$speechFinal');
+              'onTurnEnded 콜백 수신: len=${transcript.length} speechFinal=$speechFinal');
           _swDeepgram.stop();
           // source(speechFinal)를 인자로 직접 전달 → 비동기 다음 이벤트에 상태값이 덮이는 위험 제거
           _stopMicAndProcess(transcript, speechFinal: speechFinal);
@@ -808,9 +819,11 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     final bool isFirstUtterance = _turnCounter == 0;
     final waitMs = isFirstUtterance
         ? kFreeTalkFirstTurnCommitWaitMs
-        : (speechFinal ? COMMIT_WAIT_SPEECH_FINAL_MS : COMMIT_WAIT_UNCERTAIN_MS);
+        : (speechFinal
+            ? COMMIT_WAIT_SPEECH_FINAL_MS
+            : COMMIT_WAIT_UNCERTAIN_MS);
     _log('🔀 [STOP-01]',
-        '$source 수신: "$clean" (len=${clean.length}) waitMs=$waitMs first=$isFirstUtterance');
+        '$source 수신: len=${clean.length} waitMs=$waitMs first=$isFirstUtterance');
 
     if (clean.length < 2) {
       _log('🔀 [STOP-02]', '너무 짧음 → 무시');
@@ -818,13 +831,25 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     }
 
     // 🔧 기존 대기 중인 발화가 있으면 공백으로 연결 (더듬거림 합치기)
+    final finalReceivedAt = DateTime.now();
+    final isDuplicateFinal = isDuplicateFinalTranscript(
+      _pendingTranscript,
+      clean,
+      sincePreviousFinal: _lastPendingFinalAt == null
+          ? null
+          : finalReceivedAt.difference(_lastPendingFinalAt!),
+    );
+    _lastPendingFinalAt = finalReceivedAt;
     if (_pendingTranscript.isEmpty) {
       _pendingTranscript = clean;
       _log('🔀 [STOP-03]', '신규 발화 접수. ${waitMs}ms 대기창 시작 (source=$source)');
+    } else if (isDuplicateFinal) {
+      _log('🔀 [STOP-04]',
+          '동일 final 중복 무시 (${waitMs}ms 대기창 리셋, source=$source)');
     } else {
       _pendingTranscript = '$_pendingTranscript $clean';
       _log('🔀 [STOP-04]',
-          '합치기: "$_pendingTranscript" (${waitMs}ms 대기창 리셋, source=$source)');
+          '합치기: len=${_pendingTranscript.length} (${waitMs}ms 대기창 리셋, source=$source)');
     }
 
     // UI: 접수된 발화를 HOST_TEMP 풍선에 실시간 반영
@@ -846,7 +871,12 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     // 🚀 [SPEC-FIRST-TURN] 첫 턴이면 대기창 동안 GPT 번역을 미리 시작해 버퍼링한다.
     //   추가 발화가 오면 이 함수가 다시 호출되며(합쳐진 텍스트로) 이전 투기 번역을
     //   취소하고 재시작한다 → 짤림 위험 0. 확정 시 텍스트가 일치하면 그대로 사용.
-    if (isFirstUtterance && _pendingTranscript.trim().length >= 2) {
+    final firstUtteranceRoute =
+        _firstUtteranceJudge.previewRoute(_pendingTranscript.trim());
+    if (!isDuplicateFinal &&
+        isFirstUtterance &&
+        _pendingTranscript.trim().length >= 2 &&
+        firstUtteranceRoute == FirstUtteranceRoute.bypass) {
       _startSpeculativeTranslation(_pendingTranscript.trim());
     }
 
@@ -859,8 +889,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
   // 🔧 [v3.4] 900ms 대기 후 더 이상 발화 없으면 확정 → 파이프라인 시작
   void _commitAndProcess() async {
+    final pipelineGeneration = _pipelineGeneration;
     final committed = _pendingTranscript.trim();
     _pendingTranscript = '';
+    _lastPendingFinalAt = null;
     _commitTimer = null;
 
     if (committed.isEmpty) {
@@ -869,7 +901,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       return;
     }
 
-    _log('🔀 [COMMIT-01]', '확정: "$committed" → 파이프라인 시작');
+    _log('🔀 [COMMIT-01]', '확정: len=${committed.length} → 파이프라인 시작');
 
     // 🚀 [SPEC-FIRST-TURN] 투기적 번역이 이 확정 텍스트와 일치하면 그 스트림을 그대로
     //   파이프라인에 넘겨 TTFT를 건너뛴다. 불일치(합쳐짐 등)면 폐기하고 정상 경로.
@@ -889,7 +921,11 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
     _runMeaningProbe(committed);
     _log('🔀 [COMMIT-03]', '_processRelayPipeline 호출');
-    _processRelayPipeline(committed, userStreamOverride: userOverride);
+    _processRelayPipeline(
+      committed,
+      userStreamOverride: userOverride,
+      expectedPipelineGeneration: pipelineGeneration,
+    );
   }
 
   // ====================================================================
@@ -910,7 +946,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     final String targetLangName = FFAppState().targetLang.isNotEmpty
         ? FFAppState().targetLang
         : 'English';
-    _log('🚀 [SPEC-START]', 'first-turn 투기 번역 시작: "$text"');
+    _log('🚀 [SPEC-START]', 'first-turn 투기 번역 시작: len=${text.length}');
     _specSub = FreeTalkBrain.streamUserTranslation(
       apiKey: _openAiKey,
       textOriginal: text,
@@ -1003,14 +1039,30 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
   Future<void> _processRelayPipeline(String finalTranscript,
       {bool isCorrectionRetry = false,
-      Stream<String>? userStreamOverride}) async {
+      Stream<String>? userStreamOverride,
+      int? expectedPipelineGeneration}) async {
+    final pipelineGeneration =
+        expectedPipelineGeneration ?? _pipelineGeneration;
+    if (!isActivePipelineGeneration(
+      expected: pipelineGeneration,
+      current: _pipelineGeneration,
+      mounted: mounted,
+      conversationActive: _isConversationActive,
+    )) {
+      return;
+    }
     _logProbeTiming('PIPELINE_START');
     _resetIdleTimer();
+    final ignoreWithoutConsumingFirstTurn =
+        _firstUtteranceJudge.shouldIgnoreWithoutConsumingFirstTurn(
+      finalTranscript,
+      sttConfidence: _activeSttConfidence,
+    );
     _turnCounter++;
     final int currentTurnId = _turnCounter;
     bool skipFinallyRestart = false;
     _log('🧠 [PIPE-01]',
-        'Pipeline 시작 turn=$_turnCounter input="$finalTranscript"');
+        'Pipeline 시작 turn=$_turnCounter input_len=${finalTranscript.length}');
 
     // ─────────────────────────────────────────────────────
     // STEP 1: 증발 검열 (UI 풍선 찍기 전)
@@ -1030,10 +1082,12 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     //   Before: short ghost words could evaporate normal phrases that merely included them.
     //   Now: evaporate only when the entire cleaned transcript is itself a ghost word.
     //   Mixed phrases pass through and are handled later by the [EVAPORATE] rules if needed.
-    bool isGhost =
-        finalTranscript.length <= 2 || ghostWords.contains(lowerClean.trim());
+    bool isGhost = ignoreWithoutConsumingFirstTurn ||
+        finalTranscript.length < 2 ||
+        ghostWords.contains(lowerClean.trim());
 
     if (isGhost) {
+      if (_turnCounter == currentTurnId && _turnCounter > 0) _turnCounter--;
       if (mounted)
         setState(
             () => _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP'));
@@ -1046,6 +1100,29 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         }
       }
       return;
+    }
+
+    final firstUtteranceContext = await _firstUtteranceJudge.judgeIfNeeded(
+      apiKey: _openAiKey,
+      transcript: finalTranscript,
+      mode: _probeMode,
+      sttConfidence: _activeSttConfidence,
+      onLog: (event, details) =>
+          _log('🧭 [FIRST-CONTEXT]', 'event=$event $details'),
+    );
+    if (!isActivePipelineGeneration(
+      expected: pipelineGeneration,
+      current: _pipelineGeneration,
+      mounted: mounted,
+      conversationActive: _isConversationActive,
+    )) {
+      _log('🧭 [FIRST-CONTEXT]', 'event=stale_pipeline_discarded');
+      return;
+    }
+    if (firstUtteranceContext == null &&
+        _firstUtteranceJudge.requestStarted &&
+        _firstUtteranceJudge.requestFailed) {
+      _log('🧭 [FIRST-CONTEXT]', 'event=fallback fallback=true');
     }
 
     // [CLARIFY-EVAPORATE] 직전 SYSTEM 버블이 되묻기 질문(clarify:true)이면
@@ -1157,7 +1234,12 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
             targetLang: targetLangName,
             contextStr: contextStr,
             disableCorrection: isCorrectionRetry,
+            firstUtteranceContext:
+                firstUtteranceContext?.toInternalPromptContext() ?? '',
           );
+      if (firstUtteranceContext != null) {
+        _firstUtteranceJudge.markDelivered(firstUtteranceContext);
+      }
 
       bool evaporated = false;
       bool corrected = false; // 유저가 AI의 오해를 정정 → 직전 교환 삭제 후 재처리
@@ -1255,7 +1337,12 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         skipFinallyRestart = true;
         _isPipelineRunning = false;
         unawaited(
-            _processRelayPipeline(finalTranscript, isCorrectionRetry: true));
+          _processRelayPipeline(
+            finalTranscript,
+            isCorrectionRetry: true,
+            expectedPipelineGeneration: pipelineGeneration,
+          ),
+        );
         return;
       }
 
@@ -1591,7 +1678,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
             _logProbeTiming('AI_FIRST_TEXT');
           }
           if (!_firstAiChunkLogged) {
-            _log('🧠 [PIPE-03]', 'GPT 첫 청크 수신: "$chunk"');
+            _log('🧠 [PIPE-03]', 'GPT 첫 청크 수신');
             _firstAiChunkLogged = true;
           }
           if (_swOpenAI.isRunning) _swOpenAI.stop();
@@ -3859,6 +3946,7 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
     required String targetLang,
     required String contextStr,
     bool disableCorrection = false,
+    String firstUtteranceContext = '',
   }) async* {
     final client = OpenAiConnectionPool.instance.client;
     try {
@@ -3890,12 +3978,15 @@ Even slight or indirect displeasure aimed at the AI's last reply or question cou
 Do NOT confuse this with a negative ANSWER to the question (e.g., "아니, 안 갔어" = a valid answer, NOT dissatisfaction).
 If so, output EXACTLY: [DISSATISFIED]  (and nothing else)''';
 
+      final contextJudgeBlock = firstUtteranceContext.trim().isEmpty
+          ? ''
+          : '\n\n${firstUtteranceContext.trim()}';
       final sysPrompt =
           '''You are an expert real-time Korean-to-$targetLang translator specialized in live conversation.
 
 Korean is a heavy pro-drop language — subjects, objects, and pronouns are constantly omitted when clear from context. Your job is to resolve these omissions perfectly.
 
-$correctionBlock
+$correctionBlock$contextJudgeBlock
 
 [INTERNAL THINKING - do not output]
 Step 1. CONTEXT CHECK: Review the conversation history to identify who is speaking, who is being addressed, and who/what is the current topic.
