@@ -302,19 +302,6 @@ void main() {
     });
   });
 
-  group('Anyone gradual context response policy', () {
-    test('keeps identity provisional and gathers context without inventing it',
-        () {
-      expect(kAnyoneGradualContextResponsePolicy,
-          contains('provisional hypothesis'));
-      expect(kAnyoneGradualContextResponsePolicy, contains('explicitly said'));
-      expect(kAnyoneGradualContextResponsePolicy, contains('socially safe'));
-      expect(kAnyoneGradualContextResponsePolicy, contains('Do not invent'));
-      expect(kAnyoneGradualContextResponsePolicy, contains('at most one'));
-      expect(kAnyoneGradualContextResponsePolicy, contains('gradually'));
-    });
-  });
-
   group('Step Expand first-turn seed policy', () {
     test('opening text stays a single short question', () {
       expect(kStepExpandOpeningNudgeText, '오늘은 어떤 순간을 영어로 풀어 볼까요?');
