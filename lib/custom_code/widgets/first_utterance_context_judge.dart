@@ -15,6 +15,16 @@ const Duration kDuplicateFinalTranscriptWindow = Duration(milliseconds: 250);
 
 const String kStepExpandOpeningNudgeText = '오늘은 어떤 순간을 영어로 풀어 볼까요?';
 
+/// Anyone 자유대화 답변 전 내부 숙고 지시.
+/// 응답이 1초 정도 느려지더라도 어중간한 답 대신 구체적인 답과 질문을 뽑는다.
+const String kAnyoneDeliberateReplyPolicy = '''[THINK TWICE BEFORE YOU SPEAK]
+- Take an extra beat. A slightly slower reply that lands is far better than a fast, vague one.
+- Silently draft two different replies, compare them, then say only the better one.
+- Throw away any draft that is hedging or generic — anything that could have been said to anyone by anyone ("That sounds tough.", "I see.", "How do you feel about that?"). Commit to a real reaction instead.
+- Keep the draft that reacts to the specific thing the user just said, in the voice of the specific person you are.
+- Your question must earn its place: ask about the one concrete detail you most want to know next — what happened, what they did, what the other person said back. One sharp, specific question. Never a vague or generic one.
+- Never show your drafts, your comparison, or any reasoning. Output only the final reply.''';
+
 String buildStepExpandFirstTurnSeedPolicy(String targetLanguage) {
   final language = targetLanguage.trim().isEmpty
       ? 'the requested target language'

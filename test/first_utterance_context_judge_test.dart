@@ -302,6 +302,25 @@ void main() {
     });
   });
 
+  group('Anyone deliberate reply policy', () {
+    test('trades a beat of latency for a committed, specific reply', () {
+      expect(kAnyoneDeliberateReplyPolicy, contains('Take an extra beat'));
+      expect(kAnyoneDeliberateReplyPolicy, contains('two different replies'));
+      expect(kAnyoneDeliberateReplyPolicy, contains('hedging or generic'));
+    });
+
+    test('demands one sharp question instead of a vague one', () {
+      expect(kAnyoneDeliberateReplyPolicy, contains('must earn its place'));
+      expect(kAnyoneDeliberateReplyPolicy, contains('One sharp, specific'));
+      expect(kAnyoneDeliberateReplyPolicy, contains('Never a vague'));
+    });
+
+    test('keeps the deliberation hidden from the streamed output', () {
+      expect(kAnyoneDeliberateReplyPolicy, contains('Never show your drafts'));
+      expect(kAnyoneDeliberateReplyPolicy, contains('only the final reply'));
+    });
+  });
+
   group('Step Expand first-turn seed policy', () {
     test('opening text stays a single short question', () {
       expect(kStepExpandOpeningNudgeText, '오늘은 어떤 순간을 영어로 풀어 볼까요?');
