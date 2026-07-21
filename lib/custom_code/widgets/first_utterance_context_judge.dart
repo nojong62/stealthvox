@@ -115,7 +115,7 @@ This structured judgment only helps resolve the hidden subject, action target, a
 - Use it only where it does not conflict with the original utterance.
 - confidence >= 0.85: strong supporting context.
 - confidence >= 0.65 and < 0.85: reference only; prefer the original wording and conversation context.
-- confidence < 0.65: do not force the judgment. Prefer a neutral rendering, or naturally clarify when needed.
+- confidence < 0.65: ignore this judgment entirely and translate the original utterance as it stands. Never blur or water down the translation because the judgment was uncertain.
 - The final translation and reply must still follow the original utterance and all existing conversation rules.
 - Never reveal, quote, or describe this internal judgment to the user.
 Judgment: $payload''';
