@@ -13,12 +13,29 @@ enum FirstUtteranceRoute { excluded, judge, bypass }
 
 const Duration kDuplicateFinalTranscriptWindow = Duration(milliseconds: 250);
 
+const String kStepExpandOpeningNudgeText =
+    '오늘은 어떤 순간을 영어로 다시 그려볼까요?\nAI가 간단한 씨앗 문장을 만들어 드려요.';
+
 const String kAnyoneGradualContextResponsePolicy = '''[GRADUAL CONTEXT POLICY]
 - Treat the conversation partner's exact identity and relationship as a provisional hypothesis, not a fact, until the user states it explicitly or several consistent turns support it.
 - Respond first to what the user explicitly said. When context is still ambiguous, choose a socially safe, natural reply that would fit multiple plausible relationships.
 - Do not invent shared memories, intimacy, authority, promises, motives, or off-screen events. Do not commit to partner, family, friend, or workplace behavior from one weak clue.
 - When more context would materially improve the reply, acknowledge the content briefly and ask at most one natural question about the situation or what happened next. Do not directly ask the user to identify your relationship.
 - As clear evidence accumulates, gradually make the tone and response more specific. If later evidence conflicts with an earlier hypothesis, adjust silently without defending the old assumption.''';
+
+String buildStepExpandFirstTurnSeedPolicy(String targetLanguage) {
+  final language = targetLanguage.trim().isEmpty
+      ? 'the requested target language'
+      : targetLanguage.trim();
+  return '''[CASE 1] History is empty (USER'S FIRST TURN — CREATE A SEED)
+- Whatever meaningful content the user gives, turn its core meaning into ONE short, complete, natural spoken seed sentence in $language that can grow in later turns.
+- Keep one clear subject and one main idea. Prefer a brief, simple clause over details or complex grammar.
+- If the input is already a complete sentence, preserve its meaning and simplify only when useful.
+- If it is a fragment, question, reaction, or vague thought, add only the minimum grammatical framing needed to make a usable seed.
+- Never invent a name, event, reason, relationship, feeling, or factual detail that the user did not provide.
+- On this first turn, do not output [DISSATISFIED], [CORRECTION], [MISHEARD], [CLARIFY], [RESTATE], or [GARBLED] when any coherent topic or intent is recoverable. Use [EVAPORATE] only when there is no recoverable meaning.
+- Output ONLY the seed sentence in $language.''';
+}
 
 String normalizeTranscriptForDuplicateCheck(String transcript) {
   return transcript.trim().replaceAll(RegExp(r'\s+'), ' ');
@@ -47,6 +64,13 @@ bool isActivePipelineGeneration({
   required bool conversationActive,
 }) {
   return mounted && conversationActive && expected == current;
+}
+
+bool shouldRunStepQuestionDissatisfactionFastLane({
+  required bool hasPriorAiQuestion,
+  required bool rawDissatisfactionMatch,
+}) {
+  return hasPriorAiQuestion && rawDissatisfactionMatch;
 }
 
 class FirstUtteranceContext {

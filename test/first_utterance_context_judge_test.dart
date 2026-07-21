@@ -314,4 +314,74 @@ void main() {
       expect(kAnyoneGradualContextResponsePolicy, contains('gradually'));
     });
   });
+
+  group('Step Expand first-turn seed policy', () {
+    test('opening text tells the user that AI creates the seed sentence', () {
+      expect(
+        kStepExpandOpeningNudgeText,
+        startsWith('오늘은 어떤 순간을 영어로 다시 그려볼까요?'),
+      );
+      expect(kStepExpandOpeningNudgeText, contains('AI가 간단한 씨앗 문장'));
+    });
+
+    test('turns any recoverable first input into a short grounded seed', () {
+      final policy = buildStepExpandFirstTurnSeedPolicy('English');
+      expect(policy, contains('CREATE A SEED'));
+      expect(policy, contains('Whatever meaningful'));
+      expect(policy, contains('seed sentence in English'));
+      expect(policy, contains('brief, simple clause'));
+      expect(policy, contains('minimum grammatical'));
+      expect(policy, contains('Never invent'));
+      expect(policy, contains('Output ONLY'));
+    });
+
+    test('keeps first-turn control tags from replacing a recoverable seed', () {
+      final policy = buildStepExpandFirstTurnSeedPolicy('English');
+      for (final tag in [
+        '[DISSATISFIED]',
+        '[CORRECTION]',
+        '[MISHEARD]',
+        '[CLARIFY]',
+        '[RESTATE]',
+        '[GARBLED]',
+      ]) {
+        expect(policy, contains(tag), reason: tag);
+      }
+      expect(
+        policy,
+        contains('when any coherent topic or intent is recoverable'),
+      );
+    });
+
+    test('builds the seed in the selected target language', () {
+      expect(
+        buildStepExpandFirstTurnSeedPolicy('Japanese'),
+        contains('seed sentence in Japanese'),
+      );
+    });
+
+    test('runs question dissatisfaction only after an actual AI question', () {
+      expect(
+        shouldRunStepQuestionDissatisfactionFastLane(
+          hasPriorAiQuestion: false,
+          rawDissatisfactionMatch: true,
+        ),
+        isFalse,
+      );
+      expect(
+        shouldRunStepQuestionDissatisfactionFastLane(
+          hasPriorAiQuestion: true,
+          rawDissatisfactionMatch: true,
+        ),
+        isTrue,
+      );
+      expect(
+        shouldRunStepQuestionDissatisfactionFastLane(
+          hasPriorAiQuestion: true,
+          rawDissatisfactionMatch: false,
+        ),
+        isFalse,
+      );
+    });
+  });
 }

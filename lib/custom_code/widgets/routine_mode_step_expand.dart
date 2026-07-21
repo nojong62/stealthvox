@@ -76,9 +76,9 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   List<String> _lastExchangeMsgIds = []; // [??] ?? ?? messages docId
 
   // 🆕 [Anyone 형태 진입 안내] 채팅 말풍선/소리 없이 화면 중앙 사각형 텍스트로
-  //    안내만 띄우고 2초 후 자동 페이드아웃. 마이크는 처음부터 열려 있어서
+  //    안내만 띄우고 3초 후 자동 페이드아웃. 마이크는 처음부터 열려 있어서
   //    안내가 떠 있는 동안 유저가 말하면 그 발화가 그대로 파이프라인에 들어간다.
-  static const String _openingNudgeText = '오늘은 어떤 순간을 영어로 다시 그려볼까요?';
+  static const String _openingNudgeText = kStepExpandOpeningNudgeText;
   bool _hasShownNudgeBubble = false; // 세션당 1회 노출 가드
   bool _showNudgeBubble = false; // 현재 표시 여부(페이드 애니메이션 트리거)
 
@@ -545,9 +545,9 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   // ====================================================================
   // 🎯 [스텝익스팬드 대화 설계 원칙]
   // ====================================================================
-  // 1. 유저가 먼저 기본 문장을 제안한다 (User-First)
+  // 1. 유저가 먼저 무엇이든 말하면 AI가 기본 씨앗 문장을 만든다 (User-First)
   //    - 세션 시작 시 AI는 시작 안내만 하고 대기
-  //    - 유저의 첫 문장이 확장 seed가 됨
+  //    - 유저 첫 발화의 핵심 의미로 짧고 완전한 확장 seed를 생성
   //
   // 2. AI는 시작 안내와 동시에 듣기 시작 (Guided Barge-in)
   //    - "오늘은 어떤 순간을 영어로 다시 그려볼까요?"
@@ -851,7 +851,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     }
   }
 
-  /// 세션 시작: 안내문 TTS만 재생하고 유저 기본 문장(seed) 대기
+  /// 세션 시작: 안내문을 표시하고 씨앗 재료가 될 유저 첫 발화 대기
   Future<void> _startSessionWaitingForUserSeed() async {
     if (_openAiKey.isEmpty || !mounted) return;
     if (_isSessionComplete) return;
@@ -862,7 +862,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     _ttsQueueManager.setAiPaused(false);
 
     // 🆕 [Anyone 형태 진입 안내] 채팅 말풍선/TTS 없이, 화면 중앙 사각형 텍스트로
-    //    안내만 띄우고 2초 후 자동 페이드아웃. (오프닝 멘트 TTS 재생 제거)
+    //    안내만 띄우고 3초 후 자동 페이드아웃. (오프닝 멘트 TTS 재생 제거)
     _showOpeningNudgeOnce();
 
     // 마이크부터 열어 첫 발화를 즉시 받는다. 안내가 떠 있는 동안 유저가 말하면
@@ -871,13 +871,13 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   }
 
   // ====================================================================
-  // 📦 [Anyone 형태 진입 안내] — 소리 대신 화면 중앙 사각형 텍스트, 2초 후 소멸
+  // 📦 [Anyone 형태 진입 안내] — 소리 대신 화면 중앙 사각형 텍스트, 3초 후 소멸
   // ====================================================================
   void _showOpeningNudgeOnce() {
     if (_hasShownNudgeBubble || !mounted) return;
     _hasShownNudgeBubble = true;
     setState(() => _showNudgeBubble = true);
-    Timer(const Duration(milliseconds: 2000), () {
+    Timer(const Duration(milliseconds: 3000), () {
       if (mounted) setState(() => _showNudgeBubble = false);
     });
   }
@@ -1139,7 +1139,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       });
     }
     _practiceRecognizedWords.clear();
-    _startSessionWaitingForUserSeed(); // 시작 안내 후 유저 seed 문장 대기
+    _startSessionWaitingForUserSeed(); // 시작 안내 후 씨앗 재료가 될 첫 발화 대기
   }
 
   // ====================================================================
@@ -2390,8 +2390,17 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       }
     }
 
-    // 🔧 [FAST-LANE] 로컬 질문 불만 판정 — streamUserTranslation 호출 전 빠른 처리
-    if (_isQuestionDissatisfactionRaw(finalTranscript)) {
+    // 🔧 [FAST-LANE] 실제 이전 AI 질문이 있을 때만 질문 불만으로 처리한다.
+    // 첫 발화는 어떤 내용이든 씨앗 문장 생성이 우선이다.
+    final hasPriorAiQuestion = _localMessages.any((message) {
+      if (message['role'] != 'SYSTEM') return false;
+      final target = (message['target'] ?? '').toString().trim();
+      return target.isNotEmpty && target != '...';
+    });
+    if (shouldRunStepQuestionDissatisfactionFastLane(
+      hasPriorAiQuestion: hasPriorAiQuestion,
+      rawDissatisfactionMatch: _isQuestionDissatisfactionRaw(finalTranscript),
+    )) {
       _log('🟠 [FAST-DISSATISFIED]', '로컬 fast-lane 감지');
       _turnCounter--; // 불만 발화는 학습 턴 미적용
       if (mounted) {
@@ -2477,7 +2486,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         _firstUtteranceJudge.markDelivered(firstUtteranceContext);
       }
 
-      // 🌱 [StepExpand Part2만 TTS] 첫 턴은 단순 번역 (Part 구분 없음)
+      // 🌱 [StepExpand Part2만 TTS] 첫 턴은 AI 씨앗 문장 (Part 구분 없음)
       //    2턴+는 "Part1\n\nPart2" 구조 → Part2만 TTS로 재생
       //    \n\n 감지 전까지는 buffer에 쌓되 TTS는 안 보냄
       //    \n\n 감지 시 buffer 리셋 → 이후 chunk부터 TTS (=Part2)
@@ -3511,7 +3520,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
               child: Stack(children: [
                 _buildChatList(),
                 _buildIdleOverlay(),
-                _buildNudgeBubble(), // 🆕 [Anyone 형태 진입 안내] 2초 노출 후 소멸
+                _buildNudgeBubble(), // 🆕 [Anyone 형태 진입 안내] 3초 노출 후 소멸
               ]),
             ),
             _buildControlArea(bottomPad),
@@ -5404,7 +5413,7 @@ class StepExpandBrain {
   // 📦 [Box 7-1-A] streamUserTranslation — CoT 2단계 + 성장 머징
   // ------------------------------------------------------------------
   // 🌱 두 가지 케이스:
-  //   CASE 1 (첫 턴): 단순 번역 1개만
+  //   CASE 1 (첫 턴): 유저 의미를 짧은 AI 씨앗 문장으로 생성
   //   CASE 2 (2턴+): Part1(짧은 번역) + \n\n + Part2(성장한 확장 문장)
   // ==================================================================
   static Stream<String> streamUserTranslation({
@@ -5446,7 +5455,8 @@ You help the user grow ONE English sentence across multiple turns, adding detail
 
 Read the 'History' carefully to determine the user's current turn.$contextJudgeBlock
 
-[DISSATISFIED CHECK — ABSOLUTE FIRST PRIORITY — APPLY BEFORE ANY OTHER CHECK]
+[DISSATISFIED CHECK — APPLY BEFORE OTHER CHECKS ONLY WHEN HISTORY HAS AN AI QUESTION]
+If History is empty, skip this check and follow CASE 1.
 Does the user's input express dissatisfaction, complaint, or rejection aimed at the AI's QUESTION ITSELF?
 If ANY of the following apply → output EXACTLY: [DISSATISFIED] and stop immediately. Do NOT run RELEVANCE CHECK, RESTATE GUARD, CORRECTION, or any other check.
 
@@ -5478,11 +5488,7 @@ Korean uses body-part expressions for PHYSICAL sensations. Never translate them 
 - 기운이 없다 → "I have no energy" / "I feel drained" (NOT "I'm unmotivated")
 Context determines: "불편하다" after a body part = physical; after 마음/기분 = emotional. Default to PHYSICAL when the body part is explicit.
 
-[CASE 1] History is empty (USER'S FIRST TURN)
-- Simply translate the user's Korean input into ONE natural English sentence.
-- DO NOT expand. DO NOT add anything extra.
-- Example Input: 알렉스에게 전화할 생각이 났어요.
-- Example Output: I remembered to call Alex.
+${buildStepExpandFirstTurnSeedPolicy(targetLang)}
 
 [CASE 2] History exists (USER'S SECOND+ TURN)
 - Output EXACTLY two parts, separated by an empty line (\n\n).
@@ -5513,7 +5519,8 @@ Suddenly.
 
 I suddenly remembered to call Alex.
 
-[CLARIFICATION GUARD]
+[CLARIFICATION GUARD — CASE 2 ONLY]
+If History is empty, skip this guard and follow CASE 1.
 Before translating, check: is the subject or object of the utterance clear from the input OR resolvable from History?
 If clear → proceed with normal translation.
 If genuinely ambiguous AND History cannot resolve it → output EXACTLY:
@@ -5528,13 +5535,15 @@ Style pool — pick ONE and VARY each time (never repeat the same phrasing twice
 
 NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
 
-[RELEVANCE CHECK — Run only after DISSATISFIED CHECK passes (no [DISSATISFIED] triggered)]
+[RELEVANCE CHECK — CASE 2 ONLY; run after DISSATISFIED CHECK passes]
+If History is empty, skip this check and follow CASE 1.
 Look at the AI's LAST question in History. Ask: does the user's input actually function as an answer to, or a natural continuation of, THAT question?
 - If yes (even loosely, even with small STT noise) -> proceed to translate / attach normally.
 - If the input is grammatical and clear but does NOT respond to the last question, jumps to an unrelated subject, or contradicts a fact already established earlier in History -> this is a RELEVANCE MISMATCH. Do NOT force it onto the growing sentence and do NOT invent a connection. Output EXACTLY: [RESTATE]
 Calibration: a natural, on-topic tangent that still belongs to the same story is FINE — translate it. Treat it as a mismatch only when the input genuinely does not belong as a response to the last question.
 
-[RESTATE GUARD] — hold the center; never invent content
+[RESTATE GUARD — CASE 2 ONLY] — hold the center; never invent content
+If History is empty, skip this guard and follow CASE 1.
 Stay anchored to the AI's LAST question and the growing sentence. If you cannot do that safely, ask the user to say it again instead of guessing.
 Output EXACTLY: [RESTATE]  in these cases (the speech itself is CLEAR):
 1. RELEVANCE MISMATCH: The input is clear but does not answer the AI's last question, switches to an unrelated subject, or contradicts established facts (see [RELEVANCE CHECK] above).
@@ -5579,7 +5588,7 @@ Output: [GARBLED]
 - If the input has minor STT errors but the intended meaning is still clearly inferable from context, make your best interpretation and produce the normal output (keep tolerating small errors).
 - If the input is CLEAR but off-context (see [RESTATE GUARD]), output EXACTLY: [RESTATE]. If it is too GARBLED to interpret safely, output EXACTLY: [GARBLED]. Never guess and never invent content the user did not say.
 - Output [RETRY] ONLY when the user's answer shows they did not understand the AI's question itself, so re-asking the same thing would not help.
-- Output [DISSATISFIED] when the user expresses dissatisfaction, complaint, or rejection about the AI's QUESTION itself (not about the topic). Signs: "다른 질문 해줘" / "그 질문 싫어" / "질문 바꿔" / "무슨 질문이 그래" / "별로야" / "그건 좀" / "다른 거 물어봐" / "change the question" / "ask something else" / "I don't like that question". MILD signs ALSO count: "별로" / "별론데" / "아 그건 좀" / "에이" / "그런 거 말고" / "그건 없어" / "재미없어" / "이상하네" / "뭐야 그게" / "meh" / "not really" / "hmm, not that one". REPETITION COMPLAINT signs ALSO count: "아까 말했잖아" / "이미 대답했잖아" / "방금 말했는데" / "이미 얘기했어" / "똑같은 질문" / "같은 걸 또" / "already said" / "already answered" / "I already told you". Even slight or indirect displeasure aimed at the QUESTION itself counts. Do NOT output [DISSATISFIED] when the user is simply answering negatively (e.g., "아니, 안 갔어" = a valid negative answer).""";
+- Output [DISSATISFIED] only when History contains an AI question and the user expresses dissatisfaction, complaint, or rejection about that QUESTION itself (not about the topic). Signs: "다른 질문 해줘" / "그 질문 싫어" / "질문 바꿔" / "무슨 질문이 그래" / "별로야" / "그건 좀" / "다른 거 물어봐" / "change the question" / "ask something else" / "I don't like that question". MILD signs ALSO count: "별로" / "별론데" / "아 그건 좀" / "에이" / "그런 거 말고" / "그건 없어" / "재미없어" / "이상하네" / "뭐야 그게" / "meh" / "not really" / "hmm, not that one". REPETITION COMPLAINT signs ALSO count: "아까 말했잖아" / "이미 대답했잖아" / "방금 말했는데" / "이미 얘기했어" / "똑같은 질문" / "같은 걸 또" / "already said" / "already answered" / "I already told you". Even slight or indirect displeasure aimed at the QUESTION itself counts. Do NOT output [DISSATISFIED] when History is empty or when the user is simply answering negatively (e.g., "아니, 안 갔어" = a valid negative answer).""";
 
       final request = http.Request(
         'POST',
