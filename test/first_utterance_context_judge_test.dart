@@ -301,4 +301,17 @@ void main() {
       );
     });
   });
+
+  group('Anyone gradual context response policy', () {
+    test('keeps identity provisional and gathers context without inventing it',
+        () {
+      expect(kAnyoneGradualContextResponsePolicy,
+          contains('provisional hypothesis'));
+      expect(kAnyoneGradualContextResponsePolicy, contains('explicitly said'));
+      expect(kAnyoneGradualContextResponsePolicy, contains('socially safe'));
+      expect(kAnyoneGradualContextResponsePolicy, contains('Do not invent'));
+      expect(kAnyoneGradualContextResponsePolicy, contains('at most one'));
+      expect(kAnyoneGradualContextResponsePolicy, contains('gradually'));
+    });
+  });
 }

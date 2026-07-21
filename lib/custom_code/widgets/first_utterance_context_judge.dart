@@ -13,6 +13,13 @@ enum FirstUtteranceRoute { excluded, judge, bypass }
 
 const Duration kDuplicateFinalTranscriptWindow = Duration(milliseconds: 250);
 
+const String kAnyoneGradualContextResponsePolicy = '''[GRADUAL CONTEXT POLICY]
+- Treat the conversation partner's exact identity and relationship as a provisional hypothesis, not a fact, until the user states it explicitly or several consistent turns support it.
+- Respond first to what the user explicitly said. When context is still ambiguous, choose a socially safe, natural reply that would fit multiple plausible relationships.
+- Do not invent shared memories, intimacy, authority, promises, motives, or off-screen events. Do not commit to partner, family, friend, or workplace behavior from one weak clue.
+- When more context would materially improve the reply, acknowledge the content briefly and ask at most one natural question about the situation or what happened next. Do not directly ask the user to identify your relationship.
+- As clear evidence accumulates, gradually make the tone and response more specific. If later evidence conflicts with an earlier hypothesis, adjust silently without defending the old assumption.''';
+
 String normalizeTranscriptForDuplicateCheck(String transcript) {
   return transcript.trim().replaceAll(RegExp(r'\s+'), ' ');
 }
