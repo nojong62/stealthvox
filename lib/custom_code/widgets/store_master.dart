@@ -326,18 +326,6 @@ class _StoreMasterState extends State<StoreMaster> {
     _listenForServerCredit(planTitle);
   }
 
-  Future<void> _runRestore() async {
-    setState(() => isProcessing = true);
-    try {
-      await Purchases.restorePurchases();
-      _showFeedback("✅ 구매 내역 복원 완료", Colors.blueAccent);
-    } on PlatformException catch (e) {
-      _showFeedback("❌ 복원 실패: ${e.message}", const Color(0xFFF87171));
-    } finally {
-      if (mounted) setState(() => isProcessing = false);
-    }
-  }
-
   void _showFeedback(String message, Color bgColor) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -1297,7 +1285,7 @@ class _StoreMasterState extends State<StoreMaster> {
                     ),
                   ),
 
-                  // 하단 부가 기능 메뉴
+                  // 하단 정책 링크
                   Padding(
                     padding: const EdgeInsets.only(bottom: 4, top: 10),
                     child: Wrap(
@@ -1306,14 +1294,6 @@ class _StoreMasterState extends State<StoreMaster> {
                       spacing: 20,
                       runSpacing: 6,
                       children: [
-                        InkWell(
-                          onTap: _runRestore,
-                          child: const Text("Restore Purchases",
-                              style: TextStyle(
-                                  color: Colors.white38,
-                                  fontSize: 11,
-                                  decoration: TextDecoration.underline)),
-                        ),
                         InkWell(
                           onTap: () => _launchURL(_privacyUrl),
                           child: const Text("개인정보 처리방침",
