@@ -144,16 +144,25 @@ class _IntroMasterState extends State<IntroMaster> {
   Future<void> _checkEntryStatus() async {
     debugPrint(
         '[TrialDebug] _checkEntryStatus enter, currentUser=${FirebaseAuth.instance.currentUser?.uid}, isAnonymous=${FirebaseAuth.instance.currentUser?.isAnonymous}, time=${DateTime.now().toIso8601String()}');
-    // 1순위: FFAppState에 pending invite가 있으면 바로 StealthRoom
+    // 1순위: Play 설치 referrer의 최신 초대를 먼저 복구한다.
+    // Android 자동 백업이 과거 FFAppState 초대를 되살리는 경우보다 우선해야 한다.
+    await AppsFlyerManager.recoverPlayInstallInvite();
+    if (!mounted) return;
+
+    // 저장된 초대는 서버에 활성 방이 있을 때만 사용한다.
     debugPrint(
         '[Intro] pendingInviteType=${FFAppState().pendingInviteType}, duoRoomId=${FFAppState().duoRoomId}');
     if (FFAppState().pendingInviteType == 'duo' &&
         FFAppState().duoRoomId.isNotEmpty) {
-      debugPrint('[Intro] routing to StealthRoom for Duo invite');
-      if (mounted) context.pushReplacementNamed('StealthRoom');
-      return;
+      final isValid = await AppsFlyerManager.validatePendingDuoInvite();
+      if (!mounted) return;
+      if (isValid) {
+        debugPrint('[Intro] routing to StealthRoom for Duo invite');
+        context.pushReplacementNamed('StealthRoom');
+        return;
+      }
     }
-    // 2순위: 항상 AppsFlyer 초기화 (로그인 여부와 무관하게 딥링크 콜백 등록)
+    // 2순위: AppsFlyer 초기화 (로그인 여부와 무관하게 딥링크 콜백 등록)
     await _initAppsFlyer();
     if (!mounted) return;
     // 3순위: 정식 회원(non-anonymous)만 Lobby로 라우팅

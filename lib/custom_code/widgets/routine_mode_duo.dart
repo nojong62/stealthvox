@@ -950,6 +950,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
       final snap = await _duoSessionRef!.get();
       if (!snap.exists) {
         debugPrint('[Duo] _joinAsGuest: session not found ($roomId)');
+        if (FFAppState().duoRoomId == roomId) {
+          AppsFlyerManager.clearPendingDuoInvite();
+        }
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('초대된 방을 찾을 수 없습니다.')),
@@ -961,6 +964,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
       final data = snap.data() as Map<String, dynamic>?;
       if (data == null || data['isDuoEnabled'] != true) {
         debugPrint('[Duo] _joinAsGuest: isDuoEnabled is not true ($roomId)');
+        if (FFAppState().duoRoomId == roomId) {
+          AppsFlyerManager.clearPendingDuoInvite();
+        }
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('이 방은 현재 사용할 수 없습니다.')),

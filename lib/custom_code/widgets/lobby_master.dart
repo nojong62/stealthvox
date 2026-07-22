@@ -26,6 +26,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:appsflyer_sdk/appsflyer_sdk.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
 import 'dart:io' show Platform;
@@ -949,9 +950,72 @@ class LobbyBrain {
 class AppsFlyerManager {
   static AppsflyerSdk? _instance;
   static bool _isInitialized = false;
+  static const MethodChannel _installReferrerChannel =
+      MethodChannel('stealthvox/install_referrer');
+  static const String _consumedReferrerKey =
+      'duo_consumed_play_install_referrer';
 
   /// Duo 초대 딥링크 처리 완료 후 증가하는 신호.
   static final ValueNotifier<int> duoInviteSignal = ValueNotifier<int>(0);
+
+  /// Google Play가 이번 설치에 기록한 초대를 AppsFlyer/Android 백업 상태보다
+  /// 먼저 적용한다. 동일 referrer는 한 번만 소비해 일반 실행 때 재입장하지 않는다.
+  static Future<bool> recoverPlayInstallInvite() async {
+    if (!Platform.isAndroid) return false;
+    try {
+      final String? referrer = await _installReferrerChannel
+          .invokeMethod<String>('getInstallReferrer');
+      if (referrer == null || referrer.isEmpty) return false;
+
+      final params = Uri.splitQueryString(referrer);
+      if (params['deep_link_value'] != 'duo_chat') return false;
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getString(_consumedReferrerKey) == referrer) return false;
+
+      final applied = await handleDuoDeepLink(params, emitSignal: false);
+      if (!applied) return false;
+      await prefs.setString(_consumedReferrerKey, referrer);
+      debugPrint(
+          '[AppsFlyerManager] Play install referrer applied - roomId: ${params['deep_link_sub2']}');
+      return true;
+    } catch (e) {
+      debugPrint('[AppsFlyerManager] install referrer error: $e');
+      return false;
+    }
+  }
+
+  /// 저장/복원된 초대가 아직 서버에 존재하는 활성 방인지 확인한다.
+  /// 네트워크 오류는 입장 화면의 기존 재시도 경로에 맡기기 위해 유효로 취급한다.
+  static Future<bool> validatePendingDuoInvite() async {
+    if (FFAppState().pendingInviteType != 'duo' ||
+        FFAppState().duoRoomId.isEmpty) return false;
+    final roomId = FFAppState().duoRoomId;
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('duo_sessions')
+          .doc(roomId)
+          .get(const GetOptions(source: Source.server));
+      final data = snap.data();
+      final valid = snap.exists && data?['isDuoEnabled'] == true;
+      if (!valid && FFAppState().duoRoomId == roomId) {
+        clearPendingDuoInvite();
+        debugPrint(
+            '[AppsFlyerManager] stale Duo invite cleared - roomId: $roomId');
+      }
+      return valid;
+    } catch (e) {
+      debugPrint('[AppsFlyerManager] invite validation deferred: $e');
+      return true;
+    }
+  }
+
+  static void clearPendingDuoInvite() {
+    FFAppState().isGuestSession = false;
+    FFAppState().inviterUid = '';
+    FFAppState().duoRoomId = '';
+    FFAppState().pendingInviteType = '';
+    FFAppState().update(() {});
+  }
 
   static Future<void> initialize({
     required String devKey,
@@ -1014,7 +1078,8 @@ class AppsFlyerManager {
   }
 
   /// Duo 초대 딥링크를 전역 처리한다.
-  static Future<void> handleDuoDeepLink(Map<String, dynamic> params) async {
+  static Future<bool> handleDuoDeepLink(Map<String, dynamic> params,
+      {bool emitSignal = true}) async {
     Map<String, dynamic> deepLinkData = {};
     if (params['deepLink'] is String) {
       try {
@@ -1027,7 +1092,7 @@ class AppsFlyerManager {
 
     final String? deepLinkValue = params['deep_link_value']?.toString() ??
         deepLinkData['deep_link_value']?.toString();
-    if (deepLinkValue != 'duo_chat') return;
+    if (deepLinkValue != 'duo_chat') return false;
 
     final String? inviterId = params['deep_link_sub1']?.toString() ??
         deepLinkData['deep_link_sub1']?.toString() ??
@@ -1052,7 +1117,7 @@ class AppsFlyerManager {
         roomId == null ||
         roomId.isEmpty) {
       debugPrint('[AppsFlyerManager] handleDuoDeepLink: missing params');
-      return;
+      return false;
     }
 
     try {
@@ -1066,9 +1131,11 @@ class AppsFlyerManager {
       FFAppState().update(() {});
       debugPrint(
           '[AppsFlyerManager] Duo invite ready - roomId: $roomId, signal++');
-      duoInviteSignal.value++;
+      if (emitSignal) duoInviteSignal.value++;
+      return true;
     } catch (e) {
       debugPrint('[AppsFlyerManager] handleDuoDeepLink error: $e');
+      return false;
     }
   }
 }
