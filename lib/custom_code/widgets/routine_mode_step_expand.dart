@@ -71,6 +71,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   int _turnCounter = 0;
   final FirstUtteranceContextJudgeSession _firstUtteranceJudge =
       FirstUtteranceContextJudgeSession();
+  final FirstUtteranceContextJudgeSession _prefetchFirstUtteranceJudge =
+      FirstUtteranceContextJudgeSession();
+  Future<FirstUtteranceContext?>? _prefetchedFirstUtteranceFuture;
+  String _prefetchedFirstUtteranceTranscript = '';
   String? _sessionDocId; // 🔧 [v3 추가] 첫 대화 후 세션 ID (클론 변경 시 null 리셋)
   DocumentReference? _myHistoryRef; // 🔧 [히스토리] chat_history 문서 참조 (Duo 패턴)
   List<String> _lastExchangeMsgIds = []; // [??] ?? ?? messages docId
@@ -1804,6 +1808,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     _commitTimer = null;
     _cancelSpeculativeTranslation(); // 🚀 [SPEC] 진행 중 투기 번역 정리
     _firstUtteranceJudge.cancel();
+    _cancelPrefetchedFirstUtteranceJudge();
     _pendingTranscript = '';
     _lastPendingFinalAt = null;
     _pendingDeepgramResults.clear();
@@ -1964,13 +1969,18 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     // 🚀 [SPEC-FIRST-TURN] 첫 턴(seed)이면 대기창 동안 GPT 번역을 미리 시작해 버퍼링.
     //   추가 발화가 오면 이 함수가 다시 호출되며 이전 투기 번역을 취소·재시작한다
     //   → 짤림 위험 0. 확정 시 텍스트가 일치하면 그대로 선반영.
+    final pendingFirstUtterance = _pendingTranscript.trim();
     final firstUtteranceRoute =
-        _firstUtteranceJudge.previewRoute(_pendingTranscript.trim());
+        _firstUtteranceJudge.previewRoute(pendingFirstUtterance);
     if (!isDuplicateFinal &&
         isFirstUtterance &&
-        _pendingTranscript.trim().length >= 2 &&
-        firstUtteranceRoute == FirstUtteranceRoute.bypass) {
-      _startSpeculativeTranslation(_pendingTranscript.trim());
+        pendingFirstUtterance.length >= 2) {
+      if (_prefetchedFirstUtteranceFuture != null ||
+          firstUtteranceRoute == FirstUtteranceRoute.judge) {
+        _startPrefetchedFirstUtteranceJudge(pendingFirstUtterance);
+      } else if (firstUtteranceRoute == FirstUtteranceRoute.bypass) {
+        _startSpeculativeTranslation(pendingFirstUtterance);
+      }
     }
 
     // 조건부 대기 후 파이프라인 시작 예약 (source별 waitMs)
@@ -1992,6 +2002,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       _log('🔀 [COMMIT-00]', '빈 발화 → 마이크 재시작');
       // 🚀 [SPEC] 빈 확정이면 진행 중 투기 번역 폐기
       _cancelSpeculativeTranslation();
+      _cancelPrefetchedFirstUtteranceJudge();
       if (_isConversationActive) _startDeepgramListening();
       return;
     }
@@ -2077,6 +2088,65 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     _specTranscript = '';
     sub?.cancel();
     if (c != null && !c.isClosed) c.close();
+  }
+
+  // GPT-4.1 문맥 판정을 첫 발화 확정 대기창과 겹쳐 실행한다. 실제 세션 판정
+  // 상태는 건드리지 않으므로 낮은 STT 신뢰도/고스트 발화가 첫 기회를 소모하지 않는다.
+  void _startPrefetchedFirstUtteranceJudge(String transcript) {
+    if (_prefetchedFirstUtteranceFuture != null &&
+        _prefetchedFirstUtteranceTranscript == transcript) {
+      return;
+    }
+    _prefetchFirstUtteranceJudge.reset();
+    _prefetchedFirstUtteranceTranscript = transcript;
+    _log('🧭 [FIRST-CONTEXT]', 'event=prefetch_start mode=$_probeMode');
+    _prefetchedFirstUtteranceFuture =
+        _prefetchFirstUtteranceJudge.judgeIfNeeded(
+      apiKey: _openAiKey,
+      transcript: transcript,
+      mode: _probeMode,
+      client: OpenAiConnectionPool.instance.client,
+      onLog: (event, details) =>
+          _log('🧭 [FIRST-CONTEXT]', 'event=prefetch_$event $details'),
+    );
+  }
+
+  void _cancelPrefetchedFirstUtteranceJudge() {
+    _prefetchFirstUtteranceJudge.reset();
+    _prefetchedFirstUtteranceFuture = null;
+    _prefetchedFirstUtteranceTranscript = '';
+  }
+
+  Future<FirstUtteranceContext?> _takePrefetchedOrJudgeFirstUtterance(
+    String transcript,
+  ) async {
+    final prefetched = _prefetchedFirstUtteranceFuture;
+    if (prefetched != null &&
+        _prefetchedFirstUtteranceTranscript == transcript) {
+      final context = await prefetched;
+      if (!identical(_prefetchedFirstUtteranceFuture, prefetched) ||
+          _prefetchedFirstUtteranceTranscript != transcript) {
+        return null;
+      }
+      _firstUtteranceJudge.adoptPrefetchedResult(
+        context,
+        requestFailed: _prefetchFirstUtteranceJudge.requestFailed,
+      );
+      _prefetchedFirstUtteranceFuture = null;
+      _prefetchedFirstUtteranceTranscript = '';
+      _log('🧭 [FIRST-CONTEXT]', 'event=prefetch_handoff');
+      return context;
+    }
+    _cancelPrefetchedFirstUtteranceJudge();
+    return _firstUtteranceJudge.judgeIfNeeded(
+      apiKey: _openAiKey,
+      transcript: transcript,
+      mode: _probeMode,
+      sttConfidence: _activeSttConfidence,
+      client: OpenAiConnectionPool.instance.client,
+      onLog: (event, details) =>
+          _log('🧭 [FIRST-CONTEXT]', 'event=$event $details'),
+    );
   }
 
 // ====================================================================
@@ -2348,6 +2418,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         ghostWords.contains(lowerClean.trim());
 
     if (isGhost) {
+      _cancelPrefetchedFirstUtteranceJudge();
       if (_turnCounter == currentTurnId && _turnCounter > 0) _turnCounter--;
       if (mounted)
         setState(
@@ -2356,14 +2427,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       return;
     }
 
-    final firstUtteranceContext = await _firstUtteranceJudge.judgeIfNeeded(
-      apiKey: _openAiKey,
-      transcript: finalTranscript,
-      mode: _probeMode,
-      sttConfidence: _activeSttConfidence,
-      onLog: (event, details) =>
-          _log('🧭 [FIRST-CONTEXT]', 'event=$event $details'),
-    );
+    final firstUtteranceContext =
+        await _takePrefetchedOrJudgeFirstUtterance(finalTranscript);
     if (!isActivePipelineGeneration(
       expected: pipelineGeneration,
       current: _pipelineGeneration,
@@ -3141,8 +3206,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       // ─────────────────────────────────────────────────────
       // 🔧 유저 소리 완전 종료 후 0.7초 숨 고르기 → 그 다음 글자+소리 동시 출력.
       //    유저 소리와 AI 소리는 절대 겹치지 않는다.
-      await Future.delayed(const Duration(milliseconds: 700));
-      _log('🧠 [PIPE-GAP]', '유저-AI 전환 안전 간격 700ms 완료');
+      await Future.delayed(const Duration(milliseconds: 350));
+      _log('🧠 [PIPE-GAP]', '유저-AI 전환 안전 간격 350ms 완료');
 
       // 턴 전환
       _ttsQueueManager.setUserTurn(false);

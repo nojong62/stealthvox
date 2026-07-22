@@ -209,6 +209,38 @@ void main() {
         isFalse,
       );
     });
+
+    test('adopts a successful prefetched judgment only at handoff', () {
+      final session = FirstUtteranceContextJudgeSession();
+      const context = FirstUtteranceContext(
+        actor: 'user',
+        target: 'listener',
+        omittedSubject: '나',
+        tense: 'past',
+        relationship: 'unknown',
+        confidence: 0.9,
+        ambiguityReason: '',
+      );
+
+      expect(session.firstNormalUtteranceSeen, isFalse);
+      session.adoptPrefetchedResult(context, requestFailed: false);
+
+      expect(session.firstNormalUtteranceSeen, isTrue);
+      expect(session.requestStarted, isTrue);
+      expect(session.requestCompleted, isTrue);
+      expect(session.requestFailed, isFalse);
+    });
+
+    test('adopts a failed prefetch as a normal fallback', () {
+      final session = FirstUtteranceContextJudgeSession();
+
+      session.adoptPrefetchedResult(null, requestFailed: true);
+
+      expect(session.firstNormalUtteranceSeen, isTrue);
+      expect(session.requestStarted, isTrue);
+      expect(session.requestCompleted, isFalse);
+      expect(session.requestFailed, isTrue);
+    });
   });
 
   group('final transcript deduplication', () {

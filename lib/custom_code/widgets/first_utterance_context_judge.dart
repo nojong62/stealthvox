@@ -177,6 +177,7 @@ class FirstUtteranceContextJudgeSession {
   bool resultDelivered = false;
 
   http.Client? _activeClient;
+  bool _ownsActiveClient = false;
   int _generation = 0;
 
   FirstUtteranceRoute previewRoute(String transcript) {
@@ -208,6 +209,7 @@ class FirstUtteranceContextJudgeSession {
     required String mode,
     double? sttConfidence,
     FirstUtteranceJudgeLogger? onLog,
+    http.Client? client,
   }) async {
     if (firstNormalUtteranceSeen || requestStarted) return null;
     final eligibility = _classify(transcript);
@@ -231,11 +233,13 @@ class FirstUtteranceContextJudgeSession {
     requestFailed = false;
     final generation = ++_generation;
     final stopwatch = Stopwatch()..start();
-    final client = http.Client();
-    _activeClient = client;
+    final requestClient = client ?? http.Client();
+    final ownsClient = client == null;
+    _activeClient = requestClient;
+    _ownsActiveClient = ownsClient;
     onLog?.call('start', 'model=$kFirstUtteranceJudgeModel mode=$mode');
     try {
-      final response = await client
+      final response = await requestClient
           .post(
             Uri.parse('https://api.openai.com/v1/chat/completions'),
             headers: {
@@ -378,9 +382,26 @@ Use ambiguity_reason only for a short reason when uncertain; otherwise return an
       return null;
     } finally {
       stopwatch.stop();
-      if (identical(_activeClient, client)) _activeClient = null;
-      client.close();
+      if (identical(_activeClient, requestClient)) {
+        _activeClient = null;
+        _ownsActiveClient = false;
+      }
+      if (ownsClient) requestClient.close();
     }
+  }
+
+  /// Adopts a result that was requested speculatively during the transcript
+  /// commit window. The live session remains untouched until the utterance has
+  /// passed its final STT-confidence and ghost-word checks.
+  void adoptPrefetchedResult(
+    FirstUtteranceContext? context, {
+    required bool requestFailed,
+  }) {
+    if (firstNormalUtteranceSeen || requestStarted) return;
+    firstNormalUtteranceSeen = true;
+    requestStarted = true;
+    this.requestFailed = requestFailed || context == null;
+    requestCompleted = context != null && !this.requestFailed;
   }
 
   void markDelivered(FirstUtteranceContext context) {
@@ -392,8 +413,9 @@ Use ambiguity_reason only for a short reason when uncertain; otherwise return an
   void cancel() {
     if (requestStarted && !requestCompleted) requestFailed = true;
     _generation++;
-    _activeClient?.close();
+    if (_ownsActiveClient) _activeClient?.close();
     _activeClient = null;
+    _ownsActiveClient = false;
   }
 
   void reset() {
