@@ -60,7 +60,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   String? _pendingJoinRoomId;
 
   // 🆕 [PTT] Duo 무전기 상태기계
-  // idle: 대기 / recording: 녹음 중 / processing: STT·번역 중 / playing: TTS 재생 중 / cooldown: 재생 후 짧은 잠금
+  // idle: 대기 / recording: 녹음 중 / finishing: 마이크 종료 표시 /
+  // processing: STT·번역 중 / playing: TTS 재생 중 / cooldown: 재생 후 짧은 잠금
   String _duoState = 'idle';
   // 🆕 [과금정책] 게스트 입장 후에만 과금 시작 (호스트 대기 중 정지)
   bool _billingStarted = false;
@@ -390,14 +391,17 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   // ============================================================================
   Future<void> _stopAndSendToWhisper() async {
     _silenceTimer?.cancel();
-    _setDuoState('processing');
+    // 녹음은 즉시 멈추되, 화면에서는 마이크가 자연스럽게 꺼지는 짧은 전환을 보여준다.
+    _setDuoState('finishing');
     final path = await _audioRecorder.stop();
     BillingTicker.instance.resumeFromActivity('duo_mic_stop');
+    await Future.delayed(const Duration(milliseconds: 220));
     if (path == null) {
       _setDuoState('idle');
       if (_incomingQueue.isNotEmpty) _drainIncoming();
       return;
     }
+    _setDuoState('processing');
     try {
       Uri uri = Uri.parse('https://api.openai.com/v1/audio/transcriptions');
       var request = http.MultipartRequest('POST', uri);
@@ -770,6 +774,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   String _pttLabel() {
     switch (_duoState) {
       case 'recording':
+        return '';
+      case 'finishing':
         return '';
       case 'processing':
         return 'Processing…';
@@ -1466,11 +1472,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
 
   Widget _buildControlArea(double bottomPadding) {
     final bool isRec = _duoState == 'recording';
-    final bool isBusy = _duoState == 'processing' ||
+    final bool isFinishing = _duoState == 'finishing';
+    final bool isBusy = isFinishing ||
+        _duoState == 'processing' ||
         _duoState == 'playing' ||
         _duoState == 'cooldown';
     final Color accent = isRec
-        ? Colors.redAccent
+        ? const Color(0xFF34D399)
         : (isBusy ? Colors.white38 : const Color(0xFF2563EB));
     return Container(
       padding: EdgeInsets.fromLTRB(24, 16, 24, bottomPadding),
@@ -1491,24 +1499,42 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
             behavior: HitTestBehavior.opaque,
             // [토글] 처리·재생·쿨다운 중에는 탭 무시
             onTap: isBusy ? null : _onMicToggle,
-            child: Container(
-                width: 72,
-                height: 72,
+            child: AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                width: isRec ? 76 : 72,
+                height: isRec ? 76 : 72,
                 decoration: BoxDecoration(
-                    // [토글] 녹음 중에는 채운 빨강, 대기 중에는 테두리형
-                    color: isRec ? accent : accent.withValues(alpha: 0.15),
+                    // 녹음 중에는 초록 마이크와 은은한 활성 링으로 표시한다.
+                    color: isRec
+                        ? accent.withValues(alpha: 0.16)
+                        : accent.withValues(alpha: 0.12),
                     shape: BoxShape.circle,
-                    border: Border.all(color: accent, width: 2.5),
+                    border: Border.all(
+                        color: accent, width: isRec ? 3.0 : 2.0),
                     boxShadow: isRec
                         ? [
                             BoxShadow(
-                                color: accent.withValues(alpha: 0.55),
-                                blurRadius: 18,
-                                spreadRadius: 2)
+                                color: accent.withValues(alpha: 0.28),
+                                blurRadius: 20,
+                                spreadRadius: 4)
                           ]
                         : null),
-                child: Icon(isRec ? Icons.stop_rounded : Icons.mic_none_rounded,
-                    color: isRec ? Colors.white : accent, size: 38)),
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  transitionBuilder: (child, animation) =>
+                      FadeTransition(opacity: animation, child: child),
+                  child: Icon(
+                    isRec
+                        ? Icons.mic_rounded
+                        : (isFinishing
+                            ? Icons.mic_off_rounded
+                            : Icons.mic_none_rounded),
+                    key: ValueKey<String>(_duoState),
+                    color: accent,
+                    size: isRec ? 40 : 36,
+                  ),
+                )),
           ),
         ],
       ),
