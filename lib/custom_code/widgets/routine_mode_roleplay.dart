@@ -2242,29 +2242,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     final String displayTarget = isThinking ? '...' : rawTarget;
     if (displayTarget.isEmpty) return const SizedBox.shrink();
 
-    // 아이콘 아바타
-    final Widget avatar = Container(
-      width: 32,
-      height: 32,
-      decoration: BoxDecoration(
-        color: isHost
-            ? const Color(0xFF1D4ED8).withValues(alpha: 0.22)
-            : const Color(0xFF16A34A).withValues(alpha: 0.22),
-        shape: BoxShape.circle,
-        border: Border.all(
-          color: isHost
-              ? const Color(0xFF60A5FA).withValues(alpha: 0.45)
-              : const Color(0xFF4ADE80).withValues(alpha: 0.45),
-          width: 1,
-        ),
-      ),
-      child: Icon(
-        isHost ? Icons.person_rounded : Icons.smart_toy_rounded,
-        color: isHost ? const Color(0xFF93C5FD) : const Color(0xFFBBF7D0),
-        size: 17,
-      ),
-    );
-
     // 말풍선
     final Widget bubble = ConstrainedBox(
       constraints:
@@ -2316,15 +2293,44 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       ),
     );
 
+    final String speakerLabel =
+        isHost ? _roleplayUserLabel : _roleplayPartnerLabel;
+    final Widget messageBlock = ConstrainedBox(
+      constraints:
+          BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.73),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment:
+            isHost ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Text(
+              speakerLabel,
+              textAlign: isHost ? TextAlign.right : TextAlign.left,
+              softWrap: true,
+              style: TextStyle(
+                color: isHost
+                    ? const Color(0xFF93C5FD)
+                    : const Color(0xFF86EFAC),
+                fontSize: 12 * _fontScale,
+                fontWeight: FontWeight.w700,
+                height: 1.25,
+              ),
+            ),
+          ),
+          const SizedBox(height: 5),
+          bubble,
+        ],
+      ),
+    );
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
       child: Row(
         mainAxisAlignment:
             isHost ? MainAxisAlignment.end : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: isHost
-            ? [bubble, const SizedBox(width: 8), avatar]
-            : [avatar, const SizedBox(width: 8), bubble],
+        children: [messageBlock],
       ),
     );
   }
