@@ -52,6 +52,7 @@ class _IntroMasterState extends State<IntroMaster> {
   bool isLoginMode = true;
   bool isLoading = false;
   IntroScreen _currentScreen = IntroScreen.welcome;
+  int _welcomePage = 0;
   bool _showEmailForm = false;
   bool _trialStarting = false;
   String _trialNativeLang = 'Korean';
@@ -415,194 +416,211 @@ class _IntroMasterState extends State<IntroMaster> {
                 ),
               )
             : SafeArea(
-                child: SingleChildScrollView(
-                  controller: _scrollController,
-                  padding: EdgeInsets.fromLTRB(24, 18, 24,
-                      28 + MediaQuery.of(context).viewInsets.bottom),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          const Icon(Icons.record_voice_over,
-                              size: 20, color: Color(0xFF58D6BD)),
-                          const SizedBox(width: 8),
-                          Text("StealthVox",
-                              style: GoogleFonts.orbitron(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.bold,
-                                  color: const Color(0xFFF5F5F7))),
-                        ],
-                      ),
-                      const SizedBox(height: 5),
-                      Text("내 이야기로 배우는 영어",
-                          style: GoogleFonts.roboto(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w300,
-                              color: const Color(0xFF6F6F78))),
-                      const SizedBox(height: 18),
-                      _buildBentoCard(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              "당신의 이야기가\n최고의 영어 교재가\n됩니다",
-                              style: TextStyle(
-                                color: Color(0xFFF5F5F7),
-                                fontSize: 19,
-                                fontWeight: FontWeight.w700,
-                                height: 1.2,
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            const Text(
-                              "",
-                              style: TextStyle(
-                                color: Color(0xFFA7A7AE),
-                                fontSize: 12,
-                                height: 1.36,
-                              ),
-                            ),
-                            const SizedBox(height: 14),
-                            _buildWaveform(),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      _buildTrialGuideCard(),
-                      const SizedBox(height: 18),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 62,
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0x1A8176EA),
-                            shadowColor: Colors.transparent,
-                            elevation: 0,
-                            side: const BorderSide(
-                                color: Color(0xFF8B7CFF), width: 1.25),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(30),
-                            ),
-                          ),
-                          onPressed: () {
-                            debugPrint(
-                                '[TrialDebug] trial button tapped, time=${DateTime.now().toIso8601String()}');
-                            _startTrial(context);
-                          },
-                          child: const Text(
-                            '1분 무료 체험 시작 →',
-                            style: TextStyle(
-                              color: Color(0xFFF5F5F7),
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      const Center(
-                        child: Text(
-                          '회원가입 없이 바로 · 체험 하기',
-                          style: TextStyle(
-                            color: Color(0xFF6F6F78),
-                            fontSize: 10.5,
-                            height: 1.28,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Center(
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text("대화 1분",
-                                style: GoogleFonts.roboto(
-                                    fontSize: 11,
-                                    color: const Color(0xFFA7A7AE))),
-                            const Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 8),
-                              child: Text("·",
-                                  style: TextStyle(
-                                      color: Color(0xFF8B7CFF), fontSize: 11)),
-                            ),
-                            Text("공부방 2분",
-                                style: GoogleFonts.roboto(
-                                    fontSize: 11,
-                                    color: const Color(0xFFA7A7AE))),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      const Row(
-                        children: [
-                          Icon(Icons.lightbulb, color: Colors.amber, size: 20),
-                          SizedBox(width: 8),
-                          Text.rich(
-                            TextSpan(
-                              text: "이용 방법 ",
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.bold),
-                              children: [
-                                TextSpan(
-                                  text: "(Anyone 모드)",
-                                  style: TextStyle(
-                                      color: Colors.white70,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w500),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      const Text(
-                        '대화하고 싶은 사람을 한 명 떠올려 보세요. 그 사람이 눈앞에 있다고 생각하고, 하고 싶었던 말을 편하게 꺼내면 AI가 그 사람이 되어 대답합니다. 반응이 다르게 느껴지면 "왜 그렇게 느껴?"라고 되물어 보세요. 대화가 끝나면 방금 나눈 이야기가 그대로 나만의 영어 교재로 바뀝니다.',
-                        style: TextStyle(
-                            color: Colors.white70, fontSize: 13, height: 1.6),
-                      ),
-                      const SizedBox(height: 22),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 48,
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0x996F66D8),
-                            shadowColor: Colors.transparent,
-                            elevation: 0,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                          ),
-                          onPressed: () {
-                            if (_scrollController.hasClients) {
-                              _scrollController.jumpTo(0);
-                            }
-                            setState(() {
-                              _currentScreen = IntroScreen.auth;
-                              _showEmailForm = false;
-                            });
-                          },
-                          child: const Text(
-                            '로그인',
-                            style: TextStyle(
-                              color: Color(0xFFF5F5F7),
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _advanceWelcome,
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 320),
+                    switchInCurve: Curves.easeOut,
+                    switchOutCurve: Curves.easeIn,
+                    child: _welcomePage == 0
+                        ? _buildWelcomeStoryPage()
+                        : _buildWelcomeGuidePage(),
                   ),
                 ),
               ),
       ),
+    );
+  }
+
+  void _advanceWelcome() {
+    if (_welcomePage == 0) {
+      setState(() => _welcomePage = 1);
+      return;
+    }
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(0);
+    }
+    setState(() {
+      _currentScreen = IntroScreen.auth;
+      _showEmailForm = false;
+    });
+  }
+
+  Widget _buildWelcomeStoryPage() {
+    return LayoutBuilder(
+      key: const ValueKey('welcome-story'),
+      builder: (context, constraints) => SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+          child: IntrinsicHeight(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(28, 28, 28, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.record_voice_over,
+                          size: 22, color: Color(0xFF58D6BD)),
+                      const SizedBox(width: 9),
+                      Text(
+                        'StealthVox',
+                        style: GoogleFonts.orbitron(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: const Color(0xFFF5F5F7),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 7),
+                  Text(
+                    '내 이야기로 배우는 영어',
+                    style: GoogleFonts.roboto(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w300,
+                      color: const Color(0xFF777780),
+                    ),
+                  ),
+                  const Spacer(),
+                  _buildBentoCard(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 22),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '당신의 이야기가\n최고의 영어 교재가\n됩니다',
+                            style: TextStyle(
+                              color: Color(0xFFF5F5F7),
+                              fontSize: 25,
+                              fontWeight: FontWeight.w700,
+                              height: 1.28,
+                            ),
+                          ),
+                          const SizedBox(height: 34),
+                          _buildWaveform(),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                  _buildWelcomePageFooter(page: 0),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWelcomeGuidePage() {
+    return LayoutBuilder(
+      key: const ValueKey('welcome-guide'),
+      builder: (context, constraints) => SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+          child: IntrinsicHeight(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 22),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildTrialGuideCard(),
+                  const SizedBox(height: 28),
+                  const Row(
+                    children: [
+                      Icon(Icons.lightbulb, color: Colors.amber, size: 20),
+                      SizedBox(width: 8),
+                      Text.rich(
+                        TextSpan(
+                          text: '이용 방법 ',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          children: [
+                            TextSpan(
+                              text: '(Anyone 모드)',
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    '대화하고 싶은 사람을 한 명 떠올려 보세요. 그 사람이 눈앞에 있다고 생각하고, 하고 싶었던 말을 편하게 꺼내면 AI가 그 사람이 되어 대답합니다. 반응이 다르게 느껴지면 "왜 그렇게 느껴?"라고 되물어 보세요. 대화가 끝나면 방금 나눈 이야기가 그대로 나만의 영어 교재로 바뀝니다.',
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 14,
+                      height: 1.72,
+                    ),
+                  ),
+                  const Spacer(),
+                  const SizedBox(height: 28),
+                  const Center(
+                    child: Text(
+                      '시작하기',
+                      style: TextStyle(
+                        color: Color(0xFFF5F5F7),
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _buildWelcomePageFooter(page: 1),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWelcomePageFooter({required int page}) {
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: List.generate(2, (index) {
+            final selected = index == page;
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              width: selected ? 22 : 7,
+              height: 7,
+              margin: const EdgeInsets.symmetric(horizontal: 4),
+              decoration: BoxDecoration(
+                color: selected
+                    ? const Color(0xFF58D6BD)
+                    : Colors.white.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(99),
+              ),
+            );
+          }),
+        ),
+        const SizedBox(height: 12),
+        const Center(
+          child: Text(
+            '화면을 탭하여 계속하기',
+            style: TextStyle(
+              color: Color(0xFF777780),
+              fontSize: 11.5,
+              letterSpacing: 0.2,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -2043,7 +2061,7 @@ class _IntroMasterState extends State<IntroMaster> {
               ),
             ),
             child: const Text(
-              '처음 오셨나요',
+              '처음 오셨나요?',
               style: TextStyle(
                 color: Color(0xFF58D6BD),
                 fontSize: 10,
