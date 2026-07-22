@@ -140,16 +140,22 @@ Future login(String? uid) async {
   if (!_isConfigured) {
     return;
   }
-  if (uid == _loggedInUid) {
+  // The auth stream can briefly emit an empty UID while Firebase restores a
+  // signed-in user. Treat it as "not ready" instead of calling logIn("").
+  final normalizedUid = uid?.trim();
+  if (normalizedUid?.isEmpty ?? false) {
+    return;
+  }
+  if (normalizedUid == _loggedInUid) {
     return;
   }
   try {
-    if (uid != null) {
-      customerInfo = (await Purchases.logIn(uid)).customerInfo;
+    if (normalizedUid != null) {
+      customerInfo = (await Purchases.logIn(normalizedUid)).customerInfo;
     } else {
       customerInfo = await Purchases.logOut();
     }
-    _loggedInUid = uid;
+    _loggedInUid = normalizedUid;
   } on Exception catch (e) {
     print("Unable to logIn or logOut user in RevenueCat: $e");
   }
