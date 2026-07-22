@@ -770,7 +770,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   String _pttLabel() {
     switch (_duoState) {
       case 'recording':
-        return 'Tap to stop · send';
+        return '';
       case 'processing':
         return 'Processing…';
       case 'playing':
@@ -1478,12 +1478,15 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(_pttLabel(),
-              style: const TextStyle(
-                  color: Colors.white54,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.0)),
+          if (!isRec)
+            Text(_pttLabel(),
+                style: const TextStyle(
+                    color: Colors.white54,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.0))
+          else
+            const SizedBox.shrink(),
           GestureDetector(
             behavior: HitTestBehavior.opaque,
             // [토글] 처리·재생·쿨다운 중에는 탭 무시
