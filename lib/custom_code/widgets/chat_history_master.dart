@@ -166,9 +166,14 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   int _shadowWordIdx = -1;
   Timer? _shadowHighlightTimer;
   Timer? _shadowAdvanceTimer;
-  double _shadowSpeed = 1.0; // [P2-SHADOW] 0.8/1.0/1.2, larger is faster.
+  double _shadowSpeed = 1.0; // [P2-SHADOW] 0.7/0.8/0.9/1.0.
   // [P2-START] Wait for speed selection before starting P2 read-along.
   bool _shadowStarted = false;
+  bool _p2CountdownStarting = false;
+  Future<Uint8List?>? _p2CountdownAudioFuture;
+  AudioPlayer? _p2CountdownPlayer;
+  Completer<void>? _p2CountdownCancel;
+  int _p2CountdownGeneration = 0;
   // [P2-PROXY] Local amplitude proxy for spoken-ratio checks. No Whisper cost.
   Timer? _shadowAmpTimer;
   int _shadowVoicedTicks = 0;
@@ -374,6 +379,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
     _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
     _stopShadowAiPlayback(); // [P2-SHADOW-AI]
+    _stopP2Countdown();
     _chunkScrollController.dispose();
     _practiceScrollController.dispose();
     _playerStateSub?.cancel();
@@ -386,6 +392,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _dialogSetState = null;
     BillingTicker.instance.pause();
     audioPlayer.dispose();
+    _p2CountdownPlayer?.dispose();
     _tutorAudioPlayer?.dispose();
     _appCorrectedAudio = null;
     if (_appIsRecording || _appIsShadowRecording || _shadowRecording) {
@@ -1693,6 +1700,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
     _stopShadowAiPlayback(); // [P2-SHADOW-AI]
     _stopShadowRecording(); // [P2-SHADOW-REC]
+    _stopP2Countdown();
     _stopDeepgramListening();
     audioPlayer.stop();
     if (mounted) {
@@ -6482,9 +6490,104 @@ RULES — follow exactly:
       _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
       _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
       _stopShadowAiPlayback(); // [P2-SHADOW-AI]
+      _stopP2Countdown();
       // 🆕 [P2-ENTER-CUE] P3의 "Echo it!"과 동일한 개념 — P2 진입 즉시 "Shadow it!"
       //    안내를 2초간 표시. 실제 낭독은 유저가 속도를 고를 때 시작된다.
       _triggerShadowingOverlay();
+      _prepareP2StartAudio();
+    }
+  }
+
+  static const String _p2CountdownText = 'Three, two, one, start.';
+
+  Future<Uint8List?> _loadP2CountdownAudio() async {
+    Uint8List? audio = await TtsCache.get(_p2CountdownText, 'echo');
+    if (audio != null) return audio;
+    audio = await _fetchOpenAITTS(_p2CountdownText, 1.0, 'echo');
+    if (audio != null) TtsCache.put(_p2CountdownText, 'echo', audio);
+    return audio;
+  }
+
+  void _prepareP2StartAudio() {
+    // 속도 선택 화면을 보는 동안 카운트다운과 첫 AI 문장을 함께 준비한다.
+    _p2CountdownGeneration++;
+    _p2CountdownAudioFuture = _loadP2CountdownAudio();
+    if (_tutorLines.isEmpty) return;
+    final firstText = (_tutorLines.first['text'] ?? '').toString().trim();
+    if (firstText.isEmpty) return;
+    unawaited(() async {
+      var audio = await TtsCache.get(firstText, 'nova');
+      if (audio == null) {
+        audio = await _fetchOpenAITTS(firstText, 1.0, 'nova');
+        if (audio != null) TtsCache.put(firstText, 'nova', audio);
+      }
+    }());
+  }
+
+  Future<void> _startP2AfterCountdown() async {
+    if (_p2CountdownStarting || !mounted) return;
+    _p2CountdownStarting = true;
+    final generation = _p2CountdownGeneration;
+    try {
+      final future = _p2CountdownAudioFuture ?? _loadP2CountdownAudio();
+      final audio = await future.timeout(
+        const Duration(seconds: 4),
+        onTimeout: () => null,
+      );
+      if (!mounted ||
+          generation != _p2CountdownGeneration ||
+          _phase != ShadowingPhase.part2Practice ||
+          !_shadowStarted ||
+          isPaused) {
+        return;
+      }
+      if (audio != null) {
+        final player = AudioPlayer();
+        _p2CountdownPlayer = player;
+        final completed = player.onPlayerComplete.first;
+        final cancelled = Completer<void>();
+        _p2CountdownCancel = cancelled;
+        try {
+          await player.play(BytesSource(audio));
+          await Future.any([completed, cancelled.future])
+              .timeout(const Duration(seconds: 8));
+        } catch (e) {
+          debugPrint('[P2 countdown] $e');
+        } finally {
+          if (identical(_p2CountdownCancel, cancelled)) {
+            _p2CountdownCancel = null;
+          }
+          if (identical(_p2CountdownPlayer, player)) {
+            _p2CountdownPlayer = null;
+          }
+          await player.dispose();
+        }
+      }
+      if (mounted &&
+          generation == _p2CountdownGeneration &&
+          _phase == ShadowingPhase.part2Practice &&
+          _shadowStarted &&
+          !isPaused) {
+        _startTurnPractice();
+      }
+    } finally {
+      if (generation == _p2CountdownGeneration) {
+        _p2CountdownStarting = false;
+      }
+    }
+  }
+
+  Future<void> _stopP2Countdown() async {
+    _p2CountdownGeneration++;
+    _p2CountdownStarting = false;
+    _p2CountdownAudioFuture = null;
+    final cancelled = _p2CountdownCancel;
+    _p2CountdownCancel = null;
+    if (cancelled != null && !cancelled.isCompleted) cancelled.complete();
+    final player = _p2CountdownPlayer;
+    _p2CountdownPlayer = null;
+    if (player != null) {
+      await player.stop();
     }
   }
 
@@ -6952,6 +7055,7 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
     _stopShadowAiPlayback(); // [P2-SHADOW-AI]
     _stopShadowRecording(); // [P2-SHADOW-REC]
+    _stopP2Countdown();
     if (practiceNum == 1) {
       _startPart1Practice();
     } else if (practiceNum == 2) {
@@ -7113,11 +7217,13 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _buildSpeedSegment(0.8, "0.8", first: true),
+                _buildSpeedSegment(0.7, "0.7", first: true),
                 Container(width: 1, height: 22, color: divider),
-                _buildSpeedSegment(1.0, "1"),
+                _buildSpeedSegment(0.8, "0.8"),
                 Container(width: 1, height: 22, color: divider),
-                _buildSpeedSegment(1.2, "1.2", last: true),
+                _buildSpeedSegment(0.9, "0.9"),
+                Container(width: 1, height: 22, color: divider),
+                _buildSpeedSegment(1.0, "1", last: true),
               ],
             ),
           ),
@@ -7140,18 +7246,14 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
         });
         if (_phase != ShadowingPhase.part2Practice || isPaused) return;
         if (firstSelection) {
-          // 🆕 [P2-ENTER-CUE] "Shadow it!" 안내는 이미 P2 진입 시 1회 표시됨 →
-          //    여기서는 중복 표시 없이 낭독만 바로 시작한다.
-          if (mounted && _phase == ShadowingPhase.part2Practice && !isPaused) {
-            _startTurnPractice();
-          }
+          unawaited(_startP2AfterCountdown());
           return;
         }
         final player = _shadowAiPlayer;
         if (player != null) unawaited(player.setPlaybackRate(v));
       },
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 6),
         decoration: BoxDecoration(
           color:
               sel ? Colors.amber.withValues(alpha: 0.22) : Colors.transparent,
