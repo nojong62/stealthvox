@@ -47,6 +47,10 @@ class AppStateNotifier extends ChangeNotifier {
   bool get loading => user == null || showSplashImage;
   bool get loggedIn {
     if (!(user?.loggedIn ?? false)) return false;
+    // Duo 초대 게스트는 Firebase 회원 여부와 관계없이 초대 세션이 끝난 뒤
+    // Intro에서 다시 시작해야 한다. 이 플래그는 사용자가 Intro에서
+    // 체험/로그인을 명시적으로 시작할 때 해제된다.
+    if (FFAppState().isGuestSession) return false;
     // anonymous 체험 유저는 "로그인 안 됨"으로 취급
     // -> GoRouter가 Lobby로 자동 이동하지 않음
     // -> 체험은 imperative navigation(pushNamed)으로 처리

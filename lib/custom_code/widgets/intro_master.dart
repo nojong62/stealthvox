@@ -162,6 +162,13 @@ class _IntroMasterState extends State<IntroMaster> {
         return;
       }
     }
+    // 완료된 Duo 초대 게스트는 회원 계정이 살아 있어도 자동 Lobby 이동 없이
+    // Intro에 머문다. 사용자가 체험 또는 로그인을 선택하면 플래그를 해제한다.
+    if (FFAppState().isGuestSession) {
+      debugPrint('[Intro] completed Duo guest session stays on Intro');
+      await _initAppsFlyer();
+      return;
+    }
     // 2순위: AppsFlyer 초기화 (로그인 여부와 무관하게 딥링크 콜백 등록)
     await _initAppsFlyer();
     if (!mounted) return;
@@ -190,6 +197,7 @@ class _IntroMasterState extends State<IntroMaster> {
       // Duo 자동 진입을 판단한다. 삭제는 _joinAsGuest 성공 후에만.
       context.pushReplacementNamed('StealthRoom');
     } else {
+      FFAppState().isGuestSession = false;
       context.goNamed('Lobby');
     }
   }
@@ -208,6 +216,7 @@ class _IntroMasterState extends State<IntroMaster> {
     _trialStarting = true;
     setState(() => isLoading = true);
     try {
+      FFAppState().isGuestSession = false;
       TrialFlowState.instance.restoreFromAppState();
 
       final existingUser = FirebaseAuth.instance.currentUser;

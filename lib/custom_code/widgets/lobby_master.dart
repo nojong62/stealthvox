@@ -1069,6 +1069,16 @@ class AppsFlyerManager {
       if (res == null) return;
       final Map<dynamic, dynamic> raw = res as Map<dynamic, dynamic>;
       if ((raw['status']?.toString() ?? '') != 'success') return;
+      // AppsFlyer가 이전 설치 초대의 conversion/app-open 데이터를 재전달해도
+      // 완료된 게스트 세션을 같은 Duo 방으로 다시 진입시키지 않는다.
+      // 새 초대 링크는 onDeepLinking 콜백에서 별도로 처리된다.
+      if (FFAppState().isGuestSession &&
+          FFAppState().pendingInviteType.isEmpty &&
+          FFAppState().duoRoomId.isEmpty) {
+        debugPrint(
+            '[AppsFlyerManager] cached attribution ignored after Duo guest session');
+        return;
+      }
       final dynamic payload = raw['data'] ?? raw;
       if (payload == null) return;
       handleDuoDeepLink(Map<String, dynamic>.from(payload as Map));

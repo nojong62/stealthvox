@@ -47,7 +47,8 @@ class RoutineModeDuo extends StatefulWidget {
   _RoutineModeDuoState createState() => _RoutineModeDuoState();
 }
 
-class _RoutineModeDuoState extends State<RoutineModeDuo> {
+class _RoutineModeDuoState extends State<RoutineModeDuo>
+    with WidgetsBindingObserver {
   // ============================================================================
   // 📦 [1. 상태 변수 (STATE VARIABLES)]
   // 앱의 전반적인 상태, UI 설정, 데이터 보관용 변수 모음
@@ -213,6 +214,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _fetchKeys();
     _audioPlayer.setVolume(1.0);
     _ttsPlayer.setVolume(1.0);
@@ -260,6 +262,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _partnerJoinedSubscription?.cancel();
     _messageSubscription?.cancel(); // 🆕 메시지 채널 구독 해제
     _silenceTimer?.cancel();
@@ -270,6 +273,19 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
     BillingTicker.instance.pause();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!FFAppState().isGuestSession) return;
+
+    if (state == AppLifecycleState.paused) {
+      // 초대 게스트가 앱을 떠나면 Duo 세션을 종료한다. 정리 작업은
+      // 백그라운드에서도 마무리하고, 복귀 시에는 Intro만 보이게 한다.
+      unawaited(_handleAutoSaveAndExit());
+    } else if (state == AppLifecycleState.resumed && _isExiting && mounted) {
+      context.goNamed('Intro');
+    }
   }
 
   Future<void> _fetchKeys() async {
@@ -1000,11 +1016,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
         'partnerJoinedAt': FieldValue.serverTimestamp(),
       });
 
-      // 입장 성공 후에만 초대 상태 정리 (3개 세트)
-      FFAppState().isGuestSession = false;
+      // 입장 성공 후 방 초대 정보만 정리한다. isGuestSession은 대화 종료 뒤에도
+      // Intro 복귀를 강제하는 세션 경계이므로 사용자가 Intro에서 새 흐름을
+      // 시작할 때까지 유지한다.
       FFAppState().duoRoomId = '';
       FFAppState().pendingInviteType = '';
-      debugPrint('[AppState] duo invite state cleared (after successful join)');
+      debugPrint(
+          '[AppState] duo invite room state cleared; guest session kept');
 
       debugPrint(
           '[Duo] _joinAsGuest success — guestUid: $guestUid, roomId: $roomId');
@@ -1077,6 +1095,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
   Future<void> _handleAutoSaveAndExit() async {
     if (_isExiting) return;
     _isExiting = true;
+    final bool isInviteGuest = FFAppState().isGuestSession;
     _stopDuoBilling();
 
     // listener 즉시 해제 — 본인의 Firestore 업데이트가 listener를 재트리거하지 않도록
@@ -1127,7 +1146,15 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
       }
     }
     if (mounted) {
-      if (StealthRoomMaster.exitCurrentMode != null) {
+      if (isInviteGuest) {
+        // 게스트에게 StealthRoom 메뉴를 노출하지 않고 라우트 스택을 Intro로
+        // 교체한다. 로그인 상태는 유지하되 자동 Lobby 진입만 차단한다.
+        FFAppState().inviterUid = '';
+        FFAppState().duoRoomId = '';
+        FFAppState().pendingInviteType = '';
+        FFAppState().update(() {});
+        context.goNamed('Intro');
+      } else if (StealthRoomMaster.exitCurrentMode != null) {
         StealthRoomMaster.exitCurrentMode!();
       } else if (Navigator.canPop(context)) {
         Navigator.pop(context);
@@ -1510,8 +1537,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo> {
                         ? accent.withValues(alpha: 0.16)
                         : accent.withValues(alpha: 0.12),
                     shape: BoxShape.circle,
-                    border: Border.all(
-                        color: accent, width: isRec ? 3.0 : 2.0),
+                    border: Border.all(color: accent, width: isRec ? 3.0 : 2.0),
                     boxShadow: isRec
                         ? [
                             BoxShadow(
