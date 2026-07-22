@@ -1555,7 +1555,18 @@ class _IntroMasterState extends State<IntroMaster> {
       final hasBirthYear =
           userDoc.exists && userDoc.data()?['birthYear'] != null;
       if (!hasBirthYear && mounted) {
-        await _showBirthYearDialog();
+        final ageCheckCompleted = await _showBirthYearDialog();
+        if (!ageCheckCompleted) {
+          await _showAgeCheckRequiredDialog();
+          await FirebaseAuth.instance.signOut();
+          FFAppState().remainingTime = 0;
+          FFAppState().remainingTimeLoaded = false;
+          LobbyBrain.lastSyncedUid = null;
+          if (mounted) {
+            setState(() => isLoginMode = true);
+          }
+          return;
+        }
       }
     } catch (e) {
       debugPrint('[Auth] birthYear check failed (non-blocking): $e');
@@ -1565,7 +1576,7 @@ class _IntroMasterState extends State<IntroMaster> {
   }
 
   /// 신규 가입 시 태어난 해 확인 + 14세 미만 보호자 이메일 수집
-  Future<void> _showBirthYearDialog() async {
+  Future<bool> _showBirthYearDialog() async {
     final currentYear = DateTime.now().year;
     int selectedYear = currentYear - 20;
 
@@ -1590,39 +1601,55 @@ class _IntroMasterState extends State<IntroMaster> {
                 ),
               ),
               content: SizedBox(
-                height: 150,
-                child: ListWheelScrollView.useDelegate(
-                  itemExtent: 42,
-                  physics: const FixedExtentScrollPhysics(),
-                  controller: FixedExtentScrollController(
-                    initialItem: currentYear - 1940 - 20,
-                  ),
-                  onSelectedItemChanged: (index) {
-                    setDialogState(() => selectedYear = 1940 + index);
-                  },
-                  childDelegate: ListWheelChildBuilderDelegate(
-                    builder: (context, index) {
-                      final year = 1940 + index;
-                      if (year < 1940 || year > currentYear - 4) {
-                        return null;
-                      }
-                      return Center(
-                        child: Text(
-                          '$year년',
-                          style: TextStyle(
-                            color: year == selectedYear
-                                ? Colors.white
-                                : Colors.white38,
-                            fontSize: year == selectedYear ? 20 : 16,
-                            fontWeight: year == selectedYear
-                                ? FontWeight.bold
-                                : FontWeight.normal,
-                          ),
+                height: 225,
+                child: Column(
+                  children: [
+                    const Text(
+                      '미성년자 확인을 위한 필수 절차입니다.\n미성년자는 부모님 동의 후 가입할 수 있습니다.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 13,
+                        height: 1.5,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Expanded(
+                      child: ListWheelScrollView.useDelegate(
+                        itemExtent: 42,
+                        physics: const FixedExtentScrollPhysics(),
+                        controller: FixedExtentScrollController(
+                          initialItem: currentYear - 1940 - 20,
                         ),
-                      );
-                    },
-                    childCount: currentYear - 4 - 1940 + 1,
-                  ),
+                        onSelectedItemChanged: (index) {
+                          setDialogState(() => selectedYear = 1940 + index);
+                        },
+                        childDelegate: ListWheelChildBuilderDelegate(
+                          builder: (context, index) {
+                            final year = 1940 + index;
+                            if (year < 1940 || year > currentYear - 4) {
+                              return null;
+                            }
+                            return Center(
+                              child: Text(
+                                '$year년',
+                                style: TextStyle(
+                                  color: year == selectedYear
+                                      ? Colors.white
+                                      : Colors.white38,
+                                  fontSize: year == selectedYear ? 20 : 16,
+                                  fontWeight: year == selectedYear
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                ),
+                              ),
+                            );
+                          },
+                          childCount: currentYear - 4 - 1940 + 1,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
               actions: [
@@ -1653,10 +1680,10 @@ class _IntroMasterState extends State<IntroMaster> {
       },
     );
 
-    if (confirmed != true || !mounted) return;
+    if (confirmed != true || !mounted) return false;
 
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    if (user == null) return false;
 
     final age = currentYear - selectedYear;
     final userRef =
@@ -1664,6 +1691,7 @@ class _IntroMasterState extends State<IntroMaster> {
 
     if (age >= 14) {
       await userRef.set({'birthYear': selectedYear}, SetOptions(merge: true));
+      return true;
     } else {
       final parentEmail = await _showParentEmailDialog();
       if (parentEmail != null && parentEmail.isNotEmpty) {
@@ -1687,10 +1715,60 @@ class _IntroMasterState extends State<IntroMaster> {
             ),
           );
         }
+        return true;
       } else {
-        await userRef.set({'birthYear': selectedYear}, SetOptions(merge: true));
+        return false;
       }
     }
+  }
+
+  Future<void> _showAgeCheckRequiredDialog() async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF161616),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: const BorderSide(color: Color(0xFF2A3A36), width: 1),
+        ),
+        title: const Text(
+          '연령 확인이 필요합니다',
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 18,
+          ),
+        ),
+        content: const Text(
+          '탄생년 선택은 미성년자 확인을 위한 필수 절차입니다.\n\n미성년자는 부모님 동의 후 가입할 수 있습니다.\n로그인 페이지로 돌아갑니다.',
+          style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.5),
+        ),
+        actions: [
+          SizedBox(
+            width: double.infinity,
+            height: 46,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF4A90D9),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text(
+                '확인',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   /// 14세 미만: 보호자 이메일 입력 다이얼로그
