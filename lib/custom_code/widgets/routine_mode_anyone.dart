@@ -41,6 +41,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/openai_connection_pool.dart';
 import 'deepgram_confidence_probe.dart';
+import 'first_turn_realtime_voice.dart';
 import 'first_utterance_context_judge.dart';
 import 'trial/trial_flow_state.dart';
 import 'trial/trial_anyone_timer_mixin.dart';
@@ -81,6 +82,9 @@ class AnyoneCostTracker {
   int ttsInputChars = 0;
   int ttsRequestCount = 0;
   int ttsDuplicateBlocked = 0;
+  int realtimeRequestCount = 0;
+  int realtimeAudioOutputTokens = 0;
+  int realtimeTextOutputTokens = 0;
 
   void addDeepgramBytes(int byteCount) {
     // PCM16, 16 kHz, mono = 32 bytes/ms.
@@ -96,13 +100,26 @@ class AnyoneCostTracker {
     ttsDuplicateBlocked++;
   }
 
+  // 🎙️ [FIRST-TURN-REALTIME] 첫 대사 1회분 Realtime 사용량.
+  void recordRealtimeResponse({
+    required int audioTokens,
+    required int textTokens,
+  }) {
+    realtimeRequestCount++;
+    realtimeAudioOutputTokens += audioTokens;
+    realtimeTextOutputTokens += textTokens;
+  }
+
   void logSnapshot({required String reason}) {
     onLog(
       '💰 [COST]',
       'reason=$reason deepgram_audio_ms=$deepgramAudioMs '
           'tts_input_chars=$ttsInputChars '
           'tts_request_count=$ttsRequestCount '
-          'tts_duplicate_blocked=$ttsDuplicateBlocked',
+          'tts_duplicate_blocked=$ttsDuplicateBlocked '
+          'realtime_request_count=$realtimeRequestCount '
+          'realtime_audio_output_tokens=$realtimeAudioOutputTokens '
+          'realtime_text_output_tokens=$realtimeTextOutputTokens',
     );
   }
 }
@@ -144,6 +161,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   final FirstUtteranceContextJudgeSession _prefetchFirstUtteranceJudge =
       FirstUtteranceContextJudgeSession();
   Future<FirstUtteranceContext?>? _prefetchedFirstUtteranceFuture;
+  // 🔥 [RT-PREWARM] 대기창 동안 미리 열어 두는 Realtime 소켓. 발화 내용은 아직
+  //   보내지 않으므로 버려져도 토큰 비용 0.
+  FirstTurnRealtimeVoice? _prewarmedRealtimeVoice;
   String _prefetchedFirstUtteranceTranscript = '';
   String? _sessionDocId; // 🔧 [v3 추가] 첫 대화 후 세션 ID (클론 변경 시 null 리셋)
   DocumentReference? _myHistoryRef; // 🔧 [히스토리] chat_history 문서 참조 (Duo 패턴)
@@ -661,6 +681,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     _cancelSpeculativeTranslation(); // 🚀 [SPEC] 진행 중 투기 번역 정리
     _firstUtteranceJudge.cancel();
     _cancelPrefetchedFirstUtteranceJudge();
+    _cancelPrewarmedRealtimeVoice(); // 🔥 [RT-PREWARM] 선점 소켓 정리
     _pendingTranscript = ''; // 대기 중 발화도 버림
     _lastPendingFinalAt = null;
     _pendingDeepgramResults.clear();
@@ -935,15 +956,17 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     final pendingFirstUtterance = _pendingTranscript.trim();
     final firstUtteranceRoute =
         _firstUtteranceJudge.previewRoute(pendingFirstUtterance);
+    // 🎙️ [FIRST-TURN-REALTIME] 첫 대사 번역/낭독은 Realtime이 맡으므로 gpt-4o-mini
+    //   투기 번역은 더 이상 선시작하지 않는다. GPT-4.1 문맥 판정 선시작만 유지.
     if (!isDuplicateFinal &&
         isFirstUtterance &&
         pendingFirstUtterance.length >= 2) {
       if (_prefetchedFirstUtteranceFuture != null ||
           firstUtteranceRoute == FirstUtteranceRoute.judge) {
         _startPrefetchedFirstUtteranceJudge(pendingFirstUtterance);
-      } else if (firstUtteranceRoute == FirstUtteranceRoute.bypass) {
-        _startSpeculativeTranslation(pendingFirstUtterance);
       }
+      // 🔥 [RT-PREWARM] 판정 경로와 무관하게(그리고 판정과 독립적으로) 소켓만 선점.
+      _startPrewarmedRealtimeVoice();
     }
 
     // 조건부 대기 후 파이프라인 시작 예약 (source별 waitMs)
@@ -964,6 +987,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     if (committed.isEmpty) {
       _log('🔀 [COMMIT-00]', '빈 발화 → 마이크 재시작');
       _cancelPrefetchedFirstUtteranceJudge();
+      _cancelPrewarmedRealtimeVoice();
       if (_isConversationActive) _startDeepgramListening();
       return;
     }
@@ -1004,6 +1028,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   // 추가 발화가 오면(합치기) 투기 번역을 취소하고 재시작하므로 짤림 위험이 없다.
   // (첫 턴 전용 — _stopMicAndProcess의 isFirstUtterance 가드에서만 호출)
   // ====================================================================
+  // 🎙️ [FIRST-TURN-REALTIME] 현재 호출부 없음 — 첫 대사를 Realtime이 맡으면서
+  //   투기 번역 선시작을 껐다. 롤백 시 _stopMicAndProcess에서 다시 호출하면 된다.
+  // ignore: unused_element
   void _startSpeculativeTranslation(String text) {
     _cancelSpeculativeTranslation(); // 이전 투기 번역 정리 후 재시작
     _specTranscript = text;
@@ -1077,6 +1104,50 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     _prefetchFirstUtteranceJudge.reset();
     _prefetchedFirstUtteranceFuture = null;
     _prefetchedFirstUtteranceTranscript = '';
+  }
+
+  // ====================================================================
+  // 🔥 [RT-PREWARM] 첫 발화 확정 대기창 동안 Realtime 소켓만 미리 열어 둔다.
+  // ------------------------------------------------------------------
+  // TLS 핸드셰이크를 크리티컬 패스 밖으로 밀어내는 것이 전부다. 발화 내용/
+  // 시스템 프롬프트는 확정 시점(begin)까지 보내지 않으므로, 발화가 합쳐지거나
+  // 증발해서 이 소켓을 버려도 토큰 비용은 0원이다.
+  // GPT-4.1 문맥 판정 선시작과 서로 await하지 않는 독립 작업이다.
+  // ====================================================================
+  String get _currentUserVoice =>
+      FFAppState().aiVoice.isNotEmpty ? FFAppState().aiVoice : 'echo';
+
+  void _startPrewarmedRealtimeVoice() {
+    if (_openAiKey.isEmpty) return;
+    final existing = _prewarmedRealtimeVoice;
+    // 발화가 합쳐져 이 함수가 다시 불려도 이미 연 소켓을 그대로 재사용한다.
+    if (existing != null && existing.voice == _currentUserVoice) return;
+    existing?.cancel();
+    final session = FirstTurnRealtimeVoice(
+      apiKey: _openAiKey,
+      voice: _currentUserVoice,
+      onLog: _log,
+    );
+    _prewarmedRealtimeVoice = session;
+    _log('🔥 [RT-PREWARM]', '대기창 소켓 선점 시작');
+    unawaited(session.prewarm());
+  }
+
+  /// 확정 시점에 선점 소켓의 소유권을 파이프라인으로 넘긴다.
+  FirstTurnRealtimeVoice? _takePrewarmedRealtimeVoice(String voice) {
+    final session = _prewarmedRealtimeVoice;
+    _prewarmedRealtimeVoice = null;
+    if (session == null) return null;
+    if (session.voice != voice) {
+      session.cancel();
+      return null;
+    }
+    return session;
+  }
+
+  void _cancelPrewarmedRealtimeVoice() {
+    _prewarmedRealtimeVoice?.cancel();
+    _prewarmedRealtimeVoice = null;
   }
 
   Future<FirstUtteranceContext?> _takePrefetchedOrJudgeFirstUtterance(
@@ -1215,6 +1286,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
     if (isGhost) {
       _cancelPrefetchedFirstUtteranceJudge();
+      _cancelPrewarmedRealtimeVoice();
       if (_turnCounter == currentTurnId && _turnCounter > 0) _turnCounter--;
       if (mounted)
         setState(
@@ -1348,6 +1420,21 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           ? FFAppState().targetLang
           : 'English';
 
+      // 🎙️ [FIRST-TURN-REALTIME] 유저 첫 대사(turn 1)만 gpt-realtime-2.1-mini로
+      //   번역+음성을 한 번에 받는다. 2턴부터는 realtimeVoice=null → 기존 경로.
+      //   (투기 번역 스트림을 물려받은 턴은 begin()이 호출되지 않으므로 제외)
+      //   대기창에서 선점해 둔 소켓이 있으면 그대로 물려받는다(RT-PREWARM).
+      final FirstTurnRealtimeVoice? realtimeVoice =
+          (currentTurnId == 1 && userStreamOverride == null)
+              ? (_takePrewarmedRealtimeVoice(userVoice) ??
+                  FirstTurnRealtimeVoice(
+                    apiKey: _openAiKey,
+                    voice: userVoice,
+                    onLog: _log,
+                  ))
+              : null;
+      if (realtimeVoice == null) _cancelPrewarmedRealtimeVoice();
+
       // 🚀 [SPEC-FIRST-TURN] 투기 번역이 넘어오면 그 버퍼 스트림을 그대로 소비한다
       //   (선반영). 없으면 지금 새로 요청. 소비 방식은 완전히 동일.
       final userStream = userStreamOverride ??
@@ -1359,6 +1446,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
             disableCorrection: isCorrectionRetry,
             firstUtteranceContext:
                 firstUtteranceContext?.toInternalPromptContext() ?? '',
+            realtimeVoice: realtimeVoice,
           );
       if (firstUtteranceContext != null) {
         _firstUtteranceJudge.markDelivered(firstUtteranceContext);
@@ -1407,8 +1495,12 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
         // 정상 번역은 스트림 도중 4단어/구두점이 모이는 즉시 첫 TTS를 요청한다.
         // 제어 태그가 조각나 도착하는 동안에는 잘못된 안내가 재생되지 않도록 보류한다.
+        // 🎙️ [FIRST-TURN-REALTIME] Realtime이 살아 있으면 낭독 음성은 이미 같은
+        //   응답에 실려 오므로 tts-1 청크 발사를 하지 않는다.
         final bool containsControlTag = userTargetText.contains('[');
-        if (!clarified && !containsControlTag) {
+        if (!clarified &&
+            !containsControlTag &&
+            !(realtimeVoice?.active ?? false)) {
           userHybridTts.onChunk(chunk);
           userHybridInputStarted = true;
         }
@@ -1420,6 +1512,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           misheard ||
           dissatisfiedReply ||
           clarified) {
+        realtimeVoice?.cancel();
         userTtsFetcher.cancel();
         _ttsQueueManager.stop();
       }
@@ -1692,6 +1785,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           setState(() => _localMessages[hostIndex]['target'] = userTargetText);
         }
         if (userTargetText.isEmpty) {
+          realtimeVoice?.cancel();
           if (mounted) {
             setState(() {
               _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
@@ -1710,10 +1804,22 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         }
       }
 
+      // 🎙️ [FIRST-TURN-REALTIME] Realtime이 만든 낭독 음성을 유저 큐에 그대로 넣는다.
+      //   실패해서 null이면 아래 기존 tts-1 경로가 통문장을 읽는다(음성만 폴백).
+      final Uint8List? realtimeWav = await realtimeVoice?.audioWav;
+
       // 스트림 중 첫 청크를 선발사하고, 종료 시 남은 부분만 순서대로 요청한다.
       // 제어 태그 제거 후에야 정상 문장이 생긴 예외 경로는 여기서 처음 공급한다.
       final String fullUserTts = _cleanText(userTargetText.trim());
-      if (fullUserTts.isNotEmpty) {
+      if (realtimeWav != null && realtimeWav.isNotEmpty) {
+        _costTracker.recordRealtimeResponse(
+          audioTokens: realtimeVoice?.audioTokens ?? 0,
+          textTokens: realtimeVoice?.textTokens ?? 0,
+        );
+        await _ttsQueueManager.addAudio(realtimeWav, isUser: true);
+        _log('🎙️ [RT-PLAY]',
+            'Realtime 음성 재생 큐 적재 (${realtimeWav.length}B) — tts-1 미사용');
+      } else if (fullUserTts.isNotEmpty) {
         if (!userHybridInputStarted) {
           userHybridTts.onChunk(fullUserTts);
         }
@@ -4319,6 +4425,10 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
     required String contextStr,
     bool disableCorrection = false,
     String firstUtteranceContext = '',
+    // 🎙️ [FIRST-TURN-REALTIME] 유저 첫 대사에만 주입된다. 넘어오면 gpt-4o-mini +
+    //   tts-1 대신 gpt-realtime-2.1-mini 한 번으로 번역문과 음성을 함께 받는다.
+    //   연결/응답 실패 시 아래 기존 경로로 그대로 폴백한다.
+    FirstTurnRealtimeVoice? realtimeVoice,
   }) async* {
     final client = OpenAiConnectionPool.instance.client;
     try {
@@ -4403,6 +4513,23 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
 - Output ONLY the $targetLang translation. No explanation, no Korean text, no prefixes.
 - If the input is meaningless noise or filler (under 2 meaningful chars), output EXACTLY: [EVAPORATE]''';
 
+      final String userContent =
+          'Conversation so far:\n$contextStr\n\nTranslate this Korean utterance: "$textOriginal"';
+
+      // 🎙️ [FIRST-TURN-REALTIME] 첫 대사: 같은 시스템 프롬프트를 Realtime에 그대로
+      //   넘겨 번역문(전사)과 낭독 음성을 한 번에 받는다. begin()이 false면 아무
+      //   일도 없었던 것처럼 아래 gpt-4o-mini 경로가 이어진다.
+      if (realtimeVoice != null) {
+        final bool realtimeReady = await realtimeVoice.begin(
+          instructions: sysPrompt,
+          userContent: userContent,
+        );
+        if (realtimeReady) {
+          yield* realtimeVoice.textStream;
+          return;
+        }
+      }
+
       final request = http.Request(
         'POST',
         Uri.parse('https://api.openai.com/v1/chat/completions'),
@@ -4418,11 +4545,7 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
         'max_tokens': 120,
         'messages': [
           {'role': 'system', 'content': sysPrompt},
-          {
-            'role': 'user',
-            'content':
-                'Conversation so far:\n$contextStr\n\nTranslate this Korean utterance: "$textOriginal"',
-          },
+          {'role': 'user', 'content': userContent},
         ],
       });
 
