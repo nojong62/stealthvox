@@ -529,6 +529,37 @@ class _IntroMasterState extends State<IntroMaster> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildTrialGuideCard(),
+                  const SizedBox(height: 18),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 58,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        debugPrint(
+                            '[TrialDebug] trial button tapped, time=${DateTime.now().toIso8601String()}');
+                        _startTrial(context);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0x1A8176EA),
+                        foregroundColor: const Color(0xFFF5F5F7),
+                        elevation: 0,
+                        side: const BorderSide(
+                          color: Color(0xFF8B7CFF),
+                          width: 1.25,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(29),
+                        ),
+                      ),
+                      child: const Text(
+                        '1분 무료 체험 시작 →',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
                   const SizedBox(height: 28),
                   const Row(
                     children: [
