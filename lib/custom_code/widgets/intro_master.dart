@@ -55,6 +55,7 @@ class _IntroMasterState extends State<IntroMaster> {
   int _welcomePage = 0;
   bool _showEmailForm = false;
   bool _trialStarting = false;
+  bool _isValidatingDuoInvite = false;
   String _trialNativeLang = 'Korean';
   String _trialTargetLang = 'English';
 
@@ -99,12 +100,27 @@ class _IntroMasterState extends State<IntroMaster> {
         : 'English';
   }
 
-  void _onDuoInviteSignal() {
-    if (!mounted) return;
-    if (FFAppState().pendingInviteType == 'duo' &&
-        FFAppState().duoRoomId.isNotEmpty) {
-      debugPrint('[Intro] duoInviteSignal - routing to StealthRoom');
+  void _onDuoInviteSignal() async {
+    if (!mounted || _isValidatingDuoInvite) return;
+    if (FFAppState().pendingInviteType != 'duo' ||
+        FFAppState().duoRoomId.isEmpty) {
+      return;
+    }
+
+    final roomId = FFAppState().duoRoomId;
+    _isValidatingDuoInvite = true;
+    try {
+      final isValid = await AppsFlyerManager.validatePendingDuoInvite();
+      if (!mounted ||
+          !isValid ||
+          FFAppState().pendingInviteType != 'duo' ||
+          FFAppState().duoRoomId != roomId) {
+        return;
+      }
+      debugPrint('[Intro] validated duoInviteSignal - routing to StealthRoom');
       context.pushReplacementNamed('StealthRoom');
+    } finally {
+      _isValidatingDuoInvite = false;
     }
   }
 

@@ -954,6 +954,7 @@ class AppsFlyerManager {
       MethodChannel('stealthvox/install_referrer');
   static const String _consumedReferrerKey =
       'duo_consumed_play_install_referrer';
+  static const String _completedDuoRoomsKey = 'duo_completed_guest_room_ids';
 
   /// Duo 초대 딥링크 처리 완료 후 증가하는 신호.
   static final ValueNotifier<int> duoInviteSignal = ValueNotifier<int>(0);
@@ -1017,6 +1018,27 @@ class AppsFlyerManager {
     FFAppState().update(() {});
   }
 
+  /// 게스트가 실제로 소비했거나 종료한 Duo 방을 기록한다.
+  /// AppsFlyer가 동일 초대를 재전달하더라도 Intro에서 다시 열리지 않게 한다.
+  static Future<void> markDuoInviteCompleted(String? roomId) async {
+    if (roomId == null || roomId.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final completedRoomIds =
+          List<String>.from(prefs.getStringList(_completedDuoRoomsKey) ?? []);
+      completedRoomIds.remove(roomId);
+      completedRoomIds.add(roomId);
+      if (completedRoomIds.length > 20) {
+        completedRoomIds.removeRange(0, completedRoomIds.length - 20);
+      }
+      await prefs.setStringList(_completedDuoRoomsKey, completedRoomIds);
+      debugPrint(
+          '[AppsFlyerManager] completed Duo room recorded - roomId: $roomId');
+    } catch (e) {
+      debugPrint('[AppsFlyerManager] failed to record completed Duo room: $e');
+    }
+  }
+
   static Future<void> initialize({
     required String devKey,
     required String appId,
@@ -1069,16 +1091,6 @@ class AppsFlyerManager {
       if (res == null) return;
       final Map<dynamic, dynamic> raw = res as Map<dynamic, dynamic>;
       if ((raw['status']?.toString() ?? '') != 'success') return;
-      // AppsFlyer가 이전 설치 초대의 conversion/app-open 데이터를 재전달해도
-      // 완료된 게스트 세션을 같은 Duo 방으로 다시 진입시키지 않는다.
-      // 새 초대 링크는 onDeepLinking 콜백에서 별도로 처리된다.
-      if (FFAppState().isGuestSession &&
-          FFAppState().pendingInviteType.isEmpty &&
-          FFAppState().duoRoomId.isEmpty) {
-        debugPrint(
-            '[AppsFlyerManager] cached attribution ignored after Duo guest session');
-        return;
-      }
       final dynamic payload = raw['data'] ?? raw;
       if (payload == null) return;
       handleDuoDeepLink(Map<String, dynamic>.from(payload as Map));
@@ -1131,6 +1143,24 @@ class AppsFlyerManager {
     }
 
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final completedRoomIds =
+          prefs.getStringList(_completedDuoRoomsKey) ?? const <String>[];
+
+      if (completedRoomIds.contains(roomId)) {
+        debugPrint(
+            '[AppsFlyerManager] replayed completed Duo invite ignored - roomId: $roomId');
+        return false;
+      }
+
+      if (FFAppState().isGuestSession &&
+          FFAppState().pendingInviteType == 'duo' &&
+          FFAppState().duoRoomId == roomId) {
+        debugPrint(
+            '[AppsFlyerManager] duplicate pending Duo invite ignored - roomId: $roomId');
+        return true;
+      }
+
       if (FirebaseAuth.instance.currentUser == null) {
         await FirebaseAuth.instance.signInAnonymously();
       }

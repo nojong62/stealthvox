@@ -1015,6 +1015,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         'partnerUid': guestUid,
         'partnerJoinedAt': FieldValue.serverTimestamp(),
       });
+      await AppsFlyerManager.markDuoInviteCompleted(roomId);
 
       // 입장 성공 후 방 초대 정보만 정리한다. isGuestSession은 대화 종료 뒤에도
       // Intro 복귀를 강제하는 세션 경계이므로 사용자가 Intro에서 새 흐름을
@@ -1096,6 +1097,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     if (_isExiting) return;
     _isExiting = true;
     final bool isInviteGuest = FFAppState().isGuestSession;
+    final String? guestRoomId = _duoSessionRef?.id ??
+        widget.roomId ??
+        _pendingJoinRoomId ??
+        (FFAppState().duoRoomId.isNotEmpty ? FFAppState().duoRoomId : null);
+    if (isInviteGuest) {
+      await AppsFlyerManager.markDuoInviteCompleted(guestRoomId);
+    }
     _stopDuoBilling();
 
     // listener 즉시 해제 — 본인의 Firestore 업데이트가 listener를 재트리거하지 않도록
