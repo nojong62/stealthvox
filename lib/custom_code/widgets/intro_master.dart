@@ -53,6 +53,7 @@ class _IntroMasterState extends State<IntroMaster> {
   bool isLoading = false;
   IntroScreen _currentScreen = IntroScreen.welcome;
   int _welcomePage = 0;
+  bool _showUsageGuidePopup = false;
   bool _showEmailForm = false;
   bool _trialStarting = false;
   bool _isValidatingDuoInvite = false;
@@ -65,6 +66,9 @@ class _IntroMasterState extends State<IntroMaster> {
   final List<AccountDiscoveryResult> _accountDiscoveryResults = [];
   String _accountDiscoveryMessage = '';
   String _accountDiscoveryBusyProvider = '';
+
+  bool get _requiresAuthOnlyIntro =>
+      FFAppState().trialCompleted || FFAppState().isGuestSession;
 
   @override
   void initState() {
@@ -79,7 +83,7 @@ class _IntroMasterState extends State<IntroMaster> {
     _passwordFocusNode.addListener(_onFocusChange);
     _clearInvalidLastAuthProvider();
     AppsFlyerManager.duoInviteSignal.addListener(_onDuoInviteSignal);
-    if (FFAppState().trialCompleted) {
+    if (_requiresAuthOnlyIntro) {
       _currentScreen = IntroScreen.auth;
     } else {
       _currentScreen = IntroScreen.welcome;
@@ -432,16 +436,23 @@ class _IntroMasterState extends State<IntroMaster> {
                 ),
               )
             : SafeArea(
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: _advanceWelcome,
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 320),
-                    switchInCurve: Curves.easeOut,
-                    switchOutCurve: Curves.easeIn,
-                    child: _welcomePage == 0
-                        ? _buildWelcomeStoryPage()
-                        : _buildWelcomeGuidePage(),
+                child: MediaQuery(
+                  data: MediaQuery.of(context).copyWith(
+                    textScaler: const TextScaler.linear(1.0),
+                  ),
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: _showUsageGuidePopup
+                        ? _dismissUsageGuidePopup
+                        : _advanceWelcome,
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 320),
+                      switchInCurve: Curves.easeOut,
+                      switchOutCurve: Curves.easeIn,
+                      child: _welcomePage == 0
+                          ? _buildWelcomeStoryPage()
+                          : _buildWelcomeGuidePage(),
+                    ),
                   ),
                 ),
               ),
@@ -451,7 +462,10 @@ class _IntroMasterState extends State<IntroMaster> {
 
   void _advanceWelcome() {
     if (_welcomePage == 0) {
-      setState(() => _welcomePage = 1);
+      setState(() {
+        _welcomePage = 1;
+        _showUsageGuidePopup = true;
+      });
       return;
     }
     if (_scrollController.hasClients) {
@@ -461,6 +475,11 @@ class _IntroMasterState extends State<IntroMaster> {
       _currentScreen = IntroScreen.auth;
       _showEmailForm = false;
     });
+  }
+
+  void _dismissUsageGuidePopup() {
+    if (!_showUsageGuidePopup) return;
+    setState(() => _showUsageGuidePopup = false);
   }
 
   Widget _buildWelcomeStoryPage() {
@@ -522,7 +541,7 @@ class _IntroMasterState extends State<IntroMaster> {
                     ),
                   ),
                   const Spacer(),
-                  _buildWelcomePageFooter(page: 0),
+                  _buildWelcomePageFooter(),
                 ],
               ),
             ),
@@ -533,101 +552,134 @@ class _IntroMasterState extends State<IntroMaster> {
   }
 
   Widget _buildWelcomeGuidePage() {
-    return LayoutBuilder(
+    return Stack(
       key: const ValueKey('welcome-guide'),
-      builder: (context, constraints) => SingleChildScrollView(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(minHeight: constraints.maxHeight),
-          child: IntrinsicHeight(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(24, 24, 24, 22),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildTrialGuideCard(),
-                  const SizedBox(height: 18),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 58,
-                    child: ElevatedButton(
-                      onPressed: () {
-                        debugPrint(
-                            '[TrialDebug] trial button tapped, time=${DateTime.now().toIso8601String()}');
-                        _startTrial(context);
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0x1A8176EA),
-                        foregroundColor: const Color(0xFFF5F5F7),
-                        elevation: 0,
-                        side: const BorderSide(
-                          color: Color(0xFF8B7CFF),
-                          width: 1.25,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(29),
-                        ),
-                      ),
-                      child: const Text(
-                        '1분 무료 체험 시작 →',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 28),
-                  const Row(
+      children: [
+        LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: IntrinsicHeight(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 24, 24, 22),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.lightbulb, color: Colors.amber, size: 20),
-                      SizedBox(width: 8),
-                      Text.rich(
-                        TextSpan(
-                          text: '이용 방법 ',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
+                      _buildTrialGuideCard(
+                        onTrialPressed: () {
+                          debugPrint(
+                              '[TrialDebug] trial button tapped, time=${DateTime.now().toIso8601String()}');
+                          _startTrial(context);
+                        },
+                      ),
+                      const SizedBox(height: 14),
+                      Center(
+                        child: TextButton.icon(
+                          onPressed: () =>
+                              setState(() => _showUsageGuidePopup = true),
+                          icon: const Icon(
+                            Icons.lightbulb_outline,
+                            size: 16,
+                            color: Colors.amber,
                           ),
-                          children: [
-                            TextSpan(
-                              text: '(Anyone 모드)',
-                              style: TextStyle(
-                                color: Colors.white70,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w500,
-                              ),
+                          label: const Text(
+                            'Anyone 이용 방법',
+                            style: TextStyle(
+                              color: Colors.white60,
+                              fontSize: 12,
                             ),
-                          ],
+                          ),
                         ),
                       ),
+                      const Spacer(),
+                      const SizedBox(height: 18),
+                      const Center(
+                        child: Text(
+                          '바로 시작하기',
+                          style: TextStyle(
+                            color: Color(0xFFF5F5F7),
+                            fontSize: 17,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      _buildWelcomePageFooter(),
                     ],
                   ),
-                  const SizedBox(height: 14),
-                  const Text(
-                    '대화하고 싶은 사람을 한 명 떠올려 보세요. 그 사람이 눈앞에 있다고 생각하고, 하고 싶었던 말을 편하게 꺼내면 AI가 그 사람이 되어 대답합니다. 반응이 다르게 느껴지면 "왜 그렇게 느껴?"라고 되물어 보세요. 대화가 끝나면 방금 나눈 이야기가 그대로 나만의 영어 교재로 바뀝니다.',
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 14,
-                      height: 1.72,
-                    ),
-                  ),
-                  const Spacer(),
-                  const SizedBox(height: 28),
-                  const Center(
-                    child: Text(
-                      '시작하기',
+                ),
+              ),
+            ),
+          ),
+        ),
+        if (_showUsageGuidePopup) _buildUsageGuidePopup(),
+      ],
+    );
+  }
+
+  Widget _buildUsageGuidePopup() {
+    return Positioned.fill(
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _dismissUsageGuidePopup,
+        child: Container(
+          color: Colors.black.withValues(alpha: 0.72),
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 36),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 360),
+            padding: const EdgeInsets.fromLTRB(22, 20, 22, 18),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1B1B20),
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: Colors.white12),
+              boxShadow: const [
+                BoxShadow(
+                  color: Colors.black54,
+                  blurRadius: 24,
+                  offset: Offset(0, 12),
+                ),
+              ],
+            ),
+            child: const Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.lightbulb, color: Colors.amber, size: 18),
+                    SizedBox(width: 8),
+                    Text(
+                      'Anyone 이용 방법',
                       style: TextStyle(
-                        color: Color(0xFFF5F5F7),
-                        fontSize: 18,
+                        color: Colors.white,
+                        fontSize: 14,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
+                  ],
+                ),
+                SizedBox(height: 14),
+                Text(
+                  '대화하고 싶은 사람을 한 명 떠올려 보세요. 그 사람이 눈앞에 있다고 생각하고, 하고 싶었던 말을 편하게 꺼내면 AI가 그 사람이 되어 대답합니다. 반응이 다르게 느껴지면 "왜 그렇게 느껴?"라고 되물어 보세요. 대화가 끝나면 방금 나눈 이야기가 그대로 나만의 영어 교재로 바뀝니다.',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12.5,
+                    height: 1.58,
                   ),
-                  const SizedBox(height: 12),
-                  _buildWelcomePageFooter(page: 1),
-                ],
-              ),
+                ),
+                SizedBox(height: 16),
+                Align(
+                  alignment: Alignment.center,
+                  child: Text(
+                    '화면을 탭하면 닫힙니다',
+                    style: TextStyle(
+                      color: Color(0xFF777780),
+                      fontSize: 10.5,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -635,39 +687,16 @@ class _IntroMasterState extends State<IntroMaster> {
     );
   }
 
-  Widget _buildWelcomePageFooter({required int page}) {
-    return Column(
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(2, (index) {
-            final selected = index == page;
-            return AnimatedContainer(
-              duration: const Duration(milliseconds: 220),
-              width: selected ? 22 : 7,
-              height: 7,
-              margin: const EdgeInsets.symmetric(horizontal: 4),
-              decoration: BoxDecoration(
-                color: selected
-                    ? const Color(0xFF58D6BD)
-                    : Colors.white.withValues(alpha: 0.18),
-                borderRadius: BorderRadius.circular(99),
-              ),
-            );
-          }),
+  Widget _buildWelcomePageFooter() {
+    return const Center(
+      child: Text(
+        '화면을 탭하여 계속하기',
+        style: TextStyle(
+          color: Color(0xFF777780),
+          fontSize: 11.5,
+          letterSpacing: 0.2,
         ),
-        const SizedBox(height: 12),
-        const Center(
-          child: Text(
-            '화면을 탭하여 계속하기',
-            style: TextStyle(
-              color: Color(0xFF777780),
-              fontSize: 11.5,
-              letterSpacing: 0.2,
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 
@@ -819,7 +848,7 @@ class _IntroMasterState extends State<IntroMaster> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // 뒤로가기: 체험 완료 전에만 표시
-          if (!FFAppState().trialCompleted)
+          if (!_requiresAuthOnlyIntro)
             Align(
               alignment: Alignment.centerLeft,
               child: IconButton(
@@ -831,7 +860,7 @@ class _IntroMasterState extends State<IntroMaster> {
                 tooltip: '뒤로',
               ),
             ),
-          SizedBox(height: FFAppState().trialCompleted ? 60 : 24),
+          SizedBox(height: _requiresAuthOnlyIntro ? 60 : 24),
           // 제목 + 재방문 안내
           ..._buildAuthHeader(),
           const SizedBox(height: 34),
@@ -1351,7 +1380,10 @@ class _IntroMasterState extends State<IntroMaster> {
   }
 
   List<Widget> _buildAuthHeader() {
-    final lastProvider = _validLastAuthProvider();
+    // 1분 체험을 마친 사용자는 재방문 계정 기록과 관계없이
+    // 세 가지 가입/로그인 방법을 모두 선택할 수 있어야 한다.
+    final lastProvider =
+        _requiresAuthOnlyIntro ? null : _validLastAuthProvider();
     if (lastProvider == null) {
       return [
         _authSectionTitle(
@@ -1370,7 +1402,8 @@ class _IntroMasterState extends State<IntroMaster> {
   }
 
   List<Widget> _buildProviderButtons() {
-    final lastProvider = _validLastAuthProvider();
+    final lastProvider =
+        _requiresAuthOnlyIntro ? null : _validLastAuthProvider();
     if (lastProvider != null) {
       return [_providerButton(lastProvider)];
     }
@@ -2086,7 +2119,7 @@ class _IntroMasterState extends State<IntroMaster> {
     );
   }
 
-  Widget _buildTrialGuideCard() {
+  Widget _buildTrialGuideCard({VoidCallback? onTrialPressed}) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
@@ -2111,7 +2144,7 @@ class _IntroMasterState extends State<IntroMaster> {
               '처음 오셨나요?',
               style: TextStyle(
                 color: Color(0xFF58D6BD),
-                fontSize: 10,
+                fontSize: 12,
                 fontWeight: FontWeight.w600,
                 height: 1.1,
               ),
@@ -2122,7 +2155,7 @@ class _IntroMasterState extends State<IntroMaster> {
             '1분 동안\nAnyone 모드를\n체험해 보세요',
             style: TextStyle(
               color: Color(0xFFF5F5F7),
-              fontSize: 14.5,
+              fontSize: 22,
               fontWeight: FontWeight.w700,
               height: 1.22,
             ),
@@ -2132,8 +2165,8 @@ class _IntroMasterState extends State<IntroMaster> {
             '대화가 끝나면\n방금 그 대화가\n영어 교재로 바뀝니다.',
             style: TextStyle(
               color: Color(0xFFA7A7AE),
-              fontSize: 12,
-              height: 1.32,
+              fontSize: 15,
+              height: 1.45,
             ),
           ),
           const SizedBox(height: 11),
@@ -2160,6 +2193,56 @@ class _IntroMasterState extends State<IntroMaster> {
               ],
             ),
           ),
+          if (onTrialPressed != null) ...[
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              height: 56,
+              child: ElevatedButton(
+                onPressed: onTrialPressed,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF6F66D8),
+                  foregroundColor: const Color(0xFFF5F5F7),
+                  elevation: 0,
+                  side: const BorderSide(
+                    color: Color(0xFF9A8FFF),
+                    width: 1.2,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                ),
+                child: const Text(
+                  '1분 무료 체험 시작 →',
+                  style: TextStyle(
+                    fontSize: 15.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Center(
+              child: Text(
+                '회원가입 없이 바로 · 체험하기',
+                style: TextStyle(
+                  color: Color(0xFF8D8D96),
+                  fontSize: 11,
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Center(
+              child: Text(
+                '1분 대화방  ·  2분 공부방',
+                style: TextStyle(
+                  color: Color(0xFFA7A7AE),
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
