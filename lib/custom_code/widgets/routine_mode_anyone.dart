@@ -22,7 +22,6 @@ import 'package:flutter/services.dart'; // 🔬 [v3.1] Clipboard용
 // ====================================================================
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
 import 'dart:typed_data';
 import 'package:record/record.dart';
 import 'package:web_socket_channel/io.dart';
@@ -69,9 +68,6 @@ const List<int> kFreeTalkChunkTtsTimeoutLadderSec = [
   12
 ]; // Chunk TTS per-attempt timeout ladder.
 const int kFreeTalkAiResponseMaxTokens = 70;
-const int kFreeTalkVadPreRollMs = 300;
-const int kFreeTalkVadSilenceTailMs = 800;
-const double kFreeTalkVadMinimumRms = 520;
 const int kFreeTalkMaxTtsCharsPerUtterance = 800;
 
 class AnyoneCostTracker {
@@ -2891,10 +2887,6 @@ class DeepgramV2VoiceManager {
   Timer? _micWatchdog; // 🔧 첫 진입 무음(마이크 데드) 감지 워치독
   Timer? _keepAliveTimer;
   int _packetCount = 0; // 🔧 수신 오디오 패킷 수 (워치독 판정용)
-  final List<int> _preRoll = [];
-  bool _vadSpeaking = false;
-  int _vadSilenceMs = 0;
-  double _vadNoiseFloor = 180;
 
   DeepgramV2VoiceManager({
     required this.apiKey,
@@ -2916,19 +2908,6 @@ class DeepgramV2VoiceManager {
     onLog?.call(tag, msg);
   }
 
-  double _pcmRms(Uint8List data) {
-    if (data.length < 2) return 0;
-    double sumSquares = 0;
-    int samples = 0;
-    for (int i = 0; i + 1 < data.length; i += 2) {
-      int sample = data[i] | (data[i + 1] << 8);
-      if (sample >= 0x8000) sample -= 0x10000;
-      sumSquares += sample * sample;
-      samples++;
-    }
-    return samples == 0 ? 0 : sqrt(sumSquares / samples);
-  }
-
   void _sendPcm(List<int> data) {
     if (_isDisposed || data.isEmpty) return;
     final bytes = data is Uint8List ? data : Uint8List.fromList(data);
@@ -2940,49 +2919,11 @@ class DeepgramV2VoiceManager {
     }
   }
 
-  void _bufferPreRoll(Uint8List data) {
-    _preRoll.addAll(data);
-    const maxBytes = kFreeTalkVadPreRollMs * 32;
-    if (_preRoll.length > maxBytes) {
-      _preRoll.removeRange(0, _preRoll.length - maxBytes);
-    }
-  }
-
   void _handleAudioPacket(Uint8List data) {
-    final rms = _pcmRms(data);
-    final threshold =
-        max(kFreeTalkVadMinimumRms, _vadNoiseFloor * 3.0).toDouble();
-    final hasVoice = rms >= threshold;
-    final packetMs = max(1, (data.length / 32).round());
-
-    if (!_vadSpeaking) {
-      _bufferPreRoll(data);
-      if (!hasVoice) {
-        // 말하지 않을 때만 배경 소음 기준을 천천히 적응시킨다.
-        _vadNoiseFloor = (_vadNoiseFloor * 0.96) + (rms * 0.04);
-        return;
-      }
-      _vadSpeaking = true;
-      _vadSilenceMs = 0;
-      _lg('🎙️ [VAD-START]',
-          'rms=${rms.round()} threshold=${threshold.round()} preRoll=${_preRoll.length}B');
-      _sendPcm(_preRoll);
-      _preRoll.clear();
-      return;
-    }
-
+    // Deepgram이 자체 endpointing/VAD를 수행한다. 여기서 RMS 임계값으로
+    // 패킷을 버리면 마이크 출력이 작은 기기에서는 음성이 한 바이트도 전송되지
+    // 않고, silence tail도 잘려 UtteranceEnd가 오지 않을 수 있다.
     _sendPcm(data);
-    if (hasVoice) {
-      _vadSilenceMs = 0;
-      return;
-    }
-    _vadSilenceMs += packetMs;
-    if (_vadSilenceMs >= kFreeTalkVadSilenceTailMs) {
-      _vadSpeaking = false;
-      _vadSilenceMs = 0;
-      _preRoll.clear();
-      _lg('🎙️ [VAD-END]', 'tail=${kFreeTalkVadSilenceTailMs}ms');
-    }
   }
 
   void _startKeepAlive() {
@@ -2998,13 +2939,6 @@ class DeepgramV2VoiceManager {
     });
   }
 
-  void _resetVad() {
-    _preRoll.clear();
-    _vadSpeaking = false;
-    _vadSilenceMs = 0;
-    _vadNoiseFloor = 180;
-  }
-
   Future<void> connectAndStart() async {
     _lg('🎤 [DG-00]', 'connectAndStart 진입');
     await _connect();
@@ -3016,7 +2950,6 @@ class DeepgramV2VoiceManager {
     _micWatchdog = null;
     _keepAliveTimer?.cancel();
     _keepAliveTimer = null;
-    _resetVad();
     _lg('🎤 [MIC-01]', '_connect 진입');
     try {
       final uri = Uri.parse(
@@ -3236,7 +3169,6 @@ class DeepgramV2VoiceManager {
     _keepAliveTimer = null;
     await _audioSub?.cancel();
     _audioSub = null;
-    _resetVad();
     if (shouldReconnect != null && !shouldReconnect!()) {
       _lg('🎤 [DG-RETRY-SKIP]', '재연결 조건 불충족');
       return;
@@ -3267,7 +3199,6 @@ class DeepgramV2VoiceManager {
     _micWatchdog = null;
     _keepAliveTimer?.cancel();
     _keepAliveTimer = null;
-    _resetVad();
     await _audioSub?.cancel();
     _audioSub = null;
     await _wsSub?.cancel();
