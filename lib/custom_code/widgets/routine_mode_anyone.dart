@@ -22,6 +22,7 @@ import 'package:flutter/services.dart'; // 🔬 [v3.1] Clipboard용
 // ====================================================================
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 import 'package:record/record.dart';
 import 'package:web_socket_channel/io.dart';
@@ -67,6 +68,44 @@ const List<int> kFreeTalkChunkTtsTimeoutLadderSec = [
   12
 ]; // Chunk TTS per-attempt timeout ladder.
 const int kFreeTalkAiResponseMaxTokens = 70;
+const int kFreeTalkVadPreRollMs = 300;
+const int kFreeTalkVadSilenceTailMs = 800;
+const double kFreeTalkVadMinimumRms = 520;
+const int kFreeTalkMaxTtsCharsPerUtterance = 800;
+
+class AnyoneCostTracker {
+  AnyoneCostTracker(this.onLog);
+
+  final void Function(String tag, String msg) onLog;
+  int deepgramAudioMs = 0;
+  int ttsInputChars = 0;
+  int ttsRequestCount = 0;
+  int ttsDuplicateBlocked = 0;
+
+  void addDeepgramBytes(int byteCount) {
+    // PCM16, 16 kHz, mono = 32 bytes/ms.
+    deepgramAudioMs += (byteCount / 32).round();
+  }
+
+  void recordTtsRequest(int inputChars) {
+    ttsInputChars += inputChars;
+    ttsRequestCount++;
+  }
+
+  void recordTtsDuplicateBlocked() {
+    ttsDuplicateBlocked++;
+  }
+
+  void logSnapshot({required String reason}) {
+    onLog(
+      '💰 [COST]',
+      'reason=$reason deepgram_audio_ms=$deepgramAudioMs '
+          'tts_input_chars=$ttsInputChars '
+          'tts_request_count=$ttsRequestCount '
+          'tts_duplicate_blocked=$ttsDuplicateBlocked',
+    );
+  }
+}
 
 /// ==================================================================== [Box
 /// 2: 클래스 선언부]
@@ -331,6 +370,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   // 🔧 [PREFETCH v1] 현재 턴 AI TTS fetcher 참조. 다음 턴 시작 시 cancel()로
   //   이전 턴의 늦은 fetch가 공유 큐(_ttsQueueManager)로 유입되는 것을 차단.
   ChunkedTtsFetcher? _aiTtsFetcher;
+  late final AnyoneCostTracker _costTracker;
 
   // ⏱️ 성능 측정용 초시계
   final Stopwatch _swDeepgram = Stopwatch();
@@ -342,6 +382,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   @override
   void initState() {
     super.initState();
+    _costTracker = AnyoneCostTracker(_log);
     _ttsQueueManager = TtsQueueManager(onPlayStart: () {
       if (_awaitingAiFirstAudioProbe) {
         _awaitingAiFirstAudioProbe = false;
@@ -381,6 +422,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
   @override
   void dispose() {
+    _costTracker.logSnapshot(reason: 'dispose');
     disposeTrialTimer();
     _startupRetryTimer?.cancel();
     _clearIdleTimers();
@@ -502,29 +544,42 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
   void _saveUserFullSentenceToCache(String text) {
     if (text.isEmpty) return;
-    TtsCache.get(text, 'nova').then((existing) {
-      if (existing != null) return;
-      http
-          .post(
-        Uri.parse('https://api.openai.com/v1/audio/speech'),
-        headers: {
-          'Authorization': 'Bearer $_openAiKey',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'model': 'tts-1',
-          'input': text,
-          'voice': 'nova',
-          'speed': 1.0,
-        }),
-      )
-          .then((res) {
-        if (res.statusCode == 200) {
-          TtsCache.put(text, 'nova', res.bodyBytes);
-        }
-      }).catchError((e) {
-        debugPrint('[_saveUserFullSentenceToCache] $e');
-      });
+    TtsCache.getOrCreate(
+      text: text,
+      voice: 'nova',
+      language: 'en',
+      onDuplicateBlocked: () {
+        _costTracker.recordTtsDuplicateBlocked();
+        _log('🔊 [TTS-DUP-BLOCKED]', 'full-sentence cache request reused');
+      },
+      create: () async {
+        _costTracker.recordTtsRequest(text.length);
+        final res = await http
+            .post(
+              Uri.parse('https://api.openai.com/v1/audio/speech'),
+              headers: {
+                'Authorization': 'Bearer $_openAiKey',
+                'Content-Type': 'application/json',
+              },
+              body: jsonEncode({
+                'model': 'tts-1',
+                'input': text,
+                'voice': 'nova',
+                'speed': 1.0,
+              }),
+            )
+            .timeout(
+                const Duration(seconds: kFreeTalkOpenAiTtsHttpTimeoutSeconds));
+        if (res.statusCode == 200) return res.bodyBytes;
+        _log(
+          '❌ [TTS-API-ERR]',
+          'full-sentence cache statusCode=${res.statusCode}',
+        );
+        return null;
+      },
+    ).catchError((e) {
+      debugPrint('[_saveUserFullSentenceToCache] $e');
+      return null;
     });
   }
 
@@ -731,6 +786,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         apiKey: _deepgramKey,
         audioRecorder: _audioRecorder,
         langCode: dgLangCode,
+        costTracker: _costTracker,
         onLog: _log, // 🔬 로그 훅 주입
         shouldReconnect: () =>
             isCurrentGeneration() &&
@@ -1098,6 +1154,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       "nova",
       isUser: false,
       onLog: _log,
+      costTracker: _costTracker,
     );
     fetcher.addText(_retryPhrase(lang));
     while (
@@ -1272,6 +1329,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         _ttsQueueManager,
         userVoice,
         onLog: _log,
+        costTracker: _costTracker,
       );
       final HybridTtsPlayer userHybridTts = HybridTtsPlayer(
         _openAiKey,
@@ -1438,6 +1496,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           'nova',
           isUser: false,
           onLog: _log,
+          costTracker: _costTracker,
         );
         misheardTts.addText("아 제가 잘못 들었어요. 다시 한 번 말해주세요.");
         int misheardTicks = 0;
@@ -1500,6 +1559,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           'nova',
           isUser: false,
           onLog: _log,
+          costTracker: _costTracker,
         );
         regenPhraseTts.addText("그럼 다시 답해 볼게요.");
         var regenMsgs = _localMessages.where((m) {
@@ -1525,6 +1585,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           'nova',
           isUser: false,
           onLog: _log,
+          costTracker: _costTracker,
         );
         String regenText = "";
         final regenStream = FreeTalkBrain.streamFreeTalkResponse(
@@ -1607,6 +1668,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           'nova',
           isUser: false,
           onLog: _log,
+          costTracker: _costTracker,
         );
         clarifyTts.addText(clarifyText);
         int clarifyTicks = 0;
@@ -1699,6 +1761,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         "nova",
         isUser: false, // AI 큐로 분리
         onLog: _log,
+        costTracker: _costTracker,
       );
       _aiTtsFetcher = aiTtsFetcher; // 다음 턴에서 취소할 수 있도록 참조 보관
       // [하이브리드 전환] 턴 시작 시 리셋 + 새 인스턴스 생성
@@ -2698,6 +2761,7 @@ class DeepgramV2VoiceManager {
   final String apiKey;
   final AudioRecorder audioRecorder;
   final String langCode;
+  final AnyoneCostTracker? costTracker;
   final VoidCallback onConnected;
   final Function(String) onTranscriptUpdate;
   final void Function(String, {bool speechFinal}) onTurnEnded;
@@ -2719,12 +2783,18 @@ class DeepgramV2VoiceManager {
   int _retryCount = 0;
   static const int _maxRetries = 5;
   Timer? _micWatchdog; // 🔧 첫 진입 무음(마이크 데드) 감지 워치독
+  Timer? _keepAliveTimer;
   int _packetCount = 0; // 🔧 수신 오디오 패킷 수 (워치독 판정용)
+  final List<int> _preRoll = [];
+  bool _vadSpeaking = false;
+  int _vadSilenceMs = 0;
+  double _vadNoiseFloor = 180;
 
   DeepgramV2VoiceManager({
     required this.apiKey,
     required this.audioRecorder,
     required this.langCode,
+    this.costTracker,
     required this.onConnected,
     required this.onTranscriptUpdate,
     required this.onTurnEnded,
@@ -2740,6 +2810,95 @@ class DeepgramV2VoiceManager {
     onLog?.call(tag, msg);
   }
 
+  double _pcmRms(Uint8List data) {
+    if (data.length < 2) return 0;
+    double sumSquares = 0;
+    int samples = 0;
+    for (int i = 0; i + 1 < data.length; i += 2) {
+      int sample = data[i] | (data[i + 1] << 8);
+      if (sample >= 0x8000) sample -= 0x10000;
+      sumSquares += sample * sample;
+      samples++;
+    }
+    return samples == 0 ? 0 : sqrt(sumSquares / samples);
+  }
+
+  void _sendPcm(List<int> data) {
+    if (_isDisposed || data.isEmpty) return;
+    final bytes = data is Uint8List ? data : Uint8List.fromList(data);
+    try {
+      _channel?.sink.add(bytes);
+      costTracker?.addDeepgramBytes(bytes.length);
+    } catch (e) {
+      _lg('❌ [DG-PCM-ERR]', 'PCM 전송 실패: $e');
+    }
+  }
+
+  void _bufferPreRoll(Uint8List data) {
+    _preRoll.addAll(data);
+    const maxBytes = kFreeTalkVadPreRollMs * 32;
+    if (_preRoll.length > maxBytes) {
+      _preRoll.removeRange(0, _preRoll.length - maxBytes);
+    }
+  }
+
+  void _handleAudioPacket(Uint8List data) {
+    final rms = _pcmRms(data);
+    final threshold =
+        max(kFreeTalkVadMinimumRms, _vadNoiseFloor * 3.0).toDouble();
+    final hasVoice = rms >= threshold;
+    final packetMs = max(1, (data.length / 32).round());
+
+    if (!_vadSpeaking) {
+      _bufferPreRoll(data);
+      if (!hasVoice) {
+        // 말하지 않을 때만 배경 소음 기준을 천천히 적응시킨다.
+        _vadNoiseFloor = (_vadNoiseFloor * 0.96) + (rms * 0.04);
+        return;
+      }
+      _vadSpeaking = true;
+      _vadSilenceMs = 0;
+      _lg('🎙️ [VAD-START]',
+          'rms=${rms.round()} threshold=${threshold.round()} preRoll=${_preRoll.length}B');
+      _sendPcm(_preRoll);
+      _preRoll.clear();
+      return;
+    }
+
+    _sendPcm(data);
+    if (hasVoice) {
+      _vadSilenceMs = 0;
+      return;
+    }
+    _vadSilenceMs += packetMs;
+    if (_vadSilenceMs >= kFreeTalkVadSilenceTailMs) {
+      _vadSpeaking = false;
+      _vadSilenceMs = 0;
+      _preRoll.clear();
+      _lg('🎙️ [VAD-END]', 'tail=${kFreeTalkVadSilenceTailMs}ms');
+    }
+  }
+
+  void _startKeepAlive() {
+    _keepAliveTimer?.cancel();
+    _keepAliveTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (_isDisposed) return;
+      try {
+        // Deepgram 제어 메시지는 과금 대상 PCM과 분리해서 전송한다.
+        _channel?.sink.add(jsonEncode({'type': 'KeepAlive'}));
+      } catch (e) {
+        _lg('❌ [DG-KEEPALIVE]', 'KeepAlive 전송 실패: $e');
+      }
+    });
+  }
+
+  void _resetVad() {
+    _preRoll.clear();
+    _vadSpeaking = false;
+    _vadSilenceMs = 0;
+    _vadNoiseFloor = 180;
+  }
+
   Future<void> connectAndStart() async {
     _lg('🎤 [DG-00]', 'connectAndStart 진입');
     await _connect();
@@ -2749,6 +2908,9 @@ class DeepgramV2VoiceManager {
     if (_isDisposed) return;
     _micWatchdog?.cancel(); // 🔧 재연결 시 이전 워치독 정리
     _micWatchdog = null;
+    _keepAliveTimer?.cancel();
+    _keepAliveTimer = null;
+    _resetVad();
     _lg('🎤 [MIC-01]', '_connect 진입');
     try {
       final uri = Uri.parse(
@@ -2770,6 +2932,7 @@ class DeepgramV2VoiceManager {
         headers: {'Authorization': 'Token $apiKey'},
         pingInterval: const Duration(seconds: 10),
       );
+      _startKeepAlive();
       _lg('🎤 [DG-01]', 'WebSocket 연결 요청 전송');
 
       await _wsSub?.cancel();
@@ -2843,9 +3006,9 @@ class DeepgramV2VoiceManager {
               _lg('🎤 [MIC-07]', '첫 오디오 패킷 수신 (${data.length}B)');
             }
             if (_packetCount == 50) {
-              _lg('🎤 [MIC-08]', '패킷 50개 송신 중 (마이크 정상 동작)');
+              _lg('🎤 [MIC-08]', '패킷 50개 수신 중 (마이크 정상 동작)');
             }
-            _channel?.sink.add(Uint8List.fromList(data));
+            _handleAudioPacket(Uint8List.fromList(data));
           }
         },
         onError: (e) {
@@ -2963,6 +3126,11 @@ class DeepgramV2VoiceManager {
 
   Future<void> _handleDisconnect() async {
     if (_isDisposed) return;
+    _keepAliveTimer?.cancel();
+    _keepAliveTimer = null;
+    await _audioSub?.cancel();
+    _audioSub = null;
+    _resetVad();
     if (shouldReconnect != null && !shouldReconnect!()) {
       _lg('🎤 [DG-RETRY-SKIP]', '재연결 조건 불충족');
       return;
@@ -2991,6 +3159,9 @@ class DeepgramV2VoiceManager {
     _isDisposed = true;
     _micWatchdog?.cancel();
     _micWatchdog = null;
+    _keepAliveTimer?.cancel();
+    _keepAliveTimer = null;
+    _resetVad();
     await _audioSub?.cancel();
     _audioSub = null;
     await _wsSub?.cancel();
@@ -3095,9 +3266,15 @@ class UnifiedBrain {
 //   → 경로: {앱로컬}/tts_cache/{해시키}.mp3
 class TtsCache {
   static String? _cacheDirPath;
+  static final Map<String, Future<Uint8List?>> _inFlight = {};
 
-  static String _key(String text, String voice) {
-    final combined = '$text|$voice';
+  static String _key(
+    String text,
+    String voice, {
+    double speed = 1.0,
+    String language = 'en',
+  }) {
+    final combined = '$text|$voice|$speed|$language';
     final h = combined.hashCode.abs().toRadixString(16);
     return '${h}_${combined.length}';
   }
@@ -3115,17 +3292,32 @@ class TtsCache {
 
   // 🔧 [B 수정] 디스크 I/O 경합으로 hang되는 것을 막기 위해 2초 타임아웃.
   // 타임아웃/예외 시 캐시 미스로 처리(null)해 호출 측은 API 경로로 진행.
-  static Future<Uint8List?> get(String text, String voice) async {
+  static Future<Uint8List?> get(
+    String text,
+    String voice, {
+    double speed = 1.0,
+    String language = 'en',
+  }) async {
     try {
-      return await _getInternal(text, voice)
-          .timeout(const Duration(seconds: 2));
+      return await _getInternal(
+        text,
+        voice,
+        speed: speed,
+        language: language,
+      ).timeout(const Duration(seconds: 2));
     } catch (_) {
       return null;
     }
   }
 
-  static Future<Uint8List?> _getInternal(String text, String voice) async {
-    final path = '${await _getDir()}/${_key(text, voice)}.mp3';
+  static Future<Uint8List?> _getInternal(
+    String text,
+    String voice, {
+    required double speed,
+    required String language,
+  }) async {
+    final path =
+        '${await _getDir()}/${_key(text, voice, speed: speed, language: language)}.mp3';
     final file = File(path);
     if (await file.exists()) {
       return await file.readAsBytes();
@@ -3134,16 +3326,84 @@ class TtsCache {
   }
 
   // 🔧 [B 수정] 저장도 2초 타임아웃. 실패해도 캐시는 best-effort로 조용히 무시.
-  static Future<void> put(String text, String voice, Uint8List data) async {
+  static Future<void> put(
+    String text,
+    String voice,
+    Uint8List data, {
+    double speed = 1.0,
+    String language = 'en',
+  }) async {
     try {
-      await _putInternal(text, voice, data).timeout(const Duration(seconds: 2));
+      await _putInternal(
+        text,
+        voice,
+        data,
+        speed: speed,
+        language: language,
+      ).timeout(const Duration(seconds: 2));
     } catch (_) {}
   }
 
   static Future<void> _putInternal(
-      String text, String voice, Uint8List data) async {
-    final path = '${await _getDir()}/${_key(text, voice)}.mp3';
+    String text,
+    String voice,
+    Uint8List data, {
+    required double speed,
+    required String language,
+  }) async {
+    final path =
+        '${await _getDir()}/${_key(text, voice, speed: speed, language: language)}.mp3';
     await File(path).writeAsBytes(data);
+  }
+
+  static Future<Uint8List?> getOrCreate({
+    required String text,
+    required String voice,
+    double speed = 1.0,
+    String language = 'en',
+    required Future<Uint8List?> Function() create,
+    VoidCallback? onDuplicateBlocked,
+  }) async {
+    final cached = await get(text, voice, speed: speed, language: language);
+    if (cached != null && cached.isNotEmpty) return cached;
+
+    final cacheKey = _key(
+      text,
+      voice,
+      speed: speed,
+      language: language,
+    );
+    final existing = _inFlight[cacheKey];
+    if (existing != null) {
+      onDuplicateBlocked?.call();
+      return existing;
+    }
+
+    final completer = Completer<Uint8List?>();
+    final future = completer.future;
+    _inFlight[cacheKey] = future;
+    () async {
+      try {
+        final created = await create();
+        if (created != null && created.isNotEmpty) {
+          await put(
+            text,
+            voice,
+            created,
+            speed: speed,
+            language: language,
+          );
+        }
+        completer.complete(created);
+      } catch (e, stackTrace) {
+        completer.completeError(e, stackTrace);
+      } finally {
+        if (identical(_inFlight[cacheKey], future)) {
+          _inFlight.remove(cacheKey);
+        }
+      }
+    }();
+    return future;
   }
 
   /// 캐시 용량 관리 (100MB 초과 시 오래된 파일부터 제거)
@@ -3423,12 +3683,15 @@ class ChunkedTtsFetcher {
   final String language;
   final bool isUser; // 🔧 [v3.5] true=유저 큐, false=AI 큐
   final void Function(String tag, String msg)? onLog; // 🔬 [v3.1] 로그 훅
+  final AnyoneCostTracker? costTracker;
 
   int _requestCounter = 0;
   int _readyCounter = 0;
   final Map<int, Uint8List> _buffer = {};
+  final Set<String> _scheduledKeys = {};
   int _pendingCount = 0;
   int _generation = 0;
+  int _acceptedChars = 0;
   bool _cancelled = false;
   int get pendingRequests => _pendingCount;
   VoidCallback? onAllComplete;
@@ -3441,10 +3704,26 @@ class ChunkedTtsFetcher {
     this.isUser = true, // 🔧 [v3.5] 기본값: 유저 큐
     this.onAllComplete,
     this.onLog,
+    this.costTracker,
   });
 
-  void addText(String text) {
-    if (text.trim().isEmpty) return;
+  String _spokenTextOnly(String text) {
+    return text
+        .replaceAll(
+          RegExp(
+            r'\[(CORRECTION|EVAPORATE|MISHEARD)\]',
+            caseSensitive: false,
+          ),
+          '',
+        )
+        .replaceAll(RegExp(r'[`*_#>]'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  void addText(String rawText) {
+    String text = _spokenTextOnly(rawText);
+    if (text.isEmpty) return;
     // TTS API is unreliable for punctuation-only chunks like "!" or ",".
     if (!RegExp(r'[a-zA-Z0-9가-힣]').hasMatch(text)) {
       onLog?.call('🔊 [TTS-SKIP]', 'punctuation-only skipped: "$text"');
@@ -3456,6 +3735,27 @@ class ChunkedTtsFetcher {
           '[$turnTag] addText ignored after cancel: "$text"');
       return;
     }
+
+    final remaining = kFreeTalkMaxTtsCharsPerUtterance - _acceptedChars;
+    if (remaining <= 0) {
+      onLog?.call('🔊 [TTS-LIMIT]',
+          'utterance limit=$kFreeTalkMaxTtsCharsPerUtterance reached');
+      return;
+    }
+    if (text.length > remaining) {
+      text = text.substring(0, remaining).trimRight();
+      onLog?.call('🔊 [TTS-LIMIT]',
+          'utterance truncated at $kFreeTalkMaxTtsCharsPerUtterance chars');
+    }
+    if (text.isEmpty) return;
+
+    final requestKey = '$text|$voice|1.0|$language';
+    if (!_scheduledKeys.add(requestKey)) {
+      costTracker?.recordTtsDuplicateBlocked();
+      onLog?.call('🔊 [TTS-DUP-BLOCKED]', 'same utterance skipped');
+      return;
+    }
+    _acceptedChars += text.length;
     _pendingCount++;
     final turnTag = isUser ? 'USER' : 'AI';
     onLog?.call(
@@ -3468,54 +3768,59 @@ class ChunkedTtsFetcher {
     // _pendingCount가 정확히 1회 감소하도록 try/finally로 보장.
     Uint8List result = Uint8List(0);
     try {
-      // [1단계] 로컬 캐시 확인 (히트 시 result에 담고 finally에서 큐 적재)
-      final cached = await TtsCache.get(text, voice);
-      if (cached != null && cached.isNotEmpty) {
-        result = cached;
-        return;
-      }
+      final fetched = await TtsCache.getOrCreate(
+        text: text,
+        voice: voice,
+        language: language,
+        onDuplicateBlocked: () {
+          costTracker?.recordTtsDuplicateBlocked();
+          onLog?.call(
+              '🔊 [TTS-DUP-BLOCKED]', 'in-flight request reused for "$text"');
+        },
+        create: () async {
+          // API 호출 (5초/8초/12초 타임아웃, 최대 3회 시도)
+          for (int attempt = 0; attempt < 3; attempt++) {
+            try {
+              costTracker?.recordTtsRequest(text.length);
+              final res = await OpenAiConnectionPool.instance.client
+                  .post(
+                    Uri.parse('https://api.openai.com/v1/audio/speech'),
+                    headers: {
+                      'Authorization': 'Bearer $apiKey',
+                      'Content-Type': 'application/json',
+                    },
+                    body: jsonEncode({
+                      'model': 'tts-1',
+                      'input': text,
+                      'voice': voice,
+                      'speed': 1.0,
+                      'response_format': 'mp3',
+                    }),
+                  )
+                  .timeout(Duration(
+                      seconds: kFreeTalkChunkTtsTimeoutLadderSec[attempt]));
 
-      // [2단계] API 호출 (5초 타임아웃, 최대 3회 시도) — TTS 지연 스파이크 대응
-      for (int attempt = 0; attempt < 3; attempt++) {
-        try {
-          final res = await OpenAiConnectionPool.instance.client
-              .post(
-                Uri.parse('https://api.openai.com/v1/audio/speech'),
-                headers: {
-                  'Authorization': 'Bearer $apiKey',
-                  'Content-Type': 'application/json',
-                },
-                body: jsonEncode({
-                  'model': 'tts-1',
-                  'input': text,
-                  'voice': voice,
-                  'speed': 1.0,
-                  'response_format': 'mp3',
-                }),
-              )
-              .timeout(Duration(
-                  seconds: kFreeTalkChunkTtsTimeoutLadderSec[attempt]));
-
-          if (res.statusCode == 200) {
-            result = res.bodyBytes;
-            final turnTag = isUser ? 'USER' : 'AI';
-            onLog?.call('🔊 [TTS-02]',
-                '[$turnTag] API OK (${result.length}B) for "$text"');
-            // [3단계] 캐시 저장 (백그라운드, await 없음)
-            unawaited(TtsCache.put(text, voice, result));
-            break;
-          } else {
-            onLog?.call('❌ [TTS-API-ERR]',
-                'statusCode=${res.statusCode} (attempt=${attempt + 1}/3)');
+              if (res.statusCode == 200) {
+                final bytes = res.bodyBytes;
+                final turnTag = isUser ? 'USER' : 'AI';
+                onLog?.call('🔊 [TTS-02]',
+                    '[$turnTag] API OK (${bytes.length}B) for "$text"');
+                return bytes;
+              }
+              onLog?.call('❌ [TTS-API-ERR]',
+                  'statusCode=${res.statusCode} (attempt=${attempt + 1}/3)');
+            } catch (e) {
+              onLog?.call('⚠️ [TTS-RETRY]',
+                  'attempt=${attempt + 1}/3 실패 (${e.runtimeType}) for "$text"');
+              if (attempt < 2 && e is! TimeoutException) {
+                await Future.delayed(const Duration(milliseconds: 300));
+              }
+            }
           }
-        } catch (e) {
-          onLog?.call('⚠️ [TTS-RETRY]',
-              'attempt=${attempt + 1}/3 실패 (${e.runtimeType}) for "$text"');
-          if (attempt < 2 && e is! TimeoutException) {
-            await Future.delayed(const Duration(milliseconds: 300));
-          }
-        }
-      }
+          return null;
+        },
+      );
+      result = fetched ?? Uint8List(0);
       if (result.isEmpty) {
         onLog?.call('❌ [TTS-FAIL]', '3회 모두 실패 — 청크 스킵: "$text"');
       }
@@ -3558,7 +3863,9 @@ class ChunkedTtsFetcher {
     _requestCounter = 0;
     _readyCounter = 0;
     _buffer.clear();
+    _scheduledKeys.clear();
     _pendingCount = 0;
+    _acceptedChars = 0;
   }
 }
 
