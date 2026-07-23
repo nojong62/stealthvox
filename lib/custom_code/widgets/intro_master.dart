@@ -567,43 +567,6 @@ class _IntroMasterState extends State<IntroMaster> {
     );
   }
 
-  Widget _buildFlowItem({
-    required IconData icon,
-    required String label,
-  }) {
-    return Expanded(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: const Color(0xFF7B71F4).withValues(alpha: 0.11),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            alignment: Alignment.center,
-            child: Icon(
-              icon,
-              size: 21,
-              color: const Color(0xFFB8B2FF),
-            ),
-          ),
-          const SizedBox(height: 9),
-          Text(
-            label,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: Color(0xFFC6C8D0),
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildGuideStep({
     required int number,
     required String title,
@@ -747,7 +710,9 @@ class _IntroMasterState extends State<IntroMaster> {
       key: const ValueKey('welcome-story'),
       builder: (context, constraints) {
         final compact = constraints.maxHeight < 700;
-        final headlineSize = constraints.maxWidth < 360 ? 30.0 : 34.0;
+        // 페이지 좌우 여백 24를 뺀 폭에 '최고의 영어 교재가 됩니다'(13자)가 한 줄로
+        // 들어가는 상한. 좁은 기기에서는 한 단계 줄인다.
+        final headlineSize = constraints.maxWidth < 360 ? 24.0 : 28.0;
 
         return SingleChildScrollView(
           padding: EdgeInsets.fromLTRB(
@@ -777,7 +742,7 @@ class _IntroMasterState extends State<IntroMaster> {
                       ),
                     ),
                     child: const Text(
-                      '말한 순간, 교재가 됩니다',
+                      '말한 순간, 바로 복습으로',
                       style: TextStyle(
                         color: Color(0xFF70DFC9),
                         fontSize: 12.5,
@@ -785,72 +750,19 @@ class _IntroMasterState extends State<IntroMaster> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 18),
+                  SizedBox(height: compact ? 22 : 30),
                   Text(
-                    '오늘 나눈 이야기를\n내일의 영어로',
+                    '당신의 이야기가\n최고의 영어 교재가 됩니다',
                     style: TextStyle(
                       color: const Color(0xFFF7F8FA),
                       fontSize: headlineSize,
                       fontWeight: FontWeight.w800,
-                      height: 1.18,
-                      letterSpacing: -1.1,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  const Text(
-                    'StealthVox는 당신의 실제 대화를\n영어 표현과 복습 자료로 바꿉니다.',
-                    style: TextStyle(
-                      color: Color(0xFFA7ABB5),
-                      fontSize: 15.5,
-                      height: 1.5,
-                      letterSpacing: -0.2,
+                      height: 1.28,
+                      letterSpacing: -1.0,
                     ),
                   ),
                   SizedBox(height: compact ? 24 : 34),
-                  _buildBentoCard(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          '대화 하나가 학습으로 이어집니다',
-                          style: TextStyle(
-                            color: Color(0xFFE8E9ED),
-                            fontSize: 15.5,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(height: 22),
-                        Row(
-                          children: [
-                            _buildFlowItem(
-                              icon: Icons.mic_none_rounded,
-                              label: '내 이야기',
-                            ),
-                            Icon(
-                              Icons.arrow_forward_rounded,
-                              size: 17,
-                              color: Colors.white.withValues(alpha: 0.24),
-                            ),
-                            _buildFlowItem(
-                              icon: Icons.translate_rounded,
-                              label: '영어 표현',
-                            ),
-                            Icon(
-                              Icons.arrow_forward_rounded,
-                              size: 17,
-                              color: Colors.white.withValues(alpha: 0.24),
-                            ),
-                            _buildFlowItem(
-                              icon: Icons.auto_stories_outlined,
-                              label: '나만의 복습',
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 22),
-                        _buildWaveform(),
-                      ],
-                    ),
-                  ),
+                  _buildBentoCard(child: _buildWaveform()),
                   const Spacer(),
                   SizedBox(height: compact ? 26 : 38),
                   _buildPrimaryAction(
