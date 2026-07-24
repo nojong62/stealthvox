@@ -157,6 +157,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   final FirstUtteranceContextJudgeSession _prefetchFirstUtteranceJudge =
       FirstUtteranceContextJudgeSession();
   Future<FirstUtteranceContext?>? _prefetchedFirstUtteranceFuture;
+  FirstUtteranceContext? _prefetchedFirstUtteranceResult;
+  bool _prefetchedFirstUtteranceCompleted = false;
+  bool _prefetchedFirstUtteranceRequestFailed = false;
   // 🔥 [RT-PREWARM] 대기창 동안 미리 열어 두는 Realtime 소켓. 발화 내용은 아직
   //   보내지 않으므로 버려져도 토큰 비용 0.
   FirstTurnRealtimeVoice? _prewarmedRealtimeVoice;
@@ -773,6 +776,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       if (!mounted || listenGeneration != _listenGeneration) return;
       _resetIdleTimer();
       _isConversationActive = true;
+      // 첫 발화가 끝난 뒤 650ms 대기창에서 연결을 시작하면 TLS 연결이
+      // 크리티컬 패스에 남는다. 첫 청취 시작과 동시에 토큰 비용 없는
+      // Realtime 소켓을 열어 실제 발화가 끝날 때는 바로 요청할 수 있게 한다.
+      if (_turnCounter == 0) _startPrewarmedRealtimeVoice();
       if (mounted) {
         setState(() {
           _debugResult = "⏱️ 듣는 중...";
@@ -827,6 +834,18 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           }
           _swDeepgram.reset();
           _swDeepgram.start();
+          // Deepgram의 안정된 is_final 누적문이 UtteranceEnd보다 먼저 온다.
+          // 첫 한국어가 실제로 문맥 판정 대상일 때만 여기서 GPT-4.1을 선시작해
+          // 발화 종료/650ms 확정창과 네트워크 시간을 최대한 겹친다.
+          if (_turnCounter == 0 && transcript.trim().length >= 2) {
+            final route = _firstUtteranceJudge.previewRoute(transcript);
+            if (route == FirstUtteranceRoute.judge) {
+              _startPrefetchedFirstUtteranceJudge(transcript.trim());
+            } else if (_prefetchedFirstUtteranceFuture != null &&
+                _prefetchedFirstUtteranceTranscript != transcript.trim()) {
+              _cancelPrefetchedFirstUtteranceJudge();
+            }
+          }
         },
         onTurnResult: _onDeepgramTurnResult,
         onTurnEnded: (transcript, {bool speechFinal = false}) {
@@ -957,9 +976,12 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     if (!isDuplicateFinal &&
         isFirstUtterance &&
         pendingFirstUtterance.length >= 2) {
-      if (_prefetchedFirstUtteranceFuture != null ||
-          firstUtteranceRoute == FirstUtteranceRoute.judge) {
+      _log('🧭 [FIRST-CONTEXT]',
+          'event=route route=${firstUtteranceRoute.name}');
+      if (firstUtteranceRoute == FirstUtteranceRoute.judge) {
         _startPrefetchedFirstUtteranceJudge(pendingFirstUtterance);
+      } else if (_prefetchedFirstUtteranceFuture != null) {
+        _cancelPrefetchedFirstUtteranceJudge();
       }
       // 🔥 [RT-PREWARM] 판정 경로와 무관하게(그리고 판정과 독립적으로) 소켓만 선점.
       _startPrewarmedRealtimeVoice();
@@ -1084,9 +1106,11 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     }
     _prefetchFirstUtteranceJudge.reset();
     _prefetchedFirstUtteranceTranscript = transcript;
+    _prefetchedFirstUtteranceResult = null;
+    _prefetchedFirstUtteranceCompleted = false;
+    _prefetchedFirstUtteranceRequestFailed = false;
     _log('🧭 [FIRST-CONTEXT]', 'event=prefetch_start mode=$_probeMode');
-    _prefetchedFirstUtteranceFuture =
-        _prefetchFirstUtteranceJudge.judgeIfNeeded(
+    final future = _prefetchFirstUtteranceJudge.judgeIfNeeded(
       apiKey: _openAiKey,
       transcript: transcript,
       mode: _probeMode,
@@ -1094,12 +1118,30 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       onLog: (event, details) =>
           _log('🧭 [FIRST-CONTEXT]', 'event=prefetch_$event $details'),
     );
+    _prefetchedFirstUtteranceFuture = future;
+    unawaited(future.then((context) {
+      if (!identical(_prefetchedFirstUtteranceFuture, future) ||
+          _prefetchedFirstUtteranceTranscript != transcript) {
+        return;
+      }
+      _prefetchedFirstUtteranceResult = context;
+      _prefetchedFirstUtteranceCompleted = true;
+      _prefetchedFirstUtteranceRequestFailed =
+          context == null || _prefetchFirstUtteranceJudge.requestFailed;
+      _log(
+        '🧭 [FIRST-CONTEXT]',
+        'event=prefetch_ready success=${context != null}',
+      );
+    }));
   }
 
   void _cancelPrefetchedFirstUtteranceJudge() {
     _prefetchFirstUtteranceJudge.reset();
     _prefetchedFirstUtteranceFuture = null;
     _prefetchedFirstUtteranceTranscript = '';
+    _prefetchedFirstUtteranceResult = null;
+    _prefetchedFirstUtteranceCompleted = false;
+    _prefetchedFirstUtteranceRequestFailed = false;
   }
 
   // ====================================================================
@@ -1123,6 +1165,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       apiKey: _openAiKey,
       voice: _currentUserVoice,
       onLog: _log,
+      enableStreamingPlayback: true,
+      onStreamingAudioStart: () => _logProbeTiming('USER_FIRST_AUDIO'),
     );
     _prewarmedRealtimeVoice = session;
     _log('🔥 [RT-PREWARM]', '대기창 소켓 선점 시작');
@@ -1152,21 +1196,49 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     final prefetched = _prefetchedFirstUtteranceFuture;
     if (prefetched != null &&
         _prefetchedFirstUtteranceTranscript == transcript) {
-      final context = await prefetched;
-      if (!identical(_prefetchedFirstUtteranceFuture, prefetched) ||
-          _prefetchedFirstUtteranceTranscript != transcript) {
-        return null;
+      final completed = _prefetchedFirstUtteranceCompleted;
+      final context = completed ? _prefetchedFirstUtteranceResult : null;
+      final requestFailed =
+          completed ? _prefetchedFirstUtteranceRequestFailed : true;
+      if (!completed) {
+        // 결과가 확정창 안에 오지 않았으면 단 1ms도 더 기다리지 않는다.
+        // 공유 HTTP client는 유지하고 이 판정 세대만 무효화한다.
+        _prefetchFirstUtteranceJudge.reset();
+        _log(
+          '🧭 [FIRST-CONTEXT]',
+          'event=prefetch_not_ready wait_ms=0 fallback=true',
+        );
       }
       _firstUtteranceJudge.adoptPrefetchedResult(
         context,
-        requestFailed: _prefetchFirstUtteranceJudge.requestFailed,
+        requestFailed: requestFailed,
       );
       _prefetchedFirstUtteranceFuture = null;
       _prefetchedFirstUtteranceTranscript = '';
-      _log('🧭 [FIRST-CONTEXT]', 'event=prefetch_handoff');
+      _prefetchedFirstUtteranceResult = null;
+      _prefetchedFirstUtteranceCompleted = false;
+      _prefetchedFirstUtteranceRequestFailed = false;
+      _log(
+        '🧭 [FIRST-CONTEXT]',
+        'event=prefetch_handoff ready=$completed',
+      );
       return context;
     }
     _cancelPrefetchedFirstUtteranceJudge();
+    final route = _firstUtteranceJudge.previewRoute(transcript);
+    if (route == FirstUtteranceRoute.judge) {
+      // 조기 prefetch가 없거나 전사 변경으로 폐기된 예외도 동기 요청하지 않는다.
+      _firstUtteranceJudge.adoptPrefetchedResult(
+        null,
+        requestFailed: true,
+      );
+      _log(
+        '🧭 [FIRST-CONTEXT]',
+        'event=no_prefetch wait_ms=0 fallback=true',
+      );
+      return null;
+    }
+    // excluded/bypass 경로는 네트워크 요청 없이 첫 정상 발화 상태만 확정한다.
     return _firstUtteranceJudge.judgeIfNeeded(
       apiKey: _openAiKey,
       transcript: transcript,
@@ -1427,6 +1499,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
                     apiKey: _openAiKey,
                     voice: userVoice,
                     onLog: _log,
+                    enableStreamingPlayback: true,
+                    onStreamingAudioStart: () =>
+                        _logProbeTiming('USER_FIRST_AUDIO'),
                   ))
               : null;
       if (realtimeVoice == null) _cancelPrewarmedRealtimeVoice();
@@ -1803,18 +1878,23 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       // 🎙️ [FIRST-TURN-REALTIME] Realtime이 만든 낭독 음성을 유저 큐에 그대로 넣는다.
       //   실패해서 null이면 아래 기존 tts-1 경로가 통문장을 읽는다(음성만 폴백).
       final Uint8List? realtimeWav = await realtimeVoice?.audioWav;
+      final bool realtimeStreamed = realtimeVoice?.streamedAudio ?? false;
 
       // 스트림 중 첫 청크를 선발사하고, 종료 시 남은 부분만 순서대로 요청한다.
       // 제어 태그 제거 후에야 정상 문장이 생긴 예외 경로는 여기서 처음 공급한다.
       final String fullUserTts = _cleanText(userTargetText.trim());
-      if (realtimeWav != null && realtimeWav.isNotEmpty) {
+      if (realtimeStreamed || (realtimeWav != null && realtimeWav.isNotEmpty)) {
         _costTracker.recordRealtimeResponse(
           audioTokens: realtimeVoice?.audioTokens ?? 0,
           textTokens: realtimeVoice?.textTokens ?? 0,
         );
-        await _ttsQueueManager.addAudio(realtimeWav, isUser: true);
-        _log('🎙️ [RT-PLAY]',
-            'Realtime 음성 재생 큐 적재 (${realtimeWav.length}B) — tts-1 미사용');
+        if (realtimeStreamed) {
+          _log('🎙️ [RT-PLAY]', 'Realtime PCM 스트리밍 재생 사용 — tts-1 미사용');
+        } else {
+          await _ttsQueueManager.addAudio(realtimeWav!, isUser: true);
+          _log('🎙️ [RT-PLAY]',
+              'Realtime 음성 재생 큐 적재 (${realtimeWav.length}B) — tts-1 미사용');
+        }
       } else if (fullUserTts.isNotEmpty) {
         if (!userHybridInputStarted) {
           userHybridTts.onChunk(fullUserTts);
@@ -1996,7 +2076,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       //   마지막 유저 청크의 마지막 샘플 재생 완료 즉시 해제한다.
       //   isBusy 폴링과 청크 사이 false 위험을 제거한다.
       _ttsQueueManager.sealUserStream();
-      await _ttsQueueManager.waitUserDrained();
+      await Future.wait<void>([
+        _ttsQueueManager.waitUserDrained(),
+        if (realtimeVoice != null) realtimeVoice.playbackDone,
+      ]);
       _log('🧠 [PIPE-06]', '유저 TTS 재생 완료 → AI 큐 개방');
 
 // ─────────────────────────────────────────────────────

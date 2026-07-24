@@ -466,10 +466,31 @@ Use ambiguity_reason only for a short reason when uncertain; otherwise return an
       return const _FirstUtteranceEligibility(false, false);
     }
 
-    // Keep local code out of Korean discourse interpretation. Every first
-    // meaningful Korean utterance goes to GPT-4.1; its structured confidence
-    // controls how strongly GPT-4o mini uses the judgment.
-    return const _FirstUtteranceEligibility(true, true);
+    // 문맥 판정의 실익이 큰 경우만 GPT-4.1을 사용한다. 한국어 평서문의 생략
+    // 주어는 보통 화자 자신이라 Realtime 번역만으로 충분하고, 첫 질문에서
+    // 화자/청자 중 누가 행동 주체인지 불분명할 때만 별도 판정을 요청한다.
+    //
+    // 명시적 인칭/참여자가 있으면 질문이어도 로컬에서 안전하게 bypass한다.
+    final hasExplicitActor = RegExp(
+      r'(?:^|[\s,])(?:나|나는|난|내가|저|저는|전|제가|우리|우리는|우린|우리가|'
+      r'너|너는|넌|네가|당신|당신은|당신이|그|그는|그가|그녀|그녀는|그녀가|'
+      r'엄마|아빠|형|누나|언니|오빠|동생|친구|상사|팀장|선생님|남편|아내|'
+      r'아이|고객)(?:은|는|이|가)?(?:[\s,]|$)',
+    ).hasMatch(text);
+    final hasQuestionWord =
+        RegExp(r'(누구|뭐|무엇|어디|언제|왜|어떻게|어느|몇)').hasMatch(text);
+    final hasQuestionEnding = RegExp(
+      r'(?:니|냐|나요|까요|을까|ㄹ까|습니까)\s*[?？~.!]*$',
+    ).hasMatch(text);
+    final isQuestionLike = text.contains('?') ||
+        text.contains('？') ||
+        hasQuestionWord ||
+        hasQuestionEnding;
+
+    return _FirstUtteranceEligibility(
+      true,
+      isQuestionLike && !hasExplicitActor,
+    );
   }
 }
 

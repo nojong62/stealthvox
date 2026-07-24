@@ -41,8 +41,12 @@ void main() {
 
       expect(session.previewRoute('안녕하세요'), FirstUtteranceRoute.excluded);
       expect(
-        session.previewRoute('어제 친구를 만났어'),
+        session.previewRoute('내일 출장 어디로 가?'),
         FirstUtteranceRoute.judge,
+      );
+      expect(
+        session.previewRoute('어제 친구를 만났어'),
+        FirstUtteranceRoute.bypass,
       );
       expect(session.previewRoute('I went home'), FirstUtteranceRoute.bypass);
 
@@ -54,89 +58,85 @@ void main() {
       expect(session.previewRoute('안녕하세요'), FirstUtteranceRoute.bypass);
     });
 
-    test('routes every meaningful Korean first utterance to the judge', () {
+    test('routes only actor-ambiguous Korean questions to the judge', () {
       final session = FirstUtteranceContextJudgeSession();
 
       expect(
+        session.shouldDeferSpeculativeTranslation('내일 출장 어디로 가?'),
+        isTrue,
+      );
+      expect(
+        session.shouldDeferSpeculativeTranslation('내일은 경주 갈까?'),
+        isTrue,
+      );
+      expect(
         session.shouldDeferSpeculativeTranslation('어제 친구를 만났어'),
-        isTrue,
-      );
-      expect(
-        session.shouldDeferSpeculativeTranslation('민수가 병원에 갔어요'),
-        isTrue,
-      );
-      expect(
-        session.shouldDeferSpeculativeTranslation('나는 친구를 만났어'),
-        isTrue,
+        isFalse,
       );
       expect(
         session.shouldDeferSpeculativeTranslation('나는 집에 갔어'),
-        isTrue,
+        isFalse,
       );
       expect(session.shouldDeferSpeculativeTranslation('네'), isFalse);
       expect(session.shouldDeferSpeculativeTranslation('안녕하세요'), isFalse);
     });
 
-    test('does not depend on pronoun, name, or participant patterns', () {
+    test('bypasses questions with an explicit actor or participant', () {
       final session = FirstUtteranceContextJudgeSession();
 
       expect(
-        session.shouldDeferSpeculativeTranslation('제가 엄마를 만났어요'),
-        isTrue,
+        session.shouldDeferSpeculativeTranslation('너는 내일 어디로 가?'),
+        isFalse,
       );
       expect(
-        session.shouldDeferSpeculativeTranslation('내가 친구에게 전화했어'),
-        isTrue,
+        session.shouldDeferSpeculativeTranslation('제가 어디로 가면 돼요?'),
+        isFalse,
       );
       expect(
-        session.shouldDeferSpeculativeTranslation('나는 민수와 지수를 만났어'),
-        isTrue,
+        session.shouldDeferSpeculativeTranslation('친구는 언제 와?'),
+        isFalse,
       );
     });
 
-    test('does not depend on a relation-sensitive verb list', () {
+    test('bypasses ordinary Korean statements', () {
       final session = FirstUtteranceContextJudgeSession();
 
       expect(
         session.shouldDeferSpeculativeTranslation('나는 어제 전화했어'),
-        isTrue,
+        isFalse,
       );
       expect(
         session.shouldDeferSpeculativeTranslation('저는 선물을 보냈어요'),
-        isTrue,
+        isFalse,
       );
       expect(
-        session.shouldDeferSpeculativeTranslation('나는 집에 갔어'),
-        isTrue,
+        session.shouldDeferSpeculativeTranslation('어제 친구를 만났어'),
+        isFalse,
       );
     });
 
-    test('lets the model judge all two-syllable Korean content', () {
+    test('bypasses short reactions and statements', () {
       final session = FirstUtteranceContextJudgeSession();
 
       for (final utterance in ['좋아', '싫어', '가자', '몰라', '맞아']) {
         expect(
           session.shouldDeferSpeculativeTranslation(utterance),
-          isTrue,
+          isFalse,
           reason: utterance,
         );
       }
-      expect(session.shouldDeferSpeculativeTranslation('전화'), isTrue);
+      expect(session.shouldDeferSpeculativeTranslation('전화'), isFalse);
     });
 
-    test('does not mistake topic and modifier endings for subjects', () {
+    test('still judges questions with only time or place topics', () {
       final session = FirstUtteranceContextJudgeSession();
 
       expect(
-        session.shouldDeferSpeculativeTranslation('어제는 친구를 만났어'),
+        session.shouldDeferSpeculativeTranslation('내일은 어디로 가?'),
         isTrue,
       );
       expect(
-        session.shouldDeferSpeculativeTranslation('병원에서는 많이 기다렸어요'),
-        isTrue,
-      );
-      expect(
-        session.shouldDeferSpeculativeTranslation('매일 먹는 편이에요'),
+        session.shouldDeferSpeculativeTranslation('회사에서는 누구를 만나?'),
         isTrue,
       );
     });

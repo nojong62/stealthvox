@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart';
+
 // ====================================================================
 // 🎙️ [FIRST-TURN REALTIME] 유저 "첫 대사" 전용 번역+음성 엔진
 // --------------------------------------------------------------------
@@ -103,17 +105,23 @@ class FirstTurnRealtimeVoice {
     required this.voice,
     this.model = kFirstTurnRealtimeModel,
     this.onLog,
+    this.enableStreamingPlayback = false,
+    this.onStreamingAudioStart,
   });
 
   final String apiKey;
   final String voice;
   final String model;
   final void Function(String tag, String msg)? onLog;
+  final bool enableStreamingPlayback;
+  final void Function()? onStreamingAudioStart;
 
   final StreamController<String> _textCtl = StreamController<String>();
   final Completer<bool> _ready = Completer<bool>();
   final Completer<Uint8List?> _audio = Completer<Uint8List?>();
+  final Completer<void> _playbackDone = Completer<void>();
   final BytesBuilder _pcm = BytesBuilder(copy: false);
+  final List<Uint8List> _pendingStreamPcm = <Uint8List>[];
 
   WebSocket? _socket;
   StreamSubscription? _sub;
@@ -125,6 +133,13 @@ class FirstTurnRealtimeVoice {
   bool _active = false;
   bool _emittedText = false;
   bool _closed = false;
+  bool _streamPlayerReady = false;
+  bool _streamDecisionMade = false;
+  bool _streamPlaybackAllowed = false;
+  bool _streamedAudio = false;
+  bool _streamStartNotified = false;
+  DateTime? _responseStartedAt;
+  final _pcmPlayer = _RealtimePcmStreamPlayer();
 
   /// 선점 단계에서만 켜진다. 소켓이 죽어도 세션 자체는 살려 두고, begin()이
   /// 새 소켓으로 다시 연결하게 한다(자가치유).
@@ -141,6 +156,14 @@ class FirstTurnRealtimeVoice {
 
   /// 낭독 오디오(WAV). 실패하면 null → 호출부가 기존 tts-1로 폴백한다.
   Future<Uint8List?> get audioWav => _audio.future;
+
+  /// true면 오디오는 네이티브 PCM 스트림으로 이미 재생 중/완료 상태다.
+  /// 호출부는 완성 WAV를 다시 큐에 넣지 않아야 한다.
+  bool get streamedAudio => _streamedAudio;
+
+  /// 네이티브 스트리밍의 마지막 샘플이 실제 출력될 때까지 기다린다.
+  /// 스트리밍을 사용하지 않은 경로에서는 즉시 완료된다.
+  Future<void> get playbackDone => _playbackDone.future;
 
   int get audioTokens => _audioTokens;
   int get textTokens => _textTokens;
@@ -179,6 +202,14 @@ class FirstTurnRealtimeVoice {
       return _ready.future;
     }
 
+    if (enableStreamingPlayback && Platform.isAndroid) {
+      _streamPlayerReady = await _pcmPlayer.start(kFirstTurnRealtimeSampleRate);
+      if (!_streamPlayerReady) {
+        onLog?.call('🎙️ [RT-STREAM-FALLBACK]',
+            'native_pcm_start_failed → 완성 WAV 재생 유지');
+      }
+    }
+
     // 번역 지시문은 기존 gpt-4o-mini와 완전히 동일한 시스템 프롬프트를 쓴다.
     // 선점 단계에서 보내지 않고 여기(확정 시점)서 response.create에 실어 보낸다.
     // 출력은 오디오 모달리티 하나 — 낭독 전사(transcript)가 곧 번역문이다.
@@ -208,6 +239,7 @@ class FirstTurnRealtimeVoice {
         },
       },
     });
+    _responseStartedAt = DateTime.now();
 
     _totalTimer =
         Timer(kFirstTurnRealtimeTotalTimeout, () => _abort('total_timeout'));
@@ -331,7 +363,9 @@ class FirstTurnRealtimeVoice {
       final delta = event['delta'];
       if (delta is String && delta.isNotEmpty) {
         try {
-          _pcm.add(base64Decode(delta));
+          final bytes = base64Decode(delta);
+          _pcm.add(bytes);
+          _handlePcmDelta(bytes);
         } catch (_) {}
       }
       return;
@@ -364,12 +398,59 @@ class FirstTurnRealtimeVoice {
   void _emit(String delta) {
     if (_closed || _textCtl.isClosed) return;
     _textCtl.add(delta);
+    _decideStreamingPlayback(delta);
     if (_emittedText) return;
     _emittedText = true;
     _firstDeltaTimer?.cancel();
     _firstDeltaTimer = null;
     _active = true;
     if (!_ready.isCompleted) _ready.complete(true);
+  }
+
+  /// 제어 태그는 항상 응답 맨 앞의 '['로 시작한다. 첫 비공백 전사 델타가
+  /// 정상 문장임을 확인하기 전까지만 PCM을 잠깐 보류해 잘못된 안내가 먼저
+  /// 재생되는 것을 막는다.
+  void _decideStreamingPlayback(String delta) {
+    if (_streamDecisionMade || !_streamPlayerReady) return;
+    final first = delta.trimLeft();
+    if (first.isEmpty) return;
+    _streamDecisionMade = true;
+    _streamPlaybackAllowed = !first.startsWith('[');
+    if (!_streamPlaybackAllowed) {
+      _pendingStreamPcm.clear();
+      unawaited(_pcmPlayer.stop());
+      _completePlaybackDone();
+      onLog?.call('🎙️ [RT-STREAM-GUARD]', 'control_tag_prefix → 완성 전 재생 차단');
+      return;
+    }
+    for (final bytes in _pendingStreamPcm) {
+      _appendStreamingPcm(bytes);
+    }
+    _pendingStreamPcm.clear();
+  }
+
+  void _handlePcmDelta(Uint8List bytes) {
+    if (!_streamPlayerReady || bytes.isEmpty) return;
+    if (!_streamDecisionMade) {
+      _pendingStreamPcm.add(bytes);
+      return;
+    }
+    if (_streamPlaybackAllowed) _appendStreamingPcm(bytes);
+  }
+
+  void _appendStreamingPcm(Uint8List bytes) {
+    if (!_streamPlaybackAllowed || bytes.isEmpty) return;
+    _streamedAudio = true;
+    if (!_streamStartNotified) {
+      _streamStartNotified = true;
+      final elapsed = _responseStartedAt == null
+          ? -1
+          : DateTime.now().difference(_responseStartedAt!).inMilliseconds;
+      onLog?.call('🎙️ [RT-STREAM-FIRST]',
+          'pcm_bytes=${bytes.length} response_to_audio_ms=$elapsed');
+      onStreamingAudioStart?.call();
+    }
+    unawaited(_pcmPlayer.append(bytes));
   }
 
   void _readUsage(Map<String, dynamic> event) {
@@ -388,11 +469,19 @@ class FirstTurnRealtimeVoice {
     _closed = true;
     _teardown();
     final pcm = _pcm.takeBytes();
-    final Uint8List? wav = pcm.isEmpty ? null : firstTurnPcm16ToWav(pcm);
+    final Uint8List? wav =
+        _streamedAudio || pcm.isEmpty ? null : firstTurnPcm16ToWav(pcm);
     onLog?.call(
         '🎙️ [RT-02]',
         'done text_chars=${_emittedText ? 'yes' : 'none'} pcm_bytes=${pcm.length} '
+            'streamed=$_streamedAudio '
             'audio_tokens=$_audioTokens text_tokens=$_textTokens');
+    if (_streamedAudio) {
+      unawaited(_pcmPlayer.finish().whenComplete(_completePlaybackDone));
+    } else {
+      unawaited(_pcmPlayer.stop());
+      _completePlaybackDone();
+    }
     if (!_ready.isCompleted) _ready.complete(_emittedText);
     if (!_audio.isCompleted) _audio.complete(wav);
     if (!_textCtl.isClosed) _textCtl.close();
@@ -402,12 +491,22 @@ class FirstTurnRealtimeVoice {
     if (_closed) return;
     _closed = true;
     _active = false;
+    // 일부 PCM이 먼저 재생된 뒤 연결이 끊긴 경우에도 정상 완료로 오인하지
+    // 않게 한다. 호출부는 기존 번역 TTS로 문장 전체를 다시 읽어 복구한다.
+    _streamedAudio = false;
     _teardown();
+    _pendingStreamPcm.clear();
+    unawaited(_pcmPlayer.stop());
+    _completePlaybackDone();
     onLog?.call('🎙️ [RT-FALLBACK]',
         'reason=$reason emitted_text=$_emittedText → 기존 gpt-4o-mini/tts-1 경로 사용');
     if (!_ready.isCompleted) _ready.complete(false);
     if (!_audio.isCompleted) _audio.complete(null);
     if (!_textCtl.isClosed) _textCtl.close();
+  }
+
+  void _completePlaybackDone() {
+    if (!_playbackDone.isCompleted) _playbackDone.complete();
   }
 
   void _teardown() {
@@ -429,5 +528,53 @@ class FirstTurnRealtimeVoice {
     if (socket != null) {
       unawaited(socket.close().catchError((_) => null));
     }
+  }
+}
+
+/// Android AudioTrack에 Realtime PCM16 델타를 순서대로 전달한다.
+/// 지원하지 않는 플랫폼/채널 오류는 false로 처리해 기존 WAV 경로를 유지한다.
+class _RealtimePcmStreamPlayer {
+  static const MethodChannel _channel =
+      MethodChannel('stealthvox/realtime_pcm');
+
+  bool _started = false;
+
+  Future<bool> start(int sampleRate) async {
+    try {
+      final ok = await _channel.invokeMethod<bool>(
+        'start',
+        <String, dynamic>{'sampleRate': sampleRate},
+      );
+      _started = ok ?? false;
+      return _started;
+    } catch (_) {
+      _started = false;
+      return false;
+    }
+  }
+
+  Future<void> append(Uint8List bytes) async {
+    if (!_started || bytes.isEmpty) return;
+    try {
+      await _channel.invokeMethod<void>('append', bytes);
+    } catch (_) {
+      // finish/stop은 계속 호출해 네이티브 자원을 확실히 회수한다.
+    }
+  }
+
+  Future<void> finish() async {
+    if (!_started) return;
+    _started = false;
+    try {
+      await _channel.invokeMethod<void>('finish');
+    } catch (_) {}
+  }
+
+  Future<void> stop() async {
+    if (!_started) return;
+    _started = false;
+    try {
+      await _channel.invokeMethod<void>('stop');
+    } catch (_) {}
   }
 }
