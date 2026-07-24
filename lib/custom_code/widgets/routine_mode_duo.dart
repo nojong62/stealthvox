@@ -153,6 +153,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   bool _isPartnerOnline = false;
   bool _isExiting = false;
   int _turnCounter = 0;
+  int _duoConversationTurnCounter = 0;
   double _fontScale = 1.0;
   bool _showOriginal = true;
 
@@ -423,7 +424,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
                 encoder: AudioEncoder.aacLc, sampleRate: 16000, numChannels: 1),
             path: path);
         _setDuoState('recording');
-        _prewarmDuoRealtime(_myVoice());
+        if (_duoConversationTurnCounter == 0) {
+          _prewarmDuoRealtime(_myVoice());
+        }
         _silenceTimer?.cancel();
         // [토글] 발화 후 1.5초 침묵하면 자동 전송. 버튼 탭으로도 즉시 전송 가능.
         // 무발화로 오래 켜져 있으면 안전 종료하여 마이크 점유와 과금을 방지한다.
@@ -597,6 +600,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     required String nativeLang,
     required String voice,
     required String originalFallback,
+    required bool useRealtime,
     FirstTurnRealtimeVoice? prewarmed,
   }) async {
     final fallbackFuture = DuoBrain.processTranslation(
@@ -606,6 +610,26 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       myTargetLang: targetLang,
       myNativeLang: nativeLang,
     );
+
+    if (!useRealtime) {
+      final fallback = await fallbackFuture;
+      final fallbackTarget =
+          (fallback?['target'] ?? '').trim().isNotEmpty
+              ? fallback!['target']!.trim()
+              : raw;
+      final fallbackOriginal =
+          (fallback?['original'] ?? '').trim().isNotEmpty
+              ? fallback!['original']!.trim()
+              : originalFallback;
+      return _DuoResolvedTurn(
+        target: fallbackTarget,
+        original: fallbackOriginal,
+        realtimeSession: null,
+        realtimeWav: null,
+        streamed: false,
+        generation: _duoRealtimeGeneration,
+      );
+    }
 
     final generation = ++_duoRealtimeGeneration;
     final session = prewarmed ?? _createDuoRealtime(voice);
@@ -719,6 +743,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
   Future<void> _processRelayPipeline(String finalTranscript) async {
     _turnCounter++;
     final int currentTurnId = _turnCounter;
+    final bool useRealtime = ++_duoConversationTurnCounter == 1;
     final String myTarget = _myTarget();
     final String myNative = _myNative();
 
@@ -729,8 +754,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
 
     if (!_isConversationActive || _turnCounter != currentTurnId) return;
 
-    // 3. Realtime이 번역과 PCM 재생을 우선 담당한다. 기존 GPT JSON 번역은
-    //    original 정리와 Realtime 실패 시 TTS-1 폴백을 위해 병렬 유지한다.
+    // 3. 세션의 첫 PTT만 Realtime 우선. 이후 턴은 기존 GPT JSON + TTS-1.
     final resolved = await _resolveDuoTurn(
       raw: finalTranscript,
       srcLang: myNative,
@@ -738,7 +762,9 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       nativeLang: myNative,
       voice: _myVoice(),
       originalFallback: finalTranscript,
-      prewarmed: _takePrewarmedDuoRealtime(_myVoice()),
+      useRealtime: useRealtime,
+      prewarmed:
+          useRealtime ? _takePrewarmedDuoRealtime(_myVoice()) : null,
     );
 
     if (!_isConversationActive || _turnCounter != currentTurnId) return;
@@ -755,7 +781,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     }
     await _saveHistoryMessage(tgt, org, 'HOST');
 
-    // 5. Realtime PCM/WAV 우선, 실패한 턴만 기존 TTS-1로 재생한다.
+    // 5. 첫 PTT는 Realtime PCM/WAV 우선, 이후 턴은 기존 TTS-1로 재생한다.
     _rememberGenerated(tgt);
     _rememberGenerated(org);
     if (_isConversationActive && _turnCounter == currentTurnId) {
@@ -867,6 +893,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
 
     final String myTarget = _myTarget();
     final String myNative = _myNative();
+    final bool useRealtime = ++_duoConversationTurnCounter == 1;
 
     final resolved = await _resolveDuoTurn(
       raw: raw,
@@ -875,6 +902,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       nativeLang: myNative,
       voice: 'nova',
       originalFallback: '',
+      useRealtime: useRealtime,
     );
 
     if (!mounted || _isExiting) return;
@@ -891,7 +919,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     }
     await _saveHistoryMessage(tgt, org, 'SYSTEM');
 
-    // 상대방 Realtime PCM/WAV 재생. 실패한 턴만 기존 nova TTS-1로 폴백한다.
+    // 세션 첫 PTT면 Realtime, 이후 상대 발화는 기존 nova TTS-1로 재생한다.
     _rememberGenerated(tgt);
     _rememberGenerated(org);
     if (_isConversationActive && !_isExiting) {

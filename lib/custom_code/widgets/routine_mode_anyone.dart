@@ -781,10 +781,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       if (!mounted || listenGeneration != _listenGeneration) return;
       _resetIdleTimer();
       _isConversationActive = true;
-      // 발화가 끝난 뒤 확정 대기창에서 연결을 시작하면 TLS 연결이
+      // 첫 발화가 끝난 뒤 650ms 대기창에서 연결을 시작하면 TLS 연결이
       // 크리티컬 패스에 남는다. 첫 청취 시작과 동시에 토큰 비용 없는
       // Realtime 소켓을 열어 실제 발화가 끝날 때는 바로 요청할 수 있게 한다.
-      _startPrewarmedRealtimeVoice();
+      if (_turnCounter == 0) _startPrewarmedRealtimeVoice();
       if (mounted) {
         setState(() {
           _debugResult = "⏱️ 듣는 중...";
@@ -978,8 +978,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     final pendingFirstUtterance = _pendingTranscript.trim();
     final firstUtteranceRoute =
         _firstUtteranceJudge.previewRoute(pendingFirstUtterance);
-    // 🎙️ [REALTIME-FIRST] 번역/낭독은 모든 정상 턴에서 Realtime을 우선한다.
-    //   첫 턴의 GPT-4.1 문맥 판정 선시작은 기존대로 유지한다.
+    // 🎙️ [FIRST-TURN-REALTIME] 첫 대사 번역/낭독은 Realtime이 맡으므로 gpt-4o-mini
+    //   투기 번역은 더 이상 선시작하지 않는다. GPT-4.1 문맥 판정 선시작만 유지.
     if (!isDuplicateFinal &&
         isFirstUtterance &&
         pendingFirstUtterance.length >= 2) {
@@ -990,9 +990,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       } else if (_prefetchedFirstUtteranceFuture != null) {
         _cancelPrefetchedFirstUtteranceJudge();
       }
+      // 🔥 [RT-PREWARM] 판정 경로와 무관하게(그리고 판정과 독립적으로) 소켓만 선점.
+      _startPrewarmedRealtimeVoice();
     }
-    // 🔥 [RT-PREWARM] 턴/판정 경로와 무관하게 소켓만 선점한다.
-    _startPrewarmedRealtimeVoice();
 
     // 조건부 대기 후 파이프라인 시작 예약 (source별 waitMs)
     _commitTimer = Timer(
@@ -1152,7 +1152,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   }
 
   // ====================================================================
-  // 🔥 [RT-PREWARM] 발화 확정 대기창 동안 Realtime 소켓만 미리 열어 둔다.
+  // 🔥 [RT-PREWARM] 첫 발화 확정 대기창 동안 Realtime 소켓만 미리 열어 둔다.
   // ------------------------------------------------------------------
   // TLS 핸드셰이크를 크리티컬 패스 밖으로 밀어내는 것이 전부다. 발화 내용/
   // 시스템 프롬프트는 확정 시점(begin)까지 보내지 않으므로, 발화가 합쳐지거나
@@ -1495,13 +1495,12 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           ? FFAppState().targetLang
           : 'English';
 
-      // 🎙️ [REALTIME-FIRST] 모든 정상 턴을 gpt-realtime-2.1-mini로
-      //   번역+음성을 한 번에 받는다. 연결/응답 실패 시 streamUserTranslation의
-      //   기존 gpt-4o-mini + tts-1 경로가 그대로 받친다.
+      // 🎙️ [FIRST-TURN-REALTIME] 유저 첫 대사(turn 1)만 gpt-realtime-2.1-mini로
+      //   번역+음성을 한 번에 받는다. 2턴부터는 realtimeVoice=null → 기존 경로.
       //   (투기 번역 스트림을 물려받은 턴은 begin()이 호출되지 않으므로 제외)
       //   대기창에서 선점해 둔 소켓이 있으면 그대로 물려받는다(RT-PREWARM).
       final FirstTurnRealtimeVoice? realtimeVoice =
-          (userStreamOverride == null)
+          (currentTurnId == 1 && userStreamOverride == null)
               ? (_takePrewarmedRealtimeVoice(userVoice) ??
                   FirstTurnRealtimeVoice(
                     apiKey: _openAiKey,
@@ -1526,7 +1525,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
             firstUtteranceContext:
                 firstUtteranceContext?.toInternalPromptContext() ?? '',
             realtimeVoice: realtimeVoice,
-            parallelFallback: currentTurnId >= 2,
           );
       if (firstUtteranceContext != null) {
         _firstUtteranceJudge.markDelivered(firstUtteranceContext);
@@ -1575,7 +1573,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
         // 정상 번역은 스트림 도중 4단어/구두점이 모이는 즉시 첫 TTS를 요청한다.
         // 제어 태그가 조각나 도착하는 동안에는 잘못된 안내가 재생되지 않도록 보류한다.
-        // 🎙️ [REALTIME-FIRST] Realtime이 살아 있으면 낭독 음성은 이미 같은
+        // 🎙️ [FIRST-TURN-REALTIME] Realtime이 살아 있으면 낭독 음성은 이미 같은
         //   응답에 실려 오므로 tts-1 청크 발사를 하지 않는다.
         final bool containsControlTag = userTargetText.contains('[');
         if (!clarified &&
@@ -1884,7 +1882,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         }
       }
 
-      // 🎙️ [REALTIME-FIRST] Realtime이 만든 낭독 음성을 유저 큐에 그대로 넣는다.
+      // 🎙️ [FIRST-TURN-REALTIME] Realtime이 만든 낭독 음성을 유저 큐에 그대로 넣는다.
       //   실패해서 null이면 아래 기존 tts-1 경로가 통문장을 읽는다(음성만 폴백).
       final Uint8List? realtimeWav = await realtimeVoice?.audioWav;
       final bool realtimeStreamed = realtimeVoice?.streamedAudio ?? false;
@@ -4450,14 +4448,12 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
     required String contextStr,
     bool disableCorrection = false,
     String firstUtteranceContext = '',
-    // 🎙️ [REALTIME-FIRST] 주입되면 gpt-4o-mini + tts-1 대신
-    //   gpt-realtime-2.1-mini 한 번으로 번역문과 음성을 함께 받는다.
+    // 🎙️ [FIRST-TURN-REALTIME] 유저 첫 대사에만 주입된다. 넘어오면 gpt-4o-mini +
+    //   tts-1 대신 gpt-realtime-2.1-mini 한 번으로 번역문과 음성을 함께 받는다.
     //   연결/응답 실패 시 아래 기존 경로로 그대로 폴백한다.
     FirstTurnRealtimeVoice? realtimeVoice,
-    // Duo와 같은 후속 턴 하이브리드: Realtime과 동시에 gpt-4o-mini를 준비하고,
-    // Realtime이 끝까지 성공하지 못한 경우 준비된 결과를 즉시 사용한다.
-    bool parallelFallback = false,
   }) async* {
+    final client = OpenAiConnectionPool.instance.client;
     try {
       final String correctionBlock = disableCorrection
           ? "Never output [CORRECTION] or [MISHEARD]. Treat the input as normal content to translate."
@@ -4543,63 +4539,20 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
       final String userContent =
           'Conversation so far:\n$contextStr\n\nTranslate this Korean utterance: "$textOriginal"';
 
-      // 🎙️ [REALTIME-FIRST] 같은 시스템 프롬프트를 Realtime에 그대로
+      // 🎙️ [FIRST-TURN-REALTIME] 첫 대사: 같은 시스템 프롬프트를 Realtime에 그대로
       //   넘겨 번역문(전사)과 낭독 음성을 한 번에 받는다. begin()이 false면 아무
       //   일도 없었던 것처럼 아래 gpt-4o-mini 경로가 이어진다.
-      final Future<List<String>>? fallbackChunks = parallelFallback
-          ? _streamGptUserTranslation(
-              apiKey: apiKey,
-              sysPrompt: sysPrompt,
-              userContent: userContent,
-            ).toList()
-          : null;
       if (realtimeVoice != null) {
         final bool realtimeReady = await realtimeVoice.begin(
           instructions: sysPrompt,
           userContent: userContent,
         );
         if (realtimeReady) {
-          if (!parallelFallback) {
-            yield* realtimeVoice.textStream;
-            return;
-          }
-          final realtimeChunks = await realtimeVoice.textStream.toList();
-          final realtimeWav = await realtimeVoice.audioWav;
-          final realtimeCompleted = realtimeChunks.isNotEmpty &&
-              (realtimeVoice.streamedAudio ||
-                  (realtimeWav != null && realtimeWav.isNotEmpty));
-          if (realtimeCompleted) {
-            for (final chunk in realtimeChunks) {
-              yield chunk;
-            }
-            return;
-          }
+          yield* realtimeVoice.textStream;
+          return;
         }
       }
 
-      if (fallbackChunks != null) {
-        for (final chunk in await fallbackChunks) {
-          yield chunk;
-        }
-      } else {
-        yield* _streamGptUserTranslation(
-          apiKey: apiKey,
-          sysPrompt: sysPrompt,
-          userContent: userContent,
-        );
-      }
-    } catch (_) {
-      yield '[EVAPORATE]';
-    }
-  }
-
-  static Stream<String> _streamGptUserTranslation({
-    required String apiKey,
-    required String sysPrompt,
-    required String userContent,
-  }) async* {
-    final client = OpenAiConnectionPool.instance.client;
-    try {
       final request = http.Request(
         'POST',
         Uri.parse('https://api.openai.com/v1/chat/completions'),
@@ -4611,7 +4564,7 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
       request.body = jsonEncode({
         'model': 'gpt-4o-mini',
         'stream': true,
-        'temperature': 0.0,
+        'temperature': 0.0, // 주어 추론 일관성 극대화
         'max_tokens': 120,
         'messages': [
           {'role': 'system', 'content': sysPrompt},
