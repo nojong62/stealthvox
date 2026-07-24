@@ -182,7 +182,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     return _ttsQueueManager.isBusy;
   }
 
-  void _resetIdleTimer() {
+  void _markConversationActivity() {
     _idleElapsedSec = 0;
     if (_isIdlePaused) {
       _isIdlePaused = false;
@@ -192,6 +192,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         BillingTicker.instance.logMode('free_talk');
       }
     }
+  }
+
+  void _resetIdleTimer() {
+    _markConversationActivity();
     _idlePauseTimer?.cancel();
     _idlePauseTimer =
         Timer.periodic(const Duration(seconds: 1), (_) => _idleTick());
@@ -403,6 +407,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     super.initState();
     _costTracker = AnyoneCostTracker(_log);
     _ttsQueueManager = TtsQueueManager(onPlayStart: () {
+      _markConversationActivity();
       if (_awaitingAiFirstAudioProbe) {
         _awaitingAiFirstAudioProbe = false;
         _logProbeTiming('AI_FIRST_AUDIO');
@@ -825,6 +830,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           _log('✅ [LISTEN-02]', 'onConnected 콜백 실행');
         },
         onTranscriptUpdate: (transcript) {
+          _markConversationActivity();
           if (!TrialFlowState.instance.isTrial) {
             BillingTicker.instance.resumeFromActivity('free_talk_stt_partial');
           }
@@ -849,6 +855,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         },
         onTurnResult: _onDeepgramTurnResult,
         onTurnEnded: (transcript, {bool speechFinal = false}) {
+          _markConversationActivity();
           if (!TrialFlowState.instance.isTrial) {
             BillingTicker.instance.resumeFromActivity('free_talk_stt_result');
           }
@@ -2684,19 +2691,21 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
                               ),
                             ),
                             const SizedBox(width: 6),
-                            Text(
-                              () {
-                                final int s = (FFAppState().remainingTime)
-                                    .toInt()
-                                    .clamp(0, 999999);
-                                final int h = s ~/ 3600;
-                                final int m = (s % 3600) ~/ 60;
-                                return '${h.toString().padLeft(2, '0')}:'
-                                    '${m.toString().padLeft(2, '0')}';
-                              }(),
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
+                            ValueListenableBuilder<int>(
+                              valueListenable: BillingTicker
+                                  .instance.remainingSecondsNotifier,
+                              builder: (_, remaining, __) => Text(
+                                () {
+                                  final int s = remaining.clamp(0, 999999);
+                                  final int h = s ~/ 3600;
+                                  final int m = (s % 3600) ~/ 60;
+                                  return '${h.toString().padLeft(2, '0')}:'
+                                      '${m.toString().padLeft(2, '0')}';
+                                }(),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                             ),
                           ],
