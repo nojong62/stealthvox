@@ -55,6 +55,7 @@ class _IntroMasterState extends State<IntroMaster> {
   bool _welcomeForward = true;
   bool _showEmailForm = false;
   bool _trialStarting = false;
+  int _trialRequestGeneration = 0;
   bool _isValidatingDuoInvite = false;
   String _trialNativeLang = 'Korean';
   String _trialTargetLang = 'English';
@@ -150,6 +151,7 @@ class _IntroMasterState extends State<IntroMaster> {
 
   @override
   void dispose() {
+    ++_trialRequestGeneration;
     AppsFlyerManager.duoInviteSignal.removeListener(_onDuoInviteSignal);
     _scrollController.dispose();
     _emailFocusNode.dispose();
@@ -229,12 +231,13 @@ class _IntroMasterState extends State<IntroMaster> {
     );
   }
 
-  Future<void> _startTrial(BuildContext context) async {
+  Future<void> _startTrial() async {
     debugPrint(
         '[TrialDebug] _startTrial enter, currentUser=${FirebaseAuth.instance.currentUser?.uid}, isAnonymous=${FirebaseAuth.instance.currentUser?.isAnonymous}, time=${DateTime.now().toIso8601String()}');
     if (_trialStarting) return;
     _trialStarting = true;
-    setState(() => isLoading = true);
+    final requestGeneration = ++_trialRequestGeneration;
+    var authNotificationSuppressed = false;
     try {
       FFAppState().isGuestSession = false;
       TrialFlowState.instance.restoreFromAppState();
@@ -248,38 +251,55 @@ class _IntroMasterState extends State<IntroMaster> {
         return;
       }
 
+      // 언어 선택은 익명 로그인보다 먼저 띄운다. 첫 익명 로그인에서 인증 상태가
+      // 바뀌며 Intro가 재구성되더라도 첫 탭의 사용자 흐름이 끊기지 않게 한다.
+      await _showLanguageSettingDialog();
+      if (!_isCurrentTrialRequest(requestGeneration)) return;
+      debugPrint(
+          '[TrialDebug] language dialog confirmed, native=$_trialNativeLang, target=$_trialTargetLang');
+      setState(() => isLoading = true);
+
       // 정책 A: 체험 확정 -> pending invite 초기화 (체험과 Duo는 분리)
       FFAppState().pendingInviteType = '';
       FFAppState().duoRoomId = '';
 
       if (FirebaseAuth.instance.currentUser == null) {
         AppStateNotifier.instance.updateNotifyOnAuthChange(false);
+        authNotificationSuppressed = true;
         await FirebaseAuth.instance.signInAnonymously();
       }
-      if (!context.mounted) return;
-      await _showLanguageSettingDialog();
-
+      if (!_isCurrentTrialRequest(requestGeneration)) return;
+      debugPrint(
+          '[TrialDebug] anonymous auth ready, uid=${FirebaseAuth.instance.currentUser?.uid}, stateMounted=$mounted');
       FFAppState().nativeLang = _trialNativeLang;
       FFAppState().targetLang = _trialTargetLang;
 
-      if (!context.mounted) return;
-      await _enterTrialAnyone(context);
+      await _enterTrialAnyone(requestGeneration);
     } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      final errorContext = mounted ? context : appNavigatorKey.currentContext;
+      if (errorContext != null && errorContext.mounted) {
+        ScaffoldMessenger.of(errorContext).showSnackBar(
           SnackBar(content: Text('체험을 시작할 수 없습니다: $e')),
         );
       }
     } finally {
-      AppStateNotifier.instance.updateNotifyOnAuthChange(true);
+      if (authNotificationSuppressed) {
+        AppStateNotifier.instance.updateNotifyOnAuthChange(true);
+      }
       _trialStarting = false;
       if (mounted) setState(() => isLoading = false);
     }
   }
 
-  Future<void> _enterTrialAnyone(BuildContext context) async {
+  bool _isCurrentTrialRequest(int requestGeneration) {
+    return mounted &&
+        requestGeneration == _trialRequestGeneration &&
+        (ModalRoute.of(context)?.isCurrent ?? false);
+  }
+
+  Future<void> _enterTrialAnyone(int requestGeneration) async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null || !context.mounted) return;
+    if (user == null || !_isCurrentTrialRequest(requestGeneration)) return;
     final historyRef = FirebaseFirestore.instance
         .collection('users')
         .doc(user.uid)
@@ -294,7 +314,11 @@ class _IntroMasterState extends State<IntroMaster> {
     });
     TrialFlowState.instance.myHistoryRef = historyRef;
     TrialFlowState.instance.advanceTo(1);
-    if (!context.mounted) return;
+    if (!mounted ||
+        requestGeneration != _trialRequestGeneration ||
+        !(ModalRoute.of(context)?.isCurrent ?? false)) {
+      return;
+    }
     context.pushNamed(
       'StealthRoom',
       queryParameters: {
@@ -993,7 +1017,7 @@ class _IntroMasterState extends State<IntroMaster> {
                       debugPrint(
                         '[TrialDebug] trial button tapped, time=${DateTime.now().toIso8601String()}',
                       );
-                      _startTrial(context);
+                      _startTrial();
                     },
                   ),
                   SizedBox(height: compact ? 16 : 20),
@@ -1188,10 +1212,12 @@ class _IntroMasterState extends State<IntroMaster> {
                       ),
                     ),
                     onPressed: () {
-                      setState(() {
-                        _trialNativeLang = nativeLang;
-                        _trialTargetLang = targetLang;
-                      });
+                      if (mounted) {
+                        setState(() {
+                          _trialNativeLang = nativeLang;
+                          _trialTargetLang = targetLang;
+                        });
+                      }
                       Navigator.of(dialogContext).pop();
                     },
                     child: const Text(
