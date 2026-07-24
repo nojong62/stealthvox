@@ -253,8 +253,11 @@ class _IntroMasterState extends State<IntroMaster> {
 
       // 언어 선택은 익명 로그인보다 먼저 띄운다. 첫 익명 로그인에서 인증 상태가
       // 바뀌며 Intro가 재구성되더라도 첫 탭의 사용자 흐름이 끊기지 않게 한다.
-      await _showLanguageSettingDialog();
-      if (!_isCurrentTrialRequest(requestGeneration)) return;
+      final languageConfirmed = await _showLanguageSettingDialog();
+      if (!languageConfirmed ||
+          !_isCurrentTrialRequest(requestGeneration)) {
+        return;
+      }
       debugPrint(
           '[TrialDebug] language dialog confirmed, native=$_trialNativeLang, target=$_trialTargetLang');
       setState(() => isLoading = true);
@@ -1138,7 +1141,7 @@ class _IntroMasterState extends State<IntroMaster> {
     );
   }
 
-  Future<void> _showLanguageSettingDialog() async {
+  Future<bool> _showLanguageSettingDialog() async {
     const languages = [
       'Korean',
       'English',
@@ -1156,7 +1159,7 @@ class _IntroMasterState extends State<IntroMaster> {
     String nativeLang = _trialNativeLang;
     String targetLang = _trialTargetLang;
 
-    await showDialog<void>(
+    final confirmed = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) {
@@ -1218,7 +1221,7 @@ class _IntroMasterState extends State<IntroMaster> {
                           _trialTargetLang = targetLang;
                         });
                       }
-                      Navigator.of(dialogContext).pop();
+                      Navigator.of(dialogContext).pop(true);
                     },
                     child: const Text(
                       '확인',
@@ -1234,6 +1237,7 @@ class _IntroMasterState extends State<IntroMaster> {
         );
       },
     );
+    return confirmed == true;
   }
 
   Widget _languageDropdown({
