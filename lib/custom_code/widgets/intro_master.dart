@@ -461,7 +461,7 @@ class _IntroMasterState extends State<IntroMaster> {
         Text(
           'StealthVox',
           style: GoogleFonts.orbitron(
-            fontSize: compact ? 15 : 18,
+            fontSize: compact ? 15 : 16,
             fontWeight: FontWeight.w700,
             color: const Color(0xFFF7F8FA),
             letterSpacing: 0.2,
@@ -471,7 +471,10 @@ class _IntroMasterState extends State<IntroMaster> {
     );
   }
 
-  Widget _buildPageIndicator(int activeIndex) {
+  Widget _buildPageIndicator(
+    int activeIndex, {
+    bool tealActive = false,
+  }) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: List.generate(2, (index) {
@@ -483,12 +486,117 @@ class _IntroMasterState extends State<IntroMaster> {
           margin: const EdgeInsets.symmetric(horizontal: 4),
           decoration: BoxDecoration(
             color: active
-                ? const Color(0xFF7B71F4)
+                ? (tealActive
+                    ? const Color(0xFF52D4C3)
+                    : const Color(0xFF7B71F4))
                 : Colors.white.withValues(alpha: 0.18),
             borderRadius: BorderRadius.circular(99),
+            boxShadow: active && tealActive
+                ? [
+                    BoxShadow(
+                      color: const Color(0xFF52D4C3).withValues(alpha: 0.26),
+                      blurRadius: 10,
+                    ),
+                  ]
+                : null,
           ),
         );
       }),
+    );
+  }
+
+  Widget _buildWelcomeTrialAction() {
+    return Container(
+      width: double.infinity,
+      height: 60,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+          colors: [
+            Color(0xFF45CDBD),
+            Color(0xFF5C9DDB),
+            Color(0xFF765EEB),
+          ],
+          stops: [0.0, 0.52, 1.0],
+        ),
+        borderRadius: BorderRadius.circular(19),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF53CBBB).withValues(alpha: 0.14),
+            blurRadius: 24,
+            offset: const Offset(-8, 10),
+          ),
+          BoxShadow(
+            color: const Color(0xFF755FE9).withValues(alpha: 0.16),
+            blurRadius: 24,
+            offset: const Offset(8, 10),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(19),
+        child: InkWell(
+          onTap: _goToGuidePage,
+          borderRadius: BorderRadius.circular(19),
+          child: const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                '1분 체험 알아보기',
+                style: TextStyle(
+                  color: Color(0xFFF9FAFC),
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.35,
+                ),
+              ),
+              SizedBox(width: 17),
+              Icon(
+                Icons.arrow_forward_rounded,
+                size: 25,
+                color: Color(0xFFF9FAFC),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWelcomeLoginAction() {
+    return TextButton(
+      onPressed: _openAuthScreen,
+      style: TextButton.styleFrom(
+        minimumSize: const Size.fromHeight(48),
+        foregroundColor: const Color(0xFFB7BAC3),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            '이미 계정이 있어요',
+            style: TextStyle(
+              fontSize: 14.5,
+              fontWeight: FontWeight.w500,
+              letterSpacing: -0.15,
+            ),
+          ),
+          const SizedBox(height: 7),
+          Container(
+            width: 58,
+            height: 1.5,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF43CCBD), Color(0xFF7661EA)],
+              ),
+              borderRadius: BorderRadius.circular(99),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -709,84 +817,93 @@ class _IntroMasterState extends State<IntroMaster> {
     return LayoutBuilder(
       key: const ValueKey('welcome-story'),
       builder: (context, constraints) {
-        final compact = constraints.maxHeight < 700;
-        // 페이지 좌우 여백 24를 뺀 폭에 '최고의 영어 교재가 됩니다'(13자)가 한 줄로
-        // 들어가는 상한. 좁은 기기에서는 한 단계 줄인다.
-        final headlineSize = constraints.maxWidth < 360 ? 24.0 : 28.0;
+        final compact = constraints.maxHeight < 660;
+        final headlineSize = constraints.maxWidth < 340 ? 33.0 : 36.0;
+        final storyGradient = const LinearGradient(
+          begin: Alignment.centerLeft,
+          end: Alignment.centerRight,
+          colors: [
+            Color(0xFF48CEBD),
+            Color(0xFF4FAFCE),
+            Color(0xFF7763E9),
+          ],
+        ).createShader(const Rect.fromLTWH(82, 0, 132, 52));
 
         return SingleChildScrollView(
           padding: EdgeInsets.fromLTRB(
             24,
-            compact ? 18 : 24,
+            compact ? 20 : 33,
             24,
-            compact ? 18 : 22,
+            compact ? 14 : 18,
           ),
           child: ConstrainedBox(
             constraints: BoxConstraints(
-              minHeight: constraints.maxHeight - (compact ? 36 : 46),
+              minHeight: constraints.maxHeight - (compact ? 30 : 38),
             ),
             child: IntrinsicHeight(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildBrandMark(),
-                  SizedBox(height: compact ? 34 : 52),
+                  SizedBox(height: compact ? 56 : 78),
                   Container(
                     padding:
-                        const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF58D6BD).withValues(alpha: 0.09),
+                      color: const Color(0xFF43CCBD).withValues(alpha: 0.035),
                       borderRadius: BorderRadius.circular(99),
                       border: Border.all(
-                        color: const Color(0xFF58D6BD).withValues(alpha: 0.16),
+                        color: const Color(0xFF4BCDBD).withValues(alpha: 0.54),
                       ),
                     ),
                     child: const Text(
                       '말한 순간, 바로 복습으로',
                       style: TextStyle(
-                        color: Color(0xFF70DFC9),
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF62D8C9),
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w500,
+                        letterSpacing: -0.2,
                       ),
                     ),
                   ),
-                  SizedBox(height: compact ? 22 : 30),
-                  Text(
-                    '당신의 이야기가\n최고의 영어 교재가 됩니다',
+                  SizedBox(height: compact ? 26 : 35),
+                  Text.rich(
+                    TextSpan(
+                      children: [
+                        const TextSpan(text: '당신의 '),
+                        TextSpan(
+                          text: '이야기',
+                          style: TextStyle(
+                            foreground: Paint()..shader = storyGradient,
+                          ),
+                        ),
+                        const TextSpan(
+                          text: '가\n최고의 영어 교재가\n됩니다',
+                        ),
+                      ],
+                    ),
                     style: TextStyle(
                       color: const Color(0xFFF7F8FA),
                       fontSize: headlineSize,
                       fontWeight: FontWeight.w800,
-                      height: 1.28,
-                      letterSpacing: -1.0,
+                      height: 1.16,
+                      letterSpacing: -1.4,
                     ),
                   ),
-                  SizedBox(height: compact ? 24 : 34),
-                  _buildBentoCard(child: _buildWaveform()),
+                  SizedBox(height: compact ? 16 : 20),
+                  SizedBox(
+                    width: double.infinity,
+                    height: compact ? 58 : 72,
+                    child: Center(child: _buildWaveform()),
+                  ),
                   const Spacer(),
-                  SizedBox(height: compact ? 26 : 38),
-                  _buildPrimaryAction(
-                    label: '1분 체험 알아보기',
-                    onPressed: _goToGuidePage,
-                  ),
-                  const SizedBox(height: 10),
-                  TextButton(
-                    onPressed: _openAuthScreen,
-                    style: TextButton.styleFrom(
-                      minimumSize: const Size.fromHeight(44),
-                      foregroundColor: const Color(0xFFC5C7CE),
-                    ),
-                    child: const Text(
-                      '이미 계정이 있어요',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Center(child: _buildPageIndicator(0)),
-                  const SizedBox(height: 10),
+                  SizedBox(height: compact ? 22 : 34),
+                  _buildWelcomeTrialAction(),
+                  SizedBox(height: compact ? 8 : 14),
+                  _buildWelcomeLoginAction(),
+                  SizedBox(height: compact ? 8 : 13),
+                  Center(child: _buildPageIndicator(0, tealActive: true)),
+                  SizedBox(height: compact ? 10 : 17),
                   _buildWelcomePageFooter('옆으로 밀어 계속하기'),
                 ],
               ),
@@ -2467,60 +2584,78 @@ class _IntroMasterState extends State<IntroMaster> {
 
   Widget _buildWaveform() {
     final heights = [
+      5.0,
+      4.0,
+      8.0,
+      11.0,
+      8.0,
+      6.0,
+      5.0,
+      7.0,
       12.0,
+      23.0,
+      35.0,
+      49.0,
+      57.0,
+      52.0,
+      43.0,
+      31.0,
       20.0,
-      30.0,
-      16.0,
-      34.0,
-      26.0,
-      18.0,
-      32.0,
+      12.0,
+      9.0,
+      15.0,
+      24.0,
+      31.0,
+      27.0,
+      20.0,
+      13.0,
+      9.0,
+      7.0,
+      6.0,
+      8.0,
       14.0,
-      28.0,
-      22.0,
+      27.0,
+      36.0,
+      42.0,
+      34.0,
+      23.0,
+      14.0,
+      9.0,
+      7.0,
+      11.0,
+      15.0,
       10.0,
-    ];
-    final colors = [
-      const Color(0xFF58D6BD),
-      const Color(0xFF8B7CFF),
-      const Color(0xFF45BFA5),
-      const Color(0xFF7167D8),
+      6.0,
+      5.0,
     ];
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: List.generate(heights.length, (index) {
+        final progress = index / (heights.length - 1);
+        final color = Color.lerp(
+          const Color(0xFF45D1C0),
+          const Color(0xFF7963EA),
+          progress,
+        )!;
+        final edgeOpacity = 0.30 + (heights[index] / 57 * 0.35);
         return Container(
-          width: 3.2,
-          height: heights[index] * 0.78,
-          margin: const EdgeInsets.symmetric(horizontal: 2.1),
+          width: index % 3 == 0 ? 2.4 : 2.0,
+          height: heights[index] * 0.68,
+          margin: const EdgeInsets.symmetric(horizontal: 1.25),
           decoration: BoxDecoration(
-            color: colors[index % colors.length],
-            borderRadius: BorderRadius.circular(2),
+            color: color.withValues(alpha: edgeOpacity),
+            borderRadius: BorderRadius.circular(99),
+            boxShadow: heights[index] > 20
+                ? [
+                    BoxShadow(
+                      color: color.withValues(alpha: 0.08),
+                      blurRadius: 8,
+                    ),
+                  ]
+                : null,
           ),
         );
       }),
-    );
-  }
-
-  Widget _buildBentoCard({required Widget child}) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(
-        color: const Color(0xFF15171D),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.075),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF756BE8).withValues(alpha: 0.06),
-            blurRadius: 28,
-            offset: const Offset(0, 14),
-          ),
-        ],
-      ),
-      child: child,
     );
   }
 
@@ -2636,7 +2771,7 @@ class _IntroMasterState extends State<IntroMaster> {
           ),
           const SizedBox(height: 8),
           const Text(
-            '대화가 끝나면 같은 이야기를\n영어 표현과 복습 자료로 다시 만납니다.',
+            '방금 나눈 대화를 역할 교환 영어 대화와 맞춤 튜터링으로 이어가며, 더 다양한 표현을 익혀보세요.',
             style: TextStyle(
               color: Color(0xFFA7ABB5),
               fontSize: 14,
