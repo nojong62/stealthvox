@@ -39,6 +39,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/openai_connection_pool.dart';
+import '/custom_code/services/realtime_anyone_adapter.dart';
+import '/custom_code/services/realtime_feature_flags.dart';
 import 'deepgram_confidence_probe.dart';
 import 'first_turn_realtime_voice.dart';
 import 'first_utterance_context_judge.dart';
@@ -387,6 +389,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   final ScrollController _scrollController = ScrollController();
   final Map<int, GlobalKey> _itemKeys = {};
   DeepgramV2VoiceManager? _voiceManager;
+  RealtimeAnyoneAdapter? _realtimeAnyone;
   final AudioRecorder _audioRecorder = AudioRecorder();
   late final TtsQueueManager _ttsQueueManager;
   HybridTtsPlayer? _hybridTtsPlayer; // [하이브리드] 메인 턴 TTS 플레이어
@@ -432,6 +435,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     }
 
     _initPermissions();
+    unawaited(RealtimeFeatureFlags.initialize());
     _fetchKeys();
     BillingTicker.instance.setSessionIdentifiers();
     BillingTicker.instance.setRate(BillingRate.full);
@@ -534,7 +538,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     // 🆕 첫 진입 race 방지: 키와 마이크 권한이 "둘 다" 준비됐을 때만 시작한다.
     //    준비 안 된 항목이 있으면 조용히 대기 → 키 로드 콜백(_fetchKeys) 또는
     //    권한 콜백(_initPermissions) 중 늦게 끝나는 쪽이 이 함수를 다시 호출해 시작.
-    if (_deepgramKey.isEmpty) {
+    if (!RealtimeFeatureFlags.enabledFor('anyone') && _deepgramKey.isEmpty) {
       _log('🎤 [START-GATE]', '키 미준비 → 시작 보류');
       return;
     }
@@ -555,7 +559,73 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     _micPermissionReady = true;
     if (!mounted || _isConversationActive) return;
     _hasShownNudgeBubble = false;
+    if (RealtimeFeatureFlags.enabledFor('anyone')) {
+      await _startRealtimeAnyoneSession();
+      return;
+    }
     await _startDeepgramListening();
+  }
+
+  Future<void> _startRealtimeAnyoneSession() async {
+    if (_realtimeAnyone != null || _isStartingListening) return;
+    _isStartingListening = true;
+    final adapter = RealtimeAnyoneAdapter(
+      onUserTranscript: (text) {
+        if (!mounted) return;
+        setState(() {
+          _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+          final index = _localMessages.lastIndexWhere((m) => m['role'] == 'HOST');
+          final message = <String, dynamic>{'role': 'HOST', 'original': text, 'target': text};
+          if (index >= 0) {
+            _localMessages[index] = message;
+          } else {
+            _localMessages.add(message);
+          }
+        });
+        _scrollToBottomThrottled();
+      },
+      onAssistantTranscript: (text) {
+        if (!mounted) return;
+        setState(() {
+          final index = _localMessages.lastIndexWhere((m) => m['role'] == 'SYSTEM');
+          final message = <String, dynamic>{'role': 'SYSTEM', 'original': text, 'target': text};
+          if (index >= 0) {
+            _localMessages[index] = message;
+          } else {
+            _localMessages.add(message);
+          }
+        });
+        _scrollToBottomThrottled();
+      },
+      onError: (error) {
+        _log('❌ [REALTIME]', error.toString());
+        _stopRealtimeAnyoneSession();
+      },
+    );
+    _realtimeAnyone = adapter;
+    try {
+      await adapter.start(
+        modeSessionId: _sessionDocId ??
+            'anyone-${DateTime.now().microsecondsSinceEpoch}',
+      );
+      if (!mounted) return;
+      _isConversationActive = true;
+      _isStartingListening = false;
+      setState(() {});
+    } catch (error) {
+      _log('❌ [REALTIME-START]', error.toString());
+      await adapter.dispose();
+      _realtimeAnyone = null;
+      _isStartingListening = false;
+    }
+  }
+
+  void _stopRealtimeAnyoneSession() {
+    final adapter = _realtimeAnyone;
+    _realtimeAnyone = null;
+    if (adapter != null) unawaited(adapter.dispose());
+    _isConversationActive = false;
+    _isStartingListening = false;
   }
 
   // ====================================================================
@@ -694,6 +764,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     _awaitingAiFirstAudioProbe = false;
     _voiceManager?.dispose();
     _voiceManager = null;
+    _stopRealtimeAnyoneSession();
     _ttsQueueManager.stop();
     if (mounted) setState(() {});
   }
