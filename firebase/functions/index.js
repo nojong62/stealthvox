@@ -16,8 +16,110 @@ const admin = require("firebase-admin");
 const crypto = require("crypto");
 const { defineSecret } = require("firebase-functions/params");
 const revenueCatWebhookSecret = defineSecret("REVENUECAT_WEBHOOK_SECRET");
+const openAiApiKey = defineSecret("OPENAI_API_KEY");
+
+const realtimeModes = new Set(["anyone", "roleplay", "duo", "step_first_turn"]);
+const realtimeRequestTimestamps = new Map();
 
 admin.initializeApp();
+
+function realtimeFailure(code, message) {
+  return new functions.https.HttpsError(code, message);
+}
+
+function checkRealtimeRateLimit(uid) {
+  const now = Date.now();
+  const windowMs = 60 * 1000;
+  const recent = (realtimeRequestTimestamps.get(uid) || []).filter(
+    (timestamp) => now - timestamp < windowMs
+  );
+  if (recent.length >= 10) return false;
+  recent.push(now);
+  realtimeRequestTimestamps.set(uid, recent);
+  if (realtimeRequestTimestamps.size > 1000) {
+    for (const [key, values] of realtimeRequestTimestamps.entries()) {
+      if (values.every((timestamp) => now - timestamp >= windowMs)) {
+        realtimeRequestTimestamps.delete(key);
+      }
+    }
+  }
+  return true;
+}
+
+// Secure, short-lived Realtime client secret. Existing client-side OpenAI
+// calls remain untouched until the secure migration is validated.
+exports.createRealtimeClientSecret = functions
+  .region("us-central1")
+  .runWith({ secrets: [openAiApiKey] })
+  .https.onCall(async (data, context) => {
+    if (!context.auth || !context.auth.uid) {
+      throw realtimeFailure("unauthenticated", "Authentication is required.");
+    }
+    if (!context.app) {
+      throw realtimeFailure("failed-precondition", "App Check is required.");
+    }
+
+    const mode = typeof data?.mode === "string" ? data.mode : "";
+    const appVersion = typeof data?.appVersion === "string" ? data.appVersion : "";
+    if (!realtimeModes.has(mode)) {
+      throw realtimeFailure("invalid-argument", "Unsupported Realtime mode.");
+    }
+    if (!appVersion || appVersion.length > 40) {
+      throw realtimeFailure("invalid-argument", "A valid app version is required.");
+    }
+    if (process.env.REALTIME_GLOBAL_KILL_SWITCH === "true") {
+      throw realtimeFailure("failed-precondition", "Realtime is temporarily disabled.");
+    }
+    const minimumVersion = process.env.REALTIME_MIN_APP_VERSION || "";
+    if (minimumVersion && appVersion !== minimumVersion) {
+      throw realtimeFailure("failed-precondition", "This app version is not enabled.");
+    }
+    if (!checkRealtimeRateLimit(context.auth.uid)) {
+      throw realtimeFailure("resource-exhausted", "Too many Realtime requests.");
+    }
+
+    const safetyIdentifier = crypto
+      .createHash("sha256")
+      .update(String(context.auth.uid))
+      .digest("hex");
+    const response = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer " + openAiApiKey.value(),
+        "Content-Type": "application/json",
+        "OpenAI-Safety-Identifier": safetyIdentifier,
+      },
+      body: JSON.stringify({
+        expires_after: { anchor: "created_at", seconds: 600 },
+        session: {
+          type: "realtime",
+          model: "gpt-realtime-2.1-mini",
+          output_modalities: ["audio"],
+        },
+      }),
+    });
+    if (!response.ok) {
+      functions.logger.warn("createRealtimeClientSecret upstream failure", {
+        uid: context.auth.uid,
+        mode,
+        status: response.status,
+      });
+      throw realtimeFailure("unavailable", "Realtime authentication is unavailable.");
+    }
+    const payload = await response.json();
+    if (!payload || typeof payload.value !== "string") {
+      throw realtimeFailure("internal", "Realtime authentication returned no client secret.");
+    }
+    functions.logger.info("createRealtimeClientSecret", {
+      uid: context.auth.uid,
+      mode,
+      appVersion,
+    });
+    return {
+      value: payload.value,
+      expires_at: payload.expires_at || 0,
+    };
+  });
 
 async function verifyGoogleOAuthIdToken(idToken) {
   if (!idToken || typeof idToken !== "string") {
