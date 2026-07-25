@@ -1,6 +1,8 @@
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+import 'realtime_app_check.dart';
+
 class RealtimeClientSecret {
   const RealtimeClientSecret({required this.value, required this.expiresAt});
 
@@ -15,7 +17,11 @@ class RealtimeClientSecretService {
 
   final FirebaseFunctions _functions;
 
-  Future<RealtimeClientSecret> create({required String mode}) async {
+  Future<RealtimeClientSecret> create({
+    required String mode,
+    bool debugAppCheck = false,
+  }) async {
+    await RealtimeAppCheck.initialize(debugProvider: debugAppCheck);
     final packageInfo = await PackageInfo.fromPlatform();
     final callable = _functions.httpsCallable('createRealtimeClientSecret');
     final result = await callable.call(<String, dynamic>{
