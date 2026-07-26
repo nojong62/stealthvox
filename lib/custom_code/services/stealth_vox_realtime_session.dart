@@ -64,9 +64,12 @@ class RealtimeSessionEvent {
 class StealthVoxRealtimeSession {
   StealthVoxRealtimeSession({
     RealtimeClientSecretService? secretService,
-  }) : _secretService = secretService ?? RealtimeClientSecretService();
+    RealtimeLogger? logger,
+  })  : _secretService = secretService ?? RealtimeClientSecretService(),
+        _logger = logger;
 
   final RealtimeClientSecretService _secretService;
+  final RealtimeLogger? _logger;
   final StreamController<RealtimeSessionEvent> _events =
       StreamController<RealtimeSessionEvent>.broadcast();
 
@@ -103,78 +106,123 @@ class StealthVoxRealtimeSession {
     if (isReady || _connectionState == RealtimeConnectionState.connecting) {
       return;
     }
+    _logger?.call('[RT-PATH]', 'secure_webrtc mode=$mode');
     _modeSessionId = modeSessionId;
     final generation = ++_connectionGeneration;
-    _setConnectionState(RealtimeConnectionState.requestingToken);
-    final secret = await _secretService.create(mode: mode);
-    _assertCurrent(generation);
-    _setConnectionState(RealtimeConnectionState.connecting);
+    String stage = 'secret';
+    try {
+      _setConnectionState(RealtimeConnectionState.requestingToken);
+      final secret = await _secretService.create(mode: mode, logger: _logger);
+      _assertCurrent(generation);
+      _setConnectionState(RealtimeConnectionState.connecting);
 
-    final peer = await createPeerConnection(<String, dynamic>{});
-    _peerConnection = peer;
-    peer.onTrack = (event) {
-      if (!_isCurrent(generation) || event.streams.isEmpty) {
-        _emit(RealtimeEventType.staleEventDropped);
-        return;
-      }
-      _emit(
-        RealtimeEventType.remoteAudioTrack,
-        remoteStream: event.streams.first,
+      stage = 'peer_connection';
+      final peer = await createPeerConnection(<String, dynamic>{});
+      _peerConnection = peer;
+      _logger?.call('[RT-PC]', 'created');
+      peer.onTrack = (event) {
+        if (!_isCurrent(generation) || event.streams.isEmpty) {
+          _emit(RealtimeEventType.staleEventDropped);
+          return;
+        }
+        _logger?.call('[RT-AUDIO]', 'remote_track_received');
+        _emit(
+          RealtimeEventType.remoteAudioTrack,
+          remoteStream: event.streams.first,
+        );
+      };
+      peer.onIceConnectionState = (state) {
+        if (!_isCurrent(generation)) return;
+        _logger?.call('[RT-ICE]', _iceStateLabel(state));
+      };
+      peer.onConnectionState = (state) {
+        if (!_isCurrent(generation)) {
+          _emit(RealtimeEventType.staleEventDropped);
+          return;
+        }
+        if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+          _setConnectionState(RealtimeConnectionState.ready);
+        } else if (state ==
+            RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
+          _setConnectionState(RealtimeConnectionState.failed);
+        }
+      };
+
+      stage = 'microphone';
+      _localStream = await navigator.mediaDevices.getUserMedia(
+        <String, dynamic>{'audio': true, 'video': false},
       );
-    };
-    peer.onConnectionState = (state) {
-      if (!_isCurrent(generation)) {
-        _emit(RealtimeEventType.staleEventDropped);
-        return;
+      final audioTracks = _localStream!.getAudioTracks();
+      if (audioTracks.isEmpty) throw StateError('No local microphone track.');
+      await peer.addTrack(audioTracks.first, _localStream!);
+
+      stage = 'data_channel';
+      _dataChannel = await peer.createDataChannel(
+        'oai-events',
+        RTCDataChannelInit(),
+      );
+      _dataChannel!.onDataChannelState = (state) {
+        if (state == RTCDataChannelState.RTCDataChannelOpen) {
+          _emit(RealtimeEventType.dataChannelOpened);
+          _setConnectionState(RealtimeConnectionState.configuring);
+          _sendSessionUpdate(voice: voice, instructions: instructions);
+        }
+      };
+      _dataChannel!.onMessage = (message) {
+        _handleServerEvent(message.text, generation);
+      };
+
+      stage = 'sdp_offer';
+      final offer = await peer.createOffer(<String, dynamic>{});
+      await peer.setLocalDescription(offer);
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+      final localDescription = await peer.getLocalDescription();
+      final sdp = localDescription?.sdp;
+      if (sdp == null || sdp.isEmpty) throw StateError('Local SDP is empty.');
+      _logger?.call('[RT-SDP]', 'offer_created');
+
+      stage = 'sdp_answer';
+      final response = await http.post(
+        Uri.parse('https://api.openai.com/v1/realtime/calls'),
+        headers: <String, String>{
+          'Authorization': 'Bearer ${secret.value}',
+          'Content-Type': 'application/sdp',
+        },
+        body: sdp,
+      );
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw StateError('Realtime SDP negotiation failed.');
       }
-      if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
-        _setConnectionState(RealtimeConnectionState.ready);
-      } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
+      await peer.setRemoteDescription(
+        RTCSessionDescription(response.body, 'answer'),
+      );
+      _logger?.call('[RT-SDP]', 'answer_applied');
+    } catch (e) {
+      if (_isCurrent(generation)) {
         _setConnectionState(RealtimeConnectionState.failed);
       }
-    };
-    _localStream = await navigator.mediaDevices.getUserMedia(
-      <String, dynamic>{'audio': true, 'video': false},
-    );
-    final audioTracks = _localStream!.getAudioTracks();
-    if (audioTracks.isEmpty) throw StateError('No local microphone track.');
-    await peer.addTrack(audioTracks.first, _localStream!);
-
-    _dataChannel = await peer.createDataChannel(
-      'oai-events',
-      RTCDataChannelInit(),
-    );
-    _dataChannel!.onDataChannelState = (state) {
-      if (state == RTCDataChannelState.RTCDataChannelOpen) {
-        _emit(RealtimeEventType.dataChannelOpened);
-        _setConnectionState(RealtimeConnectionState.configuring);
-        _sendSessionUpdate(voice: voice, instructions: instructions);
-      }
-    };
-    _dataChannel!.onMessage = (message) {
-      _handleServerEvent(message.text, generation);
-    };
-
-    final offer = await peer.createOffer(<String, dynamic>{});
-    await peer.setLocalDescription(offer);
-    await Future<void>.delayed(const Duration(milliseconds: 350));
-    final localDescription = await peer.getLocalDescription();
-    final sdp = localDescription?.sdp;
-    if (sdp == null || sdp.isEmpty) throw StateError('Local SDP is empty.');
-    final response = await http.post(
-      Uri.parse('https://api.openai.com/v1/realtime/calls'),
-      headers: <String, String>{
-        'Authorization': 'Bearer ${secret.value}',
-        'Content-Type': 'application/sdp',
-      },
-      body: sdp,
-    );
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw StateError('Realtime SDP negotiation failed.');
+      _logger?.call('[RT-ERROR]', 'stage=$stage reason=${e.runtimeType}');
+      rethrow;
     }
-    await peer.setRemoteDescription(
-      RTCSessionDescription(response.body, 'answer'),
-    );
+  }
+
+  String _iceStateLabel(RTCIceConnectionState state) {
+    switch (state) {
+      case RTCIceConnectionState.RTCIceConnectionStateChecking:
+        return 'checking';
+      case RTCIceConnectionState.RTCIceConnectionStateConnected:
+        return 'connected';
+      case RTCIceConnectionState.RTCIceConnectionStateCompleted:
+        return 'completed';
+      case RTCIceConnectionState.RTCIceConnectionStateFailed:
+        return 'failed';
+      case RTCIceConnectionState.RTCIceConnectionStateDisconnected:
+        return 'disconnected';
+      case RTCIceConnectionState.RTCIceConnectionStateClosed:
+        return 'closed';
+      default:
+        return 'new';
+    }
   }
 
   void sendEvent(Map<String, dynamic> event) {

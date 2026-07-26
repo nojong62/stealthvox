@@ -1,6 +1,7 @@
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/flutter_flow_widgets.dart';
+import '/custom_code/widgets/index.dart';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -52,11 +53,12 @@ class _CloneTestPageWidgetState extends State<CloneTestPageWidget> {
         backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
         body: SafeArea(
           top: true,
-          child: Column(
-            mainAxisSize: MainAxisSize.max,
-            children: [
-              const SizedBox.shrink(),
-            ],
+          child: SizedBox.expand(
+            // 🛰️ [PHASE 2] 신규 보안 WebRTC 경로 실기기 연결 검증 진입점.
+            child: RealtimeWebrtcProbe(
+              width: double.infinity,
+              height: double.infinity,
+            ),
           ),
         ),
       ),
