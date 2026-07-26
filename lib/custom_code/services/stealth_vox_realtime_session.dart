@@ -60,6 +60,89 @@ class RealtimeSessionEvent {
   final MediaStream? remoteStream;
 }
 
+/// Terminal outcome of a single text-driven translation turn.
+enum RealtimeTurnOutcome { completed, failed, cancelled, timedOut }
+
+/// Handle for one text-driven translation turn multiplexed over the shared
+/// [StealthVoxRealtimeSession]. The session drives its state; callers only read
+/// the text stream and the completion futures.
+class RealtimeTranslationTurn {
+  RealtimeTranslationTurn._(this.turnId, {required bool expectAudio})
+      : _expectAudio = expectAudio {
+    if (!expectAudio) {
+      // Text-only turns have no audio to wait for.
+      _audioDone = true;
+      if (!_audioComplete.isCompleted) _audioComplete.complete();
+    }
+  }
+
+  final String turnId;
+  final bool _expectAudio;
+
+  /// Server-assigned response id, bound on `response.created`.
+  String? responseId;
+
+  final StringBuffer _textBuffer = StringBuffer();
+  final StreamController<String> _textCtl =
+      StreamController<String>.broadcast();
+  final Completer<String> _finalText = Completer<String>();
+  final Completer<void> _audioComplete = Completer<void>();
+  final Completer<RealtimeTurnOutcome> _done = Completer<RealtimeTurnOutcome>();
+
+  bool _settled = false;
+  bool _responseDoneSeen = false;
+  bool _audioDone = false;
+
+  /// Incremental translation text (transcript deltas for audio turns,
+  /// text deltas for text-only turns).
+  Stream<String> get textStream => _textCtl.stream;
+
+  /// The full translation text, resolved when the response finishes.
+  Future<String> get finalText => _finalText.future;
+
+  /// Resolves when the model audio has finished playing out. Completes
+  /// immediately for text-only turns, and via a fallback timer if no explicit
+  /// stop signal arrives.
+  Future<void> get audioComplete => _audioComplete.future;
+
+  /// Terminal outcome of the turn.
+  Future<RealtimeTurnOutcome> get done => _done.future;
+
+  bool get isSettled => _settled;
+  String get accumulatedText => _textBuffer.toString();
+
+  void _emitText(String delta) {
+    if (_settled || delta.isEmpty) return;
+    _textBuffer.write(delta);
+    if (!_textCtl.isClosed) _textCtl.add(delta);
+  }
+
+  void _overrideText(String text) {
+    if (_settled) return;
+    _textBuffer
+      ..clear()
+      ..write(text);
+  }
+
+  void _completeText() {
+    if (!_finalText.isCompleted) _finalText.complete(_textBuffer.toString());
+  }
+
+  void _completeAudio() {
+    _audioDone = true;
+    if (!_audioComplete.isCompleted) _audioComplete.complete();
+  }
+
+  void _settle(RealtimeTurnOutcome outcome) {
+    if (_settled) return;
+    _settled = true;
+    _completeText();
+    if (!_audioComplete.isCompleted) _audioComplete.complete();
+    if (!_done.isCompleted) _done.complete(outcome);
+    if (!_textCtl.isClosed) _textCtl.close();
+  }
+}
+
 /// Transport-only WebRTC layer. It owns no UI, Firestore, billing, or TTS.
 class StealthVoxRealtimeSession {
   StealthVoxRealtimeSession({
@@ -85,7 +168,16 @@ class StealthVoxRealtimeSession {
       RealtimeConnectionState.disconnected;
   RealtimeTurnState _turnState = RealtimeTurnState.idle;
 
+  bool _captureMicrophone = true;
+  bool _disableServerVad = false;
+  RealtimeTranslationTurn? _activeTurn;
+  Timer? _turnTimeoutTimer;
+  Timer? _audioTailTimer;
+  Duration _audioStabilization = const Duration(milliseconds: 250);
+  Duration _audioTailTimeout = const Duration(seconds: 5);
+
   Stream<RealtimeSessionEvent> get events => _events.stream;
+  RealtimeTranslationTurn? get activeTurn => _activeTurn;
   RealtimeConnectionState get connectionState => _connectionState;
   RealtimeTurnState get turnState => _turnState;
   bool get isReady => _connectionState == RealtimeConnectionState.ready;
@@ -98,6 +190,8 @@ class StealthVoxRealtimeSession {
     String voice = 'marin',
     String instructions = '',
     bool allowWhenDisabled = false,
+    bool captureMicrophone = true,
+    bool disableServerVad = false,
   }) async {
     if (_disposed) throw StateError('Realtime session is disposed.');
     if (!allowWhenDisabled && !RealtimeFeatureFlags.enabledFor(mode)) {
@@ -107,6 +201,8 @@ class StealthVoxRealtimeSession {
       return;
     }
     _logger?.call('[RT-PATH]', 'secure_webrtc mode=$mode');
+    _captureMicrophone = captureMicrophone;
+    _disableServerVad = disableServerVad;
     _modeSessionId = modeSessionId;
     final generation = ++_connectionGeneration;
     String stage = 'secret';
@@ -149,12 +245,24 @@ class StealthVoxRealtimeSession {
       };
 
       stage = 'microphone';
-      _localStream = await navigator.mediaDevices.getUserMedia(
-        <String, dynamic>{'audio': true, 'video': false},
-      );
-      final audioTracks = _localStream!.getAudioTracks();
-      if (audioTracks.isEmpty) throw StateError('No local microphone track.');
-      await peer.addTrack(audioTracks.first, _localStream!);
+      if (_captureMicrophone) {
+        _localStream = await navigator.mediaDevices.getUserMedia(
+          <String, dynamic>{'audio': true, 'video': false},
+        );
+        final audioTracks = _localStream!.getAudioTracks();
+        if (audioTracks.isEmpty) {
+          throw StateError('No local microphone track.');
+        }
+        await peer.addTrack(audioTracks.first, _localStream!);
+      } else {
+        // Text-driven turns: receive remote audio without publishing a mic.
+        await peer.addTransceiver(
+          kind: RTCRtpMediaType.RTCRtpMediaTypeAudio,
+          init: RTCRtpTransceiverInit(
+            direction: TransceiverDirection.RecvOnly,
+          ),
+        );
+      }
 
       stage = 'data_channel';
       _dataChannel = await peer.createDataChannel(
@@ -242,25 +350,215 @@ class StealthVoxRealtimeSession {
 
   void cancelResponse() {
     _setTurnState(RealtimeTurnState.interrupted);
+    _sendCancel();
+    _setTurnState(RealtimeTurnState.cancelled);
+  }
+
+  void _sendCancel() {
     if (_dataChannel?.state == RTCDataChannelState.RTCDataChannelOpen) {
-      _dataChannel!.send(
-        RTCDataChannelMessage(jsonEncode(<String, dynamic>{
-          'type': 'response.cancel',
-        })),
-      );
-      _dataChannel!.send(
-        RTCDataChannelMessage(jsonEncode(<String, dynamic>{
-          'type': 'output_audio_buffer.clear',
-        })),
-      );
+      _dataChannel!.send(RTCDataChannelMessage(
+          jsonEncode(<String, dynamic>{'type': 'response.cancel'})));
+      _dataChannel!.send(RTCDataChannelMessage(
+          jsonEncode(<String, dynamic>{'type': 'output_audio_buffer.clear'})));
     }
     _responseId = null;
-    _setTurnState(RealtimeTurnState.cancelled);
+  }
+
+  /// Requests one text-driven translation turn on the live session and returns
+  /// a handle exposing the text stream and completion futures. Rejects if a turn
+  /// is already active — the caller serializes turns (one active response per
+  /// session is a protocol constraint).
+  ///
+  /// [suppressAudio] true → text-only draft (first-turn review); false →
+  /// text + WebRTC audio (turn 2+). The audio itself plays via the media track.
+  RealtimeTranslationTurn requestTranslatedTurn({
+    required String turnId,
+    required String sourceText,
+    required String instructions,
+    String voice = 'marin',
+    bool suppressAudio = false,
+    Duration turnTimeout = const Duration(seconds: 20),
+    Duration audioTailTimeout = const Duration(seconds: 5),
+    Duration audioStabilization = const Duration(milliseconds: 250),
+  }) {
+    if (_disposed) throw StateError('Realtime session is disposed.');
+    if (_activeTurn != null && !_activeTurn!.isSettled) {
+      throw StateError('A realtime turn is already active.');
+    }
+    if (_connectionState != RealtimeConnectionState.ready &&
+        _connectionState != RealtimeConnectionState.configuring) {
+      throw StateError('Realtime session is not ready.');
+    }
+
+    final turn = RealtimeTranslationTurn._(turnId, expectAudio: !suppressAudio);
+    _activeTurn = turn;
+    _turnId = turnId;
+    _audioTailTimeout = audioTailTimeout;
+    _audioStabilization = audioStabilization;
+
+    // 1) Inject the user text as a conversation item.
+    sendEvent(<String, dynamic>{
+      'type': 'conversation.item.create',
+      'item': <String, dynamic>{
+        'type': 'message',
+        'role': 'user',
+        'content': <Map<String, dynamic>>[
+          <String, dynamic>{'type': 'input_text', 'text': sourceText},
+        ],
+      },
+    });
+
+    // 2) Ask for exactly one response in the requested modality.
+    final response = <String, dynamic>{
+      'instructions': instructions,
+      'output_modalities':
+          suppressAudio ? <String>['text'] : <String>['audio'],
+    };
+    if (!suppressAudio) {
+      response['audio'] = <String, dynamic>{
+        'output': <String, dynamic>{'voice': voice},
+      };
+    }
+    sendEvent(
+        <String, dynamic>{'type': 'response.create', 'response': response});
+    _setTurnState(RealtimeTurnState.responseRequested);
+    _logger?.call(
+        '[RT-TURN]', 'turnId=$turnId start suppress_audio=$suppressAudio');
+
+    _turnTimeoutTimer?.cancel();
+    _turnTimeoutTimer = Timer(turnTimeout, () {
+      if (identical(_activeTurn, turn) && !turn.isSettled) {
+        _logger?.call('[RT-TURN]', 'turnId=$turnId timeout');
+        _endTurn(turn, RealtimeTurnOutcome.timedOut, cancelServer: true);
+      }
+    });
+
+    return turn;
+  }
+
+  /// Cancels the in-flight translation turn, if any, and clears the server
+  /// response so a late one cannot leak into the next turn.
+  void cancelActiveTurn() {
+    final turn = _activeTurn;
+    if (turn == null || turn.isSettled) return;
+    _endTurn(turn, RealtimeTurnOutcome.cancelled, cancelServer: true);
+  }
+
+  void _routeTurnEvent(String type, Map<String, dynamic> payload) {
+    final turn = _activeTurn;
+    if (turn == null || turn.isSettled) return;
+
+    if (type == 'response.created') {
+      turn.responseId ??= (payload['response'] as Map?)?['id']?.toString();
+      return;
+    }
+
+    // Stale-response guard: once bound, ignore events from other responses.
+    final eventResponseId = payload['response_id']?.toString() ??
+        (payload['response'] as Map?)?['id']?.toString();
+    if (turn.responseId != null &&
+        eventResponseId != null &&
+        eventResponseId != turn.responseId) {
+      _emit(RealtimeEventType.staleEventDropped);
+      return;
+    }
+
+    switch (type) {
+      case 'response.output_text.delta':
+      case 'response.output_audio_transcript.delta':
+        turn._emitText(payload['delta']?.toString() ?? '');
+        break;
+      case 'response.output_text.done':
+      case 'response.output_audio_transcript.done':
+        final finalText =
+            payload['text']?.toString() ?? payload['transcript']?.toString();
+        if (finalText != null && finalText.isNotEmpty) {
+          turn._overrideText(finalText);
+        }
+        turn._completeText();
+        break;
+      case 'output_audio_buffer.started':
+        break;
+      case 'output_audio_buffer.stopped':
+        _scheduleAudioComplete(turn);
+        break;
+      case 'response.done':
+        _handleTurnResponseDone(
+            turn, (payload['response'] as Map?)?['status']?.toString());
+        break;
+      case 'error':
+      case 'response.failed':
+        _endTurn(turn, RealtimeTurnOutcome.failed, cancelServer: true);
+        break;
+    }
+  }
+
+  void _scheduleAudioComplete(RealtimeTranslationTurn turn) {
+    _audioTailTimer?.cancel();
+    _audioTailTimer = Timer(_audioStabilization, () {
+      if (!identical(_activeTurn, turn) || turn.isSettled) return;
+      turn._completeAudio();
+      _logger?.call('[RT-AUDIO]', 'turnId=${turn.turnId} playback_done');
+      _maybeSettleTurn(turn);
+    });
+  }
+
+  void _handleTurnResponseDone(RealtimeTranslationTurn turn, String? status) {
+    turn._responseDoneSeen = true;
+    turn._completeText();
+    if (status != null && status != 'completed') {
+      _logger?.call(
+          '[RT-TURN]', 'turnId=${turn.turnId} response_status=$status');
+      _endTurn(turn, RealtimeTurnOutcome.failed, cancelServer: true);
+      return;
+    }
+    // response.done is not proof the speaker finished; wait for the audio buffer
+    // stop (WebRTC) with a stabilization delay, then a hard fallback timeout.
+    if (turn._expectAudio && !turn._audioDone) {
+      _audioTailTimer?.cancel();
+      _audioTailTimer = Timer(_audioTailTimeout, () {
+        if (!identical(_activeTurn, turn) || turn.isSettled) return;
+        turn._completeAudio();
+        _logger?.call('[RT-AUDIO]', 'completion_timeout turnId=${turn.turnId}');
+        _maybeSettleTurn(turn);
+      });
+    }
+    _maybeSettleTurn(turn);
+  }
+
+  void _maybeSettleTurn(RealtimeTranslationTurn turn) {
+    if (turn.isSettled || !turn._responseDoneSeen) return;
+    if (turn._expectAudio && !turn._audioDone) return;
+    _endTurn(turn, RealtimeTurnOutcome.completed, cancelServer: false);
+  }
+
+  void _endTurn(
+    RealtimeTranslationTurn turn,
+    RealtimeTurnOutcome outcome, {
+    required bool cancelServer,
+  }) {
+    if (turn.isSettled) return;
+    if (cancelServer) _sendCancel();
+    _turnTimeoutTimer?.cancel();
+    _audioTailTimer?.cancel();
+    turn._settle(outcome);
+    if (identical(_activeTurn, turn)) _activeTurn = null;
+    _setTurnState(outcome == RealtimeTurnOutcome.completed
+        ? RealtimeTurnState.completed
+        : RealtimeTurnState.failed);
+    _logger?.call('[RT-TURN]', 'turnId=${turn.turnId} ${outcome.name}');
   }
 
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
+    _turnTimeoutTimer?.cancel();
+    _audioTailTimer?.cancel();
+    final active = _activeTurn;
+    _activeTurn = null;
+    if (active != null && !active.isSettled) {
+      active._settle(RealtimeTurnOutcome.cancelled);
+    }
     ++_connectionGeneration;
     _setConnectionState(RealtimeConnectionState.closing);
     for (final track in _localStream?.getTracks() ?? <MediaStreamTrack>[]) {
@@ -277,6 +575,13 @@ class StealthVoxRealtimeSession {
 
   void _sendSessionUpdate(
       {required String voice, required String instructions}) {
+    final audio = <String, dynamic>{
+      'output': <String, dynamic>{'voice': voice},
+    };
+    if (_disableServerVad) {
+      // Text-driven turns must never auto-respond to inbound audio.
+      audio['input'] = <String, dynamic>{'turn_detection': null};
+    }
     sendEvent(<String, dynamic>{
       'type': 'session.update',
       'session': <String, dynamic>{
@@ -284,9 +589,7 @@ class StealthVoxRealtimeSession {
         'model': 'gpt-realtime-2.1-mini',
         'output_modalities': <String>['audio'],
         'instructions': instructions,
-        'audio': <String, dynamic>{
-          'output': <String, dynamic>{'voice': voice},
-        },
+        'audio': audio,
       },
     });
   }
@@ -310,6 +613,7 @@ class StealthVoxRealtimeSession {
         _setTurnState(RealtimeTurnState.failed);
         _emit(RealtimeEventType.error, payload: payload);
       }
+      _routeTurnEvent(type, payload);
       _emit(RealtimeEventType.serverEvent, payload: payload);
     } catch (_) {
       _emit(RealtimeEventType.error);
