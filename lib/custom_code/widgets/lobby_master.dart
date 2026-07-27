@@ -118,8 +118,10 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
       setState(() => FFAppState().nativeLang = "Korean");
     if (FFAppState().targetLang == null || FFAppState().targetLang.isEmpty)
       setState(() => FFAppState().targetLang = "English");
-    if (!["echo", "onyx", "fable"].contains(FFAppState().aiVoice))
-      setState(() => FFAppState().aiVoice = "echo");
+    // 기존 사용자가 저장해 둔 tts-1 전용 voice(onyx/fable)는 Realtime에서 거부되므로
+    // 기본값 verse로 되돌린다.
+    if (!["verse", "cedar", "echo", "ash"].contains(FFAppState().aiVoice))
+      setState(() => FFAppState().aiVoice = "verse");
   }
 
   Future<void> _initializeLobbyData() async {
@@ -391,7 +393,10 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   }
 
   Widget _buildSleekVoiceSelector(String value, Function(String?) onChanged) {
-    final List<String> voices = ["echo", "onyx", "fable"];
+    // 유저 목소리는 Realtime 세션에 그대로 실린다. Realtime이 허용하는 값만 둘 것
+    // — onyx/fable 같은 tts-1 전용 이름을 보내면 session.update가 invalid_value로
+    // 거부되어 세션이 통째로 legacy로 폴백된다.
+    final List<String> voices = ["verse", "cedar", "echo", "ash"];
     return Container(
       height: 54,
       padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -401,7 +406,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           border: Border.all(color: Colors.white12)),
       child: DropdownButtonHideUnderline(
           child: DropdownButton<String>(
-        value: voices.contains(value) ? value : "echo",
+        value: voices.contains(value) ? value : "verse",
         dropdownColor: const Color(0xFF1E1E1E),
         isExpanded: true,
         icon: const Icon(Icons.record_voice_over_rounded,
