@@ -7,6 +7,7 @@ import 'index.dart'; // Imports other custom widgets
 import '/custom_code/actions/index.dart'; // Imports custom actions
 import '/flutter_flow/custom_functions.dart'; // Imports custom functions
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 // Begin custom widget code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
@@ -73,6 +74,36 @@ const List<int> kFreeTalkChunkTtsTimeoutLadderSec = [
 const int kFreeTalkAiResponseMaxTokens = 70;
 const int kFreeTalkMaxTtsCharsPerUtterance = 800;
 
+enum AnyoneTranscriptSource {
+  realtime,
+  deepgramFallback,
+}
+
+enum AnyoneMicOwner {
+  none,
+  realtime,
+  deepgramFallback,
+}
+
+/// 🗣️ [RT-CONV] 한 턴의 비동기 조각들을 turnId로 묶는 레코드.
+/// Realtime 응답(번역+AI 응답), 입력 전사(한국어 원문), 자막 역번역이 각각 다른
+/// 시점에 도착하므로, 이전 턴 데이터가 다음 턴 말풍선·History에 섞이지 않도록
+/// 반드시 이 레코드를 통해서만 결합한다.
+class AnyoneConvTurn {
+  AnyoneConvTurn({required this.turnId, required this.hostIndex});
+
+  final int turnId;
+  final int hostIndex;
+  int? aiIndex;
+  String transcript = '';
+  String translation = '';
+  String reply = '';
+  bool responseDone = false;
+  bool transcriptDone = false;
+  bool saved = false;
+  Timer? saveTimer;
+}
+
 class AnyoneCostTracker {
   AnyoneCostTracker(this.onLog);
 
@@ -127,9 +158,15 @@ class AnyoneCostTracker {
 /// 2: 클래스 선언부]
 /// ====================================================================
 class RoutineModeAnyone extends StatefulWidget {
-  const RoutineModeAnyone({super.key, this.width, this.height});
+  const RoutineModeAnyone({
+    super.key,
+    this.width,
+    this.height,
+    this.onListeningReady,
+  });
   final double? width;
   final double? height;
+  final VoidCallback? onListeningReady;
 
   @override
   State<RoutineModeAnyone> createState() => _RoutineModeAnyoneState();
@@ -146,10 +183,33 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   bool _isConversationActive = false;
   bool _isStartingListening = false;
   bool _isPipelineRunning = false;
+  bool _listeningReadyReported = false;
   Timer? _startupRetryTimer;
   int _startupRetryCount = 0;
   static const int _maxStartupRetries = 12;
   int _listenGeneration = 0;
+  int _realtimeListenGeneration = 0;
+  static const Duration _realtimeFinalTimeout = Duration(seconds: 3);
+  static const Duration _iceDisconnectedGrace = Duration(seconds: 2);
+  static const Duration _realtimeMuteEventGrace =
+      Duration(milliseconds: 250);
+  Timer? _realtimeFinalTimer;
+  String? _realtimeAwaitingItemId;
+  Timer? _iceDisconnectedTimer;
+  bool _realtimeFallbackStarted = false;
+  bool _realtimeFinalAccepted = false;
+  // 🔇 [ANY-RT-EMPTY] server VAD는 숨소리·AI TTS 꼬리·짧은 잡음에도 발화 구간을
+  //   열고 빈 전사를 돌려준다. 이건 Realtime 장애가 아니므로 한 번으로 세션 전체를
+  //   legacy에 고정하지 않는다. 연속으로 이 횟수만큼 비면 진짜 이상으로 보고 폴백.
+  static const int _maxConsecutiveEmptyRealtimeFinals = 3;
+  int _consecutiveEmptyRealtimeFinals = 0;
+  bool _useDeepgramFallbackForSession = false;
+  RealtimeAnyoneAdapter? _realtimeAdapterIdentity;
+  DateTime? _realtimeMicDisabledAt;
+  AnyoneMicOwner _micOwner = AnyoneMicOwner.none;
+  final Set<String> _handledFinalTranscriptIds = <String>{};
+  final Set<String> _activeRealtimeInputItemIds = <String>{};
+  final Set<String> _drainingRealtimeInputItemIds = <String>{};
   DateTime? _lastListenStartAt;
   double _fontScale = 1.0;
   bool _showOriginal = true;
@@ -251,6 +311,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   // 이벤트 종류에 따라 조건부 대기: speech_final=900ms, UtteranceEnd=500ms
   // 대기 중 새 발화 오면 합쳐서 처리 (최종 한 덩어리로)
   String _pendingTranscript = ''; // 대기 중인 유저 발화 누적
+  AnyoneTranscriptSource? _pendingTranscriptSource;
   DateTime? _lastPendingFinalAt;
   Timer? _commitTimer; // "진짜 끝났는지" 확정 타이머
   // 🚀 [SPEC-FIRST-TURN] 첫 턴 투기적 선시작: 대기창 동안 GPT 번역을 미리 돌려
@@ -276,6 +337,291 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     final line = '[$ts] $tag $msg';
     print(line);
     AppLogLedger.instance.add('FREETALK', '$tag $msg');
+  }
+
+  void _reportListeningReady() {
+    if (_listeningReadyReported || !mounted) return;
+    _listeningReadyReported = true;
+    widget.onListeningReady?.call();
+  }
+
+  bool get _hasEnabledRealtimeMicrophone {
+    final adapters = <RealtimeAnyoneAdapter?>[
+      _translateAdapter,
+      _realtimeAnyone,
+    ];
+    for (final adapter in adapters) {
+      final session = adapter?.session;
+      if (session != null &&
+          session.capturesMicrophone &&
+          session.isMicrophoneEnabled) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool _setMicOwner(AnyoneMicOwner next, {required String reason}) {
+    final previous = _micOwner;
+    final realtimeMicEnabled = _hasEnabledRealtimeMicrophone;
+    final hasDeepgramManager = _voiceManager != null;
+    final conflict =
+        next == AnyoneMicOwner.realtime && hasDeepgramManager ||
+            next == AnyoneMicOwner.deepgramFallback && realtimeMicEnabled;
+    if (conflict) {
+      _log(
+        '[ANY-MIC]',
+        'ownership_conflict current=${previous.name} requested=${next.name} '
+            'reason=$reason deepgramActive=$hasDeepgramManager '
+            'realtimeMicEnabled=$realtimeMicEnabled',
+      );
+      return false;
+    }
+    if (previous != next) {
+      _micOwner = next;
+      _log('[ANY-MIC]',
+          'owner_changed from=${previous.name} to=${next.name} reason=$reason');
+    }
+    return true;
+  }
+
+  void _cancelRealtimeFinalTimer({String? itemId}) {
+    final awaitingItemId = _realtimeAwaitingItemId;
+    final timer = _realtimeFinalTimer;
+    _realtimeFinalTimer = null;
+    _realtimeAwaitingItemId = null;
+    timer?.cancel();
+    if (timer != null) {
+      _log('[ANY-RT-STT]',
+          'final_timer_cancelled itemId=${itemId ?? awaitingItemId ?? ''}');
+    }
+  }
+
+  void _startRealtimeFinalTimer({
+    required RealtimeAnyoneAdapter adapter,
+    required String itemId,
+    required int listenGeneration,
+  }) {
+    _cancelRealtimeFinalTimer();
+    _realtimeAwaitingItemId = itemId;
+    _realtimeFinalTimer = Timer(_realtimeFinalTimeout, () {
+      if (!identical(_translateAdapter, adapter) ||
+          listenGeneration != _listenGeneration ||
+          _realtimeAwaitingItemId != itemId ||
+          _realtimeFinalAccepted) {
+        _log('[ANY-RT-FALLBACK]',
+            'stale_dropped reason=final_timeout itemId=$itemId');
+        return;
+      }
+      _realtimeFinalTimer = null;
+      _realtimeAwaitingItemId = null;
+      _log('[ANY-RT-STT]', 'final_timeout itemId=$itemId');
+      unawaited(
+        _requestRealtimeSttFallback(
+          reason: 'final_timeout',
+          adapter: adapter,
+          listenGeneration: listenGeneration,
+          promptRetry: true,
+        ),
+      );
+    });
+    _log('[ANY-RT-STT]',
+        'final_timer_started itemId=$itemId generation=$listenGeneration');
+  }
+
+  void _cancelIceDisconnectedTimer({bool recovered = false}) {
+    final timer = _iceDisconnectedTimer;
+    _iceDisconnectedTimer = null;
+    timer?.cancel();
+    if (recovered && timer != null) {
+      _log('[RT-ICE]', 'recovered');
+    }
+  }
+
+  void _startIceDisconnectedGrace({
+    required RealtimeAnyoneAdapter adapter,
+    required int listenGeneration,
+  }) {
+    _cancelIceDisconnectedTimer();
+    _log('[RT-ICE]', 'disconnected_grace_started');
+    _iceDisconnectedTimer = Timer(_iceDisconnectedGrace, () {
+      _iceDisconnectedTimer = null;
+      unawaited(
+        _requestRealtimeSttFallback(
+          reason: 'ice_disconnected_timeout',
+          adapter: adapter,
+          listenGeneration: listenGeneration,
+          promptRetry: false,
+        ),
+      );
+    });
+  }
+
+  Future<void> _requestRealtimeSttFallback({
+    required String reason,
+    required RealtimeAnyoneAdapter adapter,
+    required int listenGeneration,
+    required bool promptRetry,
+  }) async {
+    _log('[ANY-RT-FALLBACK]',
+        'requested reason=$reason generation=$listenGeneration');
+    if (_realtimeFinalAccepted) {
+      _log('[ANY-RT-FALLBACK]', 'blocked final_already_accepted');
+      return;
+    }
+    if (_realtimeFallbackStarted || _useDeepgramFallbackForSession) {
+      _log('[ANY-RT-FALLBACK]', 'already_started');
+      return;
+    }
+    if (!mounted ||
+        !identical(_translateAdapter, adapter) ||
+        !identical(_realtimeAdapterIdentity, adapter) ||
+        listenGeneration != _listenGeneration ||
+        _isPipelineRunning ||
+        (!_isConversationActive && !_isStartingListening) ||
+        (_micOwner != AnyoneMicOwner.realtime && !_isStartingListening)) {
+      _log('[ANY-RT-FALLBACK]',
+          'stale_dropped reason=$reason generation=$listenGeneration '
+              'current=$_listenGeneration owner=${_micOwner.name}');
+      return;
+    }
+
+    _realtimeFallbackStarted = true;
+    _useDeepgramFallbackForSession = true;
+    _cancelRealtimeFinalTimer();
+    _cancelIceDisconnectedTimer();
+    _activeRealtimeInputItemIds.clear();
+    _drainingRealtimeInputItemIds.clear();
+    final invalidatedGeneration = ++_listenGeneration;
+    _isStartingListening = false;
+
+    if (adapter.session.capturesMicrophone &&
+        adapter.session.isMicrophoneEnabled) {
+      try {
+        adapter.setMicrophoneEnabled(false);
+      } catch (_) {
+        // dispose below remains the authoritative microphone release.
+      }
+    }
+    _translateAdapter = null;
+    _realtimeAdapterIdentity = null;
+    if (identical(_conversationAdapter, adapter)) _conversationAdapter = null;
+    adapter.cancelActiveTurn();
+    try {
+      await adapter.dispose();
+    } catch (error) {
+      _setMicOwner(AnyoneMicOwner.none, reason: 'realtime_release_failed');
+      _log('[ANY-RT-FALLBACK]',
+          'deepgram_failed reason=realtime_release_${error.runtimeType}');
+      return;
+    }
+    _setMicOwner(AnyoneMicOwner.none, reason: 'realtime_fallback_release');
+    _log('[ANY-RT-FALLBACK]', 'realtime_released');
+
+    if (!mounted ||
+        invalidatedGeneration != _listenGeneration ||
+        !_useDeepgramFallbackForSession) {
+      _log('[ANY-RT-FALLBACK]',
+          'stale_dropped reason=release_completed_after_stop');
+      return;
+    }
+    _isConversationActive = true;
+    if (promptRetry) {
+      _log('[ANY-RT-FALLBACK]', 'retry_prompt_started');
+      await _playRetryPromptOnly();
+      if (!mounted ||
+          invalidatedGeneration != _listenGeneration ||
+          !_useDeepgramFallbackForSession) {
+        _log('[ANY-RT-FALLBACK]',
+            'stale_dropped reason=retry_prompt_completed_after_stop');
+        return;
+      }
+      _log('[ANY-RT-FALLBACK]', 'retry_prompt_done');
+    }
+
+    _lastListenStartAt = null;
+    final started = await _startDeepgramListening(force: true);
+    if (started) {
+      _log('[ANY-RT-FALLBACK]', 'deepgram_started');
+    } else {
+      _setMicOwner(AnyoneMicOwner.none, reason: 'deepgram_fallback_failed');
+      _log('[ANY-RT-FALLBACK]', 'deepgram_failed');
+    }
+  }
+
+  String _deepgramSourceTurnId(String transcript, int listenGeneration) {
+    final normalized = transcript.trim().replaceAll(RegExp(r'\s+'), ' ');
+    final fingerprint = normalized.hashCode.toUnsigned(32).toRadixString(16);
+    return 'dg-$listenGeneration-$fingerprint';
+  }
+
+  void _handleFinalUserTranscript({
+    required String transcript,
+    required AnyoneTranscriptSource source,
+    required String sourceTurnId,
+    required int listenGeneration,
+    bool deepgramSpeechFinal = false,
+  }) {
+    final clean = transcript.trim();
+    if (!mounted ||
+        !_isConversationActive ||
+        listenGeneration != _listenGeneration) {
+      _log(
+        '[ANY-STT]',
+        'stale_dropped source=${source.name} turnId=$sourceTurnId '
+            'generation=$listenGeneration current=$_listenGeneration '
+            'len=${clean.length}',
+      );
+      return;
+    }
+
+    final expectedOwner = source == AnyoneTranscriptSource.realtime
+        ? AnyoneMicOwner.realtime
+        : AnyoneMicOwner.deepgramFallback;
+    if (_micOwner != expectedOwner) {
+      _log(
+        '[ANY-MIC]',
+        'ownership_conflict current=${_micOwner.name} '
+            'expected=${expectedOwner.name} source=${source.name} '
+            'turnId=$sourceTurnId',
+      );
+      return;
+    }
+    if (clean.isEmpty) {
+      _log('[ANY-STT]',
+          'stale_dropped source=${source.name} turnId=$sourceTurnId '
+              'generation=$listenGeneration reason=empty len=0');
+      return;
+    }
+
+    final dedupeKey = '${source.name}:$sourceTurnId';
+    if (!_handledFinalTranscriptIds.add(dedupeKey)) {
+      _log(
+        '[ANY-STT]',
+        'duplicate_dropped source=${source.name} turnId=$sourceTurnId '
+            'generation=$listenGeneration len=${clean.length}',
+      );
+      return;
+    }
+    if (_handledFinalTranscriptIds.length > 64) {
+      _handledFinalTranscriptIds.remove(_handledFinalTranscriptIds.first);
+    }
+
+    if (source == AnyoneTranscriptSource.realtime) {
+      _activeSttConfidence = null;
+      _pendingDeepgramResults.clear();
+      _activeProbeDgFinalAt = null;
+    }
+    _log(
+      '[ANY-STT]',
+      'final_received source=${source.name} turnId=$sourceTurnId '
+          'generation=$listenGeneration len=${clean.length}',
+    );
+    _stopMicAndProcess(
+      clean,
+      speechFinal: deepgramSpeechFinal,
+      transcriptSource: source,
+    );
   }
 
   void _onDeepgramTurnResult(DeepgramTurnResult result) {
@@ -392,6 +738,21 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   DeepgramV2VoiceManager? _voiceManager;
   RealtimeAnyoneAdapter? _realtimeAnyone;
   RealtimeAnyoneAdapter? _translateAdapter;
+  // 🗣️ [RT-CONV] guide3 단일 Realtime 검증 경로에서 쓰는 음성 직결 세션.
+  //   _translateAdapter에도 같은 인스턴스를 넣어 기존 ICE/error fallback과
+  //   teardown 로직을 그대로 재사용한다.
+  RealtimeAnyoneAdapter? _conversationAdapter;
+  int _conversationTurnCount = 0;
+  // 한 응답 안에서 "유저 발화의 영어 번역"과 "AI 대화 응답"은 빈 줄로 구분되어
+  // 도착한다. 두 말풍선으로 갈라 담기 위한 인덱스.
+  int? _convHostIndex;
+  int? _convAiIndex;
+  static final RegExp _convPartSeparator = RegExp(r'\n[ \t]*\n');
+  final List<AnyoneConvTurn> _convTurns = <AnyoneConvTurn>[];
+  AnyoneConvTurn? _activeConvTurn;
+  // 응답이 끝났는데 전사가 아직이면 이만큼만 기다렸다가 저장한다(저장이 다음
+  // 턴을 막지 않도록 상한을 둔다).
+  static const Duration _convTranscriptGrace = Duration(seconds: 2);
   bool _translateReconnectTried = false;
   final AudioRecorder _audioRecorder = AudioRecorder();
   late final TtsQueueManager _ttsQueueManager;
@@ -476,6 +837,12 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
   Future<void> _fetchKeys() async {
     final remoteConfig = FirebaseRemoteConfig.instance;
+    if (kDebugMode) {
+      await remoteConfig.setConfigSettings(RemoteConfigSettings(
+        fetchTimeout: const Duration(seconds: 10),
+        minimumFetchInterval: Duration.zero,
+      ));
+    }
 
     // 앱 시작 시 이미 활성화된 값을 먼저 사용한다. 네트워크 fetch가 실패하거나
     // 지연돼도 두 번째 입장까지 기다리지 않고 첫 입장에서 바로 시작할 수 있다.
@@ -541,7 +908,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     // 🆕 첫 진입 race 방지: 키와 마이크 권한이 "둘 다" 준비됐을 때만 시작한다.
     //    준비 안 된 항목이 있으면 조용히 대기 → 키 로드 콜백(_fetchKeys) 또는
     //    권한 콜백(_initPermissions) 중 늦게 끝나는 쪽이 이 함수를 다시 호출해 시작.
-    if (_deepgramKey.isEmpty) {
+    final realtimeEnabled = RealtimeFeatureFlags.enabledFor('anyone');
+    final requiredKeyMissing =
+        realtimeEnabled ? _openAiKey.isEmpty : _deepgramKey.isEmpty;
+    if (requiredKeyMissing) {
       _log('🎤 [START-GATE]', '키 미준비 → 시작 보류');
       return;
     }
@@ -562,11 +932,32 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     _micPermissionReady = true;
     if (!mounted || _isConversationActive) return;
     _hasShownNudgeBubble = false;
-    if (RealtimeFeatureFlags.enabledFor('anyone')) {
+    if (realtimeEnabled) {
+      // 🔀 [HYBRID] 유저 쪽만 Realtime 2.1 mini가 담당한다.
+      //   유저 발화 → Realtime 전사 → Realtime 영어 번역 + 유저 목소리 음성.
+      //   AI 응답은 기존 파이프라인 그대로 gpt-4o-mini + tts-1(nova)이 만든다.
+      //   목소리가 갈려 유저/AI 구분이 되고, Anyone 페르소나 프롬프트도
+      //   기존 gpt-4o-mini 경로에서 그대로 쓰인다.
       _isStartingListening = true;
-      await _ensureTranslateSession();
-      if (!mounted || !_isStartingListening) return;
+      final reservedGeneration = ++_listenGeneration;
+      _realtimeListenGeneration = reservedGeneration;
+      _isConversationActive = true;
+      if (!_setMicOwner(
+        AnyoneMicOwner.realtime,
+        reason: 'realtime_connect_start',
+      )) {
+        _isConversationActive = false;
+        _isStartingListening = false;
+        return;
+      }
+      final connected = await _ensureTranslateSession();
+      if (!mounted) return;
+      if (!connected) return;
+      _reportListeningReady();
+      if (!_isStartingListening) return;
       _isStartingListening = false;
+      await _startRealtimeListening(reservedGeneration: reservedGeneration);
+      return;
     }
     await _startDeepgramListening();
   }
@@ -595,7 +986,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
   Future<bool> _ensureTranslateSession({bool reconnect = false}) async {
     final existing = _translateAdapter;
-    if (_isTranslateSessionUsable(existing)) return true;
+    if (_isTranslateSessionUsable(existing) &&
+        existing?.session.capturesMicrophone == true) {
+      return true;
+    }
     if (reconnect) {
       if (_translateReconnectTried) return false;
       _translateReconnectTried = true;
@@ -609,10 +1003,271 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       }
     }
 
-    final adapter = RealtimeAnyoneAdapter(logger: _log);
+    late final RealtimeAnyoneAdapter adapter;
+    adapter = RealtimeAnyoneAdapter(
+      logger: _log,
+      onSpeechStarted: (itemId) {
+        if (!identical(_translateAdapter, adapter)) return;
+        final generation = _realtimeListenGeneration;
+        if (!adapter.session.isMicrophoneEnabled) {
+          final disabledAt = _realtimeMicDisabledAt;
+          if (disabledAt != null &&
+              DateTime.now().difference(disabledAt) <=
+                  _realtimeMuteEventGrace) {
+            _drainingRealtimeInputItemIds.add(itemId);
+            _log('[ANY-RT-STT]',
+                'delayed_after_mute event=speech_started itemId=$itemId '
+                    'generation=$generation');
+            return;
+          }
+          _log('[ANY-RT-STT]',
+              'transcript_while_muted event=speech_started itemId=$itemId '
+                  'generation=$generation');
+          return;
+        }
+        _cancelRealtimeFinalTimer();
+        _activeRealtimeInputItemIds.add(itemId);
+        _markConversationActivity();
+        if (!TrialFlowState.instance.isTrial) {
+          BillingTicker.instance.resumeFromActivity('free_talk_stt_partial');
+        }
+        _log('[ANY-RT-STT]',
+            'speech_started itemId=$itemId generation=$generation');
+      },
+      onSpeechStopped: (itemId) {
+        if (!identical(_translateAdapter, adapter)) return;
+        final generation = _realtimeListenGeneration;
+        if (!adapter.session.isMicrophoneEnabled) {
+          if (_drainingRealtimeInputItemIds.contains(itemId)) {
+            _log('[ANY-RT-STT]',
+                'delayed_after_mute event=speech_stopped itemId=$itemId '
+                    'generation=$generation');
+            return;
+          }
+          _log('[ANY-RT-STT]',
+              'transcript_while_muted event=speech_stopped itemId=$itemId '
+                  'generation=$generation');
+          return;
+        }
+        _markConversationActivity();
+        _log('[ANY-RT-STT]',
+            'speech_stopped itemId=$itemId generation=$generation');
+        if (!_realtimeFinalAccepted &&
+            !_realtimeFallbackStarted &&
+            _micOwner == AnyoneMicOwner.realtime) {
+          _startRealtimeFinalTimer(
+            adapter: adapter,
+            itemId: itemId,
+            listenGeneration: generation,
+          );
+        }
+      },
+      onUserTranscriptDelta: (itemId, delta, accumulatedText) {
+        if (!identical(_translateAdapter, adapter)) return;
+        final generation = _realtimeListenGeneration;
+        if (!adapter.session.isMicrophoneEnabled) {
+          if (_drainingRealtimeInputItemIds.contains(itemId)) {
+            _log('[ANY-RT-STT]',
+                'delayed_after_mute event=delta itemId=$itemId '
+                    'generation=$generation len=${delta.length}');
+            return;
+          }
+          _log('[ANY-RT-STT]',
+              'transcript_while_muted event=delta itemId=$itemId '
+                  'generation=$generation len=${delta.length}');
+          return;
+        }
+        _markConversationActivity();
+        if (!TrialFlowState.instance.isTrial) {
+          BillingTicker.instance.resumeFromActivity('free_talk_stt_partial');
+        }
+        _log('[ANY-RT-STT]',
+            'transcription_delta itemId=$itemId generation=$generation '
+                'len=${delta.length} accumulatedLen=${accumulatedText.length}');
+      },
+      onUserTranscriptCompleted: (itemId, transcript) {
+        if (!identical(_translateAdapter, adapter) ||
+            !identical(_realtimeAdapterIdentity, adapter)) {
+          _log('[ANY-RT-STT]',
+              'late_completed_dropped itemId=$itemId reason=adapter_replaced');
+          return;
+        }
+        final generation = _realtimeListenGeneration;
+        final clean = transcript.trim();
+        final startedBeforeMute =
+            _drainingRealtimeInputItemIds.remove(itemId);
+        _activeRealtimeInputItemIds.remove(itemId);
+        _log('[ANY-RT-STT]',
+            'final_received itemId=$itemId len=${clean.length} '
+                'generation=$generation');
+        if (_realtimeFallbackStarted ||
+            _useDeepgramFallbackForSession ||
+            generation != _listenGeneration) {
+          _log('[ANY-RT-STT]',
+              'late_completed_dropped itemId=$itemId generation=$generation');
+          return;
+        }
+        if (_realtimeFinalAccepted && !startedBeforeMute) {
+          _log('[ANY-RT-STT]',
+              'late_completed_dropped itemId=$itemId reason=final_already_accepted');
+          return;
+        }
+        if (clean.isEmpty) {
+          if (_realtimeAwaitingItemId == itemId) {
+            _cancelRealtimeFinalTimer(itemId: itemId);
+          }
+          // 🔇 [ANY-RT-EMPTY] 빈 전사는 정상적인 잡음 구간이다. 마이크는 계속
+          //   열려 있으므로 조용히 무시하고 다음 발화를 기다린다. 연속으로
+          //   임계치만큼 비었을 때만 전사 경로 이상으로 보고 폴백한다.
+          _consecutiveEmptyRealtimeFinals++;
+          if (_consecutiveEmptyRealtimeFinals <
+              _maxConsecutiveEmptyRealtimeFinals) {
+            _log(
+              '[ANY-RT-EMPTY]',
+              'ignored itemId=$itemId generation=$generation '
+                  'consecutive=$_consecutiveEmptyRealtimeFinals/'
+                  '$_maxConsecutiveEmptyRealtimeFinals',
+            );
+            return;
+          }
+          _log(
+            '[ANY-RT-EMPTY]',
+            'threshold_reached itemId=$itemId generation=$generation '
+                'consecutive=$_consecutiveEmptyRealtimeFinals → fallback',
+          );
+          unawaited(
+            _requestRealtimeSttFallback(
+              reason: 'empty_completed',
+              adapter: adapter,
+              listenGeneration: generation,
+              promptRetry: true,
+            ),
+          );
+          return;
+        }
+        _consecutiveEmptyRealtimeFinals = 0;
+        if (clean.length < 2) {
+          _handleFinalUserTranscript(
+            transcript: clean,
+            source: AnyoneTranscriptSource.realtime,
+            sourceTurnId: itemId,
+            listenGeneration: generation,
+          );
+          return;
+        }
+        if (_realtimeAwaitingItemId == itemId) {
+          _cancelRealtimeFinalTimer(itemId: itemId);
+        }
+        if (!mounted ||
+            !_isConversationActive ||
+            generation != _listenGeneration ||
+            _micOwner != AnyoneMicOwner.realtime) {
+          _handleFinalUserTranscript(
+            transcript: clean,
+            source: AnyoneTranscriptSource.realtime,
+            sourceTurnId: itemId,
+            listenGeneration: generation,
+          );
+          return;
+        }
+        if (!adapter.session.isMicrophoneEnabled) {
+          if (startedBeforeMute) {
+            _log('[ANY-RT-STT]',
+                'delayed_after_mute event=completed itemId=$itemId '
+                    'generation=$generation len=${clean.length}');
+            _handleFinalUserTranscript(
+              transcript: clean,
+              source: AnyoneTranscriptSource.realtime,
+              sourceTurnId: itemId,
+              listenGeneration: generation,
+            );
+            return;
+          }
+          _log('[ANY-RT-STT]',
+              'transcript_while_muted event=completed itemId=$itemId '
+                  'generation=$generation len=${clean.length}');
+          return;
+        }
+        _markConversationActivity();
+        if (!TrialFlowState.instance.isTrial) {
+          BillingTicker.instance.resumeFromActivity('free_talk_stt_result');
+        }
+        try {
+          _cancelRealtimeFinalTimer(itemId: itemId);
+          _drainingRealtimeInputItemIds
+              .addAll(_activeRealtimeInputItemIds);
+          _activeRealtimeInputItemIds.clear();
+          adapter.setMicrophoneEnabled(false);
+          _realtimeMicDisabledAt = DateTime.now();
+          _realtimeFinalAccepted = true;
+          _log('[ANY-MIC]',
+              'realtime_disabled_for_pipeline generation=$generation');
+        } catch (error) {
+          _log('[ANY-RT-STT]',
+              'microphone_disable_failed reason=${error.runtimeType}');
+          return;
+        }
+        _handleFinalUserTranscript(
+          transcript: clean,
+          source: AnyoneTranscriptSource.realtime,
+          sourceTurnId: itemId,
+          listenGeneration: generation,
+        );
+      },
+      onConnectionStateChanged: (state) {
+        if (!identical(_translateAdapter, adapter)) return;
+        if (state == RealtimeConnectionState.failed) {
+          unawaited(
+            _requestRealtimeSttFallback(
+              reason: 'connection_failed',
+              adapter: adapter,
+              listenGeneration: _realtimeListenGeneration,
+              promptRetry: false,
+            ),
+          );
+        }
+      },
+      onIceStateChanged: (state) {
+        if (!identical(_translateAdapter, adapter)) return;
+        final generation = _realtimeListenGeneration;
+        if (state == 'failed') {
+          _cancelIceDisconnectedTimer();
+          unawaited(
+            _requestRealtimeSttFallback(
+              reason: 'ice_failed',
+              adapter: adapter,
+              listenGeneration: generation,
+              promptRetry: false,
+            ),
+          );
+        } else if (state == 'disconnected') {
+          if (!_realtimeFinalAccepted && !_isPipelineRunning) {
+            _startIceDisconnectedGrace(
+              adapter: adapter,
+              listenGeneration: generation,
+            );
+          }
+        } else if (state == 'connected' || state == 'completed') {
+          _cancelIceDisconnectedTimer(recovered: true);
+        }
+      },
+      onError: (error) {
+        if (!identical(_translateAdapter, adapter)) return;
+        _log('[ANY-RT-STT]', 'session_error reason=${error.runtimeType}');
+        unawaited(
+          _requestRealtimeSttFallback(
+            reason: 'session_error_${error.runtimeType}',
+            adapter: adapter,
+            listenGeneration: _realtimeListenGeneration,
+            promptRetry: false,
+          ),
+        );
+      },
+    );
     _translateAdapter = adapter;
+    _realtimeAdapterIdentity = adapter;
     try {
-      await adapter.connectForTranslation(
+      await adapter.connectForMicrophoneTranscription(
         modeSessionId:
             _sessionDocId ?? 'anyone-${DateTime.now().microsecondsSinceEpoch}',
         voice: _currentUserVoice,
@@ -620,27 +1275,402 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       );
       final usable = await _waitForTranslateSessionUsable(adapter);
       if (!usable) {
-        await adapter.dispose();
-        if (identical(_translateAdapter, adapter)) {
-          _translateAdapter = null;
-        }
+        await _requestRealtimeSttFallback(
+          reason: 'session_not_usable',
+          adapter: adapter,
+          listenGeneration: _realtimeListenGeneration,
+          promptRetry: false,
+        );
         return false;
       }
-      _log('🔐 [RT-TRANSLATE]', 'secure translation session ready');
+      _log('🔐 [RT-TRANSLATE]',
+          'secure translation and transcription session ready');
       return true;
     } catch (error) {
-      _log('❌ [RT-TRANSLATE]', 'connect failed: $error');
-      await adapter.dispose();
-      if (identical(_translateAdapter, adapter)) {
-        _translateAdapter = null;
-      }
+      _log('❌ [RT-TRANSLATE]',
+          'connect failed reason=${error.runtimeType}');
+      await _requestRealtimeSttFallback(
+        reason: 'connect_${error.runtimeType}',
+        adapter: adapter,
+        listenGeneration: _realtimeListenGeneration,
+        promptRetry: false,
+      );
       return false;
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // 🗣️ [RT-CONV] 단일 Realtime 음성 대화 경로 (guide3 검증 빌드)
+  //   유저 한국어 음성 → gpt-realtime-2.1-mini가 직접 이해 → 영어 번역문을
+  //   말하고 이어서 대화 응답까지 한 응답(response.create 1회)으로 출력 →
+  //   WebRTC remote audio로 즉시 재생. Deepgram/GPT-4.1/gpt-4o-mini/tts-1
+  //   미사용.
+  // ══════════════════════════════════════════════════════════════════
+  String _buildConversationInstructions() {
+    final targetLang = FFAppState().targetLang.isNotEmpty
+        ? FFAppState().targetLang
+        : 'English';
+    final nativeLang =
+        FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
+    // 성격 규정은 기존 Anyone 클론 응답 프롬프트를 그대로 쓴다. 여기에 제약을
+    // 더 얹지 말 것 — 조건을 겹겹이 쌓으면 mini 모델이 오히려 무너진다.
+    // 한 응답에 "유저 발화의 영어 번역"과 "그 사람의 답"을 함께 담아야 하므로
+    // 그 최소한의 출력 형식만 앞에 붙인다.
+    return '''Each time the user speaks, you say two things, in two paragraphs with one blank line between them.
+
+First paragraph: what the user just said, in natural everyday $targetLang, as if they had said it themselves. Their words, not your answer. Keep their meaning exactly — negation, tense, who did what to whom, place and time. $nativeLang drops subjects, so restore them from context.
+
+Second paragraph: your reply as the person below. The first paragraph is the user speaking; the second is you answering them. Never mix the two.
+
+You are role-playing as the specific person the user has in mind and is speaking to.
+You do NOT know who that person is — a partner, a parent, a boss, an old friend, someone they drifted apart from. Work it out silently from how they speak.
+From their tone, what they call you, the topic, the emotion, the history they assume — quietly infer who you are to them, and become that person.
+
+OUTPUT LANGUAGE: $targetLang ONLY. Zero Korean characters in output.
+
+[ABSOLUTE RULES]
+- NEVER reveal you are guessing or analyzing. Never name the relationship, never ask "who am I to you?", never say things like "we go way back" or "as your ___". No meta-comments about who they might be talking to.
+- Just respond AS that person would — their likely tone, attitude, and feelings. Stay fully in character.
+- As the conversation continues, become more consistent and more precisely that person.
+- If the user pushes back because your reaction feels off (e.g. "why would you say that?"), answer in character and naturally shift toward the person they seem to be speaking to.
+- Never say you are an AI or a language model.
+
+$kAnyoneDeliberateReplyPolicy
+
+[STYLE]
+- Respond in $targetLang only. Usually ONE short sentence; use two only when truly needed.
+- Ask at most ONE question. Leave room for the user to speak next.
+- No greetings, no "I understand", no prefixes. Just speak as that person.
+- If the audio is garbled or impossible to make out (a speech recognition error), ask them to repeat, in character, in $targetLang.
+- Never speak labels such as "Translation" or "My response", and never read quotation marks or brackets aloud.
+
+Learner level: ${FreeTalkBrain._freeTalkLevelInstruction(_freeTalkLevel)}''';
+  }
+
+  /// 🗣️ [RT-CONV] 한 턴이 끝나면 History에 저장한다. 전부 백그라운드이며 음성
+  /// 재생이나 다음 턴 시작을 막지 않는다.
+  ///  - HOST : original_text = 입력 전사(한국어 원문), translated_text = 영어 번역
+  ///  - SYSTEM: original_text = gpt-4o-mini 역번역 자막, translated_text = 영어 응답
+  Future<void> _saveConvTurn(AnyoneConvTurn turn) async {
+    if (turn.saved) return;
+    turn.saved = true;
+    turn.saveTimer?.cancel();
+    turn.saveTimer = null;
+
+    // SYSTEM 한국어 자막: 번역 엔진이 아니라 자막 생성용 호출이다.
+    String aiOriginal = '';
+    if (turn.reply.trim().isNotEmpty) {
+      try {
+        aiOriginal = await FreeTalkBrain.generateCleanOriginal(
+          apiKey: _openAiKey,
+          englishText: turn.reply,
+        );
+        _log('[ANY-SUBTITLE-KO]',
+            'turn=${turn.turnId} model=gpt-4o-mini purpose=system_subtitle_backtranslation '
+                'len=${aiOriginal.length}');
+        final aiIndex = turn.aiIndex;
+        if (mounted && aiIndex != null && aiIndex < _localMessages.length) {
+          setState(() => _localMessages[aiIndex]['original'] = aiOriginal);
+        }
+      } catch (error) {
+        _log('[ANY-SUBTITLE-KO]',
+            'turn=${turn.turnId} failed reason=${error.runtimeType}');
+      }
+    }
+
+    final hostLine = <String, dynamic>{
+      'role': 'HOST',
+      'original_text': turn.transcript,
+      'translated_text': turn.translation,
+    };
+    final systemLine = <String, dynamic>{
+      'role': 'SYSTEM',
+      'original_text': aiOriginal,
+      'translated_text': turn.reply,
+    };
+    _saveTurnToFirestore([hostLine, systemLine]);
+    _saveHistoryMessages([hostLine, systemLine]);
+    _saveRecentHistory(turn.translation, turn.reply);
+    _log(
+      '[ANY-HISTORY-SAVE]',
+      'turn=${turn.turnId} host_original_len=${turn.transcript.length} '
+          'host_translated_len=${turn.translation.length} '
+          'system_original_len=${aiOriginal.length} '
+          'system_translated_len=${turn.reply.length}',
+    );
+  }
+
+  Future<bool> _waitForConversationSessionReady(
+      RealtimeAnyoneAdapter adapter) async {
+    const pollInterval = Duration(milliseconds: 50);
+    final deadline = DateTime.now().add(const Duration(seconds: 6));
+    while (mounted &&
+        identical(_conversationAdapter, adapter) &&
+        DateTime.now().isBefore(deadline)) {
+      final state = adapter.session.connectionState;
+      if (state == RealtimeConnectionState.ready) return true;
+      if (state == RealtimeConnectionState.failed ||
+          state == RealtimeConnectionState.closed) {
+        return false;
+      }
+      await Future<void>.delayed(pollInterval);
+    }
+    return mounted &&
+        identical(_conversationAdapter, adapter) &&
+        adapter.session.connectionState == RealtimeConnectionState.ready;
+  }
+
+  Future<void> _startAnyoneConversationSession() async {
+    if (_conversationAdapter != null || _isStartingListening) return;
+    _isStartingListening = true;
+    final reservedGeneration = ++_listenGeneration;
+    _realtimeListenGeneration = reservedGeneration;
+    _isConversationActive = true;
+    if (!_setMicOwner(
+      AnyoneMicOwner.realtime,
+      reason: 'realtime_conversation_start',
+    )) {
+      _isConversationActive = false;
+      _isStartingListening = false;
+      return;
+    }
+
+    late final RealtimeAnyoneAdapter adapter;
+    adapter = RealtimeAnyoneAdapter(
+      logger: _log,
+      onSpeechStarted: (itemId) {
+        if (!identical(_conversationAdapter, adapter)) return;
+        _markConversationActivity();
+        if (!TrialFlowState.instance.isTrial) {
+          BillingTicker.instance.resumeFromActivity('free_talk_rt_speech');
+        }
+        _log('[ANY-RT-CONV]', 'speech_started itemId=$itemId');
+      },
+      onSpeechStopped: (itemId) {
+        if (!identical(_conversationAdapter, adapter)) return;
+        _markConversationActivity();
+        _log('[ANY-RT-CONV]', 'speech_stopped itemId=$itemId');
+      },
+      onUserTranscriptCompleted: (itemId, transcript) {
+        // 전사는 응답과 무관하게 병렬로 도착한다. HOST 한국어 원문과 History
+        // 저장에만 쓰고, 절대 응답 시작을 기다리게 하지 않는다.
+        if (!identical(_conversationAdapter, adapter) || !mounted) return;
+        final clean = transcript.trim();
+        if (clean.isEmpty) return;
+        AnyoneConvTurn? target;
+        for (final t in _convTurns) {
+          if (!t.transcriptDone) {
+            target = t;
+            break;
+          }
+        }
+        if (target == null) {
+          _log('[ANY-RT-TRANSCRIPT]',
+              'unmatched itemId=$itemId len=${clean.length} (버려짐)');
+          return;
+        }
+        target.transcript = clean;
+        target.transcriptDone = true;
+        _log('[ANY-RT-TRANSCRIPT]',
+            'turn=${target.turnId} len=${clean.length} text="$clean"');
+        if (target.hostIndex < _localMessages.length) {
+          setState(() =>
+              _localMessages[target!.hostIndex]['original'] = clean);
+        }
+        if (target.responseDone && !target.saved) {
+          target.saveTimer?.cancel();
+          unawaited(_saveConvTurn(target));
+        }
+      },
+      onResponseStarted: () {
+        if (!identical(_conversationAdapter, adapter) || !mounted) return;
+        _conversationTurnCount++;
+        _markConversationActivity();
+        setState(() {
+          _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+          _localMessages.add({'role': 'HOST', 'target': '', 'original': ''});
+          _convHostIndex = _localMessages.length - 1;
+          _convAiIndex = null;
+        });
+        final turn = AnyoneConvTurn(
+          turnId: _conversationTurnCount,
+          hostIndex: _convHostIndex!,
+        );
+        _convTurns.add(turn);
+        _activeConvTurn = turn;
+        if (_convTurns.length > 12) {
+          final stale = _convTurns.removeAt(0);
+          stale.saveTimer?.cancel();
+        }
+        _scrollToBottomThrottled();
+      },
+      onAssistantTranscript: (text) {
+        if (!identical(_conversationAdapter, adapter) || !mounted) return;
+        final hostIndex = _convHostIndex;
+        if (hostIndex == null || hostIndex >= _localMessages.length) return;
+        final match = _convPartSeparator.firstMatch(text);
+        setState(() {
+          if (match == null) {
+            // 아직 번역부만 도착한 상태.
+            _localMessages[hostIndex]['target'] = text.trim();
+            return;
+          }
+          _localMessages[hostIndex]['target'] =
+              text.substring(0, match.start).trim();
+          final reply = text.substring(match.end).trim();
+          var aiIndex = _convAiIndex;
+          if (aiIndex == null) {
+            _localMessages.add({'role': 'SYSTEM', 'target': '', 'original': ''});
+            aiIndex = _localMessages.length - 1;
+            _convAiIndex = aiIndex;
+          }
+          if (aiIndex < _localMessages.length) {
+            _localMessages[aiIndex]['target'] = reply;
+          }
+        });
+        final turn = _activeConvTurn;
+        if (turn != null) {
+          turn.aiIndex = _convAiIndex;
+          turn.translation =
+              (_localMessages[hostIndex]['target'] ?? '').toString();
+          final ai = _convAiIndex;
+          turn.reply = (ai != null && ai < _localMessages.length)
+              ? (_localMessages[ai]['target'] ?? '').toString()
+              : '';
+        }
+        _scrollToBottomThrottled();
+      },
+      onResponseDone: () {
+        if (!identical(_conversationAdapter, adapter)) return;
+        _markConversationActivity();
+        final turn = _activeConvTurn;
+        if (turn == null) return;
+        turn.responseDone = true;
+        _log(
+          '[ANY-RT-TEXT]',
+          'turn=${turn.turnId} split=${turn.aiIndex != null} '
+              'translation="${turn.translation}" reply="${turn.reply}"',
+        );
+        _log('[ANY-RT-CONV]', 'response_done turn=${turn.turnId}');
+        if (turn.transcriptDone) {
+          unawaited(_saveConvTurn(turn));
+          return;
+        }
+        // 전사가 아직이면 짧게만 기다린다. 저장은 백그라운드이므로 음성 재생과
+        // 다음 턴 시작을 막지 않는다.
+        turn.saveTimer?.cancel();
+        turn.saveTimer = Timer(_convTranscriptGrace, () {
+          if (!turn.saved) {
+            _log('[ANY-RT-TRANSCRIPT]',
+                'turn=${turn.turnId} timeout → 원문 없이 저장');
+            unawaited(_saveConvTurn(turn));
+          }
+        });
+      },
+      onConnectionStateChanged: (state) {
+        if (!identical(_conversationAdapter, adapter)) return;
+        if (state == RealtimeConnectionState.failed) {
+          unawaited(_requestRealtimeSttFallback(
+            reason: 'connection_failed',
+            adapter: adapter,
+            listenGeneration: _realtimeListenGeneration,
+            promptRetry: false,
+          ));
+        }
+      },
+      onIceStateChanged: (state) {
+        if (!identical(_conversationAdapter, adapter)) return;
+        if (state == 'failed') {
+          _cancelIceDisconnectedTimer();
+          unawaited(_requestRealtimeSttFallback(
+            reason: 'ice_failed',
+            adapter: adapter,
+            listenGeneration: _realtimeListenGeneration,
+            promptRetry: false,
+          ));
+        } else if (state == 'disconnected') {
+          _startIceDisconnectedGrace(
+            adapter: adapter,
+            listenGeneration: _realtimeListenGeneration,
+          );
+        } else if (state == 'connected' || state == 'completed') {
+          _cancelIceDisconnectedTimer(recovered: true);
+        }
+      },
+      onError: (error) {
+        if (!identical(_conversationAdapter, adapter)) return;
+        _log('[ANY-RT-CONV]', 'session_error reason=${error.runtimeType}');
+        unawaited(_requestRealtimeSttFallback(
+          reason: 'session_error_${error.runtimeType}',
+          adapter: adapter,
+          listenGeneration: _realtimeListenGeneration,
+          promptRetry: false,
+        ));
+      },
+    );
+    _conversationAdapter = adapter;
+    // 기존 fallback/teardown 경로가 참조하는 핸들을 같은 인스턴스로 맞춘다.
+    _translateAdapter = adapter;
+    _realtimeAdapterIdentity = adapter;
+
+    try {
+      await adapter.connectForConversation(
+        modeSessionId:
+            _sessionDocId ?? 'anyone-${DateTime.now().microsecondsSinceEpoch}',
+        instructions: _buildConversationInstructions(),
+        voice: _currentUserVoice,
+        allowWhenDisabled: true,
+      );
+      final ready = await _waitForConversationSessionReady(adapter);
+      if (!mounted) return;
+      if (!ready) {
+        _log('❌ [ANY-RT-CONV]', 'session_not_ready');
+        _isStartingListening = false;
+        await _requestRealtimeSttFallback(
+          reason: 'session_not_usable',
+          adapter: adapter,
+          listenGeneration: reservedGeneration,
+          promptRetry: false,
+        );
+        return;
+      }
+      _isStartingListening = false;
+      _resetIdleTimer();
+      _lastListenStartAt = DateTime.now();
+      if (!TrialFlowState.instance.isTrial) {
+        BillingTicker.instance.resumeFromActivity('free_talk_mic_start');
+      }
+      _log('🗣️ [ANY-RT-CONV]',
+          'session_ready voice=$_currentUserVoice generation=$reservedGeneration');
+      _reportListeningReady();
+      if (mounted) {
+        setState(() {
+          _debugResult = "⏱️ 듣는 중...";
+          _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+        });
+      }
+      if (_localMessages.isEmpty && !_hasShownNudgeBubble) {
+        _showNudgeBubbleOnce();
+      }
+    } catch (error) {
+      _log('❌ [ANY-RT-CONV]', 'connect_failed reason=${error.runtimeType}');
+      _isStartingListening = false;
+      await _requestRealtimeSttFallback(
+        reason: 'connect_${error.runtimeType}',
+        adapter: adapter,
+        listenGeneration: reservedGeneration,
+        promptRetry: false,
+      );
     }
   }
 
   void _stopTranslateSession() {
     final adapter = _translateAdapter;
     _translateAdapter = null;
+    if (identical(_conversationAdapter, adapter)) _conversationAdapter = null;
+    if (identical(_realtimeAdapterIdentity, adapter)) {
+      _realtimeAdapterIdentity = null;
+    }
     adapter?.cancelActiveTurn();
     if (adapter != null) unawaited(adapter.dispose());
   }
@@ -829,6 +1859,22 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     _isStartingListening = false;
     _isPipelineRunning = false;
     _listenGeneration++;
+    _cancelRealtimeFinalTimer();
+    _cancelIceDisconnectedTimer();
+    _realtimeFallbackStarted = false;
+    _realtimeFinalAccepted = false;
+    _consecutiveEmptyRealtimeFinals = 0;
+    _conversationTurnCount = 0;
+    _convHostIndex = null;
+    _convAiIndex = null;
+    for (final t in _convTurns) {
+      t.saveTimer?.cancel();
+    }
+    _convTurns.clear();
+    _activeConvTurn = null;
+    _useDeepgramFallbackForSession = false;
+    _realtimeAdapterIdentity = null;
+    _realtimeMicDisabledAt = null;
     _commitTimer?.cancel(); // 🔧 [v3.4] 대기 중 타이머 정리
     _commitTimer = null;
     _cancelSpeculativeTranslation(); // 🚀 [SPEC] 진행 중 투기 번역 정리
@@ -837,13 +1883,18 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     _cancelPrewarmedRealtimeVoice(); // 🔥 [RT-PREWARM] 선점 소켓 정리
     _translateAdapter?.cancelActiveTurn();
     _pendingTranscript = ''; // 대기 중 발화도 버림
+    _pendingTranscriptSource = null;
     _lastPendingFinalAt = null;
+    _handledFinalTranscriptIds.clear();
+    _activeRealtimeInputItemIds.clear();
+    _drainingRealtimeInputItemIds.clear();
     _pendingDeepgramResults.clear();
     _activeProbeDgFinalAt = null;
     _awaitingAiFirstTextProbe = false;
     _awaitingAiFirstAudioProbe = false;
     _voiceManager?.dispose();
     _voiceManager = null;
+    _setMicOwner(AnyoneMicOwner.none, reason: 'stop_everything');
     _stopRealtimeAnyoneSession();
     _stopTranslateSession();
     _ttsQueueManager.stop();
@@ -887,24 +1938,145 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     if (lastHostIdx >= 0) _localMessages.removeAt(lastHostIdx);
   }
 
-  Future<void> _startDeepgramListening() async {
+  void _restartConfiguredListening({int? expectedPipelineGeneration}) {
+    if (RealtimeFeatureFlags.enabledFor('anyone') &&
+        !_useDeepgramFallbackForSession) {
+      unawaited(
+        _startRealtimeListening(
+          afterPipeline: true,
+          expectedPipelineGeneration: expectedPipelineGeneration,
+        ),
+      );
+      return;
+    }
+    unawaited(_startDeepgramListening().then<void>((_) {}));
+  }
+
+  Future<void> _startRealtimeListening({
+    bool afterPipeline = false,
+    int? expectedPipelineGeneration,
+    int? reservedGeneration,
+  }) async {
+    if (!mounted ||
+        (expectedPipelineGeneration != null &&
+            expectedPipelineGeneration != _pipelineGeneration)) {
+      _log('[ANY-RT-STT]', 'listening_start_ignored reason=stale_generation');
+      return;
+    }
     if (_isStartingListening) {
-      _log('🎤 [LISTEN-SKIP]', 'already starting');
+      _log('[ANY-RT-STT]', 'listening_start_ignored reason=already_starting');
       return;
     }
     if (_isPipelineRunning) {
-      _log('🎤 [LISTEN-SKIP]', 'pipeline running');
+      _log('[ANY-RT-STT]', 'listening_start_ignored reason=pipeline_running');
       return;
     }
     if (_ttsQueueManager.isBusy) {
-      _log('🎤 [LISTEN-SKIP]', 'tts busy');
+      _log('[ANY-RT-STT]', 'listening_start_ignored reason=tts_busy');
       return;
     }
+
+    final adapter = _translateAdapter;
+    if (!_isTranslateSessionUsable(adapter) ||
+        adapter?.session.capturesMicrophone != true) {
+      _log('[ANY-RT-STT]', 'listening_start_failed reason=session_not_usable');
+      if (adapter != null) {
+        _realtimeFinalAccepted = false;
+        unawaited(
+          _requestRealtimeSttFallback(
+            reason: 'restart_session_not_usable',
+            adapter: adapter,
+            listenGeneration: _realtimeListenGeneration,
+            promptRetry: false,
+          ),
+        );
+      }
+      return;
+    }
+    if (!_setMicOwner(
+      AnyoneMicOwner.realtime,
+      reason: afterPipeline ? 'pipeline_complete' : 'realtime_listen_start',
+    )) {
+      return;
+    }
+
+    _isStartingListening = true;
+    final generation = reservedGeneration != null &&
+            reservedGeneration == _listenGeneration
+        ? reservedGeneration
+        : ++_listenGeneration;
+    _realtimeListenGeneration = generation;
+    _realtimeFinalAccepted = false;
+    _consecutiveEmptyRealtimeFinals = 0;
+    _cancelRealtimeFinalTimer();
+    _cancelIceDisconnectedTimer();
+    _activeRealtimeInputItemIds.clear();
+    _drainingRealtimeInputItemIds.clear();
+    try {
+      if (!identical(_translateAdapter, adapter) ||
+          !mounted ||
+          (expectedPipelineGeneration != null &&
+              expectedPipelineGeneration != _pipelineGeneration)) {
+        _setMicOwner(AnyoneMicOwner.none, reason: 'realtime_start_stale');
+        return;
+      }
+      if (!adapter!.session.isMicrophoneEnabled) {
+        _activeRealtimeInputItemIds.clear();
+        _drainingRealtimeInputItemIds.clear();
+        adapter.setMicrophoneEnabled(true);
+        _realtimeMicDisabledAt = null;
+        if (afterPipeline) {
+          _log('[ANY-MIC]',
+              'realtime_enabled_after_pipeline generation=$generation');
+        }
+      }
+      _resetIdleTimer();
+      _isConversationActive = true;
+      _lastListenStartAt = DateTime.now();
+      if (!TrialFlowState.instance.isTrial) {
+        BillingTicker.instance.resumeFromActivity('free_talk_mic_start');
+      }
+      if (mounted) {
+        setState(() {
+          _debugResult = "⏱️ 듣는 중...";
+          _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+        });
+      }
+      _log('[ANY-RT-STT]', 'listening_started generation=$generation');
+      _reportListeningReady();
+      if (_localMessages.isEmpty && !_hasShownNudgeBubble) {
+        _showNudgeBubbleOnce();
+      }
+    } catch (error) {
+      _setMicOwner(AnyoneMicOwner.none, reason: 'realtime_start_error');
+      _log('[ANY-RT-STT]',
+          'listening_start_failed reason=${error.runtimeType}');
+    } finally {
+      if (generation == _listenGeneration) {
+        _isStartingListening = false;
+      }
+    }
+  }
+
+  Future<bool> _startDeepgramListening({bool force = false}) async {
+    if (_isStartingListening) {
+      _log('🎤 [LISTEN-SKIP]', 'already starting');
+      return false;
+    }
+    if (_isPipelineRunning) {
+      _log('🎤 [LISTEN-SKIP]', 'pipeline running');
+      return false;
+    }
+    if (_ttsQueueManager.isBusy) {
+      _log('🎤 [LISTEN-SKIP]', 'tts busy');
+      return false;
+    }
     final now = DateTime.now();
-    if (_lastListenStartAt != null &&
+    if (!force &&
+        _lastListenStartAt != null &&
         now.difference(_lastListenStartAt!) < const Duration(seconds: 1)) {
       _log('🎤 [LISTEN-SKIP]', 'called again within 1s');
-      return;
+      return false;
     }
 
     _isStartingListening = true;
@@ -914,7 +2086,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
     try {
       if (_deepgramKey.isEmpty) {
-        return;
+        return false;
       }
       bool hasPermission = _micPermissionReady;
       if (!hasPermission) {
@@ -927,16 +2099,27 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         }
       }
       if (!hasPermission) {
-        return;
+        return false;
       }
       _micPermissionReady = true;
-      if (!mounted || listenGeneration != _listenGeneration) return;
+      if (!mounted || listenGeneration != _listenGeneration) return false;
+      if (_hasEnabledRealtimeMicrophone) {
+        _log('[ANY-MIC]',
+            'ownership_conflict current=${_micOwner.name} '
+                'requested=${AnyoneMicOwner.deepgramFallback.name} '
+                'reason=realtime_not_released');
+        return false;
+      }
       _resetIdleTimer();
       _isConversationActive = true;
-      // 발화가 끝난 뒤 확정 대기창에서 연결을 시작하면 TLS 연결이
-      // 크리티컬 패스에 남는다. 첫 청취 시작과 동시에 토큰 비용 없는
-      // Realtime 소켓을 열어 실제 발화가 끝날 때는 바로 요청할 수 있게 한다.
-      _startPrewarmedRealtimeVoice();
+      // Feature Flag OFF의 기존 첫 턴 경로에서만 WebSocket을 선점한다.
+      // Flag ON은 이미 연결된 공유 WebRTC 세션을 사용한다.
+      if (!RealtimeFeatureFlags.enabledFor('anyone') &&
+          !_isTranslateSessionUsable()) {
+        _startPrewarmedRealtimeVoice();
+      } else {
+        _cancelPrewarmedRealtimeVoice();
+      }
       if (mounted) {
         setState(() {
           _debugResult = "⏱️ 듣는 중...";
@@ -1019,7 +2202,14 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
               'onTurnEnded 콜백 수신: len=${transcript.length} speechFinal=$speechFinal');
           _swDeepgram.stop();
           // source(speechFinal)를 인자로 직접 전달 → 비동기 다음 이벤트에 상태값이 덮이는 위험 제거
-          _stopMicAndProcess(transcript, speechFinal: speechFinal);
+          _handleFinalUserTranscript(
+            transcript: transcript,
+            source: AnyoneTranscriptSource.deepgramFallback,
+            sourceTurnId:
+                _deepgramSourceTurnId(transcript, listenGeneration),
+            listenGeneration: listenGeneration,
+            deepgramSpeechFinal: speechFinal,
+          );
         },
         onError: (err) {
           if (!isCurrentGeneration()) {
@@ -1046,15 +2236,35 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       );
       _log('🎤 [LISTEN-04]', 'connectAndStart 호출 직전');
       await _voiceManager!.connectAndStart();
+      if (!mounted || listenGeneration != _listenGeneration) {
+        await _voiceManager?.dispose();
+        _voiceManager = null;
+        return false;
+      }
+      if (!_setMicOwner(AnyoneMicOwner.deepgramFallback,
+          reason: 'deepgram_connected')) {
+        await _voiceManager?.dispose();
+        _voiceManager = null;
+        return false;
+      }
       if (!TrialFlowState.instance.isTrial) {
         BillingTicker.instance.resumeFromActivity('free_talk_mic_start');
       }
       _log('🎤 [LISTEN-05]', 'connectAndStart 완료');
+      _reportListeningReady();
 
       // 🆕 [즉시 안내 말풍선] 첫 턴이면 마이크 연결 직후 바로 표시 (텍스트라 겹침 걱정 없음)
       if (_localMessages.isEmpty && !_hasShownNudgeBubble) {
         _showNudgeBubbleOnce();
       }
+      return true;
+    } catch (error) {
+      await _voiceManager?.dispose();
+      _voiceManager = null;
+      _setMicOwner(AnyoneMicOwner.none, reason: 'deepgram_connect_failed');
+      _log('❌ [LISTEN-ERR]',
+          'Deepgram start failed reason=${error.runtimeType}');
+      return false;
     } finally {
       if (listenGeneration == _listenGeneration) {
         _isStartingListening = false;
@@ -1066,7 +2276,12 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   // 조건부 대기창(speech_final=900ms, UtteranceEnd=500ms) 안에서 추가 발화 합치기
   // → 완전히 끝나면 파이프라인 시작
   // speechFinal은 인자로 직접 받아 이 함수 안에서만 사용 (상태 필드 미사용)
-  void _stopMicAndProcess(String transcript, {bool speechFinal = false}) async {
+  void _stopMicAndProcess(
+    String transcript, {
+    bool speechFinal = false,
+    AnyoneTranscriptSource transcriptSource =
+        AnyoneTranscriptSource.deepgramFallback,
+  }) async {
     _resetIdleTimer();
     final clean = transcript.trim();
     final source = speechFinal ? 'speech_final' : 'utterance_end';
@@ -1085,6 +2300,17 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       _log('🔀 [STOP-02]', '너무 짧음 → 무시');
       return;
     }
+
+    if (_pendingTranscript.isNotEmpty &&
+        _pendingTranscriptSource != transcriptSource) {
+      _log(
+        '[ANY-MIC]',
+        'ownership_conflict pendingSource=${_pendingTranscriptSource?.name} '
+            'incomingSource=${transcriptSource.name}',
+      );
+      return;
+    }
+    _pendingTranscriptSource ??= transcriptSource;
 
     // 🔧 기존 대기 중인 발화가 있으면 공백으로 연결 (더듬거림 합치기)
     final finalReceivedAt = DateTime.now();
@@ -1143,9 +2369,11 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         _cancelPrefetchedFirstUtteranceJudge();
       }
     }
-    // 🔥 첫 정상 턴만 기존 Realtime WebSocket을 선점한다.
-    // Feature Flag ON의 2턴+는 공유 WebRTC 번역 세션만 사용한다.
-    if (_turnCounter == 0) {
+    // Feature Flag OFF의 첫 정상 턴만 기존 Realtime WebSocket을 선점한다.
+    // Flag ON 첫 턴은 공유 WebRTC text-only 초안 + GPT-4.1 검수를 사용한다.
+    if (_turnCounter == 0 &&
+        !RealtimeFeatureFlags.enabledFor('anyone') &&
+        !_isTranslateSessionUsable()) {
       _startPrewarmedRealtimeVoice();
     } else {
       _cancelPrewarmedRealtimeVoice();
@@ -1162,7 +2390,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   void _commitAndProcess() async {
     final pipelineGeneration = _pipelineGeneration;
     final committed = _pendingTranscript.trim();
+    final transcriptSource =
+        _pendingTranscriptSource ?? AnyoneTranscriptSource.deepgramFallback;
     _pendingTranscript = '';
+    _pendingTranscriptSource = null;
     _lastPendingFinalAt = null;
     _commitTimer = null;
 
@@ -1170,7 +2401,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       _log('🔀 [COMMIT-00]', '빈 발화 → 마이크 재시작');
       _cancelPrefetchedFirstUtteranceJudge();
       _cancelPrewarmedRealtimeVoice();
-      if (_isConversationActive) _startDeepgramListening();
+      if (_isConversationActive) {
+        _restartConfiguredListening(
+            expectedPipelineGeneration: pipelineGeneration);
+      }
       return;
     }
 
@@ -1190,9 +2424,16 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     // 마이크/VoiceManager 정리
     await _voiceManager?.dispose();
     _voiceManager = null;
+    _setMicOwner(AnyoneMicOwner.none, reason: 'transcript_committed');
     _log('🔀 [COMMIT-02]', 'VoiceManager dispose 완료');
 
-    _runMeaningProbe(committed);
+    if (transcriptSource == AnyoneTranscriptSource.deepgramFallback) {
+      _runMeaningProbe(committed);
+    } else {
+      _activeSttConfidence = null;
+      _pendingDeepgramResults.clear();
+      _activeProbeDgFinalAt = null;
+    }
     _log('🔀 [COMMIT-03]', '_processRelayPipeline 호출');
     _processRelayPipeline(
       committed,
@@ -1317,7 +2558,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   // GPT-4.1 문맥 판정 선시작과 서로 await하지 않는 독립 작업이다.
   // ====================================================================
   String get _currentUserVoice =>
-      FFAppState().aiVoice.isNotEmpty ? FFAppState().aiVoice : 'echo';
+      FFAppState().aiVoice.isNotEmpty ? FFAppState().aiVoice : 'verse';
 
   void _startPrewarmedRealtimeVoice() {
     if (_openAiKey.isEmpty) return;
@@ -1443,7 +2684,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     }
   }
 
-  Future<void> _speakRetryAndListen() async {
+  Future<void> _playRetryPromptOnly() async {
     if (!mounted || !_isConversationActive) return;
     final lang = FFAppState().targetLang.isNotEmpty
         ? FFAppState().targetLang
@@ -1464,7 +2705,13 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         (fetcher.pendingRequests > 0 || _ttsQueueManager.isBusy) && mounted) {
       await Future.delayed(const Duration(milliseconds: 100));
     }
-    if (mounted && _isConversationActive) _startDeepgramListening();
+  }
+
+  Future<void> _speakRetryAndListen() async {
+    await _playRetryPromptOnly();
+    if (mounted && _isConversationActive) {
+      _restartConfiguredListening();
+    }
   }
 
   Future<void> _processRelayPipeline(String finalTranscript,
@@ -1528,7 +2775,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         if (finalTranscript.length <= 2) {
           _speakRetryAndListen();
         } else {
-          _startDeepgramListening();
+          _restartConfiguredListening(
+              expectedPipelineGeneration: pipelineGeneration);
         }
       }
       return;
@@ -1561,7 +2809,27 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       }
     }
 
-    if (RealtimeFeatureFlags.enabledFor('anyone') &&
+    final bool realtimeFeatureEnabled =
+        RealtimeFeatureFlags.enabledFor('anyone');
+    final bool realtimeEnabled =
+        realtimeFeatureEnabled && !_useDeepgramFallbackForSession;
+    final pendingTranslateAdapter = _translateAdapter;
+    if (realtimeEnabled &&
+        !_isTranslateSessionUsable(pendingTranslateAdapter) &&
+        pendingTranslateAdapter != null) {
+      await _waitForTranslateSessionUsable(pendingTranslateAdapter);
+      if (!isActivePipelineGeneration(
+            expected: pipelineGeneration,
+            current: _pipelineGeneration,
+            mounted: mounted,
+            conversationActive: _isConversationActive,
+          ) ||
+          _turnCounter != currentTurnId) {
+        return;
+      }
+    }
+
+    if (realtimeEnabled &&
         currentTurnId >= 2 &&
         !_isTranslateSessionUsable() &&
         !_translateReconnectTried) {
@@ -1577,24 +2845,29 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       }
     }
 
+    // 🔀 [HYBRID] 첫 턴 전용 GPT-4.1 검수 경로를 쓰지 않는다. 1턴부터 모든 턴이
+    //   동일하게 Realtime 번역 + 음성을 사용한다.
+    const bool usingSecureFirstReview = false;
     final bool usingSecureRealtime =
-        RealtimeFeatureFlags.enabledFor('anyone') &&
-            currentTurnId >= 2 &&
-            _isTranslateSessionUsable();
-    final bool usingFirstTurnRealtime = currentTurnId == 1;
-    final String turnPath = usingSecureRealtime
-        ? 'anyone_secure_realtime'
-        : usingFirstTurnRealtime
-            ? 'anyone_legacy_first_turn'
-            : 'anyone_legacy_fallback';
-    if (RealtimeFeatureFlags.enabledFor('anyone') &&
-        currentTurnId >= 2 &&
+        realtimeEnabled && _isTranslateSessionUsable();
+    final bool usingFirstTurnRealtime =
+        !realtimeFeatureEnabled && currentTurnId == 1;
+    final String turnPath = usingSecureFirstReview
+        ? 'anyone_secure_realtime_first_review'
+        : usingSecureRealtime
+            ? 'anyone_secure_realtime'
+            : usingFirstTurnRealtime
+                ? 'anyone_legacy_first_turn'
+                : 'anyone_legacy_fallback';
+    if (realtimeEnabled &&
+        currentTurnId >= 1 &&
+        !usingSecureFirstReview &&
         !usingSecureRealtime) {
       _log('[RT-FALLBACK]',
           'mode=anyone turnId=$currentTurnId reason=session_not_usable');
     }
     _log('[RT-PATH]', '$turnPath turnId=$currentTurnId');
-    if (usingSecureRealtime) {
+    if (usingSecureFirstReview || usingSecureRealtime) {
       _cancelPrewarmedRealtimeVoice();
     }
 
@@ -1664,7 +2937,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       String userTargetText = "";
       // 🆕 유저 목소리 = 로비에서 고른 값(FFAppState().aiVoice). AI는 nova 고정.
       final String userVoice =
-          FFAppState().aiVoice.isNotEmpty ? FFAppState().aiVoice : 'echo';
+          FFAppState().aiVoice.isNotEmpty ? FFAppState().aiVoice : 'verse';
       ChunkedTtsFetcher userTtsFetcher = ChunkedTtsFetcher(
         _openAiKey,
         _ttsQueueManager,
@@ -1689,8 +2962,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           ? FFAppState().targetLang
           : 'English';
 
-      // 첫 정상 턴만 기존 Realtime WebSocket 경로를 유지한다.
-      // 2턴+ secure/fallback 경로에서는 이 객체를 만들지 않는다.
+      // Feature Flag OFF 첫 턴만 기존 Realtime WebSocket 경로를 유지한다.
+      // Flag ON 첫 턴과 2턴+에서는 공유 WebRTC 세션만 사용한다.
       final FirstTurnRealtimeVoice? realtimeVoice = usingFirstTurnRealtime
           ? _takePrewarmedRealtimeVoice(userVoice) ??
               FirstTurnRealtimeVoice(
@@ -1704,6 +2977,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           : null;
       RealtimeTranslationTurn? secureTurn;
       bool secureTurnCompleted = false;
+      bool firstReviewDraftCompleted = false;
       bool secureFallbackLogged = false;
 
       // 🚀 [SPEC-FIRST-TURN] 투기 번역이 넘어오면 그 버퍼 스트림을 그대로 소비한다
@@ -1717,11 +2991,20 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         firstUtteranceContext:
             firstUtteranceContext?.toInternalPromptContext() ?? '',
         realtimeVoice: realtimeVoice,
-        secureAdapter: usingSecureRealtime ? _translateAdapter : null,
+        secureAdapter: (usingSecureFirstReview || usingSecureRealtime)
+            ? _translateAdapter
+            : null,
         secureTurnId: currentTurnId.toString(),
         secureVoice: userVoice,
+        secureSuppressAudio: usingSecureFirstReview,
         onSecureTurn: (turn) => secureTurn = turn,
-        onSecureSuccess: () => secureTurnCompleted = true,
+        onSecureSuccess: () {
+          if (usingSecureFirstReview) {
+            firstReviewDraftCompleted = true;
+          } else {
+            secureTurnCompleted = true;
+          }
+        },
         onSecureFallback: (reason) {
           if (secureFallbackLogged) return;
           secureFallbackLogged = true;
@@ -1764,6 +3047,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           return;
         }
         userTargetText += chunk;
+
+        // 첫 턴 secure 초안은 검수가 끝날 때까지 UI/TTS/제어 흐름에 노출하지 않는다.
+        if (usingSecureFirstReview) continue;
 
         if (userTargetText.contains('[REALTIME_UNAVAILABLE]')) {
           _log('⚠️ [RT-ONLY]', 'Realtime unavailable → 턴 폐기 후 재청취');
@@ -1817,10 +3103,69 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         final bool containsControlTag = userTargetText.contains('[');
         if (!clarified &&
             !containsControlTag &&
+            !usingSecureFirstReview &&
             !usingSecureRealtime &&
             realtimeVoice?.active != true) {
           userHybridTts.onChunk(chunk);
           userHybridInputStarted = true;
+        }
+      }
+
+      if (usingSecureFirstReview) {
+        final realtimeDraft = userTargetText.trim();
+        if (firstReviewDraftCompleted) {
+          _log('[RT-FIRST-REVIEW]', 'draft_received');
+          final review =
+              await _firstUtteranceJudge.reviewTranslationDraft(
+            apiKey: _openAiKey,
+            sourceText: finalTranscript,
+            realtimeDraft: realtimeDraft,
+            targetLanguage: targetLangName,
+            context: firstUtteranceContext,
+            onLog: (event, details) => _log(
+              '[RT-FIRST-REVIEW]',
+              details.trim().isEmpty ? event : '$event $details',
+            ),
+          );
+          if (!_isPipelineRunning ||
+              _turnCounter != currentTurnId ||
+              !isActivePipelineGeneration(
+                expected: pipelineGeneration,
+                current: _pipelineGeneration,
+                mounted: mounted,
+                conversationActive: _isConversationActive,
+              )) {
+            _firstUtteranceJudge.cancelTranslationReview();
+            _translateAdapter?.cancelActiveTurn();
+            return;
+          }
+          userTargetText = review?.finalText ?? realtimeDraft;
+        } else {
+          // Realtime 초안 자체가 실패한 경우 streamUserTranslation이 한 번만
+          // fall through한 기존 GPT 번역 결과를 그대로 legacy TTS로 보낸다.
+          userTargetText = realtimeDraft;
+        }
+
+        if (userTargetText.contains("[EVAPORATE]")) {
+          evaporated = true;
+          _log('⚠️ [EVAPORATE]', '증발 감지 → 턴 취소');
+        } else if (!isCorrectionRetry &&
+            userTargetText.contains("[CORRECTION]")) {
+          corrected = true;
+          _log('🔄 [CORRECTION]', '정정 감지 → 직전 교환 삭제 후 재시작');
+        } else if (!isCorrectionRetry &&
+            userTargetText.contains("[MISHEARD]")) {
+          misheard = true;
+          _log('👂 [MISHEARD]', '오청취 불만 감지 → 직전 교환 삭제 후 재청취');
+        } else if (userTargetText.contains("[DISSATISFIED]")) {
+          dissatisfiedReply = true;
+          _log('🟣 [DISSATISFIED]', '응답 불만 감지 → 직전 응답 삭제 후 재생성');
+        } else if (userTargetText.contains("[CLARIFY]")) {
+          clarified = true;
+          _log('❓ [CLARIFY]', '되묻기 감지 → 검수 완료 후 처리');
+        } else if (mounted) {
+          setState(
+              () => _localMessages[hostIndex]['target'] = userTargetText);
         }
       }
 
@@ -1833,7 +3178,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         }
         skipFinallyRestart = true;
         _isPipelineRunning = false;
-        if (_isConversationActive) _startDeepgramListening();
+        if (_isConversationActive) {
+          _restartConfiguredListening(
+              expectedPipelineGeneration: pipelineGeneration);
+        }
         return;
       }
 
@@ -1932,7 +3280,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         }
         skipFinallyRestart = true;
         _isPipelineRunning = false;
-        if (mounted && _isConversationActive) _startDeepgramListening();
+        if (mounted && _isConversationActive) {
+          _restartConfiguredListening(
+              expectedPipelineGeneration: pipelineGeneration);
+        }
         return;
       }
 
@@ -2058,7 +3409,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         }
         skipFinallyRestart = true;
         _isPipelineRunning = false;
-        if (mounted && _isConversationActive) _startDeepgramListening();
+        if (mounted && _isConversationActive) {
+          _restartConfiguredListening(
+              expectedPipelineGeneration: pipelineGeneration);
+        }
         return;
       }
 
@@ -2104,7 +3458,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         }
         skipFinallyRestart = true;
         _isPipelineRunning = false;
-        if (mounted && _isConversationActive) _startDeepgramListening();
+        if (mounted && _isConversationActive) {
+          _restartConfiguredListening(
+              expectedPipelineGeneration: pipelineGeneration);
+        }
         return;
       }
 
@@ -2156,7 +3513,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           }
           skipFinallyRestart = true;
           _isPipelineRunning = false;
-          if (_isConversationActive) _startDeepgramListening();
+          if (_isConversationActive) {
+            _restartConfiguredListening(
+                expectedPipelineGeneration: pipelineGeneration);
+          }
           return;
         }
         _costTracker.recordRealtimeResponse(
@@ -2171,6 +3531,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
               'Realtime 음성 재생 큐 적재 (${realtimeWav.length}B) — tts-1 미사용');
         }
       } else if (fullUserTts.isNotEmpty) {
+        if (usingSecureFirstReview && firstReviewDraftCompleted) {
+          _log(
+              '[RT-FIRST-REVIEW]', 'audio_path=legacy_tts_after_review');
+        }
         if (!userHybridInputStarted) {
           userHybridTts.onChunk(fullUserTts);
         }
@@ -2482,7 +3846,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           _isConversationActive &&
           _turnCounter == currentTurnId) {
         _log('🧠 [PIPE-RESTART]', '마이크 재시작 시도');
-        _startDeepgramListening();
+        _restartConfiguredListening(
+            expectedPipelineGeneration: pipelineGeneration);
       } else {
         _log('⚠️ [PIPE-NORESTART]', '마이크 재시작 조건 불충족');
       }
@@ -4745,6 +6110,7 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
     RealtimeAnyoneAdapter? secureAdapter,
     String secureTurnId = '',
     String secureVoice = 'marin',
+    bool secureSuppressAudio = false,
     void Function(RealtimeTranslationTurn turn)? onSecureTurn,
     void Function()? onSecureSuccess,
     void Function(Object reason)? onSecureFallback,
@@ -4847,7 +6213,7 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
             sourceText: userContent,
             instructions: sysPrompt,
             voice: secureVoice,
-            suppressAudio: false,
+            suppressAudio: secureSuppressAudio,
           );
           onSecureTurn?.call(turn);
           final outcome = await turn.done;

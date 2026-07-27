@@ -7,14 +7,34 @@ import 'stealth_vox_realtime_session.dart';
 class RealtimeAnyoneAdapter {
   RealtimeAnyoneAdapter({
     this.onUserTranscript,
+    this.onUserTranscriptDelta,
+    this.onUserTranscriptCompleted,
+    this.onSpeechStarted,
+    this.onSpeechStopped,
+    this.onConnectionStateChanged,
+    this.onIceStateChanged,
     this.onAssistantTranscript,
+    this.onResponseStarted,
     this.onResponseDone,
     this.onError,
     this.logger,
   });
 
   final void Function(String text)? onUserTranscript;
+  final void Function(
+    String itemId,
+    String delta,
+    String accumulatedText,
+  )? onUserTranscriptDelta;
+  final void Function(String itemId, String transcript)?
+      onUserTranscriptCompleted;
+  final void Function(String itemId)? onSpeechStarted;
+  final void Function(String itemId)? onSpeechStopped;
+  final void Function(RealtimeConnectionState state)?
+      onConnectionStateChanged;
+  final void Function(String state)? onIceStateChanged;
   final void Function(String text)? onAssistantTranscript;
+  final VoidCallback? onResponseStarted;
   final VoidCallback? onResponseDone;
   final void Function(Object error)? onError;
   final RealtimeLogger? logger;
@@ -24,15 +44,60 @@ class RealtimeAnyoneAdapter {
   StreamSubscription<RealtimeSessionEvent>? _subscription;
   String _userText = '';
   String _assistantText = '';
+  final Map<String, StringBuffer> _userTranscriptBuffers =
+      <String, StringBuffer>{};
+  final Set<String> _completedTranscriptItemIds = <String>{};
 
   Future<void> start({required String modeSessionId}) async {
-    _subscription = session.events.listen(_onEvent);
+    _ensureEventSubscription();
     await session.connect(
       mode: 'anyone',
       modeSessionId: modeSessionId,
       instructions:
           'You are a friendly English conversation partner. Speak naturally, '
           'keep replies concise, and wait for the user turn.',
+    );
+  }
+
+  /// Connects Anyone to a microphone-publishing Realtime session. Server VAD
+  /// produces speech boundaries and final input transcription events, while
+  /// automatic assistant responses remain disabled at the transport layer.
+  Future<void> connectForMicrophoneTranscription({
+    required String modeSessionId,
+    String voice = 'marin',
+    bool allowWhenDisabled = false,
+  }) async {
+    _ensureEventSubscription();
+    await session.connect(
+      mode: 'anyone',
+      modeSessionId: modeSessionId,
+      voice: voice,
+      allowWhenDisabled: allowWhenDisabled,
+      captureMicrophone: true,
+      disableServerVad: false,
+    );
+  }
+
+  /// 🗣️ [RT-CONV] 음성 직결 대화 모드. 마이크 오디오를 그대로 모델에 보내고,
+  /// server VAD가 발화 종료를 감지하면 모델이 곧바로 영어 음성으로 응답한다.
+  /// 입력 전사(gpt-4o-mini-transcribe)를 사용하지 않으므로 사용자 원문 텍스트는
+  /// 제공되지 않는다.
+  Future<void> connectForConversation({
+    required String modeSessionId,
+    required String instructions,
+    String voice = 'marin',
+    bool allowWhenDisabled = false,
+  }) async {
+    _ensureEventSubscription();
+    await session.connect(
+      mode: 'anyone',
+      modeSessionId: modeSessionId,
+      voice: voice,
+      instructions: instructions,
+      allowWhenDisabled: allowWhenDisabled,
+      captureMicrophone: true,
+      disableServerVad: false,
+      autoRespond: true,
     );
   }
 
@@ -81,9 +146,16 @@ class RealtimeAnyoneAdapter {
 
   void cancelActiveTurn() => session.cancelActiveTurn();
 
+  void setMicrophoneEnabled(bool enabled) =>
+      session.setMicrophoneEnabled(enabled);
+
   Future<void> dispose() async {
     await _subscription?.cancel();
     await session.dispose();
+  }
+
+  void _ensureEventSubscription() {
+    _subscription ??= session.events.listen(_onEvent);
   }
 
   void _onEvent(RealtimeSessionEvent event) {
@@ -91,28 +163,66 @@ class RealtimeAnyoneAdapter {
       onError?.call(event.payload?['error'] ?? StateError('Realtime error'));
       return;
     }
+    if (event.type == RealtimeEventType.stateChanged) {
+      final state = event.connectionState;
+      if (state != null) onConnectionStateChanged?.call(state);
+      return;
+    }
+    if (event.type == RealtimeEventType.iceStateChanged) {
+      onIceStateChanged?.call(event.payload?['state']?.toString() ?? '');
+      return;
+    }
     if (event.type != RealtimeEventType.serverEvent) return;
     final payload = event.payload;
     if (payload == null) return;
     final type = payload['type']?.toString() ?? '';
     final delta = payload['delta']?.toString() ?? '';
-    if (delta.isNotEmpty &&
-        (type.contains('input_audio_transcription') ||
-            type == 'conversation.item.input_audio_transcription.delta')) {
-      _userText += delta;
+    final itemId = payload['item_id']?.toString() ?? '';
+    if (type == 'input_audio_buffer.speech_started') {
+      onSpeechStarted?.call(itemId);
+      return;
+    }
+    if (type == 'input_audio_buffer.speech_stopped') {
+      onSpeechStopped?.call(itemId);
+      return;
+    }
+    if (type == 'response.created') {
+      _assistantText = '';
+      onResponseStarted?.call();
+      return;
+    }
+    if (type == 'conversation.item.input_audio_transcription.delta') {
+      if (delta.isEmpty) return;
+      final buffer =
+          _userTranscriptBuffers.putIfAbsent(itemId, StringBuffer.new);
+      buffer.write(delta);
+      _userText = buffer.toString();
+      onUserTranscriptDelta?.call(itemId, delta, _userText);
       onUserTranscript?.call(_userText);
-    } else if (delta.isNotEmpty &&
+      return;
+    }
+    if (type == 'conversation.item.input_audio_transcription.completed') {
+      if (!_completedTranscriptItemIds.add(itemId)) {
+        logger?.call(
+            '[RT-TRANSCRIBE]', 'duplicate_completed_dropped itemId=$itemId');
+        return;
+      }
+      final bufferedText =
+          _userTranscriptBuffers.remove(itemId)?.toString() ?? '';
+      final text = payload['transcript']?.toString().trim() ?? '';
+      final finalText = text.isNotEmpty ? text : bufferedText.trim();
+      _userText = finalText;
+      onUserTranscriptCompleted?.call(itemId, finalText);
+      if (finalText.isNotEmpty) {
+        onUserTranscript?.call(finalText);
+      }
+      return;
+    }
+    if (delta.isNotEmpty &&
         (type.contains('audio_transcript') ||
             type.contains('output_text'))) {
       _assistantText += delta;
       onAssistantTranscript?.call(_assistantText);
-    }
-    if (type == 'conversation.item.input_audio_transcription.completed') {
-      final text = payload['transcript']?.toString() ?? _userText;
-      if (text.isNotEmpty) {
-        _userText = text;
-        onUserTranscript?.call(text);
-      }
     }
     if (type == 'response.audio_transcript.done' ||
         type == 'response.output_audio_transcript.done' ||

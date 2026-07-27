@@ -38,6 +38,7 @@ enum RealtimeEventType {
   stateChanged,
   turnStateChanged,
   serverEvent,
+  iceStateChanged,
   remoteAudioTrack,
   dataChannelOpened,
   staleEventDropped,
@@ -170,9 +171,61 @@ class StealthVoxRealtimeSession {
 
   bool _captureMicrophone = true;
   bool _disableServerVad = false;
+  // 🗣️ [RT-CONV] true면 server VAD가 발화 종료 시 곧바로 응답을 생성한다(음성
+  //   대화 직결 모드). 이때 입력 전사(gpt-4o-mini-transcribe)는 사용하지 않고
+  //   모델이 오디오를 직접 이해한다.
+  bool _autoRespond = false;
+  String _mode = '';
+  // ⏱️ [RT-LATENCY] 음성 직결 모드 턴별 지연 측정용 타임스탬프.
+  DateTime? _convSpeechStoppedAt;
+  DateTime? _convResponseCreatedAt;
+  DateTime? _convFirstTextAt;
+  DateTime? _convFirstAudioAt;
+  int _convTurnCount = 0;
+  // AI 음성이 실제로 재생 중인지. 유저가 말을 시작하면 이걸 보고 즉시 끊는다.
+  bool _outputAudioActive = false;
+  // 🔇 [RT-HALF-DUPLEX] AI 음성이 스피커로 나가는 동안 마이크를 닫는다. 닫지
+  //   않으면 자기 음성을 server VAD가 새 발화로 판정해 응답을 또 만들고, 그
+  //   응답을 다시 듣는 무한 되먹임에 빠진다.
+  bool _micMutedForPlayback = false;
+  Timer? _micRestoreTimer;
+  static const Duration _micRestoreTail = Duration(milliseconds: 350);
+
+  void _muteMicForAiPlayback() {
+    _micRestoreTimer?.cancel();
+    _micRestoreTimer = null;
+    if (_micMutedForPlayback || !_captureMicrophone) return;
+    try {
+      setMicrophoneEnabled(false);
+      _micMutedForPlayback = true;
+      _logger?.call('[RT-HALF-DUPLEX]', 'mic_muted_during_ai_audio');
+    } catch (error) {
+      _logger?.call('[RT-HALF-DUPLEX]', 'mute_failed ${error.runtimeType}');
+    }
+  }
+
+  void _restoreMicAfterAiPlayback() {
+    if (!_micMutedForPlayback) return;
+    _micRestoreTimer?.cancel();
+    // 스피커 잔향이 마이크로 새어 들어가 다시 트리거되지 않도록 짧은 꼬리를 둔다.
+    _micRestoreTimer = Timer(_micRestoreTail, () {
+      _micRestoreTimer = null;
+      if (_disposed || !_micMutedForPlayback) return;
+      try {
+        setMicrophoneEnabled(true);
+        _micMutedForPlayback = false;
+        _logger?.call('[RT-HALF-DUPLEX]', 'mic_restored');
+      } catch (error) {
+        _logger?.call('[RT-HALF-DUPLEX]', 'restore_failed ${error.runtimeType}');
+      }
+    });
+  }
+  bool _peerConnected = false;
+  bool _sessionUpdatedConfirmed = false;
   RealtimeTranslationTurn? _activeTurn;
   Timer? _turnTimeoutTimer;
   Timer? _audioTailTimer;
+  Completer<void>? _sessionUpdatedCompleter;
   Duration _audioStabilization = const Duration(milliseconds: 250);
   Duration _audioTailTimeout = const Duration(seconds: 5);
 
@@ -183,6 +236,9 @@ class StealthVoxRealtimeSession {
   bool get isReady => _connectionState == RealtimeConnectionState.ready;
   String? get modeSessionId => _modeSessionId;
   String? get responseId => _responseId;
+  bool get capturesMicrophone => _captureMicrophone;
+  bool get isMicrophoneEnabled =>
+      _localStream?.getAudioTracks().any((track) => track.enabled) ?? false;
 
   Future<void> connect({
     required String mode,
@@ -192,6 +248,7 @@ class StealthVoxRealtimeSession {
     bool allowWhenDisabled = false,
     bool captureMicrophone = true,
     bool disableServerVad = false,
+    bool autoRespond = false,
   }) async {
     if (_disposed) throw StateError('Realtime session is disposed.');
     if (!allowWhenDisabled && !RealtimeFeatureFlags.enabledFor(mode)) {
@@ -203,6 +260,11 @@ class StealthVoxRealtimeSession {
     _logger?.call('[RT-PATH]', 'secure_webrtc mode=$mode');
     _captureMicrophone = captureMicrophone;
     _disableServerVad = disableServerVad;
+    _autoRespond = autoRespond;
+    _mode = mode;
+    _peerConnected = false;
+    _sessionUpdatedConfirmed = false;
+    _sessionUpdatedCompleter = Completer<void>();
     _modeSessionId = modeSessionId;
     final generation = ++_connectionGeneration;
     String stage = 'secret';
@@ -213,7 +275,9 @@ class StealthVoxRealtimeSession {
       _setConnectionState(RealtimeConnectionState.connecting);
 
       stage = 'peer_connection';
-      final peer = await createPeerConnection(<String, dynamic>{});
+      final peer = await createPeerConnection(<String, dynamic>{})
+          .timeout(const Duration(seconds: 5));
+      _assertCurrent(generation);
       _peerConnection = peer;
       _logger?.call('[RT-PC]', 'created');
       peer.onTrack = (event) {
@@ -229,7 +293,23 @@ class StealthVoxRealtimeSession {
       };
       peer.onIceConnectionState = (state) {
         if (!_isCurrent(generation)) return;
-        _logger?.call('[RT-ICE]', _iceStateLabel(state));
+        final label = _iceStateLabel(state);
+        _logger?.call('[RT-ICE]', label);
+        _emit(
+          RealtimeEventType.iceStateChanged,
+          payload: <String, dynamic>{'state': label},
+        );
+        if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+          _setConnectionState(RealtimeConnectionState.failed);
+        } else if (state ==
+            RTCIceConnectionState.RTCIceConnectionStateDisconnected) {
+          _setConnectionState(RealtimeConnectionState.reconnecting);
+        } else if (state ==
+                RTCIceConnectionState.RTCIceConnectionStateConnected ||
+            state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
+          _peerConnected = true;
+          _setReadyWhenConfigured();
+        }
       };
       peer.onConnectionState = (state) {
         if (!_isCurrent(generation)) {
@@ -237,7 +317,8 @@ class StealthVoxRealtimeSession {
           return;
         }
         if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
-          _setConnectionState(RealtimeConnectionState.ready);
+          _peerConnected = true;
+          _setReadyWhenConfigured();
         } else if (state ==
             RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
           _setConnectionState(RealtimeConnectionState.failed);
@@ -246,14 +327,21 @@ class StealthVoxRealtimeSession {
 
       stage = 'microphone';
       if (_captureMicrophone) {
-        _localStream = await navigator.mediaDevices.getUserMedia(
-          <String, dynamic>{'audio': true, 'video': false},
-        );
+        _localStream = await navigator.mediaDevices
+            .getUserMedia(
+              <String, dynamic>{'audio': true, 'video': false},
+            )
+            .timeout(const Duration(seconds: 8));
+        _assertCurrent(generation);
         final audioTracks = _localStream!.getAudioTracks();
         if (audioTracks.isEmpty) {
           throw StateError('No local microphone track.');
         }
-        await peer.addTrack(audioTracks.first, _localStream!);
+        await peer
+            .addTrack(audioTracks.first, _localStream!)
+            .timeout(const Duration(seconds: 5));
+        _assertCurrent(generation);
+        _logger?.call('[RT-MIC]', 'local_track_added enabled=true');
       } else {
         // Text-driven turns: receive remote audio without publishing a mic.
         await peer.addTransceiver(
@@ -265,10 +353,13 @@ class StealthVoxRealtimeSession {
       }
 
       stage = 'data_channel';
-      _dataChannel = await peer.createDataChannel(
-        'oai-events',
-        RTCDataChannelInit(),
-      );
+      _dataChannel = await peer
+          .createDataChannel(
+            'oai-events',
+            RTCDataChannelInit(),
+          )
+          .timeout(const Duration(seconds: 5));
+      _assertCurrent(generation);
       _dataChannel!.onDataChannelState = (state) {
         if (state == RTCDataChannelState.RTCDataChannelOpen) {
           _emit(RealtimeEventType.dataChannelOpened);
@@ -281,8 +372,14 @@ class StealthVoxRealtimeSession {
       };
 
       stage = 'sdp_offer';
-      final offer = await peer.createOffer(<String, dynamic>{});
-      await peer.setLocalDescription(offer);
+      final offer = await peer
+          .createOffer(<String, dynamic>{})
+          .timeout(const Duration(seconds: 5));
+      _assertCurrent(generation);
+      await peer
+          .setLocalDescription(offer)
+          .timeout(const Duration(seconds: 5));
+      _assertCurrent(generation);
       await Future<void>.delayed(const Duration(milliseconds: 350));
       final localDescription = await peer.getLocalDescription();
       final sdp = localDescription?.sdp;
@@ -290,21 +387,32 @@ class StealthVoxRealtimeSession {
       _logger?.call('[RT-SDP]', 'offer_created');
 
       stage = 'sdp_answer';
-      final response = await http.post(
-        Uri.parse('https://api.openai.com/v1/realtime/calls'),
-        headers: <String, String>{
-          'Authorization': 'Bearer ${secret.value}',
-          'Content-Type': 'application/sdp',
-        },
-        body: sdp,
-      );
+      final response = await http
+          .post(
+            Uri.parse('https://api.openai.com/v1/realtime/calls'),
+            headers: <String, String>{
+              'Authorization': 'Bearer ${secret.value}',
+              'Content-Type': 'application/sdp',
+            },
+            body: sdp,
+          )
+          .timeout(const Duration(seconds: 10));
+      _assertCurrent(generation);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw StateError('Realtime SDP negotiation failed.');
       }
-      await peer.setRemoteDescription(
-        RTCSessionDescription(response.body, 'answer'),
-      );
+      await peer
+          .setRemoteDescription(
+            RTCSessionDescription(response.body, 'answer'),
+          )
+          .timeout(const Duration(seconds: 5));
+      _assertCurrent(generation);
       _logger?.call('[RT-SDP]', 'answer_applied');
+
+      stage = 'session_updated';
+      await _sessionUpdatedCompleter!.future
+          .timeout(const Duration(seconds: 3));
+      _assertCurrent(generation);
     } catch (e) {
       if (_isCurrent(generation)) {
         _setConnectionState(RealtimeConnectionState.failed);
@@ -352,6 +460,23 @@ class StealthVoxRealtimeSession {
     _setTurnState(RealtimeTurnState.interrupted);
     _sendCancel();
     _setTurnState(RealtimeTurnState.cancelled);
+  }
+
+  /// Enables or mutes the published WebRTC microphone track without replacing
+  /// the PeerConnection. Translation responses can therefore reuse the same
+  /// connection without feeding speaker output back into the next user turn.
+  void setMicrophoneEnabled(bool enabled) {
+    if (!_captureMicrophone) {
+      throw StateError('This Realtime session has no microphone track.');
+    }
+    final tracks = _localStream?.getAudioTracks() ?? <MediaStreamTrack>[];
+    if (tracks.isEmpty) {
+      throw StateError('Realtime microphone track is unavailable.');
+    }
+    for (final track in tracks) {
+      track.enabled = enabled;
+    }
+    _logger?.call('[RT-MIC]', 'enabled=$enabled');
   }
 
   void _sendCancel() {
@@ -416,7 +541,7 @@ class StealthVoxRealtimeSession {
     };
     if (!suppressAudio) {
       response['audio'] = <String, dynamic>{
-        'output': <String, dynamic>{'voice': voice},
+        'output': <String, dynamic>{'voice': _resolveRealtimeVoice(voice)},
       };
     }
     sendEvent(
@@ -564,6 +689,10 @@ class StealthVoxRealtimeSession {
     for (final track in _localStream?.getTracks() ?? <MediaStreamTrack>[]) {
       await track.stop();
     }
+    _micRestoreTimer?.cancel();
+    _micRestoreTimer = null;
+    _micMutedForPlayback = false;
+    _outputAudioActive = false;
     await _localStream?.dispose();
     await _dataChannel?.close();
     await _peerConnection?.close();
@@ -573,24 +702,97 @@ class StealthVoxRealtimeSession {
     await _events.close();
   }
 
+  /// Realtime API가 허용하는 출력 voice 목록. legacy TTS(tts-1)에서 쓰는 이름
+  /// (fable/onyx/nova)을 그대로 보내면 서버가 session.update 전체를
+  /// invalid_value로 거부하고, 그 결과 세션이 통째로 Deepgram legacy로 폴백된다.
+  static const Set<String> _supportedRealtimeVoices = <String>{
+    'alloy',
+    'ash',
+    'ballad',
+    'coral',
+    'echo',
+    'sage',
+    'shimmer',
+    'verse',
+    'marin',
+    'cedar',
+  };
+
+  /// legacy TTS voice → 가장 가까운 Realtime voice.
+  static const Map<String, String> _legacyVoiceAliases = <String, String>{
+    'fable': 'ballad',
+    'onyx': 'ash',
+    'nova': 'coral',
+  };
+
+  static const String kDefaultRealtimeVoice = 'marin';
+
+  String _resolveRealtimeVoice(String requested) {
+    final normalized = requested.trim().toLowerCase();
+    if (_supportedRealtimeVoices.contains(normalized)) return normalized;
+    final resolved = _legacyVoiceAliases[normalized] ?? kDefaultRealtimeVoice;
+    _logger?.call(
+      '[RT-VOICE]',
+      'unsupported_voice_mapped requested=$requested resolved=$resolved',
+    );
+    return resolved;
+  }
+
   void _sendSessionUpdate(
       {required String voice, required String instructions}) {
     final audio = <String, dynamic>{
-      'output': <String, dynamic>{'voice': voice},
+      'output': <String, dynamic>{'voice': _resolveRealtimeVoice(voice)},
     };
     if (_disableServerVad) {
       // Text-driven turns must never auto-respond to inbound audio.
       audio['input'] = <String, dynamic>{'turn_detection': null};
+    } else if (_captureMicrophone) {
+      final turnDetection = <String, dynamic>{
+        'type': 'server_vad',
+        // 🗣️ [RT-CONV] 음성 직결 모드에서는 서버가 발화 종료 즉시 응답을
+        //   만들고, 사용자가 끼어들면(barge-in) 진행 중 응답을 중단한다.
+        'create_response': _autoRespond,
+        'interrupt_response': _autoRespond,
+      };
+      if (_autoRespond) {
+        // 기본값(threshold 0.5 / silence 500ms)은 문장 중간의 짧은 숨에도 발화를
+        // 끊어 한 발화가 두 턴으로 쪼개지고, 그 결과 응답이 2개 생성돼 음성이
+        // 겹친다. 임계값과 침묵 길이를 올려 한 발화를 한 턴으로 묶는다.
+        turnDetection['threshold'] = 0.65;
+        turnDetection['silence_duration_ms'] = 900;
+        turnDetection['prefix_padding_ms'] = 300;
+      }
+      final input = <String, dynamic>{'turn_detection': turnDetection};
+      // 입력 전사는 항상 병렬로 켠다.
+      //  - autoRespond 모드: 모델은 오디오를 직접 이해해 즉시 응답하고, 전사는
+      //    HOST 한국어 원문/History 저장 용도로만 비동기 도착한다. 전사 완료가
+      //    응답 시작을 막지 않는다.
+      //  - 텍스트 구동 경로: 전사 이벤트로 턴 경계를 잡는다.
+      input['transcription'] = <String, dynamic>{
+        'model': 'gpt-4o-mini-transcribe',
+      };
+      if (_autoRespond) {
+        _logger?.call('[RT-TRANSCRIPTION]',
+            'parallel_for_subtitle_only mode=$_mode (응답 대기 없음)');
+      }
+      audio['input'] = input;
     }
+    final session = <String, dynamic>{
+      'type': 'realtime',
+      'model': 'gpt-realtime-2.1-mini',
+      'output_modalities': <String>['audio'],
+      'instructions': instructions,
+      'audio': audio,
+    };
+    // ⚠️ 여기에 temperature나 max_output_tokens를 넣지 말 것.
+    //  - temperature: GA Realtime 세션이 거부한다.
+    //    code=unknown_parameter param=session.temperature → 세션 설정 전체 실패.
+    //  - max_output_tokens: 이 값은 "오디오" 출력 토큰까지 센다. 200으로 두었더니
+    //    번역문이 예산을 다 써서 AI 응답이 "That" / "You" 한 단어에서 잘렸다.
+    //    응답 길이는 오직 프롬프트로 제어한다(기본 "inf" 유지).
     sendEvent(<String, dynamic>{
       'type': 'session.update',
-      'session': <String, dynamic>{
-        'type': 'realtime',
-        'model': 'gpt-realtime-2.1-mini',
-        'output_modalities': <String>['audio'],
-        'instructions': instructions,
-        'audio': audio,
-      },
+      'session': session,
     });
   }
 
@@ -604,19 +806,325 @@ class StealthVoxRealtimeSession {
       if (decoded is! Map) return;
       final payload = Map<String, dynamic>.from(decoded);
       final type = payload['type']?.toString() ?? '';
-      if (type == 'response.created') {
+      _logInputTranscriptionEvent(type, payload);
+      if (_autoRespond) _trackConversationLatency(type);
+      if (type == 'session.updated') {
+        _confirmSessionUpdated(payload);
+      } else if (type == 'response.created') {
         _responseId = (payload['response'] as Map?)?['id']?.toString();
         _setTurnState(RealtimeTurnState.responseStreaming);
+        if (_captureMicrophone && _activeTurn == null) {
+          _logger?.call(
+              '[RT-TRANSCRIBE]', 'unexpected_auto_response response_created');
+        }
       } else if (type == 'response.done') {
         _setTurnState(RealtimeTurnState.completed);
       } else if (type == 'error' || type == 'response.failed') {
+        _logServerErrorDiagnostics(type, payload);
         _setTurnState(RealtimeTurnState.failed);
+        final completer = _sessionUpdatedCompleter;
+        if (!_sessionUpdatedConfirmed &&
+            completer != null &&
+            !completer.isCompleted) {
+          completer.completeError(StateError('Realtime session update failed.'));
+        }
         _emit(RealtimeEventType.error, payload: payload);
       }
       _routeTurnEvent(type, payload);
       _emit(RealtimeEventType.serverEvent, payload: payload);
     } catch (_) {
+      final completer = _sessionUpdatedCompleter;
+      if (!_sessionUpdatedConfirmed &&
+          completer != null &&
+          !completer.isCompleted) {
+        completer.completeError(
+            StateError('Realtime session event parsing failed.'));
+      }
       _emit(RealtimeEventType.error);
+    }
+  }
+
+  void _confirmSessionUpdated(Map<String, dynamic> payload) {
+    // ⚠️ [DIAGNOSTIC] session.updated 스키마 확인용 임시 로그. 원인 확정 후 제거.
+    _logSessionUpdatedRaw(payload);
+    bool valid = true;
+    if (_captureMicrophone && !_disableServerVad) {
+      final session = payload['session'];
+      final audio = session is Map ? session['audio'] : null;
+      final input = audio is Map ? audio['input'] : null;
+      final transcription = input is Map ? input['transcription'] : null;
+      final turnDetection = input is Map ? input['turn_detection'] : null;
+      // 성공 필수 조건은 "세션 객체 정상 + turn detection이 실제로 server VAD"
+      // 까지다. 서버가 에코하지 않을 수 있는 선택 필드(create_response,
+      // transcription)의 부재를 실패 사유로 삼지 않는다. 반대로 명백히 다른 값이
+      // 확정돼 돌아오면 계속 실패 처리한다.
+      final createResponse =
+          turnDetection is Map ? turnDetection['create_response'] : null;
+      valid = session is Map &&
+          turnDetection is Map &&
+          turnDetection['type']?.toString() == 'server_vad' &&
+          (createResponse == null || createResponse == _autoRespond);
+      _logSessionUpdatedCheck(
+        session: session,
+        audio: audio,
+        input: input,
+        transcription: transcription,
+        turnDetection: turnDetection,
+        valid: valid,
+      );
+    } else {
+      _logger?.call(
+        '[RT-SESSION-UPDATED-CHECK]',
+        'validation_skipped captureMicrophone=$_captureMicrophone '
+            'disableServerVad=$_disableServerVad valid=true',
+      );
+    }
+
+    final completer = _sessionUpdatedCompleter;
+    if (!valid) {
+      if (completer != null && !completer.isCompleted) {
+        completer.completeError(
+            StateError('Realtime transcription session was not configured.'));
+      }
+      return;
+    }
+    _sessionUpdatedConfirmed = true;
+    if (completer != null && !completer.isCompleted) {
+      completer.complete();
+    }
+    _logger?.call('[RT-SESSION]', 'updated_confirmed');
+    _setReadyWhenConfigured();
+  }
+
+  // ⚠️ [DIAGNOSTIC] 아래 3개 메서드는 session.updated 스키마 진단용 임시 코드다.
+  //   원인이 확정되면 제거한다. 로그에는 client secret / instructions / SDP 등
+  //   민감값을 절대 싣지 않는다.
+  static const Set<String> _diagnosticRedactedKeys = <String>{
+    'client_secret',
+    'instructions',
+    'sdp',
+    'api_key',
+    'token',
+    'authorization',
+  };
+
+  Object? _redactForDiagnostics(Object? value) {
+    if (value is Map) {
+      final result = <String, dynamic>{};
+      value.forEach((key, dynamic child) {
+        final name = key.toString();
+        if (_diagnosticRedactedKeys.contains(name.toLowerCase())) {
+          result[name] = child is String
+              ? '<redacted len=${child.length}>'
+              : '<redacted>';
+        } else {
+          result[name] = _redactForDiagnostics(child);
+        }
+      });
+      return result;
+    }
+    if (value is List) {
+      return value.map<Object?>(_redactForDiagnostics).toList();
+    }
+    return value;
+  }
+
+  void _logSessionUpdatedRaw(Map<String, dynamic> payload) {
+    try {
+      final encoded = jsonEncode(_redactForDiagnostics(payload));
+      // logcat 한 줄 길이 제한을 피하려고 조각내서 남긴다.
+      const chunkSize = 700;
+      final total = (encoded.length / chunkSize).ceil();
+      for (var i = 0; i < total; i++) {
+        final start = i * chunkSize;
+        final end =
+            start + chunkSize < encoded.length ? start + chunkSize : encoded.length;
+        _logger?.call('[RT-SESSION-UPDATED-RAW]',
+            'part=${i + 1}/$total ${encoded.substring(start, end)}');
+      }
+    } catch (error) {
+      _logger?.call(
+          '[RT-SESSION-UPDATED-RAW]', 'encode_failed reason=${error.runtimeType}');
+    }
+  }
+
+  void _logSessionUpdatedCheck({
+    required Object? session,
+    required Object? audio,
+    required Object? input,
+    required Object? transcription,
+    required Object? turnDetection,
+    required bool valid,
+  }) {
+    try {
+      final failures = <String>[];
+      if (session is! Map) {
+        failures.add('session expected=Map got=${session.runtimeType}');
+      }
+      if (audio is! Map) {
+        failures.add('session.audio expected=Map got=${audio.runtimeType}');
+      }
+      if (input is! Map) {
+        failures.add('session.audio.input expected=Map got=${input.runtimeType}');
+      }
+      if (turnDetection is! Map) {
+        failures.add('session.audio.input.turn_detection expected=Map '
+            'got=${turnDetection.runtimeType} value=$turnDetection');
+      } else {
+        final type = turnDetection['type'];
+        if (type?.toString() != 'server_vad') {
+          failures.add("turn_detection.type expected='server_vad' got='$type'");
+        }
+        final createResponse = turnDetection['create_response'];
+        if (createResponse != null && createResponse != _autoRespond) {
+          failures.add('turn_detection.create_response expected=$_autoRespond '
+              'or omitted got=$createResponse type=${createResponse.runtimeType}');
+        }
+      }
+      final td = turnDetection is Map ? turnDetection : null;
+      _logger?.call(
+        '[RT-SESSION-UPDATED-CHECK]',
+        'expected_conditions="session is Map && turn_detection is Map && '
+            "turn_detection['type']=='server_vad' && "
+            '(create_response omitted || create_response==$_autoRespond)" '
+            'autoRespond=$_autoRespond '
+            'valid=$valid '
+            'session_keys=${session is Map ? session.keys.toList() : null} '
+            'audio_keys=${audio is Map ? audio.keys.toList() : null} '
+            'input_keys=${input is Map ? input.keys.toList() : null} '
+            'transcription=${transcription is Map ? transcription : transcription} '
+            'turn_detection=$td '
+            'turn_detection_type=${td?['type']} '
+            'create_response=${td?['create_response']} '
+            'create_response_present=${td?.containsKey('create_response')} '
+            'interrupt_response=${td?['interrupt_response']} '
+            'interrupt_response_present=${td?.containsKey('interrupt_response')} '
+            'failed_fields=${failures.isEmpty ? 'none' : failures.join(' | ')}',
+      );
+    } catch (error) {
+      _logger?.call(
+          '[RT-SESSION-UPDATED-CHECK]', 'log_failed reason=${error.runtimeType}');
+    }
+  }
+
+  void _logServerErrorDiagnostics(String type, Map<String, dynamic> payload) {
+    try {
+      final error = payload['error'];
+      final detail = error is Map
+          ? 'code=${error['code']} type=${error['type']} '
+              'param=${error['param']} message=${error['message']}'
+          : 'raw=${_redactForDiagnostics(payload)}';
+      _logger?.call('[RT-SERVER-ERROR]', 'event=$type $detail');
+    } catch (logError) {
+      _logger?.call(
+          '[RT-SERVER-ERROR]', 'log_failed reason=${logError.runtimeType}');
+    }
+  }
+
+  /// 🗣️ [RT-CONV] 음성 직결 모드의 턴 경로와 지연을 측정한다. WebRTC에서는
+  /// 오디오가 미디어 트랙으로 오므로 "첫 오디오"는 데이터채널의 오디오 신호
+  /// 이벤트(output_audio_buffer.started / response.output_audio.delta)를 기준으로
+  /// 잡는다. 실제 스피커 재생 시각과는 미세한 차이가 있을 수 있다.
+  void _trackConversationLatency(String type) {
+    final now = DateTime.now();
+    switch (type) {
+      case 'input_audio_buffer.speech_started':
+        // 유저가 말을 시작하면 AI는 즉시 멈추고 유저 발화부터 처리한다.
+        // interrupt_response는 서버의 생성만 중단시키므로, 이미 전송돼 클라이언트
+        // 버퍼에 남은 오디오까지 비워야 두 목소리가 겹치지 않는다.
+        if (_outputAudioActive) {
+          sendEvent(<String, dynamic>{'type': 'output_audio_buffer.clear'});
+          _outputAudioActive = false;
+          _logger?.call('[RT-BARGE-IN]', 'user_speech_started → ai_audio_stopped');
+        }
+        _convSpeechStoppedAt = null;
+        _convResponseCreatedAt = null;
+        _convFirstTextAt = null;
+        _convFirstAudioAt = null;
+        return;
+      case 'input_audio_buffer.speech_stopped':
+        _convSpeechStoppedAt = now;
+        return;
+      case 'response.created':
+        _convResponseCreatedAt = now;
+        _convTurnCount++;
+        _logger?.call('[RT-PATH]', '${_mode}_realtime_mini turnId=$_convTurnCount');
+        return;
+      case 'response.output_audio_transcript.delta':
+      case 'response.audio_transcript.delta':
+        _convFirstTextAt ??= now;
+        return;
+      case 'output_audio_buffer.started':
+      case 'response.output_audio.delta':
+      case 'response.audio.delta':
+        _outputAudioActive = true;
+        _muteMicForAiPlayback();
+        if (_convFirstAudioAt == null) {
+          _convFirstAudioAt = now;
+          _logger?.call('[RT-PLAY]', 'secure WebRTC remote audio signal=$type');
+        }
+        return;
+      case 'output_audio_buffer.cleared':
+      case 'output_audio_buffer.stopped':
+        _outputAudioActive = false;
+        _restoreMicAfterAiPlayback();
+        _emitConversationLatency(endedAt: now);
+        return;
+      case 'response.done':
+        // 오디오 버퍼 이벤트가 없는 응답(텍스트만)에서도 마이크가 닫힌 채로
+        // 남지 않도록 보정한다.
+        _restoreMicAfterAiPlayback();
+        _emitConversationLatency(endedAt: now);
+        return;
+    }
+  }
+
+  void _emitConversationLatency({required DateTime endedAt}) {
+    final speechEnd = _convSpeechStoppedAt;
+    if (speechEnd == null && _convResponseCreatedAt == null) return;
+    String ms(DateTime? from, DateTime? to) {
+      if (from == null || to == null) return 'n/a';
+      return to.difference(from).inMilliseconds.toString();
+    }
+
+    final audioStart = _convFirstAudioAt ?? _convFirstTextAt;
+    _logger?.call(
+      '[RT-LATENCY]',
+      'turnId=$_convTurnCount '
+          'speechEndToResponseCreatedMs=${ms(speechEnd, _convResponseCreatedAt)} '
+          'speechEndToFirstTextMs=${ms(speechEnd, _convFirstTextAt)} '
+          'speechEndToFirstAudioMs=${ms(speechEnd, audioStart)} '
+          'playbackDurationMs=${ms(audioStart, endedAt)} '
+          'firstAudioSource=${_convFirstAudioAt != null ? 'audio_event' : 'text_proxy'} '
+          'fallback=false',
+    );
+    _convSpeechStoppedAt = null;
+    _convResponseCreatedAt = null;
+    _convFirstTextAt = null;
+    _convFirstAudioAt = null;
+  }
+
+  void _logInputTranscriptionEvent(
+      String type, Map<String, dynamic> payload) {
+    final itemId = payload['item_id']?.toString() ?? '';
+    switch (type) {
+      case 'input_audio_buffer.speech_started':
+        _logger?.call('[RT-TRANSCRIBE]', 'speech_started itemId=$itemId');
+        break;
+      case 'input_audio_buffer.speech_stopped':
+        _logger?.call('[RT-TRANSCRIBE]', 'speech_stopped itemId=$itemId');
+        break;
+      case 'conversation.item.input_audio_transcription.delta':
+        final deltaLength = payload['delta']?.toString().length ?? 0;
+        _logger?.call('[RT-TRANSCRIBE]',
+            'transcription_delta itemId=$itemId len=$deltaLength');
+        break;
+      case 'conversation.item.input_audio_transcription.completed':
+        final transcriptLength =
+            payload['transcript']?.toString().trim().length ?? 0;
+        _logger?.call('[RT-TRANSCRIBE]',
+            'transcription_completed itemId=$itemId len=$transcriptLength');
+        break;
     }
   }
 
@@ -625,6 +1133,12 @@ class StealthVoxRealtimeSession {
 
   void _assertCurrent(int generation) {
     if (!_isCurrent(generation)) throw StateError('Stale Realtime session.');
+  }
+
+  void _setReadyWhenConfigured() {
+    if (_peerConnected && _sessionUpdatedConfirmed) {
+      _setConnectionState(RealtimeConnectionState.ready);
+    }
   }
 
   void _setConnectionState(RealtimeConnectionState state) {
