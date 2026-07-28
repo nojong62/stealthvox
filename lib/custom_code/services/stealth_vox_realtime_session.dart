@@ -88,6 +88,7 @@ class RealtimeTranslationTurn {
       StreamController<String>.broadcast();
   final Completer<String> _finalText = Completer<String>();
   final Completer<void> _audioComplete = Completer<void>();
+  final Completer<bool> _textOutcome = Completer<bool>();
   final Completer<RealtimeTurnOutcome> _done = Completer<RealtimeTurnOutcome>();
 
   bool _settled = false;
@@ -109,6 +110,14 @@ class RealtimeTranslationTurn {
   /// immediately for text-only turns, and via a fallback timer if no explicit
   /// stop signal arrives.
   Future<void> get audioComplete => _audioComplete.future;
+
+  /// 🚀 [PARALLEL] 번역문이 확정된 시점에 해소된다(true=성공 응답).
+  /// [done]과 달리 **오디오 재생 완료를 기다리지 않는다.**
+  ///
+  /// 호출부는 이 값으로 번역문을 먼저 받아 AI 응답 생성을 유저 음성 재생과
+  /// 겹칠 수 있다. 재생 순서는 [audioComplete]로 따로 잡아야 한다 — 그러지
+  /// 않으면 AI 음성이 유저 음성 위에 겹쳐 나온다.
+  Future<bool> get textOutcome => _textOutcome.future;
 
   /// Terminal outcome of the turn.
   Future<RealtimeTurnOutcome> get done => _done.future;
@@ -142,6 +151,10 @@ class RealtimeTranslationTurn {
     _audioStartedAt ??= DateTime.now();
   }
 
+  void _markTextSucceeded() {
+    if (!_textOutcome.isCompleted) _textOutcome.complete(true);
+  }
+
   /// 🕐 [RT-AUDIO] `output_audio_buffer.stopped`가 오지 않는 응답이 실제로
   /// 존재한다(실기기 확인). 그때마다 고정 5초를 통째로 기다리면 턴 사이가
   /// 그만큼 비므로, 낭독에 남은 시간을 낭독문 길이로 추정해 대기 상한을 좁힌다.
@@ -168,6 +181,10 @@ class RealtimeTranslationTurn {
     if (_settled) return;
     _settled = true;
     _completeText();
+    // 실패·취소로 끝나면 텍스트를 기다리던 호출부도 같이 풀어 준다.
+    if (!_textOutcome.isCompleted) {
+      _textOutcome.complete(outcome == RealtimeTurnOutcome.completed);
+    }
     if (!_audioComplete.isCompleted) _audioComplete.complete();
     if (!_done.isCompleted) _done.complete(outcome);
     if (!_textCtl.isClosed) _textCtl.close();
@@ -761,6 +778,9 @@ class StealthVoxRealtimeSession {
       _endTurn(turn, RealtimeTurnOutcome.failed, cancelServer: true);
       return;
     }
+    // 🚀 [PARALLEL] 번역문은 여기서 확정된다. 오디오가 아직 재생 중이어도
+    //   호출부가 먼저 받아 AI 응답 생성을 시작할 수 있게 알린다.
+    turn._markTextSucceeded();
     // response.done is not proof the speaker finished; wait for the audio buffer
     // stop (WebRTC) with a stabilization delay, then a fallback timeout.
     //

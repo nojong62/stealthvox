@@ -3964,21 +3964,13 @@ Learner level: ${FreeTalkBrain._freeTalkLevelInstruction(_freeTalkLevel)}''';
         }
       });
 
-      // secure 경로는 번역 음성 재생이 끝난 뒤에만 AI 클론 생성을 시작한다.
+      // 🚀 [PARALLEL] 여기서 유저 음성 재생 완료를 기다리지 않는다. 기다리면
+      //   유저 음성이 흐르는 3~5초 동안 AI 쪽이 놀고, 그만큼 응답이 늦어진다.
+      //   AI 생성·TTS는 지금 시작해 유저 음성 뒤에 숨기고, 실제 재생은 STEP 5의
+      //   audioComplete 게이트(setAiPaused(false) 직전)가 계속 막는다.
       if (secureTurnCompleted) {
-        await secureTurn!.audioComplete;
-        if (!_isPipelineRunning ||
-            _turnCounter != currentTurnId ||
-            !isActivePipelineGeneration(
-              expected: pipelineGeneration,
-              current: _pipelineGeneration,
-              mounted: mounted,
-              conversationActive: _isConversationActive,
-            )) {
-          return;
-        }
         _log('[RT-AUDIO]',
-            'mode=anyone turnId=$currentTurnId complete → clone pipeline');
+            'mode=anyone turnId=$currentTurnId text_ready → clone pipeline (parallel)');
       }
 
       // ─────────────────────────────────────────────────────
@@ -6622,17 +6614,20 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
                   suppressAudio: secureSuppressAudio,
                 );
           onSecureTurn?.call(turn);
-          final outcome = await turn.done;
+          // 🚀 [PARALLEL] 오디오 재생 완료(turn.done)까지 기다리지 않는다.
+          //   번역문이 확정되는 즉시 파이프라인에 넘겨, AI 응답 생성이 유저
+          //   음성 재생과 겹치게 한다. AI 음성 재생 순서는 호출부 STEP 5의
+          //   audioComplete 게이트가 계속 막는다.
+          final textOk = await turn.textOutcome;
           final finalText = (await turn.finalText).trim();
-          if (outcome == RealtimeTurnOutcome.completed &&
-              finalText.isNotEmpty) {
+          if (textOk && finalText.isNotEmpty) {
             if (shouldContinue?.call() == false) return;
             onSecureSuccess?.call();
             yield finalText;
             return;
           }
           fallbackReason = StateError(
-              'outcome=${outcome.name} final_text_empty=${finalText.isEmpty}');
+              'text_ok=$textOk final_text_empty=${finalText.isEmpty}');
         } catch (error) {
           fallbackReason = error;
         }
