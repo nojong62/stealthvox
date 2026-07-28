@@ -21,6 +21,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/openai_connection_pool.dart';
+import '/custom_code/services/realtime_client_secret_service.dart';
+import '/custom_code/services/realtime_feature_flags.dart';
 import 'package:http/http.dart' as http;
 import 'trial/trial_flow_state.dart';
 
@@ -47,6 +49,14 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   // ============================================================================
   // 0: 메뉴 화면, 1: Duo, 2: Free Talk, 3: Roleplay, 4: Expand
   int? _currentMode;
+  bool _preparingAnyone = false;
+  // 🎤 [ENTRY-GATE] 준비 화면 최대 노출 시간(연결 실패 시 안전 장치)
+  static const Duration _anyonePrepMinVisible = Duration(seconds: 2);
+  static const Duration _anyonePrepMaxWait = Duration(seconds: 12);
+  DateTime? _anyonePrepStartedAt;
+  bool _anyoneListeningReady = false;
+  Timer? _anyonePrepMinTimer;
+  Timer? _anyonePrepTimeoutTimer;
 
   // 초대 링크에서 소비한 roomId (1회용 — build에서 Duo 생성자에 전달)
   String? _pendingDuoRoomId;
@@ -55,8 +65,16 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    StealthRoomMaster.exitCurrentMode =
-        () => setState(() => _currentMode = null);
+    StealthRoomMaster.exitCurrentMode = () {
+      _anyonePrepMinTimer?.cancel();
+      _anyonePrepTimeoutTimer?.cancel();
+      _anyonePrepStartedAt = null;
+      _anyoneListeningReady = false;
+      setState(() {
+        _preparingAnyone = false;
+        _currentMode = null;
+      });
+    };
     AppsFlyerManager.duoInviteSignal.addListener(_onDuoInviteSignal);
     unawaited(_prepareFirstUserResponse());
 
@@ -78,7 +96,10 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     // 트라이얼 Anyone 자동 진입 — 메뉴 화면을 건너뛰고 바로 Anyone 모드로
     TrialFlowState.instance.restoreFromAppState();
     if (TrialFlowState.instance.isTrialAnyone) {
-      _currentMode = 2;
+      _preparingAnyone = true;
+      _anyonePrepStartedAt = DateTime.now();
+      _anyoneListeningReady = false;
+      _startAnyonePrepTimeout();
     }
   }
 
@@ -89,6 +110,13 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     //   애니원/스텝익스팬드 진입 시 STT WebSocket 연결 시간을 줄인다.
     //   녹음/스트리밍은 하지 않는다(프라이버시·과금 없음). 응답 경로(OpenAI)와 병행.
     unawaited(_warmUpDeepgram());
+
+    // 🔥 [RT-PREWARM] Anyone 진입 지연의 절반가량(약 3.2초)이 Realtime client
+    //   secret 발급이다. 메뉴를 보는 동안 토큰만 미리 받아둔다. 마이크를 켜지도,
+    //   WebRTC를 열지도 않으므로 프라이버시·과금 영향이 없고, 쓰지 않고 버려도
+    //   정리할 자원이 없다. 실패하거나 만료되면 진입 시 평소대로 새로 발급된다.
+    unawaited(_prewarmAnyoneRealtimeSecret());
+    unawaited(_prewarmStepExpandRealtimeSecret());
 
     final remoteConfig = FirebaseRemoteConfig.instance;
     String openAiKey = remoteConfig.getString('OpenAIAPIKey');
@@ -109,6 +137,34 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       openAiKey,
       onLog: debugPrint,
     );
+  }
+
+  /// 🔥 [RT-PREWARM] Anyone용 Realtime client secret만 미리 받아둔다.
+  /// 마이크·WebRTC를 건드리지 않으므로 다른 모드로 들어가도 정리할 것이 없다.
+  Future<void> _prewarmAnyoneRealtimeSecret() async {
+    try {
+      await RealtimeFeatureFlags.initialize();
+      if (!RealtimeFeatureFlags.enabledFor('anyone')) return;
+      await RealtimeClientSecretPrewarm.instance.prewarm(
+        mode: 'anyone',
+        logger: (tag, detail) => debugPrint('$tag $detail'),
+      );
+    } catch (error) {
+      debugPrint('[RT-PREWARM] skipped reason=${error.runtimeType}');
+    }
+  }
+
+  Future<void> _prewarmStepExpandRealtimeSecret() async {
+    try {
+      await RealtimeFeatureFlags.initialize();
+      await RealtimeClientSecretPrewarm.instance.prewarm(
+        // Step Expand도 검증된 Anyone WebRTC transport를 공유한다.
+        mode: 'anyone',
+        logger: (tag, detail) => debugPrint('$tag $detail'),
+      );
+    } catch (error) {
+      debugPrint('[RT-PREWARM] step skipped reason=${error.runtimeType}');
+    }
   }
 
   /// 🚀 [DEEPGRAM-WARMUP] Deepgram 호스트로 가벼운 HTTPS 요청을 1회 보내 DNS/TLS를
@@ -145,6 +201,8 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
 
   @override
   void dispose() {
+    _anyonePrepMinTimer?.cancel();
+    _anyonePrepTimeoutTimer?.cancel();
     AppsFlyerManager.duoInviteSignal.removeListener(_onDuoInviteSignal);
     WidgetsBinding.instance.removeObserver(this);
     StealthRoomMaster.exitCurrentMode = null;
@@ -160,8 +218,71 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   }
 
   void _switchMode(int newMode) {
+    if (newMode == 2) {
+      if (_preparingAnyone || _currentMode == 2) return;
+      _anyonePrepMinTimer?.cancel();
+      _anyonePrepStartedAt = DateTime.now();
+      _anyoneListeningReady = false;
+      setState(() {
+        _currentMode = null;
+        _preparingAnyone = true;
+      });
+      _startAnyonePrepTimeout();
+      return;
+    }
+    _anyonePrepMinTimer?.cancel();
+    _anyonePrepTimeoutTimer?.cancel();
+    _anyonePrepStartedAt = null;
+    _anyoneListeningReady = false;
     setState(() {
+      _preparingAnyone = false;
       _currentMode = newMode;
+    });
+  }
+
+  /// 🎤 [ENTRY-GATE] 준비 화면은 마이크가 실제로 열린 뒤에 걷는다. 다만 연결이
+  /// 끝내 실패하면 화면이 영원히 덮여 있으므로, 상한을 두고 강제로 진입시킨다.
+  /// (진입 후에도 Anyone 내부의 재시도 로직이 계속 마이크를 살린다.)
+  void _startAnyonePrepTimeout() {
+    _anyonePrepTimeoutTimer?.cancel();
+    _anyonePrepTimeoutTimer = Timer(_anyonePrepMaxWait, () {
+      if (!mounted || !_preparingAnyone) return;
+      debugPrint('[ENTRY-GATE] anyone prep timeout → 준비 화면 강제 해제');
+      _anyonePrepMinTimer?.cancel();
+      _anyonePrepStartedAt = null;
+      _anyoneListeningReady = false;
+      setState(() {
+        _preparingAnyone = false;
+        _currentMode = 2;
+      });
+    });
+  }
+
+  void _onAnyoneListeningReady() {
+    if (!mounted || !_preparingAnyone) return;
+    _anyoneListeningReady = true;
+    final startedAt = _anyonePrepStartedAt;
+    final elapsed = startedAt == null
+        ? _anyonePrepMinVisible
+        : DateTime.now().difference(startedAt);
+    final remaining = _anyonePrepMinVisible - elapsed;
+    if (remaining > Duration.zero) {
+      _anyonePrepMinTimer?.cancel();
+      _anyonePrepMinTimer = Timer(remaining, _finishAnyonePreparation);
+      return;
+    }
+    _finishAnyonePreparation();
+  }
+
+  void _finishAnyonePreparation() {
+    if (!mounted || !_preparingAnyone || !_anyoneListeningReady) return;
+    _anyonePrepMinTimer?.cancel();
+    _anyonePrepTimeoutTimer?.cancel();
+    _anyonePrepStartedAt = null;
+    _anyoneListeningReady = false;
+    setState(() {
+      _preparingAnyone = false;
+      _currentMode = 2;
     });
   }
 
@@ -346,17 +467,63 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   // ============================================================================
   @override
   Widget build(BuildContext context) {
+    if (_preparingAnyone || _currentMode == 2) {
+      return Stack(
+        children: [
+          Positioned.fill(
+            child: RoutineModeAnyone(
+              key: const ValueKey('RoutineModeAnyone'),
+              width: widget.width,
+              height: widget.height,
+              onListeningReady: _onAnyoneListeningReady,
+            ),
+          ),
+          if (_preparingAnyone)
+            Positioned.fill(
+              child: ColoredBox(
+                color: const Color(0xFF121212),
+                child: SafeArea(
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: const [
+                        SizedBox(
+                          width: 28,
+                          height: 28,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.4,
+                            color: Color(0xFF7F77DD),
+                          ),
+                        ),
+                        SizedBox(height: 22),
+                        Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 40),
+                          child: Text(
+                            '여기, 그 사람이 있어요.\n편하게 말 걸어보세요.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 15,
+                              height: 1.6,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      );
+    }
     if (_currentMode == 1) {
       return RoutineModeDuo(
           key: const ValueKey('RoutineModeDuo'),
           width: widget.width,
           height: widget.height,
           roomId: _pendingDuoRoomId);
-    } else if (_currentMode == 2) {
-      return RoutineModeAnyone(
-          key: const ValueKey('RoutineModeAnyone'),
-          width: widget.width,
-          height: widget.height);
     } else if (_currentMode == 3) {
       return RoutineModeRoleplay(
           key: const ValueKey('RoutineModeRoleplay'),
