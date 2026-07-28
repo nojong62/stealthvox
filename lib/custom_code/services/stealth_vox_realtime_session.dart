@@ -94,6 +94,10 @@ class RealtimeTranslationTurn {
   bool _responseDoneSeen = false;
   bool _audioDone = false;
 
+  /// 원격 오디오가 실제로 흐르기 시작한 시각. `output_audio_buffer.started`
+  /// 또는 첫 `response.output_audio.delta`로 잡는다.
+  DateTime? _audioStartedAt;
+
   /// Incremental translation text (transcript deltas for audio turns,
   /// text deltas for text-only turns).
   Stream<String> get textStream => _textCtl.stream;
@@ -132,6 +136,32 @@ class RealtimeTranslationTurn {
   void _completeAudio() {
     _audioDone = true;
     if (!_audioComplete.isCompleted) _audioComplete.complete();
+  }
+
+  void _markAudioStarted() {
+    _audioStartedAt ??= DateTime.now();
+  }
+
+  /// 🕐 [RT-AUDIO] `output_audio_buffer.stopped`가 오지 않는 응답이 실제로
+  /// 존재한다(실기기 확인). 그때마다 고정 5초를 통째로 기다리면 턴 사이가
+  /// 그만큼 비므로, 낭독에 남은 시간을 낭독문 길이로 추정해 대기 상한을 좁힌다.
+  ///
+  /// 낭독 속도는 실제(약 165wpm)보다 느리게 잡아 과소추정으로 AI 음성이 유저
+  /// 음성 꼬리를 덮는 일이 없게 한다. 시작 신호조차 못 받은 경우에는 추정을
+  /// 포기하고 기존 상한을 그대로 쓴다.
+  Duration? _estimateRemainingAudio() {
+    final startedAt = _audioStartedAt;
+    if (startedAt == null) return null;
+    final words = _textBuffer
+        .toString()
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((w) => w.isNotEmpty)
+        .length;
+    if (words == 0) return null;
+    final estimatedTotal = Duration(milliseconds: words * 380 + 700);
+    final remaining = estimatedTotal - DateTime.now().difference(startedAt);
+    return remaining.isNegative ? Duration.zero : remaining;
   }
 
   void _settle(RealtimeTurnOutcome outcome) {
@@ -270,7 +300,11 @@ class StealthVoxRealtimeSession {
     String stage = 'secret';
     try {
       _setConnectionState(RealtimeConnectionState.requestingToken);
-      final secret = await _secretService.create(mode: mode, logger: _logger);
+      // 🔥 [RT-PREWARM] StealthRoom에서 미리 받아둔 secret이 살아 있으면 쓴다.
+      //   없거나 만료가 임박하면 평소대로 새로 발급한다(동작 차이 없음).
+      final secret =
+          RealtimeClientSecretPrewarm.instance.take(mode, logger: _logger) ??
+              await _secretService.create(mode: mode, logger: _logger);
       _assertCurrent(generation);
       _setConnectionState(RealtimeConnectionState.connecting);
 
@@ -561,6 +595,59 @@ class StealthVoxRealtimeSession {
     return turn;
   }
 
+  /// 🎙️ [SPEECH-FIRST] 서버 VAD가 방금 커밋한 유저 오디오를 그대로 조건으로 삼아
+  /// 응답 1개를 요청한다. 전사 텍스트를 주입하지 않으므로 전사 완료를 기다릴
+  /// 필요가 없고, 발화가 끝나는 즉시 발사할 수 있다(= 유저 목소리가 바로 나온다).
+  /// 전사는 자막·AI 응답용으로 뒤따라 도착하며 이 턴을 막지 않는다.
+  RealtimeTranslationTurn requestSpeechTranslationTurn({
+    required String turnId,
+    required String instructions,
+    String voice = 'marin',
+    Duration turnTimeout = const Duration(seconds: 20),
+    Duration audioTailTimeout = const Duration(seconds: 5),
+    Duration audioStabilization = const Duration(milliseconds: 250),
+  }) {
+    if (_disposed) throw StateError('Realtime session is disposed.');
+    if (_activeTurn != null && !_activeTurn!.isSettled) {
+      throw StateError('A realtime turn is already active.');
+    }
+    if (_connectionState != RealtimeConnectionState.ready &&
+        _connectionState != RealtimeConnectionState.configuring) {
+      throw StateError('Realtime session is not ready.');
+    }
+
+    final turn = RealtimeTranslationTurn._(turnId, expectAudio: true);
+    _activeTurn = turn;
+    _turnId = turnId;
+    _audioTailTimeout = audioTailTimeout;
+    _audioStabilization = audioStabilization;
+
+    // 입력 아이템을 만들지 않는다 — 서버 VAD가 커밋한 오디오 아이템이 이미
+    // 대화에 들어가 있으므로 response.create만 보내면 그 발화를 조건으로 답한다.
+    sendEvent(<String, dynamic>{
+      'type': 'response.create',
+      'response': <String, dynamic>{
+        'instructions': instructions,
+        'output_modalities': <String>['audio'],
+        'audio': <String, dynamic>{
+          'output': <String, dynamic>{'voice': _resolveRealtimeVoice(voice)},
+        },
+      },
+    });
+    _setTurnState(RealtimeTurnState.responseRequested);
+    _logger?.call('[RT-TURN]', 'turnId=$turnId start mode=speech_first');
+
+    _turnTimeoutTimer?.cancel();
+    _turnTimeoutTimer = Timer(turnTimeout, () {
+      if (identical(_activeTurn, turn) && !turn.isSettled) {
+        _logger?.call('[RT-TURN]', 'turnId=$turnId timeout');
+        _endTurn(turn, RealtimeTurnOutcome.timedOut, cancelServer: true);
+      }
+    });
+
+    return turn;
+  }
+
   /// Cancels the in-flight translation turn, if any, and clears the server
   /// response so a late one cannot leak into the next turn.
   void cancelActiveTurn() {
@@ -603,8 +690,20 @@ class StealthVoxRealtimeSession {
         turn._completeText();
         break;
       case 'output_audio_buffer.started':
+      case 'response.output_audio.delta':
+      case 'response.audio.delta':
+        // 오디오가 실제로 흐르기 시작한 시각을 남긴다. 종료 신호가 오지 않는
+        // 응답에서 남은 낭독 시간을 추정하는 기준점이다.
+        if (turn._audioStartedAt == null) {
+          turn._markAudioStarted();
+          _logger?.call('[RT-AUDIO]', 'stream_started signal=$type '
+              'turnId=${turn.turnId}');
+        }
         break;
       case 'output_audio_buffer.stopped':
+      case 'output_audio_buffer.cleared':
+        _logger?.call(
+            '[RT-AUDIO]', 'stop_signal=$type turnId=${turn.turnId}');
         _scheduleAudioComplete(turn);
         break;
       case 'response.done':
@@ -638,13 +737,26 @@ class StealthVoxRealtimeSession {
       return;
     }
     // response.done is not proof the speaker finished; wait for the audio buffer
-    // stop (WebRTC) with a stabilization delay, then a hard fallback timeout.
+    // stop (WebRTC) with a stabilization delay, then a fallback timeout.
+    //
+    // 🕐 [RT-AUDIO] 실기기에서 긴 발화 턴은 `output_audio_buffer.stopped`가
+    //   끝내 오지 않는 경우가 있다. 그때 고정 상한(5초)을 통째로 기다리면 유저
+    //   음성이 끝난 뒤에도 그만큼 정적이 생긴다. 낭독 길이로 남은 시간을 추정해
+    //   기다림을 좁히되, 추정이 불가능하거나 추정치가 더 길면 기존 상한을 쓴다.
     if (turn._expectAudio && !turn._audioDone) {
+      final estimated = turn._estimateRemainingAudio();
+      final wait = (estimated != null && estimated < _audioTailTimeout)
+          ? estimated
+          : _audioTailTimeout;
       _audioTailTimer?.cancel();
-      _audioTailTimer = Timer(_audioTailTimeout, () {
+      _audioTailTimer = Timer(wait, () {
         if (!identical(_activeTurn, turn) || turn.isSettled) return;
         turn._completeAudio();
-        _logger?.call('[RT-AUDIO]', 'completion_timeout turnId=${turn.turnId}');
+        _logger?.call(
+            '[RT-AUDIO]',
+            'completion_timeout turnId=${turn.turnId} '
+                'waited_ms=${wait.inMilliseconds} '
+                'source=${estimated == null ? 'fixed_cap' : 'estimated'}');
         _maybeSettleTurn(turn);
       });
     }
