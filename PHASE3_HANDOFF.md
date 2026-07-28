@@ -1,3 +1,9 @@
+> ⚠️ **이 문서는 낡았다 (커밋 `91ef3b78` 기준).**
+> 이후 첫 턴 GPT-4.1 검수는 폐기됐고, secure realtime은 2턴이 아니라 1턴부터
+> 적용되며, speech-first는 도입됐다가 다시 제거됐다.
+> **최신 정본은 `REALTIME_ANYONE_PATTERN.md`다.** 충돌하면 그쪽이 맞다.
+> 이 문서는 Phase 2~3 초기 경위 기록으로만 남긴다.
+
 # Realtime 보안 WebRTC 이전 — 진행 상황 핸드오프
 
 브랜치: `realtime-secure-webrtc` · 마지막 갱신 기준 커밋: `91ef3b78`
