@@ -259,6 +259,25 @@ class StealthVoxRealtimeSession {
   Duration _audioStabilization = const Duration(milliseconds: 250);
   Duration _audioTailTimeout = const Duration(seconds: 5);
 
+  /// 🎧 [RT-TRANSCRIPTION] 입력 전사 언어. 비워 두면 서버가 언어부터 스스로
+  /// 추측한다. 모국어를 못 박아 그 추측 단계를 없앤다.
+  ///
+  /// 어휘 힌트(prompt)는 의도적으로 쓰지 않는다. 특정 표현으로 인식을 끌어당겨
+  /// 사용자가 다른 말을 해도 힌트 쪽으로 붙을 위험이 있고, 전사가 파이프라인의
+  /// 임계 경로에 있어 프롬프트 길이가 그대로 지연이 된다.
+  String? _transcriptionLanguage;
+
+  /// 🎧 [RT-TRANSCRIPTION] 첫 발화만 정밀 모델로 받고 이후는 경량으로 내린다.
+  /// 첫 발화는 상대·상황을 정하는 문장이라 한 번 잘못 들으면 대화 전체가
+  /// 어긋난다. 2턴부터는 문맥이 쌓여 경량 모델로도 복구가 된다.
+  static const String kAccurateTranscriptionModel = 'gpt-4o-transcribe';
+  static const String kLightTranscriptionModel = 'gpt-4o-mini-transcribe';
+  String _transcriptionModel = kLightTranscriptionModel;
+
+  /// 전사 모델을 바꿔 session.update를 다시 보내려면 최초 설정값이 필요하다.
+  String _sessionVoice = kDefaultRealtimeVoice;
+  String _sessionInstructions = '';
+
   Stream<RealtimeSessionEvent> get events => _events.stream;
   RealtimeTranslationTurn? get activeTurn => _activeTurn;
   RealtimeConnectionState get connectionState => _connectionState;
@@ -279,6 +298,8 @@ class StealthVoxRealtimeSession {
     bool captureMicrophone = true,
     bool disableServerVad = false,
     bool autoRespond = false,
+    String? transcriptionLanguage,
+    String transcriptionModel = kLightTranscriptionModel,
   }) async {
     if (_disposed) throw StateError('Realtime session is disposed.');
     if (!allowWhenDisabled && !RealtimeFeatureFlags.enabledFor(mode)) {
@@ -291,6 +312,10 @@ class StealthVoxRealtimeSession {
     _captureMicrophone = captureMicrophone;
     _disableServerVad = disableServerVad;
     _autoRespond = autoRespond;
+    _transcriptionLanguage = transcriptionLanguage;
+    _transcriptionModel = transcriptionModel;
+    _sessionVoice = voice;
+    _sessionInstructions = instructions;
     _mode = mode;
     _peerConnected = false;
     _sessionUpdatedConfirmed = false;
@@ -850,6 +875,22 @@ class StealthVoxRealtimeSession {
     return resolved;
   }
 
+  /// 🎧 [RT-TRANSCRIPTION] 전사 모델을 바꾸고 세션 설정을 다시 보낸다.
+  /// 다음 발화부터 적용된다. 진행 중인 전사에는 영향을 주지 않는다.
+  void setTranscriptionModel(String model) {
+    if (_disposed || _transcriptionModel == model) return;
+    _transcriptionModel = model;
+    if (!_captureMicrophone) return;
+    if (_connectionState != RealtimeConnectionState.ready &&
+        _connectionState != RealtimeConnectionState.configuring) {
+      // 아직 연결 전이면 값만 바꿔 둔다. 최초 session.update가 이 값을 쓴다.
+      return;
+    }
+    _logger?.call('[RT-TRANSCRIPTION]', 'model_switch → $model');
+    _sendSessionUpdate(
+        voice: _sessionVoice, instructions: _sessionInstructions);
+  }
+
   void _sendSessionUpdate(
       {required String voice, required String instructions}) {
     final audio = <String, dynamic>{
@@ -880,9 +921,18 @@ class StealthVoxRealtimeSession {
       //    HOST 한국어 원문/History 저장 용도로만 비동기 도착한다. 전사 완료가
       //    응답 시작을 막지 않는다.
       //  - 텍스트 구동 경로: 전사 이벤트로 턴 경계를 잡는다.
-      input['transcription'] = <String, dynamic>{
-        'model': 'gpt-4o-mini-transcribe',
+      // 🎧 [RT-TRANSCRIPTION] language를 비워 두면 서버가 언어부터 추측한다.
+      //   모국어를 못 박아 그 단계를 없앤다. 어휘 힌트(prompt)는 쓰지 않는다.
+      final transcription = <String, dynamic>{
+        'model': _transcriptionModel,
       };
+      final language = _transcriptionLanguage?.trim();
+      if (language != null && language.isNotEmpty) {
+        transcription['language'] = language;
+      }
+      _logger?.call('[RT-TRANSCRIPTION]',
+          'model=$_transcriptionModel language=${language ?? 'auto'}');
+      input['transcription'] = transcription;
       if (_autoRespond) {
         _logger?.call('[RT-TRANSCRIPTION]',
             'parallel_for_subtitle_only mode=$_mode (응답 대기 없음)');

@@ -66,6 +66,9 @@ class RealtimeAnyoneAdapter {
     String voice = 'marin',
     String mode = 'anyone',
     bool allowWhenDisabled = false,
+    String? transcriptionLanguage,
+    String transcriptionModel =
+        StealthVoxRealtimeSession.kLightTranscriptionModel,
   }) async {
     _ensureEventSubscription();
     await session.connect(
@@ -75,8 +78,14 @@ class RealtimeAnyoneAdapter {
       allowWhenDisabled: allowWhenDisabled,
       captureMicrophone: true,
       disableServerVad: false,
+      transcriptionLanguage: transcriptionLanguage,
+      transcriptionModel: transcriptionModel,
     );
   }
+
+  /// 🎧 [RT-TRANSCRIPTION] 첫 발화 뒤 경량 모델로 내릴 때 쓴다.
+  void setTranscriptionModel(String model) =>
+      session.setTranscriptionModel(model);
 
   /// 🗣️ [RT-CONV] 음성 직결 대화 모드. 마이크 오디오를 그대로 모델에 보내고,
   /// server VAD가 발화 종료를 감지하면 모델이 곧바로 영어 음성으로 응답한다.

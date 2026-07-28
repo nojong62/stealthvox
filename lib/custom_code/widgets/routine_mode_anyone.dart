@@ -195,6 +195,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   //   전사를 받고 판정한 뒤 번역하는 _commitAndProcess 경로로 되돌린다. 그 대가는
   //   전사 대기 약 0.4초뿐이고, 되돌리려면 이 값만 true로 바꾸면 된다.
   static const bool _kSpeechFirstEnabled = false;
+
+  /// 🎧 [RT-TRANSCRIPTION] 정밀 전사 모델을 첫 발화에 이미 썼는지. 세션마다
+  ///   한 번만 쓰고 경량으로 내린다.
+  bool _accurateTranscriptionSpent = false;
   RealtimeTranslationTurn? _speechFirstTurn;
   String? _speechFirstItemId;
   int _speechFirstGeneration = -1;
@@ -1509,12 +1513,22 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     );
     _translateAdapter = adapter;
     _realtimeAdapterIdentity = adapter;
+    // 새 세션이므로 정밀 전사 1회분을 다시 쓸 수 있다.
+    _accurateTranscriptionSpent = false;
     try {
       await adapter.connectForMicrophoneTranscription(
         modeSessionId:
             _sessionDocId ?? 'anyone-${DateTime.now().microsecondsSinceEpoch}',
         voice: _currentUserVoice,
         allowWhenDisabled: true,
+        transcriptionLanguage: _mapLanguageToCode(
+          FFAppState().nativeLang.isNotEmpty
+              ? FFAppState().nativeLang
+              : 'Korean',
+        ),
+        // 🎧 [RT-TRANSCRIPTION] 첫 발화만 정밀 모델. 첫 문장을 잘못 들으면
+        //   상대와 상황 설정이 통째로 어긋나므로 여기만 비용을 더 쓴다.
+        transcriptionModel: StealthVoxRealtimeSession.kAccurateTranscriptionModel,
       );
       final usable = await _waitForTranslateSessionUsable(adapter);
       if (!usable) {
@@ -2650,6 +2664,14 @@ Learner level: ${FreeTalkBrain._freeTalkLevelInstruction(_freeTalkLevel)}''';
     }
 
     _log('🔀 [COMMIT-01]', '확정: len=${committed.length} → 파이프라인 시작');
+
+    // 🎧 [RT-TRANSCRIPTION] 첫 발화를 정밀 모델로 받았으면 여기서 경량으로 내린다.
+    //   다음 발화부터 적용되므로 이 턴의 전사에는 영향이 없다.
+    if (!_accurateTranscriptionSpent) {
+      _accurateTranscriptionSpent = true;
+      _translateAdapter?.setTranscriptionModel(
+          StealthVoxRealtimeSession.kLightTranscriptionModel);
+    }
 
     // 🚀 [SPEC-FIRST-TURN] 투기적 번역이 이 확정 텍스트와 일치하면 그 스트림을 그대로
     //   파이프라인에 넘겨 TTFT를 건너뛴다. 불일치(합쳐짐 등)면 폐기하고 정상 경로.
