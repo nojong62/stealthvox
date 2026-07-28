@@ -6,6 +6,9 @@ import 'package:http/http.dart' as http;
 const String kFirstUtteranceJudgeModel = 'gpt-4.1';
 const int kFirstUtteranceJudgeMaxOutputTokens = 160;
 const Duration kFirstUtteranceJudgeTimeout = Duration(milliseconds: 2500);
+const int kFirstTurnTranslationReviewMaxOutputTokens = 180;
+const Duration kFirstTurnTranslationReviewTimeout =
+    Duration(milliseconds: 2500);
 
 typedef FirstUtteranceJudgeLogger = void Function(String event, String details);
 
@@ -169,6 +172,44 @@ Judgment: $payload''';
   }
 }
 
+enum FirstTurnTranslationReviewVerdict {
+  accepted,
+  polished,
+  retranslated,
+}
+
+class FirstTurnTranslationReview {
+  const FirstTurnTranslationReview({
+    required this.verdict,
+    required this.finalText,
+  });
+
+  final FirstTurnTranslationReviewVerdict verdict;
+  final String finalText;
+
+  static FirstTurnTranslationReview? fromJson(dynamic value) {
+    if (value is! Map<String, dynamic> ||
+        value.length != 2 ||
+        !value.containsKey('verdict') ||
+        !value.containsKey('final_text')) {
+      return null;
+    }
+    final verdictName = value['verdict']?.toString();
+    final finalText = value['final_text']?.toString().trim() ?? '';
+    final verdict = switch (verdictName) {
+      'accepted' => FirstTurnTranslationReviewVerdict.accepted,
+      'polished' => FirstTurnTranslationReviewVerdict.polished,
+      'retranslated' => FirstTurnTranslationReviewVerdict.retranslated,
+      _ => null,
+    };
+    if (verdict == null || finalText.isEmpty) return null;
+    return FirstTurnTranslationReview(
+      verdict: verdict,
+      finalText: finalText,
+    );
+  }
+}
+
 class FirstUtteranceContextJudgeSession {
   bool firstNormalUtteranceSeen = false;
   bool requestStarted = false;
@@ -179,6 +220,10 @@ class FirstUtteranceContextJudgeSession {
   http.Client? _activeClient;
   bool _ownsActiveClient = false;
   int _generation = 0;
+  http.Client? _activeReviewClient;
+  bool _ownsActiveReviewClient = false;
+  FirstUtteranceJudgeLogger? _activeReviewLogger;
+  int _reviewGeneration = 0;
 
   FirstUtteranceRoute previewRoute(String transcript) {
     if (firstNormalUtteranceSeen || requestStarted) {
@@ -390,6 +435,189 @@ Use ambiguity_reason only for a short reason when uncertain; otherwise return an
     }
   }
 
+  Future<FirstTurnTranslationReview?> reviewTranslationDraft({
+    required String apiKey,
+    required String sourceText,
+    required String realtimeDraft,
+    required String targetLanguage,
+    FirstUtteranceContext? context,
+    FirstUtteranceJudgeLogger? onLog,
+    http.Client? client,
+  }) async {
+    final draft = realtimeDraft.trim();
+    if (draft.isEmpty) {
+      onLog?.call('fallback', 'reason=empty');
+      return null;
+    }
+
+    final generation = ++_reviewGeneration;
+    final requestClient = client ?? http.Client();
+    final ownsClient = client == null;
+    _activeReviewClient = requestClient;
+    _ownsActiveReviewClient = ownsClient;
+    _activeReviewLogger = onLog;
+    onLog?.call('review_start', '');
+    try {
+      final contextPayload = context == null
+          ? null
+          : <String, dynamic>{
+              'actor': context.actor,
+              'target': context.target,
+              'omitted_subject': context.omittedSubject,
+              'tense': context.tense,
+              'relationship': context.relationship,
+              'confidence': context.confidence,
+              'ambiguity_reason': context.ambiguityReason,
+            };
+      final response = await requestClient
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': kFirstUtteranceJudgeModel,
+              'temperature': 0,
+              'max_completion_tokens':
+                  kFirstTurnTranslationReviewMaxOutputTokens,
+              'response_format': {
+                'type': 'json_schema',
+                'json_schema': {
+                  'name': 'first_turn_translation_review',
+                  'strict': true,
+                  'schema': {
+                    'type': 'object',
+                    'additionalProperties': false,
+                    'properties': {
+                      'verdict': {
+                        'type': 'string',
+                        'enum': [
+                          'accepted',
+                          'polished',
+                          'retranslated'
+                        ]
+                      },
+                      'final_text': {'type': 'string'}
+                    },
+                    'required': ['verdict', 'final_text']
+                  }
+                }
+              },
+              'messages': [
+                {
+                  'role': 'system',
+                  'content': '''You are the final quality reviewer for the first user utterance in a live conversation.
+The Deepgram source utterance is the authority. The Realtime draft is only a candidate translation.
+
+Evaluate BOTH semantic fidelity and whether the result sounds natural in real spoken $targetLanguage.
+
+First verify meaning:
+- who the speaker is and who is being addressed
+- subject, object, recipient, and named-person relationships
+- omitted Korean subjects, objects, and pronouns, using the supplied first-utterance context when available
+- tense, aspect, modality, question versus statement, intent, and positive versus negative meaning
+- politeness, speech register, and the relationship between speakers
+- whether any important meaning was omitted or any new meaning was invented
+
+Then verify conversational naturalness:
+- reject literal Korean-to-English calques, awkward collocations, unnatural prepositions, and textbook-like wording
+- prefer concise, idiomatic language a native speaker would actually say in this situation
+- preserve the source tone and level of formality
+- do not embellish, over-explain, or make the sentence longer than needed
+
+Choose exactly one verdict:
+- "accepted": Meaning and conversational naturalness are both sufficient. Return the Realtime draft EXACTLY unchanged.
+- "polished": The meaning is faithful, but the wording is literal, stiff, or unnatural in conversation. Make the smallest rewrite needed for idiomatic spoken $targetLanguage.
+- "retranslated": The draft gets the subject, target, referent, tense, intent, question form, polarity/negation, or another material meaning wrong. Translate again from the source, using the supplied context.
+
+Example:
+Source: 오늘은 회사에서 좀 힘들었어요.
+Draft: Today was a little hard at the company.
+Correct result: {"verdict":"polished","final_text":"I had a bit of a rough day at work today."}
+
+Never add new information or output explanations, alternatives, notes, or commentary.
+Never create, delete, rename, or alter an existing control tag such as [EVAPORATE], [CORRECTION], [MISHEARD], [DISSATISFIED], or [CLARIFY].
+Return only the requested JSON object.'''
+                },
+                {
+                  'role': 'user',
+                  'content': jsonEncode({
+                    'source_text': sourceText,
+                    'realtime_draft': draft,
+                    'target_language': targetLanguage,
+                    'first_utterance_context': contextPayload,
+                  })
+                }
+              ]
+            }),
+          )
+          .timeout(kFirstTurnTranslationReviewTimeout);
+      if (generation != _reviewGeneration) return null;
+      if (response.statusCode != 200) {
+        onLog?.call('fallback', 'reason=http');
+        return null;
+      }
+
+      dynamic envelope;
+      dynamic content;
+      try {
+        envelope = jsonDecode(utf8.decode(response.bodyBytes));
+        content = envelope['choices']?[0]?['message']?['content'];
+        if (content is! String) throw const FormatException();
+      } catch (_) {
+        onLog?.call('fallback', 'reason=parse');
+        return null;
+      }
+
+      dynamic decoded;
+      try {
+        decoded = jsonDecode(content);
+      } catch (_) {
+        onLog?.call('fallback', 'reason=parse');
+        return null;
+      }
+      final review = FirstTurnTranslationReview.fromJson(decoded);
+      if (review == null) {
+        final rawFinalText =
+            decoded is Map ? decoded['final_text']?.toString().trim() : null;
+        onLog?.call(
+            'fallback', 'reason=${rawFinalText?.isEmpty == true ? 'empty' : 'parse'}');
+        return null;
+      }
+      onLog?.call('review_done', 'verdict=${review.verdict.name}');
+      return review;
+    } on TimeoutException {
+      if (generation == _reviewGeneration) {
+        onLog?.call('fallback', 'reason=timeout');
+      }
+      return null;
+    } catch (_) {
+      if (generation == _reviewGeneration) {
+        onLog?.call('fallback', 'reason=http');
+      }
+      return null;
+    } finally {
+      if (identical(_activeReviewClient, requestClient)) {
+        _activeReviewClient = null;
+        _ownsActiveReviewClient = false;
+        _activeReviewLogger = null;
+      }
+      if (ownsClient) requestClient.close();
+    }
+  }
+
+  void cancelTranslationReview() {
+    final logger = _activeReviewLogger;
+    final hadActiveReview = _activeReviewClient != null;
+    _reviewGeneration++;
+    if (_ownsActiveReviewClient) _activeReviewClient?.close();
+    _activeReviewClient = null;
+    _ownsActiveReviewClient = false;
+    _activeReviewLogger = null;
+    if (hadActiveReview) logger?.call('fallback', 'reason=cancelled');
+  }
+
   /// Adopts a result that was requested speculatively during the transcript
   /// commit window. The live session remains untouched until the utterance has
   /// passed its final STT-confidence and ghost-word checks.
@@ -411,6 +639,7 @@ Use ambiguity_reason only for a short reason when uncertain; otherwise return an
   }
 
   void cancel() {
+    cancelTranslationReview();
     if (requestStarted && !requestCompleted) requestFailed = true;
     _generation++;
     if (_ownsActiveClient) _activeClient?.close();

@@ -30,8 +30,7 @@ class RealtimeAnyoneAdapter {
       onUserTranscriptCompleted;
   final void Function(String itemId)? onSpeechStarted;
   final void Function(String itemId)? onSpeechStopped;
-  final void Function(RealtimeConnectionState state)?
-      onConnectionStateChanged;
+  final void Function(RealtimeConnectionState state)? onConnectionStateChanged;
   final void Function(String state)? onIceStateChanged;
   final void Function(String text)? onAssistantTranscript;
   final VoidCallback? onResponseStarted;
@@ -65,11 +64,12 @@ class RealtimeAnyoneAdapter {
   Future<void> connectForMicrophoneTranscription({
     required String modeSessionId,
     String voice = 'marin',
+    String mode = 'anyone',
     bool allowWhenDisabled = false,
   }) async {
     _ensureEventSubscription();
     await session.connect(
-      mode: 'anyone',
+      mode: mode,
       modeSessionId: modeSessionId,
       voice: voice,
       allowWhenDisabled: allowWhenDisabled,
@@ -141,6 +141,20 @@ class RealtimeAnyoneAdapter {
       instructions: instructions,
       voice: voice,
       suppressAudio: suppressAudio,
+    );
+  }
+
+  /// 🎙️ [SPEECH-FIRST] 전사 대기 없이, 방금 끝난 유저 발화 오디오로 바로 번역
+  /// 음성 턴을 요청한다.
+  RealtimeTranslationTurn requestSpeechTranslatedTurn({
+    required String turnId,
+    required String instructions,
+    String voice = 'marin',
+  }) {
+    return session.requestSpeechTranslationTurn(
+      turnId: turnId,
+      instructions: instructions,
+      voice: voice,
     );
   }
 
@@ -219,8 +233,7 @@ class RealtimeAnyoneAdapter {
       return;
     }
     if (delta.isNotEmpty &&
-        (type.contains('audio_transcript') ||
-            type.contains('output_text'))) {
+        (type.contains('audio_transcript') || type.contains('output_text'))) {
       _assistantText += delta;
       onAssistantTranscript?.call(_assistantText);
     }
