@@ -51,7 +51,16 @@ class _RealtimeWebrtcProbeState extends State<RealtimeWebrtcProbe> {
   final List<String> _logs = <String>[];
   String _status = 'idle';
   bool _running = false;
-  bool _playbackStarted = false;
+  bool _speakerReady = false;
+  bool _micEnabled = true;
+  bool _translationRunning = false;
+  bool _awaitingPostEnableTranscript = false;
+  String _translationText = '';
+  DateTime? _micDisabledAt;
+  final Set<String> _activeInputItemIds = <String>{};
+  final Set<String> _mutedCarryoverItemIds = <String>{};
+  int _probeGeneration = 0;
+  bool _disposing = false;
 
   @override
   void initState() {
@@ -63,6 +72,9 @@ class _RealtimeWebrtcProbeState extends State<RealtimeWebrtcProbe> {
 
   @override
   void dispose() {
+    _disposing = true;
+    ++_probeGeneration;
+    _session?.cancelActiveTurn();
     _sub?.cancel();
     _session?.dispose();
     super.dispose();
@@ -80,9 +92,17 @@ class _RealtimeWebrtcProbeState extends State<RealtimeWebrtcProbe> {
 
   Future<void> _start() async {
     if (_running) return;
+    final generation = ++_probeGeneration;
     setState(() {
       _running = true;
-      _playbackStarted = false;
+      _speakerReady = false;
+      _micEnabled = true;
+      _translationRunning = false;
+      _awaitingPostEnableTranscript = false;
+      _translationText = '';
+      _micDisabledAt = null;
+      _activeInputItemIds.clear();
+      _mutedCarryoverItemIds.clear();
       _status = 'connecting';
     });
 
@@ -107,16 +127,22 @@ class _RealtimeWebrtcProbeState extends State<RealtimeWebrtcProbe> {
         modeSessionId: 'probe-${DateTime.now().microsecondsSinceEpoch}',
         allowWhenDisabled: widget.forceEnable,
       );
-      if (mounted) setState(() => _status = 'negotiated — waiting for audio');
+      if (_isCurrentSession(session, generation)) {
+        setState(() => _status = 'negotiated — speak once');
+      }
     } catch (e) {
       // 자동 폴백 없음: 실패 로그만 남기고 세션을 정리한다.
-      if (mounted) setState(() => _status = 'failed — 종료(폴백 없음)');
+      if (_isCurrentSession(session, generation)) {
+        setState(() => _status = 'failed — 종료(폴백 없음)');
+      }
       await _sub?.cancel();
       _sub = null;
       await session.dispose();
-      _session = null;
+      if (identical(_session, session)) _session = null;
     } finally {
-      if (mounted) setState(() => _running = false);
+      if (mounted && generation == _probeGeneration) {
+        setState(() => _running = false);
+      }
     }
   }
 
@@ -127,14 +153,16 @@ class _RealtimeWebrtcProbeState extends State<RealtimeWebrtcProbe> {
         if (name != null && mounted) setState(() => _status = name);
         break;
       case RealtimeEventType.remoteAudioTrack:
-        if (!_playbackStarted) {
-          _playbackStarted = true;
+        if (!_speakerReady) {
+          _speakerReady = true;
           try {
             await Helper.setSpeakerphoneOn(true);
           } catch (_) {}
-          _log('[RT-AUDIO]', 'playback_started');
-          if (mounted) setState(() => _status = 'audio playing');
+          _log('[RT-AUDIO]', 'speaker_ready');
         }
+        break;
+      case RealtimeEventType.serverEvent:
+        _handleServerEvent(event.payload);
         break;
       case RealtimeEventType.error:
         _log('[RT-ERROR]', 'stage=session reason=server_event');
@@ -144,11 +172,212 @@ class _RealtimeWebrtcProbeState extends State<RealtimeWebrtcProbe> {
     }
   }
 
+  void _handleServerEvent(Map<String, dynamic>? payload) {
+    if (payload == null) return;
+    final type = payload['type']?.toString() ?? '';
+    final itemId = payload['item_id']?.toString() ?? '';
+
+    if (type == 'output_audio_buffer.started') {
+      _log('[RT-AUDIO]', 'playback_started');
+      if (mounted) setState(() => _status = 'translation audio playing');
+      return;
+    }
+
+    const inputEventTypes = <String>{
+      'input_audio_buffer.speech_started',
+      'conversation.item.input_audio_transcription.delta',
+      'conversation.item.input_audio_transcription.completed',
+    };
+    if (!inputEventTypes.contains(type)) return;
+
+    final wasAlreadyActive = _activeInputItemIds.contains(itemId);
+    if (type == 'input_audio_buffer.speech_started' && itemId.isNotEmpty) {
+      _activeInputItemIds.add(itemId);
+    }
+
+    if (!_micEnabled) {
+      final isCarryover =
+          itemId.isNotEmpty && _mutedCarryoverItemIds.contains(itemId);
+      if (!isCarryover) {
+        _log(
+          '[RT-MIC-TEST]',
+          'transcript_while_muted event=$type itemId=$itemId '
+              'disabledAt=${_micDisabledAt?.toIso8601String() ?? "unknown"} '
+              'wasActiveBeforeMute=$wasAlreadyActive',
+        );
+      } else {
+        _log('[RT-MIC-TEST]',
+            'delayed_pre_mute_event event=$type itemId=$itemId');
+      }
+    } else if (type ==
+        'conversation.item.input_audio_transcription.completed') {
+      final transcriptLength =
+          payload['transcript']?.toString().trim().length ?? 0;
+      if (transcriptLength > 0) {
+        if (_awaitingPostEnableTranscript) {
+          _awaitingPostEnableTranscript = false;
+          _log('[RT-MIC-TEST]',
+              'post_enable_transcript_received itemId=$itemId len=$transcriptLength');
+          if (mounted) {
+            setState(() => _status = 'post-enable transcript received');
+          }
+        } else {
+          _log('[RT-MIC-TEST]',
+              'active_transcript_received itemId=$itemId len=$transcriptLength');
+        }
+      }
+    }
+
+    if (type == 'conversation.item.input_audio_transcription.completed') {
+      _activeInputItemIds.remove(itemId);
+      _mutedCarryoverItemIds.remove(itemId);
+    }
+  }
+
+  bool _isCurrentSession(
+          StealthVoxRealtimeSession session, int generation) =>
+      mounted &&
+      !_disposing &&
+      generation == _probeGeneration &&
+      identical(_session, session);
+
+  bool get _sessionUsable {
+    final state = _session?.connectionState;
+    return state == RealtimeConnectionState.ready ||
+        state == RealtimeConnectionState.configuring;
+  }
+
+  bool _disableMicrophone({
+    required StealthVoxRealtimeSession session,
+    required int generation,
+  }) {
+    if (!_isCurrentSession(session, generation) || !_sessionUsable) return false;
+    _micDisabledAt = DateTime.now();
+    _mutedCarryoverItemIds
+      ..clear()
+      ..addAll(_activeInputItemIds);
+    _log(
+      '[RT-MIC-TEST]',
+      'disable_requested disabledAt=${_micDisabledAt!.toIso8601String()} '
+          'carryoverItemIds=${_mutedCarryoverItemIds.join(",")}',
+    );
+    try {
+      session.setMicrophoneEnabled(false);
+      if (mounted) {
+        setState(() {
+          _micEnabled = false;
+          _status = 'microphone disabled';
+        });
+      }
+      return true;
+    } catch (e) {
+      _log('[RT-ERROR]', 'stage=mic_disable reason=${e.runtimeType}');
+      return false;
+    }
+  }
+
+  bool _enableMicrophone({
+    required StealthVoxRealtimeSession session,
+    required int generation,
+    bool expectNextTranscript = false,
+  }) {
+    if (!_isCurrentSession(session, generation) || !_sessionUsable) return false;
+    _log('[RT-MIC-TEST]', 'enable_requested');
+    try {
+      session.setMicrophoneEnabled(true);
+      if (mounted) {
+        setState(() {
+          _micEnabled = true;
+          _micDisabledAt = null;
+          _mutedCarryoverItemIds.clear();
+          _awaitingPostEnableTranscript = expectNextTranscript;
+          _status = expectNextTranscript
+              ? 'microphone enabled — speak again'
+              : 'microphone enabled';
+        });
+      }
+      return true;
+    } catch (e) {
+      _log('[RT-ERROR]', 'stage=mic_enable reason=${e.runtimeType}');
+      return false;
+    }
+  }
+
+  void _disableMicButton() {
+    final session = _session;
+    if (session == null) return;
+    _disableMicrophone(session: session, generation: _probeGeneration);
+  }
+
+  void _enableMicButton() {
+    final session = _session;
+    if (session == null) return;
+    _enableMicrophone(session: session, generation: _probeGeneration);
+  }
+
+  Future<void> _runTranslationTest() async {
+    final session = _session;
+    if (session == null || _translationRunning || !_sessionUsable) return;
+    final generation = _probeGeneration;
+    if (!_disableMicrophone(session: session, generation: generation)) return;
+
+    setState(() {
+      _translationRunning = true;
+      _translationText = '';
+    });
+    StreamSubscription<String>? textSub;
+    try {
+      _log('[RT-MIC-TEST]', 'translation_requested');
+      final turn = session.requestTranslatedTurn(
+        turnId: 'probe-mic-${DateTime.now().microsecondsSinceEpoch}',
+        sourceText: '마이크 음소거 재전사 검증입니다.',
+        instructions:
+            'Translate the user sentence into natural English. Return only '
+            'the translation, without labels, notes, or alternatives.',
+        voice: 'marin',
+      );
+      textSub = turn.textStream.listen((delta) {
+        if (!_isCurrentSession(session, generation)) return;
+        setState(() => _translationText += delta);
+      });
+      final outcome = await turn.done;
+      final finalText = (await turn.finalText).trim();
+      if (!_isCurrentSession(session, generation)) return;
+      if (outcome != RealtimeTurnOutcome.completed || finalText.isEmpty) {
+        throw StateError('Translation probe did not complete.');
+      }
+      setState(() {
+        _translationText = finalText;
+        _status = 'translation playback complete';
+      });
+      _log('[RT-MIC-TEST]',
+          'translation_completed textLen=${finalText.length}');
+    } catch (e) {
+      _log('[RT-ERROR]',
+          'stage=translation_test reason=${e.runtimeType}');
+    } finally {
+      await textSub?.cancel();
+      if (_isCurrentSession(session, generation) && !_micEnabled) {
+        _enableMicrophone(
+          session: session,
+          generation: generation,
+          expectNextTranscript: true,
+        );
+      }
+      if (mounted && generation == _probeGeneration) {
+        setState(() => _translationRunning = false);
+      }
+    }
+  }
+
   Future<void> _restart() async {
+    ++_probeGeneration;
+    _session?.cancelActiveTurn();
     await _sub?.cancel();
     _sub = null;
     await _session?.dispose();
     _session = null;
+    if (!mounted) return;
     setState(() {
       _logs.clear();
       _status = 'idle';
@@ -190,6 +419,40 @@ class _RealtimeWebrtcProbeState extends State<RealtimeWebrtcProbe> {
             'status: $_status',
             style: const TextStyle(color: Color(0xFF7EE787), fontSize: 13),
           ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton(
+                onPressed: _sessionUsable && _micEnabled && !_translationRunning
+                    ? _disableMicButton
+                    : null,
+                child: const Text('Mic Disable'),
+              ),
+              OutlinedButton(
+                onPressed:
+                    _sessionUsable && !_micEnabled && !_translationRunning
+                        ? _enableMicButton
+                        : null,
+                child: const Text('Mic Enable'),
+              ),
+              ElevatedButton(
+                onPressed: _sessionUsable && !_translationRunning
+                    ? _runTranslationTest
+                    : null,
+                child: Text(
+                    _translationRunning ? 'Translation...' : 'Translation Test'),
+              ),
+            ],
+          ),
+          if (_translationText.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              _translationText,
+              style: const TextStyle(color: Colors.white, fontSize: 14),
+            ),
+          ],
           const Divider(color: Colors.white24, height: 16),
           Expanded(
             child: ListView.builder(
