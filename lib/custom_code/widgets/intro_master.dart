@@ -498,6 +498,124 @@ class _IntroMasterState extends State<IntroMaster> {
     );
   }
 
+  Widget _buildDuoPromoBadge() {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: _showDuoPromo,
+        borderRadius: BorderRadius.circular(99),
+        child: Ink(
+          padding: const EdgeInsets.fromLTRB(7, 6, 11, 6),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [
+                Color(0xFF2D2760),
+                Color(0xFF173F66),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(99),
+            border: Border.all(
+              color: const Color(0xFF7B71F4).withValues(alpha: 0.58),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF6A60E8).withValues(alpha: 0.18),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Color(0xFFE96479),
+                  borderRadius: BorderRadius.all(Radius.circular(99)),
+                ),
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  child: Text(
+                    'AD',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 8,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.4,
+                    ),
+                  ),
+                ),
+              ),
+              SizedBox(width: 6),
+              Icon(
+                Icons.photo_camera_rounded,
+                size: 13,
+                color: Color(0xFF9EDFF5),
+              ),
+              SizedBox(width: 4),
+              Text(
+                'Duo 한 컷',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.2,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showDuoPromo() {
+    showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Duo 한 컷 닫기',
+      barrierColor: Colors.black.withValues(alpha: 0.88),
+      transitionDuration: const Duration(milliseconds: 220),
+      pageBuilder: (dialogContext, animation, secondaryAnimation) {
+        return Material(
+          color: Colors.transparent,
+          child: SafeArea(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => Navigator.of(dialogContext).pop(),
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(18),
+                    child: Image.asset(
+                      'assets/images/duo_promo_one_cut.png',
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+      transitionBuilder: (context, animation, secondaryAnimation, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
+        );
+        return FadeTransition(
+          opacity: curved,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.94, end: 1).animate(curved),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildPageIndicator(
     int activeIndex, {
     bool tealActive = false,
@@ -871,7 +989,13 @@ class _IntroMasterState extends State<IntroMaster> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildBrandMark(),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _buildBrandMark(),
+                      _buildDuoPromoBadge(),
+                    ],
+                  ),
                   SizedBox(height: compact ? 56 : 78),
                   Container(
                     padding:
