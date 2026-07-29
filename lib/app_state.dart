@@ -179,7 +179,7 @@ class FFAppState extends ChangeNotifier {
     _secureApiKey = value;
   }
 
-  String _aiVoice = 'verse';
+  String _aiVoice = 'echo';
   String get aiVoice => _aiVoice;
   set aiVoice(String value) {
     _aiVoice = value;
