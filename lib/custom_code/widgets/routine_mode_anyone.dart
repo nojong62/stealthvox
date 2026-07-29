@@ -446,9 +446,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     return turn;
   }
 
-  /// 🎙️ [SPEECH-FIRST] 전사가 발화가 아니라 잡음·추임새인지 판정한다.
-  /// 선발사 경로는 파이프라인 진입 전 검열을 못 하므로, 뒤늦게 도착한 전사로
-  /// 여기서 걸러 이미 나가고 있는 음성을 끊는다. ("흠" → "Yes." 사고 방지)
+  /// 전사가 발화가 아니라 잡음·추임새인지 판정한다. 파이프라인 진입 전 검열이
+  /// 이 함수 하나를 쓴다. 추임새를 통과시키면 "음." 같은 게 "Um."으로 번역돼
+  /// 유저 목소리로 나가고 AI가 거기에 대답한다(실기기에서 발생).
   bool _isNoiseTranscript(String text) {
     final clean = text
         .toLowerCase()
@@ -2431,25 +2431,12 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     // ─────────────────────────────────────────────────────
     // STEP 1: 증발 검열 (UI 풍선 찍기 전)
     // ─────────────────────────────────────────────────────
-    String lowerClean =
-        finalTranscript.toLowerCase().replaceAll(RegExp(r'[^\w\s]'), '');
-    List<String> ghostWords = [
-      'thank you',
-      'thanks',
-      'yeah',
-      'okay',
-      '감사합니다',
-      '네',
-      '응'
-    ];
-    // [GHOST-EXACT] Change ghost-word detection from substring contains to exact match.
-    //   Before: short ghost words could evaporate normal phrases that merely included them.
-    //   Now: evaporate only when the entire cleaned transcript is itself a ghost word.
-    //   Mixed phrases pass through and are handled later by the [EVAPORATE] rules if needed.
+    // [GHOST-EXACT] 통째로 추임새/고스트워드일 때만 증발시킨다. 부분 일치로
+    //   판정하면 그 단어를 품은 정상 문장까지 사라진다. 판정 기준은
+    //   _isNoiseTranscript 하나로 모은다 — 여기 목록을 따로 두었더니 "음."이
+    //   빠져나가 "Um."으로 번역됐다.
     bool isGhost = !speechFirst &&
-        (ignoreWithoutConsumingFirstTurn ||
-            finalTranscript.length < 2 ||
-            ghostWords.contains(lowerClean.trim()));
+        (ignoreWithoutConsumingFirstTurn || _isNoiseTranscript(finalTranscript));
 
     if (isGhost) {
       _cancelPrewarmedRealtimeVoice();
