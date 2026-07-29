@@ -562,8 +562,13 @@ class StealthVoxRealtimeSession {
 
   void _sendCancel() {
     if (_dataChannel?.state == RTCDataChannelState.RTCDataChannelOpen) {
-      _dataChannel!.send(RTCDataChannelMessage(
-          jsonEncode(<String, dynamic>{'type': 'response.cancel'})));
+      // 이미 끝난 응답에 response.cancel을 보내면 서버가 error를 돌려준다.
+      // 응답이 살아 있을 때만 보낸다. 오디오 버퍼 비우기는 항상 필요하다
+      // (재생 중인 꼬리를 끊어야 다음 턴과 겹치지 않는다).
+      if (_responseId != null) {
+        _dataChannel!.send(RTCDataChannelMessage(
+            jsonEncode(<String, dynamic>{'type': 'response.cancel'})));
+      }
       _dataChannel!.send(RTCDataChannelMessage(
           jsonEncode(<String, dynamic>{'type': 'output_audio_buffer.clear'})));
     }
@@ -1024,9 +1029,22 @@ class StealthVoxRealtimeSession {
               '[RT-TRANSCRIBE]', 'unexpected_auto_response response_created');
         }
       } else if (type == 'response.done') {
+        // 응답이 끝났으므로 취소 대상이 없다. 이걸 비워야 뒤늦은 취소가
+        // response_cancel_not_active 에러를 만들지 않는다.
+        _responseId = null;
         _setTurnState(RealtimeTurnState.completed);
       } else if (type == 'error' || type == 'response.failed') {
         _logServerErrorDiagnostics(type, payload);
+        // 🩹 [RT-BENIGN] 이미 끝난 응답을 취소하면 서버가 error를 돌려준다.
+        //   되묻기/정정 판정은 응답이 끝난 뒤 취소를 보내므로 정상 흐름에서 늘
+        //   발생한다. 이걸 세션 장애로 처리하면 멀쩡한 세션이 Deepgram으로
+        //   떨어지고 그 뒤 모든 턴이 legacy가 된다(실기기에서 실제로 발생).
+        if (_isBenignServerError(payload)) {
+          _logger?.call('[RT-BENIGN]', 'ignored code=${_serverErrorCode(payload)}');
+          _routeTurnEvent(type, payload);
+          _emit(RealtimeEventType.serverEvent, payload: payload);
+          return;
+        }
         _setTurnState(RealtimeTurnState.failed);
         final completer = _sessionUpdatedCompleter;
         if (!_sessionUpdatedConfirmed &&
@@ -1211,6 +1229,23 @@ class StealthVoxRealtimeSession {
       _logger?.call(
           '[RT-SESSION-UPDATED-CHECK]', 'log_failed reason=${error.runtimeType}');
     }
+  }
+
+  /// 세션을 죽일 이유가 없는 서버 에러 코드. 늘리기 전에 반드시 실기기 로그로
+  /// "정상 흐름에서 발생한다"를 확인할 것. 넓히면 진짜 장애를 놓친다.
+  static const Set<String> _benignServerErrorCodes = <String>{
+    // 이미 끝난 응답에 response.cancel을 보냈을 때.
+    'response_cancel_not_active',
+  };
+
+  String? _serverErrorCode(Map<String, dynamic> payload) {
+    final error = payload['error'];
+    return error is Map ? error['code']?.toString() : null;
+  }
+
+  bool _isBenignServerError(Map<String, dynamic> payload) {
+    final code = _serverErrorCode(payload);
+    return code != null && _benignServerErrorCodes.contains(code);
   }
 
   void _logServerErrorDiagnostics(String type, Map<String, dynamic> payload) {
