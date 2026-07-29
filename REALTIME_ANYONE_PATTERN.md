@@ -1,6 +1,6 @@
 # Anyone Realtime 통신 로직 — 다른 모드 이식용 정리
 
-브랜치 `realtime-secure-webrtc` · 기준 커밋 `bdab867f` · 최종 실기기 검증 2026-07-28 (Samsung SM-S931N)
+브랜치 `realtime-secure-webrtc` · 최종 실기기 검증 2026-07-29 (Samsung SM-S931N)
 
 이 문서는 **Anyone에서 실기기로 검증이 끝난 Realtime 통신 구조**를 다른 모드
 (Duo / Roleplay / Step Expand)에 옮기기 위한 것이다. 설계안이 아니라 **동작이
@@ -43,7 +43,24 @@
 
 ## 2. 검증된 통신 흐름
 
-실측 로그(2026-07-28 21:11) 기준. 괄호 안은 발화 종료 기준 경과.
+### 모델은 두 개다 — 헷갈리지 말 것
+
+세션은 하나인데 그 안에 모델 칸이 둘이다. 둘 다 이름에 mini가 들어가서 자주 섞인다.
+
+| 역할 | 설정 위치 | 모델 |
+|---|---|---|
+| 귀 (받아쓰기) | `session.audio.input.transcription.model` | `gpt-4o-mini-transcribe` |
+| 입 (번역 + 음성) | `session.model` | `gpt-realtime-2.1-mini` |
+
+**입 모델은 오디오를 직접 듣지만 글로 돌려주지 않는다.** 듣고 바로 대답만 한다.
+그래서 받아쓰기 담당을 따로 붙인다. 전사 텍스트가 필요한 이유는 넷이다 —
+번역 지시를 텍스트로 줘야 확인·정정 판정이 낄 자리가 생기고(4.4), 한국어 원문
+말풍선/History가 필요하고, 턴 경계를 잡아야 하고, 빈 발화를 걸러야 한다(4.3).
+
+번역 턴은 **오디오가 아니라 전사 텍스트**를 `input_text`로 넣는다
+(`stealth_vox_realtime_session.dart` `conversation.item.create`).
+
+실측 로그(2026-07-29 10:16) 기준. 괄호 안은 발화 종료 기준 경과.
 
 ```
 [스텔스룸 진입]
@@ -58,25 +75,32 @@
   [RT-PC] created
   [RT-MIC] local_track_added                 (+0.19초)
   [RT-SDP] offer_created → answer_applied
-  [RT-AUDIO] remote_track_received
+  [RT-AUDIO] remote_track_received → speaker_on
   [RT-ICE] connected                         (+2.5초)
   [RT-SESSION] updated_confirmed valid=true
+  [RT-TRANSCRIPTION] model=gpt-4o-mini-transcribe language=ko
+  [TTS-ROUTE] voice_call=on                  ← AI 음성도 통화 오디오로 (4.9)
   🔐 [RT-TRANSLATE] session ready            (+2.9초, 완전 스탠바이)
   [ANY-RT-STT] listening_started
 
 [유저 발화]
   speech_started / speech_stopped            (서버 VAD)
-  [ANY-RT-STT] final_received len=23         (+0.43초)  ← 전사
-  🔀 [COMMIT-01] 확정                        (+0.53초)
+  [ANY-RT-STT] final_received len=23         (+0.34초)  ← 전사
+  🎧 [STT-RAW] text="밥 먹지 말고 기다려…"    ← 전사 원문 (디버그 빌드만)
+  🔀 [COMMIT-01] 확정                        (+0.46초)
+  🧭 [FIRST-CONTEXT] first_normal_utterance judge=off
   [RT-PATH] anyone_secure_realtime turnId=N
-  [RT-TURN] start suppress_audio=false
-  [RT-AUDIO] stream_started                  (+2.10초)  ← 유저 영어 음성 시작
-  [RT-AUDIO] stop_signal=output_audio_buffer.stopped (+5.14초)
-  [RT-AUDIO] playback_done                   (+5.40초)
+  [RT-TURN] start
+  [RT-AUDIO] stream_started                  (+1.79초)  ← 유저 영어 음성 시작
+  [RT-AUDIO] text_ready → clone pipeline (parallel)     ← AI 생성 병렬 시작
+  [RT-AUDIO] playback_done                   (+5.11초)
   [RT-PLAY] secure WebRTC 원격 오디오 사용
-  → clone pipeline (AI 응답은 legacy gpt-4o-mini + tts-1)
-  AI 첫 음성                                  (+8.15초)
+  [PIPE-07] setAiPaused(false)               (+5.36초)  ← AI 음성 (legacy gpt-4o-mini + tts-1)
 ```
+
+**`[STT-RAW]`이 이 문서에서 가장 중요한 로그다.** 오역이 났을 때 귀가 틀렸는지
+입이 틀렸는지 이것 없이는 못 가른다. 화면 한국어 자막은 영어 번역문을 역번역한
+것이라 원문 대조에 쓸 수 없다(6-6). 다른 모드에도 반드시 같이 넣을 것.
 
 ### 하이브리드가 의도된 설계다
 
