@@ -79,7 +79,7 @@
   [RT-ICE] connected                         (+2.5초)
   [RT-SESSION] updated_confirmed valid=true
   [RT-TRANSCRIPTION] model=gpt-4o-mini-transcribe language=ko
-  [TTS-ROUTE] voice_call=on                  ← AI 음성도 통화 오디오로 (4.9)
+  [TTS-ROUTE] voice_call=on                  ← AI 음성도 통화 오디오로
   🔐 [RT-TRANSLATE] session ready            (+2.9초, 완전 스탠바이)
   [ANY-RT-STT] listening_started
 
@@ -233,27 +233,58 @@ WebRTC 오디오 종료 신호다. 대부분 정상 도착하지만 놓친 사�
 다른 말을 해도 힌트 쪽에 붙을 위험이 있고, speech-first를 끈 뒤로 전사가
 임계 경로라 프롬프트 길이가 그대로 지연이 된다.
 
-현재 구성은 **첫 발화만 `gpt-4o-transcribe`, 이후 `gpt-4o-mini-transcribe`**다.
-첫 문장이 상대와 상황을 정하므로 거기만 비용을 더 쓴다.
-(`setTranscriptionModel`, `_accurateTranscriptionSpent`)
+현재 구성은 **전 턴 `gpt-4o-mini-transcribe`(경량)**다. 정밀 모델은 쓰지 않는다.
 
-**단, 정밀 모델이 실제로 필요한지는 아직 확정되지 않았다.** 같은 문장
-("밥 먹지 말고 기다려. 나 곧 도착하니까.")으로 측정한 결과:
+**정밀 모델 논쟁은 2026-07-29 실측으로 종결됐다.** 같은 문장을 같은 톤으로
+양쪽에 넣어 나란히 비교한 결과:
 
-| 시각 | 모델 | language | 결과 |
-|---|---|---|---|
-| 21:11 | mini | **없음** | "Don't panic…" ❌ (겁 먹지로 오인식) |
-| 21:44 | 정밀 | ko | ✅ |
-| 21:51 1턴 | 정밀 | ko | ✅ |
-| 21:51 2턴 | **mini** | ko | **✅** |
+| 문장 | 경량 | 정밀 |
+|---|---|---|
+| 왜 어제 안 왔어? | "왜 오지 않았어?" ❌ | "왜 오지 않았어?" ❌ (2회 모두 동일) |
+| 나 아까 밥 먹었어 | ✅ | **"나가 밥 먹었어."** ❌ |
+| 전사 지연 | 0.51초 | 0.51초 |
 
-성공/실패를 가른 변수는 모델이 아니라 **`language` 지정**으로 보인다. mini도
-언어만 못 박으면 정확했고 **0.24초 더 빨랐다**(전사 0.41초 vs 0.65초).
+정밀 모델은 **경량이 틀리는 문장을 똑같이 틀렸고**(글자 하나 다르지 않았다),
+**경량이 맞히던 문장은 퇴행시켰다.** 지연 차이도 없었다. 비싸기만 하다.
 
-표본이 조건당 1개뿐이라 단정하지 않았다. 같은 세션에서 4~5턴 반복해 mini가
-계속 정확하면 정밀 모델을 빼도 된다(비용↓, 첫 턴 0.24초↓, 코드 단순화).
+과거에 "정밀이 0.24초 느리다"고 기록해 뒀으나 이번 조건에서는 재현되지 않았다.
+어느 쪽이든 정밀을 쓸 이유는 없다.
 
-### 4.8 session.updated 검증을 과하게 하지 말 것
+**등급으로 못 넘는 벽이 있다.** "어제 안 왔어"[어제아놔써]와 "오지 않았어"
+[오지아나써]는 음향적으로 거의 겹친다. 모델은 단어를 흘린 게 아니라 문법적으로
+더 매끄러운 쪽으로 재분절한다. 두 등급이 같은 답을 내놓는 것이 그 증거다.
+이런 구간은 모델을 바꿔서 해결되지 않는다.
+
+### 4.8 발화 앞부분이 잘리면 모델이 앞을 지어낸다 (prefix_padding)
+
+**오인식의 가장 큰 원인은 모델이 아니라 VAD 설정이었다.**
+
+server VAD는 발화 시작을 감지한 시점부터 오디오를 보내되, 그 **앞의 일정 구간을
+같이 담아** 첫 음절이 잘리지 않게 한다. 그 길이가 `prefix_padding_ms`다.
+기본 300ms로는 **말을 툭 던지듯 시작할 때 첫 음절이 잘려 나갔고, 모델이 잘린
+앞을 통째로 지어냈다.**
+
+| 발화 | padding 300 | **padding 600** |
+|---|---|---|
+| 왜 어제 안 왔어? | "배우 있지 않아서?" / "악사 왜 오지 않아서" | "왜 오지 않았어?" |
+| 밥 먹지 | "밟" | **"밥 먹지." ✅** |
+| 나 아까 밥 먹었어 | — | ✅ |
+| 너 방금 뭐라고 했어? | — | ✅ |
+| 내일 학교 안 가? | — | ✅ |
+
+문장 **앞**이 살아나자 나머지가 따라왔다. 실측 6문장 중 5문장이 정확해졌다.
+`stealth_vox_realtime_session.dart`의 `turnDetection['prefix_padding_ms'] = 600`.
+
+**공짜다.** 이미 지나간 소리를 더 담는 것이라 응답이 늦어지지 않는다. 전사 지연은
+padding 300일 때와 같은 0.51초였다.
+
+주의: 이 값은 `_autoRespond` 분기 **밖**에 둬야 한다. 안에 두면 음성 직결 모드
+에서만 적용되고 전사 경로에는 안 걸린다(실제로 그렇게 잘못 들어가 있었다).
+
+진단 요령 — 오인식이 났을 때 **틀린 자리가 문장 앞이면 padding을 의심**하고,
+가운데·뒤가 흔들리면 padding으로 해결되지 않는다(4.7).
+
+### 4.9 session.updated 검증을 과하게 하지 말 것
 
 서버가 요청한 설정을 전부 에코하지 않는다. 선택 필드가 없다고 실패 처리하면
 멀쩡한 세션이 Deepgram으로 폴백된다. 성공 조건은 **세션 객체 정상 + turn
@@ -302,10 +333,9 @@ detection이 실제로 server_vad**까지다. 반대로 명백히 다른 값이 
    있어야 한다. 겹치면 이 커밋을 되돌리는 것이 가장 빠르다.
 2. `[CLARIFY]` 태그가 음성으로 읽힐 수 있다 (4.5).
 3. 오디오 종료 5초 상한이 긴 음성을 자를 수 있다 (4.6).
-4. **첫 발화 정밀 전사 모델이 정말 필요한지 미확정** (4.7). 실측에서 mini도
-   `language`만 지정하면 정확했고 오히려 0.24초 빨랐다. 조건당 표본 1개라
-   결론을 못 냈다. **같은 세션에서 4~5턴 반복하면 답이 나온다** — 1턴만
-   정밀이고 나머지는 전부 mini이므로, mini가 계속 정확하면 정밀을 빼도 된다.
+4. ~~첫 발화 정밀 전사 모델이 정말 필요한지 미확정.~~ → **종결(2026-07-29).**
+   정밀 모델은 개선이 없고 오히려 퇴행시켰다. 전 턴 경량으로 확정 (4.7).
+   남은 오인식은 동음에 가까운 구간의 재분절이라 모델 등급으로 못 넘는다.
 5. `_costTracker.recordRealtimeResponse`가 WebRTC 경로에서 토큰을 못 받는다
    (`realtime_request_count=0`으로 찍힘). 과금 집계가 실제와 다르다.
 6. 한국어 자막(`original`)을 `generateCleanOriginal`이 gpt-4o-mini로 영→한
@@ -313,7 +343,80 @@ detection이 실제로 server_vad**까지다. 반대로 명백히 다른 값이 
 
 ---
 
-## 7. 로그 태그 사전
+## 7. 모드별 이식 현황 — Step Expand 점검 (2026-07-29)
+
+Step Expand는 이미 `RealtimeAnyoneAdapter`를 쓰고 있다. 계층 구조는 맞게 탔고,
+**세션 계층([2])을 공유하므로 4.8 prefix_padding 600은 자동으로 적용된다.**
+아래는 코드 대조로 찾은 차이다. 실기기 실측은 아직 안 했다.
+
+### 그대로 따라간 것
+
+| 항목 | 상태 |
+|---|---|
+| 계층 분리 ([1][2] 재사용, 어댑터 경유) | ✅ |
+| secret 프리웜 (`_prewarmStepExpandRealtimeSecret`) | ✅ |
+| voice 매핑 (세션 계층 경유, `echo` 기본) | ✅ |
+| 전사 모델 (인자 생략 → 경량 기본값) | ✅ 결과적으로 일치 |
+| prefix_padding 600 | ✅ 세션 계층에서 자동 |
+
+### 고쳐야 할 차이
+
+**① `transcriptionLanguage`를 안 넘긴다 — 확정 결함 (4.7 정면 위반)**
+
+`routine_mode_step_expand.dart:1957` `connectForMicrophoneTranscription(...)`에
+`transcriptionLanguage` 인자가 없다. 어댑터 기본값이 `null`이라 **서버가 언어부터
+추측한다.** Anyone에서 오인식("밥 먹지" → "겁 먹지")을 만든 바로 그 조건이다.
+
+```dart
+// Anyone (routine_mode_anyone.dart:1485)
+transcriptionLanguage: _mapLanguageToCode(
+  FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean'),
+
+// Step Expand — 이 줄이 없다
+```
+
+Step Expand에는 `_mapLanguageToCode`가 이미 있다(Deepgram 경로에서 쓴다).
+한 줄 추가면 끝난다. **가장 먼저 고칠 것.**
+
+**② `[STT-RAW]` 로그가 없다**
+
+`[STEP-RT-STT] final_received len=23`처럼 길이만 찍는다. 2절에 적었듯 오역이
+났을 때 귀가 틀렸는지 입이 틀렸는지 이것 없이는 못 가른다. Step Expand는 오늘 같은
+padding 실측 자체가 불가능한 상태다. Anyone과 같은 형식으로 넣을 것.
+
+**③ 잡음·추임새 필터가 두 군데서 다 약하다**
+
+- 어댑터 콜백(`:1916`): `clean.length < 2`만 본다. **"음."은 2자라 통과한다.**
+  Anyone에서 이게 "Um."으로 번역돼 유저 목소리로 나갔다.
+- 파이프라인(`:2690`): `ghostWords` 하드코딩 목록. Anyone은 이 목록을
+  `_isNoiseTranscript` 하나로 통합했다(같은 사고의 재발 방지).
+
+**④ 연결 후 ready 대기가 없다 — 마이크가 안 열린 채 멈출 수 있다**
+
+`:1967`에서 connect 직후 `_startUserListening()`을 다시 부르는데, 이때
+`_stepRealtimeConnecting`이 아직 `true`다(`finally`가 그 뒤에 돈다).
+세션이 그 시점에 `ready`가 아니면 `_isStepRealtimeUsable`이 false →
+`if (_stepRealtimeConnecting) return;`에 걸려 **조용히 빠져나가고 아무도 다시
+부르지 않는다.** Anyone은 `_waitForTranslateSessionUsable` 후 실패 시 명시적으로
+fallback한다. 같은 구조를 넣을 것.
+
+**⑤ `onError`면 무조건 Deepgram으로 떨어진다**
+
+Step Expand도 `cancelActiveTurn()`을 쓰므로(`:3048`, `:6149`) 이미 끝난 응답에
+취소가 나가 서버 error가 올 수 있다. 그 한 번에 세션이 legacy로 내려가고 이후
+모든 턴이 Deepgram이 된다. 세션 계층의 benign 에러 무시가 들어가면 이 건은
+공유로 해결되지만, **그 외 에러에 대한 즉시 폴백은 여전히 과하다**(4.9의 정신).
+
+### 권장 순서
+
+1. ① `transcriptionLanguage` 한 줄 — 즉시, 효과 확실
+2. ② `[STT-RAW]` 로그 — 이게 있어야 나머지를 측정할 수 있다
+3. 실기기 실측 (Anyone과 같은 문장 6개로 대조)
+4. ③④⑤ — 측정 결과 보고 판단
+
+---
+
+## 8. 로그 태그 사전
 
 | 태그 | 의미 |
 |---|---|
