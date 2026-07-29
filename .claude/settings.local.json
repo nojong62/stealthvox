@@ -164,7 +164,8 @@
       "PowerShell(Select-String *)",
       "PowerShell($result = flutter analyze 2>&1; $result | Where-Object { \\($_ -match \"routine_mode_free_talk|routine_mode_step_expand|routine_mode_roleplay\"\\) -and \\($_ -match \"error\"\\) })",
       "PowerShell($now = Get-Date -Format \"yyyyMMdd_HHmm\"; Write-Output \"filename: stealth_vox_v1.0.50_${now}.apk\")",
-      "PowerShell(Get-Process *)"
+      "PowerShell(Get-Process *)",
+      "PowerShell(Get-Content *)"
     ]
   }
 }
