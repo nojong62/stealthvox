@@ -1844,7 +1844,12 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     final realtimeAdapter = _stepRealtimeAdapter;
     _stepRealtimeAdapter = null;
     _stepRealtimeTurnInFlight = false;
-    if (realtimeAdapter != null) unawaited(realtimeAdapter.dispose());
+    if (realtimeAdapter != null) {
+      // 활성 턴을 먼저 끊고 나서 세션을 내린다. 순서가 바뀌면 방을 나가는
+      // 순간 생성 중이던 응답 오디오가 남는다.
+      realtimeAdapter.cancelActiveTurn();
+      unawaited(realtimeAdapter.dispose());
+    }
     _ttsQueueManager.setAiPaused(false); // 🔧 [v3.6] TTS 대기 플래그 초기화
     _ttsQueueManager.setUserTurn(false);
     _ttsQueueManager.stop();
@@ -1857,6 +1862,51 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     return adapter != null &&
         adapter.session.connectionState == RealtimeConnectionState.ready &&
         adapter.session.capturesMicrophone;
+  }
+
+  /// 세션이 실제로 쓸 수 있게 될 때까지 짧게 기다린다. connect가 반환해도
+  /// 곧바로 ready가 아닐 수 있는데, 그때 그냥 빠져나가면 마이크가 안 열린 채
+  /// 아무도 다시 부르지 않는 정지 상태가 된다.
+  Future<bool> _waitForStepRealtimeUsable(RealtimeAnyoneAdapter adapter) async {
+    const pollInterval = Duration(milliseconds: 50);
+    const maxWait = Duration(seconds: 2);
+    final deadline = DateTime.now().add(maxWait);
+    while (mounted &&
+        identical(_stepRealtimeAdapter, adapter) &&
+        DateTime.now().isBefore(deadline)) {
+      if (_isStepRealtimeUsable) return true;
+      await Future<void>.delayed(pollInterval);
+    }
+    return mounted &&
+        identical(_stepRealtimeAdapter, adapter) &&
+        _isStepRealtimeUsable;
+  }
+
+  /// 전사가 발화가 아니라 잡음·추임새인지 판정한다. 파이프라인 진입 전 검열이
+  /// 이 함수 하나를 쓴다. 추임새를 통과시키면 "음." 같은 게 "Um."으로 번역돼
+  /// 유저 목소리로 나가고 AI가 거기에 대답한다(Anyone 실기기에서 발생).
+  bool _isNoiseTranscript(String text) {
+    final clean = text
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^\w\s가-힣]'), '')
+        .replaceAll(RegExp(r'\s+'), '')
+        .trim();
+    if (clean.length < 2) return true;
+    const ghostWords = <String>[
+      'thankyou',
+      'thanks',
+      'yeah',
+      'okay',
+      '감사합니다',
+      '네',
+      '응',
+    ];
+    if (ghostWords.contains(clean)) return true;
+    // 단독 추임새/감탄사만으로 이뤄진 발화 (흠, 음음, 어어, 아아 ...)
+    if (RegExp(r'^[흠음어아으네넵응윽허헐하흐엄음]{1,4}$').hasMatch(clean)) {
+      return true;
+    }
+    return false;
   }
 
   /// Step Expand 사용자 입력/번역 음성은 Anyone과 같은 장기 WebRTC 세션을
@@ -1914,8 +1964,11 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           return;
         }
         final clean = transcript.trim();
-        if (clean.length < 2) {
-          _log('[STEP-RT-STT]', 'empty_or_short_dropped itemId=$itemId');
+        // 빈 전사·추임새는 조용히 버리고 다시 듣는다. 폴백 사유로 삼지 않는다
+        // — server VAD는 숨소리·에어컨·TTS 꼬리도 발화로 잡는다.
+        if (_isNoiseTranscript(clean)) {
+          _log('[STEP-RT-STT]',
+              'noise_dropped itemId=$itemId len=${clean.length}');
           return;
         }
         try {
@@ -1972,7 +2025,19 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         ),
       );
       if (!mounted || !identical(_stepRealtimeAdapter, adapter)) return;
+      // connect가 반환해도 곧바로 ready가 아닐 수 있다. 여기서 안 기다리면
+      // 아래 _startUserListening이 _stepRealtimeConnecting(아직 true)에 걸려
+      // 조용히 빠져나가고 마이크가 영영 안 열린다.
+      final usable = await _waitForStepRealtimeUsable(adapter);
+      if (!mounted || !identical(_stepRealtimeAdapter, adapter)) return;
+      if (!usable) {
+        _log('[STEP-RT-STT]', 'session_not_usable → deepgram');
+        _stepRealtimeConnecting = false;
+        await _fallbackToStepDeepgram();
+        return;
+      }
       _log('[STEP-RT-STT]', 'secure session ready');
+      _stepRealtimeConnecting = false;
       await _startUserListening();
     } catch (error) {
       _log('[STEP-RT-STT]', 'connect_failed reason=${error.runtimeType}');
@@ -2703,24 +2768,12 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     // ─────────────────────────────────────────────────────
     // STEP 1: 증발 검열 (UI 풍선 찍기 전)
     // ─────────────────────────────────────────────────────
-    String lowerClean =
-        finalTranscript.toLowerCase().replaceAll(RegExp(r'[^\w\s]'), '');
-    List<String> ghostWords = [
-      'thank you',
-      'thanks',
-      'yeah',
-      'okay',
-      '감사합니다',
-      '네',
-      '응'
-    ];
-    // [GHOST-EXACT] Change ghost-word detection from substring contains to exact match.
-    //   Before: short ghost words could evaporate normal phrases that merely included them.
-    //   Now: evaporate only when the entire cleaned transcript is itself a ghost word.
-    //   Mixed phrases pass through and are handled later by the [EVAPORATE] rules if needed.
-    bool isGhost = ignoreWithoutConsumingFirstTurn ||
-        finalTranscript.length < 2 ||
-        ghostWords.contains(lowerClean.trim());
+    // [GHOST-EXACT] 통째로 추임새/고스트워드일 때만 증발시킨다. 부분 일치로
+    //   판정하면 그 단어를 품은 정상 문장까지 사라진다. 판정 기준은
+    //   _isNoiseTranscript 하나로 모은다 — 여기 목록을 따로 두었더니 "음."이
+    //   빠져나가 "Um."으로 번역됐다(Anyone에서 발생).
+    bool isGhost =
+        ignoreWithoutConsumingFirstTurn || _isNoiseTranscript(finalTranscript);
 
     if (isGhost) {
       _cancelPrefetchedFirstUtteranceJudge();
