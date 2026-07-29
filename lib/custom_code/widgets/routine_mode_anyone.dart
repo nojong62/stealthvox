@@ -3211,6 +3211,38 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         await userHybridTts.onStreamEnd();
       }
 
+      // 🛑 [PIPE-STOP] 유저 음성 구간이 끝난 뒤에도 방을 나갔거나 턴이 갈아치워졌을
+      //   수 있다. 여기서 안 막으면 화면이 없는 채로 AI 생성·TTS가 계속 돈다
+      //   (실측: 방 나간 뒤 GPT 1회 + TTS 3회가 헛돌았다). 아래 백그라운드 호출들이
+      //   시작되기 전에 끊어야 한다.
+      if (!isActivePipelineGeneration(
+            expected: pipelineGeneration,
+            current: _pipelineGeneration,
+            mounted: mounted,
+            conversationActive: _isConversationActive,
+          ) ||
+          _turnCounter != currentTurnId) {
+        _log('🛑 [PIPE-STOP]',
+            'reason=stale_after_user_audio turnId=$currentTurnId');
+        realtimeVoice?.cancel();
+        _translateAdapter?.cancelActiveTurn();
+        return;
+      }
+
+      // 🛑 [PIPE-STOP] 번역문이 비어 있으면 AI가 대답할 대상이 없다. 그대로 두면
+      //   빈 입력으로 아무 말이나 만들어낸다. 조용히 버리고 다시 듣는다.
+      if (userTargetText.trim().isEmpty) {
+        _log('🛑 [PIPE-STOP]',
+            'reason=empty_translation turnId=$currentTurnId → 재청취');
+        if (_turnCounter == currentTurnId && _turnCounter > 0) _turnCounter--;
+        if (mounted &&
+            hostIndex < _localMessages.length &&
+            _localMessages[hostIndex]['role'] == 'HOST') {
+          setState(() => _localMessages.removeAt(hostIndex));
+        }
+        return;
+      }
+
       // 🔧 [v3.7] 유저 통문장 TtsCache 백그라운드 저장 (히스토리 HIT 유도)
       //   - 청크별 캐시만으로는 히스토리에서 통문장 GET이 MISS됨
       //   - fire-and-forget: 유저 재생 흐름과 무관하게 백그라운드 처리
@@ -3309,6 +3341,19 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       bool _firstAiChunkLogged = false;
       final Future<void> aiGenerationTask = () async {
         await for (String chunk in aiStream) {
+          // 🛑 [PIPE-STOP] 생성 도중 방을 나가면 남은 청크를 버린다. 안 그러면
+          //   화면이 사라진 뒤에도 TTS 요청이 계속 나간다.
+          if (!isActivePipelineGeneration(
+                expected: pipelineGeneration,
+                current: _pipelineGeneration,
+                mounted: mounted,
+                conversationActive: _isConversationActive,
+              ) ||
+              _turnCounter != currentTurnId) {
+            _log('🛑 [PIPE-STOP]',
+                'reason=stale_during_ai_stream turnId=$currentTurnId');
+            break;
+          }
           if (_awaitingAiFirstTextProbe && chunk.trim().isNotEmpty) {
             _awaitingAiFirstTextProbe = false;
             _logProbeTiming('AI_FIRST_TEXT');
@@ -3375,6 +3420,18 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         //   유저 TTS 재생 중에 ②③ 오디오가 미리 준비되고, 큐 개방 시 ①②③이
         //   공백 없이 이어진다. (재생 게이팅/이벤트 로직은 불변)
         //   onStreamEnd는 내부 가드(_streamEnded)로 이중 호출에 안전하다.
+        // 🛑 [PIPE-STOP] 위에서 끊고 나온 경우 remainder까지 발사하면 헛도는 TTS가
+        //   그대로 남는다. 살아 있을 때만 마무리한다.
+        if (!isActivePipelineGeneration(
+              expected: pipelineGeneration,
+              current: _pipelineGeneration,
+              mounted: mounted,
+              conversationActive: _isConversationActive,
+            ) ||
+            _turnCounter != currentTurnId) {
+          aiTtsFetcher.cancel();
+          return;
+        }
         await _hybridTtsPlayer!
             .onStreamEnd(fullSentence: _cleanText(aiTargetText.trim()));
       }();
