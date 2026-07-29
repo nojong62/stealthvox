@@ -1487,9 +1487,11 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
               ? FFAppState().nativeLang
               : 'Korean',
         ),
-        // 🎧 [RT-TRANSCRIPTION] 전 턴 경량 모델. 첫 발화만 정밀 모델을 쓰던
-        //   구성은 실측에서 이점이 없었다 — language를 못 박으면 경량도 정확했고
-        //   0.24초 더 빨랐다. 정확도가 흔들리면 이 한 줄만 되돌리면 된다.
+        // 🎧 [RT-TRANSCRIPTION] 전 턴 경량 모델. prefix_padding 600으로 앞잘림을
+        //   잡은 뒤 2026-07-29 실측에서 정밀 모델을 나란히 재봤으나, 못 맞히던
+        //   문장은 글자 하나 다르지 않게 똑같이 틀렸고("왜 어제 안 왔어?" →
+        //   양쪽 다 "왜 오지 않았어?") 경량이 맞히던 "나 아까"는 "나가"로
+        //   퇴행시켰다. 전사 지연은 양쪽 0.51초로 같았다. 더 비싼데 더 나쁘다.
         transcriptionModel: StealthVoxRealtimeSession.kLightTranscriptionModel,
       );
       final usable = await _waitForTranslateSessionUsable(adapter);

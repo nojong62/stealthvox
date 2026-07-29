@@ -946,13 +946,18 @@ class StealthVoxRealtimeSession {
         'create_response': _autoRespond,
         'interrupt_response': _autoRespond,
       };
+      // 🎧 [RT-VAD] 발화 시작 앞의 오디오를 얼마나 더 담을지. 기본 300ms로는
+      //   말을 툭 던지듯 시작할 때 첫 음절이 잘려 나갔고, 모델이 잘린 앞을
+      //   지어냈다 — "왜 어제 안 왔어?"가 "악사 왜 오지 않아서"/"배우 있지
+      //   않아서?"로, "밥 먹지"가 "밟"으로. 이미 지나간 소리를 더 담는 것이라
+      //   응답이 늦어지지 않는다.
+      turnDetection['prefix_padding_ms'] = 600;
       if (_autoRespond) {
         // 기본값(threshold 0.5 / silence 500ms)은 문장 중간의 짧은 숨에도 발화를
         // 끊어 한 발화가 두 턴으로 쪼개지고, 그 결과 응답이 2개 생성돼 음성이
         // 겹친다. 임계값과 침묵 길이를 올려 한 발화를 한 턴으로 묶는다.
         turnDetection['threshold'] = 0.65;
         turnDetection['silence_duration_ms'] = 900;
-        turnDetection['prefix_padding_ms'] = 300;
       }
       final input = <String, dynamic>{'turn_detection': turnDetection};
       // 입력 전사는 항상 병렬로 켠다.
