@@ -2162,18 +2162,26 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
                           ],
                         )
                       : Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 16),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
-                            children: const [
-                              Icon(Icons.movie_outlined,
+                            children: [
+                              const Icon(Icons.movie_outlined,
                                   color: Color(0xFF86EFAC), size: 20),
-                              SizedBox(width: 8),
-                              Text('시나리오 불러오는 중...',
-                                  style: TextStyle(
-                                      color: Color(0xFF86EFAC),
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600)),
+                              const SizedBox(width: 8),
+                              // 시스템 글꼴이 크면 이 한 줄이 버튼 폭을 넘겨
+                              // 진입 직후 잠깐 오버플로우 줄무늬가 보였다.
+                              // 남는 폭에 맞춰 줄어들도록 Flexible로 감싼다.
+                              const Flexible(
+                                child: Text('시나리오 불러오는 중...',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                        color: Color(0xFF86EFAC),
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600)),
+                              ),
                             ],
                           ),
                         ),
