@@ -290,6 +290,7 @@ class StealthVoxRealtimeSession {
   static const String kAccurateTranscriptionModel = 'gpt-4o-transcribe';
   static const String kLightTranscriptionModel = 'gpt-4o-mini-transcribe';
   String _transcriptionModel = kLightTranscriptionModel;
+  bool _speakerphoneEnabled = false;
 
   /// 전사 모델을 바꿔 session.update를 다시 보내려면 최초 설정값이 필요하다.
   String _sessionVoice = kDefaultRealtimeVoice;
@@ -362,6 +363,10 @@ class StealthVoxRealtimeSession {
           return;
         }
         _logger?.call('[RT-AUDIO]', 'remote_track_received');
+        // 🔊 [RT-AUDIO] WebRTC 연결이 살아 있는 동안 Android는 통화 모드로 들어가
+        //   미디어 재생(AI TTS)이 수화부로 빠지거나 크게 줄어든다. 원격 트랙이
+        //   붙는 즉시 스피커로 고정해 유저 음성과 AI 음성을 같은 출력으로 맞춘다.
+        _enableSpeakerphone();
         _emit(
           RealtimeEventType.remoteAudioTrack,
           remoteStream: event.streams.first,
@@ -897,6 +902,20 @@ class StealthVoxRealtimeSession {
 
   /// 🎧 [RT-TRANSCRIPTION] 전사 모델을 바꾸고 세션 설정을 다시 보낸다.
   /// 다음 발화부터 적용된다. 진행 중인 전사에는 영향을 주지 않는다.
+  /// 🔊 [RT-AUDIO] 원격 오디오를 스피커로 고정한다. 실패해도 세션은 그대로 둔다
+  /// — 소리 경로 문제일 뿐 통신 실패가 아니다.
+  void _enableSpeakerphone() {
+    if (_speakerphoneEnabled) return;
+    _speakerphoneEnabled = true;
+    unawaited(Helper.setSpeakerphoneOn(true).then(
+      (_) => _logger?.call('[RT-AUDIO]', 'speaker_on'),
+      onError: (Object error) {
+        _speakerphoneEnabled = false;
+        _logger?.call('[RT-AUDIO]', 'speaker_failed reason=${error.runtimeType}');
+      },
+    ));
+  }
+
   void setTranscriptionModel(String model) {
     if (_disposed || _transcriptionModel == model) return;
     _transcriptionModel = model;
