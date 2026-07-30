@@ -39,25 +39,30 @@ import 'package:path_provider/path_provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
+import '/custom_code/services/deepgram_prewarm_session.dart';
 import '/custom_code/services/openai_connection_pool.dart';
-import '/custom_code/services/realtime_anyone_adapter.dart';
-import '/custom_code/services/realtime_feature_flags.dart';
-import '/custom_code/services/stealth_vox_realtime_session.dart';
+import '/custom_code/services/openai_transcribe_service.dart';
+import '/custom_code/services/tts_adapter.dart';
 import 'deepgram_confidence_probe.dart';
-import 'first_turn_realtime_voice.dart';
 import 'first_utterance_context_judge.dart';
 import 'trial/trial_flow_state.dart';
 import 'trial/trial_anyone_timer_mixin.dart';
 import 'trial/learning_prep_overlay.dart';
 import 'trial/trial_study_page.dart';
 
-const int kFreeTalkCommitWaitMs = 900; // speech_final 경로: 안전값 유지
+// speech_final 경로 확정 대기창. Deepgram endpointing(700ms)이 이미 침묵을
+// 확인한 뒤에 오는 신호라, 파이프라인 고속화(2026-07-30)에 맞춰 900→700으로
+// 줄였다. 발화 짤림(합치기 실패)이 늘면 900으로 되돌릴 것.
+const int kFreeTalkCommitWaitMs = 700;
 const int kFreeTalkCommitWaitUncertainMs =
     500; // UtteranceEnd 경로: 이미 utterance_end_ms 침묵 확인됨 → 짧게
-// 🚀 [FIRST-TURN] 첫 유저 발화에만: 안전값보다는 짧지만, 말 중간의 짧은 쉼을
-//   견뎌 이어 말하기를 한 덩어리로 합칠 만큼은 준다(짤림 방지). 속도는 투기적
-//   선시작(TTFT 은닉)이 담당하므로 이 대기를 과하게 줄일 필요가 없다.
-const int kFreeTalkFirstTurnCommitWaitMs = 650;
+// 🚀 [FIRST-TURN] 첫 유저 발화 확정 대기창.
+//   Deepgram이 이미 endpointing(700ms)/utterance_end(1000ms)로 침묵을 확인한
+//   뒤에 final을 주므로, 앱에서 다시 650ms를 기다리는 것은 이중 대기였다.
+//   원래는 투기적 번역 선시작이 이 구간을 숨기는 전제였는데 그 경로가 꺼져
+//   있어(호출부 없음) 그대로 체감 지연으로 남았다. 200ms로 줄인다 —
+//   이어 말하기를 합치는 최소 여유만 남기는 값이다.
+const int kFreeTalkFirstTurnCommitWaitMs = 200;
 const int kFreeTalkDeepgramEndpointingMs = 700;
 const int kFreeTalkDeepgramUtteranceEndMs =
     1000; // Deepgram minimum allowed value; 900 returns HTTP 400.
@@ -74,20 +79,28 @@ const List<int> kFreeTalkChunkTtsTimeoutLadderSec = [
 const int kFreeTalkAiResponseMaxTokens = 70;
 const int kFreeTalkMaxTtsCharsPerUtterance = 800;
 
-enum AnyoneTranscriptSource {
-  realtime,
-  deepgramFallback,
-}
+// 🎧 [RETRANSCRIBE] OpenAI 전사 대기 상한 (guide4 15장).
+//   초과 시 Nova-3 전사로 폴백하고 재전사 결과는 폐기한다.
+//   첫 턴은 크리티컬 패스에 있으므로 짧게 끊는다 — 실측 도착 시간이
+//   611~1365ms였으므로 1200ms면 정상 응답을 놓치지 않으면서 최악을 막는다.
+//   저신뢰 재전사는 이미 번역을 못 믿는 상황이라 더 기다려도 손해가 적다.
+// 7차 실측에서 1200ms는 실패였다 — 확정까지 210ms가 이미 흘러 남은 예산이
+// 980ms였고, mini(도착 604~1406ms)가 못 들어와 그 대기를 통째로 낭비했다.
+// 1800ms면 확정 후 약 1.6초를 기다려 실측 도착 범위를 대부분 덮는다.
+// 첫 턴은 gpt-4o-transcribe 정확도 경로이므로 mini보다 넉넉히 기다린다.
+const int kFreeTalkFirstTurnRetranscribeTimeoutMs = 3000;
+// 🎙️ [PCM-TEE] 재전사용 원본 음성 버퍼 상한. 16kHz PCM16 = 32KB/s → 60초.
+const int kFreeTalkTurnPcmBufferMaxBytes = 32000 * 60;
+
+// 🧠 [TRANSLATE-ROUTE] 번역 모델 분기 (guide4 6장). 같은 턴에 두 모델을 동시에
+//   호출하지 않는다 — 판정 결과에 따라 처음부터 하나만 쓴다.
+const String kFreeTalkTranslateModelFast = 'gpt-4o-mini';
 
 enum AnyoneMicOwner {
   none,
-  realtime,
-  deepgramFallback,
+  deepgram,
 }
 
-/// 🗣️ [RT-CONV] 한 턴의 비동기 조각들을 turnId로 묶는 레코드.
-/// Realtime 응답(번역+AI 응답), 입력 전사(한국어 원문), 자막 역번역이 각각 다른
-/// 시점에 도착하므로, 이전 턴 데이터가 다음 턴 말풍선·History에 섞이지 않도록
 class AnyoneCostTracker {
   AnyoneCostTracker(this.onLog);
 
@@ -96,9 +109,7 @@ class AnyoneCostTracker {
   int ttsInputChars = 0;
   int ttsRequestCount = 0;
   int ttsDuplicateBlocked = 0;
-  int realtimeRequestCount = 0;
-  int realtimeAudioOutputTokens = 0;
-  int realtimeTextOutputTokens = 0;
+  int retranscribeRequestCount = 0;
 
   void addDeepgramBytes(int byteCount) {
     // PCM16, 16 kHz, mono = 32 bytes/ms.
@@ -114,14 +125,9 @@ class AnyoneCostTracker {
     ttsDuplicateBlocked++;
   }
 
-  // 🎙️ [FIRST-TURN-REALTIME] 첫 대사 1회분 Realtime 사용량.
-  void recordRealtimeResponse({
-    required int audioTokens,
-    required int textTokens,
-  }) {
-    realtimeRequestCount++;
-    realtimeAudioOutputTokens += audioTokens;
-    realtimeTextOutputTokens += textTokens;
+  // 🎧 [RETRANSCRIBE] 첫 턴 병렬 전사 + 저신뢰 재전사 호출 횟수.
+  void recordRetranscribeRequest() {
+    retranscribeRequestCount++;
   }
 
   void logSnapshot({required String reason}) {
@@ -131,9 +137,7 @@ class AnyoneCostTracker {
           'tts_input_chars=$ttsInputChars '
           'tts_request_count=$ttsRequestCount '
           'tts_duplicate_blocked=$ttsDuplicateBlocked '
-          'realtime_request_count=$realtimeRequestCount '
-          'realtime_audio_output_tokens=$realtimeAudioOutputTokens '
-          'realtime_text_output_tokens=$realtimeTextOutputTokens',
+          'retranscribe_request_count=$retranscribeRequestCount',
     );
   }
 }
@@ -147,10 +151,16 @@ class RoutineModeAnyone extends StatefulWidget {
     this.width,
     this.height,
     this.onListeningReady,
+    this.preparedAudioRecorder,
+    this.audioPreparation,
+    this.micInputAt,
   });
   final double? width;
   final double? height;
   final VoidCallback? onListeningReady;
+  final AudioRecorder? preparedAudioRecorder;
+  final Future<void>? audioPreparation;
+  final DateTime? micInputAt;
 
   @override
   State<RoutineModeAnyone> createState() => _RoutineModeAnyoneState();
@@ -169,53 +179,30 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   bool _isPipelineRunning = false;
   bool _listeningReadyReported = false;
   bool _isDisposing = false; // 🧹 [DISPOSE-GUARD] dispose 진행 중 setState 차단
-  // 🎙️ [SPEECH-FIRST] 발화가 끝나는 즉시 발사해 둔 번역 음성 턴. 전사를 기다리지
-  //   않으므로 유저 목소리가 먼저 나오고, 전사는 자막·AI용으로 뒤따라온다.
-  //
-  // ⛔ 현재 비활성. 실기기 검증(2026-07-28)에서 확인된 문제:
-  //   - 모델이 오디오만 듣고 곧바로 말해버려 "제가 잘못 들었나요?" 확인 질문,
-  //     되묻기, 정정 판정이 끼어들 자리가 없다. 오청취가 그대로 번역돼 나갔다.
-  //   - 잡음이 발화로 잡히면 빈 전사 턴이 되어 매번 legacy fallback으로 떨어졌다.
-  //   전사를 받고 판정한 뒤 번역하는 _commitAndProcess 경로로 되돌린다. 그 대가는
-  //   전사 대기 약 0.4초뿐이고, 되돌리려면 이 값만 true로 바꾸면 된다.
-  static const bool _kSpeechFirstEnabled = false;
-
-  RealtimeTranslationTurn? _speechFirstTurn;
-  String? _speechFirstItemId;
-  int _speechFirstGeneration = -1;
-  // 전사 대기 없이 파이프라인을 연 발화. 뒤늦게 도착한 전사는 폴백 원고로만 쓴다.
-  String? _speechFirstPipelineItemId;
-  Completer<String>? _speechFirstTranscript;
-  bool _speechFirstNoiseAbort = false; // 잡음으로 판정돼 조용히 버릴 턴
   Timer? _startupRetryTimer;
   int _startupRetryCount = 0;
   static const int _maxStartupRetries = 12;
   int _listenGeneration = 0;
-  int _realtimeListenGeneration = 0;
-  static const Duration _realtimeFinalTimeout = Duration(seconds: 3);
-  static const Duration _iceDisconnectedGrace = Duration(seconds: 2);
-  static const Duration _realtimeMuteEventGrace = Duration(milliseconds: 250);
-  Timer? _realtimeFinalTimer;
-  String? _realtimeAwaitingItemId;
-  Timer? _iceDisconnectedTimer;
-  bool _realtimeFallbackStarted = false;
-  bool _realtimeFinalAccepted = false;
-  // 🔇 [ANY-RT-EMPTY] server VAD는 숨소리·AI TTS 꼬리·짧은 잡음에도 발화 구간을
-  //   열고 빈 전사를 돌려준다. 이건 Realtime 장애가 아니므로 한 번으로 세션 전체를
-  //   legacy에 고정하지 않는다. 연속으로 이 횟수만큼 비면 진짜 이상으로 보고 폴백.
-  static const int _maxConsecutiveEmptyRealtimeFinals = 3;
-  int _consecutiveEmptyRealtimeFinals = 0;
-  bool _useDeepgramFallbackForSession = false;
-  RealtimeAnyoneAdapter? _realtimeAdapterIdentity;
-  DateTime? _realtimeMicDisabledAt;
   AnyoneMicOwner _micOwner = AnyoneMicOwner.none;
   final Set<String> _handledFinalTranscriptIds = <String>{};
-  final Set<String> _activeRealtimeInputItemIds = <String>{};
-  final Set<String> _drainingRealtimeInputItemIds = <String>{};
   DateTime? _lastListenStartAt;
+
+  // 🎙️ [PCM-TEE] 마이크 원본 PCM(16kHz mono)을 Deepgram 전송과 동시에 여기에도
+  //   담는다. 병렬 전사와 저신뢰 재전사가 이 버퍼를 쓴다 (guide4 3장/4.4).
+  final List<Uint8List> _turnPcmChunks = <Uint8List>[];
+  int _turnPcmBytes = 0;
+  // ⏱️ [PERF] 유저 음성이 나오기까지의 구간을 끝까지 재기 위한 기준점.
+  //   Deepgram final 수신 시각(= 앱이 발화 종료를 아는 가장 이른 시점).
+  DateTime? _turnPerfAnchor;
   double _fontScale = 1.0;
   bool _showOriginal = true;
   bool _showUsageGuide = false; // 🆕 [Anyone] 이용방법 말풍선 토글
+  // 🆕 [진입 안내] 스텔스룸 준비 오버레이에 있던 문구를 페이지 안으로 옮겼다
+  //   (Realtime 연결 대기가 사라져 준비 화면 자체가 제거됨). Step Expand의
+  //   _showOpeningNudgeOnce와 같은 방식 — 2초 노출 후 페이드아웃.
+  static const String _openingNudgeText = '여기, 그 사람이 있어요.\n편하게 말 걸어보세요.';
+  bool _hasShownNudgeBubble = false;
+  bool _showNudgeBubble = false;
   int _turnCounter = 0;
   // 🧭 [FIRST-CONTEXT] 첫 정상 발화 판정. Anyone은 GPT-4.1 문맥 판정을 쓰지
   //   않으므로 네트워크 호출 없는 로컬 분류(증발/고스트워드 검열)만 사용한다.
@@ -223,15 +210,12 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       FirstUtteranceContextJudgeSession();
   String? _pendingHeardConfirmation;
   int _heardConfirmationAttempts = 0;
-  // 🔥 [RT-PREWARM] 대기창 동안 미리 열어 두는 Realtime 소켓. 발화 내용은 아직
-  //   보내지 않으므로 버려져도 토큰 비용 0.
-  FirstTurnRealtimeVoice? _prewarmedRealtimeVoice;
   String? _sessionDocId; // 🔧 [v3 추가] 첫 대화 후 세션 ID (클론 변경 시 null 리셋)
   DocumentReference? _myHistoryRef; // 🔧 [히스토리] chat_history 문서 참조 (Duo 패턴)
 
   // ── Idle Timeout v2 ───────────────────────────────────────────────
   // 기준: "유저도 AI도 아무 작동이 없는 상태"가 연속 60초 지속되면 pause.
-  //  - AI 작동 = _ttsQueueManager.isBusy (TTS 재생/대기)
+  //  - AI 작동 = _ttsAdapter.isBusy (TTS 재생/대기)
   //  - 유저 작동 = _voiceManager != null (마이크 연결/녹음)
   // 1초 주기 감시 타이머가 작동 여부를 보고 idle 누적초를 증감한다.
   Timer? _idlePauseTimer;
@@ -239,7 +223,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   int _idleElapsedSec = 0;
 
   bool get _isSystemBusy {
-    return _ttsQueueManager.isBusy;
+    return _ttsAdapter.isBusy;
   }
 
   void _markConversationActivity() {
@@ -308,7 +292,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   // 이벤트 종류에 따라 조건부 대기: speech_final=900ms, UtteranceEnd=500ms
   // 대기 중 새 발화 오면 합쳐서 처리 (최종 한 덩어리로)
   String _pendingTranscript = ''; // 대기 중인 유저 발화 누적
-  AnyoneTranscriptSource? _pendingTranscriptSource;
   DateTime? _lastPendingFinalAt;
   Timer? _commitTimer; // "진짜 끝났는지" 확정 타이머
   // 🚀 [SPEC-FIRST-TURN] 첫 턴 투기적 선시작: 대기창 동안 GPT 번역을 미리 돌려
@@ -328,6 +311,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   bool _awaitingAiFirstTextProbe = false;
   bool _awaitingAiFirstAudioProbe = false;
   double? _activeSttConfidence;
+  // 🎧 probe가 지목한 최저 신뢰 단어. 평균이 멀쩡해도 이 값이 낮으면 그 단어가
+  //   바뀐 오인식이다 (아래 _isTranscriptUncertain / 전사 채택 판단에 쓴다).
+  double? _activeSttWordConfidenceMin;
+  int _activeSttLowConfidenceWordCount = 0;
   int _pipelineGeneration = 0;
   void _log(String tag, String msg) {
     final ts = DateTime.now().toIso8601String().substring(11, 23);
@@ -337,113 +324,60 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   }
 
   // ====================================================================
-  // 🎙️ [SPEECH-FIRST] 발화 종료 → 전사 대기 없이 번역 음성 턴 즉시 발사
-  //   Realtime은 이미 유저 오디오를 대화에 갖고 있으므로 텍스트 주입이 필요 없다.
-  //   Deepgram 시절의 이벤트 기반 확정 대기창(650ms)은 이 경로에 적용하지 않는다.
+  // 🎙️ [PCM-TEE] 재전사용 원본 음성 버퍼
+  //   Deepgram으로 나가는 PCM을 그대로 복사해 둔다. 첫 턴 병렬 전사와
+  //   저신뢰 재전사(guide4 4.4)가 이 버퍼를 WAV로 포장해 올린다.
   // ====================================================================
-  String _targetLanguageName() =>
-      FFAppState().targetLang.isNotEmpty ? FFAppState().targetLang : 'English';
-
-  /// 파이프라인이 쓰는 것과 동일한 대화 컨텍스트 문자열.
-  String _buildContextString() {
-    if (_recentHistory.isNotEmpty) {
-      return _recentHistory
-          .map((m) => '${m['role'] == 'user' ? 'User' : 'AI'}: ${m['content']}')
-          .join('\n');
-    }
-    var validMsgs = _localMessages.where((m) {
-      if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
-      final target = (m['target'] ?? '').toString().trim();
-      return target.isNotEmpty && target != '...';
-    }).toList();
-    if (validMsgs.length > 10) {
-      validMsgs = validMsgs.sublist(validMsgs.length - 10);
-    }
-    return validMsgs
-        .map((m) => "${m['role'] == 'HOST' ? 'User' : 'AI'}: ${m['target']}")
-        .join("\n");
+  void _resetTurnPcmBuffer() {
+    _turnPcmChunks.clear();
+    _turnPcmBytes = 0;
   }
 
-  void _maybeStartSpeechFirstTurn({
-    required RealtimeAnyoneAdapter adapter,
-    required String itemId,
-    required int listenGeneration,
-  }) {
-    if (!identical(_translateAdapter, adapter)) return;
-    if (_micOwner != AnyoneMicOwner.realtime) return;
-    if (_realtimeFallbackStarted || _useDeepgramFallbackForSession) return;
-    if (_isPipelineRunning) return;
-    // 확인 답변은 전사 내용을 먼저 읽어야 하므로 speech-first 선발사를 금지한다.
-    if (_pendingHeardConfirmation != null) return;
-    if (!_isTranslateSessionUsable(adapter)) return;
-    final existing = _speechFirstTurn;
-    if (existing != null && !existing.isSettled) return;
-
-    try {
-      final instructions =
-          '${FreeTalkBrain.buildTranslationSysPrompt(targetLang: _targetLanguageName())}\n\n'
-          '[CONVERSATION SO FAR]\n${_buildContextString()}\n\n'
-          'Translate the Korean utterance you just heard, following every rule above.';
-      final turn = adapter.requestSpeechTranslatedTurn(
-        turnId: itemId,
-        instructions: instructions,
-        voice: _currentUserVoice,
-      );
-      _speechFirstTurn = turn;
-      _speechFirstItemId = itemId;
-      _speechFirstGeneration = listenGeneration;
-      _log('[RT-SPEECH-FIRST]',
-          'turn_started itemId=$itemId generation=$listenGeneration');
-
-      // 🎙️ [SPEECH-FIRST/A안] 전사를 기다리지 않고 파이프라인까지 바로 연다.
-      //   기존에 final 도착 시점에 하던 마이크 정리를 여기로 앞당긴다.
-      _drainingRealtimeInputItemIds.addAll(_activeRealtimeInputItemIds);
-      _activeRealtimeInputItemIds.clear();
-      adapter.setMicrophoneEnabled(false);
-      _realtimeMicDisabledAt = DateTime.now();
-      _realtimeFinalAccepted = true;
-      _cancelRealtimeFinalTimer(itemId: itemId);
-      _log('[ANY-MIC]',
-          'realtime_disabled_for_speech_first generation=$listenGeneration');
-
-      _speechFirstPipelineItemId = itemId;
-      _speechFirstTranscript = Completer<String>();
-      _speechFirstNoiseAbort = false;
-      _cancelSpeculativeTranslation();
-      _setMicOwner(AnyoneMicOwner.none, reason: 'speech_first_committed');
-      _log('🔀 [COMMIT-01]', '선발사 확정(전사 대기 없음) → 파이프라인 시작');
-      _processRelayPipeline(
-        '',
-        speechFirst: true,
-        expectedPipelineGeneration: _pipelineGeneration,
-      );
-    } catch (error) {
-      _speechFirstTurn = null;
-      _speechFirstItemId = null;
-      _log('[RT-SPEECH-FIRST]', 'start_skipped reason=${error.runtimeType}');
+  void _appendTurnPcm(Uint8List bytes) {
+    if (bytes.isEmpty) return;
+    _turnPcmChunks.add(bytes);
+    _turnPcmBytes += bytes.length;
+    while (_turnPcmBytes > kFreeTalkTurnPcmBufferMaxBytes &&
+        _turnPcmChunks.isNotEmpty) {
+      _turnPcmBytes -= _turnPcmChunks.removeAt(0).length;
     }
   }
 
-  /// 파이프라인이 선발사된 턴을 인계받는다. 세대가 어긋났거나 이미 끝난 턴이면
-  /// null을 돌려주고, 그 경우 기존 텍스트 주입 경로가 그대로 동작한다.
-  RealtimeTranslationTurn? _takeSpeechFirstTurn() {
-    final turn = _speechFirstTurn;
-    final itemId = _speechFirstItemId;
-    final generation = _speechFirstGeneration;
-    _speechFirstTurn = null;
-    _speechFirstItemId = null;
-    _speechFirstGeneration = -1;
-    if (turn == null || turn.isSettled) return null;
-    if (generation != _realtimeListenGeneration) {
-      _log(
-          '[RT-SPEECH-FIRST]',
-          'handover_dropped itemId=$itemId generation=$generation '
-              'current=$_realtimeListenGeneration');
-      _translateAdapter?.cancelActiveTurn();
-      return null;
+  Uint8List? _snapshotTurnPcm() {
+    if (_turnPcmBytes <= 0) return null;
+    final out = Uint8List(_turnPcmBytes);
+    int offset = 0;
+    for (final chunk in _turnPcmChunks) {
+      out.setRange(offset, offset + chunk.length, chunk);
+      offset += chunk.length;
     }
-    _log('[RT-SPEECH-FIRST]', 'handover itemId=$itemId');
-    return turn;
+    return out;
+  }
+
+  /// 첫 턴 전용 전사. 실패해도 Deepgram 텍스트로 폴백하지 않는다.
+  Future<String?> _transcribeFirstTurn() async {
+    final pcm = _snapshotTurnPcm();
+    if (pcm == null || _openAiKey.isEmpty) return null;
+    _costTracker.recordRetranscribeRequest();
+    final requestStartedAt = DateTime.now();
+    _markFirstSpeech('FIRST_PCM_SENT_TO_STT', at: requestStartedAt);
+    final transcript = await OpenAiTranscribeService.transcribePcm16(
+      apiKey: _openAiKey,
+      pcm: pcm,
+      language: _mapLanguageToCode(FFAppState().nativeLang.isNotEmpty
+          ? FFAppState().nativeLang
+          : 'Korean'),
+      model: OpenAiTranscribeService.firstTurnModel,
+      timeout:
+          const Duration(milliseconds: kFreeTalkFirstTurnRetranscribeTimeoutMs),
+      onLog: _log,
+    );
+    if (transcript != null && transcript.trim().isNotEmpty) {
+      // 파일 전사 API는 partial 이벤트가 없으므로 첫 전사 응답 수신 시각을
+      // 동일 측정 슬롯에 기록한다.
+      _markFirstSpeech('STT_FIRST_PARTIAL_RECEIVED');
+    }
+    return transcript;
   }
 
   /// 전사가 발화가 아니라 잡음·추임새인지 판정한다. 파이프라인 진입 전 검열이
@@ -473,253 +407,76 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     return false;
   }
 
-  /// 뒤늦게 도착한 전사를 폴백 대기자에게 전달한다.
-  void _resolveSpeechFirstTranscript(String transcript) {
-    final completer = _speechFirstTranscript;
-    if (completer != null && !completer.isCompleted) {
-      completer.complete(transcript);
-    }
-  }
-
-  /// 폴백 시점에만 호출된다. Realtime이 실패했을 때 뒤늦은 전사를 기다린다.
-  /// 전사가 끝내 안 오면 빈 문자열 → 파이프라인이 증발 처리한다.
-  Future<String> _awaitSpeechFirstTranscript() async {
-    final completer = _speechFirstTranscript;
-    if (completer == null) return '';
-    try {
-      final text = await completer.future.timeout(const Duration(seconds: 4));
-      _log('[RT-SPEECH-FIRST]', 'fallback_source_resolved len=${text.length}');
-      return text;
-    } catch (_) {
-      _log('[RT-SPEECH-FIRST]', 'fallback_source_timeout');
-      return '';
-    }
-  }
-
-  /// [itemId]를 주면 그 발화에 대해 발사된 턴일 때만 취소한다(다른 발화의 턴을
-  /// 실수로 끊지 않기 위한 안전장치).
-  void _cancelSpeechFirstTurn({String? itemId, String reason = 'stop'}) {
-    // 인계(handover) 전에는 _speechFirstTurn이, 인계 후에는 파이프라인이 턴을
-    // 들고 있다. 어느 쪽이든 세션의 활성 턴은 동일하므로 어댑터로 끊는다.
-    // (인계 후 참조가 비었다고 return하면 재생 중인 음성을 못 끊는다.)
-    final bool matches = itemId == null ||
-        _speechFirstItemId == itemId ||
-        _speechFirstPipelineItemId == itemId;
-    if (!matches) return;
-    final turn = _speechFirstTurn;
-    _speechFirstTurn = null;
-    _speechFirstItemId = null;
-    _speechFirstGeneration = -1;
-    if (turn != null && turn.isSettled) return;
-    _translateAdapter?.cancelActiveTurn();
-    _log('[RT-SPEECH-FIRST]',
-        'cancelled itemId=${itemId ?? '-'} reason=$reason');
-  }
-
   void _reportListeningReady() {
     if (_listeningReadyReported || !mounted) return;
     _listeningReadyReported = true;
     widget.onListeningReady?.call();
+    // 준비 오버레이 없이 직접 진입하는 경우(현재 기본) 페이지가 안내를 띄운다.
+    if (widget.onListeningReady == null) _showOpeningNudgeOnce();
   }
 
-  bool get _hasEnabledRealtimeMicrophone {
-    final adapters = <RealtimeAnyoneAdapter?>[_translateAdapter];
-    for (final adapter in adapters) {
-      final session = adapter?.session;
-      if (session != null &&
-          session.capturesMicrophone &&
-          session.isMicrophoneEnabled) {
-        return true;
-      }
-    }
-    return false;
+  // ====================================================================
+  // 📦 [진입 안내] — 화면 중앙 둥근 사각형 텍스트, 2초 후 소멸 (Step Expand 동일)
+  // ====================================================================
+  void _showOpeningNudgeOnce() {
+    if (_hasShownNudgeBubble || !mounted) return;
+    _hasShownNudgeBubble = true;
+    setState(() => _showNudgeBubble = true);
+    Timer(const Duration(milliseconds: 2000), () {
+      if (mounted) setState(() => _showNudgeBubble = false);
+    });
+  }
+
+  Widget _buildNudgeBubble() {
+    return IgnorePointer(
+      child: Align(
+        alignment: Alignment.center,
+        child: AnimatedOpacity(
+          opacity: _showNudgeBubble ? 1.0 : 0.0,
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeOut,
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 36),
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E1E22).withValues(alpha: 0.92),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: const Color(0xFF7F77DD).withValues(alpha: 0.55),
+                width: 1.4,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF2DD4BF).withValues(alpha: 0.25),
+                  blurRadius: 20,
+                  spreadRadius: 1,
+                ),
+              ],
+            ),
+            child: const Text(
+              _openingNudgeText,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                height: 1.5,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   bool _setMicOwner(AnyoneMicOwner next, {required String reason}) {
     final previous = _micOwner;
-    final realtimeMicEnabled = _hasEnabledRealtimeMicrophone;
-    final hasDeepgramManager = _voiceManager != null;
-    final conflict = next == AnyoneMicOwner.realtime && hasDeepgramManager ||
-        next == AnyoneMicOwner.deepgramFallback && realtimeMicEnabled;
-    if (conflict) {
-      _log(
-        '[ANY-MIC]',
-        'ownership_conflict current=${previous.name} requested=${next.name} '
-            'reason=$reason deepgramActive=$hasDeepgramManager '
-            'realtimeMicEnabled=$realtimeMicEnabled',
-      );
-      return false;
-    }
     if (previous != next) {
       _micOwner = next;
       _log('[ANY-MIC]',
           'owner_changed from=${previous.name} to=${next.name} reason=$reason');
     }
     return true;
-  }
-
-  void _cancelRealtimeFinalTimer({String? itemId}) {
-    final awaitingItemId = _realtimeAwaitingItemId;
-    final timer = _realtimeFinalTimer;
-    _realtimeFinalTimer = null;
-    _realtimeAwaitingItemId = null;
-    timer?.cancel();
-    if (timer != null) {
-      _log('[ANY-RT-STT]',
-          'final_timer_cancelled itemId=${itemId ?? awaitingItemId ?? ''}');
-    }
-  }
-
-  void _startRealtimeFinalTimer({
-    required RealtimeAnyoneAdapter adapter,
-    required String itemId,
-    required int listenGeneration,
-  }) {
-    _cancelRealtimeFinalTimer();
-    _realtimeAwaitingItemId = itemId;
-    _realtimeFinalTimer = Timer(_realtimeFinalTimeout, () {
-      if (!identical(_translateAdapter, adapter) ||
-          listenGeneration != _listenGeneration ||
-          _realtimeAwaitingItemId != itemId ||
-          _realtimeFinalAccepted) {
-        _log('[ANY-RT-FALLBACK]',
-            'stale_dropped reason=final_timeout itemId=$itemId');
-        return;
-      }
-      _realtimeFinalTimer = null;
-      _realtimeAwaitingItemId = null;
-      _log('[ANY-RT-STT]', 'final_timeout itemId=$itemId');
-      unawaited(
-        _requestRealtimeSttFallback(
-          reason: 'final_timeout',
-          adapter: adapter,
-          listenGeneration: listenGeneration,
-          promptRetry: true,
-        ),
-      );
-    });
-    _log('[ANY-RT-STT]',
-        'final_timer_started itemId=$itemId generation=$listenGeneration');
-  }
-
-  void _cancelIceDisconnectedTimer({bool recovered = false}) {
-    final timer = _iceDisconnectedTimer;
-    _iceDisconnectedTimer = null;
-    timer?.cancel();
-    if (recovered && timer != null) {
-      _log('[RT-ICE]', 'recovered');
-    }
-  }
-
-  void _startIceDisconnectedGrace({
-    required RealtimeAnyoneAdapter adapter,
-    required int listenGeneration,
-  }) {
-    _cancelIceDisconnectedTimer();
-    _log('[RT-ICE]', 'disconnected_grace_started');
-    _iceDisconnectedTimer = Timer(_iceDisconnectedGrace, () {
-      _iceDisconnectedTimer = null;
-      unawaited(
-        _requestRealtimeSttFallback(
-          reason: 'ice_disconnected_timeout',
-          adapter: adapter,
-          listenGeneration: listenGeneration,
-          promptRetry: false,
-        ),
-      );
-    });
-  }
-
-  Future<void> _requestRealtimeSttFallback({
-    required String reason,
-    required RealtimeAnyoneAdapter adapter,
-    required int listenGeneration,
-    required bool promptRetry,
-  }) async {
-    _log('[ANY-RT-FALLBACK]',
-        'requested reason=$reason generation=$listenGeneration');
-    if (_realtimeFinalAccepted) {
-      _log('[ANY-RT-FALLBACK]', 'blocked final_already_accepted');
-      return;
-    }
-    if (_realtimeFallbackStarted || _useDeepgramFallbackForSession) {
-      _log('[ANY-RT-FALLBACK]', 'already_started');
-      return;
-    }
-    if (!mounted ||
-        !identical(_translateAdapter, adapter) ||
-        !identical(_realtimeAdapterIdentity, adapter) ||
-        listenGeneration != _listenGeneration ||
-        _isPipelineRunning ||
-        (!_isConversationActive && !_isStartingListening) ||
-        (_micOwner != AnyoneMicOwner.realtime && !_isStartingListening)) {
-      _log(
-          '[ANY-RT-FALLBACK]',
-          'stale_dropped reason=$reason generation=$listenGeneration '
-              'current=$_listenGeneration owner=${_micOwner.name}');
-      return;
-    }
-
-    _realtimeFallbackStarted = true;
-    _useDeepgramFallbackForSession = true;
-    _cancelRealtimeFinalTimer();
-    _cancelIceDisconnectedTimer();
-    _activeRealtimeInputItemIds.clear();
-    _drainingRealtimeInputItemIds.clear();
-    final invalidatedGeneration = ++_listenGeneration;
-    _isStartingListening = false;
-
-    if (adapter.session.capturesMicrophone &&
-        adapter.session.isMicrophoneEnabled) {
-      try {
-        adapter.setMicrophoneEnabled(false);
-      } catch (_) {
-        // dispose below remains the authoritative microphone release.
-      }
-    }
-    _translateAdapter = null;
-    _realtimeAdapterIdentity = null;
-    adapter.cancelActiveTurn();
-    try {
-      await adapter.dispose();
-    } catch (error) {
-      _setMicOwner(AnyoneMicOwner.none, reason: 'realtime_release_failed');
-      _log('[ANY-RT-FALLBACK]',
-          'deepgram_failed reason=realtime_release_${error.runtimeType}');
-      return;
-    }
-    _setMicOwner(AnyoneMicOwner.none, reason: 'realtime_fallback_release');
-    _log('[ANY-RT-FALLBACK]', 'realtime_released');
-
-    if (!mounted ||
-        invalidatedGeneration != _listenGeneration ||
-        !_useDeepgramFallbackForSession) {
-      _log('[ANY-RT-FALLBACK]',
-          'stale_dropped reason=release_completed_after_stop');
-      return;
-    }
-    _isConversationActive = true;
-    if (promptRetry) {
-      _log('[ANY-RT-FALLBACK]', 'retry_prompt_started');
-      await _playRetryPromptOnly();
-      if (!mounted ||
-          invalidatedGeneration != _listenGeneration ||
-          !_useDeepgramFallbackForSession) {
-        _log('[ANY-RT-FALLBACK]',
-            'stale_dropped reason=retry_prompt_completed_after_stop');
-        return;
-      }
-      _log('[ANY-RT-FALLBACK]', 'retry_prompt_done');
-    }
-
-    _lastListenStartAt = null;
-    final started = await _startDeepgramListening(force: true);
-    if (started) {
-      _log('[ANY-RT-FALLBACK]', 'deepgram_started');
-    } else {
-      _setMicOwner(AnyoneMicOwner.none, reason: 'deepgram_fallback_failed');
-      _log('[ANY-RT-FALLBACK]', 'deepgram_failed');
-    }
   }
 
   String _deepgramSourceTurnId(String transcript, int listenGeneration) {
@@ -730,7 +487,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
   void _handleFinalUserTranscript({
     required String transcript,
-    required AnyoneTranscriptSource source,
     required String sourceTurnId,
     required int listenGeneration,
     bool deepgramSpeechFinal = false,
@@ -741,38 +497,32 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         listenGeneration != _listenGeneration) {
       _log(
         '[ANY-STT]',
-        'stale_dropped source=${source.name} turnId=$sourceTurnId '
+        'stale_dropped turnId=$sourceTurnId '
             'generation=$listenGeneration current=$_listenGeneration '
             'len=${clean.length}',
       );
       return;
     }
-
-    final expectedOwner = source == AnyoneTranscriptSource.realtime
-        ? AnyoneMicOwner.realtime
-        : AnyoneMicOwner.deepgramFallback;
-    if (_micOwner != expectedOwner) {
+    if (_micOwner != AnyoneMicOwner.deepgram) {
       _log(
         '[ANY-MIC]',
-        'ownership_conflict current=${_micOwner.name} '
-            'expected=${expectedOwner.name} source=${source.name} '
-            'turnId=$sourceTurnId',
+        'ownership_conflict current=${_micOwner.name} turnId=$sourceTurnId',
       );
       return;
     }
     if (clean.isEmpty) {
       _log(
           '[ANY-STT]',
-          'stale_dropped source=${source.name} turnId=$sourceTurnId '
+          'stale_dropped turnId=$sourceTurnId '
               'generation=$listenGeneration reason=empty len=0');
       return;
     }
 
-    final dedupeKey = '${source.name}:$sourceTurnId';
+    final dedupeKey = 'dg:$sourceTurnId';
     if (!_handledFinalTranscriptIds.add(dedupeKey)) {
       _log(
         '[ANY-STT]',
-        'duplicate_dropped source=${source.name} turnId=$sourceTurnId '
+        'duplicate_dropped turnId=$sourceTurnId '
             'generation=$listenGeneration len=${clean.length}',
       );
       return;
@@ -780,22 +530,12 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     if (_handledFinalTranscriptIds.length > 64) {
       _handledFinalTranscriptIds.remove(_handledFinalTranscriptIds.first);
     }
-
-    if (source == AnyoneTranscriptSource.realtime) {
-      _activeSttConfidence = null;
-      _pendingDeepgramResults.clear();
-      _activeProbeDgFinalAt = null;
-    }
     _log(
       '[ANY-STT]',
-      'final_received source=${source.name} turnId=$sourceTurnId '
+      'final_received turnId=$sourceTurnId '
           'generation=$listenGeneration len=${clean.length}',
     );
-    _stopMicAndProcess(
-      clean,
-      speechFinal: deepgramSpeechFinal,
-      transcriptSource: source,
-    );
+    _stopMicAndProcess(clean, speechFinal: deepgramSpeechFinal);
   }
 
   void _onDeepgramTurnResult(DeepgramTurnResult result) {
@@ -827,6 +567,12 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     );
     _activeSttConfidence =
         probe.chunkTranscriptConfidenceMean ?? probe.wordConfidenceMean;
+    // 🎧 평균만 보면 한 단어만 바뀐 오인식을 놓친다. 실측(2026-07-30 4차)에서
+    //   "내일 학교" → "내일 고장"이 평균 0.874로 통과했는데, 정작 "고장"의
+    //   단어 confidence는 0.370이었고 probe는 그 단어를 이미 지목해 뒀다.
+    //   최솟값과 지목 개수를 따로 들고 있어야 그 신호를 쓸 수 있다.
+    _activeSttWordConfidenceMin = probe.wordConfidenceMin;
+    _activeSttLowConfidenceWordCount = probe.lowConfidenceWordCount;
     probeStopwatch.stop();
     _activeProbeDgFinalAt = hadDeepgramResult ? turn.finalizedAt : null;
     final meaningProbeMs =
@@ -849,6 +595,15 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       '⏱️ [MEANING_PROBE_END]',
       'mode=$_probeMode meaningProbeMs=$meaningProbeMs',
     );
+  }
+
+  /// ⏱️ [PERF] Deepgram final(=앱이 발화 종료를 아는 시점) 기준 경과.
+  ///   유저 음성이 나오기까지의 병목을 이 한 계열로 추적한다.
+  void _logTurnPerf(String event) {
+    final anchor = _turnPerfAnchor;
+    if (anchor == null) return;
+    final ms = DateTime.now().difference(anchor).inMilliseconds;
+    _log('⏱️ [PERF]', '$event=+${ms}ms');
   }
 
   void _logProbeTiming(String event) {
@@ -910,21 +665,15 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   final ScrollController _scrollController = ScrollController();
   final Map<int, GlobalKey> _itemKeys = {};
   DeepgramV2VoiceManager? _voiceManager;
-  RealtimeAnyoneAdapter? _translateAdapter;
-  // 🗣️ [RT-CONV] guide3 단일 Realtime 검증 경로에서 쓰는 음성 직결 세션.
-  //   _translateAdapter에도 같은 인스턴스를 넣어 기존 ICE/error fallback과
-  //   teardown 로직을 그대로 재사용한다.
-  // 한 응답 안에서 "유저 발화의 영어 번역"과 "AI 대화 응답"은 빈 줄로 구분되어
-  // 도착한다. 두 말풍선으로 갈라 담기 위한 인덱스.
-  // 응답이 끝났는데 전사가 아직이면 이만큼만 기다렸다가 저장한다(저장이 다음
-  // 턴을 막지 않도록 상한을 둔다).
-  bool _translateReconnectTried = false;
-  final AudioRecorder _audioRecorder = AudioRecorder();
-  late final TtsQueueManager _ttsQueueManager;
-  HybridTtsPlayer? _hybridTtsPlayer; // [하이브리드] 메인 턴 TTS 플레이어
-  // 🔧 [PREFETCH v1] 현재 턴 AI TTS fetcher 참조. 다음 턴 시작 시 cancel()로
-  //   이전 턴의 늦은 fetch가 공유 큐(_ttsQueueManager)로 유입되는 것을 차단.
-  ChunkedTtsFetcher? _aiTtsFetcher;
+  late final AudioRecorder _audioRecorder;
+  late final bool _ownsAudioRecorder;
+  Future<AnyonePreparedAudioCapture?>? _preparedCaptureFuture;
+  AnyonePreparedAudioCapture? _preparedCapture;
+  late final DateTime _micInputAt;
+  final Set<String> _firstSpeechMarks = <String>{};
+  // 🔊 [TTS-ADAPTER] 유저 번역 음성·AI 응답 음성·안내 음성 전부 이 어댑터 하나로
+  //   나간다 (guide4 8장). 모델명/보이스 매핑은 어댑터 설정에만 있다.
+  late final TtsAdapter _ttsAdapter;
   late final AnyoneCostTracker _costTracker;
 
   // ⏱️ 성능 측정용 초시계
@@ -937,23 +686,59 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   @override
   void initState() {
     super.initState();
+    _audioRecorder = widget.preparedAudioRecorder ?? AudioRecorder();
+    _ownsAudioRecorder = widget.preparedAudioRecorder == null;
+    _micInputAt = widget.micInputAt ?? DateTime.now();
+    _markFirstSpeech('MIC_INPUT', at: _micInputAt);
+    _preparedCaptureFuture = _startImmediateLocalCapture();
     _costTracker = AnyoneCostTracker(_log);
-    _ttsQueueManager = TtsQueueManager(onPlayStart: () {
-      _markConversationActivity();
-      if (_awaitingAiFirstAudioProbe) {
-        _awaitingAiFirstAudioProbe = false;
-        _logProbeTiming('AI_FIRST_AUDIO');
-      }
-      if (_swTTS.isRunning) {
-        _swTTS.stop();
-        if (mounted) {
-          setState(() {
-            _debugResult =
-                "⏱️ 확정: ${_swDeepgram.elapsedMilliseconds}ms | 뇌: ${_swOpenAI.elapsedMilliseconds}ms | 입: ${_swTTS.elapsedMilliseconds}ms";
-          });
+    _ttsAdapter = TtsAdapter(
+      apiKeyProvider: () => _openAiKey,
+      onLog: _log,
+      onPlaybackStart: (request) {
+        _markConversationActivity();
+        if (!TrialFlowState.instance.isTrial) {
+          BillingTicker.instance.resumeFromActivity(
+              request.speakerType == TtsSpeakerType.user
+                  ? 'free_talk_user_tts_start'
+                  : 'free_talk_ai_tts_start');
         }
-      }
-    });
+        // ⏱️ [PERF] 유저/AI 첫 PCM 시점 — 이게 실제로 소리가 시작되는 순간이다.
+        _logTurnPerf(request.speakerType == TtsSpeakerType.user
+            ? 'USER_FIRST_AUDIO'
+            : 'AI_FIRST_AUDIO');
+        if (request.speakerType != TtsSpeakerType.user &&
+            _awaitingAiFirstAudioProbe) {
+          _awaitingAiFirstAudioProbe = false;
+          _logProbeTiming('AI_FIRST_AUDIO');
+        }
+        if (_swTTS.isRunning) {
+          _swTTS.stop();
+          if (mounted) {
+            setState(() {
+              _debugResult =
+                  "⏱️ 확정: ${_swDeepgram.elapsedMilliseconds}ms | 뇌: ${_swOpenAI.elapsedMilliseconds}ms | 입: ${_swTTS.elapsedMilliseconds}ms";
+            });
+          }
+        }
+      },
+      onPlaybackEnd: (request, ok) {
+        if (!TrialFlowState.instance.isTrial) {
+          BillingTicker.instance.resumeFromActivity(
+              request.speakerType == TtsSpeakerType.user
+                  ? 'free_talk_user_tts_end'
+                  : 'free_talk_ai_tts_end');
+        }
+      },
+      // 🔊 [TTS-HIST] 정상 완료된 음원만 온다 (guide4 11장). 히스토리 캐시에
+      //   넣어 히스토리 재생 때 TTS API 재호출이 없도록 한다.
+      onHistoryAudioReady: (request, wav) {
+        final voiceKey = request.historyVoiceKey ?? request.voiceId;
+        unawaited(TtsCache.put(request.text, voiceKey, wav));
+        _log('🔊 [TTS-HIST]',
+            'cached len=${wav.length} voiceKey=$voiceKey turnId=${request.turnId}');
+      },
+    );
 
     TrialFlowState.instance.restoreFromAppState();
     if (TrialFlowState.instance.isTrialAnyone) {
@@ -964,7 +749,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     }
 
     _initPermissions();
-    unawaited(RealtimeFeatureFlags.initialize());
     _fetchKeys();
     BillingTicker.instance.setSessionIdentifiers();
     BillingTicker.instance.setRate(BillingRate.full);
@@ -989,12 +773,53 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     BillingTicker.instance.pause();
     _stopEverything();
     _voiceManager?.dispose();
-    _audioRecorder.dispose();
+    final preparedCapture = _preparedCapture;
+    if (preparedCapture != null) {
+      unawaited(preparedCapture.stop());
+      _preparedCapture = null;
+    }
+    if (_ownsAudioRecorder) {
+      unawaited(_audioRecorder.dispose());
+    }
     // 🔇 [TTS-CLOSED] stop()만 하면 이미 요청된 TTS가 나중에 도착해 재생된다.
-    //   dispose로 큐를 닫아 화면을 떠난 뒤 소리가 새는 것을 막는다.
-    unawaited(_ttsQueueManager.dispose());
+    //   dispose로 어댑터를 닫아 화면을 떠난 뒤 소리가 새는 것을 막는다.
+    unawaited(_ttsAdapter.dispose());
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _markFirstSpeech(String event, {DateTime? at}) {
+    if (!_firstSpeechMarks.add(event)) return;
+    final timestamp = at ?? DateTime.now();
+    final deltaMs = timestamp.difference(_micInputAt).inMilliseconds;
+    _log(
+      '⏱️ [FIRST-SPEECH]',
+      'event=$event at=${timestamp.toIso8601String()} '
+          'deltaMs=${deltaMs < 0 ? 0 : deltaMs}',
+    );
+  }
+
+  Future<AnyonePreparedAudioCapture?> _startImmediateLocalCapture() async {
+    try {
+      await widget.audioPreparation;
+      final hasPermission = await _audioRecorder.hasPermission();
+      if (!hasPermission || !mounted) return null;
+      final capture = await AnyonePreparedAudioCapture.start(
+        recorder: _audioRecorder,
+        onRecordingStarted: (at) =>
+            _markFirstSpeech('LOCAL_RECORDING_STARTED', at: at),
+        onFirstFrame: (at, byteCount) {
+          _markFirstSpeech('FIRST_PCM_CREATED', at: at);
+          _log('🎤 [FIRST-SPEECH]', 'first_pcm_bytes=$byteCount');
+        },
+      );
+      _preparedCapture = capture;
+      return capture;
+    } catch (error) {
+      _log('❌ [FIRST-SPEECH]',
+          'immediate_capture_failed reason=${error.runtimeType}');
+      return null;
+    }
   }
 
   Future<void> _initPermissions() async {
@@ -1078,10 +903,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     // 🆕 첫 진입 race 방지: 키와 마이크 권한이 "둘 다" 준비됐을 때만 시작한다.
     //    준비 안 된 항목이 있으면 조용히 대기 → 키 로드 콜백(_fetchKeys) 또는
     //    권한 콜백(_initPermissions) 중 늦게 끝나는 쪽이 이 함수를 다시 호출해 시작.
-    final realtimeEnabled = RealtimeFeatureFlags.enabledFor('anyone');
-    final requiredKeyMissing =
-        realtimeEnabled ? _openAiKey.isEmpty : _deepgramKey.isEmpty;
-    if (requiredKeyMissing) {
+    //    전사=Deepgram, 번역/응답/TTS=OpenAI라 두 키가 모두 필요하다.
+    if (_deepgramKey.isEmpty || _openAiKey.isEmpty) {
       _log('🎤 [START-GATE]', '키 미준비 → 시작 보류');
       return;
     }
@@ -1101,486 +924,13 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     }
     _micPermissionReady = true;
     if (!mounted || _isConversationActive) return;
-    if (realtimeEnabled) {
-      // 🔀 [HYBRID] 유저 쪽만 Realtime 2.1 mini가 담당한다.
-      //   유저 발화 → Realtime 전사 → Realtime 영어 번역 + 유저 목소리 음성.
-      //   AI 응답은 기존 파이프라인 그대로 gpt-4o-mini + tts-1(nova)이 만든다.
-      //   목소리가 갈려 유저/AI 구분이 되고, Anyone 페르소나 프롬프트도
-      //   기존 gpt-4o-mini 경로에서 그대로 쓰인다.
-      _isStartingListening = true;
-      final reservedGeneration = ++_listenGeneration;
-      _realtimeListenGeneration = reservedGeneration;
-      _isConversationActive = true;
-      if (!_setMicOwner(
-        AnyoneMicOwner.realtime,
-        reason: 'realtime_connect_start',
-      )) {
-        _isConversationActive = false;
-        _isStartingListening = false;
-        return;
-      }
-      final connected = await _ensureTranslateSession();
-      if (!mounted) return;
-      if (!connected) return;
-      // 🎤 [ENTRY-GATE] 세션 연결만으로 준비화면을 걷지 않는다. 마이크가 실제로
-      //   열린 뒤(_startRealtimeListening 내부)에 ready를 보고해야 진입 즉시 발화 가능.
-      if (!_isStartingListening) return;
-      _isStartingListening = false;
-      await _startRealtimeListening(reservedGeneration: reservedGeneration);
-      return;
-    }
     await _startDeepgramListening();
-  }
-
-  bool _isTranslateSessionUsable([RealtimeAnyoneAdapter? adapter]) {
-    final state = (adapter ?? _translateAdapter)?.session.connectionState;
-    return state == RealtimeConnectionState.ready ||
-        state == RealtimeConnectionState.configuring;
-  }
-
-  Future<bool> _waitForTranslateSessionUsable(
-      RealtimeAnyoneAdapter adapter) async {
-    const pollInterval = Duration(milliseconds: 50);
-    const maxWait = Duration(seconds: 2);
-    final deadline = DateTime.now().add(maxWait);
-    while (mounted &&
-        identical(_translateAdapter, adapter) &&
-        DateTime.now().isBefore(deadline)) {
-      if (_isTranslateSessionUsable(adapter)) return true;
-      await Future<void>.delayed(pollInterval);
-    }
-    return mounted &&
-        identical(_translateAdapter, adapter) &&
-        _isTranslateSessionUsable(adapter);
-  }
-
-  Future<bool> _ensureTranslateSession({bool reconnect = false}) async {
-    final existing = _translateAdapter;
-    if (_isTranslateSessionUsable(existing) &&
-        existing?.session.capturesMicrophone == true) {
-      return true;
-    }
-    if (reconnect) {
-      if (_translateReconnectTried) return false;
-      _translateReconnectTried = true;
-    }
-
-    if (existing != null) {
-      existing.cancelActiveTurn();
-      await existing.dispose();
-      if (identical(_translateAdapter, existing)) {
-        _translateAdapter = null;
-      }
-    }
-
-    late final RealtimeAnyoneAdapter adapter;
-    adapter = RealtimeAnyoneAdapter(
-      logger: _log,
-      onSpeechStarted: (itemId) {
-        if (!identical(_translateAdapter, adapter)) return;
-        final generation = _realtimeListenGeneration;
-        if (!adapter.session.isMicrophoneEnabled) {
-          final disabledAt = _realtimeMicDisabledAt;
-          if (disabledAt != null &&
-              DateTime.now().difference(disabledAt) <=
-                  _realtimeMuteEventGrace) {
-            _drainingRealtimeInputItemIds.add(itemId);
-            _log(
-                '[ANY-RT-STT]',
-                'delayed_after_mute event=speech_started itemId=$itemId '
-                    'generation=$generation');
-            return;
-          }
-          _log(
-              '[ANY-RT-STT]',
-              'transcript_while_muted event=speech_started itemId=$itemId '
-                  'generation=$generation');
-          return;
-        }
-        _cancelRealtimeFinalTimer();
-        _activeRealtimeInputItemIds.add(itemId);
-        _markConversationActivity();
-        if (!TrialFlowState.instance.isTrial) {
-          BillingTicker.instance.resumeFromActivity('free_talk_stt_partial');
-        }
-        _log('[ANY-RT-STT]',
-            'speech_started itemId=$itemId generation=$generation');
-      },
-      onSpeechStopped: (itemId) {
-        if (!identical(_translateAdapter, adapter)) return;
-        final generation = _realtimeListenGeneration;
-        if (!adapter.session.isMicrophoneEnabled) {
-          if (_drainingRealtimeInputItemIds.contains(itemId)) {
-            _log(
-                '[ANY-RT-STT]',
-                'delayed_after_mute event=speech_stopped itemId=$itemId '
-                    'generation=$generation');
-            return;
-          }
-          _log(
-              '[ANY-RT-STT]',
-              'transcript_while_muted event=speech_stopped itemId=$itemId '
-                  'generation=$generation');
-          return;
-        }
-        _markConversationActivity();
-        _log('[ANY-RT-STT]',
-            'speech_stopped itemId=$itemId generation=$generation');
-        // 🎙️ [SPEECH-FIRST] 전사를 기다리지 않고 바로 번역 음성을 요청한다.
-        //   비활성일 때는 전사 확정(_commitAndProcess)까지 기다렸다가 번역한다.
-        if (_kSpeechFirstEnabled) {
-          _maybeStartSpeechFirstTurn(
-            adapter: adapter,
-            itemId: itemId,
-            listenGeneration: generation,
-          );
-        }
-        if (!_realtimeFinalAccepted &&
-            !_realtimeFallbackStarted &&
-            _micOwner == AnyoneMicOwner.realtime) {
-          _startRealtimeFinalTimer(
-            adapter: adapter,
-            itemId: itemId,
-            listenGeneration: generation,
-          );
-        }
-      },
-      onUserTranscriptDelta: (itemId, delta, accumulatedText) {
-        if (!identical(_translateAdapter, adapter)) return;
-        final generation = _realtimeListenGeneration;
-        if (!adapter.session.isMicrophoneEnabled) {
-          if (_drainingRealtimeInputItemIds.contains(itemId)) {
-            _log(
-                '[ANY-RT-STT]',
-                'delayed_after_mute event=delta itemId=$itemId '
-                    'generation=$generation len=${delta.length}');
-            return;
-          }
-          _log(
-              '[ANY-RT-STT]',
-              'transcript_while_muted event=delta itemId=$itemId '
-                  'generation=$generation len=${delta.length}');
-          return;
-        }
-        _markConversationActivity();
-        if (!TrialFlowState.instance.isTrial) {
-          BillingTicker.instance.resumeFromActivity('free_talk_stt_partial');
-        }
-        _log(
-            '[ANY-RT-STT]',
-            'transcription_delta itemId=$itemId generation=$generation '
-                'len=${delta.length} accumulatedLen=${accumulatedText.length}');
-      },
-      onUserTranscriptCompleted: (itemId, transcript) {
-        if (!identical(_translateAdapter, adapter) ||
-            !identical(_realtimeAdapterIdentity, adapter)) {
-          _log('[ANY-RT-STT]',
-              'late_completed_dropped itemId=$itemId reason=adapter_replaced');
-          return;
-        }
-        final generation = _realtimeListenGeneration;
-        final clean = transcript.trim();
-        final startedBeforeMute = _drainingRealtimeInputItemIds.remove(itemId);
-        _activeRealtimeInputItemIds.remove(itemId);
-        _log(
-            '[ANY-RT-STT]',
-            'final_received itemId=$itemId len=${clean.length} '
-                'generation=$generation');
-        // 🎙️ [SPEECH-FIRST/A안] 이 발화는 전사를 기다리지 않고 이미 파이프라인을
-        //   열었다. 전사는 폴백 원고로만 넘기고, 여기서 두 번째 파이프라인을
-        //   시작하지 않는다. 전사가 비었으면 = 잡음이므로 진행 중인 턴을 끊는다.
-        if (_speechFirstPipelineItemId == itemId) {
-          final bool isNoise = _isNoiseTranscript(clean);
-          // 잡음이면 폴백 원고도 주지 않는다 → 파이프라인이 증발 처리한다.
-          _resolveSpeechFirstTranscript(isNoise ? '' : clean);
-          if (isNoise) {
-            _speechFirstNoiseAbort = true;
-            _cancelSpeechFirstTurn(
-              itemId: itemId,
-              reason: clean.isEmpty ? 'empty_transcript' : 'noise_transcript',
-            );
-          }
-          _log(
-              '[RT-SPEECH-FIRST]',
-              'transcript_forwarded itemId=$itemId len=${clean.length} '
-                  'noise=$isNoise');
-          return;
-        }
-        if (_realtimeFallbackStarted ||
-            _useDeepgramFallbackForSession ||
-            generation != _listenGeneration) {
-          _log('[ANY-RT-STT]',
-              'late_completed_dropped itemId=$itemId generation=$generation');
-          return;
-        }
-        if (_realtimeFinalAccepted && !startedBeforeMute) {
-          _log('[ANY-RT-STT]',
-              'late_completed_dropped itemId=$itemId reason=final_already_accepted');
-          return;
-        }
-        if (clean.isEmpty) {
-          // 🎙️ [SPEECH-FIRST] 전사가 비었다 = 발화가 아니라 잡음/AI 음성 반향이다.
-          //   전사를 기다리지 않고 이미 쏜 턴이 있으면 여기서 끊어 소리를 막는다.
-          _cancelSpeechFirstTurn(itemId: itemId, reason: 'empty_transcript');
-          if (_realtimeAwaitingItemId == itemId) {
-            _cancelRealtimeFinalTimer(itemId: itemId);
-          }
-          // 🔇 [ANY-RT-EMPTY] 빈 전사는 정상적인 잡음 구간이다. 마이크는 계속
-          //   열려 있으므로 조용히 무시하고 다음 발화를 기다린다. 연속으로
-          //   임계치만큼 비었을 때만 전사 경로 이상으로 보고 폴백한다.
-          _consecutiveEmptyRealtimeFinals++;
-          if (_consecutiveEmptyRealtimeFinals <
-              _maxConsecutiveEmptyRealtimeFinals) {
-            _log(
-              '[ANY-RT-EMPTY]',
-              'ignored itemId=$itemId generation=$generation '
-                  'consecutive=$_consecutiveEmptyRealtimeFinals/'
-                  '$_maxConsecutiveEmptyRealtimeFinals',
-            );
-            return;
-          }
-          _log(
-            '[ANY-RT-EMPTY]',
-            'threshold_reached itemId=$itemId generation=$generation '
-                'consecutive=$_consecutiveEmptyRealtimeFinals → fallback',
-          );
-          unawaited(
-            _requestRealtimeSttFallback(
-              reason: 'empty_completed',
-              adapter: adapter,
-              listenGeneration: generation,
-              promptRetry: true,
-            ),
-          );
-          return;
-        }
-        _consecutiveEmptyRealtimeFinals = 0;
-        if (clean.length < 2) {
-          _handleFinalUserTranscript(
-            transcript: clean,
-            source: AnyoneTranscriptSource.realtime,
-            sourceTurnId: itemId,
-            listenGeneration: generation,
-          );
-          return;
-        }
-        if (_realtimeAwaitingItemId == itemId) {
-          _cancelRealtimeFinalTimer(itemId: itemId);
-        }
-        if (!mounted ||
-            !_isConversationActive ||
-            generation != _listenGeneration ||
-            _micOwner != AnyoneMicOwner.realtime) {
-          _handleFinalUserTranscript(
-            transcript: clean,
-            source: AnyoneTranscriptSource.realtime,
-            sourceTurnId: itemId,
-            listenGeneration: generation,
-          );
-          return;
-        }
-        if (!adapter.session.isMicrophoneEnabled) {
-          if (startedBeforeMute) {
-            _log(
-                '[ANY-RT-STT]',
-                'delayed_after_mute event=completed itemId=$itemId '
-                    'generation=$generation len=${clean.length}');
-            _handleFinalUserTranscript(
-              transcript: clean,
-              source: AnyoneTranscriptSource.realtime,
-              sourceTurnId: itemId,
-              listenGeneration: generation,
-            );
-            return;
-          }
-          _log(
-              '[ANY-RT-STT]',
-              'transcript_while_muted event=completed itemId=$itemId '
-                  'generation=$generation len=${clean.length}');
-          return;
-        }
-        _markConversationActivity();
-        if (!TrialFlowState.instance.isTrial) {
-          BillingTicker.instance.resumeFromActivity('free_talk_stt_result');
-        }
-        try {
-          _cancelRealtimeFinalTimer(itemId: itemId);
-          _drainingRealtimeInputItemIds.addAll(_activeRealtimeInputItemIds);
-          _activeRealtimeInputItemIds.clear();
-          adapter.setMicrophoneEnabled(false);
-          _realtimeMicDisabledAt = DateTime.now();
-          _realtimeFinalAccepted = true;
-          _log('[ANY-MIC]',
-              'realtime_disabled_for_pipeline generation=$generation');
-        } catch (error) {
-          _log('[ANY-RT-STT]',
-              'microphone_disable_failed reason=${error.runtimeType}');
-          return;
-        }
-        _handleFinalUserTranscript(
-          transcript: clean,
-          source: AnyoneTranscriptSource.realtime,
-          sourceTurnId: itemId,
-          listenGeneration: generation,
-        );
-      },
-      onConnectionStateChanged: (state) {
-        if (!identical(_translateAdapter, adapter)) return;
-        if (state == RealtimeConnectionState.failed) {
-          unawaited(
-            _requestRealtimeSttFallback(
-              reason: 'connection_failed',
-              adapter: adapter,
-              listenGeneration: _realtimeListenGeneration,
-              promptRetry: false,
-            ),
-          );
-        }
-      },
-      onIceStateChanged: (state) {
-        if (!identical(_translateAdapter, adapter)) return;
-        final generation = _realtimeListenGeneration;
-        if (state == 'failed') {
-          _cancelIceDisconnectedTimer();
-          unawaited(
-            _requestRealtimeSttFallback(
-              reason: 'ice_failed',
-              adapter: adapter,
-              listenGeneration: generation,
-              promptRetry: false,
-            ),
-          );
-        } else if (state == 'disconnected') {
-          if (!_realtimeFinalAccepted && !_isPipelineRunning) {
-            _startIceDisconnectedGrace(
-              adapter: adapter,
-              listenGeneration: generation,
-            );
-          }
-        } else if (state == 'connected' || state == 'completed') {
-          _cancelIceDisconnectedTimer(recovered: true);
-        }
-      },
-      onError: (error) {
-        if (!identical(_translateAdapter, adapter)) return;
-        _log('[ANY-RT-STT]', 'session_error reason=${error.runtimeType}');
-        unawaited(
-          _requestRealtimeSttFallback(
-            reason: 'session_error_${error.runtimeType}',
-            adapter: adapter,
-            listenGeneration: _realtimeListenGeneration,
-            promptRetry: false,
-          ),
-        );
-      },
-    );
-    _translateAdapter = adapter;
-    _realtimeAdapterIdentity = adapter;
-    try {
-      await adapter.connectForMicrophoneTranscription(
-        modeSessionId:
-            _sessionDocId ?? 'anyone-${DateTime.now().microsecondsSinceEpoch}',
-        voice: _currentUserVoice,
-        allowWhenDisabled: true,
-        transcriptionLanguage: _mapLanguageToCode(
-          FFAppState().nativeLang.isNotEmpty
-              ? FFAppState().nativeLang
-              : 'Korean',
-        ),
-        // 🎧 [RT-TRANSCRIPTION] 전 턴 경량 모델. prefix_padding 600으로 앞잘림을
-        //   잡은 뒤 2026-07-29 실측에서 정밀 모델을 나란히 재봤으나, 못 맞히던
-        //   문장은 글자 하나 다르지 않게 똑같이 틀렸고("왜 어제 안 왔어?" →
-        //   양쪽 다 "왜 오지 않았어?") 경량이 맞히던 "나 아까"는 "나가"로
-        //   퇴행시켰다. 전사 지연은 양쪽 0.51초로 같았다. 더 비싼데 더 나쁘다.
-        transcriptionModel: StealthVoxRealtimeSession.kLightTranscriptionModel,
-      );
-      final usable = await _waitForTranslateSessionUsable(adapter);
-      if (!usable) {
-        await _requestRealtimeSttFallback(
-          reason: 'session_not_usable',
-          adapter: adapter,
-          listenGeneration: _realtimeListenGeneration,
-          promptRetry: false,
-        );
-        return false;
-      }
-      // 🔊 [TTS-ROUTE] 유저 음성(WebRTC)과 AI 음성(TTS)을 같은 통화 오디오로 묶어
-      //   볼륨 손잡이를 하나로 만든다. 세션 종료 시 _stopTranslateSession이 되돌린다.
-      await _ttsQueueManager.setVoiceCallRouting(true);
-      _log('🔊 [TTS-ROUTE]', 'voice_call=on reason=realtime_session_ready');
-      _log('🔐 [RT-TRANSLATE]',
-          'secure translation and transcription session ready');
-      return true;
-    } catch (error) {
-      _log('❌ [RT-TRANSLATE]', 'connect failed reason=${error.runtimeType}');
-      await _requestRealtimeSttFallback(
-        reason: 'connect_${error.runtimeType}',
-        adapter: adapter,
-        listenGeneration: _realtimeListenGeneration,
-        promptRetry: false,
-      );
-      return false;
-    }
-  }
-
-  // ══════════════════════════════════════════════════════════════════
-  void _stopTranslateSession() {
-    final adapter = _translateAdapter;
-    _translateAdapter = null;
-    if (identical(_realtimeAdapterIdentity, adapter)) {
-      _realtimeAdapterIdentity = null;
-    }
-    adapter?.cancelActiveTurn();
-    if (adapter != null) unawaited(adapter.dispose());
-    // 🔊 [TTS-ROUTE] WebRTC가 사라졌으므로 미디어 통로로 되돌린다.
-    unawaited(_ttsQueueManager.setVoiceCallRouting(false));
   }
 
   void _saveRecentHistory(String userText, String aiText) {
     _recentHistory.add({'role': 'user', 'content': userText});
     _recentHistory.add({'role': 'assistant', 'content': aiText});
     while (_recentHistory.length > 4) _recentHistory.removeAt(0);
-  }
-
-  void _saveUserFullSentenceToCache(String text) {
-    if (text.isEmpty) return;
-    TtsCache.getOrCreate(
-      text: text,
-      voice: 'nova',
-      language: 'en',
-      onDuplicateBlocked: () {
-        _costTracker.recordTtsDuplicateBlocked();
-        _log('🔊 [TTS-DUP-BLOCKED]', 'full-sentence cache request reused');
-      },
-      create: () async {
-        _costTracker.recordTtsRequest(text.length);
-        final res = await http
-            .post(
-              Uri.parse('https://api.openai.com/v1/audio/speech'),
-              headers: {
-                'Authorization': 'Bearer $_openAiKey',
-                'Content-Type': 'application/json',
-              },
-              body: jsonEncode({
-                'model': 'tts-1',
-                'input': text,
-                'voice': 'nova',
-                'speed': 1.0,
-              }),
-            )
-            .timeout(
-                const Duration(seconds: kFreeTalkOpenAiTtsHttpTimeoutSeconds));
-        if (res.statusCode == 200) return res.bodyBytes;
-        _log(
-          '❌ [TTS-API-ERR]',
-          'full-sentence cache statusCode=${res.statusCode}',
-        );
-        return null;
-      },
-    ).catchError((e) {
-      debugPrint('[_saveUserFullSentenceToCache] $e');
-      return null;
-    });
   }
 
 // ====================================================================
@@ -1644,32 +994,16 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     _isStartingListening = false;
     _isPipelineRunning = false;
     _listenGeneration++;
-    _cancelRealtimeFinalTimer();
-    _cancelIceDisconnectedTimer();
-    _realtimeFallbackStarted = false;
-    _realtimeFinalAccepted = false;
-    _consecutiveEmptyRealtimeFinals = 0;
-    _useDeepgramFallbackForSession = false;
-    _realtimeAdapterIdentity = null;
-    _realtimeMicDisabledAt = null;
+    _resetTurnPcmBuffer();
     _commitTimer?.cancel(); // 🔧 [v3.4] 대기 중 타이머 정리
     _commitTimer = null;
     _cancelSpeculativeTranslation(); // 🚀 [SPEC] 진행 중 투기 번역 정리
     _firstUtteranceJudge.cancel();
     _pendingHeardConfirmation = null;
     _heardConfirmationAttempts = 0;
-    _cancelPrewarmedRealtimeVoice(); // 🔥 [RT-PREWARM] 선점 소켓 정리
-    _cancelSpeechFirstTurn(); // 🎙️ [SPEECH-FIRST] 선발사 턴 정리
-    _resolveSpeechFirstTranscript(''); // 폴백 대기자 깨우기(교착 방지)
-    _speechFirstPipelineItemId = null;
-    _speechFirstTranscript = null;
-    _translateAdapter?.cancelActiveTurn();
     _pendingTranscript = ''; // 대기 중 발화도 버림
-    _pendingTranscriptSource = null;
     _lastPendingFinalAt = null;
     _handledFinalTranscriptIds.clear();
-    _activeRealtimeInputItemIds.clear();
-    _drainingRealtimeInputItemIds.clear();
     _pendingDeepgramResults.clear();
     _activeProbeDgFinalAt = null;
     _awaitingAiFirstTextProbe = false;
@@ -1677,8 +1011,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     _voiceManager?.dispose();
     _voiceManager = null;
     _setMicOwner(AnyoneMicOwner.none, reason: 'stop_everything');
-    _stopTranslateSession();
-    _ttsQueueManager.stop();
+    // 🔇 늦게 도착한 이전 세대 TTS가 재생되지 않도록 세대를 올려 막는다.
+    _ttsAdapter.invalidateGenerationsBefore(_pipelineGeneration);
+    _ttsAdapter.stopAll(reason: 'stop_everything');
     if (mounted && !_isDisposing) setState(() {});
   }
 
@@ -1708,120 +1043,12 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   }
 
   void _restartConfiguredListening({int? expectedPipelineGeneration}) {
-    if (RealtimeFeatureFlags.enabledFor('anyone') &&
-        !_useDeepgramFallbackForSession) {
-      unawaited(
-        _startRealtimeListening(
-          afterPipeline: true,
-          expectedPipelineGeneration: expectedPipelineGeneration,
-        ),
-      );
+    if (expectedPipelineGeneration != null &&
+        expectedPipelineGeneration != _pipelineGeneration) {
+      _log('🎤 [LISTEN-SKIP]', 'restart ignored reason=stale_generation');
       return;
     }
     unawaited(_startDeepgramListening().then<void>((_) {}));
-  }
-
-  Future<void> _startRealtimeListening({
-    bool afterPipeline = false,
-    int? expectedPipelineGeneration,
-    int? reservedGeneration,
-  }) async {
-    if (!mounted ||
-        (expectedPipelineGeneration != null &&
-            expectedPipelineGeneration != _pipelineGeneration)) {
-      _log('[ANY-RT-STT]', 'listening_start_ignored reason=stale_generation');
-      return;
-    }
-    if (_isStartingListening) {
-      _log('[ANY-RT-STT]', 'listening_start_ignored reason=already_starting');
-      return;
-    }
-    if (_isPipelineRunning) {
-      _log('[ANY-RT-STT]', 'listening_start_ignored reason=pipeline_running');
-      return;
-    }
-    if (_ttsQueueManager.isBusy) {
-      _log('[ANY-RT-STT]', 'listening_start_ignored reason=tts_busy');
-      return;
-    }
-
-    final adapter = _translateAdapter;
-    if (!_isTranslateSessionUsable(adapter) ||
-        adapter?.session.capturesMicrophone != true) {
-      _log('[ANY-RT-STT]', 'listening_start_failed reason=session_not_usable');
-      if (adapter != null) {
-        _realtimeFinalAccepted = false;
-        unawaited(
-          _requestRealtimeSttFallback(
-            reason: 'restart_session_not_usable',
-            adapter: adapter,
-            listenGeneration: _realtimeListenGeneration,
-            promptRetry: false,
-          ),
-        );
-      }
-      return;
-    }
-    if (!_setMicOwner(
-      AnyoneMicOwner.realtime,
-      reason: afterPipeline ? 'pipeline_complete' : 'realtime_listen_start',
-    )) {
-      return;
-    }
-
-    _isStartingListening = true;
-    final generation =
-        reservedGeneration != null && reservedGeneration == _listenGeneration
-            ? reservedGeneration
-            : ++_listenGeneration;
-    _realtimeListenGeneration = generation;
-    _realtimeFinalAccepted = false;
-    _consecutiveEmptyRealtimeFinals = 0;
-    _cancelRealtimeFinalTimer();
-    _cancelIceDisconnectedTimer();
-    _activeRealtimeInputItemIds.clear();
-    _drainingRealtimeInputItemIds.clear();
-    try {
-      if (!identical(_translateAdapter, adapter) ||
-          !mounted ||
-          (expectedPipelineGeneration != null &&
-              expectedPipelineGeneration != _pipelineGeneration)) {
-        _setMicOwner(AnyoneMicOwner.none, reason: 'realtime_start_stale');
-        return;
-      }
-      if (!adapter!.session.isMicrophoneEnabled) {
-        _activeRealtimeInputItemIds.clear();
-        _drainingRealtimeInputItemIds.clear();
-        adapter.setMicrophoneEnabled(true);
-        _realtimeMicDisabledAt = null;
-        if (afterPipeline) {
-          _log('[ANY-MIC]',
-              'realtime_enabled_after_pipeline generation=$generation');
-        }
-      }
-      _resetIdleTimer();
-      _isConversationActive = true;
-      _lastListenStartAt = DateTime.now();
-      if (!TrialFlowState.instance.isTrial) {
-        BillingTicker.instance.resumeFromActivity('free_talk_mic_start');
-      }
-      if (mounted) {
-        setState(() {
-          _debugResult = "⏱️ 듣는 중...";
-          _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-        });
-      }
-      _log('[ANY-RT-STT]', 'listening_started generation=$generation');
-      _reportListeningReady();
-    } catch (error) {
-      _setMicOwner(AnyoneMicOwner.none, reason: 'realtime_start_error');
-      _log(
-          '[ANY-RT-STT]', 'listening_start_failed reason=${error.runtimeType}');
-    } finally {
-      if (generation == _listenGeneration) {
-        _isStartingListening = false;
-      }
-    }
   }
 
   Future<bool> _startDeepgramListening({bool force = false}) async {
@@ -1833,7 +1060,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       _log('🎤 [LISTEN-SKIP]', 'pipeline running');
       return false;
     }
-    if (_ttsQueueManager.isBusy) {
+    if (_ttsAdapter.isBusy) {
       _log('🎤 [LISTEN-SKIP]', 'tts busy');
       return false;
     }
@@ -1869,24 +1096,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       }
       _micPermissionReady = true;
       if (!mounted || listenGeneration != _listenGeneration) return false;
-      if (_hasEnabledRealtimeMicrophone) {
-        _log(
-            '[ANY-MIC]',
-            'ownership_conflict current=${_micOwner.name} '
-                'requested=${AnyoneMicOwner.deepgramFallback.name} '
-                'reason=realtime_not_released');
-        return false;
-      }
       _resetIdleTimer();
       _isConversationActive = true;
-      // Feature Flag OFF의 기존 첫 턴 경로에서만 WebSocket을 선점한다.
-      // Flag ON은 이미 연결된 공유 WebRTC 세션을 사용한다.
-      if (!RealtimeFeatureFlags.enabledFor('anyone') &&
-          !_isTranslateSessionUsable()) {
-        _startPrewarmedRealtimeVoice();
-      } else {
-        _cancelPrewarmedRealtimeVoice();
-      }
       if (mounted) {
         setState(() {
           _debugResult = "⏱️ 듣는 중...";
@@ -1913,17 +1124,42 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       bool isCurrentGeneration() =>
           mounted && listenGeneration == _listenGeneration;
 
+      // 🎙️ [PCM-TEE] 새 청취 구간 시작 — 재전사 버퍼를 비운다.
+      _resetTurnPcmBuffer();
+
+      final preparedCaptureFuture = _preparedCaptureFuture;
+      _preparedCaptureFuture = null;
+      final preparedCapture = await preparedCaptureFuture;
+      if (identical(_preparedCapture, preparedCapture)) {
+        _preparedCapture = null; // 이제 VoiceManager가 종료 책임을 가진다.
+      }
+      final prewarmedChannel = DeepgramPrewarmSession.instance.take(
+        apiKey: _deepgramKey,
+        languageCode: dgLangCode,
+        onLog: (message) => _log('🚀 [DG-PREWARM]', message),
+      );
+
       _voiceManager = DeepgramV2VoiceManager(
         apiKey: _deepgramKey,
         audioRecorder: _audioRecorder,
         langCode: dgLangCode,
+        preconnectedChannel: prewarmedChannel,
+        preparedCapture: preparedCapture,
         costTracker: _costTracker,
         onLog: _log, // 🔬 로그 훅 주입
+        onFirstPcmSent: (at) =>
+            _markFirstSpeech('FIRST_PCM_SENT_TO_STT', at: at),
+        onFirstPartial: (at) =>
+            _markFirstSpeech('STT_FIRST_PARTIAL_RECEIVED', at: at),
+        // Deepgram으로 나가는 PCM을 그대로 복사 — 병렬 전사/재전사 원본.
+        onAudioChunk: (bytes) {
+          if (isCurrentGeneration()) _appendTurnPcm(bytes);
+        },
         shouldReconnect: () =>
             isCurrentGeneration() &&
             _isConversationActive &&
             !_isPipelineRunning &&
-            !_ttsQueueManager.isBusy,
+            !_ttsAdapter.isBusy,
         onConnected: () {
           if (!isCurrentGeneration()) {
             _log('🎤 [LISTEN-STALE]', 'onConnected ignored');
@@ -1956,10 +1192,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           _log('🔀 [LISTEN-03]',
               'onTurnEnded 콜백 수신: len=${transcript.length} speechFinal=$speechFinal');
           _swDeepgram.stop();
-          // source(speechFinal)를 인자로 직접 전달 → 비동기 다음 이벤트에 상태값이 덮이는 위험 제거
+          // speechFinal을 인자로 직접 전달 → 비동기 다음 이벤트에 상태값이 덮이는 위험 제거
           _handleFinalUserTranscript(
             transcript: transcript,
-            source: AnyoneTranscriptSource.deepgramFallback,
             sourceTurnId: _deepgramSourceTurnId(transcript, listenGeneration),
             listenGeneration: listenGeneration,
             deepgramSpeechFinal: speechFinal,
@@ -1995,7 +1230,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         _voiceManager = null;
         return false;
       }
-      if (!_setMicOwner(AnyoneMicOwner.deepgramFallback,
+      if (!_setMicOwner(AnyoneMicOwner.deepgram,
           reason: 'deepgram_connected')) {
         await _voiceManager?.dispose();
         _voiceManager = null;
@@ -2028,8 +1263,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   void _stopMicAndProcess(
     String transcript, {
     bool speechFinal = false,
-    AnyoneTranscriptSource transcriptSource =
-        AnyoneTranscriptSource.deepgramFallback,
   }) async {
     _resetIdleTimer();
     final clean = transcript.trim();
@@ -2037,18 +1270,11 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     // 🚀 [FIRST-TURN] 아직 완료된 턴이 없으면(_turnCounter==0) 첫 유저 발화 →
     //   대기창을 짧게 잡아 파이프라인을 일찍 시작한다. 이후 턴은 기존 안전값.
     final bool isFirstUtterance = _turnCounter == 0;
-    // 🎙️ [SPEECH-FIRST] 확정 대기창은 Deepgram이 한 발화를 여러 final로 쪼개
-    //   보내던 이벤트 기반 경로를 위한 안전장치다. Realtime은 server VAD가 발화
-    //   하나당 final 하나를 주므로 이 대기창을 적용하지 않는다(즉시 확정).
-    final bool isRealtimeSource =
-        transcriptSource == AnyoneTranscriptSource.realtime;
-    final waitMs = isRealtimeSource
-        ? 0
-        : (isFirstUtterance
-            ? kFreeTalkFirstTurnCommitWaitMs
-            : (speechFinal
-                ? COMMIT_WAIT_SPEECH_FINAL_MS
-                : COMMIT_WAIT_UNCERTAIN_MS));
+    final waitMs = isFirstUtterance
+        ? kFreeTalkFirstTurnCommitWaitMs
+        : (speechFinal
+            ? COMMIT_WAIT_SPEECH_FINAL_MS
+            : COMMIT_WAIT_UNCERTAIN_MS);
     _log('🔀 [STOP-01]',
         '$source 수신: len=${clean.length} waitMs=$waitMs first=$isFirstUtterance');
 
@@ -2057,19 +1283,14 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       return;
     }
 
-    if (_pendingTranscript.isNotEmpty &&
-        _pendingTranscriptSource != transcriptSource) {
-      _log(
-        '[ANY-MIC]',
-        'ownership_conflict pendingSource=${_pendingTranscriptSource?.name} '
-            'incomingSource=${transcriptSource.name}',
-      );
-      return;
-    }
-    _pendingTranscriptSource ??= transcriptSource;
-
     // 🔧 기존 대기 중인 발화가 있으면 공백으로 연결 (더듬거림 합치기)
     final finalReceivedAt = DateTime.now();
+    // ⏱️ [PERF] 첫 final이 기준점. 합치기로 다시 들어오면 갱신하지 않는다
+    //   (한 발화의 전체 지연을 재야 하므로).
+    if (_pendingTranscript.isEmpty) {
+      _turnPerfAnchor = finalReceivedAt;
+      _log('⏱️ [PERF]', 'DG_FINAL anchor set');
+    }
     final isDuplicateFinal = isDuplicateFinalTranscript(
       _pendingTranscript,
       clean,
@@ -2106,15 +1327,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     // 기존 타이머 취소 (새 발화가 왔으므로 대기창 리셋)
     _commitTimer?.cancel();
 
-    // Feature Flag OFF의 첫 정상 턴만 기존 Realtime WebSocket을 선점한다.
-    // Flag ON은 1턴부터 공유 WebRTC 세션이 번역과 음성을 모두 맡는다.
-    if (_turnCounter == 0 &&
-        !RealtimeFeatureFlags.enabledFor('anyone') &&
-        !_isTranslateSessionUsable()) {
-      _startPrewarmedRealtimeVoice();
-    } else {
-      _cancelPrewarmedRealtimeVoice();
-    }
+    // 첫 턴은 gpt-4o-transcribe, 2턴부터는 Deepgram Nova-3 결과만 쓴다.
+    // 별도 OpenAI 재전사를 병렬로 발사하지 않는다.
 
     // 조건부 대기 후 파이프라인 시작 예약 (source별 waitMs)
     _commitTimer = Timer(
@@ -2127,16 +1341,12 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   void _commitAndProcess() async {
     final pipelineGeneration = _pipelineGeneration;
     final committed = _pendingTranscript.trim();
-    final transcriptSource =
-        _pendingTranscriptSource ?? AnyoneTranscriptSource.deepgramFallback;
     _pendingTranscript = '';
-    _pendingTranscriptSource = null;
     _lastPendingFinalAt = null;
     _commitTimer = null;
 
     if (committed.isEmpty) {
       _log('🔀 [COMMIT-00]', '빈 발화 → 마이크 재시작');
-      _cancelPrewarmedRealtimeVoice();
       if (_isConversationActive) {
         _restartConfiguredListening(
             expectedPipelineGeneration: pipelineGeneration);
@@ -2144,13 +1354,16 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       return;
     }
 
+    final bool isFirstTurn = _turnCounter == 0;
+
     _log('🔀 [COMMIT-01]', '확정: len=${committed.length} → 파이프라인 시작');
+    _logTurnPerf('COMMIT');
     // 🎧 [STT-RAW] 전사 원문. 이게 없으면 오역이 났을 때 "잘못 들은 것"인지
     //   "제대로 듣고 번역이 튄 것"인지 가릴 수가 없다. 화면 한국어 자막은
     //   영어 번역문을 되돌린 것이라 원문 대조에 쓸 수 없다.
     //   유저 발화 내용이므로 디버그 빌드에서만 남긴다.
-    if (kDebugMode) {
-      _log('🎧 [STT-RAW]', 'source=${transcriptSource.name} text="$committed"');
+    if (kDebugMode && !isFirstTurn) {
+      _log('🎧 [STT-RAW]', 'source=nova3 text="$committed"');
     }
 
     // 🚀 [SPEC-FIRST-TURN] 투기적 번역이 이 확정 텍스트와 일치하면 그 스트림을 그대로
@@ -2164,24 +1377,59 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       _cancelSpeculativeTranslation();
     }
 
-    // 마이크/VoiceManager 정리
-    await _voiceManager?.dispose();
+    // 마이크/VoiceManager 정리.
+    // ⏱️ dispose 완료를 기다리면 그만큼 번역 시작이 밀린다. 소유권만 즉시
+    //   넘기고 실제 정리(WebSocket close, 녹음 중지)는 백그라운드로 보낸다.
+    //   참조를 먼저 끊으므로 이후 콜백은 세대 가드에서 걸러진다.
+    final closingVoiceManager = _voiceManager;
     _voiceManager = null;
     _setMicOwner(AnyoneMicOwner.none, reason: 'transcript_committed');
-    _log('🔀 [COMMIT-02]', 'VoiceManager dispose 완료');
-
-    if (transcriptSource == AnyoneTranscriptSource.deepgramFallback) {
-      _runMeaningProbe(committed);
-    } else {
-      _activeSttConfidence = null;
-      _pendingDeepgramResults.clear();
-      _activeProbeDgFinalAt = null;
+    if (closingVoiceManager != null) {
+      unawaited(closingVoiceManager.dispose());
     }
+    _log('🔀 [COMMIT-02]', 'VoiceManager 정리 백그라운드 위임');
+
+    // ── 전사 선택 ───────────────────────────────────────────────────
+    //   · 첫 턴   → gpt-4o-transcribe
+    //   · 2턴부터 → Deepgram Nova-3
+    String effectiveTranscript = committed;
+    if (isFirstTurn) {
+      final firstTurnTranscript = (await _transcribeFirstTurn())?.trim();
+      if (firstTurnTranscript == null || firstTurnTranscript.isEmpty) {
+        _log('❌ [FIRST-TURN-STT]',
+            'gpt-4o-transcribe 실패 → Deepgram 텍스트 미사용, 재청취');
+        if (mounted) {
+          setState(() => _localMessages
+              .removeWhere((message) => message['role'] == 'HOST_TEMP'));
+        }
+        await _speakRetryAndListen();
+        return;
+      }
+      effectiveTranscript = firstTurnTranscript;
+      if (kDebugMode) {
+        _log('🎧 [STT-RAW]',
+            'source=gpt-4o-transcribe text="$firstTurnTranscript"');
+      }
+      _log('🎧 [FIRST-TURN-STT]',
+          'selected=gpt-4o-transcribe deepgram_text_discarded=true');
+    } else {
+      _log('🎧 [STT-ROUTE]', 'selected=nova3 turn=$_turnCounter');
+    }
+    _runMeaningProbe(effectiveTranscript);
+    if (pipelineGeneration != _pipelineGeneration || !mounted) return;
+
+    // 모든 유저 턴 번역은 gpt-4o-mini 한 모델로 고정한다.
+    const translationModel = kFreeTalkTranslateModelFast;
+    _log('🧠 [TRANSLATE-ROUTE]',
+        'model=$translationModel firstTurn=$isFirstTurn fixed=true');
+    _logTurnPerf('TRANSCRIPT_SELECTED');
+
     _log('🔀 [COMMIT-03]', '_processRelayPipeline 호출');
     _processRelayPipeline(
-      committed,
+      effectiveTranscript,
       userStreamOverride: userOverride,
       expectedPipelineGeneration: pipelineGeneration,
+      translationModel: translationModel,
     );
   }
 
@@ -2245,51 +1493,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     if (c != null && !c.isClosed) c.close();
   }
 
-  // ====================================================================
-  // 🔥 [RT-PREWARM] 첫 발화 확정 대기창 동안 Realtime 소켓만 미리 열어 둔다.
-  // ------------------------------------------------------------------
-  // TLS 핸드셰이크를 크리티컬 패스 밖으로 밀어내는 것이 전부다. 발화 내용/
-  // 시스템 프롬프트는 확정 시점(begin)까지 보내지 않으므로, 발화가 합쳐지거나
-  // 증발해서 이 소켓을 버려도 토큰 비용은 0원이다.
-  // GPT-4.1 문맥 판정 선시작과 서로 await하지 않는 독립 작업이다.
-  // ====================================================================
   String get _currentUserVoice =>
       FFAppState().aiVoice.isNotEmpty ? FFAppState().aiVoice : 'marin';
-
-  void _startPrewarmedRealtimeVoice() {
-    if (_openAiKey.isEmpty) return;
-    final existing = _prewarmedRealtimeVoice;
-    // 발화가 합쳐져 이 함수가 다시 불려도 이미 연 소켓을 그대로 재사용한다.
-    if (existing != null && existing.voice == _currentUserVoice) return;
-    existing?.cancel();
-    final session = FirstTurnRealtimeVoice(
-      apiKey: _openAiKey,
-      voice: _currentUserVoice,
-      onLog: _log,
-      enableStreamingPlayback: true,
-      onStreamingAudioStart: () => _logProbeTiming('USER_FIRST_AUDIO'),
-    );
-    _prewarmedRealtimeVoice = session;
-    _log('🔥 [RT-PREWARM]', '대기창 소켓 선점 시작');
-    unawaited(session.prewarm());
-  }
-
-  /// 확정 시점에 선점 소켓의 소유권을 파이프라인으로 넘긴다.
-  FirstTurnRealtimeVoice? _takePrewarmedRealtimeVoice(String voice) {
-    final session = _prewarmedRealtimeVoice;
-    _prewarmedRealtimeVoice = null;
-    if (session == null) return null;
-    if (session.voice != voice) {
-      session.cancel();
-      return null;
-    }
-    return session;
-  }
-
-  void _cancelPrewarmedRealtimeVoice() {
-    _prewarmedRealtimeVoice?.cancel();
-    _prewarmedRealtimeVoice = null;
-  }
 
 // ====================================================================
 // 📦 [Box 5-A: 중앙 통제실 - 루틴 정석 "시간벌기 마술" 패턴]
@@ -2320,27 +1525,34 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     }
   }
 
+  /// 🔊 안내/시스템 문구 1건을 어댑터로 재생하고 끝날 때까지 기다린다.
+  ///   모델·보이스 매핑은 어댑터가 정한다 — 여기서 모델명을 쓰지 않는다.
+  Future<void> _speakSystemLine(String text,
+      {Duration timeout = const Duration(seconds: 15)}) async {
+    if (!mounted || text.trim().isEmpty) return;
+    _costTracker.recordTtsRequest(text.length);
+    final utterance = _ttsAdapter.speak(TtsRequest(
+      text: text,
+      voiceId: 'nova',
+      speakerType: TtsSpeakerType.system,
+      turnId: 'sys-${DateTime.now().microsecondsSinceEpoch}',
+      generationId: _pipelineGeneration,
+      playbackCategory: 'system',
+    ));
+    try {
+      await utterance.done.timeout(timeout);
+    } on TimeoutException {
+      utterance.cancel();
+    }
+  }
+
   Future<void> _playRetryPromptOnly() async {
     if (!mounted || !_isConversationActive) return;
     final lang = FFAppState().targetLang.isNotEmpty
         ? FFAppState().targetLang
         : 'English';
-    _ttsQueueManager.stop();
-    _ttsQueueManager.setUserTurn(false);
-    _ttsQueueManager.setAiPaused(false);
-    final fetcher = ChunkedTtsFetcher(
-      _openAiKey,
-      _ttsQueueManager,
-      "nova",
-      isUser: false,
-      onLog: _log,
-      costTracker: _costTracker,
-    );
-    fetcher.addText(_retryPhrase(lang));
-    while (
-        (fetcher.pendingRequests > 0 || _ttsQueueManager.isBusy) && mounted) {
-      await Future.delayed(const Duration(milliseconds: 100));
-    }
+    _ttsAdapter.stopAll(reason: 'retry_prompt');
+    await _speakSystemLine(_retryPhrase(lang));
   }
 
   Future<void> _speakRetryAndListen() async {
@@ -2354,10 +1566,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       {bool isCorrectionRetry = false,
       bool understandingConfirmed = false,
       Stream<String>? userStreamOverride,
-      // 🎙️ [SPEECH-FIRST/A안] 전사를 기다리지 않고 시작한 턴. finalTranscript가
-      //   비어 있으므로 전사에 의존하는 사전 검열(고스트/첫발화 판정)을 건너뛴다.
-      //   잡음 차단은 빈 전사 도착 시 턴 취소(_cancelSpeechFirstTurn)가 맡는다.
-      bool speechFirst = false,
+      // 🧠 [TRANSLATE-ROUTE] _commitAndProcess가 guide4 6장 우선순위로 정한
+      //   번역 모델. 이 턴은 이 모델 하나만 호출한다.
+      String translationModel = kFreeTalkTranslateModelFast,
       int? expectedPipelineGeneration}) async {
     final pipelineGeneration =
         expectedPipelineGeneration ?? _pipelineGeneration;
@@ -2370,7 +1581,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       return;
     }
     final pendingHeard = _pendingHeardConfirmation;
-    if (pendingHeard != null && !speechFirst) {
+    if (pendingHeard != null) {
       final reply = finalTranscript
           .trim()
           .toLowerCase()
@@ -2402,6 +1613,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           pendingHeard,
           isCorrectionRetry: isCorrectionRetry,
           understandingConfirmed: true,
+          translationModel: translationModel,
           expectedPipelineGeneration: pipelineGeneration,
         );
       }
@@ -2416,12 +1628,11 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     }
     _logProbeTiming('PIPELINE_START');
     _resetIdleTimer();
-    final ignoreWithoutConsumingFirstTurn = speechFirst
-        ? false
-        : _firstUtteranceJudge.shouldIgnoreWithoutConsumingFirstTurn(
-            finalTranscript,
-            sttConfidence: _activeSttConfidence,
-          );
+    final ignoreWithoutConsumingFirstTurn =
+        _firstUtteranceJudge.shouldIgnoreWithoutConsumingFirstTurn(
+      finalTranscript,
+      sttConfidence: _activeSttConfidence,
+    );
     _turnCounter++;
     final int currentTurnId = _turnCounter;
     bool skipFinallyRestart = false;
@@ -2431,15 +1642,13 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     // ─────────────────────────────────────────────────────
     // STEP 1: 증발 검열 (UI 풍선 찍기 전)
     // ─────────────────────────────────────────────────────
-    // [GHOST-EXACT] 통째로 추임새/고스트워드일 때만 증발시킨다. 부분 일치로
-    //   판정하면 그 단어를 품은 정상 문장까지 사라진다. 판정 기준은
-    //   _isNoiseTranscript 하나로 모은다 — 여기 목록을 따로 두었더니 "음."이
-    //   빠져나가 "Um."으로 번역됐다.
-    bool isGhost = !speechFirst &&
-        (ignoreWithoutConsumingFirstTurn || _isNoiseTranscript(finalTranscript));
+    // [GHOST-EXACT] 통째로 추임새/고스트워드일 때만 증발시킨다. 판정 기준은
+    //   _isNoiseTranscript 하나로 모은다 — 목록을 따로 두면 "음."이 빠져나가
+    //   "Um."으로 번역된다(실기기에서 발생).
+    bool isGhost =
+        ignoreWithoutConsumingFirstTurn || _isNoiseTranscript(finalTranscript);
 
     if (isGhost) {
-      _cancelPrewarmedRealtimeVoice();
       if (_turnCounter == currentTurnId && _turnCounter > 0) _turnCounter--;
       if (mounted)
         setState(
@@ -2456,17 +1665,13 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       return;
     }
 
-    // 🧭 [FIRST-CONTEXT] 첫 정상 발화 슬롯만 로컬로 소비한다. GPT-4.1 문맥 판정은
-    //   쓰지 않는다 — Realtime 경로는 전사 확정 대기창이 0ms라 판정 결과가 도착할
-    //   시간이 없어 매번 폐기됐다(요청 비용만 발생). 되살리려면 대기창부터 만들 것.
-    if (!speechFirst) {
-      _firstUtteranceJudge.consumeFirstNormalUtterance(
-        finalTranscript,
-        sttConfidence: _activeSttConfidence,
-        onLog: (event, details) =>
-            _log('🧭 [FIRST-CONTEXT]', 'event=$event $details'),
-      );
-    }
+    // 🧭 [FIRST-CONTEXT] 첫 정상 발화 슬롯만 로컬로 소비한다.
+    _firstUtteranceJudge.consumeFirstNormalUtterance(
+      finalTranscript,
+      sttConfidence: _activeSttConfidence,
+      onLog: (event, details) =>
+          _log('🧭 [FIRST-CONTEXT]', 'event=$event $details'),
+    );
 
     // [CLARIFY-EVAPORATE] 직전 SYSTEM 버블이 되묻기 질문(clarify:true)이면
     // 유저의 실제 발화이므로 다음 컨텍스트 구성 전에 제거한다.
@@ -2478,65 +1683,18 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       }
     }
 
-    final bool realtimeFeatureEnabled =
-        RealtimeFeatureFlags.enabledFor('anyone');
-    final bool realtimeEnabled =
-        realtimeFeatureEnabled && !_useDeepgramFallbackForSession;
-    final pendingTranslateAdapter = _translateAdapter;
-    if (realtimeEnabled &&
-        !_isTranslateSessionUsable(pendingTranslateAdapter) &&
-        pendingTranslateAdapter != null) {
-      await _waitForTranslateSessionUsable(pendingTranslateAdapter);
-      if (!isActivePipelineGeneration(
-            expected: pipelineGeneration,
-            current: _pipelineGeneration,
-            mounted: mounted,
-            conversationActive: _isConversationActive,
-          ) ||
-          _turnCounter != currentTurnId) {
-        return;
-      }
-    }
-
-    if (realtimeEnabled &&
-        currentTurnId >= 2 &&
-        !_isTranslateSessionUsable() &&
-        !_translateReconnectTried) {
-      await _ensureTranslateSession(reconnect: true);
-      if (!isActivePipelineGeneration(
-            expected: pipelineGeneration,
-            current: _pipelineGeneration,
-            mounted: mounted,
-            conversationActive: _isConversationActive,
-          ) ||
-          _turnCounter != currentTurnId) {
-        return;
-      }
-    }
-
-    // 🔀 [HYBRID] 1턴부터 모든 턴이 동일하게 Realtime 번역 + 음성을 사용한다.
-    final bool usingSecureRealtime =
-        realtimeEnabled && _isTranslateSessionUsable();
-    final bool usingFirstTurnRealtime =
-        !realtimeFeatureEnabled && currentTurnId == 1;
-    final String turnPath = usingSecureRealtime
-        ? 'anyone_secure_realtime'
-        : usingFirstTurnRealtime
-            ? 'anyone_legacy_first_turn'
-            : 'anyone_legacy_fallback';
-    if (realtimeEnabled && currentTurnId >= 1 && !usingSecureRealtime) {
-      _log('[RT-FALLBACK]',
-          'mode=anyone turnId=$currentTurnId reason=session_not_usable');
-    }
-    _log('[RT-PATH]', '$turnPath turnId=$currentTurnId');
-    if (usingSecureRealtime) {
-      _cancelPrewarmedRealtimeVoice();
-    }
+    _log('[PIPE-PATH]',
+        'anyone_nova3 turnId=$currentTurnId translateModel=$translationModel');
 
     _isPipelineRunning = true;
+    TtsUtterance? userUtterance;
+    TtsUtterance? aiUtterance;
+    TtsPrefetch? aiTtsPrefetch;
     try {
       // ─────────────────────────────────────────────────────
-      // STEP 2: HOST 풍선 생성 + 유저 번역 스트리밍
+      // STEP 2: HOST 풍선 + 유저 번역 스트리밍
+      //   제어 태그 검사가 끝난 "최종 문장"만 TTS 어댑터로 보낸다 (guide4 3.4).
+      //   텍스트 먼저 → 검사 → TTS 구조라 [CLARIFY] 등 태그가 음성으로 새지 않는다.
       // ─────────────────────────────────────────────────────
       if (mounted) {
         setState(() {
@@ -2570,112 +1728,25 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
             .join("\n");
       }
 
-      // 🧩 [A] 클론 응답용 구조화 히스토리(오프너 포함, 역할별 교대 턴).
-      //   소스는 화면 메시지(_localMessages): HOST→user, SYSTEM(클론 발화)→assistant.
-      //   빈 target / '...' / HOST_TEMP 는 제외. 현재 입력(빈 HOST 버블)은 자동 제외되고,
-      List<Map<String, dynamic>> cloneHistory = _localMessages
-          .where((m) {
-            final role = (m['role'] ?? '').toString();
-            if (role != 'HOST' && role != 'SYSTEM') return false;
-            final t = (m['target'] ?? '').toString().trim();
-            return t.isNotEmpty && t != '...';
-          })
-          .map<Map<String, dynamic>>((m) => <String, dynamic>{
-                'role': (m['role'] == 'HOST') ? 'user' : 'assistant',
-                'content': (m['target'] ?? '').toString().trim(),
-              })
-          .toList();
-      // 화면 메시지가 비어 있으면(예: 세션 복원 직후) 장기기억으로 폴백
-      if (cloneHistory.isEmpty && _recentHistory.isNotEmpty) {
-        cloneHistory = _recentHistory
-            .map<Map<String, dynamic>>((m) => <String, dynamic>{
-                  'role': (m['role'] == 'assistant') ? 'assistant' : 'user',
-                  'content': (m['content'] ?? '').toString().trim(),
-                })
-            .where((m) => (m['content'] as String).isNotEmpty)
-            .toList();
-      }
-
       String userTargetText = "";
       // 🆕 유저 목소리 = 로비에서 고른 값(FFAppState().aiVoice). AI는 nova 고정.
-      final String userVoice =
-          FFAppState().aiVoice.isNotEmpty ? FFAppState().aiVoice : 'marin';
-      ChunkedTtsFetcher userTtsFetcher = ChunkedTtsFetcher(
-        _openAiKey,
-        _ttsQueueManager,
-        userVoice,
-        onLog: _log,
-        costTracker: _costTracker,
-      );
-      final HybridTtsPlayer userHybridTts = HybridTtsPlayer(
-        _openAiKey,
-        _ttsQueueManager,
-        userTtsFetcher,
-        userVoice,
-        onLog: _log,
-        // 🚀 [FIRST-TURN] 첫 TTS는 자연스러운 구/구두점 단위(기본 4단어 또는 첫 콤마)로
-        //   발사한다. 2단어 조기발사는 재생이 툭툭 끊겨 되돌림. 속도는 투기적 선시작이 담당.
-      );
-      _ttsQueueManager.setUserTurn(true);
-      _ttsQueueManager.setAiPaused(false); // 유저 청크는 즉시 재생
+      final String userVoice = _currentUserVoice;
 
       // 🌐 [v3.1] 로비에서 유저가 선택한 타겟 언어로 번역
       final String targetLangName = FFAppState().targetLang.isNotEmpty
           ? FFAppState().targetLang
           : 'English';
 
-      // Feature Flag OFF 첫 턴만 기존 Realtime WebSocket 경로를 유지한다.
-      // Flag ON 첫 턴과 2턴+에서는 공유 WebRTC 세션만 사용한다.
-      final FirstTurnRealtimeVoice? realtimeVoice = usingFirstTurnRealtime
-          ? _takePrewarmedRealtimeVoice(userVoice) ??
-              FirstTurnRealtimeVoice(
-                apiKey: _openAiKey,
-                voice: userVoice,
-                onLog: _log,
-                enableStreamingPlayback: true,
-                onStreamingAudioStart: () =>
-                    _logProbeTiming('USER_FIRST_AUDIO'),
-              )
-          : null;
-      RealtimeTranslationTurn? secureTurn;
-      bool secureTurnCompleted = false;
-      bool secureFallbackLogged = false;
-
-      // 🚀 [SPEC-FIRST-TURN] 투기 번역이 넘어오면 그 버퍼 스트림을 그대로 소비한다
-      //   (선반영). 없으면 지금 새로 요청. 소비 방식은 완전히 동일.
-      final userStream = FreeTalkBrain.streamUserTranslation(
-        apiKey: _openAiKey,
-        textOriginal: finalTranscript,
-        targetLang: targetLangName,
-        contextStr: contextStr,
-        disableCorrection: isCorrectionRetry,
-        disableHeardConfirmation: understandingConfirmed,
-        realtimeVoice: realtimeVoice,
-        secureAdapter: usingSecureRealtime ? _translateAdapter : null,
-        // 🎙️ [SPEECH-FIRST] 발화 종료 즉시 발사해 둔 턴이 이 발화의 것이면 인계.
-        preStartedTurn: usingSecureRealtime ? _takeSpeechFirstTurn() : null,
-        resolveTextOriginal: speechFirst ? _awaitSpeechFirstTranscript : null,
-        secureTurnId: currentTurnId.toString(),
-        secureVoice: userVoice,
-        onSecureTurn: (turn) => secureTurn = turn,
-        onSecureSuccess: () => secureTurnCompleted = true,
-        onSecureFallback: (reason) {
-          if (secureFallbackLogged) return;
-          secureFallbackLogged = true;
-          _log('[RT-FALLBACK]',
-              'mode=anyone turnId=$currentTurnId reason=$reason');
-          _log('[RT-PATH]', 'anyone_legacy_fallback turnId=$currentTurnId');
-        },
-        shouldContinue: () =>
-            _isPipelineRunning &&
-            _turnCounter == currentTurnId &&
-            isActivePipelineGeneration(
-              expected: pipelineGeneration,
-              current: _pipelineGeneration,
-              mounted: mounted,
-              conversationActive: _isConversationActive,
-            ),
-      );
+      final userStream = userStreamOverride ??
+          FreeTalkBrain.streamUserTranslation(
+            apiKey: _openAiKey,
+            textOriginal: finalTranscript,
+            targetLang: targetLangName,
+            contextStr: contextStr,
+            model: translationModel,
+            disableCorrection: isCorrectionRetry,
+            disableHeardConfirmation: understandingConfirmed,
+          );
 
       bool evaporated = false;
       bool corrected = false; // 유저가 AI의 오해를 정정 → 직전 교환 삭제 후 재처리
@@ -2683,8 +1754,18 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       bool dissatisfiedReply = false; // AI 직전 응답 불만 → 응답만 재생성
       bool clarified = false; // 주어/목적어 모호 → AI 되묻기
       bool heardConfirmation = false; // 특정 단어 오청취 가능성 → 확인 후 보류 턴 재개
-      bool userHybridInputStarted = false;
-      bool secureControlTagLogged = false;
+
+      // 🚀 [EARLY-FIRE] 번역 스트림 도중 첫 문장이 확정되면 그 자리에서 TTS를
+      //   발사한다. gpt-4o-mini-tts의 TTFB(실측 1.6초)를 남은 번역 시간과
+      //   겹쳐 없애는 것이 목적이다 (실측 2026-07-30 7차: 번역 1.57초).
+      //
+      //   태그 누출 방지: 이 프롬프트의 제어 태그와 확인 질문은 **항상 응답
+      //   맨 앞**에 온다. 그래서 선두가 '['도 아니고 확인 질문 접두도 아닌
+      //   것이 확인되면, 그 응답에는 태그가 없다고 단정할 수 있다.
+      //   그 조건이 성립한 뒤에만 발사한다.
+      String earlyFiredText = '';
+      TtsUtterance? earlyUtterance;
+      bool earlyFireBlocked = false;
       await for (String chunk in userStream) {
         if (!_isPipelineRunning ||
             _turnCounter != currentTurnId ||
@@ -2694,24 +1775,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
               mounted: mounted,
               conversationActive: _isConversationActive,
             )) {
-          realtimeVoice?.cancel();
-          _translateAdapter?.cancelActiveTurn();
           return;
         }
         userTargetText += chunk;
-
-        if (userTargetText.contains('[REALTIME_UNAVAILABLE]')) {
-          _log('⚠️ [RT-ONLY]', 'Realtime unavailable → 턴 폐기 후 재청취');
-          break;
-        }
-
-        if (secureTurnCompleted &&
-            !secureControlTagLogged &&
-            userTargetText.contains('[')) {
-          secureControlTagLogged = true;
-          _log('[RT-CONTROL]',
-              'mode=anyone turnId=$currentTurnId audio_may_have_played=true');
-        }
 
         // 🔧 [v3.3] 누적된 전체 텍스트에서 EVAPORATE 감지 (스트림 조각 분할 대응)
         if (userTargetText.contains("[EVAPORATE]")) {
@@ -2751,47 +1817,55 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         if (mounted && !clarified && !heardConfirmation)
           setState(() => _localMessages[hostIndex]['target'] = userTargetText);
 
-        // 정상 번역은 스트림 도중 4단어/구두점이 모이는 즉시 첫 TTS를 요청한다.
-        // 제어 태그가 조각나 도착하는 동안에는 잘못된 안내가 재생되지 않도록 보류한다.
-        // 🎙️ [REALTIME-ONLY] Realtime이 살아 있으면 낭독 음성은 이미 같은
-        //   응답에 실려 오므로 tts-1 청크 발사를 하지 않는다.
-        final bool containsControlTag = userTargetText.contains('[');
-        if (!clarified &&
-            !containsControlTag &&
-            !usingSecureRealtime &&
-            realtimeVoice?.active != true) {
-          userHybridTts.onChunk(chunk);
-          userHybridInputStarted = true;
+        // 🚀 [EARLY-FIRE] 첫 조각 발사 판단
+        if (earlyFiredText.isEmpty && !earlyFireBlocked) {
+          final head = userTargetText.trimLeft();
+          if (head.startsWith('[') || '제가 잘못 들었나요?'.startsWith(head)) {
+            // 태그거나 확인 질문일 수 있다 → 아직 단정할 수 없으므로 보류.
+            // (접두가 길어져 확인 질문이 아님이 드러나면 다음 청크에서 통과)
+          } else if (head.contains('[')) {
+            earlyFireBlocked = true;
+            _log('🚀 [EARLY-FIRE]', 'blocked reason=control_tag_present');
+          } else if (head.length >= 12) {
+            // 태그 없음이 확정됐다. 첫 문장 경계를 찾는다.
+            final match = RegExp(r'[.!?,;:]\s').firstMatch(head);
+            final int cut = match?.end ?? -1;
+            final String segment = cut > 0 ? head.substring(0, cut).trim() : '';
+            // 남은 번역이 있을 때만 쪼갠다 — 문장이 하나로 끝나면 통짜가 낫다.
+            if (segment.length >= 12) {
+              earlyFiredText = segment;
+              _logTurnPerf('EARLY_FIRE');
+              _costTracker.recordTtsRequest(segment.length);
+              earlyUtterance = _ttsAdapter.speak(TtsRequest(
+                text: segment,
+                voiceId: userVoice,
+                speakerType: TtsSpeakerType.user,
+                turnId: 'user-$currentTurnId',
+                generationId: pipelineGeneration,
+                saveToHistory: true,
+                historyVoiceKey: 'nova',
+                expectsMoreSegments: true,
+              ));
+              _log('🚀 [EARLY-FIRE]',
+                  'fired len=${segment.length} text="$segment"');
+            }
+          }
         }
       }
 
-      if (userTargetText.contains('[REALTIME_UNAVAILABLE]')) {
-        realtimeVoice?.cancel();
-        _translateAdapter?.cancelActiveTurn();
-        if (mounted) {
-          setState(() => _localMessages.removeWhere(
-              (m) => m['role'] == 'HOST' || m['role'] == 'HOST_TEMP'));
-        }
-        skipFinallyRestart = true;
-        _isPipelineRunning = false;
-        if (_isConversationActive) {
-          _restartConfiguredListening(
-              expectedPipelineGeneration: pipelineGeneration);
-        }
-        return;
-      }
-
-      // 이미 선발사된 뒤 제어 태그가 도착한 경우 진행 중 요청과 재생을 모두 폐기한다.
-      if (evaporated ||
-          corrected ||
-          misheard ||
-          dissatisfiedReply ||
-          clarified ||
-          heardConfirmation) {
-        realtimeVoice?.cancel();
-        _translateAdapter?.cancelActiveTurn();
-        userTtsFetcher.cancel();
-        _ttsQueueManager.stop();
+      // 🚀 [EARLY-FIRE] 제어 태그 경로는 위 발사 조건상 도달하지 않아야 하지만,
+      //   모델이 태그를 문장 뒤에 붙이는 예외가 생기면 이미 나간 소리를 끊는다.
+      if (earlyFiredText.isNotEmpty &&
+          (evaporated ||
+              corrected ||
+              misheard ||
+              dissatisfiedReply ||
+              clarified ||
+              heardConfirmation)) {
+        _log('🚀 [EARLY-FIRE]', 'control_tag_after_fire → 재생 취소');
+        earlyUtterance?.cancel();
+        _ttsAdapter.stopAll(reason: 'early_fire_control_tag');
+        earlyFiredText = '';
       }
 
       if (evaporated) {
@@ -2801,15 +1875,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         if (_isConversationActive && _turnCounter == currentTurnId) {
           skipFinallyRestart = true;
           _isPipelineRunning = false;
-          if (_speechFirstNoiseAbort) {
-            // 🎙️ [SPEECH-FIRST] 잡음/추임새였다 → 안내 음성 없이 조용히 재청취.
-            _speechFirstNoiseAbort = false;
-            _log('[RT-SPEECH-FIRST]', 'noise_turn_dropped → 조용히 재청취');
-            _restartConfiguredListening(
-                expectedPipelineGeneration: pipelineGeneration);
-          } else {
-            await _speakRetryAndListen();
-          }
+          await _speakRetryAndListen();
         }
         return;
       }
@@ -2832,15 +1898,15 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           _recentHistory.removeRange(
               _recentHistory.length - 2, _recentHistory.length);
         }
-        _ttsQueueManager.stop();
-        _ttsQueueManager.setUserTurn(false);
-        // 정정된 발화로 재처리 (재진입이므로 [CORRECTION] 재감지 안 함)
+        _ttsAdapter.stopAll(reason: 'correction');
+        // 정정된 발화로 재처리 — guide4 5장: 정밀 모델만 한 번 호출한다.
         skipFinallyRestart = true;
         _isPipelineRunning = false;
         unawaited(
           _processRelayPipeline(
             finalTranscript,
             isCorrectionRetry: true,
+            translationModel: kFreeTalkTranslateModelFast,
             expectedPipelineGeneration: pipelineGeneration,
           ),
         );
@@ -2865,24 +1931,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           _recentHistory.removeRange(
               _recentHistory.length - 2, _recentHistory.length);
         }
-        _ttsQueueManager.stop();
-        _ttsQueueManager.setUserTurn(false);
-        _ttsQueueManager.setAiPaused(false);
-        final misheardTts = ChunkedTtsFetcher(
-          _openAiKey,
-          _ttsQueueManager,
-          'nova',
-          isUser: false,
-          onLog: _log,
-          costTracker: _costTracker,
-        );
-        misheardTts.addText("아 제가 잘못 들었어요. 다시 한 번 말해주세요.");
-        int misheardTicks = 0;
-        while ((misheardTts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
-            mounted) {
-          await Future.delayed(const Duration(milliseconds: 50));
-          if (++misheardTicks > 200) break;
-        }
+        _ttsAdapter.stopAll(reason: 'misheard');
+        await _speakSystemLine("아 제가 잘못 들었어요. 다시 한 번 말해주세요.");
         skipFinallyRestart = true;
         _isPipelineRunning = false;
         if (mounted && _isConversationActive) {
@@ -2921,7 +1971,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           if (_localMessages.isNotEmpty) _scrollToBottom();
         }
         if (lastUserTarget.trim().isEmpty) {
-          _ttsQueueManager.stop();
+          _ttsAdapter.stopAll(reason: 'dissatisfied_no_source');
           skipFinallyRestart = true;
           _isPipelineRunning = false;
           await _speakRetryAndListen();
@@ -2931,18 +1981,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
             _recentHistory.last['role'] == 'assistant') {
           _recentHistory.removeLast();
         }
-        _ttsQueueManager.stop();
-        _ttsQueueManager.setUserTurn(false);
-        _ttsQueueManager.setAiPaused(false);
-        final regenPhraseTts = ChunkedTtsFetcher(
-          _openAiKey,
-          _ttsQueueManager,
-          'nova',
-          isUser: false,
-          onLog: _log,
-          costTracker: _costTracker,
-        );
-        regenPhraseTts.addText("그럼 다시 답해 볼게요.");
+        _ttsAdapter.stopAll(reason: 'dissatisfied');
+        await _speakSystemLine("그럼 다시 답해 볼게요.");
         var regenMsgs = _localMessages.where((m) {
           if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
           final target = (m['target'] ?? '').toString().trim();
@@ -2960,14 +2000,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           _scrollToBottom();
         }
         final int regenAiIndex = _localMessages.length - 1;
-        final regenTts = ChunkedTtsFetcher(
-          _openAiKey,
-          _ttsQueueManager,
-          'nova',
-          isUser: false,
-          onLog: _log,
-          costTracker: _costTracker,
-        );
         String regenText = "";
         final regenStream = FreeTalkBrain.streamFreeTalkResponse(
           apiKey: _openAiKey,
@@ -2993,7 +2025,17 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           await _speakRetryAndListen();
           return;
         }
-        regenTts.addText(regenClean);
+        _costTracker.recordTtsRequest(regenClean.length);
+        final regenUtterance = _ttsAdapter.speak(TtsRequest(
+          text: regenClean,
+          voiceId: TtsAdapterConfig.aiVoice,
+          speakerType: TtsSpeakerType.ai,
+          turnId:
+              'regen-$currentTurnId-${DateTime.now().millisecondsSinceEpoch}',
+          generationId: pipelineGeneration,
+          saveToHistory: true,
+          historyVoiceKey: 'nova',
+        ));
         FreeTalkBrain.generateCleanOriginal(
                 apiKey: _openAiKey, englishText: regenText)
             .then((cleanKorean) {
@@ -3004,13 +2046,11 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         });
         _recentHistory.add({'role': 'assistant', 'content': regenText});
         while (_recentHistory.length > 4) _recentHistory.removeAt(0);
-        int regenTicks = 0;
-        while ((regenPhraseTts.pendingRequests > 0 ||
-                regenTts.pendingRequests > 0 ||
-                _ttsQueueManager.isBusy) &&
-            mounted) {
-          await Future.delayed(const Duration(milliseconds: 50));
-          if (++regenTicks > 400) break;
+        try {
+          await regenUtterance.done.timeout(
+              const Duration(milliseconds: kFreeTalkAiTtsWaitTimeoutMs));
+        } on TimeoutException {
+          regenUtterance.cancel();
         }
         skipFinallyRestart = true;
         _isPipelineRunning = false;
@@ -3022,7 +2062,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       }
 
       // ❓ [CLARIFY] 유저 발화 주어/목적어 모호 → AI 되묻기 버블 + TTS + STT 재시작
-      //   이 교환은 아직 저장되지 않았으므로 현재 HOST 버블만 제거하면 된다.
+      //   텍스트 확정 후에만 TTS를 부르므로 태그가 소리로 새지 않는다.
       if (clarified) {
         _turnCounter--;
         final clarifyText =
@@ -3043,24 +2083,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           });
           _scrollToBottom();
         }
-        _ttsQueueManager.stop();
-        _ttsQueueManager.setUserTurn(false);
-        _ttsQueueManager.setAiPaused(false);
-        final clarifyTts = ChunkedTtsFetcher(
-          _openAiKey,
-          _ttsQueueManager,
-          'nova',
-          isUser: false,
-          onLog: _log,
-          costTracker: _costTracker,
-        );
-        clarifyTts.addText(clarifyText);
-        int clarifyTicks = 0;
-        while ((clarifyTts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
-            mounted) {
-          await Future.delayed(const Duration(milliseconds: 50));
-          if (++clarifyTicks > 200) break;
-        }
+        _ttsAdapter.stopAll(reason: 'clarify');
+        await _speakSystemLine(clarifyText);
         skipFinallyRestart = true;
         _isPipelineRunning = false;
         if (mounted && _isConversationActive) {
@@ -3072,9 +2096,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
       if (heardConfirmation) {
         _turnCounter--;
-        String source = finalTranscript.trim();
-        if (source.isEmpty)
-          source = (await _awaitSpeechFirstTranscript()).trim();
+        final String source = finalTranscript.trim();
         final spokenPrompt = userTargetText.trimLeft().startsWith('제가 잘못 들었나요?')
             ? userTargetText.trim().replaceAll(RegExp(r'[\r\n]+'), ' ')
             : '';
@@ -3114,22 +2136,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           });
           _scrollToBottom();
         }
-        final confirmTts = ChunkedTtsFetcher(
-          _openAiKey,
-          _ttsQueueManager,
-          'nova',
-          isUser: false,
-          onLog: _log,
-          costTracker: _costTracker,
-        );
-        // secure Realtime은 위 한국어 확인 질문을 이미 자연 음성으로 말했다.
-        if (!secureTurnCompleted) confirmTts.addText(prompt);
-        int ticks = 0;
-        while ((confirmTts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
-            mounted) {
-          await Future.delayed(const Duration(milliseconds: 50));
-          if (++ticks > 200) break;
-        }
+        _ttsAdapter.stopAll(reason: 'heard_confirm');
+        await _speakSystemLine(prompt);
         skipFinallyRestart = true;
         _isPipelineRunning = false;
         if (mounted && _isConversationActive) {
@@ -3140,16 +2148,12 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       }
 
       // 🛡️ [CORRECTION-GUARD] 태그가 번역 결과로 화면/TTS에 남는 것 차단
-      //   - 재진입 경로에서 모델이 태그를 내면 제거하고,
-      //   - 남는 내용이 없으면 EVAPORATE와 동일하게 처리 (버블 제거 + 재청취)
       if (userTargetText.contains('[CORRECTION]')) {
         userTargetText = userTargetText.replaceAll('[CORRECTION]', '').trim();
         if (mounted && hostIndex < _localMessages.length) {
           setState(() => _localMessages[hostIndex]['target'] = userTargetText);
         }
         if (userTargetText.isEmpty) {
-          realtimeVoice?.cancel();
-          _translateAdapter?.cancelActiveTurn();
           if (mounted) {
             setState(() {
               _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
@@ -3169,68 +2173,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       }
       _heardConfirmationAttempts = 0;
 
-      // 스트림 중 첫 청크를 선발사하고, 종료 시 남은 부분만 순서대로 요청한다.
-      // 제어 태그 제거 후에야 정상 문장이 생긴 예외 경로는 여기서 처음 공급한다.
-      final String fullUserTts = _cleanText(userTargetText.trim());
-      if (secureTurnCompleted) {
-        _log('🎙️ [RT-PLAY]',
-            'secure WebRTC 원격 오디오 사용 — legacy translation TTS 미사용');
-      } else if (realtimeVoice != null) {
-        final Uint8List? realtimeWav = await realtimeVoice.audioWav;
-        final bool realtimeStreamed = realtimeVoice.streamedAudio;
-        if (!realtimeStreamed && (realtimeWav == null || realtimeWav.isEmpty)) {
-          _log('⚠️ [RT-ONLY]', 'Realtime response failed → 턴 폐기 후 재청취');
-          realtimeVoice.cancel();
-          if (mounted) {
-            setState(() => _localMessages.removeWhere(
-                (m) => m['role'] == 'HOST' || m['role'] == 'HOST_TEMP'));
-          }
-          skipFinallyRestart = true;
-          _isPipelineRunning = false;
-          if (_isConversationActive) {
-            _restartConfiguredListening(
-                expectedPipelineGeneration: pipelineGeneration);
-          }
-          return;
-        }
-        _costTracker.recordRealtimeResponse(
-          audioTokens: realtimeVoice.audioTokens,
-          textTokens: realtimeVoice.textTokens,
-        );
-        if (realtimeStreamed) {
-          _log('🎙️ [RT-PLAY]', 'Realtime PCM 스트리밍 재생 사용 — tts-1 미사용');
-        } else {
-          await _ttsQueueManager.addAudio(realtimeWav!, isUser: true);
-          _log('🎙️ [RT-PLAY]',
-              'Realtime 음성 재생 큐 적재 (${realtimeWav.length}B) — tts-1 미사용');
-        }
-      } else if (fullUserTts.isNotEmpty) {
-        if (!userHybridInputStarted) {
-          userHybridTts.onChunk(fullUserTts);
-        }
-        await userHybridTts.onStreamEnd();
-      }
-
-      // 🛑 [PIPE-STOP] 유저 음성 구간이 끝난 뒤에도 방을 나갔거나 턴이 갈아치워졌을
-      //   수 있다. 여기서 안 막으면 화면이 없는 채로 AI 생성·TTS가 계속 돈다
-      //   (실측: 방 나간 뒤 GPT 1회 + TTS 3회가 헛돌았다). 아래 백그라운드 호출들이
-      //   시작되기 전에 끊어야 한다.
-      if (!isActivePipelineGeneration(
-            expected: pipelineGeneration,
-            current: _pipelineGeneration,
-            mounted: mounted,
-            conversationActive: _isConversationActive,
-          ) ||
-          _turnCounter != currentTurnId) {
-        _log('🛑 [PIPE-STOP]',
-            'reason=stale_after_user_audio turnId=$currentTurnId');
-        realtimeVoice?.cancel();
-        _translateAdapter?.cancelActiveTurn();
-        return;
-      }
-
-      // 🛑 [PIPE-STOP] 번역문이 비어 있으면 AI가 대답할 대상이 없다. 그대로 두면
-      //   빈 입력으로 아무 말이나 만들어낸다. 조용히 버리고 다시 듣는다.
+      // 🛑 [PIPE-STOP] 번역문이 비어 있으면 AI가 대답할 대상이 없다. 조용히 재청취.
       if (userTargetText.trim().isEmpty) {
         _log('🛑 [PIPE-STOP]',
             'reason=empty_translation turnId=$currentTurnId → 재청취');
@@ -3243,12 +2186,51 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         return;
       }
 
-      // 🔧 [v3.7] 유저 통문장 TtsCache 백그라운드 저장 (히스토리 HIT 유도)
-      //   - 청크별 캐시만으로는 히스토리에서 통문장 GET이 MISS됨
-      //   - fire-and-forget: 유저 재생 흐름과 무관하게 백그라운드 처리
-      //   - voice/speed는 히스토리 _playRhythmAudio와 동일하게 "nova", 1.0 고정
-      if (!secureTurnCompleted) {
-        _saveUserFullSentenceToCache(userTargetText.trim());
+      // ─────────────────────────────────────────────────────
+      // STEP 3: 최종 번역문 확정 → 공통 TTS 어댑터 (guide4 3.4)
+      //   PCM 첫 청크부터 즉시 재생 + 같은 스트림이 히스토리 버퍼에 기록된다.
+      //   여기서 모델명을 지정하지 않는다 — 어댑터 설정이 정한다.
+      // ─────────────────────────────────────────────────────
+      _logTurnPerf('TRANSLATION_DONE');
+      final String fullUserTts = _cleanText(userTargetText.trim());
+      if (fullUserTts.isNotEmpty) {
+        _swTTS.reset();
+        _swTTS.start();
+        // 🚀 [EARLY-FIRE] 앞 조각이 이미 나갔으면 나머지만 이어 붙인다.
+        String remainder = fullUserTts;
+        if (earlyFiredText.isNotEmpty) {
+          final head = _cleanText(earlyFiredText);
+          if (fullUserTts.startsWith(head)) {
+            remainder = fullUserTts.substring(head.length).trim();
+          } else {
+            // 정규화 차이로 접두가 안 맞으면 통짜 재생으로 되돌린다(중복 방지).
+            _log('🚀 [EARLY-FIRE]', 'prefix_mismatch → 앞 조각 취소, 통짜 재생');
+            earlyUtterance?.cancel();
+            _ttsAdapter.stopAll(reason: 'early_fire_prefix_mismatch');
+            earlyFiredText = '';
+          }
+        }
+        if (earlyFiredText.isNotEmpty && remainder.isEmpty) {
+          // 첫 조각이 곧 전체였다 → 열린 세션만 정상 종료한다.
+          _log('🚀 [EARLY-FIRE]', 'no_remainder → 세션 종료');
+          userUtterance = earlyUtterance;
+          unawaited(_ttsAdapter.closeOpenSegment());
+        } else {
+          _logTurnPerf('USER_TTS_REQUEST');
+          _costTracker.recordTtsRequest(remainder.length);
+          userUtterance = _ttsAdapter.speak(TtsRequest(
+            text: remainder,
+            voiceId: userVoice,
+            speakerType: TtsSpeakerType.user,
+            turnId: 'user-$currentTurnId',
+            generationId: pipelineGeneration,
+            saveToHistory: true,
+            // 히스토리 통문장 조회 규약과 동일한 키('nova')로 저장 — HIT 유도.
+            historyVoiceKey: 'nova',
+            continuesPreviousSegment: earlyFiredText.isNotEmpty,
+          ));
+          _logProbeTiming('USER_TTS_REQUEST');
+        }
       }
 
       // 유저 original 생성 (백그라운드)
@@ -3260,19 +2242,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         }
       });
 
-      // 🚀 [PARALLEL] 여기서 유저 음성 재생 완료를 기다리지 않는다. 기다리면
-      //   유저 음성이 흐르는 3~5초 동안 AI 쪽이 놀고, 그만큼 응답이 늦어진다.
-      //   AI 생성·TTS는 지금 시작해 유저 음성 뒤에 숨기고, 실제 재생은 STEP 5의
-      //   audioComplete 게이트(setAiPaused(false) 직전)가 계속 막는다.
-      if (secureTurnCompleted) {
-        _log('[RT-AUDIO]',
-            'mode=anyone turnId=$currentTurnId text_ready → clone pipeline (parallel)');
-      }
-
       // ─────────────────────────────────────────────────────
-      // STEP 3 & 4 (병렬): AI 응답 백그라운드 생성
-      //   → AI 청크는 큐에 쌓이지만 _aiPaused=true라 재생 대기
-      //   → 유저 TTS는 계속 재생 중
+      // STEP 4 (병렬): 유저 번역 음성이 흐르는 동안 AI 응답 "텍스트"를 미리
+      //   생성한다. AI "음성"은 유저 음성 재생 완료 후에만 시작한다 (guide4 7장).
       // ─────────────────────────────────────────────────────
       if (mounted) {
         setState(() => _localMessages
@@ -3281,51 +2253,20 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       }
       int aiIndex = _localMessages.length - 1;
 
-      // 🔧 [v3.2 버그 수정] setUserTurn(false)는 유저 재생 완료 후로 이동
-      // 현재 시점에서 유저 TTS가 아직 재생 중인데 _isUserTurn=false로 바꾸면
-      // TtsQueueManager._processQueue가 'AI 턴이고 paused' 판단하여 유저 마지막 청크까지 멈춰버림
-      _ttsQueueManager.setAiPaused(true); // AI 재생 대기 모드 (유저 TTS는 계속 재생)
-      // 🔧 [PREFETCH v1] 이전 턴 AI fetcher에 남은 in-flight fetch를 무효화한다.
-      //   (드레인 타임아웃 등으로 이전 fetch가 늦게 끝나 이번 턴 큐로 유입되는 것 방지)
-      _aiTtsFetcher?.cancel();
-      // 🔧 [v3.5] AI 전용 큐로 보내기 위해 isUser: false 명시
-      ChunkedTtsFetcher aiTtsFetcher = ChunkedTtsFetcher(
-        _openAiKey,
-        _ttsQueueManager,
-        "nova",
-        isUser: false, // AI 큐로 분리
-        onLog: _log,
-        costTracker: _costTracker,
-      );
-      _aiTtsFetcher = aiTtsFetcher; // 다음 턴에서 취소할 수 있도록 참조 보관
-      // [하이브리드 전환] 턴 시작 시 리셋 + 새 인스턴스 생성
-      _hybridTtsPlayer?.reset();
-      _hybridTtsPlayer = HybridTtsPlayer(
-        _openAiKey,
-        _ttsQueueManager,
-        aiTtsFetcher,
-        "nova",
-        onLog: _log,
-      );
-
       String latestContextStr = contextStr.isEmpty
           ? "User: $userTargetText"
           : "$contextStr\nUser: $userTargetText";
       String aiTargetText = "";
-      // String aiBuffer = ""; // [하이브리드 전환] HybridTtsPlayer 내부에서 처리 (삭제 금지)
-      bool firstChunkSentToTTS = false;
+      bool userPlaybackFinished = false;
 
       _swOpenAI.reset();
       _swOpenAI.start();
-      _swTTS.reset();
 
       _log('🧠 [PIPE-02]', 'AI 스트림 요청: userText="$userTargetText"');
       _logProbeTiming('AI_REQUEST');
       _awaitingAiFirstTextProbe = true;
 
       // 🎙️ [LEAD] 질문은 3턴에 1회만 허용해 대화 주도권을 유저에게 둔다.
-      //   프롬프트 문구로 빈도를 부탁하면 모델이 매 턴 질문하므로 앱에서 턴 단위로
-      //   확정한다.
       final bool allowAiQuestion = currentTurnId % 3 == 0;
       _log('🎙️ [LEAD]', 'turn=$currentTurnId allow_question=$allowAiQuestion');
       final aiStream = FreeTalkBrain.streamFreeTalkResponse(
@@ -3337,12 +2278,11 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         allowQuestion: allowAiQuestion,
       );
 
-      // AI 생성+청킹을 Future로 (유저 재생과 병렬)
+      // AI 생성을 Future로 (유저 재생과 병렬)
       bool _firstAiChunkLogged = false;
       final Future<void> aiGenerationTask = () async {
         await for (String chunk in aiStream) {
-          // 🛑 [PIPE-STOP] 생성 도중 방을 나가면 남은 청크를 버린다. 안 그러면
-          //   화면이 사라진 뒤에도 TTS 요청이 계속 나간다.
+          // 🛑 [PIPE-STOP] 생성 도중 방을 나가면 남은 청크를 버린다.
           if (!isActivePipelineGeneration(
                 expected: pipelineGeneration,
                 current: _pipelineGeneration,
@@ -3364,64 +2304,25 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           }
           if (_swOpenAI.isRunning) _swOpenAI.stop();
           aiTargetText += chunk;
-          // aiBuffer += chunk; // [하이브리드 전환] HybridTtsPlayer 내부에서 처리 (롤백 가능)
-          // 🔧 [요청1] AI 영어 텍스트는 유저 TTS 재생 완료 후에만 표시.
-          // 유저가 말하는 중에는 AI 글자가 먼저 노출되지 않게 막는다.
-          if (mounted && !_ttsQueueManager.aiPaused) {
+          // 🔧 AI 영어 텍스트는 유저 TTS 재생 완료 후에만 표시.
+          if (mounted && userPlaybackFinished) {
             setState(() => _localMessages[aiIndex]['target'] = aiTargetText);
-            // 스크롤은 AI 차례(!aiPaused)에만 수행해 유저가 자기 버블을 보는 중
-            // AI 버블로 화면이 이동하는 것을 방지.
-            if (!_ttsQueueManager.aiPaused) {
-              final _scrollNow = DateTime.now();
-              if (_lastScrollThrottle == null ||
-                  _scrollNow.difference(_lastScrollThrottle!) >=
-                      const Duration(milliseconds: 250)) {
-                _lastScrollThrottle = _scrollNow;
-                _scrollToCurrent(aiIndex);
-              }
+            final _scrollNow = DateTime.now();
+            if (_lastScrollThrottle == null ||
+                _scrollNow.difference(_lastScrollThrottle!) >=
+                    const Duration(milliseconds: 250)) {
+              _lastScrollThrottle = _scrollNow;
+              _scrollToCurrent(aiIndex);
             }
           }
-
-          // [하이브리드 전환] HybridTtsPlayer.onChunk로 대체 (롤백 가능)
-          _hybridTtsPlayer!.onChunk(chunk);
-          if (!firstChunkSentToTTS && _hybridTtsPlayer!.firstChunkFired) {
-            _swTTS.start();
-            firstChunkSentToTTS = true;
-          }
-
-          /* [하이브리드 전환] HybridTtsPlayer.onChunk로 대체 (롤백 가능)
-          final matches = splitPattern.allMatches(aiBuffer).toList();
-          if (matches.isNotEmpty) {
-            int lastIdx = matches.last.end;
-            String toSpeak = aiBuffer.substring(0, lastIdx).trim();
-            aiBuffer = aiBuffer.substring(lastIdx);
-            if (toSpeak.isNotEmpty) {
-              if (!firstChunkSentToTTS) {
-                _swTTS.start();
-                firstChunkSentToTTS = true;
-              }
-              aiTtsFetcher.addText(toSpeak);
-            }
-          }
-          */
         }
-        /* [하이브리드 전환] HybridTtsPlayer.onStreamEnd로 대체 (롤백 가능)
-        if (aiBuffer.trim().isNotEmpty) {
-          if (!firstChunkSentToTTS) {
-            _swTTS.start();
-            firstChunkSentToTTS = true;
-          }
-          aiTtsFetcher.addText(aiBuffer.trim());
-        }
-        */
-        // 🔧 [PREFETCH v1] GPT 스트림 종료 즉시 remainder 청크(②③…)를 발사한다.
-        //   fetcher는 addText 즉시 fetch를 시작하지만, AI 큐는 아직 setAiPaused(true)
-        //   상태라 재생은 PIPE-07까지 대기한다. 따라서 fetch 시점만 앞당겨져
-        //   유저 TTS 재생 중에 ②③ 오디오가 미리 준비되고, 큐 개방 시 ①②③이
-        //   공백 없이 이어진다. (재생 게이팅/이벤트 로직은 불변)
-        //   onStreamEnd는 내부 가드(_streamEnded)로 이중 호출에 안전하다.
-        // 🛑 [PIPE-STOP] 위에서 끊고 나온 경우 remainder까지 발사하면 헛도는 TTS가
-        //   그대로 남는다. 살아 있을 때만 마무리한다.
+      }();
+
+      // 🚀 AI 텍스트가 먼저 완성되면 사용자 번역 음성 재생 중에도 TTS HTTP
+      // 요청과 PCM 수신을 시작한다. 실제 재생은 아래에서 사용자 음성이 끝난
+      // 뒤 FIFO 큐에 연결하므로 두 음성은 겹치지 않는다.
+      Future<String>? aiOriginalFuture;
+      final Future<void> aiPreparationTask = aiGenerationTask.then((_) {
         if (!isActivePipelineGeneration(
               expected: pipelineGeneration,
               current: _pipelineGeneration,
@@ -3429,86 +2330,92 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
               conversationActive: _isConversationActive,
             ) ||
             _turnCounter != currentTurnId) {
-          aiTtsFetcher.cancel();
           return;
         }
-        await _hybridTtsPlayer!
-            .onStreamEnd(fullSentence: _cleanText(aiTargetText.trim()));
-      }();
+
+        if (aiTargetText.trim().isNotEmpty) {
+          aiOriginalFuture = FreeTalkBrain.generateCleanOriginal(
+              apiKey: _openAiKey, englishText: aiTargetText);
+        }
+        final String aiTtsText = _cleanText(aiTargetText.trim());
+        if (aiTtsText.isEmpty) return;
+        _costTracker.recordTtsRequest(aiTtsText.length);
+        aiTtsPrefetch = _ttsAdapter.prefetch(TtsRequest(
+          text: aiTtsText,
+          voiceId: TtsAdapterConfig.aiVoice,
+          speakerType: TtsSpeakerType.ai,
+          turnId: 'ai-$currentTurnId',
+          generationId: pipelineGeneration,
+          saveToHistory: true,
+          historyVoiceKey: 'nova',
+        ));
+        _log(
+          '🚀 [AI-TTS-PREFETCH]',
+          'started userPlaybackFinished=$userPlaybackFinished '
+              'len=${aiTtsText.length}',
+        );
+      });
 
       // ─────────────────────────────────────────────────────
-      // STEP 5: 유저 TTS 모두 재생될 때까지 대기
+      // STEP 5: 유저 번역 음성 재생 완료 대기 (두 음성이 겹치지 않는 순서 보장)
       // ─────────────────────────────────────────────────────
-      _log('🧠 [PIPE-04]',
-          '유저 TTS 대기 시작. pending=${userTtsFetcher.pendingRequests}');
-
-      int waitTicks = 0;
-      while (userTtsFetcher.pendingRequests > 0) {
-        await Future.delayed(const Duration(milliseconds: 50));
-        waitTicks++;
-        if (waitTicks * 50 >= kFreeTalkUserTtsFetchTimeoutMs) {
-          userTtsFetcher.cancel(dropBuffered: false);
-          _log('⚠️ [PIPE-TIMEOUT]', '유저 TTS fetch 15초 초과, 강제 진행');
-          break;
+      if (userUtterance != null) {
+        _log('🧠 [PIPE-04]', '유저 TTS 재생 대기');
+        bool userTtsOk = false;
+        try {
+          userTtsOk = await userUtterance.done.timeout(const Duration(
+              milliseconds: kFreeTalkUserTtsFetchTimeoutMs +
+                  kFreeTalkUserTtsPlaybackTimeoutMs));
+        } on TimeoutException {
+          userUtterance.cancel();
+          _log('⚠️ [PIPE-TIMEOUT]', '유저 TTS 재생 시간 초과, 강제 진행');
+        }
+        if (!userTtsOk) {
+          // guide4 12장: 음성 실패 시 텍스트는 유지하고 진행한다.
+          _log('⚠️ [PIPE-05]', '유저 TTS 실패/취소 — 텍스트 유지하고 진행');
         }
       }
-      _log(
-          '🧠 [PIPE-05]', '유저 TTS fetch 완료. isBusy=${_ttsQueueManager.isBusy}');
+      userPlaybackFinished = true;
+      _log('🧠 [PIPE-06]', '유저 TTS 재생 완료 → AI 차례');
 
-      // 🔒 [Box 7 USER-DRAIN-SIGNAL] 실제 기반 drain 게이트.
-      //   마지막 유저 청크의 마지막 샘플 재생 완료 즉시 해제한다.
-      //   isBusy 폴링과 청크 사이 false 위험을 제거한다.
-      _ttsQueueManager.sealUserStream();
-      await Future.wait<void>([
-        _ttsQueueManager.waitUserDrained(),
-        if (secureTurnCompleted)
-          secureTurn!.audioComplete
-        else
-          realtimeVoice?.playbackDone ?? Future<void>.value(),
-      ]);
-      _log('🧠 [PIPE-06]', '유저 TTS 재생 완료 → AI 큐 개방');
+      // 🛑 [PIPE-STOP] 유저 음성 구간이 끝난 뒤에도 방을 나갔거나 턴이 갈아치워
+      //   졌을 수 있다. AI TTS가 시작되기 전에 끊는다.
+      if (!isActivePipelineGeneration(
+            expected: pipelineGeneration,
+            current: _pipelineGeneration,
+            mounted: mounted,
+            conversationActive: _isConversationActive,
+          ) ||
+          _turnCounter != currentTurnId) {
+        _log('🛑 [PIPE-STOP]',
+            'reason=stale_after_user_audio turnId=$currentTurnId');
+        return;
+      }
 
-// ─────────────────────────────────────────────────────
-      // STEP 6: AI 큐 개방
       // ─────────────────────────────────────────────────────
-      // 🔧 [v3.3 안전 간격] 유저 TTS 재생 완료 직후 250ms 대기
-      // 이유: isBusy=false가 되었어도 AudioPlayer 내부에서
-      //       마지막 샘플이 디코딩/재생 꼬리가 남을 수 있어 소리 겹침 발생
-      //       250ms = 체감상 자연스러운 "숨 고르기" + 겹침 방지
+      // STEP 6: 유저-AI 전환 안전 간격 + AI 텍스트 확정 → AI 음성
+      // ─────────────────────────────────────────────────────
       await Future.delayed(const Duration(milliseconds: 250));
       _log('🧠 [PIPE-GAP]', '유저-AI 전환 안전 간격 250ms 완료');
 
-      // 턴 전환
-      _ttsQueueManager.setUserTurn(false);
+      await aiPreparationTask;
+      _log('🧠 [PIPE-07]',
+          'AI 텍스트/TTS 선요청 준비 (len=${aiTargetText.length}) → AI 음성 시작');
       _awaitingAiFirstAudioProbe = true;
-      _ttsQueueManager.setAiPaused(false);
-      _log('🧠 [PIPE-07]', 'setUserTurn(false) + setAiPaused(false). AI 재생 시작');
-      // [v3.6] PIPE-07 시점: 버퍼된 AI 텍스트 일괄 표시 — 중앙 고정으로 안정적 표시
       if (mounted && aiTargetText.isNotEmpty) {
         setState(() => _localMessages[aiIndex]['target'] = aiTargetText);
         _scrollToCurrent(aiIndex);
       }
 
-      await aiGenerationTask;
-      _log('🧠 [PIPE-08]',
-          'aiGenerationTask 완료. AI pending=${aiTtsFetcher.pendingRequests}');
-      Future<String>? aiOriginalFuture;
-      if (aiTargetText.trim().isNotEmpty) {
-        aiOriginalFuture = FreeTalkBrain.generateCleanOriginal(
-            apiKey: _openAiKey, englishText: aiTargetText);
-      }
-      // [하이브리드] remainder 발사 + 통문장 TtsCache 저장은
-      // 🔧 [PREFETCH v1]로 aiGenerationTask 내부(스트림 종료 시점)로 이동했다.
-      // 여기서 중복 호출하면 remainder가 두 번 발사되므로 호출하지 않는다.
-      // (aiGenerationTask는 위에서 이미 await 완료 → onStreamEnd 실행 보장)
-
-      waitTicks = 0;
-      while (aiTtsFetcher.pendingRequests > 0 || _ttsQueueManager.isBusy) {
-        await Future.delayed(const Duration(milliseconds: 50));
-        waitTicks++;
-        if (waitTicks * 50 >= kFreeTalkAiTtsWaitTimeoutMs) {
+      final prefetched = aiTtsPrefetch;
+      if (prefetched != null) {
+        aiUtterance = _ttsAdapter.speakPrefetched(prefetched);
+        try {
+          await aiUtterance.done.timeout(
+              const Duration(milliseconds: kFreeTalkAiTtsWaitTimeoutMs));
+        } on TimeoutException {
+          aiUtterance.cancel();
           _log('⚠️ [PIPE-TIMEOUT]', 'AI TTS 20초 초과, 강제 진행');
-          break;
         }
       }
       _log('🧠 [PIPE-09]', 'AI TTS 재생 완료');
@@ -3516,7 +2423,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       // ─────────────────────────────────────────────────────
       // STEP 7: Firestore 저장
       // ─────────────────────────────────────────────────────
-      // AI original 생성 — aiTargetText 확정 후, 저장 전에 생성 (bilingual 저장 보장)
       String aiOriginalText = '';
       if (aiTargetText.trim().isNotEmpty) {
         try {
@@ -3533,7 +2439,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         }
       }
 
-      // 유저 original — 백그라운드 생성이 완료된 값 사용, 비어 있으면 Deepgram 원문 fallback
+      // 유저 original — 백그라운드 생성이 완료된 값 사용, 비어 있으면 전사 원문 fallback
       final String hostOriginal = (_localMessages[hostIndex]['original'] ?? '')
               .toString()
               .trim()
@@ -3557,7 +2463,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           userTargetText, aiTargetText); // 🧠 [장기 기억] 백그라운드 메모리 업데이트
       _log('🧠 [PIPE-10]', 'Firestore 저장 호출 완료');
     } catch (e) {
-      _translateAdapter?.cancelActiveTurn();
+      aiTtsPrefetch?.cancel();
+      userUtterance?.cancel();
+      aiUtterance?.cancel();
       _log('❌ [PIPE-ERR]', 'Relay Error: $e');
     } finally {
       if (!skipFinallyRestart) {
@@ -3835,6 +2743,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
             child: Stack(children: [
               _buildChatList(),
               _buildIdleOverlay(),
+              _buildNudgeBubble(), // 🆕 [진입 안내] 스텔스룸에서 옮겨온 문구
               if (trialMode) buildTrialCountdown(),
               if (_showUsageGuide) _buildUsageGuide(), // 🆕 [Anyone] 이용방법 말풍선
             ]),
@@ -4228,6 +3137,76 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 // 각 Brain/파이프라인에서 TTS 청킹 기준으로 사용
 final RegExp kTtsDelimiterPattern = RegExp(r'[,\.?!;:。、！？…，；：\n]');
 
+/// 마이크 입력 의도가 발생한 직후 시작하는 로컬 PCM 캡처.
+///
+/// Deepgram 키/소켓 준비와 독립적으로 먼저 녹음하고, 단일 구독 컨트롤러가
+/// 서버 전송 소비자가 붙을 때까지 초기 PCM 프레임을 보관한다.
+class AnyonePreparedAudioCapture {
+  AnyonePreparedAudioCapture._({
+    required this.recorder,
+    required this.stream,
+    required StreamSubscription<Uint8List> sourceSubscription,
+    required StreamController<Uint8List> controller,
+  })  : _sourceSubscription = sourceSubscription,
+        _controller = controller;
+
+  final AudioRecorder recorder;
+  final Stream<Uint8List> stream;
+  final StreamSubscription<Uint8List> _sourceSubscription;
+  final StreamController<Uint8List> _controller;
+  bool _stopped = false;
+
+  static Future<AnyonePreparedAudioCapture> start({
+    required AudioRecorder recorder,
+    required void Function(DateTime at) onRecordingStarted,
+    required void Function(DateTime at, int byteCount) onFirstFrame,
+  }) async {
+    final source = await recorder.startStream(
+      const RecordConfig(
+        encoder: AudioEncoder.pcm16bits,
+        sampleRate: 16000,
+        numChannels: 1,
+      ),
+    );
+    onRecordingStarted(DateTime.now());
+
+    final controller = StreamController<Uint8List>();
+    bool firstFrameSeen = false;
+    late final StreamSubscription<Uint8List> sourceSubscription;
+    sourceSubscription = source.listen(
+      (data) {
+        if (data.isEmpty || controller.isClosed) return;
+        final bytes = data;
+        if (!firstFrameSeen) {
+          firstFrameSeen = true;
+          onFirstFrame(DateTime.now(), bytes.length);
+        }
+        controller.add(bytes);
+      },
+      onError: controller.addError,
+      onDone: () {
+        if (!controller.isClosed) unawaited(controller.close());
+      },
+    );
+    return AnyonePreparedAudioCapture._(
+      recorder: recorder,
+      stream: controller.stream,
+      sourceSubscription: sourceSubscription,
+      controller: controller,
+    );
+  }
+
+  Future<void> stop() async {
+    if (_stopped) return;
+    _stopped = true;
+    await _sourceSubscription.cancel();
+    if (!_controller.isClosed) unawaited(_controller.close());
+    try {
+      if (await recorder.isRecording()) await recorder.stop();
+    } catch (_) {}
+  }
+}
+
 // ====================================================================
 // 📦 [Box 7-A: ConversationHistory] — 슬라이딩 윈도우 히스토리 관리자
 // 기존 버전 문제: 히스토리가 주석에만 존재, 실제 구현 없음
@@ -4301,8 +3280,15 @@ class DeepgramV2VoiceManager {
   final VoidCallback? onGaveUp; // 재연결 포기 알림 (선택적)
   final bool Function()? shouldReconnect;
   final void Function(String tag, String msg)? onLog; // 🔬 [v3.1] 로그 훅
+  // 🎙️ [PCM-TEE] Deepgram으로 나가는 PCM 원본 복사 훅 (재전사 버퍼용)
+  final void Function(Uint8List)? onAudioChunk;
+  final void Function(DateTime at)? onFirstPcmSent;
+  final void Function(DateTime at)? onFirstPartial;
 
   IOWebSocketChannel? _channel;
+  IOWebSocketChannel? _preconnectedChannel;
+  AnyonePreparedAudioCapture? _preparedCapture;
+  AnyonePreparedAudioCapture? _activePreparedCapture;
   StreamSubscription? _audioSub;
   StreamSubscription? _wsSub;
   String _currentTranscript = '';
@@ -4315,6 +3301,8 @@ class DeepgramV2VoiceManager {
   Timer? _micWatchdog; // 🔧 첫 진입 무음(마이크 데드) 감지 워치독
   Timer? _keepAliveTimer;
   int _packetCount = 0; // 🔧 수신 오디오 패킷 수 (워치독 판정용)
+  bool _firstPcmSent = false;
+  bool _firstPartialReceived = false;
 
   DeepgramV2VoiceManager({
     required this.apiKey,
@@ -4330,7 +3318,13 @@ class DeepgramV2VoiceManager {
     this.onGaveUp,
     this.shouldReconnect,
     this.onLog,
-  });
+    this.onAudioChunk,
+    this.onFirstPcmSent,
+    this.onFirstPartial,
+    IOWebSocketChannel? preconnectedChannel,
+    AnyonePreparedAudioCapture? preparedCapture,
+  })  : _preconnectedChannel = preconnectedChannel,
+        _preparedCapture = preparedCapture;
 
   void _lg(String tag, String msg) {
     onLog?.call(tag, msg);
@@ -4342,6 +3336,13 @@ class DeepgramV2VoiceManager {
     try {
       _channel?.sink.add(bytes);
       costTracker?.addDeepgramBytes(bytes.length);
+      if (!_firstPcmSent) {
+        _firstPcmSent = true;
+        final at = DateTime.now();
+        _lg('📡 [DG-FIRST-SEND]',
+            'at=${at.toIso8601String()} bytes=${bytes.length}');
+        onFirstPcmSent?.call(at);
+      }
     } catch (e) {
       _lg('❌ [DG-PCM-ERR]', 'PCM 전송 실패: $e');
     }
@@ -4351,6 +3352,7 @@ class DeepgramV2VoiceManager {
     // Deepgram이 자체 endpointing/VAD를 수행한다. 여기서 RMS 임계값으로
     // 패킷을 버리면 마이크 출력이 작은 기기에서는 음성이 한 바이트도 전송되지
     // 않고, silence tail도 잘려 UtteranceEnd가 오지 않을 수 있다.
+    onAudioChunk?.call(data); // 🎙️ [PCM-TEE] 재전사 버퍼로 복사
     _sendPcm(data);
   }
 
@@ -4380,27 +3382,22 @@ class DeepgramV2VoiceManager {
     _keepAliveTimer = null;
     _lg('🎤 [MIC-01]', '_connect 진입');
     try {
-      final uri = Uri.parse(
-        'wss://api.deepgram.com/v1/listen'
-        '?model=nova-3'
-        '&language=$langCode'
-        '&smart_format=true'
-        '&endpointing=$kFreeTalkDeepgramEndpointingMs' // 🔧 Free Talk: 더듬거림에 덜 민감하게
-        '&utterance_end_ms=$kFreeTalkDeepgramUtteranceEndMs' // 🔧 Free Talk: 900ms로 반응속도 개선
-        '&interim_results=true'
-        '&encoding=linear16'
-        '&sample_rate=16000'
-        '&channels=1'
-        '&filler_words=false',
-      );
+      final uri = buildAnyoneDeepgramUri(langCode);
 
-      _channel = IOWebSocketChannel.connect(
-        uri,
-        headers: {'Authorization': 'Token $apiKey'},
-        pingInterval: const Duration(seconds: 10),
-      );
+      final preconnectedChannel = _preconnectedChannel;
+      _preconnectedChannel = null;
+      _channel = preconnectedChannel ??
+          IOWebSocketChannel.connect(
+            uri,
+            headers: {'Authorization': 'Token $apiKey'},
+            pingInterval: const Duration(seconds: 10),
+          );
       _startKeepAlive();
-      _lg('🎤 [DG-01]', 'WebSocket 연결 요청 전송');
+      _lg(
+          '🎤 [DG-01]',
+          preconnectedChannel == null
+              ? 'WebSocket 연결 요청 전송'
+              : '인증 완료된 prewarm WebSocket 채택');
 
       await _wsSub?.cancel();
       _wsSub = _channel!.stream.listen(
@@ -4421,36 +3418,45 @@ class DeepgramV2VoiceManager {
       _audioSub = null;
       _lg('🎤 [MIC-03]', '기존 _audioSub 구독 해제 완료');
 
-      try {
-        final isRec = await audioRecorder.isRecording();
-        _lg('🎤 [MIC-04]', 'audioRecorder.isRecording()=$isRec');
-        if (isRec) {
-          await audioRecorder.stop();
-          _lg('🎤 [MIC-05]', '기존 녹음 강제 중단 완료');
-        }
-      } catch (e) {
-        _lg('❌ [MIC-ERR-A]', 'isRecording/stop 에러: $e');
-      }
-
-      // 🔧 [첫 진입 데드마이크 수정] startStream이 첫 시도에 실패하는 경우
-      //    (오디오 서브시스템 warm-up 전) 대비 최대 3회 재시도.
+      // 마이크 입력 직후 이미 시작한 로컬 캡처가 있으면 그대로 채택한다.
+      // 네트워크 연결/인증을 기다린 뒤 startStream을 호출하지 않는다.
       Stream<Uint8List>? stream;
-      for (int attempt = 1; attempt <= 3; attempt++) {
-        if (_isDisposed) return;
+      final preparedCapture = _preparedCapture;
+      _preparedCapture = null;
+      if (preparedCapture != null) {
+        _activePreparedCapture = preparedCapture;
+        stream = preparedCapture.stream;
+        _lg('🎤 [MIC-04]', 'prepared local capture 채택');
+      } else {
         try {
-          stream = await audioRecorder.startStream(
-            const RecordConfig(
-              encoder: AudioEncoder.pcm16bits,
-              sampleRate: 16000,
-              numChannels: 1,
-            ),
-          );
-          _lg('🎤 [MIC-06]', 'startStream 성공 (attempt=$attempt)');
-          break;
+          final isRec = await audioRecorder.isRecording();
+          _lg('🎤 [MIC-04]', 'audioRecorder.isRecording()=$isRec');
+          if (isRec) {
+            await audioRecorder.stop();
+            _lg('🎤 [MIC-05]', '기존 녹음 강제 중단 완료');
+          }
         } catch (e) {
-          _lg('❌ [MIC-ERR-C]', 'startStream 실패(attempt=$attempt): $e');
-          if (attempt < 3) {
-            await Future.delayed(Duration(milliseconds: 250 * attempt));
+          _lg('❌ [MIC-ERR-A]', 'isRecording/stop 에러: $e');
+        }
+
+        // 첫 진입 오디오 서브시스템 준비 실패에 대비한 기존 재시도 폴백.
+        for (int attempt = 1; attempt <= 3; attempt++) {
+          if (_isDisposed) return;
+          try {
+            stream = await audioRecorder.startStream(
+              const RecordConfig(
+                encoder: AudioEncoder.pcm16bits,
+                sampleRate: 16000,
+                numChannels: 1,
+              ),
+            );
+            _lg('🎤 [MIC-06]', 'startStream 성공 (attempt=$attempt)');
+            break;
+          } catch (e) {
+            _lg('❌ [MIC-ERR-C]', 'startStream 실패(attempt=$attempt): $e');
+            if (attempt < 3) {
+              await Future.delayed(Duration(milliseconds: 250 * attempt));
+            }
           }
         }
       }
@@ -4554,6 +3560,13 @@ class DeepgramV2VoiceManager {
       final chunk = (alternative['transcript'] as String?) ?? '';
       final isFinal = data['is_final'] == true;
       final speechFinal = data['speech_final'] == true;
+      if (!_firstPartialReceived && chunk.trim().isNotEmpty) {
+        _firstPartialReceived = true;
+        final at = DateTime.now();
+        _lg('📡 [DG-FIRST-PARTIAL]',
+            'at=${at.toIso8601String()} len=${chunk.trim().length}');
+        onFirstPartial?.call(at);
+      }
 
       if (isFinal || speechFinal) {
         _lg('📡 [DG-03]',
@@ -4597,6 +3610,8 @@ class DeepgramV2VoiceManager {
     _keepAliveTimer = null;
     await _audioSub?.cancel();
     _audioSub = null;
+    await _activePreparedCapture?.stop();
+    _activePreparedCapture = null;
     if (shouldReconnect != null && !shouldReconnect!()) {
       _lg('🎤 [DG-RETRY-SKIP]', '재연결 조건 불충족');
       return;
@@ -4627,6 +3642,10 @@ class DeepgramV2VoiceManager {
     _micWatchdog = null;
     _keepAliveTimer?.cancel();
     _keepAliveTimer = null;
+    await _preparedCapture?.stop();
+    _preparedCapture = null;
+    await _activePreparedCapture?.stop();
+    _activePreparedCapture = null;
     await _audioSub?.cancel();
     _audioSub = null;
     await _wsSub?.cancel();
@@ -5928,25 +4947,10 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
     required String textOriginal,
     required String targetLang,
     required String contextStr,
+    // 🧠 [TRANSLATE-ROUTE] guide4 6장 분기 결과. 이 턴은 이 모델 하나만 호출한다.
+    String model = kFreeTalkTranslateModelFast,
     bool disableCorrection = false,
     bool disableHeardConfirmation = false,
-    // 🎙️ [REALTIME-ONLY] 주입되면 gpt-realtime-2.1-mini만 사용한다.
-    //   연결/응답 실패 시 GPT-4o-mini/TTS-1로 폴백하지 않는다.
-    FirstTurnRealtimeVoice? realtimeVoice,
-    RealtimeAnyoneAdapter? secureAdapter,
-    // 🎙️ [SPEECH-FIRST] 발화 종료 즉시 이미 발사해 둔 턴. 있으면 새로 요청하지
-    //   않고 그대로 물려받는다(전사 대기 없이 소리가 먼저 나온 그 턴).
-    RealtimeTranslationTurn? preStartedTurn,
-    // 🎙️ [SPEECH-FIRST/A안] 전사를 기다리지 않고 파이프라인을 시작한 경우
-    //   textOriginal이 비어 있다. Realtime이 실패해 레거시로 내려갈 때만
-    //   이 콜백으로 뒤늦게 도착한 한국어 전사를 받아 원고로 쓴다.
-    Future<String> Function()? resolveTextOriginal,
-    String secureTurnId = '',
-    String secureVoice = 'marin',
-    void Function(RealtimeTranslationTurn turn)? onSecureTurn,
-    void Function()? onSecureSuccess,
-    void Function(Object reason)? onSecureFallback,
-    bool Function()? shouldContinue,
   }) async* {
     final client = OpenAiConnectionPool.instance.client;
     try {
@@ -5956,74 +4960,13 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
         disableHeardConfirmation: disableHeardConfirmation,
       );
 
-      String buildUserContent(String source) =>
-          'Conversation so far:\n$contextStr\n\nTranslate this Korean utterance: "$source"';
-      final String userContent = buildUserContent(textOriginal);
-
-      // 🔐 [SECURE-REALTIME] delta는 UI에 전달하지 않고 최종문을 한 번만 넘긴다.
-      // 실패한 경우에만 아래의 기존 gpt-4o-mini 스트림으로 한 번 fall through한다.
-      if (secureAdapter != null) {
-        Object fallbackReason = StateError('Unknown secure realtime failure.');
-        try {
-          if (shouldContinue?.call() == false) return;
-          final turn = (preStartedTurn != null && !preStartedTurn.isSettled)
-              ? preStartedTurn
-              : secureAdapter.requestTranslatedTurn(
-                  turnId: secureTurnId,
-                  sourceText: userContent,
-                  instructions: sysPrompt,
-                  voice: secureVoice,
-                );
-          onSecureTurn?.call(turn);
-          // 🚀 [PARALLEL] 오디오 재생 완료(turn.done)까지 기다리지 않는다.
-          //   번역문이 확정되는 즉시 파이프라인에 넘겨, AI 응답 생성이 유저
-          //   음성 재생과 겹치게 한다. AI 음성 재생 순서는 호출부 STEP 5의
-          //   audioComplete 게이트가 계속 막는다.
-          final textOk = await turn.textOutcome;
-          final finalText = (await turn.finalText).trim();
-          if (textOk && finalText.isNotEmpty) {
-            if (shouldContinue?.call() == false) return;
-            onSecureSuccess?.call();
-            yield finalText;
-            return;
-          }
-          fallbackReason = StateError(
-              'text_ok=$textOk final_text_empty=${finalText.isEmpty}');
-        } catch (error) {
-          fallbackReason = error;
-        }
-        secureAdapter.cancelActiveTurn();
-        if (shouldContinue?.call() == false) return;
-        onSecureFallback?.call(fallbackReason);
-      }
-
-      // 🎙️ [SPEECH-FIRST/A안] 여기부터는 레거시 원고가 필요하다. 전사를 기다리지
-      //   않고 시작한 턴이면 textOriginal이 비어 있으므로, 이 시점에 뒤늦게 도착한
-      //   전사를 받아온다(정상 경로는 위에서 이미 return되어 여기 오지 않는다).
-      String legacySource = textOriginal.trim();
-      if (legacySource.isEmpty && resolveTextOriginal != null) {
-        legacySource = (await resolveTextOriginal()).trim();
-      }
-      if (legacySource.isEmpty) {
-        // 원고가 끝내 없으면 살릴 방법이 없다 → 턴을 증발 처리해 마이크를 되돌린다.
+      final String source = textOriginal.trim();
+      if (source.isEmpty) {
         yield '[EVAPORATE]';
         return;
       }
-      final String legacyUserContent = buildUserContent(legacySource);
-
-      // 🎙️ [REALTIME-ONLY] 같은 시스템 프롬프트를 Realtime에 그대로 넘긴다.
-      if (realtimeVoice != null) {
-        final bool realtimeReady = await realtimeVoice.begin(
-          instructions: sysPrompt,
-          userContent: legacyUserContent,
-        );
-        if (realtimeReady) {
-          yield* realtimeVoice.textStream;
-          return;
-        }
-        yield '[REALTIME_UNAVAILABLE]';
-        return;
-      }
+      final String userContent =
+          'Conversation so far:\n$contextStr\n\nTranslate this Korean utterance: "$source"';
 
       final request = http.Request(
         'POST',
@@ -6034,13 +4977,13 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
         'Content-Type': 'application/json; charset=utf-8',
       });
       request.body = jsonEncode({
-        'model': 'gpt-4o-mini',
+        'model': model,
         'stream': true,
         'temperature': 0.0, // 주어 추론 일관성 극대화
         'max_tokens': 120,
         'messages': [
           {'role': 'system', 'content': sysPrompt},
-          {'role': 'user', 'content': legacyUserContent},
+          {'role': 'user', 'content': userContent},
         ],
       });
 

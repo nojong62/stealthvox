@@ -20,10 +20,10 @@ import 'dart:async';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';
 import '/custom_code/actions/billing_ticker.dart';
+import '/custom_code/services/deepgram_prewarm_session.dart';
 import '/custom_code/services/openai_connection_pool.dart';
-import '/custom_code/services/realtime_client_secret_service.dart';
-import '/custom_code/services/realtime_feature_flags.dart';
-import 'package:http/http.dart' as http;
+import 'package:permission_handler/permission_handler.dart';
+import 'package:record/record.dart';
 import 'trial/trial_flow_state.dart';
 
 class StealthRoomMaster extends StatefulWidget {
@@ -49,14 +49,14 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   // ============================================================================
   // 0: 메뉴 화면, 1: Duo, 2: Free Talk, 3: Roleplay, 4: Expand
   int? _currentMode;
-  bool _preparingAnyone = false;
-  // 🎤 [ENTRY-GATE] 준비 화면 최대 노출 시간(연결 실패 시 안전 장치)
-  static const Duration _anyonePrepMinVisible = Duration(seconds: 2);
-  static const Duration _anyonePrepMaxWait = Duration(seconds: 12);
-  DateTime? _anyonePrepStartedAt;
-  bool _anyoneListeningReady = false;
-  Timer? _anyonePrepMinTimer;
-  Timer? _anyonePrepTimeoutTimer;
+  final AudioRecorder _anyoneAudioRecorder = AudioRecorder();
+  late Future<void> _anyoneAudioReady;
+  DateTime? _anyoneMicInputAt;
+  // 🎤 [ENTRY-GATE] 준비 화면(오버레이)은 Realtime 시절의 산물이라 제거됐다.
+  //   Anyone도 Step Expand처럼 Deepgram만 쓰므로 화면을 바로 넘겨도 유저가
+  //   허공에 대고 말할 일이 없다. 안내 문구는 각 페이지가 직접 띄운다
+  //   (routine_mode_anyone.dart / routine_mode_step_expand.dart의
+  //   `_showOpeningNudgeOnce`).
 
   // 초대 링크에서 소비한 roomId (1회용 — build에서 Duo 생성자에 전달)
   String? _pendingDuoRoomId;
@@ -66,16 +66,13 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     StealthRoomMaster.exitCurrentMode = () {
-      _anyonePrepMinTimer?.cancel();
-      _anyonePrepTimeoutTimer?.cancel();
-      _anyonePrepStartedAt = null;
-      _anyoneListeningReady = false;
       setState(() {
-        _preparingAnyone = false;
         _currentMode = null;
       });
+      unawaited(_refreshAnyonePrewarmAfterExit());
     };
     AppsFlyerManager.duoInviteSignal.addListener(_onDuoInviteSignal);
+    _anyoneAudioReady = _prepareAnyoneAudioInput();
     unawaited(_prepareFirstUserResponse());
 
     // Duo 초대 링크 자동 진입 처리
@@ -96,90 +93,72 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     // 트라이얼 Anyone 자동 진입 — 메뉴 화면을 건너뛰고 바로 Anyone 모드로
     TrialFlowState.instance.restoreFromAppState();
     if (TrialFlowState.instance.isTrialAnyone) {
-      _preparingAnyone = true;
-      _anyonePrepStartedAt = DateTime.now();
-      _anyoneListeningReady = false;
-      _startAnyonePrepTimeout();
+      _anyoneMicInputAt = DateTime.now();
+      _currentMode = 2;
     }
+  }
+
+  Future<void> _refreshAnyonePrewarmAfterExit() async {
+    // 이전 Anyone의 recorder/소켓 정리가 끝난 뒤 다음 입장을 다시 준비한다.
+    await Future.delayed(const Duration(milliseconds: 300));
+    if (!mounted || _currentMode != null) return;
+    _anyoneAudioReady = _prepareAnyoneAudioInput();
+    unawaited(_prepareFirstUserResponse());
   }
 
   /// StealthRoom 메뉴를 보는 동안 첫 유저 번역/TTS용 OpenAI 연결을 준비한다.
   /// UI나 모드 진입을 막지 않으며, 준비 실패 시 각 모드의 기존 요청이 동작한다.
   Future<void> _prepareFirstUserResponse() async {
-    // 🚀 [DEEPGRAM-WARMUP] 감지(STT) 경로 준비 — Deepgram 호스트 DNS/TLS를 미리 데워
-    //   애니원/스텝익스팬드 진입 시 STT WebSocket 연결 시간을 줄인다.
-    //   녹음/스트리밍은 하지 않는다(프라이버시·과금 없음). 응답 경로(OpenAI)와 병행.
-    unawaited(_warmUpDeepgram());
-
-    // 🔥 [RT-PREWARM] Anyone 진입 지연의 절반가량(약 3.2초)이 Realtime client
-    //   secret 발급이다. 메뉴를 보는 동안 토큰만 미리 받아둔다. 마이크를 켜지도,
-    //   WebRTC를 열지도 않으므로 프라이버시·과금 영향이 없고, 쓰지 않고 버려도
-    //   정리할 자원이 없다. 실패하거나 만료되면 진입 시 평소대로 새로 발급된다.
-    unawaited(_prewarmAnyoneRealtimeSecret());
-    unawaited(_prewarmStepExpandRealtimeSecret());
-
     final remoteConfig = FirebaseRemoteConfig.instance;
     String openAiKey = remoteConfig.getString('OpenAIAPIKey');
+    String deepgramKey = remoteConfig.getString('DeepgramAPIKey');
 
-    if (openAiKey.isEmpty) {
+    if (openAiKey.isEmpty || deepgramKey.isEmpty) {
       try {
         await remoteConfig
             .fetchAndActivate()
             .timeout(const Duration(seconds: 6));
         openAiKey = remoteConfig.getString('OpenAIAPIKey');
+        deepgramKey = remoteConfig.getString('DeepgramAPIKey');
       } catch (error) {
-        debugPrint('[OPENAI-WARMUP] key unavailable: ${error.runtimeType}');
+        debugPrint('[ROOM-PREWARM] key unavailable: ${error.runtimeType}');
       }
     }
 
-    if (openAiKey.isEmpty) return;
-    await OpenAiConnectionPool.instance.warmUp(
-      openAiKey,
-      onLog: debugPrint,
-    );
-  }
-
-  /// 🔥 [RT-PREWARM] Anyone용 Realtime client secret만 미리 받아둔다.
-  /// 마이크·WebRTC를 건드리지 않으므로 다른 모드로 들어가도 정리할 것이 없다.
-  Future<void> _prewarmAnyoneRealtimeSecret() async {
-    try {
-      await RealtimeFeatureFlags.initialize();
-      if (!RealtimeFeatureFlags.enabledFor('anyone')) return;
-      await RealtimeClientSecretPrewarm.instance.prewarm(
-        mode: 'anyone',
-        logger: (tag, detail) => debugPrint('$tag $detail'),
+    if (deepgramKey.isNotEmpty) {
+      final nativeLanguage = FFAppState().nativeLang.isNotEmpty
+          ? FFAppState().nativeLang
+          : 'Korean';
+      unawaited(DeepgramPrewarmSession.instance.prepare(
+        apiKey: deepgramKey,
+        languageCode: deepgramLanguageCode(nativeLanguage),
+        onLog: debugPrint,
+      ));
+    }
+    if (openAiKey.isNotEmpty) {
+      await OpenAiConnectionPool.instance.warmUp(
+        openAiKey,
+        onLog: debugPrint,
       );
-    } catch (error) {
-      debugPrint('[RT-PREWARM] skipped reason=${error.runtimeType}');
     }
   }
 
-  Future<void> _prewarmStepExpandRealtimeSecret() async {
-    try {
-      await RealtimeFeatureFlags.initialize();
-      await RealtimeClientSecretPrewarm.instance.prewarm(
-        // Step Expand도 검증된 Anyone WebRTC transport를 공유한다.
-        mode: 'anyone',
-        logger: (tag, detail) => debugPrint('$tag $detail'),
-      );
-    } catch (error) {
-      debugPrint('[RT-PREWARM] step skipped reason=${error.runtimeType}');
-    }
-  }
-
-  /// 🚀 [DEEPGRAM-WARMUP] Deepgram 호스트로 가벼운 HTTPS 요청을 1회 보내 DNS/TLS를
-  /// 미리 확립한다. 실제 STT는 WebSocket을 쓰지만, 최소한 DNS 캐시가 데워져
-  /// 진입 시 소켓 연결 지연을 줄인다. 실패해도 무해(기존 진입 경로 그대로).
-  Future<void> _warmUpDeepgram() async {
+  /// 메뉴 진입 시 권한 요청과 record 플러그인 채널 초기화를 끝낸다.
+  Future<void> _prepareAnyoneAudioInput() async {
     final stopwatch = Stopwatch()..start();
     try {
-      await http
-          .get(Uri.parse('https://api.deepgram.com/v1/'))
-          .timeout(const Duration(seconds: 5));
-      debugPrint('[DEEPGRAM-WARMUP] ready ${stopwatch.elapsedMilliseconds}ms');
+      final permission = await Permission.microphone.request();
+      if (!permission.isGranted) {
+        debugPrint('[ANY-INPUT-PREWARM] permission_denied');
+        return;
+      }
+      await _anyoneAudioRecorder.hasPermission();
+      await _anyoneAudioRecorder.isRecording();
+      debugPrint(
+          '[ANY-INPUT-PREWARM] ready elapsedMs=${stopwatch.elapsedMilliseconds}');
     } catch (error) {
       debugPrint(
-          '[DEEPGRAM-WARMUP] skipped ${error.runtimeType} ${stopwatch.elapsedMilliseconds}ms');
+          '[ANY-INPUT-PREWARM] failed reason=${error.runtimeType} elapsedMs=${stopwatch.elapsedMilliseconds}');
     } finally {
       stopwatch.stop();
     }
@@ -201,11 +180,11 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
 
   @override
   void dispose() {
-    _anyonePrepMinTimer?.cancel();
-    _anyonePrepTimeoutTimer?.cancel();
     AppsFlyerManager.duoInviteSignal.removeListener(_onDuoInviteSignal);
     WidgetsBinding.instance.removeObserver(this);
     StealthRoomMaster.exitCurrentMode = null;
+    unawaited(DeepgramPrewarmSession.instance.discard(reason: 'room_dispose'));
+    unawaited(_anyoneAudioRecorder.dispose());
     super.dispose();
   }
 
@@ -218,71 +197,14 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   }
 
   void _switchMode(int newMode) {
+    if (_currentMode == newMode) return;
     if (newMode == 2) {
-      if (_preparingAnyone || _currentMode == 2) return;
-      _anyonePrepMinTimer?.cancel();
-      _anyonePrepStartedAt = DateTime.now();
-      _anyoneListeningReady = false;
-      setState(() {
-        _currentMode = null;
-        _preparingAnyone = true;
-      });
-      _startAnyonePrepTimeout();
-      return;
+      _anyoneMicInputAt = DateTime.now();
+      debugPrint(
+          '[FIRST-SPEECH] event=MIC_INPUT at=${_anyoneMicInputAt!.toIso8601String()} deltaMs=0');
     }
-    _anyonePrepMinTimer?.cancel();
-    _anyonePrepTimeoutTimer?.cancel();
-    _anyonePrepStartedAt = null;
-    _anyoneListeningReady = false;
     setState(() {
-      _preparingAnyone = false;
       _currentMode = newMode;
-    });
-  }
-
-  /// 🎤 [ENTRY-GATE] 준비 화면은 마이크가 실제로 열린 뒤에 걷는다. 다만 연결이
-  /// 끝내 실패하면 화면이 영원히 덮여 있으므로, 상한을 두고 강제로 진입시킨다.
-  /// (진입 후에도 Anyone 내부의 재시도 로직이 계속 마이크를 살린다.)
-  void _startAnyonePrepTimeout() {
-    _anyonePrepTimeoutTimer?.cancel();
-    _anyonePrepTimeoutTimer = Timer(_anyonePrepMaxWait, () {
-      if (!mounted || !_preparingAnyone) return;
-      debugPrint('[ENTRY-GATE] anyone prep timeout → 준비 화면 강제 해제');
-      _anyonePrepMinTimer?.cancel();
-      _anyonePrepStartedAt = null;
-      _anyoneListeningReady = false;
-      setState(() {
-        _preparingAnyone = false;
-        _currentMode = 2;
-      });
-    });
-  }
-
-  void _onAnyoneListeningReady() {
-    if (!mounted || !_preparingAnyone) return;
-    _anyoneListeningReady = true;
-    final startedAt = _anyonePrepStartedAt;
-    final elapsed = startedAt == null
-        ? _anyonePrepMinVisible
-        : DateTime.now().difference(startedAt);
-    final remaining = _anyonePrepMinVisible - elapsed;
-    if (remaining > Duration.zero) {
-      _anyonePrepMinTimer?.cancel();
-      _anyonePrepMinTimer = Timer(remaining, _finishAnyonePreparation);
-      return;
-    }
-    _finishAnyonePreparation();
-  }
-
-  void _finishAnyonePreparation() {
-    if (!mounted || !_preparingAnyone || !_anyoneListeningReady) return;
-    _anyonePrepMinTimer?.cancel();
-    _anyonePrepTimeoutTimer?.cancel();
-    _anyonePrepStartedAt = null;
-    _anyoneListeningReady = false;
-    setState(() {
-      _preparingAnyone = false;
-      _currentMode = 2;
     });
   }
 
@@ -467,55 +389,28 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   // ============================================================================
   @override
   Widget build(BuildContext context) {
-    if (_preparingAnyone || _currentMode == 2) {
-      return Stack(
-        children: [
-          Positioned.fill(
-            child: RoutineModeAnyone(
-              key: const ValueKey('RoutineModeAnyone'),
-              width: widget.width,
-              height: widget.height,
-              onListeningReady: _onAnyoneListeningReady,
-            ),
-          ),
-          if (_preparingAnyone)
-            Positioned.fill(
-              child: ColoredBox(
-                color: const Color(0xFF121212),
-                child: SafeArea(
-                  child: Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: const [
-                        SizedBox(
-                          width: 28,
-                          height: 28,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2.4,
-                            color: Color(0xFF7F77DD),
-                          ),
-                        ),
-                        SizedBox(height: 22),
-                        Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 40),
-                          child: Text(
-                            '여기, 그 사람이 있어요.\n편하게 말 걸어보세요.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 15,
-                              height: 1.6,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-        ],
+    if (_currentMode == 2) {
+      // 준비 화면을 거치지 않는다 — Realtime 연결 대기가 사라졌으므로 바로
+      // 진입한다. 안내 문구는 Anyone 페이지가 직접 띄운다
+      // (routine_mode_anyone.dart `_showOpeningNudgeOnce`).
+      // onListeningReady를 넘기지 않는 것이 그 스위치다.
+      return RoutineModeAnyone(
+        key: const ValueKey('RoutineModeAnyone'),
+        width: widget.width,
+        height: widget.height,
+        preparedAudioRecorder: _anyoneAudioRecorder,
+        audioPreparation: _anyoneAudioReady,
+        micInputAt: _anyoneMicInputAt,
+      );
+    }
+    if (_currentMode == 4) {
+      // 준비 화면을 거치지 않는다 — 곧바로 페이지로 들어가고, 안내 문구는
+      // 스텝 페이지가 직접 띄운다. onListeningReady를 넘기지 않는 것이 그
+      // 스위치다(routine_mode_step_expand.dart `_startSessionWaitingForUserSeed`).
+      return RoutineModeStepExpand(
+        key: const ValueKey('RoutineModeStepExpand'),
+        width: widget.width,
+        height: widget.height,
       );
     }
     if (_currentMode == 1) {
@@ -527,11 +422,6 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     } else if (_currentMode == 3) {
       return RoutineModeRoleplay(
           key: const ValueKey('RoutineModeRoleplay'),
-          width: widget.width,
-          height: widget.height);
-    } else if (_currentMode == 4) {
-      return RoutineModeStepExpand(
-          key: const ValueKey('RoutineModeStepExpand'),
           width: widget.width,
           height: widget.height);
     }

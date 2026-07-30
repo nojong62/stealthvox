@@ -32,6 +32,9 @@ import 'package:flutter/services.dart';
 import 'routine_mode_roleplay.dart' show TtsCache;
 import '/custom_code/actions/billing_ticker.dart';
 
+const String _historyListenTtsModel = 'tts-1';
+const String _historyListenTtsVoice = 'nova';
+
 /// 📦 [Box 2: 위젯 클래스 선언부]
 class ChatHistoryMaster extends StatefulWidget {
   const ChatHistoryMaster({
@@ -2670,13 +2673,13 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     _resumeHistoryFromUserAction();
     if (text.isEmpty || _apiKey.isEmpty) return;
     final historyId = widget.historyDoc.id;
-    final cacheKey = 'native_$msgId.mp3';
+    final cacheKey = 'tts1_nova_native_$msgId.mp3';
     final diskHit = await _AudioDiskCache.read(historyId, cacheKey);
     if (diskHit != null) {
       await audioPlayer.play(BytesSource(diskHit));
       return;
     }
-    final audio = await _fetchOpenAITTS(text, 1.0, 'nova');
+    final audio = await _fetchOpenAITTS(text, 1.0, _historyListenTtsVoice);
     if (audio == null || !mounted) return;
     await _AudioDiskCache.write(historyId, cacheKey, audio);
     await audioPlayer.play(BytesSource(audio));
@@ -2695,7 +2698,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
               'Content-Type': 'application/json'
             },
             body: jsonEncode({
-              'model': 'tts-1',
+              'model': _historyListenTtsModel,
               'input': text,
               'voice': voice,
               'speed': speed

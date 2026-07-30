@@ -25,6 +25,10 @@ import 'package:record/record.dart';
 import 'routine_mode_roleplay.dart' show TtsCache;
 import '/custom_code/actions/billing_ticker.dart';
 
+const String _historyListTtsModel = 'tts-1';
+const String _historyListTtsVoice = 'nova';
+const String _historyListTtsCacheVoice = 'history-tts1-nova';
+
 class ChatHistoryListMaster extends StatefulWidget {
   const ChatHistoryListMaster({
     Key? key,
@@ -961,11 +965,11 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
 
     try {
       // TtsCache 우선 조회
-      Uint8List? audio = await TtsCache.get(text, 'nova');
+      Uint8List? audio = await TtsCache.get(text, _historyListTtsCacheVoice);
       if (audio == null) {
-        audio = await _fetchTts(text, 'nova');
+        audio = await _fetchTts(text, _historyListTtsVoice);
         if (audio != null) {
-          TtsCache.put(text, 'nova', audio);
+          TtsCache.put(text, _historyListTtsCacheVoice, audio);
         }
       }
       if (audio == null || !mounted) return;
@@ -1010,7 +1014,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
           'Content-Type': 'application/json',
         },
         body: jsonEncode({
-          'model': 'tts-1',
+          'model': _historyListTtsModel,
           'input': text,
           'voice': voice,
           'speed': speed,
@@ -1376,7 +1380,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
                 decoration: BoxDecoration(
                   color: Colors.amber.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
+                  border:
+                      Border.all(color: Colors.amber.withValues(alpha: 0.3)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,

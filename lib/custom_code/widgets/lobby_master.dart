@@ -28,8 +28,25 @@ import 'package:appsflyer_sdk/appsflyer_sdk.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '/custom_code/actions/billing_ticker.dart';
+
 import 'package:purchases_flutter/purchases_flutter.dart';
 import 'dart:io' show Platform;
+
+const List<String> _lobbyVoiceOptions = <String>[
+  'verse',
+  'alloy',
+  'ballad',
+  'cedar',
+  'ash',
+  'echo',
+  'fable',
+  'onyx',
+  'coral',
+  'nova',
+  'sage',
+  'shimmer',
+  'marin',
+];
 
 /// 📦 [Box 2: 클래스 선언부]
 class LobbyMaster extends StatefulWidget {
@@ -118,10 +135,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
       setState(() => FFAppState().nativeLang = "Korean");
     if (FFAppState().targetLang == null || FFAppState().targetLang.isEmpty)
       setState(() => FFAppState().targetLang = "English");
-    // Realtime과 tts-1에서 공통 지원하는 로비 보이스만 유지한다.
-    // 기존에 저장된 보이스가 공통 목록에 없으면 기본값 echo로 되돌린다.
-    if (!["echo", "ash", "alloy", "coral", "sage", "shimmer"]
-        .contains(FFAppState().aiVoice)) {
+    if (!_lobbyVoiceOptions.contains(FFAppState().aiVoice)) {
       setState(() => FFAppState().aiVoice = "echo");
     }
   }
@@ -395,16 +409,6 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   }
 
   Widget _buildSleekVoiceSelector(String value, Function(String?) onChanged) {
-    // Realtime과 tts-1에서 공통 지원하는 보이스만 제공한다.
-    const voices = ["echo", "ash", "alloy", "coral", "sage", "shimmer"];
-    const voiceLabels = {
-      "echo": "echo(M)",
-      "ash": "ash(M)",
-      "alloy": "alloy(F)",
-      "coral": "coral(F)",
-      "sage": "sage(F)",
-      "shimmer": "shimmer(F)",
-    };
     return Container(
       height: 54,
       padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -414,16 +418,16 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           border: Border.all(color: Colors.white12)),
       child: DropdownButtonHideUnderline(
           child: DropdownButton<String>(
-        value: voices.contains(value) ? value : "echo",
+        value: _lobbyVoiceOptions.contains(value) ? value : "echo",
         dropdownColor: const Color(0xFF1E1E1E),
         isExpanded: true,
         icon: const Icon(Icons.record_voice_over_rounded,
             color: Colors.white54, size: 20),
         style: const TextStyle(
             color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
-        items: voices
-            .map((voice) => DropdownMenuItem<String>(
-                value: voice, child: Text(voiceLabels[voice]!)))
+        items: _lobbyVoiceOptions
+            .map((voice) =>
+                DropdownMenuItem<String>(value: voice, child: Text(voice)))
             .toList(),
         onChanged: onChanged,
       )),
