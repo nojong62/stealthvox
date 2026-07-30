@@ -1909,10 +1909,10 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
             onTap: _handleAutoSaveAndExit, // 🔧 [히스토리] AutoSave 연결
             behavior: HitTestBehavior.opaque,
             child: Container(
-              width: 56,
+              width: 72,
               height: 56,
               alignment: Alignment.centerLeft,
-              padding: const EdgeInsets.only(left: 4),
+              padding: const EdgeInsets.only(left: 8),
               child: const Icon(Icons.arrow_back_ios_new_rounded,
                   color: Colors.white70),
             ),

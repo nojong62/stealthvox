@@ -7,6 +7,7 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
+import 'openai_connection_pool.dart';
 import 'pcm_audio_utils.dart';
 
 class OpenAiTranscribeService {
@@ -44,7 +45,12 @@ class OpenAiTranscribeService {
         filename: 'utterance.wav',
       ));
 
-      final streamed = await request.send().timeout(timeout);
+      // 방 입장 단계에서 예열한 app-lifetime Client를 재사용한다.
+      // MultipartRequest.send()는 요청마다 새 Client를 만들어 DNS/TLS 비용이
+      // 첫 유저 음성의 지연에 다시 붙을 수 있다.
+      final streamed = await OpenAiConnectionPool.instance.client
+          .send(request)
+          .timeout(timeout);
       final body = await streamed.stream.bytesToString().timeout(timeout);
       sw.stop();
       if (streamed.statusCode != 200) {

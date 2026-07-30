@@ -1661,6 +1661,11 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
               IconButton(
                   icon: const Icon(Icons.arrow_back_ios_new_rounded,
                       color: Colors.white70),
+                  tooltip: '이전 단계',
+                  padding: EdgeInsets.zero,
+                  alignment: Alignment.centerLeft,
+                  constraints:
+                      const BoxConstraints(minWidth: 72, minHeight: 56),
                   onPressed: _handleAutoSaveAndExit),
               IconButton(
                 icon: const Icon(Icons.person_add_alt_1,

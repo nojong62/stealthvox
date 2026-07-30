@@ -4109,6 +4109,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           IconButton(
               icon: const Icon(Icons.arrow_back_ios_new_rounded,
                   color: Colors.white70),
+              tooltip: '이전 단계',
+              padding: EdgeInsets.zero,
+              alignment: Alignment.centerLeft,
+              constraints: const BoxConstraints(minWidth: 72, minHeight: 56),
               onPressed: _handleAutoSaveAndExit), // 🔧 [히스토리] AutoSave 연결
           Row(children: [
             IconButton(

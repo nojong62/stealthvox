@@ -299,6 +299,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   StreamController<String>? _specController;
   StreamSubscription<String>? _specSub;
   String _specTranscript = '';
+  Future<String?>? _prefetchedFirstTurnTranscribe;
+  int _prefetchedFirstTurnPcmBytes = 0;
   static const int COMMIT_WAIT_SPEECH_FINAL_MS =
       kFreeTalkCommitWaitMs; // speech_final: 900ms
   static const int COMMIT_WAIT_UNCERTAIN_MS =
@@ -355,8 +357,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   }
 
   /// 첫 턴 전용 전사. 실패해도 Deepgram 텍스트로 폴백하지 않는다.
-  Future<String?> _transcribeFirstTurn() async {
-    final pcm = _snapshotTurnPcm();
+  Future<String?> _transcribeFirstTurn({Uint8List? pcmOverride}) async {
+    final pcm = pcmOverride ?? _snapshotTurnPcm();
     if (pcm == null || _openAiKey.isEmpty) return null;
     _costTracker.recordRetranscribeRequest();
     final requestStartedAt = DateTime.now();
@@ -378,6 +380,22 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       _markFirstSpeech('STT_FIRST_PARTIAL_RECEIVED');
     }
     return transcript;
+  }
+
+  void _prefetchFirstTurnTranscribe() {
+    final pcm = _snapshotTurnPcm();
+    if (pcm == null || pcm.isEmpty || _openAiKey.isEmpty) return;
+    if (_prefetchedFirstTurnTranscribe != null &&
+        pcm.length <= _prefetchedFirstTurnPcmBytes) {
+      return;
+    }
+    _prefetchedFirstTurnPcmBytes = pcm.length;
+    _prefetchedFirstTurnTranscribe = _transcribeFirstTurn(pcmOverride: pcm);
+    _log(
+      '🚀 [FIRST-TRANSCRIBE-PREFETCH]',
+      'started pcmBytes=${pcm.length} '
+          'commitWaitMs=$kFreeTalkFirstTurnCommitWaitMs',
+    );
   }
 
   /// 전사가 발화가 아니라 잡음·추임새인지 판정한다. 파이프라인 진입 전 검열이
@@ -998,6 +1016,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     _commitTimer?.cancel(); // 🔧 [v3.4] 대기 중 타이머 정리
     _commitTimer = null;
     _cancelSpeculativeTranslation(); // 🚀 [SPEC] 진행 중 투기 번역 정리
+    _prefetchedFirstTurnTranscribe = null;
+    _prefetchedFirstTurnPcmBytes = 0;
     _firstUtteranceJudge.cancel();
     _pendingHeardConfirmation = null;
     _heardConfirmationAttempts = 0;
@@ -1327,8 +1347,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     // 기존 타이머 취소 (새 발화가 왔으므로 대기창 리셋)
     _commitTimer?.cancel();
 
-    // 첫 턴은 gpt-4o-transcribe, 2턴부터는 Deepgram Nova-3 결과만 쓴다.
-    // 별도 OpenAI 재전사를 병렬로 발사하지 않는다.
+    // Deepgram 확정 대기 200ms와 OpenAI 전사를 겹친다. 최종 전사 선택은
+    // 여전히 gpt-4o-transcribe만 사용하고 Deepgram 텍스트는 폐기한다.
+    if (isFirstUtterance) _prefetchFirstTurnTranscribe();
 
     // 조건부 대기 후 파이프라인 시작 예약 (source별 waitMs)
     _commitTimer = Timer(
@@ -1394,7 +1415,11 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     //   · 2턴부터 → Deepgram Nova-3
     String effectiveTranscript = committed;
     if (isFirstTurn) {
-      final firstTurnTranscript = (await _transcribeFirstTurn())?.trim();
+      final prefetchedTranscribe = _prefetchedFirstTurnTranscribe;
+      _prefetchedFirstTurnTranscribe = null;
+      _prefetchedFirstTurnPcmBytes = 0;
+      final firstTurnTranscript =
+          (await (prefetchedTranscribe ?? _transcribeFirstTurn()))?.trim();
       if (firstTurnTranscript == null || firstTurnTranscript.isEmpty) {
         _log('❌ [FIRST-TURN-STT]',
             'gpt-4o-transcribe 실패 → Deepgram 텍스트 미사용, 재청취');
@@ -2855,6 +2880,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
               Icons.arrow_back_ios_new_rounded,
               color: Colors.white70,
             ),
+            tooltip: '이전 단계',
+            padding: EdgeInsets.zero,
+            alignment: Alignment.centerLeft,
+            constraints: const BoxConstraints(minWidth: 72, minHeight: 56),
             onPressed: _handleAutoSaveAndExit,
           ),
           Expanded(
@@ -3303,6 +3332,11 @@ class DeepgramV2VoiceManager {
   int _packetCount = 0; // 🔧 수신 오디오 패킷 수 (워치독 판정용)
   bool _firstPcmSent = false;
   bool _firstPartialReceived = false;
+  bool _pcmTransportReady = false;
+  bool _disconnectInProgress = false;
+  final List<Uint8List> _pendingPcm = <Uint8List>[];
+  int _pendingPcmBytes = 0;
+  static const int _maxPendingPcmBytes = 64000; // PCM16/16kHz 약 2초
 
   DeepgramV2VoiceManager({
     required this.apiKey,
@@ -3333,6 +3367,18 @@ class DeepgramV2VoiceManager {
   void _sendPcm(List<int> data) {
     if (_isDisposed || data.isEmpty) return;
     final bytes = data is Uint8List ? data : Uint8List.fromList(data);
+    if (!_pcmTransportReady || _channel == null) {
+      _pendingPcm.add(Uint8List.fromList(bytes));
+      _pendingPcmBytes += bytes.length;
+      while (_pendingPcmBytes > _maxPendingPcmBytes && _pendingPcm.isNotEmpty) {
+        _pendingPcmBytes -= _pendingPcm.removeAt(0).length;
+      }
+      return;
+    }
+    _sendPcmNow(bytes);
+  }
+
+  void _sendPcmNow(Uint8List bytes) {
     try {
       _channel?.sink.add(bytes);
       costTracker?.addDeepgramBytes(bytes.length);
@@ -3345,6 +3391,24 @@ class DeepgramV2VoiceManager {
       }
     } catch (e) {
       _lg('❌ [DG-PCM-ERR]', 'PCM 전송 실패: $e');
+    }
+  }
+
+  void _flushPendingPcm() {
+    if (!_pcmTransportReady || _channel == null || _pendingPcm.isEmpty) return;
+    final queued = List<Uint8List>.of(_pendingPcm);
+    final queuedBytes = _pendingPcmBytes;
+    _pendingPcm.clear();
+    _pendingPcmBytes = 0;
+    _lg('📡 [DG-PCM-BUFFER]',
+        'flush packets=${queued.length} bytes=$queuedBytes');
+    for (final bytes in queued) {
+      if (!_pcmTransportReady || _channel == null) {
+        _pendingPcm.insert(0, bytes);
+        _pendingPcmBytes += bytes.length;
+        continue;
+      }
+      _sendPcmNow(bytes);
     }
   }
 
@@ -3386,12 +3450,14 @@ class DeepgramV2VoiceManager {
 
       final preconnectedChannel = _preconnectedChannel;
       _preconnectedChannel = null;
-      _channel = preconnectedChannel ??
+      final channel = preconnectedChannel ??
           IOWebSocketChannel.connect(
             uri,
             headers: {'Authorization': 'Token $apiKey'},
             pingInterval: const Duration(seconds: 10),
           );
+      _channel = channel;
+      _pcmTransportReady = true;
       _startKeepAlive();
       _lg(
           '🎤 [DG-01]',
@@ -3400,23 +3466,29 @@ class DeepgramV2VoiceManager {
               : '인증 완료된 prewarm WebSocket 채택');
 
       await _wsSub?.cancel();
-      _wsSub = _channel!.stream.listen(
+      _wsSub = channel.stream.listen(
         _handleMessage,
         onError: (e) {
+          if (!identical(_channel, channel)) return;
           _lg('❌ [DG-WS-ERR]', 'WebSocket 에러: $e');
           _handleDisconnect();
         },
         onDone: () {
+          if (!identical(_channel, channel)) return;
           _lg('🎤 [DG-WS-DONE]', 'WebSocket onDone');
           _handleDisconnect();
         },
       );
+      _flushPendingPcm();
 
-      // 🔧 [v3.1 핵심 버그 수정] 마이크 스트림 강제 재시작
+      // 소켓 재연결과 마이크 수명주기를 분리한다. 네트워크가 끊겨도 기존
+      // 로컬 캡처는 계속 유지하고, 그동안의 PCM은 위 큐에 보관한다.
       _lg('🎤 [MIC-02]', '마이크 시작 시퀀스 진입');
-      await _audioSub?.cancel();
-      _audioSub = null;
-      _lg('🎤 [MIC-03]', '기존 _audioSub 구독 해제 완료');
+      if (_audioSub != null) {
+        _lg('🎤 [MIC-03]', '기존 마이크 스트림 유지 (소켓만 재연결)');
+        return;
+      }
+      _lg('🎤 [MIC-03]', '새 마이크 스트림 연결 준비');
 
       // 마이크 입력 직후 이미 시작한 로컬 캡처가 있으면 그대로 채택한다.
       // 네트워크 연결/인증을 기다린 뒤 startStream을 호출하지 않는다.
@@ -3605,33 +3677,39 @@ class DeepgramV2VoiceManager {
   }
 
   Future<void> _handleDisconnect() async {
-    if (_isDisposed) return;
+    if (_isDisposed || _disconnectInProgress) return;
+    _disconnectInProgress = true;
+    _pcmTransportReady = false;
     _keepAliveTimer?.cancel();
     _keepAliveTimer = null;
-    await _audioSub?.cancel();
-    _audioSub = null;
-    await _activePreparedCapture?.stop();
-    _activePreparedCapture = null;
-    if (shouldReconnect != null && !shouldReconnect!()) {
-      _lg('🎤 [DG-RETRY-SKIP]', '재연결 조건 불충족');
-      return;
-    }
-    _isConnected = false;
-    if (_retryCount < _maxRetries) {
-      _retryCount++;
-      _lg('🎤 [DG-RETRY]', '재연결 시도 $_retryCount/$_maxRetries');
-      onReconnecting?.call(_retryCount); // 🔧 선택적 콜백 호출
-      final delay = Duration(milliseconds: 500 * (1 << (_retryCount - 1)));
-      await Future.delayed(delay);
-      if (!_isDisposed && (shouldReconnect == null || shouldReconnect!())) {
-        await _connect();
-      } else {
-        _lg('🎤 [DG-RETRY-SKIP]', '재연결 지연 중 상태 변경');
+    _channel = null;
+    try {
+      if (shouldReconnect != null && !shouldReconnect!()) {
+        _lg('🎤 [DG-RETRY-SKIP]', '재연결 조건 불충족');
+        return;
       }
-    } else {
-      _lg('❌ [DG-GIVEUP]', '재연결 최대치 도달');
-      onGaveUp?.call(); // 🔧 선택적 콜백 호출
-      onError('Connection lost');
+      _isConnected = false;
+      if (_retryCount < _maxRetries) {
+        _retryCount++;
+        _lg('🎤 [DG-RETRY]', '재연결 시도 $_retryCount/$_maxRetries');
+        onReconnecting?.call(_retryCount); // 🔧 선택적 콜백 호출
+        final delay = Duration(milliseconds: 500 * (1 << (_retryCount - 1)));
+        await Future.delayed(delay);
+        if (!_isDisposed && (shouldReconnect == null || shouldReconnect!())) {
+          // 새 소켓도 즉시 실패할 수 있으므로 다음 disconnect 이벤트를
+          // _connect 호출 전에 다시 받을 수 있게 한다.
+          _disconnectInProgress = false;
+          await _connect();
+        } else {
+          _lg('🎤 [DG-RETRY-SKIP]', '재연결 지연 중 상태 변경');
+        }
+      } else {
+        _lg('❌ [DG-GIVEUP]', '재연결 최대치 도달');
+        onGaveUp?.call(); // 🔧 선택적 콜백 호출
+        onError('Connection lost');
+      }
+    } finally {
+      _disconnectInProgress = false;
     }
   }
 
@@ -3642,6 +3720,9 @@ class DeepgramV2VoiceManager {
     _micWatchdog = null;
     _keepAliveTimer?.cancel();
     _keepAliveTimer = null;
+    _pcmTransportReady = false;
+    _pendingPcm.clear();
+    _pendingPcmBytes = 0;
     await _preparedCapture?.stop();
     _preparedCapture = null;
     await _activePreparedCapture?.stop();

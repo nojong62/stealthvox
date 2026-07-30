@@ -91,6 +91,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   String roomName = "";
   bool _isActionLocked = false;
   bool _isEnteringPractice = false;
+  bool _isOpeningNextHistory = false;
   Map<String, dynamic>? _cachedRoomData;
 
   // 📦 [Box 4: 상태 변수 - Shadowing 상태 머신]
@@ -438,6 +439,66 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     }
     if (!mounted) return;
     context.pushReplacementNamed('ChatHistory');
+  }
+
+  Future<void> _openNextHistoryInSameMode() async {
+    if (_isOpeningNextHistory) return;
+    _resumeHistoryFromUserAction();
+    setState(() => _isOpeningNextHistory = true);
+    try {
+      var currentData = _cachedRoomData;
+      if (currentData == null) {
+        final currentSnapshot = await widget.historyDoc.get();
+        currentData = currentSnapshot.data() as Map<String, dynamic>?;
+      }
+      final currentModeKey = _historyModeKey(currentData);
+      final snapshot = await widget.historyDoc.parent
+          .orderBy('is_pinned', descending: true)
+          .orderBy('created_at', descending: true)
+          .get();
+
+      final sameModeDocs = snapshot.docs.where((doc) {
+        final data = doc.data() as Map<String, dynamic>?;
+        return data?['last_message'] != null &&
+            _historyModeKey(data) == currentModeKey;
+      }).toList();
+      final currentIndex =
+          sameModeDocs.indexWhere((doc) => doc.id == widget.historyDoc.id);
+      final DocumentSnapshot? nextDoc =
+          currentIndex >= 0 && currentIndex + 1 < sameModeDocs.length
+              ? sameModeDocs[currentIndex + 1]
+              : null;
+
+      if (!mounted) return;
+      if (nextDoc == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('같은 모드의 다음 대화가 없습니다.'),
+            duration: Duration(seconds: 1),
+          ),
+        );
+        return;
+      }
+      context.pushReplacementNamed(
+        'ChatDetail',
+        queryParameters: {
+          'historyRef':
+              serializeParam(nextDoc.reference, ParamType.DocumentReference),
+        }.withoutNulls,
+      );
+    } catch (e) {
+      debugPrint('[openNextHistoryInSameMode] $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('다음 대화를 불러오지 못했습니다.'),
+            duration: Duration(seconds: 1),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isOpeningNextHistory = false);
+    }
   }
 
   Future<void> _deleteMessage(DocumentReference msgRef) async {
@@ -3623,7 +3684,10 @@ RULES — follow exactly:
                   onTap: () => context.pop(),
                   behavior: HitTestBehavior.opaque,
                   child: Container(
-                    padding: const EdgeInsets.all(12),
+                    width: 64,
+                    height: 56,
+                    alignment: Alignment.centerLeft,
+                    padding: const EdgeInsets.only(left: 8),
                     child: const Icon(Icons.keyboard_arrow_left,
                         color: Colors.amber, size: 28),
                   )),
@@ -4035,12 +4099,41 @@ RULES — follow exactly:
             if (isLast) ...[
               Align(
                 alignment: Alignment.centerRight,
-                child: GestureDetector(
-                  onTap: _deleteHistoryRoom,
-                  child: const Padding(
-                    padding: EdgeInsets.fromLTRB(8, 0, 4, 4),
-                    child: Icon(Icons.delete_outline_rounded,
-                        color: Colors.white54, size: 22),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 0, 0, 4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        onPressed: _deleteHistoryRoom,
+                        tooltip: '대화 삭제',
+                        icon: const Icon(
+                          Icons.delete_outline_rounded,
+                          color: Colors.white54,
+                          size: 22,
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: _isOpeningNextHistory
+                            ? null
+                            : _openNextHistoryInSameMode,
+                        tooltip: '같은 모드의 다음 대화',
+                        icon: _isOpeningNextHistory
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.amber,
+                                ),
+                              )
+                            : const Icon(
+                                Icons.arrow_forward_rounded,
+                                color: Colors.amber,
+                                size: 24,
+                              ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -6615,8 +6708,18 @@ RULES — follow exactly:
     if (room == 'Clone Mode') return 'clone';
     if (room == 'Roleplay Mode') return 'roleplay';
     if (room == 'FreeTalk Mode' || room == 'Free Talk Mode') return 'free_talk';
-    if (room == 'Duo Mode') return 'duo';
+    if (room == 'Anyone') return 'free_talk';
+    if (room == 'Duo Mode' || room == 'Duo Connect Mode') return 'duo';
+    if (room == 'Step.Ex Mode' || room == 'Step Expand Mode') {
+      return 'step_expand';
+    }
     return '';
+  }
+
+  String _historyModeKey(Map<String, dynamic>? data) {
+    final inferred = _inferHistoryMode(data);
+    if (inferred.isNotEmpty) return 'mode:$inferred';
+    return 'room:${_normalizeHistoryMode(_historyString(data, 'room_name'))}';
   }
 
   Future<String> _fetchCloneNameForHistory(String cloneId) async {

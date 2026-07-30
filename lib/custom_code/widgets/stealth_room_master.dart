@@ -454,6 +454,11 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
                 IconButton(
                     icon: const Icon(Icons.arrow_back_ios_new,
                         color: Colors.white, size: 22),
+                    tooltip: '이전 단계',
+                    padding: EdgeInsets.zero,
+                    alignment: Alignment.centerLeft,
+                    constraints:
+                        const BoxConstraints(minWidth: 64, minHeight: 56),
                     onPressed: () => context.pop()),
               ]),
               GestureDetector(

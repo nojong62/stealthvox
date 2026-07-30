@@ -67,6 +67,13 @@ class DeepgramPrewarmSession {
   String _languageCode = '';
   Future<bool>? _preparing;
   Timer? _keepAliveTimer;
+  DateTime? _readyAt;
+
+  // Deepgram can close an audio WebSocket that has stayed idle even when the
+  // client-side channel object still exists. A stale channel is worse than a
+  // fresh connection because it fails immediately after microphone adoption
+  // and forces the recorder to restart.
+  static const Duration _maxAdoptableAge = Duration(seconds: 12);
 
   Future<bool> prepare({
     required String apiKey,
@@ -116,6 +123,7 @@ class DeepgramPrewarmSession {
       _channel = channel;
       _apiKey = apiKey;
       _languageCode = languageCode;
+      _readyAt = DateTime.now();
       _keepAliveTimer = Timer.periodic(const Duration(seconds: 5), (_) {
         try {
           _channel?.sink.add(jsonEncode({'type': 'KeepAlive'}));
@@ -142,7 +150,17 @@ class DeepgramPrewarmSession {
     if (_apiKey != apiKey || _languageCode != languageCode) return null;
     final channel = _channel;
     if (channel == null) return null;
+    final readyAt = _readyAt;
+    final age =
+        readyAt == null ? _maxAdoptableAge : DateTime.now().difference(readyAt);
+    if (age >= _maxAdoptableAge) {
+      onLog?.call(
+          '[DG-PREWARM] stale ageMs=${age.inMilliseconds} → fresh connect');
+      unawaited(discard(reason: 'stale'));
+      return null;
+    }
     _channel = null;
+    _readyAt = null;
     _keepAliveTimer?.cancel();
     _keepAliveTimer = null;
     onLog?.call('[DG-PREWARM] adopted lang=$languageCode');
@@ -154,6 +172,7 @@ class DeepgramPrewarmSession {
     _keepAliveTimer = null;
     final channel = _channel;
     _channel = null;
+    _readyAt = null;
     if (channel != null) {
       try {
         await channel.sink.close();

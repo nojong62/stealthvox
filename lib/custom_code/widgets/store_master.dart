@@ -1120,6 +1120,11 @@ class _StoreMasterState extends State<StoreMaster> {
                         IconButton(
                           icon: const Icon(Icons.arrow_back_ios_new_rounded,
                               color: Colors.white, size: 20),
+                          tooltip: '이전 단계',
+                          padding: EdgeInsets.zero,
+                          alignment: Alignment.centerLeft,
+                          constraints:
+                              const BoxConstraints(minWidth: 64, minHeight: 56),
                           onPressed: () => Navigator.pop(context),
                         ),
                         GestureDetector(
