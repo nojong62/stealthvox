@@ -34,7 +34,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:permission_handler/permission_handler.dart';
 // 🔧 [v3 추가] TTS 로컬 캐싱 + Firestore 저장용
 import 'dart:io';
-import 'dart:ui' as ui;
 import 'package:path_provider/path_provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -195,8 +194,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   double _fontScale = 1.0;
   // 기본 화면은 목표 언어만 표시한다. 상단 언어 버튼을 눌렀을 때만
   // 원문을 함께 보여 준다.
-  bool _showOriginal = false;
   bool _showUsageGuide = false; // 🆕 [Anyone] 이용방법 말풍선 토글
+  String? _selectedAiVoice;
+  bool _showVoiceMenu = true;
   // 🆕 [진입 안내] 스텔스룸 준비 오버레이에 있던 문구를 페이지 안으로 옮겼다
   //   (Realtime 연결 대기가 사라져 준비 화면 자체가 제거됨). Step Expand의
   //   _showOpeningNudgeOnce와 같은 방식 — 2초 노출 후 페이드아웃.
@@ -366,9 +366,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     final transcript = await OpenAiTranscribeService.transcribePcm16(
       apiKey: _openAiKey,
       pcm: pcm,
-      language: _mapLanguageToCode(FFAppState().nativeLang.isNotEmpty
-          ? FFAppState().nativeLang
-          : 'Korean'),
+      language: _mapLanguageToCode('Korean'),
       model: OpenAiTranscribeService.firstTurnModel,
       timeout:
           const Duration(milliseconds: kFreeTalkFirstTurnRetranscribeTimeoutMs),
@@ -544,10 +542,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           duration: const Duration(milliseconds: 350),
           curve: Curves.easeOut,
           child: Container(
-            width: double.infinity,
-            constraints: const BoxConstraints(maxWidth: 420),
-            margin: const EdgeInsets.symmetric(horizontal: 20),
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
+            margin: const EdgeInsets.symmetric(horizontal: 36),
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
             decoration: BoxDecoration(
               color: const Color(0xFF1E1E22).withValues(alpha: 0.92),
               borderRadius: BorderRadius.circular(20),
@@ -566,11 +562,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
             child: const Text(
               _openingNudgeText,
               textAlign: TextAlign.center,
-              textScaler: TextScaler.noScaling,
               softWrap: true,
               style: TextStyle(
                 color: Colors.white,
-                fontSize: 17,
+                fontSize: 15,
                 height: 1.5,
                 fontWeight: FontWeight.w500,
               ),
@@ -669,8 +664,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       results: List<DeepgramTurnResult>.from(_pendingDeepgramResults),
     );
     _pendingDeepgramResults.clear();
-    final nativeLanguage =
-        FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
+    const nativeLanguage = 'Korean';
     final languageCode = _mapLanguageToCode(nativeLanguage);
     // Decision/classification logic always runs (keeps the probe pathway live).
     final probe = DeepgramConfidenceProbe.evaluate(
@@ -793,7 +787,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   final Stopwatch _swOpenAI = Stopwatch();
   final Stopwatch _swTTS = Stopwatch();
   String _debugResult = "⏱️ 대기 중";
-  DateTime? _lastScrollThrottle;
 
   @override
   void initState() {
@@ -990,6 +983,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   /// 짧게 재확인한다. 재입장으로 우연히 초기화되는 동작에 의존하지 않는다.
   void _scheduleStartupRetry({bool immediate = false}) {
     if (!mounted || _isConversationActive || _isStartingListening) return;
+    if (_selectedAiVoice == null) return;
     _startupRetryTimer?.cancel();
     final delay = immediate ? Duration.zero : const Duration(milliseconds: 750);
     _startupRetryTimer = Timer(delay, () async {
@@ -1012,6 +1006,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     if (!mounted) return;
     if (_isConversationActive) return; // 중복 시작 방지
     if (_isStartingListening) return;
+    if (_selectedAiVoice == null) {
+      _log('🎙️ [VOICE-GATE]', 'AI 보이스 미선택 → 시작 보류');
+      return;
+    }
     // 🆕 첫 진입 race 방지: 키와 마이크 권한이 "둘 다" 준비됐을 때만 시작한다.
     //    준비 안 된 항목이 있으면 조용히 대기 → 키 로드 콜백(_fetchKeys) 또는
     //    권한 콜백(_initPermissions) 중 늦게 끝나는 쪽이 이 함수를 다시 호출해 시작.
@@ -1226,11 +1224,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         _voiceManager = null;
       }
 
-      // 🌐 [v3.1] 로비에서 유저가 선택한 모국어(nativeLang)로 Deepgram 인식
-      // 유저가 한국어로 말하면 Deepgram이 한국어로 인식 → Brain이 영어로 번역
-      final String nativeLang = FFAppState().nativeLang.isNotEmpty
-          ? FFAppState().nativeLang
-          : 'Korean';
+      // Anyone 대화방의 실제 대화 언어는 항상 한국어다.
+      const String nativeLang = 'Korean';
       final String dgLangCode = _mapLanguageToCode(nativeLang);
       _log('🌐 [LANG]',
           'nativeLang="$nativeLang" → Deepgram code="$dgLangCode"');
@@ -1611,9 +1606,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     final controller = StreamController<String>();
     _specController = controller;
     // 첫 턴은 대화 컨텍스트가 없으므로 contextStr은 빈 문자열(파이프라인과 동일).
-    final String targetLangName = FFAppState().targetLang.isNotEmpty
-        ? FFAppState().targetLang
-        : 'English';
+    const String targetLangName = 'English';
     _log('🚀 [SPEC-START]', 'first-turn 투기 번역 시작: len=${text.length}');
     _specSub = FreeTalkBrain.streamUserTranslation(
       apiKey: _openAiKey,
@@ -1669,37 +1662,32 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 //   STEP 1: 증발 검열 (고스트워드/너무 짧음 → 조용히 폐기)
 //   STEP 2: HOST 풍선 + 유저 번역 스트리밍 (CoT 주어 복원)
 //   STEP 3: 사용자 원문·번역 텍스트 확정 (대화방에서는 사용자 TTS 미재생)
-//   STEP 4: AI 응답 스트리밍 + TTS 선요청·재생
-//   STEP 5: AI 역번역 + Firestore 저장
-//   STEP 6: 사용자 두 언어 음성을 히스토리 캐시에 백그라운드 생성
+//   STEP 4: AI 한국어 응답 스트리밍 + 선택 보이스 TTS 재생
+//   STEP 5: AI 영어 번역 + 한·영 텍스트 Firestore 저장
+//   STEP 6: 유저·AI 영어 음성을 히스토리 규칙으로 백그라운드 생성
 //   STEP 7: 마이크 재개방
 // ====================================================================
-  String _retryPhrase(String lang) {
-    switch (lang.toLowerCase()) {
-      case 'japanese':
-        return 'もう一度お願いします。';
-      case 'chinese':
-        return '请再说一遍。';
-      case 'french':
-        return 'Pardon?';
-      case 'spanish':
-        return '¿Perdón?';
-      case 'german':
-        return 'Wie bitte?';
-      default:
-        return 'Pardon?';
-    }
-  }
-
   /// 🔊 안내/시스템 문구 1건을 어댑터로 재생하고 끝날 때까지 기다린다.
   ///   모델·보이스 매핑은 어댑터가 정한다 — 여기서 모델명을 쓰지 않는다.
   Future<void> _speakSystemLine(String text,
       {Duration timeout = const Duration(seconds: 15)}) async {
     if (!mounted || text.trim().isEmpty) return;
-    _costTracker.recordTtsRequest(text.length);
+    final voice = _selectedAiVoice;
+    if (voice == null) return;
+    String spokenText = text.trim();
+    if (!RegExp(r'[가-힣]').hasMatch(spokenText) && _openAiKey.isNotEmpty) {
+      spokenText = await FreeTalkBrain.generateCleanOriginal(
+        apiKey: _openAiKey,
+        englishText: spokenText,
+      );
+      if (!RegExp(r'[가-힣]').hasMatch(spokenText)) {
+        spokenText = '조금 더 자세히 말씀해 주세요.';
+      }
+    }
+    _costTracker.recordTtsRequest(spokenText.length);
     final utterance = _ttsAdapter.speak(TtsRequest(
-      text: text,
-      voiceId: 'nova',
+      text: spokenText,
+      voiceId: voice,
       speakerType: TtsSpeakerType.system,
       turnId: 'sys-${DateTime.now().microsecondsSinceEpoch}',
       generationId: _pipelineGeneration,
@@ -1712,55 +1700,45 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     }
   }
 
-  /// 사용자 원문과 목표 언어 문장을 대화방에서는 재생하지 않고 히스토리용
-  /// 음성으로만 만든다. AI 답변과 저장이 끝난 뒤 호출하므로 실시간 응답 경로를
-  /// 기다리게 하지 않는다. 동일 언어·동일 문장은 한 번만 생성한다.
-  void _cacheUserSpeechForHistory({
-    required String originalText,
+  /// 대화방의 한국어 원음/TTS는 저장하지 않고, 히스토리 연습에서 사용하는
+  /// 목표 언어 문장만 기존 화자별 보이스 규칙으로 백그라운드 생성한다.
+  void _cacheTargetSpeechForHistory({
     required String targetText,
     required int turnId,
     required int generationId,
+    required bool isAi,
   }) {
-    final texts = <String>{
-      if (originalText.trim().isNotEmpty) originalText.trim(),
-      if (targetText.trim().isNotEmpty) targetText.trim(),
-    };
-    final historyVoiceKey =
-        '${TtsAdapterConfig.model}_${TtsAdapterConfig.userVoice}';
-    var index = 0;
-    for (final text in texts) {
-      index++;
-      final itemIndex = index;
-      _costTracker.recordTtsRequest(text.length);
-      unawaited(
-        _ttsAdapter
-            .synthesizeForHistory(
-              TtsRequest(
-                text: text,
-                voiceId: TtsAdapterConfig.userVoice,
-                speakerType: TtsSpeakerType.user,
-                turnId: 'user-history-$turnId-$itemIndex',
-                generationId: generationId,
-                saveToHistory: true,
-                historyVoiceKey: historyVoiceKey,
-                playbackCategory: 'history_only',
-              ),
-            )
-            .then((ok) => _log(
-                  '🔊 [USER-HISTORY-TTS]',
-                  'turn=$turnId item=$itemIndex cached=$ok len=${text.length}',
-                )),
-      );
-    }
+    final text = targetText.trim();
+    if (text.isEmpty) return;
+    final voice = isAi ? TtsAdapterConfig.aiVoice : TtsAdapterConfig.userVoice;
+    final historyVoiceKey = '${TtsAdapterConfig.model}_$voice';
+    _costTracker.recordTtsRequest(text.length);
+    unawaited(
+      _ttsAdapter
+          .synthesizeForHistory(
+            TtsRequest(
+              text: text,
+              voiceId: voice,
+              speakerType: isAi ? TtsSpeakerType.ai : TtsSpeakerType.user,
+              turnId: '${isAi ? 'ai' : 'user'}-history-$turnId',
+              generationId: generationId,
+              saveToHistory: true,
+              historyVoiceKey: historyVoiceKey,
+              playbackCategory: 'history_only',
+            ),
+          )
+          .then((ok) => _log(
+                '🔊 [TARGET-HISTORY-TTS]',
+                'turn=$turnId role=${isAi ? 'AI' : 'USER'} '
+                    'cached=$ok len=${text.length}',
+              )),
+    );
   }
 
   Future<void> _playRetryPromptOnly() async {
     if (!mounted || !_isConversationActive) return;
-    final lang = FFAppState().targetLang.isNotEmpty
-        ? FFAppState().targetLang
-        : 'English';
     _ttsAdapter.stopAll(reason: 'retry_prompt');
-    await _speakSystemLine(_retryPhrase(lang));
+    await _speakSystemLine('다시 한 번 말씀해 주세요.');
   }
 
   Future<void> _speakRetryAndListen() async {
@@ -1963,25 +1941,23 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
                 '${m['role'] == 'user' ? 'User' : 'AI'}: ${m['content']}')
             .join('\n');
       } else {
-        var validMsgs = _localMessages.where((m) {
+        var validMsgs = _localMessages.take(hostIndex).where((m) {
           if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
-          final target = (m['target'] ?? '').toString().trim();
-          return target.isNotEmpty && target != '...';
+          final original = (m['original'] ?? '').toString().trim();
+          return original.isNotEmpty && original != '...';
         }).toList();
         if (validMsgs.length > 10)
           validMsgs = validMsgs.sublist(validMsgs.length - 10);
         contextStr = validMsgs
-            .map(
-                (m) => "${m['role'] == 'HOST' ? 'User' : 'AI'}: ${m['target']}")
+            .map((m) =>
+                "${m['role'] == 'HOST' ? 'User' : 'AI'}: ${m['original']}")
             .join("\n");
       }
 
       String userTargetText = "";
 
-      // 🌐 [v3.1] 로비에서 유저가 선택한 타겟 언어로 번역
-      final String targetLangName = FFAppState().targetLang.isNotEmpty
-          ? FFAppState().targetLang
-          : 'English';
+      // Anyone 화면과 히스토리 연습의 목표 언어는 항상 영어다.
+      const String targetLangName = 'English';
 
       // 첫 정상 턴에 이전 문맥이 없을 때만 짧은 전용 프롬프트를 쓴다.
       // 정정/확인 규칙이 필요한 이후 턴은 기존 정밀 프롬프트를 그대로 유지한다.
@@ -2325,11 +2301,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       int aiIndex = _localMessages.length - 1;
 
       String latestContextStr = contextStr.isEmpty
-          ? "User: $userTargetText"
-          : "$contextStr\nUser: $userTargetText";
-      String aiTargetText = "";
-      // 애니원에서는 사용자 번역 음성을 재생하지 않으므로 AI 텍스트를 즉시 표시.
-      const bool userPlaybackFinished = true;
+          ? "User: $finalTranscript"
+          : "$contextStr\nUser: $finalTranscript";
+      String aiOriginalText = "";
       // 정정 턴은 삭제한 직전 턴과 같은 화면 turn 번호를 재사용한다. TTS
       // 중복 방지 키까지 같으면 새 AI 음성이 차단되므로 정정 재생에만 고유 ID.
       final String aiTtsTurnId = isCorrectionRetry
@@ -2339,7 +2313,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       _swOpenAI.reset();
       _swOpenAI.start();
 
-      _log('🧠 [PIPE-02]', 'AI 스트림 요청: userText="$userTargetText"');
+      _log('🧠 [PIPE-02]', 'AI 한국어 스트림 요청: userText="$finalTranscript"');
       _logProbeTiming('AI_REQUEST');
       _awaitingAiFirstTextProbe = true;
 
@@ -2348,9 +2322,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       _log('🎙️ [LEAD]', 'turn=$currentTurnId allow_question=$allowAiQuestion');
       final aiStream = FreeTalkBrain.streamFreeTalkResponse(
         apiKey: _openAiKey,
-        userTargetText: userTargetText,
+        userTargetText: finalTranscript,
         contextStr: latestContextStr,
-        myTarget: targetLangName,
+        myTarget: 'Korean',
         level: _freeTalkLevel,
         allowQuestion: allowAiQuestion,
       );
@@ -2380,25 +2354,14 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
             _firstAiChunkLogged = true;
           }
           if (_swOpenAI.isRunning) _swOpenAI.stop();
-          aiTargetText += chunk;
-          // 🔧 AI 영어 텍스트는 유저 TTS 재생 완료 후에만 표시.
-          if (mounted && userPlaybackFinished) {
-            setState(() => _localMessages[aiIndex]['target'] = aiTargetText);
-            final _scrollNow = DateTime.now();
-            if (_lastScrollThrottle == null ||
-                _scrollNow.difference(_lastScrollThrottle!) >=
-                    const Duration(milliseconds: 250)) {
-              _lastScrollThrottle = _scrollNow;
-              _scrollToCurrent(aiIndex);
-            }
-          }
+          aiOriginalText += chunk;
         }
       }();
 
       // 🚀 AI 텍스트가 먼저 완성되면 사용자 번역 음성 재생 중에도 TTS HTTP
       // 요청과 PCM 수신을 시작한다. 실제 재생은 아래에서 사용자 음성이 끝난
       // 뒤 FIFO 큐에 연결하므로 두 음성은 겹치지 않는다.
-      Future<String>? aiOriginalFuture;
+      Future<String>? aiTargetFuture;
       final Future<void> aiPreparationTask = aiGenerationTask.then((_) {
         if (!isActivePipelineGeneration(
               expected: pipelineGeneration,
@@ -2410,26 +2373,29 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           return;
         }
 
-        if (aiTargetText.trim().isNotEmpty) {
-          aiOriginalFuture = FreeTalkBrain.generateCleanOriginal(
-              apiKey: _openAiKey, englishText: aiTargetText);
+        if (aiOriginalText.trim().isNotEmpty) {
+          aiTargetFuture = FreeTalkBrain.translateKoreanToTarget(
+            apiKey: _openAiKey,
+            koreanText: aiOriginalText,
+            targetLang: targetLangName,
+          );
         }
-        final String aiTtsText = _cleanText(aiTargetText.trim());
+        final String aiTtsText = _cleanText(aiOriginalText.trim());
         if (aiTtsText.isEmpty) return;
+        final voice = _selectedAiVoice;
+        if (voice == null) return;
         _costTracker.recordTtsRequest(aiTtsText.length);
         aiTtsPrefetch = _ttsAdapter.prefetch(TtsRequest(
           text: aiTtsText,
-          voiceId: TtsAdapterConfig.aiVoice,
+          voiceId: voice,
           speakerType: TtsSpeakerType.ai,
           turnId: aiTtsTurnId,
           generationId: pipelineGeneration,
-          saveToHistory: true,
-          historyVoiceKey: 'nova',
+          saveToHistory: false,
         ));
         _log(
           '🚀 [AI-TTS-PREFETCH]',
-          'started userPlaybackFinished=$userPlaybackFinished '
-              'len=${aiTtsText.length}',
+          'started language=Korean voice=$voice len=${aiTtsText.length}',
         );
       });
 
@@ -2449,12 +2415,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
       await aiPreparationTask;
       _log('🧠 [PIPE-07]',
-          'AI 텍스트/TTS 선요청 준비 (len=${aiTargetText.length}) → AI 음성 시작');
+          'AI 한국어/TTS 선요청 준비 (len=${aiOriginalText.length}) → AI 음성 시작');
       _awaitingAiFirstAudioProbe = true;
-      if (mounted && aiTargetText.isNotEmpty) {
-        setState(() => _localMessages[aiIndex]['target'] = aiTargetText);
-        _scrollToCurrent(aiIndex);
-      }
 
       final prefetched = aiTtsPrefetch;
       if (prefetched != null) {
@@ -2472,19 +2434,25 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       // ─────────────────────────────────────────────────────
       // STEP 7: Firestore 저장
       // ─────────────────────────────────────────────────────
-      String aiOriginalText = '';
-      if (aiTargetText.trim().isNotEmpty) {
+      String aiTargetText = '';
+      if (aiOriginalText.trim().isNotEmpty) {
         try {
-          aiOriginalText = await (aiOriginalFuture ??
-              FreeTalkBrain.generateCleanOriginal(
-                  apiKey: _openAiKey, englishText: aiTargetText));
-          _log('🔤 [AI-ORIG]', 'AI original 생성 완료 → UI 반영 및 저장');
+          aiTargetText = await (aiTargetFuture ??
+              FreeTalkBrain.translateKoreanToTarget(
+                apiKey: _openAiKey,
+                koreanText: aiOriginalText,
+                targetLang: targetLangName,
+              ));
+          _log('🔤 [AI-TARGET]', 'AI 영어 번역 완료 → UI 반영 및 저장');
           if (mounted && _localMessages.length > aiIndex) {
-            setState(
-                () => _localMessages[aiIndex]['original'] = aiOriginalText);
+            setState(() {
+              _localMessages[aiIndex]['target'] = aiTargetText;
+              _localMessages[aiIndex]['original'] = aiOriginalText;
+            });
+            _scrollToCurrent(aiIndex);
           }
         } catch (e) {
-          _log('❌ [AI-ORIG-ERR]', 'AI original 생성 실패: $e');
+          _log('❌ [AI-TARGET-ERR]', 'AI 영어 번역 실패: $e');
         }
       }
 
@@ -2509,12 +2477,18 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       _saveTurnToFirestore([hostLine, systemLine]);
       _saveHistoryMessages([hostLine, systemLine]); // 🔧 [히스토리] 병행 저장
       _saveRecentHistory(
-          userTargetText, aiTargetText); // 🧠 [장기 기억] 백그라운드 메모리 업데이트
-      _cacheUserSpeechForHistory(
-        originalText: hostOriginal,
+          hostOriginal, aiOriginalText); // 🧠 [한국어 대화 문맥] 백그라운드 메모리 업데이트
+      _cacheTargetSpeechForHistory(
         targetText: userTargetText,
         turnId: currentTurnId,
         generationId: pipelineGeneration,
+        isAi: false,
+      );
+      _cacheTargetSpeechForHistory(
+        targetText: aiTargetText,
+        turnId: currentTurnId,
+        generationId: pipelineGeneration,
+        isAi: true,
       );
       _log('🧠 [PIPE-10]', 'Firestore 저장 호출 완료');
     } catch (e) {
@@ -2704,8 +2678,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         'is_pinned': false,
         'msg_count': 0,
         // 세션 생성 당시 언어 식별값 보존(History 동일 언어 판정용)
-        'native_lang': FFAppState().nativeLang,
-        'target_lang': FFAppState().targetLang,
+        'native_lang': 'Korean',
+        'target_lang': 'English',
       });
       BillingTicker.instance.setSessionIdentifiers(
         sessionDocId: _sessionDocId,
@@ -2729,10 +2703,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         await _myHistoryRef!.collection('messages').add({
           'role': line['role'] ?? '',
           'translated_text': translated,
-          'original_text': (FFAppState().nativeLang.isNotEmpty &&
-                  FFAppState().nativeLang == FFAppState().targetLang)
-              ? ''
-              : (line['original_text'] ?? '').toString(),
+          'original_text': (line['original_text'] ?? '').toString(),
           'created_at': FieldValue.serverTimestamp(),
         });
       }
@@ -2864,10 +2835,135 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
               _buildNudgeBubble(), // 🆕 [진입 안내] 스텔스룸에서 옮겨온 문구
               if (trialMode) buildTrialCountdown(),
               if (_showUsageGuide) _buildUsageGuide(), // 🆕 [Anyone] 이용방법 말풍선
+              if (_showVoiceMenu) _buildVoiceMenu(),
             ]),
           ),
           _buildControlArea(bottomPad),
         ]),
+      ),
+    );
+  }
+
+  Widget _buildVoiceMenu() {
+    Widget choice({
+      required String gender,
+      required String voice,
+      required IconData icon,
+    }) {
+      final selected = _selectedAiVoice == voice;
+      return Expanded(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () {
+            setState(() {
+              _selectedAiVoice = voice;
+              _showVoiceMenu = false;
+            });
+            _log('🎙️ [VOICE-SELECT]', 'voice=$voice gender=$gender');
+            _scheduleStartupRetry(immediate: true);
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+            decoration: BoxDecoration(
+              color: selected
+                  ? const Color(0xFF7F77DD).withValues(alpha: 0.28)
+                  : Colors.white.withValues(alpha: 0.06),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: selected
+                    ? const Color(0xFF9B93FF)
+                    : Colors.white.withValues(alpha: 0.14),
+              ),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon,
+                    color: selected ? const Color(0xFFB9B4FF) : Colors.white70,
+                    size: 23),
+                const SizedBox(height: 7),
+                Text('$gender 추천',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600)),
+                const SizedBox(height: 3),
+                Text(voice,
+                    style: TextStyle(
+                        color:
+                            selected ? const Color(0xFFB9B4FF) : Colors.white54,
+                        fontSize: 12)),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    Widget ageRow(String age, String maleVoice, String femaleVoice) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(age,
+              style: const TextStyle(
+                  color: Colors.amberAccent,
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Row(children: [
+            choice(gender: '남성', voice: maleVoice, icon: Icons.male_rounded),
+            const SizedBox(width: 10),
+            choice(
+                gender: '여성', voice: femaleVoice, icon: Icons.female_rounded),
+          ]),
+        ],
+      );
+    }
+
+    return Positioned.fill(
+      child: Container(
+        color: Colors.black.withValues(alpha: 0.72),
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+        child: SingleChildScrollView(
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 420),
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: const Color(0xFF242428),
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(
+                  color: const Color(0xFF7F77DD).withValues(alpha: 0.65)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(children: [
+                  Icon(Icons.record_voice_over_rounded,
+                      color: Colors.amberAccent, size: 23),
+                  SizedBox(width: 9),
+                  Text('AI 보이스 선택',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold)),
+                ]),
+                const SizedBox(height: 8),
+                const Text(
+                  '연령대와 성별에 맞는 보이스를 선택하면 대화가 시작됩니다.',
+                  style: TextStyle(
+                      color: Colors.white60, fontSize: 13, height: 1.45),
+                ),
+                const SizedBox(height: 18),
+                ageRow('20~30대', 'verse', 'coral'),
+                const SizedBox(height: 18),
+                ageRow('40~50대', 'cedar', 'marin'),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -2940,7 +3036,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
                       ]),
                       const SizedBox(height: 12),
                       const Text(
-                        '대화하고 싶은 사람을 한 명 떠올려 보세요. 그 사람이 눈앞에 있다고 생각하고, 하고 싶었던 말을 편하게 꺼내면 AI가 그 사람이 되어 대답합니다. 반응이 다르게 느껴지면 "왜 그렇게 느껴?"라고 되물어 보세요. 대화가 끝나면 방금 나눈 이야기가 그대로 나만의 영어 교재로 바뀝니다.',
+                        '먼저 상단에서 AI 보이스를 선택하세요. 사용자와 AI는 모두 한국어로 대화하고, 화면에는 영어가 표시됩니다. 대화하고 싶은 사람을 떠올려 편하게 말을 꺼내면 AI가 그 사람이 되어 대답합니다. 대화가 끝나면 한·영 문장과 영어 연습 음성이 히스토리에 준비됩니다.',
                         style: TextStyle(
                             color: Colors.white, fontSize: 14, height: 1.6),
                       ),
@@ -3017,17 +3113,29 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
                             : 1.0;
                   }),
                 ),
-                IconButton(
-                  icon: CustomPaint(
-                    size: const Size(26, 26),
-                    painter: _LangIconPainter(active: _showOriginal),
+                TextButton.icon(
+                  onPressed: () => setState(() => _showVoiceMenu = true),
+                  icon: Icon(
+                    Icons.record_voice_over_rounded,
+                    color: _selectedAiVoice == null
+                        ? Colors.amberAccent
+                        : const Color(0xFFB9B4FF),
+                    size: 21,
                   ),
-                  tooltip: _showOriginal ? '원문 숨기기' : '원문 함께 보기',
-                  onPressed: () =>
-                      setState(() => _showOriginal = !_showOriginal),
-                  padding: EdgeInsets.zero,
-                  constraints:
-                      const BoxConstraints(minWidth: 36, minHeight: 36),
+                  label: Text(
+                    _selectedAiVoice ?? '보이스',
+                    style: TextStyle(
+                      color: _selectedAiVoice == null
+                          ? Colors.amberAccent
+                          : Colors.white70,
+                      fontSize: 12,
+                    ),
+                  ),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 7),
+                    minimumSize: const Size(0, 36),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
                 ),
                 const SizedBox(width: 4),
                 // [v3.6] 좁은 화면/큰 글꼴에서도 상단 Row가 넘치지 않도록 축소 허용
@@ -3179,18 +3287,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
                       color: Colors.white,
                       fontSize: 16 * _fontScale,
                       fontWeight: FontWeight.bold)),
-              if (_showOriginal &&
-                  !(FFAppState().nativeLang.isNotEmpty &&
-                      FFAppState().nativeLang == FFAppState().targetLang) &&
-                  !isThinking &&
-                  msg['original'] != null &&
-                  msg['original'].toString().isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text(msg['original'],
-                    textAlign: isHost ? TextAlign.right : TextAlign.left,
-                    style: TextStyle(
-                        color: Colors.grey, fontSize: 12 * _fontScale))
-              ]
             ]),
       ),
     );
@@ -5212,6 +5308,58 @@ Rules:
     }
   }
 
+  /// AI가 대화방에서 말한 한국어를 화면·히스토리용 목표 언어로 변환한다.
+  /// 제어 태그나 대화 판정 없이 번역만 수행하므로 한국어 음성 생성과 병렬 실행한다.
+  static Future<String> translateKoreanToTarget({
+    required String apiKey,
+    required String koreanText,
+    required String targetLang,
+  }) async {
+    final source = koreanText.trim();
+    if (source.isEmpty) return '';
+    for (int attempt = 0; attempt < 2; attempt++) {
+      final client = http.Client();
+      try {
+        final response = await client
+            .post(
+              Uri.parse('https://api.openai.com/v1/chat/completions'),
+              headers: {
+                'Authorization': 'Bearer $apiKey',
+                'Content-Type': 'application/json; charset=utf-8',
+              },
+              body: jsonEncode({
+                'model': kFreeTalkTranslateModelFast,
+                'temperature': 0.0,
+                'max_tokens': 150,
+                'messages': [
+                  {
+                    'role': 'system',
+                    'content': 'Translate the Korean dialogue line into natural spoken '
+                        '$targetLang. Preserve meaning, relationship, emotion, '
+                        'speech register, and names. Output only the translation.'
+                  },
+                  {'role': 'user', 'content': source},
+                ],
+              }),
+            )
+            .timeout(const Duration(seconds: 15));
+        if (response.statusCode == 200) {
+          final data = jsonDecode(utf8.decode(response.bodyBytes));
+          final translated =
+              data['choices'][0]['message']['content'].toString().trim();
+          if (translated.isNotEmpty) return translated;
+        }
+      } catch (_) {
+        if (attempt == 0) {
+          await Future.delayed(const Duration(milliseconds: 400));
+        }
+      } finally {
+        client.close();
+      }
+    }
+    return '';
+  }
+
   // ==================================================================
   // 📦 [Box 7-1-C] generateCleanOriginal — AI original 생성 (오리지널 언어 자막)
   // ==================================================================
@@ -5337,12 +5485,15 @@ Rules:
       final String rejectedBlock = rejectedReply.trim().isEmpty
           ? ""
           : "\n- IMPORTANT: The user disliked your previous reply: \"${rejectedReply.trim()}\". Give a COMPLETELY DIFFERENT reply this time — different angle, different wording. Do NOT repeat or rephrase it.";
+      final String outputRule = myTarget.toLowerCase() == 'korean'
+          ? 'OUTPUT LANGUAGE: Natural spoken Korean ONLY. Use the same polite or casual register as the user.'
+          : 'OUTPUT LANGUAGE: $myTarget ONLY. Zero Korean characters in output.';
       final sysPrompt =
           """You are the person the user has in mind and is speaking to. They will not describe that person to you. They simply start talking, the way people do with someone they already know.
 
 Your job is not to invent that person. It is to discover them from what the user says, turn by turn. The user creates the relationship; you find it and grow into it.
 
-OUTPUT LANGUAGE: $myTarget ONLY. Zero Korean characters in output.
+$outputRule
 
 [ROLE AND VIEWPOINT CHECK — DO THIS SILENTLY BEFORE EVERY REPLY]
 - First decide who YOU are in relation to the user from the conversation so far. Keep that role consistent, but keep it broad until the user's clues make it clear.
@@ -5428,96 +5579,6 @@ Learner level: ${_freeTalkLevelInstruction(level)}""";
       client.close();
     }
   }
-}
-
-class _LangIconPainter extends CustomPainter {
-  final bool active;
-  const _LangIconPainter({required this.active});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final r = size.width / 2;
-    final center = Offset(r, r);
-
-    canvas
-        .clipPath(Path()..addOval(Rect.fromCircle(center: center, radius: r)));
-
-    // 밝은 파란 배경 (상단 좌측)
-    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height),
-        Paint()..color = const Color(0xFF1E7DB5));
-
-    // 짙은 파란 삼각형 (하단 우측)
-    canvas.drawPath(
-      Path()
-        ..moveTo(size.width * 0.05, size.height)
-        ..lineTo(size.width, size.height * 0.05)
-        ..lineTo(size.width, size.height)
-        ..close(),
-      Paint()..color = const Color(0xFF0B4870),
-    );
-
-    // 골드 대각선
-    canvas.drawLine(
-      Offset(size.width * 0.04, size.height * 0.96),
-      Offset(size.width * 0.96, size.height * 0.04),
-      Paint()
-        ..color = const Color(0xFFD4AF37)
-        ..strokeWidth = 2.0
-        ..strokeCap = StrokeCap.round,
-    );
-
-    // 골드 원형 테두리
-    canvas.drawCircle(
-      center,
-      r - 1.5,
-      Paint()
-        ..color = const Color(0xFFD4AF37)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.5,
-    );
-
-    final col = active ? Colors.white : const Color(0x61FFFFFF);
-
-    // 상단 좌측 "T"
-    _drawText(canvas, 'T', Offset(size.width * 0.09, size.height * 0.06),
-        size.width * 0.34, col);
-
-    // 빨간 원형 포인트 (○)
-    final dotC = Offset(size.width * 0.63, size.height * 0.23);
-    final dotR = size.width * 0.105;
-    canvas.drawCircle(dotC, dotR, Paint()..color = const Color(0xFFE03030));
-    canvas.drawCircle(
-        dotC, dotR * 0.45, Paint()..color = const Color(0xFFFF6060));
-    canvas.drawCircle(
-        dotC,
-        dotR,
-        Paint()
-          ..color = const Color(0xBBFFFFFF)
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 0.8);
-
-    // 하단 우측 "T"
-    _drawText(canvas, 'T', Offset(size.width * 0.55, size.height * 0.58),
-        size.width * 0.34, col);
-  }
-
-  void _drawText(
-      Canvas canvas, String text, Offset offset, double fontSize, Color color) {
-    final tp = TextPainter(
-      text: TextSpan(
-          text: text,
-          style: TextStyle(
-              color: color,
-              fontSize: fontSize,
-              fontWeight: FontWeight.bold,
-              height: 1.0)),
-      textDirection: ui.TextDirection.ltr,
-    )..layout();
-    tp.paint(canvas, offset);
-  }
-
-  @override
-  bool shouldRepaint(_LangIconPainter old) => old.active != active;
 }
 
 // 🆕 [Anyone] 이용방법 말풍선 꼬리 페인터
