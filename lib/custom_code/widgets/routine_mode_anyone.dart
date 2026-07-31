@@ -474,6 +474,18 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     return cleaned.trim();
   }
 
+  String? _explicitCorrectionContent(String transcript) {
+    final hasExplicitReplacementSignal = RegExp(
+      r'(그게\s*아니라|그런\s*뜻이\s*아니|내\s*(말|뜻)은|'
+      r'내가\s*말한\s*건|다시\s*말하면|I\s+mean|what\s+I\s+mean\s+is|'
+      r'that.?s\s+not\s+what\s+I\s+meant)',
+      caseSensitive: false,
+    ).hasMatch(transcript);
+    if (!hasExplicitReplacementSignal) return null;
+    final content = _stripCorrectionFraming(transcript);
+    return content.isEmpty ? null : content;
+  }
+
   /// 전사가 발화가 아니라 잡음·추임새인지 판정한다. 파이프라인 진입 전 검열이
   /// 이 함수 하나를 쓴다. 추임새를 통과시키면 "음." 같은 게 "Um."으로 번역돼
   /// 유저 목소리로 나가고 AI가 거기에 대답한다(실기기에서 발생).
@@ -530,8 +542,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           duration: const Duration(milliseconds: 350),
           curve: Curves.easeOut,
           child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 36),
-            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+            width: double.infinity,
+            constraints: const BoxConstraints(maxWidth: 420),
+            margin: const EdgeInsets.symmetric(horizontal: 20),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
             decoration: BoxDecoration(
               color: const Color(0xFF1E1E22).withValues(alpha: 0.92),
               borderRadius: BorderRadius.circular(20),
@@ -550,9 +564,11 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
             child: const Text(
               _openingNudgeText,
               textAlign: TextAlign.center,
+              textScaler: TextScaler.noScaling,
+              softWrap: true,
               style: TextStyle(
                 color: Colors.white,
-                fontSize: 15,
+                fontSize: 17,
                 height: 1.5,
                 fontWeight: FontWeight.w500,
               ),
@@ -1644,9 +1660,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     return left.isNotEmpty && left == right;
   }
 
-  String get _currentUserVoice =>
-      FFAppState().aiVoice.isNotEmpty ? FFAppState().aiVoice : 'marin';
-
 // ====================================================================
 // 📦 [Box 5-A: 중앙 통제실 - 루틴 정석 "시간벌기 마술" 패턴]
 // ====================================================================
@@ -1777,6 +1790,43 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       // 정정 내용을 직접 말한 경우에는 새 발화로 아래 정상 판정을 다시 수행한다.
       _log('[HEARD-CONFIRM]', 'corrected_with_content → 새 발화 판정');
     }
+
+    // 번역 모델이 [CORRECTION] 태그를 빠뜨려도 "그게 아니라, 내 말은 X"처럼
+    // 교체 의사가 명시된 문장은 앱이 먼저 확정한다. 일반적인 "아니, 안 갔어"는
+    // 강한 교체 표지가 없으므로 정상 답변으로 그대로 처리한다.
+    final hasPreviousExchange =
+        _localMessages.any((m) => m['role'] == 'HOST') &&
+            _localMessages.any((m) => m['role'] == 'SYSTEM');
+    final explicitCorrection = !isCorrectionRetry && hasPreviousExchange
+        ? _explicitCorrectionContent(finalTranscript)
+        : null;
+    if (explicitCorrection != null) {
+      _log(
+        '🔄 [CORRECTION-LOCAL]',
+        '직전 교환 삭제 → corrected_len=${explicitCorrection.length}',
+      );
+      if (mounted) {
+        setState(() {
+          _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+          _removeLastExchange();
+        });
+        if (_localMessages.isNotEmpty) _scrollToBottom();
+      }
+      if (_recentHistory.length >= 2) {
+        _recentHistory.removeRange(
+            _recentHistory.length - 2, _recentHistory.length);
+      }
+      _ttsAdapter.stopAll(reason: 'explicit_correction');
+      _turnCounter = (_turnCounter - 1).clamp(0, 1 << 30).toInt();
+      await _deleteLastPersistedExchange();
+      return _processRelayPipeline(
+        explicitCorrection,
+        isCorrectionRetry: true,
+        translationModel: translationModel,
+        expectedPipelineGeneration: pipelineGeneration,
+      );
+    }
+
     _logProbeTiming('PIPELINE_START');
     _resetIdleTimer();
     final ignoreWithoutConsumingFirstTurn =
@@ -1883,8 +1933,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       }
 
       String userTargetText = "";
-      // 🆕 유저 목소리 = 로비에서 고른 값(FFAppState().aiVoice). AI는 nova 고정.
-      final String userVoice = _currentUserVoice;
 
       // 🌐 [v3.1] 로비에서 유저가 선택한 타겟 언어로 번역
       final String targetLangName = FFAppState().targetLang.isNotEmpty
@@ -2005,6 +2053,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
               _recentHistory.length - 2, _recentHistory.length);
         }
         _ttsAdapter.stopAll(reason: 'correction');
+        await _deleteLastPersistedExchange();
         // 방금 정정 감지용 턴과 삭제한 직전 턴을 되돌린 뒤, 정정 내용이 새
         // 사용자 턴 1개가 되도록 다시 시작한다.
         _turnCounter = (_turnCounter - 2).clamp(0, 1 << 30).toInt();
@@ -2044,6 +2093,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
               _recentHistory.length - 2, _recentHistory.length);
         }
         _ttsAdapter.stopAll(reason: 'misheard');
+        await _deleteLastPersistedExchange();
         await _speakSystemLine("아 제가 잘못 들었어요. 다시 한 번 말해주세요.");
         skipFinallyRestart = true;
         _isPipelineRunning = false;
@@ -2075,6 +2125,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
               _recentHistory.length - 2, _recentHistory.length);
         }
         _ttsAdapter.stopAll(reason: 'dissatisfied');
+        await _deleteLastPersistedExchange();
         await _speakSystemLine("알겠어요. 원하시는 뜻으로 다시 말씀해 주세요.");
         skipFinallyRestart = true;
         _isPipelineRunning = false;
@@ -2211,30 +2262,13 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       }
 
       // ─────────────────────────────────────────────────────
-      // STEP 3: 사용자 번역 음성은 라이브로 재생하지 않는다.
-      //   화면에는 선택된 전사 원문(original)과 번역(target)만 표시하고,
-      //   음원은 AI 실시간 재생 큐와 분리해 히스토리용으로만 만든다.
+      // STEP 3: 사용자 발화는 원문(original)과 번역(target) 텍스트만 저장한다.
+      //   대화 중에는 사용자 TTS API를 호출하지 않는다. 히스토리 말풍선의
+      //   재생 버튼을 처음 눌렀을 때 tts-1/nova로 생성하고 디스크 캐시한다.
       // ─────────────────────────────────────────────────────
       _logTurnPerf('TRANSLATION_DONE');
-      final String fullUserTts = _cleanText(userTargetText.trim());
-      final TtsRequest? userHistoryTtsRequest = fullUserTts.isEmpty
-          ? null
-          : TtsRequest(
-              text: fullUserTts,
-              voiceId: userVoice,
-              speakerType: TtsSpeakerType.user,
-              turnId: 'user-$currentTurnId',
-              generationId: pipelineGeneration,
-              saveToHistory: true,
-              historyVoiceKey: 'nova',
-            );
-      if (userHistoryTtsRequest != null) {
-        _costTracker.recordTtsRequest(fullUserTts.length);
-        _log(
-          '🔊 [USER-TTS-HISTORY-ONLY]',
-          'queued turnId=$currentTurnId len=${fullUserTts.length}',
-        );
-      }
+      _log('🔇 [USER-TTS-SKIP]',
+          'text_only=true history_download_on_first_play=true');
 
       // ─────────────────────────────────────────────────────
       // STEP 4: AI 응답 텍스트와 음성은 기존 방식대로 생성·재생한다.
@@ -2252,6 +2286,11 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       String aiTargetText = "";
       // 애니원에서는 사용자 번역 음성을 재생하지 않으므로 AI 텍스트를 즉시 표시.
       const bool userPlaybackFinished = true;
+      // 정정 턴은 삭제한 직전 턴과 같은 화면 turn 번호를 재사용한다. TTS
+      // 중복 방지 키까지 같으면 새 AI 음성이 차단되므로 정정 재생에만 고유 ID.
+      final String aiTtsTurnId = isCorrectionRetry
+          ? 'ai-$currentTurnId-c${DateTime.now().microsecondsSinceEpoch}'
+          : 'ai-$currentTurnId';
 
       _swOpenAI.reset();
       _swOpenAI.start();
@@ -2332,19 +2371,13 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
               apiKey: _openAiKey, englishText: aiTargetText);
         }
         final String aiTtsText = _cleanText(aiTargetText.trim());
-        if (aiTtsText.isEmpty) {
-          final historyRequest = userHistoryTtsRequest;
-          if (historyRequest != null) {
-            unawaited(_ttsAdapter.synthesizeForHistory(historyRequest));
-          }
-          return;
-        }
+        if (aiTtsText.isEmpty) return;
         _costTracker.recordTtsRequest(aiTtsText.length);
         aiTtsPrefetch = _ttsAdapter.prefetch(TtsRequest(
           text: aiTtsText,
           voiceId: TtsAdapterConfig.aiVoice,
           speakerType: TtsSpeakerType.ai,
-          turnId: 'ai-$currentTurnId',
+          turnId: aiTtsTurnId,
           generationId: pipelineGeneration,
           saveToHistory: true,
           historyVoiceKey: 'nova',
@@ -2354,12 +2387,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           'started userPlaybackFinished=$userPlaybackFinished '
               'len=${aiTtsText.length}',
         );
-        // AI 음성 요청을 먼저 출발시킨 뒤 사용자 번역 음원을 별도 연결로
-        // 생성한다. 사용자 음원은 재생 큐에 들어가지 않고 히스토리에만 저장된다.
-        final historyRequest = userHistoryTtsRequest;
-        if (historyRequest != null) {
-          unawaited(_ttsAdapter.synthesizeForHistory(historyRequest));
-        }
       });
 
       // 사용자 번역음성 완료를 기다리지 않는다. AI 텍스트 생성과 TTS 선요청이
@@ -2461,6 +2488,70 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       } else {
         _log('⚠️ [PIPE-NORESTART]', '마이크 재시작 조건 불충족');
       }
+    }
+  }
+
+  Future<void> _deleteLastPersistedExchange() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+      final firestore = FirebaseFirestore.instance;
+
+      // 분석용 sessions/transcript에서도 직전 HOST+SYSTEM 두 줄을 제거한다.
+      final sessionId = _sessionDocId;
+      if (sessionId != null) {
+        final sessionRef = firestore
+            .collection('users')
+            .doc(user.uid)
+            .collection('sessions')
+            .doc(sessionId);
+        final sessionSnapshot = await sessionRef.get();
+        final transcript = List<Map<String, dynamic>>.from(
+          (sessionSnapshot.data()?['transcript'] as List<dynamic>? ?? const [])
+              .whereType<Map>()
+              .map((item) => Map<String, dynamic>.from(item)),
+        );
+        if (transcript.isNotEmpty) {
+          final removeCount = transcript.length >= 2 ? 2 : 1;
+          transcript.removeRange(
+              transcript.length - removeCount, transcript.length);
+          await sessionRef.update({'transcript': transcript});
+        }
+      }
+
+      // 사용자에게 보이는 chat_history/messages에서도 최근 두 문장을 삭제한다.
+      final historyRef = _myHistoryRef;
+      if (historyRef != null) {
+        final recent = await historyRef
+            .collection('messages')
+            .orderBy('created_at', descending: true)
+            .limit(3)
+            .get();
+        final deleteCount = recent.docs.length >= 2 ? 2 : recent.docs.length;
+        if (deleteCount > 0) {
+          final batch = firestore.batch();
+          for (int i = 0; i < deleteCount; i++) {
+            batch.delete(recent.docs[i].reference);
+          }
+          final remainingLastMessage = recent.docs.length > deleteCount
+              ? (recent.docs[deleteCount].data()['translated_text'] ?? '')
+                  .toString()
+                  .trim()
+              : '';
+          batch.update(historyRef, {
+            'msg_count': FieldValue.increment(-deleteCount),
+            'last_message': remainingLastMessage.isEmpty
+                ? FieldValue.delete()
+                : remainingLastMessage,
+            'last_active': FieldValue.serverTimestamp(),
+          });
+          await batch.commit();
+        }
+      }
+      _log('🗑️ [CORRECTION-PERSIST]', '직전 HOST+SYSTEM 저장본 삭제 완료');
+    } catch (error) {
+      // 저장 정리가 실패해도 대화 자체는 새 뜻으로 계속 진행한다.
+      _log('⚠️ [CORRECTION-PERSIST]', '저장본 삭제 실패 reason=${error.runtimeType}');
     }
   }
 
@@ -5201,6 +5292,12 @@ Rules:
 Your job is not to invent that person. It is to discover them from what the user says, turn by turn. The user creates the relationship; you find it and grow into it.
 
 OUTPUT LANGUAGE: $myTarget ONLY. Zero Korean characters in output.
+
+[ROLE AND VIEWPOINT CHECK — DO THIS SILENTLY BEFORE EVERY REPLY]
+- First decide who YOU are in relation to the user from the conversation so far. Keep that role consistent, but keep it broad until the user's clues make it clear.
+- Every first-person statement in a "User:" line belongs to THE USER, never to you. Their feelings, memories, plans, actions, possessions, and relationships stay theirs.
+- Every "AI:" line is your side. Reply from that other person's position; do not continue, paraphrase, or adopt the user's first-person statement as your own.
+- Perspective test: if the user says "I need to study," react to their need. Never answer as though you are the one who needs to study. If the user says "You didn't call me," you are the person who did not call.
 
 [DISCOVER — NEVER DECIDE]
 - Do not settle the relationship early. In the opening turns stay open: partner, parent, child, friend, coworker, someone they drifted away from — any of these could still be true.

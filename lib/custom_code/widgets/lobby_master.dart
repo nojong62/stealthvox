@@ -32,22 +32,6 @@ import '/custom_code/actions/billing_ticker.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
 import 'dart:io' show Platform;
 
-const List<String> _lobbyVoiceOptions = <String>[
-  'verse',
-  'alloy',
-  'ballad',
-  'cedar',
-  'ash',
-  'echo',
-  'fable',
-  'onyx',
-  'coral',
-  'nova',
-  'sage',
-  'shimmer',
-  'marin',
-];
-
 /// 📦 [Box 2: 클래스 선언부]
 class LobbyMaster extends StatefulWidget {
   const LobbyMaster({
@@ -135,8 +119,10 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
       setState(() => FFAppState().nativeLang = "Korean");
     if (FFAppState().targetLang == null || FFAppState().targetLang.isEmpty)
       setState(() => FFAppState().targetLang = "English");
-    if (!_lobbyVoiceOptions.contains(FFAppState().aiVoice)) {
-      setState(() => FFAppState().aiVoice = "echo");
+    // 로비에서 음성을 선택하지 않는다. 사용자 역할 음성이 필요한 기존
+    // 화면(Duo/History Practice)은 항상 verse를 사용한다.
+    if (FFAppState().aiVoice != "verse") {
+      setState(() => FFAppState().aiVoice = "verse");
     }
   }
 
@@ -411,32 +397,6 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           child: child,
         ),
       ),
-    );
-  }
-
-  Widget _buildSleekVoiceSelector(String value, Function(String?) onChanged) {
-    return Container(
-      height: 54,
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.5),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white12)),
-      child: DropdownButtonHideUnderline(
-          child: DropdownButton<String>(
-        value: _lobbyVoiceOptions.contains(value) ? value : "echo",
-        dropdownColor: const Color(0xFF1E1E1E),
-        isExpanded: true,
-        icon: const Icon(Icons.record_voice_over_rounded,
-            color: Colors.white54, size: 20),
-        style: const TextStyle(
-            color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
-        items: _lobbyVoiceOptions
-            .map((voice) =>
-                DropdownMenuItem<String>(value: voice, child: Text(voice)))
-            .toList(),
-        onChanged: onChanged,
-      )),
     );
   }
 
@@ -786,18 +746,6 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                                           (tone) => setState(
                                               () => appState.tone = tone),
                                         ),
-                                        const SizedBox(height: 32),
-                                        const Text("MY VOICE",
-                                            style: TextStyle(
-                                                color: Color(0xFF4ADE80),
-                                                fontSize: 12,
-                                                letterSpacing: 1,
-                                                fontWeight: FontWeight.bold)),
-                                        const SizedBox(height: 12),
-                                        _buildSleekVoiceSelector(
-                                            appState.aiVoice,
-                                            (val) => setState(
-                                                () => appState.aiVoice = val!)),
                                       ])),
                               const SizedBox(height: 30),
                             ]),

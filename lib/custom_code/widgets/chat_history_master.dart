@@ -34,6 +34,62 @@ import '/custom_code/actions/billing_ticker.dart';
 
 const String _historyListenTtsModel = 'tts-1';
 const String _historyListenTtsVoice = 'nova';
+const String _historyPracticeTtsModel = 'gpt-4o-mini-tts';
+const String _historyPracticeAiVoice = 'nova';
+const String _historyPracticeUserVoice = 'verse';
+const List<String> _meaningUnitVoiceOptions = <String>[
+  'marin',
+  'cedar',
+  'verse',
+  'coral',
+];
+const List<String> _nativeMeaningUnitVoiceOptions = <String>[
+  'verse',
+  'cedar',
+  'coral',
+];
+const String _meaningUnitTtsInstructions = '''
+Read the English sentence for language learners using clear thought groups.
+
+Follow these rules:
+
+1. Divide the sentence into meaningful phrases based on grammar and meaning, not word by word.
+2. Keep words inside each phrase naturally connected.
+3. Add a short, subtle pause between thought groups.
+4. Make each thought group easy to recognize, but do not exaggerate the pauses.
+5. Slightly emphasize the key word in each phrase.
+6. Reduce less important function words naturally, but do not make them unclear.
+7. Preserve natural English rhythm, linking, stress, and intonation.
+8. Do not sound like a newsreader, audiobook narrator, or pronunciation drill.
+9. Do not speak unnaturally slowly.
+10. Use a clear, conversational pace suitable for intermediate English learners.
+11. For long or complex sentences, slow down slightly at clause boundaries.
+12. Make questions, contrasts, conditions, and important corrections clear through intonation.
+13. Do not insert spoken explanations, labels, or the words pause or slash.
+14. Read only the supplied sentence.
+
+The result should sound like a native speaker speaking clearly to an English learner: natural within each phrase, with brief and recognizable pauses between meaning units.
+''';
+const String _nativeMeaningUnitTtsInstructions = '''
+Speak in natural, everyday English using native-like thought groups.
+
+Follow these rules:
+
+1. Group words naturally according to meaning and sentence flow.
+2. Keep each thought group smoothly connected without sounding segmented.
+3. Use brief, subtle pauses only where a native speaker would naturally pause.
+4. Do not pause at every comma or punctuation mark.
+5. Let important words carry the stress, while function words remain lighter and naturally reduced.
+6. Use natural linking, contractions, rhythm, and intonation.
+7. Vary the pace slightly: move faster through predictable information and slow down briefly for important, contrasting, or new information.
+8. Do not over-enunciate every word.
+9. Do not sound like a teacher, newsreader, audiobook narrator, or pronunciation exercise.
+10. Maintain a relaxed, conversational pace used in real-life native speech.
+11. Preserve clarity, but prioritize natural flow over textbook-style pronunciation.
+12. Read only the supplied text without adding explanations or commentary.
+
+The result should sound like a native speaker talking naturally to another person, with meaning carried through rhythm, stress, linking, and subtle pauses.
+''';
 
 /// 📦 [Box 2: 위젯 클래스 선언부]
 class ChatHistoryMaster extends StatefulWidget {
@@ -106,6 +162,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // 🔧 [STAMPEDE-FIX] 같은 청크에 대한 동시 API 호출 방지
   // key: chunk index, value: 진행 중인 audio fetch Future
   final Map<int, Future<Uint8List?>> _inFlightChunkFetch = {};
+  final Map<String, Future<Uint8List?>> _meaningUnitTtsInFlight = {};
+  final Map<String, Future<Uint8List?>> _p3MeaningUnitTtsInFlight = {};
   List<PracticeChunk> _chunks = [];
   int _currentChunkIdx = 0;
   bool _isRerecordingSingle = false;
@@ -166,13 +224,14 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   bool _showRetryHint = false;
   int _turnPracticeRetryCount = 0;
 
-  // [P2-SHADOW] Highlight read-along state. P2 only, no recording.
+  // [P2-MEANING-SHADOW] 의미단위 학습 음성을 동시에 따라 읽는 상태.
   List<String> _shadowWords = [];
   int _shadowWordIdx = -1;
   Timer? _shadowHighlightTimer;
   Timer? _shadowAdvanceTimer;
-  double _shadowSpeed = 1.0; // [P2-SHADOW] 0.7/0.8/0.9/1.0.
-  // [P2-START] Wait for speed selection before starting P2 read-along.
+  double _shadowSpeed = 1.0; // 오디오 실패 시 하이라이트 fallback용 고정 속도.
+  String? _selectedMeaningUnitVoice;
+  // P2 학습 Voice를 직접 선택해야 의미단위 쉐도잉을 시작한다.
   bool _shadowStarted = false;
   bool _p2CountdownStarting = false;
   Future<Uint8List?>? _p2CountdownAudioFuture;
@@ -203,6 +262,23 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // 🆕 [P2-INDICATOR] AI 다시 듣기 모드 (true이면 끝나도 마이크 자동 ON 안 함)
   bool _isReplayMode = false;
 
+  // P3 한 문장 의미단위 쉐도잉 상태.
+  String? _selectedP3LearningVoice;
+  String? _selectedP3NativeVoice;
+  bool? _p3UsesNativeStyle;
+  bool _p3ShadowLoading = false;
+  bool _p3ShadowPlaying = false;
+  bool _p3ShadowRecording = false;
+  bool _p3ShadowComplete = false;
+  int _p3ShadowGeneration = 0;
+  AudioPlayer? _p3ShadowPlayer;
+  StreamSubscription<Duration>? _p3ShadowPositionSub;
+  StreamSubscription<Duration>? _p3ShadowDurationSub;
+  Duration _p3ShadowDuration = Duration.zero;
+  List<String> _p3ShadowWords = [];
+  int _p3ShadowWordIndex = -1;
+  String? _p3ShadowRecordPath;
+
   // 🆕 [CHUNK-PRACTICE] 의미단위 연습 모드 상태
   bool _practicingPolished = false; // false = expanded, true = polished
   bool _isBuildingExpand = false; // 🆕 [EXPAND-FROM-CHAT] 확장문장 생성 중 플래그
@@ -223,7 +299,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   bool _polishedUnitAIPlaying = false;
 
   // 📦 [Box 5: 상태 변수 - 오디오 플레이어 및 마이크]
-  String _selectedPracticeVoice = 'nova';
   late AudioPlayer audioPlayer;
   bool isPlaying = false;
   late AudioRecorder appAudioRecorder;
@@ -706,12 +781,11 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   Future<void> _prepareStepP3(String sentence, int generation) async {
     try {
-      await _buildChunks(sentence, preparationGeneration: generation);
       if (!mounted || generation != _stepP3PreparationGeneration) return;
       setState(() {
         _isPreparingStepP3 = false;
         _stepP3PreparationError =
-            _chunks.isEmpty ? 'P3 준비에 실패했습니다. 눌러서 다시 시도하세요.' : null;
+            sentence.trim().isEmpty ? 'P3에서 사용할 문장이 없습니다.' : null;
       });
     } catch (e) {
       debugPrint('[prepareStepP3] $e');
@@ -727,7 +801,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     if (_isPreparingStepP3 || _expandedSentence.isEmpty) return;
     final generation = ++_stepP3PreparationGeneration;
     setState(() {
-      _chunks = [];
       _isPreparingStepP3 = true;
       _stepP3PreparationError = null;
     });
@@ -756,16 +829,16 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       if (!mounted || !_isTutorPlaying) break;
       final line = _tutorLines[i];
       final text = line['text'] as String;
-      final bool isAi = (line['role'] as String) == 'HOST';
+      final bool lineRepresentsAi = _lineRepresentsAi(line);
 
       if (mounted) {
         setState(() {
           _tutorCurrentIdx = i;
-          _tutorIsAiTurn = isAi;
+          _tutorIsAiTurn = lineRepresentsAi;
         });
       }
 
-      await _playTutorLineTTS(text, isAi);
+      await _playTutorLineTTS(text, lineRepresentsAi);
 
       if (!mounted || !_isTutorPlaying) break;
       await Future.delayed(const Duration(milliseconds: 600));
@@ -784,14 +857,15 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // 🔧 [v3.7] TtsCache 우선 조회 → MISS 시 API 호출 후 캐시 저장
   Future<void> _playTutorLineTTS(String text, bool isAi) async {
     if (_apiKey.isEmpty || text.trim().isEmpty) return;
-    final voice = isAi ? 'nova' : FFAppState().aiVoice;
+    final voice = isAi ? _historyPracticeAiVoice : _historyPracticeUserVoice;
+    final cacheVoice = _practiceCacheVoice(voice);
     try {
-      Uint8List? audio = await TtsCache.get(text, voice);
+      Uint8List? audio = await TtsCache.get(text, cacheVoice);
       if (audio != null) {
       } else {
-        audio = await _fetchOpenAITTS(text, 1.0, voice);
+        audio = await _fetchPracticeTTS(text, voice);
         if (audio != null) {
-          TtsCache.put(text, voice, audio);
+          TtsCache.put(text, cacheVoice, audio);
         }
       }
       if (!mounted || !_isTutorPlaying || audio == null) return;
@@ -985,16 +1059,18 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   }
 
   // [P2-SHADOW-AI] Fetch + play the AI voice for the current read-along line and
-  // sync the word highlight to the audio position. Speed follows _shadowSpeed.
+  // sync the word highlight to the audio position. The generated audio itself
+  // carries natural thought-group pauses; playback speed is never manipulated.
   Future<void> _startShadowAiVoice(int lineIdx, List<String> words) async {
     final text = (_tutorLines[lineIdx]['text'] as String).trim();
+    final voice = _selectedMeaningUnitVoice;
+    if (voice == null) {
+      _stepShadowHighlight(0);
+      return;
+    }
     Uint8List? audio;
     try {
-      audio = await TtsCache.get(text, 'nova');
-      if (audio == null) {
-        audio = await _fetchOpenAITTS(text, 1.0, 'nova');
-        if (audio != null) TtsCache.put(text, 'nova', audio);
-      }
+      audio = await _getMeaningUnitTTS(text, voice);
     } catch (e) {
       debugPrint('[startShadowAiVoice] fetch $e');
     }
@@ -1035,7 +1111,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         player.onPlayerComplete.listen((_) => _onShadowAiComplete(lineIdx));
     try {
       await player.play(BytesSource(audio));
-      await player.setPlaybackRate(_shadowSpeed);
     } catch (e) {
       debugPrint('[startShadowAiVoice] play $e');
       await _stopShadowAiPlayback();
@@ -1312,12 +1387,16 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       _nextTurn();
       return;
     }
+    final voice = _practiceVoiceForLine(_tutorLines[currentIndex]);
     if (mounted) setState(() => _tutorAiSpeaking = true); // 🆕 [BOX-31]
-    await _playSmartAudio(text);
+    await _playSmartAudio(text, voice: voice);
   }
 
   // 🔧 [v3.7] TtsCache 우선 조회 → MISS 시 API 호출 후 캐시 저장
-  Future<void> _playSmartAudio(String text) async {
+  Future<void> _playSmartAudio(
+    String text, {
+    String voice = _historyPracticeAiVoice,
+  }) async {
     _resumeHistoryFromUserAction();
     text = text.trim();
     if (text.isEmpty) {
@@ -1328,7 +1407,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       return;
     }
     try {
-      Uint8List? audio = await TtsCache.get(text, 'nova');
+      final cacheVoice = _practiceCacheVoice(voice);
+      Uint8List? audio = await TtsCache.get(text, cacheVoice);
       if (audio != null) {
       } else {
         if (_apiKey.isEmpty) {
@@ -1338,9 +1418,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
           }
           return;
         }
-        audio = await _fetchOpenAITTS(text, 1.0, 'nova');
+        audio = await _fetchPracticeTTS(text, voice);
         if (audio != null) {
-          TtsCache.put(text, 'nova', audio);
+          TtsCache.put(text, cacheVoice, audio);
         }
       }
       if (!mounted || !isPracticeMode) return;
@@ -1524,11 +1604,12 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   Future<void> _playRetryPrompt() async {
     const prompt = '끝까지 다시 읽어 주세요';
     try {
-      Uint8List? audio = await TtsCache.get(prompt, 'nova');
+      final cacheVoice = _practiceCacheVoice(_historyPracticeAiVoice);
+      Uint8List? audio = await TtsCache.get(prompt, cacheVoice);
       if (audio != null) {
       } else if (_apiKey.isNotEmpty) {
-        audio = await _fetchOpenAITTS(prompt, 1.0, 'nova');
-        if (audio != null) TtsCache.put(prompt, 'nova', audio);
+        audio = await _fetchPracticeTTS(prompt, _historyPracticeAiVoice);
+        if (audio != null) TtsCache.put(prompt, cacheVoice, audio);
       } else {}
       if (audio == null || !mounted || !isPracticeMode) return;
       final player = AudioPlayer();
@@ -1641,27 +1722,13 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _polishedSentence = "";
     _entryMessageDocId = docId;
     _practicingPolished = false;
-    await _buildChunks(_expandedSentence);
 
     if (mounted) {
       BillingTicker.instance.setRate(BillingRate.full);
-      setState(() {
-        isPracticeMode = true;
-        _phase = ShadowingPhase.chunkPractice;
-        _currentChunkIdx = -1;
-      });
-      // Start the first chunk when the overlay disappears.
-      _triggerEchoingOverlay(onDismiss: () {
-        if (mounted &&
-            _phase == ShadowingPhase.chunkPractice &&
-            _chunks.isNotEmpty &&
-            _currentChunkIdx == -1) {
-          _onChunkTapped(0);
-        }
-      });
+      setState(() => isPracticeMode = true);
+      _goToChunkPractice();
     }
     _loadPolishedSentence();
-    _prefetchAllChunkAI();
   }
 
   Future<void> _loadPolishedSentence() async {
@@ -1780,6 +1847,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _stopShadowAiPlayback(); // [P2-SHADOW-AI]
     _stopShadowRecording(); // [P2-SHADOW-REC]
     _stopP2Countdown();
+    unawaited(_stopP3Shadowing(resetSelection: true));
     _stopDeepgramListening();
     audioPlayer.stop();
     if (mounted) {
@@ -2500,7 +2568,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     final historyId = widget.historyDoc.id;
     final variant =
         _selectedVariant == SentenceVariant.polished ? 'pol' : 'exp';
-    final cacheKey = 'chunk_${variant}_$idx.mp3';
+    final cacheKey = 'gpt4omini_nova_chunk_${variant}_$idx.mp3';
     if (chunk.aiAudio != null) {
       return chunk.aiAudio;
     }
@@ -2512,7 +2580,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
       }
     }
     // 🔧 [정상속도] formatForSlowRhythm 제거 → 텍스트 그대로 TTS
-    final audio = await _fetchOpenAITTS(chunk.text, 1.0, 'nova');
+    final audio = await _fetchPracticeTTS(chunk.text, _historyPracticeAiVoice);
     if (!mounted) return null;
     if (audio != null && idx < _chunks.length) {
       setState(() => _chunks[idx].aiAudio = audio);
@@ -2710,14 +2778,15 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     final historyId = widget.historyDoc.id;
     final variant =
         _selectedVariant == SentenceVariant.polished ? 'pol' : 'exp';
-    final cacheKey = 'full_${variant}_${_hashText(text)}.mp3';
+    final cacheKey = 'gpt4omini_nova_full_${variant}_${_hashText(text)}.mp3';
     // TODO: LRU 정리 — 30개 초과 시 가장 오래된 것부터 제거
     if (_fullAIAudioCache.containsKey(cacheKey)) {
       await audioPlayer.play(BytesSource(_fullAIAudioCache[cacheKey]!));
       return;
     }
     // 대화방 공유 캐시(TtsCache) 확인 — 같은 문장을 대화방에서 들었으면 API 0회
-    final ttsHit = await TtsCache.get(text, _selectedPracticeVoice);
+    final cacheVoice = _practiceCacheVoice(_historyPracticeAiVoice);
+    final ttsHit = await TtsCache.get(text, cacheVoice);
     if (ttsHit != null && mounted) {
       _fullAIAudioCache[cacheKey] = ttsHit;
       await audioPlayer.play(BytesSource(ttsHit));
@@ -2732,11 +2801,11 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
       }
     }
     // 🔧 [정상속도] formatForSlowRhythm 제거 → 텍스트 그대로 TTS
-    Uint8List? audio = await _fetchOpenAITTS(text, 1.0, _selectedPracticeVoice);
+    Uint8List? audio = await _fetchPracticeTTS(text, _historyPracticeAiVoice);
     if (!mounted) return;
     if (audio != null) {
       _fullAIAudioCache[cacheKey] = audio;
-      await TtsCache.put(text, _selectedPracticeVoice, audio);
+      await TtsCache.put(text, cacheVoice, audio);
       if (_phase != ShadowingPhase.turnPractice) {
         await _AudioDiskCache.write(historyId, cacheKey, audio);
       }
@@ -2762,8 +2831,86 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
   }
 
   // OpenAI TTS 헬퍼
-  Future<Uint8List?> _fetchOpenAITTS(
-      String text, double speed, String voice) async {
+  String _practiceCacheVoice(String voice) =>
+      '${_historyPracticeTtsModel}_$voice';
+
+  Future<Uint8List?> _fetchPracticeTTS(String text, String voice) =>
+      _fetchOpenAITTS(
+        text,
+        1.0,
+        voice,
+        model: _historyPracticeTtsModel,
+      );
+
+  String _meaningUnitCacheVoice(String voice) =>
+      '${_historyPracticeTtsModel}_meaning_groups_v1_$voice';
+
+  Future<Uint8List?> _fetchMeaningUnitTTS(String text, String voice) =>
+      _fetchOpenAITTS(
+        text,
+        1.0,
+        voice,
+        model: _historyPracticeTtsModel,
+        instructions: _meaningUnitTtsInstructions,
+        instructionTag: 'p2_learning',
+      );
+
+  Future<Uint8List?> _getMeaningUnitTTS(String text, String voice) {
+    final requestKey = '$voice|${text.trim()}';
+    final existing = _meaningUnitTtsInFlight[requestKey];
+    if (existing != null) return existing;
+    final future = () async {
+      final cacheVoice = _meaningUnitCacheVoice(voice);
+      var audio = await TtsCache.get(text, cacheVoice);
+      if (audio != null) return audio;
+      audio = await _fetchMeaningUnitTTS(text, voice);
+      if (audio != null) await TtsCache.put(text, cacheVoice, audio);
+      return audio;
+    }();
+    _meaningUnitTtsInFlight[requestKey] = future;
+    future.whenComplete(() => _meaningUnitTtsInFlight.remove(requestKey));
+    return future;
+  }
+
+  String _p3MeaningUnitCacheVoice(String voice, {required bool nativeStyle}) =>
+      '${_historyPracticeTtsModel}_p3_${nativeStyle ? 'native' : 'learning'}_thought_groups_v1_$voice';
+
+  Future<Uint8List?> _getP3MeaningUnitTTS(
+    String text,
+    String voice, {
+    required bool nativeStyle,
+  }) {
+    final requestKey =
+        '${nativeStyle ? 'native' : 'learning'}|$voice|${text.trim()}';
+    final existing = _p3MeaningUnitTtsInFlight[requestKey];
+    if (existing != null) return existing;
+    final future = () async {
+      final cacheVoice =
+          _p3MeaningUnitCacheVoice(voice, nativeStyle: nativeStyle);
+      var audio = await TtsCache.get(text, cacheVoice);
+      if (audio != null) return audio;
+      audio = await _fetchOpenAITTS(
+        text,
+        1.0,
+        voice,
+        model: _historyPracticeTtsModel,
+        instructions: nativeStyle
+            ? _nativeMeaningUnitTtsInstructions
+            : _meaningUnitTtsInstructions,
+        instructionTag: nativeStyle ? 'p3_native' : 'p3_learning',
+      );
+      if (audio != null) await TtsCache.put(text, cacheVoice, audio);
+      return audio;
+    }();
+    _p3MeaningUnitTtsInFlight[requestKey] = future;
+    future.whenComplete(() => _p3MeaningUnitTtsInFlight.remove(requestKey));
+    return future;
+  }
+
+  Future<Uint8List?> _fetchOpenAITTS(String text, double speed, String voice,
+      {String model = _historyListenTtsModel,
+      String? instructions,
+      String? instructionTag}) async {
     if (_apiKey.isEmpty || text.trim().isEmpty) return null;
     try {
       var response = await http
@@ -2774,13 +2921,17 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
               'Content-Type': 'application/json'
             },
             body: jsonEncode({
-              'model': _historyListenTtsModel,
+              'model': model,
               'input': text,
               'voice': voice,
-              'speed': speed
+              if (model == _historyListenTtsModel) 'speed': speed,
+              if (instructions != null && instructions.trim().isNotEmpty)
+                'instructions': instructions,
             }),
           )
           .timeout(const Duration(seconds: 10));
+      debugPrint(
+          '[HISTORY-TTS] model=$model voice=$voice instruction=${instructionTag ?? 'none'} status=${response.statusCode} chars=${text.trim().length}');
       return response.statusCode == 200 ? response.bodyBytes : null;
     } catch (e) {
       debugPrint("[fetchOpenAITTS] $e");
@@ -3356,14 +3507,15 @@ RULES — follow exactly:
 
         // Step 3: TTS 생성 → 자동 재생
         if (correctedEn.isNotEmpty) {
-          final corrCacheKey = 'correction_${correctedEn.hashCode.abs()}.mp3';
+          final corrCacheKey =
+              'gpt4omini_nova_correction_${correctedEn.hashCode.abs()}.mp3';
           Uint8List? cachedAudio;
           if (_phase != ShadowingPhase.turnPractice) {
             cachedAudio =
                 await _AudioDiskCache.read(widget.historyDoc.id, corrCacheKey);
           }
-          final ttsAudio =
-              cachedAudio ?? await _fetchOpenAITTS(correctedEn, 1.0, 'nova');
+          final ttsAudio = cachedAudio ??
+              await _fetchPracticeTTS(correctedEn, _historyPracticeAiVoice);
           if (cachedAudio == null && ttsAudio != null) {
             if (_phase != ShadowingPhase.turnPractice) {
               await _AudioDiskCache.write(
@@ -4903,6 +5055,19 @@ RULES — follow exactly:
   // 📦 [BOX-32: 역할 스왑 - 동적 판정 헬퍼]
   // 일반 History Practice는 HOST=사용자, SYSTEM=AI 기준으로 판정하고,
   // Step Expand P1/P2는 생성된 _tutorLines 구조(HOST=AI)를 유지한다.
+  bool _lineRepresentsAi(Map<String, dynamic> line) {
+    final role = line['role'] as String;
+    if (_phase == ShadowingPhase.turnPractice) {
+      return role == 'SYSTEM';
+    }
+    return role == 'HOST';
+  }
+
+  String _practiceVoiceForLine(Map<String, dynamic> line) =>
+      _lineRepresentsAi(line)
+          ? _historyPracticeAiVoice
+          : _historyPracticeUserVoice;
+
   bool _isAiTurn(Map<String, dynamic> line) {
     final role = line['role'] as String;
     if (_phase == ShadowingPhase.turnPractice) {
@@ -4943,22 +5108,24 @@ RULES — follow exactly:
       for (int i = 0; i < _tutorLines.length; i++) {
         if (!mounted || !_tutorPlayingFullback) break;
         final line = _tutorLines[i];
-        final bool isAi = _isAiTurn(line);
+        final bool isAutomatedTurn = _isAiTurn(line);
         final text = (line['text'] as String).trim();
         if (text.isEmpty) continue;
-        if (isAi) {
+        if (isAutomatedTurn) {
+          final voice = _practiceVoiceForLine(line);
+          final cacheVoice = _practiceCacheVoice(voice);
           Uint8List? audio = line['ai_audio_bytes'] as Uint8List?;
           if (audio != null) {
           } else {
             // 🔧 [v3.7] TtsCache 우선 조회 → MISS 시 API 호출 후 캐시+메모리 저장
-            audio = await TtsCache.get(text, 'nova');
+            audio = await TtsCache.get(text, cacheVoice);
             if (audio != null) {
               line['ai_audio_bytes'] = audio;
             } else {
-              audio = await _fetchOpenAITTS(text, 1.0, 'nova');
+              audio = await _fetchPracticeTTS(text, voice);
               if (audio != null) {
                 line['ai_audio_bytes'] = audio;
-                TtsCache.put(text, 'nova', audio);
+                TtsCache.put(text, cacheVoice, audio);
               }
             }
           }
@@ -5906,12 +6073,13 @@ RULES — follow exactly:
     if (!mounted || idx >= _polishedUnits.length) return;
     if (mounted) setState(() => _polishedUnitAIPlaying = true);
     final text = _polishedUnits[idx];
-    Uint8List? audio = await TtsCache.get(text, _selectedPracticeVoice);
+    final cacheVoice = _practiceCacheVoice(_historyPracticeAiVoice);
+    Uint8List? audio = await TtsCache.get(text, cacheVoice);
     if (audio != null) {
     } else {
-      audio = await _fetchOpenAITTS(text, 1.0, _selectedPracticeVoice);
+      audio = await _fetchPracticeTTS(text, _historyPracticeAiVoice);
       if (audio != null) {
-        TtsCache.put(text, _selectedPracticeVoice, audio);
+        TtsCache.put(text, cacheVoice, audio);
       }
     }
     if (!mounted) return;
@@ -6052,7 +6220,550 @@ RULES — follow exactly:
     );
   }
 
-  Widget _buildChunkPracticeScreen() {
+  String _p3Sentence({required bool nativeStyle}) {
+    if (nativeStyle && _polishedSentence.trim().isNotEmpty) {
+      return _polishedSentence.trim();
+    }
+    return _expandedSentence.trim();
+  }
+
+  Future<void> _stopP3Shadowing({bool resetSelection = false}) async {
+    _p3ShadowGeneration++;
+    await _p3ShadowPositionSub?.cancel();
+    _p3ShadowPositionSub = null;
+    await _p3ShadowDurationSub?.cancel();
+    _p3ShadowDurationSub = null;
+    final player = _p3ShadowPlayer;
+    _p3ShadowPlayer = null;
+    if (player != null) {
+      try {
+        await player.stop();
+      } catch (_) {}
+      try {
+        await player.dispose();
+      } catch (_) {}
+    }
+    if (_p3ShadowRecording) {
+      _p3ShadowRecording = false;
+      try {
+        final path = await appAudioRecorder.stop();
+        if (path != null && path.isNotEmpty) _p3ShadowRecordPath = path;
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    setState(() {
+      _p3ShadowLoading = false;
+      _p3ShadowPlaying = false;
+      _p3ShadowDuration = Duration.zero;
+      _p3ShadowWordIndex = -1;
+      if (resetSelection) {
+        _selectedP3LearningVoice = null;
+        _selectedP3NativeVoice = null;
+        _p3UsesNativeStyle = null;
+        _p3ShadowComplete = false;
+        _p3ShadowWords = [];
+        _p3ShadowRecordPath = null;
+      }
+    });
+  }
+
+  Future<void> _startP3ShadowRecording(int generation) async {
+    if (!await appAudioRecorder.hasPermission()) return;
+    try {
+      final dir = await getTemporaryDirectory();
+      final path =
+          '${dir.path}/p3_shadow_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      await appAudioRecorder.start(
+        const RecordConfig(
+          encoder: AudioEncoder.aacLc,
+          sampleRate: 16000,
+          numChannels: 1,
+        ),
+        path: path,
+      );
+      if (!mounted || generation != _p3ShadowGeneration) {
+        await appAudioRecorder.stop();
+        return;
+      }
+      setState(() {
+        _p3ShadowRecording = true;
+        _p3ShadowRecordPath = path;
+      });
+    } catch (e) {
+      debugPrint('[P3-SHADOW-REC] start failed: $e');
+    }
+  }
+
+  Future<void> _startP3MeaningUnitShadowing({
+    required bool nativeStyle,
+    required String voice,
+  }) async {
+    await _stopP3Shadowing();
+    if (!mounted || _phase != ShadowingPhase.chunkPractice) return;
+    final text = _p3Sentence(nativeStyle: nativeStyle);
+    if (text.isEmpty) {
+      _showRoomEntryToast('P3에서 사용할 문장이 없습니다');
+      return;
+    }
+    final generation = ++_p3ShadowGeneration;
+    setState(() {
+      _p3UsesNativeStyle = nativeStyle;
+      _p3ShadowLoading = true;
+      _p3ShadowPlaying = false;
+      _p3ShadowComplete = false;
+      _p3ShadowWords =
+          text.split(RegExp(r'\s+')).where((word) => word.isNotEmpty).toList();
+      _p3ShadowWordIndex = -1;
+      _p3ShadowRecordPath = null;
+    });
+
+    final audio = await _getP3MeaningUnitTTS(
+      text,
+      voice,
+      nativeStyle: nativeStyle,
+    );
+    if (!mounted ||
+        generation != _p3ShadowGeneration ||
+        _phase != ShadowingPhase.chunkPractice) {
+      return;
+    }
+    if (audio == null) {
+      setState(() => _p3ShadowLoading = false);
+      _showRoomEntryToast('P3 학습 음성을 만들지 못했습니다');
+      return;
+    }
+
+    final player = AudioPlayer();
+    _p3ShadowPlayer = player;
+    _p3ShadowDuration = Duration.zero;
+    _p3ShadowDurationSub = player.onDurationChanged.listen((duration) {
+      if (duration > Duration.zero) _p3ShadowDuration = duration;
+    });
+    _p3ShadowPositionSub = player.onPositionChanged.listen((position) {
+      if (!mounted || generation != _p3ShadowGeneration) return;
+      final total = _p3ShadowDuration.inMilliseconds;
+      if (total <= 0 || _p3ShadowWords.isEmpty) return;
+      final ratio = (position.inMilliseconds / total).clamp(0.0, 1.0);
+      final index = (ratio * _p3ShadowWords.length)
+          .floor()
+          .clamp(0, _p3ShadowWords.length - 1);
+      if (index != _p3ShadowWordIndex) {
+        setState(() => _p3ShadowWordIndex = index);
+      }
+    });
+
+    final playbackComplete = player.onPlayerComplete.first;
+    await _startP3ShadowRecording(generation);
+    if (!mounted || generation != _p3ShadowGeneration) return;
+    setState(() {
+      _p3ShadowLoading = false;
+      _p3ShadowPlaying = true;
+    });
+    try {
+      await player.play(BytesSource(audio));
+      await playbackComplete.timeout(const Duration(seconds: 90));
+      await Future.delayed(const Duration(milliseconds: 700));
+    } catch (e) {
+      debugPrint('[P3-SHADOW] play failed: $e');
+    }
+    if (!mounted || generation != _p3ShadowGeneration) return;
+    if (_p3ShadowRecording) {
+      _p3ShadowRecording = false;
+      try {
+        final path = await appAudioRecorder.stop();
+        if (path != null && path.isNotEmpty) _p3ShadowRecordPath = path;
+      } catch (_) {}
+    }
+    await _p3ShadowPositionSub?.cancel();
+    _p3ShadowPositionSub = null;
+    await _p3ShadowDurationSub?.cancel();
+    _p3ShadowDurationSub = null;
+    if (identical(_p3ShadowPlayer, player)) _p3ShadowPlayer = null;
+    await player.dispose();
+    if (mounted && generation == _p3ShadowGeneration) {
+      setState(() {
+        _p3ShadowPlaying = false;
+        _p3ShadowComplete = true;
+        _p3ShadowWordIndex = _p3ShadowWords.length;
+      });
+    }
+  }
+
+  void _replaySelectedP3Shadowing() {
+    final nativeStyle = _p3UsesNativeStyle;
+    if (nativeStyle == null) return;
+    final voice =
+        nativeStyle ? _selectedP3NativeVoice : _selectedP3LearningVoice;
+    if (voice == null) return;
+    unawaited(_startP3MeaningUnitShadowing(
+      nativeStyle: nativeStyle,
+      voice: voice,
+    ));
+  }
+
+  Future<void> _playP3ShadowRecording() async {
+    final path = _p3ShadowRecordPath;
+    if (path == null || path.isEmpty || !await File(path).exists()) return;
+    final player = AudioPlayer();
+    try {
+      final complete = player.onPlayerComplete.first;
+      await player.play(DeviceFileSource(path));
+      await complete.timeout(const Duration(seconds: 90));
+    } catch (e) {
+      debugPrint('[P3-SHADOW-REC] playback failed: $e');
+    } finally {
+      await player.dispose();
+    }
+  }
+
+  Widget _buildChunkPracticeScreen() => _buildP3MeaningUnitShadowingScreen();
+
+  Widget _buildP3VoiceSelector({
+    required String label,
+    required List<String> options,
+    required String? value,
+    required Color color,
+    required ValueChanged<String> onSelected,
+  }) {
+    final needsSelection = value == null;
+    final content = Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: needsSelection ? 0.11 : 0.06),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: needsSelection ? color : color.withValues(alpha: 0.45),
+          width: needsSelection ? 1.7 : 1.2,
+        ),
+        boxShadow: needsSelection
+            ? [
+                BoxShadow(
+                  color: color.withValues(alpha: 0.35),
+                  blurRadius: 14,
+                  spreadRadius: 1,
+                ),
+              ]
+            : null,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: needsSelection ? color : Colors.white60,
+              fontSize: 10.5,
+              height: 1.25,
+              fontWeight: needsSelection ? FontWeight.bold : FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Container(
+            height: 36,
+            padding: const EdgeInsets.only(left: 12, right: 8),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.28),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: color.withValues(alpha: 0.65)),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: value,
+                hint: Text(
+                  '선택',
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                isExpanded: true,
+                dropdownColor: const Color(0xFF232323),
+                icon: Icon(Icons.keyboard_arrow_down_rounded,
+                    color: color, size: 18),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+                items: options
+                    .map(
+                      (voice) => DropdownMenuItem<String>(
+                        value: voice,
+                        child: Text(
+                            '${voice[0].toUpperCase()}${voice.substring(1)}'),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (voice) {
+                  if (voice != null) onSelected(voice);
+                },
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (!needsSelection) return content;
+    return AnimatedBuilder(
+      animation: _blinkController,
+      builder: (_, child) => Opacity(
+        opacity: 0.35 + (_blinkOpacity.value * 0.65),
+        child: child,
+      ),
+      child: content,
+    );
+  }
+
+  Widget _buildP3SentenceText(String sentence) {
+    final active = _p3UsesNativeStyle != null;
+    final words = active
+        ? _p3ShadowWords
+        : sentence
+            .split(RegExp(r'\s+'))
+            .where((word) => word.isNotEmpty)
+            .toList();
+    return Text.rich(
+      TextSpan(
+        children: List.generate(words.length, (index) {
+          final current = active && index == _p3ShadowWordIndex;
+          final passed = active && index < _p3ShadowWordIndex;
+          return TextSpan(
+            text: '${words[index]}${index == words.length - 1 ? '' : ' '}',
+            style: TextStyle(
+              color: current
+                  ? Colors.amber
+                  : passed
+                      ? Colors.white
+                      : Colors.white70,
+              fontWeight: current ? FontWeight.bold : FontWeight.w500,
+              backgroundColor: current
+                  ? Colors.amber.withValues(alpha: 0.13)
+                  : Colors.transparent,
+            ),
+          );
+        }),
+      ),
+      textAlign: TextAlign.center,
+      style: TextStyle(fontSize: 20 * _fontScale, height: 1.65),
+    );
+  }
+
+  Widget _buildP3MeaningUnitShadowingScreen() {
+    final activeNative = _p3UsesNativeStyle == true;
+    final activeLearning = _p3UsesNativeStyle == false;
+    final sentence = _p3UsesNativeStyle == null
+        ? _expandedSentence.trim()
+        : _p3Sentence(nativeStyle: activeNative);
+    final busy = _p3ShadowLoading || _p3ShadowPlaying;
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 8, 8, 2),
+          child: Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.close, color: Colors.white70),
+                onPressed: _exitShadowing,
+              ),
+              const Expanded(
+                child: Text(
+                  'P3  Meaning-unit Shadowing',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.4,
+                  ),
+                ),
+              ),
+              ValueListenableBuilder<int>(
+                valueListenable: BillingTicker.instance.billingState,
+                builder: (_, state, __) => Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: CustomPaint(
+                    size: const Size(16, 16),
+                    painter: BillingDotPainter(state),
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: () => setState(() {
+                  _fontScale = _fontScale == 1.0
+                      ? 1.3
+                      : _fontScale == 1.3
+                          ? 0.8
+                          : 1.0;
+                }),
+                icon: const Icon(Icons.format_size, color: Colors.white54),
+              ),
+            ],
+          ),
+        ),
+        if (_isStepExpandRoom) _buildPracticeTabBar(),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _buildP3VoiceSelector(
+                  label: '원어민식 의미단위\n쉐도잉 보이스 선택',
+                  options: _nativeMeaningUnitVoiceOptions,
+                  value: _selectedP3NativeVoice,
+                  color: const Color(0xFF818CF8),
+                  onSelected: (voice) {
+                    setState(() => _selectedP3NativeVoice = voice);
+                    unawaited(_startP3MeaningUnitShadowing(
+                      nativeStyle: true,
+                      voice: voice,
+                    ));
+                  },
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _buildP3VoiceSelector(
+                  label: '학습용 의미단위\n쉐도잉 보이스 선택',
+                  options: _meaningUnitVoiceOptions,
+                  value: _selectedP3LearningVoice,
+                  color: Colors.amber,
+                  onSelected: (voice) {
+                    setState(() => _selectedP3LearningVoice = voice);
+                    unawaited(_startP3MeaningUnitShadowing(
+                      nativeStyle: false,
+                      voice: voice,
+                    ));
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(18, 12, 18, 24),
+            child: Column(
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 250),
+                  width: double.infinity,
+                  padding: const EdgeInsets.fromLTRB(18, 24, 18, 24),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1C1C1E),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: activeNative
+                          ? const Color(0xFF818CF8)
+                          : activeLearning
+                              ? Colors.amber
+                              : Colors.white12,
+                      width: _p3UsesNativeStyle == null ? 1 : 1.6,
+                    ),
+                  ),
+                  child: sentence.isEmpty
+                      ? const Text(
+                          'P3에서 사용할 문장이 없습니다.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.white38),
+                        )
+                      : _buildP3SentenceText(sentence),
+                ),
+                const SizedBox(height: 18),
+                if (_p3UsesNativeStyle == null)
+                  const Text(
+                    '왼쪽 또는 오른쪽에서 Voice를 선택하면 시작합니다.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.white54, fontSize: 13),
+                  )
+                else if (_p3ShadowLoading)
+                  const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.amber),
+                      ),
+                      SizedBox(width: 9),
+                      Text('의미단위 음성 준비 중...',
+                          style: TextStyle(color: Colors.white60)),
+                    ],
+                  )
+                else if (_p3ShadowPlaying)
+                  const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.graphic_eq,
+                          color: Colors.greenAccent, size: 20),
+                      SizedBox(width: 8),
+                      Text('음성을 들으며 동시에 따라 읽으세요',
+                          style: TextStyle(color: Colors.greenAccent)),
+                    ],
+                  )
+                else if (_p3ShadowComplete)
+                  const Text('쉐도잉 완료',
+                      style: TextStyle(
+                          color: Colors.greenAccent,
+                          fontWeight: FontWeight.bold)),
+                const SizedBox(height: 18),
+                if (_p3UsesNativeStyle != null)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: SizedBox(
+                          height: 48,
+                          child: ElevatedButton.icon(
+                            onPressed: busy ? null : _replaySelectedP3Shadowing,
+                            icon: Icon(busy
+                                ? Icons.hourglass_top_rounded
+                                : Icons.replay_rounded),
+                            label: Text(busy ? '진행 중' : '다시 쉐도잉'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: activeNative
+                                  ? const Color(0xFF4F46E5)
+                                  : Colors.amber,
+                              foregroundColor:
+                                  activeNative ? Colors.white : Colors.black,
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14)),
+                            ),
+                          ),
+                        ),
+                      ),
+                      if (_p3ShadowComplete && _p3ShadowRecordPath != null) ...[
+                        const SizedBox(width: 10),
+                        SizedBox(
+                          height: 48,
+                          child: OutlinedButton.icon(
+                            onPressed: _playP3ShadowRecording,
+                            icon: const Icon(Icons.hearing_rounded),
+                            label: const Text('내 음성'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white70,
+                              side: const BorderSide(color: Colors.white24),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14)),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLegacyChunkPracticeScreen() {
     const Color colorA = Color(0xFF0F2233);
     const Color colorB = Color(0xFF1A0F2E);
     const Color colorAActive = Color(0xFF1C3D55);
@@ -6609,8 +7320,9 @@ RULES — follow exactly:
         _showRetryHint = false;
         _shadowWords = []; // [P2-SHADOW]
         _shadowWordIdx = -1; // [P2-SHADOW]
-        _shadowSpeed = 1.0; // [P2-SHADOW]
-        _shadowStarted = false; // Wait until the learner chooses a speed.
+        _shadowSpeed = 1.0;
+        _selectedMeaningUnitVoice = null;
+        _shadowStarted = false;
         _shadowRereadCount = 0; // [P2-PROXY]
         _showEchoingOverlay = false;
         _showShadowingOverlay = false;
@@ -6621,8 +7333,7 @@ RULES — follow exactly:
       _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
       _stopShadowAiPlayback(); // [P2-SHADOW-AI]
       _stopP2Countdown();
-      // 🆕 [P2-ENTER-CUE] P3의 "Echo it!"과 동일한 개념 — P2 진입 즉시 "Shadow it!"
-      //    안내를 2초간 표시. 실제 낭독은 유저가 속도를 고를 때 시작된다.
+      // 진입 안내 뒤 학습 Voice를 선택해야만 P2가 시작된다.
       _triggerShadowingOverlay();
       _prepareP2StartAudio();
     }
@@ -6639,19 +7350,38 @@ RULES — follow exactly:
   }
 
   void _prepareP2StartAudio() {
-    // 속도 선택 화면을 보는 동안 카운트다운과 첫 AI 문장을 함께 준비한다.
+    // Voice 선택을 기다리는 동안 카운트다운과 첫 AI 문장을 준비한다.
     _p2CountdownGeneration++;
     _p2CountdownAudioFuture = _loadP2CountdownAudio();
     if (_tutorLines.isEmpty) return;
     final firstText = (_tutorLines.first['text'] ?? '').toString().trim();
     if (firstText.isEmpty) return;
     unawaited(() async {
-      var audio = await TtsCache.get(firstText, 'nova');
+      final cacheVoice = _practiceCacheVoice(_historyPracticeAiVoice);
+      var audio = await TtsCache.get(firstText, cacheVoice);
       if (audio == null) {
-        audio = await _fetchOpenAITTS(firstText, 1.0, 'nova');
-        if (audio != null) TtsCache.put(firstText, 'nova', audio);
+        audio = await _fetchPracticeTTS(firstText, _historyPracticeAiVoice);
+        if (audio != null) TtsCache.put(firstText, cacheVoice, audio);
       }
     }());
+  }
+
+  Future<void> _prefetchNextMeaningUnitAudio() async {
+    if (_phase != ShadowingPhase.part2Practice) return;
+    Map<String, dynamic>? nextLine;
+    for (int i = currentIndex; i < _tutorLines.length; i++) {
+      final line = _tutorLines[i];
+      if ((line['role'] as String?) == 'USER') {
+        nextLine = line;
+        break;
+      }
+    }
+    if (nextLine == null) return;
+    final text = (nextLine['text'] ?? '').toString().trim();
+    if (text.isEmpty) return;
+    final voice = _selectedMeaningUnitVoice;
+    if (voice == null) return;
+    await _getMeaningUnitTTS(text, voice);
   }
 
   Future<void> _startP2AfterCountdown() async {
@@ -7145,9 +7875,6 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
       _polishedUnits = [];
       _polishedUnitIdx = -1;
 
-      await _buildChunks(_expandedSentence);
-      if (!mounted) return;
-
       setState(() => _isBuildingExpand = false);
       _goToChunkPractice();
     } catch (e) {
@@ -7167,6 +7894,8 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     } catch (_) {}
     audioPlayer.stop();
     _shadowingOverlayTimer?.cancel();
+    _echoingOverlayTimer?.cancel();
+    unawaited(_stopP3Shadowing(resetSelection: true));
     if (mounted) {
       setState(() {
         _isAutoRecording = false;
@@ -7174,17 +7903,13 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
         _currentChunkIdx = -1;
         _phase = ShadowingPhase.chunkPractice;
         _showShadowingOverlay = false;
+        _showEchoingOverlay = false;
+        _selectedP3LearningVoice = null;
+        _selectedP3NativeVoice = null;
+        _p3UsesNativeStyle = null;
+        _p3ShadowComplete = false;
       });
     }
-    // Start the first chunk when the overlay disappears.
-    _triggerEchoingOverlay(onDismiss: () {
-      if (mounted &&
-          _phase == ShadowingPhase.chunkPractice &&
-          _chunks.isNotEmpty &&
-          _currentChunkIdx == -1) {
-        _onChunkTapped(0);
-      }
-    });
   }
 
   void _switchToPractice(int practiceNum) {
@@ -7196,6 +7921,7 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     _stopShadowAiPlayback(); // [P2-SHADOW-AI]
     _stopShadowRecording(); // [P2-SHADOW-REC]
     _stopP2Countdown();
+    unawaited(_stopP3Shadowing(resetSelection: true));
     if (practiceNum == 1) {
       _startPart1Practice();
     } else if (practiceNum == 2) {
@@ -7243,7 +7969,7 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
                   child: Column(
                     children: [
                       if (_phase == ShadowingPhase.part2Practice)
-                        _buildShadowSpeedSelector(),
+                        _buildMeaningUnitVoiceSelector(),
                       Expanded(child: _buildTurnPracticeScreen()),
                     ],
                   ),
@@ -7273,7 +7999,8 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
                   ],
                 ),
                 child: const Text(
-                  'Shadow it!',
+                  'Thought-group\nShadowing',
+                  textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Colors.amber,
                     fontSize: 26,
@@ -7317,100 +8044,108 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     );
   }
 
-  // [P2-SHADOW] Top speed selector - connected segmented toggle bar.
-  // Larger values read faster. Label blinks until a speed is chosen.
-  Widget _buildShadowSpeedSelector() {
-    const Color divider = Colors.white24;
-    final bool blink = !_shadowStarted; // [P2] Blink label until speed chosen.
-    const Widget label = Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(Icons.speed, color: Colors.white54, size: 15),
-        SizedBox(width: 5),
-        Text(
-          "\uC18D\uB3C4 \uC120\uD0DD", // 속도 선택
-          style: TextStyle(color: Colors.white54, fontSize: 12),
-        ),
-      ],
-    );
-    return Padding(
-      padding: const EdgeInsets.only(top: 2, bottom: 6),
+  // P2 상단 오른쪽: 의미단위 쉐도잉 전용 학습 Voice.
+  Widget _buildMeaningUnitVoiceSelector() {
+    final busy = _shadowAiPlayer != null || _shadowRecording;
+    final needsSelection = _selectedMeaningUnitVoice == null;
+    final selector = Padding(
+      padding: const EdgeInsets.fromLTRB(12, 2, 16, 6),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisAlignment: MainAxisAlignment.end,
         children: [
-          blink
-              ? AnimatedBuilder(
-                  animation: _blinkController,
-                  builder: (_, child) =>
-                      Opacity(opacity: _blinkOpacity.value, child: child),
-                  child: label,
-                )
-              : label,
-          const SizedBox(width: 12),
-          // [P2] Connected segmented bar - visually distinct from P1/P2/P3 pills.
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.04),
-              borderRadius: BorderRadius.circular(15),
-              border: Border.all(color: divider, width: 1),
+          Flexible(
+            child: Text(
+              '학습용 의미단위 쉐도잉 보이스 선택',
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: needsSelection ? Colors.amber : Colors.white54,
+                fontSize: 11,
+                fontWeight: needsSelection ? FontWeight.bold : FontWeight.w500,
+                shadows: needsSelection
+                    ? const [
+                        Shadow(color: Colors.amber, blurRadius: 10),
+                      ]
+                    : null,
+              ),
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _buildSpeedSegment(0.7, "0.7", first: true),
-                Container(width: 1, height: 22, color: divider),
-                _buildSpeedSegment(0.8, "0.8"),
-                Container(width: 1, height: 22, color: divider),
-                _buildSpeedSegment(0.9, "0.9"),
-                Container(width: 1, height: 22, color: divider),
-                _buildSpeedSegment(1.0, "1", last: true),
-              ],
+          ),
+          const SizedBox(width: 8),
+          Container(
+            height: 36,
+            padding: const EdgeInsets.only(left: 12, right: 8),
+            decoration: BoxDecoration(
+              color: needsSelection
+                  ? Colors.amber.withValues(alpha: 0.12)
+                  : Colors.white.withValues(alpha: 0.06),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: needsSelection ? Colors.amber : Colors.white24,
+                width: needsSelection ? 1.5 : 1,
+              ),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: _selectedMeaningUnitVoice,
+                hint: const Text(
+                  '선택',
+                  style: TextStyle(
+                    color: Colors.amber,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                dropdownColor: const Color(0xFF232323),
+                icon: Icon(
+                  Icons.keyboard_arrow_down_rounded,
+                  color: busy ? Colors.white24 : Colors.amber,
+                  size: 18,
+                ),
+                style: TextStyle(
+                  color: busy ? Colors.white38 : Colors.white70,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+                items: _meaningUnitVoiceOptions
+                    .map(
+                      (voice) => DropdownMenuItem<String>(
+                        value: voice,
+                        child: Text(
+                          '${voice[0].toUpperCase()}${voice.substring(1)}',
+                        ),
+                      ),
+                    )
+                    .toList(),
+                onChanged: busy
+                    ? null
+                    : (voice) {
+                        if (voice == null ||
+                            voice == _selectedMeaningUnitVoice) {
+                          return;
+                        }
+                        final firstSelection = !_shadowStarted;
+                        setState(() {
+                          _selectedMeaningUnitVoice = voice;
+                          if (firstSelection) _shadowStarted = true;
+                        });
+                        unawaited(_prefetchNextMeaningUnitAudio());
+                        if (firstSelection &&
+                            _phase == ShadowingPhase.part2Practice &&
+                            !isPaused) {
+                          unawaited(_startP2AfterCountdown());
+                        }
+                      },
+              ),
             ),
           ),
         ],
       ),
     );
-  }
-
-  // [P2-SHADOW] One cell of the connected segmented speed toggle bar.
-  Widget _buildSpeedSegment(double v, String label,
-      {bool first = false, bool last = false}) {
-    // [P2-START] Before choosing a speed, no cell should look selected.
-    final bool sel = _shadowStarted && _shadowSpeed == v;
-    return GestureDetector(
-      onTap: () {
-        final bool firstSelection = !_shadowStarted;
-        setState(() {
-          _shadowSpeed = v;
-          if (firstSelection) _shadowStarted = true;
-        });
-        if (_phase != ShadowingPhase.part2Practice || isPaused) return;
-        if (firstSelection) {
-          unawaited(_startP2AfterCountdown());
-          return;
-        }
-        final player = _shadowAiPlayer;
-        if (player != null) unawaited(player.setPlaybackRate(v));
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 6),
-        decoration: BoxDecoration(
-          color:
-              sel ? Colors.amber.withValues(alpha: 0.22) : Colors.transparent,
-          borderRadius: BorderRadius.horizontal(
-            left: Radius.circular(first ? 15 : 0),
-            right: Radius.circular(last ? 15 : 0),
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: sel ? Colors.amber : Colors.white54,
-            fontSize: 13,
-            fontWeight: sel ? FontWeight.bold : FontWeight.normal,
-          ),
-        ),
-      ),
+    if (!needsSelection) return selector;
+    return AnimatedBuilder(
+      animation: _blinkController,
+      builder: (_, child) =>
+          Opacity(opacity: _blinkOpacity.value, child: child),
+      child: selector,
     );
   }
 
@@ -7461,13 +8196,14 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
             title: "Practice 3",
             subtitle: _isPreparingStepP3
                 ? "P3 준비 중... P1/P2는 바로 시작할 수 있어요"
-                : (_stepP3PreparationError ?? "확장문장 의미단위 따라읽기"),
+                : (_stepP3PreparationError ?? "전체 문장 의미단위 쉐도잉"),
             color: Colors.amber,
             icon: Icons.music_note_rounded,
             isLoading: _isPreparingStepP3,
             onTap: _isPreparingStepP3
                 ? null
-                : _stepP3PreparationError != null || _chunks.isEmpty
+                : _stepP3PreparationError != null ||
+                        _expandedSentence.trim().isEmpty
                     ? _retryStepP3Preparation
                     : _goToChunkPractice,
           ),
