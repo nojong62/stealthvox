@@ -141,10 +141,10 @@ class DeepgramConfidenceProbe {
   // for diagnosis, build with:  --dart-define=PROBE_DIAGNOSTICS=true
   static const bool _diagnosticsOverride =
       bool.fromEnvironment('PROBE_DIAGNOSTICS', defaultValue: false);
-  static bool get detailedLoggingEnabled =>
-      kDebugMode || _diagnosticsOverride;
+  static bool get detailedLoggingEnabled => kDebugMode || _diagnosticsOverride;
 
-  // Probe-only thresholds. They never control conversation behavior.
+  // Confidence thresholds. Anyone mode also uses the resulting low-confidence
+  // signals to decide whether a turn needs gpt-4o-transcribe verification.
   static const double lowWordConfidenceThreshold = 0.65;
   static const double lowChunkConfidenceThreshold = 0.70;
   static const double veryLowChunkConfidenceThreshold = 0.50;

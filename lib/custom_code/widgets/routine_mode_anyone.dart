@@ -66,8 +66,6 @@ const int kFreeTalkFirstTurnCommitWaitMs = 200;
 const int kFreeTalkDeepgramEndpointingMs = 700;
 const int kFreeTalkDeepgramUtteranceEndMs =
     1000; // Deepgram minimum allowed value; 900 returns HTTP 400.
-const int kFreeTalkUserTtsFetchTimeoutMs = 15000;
-const int kFreeTalkUserTtsPlaybackTimeoutMs = 15000;
 const int kFreeTalkAiTtsWaitTimeoutMs = 20000;
 const int kFreeTalkOpenAiTtsHttpTimeoutSeconds =
     18; // Long-form cache save path.
@@ -87,7 +85,7 @@ const int kFreeTalkMaxTtsCharsPerUtterance = 800;
 // 7차 실측에서 1200ms는 실패였다 — 확정까지 210ms가 이미 흘러 남은 예산이
 // 980ms였고, mini(도착 604~1406ms)가 못 들어와 그 대기를 통째로 낭비했다.
 // 1800ms면 확정 후 약 1.6초를 기다려 실측 도착 범위를 대부분 덮는다.
-// 첫 턴은 gpt-4o-transcribe 정확도 경로이므로 mini보다 넉넉히 기다린다.
+// 선택적 gpt-4o-transcribe 정확도 경로는 파일 전사 응답을 넉넉히 기다린다.
 const int kFreeTalkFirstTurnRetranscribeTimeoutMs = 3000;
 // 🎙️ [PCM-TEE] 재전사용 원본 음성 버퍼 상한. 16kHz PCM16 = 32KB/s → 60초.
 const int kFreeTalkTurnPcmBufferMaxBytes = 32000 * 60;
@@ -305,8 +303,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       kFreeTalkCommitWaitMs; // speech_final: 900ms
   static const int COMMIT_WAIT_UNCERTAIN_MS =
       kFreeTalkCommitWaitUncertainMs; // UtteranceEnd: 500ms
-  // 📦 [Meaning Confidence Probe] Measurement-only state.
-  // Never use these values to branch UI, History, Turn, GPT, TTS, or microphone flow.
+  // 📦 [Meaning Confidence Probe] Deepgram 결과의 전사 신뢰도를 측정한다.
+  // 낮은 confidence는 선택적 gpt-4o-transcribe 재전사 조건으로 사용한다.
   static const String _probeMode = 'ANYONE';
   final List<DeepgramTurnResult> _pendingDeepgramResults = [];
   DateTime? _activeProbeDgFinalAt;
@@ -356,8 +354,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     return out;
   }
 
-  /// 첫 턴 전용 전사. 실패해도 Deepgram 텍스트로 폴백하지 않는다.
-  Future<String?> _transcribeFirstTurn({Uint8List? pcmOverride}) async {
+  /// 정확도가 필요한 턴을 gpt-4o-transcribe로 다시 전사한다.
+  Future<String?> _transcribeAccurately({Uint8List? pcmOverride}) async {
     final pcm = pcmOverride ?? _snapshotTurnPcm();
     if (pcm == null || _openAiKey.isEmpty) return null;
     _costTracker.recordRetranscribeRequest();
@@ -390,12 +388,90 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       return;
     }
     _prefetchedFirstTurnPcmBytes = pcm.length;
-    _prefetchedFirstTurnTranscribe = _transcribeFirstTurn(pcmOverride: pcm);
+    _prefetchedFirstTurnTranscribe = _transcribeAccurately(pcmOverride: pcm);
     _log(
       '🚀 [FIRST-TRANSCRIBE-PREFETCH]',
       'started pcmBytes=${pcm.length} '
           'commitWaitMs=$kFreeTalkFirstTurnCommitWaitMs',
     );
+  }
+
+  /// Deepgram은 모든 턴의 발화 종료 판단을 담당한다. 아래 신호가 하나라도
+  /// 있으면 그 턴의 최종 문장만 gpt-4o-transcribe 결과로 교체한다.
+  List<String> _accurateTranscriptionReasons(
+    String transcript, {
+    required bool isFirstTurn,
+  }) {
+    final reasons = <String>[];
+    final text = transcript.trim();
+    final compact = text.replaceAll(RegExp(r'\s+'), '');
+
+    if (isFirstTurn) reasons.add('first_turn');
+    if (_activeSttConfidence == null) {
+      reasons.add('confidence_missing');
+    } else if (_activeSttConfidence! < 0.70) {
+      reasons.add('low_transcript_confidence');
+    }
+    if ((_activeSttWordConfidenceMin ?? 1.0) < 0.65 ||
+        _activeSttLowConfidenceWordCount > 0) {
+      reasons.add('low_word_confidence');
+    }
+
+    final hasKorean = RegExp(r'[가-힣]').hasMatch(text);
+    final hasEnglish = RegExp(r'[A-Za-z]').hasMatch(text);
+    if (hasKorean && hasEnglish) reasons.add('mixed_language');
+
+    final correctionSignal = RegExp(
+      r'(그게\s*아니|그런\s*뜻이\s*아니|내\s*(말|뜻)은|잘못\s*(들|적|알아)|'
+      r'다시\s*말|방금\s*(말|번역)|아니[요,.\s]|I\s+mean|that.?s\s+not\s+what\s+I\s+meant)',
+      caseSensitive: false,
+    );
+    if (correctionSignal.hasMatch(text)) reasons.add('correction_or_misheard');
+
+    final negativeCount = RegExp(
+      r'(아니|않|안\s|못\s|없|말고|not|never|no\s)',
+      caseSensitive: false,
+    ).allMatches('$text ').length;
+    if (negativeCount >= 2) reasons.add('nested_negation');
+
+    final vagueReference = RegExp(
+      r'(걔|그\s*사람|그분|그거|그것|그쪽|거기|그때|그분한테|'
+      r'\b(he|she|they|that|there|then)\b)',
+      caseSensitive: false,
+    );
+    if (vagueReference.hasMatch(text)) {
+      reasons.add('ambiguous_subject_relation_or_tense');
+    }
+
+    final looksBroken = text.endsWith('...') ||
+        text.endsWith('…') ||
+        RegExp(r'(그런데|근데|그래서|하지만|했는데|하는데|라서|때문에)$').hasMatch(compact);
+    if (looksBroken) reasons.add('possibly_broken_sentence');
+    if (_pendingHeardConfirmation != null) reasons.add('misheard_followup');
+
+    return reasons;
+  }
+
+  String _stripCorrectionFraming(String transcript) {
+    var cleaned = transcript.trim();
+    cleaned = cleaned.replaceFirst(
+      RegExp(
+        r'^(아니[요]?[,.!\s]*|아\s*)?'
+        r'(그게|그런\s*게|그런\s*뜻이|내\s*(말|뜻)이?)\s*'
+        r'아니(?:라|고|야|에요|예요|었고|었다)?[,.!\s]*',
+        caseSensitive: false,
+      ),
+      '',
+    );
+    cleaned = cleaned.replaceFirst(
+      RegExp(
+        r'^(내\s*(말|뜻)은|내가\s*말한\s*건|그러니까|다시\s*말하면|'
+        r'I\s+mean|what\s+I\s+mean\s+is|that.?s\s+not\s+what\s+I\s+meant)[,:.\s]*',
+        caseSensitive: false,
+      ),
+      '',
+    );
+    return cleaned.trim();
   }
 
   /// 전사가 발화가 아니라 잡음·추임새인지 판정한다. 파이프라인 진입 전 검열이
@@ -1347,9 +1423,12 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     // 기존 타이머 취소 (새 발화가 왔으므로 대기창 리셋)
     _commitTimer?.cancel();
 
-    // Deepgram 확정 대기 200ms와 OpenAI 전사를 겹친다. 최종 전사 선택은
-    // 여전히 gpt-4o-transcribe만 사용하고 Deepgram 텍스트는 폐기한다.
-    if (isFirstUtterance) _prefetchFirstTurnTranscribe();
+    // Deepgram 확정 대기 200ms와 OpenAI 전사·번역을 겹친다. 선번역은
+    // gpt-4o-transcribe 결과와 글자가 일치할 때만 채택한다.
+    if (isFirstUtterance) {
+      _prefetchFirstTurnTranscribe();
+      _startSpeculativeTranslation(_pendingTranscript);
+    }
 
     // 조건부 대기 후 파이프라인 시작 예약 (source별 waitMs)
     _commitTimer = Timer(
@@ -1387,16 +1466,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       _log('🎧 [STT-RAW]', 'source=nova3 text="$committed"');
     }
 
-    // 🚀 [SPEC-FIRST-TURN] 투기적 번역이 이 확정 텍스트와 일치하면 그 스트림을 그대로
-    //   파이프라인에 넘겨 TTFT를 건너뛴다. 불일치(합쳐짐 등)면 폐기하고 정상 경로.
     Stream<String>? userOverride;
-    if (_specController != null && _specTranscript == committed) {
-      userOverride = _specController!.stream;
-      _detachSpeculativeTranslation(); // 소유권 이전(컨트롤러를 닫지 않음)
-      _log('🚀 [SPEC-HANDOFF]', '투기 번역 선반영 사용');
-    } else {
-      _cancelSpeculativeTranslation();
-    }
 
     // 마이크/VoiceManager 정리.
     // ⏱️ dispose 완료를 기다리면 그만큼 번역 시작이 밀린다. 소유권만 즉시
@@ -1410,37 +1480,77 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     }
     _log('🔀 [COMMIT-02]', 'VoiceManager 정리 백그라운드 위임');
 
+    // Deepgram 최종 결과의 confidence를 먼저 계산해 선택적 재전사에 쓴다.
+    // 발화 종료 판단은 모델 선택과 무관하게 모든 턴에서 Deepgram이 담당한다.
+    _runMeaningProbe(committed);
+
     // ── 전사 선택 ───────────────────────────────────────────────────
-    //   · 첫 턴   → gpt-4o-transcribe
-    //   · 2턴부터 → Deepgram Nova-3
+    //   · 첫 턴/불확실 신호 → gpt-4o-transcribe
+    //   · 그 외             → Deepgram Nova-3
     String effectiveTranscript = committed;
-    if (isFirstTurn) {
+    final accurateReasons = _accurateTranscriptionReasons(
+      committed,
+      isFirstTurn: isFirstTurn,
+    );
+    final useAccurateTranscription = accurateReasons.isNotEmpty;
+    if (useAccurateTranscription) {
       final prefetchedTranscribe = _prefetchedFirstTurnTranscribe;
       _prefetchedFirstTurnTranscribe = null;
       _prefetchedFirstTurnPcmBytes = 0;
-      final firstTurnTranscript =
-          (await (prefetchedTranscribe ?? _transcribeFirstTurn()))?.trim();
-      if (firstTurnTranscript == null || firstTurnTranscript.isEmpty) {
-        _log('❌ [FIRST-TURN-STT]',
-            'gpt-4o-transcribe 실패 → Deepgram 텍스트 미사용, 재청취');
-        if (mounted) {
-          setState(() => _localMessages
-              .removeWhere((message) => message['role'] == 'HOST_TEMP'));
+      final accurateTranscript =
+          (await (prefetchedTranscribe ?? _transcribeAccurately()))?.trim();
+      if (accurateTranscript == null || accurateTranscript.isEmpty) {
+        _cancelSpeculativeTranslation();
+        if (isFirstTurn) {
+          _log('❌ [FIRST-TURN-STT]',
+              'gpt-4o-transcribe 실패 → Deepgram 텍스트 미사용, 재청취');
+          if (mounted) {
+            setState(() => _localMessages
+                .removeWhere((message) => message['role'] == 'HOST_TEMP'));
+          }
+          await _speakRetryAndListen();
+          return;
         }
-        await _speakRetryAndListen();
-        return;
+        // 이후 턴은 정확 전사가 실패해도 이미 확정된 Deepgram 문장을 보존한다.
+        _log(
+          '⚠️ [STT-ROUTE]',
+          'gpt-4o-transcribe failed fallback=nova3 '
+              'reasons=${accurateReasons.join(",")}',
+        );
+      } else {
+        effectiveTranscript = accurateTranscript;
+        if (kDebugMode) {
+          _log('🎧 [STT-RAW]',
+              'source=gpt-4o-transcribe text="$accurateTranscript"');
+        }
+        _log(
+          '🎧 [STT-ROUTE]',
+          'selected=gpt-4o-transcribe turn=$_turnCounter '
+              'reasons=${accurateReasons.join(",")}',
+        );
       }
-      effectiveTranscript = firstTurnTranscript;
-      if (kDebugMode) {
-        _log('🎧 [STT-RAW]',
-            'source=gpt-4o-transcribe text="$firstTurnTranscript"');
+
+      // Deepgram 문장은 최종 전사로 사용하지 않는다. 다만 공백·문장부호를
+      // 제외한 글자가 GPT 전사문과 완전히 같으면, 전사 대기 중 미리 생성한
+      // 번역 스트림만 넘겨 1회분 번역 지연을 숨긴다.
+      if (effectiveTranscript != committed &&
+          _specController != null &&
+          _sameTranscriptForSpec(_specTranscript, effectiveTranscript)) {
+        userOverride = _specController!.stream;
+        _detachSpeculativeTranslation(); // 스트림 소유권을 파이프라인으로 이전
+        _log('🚀 [SPEC-HANDOFF]',
+            'accepted exact_match=true len=${effectiveTranscript.length}');
+      } else {
+        _log(
+            '🚀 [SPEC-HANDOFF]',
+            'discarded exact_match=false dgLen=${_specTranscript.length} '
+                'gptLen=${effectiveTranscript.length}');
+        _cancelSpeculativeTranslation();
       }
-      _log('🎧 [FIRST-TURN-STT]',
-          'selected=gpt-4o-transcribe deepgram_text_discarded=true');
     } else {
+      _cancelSpeculativeTranslation();
       _log('🎧 [STT-ROUTE]', 'selected=nova3 turn=$_turnCounter');
     }
-    _runMeaningProbe(effectiveTranscript);
     if (pipelineGeneration != _pipelineGeneration || !mounted) return;
 
     // 모든 유저 턴 번역은 gpt-4o-mini 한 모델로 고정한다.
@@ -1471,8 +1581,15 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   //   투기 번역 선시작을 껐다. 롤백 시 _stopMicAndProcess에서 다시 호출하면 된다.
   // ignore: unused_element
   void _startSpeculativeTranslation(String text) {
+    final clean = text.trim();
+    if (clean.isEmpty) return;
+    if (_specController != null &&
+        _sameTranscriptForSpec(_specTranscript, clean)) {
+      _log('🚀 [SPEC-REUSE]', 'same Deepgram final → 기존 선번역 유지');
+      return;
+    }
     _cancelSpeculativeTranslation(); // 이전 투기 번역 정리 후 재시작
-    _specTranscript = text;
+    _specTranscript = clean;
     final controller = StreamController<String>();
     _specController = controller;
     // 첫 턴은 대화 컨텍스트가 없으므로 contextStr은 빈 문자열(파이프라인과 동일).
@@ -1486,6 +1603,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       targetLang: targetLangName,
       contextStr: '',
       disableCorrection: false,
+      fastFirstTurn: true,
     ).listen(
       (chunk) {
         if (!controller.isClosed) controller.add(chunk);
@@ -1516,6 +1634,14 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     _specTranscript = '';
     sub?.cancel();
     if (c != null && !c.isClosed) c.close();
+  }
+
+  bool _sameTranscriptForSpec(String a, String b) {
+    String normalize(String value) =>
+        value.toLowerCase().replaceAll(RegExp(r'[^\w가-힣]'), '').trim();
+    final left = normalize(a);
+    final right = normalize(b);
+    return left.isNotEmpty && left == right;
   }
 
   String get _currentUserVoice =>
@@ -1712,7 +1838,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         'anyone_nova3 turnId=$currentTurnId translateModel=$translationModel');
 
     _isPipelineRunning = true;
-    TtsUtterance? userUtterance;
     TtsUtterance? aiUtterance;
     TtsPrefetch? aiTtsPrefetch;
     try {
@@ -1724,7 +1849,11 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       if (mounted) {
         setState(() {
           _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-          _localMessages.add({'role': 'HOST', 'target': '', 'original': ''});
+          _localMessages.add({
+            'role': 'HOST',
+            'target': '',
+            'original': finalTranscript,
+          });
         });
       }
 
@@ -1762,6 +1891,17 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           ? FFAppState().targetLang
           : 'English';
 
+      // 첫 정상 턴에 이전 문맥이 없을 때만 짧은 전용 프롬프트를 쓴다.
+      // 정정/확인 규칙이 필요한 이후 턴은 기존 정밀 프롬프트를 그대로 유지한다.
+      final bool useFastFirstTurnTranslation = currentTurnId == 1 &&
+          userStreamOverride == null &&
+          !isCorrectionRetry &&
+          !understandingConfirmed &&
+          contextStr.trim().isEmpty;
+      if (useFastFirstTurnTranslation) {
+        _log('🚀 [FIRST-TURN-TRANSLATE]', 'compact_prompt=true');
+      }
+
       final userStream = userStreamOverride ??
           FreeTalkBrain.streamUserTranslation(
             apiKey: _openAiKey,
@@ -1771,6 +1911,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
             model: translationModel,
             disableCorrection: isCorrectionRetry,
             disableHeardConfirmation: understandingConfirmed,
+            fastFirstTurn: useFastFirstTurnTranslation,
           );
 
       bool evaporated = false;
@@ -1780,17 +1921,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       bool clarified = false; // 주어/목적어 모호 → AI 되묻기
       bool heardConfirmation = false; // 특정 단어 오청취 가능성 → 확인 후 보류 턴 재개
 
-      // 🚀 [EARLY-FIRE] 번역 스트림 도중 첫 문장이 확정되면 그 자리에서 TTS를
-      //   발사한다. gpt-4o-mini-tts의 TTFB(실측 1.6초)를 남은 번역 시간과
-      //   겹쳐 없애는 것이 목적이다 (실측 2026-07-30 7차: 번역 1.57초).
-      //
-      //   태그 누출 방지: 이 프롬프트의 제어 태그와 확인 질문은 **항상 응답
-      //   맨 앞**에 온다. 그래서 선두가 '['도 아니고 확인 질문 접두도 아닌
-      //   것이 확인되면, 그 응답에는 태그가 없다고 단정할 수 있다.
-      //   그 조건이 성립한 뒤에만 발사한다.
-      String earlyFiredText = '';
-      TtsUtterance? earlyUtterance;
-      bool earlyFireBlocked = false;
       await for (String chunk in userStream) {
         if (!_isPipelineRunning ||
             _turnCounter != currentTurnId ||
@@ -1841,56 +1971,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         }
         if (mounted && !clarified && !heardConfirmation)
           setState(() => _localMessages[hostIndex]['target'] = userTargetText);
-
-        // 🚀 [EARLY-FIRE] 첫 조각 발사 판단
-        if (earlyFiredText.isEmpty && !earlyFireBlocked) {
-          final head = userTargetText.trimLeft();
-          if (head.startsWith('[') || '제가 잘못 들었나요?'.startsWith(head)) {
-            // 태그거나 확인 질문일 수 있다 → 아직 단정할 수 없으므로 보류.
-            // (접두가 길어져 확인 질문이 아님이 드러나면 다음 청크에서 통과)
-          } else if (head.contains('[')) {
-            earlyFireBlocked = true;
-            _log('🚀 [EARLY-FIRE]', 'blocked reason=control_tag_present');
-          } else if (head.length >= 12) {
-            // 태그 없음이 확정됐다. 첫 문장 경계를 찾는다.
-            final match = RegExp(r'[.!?,;:]\s').firstMatch(head);
-            final int cut = match?.end ?? -1;
-            final String segment = cut > 0 ? head.substring(0, cut).trim() : '';
-            // 남은 번역이 있을 때만 쪼갠다 — 문장이 하나로 끝나면 통짜가 낫다.
-            if (segment.length >= 12) {
-              earlyFiredText = segment;
-              _logTurnPerf('EARLY_FIRE');
-              _costTracker.recordTtsRequest(segment.length);
-              earlyUtterance = _ttsAdapter.speak(TtsRequest(
-                text: segment,
-                voiceId: userVoice,
-                speakerType: TtsSpeakerType.user,
-                turnId: 'user-$currentTurnId',
-                generationId: pipelineGeneration,
-                saveToHistory: true,
-                historyVoiceKey: 'nova',
-                expectsMoreSegments: true,
-              ));
-              _log('🚀 [EARLY-FIRE]',
-                  'fired len=${segment.length} text="$segment"');
-            }
-          }
-        }
-      }
-
-      // 🚀 [EARLY-FIRE] 제어 태그 경로는 위 발사 조건상 도달하지 않아야 하지만,
-      //   모델이 태그를 문장 뒤에 붙이는 예외가 생기면 이미 나간 소리를 끊는다.
-      if (earlyFiredText.isNotEmpty &&
-          (evaporated ||
-              corrected ||
-              misheard ||
-              dissatisfiedReply ||
-              clarified ||
-              heardConfirmation)) {
-        _log('🚀 [EARLY-FIRE]', 'control_tag_after_fire → 재생 취소');
-        earlyUtterance?.cancel();
-        _ttsAdapter.stopAll(reason: 'early_fire_control_tag');
-        earlyFiredText = '';
       }
 
       if (evaporated) {
@@ -1907,6 +1987,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
       // 🔄 [CORRECTION] 유저가 AI의 오해/오청취를 정정 → 직전 교환 삭제 후 재처리
       if (corrected) {
+        final correctedTranscript = _stripCorrectionFraming(finalTranscript);
         if (mounted) {
           setState(() {
             _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
@@ -1924,12 +2005,18 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
               _recentHistory.length - 2, _recentHistory.length);
         }
         _ttsAdapter.stopAll(reason: 'correction');
-        // 정정된 발화로 재처리 — guide4 5장: 정밀 모델만 한 번 호출한다.
+        // 방금 정정 감지용 턴과 삭제한 직전 턴을 되돌린 뒤, 정정 내용이 새
+        // 사용자 턴 1개가 되도록 다시 시작한다.
+        _turnCounter = (_turnCounter - 2).clamp(0, 1 << 30).toInt();
         skipFinallyRestart = true;
         _isPipelineRunning = false;
+        if (correctedTranscript.isEmpty) {
+          await _speakRetryAndListen();
+          return;
+        }
         unawaited(
           _processRelayPipeline(
-            finalTranscript,
+            correctedTranscript,
             isCorrectionRetry: true,
             translationModel: kFreeTalkTranslateModelFast,
             expectedPipelineGeneration: pipelineGeneration,
@@ -1940,7 +2027,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
       // 👂 [MISHEARD] 잘못 들었다는 불만만 말한 경우 → 직전 교환 삭제 후 재청취
       if (misheard) {
-        _turnCounter--;
+        _turnCounter = (_turnCounter - 2).clamp(0, 1 << 30).toInt();
         if (mounted) {
           setState(() {
             _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
@@ -1967,11 +2054,11 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         return;
       }
 
-      // 🟣 [DISSATISFIED] AI 직전 응답 불만 → 직전 SYSTEM만 제거하고 같은 유저 발화로 재생성
+      // 🟣 새 뜻 없이 직전 AI 답변만 거부한 경우에도 직전 유저+AI 교환을
+      // 삭제한다. 새 내용이 포함된 "내 말은 X" 형태는 프롬프트가
+      // [CORRECTION]으로 분류해 위에서 X를 새 유저 턴으로 다시 시작한다.
       if (dissatisfiedReply) {
-        _turnCounter--;
-        String rejectedReply = '';
-        String lastUserTarget = '';
+        _turnCounter = (_turnCounter - 2).clamp(0, 1 << 30).toInt();
         if (mounted) {
           setState(() {
             _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
@@ -1979,104 +2066,16 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
                 _localMessages[hostIndex]['role'] == 'HOST') {
               _localMessages.removeAt(hostIndex);
             }
-            final lastSysIdx =
-                _localMessages.lastIndexWhere((m) => m['role'] == 'SYSTEM');
-            if (lastSysIdx != -1) {
-              rejectedReply =
-                  (_localMessages[lastSysIdx]['target'] ?? '').toString();
-              _localMessages.removeAt(lastSysIdx);
-            }
-            final lastHostIdx =
-                _localMessages.lastIndexWhere((m) => m['role'] == 'HOST');
-            if (lastHostIdx != -1) {
-              lastUserTarget =
-                  (_localMessages[lastHostIdx]['target'] ?? '').toString();
-            }
+            _removeLastExchange();
           });
           if (_localMessages.isNotEmpty) _scrollToBottom();
         }
-        if (lastUserTarget.trim().isEmpty) {
-          _ttsAdapter.stopAll(reason: 'dissatisfied_no_source');
-          skipFinallyRestart = true;
-          _isPipelineRunning = false;
-          await _speakRetryAndListen();
-          return;
-        }
-        if (_recentHistory.isNotEmpty &&
-            _recentHistory.last['role'] == 'assistant') {
-          _recentHistory.removeLast();
+        if (_recentHistory.length >= 2) {
+          _recentHistory.removeRange(
+              _recentHistory.length - 2, _recentHistory.length);
         }
         _ttsAdapter.stopAll(reason: 'dissatisfied');
-        await _speakSystemLine("그럼 다시 답해 볼게요.");
-        var regenMsgs = _localMessages.where((m) {
-          if (m['role'] != 'HOST' && m['role'] != 'SYSTEM') return false;
-          final target = (m['target'] ?? '').toString().trim();
-          return target.isNotEmpty && target != '...';
-        }).toList();
-        if (regenMsgs.length > 10)
-          regenMsgs = regenMsgs.sublist(regenMsgs.length - 10);
-        final String regenContextStr = regenMsgs
-            .map(
-                (m) => "${m['role'] == 'HOST' ? 'User' : 'AI'}: ${m['target']}")
-            .join("\n");
-        if (mounted) {
-          setState(() => _localMessages
-              .add({'role': 'SYSTEM', 'target': '', 'original': ''}));
-          _scrollToBottom();
-        }
-        final int regenAiIndex = _localMessages.length - 1;
-        String regenText = "";
-        final regenStream = FreeTalkBrain.streamFreeTalkResponse(
-          apiKey: _openAiKey,
-          userTargetText: lastUserTarget,
-          contextStr: regenContextStr,
-          myTarget: targetLangName,
-          level: _freeTalkLevel,
-          rejectedReply: rejectedReply,
-        );
-        await for (final chunk in regenStream) {
-          regenText += chunk;
-          if (mounted && regenAiIndex < _localMessages.length) {
-            setState(() => _localMessages[regenAiIndex]['target'] = regenText);
-          }
-        }
-        final String regenClean = _cleanText(regenText.trim());
-        if (regenClean.isEmpty) {
-          if (mounted && regenAiIndex < _localMessages.length) {
-            setState(() => _localMessages.removeAt(regenAiIndex));
-          }
-          skipFinallyRestart = true;
-          _isPipelineRunning = false;
-          await _speakRetryAndListen();
-          return;
-        }
-        _costTracker.recordTtsRequest(regenClean.length);
-        final regenUtterance = _ttsAdapter.speak(TtsRequest(
-          text: regenClean,
-          voiceId: TtsAdapterConfig.aiVoice,
-          speakerType: TtsSpeakerType.ai,
-          turnId:
-              'regen-$currentTurnId-${DateTime.now().millisecondsSinceEpoch}',
-          generationId: pipelineGeneration,
-          saveToHistory: true,
-          historyVoiceKey: 'nova',
-        ));
-        FreeTalkBrain.generateCleanOriginal(
-                apiKey: _openAiKey, englishText: regenText)
-            .then((cleanKorean) {
-          if (mounted && _localMessages.length > regenAiIndex) {
-            setState(
-                () => _localMessages[regenAiIndex]['original'] = cleanKorean);
-          }
-        });
-        _recentHistory.add({'role': 'assistant', 'content': regenText});
-        while (_recentHistory.length > 4) _recentHistory.removeAt(0);
-        try {
-          await regenUtterance.done.timeout(
-              const Duration(milliseconds: kFreeTalkAiTtsWaitTimeoutMs));
-        } on TimeoutException {
-          regenUtterance.cancel();
-        }
+        await _speakSystemLine("알겠어요. 원하시는 뜻으로 다시 말씀해 주세요.");
         skipFinallyRestart = true;
         _isPipelineRunning = false;
         if (mounted && _isConversationActive) {
@@ -2212,64 +2211,33 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       }
 
       // ─────────────────────────────────────────────────────
-      // STEP 3: 최종 번역문 확정 → 공통 TTS 어댑터 (guide4 3.4)
-      //   PCM 첫 청크부터 즉시 재생 + 같은 스트림이 히스토리 버퍼에 기록된다.
-      //   여기서 모델명을 지정하지 않는다 — 어댑터 설정이 정한다.
+      // STEP 3: 사용자 번역 음성은 라이브로 재생하지 않는다.
+      //   화면에는 선택된 전사 원문(original)과 번역(target)만 표시하고,
+      //   음원은 AI 실시간 재생 큐와 분리해 히스토리용으로만 만든다.
       // ─────────────────────────────────────────────────────
       _logTurnPerf('TRANSLATION_DONE');
       final String fullUserTts = _cleanText(userTargetText.trim());
-      if (fullUserTts.isNotEmpty) {
-        _swTTS.reset();
-        _swTTS.start();
-        // 🚀 [EARLY-FIRE] 앞 조각이 이미 나갔으면 나머지만 이어 붙인다.
-        String remainder = fullUserTts;
-        if (earlyFiredText.isNotEmpty) {
-          final head = _cleanText(earlyFiredText);
-          if (fullUserTts.startsWith(head)) {
-            remainder = fullUserTts.substring(head.length).trim();
-          } else {
-            // 정규화 차이로 접두가 안 맞으면 통짜 재생으로 되돌린다(중복 방지).
-            _log('🚀 [EARLY-FIRE]', 'prefix_mismatch → 앞 조각 취소, 통짜 재생');
-            earlyUtterance?.cancel();
-            _ttsAdapter.stopAll(reason: 'early_fire_prefix_mismatch');
-            earlyFiredText = '';
-          }
-        }
-        if (earlyFiredText.isNotEmpty && remainder.isEmpty) {
-          // 첫 조각이 곧 전체였다 → 열린 세션만 정상 종료한다.
-          _log('🚀 [EARLY-FIRE]', 'no_remainder → 세션 종료');
-          userUtterance = earlyUtterance;
-          unawaited(_ttsAdapter.closeOpenSegment());
-        } else {
-          _logTurnPerf('USER_TTS_REQUEST');
-          _costTracker.recordTtsRequest(remainder.length);
-          userUtterance = _ttsAdapter.speak(TtsRequest(
-            text: remainder,
-            voiceId: userVoice,
-            speakerType: TtsSpeakerType.user,
-            turnId: 'user-$currentTurnId',
-            generationId: pipelineGeneration,
-            saveToHistory: true,
-            // 히스토리 통문장 조회 규약과 동일한 키('nova')로 저장 — HIT 유도.
-            historyVoiceKey: 'nova',
-            continuesPreviousSegment: earlyFiredText.isNotEmpty,
-          ));
-          _logProbeTiming('USER_TTS_REQUEST');
-        }
+      final TtsRequest? userHistoryTtsRequest = fullUserTts.isEmpty
+          ? null
+          : TtsRequest(
+              text: fullUserTts,
+              voiceId: userVoice,
+              speakerType: TtsSpeakerType.user,
+              turnId: 'user-$currentTurnId',
+              generationId: pipelineGeneration,
+              saveToHistory: true,
+              historyVoiceKey: 'nova',
+            );
+      if (userHistoryTtsRequest != null) {
+        _costTracker.recordTtsRequest(fullUserTts.length);
+        _log(
+          '🔊 [USER-TTS-HISTORY-ONLY]',
+          'queued turnId=$currentTurnId len=${fullUserTts.length}',
+        );
       }
 
-      // 유저 original 생성 (백그라운드)
-      FreeTalkBrain.generateCleanOriginal(
-              apiKey: _openAiKey, englishText: userTargetText)
-          .then((cleanKorean) {
-        if (mounted && _localMessages.length > hostIndex) {
-          setState(() => _localMessages[hostIndex]['original'] = cleanKorean);
-        }
-      });
-
       // ─────────────────────────────────────────────────────
-      // STEP 4 (병렬): 유저 번역 음성이 흐르는 동안 AI 응답 "텍스트"를 미리
-      //   생성한다. AI "음성"은 유저 음성 재생 완료 후에만 시작한다 (guide4 7장).
+      // STEP 4: AI 응답 텍스트와 음성은 기존 방식대로 생성·재생한다.
       // ─────────────────────────────────────────────────────
       if (mounted) {
         setState(() => _localMessages
@@ -2282,7 +2250,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           ? "User: $userTargetText"
           : "$contextStr\nUser: $userTargetText";
       String aiTargetText = "";
-      bool userPlaybackFinished = false;
+      // 애니원에서는 사용자 번역 음성을 재생하지 않으므로 AI 텍스트를 즉시 표시.
+      const bool userPlaybackFinished = true;
 
       _swOpenAI.reset();
       _swOpenAI.start();
@@ -2363,7 +2332,13 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
               apiKey: _openAiKey, englishText: aiTargetText);
         }
         final String aiTtsText = _cleanText(aiTargetText.trim());
-        if (aiTtsText.isEmpty) return;
+        if (aiTtsText.isEmpty) {
+          final historyRequest = userHistoryTtsRequest;
+          if (historyRequest != null) {
+            unawaited(_ttsAdapter.synthesizeForHistory(historyRequest));
+          }
+          return;
+        }
         _costTracker.recordTtsRequest(aiTtsText.length);
         aiTtsPrefetch = _ttsAdapter.prefetch(TtsRequest(
           text: aiTtsText,
@@ -2379,32 +2354,16 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           'started userPlaybackFinished=$userPlaybackFinished '
               'len=${aiTtsText.length}',
         );
+        // AI 음성 요청을 먼저 출발시킨 뒤 사용자 번역 음원을 별도 연결로
+        // 생성한다. 사용자 음원은 재생 큐에 들어가지 않고 히스토리에만 저장된다.
+        final historyRequest = userHistoryTtsRequest;
+        if (historyRequest != null) {
+          unawaited(_ttsAdapter.synthesizeForHistory(historyRequest));
+        }
       });
 
-      // ─────────────────────────────────────────────────────
-      // STEP 5: 유저 번역 음성 재생 완료 대기 (두 음성이 겹치지 않는 순서 보장)
-      // ─────────────────────────────────────────────────────
-      if (userUtterance != null) {
-        _log('🧠 [PIPE-04]', '유저 TTS 재생 대기');
-        bool userTtsOk = false;
-        try {
-          userTtsOk = await userUtterance.done.timeout(const Duration(
-              milliseconds: kFreeTalkUserTtsFetchTimeoutMs +
-                  kFreeTalkUserTtsPlaybackTimeoutMs));
-        } on TimeoutException {
-          userUtterance.cancel();
-          _log('⚠️ [PIPE-TIMEOUT]', '유저 TTS 재생 시간 초과, 강제 진행');
-        }
-        if (!userTtsOk) {
-          // guide4 12장: 음성 실패 시 텍스트는 유지하고 진행한다.
-          _log('⚠️ [PIPE-05]', '유저 TTS 실패/취소 — 텍스트 유지하고 진행');
-        }
-      }
-      userPlaybackFinished = true;
-      _log('🧠 [PIPE-06]', '유저 TTS 재생 완료 → AI 차례');
-
-      // 🛑 [PIPE-STOP] 유저 음성 구간이 끝난 뒤에도 방을 나갔거나 턴이 갈아치워
-      //   졌을 수 있다. AI TTS가 시작되기 전에 끊는다.
+      // 사용자 번역음성 완료를 기다리지 않는다. AI 텍스트 생성과 TTS 선요청이
+      // 끝나는 즉시 AI 음성을 시작한다.
       if (!isActivePipelineGeneration(
             expected: pipelineGeneration,
             current: _pipelineGeneration,
@@ -2416,12 +2375,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
             'reason=stale_after_user_audio turnId=$currentTurnId');
         return;
       }
-
-      // ─────────────────────────────────────────────────────
-      // STEP 6: 유저-AI 전환 안전 간격 + AI 텍스트 확정 → AI 음성
-      // ─────────────────────────────────────────────────────
-      await Future.delayed(const Duration(milliseconds: 250));
-      _log('🧠 [PIPE-GAP]', '유저-AI 전환 안전 간격 250ms 완료');
 
       await aiPreparationTask;
       _log('🧠 [PIPE-07]',
@@ -2489,7 +2442,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       _log('🧠 [PIPE-10]', 'Firestore 저장 호출 완료');
     } catch (e) {
       aiTtsPrefetch?.cancel();
-      userUtterance?.cancel();
       aiUtterance?.cancel();
       _log('❌ [PIPE-ERR]', 'Relay Error: $e');
     } finally {
@@ -4930,13 +4882,16 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
     bool disableHeardConfirmation = false,
   }) {
     final String correctionBlock = disableCorrection
-        ? "Never output [CORRECTION] or [MISHEARD]. Treat the input as normal content to translate."
+        ? '''Never output [CORRECTION], [MISHEARD], or [DISSATISFIED].
+The user is restating their intended meaning after rejecting the previous user/AI exchange.
+Remove correction framing such as "아니", "그게 아니라", "내 뜻은", "내 말은", "I mean", and "that's not what I meant".
+Translate ONLY the corrected statement that remains.'''
         : '''[CASE CORRECTION] — Check this FIRST, only when the conversation history contains at least one "User:" line.
-The user is correcting the AI's misunderstanding or mishearing of their PREVIOUS utterance.
+The user is replacing the PREVIOUS user/AI exchange because their words were recorded incorrectly, the AI misunderstood them, or the AI's reply was not what they wanted.
 Signs:
 - Starts with a correction signal: "아니" / "아니요" / "아 그게 아니라" / "다시" / "내 말은" / "그러니까" / "I mean" / "actually" / "no," / "wait,"
-- AND the content is clearly a re-statement or clarification of the LAST "User:" line in the history, NOT new information.
-- The user is essentially saying "that's not what I said — what I said was X."
+- OR rejects the last AI reply and gives the intended statement: "그게 아니다" / "내 뜻이 아니다" / "내 말은 X" / "what I mean is X".
+- AND the utterance includes the replacement or corrected content X.
 If this is a correction, output EXACTLY: [CORRECTION]  (and nothing else)
 Do NOT output [CORRECTION] when the user simply adds new details that happen to start with "아니" etc.
 
@@ -4950,6 +4905,7 @@ If the complaint INCLUDES the corrected content, use [CORRECTION] instead.
 [CASE DISSATISFIED] — Check this THIRD, only when the history contains at least one "AI:" line.
 The user is complaining about the AI's LAST reply itself and wants a different one,
 OR the user did not catch / did not like the AI's last QUESTION and asks for it to be repeated, rephrased, or replaced.
+Use this tag only when the user provides NO corrected/replacement content. If replacement content is present, use [CORRECTION].
 Signs: "무슨 대답이 그래" / "무슨 질문이 그래" / "대답이 이상해" / "다른 말 해줘" / "다시 대답해 봐" / "그 대답 별로야" / "say something else" / "that's a weird reply" / "answer again"
 More signs (question complaints): "뭐라고 물었어" / "뭐라고 물은 거야" / "다시 물어봐" / "제대로 다시 물어봐" / "질문 다시 해줘" / "다른 질문 해줘" / "what did you ask" / "ask me again" / "ask a different question"
 More signs (MILD dissatisfaction — these ALSO count): "별로" / "별론데" / "아 그건 좀" / "에이" / "그런 거 말고" / "그건 없어" / "재미없어" / "이상하네" / "뭐야 그게" / "meh" / "not really" / "hmm, not that one"
@@ -5023,6 +4979,25 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
     return sysPrompt;
   }
 
+  /// 첫 턴에는 이전 대화가 없으므로 정정·불만·재생성 규칙과 긴 예시를 보내지
+  /// 않는다. 필요한 안전 태그와 한국어 주어 복원만 남겨 입력 처리 시간을 줄이고,
+  /// 자연스러운 첫 구절 경계를 만들어 TTS를 번역 완료 전에 시작할 수 있게 한다.
+  static String buildFirstTurnTranslationSysPrompt({
+    required String targetLang,
+  }) {
+    return '''Translate the first Korean utterance of a live conversation into natural $targetLang.
+The input is an ASR transcript, not typed text.
+
+Rules:
+- Preserve the exact meaning, proper names, speech register, and emotion.
+- Restore an omitted Korean subject or object only when it is clear from the sentence. Never invent one.
+- If the text is meaningless noise or has under 2 meaningful characters, output exactly: [EVAPORATE]
+- If the transcript is broken Korean and its intended wording cannot be recovered, output exactly in Korean:
+제가 잘못 들었나요? '<the exact doubtful word or short phrase>'라고 말씀하신 게 맞나요?
+- If a required subject or object is genuinely ambiguous, output: [CLARIFY] <one short clarification question in $targetLang>
+- Otherwise output only the translation. No explanation, prefix, quotes, or Korean.''';
+  }
+
   static Stream<String> streamUserTranslation({
     required String apiKey,
     required String textOriginal,
@@ -5032,22 +5007,26 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
     String model = kFreeTalkTranslateModelFast,
     bool disableCorrection = false,
     bool disableHeardConfirmation = false,
+    bool fastFirstTurn = false,
   }) async* {
     final client = OpenAiConnectionPool.instance.client;
     try {
-      final sysPrompt = buildTranslationSysPrompt(
-        targetLang: targetLang,
-        disableCorrection: disableCorrection,
-        disableHeardConfirmation: disableHeardConfirmation,
-      );
+      final sysPrompt = fastFirstTurn
+          ? buildFirstTurnTranslationSysPrompt(targetLang: targetLang)
+          : buildTranslationSysPrompt(
+              targetLang: targetLang,
+              disableCorrection: disableCorrection,
+              disableHeardConfirmation: disableHeardConfirmation,
+            );
 
       final String source = textOriginal.trim();
       if (source.isEmpty) {
         yield '[EVAPORATE]';
         return;
       }
-      final String userContent =
-          'Conversation so far:\n$contextStr\n\nTranslate this Korean utterance: "$source"';
+      final String userContent = fastFirstTurn
+          ? 'Translate: "$source"'
+          : 'Conversation so far:\n$contextStr\n\nTranslate this Korean utterance: "$source"';
 
       final request = http.Request(
         'POST',

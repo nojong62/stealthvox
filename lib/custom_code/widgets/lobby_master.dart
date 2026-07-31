@@ -288,16 +288,16 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                 ])));
   }
 
-  void _showTermsDialog(BuildContext context) {
+  void _showUsageGuideDialog(BuildContext context) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1C1C1E),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(children: const [
-          Icon(Icons.article_outlined, color: Color(0xFF0A84FF)),
+          Icon(Icons.menu_book_outlined, color: Color(0xFF0A84FF)),
           SizedBox(width: 8),
-          Text("[ 이용 약관 ]",
+          Text("[ 사용 설명서 ]",
               style: TextStyle(
                   color: Colors.white,
                   fontSize: 16,
@@ -305,17 +305,23 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
         ]),
         content: const SingleChildScrollView(
           child: Text(
-            "1. 서비스 목적\n본 약관은 StealthVox이 제공하는 AI 통역 및 통화 서비스의 이용 조건 및 절차를 규정합니다.\n\n"
-            "2. 요금 및 환불\n• 본 서비스는 유료 시간제(분 단위 차감)로 운영됩니다.\n\n"
-            "3. 사용자의 의무\n• 타인에게 피해를 주는 불법적인 사용을 금지합니다.\n\n"
-            "4. 면책 조항\n• AI 번역은 100% 정확성을 보장하지 않습니다.",
+            "1. 한국어로 편하게 대화하세요\n"
+            "StealthVox는 사용자가 한국어로 AI와 자연스럽게 대화하면서, 그 대화를 영어 공부방 교재로 만드는 공간입니다.\n\n"
+            "2. 영어를 자유롭게 섞어도 됩니다\n"
+            "한국어로 말해도 되고, 영어로 말하거나 한국어와 영어를 섞어서 말해도 됩니다. 완벽한 문장을 만들려고 부담 갖지 말고 평소 말하듯 이야기하세요.\n\n"
+            "3. 대화가 학습 자료가 됩니다\n"
+            "대화에서 만들어진 원문, 목표 언어 번역, AI 답변과 음성은 히스토리에 정리됩니다. 다양한 공부방에서 다시 듣기, 따라 말하기, 복습 자료로 활용할 수 있습니다.\n\n"
+            "4. 영어를 생활 언어로 연습하세요\n"
+            "정답을 맞히는 공부보다 내가 실제로 하고 싶은 말을 반복해 보세요. 만들어진 자료를 부담 없이 즐기다 보면 영어를 일상에서 쓰는 생활 언어로 연습할 수 있습니다.\n\n"
+            "5. 잘못 알아들었을 때\n"
+            "음성 인식이나 번역이 뜻과 다르면 “그게 아니라, 내 말은…”이라고 말한 뒤 원하는 내용을 다시 이야기하세요. 직전 대화를 바꾸고 새 뜻으로 이어갈 수 있습니다.",
             style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
           ),
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text("동의 및 닫기",
+              child: const Text("확인",
                   style: TextStyle(
                       color: Color(0xFF0A84FF), fontWeight: FontWeight.bold))),
         ],
@@ -835,7 +841,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         children: [
                           _buildFooterLink(
-                              "이용 약관", () => _showTermsDialog(context)),
+                              "사용 설명서", () => _showUsageGuideDialog(context)),
                           _buildFooterLink("로그아웃", () async {
                             FFAppState().remainingTime = 0;
                             FFAppState().remainingTimeLoaded = false;

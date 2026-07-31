@@ -53,8 +53,67 @@ Uint8List pcm16ToWav(
 }
 
 /// PCM16 바이트 길이 → 재생 시간(ms).
-int pcm16DurationMs(int byteLength, {required int sampleRate, int channels = 1}) {
+int pcm16DurationMs(int byteLength,
+    {required int sampleRate, int channels = 1}) {
   final int bytesPerSecond = sampleRate * channels * 2;
   if (bytesPerSecond <= 0) return 0;
   return (byteLength * 1000 / bytesPerSecond).round();
+}
+
+/// PCM16 mono 앞부분의 대기 무음을 제거한다.
+///
+/// 짧은 프레임의 평균 절댓값과 피크를 함께 보므로 작은 마이크의 첫 자음은
+/// 놓치지 않으면서 디지털 무음/방 대기음은 건너뛴다. 연속 프레임 조건과
+/// [paddingMs]만큼의 앞 여유를 둬 발화 시작이 잘리지 않게 한다.
+Uint8List trimLeadingSilencePcm16(
+  Uint8List pcm, {
+  required int sampleRate,
+  int frameMs = 20,
+  int consecutiveFrames = 2,
+  int meanAbsThreshold = 180,
+  int peakThreshold = 1200,
+  int paddingMs = 300,
+}) {
+  if (pcm.length < 2 || sampleRate <= 0) return pcm;
+
+  final int alignedLength = pcm.length - (pcm.length.isOdd ? 1 : 0);
+  final int samplesPerFrame = (sampleRate * frameMs ~/ 1000).clamp(1, 1 << 20);
+  final int bytesPerFrame = samplesPerFrame * 2;
+  final data = ByteData.sublistView(pcm, 0, alignedLength);
+
+  int consecutive = 0;
+  int candidateStartByte = 0;
+  for (int frameStart = 0;
+      frameStart + bytesPerFrame <= alignedLength;
+      frameStart += bytesPerFrame) {
+    int absoluteSum = 0;
+    int peak = 0;
+    for (int offset = frameStart;
+        offset < frameStart + bytesPerFrame;
+        offset += 2) {
+      final int sample = data.getInt16(offset, Endian.little);
+      final int absolute = sample < 0 ? -sample : sample;
+      absoluteSum += absolute;
+      if (absolute > peak) peak = absolute;
+    }
+    final int meanAbsolute = absoluteSum ~/ samplesPerFrame;
+    final bool hasVoice =
+        meanAbsolute >= meanAbsThreshold || peak >= peakThreshold;
+    if (hasVoice) {
+      if (consecutive == 0) candidateStartByte = frameStart;
+      consecutive++;
+      if (consecutive >= consecutiveFrames) {
+        final int paddingBytes = sampleRate * 2 * paddingMs ~/ 1000;
+        final int trimStart =
+            (candidateStartByte - paddingBytes).clamp(0, alignedLength).toInt();
+        if (trimStart <= 0) return Uint8List.sublistView(pcm, 0, alignedLength);
+        return Uint8List.sublistView(pcm, trimStart, alignedLength);
+      }
+    } else {
+      consecutive = 0;
+    }
+  }
+
+  // 확실한 발화를 찾지 못했다면 원본을 유지한다. 잘못된 과도 트림보다 안전하다.
+  return Uint8List.sublistView(pcm, 0, alignedLength);
 }

@@ -28,7 +28,22 @@ class OpenAiTranscribeService {
     if (apiKey.isEmpty || pcm.isEmpty) return null;
     final sw = Stopwatch()..start();
     try {
-      final wav = pcm16ToWav(pcm, sampleRate: sampleRate);
+      final preparedPcm = trimLeadingSilencePcm16(
+        pcm,
+        sampleRate: sampleRate,
+      );
+      final originalAudioMs =
+          pcm16DurationMs(pcm.length, sampleRate: sampleRate);
+      final preparedAudioMs =
+          pcm16DurationMs(preparedPcm.length, sampleRate: sampleRate);
+      if (preparedPcm.length < pcm.length) {
+        onLog?.call(
+          '✂️ [RETRANSCRIBE-TRIM]',
+          'leadingSilenceMs=${originalAudioMs - preparedAudioMs} '
+              'audioMs=$originalAudioMs->$preparedAudioMs paddingMs=300',
+        );
+      }
+      final wav = pcm16ToWav(preparedPcm, sampleRate: sampleRate);
       final request = http.MultipartRequest(
         'POST',
         Uri.parse('https://api.openai.com/v1/audio/transcriptions'),
@@ -63,7 +78,7 @@ class OpenAiTranscribeService {
       onLog?.call(
         '🎧 [RETRANSCRIBE]',
         'ok model=$model len=${text.length} '
-            'audioMs=${pcm16DurationMs(pcm.length, sampleRate: sampleRate)} '
+            'audioMs=$preparedAudioMs '
             'elapsedMs=${sw.elapsedMilliseconds}',
       );
       return text;

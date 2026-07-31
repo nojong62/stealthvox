@@ -65,15 +65,23 @@ class TtsAdapterConfig {
   /// 체감 지연이 커진다.
   static const int prerollBytes = 36000;
 
-  /// 네이티브 링버퍼 크기. 작으면 Dart 이벤트 루프 지터에도 언더런이 난다.
-  /// 32,768B ≈ 0.68초.
-  static const int playerBufferSize = 32768;
+  /// 첫 턴 유저 번역 전용 프리롤. 아래 64KB 링버퍼로 언더런 여유를 확보한
+  /// 상태에서 시작 대기만 0.75초 → 0.5초로 줄인다. 다른 TTS에는 적용하지
+  /// 않아 AI 음성 및 이후 턴의 안정성은 그대로 유지한다.
+  static const int fastFirstTurnPrerollBytes = 24000;
+
+  /// 네이티브 링버퍼 크기. 작으면 Dart 이벤트 루프 지터나 다음 TTS 조각의
+  /// 네트워크 공급 지연 때 언더런이 나 단어 중간이 잘려 들린다.
+  ///
+  /// 65,536B ≈ 1.36초. 프리롤 양은 그대로이므로 첫 음성 시작 시각은 늦추지
+  /// 않고, 플레이어가 미리 받아 둘 수 있는 여유만 두 배로 늘린다.
+  static const int playerBufferSize = 65536;
 
   /// 화자별 체감 음량. gpt-4o-mini-tts의 nova(AI)가 로비에서 고른 유저
   /// 보이스보다 크게 들리므로 AI만 낮춘다. 기기 미디어/통화 볼륨 자체는
   /// 건드리지 않고, 이 재생 세션에만 적용된다.
   static const double userVolume = 1.0;
-  static const double aiVolume = 0.70;
+  static const double aiVolume = 0.62;
   static const double systemVolume = 0.82;
 
   static double volumeFor(TtsSpeakerType speakerType) {
@@ -153,6 +161,7 @@ class TtsRequest {
     this.playbackCategory = 'main',
     this.continuesPreviousSegment = false,
     this.expectsMoreSegments = false,
+    this.prerollBytes,
   });
 
   final String text;
@@ -175,6 +184,10 @@ class TtsRequest {
   /// 🔗 [SEGMENT] 뒤에 조각이 더 온다 — 재생 세션을 닫지 않고 열어 둔다.
   /// 마지막 조각은 이 값이 false여야 세션이 정리된다.
   final bool expectsMoreSegments;
+
+  /// null이면 공통 안전 프리롤을 쓴다. 충분히 큰 링버퍼가 검증된 지연 민감
+  /// 요청만 더 작은 값을 명시한다.
+  final int? prerollBytes;
 }
 
 // ====================================================================
@@ -431,6 +444,94 @@ class TtsAdapter {
   /// 선요청으로 받고 있는 PCM을 기존 FIFO 재생 큐에 연결한다.
   TtsUtterance speakPrefetched(TtsPrefetch prefetch) {
     return _enqueue(prefetch.request, prefetch: prefetch);
+  }
+
+  /// 음성을 재생하지 않고 끝까지 생성해 히스토리 캐시에만 전달한다.
+  ///
+  /// 대화방의 실시간 재생 큐와 분리되어 있으므로 사용자 번역 음원을 만드는
+  /// 동안 AI 음성이 기다리지 않는다. 정상적으로 완성된 PCM만 WAV로 포장한다.
+  Future<bool> synthesizeForHistory(TtsRequest request) async {
+    if (_disposed ||
+        request.text.trim().isEmpty ||
+        !request.saveToHistory ||
+        onHistoryAudioReady == null) {
+      return false;
+    }
+
+    final apiKey = apiKeyProvider();
+    if (apiKey.isEmpty) return false;
+    final voice = request.speakerType == TtsSpeakerType.ai
+        ? TtsAdapterConfig.aiVoice
+        : TtsAdapterConfig.mapVoice(request.voiceId);
+    final sw = Stopwatch()..start();
+    Object? lastError;
+
+    for (int attempt = 1; attempt <= TtsAdapterConfig.maxAttempts; attempt++) {
+      final pcmBuilder = BytesBuilder(copy: false);
+      try {
+        final response = await OpenAiConnectionPool.instance.client
+            .send(_buildSpeechRequest(
+              apiKey: apiKey,
+              request: request,
+              voice: voice,
+            ))
+            .timeout(TtsAdapterConfig.requestTimeout);
+        if (response.statusCode != 200) {
+          lastError =
+              StateError('History-only TTS HTTP ${response.statusCode}.');
+          await response.stream.drain<void>();
+          continue;
+        }
+
+        await for (final chunk
+            in response.stream.timeout(TtsAdapterConfig.chunkTimeout)) {
+          if (chunk.isNotEmpty) pcmBuilder.add(chunk);
+        }
+        final rawPcm = pcmBuilder.takeBytes();
+        if (rawPcm.isEmpty) {
+          lastError = StateError('History-only TTS returned an empty stream.');
+          continue;
+        }
+
+        // PCM16은 2바이트 단위다. 스트림 끝이 홀수 바이트면 0을 보충한 뒤
+        // 짧은 무음을 붙여 히스토리 재생 끝의 팝/둔탁한 소리를 막는다.
+        final Uint8List alignedPcm;
+        if (rawPcm.length.isOdd) {
+          alignedPcm = Uint8List(rawPcm.length + 1)
+            ..setRange(0, rawPcm.length, rawPcm);
+        } else {
+          alignedPcm = rawPcm;
+        }
+        final wav = pcm16ToWav(
+          _withTailSilence(alignedPcm),
+          sampleRate: TtsAdapterConfig.sampleRate,
+          channels: TtsAdapterConfig.channels,
+        );
+        onHistoryAudioReady?.call(request, wav);
+        sw.stop();
+        _log(
+          '🔊 [TTS-HISTORY-ONLY]',
+          'completed turnId=${request.turnId} bytes=${alignedPcm.length} '
+              'elapsedMs=${sw.elapsedMilliseconds}',
+        );
+        return true;
+      } catch (error) {
+        lastError = error;
+        _log(
+          '⚠️ [TTS-HISTORY-ONLY]',
+          'attempt=$attempt/${TtsAdapterConfig.maxAttempts} '
+              'failed reason=${error.runtimeType}',
+        );
+      }
+    }
+
+    sw.stop();
+    _log(
+      '❌ [TTS-HISTORY-ONLY]',
+      'failed turnId=${request.turnId} elapsedMs=${sw.elapsedMilliseconds} '
+          'reason=${lastError.runtimeType}',
+    );
+    return false;
   }
 
   TtsUtterance _enqueue(
@@ -754,6 +855,8 @@ class TtsAdapter {
         utterance.status = TtsUtteranceStatus.streaming;
         int leftoverByte = -1; // PCM16 정렬: 홀수 바이트 청크 대비
         final sw = Stopwatch()..start();
+        final int prerollTarget =
+            request.prerollBytes ?? TtsAdapterConfig.prerollBytes;
 
         await for (final rawChunk
             in audioStream.timeout(TtsAdapterConfig.chunkTimeout)) {
@@ -787,7 +890,7 @@ class TtsAdapter {
           //   목표량을 채우면 그때 세션을 열고 한꺼번에 밀어넣는다.
           if (!audioStarted) {
             preroll.add(chunk);
-            if (preroll.length < TtsAdapterConfig.prerollBytes) continue;
+            if (preroll.length < prerollTarget) continue;
             audioStarted = true;
             await _pcmPlayer.begin(
               sampleRate: TtsAdapterConfig.sampleRate,

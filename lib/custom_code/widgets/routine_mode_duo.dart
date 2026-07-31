@@ -1651,9 +1651,8 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
 
   Widget _buildTopBar() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Row(
             mainAxisSize: MainAxisSize.min,
@@ -1665,7 +1664,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                   padding: EdgeInsets.zero,
                   alignment: Alignment.centerLeft,
                   constraints:
-                      const BoxConstraints(minWidth: 72, minHeight: 56),
+                      const BoxConstraints(minWidth: 56, minHeight: 56),
                   onPressed: _handleAutoSaveAndExit),
               IconButton(
                 icon: const Icon(Icons.person_add_alt_1,
@@ -1678,6 +1677,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
               _buildPartnerIndicator(),
             ],
           ),
+          const Spacer(),
           Row(children: [
             IconButton(
               icon: const Icon(Icons.format_size,
@@ -1698,12 +1698,13 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
               constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
             ),
           ]),
+          const SizedBox(width: 4),
           ValueListenableBuilder<int>(
               valueListenable: BillingTicker.instance.remainingSecondsNotifier,
               builder: (context, remaining, child) {
                 return Container(
                     padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                     decoration: BoxDecoration(
                         color: const Color(0xFF2563EB),
                         borderRadius: BorderRadius.circular(20)),

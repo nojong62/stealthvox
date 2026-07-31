@@ -91,7 +91,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   String roomName = "";
   bool _isActionLocked = false;
   bool _isEnteringPractice = false;
-  bool _isOpeningNextHistory = false;
+  bool _isOpeningAdjacentHistory = false;
+  int _openingHistoryOffset = 0;
   Map<String, dynamic>? _cachedRoomData;
 
   // 📦 [Box 4: 상태 변수 - Shadowing 상태 머신]
@@ -441,10 +442,13 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     context.pushReplacementNamed('ChatHistory');
   }
 
-  Future<void> _openNextHistoryInSameMode() async {
-    if (_isOpeningNextHistory) return;
+  Future<void> _openAdjacentHistoryInSameMode(int offset) async {
+    if (_isOpeningAdjacentHistory || (offset != -1 && offset != 1)) return;
     _resumeHistoryFromUserAction();
-    setState(() => _isOpeningNextHistory = true);
+    setState(() {
+      _isOpeningAdjacentHistory = true;
+      _openingHistoryOffset = offset;
+    });
     try {
       var currentData = _cachedRoomData;
       if (currentData == null) {
@@ -464,16 +468,20 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       }).toList();
       final currentIndex =
           sameModeDocs.indexWhere((doc) => doc.id == widget.historyDoc.id);
-      final DocumentSnapshot? nextDoc =
-          currentIndex >= 0 && currentIndex + 1 < sameModeDocs.length
-              ? sameModeDocs[currentIndex + 1]
-              : null;
+      final adjacentIndex = currentIndex + offset;
+      final DocumentSnapshot? adjacentDoc = currentIndex >= 0 &&
+              adjacentIndex >= 0 &&
+              adjacentIndex < sameModeDocs.length
+          ? sameModeDocs[adjacentIndex]
+          : null;
 
       if (!mounted) return;
-      if (nextDoc == null) {
+      if (adjacentDoc == null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('같은 모드의 다음 대화가 없습니다.'),
+          SnackBar(
+            content: Text(
+              offset < 0 ? '같은 모드의 이전 대화가 없습니다.' : '같은 모드의 다음 대화가 없습니다.',
+            ),
             duration: Duration(seconds: 1),
           ),
         );
@@ -482,22 +490,29 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       context.pushReplacementNamed(
         'ChatDetail',
         queryParameters: {
-          'historyRef':
-              serializeParam(nextDoc.reference, ParamType.DocumentReference),
+          'historyRef': serializeParam(
+              adjacentDoc.reference, ParamType.DocumentReference),
         }.withoutNulls,
       );
     } catch (e) {
-      debugPrint('[openNextHistoryInSameMode] $e');
+      debugPrint('[openAdjacentHistoryInSameMode] $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('다음 대화를 불러오지 못했습니다.'),
+          SnackBar(
+            content: Text(
+              offset < 0 ? '이전 대화를 불러오지 못했습니다.' : '다음 대화를 불러오지 못했습니다.',
+            ),
             duration: Duration(seconds: 1),
           ),
         );
       }
     } finally {
-      if (mounted) setState(() => _isOpeningNextHistory = false);
+      if (mounted) {
+        setState(() {
+          _isOpeningAdjacentHistory = false;
+          _openingHistoryOffset = 0;
+        });
+      }
     }
   }
 
@@ -4097,44 +4112,63 @@ RULES — follow exactly:
               ),
             ),
             if (isLast) ...[
-              Align(
-                alignment: Alignment.centerRight,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 0, 0, 4),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        onPressed: _deleteHistoryRoom,
-                        tooltip: '대화 삭제',
-                        icon: const Icon(
-                          Icons.delete_outline_rounded,
-                          color: Colors.white54,
-                          size: 22,
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: _isOpeningNextHistory
-                            ? null
-                            : _openNextHistoryInSameMode,
-                        tooltip: '같은 모드의 다음 대화',
-                        icon: _isOpeningNextHistory
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.amber,
-                                ),
-                              )
-                            : const Icon(
-                                Icons.arrow_forward_rounded,
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 0, 0, 4),
+                child: Row(
+                  children: [
+                    IconButton(
+                      onPressed: _isOpeningAdjacentHistory
+                          ? null
+                          : () => _openAdjacentHistoryInSameMode(-1),
+                      tooltip: '같은 모드의 이전 대화',
+                      icon: _isOpeningAdjacentHistory &&
+                              _openingHistoryOffset == -1
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
                                 color: Colors.amber,
-                                size: 24,
                               ),
+                            )
+                          : const Icon(
+                              Icons.arrow_back_rounded,
+                              color: Colors.amber,
+                              size: 24,
+                            ),
+                    ),
+                    IconButton(
+                      onPressed: _isOpeningAdjacentHistory
+                          ? null
+                          : () => _openAdjacentHistoryInSameMode(1),
+                      tooltip: '같은 모드의 다음 대화',
+                      icon: _isOpeningAdjacentHistory &&
+                              _openingHistoryOffset == 1
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.amber,
+                              ),
+                            )
+                          : const Icon(
+                              Icons.arrow_forward_rounded,
+                              color: Colors.amber,
+                              size: 24,
+                            ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      onPressed: _deleteHistoryRoom,
+                      tooltip: '대화 삭제',
+                      icon: const Icon(
+                        Icons.delete_outline_rounded,
+                        color: Colors.white54,
+                        size: 22,
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(width: double.infinity, height: 64),
