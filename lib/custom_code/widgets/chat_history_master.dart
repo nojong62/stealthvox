@@ -48,6 +48,12 @@ const List<String> _nativeMeaningUnitVoiceOptions = <String>[
   'cedar',
   'coral',
 ];
+const List<String> _p3LearningVoiceOptions = <String>[
+  'marin',
+  'cedar',
+  'verse',
+];
+const Color _p3ShadowingAccentColor = Color(0xFF818CF8);
 const String _meaningUnitTtsInstructions = '''
 Read the English sentence for language learners using clear thought groups.
 
@@ -272,11 +278,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   bool _p3ShadowComplete = false;
   int _p3ShadowGeneration = 0;
   AudioPlayer? _p3ShadowPlayer;
-  StreamSubscription<Duration>? _p3ShadowPositionSub;
-  StreamSubscription<Duration>? _p3ShadowDurationSub;
-  Duration _p3ShadowDuration = Duration.zero;
-  List<String> _p3ShadowWords = [];
-  int _p3ShadowWordIndex = -1;
   String? _p3ShadowRecordPath;
 
   // 🆕 [CHUNK-PRACTICE] 의미단위 연습 모드 상태
@@ -6229,10 +6230,6 @@ RULES — follow exactly:
 
   Future<void> _stopP3Shadowing({bool resetSelection = false}) async {
     _p3ShadowGeneration++;
-    await _p3ShadowPositionSub?.cancel();
-    _p3ShadowPositionSub = null;
-    await _p3ShadowDurationSub?.cancel();
-    _p3ShadowDurationSub = null;
     final player = _p3ShadowPlayer;
     _p3ShadowPlayer = null;
     if (player != null) {
@@ -6254,14 +6251,11 @@ RULES — follow exactly:
     setState(() {
       _p3ShadowLoading = false;
       _p3ShadowPlaying = false;
-      _p3ShadowDuration = Duration.zero;
-      _p3ShadowWordIndex = -1;
       if (resetSelection) {
         _selectedP3LearningVoice = null;
         _selectedP3NativeVoice = null;
         _p3UsesNativeStyle = null;
         _p3ShadowComplete = false;
-        _p3ShadowWords = [];
         _p3ShadowRecordPath = null;
       }
     });
@@ -6311,9 +6305,6 @@ RULES — follow exactly:
       _p3ShadowLoading = true;
       _p3ShadowPlaying = false;
       _p3ShadowComplete = false;
-      _p3ShadowWords =
-          text.split(RegExp(r'\s+')).where((word) => word.isNotEmpty).toList();
-      _p3ShadowWordIndex = -1;
       _p3ShadowRecordPath = null;
     });
 
@@ -6335,22 +6326,6 @@ RULES — follow exactly:
 
     final player = AudioPlayer();
     _p3ShadowPlayer = player;
-    _p3ShadowDuration = Duration.zero;
-    _p3ShadowDurationSub = player.onDurationChanged.listen((duration) {
-      if (duration > Duration.zero) _p3ShadowDuration = duration;
-    });
-    _p3ShadowPositionSub = player.onPositionChanged.listen((position) {
-      if (!mounted || generation != _p3ShadowGeneration) return;
-      final total = _p3ShadowDuration.inMilliseconds;
-      if (total <= 0 || _p3ShadowWords.isEmpty) return;
-      final ratio = (position.inMilliseconds / total).clamp(0.0, 1.0);
-      final index = (ratio * _p3ShadowWords.length)
-          .floor()
-          .clamp(0, _p3ShadowWords.length - 1);
-      if (index != _p3ShadowWordIndex) {
-        setState(() => _p3ShadowWordIndex = index);
-      }
-    });
 
     final playbackComplete = player.onPlayerComplete.first;
     await _startP3ShadowRecording(generation);
@@ -6374,17 +6349,12 @@ RULES — follow exactly:
         if (path != null && path.isNotEmpty) _p3ShadowRecordPath = path;
       } catch (_) {}
     }
-    await _p3ShadowPositionSub?.cancel();
-    _p3ShadowPositionSub = null;
-    await _p3ShadowDurationSub?.cancel();
-    _p3ShadowDurationSub = null;
     if (identical(_p3ShadowPlayer, player)) _p3ShadowPlayer = null;
     await player.dispose();
     if (mounted && generation == _p3ShadowGeneration) {
       setState(() {
         _p3ShadowPlaying = false;
         _p3ShadowComplete = true;
-        _p3ShadowWordIndex = _p3ShadowWords.length;
       });
     }
   }
@@ -6519,36 +6489,15 @@ RULES — follow exactly:
   }
 
   Widget _buildP3SentenceText(String sentence) {
-    final active = _p3UsesNativeStyle != null;
-    final words = active
-        ? _p3ShadowWords
-        : sentence
-            .split(RegExp(r'\s+'))
-            .where((word) => word.isNotEmpty)
-            .toList();
-    return Text.rich(
-      TextSpan(
-        children: List.generate(words.length, (index) {
-          final current = active && index == _p3ShadowWordIndex;
-          final passed = active && index < _p3ShadowWordIndex;
-          return TextSpan(
-            text: '${words[index]}${index == words.length - 1 ? '' : ' '}',
-            style: TextStyle(
-              color: current
-                  ? Colors.amber
-                  : passed
-                      ? Colors.white
-                      : Colors.white70,
-              fontWeight: current ? FontWeight.bold : FontWeight.w500,
-              backgroundColor: current
-                  ? Colors.amber.withValues(alpha: 0.13)
-                  : Colors.transparent,
-            ),
-          );
-        }),
-      ),
+    return Text(
+      sentence,
       textAlign: TextAlign.center,
-      style: TextStyle(fontSize: 20 * _fontScale, height: 1.65),
+      style: TextStyle(
+        color: Colors.white70,
+        fontSize: 20 * _fontScale,
+        height: 1.65,
+        fontWeight: FontWeight.w500,
+      ),
     );
   }
 
@@ -6612,10 +6561,10 @@ RULES — follow exactly:
             children: [
               Expanded(
                 child: _buildP3VoiceSelector(
-                  label: '원어민식 의미단위\n쉐도잉 보이스 선택',
+                  label: '원어민식 쉐도잉',
                   options: _nativeMeaningUnitVoiceOptions,
                   value: _selectedP3NativeVoice,
-                  color: const Color(0xFF818CF8),
+                  color: _p3ShadowingAccentColor,
                   onSelected: (voice) {
                     setState(() => _selectedP3NativeVoice = voice);
                     unawaited(_startP3MeaningUnitShadowing(
@@ -6628,10 +6577,10 @@ RULES — follow exactly:
               const SizedBox(width: 10),
               Expanded(
                 child: _buildP3VoiceSelector(
-                  label: '학습용 의미단위\n쉐도잉 보이스 선택',
-                  options: _meaningUnitVoiceOptions,
+                  label: '학습용 쉐도잉',
+                  options: _p3LearningVoiceOptions,
                   value: _selectedP3LearningVoice,
-                  color: Colors.amber,
+                  color: _p3ShadowingAccentColor,
                   onSelected: (voice) {
                     setState(() => _selectedP3LearningVoice = voice);
                     unawaited(_startP3MeaningUnitShadowing(
@@ -6657,11 +6606,9 @@ RULES — follow exactly:
                     color: const Color(0xFF1C1C1E),
                     borderRadius: BorderRadius.circular(18),
                     border: Border.all(
-                      color: activeNative
-                          ? const Color(0xFF818CF8)
-                          : activeLearning
-                              ? Colors.amber
-                              : Colors.white12,
+                      color: activeNative || activeLearning
+                          ? _p3ShadowingAccentColor
+                          : Colors.white12,
                       width: _p3UsesNativeStyle == null ? 1 : 1.6,
                     ),
                   ),
@@ -6688,7 +6635,7 @@ RULES — follow exactly:
                         width: 16,
                         height: 16,
                         child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.amber),
+                            strokeWidth: 2, color: _p3ShadowingAccentColor),
                       ),
                       SizedBox(width: 9),
                       Text('의미단위 음성 준비 중...',
@@ -6725,11 +6672,8 @@ RULES — follow exactly:
                                 : Icons.replay_rounded),
                             label: Text(busy ? '진행 중' : '다시 쉐도잉'),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: activeNative
-                                  ? const Color(0xFF4F46E5)
-                                  : Colors.amber,
-                              foregroundColor:
-                                  activeNative ? Colors.white : Colors.black,
+                              backgroundColor: const Color(0xFF4F46E5),
+                              foregroundColor: Colors.white,
                               shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(14)),
                             ),

@@ -119,6 +119,7 @@ class TtsAdapterConfig {
   };
   static const String fallbackVoice = 'nova';
   static const String aiVoice = 'nova';
+  static const String userVoice = 'verse';
 
   static String mapVoice(String voiceId) {
     final v = voiceId.trim().toLowerCase();
@@ -444,6 +445,92 @@ class TtsAdapter {
   /// 선요청으로 받고 있는 PCM을 기존 FIFO 재생 큐에 연결한다.
   TtsUtterance speakPrefetched(TtsPrefetch prefetch) {
     return _enqueue(prefetch.request, prefetch: prefetch);
+  }
+
+  /// 음성을 재생하지 않고 끝까지 생성해 히스토리 캐시에만 전달한다.
+  /// 실시간 재생 큐와 분리되어 AI 답변 재생 순서를 막지 않는다.
+  Future<bool> synthesizeForHistory(TtsRequest request) async {
+    if (_disposed ||
+        request.text.trim().isEmpty ||
+        !request.saveToHistory ||
+        onHistoryAudioReady == null) {
+      return false;
+    }
+
+    final apiKey = apiKeyProvider();
+    if (apiKey.isEmpty) return false;
+    final voice = request.speakerType == TtsSpeakerType.ai
+        ? TtsAdapterConfig.aiVoice
+        : TtsAdapterConfig.mapVoice(request.voiceId);
+    final sw = Stopwatch()..start();
+    Object? lastError;
+
+    for (int attempt = 1; attempt <= TtsAdapterConfig.maxAttempts; attempt++) {
+      final pcmBuilder = BytesBuilder(copy: false);
+      try {
+        final response = await OpenAiConnectionPool.instance.client
+            .send(_buildSpeechRequest(
+              apiKey: apiKey,
+              request: request,
+              voice: voice,
+            ))
+            .timeout(TtsAdapterConfig.requestTimeout);
+        if (response.statusCode != 200) {
+          lastError =
+              StateError('History-only TTS HTTP ${response.statusCode}.');
+          await response.stream.drain<void>();
+          continue;
+        }
+
+        await for (final chunk
+            in response.stream.timeout(TtsAdapterConfig.chunkTimeout)) {
+          if (chunk.isNotEmpty) pcmBuilder.add(chunk);
+        }
+        final rawPcm = pcmBuilder.takeBytes();
+        if (rawPcm.isEmpty) {
+          lastError = StateError('History-only TTS returned an empty stream.');
+          continue;
+        }
+
+        final Uint8List alignedPcm;
+        if (rawPcm.length.isOdd) {
+          alignedPcm = Uint8List(rawPcm.length + 1)
+            ..setRange(0, rawPcm.length, rawPcm);
+        } else {
+          alignedPcm = rawPcm;
+        }
+        onHistoryAudioReady?.call(
+          request,
+          pcm16ToWav(
+            _withTailSilence(alignedPcm),
+            sampleRate: TtsAdapterConfig.sampleRate,
+            channels: TtsAdapterConfig.channels,
+          ),
+        );
+        sw.stop();
+        _log(
+          '🔊 [TTS-HISTORY-ONLY]',
+          'completed turnId=${request.turnId} bytes=${alignedPcm.length} '
+              'elapsedMs=${sw.elapsedMilliseconds}',
+        );
+        return true;
+      } catch (error) {
+        lastError = error;
+        _log(
+          '⚠️ [TTS-HISTORY-ONLY]',
+          'attempt=$attempt/${TtsAdapterConfig.maxAttempts} '
+              'failed reason=${error.runtimeType}',
+        );
+      }
+    }
+
+    sw.stop();
+    _log(
+      '❌ [TTS-HISTORY-ONLY]',
+      'failed turnId=${request.turnId} elapsedMs=${sw.elapsedMilliseconds} '
+          'reason=${lastError.runtimeType}',
+    );
+    return false;
   }
 
   TtsUtterance _enqueue(

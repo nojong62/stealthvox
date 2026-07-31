@@ -193,7 +193,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   //   Deepgram final 수신 시각(= 앱이 발화 종료를 아는 가장 이른 시점).
   DateTime? _turnPerfAnchor;
   double _fontScale = 1.0;
-  bool _showOriginal = true;
+  // 기본 화면은 목표 언어만 표시한다. 상단 언어 버튼을 눌렀을 때만
+  // 원문을 함께 보여 준다.
+  bool _showOriginal = false;
   bool _showUsageGuide = false; // 🆕 [Anyone] 이용방법 말풍선 토글
   // 🆕 [진입 안내] 스텔스룸 준비 오버레이에 있던 문구를 페이지 안으로 옮겼다
   //   (Realtime 연결 대기가 사라져 준비 화면 자체가 제거됨). Step Expand의
@@ -1666,10 +1668,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 // 🎯 핵심 전략:
 //   STEP 1: 증발 검열 (고스트워드/너무 짧음 → 조용히 폐기)
 //   STEP 2: HOST 풍선 + 유저 번역 스트리밍 (CoT 주어 복원)
-//   STEP 3: 유저 타겟 TTS 재생 시작 (_aiPaused=true)
-//   STEP 4: (병렬) AI 응답 스트리밍 + 청킹 → 큐 적재 (재생 대기)
-//   STEP 5: 유저 낭독 완료 → _aiPaused=false → AI 청크 폭발
-//   STEP 6: AI 역번역 + Firestore 저장 (백그라운드)
+//   STEP 3: 사용자 원문·번역 텍스트 확정 (대화방에서는 사용자 TTS 미재생)
+//   STEP 4: AI 응답 스트리밍 + TTS 선요청·재생
+//   STEP 5: AI 역번역 + Firestore 저장
+//   STEP 6: 사용자 두 언어 음성을 히스토리 캐시에 백그라운드 생성
 //   STEP 7: 마이크 재개방
 // ====================================================================
   String _retryPhrase(String lang) {
@@ -1707,6 +1709,48 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       await utterance.done.timeout(timeout);
     } on TimeoutException {
       utterance.cancel();
+    }
+  }
+
+  /// 사용자 원문과 목표 언어 문장을 대화방에서는 재생하지 않고 히스토리용
+  /// 음성으로만 만든다. AI 답변과 저장이 끝난 뒤 호출하므로 실시간 응답 경로를
+  /// 기다리게 하지 않는다. 동일 언어·동일 문장은 한 번만 생성한다.
+  void _cacheUserSpeechForHistory({
+    required String originalText,
+    required String targetText,
+    required int turnId,
+    required int generationId,
+  }) {
+    final texts = <String>{
+      if (originalText.trim().isNotEmpty) originalText.trim(),
+      if (targetText.trim().isNotEmpty) targetText.trim(),
+    };
+    final historyVoiceKey =
+        '${TtsAdapterConfig.model}_${TtsAdapterConfig.userVoice}';
+    var index = 0;
+    for (final text in texts) {
+      index++;
+      final itemIndex = index;
+      _costTracker.recordTtsRequest(text.length);
+      unawaited(
+        _ttsAdapter
+            .synthesizeForHistory(
+              TtsRequest(
+                text: text,
+                voiceId: TtsAdapterConfig.userVoice,
+                speakerType: TtsSpeakerType.user,
+                turnId: 'user-history-$turnId-$itemIndex',
+                generationId: generationId,
+                saveToHistory: true,
+                historyVoiceKey: historyVoiceKey,
+                playbackCategory: 'history_only',
+              ),
+            )
+            .then((ok) => _log(
+                  '🔊 [USER-HISTORY-TTS]',
+                  'turn=$turnId item=$itemIndex cached=$ok len=${text.length}',
+                )),
+      );
     }
   }
 
@@ -2262,13 +2306,13 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       }
 
       // ─────────────────────────────────────────────────────
-      // STEP 3: 사용자 발화는 원문(original)과 번역(target) 텍스트만 저장한다.
-      //   대화 중에는 사용자 TTS API를 호출하지 않는다. 히스토리 말풍선의
-      //   재생 버튼을 처음 눌렀을 때 tts-1/nova로 생성하고 디스크 캐시한다.
+      // STEP 3: 사용자 발화는 원문(original)과 번역(target)을 화면·저장용으로
+      //   확정한다. 두 문장의 사용자 음성은 대화방에서 재생하지 않고, AI 응답이
+      //   끝난 뒤 히스토리 캐시에 백그라운드로 생성한다.
       // ─────────────────────────────────────────────────────
       _logTurnPerf('TRANSLATION_DONE');
-      _log('🔇 [USER-TTS-SKIP]',
-          'text_only=true history_download_on_first_play=true');
+      _log('🔇 [USER-TTS-DEFER]',
+          'playback=false history_background_after_ai=true');
 
       // ─────────────────────────────────────────────────────
       // STEP 4: AI 응답 텍스트와 음성은 기존 방식대로 생성·재생한다.
@@ -2466,6 +2510,12 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       _saveHistoryMessages([hostLine, systemLine]); // 🔧 [히스토리] 병행 저장
       _saveRecentHistory(
           userTargetText, aiTargetText); // 🧠 [장기 기억] 백그라운드 메모리 업데이트
+      _cacheUserSpeechForHistory(
+        originalText: hostOriginal,
+        targetText: userTargetText,
+        turnId: currentTurnId,
+        generationId: pipelineGeneration,
+      );
       _log('🧠 [PIPE-10]', 'Firestore 저장 호출 완료');
     } catch (e) {
       aiTtsPrefetch?.cancel();
@@ -2972,6 +3022,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
                     size: const Size(26, 26),
                     painter: _LangIconPainter(active: _showOriginal),
                   ),
+                  tooltip: _showOriginal ? '원문 숨기기' : '원문 함께 보기',
                   onPressed: () =>
                       setState(() => _showOriginal = !_showOriginal),
                   padding: EdgeInsets.zero,
@@ -3058,7 +3109,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    '타겟 언어로만 프리톡하려면',
+                    '목표 언어만 표시됩니다',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: Colors.white.withValues(alpha: 0.22),
@@ -3068,7 +3119,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
                     ),
                   ),
                   Text(
-                    '타겟과 오리지널 언어를 같게 하세요',
+                    '상단 언어 버튼을 누르면 원문도 함께 볼 수 있어요',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: Colors.white.withValues(alpha: 0.14),
