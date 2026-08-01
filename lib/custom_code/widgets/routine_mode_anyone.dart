@@ -1128,10 +1128,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           .allMatches(guarded)
           .map((match) => match.group(0) ?? '')
           .where((sentence) {
-            final trimmed = sentence.trimRight();
-            return !trimmed.endsWith('?') && !trimmed.endsWith('？');
-          })
-          .join(' ');
+        final trimmed = sentence.trimRight();
+        return !trimmed.endsWith('?') && !trimmed.endsWith('？');
+      }).join(' ');
     }
 
     guarded = guarded
@@ -1148,6 +1147,33 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       );
     }
     return guarded;
+  }
+
+  bool _mayUseCasualRegister() {
+    final memory = _characterShortTermMemory;
+    if (!memory.contains('CONFIDENCE: HIGH')) return false;
+    return RegExp(r'(반말|해체|casual)', caseSensitive: false).hasMatch(memory);
+  }
+
+  bool _needsNaturalPoliteRewrite(String text) {
+    final cleaned = _cleanText(text);
+    if (cleaned.isEmpty) return false;
+    if (RegExp(r'(?:습니다|습니까)(?:[.!?。！？]|$)').hasMatch(cleaned)) {
+      return true;
+    }
+
+    final sentences = RegExp(r'[^.!?。！？\n]+[.!?。！？]?')
+        .allMatches(cleaned)
+        .map((match) => (match.group(0) ?? '').trim())
+        .where((sentence) => sentence.isNotEmpty);
+    for (final sentence in sentences) {
+      final ending = sentence.replaceAll(RegExp(r'[.!?。！？"”’\s]+$'), '');
+      if (!RegExp(r'(?:요|죠|세요|네요|군요)$').hasMatch(ending) &&
+          !RegExp(r'^(?:네|예|아니요)$').hasMatch(ending)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   void _stopEverything() {
@@ -2375,8 +2401,12 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       // 상대방의 정체와 관계가 단기 기억에서 확실해진 뒤에만 질문을 허용한다.
       final bool allowAiQuestion =
           _characterShortTermMemory.contains('CONFIDENCE: HIGH');
-      _log('🎙️ [LEAD]',
-          'turn=$currentTurnId allow_question=$allowAiQuestion character_memory=${_characterShortTermMemory.isNotEmpty}');
+      final bool forceNaturalPolite = !_mayUseCasualRegister();
+      _log(
+          '🎙️ [LEAD]',
+          'turn=$currentTurnId allow_question=$allowAiQuestion '
+              'force_polite=$forceNaturalPolite '
+              'character_memory=${_characterShortTermMemory.isNotEmpty}');
       final selectedVoice = _selectedAiVoice ?? 'alloy';
       final aiStream = FreeTalkBrain.streamFreeTalkResponse(
         apiKey: _openAiKey,
@@ -2384,6 +2414,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         contextStr: latestContextStr,
         myTarget: 'Korean',
         allowQuestion: allowAiQuestion,
+        forceNaturalPolite: forceNaturalPolite,
         characterMemory: _characterShortTermMemory,
         voiceCharacterInstruction: _voiceCharacterInstruction(selectedVoice),
       );
@@ -2422,7 +2453,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       // 뒤 FIFO 큐에 연결하므로 두 음성은 겹치지 않는다.
       Future<String>? aiTargetFuture;
       Future<String>? characterMemoryFuture;
-      final Future<void> aiPreparationTask = aiGenerationTask.then((_) {
+      final Future<void> aiPreparationTask = aiGenerationTask.then((_) async {
         if (!isActivePipelineGeneration(
               expected: pipelineGeneration,
               current: _pipelineGeneration,
@@ -2437,6 +2468,31 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           aiOriginalText,
           allowQuestion: allowAiQuestion,
         );
+
+        if (forceNaturalPolite && _needsNaturalPoliteRewrite(aiOriginalText)) {
+          final beforeRewrite = aiOriginalText;
+          final rewritten = await FreeTalkBrain.rewriteToNaturalPoliteKorean(
+            apiKey: _openAiKey,
+            text: beforeRewrite,
+          );
+          if (!isActivePipelineGeneration(
+                expected: pipelineGeneration,
+                current: _pipelineGeneration,
+                mounted: mounted,
+                conversationActive: _isConversationActive,
+              ) ||
+              _turnCounter != currentTurnId) {
+            return;
+          }
+          aiOriginalText = _guardAnyoneAiReply(
+            rewritten,
+            allowQuestion: allowAiQuestion,
+          );
+          _log(
+            '🛡️ [AI-REGISTER-GUARD]',
+            'rewritten=true before="$beforeRewrite" after="$aiOriginalText"',
+          );
+        }
 
         if (aiOriginalText.trim().isNotEmpty) {
           aiTargetFuture = FreeTalkBrain.translateKoreanToTarget(
@@ -5564,6 +5620,58 @@ Update the private memory:'''
     }
   }
 
+  /// 캐릭터와 관계가 확정되기 전의 AI 답변을 자연스러운 해요체로만 바꾼다.
+  /// 의미, 관점, 사실은 그대로 두고 말끝만 교정하며 실패하면 원문을 보존한다.
+  static Future<String> rewriteToNaturalPoliteKorean({
+    required String apiKey,
+    required String text,
+  }) async {
+    final source = text.trim();
+    if (source.isEmpty || apiKey.isEmpty) return source;
+    final client = http.Client();
+    try {
+      final response = await client
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.0,
+              'max_tokens': 120,
+              'messages': [
+                {
+                  'role': 'system',
+                  'content': '''Rewrite the Korean reply in natural spoken 해요체.
+Keep its exact meaning, first-person viewpoint, character, facts, and sentence count.
+Change only the speech register.
+Every sentence must end naturally and politely with -요 style.
+Do not use stiff -습니다/-습니까 style.
+Do not add a question, greeting, explanation, subject, detail, or new fact.
+Do not answer the reply. Output only the rewritten Korean reply.'''
+                },
+                {'role': 'user', 'content': source},
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode != 200) return source;
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      final rewritten =
+          ((body['choices'] as List).first['message']['content'] as String)
+              .trim()
+              .replaceAll(RegExp(r'''^['"“]|['"”]$'''), '');
+      return rewritten.isEmpty ? source : rewritten;
+    } catch (_) {
+      return source;
+    } finally {
+      client.close();
+    }
+  }
+
   // 📦 [Box 7-1-D] streamFreeTalkResponse — Free Talk AI 응답 스트림
   static Stream<String> streamFreeTalkResponse({
     required String apiKey,
@@ -5575,12 +5683,18 @@ Update the private memory:'''
     String voiceCharacterInstruction = '',
     // 상대방의 정체가 충분히 확정된 뒤에만 질문을 허용한다.
     bool allowQuestion = true,
+    bool forceNaturalPolite = false,
   }) async* {
     final client = http.Client();
     try {
       final String questionRule = allowQuestion
           ? "- The character is now understood with high confidence. You may ask ONE short, character-appropriate question only when it is genuinely necessary. Never ask a generic return question."
           : "- The character is not yet understood with high confidence. Do NOT ask the user any question. Respond naturally and stop.";
+      final String registerRule = forceNaturalPolite
+          ? '''- MANDATORY FOR THIS TURN: Use natural Korean 해요체 throughout. Every sentence must end politely in -요 style.
+- Do not mirror the user's casual endings even if the user says -니, -어, -아, -야, or -겠어.
+- Do not use stiff -습니다/-습니까 style.'''
+          : '- Follow the clearly confirmed speech register in SESSION CHARACTER MEMORY.';
       final String rejectedBlock = rejectedReply.trim().isEmpty
           ? ""
           : "\n- IMPORTANT: The user disliked your previous reply: \"${rejectedReply.trim()}\". Give a COMPLETELY DIFFERENT reply this time — different angle, different wording. Do NOT repeat or rephrase it.";
@@ -5653,6 +5767,9 @@ $questionRule
 - Switch to casual Korean only after the user's wording and the confirmed relationship clearly support it. A single casual sentence on the first turn is not enough.
 - Once the register is clearly established, match it while preserving the selected character impression.$rejectedBlock""";
 
+      final finalSysPrompt =
+          '$sysPrompt\n\n[CURRENT TURN REGISTER]\n$registerRule';
+
       final request = http.Request(
         'POST',
         Uri.parse('https://api.openai.com/v1/chat/completions'),
@@ -5667,7 +5784,7 @@ $questionRule
         'temperature': 0.3,
         'max_tokens': kFreeTalkAiResponseMaxTokens,
         'messages': [
-          {'role': 'system', 'content': sysPrompt},
+          {'role': 'system', 'content': finalSysPrompt},
           {
             'role': 'user',
             'content':

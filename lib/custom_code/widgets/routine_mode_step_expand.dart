@@ -23,7 +23,6 @@ import 'package:flutter/foundation.dart'; // 🎧 [STT-RAW] kDebugMode
 // ====================================================================
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
 import 'dart:typed_data';
 import 'package:record/record.dart';
 import 'package:web_socket_channel/io.dart';
@@ -31,7 +30,6 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:http/http.dart' as http;
 import 'package:firebase_remote_config/firebase_remote_config.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:permission_handler/permission_handler.dart';
 // 🔧 [v3 추가] TTS 로컬 캐싱 + Firestore 저장용
 import 'dart:io';
@@ -41,6 +39,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/openai_connection_pool.dart';
+import '/custom_code/services/openai_transcribe_service.dart';
 import 'deepgram_confidence_probe.dart';
 import 'first_utterance_context_judge.dart';
 
@@ -78,14 +77,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   // 상단 언어 버튼을 누르면 실제 한국어 대화도 함께 확인할 수 있다.
   bool _showOriginal = false;
   int _turnCounter = 0;
-  final FirstUtteranceContextJudgeSession _firstUtteranceJudge =
-      FirstUtteranceContextJudgeSession();
-  final FirstUtteranceContextJudgeSession _prefetchFirstUtteranceJudge =
-      FirstUtteranceContextJudgeSession();
   String? _pendingHeardConfirmation;
   int _heardConfirmationAttempts = 0;
-  Future<FirstUtteranceContext?>? _prefetchedFirstUtteranceFuture;
-  String _prefetchedFirstUtteranceTranscript = '';
   String? _sessionDocId; // 🔧 [v3 추가] 첫 대화 후 세션 ID (클론 변경 시 null 리셋)
   DocumentReference? _myHistoryRef; // 🔧 [히스토리] chat_history 문서 참조 (Duo 패턴)
   List<String> _lastExchangeMsgIds = []; // [??] ?? ?? messages docId
@@ -220,68 +213,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     return false;
   }
 
-  /// Seed snippet filter shared by FreeTalk and Roleplay history fetchers.
-  static bool _isSeedFiller(String s) {
-    final t = s.replaceAll(RegExp(r'[\s\.,!?~…]'), '').toLowerCase();
-    if (t.length < 6) return true;
-    const fillerPatterns = [
-      '네',
-      '응',
-      '어',
-      '그래',
-      '맞아',
-      '맞아요',
-      '좋아',
-      '좋아요',
-      '글쎄',
-      'ok',
-      'okay',
-      '음',
-      '아',
-      '오',
-      '그래요',
-      '그러니까',
-      '그럴까',
-      '그렇구나',
-      '알겠어',
-      '알겠습니다',
-      '고마워',
-      '고맙습니다',
-      'yes',
-      'yeah',
-      'sure',
-      'right',
-      'thank you',
-      'thanks',
-    ];
-    if (fillerPatterns.contains(t)) return true;
-    const complaintPatterns = [
-      '질문',
-      '물어봐',
-      '물어보',
-      '다시마',
-      '이상하',
-      '별로',
-      '뭐야',
-      '바꿔',
-      '그런거말고',
-      '그런것말고',
-      '이거',
-      '다른거',
-      '다른걸',
-      '마음에안',
-      '맘에안',
-      'question',
-      'askme',
-      'weird',
-    ];
-    for (final p in complaintPatterns) {
-      if (t.contains(p)) return true;
-    }
-    return false;
-  }
-  // ──────────────────────────────────────────────────────────────────
-
   Widget _buildIdleBanner() => const SizedBox.shrink();
 
   Widget _buildIdleOverlay() => const SizedBox.shrink();
@@ -298,6 +229,12 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   StreamController<String>? _specController;
   StreamSubscription<String>? _specSub;
   String _specTranscript = '';
+  Future<String?>? _prefetchedFirstTurnTranscribe;
+  int _prefetchedFirstTurnPcmBytes = 0;
+  final List<Uint8List> _turnPcmChunks = <Uint8List>[];
+  int _turnPcmBytes = 0;
+  static const int _turnPcmBufferMaxBytes = 32000 * 60;
+  static const Duration _accurateTranscribeTimeout = Duration(seconds: 3);
   static const int COMMIT_WAIT_SPEECH_FINAL_MS = 1200; // speech_final: 1200ms
   static const int COMMIT_WAIT_UNCERTAIN_MS = 500; // UtteranceEnd: 500ms
   // 🚀 [FIRST-TURN] 첫 유저 발화(seed)만: 안전값보다는 짧지만, 말 중간의 짧은 쉼을
@@ -305,8 +242,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   //   선시작(TTFT 은닉)이 담당하므로 이 대기를 과하게 줄일 필요가 없다.
   static const int COMMIT_WAIT_FIRST_TURN_MS = 650;
 
-  // 📦 [Meaning Confidence Probe] Measurement-only state.
-  // Never use these values to branch UI, History, Turn, GPT, TTS, or microphone flow.
+  // Deepgram 신뢰도 측정값은 선택적 gpt-4o-transcribe 전사 여부에만 사용한다.
   static const String _probeMode = 'STEP_EXPAND';
   final List<DeepgramTurnResult> _pendingDeepgramResults = [];
   DateTime? _activeProbeDgFinalAt;
@@ -384,6 +320,95 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     );
   }
 
+  void _resetTurnPcmBuffer() {
+    _turnPcmChunks.clear();
+    _turnPcmBytes = 0;
+  }
+
+  void _appendTurnPcm(Uint8List bytes) {
+    if (bytes.isEmpty) return;
+    _turnPcmChunks.add(bytes);
+    _turnPcmBytes += bytes.length;
+    while (
+        _turnPcmBytes > _turnPcmBufferMaxBytes && _turnPcmChunks.isNotEmpty) {
+      _turnPcmBytes -= _turnPcmChunks.removeAt(0).length;
+    }
+  }
+
+  Uint8List? _snapshotTurnPcm() {
+    if (_turnPcmBytes <= 0) return null;
+    final pcm = Uint8List(_turnPcmBytes);
+    int offset = 0;
+    for (final chunk in _turnPcmChunks) {
+      pcm.setRange(offset, offset + chunk.length, chunk);
+      offset += chunk.length;
+    }
+    return pcm;
+  }
+
+  Future<String?> _transcribeAccurately({Uint8List? pcmOverride}) {
+    final pcm = pcmOverride ?? _snapshotTurnPcm();
+    if (pcm == null || pcm.isEmpty || _openAiKey.isEmpty) {
+      return Future<String?>.value(null);
+    }
+    return OpenAiTranscribeService.transcribePcm16(
+      apiKey: _openAiKey,
+      pcm: pcm,
+      language: 'ko',
+      model: OpenAiTranscribeService.firstTurnModel,
+      timeout: _accurateTranscribeTimeout,
+      onLog: _log,
+    );
+  }
+
+  void _prefetchFirstTurnTranscription() {
+    final pcm = _snapshotTurnPcm();
+    if (pcm == null || pcm.isEmpty || _openAiKey.isEmpty) return;
+    if (_prefetchedFirstTurnTranscribe != null &&
+        pcm.length <= _prefetchedFirstTurnPcmBytes) {
+      return;
+    }
+    _prefetchedFirstTurnPcmBytes = pcm.length;
+    _prefetchedFirstTurnTranscribe = _transcribeAccurately(pcmOverride: pcm);
+    _log('🚀 [FIRST-TRANSCRIBE-PREFETCH]',
+        'started pcmBytes=${pcm.length} commitWaitMs=$COMMIT_WAIT_FIRST_TURN_MS');
+  }
+
+  List<String> _accurateTranscriptionReasons(
+    String transcript, {
+    required bool isFirstTurn,
+  }) {
+    final reasons = <String>[];
+    final text = transcript.trim();
+    if (isFirstTurn) reasons.add('first_turn');
+    if (_activeSttConfidence == null) {
+      reasons.add('confidence_missing');
+    } else if (_activeSttConfidence! < 0.70) {
+      reasons.add('low_transcript_confidence');
+    }
+    if (RegExp(r'[가-힣]').hasMatch(text) && RegExp(r'[A-Za-z]').hasMatch(text)) {
+      reasons.add('mixed_language');
+    }
+    if (RegExp(
+      r'(그게\s*아니|내\s*(말|뜻)은|잘못\s*(들|적|알아)|다시\s*말|아니[요,.\s])',
+    ).hasMatch(text)) {
+      reasons.add('correction_or_misheard');
+    }
+    if (text.endsWith('...') ||
+        text.endsWith('…') ||
+        RegExp(r'(그런데|근데|그래서|하지만|했는데|하는데|라서|때문에)$')
+            .hasMatch(text.replaceAll(RegExp(r'\s+'), ''))) {
+      reasons.add('possibly_broken_sentence');
+    }
+    return reasons;
+  }
+
+  bool _sameTranscriptForSpec(String left, String right) {
+    String normalize(String value) =>
+        value.toLowerCase().replaceAll(RegExp(r'[^0-9a-z가-힣]'), '');
+    return normalize(left) == normalize(right);
+  }
+
   // 🌐 [v3.1] 로비에서 선택한 언어 이름 → Deepgram/OpenAI 언어 코드 매핑
   String _mapLanguageToCode(String lang) {
     switch (lang.trim().toLowerCase()) {
@@ -425,12 +450,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   // 🌱 스텝익스팬드 전용 상태
   static const int MAX_TURNS = 5; // 5턴 자동 마무리 룰
 
-  /// 🧠 [STEP-EXPAND] 유저 발화 번역에 쓰는 턴별 모델.
-  ///
-  /// 첫 턴의 씨앗 문장이 5턴 전체의 토대라, 여기서 어긋나면 이후 확장이 통째로
-  /// 딸려 간다. 그 한 턴만 상위 모델을 쓰고, 토대가 선 2턴부터는 경량으로 내린다.
-  static const String kFirstTurnUserModel = 'gpt-4.1';
-  static const String kFollowUpUserModel = 'gpt-4o-mini';
+  /// 사용자 번역·확장과 AI 질문 생성은 모두 같은 경량 모델로 처리한다.
+  static const String kStepExpandUserModel = 'gpt-4o-mini';
   bool _isSessionComplete = false; // 5턴 완료 플래그 (마이크 잠금)
   bool _isPolishing = false; // 세련된 변형 문장 생성 중
   String _polishedSentence = ""; // 생성된 세련된 변형
@@ -584,295 +605,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   // 4. 이후 AI는 기존 5턴 확장 패턴대로 짧은 유도 질문을 한다
   //    - 대화 패턴과 확장 로직은 기존 유지
   // ====================================================================
-
-  // 🆕 프리톡 기록에서 유저(HOST) 발화 최대 3개를 최근 3개 방에서 수집.
-  //   - mode alias 확장으로 다양한 저장값 커버
-  //   - role/field fallback으로 저장 스키마 차이 대응
-  //   - 기록 없으면 빈 리스트 → 호출부에서 roleplay 또는 고정 안내로 폴백
-  // ignore: unused_element
-  Future<List<String>> _fetchFreeTalkUserSnippets() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return [];
-    try {
-      final roomsSnap = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .collection('chat_history')
-          .orderBy('created_at', descending: true)
-          .limit(30)
-          .get();
-
-      // mode alias: free_talk, freetalk, freeTalk, ai_free_talk, free_talk_mode
-      bool isFtMode(String m) {
-        final n = m.toLowerCase().replaceAll(' ', '_').replaceAll('-', '_');
-        return n == 'free_talk' ||
-            n == 'freetalk' ||
-            n == 'ai_free_talk' ||
-            n == 'free_talk_mode';
-      }
-
-      final freeTalkRooms = roomsSnap.docs
-          .where((d) => isFtMode((d.data()['mode'] ?? '').toString()))
-          .take(5)
-          .toList();
-      if (freeTalkRooms.isEmpty) return [];
-
-      // 중복 회피: 최근에 안 쓴 방 우선
-      final prefs = await SharedPreferences.getInstance();
-      final usedKey = 'freetalk_seed_used_${user.uid}';
-      final used = Set<String>.from(prefs.getStringList(usedKey) ?? []);
-      var pool = freeTalkRooms.where((d) => !used.contains(d.id)).toList();
-      if (pool.isEmpty) {
-        pool = List.of(freeTalkRooms);
-        await prefs.remove(usedKey);
-      }
-      pool.shuffle();
-
-      // 최근 3개 방에서 수집
-      final selectedRooms = pool.take(3).toList();
-      final newUsed = Set<String>.from(prefs.getStringList(usedKey) ?? [])
-        ..addAll(selectedRooms.map((r) => r.id));
-      await prefs.setStringList(usedKey, newUsed.toList());
-
-      // role 판정 fallback: HOST, USER, host, user
-      bool isHostRole(Map<String, dynamic> data) {
-        final role =
-            (data['role'] ?? data['speaker_role'] ?? data['sender'] ?? '')
-                .toString()
-                .toUpperCase();
-        return role == 'HOST' || role == 'USER';
-      }
-
-      // 메시지 텍스트 추출 fallback
-      String extractText(Map<String, dynamic> data) {
-        final orig = (data['original_text'] ??
-                data['original'] ??
-                data['text'] ??
-                data['message'] ??
-                data['content'] ??
-                '')
-            .toString()
-            .trim();
-        final tgt =
-            (data['translated_text'] ?? data['target'] ?? '').toString().trim();
-        return orig.isNotEmpty ? orig : tgt;
-      }
-
-      final List<String> allCandidates = [];
-      for (final room in selectedRooms) {
-        try {
-          final msgSnap = await room.reference.collection('messages').get();
-          final texts = msgSnap.docs
-              .where((d) => isHostRole(d.data()))
-              .map((d) => extractText(d.data()))
-              .where((s) => s.isNotEmpty && !_isSeedFiller(s))
-              .toList();
-          allCandidates.addAll(texts);
-        } catch (_) {}
-      }
-
-      if (allCandidates.isEmpty) return [];
-      allCandidates.sort((a, b) => b.length.compareTo(a.length));
-      final seedPool = allCandidates.take(8).toList()..shuffle();
-      return seedPool.take(3).toList();
-    } catch (e) {
-      _log('⚠️ [FT-SEED]', 'fetch 실패: $e');
-      return [];
-    }
-  }
-
-  // 🆕 roleplay 기록에서 유저(HOST) 발화 1~2개를 최근 3개 방에서 수집.
-  //   - mode alias 확장 (roleplay, role_play, routine_mode_roleplay)
-  //   - 역할극 발화이므로 실제 사실 아님 — 주제/분위기 재료로만 사용
-  // ignore: unused_element
-  Future<List<String>> _fetchRoleplayUserSnippets() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return [];
-    try {
-      final roomsSnap = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .collection('chat_history')
-          .orderBy('created_at', descending: true)
-          .limit(30)
-          .get();
-
-      // mode alias: roleplay, role_play, routine_mode_roleplay
-      bool isRpMode(String m) {
-        final n = m.toLowerCase().replaceAll(' ', '_').replaceAll('-', '_');
-        return n == 'roleplay' ||
-            n == 'role_play' ||
-            n == 'routine_mode_roleplay' ||
-            n == 'roleplaying';
-      }
-
-      final rpRooms = roomsSnap.docs
-          .where((d) => isRpMode((d.data()['mode'] ?? '').toString()))
-          .take(5)
-          .toList();
-      if (rpRooms.isEmpty) return [];
-
-      final prefs = await SharedPreferences.getInstance();
-      final usedKey = 'roleplay_seed_used_${user.uid}';
-      final used = Set<String>.from(prefs.getStringList(usedKey) ?? []);
-      var pool = rpRooms.where((d) => !used.contains(d.id)).toList();
-      if (pool.isEmpty) {
-        pool = List.of(rpRooms);
-        await prefs.remove(usedKey);
-      }
-      pool.shuffle();
-
-      // 최근 3개 방에서 수집
-      final selectedRooms = pool.take(3).toList();
-      final newUsed = Set<String>.from(prefs.getStringList(usedKey) ?? [])
-        ..addAll(selectedRooms.map((r) => r.id));
-      await prefs.setStringList(usedKey, newUsed.toList());
-
-      // role 판정 fallback
-      bool isHostRole(Map<String, dynamic> data) {
-        final role =
-            (data['role'] ?? data['speaker_role'] ?? data['sender'] ?? '')
-                .toString()
-                .toUpperCase();
-        return role == 'HOST' || role == 'USER';
-      }
-
-      // 메시지 텍스트 추출 fallback
-      String extractText(Map<String, dynamic> data) {
-        final orig = (data['original_text'] ??
-                data['original'] ??
-                data['text'] ??
-                data['message'] ??
-                data['content'] ??
-                '')
-            .toString()
-            .trim();
-        final tgt =
-            (data['translated_text'] ?? data['target'] ?? '').toString().trim();
-        return orig.isNotEmpty ? orig : tgt;
-      }
-
-      final List<String> allCandidates = [];
-      for (final room in selectedRooms) {
-        try {
-          final msgSnap = await room.reference.collection('messages').get();
-          final texts = msgSnap.docs
-              .where((d) => isHostRole(d.data()))
-              .map((d) => extractText(d.data()))
-              .where((s) => s.isNotEmpty && !_isSeedFiller(s))
-              .toList();
-          allCandidates.addAll(texts);
-        } catch (_) {}
-      }
-
-      if (allCandidates.isEmpty) return [];
-      allCandidates.sort((a, b) => b.length.compareTo(a.length));
-      final seedPool = allCandidates.take(6).toList()..shuffle();
-      return seedPool.take(2).toList();
-    } catch (e) {
-      _log('⚠️ [RP-SEED]', 'fetch 실패: $e');
-      return [];
-    }
-  }
-
-  // 🆕 프리톡 기반 첫 질문을 AI 버블로 렌더 + 타겟 TTS 재생 (그래머 질문과 동일 패턴)
-  // [FIRST-MENT] 현재 첫 멘트는 고정 문구만 사용 → 미호출 상태로 보존.
-  // ignore: unused_element
-  Future<void> _generateAndPlayFreeTalkSeedQuestion(
-      List<String> snippets, List<String> roleplaySnippets) async {
-    final String targetLangName = FFAppState().targetLang.isNotEmpty
-        ? FFAppState().targetLang
-        : 'English';
-    final String nativeLangName =
-        FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : '';
-
-    if (mounted) {
-      setState(() {
-        _localMessages.add({'role': 'SYSTEM', 'target': '', 'original': ''});
-      });
-      _scrollToBottom();
-    }
-    final int aiIdx = _localMessages.length - 1;
-
-    final aiStream = StepExpandBrain.streamFreeTalkSeedQuestion(
-      apiKey: _openAiKey,
-      myTarget: targetLangName,
-      myNative: nativeLangName,
-      snippets: snippets,
-      roleplaySnippets: roleplaySnippets,
-    );
-
-    final questionTts = ChunkedTtsFetcher(
-      _openAiKey,
-      _ttsQueueManager,
-      'nova',
-      isUser: false,
-      onLog: _log,
-    );
-    final HybridTtsPlayer questionHybridTts = HybridTtsPlayer(
-      apiKey: _openAiKey,
-      voice: 'nova',
-      onLog: _log,
-    );
-    _ttsQueueManager.setUserTurn(false);
-    _ttsQueueManager.setAiPaused(false);
-
-    String aiText = "";
-    String aiOriginal = "";
-    String aiBuffer = "";
-    bool hasDoubleNewline = false;
-
-    await for (final chunk in aiStream) {
-      if (!hasDoubleNewline) {
-        aiText += chunk;
-        aiBuffer += chunk;
-        if (aiText.contains('\n\n')) {
-          hasDoubleNewline = true;
-          final sepIdx = aiText.indexOf('\n\n');
-          final afterSep = aiText.substring(sepIdx + 2);
-          aiText = aiText.substring(0, sepIdx);
-          final bufSepIdx = aiBuffer.indexOf('\n\n');
-          if (bufSepIdx >= 0) aiBuffer = aiBuffer.substring(0, bufSepIdx);
-          if (afterSep.isNotEmpty) aiOriginal += afterSep;
-        } else {
-          if (!questionHybridTts.firstChunkFired) {
-            final cutIdx =
-                questionHybridTts.onChunk(aiBuffer, questionTts, _swTTS);
-            if (cutIdx >= 0) aiBuffer = aiBuffer.substring(cutIdx);
-          }
-        }
-      } else {
-        aiOriginal += chunk; // Part2 (모국어) — TTS 금지
-      }
-      if (mounted && aiIdx < _localMessages.length) {
-        setState(() {
-          _localMessages[aiIdx]['target'] = aiText;
-          _localMessages[aiIdx]['original'] = aiOriginal;
-        });
-      }
-      _scrollToBottom();
-    }
-
-    await questionHybridTts.onStreamEnd(
-      fullSentence: aiText.trim(),
-      remainderBuffer: aiBuffer,
-      fetcher: questionTts,
-      swSpeechEnd: _swTTS,
-    );
-    _revealForReading(aiIdx, aiText.trim()); // 🆕 긴 대사 텔레프롬프터
-
-    int ticks = 0;
-    while (questionTts.pendingRequests > 0 || _ttsQueueManager.isBusy) {
-      await Future.delayed(const Duration(milliseconds: 50));
-      if (++ticks > 300) break;
-    }
-
-    if (mounted && aiIdx < _localMessages.length) {
-      setState(() {
-        _localMessages[aiIdx]['original'] = aiOriginal;
-      });
-    }
-  }
 
   /// 세션 시작: 안내문을 표시하고 씨앗 재료가 될 유저 첫 발화 대기
   Future<void> _startSessionWaitingForUserSeed() async {
@@ -1097,7 +829,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   /// 세션 UI 리셋 (Firestore 저장은 이미 매 턴 완료됨)
   void _resetSession() {
     _stopEverything();
-    _firstUtteranceJudge.reset();
     if (mounted) {
       setState(() {
         _localMessages.clear();
@@ -1134,7 +865,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       _history.add(_polishedSentence);
     }
     _stopEverything();
-    _firstUtteranceJudge.reset();
     if (mounted) {
       setState(() {
         _localMessages.clear();
@@ -1855,10 +1585,11 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     _commitTimer?.cancel();
     _commitTimer = null;
     _cancelSpeculativeTranslation(); // 🚀 [SPEC] 진행 중 투기 번역 정리
-    _firstUtteranceJudge.cancel();
+    _prefetchedFirstTurnTranscribe = null;
+    _prefetchedFirstTurnPcmBytes = 0;
+    _resetTurnPcmBuffer();
     _pendingHeardConfirmation = null;
     _heardConfirmationAttempts = 0;
-    _cancelPrefetchedFirstUtteranceJudge();
     _pendingTranscript = '';
     _lastPendingFinalAt = null;
     _pendingDeepgramResults.clear();
@@ -1901,7 +1632,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     return false;
   }
 
-  /// 사용자 입력을 듣기 시작한다. Step Expand는 Deepgram STT만 쓴다.
+  /// 사용자 입력은 Deepgram을 기본 STT·발화 종료 판단으로 사용하고, 첫 턴이나
+  /// 낮은 신뢰도에서만 gpt-4o-transcribe 정밀 전사를 선택한다.
   ///
   /// Realtime(WebRTC) 입력 경로는 걷어냈다. 확장 문장은 매 턴 유저가 한 말을
   /// 다시 엮는 작업이라 "지어내지 않는 것"이 "매끄러운 것"보다 중요한데,
@@ -1948,6 +1680,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     if (_isSessionComplete) return;
     _resetIdleTimer();
     _isConversationActive = true;
+    _resetTurnPcmBuffer();
     if (mounted) {
       setState(() {
         _debugResult = "⏱️ 듣는 중...";
@@ -1983,6 +1716,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         _swDeepgram.start();
       },
       onTurnResult: _onDeepgramTurnResult,
+      onAudioData: _appendTurnPcm,
       onTurnEnded: (transcript, {bool speechFinal = false}) {
         _log('🔀 [LISTEN-03]',
             'onTurnEnded 콜백 수신: len=${transcript.length} speechFinal=$speechFinal');
@@ -2087,21 +1821,14 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     // 기존 타이머 취소 (새 발화가 왔으므로 대기창 리셋)
     _commitTimer?.cancel();
 
-    // 🚀 [SPEC-FIRST-TURN] 첫 턴(seed)이면 대기창 동안 GPT 번역을 미리 시작해 버퍼링.
-    //   추가 발화가 오면 이 함수가 다시 호출되며 이전 투기 번역을 취소·재시작한다
-    //   → 짤림 위험 0. 확정 시 텍스트가 일치하면 그대로 선반영.
+    // 첫 턴은 650ms 확정 대기와 정밀 전사·투기 번역을 동시에 진행한다.
+    // 정밀 전사와 Deepgram 문장이 같을 때만 투기 번역을 그대로 사용한다.
     final pendingFirstUtterance = _pendingTranscript.trim();
-    final firstUtteranceRoute =
-        _firstUtteranceJudge.previewRoute(pendingFirstUtterance);
     if (!isDuplicateFinal &&
         isFirstUtterance &&
         pendingFirstUtterance.length >= 2) {
-      if (_prefetchedFirstUtteranceFuture != null ||
-          firstUtteranceRoute == FirstUtteranceRoute.judge) {
-        _startPrefetchedFirstUtteranceJudge(pendingFirstUtterance);
-      } else if (firstUtteranceRoute == FirstUtteranceRoute.bypass) {
-        _startSpeculativeTranslation(pendingFirstUtterance);
-      }
+      _prefetchFirstTurnTranscription();
+      _startSpeculativeTranslation(pendingFirstUtterance);
     }
 
     // 조건부 대기 후 파이프라인 시작 예약 (source별 waitMs)
@@ -2123,23 +1850,13 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       _log('🔀 [COMMIT-00]', '빈 발화 → 마이크 재시작');
       // 🚀 [SPEC] 빈 확정이면 진행 중 투기 번역 폐기
       _cancelSpeculativeTranslation();
-      _cancelPrefetchedFirstUtteranceJudge();
+      _prefetchedFirstTurnTranscribe = null;
+      _prefetchedFirstTurnPcmBytes = 0;
       if (_isConversationActive) _startUserListening();
       return;
     }
 
     _log('🔀 [COMMIT-01]', '확정: len=${committed.length} → 파이프라인 시작');
-
-    // 🚀 [SPEC-FIRST-TURN] 투기적 번역이 이 확정 텍스트와 일치하면 그 스트림을 그대로
-    //   파이프라인에 넘겨 TTFT를 건너뛴다. 불일치(합쳐짐 등)면 폐기하고 정상 경로.
-    Stream<String>? userOverride;
-    if (_specController != null && _specTranscript == committed) {
-      userOverride = _specController!.stream;
-      _detachSpeculativeTranslation(); // 소유권 이전(컨트롤러를 닫지 않음)
-      _log('🚀 [SPEC-HANDOFF]', '투기 번역 선반영 사용');
-    } else {
-      _cancelSpeculativeTranslation();
-    }
 
     // 마이크/VoiceManager 정리
     await _voiceManager?.dispose();
@@ -2147,9 +1864,44 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     _log('🔀 [COMMIT-02]', 'VoiceManager dispose 완료');
 
     _runMeaningProbe(committed);
+    final isFirstTurn = _turnCounter == 0;
+    final accurateReasons = _accurateTranscriptionReasons(
+      committed,
+      isFirstTurn: isFirstTurn,
+    );
+    String effectiveTranscript = committed;
+    if (accurateReasons.isNotEmpty) {
+      final prefetched = _prefetchedFirstTurnTranscribe;
+      _prefetchedFirstTurnTranscribe = null;
+      _prefetchedFirstTurnPcmBytes = 0;
+      final accurate = (await (prefetched ?? _transcribeAccurately()))?.trim();
+      if (accurate != null && accurate.isNotEmpty) {
+        effectiveTranscript = accurate;
+        _log('🎧 [STT-ROUTE]',
+            'selected=gpt-4o-transcribe reasons=${accurateReasons.join(",")}');
+      } else {
+        _log('⚠️ [STT-ROUTE]',
+            'gpt-4o-transcribe failed fallback=nova3 reasons=${accurateReasons.join(",")}');
+      }
+    } else {
+      _log('🎧 [STT-ROUTE]', 'selected=nova3 turn=$_turnCounter');
+    }
+
+    Stream<String>? userOverride;
+    if (_specController != null &&
+        _sameTranscriptForSpec(_specTranscript, effectiveTranscript)) {
+      userOverride = _specController!.stream;
+      _detachSpeculativeTranslation();
+      _log('🚀 [SPEC-HANDOFF]', 'accepted transcript_match=true');
+    } else {
+      _cancelSpeculativeTranslation();
+      _log('🚀 [SPEC-HANDOFF]', 'discarded transcript_match=false');
+    }
+    if (pipelineGeneration != _pipelineGeneration || !mounted) return;
+
     _log('🔀 [COMMIT-03]', '_processRelayPipeline 호출');
     _processRelayPipeline(
-      committed,
+      effectiveTranscript,
       userStreamOverride: userOverride,
       expectedPipelineGeneration: pipelineGeneration,
     );
@@ -2179,8 +1931,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       targetLang: targetLangName,
       contextStr: '',
       disableCorrection: false,
-      // 첫 턴 전용 선시작이므로 상위 모델을 쓴다(파이프라인 본 호출과 동일).
-      model: kFirstTurnUserModel,
+      model: kStepExpandUserModel,
     ).listen(
       (chunk) {
         if (!controller.isClosed) controller.add(chunk);
@@ -2211,65 +1962,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     _specTranscript = '';
     sub?.cancel();
     if (c != null && !c.isClosed) c.close();
-  }
-
-  // GPT-4.1 문맥 판정을 첫 발화 확정 대기창과 겹쳐 실행한다. 실제 세션 판정
-  // 상태는 건드리지 않으므로 낮은 STT 신뢰도/고스트 발화가 첫 기회를 소모하지 않는다.
-  void _startPrefetchedFirstUtteranceJudge(String transcript) {
-    if (_prefetchedFirstUtteranceFuture != null &&
-        _prefetchedFirstUtteranceTranscript == transcript) {
-      return;
-    }
-    _prefetchFirstUtteranceJudge.reset();
-    _prefetchedFirstUtteranceTranscript = transcript;
-    _log('🧭 [FIRST-CONTEXT]', 'event=prefetch_start mode=$_probeMode');
-    _prefetchedFirstUtteranceFuture =
-        _prefetchFirstUtteranceJudge.judgeIfNeeded(
-      apiKey: _openAiKey,
-      transcript: transcript,
-      mode: _probeMode,
-      client: OpenAiConnectionPool.instance.client,
-      onLog: (event, details) =>
-          _log('🧭 [FIRST-CONTEXT]', 'event=prefetch_$event $details'),
-    );
-  }
-
-  void _cancelPrefetchedFirstUtteranceJudge() {
-    _prefetchFirstUtteranceJudge.reset();
-    _prefetchedFirstUtteranceFuture = null;
-    _prefetchedFirstUtteranceTranscript = '';
-  }
-
-  Future<FirstUtteranceContext?> _takePrefetchedOrJudgeFirstUtterance(
-    String transcript,
-  ) async {
-    final prefetched = _prefetchedFirstUtteranceFuture;
-    if (prefetched != null &&
-        _prefetchedFirstUtteranceTranscript == transcript) {
-      final context = await prefetched;
-      if (!identical(_prefetchedFirstUtteranceFuture, prefetched) ||
-          _prefetchedFirstUtteranceTranscript != transcript) {
-        return null;
-      }
-      _firstUtteranceJudge.adoptPrefetchedResult(
-        context,
-        requestFailed: _prefetchFirstUtteranceJudge.requestFailed,
-      );
-      _prefetchedFirstUtteranceFuture = null;
-      _prefetchedFirstUtteranceTranscript = '';
-      _log('🧭 [FIRST-CONTEXT]', 'event=prefetch_handoff');
-      return context;
-    }
-    _cancelPrefetchedFirstUtteranceJudge();
-    return _firstUtteranceJudge.judgeIfNeeded(
-      apiKey: _openAiKey,
-      transcript: transcript,
-      mode: _probeMode,
-      sttConfidence: _activeSttConfidence,
-      client: OpenAiConnectionPool.instance.client,
-      onLog: (event, details) =>
-          _log('🧭 [FIRST-CONTEXT]', 'event=$event $details'),
-    );
   }
 
 // ====================================================================
@@ -2373,6 +2065,18 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         });
       }
       _scrollToBottom();
+    }
+    if (StepExpandBrain.needsNaturalPoliteRewrite(aiOriginalRetry)) {
+      final beforeRewrite = aiOriginalRetry.trim();
+      aiOriginalRetry = await StepExpandBrain.rewriteToNaturalPoliteKorean(
+        apiKey: _openAiKey,
+        text: beforeRewrite,
+      );
+      _log('🛡️ [AI-REGISTER-GUARD]',
+          'path=retry before="$beforeRewrite" after="$aiOriginalRetry"');
+      if (mounted && aiIdx < _localMessages.length) {
+        setState(() => _localMessages[aiIdx]['original'] = aiOriginalRetry);
+      }
     }
     questionTts.addText(aiOriginalRetry.trim());
     _revealForReading(aiIdx, aiText.trim()); // 🆕 긴 대사 텔레프롬프터
@@ -2535,11 +2239,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     }
     _logProbeTiming('PIPELINE_START');
     _resetIdleTimer();
-    final ignoreWithoutConsumingFirstTurn =
-        _firstUtteranceJudge.shouldIgnoreWithoutConsumingFirstTurn(
-      finalTranscript,
-      sttConfidence: _activeSttConfidence,
-    );
     _turnCounter++;
     final int currentTurnId = _turnCounter;
     _log('🧠 [PIPE-01]',
@@ -2550,7 +2249,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     //   하나에 걸려 있다 — 길이만 찍던 동안은 오인식 원인을 못 짚었다.
     //   유저 발화 내용이므로 디버그 빌드에서만 남긴다.
     if (kDebugMode) {
-      _log('🎧 [STT-RAW]', 'source=deepgram text="$finalTranscript"');
+      _log('🎧 [STT-RAW]', 'source=selected text="$finalTranscript"');
     }
 
     // ─────────────────────────────────────────────────────
@@ -2560,34 +2259,15 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     //   판정하면 그 단어를 품은 정상 문장까지 사라진다. 판정 기준은
     //   _isNoiseTranscript 하나로 모은다 — 여기 목록을 따로 두었더니 "음."이
     //   빠져나가 "Um."으로 번역됐다(Anyone에서 발생).
-    bool isGhost =
-        ignoreWithoutConsumingFirstTurn || _isNoiseTranscript(finalTranscript);
+    final bool isGhost = _isNoiseTranscript(finalTranscript);
 
     if (isGhost) {
-      _cancelPrefetchedFirstUtteranceJudge();
       if (_turnCounter == currentTurnId && _turnCounter > 0) _turnCounter--;
       if (mounted)
         setState(
             () => _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP'));
       if (_isConversationActive) _startUserListening();
       return;
-    }
-
-    final firstUtteranceContext =
-        await _takePrefetchedOrJudgeFirstUtterance(finalTranscript);
-    if (!isActivePipelineGeneration(
-      expected: pipelineGeneration,
-      current: _pipelineGeneration,
-      mounted: mounted,
-      conversationActive: _isConversationActive,
-    )) {
-      _log('🧭 [FIRST-CONTEXT]', 'event=stale_pipeline_discarded');
-      return;
-    }
-    if (firstUtteranceContext == null &&
-        _firstUtteranceJudge.requestStarted &&
-        _firstUtteranceJudge.requestFailed) {
-      _log('🧭 [FIRST-CONTEXT]', 'event=fallback fallback=true');
     }
 
     // [CLARIFY-EVAPORATE] If the latest SYSTEM bubble is a pronunciation clarify
@@ -2677,15 +2357,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
             contextStr: contextStr,
             disableCorrection: isCorrectionRetry,
             disableHeardConfirmation: understandingConfirmed,
-            firstUtteranceContext:
-                firstUtteranceContext?.toInternalPromptContext() ?? '',
-            // 🧠 첫 턴만 상위 모델. 씨앗 문장이 5턴 전체의 토대라서다.
-            model:
-                currentTurnId == 1 ? kFirstTurnUserModel : kFollowUpUserModel,
+            model: kStepExpandUserModel,
           );
-      if (firstUtteranceContext != null) {
-        _firstUtteranceJudge.markDelivered(firstUtteranceContext);
-      }
 
       // 첫 턴은 영어 씨앗 문장, 2턴부터는 "새 영어 문장\n\n누적 확장문장"을
       // 화면과 히스토리에 남긴다. 어느 쪽도 대화방에서는 낭독하지 않는다.
@@ -3273,6 +2946,15 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           }
 
           // 텍스트는 AI 소리 시작 시점(setAiPaused=false)에 일괄 표시
+        }
+        if (StepExpandBrain.needsNaturalPoliteRewrite(aiOriginalText)) {
+          final beforeRewrite = aiOriginalText.trim();
+          aiOriginalText = await StepExpandBrain.rewriteToNaturalPoliteKorean(
+            apiKey: _openAiKey,
+            text: beforeRewrite,
+          );
+          _log('🛡️ [AI-REGISTER-GUARD]',
+              'path=normal before="$beforeRewrite" after="$aiOriginalText"');
         }
         // 스트림이 끝나면 한국어만 tts-1/nova로 한 번 읽는다.
         // cacheEnabled=false이므로 이 음성은 대화방을 나가면 폐기된다.
@@ -5606,8 +5288,6 @@ class StepExpandBrain {
     bool disableCorrection = false,
     bool disableRestate = false,
     bool disableHeardConfirmation = false,
-    String firstUtteranceContext = '',
-    // 🧠 [STEP-EXPAND] 이 턴에 쓸 텍스트 모델. 첫 턴만 상위 모델을 받는다.
     String model = 'gpt-4o-mini',
   }) async* {
     final client = OpenAiConnectionPool.instance.client;
@@ -5631,14 +5311,11 @@ Signs:
 If this is a bare mishearing complaint, output EXACTLY: [MISHEARD]
 If the complaint INCLUDES the corrected content, use [CORRECTION] instead.""";
 
-      final contextJudgeBlock = firstUtteranceContext.trim().isEmpty
-          ? ''
-          : '\n\n${firstUtteranceContext.trim()}';
       final sysPrompt =
           """You are a [Step Expand Translator] translating Korean to $targetLang.
 You help the user grow ONE English sentence across multiple turns, adding details each turn.
 
-Read the 'History' carefully to determine the user's current turn.$contextJudgeBlock
+Read the 'History' carefully to determine the user's current turn, restore omitted Korean subjects from context, and preserve the speaker's intended viewpoint.
 
 [DISSATISFIED CHECK — APPLY BEFORE OTHER CHECKS ONLY WHEN HISTORY HAS AN AI QUESTION]
 If History is empty, skip this check and follow CASE 1.
@@ -5842,6 +5519,75 @@ Output: [GARBLED]
   // ------------------------------------------------------------------
   // 🌱 영어의 \n\n 줄바꿈을 한국어에도 동일하게 유지
   // ==================================================================
+  static bool needsNaturalPoliteRewrite(String text) {
+    final cleaned = text.trim();
+    if (cleaned.isEmpty) return false;
+    if (RegExp(r'(?:습니다|습니까)(?:[.!?。！？]|$)').hasMatch(cleaned)) {
+      return true;
+    }
+    final sentences = RegExp(r'[^.!?。！？\n]+[.!?。！？]?')
+        .allMatches(cleaned)
+        .map((match) => (match.group(0) ?? '').trim())
+        .where((sentence) => sentence.isNotEmpty);
+    for (final sentence in sentences) {
+      final ending = sentence.replaceAll(RegExp(r'[.!?。！？"”’\s]+$'), '');
+      if (!RegExp(r'(?:요|죠|세요|네요|군요)$').hasMatch(ending) &&
+          !RegExp(r'^(?:네|예|아니요)$').hasMatch(ending)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static Future<String> rewriteToNaturalPoliteKorean({
+    required String apiKey,
+    required String text,
+  }) async {
+    final source = text.trim();
+    if (source.isEmpty || apiKey.isEmpty) return source;
+    final client = http.Client();
+    try {
+      final response = await client
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.0,
+              'max_tokens': 120,
+              'messages': [
+                {
+                  'role': 'system',
+                  'content': '''주어진 한국어 문장을 자연스러운 일상 존댓말인 해요체로만 고치세요.
+뜻, 질문 내용, 화자 관점, 사실, 문장 수는 그대로 유지하세요.
+모든 문장을 자연스럽게 -요체로 끝내세요.
+반말과 딱딱한 -습니다/-습니까체는 사용하지 마세요.
+새 질문, 인사, 설명, 주어, 정보는 추가하지 마세요.
+교정한 한국어 문장만 출력하세요.'''
+                },
+                {'role': 'user', 'content': source},
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode != 200) return source;
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      final rewritten =
+          ((body['choices'] as List).first['message']['content'] as String)
+              .trim()
+              .replaceAll(RegExp(r'''^['"“]|['"”]$'''), '');
+      return rewritten.isEmpty ? source : rewritten;
+    } catch (_) {
+      return source;
+    } finally {
+      client.close();
+    }
+  }
+
   static Future<String> generateCleanOriginal({
     required String apiKey,
     required String englishText,
@@ -5869,7 +5615,8 @@ Output: [GARBLED]
 - 원문 내용만 번역. 설명·부연·의견 추가 절대 금지.
 - 짧은 문장은 짧게, 긴 문장은 길게 — 원문 길이에 비례하게.
 - 한국어 주어 생략: 문맥상 명확한 I/You/We/They는 생략.
-- 구어체 (문어체 X).
+- 자연스러운 일상 존댓말인 해요체만 사용. 모든 문장을 -요체로 끝낼 것.
+- 반말 및 딱딱한 -습니다/-습니까체 사용 금지.
 - 원문에 빈 줄(\\n\\n)이 있으면 한국어에도 그대로 유지.
 - 번역문만 출력. 설명/주석/따옴표 없음.
 ''',
@@ -5882,7 +5629,14 @@ Output: [GARBLED]
 
         if (res.statusCode == 200) {
           final data = jsonDecode(utf8.decode(res.bodyBytes));
-          return data['choices'][0]['message']['content'].toString().trim();
+          final translated =
+              data['choices'][0]['message']['content'].toString().trim();
+          return needsNaturalPoliteRewrite(translated)
+              ? await rewriteToNaturalPoliteKorean(
+                  apiKey: apiKey,
+                  text: translated,
+                )
+              : translated;
         }
       } catch (_) {
         if (attempt == 0) {
@@ -6037,7 +5791,8 @@ TRAILING relative clauses are fine and linear — a sentence-final, comma-led "w
 [OUTPUT FORMAT - STRICT]
 Output EXACTLY two parts separated by ONE empty line.
 PART 1: "Expanded Sentence: " + your synthesized sentence (25–40 words) + newline + "Connectors used: [list]"
-PART 2: A natural Korean conversational translation of the synthesized sentence."""
+PART 2: A natural Korean conversational translation of the synthesized sentence.
+PART 2 must use natural everyday Korean 해요체 throughout. Every sentence must end in polite -요 style. Never use casual speech or stiff -습니다/-습니까 style."""
           : """You are a Step Expand conversation guide. You are on turn $turnNumber of $maxTurns.
 
 Read the conversation History carefully.
@@ -6050,6 +5805,7 @@ You are a warm, skilled conversation coach — not a grammar teacher. Your job i
 - Across exactly five user turns, collect one useful sentence-building detail per turn and keep joining those details into one coherent expanded sentence.
 - Stay warmly focused on obtaining the next attachable detail. Do not drift into jokes, wordplay, trivia, long reactions, or entertaining banter that does not help complete the expanded sentence.
 - PART 2 is the actual Korean line spoken aloud to the user by tts-1/nova. It must sound like natural, friendly Korean conversation, not a stiff literal translation.
+- PART 2 must always use natural everyday Korean 해요체. End every sentence politely in -요 style, even when the user speaks casually. Never use casual speech or stiff -습니다/-습니까 style.
 - PART 1 and PART 2 must ask the same single question and must not add different facts.
 
 [TWO-LAYER DESIGN — MANDATORY]
@@ -6275,7 +6031,7 @@ User: Too many deadlines piling up.
 [OUTPUT FORMAT - STRICT]
 Output EXACTLY two parts separated by ONE empty line.
 PART 1: Your English question (follow all rules above).
-PART 2: The natural Korean conversational line that will actually be spoken aloud. Keep the same meaning as PART 1.""";
+PART 2: The natural Korean conversational line that will actually be spoken aloud. Keep the same meaning as PART 1. Use natural everyday Korean 해요체 only; every sentence must end politely in -요 style.""";
 
       final request = http.Request(
         'POST',
@@ -6402,109 +6158,6 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
       client.close();
     }
     return originalSentence; // 실패 시 원문 반환
-  }
-
-  // ==================================================================
-  // 📦 streamFreeTalkSeedQuestion — 프리톡 기록 기반 첫 질문 (온도 0.2)
-  // ------------------------------------------------------------------
-  // 유저의 과거 프리톡 발화 몇 개를 받아, 그중 한 주제로 "기본 문장(seed)"을
-  // 유도하는 질문 1개를 타겟 언어로 생성. 변주는 입력 랜덤화로 확보(온도 0.2).
-  // 출력: <타겟 질문>\n\n<모국어 번역>  (타겟==모국어면 타겟만)
-  // ==================================================================
-  static Stream<String> streamFreeTalkSeedQuestion({
-    required String apiKey,
-    required String myTarget,
-    required List<String> snippets,
-    String myNative = '',
-    List<String> roleplaySnippets = const [],
-  }) async* {
-    final client = http.Client();
-    try {
-      final String snippetsBlock = snippets.map((s) => '- $s').join('\n');
-      final String sameLangNote = (myNative.isNotEmpty && myNative == myTarget)
-          ? 'NOTE: $myTarget and the user\'s language are the same — output ONLY the question, with NO blank line and NO translation.\n'
-          : '';
-
-      final String sysPrompt =
-          'You are a Step Expand grammar coach opening a session.\n'
-          '\n'
-          '[HISTORY SIGNALS — two sources with different roles]\n'
-          '\n'
-          'SOURCE A — FreeTalk snippets (real personal-interest signals from actual conversations):\n'
-          '${snippets.isEmpty ? "(none)" : snippetsBlock}\n'
-          '\n'
-          '${roleplaySnippets.isEmpty ? "" : "SOURCE B — Roleplay snippets (situation / mood / tone hints ONLY — these are acting-practice lines, NOT real facts about the user):\n${roleplaySnippets.map((s) => '- $s').join('\n')}\n\n"}'
-          '[BLENDING RULES]\n'
-          'When BOTH sources are present:\n'
-          '- Use FreeTalk as the MAIN personal-interest signal (real topics the user cares about).\n'
-          '- Use Roleplay ONLY to shape the situation, tone, or practical angle of the question.\n'
-          '- Create ONE blended everyday question that does NOT reveal its source.\n'
-          'When only FreeTalk is present:\n'
-          '- Base the question on a concrete topic from the FreeTalk snippets.\n'
-          'When only Roleplay is present:\n'
-          '- Use the theme or situation angle from the roleplay to inspire a natural everyday question.\n'
-          '- NEVER ask as if the roleplay scenario actually happened.\n'
-          'When neither source has real content:\n'
-          '- Ask a simple, warm everyday-life question.\n'
-          '\n'
-          '[RULES]\n'
-          '- NEVER mention or quote past conversations. Ask as if you naturally sense what is on the user\'s mind.\n'
-          '- IGNORE contentless filler (yes, okay, hmm, right). Pick only concrete topics — activities, places, people, plans, opinions.\n'
-          '- Roleplay lines are fictional acting practice — NEVER treat them as real events or facts.\n'
-          '- The question must invite a short, simple statement — NOT yes/no, NOT a list.\n'
-          '- Middle-school level vocabulary. Warm and conversational.\n'
-          '- Do NOT give meta-instructions like "make a sentence" or "expand". Just ask.\n'
-          '- ONE question only, under 25 words.\n'
-          '$sameLangNote'
-          '\n'
-          '[OUTPUT FORMAT — follow EXACTLY]\n'
-          '- First: the question in $myTarget only.\n'
-          '- Then a blank line (two newlines).\n'
-          '- Then: the same question translated into $myNative.\n'
-          '- No labels, no quotes, no prefixes.';
-
-      final request = http.Request(
-        'POST',
-        Uri.parse('https://api.openai.com/v1/chat/completions'),
-      );
-      request.headers.addAll({
-        'Authorization': 'Bearer $apiKey',
-        'Content-Type': 'application/json; charset=utf-8',
-      });
-      request.body = jsonEncode({
-        'model': 'gpt-4o-mini',
-        'stream': true,
-        'temperature': 0.2,
-        'max_tokens': 160,
-        'messages': [
-          {'role': 'system', 'content': sysPrompt},
-          {
-            'role': 'user',
-            'content':
-                'Ask your opening question now (output in the exact format above).',
-          },
-        ],
-      });
-
-      final response =
-          await client.send(request).timeout(const Duration(seconds: 15));
-      if (response.statusCode != 200) return;
-
-      await for (final line in response.stream
-          .transform(utf8.decoder)
-          .transform(const LineSplitter())) {
-        if (line.startsWith('data: ') && line != 'data: [DONE]') {
-          try {
-            final delta =
-                jsonDecode(line.substring(6))['choices'][0]['delta']['content'];
-            if (delta != null) yield delta.toString();
-          } catch (_) {}
-        }
-      }
-    } catch (_) {
-    } finally {
-      client.close();
-    }
   }
 }
 
