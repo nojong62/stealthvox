@@ -18,6 +18,7 @@ import 'package:flutter/services.dart'; // 🔬 [v3.1] Clipboard용
 // ====================================================================
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' as ui;
 import 'package:record/record.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:audioplayers/audioplayers.dart';
@@ -185,6 +186,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   double _fontScale = 1.0;
   // 기본 화면은 목표 언어만 표시한다. 상단 언어 버튼을 눌렀을 때만
   // 원문을 함께 보여 준다.
+  bool _showOriginal = false;
   bool _showUsageGuide = false; // 🆕 [Anyone] 이용방법 말풍선 토글
   String? _selectedAiVoice;
   bool _showVoiceMenu = true;
@@ -2874,10 +2876,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
   Widget _buildVoiceMenu() {
     const options = <String, String>{
-      'alloy': 'alloy  ·  남성  ·  20~30대',
-      'coral': 'coral  ·  여성  ·  20~30대',
-      'cedar': 'cedar  ·  남성  ·  40~50대',
-      'marin': 'marin  ·  여성  ·  40~50대',
+      'alloy': 'alloy  ·  남성  ·  20~',
+      'coral': 'coral  ·  여성  ·  20~',
+      'cedar': 'cedar  ·  남성  ·  40~',
+      'marin': 'marin  ·  여성  ·  40~',
     };
 
     return Positioned.fill(
@@ -2918,13 +2920,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
                       tooltip: '닫기',
                     ),
                 ]),
-                const SizedBox(height: 8),
-                const Text(
-                  '상대방의 연령대와 성별에 맞는 목소리를 선택하세요. 처음 선택하면 대화가 시작됩니다.',
-                  style: TextStyle(
-                      color: Colors.white60, fontSize: 13, height: 1.45),
-                ),
-                const SizedBox(height: 18),
+                const SizedBox(height: 14),
                 DropdownButtonFormField<String>(
                   initialValue: _selectedAiVoice,
                   isExpanded: true,
@@ -2950,9 +2946,15 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
                   items: options.entries
                       .map((entry) => DropdownMenuItem<String>(
                             value: entry.key,
-                            child: Text(entry.value,
-                                style: const TextStyle(
-                                    color: Colors.white, fontSize: 14)),
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: Text(entry.value,
+                                  maxLines: 1,
+                                  softWrap: false,
+                                  style: const TextStyle(
+                                      color: Colors.white, fontSize: 14)),
+                            ),
                           ))
                       .toList(),
                   onChanged: (voice) {
@@ -3118,29 +3120,17 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
                             : 1.0;
                   }),
                 ),
-                TextButton.icon(
-                  onPressed: () => setState(() => _showVoiceMenu = true),
-                  icon: Icon(
-                    Icons.record_voice_over_rounded,
-                    color: _selectedAiVoice == null
-                        ? Colors.amberAccent
-                        : const Color(0xFFB9B4FF),
-                    size: 21,
+                IconButton(
+                  icon: CustomPaint(
+                    size: const Size(26, 26),
+                    painter: _LangIconPainter(active: _showOriginal),
                   ),
-                  label: Text(
-                    _selectedAiVoice ?? '보이스',
-                    style: TextStyle(
-                      color: _selectedAiVoice == null
-                          ? Colors.amberAccent
-                          : Colors.white70,
-                      fontSize: 12,
-                    ),
-                  ),
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 7),
-                    minimumSize: const Size(0, 36),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
+                  tooltip: _showOriginal ? '원문 숨기기' : '원문 함께 보기',
+                  onPressed: () =>
+                      setState(() => _showOriginal = !_showOriginal),
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 36, minHeight: 36),
                 ),
                 const SizedBox(width: 4),
                 // [v3.6] 좁은 화면/큰 글꼴에서도 상단 Row가 넘치지 않도록 축소 허용
@@ -3292,6 +3282,16 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
                       color: Colors.white,
                       fontSize: 16 * _fontScale,
                       fontWeight: FontWeight.bold)),
+              if (_showOriginal &&
+                  !isThinking &&
+                  msg['original'] != null &&
+                  msg['original'].toString().isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(msg['original'],
+                    textAlign: isHost ? TextAlign.right : TextAlign.left,
+                    style: TextStyle(
+                        color: Colors.grey, fontSize: 12 * _fontScale)),
+              ],
             ]),
       ),
     );
@@ -5635,6 +5635,85 @@ $questionRule
       client.close();
     }
   }
+}
+
+class _LangIconPainter extends CustomPainter {
+  final bool active;
+  const _LangIconPainter({required this.active});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final r = size.width / 2;
+    final center = Offset(r, r);
+    canvas
+        .clipPath(Path()..addOval(Rect.fromCircle(center: center, radius: r)));
+
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height),
+        Paint()..color = const Color(0xFF1E7DB5));
+    canvas.drawPath(
+      Path()
+        ..moveTo(size.width * 0.05, size.height)
+        ..lineTo(size.width, size.height * 0.05)
+        ..lineTo(size.width, size.height)
+        ..close(),
+      Paint()..color = const Color(0xFF0B4870),
+    );
+    canvas.drawLine(
+      Offset(size.width * 0.04, size.height * 0.96),
+      Offset(size.width * 0.96, size.height * 0.04),
+      Paint()
+        ..color = const Color(0xFFD4AF37)
+        ..strokeWidth = 2.0
+        ..strokeCap = StrokeCap.round,
+    );
+    canvas.drawCircle(
+      center,
+      r - 1.5,
+      Paint()
+        ..color = const Color(0xFFD4AF37)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.5,
+    );
+
+    final col = active ? Colors.white : const Color(0x61FFFFFF);
+    _drawText(canvas, 'T', Offset(size.width * 0.09, size.height * 0.06),
+        size.width * 0.34, col);
+
+    final dotC = Offset(size.width * 0.63, size.height * 0.23);
+    final dotR = size.width * 0.105;
+    canvas.drawCircle(dotC, dotR, Paint()..color = const Color(0xFFE03030));
+    canvas.drawCircle(
+        dotC, dotR * 0.45, Paint()..color = const Color(0xFFFF6060));
+    canvas.drawCircle(
+        dotC,
+        dotR,
+        Paint()
+          ..color = const Color(0xBBFFFFFF)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 0.8);
+
+    _drawText(canvas, 'T', Offset(size.width * 0.55, size.height * 0.58),
+        size.width * 0.34, col);
+  }
+
+  void _drawText(
+      Canvas canvas, String text, Offset offset, double fontSize, Color color) {
+    final painter = TextPainter(
+      text: TextSpan(
+          text: text,
+          style: TextStyle(
+              color: color,
+              fontSize: fontSize,
+              fontWeight: FontWeight.bold,
+              height: 1.0)),
+      textDirection: ui.TextDirection.ltr,
+    )..layout();
+    painter.paint(canvas, offset);
+  }
+
+  @override
+  bool shouldRepaint(_LangIconPainter oldDelegate) =>
+      oldDelegate.active != active;
 }
 
 // 🆕 [Anyone] 이용방법 말풍선 꼬리 페인터
