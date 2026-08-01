@@ -76,25 +76,10 @@ Follow these rules:
 
 The result should sound like a native speaker speaking clearly to an English learner: natural within each phrase, with brief and recognizable pauses between meaning units.
 ''';
-const String _nativeMeaningUnitTtsInstructions = '''
-Speak in natural, everyday English using native-like thought groups.
+const String _p3ShadowingTtsInstructions = '''
+Read in natural conversational English. Keep a natural speaking pace of approximately 0.95x normal speed, but clearly separate meaningful chunks with brief, natural pauses. Use clear stress and rhythm so learners can easily shadow your speech. Avoid sounding slow or robotic.
 
-Follow these rules:
-
-1. Group words naturally according to meaning and sentence flow.
-2. Keep each thought group smoothly connected without sounding segmented.
-3. Use brief, subtle pauses only where a native speaker would naturally pause.
-4. Do not pause at every comma or punctuation mark.
-5. Let important words carry the stress, while function words remain lighter and naturally reduced.
-6. Use natural linking, contractions, rhythm, and intonation.
-7. Vary the pace slightly: move faster through predictable information and slow down briefly for important, contrasting, or new information.
-8. Do not over-enunciate every word.
-9. Do not sound like a teacher, newsreader, audiobook narrator, or pronunciation exercise.
-10. Maintain a relaxed, conversational pace used in real-life native speech.
-11. Preserve clarity, but prioritize natural flow over textbook-style pronunciation.
-12. Read only the supplied text without adding explanations or commentary.
-
-The result should sound like a native speaker talking naturally to another person, with meaning carried through rhythm, stress, linking, and subtle pauses.
+Prioritize a natural pace, clear thought groups, and useful stress and rhythm. Do not perform this as a slow-reading exercise. Read only the supplied sentence without adding explanations, labels, or commentary.
 ''';
 
 /// 📦 [Box 2: 위젯 클래스 선언부]
@@ -271,8 +256,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // P3 한 문장 의미단위 쉐도잉 상태.
   String? _selectedP3LearningVoice;
   String? _selectedP3NativeVoice;
-  double _p3LearningSpeed = 0.8;
-  double _p3NativeSpeed = 1.0;
   bool? _p3UsesNativeStyle;
   bool _p3ShadowLoading = false;
   bool _p3ShadowPlaying = false;
@@ -2906,42 +2889,22 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
   String _p3MeaningUnitCacheVoice(
     String voice, {
     required bool nativeStyle,
-    required double speed,
   }) =>
-      '${_historyPracticeTtsModel}_p3_${nativeStyle ? 'native' : 'learning'}_thought_groups_v2_${speed.toStringAsFixed(1)}x_$voice';
-
-  String _p3TtsInstructions({
-    required bool nativeStyle,
-    required double speed,
-  }) {
-    final base = nativeStyle
-        ? _nativeMeaningUnitTtsInstructions
-        : _meaningUnitTtsInstructions;
-    final pacing = speed < 1.0
-        ? '''
-Pacing requirement: Read at approximately 0.8 times normal conversational speed. Keep the rhythm smooth and natural; do not stretch individual sounds or add extra pauses beyond the thought-group pauses.
-'''
-        : '''
-Pacing requirement: Read at normal 1.0 conversational speed with a smooth, natural rhythm.
-''';
-    return '$base\n$pacing';
-  }
+      '${_historyPracticeTtsModel}_p3_${nativeStyle ? 'native' : 'learning'}_natural_chunks_095_v1_$voice';
 
   Future<Uint8List?> _getP3MeaningUnitTTS(
     String text,
     String voice, {
     required bool nativeStyle,
-    required double speed,
   }) {
     final requestKey =
-        '${nativeStyle ? 'native' : 'learning'}|$voice|${speed.toStringAsFixed(1)}|${text.trim()}';
+        '${nativeStyle ? 'native' : 'learning'}|$voice|natural_chunks_095|${text.trim()}';
     final existing = _p3MeaningUnitTtsInFlight[requestKey];
     if (existing != null) return existing;
     final future = () async {
       final cacheVoice = _p3MeaningUnitCacheVoice(
         voice,
         nativeStyle: nativeStyle,
-        speed: speed,
       );
       var audio = await TtsCache.get(text, cacheVoice);
       if (audio != null) return audio;
@@ -2950,10 +2913,9 @@ Pacing requirement: Read at normal 1.0 conversational speed with a smooth, natur
         1.0,
         voice,
         model: _historyPracticeTtsModel,
-        instructions:
-            _p3TtsInstructions(nativeStyle: nativeStyle, speed: speed),
+        instructions: _p3ShadowingTtsInstructions,
         instructionTag:
-            '${nativeStyle ? 'p3_native' : 'p3_learning'}_${speed.toStringAsFixed(1)}x',
+            '${nativeStyle ? 'p3_native' : 'p3_learning'}_natural_chunks_095',
       );
       if (audio != null) await TtsCache.put(text, cacheVoice, audio);
       return audio;
@@ -6351,7 +6313,6 @@ RULES — follow exactly:
   Future<void> _startP3MeaningUnitShadowing({
     required bool nativeStyle,
     required String voice,
-    required double speed,
   }) async {
     await _stopP3Shadowing();
     if (!mounted || _phase != ShadowingPhase.chunkPractice) return;
@@ -6378,7 +6339,6 @@ RULES — follow exactly:
       text,
       voice,
       nativeStyle: nativeStyle,
-      speed: speed,
     );
     if (!mounted ||
         generation != _p3ShadowGeneration ||
@@ -6454,11 +6414,9 @@ RULES — follow exactly:
     final voice =
         nativeStyle ? _selectedP3NativeVoice : _selectedP3LearningVoice;
     if (voice == null) return;
-    final speed = nativeStyle ? _p3NativeSpeed : _p3LearningSpeed;
     unawaited(_startP3MeaningUnitShadowing(
       nativeStyle: nativeStyle,
       voice: voice,
-      speed: speed,
     ));
   }
 
@@ -6483,9 +6441,7 @@ RULES — follow exactly:
     required String label,
     required List<String> options,
     required String? voice,
-    required double speed,
     required ValueChanged<String> onVoiceSelected,
-    required ValueChanged<double> onSpeedSelected,
   }) {
     Widget menuBox({required Widget child}) => Container(
           height: 42,
@@ -6511,76 +6467,52 @@ RULES — follow exactly:
           width: voice == null ? 1.7 : 1.2,
         ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Text(
-            label,
-            style: TextStyle(
-              color: voice == null ? _p3ShadowingAccentColor : Colors.white60,
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
+          Expanded(
+            flex: 5,
+            child: Text(
+              label,
+              maxLines: 2,
+              style: TextStyle(
+                color: voice == null ? _p3ShadowingAccentColor : Colors.white60,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: menuBox(
-                  child: DropdownButton<String>(
-                    value: voice,
-                    hint: const Text('목소리',
-                        style: TextStyle(
-                            color: _p3ShadowingAccentColor,
-                            fontWeight: FontWeight.bold)),
-                    isExpanded: true,
-                    dropdownColor: const Color(0xFF232323),
-                    icon: const Icon(Icons.keyboard_arrow_down_rounded,
-                        color: _p3ShadowingAccentColor, size: 18),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    items: options
-                        .map((option) => DropdownMenuItem<String>(
-                              value: option,
-                              child: Text(
-                                  '${option[0].toUpperCase()}${option.substring(1)}'),
-                            ))
-                        .toList(),
-                    onChanged: (selected) {
-                      if (selected != null) onVoiceSelected(selected);
-                    },
-                  ),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 4,
+            child: menuBox(
+              child: DropdownButton<String>(
+                value: voice,
+                hint: const Text('목소리 선택',
+                    maxLines: 1,
+                    style: TextStyle(
+                        color: _p3ShadowingAccentColor,
+                        fontWeight: FontWeight.bold)),
+                isExpanded: true,
+                dropdownColor: const Color(0xFF232323),
+                icon: const Icon(Icons.keyboard_arrow_down_rounded,
+                    color: _p3ShadowingAccentColor, size: 18),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
                 ),
+                items: options
+                    .map((option) => DropdownMenuItem<String>(
+                          value: option,
+                          child: Text(
+                              '${option[0].toUpperCase()}${option.substring(1)}'),
+                        ))
+                    .toList(),
+                onChanged: (selected) {
+                  if (selected != null) onVoiceSelected(selected);
+                },
               ),
-              const SizedBox(width: 10),
-              SizedBox(
-                width: 128,
-                child: menuBox(
-                  child: DropdownButton<double>(
-                    value: speed,
-                    isExpanded: true,
-                    dropdownColor: const Color(0xFF232323),
-                    icon: const Icon(Icons.keyboard_arrow_down_rounded,
-                        color: _p3ShadowingAccentColor, size: 18),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    items: const [
-                      DropdownMenuItem(value: 0.8, child: Text('속도 0.8')),
-                      DropdownMenuItem(value: 1.0, child: Text('속도 1')),
-                    ],
-                    onChanged: (selected) {
-                      if (selected != null) onSpeedSelected(selected);
-                    },
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
         ],
       ),
@@ -6737,7 +6669,6 @@ RULES — follow exactly:
         nativeStyle ? _polishedSentence.trim() : _expandedSentence.trim();
     final voice =
         nativeStyle ? _selectedP3NativeVoice : _selectedP3LearningVoice;
-    final speed = nativeStyle ? _p3NativeSpeed : _p3LearningSpeed;
     final busy = _p3ShadowLoading || _p3ShadowPlaying;
     final focusedReading = _p3ShadowLoading || _p3ShadowPlaying;
     return Column(
@@ -6800,7 +6731,6 @@ RULES — follow exactly:
                   ? _nativeMeaningUnitVoiceOptions
                   : _p3LearningVoiceOptions,
               voice: voice,
-              speed: speed,
               onVoiceSelected: (selectedVoice) {
                 setState(() {
                   if (nativeStyle) {
@@ -6812,24 +6742,7 @@ RULES — follow exactly:
                 unawaited(_startP3MeaningUnitShadowing(
                   nativeStyle: nativeStyle,
                   voice: selectedVoice,
-                  speed: speed,
                 ));
-              },
-              onSpeedSelected: (selectedSpeed) {
-                setState(() {
-                  if (nativeStyle) {
-                    _p3NativeSpeed = selectedSpeed;
-                  } else {
-                    _p3LearningSpeed = selectedSpeed;
-                  }
-                });
-                if (voice != null) {
-                  unawaited(_startP3MeaningUnitShadowing(
-                    nativeStyle: nativeStyle,
-                    voice: voice,
-                    speed: selectedSpeed,
-                  ));
-                }
               },
             ),
           ),
@@ -8076,8 +7989,6 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
         _selectedVariant = SentenceVariant.expanded;
         _selectedP3LearningVoice = null;
         _selectedP3NativeVoice = null;
-        _p3LearningSpeed = 0.8;
-        _p3NativeSpeed = 1.0;
         _p3UsesNativeStyle = null;
         _p3ShadowComplete = false;
       });
