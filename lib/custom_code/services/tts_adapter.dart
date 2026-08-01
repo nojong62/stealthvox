@@ -577,9 +577,8 @@ class TtsAdapter {
   Future<void> _runPrefetch(TtsPrefetch handle) async {
     final request = handle.request;
     final apiKey = apiKeyProvider();
-    final voice = request.speakerType == TtsSpeakerType.ai
-        ? TtsAdapterConfig.aiVoice
-        : TtsAdapterConfig.mapVoice(request.voiceId);
+    // 실시간 AI 음성은 Anyone 메뉴에서 선택한 보이스를 그대로 사용한다.
+    final voice = TtsAdapterConfig.mapVoice(request.voiceId);
     final sw = Stopwatch()..start();
     int totalBytes = 0;
     int? firstByteMs;
@@ -787,9 +786,8 @@ class TtsAdapter {
       return;
     }
 
-    final voice = request.speakerType == TtsSpeakerType.ai
-        ? TtsAdapterConfig.aiVoice
-        : TtsAdapterConfig.mapVoice(request.voiceId);
+    // 프리패치와 실제 재생이 반드시 같은 선택 보이스를 사용해야 한다.
+    final voice = TtsAdapterConfig.mapVoice(request.voiceId);
     final playbackVolume = TtsAdapterConfig.volumeFor(request.speakerType);
     if (voice != request.voiceId.trim().toLowerCase()) {
       _log('🔊 [TTS-VOICE]', 'unsupported voiceId=${request.voiceId} → $voice');

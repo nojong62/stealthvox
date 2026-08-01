@@ -1097,6 +1097,59 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         .trim();
   }
 
+  /// 모델이 시스템 프롬프트를 어겨 되묻기를 붙이더라도 번역, TTS, 저장 전에
+  /// 제거한다. 캐릭터 확정 전에는 질문 자체를 허용하지 않는다.
+  String _guardAnyoneAiReply(
+    String text, {
+    required bool allowQuestion,
+  }) {
+    final original = text.trim();
+    if (original.isEmpty) return original;
+
+    String guarded = original
+        .replaceAll(
+          RegExp(
+            r'(?:그럼|그러면|근데|그런데)?\s*(?:너는|넌|당신은|그쪽은|사용자님은)\s*(?:어때(?:요)?|어떠세요|어떻게\s*생각해(?:요|세요)?|어떻게요)?\s*[?？]+',
+            caseSensitive: false,
+          ),
+          '',
+        )
+        .replaceAll(
+          RegExp(
+            r'(?:and\s+)?(?:what|how)\s+about\s+you\s*[?？]+',
+            caseSensitive: false,
+          ),
+          '',
+        );
+
+    if (!allowQuestion) {
+      final sentencePattern = RegExp(r'[^.!?。！？\n]+[.!?。！？]?|\n');
+      guarded = sentencePattern
+          .allMatches(guarded)
+          .map((match) => match.group(0) ?? '')
+          .where((sentence) {
+            final trimmed = sentence.trimRight();
+            return !trimmed.endsWith('?') && !trimmed.endsWith('？');
+          })
+          .join(' ');
+    }
+
+    guarded = guarded
+        .replaceAll(RegExp(r'\s+([.!?。！？])'), r'$1')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (guarded.isEmpty) {
+      guarded = '아직은 정확히 기억나지 않아요.';
+    }
+    if (guarded != original) {
+      _log(
+        '🛡️ [AI-REPLY-GUARD]',
+        'question_removed=true allow_question=$allowQuestion',
+      );
+    }
+    return guarded;
+  }
+
   void _stopEverything() {
     _pipelineGeneration++;
     _isConversationActive = false;
@@ -1513,14 +1566,14 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       if (accurateTranscript == null || accurateTranscript.isEmpty) {
         _cancelSpeculativeTranslation();
         if (isFirstTurn) {
-          _log('❌ [FIRST-TURN-STT]',
-              'gpt-4o-transcribe 실패 → Deepgram 텍스트 미사용, 재청취');
-          if (mounted) {
-            setState(() => _localMessages
-                .removeWhere((message) => message['role'] == 'HOST_TEMP'));
-          }
-          await _speakRetryAndListen();
-          return;
+          // Deepgram이 이미 정상 문장을 확정했다면 보조 전사 실패만으로 첫
+          // 발화를 버리지 않는다. 기존 로직은 여기서 마이크까지 닫아 사용자가
+          // 다시 말하는 동안 입력이 사라지는 연쇄 실패를 만들었다.
+          _log(
+            '⚠️ [FIRST-TURN-STT]',
+            'gpt-4o-transcribe failed fallback=nova3 '
+                'deepgramLen=${committed.length}',
+          );
         }
         // 이후 턴은 정확 전사가 실패해도 이미 확정된 Deepgram 문장을 보존한다.
         _log(
@@ -2379,6 +2432,11 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
             _turnCounter != currentTurnId) {
           return;
         }
+
+        aiOriginalText = _guardAnyoneAiReply(
+          aiOriginalText,
+          allowQuestion: allowAiQuestion,
+        );
 
         if (aiOriginalText.trim().isNotEmpty) {
           aiTargetFuture = FreeTalkBrain.translateKoreanToTarget(
@@ -3363,8 +3421,10 @@ final RegExp kTtsDelimiterPattern = RegExp(r'[,\.?!;:。、！？…，；：\n]
 
 /// 마이크 입력 의도가 발생한 직후 시작하는 로컬 PCM 캡처.
 ///
-/// Deepgram 키/소켓 준비와 독립적으로 먼저 녹음하고, 단일 구독 컨트롤러가
-/// 서버 전송 소비자가 붙을 때까지 초기 PCM 프레임을 보관한다.
+/// Deepgram 키/소켓 준비와 독립적으로 먼저 녹음한다. 보이스를 선택하기 전에
+/// 들어온 PCM은 보관하지 않고 폐기하며, 서버 전송 소비자가 붙은 뒤 들어오는
+/// 새 PCM만 전달한다. 오래된 무음이 실시간 발화보다 먼저 전송되면 입력이 그
+/// 시간만큼 밀리기 때문이다.
 class AnyonePreparedAudioCapture {
   AnyonePreparedAudioCapture._({
     required this.recorder,
@@ -3394,7 +3454,9 @@ class AnyonePreparedAudioCapture {
     );
     onRecordingStarted(DateTime.now());
 
-    final controller = StreamController<Uint8List>();
+    // broadcast controller는 listener가 없을 때 이벤트를 버린다. 따라서 보이스
+    // 선택 전 녹음은 누적되지 않고, 선택 직후 붙는 listener부터 실시간 전달된다.
+    final controller = StreamController<Uint8List>.broadcast(sync: true);
     bool firstFrameSeen = false;
     late final StreamSubscription<Uint8List> sourceSubscription;
     sourceSubscription = source.listen(
@@ -5575,6 +5637,7 @@ $memoryBlock
 $questionRule
 - Even when questions are allowed, first answer the user completely. A follow-up question must never replace the answer.
 - A question must relate to an already confirmed relationship or fact. Never use it to discover who you are.
+- When questions are not allowed, the final reply must contain ZERO questions and ZERO question marks.
 - The only exception for unclear audio is a plain retry request such as "잘 못 들었어. 다시 말해 줘." Do not guess the content.
 
 [SPEAK AS THAT PERSON]
@@ -5586,7 +5649,9 @@ $questionRule
 - Speak the way people actually speak: usually ONE short sentence, two only when truly needed.
 - The user leads this conversation. Do not steer it, do not propose topics, do not keep it going for its own sake.
 - No greetings, no "I understand", no prefixes. Just speak as that person.
-- Match the relationship's established polite or casual register while preserving the selected character impression.$rejectedBlock""";
+- Until the relationship and its speech register are clearly established, default to natural Korean 해요체 (-요), not stiff formal 합쇼체 (-습니다/-습니까).
+- Switch to casual Korean only after the user's wording and the confirmed relationship clearly support it. A single casual sentence on the first turn is not enough.
+- Once the register is clearly established, match it while preserving the selected character impression.$rejectedBlock""";
 
       final request = http.Request(
         'POST',
@@ -5599,7 +5664,7 @@ $questionRule
       request.body = jsonEncode({
         'model': 'gpt-4o-mini',
         'stream': true,
-        'temperature': 0.5,
+        'temperature': 0.3,
         'max_tokens': kFreeTalkAiResponseMaxTokens,
         'messages': [
           {'role': 'system', 'content': sysPrompt},
