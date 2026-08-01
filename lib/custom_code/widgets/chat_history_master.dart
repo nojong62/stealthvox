@@ -271,6 +271,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // P3 한 문장 의미단위 쉐도잉 상태.
   String? _selectedP3LearningVoice;
   String? _selectedP3NativeVoice;
+  double _p3LearningSpeed = 0.8;
+  double _p3NativeSpeed = 1.0;
   bool? _p3UsesNativeStyle;
   bool _p3ShadowLoading = false;
   bool _p3ShadowPlaying = false;
@@ -279,6 +281,10 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   int _p3ShadowGeneration = 0;
   AudioPlayer? _p3ShadowPlayer;
   String? _p3ShadowRecordPath;
+  final ScrollController _p3SentenceScrollController = ScrollController();
+  StreamSubscription<Duration>? _p3ShadowPositionSub;
+  StreamSubscription<Duration>? _p3ShadowDurationSub;
+  Duration _p3ShadowAudioDuration = Duration.zero;
 
   // 🆕 [CHUNK-PRACTICE] 의미단위 연습 모드 상태
   bool _practicingPolished = false; // false = expanded, true = polished
@@ -463,6 +469,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _stopP2Countdown();
     _chunkScrollController.dispose();
     _practiceScrollController.dispose();
+    _p3ShadowPositionSub?.cancel();
+    _p3ShadowDurationSub?.cancel();
+    _p3SentenceScrollController.dispose();
     _playerStateSub?.cancel();
     _playerCompleteSub?.cancel();
     _dgSubscription?.cancel();
@@ -2894,21 +2903,46 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     return future;
   }
 
-  String _p3MeaningUnitCacheVoice(String voice, {required bool nativeStyle}) =>
-      '${_historyPracticeTtsModel}_p3_${nativeStyle ? 'native' : 'learning'}_thought_groups_v1_$voice';
+  String _p3MeaningUnitCacheVoice(
+    String voice, {
+    required bool nativeStyle,
+    required double speed,
+  }) =>
+      '${_historyPracticeTtsModel}_p3_${nativeStyle ? 'native' : 'learning'}_thought_groups_v2_${speed.toStringAsFixed(1)}x_$voice';
+
+  String _p3TtsInstructions({
+    required bool nativeStyle,
+    required double speed,
+  }) {
+    final base = nativeStyle
+        ? _nativeMeaningUnitTtsInstructions
+        : _meaningUnitTtsInstructions;
+    final pacing = speed < 1.0
+        ? '''
+Pacing requirement: Read at approximately 0.8 times normal conversational speed. Keep the rhythm smooth and natural; do not stretch individual sounds or add extra pauses beyond the thought-group pauses.
+'''
+        : '''
+Pacing requirement: Read at normal 1.0 conversational speed with a smooth, natural rhythm.
+''';
+    return '$base\n$pacing';
+  }
 
   Future<Uint8List?> _getP3MeaningUnitTTS(
     String text,
     String voice, {
     required bool nativeStyle,
+    required double speed,
   }) {
     final requestKey =
-        '${nativeStyle ? 'native' : 'learning'}|$voice|${text.trim()}';
+        '${nativeStyle ? 'native' : 'learning'}|$voice|${speed.toStringAsFixed(1)}|${text.trim()}';
     final existing = _p3MeaningUnitTtsInFlight[requestKey];
     if (existing != null) return existing;
     final future = () async {
-      final cacheVoice =
-          _p3MeaningUnitCacheVoice(voice, nativeStyle: nativeStyle);
+      final cacheVoice = _p3MeaningUnitCacheVoice(
+        voice,
+        nativeStyle: nativeStyle,
+        speed: speed,
+      );
       var audio = await TtsCache.get(text, cacheVoice);
       if (audio != null) return audio;
       audio = await _fetchOpenAITTS(
@@ -2916,10 +2950,10 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
         1.0,
         voice,
         model: _historyPracticeTtsModel,
-        instructions: nativeStyle
-            ? _nativeMeaningUnitTtsInstructions
-            : _meaningUnitTtsInstructions,
-        instructionTag: nativeStyle ? 'p3_native' : 'p3_learning',
+        instructions:
+            _p3TtsInstructions(nativeStyle: nativeStyle, speed: speed),
+        instructionTag:
+            '${nativeStyle ? 'p3_native' : 'p3_learning'}_${speed.toStringAsFixed(1)}x',
       );
       if (audio != null) await TtsCache.put(text, cacheVoice, audio);
       return audio;
@@ -6251,6 +6285,11 @@ RULES — follow exactly:
 
   Future<void> _stopP3Shadowing({bool resetSelection = false}) async {
     _p3ShadowGeneration++;
+    await _p3ShadowPositionSub?.cancel();
+    await _p3ShadowDurationSub?.cancel();
+    _p3ShadowPositionSub = null;
+    _p3ShadowDurationSub = null;
+    _p3ShadowAudioDuration = Duration.zero;
     final player = _p3ShadowPlayer;
     _p3ShadowPlayer = null;
     if (player != null) {
@@ -6312,6 +6351,7 @@ RULES — follow exactly:
   Future<void> _startP3MeaningUnitShadowing({
     required bool nativeStyle,
     required String voice,
+    required double speed,
   }) async {
     await _stopP3Shadowing();
     if (!mounted || _phase != ShadowingPhase.chunkPractice) return;
@@ -6328,11 +6368,17 @@ RULES — follow exactly:
       _p3ShadowComplete = false;
       _p3ShadowRecordPath = null;
     });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_p3SentenceScrollController.hasClients) {
+        _p3SentenceScrollController.jumpTo(0);
+      }
+    });
 
     final audio = await _getP3MeaningUnitTTS(
       text,
       voice,
       nativeStyle: nativeStyle,
+      speed: speed,
     );
     if (!mounted ||
         generation != _p3ShadowGeneration ||
@@ -6347,6 +6393,24 @@ RULES — follow exactly:
 
     final player = AudioPlayer();
     _p3ShadowPlayer = player;
+    _p3ShadowDurationSub = player.onDurationChanged.listen((duration) {
+      _p3ShadowAudioDuration = duration;
+    });
+    _p3ShadowPositionSub = player.onPositionChanged.listen((position) {
+      final durationMs = _p3ShadowAudioDuration.inMilliseconds;
+      if (durationMs <= 0 || !_p3SentenceScrollController.hasClients) return;
+      final maxExtent = _p3SentenceScrollController.position.maxScrollExtent;
+      if (maxExtent <= 0) return;
+      final progress = position.inMilliseconds / durationMs;
+      final scrollProgress = ((progress - 0.08) / 0.84).clamp(0.0, 1.0);
+      final target = maxExtent * scrollProgress;
+      if ((target - _p3SentenceScrollController.offset).abs() < 4) return;
+      _p3SentenceScrollController.animateTo(
+        target,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.linear,
+      );
+    });
 
     final playbackComplete = player.onPlayerComplete.first;
     await _startP3ShadowRecording(generation);
@@ -6371,6 +6435,10 @@ RULES — follow exactly:
       } catch (_) {}
     }
     if (identical(_p3ShadowPlayer, player)) _p3ShadowPlayer = null;
+    await _p3ShadowPositionSub?.cancel();
+    await _p3ShadowDurationSub?.cancel();
+    _p3ShadowPositionSub = null;
+    _p3ShadowDurationSub = null;
     await player.dispose();
     if (mounted && generation == _p3ShadowGeneration) {
       setState(() {
@@ -6386,9 +6454,11 @@ RULES — follow exactly:
     final voice =
         nativeStyle ? _selectedP3NativeVoice : _selectedP3LearningVoice;
     if (voice == null) return;
+    final speed = nativeStyle ? _p3NativeSpeed : _p3LearningSpeed;
     unawaited(_startP3MeaningUnitShadowing(
       nativeStyle: nativeStyle,
       voice: voice,
+      speed: speed,
     ));
   }
 
@@ -6409,103 +6479,111 @@ RULES — follow exactly:
 
   Widget _buildChunkPracticeScreen() => _buildP3MeaningUnitShadowingScreen();
 
-  Widget _buildP3VoiceSelector({
+  Widget _buildP3PracticeControls({
     required String label,
     required List<String> options,
-    required String? value,
-    required Color color,
-    required ValueChanged<String> onSelected,
+    required String? voice,
+    required double speed,
+    required ValueChanged<String> onVoiceSelected,
+    required ValueChanged<double> onSpeedSelected,
   }) {
-    final needsSelection = value == null;
-    final content = Container(
-      padding: const EdgeInsets.all(10),
+    Widget menuBox({required Widget child}) => Container(
+          height: 42,
+          padding: const EdgeInsets.only(left: 12, right: 8),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.28),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+                color: _p3ShadowingAccentColor.withValues(alpha: 0.65)),
+          ),
+          child: DropdownButtonHideUnderline(child: child),
+        );
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: needsSelection ? 0.11 : 0.06),
+        color: _p3ShadowingAccentColor.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: needsSelection ? color : color.withValues(alpha: 0.45),
-          width: needsSelection ? 1.7 : 1.2,
+          color: voice == null
+              ? _p3ShadowingAccentColor
+              : _p3ShadowingAccentColor.withValues(alpha: 0.45),
+          width: voice == null ? 1.7 : 1.2,
         ),
-        boxShadow: needsSelection
-            ? [
-                BoxShadow(
-                  color: color.withValues(alpha: 0.35),
-                  blurRadius: 14,
-                  spreadRadius: 1,
-                ),
-              ]
-            : null,
       ),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             label,
-            textAlign: TextAlign.center,
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              color: needsSelection ? color : Colors.white60,
-              fontSize: 10.5,
-              height: 1.25,
-              fontWeight: needsSelection ? FontWeight.bold : FontWeight.w600,
+              color: voice == null ? _p3ShadowingAccentColor : Colors.white60,
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
             ),
           ),
           const SizedBox(height: 8),
-          Container(
-            height: 36,
-            padding: const EdgeInsets.only(left: 12, right: 8),
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.28),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: color.withValues(alpha: 0.65)),
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                value: value,
-                hint: Text(
-                  '선택',
-                  style: TextStyle(
-                    color: color,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
+          Row(
+            children: [
+              Expanded(
+                child: menuBox(
+                  child: DropdownButton<String>(
+                    value: voice,
+                    hint: const Text('목소리',
+                        style: TextStyle(
+                            color: _p3ShadowingAccentColor,
+                            fontWeight: FontWeight.bold)),
+                    isExpanded: true,
+                    dropdownColor: const Color(0xFF232323),
+                    icon: const Icon(Icons.keyboard_arrow_down_rounded,
+                        color: _p3ShadowingAccentColor, size: 18),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    items: options
+                        .map((option) => DropdownMenuItem<String>(
+                              value: option,
+                              child: Text(
+                                  '${option[0].toUpperCase()}${option.substring(1)}'),
+                            ))
+                        .toList(),
+                    onChanged: (selected) {
+                      if (selected != null) onVoiceSelected(selected);
+                    },
                   ),
                 ),
-                isExpanded: true,
-                dropdownColor: const Color(0xFF232323),
-                icon: Icon(Icons.keyboard_arrow_down_rounded,
-                    color: color, size: 18),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-                items: options
-                    .map(
-                      (voice) => DropdownMenuItem<String>(
-                        value: voice,
-                        child: Text(
-                            '${voice[0].toUpperCase()}${voice.substring(1)}'),
-                      ),
-                    )
-                    .toList(),
-                onChanged: (voice) {
-                  if (voice != null) onSelected(voice);
-                },
               ),
-            ),
+              const SizedBox(width: 10),
+              SizedBox(
+                width: 104,
+                child: menuBox(
+                  child: DropdownButton<double>(
+                    value: speed,
+                    isExpanded: true,
+                    dropdownColor: const Color(0xFF232323),
+                    icon: const Icon(Icons.keyboard_arrow_down_rounded,
+                        color: _p3ShadowingAccentColor, size: 18),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 0.8, child: Text('속도 0.8')),
+                      DropdownMenuItem(value: 1.0, child: Text('속도 1')),
+                    ],
+                    onChanged: (selected) {
+                      if (selected != null) onSpeedSelected(selected);
+                    },
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
-    );
-    if (!needsSelection) return content;
-    return AnimatedBuilder(
-      animation: _blinkController,
-      builder: (_, child) => Opacity(
-        opacity: 0.35 + (_blinkOpacity.value * 0.65),
-        child: child,
-      ),
-      child: content,
     );
   }
 
@@ -6526,6 +6604,7 @@ RULES — follow exactly:
     required String label,
     required String sentence,
     required bool active,
+    required ScrollController scrollController,
     String emptyMessage = '문장이 준비되지 않았습니다.',
   }) {
     return AnimatedContainer(
@@ -6552,23 +6631,110 @@ RULES — follow exactly:
             ),
           ),
           const SizedBox(height: 10),
-          sentence.isEmpty
-              ? Text(
-                  emptyMessage,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white38),
-                )
-              : _buildP3SentenceText(sentence),
+          Expanded(
+            child: sentence.isEmpty
+                ? Center(
+                    child: Text(
+                      emptyMessage,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.white38),
+                    ),
+                  )
+                : LayoutBuilder(
+                    builder: (context, constraints) => Scrollbar(
+                      controller: scrollController,
+                      thumbVisibility: true,
+                      child: SingleChildScrollView(
+                        controller: scrollController,
+                        padding: const EdgeInsets.fromLTRB(2, 4, 8, 28),
+                        child: ConstrainedBox(
+                          constraints:
+                              BoxConstraints(minHeight: constraints.maxHeight),
+                          child: Align(
+                            alignment: Alignment.topCenter,
+                            child: _buildP3SentenceText(sentence),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _selectP3Variant(SentenceVariant variant) async {
+    if (_selectedVariant == variant) return;
+    await _stopP3Shadowing();
+    if (!mounted) return;
+    setState(() {
+      _selectedVariant = variant;
+      _p3UsesNativeStyle = null;
+      _p3ShadowComplete = false;
+      _p3ShadowRecordPath = null;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_p3SentenceScrollController.hasClients) {
+        _p3SentenceScrollController.jumpTo(0);
+      }
+    });
+  }
+
+  Widget _buildP3VariantSelector() {
+    Widget option(String label, SentenceVariant variant) {
+      final selected = _selectedVariant == variant;
+      return Expanded(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(11),
+          onTap: () => unawaited(_selectP3Variant(variant)),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            height: 42,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: selected
+                  ? _p3ShadowingAccentColor
+                  : Colors.white.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(11),
+            ),
+            child: Text(
+              label,
+              style: TextStyle(
+                color: selected ? Colors.white : Colors.white54,
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1C1C1E),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Row(
+        children: [
+          option('완성 문장', SentenceVariant.expanded),
+          const SizedBox(width: 4),
+          option('정제 문장', SentenceVariant.polished),
         ],
       ),
     );
   }
 
   Widget _buildP3MeaningUnitShadowingScreen() {
-    final activeNative = _p3UsesNativeStyle == true;
-    final activeLearning = _p3UsesNativeStyle == false;
-    final expandedSentence = _expandedSentence.trim();
-    final polishedSentence = _polishedSentence.trim();
+    final nativeStyle = _selectedVariant == SentenceVariant.polished;
+    final sentence =
+        nativeStyle ? _polishedSentence.trim() : _expandedSentence.trim();
+    final voice =
+        nativeStyle ? _selectedP3NativeVoice : _selectedP3LearningVoice;
+    final speed = nativeStyle ? _p3NativeSpeed : _p3LearningSpeed;
     final busy = _p3ShadowLoading || _p3ShadowPlaying;
     return Column(
       children: [
@@ -6618,144 +6784,142 @@ RULES — follow exactly:
         if (_isStepExpandRoom) _buildPracticeTabBar(),
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: _buildP3VoiceSelector(
-                  label: '원어민식 쉐도잉',
-                  options: _nativeMeaningUnitVoiceOptions,
-                  value: _selectedP3NativeVoice,
-                  color: _p3ShadowingAccentColor,
-                  onSelected: (voice) {
-                    setState(() => _selectedP3NativeVoice = voice);
-                    unawaited(_startP3MeaningUnitShadowing(
-                      nativeStyle: true,
-                      voice: voice,
-                    ));
-                  },
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _buildP3VoiceSelector(
-                  label: '학습용 쉐도잉',
-                  options: _p3LearningVoiceOptions,
-                  value: _selectedP3LearningVoice,
-                  color: _p3ShadowingAccentColor,
-                  onSelected: (voice) {
-                    setState(() => _selectedP3LearningVoice = voice);
-                    unawaited(_startP3MeaningUnitShadowing(
-                      nativeStyle: false,
-                      voice: voice,
-                    ));
-                  },
-                ),
-              ),
-            ],
+          child: _buildP3VariantSelector(),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+          child: _buildP3PracticeControls(
+            label: nativeStyle ? '원어민식 쉐도잉' : '학습용 쉐도잉',
+            options: nativeStyle
+                ? _nativeMeaningUnitVoiceOptions
+                : _p3LearningVoiceOptions,
+            voice: voice,
+            speed: speed,
+            onVoiceSelected: (selectedVoice) {
+              setState(() {
+                if (nativeStyle) {
+                  _selectedP3NativeVoice = selectedVoice;
+                } else {
+                  _selectedP3LearningVoice = selectedVoice;
+                }
+              });
+              unawaited(_startP3MeaningUnitShadowing(
+                nativeStyle: nativeStyle,
+                voice: selectedVoice,
+                speed: speed,
+              ));
+            },
+            onSpeedSelected: (selectedSpeed) {
+              setState(() {
+                if (nativeStyle) {
+                  _p3NativeSpeed = selectedSpeed;
+                } else {
+                  _p3LearningSpeed = selectedSpeed;
+                }
+              });
+              if (voice != null) {
+                unawaited(_startP3MeaningUnitShadowing(
+                  nativeStyle: nativeStyle,
+                  voice: voice,
+                  speed: selectedSpeed,
+                ));
+              }
+            },
           ),
         ),
         Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(18, 12, 18, 24),
-            child: Column(
-              children: [
-                _buildP3FullSentenceCard(
-                  label: 'Expanded Sentence · 학습용',
-                  sentence: expandedSentence,
-                  active: activeLearning,
-                  emptyMessage: '완성된 확장 문장이 없습니다.',
-                ),
-                const SizedBox(height: 12),
-                _buildP3FullSentenceCard(
-                  label: 'Polished Sentence · 원어민식',
-                  sentence: polishedSentence,
-                  active: activeNative,
-                  emptyMessage: _isPreparingStepP3
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 4, 18, 8),
+            child: _buildP3FullSentenceCard(
+              label: nativeStyle ? 'Polished Sentence' : 'Expanded Sentence',
+              sentence: sentence,
+              active: _p3UsesNativeStyle == nativeStyle,
+              scrollController: _p3SentenceScrollController,
+              emptyMessage: nativeStyle
+                  ? (_isPreparingStepP3
                       ? 'Polished Sentence 준비 중...'
-                      : 'Polished Sentence가 없습니다.',
-                ),
-                const SizedBox(height: 18),
-                if (_p3UsesNativeStyle == null)
-                  const Text(
-                    '왼쪽 또는 오른쪽에서 Voice를 선택하면 시작합니다.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.white54, fontSize: 13),
-                  )
-                else if (_p3ShadowLoading)
-                  const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: _p3ShadowingAccentColor),
-                      ),
-                      SizedBox(width: 9),
-                      Text('의미단위 음성 준비 중...',
-                          style: TextStyle(color: Colors.white60)),
-                    ],
-                  )
-                else if (_p3ShadowPlaying)
-                  const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.graphic_eq,
-                          color: Colors.greenAccent, size: 20),
-                      SizedBox(width: 8),
-                      Text('음성을 들으며 동시에 따라 읽으세요',
-                          style: TextStyle(color: Colors.greenAccent)),
-                    ],
-                  )
-                else if (_p3ShadowComplete)
-                  const Text('쉐도잉 완료',
-                      style: TextStyle(
-                          color: Colors.greenAccent,
-                          fontWeight: FontWeight.bold)),
-                const SizedBox(height: 18),
-                if (_p3UsesNativeStyle != null)
-                  Row(
-                    children: [
-                      Expanded(
-                        child: SizedBox(
-                          height: 48,
-                          child: ElevatedButton.icon(
-                            onPressed: busy ? null : _replaySelectedP3Shadowing,
-                            icon: Icon(busy
-                                ? Icons.hourglass_top_rounded
-                                : Icons.replay_rounded),
-                            label: Text(busy ? '진행 중' : '다시 쉐도잉'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF4F46E5),
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14)),
-                            ),
-                          ),
-                        ),
-                      ),
-                      if (_p3ShadowComplete && _p3ShadowRecordPath != null) ...[
-                        const SizedBox(width: 10),
-                        SizedBox(
-                          height: 48,
-                          child: OutlinedButton.icon(
-                            onPressed: _playP3ShadowRecording,
-                            icon: const Icon(Icons.hearing_rounded),
-                            label: const Text('내 음성'),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.white70,
-                              side: const BorderSide(color: Colors.white24),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14)),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-              ],
+                      : 'Polished Sentence가 없습니다.')
+                  : '완성된 확장 문장이 없습니다.',
             ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(18, 2, 18, 12),
+          child: Column(
+            children: [
+              if (_p3ShadowLoading)
+                const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: _p3ShadowingAccentColor),
+                    ),
+                    SizedBox(width: 9),
+                    Text('의미단위 음성 준비 중...',
+                        style: TextStyle(color: Colors.white60)),
+                  ],
+                )
+              else if (_p3ShadowPlaying)
+                const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.graphic_eq, color: Colors.greenAccent, size: 20),
+                    SizedBox(width: 8),
+                    Text('음성을 들으며 동시에 따라 읽으세요',
+                        style: TextStyle(color: Colors.greenAccent)),
+                  ],
+                )
+              else if (_p3ShadowComplete)
+                const Text('쉐도잉 완료',
+                    style: TextStyle(
+                        color: Colors.greenAccent,
+                        fontWeight: FontWeight.bold)),
+              if (_p3UsesNativeStyle != null) ...[
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: SizedBox(
+                        height: 46,
+                        child: ElevatedButton.icon(
+                          onPressed: busy ? null : _replaySelectedP3Shadowing,
+                          icon: Icon(busy
+                              ? Icons.hourglass_top_rounded
+                              : Icons.replay_rounded),
+                          label: Text(busy ? '진행 중' : '다시 쉐도잉'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF4F46E5),
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14)),
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (_p3ShadowComplete && _p3ShadowRecordPath != null) ...[
+                      const SizedBox(width: 10),
+                      SizedBox(
+                        height: 46,
+                        child: OutlinedButton.icon(
+                          onPressed: _playP3ShadowRecording,
+                          icon: const Icon(Icons.hearing_rounded),
+                          label: const Text('내 음성'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.white70,
+                            side: const BorderSide(color: Colors.white24),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14)),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ],
           ),
         ),
       ],
@@ -7903,8 +8067,11 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
         _phase = ShadowingPhase.chunkPractice;
         _showShadowingOverlay = false;
         _showEchoingOverlay = false;
+        _selectedVariant = SentenceVariant.expanded;
         _selectedP3LearningVoice = null;
         _selectedP3NativeVoice = null;
+        _p3LearningSpeed = 0.8;
+        _p3NativeSpeed = 1.0;
         _p3UsesNativeStyle = null;
         _p3ShadowComplete = false;
       });

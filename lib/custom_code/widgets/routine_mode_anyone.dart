@@ -3035,51 +3035,55 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
                     ),
                 ]),
                 const SizedBox(height: 14),
-                DropdownButtonFormField<String>(
-                  initialValue: _selectedAiVoice,
-                  isExpanded: true,
-                  dropdownColor: const Color(0xFF303036),
-                  iconEnabledColor: const Color(0xFFB9B4FF),
-                  hint: const Text('목소리를 선택하세요',
-                      style: TextStyle(color: Colors.white54)),
-                  decoration: InputDecoration(
-                    filled: true,
-                    fillColor: Colors.white.withValues(alpha: 0.06),
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 13),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: BorderSide(
-                          color: Colors.white.withValues(alpha: 0.16)),
+                SizedBox(
+                  height: 64,
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _selectedAiVoice,
+                    isExpanded: true,
+                    itemHeight: 64,
+                    dropdownColor: const Color(0xFF303036),
+                    iconEnabledColor: const Color(0xFFB9B4FF),
+                    hint: const Text('목소리 선택',
+                        style: TextStyle(color: Colors.white54)),
+                    decoration: InputDecoration(
+                      filled: true,
+                      fillColor: Colors.white.withValues(alpha: 0.06),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 16),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: BorderSide(
+                            color: Colors.white.withValues(alpha: 0.16)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: Color(0xFF9B93FF)),
+                      ),
                     ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: const BorderSide(color: Color(0xFF9B93FF)),
-                    ),
+                    items: options.entries
+                        .map((entry) => DropdownMenuItem<String>(
+                              value: entry.key,
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerLeft,
+                                child: Text(entry.value,
+                                    maxLines: 1,
+                                    softWrap: false,
+                                    style: const TextStyle(
+                                        color: Colors.white, fontSize: 14)),
+                              ),
+                            ))
+                        .toList(),
+                    onChanged: (voice) {
+                      if (voice == null) return;
+                      setState(() {
+                        _selectedAiVoice = voice;
+                        _showVoiceMenu = false;
+                      });
+                      _log('🎙️ [VOICE-SELECT]', 'voice=$voice');
+                      _scheduleStartupRetry(immediate: true);
+                    },
                   ),
-                  items: options.entries
-                      .map((entry) => DropdownMenuItem<String>(
-                            value: entry.key,
-                            child: FittedBox(
-                              fit: BoxFit.scaleDown,
-                              alignment: Alignment.centerLeft,
-                              child: Text(entry.value,
-                                  maxLines: 1,
-                                  softWrap: false,
-                                  style: const TextStyle(
-                                      color: Colors.white, fontSize: 14)),
-                            ),
-                          ))
-                      .toList(),
-                  onChanged: (voice) {
-                    if (voice == null) return;
-                    setState(() {
-                      _selectedAiVoice = voice;
-                      _showVoiceMenu = false;
-                    });
-                    _log('🎙️ [VOICE-SELECT]', 'voice=$voice');
-                    _scheduleStartupRetry(immediate: true);
-                  },
                 ),
               ],
             ),
