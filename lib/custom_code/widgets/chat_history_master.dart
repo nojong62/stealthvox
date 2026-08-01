@@ -783,10 +783,31 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   Future<void> _prepareStepP3(String sentence, int generation) async {
     try {
       if (!mounted || generation != _stepP3PreparationGeneration) return;
+      final expanded = sentence.trim();
+      if (expanded.isNotEmpty && _polishedSentence.trim().isEmpty) {
+        final polished = await _polishExpandedSentence(
+          expanded,
+          partnerLabel: 'AI',
+        );
+        if (!mounted || generation != _stepP3PreparationGeneration) return;
+        if (polished != null && polished.trim().isNotEmpty) {
+          final readyPolished = polished.trim();
+          _polishedSentence = readyPolished;
+          try {
+            await widget.historyDoc.update({
+              'polished_sentence': readyPolished,
+              'has_practice': true,
+            });
+          } catch (e) {
+            debugPrint('[prepareStepP3] polished cache save failed: $e');
+          }
+        }
+      }
+      if (!mounted || generation != _stepP3PreparationGeneration) return;
       setState(() {
         _isPreparingStepP3 = false;
         _stepP3PreparationError =
-            sentence.trim().isEmpty ? 'P3에서 사용할 문장이 없습니다.' : null;
+            expanded.isEmpty ? 'P3에서 사용할 문장이 없습니다.' : null;
       });
     } catch (e) {
       debugPrint('[prepareStepP3] $e');
@@ -6501,12 +6522,53 @@ RULES — follow exactly:
     );
   }
 
+  Widget _buildP3FullSentenceCard({
+    required String label,
+    required String sentence,
+    required bool active,
+    String emptyMessage = '문장이 준비되지 않았습니다.',
+  }) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 250),
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1C1C1E),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: active ? _p3ShadowingAccentColor : Colors.white12,
+          width: active ? 1.6 : 1,
+        ),
+      ),
+      child: Column(
+        children: [
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: active ? _p3ShadowingAccentColor : Colors.white54,
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 10),
+          sentence.isEmpty
+              ? Text(
+                  emptyMessage,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white38),
+                )
+              : _buildP3SentenceText(sentence),
+        ],
+      ),
+    );
+  }
+
   Widget _buildP3MeaningUnitShadowingScreen() {
     final activeNative = _p3UsesNativeStyle == true;
     final activeLearning = _p3UsesNativeStyle == false;
-    final sentence = _p3UsesNativeStyle == null
-        ? _expandedSentence.trim()
-        : _p3Sentence(nativeStyle: activeNative);
+    final expandedSentence = _expandedSentence.trim();
+    final polishedSentence = _polishedSentence.trim();
     final busy = _p3ShadowLoading || _p3ShadowPlaying;
     return Column(
       children: [
@@ -6598,27 +6660,20 @@ RULES — follow exactly:
             padding: const EdgeInsets.fromLTRB(18, 12, 18, 24),
             child: Column(
               children: [
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 250),
-                  width: double.infinity,
-                  padding: const EdgeInsets.fromLTRB(18, 24, 18, 24),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1C1C1E),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                      color: activeNative || activeLearning
-                          ? _p3ShadowingAccentColor
-                          : Colors.white12,
-                      width: _p3UsesNativeStyle == null ? 1 : 1.6,
-                    ),
-                  ),
-                  child: sentence.isEmpty
-                      ? const Text(
-                          'P3에서 사용할 문장이 없습니다.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.white38),
-                        )
-                      : _buildP3SentenceText(sentence),
+                _buildP3FullSentenceCard(
+                  label: 'Expanded Sentence · 학습용',
+                  sentence: expandedSentence,
+                  active: activeLearning,
+                  emptyMessage: '완성된 확장 문장이 없습니다.',
+                ),
+                const SizedBox(height: 12),
+                _buildP3FullSentenceCard(
+                  label: 'Polished Sentence · 원어민식',
+                  sentence: polishedSentence,
+                  active: activeNative,
+                  emptyMessage: _isPreparingStepP3
+                      ? 'Polished Sentence 준비 중...'
+                      : 'Polished Sentence가 없습니다.',
                 ),
                 const SizedBox(height: 18),
                 if (_p3UsesNativeStyle == null)

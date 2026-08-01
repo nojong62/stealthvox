@@ -41,10 +41,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/openai_connection_pool.dart';
-import '/custom_code/services/realtime_anyone_adapter.dart';
-import '/custom_code/services/stealth_vox_realtime_session.dart';
 import 'deepgram_confidence_probe.dart';
-import 'first_turn_realtime_voice.dart';
 import 'first_utterance_context_judge.dart';
 
 /// ==================================================================== [Box
@@ -77,7 +74,9 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   bool _isConversationActive = false;
   bool _isExiting = false; // 🔧 [EXIT-GUARD] PopScope+버튼 이중 종료 방지
   double _fontScale = 1.0;
-  bool _showOriginal = true;
+  // Step Expand는 대화 집중을 위해 타겟 언어(영어)를 기본 표시한다.
+  // 상단 언어 버튼을 누르면 실제 한국어 대화도 함께 확인할 수 있다.
+  bool _showOriginal = false;
   int _turnCounter = 0;
   final FirstUtteranceContextJudgeSession _firstUtteranceJudge =
       FirstUtteranceContextJudgeSession();
@@ -86,9 +85,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   String? _pendingHeardConfirmation;
   int _heardConfirmationAttempts = 0;
   Future<FirstUtteranceContext?>? _prefetchedFirstUtteranceFuture;
-  // 🔥 [RT-PREWARM] 대기창 동안 미리 열어 두는 Realtime 소켓. 발화 내용은 아직
-  //   보내지 않으므로 버려져도 토큰 비용 0.
-  FirstTurnRealtimeVoice? _prewarmedRealtimeVoice;
   String _prefetchedFirstUtteranceTranscript = '';
   String? _sessionDocId; // 🔧 [v3 추가] 첫 대화 후 세션 ID (클론 변경 시 null 리셋)
   DocumentReference? _myHistoryRef; // 🔧 [히스토리] chat_history 문서 참조 (Duo 패턴)
@@ -428,6 +424,13 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 
   // 🌱 스텝익스팬드 전용 상태
   static const int MAX_TURNS = 5; // 5턴 자동 마무리 룰
+
+  /// 🧠 [STEP-EXPAND] 유저 발화 번역에 쓰는 턴별 모델.
+  ///
+  /// 첫 턴의 씨앗 문장이 5턴 전체의 토대라, 여기서 어긋나면 이후 확장이 통째로
+  /// 딸려 간다. 그 한 턴만 상위 모델을 쓰고, 토대가 선 2턴부터는 경량으로 내린다.
+  static const String kFirstTurnUserModel = 'gpt-4.1';
+  static const String kFollowUpUserModel = 'gpt-4o-mini';
   bool _isSessionComplete = false; // 5턴 완료 플래그 (마이크 잠금)
   bool _isPolishing = false; // 세련된 변형 문장 생성 중
   String _polishedSentence = ""; // 생성된 세련된 변형
@@ -463,10 +466,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   int _lastScrollTopIndex = -1;
   final Map<int, GlobalKey> _itemKeys = {};
   DeepgramV2VoiceManager? _voiceManager;
-  RealtimeAnyoneAdapter? _stepRealtimeAdapter;
-  bool _stepRealtimeConnecting = false;
-  bool _stepRealtimeFallback = false;
-  bool _stepRealtimeTurnInFlight = false;
   final AudioRecorder _audioRecorder = AudioRecorder();
   late final TtsQueueManager _ttsQueueManager;
 
@@ -1822,6 +1821,34 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     return ms.clamp(1500, 25000);
   }
 
+  /// 대화방에서만 쓰는 한국어 AI 음성. tts-1/nova로 재생하되 캐시에
+  /// 저장하지 않아, 히스토리의 타겟 언어 음성 생성 규칙과 분리한다.
+  Future<void> _speakLiveKorean(String text) async {
+    final spoken = text.trim();
+    if (spoken.isEmpty || _openAiKey.isEmpty) return;
+    _ttsQueueManager.setUserTurn(false);
+    _ttsQueueManager.setAiPaused(false);
+    final fetcher = ChunkedTtsFetcher(
+      _openAiKey,
+      _ttsQueueManager,
+      'nova',
+      language: 'ko',
+      cacheEnabled: false,
+      isUser: false,
+      onLog: _log,
+    );
+    fetcher.addText(spoken);
+    int ticks = 0;
+    while (
+        (fetcher.pendingRequests > 0 || _ttsQueueManager.isBusy) && mounted) {
+      await Future.delayed(const Duration(milliseconds: 50));
+      if (++ticks > 600) {
+        _log('⚠️ [KOREAN-TTS-TIMEOUT]', '한국어 안내 음성 30초 초과');
+        break;
+      }
+    }
+  }
+
   void _stopEverything() {
     _pipelineGeneration++;
     _isConversationActive = false;
@@ -1832,7 +1859,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     _pendingHeardConfirmation = null;
     _heardConfirmationAttempts = 0;
     _cancelPrefetchedFirstUtteranceJudge();
-    _cancelPrewarmedRealtimeVoice(); // 🔥 [RT-PREWARM] 선점 소켓 정리
     _pendingTranscript = '';
     _lastPendingFinalAt = null;
     _pendingDeepgramResults.clear();
@@ -1841,45 +1867,11 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     _awaitingAiFirstAudioProbe = false;
     _voiceManager?.dispose();
     _voiceManager = null;
-    final realtimeAdapter = _stepRealtimeAdapter;
-    _stepRealtimeAdapter = null;
-    _stepRealtimeTurnInFlight = false;
-    if (realtimeAdapter != null) {
-      // 활성 턴을 먼저 끊고 나서 세션을 내린다. 순서가 바뀌면 방을 나가는
-      // 순간 생성 중이던 응답 오디오가 남는다.
-      realtimeAdapter.cancelActiveTurn();
-      unawaited(realtimeAdapter.dispose());
-    }
     _ttsQueueManager.setAiPaused(false); // 🔧 [v3.6] TTS 대기 플래그 초기화
     _ttsQueueManager.setUserTurn(false);
     _ttsQueueManager.stop();
     _practicePlayer.stop();
     if (mounted) setState(() {});
-  }
-
-  bool get _isStepRealtimeUsable {
-    final adapter = _stepRealtimeAdapter;
-    return adapter != null &&
-        adapter.session.connectionState == RealtimeConnectionState.ready &&
-        adapter.session.capturesMicrophone;
-  }
-
-  /// 세션이 실제로 쓸 수 있게 될 때까지 짧게 기다린다. connect가 반환해도
-  /// 곧바로 ready가 아닐 수 있는데, 그때 그냥 빠져나가면 마이크가 안 열린 채
-  /// 아무도 다시 부르지 않는 정지 상태가 된다.
-  Future<bool> _waitForStepRealtimeUsable(RealtimeAnyoneAdapter adapter) async {
-    const pollInterval = Duration(milliseconds: 50);
-    const maxWait = Duration(seconds: 2);
-    final deadline = DateTime.now().add(maxWait);
-    while (mounted &&
-        identical(_stepRealtimeAdapter, adapter) &&
-        DateTime.now().isBefore(deadline)) {
-      if (_isStepRealtimeUsable) return true;
-      await Future<void>.delayed(pollInterval);
-    }
-    return mounted &&
-        identical(_stepRealtimeAdapter, adapter) &&
-        _isStepRealtimeUsable;
   }
 
   /// 전사가 발화가 아니라 잡음·추임새인지 판정한다. 파이프라인 진입 전 검열이
@@ -1909,156 +1901,15 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     return false;
   }
 
-  /// Step Expand 사용자 입력/번역 음성은 Anyone과 같은 장기 WebRTC 세션을
-  /// 재사용한다. 전사는 턴 경계와 원문 보존에만 쓰고, 번역문+사용자 음성은
-  /// gpt-realtime-2.1-mini가 전체 확장 문맥을 보고 생성한다.
+  /// 사용자 입력을 듣기 시작한다. Step Expand는 Deepgram STT만 쓴다.
+  ///
+  /// Realtime(WebRTC) 입력 경로는 걷어냈다. 확장 문장은 매 턴 유저가 한 말을
+  /// 다시 엮는 작업이라 "지어내지 않는 것"이 "매끄러운 것"보다 중요한데,
+  /// Realtime은 그 반대쪽에 강한 모델이었다. 막으려 규칙을 쌓으면 Realtime을
+  /// 쓸 이유였던 자연스러움이 같이 죽었다. 되살릴 일이 생기면 커밋
+  /// 0060655f(WebRTC 입력) / 7745f400(첫 턴 음성)에 그대로 남아 있다.
   Future<void> _startUserListening() async {
-    _stepRealtimeTurnInFlight = false;
-    if (_stepRealtimeFallback) {
-      await _startDeepgramListening();
-      return;
-    }
-    if (!mounted || _isSessionComplete || _stepRealtimeTurnInFlight) return;
-    if (_isStepRealtimeUsable) {
-      try {
-        final adapter = _stepRealtimeAdapter!;
-        if (!adapter.session.isMicrophoneEnabled) {
-          adapter.setMicrophoneEnabled(true);
-        }
-        _resetIdleTimer();
-        _isConversationActive = true;
-        if (mounted) {
-          setState(() {
-            _debugResult = "⏱️ 듣는 중...";
-            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-          });
-        }
-        _log('[STEP-RT-STT]', 'listening_started');
-        _reportListeningReady();
-        return;
-      } catch (error) {
-        _log('[STEP-RT-STT]',
-            'microphone_enable_failed reason=${error.runtimeType}');
-        await _fallbackToStepDeepgram();
-        return;
-      }
-    }
-    if (_stepRealtimeConnecting) return;
-    _stepRealtimeConnecting = true;
-    late final RealtimeAnyoneAdapter adapter;
-    adapter = RealtimeAnyoneAdapter(
-      logger: _log,
-      onSpeechStarted: (_) {
-        if (!identical(_stepRealtimeAdapter, adapter)) return;
-        BillingTicker.instance.resumeFromActivity('step_expand_rt_partial');
-        if (_isInitialGuidePlaying) {
-          _isInitialGuidePlaying = false;
-          _ttsQueueManager.stop();
-          _log('[STEP-RT-BARGE-IN]', '첫 사용자 발화 → 안내 TTS 중단');
-        }
-      },
-      onUserTranscriptCompleted: (itemId, transcript) {
-        if (!identical(_stepRealtimeAdapter, adapter) ||
-            !mounted ||
-            _stepRealtimeTurnInFlight) {
-          return;
-        }
-        final clean = transcript.trim();
-        // 빈 전사·추임새는 조용히 버리고 다시 듣는다. 폴백 사유로 삼지 않는다
-        // — server VAD는 숨소리·에어컨·TTS 꼬리도 발화로 잡는다.
-        if (_isNoiseTranscript(clean)) {
-          _log('[STEP-RT-STT]',
-              'noise_dropped itemId=$itemId len=${clean.length}');
-          return;
-        }
-        try {
-          adapter.setMicrophoneEnabled(false);
-        } catch (_) {}
-        _stepRealtimeTurnInFlight = true;
-        BillingTicker.instance.resumeFromActivity('step_expand_rt_result');
-        if (mounted) {
-          setState(() {
-            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-            _localMessages.add({
-              'role': 'HOST_TEMP',
-              'target': '...',
-              'original': '...',
-              'type': 'user_input',
-            });
-          });
-        }
-        _log('[STEP-RT-STT]',
-            'final_received itemId=$itemId len=${clean.length}');
-        unawaited(_processRelayPipeline(
-          clean,
-          expectedPipelineGeneration: _pipelineGeneration,
-        ));
-      },
-      onConnectionStateChanged: (state) {
-        if (!identical(_stepRealtimeAdapter, adapter)) return;
-        if (state == RealtimeConnectionState.failed) {
-          unawaited(_fallbackToStepDeepgram());
-        }
-      },
-      onError: (error) {
-        if (!identical(_stepRealtimeAdapter, adapter)) return;
-        _log('[STEP-RT-STT]', 'session_error reason=${error.runtimeType}');
-        unawaited(_fallbackToStepDeepgram());
-      },
-    );
-    _stepRealtimeAdapter = adapter;
-    try {
-      await adapter.connectForMicrophoneTranscription(
-        modeSessionId: 'step-expand-${DateTime.now().microsecondsSinceEpoch}',
-        // Firebase의 Realtime secret 발급 함수가 현재 허용하는 Anyone transport를
-        // 그대로 재사용한다. 화면 모드와 프롬프트는 Step Expand로 유지된다.
-        mode: 'anyone',
-        voice: FFAppState().aiVoice.isNotEmpty ? FFAppState().aiVoice : 'echo',
-        allowWhenDisabled: true,
-        // 🎧 [RT-TRANSCRIPTION] 비워 두면 서버가 언어부터 추측한다. 모국어를
-        //   못 박아 그 단계를 없앤다. Anyone에서 이걸 빠뜨렸을 때 "밥 먹지"가
-        //   "겁 먹지"로 인식됐다(둘 다 한국어라 뒤늦게 발견됐다).
-        transcriptionLanguage: _mapLanguageToCode(
-          FFAppState().nativeLang.isNotEmpty
-              ? FFAppState().nativeLang
-              : 'Korean',
-        ),
-      );
-      if (!mounted || !identical(_stepRealtimeAdapter, adapter)) return;
-      // connect가 반환해도 곧바로 ready가 아닐 수 있다. 여기서 안 기다리면
-      // 아래 _startUserListening이 _stepRealtimeConnecting(아직 true)에 걸려
-      // 조용히 빠져나가고 마이크가 영영 안 열린다.
-      final usable = await _waitForStepRealtimeUsable(adapter);
-      if (!mounted || !identical(_stepRealtimeAdapter, adapter)) return;
-      if (!usable) {
-        _log('[STEP-RT-STT]', 'session_not_usable → deepgram');
-        _stepRealtimeConnecting = false;
-        await _fallbackToStepDeepgram();
-        return;
-      }
-      _log('[STEP-RT-STT]', 'secure session ready');
-      _stepRealtimeConnecting = false;
-      await _startUserListening();
-    } catch (error) {
-      _log('[STEP-RT-STT]', 'connect_failed reason=${error.runtimeType}');
-      await _fallbackToStepDeepgram();
-    } finally {
-      _stepRealtimeConnecting = false;
-    }
-  }
-
-  Future<void> _fallbackToStepDeepgram() async {
-    if (_stepRealtimeFallback) return;
-    _stepRealtimeFallback = true;
-    _stepRealtimeConnecting = false;
-    _stepRealtimeTurnInFlight = false;
-    final adapter = _stepRealtimeAdapter;
-    _stepRealtimeAdapter = null;
-    if (adapter != null) await adapter.dispose();
-    _log('[STEP-RT-FALLBACK]', 'Deepgram legacy input enabled');
-    if (mounted && _isConversationActive && !_isSessionComplete) {
-      await _startDeepgramListening();
-    }
+    await _startDeepgramListening();
   }
 
   void _reportListeningReady() {
@@ -2074,6 +1925,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       _openAiKey,
       _ttsQueueManager,
       'nova',
+      language: 'ko',
+      cacheEnabled: false,
       isUser: false,
       onLog: _log,
     );
@@ -2178,10 +2031,12 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         _openAiKey,
         _ttsQueueManager,
         'nova',
+        language: 'ko',
+        cacheEnabled: false,
         isUser: false,
         onLog: _log,
       );
-      retryTts.addText('Please say that again.');
+      retryTts.addText('다시 말씀해 주세요.');
       int _retryTicks = 0;
       while ((retryTts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
           mounted) {
@@ -2238,17 +2093,15 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     final pendingFirstUtterance = _pendingTranscript.trim();
     final firstUtteranceRoute =
         _firstUtteranceJudge.previewRoute(pendingFirstUtterance);
-    // 🎙️ [FIRST-TURN-REALTIME] 첫 대사 번역/낭독은 Realtime이 맡으므로 gpt-4o-mini
-    //   투기 번역은 더 이상 선시작하지 않는다. GPT-4.1 문맥 판정 선시작만 유지.
     if (!isDuplicateFinal &&
         isFirstUtterance &&
         pendingFirstUtterance.length >= 2) {
       if (_prefetchedFirstUtteranceFuture != null ||
           firstUtteranceRoute == FirstUtteranceRoute.judge) {
         _startPrefetchedFirstUtteranceJudge(pendingFirstUtterance);
+      } else if (firstUtteranceRoute == FirstUtteranceRoute.bypass) {
+        _startSpeculativeTranslation(pendingFirstUtterance);
       }
-      // 🔥 [RT-PREWARM] 판정 경로와 무관하게(그리고 판정과 독립적으로) 소켓만 선점.
-      _startPrewarmedRealtimeVoice();
     }
 
     // 조건부 대기 후 파이프라인 시작 예약 (source별 waitMs)
@@ -2271,7 +2124,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       // 🚀 [SPEC] 빈 확정이면 진행 중 투기 번역 폐기
       _cancelSpeculativeTranslation();
       _cancelPrefetchedFirstUtteranceJudge();
-      _cancelPrewarmedRealtimeVoice();
       if (_isConversationActive) _startUserListening();
       return;
     }
@@ -2311,9 +2163,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   // 사라진다. 마이크/오디오/AI응답 로직은 전혀 건드리지 않아 안전하며, 추가 발화가
   // 오면(합치기) 투기 번역을 취소·재시작하므로 짤림 위험이 없다. (첫 턴 전용)
   // ====================================================================
-  // 🎙️ [FIRST-TURN-REALTIME] 현재 호출부 없음 — 첫 대사를 Realtime이 맡으면서
-  //   투기 번역 선시작을 껐다. 롤백 시 _stopMicAndProcess에서 다시 호출하면 된다.
-  // ignore: unused_element
   void _startSpeculativeTranslation(String text) {
     _cancelSpeculativeTranslation(); // 이전 투기 번역 정리 후 재시작
     _specTranscript = text;
@@ -2330,6 +2179,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       targetLang: targetLangName,
       contextStr: '',
       disableCorrection: false,
+      // 첫 턴 전용 선시작이므로 상위 모델을 쓴다(파이프라인 본 호출과 동일).
+      model: kFirstTurnUserModel,
     ).listen(
       (chunk) {
         if (!controller.isClosed) controller.add(chunk);
@@ -2389,50 +2240,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     _prefetchedFirstUtteranceTranscript = '';
   }
 
-  // ====================================================================
-  // 🔥 [RT-PREWARM] 첫 발화 확정 대기창 동안 Realtime 소켓만 미리 열어 둔다.
-  // ------------------------------------------------------------------
-  // TLS 핸드셰이크를 크리티컬 패스 밖으로 밀어내는 것이 전부다. 발화 내용/
-  // 시스템 프롬프트는 확정 시점(begin)까지 보내지 않으므로, 발화가 합쳐지거나
-  // 증발해서 이 소켓을 버려도 토큰 비용은 0원이다.
-  // GPT-4.1 문맥 판정 선시작과 서로 await하지 않는 독립 작업이다.
-  // ====================================================================
-  String get _currentUserVoice =>
-      FFAppState().aiVoice.isNotEmpty ? FFAppState().aiVoice : 'echo';
-
-  void _startPrewarmedRealtimeVoice() {
-    if (_openAiKey.isEmpty) return;
-    final existing = _prewarmedRealtimeVoice;
-    // 발화가 합쳐져 이 함수가 다시 불려도 이미 연 소켓을 그대로 재사용한다.
-    if (existing != null && existing.voice == _currentUserVoice) return;
-    existing?.cancel();
-    final session = FirstTurnRealtimeVoice(
-      apiKey: _openAiKey,
-      voice: _currentUserVoice,
-      onLog: _log,
-    );
-    _prewarmedRealtimeVoice = session;
-    _log('🔥 [RT-PREWARM]', '대기창 소켓 선점 시작');
-    unawaited(session.prewarm());
-  }
-
-  /// 확정 시점에 선점 소켓의 소유권을 파이프라인으로 넘긴다.
-  FirstTurnRealtimeVoice? _takePrewarmedRealtimeVoice(String voice) {
-    final session = _prewarmedRealtimeVoice;
-    _prewarmedRealtimeVoice = null;
-    if (session == null) return null;
-    if (session.voice != voice) {
-      session.cancel();
-      return null;
-    }
-    return session;
-  }
-
-  void _cancelPrewarmedRealtimeVoice() {
-    _prewarmedRealtimeVoice?.cancel();
-    _prewarmedRealtimeVoice = null;
-  }
-
   Future<FirstUtteranceContext?> _takePrefetchedOrJudgeFirstUtterance(
     String transcript,
   ) async {
@@ -2490,6 +2297,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         _openAiKey,
         _ttsQueueManager,
         'nova',
+        language: 'ko',
+        cacheEnabled: false,
         isUser: false,
         onLog: _log,
       );
@@ -2527,17 +2336,13 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       _openAiKey,
       _ttsQueueManager,
       'nova',
+      language: 'ko',
+      cacheEnabled: false,
       isUser: false,
-      onLog: _log,
-    );
-    final HybridTtsPlayer questionHybridTts = HybridTtsPlayer(
-      apiKey: _openAiKey,
-      voice: 'nova',
       onLog: _log,
     );
     String aiText = "";
     String aiOriginalRetry = "";
-    String aiBuffer = "";
     bool aiRetryHasDoubleNewline = false;
 
     // _swTTS..reset()..start();
@@ -2547,28 +2352,18 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 
     await for (final chunk in aiStream) {
       if (!aiRetryHasDoubleNewline) {
-        // Part1 (영어)
+        // Part1 (영어): 화면/히스토리용
         aiText += chunk;
-        aiBuffer += chunk;
 
         if (aiText.contains('\n\n')) {
           aiRetryHasDoubleNewline = true;
           final sepIdx = aiText.indexOf('\n\n');
           final afterSep = aiText.substring(sepIdx + 2);
           aiText = aiText.substring(0, sepIdx);
-          final bufSepIdx = aiBuffer.indexOf('\n\n');
-          if (bufSepIdx >= 0) aiBuffer = aiBuffer.substring(0, bufSepIdx);
           if (afterSep.isNotEmpty) aiOriginalRetry += afterSep;
-        } else {
-          // 하이브리드: 4단어/구두점 도달 시 첫 청크 발사
-          if (!questionHybridTts.firstChunkFired) {
-            final cutIdx =
-                questionHybridTts.onChunk(aiBuffer, questionTts, _swTTS);
-            if (cutIdx >= 0) aiBuffer = aiBuffer.substring(cutIdx);
-          }
         }
       } else {
-        // Part2 (한국어) — TTS 금지
+        // Part2 (한국어): 실시간 대화 음성
         aiOriginalRetry += chunk;
       }
       if (mounted && aiIdx < _localMessages.length) {
@@ -2579,12 +2374,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       }
       _scrollToBottom();
     }
-    await questionHybridTts.onStreamEnd(
-      fullSentence: aiText.trim(),
-      remainderBuffer: aiBuffer,
-      fetcher: questionTts,
-      swSpeechEnd: _swTTS,
-    );
+    questionTts.addText(aiOriginalRetry.trim());
     _revealForReading(aiIdx, aiText.trim()); // 🆕 긴 대사 텔레프롬프터
 
     // TTS 재생 완료 대기
@@ -2604,12 +2394,11 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 // ====================================================================
 // 🎯 핵심 전략:
 //   STEP 1: 증발 검열 (고스트워드/너무 짧음 → 조용히 폐기)
-//   STEP 2: HOST 풍선 + 유저 번역 스트리밍 (CoT 주어 복원)
-//   STEP 3: 유저 타겟 TTS 재생 시작 (_aiPaused=true)
-//   STEP 4: (병렬) AI 응답 스트리밍 + 청킹 → 큐 적재 (재생 대기)
-//   STEP 5: 유저 낭독 완료 → _aiPaused=false → AI 청크 폭발
-//   STEP 6: AI 역번역 + Firestore 저장 (백그라운드)
-//   STEP 7: 마이크 재개방
+//   STEP 2: 유저 한국어 원문 보존 + 타겟 영어 문장 스트리밍
+//   STEP 3: AI 영어 화면 문장 + 한국어 대화 문장 동시 생성
+//   STEP 4: AI 한국어만 tts-1/nova로 재생 (캐시하지 않음)
+//   STEP 5: 한·영 글자를 Firestore/히스토리에 저장
+//   STEP 6: 마이크 재개방, 5턴이면 P3 자료 저장 후 자동 종료
 // ====================================================================
   /// Build clean HOST/SYSTEM context for normal, fast-lane, dissatisfied, and misheard paths.
   Map<String, String> _buildCleanContext({
@@ -2761,8 +2550,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     //   하나에 걸려 있다 — 길이만 찍던 동안은 오인식 원인을 못 짚었다.
     //   유저 발화 내용이므로 디버그 빌드에서만 남긴다.
     if (kDebugMode) {
-      final source = _stepRealtimeFallback ? 'deepgram' : 'realtime';
-      _log('🎧 [STT-RAW]', 'source=$source text="$finalTranscript"');
+      _log('🎧 [STT-RAW]', 'source=deepgram text="$finalTranscript"');
     }
 
     // ─────────────────────────────────────────────────────
@@ -2777,7 +2565,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 
     if (isGhost) {
       _cancelPrefetchedFirstUtteranceJudge();
-      _cancelPrewarmedRealtimeVoice();
       if (_turnCounter == currentTurnId && _turnCounter > 0) _turnCounter--;
       if (mounted)
         setState(
@@ -2856,7 +2643,9 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           _localMessages.add({
             'role': 'HOST',
             'target': '',
-            'original': '',
+            // 유저가 실제로 말한 한국어를 그대로 보존한다. 번역문을 다시
+            // 한국어로 역번역하면 말투와 의미가 달라질 수 있다.
+            'original': finalTranscript.trim(),
             'turnId': currentTurnId
           });
         });
@@ -2869,48 +2658,14 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       String contextStr = pipeResult['contextStr']!;
 
       String userTargetText = "";
-      String userBuffer = "";
-      // User voice follows the lobby My Voice setting; AI remains fixed to nova.
-      final String userVoice =
-          FFAppState().aiVoice.isNotEmpty ? FFAppState().aiVoice : 'echo';
-      ChunkedTtsFetcher userTtsFetcher = ChunkedTtsFetcher(
-        _openAiKey,
-        _ttsQueueManager,
-        userVoice,
-        onLog: _log,
-      );
-      final HybridTtsPlayer userHybridTts = HybridTtsPlayer(
-        apiKey: _openAiKey,
-        voice: userVoice,
-        onLog: _log,
-        // 🚀 [FIRST-TURN] 첫 TTS는 자연스러운 구/구두점 단위(기본 4단어 또는 첫 콤마)로
-        //   발사한다. 2단어 조기발사는 재생이 툭툭 끊겨 되돌림. 속도는 투기적 선시작이 담당.
-      );
-      _ttsQueueManager.setUserTurn(true);
-      _ttsQueueManager.setAiPaused(false); // 유저 청크는 즉시 재생
+      // 대화방에서는 유저의 한국어 원음을 그대로 듣고 영어 TTS는 만들지 않는다.
+      _ttsQueueManager.setUserTurn(false);
+      _ttsQueueManager.setAiPaused(false);
 
       // 🌐 [v3.1] 로비에서 유저가 선택한 타겟 언어로 번역
       final String targetLangName = FFAppState().targetLang.isNotEmpty
           ? FFAppState().targetLang
           : 'English';
-
-      final secureAdapter = _isStepRealtimeUsable ? _stepRealtimeAdapter : null;
-      RealtimeTranslationTurn? secureTurn;
-      bool secureTurnCompleted = false;
-      bool secureFallbackLogged = false;
-
-      // 보안 WebRTC 세션이 없을 때만 과거 첫 턴 WebSocket 경로를 사용한다.
-      final FirstTurnRealtimeVoice? realtimeVoice = (secureAdapter == null &&
-              currentTurnId == 1 &&
-              userStreamOverride == null)
-          ? (_takePrewarmedRealtimeVoice(userVoice) ??
-              FirstTurnRealtimeVoice(
-                apiKey: _openAiKey,
-                voice: userVoice,
-                onLog: _log,
-              ))
-          : null;
-      if (realtimeVoice == null) _cancelPrewarmedRealtimeVoice();
 
       // 🚀 [SPEC-FIRST-TURN] 투기 번역이 넘어오면 그 버퍼 스트림을 그대로 소비한다
       //   (선반영). 없으면 지금 새로 요청. 소비 방식은 완전히 동일.
@@ -2924,33 +2679,16 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
             disableHeardConfirmation: understandingConfirmed,
             firstUtteranceContext:
                 firstUtteranceContext?.toInternalPromptContext() ?? '',
-            realtimeVoice: realtimeVoice,
-            secureAdapter: secureAdapter,
-            secureTurnId: 'step-$currentTurnId',
-            secureVoice: userVoice,
-            onSecureTurn: (turn) => secureTurn = turn,
-            onSecureSuccess: () => secureTurnCompleted = true,
-            onSecureFallback: (reason) {
-              if (secureFallbackLogged) return;
-              secureFallbackLogged = true;
-              _log('[STEP-RT-FALLBACK]',
-                  'translation turn=$currentTurnId reason=${reason.runtimeType}');
-            },
-            shouldContinue: () => isActivePipelineGeneration(
-              expected: pipelineGeneration,
-              current: _pipelineGeneration,
-              mounted: mounted,
-              conversationActive: _isConversationActive,
-            ),
+            // 🧠 첫 턴만 상위 모델. 씨앗 문장이 5턴 전체의 토대라서다.
+            model:
+                currentTurnId == 1 ? kFirstTurnUserModel : kFollowUpUserModel,
           );
       if (firstUtteranceContext != null) {
         _firstUtteranceJudge.markDelivered(firstUtteranceContext);
       }
 
-      // 🌱 [StepExpand Part2만 TTS] 첫 턴은 AI 씨앗 문장 (Part 구분 없음)
-      //    2턴+는 "Part1\n\nPart2" 구조 → Part2만 TTS로 재생
-      //    \n\n 감지 전까지는 buffer에 쌓되 TTS는 안 보냄
-      //    \n\n 감지 시 buffer 리셋 → 이후 chunk부터 TTS (=Part2)
+      // 첫 턴은 영어 씨앗 문장, 2턴부터는 "새 영어 문장\n\n누적 확장문장"을
+      // 화면과 히스토리에 남긴다. 어느 쪽도 대화방에서는 낭독하지 않는다.
       bool evaporated = false;
       bool retried = false;
       bool corrected = false; // 유저가 AI의 오해를 정정하는 경우 → 직전 HOST+SYSTEM 쌍 삭제 후 재시작
@@ -2960,13 +2698,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       bool restated = false; // 오프토픽이지만 스피킹 내용 그대로 음성 확인 질문 후 재청취
       bool garbled = false; // 진짜 발음 불확실 → "다시 말해 주세요" 요청
       bool dissatisfied = false; // [DISSATISFIED] 유저가 AI 질문에 불만 → 확인 후 재질문
-      bool _part2Started = false; // \n\n 이후 진입 여부
       bool hasDoubleNewline = false; // 2파트 구조 여부
-      bool firstChunkSent = false;
 
       await for (String chunk in userStream) {
         userTargetText += chunk;
-        userBuffer += chunk;
 
         // 🔧 [v3.3] EVAPORATE 감지
         if (userTargetText.contains("[EVAPORATE]")) {
@@ -3037,86 +2772,22 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         }
         _scrollToCurrentTop(hostIndex);
 
-        // 🌱 \n\n 최초 감지: Part1 버퍼 폐기, Part2만 TTS
+        // 🌱 \n\n 최초 감지: Part2는 누적 확장문장이다.
         if (!hasDoubleNewline && userTargetText.contains('\n\n')) {
-          // 첫 턴(turn 1)에선 확장 없음 → Part1만 onStreamEnd에 전달, Part2 무시
+          // 첫 턴(turn 1)에선 확장이 없다. Part2가 왔다면 모델이 지어낸 것이므로
+          // Part1(씨앗 문장)만 남기고 잘라낸다.
           if (currentTurnId == 1) {
             final idx = userTargetText.indexOf('\n\n');
             userTargetText = userTargetText.substring(0, idx).trim();
             if (mounted && hostIndex < _localMessages.length)
               setState(
                   () => _localMessages[hostIndex]['target'] = userTargetText);
-            userBuffer = userTargetText; // Part1만 onStreamEnd에 전달
             break;
           }
           hasDoubleNewline = true;
-          _part2Started = true;
-          final idx = userTargetText.indexOf('\n\n');
-          userBuffer = userTargetText.substring(idx + 2);
-          _log('🌱 [PART2-START]', 'Part2 감지 → Part1 TTS 스킵, Part2만 낭독');
+          _log('🌱 [PART2-START]', 'Part2 감지 → 누적 확장문장 화면/저장');
           continue;
         }
-
-        // 첫 턴은 Part1 자체가 유저의 완성 문장이다. GPT 토큰이 4단어 또는
-        // 구두점까지 도착하는 즉시 TTS 요청을 발사해 GPT 스트림/TTS/오디오
-        // 큐가 파이프라인으로 동시에 진행되게 한다. 2턴부터는 기존대로
-        // Part1을 읽지 않고 Part2(확장 문장)만 낭독한다.
-        if (!_part2Started) {
-          // 🎙️ [FIRST-TURN-REALTIME] Realtime이 살아 있으면 낭독 음성이 같은 응답에
-          //   실려 오므로 tts-1 청크 발사를 건너뛴다.
-          final bool containsControlTag = userTargetText.contains('[');
-          if (currentTurnId == 1 &&
-              !containsControlTag &&
-              !secureTurnCompleted &&
-              !(realtimeVoice?.active ?? false) &&
-              !userHybridTts.firstChunkFired) {
-            final cutIdx =
-                userHybridTts.onChunk(userBuffer, userTtsFetcher, _swTTS);
-            if (cutIdx >= 0) {
-              userBuffer = userBuffer.substring(cutIdx);
-              firstChunkSent = true;
-              _log('🌱 [FIRST-TURN-PIPE]', 'GPT 스트림 중 첫 유저 TTS 청크 발사');
-            }
-          }
-          continue;
-        }
-
-        // Part2 하이브리드: 4단어/구두점 도달 시 첫 청크만 발사
-        if (!secureTurnCompleted && !userHybridTts.firstChunkFired) {
-          final cutIdx =
-              userHybridTts.onChunk(userBuffer, userTtsFetcher, _swTTS);
-          if (cutIdx >= 0) {
-            userBuffer = userBuffer.substring(cutIdx);
-            firstChunkSent = true;
-          }
-        }
-        if (!secureTurnCompleted && !firstChunkSent) {
-          final wordCount = userBuffer
-              .trim()
-              .split(RegExp(r'\s+'))
-              .where((w) => w.isNotEmpty)
-              .length;
-          if (wordCount >= 4) {
-            userTtsFetcher.addText(userBuffer.trim());
-            userBuffer = "";
-            firstChunkSent = true;
-          }
-        }
-      }
-
-      // 🎙️ [FIRST-TURN-REALTIME] 제어 태그로 턴이 꺾이면 Realtime 세션을 즉시 닫는다.
-      //   (정상 종료된 세션에는 no-op)
-      if (evaporated ||
-          retried ||
-          dissatisfied ||
-          corrected ||
-          misheard ||
-          clarified ||
-          heardConfirmation ||
-          restated ||
-          garbled) {
-        realtimeVoice?.cancel();
-        secureAdapter?.cancelActiveTurn();
       }
 
       if (evaporated) {
@@ -3260,6 +2931,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         _turnCounter--;
         final clarifyText =
             userTargetText.replaceFirst(RegExp(r'^\[CLARIFY\]\s*'), '');
+        final clarifyKorean = await StepExpandBrain.generateCleanOriginal(
+          apiKey: _openAiKey,
+          englishText: clarifyText,
+        );
         if (mounted) {
           setState(() {
             _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
@@ -3268,7 +2943,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
             _localMessages.add({
               'role': 'SYSTEM',
               'target': clarifyText,
-              'original': '',
+              'original': clarifyKorean,
               'clarify': true, // Mark temporary clarify bubble for evaporation.
             });
           });
@@ -3280,10 +2955,12 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           _openAiKey,
           _ttsQueueManager,
           'nova',
+          language: 'ko',
+          cacheEnabled: false,
           isUser: false,
           onLog: _log,
         );
-        clarifyTts.addText(clarifyText);
+        clarifyTts.addText(clarifyKorean);
         int waitTicks = 0;
         while ((clarifyTts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
             mounted) {
@@ -3316,6 +2993,9 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
             : spokenPrompt.isNotEmpty
                 ? spokenPrompt
                 : "제가 잘못 들었나요? '$candidate'라고 말씀하신 게 맞나요?";
+        final promptTarget = tooManyAttempts
+            ? 'Sorry. Please say the sentence again a little more slowly.'
+            : "Did I hear you correctly? Did you say '$candidate'?";
         if (tooManyAttempts) {
           _pendingHeardConfirmation = null;
           _heardConfirmationAttempts = 0;
@@ -3328,8 +3008,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
             }
             _localMessages.add({
               'role': 'SYSTEM',
-              'target': prompt,
-              'original': '',
+              'target': promptTarget,
+              'original': prompt,
               'clarify': true,
             });
           });
@@ -3341,10 +3021,12 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           _openAiKey,
           _ttsQueueManager,
           'nova',
+          language: 'ko',
+          cacheEnabled: false,
           isUser: false,
           onLog: _log,
         );
-        if (!secureTurnCompleted) confirmTts.addText(prompt);
+        confirmTts.addText(prompt);
         int ticks = 0;
         while ((confirmTts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
             mounted) {
@@ -3386,6 +3068,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           _openAiKey,
           _ttsQueueManager,
           'nova',
+          language: 'ko',
+          cacheEnabled: false,
           isUser: false,
           onLog: _log,
         );
@@ -3405,62 +3089,9 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       _consecutiveRestateCount = 0;
       _heardConfirmationAttempts = 0;
 
-      // 🌱 [E-2] 하이브리드: remainder 발사 + 통문장 TtsCache 저장
-      final String _part2FullSentence = hasDoubleNewline
-          ? userTargetText.substring(userTargetText.indexOf('\n\n') + 2).trim()
-          : userTargetText.trim();
-
-      // 🎙️ [FIRST-TURN-REALTIME] Realtime이 만든 낭독 음성을 유저 큐에 그대로 넣는다.
-      //   실패해서 null이면 기존 tts-1 경로가 통문장을 읽는다(음성만 폴백).
-      final Uint8List? realtimeWav = await realtimeVoice?.audioWav;
-      final bool realtimeSpoke = realtimeWav != null && realtimeWav.isNotEmpty;
-      if (realtimeSpoke) {
-        await _ttsQueueManager.addAudio(realtimeWav, isUser: true);
-        _log('🎙️ [RT-PLAY]',
-            'Realtime 음성 재생 큐 적재 (${realtimeWav.length}B) — tts-1 미사용');
-      }
-      if (secureTurnCompleted) {
-        await secureTurn!.audioComplete;
-        _log('[STEP-RT-AUDIO]',
-            'turn=$currentTurnId complete → legacy user TTS skipped');
-      } else {
-        await userHybridTts.onStreamEnd(
-          fullSentence: _part2FullSentence,
-          remainderBuffer: userBuffer,
-          fetcher: userTtsFetcher,
-          swSpeechEnd: _swTTS,
-          speechAlreadySupplied: realtimeSpoke,
-        );
-      }
-      _revealForReading(hostIndex, _part2FullSentence); // 🆕 긴 대사 텔레프롬프터
-
-      // 🌱 유저 original(한국어) 역번역
-      // 1턴: 전체 문장 역번역 → 대화방 표시 + Firestore 저장
-      // 2턴+: Part1\n\nPart2 전체를 역번역 → 대화방에서는 Part2 한국어만 표시, Firestore에는 전체 저장
-      Future<String>? userOrigFuture;
-      if (currentTurnId == 1) {
-        userOrigFuture = StepExpandBrain.generateCleanOriginal(
-            apiKey: _openAiKey, englishText: userTargetText);
-        userOrigFuture.then((cleanKorean) {
-          if (mounted && _localMessages.length > hostIndex) {
-            setState(() => _localMessages[hostIndex]['original'] = cleanKorean);
-          }
-        });
-      } else if (hasDoubleNewline) {
-        // 2턴+: Part1(짧은 대답)만 역번역 → 확장문장(Part2)은 한국어 불필요
-        final part1English =
-            userTargetText.substring(0, userTargetText.indexOf('\n\n')).trim();
-        if (part1English.isNotEmpty) {
-          userOrigFuture = StepExpandBrain.generateCleanOriginal(
-              apiKey: _openAiKey, englishText: part1English);
-          userOrigFuture.then((cleanKorean) {
-            if (mounted && _localMessages.length > hostIndex) {
-              setState(
-                  () => _localMessages[hostIndex]['original'] = cleanKorean);
-            }
-          });
-        }
-      }
+      // 화면에는 영어 번역을 남기되, 대화방에서 영어 음성은 재생하지 않는다.
+      // 한국어 원문은 STT 결과를 그대로 사용하고 한·영 모두 히스토리에 저장한다.
+      _revealForReading(hostIndex, userTargetText);
 
       // ─────────────────────────────────────────────────────
       // 🌱 [StepExpand] 5턴 완료 조기 종료
@@ -3468,35 +3099,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       // → AI 응답을 생성하지 않고 결과 버튼 바로 표시
       // ─────────────────────────────────────────────────────
       if (_turnCounter >= MAX_TURNS) {
-        // 🌱 [LAST-TURN] 마지막 5턴 — 긴 확장 문장(30~50단어)도 끝까지 들려준 뒤 완료 처리
-        // 유저 TTS fetch 완료 대기 (10초 타임아웃)
-        int waitTicks = 0;
-        while (userTtsFetcher.pendingRequests > 0) {
-          await Future.delayed(const Duration(milliseconds: 50));
-          waitTicks++;
-          if (waitTicks > 200) {
-            _log('⚠️ [PIPE-TIMEOUT]', '유저 TTS fetch 10초 초과, 강제 진행');
-            break;
-          }
-        }
-        // 유저 TTS 재생 완료 대기 (최대 60초)
-        waitTicks = 0;
-        bool _lastTurnTimedOut = false;
-        while (_ttsQueueManager.isBusy) {
-          await Future.delayed(const Duration(milliseconds: 50));
-          waitTicks++;
-          if (waitTicks > 1200) {
-            _log('⚠️ [PIPE-TIMEOUT]', '유저 TTS 재생 60초 초과, 강제 진행');
-            _lastTurnTimedOut = true;
-            break;
-          }
-        }
-        // 자연 종료 시 800ms 마진 (끝부분 클리핑 방지)
-        if (!_lastTurnTimedOut) {
-          await Future.delayed(const Duration(milliseconds: 800));
-        }
-        _ttsQueueManager.setUserTurn(false);
-
         // Firestore 저장 (유저 턴만, AI 응답 없음)
         // 🔧 [PRACTICE-FIX] _localMessages[hostIndex]['target']은 Part1\n\nPart2 형태로 누적됨
         //    → Part2(expanded)를 expanded_sentence 필드로 별도 추출 저장 (옵션 B, 후방호환)
@@ -3535,29 +3137,50 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           }
         }
 
-        _stopEverything();
+        // 대화방에서는 영어 문장을 읽지 않지만, P3의 두 연습 선택지가 모두
+        // 준비되도록 Polished Sentence를 종료 전에 생성해 히스토리에 저장한다.
+        // P3 학습식은 expanded_sentence, 원어민식은 polished_sentence를 사용한다.
+        final Future<void> preparePolished = () async {
+          if (hostExpanded.isEmpty) return;
+          final polished = await StepExpandBrain.polishSentence(
+            apiKey: _openAiKey,
+            originalSentence: hostExpanded,
+          );
+          if (polished.trim().isNotEmpty) {
+            await _savePolishedToFirestore(polished.trim());
+          }
+        }();
+
+        const completionTarget =
+            'Your expanded sentence is complete. You can practice it in the Study Room.';
+        const completionKorean = '확장 문장이 완성되었습니다. 공부방에서 연습하실 수 있습니다.';
         if (mounted) {
           setState(() {
             _isSessionComplete = true;
-            _debugResult =
-                _lastTurnTimedOut ? "🎉 5턴 완료! (긴 문장으로 일부 강제 종료)" : "🎉 5턴 완료!";
-          });
-        }
-        _log('🌱 [DONE]', '5턴 완료 → 확장문장 카드 표시 (낭독은 유저 턴에서 완료)');
-        // 🔁 AUTO-FLOW 1: 완성된 확장 문장 별도 표시 (방안1: 중복 낭독 제거) 🔁
-        // ✅ [방안1-중복제거] 유저 턴에서 이미 동일 확장문장을 nova 음성으로
-        //   낭독했으므로 완성 카드에는 화면 표시만 하고 낭독하지 않는다.
-        //   (글자는 버블 + 카드 2회 노출 유지 = 결과 강조용 카드 유지)
-        if (hostExpanded.isNotEmpty && mounted) {
-          setState(() {
-            _expandedFinalSentence = hostExpanded;
-            _showExpandedFinalCard = true;
+            _localMessages.add({
+              'role': 'SYSTEM',
+              'target': completionTarget,
+              'original': completionKorean,
+            });
+            _debugResult = "🎉 5턴 완료!";
           });
           _scrollToBottom();
         }
+        final completionLine = {
+          'role': 'SYSTEM',
+          'original_text': completionKorean,
+          'translated_text': completionTarget,
+        };
+        await _saveTurnToFirestore([completionLine]);
+        await _saveHistoryMessages([completionLine]);
 
-        // ── AUTO-FLOW 2: Polished Sentence 자동 생성 → 낭독 → Study Room 안내 ──
-        await _autoPolishAndSpeak(hostExpanded);
+        _log('🌱 [DONE]', '5턴 완료 → 한국어 안내 후 스텔스 룸 자동 복귀');
+        await Future.wait([
+          _speakLiveKorean(completionKorean),
+          preparePolished,
+        ]);
+        _stopEverything();
+        await _handleAutoSaveAndExit();
         return;
       }
 
@@ -3583,6 +3206,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         _openAiKey,
         _ttsQueueManager,
         'nova', // 🌱 AI 목소리 nova 고정
+        language: 'ko',
+        cacheEnabled: false, // 실시간 한국어 음성은 히스토리 영어 캐시에 남기지 않음
         isUser: false, // AI 큐로 분리
         onLog: _log,
       );
@@ -3592,8 +3217,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           : "$contextStr\nUser: $userTargetText";
       String aiTargetText = "";
       String aiOriginalText = "";
-      String aiBuffer = "";
-      bool firstChunkSentToTTS = false;
       bool aiHasDoubleNewline = false;
       final HybridTtsPlayer aiHybridTts = HybridTtsPlayer(
         apiKey: _openAiKey,
@@ -3633,9 +3256,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
           if (_swOpenAI.isRunning) _swOpenAI.stop();
 
           if (!aiHasDoubleNewline) {
-            // Part1 (영어): 누적 + 하이브리드 첫 청크 발사
+            // Part1 (영어): 화면 표시와 히스토리 저장용으로만 누적한다.
             aiTargetText += chunk;
-            aiBuffer += chunk;
 
             if (aiTargetText.contains('\n\n')) {
               // \n\n 감지: Part1 끝, Part2(한국어) 시작
@@ -3643,73 +3265,30 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
               final sepIdx = aiTargetText.indexOf('\n\n');
               final afterSep = aiTargetText.substring(sepIdx + 2);
               aiTargetText = aiTargetText.substring(0, sepIdx);
-              final bufSepIdx = aiBuffer.indexOf('\n\n');
-              if (bufSepIdx >= 0) aiBuffer = aiBuffer.substring(0, bufSepIdx);
               if (afterSep.isNotEmpty) aiOriginalText += afterSep;
-            } else {
-              // Part1 하이브리드: 4단어/구두점 도달 시 첫 청크 발사
-              if (!aiHybridTts.firstChunkFired) {
-                if (!firstChunkSentToTTS) {
-                  _swTTS.start();
-                  firstChunkSentToTTS = true;
-                }
-                final cutIdx =
-                    aiHybridTts.onChunk(aiBuffer, aiTtsFetcher, _swTTS);
-                if (cutIdx >= 0) aiBuffer = aiBuffer.substring(cutIdx);
-              }
             }
           } else {
-            // Part2 (한국어): aiOriginalText에만 누적 — TTS 금지
+            // Part2 (한국어): 실제 대화방에서 nova가 말할 문장이다.
             aiOriginalText += chunk;
           }
 
           // 텍스트는 AI 소리 시작 시점(setAiPaused=false)에 일괄 표시
         }
-        // 스트림 종료: remainder 발사 + 통문장 TtsCache 저장
-        if (!firstChunkSentToTTS) {
-          _swTTS.start();
-          firstChunkSentToTTS = true;
-        }
-        await aiHybridTts.onStreamEnd(
-          fullSentence: aiTargetText.trim(),
-          remainderBuffer: aiBuffer,
+        // 스트림이 끝나면 한국어만 tts-1/nova로 한 번 읽는다.
+        // cacheEnabled=false이므로 이 음성은 대화방을 나가면 폐기된다.
+        _swTTS
+          ..reset()
+          ..start();
+        await aiHybridTts.speakWholeSentence(
+          fullSentence: aiOriginalText.trim(),
           fetcher: aiTtsFetcher,
           swSpeechEnd: _swTTS,
         );
       }();
 
       // ─────────────────────────────────────────────────────
-      // STEP 5: 유저 TTS 모두 재생될 때까지 대기
+      // STEP 5: 유저의 실제 한국어 발화 뒤에 짧게 쉬고 AI 한국어 큐 개방
       // ─────────────────────────────────────────────────────
-      _log('🧠 [PIPE-04]',
-          '유저 TTS 대기 시작. pending=${userTtsFetcher.pendingRequests}');
-
-      int waitTicks = 0;
-      while (userTtsFetcher.pendingRequests > 0) {
-        await Future.delayed(const Duration(milliseconds: 50));
-        waitTicks++;
-        if (waitTicks > 200) {
-          // 10초 타임아웃
-          _log('⚠️ [PIPE-TIMEOUT]', '유저 TTS fetch 10초 초과, 강제 진행');
-          break;
-        }
-      }
-      _log(
-          '🧠 [PIPE-05]', '유저 TTS fetch 완료. isBusy=${_ttsQueueManager.isBusy}');
-
-      // 🔒 [Box 7 USER-DRAIN-SIGNAL] 실제 기반 drain 게이트.
-      //   마지막 유저 청크의 마지막 샘플 재생 완료 즉시 해제한다.
-      //   추정치(wps, 단어수, 첫 청크 차감)는 제거하고 Box 7 이벤트 기반으로 기다린다.
-      _ttsQueueManager.sealUserStream();
-      await _ttsQueueManager.waitUserDrained();
-      _log('🧠 [PIPE-06]',
-          '유저 TTS 재생 완료 → AI 큐 개방. busy=${_ttsQueueManager.isBusy}');
-
-      // ─────────────────────────────────────────────────────
-      // STEP 6: AI 큐 개방
-      // ─────────────────────────────────────────────────────
-      // 🔧 유저 소리 완전 종료 후 0.7초 숨 고르기 → 그 다음 글자+소리 동시 출력.
-      //    유저 소리와 AI 소리는 절대 겹치지 않는다.
       await Future.delayed(const Duration(milliseconds: 350));
       _log('🧠 [PIPE-GAP]', '유저-AI 전환 안전 간격 350ms 완료');
 
@@ -3726,10 +3305,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         });
         _revealForReading(aiIndex, aiTargetText); // 🆕 긴 대사 텔레프롬프터
       }
-      // [v3.8] AI 한국어 단일 호출 통합
-      //   streamGrammarQuestion 프롬프트가 "영어 \n\n 한국어" 두 파트를 한 스트림으로 출력
-      //   Part1 = target + TTS, Part2 = original (TTS 미전송)
-      //   별도 generateCleanOriginal 호출 없음 — GPT 호출 1회로 둘 다 처리
+      // Part1 영어는 화면/히스토리용, Part2 한국어는 실시간 대화용이다.
 
       await aiGenerationTask;
       // 스트리밍이 아직 진행 중이었다면 최종 텍스트 반영
@@ -3743,7 +3319,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       _log('🧠 [PIPE-08]',
           'aiGenerationTask 완료. AI pending=${aiTtsFetcher.pendingRequests}');
 
-      waitTicks = 0;
+      int waitTicks = 0;
       while (aiTtsFetcher.pendingRequests > 0 || _ttsQueueManager.isBusy) {
         await Future.delayed(const Duration(milliseconds: 50));
         waitTicks++;
@@ -3758,20 +3334,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       // ─────────────────────────────────────────────────────
       // STEP 7: Firestore 저장
       // ─────────────────────────────────────────────────────
-      // 히스토리 저장 전 Korean original 완료 보장 (1턴 및 2턴+)
-      // effectiveOriginal(화면 표시용)과 달리, 저장 payload에는 실제 originalRaw 사용
-      if (userOrigFuture != null) {
-        try {
-          final cleanKorean =
-              await userOrigFuture.timeout(const Duration(seconds: 10));
-          if (hostIndex < _localMessages.length &&
-              (_localMessages[hostIndex]['original'] ?? '')
-                  .toString()
-                  .isEmpty) {
-            _localMessages[hostIndex]['original'] = cleanKorean;
-          }
-        } catch (_) {}
-      }
+      // 유저 원문은 STT로 받은 한국어를 그대로 저장한다.
       final String _hostOriginal = hostIndex < _localMessages.length
           ? ((_localMessages[hostIndex]['original']) ?? '').toString()
           : '';
@@ -4445,9 +4008,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     final bool isExpandTurn =
         role == 'HOST' && (turnId >= 2 || targetParts.length >= 2);
 
-    // HOST bubbles only show the target sentence; original stays available for history saves.
-    final String effectiveOriginal =
-        (role == 'HOST_TEMP' || role == 'HOST') ? '' : originalRaw;
+    final String effectiveOriginal = role == 'HOST_TEMP' ? '' : originalRaw;
 
     return Align(
       alignment: isHost ? Alignment.centerRight : Alignment.centerLeft,
@@ -4477,6 +4038,17 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
                       color: Colors.white,
                       fontSize: 16 * _fontScale,
                       fontWeight: FontWeight.bold)),
+              if (_showOriginal && originalRaw.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(
+                  originalRaw,
+                  textAlign: isHost ? TextAlign.right : TextAlign.left,
+                  style: TextStyle(
+                    color: Colors.grey,
+                    fontSize: 10 * _fontScale,
+                  ),
+                ),
+              ],
             ] else ...[
               Text(displayTarget,
                   textAlign: isHost ? TextAlign.right : TextAlign.left,
@@ -4892,6 +4464,30 @@ class HybridTtsPlayer {
     onLog?.call('[HYB-01]',
         '발사(${punctMatch != null ? "구두점" : "$fireWordThreshold단어"}): "$text" ${lastFirstChunkMs}ms');
     return cutIdx;
+  }
+
+  /// 🔊 [WHOLE-SENTENCE] 문장을 쪼개지 않고 tts-1 한 번으로 읽는다.
+  ///
+  /// `fetcher.addText`가 캐시 확인 → (없으면) API 1회 → 캐시 저장 → 재생 큐를
+  /// 모두 처리하므로, 히스토리용 통문장 캐시(`_cacheFullSentenceInBackground`)를
+  /// 따로 부를 필요가 없다. 한 턴에 나가던 tts-1 요청 4개가 1개로 줄고, 같은
+  /// 문장을 다시 들을 때는 호출이 0개가 된다.
+  ///
+  /// 조각내지 않는 것이 핵심이다. tts-1은 넘겨준 텍스트를 완결된 발화로 읽으므로,
+  /// 쪼개면 조각마다 억양이 새로 시작하고 끝에서 내려간다. 한 번에 주면 문장
+  /// 전체가 하나의 호흡으로 나온다.
+  Future<void> speakWholeSentence({
+    required String fullSentence,
+    required ChunkedTtsFetcher fetcher,
+    required Stopwatch swSpeechEnd,
+  }) async {
+    final sentence = fullSentence.trim();
+    if (sentence.isEmpty) return;
+    _firstChunkFired = true;
+    lastFirstChunkMs = swSpeechEnd.elapsedMilliseconds;
+    fetcher.addText(sentence);
+    onLog?.call(
+        '[HYB-WHOLE]', '통문장 1회 발사 (${sentence.length}c) ${lastFirstChunkMs}ms');
   }
 
   // GPT 스트림 종료 시 호출:
@@ -5675,6 +5271,7 @@ class ChunkedTtsFetcher {
   final TtsQueueManager audioQueue;
   final String voice;
   final String language;
+  final bool cacheEnabled;
   final bool isUser; // 🔧 [v3.5] true=유저 큐, false=AI 큐
   final void Function(String tag, String msg)? onLog; // 🔬 [v3.1] 로그 훅
 
@@ -5690,6 +5287,7 @@ class ChunkedTtsFetcher {
     this.audioQueue,
     this.voice, {
     this.language = 'en',
+    this.cacheEnabled = true,
     this.isUser = true, // 🔧 [v3.5] 기본값: 유저 큐
     this.onAllComplete,
     this.onLog,
@@ -5711,13 +5309,15 @@ class ChunkedTtsFetcher {
 
   Future<void> _fetch(int id, String text) async {
     // [1단계] 로컬 캐시 확인 (히트 시 즉시 반환)
-    final cached = await TtsCache.get(text, voice);
-    if (cached != null && cached.isNotEmpty) {
-      _buffer[id] = cached;
-      _pendingCount--;
-      _pushReady();
-      if (_pendingCount == 0) onAllComplete?.call();
-      return;
+    if (cacheEnabled) {
+      final cached = await TtsCache.get(text, voice);
+      if (cached != null && cached.isNotEmpty) {
+        _buffer[id] = cached;
+        _pendingCount--;
+        _pushReady();
+        if (_pendingCount == 0) onAllComplete?.call();
+        return;
+      }
     }
 
     // [2단계] API 호출 (타임아웃 사다리 5/8/12초, 최대 3회 시도) — TTS 지연 스파이크 대응
@@ -5748,7 +5348,7 @@ class ChunkedTtsFetcher {
           onLog?.call('🔊 [TTS-02]',
               '[$turnTag] API OK (${result.length}B) for "$text"');
           // [3단계] 캐시 저장 (백그라운드)
-          TtsCache.put(text, voice, result);
+          if (cacheEnabled) TtsCache.put(text, voice, result);
           break;
         } else {
           onLog?.call('❌ [TTS-API-ERR]',
@@ -6007,17 +5607,8 @@ class StepExpandBrain {
     bool disableRestate = false,
     bool disableHeardConfirmation = false,
     String firstUtteranceContext = '',
-    // 🎙️ [FIRST-TURN-REALTIME] 유저 첫 대사에만 주입된다. 넘어오면 gpt-4o-mini +
-    //   tts-1 대신 gpt-realtime-2.1-mini 한 번으로 씨앗 문장과 음성을 함께 받는다.
-    //   연결/응답 실패 시 아래 기존 경로로 그대로 폴백한다.
-    FirstTurnRealtimeVoice? realtimeVoice,
-    RealtimeAnyoneAdapter? secureAdapter,
-    String secureTurnId = '',
-    String secureVoice = 'echo',
-    void Function(RealtimeTranslationTurn turn)? onSecureTurn,
-    void Function()? onSecureSuccess,
-    void Function(Object reason)? onSecureFallback,
-    bool Function()? shouldContinue,
+    // 🧠 [STEP-EXPAND] 이 턴에 쓸 텍스트 모델. 첫 턴만 상위 모델을 받는다.
+    String model = 'gpt-4o-mini',
   }) async* {
     final client = OpenAiConnectionPool.instance.client;
     try {
@@ -6095,6 +5686,17 @@ ${buildStepExpandFirstTurnSeedPolicy(targetLang)}
 - PART 2: A grown/expanded English sentence that naturally merges:
     (a) The most recent expanded sentence from History
     (b) The new information from Part 1
+  EVERY clause in PART 2 must trace back to words the user actually said — in
+  History or in Part 1. Before writing a clause, point to the user's own words
+  for it. If you cannot, do not write it. You are weaving their sentences
+  together, not co-writing with them.
+  Never pad with feelings or judgements they did not express — "and I enjoyed
+  it", "it was great", "which made me happy" are inventions unless the user
+  said so. A shorter honest sentence beats a fuller invented one.
+  Vary the connector. Do NOT use the same one twice in a sentence — if the last
+  link was "and", make this one different (where / which / so / but / because /
+  and then). Three clauses strung on "and ... and ..." reads like a list, not
+  like a person talking.
   Grow it the way a native speaker actually TALKS — linearly, left to right,
   by chaining short clauses one after another. Do NOT nest clauses inside clauses.
   Preferred connectors (use these, and vary them turn to turn):
@@ -6181,6 +5783,7 @@ Output: [GARBLED]
 
 [RULES]
 - CASE 2 output MUST have the empty line (\n\n) between parts.
+- CASE 1 output MUST NOT have an empty line. One part only. If History is empty and you are about to write a second part, stop — you are inventing.
 - Output ONLY the translation. No labels, no "Part 1:", no meta-comments.
 - Insert commas (,) after natural phrases for TTS rhythm.
 - If the input is meaningless noise (random symbols, silence markers, or clearly non-speech artifacts), output EXACTLY: [EVAPORATE]
@@ -6192,54 +5795,6 @@ Output: [GARBLED]
       final String userContent =
           'History:\n$contextStr\n\nInput: $textOriginal';
 
-      // 🔐 모든 Step Expand 턴의 사용자 번역문+음성을 장기 WebRTC 세션의
-      // gpt-realtime-2.1-mini가 함께 만든다. History에는 매 턴의 확장문과
-      // 질문이 누적되므로 모델이 전체 성장 흐름을 보면서 다음 문장을 만든다.
-      if (secureAdapter != null) {
-        Object fallbackReason =
-            StateError('Unknown Step Expand realtime failure.');
-        try {
-          if (shouldContinue?.call() == false) return;
-          final turn = secureAdapter.requestTranslatedTurn(
-            turnId: secureTurnId,
-            sourceText: userContent,
-            instructions: sysPrompt,
-            voice: secureVoice,
-          );
-          onSecureTurn?.call(turn);
-          final outcome = await turn.done;
-          final finalText = (await turn.finalText).trim();
-          if (outcome == RealtimeTurnOutcome.completed &&
-              finalText.isNotEmpty) {
-            if (shouldContinue?.call() == false) return;
-            onSecureSuccess?.call();
-            yield finalText;
-            return;
-          }
-          fallbackReason = StateError(
-              'outcome=${outcome.name} final_text_empty=${finalText.isEmpty}');
-        } catch (error) {
-          fallbackReason = error;
-        }
-        secureAdapter.cancelActiveTurn();
-        if (shouldContinue?.call() == false) return;
-        onSecureFallback?.call(fallbackReason);
-      }
-
-      // 🎙️ [FIRST-TURN-REALTIME] 첫 대사: 같은 시스템 프롬프트를 Realtime에 그대로
-      //   넘겨 씨앗 문장(전사)과 낭독 음성을 한 번에 받는다. begin()이 false면
-      //   아무 일도 없었던 것처럼 아래 gpt-4o-mini 경로가 이어진다.
-      if (realtimeVoice != null) {
-        final bool realtimeReady = await realtimeVoice.begin(
-          instructions: sysPrompt,
-          userContent: userContent,
-        );
-        if (realtimeReady) {
-          yield* realtimeVoice.textStream;
-          return;
-        }
-      }
-
       final request = http.Request(
         'POST',
         Uri.parse('https://api.openai.com/v1/chat/completions'),
@@ -6249,7 +5804,7 @@ Output: [GARBLED]
         'Content-Type': 'application/json; charset=utf-8',
       });
       request.body = jsonEncode({
-        'model': 'gpt-4o-mini',
+        'model': model,
         'stream': true,
         'temperature': 0.0,
         'max_tokens': 200,
@@ -6490,6 +6045,13 @@ Read the conversation History carefully.
 [YOUR ROLE]
 You are a warm, skilled conversation coach — not a grammar teacher. Your job is to ask ONE short, natural question that makes the user want to share one more detail about their story. The detail they share will naturally grow the sentence, but you NEVER mention grammar.
 
+[SESSION GOAL — HIGHEST PRIORITY]
+- The live conversation is in Korean, while the screen records the target-language English.
+- Across exactly five user turns, collect one useful sentence-building detail per turn and keep joining those details into one coherent expanded sentence.
+- Stay warmly focused on obtaining the next attachable detail. Do not drift into jokes, wordplay, trivia, long reactions, or entertaining banter that does not help complete the expanded sentence.
+- PART 2 is the actual Korean line spoken aloud to the user by tts-1/nova. It must sound like natural, friendly Korean conversation, not a stiff literal translation.
+- PART 1 and PART 2 must ask the same single question and must not add different facts.
+
 [TWO-LAYER DESIGN — MANDATORY]
 
 LAYER 1 — INTERNAL REASONING (never output, work silently):
@@ -6713,7 +6275,7 @@ User: Too many deadlines piling up.
 [OUTPUT FORMAT - STRICT]
 Output EXACTLY two parts separated by ONE empty line.
 PART 1: Your English question (follow all rules above).
-PART 2: A natural Korean conversational translation of PART 1.""";
+PART 2: The natural Korean conversational line that will actually be spoken aloud. Keep the same meaning as PART 1.""";
 
       final request = http.Request(
         'POST',
