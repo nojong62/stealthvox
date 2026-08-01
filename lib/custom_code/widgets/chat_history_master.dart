@@ -6557,7 +6557,7 @@ RULES — follow exactly:
               ),
               const SizedBox(width: 10),
               SizedBox(
-                width: 104,
+                width: 128,
                 child: menuBox(
                   child: DropdownButton<double>(
                     value: speed,
@@ -6588,14 +6588,17 @@ RULES — follow exactly:
   }
 
   Widget _buildP3SentenceText(String sentence) {
-    return Text(
-      sentence,
-      textAlign: TextAlign.center,
-      style: TextStyle(
-        color: Colors.white70,
-        fontSize: 20 * _fontScale,
-        height: 1.65,
-        fontWeight: FontWeight.w500,
+    return SizedBox(
+      width: double.infinity,
+      child: Text(
+        sentence,
+        textAlign: TextAlign.left,
+        style: TextStyle(
+          color: Colors.white70,
+          fontSize: 20 * _fontScale,
+          height: 1.65,
+          fontWeight: FontWeight.w500,
+        ),
       ),
     );
   }
@@ -6736,6 +6739,7 @@ RULES — follow exactly:
         nativeStyle ? _selectedP3NativeVoice : _selectedP3LearningVoice;
     final speed = nativeStyle ? _p3NativeSpeed : _p3LearningSpeed;
     final busy = _p3ShadowLoading || _p3ShadowPlaying;
+    final focusedReading = _p3ShadowLoading || _p3ShadowPlaying;
     return Column(
       children: [
         Padding(
@@ -6782,56 +6786,58 @@ RULES — follow exactly:
           ),
         ),
         if (_isStepExpandRoom) _buildPracticeTabBar(),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-          child: _buildP3VariantSelector(),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-          child: _buildP3PracticeControls(
-            label: nativeStyle ? '원어민식 쉐도잉' : '학습용 쉐도잉',
-            options: nativeStyle
-                ? _nativeMeaningUnitVoiceOptions
-                : _p3LearningVoiceOptions,
-            voice: voice,
-            speed: speed,
-            onVoiceSelected: (selectedVoice) {
-              setState(() {
-                if (nativeStyle) {
-                  _selectedP3NativeVoice = selectedVoice;
-                } else {
-                  _selectedP3LearningVoice = selectedVoice;
-                }
-              });
-              unawaited(_startP3MeaningUnitShadowing(
-                nativeStyle: nativeStyle,
-                voice: selectedVoice,
-                speed: speed,
-              ));
-            },
-            onSpeedSelected: (selectedSpeed) {
-              setState(() {
-                if (nativeStyle) {
-                  _p3NativeSpeed = selectedSpeed;
-                } else {
-                  _p3LearningSpeed = selectedSpeed;
-                }
-              });
-              if (voice != null) {
+        if (!focusedReading)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+            child: _buildP3VariantSelector(),
+          ),
+        if (!focusedReading)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            child: _buildP3PracticeControls(
+              label: nativeStyle ? '원어민식 쉐도잉' : '학습용 쉐도잉',
+              options: nativeStyle
+                  ? _nativeMeaningUnitVoiceOptions
+                  : _p3LearningVoiceOptions,
+              voice: voice,
+              speed: speed,
+              onVoiceSelected: (selectedVoice) {
+                setState(() {
+                  if (nativeStyle) {
+                    _selectedP3NativeVoice = selectedVoice;
+                  } else {
+                    _selectedP3LearningVoice = selectedVoice;
+                  }
+                });
                 unawaited(_startP3MeaningUnitShadowing(
                   nativeStyle: nativeStyle,
-                  voice: voice,
-                  speed: selectedSpeed,
+                  voice: selectedVoice,
+                  speed: speed,
                 ));
-              }
-            },
+              },
+              onSpeedSelected: (selectedSpeed) {
+                setState(() {
+                  if (nativeStyle) {
+                    _p3NativeSpeed = selectedSpeed;
+                  } else {
+                    _p3LearningSpeed = selectedSpeed;
+                  }
+                });
+                if (voice != null) {
+                  unawaited(_startP3MeaningUnitShadowing(
+                    nativeStyle: nativeStyle,
+                    voice: voice,
+                    speed: selectedSpeed,
+                  ));
+                }
+              },
+            ),
           ),
-        ),
         Expanded(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(18, 4, 18, 8),
             child: _buildP3FullSentenceCard(
-              label: nativeStyle ? 'Polished Sentence' : 'Expanded Sentence',
+              label: nativeStyle ? 'Polished' : 'Expanded',
               sentence: sentence,
               active: _p3UsesNativeStyle == nativeStyle,
               scrollController: _p3SentenceScrollController,
