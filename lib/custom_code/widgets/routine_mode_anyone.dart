@@ -11,11 +11,6 @@ import 'package:flutter/foundation.dart';
 // Begin custom widget code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
-import 'index.dart'; // Imports other custom widgets
-
-import '/custom_code/widgets/index.dart';
-import '/custom_code/actions/index.dart';
-import '/flutter_flow/custom_functions.dart';
 import 'package:flutter/services.dart'; // 🔬 [v3.1] Clipboard용
 
 // ====================================================================
@@ -23,19 +18,15 @@ import 'package:flutter/services.dart'; // 🔬 [v3.1] Clipboard용
 // ====================================================================
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:record/record.dart';
 import 'package:web_socket_channel/io.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:http/http.dart' as http;
 import 'package:firebase_remote_config/firebase_remote_config.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:permission_handler/permission_handler.dart';
 // 🔧 [v3 추가] TTS 로컬 캐싱 + Firestore 저장용
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
@@ -197,10 +188,11 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   bool _showUsageGuide = false; // 🆕 [Anyone] 이용방법 말풍선 토글
   String? _selectedAiVoice;
   bool _showVoiceMenu = true;
+  String _characterShortTermMemory = '';
   // 🆕 [진입 안내] 스텔스룸 준비 오버레이에 있던 문구를 페이지 안으로 옮겼다
   //   (Realtime 연결 대기가 사라져 준비 화면 자체가 제거됨). Step Expand의
   //   _showOpeningNudgeOnce와 같은 방식 — 2초 노출 후 페이드아웃.
-  static const String _openingNudgeText = '여기, 그 사람이 있어요.\n편하게 말 걸어보세요.';
+  static const String _openingNudgeText = '여기,\n그 사람이 있어요.\n편하게\n말 걸어보세요.';
   bool _hasShownNudgeBubble = false;
   bool _showNudgeBubble = false;
   int _turnCounter = 0;
@@ -283,8 +275,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   }
   // ──────────────────────────────────────────────────────────────────
 
-  Widget _buildIdleBanner() => const SizedBox.shrink();
-
   Widget _buildIdleOverlay() => const SizedBox.shrink();
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -301,9 +291,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   String _specTranscript = '';
   Future<String?>? _prefetchedFirstTurnTranscribe;
   int _prefetchedFirstTurnPcmBytes = 0;
-  static const int COMMIT_WAIT_SPEECH_FINAL_MS =
+  static const int _commitWaitSpeechFinalMs =
       kFreeTalkCommitWaitMs; // speech_final: 900ms
-  static const int COMMIT_WAIT_UNCERTAIN_MS =
+  static const int _commitWaitUncertainMs =
       kFreeTalkCommitWaitUncertainMs; // UtteranceEnd: 500ms
   // 📦 [Meaning Confidence Probe] Deepgram 결과의 전사 신뢰도를 측정한다.
   // 낮은 confidence는 선택적 gpt-4o-transcribe 재전사 조건으로 사용한다.
@@ -321,7 +311,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   void _log(String tag, String msg) {
     final ts = DateTime.now().toIso8601String().substring(11, 23);
     final line = '[$ts] $tag $msg';
-    print(line);
+    debugPrint(line);
     AppLogLedger.instance.add('FREETALK', '$tag $msg');
   }
 
@@ -760,11 +750,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     }
   }
 
-  // 언어 수준 고정값 (초/중/고급 선택 UI 제거 — 내부 프롬프트 파이프라인용 Intermediate 고정)
-  final String _freeTalkLevel = "Intermediate";
-
   // 대화 컨텍스트용 슬라이딩 히스토리 (파이프라인에서 사용 — 유지)
-  List<Map<String, String>> _recentHistory = [];
+  final List<Map<String, String>> _recentHistory = [];
 
   // 오디오 및 UI
   final List<Map<String, dynamic>> _localMessages = [];
@@ -786,7 +773,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   final Stopwatch _swDeepgram = Stopwatch();
   final Stopwatch _swOpenAI = Stopwatch();
   final Stopwatch _swTTS = Stopwatch();
-  String _debugResult = "⏱️ 대기 중";
 
   @override
   void initState() {
@@ -819,12 +805,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         }
         if (_swTTS.isRunning) {
           _swTTS.stop();
-          if (mounted) {
-            setState(() {
-              _debugResult =
-                  "⏱️ 확정: ${_swDeepgram.elapsedMilliseconds}ms | 뇌: ${_swOpenAI.elapsedMilliseconds}ms | 입: ${_swTTS.elapsedMilliseconds}ms";
-            });
-          }
         }
       },
       onPlaybackEnd: (request, ok) {
@@ -1040,7 +1020,24 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   void _saveRecentHistory(String userText, String aiText) {
     _recentHistory.add({'role': 'user', 'content': userText});
     _recentHistory.add({'role': 'assistant', 'content': aiText});
-    while (_recentHistory.length > 4) _recentHistory.removeAt(0);
+    while (_recentHistory.length > 12) {
+      _recentHistory.removeAt(0);
+    }
+  }
+
+  String _voiceCharacterInstruction(String voice) {
+    switch (voice) {
+      case 'alloy':
+        return '20~30대 남성. 자연스럽고 친근한 젊은 직장인 이미지로 반응한다.';
+      case 'coral':
+        return '20~30대 여성. 밝고 친근하며 반응성이 좋은 느낌으로 대화한다.';
+      case 'cedar':
+        return '40~50대 남성. 말과 반응에서 안정감이 느껴지도록 대화한다.';
+      case 'marin':
+        return '40~50대 여성. 차분하고 성숙한 인상이 느껴지도록 대화한다.';
+      default:
+        return '상대방의 말투와 관계 단서를 존중하며 자연스럽게 대화한다.';
+    }
   }
 
 // ====================================================================
@@ -1152,6 +1149,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     // 인덱스가 큰 것부터 제거 (인덱스 밀림 방지)
     _localMessages.removeAt(lastSystemIdx);
     if (lastHostIdx >= 0) _localMessages.removeAt(lastHostIdx);
+    // 삭제된 대화를 근거로 만든 인물 추론은 다음 턴에 다시 쌓는다.
+    _characterShortTermMemory = '';
   }
 
   void _restartConfiguredListening({int? expectedPipelineGeneration}) {
@@ -1212,7 +1211,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       _isConversationActive = true;
       if (mounted) {
         setState(() {
-          _debugResult = "⏱️ 듣는 중...";
           _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
         });
         // HOST_TEMP 버블은 스크롤 트리거 없음 — 실제 HOST 버블 등장 시 스크롤
@@ -1381,9 +1379,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     final bool isFirstUtterance = _turnCounter == 0;
     final waitMs = isFirstUtterance
         ? kFreeTalkFirstTurnCommitWaitMs
-        : (speechFinal
-            ? COMMIT_WAIT_SPEECH_FINAL_MS
-            : COMMIT_WAIT_UNCERTAIN_MS);
+        : (speechFinal ? _commitWaitSpeechFinalMs : _commitWaitUncertainMs);
     _log('🔀 [STOP-01]',
         '$source 수신: len=${clean.length} waitMs=$waitMs first=$isFirstUtterance');
 
@@ -1873,9 +1869,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
     if (isGhost) {
       if (_turnCounter == currentTurnId && _turnCounter > 0) _turnCounter--;
-      if (mounted)
+      if (mounted) {
         setState(
             () => _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP'));
+      }
       if (_isConversationActive) {
         // 너무 짧아서 인식 실패 → 다시 말해 달라 요청
         if (finalTranscript.length <= 2) {
@@ -1946,8 +1943,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           final original = (m['original'] ?? '').toString().trim();
           return original.isNotEmpty && original != '...';
         }).toList();
-        if (validMsgs.length > 10)
+        if (validMsgs.length > 10) {
           validMsgs = validMsgs.sublist(validMsgs.length - 10);
+        }
         contextStr = validMsgs
             .map((m) =>
                 "${m['role'] == 'HOST' ? 'User' : 'AI'}: ${m['original']}")
@@ -2037,14 +2035,16 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           heardConfirmation = true;
           _log('[HEARD-CONFIRM]', '단어 확인 필요');
         }
-        if (mounted && !clarified && !heardConfirmation)
+        if (mounted && !clarified && !heardConfirmation) {
           setState(() => _localMessages[hostIndex]['target'] = userTargetText);
+        }
       }
 
       if (evaporated) {
-        if (mounted)
+        if (mounted) {
           setState(
               () => _localMessages.removeWhere((m) => m['role'] == 'HOST'));
+        }
         if (_isConversationActive && _turnCounter == currentTurnId) {
           skipFinallyRestart = true;
           _isPipelineRunning = false;
@@ -2317,20 +2317,24 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       _logProbeTiming('AI_REQUEST');
       _awaitingAiFirstTextProbe = true;
 
-      // 🎙️ [LEAD] 질문은 3턴에 1회만 허용해 대화 주도권을 유저에게 둔다.
-      final bool allowAiQuestion = currentTurnId % 3 == 0;
-      _log('🎙️ [LEAD]', 'turn=$currentTurnId allow_question=$allowAiQuestion');
+      // 상대방의 정체와 관계가 단기 기억에서 확실해진 뒤에만 질문을 허용한다.
+      final bool allowAiQuestion =
+          _characterShortTermMemory.contains('CONFIDENCE: HIGH');
+      _log('🎙️ [LEAD]',
+          'turn=$currentTurnId allow_question=$allowAiQuestion character_memory=${_characterShortTermMemory.isNotEmpty}');
+      final selectedVoice = _selectedAiVoice ?? 'alloy';
       final aiStream = FreeTalkBrain.streamFreeTalkResponse(
         apiKey: _openAiKey,
         userTargetText: finalTranscript,
         contextStr: latestContextStr,
         myTarget: 'Korean',
-        level: _freeTalkLevel,
         allowQuestion: allowAiQuestion,
+        characterMemory: _characterShortTermMemory,
+        voiceCharacterInstruction: _voiceCharacterInstruction(selectedVoice),
       );
 
       // AI 생성을 Future로 (유저 재생과 병렬)
-      bool _firstAiChunkLogged = false;
+      bool firstAiChunkLogged = false;
       final Future<void> aiGenerationTask = () async {
         await for (String chunk in aiStream) {
           // 🛑 [PIPE-STOP] 생성 도중 방을 나가면 남은 청크를 버린다.
@@ -2349,9 +2353,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
             _awaitingAiFirstTextProbe = false;
             _logProbeTiming('AI_FIRST_TEXT');
           }
-          if (!_firstAiChunkLogged) {
+          if (!firstAiChunkLogged) {
             _log('🧠 [PIPE-03]', 'GPT 첫 청크 수신');
-            _firstAiChunkLogged = true;
+            firstAiChunkLogged = true;
           }
           if (_swOpenAI.isRunning) _swOpenAI.stop();
           aiOriginalText += chunk;
@@ -2362,6 +2366,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       // 요청과 PCM 수신을 시작한다. 실제 재생은 아래에서 사용자 음성이 끝난
       // 뒤 FIFO 큐에 연결하므로 두 음성은 겹치지 않는다.
       Future<String>? aiTargetFuture;
+      Future<String>? characterMemoryFuture;
       final Future<void> aiPreparationTask = aiGenerationTask.then((_) {
         if (!isActivePipelineGeneration(
               expected: pipelineGeneration,
@@ -2378,6 +2383,13 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
             apiKey: _openAiKey,
             koreanText: aiOriginalText,
             targetLang: targetLangName,
+          );
+          characterMemoryFuture = FreeTalkBrain.updateCharacterMemory(
+            apiKey: _openAiKey,
+            previousMemory: _characterShortTermMemory,
+            conversationContext: contextStr,
+            latestUserLine: finalTranscript,
+            latestAiLine: aiOriginalText,
           );
         }
         final String aiTtsText = _cleanText(aiOriginalText.trim());
@@ -2453,6 +2465,22 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           }
         } catch (e) {
           _log('❌ [AI-TARGET-ERR]', 'AI 영어 번역 실패: $e');
+        }
+      }
+
+      final memoryFuture = characterMemoryFuture;
+      if (memoryFuture != null) {
+        try {
+          final updatedMemory = await memoryFuture.timeout(
+            const Duration(seconds: 8),
+            onTimeout: () => _characterShortTermMemory,
+          );
+          if (updatedMemory.trim().isNotEmpty) {
+            _characterShortTermMemory = updatedMemory.trim();
+            _log('🧠 [CHARACTER-MEMORY]', _characterShortTermMemory);
+          }
+        } catch (e) {
+          _log('⚠️ [CHARACTER-MEMORY]', 'update_failed=${e.runtimeType}');
         }
       }
 
@@ -2845,81 +2873,12 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   }
 
   Widget _buildVoiceMenu() {
-    Widget choice({
-      required String gender,
-      required String voice,
-      required IconData icon,
-    }) {
-      final selected = _selectedAiVoice == voice;
-      return Expanded(
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: () {
-            setState(() {
-              _selectedAiVoice = voice;
-              _showVoiceMenu = false;
-            });
-            _log('🎙️ [VOICE-SELECT]', 'voice=$voice gender=$gender');
-            _scheduleStartupRetry(immediate: true);
-          },
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-            decoration: BoxDecoration(
-              color: selected
-                  ? const Color(0xFF7F77DD).withValues(alpha: 0.28)
-                  : Colors.white.withValues(alpha: 0.06),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: selected
-                    ? const Color(0xFF9B93FF)
-                    : Colors.white.withValues(alpha: 0.14),
-              ),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon,
-                    color: selected ? const Color(0xFFB9B4FF) : Colors.white70,
-                    size: 23),
-                const SizedBox(height: 7),
-                Text('$gender 추천',
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600)),
-                const SizedBox(height: 3),
-                Text(voice,
-                    style: TextStyle(
-                        color:
-                            selected ? const Color(0xFFB9B4FF) : Colors.white54,
-                        fontSize: 12)),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
-    Widget ageRow(String age, String maleVoice, String femaleVoice) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(age,
-              style: const TextStyle(
-                  color: Colors.amberAccent,
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          Row(children: [
-            choice(gender: '남성', voice: maleVoice, icon: Icons.male_rounded),
-            const SizedBox(width: 10),
-            choice(
-                gender: '여성', voice: femaleVoice, icon: Icons.female_rounded),
-          ]),
-        ],
-      );
-    }
+    const options = <String, String>{
+      'alloy': 'alloy  ·  남성  ·  20~30대',
+      'coral': 'coral  ·  여성  ·  20~30대',
+      'cedar': 'cedar  ·  남성  ·  40~50대',
+      'marin': 'marin  ·  여성  ·  40~50대',
+    };
 
     return Positioned.fill(
       child: Container(
@@ -2940,26 +2899,72 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Row(children: [
-                  Icon(Icons.record_voice_over_rounded,
+                Row(children: [
+                  const Icon(Icons.record_voice_over_rounded,
                       color: Colors.amberAccent, size: 23),
-                  SizedBox(width: 9),
-                  Text('AI 보이스 선택',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold)),
+                  const SizedBox(width: 9),
+                  const Expanded(
+                    child: Text('상대방 목소리 설정',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold)),
+                  ),
+                  if (_selectedAiVoice != null)
+                    IconButton(
+                      onPressed: () => setState(() => _showVoiceMenu = false),
+                      icon: const Icon(Icons.close_rounded,
+                          color: Colors.white54, size: 21),
+                      tooltip: '닫기',
+                    ),
                 ]),
                 const SizedBox(height: 8),
                 const Text(
-                  '연령대와 성별에 맞는 보이스를 선택하면 대화가 시작됩니다.',
+                  '상대방의 연령대와 성별에 맞는 목소리를 선택하세요. 처음 선택하면 대화가 시작됩니다.',
                   style: TextStyle(
                       color: Colors.white60, fontSize: 13, height: 1.45),
                 ),
                 const SizedBox(height: 18),
-                ageRow('20~30대', 'verse', 'coral'),
-                const SizedBox(height: 18),
-                ageRow('40~50대', 'cedar', 'marin'),
+                DropdownButtonFormField<String>(
+                  initialValue: _selectedAiVoice,
+                  isExpanded: true,
+                  dropdownColor: const Color(0xFF303036),
+                  iconEnabledColor: const Color(0xFFB9B4FF),
+                  hint: const Text('목소리를 선택하세요',
+                      style: TextStyle(color: Colors.white54)),
+                  decoration: InputDecoration(
+                    filled: true,
+                    fillColor: Colors.white.withValues(alpha: 0.06),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 13),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide(
+                          color: Colors.white.withValues(alpha: 0.16)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: const BorderSide(color: Color(0xFF9B93FF)),
+                    ),
+                  ),
+                  items: options.entries
+                      .map((entry) => DropdownMenuItem<String>(
+                            value: entry.key,
+                            child: Text(entry.value,
+                                style: const TextStyle(
+                                    color: Colors.white, fontSize: 14)),
+                          ))
+                      .toList(),
+                  onChanged: (voice) {
+                    if (voice == null) return;
+                    setState(() {
+                      _selectedAiVoice = voice;
+                      _showVoiceMenu = false;
+                    });
+                    _log('🎙️ [VOICE-SELECT]', 'voice=$voice');
+                    _scheduleStartupRetry(immediate: true);
+                  },
+                ),
               ],
             ),
           ),
@@ -2982,12 +2987,12 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Align(
+                const Align(
                   alignment: Alignment.topRight,
                   child: Padding(
-                    padding: const EdgeInsets.only(right: 22),
+                    padding: EdgeInsets.only(right: 22),
                     child: CustomPaint(
-                      size: const Size(22, 11),
+                      size: Size(22, 11),
                       painter: _BubbleTailPainter(),
                     ),
                   ),
@@ -3007,11 +3012,11 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
                           offset: const Offset(0, 6)),
                     ],
                   ),
-                  child: Column(
+                  child: const Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(children: const [
+                      Row(children: [
                         Icon(Icons.lightbulb_outline,
                             color: Colors.amberAccent, size: 20),
                         SizedBox(width: 8),
@@ -3034,14 +3039,14 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
                           ),
                         ),
                       ]),
-                      const SizedBox(height: 12),
-                      const Text(
+                      SizedBox(height: 12),
+                      Text(
                         '먼저 상단에서 AI 보이스를 선택하세요. 사용자와 AI는 모두 한국어로 대화하고, 화면에는 영어가 표시됩니다. 대화하고 싶은 사람을 떠올려 편하게 말을 꺼내면 AI가 그 사람이 되어 대답합니다. 대화가 끝나면 한·영 문장과 영어 연습 음성이 히스토리에 준비됩니다.',
                         style: TextStyle(
                             color: Colors.white, fontSize: 14, height: 1.6),
                       ),
-                      const SizedBox(height: 10),
-                      const Align(
+                      SizedBox(height: 10),
+                      Align(
                         alignment: Alignment.centerRight,
                         child: Text("(말풍선을 톡 누르면 닫혀요)",
                             style:
@@ -3301,7 +3306,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text("Free Talk",
+              const Text("Free Talk",
                   style: TextStyle(
                       color: Colors.white54,
                       fontSize: 20,
@@ -3452,13 +3457,13 @@ class ConversationHistory {
   }
 
   int _estimatedTokens() {
-    return _turns.fold(0, (sum, turn) {
+    return _turns.fold(0, (total, turn) {
       final content = turn['content'] ?? '';
       // 한글 비율에 따라 토큰 추산 조정
       final koreanChars = RegExp(r'[가-힣]').allMatches(content).length;
-      final ratio = koreanChars / (content.length > 0 ? content.length : 1);
+      final ratio = koreanChars / (content.isNotEmpty ? content.length : 1);
       final tokenRate = 0.75 + (ratio * 1.05); // 영어 0.75 ~ 한국어 1.8
-      return sum + (content.length * tokenRate).round();
+      return total + (content.length * tokenRate).round();
     });
   }
 
@@ -3513,7 +3518,6 @@ class DeepgramV2VoiceManager {
   String _currentTranscript = '';
   final List<DeepgramWordResult> _finalWords = [];
   final List<double> _chunkTranscriptConfidences = [];
-  bool _isConnected = false;
   bool _isDisposed = false;
   int _retryCount = 0;
   static const int _maxRetries = 5;
@@ -3796,7 +3800,6 @@ class DeepgramV2VoiceManager {
       final data = jsonDecode(msg as String);
 
       if (data['type'] == 'Metadata') {
-        _isConnected = true;
         _lg('📡 [DG-02]', 'Metadata 수신 → onConnected 호출');
         onConnected();
         return;
@@ -3878,7 +3881,6 @@ class DeepgramV2VoiceManager {
         _lg('🎤 [DG-RETRY-SKIP]', '재연결 조건 불충족');
         return;
       }
-      _isConnected = false;
       if (_retryCount < _maxRetries) {
         _retryCount++;
         _lg('🎤 [DG-RETRY]', '재연결 시도 $_retryCount/$_maxRetries');
@@ -3925,7 +3927,6 @@ class DeepgramV2VoiceManager {
       await _channel?.sink.close();
     } catch (_) {}
     _channel = null;
-    _isConnected = false;
   }
 }
 
@@ -4212,9 +4213,6 @@ class TtsQueueManager {
 
   // 🔧 [v3.6] 외부에서 _aiPaused 상태 조회 (UI 업데이트 보류 판단용)
   bool get aiPaused => _aiPaused;
-  // UI 상태 표시용 (레거시 호환)
-  bool _isUserTurn = true;
-
   // 🔒 [Box 7 USER-DRAIN-SIGNAL] 유저 큐 완전 drain 감지용
   bool _userStreamSealed = false;
   Completer<void>? _userDrainedCompleter;
@@ -4233,7 +4231,7 @@ class TtsQueueManager {
 
   void _tlog(String tag, String msg) {
     final ts = DateTime.now().toIso8601String().substring(11, 23);
-    print('[$ts] $tag $msg');
+    debugPrint('[$ts] $tag $msg');
   }
 
   /// 유저 재생 중이거나 유저 큐에 남은 게 있으면 busy
@@ -4273,9 +4271,9 @@ class TtsQueueManager {
                 : AndroidUsageType.media,
             audioFocus: AndroidAudioFocus.gainTransientMayDuck,
           ),
-          iOS: AudioContextIOS(
+          iOS: const AudioContextIOS(
             category: AVAudioSessionCategory.playAndRecord,
-            options: const [
+            options: [
               AVAudioSessionOptions.defaultToSpeaker,
               AVAudioSessionOptions.mixWithOthers,
             ],
@@ -4299,9 +4297,7 @@ class TtsQueueManager {
   }
 
   /// 레거시 호환용 (UI 상태 표시만)
-  void setUserTurn(bool isUser) {
-    _isUserTurn = isUser;
-  }
+  void setUserTurn(bool isUser) {}
 
   /// 🔧 [v3.5] isUser=true면 유저 큐, false면 AI 큐에 적재
   Future<void> addAudio(Uint8List bytes, {required bool isUser}) async {
@@ -4713,12 +4709,12 @@ class RelayPipeline {
       apiKey: deepgramKey,
       audioRecorder: audioRecorder,
       langCode: targetLanguage,
-      onConnected: () => print('[Deepgram] 연결됨'),
+      onConnected: () => debugPrint('[Deepgram] 연결됨'),
       onTranscriptUpdate: (_) {}, // UI에서 오버라이드
       onTurnEnded: _onUserTurnEnded,
-      onError: (e) => print('[Deepgram] 오류: $e'),
-      onReconnecting: (attempt) => print('[Deepgram] 재연결 시도 $attempt/5회'),
-      onGaveUp: () => print('[Deepgram] 재연결 포기'),
+      onError: (e) => debugPrint('[Deepgram] 오류: $e'),
+      onReconnecting: (attempt) => debugPrint('[Deepgram] 재연결 시도 $attempt/5회'),
+      onGaveUp: () => debugPrint('[Deepgram] 재연결 포기'),
     );
   }
 
@@ -4774,7 +4770,7 @@ class RelayPipeline {
         _history.add('assistant', aiResponseBuffer.trim());
       }
     } catch (e) {
-      print('[RelayPipeline] AI 오류: $e');
+      debugPrint('[RelayPipeline] AI 오류: $e');
     }
   }
 
@@ -4810,7 +4806,6 @@ class RelayPipeline {
 //   → Rollback: onChunk/onStreamEnd 제거 후 aiTtsFetcher.addText(toSpeak) 복원
 class HybridTtsPlayer {
   final String _apiKey;
-  final TtsQueueManager _ttsQueueManager;
   final ChunkedTtsFetcher _fetcher;
   final String _voice;
   final void Function(String, String)? onLog;
@@ -4825,7 +4820,7 @@ class HybridTtsPlayer {
 
   HybridTtsPlayer(
     this._apiKey,
-    this._ttsQueueManager,
+    TtsQueueManager ttsQueueManager,
     this._fetcher,
     this._voice, {
     this.onLog,
@@ -5033,8 +5028,9 @@ content and gist of the WHOLE conversation.
       String s =
           ((body['choices'] as List).first['message']['content'] as String)
               .trim();
-      if (s.startsWith('"') && s.endsWith('"'))
+      if (s.startsWith('"') && s.endsWith('"')) {
         s = s.substring(1, s.length - 1);
+      }
       return s.isEmpty ? null : s;
     } catch (e) {
       debugPrint("[FreeTalkBrain.generateExpandedFromConversation] $e");
@@ -5050,9 +5046,7 @@ content and gist of the WHOLE conversation.
   }) async {
     if (apiKey.isEmpty || originalSentence.trim().isEmpty) return null;
     try {
-      final safePartnerLabel =
-          partnerLabel.trim().isNotEmpty ? partnerLabel.trim() : 'AI partner';
-      final sysPrompt = """You are an English speaking coach.
+      const sysPrompt = """You are an English speaking coach.
 Rewrite the given long English sentence as ONE "easy but elegant" spoken sentence.
 
 [GOALS]
@@ -5094,8 +5088,9 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
       String p =
           ((body['choices'] as List).first['message']['content'] as String)
               .trim();
-      if (p.startsWith('"') && p.endsWith('"'))
+      if (p.startsWith('"') && p.endsWith('"')) {
         p = p.substring(1, p.length - 1);
+      }
       return p.isEmpty ? originalSentence : p;
     } catch (e) {
       debugPrint("[FreeTalkBrain.polishSentence] $e");
@@ -5441,28 +5436,69 @@ Rules:
     return englishText; // 실패 시 영어 원문 (빈칸 방지)
   }
 
-  // ==================================================================
-  // 📦 Free Talk 언어 수준별 어휘 지침
-  static String _freeTalkLevelInstruction(String level) {
-    switch (level) {
-      case "Beginner":
-        return "BEGINNER (CEFR A1-A2). Use only the most common everyday words. "
-            "Keep every sentence to 8 words or fewer. "
-            "Use only simple present and simple past tense. "
-            "No idioms, no phrasal verbs, no slang. "
-            "Speak as if talking to a young child learning the language.";
-      case "Advanced":
-        return "ADVANCED (CEFR C1-C2). Speak like a refined, well-educated native adult. "
-            "Use sophisticated, precise vocabulary and elegant, polished expressions. "
-            "Refined idioms and nuanced word choice are welcome; NO slang, NO vulgar or overly casual wording. "
-            "Use varied grammar such as conditionals, relative clauses, and perfect tenses. "
-            "CRITICAL: Elevate WORD CHOICE only. NEVER make replies longer — keep the exact same brevity as the other levels (usually ONE short sentence).";
-      case "Intermediate":
-      default:
-        return "INTERMEDIATE (CEFR B1-B2). Use everyday vocabulary with some variety. "
-            "Keep sentences to about 14 words or fewer. "
-            "Common phrasal verbs and natural expressions are fine, "
-            "but avoid rare idioms and slang.";
+  /// 세션 안에서만 쓰는 상대방 캐릭터 메모리. 이름·관계·성격을 추측하되
+  /// 유저가 실제로 준 단서보다 앞서 확정하지 않는다.
+  static Future<String> updateCharacterMemory({
+    required String apiKey,
+    required String previousMemory,
+    required String conversationContext,
+    required String latestUserLine,
+    required String latestAiLine,
+  }) async {
+    final client = http.Client();
+    try {
+      final response = await client
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': kFreeTalkTranslateModelFast,
+              'temperature': 0.0,
+              'max_tokens': 180,
+              'messages': [
+                {
+                  'role': 'system',
+                  'content':
+                      '''Maintain a private short-term character memory for a roleplay conversation.
+Infer who the AI is to the user only from explicit dialogue evidence. Never invent or overcommit.
+Preserve confirmed facts from the previous memory unless the newest dialogue clearly corrects them.
+Set CONFIDENCE: HIGH only when the relationship/role is clear from direct wording or several consistent clues. One vague clue is never HIGH.
+
+Output exactly these six compact lines. Use Korean after each label except the confidence value:
+CONFIDENCE: LOW | MEDIUM | HIGH
+ROLE: confirmed role or 추측 중
+RELATIONSHIP: confirmed relationship or 추측 중
+TRAITS: confirmed conversational traits/register or 아직 불명확
+KNOWN: only facts explicitly established about the AI character
+USER: only facts explicitly established about the user'''
+                },
+                {
+                  'role': 'user',
+                  'content': '''Previous private memory:
+${previousMemory.trim().isEmpty ? '(none)' : previousMemory}
+
+Recent conversation:
+$conversationContext
+User: $latestUserLine
+AI: $latestAiLine
+
+Update the private memory:'''
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode != 200) return previousMemory;
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      final result = data['choices'][0]['message']['content'].toString().trim();
+      return result.isEmpty ? previousMemory : result;
+    } catch (_) {
+      return previousMemory;
+    } finally {
+      client.close();
     }
   }
 
@@ -5472,65 +5508,85 @@ Rules:
     required String userTargetText,
     required String contextStr,
     required String myTarget,
-    String level = "Intermediate",
     String rejectedReply = '',
-    // 대화 주도권을 유저에게 두기 위해 질문은 몇 턴에 한 번만 허용한다.
+    String characterMemory = '',
+    String voiceCharacterInstruction = '',
+    // 상대방의 정체가 충분히 확정된 뒤에만 질문을 허용한다.
     bool allowQuestion = true,
   }) async* {
     final client = http.Client();
     try {
       final String questionRule = allowQuestion
-          ? "- You may end with ONE short question this turn, only if it genuinely earns its place. Never a vague or generic one."
-          : "- Do NOT ask a question this turn. React and stop. Let the silence hand the conversation back to them — the user decides where it goes next.";
+          ? "- The character is now understood with high confidence. You may ask ONE short, character-appropriate question only when it is genuinely necessary. Never ask a generic return question."
+          : "- The character is not yet understood with high confidence. Do NOT ask the user any question. Respond naturally and stop.";
       final String rejectedBlock = rejectedReply.trim().isEmpty
           ? ""
           : "\n- IMPORTANT: The user disliked your previous reply: \"${rejectedReply.trim()}\". Give a COMPLETELY DIFFERENT reply this time — different angle, different wording. Do NOT repeat or rephrase it.";
       final String outputRule = myTarget.toLowerCase() == 'korean'
-          ? 'OUTPUT LANGUAGE: Natural spoken Korean ONLY. Use the same polite or casual register as the user.'
+          ? 'OUTPUT LANGUAGE: Natural spoken Korean ONLY.'
           : 'OUTPUT LANGUAGE: $myTarget ONLY. Zero Korean characters in output.';
+      final String memoryBlock = characterMemory.trim().isEmpty
+          ? 'No character facts are confirmed yet. Stay broad and do not ask questions.'
+          : characterMemory.trim();
       final sysPrompt =
           """You are the person the user has in mind and is speaking to. They will not describe that person to you. They simply start talking, the way people do with someone they already know.
 
-Your job is not to invent that person. It is to discover them from what the user says, turn by turn. The user creates the relationship; you find it and grow into it.
+Your job is to infer that person carefully from the user's words and remain that same person throughout this session.
 
 $outputRule
 
-[ROLE AND VIEWPOINT CHECK — DO THIS SILENTLY BEFORE EVERY REPLY]
-- First decide who YOU are in relation to the user from the conversation so far. Keep that role consistent, but keep it broad until the user's clues make it clear.
+[PRIORITY — RESOLVE EVERY CONFLICT IN THIS ORDER]
+1. Answer the user's actual question or statement directly from the character's viewpoint.
+2. Preserve facts and relationships marked as confirmed in SESSION CHARACTER MEMORY.
+3. Maintain the selected age/gender/personality presentation.
+4. When evidence is uncertain, stay non-specific instead of inventing or asking.
+
+[SELECTED CHARACTER PRESENTATION — FIXED]
+$voiceCharacterInstruction
+- Carry this impression consistently in word choice, warmth, tempo, and reactions.
+- It defines presentation only. It does NOT by itself establish a name, job, family role, event, or shared memory.
+
+[SESSION CHARACTER MEMORY — PRIVATE, NEVER MENTION IT]
+$memoryBlock
+- Keep every confirmed role, relationship, personality trait, speech register, and fact consistent across turns.
+- Treat uncertain items as uncertain. Never turn a guess into a fact.
+- If new evidence conflicts with an old guess, follow the user's newest clear evidence quietly.
+
+[CHARACTER DISCOVERY]
+- Infer who you are to the user silently from explicit wording and repeated consistent clues.
+- While confidence is LOW or MEDIUM, keep the relationship broad and choose a response that could fit several plausible relationships.
+- Once memory says CONFIDENCE: HIGH, stop broadening the role and respond consistently as the confirmed person.
+- Never ask who you are, never announce a guess, and never describe this inference process.
+- If the user corrects your reaction, accept the newest evidence silently and adjust in character.
+- Do not invent a name, place, job, family tie, event, opinion, possession, or shared past that the user has not established.
+
+[VIEWPOINT CHECK — DO THIS SILENTLY BEFORE EVERY REPLY]
 - Every first-person statement in a "User:" line belongs to THE USER, never to you. Their feelings, memories, plans, actions, possessions, and relationships stay theirs.
 - Every "AI:" line is your side. Reply from that other person's position; do not continue, paraphrase, or adopt the user's first-person statement as your own.
 - Perspective test: if the user says "I need to study," react to their need. Never answer as though you are the one who needs to study. If the user says "You didn't call me," you are the person who did not call.
 
-[DISCOVER — NEVER DECIDE]
-- Do not settle the relationship early. In the opening turns stay open: partner, parent, child, friend, coworker, someone they drifted away from — any of these could still be true.
-- Never name or hint at the relationship. Never ask who you are to them. No meta-comments about who they might be talking to.
-- When the user's own words settle it, follow them and stay there. Let their clues decide, and never announce that you decided.
-- If the user pushes back because your reaction felt off, answer in character and quietly move toward the person they seem to be speaking to.
+[DIRECT ANSWERS — NEVER BOUNCE A QUESTION BACK]
+- When the user asks you a question, answer it directly as the character you are playing.
+- The question concerns YOUR character's life, feeling, opinion, memory, or situation. It does not automatically apply to the user.
+- NEVER respond with "너는?", "넌 어때?", "너는 어떻게 생각해?", "What about you?", or any equivalent return question.
+- Do not avoid an answer by interviewing the user. If a requested fact is unknown, give a natural non-specific answer without manufacturing details.
 
-[NEVER INVENT]
-- Add no event, place, job, name, family tie, or shared past that the user has not given you.
-- If a reply seems to need such a detail, you picked the wrong reply. Answer without it.
-- Wrong: "Sorry babe, the work dinner ran till dawn."
-- Right: "Sorry. It ran later than I expected. Did you wait long?"
-
-[WHEN IT COULD MEAN SEVERAL THINGS, TAKE THE WIDEST READING]
-- Prefer the reply that would still make sense to a partner, a friend, and a parent alike.
-- Staying unspecific about facts is not the same as being flat. React honestly to the thing they actually said — that is where your reply gets its edge, not from invented detail.
+[QUESTION POLICY]
+$questionRule
+- Even when questions are allowed, first answer the user completely. A follow-up question must never replace the answer.
+- A question must relate to an already confirmed relationship or fact. Never use it to discover who you are.
+- The only exception for unclear audio is a plain retry request such as "잘 못 들었어. 다시 말해 줘." Do not guess the content.
 
 [SPEAK AS THAT PERSON]
-- You are the other side of the conversation. Not a teacher, not a coach, not an assistant. Never correct their English, never explain, never advise unless a real person would in that moment.
+- You are the other side of the conversation, not a teacher, coach, interviewer, or assistant.
 - Feeling, apology, pushback, a plain answer — all fine. React the way that person would.
 - Never say you are an AI or a language model.
-- The user keeps their side; you keep yours. If the user is the one arriving, you are the one waiting.
 
 [STYLE]
 - Speak the way people actually speak: usually ONE short sentence, two only when truly needed.
-$questionRule
 - The user leads this conversation. Do not steer it, do not propose topics, do not keep it going for its own sake.
 - No greetings, no "I understand", no prefixes. Just speak as that person.
-- If what they said cannot be made out, say so plainly, in character, and ask them to say it again.$rejectedBlock
-
-Learner level: ${_freeTalkLevelInstruction(level)}""";
+- Match the relationship's established polite or casual register while preserving the selected character impression.$rejectedBlock""";
 
       final request = http.Request(
         'POST',
@@ -5583,6 +5639,8 @@ Learner level: ${_freeTalkLevelInstruction(level)}""";
 
 // 🆕 [Anyone] 이용방법 말풍선 꼬리 페인터
 class _BubbleTailPainter extends CustomPainter {
+  const _BubbleTailPainter();
+
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
