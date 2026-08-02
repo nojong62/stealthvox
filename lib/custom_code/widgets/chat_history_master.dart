@@ -2976,7 +2976,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
       );
 
   String _meaningUnitCacheVoice(String voice) =>
-      '${_historyPracticeTtsModel}_meaning_groups_v1_$voice';
+      '${_historyPracticeTtsModel}_meaning_groups_prompt_v2_$voice';
 
   Future<Uint8List?> _fetchMeaningUnitTTS(String text, String voice) =>
       _fetchOpenAITTS(
@@ -2985,7 +2985,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
         voice,
         model: _historyPracticeTtsModel,
         instructions: _meaningUnitTtsInstructions,
-        instructionTag: 'p2_learning',
+        instructionTag: 'p2_learning_meaning_groups_v2',
       );
 
   Future<Uint8List?> _getMeaningUnitTTS(String text, String voice) {
