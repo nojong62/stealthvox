@@ -305,8 +305,11 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   // 📦 [Box 6: 상태 변수 - DB 캐시 및 튜터링 팝업]
   List<DocumentSnapshot> _cachedDocs = [];
+  final Map<String, Future<bool>> _targetTranslationInFlight =
+      <String, Future<bool>>{};
   String _apiKey = "";
   String _deepgramKey = "";
+  Future<void>? _remoteConfigFuture;
   String? activeAppDocId;
   bool isGeneratingApp = false;
   String appOriginalText = "";
@@ -416,7 +419,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     );
     audioPlayer = AudioPlayer();
     appAudioRecorder = AudioRecorder();
-    _fetchRemoteConfig();
+    _remoteConfigFuture = _fetchRemoteConfig();
     _fetchRoomData();
     _initPermissions();
     BillingTicker.instance.setRate(BillingRate.quarter);
@@ -623,6 +626,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         // 세션 생성 당시 보존된 언어 식별값(있으면 동일 언어 판정에 사용)
         _sessionNativeLang = data['native_lang'] as String?;
         _sessionTargetLang = data['target_lang'] as String?;
+        _scheduleMissingTargetGeneration(_cachedDocs);
       }
     } catch (e) {
       debugPrint("[fetchRoomData] $e");
@@ -639,10 +643,117 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
           _apiKey = remoteConfig.getString('OpenAIAPIKey');
           _deepgramKey = remoteConfig.getString('DeepgramAPIKey');
         });
+        _scheduleMissingTargetGeneration(_cachedDocs);
       }
     } catch (e) {
       debugPrint("[fetchRemoteConfig] $e");
     }
+  }
+
+  void _scheduleMissingTargetGeneration(List<DocumentSnapshot> docs) {
+    if (!_usesDeferredHistoryTargets || _apiKey.isEmpty || docs.isEmpty) {
+      return;
+    }
+    for (final doc in docs) {
+      final data = doc.data() as Map<String, dynamic>?;
+      if (data == null) continue;
+      final original = (data['original_text'] ?? '').toString().trim();
+      final translated = (data['translated_text'] ?? '').toString().trim();
+      if (original.isEmpty || translated.isNotEmpty) continue;
+      unawaited(_generateAndCacheHistoryTarget(doc.reference, original));
+    }
+  }
+
+  Future<bool> _generateAndCacheHistoryTarget(
+    DocumentReference messageRef,
+    String originalText,
+  ) {
+    final existing = _targetTranslationInFlight[messageRef.id];
+    if (existing != null) return existing;
+    final future = _performHistoryTargetGeneration(messageRef, originalText);
+    _targetTranslationInFlight[messageRef.id] = future;
+    return future.whenComplete(() {
+      if (identical(_targetTranslationInFlight[messageRef.id], future)) {
+        _targetTranslationInFlight.remove(messageRef.id);
+      }
+    });
+  }
+
+  Future<bool> _performHistoryTargetGeneration(
+    DocumentReference messageRef,
+    String originalText,
+  ) async {
+    final source = originalText.trim();
+    if (source.isEmpty || _apiKey.isEmpty) return false;
+    try {
+      final targetLanguage = (_sessionTargetLang ?? 'English').trim();
+      final sameLanguage = _recordSameLang == true;
+      String targetText = source;
+      if (!sameLanguage) {
+        final response = await http
+            .post(
+              Uri.parse('https://api.openai.com/v1/chat/completions'),
+              headers: <String, String>{
+                'Authorization': 'Bearer $_apiKey',
+                'Content-Type': 'application/json; charset=utf-8',
+              },
+              body: jsonEncode(<String, dynamic>{
+                'model': 'gpt-4o-mini',
+                'temperature': 0.0,
+                'max_tokens': 220,
+                'messages': <Map<String, String>>[
+                  <String, String>{
+                    'role': 'system',
+                    'content': 'Translate the Korean conversation line into natural spoken $targetLanguage. '
+                        'Preserve the speaker viewpoint, meaning, tone, and relationship. '
+                        'Return only the translated sentence with no label or explanation.',
+                  },
+                  <String, String>{'role': 'user', 'content': source},
+                ],
+              }),
+            )
+            .timeout(const Duration(seconds: 15));
+        if (response.statusCode != 200) {
+          debugPrint(
+              '[HISTORY-TARGET] status=${response.statusCode} msg=${messageRef.id}');
+          return false;
+        }
+        final body = jsonDecode(response.body) as Map<String, dynamic>;
+        final choices = body['choices'] as List? ?? const <dynamic>[];
+        final firstChoice =
+            choices.isEmpty ? null : choices.first as Map<String, dynamic>?;
+        final message = firstChoice?['message'] as Map<String, dynamic>?;
+        targetText = (message?['content'] ?? '').toString().trim();
+      }
+      if (targetText.isEmpty) return false;
+      await messageRef.update(<String, dynamic>{
+        'translated_text': targetText,
+        'target_generated_by': sameLanguage ? 'copy' : 'gpt-4o-mini',
+        'target_generated_at': FieldValue.serverTimestamp(),
+      });
+      debugPrint(
+          '[HISTORY-TARGET] generated msg=${messageRef.id} model=${sameLanguage ? 'copy' : 'gpt-4o-mini'}');
+      return true;
+    } catch (error) {
+      debugPrint(
+          '[HISTORY-TARGET] failed msg=${messageRef.id} reason=${error.runtimeType}');
+      return false;
+    }
+  }
+
+  Future<void> _ensureHistoryTargets(List<DocumentSnapshot> docs) async {
+    if (!_usesDeferredHistoryTargets || _apiKey.isEmpty) return;
+    final tasks = <Future<bool>>[];
+    for (final doc in docs) {
+      final data = doc.data() as Map<String, dynamic>?;
+      if (data == null) continue;
+      final original = (data['original_text'] ?? '').toString().trim();
+      final translated = (data['translated_text'] ?? '').toString().trim();
+      if (original.isNotEmpty && translated.isEmpty) {
+        tasks.add(_generateAndCacheHistoryTarget(doc.reference, original));
+      }
+    }
+    if (tasks.isNotEmpty) await Future.wait(tasks);
   }
 
   // 📦 [Box 10: 헬퍼 - 권한 요청]
@@ -718,6 +829,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       }
 
       // Clone / Roleplay / Duo 방: messages 서브컬렉션 → Tutor 모드
+      await _remoteConfigFuture;
       var messageDocs = _cachedDocs;
       if (messageDocs.isEmpty) {
         final messagesSnap = await widget.historyDoc
@@ -727,6 +839,13 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         messageDocs = messagesSnap.docs;
         _cachedDocs = messageDocs;
       }
+      await _ensureHistoryTargets(messageDocs);
+      final refreshedMessages = await widget.historyDoc
+          .collection('messages')
+          .orderBy('created_at', descending: false)
+          .get();
+      messageDocs = refreshedMessages.docs;
+      _cachedDocs = messageDocs;
       if (!mounted) return;
 
       final tutorLines = messageDocs
@@ -3803,7 +3922,10 @@ RULES — follow exactly:
                     }
                     final docs = snapshot.data!.docs;
                     WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (mounted) _cachedDocs = docs;
+                      if (mounted) {
+                        _cachedDocs = docs;
+                        _scheduleMissingTargetGeneration(docs);
+                      }
                     });
                     if (docs.isEmpty) {
                       return const Center(
@@ -7560,6 +7682,13 @@ RULES — follow exactly:
       return 'step_expand';
     }
     return '';
+  }
+
+  bool get _usesDeferredHistoryTargets {
+    final mode = _inferHistoryMode(_cachedRoomData);
+    return mode == 'free_talk' ||
+        mode == 'roleplay' ||
+        mode == 'step_expand';
   }
 
   String _historyModeKey(Map<String, dynamic>? data) {

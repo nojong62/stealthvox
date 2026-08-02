@@ -33,6 +33,8 @@ import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
 import '/custom_code/services/openai_connection_pool.dart';
 import '/custom_code/services/openai_transcribe_service.dart';
+import '/custom_code/services/realtime_anyone_adapter.dart';
+import '/custom_code/services/stealth_vox_realtime_session.dart';
 import '/custom_code/services/tts_adapter.dart';
 import 'deepgram_confidence_probe.dart';
 import 'first_utterance_context_judge.dart';
@@ -166,6 +168,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   bool _isConversationActive = false;
   bool _isStartingListening = false;
   bool _isPipelineRunning = false;
+  bool _realtimeTurnActive = false;
   bool _listeningReadyReported = false;
   bool _isDisposing = false; // 🧹 [DISPOSE-GUARD] dispose 진행 중 setState 차단
   Timer? _startupRetryTimer;
@@ -184,8 +187,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   //   Deepgram final 수신 시각(= 앱이 발화 종료를 아는 가장 이른 시점).
   DateTime? _turnPerfAnchor;
   double _fontScale = 1.0;
-  // 기본 화면은 목표 언어만 표시한다. 상단 언어 버튼을 눌렀을 때만
-  // 원문을 함께 보여 준다.
+  // 최종 통신 구조에서는 대화방에 확정된 한국어 문장만 표시한다.
   bool _showOriginal = false;
   bool _showUsageGuide = false; // 🆕 [Anyone] 이용방법 말풍선 토글
   String? _selectedAiVoice;
@@ -217,7 +219,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   int _idleElapsedSec = 0;
 
   bool get _isSystemBusy {
-    return _ttsAdapter.isBusy;
+    return _ttsAdapter.isBusy || _realtimeTurnActive;
   }
 
   void _markConversationActivity() {
@@ -770,6 +772,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   //   나간다 (guide4 8장). 모델명/보이스 매핑은 어댑터 설정에만 있다.
   late final TtsAdapter _ttsAdapter;
   late final AnyoneCostTracker _costTracker;
+  RealtimeAnyoneAdapter? _realtimeAdapter;
+  Future<bool>? _realtimeConnectFuture;
+  late final String _realtimeModeSessionId;
 
   // ⏱️ 성능 측정용 초시계
   final Stopwatch _swDeepgram = Stopwatch();
@@ -782,6 +787,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     _audioRecorder = widget.preparedAudioRecorder ?? AudioRecorder();
     _ownsAudioRecorder = widget.preparedAudioRecorder == null;
     _micInputAt = widget.micInputAt ?? DateTime.now();
+    _realtimeModeSessionId = 'anyone-${DateTime.now().microsecondsSinceEpoch}';
     _markFirstSpeech('MIC_INPUT', at: _micInputAt);
     _preparedCaptureFuture = _startImmediateLocalCapture();
     _costTracker = AnyoneCostTracker(_log);
@@ -1016,7 +1022,73 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     }
     _micPermissionReady = true;
     if (!mounted || _isConversationActive) return;
+    // Realtime is receive-only in Anyone. Start its WebRTC negotiation while
+    // Deepgram is listening so the first AI audio turn does not pay setup cost.
+    unawaited(_ensureAnyoneRealtimeConnected());
     await _startDeepgramListening();
+  }
+
+  String _buildAnyoneRealtimeInstructions() {
+    final voice = _selectedAiVoice ?? 'marin';
+    return '''You are the person the user has in mind and is speaking to.
+Infer that person cautiously from the conversation and remain the same person.
+${_voiceCharacterInstruction(voice)}
+
+OUTPUT LANGUAGE: Natural spoken Korean only.
+- Treat every incoming text message as the user's actual Korean utterance.
+- Reply directly from the other person's viewpoint. Never adopt the user's first-person statement as your own.
+- Usually answer in one short sentence; use two only when necessary.
+- Do not translate, teach, coach, narrate, or mention being an AI.
+- Do not invent names, relationships, events, or shared memories that the user has not established.
+- Until the relationship and register are clear, use natural Korean 해요체 rather than stiff formal speech.
+- Do not ask generic return questions. Let the user lead the conversation.''';
+  }
+
+  Future<bool> _connectAnyoneRealtime() async {
+    final old = _realtimeAdapter;
+    if (old != null) await old.dispose();
+    if (!mounted || _selectedAiVoice == null) return false;
+
+    final adapter = RealtimeAnyoneAdapter(
+      onConnectionStateChanged: (state) =>
+          _log('[RT-STATE]', 'state=${state.name}'),
+      onError: (error) => _log('[RT-ERROR]', 'reason=${error.runtimeType}'),
+      logger: _log,
+    );
+    _realtimeAdapter = adapter;
+    try {
+      await adapter.connectForTranslation(
+        modeSessionId: _realtimeModeSessionId,
+        voice: _selectedAiVoice!,
+        allowWhenDisabled: true,
+        instructions: _buildAnyoneRealtimeInstructions(),
+      );
+      final ready = adapter.session.isReady;
+      _log('[RT-READY]', 'ready=$ready mode=text_in_audio_out');
+      return ready;
+    } catch (error) {
+      _log('[RT-CONNECT-FAIL]', 'reason=${error.runtimeType}');
+      if (identical(_realtimeAdapter, adapter)) _realtimeAdapter = null;
+      await adapter.dispose();
+      return false;
+    }
+  }
+
+  Future<bool> _ensureAnyoneRealtimeConnected() async {
+    final current = _realtimeAdapter;
+    if (current?.session.isReady ?? false) return true;
+    final inFlight = _realtimeConnectFuture;
+    if (inFlight != null) return inFlight;
+
+    final future = _connectAnyoneRealtime();
+    _realtimeConnectFuture = future;
+    try {
+      return await future;
+    } finally {
+      if (identical(_realtimeConnectFuture, future)) {
+        _realtimeConnectFuture = null;
+      }
+    }
   }
 
   void _saveRecentHistory(String userText, String aiText) {
@@ -1204,6 +1276,11 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     // 🔇 늦게 도착한 이전 세대 TTS가 재생되지 않도록 세대를 올려 막는다.
     _ttsAdapter.invalidateGenerationsBefore(_pipelineGeneration);
     _ttsAdapter.stopAll(reason: 'stop_everything');
+    _realtimeTurnActive = false;
+    _realtimeConnectFuture = null;
+    final realtime = _realtimeAdapter;
+    _realtimeAdapter = null;
+    if (realtime != null) unawaited(realtime.dispose());
     if (mounted && !_isDisposing) setState(() {});
   }
 
@@ -1513,13 +1590,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     // 기존 타이머 취소 (새 발화가 왔으므로 대기창 리셋)
     _commitTimer?.cancel();
 
-    // Deepgram 확정 대기 200ms와 OpenAI 전사·번역을 겹친다. 선번역은
-    // gpt-4o-transcribe 결과와 글자가 일치할 때만 채택한다.
-    if (isFirstUtterance) {
-      _prefetchFirstTurnTranscribe();
-      _startSpeculativeTranslation(_pendingTranscript);
-    }
-
     // 조건부 대기 후 파이프라인 시작 예약 (source별 waitMs)
     _commitTimer = Timer(
       Duration(milliseconds: waitMs),
@@ -1527,8 +1597,214 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     );
   }
 
-  // 🔧 [v3.4] 900ms 대기 후 더 이상 발화 없으면 확정 → 파이프라인 시작
+  // Deepgram 텍스트는 발화 종료 신호를 묶는 데까지만 사용한다. 최종 사용자
+  // 문장은 매 턴 PCM 원본을 gpt-4o-transcribe에 보내 새로 확정한다.
   void _commitAndProcess() async {
+    final pipelineGeneration = _pipelineGeneration;
+    final boundaryTranscript = _pendingTranscript.trim();
+    _pendingTranscript = '';
+    _lastPendingFinalAt = null;
+    _commitTimer = null;
+    _cancelSpeculativeTranslation();
+    _prefetchedFirstTurnTranscribe = null;
+    _prefetchedFirstTurnPcmBytes = 0;
+
+    if (boundaryTranscript.isEmpty) {
+      if (_isConversationActive) {
+        _restartConfiguredListening(
+            expectedPipelineGeneration: pipelineGeneration);
+      }
+      return;
+    }
+
+    _log('🔀 [COMMIT-01]',
+        'Deepgram boundary 확정 len=${boundaryTranscript.length}');
+    _logTurnPerf('COMMIT');
+
+    final pcm = _snapshotTurnPcm();
+    final closingVoiceManager = _voiceManager;
+    _voiceManager = null;
+    _setMicOwner(AnyoneMicOwner.none, reason: 'vad_boundary_committed');
+    if (closingVoiceManager != null) {
+      unawaited(closingVoiceManager.dispose());
+    }
+
+    if (pcm == null || pcm.isEmpty) {
+      _log('⚠️ [STT-ROUTE]', 'gpt-4o-transcribe skipped reason=empty_pcm');
+      if (_isConversationActive) {
+        _restartConfiguredListening(
+            expectedPipelineGeneration: pipelineGeneration);
+      }
+      return;
+    }
+
+    final userOriginal =
+        (await _transcribeAccurately(pcmOverride: pcm))?.trim() ?? '';
+    if (!mounted || pipelineGeneration != _pipelineGeneration) return;
+    if (userOriginal.isEmpty) {
+      _log('⚠️ [STT-ROUTE]',
+          'gpt-4o-transcribe failed; Deepgram text discarded');
+      if (_isConversationActive) {
+        _restartConfiguredListening(
+            expectedPipelineGeneration: pipelineGeneration);
+      }
+      return;
+    }
+
+    _log('🎧 [STT-ROUTE]',
+        'selected=gpt-4o-transcribe every_turn=true len=${userOriginal.length}');
+    _logTurnPerf('USER_KOREAN_FINAL');
+    await _processRealtimeConversation(
+      userOriginal,
+      expectedPipelineGeneration: pipelineGeneration,
+    );
+  }
+
+  Future<void> _processRealtimeConversation(
+    String userOriginal, {
+    required int expectedPipelineGeneration,
+  }) async {
+    if (!isActivePipelineGeneration(
+      expected: expectedPipelineGeneration,
+      current: _pipelineGeneration,
+      mounted: mounted,
+      conversationActive: _isConversationActive,
+    )) {
+      return;
+    }
+    if (_isNoiseTranscript(userOriginal)) {
+      _log('[RT-TURN-SKIP]', 'reason=noise_transcript');
+      _restartConfiguredListening(
+          expectedPipelineGeneration: expectedPipelineGeneration);
+      return;
+    }
+
+    _turnCounter++;
+    final currentTurnId = _turnCounter;
+    _isPipelineRunning = true;
+    _realtimeTurnActive = true;
+    StreamSubscription<String>? transcriptSubscription;
+    int aiIndex = -1;
+    try {
+      if (mounted) {
+        setState(() {
+          _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+          _localMessages.add({
+            'role': 'HOST',
+            'target': userOriginal,
+            'original': '',
+          });
+          _localMessages.add({
+            'role': 'SYSTEM',
+            'target': '',
+            'original': '',
+          });
+          aiIndex = _localMessages.length - 1;
+        });
+        _scrollToCurrent(aiIndex);
+      }
+
+      final connected = await _ensureAnyoneRealtimeConnected();
+      if (!connected ||
+          !isActivePipelineGeneration(
+            expected: expectedPipelineGeneration,
+            current: _pipelineGeneration,
+            mounted: mounted,
+            conversationActive: _isConversationActive,
+          )) {
+        throw StateError('Realtime session is unavailable.');
+      }
+
+      final adapter = _realtimeAdapter!;
+      final turn = adapter.requestConversationTurn(
+        turnId: 'anyone-$currentTurnId',
+        userText: userOriginal,
+        voice: _selectedAiVoice ?? 'marin',
+        instructions:
+            'Respond now as the established conversation partner. Speak natural Korean only, briefly and directly.',
+      );
+      _log('[RT-TURN]',
+          'turn=$currentTurnId input=text output=korean_webrtc_audio');
+
+      var streamedAiText = '';
+      transcriptSubscription = turn.textStream.listen((delta) {
+        if (delta.isEmpty ||
+            !mounted ||
+            expectedPipelineGeneration != _pipelineGeneration ||
+            currentTurnId != _turnCounter) {
+          return;
+        }
+        streamedAiText += delta;
+        if (aiIndex >= 0 && aiIndex < _localMessages.length) {
+          setState(() => _localMessages[aiIndex]['target'] = streamedAiText);
+        }
+      });
+
+      final outcome = await turn.done;
+      final aiOriginal = (await turn.finalText).trim();
+      if (outcome != RealtimeTurnOutcome.completed || aiOriginal.isEmpty) {
+        throw StateError('Realtime response did not complete.');
+      }
+      if (!isActivePipelineGeneration(
+            expected: expectedPipelineGeneration,
+            current: _pipelineGeneration,
+            mounted: mounted,
+            conversationActive: _isConversationActive,
+          ) ||
+          currentTurnId != _turnCounter) {
+        return;
+      }
+
+      if (aiIndex >= 0 && aiIndex < _localMessages.length) {
+        setState(() {
+          _localMessages[aiIndex]['target'] = aiOriginal;
+          _localMessages[aiIndex]['original'] = '';
+        });
+        _scrollToCurrent(aiIndex);
+      }
+
+      // 대화방은 한국어 텍스트만 넘긴다. Realtime WebRTC 오디오는 transport
+      // 내부에서 재생된 뒤 폐기되며 파일/캐시 저장 API에 전달하지 않는다.
+      final hostLine = <String, dynamic>{
+        'role': 'HOST',
+        'original_text': userOriginal,
+      };
+      final systemLine = <String, dynamic>{
+        'role': 'SYSTEM',
+        'original_text': aiOriginal,
+      };
+      _saveTurnToFirestore([hostLine, systemLine]);
+      _saveHistoryMessages([hostLine, systemLine]);
+      _saveRecentHistory(userOriginal, aiOriginal);
+      _log('[RT-HISTORY]',
+          'turn=$currentTurnId text_only=true realtime_audio_saved=false');
+    } catch (error) {
+      _log('[RT-PIPE-ERR]', 'turn=$currentTurnId reason=${error.runtimeType}');
+      if (mounted && aiIndex >= 0 && aiIndex < _localMessages.length) {
+        setState(() {
+          if ((_localMessages[aiIndex]['target'] ?? '').toString().isEmpty) {
+            _localMessages.removeAt(aiIndex);
+          }
+        });
+      }
+    } finally {
+      await transcriptSubscription?.cancel();
+      _realtimeTurnActive = false;
+      _isPipelineRunning = false;
+      if (mounted &&
+          _isConversationActive &&
+          currentTurnId == _turnCounter &&
+          expectedPipelineGeneration == _pipelineGeneration) {
+        _restartConfiguredListening(
+            expectedPipelineGeneration: expectedPipelineGeneration);
+      }
+    }
+  }
+
+  // 백업 브랜치와 비교·긴급 복구를 위해 기존 파이프라인은 호출되지 않는 상태로
+  // 남겨 둔다. 새 통신 경로는 위 _commitAndProcess에서만 진입한다.
+  // ignore: unused_element
+  void _commitAndProcessLegacy() async {
     final pipelineGeneration = _pipelineGeneration;
     final committed = _pendingTranscript.trim();
     _pendingTranscript = '';
@@ -2842,28 +3118,28 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
       // messages 서브컬렉션에 각 발화 저장
       for (final line in chatLines) {
-        final translated = (line['translated_text'] ?? '').toString().trim();
-        if (translated.isEmpty) continue;
+        final original = (line['original_text'] ?? '').toString().trim();
+        if (original.isEmpty) continue;
         await _myHistoryRef!.collection('messages').add({
           'role': line['role'] ?? '',
-          'translated_text': translated,
-          'original_text': (line['original_text'] ?? '').toString(),
+          // Target은 History가 gpt-4o-mini로 최초 1회 생성해 채운다.
+          'original_text': original,
           'created_at': FieldValue.serverTimestamp(),
         });
       }
 
       // 🔧 [핵심] 턴마다 msg_count/last_message 업데이트
-      final lastTranslated = chatLines
-          .map((l) => (l['translated_text'] ?? '').toString().trim())
+      final lastOriginal = chatLines
+          .map((l) => (l['original_text'] ?? '').toString().trim())
           .lastWhere((t) => t.isNotEmpty, orElse: () => '');
-      if (lastTranslated.isNotEmpty) {
+      if (lastOriginal.isNotEmpty) {
         await _myHistoryRef!.update({
           'msg_count': FieldValue.increment(chatLines.length),
-          'last_message': lastTranslated,
+          'last_message': lastOriginal,
           'last_active': FieldValue.serverTimestamp(),
         });
         _log('💾 [HIST-UPD]',
-            'msg_count+${chatLines.length}, last="$lastTranslated"');
+            'msg_count+${chatLines.length}, korean_text_only=true');
       }
     } catch (e) {
       _log('❌ [HIST-ERR]', 'chat_history 저장 실패: $e');
@@ -3161,7 +3437,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
                       ]),
                       SizedBox(height: 12),
                       Text(
-                        '먼저 상단에서 AI 보이스를 선택하세요. 사용자와 AI는 모두 한국어로 대화하고, 화면에는 영어가 표시됩니다. 대화하고 싶은 사람을 떠올려 편하게 말을 꺼내면 AI가 그 사람이 되어 대답합니다. 대화가 끝나면 한·영 문장과 영어 연습 음성이 히스토리에 준비됩니다.',
+                        '먼저 상단에서 AI 보이스를 선택하세요. 사용자와 AI는 모두 한국어로 대화하고, 확정된 한국어 문장만 화면에 표시됩니다. 대화하고 싶은 사람을 떠올려 편하게 말을 꺼내면 AI가 그 사람이 되어 대답합니다. 영어 문장과 학습 음성은 히스토리에서 필요할 때 생성됩니다.',
                         style: TextStyle(
                             color: Colors.white, fontSize: 14, height: 1.6),
                       ),
@@ -3330,7 +3606,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    '목표 언어만 표시됩니다',
+                    '확정된 한국어 문장이 표시됩니다',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: Colors.white.withValues(alpha: 0.22),
@@ -3340,7 +3616,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
                     ),
                   ),
                   Text(
-                    '상단 언어 버튼을 누르면 원문도 함께 볼 수 있어요',
+                    '학습용 영어 문장과 음성은 히스토리에서 준비됩니다',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: Colors.white.withValues(alpha: 0.14),

@@ -69,6 +69,7 @@ class RealtimeAnyoneAdapter {
     String? transcriptionLanguage,
     String transcriptionModel =
         StealthVoxRealtimeSession.kLightTranscriptionModel,
+
     /// 세션에 한 번만 실리는 역할 지시문. 턴마다 전체 프롬프트를 다시 보내면
     /// 세션이 이미 가진 대화 기억과 경쟁해 문장 감각이 죽는다. 역할은 여기,
     /// 턴에는 상태만 보내는 구성을 위한 것이다. 비워 두면 기존 동작 그대로다.
@@ -129,11 +130,14 @@ class RealtimeAnyoneAdapter {
     required String modeSessionId,
     String voice = 'marin',
     bool allowWhenDisabled = false,
+    String instructions = '',
   }) async {
+    _ensureEventSubscription();
     await session.connect(
       mode: 'anyone',
       modeSessionId: modeSessionId,
       voice: voice,
+      instructions: instructions,
       allowWhenDisabled: allowWhenDisabled,
       captureMicrophone: false,
       disableServerVad: true,
@@ -155,6 +159,23 @@ class RealtimeAnyoneAdapter {
       instructions: instructions,
       voice: voice,
       suppressAudio: suppressAudio,
+    );
+  }
+
+  /// Sends a finalized user transcript to Realtime and receives a spoken
+  /// assistant reply. The transport is identical to a text-driven translation
+  /// turn, but this name makes the Anyone conversation boundary explicit.
+  RealtimeTranslationTurn requestConversationTurn({
+    required String turnId,
+    required String userText,
+    required String instructions,
+    String voice = 'marin',
+  }) {
+    return session.requestTranslatedTurn(
+      turnId: turnId,
+      sourceText: userText,
+      instructions: instructions,
+      voice: voice,
     );
   }
 

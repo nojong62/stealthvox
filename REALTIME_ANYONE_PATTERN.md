@@ -1,11 +1,24 @@
 # Anyone Realtime 통신 로직 — 다른 모드 이식용 정리
 
-> ⚠️ **2026-07-30: Anyone은 이 구조에서 내려왔다.** guide4.md 지시에 따라
-> Anyone은 Deepgram Nova-3 기본 + 첫 턴 `gpt-4o-mini-transcribe` 병렬 +
-> GPT-4o mini/4.1 mini 번역 분기 + 공통 TTS 어댑터(`tts_adapter.dart`,
-> `gpt-4o-mini-tts` PCM 스트리밍) 구조로 전환됐다. 이 문서의 Realtime 패턴은
-> **Step Expand 등 Realtime을 계속 쓰는 모드의 참고용**으로만 유효하다.
-> 세션 계층 서비스 파일들([1][2])은 Step Expand가 쓰므로 그대로 남아 있다.
+> **2026-08-02 최종 Anyone 구조**
+>
+> ```text
+> 한국어 마이크 PCM
+> → Deepgram Nova-3: 발화 종료 경계만 사용(전사문 폐기)
+> → gpt-4o-transcribe: 사용자 한국어 문장 확정
+> → Realtime text input
+> → gpt-realtime-2.1-mini: 한국어 응답 + WebRTC 음성 즉시 재생
+> → Realtime 음성 폐기
+> → 사용자/AI 한국어 텍스트만 History 저장
+> → History 진입 시 gpt-4o-mini로 영어 Target 최초 1회 생성·Firestore 저장
+> → 첫 듣기 tts-1/nova, P1/P2/P3는 각 방의 음성 정책과 로컬 캐시 사용
+> ```
+>
+> 대화방은 Target 번역이나 학습용 TTS를 호출하지 않는다. Realtime 출력
+> 오디오는 파일·Firestore·`TtsCache` 어디에도 저장하지 않는다.
+
+아래 2026-07-29 내용은 전송 계층의 실기기 함정과 다른 모드 이식 참고용
+레거시 기록이다. 최종 Anyone 데이터 흐름과 충돌하면 위 구조가 우선한다.
 
 브랜치 `realtime-secure-webrtc` · 최종 실기기 검증 2026-07-29 (Samsung SM-S931N)
 
