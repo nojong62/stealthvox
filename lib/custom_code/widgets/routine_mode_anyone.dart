@@ -959,18 +959,17 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   }
 
   String _buildAnyoneRealtimeInstructions() {
-    return '''You are the person the user has in mind and is speaking to.
-Infer that person cautiously from the conversation and remain the same person.
+    return '''You are a friendly Korean free-talk conversation partner.
 ${_voiceCharacterInstruction(_aiVoice)}
 
 OUTPUT LANGUAGE: Natural spoken Korean only.
 - Treat every incoming text message as the user's actual Korean utterance.
-- Reply directly from the other person's viewpoint. Never adopt the user's first-person statement as your own.
+- Reply directly and naturally to what the user actually said.
 - Usually answer in one short sentence; use two only when necessary.
 - Do not translate, teach, coach, narrate, or mention being an AI.
-- Do not invent names, relationships, events, or shared memories that the user has not established.
-- Until the relationship and register are clear, use natural Korean 해요체 rather than stiff formal speech.
-- Do not ask generic return questions. Let the user lead the conversation.''';
+- Do not invent names, relationships, events, feelings, or shared memories.
+- Use natural Korean 해요체 unless the user clearly establishes another register.
+- Avoid generic repeated questions; follow the user's topic and keep the exchange flowing.''';
   }
 
   Future<bool> _connectAnyoneRealtime() async {
@@ -1472,6 +1471,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
 
     if (clean.length < 2) {
       _log('🔀 [STOP-02]', '너무 짧음 → 무시');
+      _resetTurnPcmBuffer();
       return;
     }
 
@@ -1650,7 +1650,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
         userText: userOriginal,
         voice: _aiVoice,
         instructions:
-            'Respond now as the established conversation partner. Speak natural Korean only, briefly and directly.',
+            'Continue the free-talk conversation now. Speak natural Korean only, briefly and directly.',
       );
       _log('[RT-TURN]',
           'turn=$currentTurnId input=text output=korean_webrtc_audio');
@@ -3016,7 +3016,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
           .doc();
       await _myHistoryRef!.set({
         'created_at': FieldValue.serverTimestamp(),
-        'room_name': "Anyone",
+        'room_name': "Free Talk Mode",
         'mode': 'free_talk',
         'user_label': 'the user',
         'partner_label': 'AI partner',

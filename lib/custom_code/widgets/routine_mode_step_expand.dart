@@ -40,6 +40,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/openai_connection_pool.dart';
 import '/custom_code/services/openai_transcribe_service.dart';
+import '/custom_code/services/realtime_anyone_adapter.dart';
+import '/custom_code/services/stealth_vox_realtime_session.dart';
 import 'deepgram_confidence_probe.dart';
 import 'first_utterance_context_judge.dart';
 
@@ -67,6 +69,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   // ====================================================================
   String _deepgramKey = "";
   String _openAiKey = "";
+  static const String _aiVoice = 'ballad';
   bool _micPermissionReady = false; // 🆕 마이크 권한 준비 여부(첫 진입 race 방지)
   bool _initialSessionStarted = false; // 🆕 초기 자동 시작 1회성 보장
   bool _isInitialGuidePlaying = false; // 첫 안내 중 유저 발화 시 즉시 중단(barge-in)
@@ -101,7 +104,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   int _idleElapsedSec = 0;
 
   bool get _isSystemBusy {
-    return _ttsQueueManager.isBusy;
+    return _ttsQueueManager.isBusy || _realtimeTurnActive;
   }
 
   void _resetIdleTimer() {
@@ -234,7 +237,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   final List<Uint8List> _turnPcmChunks = <Uint8List>[];
   int _turnPcmBytes = 0;
   static const int _turnPcmBufferMaxBytes = 32000 * 60;
-  static const Duration _accurateTranscribeTimeout = Duration(seconds: 3);
+  static const Duration _accurateTranscribeTimeout = Duration(seconds: 12);
   static const int COMMIT_WAIT_SPEECH_FINAL_MS = 1200; // speech_final: 1200ms
   static const int COMMIT_WAIT_UNCERTAIN_MS = 500; // UtteranceEnd: 500ms
   // 🚀 [FIRST-TURN] 첫 유저 발화(seed)만: 안전값보다는 짧지만, 말 중간의 짧은 쉼을
@@ -250,6 +253,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   bool _awaitingAiFirstAudioProbe = false;
   double? _activeSttConfidence;
   int _pipelineGeneration = 0;
+  bool _realtimeTurnActive = false;
+  RealtimeAnyoneAdapter? _realtimeAdapter;
+  Future<bool>? _realtimeConnectFuture;
+  late final String _realtimeModeSessionId;
   void _log(String tag, String msg) {
     final ts = DateTime.now().toIso8601String().substring(11, 23);
     final line = '[$ts] $tag $msg';
@@ -359,6 +366,60 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       timeout: _accurateTranscribeTimeout,
       onLog: _log,
     );
+  }
+
+  String _buildStepExpandRealtimeInstructions() => '''
+You are the Korean conversation partner for Step Expand practice.
+
+OUTPUT LANGUAGE: Natural spoken Korean only.
+- Build the conversation one meaningful step at a time from facts the user has actually said.
+- Respond directly to the latest Korean line, then invite one small, relevant detail that can expand it.
+- Keep each reply concise: normally one or two spoken sentences.
+- Do not translate, teach grammar, show English, narrate, or mention being an AI.
+- Do not invent facts, names, events, feelings, or relationships.
+- Avoid repeating a question already answered in this session.
+''';
+
+  Future<bool> _connectStepExpandRealtime() async {
+    final old = _realtimeAdapter;
+    if (old != null) await old.dispose();
+    if (!mounted) return false;
+    final adapter = RealtimeAnyoneAdapter(
+      onConnectionStateChanged: (state) =>
+          _log('[RT-STATE]', 'state=${state.name}'),
+      onError: (error) => _log('[RT-ERROR]', 'reason=${error.runtimeType}'),
+      logger: _log,
+    );
+    _realtimeAdapter = adapter;
+    try {
+      await adapter.connectForTranslation(
+        modeSessionId: _realtimeModeSessionId,
+        voice: _aiVoice,
+        allowWhenDisabled: true,
+        instructions: _buildStepExpandRealtimeInstructions(),
+      );
+      return adapter.session.isReady;
+    } catch (error) {
+      if (identical(_realtimeAdapter, adapter)) _realtimeAdapter = null;
+      await adapter.dispose();
+      _log('[RT-CONNECT-FAIL]', 'reason=${error.runtimeType}');
+      return false;
+    }
+  }
+
+  Future<bool> _ensureStepExpandRealtimeConnected() async {
+    if (_realtimeAdapter?.session.isReady ?? false) return true;
+    final inFlight = _realtimeConnectFuture;
+    if (inFlight != null) return inFlight;
+    final future = _connectStepExpandRealtime();
+    _realtimeConnectFuture = future;
+    try {
+      return await future;
+    } finally {
+      if (identical(_realtimeConnectFuture, future)) {
+        _realtimeConnectFuture = null;
+      }
+    }
   }
 
   void _prefetchFirstTurnTranscription() {
@@ -499,6 +560,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   @override
   void initState() {
     super.initState();
+    _realtimeModeSessionId =
+        'step-expand-${DateTime.now().microsecondsSinceEpoch}';
     _ttsQueueManager = TtsQueueManager(onPlayStart: () {
       if (_awaitingAiFirstAudioProbe) {
         _awaitingAiFirstAudioProbe = false;
@@ -532,6 +595,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     BillingTicker.instance.pause();
     _stopEverything();
     _voiceManager?.dispose();
+    unawaited(_realtimeAdapter?.dispose());
+    _realtimeAdapter = null;
     _audioRecorder.dispose();
     _ttsQueueManager.stop();
     _practicePlayer.dispose();
@@ -1582,6 +1647,11 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   void _stopEverything() {
     _pipelineGeneration++;
     _isConversationActive = false;
+    _realtimeTurnActive = false;
+    _realtimeConnectFuture = null;
+    final realtime = _realtimeAdapter;
+    _realtimeAdapter = null;
+    if (realtime != null) unawaited(realtime.dispose());
     _commitTimer?.cancel();
     _commitTimer = null;
     _cancelSpeculativeTranslation(); // 🚀 [SPEC] 진행 중 투기 번역 정리
@@ -1691,10 +1761,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 
     // 🌐 [v3.1] 로비에서 유저가 선택한 모국어(nativeLang)로 Deepgram 인식
     // 유저가 한국어로 말하면 Deepgram이 한국어로 인식 → Brain이 영어로 번역
-    final String nativeLang =
-        FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
-    final String dgLangCode = _mapLanguageToCode(nativeLang);
-    _log('🌐 [LANG]', 'nativeLang="$nativeLang" → Deepgram code="$dgLangCode"');
+    const String dgLangCode = 'ko';
+    _log('🌐 [LANG]', 'Deepgram boundary language=ko');
 
     _voiceManager = DeepgramV2VoiceManager(
       apiKey: _deepgramKey,
@@ -1756,30 +1824,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         '$source 수신: len=${clean.length} waitMs=$waitMs first=$isFirstUtterance');
 
     if (clean.length < 2) {
-      _log('🔀 [STOP-02]', '너무 짧음 → "Please say that again." TTS 후 대기');
-      await _voiceManager?.dispose();
-      _voiceManager = null;
-      _ttsQueueManager.setUserTurn(false);
-      _ttsQueueManager.setAiPaused(false);
-      final retryTts = ChunkedTtsFetcher(
-        _openAiKey,
-        _ttsQueueManager,
-        'nova',
-        language: 'ko',
-        cacheEnabled: false,
-        isUser: false,
-        onLog: _log,
-      );
-      retryTts.addText('다시 말씀해 주세요.');
-      int _retryTicks = 0;
-      while ((retryTts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
-          mounted) {
-        await Future.delayed(const Duration(milliseconds: 50));
-        if (++_retryTicks > 200) break;
-      }
-      if (mounted && _isConversationActive && !_isSessionComplete) {
-        _startUserListening();
-      }
+      _log('🔀 [STOP-02]', '너무 짧음 → 조용히 계속 청취');
+      _resetTurnPcmBuffer();
       return;
     }
 
@@ -1821,16 +1867,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     // 기존 타이머 취소 (새 발화가 왔으므로 대기창 리셋)
     _commitTimer?.cancel();
 
-    // 첫 턴은 650ms 확정 대기와 정밀 전사·투기 번역을 동시에 진행한다.
-    // 정밀 전사와 Deepgram 문장이 같을 때만 투기 번역을 그대로 사용한다.
-    final pendingFirstUtterance = _pendingTranscript.trim();
-    if (!isDuplicateFinal &&
-        isFirstUtterance &&
-        pendingFirstUtterance.length >= 2) {
-      _prefetchFirstTurnTranscription();
-      _startSpeculativeTranslation(pendingFirstUtterance);
-    }
-
     // 조건부 대기 후 파이프라인 시작 예약 (source별 waitMs)
     _commitTimer = Timer(
       Duration(milliseconds: waitMs),
@@ -1838,8 +1874,47 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     );
   }
 
-  // 🔧 [v3.4] 1.2초 대기 후 더 이상 발화 없으면 확정 → 파이프라인 시작
+  // Deepgram은 발화 종료 경계만 제공한다. 사용자 한국어 문장은 매 턴 PCM을
+  // gpt-4o-transcribe로 전사한 결과만 사용한다.
   void _commitAndProcess() async {
+    final generation = _pipelineGeneration;
+    final boundaryTranscript = _pendingTranscript.trim();
+    _pendingTranscript = '';
+    _lastPendingFinalAt = null;
+    _commitTimer = null;
+    _cancelSpeculativeTranslation();
+    _prefetchedFirstTurnTranscribe = null;
+    _prefetchedFirstTurnPcmBytes = 0;
+    if (boundaryTranscript.isEmpty) {
+      if (_isConversationActive && !_isSessionComplete) _startUserListening();
+      return;
+    }
+
+    final pcm = _snapshotTurnPcm();
+    final closingManager = _voiceManager;
+    _voiceManager = null;
+    if (closingManager != null) unawaited(closingManager.dispose());
+    if (pcm == null || pcm.isEmpty) {
+      _log('[STT-ROUTE]', 'gpt-4o-transcribe skipped reason=empty_pcm');
+      if (_isConversationActive && !_isSessionComplete) _startUserListening();
+      return;
+    }
+
+    final userKorean =
+        (await _transcribeAccurately(pcmOverride: pcm))?.trim() ?? '';
+    if (!mounted || generation != _pipelineGeneration) return;
+    if (userKorean.isEmpty) {
+      _log('[STT-ROUTE]', 'gpt-4o-transcribe failed; Deepgram text discarded');
+      if (_isConversationActive && !_isSessionComplete) _startUserListening();
+      return;
+    }
+    _log('[STT-ROUTE]',
+        'selected=gpt-4o-transcribe every_turn=true len=${userKorean.length}');
+    await _processRealtimeStepExpandTurn(userKorean, generation: generation);
+  }
+
+  // ignore: unused_element
+  void _commitAndProcessLegacy() async {
     final pipelineGeneration = _pipelineGeneration;
     final committed = _pendingTranscript.trim();
     _pendingTranscript = '';
@@ -1905,6 +1980,125 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       userStreamOverride: userOverride,
       expectedPipelineGeneration: pipelineGeneration,
     );
+  }
+
+  Future<void> _processRealtimeStepExpandTurn(
+    String userKorean, {
+    required int generation,
+  }) async {
+    if (!mounted ||
+        !_isConversationActive ||
+        generation != _pipelineGeneration) {
+      return;
+    }
+    if (_isNoiseTranscript(userKorean)) {
+      if (_isConversationActive && !_isSessionComplete) _startUserListening();
+      return;
+    }
+    _turnCounter++;
+    final turnNumber = _turnCounter;
+    _realtimeTurnActive = true;
+    StreamSubscription<String>? transcriptSubscription;
+    var aiIndex = -1;
+    try {
+      setState(() {
+        _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+        _localMessages.add(<String, dynamic>{
+          'role': 'HOST',
+          'target': userKorean,
+          'original': '',
+        });
+        _localMessages.add(<String, dynamic>{
+          'role': 'SYSTEM',
+          'target': '',
+          'original': '',
+        });
+        aiIndex = _localMessages.length - 1;
+      });
+      _scrollToBottom();
+
+      final connected = await _ensureStepExpandRealtimeConnected();
+      if (!connected ||
+          !mounted ||
+          !_isConversationActive ||
+          generation != _pipelineGeneration) {
+        throw StateError('Realtime Step Expand session is unavailable.');
+      }
+      final turn = _realtimeAdapter!.requestConversationTurn(
+        turnId: 'step-expand-$turnNumber',
+        userText: userKorean,
+        voice: _aiVoice,
+        instructions: turnNumber >= MAX_TURNS
+            ? 'This is the final turn. Briefly acknowledge the completed idea in natural Korean without asking another question.'
+            : 'Continue Step Expand now in natural Korean. Add one concise reaction and invite exactly one relevant detail.',
+      );
+      var streamedText = '';
+      transcriptSubscription = turn.textStream.listen((delta) {
+        if (delta.isEmpty ||
+            !mounted ||
+            generation != _pipelineGeneration ||
+            turnNumber != _turnCounter) {
+          return;
+        }
+        streamedText += delta;
+        if (aiIndex >= 0 && aiIndex < _localMessages.length) {
+          setState(() => _localMessages[aiIndex]['target'] = streamedText);
+        }
+      });
+
+      final outcome = await turn.done;
+      final aiKorean = (await turn.finalText).trim();
+      if (outcome != RealtimeTurnOutcome.completed || aiKorean.isEmpty) {
+        throw StateError('Realtime Step Expand response did not complete.');
+      }
+      if (!mounted ||
+          !_isConversationActive ||
+          generation != _pipelineGeneration ||
+          turnNumber != _turnCounter) {
+        return;
+      }
+      setState(() {
+        _localMessages[aiIndex]['target'] = aiKorean;
+        _localMessages[aiIndex]['original'] = '';
+        if (turnNumber >= MAX_TURNS) {
+          _isSessionComplete = true;
+          _debugResult = '🎉 $MAX_TURNS턴 완료!';
+        }
+      });
+      _scrollToBottom();
+
+      final hostLine = <String, dynamic>{
+        'role': 'HOST',
+        'original_text': userKorean,
+      };
+      final systemLine = <String, dynamic>{
+        'role': 'SYSTEM',
+        'original_text': aiKorean,
+      };
+      await _saveTurnToFirestore(<Map<String, dynamic>>[hostLine, systemLine]);
+      await _saveHistoryMessages(<Map<String, dynamic>>[hostLine, systemLine]);
+      _log('[RT-HISTORY]',
+          'turn=$turnNumber text_only=true voice=$_aiVoice realtime_audio_saved=false');
+    } catch (error) {
+      _log('[RT-PIPE-ERR]', 'turn=$turnNumber reason=${error.runtimeType}');
+      if (mounted && aiIndex >= 0 && aiIndex < _localMessages.length) {
+        setState(() {
+          if ((_localMessages[aiIndex]['target'] ?? '').toString().isEmpty) {
+            _localMessages.removeAt(aiIndex);
+          }
+        });
+      }
+    } finally {
+      await transcriptSubscription?.cancel();
+      _realtimeTurnActive = false;
+      if (mounted &&
+          _isConversationActive &&
+          !_isSessionComplete &&
+          generation == _pipelineGeneration &&
+          turnNumber == _turnCounter) {
+        _startUserListening();
+      }
+    }
   }
 
   // ====================================================================
@@ -3167,7 +3361,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
         'last_message': '',
         'msg_count': 0,
         // 세션 생성 당시 언어 식별값 보존(History 동일 언어 판정용)
-        'native_lang': FFAppState().nativeLang,
+        'native_lang': 'Korean',
         'target_lang': FFAppState().targetLang,
       });
       BillingTicker.instance.setSessionIdentifiers(
@@ -3189,19 +3383,12 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       // messages 서브컬렉션에 각 발화 저장
       final List<String> savedIds = [];
       for (final line in chatLines) {
-        final translated = (line['translated_text'] ?? '').toString().trim();
-        if (translated.isEmpty) continue; // 빈 발화 스킵
-        // 🔧 [PRACTICE-FIX] expanded_sentence 필드 있으면 함께 저장 (옵션 B 후방호환)
-        final String expandedSent =
-            (line['expanded_sentence'] ?? '').toString().trim();
+        final original = (line['original_text'] ?? '').toString().trim();
+        if (original.isEmpty) continue;
         final addedRef = await _myHistoryRef!.collection('messages').add({
           'role': line['role'] ?? '',
-          'translated_text': translated,
-          'original_text': (FFAppState().nativeLang.isNotEmpty &&
-                  FFAppState().nativeLang == FFAppState().targetLang)
-              ? ''
-              : (line['original_text'] ?? '').toString(),
-          if (expandedSent.isNotEmpty) 'expanded_sentence': expandedSent,
+          // Target은 History 진입 시 gpt-4o-mini로 최초 1회 생성한다.
+          'original_text': original,
           'created_at': FieldValue.serverTimestamp(),
         });
         savedIds.add(addedRef.id);
@@ -3213,24 +3400,18 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       // 🔧 [핵심] 턴마다 msg_count/last_message 업데이트
       //   - 뒤로가기 경로와 무관하게 항상 갱신됨
       //   - last_message는 마지막 비어있지 않은 translated_text
-      final lastTranslated = chatLines
-          .map((l) => (l['translated_text'] ?? '').toString().trim())
+      final lastOriginal = chatLines
+          .map((l) => (l['original_text'] ?? '').toString().trim())
           .lastWhere((t) => t.isNotEmpty, orElse: () => '');
-      if (lastTranslated.isNotEmpty) {
+      if (lastOriginal.isNotEmpty) {
         final updateMap = <String, dynamic>{
           'msg_count': FieldValue.increment(chatLines.length),
-          'last_message': lastTranslated,
+          'last_message': lastOriginal,
           'last_active': FieldValue.serverTimestamp(),
         };
-        final expandedSentence = chatLines
-            .map((l) => (l['expanded_sentence'] ?? '').toString().trim())
-            .lastWhere((t) => t.isNotEmpty, orElse: () => '');
-        if (expandedSentence.isNotEmpty) {
-          updateMap['expanded_sentence'] = expandedSentence;
-        }
         await _myHistoryRef!.update(updateMap);
         _log('💾 [HIST-UPD]',
-            'msg_count+${chatLines.length}, last="$lastTranslated"');
+            'msg_count+${chatLines.length}, korean_text_only=true');
       }
     } catch (e) {
       _log('❌ [HIST-ERR]', 'chat_history 저장 실패: $e');

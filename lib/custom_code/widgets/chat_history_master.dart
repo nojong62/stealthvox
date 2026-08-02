@@ -7686,9 +7686,7 @@ RULES — follow exactly:
 
   bool get _usesDeferredHistoryTargets {
     final mode = _inferHistoryMode(_cachedRoomData);
-    return mode == 'free_talk' ||
-        mode == 'roleplay' ||
-        mode == 'step_expand';
+    return mode == 'free_talk' || mode == 'roleplay' || mode == 'step_expand';
   }
 
   String _historyModeKey(Map<String, dynamic>? data) {

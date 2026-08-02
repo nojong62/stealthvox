@@ -39,6 +39,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
+import '/custom_code/services/openai_transcribe_service.dart';
+import '/custom_code/services/realtime_anyone_adapter.dart';
+import '/custom_code/services/stealth_vox_realtime_session.dart';
 
 // ====================================================================
 // 🛡️ [v4] 시나리오 재진입 보존용 static 홀더 (App State 대체)
@@ -68,6 +71,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   // ====================================================================
   String _deepgramKey = "";
   String _openAiKey = "";
+  static const String _aiVoice = 'coral';
+  static const Duration _accurateTranscribeTimeout = Duration(seconds: 12);
   bool _isConversationActive = false;
   double _fontScale = 1.0;
   bool _showOriginal = true;
@@ -85,6 +90,14 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   static const int COMMIT_WAIT_UNCERTAIN_MS =
       1100; // UtteranceEnd/speechFinal=false 시 여유 대기
   bool _lastTurnWasSpeechFinal = false; // 마지막 onTurnEnded 이벤트 타입 기록
+  final List<Uint8List> _turnPcmChunks = <Uint8List>[];
+  int _turnPcmBytes = 0;
+  static const int _turnPcmBufferMaxBytes = 32000 * 60;
+  int _pipelineGeneration = 0;
+  bool _realtimeTurnActive = false;
+  RealtimeAnyoneAdapter? _realtimeAdapter;
+  Future<bool>? _realtimeConnectFuture;
+  late final String _realtimeModeSessionId;
 
   void _log(String tag, String msg) {
     final ts = DateTime.now().toIso8601String().substring(11, 23);
@@ -147,6 +160,100 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     }
   }
 
+  void _resetTurnPcmBuffer() {
+    _turnPcmChunks.clear();
+    _turnPcmBytes = 0;
+  }
+
+  void _appendTurnPcm(Uint8List bytes) {
+    if (bytes.isEmpty) return;
+    _turnPcmChunks.add(bytes);
+    _turnPcmBytes += bytes.length;
+    while (
+        _turnPcmBytes > _turnPcmBufferMaxBytes && _turnPcmChunks.isNotEmpty) {
+      _turnPcmBytes -= _turnPcmChunks.removeAt(0).length;
+    }
+  }
+
+  Uint8List? _snapshotTurnPcm() {
+    if (_turnPcmBytes <= 0) return null;
+    final pcm = Uint8List(_turnPcmBytes);
+    var offset = 0;
+    for (final chunk in _turnPcmChunks) {
+      pcm.setRange(offset, offset + chunk.length, chunk);
+      offset += chunk.length;
+    }
+    return pcm;
+  }
+
+  Future<String?> _transcribeTurn(Uint8List pcm) {
+    if (pcm.isEmpty || _openAiKey.isEmpty) return Future.value(null);
+    return OpenAiTranscribeService.transcribePcm16(
+      apiKey: _openAiKey,
+      pcm: pcm,
+      language: 'ko',
+      model: OpenAiTranscribeService.firstTurnModel,
+      timeout: _accurateTranscribeTimeout,
+      onLog: _log,
+    );
+  }
+
+  String _buildRoleplayRealtimeInstructions() => '''
+You are the AI character in a live Korean roleplay.
+Situation: ${_scenarioSituation.trim()}
+Your role: ${_roleplayPartnerLabel.trim()}
+User role: ${_roleplayUserLabel.trim()}
+
+OUTPUT LANGUAGE: Natural spoken Korean only.
+- Stay fully in character and react directly to the user's latest Korean line.
+- Preserve the established situation, roles, relationship, and conversation memory.
+- Keep replies concise and conversational, normally one or two sentences.
+- Do not translate, teach, coach, narrate, or mention being an AI.
+- Do not output stage directions, labels, brackets, or explanations.
+''';
+
+  Future<bool> _connectRoleplayRealtime() async {
+    final old = _realtimeAdapter;
+    if (old != null) await old.dispose();
+    if (!mounted) return false;
+    final adapter = RealtimeAnyoneAdapter(
+      onConnectionStateChanged: (state) =>
+          _log('[RT-STATE]', 'state=${state.name}'),
+      onError: (error) => _log('[RT-ERROR]', 'reason=${error.runtimeType}'),
+      logger: _log,
+    );
+    _realtimeAdapter = adapter;
+    try {
+      await adapter.connectForTranslation(
+        modeSessionId: _realtimeModeSessionId,
+        voice: _aiVoice,
+        allowWhenDisabled: true,
+        instructions: _buildRoleplayRealtimeInstructions(),
+      );
+      return adapter.session.isReady;
+    } catch (error) {
+      if (identical(_realtimeAdapter, adapter)) _realtimeAdapter = null;
+      await adapter.dispose();
+      _log('[RT-CONNECT-FAIL]', 'reason=${error.runtimeType}');
+      return false;
+    }
+  }
+
+  Future<bool> _ensureRoleplayRealtimeConnected() async {
+    if (_realtimeAdapter?.session.isReady ?? false) return true;
+    final inFlight = _realtimeConnectFuture;
+    if (inFlight != null) return inFlight;
+    final future = _connectRoleplayRealtime();
+    _realtimeConnectFuture = future;
+    try {
+      return await future;
+    } finally {
+      if (identical(_realtimeConnectFuture, future)) {
+        _realtimeConnectFuture = null;
+      }
+    }
+  }
+
   // 🎭 롤플레이 시나리오
   String _scenarioKeyword = "";
   String _scenarioSituation = "";
@@ -180,7 +287,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   int _idleElapsedSec = 0;
 
   bool get _isSystemBusy {
-    return _ttsQueueManager.isBusy;
+    return _ttsQueueManager.isBusy || _realtimeTurnActive;
   }
 
   void _resetIdleTimer() {
@@ -258,6 +365,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   @override
   void initState() {
     super.initState();
+    _realtimeModeSessionId =
+        'roleplay-${DateTime.now().microsecondsSinceEpoch}';
     _ttsQueueManager = TtsQueueManager(onPlayStart: () {
       if (_swTTS.isRunning) {
         _swTTS.stop();
@@ -312,6 +421,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     _forceSaveToFirestore();
     _stopEverything();
     _voiceManager?.dispose();
+    unawaited(_realtimeAdapter?.dispose());
+    _realtimeAdapter = null;
     _audioRecorder.dispose();
     _ttsQueueManager.stop();
     _scrollController.dispose();
@@ -589,11 +700,18 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   }
 
   void _stopEverything() {
+    _pipelineGeneration++;
     _isConversationActive = false;
     _isAiOpenerPlaying = false;
+    _realtimeTurnActive = false;
+    _realtimeConnectFuture = null;
+    final realtime = _realtimeAdapter;
+    _realtimeAdapter = null;
+    if (realtime != null) unawaited(realtime.dispose());
     _commitTimer?.cancel(); // 🔧 [v3.4] 대기 중 타이머 정리
     _commitTimer = null;
     _pendingTranscript = ''; // 대기 중 발화도 버림
+    _resetTurnPcmBuffer();
     _voiceManager?.dispose();
     _voiceManager = null;
     _ttsQueueManager.stop();
@@ -618,6 +736,69 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   //         어색한 학습용 인사 X, 그 역할·상황에 딱 맞는 현실적 구어체 O.
   // ====================================================================
   Future<void> _generateAndPlayAiOpener() async {
+    if (_isAiOpenerPlaying || _scenarioAiRole.isEmpty) return;
+    _isAiOpenerPlaying = true;
+    _realtimeTurnActive = true;
+    StreamSubscription<String>? transcriptSubscription;
+    var aiIndex = -1;
+    if (mounted) setState(() {});
+    try {
+      setState(() {
+        _localMessages.add(<String, dynamic>{
+          'role': 'SYSTEM',
+          'target': '',
+          'original': '',
+        });
+        aiIndex = _localMessages.length - 1;
+      });
+      final connected = await _ensureRoleplayRealtimeConnected();
+      if (!connected || !mounted || !_isConversationActive) {
+        throw StateError('Realtime roleplay opener is unavailable.');
+      }
+      final turn = _realtimeAdapter!.requestConversationTurn(
+        turnId: 'roleplay-opener',
+        userText: '롤플레이 상황에 맞는 첫 대사를 시작하세요.',
+        voice: _aiVoice,
+        instructions:
+            'Start the roleplay now with one natural Korean opening line as your assigned character. Do not explain the setup.',
+      );
+      var streamedText = '';
+      transcriptSubscription = turn.textStream.listen((delta) {
+        if (delta.isEmpty || !mounted || !_isConversationActive) return;
+        streamedText += delta;
+        if (aiIndex >= 0 && aiIndex < _localMessages.length) {
+          setState(() => _localMessages[aiIndex]['target'] = streamedText);
+        }
+      });
+      final outcome = await turn.done;
+      final aiKorean = (await turn.finalText).trim();
+      if (outcome != RealtimeTurnOutcome.completed || aiKorean.isEmpty) {
+        throw StateError('Realtime roleplay opener did not complete.');
+      }
+      if (!mounted || !_isConversationActive) return;
+      setState(() => _localMessages[aiIndex]['target'] = aiKorean);
+      await _saveHistoryMessages(<Map<String, dynamic>>[
+        <String, dynamic>{
+          'role': 'SYSTEM',
+          'original_text': aiKorean,
+        },
+      ]);
+      _log('[RT-OPENER]', 'voice=$_aiVoice text_only_history=true');
+    } catch (error) {
+      _log('[RT-OPENER-ERR]', 'reason=${error.runtimeType}');
+      if (mounted && aiIndex >= 0 && aiIndex < _localMessages.length) {
+        setState(() => _localMessages.removeAt(aiIndex));
+      }
+    } finally {
+      await transcriptSubscription?.cancel();
+      _realtimeTurnActive = false;
+      _isAiOpenerPlaying = false;
+      if (mounted && _isConversationActive) _startDeepgramListening();
+    }
+  }
+
+  // ignore: unused_element
+  Future<void> _generateAndPlayAiOpenerLegacy() async {
     if (_isAiOpenerPlaying || _scenarioAiRole.isEmpty) return;
     _isAiOpenerPlaying = true;
     if (mounted) setState(() {});
@@ -776,6 +957,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     if (_deepgramKey.isEmpty || !(await _audioRecorder.hasPermission())) return;
     _resetIdleTimer();
     _isConversationActive = true;
+    _resetTurnPcmBuffer();
     if (mounted) {
       setState(() {
         _debugResult = "⏱️ 듣는 중...";
@@ -790,10 +972,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 
     // 🌐 [v3.1] 로비에서 유저가 선택한 모국어(nativeLang)로 Deepgram 인식
     // 유저가 한국어로 말하면 Deepgram이 한국어로 인식 → Brain이 영어로 번역
-    final String nativeLang =
-        FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
-    final String dgLangCode = _mapLanguageToCode(nativeLang);
-    _log('🌐 [LANG]', 'nativeLang="$nativeLang" → Deepgram code="$dgLangCode"');
+    const String dgLangCode = 'ko';
+    _log('🌐 [LANG]', 'Deepgram boundary language=ko');
 
     _voiceManager = DeepgramV2VoiceManager(
       apiKey: _deepgramKey,
@@ -808,6 +988,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         _swDeepgram.reset();
         _swDeepgram.start();
       },
+      onAudioData: _appendTurnPcm,
       onTurnEnded: (transcript, {bool speechFinal = false}) {
         BillingTicker.instance.resumeFromActivity('roleplay_stt_result');
         _lastTurnWasSpeechFinal = speechFinal;
@@ -844,6 +1025,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 
     if (clean.length < 2) {
       _log('🔀 [STOP-02]', '너무 짧음 → 무시');
+      _resetTurnPcmBuffer();
       return;
     }
 
@@ -883,8 +1065,42 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     );
   }
 
-  // 🔧 [v3.4] 1.2초 대기 후 더 이상 발화 없으면 확정 → 파이프라인 시작
+  // Deepgram 텍스트는 발화 종료 경계에만 사용한다. 실제 한국어 문장은
+  // 녹음 PCM 전체를 gpt-4o-transcribe에 전달해 매 턴 새로 확정한다.
   void _commitAndProcess() async {
+    final generation = _pipelineGeneration;
+    final boundaryTranscript = _pendingTranscript.trim();
+    _pendingTranscript = '';
+    _commitTimer = null;
+    if (boundaryTranscript.isEmpty) {
+      if (_isConversationActive) _startDeepgramListening();
+      return;
+    }
+
+    final pcm = _snapshotTurnPcm();
+    final closingManager = _voiceManager;
+    _voiceManager = null;
+    if (closingManager != null) unawaited(closingManager.dispose());
+    if (pcm == null || pcm.isEmpty) {
+      _log('[STT-ROUTE]', 'gpt-4o-transcribe skipped reason=empty_pcm');
+      if (_isConversationActive) _startDeepgramListening();
+      return;
+    }
+
+    final userKorean = (await _transcribeTurn(pcm))?.trim() ?? '';
+    if (!mounted || generation != _pipelineGeneration) return;
+    if (userKorean.isEmpty) {
+      _log('[STT-ROUTE]', 'gpt-4o-transcribe failed; Deepgram text discarded');
+      if (_isConversationActive) _startDeepgramListening();
+      return;
+    }
+    _log('[STT-ROUTE]',
+        'selected=gpt-4o-transcribe every_turn=true len=${userKorean.length}');
+    await _processRealtimeRoleplayTurn(userKorean, generation: generation);
+  }
+
+  // ignore: unused_element
+  void _commitAndProcessLegacy() async {
     final committed = _pendingTranscript.trim();
     _pendingTranscript = '';
     _commitTimer = null;
@@ -906,6 +1122,117 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 
     _log('🔀 [COMMIT-03]', '_processRelayPipeline 호출');
     _processRelayPipeline(committed);
+  }
+
+  Future<void> _processRealtimeRoleplayTurn(
+    String userKorean, {
+    required int generation,
+  }) async {
+    if (!mounted ||
+        !_isConversationActive ||
+        generation != _pipelineGeneration) {
+      return;
+    }
+    _turnCounter++;
+    final turnNumber = _turnCounter;
+    _realtimeTurnActive = true;
+    StreamSubscription<String>? transcriptSubscription;
+    var aiIndex = -1;
+    try {
+      setState(() {
+        _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+        _removeOrphanedHostBubbles();
+        _localMessages.add(<String, dynamic>{
+          'role': 'HOST',
+          'target': userKorean,
+          'original': '',
+        });
+        _localMessages.add(<String, dynamic>{
+          'role': 'SYSTEM',
+          'target': '',
+          'original': '',
+        });
+        aiIndex = _localMessages.length - 1;
+      });
+      _scrollToBottom();
+
+      final connected = await _ensureRoleplayRealtimeConnected();
+      if (!connected ||
+          !mounted ||
+          !_isConversationActive ||
+          generation != _pipelineGeneration) {
+        throw StateError('Realtime roleplay session is unavailable.');
+      }
+
+      final turn = _realtimeAdapter!.requestConversationTurn(
+        turnId: 'roleplay-$turnNumber',
+        userText: userKorean,
+        voice: _aiVoice,
+        instructions:
+            'Continue the established roleplay now. Reply in natural Korean only, in character, briefly and directly.',
+      );
+      var streamedText = '';
+      transcriptSubscription = turn.textStream.listen((delta) {
+        if (delta.isEmpty ||
+            !mounted ||
+            generation != _pipelineGeneration ||
+            turnNumber != _turnCounter) {
+          return;
+        }
+        streamedText += delta;
+        if (aiIndex >= 0 && aiIndex < _localMessages.length) {
+          setState(() => _localMessages[aiIndex]['target'] = streamedText);
+        }
+      });
+
+      final outcome = await turn.done;
+      final aiKorean = (await turn.finalText).trim();
+      if (outcome != RealtimeTurnOutcome.completed || aiKorean.isEmpty) {
+        throw StateError('Realtime roleplay response did not complete.');
+      }
+      if (!mounted ||
+          !_isConversationActive ||
+          generation != _pipelineGeneration ||
+          turnNumber != _turnCounter) {
+        return;
+      }
+      setState(() {
+        _localMessages[aiIndex]['target'] = aiKorean;
+        _localMessages[aiIndex]['original'] = '';
+      });
+      _scrollToBottom();
+
+      final hostLine = <String, dynamic>{
+        'role': 'HOST',
+        'original_text': userKorean,
+      };
+      final systemLine = <String, dynamic>{
+        'role': 'SYSTEM',
+        'original_text': aiKorean,
+      };
+      _saveTurnToFirestore(<Map<String, dynamic>>[hostLine, systemLine]);
+      await _saveHistoryMessages(<Map<String, dynamic>>[hostLine, systemLine]);
+      _log('[RT-HISTORY]',
+          'turn=$turnNumber text_only=true voice=$_aiVoice realtime_audio_saved=false');
+    } catch (error) {
+      _log('[RT-PIPE-ERR]', 'turn=$turnNumber reason=${error.runtimeType}');
+      if (mounted && aiIndex >= 0 && aiIndex < _localMessages.length) {
+        setState(() {
+          if ((_localMessages[aiIndex]['target'] ?? '').toString().isEmpty) {
+            _localMessages.removeAt(aiIndex);
+          }
+        });
+      }
+    } finally {
+      await transcriptSubscription?.cancel();
+      _realtimeTurnActive = false;
+      if (mounted &&
+          _isConversationActive &&
+          generation == _pipelineGeneration &&
+          turnNumber == _turnCounter) {
+        _startDeepgramListening();
+      }
+    }
   }
 
 // ====================================================================
@@ -1748,7 +2075,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
         'is_pinned': false,
         'msg_count': 0,
         // 세션 생성 당시 언어 식별값 보존(History 동일 언어 판정용)
-        'native_lang': FFAppState().nativeLang,
+        'native_lang': 'Korean',
         'target_lang': FFAppState().targetLang,
       });
       _myHistoryRef = newRef;
@@ -1770,15 +2097,12 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       // messages 서브컬렉션에 각 발화 저장
       final List<String> savedIds = [];
       for (final line in chatLines) {
-        final translated = (line['translated_text'] ?? '').toString().trim();
-        if (translated.isEmpty) continue;
+        final original = (line['original_text'] ?? '').toString().trim();
+        if (original.isEmpty) continue;
         final addedRef = await _myHistoryRef!.collection('messages').add({
           'role': line['role'] ?? '',
-          'translated_text': translated,
-          'original_text': (FFAppState().nativeLang.isNotEmpty &&
-                  FFAppState().nativeLang == FFAppState().targetLang)
-              ? ''
-              : (line['original_text'] ?? '').toString(),
+          // Target은 History 진입 시 gpt-4o-mini로 최초 1회 생성한다.
+          'original_text': original,
           'created_at': FieldValue.serverTimestamp(),
         });
         savedIds.add(addedRef.id);
@@ -1788,17 +2112,17 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       }
 
       // 🔧 [핵심] 턴마다 msg_count/last_message 업데이트
-      final lastTranslated = chatLines
-          .map((l) => (l['translated_text'] ?? '').toString().trim())
+      final lastOriginal = chatLines
+          .map((l) => (l['original_text'] ?? '').toString().trim())
           .lastWhere((t) => t.isNotEmpty, orElse: () => '');
-      if (lastTranslated.isNotEmpty) {
+      if (lastOriginal.isNotEmpty) {
         await _myHistoryRef!.update({
           'msg_count': FieldValue.increment(chatLines.length),
-          'last_message': lastTranslated,
+          'last_message': lastOriginal,
           'last_active': FieldValue.serverTimestamp(),
         });
         _log('💾 [HIST-UPD]',
-            'msg_count+${chatLines.length}, last="$lastTranslated"');
+            'msg_count+${chatLines.length}, korean_text_only=true');
       }
     } catch (e) {
       _log('❌ [HIST-ERR]', 'chat_history 저장 실패: $e');
@@ -2318,9 +2642,8 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
               textAlign: isHost ? TextAlign.right : TextAlign.left,
               softWrap: true,
               style: TextStyle(
-                color: isHost
-                    ? const Color(0xFF93C5FD)
-                    : const Color(0xFF86EFAC),
+                color:
+                    isHost ? const Color(0xFF93C5FD) : const Color(0xFF86EFAC),
                 fontSize: 12 * _fontScale,
                 fontWeight: FontWeight.w700,
                 height: 1.25,
@@ -2551,6 +2874,7 @@ class DeepgramV2VoiceManager {
   final Function(int)? onReconnecting; // 재연결 시도 알림 (선택적)
   final VoidCallback? onGaveUp; // 재연결 포기 알림 (선택적)
   final void Function(String tag, String msg)? onLog; // 🔬 [v3.1] 로그 훅
+  final void Function(Uint8List bytes)? onAudioData;
 
   IOWebSocketChannel? _channel;
   StreamSubscription? _audioSub;
@@ -2572,6 +2896,7 @@ class DeepgramV2VoiceManager {
     this.onReconnecting,
     this.onGaveUp,
     this.onLog,
+    this.onAudioData,
   });
 
   void _lg(String tag, String msg) {
@@ -2653,6 +2978,7 @@ class DeepgramV2VoiceManager {
           (data) {
             if (_isDisposed) return;
             if (data.isNotEmpty) {
+              onAudioData?.call(Uint8List.fromList(data));
               packetCount++;
               if (packetCount == 1) {
                 _lg('🎤 [MIC-07]', '첫 오디오 패킷 수신 (${data.length}B)');

@@ -263,10 +263,12 @@ class StealthVoxRealtimeSession {
         _micMutedForPlayback = false;
         _logger?.call('[RT-HALF-DUPLEX]', 'mic_restored');
       } catch (error) {
-        _logger?.call('[RT-HALF-DUPLEX]', 'restore_failed ${error.runtimeType}');
+        _logger?.call(
+            '[RT-HALF-DUPLEX]', 'restore_failed ${error.runtimeType}');
       }
     });
   }
+
   bool _peerConnected = false;
   bool _sessionUpdatedConfirmed = false;
   RealtimeTranslationTurn? _activeTurn;
@@ -408,11 +410,9 @@ class StealthVoxRealtimeSession {
 
       stage = 'microphone';
       if (_captureMicrophone) {
-        _localStream = await navigator.mediaDevices
-            .getUserMedia(
-              <String, dynamic>{'audio': true, 'video': false},
-            )
-            .timeout(const Duration(seconds: 8));
+        _localStream = await navigator.mediaDevices.getUserMedia(
+          <String, dynamic>{'audio': true, 'video': false},
+        ).timeout(const Duration(seconds: 8));
         _assertCurrent(generation);
         final audioTracks = _localStream!.getAudioTracks();
         if (audioTracks.isEmpty) {
@@ -454,12 +454,9 @@ class StealthVoxRealtimeSession {
 
       stage = 'sdp_offer';
       final offer = await peer
-          .createOffer(<String, dynamic>{})
-          .timeout(const Duration(seconds: 5));
+          .createOffer(<String, dynamic>{}).timeout(const Duration(seconds: 5));
       _assertCurrent(generation);
-      await peer
-          .setLocalDescription(offer)
-          .timeout(const Duration(seconds: 5));
+      await peer.setLocalDescription(offer).timeout(const Duration(seconds: 5));
       _assertCurrent(generation);
       await Future<void>.delayed(const Duration(milliseconds: 350));
       final localDescription = await peer.getLocalDescription();
@@ -622,8 +619,7 @@ class StealthVoxRealtimeSession {
     // 2) Ask for exactly one response in the requested modality.
     final response = <String, dynamic>{
       'instructions': instructions,
-      'output_modalities':
-          suppressAudio ? <String>['text'] : <String>['audio'],
+      'output_modalities': suppressAudio ? <String>['text'] : <String>['audio'],
     };
     if (!suppressAudio) {
       response['audio'] = <String, dynamic>{
@@ -748,14 +744,15 @@ class StealthVoxRealtimeSession {
         // 응답에서 남은 낭독 시간을 추정하는 기준점이다.
         if (turn._audioStartedAt == null) {
           turn._markAudioStarted();
-          _logger?.call('[RT-AUDIO]', 'stream_started signal=$type '
-              'turnId=${turn.turnId}');
+          _logger?.call(
+              '[RT-AUDIO]',
+              'stream_started signal=$type '
+                  'turnId=${turn.turnId}');
         }
         break;
       case 'output_audio_buffer.stopped':
       case 'output_audio_buffer.cleared':
-        _logger?.call(
-            '[RT-AUDIO]', 'stop_signal=$type turnId=${turn.turnId}');
+        _logger?.call('[RT-AUDIO]', 'stop_signal=$type turnId=${turn.turnId}');
         _scheduleAudioComplete(turn);
         break;
       case 'response.done':
@@ -916,7 +913,8 @@ class StealthVoxRealtimeSession {
       (_) => _logger?.call('[RT-AUDIO]', 'speaker_on'),
       onError: (Object error) {
         _speakerphoneEnabled = false;
-        _logger?.call('[RT-AUDIO]', 'speaker_failed reason=${error.runtimeType}');
+        _logger?.call(
+            '[RT-AUDIO]', 'speaker_failed reason=${error.runtimeType}');
       },
     ));
   }
@@ -1040,7 +1038,8 @@ class StealthVoxRealtimeSession {
         //   발생한다. 이걸 세션 장애로 처리하면 멀쩡한 세션이 Deepgram으로
         //   떨어지고 그 뒤 모든 턴이 legacy가 된다(실기기에서 실제로 발생).
         if (_isBenignServerError(payload)) {
-          _logger?.call('[RT-BENIGN]', 'ignored code=${_serverErrorCode(payload)}');
+          _logger?.call(
+              '[RT-BENIGN]', 'ignored code=${_serverErrorCode(payload)}');
           _routeTurnEvent(type, payload);
           _emit(RealtimeEventType.serverEvent, payload: payload);
           return;
@@ -1050,7 +1049,8 @@ class StealthVoxRealtimeSession {
         if (!_sessionUpdatedConfirmed &&
             completer != null &&
             !completer.isCompleted) {
-          completer.completeError(StateError('Realtime session update failed.'));
+          completer
+              .completeError(StateError('Realtime session update failed.'));
         }
         _emit(RealtimeEventType.error, payload: payload);
       }
@@ -1138,9 +1138,8 @@ class StealthVoxRealtimeSession {
       value.forEach((key, dynamic child) {
         final name = key.toString();
         if (_diagnosticRedactedKeys.contains(name.toLowerCase())) {
-          result[name] = child is String
-              ? '<redacted len=${child.length}>'
-              : '<redacted>';
+          result[name] =
+              child is String ? '<redacted len=${child.length}>' : '<redacted>';
         } else {
           result[name] = _redactForDiagnostics(child);
         }
@@ -1161,14 +1160,15 @@ class StealthVoxRealtimeSession {
       final total = (encoded.length / chunkSize).ceil();
       for (var i = 0; i < total; i++) {
         final start = i * chunkSize;
-        final end =
-            start + chunkSize < encoded.length ? start + chunkSize : encoded.length;
+        final end = start + chunkSize < encoded.length
+            ? start + chunkSize
+            : encoded.length;
         _logger?.call('[RT-SESSION-UPDATED-RAW]',
             'part=${i + 1}/$total ${encoded.substring(start, end)}');
       }
     } catch (error) {
-      _logger?.call(
-          '[RT-SESSION-UPDATED-RAW]', 'encode_failed reason=${error.runtimeType}');
+      _logger?.call('[RT-SESSION-UPDATED-RAW]',
+          'encode_failed reason=${error.runtimeType}');
     }
   }
 
@@ -1189,7 +1189,8 @@ class StealthVoxRealtimeSession {
         failures.add('session.audio expected=Map got=${audio.runtimeType}');
       }
       if (input is! Map) {
-        failures.add('session.audio.input expected=Map got=${input.runtimeType}');
+        failures
+            .add('session.audio.input expected=Map got=${input.runtimeType}');
       }
       if (turnDetection is! Map) {
         failures.add('session.audio.input.turn_detection expected=Map '
@@ -1226,8 +1227,8 @@ class StealthVoxRealtimeSession {
             'failed_fields=${failures.isEmpty ? 'none' : failures.join(' | ')}',
       );
     } catch (error) {
-      _logger?.call(
-          '[RT-SESSION-UPDATED-CHECK]', 'log_failed reason=${error.runtimeType}');
+      _logger?.call('[RT-SESSION-UPDATED-CHECK]',
+          'log_failed reason=${error.runtimeType}');
     }
   }
 
@@ -1276,7 +1277,8 @@ class StealthVoxRealtimeSession {
         if (_outputAudioActive) {
           sendEvent(<String, dynamic>{'type': 'output_audio_buffer.clear'});
           _outputAudioActive = false;
-          _logger?.call('[RT-BARGE-IN]', 'user_speech_started → ai_audio_stopped');
+          _logger?.call(
+              '[RT-BARGE-IN]', 'user_speech_started → ai_audio_stopped');
         }
         _convSpeechStoppedAt = null;
         _convResponseCreatedAt = null;
@@ -1289,7 +1291,8 @@ class StealthVoxRealtimeSession {
       case 'response.created':
         _convResponseCreatedAt = now;
         _convTurnCount++;
-        _logger?.call('[RT-PATH]', '${_mode}_realtime_mini turnId=$_convTurnCount');
+        _logger?.call(
+            '[RT-PATH]', '${_mode}_realtime_mini turnId=$_convTurnCount');
         return;
       case 'response.output_audio_transcript.delta':
       case 'response.audio_transcript.delta':
@@ -1345,8 +1348,7 @@ class StealthVoxRealtimeSession {
     _convFirstAudioAt = null;
   }
 
-  void _logInputTranscriptionEvent(
-      String type, Map<String, dynamic> payload) {
+  void _logInputTranscriptionEvent(String type, Map<String, dynamic> payload) {
     final itemId = payload['item_id']?.toString() ?? '';
     switch (type) {
       case 'input_audio_buffer.speech_started':
