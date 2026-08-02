@@ -221,8 +221,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   Timer? _shadowHighlightTimer;
   Timer? _shadowAdvanceTimer;
   double _shadowSpeed = 1.0; // 오디오 실패 시 하이라이트 fallback용 고정 속도.
-  String? _selectedMeaningUnitVoice;
-  // P2 학습 Voice를 직접 선택해야 의미단위 쉐도잉을 시작한다.
+  String? _selectedMeaningUnitVoice = 'cedar';
+  // P2 학습 Voice는 Cedar를 기본값으로 사용한다.
   bool _shadowStarted = false;
   bool _p2CountdownStarting = false;
   Future<Uint8List?>? _p2CountdownAudioFuture;
@@ -6649,7 +6649,7 @@ RULES — follow exactly:
         textAlign: TextAlign.left,
         style: TextStyle(
           color: Colors.white70,
-          fontSize: 20 * _fontScale,
+          fontSize: 19 * _fontScale,
           height: 1.65,
           fontWeight: FontWeight.w500,
         ),
@@ -7525,8 +7525,8 @@ RULES — follow exactly:
         _shadowWords = []; // [P2-SHADOW]
         _shadowWordIdx = -1; // [P2-SHADOW]
         _shadowSpeed = 1.0;
-        _selectedMeaningUnitVoice = null;
-        _shadowStarted = false;
+        _selectedMeaningUnitVoice = 'cedar';
+        _shadowStarted = true;
         _shadowRereadCount = 0; // [P2-PROXY]
         _showEchoingOverlay = false;
         _showShadowingOverlay = false;
@@ -7537,9 +7537,10 @@ RULES — follow exactly:
       _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
       _stopShadowAiPlayback(); // [P2-SHADOW-AI]
       _stopP2Countdown();
-      // 진입 안내 뒤 학습 Voice를 선택해야만 P2가 시작된다.
+      // Cedar 기본 보이스로 P2를 바로 시작한다.
       _triggerShadowingOverlay();
       _prepareP2StartAudio();
+      unawaited(_startP2AfterCountdown());
     }
   }
 
