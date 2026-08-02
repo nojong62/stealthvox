@@ -63,36 +63,3 @@ AI 지시문
  막혔던 부분/보류 이슈는 별도 메모
 ================
 지시문
-
-Firebase Console의 dev_test_device FID 교체와 Remote Config 게시가 완료됐다.
-
-지금 빌드 중인 debug APK 설치를 완료한 뒤 다음을 실행해라.
-
-앱 강제 종료
-필요하면 앱 데이터 삭제 또는 재설치
-앱 실행
-Remote Config fetchAndActivate() 완료 확인
-realtime_anyone_enabled 실제값 확인
-Anyone 모드 진입 후 5초 대기
-한 문장 발화
-Logcat으로 신규 경로 검증
-
-반드시 다음 항목을 순서대로 보고해라.
-
-realtime_anyone_enabled=true 여부
-신규 Anyone WebRTC 분기 진입 여부
-createRealtimeClientSecret 호출 여부
-App Check 성공 또는 구체적인 오류
-App Check Debug Token 출력 여부
-PeerConnection 생성 여부
-PEER_CONNECTED 여부
-Remote audio track 수신 여부
-Deepgram·GPT-4o mini·TTS-1 기존 경로가 실행됐는지
-
-realtime_anyone_enabled=true여도 createRealtimeClientSecret과 PeerConnection 로그가 없으면 신규 Realtime 경로가 실행된 것으로 판단하지 마라.
-
-App Check Debug Token이 나오면 실제 UUID 값만 별도로 보고해라. OpenAI API 키, client secret, Firebase 인증 토큰, UID, 이메일과 대화 내용은 출력하지 마라.
-
-Roleplay, Duo, Step Expand와 guide.md는 수정하지 마라.
-
-다음 결과에서 가장 먼저 볼 것은 Remote Config 값이 실제로 true로 읽히는지입니다. 그다음 App Check is required가 나오면 Debug Token 등록 단계로 넘어가면 됩니다.

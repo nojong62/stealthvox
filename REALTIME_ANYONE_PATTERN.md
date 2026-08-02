@@ -1,5 +1,12 @@
 # Anyone Realtime 통신 로직 — 다른 모드 이식용 정리
 
+> ⚠️ **2026-07-30: Anyone은 이 구조에서 내려왔다.** guide4.md 지시에 따라
+> Anyone은 Deepgram Nova-3 기본 + 첫 턴 `gpt-4o-mini-transcribe` 병렬 +
+> GPT-4o mini/4.1 mini 번역 분기 + 공통 TTS 어댑터(`tts_adapter.dart`,
+> `gpt-4o-mini-tts` PCM 스트리밍) 구조로 전환됐다. 이 문서의 Realtime 패턴은
+> **Step Expand 등 Realtime을 계속 쓰는 모드의 참고용**으로만 유효하다.
+> 세션 계층 서비스 파일들([1][2])은 Step Expand가 쓰므로 그대로 남아 있다.
+
 브랜치 `realtime-secure-webrtc` · 최종 실기기 검증 2026-07-29 (Samsung SM-S931N)
 
 이 문서는 **Anyone에서 실기기로 검증이 끝난 Realtime 통신 구조**를 다른 모드
