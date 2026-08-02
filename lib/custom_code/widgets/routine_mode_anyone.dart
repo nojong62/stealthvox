@@ -18,6 +18,7 @@ import 'package:flutter/services.dart'; // 🔬 [v3.1] Clipboard용
 // ====================================================================
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' as ui;
 import 'package:record/record.dart';
 import 'package:web_socket_channel/io.dart';
 import 'package:audioplayers/audioplayers.dart';
@@ -186,34 +187,16 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   //   Deepgram final 수신 시각(= 앱이 발화 종료를 아는 가장 이른 시점).
   DateTime? _turnPerfAnchor;
   double _fontScale = 1.0;
+  // 최종 통신 구조에서는 대화방에 확정된 한국어 문장만 표시한다.
+  bool _showOriginal = false;
   bool _showUsageGuide = false; // 🆕 [Anyone] 이용방법 말풍선 토글
-  String? _selectedAiVoice;
-  bool _showVoiceMenu = true;
-  bool _isPartnerSetupComplete = false;
-  String _partnerRole = '';
-  String _partnerName = '';
-  String _partnerRelationship = '';
-  String _partnerAgeGender = '';
-  String _partnerTone = '';
-  String _partnerSituation = '';
-  String? _selectedQuickRole;
-  final TextEditingController _partnerRoleController = TextEditingController();
-  final TextEditingController _partnerNameController = TextEditingController();
-  final TextEditingController _partnerRelationshipController =
-      TextEditingController();
-  final TextEditingController _partnerAgeGenderController =
-      TextEditingController();
-  final TextEditingController _partnerToneController = TextEditingController();
-  final TextEditingController _partnerSituationController =
-      TextEditingController();
-  final FocusNode _partnerRoleFocusNode = FocusNode();
+  String? _selectedAiVoice = 'verse';
+  bool _showVoiceMenu = false;
   String _characterShortTermMemory = '';
   // 🆕 [진입 안내] 스텔스룸 준비 오버레이에 있던 문구를 페이지 안으로 옮겼다
   //   (Realtime 연결 대기가 사라져 준비 화면 자체가 제거됨). Step Expand의
   //   _showOpeningNudgeOnce와 같은 방식 — 2초 노출 후 페이드아웃.
-  static const String _openingNudgeText =
-      '설정한 상대가 기다리고 있어요.\n편하게 이야기를 시작해 보세요.';
-  bool _hasShownNudgeBubble = false;
+  static const String _openingNudgeText = '여기,\n그 사람이 있어요.\n편하게\n말 걸어보세요.';
   bool _showNudgeBubble = false;
   int _turnCounter = 0;
   // 🧭 [FIRST-CONTEXT] 첫 정상 발화 판정. Anyone은 GPT-4.1 문맥 판정을 쓰지
@@ -535,12 +518,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   // 📦 [진입 안내] — 화면 중앙 둥근 사각형 텍스트, 2초 후 소멸 (Step Expand 동일)
   // ====================================================================
   void _showOpeningNudgeOnce() {
-    if (_hasShownNudgeBubble || !mounted) return;
-    _hasShownNudgeBubble = true;
-    setState(() => _showNudgeBubble = true);
-    Timer(const Duration(milliseconds: 2000), () {
-      if (mounted) setState(() => _showNudgeBubble = false);
-    });
+    // Free Talk에서는 목소리 설정 뒤 Anyone 안내 문구를 표시하지 않는다.
+    _showNudgeBubble = false;
   }
 
   Widget _buildNudgeBubble() {
@@ -893,20 +872,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     // 🔇 [TTS-CLOSED] stop()만 하면 이미 요청된 TTS가 나중에 도착해 재생된다.
     //   dispose로 어댑터를 닫아 화면을 떠난 뒤 소리가 새는 것을 막는다.
     unawaited(_ttsAdapter.dispose());
-    _partnerRole = '';
-    _partnerName = '';
-    _partnerRelationship = '';
-    _partnerAgeGender = '';
-    _partnerTone = '';
-    _partnerSituation = '';
-    _isPartnerSetupComplete = false;
-    _partnerRoleController.dispose();
-    _partnerNameController.dispose();
-    _partnerRelationshipController.dispose();
-    _partnerAgeGenderController.dispose();
-    _partnerToneController.dispose();
-    _partnerSituationController.dispose();
-    _partnerRoleFocusNode.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -1001,7 +966,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   /// 짧게 재확인한다. 재입장으로 우연히 초기화되는 동작에 의존하지 않는다.
   void _scheduleStartupRetry({bool immediate = false}) {
     if (!mounted || _isConversationActive || _isStartingListening) return;
-    if (!_isPartnerSetupComplete) return;
     if (_selectedAiVoice == null) return;
     _startupRetryTimer?.cancel();
     final delay = immediate ? Duration.zero : const Duration(milliseconds: 750);
@@ -1025,10 +989,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     if (!mounted) return;
     if (_isConversationActive) return; // 중복 시작 방지
     if (_isStartingListening) return;
-    if (!_isPartnerSetupComplete || _partnerRole.trim().isEmpty) {
-      _log('👤 [PARTNER-GATE]', '상대 설정 미완료 → 시작 보류');
-      return;
-    }
     if (_selectedAiVoice == null) {
       _log('🎙️ [VOICE-GATE]', 'AI 보이스 미선택 → 시작 보류');
       return;
@@ -1063,52 +1023,20 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     await _startDeepgramListening();
   }
 
-  String _buildPartnerProfile() {
-    final lines = <String>[];
-    void add(String label, String value) {
-      final clean = value.trim();
-      if (clean.isNotEmpty) lines.add('$label: $clean');
-    }
-
-    add('역할', _partnerRole);
-    add('이름 또는 호칭', _partnerName);
-    add('사용자와의 관계', _partnerRelationship);
-    add('성별연령대', _partnerAgeGender);
-    add('성격과 말투', _partnerTone);
-    add('현재 상황', _partnerSituation);
-    return lines.join('\n');
-  }
-
-  String get _partnerLabel {
-    final name = _partnerName.trim();
-    if (name.isNotEmpty) return name;
-    final role = _partnerRole.trim();
-    return role.isNotEmpty ? role : 'AI 상대';
-  }
-
   String _buildAnyoneRealtimeInstructions() {
-    final profile = _buildPartnerProfile();
-    return '''당신은 사용자가 직접 설정한 한국어 대화 상대다.
+    final voice = _selectedAiVoice ?? 'marin';
+    return '''You are the person the user has in mind and is speaking to.
+Infer that person cautiously from the conversation and remain the same person.
+${_voiceCharacterInstruction(voice)}
 
-[대화 상대 설정]
-$profile
-
-[필수 규칙]
-1. 항상 설정된 상대의 입장에서 말하고, 역할·이름·관계·연령대·성격·말투·상황을 대화 전체에서 일관되게 유지한다.
-2. 한국어로만 대답한다. 영어 문장, 번역, 문법 설명, 교정, 학습 조언을 하지 않는다.
-3. 영어 선생님이나 튜터처럼 행동하지 않고, AI·인공지능·실제 사람이 아니라는 메타 발언을 하지 않는다.
-4. 사용자가 설정한 관계와 호칭을 유지한다.
-5. 말투 설정이 있으면 반드시 따르고, 없으면 관계에 맞는 자연스러운 한국어를 사용한다. 판단하기 어려우면 자연스러운 존댓말을 사용한다.
-6. 설정된 인물의 나이·성별·관계·성격을 임의로 변경하지 않는다.
-7. 사용자가 말하지 않은 과거 사건을 실제 있었던 일처럼 단정하지 않는다. 필요한 경우에만 자연스럽게 확인한다.
-8. 모든 응답을 질문으로 끝내지 말고, 습관적으로 "넌 어떻게 생각해?" 같은 질문을 하지 않는다.
-9. 질문은 대화를 자연스럽게 이어갈 때만 사용한다. 반응이나 의견이 더 자연스러우면 그것으로 끝낸다.
-10. 실제 대화처럼 공감, 반응, 의견, 회상, 농담을 상황에 맞게 섞는다.
-11. 기본 응답은 1~3문장으로 짧고 자연스럽게 하되, 사용자가 긴 이야기를 하면 필요한 만큼 반응할 수 있다.
-12. 고민을 들으면 곧바로 분석하거나 해결책만 제시하지 말고, 설정된 상대가 먼저 보일 법한 감정과 반응을 표현한다.
-13. 특정 실존 인물로 설정되어도 확인되지 않은 사생활이나 비공개 사실을 만들어내지 않는다.
-14. 위험하거나 민감한 내용에서는 설정된 역할을 유지하면서 안전하게 대응한다.
-15. 사용자의 1인칭 경험을 당신의 경험으로 바꾸지 않는다. 당신은 대화의 반대편 인물이다.''';
+OUTPUT LANGUAGE: Natural spoken Korean only.
+- Treat every incoming text message as the user's actual Korean utterance.
+- Reply directly from the other person's viewpoint. Never adopt the user's first-person statement as your own.
+- Usually answer in one short sentence; use two only when necessary.
+- Do not translate, teach, coach, narrate, or mention being an AI.
+- Do not invent names, relationships, events, or shared memories that the user has not established.
+- Until the relationship and register are clear, use natural Korean 해요체 rather than stiff formal speech.
+- Do not ask generic return questions. Let the user lead the conversation.''';
   }
 
   Future<bool> _connectAnyoneRealtime() async {
@@ -3096,7 +3024,7 @@ $profile
           'session_no': nextSessionNo,
           'mode': 'free_talk',
           'user_label': 'the user',
-          'partner_label': _partnerLabel,
+          'partner_label': 'AI partner',
           'created_at': FieldValue.serverTimestamp(),
           'transcript': chatLines,
         });
@@ -3157,10 +3085,10 @@ $profile
           .doc();
       await _myHistoryRef!.set({
         'created_at': FieldValue.serverTimestamp(),
-        'room_name': '프리톡',
+        'room_name': "Anyone",
         'mode': 'free_talk',
         'user_label': 'the user',
-        'partner_label': _partnerLabel,
+        'partner_label': 'AI partner',
         'expand_partner_type': 'free_talk',
         'is_pinned': false,
         'msg_count': 0,
@@ -3281,7 +3209,7 @@ $profile
             'last_active': FieldValue.serverTimestamp(),
             'mode': 'free_talk',
             'user_label': 'the user',
-            'partner_label': _partnerLabel,
+            'partner_label': 'AI partner',
           });
           _log('💾 [HIST-UPD]', 'last_message 저장 (free_talk, no expand)');
         }
@@ -3331,276 +3259,104 @@ $profile
     );
   }
 
-  InputDecoration _partnerInputDecoration(String label, String hint) {
-    return InputDecoration(
-      labelText: label,
-      hintText: hint,
-      labelStyle: const TextStyle(color: Color(0xFFB9B4FF)),
-      hintStyle: const TextStyle(color: Colors.white30, fontSize: 13),
-      filled: true,
-      fillColor: Colors.white.withValues(alpha: 0.06),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.16)),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: Color(0xFF9B93FF), width: 1.4),
-      ),
-    );
-  }
-
-  Widget _buildPartnerTextField({
-    required TextEditingController controller,
-    required String label,
-    required String hint,
-    FocusNode? focusNode,
-    int maxLines = 1,
-    TextInputAction textInputAction = TextInputAction.next,
-  }) {
-    return TextField(
-      controller: controller,
-      focusNode: focusNode,
-      maxLines: maxLines,
-      textInputAction: textInputAction,
-      style: const TextStyle(color: Colors.white, fontSize: 14),
-      decoration: _partnerInputDecoration(label, hint),
-      onChanged: (value) {
-        if (identical(controller, _partnerRoleController) &&
-            _selectedQuickRole != null &&
-            value.trim() != _selectedQuickRole) {
-          _selectedQuickRole = null;
-        }
-        if (mounted) setState(() {});
-      },
-    );
-  }
-
-  void _selectQuickRole(String role) {
-    if (role == '직접 입력') {
-      setState(() => _selectedQuickRole = role);
-      _partnerRoleFocusNode.requestFocus();
-      return;
-    }
-    _partnerRoleController.text = role;
-    _partnerRoleController.selection = TextSelection.collapsed(
-      offset: _partnerRoleController.text.length,
-    );
-    setState(() => _selectedQuickRole = role);
-  }
-
-  void _startConfiguredConversation() {
-    final role = _partnerRoleController.text.trim();
-    if (role.isEmpty || _selectedAiVoice == null) return;
-    FocusScope.of(context).unfocus();
-    setState(() {
-      _partnerRole = role;
-      _partnerName = _partnerNameController.text.trim();
-      _partnerRelationship = _partnerRelationshipController.text.trim();
-      _partnerAgeGender = _partnerAgeGenderController.text.trim();
-      _partnerTone = _partnerToneController.text.trim();
-      _partnerSituation = _partnerSituationController.text.trim();
-      _isPartnerSetupComplete = true;
-      _showVoiceMenu = false;
-      _startupRetryCount = 0;
-    });
-    _log('👤 [PARTNER-SETUP]',
-        'complete=true role_len=${_partnerRole.length} voice=$_selectedAiVoice');
-    _scheduleStartupRetry(immediate: true);
-  }
-
-  void _handlePartnerSettingsTap() {
-    if (!_isPartnerSetupComplete) {
-      setState(() => _showVoiceMenu = true);
-      return;
-    }
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('대화 상대는 새 대화를 시작할 때 변경할 수 있습니다.'),
-        duration: Duration(seconds: 2),
-      ),
-    );
-  }
-
   Widget _buildVoiceMenu() {
-    const quickRoles = <String>[
-      '친구',
-      '직장 동료',
-      '상사',
-      '연인',
-      '배우자',
-      '부모',
-      '자녀',
-      '선생님',
-      '처음 만난 사람',
-      '직접 입력',
-    ];
-    const voices = <String>['alloy', 'coral', 'cedar', 'marin'];
-    final canStart = _partnerRoleController.text.trim().isNotEmpty &&
-        _selectedAiVoice != null;
-    final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
+    const options = <String, String>{
+      'alloy': 'alloy  ·  남성  ·  20~',
+      'coral': 'coral  ·  여성  ·  20~',
+      'cedar': 'cedar  ·  남성  ·  40~',
+      'marin': 'marin  ·  여성  ·  40~',
+    };
 
     return Positioned.fill(
       child: Container(
-        color: Colors.black.withValues(alpha: 0.78),
-        child: AnimatedPadding(
-          duration: const Duration(milliseconds: 180),
-          padding: EdgeInsets.fromLTRB(20, 18, 20, keyboardInset + 18),
-          child: Center(
-            child: SingleChildScrollView(
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              child: Container(
-                constraints: const BoxConstraints(maxWidth: 440),
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF242428),
-                  borderRadius: BorderRadius.circular(22),
-                  border: Border.all(
-                    color: const Color(0xFF7F77DD).withValues(alpha: 0.65),
+        color: Colors.black.withValues(alpha: 0.72),
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+        child: SingleChildScrollView(
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 420),
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: const Color(0xFF242428),
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(
+                  color: const Color(0xFF7F77DD).withValues(alpha: 0.65)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  const Icon(Icons.record_voice_over_rounded,
+                      color: Colors.amberAccent, size: 23),
+                  const SizedBox(width: 9),
+                  const Expanded(
+                    child: Text('상대방 목소리 설정',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold)),
+                  ),
+                  if (_selectedAiVoice != null)
+                    IconButton(
+                      onPressed: () => setState(() => _showVoiceMenu = false),
+                      icon: const Icon(Icons.close_rounded,
+                          color: Colors.white54, size: 21),
+                      tooltip: '닫기',
+                    ),
+                ]),
+                const SizedBox(height: 14),
+                SizedBox(
+                  height: 64,
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _selectedAiVoice,
+                    isExpanded: true,
+                    itemHeight: 64,
+                    dropdownColor: const Color(0xFF303036),
+                    iconEnabledColor: const Color(0xFFB9B4FF),
+                    hint: const Text('목소리 선택',
+                        style: TextStyle(color: Colors.white54)),
+                    decoration: InputDecoration(
+                      filled: true,
+                      fillColor: Colors.white.withValues(alpha: 0.06),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 16),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: BorderSide(
+                            color: Colors.white.withValues(alpha: 0.16)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: Color(0xFF9B93FF)),
+                      ),
+                    ),
+                    items: options.entries
+                        .map((entry) => DropdownMenuItem<String>(
+                              value: entry.key,
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerLeft,
+                                child: Text(entry.value,
+                                    maxLines: 1,
+                                    softWrap: false,
+                                    style: const TextStyle(
+                                        color: Colors.white, fontSize: 14)),
+                              ),
+                            ))
+                        .toList(),
+                    onChanged: (voice) {
+                      if (voice == null) return;
+                      setState(() {
+                        _selectedAiVoice = voice;
+                        _showVoiceMenu = false;
+                      });
+                      _log('🎙️ [VOICE-SELECT]', 'voice=$voice');
+                      _scheduleStartupRetry(immediate: true);
+                    },
                   ),
                 ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Row(children: [
-                      Icon(Icons.person_outline_rounded,
-                          color: Colors.amberAccent, size: 24),
-                      SizedBox(width: 9),
-                      Expanded(
-                        child: Text(
-                          '대화 상대 설정',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 19,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ]),
-                    const SizedBox(height: 7),
-                    const Text(
-                      'AI가 어떤 상대가 되어줄지 정해 주세요.',
-                      style: TextStyle(color: Colors.white60, fontSize: 13),
-                    ),
-                    const SizedBox(height: 16),
-                    Wrap(
-                      spacing: 7,
-                      runSpacing: 7,
-                      children: quickRoles.map((role) {
-                        final selected = _selectedQuickRole == role;
-                        return ChoiceChip(
-                          label: Text(role),
-                          selected: selected,
-                          onSelected: (_) => _selectQuickRole(role),
-                          labelStyle: TextStyle(
-                            color: selected ? Colors.black : Colors.white70,
-                            fontSize: 12,
-                          ),
-                          selectedColor: Colors.amberAccent,
-                          backgroundColor: Colors.white.withValues(alpha: 0.07),
-                          side: BorderSide(
-                            color: selected
-                                ? Colors.amberAccent
-                                : Colors.white.withValues(alpha: 0.12),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: 14),
-                    _buildPartnerTextField(
-                      controller: _partnerRoleController,
-                      focusNode: _partnerRoleFocusNode,
-                      label: '누구와 이야기할까요? *',
-                      hint: '예: 오랜 친구, 직장 상사, 딸, 남편, 여행 중 만난 사람',
-                    ),
-                    const SizedBox(height: 10),
-                    _buildPartnerTextField(
-                      controller: _partnerNameController,
-                      label: '이름 또는 호칭',
-                      hint: '예: 민수, 김 팀장님, 엄마',
-                    ),
-                    const SizedBox(height: 10),
-                    _buildPartnerTextField(
-                      controller: _partnerRelationshipController,
-                      label: '우리의 관계',
-                      hint: '예: 10년 된 친구, 같은 회사 동료, 오랜만에 만난 누나',
-                    ),
-                    const SizedBox(height: 10),
-                    _buildPartnerTextField(
-                      controller: _partnerAgeGenderController,
-                      label: '성별연령대',
-                      hint: '예: 30대 여성, 50대 남성',
-                    ),
-                    const SizedBox(height: 10),
-                    _buildPartnerTextField(
-                      controller: _partnerToneController,
-                      label: '성격과 말투',
-                      hint: '예: 편안하고 유머러스함, 차분한 존댓말',
-                    ),
-                    const SizedBox(height: 10),
-                    _buildPartnerTextField(
-                      controller: _partnerSituationController,
-                      label: '지금 어떤 상황인가요?',
-                      hint: '예: 카페에서 오랜만에 만남, 퇴근 후 전화 통화',
-                      maxLines: 2,
-                      textInputAction: TextInputAction.done,
-                    ),
-                    const SizedBox(height: 14),
-                    DropdownButtonFormField<String>(
-                      initialValue: _selectedAiVoice,
-                      isExpanded: true,
-                      dropdownColor: const Color(0xFF303036),
-                      iconEnabledColor: const Color(0xFFB9B4FF),
-                      hint: const Text('목소리 선택 *',
-                          style: TextStyle(color: Colors.white54)),
-                      decoration: _partnerInputDecoration(
-                        'AI 목소리',
-                        '목소리는 음색만 결정합니다',
-                      ),
-                      items: voices
-                          .map((voice) => DropdownMenuItem<String>(
-                                value: voice,
-                                child: Text(voice,
-                                    style:
-                                        const TextStyle(color: Colors.white)),
-                              ))
-                          .toList(),
-                      onChanged: (voice) {
-                        setState(() => _selectedAiVoice = voice);
-                        if (voice != null) {
-                          _log('🎙️ [VOICE-SELECT]', 'voice=$voice');
-                        }
-                      },
-                    ),
-                    const SizedBox(height: 18),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 52,
-                      child: FilledButton(
-                        onPressed:
-                            canStart ? _startConfiguredConversation : null,
-                        style: FilledButton.styleFrom(
-                          backgroundColor: const Color(0xFF7F77DD),
-                          disabledBackgroundColor:
-                              Colors.white.withValues(alpha: 0.08),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                        ),
-                        child: const Text(
-                          '이 상대와 대화 시작',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              ],
             ),
           ),
         ),
@@ -3657,20 +3413,26 @@ $profile
                         SizedBox(width: 8),
                         Text.rich(
                           TextSpan(
-                            text: "이용 방법",
+                            text: "이용 방법 ",
                             style: TextStyle(
                                 color: Colors.amberAccent,
                                 fontWeight: FontWeight.bold,
                                 fontSize: 15),
+                            children: [
+                              TextSpan(
+                                text: "(Anyone 모드)",
+                                style: TextStyle(
+                                    color: Colors.amberAccent,
+                                    fontWeight: FontWeight.w500,
+                                    fontSize: 11),
+                              ),
+                            ],
                           ),
                         ),
                       ]),
                       SizedBox(height: 12),
                       Text(
-                        '먼저 대화하고 싶은 상대의 역할과 목소리를 설정하세요.\n\n'
-                        '친구, 가족, 직장 동료처럼 익숙한 관계를 선택하거나 직접 원하는 상대를 입력할 수 있습니다.\n\n'
-                        '대화방에서는 사용자와 AI가 모두 한국어로 편하게 대화합니다. AI는 설정한 상대의 역할과 말투를 유지하며 자연스럽게 대답합니다.\n\n'
-                        '영어 번역과 연습 자료는 대화가 끝난 뒤 공부방에서 확인할 수 있습니다. 이 화면에서는 번역이나 문법을 신경 쓰지 말고 이야기 내용에 집중하세요.',
+                        '먼저 상단에서 AI 보이스를 선택하세요. 사용자와 AI는 모두 한국어로 대화하고, 확정된 한국어 문장만 화면에 표시됩니다. 대화하고 싶은 사람을 떠올려 편하게 말을 꺼내면 AI가 그 사람이 되어 대답합니다. 영어 문장과 학습 음성은 히스토리에서 필요할 때 생성됩니다.',
                         style: TextStyle(
                             color: Colors.white, fontSize: 14, height: 1.6),
                       ),
@@ -3727,18 +3489,6 @@ $profile
                       setState(() => _showUsageGuide = !_showUsageGuide),
                 ),
                 IconButton(
-                  icon: const Icon(
-                    Icons.person_outline_rounded,
-                    color: Color(0xFFB9B4FF),
-                    size: 22,
-                  ),
-                  tooltip: '대화 상대 설정',
-                  padding: EdgeInsets.zero,
-                  constraints:
-                      const BoxConstraints(minWidth: 40, minHeight: 40),
-                  onPressed: _handlePartnerSettingsTap,
-                ),
-                IconButton(
                   icon: Icon(
                     Icons.format_size,
                     color: _fontScale > 1.0
@@ -3758,6 +3508,18 @@ $profile
                             ? 0.8
                             : 1.0;
                   }),
+                ),
+                IconButton(
+                  icon: CustomPaint(
+                    size: const Size(26, 26),
+                    painter: _LangIconPainter(active: _showOriginal),
+                  ),
+                  tooltip: _showOriginal ? '원문 숨기기' : '원문 함께 보기',
+                  onPressed: () =>
+                      setState(() => _showOriginal = !_showOriginal),
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 36, minHeight: 36),
                 ),
                 const SizedBox(width: 4),
                 // [v3.6] 좁은 화면/큰 글꼴에서도 상단 Row가 넘치지 않도록 축소 허용
@@ -3839,7 +3601,7 @@ $profile
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    '한국어로 편하게 이야기해 보세요',
+                    '확정된 한국어 문장이 표시됩니다',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: Colors.white.withValues(alpha: 0.22),
@@ -3849,7 +3611,7 @@ $profile
                     ),
                   ),
                   Text(
-                    '영어 연습은 대화가 끝난 뒤 공부방에서 할 수 있어요',
+                    '학습용 영어 문장과 음성은 히스토리에서 준비됩니다',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: Colors.white.withValues(alpha: 0.14),
@@ -3882,18 +3644,11 @@ $profile
     final role = (msg['role'] ?? '').toString();
     bool isHost = role == 'HOST' || role == 'HOST_TEMP';
     final rawTarget = (msg['target'] ?? '').toString();
-    final rawOriginal = (msg['original'] ?? '').toString();
-    final bool isThinking = (role == 'SYSTEM' &&
-            rawOriginal.isEmpty &&
-            rawTarget.isEmpty) ||
-        (role == 'HOST_TEMP' && (rawOriginal == '...' || rawTarget == '...')) ||
-        (role == 'HOST' && rawOriginal.isEmpty && rawTarget.isEmpty);
-    // 프리톡 화면은 한국어 원문만 표시한다. 현재 Realtime 경로처럼 한국어가
-    // target 슬롯에 들어오는 턴도 화면 호환을 위해 fallback으로 표시한다.
-    final String displayText = isThinking
-        ? '...'
-        : (rawOriginal.trim().isNotEmpty ? rawOriginal : rawTarget);
-    if (displayText.isEmpty) return const SizedBox.shrink();
+    final bool isThinking = (role == 'SYSTEM' && rawTarget.isEmpty) ||
+        (role == 'HOST_TEMP' && rawTarget == '...') ||
+        (role == 'HOST' && rawTarget.isEmpty);
+    final String displayTarget = isThinking ? '...' : rawTarget;
+    if (displayTarget.isEmpty) return const SizedBox.shrink();
     return Align(
       alignment: isHost ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
@@ -3910,12 +3665,22 @@ $profile
             crossAxisAlignment:
                 isHost ? CrossAxisAlignment.end : CrossAxisAlignment.start,
             children: [
-              Text(displayText,
+              Text(displayTarget,
                   textAlign: isHost ? TextAlign.right : TextAlign.left,
                   style: TextStyle(
                       color: Colors.white,
                       fontSize: 16 * _fontScale,
                       fontWeight: FontWeight.bold)),
+              if (_showOriginal &&
+                  !isThinking &&
+                  msg['original'] != null &&
+                  msg['original'].toString().isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Text(msg['original'],
+                    textAlign: isHost ? TextAlign.right : TextAlign.left,
+                    style: TextStyle(
+                        color: Colors.grey, fontSize: 12 * _fontScale)),
+              ],
             ]),
       ),
     );
@@ -3930,7 +3695,7 @@ $profile
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text("프리톡",
+              const Text("Free Talk",
                   style: TextStyle(
                       color: Colors.white54,
                       fontSize: 20,
@@ -6327,6 +6092,85 @@ $questionRule
       client.close();
     }
   }
+}
+
+class _LangIconPainter extends CustomPainter {
+  final bool active;
+  const _LangIconPainter({required this.active});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final r = size.width / 2;
+    final center = Offset(r, r);
+    canvas
+        .clipPath(Path()..addOval(Rect.fromCircle(center: center, radius: r)));
+
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height),
+        Paint()..color = const Color(0xFF1E7DB5));
+    canvas.drawPath(
+      Path()
+        ..moveTo(size.width * 0.05, size.height)
+        ..lineTo(size.width, size.height * 0.05)
+        ..lineTo(size.width, size.height)
+        ..close(),
+      Paint()..color = const Color(0xFF0B4870),
+    );
+    canvas.drawLine(
+      Offset(size.width * 0.04, size.height * 0.96),
+      Offset(size.width * 0.96, size.height * 0.04),
+      Paint()
+        ..color = const Color(0xFFD4AF37)
+        ..strokeWidth = 2.0
+        ..strokeCap = StrokeCap.round,
+    );
+    canvas.drawCircle(
+      center,
+      r - 1.5,
+      Paint()
+        ..color = const Color(0xFFD4AF37)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.5,
+    );
+
+    final col = active ? Colors.white : const Color(0x61FFFFFF);
+    _drawText(canvas, 'T', Offset(size.width * 0.09, size.height * 0.06),
+        size.width * 0.34, col);
+
+    final dotC = Offset(size.width * 0.63, size.height * 0.23);
+    final dotR = size.width * 0.105;
+    canvas.drawCircle(dotC, dotR, Paint()..color = const Color(0xFFE03030));
+    canvas.drawCircle(
+        dotC, dotR * 0.45, Paint()..color = const Color(0xFFFF6060));
+    canvas.drawCircle(
+        dotC,
+        dotR,
+        Paint()
+          ..color = const Color(0xBBFFFFFF)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 0.8);
+
+    _drawText(canvas, 'T', Offset(size.width * 0.55, size.height * 0.58),
+        size.width * 0.34, col);
+  }
+
+  void _drawText(
+      Canvas canvas, String text, Offset offset, double fontSize, Color color) {
+    final painter = TextPainter(
+      text: TextSpan(
+          text: text,
+          style: TextStyle(
+              color: color,
+              fontSize: fontSize,
+              fontWeight: FontWeight.bold,
+              height: 1.0)),
+      textDirection: ui.TextDirection.ltr,
+    )..layout();
+    painter.paint(canvas, offset);
+  }
+
+  @override
+  bool shouldRepaint(_LangIconPainter oldDelegate) =>
+      oldDelegate.active != active;
 }
 
 // 🆕 [Anyone] 이용방법 말풍선 꼬리 페인터
