@@ -52,11 +52,8 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   final AudioRecorder _anyoneAudioRecorder = AudioRecorder();
   late Future<void> _anyoneAudioReady;
   DateTime? _anyoneMicInputAt;
-  // 🎤 [ENTRY-GATE] 준비 화면(오버레이)은 Realtime 시절의 산물이라 제거됐다.
-  //   Anyone도 Step Expand처럼 Deepgram만 쓰므로 화면을 바로 넘겨도 유저가
-  //   허공에 대고 말할 일이 없다. 안내 문구는 각 페이지가 직접 띄운다
-  //   (routine_mode_anyone.dart / routine_mode_step_expand.dart의
-  //   `_showOpeningNudgeOnce`).
+  // 🎤 [ENTRY-GATE] Free Talk은 별도 선택·안내 화면 없이 바로 입장하고,
+  //   준비가 끝나는 즉시 Deepgram 청취와 Realtime verse 응답을 시작한다.
 
   // 초대 링크에서 소비한 roomId (1회용 — build에서 Duo 생성자에 전달)
   String? _pendingDuoRoomId;
@@ -390,10 +387,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   @override
   Widget build(BuildContext context) {
     if (_currentMode == 2) {
-      // 준비 화면을 거치지 않는다 — Realtime 연결 대기가 사라졌으므로 바로
-      // 진입한다. 안내 문구는 Anyone 페이지가 직접 띄운다
-      // (routine_mode_anyone.dart `_showOpeningNudgeOnce`).
-      // onListeningReady를 넘기지 않는 것이 그 스위치다.
+      // Free Talk은 선택·안내 화면을 거치지 않고 바로 진입한다.
       return RoutineModeAnyone(
         key: const ValueKey('RoutineModeAnyone'),
         width: widget.width,

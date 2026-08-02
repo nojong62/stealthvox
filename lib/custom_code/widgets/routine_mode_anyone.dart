@@ -189,15 +189,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   double _fontScale = 1.0;
   // 최종 통신 구조에서는 대화방에 확정된 한국어 문장만 표시한다.
   bool _showOriginal = false;
-  bool _showUsageGuide = false; // 🆕 [Anyone] 이용방법 말풍선 토글
-  String? _selectedAiVoice = 'verse';
-  bool _showVoiceMenu = false;
+  static const String _aiVoice = 'verse';
   String _characterShortTermMemory = '';
-  // 🆕 [진입 안내] 스텔스룸 준비 오버레이에 있던 문구를 페이지 안으로 옮겼다
-  //   (Realtime 연결 대기가 사라져 준비 화면 자체가 제거됨). Step Expand의
-  //   _showOpeningNudgeOnce와 같은 방식 — 2초 노출 후 페이드아웃.
-  static const String _openingNudgeText = '여기,\n그 사람이 있어요.\n편하게\n말 걸어보세요.';
-  bool _showNudgeBubble = false;
   int _turnCounter = 0;
   // 🧭 [FIRST-CONTEXT] 첫 정상 발화 판정. Anyone은 GPT-4.1 문맥 판정을 쓰지
   //   않으므로 네트워크 호출 없는 로컬 분류(증발/고스트워드 검열)만 사용한다.
@@ -510,59 +503,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     if (_listeningReadyReported || !mounted) return;
     _listeningReadyReported = true;
     widget.onListeningReady?.call();
-    // 준비 오버레이 없이 직접 진입하는 경우(현재 기본) 페이지가 안내를 띄운다.
-    if (widget.onListeningReady == null) _showOpeningNudgeOnce();
-  }
-
-  // ====================================================================
-  // 📦 [진입 안내] — 화면 중앙 둥근 사각형 텍스트, 2초 후 소멸 (Step Expand 동일)
-  // ====================================================================
-  void _showOpeningNudgeOnce() {
-    // Free Talk에서는 목소리 설정 뒤 Anyone 안내 문구를 표시하지 않는다.
-    _showNudgeBubble = false;
-  }
-
-  Widget _buildNudgeBubble() {
-    return IgnorePointer(
-      child: Align(
-        alignment: Alignment.center,
-        child: AnimatedOpacity(
-          opacity: _showNudgeBubble ? 1.0 : 0.0,
-          duration: const Duration(milliseconds: 350),
-          curve: Curves.easeOut,
-          child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 36),
-            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1E1E22).withValues(alpha: 0.92),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: const Color(0xFF7F77DD).withValues(alpha: 0.55),
-                width: 1.4,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFF2DD4BF).withValues(alpha: 0.25),
-                  blurRadius: 20,
-                  spreadRadius: 1,
-                ),
-              ],
-            ),
-            child: const Text(
-              _openingNudgeText,
-              textAlign: TextAlign.center,
-              softWrap: true,
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 15,
-                height: 1.5,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
   }
 
   bool _setMicOwner(AnyoneMicOwner next, {required String reason}) {
@@ -966,7 +906,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   /// 짧게 재확인한다. 재입장으로 우연히 초기화되는 동작에 의존하지 않는다.
   void _scheduleStartupRetry({bool immediate = false}) {
     if (!mounted || _isConversationActive || _isStartingListening) return;
-    if (_selectedAiVoice == null) return;
     _startupRetryTimer?.cancel();
     final delay = immediate ? Duration.zero : const Duration(milliseconds: 750);
     _startupRetryTimer = Timer(delay, () async {
@@ -989,10 +928,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     if (!mounted) return;
     if (_isConversationActive) return; // 중복 시작 방지
     if (_isStartingListening) return;
-    if (_selectedAiVoice == null) {
-      _log('🎙️ [VOICE-GATE]', 'AI 보이스 미선택 → 시작 보류');
-      return;
-    }
     // 🆕 첫 진입 race 방지: 키와 마이크 권한이 "둘 다" 준비됐을 때만 시작한다.
     //    준비 안 된 항목이 있으면 조용히 대기 → 키 로드 콜백(_fetchKeys) 또는
     //    권한 콜백(_initPermissions) 중 늦게 끝나는 쪽이 이 함수를 다시 호출해 시작.
@@ -1024,10 +959,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   }
 
   String _buildAnyoneRealtimeInstructions() {
-    final voice = _selectedAiVoice ?? 'marin';
     return '''You are the person the user has in mind and is speaking to.
 Infer that person cautiously from the conversation and remain the same person.
-${_voiceCharacterInstruction(voice)}
+${_voiceCharacterInstruction(_aiVoice)}
 
 OUTPUT LANGUAGE: Natural spoken Korean only.
 - Treat every incoming text message as the user's actual Korean utterance.
@@ -1042,7 +976,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
   Future<bool> _connectAnyoneRealtime() async {
     final old = _realtimeAdapter;
     if (old != null) await old.dispose();
-    if (!mounted || _selectedAiVoice == null) return false;
+    if (!mounted) return false;
 
     final adapter = RealtimeAnyoneAdapter(
       onConnectionStateChanged: (state) =>
@@ -1054,7 +988,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
     try {
       await adapter.connectForTranslation(
         modeSessionId: _realtimeModeSessionId,
-        voice: _selectedAiVoice!,
+        voice: _aiVoice,
         allowWhenDisabled: true,
         instructions: _buildAnyoneRealtimeInstructions(),
       );
@@ -1714,7 +1648,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
       final turn = adapter.requestConversationTurn(
         turnId: 'anyone-$currentTurnId',
         userText: userOriginal,
-        voice: _selectedAiVoice ?? 'marin',
+        voice: _aiVoice,
         instructions:
             'Respond now as the established conversation partner. Speak natural Korean only, briefly and directly.',
       );
@@ -2020,8 +1954,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
   Future<void> _speakSystemLine(String text,
       {Duration timeout = const Duration(seconds: 15)}) async {
     if (!mounted || text.trim().isEmpty) return;
-    final voice = _selectedAiVoice;
-    if (voice == null) return;
+    const voice = _aiVoice;
     String spokenText = text.trim();
     if (!RegExp(r'[가-힣]').hasMatch(spokenText) && _openAiKey.isNotEmpty) {
       spokenText = await FreeTalkBrain.generateCleanOriginal(
@@ -2678,7 +2611,6 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
           'turn=$currentTurnId allow_question=$allowAiQuestion '
               'force_polite=$forceNaturalPolite '
               'character_memory=${_characterShortTermMemory.isNotEmpty}');
-      final selectedVoice = _selectedAiVoice ?? 'alloy';
       final aiStream = FreeTalkBrain.streamFreeTalkResponse(
         apiKey: _openAiKey,
         userTargetText: finalTranscript,
@@ -2687,7 +2619,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
         allowQuestion: allowAiQuestion,
         forceNaturalPolite: forceNaturalPolite,
         characterMemory: _characterShortTermMemory,
-        voiceCharacterInstruction: _voiceCharacterInstruction(selectedVoice),
+        voiceCharacterInstruction: _voiceCharacterInstruction(_aiVoice),
       );
 
       // AI 생성을 Future로 (유저 재생과 병렬)
@@ -2781,8 +2713,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
         }
         final String aiTtsText = _cleanText(aiOriginalText.trim());
         if (aiTtsText.isEmpty) return;
-        final voice = _selectedAiVoice;
-        if (voice == null) return;
+        const voice = _aiVoice;
         _costTracker.recordTtsRequest(aiTtsText.length);
         aiTtsPrefetch = _ttsAdapter.prefetch(TtsRequest(
           text: aiTtsText,
@@ -3247,209 +3178,11 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
             child: Stack(children: [
               _buildChatList(),
               _buildIdleOverlay(),
-              _buildNudgeBubble(), // 🆕 [진입 안내] 스텔스룸에서 옮겨온 문구
               if (trialMode) buildTrialCountdown(),
-              if (_showUsageGuide) _buildUsageGuide(), // 🆕 [Anyone] 이용방법 말풍선
-              if (_showVoiceMenu) _buildVoiceMenu(),
             ]),
           ),
           _buildControlArea(bottomPad),
         ]),
-      ),
-    );
-  }
-
-  Widget _buildVoiceMenu() {
-    const options = <String, String>{
-      'alloy': 'alloy  ·  남성  ·  20~',
-      'coral': 'coral  ·  여성  ·  20~',
-      'cedar': 'cedar  ·  남성  ·  40~',
-      'marin': 'marin  ·  여성  ·  40~',
-    };
-
-    return Positioned.fill(
-      child: Container(
-        color: Colors.black.withValues(alpha: 0.72),
-        alignment: Alignment.center,
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-        child: SingleChildScrollView(
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 420),
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: const Color(0xFF242428),
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(
-                  color: const Color(0xFF7F77DD).withValues(alpha: 0.65)),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(children: [
-                  const Icon(Icons.record_voice_over_rounded,
-                      color: Colors.amberAccent, size: 23),
-                  const SizedBox(width: 9),
-                  const Expanded(
-                    child: Text('상대방 목소리 설정',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold)),
-                  ),
-                  if (_selectedAiVoice != null)
-                    IconButton(
-                      onPressed: () => setState(() => _showVoiceMenu = false),
-                      icon: const Icon(Icons.close_rounded,
-                          color: Colors.white54, size: 21),
-                      tooltip: '닫기',
-                    ),
-                ]),
-                const SizedBox(height: 14),
-                SizedBox(
-                  height: 64,
-                  child: DropdownButtonFormField<String>(
-                    initialValue: _selectedAiVoice,
-                    isExpanded: true,
-                    itemHeight: 64,
-                    dropdownColor: const Color(0xFF303036),
-                    iconEnabledColor: const Color(0xFFB9B4FF),
-                    hint: const Text('목소리 선택',
-                        style: TextStyle(color: Colors.white54)),
-                    decoration: InputDecoration(
-                      filled: true,
-                      fillColor: Colors.white.withValues(alpha: 0.06),
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 16),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: BorderSide(
-                            color: Colors.white.withValues(alpha: 0.16)),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: const BorderSide(color: Color(0xFF9B93FF)),
-                      ),
-                    ),
-                    items: options.entries
-                        .map((entry) => DropdownMenuItem<String>(
-                              value: entry.key,
-                              child: FittedBox(
-                                fit: BoxFit.scaleDown,
-                                alignment: Alignment.centerLeft,
-                                child: Text(entry.value,
-                                    maxLines: 1,
-                                    softWrap: false,
-                                    style: const TextStyle(
-                                        color: Colors.white, fontSize: 14)),
-                              ),
-                            ))
-                        .toList(),
-                    onChanged: (voice) {
-                      if (voice == null) return;
-                      setState(() {
-                        _selectedAiVoice = voice;
-                        _showVoiceMenu = false;
-                      });
-                      _log('🎙️ [VOICE-SELECT]', 'voice=$voice');
-                      _scheduleStartupRetry(immediate: true);
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  // 🆕 [Anyone] 이용방법 말풍선 (배경/말풍선 어디든 톡 누르면 닫힘)
-  Widget _buildUsageGuide() {
-    return Positioned.fill(
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () => setState(() => _showUsageGuide = false),
-        child: Container(
-          color: Colors.black.withValues(alpha: 0.55),
-          alignment: Alignment.topCenter,
-          padding: const EdgeInsets.fromLTRB(20, 6, 20, 20),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Align(
-                  alignment: Alignment.topRight,
-                  child: Padding(
-                    padding: EdgeInsets.only(right: 22),
-                    child: CustomPaint(
-                      size: Size(22, 11),
-                      painter: _BubbleTailPainter(),
-                    ),
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF2A2A2E),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                        color: Colors.amberAccent.withValues(alpha: 0.6),
-                        width: 1.2),
-                    boxShadow: [
-                      BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.4),
-                          blurRadius: 16,
-                          offset: const Offset(0, 6)),
-                    ],
-                  ),
-                  child: const Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(children: [
-                        Icon(Icons.lightbulb_outline,
-                            color: Colors.amberAccent, size: 20),
-                        SizedBox(width: 8),
-                        Text.rich(
-                          TextSpan(
-                            text: "이용 방법 ",
-                            style: TextStyle(
-                                color: Colors.amberAccent,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 15),
-                            children: [
-                              TextSpan(
-                                text: "(Anyone 모드)",
-                                style: TextStyle(
-                                    color: Colors.amberAccent,
-                                    fontWeight: FontWeight.w500,
-                                    fontSize: 11),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ]),
-                      SizedBox(height: 12),
-                      Text(
-                        '먼저 상단에서 AI 보이스를 선택하세요. 사용자와 AI는 모두 한국어로 대화하고, 확정된 한국어 문장만 화면에 표시됩니다. 대화하고 싶은 사람을 떠올려 편하게 말을 꺼내면 AI가 그 사람이 되어 대답합니다. 영어 문장과 학습 음성은 히스토리에서 필요할 때 생성됩니다.',
-                        style: TextStyle(
-                            color: Colors.white, fontSize: 14, height: 1.6),
-                      ),
-                      SizedBox(height: 10),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: Text("(말풍선을 톡 누르면 닫혀요)",
-                            style:
-                                TextStyle(color: Colors.white38, fontSize: 11)),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
       ),
     );
   }
@@ -3475,19 +3208,6 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
             child: Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                // 🆕 [Anyone] 이용방법 말풍선 토글
-                IconButton(
-                  icon: const Icon(
-                    Icons.help_outline,
-                    color: Colors.amberAccent,
-                    size: 22,
-                  ),
-                  padding: EdgeInsets.zero,
-                  constraints:
-                      const BoxConstraints(minWidth: 40, minHeight: 40),
-                  onPressed: () =>
-                      setState(() => _showUsageGuide = !_showUsageGuide),
-                ),
                 IconButton(
                   icon: Icon(
                     Icons.format_size,
@@ -6171,25 +5891,4 @@ class _LangIconPainter extends CustomPainter {
   @override
   bool shouldRepaint(_LangIconPainter oldDelegate) =>
       oldDelegate.active != active;
-}
-
-// 🆕 [Anyone] 이용방법 말풍선 꼬리 페인터
-class _BubbleTailPainter extends CustomPainter {
-  const _BubbleTailPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = const Color(0xFF2A2A2E)
-      ..style = PaintingStyle.fill;
-    final path = Path()
-      ..moveTo(0, size.height)
-      ..lineTo(size.width / 2, 0)
-      ..lineTo(size.width, size.height)
-      ..close();
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
