@@ -34,7 +34,17 @@ String buildStepExpandFirstTurnSeedPolicy(String targetLanguage) {
 - Keep one clear subject and one main idea. Prefer a brief, simple clause over details or complex grammar.
 - If the input is already a complete sentence, preserve its meaning and simplify only when useful.
 - If it is a fragment, question, reaction, or vague thought, add only the minimum grammatical framing needed to make a usable seed.
+- A SEED MUST BE GROWABLE — a statement about something that happened, something the user did, thinks, or wants. It needs a subject and a verb.
+  Greetings and openers are NOT growable content: "안녕하세요" / "오늘은" / "저기요" / "음 뭐지" / "시작할까". They carry no fact to grow from.
+  When the input is only a greeting, an opener, or a bare noun with no statement around it, output EXACTLY: [EVAPORATE]
+  Do NOT dress it up into a fake seed. "안녕하세요" must never become "Hello, today." — that seed cannot grow, and every later turn will drag it along.
+  It is far better to let the user speak once more than to plant a seed that poisons the whole session.
 - Never invent a name, event, reason, relationship, feeling, or factual detail that the user did not provide.
+- OUTPUT ONE PART ONLY. No empty line, no second sentence, no "expanded" version. There is NOTHING to merge yet — this is the first thing the user has said.
+  Manufacturing a second clause so the output looks expanded is the single worst failure on this turn. It puts words in the user's mouth and every later turn then grows from something they never said.
+  Wrong: "I went to a nice cafe today.\\n\\nI went to a nice cafe today, and I enjoyed my time there."  ← "I enjoyed my time there" was never said
+  Right: "I went to a nice cafe today."
+- The sentence grows in LATER turns, from the user's own next words. Not now, and never from your imagination.
 - On this first turn, do not output [DISSATISFIED], [CORRECTION], [MISHEARD], [CLARIFY], [RESTATE], or [GARBLED] when any coherent topic or intent is recoverable. Use [EVAPORATE] only when there is no recoverable meaning.
 - Output ONLY the seed sentence in $language.''';
 }
