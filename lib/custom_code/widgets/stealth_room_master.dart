@@ -595,7 +595,7 @@ Return ONLY valid JSON: {"name":"..."}.
             const SizedBox(height: 30),
             _buildMenuCard(1, "Duo Connect", "초청인 대화\n만능 통역", Icons.people,
                 const Color(0xFF2563EB)),
-            _buildMenuCard(2, "Circle Talk", "원하는 서클에서 구성원처럼\n자연스럽게 대화",
+            _buildMenuCard(2, "Circle Talk", "서클 구성원 대화",
                 Icons.groups_rounded, const Color(0xFF9333EA)),
             _buildMenuCard(3, "AI Roleplay", "상황극 대화", Icons.smart_toy,
                 const Color(0xFF16A34A)),
