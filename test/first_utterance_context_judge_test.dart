@@ -358,13 +358,15 @@ void main() {
       expect(kStepExpandOpeningNudgeText, '오늘은 어떤 순간을 영어로 풀어 볼까요?');
     });
 
-    test('turns any recoverable first input into a short grounded seed', () {
+    test('accepts only a complete growable first statement as the seed', () {
       final policy = buildStepExpandFirstTurnSeedPolicy('English');
       expect(policy, contains('CREATE A SEED'));
       expect(policy, contains('Whatever meaningful'));
       expect(policy, contains('seed sentence in English'));
       expect(policy, contains('brief, simple clause'));
-      expect(policy, contains('minimum grammatical'));
+      expect(policy, contains('complete statement'));
+      expect(policy, contains('bare topic'));
+      expect(policy, contains('[EVAPORATE]'));
       expect(policy, contains('Never invent'));
       expect(policy, contains('Output ONLY'));
     });

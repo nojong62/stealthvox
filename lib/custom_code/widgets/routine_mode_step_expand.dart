@@ -69,7 +69,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   // ====================================================================
   String _deepgramKey = "";
   String _openAiKey = "";
-  static const String _aiVoice = 'ballad';
+  static const String _aiVoice = 'marin';
   bool _micPermissionReady = false; // 🆕 마이크 권한 준비 여부(첫 진입 race 방지)
   bool _initialSessionStarted = false; // 🆕 초기 자동 시작 1회성 보장
   bool _isInitialGuidePlaying = false; // 첫 안내 중 유저 발화 시 즉시 중단(barge-in)
@@ -1195,7 +1195,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
         }
       });
       // Polished 문장 한 번 낭독
-      if (polished.isNotEmpty) await _practiceSpeakText(polished, 'nova');
+      if (polished.isNotEmpty) await _practiceSpeakText(polished, _aiVoice);
     } catch (e) {
       _log('❌ [AUTO-POLISH]', 'error: $e');
       if (mounted) setState(() => _isPolishing = false);
@@ -1272,7 +1272,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
         _isPracticeUserListening = false;
       });
     }
-    await _practiceSpeakText(unit, 'nova');
+    await _practiceSpeakText(unit, _aiVoice);
     if (!mounted) return;
     setState(() {
       _isPracticeAiSpeaking = false;
@@ -1445,7 +1445,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
                 'Content-Type': 'application/json',
               },
               body: jsonEncode({
-                'model': 'tts-1',
+                'model': 'gpt-4o-mini-tts',
                 'input': text,
                 'voice': voice,
                 'speed': 1.0,
@@ -1486,7 +1486,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
       if (mounted) setState(() => _isUserFullPlaying = false);
     }
     if (mounted) setState(() => _isAiFullPlaying = true);
-    await _practiceSpeakText(_polishedSentence, 'nova');
+    await _practiceSpeakText(_polishedSentence, _aiVoice);
     if (mounted) setState(() => _isAiFullPlaying = false);
   }
 
@@ -1616,7 +1616,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
     return ms.clamp(1500, 25000);
   }
 
-  /// 대화방에서만 쓰는 한국어 AI 음성. tts-1/nova로 재생하되 캐시에
+  /// 대화방에서만 쓰는 한국어 AI 음성. gpt-4o-mini-tts/Marin으로 재생하되 캐시에
   /// 저장하지 않아, 히스토리의 타겟 언어 음성 생성 규칙과 분리한다.
   Future<void> _speakLiveKorean(String text) async {
     final spoken = text.trim();
@@ -1626,7 +1626,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
     final fetcher = ChunkedTtsFetcher(
       _openAiKey,
       _ttsQueueManager,
-      'nova',
+      _aiVoice,
       language: 'ko',
       cacheEnabled: false,
       isUser: false,
@@ -1641,6 +1641,47 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
         _log('⚠️ [KOREAN-TTS-TIMEOUT]', '한국어 안내 음성 30초 초과');
         break;
       }
+    }
+  }
+
+  Future<void> _askForUsableSeedSentence(
+    String rejectedText, {
+    required int generation,
+  }) async {
+    final guide = await StepExpandBrain.generateSeedGuidance(
+      apiKey: _openAiKey,
+      rejectedText: rejectedText,
+    );
+    if (!mounted ||
+        !_isConversationActive ||
+        generation != _pipelineGeneration ||
+        _turnCounter != 0) {
+      return;
+    }
+    final englishQuestion = guide['english_question']?.trim().isNotEmpty == true
+        ? guide['english_question']!.trim()
+        : 'What specific moment would you like to describe?';
+    final koreanQuestion = guide['korean_question']?.trim().isNotEmpty == true
+        ? guide['korean_question']!.trim()
+        : '어떤 구체적인 순간을 말해 볼까요?';
+    setState(() {
+      _localMessages.removeWhere((message) =>
+          message['role'] == 'HOST_TEMP' || message['seed_guide'] == true);
+      _localMessages.add({
+        'role': 'SYSTEM',
+        'target': englishQuestion,
+        'original': koreanQuestion,
+        'seed_guide': true,
+      });
+    });
+    _scrollToBottom();
+    _log('[SEED-GUIDE]', '첫 발화 미채택 → 유도 질문 후 1턴 유지');
+    await _speakLiveKorean(koreanQuestion);
+    if (mounted &&
+        _isConversationActive &&
+        generation == _pipelineGeneration &&
+        _turnCounter == 0) {
+      await _startUserListening();
     }
   }
 
@@ -1702,14 +1743,9 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
     return false;
   }
 
-  /// 사용자 입력은 Deepgram을 기본 STT·발화 종료 판단으로 사용하고, 첫 턴이나
-  /// 낮은 신뢰도에서만 gpt-4o-transcribe 정밀 전사를 선택한다.
-  ///
-  /// Realtime(WebRTC) 입력 경로는 걷어냈다. 확장 문장은 매 턴 유저가 한 말을
-  /// 다시 엮는 작업이라 "지어내지 않는 것"이 "매끄러운 것"보다 중요한데,
-  /// Realtime은 그 반대쪽에 강한 모델이었다. 막으려 규칙을 쌓으면 Realtime을
-  /// 쓸 이유였던 자연스러움이 같이 죽었다. 되살릴 일이 생기면 커밋
-  /// 0060655f(WebRTC 입력) / 7745f400(첫 턴 음성)에 그대로 남아 있다.
+  /// Deepgram은 발화 종료만 판단하고, 녹음 PCM은 매 턴 gpt-4o-transcribe로
+  /// 확정한다. 확정된 한국어는 일반 Realtime 대화가 아니라 Step Expand 전용
+  /// 누적 문장·핵심 질문 파이프라인으로 전달한다.
   Future<void> _startUserListening() async {
     await _startDeepgramListening();
   }
@@ -1726,7 +1762,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
     final retryTts = ChunkedTtsFetcher(
       _openAiKey,
       _ttsQueueManager,
-      'nova',
+      _aiVoice,
       language: 'ko',
       cacheEnabled: false,
       isUser: false,
@@ -1893,7 +1929,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
     final pcm = _snapshotTurnPcm();
     final closingManager = _voiceManager;
     _voiceManager = null;
-    if (closingManager != null) unawaited(closingManager.dispose());
+    if (closingManager != null) await closingManager.dispose();
     if (pcm == null || pcm.isEmpty) {
       _log('[STT-ROUTE]', 'gpt-4o-transcribe skipped reason=empty_pcm');
       if (_isConversationActive && !_isSessionComplete) _startUserListening();
@@ -1910,7 +1946,12 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
     }
     _log('[STT-ROUTE]',
         'selected=gpt-4o-transcribe every_turn=true len=${userKorean.length}');
-    await _processRealtimeStepExpandTurn(userKorean, generation: generation);
+    _runMeaningProbe(userKorean);
+    _log('🔀 [COMMIT-03]', '전사 확정 → Step Expand 누적 확장 파이프라인 호출');
+    await _processRelayPipeline(
+      userKorean,
+      expectedPipelineGeneration: generation,
+    );
   }
 
   // ignore: unused_element
@@ -1982,6 +2023,9 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
     );
   }
 
+  // 일반 Realtime 대화 경로는 Step Expand의 누적 문장 생성 규칙을 보장하지
+  // 못하므로 사용하지 않는다. 회귀 비교를 위해 구현만 남겨 둔다.
+  // ignore: unused_element
   Future<void> _processRealtimeStepExpandTurn(
     String userKorean, {
     required int generation,
@@ -2182,7 +2226,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
       phraseTts = ChunkedTtsFetcher(
         _openAiKey,
         _ttsQueueManager,
-        'nova',
+        _aiVoice,
         language: 'ko',
         cacheEnabled: false,
         isUser: false,
@@ -2221,7 +2265,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
     final questionTts = ChunkedTtsFetcher(
       _openAiKey,
       _ttsQueueManager,
-      'nova',
+      _aiVoice,
       language: 'ko',
       cacheEnabled: false,
       isUser: false,
@@ -2260,7 +2304,18 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
       }
       _scrollToBottom();
     }
-    if (StepExpandBrain.needsNaturalPoliteRewrite(aiOriginalRetry)) {
+    if (StepExpandBrain.needsShortKoreanQuestionRewrite(aiOriginalRetry)) {
+      final beforeRewrite = aiOriginalRetry.trim();
+      aiOriginalRetry = await StepExpandBrain.rewriteToShortKoreanQuestion(
+        apiKey: _openAiKey,
+        text: beforeRewrite,
+      );
+      _log('🛡️ [AI-LENGTH-GUARD]',
+          'path=retry before="$beforeRewrite" after="$aiOriginalRetry"');
+      if (mounted && aiIdx < _localMessages.length) {
+        setState(() => _localMessages[aiIdx]['original'] = aiOriginalRetry);
+      }
+    } else if (StepExpandBrain.needsNaturalPoliteRewrite(aiOriginalRetry)) {
       final beforeRewrite = aiOriginalRetry.trim();
       aiOriginalRetry = await StepExpandBrain.rewriteToNaturalPoliteKorean(
         apiKey: _openAiKey,
@@ -2294,7 +2349,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
 //   STEP 1: 증발 검열 (고스트워드/너무 짧음 → 조용히 폐기)
 //   STEP 2: 유저 한국어 원문 보존 + 타겟 영어 문장 스트리밍
 //   STEP 3: AI 영어 화면 문장 + 한국어 대화 문장 동시 생성
-//   STEP 4: AI 한국어만 tts-1/nova로 재생 (캐시하지 않음)
+//   STEP 4: AI 한국어만 gpt-4o-mini-tts/Marin으로 재생 (캐시하지 않음)
 //   STEP 5: 한·영 글자를 Firestore/히스토리에 저장
 //   STEP 6: 마이크 재개방, 5턴이면 P3 자료 저장 후 자동 종료
 // ====================================================================
@@ -2386,6 +2441,10 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
       conversationActive: _isConversationActive,
     )) {
       return;
+    }
+    if (_turnCounter == 0 && mounted) {
+      setState(() => _localMessages
+          .removeWhere((message) => message['seed_guide'] == true));
     }
     final pendingHeard = _pendingHeardConfirmation;
     if (pendingHeard != null) {
@@ -2658,6 +2717,10 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
       }
 
       if (evaporated) {
+        final bool wasSeedAttempt = currentTurnId == 1;
+        if (_turnCounter == currentTurnId && _turnCounter > 0) {
+          _turnCounter--;
+        }
         if (mounted) {
           setState(() {
             if (hostIndex < _localMessages.length) {
@@ -2665,7 +2728,12 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
             }
           });
         }
-        if (_isConversationActive && _turnCounter == currentTurnId) {
+        if (_isConversationActive && wasSeedAttempt && _turnCounter == 0) {
+          await _askForUsableSeedSentence(
+            finalTranscript,
+            generation: pipelineGeneration,
+          );
+        } else if (_isConversationActive) {
           _startUserListening();
         }
         return;
@@ -2821,7 +2889,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
         final clarifyTts = ChunkedTtsFetcher(
           _openAiKey,
           _ttsQueueManager,
-          'nova',
+          _aiVoice,
           language: 'ko',
           cacheEnabled: false,
           isUser: false,
@@ -2887,7 +2955,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
         final confirmTts = ChunkedTtsFetcher(
           _openAiKey,
           _ttsQueueManager,
-          'nova',
+          _aiVoice,
           language: 'ko',
           cacheEnabled: false,
           isUser: false,
@@ -2934,7 +3002,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
         final restateTts = ChunkedTtsFetcher(
           _openAiKey,
           _ttsQueueManager,
-          'nova',
+          _aiVoice,
           language: 'ko',
           cacheEnabled: false,
           isUser: false,
@@ -3068,11 +3136,11 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
       // TtsQueueManager._processQueue가 'AI 턴이고 paused' 판단하여 유저 마지막 청크까지 멈춰버림
       _ttsQueueManager.setAiPaused(true); // AI 재생 대기 모드 (유저 TTS는 계속 재생)
       // 🔧 [v3.5] AI 전용 큐로 보내기 위해 isUser: false 명시
-      // 🌱 [v4.0 StepExpand] AI 목소리는 nova 고정
+      // Step Expand AI 목소리는 Marin으로 통일한다.
       ChunkedTtsFetcher aiTtsFetcher = ChunkedTtsFetcher(
         _openAiKey,
         _ttsQueueManager,
-        'nova', // 🌱 AI 목소리 nova 고정
+        _aiVoice,
         language: 'ko',
         cacheEnabled: false, // 실시간 한국어 음성은 히스토리 영어 캐시에 남기지 않음
         isUser: false, // AI 큐로 분리
@@ -3087,7 +3155,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
       bool aiHasDoubleNewline = false;
       final HybridTtsPlayer aiHybridTts = HybridTtsPlayer(
         apiKey: _openAiKey,
-        voice: 'nova',
+        voice: _aiVoice,
         onLog: _log,
       );
 
@@ -3135,13 +3203,21 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
               if (afterSep.isNotEmpty) aiOriginalText += afterSep;
             }
           } else {
-            // Part2 (한국어): 실제 대화방에서 nova가 말할 문장이다.
+            // Part2 (한국어): 실제 대화방에서 Marin이 말할 문장이다.
             aiOriginalText += chunk;
           }
 
           // 텍스트는 AI 소리 시작 시점(setAiPaused=false)에 일괄 표시
         }
-        if (StepExpandBrain.needsNaturalPoliteRewrite(aiOriginalText)) {
+        if (StepExpandBrain.needsShortKoreanQuestionRewrite(aiOriginalText)) {
+          final beforeRewrite = aiOriginalText.trim();
+          aiOriginalText = await StepExpandBrain.rewriteToShortKoreanQuestion(
+            apiKey: _openAiKey,
+            text: beforeRewrite,
+          );
+          _log('🛡️ [AI-LENGTH-GUARD]',
+              'path=normal before="$beforeRewrite" after="$aiOriginalText"');
+        } else if (StepExpandBrain.needsNaturalPoliteRewrite(aiOriginalText)) {
           final beforeRewrite = aiOriginalText.trim();
           aiOriginalText = await StepExpandBrain.rewriteToNaturalPoliteKorean(
             apiKey: _openAiKey,
@@ -3150,7 +3226,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
           _log('🛡️ [AI-REGISTER-GUARD]',
               'path=normal before="$beforeRewrite" after="$aiOriginalText"');
         }
-        // 스트림이 끝나면 한국어만 tts-1/nova로 한 번 읽는다.
+        // 스트림이 끝나면 한국어만 gpt-4o-mini-tts/Marin으로 한 번 읽는다.
         // cacheEnabled=false이므로 이 음성은 대화방을 나가면 폐기된다.
         _swTTS
           ..reset()
@@ -4283,7 +4359,7 @@ class HybridTtsPlayer {
 
   HybridTtsPlayer({
     required this.apiKey,
-    this.voice = 'nova',
+    this.voice = 'marin',
     this.onLog,
     this.fireWordThreshold = 4,
   });
@@ -4422,7 +4498,7 @@ class HybridTtsPlayer {
                   'Content-Type': 'application/json',
                 },
                 body: jsonEncode({
-                  'model': 'tts-1',
+                  'model': 'gpt-4o-mini-tts',
                   'input': fullSentence,
                   'voice': voice,
                   'speed': 1.0,
@@ -5196,7 +5272,7 @@ class ChunkedTtsFetcher {
                 'Content-Type': 'application/json',
               },
               body: jsonEncode({
-                'model': 'tts-1',
+                'model': 'gpt-4o-mini-tts',
                 'input': text,
                 'voice': voice,
                 'speed': 1.0,
@@ -5700,6 +5776,68 @@ Output: [GARBLED]
   // ------------------------------------------------------------------
   // 🌱 영어의 \n\n 줄바꿈을 한국어에도 동일하게 유지
   // ==================================================================
+  static Future<Map<String, String>> generateSeedGuidance({
+    required String apiKey,
+    required String rejectedText,
+  }) async {
+    const fallback = <String, String>{
+      'english_question': 'What specific moment would you like to describe?',
+      'korean_question': '어떤 구체적인 순간을 말해 볼까요?',
+    };
+    if (apiKey.isEmpty) return fallback;
+    final client = http.Client();
+    try {
+      final response = await client
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.2,
+              'max_tokens': 100,
+              'response_format': {'type': 'json_object'},
+              'messages': [
+                {
+                  'role': 'system',
+                  'content':
+                      '''You guide a Korean user to provide one usable seed statement for Step Expand.
+The previous utterance was too vague, fragmentary, meta, or otherwise unsuitable as a sentence seed.
+Ask exactly ONE short, low-pressure question that helps the user say a concrete action, event, thought, feeling, or intention as a complete statement.
+Use any meaningful topic in their utterance, but never quote, display, judge, or save the rejected utterance.
+The Korean question must be natural 해요체, 4–10 spacing units, with no reaction or preamble.
+Return only JSON: {"english_question":"...","korean_question":"..."}.'''
+                },
+                {
+                  'role': 'user',
+                  'content': 'Rejected first utterance: $rejectedText',
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode != 200) return fallback;
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      final content =
+          ((body['choices'] as List).first['message']['content'] as String);
+      final parsed = jsonDecode(content) as Map<String, dynamic>;
+      final english = parsed['english_question']?.toString().trim() ?? '';
+      final korean = parsed['korean_question']?.toString().trim() ?? '';
+      if (english.isEmpty || korean.isEmpty) return fallback;
+      return {
+        'english_question': english,
+        'korean_question': korean,
+      };
+    } catch (_) {
+      return fallback;
+    } finally {
+      client.close();
+    }
+  }
+
   static bool needsNaturalPoliteRewrite(String text) {
     final cleaned = text.trim();
     if (cleaned.isEmpty) return false;
@@ -5718,6 +5856,72 @@ Output: [GARBLED]
       }
     }
     return false;
+  }
+
+  static bool needsShortKoreanQuestionRewrite(String text) {
+    final cleaned = text.trim();
+    if (cleaned.isEmpty) return false;
+    final spacingUnits = cleaned
+        .replaceAll(RegExp(r'[.!?。！？]+$'), '')
+        .split(RegExp(r'\s+'))
+        .where((unit) => unit.isNotEmpty)
+        .length;
+    final sentenceCount = RegExp(r'[^.!?。！？\n]+[.!?。！？]?')
+        .allMatches(cleaned)
+        .where((match) => (match.group(0) ?? '').trim().isNotEmpty)
+        .length;
+    final hasPreamble = RegExp(
+      r'^(?:네|맞아요|좋아요|그렇군요|알겠어요|이해했어요|흥미롭네요|재미있네요)[,!.\s]',
+    ).hasMatch(cleaned);
+    return spacingUnits > 12 || sentenceCount > 1 || hasPreamble;
+  }
+
+  static Future<String> rewriteToShortKoreanQuestion({
+    required String apiKey,
+    required String text,
+  }) async {
+    final source = text.trim();
+    if (source.isEmpty || apiKey.isEmpty) return source;
+    final client = http.Client();
+    try {
+      final response = await client
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.0,
+              'max_tokens': 60,
+              'messages': [
+                {
+                  'role': 'system',
+                  'content': '''주어진 문장에서 사용자의 마지막 답변과 직접 연결되는 핵심 질문 하나만 남기세요.
+자연스러운 한국어 해요체 질문 한 문장만 출력하세요.
+4~8어절을 권장하고 절대 12어절을 넘지 마세요.
+반응, 공감, 칭찬, 요약, 설명, 인사, 선택지, 두 번째 질문은 모두 삭제하세요.
+질문의 핵심 의미와 사실은 바꾸거나 새로 만들지 마세요.'''
+                },
+                {'role': 'user', 'content': source},
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode != 200) return source;
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      final rewritten =
+          ((body['choices'] as List).first['message']['content'] as String)
+              .trim()
+              .replaceAll(RegExp(r'''^['"“]|['"”]$'''), '');
+      return rewritten.isEmpty ? source : rewritten;
+    } catch (_) {
+      return source;
+    } finally {
+      client.close();
+    }
   }
 
   static Future<String> rewriteToNaturalPoliteKorean({
@@ -5985,7 +6189,9 @@ You are a warm, skilled conversation coach — not a grammar teacher. Your job i
 - The live conversation is in Korean, while the screen records the target-language English.
 - Across exactly five user turns, collect one useful sentence-building detail per turn and keep joining those details into one coherent expanded sentence.
 - Stay warmly focused on obtaining the next attachable detail. Do not drift into jokes, wordplay, trivia, long reactions, or entertaining banter that does not help complete the expanded sentence.
-- PART 2 is the actual Korean line spoken aloud to the user by tts-1/nova. It must sound like natural, friendly Korean conversation, not a stiff literal translation.
+- The user's LAST answer is the center of the next turn. Identify its single core action, feeling, reason, or result, then ask for the ONE missing detail that most directly grows the current expanded sentence.
+- Do not react to, praise, summarize, acknowledge, or answer the user's statement. Ask the next question only.
+- PART 2 is the actual Korean line spoken aloud to the user with the Marin voice. It must sound like natural, friendly Korean conversation, not a stiff literal translation.
 - PART 2 must always use natural everyday Korean 해요체. End every sentence politely in -요 style, even when the user speaks casually. Never use casual speech or stiff -습니다/-습니까 style.
 - PART 1 and PART 2 must ask the same single question and must not add different facts.
 
@@ -6039,6 +6245,7 @@ NEVER reveal this reasoning in the output.
 LAYER 2 — OUTPUT (the only thing you say):
 ONE question. 5 to 8 words. Warm and direct. No preamble.
 Output the question alone — nothing before it, nothing after it (except the PART 2 translation).
+PART 2 must also be ONE short Korean question only, preferably 4–8 Korean spacing units and never more than 12. No reaction sentence before it.
 
 [TURN GOAL]
 $grammarHint
@@ -6212,7 +6419,7 @@ User: Too many deadlines piling up.
 [OUTPUT FORMAT - STRICT]
 Output EXACTLY two parts separated by ONE empty line.
 PART 1: Your English question (follow all rules above).
-PART 2: The natural Korean conversational line that will actually be spoken aloud. Keep the same meaning as PART 1. Use natural everyday Korean 해요체 only; every sentence must end politely in -요 style.""";
+PART 2: ONE short Korean question that will actually be spoken aloud. Keep the same meaning as PART 1, use natural everyday Korean 해요체, and end in -요. Prefer 4–8 Korean spacing units; never exceed 12. No acknowledgement, reaction, explanation, or second sentence.""";
 
       final request = http.Request(
         'POST',
@@ -6226,7 +6433,7 @@ PART 2: The natural Korean conversational line that will actually be spoken alou
         'model': 'gpt-4o-mini',
         'stream': true,
         'temperature': 0.2,
-        'max_tokens': 300,
+        'max_tokens': isFinalTurn ? 300 : 100,
         'messages': [
           {'role': 'system', 'content': sysPrompt},
           {

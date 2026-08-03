@@ -199,12 +199,15 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   }
 
   String _buildRoleplayRealtimeInstructions() => '''
-You are the AI character in a live Korean roleplay.
+You are the assigned character inside a live Korean scenario conversation.
 Situation: ${_scenarioSituation.trim()}
 Your role: ${_roleplayPartnerLabel.trim()}
 User role: ${_roleplayUserLabel.trim()}
 
 OUTPUT LANGUAGE: Natural spoken Korean only.
+- You are NOT a host, moderator, narrator, facilitator, guide, or coach.
+- Never introduce the scenario, welcome the user to an activity, explain what will happen, or invite the user to begin.
+- Speak only as "${_roleplayPartnerLabel.trim()}" would actually speak to "${_roleplayUserLabel.trim()}" inside this exact situation.
 - Stay fully in character and react directly to the user's latest Korean line.
 - Preserve the established situation, roles, relationship, and conversation memory.
 - Keep replies concise and conversational, normally one or two sentences.
@@ -757,10 +760,11 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
       }
       final turn = _realtimeAdapter!.requestConversationTurn(
         turnId: 'roleplay-opener',
-        userText: '롤플레이 상황에 맞는 첫 대사를 시작하세요.',
+        userText:
+            '당신은 "${_roleplayPartnerLabel.trim()}"입니다. 지금 이 상황 속에서 "${_roleplayUserLabel.trim()}"에게 실제로 가장 먼저 할 한마디만 하세요.',
         voice: _aiVoice,
         instructions:
-            'Start the roleplay now with one natural Korean opening line as your assigned character. Do not explain the setup.',
+            'Speak exactly one short, natural Korean opening line as the assigned character inside the scene. Never act as a host or narrator. Do not greet the user to the roleplay, explain the setup, or invite them to start.',
       );
       var streamedText = '';
       transcriptSubscription = turn.textStream.listen((delta) {
@@ -1169,7 +1173,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
         userText: userKorean,
         voice: _aiVoice,
         instructions:
-            'Continue the established roleplay now. Reply in natural Korean only, in character, briefly and directly.',
+            'Continue the established scene in natural Korean only. Speak briefly and directly as the assigned character, never as a host, narrator, guide, or coach.',
       );
       var streamedText = '';
       transcriptSubscription = turn.textStream.listen((delta) {
@@ -2187,6 +2191,42 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
   // ====================================================================
   // 📦 [Box 6: UI]
   // ====================================================================
+  void _showScenarioTalkGuide() {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: const Row(
+          children: [
+            Icon(Icons.menu_book_rounded, color: Color(0xFF4ADE80)),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Scenario Talk 사용설명서',
+                style: TextStyle(color: Colors.white, fontSize: 18),
+              ),
+            ),
+          ],
+        ),
+        content: const SingleChildScrollView(
+          child: Text(
+            '실제 상황처럼 역할을 나누어 AI와 대화하는 모드입니다.\n\n'
+            '시작 전 시나리오와 AI·사용자 역할을 확인하거나 직접 수정할 수 있습니다.\n\n'
+            'Start 버튼을 누른 뒤, 화면에 표시된 역할의 인물처럼 자연스럽게 말해 보세요. AI도 지정된 역할을 유지하며 대화합니다.',
+            style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.55),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('확인', style: TextStyle(color: Color(0xFF4ADE80))),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bottomPad = MediaQuery.of(context).viewPadding.bottom == 0
@@ -2203,6 +2243,9 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
         child: SafeArea(
           child: Column(children: [
             _buildTopBar(),
+            if ((_isConversationActive || _localMessages.isNotEmpty) &&
+                _scenarioSituation.trim().isNotEmpty)
+              _buildScenarioTitle(),
             Expanded(
               child: Stack(
                 children: [
@@ -2222,12 +2265,38 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
     );
   }
 
+  Widget _buildScenarioTitle() {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(20, 2, 20, 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF16A34A).withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: const Color(0xFF16A34A).withValues(alpha: 0.28),
+        ),
+      ),
+      child: Text(
+        _scenarioSituation.trim(),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: Color(0xFFDCFCE7),
+          fontSize: 16,
+          fontWeight: FontWeight.w700,
+          height: 1.25,
+        ),
+      ),
+    );
+  }
+
   // ... (_buildTopBar, _buildTopControls, _buildChatList, _buildTextBlock, _buildControlArea는 기존과 동일하게 유지) ...
   Widget _buildTopBar() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           GestureDetector(
             onTap: _handleAutoSaveAndExit, // 🔧 [히스토리] AutoSave 연결
@@ -2241,7 +2310,16 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
                   color: Colors.white70),
             ),
           ),
+          const Spacer(),
           Row(children: [
+            IconButton(
+              icon: const Icon(Icons.menu_book_rounded,
+                  color: Color(0xFF4ADE80), size: 23),
+              tooltip: 'Scenario Talk 사용설명서',
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+              onPressed: _showScenarioTalkGuide,
+            ),
             IconButton(
               icon: Icon(
                 Icons.format_size,
@@ -2675,7 +2753,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text("Roleplay",
+              const Text("Scenario Talk",
                   style: TextStyle(
                       color: Colors.white54,
                       fontSize: 20,

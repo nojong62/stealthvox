@@ -359,7 +359,7 @@ Return ONLY valid JSON: {"name":"..."}.
                           _buildManualItem('Circle Talk', '커뮤니티 대화',
                               'AI 추천을 받거나 원하는 커뮤니티를 직접 입력하세요. AI가 그 서클의 구성원이 되어 분야의 말투, 관심사와 분위기에 맞춰 자연스럽게 대화합니다.'),
                           const Divider(color: Colors.white12, height: 24),
-                          _buildManualItem('AI Roleplay', '상황극 대화',
+                          _buildManualItem('Scenario Talk', '실전 상황 대화',
                               '창의적이고 구체적인 역할과 상황을 무한히 추천받고, 현실감 넘치는 실전 비즈니스 및 일상 회화를 연습합니다.'),
                           const Divider(color: Colors.white12, height: 24),
                           _buildManualItem('Step Expand', '점진적 문장 확장',
@@ -439,7 +439,7 @@ Return ONLY valid JSON: {"name":"..."}.
         const SizedBox(height: 12),
         _buildBillingDotRow(
           2,
-          'AI 대화 중 1초 차감, 복습·히스토리 체류 시 4초당 1초 차감',
+          '과금 진행중',
         ),
         const SizedBox(height: 10),
         _buildBillingDotRow(
@@ -595,9 +595,9 @@ Return ONLY valid JSON: {"name":"..."}.
             const SizedBox(height: 30),
             _buildMenuCard(1, "Duo Connect", "초청인 대화\n만능 통역", Icons.people,
                 const Color(0xFF2563EB)),
-            _buildMenuCard(2, "Circle Talk", "서클 구성원 대화",
-                Icons.groups_rounded, const Color(0xFF9333EA)),
-            _buildMenuCard(3, "AI Roleplay", "상황극 대화", Icons.smart_toy,
+            _buildMenuCard(2, "Circle Talk", "서클 구성원 대화", Icons.groups_rounded,
+                const Color(0xFF9333EA)),
+            _buildMenuCard(3, "Scenario Talk", "실전 상황 대화", Icons.smart_toy,
                 const Color(0xFF16A34A)),
             _buildMenuCard(4, "Step Expand", "점진적 문장 확장", Icons.trending_up,
                 const Color(0xFFEA580C)),
@@ -637,7 +637,7 @@ Return ONLY valid JSON: {"name":"..."}.
               ),
               const SizedBox(height: 8),
               Text(
-                'Circle Talk',
+                'Circle Talk Settings',
                 style: GoogleFonts.poppins(
                   color: Colors.white,
                   fontSize: 28,
@@ -646,92 +646,62 @@ Return ONLY valid JSON: {"name":"..."}.
               ),
               const SizedBox(height: 8),
               const Text(
-                '서클을 추천받거나 직접 입력하세요.',
+                '원하는 서클을 직접 입력해도 됩니다.',
                 style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
+                  color: Colors.white60,
+                  fontSize: 14,
                 ),
               ),
-              const SizedBox(height: 8),
-              const Text(
-                'AI는 정보를 설명하는 사람이 아니라, 선택한 서클의 한 구성원이 되어 그 분야의 분위기와 말투로 대화합니다.',
-                style:
-                    TextStyle(color: Colors.white60, fontSize: 13, height: 1.5),
-              ),
               const SizedBox(height: 24),
-              const Center(
-                child: Icon(Icons.groups_rounded,
-                    color: Color(0xFFB46CFF), size: 64),
+              SizedBox(
+                height: 52,
+                child: OutlinedButton(
+                  onPressed: _isRecommendingCircle ? null : _recommendCircle,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: Color(0xFF9333EA)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                  ),
+                  child: _isRecommendingCircle
+                      ? const SizedBox(
+                          width: 19,
+                          height: 19,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Color(0xFFB46CFF),
+                          ),
+                        )
+                      : const Text('서클 추천',
+                          style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
               ),
-              const SizedBox(height: 14),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  SizedBox(
-                    width: 120,
-                    height: 56,
-                    child: OutlinedButton(
-                      onPressed:
-                          _isRecommendingCircle ? null : _recommendCircle,
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                        side: const BorderSide(color: Color(0xFF9333EA)),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14)),
-                      ),
-                      child: _isRecommendingCircle
-                          ? const SizedBox(
-                              width: 19,
-                              height: 19,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Color(0xFFB46CFF),
-                              ),
-                            )
-                          : const Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.auto_awesome_rounded, size: 17),
-                                SizedBox(width: 6),
-                                Text('서클 추천',
-                                    style:
-                                        TextStyle(fontWeight: FontWeight.bold)),
-                              ],
-                            ),
-                    ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _circleController,
+                maxLength: 200,
+                maxLines: 1,
+                style: const TextStyle(color: Colors.white),
+                textInputAction: TextInputAction.done,
+                onSubmitted: _enterCircleTalk,
+                decoration: InputDecoration(
+                  hintText: '서클 이름을 입력하세요',
+                  hintStyle: const TextStyle(color: Colors.white30),
+                  filled: true,
+                  fillColor: const Color(0xFF1E1E1E),
+                  counterText: '',
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 17),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: Colors.white24),
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: TextField(
-                      controller: _circleController,
-                      maxLength: 200,
-                      maxLines: 1,
-                      style: const TextStyle(color: Colors.white),
-                      textInputAction: TextInputAction.done,
-                      onSubmitted: _enterCircleTalk,
-                      decoration: InputDecoration(
-                        hintText: '직접 서클 입력',
-                        hintStyle: const TextStyle(color: Colors.white30),
-                        filled: true,
-                        fillColor: const Color(0xFF1E1E1E),
-                        counterText: '',
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 17),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          borderSide: const BorderSide(color: Colors.white24),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          borderSide: const BorderSide(
-                              color: Color(0xFF9333EA), width: 1.5),
-                        ),
-                      ),
-                    ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide:
+                        const BorderSide(color: Color(0xFF9333EA), width: 1.5),
                   ),
-                ],
+                ),
               ),
               const SizedBox(height: 12),
               FilledButton.icon(
@@ -744,7 +714,7 @@ Return ONLY valid JSON: {"name":"..."}.
                       borderRadius: BorderRadius.circular(14)),
                 ),
                 icon: const Icon(Icons.forum_rounded),
-                label: const Text('이 서클에서 대화 시작',
+                label: const Text('서클 대화 시작',
                     style: TextStyle(fontWeight: FontWeight.bold)),
               ),
             ],

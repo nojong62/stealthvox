@@ -32,8 +32,8 @@ String buildStepExpandFirstTurnSeedPolicy(String targetLanguage) {
   return '''[CASE 1] History is empty (USER'S FIRST TURN — CREATE A SEED)
 - Whatever meaningful content the user gives, turn its core meaning into ONE short, complete, natural spoken seed sentence in $language that can grow in later turns.
 - Keep one clear subject and one main idea. Prefer a brief, simple clause over details or complex grammar.
-- If the input is already a complete sentence, preserve its meaning and simplify only when useful.
-- If it is a fragment, question, reaction, or vague thought, add only the minimum grammatical framing needed to make a usable seed.
+- If the input is already a complete statement, preserve its meaning and simplify only when useful.
+- A fragment, question, reaction, vague thought, bare topic, greeting, filler, or request to begin is NOT a seed. Output EXACTLY: [EVAPORATE]. Do not repair it by inventing a subject, action, opinion, feeling, or intent.
 - A SEED MUST BE GROWABLE — a statement about something that happened, something the user did, thinks, or wants. It needs a subject and a verb.
   Greetings and openers are NOT growable content: "안녕하세요" / "오늘은" / "저기요" / "음 뭐지" / "시작할까". They carry no fact to grow from.
   When the input is only a greeting, an opener, or a bare noun with no statement around it, output EXACTLY: [EVAPORATE]
