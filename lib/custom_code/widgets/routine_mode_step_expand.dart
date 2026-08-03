@@ -10,6 +10,19 @@ import 'package:flutter/material.dart';
 // Begin custom widget code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
+// ====================================================================
+// 🏷️ [용어 대응표]
+//   · 파일/클래스 이름 : step_expand    (코드에서 쓰는 이름)
+//   · Firestore 저장 id : step_expand   (mode 필드 값)
+//   · room_name        : "Step.Ex Mode"
+//   · 화면 표시명       : Step Expand
+//
+//   다른 모드 이름 대응은 각 파일 상단 참고:
+//     routine_mode_anyone.dart   → 저장 free_talk / 표시 Circle Talk
+//     routine_mode_roleplay.dart → 저장 roleplay  / 표시 Scenario Talk
+//   별칭 해석 테이블: chat_history_master.dart _inferHistoryMode()
+// ====================================================================
+
 import 'index.dart'; // Imports other custom widgets
 
 import '/custom_code/widgets/index.dart';

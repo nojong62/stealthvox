@@ -10,6 +10,18 @@ import 'package:flutter/material.dart';
 // Begin custom widget code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
+// ====================================================================
+// 🏷️ [용어 대응표] 이 파일은 이름이 3개다. 헷갈리지 말 것.
+//   · 파일/클래스 이름 : roleplay        (코드에서 쓰는 이름)
+//   · Firestore 저장 id : roleplay       (mode / partnerType 필드 값)
+//   · 화면 표시명       : Scenario Talk  (유저가 보는 이름)
+//
+//   표시명만 Roleplay → Scenario Talk으로 바뀌었다. 저장 id와
+//   room_name("Roleplay Mode")은 그대로 둔다. 이 둘은 과거 대화
+//   기록의 분류 키라서 바꾸면 기록이 미분류로 떨어진다.
+//   별칭 해석 테이블: chat_history_master.dart _inferHistoryMode()
+// ====================================================================
+
 import 'index.dart'; // Imports other custom widgets
 
 import '/custom_code/widgets/index.dart';
@@ -77,6 +89,14 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   double _fontScale = 1.0;
   bool _showOriginal = true;
   int _turnCounter = 0;
+
+  // 👂 [HEARD-CONFIRM] 전사가 깨졌을 때 "글로 적기 전에" 말로 되묻는다.
+  //   전사문을 화면에 쓰지 않고 여기에 보류해 두었다가, 유저가 "네"라고
+  //   확인해 주면 그대로 재개하고, 아니면 버린다. 잘못 들은 문장이
+  //   화면에 남아 유저가 컴플레인할 일을 없애는 것이 목적이다.
+  String? _pendingHeardConfirmation;
+  int _heardConfirmationAttempts = 0;
+
   String? _sessionDocId; // 🔧 [v3 추가] 첫 대화 후 세션 ID (클론 변경 시 null 리셋)
   DocumentReference? _myHistoryRef; // 🔧 [히스토리] chat_history 문서 참조 (Duo 패턴)
 
@@ -713,6 +733,8 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
     if (realtime != null) unawaited(realtime.dispose());
     _commitTimer?.cancel(); // 🔧 [v3.4] 대기 중 타이머 정리
     _commitTimer = null;
+    _pendingHeardConfirmation = null; // 보류된 확인 대기 발화도 버림
+    _heardConfirmationAttempts = 0;
     _pendingTranscript = ''; // 대기 중 발화도 버림
     _resetTurnPcmBuffer();
     _voiceManager?.dispose();
@@ -1311,7 +1333,56 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
   }
 
   Future<void> _processRelayPipeline(String finalTranscript,
-      {bool isCorrectionRetry = false}) async {
+      {bool isCorrectionRetry = false,
+      bool understandingConfirmed = false}) async {
+    // 👂 [HEARD-CONFIRM] 되묻기를 걸어둔 상태면, 이번 발화는 새 대화가 아니라
+    //   그 되물음에 대한 답이다. 확인/부정/정정 셋으로 갈라 처리한다.
+    final pendingHeard = _pendingHeardConfirmation;
+    if (pendingHeard != null) {
+      final reply = finalTranscript
+          .trim()
+          .toLowerCase()
+          .replaceAll(RegExp(r'[\s.!?~]'), '');
+      const affirmatives = {
+        '네',
+        '예',
+        '응',
+        '맞아',
+        '맞아요',
+        '맞습니다',
+        'yes',
+        'yeah',
+        'right',
+        'correct'
+      };
+      const bareNegatives = {
+        '아니',
+        '아니요',
+        '아닙니다',
+        'no',
+        'nope',
+      };
+      _pendingHeardConfirmation = null;
+      if (affirmatives.contains(reply)) {
+        // 제대로 들은 게 맞았다 → 보류해 둔 원래 발화를 그때부터 이어서 처리
+        _heardConfirmationAttempts = 0;
+        _log('[HEARD-CONFIRM]', 'affirmed → 보류 발화 재개');
+        return _processRelayPipeline(
+          pendingHeard,
+          isCorrectionRetry: isCorrectionRetry,
+          understandingConfirmed: true,
+        );
+      }
+      if (bareNegatives.contains(reply)) {
+        // 아니라고만 했다 → 보류 발화는 버리고 다시 듣는다
+        _heardConfirmationAttempts = 0;
+        _log('[HEARD-CONFIRM]', 'denied_without_correction → 재청취');
+        await _speakRetryAndListen();
+        return;
+      }
+      // 내용이 담긴 답 → 유저가 다시 설명한 것이므로 이번 발화를 새 발화로 본다
+      _log('[HEARD-CONFIRM]', 'corrected_with_content → 새 발화 판정');
+    }
     _resetIdleTimer();
     _turnCounter++;
     final int currentTurnId = _turnCounter;
@@ -1406,6 +1477,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
         userRole: _scenarioUserRole,
         situation: _scenarioSituation,
         isCorrectionRetry: isCorrectionRetry,
+        disableHeardConfirmation: understandingConfirmed,
       );
 
       bool evaporated = false;
@@ -1413,6 +1485,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
       bool corrected = false; // 유저가 AI의 오해를 정정 → 직전 교환 삭제 후 재처리
       bool misheard = false; // 잘못 들었다는 불만만 있음 → 직전 교환 삭제 후 재청취
       bool dissatisfiedReply = false; // AI 직전 응답 불만 → 응답만 재생성
+      bool heardConfirmation = false; // 전사가 깨짐 → 글로 적기 전에 말로 확인
       // [USER-FULL-TTS] firstChunkSent removed; user TTS fires once after stream end.
       await for (String chunk in userStream) {
         userTargetText += chunk;
@@ -1443,12 +1516,23 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
         }
 
         // 되묻기 감지: 주어/목적어 모호 → AI In-Character 되묻기
-        if (userTargetText.contains("[CLARIFY]")) {
+        //   되묻는 문장 전체를 받아야 하므로 break 하지 않는다. 여기서 끊으면
+        //   질문이 잘린 채로 TTS를 타서 "Who are you"에서 끝나 버린다.
+        if (!clarified && userTargetText.contains("[CLARIFY]")) {
           clarified = true;
-          _log('❓ [CLARIFY]', '되묻기 감지 → clarification 처리');
-          break;
+          _log('❓ [CLARIFY]', '되묻기 감지 → 스트림 완료 후 처리 예정');
         }
-        if (mounted)
+        // 👂 [HEARD-CONFIRM] 전사가 깨져 뜻을 복원할 수 없음
+        //   → 추측 번역 금지. 화면에 적기 전에 말로 먼저 확인한다.
+        if (!heardConfirmation &&
+            (userTargetText.contains("[HEARD_CONFIRM]") ||
+                userTargetText.trimLeft().startsWith('제가 잘못 들었나요?'))) {
+          heardConfirmation = true;
+          _log('[HEARD-CONFIRM]', '단어 확인 필요 → 스트림 완료 후 처리 예정');
+        }
+        // 되묻기/확인 중에는 유저 버블에 아무것도 쓰지 않는다. 이 텍스트는
+        // 유저가 한 말이 아니라 AI의 되물음이라 그대로 적으면 오해를 만든다.
+        if (mounted && !clarified && !heardConfirmation)
           setState(() =>
               _localMessages[hostIndex]['target'] = _cleanText(userTargetText));
         _scrollToCurrentTop(hostIndex);
@@ -1642,14 +1726,19 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
       if (clarified) {
         _turnCounter--;
         final clarifyText =
-            userTargetText.replaceFirst(RegExp(r'^\[CLARIFY\]\s*'), '');
+            userTargetText.replaceFirst(RegExp(r'^\[CLARIFY\]\s*'), '').trim();
         if (mounted) {
           setState(() {
             _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-            if (hostIndex < _localMessages.length)
+            if (hostIndex < _localMessages.length &&
+                _localMessages[hostIndex]['role'] == 'HOST')
               _localMessages.removeAt(hostIndex);
-            _localMessages
-                .add({'role': 'SYSTEM', 'target': clarifyText, 'original': ''});
+            _localMessages.add({
+              'role': 'SYSTEM',
+              'target': clarifyText,
+              'original': '',
+              'clarify': true, // 임시 되묻기 버블 — 다음 발화 시 증발 처리
+            });
           });
           _scrollToBottom();
         }
@@ -1669,6 +1758,80 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
             mounted) {
           await Future.delayed(const Duration(milliseconds: 50));
           if (++waitTicks > 200) break;
+        }
+        if (mounted && _isConversationActive) _startDeepgramListening();
+        return;
+      }
+
+      // 👂 [HEARD-CONFIRM] 전사가 깨져 뜻을 복원할 수 없음
+      //   유저 발화를 화면에 적지 않고 보류한 채, 한국어로 먼저 확인만 한다.
+      //   추측해서 적어 놓으면 유저는 자기가 하지도 않은 말을 보게 된다.
+      if (heardConfirmation) {
+        _turnCounter--;
+        // 프롬프트가 확인 문장을 통째로 낸 경우와 [HEARD_CONFIRM] 태그 뒤에
+        // 의심 단어만 낸 경우 둘 다 받는다.
+        final spokenPrompt = userTargetText.trimLeft().startsWith('제가 잘못 들었나요?')
+            ? userTargetText.trim().replaceAll(RegExp(r'[\r\n]+'), ' ')
+            : '';
+        final candidate = spokenPrompt.isNotEmpty
+            ? ''
+            : userTargetText
+                .replaceFirst(RegExp(r'^.*?\[HEARD_CONFIRM\]\s*'), '')
+                .trim()
+                .replaceAll(RegExp(r'[\r\n]+'), ' ');
+        _pendingHeardConfirmation = finalTranscript.trim();
+        _heardConfirmationAttempts++;
+        // 두 번 되물어도 안 풀리면 단어 확인을 접고 통째로 다시 말해 달라고 한다.
+        // 세 번째부터는 되묻기가 대화를 막는 쪽으로 작동하기 때문이다.
+        final tooManyAttempts = _heardConfirmationAttempts > 2 ||
+            _pendingHeardConfirmation!.isEmpty ||
+            (candidate.isEmpty && spokenPrompt.isEmpty);
+        final prompt = tooManyAttempts
+            ? '죄송해요. 문장을 조금 천천히 다시 말씀해 주세요.'
+            : spokenPrompt.isNotEmpty
+                ? spokenPrompt
+                : "제가 잘못 들었나요? '$candidate'라고 말씀하신 게 맞나요?";
+        final promptTarget = tooManyAttempts
+            ? 'Sorry. Please say the sentence again a little more slowly.'
+            : "Did I hear you correctly? Did you say '$candidate'?";
+        if (tooManyAttempts) {
+          _pendingHeardConfirmation = null;
+          _heardConfirmationAttempts = 0;
+        }
+        if (mounted) {
+          setState(() {
+            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+            if (hostIndex < _localMessages.length &&
+                _localMessages[hostIndex]['role'] == 'HOST')
+              _localMessages.removeAt(hostIndex);
+            _localMessages.add({
+              'role': 'SYSTEM',
+              'target': promptTarget,
+              'original': prompt,
+              'clarify': true,
+            });
+          });
+          _scrollToBottom();
+        }
+        _ttsQueueManager.stop();
+        _ttsQueueManager.setUserTurn(false);
+        _ttsQueueManager.setAiPaused(false);
+        // 확인 질문은 한국어로 말한다. 못 알아들었다는 말까지 외국어로 하면
+        // 유저가 두 번 헤맨다.
+        final confirmTts = ChunkedTtsFetcher(
+          _openAiKey,
+          _ttsQueueManager,
+          _aiVoice,
+          language: 'ko',
+          isUser: false,
+          onLog: _log,
+        );
+        confirmTts.addText(prompt);
+        int confirmTicks = 0;
+        while ((confirmTts.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
+            mounted) {
+          await Future.delayed(const Duration(milliseconds: 50));
+          if (++confirmTicks > 200) break;
         }
         if (mounted && _isConversationActive) _startDeepgramListening();
         return;
@@ -4255,6 +4418,7 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
     String userRole = '',
     String situation = '',
     bool isCorrectionRetry = false,
+    bool disableHeardConfirmation = false,
   }) async* {
     final client = http.Client();
     try {
@@ -4303,6 +4467,22 @@ More signs (MILD dissatisfaction — these ALSO count when clearly aimed at the 
 Even slight or indirect displeasure aimed at the AI's last reply counts.
 Do NOT output this when the user is answering negatively IN CHARACTER (e.g., refusing an offer inside the roleplay is a valid in-character answer).
 If so, output EXACTLY: [DISSATISFIED]  (and nothing else)
+
+[TRANSCRIPT CONFIDENCE GUARD — CHECK BEFORE TRANSLATING]
+${disableHeardConfirmation ? "The user has explicitly confirmed the previously heard wording. Do NOT ask another hearing-confirmation question for this turn." : """What you receive is NOT typed text. It is speech-recognition output and it can contain misrecognized words. You never hear the audio, so judge the text itself.
+
+Do NOT translate, and do NOT repair it by guessing, when any of these holds:
+- The utterance does not hold together as Korean — grammar no speaker would produce, a word that is not a word, or a phrase that breaks off mid-thought.
+- A word sits so oddly that the intended meaning cannot be recovered from the scenario and the conversation so far.
+- Making it make sense would require you to invent a subject, object, or verb that the context does not supply.
+
+In that case output EXACTLY in Korean: 제가 잘못 들었나요? '<the exact word or short phrase you doubt>'라고 말씀하신 게 맞나요?
+
+This one line is spoken OUT of character on purpose. Checking what you heard is not a scene break — translating something the user never said is.
+
+Being short is NOT by itself a reason to ask — "먼저 시켜놔." is complete and clear. Ask only when the text itself does not hold together. Accents, fillers, and casual grammar are fine; translate those normally.
+
+Never smooth a broken transcript into a plausible sentence. Guessing puts words in the user's mouth and the scene then builds on something they never said."""}
 
 [INTERNAL THINKING - do not output]
 Step 1. CONTEXT CHECK: Review conversation history.

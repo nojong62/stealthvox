@@ -7670,6 +7670,12 @@ RULES — follow exactly:
     return normalized != 'step_expand';
   }
 
+  // 🏷️ [모드 별칭 해석표 — 표시명이 바뀔 때 여기만 한 줄씩 추가한다]
+  //   저장 id는 절대 바꾸지 않는다. 이미 저장된 문서가 미분류로 떨어진다.
+  //     free_talk   ← 표시명 Free Talk → Anyone → Circle Talk 로 변천
+  //     roleplay    ← 표시명 Scenario Talk (room_name은 "Roleplay Mode" 유지)
+  //     step_expand ← 표시명 Step Expand
+  //   기존 조건은 지우지 말고 OR로 덧붙일 것. 지우면 그 시기 기록이 죽는다.
   String _inferHistoryMode(Map<String, dynamic>? data) {
     final mode = _normalizeHistoryMode(_historyString(data, 'mode'));
     if (mode.isNotEmpty) return mode;

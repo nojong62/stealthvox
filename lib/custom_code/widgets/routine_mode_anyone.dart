@@ -11,6 +11,18 @@ import 'package:flutter/foundation.dart';
 // Begin custom widget code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
+// ====================================================================
+// 🏷️ [용어 대응표] 이 파일은 이름이 3개다. 헷갈리지 말 것.
+//   · 파일/클래스 이름 : anyone       (코드에서 쓰는 이름)
+//   · Firestore 저장 id : free_talk   (mode 필드에 박히는 값)
+//   · 화면 표시명       : Circle Talk (유저가 보는 이름)
+//
+//   표시명은 Free Talk → Anyone → Circle Talk 순으로 바뀌어 왔지만,
+//   저장 id는 처음부터 free_talk 하나로 유지했다. 과거 대화 기록이
+//   살아있는 이유가 이것이다. 절대 저장 id를 바꾸지 말 것.
+//   별칭 해석 테이블: chat_history_master.dart _inferHistoryMode()
+// ====================================================================
+
 import 'package:flutter/services.dart'; // 🔬 [v3.1] Clipboard용
 
 // ====================================================================

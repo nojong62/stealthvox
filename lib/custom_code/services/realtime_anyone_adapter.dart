@@ -4,6 +4,11 @@ import 'realtime_client_secret_service.dart';
 import 'stealth_vox_realtime_session.dart';
 
 /// Small mode adapter for Anyone. UI and persistence stay outside transport.
+///
+/// 🏷️ [용어] 코드 이름 anyone = 화면 표시명 Circle Talk.
+/// 이 파일이 넘기는 `mode: 'anyone'`은 Realtime 세션/피처 플래그 키이지
+/// Firestore에 저장되는 mode 값이 아니다. 저장 id는 `free_talk`이며
+/// routine_mode_anyone.dart가 따로 기록한다. 두 값을 섞지 말 것.
 class RealtimeAnyoneAdapter {
   RealtimeAnyoneAdapter({
     this.onUserTranscript,
