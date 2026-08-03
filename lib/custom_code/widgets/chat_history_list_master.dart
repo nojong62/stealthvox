@@ -203,6 +203,23 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
     }
   }
 
+  // 🏷️ [필터칩 표시명] 화면에 보이는 이름만 바꾼다.
+  //   filterKey는 room_name 매칭에 그대로 쓰이므로(_selectedFilter로
+  //   rn.contains 비교) 절대 바꾸면 안 된다. 키를 'Scenario'로 바꾸면
+  //   저장된 "Roleplay Mode" 방들이 필터에서 통째로 사라진다.
+  //     Anyone   → Circle   (Circle Talk)
+  //     Roleplay → Scenario (Scenario Talk)
+  String _filterLabel(String filterKey) {
+    switch (filterKey) {
+      case 'Anyone':
+        return 'Circle';
+      case 'Roleplay':
+        return 'Scenario';
+      default:
+        return filterKey;
+    }
+  }
+
   bool _isExpandRoom(String roomName) =>
       roomName.contains("Expand") || roomName.contains("Step.Ex");
 
@@ -542,15 +559,20 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
         child: Row(
           children: _selectedFilter == 'All' || _selectedFilter == 'Keepers'
               ? [
-                  _buildFilterChip('Duo', 'Duo', Icons.people),
-                  _buildFilterChip('Anyone', 'Anyone', Icons.forum),
-                  _buildFilterChip('Roleplay', 'Roleplay', Icons.smart_toy),
-                  _buildFilterChip('Expand', 'Expand', Icons.trending_up),
+                  _buildFilterChip('Duo', _filterLabel('Duo'), Icons.people),
+                  _buildFilterChip(
+                      'Anyone', _filterLabel('Anyone'), Icons.forum),
+                  _buildFilterChip(
+                      'Roleplay', _filterLabel('Roleplay'), Icons.smart_toy),
+                  _buildFilterChip(
+                      'Expand', _filterLabel('Expand'), Icons.trending_up),
                   _buildKeepersChip(),
                 ]
               : [
                   _buildDeleteActionChip(),
-                  _buildFilterChip(_selectedFilter, _selectedFilter,
+                  _buildFilterChip(
+                      _selectedFilter,
+                      _filterLabel(_selectedFilter),
                       _getIconForRoom(_selectedFilter)),
                 ],
         ),
