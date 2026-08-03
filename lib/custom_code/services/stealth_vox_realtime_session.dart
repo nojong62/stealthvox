@@ -360,18 +360,22 @@ class StealthVoxRealtimeSession {
       _peerConnection = peer;
       _logger?.call('[RT-PC]', 'created');
       peer.onTrack = (event) {
-        if (!_isCurrent(generation) || event.streams.isEmpty) {
+        if (!_isCurrent(generation)) {
           _emit(RealtimeEventType.staleEventDropped);
           return;
         }
-        _logger?.call('[RT-AUDIO]', 'remote_track_received');
+        // Receive-only offers may deliver a streamless audio track. The track is
+        // still playable, so do not discard it just because `streams` is empty.
+        event.track.enabled = true;
+        _logger?.call('[RT-AUDIO]',
+            'remote_track_received kind=${event.track.kind} streams=${event.streams.length}');
         // 🔊 [RT-AUDIO] WebRTC 연결이 살아 있는 동안 Android는 통화 모드로 들어가
         //   미디어 재생(AI TTS)이 수화부로 빠지거나 크게 줄어든다. 원격 트랙이
         //   붙는 즉시 스피커로 고정해 유저 음성과 AI 음성을 같은 출력으로 맞춘다.
-        _enableSpeakerphone();
+        _enableSpeakerphone(reason: 'remote_track', force: true);
         _emit(
           RealtimeEventType.remoteAudioTrack,
-          remoteStream: event.streams.first,
+          remoteStream: event.streams.isEmpty ? null : event.streams.first,
         );
       };
       peer.onIceConnectionState = (state) {
@@ -628,6 +632,11 @@ class StealthVoxRealtimeSession {
     }
     sendEvent(
         <String, dynamic>{'type': 'response.create', 'response': response});
+    // Deepgram/record may have changed Android's audio route after WebRTC was
+    // negotiated. Re-assert the speaker route for every spoken turn.
+    if (!suppressAudio) {
+      _enableSpeakerphone(reason: 'response_requested', force: true);
+    }
     _setTurnState(RealtimeTurnState.responseRequested);
     _logger?.call(
         '[RT-TURN]', 'turnId=$turnId start suppress_audio=$suppressAudio');
@@ -743,6 +752,7 @@ class StealthVoxRealtimeSession {
         // 오디오가 실제로 흐르기 시작한 시각을 남긴다. 종료 신호가 오지 않는
         // 응답에서 남은 낭독 시간을 추정하는 기준점이다.
         if (turn._audioStartedAt == null) {
+          _enableSpeakerphone(reason: 'playback_started', force: true);
           turn._markAudioStarted();
           _logger?.call(
               '[RT-AUDIO]',
@@ -906,11 +916,12 @@ class StealthVoxRealtimeSession {
   /// 다음 발화부터 적용된다. 진행 중인 전사에는 영향을 주지 않는다.
   /// 🔊 [RT-AUDIO] 원격 오디오를 스피커로 고정한다. 실패해도 세션은 그대로 둔다
   /// — 소리 경로 문제일 뿐 통신 실패가 아니다.
-  void _enableSpeakerphone() {
-    if (_speakerphoneEnabled) return;
+  void _enableSpeakerphone(
+      {String reason = 'unspecified', bool force = false}) {
+    if (_speakerphoneEnabled && !force) return;
     _speakerphoneEnabled = true;
     unawaited(Helper.setSpeakerphoneOn(true).then(
-      (_) => _logger?.call('[RT-AUDIO]', 'speaker_on'),
+      (_) => _logger?.call('[RT-AUDIO]', 'speaker_on reason=$reason'),
       onError: (Object error) {
         _speakerphoneEnabled = false;
         _logger?.call(

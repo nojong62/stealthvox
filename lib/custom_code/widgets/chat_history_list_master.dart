@@ -207,7 +207,9 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
       roomName.contains("Expand") || roomName.contains("Step.Ex");
 
   bool _isAnyoneRoom(String roomName) =>
-      roomName.contains("Anyone") || roomName.contains("Free Talk");
+      roomName.contains("Anyone") ||
+      roomName.contains("Free Talk") ||
+      roomName.contains("Circle Talk");
 
   IconData _getIconForRoom(String roomName) {
     if (roomName.contains("Duo")) return Icons.people;

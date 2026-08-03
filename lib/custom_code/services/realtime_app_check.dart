@@ -4,15 +4,25 @@ class RealtimeAppCheck {
   RealtimeAppCheck._();
 
   static bool _initialized = false;
+  static const bool _debugProviderFromBuild = bool.fromEnvironment(
+    'REALTIME_APPCHECK_DEBUG',
+    defaultValue: false,
+  );
+  static bool _usingDebugProvider = false;
+
+  static bool get usingDebugProvider => _usingDebugProvider;
 
   static Future<void> initialize({bool debugProvider = false}) async {
     if (_initialized) return;
+    final useDebugProvider = debugProvider || _debugProviderFromBuild;
     await FirebaseAppCheck.instance.activate(
-      androidProvider:
-          debugProvider ? AndroidProvider.debug : AndroidProvider.playIntegrity,
+      androidProvider: useDebugProvider
+          ? AndroidProvider.debug
+          : AndroidProvider.playIntegrity,
       appleProvider:
-          debugProvider ? AppleProvider.debug : AppleProvider.deviceCheck,
+          useDebugProvider ? AppleProvider.debug : AppleProvider.deviceCheck,
     );
+    _usingDebugProvider = useDebugProvider;
     _initialized = true;
   }
 }

@@ -17,7 +17,9 @@ import '/custom_code/actions/index.dart';
 
 import 'dart:ui';
 import 'dart:async';
+import 'dart:convert';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 import 'package:firebase_remote_config/firebase_remote_config.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
@@ -25,6 +27,7 @@ import '/custom_code/services/openai_connection_pool.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
 import 'trial/trial_flow_state.dart';
+import 'circle_talk_guide.dart';
 
 class StealthRoomMaster extends StatefulWidget {
   const StealthRoomMaster({
@@ -47,14 +50,17 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   // 📦 [1. 상태 변수 및 모드 제어 (STATE & MODE CONTROL)]
   // 현재 선택된 모드(Duo, Clone, Roleplay, Expand)를 기억하고 전환하는 역할
   // ============================================================================
-  // 0: 메뉴 화면, 1: Duo, 2: Free Talk, 3: Roleplay, 4: Expand
+  // 0: 메뉴 화면, 1: Duo, 2: Circle Talk, 3: Roleplay, 4: Expand
   int? _currentMode;
+  bool _circleSetupOpen = false;
+  bool _isRecommendingCircle = false;
+  String? _selectedCircleDescription;
+  final TextEditingController _circleController = TextEditingController();
   final AudioRecorder _anyoneAudioRecorder = AudioRecorder();
   late Future<void> _anyoneAudioReady;
   DateTime? _anyoneMicInputAt;
-  // 🎤 [ENTRY-GATE] Free Talk은 별도 선택·안내 화면 없이 바로 입장하고,
-  //   준비가 끝나는 즉시 Deepgram 청취와 Realtime verse 응답을 시작한다.
-
+  // 🎤 [ENTRY-GATE] Circle Talk은 서클 선택 후 입장하고, 준비가 끝나는 즉시
+  //   Deepgram 청취와 Realtime verse 응답을 시작한다.
   // 초대 링크에서 소비한 roomId (1회용 — build에서 Duo 생성자에 전달)
   String? _pendingDuoRoomId;
 
@@ -65,6 +71,8 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     StealthRoomMaster.exitCurrentMode = () {
       setState(() {
         _currentMode = null;
+        _circleSetupOpen = false;
+        _selectedCircleDescription = null;
       });
       unawaited(_refreshAnyonePrewarmAfterExit());
     };
@@ -180,6 +188,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     AppsFlyerManager.duoInviteSignal.removeListener(_onDuoInviteSignal);
     WidgetsBinding.instance.removeObserver(this);
     StealthRoomMaster.exitCurrentMode = null;
+    _circleController.dispose();
     unawaited(DeepgramPrewarmSession.instance.discard(reason: 'room_dispose'));
     unawaited(_anyoneAudioRecorder.dispose());
     super.dispose();
@@ -194,15 +203,108 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   }
 
   void _switchMode(int newMode) {
-    if (_currentMode == newMode) return;
     if (newMode == 2) {
-      _anyoneMicInputAt = DateTime.now();
-      debugPrint(
-          '[FIRST-SPEECH] event=MIC_INPUT at=${_anyoneMicInputAt!.toIso8601String()} deltaMs=0');
+      setState(() => _circleSetupOpen = true);
+      return;
     }
+    if (_currentMode == newMode) return;
     setState(() {
       _currentMode = newMode;
     });
+  }
+
+  void _enterCircleTalk(String description) {
+    final clean = description.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (clean.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('참여할 서클을 입력해 주세요.')),
+      );
+      return;
+    }
+    _anyoneMicInputAt = DateTime.now();
+    debugPrint(
+        '[FIRST-SPEECH] event=MIC_INPUT at=${_anyoneMicInputAt!.toIso8601String()} deltaMs=0');
+    setState(() {
+      _selectedCircleDescription =
+          clean.length > 200 ? clean.substring(0, 200) : clean;
+      _circleSetupOpen = false;
+      _currentMode = 2;
+    });
+  }
+
+  Future<void> _recommendCircle() async {
+    if (_isRecommendingCircle) return;
+    setState(() => _isRecommendingCircle = true);
+    try {
+      final remoteConfig = FirebaseRemoteConfig.instance;
+      String apiKey = remoteConfig.getString('OpenAIAPIKey').trim();
+      if (apiKey.isEmpty) {
+        await remoteConfig
+            .fetchAndActivate()
+            .timeout(const Duration(seconds: 8));
+        apiKey = remoteConfig.getString('OpenAIAPIKey').trim();
+      }
+      if (apiKey.isEmpty) throw StateError('OpenAI key unavailable');
+
+      final response = await OpenAiConnectionPool.instance.client
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: <String, String>{
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode(<String, dynamic>{
+              'model': 'gpt-4o-mini',
+              'temperature': 1.2,
+              'response_format': <String, String>{'type': 'json_object'},
+              'max_tokens': 180,
+              'messages': <Map<String, String>>[
+                <String, String>{
+                  'role': 'system',
+                  'content':
+                      '''Create one unpredictable Korean circle name for member-to-member conversation.
+A circle is a company, workplace, professional team, project group, club, hobby group, association, or community.
+Return ONLY valid JSON: {"name":"..."}.
+- Vary widely across work, industry, business, hobbies, lifestyle, and local communities.
+- Make the name concrete enough to imply its members, vocabulary, atmosphere, and common concerns.
+- name: one natural Korean circle name, 30 characters or fewer.
+- Do not create a classroom, AI chat, language-learning group, or generic casual-chat group.''',
+                },
+                <String, String>{
+                  'role': 'user',
+                  'content': '지금 참여해 볼 무작위 서클 하나를 추천해 줘.',
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      if (response.statusCode != 200) {
+        throw http.ClientException('status=${response.statusCode}');
+      }
+      final envelope = jsonDecode(utf8.decode(response.bodyBytes));
+      final content = envelope['choices'][0]['message']['content'].toString();
+      final recommendation = jsonDecode(content) as Map<String, dynamic>;
+      final name = (recommendation['name'] ?? '').toString().trim();
+      if (name.isEmpty) {
+        throw const FormatException('empty recommendation');
+      }
+
+      if (!mounted) return;
+      _circleController.value = TextEditingValue(
+        text: name,
+        selection: TextSelection.collapsed(offset: name.length),
+      );
+    } catch (error) {
+      debugPrint('[CIRCLE-RECOMMEND] failed reason=${error.runtimeType}');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('서클을 추천하지 못했습니다. 다시 눌러 주세요.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isRecommendingCircle = false);
+    }
   }
 
 // ============================================================================
@@ -254,8 +356,8 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
                           _buildManualItem('Duo Connect', '초청인 대화',
                               '초청 링크를 통해 파트너와 함께 모국어로 대화하면, 실시간으로 통역해주는 글로벌 만능 통역 모드입니다.'),
                           const Divider(color: Colors.white12, height: 24),
-                          _buildManualItem('Free Talk', '자유로운 대화',
-                              '대화는 자유롭게 나누고, 영어 연습은 대화가 끝난 뒤 스터디룸에서 이어갈 수 있습니다.'),
+                          _buildManualItem('Circle Talk', '커뮤니티 대화',
+                              'AI 추천을 받거나 원하는 커뮤니티를 직접 입력하세요. AI가 그 서클의 구성원이 되어 분야의 말투, 관심사와 분위기에 맞춰 자연스럽게 대화합니다.'),
                           const Divider(color: Colors.white12, height: 24),
                           _buildManualItem('AI Roleplay', '상황극 대화',
                               '창의적이고 구체적인 역할과 상황을 무한히 추천받고, 현실감 넘치는 실전 비즈니스 및 일상 회화를 연습합니다.'),
@@ -387,7 +489,6 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   @override
   Widget build(BuildContext context) {
     if (_currentMode == 2) {
-      // Free Talk은 선택·안내 화면을 거치지 않고 바로 진입한다.
       return RoutineModeAnyone(
         key: const ValueKey('RoutineModeAnyone'),
         width: widget.width,
@@ -395,6 +496,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
         preparedAudioRecorder: _anyoneAudioRecorder,
         audioPreparation: _anyoneAudioReady,
         micInputAt: _anyoneMicInputAt,
+        circleDescription: _selectedCircleDescription ?? '편안한 일상 대화 커뮤니티',
       );
     }
     if (_currentMode == 4) {
@@ -419,6 +521,8 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
           width: widget.width,
           height: widget.height);
     }
+
+    if (_circleSetupOpen) return _buildCircleSetup();
 
     return Container(
       width: widget.width,
@@ -491,13 +595,160 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
             const SizedBox(height: 30),
             _buildMenuCard(1, "Duo Connect", "초청인 대화\n만능 통역", Icons.people,
                 const Color(0xFF2563EB)),
-            _buildMenuCard(2, "Free Talk", "대화는 자유롭게, 영어는\n스터디룸에서",
-                Icons.theater_comedy, const Color(0xFF9333EA)),
+            _buildMenuCard(2, "Circle Talk", "원하는 서클에서 구성원처럼\n자연스럽게 대화",
+                Icons.groups_rounded, const Color(0xFF9333EA)),
             _buildMenuCard(3, "AI Roleplay", "상황극 대화", Icons.smart_toy,
                 const Color(0xFF16A34A)),
             _buildMenuCard(4, "Step Expand", "점진적 문장 확장", Icons.trending_up,
                 const Color(0xFFEA580C)),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCircleSetup() {
+    return Container(
+      width: widget.width,
+      height: widget.height,
+      color: const Color(0xFF121212),
+      child: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  IconButton(
+                    onPressed: () => setState(() => _circleSetupOpen = false),
+                    icon: const Icon(Icons.arrow_back_ios_new,
+                        color: Colors.white, size: 22),
+                    tooltip: '대화 모드 선택으로 돌아가기',
+                  ),
+                  IconButton(
+                    onPressed: () => showCircleTalkGuide(context),
+                    icon: const Icon(Icons.menu_book_rounded,
+                        color: Color(0xFFB46CFF), size: 25),
+                    tooltip: 'Circle Talk 사용설명서',
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Circle Talk',
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                '서클을 추천받거나 직접 입력하세요.',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'AI는 정보를 설명하는 사람이 아니라, 선택한 서클의 한 구성원이 되어 그 분야의 분위기와 말투로 대화합니다.',
+                style:
+                    TextStyle(color: Colors.white60, fontSize: 13, height: 1.5),
+              ),
+              const SizedBox(height: 24),
+              const Center(
+                child: Icon(Icons.groups_rounded,
+                    color: Color(0xFFB46CFF), size: 64),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 120,
+                    height: 56,
+                    child: OutlinedButton(
+                      onPressed:
+                          _isRecommendingCircle ? null : _recommendCircle,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        side: const BorderSide(color: Color(0xFF9333EA)),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14)),
+                      ),
+                      child: _isRecommendingCircle
+                          ? const SizedBox(
+                              width: 19,
+                              height: 19,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Color(0xFFB46CFF),
+                              ),
+                            )
+                          : const Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.auto_awesome_rounded, size: 17),
+                                SizedBox(width: 6),
+                                Text('서클 추천',
+                                    style:
+                                        TextStyle(fontWeight: FontWeight.bold)),
+                              ],
+                            ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextField(
+                      controller: _circleController,
+                      maxLength: 200,
+                      maxLines: 1,
+                      style: const TextStyle(color: Colors.white),
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: _enterCircleTalk,
+                      decoration: InputDecoration(
+                        hintText: '직접 서클 입력',
+                        hintStyle: const TextStyle(color: Colors.white30),
+                        filled: true,
+                        fillColor: const Color(0xFF1E1E1E),
+                        counterText: '',
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 17),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(color: Colors.white24),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(
+                              color: Color(0xFF9333EA), width: 1.5),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: () => _enterCircleTalk(_circleController.text),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF9333EA),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 15),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
+                ),
+                icon: const Icon(Icons.forum_rounded),
+                label: const Text('이 서클에서 대화 시작',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
         ),
       ),
     );

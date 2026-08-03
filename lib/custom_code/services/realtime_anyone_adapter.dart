@@ -47,14 +47,17 @@ class RealtimeAnyoneAdapter {
       <String, StringBuffer>{};
   final Set<String> _completedTranscriptItemIds = <String>{};
 
-  Future<void> start({required String modeSessionId}) async {
+  Future<void> start({
+    required String modeSessionId,
+    String circleDescription = '편안한 일상 대화 커뮤니티',
+  }) async {
     _ensureEventSubscription();
     await session.connect(
       mode: 'anyone',
       modeSessionId: modeSessionId,
-      instructions:
-          'You are a friendly English conversation partner. Speak naturally, '
-          'keep replies concise, and wait for the user turn.',
+      instructions: 'Participate as a natural member of this circle: '
+          '"$circleDescription". Speak concise natural Korean from inside the '
+          'community, not as an outside explainer or assistant.',
     );
   }
 

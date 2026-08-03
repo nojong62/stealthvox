@@ -50,7 +50,8 @@ class RealtimeClientSecretPrewarm {
         logger?.call('[RT-PREWARM]', 'secret_ready mode=$mode');
       } catch (error) {
         // 실패해도 무해하다. 진입 시 기존 경로가 그대로 새로 발급한다.
-        logger?.call('[RT-PREWARM]', 'secret_failed reason=${error.runtimeType}');
+        logger?.call(
+            '[RT-PREWARM]', 'secret_failed reason=${error.runtimeType}');
       } finally {
         _inFlight.remove(mode);
       }
@@ -99,23 +100,33 @@ class RealtimeClientSecretService {
       await RealtimeAppCheck.initialize(
         debugProvider: debugAppCheck || kDebugMode,
       ).timeout(const Duration(seconds: 8));
-      logger?.call('[RT-APPCHECK]', 'success');
+      logger?.call(
+        '[RT-APPCHECK]',
+        'success provider=${RealtimeAppCheck.usingDebugProvider ? 'debug' : 'play_integrity'}',
+      );
     } catch (e) {
       logger?.call('[RT-APPCHECK]', 'failed reason=${e.runtimeType}');
       rethrow;
     }
-    final packageInfo = await PackageInfo.fromPlatform()
-        .timeout(const Duration(seconds: 5));
+    final packageInfo =
+        await PackageInfo.fromPlatform().timeout(const Duration(seconds: 5));
     final callable = _functions.httpsCallable('createRealtimeClientSecret');
     final Map<String, dynamic> data;
     try {
-      final result = await callable
-          .call(<String, dynamic>{
-            'mode': mode,
-            'appVersion': packageInfo.version,
-          })
-          .timeout(const Duration(seconds: 10));
+      final result = await callable.call(<String, dynamic>{
+        'mode': mode,
+        'appVersion': packageInfo.version,
+      }).timeout(const Duration(seconds: 10));
       data = Map<String, dynamic>.from(result.data as Map);
+    } on FirebaseFunctionsException catch (e) {
+      // Callable errors carry the exact backend gate that rejected the
+      // request (App Check, version gate, rate limit, or upstream OpenAI).
+      // Log only the public code/message; never include tokens or details.
+      logger?.call(
+        '[RT-SECRET]',
+        'failed code=${e.code} message=${e.message}',
+      );
+      rethrow;
     } catch (e) {
       logger?.call('[RT-SECRET]', 'failed reason=${e.runtimeType}');
       rethrow;

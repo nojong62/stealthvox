@@ -359,7 +359,7 @@ class _StoreMasterState extends State<StoreMaster> {
       case 'stealth_room':
         return '🕵️ Stealth Room';
       case 'free_talk':
-        return '💬 Free Talk';
+        return '💬 Circle Talk';
       case 'clone':
         return '🤖 AI Clone';
       case 'history':

@@ -7676,7 +7676,9 @@ RULES — follow exactly:
     final room = _historyString(data, 'room_name');
     if (room == 'Clone Mode') return 'clone';
     if (room == 'Roleplay Mode') return 'roleplay';
-    if (room == 'FreeTalk Mode' || room == 'Free Talk Mode') return 'free_talk';
+    if (room == 'FreeTalk Mode' ||
+        room == 'Free Talk Mode' ||
+        room.startsWith('Circle Talk')) return 'free_talk';
     if (room == 'Anyone') return 'free_talk';
     if (room == 'Duo Mode' || room == 'Duo Connect Mode') return 'duo';
     if (room == 'Step.Ex Mode' || room == 'Step Expand Mode') {
