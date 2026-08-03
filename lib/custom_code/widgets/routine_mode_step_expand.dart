@@ -381,6 +381,13 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     );
   }
 
+  /// 👂 되묻기 고정 문장. Realtime은 텍스트와 음성이 같은 출력에서 나오므로
+  /// [CLARIFY] 같은 태그를 쓰면 태그가 그대로 소리로 새어 나간다. 그래서
+  /// 태그 대신 이 문장 자체를 신호로 쓴다. 클라이언트는 이 문장이 오면
+  /// 유저 발화를 화면·히스토리 어디에도 적지 않고 다시 듣는다.
+  static const String kStepExpandAskBackLine =
+      '방금 하신 말씀을 제가 잘못 들은 것 같은데, 다시 말씀해 주시겠어요?';
+
   String _buildStepExpandRealtimeInstructions() => '''
 You are the Korean conversation partner for Step Expand practice.
 
@@ -391,6 +398,20 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
 - Do not translate, teach grammar, show English, narrate, or mention being an AI.
 - Do not invent facts, names, events, feelings, or relationships.
 - Avoid repeating a question already answered in this session.
+
+[ASK BACK INSTEAD OF GUESSING]
+What you receive is speech-recognition output, not typed text, so it can contain
+misrecognized words. You never hear the audio — judge the text itself.
+Do NOT answer, and do NOT repair it by guessing, when any of these holds:
+- The line does not hold together as Korean, or breaks off mid-thought.
+- A word sits so oddly that the meaning cannot be recovered from this session.
+- Making it make sense would require inventing a subject, object, or verb.
+In that case reply with EXACTLY this one line and nothing else:
+$kStepExpandAskBackLine
+Say nothing before or after it. Do not add a reaction or a question of your own.
+Being short is not by itself a reason to ask back — a clear short line is fine.
+Once the user says it again, continue from their new words as if the unclear
+line had never been said. Never build the conversation on a line you had to guess.
 ''';
 
   Future<bool> _connectStepExpandRealtime() async {
@@ -1960,10 +1981,10 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
     _log('[STT-ROUTE]',
         'selected=gpt-4o-transcribe every_turn=true len=${userKorean.length}');
     _runMeaningProbe(userKorean);
-    _log('🔀 [COMMIT-03]', '전사 확정 → Step Expand 누적 확장 파이프라인 호출');
-    await _processRelayPipeline(
+    _log('🔀 [COMMIT-03]', '전사 확정 → Step Expand Realtime 턴 호출');
+    await _processRealtimeStepExpandTurn(
       userKorean,
-      expectedPipelineGeneration: generation,
+      generation: generation,
     );
   }
 
@@ -2057,12 +2078,17 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
     _realtimeTurnActive = true;
     StreamSubscription<String>? transcriptSubscription;
     var aiIndex = -1;
+    var askedBack = false;
     try {
+      // 👂 유저 한국어를 아직 적지 않는다. AI가 되물으면 이 발화는 화면에도
+      //   히스토리에도 남으면 안 되기 때문이다. 응답 앞부분을 보고 되묻기가
+      //   아니라고 확정된 뒤에 유저 버블을 끼워 넣는다. 그동안 자리는
+      //   HOST_TEMP placeholder가 지킨다.
       setState(() {
         _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
         _localMessages.add(<String, dynamic>{
-          'role': 'HOST',
-          'target': userKorean,
+          'role': 'HOST_TEMP',
+          'target': '...',
           'original': '',
         });
         _localMessages.add(<String, dynamic>{
@@ -2090,6 +2116,7 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
             : 'Continue Step Expand now in natural Korean. Add one concise reaction and invite exactly one relevant detail.',
       );
       var streamedText = '';
+      var hostSettled = false;
       transcriptSubscription = turn.textStream.listen((delta) {
         if (delta.isEmpty ||
             !mounted ||
@@ -2098,6 +2125,23 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
           return;
         }
         streamedText += delta;
+        // 되묻기인지 아닌지 갈릴 만큼 앞부분이 쌓이면 유저 버블을 확정한다.
+        if (!hostSettled && _isAskBackDecidable(streamedText)) {
+          hostSettled = true;
+          if (!_isAskBackReply(streamedText)) {
+            setState(() {
+              final tempIndex =
+                  _localMessages.indexWhere((m) => m['role'] == 'HOST_TEMP');
+              if (tempIndex >= 0) {
+                _localMessages[tempIndex] = <String, dynamic>{
+                  'role': 'HOST',
+                  'target': userKorean,
+                  'original': '',
+                };
+              }
+            });
+          }
+        }
         if (aiIndex >= 0 && aiIndex < _localMessages.length) {
           setState(() => _localMessages[aiIndex]['target'] = streamedText);
         }
@@ -2114,7 +2158,39 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
           turnNumber != _turnCounter) {
         return;
       }
+      // 👂 되묻기 턴이면 유저 발화를 버린다. 화면에도 히스토리에도 남기지
+      //   않고 턴 번호도 되돌려, 유저가 다시 말한 것이 이 턴이 되게 한다.
+      //   되묻는 말 자체는 이미 음성으로 나갔고, 글자로도 남겨 둔다.
+      if (_isAskBackReply(aiKorean)) {
+        askedBack = true;
+        _turnCounter--;
+        setState(() {
+          _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+          final askIndex = _localMessages
+              .lastIndexWhere((m) => (m['role'] ?? '') == 'SYSTEM');
+          if (askIndex >= 0) {
+            _localMessages[askIndex]['target'] = aiKorean;
+            _localMessages[askIndex]['original'] = '';
+            _localMessages[askIndex]['clarify'] = true;
+          }
+        });
+        _scrollToBottom();
+        _log('[RT-ASK-BACK]', 'turn=$turnNumber 되묻기 → 유저 발화 폐기(화면/히스토리 미기록)');
+        return;
+      }
+
       setState(() {
+        // 응답이 짧아 스트리밍 중 판정 지점에 못 닿았을 수 있다. 되묻기가
+        // 아닌 것이 확정된 지금, 남아 있는 placeholder를 유저 발화로 굳힌다.
+        final tempIndex =
+            _localMessages.indexWhere((m) => m['role'] == 'HOST_TEMP');
+        if (tempIndex >= 0) {
+          _localMessages[tempIndex] = <String, dynamic>{
+            'role': 'HOST',
+            'target': userKorean,
+            'original': '',
+          };
+        }
         _localMessages[aiIndex]['target'] = aiKorean;
         _localMessages[aiIndex]['original'] = '';
         if (turnNumber >= MAX_TURNS) {
@@ -2138,9 +2214,13 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
           'turn=$turnNumber text_only=true voice=$_aiVoice realtime_audio_saved=false');
     } catch (error) {
       _log('[RT-PIPE-ERR]', 'turn=$turnNumber reason=${error.runtimeType}');
-      if (mounted && aiIndex >= 0 && aiIndex < _localMessages.length) {
+      if (mounted) {
         setState(() {
-          if ((_localMessages[aiIndex]['target'] ?? '').toString().isEmpty) {
+          // 확정되지 못한 유저 placeholder는 남기지 않는다.
+          _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+          if (aiIndex >= 0 &&
+              aiIndex < _localMessages.length &&
+              (_localMessages[aiIndex]['target'] ?? '').toString().isEmpty) {
             _localMessages.removeAt(aiIndex);
           }
         });
@@ -2148,14 +2228,32 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
     } finally {
       await transcriptSubscription?.cancel();
       _realtimeTurnActive = false;
+      // 되묻기 턴은 _turnCounter를 되돌렸으므로 turnNumber와 어긋난다.
+      // 그 경우에도 마이크는 반드시 다시 열어야 대화가 이어진다.
       if (mounted &&
           _isConversationActive &&
           !_isSessionComplete &&
           generation == _pipelineGeneration &&
-          turnNumber == _turnCounter) {
+          (askedBack || turnNumber == _turnCounter)) {
         _startUserListening();
       }
     }
+  }
+
+  /// 되묻기 판정용. Realtime 응답 앞부분만 보고 가른다.
+  /// 태그를 쓸 수 없어(음성으로 샌다) 고정 문장의 특징 어절로 판단한다.
+  static String _askBackProbe(String text) {
+    final compact = text.replaceAll(RegExp(r'\s'), '');
+    return compact.length > 24 ? compact.substring(0, 24) : compact;
+  }
+
+  /// 되묻기 여부를 가를 만큼 앞부분이 쌓였는지.
+  static bool _isAskBackDecidable(String streamedText) =>
+      _askBackProbe(streamedText).length >= 24 || _isAskBackReply(streamedText);
+
+  static bool _isAskBackReply(String text) {
+    final probe = _askBackProbe(text);
+    return probe.contains('잘못들') || probe.contains('잘못알아들');
   }
 
   // ====================================================================
