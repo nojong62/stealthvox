@@ -3091,6 +3091,211 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     );
   }
 
+  // 📦 [Box 17-B: 다른 표현 보기 - 말풍선 옆 버튼]
+  Widget _buildAltStyleBtn(String baseText) {
+    return IconButton(
+      padding: const EdgeInsets.all(8),
+      constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+      icon: const Icon(
+        Icons.translate_rounded,
+        color: Color(0xFF38BDF8),
+        size: 24,
+      ),
+      onPressed: () => _showAltStylePopup(baseText),
+      tooltip: "다른 표현 보기",
+    );
+  }
+
+  /// 로비의 aiStyle 설정에서 고르지 않은 나머지 스타일들.
+  /// 영어가 타겟일 때만 American/British가 존재한다(로비와 같은 규칙).
+  /// 순서는 Standard → American → British → Native로 고정한다.
+  List<String> _otherAiStyles() {
+    final targetLanguage = (_sessionTargetLang ?? 'English').trim();
+    const canonical = ['Standard', 'American', 'British', 'Native'];
+    final available =
+        targetLanguage == 'English' ? canonical : const ['Standard', 'Native'];
+    final current = FFAppState().aiStyle.trim();
+    return available.where((style) => style != current).toList();
+  }
+
+  String _altStyleBrief(String style) {
+    switch (style) {
+      case 'Standard':
+        return 'neutral, textbook-clear wording that any international speaker would understand';
+      case 'American':
+        return 'American vocabulary, idioms, and spelling as spoken in the US';
+      case 'British':
+        return 'British vocabulary, idioms, and spelling as spoken in the UK';
+      case 'Native':
+        return 'what a native speaker would actually say in relaxed everyday speech, with contractions and natural rhythm';
+      default:
+        return 'natural everyday wording';
+    }
+  }
+
+  /// 같은 뜻을 스타일만 바꿔 다시 쓴다. 뜻·화자 시점·존댓말 정도는 유지한다.
+  Future<Map<String, String>> _fetchAltStyleSentences(
+    String baseText,
+    List<String> styles,
+  ) async {
+    final source = baseText.trim();
+    if (_apiKey.isEmpty || source.isEmpty || styles.isEmpty) {
+      return <String, String>{};
+    }
+    final targetLanguage = (_sessionTargetLang ?? 'English').trim();
+    final guide = styles.map((s) => '- "$s": ${_altStyleBrief(s)}').join('\n');
+    try {
+      final response = await http
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: <String, String>{
+              'Authorization': 'Bearer $_apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode(<String, dynamic>{
+              'model': 'gpt-4o-mini',
+              'temperature': 0.4,
+              'max_tokens': 400,
+              'response_format': <String, String>{'type': 'json_object'},
+              'messages': <Map<String, String>>[
+                <String, String>{
+                  'role': 'system',
+                  'content': 'Rewrite ONE $targetLanguage sentence in different regional/register styles.\n'
+                      'Keep the meaning, the speaker viewpoint, and the politeness level identical. '
+                      'Only the wording and flavour change.\n'
+                      'Styles requested:\n$guide\n'
+                      'Return ONLY valid JSON whose keys are exactly the style names above '
+                      'and whose values are the rewritten sentences. No labels, no explanation.',
+                },
+                <String, String>{'role': 'user', 'content': source},
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) {
+        debugPrint('[ALT-STYLE] status=${response.statusCode}');
+        return <String, String>{};
+      }
+      final content = jsonDecode(utf8.decode(response.bodyBytes))['choices'][0]
+              ['message']['content']
+          .toString();
+      final parsed = jsonDecode(content) as Map<String, dynamic>;
+      final result = <String, String>{};
+      for (final style in styles) {
+        final line = parsed[style]?.toString().trim() ?? '';
+        if (line.isNotEmpty) result[style] = line;
+      }
+      return result;
+    } catch (e) {
+      debugPrint('[ALT-STYLE] failed: $e');
+      return <String, String>{};
+    }
+  }
+
+  // 📦 [Box 17-B-2: 다른 표현 보기 - 팝업]
+  //   팝업 아무 곳이나 누르면 닫힌다(유저 요청). 바깥을 눌러도 닫힌다.
+  void _showAltStylePopup(String baseText) {
+    _resumeHistoryFromUserAction();
+    final styles = _otherAiStyles();
+    if (styles.isEmpty) return;
+    final future = _fetchAltStyleSentences(baseText, styles);
+    showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => Navigator.of(dialogContext).pop(),
+        child: Dialog(
+          backgroundColor: const Color(0xFF1E1E1E),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          insetPadding:
+              const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+            child: FutureBuilder<Map<String, String>>(
+              future: future,
+              builder: (ctx, snapshot) {
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return const SizedBox(
+                    height: 90,
+                    child: Center(
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Color(0xFF38BDF8)),
+                    ),
+                  );
+                }
+                final data = snapshot.data ?? <String, String>{};
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '다른 표현 보기',
+                      style: TextStyle(
+                        color: Color(0xFF38BDF8),
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '현재 설정: ${FFAppState().aiStyle}',
+                      style:
+                          const TextStyle(color: Colors.white38, fontSize: 11),
+                    ),
+                    const SizedBox(height: 14),
+                    if (data.isEmpty)
+                      const Text(
+                        '표현을 불러오지 못했습니다. 다시 시도해 주세요.',
+                        style: TextStyle(color: Colors.white70, fontSize: 14),
+                      )
+                    else
+                      // 스타일 이름 한 줄, 다음 줄에 문장.
+                      ...styles.where(data.containsKey).map(
+                            (style) => Padding(
+                              padding: const EdgeInsets.only(bottom: 14),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    style,
+                                    style: const TextStyle(
+                                      color: Color(0xFFB46CFF),
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    data[style]!,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 15,
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                    const SizedBox(height: 2),
+                    const Center(
+                      child: Text(
+                        '탭하면 닫힙니다',
+                        style: TextStyle(color: Colors.white24, fontSize: 11),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   // 📦 [Box 17-A-2: 실전 튜터링 - 팝업 바텀시트]
   void _showTutoringPopup(String docId, String baseText) {
     _resumeHistoryFromUserAction();
@@ -4282,6 +4487,8 @@ RULES — follow exactly:
             ),
             const SizedBox(height: 4),
             _buildAppBtn(docs[index].id, translated),
+            const SizedBox(height: 4),
+            _buildAltStyleBtn(translated),
           ],
         );
 
