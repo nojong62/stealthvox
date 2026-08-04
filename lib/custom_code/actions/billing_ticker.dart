@@ -56,12 +56,24 @@ class BillingTicker with WidgetsBindingObserver {
 
   final ValueNotifier<int> remainingSecondsNotifier = ValueNotifier<int>(0);
 
-  /// 과금 상태 인디케이터 (0=paused, 2=과금 중)
+  /// 과금 상태 인디케이터 (0=차감 안 함, 2=차감 중)
   /// 1은 예전 quarter 배율 자리였다. 배율이 하나로 합쳐져 더 이상 쓰지 않는다.
   final ValueNotifier<int> billingState = ValueNotifier<int>(0);
 
+  /// 지금 이 순간 실제로 차감이 도는가.
+  /// [_onTick]의 차감 조건과 **같은 식**을 쓴다. 표시등이 따로 판단하면
+  /// 갈린다 — 예전에는 `!_paused`만 봐서, 잔여시간이 0이거나 아직 로딩되지
+  /// 않아 한 푼도 안 나가는 동안에도 초록불이 켜져 있었다.
+  bool get _isActuallyBilling =>
+      !_paused &&
+      FFAppState().remainingTimeLoaded &&
+      !FFAppState().hasConfirmedZeroTime;
+
   void _updateBillingState() {
-    billingState.value = _paused ? 0 : 2;
+    final next = _isActuallyBilling ? 2 : 0;
+    if (billingState.value == next) return;
+    billingState.value = next;
+    _addBillingLog('[BILLING] indicator=${next == 2 ? 'on' : 'off'}');
   }
 
   Timer? _tickTimer;
@@ -301,9 +313,10 @@ class BillingTicker with WidgetsBindingObserver {
   }
 
   void _onTick() {
-    if (_paused) return;
-    if (!FFAppState().remainingTimeLoaded) return;
-    if (FFAppState().hasConfirmedZeroTime) return;
+    // 잔여시간 로딩 완료·소진은 pause/resume과 무관하게 일어나므로 매 초
+    // 다시 판정한다. 아래 차감 조건과 같은 식이라 표시등이 어긋날 수 없다.
+    _updateBillingState();
+    if (!_isActuallyBilling) return;
 
     _fractionalDebt += _rate.multiplier;
     final whole = _fractionalDebt.floor();
@@ -348,6 +361,11 @@ class BillingTicker with WidgetsBindingObserver {
     _lifecyclePauseTimer?.cancel();
     _lifecyclePauseTimer = null;
     _tickTimer?.cancel();
+    _tickTimer = null;
+    // 타이머를 끄면 차감도 멈춘다. 표시등을 같이 끄지 않으면 초록불만
+    // 남는다. 지금은 호출하는 곳이 없지만 나중에 쓸 때 걸리지 않게 막아둔다.
+    _paused = true;
+    _updateBillingState();
     await flushNow();
   }
 
