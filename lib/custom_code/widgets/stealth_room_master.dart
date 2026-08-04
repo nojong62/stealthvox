@@ -255,24 +255,31 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
             },
             body: jsonEncode(<String, dynamic>{
               'model': 'gpt-4o-mini',
-              'temperature': 1.2,
+              // 흔한 모임 안에서만 갈리면 되므로 온도를 낮춘다. 1.2는
+              // 특이한 서클을 만들어 내던 원인이었다.
+              'temperature': 0.9,
               'response_format': <String, String>{'type': 'json_object'},
               'max_tokens': 180,
               'messages': <Map<String, String>>[
                 <String, String>{
                   'role': 'system',
                   'content':
-                      '''Create one unpredictable Korean circle name for member-to-member conversation.
-A circle is a company, workplace, professional team, project group, club, hobby group, association, or community.
+                      '''Create one ordinary, familiar Korean circle name for member-to-member conversation.
+A circle is a company, workplace, professional team, club, hobby group, or local community.
 Return ONLY valid JSON: {"name":"..."}.
-- Vary widely across work, industry, business, hobbies, lifestyle, and local communities.
-- Make the name concrete enough to imply its members, vocabulary, atmosphere, and common concerns.
-- name: one natural Korean circle name, 30 characters or fewer.
+- Pick the kind of group an ordinary person actually belongs to or walks into every week.
+  Good: 식품회사 직원들, 은행 직원과 손님, 동네 축구 동호회, 배드민턴 동호회,
+        회사 마케팅팀, 카페 직원과 단골손님, 아파트 주민 모임, 헬스장 회원들
+- Plain beats interesting. Choose the most common version of the group, not a clever or niche one.
+- Do NOT add a specialty, a twist, a rare industry, a specific project name, or a colorful modifier.
+  Bad: 우주덕후 모임, 심해어 연구회, 3D프린팅 창업팀, 비건 베이킹 스타트업
+- Keep it short and plain: one natural Korean circle name, 20 characters or fewer.
+- Vary which everyday group you pick, but never reach for novelty to do it.
 - Do not create a classroom, AI chat, language-learning group, or generic casual-chat group.''',
                 },
                 <String, String>{
                   'role': 'user',
-                  'content': '지금 참여해 볼 무작위 서클 하나를 추천해 줘.',
+                  'content': '지금 참여해 볼 만한 흔하고 평범한 서클 하나를 추천해 줘.',
                 },
               ],
             }),
