@@ -381,20 +381,28 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     );
   }
 
-  /// 👂 되묻기 고정 문장. Realtime은 텍스트와 음성이 같은 출력에서 나오므로
-  /// [CLARIFY] 같은 태그를 쓰면 태그가 그대로 소리로 새어 나간다. 그래서
-  /// 태그 대신 이 문장 자체를 신호로 쓴다. 클라이언트는 이 문장이 오면
-  /// 유저 발화를 화면·히스토리 어디에도 적지 않고 다시 듣는다.
+  /// 👂 되묻기 고정 문장(한국어). Realtime은 텍스트와 음성이 같은 출력에서
+  /// 나오므로 [CLARIFY] 같은 태그를 쓰면 태그가 그대로 소리로 새어 나간다.
+  /// 그래서 태그 대신 이 문장 자체를 신호로 쓴다.
+  ///
+  /// ⚠️ 원어가 한국어가 아니면 모델은 그 언어로 되묻고, 아래 [_isAskBackReply]
+  /// 의 한국어 어절 매칭이 빗나간다. 그때는 되묻는 말은 정상적으로 나가지만
+  /// 유저 발화가 화면·히스토리에 남는다. 다국어 STT를 붙일 때 같이 해결한다.
   static const String kStepExpandAskBackLine =
       '방금 하신 말씀을 제가 잘못 들은 것 같은데, 다시 말씀해 주시겠어요?';
 
-  String _buildStepExpandRealtimeInstructions() => '''
-You are the Korean conversation partner for Step Expand practice.
+  String _buildStepExpandRealtimeInstructions() {
+    final nativeLang = resolveNativeLanguageName(FFAppState().nativeLang);
+    final askBackLine = nativeLang == 'Korean'
+        ? kStepExpandAskBackLine
+        : 'the $nativeLang equivalent of "I think I misheard what you just said. Could you say it again?" — one plain spoken sentence, nothing else';
+    return '''
+You are the conversation partner for Step Expand practice.
 
-OUTPUT LANGUAGE: Natural spoken Korean only.
+${buildNativeOutputLanguagePolicy(FFAppState().nativeLang)}
 - Build the conversation one meaningful step at a time from facts the user has actually said.
-- Respond directly to the latest Korean line, then invite one small, relevant detail that can expand it.
-- Do not translate, teach grammar, show English, narrate, or mention being an AI.
+- Respond directly to the latest line, then invite one small, relevant detail that can expand it.
+- Do not translate, teach grammar, show another language, narrate, or mention being an AI.
 
 $kSpokenReplyLengthPolicy
 - Your reaction plus the one invitation must still fit in one or two short spoken sentences.
@@ -406,16 +414,17 @@ $kSpokenReplyLengthPolicy
 What you receive is speech-recognition output, not typed text, so it can contain
 misrecognized words. You never hear the audio — judge the text itself.
 Do NOT answer, and do NOT repair it by guessing, when any of these holds:
-- The line does not hold together as Korean, or breaks off mid-thought.
+- The line does not hold together as $nativeLang, or breaks off mid-thought.
 - A word sits so oddly that the meaning cannot be recovered from this session.
 - Making it make sense would require inventing a subject, object, or verb.
 In that case reply with EXACTLY this one line and nothing else:
-$kStepExpandAskBackLine
+$askBackLine
 Say nothing before or after it. Do not add a reaction or a question of your own.
 Being short is not by itself a reason to ask back — a clear short line is fine.
 Once the user says it again, continue from their new words as if the unclear
 line had never been said. Never build the conversation on a line you had to guess.
 ''';
+  }
 
   Future<bool> _connectStepExpandRealtime() async {
     final old = _realtimeAdapter;

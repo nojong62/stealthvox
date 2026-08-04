@@ -38,6 +38,24 @@ const String kSpokenReplyLengthPolicy =
 - Go longer ONLY when the user explicitly asks for detail (자세히, 더 설명해줘, 왜 그런지, 예를 들어).
   Then give exactly the depth they asked for and nothing beyond it.''';
 
+/// 로비에서 고른 원어 이름을 프롬프트용으로 정규화한다. 비어 있으면 Korean.
+String resolveNativeLanguageName(String nativeLang) {
+  final name = nativeLang.trim();
+  return name.isEmpty ? 'Korean' : name;
+}
+
+/// 3모드 대화방 공통 출력 언어 규칙.
+/// 대화방은 유저의 원어로만 말하고 적는다. 타겟 언어 연습은 History에서만
+/// 일어난다 — 이게 StealthVox의 성격이라, 외국 유저도 대화방에서는 자기
+/// 나라 말로 보고 듣는다.
+String buildNativeOutputLanguagePolicy(String nativeLang) {
+  final lang = resolveNativeLanguageName(nativeLang);
+  return '''OUTPUT LANGUAGE: Natural spoken $lang only.
+- The user's own language is $lang — they chose it in the lobby. Treat every incoming text as their actual $lang utterance.
+- Speak and write $lang only. Never switch languages, never translate, never place a second language beside it.
+- Do NOT use the user's target practice language in this room. Target-language practice happens later in History, never here.''';
+}
+
 String buildStepExpandFirstTurnSeedPolicy(String targetLanguage) {
   final language = targetLanguage.trim().isEmpty
       ? 'the requested target language'
