@@ -286,19 +286,44 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
             ),
           ],
         ),
-        title: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: BoxDecoration(
-            color: const Color(0xFF3B82F6).withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-                color: const Color(0xFF3B82F6).withValues(alpha: 0.5),
-                width: 1.5),
-          ),
-          child: const Text(
-            "Study Room",
-            style: TextStyle(
-                color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+        // 🏠 모드 필터를 푸는 방법이 "방금 누른 그 아이콘을 다시 누르기"뿐이라
+        //   유저가 전체 목록으로 돌아오지 못하는 일이 있었다. 제목 칩을 눌러도
+        //   전체로 돌아오게 하고, 필터가 걸린 동안은 되돌리기 아이콘을 붙여
+        //   누를 수 있다는 걸 알린다.
+        title: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: _selectedFilter == 'All' ? null : () => _switchFilter('All'),
+          child: Tooltip(
+            message: _selectedFilter == 'All' ? '전체 대화' : '전체 대화 보기',
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF3B82F6)
+                    .withValues(alpha: _selectedFilter == 'All' ? 0.15 : 0.3),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                    color: const Color(0xFF3B82F6).withValues(
+                        alpha: _selectedFilter == 'All' ? 0.5 : 0.9),
+                    width: 1.5),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_selectedFilter != 'All') ...[
+                    const Icon(Icons.arrow_back_rounded,
+                        color: Colors.white, size: 14),
+                    const SizedBox(width: 5),
+                  ],
+                  const Text(
+                    "Study Room",
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
         centerTitle: true,
