@@ -3096,10 +3096,12 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     return IconButton(
       padding: const EdgeInsets.all(8),
       constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+      // translate 아이콘은 글리프에 한자(文)가 들어 있어 쓰지 않는다.
+      // 글자 없는 교체 화살표로 "같은 뜻 다른 표현"을 나타낸다.
       icon: const Icon(
-        Icons.translate_rounded,
+        Icons.swap_horiz_rounded,
         color: Color(0xFF38BDF8),
-        size: 24,
+        size: 26,
       ),
       onPressed: () => _showAltStylePopup(baseText),
       tooltip: "다른 표현 보기",
@@ -3211,84 +3213,104 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           insetPadding:
               const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
-            child: FutureBuilder<Map<String, String>>(
-              future: future,
-              builder: (ctx, snapshot) {
-                if (snapshot.connectionState != ConnectionState.done) {
-                  return const SizedBox(
-                    height: 90,
-                    child: Center(
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Color(0xFF38BDF8)),
-                    ),
-                  );
-                }
-                final data = snapshot.data ?? <String, String>{};
-                return Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      '다른 표현 보기',
-                      style: TextStyle(
-                        color: Color(0xFF38BDF8),
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold,
+          // 문장이 길면 4개가 화면을 넘긴다. 높이를 화면의 75%로 묶고
+          // 안쪽을 스크롤시켜 마지막 스타일까지 볼 수 있게 한다.
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(dialogContext).size.height * 0.75,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+              child: FutureBuilder<Map<String, String>>(
+                future: future,
+                builder: (ctx, snapshot) {
+                  if (snapshot.connectionState != ConnectionState.done) {
+                    return const SizedBox(
+                      height: 90,
+                      child: Center(
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Color(0xFF38BDF8)),
                       ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '현재 설정: ${FFAppState().aiStyle}',
-                      style:
-                          const TextStyle(color: Colors.white38, fontSize: 11),
-                    ),
-                    const SizedBox(height: 14),
-                    if (data.isEmpty)
+                    );
+                  }
+                  final data = snapshot.data ?? <String, String>{};
+                  // 맨 위는 지금 설정된 스타일과 원래 문장, 그 아래로 나머지.
+                  final entries = <MapEntry<String, String>>[
+                    MapEntry(FFAppState().aiStyle, baseText.trim()),
+                    ...styles
+                        .where(data.containsKey)
+                        .map((s) => MapEntry(s, data[s]!)),
+                  ];
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                       const Text(
-                        '표현을 불러오지 못했습니다. 다시 시도해 주세요.',
-                        style: TextStyle(color: Colors.white70, fontSize: 14),
-                      )
-                    else
-                      // 스타일 이름 한 줄, 다음 줄에 문장.
-                      ...styles.where(data.containsKey).map(
-                            (style) => Padding(
-                              padding: const EdgeInsets.only(bottom: 14),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    style,
-                                    style: const TextStyle(
-                                      color: Color(0xFFB46CFF),
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold,
+                        '다른 표현 보기',
+                        style: TextStyle(
+                          color: Color(0xFF38BDF8),
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      if (data.isEmpty)
+                        const Text(
+                          '표현을 불러오지 못했습니다. 다시 시도해 주세요.',
+                          style: TextStyle(color: Colors.white70, fontSize: 14),
+                        )
+                      else
+                        Flexible(
+                          child: SingleChildScrollView(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              // 스타일 이름 한 줄, 다음 줄에 문장.
+                              children: entries
+                                  .map(
+                                    (e) => Padding(
+                                      padding:
+                                          const EdgeInsets.only(bottom: 14),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            e.key,
+                                            style: const TextStyle(
+                                              color: Color(0xFFB46CFF),
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 3),
+                                          Text(
+                                            e.value,
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 15,
+                                              height: 1.35,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
-                                  ),
-                                  const SizedBox(height: 3),
-                                  Text(
-                                    data[style]!,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 15,
-                                      height: 1.35,
-                                    ),
-                                  ),
-                                ],
-                              ),
+                                  )
+                                  .toList(),
                             ),
                           ),
-                    const SizedBox(height: 2),
-                    const Center(
-                      child: Text(
-                        '탭하면 닫힙니다',
-                        style: TextStyle(color: Colors.white24, fontSize: 11),
+                        ),
+                      const SizedBox(height: 2),
+                      const Center(
+                        child: Text(
+                          '탭하면 닫힙니다',
+                          style: TextStyle(color: Colors.white24, fontSize: 11),
+                        ),
                       ),
-                    ),
-                  ],
-                );
-              },
+                    ],
+                  );
+                },
+              ),
             ),
           ),
         ),
