@@ -615,13 +615,25 @@ Return ONLY valid JSON: {"name":"..."}.
   }
 
   Widget _buildCircleSetup() {
+    // ⌨️ 키보드가 올라온 만큼 높이를 줄인다.
+    //   예전에는 widget.height로 화면 전체 높이를 고정했다. 그러면 키보드가
+    //   떠도 스크롤 뷰포트가 키보드 뒤까지 그대로 이어져서, 입력란을 탭해도
+    //   Flutter가 "이미 보이는 위치"로 판단해 위로 밀어 올리지 않았다.
+    //   그래서 자판이 입력란을 덮은 채 글자가 안 보였다.
+    //   높이를 줄이면 뷰포트가 자판 위쪽으로 한정돼 자동 스크롤이 제대로 걸린다.
+    final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
+    final double? visibleHeight = widget.height == null
+        ? null
+        : (widget.height! - keyboardInset).clamp(0.0, widget.height!);
     return Container(
       width: widget.width,
-      height: widget.height,
+      height: visibleHeight,
       color: const Color(0xFF121212),
       child: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
+          // 자판이 떠 있을 때는 하단 여백을 조금 더 줘서 마지막 버튼까지
+          // 가려지지 않게 한다.
+          padding: EdgeInsets.fromLTRB(24, 12, 24, keyboardInset > 0 ? 16 : 32),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
