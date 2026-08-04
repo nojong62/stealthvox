@@ -54,6 +54,7 @@ import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/openai_transcribe_service.dart';
 import '/custom_code/services/realtime_anyone_adapter.dart';
 import '/custom_code/services/stealth_vox_realtime_session.dart';
+import 'first_utterance_context_judge.dart'; // 3모드 공통 응답 길이 규칙
 
 // ====================================================================
 // 🛡️ [v4] 시나리오 재진입 보존용 static 홀더 (App State 대체)
@@ -230,9 +231,11 @@ OUTPUT LANGUAGE: Natural spoken Korean only.
 - Speak only as "${_roleplayPartnerLabel.trim()}" would actually speak to "${_roleplayUserLabel.trim()}" inside this exact situation.
 - Stay fully in character and react directly to the user's latest Korean line.
 - Preserve the established situation, roles, relationship, and conversation memory.
-- Keep replies concise and conversational, normally one or two sentences.
 - Do not translate, teach, coach, narrate, or mention being an AI.
 - Do not output stage directions, labels, brackets, or explanations.
+
+$kSpokenReplyLengthPolicy
+- In character, this means answering like a real person in that situation would: briefly.
 ''';
 
   Future<bool> _connectRoleplayRealtime() async {

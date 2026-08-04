@@ -25,6 +25,19 @@ const String kAnyoneDeliberateReplyPolicy = '''[THINK TWICE BEFORE YOU SPEAK]
 - Your question must earn its place: ask about the one concrete detail you most want to know next — what happened, what they did, what the other person said back. One sharp, specific question. Never a vague or generic one.
 - Never show your drafts, your comparison, or any reasoning. Output only the final reply.''';
 
+/// 3모드(써클톡·시나리오톡·스탭익스팬드) 공통 응답 길이 규칙.
+/// 유저가 짧게 물으면 짧게 답한다. 가르치듯 길게 적는 것이 가장 흔한 실패라
+/// 한 곳에서 관리하고 세 모드의 Realtime 지시문이 모두 이 상수를 가져다 쓴다.
+const String kSpokenReplyLengthPolicy =
+    '''[MATCH THE USER'S LENGTH — TALK, DON'T TEACH]
+- Mirror the length of the user's turn. A short question gets a short answer: one sentence, sometimes just a few words.
+- A one-line question never earns a paragraph. Answer what was actually asked, then stop.
+- Do not add background, reasons, alternatives, tips, or caveats the user did not ask for.
+- Never lecture, list, enumerate, or walk through steps. This is spoken conversation, not a written guide.
+- Do not restate or summarize the user's words before answering.
+- Go longer ONLY when the user explicitly asks for detail (자세히, 더 설명해줘, 왜 그런지, 예를 들어).
+  Then give exactly the depth they asked for and nothing beyond it.''';
+
 String buildStepExpandFirstTurnSeedPolicy(String targetLanguage) {
   final language = targetLanguage.trim().isEmpty
       ? 'the requested target language'
