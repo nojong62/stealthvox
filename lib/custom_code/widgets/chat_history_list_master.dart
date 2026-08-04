@@ -122,7 +122,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
 
     final isKeepers = newFilter == 'Keepers';
     if (isKeepers && !wasKeepers) {
-      BillingTicker.instance.setRate(BillingRate.quarter);
+      BillingTicker.instance.setRate(BillingRate.full);
       BillingTicker.instance.resume();
       BillingTicker.instance.logMode('history_list');
       _resetIdleTimer();
@@ -1166,7 +1166,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
         },
       ),
     ).whenComplete(() {
-      BillingTicker.instance.setRate(BillingRate.quarter);
+      BillingTicker.instance.setRate(BillingRate.full);
       _keeperDialogSetState = null;
       if (_keeperIsRecording) {
         _keeperRecorder?.stop().catchError((_) => null);
@@ -1723,7 +1723,7 @@ RULES — follow exactly:
         },
       ),
     ).whenComplete(() {
-      BillingTicker.instance.setRate(BillingRate.quarter);
+      BillingTicker.instance.setRate(BillingRate.full);
       _casualDialogSetState = null;
       _isCasualPlaying = false;
       _casualAudioPlayer?.stop();

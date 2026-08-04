@@ -422,7 +422,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _remoteConfigFuture = _fetchRemoteConfig();
     _fetchRoomData();
     _initPermissions();
-    BillingTicker.instance.setRate(BillingRate.quarter);
+    BillingTicker.instance.setRate(BillingRate.full);
     BillingTicker.instance.resume();
     BillingTicker.instance.logMode('history');
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1970,7 +1970,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   void _exitShadowing() {
     _stepP3PreparationGeneration++;
     _deleteUserRecordings(); // 🆕 Practice 임시 녹음 파일 정리
-    BillingTicker.instance.setRate(BillingRate.quarter);
+    BillingTicker.instance.setRate(BillingRate.full);
     _stopTutorPlayback();
     _stopAutoVADRecording();
     _utteranceSafetyTimer?.cancel();
@@ -3344,7 +3344,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
       ),
     ).whenComplete(() {
       BillingTicker.instance
-          .setRate(BillingRate.quarter); // 튜터링 종료 → quarter 복귀
+          .setRate(BillingRate.full); // 튜터링 종료 (배율은 하나뿐이라 그대로)
       _dialogSetState = null;
       if (_appIsRecording || _appIsShadowRecording) {
         appAudioRecorder.stop().catchError((_) {});

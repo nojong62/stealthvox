@@ -24,9 +24,13 @@ Future billingTicker() async {}
 // BillingRate (과금 배율 enum)
 // =============================================================================
 
+/// 과금 배율은 하나뿐이다. 과금이 걸리는 모든 화면은 같은 요금으로 계산한다.
+///
+/// 예전에는 quarter(0.25x)가 있어 히스토리·Keepers를 4배 오래 쓸 수 있었다.
+/// 2026-08-04 정책 확인 결과 그런 할인은 존재하지 않으므로 제거했다.
+/// 배율을 다시 나눠야 하면 여기에 값을 추가하지 말고 먼저 정책을 확인할 것.
 enum BillingRate {
-  full, // 1.0x — 1초 사용 시 1초 차감 (실시간 AI 대화/훈련 모드)
-  quarter, // 0.25x — 1초 사용 시 0.25초 차감 (복습/히스토리 체류 계열, 4배 오래 사용 가능)
+  full, // 1.0x — 1초 사용 시 1초 차감
 }
 
 extension BillingRateMultiplier on BillingRate {
@@ -34,11 +38,6 @@ extension BillingRateMultiplier on BillingRate {
     switch (this) {
       case BillingRate.full:
         return 1.0;
-      // 복습/히스토리 체류 계열:
-      // 0.25 = 25% billing rate (StealthVox 서비스 정책 — 변경 금지).
-      // 사용자가 일반 대화보다 4배 오래 복습 가능.
-      case BillingRate.quarter:
-        return 0.25;
     }
   }
 }
@@ -57,21 +56,16 @@ class BillingTicker with WidgetsBindingObserver {
 
   final ValueNotifier<int> remainingSecondsNotifier = ValueNotifier<int>(0);
 
-  /// 과금 상태 인디케이터 (0=paused, 1=quarter, 2=full)
+  /// 과금 상태 인디케이터 (0=paused, 2=과금 중)
+  /// 1은 예전 quarter 배율 자리였다. 배율이 하나로 합쳐져 더 이상 쓰지 않는다.
   final ValueNotifier<int> billingState = ValueNotifier<int>(0);
 
   void _updateBillingState() {
-    if (_paused) {
-      billingState.value = 0;
-    } else if (_rate == BillingRate.full) {
-      billingState.value = 2;
-    } else {
-      billingState.value = 1;
-    }
+    billingState.value = _paused ? 0 : 2;
   }
 
   Timer? _tickTimer;
-  BillingRate _rate = BillingRate.quarter;
+  BillingRate _rate = BillingRate.full;
   bool _paused = true;
   bool _wasRunningBeforeBackground = false;
   bool _recoverableLifecyclePause = false;
@@ -174,8 +168,7 @@ class BillingTicker with WidgetsBindingObserver {
   /// 과금 배율 설정. 변경 시 로그 자동 기록.
   void setRate(BillingRate rate) {
     _rate = rate;
-    final rateStr = rate == BillingRate.full ? 'rate=full' : 'rate=quarter';
-    _addBillingLog('[BILLING] $rateStr');
+    _addBillingLog('[BILLING] rate=${rate.name}');
     _updateBillingState();
   }
 
