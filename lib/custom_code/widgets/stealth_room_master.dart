@@ -18,6 +18,9 @@ import '/custom_code/actions/index.dart';
 import 'dart:ui';
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math'; // 서클 분야 순서 셔플
+import 'package:shared_preferences/shared_preferences.dart'; // 분야 순회 커서
+import 'package:firebase_auth/firebase_auth.dart'; // 회원별 커서 분리
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:firebase_remote_config/firebase_remote_config.dart';
@@ -232,6 +235,41 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     });
   }
 
+  /// 🎯 서클 분야 120개.
+  ///   모델에게 "평범한 서클 하나 만들어"라고만 하면 카페·회사 같은 확률 높은
+  ///   답 몇 개로 수렴한다. 온도를 올리면 이번엔 기괴한 게 나온다. 그래서
+  ///   분야를 여기서 정해 던지고, 모델은 그 안에서만 이름을 짓게 한다.
+  ///   다양성은 이 목록이, 색깔은 분야의 구체성이 만든다.
+  static const List<String> _circleDomains = [
+    // ── 직장·업종 (60) ──
+    '무역회사', '물류센터', '택배 대리점', '제조 공장', '자동차 정비소', '건설 현장',
+    '인테리어 시공팀', '부동산 중개사무소', '회계사무소', '세무사사무소', '법무사사무소',
+    '보험 설계사', '은행 지점', '증권사 영업점', '광고 대행사', '디자인 스튜디오',
+    '인쇄소', '출판사', '방송 제작팀', '신문사 편집국', 'IT 스타트업', '소프트웨어 개발팀',
+    '고객센터 상담팀', '병원 간호팀', '약국', '치과', '한의원', '동물병원',
+    '물리치료실', '요양원', '어린이집', '유치원', '초등학교 교무실', '학원 강사실',
+    '대학 연구실', '도서관', '박물관', '미술관', '호텔 프런트', '여행사',
+    '항공사 지상직', '렌터카 영업소', '카페', '베이커리', '정육점', '반찬가게',
+    '청과상', '수산시장', '편의점', '대형마트', '백화점 매장', '옷가게',
+    '신발가게', '안경점', '꽃집', '문구점', '서점', '미용실', '네일숍', '세탁소',
+    // ── 동호회·취미 (35) ──
+    '축구 동호회', '풋살팀', '배드민턴 동호회', '탁구 동호회', '테니스 동호회',
+    '볼링 동호회', '야구 동호회', '농구 동호회', '등산 모임', '자전거 동호회',
+    '러닝 크루', '마라톤 모임', '수영 동호회', '골프 모임', '낚시 동호회',
+    '캠핑 동호회', '백패킹 모임', '클라이밍 동호회', '요가 모임', '필라테스 수강생',
+    '헬스장 회원', '복싱 체육관', '검도 도장', '태권도장', '독서 모임',
+    '사진 동호회', '영화 감상 모임', '보드게임 모임', '합창단', '직장인 밴드',
+    '통기타 모임', '댄스 동아리', '서예 교실', '도예 공방', '베이킹 클래스',
+    // ── 지역·생활 (25) ──
+    '아파트 입주민 모임', '아파트 부녀회', '반상회', '학부모회', '어린이집 학부모 모임',
+    '통학 도우미 모임', '반려견 산책 모임', '고양이 집사 모임', '텃밭 가꾸기 모임',
+    '봉사 동아리', '헌혈 동호회', '재활용 캠페인 모임', '동네 청소 모임', '육아 품앗이',
+    '신혼부부 모임', '자취생 모임', '기숙사 룸메이트들', '향우회', '동창회',
+    '사내 동호회', '등산 계모임', '계모임', '종교 소모임', '어르신 복지관', '청년 창업 모임',
+  ];
+
+  static const String _circleDomainCursorKey = 'circle_domain_cursor_';
+
   Future<void> _recommendCircle() async {
     if (_isRecommendingCircle) return;
     setState(() => _isRecommendingCircle = true);
@@ -246,6 +284,20 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       }
       if (apiKey.isEmpty) throw StateError('OpenAI key unavailable');
 
+      // 🔁 회원별 순차 배분. 무작위로 뽑으면 120개를 다 보기 전에 같은 분야가
+      //   계속 겹친다. 커서를 하나씩 밀어 한 바퀴 안에는 분야가 안 겹치게 하고,
+      //   두 바퀴째부터는 순서를 새로 섞는다.
+      final uid = FirebaseAuth.instance.currentUser?.uid ?? 'anonymous';
+      final prefs = await SharedPreferences.getInstance();
+      final cursorKey = '$_circleDomainCursorKey$uid';
+      final cursor = prefs.getInt(cursorKey) ?? 0;
+      final round = cursor ~/ _circleDomains.length;
+      final order = List<int>.generate(_circleDomains.length, (i) => i)
+        ..shuffle(Random(uid.hashCode ^ (round * 0x9E3779B9)));
+      final domain = _circleDomains[order[cursor % _circleDomains.length]];
+      await prefs.setInt(cursorKey, cursor + 1);
+      debugPrint('[CIRCLE-RECOMMEND] domain=$domain round=$round');
+
       final response = await OpenAiConnectionPool.instance.client
           .post(
             Uri.parse('https://api.openai.com/v1/chat/completions'),
@@ -255,31 +307,32 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
             },
             body: jsonEncode(<String, dynamic>{
               'model': 'gpt-4o-mini',
-              // 흔한 모임 안에서만 갈리면 되므로 온도를 낮춘다. 1.2는
-              // 특이한 서클을 만들어 내던 원인이었다.
-              'temperature': 0.9,
+              // 분야가 이미 고정돼 있어 이 온도는 "그 분야 안에서 어떤
+              // 서클이냐"만 흔든다. 분야 자체가 튀는 일은 없다.
+              'temperature': 1.0,
               'response_format': <String, String>{'type': 'json_object'},
               'max_tokens': 180,
               'messages': <Map<String, String>>[
                 <String, String>{
                   'role': 'system',
                   'content':
-                      '''Create one ordinary, familiar Korean circle name for member-to-member conversation.
-A circle is a company, workplace, professional team, club, hobby group, or local community.
+                      '''Name ONE real Korean circle that exists inside this field: "$domain".
+A circle is a workplace team, a shop and its regulars, a club, or a local community.
 Return ONLY valid JSON: {"name":"..."}.
-- Pick the kind of group an ordinary person actually belongs to or walks into every week.
-  Good: 식품회사 직원들, 은행 직원과 손님, 동네 축구 동호회, 배드민턴 동호회,
-        회사 마케팅팀, 카페 직원과 단골손님, 아파트 주민 모임, 헬스장 회원들
-- Plain beats interesting. Choose the most common version of the group, not a clever or niche one.
-- Do NOT add a specialty, a twist, a rare industry, a specific project name, or a colorful modifier.
-  Bad: 우주덕후 모임, 심해어 연구회, 3D프린팅 창업팀, 비건 베이킹 스타트업
-- Keep it short and plain: one natural Korean circle name, 20 characters or fewer.
-- Vary which everyday group you pick, but never reach for novelty to do it.
+- Stay inside "$domain". Do not drift to another field.
+- Give it the flavour of that field: who these people are and what they deal with.
+  "무역회사" → 무역회사 영업팀 / 수출 통관 담당자들 / 무역회사 신입사원들
+  "배드민턴 동호회" → 동네 배드민턴 동호회 / 배드민턴 동호회 초보반
+  "병원 간호팀" → 소아과 간호사들 / 응급실 야간 간호팀
+- It must be a group that really exists and that ordinary people join or visit.
+  Concrete is good. Weird is not.
+  Bad: 우주덕후 무역회사, 심해어 연구 간호팀, 세계정복 배드민턴부
+- One natural Korean name, 20 characters or fewer. No quotes, no explanation.
 - Do not create a classroom, AI chat, language-learning group, or generic casual-chat group.''',
                 },
                 <String, String>{
                   'role': 'user',
-                  'content': '지금 참여해 볼 만한 흔하고 평범한 서클 하나를 추천해 줘.',
+                  'content': '"$domain" 분야의 서클 하나를 추천해 줘.',
                 },
               ],
             }),
