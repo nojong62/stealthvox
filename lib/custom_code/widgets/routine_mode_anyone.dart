@@ -184,6 +184,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   bool _isStartingListening = false;
   bool _isPipelineRunning = false;
   bool _realtimeTurnActive = false;
+  bool _isAiOpenerPlaying = false; // AI가 서클 일원으로 먼저 거는 첫 마디
+  bool _openerDone = false; // 세션당 1회만
   bool _listeningReadyReported = false;
   bool _isDisposing = false; // 🧹 [DISPOSE-GUARD] dispose 진행 중 setState 차단
   Timer? _startupRetryTimer;
@@ -970,7 +972,84 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     // Realtime is receive-only in Anyone. Start its WebRTC negotiation while
     // Deepgram is listening so the first AI audio turn does not pay setup cost.
     unawaited(_ensureAnyoneRealtimeConnected());
+    // 🗣️ 유저가 빈 화면 앞에서 먼저 말을 꺼내야 하는 부담을 없앤다.
+    //   AI가 서클 일원으로 한마디 던지면 대화가 자연스럽게 시작된다.
+    //   오프너가 끝나면 그 안에서 마이크를 연다.
+    if (!_openerDone) {
+      _openerDone = true;
+      await _generateAndPlayAnyoneOpener();
+      return;
+    }
     await _startDeepgramListening();
+  }
+
+  /// AI가 서클의 일원으로 먼저 건네는 첫 마디.
+  /// 진행자·안내원이 아니라 이미 그 서클 안에 있는 사람으로 말한다.
+  Future<void> _generateAndPlayAnyoneOpener() async {
+    if (_isAiOpenerPlaying) return;
+    _isAiOpenerPlaying = true;
+    _realtimeTurnActive = true;
+    StreamSubscription<String>? transcriptSubscription;
+    var aiIndex = -1;
+    if (mounted) setState(() {});
+    try {
+      setState(() {
+        _localMessages.add(<String, dynamic>{
+          'role': 'SYSTEM',
+          'target': '',
+          'original': '',
+        });
+        aiIndex = _localMessages.length - 1;
+      });
+      final connected = await _ensureAnyoneRealtimeConnected();
+      if (!connected || !mounted) {
+        throw StateError('Realtime Circle Talk opener is unavailable.');
+      }
+      final circle = widget.circleDescription.trim();
+      final turn = _realtimeAdapter!.requestConversationTurn(
+        turnId: 'anyone-opener',
+        userText: '당신은 "${circle.isEmpty ? '편안한 일상 대화 커뮤니티' : circle}"의 일원입니다. '
+            '방금 같은 서클 사람을 만났다고 생각하고, 실제로 가장 먼저 건넬 한마디만 하세요.',
+        voice: _aiVoice,
+        instructions:
+            'Speak exactly one short, natural opening line as a fellow member of this circle. '
+            'React to something ordinary in the circle\'s daily life, or ask one small question a member would really ask. '
+            'Never act as a host, guide, or narrator. Do not welcome the user, explain the circle, or invite them to start talking.',
+      );
+      var streamedText = '';
+      transcriptSubscription = turn.textStream.listen((delta) {
+        if (delta.isEmpty || !mounted) return;
+        streamedText += delta;
+        if (aiIndex >= 0 && aiIndex < _localMessages.length) {
+          setState(() => _localMessages[aiIndex]['target'] = streamedText);
+        }
+      });
+      final outcome = await turn.done;
+      final aiText = (await turn.finalText).trim();
+      if (outcome != RealtimeTurnOutcome.completed || aiText.isEmpty) {
+        throw StateError('Realtime Circle Talk opener did not complete.');
+      }
+      if (!mounted) return;
+      setState(() => _localMessages[aiIndex]['target'] = aiText);
+      await _saveHistoryMessages(<Map<String, dynamic>>[
+        <String, dynamic>{
+          'role': 'SYSTEM',
+          'original_text': aiText,
+        },
+      ]);
+      _log('[RT-OPENER]', 'voice=$_aiVoice text_only_history=true');
+    } catch (error) {
+      _log('[RT-OPENER-ERR]', 'reason=${error.runtimeType}');
+      if (mounted && aiIndex >= 0 && aiIndex < _localMessages.length) {
+        setState(() => _localMessages.removeAt(aiIndex));
+      }
+    } finally {
+      await transcriptSubscription?.cancel();
+      _realtimeTurnActive = false;
+      _isAiOpenerPlaying = false;
+      // 오프너가 실패해도 마이크는 반드시 열어 대화가 죽지 않게 한다.
+      if (mounted) await _startDeepgramListening();
+    }
   }
 
   String _buildAnyoneRealtimeInstructions() {
@@ -1238,6 +1317,8 @@ $kSpokenReplyLengthPolicy
     _ttsAdapter.invalidateGenerationsBefore(_pipelineGeneration);
     _ttsAdapter.stopAll(reason: 'stop_everything');
     _realtimeTurnActive = false;
+    _isAiOpenerPlaying = false;
+    _openerDone = false; // 다시 입장하면 AI가 새로 말을 건다
     _realtimeConnectFuture = null;
     final realtime = _realtimeAdapter;
     _realtimeAdapter = null;
