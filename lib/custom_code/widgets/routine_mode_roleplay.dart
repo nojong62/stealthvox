@@ -4261,65 +4261,87 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
   }
 
   // 📋 [200개 기초 상황 — 카테고리 5종 × 40개] (v4 추가)
-  static const List<String> _baseSituations200 = [
-    // ── 공항_비행기_교통 (40개) ──
-    '기내 의학 환자 발생', '화장실 갇힘 사고', '산소마스크 작동됨', '여권 분실 발견함', '캐리어 파손 확인',
-    '위조지폐 의심됨',
-    '입국 거부 위기', '소지품 오인 압수', '결제 오류 지연', '비행기 놓치기 직전', '탑승권 분실함', '미아 발생 신고',
-    '승무원 부상 발생', '탑승 거부 당함', '버스 고장 멈춤', '잘못된 티켓 발권', '소매치기 발생', '짐 오인 교환됨',
-    '스크린도어 낌',
-    '비상 정지 발생', '지갑 두고 내림', '막차 취소 고립됨', '급격한 복통 발생', '부당 요금 요구', '난폭 운전 공포',
-    '계약 사기 의심',
-    '혼유 사고 발생', '차량 타이어 펑크', '차량 배터리 방전', '정산기 고장 멈춤', '예약 누락 발견', '선내 화재 경보',
-    '소지품 바다 빠짐', '배 놓치고 고립', '집단 식중독 증상', '가방 문 열려있음', '반납 처리 오류', '공중 멈춤 사고',
-    '접촉 사고 후 도주', '차량 출고 불가',
-    // ── 호텔_숙소_주거 (40개) ──
-    '예약 취소 당함', '방 내부 몰카 의심', '온수 안 나옴', '엘리베이터 갇힘', '익수 사고 발생', '알레르기 발생',
-    '취객 시비 걸림',
-    '운동 기구 부상', '화재 경보 대피', '기밀 문서 유출', '소지품 도난당함', '숙소 사진과 다름', '미끄러짐 부상',
-    '텐트 무너짐',
-    '멧돼지 출현함', '텐트 불길 번짐', '도어락 고장 갇힘', '동파로 누수 발생', '층간소음 시비', '맹견 진입 위험',
-    '계단 실족 부상',
-    '저혈압 실신함', '주인방 무단 침입', '룸메이트 절도', '상한 음식 서빙', '차량 파손 발견', '옥상 문 잠김 갇힘',
-    '독충에 물림',
-    '무단 주거 침입', '신분증 도용 의심', '난간 파손 위험', '피부 화상 입음', '독사 출현 비상', '가스 누출 의심',
-    '옷 세탁 중 분실',
-    '금고 안 열림', '지하 침수 발생', '택배 분실 항의', '유리창 깨짐', '샹들리에 추락',
-    // ── 식당_쇼핑_유흥 (40개) ──
-    '머리카락 나옴', '식중독 증상 발현', '기름 불판 화재', '주문 오인 대기', '결제 중복 처리', '커피 쏟아 화상',
-    '식판 엎음 사고',
-    '음식 도중 소진', '바가지 요금 청구', '지갑 소매치기', '명품 훼손 시비', '피부 부작용 발생', '몰래카메라 발견',
-    '카트 충돌 부상',
-    '거스름돈 사기', '여권 정보 오류', '물건 파손 변상', '지갑 분실 확인', '휴지 없이 갇힘', '유통기한 지남',
-    '취객 싸움 번짐',
-    '도난 경보 작동', '소매치기 추격', '에스컬레이터 낌', '낙상 사고 발생', '이물질 치아 파손', '배달 사고 누락',
-    '가스통 폭발 위기',
-    '인파 압사 위험', '주차 시비 폭행', '다이아 분실 오해', '신발 도난당함', '책장 쓰러짐 사고', '렌즈 파손 부상',
-    '잘못된 약 복용',
-    '교상 사고 발생', '가방 줄 걸려 파손', '칼날 부상 사고', '변질된 음식 판매', '침대 주저앉음',
-    // ── 공공장소_병원_비즈니스 (40개) ──
-    '의료진 공백 지연', '오진 가능성 확인', '호흡 곤란 환자', '수술 지연 항의', '잇몸 과다 출혈', '보이스피싱 의심',
-    '카드 먹통 됨',
-    '중요 택배 분실', '억울한 누명 씀', '긴급 출동 방해', '서류 조작 의심', '비자 발급 거부', '빔프로젝터 폭발',
-    '랜섬웨어 감염됨',
-    '정수기 누전 화재', '면접 서류 분실', '무단 침입 시위', '인감 도용 발견', '세금 폭탄 오류', '소송 상대 협박',
-    '노트북 도난당함',
-    '시험지 유출 비상', '화학 약품 누출', '등교 미아 발생', '셔틀버스 사고', '전시 작품 훼손', '유물 도난 경보',
-    '무대 조명 추락',
-    '영사기 화재 발생', '암표 사기 당함', '맹수 탈출 비상', '독초 오접촉 부상', '유기견 습격함', '열사병 환자 실신',
-    '범죄 의심 비명',
-    '부당해고 구제 신청', '부스 무너짐 사고', '생방송 방송 사고', '난입 소요 사태', '집단 감염 의심',
-    // ── 레저_관광_자연_기타 (40개) ──
-    '이식 조류 표류', '산소통 잔량 고갈', '보드 충돌 실신', '쥐가 나서 익수', '갑작스러운 불어남', '슬라이드 충돌',
-    '낚싯바늘 눈 찔림',
-    '실족 고립 조난', '저체온증 발생', '로프 끊어짐 위기', '충돌 골절 부상', '리프트 공중 멈춤', '타구 사고 부상',
-    '파울볼 안면 강타',
-    '심장마비 환자 발생', '바벨 낙하 깔림', '관절 탈구 부상', '레인 진입 기계 낌', '스케이트 날 부상', '롤러코스터 멈춤',
-    '실제 유령 공포', '오발 사고 발생', '카트 전복 사고', '나무 걸려 조난', '줄 풀림 오인 비상', '사막 식수 고갈',
-    '정글 독충 공격',
-    '낙석 낙하 갇힘', '막배 끊겨 고립', '통유리 균열 발견', '낙뢰 사고 발생', '인파 밀집 압사', '캠핑카 일산화탄소',
-    '고온 화상 입음',
-    '음향 장비 감전', '울타리 돌파 충돌', '말에서 추락 부상', '탁구대 무너짐', '당구큐대 시비', '코인기기 화재',
+  /// 회원별 시나리오 순회 커서 키. 뒤에 uid를 붙여 저장한다.
+  /// 기기 로컬(SharedPreferences)이라 앱을 지우거나 기기를 바꾸면 0부터
+  /// 다시 시작한다. 기기 간 이어보기가 필요해지면 Firestore로 옮긴다.
+  static const String _scenarioCursorPrefix = 'roleplay_scenario_cursor_';
+
+  // 🗣️ 일상 100개 — 평범한 하루에 실제로 일어나는 두 사람의 대화.
+  //   예전 목록은 200개가 전부 사고·응급 상황이라 "평범한 장면" 지시와
+  //   정면으로 부딪혔다. 그래서 절반을 일상으로 갈아 끼웠다.
+  static const List<String> _everydaySituations100 = [
+    // ── 카페_식당 (12개) ──
+    '카페에서 음료 고르기', '커피 쿠폰 사용 문의', '테이크아웃 포장 요청', '식당 메뉴 추천받기',
+    '알레르기 재료 확인', '자리 옮겨도 되는지', '식당 예약 변경 문의', '단체석 있는지 문의',
+    '남은 음식 포장 요청', '영업시간 확인하기', '주차 가능한지 묻기', '아이 의자 요청하기',
+    // ── 쇼핑 (12개) ──
+    '옷 사이즈 교환 문의', '탈의실 위치 묻기', '다른 색상 있는지', '세탁 방법 물어보기',
+    '선물 포장 요청', '영수증 재발행 요청', '할인 기간 문의', '재고 확인 요청',
+    '온라인 주문 매장 수령', '신발 발볼 상담', '화장품 색상 추천', '멤버십 적립 문의',
+    // ── 은행_관공서 (10개) ──
+    '은행 계좌 개설 문의', '체크카드 재발급 신청', '공과금 납부 방법', '주민등록등본 발급',
+    '환전 수수료 문의', '적금 상품 상담', '인터넷뱅킹 등록', '전입신고 절차 문의',
+    '여권 갱신 접수', '민원 서류 작성 도움',
+    // ── 병원_약국 (8개) ──
+    '감기 증상 진료 접수', '처방약 복용법 문의', '건강검진 예약하기', '진료 시간 변경 요청',
+    '치과 스케일링 예약', '약 부작용 문의', '진단서 발급 요청', '예방접종 상담',
+    // ── 회사_업무 (14개) ──
+    '회의 시간 조율하기', '점심 메뉴 정하기', '휴가 일정 상의', '자료 공유 요청',
+    '프린터 사용법 묻기', '신입에게 업무 안내', '외근 일정 보고', '회식 장소 정하기',
+    '택배 수령 부탁', '자리 비운 사이 메모', '커피 사다 달라 부탁', '퇴근 시간 확인',
+    '업무 인수인계 설명', '재택근무 신청 문의',
+    // ── 동호회_운동 (10개) ──
+    '헬스장 등록 상담', '운동 기구 사용법', 'PT 일정 조정', '축구 동호회 가입 문의',
+    '배드민턴 라켓 추천', '수영 강습 등록', '요가 수업 시간 문의', '러닝 코스 추천받기',
+    '동호회 회비 문의', '경기 일정 확인',
+    // ── 동네_생활 (12개) ──
+    '택배 반송 문의', '세탁소 얼룩 제거 문의', '미용실 머리 상담', '이사 견적 문의',
+    '인터넷 설치 예약', '에어컨 청소 예약', '반려동물 미용 예약', '자전거 수리 맡기기',
+    '열쇠 복사 요청', '옆집에 인사하기', '분리수거 방법 묻기', '아파트 주차 등록',
+    // ── 교통_여행 (10개) ──
+    '기차표 시간 변경', '버스 노선 물어보기', '택시에서 목적지 안내', '호텔 체크인 시간 문의',
+    '렌터카 반납 장소 확인', '지하철 환승 묻기', '항공권 좌석 지정', '수하물 규정 문의',
+    '관광지 가는 길 묻기', '숙소 조식 시간 문의',
+    // ── 교육_기타 (12개) ──
+    '학원 상담 받기', '수강 신청 문의', '도서관 대출 연장', '서점에서 책 찾기',
+    '아이 학교 상담', '온라인 강의 등록', '자격증 시험 접수', '악기 레슨 문의',
+    '사진관 증명사진 촬영', '안경 도수 상담', '휴대폰 요금제 변경', '중고 물건 거래하기',
+  ];
+
+  // 🚨 사고·문제 100개 — 기존 200개에서 현실적이고 말이 되는 것만 추렸다.
+  //   '실제 유령 공포', '맹수 탈출 비상', '사막 식수 고갈', '샹들리에 추락'처럼
+  //   회화 연습으로 쓰기 어려운 항목은 뺐다.
+  static const List<String> _troubleSituations100 = [
+    // ── 공항_교통 (20개) ──
+    '여권 분실 발견함', '캐리어 파손 확인', '입국 거부 위기', '결제 오류 지연',
+    '비행기 놓치기 직전', '탑승권 분실함', '탑승 거부 당함', '버스 고장 멈춤',
+    '잘못된 티켓 발권', '소매치기 발생', '짐 오인 교환됨', '지갑 두고 내림',
+    '막차 취소 고립됨', '부당 요금 요구', '혼유 사고 발생', '차량 타이어 펑크',
+    '차량 배터리 방전', '예약 누락 발견', '가방 문 열려있음', '접촉 사고 후 도주',
+    // ── 호텔_주거 (20개) ──
+    '예약 취소 당함', '온수 안 나옴', '엘리베이터 갇힘', '알레르기 발생',
+    '화재 경보 대피', '소지품 도난당함', '숙소 사진과 다름', '미끄러짐 부상',
+    '도어락 고장 갇힘', '동파로 누수 발생', '층간소음 시비', '계단 실족 부상',
+    '상한 음식 서빙', '차량 파손 발견', '가스 누출 의심', '옷 세탁 중 분실',
+    '지하 침수 발생', '택배 분실 항의', '유리창 깨짐', '금고 안 열림',
+    // ── 식당_쇼핑 (20개) ──
+    '머리카락 나옴', '식중독 증상 발현', '주문 오인 대기', '결제 중복 처리',
+    '커피 쏟아 화상', '음식 도중 소진', '바가지 요금 청구', '지갑 소매치기',
+    '거스름돈 사기', '물건 파손 변상', '지갑 분실 확인', '유통기한 지남',
+    '도난 경보 작동', '낙상 사고 발생', '배달 사고 누락', '주차 시비',
+    '신발 도난당함', '변질된 음식 판매', '카트 충돌 부상', '에스컬레이터 낌',
+    // ── 병원_공공_업무 (20개) ──
+    '의료진 공백 지연', '오진 가능성 확인', '수술 지연 항의', '잇몸 과다 출혈',
+    '보이스피싱 의심', '카드 먹통 됨', '중요 택배 분실', '억울한 누명 씀',
+    '서류 조작 의심', '비자 발급 거부', '랜섬웨어 감염됨', '면접 서류 분실',
+    '세금 폭탄 오류', '노트북 도난당함', '등교 미아 발생', '셔틀버스 사고',
+    '암표 사기 당함', '부당해고 구제 신청', '전시 작품 훼손', '집단 감염 의심',
+    // ── 레저_운동 (20개) ──
+    '산소통 잔량 고갈', '보드 충돌 실신', '실족 고립 조난', '저체온증 발생',
+    '충돌 골절 부상', '리프트 공중 멈춤', '타구 사고 부상', '심장마비 환자 발생',
+    '바벨 낙하 깔림', '관절 탈구 부상', '스케이트 날 부상', '롤러코스터 멈춤',
+    '카트 전복 사고', '낙석 낙하 갇힘', '막배 끊겨 고립', '낙뢰 사고 발생',
+    '캠핑카 일산화탄소', '고온 화상 입음', '말에서 추락 부상', '음향 장비 감전',
   ];
 
   // ==================================================================
@@ -4329,43 +4351,74 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
       String apiKey) async {
     final client = http.Client();
     try {
-      // 🎲 [v4 합본 풀] 200개 기초 상황 + 20개 장르 씨앗 → 변주 폭 확대
-      const genreSeeds = [
-        // 일상/긍정 (10개)
-        '카페에서 새 메뉴 추천받기', '해외여행 중 현지인과 길 묻기', '새 이웃에게 인사하며 동네 소개',
-        '옷가게에서 스타일 상담', '회사 점심시간 동료와 맛집 토크', '헬스장 첫날 트레이너와 상담',
-        '공항 체크인 카운터 대화', '호텔 체크인하며 방 업그레이드 요청', '동네 서점에서 책 추천 대화',
-        '반려동물 산책 중 견주끼리 대화',
-        // 드라마틱/갈등 (10개)
-        '불륜 발각, 부부 갈등', '직장 내 권력 다툼, 해고 위기', '형사 심문, 용의자 취조',
-        '재벌가 상속 분쟁', '비밀 연인 들킴', '가족 비밀 폭로', '첫사랑 재회, 감정 충돌',
-        '룸메이트 생활 규칙 갈등', '환불 요청하는데 매장 직원이 거부', '친구가 빌린 돈 안 갚음',
-      ];
-      final pool = [..._baseSituations200, ...genreSeeds];
-      final pick = pool[Random().nextInt(pool.length)];
-      // 200개 합본에 있으면 "그대로 쓸 구체 상황", 20개 씨앗이면 "확장할 장르 힌트"
-      final bool isConcrete = _baseSituations200.contains(pick);
+      // 🎲 [풀 구성] 일상 100 + 사고 100 = 200.
+      //   앞 100개는 평범한 하루, 뒤 100개는 사고·문제 대응이다.
+      //   인덱스로 갈리므로 프롬프트에서 어느 쪽인지 알 수 있다.
+      //   예전 20개 장르 씨앗은 절반이 극적인 사건(불륜 발각, 형사 심문 등)이라
+      //   "평범한 장면" 방침과 충돌해서 없앴다.
+      final pool = [..._everydaySituations100, ..._troubleSituations100];
 
-      final systemPrompt =
-          "You are a creative director for a high-immersion English roleplay app.\n"
-                  "Your job is to create ONE vivid scene inspired by real-life situations, Netflix series, Korean/American dramas, or movies.\n"
-                  "\n"
-                  "OUTPUT: Return ONLY valid JSON, no extra text.\n"
-                  "{\n"
-                  '  "situation": "핵심 상황 요약 (10-15 Korean chars, e.g. 카페에서 신메뉴 추천)",\n'
-                  '  "ai_role": "AI 캐릭터 (10자 이내, with clear personality, e.g. 친절한 바리스타)",\n'
-                  '  "user_role": "유저 캐릭터 (8자 이내, e.g. 단골 손님)"\n'
-                  "}\n"
-                  "\n"
-                  "RULES:\n"
-                  "- situation: vivid and specific. Do NOT name any show/character.\n"
-                  "- ai_role: give a personality that fits the genre (friendly, enthusiastic, suspicious, furious, etc).\n"
-                  "- user_role: the user naturally belongs in the scene.\n"
-                  "- For everyday/positive genres: warm, helpful, curious personalities.\n"
-                  "- For dramatic/conflict genres: intense, confrontational, emotional personalities.\n" +
-              (isConcrete
-                  ? '- USE THIS EXACT SITUATION as-is: "$pick". Do NOT invent a different one. Keep the situation field essentially equal to "$pick" (light wording polish within 10-15 Korean chars OK). Only assign a fitting ai_role and user_role.'
-                  : "- Genre hint this round: $pick");
+      // 🔁 [순차 배분] 예전에는 pool[Random().nextInt(...)]로 매번 새로 뽑았다.
+      //   복원추출이라 220개를 다 보기 훨씬 전에 같은 상황이 겹쳤다
+      //   (생일 문제: 20번 안에 중복이 날 확률이 이미 절반을 넘는다).
+      //   이제 회원마다 고정된 순서를 만들어 커서를 하나씩 밀어, 한 바퀴
+      //   220개를 다 돌기 전에는 같은 상황이 두 번 나오지 않는다.
+      final uid = FirebaseAuth.instance.currentUser?.uid ?? 'anonymous';
+      final prefs = await SharedPreferences.getInstance();
+      final cursorKey = '$_scenarioCursorPrefix$uid';
+      final cursor = prefs.getInt(cursorKey) ?? 0;
+      final round = cursor ~/ pool.length; // 몇 바퀴째인지
+      // 회원 uid와 바퀴 수로 순서를 섞는다. 회원마다 순서가 다르고,
+      // 두 바퀴째부터는 순서까지 새로 섞여 같은 흐름이 반복되지 않는다.
+      final order = List<int>.generate(pool.length, (i) => i)
+        ..shuffle(Random(uid.hashCode ^ (round * 0x9E3779B9)));
+      final pickIndex = order[cursor % pool.length];
+      final pick = pool[pickIndex];
+      await prefs.setInt(cursorKey, cursor + 1);
+      // 앞 100개가 일상, 뒤 100개가 사고. 어느 쪽이냐에 따라 지켜야 할
+      // 선이 달라서 프롬프트를 갈라 준다.
+      final bool isEveryday = pickIndex < _everydaySituations100.length;
+
+      final systemPrompt = "You are setting up ONE ordinary, everyday scene between TWO people for a spoken roleplay app.\n"
+              "\n"
+              "OUTPUT: Return ONLY valid JSON, no extra text.\n"
+              "{\n"
+              '  "situation": "핵심 상황 요약 (10-15 Korean chars, e.g. 카페에서 신메뉴 추천)",\n'
+              '  "ai_role": "AI가 맡을 사람 (10자 이내, e.g. 바리스타)",\n'
+              '  "user_role": "유저가 맡을 사람 (8자 이내, e.g. 단골 손님)"\n'
+              "}\n"
+              "\n"
+              "RULES:\n"
+              // 🙅 인물의 심리·성격은 넣지 않는다. 역할 이름만 준다.
+              //   성격을 미리 박아두면 대화가 그 성격을 연기하는 쪽으로
+              //   끌려가고, 유저는 평범하게 말하고 싶은데 상대가 과장된다.
+              "- ai_role and user_role: the ROLE ONLY — a plain job, position, or relationship noun.\n"
+              "  NO personality, NO emotion, NO attitude, NO adjectives.\n"
+              "  Good: 바리스타 / 은행 창구 직원 / 옆자리 동료 / 헬스장 트레이너 / 단골 손님\n"
+              "  Bad: 친절한 바리스타 / 화난 손님 / 의심 많은 형사 / 지친 동료\n"
+              "- The two roles must be people who would plausibly talk to each other in that scene.\n"
+              "- situation: concrete and ordinary. Something that happens to normal people on a normal day.\n"
+              "  Do NOT make it dramatic, high-stakes, or cinematic. Do NOT name any show or character.\n" +
+          // 🔀 [매번 약간 변형] 예전에는 "USE THIS EXACT SITUATION as-is"라
+          //   같은 상황이 글자 그대로 반복됐다. 이제 뼈대만 유지하고
+          //   이웃한 일상 장면으로 조금씩 옮겨 매번 다르게 만든다.
+          '- BASE SITUATION: "$pick"\n'
+              '  Keep its core activity, but shift it slightly into a NEARBY variant so it is not identical to the base.\n'
+              '  Move one or two of these: the place, the time of day, the errand at hand, or which of the two people needs something.\n' +
+          // 🔀 일상 절반과 사고 절반은 지켜야 할 선이 다르다. 한쪽 기준을
+          //   양쪽에 다 적용하면 "평범하게 하라"와 "여권을 잃어버렸다"가
+          //   서로 부딪혀 모델이 갈피를 못 잡는다.
+          (isEveryday
+              ? '  The result must still read as an ordinary day. Do NOT escalate it into an accident, a dispute, or an emergency.\n'
+                  '  Example — base "카페에서 음료 고르기": 테이크아웃 줄에서 고르기 / 마감 직전 남은 메뉴 묻기 / 쿠폰 쓰며 주문하기.\n'
+              : '  This one IS a problem the user has to handle. Keep the problem real, but play it as it would actually happen:\n'
+                  '  two ordinary people sorting it out at a counter or on the spot. No melodrama, no shouting, no life-or-death stakes.\n'
+                  '  Example — base "여권 분실 발견함": 체크인 줄에서 없는 걸 알아챔 / 분실물 창구에 문의 / 호텔 프런트에 확인 요청.\n') +
+          // 🔁 한 바퀴(200개)를 다 돈 회원에게는 변형 폭을 더 넓힌다.
+          (round == 0
+              ? ''
+              : '- REPEAT VISIT: this user has already been through every base situation $round time(s).'
+                  ' Push the variation further than usual — change the place and the reason, not just the wording.\n');
 
       final res = await client
           .post(
