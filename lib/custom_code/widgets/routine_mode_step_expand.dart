@@ -2092,25 +2092,13 @@ line had never been said. Never build the conversation on a line you had to gues
     var aiIndex = -1;
     var askedBack = false;
     try {
-      // 👂 유저 한국어를 아직 적지 않는다. AI가 되물으면 이 발화는 화면에도
-      //   히스토리에도 남으면 안 되기 때문이다. 응답 앞부분을 보고 되묻기가
-      //   아니라고 확정된 뒤에 유저 버블을 끼워 넣는다. 그동안 자리는
-      //   HOST_TEMP placeholder가 지킨다.
+      // 👂 말풍선을 미리 만들지 않는다. Realtime은 텍스트와 한국어 음성이
+      //   같이 나오므로, 첫 글자가 도착하는 순간 말풍선을 만들면 소리와
+      //   글자가 함께 뜬다. 빈 말풍선에 점 세 개를 띄워 둘 이유가 없다.
+      //   유저 한국어도 되묻기가 아님이 확정된 뒤에 AI 말풍선 위로 끼워 넣는다.
       setState(() {
         _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-        _localMessages.add(<String, dynamic>{
-          'role': 'HOST_TEMP',
-          'target': '...',
-          'original': '',
-        });
-        _localMessages.add(<String, dynamic>{
-          'role': 'SYSTEM',
-          'target': '',
-          'original': '',
-        });
-        aiIndex = _localMessages.length - 1;
       });
-      _scrollToBottom();
 
       final connected = await _ensureStepExpandRealtimeConnected();
       if (!connected ||
@@ -2137,26 +2125,31 @@ line had never been said. Never build the conversation on a line you had to gues
           return;
         }
         streamedText += delta;
-        // 되묻기인지 아닌지 갈릴 만큼 앞부분이 쌓이면 유저 버블을 확정한다.
-        if (!hostSettled && _isAskBackDecidable(streamedText)) {
-          hostSettled = true;
-          if (!_isAskBackReply(streamedText)) {
-            setState(() {
-              final tempIndex =
-                  _localMessages.indexWhere((m) => m['role'] == 'HOST_TEMP');
-              if (tempIndex >= 0) {
-                _localMessages[tempIndex] = <String, dynamic>{
-                  'role': 'HOST',
-                  'target': userKorean,
-                  'original': '',
-                };
-              }
+        setState(() {
+          // 첫 글자와 함께 AI 말풍선을 만든다(= 한국어 음성이 시작되는 시점).
+          if (aiIndex < 0) {
+            _localMessages.add(<String, dynamic>{
+              'role': 'SYSTEM',
+              'target': streamedText,
+              'original': '',
             });
+            aiIndex = _localMessages.length - 1;
+          } else {
+            _localMessages[aiIndex]['target'] = streamedText;
           }
-        }
-        if (aiIndex >= 0 && aiIndex < _localMessages.length) {
-          setState(() => _localMessages[aiIndex]['target'] = streamedText);
-        }
+          // 되묻기가 아님이 확정되면 유저 한국어를 AI 말풍선 위에 끼워 넣는다.
+          if (!hostSettled && _isAskBackDecidable(streamedText)) {
+            hostSettled = true;
+            if (!_isAskBackReply(streamedText)) {
+              _localMessages.insert(aiIndex, <String, dynamic>{
+                'role': 'HOST',
+                'target': userKorean,
+                'original': '',
+              });
+              aiIndex++;
+            }
+          }
+        });
       });
 
       final outcome = await turn.done;
@@ -2177,13 +2170,17 @@ line had never been said. Never build the conversation on a line you had to gues
         askedBack = true;
         _turnCounter--;
         setState(() {
-          _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-          final askIndex = _localMessages
-              .lastIndexWhere((m) => (m['role'] ?? '') == 'SYSTEM');
-          if (askIndex >= 0) {
-            _localMessages[askIndex]['target'] = aiKorean;
-            _localMessages[askIndex]['original'] = '';
-            _localMessages[askIndex]['clarify'] = true;
+          if (aiIndex >= 0 && aiIndex < _localMessages.length) {
+            _localMessages[aiIndex]['target'] = aiKorean;
+            _localMessages[aiIndex]['original'] = '';
+            _localMessages[aiIndex]['clarify'] = true;
+          } else {
+            _localMessages.add(<String, dynamic>{
+              'role': 'SYSTEM',
+              'target': aiKorean,
+              'original': '',
+              'clarify': true,
+            });
           }
         });
         _scrollToBottom();
@@ -2192,19 +2189,34 @@ line had never been said. Never build the conversation on a line you had to gues
       }
 
       setState(() {
-        // 응답이 짧아 스트리밍 중 판정 지점에 못 닿았을 수 있다. 되묻기가
-        // 아닌 것이 확정된 지금, 남아 있는 placeholder를 유저 발화로 굳힌다.
-        final tempIndex =
-            _localMessages.indexWhere((m) => m['role'] == 'HOST_TEMP');
-        if (tempIndex >= 0) {
-          _localMessages[tempIndex] = <String, dynamic>{
+        // 델타가 한 번도 안 왔거나(전체가 finalText로만 도착) 응답이 너무 짧아
+        // 스트리밍 중 판정에 못 닿은 경우, 여기서 두 말풍선을 마저 만든다.
+        if (aiIndex < 0) {
+          _localMessages.add(<String, dynamic>{
             'role': 'HOST',
             'target': userKorean,
             'original': '',
-          };
+          });
+          _localMessages.add(<String, dynamic>{
+            'role': 'SYSTEM',
+            'target': aiKorean,
+            'original': '',
+          });
+          aiIndex = _localMessages.length - 1;
+          hostSettled = true;
+        } else {
+          if (!hostSettled) {
+            _localMessages.insert(aiIndex, <String, dynamic>{
+              'role': 'HOST',
+              'target': userKorean,
+              'original': '',
+            });
+            aiIndex++;
+            hostSettled = true;
+          }
+          _localMessages[aiIndex]['target'] = aiKorean;
+          _localMessages[aiIndex]['original'] = '';
         }
-        _localMessages[aiIndex]['target'] = aiKorean;
-        _localMessages[aiIndex]['original'] = '';
         if (turnNumber >= MAX_TURNS) {
           _isSessionComplete = true;
           _debugResult = '🎉 $MAX_TURNS턴 완료!';
@@ -2260,8 +2272,15 @@ line had never been said. Never build the conversation on a line you had to gues
   }
 
   /// 되묻기 여부를 가를 만큼 앞부분이 쌓였는지.
-  static bool _isAskBackDecidable(String streamedText) =>
-      _askBackProbe(streamedText).length >= 24 || _isAskBackReply(streamedText);
+  /// 되묻기 고정 문장은 '방금 하신 말씀을…'으로 시작한다. 그래서 앞 두 글자가
+  /// '방금'이 아니면 그 순간 되묻기가 아님이 확정된다. 유저 문장을 기다리게
+  /// 하지 않고 바로 띄우려고 이 빠른 판정을 먼저 본다.
+  static bool _isAskBackDecidable(String streamedText) {
+    final probe = _askBackProbe(streamedText);
+    if (probe.length < 2) return false;
+    if (!probe.startsWith('방금')) return true;
+    return probe.length >= 12 || _isAskBackReply(streamedText);
+  }
 
   static bool _isAskBackReply(String text) {
     final probe = _askBackProbe(text);
