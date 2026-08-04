@@ -59,6 +59,15 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   bool _isRecommendingCircle = false;
   String? _selectedCircleDescription;
   final TextEditingController _circleController = TextEditingController();
+
+  // 🎬 Scenario Talk 설정 — 써클톡과 같은 앞 페이지 구조.
+  //   예전에는 방 안에 초록 박스로 상황을 띄웠는데, 들어가기 전에 정하고
+  //   확인하는 편이 자연스러워 앞 페이지로 뺐다.
+  bool _scenarioSetupOpen = false;
+  bool _isRecommendingScenario = false;
+  final TextEditingController _situationController = TextEditingController();
+  final TextEditingController _aiRoleController = TextEditingController();
+  final TextEditingController _userRoleController = TextEditingController();
   final AudioRecorder _anyoneAudioRecorder = AudioRecorder();
   late Future<void> _anyoneAudioReady;
   DateTime? _anyoneMicInputAt;
@@ -75,6 +84,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       setState(() {
         _currentMode = null;
         _circleSetupOpen = false;
+        _scenarioSetupOpen = false;
         _selectedCircleDescription = null;
       });
       unawaited(_refreshAnyonePrewarmAfterExit());
@@ -192,6 +202,9 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     WidgetsBinding.instance.removeObserver(this);
     StealthRoomMaster.exitCurrentMode = null;
     _circleController.dispose();
+    _situationController.dispose();
+    _aiRoleController.dispose();
+    _userRoleController.dispose();
     unawaited(DeepgramPrewarmSession.instance.discard(reason: 'room_dispose'));
     unawaited(_anyoneAudioRecorder.dispose());
     super.dispose();
@@ -208,6 +221,12 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   void _switchMode(int newMode) {
     if (newMode == 2) {
       setState(() => _circleSetupOpen = true);
+      return;
+    }
+    if (newMode == 3) {
+      setState(() => _scenarioSetupOpen = true);
+      // 비어 있으면 첫 제안을 미리 받아 둔다.
+      if (_situationController.text.trim().isEmpty) _recommendScenario();
       return;
     }
     if (_currentMode == newMode) return;
@@ -269,6 +288,60 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   ];
 
   static const String _circleDomainCursorKey = 'circle_domain_cursor_';
+
+  Future<void> _recommendScenario() async {
+    if (_isRecommendingScenario) return;
+    setState(() => _isRecommendingScenario = true);
+    try {
+      final remoteConfig = FirebaseRemoteConfig.instance;
+      String apiKey = remoteConfig.getString('OpenAIAPIKey').trim();
+      if (apiKey.isEmpty) {
+        await remoteConfig
+            .fetchAndActivate()
+            .timeout(const Duration(seconds: 8));
+        apiKey = remoteConfig.getString('OpenAIAPIKey').trim();
+      }
+      if (apiKey.isEmpty) throw StateError('OpenAI key unavailable');
+
+      final result = await RoleplayBrain.generateDramaticScenario(apiKey);
+      if (result == null) throw const FormatException('empty scenario');
+      if (!mounted) return;
+      setState(() {
+        _situationController.text = result['situation'] ?? '';
+        _aiRoleController.text = result['ai_role'] ?? '';
+        _userRoleController.text = result['user_role'] ?? '';
+      });
+    } catch (error) {
+      debugPrint('[SCENARIO-RECOMMEND] failed reason=${error.runtimeType}');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('상황을 추천하지 못했습니다. 다시 눌러 주세요.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isRecommendingScenario = false);
+    }
+  }
+
+  void _enterScenarioTalk() {
+    final situation = _situationController.text.trim();
+    final aiRole = _aiRoleController.text.trim();
+    final userRole = _userRoleController.text.trim();
+    if (situation.isEmpty || aiRole.isEmpty || userRole.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('상황과 두 역할을 모두 채워 주세요.')),
+      );
+      return;
+    }
+    // 방은 이 홀더를 읽어 시나리오를 세팅한다(재진입 보존과 같은 경로).
+    RoleplayScenarioStore.situation = situation;
+    RoleplayScenarioStore.aiRole = aiRole;
+    RoleplayScenarioStore.userRole = userRole;
+    setState(() {
+      _scenarioSetupOpen = false;
+      _currentMode = 3;
+    });
+  }
 
   Future<void> _recommendCircle() async {
     if (_isRecommendingCircle) return;
@@ -583,6 +656,7 @@ Return ONLY valid JSON: {"name":"..."}.
     }
 
     if (_circleSetupOpen) return _buildCircleSetup();
+    if (_scenarioSetupOpen) return _buildScenarioSetup();
 
     return Container(
       width: widget.width,
@@ -664,6 +738,137 @@ Return ONLY valid JSON: {"name":"..."}.
           ],
         ),
       ),
+    );
+  }
+
+  /// Scenario Talk 설정 페이지 — 써클톡과 같은 구조/여백/자판 처리.
+  Widget _buildScenarioSetup() {
+    final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
+    final double? visibleHeight = widget.height == null
+        ? null
+        : (widget.height! - keyboardInset).clamp(0.0, widget.height!);
+    const accent = Color(0xFF16A34A);
+    return Container(
+      width: widget.width,
+      height: visibleHeight,
+      color: const Color(0xFF121212),
+      child: SafeArea(
+        child: SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(24, 12, 24, keyboardInset > 0 ? 16 : 32),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  IconButton(
+                    onPressed: () => setState(() => _scenarioSetupOpen = false),
+                    icon: const Icon(Icons.arrow_back_ios_new,
+                        color: Colors.white, size: 22),
+                    tooltip: '대화 모드 선택으로 돌아가기',
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Scenario Talk Settings',
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                '추천을 받거나 원하는 상황과 역할을 직접 입력해도 됩니다.',
+                style: TextStyle(color: Colors.white60, fontSize: 14),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                height: 52,
+                child: OutlinedButton(
+                  onPressed:
+                      _isRecommendingScenario ? null : _recommendScenario,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: accent),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                  ),
+                  child: _isRecommendingScenario
+                      ? const SizedBox(
+                          width: 19,
+                          height: 19,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: accent,
+                          ),
+                        )
+                      : const Text('상황 추천',
+                          style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ),
+              const SizedBox(height: 12),
+              _scenarioField(_situationController, '상황', '예: 카페에서 음료 고르기'),
+              const SizedBox(height: 10),
+              _scenarioField(_aiRoleController, 'AI 역할', '예: 바리스타'),
+              const SizedBox(height: 10),
+              _scenarioField(_userRoleController, '내 역할', '예: 단골 손님'),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: _enterScenarioTalk,
+                style: FilledButton.styleFrom(
+                  backgroundColor: accent,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 15),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
+                ),
+                icon: const Icon(Icons.smart_toy_rounded),
+                label: const Text('상황 대화 시작',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _scenarioField(
+      TextEditingController controller, String label, String hint) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style: const TextStyle(color: Colors.white54, fontSize: 12)),
+        const SizedBox(height: 5),
+        TextField(
+          controller: controller,
+          maxLength: 60,
+          maxLines: 1,
+          style: const TextStyle(color: Colors.white),
+          textInputAction: TextInputAction.next,
+          decoration: InputDecoration(
+            hintText: hint,
+            hintStyle: const TextStyle(color: Colors.white30),
+            filled: true,
+            fillColor: const Color(0xFF1E1E1E),
+            counterText: '',
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: Colors.white24),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide:
+                  const BorderSide(color: Color(0xFF16A34A), width: 1.5),
+            ),
+          ),
+        ),
+      ],
     );
   }
 

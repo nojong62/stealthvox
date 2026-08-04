@@ -60,7 +60,7 @@ import 'first_utterance_context_judge.dart'; // 3모드 공통 응답 길이 규
 // 🛡️ [v4] 시나리오 재진입 보존용 static 홀더 (App State 대체)
 //   방을 나갔다 다시 들어와도 유저가 세팅/수정한 시나리오를 유지.
 // ====================================================================
-class _RoleplayScenarioStore {
+class RoleplayScenarioStore {
   static String situation = '';
   static String aiRole = '';
   static String userRole = '';
@@ -291,14 +291,14 @@ $kSpokenReplyLengthPolicy
   String get _roleplayPartnerLabel {
     final local = _scenarioAiRole.trim();
     if (local.isNotEmpty) return local;
-    final stored = _RoleplayScenarioStore.aiRole.trim();
+    final stored = RoleplayScenarioStore.aiRole.trim();
     return stored.isNotEmpty ? stored : 'the roleplay partner';
   }
 
   String get _roleplayUserLabel {
     final local = _scenarioUserRole.trim();
     if (local.isNotEmpty) return local;
-    final stored = _RoleplayScenarioStore.userRole.trim();
+    final stored = RoleplayScenarioStore.userRole.trim();
     return stored.isNotEmpty ? stored : 'the user';
   }
 
@@ -469,14 +469,14 @@ $kSpokenReplyLengthPolicy
           _openAiKey = FirebaseRemoteConfig.instance.getString('OpenAIAPIKey');
         });
         // 🛡️ [v4 가드] 세팅된 시나리오가 있으면 재진입 시 보존, 없으면 새 제안
-        if (_RoleplayScenarioStore.situation.isNotEmpty &&
-            _RoleplayScenarioStore.aiRole.isNotEmpty &&
-            _RoleplayScenarioStore.userRole.isNotEmpty) {
+        if (RoleplayScenarioStore.situation.isNotEmpty &&
+            RoleplayScenarioStore.aiRole.isNotEmpty &&
+            RoleplayScenarioStore.userRole.isNotEmpty) {
           setState(() {
-            _scenarioSituation = _RoleplayScenarioStore.situation;
-            _scenarioAiRole = _RoleplayScenarioStore.aiRole;
-            _scenarioUserRole = _RoleplayScenarioStore.userRole;
-            _scenarioKeyword = _RoleplayScenarioStore.situation;
+            _scenarioSituation = RoleplayScenarioStore.situation;
+            _scenarioAiRole = RoleplayScenarioStore.aiRole;
+            _scenarioUserRole = RoleplayScenarioStore.userRole;
+            _scenarioKeyword = RoleplayScenarioStore.situation;
           });
         } else {
           _generateScenario();
@@ -507,9 +507,9 @@ $kSpokenReplyLengthPolicy
           _isConversationActive = false;
         });
         // 🛡️ [v4] 재진입 보존용 홀더 동기화
-        _RoleplayScenarioStore.situation = _scenarioSituation;
-        _RoleplayScenarioStore.aiRole = _scenarioAiRole;
-        _RoleplayScenarioStore.userRole = _scenarioUserRole;
+        RoleplayScenarioStore.situation = _scenarioSituation;
+        RoleplayScenarioStore.aiRole = _scenarioAiRole;
+        RoleplayScenarioStore.userRole = _scenarioUserRole;
       }
     } catch (e) {
       print('❌ 시나리오 생성 에러: $e');
@@ -592,9 +592,9 @@ $kSpokenReplyLengthPolicy
                             _isConversationActive = false;
                           });
                           // 🛡️ [v4] 유저 수정값 보존용 홀더 동기화
-                          _RoleplayScenarioStore.situation = sit;
-                          _RoleplayScenarioStore.aiRole = ai;
-                          _RoleplayScenarioStore.userRole = user;
+                          RoleplayScenarioStore.situation = sit;
+                          RoleplayScenarioStore.aiRole = ai;
+                          RoleplayScenarioStore.userRole = user;
                         },
                         child: Container(
                           padding: const EdgeInsets.symmetric(vertical: 14),
@@ -2409,9 +2409,8 @@ $kSpokenReplyLengthPolicy
         child: SafeArea(
           child: Column(children: [
             _buildTopBar(),
-            if ((_isConversationActive || _localMessages.isNotEmpty) &&
-                _scenarioSituation.trim().isNotEmpty)
-              _buildScenarioTitle(),
+            // 🗑️ 상황 박스 제거. 상황은 입장 전 설정 페이지에서 확인하고
+            //   들어오므로 방 안에서 다시 띄울 필요가 없다.
             Expanded(
               child: Stack(
                 children: [
@@ -2431,32 +2430,8 @@ $kSpokenReplyLengthPolicy
     );
   }
 
-  Widget _buildScenarioTitle() {
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.fromLTRB(20, 2, 20, 8),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: const Color(0xFF16A34A).withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: const Color(0xFF16A34A).withValues(alpha: 0.28),
-        ),
-      ),
-      child: Text(
-        _scenarioSituation.trim(),
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        textAlign: TextAlign.center,
-        style: const TextStyle(
-          color: Color(0xFFDCFCE7),
-          fontSize: 16,
-          fontWeight: FontWeight.w700,
-          height: 1.25,
-        ),
-      ),
-    );
-  }
+  // 🗑️ _buildScenarioTitle(초록 상황 박스) 제거 — 상황은 입장 전
+  //    Scenario Talk Settings 페이지에서 정하고 확인한다.
 
   // ... (_buildTopBar, _buildTopControls, _buildChatList, _buildTextBlock, _buildControlArea는 기존과 동일하게 유지) ...
   Widget _buildTopBar() {
