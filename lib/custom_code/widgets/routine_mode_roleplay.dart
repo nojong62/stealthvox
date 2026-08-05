@@ -2323,15 +2323,13 @@ User role: ${_roleplayUserLabel.trim()}''',
                   color: Colors.white70),
             ),
           ),
-          const Spacer(),
-          // 📏 아이콘 넷과 잔여시간 칩이 한 줄에 들어간다. 폰 글꼴이 커지면
-          //   칩의 시간 글자가 함께 커져 줄 오른쪽으로 넘쳤다. 남는 폭 안에서
-          //   통째로 줄어들게 감싸, 어떤 배율에서도 시간이 잘리지 않게 한다.
-          Flexible(
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerRight,
-              child: Row(children: [
+          // 📏 아이콘 셋은 고정 크기로 두고, 폭이 모자랄 때는 잔여시간 칩만
+          //   줄어들게 한다. 예전에는 아이콘까지 한 FittedBox로 묶어서
+          //   시간 글자가 길어지면 아이콘이 통째로 작아졌다. (Circle Talk과 동일)
+          Expanded(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
                 IconButton(
                   icon: const Icon(Icons.menu_book_rounded,
                       color: Color(0xFF4ADE80), size: 23),
@@ -2351,6 +2349,9 @@ User role: ${_roleplayUserLabel.trim()}''',
                             : Colors.white70,
                     size: 22,
                   ),
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 40, minHeight: 40),
                   onPressed: () => setState(() {
                     _fontScale = _fontScale == 1.0
                         ? 1.3
@@ -2364,6 +2365,7 @@ User role: ${_roleplayUserLabel.trim()}''',
                     size: const Size(26, 26),
                     painter: _LangIconPainter(active: _showOriginal),
                   ),
+                  tooltip: _showOriginal ? '원문 숨기기' : '원문 함께 보기',
                   onPressed: () =>
                       setState(() => _showOriginal = !_showOriginal),
                   padding: EdgeInsets.zero,
@@ -2372,41 +2374,50 @@ User role: ${_roleplayUserLabel.trim()}''',
                 ),
                 const SizedBox(width: 4),
                 // [v3.6] 잔여시간 표시 + 길게 누르면 로그 (개발자용)
-                GestureDetector(
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                    decoration: BoxDecoration(
-                        color: const Color(0xFF2563EB),
-                        borderRadius: BorderRadius.circular(20)),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      ValueListenableBuilder<int>(
-                        valueListenable: BillingTicker.instance.billingState,
-                        builder: (_, s, __) => GestureDetector(
-                          onTap: s == 0 ? _resetIdleTimer : null,
-                          child: CustomPaint(
-                            size: const Size(14, 14),
-                            painter: BillingDotPainter(s),
+                Flexible(
+                  child: GestureDetector(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                          color: const Color(0xFF2563EB),
+                          borderRadius: BorderRadius.circular(20)),
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          ValueListenableBuilder<int>(
+                            valueListenable:
+                                BillingTicker.instance.billingState,
+                            builder: (_, s, __) => GestureDetector(
+                              onTap: s == 0 ? _resetIdleTimer : null,
+                              child: CustomPaint(
+                                size: const Size(14, 14),
+                                painter: BillingDotPainter(s),
+                              ),
+                            ),
                           ),
-                        ),
+                          const SizedBox(width: 6),
+                          Text(
+                            () {
+                              final int s = (FFAppState().remainingTime)
+                                  .toInt()
+                                  .clamp(0, 999999);
+                              final int h = s ~/ 3600;
+                              final int m = (s % 3600) ~/ 60;
+                              return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+                            }(),
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold),
+                          ),
+                        ]),
                       ),
-                      const SizedBox(width: 6),
-                      Text(
-                        () {
-                          final int s = (FFAppState().remainingTime)
-                              .toInt()
-                              .clamp(0, 999999);
-                          final int h = s ~/ 3600;
-                          final int m = (s % 3600) ~/ 60;
-                          return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
-                        }(),
-                        style: const TextStyle(
-                            color: Colors.white, fontWeight: FontWeight.bold),
-                      ),
-                    ]),
+                    ),
                   ),
                 ),
-              ]),
+              ],
             ),
           ),
         ],
