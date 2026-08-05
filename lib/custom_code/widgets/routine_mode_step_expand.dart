@@ -443,6 +443,22 @@ Every question continues the story the first turn opened. Do not hop sideways to
 an unrelated noun they happened to mention. Never ask again about something they
 have already answered.
 
+[NEVER REPEAT YOURSELF — YOU CAN SEE WHAT YOU ASKED]
+[CONVERSATION SO FAR] holds your own earlier questions. Read them first.
+Your new question must open ground none of them touched. Rewording an earlier
+question is repeating it: "어떤 활동을 해보고 싶으세요?" and "어떤 활동을 가장
+해보고 싶으세요?" are the same question. If the obvious next question is one you
+already asked, go somewhere else in their story.
+
+[MAKE THE SENTENCE RICHER, BUT STAY REAL]
+Each answer adds one more piece to their sentence, so aim your question at a
+piece the sentence does not have yet — who was there, when, where, what happened
+next, how it felt, why it mattered. Move to a different kind of piece each turn
+so the sentence gains variety instead of more of the same.
+But it must stay a question a real person would actually ask in conversation.
+Never reach for an unusual angle just to be different, and never ask something
+that would sound odd out loud.
+
 $kKoreanPoliteSpeechPolicy
 
 $kSpokenReplyLengthPolicy
@@ -1725,6 +1741,7 @@ line had never been said. Never build the conversation on a line you had to gues
       userText: _expandedNativeSentence.trim().isEmpty
           ? '(아직 자란 문장이 없습니다. 유저가 첫 문장을 말하도록 다시 물어보세요.)'
           : _expandedNativeSentence,
+      recentConversation: _recentKoreanConversationForValidation(),
     );
     if (!mounted ||
         !_isConversationActive ||
@@ -2340,6 +2357,7 @@ line had never been said. Never build the conversation on a line you had to gues
         // 만들지 않는다.
         instructions: '${_buildStepExpandSystemInstructions()}\n'
             '\n[THIS TURN]\n${_buildStepExpandTurnInstructions(turnNumber)}',
+        recentConversation: _recentKoreanConversationForValidation(),
         userText: _expandedNativeSentence,
       );
       if (aiKorean.isEmpty) {
@@ -6188,6 +6206,10 @@ Output: [GARBLED]
     required String apiKey,
     required String instructions,
     required String userText,
+    // 자란 문장만 주면 모델은 자기가 앞서 무엇을 물었는지 모른다. 그래서
+    // "어떤 활동을 해보고 싶으세요?"를 1턴과 3턴에 그대로 다시 물었다(실측).
+    // 지나간 대화를 같이 줘야 [ONE THREAD]와 반복 금지가 실제로 지켜진다.
+    String recentConversation = '',
   }) async {
     if (apiKey.isEmpty || userText.trim().isEmpty) return '';
     final client = http.Client();
@@ -6205,7 +6227,13 @@ Output: [GARBLED]
               'max_tokens': 160,
               'messages': [
                 {'role': 'system', 'content': instructions},
-                {'role': 'user', 'content': userText},
+                {
+                  'role': 'user',
+                  'content': recentConversation.trim().isEmpty
+                      ? userText
+                      : '[CONVERSATION SO FAR]\n${recentConversation.trim()}\n\n'
+                          '[THE SENTENCE THEY HAVE BUILT]\n$userText',
+                },
               ],
             }),
           )
@@ -7228,6 +7256,16 @@ contrast, sequence, or simultaneity.
 You may reshape the earlier part — change its ending, drop a repeated subject,
 reorder for flow — as long as its meaning survives untouched.
 Vary the link. Do not use the same connective twice in one sentence.
+
+[IT MUST SOUND LIKE A NATIVE SPEAKER SAID IT]
+Read the merged sentence back as if you were saying it out loud to a friend.
+A native speaker would never say it? Then it is wrong, no matter how correct the
+grammar looks. Variety never outranks naturalness — if the fitting connective is
+one you used before, use it again rather than reaching for an odd one.
+BAD  (grammatical but nobody talks like this):
+  ...자연을 느껴보고 싶으면서 나무가 많고 물이 흐르는 계곡도 보고 싶어.
+GOOD (what a person would actually say):
+  ...자연을 느껴보고 싶은데, 나무 많고 물 흐르는 계곡도 보고 싶어.
 
 BAD  (commas, reads as a list):
   요즘은 날씨가 뜨거운 것 같애, 지금 집에 있어요, 맛있는 수박을 먹고 싶어요.
