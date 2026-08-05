@@ -53,6 +53,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/openai_connection_pool.dart';
 import '/custom_code/services/openai_transcribe_service.dart';
+import '/custom_code/services/korean_turn_validator.dart';
 import '/custom_code/services/realtime_anyone_adapter.dart';
 import '/custom_code/services/stealth_vox_realtime_session.dart';
 import 'deepgram_confidence_probe.dart';
@@ -86,6 +87,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   bool _micPermissionReady = false; // 🆕 마이크 권한 준비 여부(첫 진입 race 방지)
   bool _initialSessionStarted = false; // 🆕 초기 자동 시작 1회성 보장
   bool _isInitialGuidePlaying = false; // 첫 안내 중 유저 발화 시 즉시 중단(barge-in)
+  // 🎤 [BARGE-IN] 지금 울리고 있는 안내 음성. 유저가 입을 열면 이걸 끊는다.
+  ChunkedTtsFetcher? _guideTtsFetcher;
   bool _isConversationActive = false;
   bool _isExiting = false; // 🔧 [EXIT-GUARD] PopScope+버튼 이중 종료 방지
   double _fontScale = 1.0;
@@ -103,8 +106,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   //    안내만 띄우고 2초 후 자동 페이드아웃. 마이크는 처음부터 열려 있어서
   //    안내가 떠 있는 동안 유저가 말하면 그 발화가 그대로 파이프라인에 들어간다.
   static const String _openingNudgeText = kStepExpandOpeningNudgeText;
-  bool _hasShownNudgeBubble = false; // 세션당 1회 노출 가드
-  bool _showNudgeBubble = false; // 현재 표시 여부(페이드 애니메이션 트리거)
+  bool _hasSpokenOpening = false; // 세션당 1회 발화 가드
   bool _listeningReadyReported = false;
 
   // ── Idle Timeout v2 ───────────────────────────────────────────────
@@ -400,22 +402,51 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
 You are the conversation partner for Step Expand practice.
 
 ${buildNativeOutputLanguagePolicy(FFAppState().nativeLang)}
-- Build the conversation one meaningful step at a time from facts the user has actually said.
-- Stay on the exact sentence-expansion thread created by the user's latest line.
-- Give at most one brief, specific acknowledgment, then ask exactly one core question
-  that helps the user add one missing concrete detail to that same sentence.
-- Choose only the single most useful detail axis: who, when, where, what happened,
-  how, feeling, or reason. Do not combine axes or ask a follow-up within the same reply.
-- Do not give explanations, advice, examples, summaries, lists, broad opinions, or
-  extra background. Do not introduce a new topic.
-- Do not translate, teach grammar, show another language, narrate, or mention being an AI.
+
+[WHAT THIS PRACTICE IS]
+The user is building ONE sentence, a small piece at a time. Whatever they answer
+gets folded into that same growing sentence. So your question is judged by one
+thing only: does their short answer attach smoothly to the sentence so far?
+What you receive is that whole sentence as it stands, not just their last words.
+
+[GUESS FIRST, THEN ASK]
+Before asking, silently guess what this person is feeling underneath what they
+said, and what they would want to say next. Then open that door for them.
+You are not collecting facts — you are giving them room for the thing they
+already half want to say.
+This guessing is about their feeling and where they are heading. It is never
+about filling in a word you could not make out — for that, see [ASK BACK] below.
+
+[NEVER INTERROGATE]
+- Do not work through who / when / where / why like a checklist.
+- Do not grab the most concrete noun and ask "what kind of X?" — that is
+  keyword-echoing, and it makes the user feel questioned rather than heard.
+- Go one level under the surface words: the reason, the mood, the memory, or
+  what it meant to them.
+
+[MAKE IT EASY TO ANSWER]
+- Someone quiet or still gathering their thoughts must be able to answer in one
+  to three words.
+- No yes/no questions. No pressure wording like "Why did you do that?".
+- Read how the answer came out. If it was quick and detailed, go deeper into the
+  part they seemed most alive about. If it was short or vague, do not push —
+  offer a smaller, easier angle instead.
+
+[ONE THREAD]
+Every question continues the story the first turn opened. Do not hop sideways to
+an unrelated noun they happened to mention. Never ask again about something they
+have already answered.
 
 $kSpokenReplyLengthPolicy
-- The whole reply must be one or two short spoken sentences. Prefer one concise
-  acknowledgment sentence plus one concise question sentence. Never elaborate.
-
+- Always two parts, in this order and nothing more:
+  1. One short, genuine response to what they just said — react to the content
+     itself, the way a friend would. Not praise, not a summary, not a repeat of
+     their words.
+  2. One question that opens the next piece of their sentence.
+- Keep both short. Never elaborate, never stack a second question.
+- Do not explain, teach grammar, advise, summarize, list, translate, show another
+  language, narrate, or mention being an AI.
 - Do not invent facts, names, events, feelings, or relationships.
-- Avoid repeating a question already answered in this session.
 
 [ASK BACK INSTEAD OF GUESSING]
 What you receive is speech-recognition output, not typed text, so it can contain
@@ -583,10 +614,6 @@ line had never been said. Never build the conversation on a line you had to gues
   // 사라지므로, 다음 턴 합치기에 같이 넘겨 따라잡게 한다.
   final List<String> _pendingNativeParts = [];
 
-  // 진행 중인 합치기 반영. 마이크 재개를 막지 않으려고 턴 흐름 밖에서 돌고,
-  // 다음 턴이 시작 전에 이것만 기다린다.
-  Future<void>? _expansionSettle;
-
   // 🌱 [AUTO-FLOW] 5턴 완료 후 자동 표시 상태
   String _expandedFinalSentence = ""; // 완성된 확장 문장 (별도 표시)
   bool _showExpandedFinalCard = false; // 확장 문장 카드 표시 여부
@@ -745,79 +772,43 @@ line had never been said. Never build the conversation on a line you had to gues
     _resetIdleTimer();
     _isConversationActive = true;
 
-    // Circle Talk과 같은 순서로 receive-only WebRTC를 먼저 협상한다.
-    // 첫 발화가 끝난 뒤 Deepgram 녹음 세션을 닫는 시점에 Realtime 연결까지
-    // 새로 만들면 Android 오디오 라우팅 전환과 겹쳐 첫 응답이 유실될 수 있다.
-    // 청취 중 미리 연결해 두면 첫 턴은 준비된 데이터 채널만 사용한다.
-    unawaited(_ensureStepExpandRealtimeConnected());
-
     _ttsQueueManager.setUserTurn(false);
     _ttsQueueManager.setAiPaused(false);
 
-    // 🆕 [Anyone 형태 진입 안내] 채팅 말풍선/TTS 없이, 화면 중앙 사각형 텍스트로
-    //    안내만 띄우고 2초 후 자동 페이드아웃. (오프닝 멘트 TTS 재생 제거)
-    // StealthRoom 진입 오버레이가 있으면 안내는 화면 전환 구간에서 표시한다.
-    if (widget.onListeningReady == null) _showOpeningNudgeOnce();
-
-    // 마이크부터 열어 첫 발화를 즉시 받는다. 안내가 떠 있는 동안 유저가 말하면
-    // 그 발화가 그대로 파이프라인에 들어가 글자 + 소리로 실행된다.
+    // 🗣️ 첫 마디는 AI가 말로 건넨다. 예전에는 화면 중앙에 글씨만 2초 띄우고
+    //    아무 말도 하지 않아, 대화가 시작됐다는 신호가 약했다.
+    //    말이 끝나기를 기다리지 않고 마이크를 같이 연다. 유저가 먼저 입을
+    //    열면 그 발화가 곧 시작이다. 스피커로 나간 AI 목소리는 녹음쪽
+    //    echoCancel이 걷어내고, 남은 잔향은 _isNoiseTranscript가 거른다.
+    unawaited(_speakOpeningOnce());
     await _startUserListening();
   }
 
-  // ====================================================================
-  // 📦 [Anyone 형태 진입 안내] — 소리 대신 화면 중앙 사각형 텍스트, 2초 후 소멸
-  // ====================================================================
-  void _showOpeningNudgeOnce() {
-    if (_hasShownNudgeBubble || !mounted) return;
-    _hasShownNudgeBubble = true;
-    setState(() => _showNudgeBubble = true);
-    Timer(const Duration(milliseconds: 2000), () {
-      if (mounted) setState(() => _showNudgeBubble = false);
-    });
-  }
-
-  // 🆕 [Anyone 형태] 화면 중앙 둥근 사각형 안내 — 색 채움 없이 테두리만 은은히 빛남.
-  //    마이크/재생과 충돌 없는 순수 텍스트라 타이밍 로직(대기/취소) 불필요.
-  Widget _buildNudgeBubble() {
-    return IgnorePointer(
-      child: Align(
-        alignment: Alignment.center,
-        child: AnimatedOpacity(
-          opacity: _showNudgeBubble ? 1.0 : 0.0,
-          duration: const Duration(milliseconds: 350),
-          curve: Curves.easeOut,
-          child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 36),
-            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1E1E22).withOpacity(0.92),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: const Color(0xFF7F77DD).withOpacity(0.55),
-                width: 1.4,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFF2DD4BF).withOpacity(0.25),
-                  blurRadius: 20,
-                  spreadRadius: 1,
-                ),
-              ],
-            ),
-            child: const Text(
-              _openingNudgeText,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 15,
-                height: 1.5,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-        ),
-      ),
+  /// 진입 첫 마디를 말풍선 + 음성으로 한 번만 내보낸다.
+  /// 문구는 gpt-4o-mini가 매번 새로 만들고, 실패하면 고정 문구로 떨어진다.
+  Future<void> _speakOpeningOnce() async {
+    if (_hasSpokenOpening || !mounted) return;
+    _hasSpokenOpening = true;
+    final opening = await StepExpandBrain.generateKoreanOpening(
+      apiKey: _openAiKey,
+      fallback: _openingNudgeText,
     );
+    // 문구를 기다리는 동안 유저가 먼저 입을 열었으면 첫 마디는 접는다.
+    if (!mounted || !_isConversationActive || _turnCounter != 0) return;
+    if (_pendingTranscript.isNotEmpty) {
+      _log('🗣️ [OPENING-SKIP]', '유저가 먼저 말함 → 첫 마디 생략');
+      return;
+    }
+    setState(() {
+      _localMessages.add(<String, dynamic>{
+        'role': 'SYSTEM',
+        'target': opening,
+        'original': '',
+      });
+    });
+    _scrollToBottom();
+    _log('🗣️ [OPENING]', 'model=gpt-4o-mini len=${opening.length}');
+    await _speakLiveKorean(opening);
   }
 
   // ====================================================================
@@ -973,8 +964,7 @@ line had never been said. Never build the conversation on a line you had to gues
         _turnCounter = 0;
         _sessionDocId = null;
         _myHistoryRef = null; // 🔧 [히스토리] 새 방 생성 준비
-        _hasShownNudgeBubble = false; // 🆕 새 주제 진입 시 안내 다시 노출
-        _showNudgeBubble = false;
+        _hasSpokenOpening = false; // 새 주제 진입 시 첫 마디 다시 건넨다
         _isSessionComplete = false;
         _isPolishing = false;
         _polishedSentence = "";
@@ -1011,8 +1001,7 @@ line had never been said. Never build the conversation on a line you had to gues
         _turnCounter = 0;
         _sessionDocId = null;
         _myHistoryRef = null; // 🔧 [히스토리] 새 방 생성 준비
-        _hasShownNudgeBubble = false; // 🆕 새 문장 진입 시 안내 다시 노출
-        _showNudgeBubble = false;
+        _hasSpokenOpening = false; // 새 문장 진입 시 첫 마디 다시 건넨다
         _isSessionComplete = false;
         _isPolishing = false;
         _polishedSentence = "";
@@ -1620,6 +1609,19 @@ line had never been said. Never build the conversation on a line you had to gues
     });
   }
 
+  String _recentKoreanConversationForValidation() {
+    final turns = _localMessages.where((message) {
+      final role = message['role']?.toString() ?? '';
+      final text = message['target']?.toString().trim() ?? '';
+      return (role == 'HOST' || role == 'SYSTEM') && text.isNotEmpty;
+    }).toList();
+    final recent = turns.length > 10 ? turns.sublist(turns.length - 10) : turns;
+    return recent.map((message) {
+      final speaker = message['role'] == 'HOST' ? 'USER' : 'AI';
+      return '$speaker: ${message['target']}';
+    }).join('\n');
+  }
+
   // 현재 유저 확장 문장을 화면 상단에 고정해 처음부터 보이게 유지.
   void _scrollToCurrentTop(int index) {
     // [SCROLL-THROTTLE] Streaming GPT chunks can request the same 220ms scroll
@@ -1709,13 +1711,55 @@ line had never been said. Never build the conversation on a line you had to gues
       isUser: false,
       onLog: _log,
     );
+    // 안내 음성이 나가는 동안은 barge-in 대상이다. 이전 안내가 남아 있으면
+    // 먼저 끊어, 취소 대상이 항상 지금 울리는 하나만 되게 한다.
+    _guideTtsFetcher?.cancel();
+    _guideTtsFetcher = fetcher;
+    _isInitialGuidePlaying = true;
+    fetcher.addText(spoken);
+    int ticks = 0;
+    try {
+      while ((fetcher.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
+          mounted &&
+          !fetcher.isCancelled) {
+        await Future.delayed(const Duration(milliseconds: 50));
+        if (++ticks > 600) {
+          _log('⚠️ [KOREAN-TTS-TIMEOUT]', '한국어 안내 음성 30초 초과');
+          break;
+        }
+      }
+    } finally {
+      // 그 사이 다음 안내가 시작됐다면 그쪽 상태를 건드리지 않는다.
+      if (identical(_guideTtsFetcher, fetcher)) {
+        _guideTtsFetcher = null;
+        _isInitialGuidePlaying = false;
+      }
+    }
+  }
+
+  /// AI 턴 응답을 한국어 음성으로 낸다.
+  /// 안내 음성과 달리 barge-in 대상이 아니다 — 답을 끝까지 들려준 뒤 마이크를 연다.
+  Future<void> _speakAiKorean(String text) async {
+    final spoken = text.trim();
+    if (spoken.isEmpty || _openAiKey.isEmpty) return;
+    _ttsQueueManager.setUserTurn(false);
+    _ttsQueueManager.setAiPaused(false);
+    final fetcher = ChunkedTtsFetcher(
+      _openAiKey,
+      _ttsQueueManager,
+      _aiVoice,
+      language: 'ko',
+      cacheEnabled: false,
+      isUser: false,
+      onLog: _log,
+    );
     fetcher.addText(spoken);
     int ticks = 0;
     while (
         (fetcher.pendingRequests > 0 || _ttsQueueManager.isBusy) && mounted) {
       await Future.delayed(const Duration(milliseconds: 50));
       if (++ticks > 600) {
-        _log('⚠️ [KOREAN-TTS-TIMEOUT]', '한국어 안내 음성 30초 초과');
+        _log('⚠️ [AI-TTS-TIMEOUT]', 'AI 응답 음성 30초 초과');
         break;
       }
     }
@@ -1767,7 +1811,6 @@ line had never been said. Never build the conversation on a line you had to gues
     _isConversationActive = false;
     _realtimeTurnActive = false;
     _realtimeConnectFuture = null;
-    _expansionSettle = null;
     final realtime = _realtimeAdapter;
     _realtimeAdapter = null;
     if (realtime != null) unawaited(realtime.dispose());
@@ -1891,6 +1934,9 @@ line had never been said. Never build the conversation on a line you had to gues
         BillingTicker.instance.resumeFromActivity('step_expand_stt_partial');
         if (_isInitialGuidePlaying && transcript.trim().isNotEmpty) {
           _isInitialGuidePlaying = false;
+          // 아직 안 돌아온 TTS 응답까지 막아야 안내가 되살아나지 않는다.
+          _guideTtsFetcher?.cancel();
+          _guideTtsFetcher = null;
           _ttsQueueManager.stop();
           _log('🎤 [BARGE-IN]', '첫 유저 발화 감지 → 시작 안내 TTS 즉시 중단');
         }
@@ -2025,9 +2071,39 @@ line had never been said. Never build the conversation on a line you had to gues
     _log('[STT-ROUTE]',
         'selected=gpt-4o-transcribe every_turn=true len=${userKorean.length}');
     _runMeaningProbe(userKorean);
-    _log('🔀 [COMMIT-03]', '전사 확정 → Step Expand Realtime 턴 호출');
-    await _processRealtimeStepExpandTurn(
-      userKorean,
+
+    final validation = await KoreanTurnValidator.validate(
+      apiKey: _openAiKey,
+      transcribedText: userKorean,
+      mode: 'step_expand',
+      modeContext:
+          'Current growing sentence: ${_expandedNativeSentence.trim().isEmpty ? '(first seed)' : _expandedNativeSentence.trim()}',
+      recentConversation: _recentKoreanConversationForValidation(),
+    );
+    if (!mounted || generation != _pipelineGeneration) return;
+    _log('[TURN-VALIDATE]',
+        'accepted=${validation.accepted} reason=${validation.reason}');
+    if (!validation.accepted) {
+      setState(() {
+        _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+        _localMessages.add(<String, dynamic>{
+          'role': 'SYSTEM',
+          'target': KoreanTurnValidator.retryLine,
+          'original': '',
+          'clarify': true,
+        });
+      });
+      _scrollToBottom();
+      await _speakLiveKorean(KoreanTurnValidator.retryLine);
+      if (mounted && _isConversationActive && !_isSessionComplete) {
+        _startUserListening();
+      }
+      return;
+    }
+
+    _log('🔀 [COMMIT-03]', '전사·문맥 확정 → Step Expand 질문 생성');
+    await _processStepExpandTurn(
+      validation.text,
       generation: generation,
     );
   }
@@ -2101,10 +2177,9 @@ line had never been said. Never build the conversation on a line you had to gues
     );
   }
 
-  // 대화방의 라이브 턴. Realtime이 원어 응답과 음성을 만들고, 유저 말풍선에
-  // 들어갈 누적 확장 문장은 별도 경량 호출로 나란히 만든다. 확장을 Realtime에
-  // 시킬 수 없는 이유는 되묻기와 같다 — 거기서 나온 글자는 그대로 소리가 된다.
-  Future<void> _processRealtimeStepExpandTurn(
+  // 대화방의 라이브 턴. 누적 문장을 먼저 확정해 유저 말풍선에 올리고,
+  // gpt-4o-mini가 다음 한국어 질문을 만든 뒤 별도 TTS로 읽는다.
+  Future<void> _processStepExpandTurn(
     String userKorean, {
     required int generation,
   }) async {
@@ -2117,146 +2192,102 @@ line had never been said. Never build the conversation on a line you had to gues
       if (_isConversationActive && !_isSessionComplete) _startUserListening();
       return;
     }
-    // 앞 턴의 합치기가 아직 안 끝났으면 먼저 기다린다. 그래야 이번 턴이
-    // 최신 누적 문장 위에 얹힌다.
-    final pendingSettle = _expansionSettle;
-    if (pendingSettle != null) {
-      await pendingSettle;
-      if (!mounted ||
-          !_isConversationActive ||
-          generation != _pipelineGeneration) {
-        return;
-      }
-    }
     _turnCounter++;
     final turnNumber = _turnCounter;
     _realtimeTurnActive = true;
-    StreamSubscription<String>? transcriptSubscription;
     var aiIndex = -1;
     var askedBack = false;
     var turnCompleted = false;
 
-    // 🌱 [NATIVE-EXPAND] 이번 턴이 이어 붙일 대상. 1턴이면 비어 있고, 그때는
-    //   유저 발화 자체가 씨앗 문장이 된다. 2턴부터 Realtime 요청과 나란히
-    //   합치기를 돌려, AI가 말하는 동안 확장 문장이 준비되게 한다.
+    // 🌱 [NATIVE-EXPAND] 이번 턴이 이어 붙일 대상. 되묻기나 실패로 이 턴을
+    //   무를 때 여기로 되돌린다.
     final previousExpanded = _expandedNativeSentence.trim();
+    final previousPending = List<String>.from(_pendingNativeParts);
     final mergeInputs = <String>[..._pendingNativeParts, userKorean];
-    final Future<String>? expansionFuture = previousExpanded.isEmpty
-        ? null
-        : StepExpandBrain.mergeNativeExpansion(
-            apiKey: _openAiKey,
-            previousExpanded: previousExpanded,
-            newUtterances: mergeInputs,
-            languageName: resolveNativeLanguageName(FFAppState().nativeLang),
-          );
     Map<String, dynamic>? hostBubble;
     try {
-      // 👂 말풍선을 미리 만들지 않는다. Realtime은 텍스트와 한국어 음성이
-      //   같이 나오므로, 첫 글자가 도착하는 순간 말풍선을 만들면 소리와
-      //   글자가 함께 뜬다. 빈 말풍선에 점 세 개를 띄워 둘 이유가 없다.
-      //   유저 한국어도 되묻기가 아님이 확정된 뒤에 AI 말풍선 위로 끼워 넣는다.
       setState(() {
         _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
       });
 
-      var streamedText = '';
-      var hostSettled = false;
-      String aiKorean = '';
-      RealtimeTurnOutcome? outcome;
-
-      // 준비된 연결이 첫 요청 전에 끊겼거나 서버가 응답을 만들지 못한 경우에만
-      // 새 세션으로 한 번 재시도한다. 텍스트가 조금이라도 온 턴은 음성도 이미
-      // 재생됐을 수 있으므로 중복 발화를 막기 위해 재시도하지 않는다.
-      for (var attempt = 1; attempt <= 2; attempt++) {
-        final connected = await _ensureStepExpandRealtimeConnected();
-        if (!connected ||
-            !mounted ||
+      // 1️⃣ 확장 문장을 AI 질문보다 먼저 확정한다. 순서가 뒤집히면 유저는
+      //    자기 문장이 어떻게 자랐는지 보기도 전에 다음 질문을 듣게 된다.
+      //    1턴은 방금 한 말이 곧 씨앗이라 합치기가 필요 없다.
+      var bubbleText = userKorean;
+      if (previousExpanded.isEmpty) {
+        _expandedNativeSentence = userKorean;
+        _pendingNativeParts.clear();
+        _log('[EXPAND-SEED]', 'turn=$turnNumber text="$userKorean"');
+      } else {
+        final merged = (await StepExpandBrain.mergeNativeExpansion(
+          apiKey: _openAiKey,
+          previousExpanded: previousExpanded,
+          newUtterances: mergeInputs,
+          languageName: resolveNativeLanguageName(FFAppState().nativeLang),
+        ))
+            .trim();
+        if (!mounted ||
             !_isConversationActive ||
             generation != _pipelineGeneration) {
-          if (attempt == 1) {
-            _log('[RT-RETRY]', 'turn=$turnNumber reason=connect_failed');
-            continue;
-          }
-          throw StateError('Realtime Step Expand session is unavailable.');
+          return;
         }
-
-        try {
-          final turn = _realtimeAdapter!.requestConversationTurn(
-            turnId: 'step-expand-$turnNumber-attempt-$attempt',
-            userText: userKorean,
-            voice: _aiVoice,
-            instructions: turnNumber >= MAX_TURNS
-                ? 'This is the final turn. In one short natural Korean sentence, briefly acknowledge the completed idea. Do not ask a question, explain, advise, or summarize at length.'
-                : 'Continue Step Expand in natural Korean. Stay on the user\'s current sentence. Give at most one very brief acknowledgment, then ask exactly one concise core question for the single most useful missing detail. No explanation, advice, examples, summary, multiple questions, or new topic.',
-          );
-          transcriptSubscription = turn.textStream.listen((delta) {
-            if (delta.isEmpty ||
-                !mounted ||
-                generation != _pipelineGeneration ||
-                turnNumber != _turnCounter) {
-              return;
-            }
-            streamedText += delta;
-            setState(() {
-              // 첫 글자와 함께 AI 말풍선을 만든다(= 한국어 음성이 시작되는 시점).
-              if (aiIndex < 0) {
-                _localMessages.add(<String, dynamic>{
-                  'role': 'SYSTEM',
-                  'target': streamedText,
-                  'original': '',
-                });
-                aiIndex = _localMessages.length - 1;
-              } else {
-                _localMessages[aiIndex]['target'] = streamedText;
-              }
-              // 되묻기가 아님이 확정되면 유저 한국어를 AI 말풍선 위에 끼워 넣는다.
-              //   확장 문장이 아직 안 왔을 수 있으므로 일단 방금 한 말로 띄우고,
-              //   합치기가 끝나면 같은 말풍선을 누적 문장으로 바꾼다.
-              if (!hostSettled && _isAskBackDecidable(streamedText)) {
-                hostSettled = true;
-                if (!_isAskBackReply(streamedText)) {
-                  hostBubble = <String, dynamic>{
-                    'role': 'HOST',
-                    'target': userKorean,
-                    'original': '',
-                  };
-                  _localMessages.insert(aiIndex, hostBubble!);
-                  aiIndex++;
-                }
-              }
+        // 👂 붙이는 쪽이 못 알아들었다고 하면 거기서 멈춘다. 여기서 어물쩍
+        //   다듬어 넘기면 아래 어디에서도 이상한 걸 알아챌 수 없다. 유저
+        //   발화는 화면에도 문장에도 넣지 않고 보류한 뒤 다시 듣는다.
+        if (merged == StepExpandBrain.kUnclearToken) {
+          askedBack = true;
+          _turnCounter--;
+          setState(() {
+            _localMessages.add(<String, dynamic>{
+              'role': 'SYSTEM',
+              'target': kStepExpandAskBackLine,
+              'original': '',
+              'clarify': true,
             });
           });
-
-          outcome = await turn.done;
-          aiKorean = (await turn.finalText).trim();
-        } catch (error) {
-          _log('[RT-ATTEMPT-ERR]',
-              'turn=$turnNumber attempt=$attempt error=$error');
-        } finally {
-          await transcriptSubscription?.cancel();
-          transcriptSubscription = null;
+          _scrollToBottom();
+          _log('[EXPAND-UNCLEAR]', 'turn=$turnNumber 되묻기 → 유저 발화 보류');
+          await _speakLiveKorean(kStepExpandAskBackLine);
+          return;
         }
-
-        if (outcome == RealtimeTurnOutcome.completed && aiKorean.isNotEmpty) {
-          break;
-        }
-        final canRetry = attempt == 1 &&
-            streamedText.isEmpty &&
-            outcome != RealtimeTurnOutcome.timedOut;
-        if (!canRetry) break;
-
-        _log('[RT-RETRY]',
-            'turn=$turnNumber reason=${outcome?.name ?? 'request_error'}');
-        final failedAdapter = _realtimeAdapter;
-        if (failedAdapter != null) {
-          _realtimeAdapter = null;
-          await failedAdapter.dispose();
+        if (merged.isEmpty) {
+          // 합치기가 실패한 발화는 버리지 않고 다음 턴에 같이 넘긴다.
+          _pendingNativeParts
+            ..clear()
+            ..addAll(mergeInputs);
+          _log('[EXPAND-MERGE]',
+              'turn=$turnNumber failed carry=${mergeInputs.length}');
+        } else {
+          bubbleText = merged;
+          _expandedNativeSentence = merged;
+          _pendingNativeParts.clear();
+          _log(
+              '[EXPAND-MERGE]',
+              'turn=$turnNumber prev="$previousExpanded" add="$userKorean" '
+                  'merged="$merged"');
         }
       }
 
-      if (outcome != RealtimeTurnOutcome.completed || aiKorean.isEmpty) {
-        throw StateError(
-            'Realtime Step Expand response did not complete: outcome=${outcome?.name}');
+      // 2️⃣ 자란 문장을 먼저 화면에 올린다.
+      hostBubble = <String, dynamic>{
+        'role': 'HOST',
+        'target': bubbleText,
+        'original': '',
+      };
+      setState(() => _localMessages.add(hostBubble!));
+      _scrollToBottom();
+
+      // 3️⃣ 그 다음에 AI가 다음 질문을 건다.
+      //    답은 gpt-4o-mini가 한국어로 만들고, 소리는 아래에서 TTS가 낸다.
+      //    방금 한 말이 아니라 지금까지 자란 문장을 통째로 준다. 다음에 무슨
+      //    말이 올지 추측하려면 문장 전체가 보여야 한다.
+      String aiKorean = await StepExpandBrain.generateKoreanTurn(
+        apiKey: _openAiKey,
+        instructions: _buildStepExpandTurnInstructions(turnNumber),
+        userText: _expandedNativeSentence,
+      );
+      if (aiKorean.isEmpty) {
+        throw StateError('Step Expand reply did not complete.');
       }
       if (!mounted ||
           !_isConversationActive ||
@@ -2271,7 +2302,13 @@ line had never been said. Never build the conversation on a line you had to gues
       if (_isAskBackReply(aiKorean)) {
         askedBack = true;
         _turnCounter--;
+        // 잘못 들은 발화로 자란 문장은 없던 일로 되돌린다.
+        _expandedNativeSentence = previousExpanded;
+        _pendingNativeParts
+          ..clear()
+          ..addAll(previousPending);
         setState(() {
+          _localMessages.remove(hostBubble);
           if (aiIndex >= 0 && aiIndex < _localMessages.length) {
             _localMessages[aiIndex]['target'] = aiKorean;
             _localMessages[aiIndex]['original'] = '';
@@ -2286,38 +2323,21 @@ line had never been said. Never build the conversation on a line you had to gues
           }
         });
         _scrollToBottom();
-        _log('[RT-ASK-BACK]', 'turn=$turnNumber 되묻기 → 유저 발화 폐기(화면/히스토리 미기록)');
+        _log('[ASK-BACK]', 'turn=$turnNumber 되묻기 → 유저 발화 폐기(화면/히스토리 미기록)');
+        await _speakAiKorean(aiKorean);
         return;
       }
 
       setState(() {
-        // 델타가 한 번도 안 왔거나(전체가 finalText로만 도착) 응답이 너무 짧아
-        // 스트리밍 중 판정에 못 닿은 경우, 여기서 두 말풍선을 마저 만든다.
+        // 델타가 한 번도 안 왔으면(전체가 finalText로만 도착) 여기서 만든다.
         if (aiIndex < 0) {
-          hostBubble = <String, dynamic>{
-            'role': 'HOST',
-            'target': userKorean,
-            'original': '',
-          };
-          _localMessages.add(hostBubble!);
           _localMessages.add(<String, dynamic>{
             'role': 'SYSTEM',
             'target': aiKorean,
             'original': '',
           });
           aiIndex = _localMessages.length - 1;
-          hostSettled = true;
         } else {
-          if (!hostSettled) {
-            hostBubble = <String, dynamic>{
-              'role': 'HOST',
-              'target': userKorean,
-              'original': '',
-            };
-            _localMessages.insert(aiIndex, hostBubble!);
-            aiIndex++;
-            hostSettled = true;
-          }
           _localMessages[aiIndex]['target'] = aiKorean;
           _localMessages[aiIndex]['original'] = '';
         }
@@ -2327,6 +2347,7 @@ line had never been said. Never build the conversation on a line you had to gues
         }
       });
       _scrollToBottom();
+      await _speakAiKorean(aiKorean);
 
       final hostLine = <String, dynamic>{
         'role': 'HOST',
@@ -2338,26 +2359,10 @@ line had never been said. Never build the conversation on a line you had to gues
       };
       await _saveTurnToFirestore(<Map<String, dynamic>>[hostLine, systemLine]);
       await _saveHistoryMessages(<Map<String, dynamic>>[hostLine, systemLine]);
-      _log('[RT-HISTORY]',
-          'turn=$turnNumber text_only=true voice=$_aiVoice realtime_audio_saved=false');
-
-      // 🌱 [NATIVE-EXPAND] 1턴은 발화가 곧 씨앗 문장이다. 2턴부터는 합치기
-      //   결과가 도착하는 대로 같은 말풍선을 누적 문장으로 바꾼다.
-      if (expansionFuture == null) {
-        _expandedNativeSentence = userKorean;
-        _pendingNativeParts.clear();
-        _log('[EXPAND-SEED]', 'turn=$turnNumber len=${userKorean.length}');
-      } else {
-        _expansionSettle = _settleNativeExpansion(
-          expansionFuture: expansionFuture,
-          mergeInputs: mergeInputs,
-          hostBubble: hostBubble,
-          generation: generation,
-          turnNumber: turnNumber,
-        );
-      }
+      _log('[GPT-HISTORY]',
+          'turn=$turnNumber model=gpt-4o-mini voice=$_aiVoice tts=true');
     } catch (error) {
-      _log('[RT-PIPE-ERR]',
+      _log('[GPT-PIPE-ERR]',
           'turn=$turnNumber reason=${error.runtimeType} error=$error');
       // 실패한 요청이 정상 턴 수를 먹지 않게 한다. 그래야 재발화가 다시 같은
       // Step 번호로 처리되고 5턴 완료 상태가 앞당겨지지 않는다.
@@ -2370,29 +2375,36 @@ line had never been said. Never build the conversation on a line you had to gues
         _turnCounter--;
       }
       if (turnStillActive && !turnCompleted && !askedBack) {
+        // 답을 못 받은 턴이므로 자란 문장도 이전 상태로 되돌린다. 유저가
+        // 다시 말하면 그 발화가 같은 자리에서 다시 붙는다.
+        _expandedNativeSentence = previousExpanded;
+        _pendingNativeParts
+          ..clear()
+          ..addAll(previousPending);
         setState(() {
-          // 확정되지 못한 유저 placeholder는 남기지 않는다.
+          // 확정되지 못한 유저 말풍선과 placeholder는 남기지 않는다.
           _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+          if (hostBubble != null) _localMessages.remove(hostBubble);
           if (aiIndex >= 0 &&
               aiIndex < _localMessages.length &&
               (_localMessages[aiIndex]['target'] ?? '').toString().isEmpty) {
             _localMessages.removeAt(aiIndex);
           }
-          if (aiIndex < 0) {
-            _localMessages.add(<String, dynamic>{
-              'role': 'SYSTEM',
-              'target': '연결이 잠시 끊겼어요. 방금 말씀을 다시 들려주시겠어요?',
-              'original': '',
-              'realtime_error': true,
-            });
-          }
+          _localMessages.add(<String, dynamic>{
+            'role': 'SYSTEM',
+            // 유저에게는 실패 원인이 아니라 다시 말해 달라는 말만 필요하다.
+            // 진짜 원인은 위 [RT-PIPE-ERR] 로그에 남는다.
+            'target': kStepExpandAskBackLine,
+            'original': '',
+            // 유저가 다시 말하면 사라지는 되묻기 말풍선으로 취급한다.
+            'clarify': true,
+          });
         });
       }
       if (turnStillActive && !turnCompleted && !askedBack) {
-        await _speakLiveKorean('연결이 잠시 끊겼어요. 방금 말씀을 다시 들려주시겠어요?');
+        await _speakLiveKorean(kStepExpandAskBackLine);
       }
     } finally {
-      await transcriptSubscription?.cancel();
       _realtimeTurnActive = false;
       // 되묻기 턴은 _turnCounter를 되돌렸으므로 turnNumber와 어긋난다.
       // 그 경우에도 마이크는 반드시 다시 열어야 대화가 이어진다.
@@ -2406,50 +2418,39 @@ line had never been said. Never build the conversation on a line you had to gues
     }
   }
 
-  /// 합치기 결과를 유저 말풍선과 누적 문장에 반영한다. 실패하면 이번 발화를
-  /// 버리지 않고 다음 턴 합치기로 넘겨, 확장 문장에서 그 턴이 빠지지 않게 한다.
-  Future<void> _settleNativeExpansion({
-    required Future<String> expansionFuture,
-    required List<String> mergeInputs,
-    required Map<String, dynamic>? hostBubble,
-    required int generation,
-    required int turnNumber,
-  }) async {
-    final merged = (await expansionFuture).trim();
-    if (merged.isEmpty) {
-      _pendingNativeParts
-        ..clear()
-        ..addAll(mergeInputs);
-      _log('[EXPAND-MERGE]',
-          'turn=$turnNumber failed carry=${mergeInputs.length}');
-      return;
+  /// 턴마다 얹는 짧은 지시. 역할과 원칙은 세션 지시문이 이미 들고 있으므로
+  /// 여기서는 이번 턴에 어느 결을 따라갈지만 정한다. 매 턴 같은 축을 주면
+  /// 질문이 육하원칙 점검처럼 굳는다.
+  String _buildStepExpandTurnInstructions(int turnNumber) {
+    if (turnNumber >= MAX_TURNS) {
+      return 'This is the final turn. In one short, warm spoken sentence, land the '
+          'sentence they built. Do not ask anything, explain, or summarize at length.';
     }
-    _expandedNativeSentence = merged;
-    _pendingNativeParts.clear();
-    _log('[EXPAND-MERGE]', 'turn=$turnNumber len=${merged.length}');
-    if (!mounted || generation != _pipelineGeneration || hostBubble == null) {
-      return;
-    }
-    setState(() => hostBubble['target'] = merged);
-    _scrollToBottom();
+    const focuses = <String>[
+      // 1턴: 왜 그 말을 꺼냈는지, 그 밑의 마음을 따라간다.
+      'Follow the feeling or the motivation under what they just said. Guess quietly '
+          'why this matters to them, then ask something light that follows that thread.',
+      // 2턴: 이야기에서 가장 무게가 실린 사람·장소·물건.
+      'Follow whichever person, place, or thing seems to carry the most weight in '
+          'their story. Ask about the one they would want to say more about.',
+      // 3턴: 그때 어떤 기분이었는지, 무엇이 남았는지.
+      'Follow how it felt, or the part that stayed with them. Let the feeling come '
+          'out on its own — do not force a contrast.',
+      // 4턴: 이야기가 저절로 향하는 곳.
+      'Follow where their story is naturally heading — what it led to, or what it '
+          'means to them now. Guess what they would enjoy adding, and invite it gently.',
+    ];
+    final focus = focuses[(turnNumber - 1).clamp(0, focuses.length - 1)];
+    return 'Continue the practice. First give one short, genuine response to what '
+        'they just said. Then ask exactly one question their one-to-three-word '
+        'answer can attach to. $focus';
   }
 
-  /// 되묻기 판정용. Realtime 응답 앞부분만 보고 가른다.
-  /// 태그를 쓸 수 없어(음성으로 샌다) 고정 문장의 특징 어절로 판단한다.
+  /// 되묻기 판정용. 태그를 쓸 수 없어(음성으로 샌다) 고정 문장의 특징 어절로
+  /// 판단한다.
   static String _askBackProbe(String text) {
     final compact = text.replaceAll(RegExp(r'\s'), '');
     return compact.length > 24 ? compact.substring(0, 24) : compact;
-  }
-
-  /// 되묻기 여부를 가를 만큼 앞부분이 쌓였는지.
-  /// 되묻기 고정 문장은 '방금 하신 말씀을…'으로 시작한다. 그래서 앞 두 글자가
-  /// '방금'이 아니면 그 순간 되묻기가 아님이 확정된다. 유저 문장을 기다리게
-  /// 하지 않고 바로 띄우려고 이 빠른 판정을 먼저 본다.
-  static bool _isAskBackDecidable(String streamedText) {
-    final probe = _askBackProbe(streamedText);
-    if (probe.length < 2) return false;
-    if (!probe.startsWith('방금')) return true;
-    return probe.length >= 12 || _isAskBackReply(streamedText);
   }
 
   static bool _isAskBackReply(String text) {
@@ -3810,6 +3811,10 @@ line had never been said. Never build the conversation on a line you had to gues
   Future<void> _handleAutoSaveAndExit() async {
     if (_isExiting) return; // 🔧 [EXIT-GUARD] 이미 종료 처리 중이면 무시
     _isExiting = true;
+    // 🔇 소리부터 끊는다. 아래 Firestore 저장은 몇 초씩 걸릴 수 있는데, 그동안
+    //   Realtime 세션이 살아 있으면 방을 나온 뒤에도 AI 목소리가 계속 들린다.
+    //   5턴 완료 경로는 이미 이 순서인데 뒤로가기 경로만 빠져 있었다.
+    _stopEverything();
     BillingTicker.instance.pause();
     try {
       if (_myHistoryRef != null) {
@@ -3903,7 +3908,6 @@ line had never been said. Never build the conversation on a line you had to gues
               child: Stack(children: [
                 _buildChatList(),
                 _buildIdleOverlay(),
-                _buildNudgeBubble(), // 🆕 [Anyone 형태 진입 안내] 2초 노출 후 소멸
               ]),
             ),
             _buildControlArea(bottomPad),
@@ -5533,6 +5537,17 @@ class ChunkedTtsFetcher {
   int get pendingRequests => _pendingCount;
   VoidCallback? onAllComplete;
 
+  // 🎤 [BARGE-IN] 취소되면 이미 날아간 요청의 응답이 돌아와도 큐에 넣지 않는다.
+  //   audioQueue.stop()만으로는 부족하다. stop()은 그 시점의 큐만 비우고,
+  //   뒤늦게 도착한 청크는 addAudio로 다시 재생을 깨워 유저 위에 겹쳐 울린다.
+  bool _cancelled = false;
+  bool get isCancelled => _cancelled;
+
+  void cancel() {
+    _cancelled = true;
+    _buffer.clear();
+  }
+
   ChunkedTtsFetcher(
     this.apiKey,
     this.audioQueue,
@@ -5624,6 +5639,10 @@ class ChunkedTtsFetcher {
   }
 
   void _pushReady() {
+    if (_cancelled) {
+      _buffer.clear();
+      return;
+    }
     while (_buffer.containsKey(_readyCounter)) {
       final data = _buffer.remove(_readyCounter)!;
       // 🔧 [v3.5] isUser 플래그로 큐 선택
@@ -5637,6 +5656,7 @@ class ChunkedTtsFetcher {
     _readyCounter = 0;
     _buffer.clear();
     _pendingCount = 0;
+    _cancelled = false;
   }
 }
 
@@ -6080,6 +6100,114 @@ Output: [GARBLED]
       }
     } catch (_) {
       yield '[EVAPORATE]';
+    }
+  }
+
+  // ==================================================================
+  // 📦 [TURN] 매 턴 AI 질문 — gpt-4o-mini가 한국어로 만든다.
+  // ------------------------------------------------------------------
+  // Realtime이 만들던 자리다. 한두 문장짜리 짧은 말이라 스트리밍 없이 통째로
+  // 받는다. 소리는 호출부가 TTS로 낸다.
+  // ==================================================================
+  static Future<String> generateKoreanTurn({
+    required String apiKey,
+    required String instructions,
+    required String userText,
+  }) async {
+    if (apiKey.isEmpty || userText.trim().isEmpty) return '';
+    final client = http.Client();
+    try {
+      final response = await client
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.7,
+              'max_tokens': 160,
+              'messages': [
+                {'role': 'system', 'content': instructions},
+                {'role': 'user', 'content': userText},
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 12));
+      if (response.statusCode != 200) return '';
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      final text =
+          (body['choices']?[0]?['message']?['content'] as String?)?.trim() ??
+              '';
+      return text.replaceAll(RegExp(r'^["“”\s]+|["“”\s]+$'), '');
+    } catch (_) {
+      return '';
+    } finally {
+      client.close();
+    }
+  }
+
+  // ==================================================================
+  // 📦 [OPENING] 진입 첫 마디 — gpt-4o-mini가 한국어 한 문장으로 만든다.
+  // ------------------------------------------------------------------
+  // 고정 문구를 그대로 읽던 자리다. 매번 같은 말이면 대화가 아니라 안내문으로
+  // 들려서, 첫 마디부터 사람이 건네는 말이 되게 모델에 맡긴다.
+  // 실패하면 기존 고정 문구로 떨어진다 — 첫 소리는 무슨 일이 있어도 난다.
+  // ==================================================================
+  static Future<String> generateKoreanOpening({
+    required String apiKey,
+    required String fallback,
+  }) async {
+    if (apiKey.isEmpty) return fallback;
+    final client = http.Client();
+    try {
+      final response = await client
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.8,
+              'max_tokens': 60,
+              'messages': [
+                {
+                  'role': 'system',
+                  'content':
+                      '''You open a Step Expand practice session by speaking first, in Korean.
+The user will answer out loud, and their answer becomes the seed sentence they then grow one piece at a time.
+Ask exactly ONE short, warm question that invites them to name any one real moment from their day.
+It must be answerable in a few words by someone who is quiet or still gathering their thoughts.
+Never ask a yes/no question. Never mention English, practice, study, sentences, AI, or how this works.
+No greeting, no preamble, no explanation, no emoji.
+Natural spoken 해요체, 4-12 spacing units, one sentence only.
+Return only the question text.'''
+                },
+                {
+                  'role': 'user',
+                  'content': 'Speak your opening line now.',
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 6));
+      if (response.statusCode != 200) return fallback;
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      final text =
+          (body['choices']?[0]?['message']?['content'] as String?)?.trim() ??
+              '';
+      if (text.isEmpty) return fallback;
+      // 모델이 따옴표로 감싸 오는 경우가 있어 벗겨서 쓴다.
+      return text.replaceAll(RegExp(r'^["“”\s]+|["“”\s]+$'), '');
+    } catch (_) {
+      return fallback;
+    } finally {
+      client.close();
     }
   }
 
@@ -6861,12 +6989,136 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
   }
 
   // ==================================================================
+  // 📦 [Box 7-1-F] generateNativeReply — 대화방 AI 한마디(반응 + 질문)
+  // ------------------------------------------------------------------
+  // Realtime 대신 이 경량 모델이 AI 대사를 만든다. 소리는 호출부가
+  // _speakLiveKorean으로 따로 붙인다. 글과 소리가 갈라져 있어, Realtime과
+  // 달리 프롬프트로 형식을 강하게 잡을 수 있다.
+  // ==================================================================
+  static Future<String> generateNativeReply({
+    required String apiKey,
+    required String languageName,
+    required String expandedSentence,
+    required String history,
+    required int turnNumber,
+    required int maxTurns,
+  }) async {
+    if (apiKey.isEmpty || expandedSentence.trim().isEmpty) return '';
+    final isFinalTurn = turnNumber >= maxTurns;
+    final client = OpenAiConnectionPool.instance.client;
+    try {
+      final sysPrompt = isFinalTurn
+          ? """You are the partner in a $languageName speaking practice where the user
+has been building ONE sentence, a piece at a time. This is the final turn.
+
+Say one short, warm $languageName sentence that lands the sentence they built.
+Do not ask anything. Do not explain, praise at length, or summarize.
+
+[OUTPUT]
+- Exactly one short spoken $languageName sentence. Nothing else."""
+          : """You are the partner in a $languageName speaking practice. The user is
+building ONE sentence, a piece at a time. Whatever they answer next gets folded
+into that same growing sentence. You are given the sentence as it stands now.
+
+[YOUR REPLY — ALWAYS EXACTLY TWO SENTENCES, IN THIS ORDER]
+1. One short, genuine response to what they just said — react to the content the
+   way a friend would. Not praise, not a summary, not their words repeated back.
+2. One question that opens the next piece of their sentence.
+
+[GUESS FIRST, THEN ASK]
+Before asking, silently guess what this person feels underneath what they said and
+what they would want to say next. Then open that door. You are not collecting
+facts — you are giving them room for the thing they already half want to say.
+
+[NEVER INTERROGATE]
+- Do not work through who / when / where / why like a checklist.
+- Do not grab the most concrete noun and ask "what kind of X?" — that is
+  keyword-echoing and it makes the user feel questioned rather than heard.
+- Go one level under the surface: the reason, the mood, the memory, what it meant.
+
+[MAKE IT EASY TO ANSWER]
+- Someone quiet must be able to answer in one to three words.
+- No yes/no questions. No pressure wording like "Why did you do that?".
+- If their last answer came out quick and detailed, go deeper into the part they
+  seemed most alive about. If it was short or vague, offer a smaller, easier angle.
+
+[ONE THREAD]
+Continue the story the first turn opened. Do not hop sideways to an unrelated noun.
+Never ask again about something already answered in the history.
+
+[THIS TURN]
+${_turnFocusLine(turnNumber)}
+
+[OUTPUT]
+- Exactly two short spoken $languageName sentences: the response, then the question.
+- Natural everyday polite speech. No labels, no quotes, no line breaks.
+- Never mention grammar, translation, practice mechanics, or being an AI.""";
+
+      final res = await client
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.7,
+              'max_tokens': 200,
+              'messages': [
+                {'role': 'system', 'content': sysPrompt},
+                {
+                  'role': 'user',
+                  'content': history.trim().isEmpty
+                      ? 'The sentence so far:\n$expandedSentence'
+                      : 'Conversation so far:\n$history\n\n'
+                          'The sentence so far:\n$expandedSentence'
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 12));
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(res.bodyBytes));
+        var reply =
+            (data['choices'][0]['message']['content'] ?? '').toString().trim();
+        if (reply.length >= 2 && reply.startsWith('"') && reply.endsWith('"')) {
+          reply = reply.substring(1, reply.length - 1).trim();
+        }
+        // 줄바꿈으로 나눠 오면 한 줄로 붙인다. 그대로 두면 말풍선이 갈라진다.
+        return reply.replaceAll(RegExp(r'\s*\n+\s*'), ' ').trim();
+      }
+    } catch (e) {
+      print('generateNativeReply error: $e');
+    }
+    return '';
+  }
+
+  /// 턴마다 도는 초점. 매 턴 같은 축을 주면 질문이 육하원칙 점검처럼 굳는다.
+  static String _turnFocusLine(int turnNumber) {
+    const focuses = <String>[
+      'Follow the feeling or the motivation under what they just said.',
+      'Follow whichever person, place, or thing carries the most weight in their story.',
+      'Follow how it felt, or the part that stayed with them.',
+      'Follow where their story is naturally heading — what it led to, or what it means now.',
+    ];
+    return focuses[(turnNumber - 1).clamp(0, focuses.length - 1)];
+  }
+
+  // ==================================================================
   // 📦 [Box 7-1-E] mergeNativeExpansion — 대화방 원어 누적 확장
   // ------------------------------------------------------------------
   // 지금까지 자란 원어 문장 + 이번 턴 발화 → 합쳐진 원어 한 문장.
   // 대화방 유저 말풍선에만 쓴다. 영어 확장·히스토리 저장과는 무관하다.
-  // 실패하면 빈 문자열을 돌려주고, 호출부가 이번 발화를 다음 턴으로 미룬다.
+  //
+  // 반환값 세 갈래:
+  //   · 합쳐진 문장 — 정상
+  //   · [kUnclearToken] — 새 발화를 도저히 못 붙이겠다(전사 오류로 보인다)
+  //   · 빈 문자열 — 호출 자체가 실패했다. 호출부가 다음 턴으로 미룬다.
   // ==================================================================
+  static const String kUnclearToken = '[UNCLEAR]';
+
   static Future<String> mergeNativeExpansion({
     required String apiKey,
     required String previousExpanded,
@@ -6875,7 +7127,9 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
   }) async {
     final additions =
         newUtterances.map((u) => u.trim()).where((u) => u.isNotEmpty).toList();
-    if (apiKey.isEmpty || previousExpanded.trim().isEmpty || additions.isEmpty) {
+    if (apiKey.isEmpty ||
+        previousExpanded.trim().isEmpty ||
+        additions.isEmpty) {
       return '';
     }
     final client = OpenAiConnectionPool.instance.client;
@@ -6888,19 +7142,48 @@ You get the sentence so far and what they just added. Rewrite them as ONE
 natural spoken $languageName sentence that keeps everything already said and
 folds the new part into it.
 
+[HOW TO JOIN — THIS IS THE WHOLE POINT]
+Do NOT set the parts side by side with commas. A comma list is not a sentence —
+it reads like someone reciting separate facts, and it is the one failure that
+makes this practice worthless. Join the parts into ONE flowing thought using real
+connective endings, the way a person actually speaks.
+In $languageName, use its normal linking endings (in Korean: ~아서/어서, ~는데,
+~고, ~니까, ~지만, ~면서, and so on). Choose whichever fits the meaning: cause,
+contrast, sequence, or simultaneity.
+You may reshape the earlier part — change its ending, drop a repeated subject,
+reorder for flow — as long as its meaning survives untouched.
+Vary the link. Do not use the same connective twice in one sentence.
+
+BAD  (commas, reads as a list):
+  요즘은 날씨가 뜨거운 것 같애, 지금 집에 있어요, 맛있는 수박을 먹고 싶어요.
+GOOD (joined into one thought):
+  요즘 날씨가 뜨거워서 집에 있는데, 시원한 수박이 먹고 싶어요.
+
 [RULES]
 - Every clause must trace back to words the user actually said. Never add
   facts, names, places, times, feelings, reasons, or judgements they did not say.
 - Keep their viewpoint, tense, and politeness level. Do not translate.
-- Grow it the way a person actually talks: short clauses chained left to right.
-  Do not nest clauses inside clauses.
-- Vary the connector. Do not use the same connector twice in one sentence.
+- Chain clauses left to right. Do not nest clauses inside clauses.
 - Do not answer, react, explain, summarize, or ask anything.
 - If the new part repeats what is already in the sentence, keep the sentence
   as it is rather than saying it twice.
 
+[WHEN YOU CANNOT ATTACH IT — CHECK THIS FIRST]
+The new part is speech-recognition output, so a word can come out wrong. You are
+the last place that would notice. Do NOT quietly smooth a broken part into
+something that reads well — once you do, nobody downstream can tell.
+Output EXACTLY this token and nothing else — [UNCLEAR] — when any of these holds:
+- The new part does not hold together as $languageName, or breaks off mid-thought.
+- A word sits so oddly against the sentence so far that its meaning cannot be
+  recovered.
+- Attaching it would require you to invent a subject, object, or verb.
+Being short is not a reason on its own. A clear short addition is fine, and so is
+one that changes the subject — people do that. Use [UNCLEAR] only when you truly
+cannot tell what they meant.
+
 [OUTPUT]
-- Exactly ONE $languageName sentence, nothing else. No quotes, no label.""";
+- Exactly ONE $languageName sentence, nothing else. No quotes, no label.
+- Or the single token [UNCLEAR].""";
 
       final addedBlock = additions.map((u) => '- $u').join('\n');
       final res = await client
@@ -6935,6 +7218,8 @@ folds the new part into it.
             merged.endsWith('"')) {
           merged = merged.substring(1, merged.length - 1).trim();
         }
+        // 토큰만 오지 않고 한마디 덧붙여 오는 경우가 있어 포함 여부로 본다.
+        if (merged.toUpperCase().contains(kUnclearToken)) return kUnclearToken;
         return merged;
       }
     } catch (e) {

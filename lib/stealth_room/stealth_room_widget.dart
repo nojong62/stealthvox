@@ -62,12 +62,17 @@ class _StealthRoomWidgetState extends State<StealthRoomWidget> {
         body: Column(
           mainAxisSize: MainAxisSize.max,
           children: [
-            Container(
-              width: MediaQuery.sizeOf(context).width * 1.0,
-              height: MediaQuery.sizeOf(context).height * 1.0,
-              child: custom_widgets.StealthRoomMaster(
+            // ⌨️ 예전에는 여기에 화면 전체 높이를 고정으로 박아 뒀다. 자판이
+            //    올라오면 Scaffold는 body를 그만큼 줄이는데 이 칸만 전체 높이를
+            //    고집해서, 설정 페이지에서 글자를 입력할 때 아래가 넘쳤다.
+            //    남는 만큼만 쓰게 두면 자판이 뜬 높이와 저절로 맞는다.
+            Expanded(
+              child: SizedBox(
                 width: MediaQuery.sizeOf(context).width * 1.0,
-                height: MediaQuery.sizeOf(context).height * 1.0,
+                child: custom_widgets.StealthRoomMaster(
+                  width: MediaQuery.sizeOf(context).width * 1.0,
+                  height: MediaQuery.sizeOf(context).height * 1.0,
+                ),
               ),
             ),
           ],

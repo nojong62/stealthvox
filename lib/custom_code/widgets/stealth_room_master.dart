@@ -741,18 +741,30 @@ Return ONLY valid JSON: {"name":"..."}.
     );
   }
 
+  /// 설정 페이지 두 곳이 함께 쓰는 자판 대응 높이.
+  ///   키보드가 올라온 만큼 높이를 줄인다. 그래야 스크롤 뷰포트가 자판 위쪽으로
+  ///   한정돼, 입력란을 탭했을 때 Flutter가 그 칸을 위로 밀어 올린다.
+  ///   widget.height가 비어 있어도 화면 높이를 기준으로 삼아야 한다. 기준이
+  ///   없으면 스크롤 뷰가 콘텐츠 높이를 그대로 요구해서, 자판이 차지한 만큼
+  ///   부모를 넘겨 노란 줄무늬가 떴다.
+  double _setupVisibleHeight(double keyboardInset) {
+    final base = widget.height ?? MediaQuery.of(context).size.height;
+    return (base - keyboardInset).clamp(0.0, base);
+  }
+
   /// Scenario Talk 설정 페이지 — 써클톡과 같은 구조/여백/자판 처리.
   Widget _buildScenarioSetup() {
     final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
-    final double? visibleHeight = widget.height == null
-        ? null
-        : (widget.height! - keyboardInset).clamp(0.0, widget.height!);
+    final visibleHeight = _setupVisibleHeight(keyboardInset);
     const accent = Color(0xFF16A34A);
     return Container(
       width: widget.width,
       height: visibleHeight,
       color: const Color(0xFF121212),
+      // 자판이 떠 있으면 하단 안전영역은 자판에 가려 보이지도 않는다.
+      // 그 패딩을 그대로 두면 좁아진 화면을 더 밀어낸다.
       child: SafeArea(
+        bottom: keyboardInset == 0,
         child: SingleChildScrollView(
           padding: EdgeInsets.fromLTRB(24, 12, 24, keyboardInset > 0 ? 16 : 32),
           child: Column(
@@ -873,16 +885,8 @@ Return ONLY valid JSON: {"name":"..."}.
   }
 
   Widget _buildCircleSetup() {
-    // ⌨️ 키보드가 올라온 만큼 높이를 줄인다.
-    //   예전에는 widget.height로 화면 전체 높이를 고정했다. 그러면 키보드가
-    //   떠도 스크롤 뷰포트가 키보드 뒤까지 그대로 이어져서, 입력란을 탭해도
-    //   Flutter가 "이미 보이는 위치"로 판단해 위로 밀어 올리지 않았다.
-    //   그래서 자판이 입력란을 덮은 채 글자가 안 보였다.
-    //   높이를 줄이면 뷰포트가 자판 위쪽으로 한정돼 자동 스크롤이 제대로 걸린다.
     final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
-    final double? visibleHeight = widget.height == null
-        ? null
-        : (widget.height! - keyboardInset).clamp(0.0, widget.height!);
+    final visibleHeight = _setupVisibleHeight(keyboardInset);
     return Container(
       width: widget.width,
       height: visibleHeight,

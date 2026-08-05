@@ -51,6 +51,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
+import '/custom_code/services/korean_turn_validator.dart';
 import '/custom_code/services/openai_transcribe_service.dart';
 import '/custom_code/services/realtime_anyone_adapter.dart';
 import '/custom_code/services/stealth_vox_realtime_session.dart';
@@ -219,7 +220,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     );
   }
 
-  String _buildRoleplayRealtimeInstructions() => '''
+  String _buildScenarioMemberInstructions() => '''
 You are the assigned character inside a live Korean scenario conversation.
 Situation: ${_scenarioSituation.trim()}
 Your role: ${_roleplayPartnerLabel.trim()}
@@ -254,7 +255,7 @@ $kSpokenReplyLengthPolicy
         modeSessionId: _realtimeModeSessionId,
         voice: _aiVoice,
         allowWhenDisabled: true,
-        instructions: _buildRoleplayRealtimeInstructions(),
+        instructions: _buildScenarioMemberInstructions(),
       );
       return adapter.session.isReady;
     } catch (error) {
@@ -276,6 +277,45 @@ $kSpokenReplyLengthPolicy
     } finally {
       if (identical(_realtimeConnectFuture, future)) {
         _realtimeConnectFuture = null;
+      }
+    }
+  }
+
+  String _recentKoreanConversation() {
+    final turns = _localMessages.where((message) {
+      final role = message['role']?.toString() ?? '';
+      final text = message['target']?.toString().trim() ?? '';
+      return (role == 'HOST' || role == 'SYSTEM') && text.isNotEmpty;
+    }).toList();
+    final recent = turns.length > 12 ? turns.sublist(turns.length - 12) : turns;
+    return recent.map((message) {
+      final speaker = message['role'] == 'HOST' ? 'USER' : 'AI';
+      return '$speaker: ${message['target']}';
+    }).join('\n');
+  }
+
+  Future<void> _speakKoreanLine(String text) async {
+    final spoken = text.trim();
+    if (spoken.isEmpty || _openAiKey.isEmpty) return;
+    _ttsQueueManager.setUserTurn(false);
+    _ttsQueueManager.setAiPaused(false);
+    final fetcher = ChunkedTtsFetcher(
+      _openAiKey,
+      _ttsQueueManager,
+      _aiVoice,
+      language: 'ko',
+      isUser: false,
+      onLog: _log,
+    );
+    fetcher.addText(spoken);
+    int ticks = 0;
+    while ((fetcher.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
+        mounted &&
+        _isConversationActive) {
+      await Future.delayed(const Duration(milliseconds: 50));
+      if (++ticks > 400) {
+        _log('[KOREAN-TTS-TIMEOUT]', 'Scenario Talk TTS exceeded 20s');
+        break;
       }
     }
   }
@@ -621,61 +661,65 @@ $kSpokenReplyLengthPolicy
   Future<void> _generateAndPlayAiOpener() async {
     if (_isAiOpenerPlaying || _scenarioAiRole.isEmpty) return;
     _isAiOpenerPlaying = true;
-    _realtimeTurnActive = true;
-    StreamSubscription<String>? transcriptSubscription;
     var aiIndex = -1;
     if (mounted) setState(() {});
     try {
+      var aiKorean = await RoleplayBrain.generateKoreanOpener(
+        apiKey: _openAiKey,
+        situation: _scenarioSituation,
+        aiRole: _roleplayPartnerLabel.trim(),
+        userRole: _roleplayUserLabel.trim(),
+      );
+      if (aiKorean.isEmpty) {
+        aiKorean = '그래서 지금 어떻게 하실 생각이세요?';
+        _log('[OPENER-FALLBACK]', 'gpt-4o-mini 첫 대사 비어 있음');
+      }
+      if (!mounted || !_isConversationActive) return;
       setState(() {
         _localMessages.add(<String, dynamic>{
           'role': 'SYSTEM',
-          'target': '',
+          'target': aiKorean,
           'original': '',
         });
         aiIndex = _localMessages.length - 1;
       });
-      final connected = await _ensureRoleplayRealtimeConnected();
-      if (!connected || !mounted || !_isConversationActive) {
-        throw StateError('Realtime roleplay opener is unavailable.');
-      }
-      final turn = _realtimeAdapter!.requestConversationTurn(
-        turnId: 'roleplay-opener',
-        userText:
-            '당신은 "${_roleplayPartnerLabel.trim()}"입니다. 지금 이 상황 속에서 "${_roleplayUserLabel.trim()}"에게 실제로 가장 먼저 할 한마디만 하세요.',
-        voice: _aiVoice,
-        instructions:
-            'Speak exactly one short, natural Korean opening line as the assigned character inside the scene. Never act as a host or narrator. Do not greet the user to the roleplay, explain the setup, or invite them to start.',
+      _scrollToBottom();
+
+      _ttsQueueManager.setUserTurn(false);
+      _ttsQueueManager.setAiPaused(false);
+      final fetcher = ChunkedTtsFetcher(
+        _openAiKey,
+        _ttsQueueManager,
+        _aiVoice,
+        language: 'ko',
+        isUser: false,
+        onLog: _log,
       );
-      var streamedText = '';
-      transcriptSubscription = turn.textStream.listen((delta) {
-        if (delta.isEmpty || !mounted || !_isConversationActive) return;
-        streamedText += delta;
-        if (aiIndex >= 0 && aiIndex < _localMessages.length) {
-          setState(() => _localMessages[aiIndex]['target'] = streamedText);
+      fetcher.addText(aiKorean);
+      int ticks = 0;
+      while ((fetcher.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
+          mounted &&
+          _isConversationActive) {
+        await Future.delayed(const Duration(milliseconds: 50));
+        if (++ticks > 400) {
+          _log('⚠️ [OPENER-TTS-TIMEOUT]', '첫 대사 음성 20초 초과');
+          break;
         }
-      });
-      final outcome = await turn.done;
-      final aiKorean = (await turn.finalText).trim();
-      if (outcome != RealtimeTurnOutcome.completed || aiKorean.isEmpty) {
-        throw StateError('Realtime roleplay opener did not complete.');
       }
-      if (!mounted || !_isConversationActive) return;
-      setState(() => _localMessages[aiIndex]['target'] = aiKorean);
+
       await _saveHistoryMessages(<Map<String, dynamic>>[
         <String, dynamic>{
           'role': 'SYSTEM',
           'original_text': aiKorean,
         },
       ]);
-      _log('[RT-OPENER]', 'voice=$_aiVoice text_only_history=true');
+      _log('[OPENER]', 'model=gpt-4o-mini voice=$_aiVoice lang=ko');
     } catch (error) {
-      _log('[RT-OPENER-ERR]', 'reason=${error.runtimeType}');
+      _log('[OPENER-ERR]', 'reason=${error.runtimeType}');
       if (mounted && aiIndex >= 0 && aiIndex < _localMessages.length) {
         setState(() => _localMessages.removeAt(aiIndex));
       }
     } finally {
-      await transcriptSubscription?.cancel();
-      _realtimeTurnActive = false;
       _isAiOpenerPlaying = false;
       if (mounted && _isConversationActive) _startDeepgramListening();
     }
@@ -980,7 +1024,35 @@ $kSpokenReplyLengthPolicy
     }
     _log('[STT-ROUTE]',
         'selected=gpt-4o-transcribe every_turn=true len=${userKorean.length}');
-    await _processRealtimeRoleplayTurn(userKorean, generation: generation);
+
+    final validation = await KoreanTurnValidator.validate(
+      apiKey: _openAiKey,
+      transcribedText: userKorean,
+      mode: 'scenario_talk',
+      modeContext: '''Situation: $_scenarioSituation
+AI role: ${_roleplayPartnerLabel.trim()}
+User role: ${_roleplayUserLabel.trim()}''',
+      recentConversation: _recentKoreanConversation(),
+    );
+    if (!mounted || generation != _pipelineGeneration) return;
+    _log('[TURN-VALIDATE]',
+        'accepted=${validation.accepted} reason=${validation.reason}');
+    if (!validation.accepted) {
+      setState(() {
+        _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+        _localMessages.add(<String, dynamic>{
+          'role': 'SYSTEM',
+          'target': KoreanTurnValidator.retryLine,
+          'original': '',
+          'clarify': true,
+        });
+      });
+      _scrollToBottom();
+      await _speakKoreanLine(KoreanTurnValidator.retryLine);
+      if (mounted && _isConversationActive) _startDeepgramListening();
+      return;
+    }
+    await _processScenarioTalkTurn(validation.text, generation: generation);
   }
 
   // ignore: unused_element
@@ -1008,7 +1080,7 @@ $kSpokenReplyLengthPolicy
     _processRelayPipeline(committed);
   }
 
-  Future<void> _processRealtimeRoleplayTurn(
+  Future<void> _processScenarioTalkTurn(
     String userKorean, {
     required int generation,
   }) async {
@@ -1019,9 +1091,8 @@ $kSpokenReplyLengthPolicy
     }
     _turnCounter++;
     final turnNumber = _turnCounter;
-    _realtimeTurnActive = true;
-    StreamSubscription<String>? transcriptSubscription;
     var aiIndex = -1;
+    final recentConversation = _recentKoreanConversation();
     try {
       setState(() {
         _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
@@ -1031,48 +1102,17 @@ $kSpokenReplyLengthPolicy
           'target': userKorean,
           'original': '',
         });
-        _localMessages.add(<String, dynamic>{
-          'role': 'SYSTEM',
-          'target': '',
-          'original': '',
-        });
-        aiIndex = _localMessages.length - 1;
       });
       _scrollToBottom();
 
-      final connected = await _ensureRoleplayRealtimeConnected();
-      if (!connected ||
-          !mounted ||
-          !_isConversationActive ||
-          generation != _pipelineGeneration) {
-        throw StateError('Realtime roleplay session is unavailable.');
-      }
-
-      final turn = _realtimeAdapter!.requestConversationTurn(
-        turnId: 'roleplay-$turnNumber',
+      final aiKorean = await RoleplayBrain.generateKoreanTurn(
+        apiKey: _openAiKey,
+        instructions: _buildScenarioMemberInstructions(),
         userText: userKorean,
-        voice: _aiVoice,
-        instructions:
-            'Continue the established scene in natural Korean only. Speak briefly and directly as the assigned character, never as a host, narrator, guide, or coach.',
+        recentConversation: recentConversation,
       );
-      var streamedText = '';
-      transcriptSubscription = turn.textStream.listen((delta) {
-        if (delta.isEmpty ||
-            !mounted ||
-            generation != _pipelineGeneration ||
-            turnNumber != _turnCounter) {
-          return;
-        }
-        streamedText += delta;
-        if (aiIndex >= 0 && aiIndex < _localMessages.length) {
-          setState(() => _localMessages[aiIndex]['target'] = streamedText);
-        }
-      });
-
-      final outcome = await turn.done;
-      final aiKorean = (await turn.finalText).trim();
-      if (outcome != RealtimeTurnOutcome.completed || aiKorean.isEmpty) {
-        throw StateError('Realtime roleplay response did not complete.');
+      if (aiKorean.isEmpty) {
+        throw StateError('Scenario Talk response did not complete.');
       }
       if (!mounted ||
           !_isConversationActive ||
@@ -1081,10 +1121,15 @@ $kSpokenReplyLengthPolicy
         return;
       }
       setState(() {
-        _localMessages[aiIndex]['target'] = aiKorean;
-        _localMessages[aiIndex]['original'] = '';
+        _localMessages.add(<String, dynamic>{
+          'role': 'SYSTEM',
+          'target': aiKorean,
+          'original': '',
+        });
+        aiIndex = _localMessages.length - 1;
       });
       _scrollToBottom();
+      await _speakKoreanLine(aiKorean);
 
       final hostLine = <String, dynamic>{
         'role': 'HOST',
@@ -1096,8 +1141,8 @@ $kSpokenReplyLengthPolicy
       };
       _saveTurnToFirestore(<Map<String, dynamic>>[hostLine, systemLine]);
       await _saveHistoryMessages(<Map<String, dynamic>>[hostLine, systemLine]);
-      _log('[RT-HISTORY]',
-          'turn=$turnNumber text_only=true voice=$_aiVoice realtime_audio_saved=false');
+      _log('[GPT-HISTORY]',
+          'turn=$turnNumber model=gpt-4o-mini voice=$_aiVoice tts=true');
     } catch (error) {
       _log('[RT-PIPE-ERR]', 'turn=$turnNumber reason=${error.runtimeType}');
       if (mounted && aiIndex >= 0 && aiIndex < _localMessages.length) {
@@ -1108,8 +1153,6 @@ $kSpokenReplyLengthPolicy
         });
       }
     } finally {
-      await transcriptSubscription?.cancel();
-      _realtimeTurnActive = false;
       if (mounted &&
           _isConversationActive &&
           generation == _pipelineGeneration &&
@@ -2353,8 +2396,8 @@ $kSpokenReplyLengthPolicy
                 // [v3.6] 잔여시간 표시 + 길게 누르면 로그 (개발자용)
                 GestureDetector(
                   child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                     decoration: BoxDecoration(
                         color: const Color(0xFF2563EB),
                         borderRadius: BorderRadius.circular(20)),
@@ -2392,7 +2435,6 @@ $kSpokenReplyLengthPolicy
       ),
     );
   }
-
 
   Widget _buildChatList() {
     final double bottomPad = MediaQuery.of(context).size.height * 0.55;
@@ -3728,6 +3770,117 @@ class HybridTtsPlayer {
 // 🧠 [Box 7-1] RoleplayBrain v3 — 롤플레이 모드 전용 AI 뇌
 // ====================================================================
 class RoleplayBrain {
+  // ==================================================================
+  // 📦 [OPENING] 장면 첫 대사 — gpt-4o-mini가 한국어 한 문장으로 만든다.
+  // ------------------------------------------------------------------
+  // Realtime이 만들던 자리다. Realtime은 시크릿 발급이 막히면 첫 마디가
+  // 통째로 사라져 대화가 시작조차 안 됐다. 짧은 한 줄이라 스트리밍도 필요 없다.
+  // ==================================================================
+  static Future<String> generateKoreanOpener({
+    required String apiKey,
+    required String situation,
+    required String aiRole,
+    required String userRole,
+  }) async {
+    if (apiKey.isEmpty) return '';
+    final client = http.Client();
+    try {
+      final response = await client
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.8,
+              'max_tokens': 80,
+              'messages': [
+                {
+                  'role': 'system',
+                  'content':
+                      '''You are "$aiRole" inside this scene, speaking to "$userRole".
+Situation: $situation
+
+Speak exactly ONE short opening line in Korean — the line this character would really say first, right now, inside this situation.
+Never act as a host, guide, or narrator. Do not greet the user to a roleplay, explain the setup, or invite them to start.
+Do not use English, do not describe the scene, do not use quotation marks or emoji.
+Natural spoken Korean, one sentence.
+Return only the line itself.'''
+                },
+                {
+                  'role': 'user',
+                  'content': 'Speak your opening line now.',
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode != 200) return '';
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      final text =
+          (body['choices']?[0]?['message']?['content'] as String?)?.trim() ??
+              '';
+      return text.replaceAll(RegExp(r'^["“”\s]+|["“”\s]+$'), '');
+    } catch (_) {
+      return '';
+    } finally {
+      client.close();
+    }
+  }
+
+  static Future<String> generateKoreanTurn({
+    required String apiKey,
+    required String instructions,
+    required String userText,
+    required String recentConversation,
+  }) async {
+    if (apiKey.isEmpty || userText.trim().isEmpty) return '';
+    final client = http.Client();
+    try {
+      final response = await client
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: <String, String>{
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode(<String, dynamic>{
+              'model': 'gpt-4o-mini',
+              'temperature': 0.75,
+              'max_tokens': 120,
+              'messages': <Map<String, String>>[
+                <String, String>{'role': 'system', 'content': instructions},
+                if (recentConversation.trim().isNotEmpty)
+                  <String, String>{
+                    'role': 'system',
+                    'content':
+                        'Recent scene dialogue (continue it consistently):\n$recentConversation',
+                  },
+                <String, String>{
+                  'role': 'user',
+                  'content': userText.trim(),
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 12));
+      if (response.statusCode != 200) return '';
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      final text =
+          (body['choices']?[0]?['message']?['content'] as String?)?.trim() ??
+              '';
+      return text.replaceAll(RegExp(r'^["“”\s]+|["“”\s]+$'), '');
+    } catch (_) {
+      return '';
+    } finally {
+      client.close();
+    }
+  }
+
   // 🆕 [EXPAND-EXIT] 대화 전체(AI+유저) → 종합 확장 문장 1개 (의미단위 ~5개, 문법 연결)
   static Future<String?> generateExpandedFromConversation(
     String apiKey,

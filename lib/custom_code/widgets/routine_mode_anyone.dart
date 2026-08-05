@@ -45,6 +45,7 @@ import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
 import '/custom_code/services/openai_connection_pool.dart';
 import '/custom_code/services/openai_transcribe_service.dart';
+import '/custom_code/services/korean_turn_validator.dart';
 import '/custom_code/services/realtime_anyone_adapter.dart';
 import '/custom_code/services/stealth_vox_realtime_session.dart';
 import '/custom_code/services/tts_adapter.dart';
@@ -969,9 +970,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     }
     _micPermissionReady = true;
     if (!mounted || _isConversationActive) return;
-    // Realtime is receive-only in Anyone. Start its WebRTC negotiation while
-    // Deepgram is listening so the first AI audio turn does not pay setup cost.
-    unawaited(_ensureAnyoneRealtimeConnected());
     // 🗣️ 유저가 빈 화면 앞에서 먼저 말을 꺼내야 하는 부담을 없앤다.
     //   AI가 서클 일원으로 한마디 던지면 대화가 자연스럽게 시작된다.
     //   오프너가 끝나면 그 안에서 마이크를 연다.
@@ -988,71 +986,52 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   Future<void> _generateAndPlayAnyoneOpener() async {
     if (_isAiOpenerPlaying) return;
     _isAiOpenerPlaying = true;
-    _realtimeTurnActive = true;
-    StreamSubscription<String>? transcriptSubscription;
     var aiIndex = -1;
     if (mounted) setState(() {});
     try {
+      var aiText = await UnifiedBrain.generateKoreanOpener(
+        apiKey: _openAiKey,
+        circleDescription: widget.circleDescription,
+      );
+      if (aiText.isEmpty) {
+        final circle = widget.circleDescription.trim();
+        aiText = circle.isEmpty
+            ? '요즘 우리 모임에서는 어떤 이야기가 제일 많이 나와요?'
+            : '요즘 우리 $circle에서는 어떤 이야기가 제일 많이 나와요?';
+        _log('[OPENER-FALLBACK]', 'gpt-4o-mini 첫 마디 비어 있음');
+      }
+      if (!mounted) return;
       setState(() {
         _localMessages.add(<String, dynamic>{
           'role': 'SYSTEM',
-          'target': '',
+          'target': aiText,
           'original': '',
         });
         aiIndex = _localMessages.length - 1;
       });
-      final connected = await _ensureAnyoneRealtimeConnected();
-      if (!connected || !mounted) {
-        throw StateError('Realtime Circle Talk opener is unavailable.');
-      }
-      final circle = widget.circleDescription.trim();
-      final turn = _realtimeAdapter!.requestConversationTurn(
-        turnId: 'anyone-opener',
-        userText: '당신은 "${circle.isEmpty ? '편안한 일상 대화 커뮤니티' : circle}"의 일원입니다. '
-            '방금 같은 서클 사람을 만났다고 생각하고, 실제로 가장 먼저 건넬 한마디만 하세요.',
-        voice: _aiVoice,
-        instructions:
-            'Speak exactly one short, natural opening line as a fellow member of this circle. '
-            'React to something ordinary in the circle\'s daily life, or ask one small question a member would really ask. '
-            'Never act as a host, guide, or narrator. Do not welcome the user, explain the circle, or invite them to start talking.',
-      );
-      var streamedText = '';
-      transcriptSubscription = turn.textStream.listen((delta) {
-        if (delta.isEmpty || !mounted) return;
-        streamedText += delta;
-        if (aiIndex >= 0 && aiIndex < _localMessages.length) {
-          setState(() => _localMessages[aiIndex]['target'] = streamedText);
-        }
-      });
-      final outcome = await turn.done;
-      final aiText = (await turn.finalText).trim();
-      if (outcome != RealtimeTurnOutcome.completed || aiText.isEmpty) {
-        throw StateError('Realtime Circle Talk opener did not complete.');
-      }
-      if (!mounted) return;
-      setState(() => _localMessages[aiIndex]['target'] = aiText);
+      _scrollToBottom();
       await _saveHistoryMessages(<Map<String, dynamic>>[
         <String, dynamic>{
           'role': 'SYSTEM',
           'original_text': aiText,
         },
       ]);
-      _log('[RT-OPENER]', 'voice=$_aiVoice text_only_history=true');
+      // 보이스·모델 매핑은 어댑터가 정한다 — 여기서 모델명을 쓰지 않는다.
+      await _speakSystemLine(aiText);
+      _log('[OPENER]', 'model=gpt-4o-mini lang=ko text_only_history=true');
     } catch (error) {
-      _log('[RT-OPENER-ERR]', 'reason=${error.runtimeType}');
+      _log('[OPENER-ERR]', 'reason=${error.runtimeType}');
       if (mounted && aiIndex >= 0 && aiIndex < _localMessages.length) {
         setState(() => _localMessages.removeAt(aiIndex));
       }
     } finally {
-      await transcriptSubscription?.cancel();
-      _realtimeTurnActive = false;
       _isAiOpenerPlaying = false;
       // 오프너가 실패해도 마이크는 반드시 열어 대화가 죽지 않게 한다.
       if (mounted) await _startDeepgramListening();
     }
   }
 
-  String _buildAnyoneRealtimeInstructions() {
+  String _buildCircleMemberInstructions() {
     final circle = widget.circleDescription
         .replaceAll('<', '（')
         .replaceAll('>', '）')
@@ -1069,6 +1048,8 @@ ${buildNativeOutputLanguagePolicy(FFAppState().nativeLang)}
 - A circle may be a company, workplace, professional team, project group, club, hobby group, association, or community.
 - You are one active participant inside it: a coworker/employee in a company, a teammate in a working group, or a fellow member in a club or community.
 - Speak from inside the circle as a colleague or fellow member, not as an outside lecturer, consultant, or customer-service agent.
+- The user always speaks as themselves. Never roleplay the user, translate their words, continue their first-person statement as your own, or speak on their behalf.
+- Reply from your own position as ANOTHER member of the same circle. The user's experiences, feelings, plans, actions, and possessions remain the user's.
 - Never introduce or explain the circle to the user. Assume both you and the user already belong there and share its immediate context.
 - Naturally reflect the circle's vocabulary, priorities, working style, atmosphere, and likely concerns.
 - Let the user lead. React to the user's exact point; do not introduce a new topic, set an agenda, or take over the conversation.
@@ -1101,7 +1082,7 @@ $kSpokenReplyLengthPolicy
         modeSessionId: _realtimeModeSessionId,
         voice: _aiVoice,
         allowWhenDisabled: true,
-        instructions: _buildAnyoneRealtimeInstructions(),
+        instructions: _buildCircleMemberInstructions(),
       );
       final ready = adapter.session.isReady;
       _log('[RT-READY]', 'ready=$ready mode=text_in_audio_out');
@@ -1694,13 +1675,44 @@ $kSpokenReplyLengthPolicy
     _log('🎧 [STT-ROUTE]',
         'selected=gpt-4o-transcribe every_turn=true len=${userOriginal.length}');
     _logTurnPerf('USER_KOREAN_FINAL');
-    await _processRealtimeConversation(
-      userOriginal,
+
+    final validation = await KoreanTurnValidator.validate(
+      apiKey: _openAiKey,
+      transcribedText: userOriginal,
+      mode: 'circle_talk',
+      modeContext: 'Selected circle: ${widget.circleDescription}',
+      recentConversation: _recentHistory
+          .map((turn) => '${turn['role']}: ${turn['content']}')
+          .join('\n'),
+    );
+    if (!mounted || pipelineGeneration != _pipelineGeneration) return;
+    _log('[TURN-VALIDATE]',
+        'accepted=${validation.accepted} reason=${validation.reason}');
+    if (!validation.accepted) {
+      setState(() {
+        _localMessages.add(<String, dynamic>{
+          'role': 'SYSTEM',
+          'target': KoreanTurnValidator.retryLine,
+          'original': '',
+          'clarify': true,
+        });
+      });
+      _scrollToBottom();
+      await _speakSystemLine(KoreanTurnValidator.retryLine);
+      if (mounted && _isConversationActive) {
+        _restartConfiguredListening(
+            expectedPipelineGeneration: pipelineGeneration);
+      }
+      return;
+    }
+
+    await _processCircleTalkTurn(
+      validation.text,
       expectedPipelineGeneration: pipelineGeneration,
     );
   }
 
-  Future<void> _processRealtimeConversation(
+  Future<void> _processCircleTalkTurn(
     String userOriginal, {
     required int expectedPipelineGeneration,
   }) async {
@@ -1722,8 +1734,6 @@ $kSpokenReplyLengthPolicy
     _turnCounter++;
     final currentTurnId = _turnCounter;
     _isPipelineRunning = true;
-    _realtimeTurnActive = true;
-    StreamSubscription<String>? transcriptSubscription;
     int aiIndex = -1;
     try {
       if (mounted) {
@@ -1734,56 +1744,18 @@ $kSpokenReplyLengthPolicy
             'target': userOriginal,
             'original': '',
           });
-          _localMessages.add({
-            'role': 'SYSTEM',
-            'target': '',
-            'original': '',
-          });
-          aiIndex = _localMessages.length - 1;
         });
-        _scrollToCurrent(aiIndex);
+        _scrollToBottom();
       }
 
-      final connected = await _ensureAnyoneRealtimeConnected();
-      if (!connected ||
-          !isActivePipelineGeneration(
-            expected: expectedPipelineGeneration,
-            current: _pipelineGeneration,
-            mounted: mounted,
-            conversationActive: _isConversationActive,
-          )) {
-        throw StateError('Realtime session is unavailable.');
-      }
-
-      final adapter = _realtimeAdapter!;
-      final turn = adapter.requestConversationTurn(
-        turnId: 'anyone-$currentTurnId',
+      final aiOriginal = await UnifiedBrain.generateCircleMemberTurn(
+        apiKey: _openAiKey,
+        systemPrompt: _buildCircleMemberInstructions(),
         userText: userOriginal,
-        voice: _aiVoice,
-        instructions:
-            'Continue as a natural member of the selected circle. Let the user lead. Make exactly one brief conversational move in concise spoken ${resolveNativeLanguageName(FFAppState().nativeLang)}, normally one short sentence. Do not introduce a new topic, stack multiple points, lecture, or automatically end with a question.',
+        history: _recentHistory,
       );
-      _log('[RT-TURN]',
-          'turn=$currentTurnId input=text output=native_webrtc_audio lang=${resolveNativeLanguageName(FFAppState().nativeLang)}');
-
-      var streamedAiText = '';
-      transcriptSubscription = turn.textStream.listen((delta) {
-        if (delta.isEmpty ||
-            !mounted ||
-            expectedPipelineGeneration != _pipelineGeneration ||
-            currentTurnId != _turnCounter) {
-          return;
-        }
-        streamedAiText += delta;
-        if (aiIndex >= 0 && aiIndex < _localMessages.length) {
-          setState(() => _localMessages[aiIndex]['target'] = streamedAiText);
-        }
-      });
-
-      final outcome = await turn.done;
-      final aiOriginal = (await turn.finalText).trim();
-      if (outcome != RealtimeTurnOutcome.completed || aiOriginal.isEmpty) {
-        throw StateError('Realtime response did not complete.');
+      if (aiOriginal.isEmpty) {
+        throw StateError('Circle Talk response did not complete.');
       }
       if (!isActivePipelineGeneration(
             expected: expectedPipelineGeneration,
@@ -1795,16 +1767,19 @@ $kSpokenReplyLengthPolicy
         return;
       }
 
-      if (aiIndex >= 0 && aiIndex < _localMessages.length) {
-        setState(() {
-          _localMessages[aiIndex]['target'] = aiOriginal;
-          _localMessages[aiIndex]['original'] = '';
+      setState(() {
+        _localMessages.add({
+          'role': 'SYSTEM',
+          'target': aiOriginal,
+          'original': '',
         });
-        _scrollToCurrent(aiIndex);
-      }
+        aiIndex = _localMessages.length - 1;
+      });
+      _scrollToCurrent(aiIndex);
+      await _speakSystemLine(aiOriginal);
 
-      // 대화방은 한국어 텍스트만 넘긴다. Realtime WebRTC 오디오는 transport
-      // 내부에서 재생된 뒤 폐기되며 파일/캐시 저장 API에 전달하지 않는다.
+      // 대화방에는 한국어 텍스트만 저장한다. TTS 오디오는 재생 후 폐기하고
+      // 파일이나 캐시 형태로 대화 기록에 넣지 않는다.
       final hostLine = <String, dynamic>{
         'role': 'HOST',
         'original_text': userOriginal,
@@ -1816,8 +1791,7 @@ $kSpokenReplyLengthPolicy
       _saveTurnToFirestore([hostLine, systemLine]);
       _saveHistoryMessages([hostLine, systemLine]);
       _saveRecentHistory(userOriginal, aiOriginal);
-      _log('[RT-HISTORY]',
-          'turn=$currentTurnId text_only=true realtime_audio_saved=false');
+      _log('[GPT-HISTORY]', 'turn=$currentTurnId model=gpt-4o-mini tts=true');
     } catch (error) {
       _log('[RT-PIPE-ERR]', 'turn=$currentTurnId reason=${error.runtimeType}');
       if (mounted && aiIndex >= 0 && aiIndex < _localMessages.length) {
@@ -1828,8 +1802,6 @@ $kSpokenReplyLengthPolicy
         });
       }
     } finally {
-      await transcriptSubscription?.cancel();
-      _realtimeTurnActive = false;
       _isPipelineRunning = false;
       if (mounted &&
           _isConversationActive &&
@@ -4155,6 +4127,121 @@ class DeepgramV2VoiceManager {
 //   - 30초 타임아웃 + 스트림 에러 전파
 // ====================================================================
 class UnifiedBrain {
+  // ==================================================================
+  // 📦 [OPENING] 서클 첫 마디 — gpt-4o-mini가 한국어 한 문장으로 만든다.
+  // ------------------------------------------------------------------
+  // Realtime이 만들던 자리다. Realtime은 시크릿 발급이 막히면 첫 마디가
+  // 통째로 사라져 대화가 시작조차 안 됐다. 한 줄이라 스트리밍이 필요 없다.
+  // ==================================================================
+  static Future<String> generateKoreanOpener({
+    required String apiKey,
+    required String circleDescription,
+  }) async {
+    if (apiKey.isEmpty) return '';
+    final circle = circleDescription.trim().isEmpty
+        ? '편안한 일상 대화 커뮤니티'
+        : circleDescription.trim();
+    final client = http.Client();
+    try {
+      final response = await client
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.9,
+              'max_tokens': 80,
+              'messages': [
+                {
+                  'role': 'system',
+                  'content': '''You are one member of this circle: $circle
+You have just run into another member. Speak exactly ONE short opening line in Korean — what a member would really say first.
+
+React to something ordinary in this circle's daily life, or ask one small question a member would actually ask.
+Never act as a host, guide, or narrator. Do not welcome anyone, explain the circle, or invite them to start talking.
+Do not use English, quotation marks, or emoji.
+Natural spoken Korean, one sentence.
+Return only the line itself.'''
+                },
+                {
+                  'role': 'user',
+                  'content': 'Speak your opening line now.',
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode != 200) return '';
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      final text =
+          (body['choices']?[0]?['message']?['content'] as String?)?.trim() ??
+              '';
+      return text.replaceAll(RegExp(r'^["“”\s]+|["“”\s]+$'), '');
+    } catch (_) {
+      return '';
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Circle Talk regular turn. The selected-circle identity lives in
+  /// [systemPrompt]; recent turns keep the member persona and topic stable.
+  static Future<String> generateCircleMemberTurn({
+    required String apiKey,
+    required String systemPrompt,
+    required String userText,
+    required List<Map<String, String>> history,
+  }) async {
+    if (apiKey.isEmpty || userText.trim().isEmpty) return '';
+    final client = http.Client();
+    try {
+      final response = await client
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: <String, String>{
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode(<String, dynamic>{
+              'model': 'gpt-4o-mini',
+              'temperature': 0.75,
+              'max_tokens': 120,
+              'messages': <Map<String, String>>[
+                <String, String>{
+                  'role': 'system',
+                  'content': systemPrompt,
+                },
+                ...history.map((turn) => <String, String>{
+                      'role':
+                          turn['role'] == 'assistant' ? 'assistant' : 'user',
+                      'content': turn['content'] ?? '',
+                    }),
+                <String, String>{
+                  'role': 'user',
+                  'content': userText.trim(),
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 12));
+      if (response.statusCode != 200) return '';
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      final text =
+          (body['choices']?[0]?['message']?['content'] as String?)?.trim() ??
+              '';
+      return text.replaceAll(RegExp(r'^["“”\s]+|["“”\s]+$'), '');
+    } catch (_) {
+      return '';
+    } finally {
+      client.close();
+    }
+  }
+
   /// 💡 변경: static Client 제거, 요청별 새 Client 사용
   static Stream<String> streamChat({
     required String apiKey,
