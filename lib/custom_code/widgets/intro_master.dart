@@ -577,26 +577,9 @@ class _IntroMasterState extends State<IntroMaster> {
       barrierColor: Colors.black.withValues(alpha: 0.88),
       transitionDuration: const Duration(milliseconds: 220),
       pageBuilder: (dialogContext, animation, secondaryAnimation) {
-        return Material(
+        return const Material(
           color: Colors.transparent,
-          child: SafeArea(
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => Navigator.of(dialogContext).pop(),
-              child: Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(18),
-                    child: Image.asset(
-                      'assets/images/duo_promo_one_cut.png',
-                      fit: BoxFit.contain,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
+          child: SafeArea(child: _DuoPromoViewer()),
         );
       },
       transitionBuilder: (context, animation, secondaryAnimation, child) {
@@ -3012,6 +2995,90 @@ class _IntroMasterState extends State<IntroMaster> {
         ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(13),
+        ),
+      ),
+    );
+  }
+}
+
+// ====================================================================
+// 🔍 [Duo 한 컷 뷰어] 손가락으로 벌려 확대해 보는 홍보 이미지
+// --------------------------------------------------------------------
+//   글자가 작아 원본 크기로는 읽기 어렵다는 얘기가 있어 확대를 붙였다.
+//   두 손가락으로 벌리거나 두 번 두드리면 커지고, 커진 채로 끌어서
+//   구석까지 볼 수 있다.
+// ====================================================================
+class _DuoPromoViewer extends StatefulWidget {
+  const _DuoPromoViewer();
+
+  @override
+  State<_DuoPromoViewer> createState() => _DuoPromoViewerState();
+}
+
+class _DuoPromoViewerState extends State<_DuoPromoViewer> {
+  static const double _zoomedScale = 2.5;
+
+  final TransformationController _controller = TransformationController();
+  Offset? _lastDoubleTapPoint;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  bool get _isZoomed => _controller.value.getMaxScaleOnAxis() > 1.01;
+
+  void _resetZoom() => _controller.value = Matrix4.identity();
+
+  /// 두 번 두드린 지점이 화면에 그대로 남도록 그 점을 중심으로 당긴다.
+  void _toggleZoom() {
+    if (_isZoomed) {
+      _resetZoom();
+      return;
+    }
+    final point = _lastDoubleTapPoint;
+    if (point == null) return;
+    _controller.value = Matrix4.identity()
+      ..translateByDouble(
+        -point.dx * (_zoomedScale - 1),
+        -point.dy * (_zoomedScale - 1),
+        0,
+        1,
+      )
+      ..scaleByDouble(_zoomedScale, _zoomedScale, _zoomedScale, 1);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      // 확대해 둔 상태에서 무심코 두드렸다고 닫아 버리면 다시 확대해야 한다.
+      // 먼저 원래 크기로 돌리고, 그 상태에서 두드릴 때 닫는다.
+      onTap: () {
+        if (_isZoomed) {
+          _resetZoom();
+          return;
+        }
+        Navigator.of(context).pop();
+      },
+      onDoubleTapDown: (details) => _lastDoubleTapPoint = details.localPosition,
+      onDoubleTap: _toggleZoom,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(18),
+            child: InteractiveViewer(
+              transformationController: _controller,
+              minScale: 1,
+              maxScale: 4,
+              child: Image.asset(
+                'assets/images/duo_promo_one_cut.png',
+                fit: BoxFit.contain,
+              ),
+            ),
+          ),
         ),
       ),
     );
