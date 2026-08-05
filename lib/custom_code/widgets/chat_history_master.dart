@@ -148,6 +148,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   String? _entryMessageDocId;
   String _expandedSentence = "";
   String _polishedSentence = "";
+  // 완성문장에 한글이 남아 있으면 아직 영어가 안 만들어진 것이다.
+  // 8019줄 [HANGUL-GUARD]가 Tutor 경로에서 쓰는 것과 같은 판정이다.
+  static final RegExp _stepExpandHangul = RegExp(r'[가-힣ᄀ-ᇿ㄰-㆏]');
   bool _polishedLoadDone = false;
   String _formattedFullSentence = "";
   // 🔧 [STAMPEDE-FIX] 같은 청크에 대한 동시 API 호출 방지
@@ -891,10 +894,89 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     }
   }
 
+  /// 대화방이 넘긴 한국어 완성문장을 P3용 영어로 만든다.
+  ///
+  /// 대화방은 한국어 자료만 넘긴다. 영어는 히스토리가 자기 규칙으로 만드는데,
+  /// 그 자리가 여기 P3 진입 시점이다 — 바로 아래 Polished 생성과 같은 자리다.
+  /// `_fetchOpenAITTS`는 받은 글자를 그대로 읽을 뿐 번역하지 않으므로, 이걸
+  /// 건너뛰면 "완성 문장" 탭이 한국어를 띄우고 한국어를 소리내어 읽는다.
+  Future<String?> _translateExpandedToTarget(String source) async {
+    final text = source.trim();
+    if (text.isEmpty || _apiKey.isEmpty) return null;
+    try {
+      final targetLanguage = (_sessionTargetLang ?? 'English').trim();
+      final response = await http
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: <String, String>{
+              'Authorization': 'Bearer $_apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode(<String, dynamic>{
+              'model': 'gpt-4o-mini',
+              'temperature': 0.0,
+              'max_tokens': 300,
+              'messages': <Map<String, String>>[
+                <String, String>{
+                  'role': 'system',
+                  'content':
+                      'The user built this Korean sentence step by step in a speaking '
+                          'practice. Translate it into ONE natural spoken $targetLanguage '
+                          'sentence for shadowing practice.\n'
+                          '- Keep the speaker viewpoint, meaning, tense, and tone.\n'
+                          '- Do not add or drop information.\n'
+                          '- Spoken rhythm, easy to say out loud. Not written prose.\n'
+                          '- The result must be 100% $targetLanguage and must NOT contain '
+                          'any Korean (Hangul) characters.\n'
+                          'Return only the sentence, with no label or explanation.',
+                },
+                <String, String>{'role': 'user', 'content': text},
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) {
+        debugPrint('[P3-EXPAND-TARGET] status=${response.statusCode}');
+        return null;
+      }
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      final choices = body['choices'] as List? ?? const <dynamic>[];
+      final firstChoice =
+          choices.isEmpty ? null : choices.first as Map<String, dynamic>?;
+      final message = firstChoice?['message'] as Map<String, dynamic>?;
+      final translated = (message?['content'] ?? '').toString().trim();
+      return translated.isEmpty ? null : translated;
+    } catch (error) {
+      debugPrint('[P3-EXPAND-TARGET] failed reason=${error.runtimeType}');
+      return null;
+    }
+  }
+
   Future<void> _prepareStepP3(String sentence, int generation) async {
     try {
       if (!mounted || generation != _stepP3PreparationGeneration) return;
-      final expanded = sentence.trim();
+      var expanded = sentence.trim();
+
+      // 한글이 남아 있으면 아직 영어가 안 만들어진 방이다. 여기서 한 번 만들고
+      // 방 문서에 캐시해, 다음 진입부터는 이 API를 다시 타지 않게 한다.
+      if (expanded.isNotEmpty && _stepExpandHangul.hasMatch(expanded)) {
+        final target = await _translateExpandedToTarget(expanded);
+        if (!mounted || generation != _stepP3PreparationGeneration) return;
+        if (target != null) {
+          expanded = target;
+          _expandedSentence = expanded;
+          try {
+            await widget.historyDoc.update({'expanded_sentence': expanded});
+            debugPrint('[P3-EXPAND-TARGET] generated model=gpt-4o-mini');
+          } catch (e) {
+            debugPrint('[prepareStepP3] expanded cache save failed: $e');
+          }
+        } else {
+          debugPrint('[P3-EXPAND-TARGET] failed → 한국어 완성문장 그대로 사용');
+        }
+      }
+
       if (expanded.isNotEmpty && _polishedSentence.trim().isEmpty) {
         final polished = await _polishExpandedSentence(
           expanded,
