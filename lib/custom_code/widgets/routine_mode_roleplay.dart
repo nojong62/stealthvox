@@ -469,6 +469,7 @@ $kSpokenReplyLengthPolicy
             _scenarioUserRole = RoleplayScenarioStore.userRole;
             _scenarioKeyword = RoleplayScenarioStore.situation;
           });
+          _maybeAutoStartScenario();
         } else {
           _generateScenario();
         }
@@ -476,6 +477,22 @@ $kSpokenReplyLengthPolicy
     } catch (e) {
       print('❌ Key Load Error: $e');
     }
+  }
+
+  /// 시나리오가 정해지면 AI가 알아서 첫 대사를 건다. 예전에는 Start 버튼을
+  /// 눌러야 시작됐다. 조건은 지웠던 그 버튼의 표시 조건과 같다 — 역할이 정해졌고,
+  /// 아직 아무 말도 오가지 않았고, 첫 대사가 재생 중이 아닐 때 딱 한 번.
+  void _maybeAutoStartScenario() {
+    if (!mounted) return;
+    if (_openAiKey.isEmpty || _scenarioAiRole.isEmpty) return;
+    if (_localMessages.isNotEmpty ||
+        _isAiOpenerPlaying ||
+        _isConversationActive) {
+      return;
+    }
+    _resetIdleTimer();
+    setState(() => _isConversationActive = true);
+    _generateAndPlayAiOpener();
   }
 
   // ====================================================================
@@ -501,6 +518,7 @@ $kSpokenReplyLengthPolicy
         RoleplayScenarioStore.situation = _scenarioSituation;
         RoleplayScenarioStore.aiRole = _scenarioAiRole;
         RoleplayScenarioStore.userRole = _scenarioUserRole;
+        _maybeAutoStartScenario();
       }
     } catch (e) {
       print('❌ 시나리오 생성 에러: $e');
@@ -2536,51 +2554,10 @@ User role: ${_roleplayUserLabel.trim()}''',
                         fontSize: 20,
                         fontWeight: FontWeight.bold)),
               ),
-              // Start 버튼: AI 역할 설정 완료 & 대화 미시작 상태
-              if (_scenarioAiRole.isNotEmpty &&
-                  _localMessages.isEmpty &&
-                  !_isAiOpenerPlaying &&
-                  !_isConversationActive)
-                GestureDetector(
-                  onTap: () {
-                    if (_openAiKey.isEmpty) return;
-                    _resetIdleTimer();
-                    setState(() => _isConversationActive = true);
-                    _generateAndPlayAiOpener();
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 20, vertical: 10),
-                    decoration: BoxDecoration(
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF16A34A), Color(0xFF15803D)],
-                      ),
-                      borderRadius: BorderRadius.circular(22),
-                      boxShadow: [
-                        BoxShadow(
-                          color:
-                              const Color(0xFF16A34A).withValues(alpha: 0.35),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: const Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.play_arrow_rounded,
-                            color: Colors.white, size: 18),
-                        SizedBox(width: 6),
-                        Text('Start',
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold)),
-                      ],
-                    ),
-                  ),
-                )
-              else if (_isAiOpenerPlaying)
+              // Start 버튼은 없앴다. 시나리오가 정해지면 AI가 알아서 먼저
+              // 말을 건다(_maybeAutoStartScenario). 버튼을 한 번 더 누르게
+              // 하는 것은 "첫 소리는 AI부터"라는 대화 설계와 어긋난다.
+              if (_isAiOpenerPlaying)
                 // AI 첫 발화 재생 중
                 const SizedBox(
                   width: 44,
