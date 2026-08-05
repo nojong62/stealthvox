@@ -254,13 +254,13 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     });
   }
 
-  /// 🎯 서클 분야 120개.
+  /// 🎯 서클 분야 200개. 20~50대가 실제로 속해 있을 법한 곳만 담는다.
   ///   모델에게 "평범한 서클 하나 만들어"라고만 하면 카페·회사 같은 확률 높은
   ///   답 몇 개로 수렴한다. 온도를 올리면 이번엔 기괴한 게 나온다. 그래서
   ///   분야를 여기서 정해 던지고, 모델은 그 안에서만 이름을 짓게 한다.
   ///   다양성은 이 목록이, 색깔은 분야의 구체성이 만든다.
   static const List<String> _circleDomains = [
-    // ── 직장·업종 (60) ──
+    // ── 직장·업종 (100) ──
     '무역회사', '물류센터', '택배 대리점', '제조 공장', '자동차 정비소', '건설 현장',
     '인테리어 시공팀', '부동산 중개사무소', '회계사무소', '세무사사무소', '법무사사무소',
     '보험 설계사', '은행 지점', '증권사 영업점', '광고 대행사', '디자인 스튜디오',
@@ -271,7 +271,15 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     '항공사 지상직', '렌터카 영업소', '카페', '베이커리', '정육점', '반찬가게',
     '청과상', '수산시장', '편의점', '대형마트', '백화점 매장', '옷가게',
     '신발가게', '안경점', '꽃집', '문구점', '서점', '미용실', '네일숍', '세탁소',
-    // ── 동호회·취미 (35) ──
+    '반도체 공장', '조선소', '화학 플랜트', '발전소 정비팀', '철도 정비창',
+    '시내버스 회사', '택시 회사', '화물 운송 기사들', '항만 하역팀', '식품 가공 공장',
+    '양조장', '커피 로스터리', '프랜차이즈 본사', '치킨집', '국밥집', '삼겹살집',
+    '횟집', '중국집', '분식집', '이자카야', '와인바', '배달 라이더들',
+    '이사 업체', '청소 용역팀', '아파트 관리사무소', '소방서', '파출소', '우체국',
+    '주민센터', '시청 민원실', '농협 지점', '축산 농가', '딸기 농장', '어촌계',
+    '목공소', '철물점', '자전거 수리점', '사진 스튜디오', '웨딩 플래너 사무실',
+    '인력 파견 사무소',
+    // ── 동호회·취미 (55) ──
     '축구 동호회', '풋살팀', '배드민턴 동호회', '탁구 동호회', '테니스 동호회',
     '볼링 동호회', '야구 동호회', '농구 동호회', '등산 모임', '자전거 동호회',
     '러닝 크루', '마라톤 모임', '수영 동호회', '골프 모임', '낚시 동호회',
@@ -279,12 +287,45 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     '헬스장 회원', '복싱 체육관', '검도 도장', '태권도장', '독서 모임',
     '사진 동호회', '영화 감상 모임', '보드게임 모임', '합창단', '직장인 밴드',
     '통기타 모임', '댄스 동아리', '서예 교실', '도예 공방', '베이킹 클래스',
-    // ── 지역·생활 (25) ──
+    '스쿠버다이빙 동호회', '서핑 모임', '스키 동호회', '스노보드 모임', '배구 동호회',
+    '족구 모임', '당구 동호회', '다트 동호회', '바둑 모임', '장기 동호회',
+    '캘리그라피 교실', '수채화 교실', '뜨개질 모임', '가죽공예 공방', '향수 공방',
+    '와인 동호회', '위스키 모임', '요리 교실', '국궁 활터', '승마 클럽',
+    // ── 지역·생활 (45) ──
     '아파트 입주민 모임', '아파트 부녀회', '반상회', '학부모회', '어린이집 학부모 모임',
     '통학 도우미 모임', '반려견 산책 모임', '고양이 집사 모임', '텃밭 가꾸기 모임',
     '봉사 동아리', '헌혈 동호회', '재활용 캠페인 모임', '동네 청소 모임', '육아 품앗이',
     '신혼부부 모임', '자취생 모임', '기숙사 룸메이트들', '향우회', '동창회',
-    '사내 동호회', '등산 계모임', '계모임', '종교 소모임', '어르신 복지관', '청년 창업 모임',
+    '사내 동호회', '동네 맘카페 모임', '계모임', '종교 소모임', '복지관 사회복지사들',
+    '청년 창업 모임',
+    '귀농 귀촌 모임', '전원주택 이웃들', '원룸 이웃들', '재건축 조합', '상가 번영회',
+    '전통시장 상인회', '소상공인 모임', '프리랜서 모임', '대학원생 모임', '워킹맘 모임',
+    '아빠 육아 모임', '다둥이 부모 모임', '유기견 봉사팀', '지역 축제 준비위',
+    '마을 방범대', '이직 준비 모임', '재테크 스터디', '자격증 준비 모임',
+    '집수리 품앗이 모임', '캠핑카 오너 모임',
+  ];
+
+  /// 🎨 분야에 얹는 변형 축 14개.
+  ///   분야 200개를 다 돌아도 모델이 짓는 이름은 "OO 동호회 초보반",
+  ///   "동네 OO 단골들" 같은 몇 가지 틀로 수렴한다. 분야가 한 바퀴 돌 때마다
+  ///   이 결을 바꿔 던지면 같은 분야가 다시 와도 다른 서클이 나온다.
+  ///   200 × 14 = 2,800가지. 첫 칸이 빈 문자열인 건 1회차는 분야 그대로
+  ///   보여주기 위해서다.
+  static const List<String> _circleFlavors = [
+    '',
+    '새로 만들어진 지 얼마 안 된',
+    '오래돼서 사람들이 서로 다 아는',
+    '신입과 막내가 많은',
+    '10년 넘은 베테랑이 많은',
+    '20대가 주축인',
+    '30대가 주축인',
+    '40~50대가 주축인',
+    '주말에만 모이는',
+    '퇴근 후 저녁에 모이는',
+    '지방 소도시에 있는',
+    '사람이 몇 명 안 되는 작은',
+    '사람이 아주 많은 큰',
+    '평소엔 온라인으로 만나는',
   ];
 
   static const String _circleDomainCursorKey = 'circle_domain_cursor_';
@@ -357,9 +398,10 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       }
       if (apiKey.isEmpty) throw StateError('OpenAI key unavailable');
 
-      // 🔁 회원별 순차 배분. 무작위로 뽑으면 120개를 다 보기 전에 같은 분야가
+      // 🔁 회원별 순차 배분. 무작위로 뽑으면 200개를 다 보기 전에 같은 분야가
       //   계속 겹친다. 커서를 하나씩 밀어 한 바퀴 안에는 분야가 안 겹치게 하고,
-      //   두 바퀴째부터는 순서를 새로 섞는다.
+      //   두 바퀴째부터는 순서를 새로 섞는다. 바퀴마다 결(flavor)도 한 칸씩
+      //   밀어, 같은 분야가 다시 와도 다른 서클이 된다.
       final uid = FirebaseAuth.instance.currentUser?.uid ?? 'anonymous';
       final prefs = await SharedPreferences.getInstance();
       final cursorKey = '$_circleDomainCursorKey$uid';
@@ -368,8 +410,12 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       final order = List<int>.generate(_circleDomains.length, (i) => i)
         ..shuffle(Random(uid.hashCode ^ (round * 0x9E3779B9)));
       final domain = _circleDomains[order[cursor % _circleDomains.length]];
+      final flavor = _circleFlavors[round % _circleFlavors.length];
+      // 모델에게는 결까지 붙인 한 덩어리로 던진다. 1회차는 flavor가 비어
+      // 있어 예전과 똑같이 분야만 간다.
+      final seed = flavor.isEmpty ? domain : '$flavor $domain';
       await prefs.setInt(cursorKey, cursor + 1);
-      debugPrint('[CIRCLE-RECOMMEND] domain=$domain round=$round');
+      debugPrint('[CIRCLE-RECOMMEND] seed=$seed round=$round');
 
       final response = await OpenAiConnectionPool.instance.client
           .post(
@@ -389,14 +435,20 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
                 <String, String>{
                   'role': 'system',
                   'content':
-                      '''Name ONE real Korean circle that exists inside this field: "$domain".
+                      '''Name ONE real Korean circle that matches this seed: "$seed".
 A circle is a workplace team, a shop and its regulars, a club, or a local community.
+Its members are ordinary Korean adults between their 20s and their 50s.
 Return ONLY valid JSON: {"name":"..."}.
 - Stay inside "$domain". Do not drift to another field.
+- Reflect the whole seed, not just the field. If the seed describes who they are
+  or when they meet, let the name carry that.
 - Give it the flavour of that field: who these people are and what they deal with.
   "무역회사" → 무역회사 영업팀 / 수출 통관 담당자들 / 무역회사 신입사원들
   "배드민턴 동호회" → 동네 배드민턴 동호회 / 배드민턴 동호회 초보반
   "병원 간호팀" → 소아과 간호사들 / 응급실 야간 간호팀
+- Vary the shape of the name. Do NOT fall back on the same few templates every
+  time — "OO 동호회 초보반", "동네 OO 단골들", "OO 모임 회원들" are worn out.
+  Name the people, the place, the shift, or the thing they gather around.
 - It must be a group that really exists and that ordinary people join or visit.
   Concrete is good. Weird is not.
   Bad: 우주덕후 무역회사, 심해어 연구 간호팀, 세계정복 배드민턴부
@@ -405,7 +457,7 @@ Return ONLY valid JSON: {"name":"..."}.
                 },
                 <String, String>{
                   'role': 'user',
-                  'content': '"$domain" 분야의 서클 하나를 추천해 줘.',
+                  'content': '"$seed" 서클 하나를 추천해 줘.',
                 },
               ],
             }),
