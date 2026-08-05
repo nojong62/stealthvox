@@ -115,9 +115,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   static const int _turnPcmBufferMaxBytes = 32000 * 60;
   int _pipelineGeneration = 0;
   bool _aiTurnActive = false;
-  // 🎤 [BARGE-IN] 첫 대사가 울리는 중인지, 그리고 그 소리를 끊을 fetcher.
-  bool _isOpenerSpeaking = false;
-  ChunkedTtsFetcher? _openerTtsFetcher;
 
   void _log(String tag, String msg) {
     final ts = DateTime.now().toIso8601String().substring(11, 23);
@@ -643,15 +640,11 @@ $kSpokenReplyLengthPolicy
         isUser: false,
         onLog: _log,
       );
-      _openerTtsFetcher = fetcher;
-      _isOpenerSpeaking = true;
       fetcher.addText(aiKorean);
 
-      // 🎤 첫 대사가 끝나기를 기다리지 않고 마이크를 연다. 유저가 말을 자르고
-      //   들어오면 onTranscriptUpdate가 이 소리를 끊는다. 스피커로 나간 AI
-      //   목소리는 녹음쪽 echoCancel이 걷어낸다.
-      unawaited(_startDeepgramListening());
-
+      // 🎤 마이크는 첫 대사가 끝난 뒤 아래 finally에서 연다. 동시에 열어 봤더니
+      //   스피커로 나가는 AI 목소리를 echoCancel이 지우면서 유저 입력까지 통째로
+      //   눌려, Deepgram이 빈 전사만 돌려줬다. 바지인보다 입력이 먼저다.
       int ticks = 0;
       while ((fetcher.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
           mounted &&
@@ -663,11 +656,6 @@ $kSpokenReplyLengthPolicy
           break;
         }
       }
-      if (identical(_openerTtsFetcher, fetcher)) {
-        _openerTtsFetcher = null;
-        _isOpenerSpeaking = false;
-      }
-
       await _saveHistoryMessages(<Map<String, dynamic>>[
         <String, dynamic>{
           'role': 'SYSTEM',
@@ -682,10 +670,7 @@ $kSpokenReplyLengthPolicy
       }
     } finally {
       _isAiOpenerPlaying = false;
-      _isOpenerSpeaking = false;
-      _openerTtsFetcher = null;
-      // 위에서 이미 열었지만, 첫 대사 생성이 실패해 거기까지 못 갔을 수 있다.
-      // 이미 듣고 있으면 _startDeepgramListening이 스스로 걸러낸다.
+      // 첫 대사가 실패해도 마이크는 반드시 열어 대화가 죽지 않게 한다.
       if (mounted && _isConversationActive) _startDeepgramListening();
     }
   }
@@ -886,15 +871,6 @@ $kSpokenReplyLengthPolicy
       },
       onTranscriptUpdate: (transcript) {
         BillingTicker.instance.resumeFromActivity('roleplay_stt_partial');
-        // 🎤 [BARGE-IN] 첫 대사가 울리는 중에 유저가 말을 시작하면 즉시 끊는다.
-        //   아직 안 돌아온 TTS 응답까지 막아야 소리가 되살아나지 않는다.
-        if (_isOpenerSpeaking && transcript.trim().isNotEmpty) {
-          _isOpenerSpeaking = false;
-          _openerTtsFetcher?.cancel();
-          _openerTtsFetcher = null;
-          _ttsQueueManager.stop();
-          _log('🎤 [BARGE-IN]', '유저 발화 감지 → 첫 대사 TTS 즉시 중단');
-        }
         _swDeepgram.reset();
         _swDeepgram.start();
       },

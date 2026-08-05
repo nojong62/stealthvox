@@ -727,12 +727,11 @@ line had never been said. Never build the conversation on a line you had to gues
     _ttsQueueManager.setUserTurn(false);
     _ttsQueueManager.setAiPaused(false);
 
-    // 🗣️ 첫 마디는 AI가 말로 건넨다. 예전에는 화면 중앙에 글씨만 2초 띄우고
-    //    아무 말도 하지 않아, 대화가 시작됐다는 신호가 약했다.
-    //    말이 끝나기를 기다리지 않고 마이크를 같이 연다. 유저가 먼저 입을
-    //    열면 그 발화가 곧 시작이다. 스피커로 나간 AI 목소리는 녹음쪽
-    //    echoCancel이 걷어내고, 남은 잔향은 _isNoiseTranscript가 거른다.
-    unawaited(_speakOpeningOnce());
+    // 🗣️ 첫 마디를 끝까지 들려준 뒤에 마이크를 연다.
+    //    동시에 열어 봤더니 Deepgram이 빈 전사(chunk="")만 돌려줬다. 스피커로
+    //    AI 목소리가 나가는 동안에는 echoCancel이 입력을 통째로 눌러, 유저가
+    //    무슨 말을 해도 아무것도 안 잡힌다. 바지인보다 입력이 먼저다.
+    await _speakOpeningOnce();
     await _startUserListening();
   }
 
@@ -1850,6 +1849,14 @@ line had never been said. Never build the conversation on a line you had to gues
   }
 
   Future<void> _startDeepgramListening() async {
+    // 이미 듣고 있으면 새로 열지 않는다. 첫 마디 재생과 마이크 열기가 겹치고
+    // 방을 드나들면 여기가 여러 번 불리는데, 그대로 두면 VoiceManager가 계속
+    // 새로 생겨 버려진 Deepgram 소켓이 쌓인다. 턴이 끝나면 _voiceManager가
+    // null이 되므로 다음 턴 재개는 막히지 않는다.
+    if (_voiceManager != null) {
+      _log('🎤 [LISTEN-SKIP]', '이미 듣는 중 → 중복 오픈 무시');
+      return;
+    }
     if (_deepgramKey.isEmpty || !(await _audioRecorder.hasPermission())) return;
     // 🌱 5턴 완료 시 마이크 잠김 (유저가 "새 주제" 버튼 눌러야 리셋됨)
     if (_isSessionComplete) return;
@@ -4925,12 +4932,24 @@ class DeepgramV2VoiceManager {
         '&filler_words=false',
       );
 
-      _channel = IOWebSocketChannel.connect(
+      final channel = IOWebSocketChannel.connect(
         uri,
         headers: {'Authorization': 'Token $apiKey'},
         pingInterval: const Duration(seconds: 10),
       );
-      _lg('🎤 [DG-01]', 'WebSocket 연결 요청 전송');
+      _channel = channel;
+      _lg('🎤 [DG-01]',
+          'WebSocket 연결 요청 전송 keyLen=${apiKey.length} lang=$langCode');
+
+      // 🔬 핸드셰이크가 실제로 끝났는지 본다. IOWebSocketChannel.connect는
+      //   즉시 반환하고 뒤에서 붙으므로, 이 로그가 없으면 소켓이 아직 안 붙은
+      //   것이고 그 사이 sink.add로 넣은 오디오는 어디에도 도달하지 않는다.
+      unawaited(channel.ready.then<void>((_) {
+        if (_isDisposed) return;
+        _lg('🎤 [DG-READY]', 'WebSocket 핸드셰이크 완료');
+      }).catchError((Object e) {
+        _lg('❌ [DG-READY-FAIL]', '핸드셰이크 실패: ${e.runtimeType} $e');
+      }));
 
       await _wsSub?.cancel();
       _wsSub = _channel!.stream.listen(
@@ -4987,6 +5006,13 @@ class DeepgramV2VoiceManager {
                 _lg('🎤 [MIC-08]', '패킷 50개 송신 중 (마이크 정상 동작)');
               }
               final packet = Uint8List.fromList(data);
+              if (_channel == null) {
+                if (packetCount == 1) {
+                  _lg('❌ [DG-NO-CHANNEL]', '소켓이 없어 오디오가 버려진다');
+                }
+              } else if (packetCount == 1) {
+                _lg('📡 [DG-FIRST-SEND]', 'bytes=${packet.length}');
+              }
               _channel?.sink.add(packet);
               onAudioData?.call(packet);
             }

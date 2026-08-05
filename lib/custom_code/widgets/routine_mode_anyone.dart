@@ -183,8 +183,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   bool _isStartingListening = false;
   bool _isPipelineRunning = false;
   bool _aiTurnActive = false;
-  // 🎤 [BARGE-IN] 첫 마디가 울리는 중인지. 유저가 입을 열면 어댑터를 세운다.
-  bool _isOpenerSpeaking = false;
   bool _isAiOpenerPlaying = false; // AI가 서클 일원으로 먼저 거는 첫 마디
   bool _openerDone = false; // 세션당 1회만
   bool _listeningReadyReported = false;
@@ -1012,14 +1010,11 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
           'original_text': aiText,
         },
       ]);
-      // 🎤 첫 마디가 끝나기를 기다리지 않고 마이크를 연다. 유저가 말을 자르고
-      //   들어오면 onTranscriptUpdate가 이 소리를 끊는다. 스피커로 나간 AI
-      //   목소리는 녹음쪽 echoCancel이 걷어낸다.
-      _isOpenerSpeaking = true;
-      unawaited(_startDeepgramListening());
+      // 🎤 마이크는 첫 마디가 끝난 뒤 아래 finally에서 연다. 동시에 열어 봤더니
+      //   스피커로 나가는 AI 목소리를 echoCancel이 지우면서 유저 입력까지 통째로
+      //   눌려, Deepgram이 빈 전사만 돌려줬다. 바지인보다 입력이 먼저다.
       // 보이스·모델 매핑은 어댑터가 정한다 — 여기서 모델명을 쓰지 않는다.
       await _speakSystemLine(aiText);
-      _isOpenerSpeaking = false;
       _log('[OPENER]', 'model=gpt-4o-mini lang=ko text_only_history=true');
     } catch (error) {
       _log('[OPENER-ERR]', 'reason=${error.runtimeType}');
@@ -1028,7 +1023,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       }
     } finally {
       _isAiOpenerPlaying = false;
-      _isOpenerSpeaking = false;
+
       // 오프너가 실패해도 마이크는 반드시 열어 대화가 죽지 않게 한다.
       // 위에서 이미 열었으면 중복 호출은 스스로 걸러진다.
       if (mounted) await _startDeepgramListening();
@@ -1255,7 +1250,7 @@ $kSpokenReplyLengthPolicy
     _ttsAdapter.invalidateGenerationsBefore(_pipelineGeneration);
     _ttsAdapter.stopAll(reason: 'stop_everything');
     _aiTurnActive = false;
-    _isOpenerSpeaking = false;
+
     _isAiOpenerPlaying = false;
     _openerDone = false; // 다시 입장하면 AI가 새로 말을 건다
     if (mounted && !_isDisposing) setState(() {});
@@ -1417,13 +1412,6 @@ $kSpokenReplyLengthPolicy
           if (!isCurrentGeneration()) {
             _log('🎤 [LISTEN-STALE]', 'onTranscriptUpdate ignored');
             return;
-          }
-          // 🎤 [BARGE-IN] 첫 마디가 울리는 중에 유저가 말을 시작하면 즉시 끊는다.
-          //   어댑터의 stopAll은 아직 안 돌아온 요청까지 세대로 막아 준다.
-          if (_isOpenerSpeaking && transcript.trim().isNotEmpty) {
-            _isOpenerSpeaking = false;
-            _ttsAdapter.stopAll(reason: 'barge_in_opener');
-            _log('🎤 [BARGE-IN]', '유저 발화 감지 → 첫 마디 TTS 즉시 중단');
           }
           _swDeepgram.reset();
           _swDeepgram.start();
