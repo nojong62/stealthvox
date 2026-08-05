@@ -2002,7 +2002,7 @@ User role: ${_roleplayUserLabel.trim()}''',
           'Content-Type': 'application/json',
         },
         body: jsonEncode({
-          'model': 'gpt-4o-mini-tts',
+          'model': 'tts-1',
           'input': text,
           'voice': 'nova',
           'speed': 1.0,
@@ -3359,7 +3359,7 @@ class ChunkedTtsFetcher {
                 'Content-Type': 'application/json',
               },
               body: jsonEncode({
-                'model': 'gpt-4o-mini-tts',
+                'model': 'tts-1',
                 'input': text,
                 'voice': voice,
                 'speed': 1.0,
@@ -3696,7 +3696,7 @@ class HybridTtsPlayer {
                   'Content-Type': 'application/json',
                 },
                 body: jsonEncode({
-                  'model': 'gpt-4o-mini-tts',
+                  'model': 'tts-1',
                   'input': fullSentence,
                   'voice': voice,
                   'speed': 1.0,

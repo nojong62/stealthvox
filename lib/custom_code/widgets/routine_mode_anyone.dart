@@ -4860,7 +4860,7 @@ class ChunkedTtsFetcher {
                       'Content-Type': 'application/json',
                     },
                     body: jsonEncode({
-                      'model': 'gpt-4o-mini-tts',
+                      'model': 'tts-1',
                       'input': text,
                       'voice': voice,
                       'speed': 1.0,
@@ -5200,7 +5200,7 @@ class HybridTtsPlayer {
                   'Content-Type': 'application/json',
                 },
                 body: jsonEncode({
-                  'model': 'gpt-4o-mini-tts',
+                  'model': 'tts-1',
                   'input': sentence,
                   'voice': _voice,
                   'speed': 1.0,

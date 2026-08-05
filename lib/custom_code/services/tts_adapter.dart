@@ -34,7 +34,12 @@ class TtsAdapterConfig {
   static const String provider = 'openai';
 
   /// 현재 TTS 모델. 교체 시 여기만 바꾼다 — 대화방 코드는 손대지 않는다.
-  static const String model = 'gpt-4o-mini-tts';
+  ///
+  /// 3모드 AI 음성은 tts-1 + nova가 스펙이다. 한때 gpt-4o-mini-tts로 바꿨더니
+  /// 한국어를 또박또박 읽어 영어보다 눈에 띄게 처졌다. tts-1은 가볍고 빠르며
+  /// `speed` 파라미터가 실제로 먹는다(gpt-4o-mini-tts는 `instructions`로만
+  /// 움직인다). 바꾸려면 speed/instructions 지원 여부부터 확인할 것.
+  static const String model = 'tts-1';
 
   /// OpenAI /v1/audio/speech 의 pcm 출력 규격: 24kHz, 16-bit LE, mono.
   static const String outputFormat = 'pcm';
@@ -77,7 +82,7 @@ class TtsAdapterConfig {
   /// 않고, 플레이어가 미리 받아 둘 수 있는 여유만 두 배로 늘린다.
   static const int playerBufferSize = 65536;
 
-  /// 화자별 체감 음량. gpt-4o-mini-tts의 nova(AI)가 로비에서 고른 유저
+  /// 화자별 체감 음량. tts-1의 nova(AI)가 로비에서 고른 유저
   /// 보이스보다 크게 들리므로 AI만 낮춘다. 기기 미디어/통화 볼륨 자체는
   /// 건드리지 않고, 이 재생 세션에만 적용된다.
   static const double userVolume = 1.0;

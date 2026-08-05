@@ -1514,7 +1514,7 @@ line had never been said. Never build the conversation on a line you had to gues
                 'Content-Type': 'application/json',
               },
               body: jsonEncode({
-                'model': 'gpt-4o-mini-tts',
+                'model': 'tts-1',
                 'input': text,
                 'voice': voice,
                 'speed': 1.0,
@@ -1698,7 +1698,7 @@ line had never been said. Never build the conversation on a line you had to gues
     return ms.clamp(1500, 25000);
   }
 
-  /// 대화방에서만 쓰는 한국어 AI 음성. gpt-4o-mini-tts/Marin으로 재생하되 캐시에
+  /// 대화방에서만 쓰는 한국어 AI 음성. tts-1/nova로 재생하되 캐시에
   /// 저장하지 않아, 히스토리의 타겟 언어 음성 생성 규칙과 분리한다.
   Future<void> _speakLiveKorean(String text) async {
     final spoken = text.trim();
@@ -2777,7 +2777,7 @@ line had never been said. Never build the conversation on a line you had to gues
 //   STEP 1: 증발 검열 (고스트워드/너무 짧음 → 조용히 폐기)
 //   STEP 2: 유저 한국어 원문 보존 + 타겟 영어 문장 스트리밍
 //   STEP 3: AI 영어 화면 문장 + 한국어 대화 문장 동시 생성
-//   STEP 4: AI 한국어만 gpt-4o-mini-tts/Marin으로 재생 (캐시하지 않음)
+//   STEP 4: AI 한국어만 tts-1/nova로 재생 (캐시하지 않음)
 //   STEP 5: 한·영 글자를 Firestore/히스토리에 저장
 //   STEP 6: 마이크 재개방, 5턴이면 P3 자료 저장 후 자동 종료
 // ====================================================================
@@ -3654,7 +3654,7 @@ line had never been said. Never build the conversation on a line you had to gues
           _log('🛡️ [AI-REGISTER-GUARD]',
               'path=normal before="$beforeRewrite" after="$aiOriginalText"');
         }
-        // 스트림이 끝나면 한국어만 gpt-4o-mini-tts/Marin으로 한 번 읽는다.
+        // 스트림이 끝나면 한국어만 tts-1/nova로 한 번 읽는다.
         // cacheEnabled=false이므로 이 음성은 대화방을 나가면 폐기된다.
         _swTTS
           ..reset()
@@ -4929,7 +4929,7 @@ class HybridTtsPlayer {
                   'Content-Type': 'application/json',
                 },
                 body: jsonEncode({
-                  'model': 'gpt-4o-mini-tts',
+                  'model': 'tts-1',
                   'input': fullSentence,
                   'voice': voice,
                   'speed': 1.0,
@@ -5733,7 +5733,7 @@ class ChunkedTtsFetcher {
                 'Content-Type': 'application/json',
               },
               body: jsonEncode({
-                'model': 'gpt-4o-mini-tts',
+                'model': 'tts-1',
                 'input': text,
                 'voice': voice,
                 'speed': 1.0,
