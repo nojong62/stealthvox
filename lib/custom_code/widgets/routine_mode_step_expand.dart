@@ -1518,6 +1518,8 @@ line had never been said. Never build the conversation on a line you had to gues
                 'input': text,
                 'voice': voice,
                 'speed': 1.0,
+                // speed로는 거의 안 움직인다. 속도 조절은 instructions다.
+                'instructions': kNativeSpokenDeliveryInstruction,
                 'response_format': 'mp3',
               }),
             )
@@ -4933,6 +4935,8 @@ class HybridTtsPlayer {
                   'input': fullSentence,
                   'voice': voice,
                   'speed': 1.0,
+                  // speed로는 거의 안 움직인다. 속도 조절은 instructions다.
+                  'instructions': kNativeSpokenDeliveryInstruction,
                   'response_format': 'mp3',
                 }),
               )
@@ -5737,6 +5741,8 @@ class ChunkedTtsFetcher {
                 'input': text,
                 'voice': voice,
                 'speed': 1.0,
+                // speed로는 거의 안 움직인다. 속도 조절은 instructions다.
+                'instructions': kNativeSpokenDeliveryInstruction,
                 'response_format': 'mp3',
               }),
             )
