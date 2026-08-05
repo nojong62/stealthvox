@@ -295,33 +295,41 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
           onTap: _selectedFilter == 'All' ? null : () => _switchFilter('All'),
           child: Tooltip(
             message: _selectedFilter == 'All' ? '전체 대화' : '전체 대화 보기',
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              decoration: BoxDecoration(
-                color: const Color(0xFF3B82F6)
-                    .withValues(alpha: _selectedFilter == 'All' ? 0.15 : 0.3),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                    color: const Color(0xFF3B82F6).withValues(
-                        alpha: _selectedFilter == 'All' ? 0.5 : 0.9),
-                    width: 1.5),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (_selectedFilter != 'All') ...[
-                    const Icon(Icons.arrow_back_rounded,
-                        color: Colors.white, size: 14),
-                    const SizedBox(width: 5),
+            // 📏 AppBar title 슬롯은 leading(96)과 actions를 뺀 나머지로 폭이
+            //   고정된다. 폰 글꼴을 키워 둔 기기에서는 이 칩이 그 폭을 넘어
+            //   노란 줄무늬(overflow)가 떴다. 글자를 자르는 대신 슬롯에 맞게
+            //   줄여, 어떤 글꼴 배율에서도 "Study Room"이 온전히 보이게 한다.
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF3B82F6)
+                      .withValues(alpha: _selectedFilter == 'All' ? 0.15 : 0.3),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                      color: const Color(0xFF3B82F6).withValues(
+                          alpha: _selectedFilter == 'All' ? 0.5 : 0.9),
+                      width: 1.5),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_selectedFilter != 'All') ...[
+                      const Icon(Icons.arrow_back_rounded,
+                          color: Colors.white, size: 14),
+                      const SizedBox(width: 5),
+                    ],
+                    const Text(
+                      "Study Room",
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13),
+                    ),
                   ],
-                  const Text(
-                    "Study Room",
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13),
-                  ),
-                ],
+                ),
               ),
             ),
           ),
@@ -573,33 +581,39 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
   //  필터 바 (Keepers 버튼 추가)
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Widget _buildFilterBar() {
-    return Container(
-      width: double.infinity,
-      color: const Color(0xFF1A1A1A),
-      padding: const EdgeInsets.only(bottom: 12, top: 4),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        physics: const BouncingScrollPhysics(),
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Row(
-          children: _selectedFilter == 'All' || _selectedFilter == 'Keepers'
-              ? [
-                  _buildFilterChip('Duo', _filterLabel('Duo'), Icons.people),
-                  _buildFilterChip(
-                      'Anyone', _filterLabel('Anyone'), Icons.forum),
-                  _buildFilterChip(
-                      'Roleplay', _filterLabel('Roleplay'), Icons.smart_toy),
-                  _buildFilterChip(
-                      'Expand', _filterLabel('Expand'), Icons.trending_up),
-                  _buildKeepersChip(),
-                ]
-              : [
-                  _buildDeleteActionChip(),
-                  _buildFilterChip(
-                      _selectedFilter,
-                      _filterLabel(_selectedFilter),
-                      _getIconForRoom(_selectedFilter)),
-                ],
+    // 📏 칩은 글자 폭만큼 커진다. 폰 글꼴을 크게 써 두면 Duo/Circle 두 개로
+    //   화면이 차서 뒤쪽 모드가 있는 줄도 모르게 된다. 가로 스크롤은 그대로
+    //   두되 배율에 천장을 씌워, 큰 글꼴에서도 모드가 몇 개인지는 보이게 한다.
+    return MediaQuery.withClampedTextScaling(
+      maxScaleFactor: 1.2,
+      child: Container(
+        width: double.infinity,
+        color: const Color(0xFF1A1A1A),
+        padding: const EdgeInsets.only(bottom: 12, top: 4),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: _selectedFilter == 'All' || _selectedFilter == 'Keepers'
+                ? [
+                    _buildFilterChip('Duo', _filterLabel('Duo'), Icons.people),
+                    _buildFilterChip(
+                        'Anyone', _filterLabel('Anyone'), Icons.forum),
+                    _buildFilterChip(
+                        'Roleplay', _filterLabel('Roleplay'), Icons.smart_toy),
+                    _buildFilterChip(
+                        'Expand', _filterLabel('Expand'), Icons.trending_up),
+                    _buildKeepersChip(),
+                  ]
+                : [
+                    _buildDeleteActionChip(),
+                    _buildFilterChip(
+                        _selectedFilter,
+                        _filterLabel(_selectedFilter),
+                        _getIconForRoom(_selectedFilter)),
+                  ],
+          ),
         ),
       ),
     );
