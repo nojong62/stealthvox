@@ -54,8 +54,6 @@ import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/openai_connection_pool.dart';
 import '/custom_code/services/openai_transcribe_service.dart';
 import '/custom_code/services/korean_turn_validator.dart';
-import '/custom_code/services/realtime_anyone_adapter.dart';
-import '/custom_code/services/stealth_vox_realtime_session.dart';
 import 'deepgram_confidence_probe.dart';
 import 'first_utterance_context_judge.dart';
 
@@ -119,7 +117,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   int _idleElapsedSec = 0;
 
   bool get _isSystemBusy {
-    return _ttsQueueManager.isBusy || _realtimeTurnActive;
+    return _ttsQueueManager.isBusy || _aiTurnActive;
   }
 
   void _resetIdleTimer() {
@@ -268,10 +266,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   bool _awaitingAiFirstAudioProbe = false;
   double? _activeSttConfidence;
   int _pipelineGeneration = 0;
-  bool _realtimeTurnActive = false;
-  RealtimeAnyoneAdapter? _realtimeAdapter;
-  Future<bool>? _realtimeConnectFuture;
-  late final String _realtimeModeSessionId;
+  bool _aiTurnActive = false;
   void _log(String tag, String msg) {
     final ts = DateTime.now().toIso8601String().substring(11, 23);
     final line = '[$ts] $tag $msg';
@@ -383,17 +378,21 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     );
   }
 
-  /// 👂 되묻기 고정 문장(한국어). Realtime은 텍스트와 음성이 같은 출력에서
-  /// 나오므로 [CLARIFY] 같은 태그를 쓰면 태그가 그대로 소리로 새어 나간다.
-  /// 그래서 태그 대신 이 문장 자체를 신호로 쓴다.
+  /// 👂 되묻기 고정 문장(한국어). 이 문장이 그대로 TTS로 나가므로 [CLARIFY]
+  /// 같은 태그를 쓰면 태그가 소리로 새어 나간다. 그래서 태그 대신 이 문장
+  /// 자체를 신호로 쓴다 — [_isAskBackReply]가 이 문장을 보고 되묻기를 알아챈다.
   ///
   /// ⚠️ 원어가 한국어가 아니면 모델은 그 언어로 되묻고, 아래 [_isAskBackReply]
   /// 의 한국어 어절 매칭이 빗나간다. 그때는 되묻는 말은 정상적으로 나가지만
   /// 유저 발화가 화면·히스토리에 남는다. 다국어 STT를 붙일 때 같이 해결한다.
-  static const String kStepExpandAskBackLine =
-      '방금 하신 말씀을 제가 잘못 들은 것 같은데, 다시 말씀해 주시겠어요?';
+  /// 되묻기는 세 모드가 한 문장만 쓴다. 전사 검증 실패든, 문장 합치기 실패든,
+  /// 모델이 스스로 되묻든 유저에게는 똑같이 들려야 한다.
+  static const String kStepExpandAskBackLine = KoreanTurnValidator.retryLine;
 
-  String _buildStepExpandRealtimeInstructions() {
+  /// 대화 설계 전문(全文). 매 턴 gpt-4o-mini의 system 프롬프트로 들어간다.
+  /// 예전에는 Realtime 세션을 열 때 한 번만 걸어 두고 턴마다 짧은 지시만
+  /// 덧붙였다. 세션이 사라진 지금은 매 턴 이걸 같이 보내야 한다.
+  String _buildStepExpandSystemInstructions() {
     final nativeLang = resolveNativeLanguageName(FFAppState().nativeLang);
     final askBackLine = nativeLang == 'Korean'
         ? kStepExpandAskBackLine
@@ -462,49 +461,6 @@ Being short is not by itself a reason to ask back — a clear short line is fine
 Once the user says it again, continue from their new words as if the unclear
 line had never been said. Never build the conversation on a line you had to guess.
 ''';
-  }
-
-  Future<bool> _connectStepExpandRealtime() async {
-    final old = _realtimeAdapter;
-    if (old != null) await old.dispose();
-    if (!mounted) return false;
-    final adapter = RealtimeAnyoneAdapter(
-      onConnectionStateChanged: (state) =>
-          _log('[RT-STATE]', 'state=${state.name}'),
-      onError: (error) =>
-          _log('[RT-ERROR]', 'reason=${error.runtimeType} error=$error'),
-      logger: _log,
-    );
-    _realtimeAdapter = adapter;
-    try {
-      await adapter.connectForTranslation(
-        modeSessionId: _realtimeModeSessionId,
-        voice: _aiVoice,
-        allowWhenDisabled: true,
-        instructions: _buildStepExpandRealtimeInstructions(),
-      );
-      return adapter.session.isReady;
-    } catch (error) {
-      if (identical(_realtimeAdapter, adapter)) _realtimeAdapter = null;
-      await adapter.dispose();
-      _log('[RT-CONNECT-FAIL]', 'reason=${error.runtimeType} error=$error');
-      return false;
-    }
-  }
-
-  Future<bool> _ensureStepExpandRealtimeConnected() async {
-    if (_realtimeAdapter?.session.isReady ?? false) return true;
-    final inFlight = _realtimeConnectFuture;
-    if (inFlight != null) return inFlight;
-    final future = _connectStepExpandRealtime();
-    _realtimeConnectFuture = future;
-    try {
-      return await future;
-    } finally {
-      if (identical(_realtimeConnectFuture, future)) {
-        _realtimeConnectFuture = null;
-      }
-    }
   }
 
   void _prefetchFirstTurnTranscription() {
@@ -654,8 +610,6 @@ line had never been said. Never build the conversation on a line you had to gues
   @override
   void initState() {
     super.initState();
-    _realtimeModeSessionId =
-        'step-expand-${DateTime.now().microsecondsSinceEpoch}';
     _ttsQueueManager = TtsQueueManager(onPlayStart: () {
       if (_awaitingAiFirstAudioProbe) {
         _awaitingAiFirstAudioProbe = false;
@@ -689,8 +643,6 @@ line had never been said. Never build the conversation on a line you had to gues
     BillingTicker.instance.pause();
     _stopEverything();
     _voiceManager?.dispose();
-    unawaited(_realtimeAdapter?.dispose());
-    _realtimeAdapter = null;
     _audioRecorder.dispose();
     _ttsQueueManager.stop();
     _practicePlayer.dispose();
@@ -1809,11 +1761,7 @@ line had never been said. Never build the conversation on a line you had to gues
   void _stopEverything() {
     _pipelineGeneration++;
     _isConversationActive = false;
-    _realtimeTurnActive = false;
-    _realtimeConnectFuture = null;
-    final realtime = _realtimeAdapter;
-    _realtimeAdapter = null;
-    if (realtime != null) unawaited(realtime.dispose());
+    _aiTurnActive = false;
     _commitTimer?.cancel();
     _commitTimer = null;
     _cancelSpeculativeTranslation(); // 🚀 [SPEC] 진행 중 투기 번역 정리
@@ -2194,7 +2142,7 @@ line had never been said. Never build the conversation on a line you had to gues
     }
     _turnCounter++;
     final turnNumber = _turnCounter;
-    _realtimeTurnActive = true;
+    _aiTurnActive = true;
     var aiIndex = -1;
     var askedBack = false;
     var turnCompleted = false;
@@ -2283,7 +2231,11 @@ line had never been said. Never build the conversation on a line you had to gues
       //    말이 올지 추측하려면 문장 전체가 보여야 한다.
       String aiKorean = await StepExpandBrain.generateKoreanTurn(
         apiKey: _openAiKey,
-        instructions: _buildStepExpandTurnInstructions(turnNumber),
+        // 대화 설계 전문 + 이번 턴 초점. 전문을 빼면 되묻기·한 줄기 유지 같은
+        // 규칙이 통째로 사라져, 모델이 [_isAskBackReply]가 찾는 문장을 아예
+        // 만들지 않는다.
+        instructions: '${_buildStepExpandSystemInstructions()}\n'
+            '\n[THIS TURN]\n${_buildStepExpandTurnInstructions(turnNumber)}',
         userText: _expandedNativeSentence,
       );
       if (aiKorean.isEmpty) {
@@ -2405,7 +2357,7 @@ line had never been said. Never build the conversation on a line you had to gues
         await _speakLiveKorean(kStepExpandAskBackLine);
       }
     } finally {
-      _realtimeTurnActive = false;
+      _aiTurnActive = false;
       // 되묻기 턴은 _turnCounter를 되돌렸으므로 turnNumber와 어긋난다.
       // 그 경우에도 마이크는 반드시 다시 열어야 대화가 이어진다.
       if (mounted &&
@@ -7195,7 +7147,10 @@ cannot tell what they meant.
             },
             body: jsonEncode({
               'model': 'gpt-4o-mini',
-              'temperature': 0.2,
+              // 0.2에서 올렸다. 프롬프트가 "연결어미를 매번 바꿔라"라고 시키는데
+              // 낮은 온도는 가장 무난한 ~고/~아서만 반복하게 만들어 서로 어긋났다.
+              // 사실 보존 규칙이 흔들리지 않는 선에서 0.5로 잡는다.
+              'temperature': 0.5,
               'max_tokens': 300,
               'messages': [
                 {'role': 'system', 'content': sysPrompt},

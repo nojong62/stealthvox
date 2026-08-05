@@ -53,8 +53,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/korean_turn_validator.dart';
 import '/custom_code/services/openai_transcribe_service.dart';
-import '/custom_code/services/realtime_anyone_adapter.dart';
-import '/custom_code/services/stealth_vox_realtime_session.dart';
 import 'first_utterance_context_judge.dart'; // 3모드 공통 응답 길이 규칙
 
 // ====================================================================
@@ -116,10 +114,10 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   int _turnPcmBytes = 0;
   static const int _turnPcmBufferMaxBytes = 32000 * 60;
   int _pipelineGeneration = 0;
-  bool _realtimeTurnActive = false;
-  RealtimeAnyoneAdapter? _realtimeAdapter;
-  Future<bool>? _realtimeConnectFuture;
-  late final String _realtimeModeSessionId;
+  bool _aiTurnActive = false;
+  // 🎤 [BARGE-IN] 첫 대사가 울리는 중인지, 그리고 그 소리를 끊을 fetcher.
+  bool _isOpenerSpeaking = false;
+  ChunkedTtsFetcher? _openerTtsFetcher;
 
   void _log(String tag, String msg) {
     final ts = DateTime.now().toIso8601String().substring(11, 23);
@@ -239,48 +237,6 @@ $kSpokenReplyLengthPolicy
 - In character, this means answering like a real person in that situation would: briefly.
 ''';
 
-  Future<bool> _connectRoleplayRealtime() async {
-    final old = _realtimeAdapter;
-    if (old != null) await old.dispose();
-    if (!mounted) return false;
-    final adapter = RealtimeAnyoneAdapter(
-      onConnectionStateChanged: (state) =>
-          _log('[RT-STATE]', 'state=${state.name}'),
-      onError: (error) => _log('[RT-ERROR]', 'reason=${error.runtimeType}'),
-      logger: _log,
-    );
-    _realtimeAdapter = adapter;
-    try {
-      await adapter.connectForTranslation(
-        modeSessionId: _realtimeModeSessionId,
-        voice: _aiVoice,
-        allowWhenDisabled: true,
-        instructions: _buildScenarioMemberInstructions(),
-      );
-      return adapter.session.isReady;
-    } catch (error) {
-      if (identical(_realtimeAdapter, adapter)) _realtimeAdapter = null;
-      await adapter.dispose();
-      _log('[RT-CONNECT-FAIL]', 'reason=${error.runtimeType}');
-      return false;
-    }
-  }
-
-  Future<bool> _ensureRoleplayRealtimeConnected() async {
-    if (_realtimeAdapter?.session.isReady ?? false) return true;
-    final inFlight = _realtimeConnectFuture;
-    if (inFlight != null) return inFlight;
-    final future = _connectRoleplayRealtime();
-    _realtimeConnectFuture = future;
-    try {
-      return await future;
-    } finally {
-      if (identical(_realtimeConnectFuture, future)) {
-        _realtimeConnectFuture = null;
-      }
-    }
-  }
-
   String _recentKoreanConversation() {
     final turns = _localMessages.where((message) {
       final role = message['role']?.toString() ?? '';
@@ -353,7 +309,7 @@ $kSpokenReplyLengthPolicy
   int _idleElapsedSec = 0;
 
   bool get _isSystemBusy {
-    return _ttsQueueManager.isBusy || _realtimeTurnActive;
+    return _ttsQueueManager.isBusy || _aiTurnActive;
   }
 
   void _resetIdleTimer() {
@@ -431,8 +387,6 @@ $kSpokenReplyLengthPolicy
   @override
   void initState() {
     super.initState();
-    _realtimeModeSessionId =
-        'roleplay-${DateTime.now().microsecondsSinceEpoch}';
     _ttsQueueManager = TtsQueueManager(onPlayStart: () {
       if (_swTTS.isRunning) {
         _swTTS.stop();
@@ -487,8 +441,6 @@ $kSpokenReplyLengthPolicy
     _forceSaveToFirestore();
     _stopEverything();
     _voiceManager?.dispose();
-    unawaited(_realtimeAdapter?.dispose());
-    _realtimeAdapter = null;
     _audioRecorder.dispose();
     _ttsQueueManager.stop();
     _scrollController.dispose();
@@ -624,11 +576,7 @@ $kSpokenReplyLengthPolicy
     _pipelineGeneration++;
     _isConversationActive = false;
     _isAiOpenerPlaying = false;
-    _realtimeTurnActive = false;
-    _realtimeConnectFuture = null;
-    final realtime = _realtimeAdapter;
-    _realtimeAdapter = null;
-    if (realtime != null) unawaited(realtime.dispose());
+    _aiTurnActive = false;
     _commitTimer?.cancel(); // 🔧 [v3.4] 대기 중 타이머 정리
     _commitTimer = null;
     _pendingHeardConfirmation = null; // 보류된 확인 대기 발화도 버림
@@ -695,16 +643,29 @@ $kSpokenReplyLengthPolicy
         isUser: false,
         onLog: _log,
       );
+      _openerTtsFetcher = fetcher;
+      _isOpenerSpeaking = true;
       fetcher.addText(aiKorean);
+
+      // 🎤 첫 대사가 끝나기를 기다리지 않고 마이크를 연다. 유저가 말을 자르고
+      //   들어오면 onTranscriptUpdate가 이 소리를 끊는다. 스피커로 나간 AI
+      //   목소리는 녹음쪽 echoCancel이 걷어낸다.
+      unawaited(_startDeepgramListening());
+
       int ticks = 0;
       while ((fetcher.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
           mounted &&
-          _isConversationActive) {
+          _isConversationActive &&
+          !fetcher.isCancelled) {
         await Future.delayed(const Duration(milliseconds: 50));
         if (++ticks > 400) {
           _log('⚠️ [OPENER-TTS-TIMEOUT]', '첫 대사 음성 20초 초과');
           break;
         }
+      }
+      if (identical(_openerTtsFetcher, fetcher)) {
+        _openerTtsFetcher = null;
+        _isOpenerSpeaking = false;
       }
 
       await _saveHistoryMessages(<Map<String, dynamic>>[
@@ -721,6 +682,10 @@ $kSpokenReplyLengthPolicy
       }
     } finally {
       _isAiOpenerPlaying = false;
+      _isOpenerSpeaking = false;
+      _openerTtsFetcher = null;
+      // 위에서 이미 열었지만, 첫 대사 생성이 실패해 거기까지 못 갔을 수 있다.
+      // 이미 듣고 있으면 _startDeepgramListening이 스스로 걸러낸다.
       if (mounted && _isConversationActive) _startDeepgramListening();
     }
   }
@@ -882,6 +847,14 @@ $kSpokenReplyLengthPolicy
   }
 
   Future<void> _startDeepgramListening() async {
+    // 이미 듣고 있으면 새로 열지 않는다. 첫 대사 재생과 마이크 열기가 겹치면서
+    // 여기가 두 번 불릴 수 있는데, 그대로 두면 VoiceManager가 하나 더 생겨
+    // 녹음 스트림이 이중으로 돈다. 턴이 끝나면 _voiceManager가 null이 되므로
+    // 다음 턴 재개는 막히지 않는다.
+    if (_voiceManager != null) {
+      _log('🎤 [LISTEN-SKIP]', '이미 듣는 중 → 중복 오픈 무시');
+      return;
+    }
     if (_deepgramKey.isEmpty || !(await _audioRecorder.hasPermission())) return;
     _resetIdleTimer();
     _isConversationActive = true;
@@ -913,6 +886,15 @@ $kSpokenReplyLengthPolicy
       },
       onTranscriptUpdate: (transcript) {
         BillingTicker.instance.resumeFromActivity('roleplay_stt_partial');
+        // 🎤 [BARGE-IN] 첫 대사가 울리는 중에 유저가 말을 시작하면 즉시 끊는다.
+        //   아직 안 돌아온 TTS 응답까지 막아야 소리가 되살아나지 않는다.
+        if (_isOpenerSpeaking && transcript.trim().isNotEmpty) {
+          _isOpenerSpeaking = false;
+          _openerTtsFetcher?.cancel();
+          _openerTtsFetcher = null;
+          _ttsQueueManager.stop();
+          _log('🎤 [BARGE-IN]', '유저 발화 감지 → 첫 대사 TTS 즉시 중단');
+        }
         _swDeepgram.reset();
         _swDeepgram.start();
       },
@@ -2024,7 +2006,7 @@ User role: ${_roleplayUserLabel.trim()}''',
           'Content-Type': 'application/json',
         },
         body: jsonEncode({
-          'model': 'tts-1',
+          'model': 'gpt-4o-mini-tts',
           'input': text,
           'voice': 'nova',
           'speed': 1.0,
@@ -3352,6 +3334,17 @@ class ChunkedTtsFetcher {
   int get pendingRequests => _pendingCount;
   VoidCallback? onAllComplete;
 
+  // 🎤 [BARGE-IN] 취소되면 이미 날아간 요청의 응답이 돌아와도 큐에 넣지 않는다.
+  //   audioQueue.stop()만으로는 부족하다. stop()은 그 시점의 큐만 비우고,
+  //   뒤늦게 도착한 청크는 addAudio로 재생을 다시 깨워 유저 위에 겹쳐 울린다.
+  bool _cancelled = false;
+  bool get isCancelled => _cancelled;
+
+  void cancel() {
+    _cancelled = true;
+    _buffer.clear();
+  }
+
   ChunkedTtsFetcher(
     this.apiKey,
     this.audioQueue,
@@ -3400,7 +3393,7 @@ class ChunkedTtsFetcher {
                 'Content-Type': 'application/json',
               },
               body: jsonEncode({
-                'model': 'tts-1',
+                'model': 'gpt-4o-mini-tts',
                 'input': text,
                 'voice': voice,
                 'speed': 1.0,
@@ -3440,6 +3433,10 @@ class ChunkedTtsFetcher {
   }
 
   void _pushReady() {
+    if (_cancelled) {
+      _buffer.clear();
+      return;
+    }
     while (_buffer.containsKey(_readyCounter)) {
       final data = _buffer.remove(_readyCounter)!;
       // 🔧 [v3.5] isUser 플래그로 큐 선택
@@ -3733,7 +3730,7 @@ class HybridTtsPlayer {
                   'Content-Type': 'application/json',
                 },
                 body: jsonEncode({
-                  'model': 'tts-1',
+                  'model': 'gpt-4o-mini-tts',
                   'input': fullSentence,
                   'voice': voice,
                   'speed': 1.0,
