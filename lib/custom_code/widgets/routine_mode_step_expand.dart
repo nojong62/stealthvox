@@ -401,11 +401,18 @@ You are the conversation partner for Step Expand practice.
 
 ${buildNativeOutputLanguagePolicy(FFAppState().nativeLang)}
 - Build the conversation one meaningful step at a time from facts the user has actually said.
-- Respond directly to the latest line, then invite one small, relevant detail that can expand it.
+- Stay on the exact sentence-expansion thread created by the user's latest line.
+- Give at most one brief, specific acknowledgment, then ask exactly one core question
+  that helps the user add one missing concrete detail to that same sentence.
+- Choose only the single most useful detail axis: who, when, where, what happened,
+  how, feeling, or reason. Do not combine axes or ask a follow-up within the same reply.
+- Do not give explanations, advice, examples, summaries, lists, broad opinions, or
+  extra background. Do not introduce a new topic.
 - Do not translate, teach grammar, show another language, narrate, or mention being an AI.
 
 $kSpokenReplyLengthPolicy
-- Your reaction plus the one invitation must still fit in one or two short spoken sentences.
+- The whole reply must be one or two short spoken sentences. Prefer one concise
+  acknowledgment sentence plus one concise question sentence. Never elaborate.
 
 - Do not invent facts, names, events, feelings, or relationships.
 - Avoid repeating a question already answered in this session.
@@ -433,7 +440,8 @@ line had never been said. Never build the conversation on a line you had to gues
     final adapter = RealtimeAnyoneAdapter(
       onConnectionStateChanged: (state) =>
           _log('[RT-STATE]', 'state=${state.name}'),
-      onError: (error) => _log('[RT-ERROR]', 'reason=${error.runtimeType}'),
+      onError: (error) =>
+          _log('[RT-ERROR]', 'reason=${error.runtimeType} error=$error'),
       logger: _log,
     );
     _realtimeAdapter = adapter;
@@ -448,7 +456,7 @@ line had never been said. Never build the conversation on a line you had to gues
     } catch (error) {
       if (identical(_realtimeAdapter, adapter)) _realtimeAdapter = null;
       await adapter.dispose();
-      _log('[RT-CONNECT-FAIL]', 'reason=${error.runtimeType}');
+      _log('[RT-CONNECT-FAIL]', 'reason=${error.runtimeType} error=$error');
       return false;
     }
   }
@@ -565,6 +573,19 @@ line had never been said. Never build the conversation on a line you had to gues
   bool _showPolishButton = false; // 5턴 완료 후 "Polished Version" 버튼 표시
   final GlobalKey _polishedCardKey = GlobalKey();
   final List<String> _history = []; // polish 완성 문장 누적 (세션 간 유지)
+
+  // 🌱 [NATIVE-EXPAND] 대화방 유저 말풍선은 매 턴 "지금까지 말한 것 + 이번에
+  //   말한 것"을 합친 원어 한 문장이다. 1턴은 발화 자체가 씨앗이고, 2턴부터
+  //   이 문장이 자란다. Realtime 응답과 무관한 별도 경량 호출로 만든다.
+  String _expandedNativeSentence = "";
+
+  // 합치기가 실패한 턴의 발화. 버리면 그 턴 내용이 확장 문장에서 통째로
+  // 사라지므로, 다음 턴 합치기에 같이 넘겨 따라잡게 한다.
+  final List<String> _pendingNativeParts = [];
+
+  // 진행 중인 합치기 반영. 마이크 재개를 막지 않으려고 턴 흐름 밖에서 돌고,
+  // 다음 턴이 시작 전에 이것만 기다린다.
+  Future<void>? _expansionSettle;
 
   // 🌱 [AUTO-FLOW] 5턴 완료 후 자동 표시 상태
   String _expandedFinalSentence = ""; // 완성된 확장 문장 (별도 표시)
@@ -723,6 +744,12 @@ line had never been said. Never build the conversation on a line you had to gues
     if (_isSessionComplete) return;
     _resetIdleTimer();
     _isConversationActive = true;
+
+    // Circle Talk과 같은 순서로 receive-only WebRTC를 먼저 협상한다.
+    // 첫 발화가 끝난 뒤 Deepgram 녹음 세션을 닫는 시점에 Realtime 연결까지
+    // 새로 만들면 Android 오디오 라우팅 전환과 겹쳐 첫 응답이 유실될 수 있다.
+    // 청취 중 미리 연결해 두면 첫 턴은 준비된 데이터 채널만 사용한다.
+    unawaited(_ensureStepExpandRealtimeConnected());
 
     _ttsQueueManager.setUserTurn(false);
     _ttsQueueManager.setAiPaused(false);
@@ -965,6 +992,8 @@ line had never been said. Never build the conversation on a line you had to gues
         _expandedFinalSentence = "";
         _showExpandedFinalCard = false;
         _showStudyRoomPrompt = false;
+        _expandedNativeSentence = "";
+        _pendingNativeParts.clear();
       });
       _practiceRecognizedWords.clear();
     }
@@ -1001,6 +1030,8 @@ line had never been said. Never build the conversation on a line you had to gues
         _expandedFinalSentence = "";
         _showExpandedFinalCard = false;
         _showStudyRoomPrompt = false;
+        _expandedNativeSentence = "";
+        _pendingNativeParts.clear();
       });
     }
     _practiceRecognizedWords.clear();
@@ -1736,6 +1767,7 @@ line had never been said. Never build the conversation on a line you had to gues
     _isConversationActive = false;
     _realtimeTurnActive = false;
     _realtimeConnectFuture = null;
+    _expansionSettle = null;
     final realtime = _realtimeAdapter;
     _realtimeAdapter = null;
     if (realtime != null) unawaited(realtime.dispose());
@@ -2069,9 +2101,9 @@ line had never been said. Never build the conversation on a line you had to gues
     );
   }
 
-  // 일반 Realtime 대화 경로는 Step Expand의 누적 문장 생성 규칙을 보장하지
-  // 못하므로 사용하지 않는다. 회귀 비교를 위해 구현만 남겨 둔다.
-  // ignore: unused_element
+  // 대화방의 라이브 턴. Realtime이 원어 응답과 음성을 만들고, 유저 말풍선에
+  // 들어갈 누적 확장 문장은 별도 경량 호출로 나란히 만든다. 확장을 Realtime에
+  // 시킬 수 없는 이유는 되묻기와 같다 — 거기서 나온 글자는 그대로 소리가 된다.
   Future<void> _processRealtimeStepExpandTurn(
     String userKorean, {
     required int generation,
@@ -2085,12 +2117,39 @@ line had never been said. Never build the conversation on a line you had to gues
       if (_isConversationActive && !_isSessionComplete) _startUserListening();
       return;
     }
+    // 앞 턴의 합치기가 아직 안 끝났으면 먼저 기다린다. 그래야 이번 턴이
+    // 최신 누적 문장 위에 얹힌다.
+    final pendingSettle = _expansionSettle;
+    if (pendingSettle != null) {
+      await pendingSettle;
+      if (!mounted ||
+          !_isConversationActive ||
+          generation != _pipelineGeneration) {
+        return;
+      }
+    }
     _turnCounter++;
     final turnNumber = _turnCounter;
     _realtimeTurnActive = true;
     StreamSubscription<String>? transcriptSubscription;
     var aiIndex = -1;
     var askedBack = false;
+    var turnCompleted = false;
+
+    // 🌱 [NATIVE-EXPAND] 이번 턴이 이어 붙일 대상. 1턴이면 비어 있고, 그때는
+    //   유저 발화 자체가 씨앗 문장이 된다. 2턴부터 Realtime 요청과 나란히
+    //   합치기를 돌려, AI가 말하는 동안 확장 문장이 준비되게 한다.
+    final previousExpanded = _expandedNativeSentence.trim();
+    final mergeInputs = <String>[..._pendingNativeParts, userKorean];
+    final Future<String>? expansionFuture = previousExpanded.isEmpty
+        ? null
+        : StepExpandBrain.mergeNativeExpansion(
+            apiKey: _openAiKey,
+            previousExpanded: previousExpanded,
+            newUtterances: mergeInputs,
+            languageName: resolveNativeLanguageName(FFAppState().nativeLang),
+          );
+    Map<String, dynamic>? hostBubble;
     try {
       // 👂 말풍선을 미리 만들지 않는다. Realtime은 텍스트와 한국어 음성이
       //   같이 나오므로, 첫 글자가 도착하는 순간 말풍선을 만들면 소리와
@@ -2100,62 +2159,104 @@ line had never been said. Never build the conversation on a line you had to gues
         _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
       });
 
-      final connected = await _ensureStepExpandRealtimeConnected();
-      if (!connected ||
-          !mounted ||
-          !_isConversationActive ||
-          generation != _pipelineGeneration) {
-        throw StateError('Realtime Step Expand session is unavailable.');
-      }
-      final turn = _realtimeAdapter!.requestConversationTurn(
-        turnId: 'step-expand-$turnNumber',
-        userText: userKorean,
-        voice: _aiVoice,
-        instructions: turnNumber >= MAX_TURNS
-            ? 'This is the final turn. Briefly acknowledge the completed idea in natural Korean without asking another question.'
-            : 'Continue Step Expand now in natural Korean. Add one concise reaction and invite exactly one relevant detail.',
-      );
       var streamedText = '';
       var hostSettled = false;
-      transcriptSubscription = turn.textStream.listen((delta) {
-        if (delta.isEmpty ||
-            !mounted ||
-            generation != _pipelineGeneration ||
-            turnNumber != _turnCounter) {
-          return;
-        }
-        streamedText += delta;
-        setState(() {
-          // 첫 글자와 함께 AI 말풍선을 만든다(= 한국어 음성이 시작되는 시점).
-          if (aiIndex < 0) {
-            _localMessages.add(<String, dynamic>{
-              'role': 'SYSTEM',
-              'target': streamedText,
-              'original': '',
-            });
-            aiIndex = _localMessages.length - 1;
-          } else {
-            _localMessages[aiIndex]['target'] = streamedText;
-          }
-          // 되묻기가 아님이 확정되면 유저 한국어를 AI 말풍선 위에 끼워 넣는다.
-          if (!hostSettled && _isAskBackDecidable(streamedText)) {
-            hostSettled = true;
-            if (!_isAskBackReply(streamedText)) {
-              _localMessages.insert(aiIndex, <String, dynamic>{
-                'role': 'HOST',
-                'target': userKorean,
-                'original': '',
-              });
-              aiIndex++;
-            }
-          }
-        });
-      });
+      String aiKorean = '';
+      RealtimeTurnOutcome? outcome;
 
-      final outcome = await turn.done;
-      final aiKorean = (await turn.finalText).trim();
+      // 준비된 연결이 첫 요청 전에 끊겼거나 서버가 응답을 만들지 못한 경우에만
+      // 새 세션으로 한 번 재시도한다. 텍스트가 조금이라도 온 턴은 음성도 이미
+      // 재생됐을 수 있으므로 중복 발화를 막기 위해 재시도하지 않는다.
+      for (var attempt = 1; attempt <= 2; attempt++) {
+        final connected = await _ensureStepExpandRealtimeConnected();
+        if (!connected ||
+            !mounted ||
+            !_isConversationActive ||
+            generation != _pipelineGeneration) {
+          if (attempt == 1) {
+            _log('[RT-RETRY]', 'turn=$turnNumber reason=connect_failed');
+            continue;
+          }
+          throw StateError('Realtime Step Expand session is unavailable.');
+        }
+
+        try {
+          final turn = _realtimeAdapter!.requestConversationTurn(
+            turnId: 'step-expand-$turnNumber-attempt-$attempt',
+            userText: userKorean,
+            voice: _aiVoice,
+            instructions: turnNumber >= MAX_TURNS
+                ? 'This is the final turn. In one short natural Korean sentence, briefly acknowledge the completed idea. Do not ask a question, explain, advise, or summarize at length.'
+                : 'Continue Step Expand in natural Korean. Stay on the user\'s current sentence. Give at most one very brief acknowledgment, then ask exactly one concise core question for the single most useful missing detail. No explanation, advice, examples, summary, multiple questions, or new topic.',
+          );
+          transcriptSubscription = turn.textStream.listen((delta) {
+            if (delta.isEmpty ||
+                !mounted ||
+                generation != _pipelineGeneration ||
+                turnNumber != _turnCounter) {
+              return;
+            }
+            streamedText += delta;
+            setState(() {
+              // 첫 글자와 함께 AI 말풍선을 만든다(= 한국어 음성이 시작되는 시점).
+              if (aiIndex < 0) {
+                _localMessages.add(<String, dynamic>{
+                  'role': 'SYSTEM',
+                  'target': streamedText,
+                  'original': '',
+                });
+                aiIndex = _localMessages.length - 1;
+              } else {
+                _localMessages[aiIndex]['target'] = streamedText;
+              }
+              // 되묻기가 아님이 확정되면 유저 한국어를 AI 말풍선 위에 끼워 넣는다.
+              //   확장 문장이 아직 안 왔을 수 있으므로 일단 방금 한 말로 띄우고,
+              //   합치기가 끝나면 같은 말풍선을 누적 문장으로 바꾼다.
+              if (!hostSettled && _isAskBackDecidable(streamedText)) {
+                hostSettled = true;
+                if (!_isAskBackReply(streamedText)) {
+                  hostBubble = <String, dynamic>{
+                    'role': 'HOST',
+                    'target': userKorean,
+                    'original': '',
+                  };
+                  _localMessages.insert(aiIndex, hostBubble!);
+                  aiIndex++;
+                }
+              }
+            });
+          });
+
+          outcome = await turn.done;
+          aiKorean = (await turn.finalText).trim();
+        } catch (error) {
+          _log('[RT-ATTEMPT-ERR]',
+              'turn=$turnNumber attempt=$attempt error=$error');
+        } finally {
+          await transcriptSubscription?.cancel();
+          transcriptSubscription = null;
+        }
+
+        if (outcome == RealtimeTurnOutcome.completed && aiKorean.isNotEmpty) {
+          break;
+        }
+        final canRetry = attempt == 1 &&
+            streamedText.isEmpty &&
+            outcome != RealtimeTurnOutcome.timedOut;
+        if (!canRetry) break;
+
+        _log('[RT-RETRY]',
+            'turn=$turnNumber reason=${outcome?.name ?? 'request_error'}');
+        final failedAdapter = _realtimeAdapter;
+        if (failedAdapter != null) {
+          _realtimeAdapter = null;
+          await failedAdapter.dispose();
+        }
+      }
+
       if (outcome != RealtimeTurnOutcome.completed || aiKorean.isEmpty) {
-        throw StateError('Realtime Step Expand response did not complete.');
+        throw StateError(
+            'Realtime Step Expand response did not complete: outcome=${outcome?.name}');
       }
       if (!mounted ||
           !_isConversationActive ||
@@ -2163,6 +2264,7 @@ line had never been said. Never build the conversation on a line you had to gues
           turnNumber != _turnCounter) {
         return;
       }
+      turnCompleted = true;
       // 👂 되묻기 턴이면 유저 발화를 버린다. 화면에도 히스토리에도 남기지
       //   않고 턴 번호도 되돌려, 유저가 다시 말한 것이 이 턴이 되게 한다.
       //   되묻는 말 자체는 이미 음성으로 나갔고, 글자로도 남겨 둔다.
@@ -2192,11 +2294,12 @@ line had never been said. Never build the conversation on a line you had to gues
         // 델타가 한 번도 안 왔거나(전체가 finalText로만 도착) 응답이 너무 짧아
         // 스트리밍 중 판정에 못 닿은 경우, 여기서 두 말풍선을 마저 만든다.
         if (aiIndex < 0) {
-          _localMessages.add(<String, dynamic>{
+          hostBubble = <String, dynamic>{
             'role': 'HOST',
             'target': userKorean,
             'original': '',
-          });
+          };
+          _localMessages.add(hostBubble!);
           _localMessages.add(<String, dynamic>{
             'role': 'SYSTEM',
             'target': aiKorean,
@@ -2206,11 +2309,12 @@ line had never been said. Never build the conversation on a line you had to gues
           hostSettled = true;
         } else {
           if (!hostSettled) {
-            _localMessages.insert(aiIndex, <String, dynamic>{
+            hostBubble = <String, dynamic>{
               'role': 'HOST',
               'target': userKorean,
               'original': '',
-            });
+            };
+            _localMessages.insert(aiIndex, hostBubble!);
             aiIndex++;
             hostSettled = true;
           }
@@ -2236,9 +2340,36 @@ line had never been said. Never build the conversation on a line you had to gues
       await _saveHistoryMessages(<Map<String, dynamic>>[hostLine, systemLine]);
       _log('[RT-HISTORY]',
           'turn=$turnNumber text_only=true voice=$_aiVoice realtime_audio_saved=false');
+
+      // 🌱 [NATIVE-EXPAND] 1턴은 발화가 곧 씨앗 문장이다. 2턴부터는 합치기
+      //   결과가 도착하는 대로 같은 말풍선을 누적 문장으로 바꾼다.
+      if (expansionFuture == null) {
+        _expandedNativeSentence = userKorean;
+        _pendingNativeParts.clear();
+        _log('[EXPAND-SEED]', 'turn=$turnNumber len=${userKorean.length}');
+      } else {
+        _expansionSettle = _settleNativeExpansion(
+          expansionFuture: expansionFuture,
+          mergeInputs: mergeInputs,
+          hostBubble: hostBubble,
+          generation: generation,
+          turnNumber: turnNumber,
+        );
+      }
     } catch (error) {
-      _log('[RT-PIPE-ERR]', 'turn=$turnNumber reason=${error.runtimeType}');
-      if (mounted) {
+      _log('[RT-PIPE-ERR]',
+          'turn=$turnNumber reason=${error.runtimeType} error=$error');
+      // 실패한 요청이 정상 턴 수를 먹지 않게 한다. 그래야 재발화가 다시 같은
+      // Step 번호로 처리되고 5턴 완료 상태가 앞당겨지지 않는다.
+      final turnStillActive =
+          mounted && _isConversationActive && generation == _pipelineGeneration;
+      if (turnStillActive &&
+          !turnCompleted &&
+          !askedBack &&
+          _turnCounter == turnNumber) {
+        _turnCounter--;
+      }
+      if (turnStillActive && !turnCompleted && !askedBack) {
         setState(() {
           // 확정되지 못한 유저 placeholder는 남기지 않는다.
           _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
@@ -2247,7 +2378,18 @@ line had never been said. Never build the conversation on a line you had to gues
               (_localMessages[aiIndex]['target'] ?? '').toString().isEmpty) {
             _localMessages.removeAt(aiIndex);
           }
+          if (aiIndex < 0) {
+            _localMessages.add(<String, dynamic>{
+              'role': 'SYSTEM',
+              'target': '연결이 잠시 끊겼어요. 방금 말씀을 다시 들려주시겠어요?',
+              'original': '',
+              'realtime_error': true,
+            });
+          }
         });
+      }
+      if (turnStillActive && !turnCompleted && !askedBack) {
+        await _speakLiveKorean('연결이 잠시 끊겼어요. 방금 말씀을 다시 들려주시겠어요?');
       }
     } finally {
       await transcriptSubscription?.cancel();
@@ -2258,10 +2400,38 @@ line had never been said. Never build the conversation on a line you had to gues
           _isConversationActive &&
           !_isSessionComplete &&
           generation == _pipelineGeneration &&
-          (askedBack || turnNumber == _turnCounter)) {
+          (askedBack || turnCompleted || turnNumber - 1 == _turnCounter)) {
         _startUserListening();
       }
     }
+  }
+
+  /// 합치기 결과를 유저 말풍선과 누적 문장에 반영한다. 실패하면 이번 발화를
+  /// 버리지 않고 다음 턴 합치기로 넘겨, 확장 문장에서 그 턴이 빠지지 않게 한다.
+  Future<void> _settleNativeExpansion({
+    required Future<String> expansionFuture,
+    required List<String> mergeInputs,
+    required Map<String, dynamic>? hostBubble,
+    required int generation,
+    required int turnNumber,
+  }) async {
+    final merged = (await expansionFuture).trim();
+    if (merged.isEmpty) {
+      _pendingNativeParts
+        ..clear()
+        ..addAll(mergeInputs);
+      _log('[EXPAND-MERGE]',
+          'turn=$turnNumber failed carry=${mergeInputs.length}');
+      return;
+    }
+    _expandedNativeSentence = merged;
+    _pendingNativeParts.clear();
+    _log('[EXPAND-MERGE]', 'turn=$turnNumber len=${merged.length}');
+    if (!mounted || generation != _pipelineGeneration || hostBubble == null) {
+      return;
+    }
+    setState(() => hostBubble['target'] = merged);
+    _scrollToBottom();
   }
 
   /// 되묻기 판정용. Realtime 응답 앞부분만 보고 가른다.
@@ -6688,6 +6858,89 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
       client.close();
     }
     return originalSentence; // 실패 시 원문 반환
+  }
+
+  // ==================================================================
+  // 📦 [Box 7-1-E] mergeNativeExpansion — 대화방 원어 누적 확장
+  // ------------------------------------------------------------------
+  // 지금까지 자란 원어 문장 + 이번 턴 발화 → 합쳐진 원어 한 문장.
+  // 대화방 유저 말풍선에만 쓴다. 영어 확장·히스토리 저장과는 무관하다.
+  // 실패하면 빈 문자열을 돌려주고, 호출부가 이번 발화를 다음 턴으로 미룬다.
+  // ==================================================================
+  static Future<String> mergeNativeExpansion({
+    required String apiKey,
+    required String previousExpanded,
+    required List<String> newUtterances,
+    required String languageName,
+  }) async {
+    final additions =
+        newUtterances.map((u) => u.trim()).where((u) => u.isNotEmpty).toList();
+    if (apiKey.isEmpty || previousExpanded.trim().isEmpty || additions.isEmpty) {
+      return '';
+    }
+    final client = OpenAiConnectionPool.instance.client;
+    try {
+      final sysPrompt =
+          """You merge a growing spoken sentence for Step Expand practice.
+
+The user is building ONE sentence in $languageName across several turns.
+You get the sentence so far and what they just added. Rewrite them as ONE
+natural spoken $languageName sentence that keeps everything already said and
+folds the new part into it.
+
+[RULES]
+- Every clause must trace back to words the user actually said. Never add
+  facts, names, places, times, feelings, reasons, or judgements they did not say.
+- Keep their viewpoint, tense, and politeness level. Do not translate.
+- Grow it the way a person actually talks: short clauses chained left to right.
+  Do not nest clauses inside clauses.
+- Vary the connector. Do not use the same connector twice in one sentence.
+- Do not answer, react, explain, summarize, or ask anything.
+- If the new part repeats what is already in the sentence, keep the sentence
+  as it is rather than saying it twice.
+
+[OUTPUT]
+- Exactly ONE $languageName sentence, nothing else. No quotes, no label.""";
+
+      final addedBlock = additions.map((u) => '- $u').join('\n');
+      final res = await client
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.2,
+              'max_tokens': 300,
+              'messages': [
+                {'role': 'system', 'content': sysPrompt},
+                {
+                  'role': 'user',
+                  'content': 'Sentence so far:\n${previousExpanded.trim()}\n\n'
+                      'The user just added:\n$addedBlock\n\nMerged sentence:'
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 12));
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(res.bodyBytes));
+        var merged =
+            (data['choices'][0]['message']['content'] ?? '').toString().trim();
+        if (merged.length >= 2 &&
+            merged.startsWith('"') &&
+            merged.endsWith('"')) {
+          merged = merged.substring(1, merged.length - 1).trim();
+        }
+        return merged;
+      }
+    } catch (e) {
+      print('mergeNativeExpansion error: $e');
+    }
+    return '';
   }
 }
 
