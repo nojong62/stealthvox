@@ -2030,8 +2030,6 @@ $kSpokenReplyLengthPolicy
       turnId: 'sys-${DateTime.now().microsecondsSinceEpoch}',
       generationId: _pipelineGeneration,
       playbackCategory: 'system',
-      // 지시를 안 주면 gpt-4o-mini-tts가 한국어를 또박또박 읽어 처진다.
-      speakingInstruction: kNativeSpokenDeliveryInstruction,
     ));
     try {
       await utterance.done.timeout(timeout);

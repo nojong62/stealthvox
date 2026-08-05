@@ -50,20 +50,6 @@ const String kSpokenReplyLengthPolicy =
 - Go longer ONLY when the user explicitly asks for detail (자세히, 더 설명해줘, 왜 그런지, 예를 들어).
   Then give exactly the depth they asked for and nothing beyond it.''';
 
-/// 3모드 공통 TTS 전달 지시(gpt-4o-mini-tts `instructions`).
-///
-/// 이 모델은 `speed` 값으로는 거의 움직이지 않고 `instructions`로 말하기 결을
-/// 잡는다. 아무것도 주지 않으면 한국어를 또박또박 읽어, 같은 문장 길이의
-/// 영어보다 눈에 띄게 처진다. 세 모드가 한 목소리(nova)를 쓰므로 말하는
-/// 속도도 한 곳에서 관리한다.
-const String kNativeSpokenDeliveryInstruction =
-    '''Speak like a person talking to a friend, not like someone reading text aloud.
-Keep the brisk pace of ordinary conversation — as quick as easy English small talk.
-Korean especially must not slow into careful, syllable-by-syllable narration.
-Let words run together the way they naturally do, keep pauses short and only where
-a speaker would actually breathe, and stay warm and casual throughout.
-Do not enunciate for a learner. Do not sound like an announcer or an audiobook.''';
-
 /// 로비에서 고른 원어 이름을 프롬프트용으로 정규화한다. 비어 있으면 Korean.
 String resolveNativeLanguageName(String nativeLang) {
   final name = nativeLang.trim();

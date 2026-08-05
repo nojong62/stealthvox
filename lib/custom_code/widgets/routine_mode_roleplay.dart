@@ -2006,8 +2006,6 @@ User role: ${_roleplayUserLabel.trim()}''',
           'input': text,
           'voice': 'nova',
           'speed': 1.0,
-          // speed로는 거의 안 움직인다. 이 모델의 속도 조절은 instructions다.
-          'instructions': kNativeSpokenDeliveryInstruction,
         }),
       )
           .then((res) {
@@ -3365,8 +3363,6 @@ class ChunkedTtsFetcher {
                 'input': text,
                 'voice': voice,
                 'speed': 1.0,
-                // speed로는 거의 안 움직인다. 속도 조절은 instructions다.
-                'instructions': kNativeSpokenDeliveryInstruction,
                 'response_format': 'mp3',
               }),
             )
@@ -3704,8 +3700,6 @@ class HybridTtsPlayer {
                   'input': fullSentence,
                   'voice': voice,
                   'speed': 1.0,
-                  // speed로는 거의 안 움직인다. 속도 조절은 instructions다.
-                  'instructions': kNativeSpokenDeliveryInstruction,
                   'response_format': 'mp3',
                 }),
               )
