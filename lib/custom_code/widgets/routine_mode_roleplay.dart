@@ -1003,6 +1003,23 @@ $kSpokenReplyLengthPolicy
     _log('[STT-ROUTE]',
         'selected=gpt-4o-transcribe every_turn=true len=${userKorean.length}');
 
+    // 🗣️ 확정된 유저 문장을 검증보다 먼저 띄운다. 검증은 gpt-4o-mini 왕복이라
+    //   그 뒤에 두면 유저가 자기 말을 글자로 보기까지 왕복을 하나 더 기다린다.
+    //   말은 이미 끝났고 문장도 확정됐는데 화면은 "..."에 머물러 있었다.
+    //   반려되면 아래 분기가 이 임시 말풍선을 그대로 걷어낸다.
+    if (mounted) {
+      setState(() {
+        _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+        _localMessages.add(<String, dynamic>{
+          'role': 'HOST_TEMP',
+          'target': userKorean,
+          'original': '',
+          'type': 'user_input',
+        });
+      });
+      _scrollToBottom();
+    }
+
     final validation = await KoreanTurnValidator.validate(
       apiKey: _openAiKey,
       transcribedText: userKorean,
@@ -2285,8 +2302,7 @@ User role: ${_roleplayUserLabel.trim()}''',
         child: SafeArea(
           child: Column(children: [
             _buildTopBar(),
-            // 🗑️ 상황 박스 제거. 상황은 입장 전 설정 페이지에서 확인하고
-            //   들어오므로 방 안에서 다시 띄울 필요가 없다.
+            _buildScenarioTitle(),
             Expanded(
               child: Stack(
                 children: [
@@ -2302,10 +2318,34 @@ User role: ${_roleplayUserLabel.trim()}''',
     );
   }
 
-  // 🗑️ 방 안 시나리오 UI는 모두 제거했다. 초록 상황 박스(_buildScenarioTitle),
-  //    빈 방에 떠 있던 시작 카드(_buildTopControls), 그 카드로만 들어가던
-  //    수정 시트(_showSituationInputSheet/_inputField)까지 함께 없앴다.
-  //    상황과 두 역할은 입장 전 Scenario Talk Settings 페이지에서 정한다.
+  /// 지금 하고 있는 상황을 본문 맨 위에 제목처럼 한 줄 건다.
+  ///
+  /// 예전 초록 상황 박스는 설정이 앞 페이지로 빠지면서 없앴는데, 대화가
+  /// 길어지면 무슨 상황이었는지 잊게 된다. 그래서 다시 두되 카드가 아니라
+  /// 제목이다 — 말풍선 공간을 먹지 않게 두 줄까지만 쓰고 넘치면 줄인다.
+  /// 시작 카드와 수정 시트는 그대로 없는 채로 둔다. 상황과 두 역할은 입장 전
+  /// Scenario Talk Settings 페이지에서 정한다.
+  Widget _buildScenarioTitle() {
+    final situation = _scenarioSituation.trim();
+    if (situation.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+      child: Text(
+        situation,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: Colors.white70,
+          fontSize: 13 * _fontScale,
+          fontWeight: FontWeight.w600,
+          height: 1.35,
+          letterSpacing: 0.2,
+        ),
+      ),
+    );
+  }
+
   Widget _buildTopBar() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
