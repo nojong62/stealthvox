@@ -25,6 +25,18 @@ const String kAnyoneDeliberateReplyPolicy = '''[THINK TWICE BEFORE YOU SPEAK]
 - Your question must earn its place: ask about the one concrete detail you most want to know next — what happened, what they did, what the other person said back. One sharp, specific question. Never a vague or generic one.
 - Never show your drafts, your comparison, or any reasoning. Output only the final reply.''';
 
+/// 3모드 공통 존댓말 규칙. AI가 내는 한국어는 글이든 소리든 전부 존댓말이다.
+/// 모델은 유저 말투를 따라가려는 성질이 강해서, 유저가 반말로 말하면 몇 턴
+/// 만에 같이 반말로 흘렀다(실기기 확인: "어떤 앱인지 궁금해."). 그래서 유저를
+/// 따라가지 말라고 못을 박는다. 유저 자신의 문장은 이 규칙 밖이다 — 유저가
+/// 만든 문장은 유저 말투 그대로 둔다.
+const String kKoreanPoliteSpeechPolicy =
+    '''[ALWAYS SPEAK KOREAN 존댓말 — NEVER MIRROR CASUAL SPEECH]
+- Every Korean line you produce, on screen and in speech, must be 해요체 존댓말.
+- End sentences politely: -요 / -세요 / -네요 / -죠 / -까요. Never -어/-아/-야/-지/-니/-거야/-겠어.
+- The user may speak 반말. Do NOT match it. Stay 존댓말 no matter how they talk, and never comment on their speech level.
+- Keep it warm and spoken, not stiff. Avoid formal -습니다/-습니까 written style.''';
+
 /// 3모드(써클톡·시나리오톡·스탭익스팬드) 공통 응답 길이 규칙.
 /// 유저가 짧게 물으면 짧게 답한다. 가르치듯 길게 적는 것이 가장 흔한 실패라
 /// 한 곳에서 관리하고 세 모드의 Realtime 지시문이 모두 이 상수를 가져다 쓴다.

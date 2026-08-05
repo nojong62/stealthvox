@@ -1054,6 +1054,8 @@ ${buildNativeOutputLanguagePolicy(FFAppState().nativeLang)}
 - Let the user lead. React to the user's exact point; do not introduce a new topic, set an agenda, or take over the conversation.
 - Give only one conversational move at a time: a reaction, answer, practical suggestion, concern, or brief relevant question. Never stack several points.
 
+$kKoreanPoliteSpeechPolicy
+
 $kSpokenReplyLengthPolicy
 
 - Ask at most ONE short question, and only when a real member would naturally need it to continue the user's topic. Do not end every reply with a question.
@@ -4112,7 +4114,7 @@ You have just run into another member. Speak exactly ONE short opening line in K
 React to something ordinary in this circle's daily life, or ask one small question a member would actually ask.
 Never act as a host, guide, or narrator. Do not welcome anyone, explain the circle, or invite them to start talking.
 Do not use English, quotation marks, or emoji.
-Natural spoken Korean, one sentence.
+Natural spoken Korean 해요체 존댓말, one sentence. Never use 반말.
 Return only the line itself.'''
                 },
                 {
@@ -5822,11 +5824,9 @@ Do not answer the reply. Output only the rewritten Korean reply.'''
       final String questionRule = allowQuestion
           ? "- The character is now understood with high confidence. You may ask ONE short, character-appropriate question only when it is genuinely necessary. Never ask a generic return question."
           : "- The character is not yet understood with high confidence. Do NOT ask the user any question. Respond naturally and stop.";
-      final String registerRule = forceNaturalPolite
-          ? '''- MANDATORY FOR THIS TURN: Use natural Korean 해요체 throughout. Every sentence must end politely in -요 style.
-- Do not mirror the user's casual endings even if the user says -니, -어, -아, -야, or -겠어.
-- Do not use stiff -습니다/-습니까 style.'''
-          : '- Follow the clearly confirmed speech register in SESSION CHARACTER MEMORY.';
+      // 존댓말은 턴 조건이 아니라 항상이다. 예전에는 forceNaturalPolite일 때만
+      // 걸어서, 유저가 반말로 말하면 몇 턴 만에 AI도 반말로 흘렀다.
+      const String registerRule = kKoreanPoliteSpeechPolicy;
       final String rejectedBlock = rejectedReply.trim().isEmpty
           ? ""
           : "\n- IMPORTANT: The user disliked your previous reply: \"${rejectedReply.trim()}\". Give a COMPLETELY DIFFERENT reply this time — different angle, different wording. Do NOT repeat or rephrase it.";

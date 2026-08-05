@@ -211,6 +211,13 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
       '또 물어',
       '반복',
       '똑같은 질문',
+      // "이거는 조금 전에 질문하고 똑같이…" — 실기기에서 이 어순이 안 잡혀
+      //   검증기로 넘어갔고, 전사 오류로 오판돼 되묻기가 나갔다.
+      '질문하고 똑같',
+      '질문이랑 똑같',
+      '질문과 똑같',
+      '아까 질문',
+      '전에 질문',
       '아까 얘기',
       '이미 얘기',
       'ask something else',
@@ -435,6 +442,8 @@ about filling in a word you could not make out — for that, see [ASK BACK] belo
 Every question continues the story the first turn opened. Do not hop sideways to
 an unrelated noun they happened to mention. Never ask again about something they
 have already answered.
+
+$kKoreanPoliteSpeechPolicy
 
 $kSpokenReplyLengthPolicy
 - Always two parts, in this order and nothing more:
@@ -1688,6 +1697,60 @@ line had never been said. Never build the conversation on a line you had to gues
     }
   }
 
+  /// 유저가 직전 AI 질문에 불만을 표시했을 때, 그 질문을 지우고 새로 만든다.
+  /// 불만 발화 자체는 학습 턴으로 세지 않는다 — 유저는 답을 한 게 아니라
+  /// 질문을 물린 것이다. 자란 문장도 건드리지 않는다.
+  Future<void> _replaceLastQuestion({required int generation}) async {
+    var rejected = '';
+    setState(() {
+      _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+      final idx = _localMessages.lastIndexWhere((m) => m['role'] == 'SYSTEM');
+      if (idx != -1) {
+        rejected = (_localMessages[idx]['target'] ?? '').toString().trim();
+        _localMessages.removeAt(idx);
+      }
+    });
+    _scrollToBottom();
+
+    final replacement = await StepExpandBrain.generateKoreanTurn(
+      apiKey: _openAiKey,
+      instructions: '${_buildStepExpandSystemInstructions()}\n'
+          '\n[THIS TURN]\n${_buildStepExpandTurnInstructions(_turnCounter + 1)}\n'
+          '\n[THE USER TURNED DOWN YOUR LAST QUESTION]\n'
+          'Your previous question was: "$rejected"\n'
+          'They found it repetitive, off, or hard to answer. Ask a completely '
+          'different one — different angle, different wording. Never repeat or '
+          'rephrase the rejected question. Do not apologize, do not mention '
+          'that they complained, and do not explain yourself. Just ask.',
+      userText: _expandedNativeSentence.trim().isEmpty
+          ? '(아직 자란 문장이 없습니다. 유저가 첫 문장을 말하도록 다시 물어보세요.)'
+          : _expandedNativeSentence,
+    );
+    if (!mounted ||
+        !_isConversationActive ||
+        generation != _pipelineGeneration) {
+      return;
+    }
+    if (replacement.isEmpty) {
+      _log('🟠 [FAST-DISSATISFIED-ERR]', '새 질문 생성 실패 → 다시 듣기');
+      if (!_isSessionComplete) _startUserListening();
+      return;
+    }
+    setState(() {
+      _localMessages.add(<String, dynamic>{
+        'role': 'SYSTEM',
+        'target': replacement,
+        'original': '',
+      });
+    });
+    _scrollToBottom();
+    _log('🟠 [FAST-DISSATISFIED]', 'rejected="$rejected" new="$replacement"');
+    await _speakAiKorean(replacement);
+    if (mounted && _isConversationActive && !_isSessionComplete) {
+      _startUserListening();
+    }
+  }
+
   /// AI 턴 응답을 한국어 음성으로 낸다.
   /// 안내 음성과 달리 barge-in 대상이 아니다 — 답을 끝까지 들려준 뒤 마이크를 연다.
   Future<void> _speakAiKorean(String text) async {
@@ -2027,18 +2090,45 @@ line had never been said. Never build the conversation on a line you had to gues
         'selected=gpt-4o-transcribe every_turn=true len=${userKorean.length}');
     _runMeaningProbe(userKorean);
 
+    // 🟠 [FAST-DISSATISFIED] 질문 불만은 전사 오류가 아니다. 검증기보다 먼저
+    //    본다. 뒤에 두면 "이거 아까 질문하고 똑같잖아" 같은 말이
+    //    transcription_is_irrelevant_to_context로 걸려 "제가 잘 못 들은 것
+    //    같아요"로 되받고, 질문 교체까지 가지도 못한다(실기기에서 확인).
+    if (_turnCounter > 0 && _isQuestionDissatisfactionRaw(userKorean)) {
+      _log('🟠 [FAST-DISSATISFIED]', '질문 불만 감지 → 직전 질문 교체');
+      await _replaceLastQuestion(generation: generation);
+      return;
+    }
+
+    // ⚡ 검증과 문장 합치기를 나란히 던진다. 둘 다 확정된 유저 문장만 있으면
+    //    되고 서로 결과를 보지 않는데, 직렬로 세워 두는 바람에 합치기 1.1~1.2초가
+    //    유저 대기시간에 그대로 얹혔다(실측). 검증에서 걸리면 합치기 결과는
+    //    버려지지만, 통과가 대부분이라 평균 대기가 그만큼 줄어든다.
+    final previousExpandedNow = _expandedNativeSentence.trim();
+    final Future<String>? mergedFuture = previousExpandedNow.isEmpty
+        ? null // 첫 문장은 합칠 대상이 없다 — 발화가 곧 씨앗이다.
+        : StepExpandBrain.mergeNativeExpansion(
+            apiKey: _openAiKey,
+            previousExpanded: previousExpandedNow,
+            newUtterances: <String>[..._pendingNativeParts, userKorean],
+            languageName: resolveNativeLanguageName(FFAppState().nativeLang),
+          );
+
     final validation = await KoreanTurnValidator.validate(
       apiKey: _openAiKey,
       transcribedText: userKorean,
       mode: 'step_expand',
       modeContext:
-          'Current growing sentence: ${_expandedNativeSentence.trim().isEmpty ? '(first seed)' : _expandedNativeSentence.trim()}',
+          'Current growing sentence: ${previousExpandedNow.isEmpty ? '(first seed)' : previousExpandedNow}',
       recentConversation: _recentKoreanConversationForValidation(),
     );
     if (!mounted || generation != _pipelineGeneration) return;
     _log('[TURN-VALIDATE]',
         'accepted=${validation.accepted} reason=${validation.reason}');
     if (!validation.accepted) {
+      // 못 알아들은 발화로 합친 결과는 쓰지 않는다. 대기자 없는 Future를
+      // 그대로 두면 나중에 unhandled로 잡히므로 여기서 명시적으로 버린다.
+      mergedFuture?.ignore();
       setState(() {
         _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
         _localMessages.add(<String, dynamic>{
@@ -2060,6 +2150,7 @@ line had never been said. Never build the conversation on a line you had to gues
     await _processStepExpandTurn(
       validation.text,
       generation: generation,
+      mergedFuture: mergedFuture,
     );
   }
 
@@ -2137,6 +2228,10 @@ line had never been said. Never build the conversation on a line you had to gues
   Future<void> _processStepExpandTurn(
     String userKorean, {
     required int generation,
+    // 검증과 나란히 미리 띄워 둔 합치기. 둘 다 확정된 유저 문장만 있으면 되고
+    // 서로 결과를 안 보므로 직렬로 세울 이유가 없다. 실측 1.1~1.2초를 먹던
+    // 구간이라 여기서 결과만 받아 쓴다.
+    Future<String>? mergedFuture,
   }) async {
     if (!mounted ||
         !_isConversationActive ||
@@ -2174,12 +2269,14 @@ line had never been said. Never build the conversation on a line you had to gues
         _pendingNativeParts.clear();
         _log('[EXPAND-SEED]', 'turn=$turnNumber text="$userKorean"');
       } else {
-        final merged = (await StepExpandBrain.mergeNativeExpansion(
-          apiKey: _openAiKey,
-          previousExpanded: previousExpanded,
-          newUtterances: mergeInputs,
-          languageName: resolveNativeLanguageName(FFAppState().nativeLang),
-        ))
+        final merged = (await (mergedFuture ??
+                StepExpandBrain.mergeNativeExpansion(
+                  apiKey: _openAiKey,
+                  previousExpanded: previousExpanded,
+                  newUtterances: mergeInputs,
+                  languageName:
+                      resolveNativeLanguageName(FFAppState().nativeLang),
+                )))
             .trim();
         if (!mounted ||
             !_isConversationActive ||

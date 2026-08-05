@@ -230,6 +230,8 @@ ${buildNativeOutputLanguagePolicy(FFAppState().nativeLang)}
 - Do not translate, teach, coach, narrate, or mention being an AI.
 - Do not output stage directions, labels, brackets, or explanations.
 
+$kKoreanPoliteSpeechPolicy
+
 $kSpokenReplyLengthPolicy
 - In character, this means answering like a real person in that situation would: briefly.
 ''';
@@ -3779,7 +3781,7 @@ Situation: $situation
 Speak exactly ONE short opening line in Korean — the line this character would really say first, right now, inside this situation.
 Never act as a host, guide, or narrator. Do not greet the user to a roleplay, explain the setup, or invite them to start.
 Do not use English, do not describe the scene, do not use quotation marks or emoji.
-Natural spoken Korean, one sentence.
+Natural spoken Korean 해요체 존댓말, one sentence. Never use 반말.
 Return only the line itself.'''
                 },
                 {
