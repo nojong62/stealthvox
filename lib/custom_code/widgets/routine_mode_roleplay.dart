@@ -518,151 +518,6 @@ $kSpokenReplyLengthPolicy
     }
   }
 
-  // ====================================================================
-  // 📦 [Box 4: 시나리오 설정 — 유저 직접 입력]
-  // ====================================================================
-  void _showSituationInputSheet() {
-    if (_isConversationActive) return;
-    final situationCtrl = TextEditingController(text: _scenarioSituation);
-    final aiRoleCtrl = TextEditingController(text: _scenarioAiRole);
-    final userRoleCtrl = TextEditingController(text: _scenarioUserRole);
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, _) => Padding(
-            padding:
-                EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
-            child: Container(
-              decoration: const BoxDecoration(
-                color: Color(0xFF0A1A0D),
-                borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-              ),
-              padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 36,
-                        height: 4,
-                        decoration: BoxDecoration(
-                            color: Colors.white24,
-                            borderRadius: BorderRadius.circular(2)),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    const Text('상황 설정',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 4),
-                    const Text('상황과 역할을 입력하면 바로 롤플레이가 시작됩니다.',
-                        style: TextStyle(color: Colors.white38, fontSize: 12)),
-                    const SizedBox(height: 20),
-                    _inputField(situationCtrl, '상황 (10-15자)', '예: 숨겨둔 돈다발 들킴'),
-                    const SizedBox(height: 12),
-                    _inputField(aiRoleCtrl, '상대 역할', '예: 화난 배우자'),
-                    const SizedBox(height: 12),
-                    _inputField(userRoleCtrl, '내 역할', '예: 당황한 남편'),
-                    const SizedBox(height: 24),
-                    SizedBox(
-                      width: double.infinity,
-                      child: GestureDetector(
-                        onTap: () {
-                          final sit = situationCtrl.text.trim();
-                          final ai = aiRoleCtrl.text.trim();
-                          final user = userRoleCtrl.text.trim();
-                          if (sit.isEmpty || ai.isEmpty || user.isEmpty) return;
-                          Navigator.pop(ctx);
-                          setState(() {
-                            _scenarioSituation = sit;
-                            _scenarioAiRole = ai;
-                            _scenarioUserRole = user;
-                            _scenarioKeyword = sit;
-                            _sessionDocId = null;
-                            _myHistoryRef = null;
-                            _localMessages.clear();
-                            _isConversationActive = false;
-                          });
-                          // 🛡️ [v4] 유저 수정값 보존용 홀더 동기화
-                          RoleplayScenarioStore.situation = sit;
-                          RoleplayScenarioStore.aiRole = ai;
-                          RoleplayScenarioStore.userRole = user;
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          decoration: BoxDecoration(
-                            gradient: const LinearGradient(
-                              colors: [Color(0xFF16A34A), Color(0xFF22C55E)],
-                            ),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: const Center(
-                            child: Text('확인',
-                                style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.bold)),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _inputField(TextEditingController ctrl, String label, String hint) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label,
-            style: const TextStyle(
-                color: Color(0xFF86EFAC),
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.8)),
-        const SizedBox(height: 6),
-        TextField(
-          controller: ctrl,
-          style: const TextStyle(color: Colors.white, fontSize: 14),
-          decoration: InputDecoration(
-            hintText: hint,
-            hintStyle: const TextStyle(color: Colors.white24, fontSize: 13),
-            filled: true,
-            fillColor: const Color(0xFF0D200F),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: Colors.white12),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: Colors.white12),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: Color(0xFF16A34A)),
-            ),
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          ),
-        ),
-      ],
-    );
-  }
-
 // ====================================================================
 // 📦 [Box 5: Deepgram + Relay Pipeline] ← 통신로직 박스코드와 완전 일치
 // ====================================================================
@@ -2415,10 +2270,6 @@ $kSpokenReplyLengthPolicy
               child: Stack(
                 children: [
                   _buildChatList(),
-                  if (_localMessages.isEmpty)
-                    Positioned.fill(
-                      child: Center(child: _buildTopControls()),
-                    ),
                   _buildIdleOverlay(),
                 ],
               ),
@@ -2430,10 +2281,10 @@ $kSpokenReplyLengthPolicy
     );
   }
 
-  // 🗑️ _buildScenarioTitle(초록 상황 박스) 제거 — 상황은 입장 전
-  //    Scenario Talk Settings 페이지에서 정하고 확인한다.
-
-  // ... (_buildTopBar, _buildTopControls, _buildChatList, _buildTextBlock, _buildControlArea는 기존과 동일하게 유지) ...
+  // 🗑️ 방 안 시나리오 UI는 모두 제거했다. 초록 상황 박스(_buildScenarioTitle),
+  //    빈 방에 떠 있던 시작 카드(_buildTopControls), 그 카드로만 들어가던
+  //    수정 시트(_showSituationInputSheet/_inputField)까지 함께 없앴다.
+  //    상황과 두 역할은 입장 전 Scenario Talk Settings 페이지에서 정한다.
   Widget _buildTopBar() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -2452,319 +2303,96 @@ $kSpokenReplyLengthPolicy
             ),
           ),
           const Spacer(),
-          Row(children: [
-            IconButton(
-              icon: const Icon(Icons.menu_book_rounded,
-                  color: Color(0xFF4ADE80), size: 23),
-              tooltip: 'Scenario Talk 사용설명서',
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-              onPressed: _showScenarioTalkGuide,
-            ),
-            IconButton(
-              icon: Icon(
-                Icons.format_size,
-                color: _fontScale > 1.0
-                    ? const Color(0xFFFBBF24)
-                    : _fontScale < 1.0
-                        ? Colors.white38
-                        : Colors.white70,
-                size: 22,
-              ),
-              onPressed: () => setState(() {
-                _fontScale = _fontScale == 1.0
-                    ? 1.3
-                    : _fontScale == 1.3
-                        ? 0.8
-                        : 1.0;
-              }),
-            ),
-            IconButton(
-              icon: CustomPaint(
-                size: const Size(26, 26),
-                painter: _LangIconPainter(active: _showOriginal),
-              ),
-              onPressed: () => setState(() => _showOriginal = !_showOriginal),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-            ),
-            const SizedBox(width: 4),
-            // [v3.6] 잔여시간 표시 + 길게 누르면 로그 (개발자용)
-            GestureDetector(
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                decoration: BoxDecoration(
-                    color: const Color(0xFF2563EB),
-                    borderRadius: BorderRadius.circular(20)),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  ValueListenableBuilder<int>(
-                    valueListenable: BillingTicker.instance.billingState,
-                    builder: (_, s, __) => GestureDetector(
-                      onTap: s == 0 ? _resetIdleTimer : null,
-                      child: CustomPaint(
-                        size: const Size(14, 14),
-                        painter: BillingDotPainter(s),
+          // 📏 아이콘 넷과 잔여시간 칩이 한 줄에 들어간다. 폰 글꼴이 커지면
+          //   칩의 시간 글자가 함께 커져 줄 오른쪽으로 넘쳤다. 남는 폭 안에서
+          //   통째로 줄어들게 감싸, 어떤 배율에서도 시간이 잘리지 않게 한다.
+          Flexible(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Row(children: [
+                IconButton(
+                  icon: const Icon(Icons.menu_book_rounded,
+                      color: Color(0xFF4ADE80), size: 23),
+                  tooltip: 'Scenario Talk 사용설명서',
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 40, minHeight: 40),
+                  onPressed: _showScenarioTalkGuide,
+                ),
+                IconButton(
+                  icon: Icon(
+                    Icons.format_size,
+                    color: _fontScale > 1.0
+                        ? const Color(0xFFFBBF24)
+                        : _fontScale < 1.0
+                            ? Colors.white38
+                            : Colors.white70,
+                    size: 22,
+                  ),
+                  onPressed: () => setState(() {
+                    _fontScale = _fontScale == 1.0
+                        ? 1.3
+                        : _fontScale == 1.3
+                            ? 0.8
+                            : 1.0;
+                  }),
+                ),
+                IconButton(
+                  icon: CustomPaint(
+                    size: const Size(26, 26),
+                    painter: _LangIconPainter(active: _showOriginal),
+                  ),
+                  onPressed: () =>
+                      setState(() => _showOriginal = !_showOriginal),
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 36, minHeight: 36),
+                ),
+                const SizedBox(width: 4),
+                // [v3.6] 잔여시간 표시 + 길게 누르면 로그 (개발자용)
+                GestureDetector(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                        color: const Color(0xFF2563EB),
+                        borderRadius: BorderRadius.circular(20)),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      ValueListenableBuilder<int>(
+                        valueListenable: BillingTicker.instance.billingState,
+                        builder: (_, s, __) => GestureDetector(
+                          onTap: s == 0 ? _resetIdleTimer : null,
+                          child: CustomPaint(
+                            size: const Size(14, 14),
+                            painter: BillingDotPainter(s),
+                          ),
+                        ),
                       ),
-                    ),
+                      const SizedBox(width: 6),
+                      Text(
+                        () {
+                          final int s = (FFAppState().remainingTime)
+                              .toInt()
+                              .clamp(0, 999999);
+                          final int h = s ~/ 3600;
+                          final int m = (s % 3600) ~/ 60;
+                          return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+                        }(),
+                        style: const TextStyle(
+                            color: Colors.white, fontWeight: FontWeight.bold),
+                      ),
+                    ]),
                   ),
-                  const SizedBox(width: 6),
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      () {
-                        final int s = (FFAppState().remainingTime)
-                            .toInt()
-                            .clamp(0, 999999);
-                        final int h = s ~/ 3600;
-                        final int m = (s % 3600) ~/ 60;
-                        return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
-                      }(),
-                      style: const TextStyle(
-                          color: Colors.white, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ]),
-              ),
+                ),
+              ]),
             ),
-          ]),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildTopControls() {
-    final hasScenario =
-        _scenarioSituation.isNotEmpty && _scenarioAiRole.isNotEmpty;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 28),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          GestureDetector(
-            onTap: (_isConversationActive || _isGeneratingScenario)
-                ? null
-                : _showSituationInputSheet,
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [Color(0xFF0D2417), Color(0xFF071A0F)],
-                ),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: const Color(0xFF16A34A).withValues(alpha: 0.35),
-                  width: 1,
-                ),
-              ),
-              child: _isGeneratingScenario
-                  ? const SizedBox(
-                      height: 60,
-                      child: Center(
-                        child: CircularProgressIndicator(
-                          color: Color(0xFF22C55E),
-                          strokeWidth: 2,
-                        ),
-                      ),
-                    )
-                  : hasScenario
-                      ? Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Row(children: const [
-                              Icon(Icons.theater_comedy_rounded,
-                                  color: Color(0xFF86EFAC), size: 13),
-                              SizedBox(width: 5),
-                              Text(
-                                'SITUATION',
-                                style: TextStyle(
-                                  color: Color(0xFF86EFAC),
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: 1.6,
-                                ),
-                              ),
-                            ]),
-                            const SizedBox(height: 8),
-                            Text(
-                              _scenarioSituation,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 17,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: -0.4,
-                                height: 1.3,
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 14, vertical: 12),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF16A34A)
-                                    .withValues(alpha: 0.18),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: const Color(0xFF16A34A)
-                                      .withValues(alpha: 0.40),
-                                  width: 1,
-                                ),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: const [
-                                      Icon(Icons.smart_toy_rounded,
-                                          color: Color(0xFFBBF7D0), size: 13),
-                                      SizedBox(width: 4),
-                                      Text('AI',
-                                          style: TextStyle(
-                                            color: Color(0xFF86EFAC),
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.w800,
-                                            letterSpacing: 1.4,
-                                          )),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(_scenarioAiRole,
-                                      style: const TextStyle(
-                                        color: Color(0xFFDCFCE7),
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.w600,
-                                      )),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 14, vertical: 12),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF0EA5E9)
-                                    .withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: const Color(0xFF0EA5E9)
-                                      .withValues(alpha: 0.32),
-                                  width: 1,
-                                ),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: const [
-                                      Icon(Icons.person_rounded,
-                                          color: Color(0xFF7DD3FC), size: 13),
-                                      SizedBox(width: 4),
-                                      Text('YOU',
-                                          style: TextStyle(
-                                            color: Color(0xFF7DD3FC),
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.w800,
-                                            letterSpacing: 1.4,
-                                          )),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(_scenarioUserRole,
-                                      style: const TextStyle(
-                                        color: Color(0xFFE0F2FE),
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.w600,
-                                      )),
-                                ],
-                              ),
-                            ),
-                            if (!_isConversationActive) ...[
-                              const SizedBox(height: 14),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.end,
-                                children: const [
-                                  Icon(Icons.edit_outlined,
-                                      color: Colors.white24, size: 13),
-                                  SizedBox(width: 4),
-                                  Text('탭하여 수정',
-                                      style: TextStyle(
-                                          color: Colors.white24, fontSize: 11)),
-                                ],
-                              ),
-                            ],
-                          ],
-                        )
-                      : Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 16),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Icon(Icons.movie_outlined,
-                                  color: Color(0xFF86EFAC), size: 20),
-                              const SizedBox(width: 8),
-                              // 시스템 글꼴이 크면 이 한 줄이 버튼 폭을 넘겨
-                              // 진입 직후 잠깐 오버플로우 줄무늬가 보였다.
-                              // 남는 폭에 맞춰 줄어들도록 Flexible로 감싼다.
-                              const Flexible(
-                                child: Text('시나리오 불러오는 중...',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                        color: Color(0xFF86EFAC),
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w600)),
-                              ),
-                            ],
-                          ),
-                        ),
-            ),
-          ),
-          if (!_isGeneratingScenario && !_isConversationActive) ...[
-            const SizedBox(height: 10),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                GestureDetector(
-                  onTap: _generateScenario,
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-                    decoration: BoxDecoration(
-                      color: Colors.transparent,
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: Colors.white12, width: 1),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: const [
-                        Icon(Icons.refresh_rounded,
-                            color: Colors.white30, size: 14),
-                        SizedBox(width: 6),
-                        Text('다시 생성',
-                            style:
-                                TextStyle(color: Colors.white30, fontSize: 12)),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ],
-      ),
-    );
-  }
 
   Widget _buildChatList() {
     final double bottomPad = MediaQuery.of(context).size.height * 0.55;
@@ -2894,11 +2522,18 @@ $kSpokenReplyLengthPolicy
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text("Scenario Talk",
-                  style: TextStyle(
-                      color: Colors.white54,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold)),
+              // 📏 폰 글꼴을 키워 둔 기기에서 이 제목이 커지면서 Start 버튼을
+              //   밀어내 줄 오른쪽이 잘렸다. 버튼 자리를 먼저 주고 제목은
+              //   남는 폭에 맞춰 줄어들게 한다.
+              const Flexible(
+                child: Text("Scenario Talk",
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        color: Colors.white54,
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold)),
+              ),
               // Start 버튼: AI 역할 설정 완료 & 대화 미시작 상태
               if (_scenarioAiRole.isNotEmpty &&
                   _localMessages.isEmpty &&
