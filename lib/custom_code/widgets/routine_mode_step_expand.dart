@@ -2144,6 +2144,23 @@ line had never been said. Never build the conversation on a line you had to gues
       return;
     }
 
+    // 🗣️ 방금 한 말을 검증·합치기보다 먼저 띄운다. 둘 다 gpt-4o-mini 왕복이라
+    //   그 뒤에 두면 유저가 자기 말을 글자로 보기까지 한참을 "..."로 기다린다.
+    //   여기 뜨는 건 방금 한 말이고, 합치기가 끝나면 자란 문장으로 바뀐다 —
+    //   문장이 어떻게 자랐는지 보여주는 것이 이 모드의 핵심이라 최종 말풍선은
+    //   그대로 자란 문장을 쓴다. 반려·되묻기 분기는 이 임시 말풍선을 걷어낸다.
+    if (mounted) {
+      setState(() {
+        _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+        _localMessages.add(<String, dynamic>{
+          'role': 'HOST_TEMP',
+          'target': userKorean,
+          'original': '',
+        });
+      });
+      _scrollToBottom();
+    }
+
     // ⚡ 검증과 문장 합치기를 나란히 던진다. 둘 다 확정된 유저 문장만 있으면
     //    되고 서로 결과를 보지 않는데, 직렬로 세워 두는 바람에 합치기 1.1~1.2초가
     //    유저 대기시간에 그대로 얹혔다(실측). 검증에서 걸리면 합치기 결과는

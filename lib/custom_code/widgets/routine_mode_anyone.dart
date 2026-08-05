@@ -1650,6 +1650,22 @@ $kSpokenReplyLengthPolicy
         'selected=gpt-4o-transcribe every_turn=true len=${userOriginal.length}');
     _logTurnPerf('USER_KOREAN_FINAL');
 
+    // 🗣️ 확정된 유저 문장을 검증보다 먼저 띄운다. 검증은 gpt-4o-mini 왕복이라
+    //   그 뒤에 두면 유저가 자기 말을 글자로 보기까지 왕복을 하나 더 기다린다.
+    //   말은 이미 끝났고 문장도 확정됐는데 화면은 비어 있었다. 반려되면 아래
+    //   분기가 이 임시 말풍선을 걷어낸다.
+    if (mounted) {
+      setState(() {
+        _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+        _localMessages.add(<String, dynamic>{
+          'role': 'HOST_TEMP',
+          'target': userOriginal,
+          'original': '',
+        });
+      });
+      _scrollToBottom();
+    }
+
     final validation = await KoreanTurnValidator.validate(
       apiKey: _openAiKey,
       transcribedText: userOriginal,
@@ -1664,6 +1680,9 @@ $kSpokenReplyLengthPolicy
         'accepted=${validation.accepted} reason=${validation.reason}');
     if (!validation.accepted) {
       setState(() {
+        // 못 알아들은 발화는 화면에 남기지 않는다. 위에서 미리 띄운 임시
+        // 말풍선을 걷어내야 유저가 다시 말한 것이 이 턴이 된다.
+        _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
         _localMessages.add(<String, dynamic>{
           'role': 'SYSTEM',
           'target': KoreanTurnValidator.retryLine,
