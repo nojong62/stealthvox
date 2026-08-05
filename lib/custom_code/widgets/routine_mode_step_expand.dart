@@ -396,6 +396,12 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   /// 모델이 스스로 되묻든 유저에게는 똑같이 들려야 한다.
   static const String kStepExpandAskBackLine = KoreanTurnValidator.retryLine;
 
+  /// 🌱 마지막 턴 고정 마무리 문장. 마지막 턴에는 더 물을 것이 없어 되묻기가
+  /// 의미를 잃는데, "묻지 말라"는 지시에도 모델이 되묻는 말을 내놓을 때가 있다.
+  /// 그대로 두면 [_isAskBackReply]가 턴을 되돌려 완성문장이 영영 나오지 않으므로,
+  /// 그때 이 문장으로 갈아 끼워 세션을 정상 종료시킨다.
+  static const String kStepExpandFinalTurnLine = '문장이 이렇게 완성됐어요. 수고하셨어요.';
+
   /// 대화 설계 전문(全文). 매 턴 gpt-4o-mini의 system 프롬프트로 들어간다.
   /// 예전에는 Realtime 세션을 열 때 한 번만 걸어 두고 턴마다 짧은 지시만
   /// 덧붙였다. 세션이 사라진 지금은 매 턴 이걸 같이 보내야 한다.
@@ -1113,6 +1119,58 @@ line had never been said. Never build the conversation on a line you had to gues
     );
   }
 
+  // ====================================================================
+  // 📦 [Box 4-C0: 5턴 완료 마무리 — 완성문장 확정 → 저장 → Polished]
+  // ====================================================================
+  /// 마지막 질문에 답까지 마친 뒤의 마무리. 지금까지 자란 한국어 문장을
+  /// 완성문장으로 못 박아 카드로 올리고, 같은 언어로 한 번 다듬어 들려준다.
+  ///
+  /// **여기서 영어를 만들지 않는다.** 대화방은 한국어 자료만 넘기고, 영어
+  /// Target과 영어 Polished는 History가 자기 규칙으로 만든다.
+  Future<void> _completeStepExpandSession({required int generation}) async {
+    final finalNative = _expandedNativeSentence.trim();
+    if (finalNative.isEmpty) {
+      _log('⚠️ [DONE]', '자란 문장이 비어 있음 → 완성문장 카드/저장 생략');
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _expandedFinalSentence = finalNative;
+        _showExpandedFinalCard = true;
+      });
+      _scrollToBottom();
+    }
+    _log('🌱 [DONE]', '$MAX_TURNS턴 완료 → 완성문장 확정 len=${finalNative.length}');
+
+    // 저장이 다듬기보다 먼저다. 여기서 유저가 앱을 닫아도 공부방에서 연습을
+    // 열 수 있어야 한다 — has_practice가 그 트리거다.
+    await _saveExpandedSentenceToFirestore(finalNative);
+
+    if (!mounted || generation != _pipelineGeneration) return;
+    await _autoPolishAndSpeak(finalNative);
+    // 여기서 공부방으로 보내지 않는다. 방은 각자 따로 돈다 — 완성문장과
+    // Polished를 띄우고 끝이다. 다음 문장은 아래 "Suggest New Sentence"로 이어간다.
+  }
+
+  /// 완성된 한국어 문장을 방 문서에 박는다. `has_practice`가 공부방 Practice
+  /// 진입 트리거라, 이게 없으면 5턴을 다 채워도 연습 화면이 열리지 않는다.
+  Future<void> _saveExpandedSentenceToFirestore(String expanded) async {
+    try {
+      if (_myHistoryRef == null) {
+        _log('⚠️ [PRACTICE-READY]', '_myHistoryRef 없음 → 연습 진입 불가');
+        return;
+      }
+      await _myHistoryRef!.update({
+        'expanded_sentence': expanded,
+        'has_practice': true,
+      });
+      _log('🌱 [PRACTICE-READY]', '방 루트에 expanded_sentence + has_practice 저장');
+    } catch (error) {
+      _log('❌ [PRACTICE-READY-ERR]', '${error.runtimeType} $error');
+    }
+  }
+
   /// Polished 문장을 Firestore에 저장
   /// 🔧 [PRACTICE-FIX] _sessionDocId가 null이어도 _myHistoryRef는 살아있을 수 있음.
   ///                  가드를 분리하여 chat_history 저장만이라도 진행되도록 보장.
@@ -1147,55 +1205,20 @@ line had never been said. Never build the conversation on a line you had to gues
   }
 
   // ====================================================================
-  // 📦 [Box 4-C: inline Polish — 5턴 완료 시 자동 호출, 채팅목록에 인라인 표시]
+  // 📦 [Box 4-C: inline Polish — 자동 생성이 실패했을 때의 재시도 버튼]
   // ====================================================================
+  /// 완료 직후 자동 다듬기가 실패하면 Polished 카드 대신 버튼이 남는다.
+  /// 그 버튼이 부르는 자리. 자동 경로와 같은 것을 해야 하므로 그대로 넘긴다.
+  ///
+  /// 예전에는 말풍선을 거꾸로 훑어 `Part1\n\nPart2`에서 뒷부분을 떼어 썼다.
+  /// 지금 유저 말풍선은 자란 한국어 문장 하나뿐이라 그 파싱은 맞지 않는다.
   Future<void> _polishSentenceInline() async {
     if (_isPolishing || _openAiKey.isEmpty) return;
-
-    String? finalExpanded;
-    for (int i = _localMessages.length - 1; i >= 0; i--) {
-      if (_localMessages[i]['role'] == 'HOST') {
-        final target = (_localMessages[i]['target'] ?? '').toString();
-        if (target.contains('\n\n')) {
-          final parts = target.split(RegExp(r'\n\s*\n'));
-          if (parts.length >= 2) {
-            finalExpanded = parts.sublist(1).join('\n\n').trim();
-            break;
-          }
-        } else if (target.trim().isNotEmpty) {
-          finalExpanded = target.trim();
-          break;
-        }
-      }
-    }
-
-    if (finalExpanded == null || finalExpanded.isEmpty) return;
-
-    if (mounted) {
-      setState(() {
-        _isPolishing = true;
-        _polishedSentence = "";
-      });
-      _scrollToBottom();
-    }
-
-    try {
-      final polished = await StepExpandBrain.polishSentence(
-        apiKey: _openAiKey,
-        originalSentence: finalExpanded,
-      );
-      if (mounted) {
-        setState(() {
-          _polishedSentence = polished;
-          _isPolishing = false;
-        });
-        _savePolishedToFirestore(polished);
-        _scrollToBottom();
-      }
-    } catch (e) {
-      _log('❌ [POLISH-INLINE]', 'error: $e');
-      if (mounted) setState(() => _isPolishing = false);
-    }
+    final finalExpanded = _expandedFinalSentence.trim().isNotEmpty
+        ? _expandedFinalSentence.trim()
+        : _expandedNativeSentence.trim();
+    if (finalExpanded.isEmpty) return;
+    await _autoPolishAndSpeak(finalExpanded);
   }
 
   // ====================================================================
@@ -1215,16 +1238,19 @@ line had never been said. Never build the conversation on a line you had to gues
       _scrollToBottom();
     }
     try {
-      final polished = await StepExpandBrain.polishSentence(
+      // 언어를 바꾸지 않는 다듬기다. 영어 Polished는 History가 따로 만들며,
+      // 여기서 만든 한국어를 polished_sentence/refined_sentence에 저장하면
+      // History가 그걸 영어인 줄 알고 그대로 P3에 써 버린다. 저장하지 않는다.
+      final polished = await StepExpandBrain.polishNativeSentence(
         apiKey: _openAiKey,
         originalSentence: expandedSentence,
+        languageName: resolveNativeLanguageName(FFAppState().nativeLang),
       );
       if (!mounted) return;
       setState(() {
         _polishedSentence = polished;
         _isPolishing = false;
       });
-      _savePolishedToFirestore(polished);
       // Polished 카드 상단(헤더)을 먼저 보여주고 TTS 따라 자연스럽게 내려감
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_polishedCardKey.currentContext != null) {
@@ -1236,8 +1262,9 @@ line had never been said. Never build the conversation on a line you had to gues
           );
         }
       });
-      // Polished 문장 한 번 낭독
-      if (polished.isNotEmpty) await _practiceSpeakText(polished, _aiVoice);
+      // Polished 문장 한 번 낭독. 대화방 음성은 TtsCache에 남기지 않는 것이
+      // 3모드 공통 규칙이라 _practiceSpeakText(캐시함)가 아니라 이쪽을 쓴다.
+      if (polished.isNotEmpty) await _speakAiKorean(polished);
     } catch (e) {
       _log('❌ [AUTO-POLISH]', 'error: $e');
       if (mounted) setState(() => _isPolishing = false);
@@ -2370,6 +2397,14 @@ line had never been said. Never build the conversation on a line you had to gues
         return;
       }
       turnCompleted = true;
+      // 🌱 마지막 턴에서는 되묻지 않는다. 더 물을 것이 없어 되묻기가 의미를
+      //   잃는데, 여기서 턴을 되돌리면 5턴을 다 채우고도 완성문장이 영영 안
+      //   나온다. 합치기는 이미 성공해 문장이 제대로 자란 상태이므로, 마무리
+      //   멘트만 고정 문장으로 갈아 끼우고 정상 종료시킨다.
+      if (turnNumber >= MAX_TURNS && _isAskBackReply(aiKorean)) {
+        _log('[ASK-BACK-FINAL]', 'turn=$turnNumber 마지막 턴 되묻기 → 고정 마무리 멘트로 대체');
+        aiKorean = kStepExpandFinalTurnLine;
+      }
       // 👂 되묻기 턴이면 유저 발화를 버린다. 화면에도 히스토리에도 남기지
       //   않고 턴 번호도 되돌려, 유저가 다시 말한 것이 이 턴이 되게 한다.
       //   되묻는 말 자체는 이미 음성으로 나갔고, 글자로도 남겨 둔다.
@@ -2435,6 +2470,12 @@ line had never been said. Never build the conversation on a line you had to gues
       await _saveHistoryMessages(<Map<String, dynamic>>[hostLine, systemLine]);
       _log('[GPT-HISTORY]',
           'turn=$turnNumber model=gpt-4o-mini voice=$_aiVoice tts=true');
+
+      // 마지막 턴이면 여기서 세션을 닫는다. _saveHistoryMessages가 방금
+      // _myHistoryRef를 보장했으므로 완성문장을 박을 자리가 확실하다.
+      if (turnNumber >= MAX_TURNS) {
+        await _completeStepExpandSession(generation: generation);
+      }
     } catch (error) {
       _log('[GPT-PIPE-ERR]',
           'turn=$turnNumber reason=${error.runtimeType} error=$error');
@@ -7089,6 +7130,81 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
       client.close();
     }
     return originalSentence; // 실패 시 원문 반환
+  }
+
+  // ==================================================================
+  // 📦 [Box 7-1-E2] polishNativeSentence — 완성문장을 같은 언어로 다듬기
+  // ------------------------------------------------------------------
+  // 위 polishSentence는 "English speaking coach" 프롬프트라 무엇을 넣든 영어를
+  // 돌려준다. 대화방은 한국어 자료만 다루므로 여기서는 언어를 바꾸지 않고
+  // 결만 다듬는다. 영어 Polished는 History가 자기 규칙으로 따로 만든다.
+  // ==================================================================
+  static Future<String> polishNativeSentence({
+    required String apiKey,
+    required String originalSentence,
+    required String languageName,
+  }) async {
+    final source = originalSentence.trim();
+    if (apiKey.isEmpty || source.isEmpty) return source;
+    final client = OpenAiConnectionPool.instance.client;
+    try {
+      final sysPrompt =
+          """The user built ONE $languageName sentence across several turns of
+speaking practice. Rewrite it as ONE sentence that sounds like a native
+$languageName speaker actually saying it out loud.
+
+[KEEP IT THEIRS]
+- Answer in $languageName. Never translate into another language.
+- Same meaning, same viewpoint, same tense, same politeness level.
+- Never add facts, names, places, times, feelings, or reasons they did not say.
+- Never drop anything they did say.
+
+[WHAT TO IMPROVE]
+- Smooth the seams where the pieces were joined.
+- Replace a stiff or repeated connective with one that fits better.
+- Drop repeated subjects and filler that spoken language would leave out.
+- Keep it easy to say in one breath. Spoken rhythm, not written prose.
+
+[OUTPUT]
+- Exactly ONE $languageName sentence. No quotes, no label, no explanation.""";
+
+      final res = await client
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.3,
+              'max_tokens': 300,
+              'messages': [
+                {'role': 'system', 'content': sysPrompt},
+                {
+                  'role': 'user',
+                  'content': 'Sentence they built:\n$source\n\nPolished:'
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(res.bodyBytes));
+        var polished =
+            (data['choices'][0]['message']['content'] ?? '').toString().trim();
+        if (polished.length >= 2 &&
+            polished.startsWith('"') &&
+            polished.endsWith('"')) {
+          polished = polished.substring(1, polished.length - 1).trim();
+        }
+        if (polished.isNotEmpty) return polished;
+      }
+    } catch (e) {
+      print('polishNativeSentence error: $e');
+    }
+    return source; // 실패 시 완성문장 그대로 — 카드가 비는 것보다 낫다
   }
 
   // ==================================================================
