@@ -81,7 +81,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   // ====================================================================
   String _deepgramKey = "";
   String _openAiKey = "";
-  static const String _aiVoice = 'marin';
+  static const String _aiVoice = 'nova';
   bool _micPermissionReady = false; // 🆕 마이크 권한 준비 여부(첫 진입 race 방지)
   bool _initialSessionStarted = false; // 🆕 초기 자동 시작 1회성 보장
   bool _isInitialGuidePlaying = false; // 첫 안내 중 유저 발화 시 즉시 중단(barge-in)

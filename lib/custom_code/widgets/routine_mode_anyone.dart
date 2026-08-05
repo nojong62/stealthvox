@@ -205,7 +205,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   double _fontScale = 1.0;
   // 최종 통신 구조에서는 대화방에 확정된 한국어 문장만 표시한다.
   bool _showOriginal = false;
-  static const String _aiVoice = 'verse';
+  static const String _aiVoice = 'nova';
   String _characterShortTermMemory = '';
   int _turnCounter = 0;
   // 🧭 [FIRST-CONTEXT] 첫 정상 발화 판정. Anyone은 GPT-4.1 문맥 판정을 쓰지

@@ -83,7 +83,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   // ====================================================================
   String _deepgramKey = "";
   String _openAiKey = "";
-  static const String _aiVoice = 'coral';
+  static const String _aiVoice = 'nova';
   static const Duration _accurateTranscribeTimeout = Duration(seconds: 12);
   bool _isConversationActive = false;
   double _fontScale = 1.0;
