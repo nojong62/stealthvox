@@ -8681,69 +8681,77 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
 
   Widget _buildStepExpandSelectScreen() {
     final bool hasData = _stepExpandTurns.isNotEmpty;
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              IconButton(
+    // 📐 시스템 글자 크기 1.7배 + 화면 확대(density 480→540)를 함께 쓰는 기기에서
+    //    이 화면이 무너졌다(실기기 확인, 논리 폭 320dp). 제목이 두 줄로 쪼개져
+    //    닫기 버튼과 부딪히고 카드 부제가 "역/할교환"처럼 어절 중간에서 끊겼다.
+    //    여기는 문장이 아니라 짧은 라벨만 있는 선택 메뉴라, 이 화면에서만 배율을
+    //    묶어 레이아웃을 지킨다. 본문 낭독 화면들은 배율을 그대로 따른다.
+    return MediaQuery.withClampedTextScaling(
+      maxScaleFactor: 1.3,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // 닫기 버튼을 제목과 같은 줄에 두면 좁은 폭에서 제목이 96dp를 뺏겨
+            // 두 줄이 된다. 버튼은 위, 제목은 아래 전체 폭으로 내린다.
+            Align(
+              alignment: Alignment.centerLeft,
+              child: IconButton(
                 icon: const Icon(Icons.close, color: Colors.white70),
                 onPressed: _exitShadowing,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
               ),
-              const Expanded(
-                child: Text(
-                  "어떤 연습부터 시작할까요?",
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold),
-                ),
-              ),
-              const SizedBox(width: 48),
-            ],
-          ),
-          const SizedBox(height: 32),
-          _buildPracticeSelectionCard(
-            title: "Practice 1",
-            subtitle: "AI 질문 + 단답 역할교환 (5턴)",
-            color: Colors.greenAccent,
-            icon: Icons.swap_horiz_rounded,
-            onTap: hasData ? _startPart1Practice : null,
-          ),
-          const SizedBox(height: 12),
-          _buildPracticeSelectionCard(
-            title: "Practice 2",
-            subtitle: "AI 질문 + 확장문장 역할교환 (4턴+AI)",
-            color: Colors.lightBlueAccent,
-            icon: Icons.expand_more_rounded,
-            onTap: hasData ? _startPart2Practice : null,
-          ),
-          const SizedBox(height: 12),
-          _buildPracticeSelectionCard(
-            title: "Practice 3",
-            subtitle: _isPreparingStepP3
-                ? "P3 준비 중... P1/P2는 바로 시작할 수 있어요"
-                : (_stepP3PreparationError ?? "전체 문장 의미단위 쉐도잉"),
-            color: Colors.amber,
-            icon: Icons.music_note_rounded,
-            isLoading: _isPreparingStepP3,
-            onTap: _isPreparingStepP3
-                ? null
-                : _stepP3PreparationError != null ||
-                        _expandedSentence.trim().isEmpty
-                    ? _retryStepP3Preparation
-                    : _goToChunkPractice,
-          ),
-          const Spacer(),
-          TextButton(
-            onPressed: _exitShadowing,
-            child: const Text("취소",
-                style: TextStyle(color: Colors.white38, fontSize: 14)),
-          ),
-        ],
+            ),
+            const Text(
+              "어떤 연습부터 시작할까요?",
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 24),
+            _buildPracticeSelectionCard(
+              title: "Practice 1",
+              subtitle: "AI 질문 + 단답 역할교환 (5턴)",
+              color: Colors.greenAccent,
+              icon: Icons.swap_horiz_rounded,
+              onTap: hasData ? _startPart1Practice : null,
+            ),
+            const SizedBox(height: 12),
+            _buildPracticeSelectionCard(
+              title: "Practice 2",
+              subtitle: "AI 질문 + 확장문장 역할교환 (4턴+AI)",
+              color: Colors.lightBlueAccent,
+              icon: Icons.expand_more_rounded,
+              onTap: hasData ? _startPart2Practice : null,
+            ),
+            const SizedBox(height: 12),
+            _buildPracticeSelectionCard(
+              title: "Practice 3",
+              subtitle: _isPreparingStepP3
+                  ? "P3 준비 중... P1/P2는 바로 시작할 수 있어요"
+                  : (_stepP3PreparationError ?? "전체 문장 의미단위 쉐도잉"),
+              color: Colors.amber,
+              icon: Icons.music_note_rounded,
+              isLoading: _isPreparingStepP3,
+              onTap: _isPreparingStepP3
+                  ? null
+                  : _stepP3PreparationError != null ||
+                          _expandedSentence.trim().isEmpty
+                      ? _retryStepP3Preparation
+                      : _goToChunkPractice,
+            ),
+            const Spacer(),
+            TextButton(
+              onPressed: _exitShadowing,
+              child: const Text("취소",
+                  style: TextStyle(color: Colors.white38, fontSize: 14)),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -8763,7 +8771,9 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
         duration: const Duration(milliseconds: 200),
         opacity: enabled ? 1.0 : 0.4,
         child: Container(
-          padding: const EdgeInsets.all(18),
+          // 좁은 폭(320dp)에서는 여백·아이콘이 가져가는 자리가 곧 글자가 깨지는
+          // 원인이다. 라벨이 한 줄에 들어오도록 조금씩 줄여 글자 폭을 벌어 준다.
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
           decoration: BoxDecoration(
             color: color.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(14),
@@ -8772,16 +8782,16 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
           child: Row(
             children: [
               Container(
-                width: 44,
-                height: 44,
+                width: 38,
+                height: 38,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: color.withValues(alpha: 0.15),
                   border: Border.all(color: color.withValues(alpha: 0.5)),
                 ),
-                child: Icon(icon, color: color, size: 22),
+                child: Icon(icon, color: color, size: 20),
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -8809,7 +8819,7 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
                 )
               else
                 Icon(Icons.chevron_right_rounded,
-                    color: color.withValues(alpha: 0.6), size: 22),
+                    color: color.withValues(alpha: 0.6), size: 20),
             ],
           ),
         ),
