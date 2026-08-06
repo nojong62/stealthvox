@@ -4140,16 +4140,24 @@ line had never been said. Never build the conversation on a line you had to gues
                     ),
                   ),
                   const SizedBox(width: 6),
-                  Text(
-                    () {
-                      final int s =
-                          (FFAppState().remainingTime).toInt().clamp(0, 999999);
+                  // 🐞 [잔여시간] 예전에는 billingState 리스너 안에서
+                  //   FFAppState().remainingTime을 직접 읽어, 과금 점 색이 바뀔
+                  //   때만 다시 그려졌다. 초 단위로 줄어드는 값인데 화면은 멈춰
+                  //   보였다. 표시만 고친다 — 이 모드는 5턴이 세션 경계라
+                  //   30분 롤오버를 쓰지 않는다.
+                  ValueListenableBuilder<int>(
+                    valueListenable:
+                        BillingTicker.instance.remainingSecondsNotifier,
+                    builder: (_, remaining, __) {
+                      final int s = remaining.clamp(0, 999999);
                       final int h = s ~/ 3600;
                       final int m = (s % 3600) ~/ 60;
-                      return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
-                    }(),
-                    style: const TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.bold),
+                      return Text(
+                        '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}',
+                        style: const TextStyle(
+                            color: Colors.white, fontWeight: FontWeight.bold),
+                      );
+                    },
                   ),
                 ]),
               ),

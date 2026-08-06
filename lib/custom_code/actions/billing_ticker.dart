@@ -13,6 +13,7 @@ import 'index.dart'; // Imports other custom actions
 
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -58,7 +59,45 @@ class BillingTicker with WidgetsBindingObserver {
 
   /// 과금 상태 인디케이터 (0=차감 안 함, 2=차감 중)
   /// 1은 예전 quarter 배율 자리였다. 배율이 하나로 합쳐져 더 이상 쓰지 않는다.
+  ///
+  /// ⚠️ 이 계약에 값을 추가하지 말 것. 7개 화면이 구독하는데 그중 다섯(히스토리·
+  /// 히스토리 목록·스토어·스텔스룸 등)은 30분 대화 세션 자체가 없다. 세션 임박
+  /// 표시는 [sessionRemainingNotifier]로 따로 내보낸다.
   final ValueNotifier<int> billingState = ValueNotifier<int>(0);
+
+  // ── 30분 대화 세션 ────────────────────────────────────────────────────────
+  // 과금 구간(usage_logs)과 다른 축이다. 과금 구간은 백그라운드·idle마다 이미
+  // 쪼개지지만, 대화 세션은 30분 롤오버에서만 끊긴다. 둘을 같은 값으로 묶으면
+  // 잠깐 앱을 내렸다 올린 것만으로 30분 시계가 되감긴다.
+  /// 🧪 디버그 빌드에서만 세션 길이를 줄여 롤오버를 실제로 밟아 볼 수 있게 한다.
+  /// 30분을 그대로 두면 경합(롤오버 × 백그라운드 × idle) 검증이 사실상 불가능하다.
+  ///   flutter run --dart-define=SESSION_SECONDS=45
+  /// 릴리스 빌드는 이 값을 무시하고 항상 30분이다.
+  static const int _kDebugSessionSecondsOverride =
+      int.fromEnvironment('SESSION_SECONDS');
+
+  static int get kSessionSeconds =>
+      (kDebugMode && _kDebugSessionSecondsOverride > 0)
+          ? _kDebugSessionSecondsOverride
+          : 30 * 60;
+
+  /// 현재 30분 세션의 잔여 초. 실제로 차감이 일어난 초에만 줄어든다
+  /// (idle·백그라운드로 멈춘 동안은 그대로) — 그래야 "30분 과금분"과 세션이
+  /// 일치한다. 대화방 2곳만 구독한다.
+  final ValueNotifier<int> sessionRemainingNotifier =
+      ValueNotifier<int>(kSessionSeconds);
+
+  /// 30분 경계에 도달했다는 신호. 엔진은 신호만 세우고 롤오버는 하지 않는다 —
+  /// "진행 중인 발화·답변이 끝날 때까지 기다림"은 모드만 아는 상태이고, 엔진에
+  /// UI·파이프라인을 넣지 않는다는 원칙을 지킨다.
+  final ValueNotifier<bool> sessionRolloverDue = ValueNotifier<bool>(false);
+
+  int _sessionElapsedSeconds = 0;
+  DateTime? _lastRolloverAttemptAt;
+
+  /// 정산 실패로 롤오버가 튕겼을 때 매 초 재시도하지 않도록 두는 간격.
+  static const Duration _kRolloverRetryCooldown = Duration(seconds: 30);
+  // ─────────────────────────────────────────────────────────────────────────
 
   /// 지금 이 순간 실제로 차감이 도는가.
   /// [_onTick]의 차감 조건과 **같은 식**을 쓴다. 표시등이 따로 판단하면
@@ -158,11 +197,10 @@ class BillingTicker with WidgetsBindingObserver {
       _addBillingLog('[BILLING] foreground resumed');
       if (_wasRunningBeforeBackground) {
         _wasRunningBeforeBackground = false;
-        // 포그라운드 복귀: 새 구간 시작 — before_seconds를 현재 잔여시간으로 재설정
+        // 포그라운드 복귀: 과금 구간만 새로 연다. 30분 시계는 그대로 둔다 —
+        // 앱을 잠깐 내렸다 올린 것으로 세션이 되감기면 안 된다.
         if (_sessionMode.isNotEmpty) {
-          _sessionBeforeSeconds = FFAppState().remainingTime;
-          _sessionStartTime = DateTime.now();
-          _usageLogSaved = false;
+          _openSegment('foreground');
           _addBillingLog(
               '[BILLING] session resumed from bg, new before=$_sessionBeforeSeconds');
         }
@@ -186,41 +224,75 @@ class BillingTicker with WidgetsBindingObserver {
 
   /// 현재 모드 로그 기록 + 세션 시작 상태 캡처
   /// 반드시 setRate() 이후에 호출해야 rate가 정확히 기록됨
-  void logMode(String mode) {
+  ///
+  /// [startNewConversation]은 30분 시계를 처음으로 되돌릴지다. 방에 새로 들어올
+  /// 때만 true다. **idle 복귀에서도 이 함수가 불리므로**(대화방 두 곳이 그렇다)
+  /// 거기서는 반드시 false를 넘겨야 한다 — 60초 쉬었다 돌아올 때마다 30분이
+  /// 되감기면 롤오버가 영영 오지 않는다.
+  void logMode(String mode, {bool startNewConversation = true}) {
     AppLogLedger.instance.onSessionStart(mode);
     _sessionMode = mode;
     _sessionRateValue = _rate.multiplier;
+    _openSegment(startNewConversation ? 'mode_enter' : 'idle_resume');
+    if (startNewConversation) resetConversationSession();
+    _addBillingLog(
+        '[BILLING] mode=$mode (session start before=$_sessionBeforeSeconds rate=$_sessionRateValue newConv=$startNewConversation)');
+  }
+
+  // ── 과금 구간 단일 진입/종료 경로 ─────────────────────────────────────────
+  // 불변식 두 개로 중복 정산과 누락을 동시에 막는다.
+  //   ① usage_logs에 쓰는 곳은 [_closeSegment] 하나뿐이다.
+  //   ② 기준선([_sessionBeforeSeconds])은 저장이 성공한 뒤에만 앞으로 간다.
+  //
+  // ②가 없으면 이렇게 샌다 — 기준선을 먼저 옮기면 secondsUsed가 0이 되어
+  // saveUsageLog가 조용히 반환하고(구간 증발), 저장 실패인데 기준선만 옮기면
+  // 재시도해도 지나간 구간을 계산할 수 없다(이력 손실).
+  bool _segmentClosing = false;
+
+  void _openSegment(String reason) {
     _sessionBeforeSeconds = FFAppState().remainingTime;
     _sessionStartTime = DateTime.now();
     _usageLogSaved = false;
     _addBillingLog(
-        '[BILLING] mode=$mode (session start before=$_sessionBeforeSeconds rate=$_sessionRateValue)');
+        '[BILLING-SEG] open reason=$reason before=$_sessionBeforeSeconds');
   }
 
-  void pause() {
-    if (_paused) return; // 이중 호출 방지
-    _cancelLifecyclePause('manual_pause');
-    _recoverableLifecyclePause = false;
-    _paused = true;
-    _addBillingLog('[BILLING] pause');
-    _updateBillingState();
-    flushNow();
-    saveUsageLog(); // 세션 종료 시 사용시간 이력 1회 저장 (중복 방지 포함)
+  /// 과금 구간 하나를 닫는다. usage_logs에 쓰는 유일한 경로.
+  ///
+  /// [reopen]이 true면 과금을 멈추지 않고 구간만 교체한다(30분 롤오버).
+  /// 반환값이 false면 정산이 실패한 것이다 — 호출부는 History를 교체하면 안 된다.
+  Future<bool> _closeSegment(String reason, {required bool reopen}) async {
+    if (_segmentClosing) {
+      _addBillingLog('[BILLING-SEG] close skipped reason=$reason busy=true');
+      return false;
+    }
+    _segmentClosing = true;
+    try {
+      await flushNow();
+      final persisted = await _persistSegment();
+      _addBillingLog(
+          '[BILLING-SEG] close reason=$reason persisted=$persisted reopen=$reopen');
+      if (!persisted) return false;
+      if (reopen) _openSegment(reason);
+      return true;
+    } finally {
+      _segmentClosing = false;
+    }
   }
 
-  /// 세션 종료 시 users/{uid}/usage_logs에 사용시간 이력 1회 저장
-  /// - seconds_used <= 0 이면 저장 안 함
-  /// - currentUser == null 이면 저장 안 함
-  /// - before_seconds <= after_seconds 이면 저장 안 함 (차감 없음)
-  /// - _usageLogSaved == true 이면 중복 저장 안 함
-  Future<void> saveUsageLog() async {
-    if (_usageLogSaved) return;
-    if (_sessionMode.isEmpty || _sessionStartTime == null) return;
+  /// 이 구간을 usage_logs에 남긴다.
+  ///
+  /// 반환값은 "기준선을 앞으로 옮겨도 안전한가"다. 저장할 것이 애초에 없던
+  /// 경우(차감 0, 비로그인, 이미 저장됨)도 true다 — 잃을 것이 없다. 저장을
+  /// 시도했다가 실패한 경우에만 false를 돌려 기준선을 붙잡아 둔다.
+  Future<bool> _persistSegment() async {
+    if (_usageLogSaved) return true;
+    if (_sessionMode.isEmpty || _sessionStartTime == null) return true;
 
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       _addBillingLog('[USAGE_LOG] skip: no user');
-      return;
+      return true;
     }
 
     final afterSeconds = FFAppState().remainingTime;
@@ -230,7 +302,7 @@ class BillingTicker with WidgetsBindingObserver {
     if (secondsUsed <= 0 || beforeSeconds <= afterSeconds) {
       _addBillingLog(
           '[USAGE_LOG] skip: no deduction before=$beforeSeconds after=$afterSeconds');
-      return;
+      return true;
     }
 
     final actualSeconds =
@@ -247,13 +319,62 @@ class BillingTicker with WidgetsBindingObserver {
       );
       _addBillingLog(
           '[USAGE_LOG] saved mode=$_sessionMode seconds_used=${secondsUsed}s actual=${actualSeconds}s before=$beforeSeconds after=$afterSeconds');
+      return true;
     } catch (e) {
-      // 저장 실패 시 플래그 초기화 → 다음 호출에서 재시도 가능
+      // 저장 실패 시 플래그 초기화 → 다음 호출에서 재시도 가능.
+      // 기준선은 옮기지 않는다(false 반환) — 옮기면 이 구간이 영영 사라진다.
       _usageLogSaved = false;
       _addBillingLog('[USAGE_LOG] error: $e');
       debugPrint('[BillingTicker] saveUsageLog failed: $e');
+      return false;
     }
   }
+
+  /// 30분 시계를 처음으로 되돌린다. 방 진입과 롤오버 성공에서만 부른다.
+  void resetConversationSession() {
+    _sessionElapsedSeconds = 0;
+    _lastRolloverAttemptAt = null;
+    if (sessionRemainingNotifier.value != kSessionSeconds) {
+      sessionRemainingNotifier.value = kSessionSeconds;
+    }
+    if (sessionRolloverDue.value) sessionRolloverDue.value = false;
+  }
+
+  /// 30분 경계에서 모드가 부른다. 과금을 멈추지 않고 구간만 교체한다.
+  ///
+  /// false면 정산이 실패했거나 재시도 대기 중이다. 그때 호출부는 History를
+  /// 새로 만들면 안 된다 — 직전 30분 이력이 새 방 id로 붙어 버린다.
+  Future<bool> rollSegment() async {
+    final lastAttempt = _lastRolloverAttemptAt;
+    if (lastAttempt != null &&
+        DateTime.now().difference(lastAttempt) < _kRolloverRetryCooldown) {
+      return false;
+    }
+    _lastRolloverAttemptAt = DateTime.now();
+    final ok = await _closeSegment('rollover_30m', reopen: true);
+    if (ok) resetConversationSession();
+    return ok;
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
+  void pause() {
+    if (_paused) return; // 이중 호출 방지
+    _cancelLifecyclePause('manual_pause');
+    _recoverableLifecyclePause = false;
+    _paused = true;
+    _addBillingLog('[BILLING] pause');
+    _updateBillingState();
+    // void 함수라 await할 수 없다. 종료 경로는 하나로 묶여 있으므로 순서
+    // (flush → 저장 → 기준선)는 _closeSegment 안에서 지켜진다.
+    unawaited(_closeSegment('pause', reopen: false));
+  }
+
+  /// 세션 종료 시 users/{uid}/usage_logs에 사용시간 이력 1회 저장.
+  ///
+  /// 실제 저장은 [_closeSegment]가 소유한다 — 저장과 기준선 이동이 갈라지면
+  /// 중복 정산이나 구간 증발이 생기기 때문이다. 이 이름은 외부 호환용으로만
+  /// 남긴다.
+  Future<void> saveUsageLog() => _closeSegment('manual', reopen: false);
 
   void resume() {
     _cancelLifecyclePause('manual_resume');
@@ -281,9 +402,9 @@ class BillingTicker with WidgetsBindingObserver {
       return;
     }
 
-    _sessionBeforeSeconds = FFAppState().remainingTime;
-    _sessionStartTime = DateTime.now();
-    _usageLogSaved = false;
+    // 과금 구간만 새로 연다. 30분 시계는 건드리지 않는다 — idle로 잠깐 멈춘
+    // 것이 30분 세션을 되감으면 안 된다.
+    _openSegment(reason);
     _addBillingLog('[BILLING-RECOVER] reason=$reason');
     resume();
   }
@@ -299,8 +420,7 @@ class BillingTicker with WidgetsBindingObserver {
     _paused = true;
     _addBillingLog('[BILLING] pause');
     _updateBillingState();
-    flushNow();
-    saveUsageLog();
+    unawaited(_closeSegment('lifecycle', reopen: false));
   }
 
   void _cancelLifecyclePause(String reason) {
@@ -334,10 +454,27 @@ class BillingTicker with WidgetsBindingObserver {
         'deducted': whole,
         'remaining': next,
       });
+      // 30분 시계는 실제로 차감된 초만 센다. 벽시계로 재면 idle·백그라운드로
+      // 멈춘 시간까지 흘러가서 "30분 과금분"과 세션이 어긋난다.
+      _advanceConversationSession(whole);
     }
 
     if (DateTime.now().difference(_lastFlushAt).inSeconds >= 60) {
       flushNow();
+    }
+  }
+
+  void _advanceConversationSession(int seconds) {
+    if (seconds <= 0) return;
+    _sessionElapsedSeconds += seconds;
+    final remaining =
+        (kSessionSeconds - _sessionElapsedSeconds).clamp(0, kSessionSeconds);
+    if (sessionRemainingNotifier.value != remaining) {
+      sessionRemainingNotifier.value = remaining;
+    }
+    if (remaining <= 0 && !sessionRolloverDue.value) {
+      sessionRolloverDue.value = true;
+      _addBillingLog('[BILLING-SEG] rollover_due elapsed=$_sessionElapsedSeconds');
     }
   }
 
@@ -461,10 +598,19 @@ class BillingTicker with WidgetsBindingObserver {
 
 class BillingDotPainter extends CustomPainter {
   final int state;
-  const BillingDotPainter(this.state);
+
+  /// 30분 세션 종료 임박(10초 이하). 차감 중인 점만 주황으로 바꾼다.
+  ///
+  /// 기본값이 false라 이 값을 넘기지 않는 화면(히스토리·목록·스토어·스텔스룸)은
+  /// 그대로다. 30분 세션이 없는 화면에 주황이 새면 안 되므로 billingState에
+  /// 값을 더하는 대신 이 플래그로 받는다.
+  final bool warning;
+
+  const BillingDotPainter(this.state, {this.warning = false});
 
   static const _green = Color(0xFF34D399);
   static const _gray = Color(0xFF4B5563);
+  static const _amber = Color(0xFFF59E0B);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -474,7 +620,7 @@ class BillingDotPainter extends CustomPainter {
     switch (state) {
       case 1:
       case 2:
-        canvas.drawCircle(c, r, Paint()..color = _green);
+        canvas.drawCircle(c, r, Paint()..color = warning ? _amber : _green);
         break;
       default:
         canvas.drawCircle(c, r * 0.75, Paint()..color = _gray);
@@ -492,7 +638,141 @@ class BillingDotPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(BillingDotPainter oldDelegate) =>
-      oldDelegate.state != state;
+      oldDelegate.state != state || oldDelegate.warning != warning;
+}
+
+// =============================================================================
+// 30분 세션 표시 (대화방 전용)
+// =============================================================================
+// 기존 HH:MM은 전체 보유시간이라 의미가 다르다. 그 자리를 덮지 않고 옆에 붙는다.
+// 30분 세션이 없는 화면(히스토리·목록·스토어·스텔스룸)은 이 위젯을 쓰지 않으므로
+// 아무 영향이 없다.
+
+/// 마지막 10초 동안 주황으로 깜박이는 과금 점.
+///
+/// 점멸은 AnimationController 없이 [BillingTicker.sessionRemainingNotifier]가
+/// 매초 바뀌는 것에 얹는다 — 1초 주기로 흐려졌다 진해진다. 컨트롤러를 두면
+/// dispose 경로가 하나 늘고 방을 빠르게 드나들 때 새는 자리가 된다.
+class BillingSessionDot extends StatelessWidget {
+  const BillingSessionDot({
+    super.key,
+    this.size = 14,
+    this.onTapWhenPaused,
+    this.warnAtSeconds = 10,
+  });
+
+  final double size;
+  final VoidCallback? onTapWhenPaused;
+  final int warnAtSeconds;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: BillingTicker.instance.billingState,
+      builder: (_, state, __) => ValueListenableBuilder<int>(
+        valueListenable: BillingTicker.instance.sessionRemainingNotifier,
+        builder: (_, remaining, __) {
+          final warning = state != 0 && remaining <= warnAtSeconds;
+          final dot = CustomPaint(
+            size: Size(size, size),
+            painter: BillingDotPainter(state, warning: warning),
+          );
+          return GestureDetector(
+            onTap: state == 0 ? onTapWhenPaused : null,
+            child: warning
+                ? Opacity(opacity: remaining.isEven ? 1.0 : 0.35, child: dot)
+                : dot,
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// 과금 배지의 시간 칸 하나. 새 요소를 옆에 붙이지 않고 이 칸을 나눠 쓴다 —
+/// 상단 바가 좁아 배지를 하나 더 달면 큰 글꼴에서 바로 넘친다.
+///
+/// 평소에는 전체 보유시간(HH:MM). 30분 세션이 30초 남으면 그 30초 동안만
+/// 카운트다운 숫자로 바뀌고, 새 세션이 시작되면 곧바로 보유시간으로 돌아온다.
+/// 보유시간의 의미는 그대로다 — 잠깐 자리를 빌려줄 뿐이다.
+class BillingTimeLabel extends StatelessWidget {
+  const BillingTimeLabel({
+    super.key,
+    this.style,
+    this.countdownAtSeconds = 30,
+  });
+
+  final TextStyle? style;
+  final int countdownAtSeconds;
+
+  static const TextStyle _defaultStyle =
+      TextStyle(color: Colors.white, fontWeight: FontWeight.bold);
+
+  @override
+  Widget build(BuildContext context) {
+    final base = style ?? _defaultStyle;
+    return ValueListenableBuilder<int>(
+      valueListenable: BillingTicker.instance.billingState,
+      builder: (_, state, __) => ValueListenableBuilder<int>(
+        valueListenable: BillingTicker.instance.sessionRemainingNotifier,
+        builder: (_, sessionRemaining, __) {
+          final counting = state != 0 &&
+              sessionRemaining > 0 &&
+              sessionRemaining <= countdownAtSeconds;
+          if (counting) {
+            return Text(
+              '$sessionRemaining',
+              style: base.copyWith(color: const Color(0xFFF59E0B)),
+            );
+          }
+          return ValueListenableBuilder<int>(
+            valueListenable: BillingTicker.instance.remainingSecondsNotifier,
+            builder: (_, remaining, __) {
+              final int s = remaining.clamp(0, 999999);
+              final int h = s ~/ 3600;
+              final int m = (s % 3600) ~/ 60;
+              return Text(
+                '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}',
+                style: base,
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// "대화가 저장되었습니다" — 종료가 아니라 저장이라는 신호.
+class SessionSavedNotice extends StatelessWidget {
+  const SessionSavedNotice({super.key, required this.visible});
+
+  final bool visible;
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: AnimatedOpacity(
+        opacity: visible ? 1.0 : 0.0,
+        duration: const Duration(milliseconds: 220),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.72),
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: const Text(
+            '대화가 저장되었습니다',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 // =============================================================================
