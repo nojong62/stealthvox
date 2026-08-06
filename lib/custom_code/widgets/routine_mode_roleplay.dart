@@ -1033,16 +1033,12 @@ User role: ${_roleplayUserLabel.trim()}''',
     _log('[TURN-VALIDATE]',
         'accepted=${validation.accepted} reason=${validation.reason}');
     if (!validation.accepted) {
+      // 👂 되묻기는 소리로만 나간다. 글자로 남기면 지우는 사람이 없어 방을
+      //   나갈 때까지 쌓이고, _recentKoreanConversation()이 그 문장을 다음 턴
+      //   컨텍스트로 넘겨 AI가 따라 되묻는다.
       setState(() {
         _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-        _localMessages.add(<String, dynamic>{
-          'role': 'SYSTEM',
-          'target': KoreanTurnValidator.retryLine,
-          'original': '',
-          'clarify': true,
-        });
       });
-      _scrollToBottom();
       await _speakKoreanLine(KoreanTurnValidator.retryLine);
       if (mounted && _isConversationActive) _startDeepgramListening();
       return;

@@ -2190,16 +2190,12 @@ line had never been said. Never build the conversation on a line you had to gues
       // 못 알아들은 발화로 합친 결과는 쓰지 않는다. 대기자 없는 Future를
       // 그대로 두면 나중에 unhandled로 잡히므로 여기서 명시적으로 버린다.
       mergedFuture?.ignore();
+      // 👂 되묻기는 소리로만 나간다. 글자로 남기면 지우는 사람이 없어 방을
+      //   나갈 때까지 쌓이고, 그 문장이 다음 턴 컨텍스트에 섞여 AI가 따라
+      //   되묻는다. 되묻기가 되묻기를 부르는 자리였다.
       setState(() {
         _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-        _localMessages.add(<String, dynamic>{
-          'role': 'SYSTEM',
-          'target': KoreanTurnValidator.retryLine,
-          'original': '',
-          'clarify': true,
-        });
       });
-      _scrollToBottom();
       await _speakLiveKorean(KoreanTurnValidator.retryLine);
       if (mounted && _isConversationActive && !_isSessionComplete) {
         _startUserListening();
@@ -2350,15 +2346,7 @@ line had never been said. Never build the conversation on a line you had to gues
         if (merged == StepExpandBrain.kUnclearToken) {
           askedBack = true;
           _turnCounter--;
-          setState(() {
-            _localMessages.add(<String, dynamic>{
-              'role': 'SYSTEM',
-              'target': kStepExpandAskBackLine,
-              'original': '',
-              'clarify': true,
-            });
-          });
-          _scrollToBottom();
+          // 되묻기는 소리로만 나간다(위 검증 반려와 같은 이유).
           _log('[EXPAND-UNCLEAR]', 'turn=$turnNumber 되묻기 → 유저 발화 보류');
           await _speakLiveKorean(kStepExpandAskBackLine);
           return;
@@ -2424,7 +2412,8 @@ line had never been said. Never build the conversation on a line you had to gues
       }
       // 👂 되묻기 턴이면 유저 발화를 버린다. 화면에도 히스토리에도 남기지
       //   않고 턴 번호도 되돌려, 유저가 다시 말한 것이 이 턴이 되게 한다.
-      //   되묻는 말 자체는 이미 음성으로 나갔고, 글자로도 남겨 둔다.
+      //   되묻는 말은 소리로만 내보낸다 — 글자로 남기면 지우는 사람이 없어
+      //   쌓이고, 다음 턴 컨텍스트에 섞여 AI가 따라 되묻는다.
       if (_isAskBackReply(aiKorean)) {
         askedBack = true;
         _turnCounter--;
@@ -2433,22 +2422,11 @@ line had never been said. Never build the conversation on a line you had to gues
         _pendingNativeParts
           ..clear()
           ..addAll(previousPending);
+        // AI 말풍선은 아래 정상 분기에서야 만들어진다(aiIndex는 여기서 아직
+        // -1). 여기서는 유저 말풍선만 걷어내면 화면에 아무것도 남지 않는다.
         setState(() {
           _localMessages.remove(hostBubble);
-          if (aiIndex >= 0 && aiIndex < _localMessages.length) {
-            _localMessages[aiIndex]['target'] = aiKorean;
-            _localMessages[aiIndex]['original'] = '';
-            _localMessages[aiIndex]['clarify'] = true;
-          } else {
-            _localMessages.add(<String, dynamic>{
-              'role': 'SYSTEM',
-              'target': aiKorean,
-              'original': '',
-              'clarify': true,
-            });
-          }
         });
-        _scrollToBottom();
         _log('[ASK-BACK]', 'turn=$turnNumber 되묻기 → 유저 발화 폐기(화면/히스토리 미기록)');
         await _speakAiKorean(aiKorean);
         return;
@@ -2522,18 +2500,10 @@ line had never been said. Never build the conversation on a line you had to gues
               (_localMessages[aiIndex]['target'] ?? '').toString().isEmpty) {
             _localMessages.removeAt(aiIndex);
           }
-          _localMessages.add(<String, dynamic>{
-            'role': 'SYSTEM',
-            // 유저에게는 실패 원인이 아니라 다시 말해 달라는 말만 필요하다.
-            // 진짜 원인은 위 [RT-PIPE-ERR] 로그에 남는다.
-            'target': kStepExpandAskBackLine,
-            'original': '',
-            // 유저가 다시 말하면 사라지는 되묻기 말풍선으로 취급한다.
-            'clarify': true,
-          });
         });
-      }
-      if (turnStillActive && !turnCompleted && !askedBack) {
+        // 유저에게는 실패 원인이 아니라 다시 말해 달라는 말만 필요하고, 그
+        // 말은 소리로만 나간다. 진짜 원인은 위 [GPT-PIPE-ERR] 로그에 남는다.
+        // 글자로 남기면 API가 흔들린 턴마다 말풍선이 쌓인다.
         await _speakLiveKorean(kStepExpandAskBackLine);
       }
     } finally {

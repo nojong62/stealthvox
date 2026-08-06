@@ -1682,15 +1682,10 @@ $kSpokenReplyLengthPolicy
       setState(() {
         // 못 알아들은 발화는 화면에 남기지 않는다. 위에서 미리 띄운 임시
         // 말풍선을 걷어내야 유저가 다시 말한 것이 이 턴이 된다.
+        // 👂 되묻는 말도 소리로만 내보낸다. 글자로 남기면 지우는 사람이 없어
+        //   되묻을 때마다 말풍선이 쌓인다.
         _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-        _localMessages.add(<String, dynamic>{
-          'role': 'SYSTEM',
-          'target': KoreanTurnValidator.retryLine,
-          'original': '',
-          'clarify': true,
-        });
       });
-      _scrollToBottom();
       await _speakSystemLine(KoreanTurnValidator.retryLine);
       if (mounted && _isConversationActive) {
         _restartConfiguredListening(
