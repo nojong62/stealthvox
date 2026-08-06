@@ -2081,7 +2081,6 @@ line had never been said. Never build the conversation on a line you had to gues
           'role': 'HOST_TEMP',
           'target': '...',
           'original': '...', // Deepgram 원문 숨기기
-          'type': 'user_input',
         });
       });
     }

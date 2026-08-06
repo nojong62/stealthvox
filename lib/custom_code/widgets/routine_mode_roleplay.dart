@@ -910,8 +910,7 @@ said. Never build the scene on a line you had to guess.
       setState(() {
         _debugResult = "⏱️ 듣는 중...";
         _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-        _localMessages
-            .add({'role': 'HOST_TEMP', 'target': '...', 'type': 'user_input'});
+        _localMessages.add({'role': 'HOST_TEMP', 'target': '...'});
       });
       // HOST_TEMP("...")는 스크롤 트리거 없음 — 실제 HOST 버블 등장 시 스크롤
     }
@@ -998,7 +997,6 @@ said. Never build the scene on a line you had to guess.
           'role': 'HOST_TEMP',
           'target': '...',
           'original': '...', // Deepgram 원문 숨기기
-          'type': 'user_input',
         });
       });
     }
@@ -1103,7 +1101,6 @@ said. Never build the scene on a line you had to guess.
           'role': 'HOST_TEMP',
           'target': userKorean,
           'original': '',
-          'type': 'user_input',
         });
       });
       _scrollToBottom();
