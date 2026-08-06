@@ -550,6 +550,8 @@ Return ONLY valid JSON: {"name":"..."}.
                           _buildManualItem('Step Expand', '점진적 문장 확장',
                               '짧은 기초 문장부터 시작해, AI의 날카로운 질문에 대답하며 점점 길고 세련된 문장 구조를 만들어가는 집중 훈련입니다.'),
                           const Divider(color: Colors.white12, height: 32),
+                          _buildSessionLegend(),
+                          const Divider(color: Colors.white12, height: 32),
                           _buildBillingLegend(),
                         ],
                       ),
@@ -605,6 +607,90 @@ Return ONLY valid JSON: {"name":"..."}.
         Text(desc,
             style: const TextStyle(
                 color: Colors.white70, fontSize: 13, height: 1.4)),
+      ],
+    );
+  }
+
+  /// 30분 세션 안내. "끊긴다"가 아니라 "저장된다"로 읽히게 쓴다 — 실제로도
+  /// 방에서 나가지 않고 같은 화면에서 대화가 이어진다.
+  Widget _buildSessionLegend() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          '대화 세션 (30분)',
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 15,
+          ),
+        ),
+        const SizedBox(height: 12),
+        const Text(
+          '대화방은 30분 단위 세션으로 운영됩니다. 30분이 지나도 대화가 끊기거나 '
+          '방에서 나가지 않습니다 — 지금까지의 대화가 기록에 저장되고, 같은 '
+          '화면에서 이어서 계속 대화할 수 있습니다.',
+          style: TextStyle(
+            color: Colors.white70,
+            fontSize: 12,
+            height: 1.5,
+          ),
+        ),
+        const SizedBox(height: 10),
+        const Text(
+          '말하는 도중에 30분이 되어도 하던 말과 AI의 답변이 끝난 뒤에 저장되므로, '
+          '한 번의 대화가 둘로 잘리지 않습니다.',
+          style: TextStyle(
+            color: Colors.white70,
+            fontSize: 12,
+            height: 1.5,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              margin: const EdgeInsets.only(top: 2),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF59E0B),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Text(
+                '30',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text(
+                '세션이 끝나기 30초 전부터 잔여시간 자리에 남은 초가 표시되고, '
+                '마지막 10초에는 과금 표시등이 주황색으로 깜박입니다. 저장이 '
+                '끝나면 잔여시간 표시로 돌아옵니다.',
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: 12,
+                  height: 1.5,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        const Text(
+          '이 30초 동안에도 잔여시간은 평소와 똑같이 차감됩니다.',
+          style: TextStyle(
+            color: Colors.white54,
+            fontSize: 11,
+            height: 1.5,
+          ),
+        ),
       ],
     );
   }
