@@ -7177,6 +7177,9 @@ RULES — follow exactly:
           padding: const EdgeInsets.fromLTRB(18, 2, 18, 12),
           child: Column(
             children: [
+              // 📐 상태 문구는 Flexible로 감싼다. 시스템 글자 크기를 크게 쓰면
+              //    이 한 줄이 가로로 넘쳐 하단에 오버플로 줄무늬가 뜬다
+              //    (실기기 1.7배에서 72px 초과 확인).
               if (_p3ShadowLoading)
                 const Row(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -7188,8 +7191,11 @@ RULES — follow exactly:
                           strokeWidth: 2, color: _p3ShadowingAccentColor),
                     ),
                     SizedBox(width: 9),
-                    Text('의미단위 음성 준비 중...',
-                        style: TextStyle(color: Colors.white60)),
+                    Flexible(
+                      child: Text('의미단위 음성 준비 중...',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.white60)),
+                    ),
                   ],
                 )
               else if (_p3ShadowPlaying)
@@ -7198,8 +7204,11 @@ RULES — follow exactly:
                   children: [
                     Icon(Icons.graphic_eq, color: Colors.greenAccent, size: 20),
                     SizedBox(width: 8),
-                    Text('음성을 들으며 동시에 따라 읽으세요',
-                        style: TextStyle(color: Colors.greenAccent)),
+                    Flexible(
+                      child: Text('음성을 들으며 동시에 따라 읽으세요',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.greenAccent)),
+                    ),
                   ],
                 )
               else if (_p3ShadowComplete)
@@ -7209,17 +7218,20 @@ RULES — follow exactly:
                         fontWeight: FontWeight.bold)),
               if (_p3UsesNativeStyle != null) ...[
                 const SizedBox(height: 10),
+                // 높이를 46으로 못 박으면 글자가 커졌을 때 라벨이 잘린다.
+                // 최소값으로 두어 글자에 맞춰 자라게 한다.
                 Row(
                   children: [
                     Expanded(
-                      child: SizedBox(
-                        height: 46,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(minHeight: 46),
                         child: ElevatedButton.icon(
                           onPressed: busy ? null : _replaySelectedP3Shadowing,
                           icon: Icon(busy
                               ? Icons.hourglass_top_rounded
                               : Icons.replay_rounded),
-                          label: Text(busy ? '진행 중' : '다시 쉐도잉'),
+                          label: Text(busy ? '진행 중' : '다시 쉐도잉',
+                              textAlign: TextAlign.center),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFF4F46E5),
                             foregroundColor: Colors.white,
@@ -7231,17 +7243,20 @@ RULES — follow exactly:
                     ),
                     if (_p3ShadowComplete && _p3ShadowRecordPath != null) ...[
                       const SizedBox(width: 10),
-                      SizedBox(
-                        height: 46,
-                        child: OutlinedButton.icon(
-                          onPressed: _playP3ShadowRecording,
-                          icon: const Icon(Icons.hearing_rounded),
-                          label: const Text('내 음성'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.white70,
-                            side: const BorderSide(color: Colors.white24),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14)),
+                      Expanded(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(minHeight: 46),
+                          child: OutlinedButton.icon(
+                            onPressed: _playP3ShadowRecording,
+                            icon: const Icon(Icons.hearing_rounded),
+                            label: const Text('내 음성',
+                                textAlign: TextAlign.center),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white70,
+                              side: const BorderSide(color: Colors.white24),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14)),
+                            ),
                           ),
                         ),
                       ),
