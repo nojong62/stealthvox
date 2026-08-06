@@ -1695,8 +1695,14 @@ $kSpokenReplyLengthPolicy
           .join('\n'),
     );
     if (!mounted || pipelineGeneration != _pipelineGeneration) return;
-    _log('[TURN-VALIDATE]',
-        'accepted=${validation.accepted} reason=${validation.reason}');
+    // 장애로 통과시킨 턴과 모델이 승인한 턴을 로그에서 갈라 본다. 원문은
+    // 싣지 않는다 — 길이와 판정 결과까지만 남긴다.
+    _log(
+        '[TURN-VALIDATE]',
+        'mode=circle_talk accepted=${validation.accepted} '
+            'failure=${validation.failure.name} '
+            'failOpen=${validation.failedOpen} '
+            'proceeded=${validation.accepted} reason=${validation.reason}');
     if (!validation.accepted) {
       setState(() {
         // 못 알아들은 발화는 화면에 남기지 않는다. 위에서 미리 띄운 임시

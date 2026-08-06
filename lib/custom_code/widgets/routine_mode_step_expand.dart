@@ -2202,8 +2202,14 @@ line had never been said. Never build the conversation on a line you had to gues
       recentConversation: _recentKoreanConversationForValidation(),
     );
     if (!mounted || generation != _pipelineGeneration) return;
-    _log('[TURN-VALIDATE]',
-        'accepted=${validation.accepted} reason=${validation.reason}');
+    // 장애로 통과시킨 턴과 모델이 승인한 턴을 로그에서 갈라 본다. 원문은
+    // 싣지 않는다 — 길이와 판정 결과까지만 남긴다.
+    _log(
+        '[TURN-VALIDATE]',
+        'mode=step_expand accepted=${validation.accepted} '
+            'failure=${validation.failure.name} '
+            'failOpen=${validation.failedOpen} '
+            'proceeded=${validation.accepted} reason=${validation.reason}');
     if (!validation.accepted) {
       // 못 알아들은 발화로 합친 결과는 쓰지 않는다. 대기자 없는 Future를
       // 그대로 두면 나중에 unhandled로 잡히므로 여기서 명시적으로 버린다.

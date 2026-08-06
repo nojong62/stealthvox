@@ -14,6 +14,9 @@ void main() {
       expect(result.accepted, isFalse);
       expect(result.reason, 'empty_transcript');
       expect(result.text, isEmpty);
+      // 빈 전사는 장애가 아니라 확정된 로컬 판정이다.
+      expect(result.failure, KoreanTurnValidatorFailure.none);
+      expect(result.failedOpen, isFalse);
     });
 
     test('fails open without a key and preserves the transcribed words',
@@ -28,6 +31,20 @@ void main() {
       expect(result.accepted, isTrue);
       expect(result.text, '오늘 회의 어땠어요?');
       expect(result.reason, 'validator_key_unavailable_fail_open');
+      // 장애로 통과시킨 턴은 모델이 승인한 턴과 값으로 구분돼야 한다.
+      expect(result.failure, KoreanTurnValidatorFailure.apiKeyMissing);
+      expect(result.failedOpen, isTrue);
+    });
+
+    test('marks a model verdict as not failed open', () {
+      const verdict = KoreanTurnValidationResult(
+        accepted: true,
+        text: '오늘 회의 어땠어요?',
+        reason: 'accepted',
+      );
+
+      expect(verdict.failure, KoreanTurnValidatorFailure.none);
+      expect(verdict.failedOpen, isFalse);
     });
 
     test('uses the shared Korean retry line', () {

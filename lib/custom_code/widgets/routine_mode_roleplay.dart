@@ -1119,8 +1119,14 @@ User role: ${_roleplayUserLabel.trim()}''',
       recentConversation: _recentKoreanConversation(),
     );
     if (!mounted || generation != _pipelineGeneration) return;
-    _log('[TURN-VALIDATE]',
-        'accepted=${validation.accepted} reason=${validation.reason}');
+    // 장애로 통과시킨 턴과 모델이 승인한 턴을 로그에서 갈라 본다. 원문은
+    // 싣지 않는다 — 길이와 판정 결과까지만 남긴다.
+    _log(
+        '[TURN-VALIDATE]',
+        'mode=scenario_talk accepted=${validation.accepted} '
+            'failure=${validation.failure.name} '
+            'failOpen=${validation.failedOpen} '
+            'proceeded=${validation.accepted} reason=${validation.reason}');
     if (!validation.accepted) {
       // 👂 되묻기는 소리로만 나간다. 글자로 남기면 지우는 사람이 없어 방을
       //   나갈 때까지 쌓이고, _recentKoreanConversation()이 그 문장을 다음 턴

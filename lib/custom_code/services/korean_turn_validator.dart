@@ -1,6 +1,21 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+
+/// validator가 판정을 내리지 못한 이유.
+///
+/// [none]이면 모델이 실제로 판정을 내렸다는 뜻이다. 나머지는 전부 장애이고,
+/// 그때 통과한 턴은 "모델이 승인한 발화"가 아니라 "장애라서 통과시킨 발화"다.
+/// 로그에서 이 둘이 섞이면 오작동을 추적할 수 없어 값으로 갈라 둔다.
+enum KoreanTurnValidatorFailure {
+  none,
+  apiKeyMissing,
+  timeout,
+  httpError,
+  parseError,
+  transportError,
+}
 
 /// Three-mode Korean speech gate used after PCM retranscription.
 ///
@@ -13,11 +28,19 @@ class KoreanTurnValidationResult {
     required this.accepted,
     required this.text,
     required this.reason,
+    this.failure = KoreanTurnValidatorFailure.none,
   });
 
   final bool accepted;
   final String text;
   final String reason;
+
+  /// 판정을 못 내린 이유. [KoreanTurnValidatorFailure.none]이면 모델 판정이다.
+  final KoreanTurnValidatorFailure failure;
+
+  /// 장애 때문에 통과시킨 턴인지. 모델이 승인한 것과 구분해서 봐야 한다.
+  bool get failedOpen =>
+      accepted && failure != KoreanTurnValidatorFailure.none;
 }
 
 class KoreanTurnValidator {
@@ -50,12 +73,29 @@ class KoreanTurnValidator {
         accepted: true,
         text: transcript,
         reason: 'validator_key_unavailable_fail_open',
+        failure: KoreanTurnValidatorFailure.apiKeyMissing,
       );
     }
 
+    // 장애 유형을 갈라 두면 로그에서 "모델이 승인함"과 "장애라서 통과시킴"이
+    // 섞이지 않는다. 응답 본문·원문·키는 어디에도 싣지 않는다 — 상태 코드와
+    // 예외 타입 이름까지만 남긴다.
+    KoreanTurnValidationResult failOpen(
+      KoreanTurnValidatorFailure failure,
+      String reason,
+    ) =>
+        KoreanTurnValidationResult(
+          accepted: true,
+          text: transcript,
+          reason: reason,
+          failure: failure,
+        );
+
     final client = http.Client();
     try {
-      final response = await client
+      final http.Response response;
+      try {
+        response = await client
           .post(
             Uri.parse('https://api.openai.com/v1/chat/completions'),
             headers: <String, String>{
@@ -102,33 +142,39 @@ $transcript''',
             }),
           )
           .timeout(timeout);
-      if (response.statusCode != 200) {
-        return KoreanTurnValidationResult(
-          accepted: true,
-          text: transcript,
-          reason: 'validator_http_${response.statusCode}_fail_open',
-        );
+      } on TimeoutException catch (error) {
+        return failOpen(KoreanTurnValidatorFailure.timeout,
+            'validator_${error.runtimeType}_fail_open');
+      } catch (error) {
+        // 소켓 끊김·DNS 실패 등 전송 계층 오류.
+        return failOpen(KoreanTurnValidatorFailure.transportError,
+            'validator_${error.runtimeType}_fail_open');
       }
 
-      final envelope =
-          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-      final content =
-          envelope['choices']?[0]?['message']?['content']?.toString() ?? '';
-      final decision = jsonDecode(content) as Map<String, dynamic>;
-      final accepted = decision['accepted'] == true;
-      return KoreanTurnValidationResult(
-        accepted: accepted,
-        text: accepted ? transcript : '',
-        reason: decision['reason']?.toString().trim().isNotEmpty == true
-            ? decision['reason'].toString().trim()
-            : (accepted ? 'accepted' : 'rejected'),
-      );
-    } catch (error) {
-      return KoreanTurnValidationResult(
-        accepted: true,
-        text: transcript,
-        reason: 'validator_${error.runtimeType}_fail_open',
-      );
+      if (response.statusCode != 200) {
+        return failOpen(KoreanTurnValidatorFailure.httpError,
+            'validator_http_${response.statusCode}_fail_open');
+      }
+
+      try {
+        final envelope =
+            jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+        final content =
+            envelope['choices']?[0]?['message']?['content']?.toString() ?? '';
+        final decision = jsonDecode(content) as Map<String, dynamic>;
+        final accepted = decision['accepted'] == true;
+        return KoreanTurnValidationResult(
+          accepted: accepted,
+          text: accepted ? transcript : '',
+          reason: decision['reason']?.toString().trim().isNotEmpty == true
+              ? decision['reason'].toString().trim()
+              : (accepted ? 'accepted' : 'rejected'),
+        );
+      } catch (error) {
+        // 응답이 200인데 JSON이 아니거나 모양이 다르다. 본문은 남기지 않는다.
+        return failOpen(KoreanTurnValidatorFailure.parseError,
+            'validator_${error.runtimeType}_fail_open');
+      }
     } finally {
       client.close();
     }
