@@ -2178,57 +2178,71 @@ line had never been said. Never build the conversation on a line you had to gues
       _scrollToBottom();
     }
 
-    // ⚡ 검증과 문장 합치기를 나란히 던진다. 둘 다 확정된 유저 문장만 있으면
-    //    되고 서로 결과를 보지 않는데, 직렬로 세워 두는 바람에 합치기 1.1~1.2초가
-    //    유저 대기시간에 그대로 얹혔다(실측). 검증에서 걸리면 합치기 결과는
-    //    버려지지만, 통과가 대부분이라 평균 대기가 그만큼 줄어든다.
+    // 🚪 [GATE] 이 턴을 통과시킬지 판정하는 곳은 하나뿐이다.
+    //
+    //    1턴(씨앗)은 붙일 대상이 없어 합치기가 아무 판정도 할 수 없다. 그 턴만
+    //    KoreanTurnValidator가 게이트를 맡는다.
+    //
+    //    2턴부터는 mergeNativeExpansion이 이미 같은 판정을 한다 — 자란 문장에
+    //    실제로 붙여 보고 못 붙이겠으면 [UNCLEAR]를 돌려준다(§kUnclearToken).
+    //    검증기의 반려 사유는 프롬프트상 "전사 오류" 하나뿐이고, 화제 전환·짧은
+    //    답·문체는 명시적으로 통과시킨다. 즉 2턴부터는 같은 판정을 두 번 사는
+    //    셈이었고, 반려된 턴에서는 더 비싼 합치기 쪽을 통째로 버리고 있었다.
+    //    붙여 보고 내린 판정이 근거가 더 좋으므로 합치기 하나로 합친다.
     final previousExpandedNow = _expandedNativeSentence.trim();
-    final Future<String>? mergedFuture = previousExpandedNow.isEmpty
-        ? null // 첫 문장은 합칠 대상이 없다 — 발화가 곧 씨앗이다.
-        : StepExpandBrain.mergeNativeExpansion(
-            apiKey: _openAiKey,
-            previousExpanded: previousExpandedNow,
-            newUtterances: <String>[..._pendingNativeParts, userKorean],
-            languageName: resolveNativeLanguageName(FFAppState().nativeLang),
-          );
-
-    final validation = await KoreanTurnValidator.validate(
-      apiKey: _openAiKey,
-      transcribedText: userKorean,
-      mode: 'step_expand',
-      modeContext:
-          'Current growing sentence: ${previousExpandedNow.isEmpty ? '(first seed)' : previousExpandedNow}',
-      recentConversation: _recentKoreanConversationForValidation(),
-    );
-    if (!mounted || generation != _pipelineGeneration) return;
-    // 장애로 통과시킨 턴과 모델이 승인한 턴을 로그에서 갈라 본다. 원문은
-    // 싣지 않는다 — 길이와 판정 결과까지만 남긴다.
-    _log(
-        '[TURN-VALIDATE]',
-        'mode=step_expand accepted=${validation.accepted} '
-            'failure=${validation.failure.name} '
-            'failOpen=${validation.failedOpen} '
-            'proceeded=${validation.accepted} reason=${validation.reason}');
-    if (!validation.accepted) {
-      // 못 알아들은 발화로 합친 결과는 쓰지 않는다. 대기자 없는 Future를
-      // 그대로 두면 나중에 unhandled로 잡히므로 여기서 명시적으로 버린다.
-      mergedFuture?.ignore();
-      // 👂 되묻기는 소리로만 나간다. 글자로 남기면 지우는 사람이 없어 방을
-      //   나갈 때까지 쌓이고, 그 문장이 다음 턴 컨텍스트에 섞여 AI가 따라
-      //   되묻는다. 되묻기가 되묻기를 부르는 자리였다.
-      setState(() {
-        _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-      });
-      await _speakLiveKorean(KoreanTurnValidator.retryLine);
-      if (mounted && _isConversationActive && !_isSessionComplete) {
-        _startUserListening();
+    if (previousExpandedNow.isEmpty) {
+      // 첫 문장은 합칠 대상이 없다 — 발화가 곧 씨앗이다.
+      final validation = await KoreanTurnValidator.validate(
+        apiKey: _openAiKey,
+        transcribedText: userKorean,
+        mode: 'step_expand',
+        modeContext: 'Current growing sentence: (first seed)',
+        recentConversation: _recentKoreanConversationForValidation(),
+      );
+      if (!mounted || generation != _pipelineGeneration) return;
+      // 장애로 통과시킨 턴과 모델이 승인한 턴을 로그에서 갈라 본다. 원문은
+      // 싣지 않는다 — 길이와 판정 결과까지만 남긴다.
+      _log(
+          '[TURN-VALIDATE]',
+          'mode=step_expand gate=validator seed=true '
+              'accepted=${validation.accepted} '
+              'failure=${validation.failure.name} '
+              'failOpen=${validation.failedOpen} '
+              'proceeded=${validation.accepted} reason=${validation.reason}');
+      if (!validation.accepted) {
+        // 👂 되묻기는 소리로만 나간다. 글자로 남기면 지우는 사람이 없어 방을
+        //   나갈 때까지 쌓이고, 그 문장이 다음 턴 컨텍스트에 섞여 AI가 따라
+        //   되묻는다. 되묻기가 되묻기를 부르는 자리였다.
+        setState(() {
+          _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+        });
+        await _speakLiveKorean(KoreanTurnValidator.retryLine);
+        if (mounted && _isConversationActive && !_isSessionComplete) {
+          _startUserListening();
+        }
+        return;
       }
+
+      _log('🔀 [COMMIT-03]', '전사·문맥 확정 → Step Expand 질문 생성');
+      await _processStepExpandTurn(
+        validation.text,
+        generation: generation,
+        mergedFuture: null,
+      );
       return;
     }
 
-    _log('🔀 [COMMIT-03]', '전사·문맥 확정 → Step Expand 질문 생성');
+    // 2턴부터는 합치기가 곧 게이트다. 결과는 버려지지 않고 반드시 소비된다.
+    final mergedFuture = StepExpandBrain.mergeNativeExpansion(
+      apiKey: _openAiKey,
+      previousExpanded: previousExpandedNow,
+      newUtterances: <String>[..._pendingNativeParts, userKorean],
+      languageName: resolveNativeLanguageName(FFAppState().nativeLang),
+    );
+
+    _log('🔀 [COMMIT-03]', '전사 확정 → 합치기 게이트 → Step Expand 질문 생성');
     await _processStepExpandTurn(
-      validation.text,
+      userKorean,
       generation: generation,
       mergedFuture: mergedFuture,
     );
@@ -2308,17 +2322,21 @@ line had never been said. Never build the conversation on a line you had to gues
   Future<void> _processStepExpandTurn(
     String userKorean, {
     required int generation,
-    // 검증과 나란히 미리 띄워 둔 합치기. 둘 다 확정된 유저 문장만 있으면 되고
-    // 서로 결과를 안 보므로 직렬로 세울 이유가 없다. 실측 1.1~1.2초를 먹던
-    // 구간이라 여기서 결과만 받아 쓴다.
-    Future<String>? mergedFuture,
+    // 2턴부터 이 턴의 게이트. 호출부가 던져 둔 합치기를 여기서 받아 쓴다.
+    // 1턴(씨앗)은 붙일 대상이 없어 null이고, 그 턴은 호출부의 검증기가
+    // 게이트였다.
+    Future<StepExpandMergeResult>? mergedFuture,
   }) async {
     if (!mounted ||
         !_isConversationActive ||
         generation != _pipelineGeneration) {
+      // 방을 나갔거나 세대가 바뀌었다. 결과를 받을 사람이 없으므로 명시적으로
+      // 버린다 — 그냥 두면 대기자 없는 Future로 남는다.
+      mergedFuture?.ignore();
       return;
     }
     if (_isNoiseTranscript(userKorean)) {
+      mergedFuture?.ignore();
       if (_isConversationActive && !_isSessionComplete) _startUserListening();
       return;
     }
@@ -2345,28 +2363,41 @@ line had never been said. Never build the conversation on a line you had to gues
       //    1턴은 방금 한 말이 곧 씨앗이라 합치기가 필요 없다.
       var bubbleText = userKorean;
       if (previousExpanded.isEmpty) {
+        // 호출부가 합치기를 던졌는데 그사이 자란 문장이 비워졌다면(방 재시작
+        // 등) 여기로 온다. 받을 사람이 없으므로 명시적으로 버린다.
+        mergedFuture?.ignore();
         _expandedNativeSentence = userKorean;
         _pendingNativeParts.clear();
         _log('[EXPAND-SEED]', 'turn=$turnNumber text="$userKorean"');
       } else {
-        final merged = (await (mergedFuture ??
-                StepExpandBrain.mergeNativeExpansion(
-                  apiKey: _openAiKey,
-                  previousExpanded: previousExpanded,
-                  newUtterances: mergeInputs,
-                  languageName:
-                      resolveNativeLanguageName(FFAppState().nativeLang),
-                )))
-            .trim();
+        final mergeResult = await (mergedFuture ??
+            StepExpandBrain.mergeNativeExpansion(
+              apiKey: _openAiKey,
+              previousExpanded: previousExpanded,
+              newUtterances: mergeInputs,
+              languageName: resolveNativeLanguageName(FFAppState().nativeLang),
+            ));
         if (!mounted ||
             !_isConversationActive ||
             generation != _pipelineGeneration) {
           return;
         }
+        final merged = mergeResult.text.trim();
+        // 🚪 [EXPAND-GATE] 2턴부터 이 줄이 이 턴의 유일한 판정이다. 장애로
+        //   넘어간 턴과 모델이 붙일 수 있다고 본 턴을 로그에서 갈라 본다.
+        //   원문은 싣지 않는다 — 판정 결과까지만 남긴다.
+        _log(
+            '[EXPAND-GATE]',
+            'turn=$turnNumber gate=merge verdict=${mergeResult.isVerdict} '
+                'unclear=${mergeResult.unclear} '
+                'failure=${mergeResult.failure.name} '
+                'failOpen=${mergeResult.failedOpen}');
         // 👂 붙이는 쪽이 못 알아들었다고 하면 거기서 멈춘다. 여기서 어물쩍
         //   다듬어 넘기면 아래 어디에서도 이상한 걸 알아챌 수 없다. 유저
         //   발화는 화면에도 문장에도 넣지 않고 보류한 뒤 다시 듣는다.
-        if (merged == StepExpandBrain.kUnclearToken) {
+        //   장애([failedOpen])는 이 분기에 걸리면 안 된다 — 통신이 끊긴 것을
+        //   "못 알아들었다"고 되묻으면 유저가 같은 말을 반복하게 된다.
+        if (mergeResult.unclear) {
           askedBack = true;
           _turnCounter--;
           // 되묻기는 소리로만 나간다(위 검증 반려와 같은 이유).
@@ -2374,13 +2405,16 @@ line had never been said. Never build the conversation on a line you had to gues
           await _speakLiveKorean(kStepExpandAskBackLine);
           return;
         }
-        if (merged.isEmpty) {
+        if (mergeResult.failedOpen || merged.isEmpty) {
           // 합치기가 실패한 발화는 버리지 않고 다음 턴에 같이 넘긴다.
+          // 되묻지 않는다 — 유저는 제대로 말했고 흔들린 건 우리 쪽이다.
           _pendingNativeParts
             ..clear()
             ..addAll(mergeInputs);
-          _log('[EXPAND-MERGE]',
-              'turn=$turnNumber failed carry=${mergeInputs.length}');
+          _log(
+              '[EXPAND-MERGE]',
+              'turn=$turnNumber failed=${mergeResult.failure.name} '
+                  'carry=${mergeInputs.length}');
         } else {
           bubbleText = merged;
           _expandedNativeSentence = merged;
@@ -5935,6 +5969,56 @@ class RelayPipeline {
 
 // ============================================================================
 
+/// 합치기가 판정을 내리지 못한 이유.
+///
+/// [none]이면 모델이 실제로 판정을 내렸다는 뜻이다. 나머지는 전부 장애이고,
+/// 그때 넘어간 발화는 "모델이 붙일 수 있다고 본 발화"가 아니라 "장애라서
+/// 다음 턴으로 미룬 발화"다. 2턴부터는 합치기가 단독 게이트라 이 둘이 로그에서
+/// 섞이면 되묻기 오작동을 추적할 수 없다. `KoreanTurnValidatorFailure`와 같은
+/// 이유로 값을 갈라 둔다.
+enum StepExpandMergeFailure {
+  none,
+  apiKeyMissing,
+
+  /// 붙일 대상이나 붙일 말이 없다. HTTP를 태우기 전 로컬에서 걸린다.
+  nothingToMerge,
+  timeout,
+  httpError,
+  parseError,
+  transportError,
+
+  /// 200인데 본문에 쓸 문장이 없다. 판정이 아니라 응답 실패다.
+  emptyResponse,
+}
+
+/// [StepExpandBrain.mergeNativeExpansion]의 결과.
+///
+/// 세 갈래를 값으로 갈라 둔다 — 합쳐진 문장 / 모델이 못 붙이겠다는 판정
+/// ([unclear]) / 장애([failure]). 예전에는 셋을 `String` 하나에 담아 장애와
+/// 빈 응답이 같은 `''`로 뭉쳤다.
+class StepExpandMergeResult {
+  const StepExpandMergeResult({
+    required this.text,
+    this.unclear = false,
+    this.failure = StepExpandMergeFailure.none,
+  });
+
+  /// 합쳐진 문장. [unclear]이거나 장애면 빈 문자열이다.
+  final String text;
+
+  /// 모델이 "이 발화는 붙일 수 없다"고 판정했다. 장애가 아니라 판정이다.
+  final bool unclear;
+
+  /// 판정을 못 내린 이유. [StepExpandMergeFailure.none]이면 모델 판정이다.
+  final StepExpandMergeFailure failure;
+
+  /// 모델이 실제로 판정을 내렸는지. false면 장애다.
+  bool get isVerdict => failure == StepExpandMergeFailure.none;
+
+  /// 장애라서 이번 턴 합치기를 건너뛴 것인지. 되묻기와 반드시 구분해야 한다.
+  bool get failedOpen => !isVerdict;
+}
+
 // ====================================================================
 // 🧠 [Box 7-1] StepExpandBrain v3 — 스텝익스팬드 전용 AI 뇌
 // ====================================================================
@@ -7348,7 +7432,7 @@ ${_turnFocusLine(turnNumber)}
   // ==================================================================
   static const String kUnclearToken = '[UNCLEAR]';
 
-  static Future<String> mergeNativeExpansion({
+  static Future<StepExpandMergeResult> mergeNativeExpansion({
     required String apiKey,
     required String previousExpanded,
     required List<String> newUtterances,
@@ -7356,10 +7440,19 @@ ${_turnFocusLine(turnNumber)}
   }) async {
     final additions =
         newUtterances.map((u) => u.trim()).where((u) => u.isNotEmpty).toList();
-    if (apiKey.isEmpty ||
-        previousExpanded.trim().isEmpty ||
-        additions.isEmpty) {
-      return '';
+    // 2턴부터는 이 함수가 단독 게이트다. 여기서 나가는 모든 갈래는 "모델이
+    // 판정했다"와 "장애라서 판정을 못 했다"가 값으로 갈려 있어야 한다.
+    if (apiKey.isEmpty) {
+      return const StepExpandMergeResult(
+        text: '',
+        failure: StepExpandMergeFailure.apiKeyMissing,
+      );
+    }
+    if (previousExpanded.trim().isEmpty || additions.isEmpty) {
+      return const StepExpandMergeResult(
+        text: '',
+        failure: StepExpandMergeFailure.nothingToMerge,
+      );
     }
     final client = OpenAiConnectionPool.instance.client;
     try {
@@ -7425,33 +7518,54 @@ cannot tell what they meant.
 - Or the single token [UNCLEAR].""";
 
       final addedBlock = additions.map((u) => '- $u').join('\n');
-      final res = await client
-          .post(
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
-            headers: {
-              'Authorization': 'Bearer $apiKey',
-              'Content-Type': 'application/json; charset=utf-8',
-            },
-            body: jsonEncode({
-              'model': 'gpt-4o-mini',
-              // 0.2에서 올렸다. 프롬프트가 "연결어미를 매번 바꿔라"라고 시키는데
-              // 낮은 온도는 가장 무난한 ~고/~아서만 반복하게 만들어 서로 어긋났다.
-              // 사실 보존 규칙이 흔들리지 않는 선에서 0.5로 잡는다.
-              'temperature': 0.5,
-              'max_tokens': 300,
-              'messages': [
-                {'role': 'system', 'content': sysPrompt},
-                {
-                  'role': 'user',
-                  'content': 'Sentence so far:\n${previousExpanded.trim()}\n\n'
-                      'The user just added:\n$addedBlock\n\nMerged sentence:'
-                },
-              ],
-            }),
-          )
-          .timeout(const Duration(seconds: 12));
+      final http.Response res;
+      try {
+        res = await client
+            .post(
+              Uri.parse('https://api.openai.com/v1/chat/completions'),
+              headers: {
+                'Authorization': 'Bearer $apiKey',
+                'Content-Type': 'application/json; charset=utf-8',
+              },
+              body: jsonEncode({
+                'model': 'gpt-4o-mini',
+                // 0.2에서 올렸다. 프롬프트가 "연결어미를 매번 바꿔라"라고 시키는데
+                // 낮은 온도는 가장 무난한 ~고/~아서만 반복하게 만들어 서로 어긋났다.
+                // 사실 보존 규칙이 흔들리지 않는 선에서 0.5로 잡는다.
+                'temperature': 0.5,
+                'max_tokens': 300,
+                'messages': [
+                  {'role': 'system', 'content': sysPrompt},
+                  {
+                    'role': 'user',
+                    'content': 'Sentence so far:\n${previousExpanded.trim()}\n\n'
+                        'The user just added:\n$addedBlock\n\nMerged sentence:'
+                  },
+                ],
+              }),
+            )
+            .timeout(const Duration(seconds: 12));
+      } on TimeoutException {
+        return const StepExpandMergeResult(
+          text: '',
+          failure: StepExpandMergeFailure.timeout,
+        );
+      } catch (_) {
+        // 소켓 끊김·DNS 실패 등 전송 계층 오류.
+        return const StepExpandMergeResult(
+          text: '',
+          failure: StepExpandMergeFailure.transportError,
+        );
+      }
 
-      if (res.statusCode == 200) {
+      if (res.statusCode != 200) {
+        return const StepExpandMergeResult(
+          text: '',
+          failure: StepExpandMergeFailure.httpError,
+        );
+      }
+
+      try {
         final data = jsonDecode(utf8.decode(res.bodyBytes));
         var merged =
             (data['choices'][0]['message']['content'] ?? '').toString().trim();
@@ -7461,13 +7575,32 @@ cannot tell what they meant.
           merged = merged.substring(1, merged.length - 1).trim();
         }
         // 토큰만 오지 않고 한마디 덧붙여 오는 경우가 있어 포함 여부로 본다.
-        if (merged.toUpperCase().contains(kUnclearToken)) return kUnclearToken;
-        return merged;
+        if (merged.toUpperCase().contains(kUnclearToken)) {
+          return const StepExpandMergeResult(text: '', unclear: true);
+        }
+        // 200인데 쓸 문장이 없다. 되묻기 판정이 아니라 응답 실패이므로
+        // [UNCLEAR]와 절대 같은 칸에 두지 않는다.
+        if (merged.isEmpty) {
+          return const StepExpandMergeResult(
+            text: '',
+            failure: StepExpandMergeFailure.emptyResponse,
+          );
+        }
+        return StepExpandMergeResult(text: merged);
+      } catch (_) {
+        // 200인데 JSON이 아니거나 모양이 다르다. 본문은 남기지 않는다.
+        return const StepExpandMergeResult(
+          text: '',
+          failure: StepExpandMergeFailure.parseError,
+        );
       }
     } catch (e) {
       print('mergeNativeExpansion error: $e');
+      return const StepExpandMergeResult(
+        text: '',
+        failure: StepExpandMergeFailure.transportError,
+      );
     }
-    return '';
   }
 }
 
