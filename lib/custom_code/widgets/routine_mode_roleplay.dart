@@ -215,7 +215,33 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     );
   }
 
-  String _buildScenarioMemberInstructions() => '''
+  /// 👂 되묻기 문구. 세 모드가 같은 한 문장을 쓴다 — 전사 검증에서 걸리든
+  /// 모델이 스스로 되묻든 유저에게는 똑같이 들려야 한다. 태그는 쓸 수 없어
+  /// (음성으로 새어 나간다) 고정 문장 자체가 신호다. [_isAskBackReply] 참조.
+  static const String kScenarioAskBackLine = KoreanTurnValidator.retryLine;
+
+  /// 되묻기 판정용. Step Expand와 같은 방식으로 공백을 지운 앞머리에서
+  /// 특징 어절을 찾는다.
+  ///
+  /// ⚠️ 원어가 한국어가 아니면 모델은 그 언어로 되묻고 이 매칭이 빗나간다.
+  /// 그때는 되묻는 말은 정상적으로 나가지만 유저 발화가 화면·히스토리에
+  /// 남는다. 다국어 STT를 붙일 때 세 모드를 같이 해결한다.
+  static String _askBackProbe(String text) {
+    final compact = text.replaceAll(RegExp(r'\s'), '');
+    return compact.length > 24 ? compact.substring(0, 24) : compact;
+  }
+
+  static bool _isAskBackReply(String text) {
+    final probe = _askBackProbe(text);
+    return probe.contains('잘못들') || probe.contains('잘못알아들');
+  }
+
+  String _buildScenarioMemberInstructions() {
+    final nativeLang = resolveNativeLanguageName(FFAppState().nativeLang);
+    final askBackLine = nativeLang == 'Korean'
+        ? kScenarioAskBackLine
+        : 'the $nativeLang equivalent of "I think I misheard what you just said. Could you say it again?" — one plain spoken sentence, nothing else';
+    return '''
 You are the assigned character inside a live Korean scenario conversation.
 Situation: ${_scenarioSituation.trim()}
 Your role: ${_roleplayPartnerLabel.trim()}
@@ -234,7 +260,23 @@ $kKoreanPoliteSpeechPolicy
 
 $kSpokenReplyLengthPolicy
 - In character, this means answering like a real person in that situation would: briefly.
+
+[ASK BACK INSTEAD OF GUESSING]
+What you receive is speech-recognition output, not typed text, so it can contain
+misrecognized words. You never hear the audio — judge the text itself.
+Do NOT answer, and do NOT repair it by guessing, when any of these holds:
+- The line does not hold together as $nativeLang, or breaks off mid-thought.
+- A word sits so oddly that the meaning cannot be recovered from this scene.
+- Making it make sense would require inventing a subject, object, or verb.
+In that case reply with EXACTLY this one line and nothing else:
+$askBackLine
+Say nothing before or after it. Do not stay in character for this one line, and
+do not add a reaction or a question of your own. Being short is not by itself a
+reason to ask back — a clear short line is fine. Once the user says it again,
+continue the scene from their new words as if the unclear line had never been
+said. Never build the scene on a line you had to guess.
 ''';
+  }
 
   String _recentKoreanConversation() {
     final turns = _localMessages.where((message) {
@@ -1083,16 +1125,19 @@ User role: ${_roleplayUserLabel.trim()}''',
     _turnCounter++;
     final turnNumber = _turnCounter;
     var aiIndex = -1;
+    var askedBack = false;
     final recentConversation = _recentKoreanConversation();
+    // 되묻기가 나오면 이 말풍선을 도로 걷어내야 하므로 참조를 들고 간다.
+    final hostBubble = <String, dynamic>{
+      'role': 'HOST',
+      'target': userKorean,
+      'original': '',
+    };
     try {
       setState(() {
         _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
         _removeOrphanedHostBubbles();
-        _localMessages.add(<String, dynamic>{
-          'role': 'HOST',
-          'target': userKorean,
-          'original': '',
-        });
+        _localMessages.add(hostBubble);
       });
       _scrollToBottom();
 
@@ -1111,6 +1156,25 @@ User role: ${_roleplayUserLabel.trim()}''',
           turnNumber != _turnCounter) {
         return;
       }
+
+      // 👂 되묻기 턴이면 유저 발화를 버린다. 화면에도 히스토리에도 남기지
+      //   않고 턴 번호도 되돌려, 유저가 다시 말한 것이 이 턴이 되게 한다.
+      //   잘못 들은 문장 위에 장면을 이어 붙이면 그 뒤가 전부 어긋난다.
+      //   되묻는 말은 소리로만 내보낸다 — 글자로 남기면 지우는 사람이 없어
+      //   쌓이고, _recentKoreanConversation()이 그걸 다음 턴 컨텍스트로
+      //   넘겨 AI가 따라 되묻는다.
+      if (_isAskBackReply(aiKorean)) {
+        askedBack = true;
+        _turnCounter--;
+        setState(() {
+          _localMessages.remove(hostBubble);
+        });
+        _log('[ASK-BACK]',
+            'turn=$turnNumber 되묻기 → 유저 발화 폐기(화면/히스토리 미기록)');
+        await _speakKoreanLine(aiKorean);
+        return;
+      }
+
       setState(() {
         _localMessages.add(<String, dynamic>{
           'role': 'SYSTEM',
@@ -1144,10 +1208,12 @@ User role: ${_roleplayUserLabel.trim()}''',
         });
       }
     } finally {
+      // 되묻기 턴은 _turnCounter를 되돌렸으므로 turnNumber와 어긋난다.
+      // 그 경우에도 마이크는 반드시 다시 열어야 대화가 이어진다.
       if (mounted &&
           _isConversationActive &&
           generation == _pipelineGeneration &&
-          turnNumber == _turnCounter) {
+          (askedBack || turnNumber == _turnCounter)) {
         _startDeepgramListening();
       }
     }
