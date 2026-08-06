@@ -197,8 +197,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   Timer? _echoingOverlayTimer;
 
   // P2 샤도잉 시작 팝업 오버레이
-  bool _showShadowingOverlay = false;
-  Timer? _shadowingOverlayTimer;
 
   // 📦 [Box 4-B: 양방향 턴제 연습 엔진 상태]
   int currentIndex = 0;
@@ -445,7 +443,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _roleBubbleTimer?.cancel();
     _blinkController.dispose();
     _echoingOverlayTimer?.cancel();
-    _shadowingOverlayTimer?.cancel();
     _polishedRevealTimer?.cancel();
     _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
     _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
@@ -2496,17 +2493,6 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     _echoingOverlayTimer = Timer(const Duration(milliseconds: 2000), () {
       if (!mounted) return;
       setState(() => _showEchoingOverlay = false);
-      onDismiss?.call();
-    });
-  }
-
-  void _triggerShadowingOverlay({VoidCallback? onDismiss}) {
-    if (!mounted) return;
-    setState(() => _showShadowingOverlay = true);
-    _shadowingOverlayTimer?.cancel();
-    _shadowingOverlayTimer = Timer(const Duration(milliseconds: 2000), () {
-      if (!mounted) return;
-      setState(() => _showShadowingOverlay = false);
       onDismiss?.call();
     });
   }
@@ -7834,15 +7820,12 @@ RULES — follow exactly:
         _shadowStarted = false;
         _shadowRereadCount = 0; // [P2-PROXY]
         _showEchoingOverlay = false;
-        _showShadowingOverlay = false;
       });
       _echoingOverlayTimer?.cancel();
-      _shadowingOverlayTimer?.cancel();
       _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
       _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
       _stopShadowAiPlayback(); // [P2-SHADOW-AI]
       // 시작은 상단 보이스 선택기가 연다(_buildMeaningUnitVoiceSelector).
-      _triggerShadowingOverlay();
       _prepareP2StartAudio();
     }
   }
@@ -8351,7 +8334,6 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
       appAudioRecorder.stop();
     } catch (_) {}
     audioPlayer.stop();
-    _shadowingOverlayTimer?.cancel();
     _echoingOverlayTimer?.cancel();
     unawaited(_stopP3Shadowing(resetSelection: true));
     if (mounted) {
@@ -8360,7 +8342,6 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
         _showRetryHint = false;
         _currentChunkIdx = -1;
         _phase = ShadowingPhase.chunkPractice;
-        _showShadowingOverlay = false;
         _showEchoingOverlay = false;
         _selectedVariant = SentenceVariant.expanded;
         _selectedP3LearningVoice = null;
@@ -8412,62 +8393,20 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     );
   }
 
+  // P2 진입 시 2초간 "Thought-group Shadowing"을 띄우고 본문을 가리던 오버레이가
+  // 있었다. 시작 신호는 보이스 선택으로 충분해서 걷어냈고, 이제 첫 화면이 바로
+  // 보인다.
   Widget _buildStepPracticeWithTabBar() {
-    return Stack(
+    return Column(
       children: [
-        Column(
-          children: [
-            _buildPracticeTabBar(),
-            Expanded(
-              child: IgnorePointer(
-                ignoring: _showShadowingOverlay,
-                child: AnimatedOpacity(
-                  opacity: _showShadowingOverlay ? 0.0 : 1.0,
-                  duration: const Duration(milliseconds: 500),
-                  child: Column(
-                    children: [
-                      if (_phase == ShadowingPhase.part2Practice)
-                        _buildMeaningUnitVoiceSelector(),
-                      Expanded(child: _buildTurnPracticeScreen()),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-        AnimatedOpacity(
-          opacity: _showShadowingOverlay ? 1.0 : 0.0,
-          duration: const Duration(milliseconds: 600),
-          child: IgnorePointer(
-            ignoring: !_showShadowingOverlay,
-            child: Center(
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 32, vertical: 22),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.80),
-                  borderRadius: BorderRadius.circular(18),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.amber.withValues(alpha: 0.18),
-                      blurRadius: 24,
-                      spreadRadius: 2,
-                    ),
-                  ],
-                ),
-                child: const Text(
-                  'Thought-group\nShadowing',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.amber,
-                    fontSize: 26,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.0,
-                  ),
-                ),
-              ),
-            ),
+        _buildPracticeTabBar(),
+        Expanded(
+          child: Column(
+            children: [
+              if (_phase == ShadowingPhase.part2Practice)
+                _buildMeaningUnitVoiceSelector(),
+              Expanded(child: _buildTurnPracticeScreen()),
+            ],
           ),
         ),
       ],
