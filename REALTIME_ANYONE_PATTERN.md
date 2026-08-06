@@ -1,33 +1,97 @@
-# Anyone Realtime 통신 로직 — 다른 모드 이식용 정리
+# 3모드 대화방 통신 구조 — 현행 + Realtime 과거 기록
 
-> **2026-08-02 최종 Anyone 구조**
->
-> ```text
-> 한국어 마이크 PCM
-> → Deepgram Nova-3: 발화 종료 경계만 사용(전사문 폐기)
-> → gpt-4o-transcribe: 사용자 한국어 문장 확정
-> → Realtime text input
-> → gpt-realtime-2.1-mini: 한국어 응답 + WebRTC 음성 즉시 재생
-> → Realtime 음성 폐기
-> → 사용자/AI 한국어 텍스트만 History 저장
-> → History 진입 시 gpt-4o-mini로 영어 Target 최초 1회 생성·Firestore 저장
-> → 첫 듣기 tts-1/nova, P1/P2/P3는 각 방의 음성 정책과 로컬 캐시 사용
-> ```
->
-> 대화방은 Target 번역이나 학습용 TTS를 호출하지 않는다. Realtime 출력
-> 오디오는 파일·Firestore·`TtsCache` 어디에도 저장하지 않는다.
+> **현행 기준**
+> 앱 `1.0.87+87` · 브랜치 `realtime-secure-webrtc` · 기준 커밋 `2d2320fa`
+> (직전 기준점 `ba62ea23`) · 2026-08-06 코드 호출 경로 추적으로 확인.
+> 이 절은 **실기기 재검증 전**이며, 근거는 정적 호출 경로다.
+
+## 현재 운영 구조 (Circle Talk / Scenario Talk / Step Expand)
+
+```text
+한국어 마이크 PCM
+→ Deepgram Nova-3: 발화 종료 경계만 사용 (전사문은 폐기)
+→ 녹음 PCM 스냅샷
+→ gpt-4o-transcribe: 매 턴 한국어 원문을 새로 확정
+→ 로컬 노이즈 게이트(_isNoiseTranscript): 빈 문자열·추임새·환청 단어를 여기서 버림
+   (걸리면 말풍선·validator·AI·TTS·저장·턴 수 어디에도 닿지 않고 마이크만 재개)
+→ HOST_TEMP 임시 말풍선 표시 — 정상 발화일 때만
+→ KoreanTurnValidator(gpt-4o-mini): 반려면 되묻기, 장애면 fail-open
+→ 모드별 gpt-4o-mini 경로가 한국어 응답 생성
+→ tts-1 / nova 재생
+→ AI 음성 재생이 끝난 뒤에만 마이크 재개
+→ 대화방에는 한국어 텍스트만 Firestore·History 저장
+→ 영어 Target은 History 최초 진입 시 1회 생성하고 이후 캐시 사용
+```
+
+| 항목 | 현재 값 |
+|---|---|
+| Circle Talk 저장 id | **`free_talk`** (표시명만 바뀌었고 id는 한 번도 안 바꿨다) |
+| Scenario Talk / Step Expand 저장 id | `roleplay` / `step_expand` |
+| 발화 경계 | Deepgram Nova-3 — **경계 전용, 전사문 폐기** |
+| 한국어 원문 | gpt-4o-transcribe, 매 턴 재전사 |
+| AI 응답 | 모드별 gpt-4o-mini 경로 |
+| 음성 | `tts-1` / `nova` |
+| 마이크 재개 | AI 음성 재생 완료 후 (동시 개방은 echoCancel이 입력을 지운다) |
+| 대화방 저장 | 한국어 텍스트만 |
+| 영어 Target | History 최초 진입 시 1회 생성 → 캐시 |
+
+### Realtime WebRTC는 운영 경로에 연결되어 있지 않다
+
+`stealth_vox_realtime_session.dart` · `realtime_anyone_adapter.dart` ·
+`realtime_client_secret_service.dart` · `realtime_feature_flags.dart`는 남아
+있지만 **세 모드 어디에서도 부르지 않는다.** 남은 참조는
+`realtime_webrtc_probe.dart`(프로브 위젯) 하나뿐이다. 이 파일들은
+프로브·실험·복구 후보로만 보존한다 — 지우지 말 것.
+
+**Realtime 재도입 여부는 별도의 제품 결정 사항이다.** 이 문서는 재도입을
+권하지도 반대하지도 않는다. 아래 과거 기록은 그 결정을 할 때 쓰라고 남긴다.
+
+### 미해결 과제
+
+- **짧은 유효 응답('네', '응')이 노이즈 게이트에 같이 걸린다.** 단어 목록에서
+  빼는 것만으로는 무음 구간 환청이 되살아난다(§4.3). PCM 길이·음량·AI 재생
+  종료 후 간격처럼 환청과 실제 발화를 가를 근거를 먼저 조사한 뒤 수정안을 낼 것.
+- **Step Expand는 검증과 문장 합치기를 나란히 던진다.** 반려된 발화에도
+  `mergeNativeExpansion` 비용이 나가고 결과를 버린다.
+- 단계별 지연 계측이 모드마다 다르다. `_logTurnPerf`는 Circle Talk에만 있고,
+  Scenario Talk·Step Expand는 `_swDeepgram/_swOpenAI/_swTTS`가 대부분 죽은
+  legacy 경로에 걸려 있다.
+
+---
+
+## ⚠️ 여기서부터는 과거/비활성 기록
+
+아래는 **Realtime WebRTC가 운영 경로였던 시기(~2026-08-02)**의 기록이다.
+현재 코드와 맞지 않는 서술이 많다. 그럼에도 지우지 않는 이유는, 전송 계층의
+실기기 함정과 측정값이 재도입 때 그대로 쓸 자산이기 때문이다.
+**현행 구조와 충돌하면 위쪽이 옳다.**
+
+브랜치 `realtime-secure-webrtc` · 당시 실기기 검증 2026-07-29 (Samsung SM-S931N)
+
+### (과거·비활성) 2026-08-02 당시 Anyone 구조
+
+```text
+한국어 마이크 PCM
+→ Deepgram Nova-3: 발화 종료 경계만 사용(전사문 폐기)
+→ gpt-4o-transcribe: 사용자 한국어 문장 확정
+→ Realtime text input                          ← 현재 없음
+→ gpt-realtime-2.1-mini: 한국어 응답 + WebRTC 음성 즉시 재생   ← 현재 없음
+→ Realtime 음성 폐기
+→ 사용자/AI 한국어 텍스트만 History 저장
+→ History 진입 시 gpt-4o-mini로 영어 Target 최초 1회 생성·Firestore 저장
+→ 첫 듣기 tts-1/nova, P1/P2/P3는 각 방의 음성 정책과 로컬 캐시 사용
+```
+
+당시에도 대화방은 Target 번역이나 학습용 TTS를 호출하지 않았고, Realtime 출력
+오디오는 파일·Firestore·`TtsCache` 어디에도 저장하지 않았다. 이 두 원칙은
+현행 구조에서도 그대로다.
 
 아래 2026-07-29 내용은 전송 계층의 실기기 함정과 다른 모드 이식 참고용
-레거시 기록이다. 최종 Anyone 데이터 흐름과 충돌하면 위 구조가 우선한다.
+기록이다. 설계안이 아니라 **당시 동작이 확인된 사실**과 **실기기에서 직접 밟은
+함정**을 적었다.
 
-브랜치 `realtime-secure-webrtc` · 최종 실기기 검증 2026-07-29 (Samsung SM-S931N)
-
-이 문서는 **Anyone에서 실기기로 검증이 끝난 Realtime 통신 구조**를 다른 모드
-(Duo / Roleplay / Step Expand)에 옮기기 위한 것이다. 설계안이 아니라 **동작이
-확인된 사실**과 **실기기에서 직접 밟은 함정**을 적는다.
-
-`PHASE3_HANDOFF.md`는 커밋 `91ef3b78` 기준이라 낡았다. 첫 턴 GPT-4.1 검수,
-"2턴부터 secure realtime" 같은 서술은 이후 폐기됐다. **충돌하면 이 문서가 최신이다.**
+`PHASE3_HANDOFF.md`는 커밋 `91ef3b78` 기준이라 이보다도 낡았다. 첫 턴 GPT-4.1
+검수, "2턴부터 secure realtime" 같은 서술은 이후 폐기됐다.
 
 ---
 
