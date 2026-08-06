@@ -1650,6 +1650,25 @@ $kSpokenReplyLengthPolicy
         'selected=gpt-4o-transcribe every_turn=true len=${userOriginal.length}');
     _logTurnPerf('USER_KOREAN_FINAL');
 
+    // 🔇 [NOISE-GATE] 로컬 잡음 검열은 화면과 API보다 먼저 온다. 뒤에 두면
+    //   잡음에도 임시 말풍선이 먼저 뜨고 validator 왕복이 한 번 나간다.
+    //   여기서 걸린 발화는 말풍선·validator·AI 응답·TTS·저장·턴 수 어디에도
+    //   닿지 않고, 마이크만 다시 열어 다음 발화를 받는다.
+    if (_isNoiseTranscript(userOriginal)) {
+      _log('🔇 [NOISE-GATE]',
+          'mode=circle_talk dropped=true len=${userOriginal.length}');
+      if (mounted) {
+        setState(() {
+          _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+        });
+      }
+      if (_isConversationActive) {
+        _restartConfiguredListening(
+            expectedPipelineGeneration: pipelineGeneration);
+      }
+      return;
+    }
+
     // 🗣️ 확정된 유저 문장을 검증보다 먼저 띄운다. 검증은 gpt-4o-mini 왕복이라
     //   그 뒤에 두면 유저가 자기 말을 글자로 보기까지 왕복을 하나 더 기다린다.
     //   말은 이미 끝났고 문장도 확정됐는데 화면은 비어 있었다. 반려되면 아래

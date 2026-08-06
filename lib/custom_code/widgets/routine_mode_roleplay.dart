@@ -1013,6 +1013,36 @@ said. Never build the scene on a line you had to guess.
     );
   }
 
+  /// 전사가 발화가 아니라 잡음·추임새인지 판정한다. 파이프라인 진입 전 검열이
+  /// 이 함수 하나를 쓴다. 추임새를 통과시키면 "음." 같은 게 "Um."으로 번역돼
+  /// 유저 목소리로 나가고 AI가 거기에 대답한다(Anyone 실기기에서 발생).
+  ///
+  /// Circle Talk(`routine_mode_anyone.dart`)·Step Expand와 같은 규칙이다.
+  /// 셋 중 하나만 고치면 모드마다 다른 말이 걸러지므로 함께 바꿀 것.
+  bool _isNoiseTranscript(String text) {
+    final clean = text
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^\w\s가-힣]'), '')
+        .replaceAll(RegExp(r'\s+'), '')
+        .trim();
+    if (clean.length < 2) return true;
+    const ghostWords = <String>[
+      'thankyou',
+      'thanks',
+      'yeah',
+      'okay',
+      '감사합니다',
+      '네',
+      '응',
+    ];
+    if (ghostWords.contains(clean)) return true;
+    // 단독 추임새/감탄사만으로 이뤄진 발화 (흠, 음음, 어어, 아아 ...)
+    if (RegExp(r'^[흠음어아으네넵응윽허헐하흐엄음]{1,4}$').hasMatch(clean)) {
+      return true;
+    }
+    return false;
+  }
+
   // Deepgram 텍스트는 발화 종료 경계에만 사용한다. 실제 한국어 문장은
   // 녹음 PCM 전체를 gpt-4o-transcribe에 전달해 매 턴 새로 확정한다.
   void _commitAndProcess() async {
@@ -1044,6 +1074,23 @@ said. Never build the scene on a line you had to guess.
     }
     _log('[STT-ROUTE]',
         'selected=gpt-4o-transcribe every_turn=true len=${userKorean.length}');
+
+    // 🔇 [NOISE-GATE] 로컬 잡음 검열은 화면과 API보다 먼저 온다. 뒤에 두면
+    //   잡음에도 임시 말풍선이 먼저 뜨고 validator 왕복이 한 번 나간다.
+    //   여기서 걸린 발화는 말풍선·validator·AI 응답·TTS·저장·턴 수 어디에도
+    //   닿지 않고, 마이크만 다시 열어 다음 발화를 받는다.
+    //   마이크를 열 때 달아 둔 "..." 말풍선이 남아 있으므로 같이 걷어낸다.
+    if (_isNoiseTranscript(userKorean)) {
+      _log('🔇 [NOISE-GATE]',
+          'mode=scenario_talk dropped=true len=${userKorean.length}');
+      if (mounted) {
+        setState(() {
+          _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+        });
+      }
+      if (_isConversationActive) _startDeepgramListening();
+      return;
+    }
 
     // 🗣️ 확정된 유저 문장을 검증보다 먼저 띄운다. 검증은 gpt-4o-mini 왕복이라
     //   그 뒤에 두면 유저가 자기 말을 글자로 보기까지 왕복을 하나 더 기다린다.

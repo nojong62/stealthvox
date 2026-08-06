@@ -2132,6 +2132,24 @@ line had never been said. Never build the conversation on a line you had to gues
     }
     _log('[STT-ROUTE]',
         'selected=gpt-4o-transcribe every_turn=true len=${userKorean.length}');
+
+    // 🔇 [NOISE-GATE] 로컬 잡음 검열은 화면과 API보다 먼저 온다. 뒤에 두면
+    //   잡음에도 임시 말풍선이 먼저 뜨고 validator·합치기 왕복이 나간다.
+    //   여기서 걸린 발화는 말풍선·validator·AI 응답·TTS·저장 어디에도 닿지
+    //   않고 턴 수도 먹지 않는다 — 잡음이 5턴을 갉아먹으면 안 된다.
+    //   마이크를 열 때 달아 둔 "..." 말풍선이 남아 있으므로 같이 걷어낸다.
+    if (_isNoiseTranscript(userKorean)) {
+      _log('🔇 [NOISE-GATE]',
+          'mode=step_expand dropped=true len=${userKorean.length}');
+      if (mounted) {
+        setState(() {
+          _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+        });
+      }
+      if (_isConversationActive && !_isSessionComplete) _startUserListening();
+      return;
+    }
+
     _runMeaningProbe(userKorean);
 
     // 🟠 [FAST-DISSATISFIED] 질문 불만은 전사 오류가 아니다. 검증기보다 먼저
