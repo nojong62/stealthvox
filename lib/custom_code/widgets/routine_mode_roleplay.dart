@@ -370,6 +370,19 @@ said. Never build the scene on a line you had to guess.
   /// 않으므로 직전 세션의 발화까지 섞여 항상 "발화 있음"으로 보인다.
   bool _currentRoomHasUserTurn = false;
 
+  /// `_localMessages`에서 지금 열린 History 문서가 시작된 위치.
+  ///
+  /// 이 모드는 퇴장할 때 화면을 통째로 `chat_json`에 넣는다. 롤오버는 화면을
+  /// 지우지 않으므로, 이 표식 없이 저장하면 **마지막 방이 앞 세션 내용을 통째로
+  /// 복사한다.** 살아 있는 경로의 말풍선 삭제는 모두 현재 방 꼬리에서만
+  /// 일어나므로 인덱스가 어긋나지 않는다.
+  int _currentRoomStartIndex = 0;
+
+  /// 지금 열린 방에 속한 말풍선만.
+  List<Map<String, dynamic>> get _currentRoomMessages =>
+      _localMessages.sublist(
+          _currentRoomStartIndex.clamp(0, _localMessages.length));
+
   /// 직전 30분 세션 요약. 시스템 프롬프트로만 넘긴다.
   /// 최근 턴은 [_recentKoreanConversation]이 이미 12개(6교환)로 잘라 주므로
   /// 여기서 따로 들고 있지 않는다.
@@ -479,6 +492,8 @@ said. Never build the scene on a line you had to guess.
       _sessionDocId = null;
       _lastExchangeMsgIds = [];
       _currentRoomHasUserTurn = false;
+      // 여기부터가 새 방의 내용이다. 화면은 그대로 두되 저장 범위만 자른다.
+      _currentRoomStartIndex = _localMessages.length;
       // 새 방이 생기기 전까지 usage_logs는 방 id 없이 남는다. 옛 방 id를 물고
       // 있으면 다음 구간이 직전 방에 잘못 붙는다.
       BillingTicker.instance.setSessionIdentifiers();
@@ -598,9 +613,12 @@ said. Never build the scene on a line you had to guess.
   /// 나가는 모든 경로에서 호출: chat_json + last_message 저장 (탐색 없이 순수 저장만)
   Future<void> _forceSaveToFirestore() async {
     if (_myHistoryRef == null) return;
+    // 이 방에 속한 말풍선만 저장한다. 화면 전체를 넣으면 롤오버 뒤에 마지막
+    // 방이 앞 세션 내용을 통째로 복사한다.
+    final roomMessages = _currentRoomMessages;
     String lastMsg = "대화 내역이 없습니다.";
-    for (int i = _localMessages.length - 1; i >= 0; i--) {
-      final t = (_localMessages[i]['target'] ?? '').toString().trim();
+    for (int i = roomMessages.length - 1; i >= 0; i--) {
+      final t = (roomMessages[i]['target'] ?? '').toString().trim();
       if (t.isNotEmpty && t != '...') {
         lastMsg = t;
         break;
@@ -610,7 +628,7 @@ said. Never build the scene on a line you had to guess.
       await _myHistoryRef!.update({
         'last_message': lastMsg,
         'last_active': FieldValue.serverTimestamp(),
-        'chat_json': jsonEncode(_localMessages),
+        'chat_json': jsonEncode(roomMessages),
         'is_completed': false,
       });
       debugPrint("✅ 히스토리 자동 저장 성공");
@@ -2504,9 +2522,11 @@ User role: ${_roleplayUserLabel.trim()}''',
           await _myHistoryRef!.delete();
           _log('🗑️ [HIST-DEL]', '빈 방 삭제 완료');
         } else {
+          // 이 방에 속한 말풍선만 저장한다(위 _forceSaveToFirestore와 같은 이유).
+          final roomMessages = _currentRoomMessages;
           String lastText = "대화 기록 저장";
-          for (int i = _localMessages.length - 1; i >= 0; i--) {
-            final t = (_localMessages[i]['target'] ?? '').toString().trim();
+          for (int i = roomMessages.length - 1; i >= 0; i--) {
+            final t = (roomMessages[i]['target'] ?? '').toString().trim();
             if (t.isNotEmpty && t != '...') {
               lastText = t;
               break;
@@ -2519,9 +2539,9 @@ User role: ${_roleplayUserLabel.trim()}''',
           await _myHistoryRef!.update({
             'last_message': lastText,
             'last_message_time': FieldValue.serverTimestamp(),
-            'msg_count': _localMessages.length,
+            'msg_count': roomMessages.length,
             'last_active': FieldValue.serverTimestamp(),
-            'chat_json': jsonEncode(_localMessages),
+            'chat_json': jsonEncode(roomMessages),
             'is_completed': false,
             'mode': 'roleplay',
             'scenario_situation': _scenarioSituation,
