@@ -1066,7 +1066,17 @@ said. Never build the scene on a line you had to guess.
     if (!mounted) return;
     if (!BillingTicker.instance.appInForeground.value) return;
     if (!_isConversationActive) return;
-    if (_isSystemBusy || _turnInFlight || _voiceManager != null) return;
+    if (_isSystemBusy || _turnInFlight) return;
+    // ⚠️ `_voiceManager != null`을 "듣는 중"으로 읽으면 안 된다. 백그라운드에서
+    //   소켓이 끊겨도 객체는 그대로 남아, 그걸 살아 있다고 보면 복구가 영영
+    //   막힌다. 소켓 상태를 직접 본다.
+    final manager = _voiceManager;
+    if (manager != null && manager.isConnected) return;
+    if (manager != null) {
+      _log('🎤 [LISTEN-FG]', '끊긴 매니저 정리');
+      _voiceManager = null;
+      unawaited(manager.dispose());
+    }
     _log('🎤 [LISTEN-FG]', '포그라운드 복귀 → STT 재연결 시도');
     unawaited(_startDeepgramListening());
   }
@@ -3087,6 +3097,10 @@ class DeepgramV2VoiceManager {
   StreamSubscription? _wsSub;
   String _currentTranscript = '';
   bool _isConnected = false;
+
+  /// 소켓이 살아 있는가. 매니저 객체가 있다고 듣고 있는 것이 아니다 —
+  /// 백그라운드에서 끊긴 뒤에도 객체는 그대로 남는다.
+  bool get isConnected => _isConnected && !_isDisposed;
   bool _isDisposed = false;
   int _retryCount = 0;
   static const int _maxRetries = 5;
