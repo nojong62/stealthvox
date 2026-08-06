@@ -236,6 +236,13 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   /// 끼어들면 한 턴이 두 History로 갈린다.
   bool _turnInFlight = false;
 
+  /// **지금 열려 있는 History 문서**가 유저 발화를 하나라도 받았는지.
+  ///
+  /// 화면 말풍선(`_localMessages`)으로는 판정할 수 없다. 롤오버는 화면을 지우지
+  /// 않으므로 직전 세션의 발화까지 섞여 항상 "발화 있음"으로 보인다. 방이 바뀔
+  /// 때마다 리셋되는 이 플래그가 그 방의 실제 내용을 가리킨다.
+  bool _currentRoomHasUserTurn = false;
+
   /// 직전 30분 세션 요약. 시스템 프롬프트로만 넘긴다 — [_recentHistory]는 그대로
   /// messages 배열이 되므로 여기에 'system' 역할을 섞으면 안 된다.
   String _rolloverSummary = '';
@@ -343,13 +350,27 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       );
       if (!mounted || !_isConversationActive) return;
 
-      // ③④ 새 기록 묶음. _ensureHistoryRef가 새 방을 만들고 그 안에서
-      //     setSessionIdentifiers를 새 id로 다시 부른다. sessions 문서도 같이
-      //     끊는다 — transcript가 arrayUnion으로만 자라서 방치하면 문서 크기
-      //     상한에 걸린다.
+      // ③④ 새 기록 묶음. **방 문서를 여기서 만들지 않는다.** 첫 저장 때
+      //     _saveHistoryMessages가 _ensureHistoryRef로 만든다.
+      //
+      //     미리 만들면 롤오버 직후 나갔을 때 유저 발화가 하나도 없는 빈 방이
+      //     남는다. 퇴장 시 빈 방을 지우는 _handleAutoSaveAndExit은 화면
+      //     말풍선(_localMessages)으로 판정하는데, 롤오버는 화면을 지우지
+      //     않으므로 직전 세션의 발화 때문에 항상 "발화 있음"으로 보여 새 빈
+      //     방이 삭제 대상에서 빠진다. 만들지 않으면 지울 일도 없다.
+      //
+      //     sessions 문서도 같이 끊는다 — transcript가 arrayUnion으로만 자라서
+      //     방치하면 문서 크기 상한에 걸린다.
+      // 나가는 방을 놓기 전에 심사한다. 여기서 안 지우면 영영 기회가 없다 —
+      // 퇴장 시 빈 방을 지우는 경로는 _myHistoryRef를 보는데, 롤오버가 이미
+      // 그 참조를 놓아버려 AI 글만 있는 방이 심사도 못 받고 남는다.
+      await _discardOutgoingRoomIfUnused();
       _myHistoryRef = null;
       _sessionDocId = null;
-      await _ensureHistoryRef();
+      _currentRoomHasUserTurn = false;
+      // 새 방이 생기기 전까지 usage_logs는 방 id 없이 남는다. 옛 방 id를 물고
+      // 있으면 다음 구간이 직전 방에 잘못 붙는다.
+      BillingTicker.instance.setSessionIdentifiers();
       if (!mounted || !_isConversationActive) return;
 
       // ⑤ 문맥 이월: 요약 + 최근 N턴 + 역할 설정(시스템 프롬프트는 매 턴 새로
@@ -358,11 +379,24 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
       _log(
           '⏱️ [ROLLOVER]',
-          'done room=${_myHistoryRef?.id} summary=${summary.isNotEmpty} '
+          'done room=pending summary=${summary.isNotEmpty} '
               'carried=${_recentHistory.length}');
       _showRolloverNotice();
     } finally {
       _rolloverInFlight = false;
+    }
+  }
+
+  /// 유저 발화가 하나도 없는 방을 폐기한다. AI 인사말만 남은 방은 히스토리에
+  /// 보일 이유가 없다. 롤오버와 퇴장이 같은 규칙을 쓴다.
+  Future<void> _discardOutgoingRoomIfUnused() async {
+    final ref = _myHistoryRef;
+    if (ref == null || _currentRoomHasUserTurn) return;
+    try {
+      await ref.delete();
+      _log('🗑️ [HIST-DEL]', 'AI 발화만 있는 방 폐기: ${ref.id}');
+    } catch (e) {
+      _log('❌ [HIST-ERR]', '빈 방 삭제 실패: $e');
     }
   }
 
@@ -3271,6 +3305,9 @@ $kSpokenReplyLengthPolicy
       for (final line in chatLines) {
         final original = (line['original_text'] ?? '').toString().trim();
         if (original.isEmpty) continue;
+        // 이 방에 유저 발화가 실제로 들어간 순간을 표시한다. AI 글만 있는 방은
+        // 남기지 않는다는 규칙의 근거가 이 한 줄이다.
+        if (line['role'] == 'HOST') _currentRoomHasUserTurn = true;
         await _myHistoryRef!.collection('messages').add({
           'role': line['role'] ?? '',
           // Target은 History가 gpt-4o-mini로 최초 1회 생성해 채운다.
@@ -3343,7 +3380,9 @@ $kSpokenReplyLengthPolicy
     BillingTicker.instance.pause();
     try {
       if (_myHistoryRef != null) {
-        final hasUserTurn = _localMessages.any((m) => m['role'] == 'HOST');
+        // 롤오버 뒤에는 화면 말풍선에 직전 세션 발화가 남아 있어 항상 "발화
+        // 있음"이 된다. 지금 열린 방에 실제로 저장된 것만 보는 플래그를 쓴다.
+        final hasUserTurn = _currentRoomHasUserTurn;
         if (!hasUserTurn) {
           await _myHistoryRef!.delete();
           _log('🗑️ [HIST-DEL]', '빈 방 삭제 완료');

@@ -364,6 +364,12 @@ said. Never build the scene on a line you had to guess.
   /// 끼어들면 한 턴이 두 History로 갈린다.
   bool _turnInFlight = false;
 
+  /// **지금 열려 있는 History 문서**가 유저 발화를 하나라도 받았는지.
+  ///
+  /// 화면 말풍선(`_localMessages`)으로는 판정할 수 없다. 롤오버는 화면을 지우지
+  /// 않으므로 직전 세션의 발화까지 섞여 항상 "발화 있음"으로 보인다.
+  bool _currentRoomHasUserTurn = false;
+
   /// 직전 30분 세션 요약. 시스템 프롬프트로만 넘긴다.
   /// 최근 턴은 [_recentKoreanConversation]이 이미 12개(6교환)로 잘라 주므로
   /// 여기서 따로 들고 있지 않는다.
@@ -455,14 +461,27 @@ said. Never build the scene on a line you had to guess.
       );
       if (!mounted || !_isConversationActive) return;
 
-      // ③④ 새 기록 묶음. _ensureHistoryRef가 새 방을 만들고 그 안에서
-      //     setSessionIdentifiers를 새 id로 다시 부른다. sessions 문서도 같이
-      //     끊는다 — transcript가 arrayUnion으로만 자라서 방치하면 문서 크기
-      //     상한에 걸린다.
+      // ③④ 새 기록 묶음. **방 문서를 여기서 만들지 않는다.** 첫 저장 때
+      //     _saveHistoryMessages가 _ensureHistoryRef로 만든다.
+      //
+      //     미리 만들면 롤오버 직후 나갔을 때 유저 발화가 하나도 없는 빈 방이
+      //     남는다. 퇴장 시 빈 방을 지우는 경로는 화면 말풍선으로 판정하는데,
+      //     롤오버는 화면을 지우지 않으므로 직전 세션의 발화 때문에 항상
+      //     "발화 있음"으로 보여 새 빈 방이 삭제 대상에서 빠진다.
+      //
+      //     sessions 문서도 같이 끊는다 — transcript가 arrayUnion으로만 자라서
+      //     방치하면 문서 크기 상한에 걸린다.
+      // 나가는 방을 놓기 전에 심사한다. 여기서 안 지우면 영영 기회가 없다 —
+      // 퇴장 시 빈 방을 지우는 경로는 _myHistoryRef를 보는데, 롤오버가 이미
+      // 그 참조를 놓아버려 AI 글만 있는 방이 심사도 못 받고 남는다.
+      await _discardOutgoingRoomIfUnused();
       _myHistoryRef = null;
       _sessionDocId = null;
       _lastExchangeMsgIds = [];
-      await _ensureHistoryRef();
+      _currentRoomHasUserTurn = false;
+      // 새 방이 생기기 전까지 usage_logs는 방 id 없이 남는다. 옛 방 id를 물고
+      // 있으면 다음 구간이 직전 방에 잘못 붙는다.
+      BillingTicker.instance.setSessionIdentifiers();
       if (!mounted || !_isConversationActive) return;
 
       // ⑤ 문맥 이월. 화면 말풍선은 그대로 두므로 최근 턴은 자동으로 따라오고,
@@ -470,10 +489,23 @@ said. Never build the scene on a line you had to guess.
       _rolloverSummary = summary;
 
       _log('⏱️ [ROLLOVER]',
-          'done room=${_myHistoryRef?.id} summary=${summary.isNotEmpty}');
+          'done room=pending summary=${summary.isNotEmpty}');
       _showRolloverNotice();
     } finally {
       _rolloverInFlight = false;
+    }
+  }
+
+  /// 유저 발화가 하나도 없는 방을 폐기한다. AI 인사말만 남은 방은 히스토리에
+  /// 보일 이유가 없다. 롤오버와 퇴장이 같은 규칙을 쓴다.
+  Future<void> _discardOutgoingRoomIfUnused() async {
+    final ref = _myHistoryRef;
+    if (ref == null || _currentRoomHasUserTurn) return;
+    try {
+      await ref.delete();
+      _log('🗑️ [HIST-DEL]', 'AI 발화만 있는 방 폐기: ${ref.id}');
+    } catch (e) {
+      _log('❌ [HIST-ERR]', '빈 방 삭제 실패: $e');
     }
   }
 
@@ -2398,6 +2430,12 @@ User role: ${_roleplayUserLabel.trim()}''',
       // messages 서브컬렉션에 각 발화 저장
       final List<String> savedIds = [];
       for (final line in chatLines) {
+        // 이 방에 유저 발화가 실제로 들어간 순간을 표시한다. AI 글만 있는 방은
+        // 남기지 않는다는 규칙의 근거가 이 한 줄이다.
+        if (line['role'] == 'HOST' &&
+            (line['original_text'] ?? '').toString().trim().isNotEmpty) {
+          _currentRoomHasUserTurn = true;
+        }
         final original = (line['original_text'] ?? '').toString().trim();
         if (original.isEmpty) continue;
         final addedRef = await _myHistoryRef!.collection('messages').add({
@@ -2435,7 +2473,9 @@ User role: ${_roleplayUserLabel.trim()}''',
     BillingTicker.instance.pause();
     try {
       if (_myHistoryRef != null) {
-        final hasUserTurn = _localMessages.any((m) => m['role'] == 'HOST');
+        // 롤오버 뒤에는 화면 말풍선에 직전 세션 발화가 남아 있어 항상 "발화
+        // 있음"이 된다. 지금 열린 방에 실제로 저장된 것만 보는 플래그를 쓴다.
+        final hasUserTurn = _currentRoomHasUserTurn;
         if (!hasUserTurn) {
           await _myHistoryRef!.delete();
           _log('🗑️ [HIST-DEL]', '빈 방 삭제 완료');
