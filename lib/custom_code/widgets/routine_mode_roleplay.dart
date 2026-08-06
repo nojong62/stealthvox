@@ -571,6 +571,7 @@ said. Never build the scene on a line you had to guess.
   @override
   void initState() {
     super.initState();
+    BillingTicker.instance.appInForeground.addListener(_onForegroundChanged);
     _ttsQueueManager = TtsQueueManager(onPlayStart: () {
       if (_swTTS.isRunning) {
         _swTTS.stop();
@@ -620,6 +621,7 @@ said. Never build the scene on a line you had to guess.
 
   @override
   void dispose() {
+    BillingTicker.instance.appInForeground.removeListener(_onForegroundChanged);
     _rolloverNoticeTimer?.cancel();
     _clearIdleTimers();
     BillingTicker.instance.pause();
@@ -1037,6 +1039,20 @@ said. Never build the scene on a line you had to guess.
     }
   }
 
+  /// 포그라운드로 돌아왔을 때 끊겨 있던 STT를 되살린다.
+  ///
+  /// 백그라운드에서는 재연결을 아예 시도하지 않으므로(위 shouldReconnect),
+  /// 돌아온 이 시점이 유일한 복구 지점이다. `_startDeepgramListening`이
+  /// `_voiceManager != null`로 중복 오픈을 막으므로 방이 살아 있는지만 본다.
+  void _onForegroundChanged() {
+    if (!mounted) return;
+    if (!BillingTicker.instance.appInForeground.value) return;
+    if (!_isConversationActive) return;
+    if (_isSystemBusy || _turnInFlight || _voiceManager != null) return;
+    _log('🎤 [LISTEN-FG]', '포그라운드 복귀 → STT 재연결 시도');
+    unawaited(_startDeepgramListening());
+  }
+
   Future<void> _startDeepgramListening() async {
     // 이미 듣고 있으면 새로 열지 않는다. 첫 대사 재생과 마이크 열기가 겹치면서
     // 여기가 두 번 불릴 수 있는데, 그대로 두면 VoiceManager가 하나 더 생겨
@@ -1092,6 +1108,14 @@ said. Never build the scene on a line you had to guess.
         _log('❌ [LISTEN-ERR]', 'Deepgram Error: $err');
         _stopEverything();
       },
+      // 🔌 백그라운드에서는 재연결을 시도하지 않는다. 소켓이 절대 안 붙는
+      //   구간인데도 재시도 5회(0.5+1+2+4+8초)를 15초 만에 전부 소모하고
+      //   포기해, 카톡 한 번 확인하고 돌아오면 마이크가 죽어 있었다.
+      //   복귀 시 _onForegroundChanged가 다시 연결한다.
+      shouldReconnect: () =>
+          _isConversationActive &&
+          BillingTicker.instance.appInForeground.value &&
+          !_isSystemBusy,
     );
     _log('🎤 [LISTEN-04]', 'connectAndStart 호출 직전');
     await _voiceManager!.connectAndStart();
@@ -3030,6 +3054,11 @@ class DeepgramV2VoiceManager {
   final Function(String) onError;
   final Function(int)? onReconnecting; // 재연결 시도 알림 (선택적)
   final VoidCallback? onGaveUp; // 재연결 포기 알림 (선택적)
+
+  /// 지금 재연결을 시도해도 되는가. false면 **재시도 횟수를 쓰지 않고** 그냥
+  /// 물러난다 — 붙을 수 없는 구간(백그라운드)에서 5회를 태워 버리면 돌아왔을
+  /// 때 되살릴 방법이 없다. 호출부가 복귀 시점에 다시 연결한다.
+  final bool Function()? shouldReconnect;
   final void Function(String tag, String msg)? onLog; // 🔬 [v3.1] 로그 훅
   final void Function(Uint8List bytes)? onAudioData;
 
@@ -3052,6 +3081,7 @@ class DeepgramV2VoiceManager {
     required this.onError,
     this.onReconnecting,
     this.onGaveUp,
+    this.shouldReconnect,
     this.onLog,
     this.onAudioData,
   });
@@ -3230,13 +3260,24 @@ class DeepgramV2VoiceManager {
   Future<void> _handleDisconnect() async {
     if (_isDisposed) return;
     _isConnected = false;
+    // 붙을 수 없는 구간이면 재시도 횟수를 쓰지 않고 물러난다.
+    if (shouldReconnect != null && !shouldReconnect!()) {
+      _lg('🎤 [DG-RETRY-SKIP]', '재연결 조건 불충족 (횟수 보존)');
+      return;
+    }
     if (_retryCount < _maxRetries) {
       _retryCount++;
       _lg('🎤 [DG-RETRY]', '재연결 시도 $_retryCount/$_maxRetries');
       onReconnecting?.call(_retryCount); // 🔧 선택적 콜백 호출
       final delay = Duration(milliseconds: 500 * (1 << (_retryCount - 1)));
       await Future.delayed(delay);
-      if (!_isDisposed) await _connect();
+      // 대기하는 사이 백그라운드로 갔을 수 있다. 다시 본다.
+      if (_isDisposed) return;
+      if (shouldReconnect != null && !shouldReconnect!()) {
+        _lg('🎤 [DG-RETRY-SKIP]', '지연 중 상태 변경');
+        return;
+      }
+      await _connect();
     } else {
       _lg('❌ [DG-GIVEUP]', '재연결 최대치 도달');
       onGaveUp?.call(); // 🔧 선택적 콜백 호출

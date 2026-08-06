@@ -99,6 +99,20 @@ class BillingTicker with WidgetsBindingObserver {
   static const Duration _kRolloverRetryCooldown = Duration(seconds: 30);
   // ─────────────────────────────────────────────────────────────────────────
 
+  /// 앱이 포그라운드에 있는가.
+  ///
+  /// 엔진이 이미 생명주기를 관찰하므로 여기서 한 번만 판정하고 필요한 곳이
+  /// 읽어 간다 — 관찰자를 여러 개 두면 콜백 순서가 엇갈린다.
+  ///
+  /// 대화방이 이 값을 보고 백그라운드에서는 STT 재연결을 시도하지 않는다.
+  /// 백그라운드에서는 소켓이 절대 안 붙는데도 재시도 5회를 15초 만에 전부
+  /// 소모하고 포기해, 돌아왔을 때 마이크가 죽어 있었다.
+  final ValueNotifier<bool> appInForeground = ValueNotifier<bool>(true);
+
+  /// 직전 [_closeSegment]가 저장에 실패했는가. 실패했다면 기준선을 옮기면
+  /// 안 된다 — 그 구간이 영영 사라진다.
+  bool _lastCloseFailed = false;
+
   /// 지금 이 순간 실제로 차감이 도는가.
   /// [_onTick]의 차감 조건과 **같은 식**을 쓴다. 표시등이 따로 판단하면
   /// 갈린다 — 예전에는 `!_paused`만 봐서, 잔여시간이 0이거나 아직 로딩되지
@@ -177,6 +191,7 @@ class BillingTicker with WidgetsBindingObserver {
         state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden ||
         state == AppLifecycleState.detached) {
+      appInForeground.value = false;
       _lifecyclePauseTimer?.cancel();
       if (!_paused) {
         _wasRunningBeforeBackground = true;
@@ -193,16 +208,28 @@ class BillingTicker with WidgetsBindingObserver {
         flushNow();
       }
     } else if (state == AppLifecycleState.resumed) {
+      // ⚠️ _cancelLifecyclePause가 이 플래그를 지우므로 **먼저 읽는다.**
+      //   예전에는 지운 뒤에 읽어서 아래 분기가 한 번도 실행된 적이 없고,
+      //   백그라운드에서 돌아와도 과금이 스스로 재개되지 않았다.
+      final wasRunning = _wasRunningBeforeBackground;
       _cancelLifecyclePause('lifecycle_resumed');
-      _addBillingLog('[BILLING] foreground resumed');
-      if (_wasRunningBeforeBackground) {
-        _wasRunningBeforeBackground = false;
+      appInForeground.value = true;
+      _addBillingLog('[BILLING] foreground resumed wasRunning=$wasRunning');
+      if (wasRunning) {
         // 포그라운드 복귀: 과금 구간만 새로 연다. 30분 시계는 그대로 둔다 —
         // 앱을 잠깐 내렸다 올린 것으로 세션이 되감기면 안 된다.
-        if (_sessionMode.isNotEmpty) {
+        //
+        // 단, 직전 종료가 저장에 실패했다면 기준선을 붙잡아 둔다. 백그라운드로
+        // 갈 때 소켓이 끊겨 logUsageSession이 실패하는 일이 실제로 있었고,
+        // 여기서 기준선을 옮기면 그 구간이 영영 사라진다.
+        if (_sessionMode.isNotEmpty && !_lastCloseFailed) {
           _openSegment('foreground');
           _addBillingLog(
               '[BILLING] session resumed from bg, new before=$_sessionBeforeSeconds');
+        } else if (_lastCloseFailed) {
+          _addBillingLog(
+              '[BILLING-SEG] baseline held reason=previous_close_failed '
+              'before=$_sessionBeforeSeconds');
         }
         resume();
       }
@@ -270,6 +297,7 @@ class BillingTicker with WidgetsBindingObserver {
     try {
       await flushNow();
       final persisted = await _persistSegment();
+      _lastCloseFailed = !persisted;
       _addBillingLog(
           '[BILLING-SEG] close reason=$reason persisted=$persisted reopen=$reopen');
       if (!persisted) return false;

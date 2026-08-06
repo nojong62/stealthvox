@@ -871,6 +871,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   @override
   void initState() {
     super.initState();
+    BillingTicker.instance.appInForeground.addListener(_onForegroundChanged);
     _audioRecorder = widget.preparedAudioRecorder ?? AudioRecorder();
     _ownsAudioRecorder = widget.preparedAudioRecorder == null;
     _micInputAt = widget.micInputAt ?? DateTime.now();
@@ -945,6 +946,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     // 🧹 [DISPOSE-GUARD] dispose 중에는 setState가 금지된다(위젯이 이미 defunct).
     //   이 플래그를 먼저 세워 _stopEverything의 setState를 건너뛴다.
     _isDisposing = true;
+    BillingTicker.instance.appInForeground.removeListener(_onForegroundChanged);
     _costTracker.logSnapshot(reason: 'dispose');
     disposeTrialTimer();
     _startupRetryTimer?.cancel();
@@ -1454,6 +1456,22 @@ $kSpokenReplyLengthPolicy
     _characterShortTermMemory = '';
   }
 
+  /// 포그라운드로 돌아왔을 때 끊겨 있던 STT를 되살린다.
+  ///
+  /// 백그라운드에서는 재연결을 아예 시도하지 않으므로(위 shouldReconnect),
+  /// 돌아온 이 시점이 유일한 복구 지점이다. `_startDeepgramListening`이
+  /// 중복 실행·파이프라인 진행·TTS 재생·1초 디바운스를 이미 막으므로 여기서는
+  /// 방이 살아 있는지만 본다.
+  void _onForegroundChanged() {
+    if (!mounted || _isDisposing) return;
+    if (!BillingTicker.instance.appInForeground.value) return;
+    if (!_isConversationActive) return;
+    if (_isSystemBusy || _isPipelineRunning || _turnInFlight) return;
+    _log('🎤 [LISTEN-FG]', '포그라운드 복귀 → STT 재연결 시도');
+    _restartConfiguredListening(
+        expectedPipelineGeneration: _pipelineGeneration);
+  }
+
   void _restartConfiguredListening({int? expectedPipelineGeneration}) {
     if (expectedPipelineGeneration != null &&
         expectedPipelineGeneration != _pipelineGeneration) {
@@ -1563,9 +1581,14 @@ $kSpokenReplyLengthPolicy
         onAudioChunk: (bytes) {
           if (isCurrentGeneration()) _appendTurnPcm(bytes);
         },
+        // 🔌 백그라운드에서는 재연결을 시도하지 않는다. 소켓이 절대 안 붙는
+        //   구간인데도 재시도 5회(0.5+1+2+4+8초)를 15초 만에 전부 소모하고
+        //   포기해, 카톡 한 번 확인하고 돌아오면 마이크가 죽어 있었다.
+        //   복귀 시 아래 _onForegroundChanged가 다시 연결한다.
         shouldReconnect: () =>
             isCurrentGeneration() &&
             _isConversationActive &&
+            BillingTicker.instance.appInForeground.value &&
             !_isPipelineRunning &&
             !_ttsAdapter.isBusy,
         onConnected: () {
