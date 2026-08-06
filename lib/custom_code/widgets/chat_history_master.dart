@@ -54,32 +54,65 @@ const List<String> _p3LearningVoiceOptions = <String>[
   'verse',
 ];
 const Color _p3ShadowingAccentColor = Color(0xFF818CF8);
+/// 의미단위 낭독의 공통 뼈대. 무엇을 한 덩어리로 볼지, 덩어리 안을 어떻게
+/// 붙일지까지만 정한다. **덩어리 사이를 어떻게 다룰지는 아래 두 낭독 방식이
+/// 갈라서 정한다.**
+///
+/// 속도는 목표가 아니라 결과라서 배속 숫자를 지시하지 않는다. 숫자를 앞에 두면
+/// 모델이 느리게 읽기부터 집행해 밋밋하게 늘어지고 리듬이 뒤로 밀린다.
+const String _meaningUnitCore = '''
+Read in meaning units — groups of words that belong together by grammar and sense.
+Never read word by word.
+
+Inside one unit, keep the words connected with natural linking and normal
+reductions. Never break a unit apart.
+
+Give each unit one clear stress on its key content word, and keep function words light.
+Let intonation carry questions, contrasts, conditions, and corrections.
+
+Never stretch individual words or sounds to change the pace. The pace comes from
+how you treat the boundaries between units.
+
+Do not add explanations, labels, or the words pause or slash. Read only the supplied sentence.''';
+
+/// 학습용 — 구간을 **의도적으로 벌려** 따라 하기 쉽게 만든다.
+const String _learningUnitDelivery = '''
+Delivery — clearly separated units, for a learner who will shadow you:
+- Put a deliberate, clearly audible pause between units. Each boundary must be easy to hear.
+- Hold a steady rhythm: units of similar weight take similar time, and the pauses stay even.
+- Use the same unit boundaries every time, so they can be predicted on a second listen.
+- Stay clear and even rather than expressive. Do not rush a unit just because it is predictable.
+- Do not sound like a pronunciation drill or an audiobook narrator; still sound like a person.''';
+
+/// 원어민식 — 중요하지 않은 곳은 **흘려 붙이고** 핵심만 세운다.
+const String _nativeUnitDelivery = '''
+Delivery — natural native flow:
+- Keep the unit boundaries, but make them soft and short: a slight easing, not a gap.
+- Move quickly through predictable, low-information words and link them tightly.
+- Slow down and lean on what is new, contrastive, or important. Let those words carry the weight.
+- Use full connected speech across the sentence: weak forms, reductions, and linking.
+- Sound like someone talking, not like a model reading for study.''';
+
 const String _meaningUnitTtsInstructions = '''
-Read the English sentence for language learners using clear thought groups.
+$_meaningUnitCore
 
-Follow these rules:
+$_learningUnitDelivery
 
-1. Divide the sentence into meaningful phrases based on grammar and meaning, not word by word.
-2. Keep words inside each phrase naturally connected.
-3. Add a short, subtle pause between thought groups.
-4. Make each thought group easy to recognize, but do not exaggerate the pauses.
-5. Slightly emphasize the key word in each phrase.
-6. Reduce less important function words naturally, but do not make them unclear.
-7. Preserve natural English rhythm, linking, stress, and intonation.
-8. Do not sound like a newsreader, audiobook narrator, or pronunciation drill.
-9. Do not speak unnaturally slowly.
-10. Use a clear, conversational pace suitable for intermediate English learners.
-11. For long or complex sentences, slow down slightly at clause boundaries.
-12. Make questions, contrasts, conditions, and important corrections clear through intonation.
-13. Do not insert spoken explanations, labels, or the words pause or slash.
-14. Read only the supplied sentence.
-
-The result should sound like a native speaker speaking clearly to an English learner: natural within each phrase, with brief and recognizable pauses between meaning units.
+This is one turn of a spoken conversation. Keep it sounding like natural speech addressed to another person.
 ''';
-const String _p3ShadowingTtsInstructions = '''
-Read in natural conversational English. Keep a natural speaking pace of approximately 0.95x normal speed, but clearly separate meaningful chunks with brief, natural pauses. Use clear stress and rhythm so learners can easily shadow your speech. Avoid sounding slow or robotic.
+const String _p3LearningShadowingTtsInstructions = '''
+$_meaningUnitCore
 
-Prioritize a natural pace, clear thought groups, and useful stress and rhythm. Do not perform this as a slow-reading exercise. Read only the supplied sentence without adding explanations, labels, or commentary.
+$_learningUnitDelivery
+
+This is a full sentence the learner shadows from start to finish.
+''';
+const String _p3NativeShadowingTtsInstructions = '''
+$_meaningUnitCore
+
+$_nativeUnitDelivery
+
+This is a full sentence the learner listens to as a model of how it actually sounds.
 ''';
 
 /// 📦 [Box 2: 위젯 클래스 선언부]
@@ -3036,7 +3069,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
       );
 
   String _meaningUnitCacheVoice(String voice) =>
-      '${_historyPracticeTtsModel}_meaning_groups_prompt_v2_$voice';
+      '${_historyPracticeTtsModel}_unit_style_v5_$voice';
 
   Future<Uint8List?> _fetchMeaningUnitTTS(String text, String voice) =>
       _fetchOpenAITTS(
@@ -3045,7 +3078,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
         voice,
         model: _historyPracticeTtsModel,
         instructions: _meaningUnitTtsInstructions,
-        instructionTag: 'p2_learning_meaning_groups_v2',
+        instructionTag: 'p2_learning_unit_style_v5',
       );
 
   Future<Uint8List?> _getMeaningUnitTTS(String text, String voice) {
@@ -3069,7 +3102,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     String voice, {
     required bool nativeStyle,
   }) =>
-      '${_historyPracticeTtsModel}_p3_${nativeStyle ? 'native' : 'learning'}_natural_chunks_095_v1_$voice';
+      '${_historyPracticeTtsModel}_p3_${nativeStyle ? 'native' : 'learning'}_unit_style_v3_$voice';
 
   Future<Uint8List?> _getP3MeaningUnitTTS(
     String text,
@@ -3077,7 +3110,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     required bool nativeStyle,
   }) {
     final requestKey =
-        '${nativeStyle ? 'native' : 'learning'}|$voice|natural_chunks_095|${text.trim()}';
+        '${nativeStyle ? 'native' : 'learning'}|$voice|unit_style|${text.trim()}';
     final existing = _p3MeaningUnitTtsInFlight[requestKey];
     if (existing != null) return existing;
     final future = () async {
@@ -3092,9 +3125,14 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
         1.0,
         voice,
         model: _historyPracticeTtsModel,
-        instructions: _p3ShadowingTtsInstructions,
+        // 정제 문장(원어민식)과 완성 문장(학습용)은 읽는 방식이 다르다.
+        // 예전에는 같은 지시문을 쓰고 캐시 키 이름만 갈라 놓아, 화면에서
+        // 방식을 바꿔도 소리가 같았다.
+        instructions: nativeStyle
+            ? _p3NativeShadowingTtsInstructions
+            : _p3LearningShadowingTtsInstructions,
         instructionTag:
-            '${nativeStyle ? 'p3_native' : 'p3_learning'}_natural_chunks_095',
+            '${nativeStyle ? 'p3_native' : 'p3_learning'}_unit_style',
       );
       if (audio != null) await TtsCache.put(text, cacheVoice, audio);
       return audio;
