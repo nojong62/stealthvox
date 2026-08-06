@@ -227,11 +227,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   String? _selectedMeaningUnitVoice = 'cedar';
   // P2 학습 Voice는 Cedar를 기본값으로 사용한다.
   bool _shadowStarted = false;
-  bool _p2CountdownStarting = false;
-  Future<Uint8List?>? _p2CountdownAudioFuture;
-  AudioPlayer? _p2CountdownPlayer;
-  Completer<void>? _p2CountdownCancel;
-  int _p2CountdownGeneration = 0;
   // [P2-PROXY] Local amplitude proxy for spoken-ratio checks. No Whisper cost.
   Timer? _shadowAmpTimer;
   int _shadowVoicedTicks = 0;
@@ -455,7 +450,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
     _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
     _stopShadowAiPlayback(); // [P2-SHADOW-AI]
-    _stopP2Countdown();
     _chunkScrollController.dispose();
     _practiceScrollController.dispose();
     _p3ShadowPositionSub?.cancel();
@@ -471,7 +465,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _dialogSetState = null;
     BillingTicker.instance.pause();
     audioPlayer.dispose();
-    _p2CountdownPlayer?.dispose();
     _tutorAudioPlayer?.dispose();
     _appCorrectedAudio = null;
     if (_appIsRecording || _appIsShadowRecording || _shadowRecording) {
@@ -2061,7 +2054,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
     _stopShadowAiPlayback(); // [P2-SHADOW-AI]
     _stopShadowRecording(); // [P2-SHADOW-REC]
-    _stopP2Countdown();
     unawaited(_stopP3Shadowing(resetSelection: true));
     _stopDeepgramListening();
     audioPlayer.stop();
@@ -7836,8 +7828,10 @@ RULES — follow exactly:
         _shadowWords = []; // [P2-SHADOW]
         _shadowWordIdx = -1; // [P2-SHADOW]
         _shadowSpeed = 1.0;
-        _selectedMeaningUnitVoice = 'cedar';
-        _shadowStarted = true;
+        // 첫 화면은 보이스를 고르기 전까지 기다린다. 미리 골라 두면 상단
+        // 선택기가 깜빡이지 않고, 고르는 순간 시작하는 흐름도 죽는다.
+        _selectedMeaningUnitVoice = null;
+        _shadowStarted = false;
         _shadowRereadCount = 0; // [P2-PROXY]
         _showEchoingOverlay = false;
         _showShadowingOverlay = false;
@@ -7847,28 +7841,15 @@ RULES — follow exactly:
       _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
       _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
       _stopShadowAiPlayback(); // [P2-SHADOW-AI]
-      _stopP2Countdown();
-      // Cedar 기본 보이스로 P2를 바로 시작한다.
+      // 시작은 상단 보이스 선택기가 연다(_buildMeaningUnitVoiceSelector).
       _triggerShadowingOverlay();
       _prepareP2StartAudio();
-      unawaited(_startP2AfterCountdown());
     }
   }
 
-  static const String _p2CountdownText = 'Three, two, one, start.';
-
-  Future<Uint8List?> _loadP2CountdownAudio() async {
-    Uint8List? audio = await TtsCache.get(_p2CountdownText, 'echo');
-    if (audio != null) return audio;
-    audio = await _fetchOpenAITTS(_p2CountdownText, 1.0, 'echo');
-    if (audio != null) TtsCache.put(_p2CountdownText, 'echo', audio);
-    return audio;
-  }
-
   void _prepareP2StartAudio() {
-    // Voice 선택을 기다리는 동안 카운트다운과 첫 AI 문장을 준비한다.
-    _p2CountdownGeneration++;
-    _p2CountdownAudioFuture = _loadP2CountdownAudio();
+    // Voice 선택을 기다리는 동안 첫 AI 문장을 미리 받아 둔다. 고르는 즉시
+    // 시작하므로 여기서 벌어 둔 시간이 그대로 체감 지연을 줄인다.
     if (_tutorLines.isEmpty) return;
     final firstText = (_tutorLines.first['text'] ?? '').toString().trim();
     if (firstText.isEmpty) return;
@@ -7900,71 +7881,19 @@ RULES — follow exactly:
     await _getMeaningUnitTTS(text, voice);
   }
 
-  Future<void> _startP2AfterCountdown() async {
-    if (_p2CountdownStarting || !mounted) return;
-    _p2CountdownStarting = true;
-    final generation = _p2CountdownGeneration;
-    try {
-      final future = _p2CountdownAudioFuture ?? _loadP2CountdownAudio();
-      final audio = await future.timeout(
-        const Duration(seconds: 4),
-        onTimeout: () => null,
-      );
-      if (!mounted ||
-          generation != _p2CountdownGeneration ||
-          _phase != ShadowingPhase.part2Practice ||
-          !_shadowStarted ||
-          isPaused) {
-        return;
-      }
-      if (audio != null) {
-        final player = AudioPlayer();
-        _p2CountdownPlayer = player;
-        final completed = player.onPlayerComplete.first;
-        final cancelled = Completer<void>();
-        _p2CountdownCancel = cancelled;
-        try {
-          await player.play(BytesSource(audio));
-          await Future.any([completed, cancelled.future])
-              .timeout(const Duration(seconds: 8));
-        } catch (e) {
-          debugPrint('[P2 countdown] $e');
-        } finally {
-          if (identical(_p2CountdownCancel, cancelled)) {
-            _p2CountdownCancel = null;
-          }
-          if (identical(_p2CountdownPlayer, player)) {
-            _p2CountdownPlayer = null;
-          }
-          await player.dispose();
-        }
-      }
-      if (mounted &&
-          generation == _p2CountdownGeneration &&
-          _phase == ShadowingPhase.part2Practice &&
-          _shadowStarted &&
-          !isPaused) {
-        _startTurnPractice();
-      }
-    } finally {
-      if (generation == _p2CountdownGeneration) {
-        _p2CountdownStarting = false;
-      }
+  /// 보이스를 고른 순간 P2를 시작한다.
+  ///
+  /// 예전에는 "Three, two, one, start." 낭독을 먼저 재생하고 그 끝을 기다렸다.
+  /// 시작 신호는 보이스를 고르는 행동 자체로 충분해서 소리를 걷어냈고, 그만큼
+  /// 첫 문장이 빨리 나온다.
+  void _startP2Practice() {
+    if (!mounted ||
+        _phase != ShadowingPhase.part2Practice ||
+        !_shadowStarted ||
+        isPaused) {
+      return;
     }
-  }
-
-  Future<void> _stopP2Countdown() async {
-    _p2CountdownGeneration++;
-    _p2CountdownStarting = false;
-    _p2CountdownAudioFuture = null;
-    final cancelled = _p2CountdownCancel;
-    _p2CountdownCancel = null;
-    if (cancelled != null && !cancelled.isCompleted) cancelled.complete();
-    final player = _p2CountdownPlayer;
-    _p2CountdownPlayer = null;
-    if (player != null) {
-      await player.stop();
-    }
+    _startTurnPractice();
   }
 
   // 🆕 [EXPAND-FROM-CHAT v2] 대화 전체(AI+유저) → 종합 확장 문장 1개 (의미단위 ~5개, 문법 연결)
@@ -8450,7 +8379,6 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
     _stopShadowAiPlayback(); // [P2-SHADOW-AI]
     _stopShadowRecording(); // [P2-SHADOW-REC]
-    _stopP2Countdown();
     unawaited(_stopP3Shadowing(resetSelection: true));
     if (practiceNum == 1) {
       _startPart1Practice();
@@ -8661,7 +8589,8 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
                         if (firstSelection &&
                             _phase == ShadowingPhase.part2Practice &&
                             !isPaused) {
-                          unawaited(_startP2AfterCountdown());
+                          // 고른 순간이 곧 시작 신호다 — 카운트다운 없음.
+                          _startP2Practice();
                         }
                       },
               ),
