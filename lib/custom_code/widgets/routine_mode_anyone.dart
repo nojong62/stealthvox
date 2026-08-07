@@ -264,8 +264,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         BillingTicker.instance.resume();
         // idle 복귀다. 30분 시계는 이어서 간다 — 여기서 되감으면 잠깐 쉴 때마다
         // 세션이 처음으로 돌아가 롤오버가 영영 오지 않는다.
-        BillingTicker.instance.logMode('free_talk',
-            startNewConversation: false);
+        BillingTicker.instance
+            .logMode('free_talk', startNewConversation: false);
       }
     }
   }
@@ -4592,6 +4592,9 @@ class TtsCache {
     } catch (_) {}
   }
 
+  /// 쓰다 만 파일이 캐시로 보이면 get()이 그걸 그대로 돌려줘 그 문장은
+  /// 재설치 전까지 재생 불가가 된다. 임시 파일에 끝까지 쓴 뒤 rename으로
+  /// 교체해, 캐시에는 완전한 파일만 나타나게 한다.
   static Future<void> _putInternal(
     String text,
     String voice,
@@ -4599,9 +4602,35 @@ class TtsCache {
     required double speed,
     required String language,
   }) async {
+    if (data.isEmpty) return;
     final path =
         '${await _getDir()}/${_key(text, voice, speed: speed, language: language)}.mp3';
-    await File(path).writeAsBytes(data);
+    // 같은 문장을 동시에 받아도 서로 덮어쓰지 않도록 임시 이름을 구분한다.
+    final tmp = File('$path.${DateTime.now().microsecondsSinceEpoch}.part');
+    try {
+      // flush 없이 rename하면 내용이 버퍼에 남은 채 이름만 바뀔 수 있다.
+      await tmp.writeAsBytes(data, flush: true);
+      await tmp.rename(path);
+    } catch (_) {
+      try {
+        if (await tmp.exists()) await tmp.delete();
+      } catch (_) {}
+      rethrow;
+    }
+  }
+
+  /// 깨진 캐시를 버린다. 재생 실패 시 호출하면 다음 시도에서 다시 받는다.
+  static Future<void> invalidate(
+    String text,
+    String voice, {
+    double speed = 1.0,
+    String language = 'en',
+  }) async {
+    try {
+      final file = File(
+          '${await _getDir()}/${_key(text, voice, speed: speed, language: language)}.mp3');
+      if (await file.exists()) await file.delete();
+    } catch (_) {}
   }
 
   static Future<Uint8List?> getOrCreate({

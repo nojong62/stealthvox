@@ -379,9 +379,8 @@ said. Never build the scene on a line you had to guess.
   int _currentRoomStartIndex = 0;
 
   /// 지금 열린 방에 속한 말풍선만.
-  List<Map<String, dynamic>> get _currentRoomMessages =>
-      _localMessages.sublist(
-          _currentRoomStartIndex.clamp(0, _localMessages.length));
+  List<Map<String, dynamic>> get _currentRoomMessages => _localMessages
+      .sublist(_currentRoomStartIndex.clamp(0, _localMessages.length));
 
   /// 직전 30분 세션 요약. 시스템 프롬프트로만 넘긴다.
   /// 최근 턴은 [_recentKoreanConversation]이 이미 12개(6교환)로 잘라 주므로
@@ -503,8 +502,7 @@ said. Never build the scene on a line you had to guess.
       //    창 밖으로 밀려난 앞부분만 요약이 메운다.
       _rolloverSummary = summary;
 
-      _log('⏱️ [ROLLOVER]',
-          'done room=pending summary=${summary.isNotEmpty}');
+      _log('⏱️ [ROLLOVER]', 'done room=pending summary=${summary.isNotEmpty}');
       _showRolloverNotice();
     } finally {
       _rolloverInFlight = false;
@@ -1428,8 +1426,7 @@ User role: ${_roleplayUserLabel.trim()}''',
         setState(() {
           _localMessages.remove(hostBubble);
         });
-        _log('[ASK-BACK]',
-            'turn=$turnNumber 되묻기 → 유저 발화 폐기(화면/히스토리 미기록)');
+        _log('[ASK-BACK]', 'turn=$turnNumber 되묻기 → 유저 발화 폐기(화면/히스토리 미기록)');
         await _speakKoreanLine(aiKorean);
         return;
       }
@@ -3454,10 +3451,31 @@ class TtsCache {
     return null;
   }
 
+  /// 쓰다 만 파일이 캐시로 보이면 get()이 그걸 그대로 돌려줘 그 문장은
+  /// 재설치 전까지 재생 불가가 된다. 임시 파일에 끝까지 쓴 뒤 rename으로
+  /// 교체해, 캐시에는 완전한 파일만 나타나게 한다.
   static Future<void> put(String text, String voice, Uint8List data) async {
+    if (data.isEmpty) return;
+    File? tmp;
     try {
       final path = '${await _getDir()}/${_key(text, voice)}.mp3';
-      await File(path).writeAsBytes(data);
+      // 같은 문장을 동시에 받아도 서로 덮어쓰지 않도록 임시 이름을 구분한다.
+      tmp = File('$path.${DateTime.now().microsecondsSinceEpoch}.part');
+      // flush 없이 rename하면 내용이 버퍼에 남은 채 이름만 바뀔 수 있다.
+      await tmp.writeAsBytes(data, flush: true);
+      await tmp.rename(path);
+    } catch (_) {
+      try {
+        if (tmp != null && await tmp.exists()) await tmp.delete();
+      } catch (_) {}
+    }
+  }
+
+  /// 깨진 캐시를 버린다. 재생 실패 시 호출하면 다음 시도에서 다시 받는다.
+  static Future<void> invalidate(String text, String voice) async {
+    try {
+      final file = File('${await _getDir()}/${_key(text, voice)}.mp3');
+      if (await file.exists()) await file.delete();
     } catch (_) {}
   }
 
