@@ -27,7 +27,18 @@ import '/custom_code/actions/billing_ticker.dart';
 
 const String _historyListTtsModel = 'tts-1';
 const String _historyListTtsVoice = 'nova';
-const String _historyListTtsCacheVoice = 'history-tts1-nova';
+
+// ── Keepers 소리듣기 전용 ─────────────────────────────────────────────
+// 의미단위 리듬을 말로 지시하려면 instructions를 받는 모델이어야 한다.
+// tts-1은 instructions 자리가 없고, gpt-4o-mini-tts는 대신 speed를 무시한다.
+// 캐시 키에 모델명을 박아 tts-1 시절 음성이 섞여 나오지 않게 한다.
+const String _keeperPlayTtsModel = 'gpt-4o-mini-tts';
+const String _keeperPlayTtsCacheVoice = 'keeper-4omini-nova';
+const String _keeperPlayInstruction = '''
+Read the line in natural meaning units — breath groups of roughly five to seven words.
+Leave a brief pause at each unit boundary and hold a steady, rhythmic cadence throughout.
+Speak clearly and slightly slower than conversational pace, as a model for a learner shadowing along.
+Do not add, drop, or reword anything in the text.''';
 
 class ChatHistoryListMaster extends StatefulWidget {
   const ChatHistoryListMaster({
@@ -106,8 +117,6 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
     _idleElapsedSec = 0;
   }
 
-  Widget _buildIdleBanner() => const SizedBox.shrink();
-
   Widget _buildIdleOverlay() => const SizedBox.shrink();
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -160,6 +169,10 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
 
   bool _keepersMigrateOnce = false;
   final ScrollController _keepersScrollController = ScrollController();
+
+  // build 안에서 snapshots()를 부르면 재빌드마다 새 스트림이 생겨 목록이
+  // waiting으로 되돌아가며 깜빡인다. 한 번 만들어 계속 쓴다.
+  Stream<QuerySnapshot>? _keepersStream;
 
   @override
   void initState() {
@@ -434,9 +447,10 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
       WidgetsBinding.instance
           .addPostFrameCallback((_) => _migrateKeeperMissingIsDeleted());
     }
+    _keepersStream ??= currentUserReference!.collection('keepers').snapshots();
     return StreamBuilder<QuerySnapshot>(
       // 인덱스/필드 누락 오류를 피하기 위해 필터·정렬 없이 전체 조회 후 Dart에서 처리
-      stream: currentUserReference!.collection('keepers').snapshots(),
+      stream: _keepersStream,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           debugPrint('[Keepers] stream error: ${snapshot.error}');
@@ -466,7 +480,9 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
             ),
           );
         }
-        if (snapshot.connectionState == ConnectionState.waiting) {
+        // 이미 받아둔 데이터가 있으면 스피너로 갈아끼우지 않는다.
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
           return const Center(
               child: CircularProgressIndicator(color: _keepersColor));
         }
@@ -982,9 +998,11 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
     required String tooltip,
     required VoidCallback onTap,
   }) {
+    // 손가락으로 정확히 짚기 어려워 탭 영역을 권장치(48dp)까지 넓힌다.
     return IconButton(
-      padding: const EdgeInsets.all(6),
-      constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+      padding: const EdgeInsets.all(12),
+      constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+      splashRadius: 24,
       icon: Icon(icon, color: color, size: 22),
       onPressed: onTap,
       tooltip: tooltip,
@@ -1011,11 +1029,17 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
 
     try {
       // TtsCache 우선 조회
-      Uint8List? audio = await TtsCache.get(text, _historyListTtsCacheVoice);
+      Uint8List? audio = await TtsCache.get(text, _keeperPlayTtsCacheVoice);
+      final bool fromCache = audio != null;
       if (audio == null) {
-        audio = await _fetchTts(text, _historyListTtsVoice);
+        audio = await _fetchTts(
+          text,
+          _historyListTtsVoice,
+          model: _keeperPlayTtsModel,
+          instructions: _keeperPlayInstruction,
+        );
         if (audio != null) {
-          TtsCache.put(text, _historyListTtsCacheVoice, audio);
+          TtsCache.put(text, _keeperPlayTtsCacheVoice, audio);
         }
       }
       if (audio == null || !mounted) return;
@@ -1038,7 +1062,24 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
           });
       });
 
-      await player.play(BytesSource(audio));
+      try {
+        await player.play(BytesSource(audio));
+      } on PlatformException {
+        // 예전에 잘린 채 저장된 캐시는 원자적 쓰기로도 풀리지 않는다.
+        // 버리고 한 번만 다시 받아, 기존 기기도 탭 한 번으로 복구되게 한다.
+        if (!fromCache) rethrow;
+        debugPrint('[Keepers] cached audio unplayable — refetching');
+        await TtsCache.invalidate(text, _keeperPlayTtsCacheVoice);
+        final fresh = await _fetchTts(
+          text,
+          _historyListTtsVoice,
+          model: _keeperPlayTtsModel,
+          instructions: _keeperPlayInstruction,
+        );
+        if (fresh == null || !mounted) rethrow;
+        TtsCache.put(text, _keeperPlayTtsCacheVoice, fresh);
+        await player.play(BytesSource(fresh));
+      }
     } catch (e) {
       debugPrint('[Keepers] playAudio error: $e');
       if (mounted)
@@ -1049,24 +1090,37 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
     }
   }
 
+  /// [model]/[instructions]를 주지 않으면 기존 tts-1 경로 그대로다(튜터링용).
+  /// instructions는 gpt-4o-mini-tts에서만 동작하고, 그 모델은 speed를 무시하므로
+  /// 둘을 같이 보내지 않는다.
   Future<Uint8List?> _fetchTts(String text, String voice,
-      {double speed = 1.0}) async {
+      {double speed = 1.0, String? model, String? instructions}) async {
     if (_apiKey.isEmpty || text.trim().isEmpty) return null;
     try {
+      final payload = <String, dynamic>{
+        'model': model ?? _historyListTtsModel,
+        'input': text,
+        'voice': voice,
+      };
+      if (instructions != null && instructions.trim().isNotEmpty) {
+        payload['instructions'] = instructions.trim();
+      } else {
+        payload['speed'] = speed;
+      }
       final response = await http.post(
         Uri.parse('https://api.openai.com/v1/audio/speech'),
         headers: {
           'Authorization': 'Bearer $_apiKey',
           'Content-Type': 'application/json',
         },
-        body: jsonEncode({
-          'model': _historyListTtsModel,
-          'input': text,
-          'voice': voice,
-          'speed': speed,
-        }),
+        body: jsonEncode(payload),
       );
-      return response.statusCode == 200 ? response.bodyBytes : null;
+      if (response.statusCode != 200) {
+        debugPrint('[Keepers] fetchTts http ${response.statusCode}: '
+            '${response.body}');
+        return null;
+      }
+      return response.bodyBytes;
     } catch (e) {
       debugPrint('[Keepers] fetchTts error: $e');
       return null;
