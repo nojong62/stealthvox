@@ -28,6 +28,8 @@ import 'package:appsflyer_sdk/appsflyer_sdk.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '/custom_code/actions/billing_ticker.dart';
+import 'dart:async'; // unawaited
+import 'routine_mode_roleplay.dart' show TtsCache; // 캐시 정리 진입점
 
 import 'package:purchases_flutter/purchases_flutter.dart';
 import 'dart:io' show Platform;
@@ -82,6 +84,9 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     AppsFlyerManager.duoInviteSignal.addListener(_onDuoInviteSignal);
+    // TTS 캐시는 상한 없이 쌓이기만 했다. 앱 실행당 한 번 정리한다.
+    // (모드별 TtsCache가 같은 tts_cache 폴더를 공유하므로 한 번이면 된다.)
+    unawaited(TtsCache.cleanupOnce());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // Duo 초대 pending 상태이면 Lobby 스킵하고 바로 StealthRoom으로
       debugPrint(

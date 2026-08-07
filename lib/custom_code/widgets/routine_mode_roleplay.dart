@@ -3479,17 +3479,40 @@ class TtsCache {
     } catch (_) {}
   }
 
+  static bool _cleanupDone = false;
+
+  /// 앱 실행당 한 번만 실제로 청소한다. 여러 화면에서 불러도 안전하다.
+  static Future<void> cleanupOnce() async {
+    if (_cleanupDone) return;
+    _cleanupDone = true;
+    await cleanup();
+  }
+
   /// 캐시 용량 관리 (100MB 초과 시 오래된 파일부터 제거)
   static Future<void> cleanup({int maxBytes = 100 * 1024 * 1024}) async {
     try {
       final dir = Directory(await _getDir());
       final files =
           await dir.list().where((e) => e is File).cast<File>().toList();
+      final cutoff = DateTime.now()
+          .subtract(const Duration(minutes: 10))
+          .millisecondsSinceEpoch;
       int total = 0;
       final infos = <MapEntry<File, int>>[];
       for (final f in files) {
         final stat = await f.stat();
-        infos.add(MapEntry(f, stat.modified.millisecondsSinceEpoch));
+        final modified = stat.modified.millisecondsSinceEpoch;
+        // rename 전에 죽어 남은 임시 파일. 진행 중인 쓰기를 건드리지 않도록
+        // 충분히 오래된 것만 지운다.
+        if (f.path.endsWith('.part')) {
+          if (modified < cutoff) {
+            try {
+              await f.delete();
+            } catch (_) {}
+          }
+          continue;
+        }
+        infos.add(MapEntry(f, modified));
         total += stat.size;
       }
       if (total > maxBytes) {
