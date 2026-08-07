@@ -1994,6 +1994,11 @@ line had never been said. Never build the conversation on a line you had to gues
       },
       onTranscriptUpdate: (transcript) {
         BillingTicker.instance.resumeFromActivity('step_expand_stt_partial');
+        if (transcript.trim().isNotEmpty && mounted) {
+          setState(() {
+            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+          });
+        }
         if (_isInitialGuidePlaying && transcript.trim().isNotEmpty) {
           _isInitialGuidePlaying = false;
           // 아직 안 돌아온 TTS 응답까지 막아야 안내가 되살아나지 않는다.
@@ -2433,6 +2438,18 @@ line had never been said. Never build the conversation on a line you had to gues
         'original': '',
       };
       setState(() => _localMessages.add(hostBubble!));
+      _scrollToBottom();
+
+      // 유저 문장이 화면에 올라온 뒤에만 AI 대기 점을 표시한다.
+      // 청취 시작 전에는 점 3개를 만들지 않는다.
+      setState(() {
+        _localMessages.add(<String, dynamic>{
+          'role': 'SYSTEM',
+          'target': '',
+          'original': '',
+        });
+        aiIndex = _localMessages.length - 1;
+      });
       _scrollToBottom();
 
       // 3️⃣ 그 다음에 AI가 다음 질문을 건다.

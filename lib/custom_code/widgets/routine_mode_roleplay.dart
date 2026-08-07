@@ -1098,9 +1098,7 @@ said. Never build the scene on a line you had to guess.
       setState(() {
         _debugResult = "⏱️ 듣는 중...";
         _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-        _localMessages.add({'role': 'HOST_TEMP', 'target': '...'});
       });
-      // HOST_TEMP("...")는 스크롤 트리거 없음 — 실제 HOST 버블 등장 시 스크롤
     }
 
     _log('🎤 [LISTEN-01]', '_startDeepgramListening 진입, VoiceManager 생성');
@@ -1120,6 +1118,11 @@ said. Never build the scene on a line you had to guess.
       },
       onTranscriptUpdate: (transcript) {
         BillingTicker.instance.resumeFromActivity('roleplay_stt_partial');
+        if (transcript.trim().isNotEmpty && mounted) {
+          setState(() {
+            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+          });
+        }
         _swDeepgram.reset();
         _swDeepgram.start();
       },
@@ -1185,15 +1188,11 @@ said. Never build the scene on a line you had to guess.
           '합치기: "$_pendingTranscript" (${waitMs}ms 조건부 대기창 리셋)');
     }
 
-    // UI: 접수된 발화를 HOST_TEMP 풍선에 실시간 반영
+    // 발화가 끝난 뒤에는 점 3개를 남기지 않는다. 확정된 유저 문장과
+    // AI 응답이 화면에 올라온 다음, 다음 청취를 시작할 때 다시 표시한다.
     if (mounted) {
       setState(() {
         _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-        _localMessages.add({
-          'role': 'HOST_TEMP',
-          'target': '...',
-          'original': '...', // Deepgram 원문 숨기기
-        });
       });
     }
 

@@ -54,6 +54,7 @@ const List<String> _p3LearningVoiceOptions = <String>[
   'verse',
 ];
 const Color _p3ShadowingAccentColor = Color(0xFF818CF8);
+
 /// 의미단위 낭독의 공통 뼈대. 무엇을 한 덩어리로 볼지, 덩어리 안을 어떻게
 /// 붙일지까지만 정한다. **덩어리 사이를 어떻게 다룰지는 아래 두 낭독 방식이
 /// 갈라서 정한다.**
@@ -191,6 +192,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   final Map<int, Future<Uint8List?>> _inFlightChunkFetch = {};
   final Map<String, Future<Uint8List?>> _meaningUnitTtsInFlight = {};
   final Map<String, Future<Uint8List?>> _p3MeaningUnitTtsInFlight = {};
+  // 모든 연속 TTS 요청은 동일한 요청 키로 하나의 네트워크 Future를 공유한다.
+  final Map<String, Future<Uint8List?>> _openAiTtsInFlight = {};
   List<PracticeChunk> _chunks = [];
   int _currentChunkIdx = 0;
   bool _isRerecordingSingle = false;
@@ -942,16 +945,15 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
               'messages': <Map<String, String>>[
                 <String, String>{
                   'role': 'system',
-                  'content':
-                      'The user built this Korean sentence step by step in a speaking '
-                          'practice. Translate it into ONE natural spoken $targetLanguage '
-                          'sentence for shadowing practice.\n'
-                          '- Keep the speaker viewpoint, meaning, tense, and tone.\n'
-                          '- Do not add or drop information.\n'
-                          '- Spoken rhythm, easy to say out loud. Not written prose.\n'
-                          '- The result must be 100% $targetLanguage and must NOT contain '
-                          'any Korean (Hangul) characters.\n'
-                          'Return only the sentence, with no label or explanation.',
+                  'content': 'The user built this Korean sentence step by step in a speaking '
+                      'practice. Translate it into ONE natural spoken $targetLanguage '
+                      'sentence for shadowing practice.\n'
+                      '- Keep the speaker viewpoint, meaning, tense, and tone.\n'
+                      '- Do not add or drop information.\n'
+                      '- Spoken rhythm, easy to say out loud. Not written prose.\n'
+                      '- The result must be 100% $targetLanguage and must NOT contain '
+                      'any Korean (Hangul) characters.\n'
+                      'Return only the sentence, with no label or explanation.',
                 },
                 <String, String>{'role': 'user', 'content': text},
               ],
@@ -1096,16 +1098,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   Future<void> _playTutorLineTTS(String text, bool isAi) async {
     if (_apiKey.isEmpty || text.trim().isEmpty) return;
     final voice = isAi ? _historyPracticeAiVoice : _historyPracticeUserVoice;
-    final cacheVoice = _practiceCacheVoice(voice);
     try {
-      Uint8List? audio = await TtsCache.get(text, cacheVoice);
-      if (audio != null) {
-      } else {
-        audio = await _fetchPracticeTTS(text, voice);
-        if (audio != null) {
-          TtsCache.put(text, cacheVoice, audio);
-        }
-      }
+      final audio = await _getOrFetchPracticeTTS(text, voice);
       if (!mounted || !_isTutorPlaying || audio == null) return;
 
       final completer = Completer<void>();
@@ -1645,20 +1639,14 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       return;
     }
     try {
-      final cacheVoice = _practiceCacheVoice(voice);
-      Uint8List? audio = await TtsCache.get(text, cacheVoice);
-      if (audio != null) {
-      } else {
+      Uint8List? audio = await _getOrFetchPracticeTTS(text, voice);
+      if (audio == null) {
         if (_apiKey.isEmpty) {
           if (mounted && isPracticeMode) {
             setState(() => _tutorAiSpeaking = false);
             _nextTurn();
           }
           return;
-        }
-        audio = await _fetchPracticeTTS(text, voice);
-        if (audio != null) {
-          TtsCache.put(text, cacheVoice, audio);
         }
       }
       if (!mounted || !isPracticeMode) return;
@@ -1842,13 +1830,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   Future<void> _playRetryPrompt() async {
     const prompt = '끝까지 다시 읽어 주세요';
     try {
-      final cacheVoice = _practiceCacheVoice(_historyPracticeAiVoice);
-      Uint8List? audio = await TtsCache.get(prompt, cacheVoice);
-      if (audio != null) {
-      } else if (_apiKey.isNotEmpty) {
-        audio = await _fetchPracticeTTS(prompt, _historyPracticeAiVoice);
-        if (audio != null) TtsCache.put(prompt, cacheVoice, audio);
-      } else {}
+      Uint8List? audio = _apiKey.isNotEmpty
+          ? await _getOrFetchPracticeTTS(prompt, _historyPracticeAiVoice)
+          : null;
       if (audio == null || !mounted || !isPracticeMode) return;
       final player = AudioPlayer();
       final completer = Completer<void>();
@@ -2798,21 +2782,20 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     if (chunk.aiAudio != null) {
       return chunk.aiAudio;
     }
-    if (_phase != ShadowingPhase.turnPractice) {
-      final diskHit = await _AudioDiskCache.read(historyId, cacheKey);
-      if (diskHit != null && mounted && idx < _chunks.length) {
-        setState(() => _chunks[idx].aiAudio = diskHit);
-        return diskHit;
-      }
+    final diskHit = await _AudioDiskCache.read(historyId, cacheKey);
+    if (diskHit != null && mounted && idx < _chunks.length) {
+      setState(() => _chunks[idx].aiAudio = diskHit);
+      return diskHit;
     }
     // 🔧 [정상속도] formatForSlowRhythm 제거 → 텍스트 그대로 TTS
-    final audio = await _fetchPracticeTTS(chunk.text, _historyPracticeAiVoice);
+    final audio = await _getOrFetchPracticeTTS(
+      chunk.text,
+      _historyPracticeAiVoice,
+    );
     if (!mounted) return null;
     if (audio != null && idx < _chunks.length) {
       setState(() => _chunks[idx].aiAudio = audio);
-      if (_phase != ShadowingPhase.turnPractice) {
-        await _AudioDiskCache.write(historyId, cacheKey, audio);
-      }
+      await _AudioDiskCache.write(historyId, cacheKey, audio);
     } else {}
     return audio;
   }
@@ -3018,23 +3001,21 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
       await audioPlayer.play(BytesSource(ttsHit));
       return;
     }
-    if (_phase != ShadowingPhase.turnPractice) {
-      final diskHit = await _AudioDiskCache.read(historyId, cacheKey);
-      if (diskHit != null && mounted) {
-        _fullAIAudioCache[cacheKey] = diskHit;
-        await audioPlayer.play(BytesSource(diskHit));
-        return;
-      }
+    final diskHit = await _AudioDiskCache.read(historyId, cacheKey);
+    if (diskHit != null && mounted) {
+      _fullAIAudioCache[cacheKey] = diskHit;
+      await audioPlayer.play(BytesSource(diskHit));
+      return;
     }
     // 🔧 [정상속도] formatForSlowRhythm 제거 → 텍스트 그대로 TTS
-    Uint8List? audio = await _fetchPracticeTTS(text, _historyPracticeAiVoice);
+    Uint8List? audio = await _getOrFetchPracticeTTS(
+      text,
+      _historyPracticeAiVoice,
+    );
     if (!mounted) return;
     if (audio != null) {
       _fullAIAudioCache[cacheKey] = audio;
-      await TtsCache.put(text, cacheVoice, audio);
-      if (_phase != ShadowingPhase.turnPractice) {
-        await _AudioDiskCache.write(historyId, cacheKey, audio);
-      }
+      await _AudioDiskCache.write(historyId, cacheKey, audio);
       await audioPlayer.play(BytesSource(audio));
     }
   }
@@ -3067,6 +3048,23 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
         voice,
         model: _historyPracticeTtsModel,
       );
+
+  Future<Uint8List?> _getOrFetchPracticeTTS(String text, String voice) {
+    final cacheVoice = _practiceCacheVoice(voice);
+    final requestKey = '$cacheVoice|${text.trim()}';
+    final existing = _openAiTtsInFlight[requestKey];
+    if (existing != null) return existing;
+    final future = () async {
+      var audio = await TtsCache.get(text, cacheVoice);
+      if (audio != null) return audio;
+      audio = await _fetchPracticeTTS(text, voice);
+      if (audio != null) await TtsCache.put(text, cacheVoice, audio);
+      return audio;
+    }();
+    _openAiTtsInFlight[requestKey] = future;
+    future.whenComplete(() => _openAiTtsInFlight.remove(requestKey));
+    return future;
+  }
 
   String _meaningUnitCacheVoice(String voice) =>
       '${_historyPracticeTtsModel}_unit_style_v5_$voice';
@@ -3145,7 +3143,37 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
   Future<Uint8List?> _fetchOpenAITTS(String text, double speed, String voice,
       {String model = _historyListenTtsModel,
       String? instructions,
-      String? instructionTag}) async {
+      String? instructionTag}) {
+    final requestKey = jsonEncode([
+      model,
+      text.trim(),
+      voice,
+      speed,
+      instructions ?? '',
+    ]);
+    final existing = _openAiTtsInFlight[requestKey];
+    if (existing != null) return existing;
+    final future = _fetchOpenAITTSInternal(
+      text,
+      speed,
+      voice,
+      model: model,
+      instructions: instructions,
+      instructionTag: instructionTag,
+    );
+    _openAiTtsInFlight[requestKey] = future;
+    future.whenComplete(() => _openAiTtsInFlight.remove(requestKey));
+    return future;
+  }
+
+  Future<Uint8List?> _fetchOpenAITTSInternal(
+    String text,
+    double speed,
+    String voice, {
+    String model = _historyListenTtsModel,
+    String? instructions,
+    String? instructionTag,
+  }) async {
     if (_apiKey.isEmpty || text.trim().isEmpty) return null;
     try {
       var response = await http
@@ -3977,7 +4005,10 @@ RULES — follow exactly:
                 await _AudioDiskCache.read(widget.historyDoc.id, corrCacheKey);
           }
           final ttsAudio = cachedAudio ??
-              await _fetchPracticeTTS(correctedEn, _historyPracticeAiVoice);
+              await _getOrFetchPracticeTTS(
+                correctedEn,
+                _historyPracticeAiVoice,
+              );
           if (cachedAudio == null && ttsAudio != null) {
             if (_phase != ShadowingPhase.turnPractice) {
               await _AudioDiskCache.write(
@@ -5589,7 +5620,7 @@ RULES — follow exactly:
             if (audio != null) {
               line['ai_audio_bytes'] = audio;
             } else {
-              audio = await _fetchPracticeTTS(text, voice);
+              audio = await _getOrFetchPracticeTTS(text, voice);
               if (audio != null) {
                 line['ai_audio_bytes'] = audio;
                 TtsCache.put(text, cacheVoice, audio);
@@ -6544,7 +6575,7 @@ RULES — follow exactly:
     Uint8List? audio = await TtsCache.get(text, cacheVoice);
     if (audio != null) {
     } else {
-      audio = await _fetchPracticeTTS(text, _historyPracticeAiVoice);
+      audio = await _getOrFetchPracticeTTS(text, _historyPracticeAiVoice);
       if (audio != null) {
         TtsCache.put(text, cacheVoice, audio);
       }
@@ -7287,8 +7318,8 @@ RULES — follow exactly:
                           child: OutlinedButton.icon(
                             onPressed: _playP3ShadowRecording,
                             icon: const Icon(Icons.hearing_rounded),
-                            label: const Text('내 음성',
-                                textAlign: TextAlign.center),
+                            label:
+                                const Text('내 음성', textAlign: TextAlign.center),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: Colors.white70,
                               side: const BorderSide(color: Colors.white24),
@@ -7893,7 +7924,10 @@ RULES — follow exactly:
       final cacheVoice = _practiceCacheVoice(_historyPracticeAiVoice);
       var audio = await TtsCache.get(firstText, cacheVoice);
       if (audio == null) {
-        audio = await _fetchPracticeTTS(firstText, _historyPracticeAiVoice);
+        audio = await _getOrFetchPracticeTTS(
+          firstText,
+          _historyPracticeAiVoice,
+        );
         if (audio != null) TtsCache.put(firstText, cacheVoice, audio);
       }
     }());

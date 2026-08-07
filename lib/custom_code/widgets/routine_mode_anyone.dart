@@ -1607,6 +1607,11 @@ $kSpokenReplyLengthPolicy
             _log('🎤 [LISTEN-STALE]', 'onTranscriptUpdate ignored');
             return;
           }
+          if (transcript.trim().isNotEmpty && mounted) {
+            setState(() {
+              _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+            });
+          }
           _swDeepgram.reset();
           _swDeepgram.start();
         },
@@ -3611,8 +3616,7 @@ $kSpokenReplyLengthPolicy
     final role = (msg['role'] ?? '').toString();
     bool isHost = role == 'HOST' || role == 'HOST_TEMP';
     final rawTarget = (msg['target'] ?? '').toString();
-    // 확정/스트리밍 텍스트가 오기 전에는 빈 공간만 유지한다. 사용자가 말한
-    // 직후와 AI 첫 글자 전의 점 3개 thinking 표시는 사용하지 않는다.
+    // 유저 대기 중 점 3개는 표시하지 않는다. AI 응답 placeholder만 점으로 보인다.
     final String displayTarget = rawTarget == '...' ? '' : rawTarget;
     if (displayTarget.isEmpty) return const SizedBox.shrink();
     return Align(
