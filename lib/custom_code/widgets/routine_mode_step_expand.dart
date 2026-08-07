@@ -26,6 +26,7 @@ import 'package:flutter/material.dart';
 import 'index.dart'; // Imports other custom widgets
 
 import '/custom_code/widgets/index.dart';
+import 'routine_mode_roleplay.dart' show TtsCache; // 캐시 구현 일원화
 import '/custom_code/actions/index.dart';
 import '/flutter_flow/custom_functions.dart';
 import 'package:flutter/services.dart'; // 🔬 [v3.1] Clipboard용
@@ -5470,74 +5471,9 @@ class UnifiedBrain {
 //   - stop() 시 Completer 안전 완료 처리
 // ====================================================================
 // ====================================================================
-// 📦 [Box 7-D: TtsCache] — TTS 오디오 로컬 캐싱 (MD5 스타일 해시)
+// 📦 [Box 7-D: TtsCache] — routine_mode_roleplay.dart로 일원화
+//   동일 구현이 두 벌이라 이 파일 사본을 제거하고 import로 대체했다.
 // ====================================================================
-// 🔧 [v3 신규] 같은 텍스트+voice+speed는 파일 재사용
-//   → OpenAI API 호출 0, 즉시 재생, Firebase Storage 비용 0
-//   → 경로: {앱로컬}/tts_cache/{해시키}.mp3
-class TtsCache {
-  static String? _cacheDirPath;
-
-  static String _key(String text, String voice) {
-    final combined = '$text|$voice';
-    final h = combined.hashCode.abs().toRadixString(16);
-    return '${h}_${combined.length}';
-  }
-
-  static Future<String> _getDir() async {
-    if (_cacheDirPath != null) return _cacheDirPath!;
-    final appDir = await getApplicationDocumentsDirectory();
-    final cacheDir = Directory('${appDir.path}/tts_cache');
-    if (!await cacheDir.exists()) {
-      await cacheDir.create(recursive: true);
-    }
-    _cacheDirPath = cacheDir.path;
-    return _cacheDirPath!;
-  }
-
-  static Future<Uint8List?> get(String text, String voice) async {
-    try {
-      final path = '${await _getDir()}/${_key(text, voice)}.mp3';
-      final file = File(path);
-      if (await file.exists()) {
-        return await file.readAsBytes();
-      }
-    } catch (_) {}
-    return null;
-  }
-
-  static Future<void> put(String text, String voice, Uint8List data) async {
-    try {
-      final path = '${await _getDir()}/${_key(text, voice)}.mp3';
-      await File(path).writeAsBytes(data);
-    } catch (_) {}
-  }
-
-  /// 캐시 용량 관리 (100MB 초과 시 오래된 파일부터 제거)
-  static Future<void> cleanup({int maxBytes = 100 * 1024 * 1024}) async {
-    try {
-      final dir = Directory(await _getDir());
-      final files =
-          await dir.list().where((e) => e is File).cast<File>().toList();
-      int total = 0;
-      final infos = <MapEntry<File, int>>[];
-      for (final f in files) {
-        final stat = await f.stat();
-        infos.add(MapEntry(f, stat.modified.millisecondsSinceEpoch));
-        total += stat.size;
-      }
-      if (total > maxBytes) {
-        infos.sort((a, b) => a.value.compareTo(b.value));
-        for (final entry in infos) {
-          final sz = (await entry.key.stat()).size;
-          await entry.key.delete();
-          total -= sz;
-          if (total <= maxBytes * 0.8) break;
-        }
-      }
-    } catch (_) {}
-  }
-}
 
 // ====================================================================
 // 📦 [Box 7-E: TtsQueueManager] — AI 대기 플래그 추가
