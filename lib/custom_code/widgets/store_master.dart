@@ -474,119 +474,143 @@ class _StoreMasterState extends State<StoreMaster> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) {
-        return Container(
-          height: MediaQuery.of(context).size.height * 0.65,
-          padding: const EdgeInsets.all(24),
-          decoration: const BoxDecoration(
-            color: Color(0xFF222222), // 모달창 다크 그레이
-            borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+        // 시스템 글꼴 배율이 크면 영수증 행이 터지므로 상한을 둔다.
+        return MediaQuery(
+          data: MediaQuery.of(context).copyWith(
+            textScaler:
+                MediaQuery.textScalerOf(context).clamp(maxScaleFactor: 1.3),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text("🧾 Purchase History",
-                      style: GoogleFonts.orbitron(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold)),
-                  IconButton(
-                    icon:
-                        const Icon(Icons.close_rounded, color: Colors.white54),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ],
-              ),
-              const Divider(color: Colors.white12, height: 30),
-              Expanded(
-                child: currentUserReference == null
-                    ? const Center(
-                        child: Text("접근 권한이 없습니다.",
-                            style: TextStyle(color: Colors.white54)))
-                    : StreamBuilder<QuerySnapshot>(
-                        stream: currentUserReference!
-                            .collection('purchases')
-                            .orderBy('purchased_at', descending: true)
-                            .snapshots(),
-                        builder: (context, snapshot) {
-                          if (!snapshot.hasData)
-                            return const Center(
-                                child: CircularProgressIndicator(
-                                    color: Colors.amber));
-                          final records = snapshot.data!.docs;
-                          if (records.isEmpty)
-                            return const Center(
-                                child: Text("결제 내역이 존재하지 않습니다.",
-                                    style: TextStyle(color: Colors.white54)));
-
-                          return ListView.separated(
-                            itemCount: records.length,
-                            separatorBuilder: (_, __) =>
-                                const SizedBox(height: 12),
-                            itemBuilder: (context, index) {
-                              var data =
-                                  records[index].data() as Map<String, dynamic>;
-                              DateTime ts = data['purchased_at'] != null
-                                  ? (data['purchased_at'] as Timestamp).toDate()
-                                  : DateTime.now();
-                              String dateFormatted =
-                                  DateFormat('yyyy.MM.dd HH:mm').format(ts);
-                              int addedMinutes =
-                                  (data['seconds_added'] ?? 0) ~/ 60;
-
-                              return Container(
-                                padding: const EdgeInsets.all(16),
-                                decoration: BoxDecoration(
-                                  color: Colors.black,
-                                  borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(color: Colors.white10),
-                                ),
-                                child: Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                            data['product_title'] ??
-                                                'Unknown Item',
-                                            style: const TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 15,
-                                                fontWeight: FontWeight.bold)),
-                                        const SizedBox(height: 4),
-                                        Text(dateFormatted,
-                                            style: const TextStyle(
-                                                color: Colors.white38,
-                                                fontSize: 12)),
-                                      ],
-                                    ),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 12, vertical: 6),
-                                      decoration: BoxDecoration(
-                                        color: Colors.green
-                                            .withValues(alpha: 0.15),
-                                        borderRadius: BorderRadius.circular(20),
-                                      ),
-                                      child: Text("+ ${addedMinutes}m",
-                                          style: const TextStyle(
-                                              color: Colors.green,
-                                              fontWeight: FontWeight.bold)),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            },
-                          );
-                        },
+          child: Container(
+            height: MediaQuery.of(context).size.height * 0.65,
+            padding: const EdgeInsets.all(24),
+            decoration: const BoxDecoration(
+              color: Color(0xFF222222), // 모달창 다크 그레이
+              borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Flexible(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text("🧾 Purchase History",
+                            maxLines: 1,
+                            style: GoogleFonts.orbitron(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold)),
                       ),
-              ),
-            ],
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded,
+                          color: Colors.white54),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+                const Divider(color: Colors.white12, height: 30),
+                Expanded(
+                  child: currentUserReference == null
+                      ? const Center(
+                          child: Text("접근 권한이 없습니다.",
+                              style: TextStyle(color: Colors.white54)))
+                      : StreamBuilder<QuerySnapshot>(
+                          stream: currentUserReference!
+                              .collection('purchases')
+                              .orderBy('purchased_at', descending: true)
+                              .snapshots(),
+                          builder: (context, snapshot) {
+                            if (!snapshot.hasData)
+                              return const Center(
+                                  child: CircularProgressIndicator(
+                                      color: Colors.amber));
+                            final records = snapshot.data!.docs;
+                            if (records.isEmpty)
+                              return const Center(
+                                  child: Text("결제 내역이 존재하지 않습니다.",
+                                      style: TextStyle(color: Colors.white54)));
+
+                            return ListView.separated(
+                              itemCount: records.length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(height: 12),
+                              itemBuilder: (context, index) {
+                                var data = records[index].data()
+                                    as Map<String, dynamic>;
+                                DateTime ts = data['purchased_at'] != null
+                                    ? (data['purchased_at'] as Timestamp)
+                                        .toDate()
+                                    : DateTime.now();
+                                String dateFormatted =
+                                    DateFormat('yyyy.MM.dd HH:mm').format(ts);
+                                int addedMinutes =
+                                    (data['seconds_added'] ?? 0) ~/ 60;
+
+                                return Container(
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black,
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(color: Colors.white10),
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                                data['product_title'] ??
+                                                    'Unknown Item',
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 15,
+                                                    fontWeight:
+                                                        FontWeight.bold)),
+                                            const SizedBox(height: 4),
+                                            Text(dateFormatted,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: const TextStyle(
+                                                    color: Colors.white38,
+                                                    fontSize: 12)),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 12, vertical: 6),
+                                        decoration: BoxDecoration(
+                                          color: Colors.green
+                                              .withValues(alpha: 0.15),
+                                          borderRadius:
+                                              BorderRadius.circular(20),
+                                        ),
+                                        child: Text("+ ${addedMinutes}m",
+                                            style: const TextStyle(
+                                                color: Colors.green,
+                                                fontWeight: FontWeight.bold)),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
           ),
         );
       },
