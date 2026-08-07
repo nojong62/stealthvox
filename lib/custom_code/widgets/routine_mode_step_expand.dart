@@ -26,7 +26,9 @@ import 'package:flutter/material.dart';
 import 'index.dart'; // Imports other custom widgets
 
 import '/custom_code/widgets/index.dart';
-import 'routine_mode_roleplay.dart' show TtsCache; // 캐시 구현 일원화
+// 아래 클래스들은 roleplay 사본과 완전히 동일해 이 파일에서는 제거하고 공유한다.
+import 'routine_mode_roleplay.dart'
+    show TtsCache, ConversationHistory, UnifiedBrain, RelayPipeline;
 import '/custom_code/actions/index.dart';
 import '/flutter_flow/custom_functions.dart';
 import 'package:flutter/services.dart'; // 🔬 [v3.1] Clipboard용
@@ -5033,52 +5035,9 @@ class HybridTtsPlayer {
 }
 
 // ====================================================================
-// 📦 [Box 7-A: ConversationHistory] — 슬라이딩 윈도우 히스토리 관리자
-// 기존 버전 문제: 히스토리가 주석에만 존재, 실제 구현 없음
-// 개선: 2000토큰 슬라이딩 윈도우, 역할 구분, 직렬화 지원
+// 📦 [Box 7-A: ConversationHistory] — routine_mode_roleplay.dart로 일원화
+//   동일 구현이 두 벌이라 이 파일 사본을 제거하고 import로 대체했다.
 // ====================================================================
-class ConversationHistory {
-  final int maxTokens;
-  final List<Map<String, String>> _turns = [];
-
-  ConversationHistory({this.maxTokens = 2000});
-
-  /// 대화 한 턴 추가 (role: 'user' | 'assistant')
-  void add(String role, String content) {
-    _turns.add({'role': role, 'content': content});
-    _trim();
-  }
-
-  /// 오래된 턴을 제거하여 토큰 예산 유지
-  /// 💡 토큰 추산: 한국어는 글자당 ~1.8토큰, 영어는 ~0.75토큰
-  void _trim() {
-    while (_estimatedTokens() > maxTokens && _turns.length > 2) {
-      _turns.removeAt(0); // 가장 오래된 턴부터 제거
-    }
-  }
-
-  int _estimatedTokens() {
-    return _turns.fold(0, (sum, turn) {
-      final content = turn['content'] ?? '';
-      // 한글 비율에 따라 토큰 추산 조정
-      final koreanChars = RegExp(r'[가-힣]').allMatches(content).length;
-      final ratio = koreanChars / (content.length > 0 ? content.length : 1);
-      final tokenRate = 0.75 + (ratio * 1.05); // 영어 0.75 ~ 한국어 1.8
-      return sum + (content.length * tokenRate).round();
-    });
-  }
-
-  /// GPT API messages 배열로 직렬화
-  List<Map<String, String>> toMessages() => List.unmodifiable(_turns);
-
-  /// 히스토리를 단순 텍스트로 직렬화 (legacy 시스템 호환)
-  String toPlainText() => _turns
-      .map((t) => '[${t['role']?.toUpperCase()}]: ${t['content']}')
-      .join('\n');
-
-  void clear() => _turns.clear();
-  int get length => _turns.length;
-}
 
 // ====================================================================
 // 📦 [Box 7-B: DeepgramV2VoiceManager] — STT 엔진 (지수 백오프 재연결)
@@ -5387,78 +5346,9 @@ class DeepgramV2VoiceManager {
 }
 
 // ====================================================================
-// 📦 [Box 7-C: UnifiedBrain] — 범용 GPT 스트리밍 (Duo 등에서 사용)
-// 기존 버전 문제:
-//   1. static Client 공유 → 동시 요청 시 경쟁 상태
-//   2. 히스토리 없음
-//   3. 스트리밍 에러 처리 없음, 타임아웃 없음
-// 개선:
-//   - 요청마다 새 Client 생성 (stateless)
-//   - ConversationHistory를 messages 배열로 직접 전달
-//   - 30초 타임아웃 + 스트림 에러 전파
+// 📦 [Box 7-C: UnifiedBrain] — routine_mode_roleplay.dart로 일원화
+//   동일 구현이 두 벌이라 이 파일 사본을 제거하고 import로 대체했다.
 // ====================================================================
-class UnifiedBrain {
-  /// 💡 변경: static Client 제거, 요청별 새 Client 사용
-  static Stream<String> streamChat({
-    required String apiKey,
-    required String systemPrompt,
-    required String userMessage,
-    ConversationHistory? history, // 💡 신규: 히스토리 직접 주입
-    double temp = 0.2,
-    Duration timeout = const Duration(seconds: 30), // 💡 신규: 타임아웃
-  }) async* {
-    final client = http.Client();
-
-    try {
-      // 메시지 배열 구성: system → history → 현재 유저 메시지
-      final messages = <Map<String, String>>[
-        {'role': 'system', 'content': systemPrompt},
-        if (history != null) ...history.toMessages(),
-        {'role': 'user', 'content': userMessage},
-      ];
-
-      final request = http.Request(
-        'POST',
-        Uri.parse('https://api.openai.com/v1/chat/completions'),
-      );
-      request.headers.addAll({
-        'Authorization': 'Bearer $apiKey',
-        'Content-Type': 'application/json; charset=utf-8',
-      });
-      request.body = jsonEncode({
-        'model': 'gpt-4o-mini',
-        'stream': true,
-        'temperature': temp,
-        'messages': messages,
-        'max_tokens': 500, // 💡 신규: 음성 대화는 짧게 (TTS 지연 최소화)
-      });
-
-      // 💡 신규: 타임아웃 적용
-      final response = await client.send(request).timeout(timeout);
-
-      if (response.statusCode != 200) {
-        final body = await response.stream.bytesToString();
-        throw Exception('GPT API 오류 ${response.statusCode}: $body');
-      }
-
-      await for (final chunk in response.stream
-          .transform(utf8.decoder)
-          .transform(const LineSplitter())) {
-        if (chunk.startsWith('data: ') && chunk != 'data: [DONE]') {
-          try {
-            final delta = jsonDecode(chunk.substring(6))['choices'][0]['delta']
-                ['content'];
-            if (delta != null) yield delta.toString();
-          } catch (_) {
-            // 불완전한 JSON 청크 스킵
-          }
-        }
-      }
-    } finally {
-      client.close(); // 💡 항상 클라이언트 해제
-    }
-  }
-}
 
 // ====================================================================
 // 📦 4 TtsQueueManager v2 — 완료 감지 안정성 개선
@@ -5800,133 +5690,9 @@ class ChunkedTtsFetcher {
 }
 
 // ====================================================================
-// 📦 [Box 7-G: RelayPipeline] — 범용 파이프라인 (참고용, 위젯에선 Box 5-A 사용)
-class RelayPipeline {
-  final String openAiKey;
-  final String deepgramKey;
-  final String ttsVoice;
-  final String targetLanguage;
-  final String systemPrompt;
-  final AudioRecorder audioRecorder;
-
-  late final ConversationHistory _history;
-  late final DeepgramV2VoiceManager _voiceManager;
-  late final TtsQueueManager _ttsQueue;
-  late ChunkedTtsFetcher _ttsFetcher;
-
-  bool _isSpeaking = false;
-
-  RelayPipeline({
-    required this.openAiKey,
-    required this.deepgramKey,
-    required this.ttsVoice,
-    required this.targetLanguage,
-    required this.systemPrompt,
-    required this.audioRecorder,
-    int historyTokens = 2000,
-  }) {
-    _history = ConversationHistory(maxTokens: historyTokens);
-
-    _ttsQueue = TtsQueueManager(
-      onPlayStart: () => _isSpeaking = true,
-      onQueueEmpty: () => _isSpeaking = false,
-    );
-
-    _ttsFetcher = ChunkedTtsFetcher(
-      openAiKey,
-      _ttsQueue,
-      ttsVoice,
-      language: targetLanguage,
-    );
-
-    _voiceManager = DeepgramV2VoiceManager(
-      apiKey: deepgramKey,
-      audioRecorder: audioRecorder,
-      langCode: targetLanguage,
-      onConnected: () => print('[Deepgram] 연결됨'),
-      onTranscriptUpdate: (_) {}, // UI에서 오버라이드
-      onTurnEnded: _onUserTurnEnded,
-      onError: (e) => print('[Deepgram] 오류: $e'),
-      onReconnecting: (attempt) => print('[Deepgram] 재연결 시도 $attempt/5회'),
-      onGaveUp: () => print('[Deepgram] 재연결 포기'),
-    );
-  }
-
-  Future<void> start() => _voiceManager.connectAndStart();
-
-  /// 💡 신규: 유저가 AI 말 중에 말을 시작하면 즉시 중단 (바지인터럽트)
-  void interruptAi() {
-    _ttsQueue.stop();
-    _ttsFetcher.reset();
-    _isSpeaking = false;
-  }
-
-  Future<void> _onUserTurnEnded(String userText,
-      {bool speechFinal = false}) async {
-    // 💡 AI가 말하는 중에 유저가 말하면 즉시 중단
-    if (_isSpeaking) interruptAi();
-
-    _history.add('user', userText);
-
-    String aiResponseBuffer = '';
-    String ttsBuffer = '';
-
-    try {
-      await for (final chunk in UnifiedBrain.streamChat(
-        apiKey: openAiKey,
-        systemPrompt: systemPrompt,
-        userMessage: userText,
-        history: _history,
-        temp: 0.2,
-      )) {
-        aiResponseBuffer += chunk;
-        ttsBuffer += chunk;
-
-        // 💡 개선된 쪼개기: 다국어 구두점 패턴 사용
-        final segments = _splitByDelimiter(ttsBuffer);
-        if (segments.length > 1) {
-          // 마지막 미완성 세그먼트는 버퍼에 남김
-          for (int i = 0; i < segments.length - 1; i++) {
-            final segment = segments[i].trim();
-            if (segment.isNotEmpty) _ttsFetcher.addText(segment);
-          }
-          ttsBuffer = segments.last;
-        }
-      }
-
-      // 스트림 종료 후 남은 버퍼 처리
-      if (ttsBuffer.trim().isNotEmpty) {
-        _ttsFetcher.addText(ttsBuffer.trim());
-      }
-
-      // 💡 신규: AI 응답 완료 후 히스토리 저장
-      if (aiResponseBuffer.isNotEmpty) {
-        _history.add('assistant', aiResponseBuffer.trim());
-      }
-    } catch (e) {
-      print('[RelayPipeline] AI 오류: $e');
-    }
-  }
-
-  /// 💡 신규: 쪼개기 로직 분리 (다국어 구두점 정규식 사용)
-  List<String> _splitByDelimiter(String text) {
-    final segments = <String>[];
-    int lastSplit = 0;
-
-    for (final match in kTtsDelimiterPattern.allMatches(text)) {
-      segments.add(text.substring(lastSplit, match.end));
-      lastSplit = match.end;
-    }
-    segments.add(text.substring(lastSplit)); // 남은 부분 (미완성)
-
-    return segments;
-  }
-
-  Future<void> dispose() async {
-    await _voiceManager.dispose();
-    await _ttsQueue.dispose();
-  }
-}
+// 📦 [Box 7-G: RelayPipeline] — routine_mode_roleplay.dart로 일원화
+//   동일 구현이 두 벌이라 이 파일 사본을 제거하고 import로 대체했다.
+// ====================================================================
 
 // ============================================================================
 
