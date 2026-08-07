@@ -58,8 +58,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
     return _keeperTutoringLoading ||
         _keeperIsRecording ||
         _isPlayingKeeper ||
-        _keeperIsPlayingCorrected ||
-        _isCasualPlaying;
+        _keeperIsPlayingCorrected;
   }
 
   void _resetIdleTimer() {
@@ -162,13 +161,6 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
   bool _keepersMigrateOnce = false;
   final ScrollController _keepersScrollController = ScrollController();
 
-  // ── Keepers 캐주얼 표현 상태 ──
-  Map<String, Map<String, String>> _casualExprCache = {};
-  bool _casualLoading = false;
-  bool _isCasualPlaying = false;
-  AudioPlayer? _casualAudioPlayer;
-  StateSetter? _casualDialogSetState;
-
   @override
   void initState() {
     super.initState();
@@ -182,7 +174,6 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
     BillingTicker.instance.pause();
     _keepersScrollController.dispose();
     _keeperAudioPlayer?.dispose();
-    _casualAudioPlayer?.dispose();
     _keeperCorrectionPlayer?.dispose();
     if (_keeperIsRecording) {
       _keeperRecorder?.stop().catchError((_) => null);
@@ -955,15 +946,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
                 onTap: () => _playKeeperAudio(doc.id, translated),
               ),
               const SizedBox(width: 4),
-              // 2) 캐주얼 표현
-              _buildKeeperAction(
-                icon: Icons.sentiment_satisfied_alt,
-                color: Colors.tealAccent,
-                tooltip: '캐주얼 표현',
-                onTap: () => _showCasualPopup(doc.id, translated),
-              ),
-              const SizedBox(width: 4),
-              // 3) 튜터링
+              // 2) 튜터링
               _buildKeeperAction(
                 icon: Icons.school_rounded,
                 color: Colors.deepPurpleAccent,
@@ -971,7 +954,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
                 onTap: () => _showKeeperTutoringPopup(doc.id, translated),
               ),
               const SizedBox(width: 4),
-              // 4) 맨 위로 올리기
+              // 3) 맨 위로 올리기
               _buildKeeperAction(
                 icon: Icons.keyboard_double_arrow_up_rounded,
                 color: _keepersColor,
@@ -979,7 +962,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
                 onTap: () => _togglePinKeeper(doc),
               ),
               const SizedBox(width: 4),
-              // 5) 삭제
+              // 4) 삭제
               _buildKeeperAction(
                 icon: Icons.delete_outline_rounded,
                 color: Colors.redAccent.withValues(alpha: 0.7),
@@ -1718,302 +1701,6 @@ RULES — follow exactly:
     BillingTicker.instance.resumeFromActivity('history_keeper_tts_start');
     await player.play(BytesSource(_keeperCorrectedAudio!));
     BillingTicker.instance.resumeFromActivity('history_keeper_tts_end');
-  }
-
-  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  //  Keepers 캐주얼 표현 팝업
-  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  void _showCasualPopup(String keeperId, String originalText) {
-    if (originalText.trim().isEmpty || _apiKey.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("표현 변환을 시작할 수 없습니다.",
-              style: TextStyle(fontWeight: FontWeight.bold)),
-          backgroundColor: Colors.orangeAccent));
-      return;
-    }
-
-    _casualLoading = !_casualExprCache.containsKey(keeperId);
-    _isCasualPlaying = false;
-    _casualDialogSetState = null;
-
-    if (_casualLoading) {
-      _generateCasualExpr(keeperId, originalText);
-    }
-
-    BillingTicker.instance.setRate(BillingRate.full);
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => StatefulBuilder(
-        builder: (_, ss) {
-          _casualDialogSetState = ss;
-          return Container(
-            margin: const EdgeInsets.only(top: 80),
-            padding: const EdgeInsets.all(16),
-            decoration: const BoxDecoration(
-              color: Color(0xFF1C1C1E),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-            ),
-            child: _buildCasualPopupBody(keeperId, originalText,
-                onClose: () => Navigator.of(ctx).pop()),
-          );
-        },
-      ),
-    ).whenComplete(() {
-      BillingTicker.instance.setRate(BillingRate.full);
-      _casualDialogSetState = null;
-      _isCasualPlaying = false;
-      _casualAudioPlayer?.stop();
-    });
-  }
-
-  Future<void> _generateCasualExpr(String keeperId, String originalText) async {
-    try {
-      final response = await http.post(
-        Uri.parse('https://api.openai.com/v1/chat/completions'),
-        headers: {
-          'Authorization': 'Bearer $_apiKey',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'model': 'gpt-4o-mini',
-          'temperature': 0.9,
-          'response_format': {'type': 'json_object'},
-          'messages': [
-            {
-              'role': 'system',
-              'content':
-                  r"""You are a native English expression converter. Given an English sentence:
-- If it is formal or standard, rewrite it as a natural casual/informal version that native speakers would actually use in everyday conversation.
-- If it is already casual, make it even more relaxed, colloquial, or slangy while keeping the same meaning.
-Keep the casual version natural and useful for a learner.
-Reply ONLY in JSON: {"casual": "casual English expression", "note": "A one-line explanation in Korean describing when/where this casual expression is naturally used"}""",
-            },
-            {
-              'role': 'user',
-              'content': 'Input: "$originalText"',
-            },
-          ],
-        }),
-      );
-      if (response.statusCode == 200) {
-        final data = jsonDecode(utf8.decode(response.bodyBytes));
-        final jsonResult = jsonDecode(data['choices'][0]['message']['content']);
-        final casual = (jsonResult['casual'] as String? ?? '').trim();
-        final note = (jsonResult['note'] as String? ?? '').trim();
-        if (casual.isNotEmpty) {
-          _casualExprCache[keeperId] = {'casual': casual, 'note': note};
-        }
-      }
-    } catch (e) {
-      debugPrint('[Keepers] generateCasualExpr error: $e');
-    } finally {
-      _casualLoading = false;
-      _casualDialogSetState?.call(() {});
-    }
-  }
-
-  Widget _buildCasualPopupBody(String keeperId, String originalText,
-      {VoidCallback? onClose}) {
-    final cached = _casualExprCache[keeperId];
-    final casualText = cached?['casual'] ?? '';
-    final noteText = cached?['note'] ?? '';
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            const Icon(Icons.sentiment_satisfied_alt,
-                color: Colors.tealAccent, size: 20),
-            const SizedBox(width: 8),
-            const Expanded(
-              child: Text("캐주얼 표현",
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 15)),
-            ),
-            IconButton(
-              icon: const Icon(Icons.close, color: Colors.white38, size: 20),
-              onPressed: onClose,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.05),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Text(originalText,
-              style: const TextStyle(
-                  color: Colors.white54, fontSize: 13, height: 1.4)),
-        ),
-        const SizedBox(height: 12),
-        if (_casualLoading)
-          const Center(
-              child: Padding(
-            padding: EdgeInsets.all(24),
-            child: CircularProgressIndicator(
-                color: Colors.tealAccent, strokeWidth: 2),
-          ))
-        else if (casualText.isNotEmpty) ...[
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: Colors.tealAccent.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(12),
-              border:
-                  Border.all(color: Colors.tealAccent.withValues(alpha: 0.25)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(casualText,
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        height: 1.5)),
-                if (noteText.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text(noteText,
-                      style: TextStyle(
-                          color: Colors.tealAccent.withValues(alpha: 0.7),
-                          fontSize: 12,
-                          height: 1.4)),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              GestureDetector(
-                onTap: () => _playCasualAudio(keeperId, casualText),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: Colors.tealAccent.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                        color: Colors.tealAccent.withValues(alpha: 0.4)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        _isCasualPlaying
-                            ? Icons.stop_rounded
-                            : Icons.volume_up_rounded,
-                        color: Colors.tealAccent,
-                        size: 18,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        _isCasualPlaying ? "정지" : "듣기",
-                        style: const TextStyle(
-                            color: Colors.tealAccent,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              GestureDetector(
-                onTap: () {
-                  Clipboard.setData(ClipboardData(text: casualText));
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                      content: Text("복사되었습니다.",
-                          style: TextStyle(fontWeight: FontWeight.bold)),
-                      backgroundColor: Colors.tealAccent,
-                      duration: Duration(seconds: 1)));
-                },
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.06),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.white24),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.copy_rounded, color: Colors.white54, size: 18),
-                      SizedBox(width: 6),
-                      Text("복사",
-                          style: TextStyle(
-                              color: Colors.white54,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13)),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ] else
-          const Text("생성 실패. 다시 시도해주세요.",
-              style: TextStyle(color: Colors.redAccent, fontSize: 13)),
-        const SizedBox(height: 16),
-      ],
-    );
-  }
-
-  Future<void> _playCasualAudio(String keeperId, String casualText) async {
-    _resetIdleTimer();
-    if (casualText.isEmpty || _apiKey.isEmpty) return;
-
-    if (_isCasualPlaying) {
-      await _casualAudioPlayer?.stop();
-      _isCasualPlaying = false;
-      _casualDialogSetState?.call(() {});
-      return;
-    }
-
-    try {
-      Uint8List? audio = await TtsCache.get(casualText, 'nova');
-      if (audio == null) {
-        audio = await _fetchTts(casualText, 'nova');
-        if (audio != null) {
-          TtsCache.put(casualText, 'nova', audio);
-        }
-      }
-      if (audio == null || !mounted) return;
-
-      _casualAudioPlayer?.dispose();
-      final player = AudioPlayer();
-      _casualAudioPlayer = player;
-
-      _isCasualPlaying = true;
-      _casualDialogSetState?.call(() {});
-      BillingTicker.instance.resumeFromActivity('history_keeper_casual_play');
-
-      player.onPlayerComplete.listen((_) {
-        _isCasualPlaying = false;
-        _casualDialogSetState?.call(() {});
-      });
-
-      await player.play(BytesSource(audio));
-    } catch (e) {
-      debugPrint('[Keepers] playCasualAudio error: $e');
-      _isCasualPlaying = false;
-      _casualDialogSetState?.call(() {});
-    }
   }
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
