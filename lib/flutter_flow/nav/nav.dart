@@ -170,11 +170,6 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
           name: OnboardingWidget.routeName,
           path: OnboardingWidget.routePath,
           builder: (context, params) => OnboardingWidget(),
-        ),
-        FFRoute(
-          name: CloneTestPageWidget.routeName,
-          path: CloneTestPageWidget.routePath,
-          builder: (context, params) => CloneTestPageWidget(),
         )
       ].map((r) => r.toRoute(appStateNotifier)).toList(),
     );
