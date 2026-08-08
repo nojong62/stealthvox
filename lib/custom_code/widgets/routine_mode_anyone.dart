@@ -1807,7 +1807,7 @@ $kSpokenReplyLengthPolicy
     _voiceManager = null;
     _setMicOwner(AnyoneMicOwner.none, reason: 'vad_boundary_committed');
     if (closingVoiceManager != null) {
-      // Android 녹음 세션이 완전히 닫힌 뒤 Realtime 원격 음성을 재생해야
+      // Android 녹음 세션이 완전히 닫힌 뒤 AI 음성(tts-1)을 재생해야
       // 녹음 라우팅이 뒤늦게 스피커 출력을 다시 덮지 않는다.
       await closingVoiceManager.dispose();
     }
@@ -1926,7 +1926,7 @@ $kSpokenReplyLengthPolicy
       return;
     }
     if (_isNoiseTranscript(userOriginal)) {
-      _log('[RT-TURN-SKIP]', 'reason=noise_transcript');
+      _log('[TURN-SKIP]', 'reason=noise_transcript');
       _restartConfiguredListening(
           expectedPipelineGeneration: expectedPipelineGeneration);
       return;
@@ -1994,7 +1994,7 @@ $kSpokenReplyLengthPolicy
       _saveRecentHistory(userOriginal, aiOriginal);
       _log('[GPT-HISTORY]', 'turn=$currentTurnId model=gpt-4o-mini tts=true');
     } catch (error) {
-      _log('[RT-PIPE-ERR]', 'turn=$currentTurnId reason=${error.runtimeType}');
+      _log('[PIPE-ERR]', 'turn=$currentTurnId reason=${error.runtimeType}');
       if (mounted && aiIndex >= 0 && aiIndex < _localMessages.length) {
         setState(() {
           if ((_localMessages[aiIndex]['target'] ?? '').toString().isEmpty) {

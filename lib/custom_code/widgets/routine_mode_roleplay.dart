@@ -1455,7 +1455,7 @@ User role: ${_roleplayUserLabel.trim()}''',
       _log('[GPT-HISTORY]',
           'turn=$turnNumber model=gpt-4o-mini voice=$_aiVoice tts=true');
     } catch (error) {
-      _log('[RT-PIPE-ERR]', 'turn=$turnNumber reason=${error.runtimeType}');
+      _log('[PIPE-ERR]', 'turn=$turnNumber reason=${error.runtimeType}');
       if (mounted && aiIndex >= 0 && aiIndex < _localMessages.length) {
         setState(() {
           if ((_localMessages[aiIndex]['target'] ?? '').toString().isEmpty) {
