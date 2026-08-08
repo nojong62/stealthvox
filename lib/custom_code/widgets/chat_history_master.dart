@@ -170,6 +170,40 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   bool isLoadingRoom = true;
   String roomName = "";
+
+  /// 상단 제목에 쓸 표시명. **저장값은 절대 건드리지 않는다** — `room_name`은
+  /// 과거 문서의 분류 키라, 히스토리 필터와 모드 추론(`_inferHistoryMode`)이
+  /// 이 문자열을 그대로 읽는다. 바꾸면 옛 대화가 미분류로 떨어진다.
+  ///
+  /// 표시명은 Free Talk → Anyone → Circle Talk, Roleplay → Scenario Talk으로
+  /// 바뀌어 왔는데 저장된 이름은 그대로라, 옛 방을 열면 옛 이름이 떴다.
+  /// "Anyone · 회사 동료"처럼 뒤에 붙은 설명은 살린다.
+  String _displayRoomTitle(String raw) {
+    final name = raw.trim();
+    if (name.isEmpty) return name;
+
+    var head = name;
+    var suffix = '';
+    final sep = name.indexOf('·');
+    if (sep >= 0) {
+      head = name.substring(0, sep).trim();
+      suffix = name.substring(sep + 1).trim();
+    }
+
+    final String display;
+    if (head.contains('Anyone') ||
+        head.contains('Free Talk') ||
+        head.contains('Circle Talk')) {
+      display = 'Circle Talk';
+    } else if (head.contains('Roleplay') || head.contains('Scenario')) {
+      display = 'Scenario Talk';
+    } else {
+      display =
+          head.replaceAll(' Mode', '').replaceAll('Step Expand', 'Step.Ex');
+    }
+    return suffix.isEmpty ? display : '$display · $suffix';
+  }
+
   bool _isActionLocked = false;
   bool _isEnteringPractice = false;
   bool _isOpeningAdjacentHistory = false;
@@ -4360,9 +4394,7 @@ RULES — follow exactly:
             child: Text(
               _phase == ShadowingPhase.practicing
                   ? "Shadowing  ${_currentChunkIdx + 1} / ${_chunks.length}"
-                  : roomName
-                      .replaceAll(' Mode', '')
-                      .replaceAll('Step Expand', 'Step.Ex'),
+                  : _displayRoomTitle(roomName),
               textAlign: TextAlign.center,
               style: const TextStyle(
                   color: Colors.white,
