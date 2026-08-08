@@ -7,6 +7,7 @@ import 'index.dart'; // Imports other custom widgets
 import '/custom_code/actions/index.dart'; // Imports custom actions
 import '/flutter_flow/custom_functions.dart'; // Imports custom functions
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart'; // 🎧 [STT-RAW] kDebugMode
 // Begin custom widget code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
@@ -1279,6 +1280,13 @@ said. Never build the scene on a line you had to guess.
     }
     _log('[STT-ROUTE]',
         'selected=gpt-4o-transcribe every_turn=true len=${userKorean.length}');
+    // 🎧 [STT-RAW] Circle Talk과 같은 형식. 이 모드는 앞 패딩이 300 그대로라
+    //   같은 문장을 두 방에서 말해 300 대 600을 바로 대조할 수 있다.
+    //   유저 발화 내용이므로 디버그 빌드에서만 남긴다.
+    if (kDebugMode) {
+      _log('🎧 [STT-RAW]',
+          'source=transcribe text="$userKorean" dg="$boundaryTranscript"');
+    }
 
     // 🔇 [NOISE-GATE] 로컬 잡음 검열은 화면과 API보다 먼저 온다. 뒤에 두면
     //   잡음에도 임시 말풍선이 먼저 뜨고 validator 왕복이 한 번 나간다.

@@ -1840,6 +1840,14 @@ $kSpokenReplyLengthPolicy
 
     _log('🎧 [STT-ROUTE]',
         'selected=gpt-4o-transcribe every_turn=true len=${userOriginal.length}');
+    // 🎧 [STT-RAW] 전사 원문. 길이만 찍던 동안은 오인식이 났을 때 화면을 캡처해
+    //   눈으로 읽어야 원인을 짚을 수 있었다. 버리는 Deepgram 문장도 같이 남긴다
+    //   — 귀가 둘이라 서로 다르게 들었는지가 그 자리에서 갈린다.
+    //   유저 발화 내용이므로 디버그 빌드에서만 남긴다.
+    if (kDebugMode) {
+      _log('🎧 [STT-RAW]',
+          'source=transcribe text="$userOriginal" dg="$boundaryTranscript"');
+    }
     _logTurnPerf('USER_KOREAN_FINAL');
 
     // 🔇 [NOISE-GATE] 로컬 잡음 검열은 화면과 API보다 먼저 온다. 뒤에 두면
