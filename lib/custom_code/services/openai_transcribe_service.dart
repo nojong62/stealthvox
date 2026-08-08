@@ -23,6 +23,11 @@ class OpenAiTranscribeService {
     String? language,
     String model = firstTurnModel,
     Duration timeout = const Duration(seconds: 3),
+    // 무음을 잘라낸 뒤 발화 앞에 남기는 여유. 감지 지점은 소리가 커진 곳이지
+    // 말이 시작된 곳이 아니라서, 약한 첫 자음(ㅂ·ㅍ·ㅅ)이 이 여유 안에
+    // 들어와야 한다. 잘리면 모델이 앞을 통째로 지어낸다("밥 먹지"→"밟").
+    // 이미 녹음된 소리를 더 떼어 보내는 것이라 지연 대가는 없다.
+    int leadingPaddingMs = 300,
     void Function(String tag, String msg)? onLog,
   }) async {
     if (apiKey.isEmpty || pcm.isEmpty) return null;
@@ -31,6 +36,7 @@ class OpenAiTranscribeService {
       final preparedPcm = trimLeadingSilencePcm16(
         pcm,
         sampleRate: sampleRate,
+        paddingMs: leadingPaddingMs,
       );
       final originalAudioMs =
           pcm16DurationMs(pcm.length, sampleRate: sampleRate);
@@ -40,7 +46,8 @@ class OpenAiTranscribeService {
         onLog?.call(
           '✂️ [RETRANSCRIBE-TRIM]',
           'leadingSilenceMs=${originalAudioMs - preparedAudioMs} '
-              'audioMs=$originalAudioMs->$preparedAudioMs paddingMs=300',
+              'audioMs=$originalAudioMs->$preparedAudioMs '
+              'paddingMs=$leadingPaddingMs',
         );
       }
       final wav = pcm16ToWav(preparedPcm, sampleRate: sampleRate);
