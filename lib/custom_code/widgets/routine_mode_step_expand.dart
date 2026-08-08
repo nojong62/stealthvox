@@ -2456,6 +2456,41 @@ line had never been said. Never build the conversation on a line you had to gues
       setState(() => _localMessages.add(hostBubble!));
       _scrollToBottom();
 
+      // 🌱 마지막 턴에서는 AI가 말을 얹지 않는다. 5번째 답까지 받으면 문장은
+      //   다 자란 상태라 더 물을 것이 없다. 그런데도 생성을 돌리면 유저가
+      //   답할 자리가 없는 여섯 번째 질문이 나간다. 지시문으로 "묻지 말라"고
+      //   해봐야 모델이 지키지 않을 때가 있고, [_isAskBackReply]는 되묻기만
+      //   걸러서 평범한 질문은 그대로 통과했다.
+      //   → 생성을 아예 건너뛰고 곧장 완성문장으로 넘어간다. 소리는
+      //     _autoPolishAndSpeak가 완성문장과 다듬은 문장을 읽어 채운다.
+      if (turnNumber >= MAX_TURNS) {
+        turnCompleted = true;
+        if (mounted) {
+          setState(() {
+            _isSessionComplete = true;
+            _debugResult = '🎉 $MAX_TURNS턴 완료!';
+          });
+          _scrollToBottom();
+        }
+        // AI 응답이 없으므로 유저 턴만 남긴다. 저장이 실패해도 완성문장은
+        // 반드시 띄운다 — 여기서 예외가 위 catch로 빠지면 5턴을 다 채우고도
+        // 카드가 안 나온다.
+        final finalHostLine = <String, dynamic>{
+          'role': 'HOST',
+          'original_text': userKorean,
+        };
+        try {
+          await _saveTurnToFirestore(<Map<String, dynamic>>[finalHostLine]);
+          await _saveHistoryMessages(<Map<String, dynamic>>[finalHostLine]);
+        } catch (error) {
+          _log('❌ [FINAL-TURN-SAVE-ERR]', '${error.runtimeType} $error');
+        }
+        _log('[GPT-HISTORY]',
+            'turn=$turnNumber model=none reason=final_turn_no_ai_reply');
+        await _completeStepExpandSession(generation: generation);
+        return;
+      }
+
       // 유저 문장이 화면에 올라온 뒤에만 AI 대기 점을 표시한다.
       // 청취 시작 전에는 점 3개를 만들지 않는다.
       setState(() {
