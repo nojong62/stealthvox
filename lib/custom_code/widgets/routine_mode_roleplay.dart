@@ -118,6 +118,9 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   int _pipelineGeneration = 0;
   bool _aiTurnActive = false;
 
+  /// 게이트가 연달아 반려한 횟수. 통과하면 0으로 돌아간다. [GATE-ESCAPE] 참조.
+  int _consecutiveGateRejects = 0;
+
   void _log(String tag, String msg) {
     final ts = DateTime.now().toIso8601String().substring(11, 23);
     final line = '[$ts] $tag $msg';
@@ -1340,17 +1343,29 @@ User role: ${_roleplayUserLabel.trim()}''',
             'failOpen=${validation.failedOpen} '
             'proceeded=${validation.accepted} reason=${validation.reason}');
     if (!validation.accepted) {
-      // 👂 되묻기는 소리로만 나간다. 글자로 남기면 지우는 사람이 없어 방을
-      //   나갈 때까지 쌓이고, _recentKoreanConversation()이 그 문장을 다음 턴
-      //   컨텍스트로 넘겨 AI가 따라 되묻는다.
-      setState(() {
-        _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-      });
-      await _speakKoreanLine(KoreanTurnValidator.retryLine);
-      if (mounted && _isConversationActive) _startDeepgramListening();
-      return;
+      // 🚪 [GATE-ESCAPE] Circle Talk과 같은 탈출구. 되묻기는 유저가 다시 말하면
+      //   풀린다는 전제인데, 게이트가 같은 문장을 계속 같게 판정하면 그 전제가
+      //   깨져 방을 나가는 것 말고는 방법이 없다.
+      _consecutiveGateRejects++;
+      if (_consecutiveGateRejects <= KoreanTurnValidator.maxConsecutiveRejects) {
+        // 👂 되묻기는 소리로만 나간다. 글자로 남기면 지우는 사람이 없어 방을
+        //   나갈 때까지 쌓이고, _recentKoreanConversation()이 그 문장을 다음 턴
+        //   컨텍스트로 넘겨 AI가 따라 되묻는다.
+        setState(() {
+          _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+        });
+        await _speakKoreanLine(KoreanTurnValidator.retryLine);
+        if (mounted && _isConversationActive) _startDeepgramListening();
+        return;
+      }
+      _log('[GATE-ESCAPE]',
+          'mode=scenario_talk forced_pass rejects=$_consecutiveGateRejects');
     }
-    await _processScenarioTalkTurn(validation.text, generation: generation);
+    _consecutiveGateRejects = 0;
+    // 반려된 판정은 text가 비어 있다. 통과시킬 때는 전사 원문을 그대로 쓴다.
+    await _processScenarioTalkTurn(
+        validation.accepted ? validation.text : userKorean,
+        generation: generation);
   }
 
   // ignore: unused_element

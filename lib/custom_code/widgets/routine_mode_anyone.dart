@@ -184,6 +184,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   bool _isStartingListening = false;
   bool _isPipelineRunning = false;
   bool _aiTurnActive = false;
+
+  /// 게이트가 연달아 반려한 횟수. 통과하면 0으로 돌아간다. [GATE-ESCAPE] 참조.
+  int _consecutiveGateRejects = 0;
   bool _isAiOpenerPlaying = false; // AI가 서클 일원으로 먼저 거는 첫 마디
   bool _openerDone = false; // 세션당 1회만
   bool _listeningReadyReported = false;
@@ -1904,23 +1907,34 @@ $kSpokenReplyLengthPolicy
             'failOpen=${validation.failedOpen} '
             'proceeded=${validation.accepted} reason=${validation.reason}');
     if (!validation.accepted) {
-      setState(() {
-        // 못 알아들은 발화는 화면에 남기지 않는다. 위에서 미리 띄운 임시
-        // 말풍선을 걷어내야 유저가 다시 말한 것이 이 턴이 된다.
-        // 👂 되묻는 말도 소리로만 내보낸다. 글자로 남기면 지우는 사람이 없어
-        //   되묻을 때마다 말풍선이 쌓인다.
-        _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-      });
-      await _speakSystemLine(KoreanTurnValidator.retryLine);
-      if (mounted && _isConversationActive) {
-        _restartConfiguredListening(
-            expectedPipelineGeneration: pipelineGeneration);
+      // 🚪 [GATE-ESCAPE] 연달아 막히면 빠져나갈 길을 열어 준다. 되묻기는 유저가
+      //   다시 말하면 풀린다는 전제인데, 게이트가 같은 문장을 계속 같게 판정하면
+      //   그 전제가 깨져 방을 나가는 것 말고는 방법이 없다. 과금은 그동안에도
+      //   계속 나간다.
+      _consecutiveGateRejects++;
+      if (_consecutiveGateRejects <= KoreanTurnValidator.maxConsecutiveRejects) {
+        setState(() {
+          // 못 알아들은 발화는 화면에 남기지 않는다. 위에서 미리 띄운 임시
+          // 말풍선을 걷어내야 유저가 다시 말한 것이 이 턴이 된다.
+          // 👂 되묻는 말도 소리로만 내보낸다. 글자로 남기면 지우는 사람이 없어
+          //   되묻을 때마다 말풍선이 쌓인다.
+          _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+        });
+        await _speakSystemLine(KoreanTurnValidator.retryLine);
+        if (mounted && _isConversationActive) {
+          _restartConfiguredListening(
+              expectedPipelineGeneration: pipelineGeneration);
+        }
+        return;
       }
-      return;
+      _log('[GATE-ESCAPE]',
+          'mode=circle_talk forced_pass rejects=$_consecutiveGateRejects');
     }
+    _consecutiveGateRejects = 0;
 
+    // 반려된 판정은 text가 비어 있다. 통과시킬 때는 전사 원문을 그대로 쓴다.
     await _processCircleTalkTurn(
-      validation.text,
+      validation.accepted ? validation.text : userOriginal,
       expectedPipelineGeneration: pipelineGeneration,
     );
   }
