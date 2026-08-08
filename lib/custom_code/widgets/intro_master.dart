@@ -464,6 +464,15 @@ class _IntroMasterState extends State<IntroMaster> {
     }
   }
 
+  /// 시스템 글꼴 배율 상한. 본문에는 쓰지 않는다 — 읽을 글은 커져야 한다.
+  /// 폭이 정해진 UI 조각(워드마크·버튼 라벨)에만 씌워서, 배율을 크게 쓰는
+  /// 기기에서 줄이 삐져나가 화면이 깨지는 것을 막는다.
+  /// (실기기 재현: font_scale 1.7 + 밀도 540 → 인증 헤더가 16px 초과)
+  TextScaler _cappedScaler(BuildContext context, double maxFactor) {
+    final factor = MediaQuery.textScalerOf(context).scale(1.0);
+    return TextScaler.linear(factor > maxFactor ? maxFactor : factor);
+  }
+
   Widget _buildBrandMark({bool compact = false}) {
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -485,13 +494,20 @@ class _IntroMasterState extends State<IntroMaster> {
           ),
         ),
         SizedBox(width: compact ? 9 : 11),
-        Text(
-          'StealthVox',
-          style: GoogleFonts.orbitron(
-            fontSize: compact ? 15 : 16,
-            fontWeight: FontWeight.w700,
-            color: const Color(0xFFF7F8FA),
-            letterSpacing: 0.2,
+        // 워드마크는 상표라 줄바꿈도 생략부호도 어울리지 않는다. 배율만
+        // 묶어 두고, 그래도 모자라면 Flexible이 마지막으로 받아낸다.
+        Flexible(
+          child: Text(
+            'StealthVox',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textScaler: _cappedScaler(context, 1.15),
+            style: GoogleFonts.orbitron(
+              fontSize: compact ? 15 : 16,
+              fontWeight: FontWeight.w700,
+              color: const Color(0xFFF7F8FA),
+              letterSpacing: 0.2,
+            ),
           ),
         ),
       ],
@@ -1400,7 +1416,10 @@ class _IntroMasterState extends State<IntroMaster> {
               else
                 const SizedBox(width: 44, height: 44),
               const Spacer(),
-              _buildBrandMark(compact: true),
+              // 양옆 Spacer가 남는 폭을 다 가져가지 않도록 워드마크에 자리를
+              // 준다. Flexible이 없으면 워드마크가 자기 크기를 고집해 Row가
+              // 넘친다 — 화면 우상단 노란 빗금이 그 자국이었다.
+              Flexible(child: _buildBrandMark(compact: true)),
               const Spacer(),
               const SizedBox(width: 44, height: 44),
             ],
@@ -1926,7 +1945,6 @@ class _IntroMasterState extends State<IntroMaster> {
           onTap: isLoading ? null : onTap,
           borderRadius: BorderRadius.circular(16),
           child: Ink(
-            height: 56,
             decoration: BoxDecoration(
               color: backgroundColor,
               borderRadius: BorderRadius.circular(16),
@@ -1937,52 +1955,62 @@ class _IntroMasterState extends State<IntroMaster> {
                     )
                   : border,
             ),
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Positioned(left: 20, child: icon),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 56),
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: foregroundColor,
-                      fontSize: 15.5,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.25,
+            // 높이를 56으로 못 박으면 배율이 큰 기기에서 라벨이 한 줄에
+            // 갇혀 "카카오톡으로 …"처럼 잘린다. 최소 높이만 지키고 글자가
+            // 늘면 버튼이 같이 자라게 한다.
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 56),
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Positioned(left: 20, child: icon),
+                  Padding(
+                    // 아이콘 오른쪽 끝이 40이라 48이면 겹치지 않는다.
+                    // 56에서 줄여 라벨이 쓸 폭을 넓혔다.
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 48, vertical: 10),
+                    child: Text(
+                      label,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      textScaler: _cappedScaler(context, 1.3),
+                      style: TextStyle(
+                        color: foregroundColor,
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.25,
+                      ),
                     ),
                   ),
-                ),
-                if (isRecent)
-                  Positioned(
-                    right: 14,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: provider == 'kakao'
-                            ? Colors.black.withValues(alpha: 0.08)
-                            : const Color(0xFF756BE8).withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(99),
-                      ),
-                      child: Text(
-                        '최근',
-                        style: TextStyle(
+                  if (isRecent)
+                    Positioned(
+                      right: 14,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
                           color: provider == 'kakao'
-                              ? const Color(0xFF3B3B36)
-                              : const Color(0xFFB9B4FF),
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w800,
+                              ? Colors.black.withValues(alpha: 0.08)
+                              : const Color(0xFF756BE8).withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(99),
+                        ),
+                        child: Text(
+                          '최근',
+                          style: TextStyle(
+                            color: provider == 'kakao'
+                                ? const Color(0xFF3B3B36)
+                                : const Color(0xFFB9B4FF),
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
