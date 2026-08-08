@@ -511,10 +511,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       model: OpenAiTranscribeService.firstTurnModel,
       timeout:
           const Duration(milliseconds: kFreeTalkFirstTurnRetranscribeTimeoutMs),
-      // 무음 트림이 남기는 300ms로는 약한 첫 자음(ㅂ·ㅍ·ㅅ)이 잘려 모델이 앞을
-      // 지어냈다("밥 먹지"→"밟"). 이미 녹음된 소리를 더 떼어 보내는 것이라
-      // 지연 대가가 없다. 값 자체는 실기기 대조 전이라 Circle Talk에만 건다.
-      leadingPaddingMs: 600,
       onLog: _log,
     );
     if (transcript != null && transcript.trim().isNotEmpty) {
