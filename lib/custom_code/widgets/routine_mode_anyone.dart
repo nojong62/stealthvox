@@ -1881,7 +1881,11 @@ $kSpokenReplyLengthPolicy
       _scrollToBottom();
     }
 
-    final validation = await KoreanTurnValidator.validate(
+    // ⏱️ [GATE-PARALLEL] 게이트와 AI 응답 생성을 같이 발사한다. 실측(2026-08-08)
+    //   에서 게이트가 0.83초 동안 AI 생성을 붙잡고 있었다. 판정 자체는 그대로다
+    //   — 무엇이 통과하고 반려되는지는 하나도 바뀌지 않고, AI가 언제 시작하는지만
+    //   달라진다. 반려된 턴의 응답은 아래에서 버린다(그 비용이 반려율만큼 나간다).
+    final validationFuture = KoreanTurnValidator.validate(
       apiKey: _openAiKey,
       transcribedText: userOriginal,
       mode: 'circle_talk',
@@ -1890,7 +1894,22 @@ $kSpokenReplyLengthPolicy
           .map((turn) => '${turn['role']}: ${turn['content']}')
           .join('\n'),
     );
-    if (!mounted || pipelineGeneration != _pipelineGeneration) return;
+    // 게이트가 도는 동안 쓸 입력은 지금 값 그대로다 — 사이에 _recentHistory를
+    // 건드리는 곳이 없어 직렬로 돌 때와 같은 문장이 들어간다.
+    final aiGenSw = Stopwatch()..start();
+    final aiFuture = UnifiedBrain.generateCircleMemberTurn(
+      apiKey: _openAiKey,
+      systemPrompt: _buildCircleMemberInstructions(),
+      userText: userOriginal,
+      history: _recentHistory,
+    );
+
+    final validation = await validationFuture;
+    if (!mounted || pipelineGeneration != _pipelineGeneration) {
+      // 받을 사람이 없다. 명시적으로 버려야 대기자 없는 Future로 남지 않는다.
+      aiFuture.ignore();
+      return;
+    }
     // 장애로 통과시킨 턴과 모델이 승인한 턴을 로그에서 갈라 본다. 원문은
     // 싣지 않는다 — 길이와 판정 결과까지만 남긴다.
     _log(
@@ -1900,6 +1919,8 @@ $kSpokenReplyLengthPolicy
             'failOpen=${validation.failedOpen} '
             'proceeded=${validation.accepted} reason=${validation.reason}');
     if (!validation.accepted) {
+      // 반려된 턴은 미리 만들던 응답을 버린다. 이 낭비가 병렬화의 값이다.
+      aiFuture.ignore();
       setState(() {
         // 못 알아들은 발화는 화면에 남기지 않는다. 위에서 미리 띄운 임시
         // 말풍선을 걷어내야 유저가 다시 말한 것이 이 턴이 된다.
@@ -1918,12 +1939,17 @@ $kSpokenReplyLengthPolicy
     await _processCircleTalkTurn(
       validation.text,
       expectedPipelineGeneration: pipelineGeneration,
+      aiFuture: aiFuture,
+      aiGenSw: aiGenSw,
     );
   }
 
   Future<void> _processCircleTalkTurn(
     String userOriginal, {
     required int expectedPipelineGeneration,
+    // 게이트와 나란히 발사해 둔 응답. 여기서 받아 쓴다.
+    required Future<String> aiFuture,
+    required Stopwatch aiGenSw,
   }) async {
     if (!isActivePipelineGeneration(
       expected: expectedPipelineGeneration,
@@ -1931,9 +1957,11 @@ $kSpokenReplyLengthPolicy
       mounted: mounted,
       conversationActive: _isConversationActive,
     )) {
+      aiFuture.ignore();
       return;
     }
     if (_isNoiseTranscript(userOriginal)) {
+      aiFuture.ignore();
       _log('[TURN-SKIP]', 'reason=noise_transcript');
       _restartConfiguredListening(
           expectedPipelineGeneration: expectedPipelineGeneration);
@@ -1957,21 +1985,18 @@ $kSpokenReplyLengthPolicy
         _scrollToBottom();
       }
 
-      // ⏱️ [AI-GEN] 턴 뒷구간(생성→합성→재생)에서 여기만 계측이 없었다.
-      //   합성·재생은 어댑터가 playback_start의 ttfbMs/startMs로 찍고, 재생
-      //   완료는 [GPT-HISTORY]가 표시한다. 이 한 줄이 있어야 셋이 갈린다.
-      final aiGenSw = Stopwatch()..start();
-      final aiOriginal = await UnifiedBrain.generateCircleMemberTurn(
-        apiKey: _openAiKey,
-        systemPrompt: _buildCircleMemberInstructions(),
-        userText: userOriginal,
-        history: _recentHistory,
-      );
+      // ⏱️ [AI-GEN] 게이트와 나란히 돌던 응답을 여기서 받는다. waitedMs가 0에
+      //   가까우면 게이트가 도는 동안 생성이 이미 끝났다는 뜻이고, 그만큼이
+      //   병렬화로 번 시간이다.
+      final waitStart = aiGenSw.elapsedMilliseconds;
+      final aiOriginal = await aiFuture;
       aiGenSw.stop();
       _log(
           '⏱️ [AI-GEN]',
           'turn=$currentTurnId model=gpt-4o-mini '
-              'elapsedMs=${aiGenSw.elapsedMilliseconds} len=${aiOriginal.length}');
+              'elapsedMs=${aiGenSw.elapsedMilliseconds} '
+              'waitedMs=${aiGenSw.elapsedMilliseconds - waitStart} '
+              'len=${aiOriginal.length}');
       if (aiOriginal.isEmpty) {
         throw StateError('Circle Talk response did not complete.');
       }
