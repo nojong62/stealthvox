@@ -277,6 +277,9 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   double? _activeSttConfidence;
   int _pipelineGeneration = 0;
   bool _aiTurnActive = false;
+
+  /// 게이트가 연달아 반려한 횟수. 통과하면 0으로 돌아간다. [GATE-ESCAPE] 참조.
+  int _consecutiveGateRejects = 0;
   void _log(String tag, String msg) {
     final ts = DateTime.now().toIso8601String().substring(11, 23);
     final line = '[$ts] $tag $msg';
@@ -2218,22 +2221,32 @@ line had never been said. Never build the conversation on a line you had to gues
               'failOpen=${validation.failedOpen} '
               'proceeded=${validation.accepted} reason=${validation.reason}');
       if (!validation.accepted) {
-        // 👂 되묻기는 소리로만 나간다. 글자로 남기면 지우는 사람이 없어 방을
-        //   나갈 때까지 쌓이고, 그 문장이 다음 턴 컨텍스트에 섞여 AI가 따라
-        //   되묻는다. 되묻기가 되묻기를 부르는 자리였다.
-        setState(() {
-          _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-        });
-        await _speakLiveKorean(KoreanTurnValidator.retryLine);
-        if (mounted && _isConversationActive && !_isSessionComplete) {
-          _startUserListening();
+        // 🚪 [GATE-ESCAPE] 씨앗 턴이 연달아 막히면 세션을 시작조차 못 한다.
+        //   다른 두 모드와 같은 탈출구를 둔다.
+        _consecutiveGateRejects++;
+        if (_consecutiveGateRejects <=
+            KoreanTurnValidator.maxConsecutiveRejects) {
+          // 👂 되묻기는 소리로만 나간다. 글자로 남기면 지우는 사람이 없어 방을
+          //   나갈 때까지 쌓이고, 그 문장이 다음 턴 컨텍스트에 섞여 AI가 따라
+          //   되묻는다. 되묻기가 되묻기를 부르는 자리였다.
+          setState(() {
+            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+          });
+          await _speakLiveKorean(KoreanTurnValidator.retryLine);
+          if (mounted && _isConversationActive && !_isSessionComplete) {
+            _startUserListening();
+          }
+          return;
         }
-        return;
+        _log('[GATE-ESCAPE]',
+            'mode=step_expand seed=true forced_pass rejects=$_consecutiveGateRejects');
       }
+      _consecutiveGateRejects = 0;
 
       _log('🔀 [COMMIT-03]', '전사·문맥 확정 → Step Expand 질문 생성');
+      // 반려된 판정은 text가 비어 있다. 통과시킬 때는 전사 원문을 그대로 쓴다.
       await _processStepExpandTurn(
-        validation.text,
+        validation.accepted ? validation.text : userKorean,
         generation: generation,
         mergedFuture: null,
       );

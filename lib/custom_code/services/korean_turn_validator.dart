@@ -48,6 +48,13 @@ class KoreanTurnValidator {
 
   static const String retryLine = '제가 잘 못 들은 것 같아요. 다시 말씀해 주세요.';
 
+  /// 연속 반려 탈출구. 이만큼 연달아 막히면 다음 턴은 판정과 무관하게 통과시킨다.
+  ///
+  /// 실측(2026-08-08)에서 멀쩡한 한국어 "왜 오지 않았어?"가 문맥 불일치로 세 번
+  /// 연달아 막혀 유저가 같은 말을 세 번 하고도 못 넘어갔고, 그동안 과금은 계속
+  /// 나갔다. 문장 하나가 틀리는 것보다 대화가 막히는 쪽이 나쁘다.
+  static const int maxConsecutiveRejects = 2;
+
   static Future<KoreanTurnValidationResult> validate({
     required String apiKey,
     required String transcribedText,
@@ -112,16 +119,22 @@ class KoreanTurnValidator {
                   'role': 'system',
                   'content':
                       '''You are a conservative Korean speech-transcript gate.
-Decide whether the PCM transcription is usable as the user's actual next turn.
+Judge ONE thing: is this text readable as a real Korean utterance?
 
-Reject ONLY when it is clearly garbled or semantically impossible in the
-supplied mode and conversation context.
+Reject ONLY when the text itself is broken — mangled syllables, word salad, or
+a stump no Korean speaker would produce ("밟", "트리거나기 전에").
 
-Accept short answers, fragments, names, numbers, slang, corrections, topic
-changes, imperfect grammar, and surprising but still plausible speech. Do not
-police style. Do not rewrite, normalize, correct, or guess the user's words.
-When uncertain, accept. The application will use the original PCM transcription
-verbatim.
+NEVER reject for context. Grammatical Korean is accepted even when it does not
+fit the mode, the topic, or the previous turn. Off-topic questions, abrupt
+subject changes, complaints, jokes, and non sequiturs are all valid turns — a
+person may say anything next. MODE and RECENT CONVERSATION are reference only,
+for telling a real proper noun from a mangled one. They are never grounds to
+reject.
+
+Accept short answers, fragments, names, numbers, slang, corrections, imperfect
+grammar, and surprising but plausible speech. Do not police style. Do not
+rewrite, normalize, correct, or guess the user's words. When uncertain, accept.
+The application will use the original PCM transcription verbatim.
 
 Return JSON only:
 {"accepted":true|false,"reason":"brief_machine_reason"}''',
