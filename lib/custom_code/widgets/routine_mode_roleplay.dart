@@ -1321,31 +1321,16 @@ said. Never build the scene on a line you had to guess.
       _scrollToBottom();
     }
 
-    // ⏱️ [GATE-PARALLEL] Circle Talk과 같은 구조. 게이트가 도는 동안 AI 응답을
-    //   미리 만든다. 판정은 그대로이고 시작 시점만 앞당긴다. Circle Talk 실측
-    //   (2026-08-08)에서 발화 종료→AI 음성이 5.26초→4.54초가 됐다.
-    final recentForTurn = _recentKoreanConversation();
-    final validationFuture = KoreanTurnValidator.validate(
+    final validation = await KoreanTurnValidator.validate(
       apiKey: _openAiKey,
       transcribedText: userKorean,
       mode: 'scenario_talk',
       modeContext: '''Situation: $_scenarioSituation
 AI role: ${_roleplayPartnerLabel.trim()}
 User role: ${_roleplayUserLabel.trim()}''',
-      recentConversation: recentForTurn,
+      recentConversation: _recentKoreanConversation(),
     );
-    final aiFuture = RoleplayBrain.generateKoreanTurn(
-      apiKey: _openAiKey,
-      instructions: _buildScenarioMemberInstructions(),
-      userText: userKorean,
-      recentConversation: recentForTurn,
-    );
-
-    final validation = await validationFuture;
-    if (!mounted || generation != _pipelineGeneration) {
-      aiFuture.ignore();
-      return;
-    }
+    if (!mounted || generation != _pipelineGeneration) return;
     // 장애로 통과시킨 턴과 모델이 승인한 턴을 로그에서 갈라 본다. 원문은
     // 싣지 않는다 — 길이와 판정 결과까지만 남긴다.
     _log(
@@ -1355,8 +1340,6 @@ User role: ${_roleplayUserLabel.trim()}''',
             'failOpen=${validation.failedOpen} '
             'proceeded=${validation.accepted} reason=${validation.reason}');
     if (!validation.accepted) {
-      // 반려된 턴은 미리 만들던 응답을 버린다. 이 낭비가 병렬화의 값이다.
-      aiFuture.ignore();
       // 👂 되묻기는 소리로만 나간다. 글자로 남기면 지우는 사람이 없어 방을
       //   나갈 때까지 쌓이고, _recentKoreanConversation()이 그 문장을 다음 턴
       //   컨텍스트로 넘겨 AI가 따라 되묻는다.
@@ -1367,11 +1350,7 @@ User role: ${_roleplayUserLabel.trim()}''',
       if (mounted && _isConversationActive) _startDeepgramListening();
       return;
     }
-    await _processScenarioTalkTurn(
-      validation.text,
-      generation: generation,
-      aiFuture: aiFuture,
-    );
+    await _processScenarioTalkTurn(validation.text, generation: generation);
   }
 
   // ignore: unused_element
@@ -1402,20 +1381,17 @@ User role: ${_roleplayUserLabel.trim()}''',
   Future<void> _processScenarioTalkTurn(
     String userKorean, {
     required int generation,
-    // 게이트와 나란히 발사해 둔 응답. 여기서 받아 쓴다.
-    required Future<String> aiFuture,
   }) async {
     if (!mounted ||
         !_isConversationActive ||
         generation != _pipelineGeneration) {
-      aiFuture.ignore();
       return;
     }
     _turnCounter++;
     final turnNumber = _turnCounter;
     var aiIndex = -1;
     var askedBack = false;
-    final aiGenSw = Stopwatch()..start();
+    final recentConversation = _recentKoreanConversation();
     // 되묻기가 나오면 이 말풍선을 도로 걷어내야 하므로 참조를 들고 간다.
     final hostBubble = <String, dynamic>{
       'role': 'HOST',
@@ -1430,14 +1406,12 @@ User role: ${_roleplayUserLabel.trim()}''',
       });
       _scrollToBottom();
 
-      // ⏱️ [AI-GEN] waitedMs가 0에 가까우면 게이트가 도는 동안 생성이 끝났다는
-      //   뜻이고, 그만큼이 병렬화로 번 시간이다.
-      final aiKorean = await aiFuture;
-      aiGenSw.stop();
-      _log(
-          '⏱️ [AI-GEN]',
-          'turn=$turnNumber model=gpt-4o-mini '
-              'waitedMs=${aiGenSw.elapsedMilliseconds} len=${aiKorean.length}');
+      final aiKorean = await RoleplayBrain.generateKoreanTurn(
+        apiKey: _openAiKey,
+        instructions: _buildScenarioMemberInstructions(),
+        userText: userKorean,
+        recentConversation: recentConversation,
+      );
       if (aiKorean.isEmpty) {
         throw StateError('Scenario Talk response did not complete.');
       }
