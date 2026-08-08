@@ -1159,7 +1159,10 @@ class _IntroMasterState extends State<IntroMaster> {
     );
   }
 
-  /// Anyone 이용 방법 안내. 팝업이 아니라 가이드 페이지에 그대로 얹는다.
+  /// Circle Talk 이용 방법 안내. 팝업이 아니라 가이드 페이지에 그대로 얹는다.
+  /// 문구는 `circle_talk_guide.dart`(방 안 사용설명서)와 같은 내용을 체험 상황에
+  /// 맞춰 줄인 것이다. 체험은 서클 선택을 건너뛰고 기본 서클로 들어가므로
+  /// (`stealth_room_master.dart` 트라이얼 자동 진입) 서클을 입력하라고 쓰지 않는다.
   Widget _buildUsageGuideSection() {
     return Container(
       width: double.infinity,
@@ -1194,7 +1197,7 @@ class _IntroMasterState extends State<IntroMaster> {
               const SizedBox(width: 10),
               const Expanded(
                 child: Text(
-                  'Anyone 이용 방법',
+                  'Circle Talk 이용 방법',
                   style: TextStyle(
                     color: Color(0xFFF7F8FA),
                     fontSize: 17,
@@ -1208,14 +1211,14 @@ class _IntroMasterState extends State<IntroMaster> {
           const SizedBox(height: 18),
           _buildGuideStep(
             number: 1,
-            title: '대화할 사람을 떠올리세요',
-            description: '그 사람이 앞에 있다고 생각하고, 하고 싶었던 말을 편하게 꺼내세요.',
+            title: 'AI가 서클 구성원으로 기다립니다',
+            description: '체험은 편안한 일상 대화 커뮤니티에서 시작합니다. AI가 그 서클의 구성원이 되어 먼저 말을 겁니다.',
           ),
           const SizedBox(height: 16),
           _buildGuideStep(
             number: 2,
-            title: '평소처럼 자연스럽게 말하세요',
-            description: 'AI가 그 사람이 되어 대답합니다. 반응이 다르면 이유를 다시 물어보세요.',
+            title: '실제 동료와 이야기하듯 말하세요',
+            description: 'AI가 서클의 분위기와 말투를 반영해 대답합니다. 관심사에 맞는 표현을 자유롭게 써 보세요.',
           ),
           const SizedBox(height: 16),
           _buildGuideStep(
@@ -1235,7 +1238,7 @@ class _IntroMasterState extends State<IntroMaster> {
               ),
             ),
             child: const Text(
-              '예: “왜 그렇게 느껴?”처럼 이유를 다시 물어보세요.',
+              '체험이 끝나면 인도 수출 무역회사, 스타트업 개발팀처럼 원하는 서클을 직접 만들 수 있습니다.',
               style: TextStyle(
                 color: Color(0xFFC9C6EA),
                 fontSize: 13,
