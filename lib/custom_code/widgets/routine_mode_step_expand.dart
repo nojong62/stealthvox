@@ -4313,27 +4313,39 @@ line had never been said. Never build the conversation on a line you had to gues
     return Padding(
       padding: const EdgeInsets.only(top: 12, bottom: 16),
       child: Center(
-        child: ElevatedButton.icon(
-          icon: _isPolishing
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(
-                      color: Colors.white, strokeWidth: 2),
-                )
-              : const Icon(Icons.auto_awesome, color: Color(0xFFFBBF24)),
-          label: Text(
-            _isPolishing ? "Polishing..." : "✨ Polished Version",
-            style: const TextStyle(color: Colors.white, fontSize: 15),
-          ),
+        // ElevatedButton.icon 대신 직접 조립한다. 글꼴 배율이 큰 기기에서
+        // 라벨이 버튼 폭을 넘겨 화면이 깨졌는데, Flexible로 감싸야 줄바꿈이
+        // 되기 때문이다. 가로 여백도 28→18로 줄여 한 줄이 버티는 폭을 넓혔다.
+        child: ElevatedButton(
           style: ElevatedButton.styleFrom(
             backgroundColor: const Color(0xFF1F2937),
             side: const BorderSide(color: Color(0xFFFBBF24), width: 1.5),
-            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
           ),
           onPressed: _isPolishing ? null : _polishSentenceInline,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _isPolishing
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                          color: Colors.white, strokeWidth: 2),
+                    )
+                  : const Icon(Icons.auto_awesome, color: Color(0xFFFBBF24)),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  _isPolishing ? "Polishing..." : "✨ Polished Version",
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white, fontSize: 15),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -4343,19 +4355,29 @@ line had never been said. Never build the conversation on a line you had to gues
     return Padding(
       padding: const EdgeInsets.only(top: 8, bottom: 16),
       child: Center(
-        child: ElevatedButton.icon(
-          icon: const Icon(Icons.refresh_rounded, color: Colors.white),
-          label: const Text(
-            "Suggest New Sentence",
-            style: TextStyle(color: Colors.white, fontSize: 15),
-          ),
+        // 위 Polished 버튼과 같은 이유로 직접 조립한다.
+        child: ElevatedButton(
           style: ElevatedButton.styleFrom(
             backgroundColor: const Color(0xFF9333EA),
-            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
           ),
           onPressed: _suggestNewSentence,
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.refresh_rounded, color: Colors.white),
+              SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  "Suggest New Sentence",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white, fontSize: 15),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -4378,16 +4400,25 @@ line had never been said. Never build the conversation on a line you had to gues
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // 헤더 글자는 시스템 글꼴 배율을 그대로 탄다. 실기기(font_scale 1.7,
+          // 밀도 540)에서 이 줄이 카드 폭을 넘어 화면이 깨졌다. Flexible로
+          // 감싸 줄바꿈을 허용한다 — 잘라내면 무슨 카드인지 안 보인다.
           const Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.check_circle_outline,
-                  color: Color(0xFF60A5FA), size: 15),
+              Padding(
+                padding: EdgeInsets.only(top: 2),
+                child: Icon(Icons.check_circle_outline,
+                    color: Color(0xFF60A5FA), size: 15),
+              ),
               SizedBox(width: 6),
-              Text("✅ Completed Sentence",
-                  style: TextStyle(
-                      color: Color(0xFF60A5FA),
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold)),
+              Flexible(
+                child: Text("✅ Completed Sentence",
+                    style: TextStyle(
+                        color: Color(0xFF60A5FA),
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold)),
+              ),
             ],
           ),
           const SizedBox(height: 12),
@@ -4439,17 +4470,26 @@ line had never been said. Never build the conversation on a line you had to gues
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // 완성문장 카드와 같은 이유로 감싼다.
           const Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.auto_awesome, color: Color(0xFFFBBF24), size: 15),
+              Padding(
+                padding: EdgeInsets.only(top: 2),
+                child:
+                    Icon(Icons.auto_awesome, color: Color(0xFFFBBF24), size: 15),
+              ),
               SizedBox(width: 6),
-              Text("Polished Sentence",
-                  style: TextStyle(
-                      color: Color(0xFFFBBF24),
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold)),
+              Flexible(
+                child: Text("Polished Sentence",
+                    style: TextStyle(
+                        color: Color(0xFFFBBF24),
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold)),
+              ),
             ],
           ),
+
           const SizedBox(height: 12),
           if (_isPolishing)
             const Center(
