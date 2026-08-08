@@ -1957,12 +1957,21 @@ $kSpokenReplyLengthPolicy
         _scrollToBottom();
       }
 
+      // ⏱️ [AI-GEN] 턴 뒷구간(생성→합성→재생)에서 여기만 계측이 없었다.
+      //   합성·재생은 어댑터가 playback_start의 ttfbMs/startMs로 찍고, 재생
+      //   완료는 [GPT-HISTORY]가 표시한다. 이 한 줄이 있어야 셋이 갈린다.
+      final aiGenSw = Stopwatch()..start();
       final aiOriginal = await UnifiedBrain.generateCircleMemberTurn(
         apiKey: _openAiKey,
         systemPrompt: _buildCircleMemberInstructions(),
         userText: userOriginal,
         history: _recentHistory,
       );
+      aiGenSw.stop();
+      _log(
+          '⏱️ [AI-GEN]',
+          'turn=$currentTurnId model=gpt-4o-mini '
+              'elapsedMs=${aiGenSw.elapsedMilliseconds} len=${aiOriginal.length}');
       if (aiOriginal.isEmpty) {
         throw StateError('Circle Talk response did not complete.');
       }
