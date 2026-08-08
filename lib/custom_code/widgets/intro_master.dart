@@ -1226,26 +1226,6 @@ class _IntroMasterState extends State<IntroMaster> {
             title: '대화가 끝나면 영어로 복습하세요',
             description: '방금 나눈 이야기가 영어 표현과 복습 자료로 자동 정리됩니다.',
           ),
-          const SizedBox(height: 16),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(13),
-            decoration: BoxDecoration(
-              color: const Color(0xFF756BE8).withValues(alpha: 0.09),
-              borderRadius: BorderRadius.circular(13),
-              border: Border.all(
-                color: const Color(0xFF756BE8).withValues(alpha: 0.15),
-              ),
-            ),
-            child: const Text(
-              '체험이 끝나면 인도 수출 무역회사, 스타트업 개발팀처럼 원하는 서클을 직접 만들 수 있습니다.',
-              style: TextStyle(
-                color: Color(0xFFC9C6EA),
-                fontSize: 13,
-                height: 1.45,
-              ),
-            ),
-          ),
         ],
       ),
     );
