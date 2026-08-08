@@ -46,7 +46,7 @@ class KoreanTurnValidationResult {
 class KoreanTurnValidator {
   KoreanTurnValidator._();
 
-  static const String retryLine = '제가 잘 못 들은 것 같아요. 다시 말씀해 주세요.';
+  static const String retryLine = '제가 잘못들은 부분이 있는 것 같아요. 다시 말씀해 주세요.';
 
   /// 연속 반려 탈출구. 이만큼 연달아 막히면 다음 턴은 판정과 무관하게 통과시킨다.
   ///
