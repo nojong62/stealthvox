@@ -4543,7 +4543,16 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
       final uid = FirebaseAuth.instance.currentUser?.uid ?? 'anonymous';
       final prefs = await SharedPreferences.getInstance();
       final cursorKey = '$_scenarioCursorPrefix$uid';
-      final cursor = prefs.getInt(cursorKey) ?? 0;
+      // 🎲 [시작점 무작위] 커서가 없으면(첫 실행·재설치·데이터 삭제) 0이 아니라
+      //   아무 자리에서 시작한다. 순서 자체는 uid로 고정돼 있어서, 커서만 0으로
+      //   돌아가면 앱을 지웠다 깔 때마다 **같은 상황이 또 첫 추천**으로 나왔다.
+      //   시작점만 흩어 놓으면 그 뒤는 지금처럼 순서대로 돌아 한 바퀴 안에
+      //   중복이 없다.
+      var cursor = prefs.getInt(cursorKey);
+      if (cursor == null) {
+        cursor = Random().nextInt(pool.length);
+        await prefs.setInt(cursorKey, cursor);
+      }
       final round = cursor ~/ pool.length; // 몇 바퀴째인지
       // 회원 uid와 바퀴 수로 순서를 섞는다. 회원마다 순서가 다르고,
       // 두 바퀴째부터는 순서까지 새로 섞여 같은 흐름이 반복되지 않는다.

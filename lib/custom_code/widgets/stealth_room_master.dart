@@ -405,7 +405,14 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       final uid = FirebaseAuth.instance.currentUser?.uid ?? 'anonymous';
       final prefs = await SharedPreferences.getInstance();
       final cursorKey = '$_circleDomainCursorKey$uid';
-      final cursor = prefs.getInt(cursorKey) ?? 0;
+      // 🎲 [시작점 무작위] 시나리오톡과 같은 이유. 커서가 없으면 0이 아니라
+      //   아무 자리에서 시작한다. 순서는 uid로 고정이라 커서만 0으로 돌아가면
+      //   재설치 때마다 같은 분야가 또 첫 추천으로 나온다.
+      var cursor = prefs.getInt(cursorKey);
+      if (cursor == null) {
+        cursor = Random().nextInt(_circleDomains.length);
+        await prefs.setInt(cursorKey, cursor);
+      }
       final round = cursor ~/ _circleDomains.length;
       final order = List<int>.generate(_circleDomains.length, (i) => i)
         ..shuffle(Random(uid.hashCode ^ (round * 0x9E3779B9)));
