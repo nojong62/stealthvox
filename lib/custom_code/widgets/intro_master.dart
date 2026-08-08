@@ -988,10 +988,14 @@ class _IntroMasterState extends State<IntroMaster> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // 워드마크 Row 안에 Flexible이 있어서, 여기서 그냥 놓으면
+                  // 폭이 무한대로 들어가 "unbounded width" 오류가 난다.
+                  // Flexible로 감싸 폭을 묶고, 남는 자리는 배지가 가져간다.
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      _buildBrandMark(),
+                      Flexible(child: _buildBrandMark()),
+                      const SizedBox(width: 8),
                       _buildDuoPromoBadge(),
                     ],
                   ),
