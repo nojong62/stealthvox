@@ -221,6 +221,8 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   void _switchMode(int newMode) {
     if (newMode == 2) {
       setState(() => _circleSetupOpen = true);
+      // 비어 있으면 첫 제안을 미리 받아 둔다. (Scenario Talk과 같은 규칙)
+      if (_circleController.text.trim().isEmpty) _recommendCircle();
       return;
     }
     if (newMode == 3) {

@@ -3485,7 +3485,7 @@ $kSpokenReplyLengthPolicy
       child: SafeArea(
         child: Column(children: [
           _buildTopBar(),
-          const SizedBox(height: 10),
+          _buildCircleTitle(),
           Expanded(
             child: Stack(children: [
               _buildChatList(),
@@ -3503,6 +3503,31 @@ $kSpokenReplyLengthPolicy
           ),
           _buildControlArea(bottomPad),
         ]),
+      ),
+    );
+  }
+
+  /// 어떤 서클에서 이야기하고 있는지가 대화 내내 보여야 한다. 하단 구석에
+  /// 회색으로 두면 말풍선이 쌓일수록 눈에 안 들어온다. Scenario Talk의
+  /// 상황 제목과 같은 자리·같은 규칙으로 올린다 — 두 줄까지만 쓰고 넘치면
+  /// 줄여 말풍선 공간을 먹지 않는다.
+  Widget _buildCircleTitle() {
+    final circle = widget.circleDescription.trim();
+    if (circle.isEmpty) return const SizedBox(height: 10);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+      child: Text(
+        circle,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: Colors.white70,
+          fontSize: 13 * _fontScale,
+          fontWeight: FontWeight.w600,
+          height: 1.35,
+          letterSpacing: 0.2,
+        ),
       ),
     );
   }
@@ -3686,20 +3711,14 @@ $kSpokenReplyLengthPolicy
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text("Circle Talk",
+                  children: const [
+                    // 서클 이름은 _buildCircleTitle로 상단에 올렸다. 여기에
+                    // 두 번 쓰면 같은 글자가 화면 위아래에 겹친다.
+                    Text("Circle Talk",
                         style: TextStyle(
                             color: Colors.white54,
                             fontSize: 20,
                             fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 2),
-                    Text(
-                      widget.circleDescription,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style:
-                          const TextStyle(color: Colors.white30, fontSize: 12),
-                    ),
                   ],
                 ),
               ),
