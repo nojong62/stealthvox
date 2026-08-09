@@ -2084,15 +2084,13 @@ line had never been said. Never build the conversation on a line you had to gues
           '합치기: len=${_pendingTranscript.length} (${waitMs}ms 대기창 리셋, source=$source)');
     }
 
-    // UI: 접수된 발화를 HOST_TEMP 풍선에 실시간 반영
+    // Deepgram은 발화 종료 경계만 잡는다. gpt-4o-transcribe가 확정한 한국어
+    // 문장이 나오기 전에는 임시 말풍선(점 3개)을 띄우지 않는다 — 내용이 없는
+    // 풍선이 먼저 떴다가 글자로 바뀌면 화면이 두 번 움직인다.
+    // (Circle Talk과 같은 규칙)
     if (mounted) {
       setState(() {
         _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-        _localMessages.add({
-          'role': 'HOST_TEMP',
-          'target': '...',
-          'original': '...', // Deepgram 원문 숨기기
-        });
       });
     }
 
