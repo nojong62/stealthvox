@@ -112,9 +112,12 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   // 말이 끝난 시점부터 700+600=1.3초가 흘렀다. 그 600ms를 없앤다.
   // 되돌리려면 이 값만 올리면 된다.
   static const int COMMIT_WAIT_SPEECH_FINAL_MS = 0;
-  // UtteranceEnd는 다르다 — "700ms 안에 확정을 못 냈다"는 뜻이라 여유를 둔다.
-  static const int COMMIT_WAIT_UNCERTAIN_MS =
-      1100; // UtteranceEnd/speechFinal=false 시 여유 대기
+  // UtteranceEnd 경로. 실측(2026-08-09)에서 6턴 중 5턴이 이쪽으로 온다 —
+  // endpointing=700이 speech_final을 거의 못 내고 utterance_end_ms=1200 폴백이
+  // 사실상 기본값이다. 그 1200ms를 이미 기다린 신호 위에 1100ms를 더 얹으면
+  // 글자가 뜨기까지 2.3초가 순수 대기였다(실제 작업은 전사 893ms뿐).
+  // 합치기 여유만 남기고 줄인다. 되돌리려면 이 값만 올리면 된다.
+  static const int COMMIT_WAIT_UNCERTAIN_MS = 300;
   bool _lastTurnWasSpeechFinal = false; // 마지막 onTurnEnded 이벤트 타입 기록
   final List<Uint8List> _turnPcmChunks = <Uint8List>[];
   int _turnPcmBytes = 0;
