@@ -988,15 +988,25 @@ class _IntroMasterState extends State<IntroMaster> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // 워드마크 Row 안에 Flexible이 있어서, 여기서 그냥 놓으면
-                  // 폭이 무한대로 들어가 "unbounded width" 오류가 난다.
-                  // Flexible로 감싸 폭을 묶고, 남는 자리는 배지가 가져간다.
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  // 배지를 워드마크와 같은 Row에 두면 둘이 폭을 나눠 갖고,
+                  // 상표인 "StealthVox"가 "StealthV…"로 잘렸다. 배지를 Stack
+                  // 위로 띄워 코너에 비스듬히 붙인다 — 우표처럼. 그러면 워드마크는
+                  // 줄 전체를 쓰고, 배지는 흐름에서 폭을 가져가지 않는다.
+                  Stack(
+                    clipBehavior: Clip.none,
                     children: [
-                      Flexible(child: _buildBrandMark()),
-                      const SizedBox(width: 8),
-                      _buildDuoPromoBadge(),
+                      SizedBox(
+                        width: double.infinity,
+                        child: _buildBrandMark(),
+                      ),
+                      Positioned(
+                        top: -2,
+                        right: -8,
+                        child: Transform.rotate(
+                          angle: -0.7853981633974483, // -45°
+                          child: _buildDuoPromoBadge(),
+                        ),
+                      ),
                     ],
                   ),
                   SizedBox(height: compact ? 56 : 78),
