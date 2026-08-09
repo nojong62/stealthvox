@@ -4694,10 +4694,14 @@ RULES — follow exactly:
                     controlButtons,
                     const SizedBox(width: 6),
                   ],
-                  // 말풍선 본체 (탭 → Keepers 저장)
+                  // 말풍선 본체 (길게 누르기 → Keepers 저장)
+                  //   가볍게 스치기만 해도 저장돼서, 스크롤하다 손이 닿거나
+                  //   대사를 눈으로 짚는 것만으로 Keepers가 쌓였다. 저장은
+                  //   의도가 있어야 하는 동작이므로 길게 누르기로 옮긴다.
                   Flexible(
                     child: GestureDetector(
-                      onTap: () => _saveToKeepers(
+                      behavior: HitTestBehavior.opaque,
+                      onLongPress: () => _saveToKeepers(
                         messageDocId: docId,
                         translatedText: translated,
                         originalText: original,

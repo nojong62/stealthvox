@@ -505,7 +505,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
                 Text("저장된 표현이 없습니다.",
                     style: GoogleFonts.notoSans(color: Colors.white54)),
                 const SizedBox(height: 8),
-                Text("대화 기록에서 대사를 탭하면 여기에 저장됩니다.",
+                Text("대화 기록에서 대사를 길게 누르면 여기에 저장됩니다.",
                     style: GoogleFonts.notoSans(
                         color: Colors.white30, fontSize: 12)),
               ],
@@ -2033,7 +2033,7 @@ AI 발음과 내 발음을 전체 문장으로 비교하며
 AI 발음을 닮아가는 정밀 훈련입니다.
 
 💾 Keepers — 내 표현 보관함
-마음에 드는 문장을 탭하면 저장.
+마음에 드는 문장을 길게 누르면 저장.
 기록을 지워도 Keepers는 남습니다.
 
 ⏸️ Auto Pause — 자동 과금 보호
