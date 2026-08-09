@@ -274,14 +274,20 @@ misrecognized words. You never hear the audio — judge the text itself.
 Do NOT answer, and do NOT repair it by guessing, when any of these holds:
 - The line does not hold together as $nativeLang, or breaks off mid-thought.
 - A word sits so oddly that the meaning cannot be recovered from this scene.
-- Making it make sense would require inventing a subject, object, or verb.
+- Making it make sense would require inventing something this scene has never
+  established.
 In that case reply with EXACTLY this one line and nothing else:
 $askBackLine
 Say nothing before or after it. Do not stay in character for this one line, and
-do not add a reaction or a question of your own. Being short is not by itself a
-reason to ask back — a clear short line is fine. Once the user says it again,
+do not add a reaction or a question of your own. Once the user says it again,
 continue the scene from their new words as if the unclear line had never been
 said. Never build the scene on a line you had to guess.
+
+A dropped subject or object is normal speech, not damage. If your own previous
+line supplies what was left out, the turn is complete — fill it in from the
+scene and answer. A bare yes, no, agreement, refusal, or pointing word that
+answers the question you just asked is a whole turn on its own. Being short is
+never by itself a reason to ask back.
 ''';
   }
 
