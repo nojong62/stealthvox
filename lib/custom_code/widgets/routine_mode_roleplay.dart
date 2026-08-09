@@ -107,8 +107,12 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   // 대기 중 새 발화 오면 합쳐서 처리 (최종 한 덩어리로)
   String _pendingTranscript = ''; // 대기 중인 유저 발화 누적
   Timer? _commitTimer; // "진짜 끝났는지" 확정 타이머
-  static const int COMMIT_WAIT_SPEECH_FINAL_MS =
-      600; // speechFinal=true 시 빠른 응답
+  // speech_final은 Deepgram이 endpointing=700ms 침묵을 이미 확인하고 보내는
+  // 신호다. 그 위에 앱이 또 기다리면 같은 판단을 두 번 사는 셈이고, 실제로
+  // 말이 끝난 시점부터 700+600=1.3초가 흘렀다. 그 600ms를 없앤다.
+  // 되돌리려면 이 값만 올리면 된다.
+  static const int COMMIT_WAIT_SPEECH_FINAL_MS = 0;
+  // UtteranceEnd는 다르다 — "700ms 안에 확정을 못 냈다"는 뜻이라 여유를 둔다.
   static const int COMMIT_WAIT_UNCERTAIN_MS =
       1100; // UtteranceEnd/speechFinal=false 시 여유 대기
   bool _lastTurnWasSpeechFinal = false; // 마지막 onTurnEnded 이벤트 타입 기록
