@@ -118,9 +118,6 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   int _pipelineGeneration = 0;
   bool _aiTurnActive = false;
 
-  /// 게이트가 연달아 반려한 횟수. 통과하면 0으로 돌아간다. [GATE-ESCAPE] 참조.
-  int _consecutiveGateRejects = 0;
-
   void _log(String tag, String msg) {
     final ts = DateTime.now().toIso8601String().substring(11, 23);
     final line = '[$ts] $tag $msg';
@@ -1308,10 +1305,9 @@ said. Never build the scene on a line you had to guess.
       return;
     }
 
-    // 🗣️ 확정된 유저 문장을 검증보다 먼저 띄운다. 검증은 gpt-4o-mini 왕복이라
-    //   그 뒤에 두면 유저가 자기 말을 글자로 보기까지 왕복을 하나 더 기다린다.
-    //   말은 이미 끝났고 문장도 확정됐는데 화면은 "..."에 머물러 있었다.
-    //   반려되면 아래 분기가 이 임시 말풍선을 그대로 걷어낸다.
+    // 🗣️ 확정된 유저 문장을 바로 띄운다. 말은 이미 끝났고 문장도 확정됐는데
+    //   화면이 "..."에 머물러 있을 이유가 없다. 답변 생성이 되묻기로 나오면
+    //   아래 [ASK-BACK] 분기가 이 임시 말풍선을 걷어낸다.
     if (mounted) {
       setState(() {
         _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
@@ -1324,48 +1320,13 @@ said. Never build the scene on a line you had to guess.
       _scrollToBottom();
     }
 
-    final validation = await KoreanTurnValidator.validate(
-      apiKey: _openAiKey,
-      transcribedText: userKorean,
-      mode: 'scenario_talk',
-      modeContext: '''Situation: $_scenarioSituation
-AI role: ${_roleplayPartnerLabel.trim()}
-User role: ${_roleplayUserLabel.trim()}''',
-      recentConversation: _recentKoreanConversation(),
-    );
-    if (!mounted || generation != _pipelineGeneration) return;
-    // 장애로 통과시킨 턴과 모델이 승인한 턴을 로그에서 갈라 본다. 원문은
-    // 싣지 않는다 — 길이와 판정 결과까지만 남긴다.
-    _log(
-        '[TURN-VALIDATE]',
-        'mode=scenario_talk accepted=${validation.accepted} '
-            'failure=${validation.failure.name} '
-            'failOpen=${validation.failedOpen} '
-            'proceeded=${validation.accepted} reason=${validation.reason}');
-    if (!validation.accepted) {
-      // 🚪 [GATE-ESCAPE] Circle Talk과 같은 탈출구. 되묻기는 유저가 다시 말하면
-      //   풀린다는 전제인데, 게이트가 같은 문장을 계속 같게 판정하면 그 전제가
-      //   깨져 방을 나가는 것 말고는 방법이 없다.
-      _consecutiveGateRejects++;
-      if (_consecutiveGateRejects <= KoreanTurnValidator.maxConsecutiveRejects) {
-        // 👂 되묻기는 소리로만 나간다. 글자로 남기면 지우는 사람이 없어 방을
-        //   나갈 때까지 쌓이고, _recentKoreanConversation()이 그 문장을 다음 턴
-        //   컨텍스트로 넘겨 AI가 따라 되묻는다.
-        setState(() {
-          _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-        });
-        await _speakKoreanLine(KoreanTurnValidator.retryLine);
-        if (mounted && _isConversationActive) _startDeepgramListening();
-        return;
-      }
-      _log('[GATE-ESCAPE]',
-          'mode=scenario_talk forced_pass rejects=$_consecutiveGateRejects');
-    }
-    _consecutiveGateRejects = 0;
-    // 반려된 판정은 text가 비어 있다. 통과시킬 때는 전사 원문을 그대로 쓴다.
-    await _processScenarioTalkTurn(
-        validation.accepted ? validation.text : userKorean,
-        generation: generation);
+    // 🚪 [GATE] 이 모드의 게이트는 답변 생성기 하나다. KoreanTurnValidator는
+    //   "대화를 이어갈 수 있는 문장인가"를 묻는데, 답변 생성기가 이미 같은
+    //   판정을 하고 있다 — 못 알아들었으면 되묻기 문장을 내놓고, 그걸
+    //   [_isAskBackReply]가 잡아 유저 발화를 폐기한다. 같은 판정을 두 번 사면서
+    //   앞의 것이 답변 생성을 0.83초 붙잡고 있었다(2026-08-08 실측).
+    //   판정 자체를 없앤 게 아니라 두 번 사던 것을 한 번으로 줄인 것이다.
+    await _processScenarioTalkTurn(userKorean, generation: generation);
   }
 
   // ignore: unused_element
