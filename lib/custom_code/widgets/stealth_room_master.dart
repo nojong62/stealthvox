@@ -108,11 +108,19 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       });
     }
 
-    // 트라이얼 Anyone 자동 진입 — 메뉴 화면을 건너뛰고 바로 Anyone 모드로
+    // 트라이얼 Circle Talk 진입 — 모드 메뉴는 건너뛰되 서클 설정 화면은 띄운다.
+    //   기본 서클로 바로 넣으면 체험자가 어떤 서클에서 이야기하는지 모른 채
+    //   시작한다. 추천 하나를 미리 채워 두면 그대로 시작 버튼만 눌러도 되고,
+    //   마음에 안 들면 다시 받거나 직접 쓸 수 있다.
+    //   _anyoneMicInputAt은 _enterCircleTalk이 설정하므로 여기서 손대지 않는다.
     TrialFlowState.instance.restoreFromAppState();
     if (TrialFlowState.instance.isTrialAnyone) {
-      _anyoneMicInputAt = DateTime.now();
-      _currentMode = 2;
+      _circleSetupOpen = true;
+      // _recommendCircle은 setState를 부르므로 첫 프레임 뒤에 돌린다.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (_circleController.text.trim().isEmpty) _recommendCircle();
+      });
     }
   }
 
