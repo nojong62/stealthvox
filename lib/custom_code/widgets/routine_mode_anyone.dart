@@ -45,7 +45,6 @@ import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
 import '/custom_code/services/openai_connection_pool.dart';
 import '/custom_code/services/openai_transcribe_service.dart';
-import '/custom_code/services/korean_turn_validator.dart';
 import '/custom_code/services/session_rollover_summary.dart';
 import '/custom_code/services/tts_adapter.dart';
 import 'deepgram_confidence_probe.dart';
@@ -185,8 +184,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   bool _isPipelineRunning = false;
   bool _aiTurnActive = false;
 
-  /// 게이트가 연달아 반려한 횟수. 통과하면 0으로 돌아간다. [GATE-ESCAPE] 참조.
-  int _consecutiveGateRejects = 0;
   bool _isAiOpenerPlaying = false; // AI가 서클 일원으로 먼저 거는 첫 마디
   bool _openerDone = false; // 세션당 1회만
   bool _listeningReadyReported = false;
@@ -1894,10 +1891,8 @@ $kSpokenReplyLengthPolicy
       return;
     }
 
-    // 🗣️ 확정된 유저 문장을 검증보다 먼저 띄운다. 검증은 gpt-4o-mini 왕복이라
-    //   그 뒤에 두면 유저가 자기 말을 글자로 보기까지 왕복을 하나 더 기다린다.
-    //   말은 이미 끝났고 문장도 확정됐는데 화면은 비어 있었다. 반려되면 아래
-    //   분기가 이 임시 말풍선을 걷어낸다.
+    // 🗣️ 확정된 유저 문장을 바로 띄운다. 말은 이미 끝났고 문장도 확정됐는데
+    //   화면이 비어 있을 이유가 없다.
     if (mounted) {
       setState(() {
         _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
@@ -1910,53 +1905,20 @@ $kSpokenReplyLengthPolicy
       _scrollToBottom();
     }
 
-    final validation = await KoreanTurnValidator.validate(
-      apiKey: _openAiKey,
-      transcribedText: userOriginal,
-      mode: 'circle_talk',
-      modeContext: 'Selected circle: ${widget.circleDescription}',
-      recentConversation: _recentHistory
-          .map((turn) => '${turn['role']}: ${turn['content']}')
-          .join('\n'),
-    );
-    if (!mounted || pipelineGeneration != _pipelineGeneration) return;
-    // 장애로 통과시킨 턴과 모델이 승인한 턴을 로그에서 갈라 본다. 원문은
-    // 싣지 않는다 — 길이와 판정 결과까지만 남긴다.
-    _log(
-        '[TURN-VALIDATE]',
-        'mode=circle_talk accepted=${validation.accepted} '
-            'failure=${validation.failure.name} '
-            'failOpen=${validation.failedOpen} '
-            'proceeded=${validation.accepted} reason=${validation.reason}');
-    if (!validation.accepted) {
-      // 🚪 [GATE-ESCAPE] 연달아 막히면 빠져나갈 길을 열어 준다. 되묻기는 유저가
-      //   다시 말하면 풀린다는 전제인데, 게이트가 같은 문장을 계속 같게 판정하면
-      //   그 전제가 깨져 방을 나가는 것 말고는 방법이 없다. 과금은 그동안에도
-      //   계속 나간다.
-      _consecutiveGateRejects++;
-      if (_consecutiveGateRejects <= KoreanTurnValidator.maxConsecutiveRejects) {
-        setState(() {
-          // 못 알아들은 발화는 화면에 남기지 않는다. 위에서 미리 띄운 임시
-          // 말풍선을 걷어내야 유저가 다시 말한 것이 이 턴이 된다.
-          // 👂 되묻는 말도 소리로만 내보낸다. 글자로 남기면 지우는 사람이 없어
-          //   되묻을 때마다 말풍선이 쌓인다.
-          _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-        });
-        await _speakSystemLine(KoreanTurnValidator.retryLine);
-        if (mounted && _isConversationActive) {
-          _restartConfiguredListening(
-              expectedPipelineGeneration: pipelineGeneration);
-        }
-        return;
-      }
-      _log('[GATE-ESCAPE]',
-          'mode=circle_talk forced_pass rejects=$_consecutiveGateRejects');
-    }
-    _consecutiveGateRejects = 0;
-
-    // 반려된 판정은 text가 비어 있다. 통과시킬 때는 전사 원문을 그대로 쓴다.
+    // 🚪 [GATE] 이 모드의 방어는 위 _isNoiseTranscript 하나다.
+    //
+    //   KoreanTurnValidator를 여기서 걷어냈다. 실측(2026-08-09)에서 잡아야 할
+    //   것은 못 잡고 멀쩡한 것을 막았다 — "왜 오지 않았어?"를 세 번 연달아
+    //   반려해 유저가 갇혔고, 정작 잘못 들은 "외우지 않았어?"는 통과시켰다.
+    //   명백한 쓰레기(일본어 환청 "そうそう" 등)는 validator에 닿기도 전에
+    //   노이즈 게이트가 이미 폐기한다. 남은 건 매 턴 0.7~1.0초와 mini 호출
+    //   한 번뿐이었다.
+    //
+    //   대가 — 되묻기 자체가 사라진다. 전사가 그럴듯하게 틀리면 되묻지 않고
+    //   그대로 답한다. 다만 그건 validator도 못 잡던 경우다.
+    //   되살리려면 태그 circle-talk-before-gate-removal 참조.
     await _processCircleTalkTurn(
-      validation.accepted ? validation.text : userOriginal,
+      userOriginal,
       expectedPipelineGeneration: pipelineGeneration,
     );
   }
