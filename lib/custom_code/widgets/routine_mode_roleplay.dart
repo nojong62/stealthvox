@@ -125,6 +125,14 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   int _pipelineGeneration = 0;
   bool _aiTurnActive = false;
 
+  /// 🚪 [ASK-BACK-ESCAPE] 연속 되묻기 횟수. 정상 응답이 나오면 0으로 돌아간다.
+  ///
+  /// 되묻기는 "유저가 다시 말하면 풀린다"는 전제인데, 모델이 같은 문장을 계속
+  /// 같게 판정하면 그 전제가 깨져 방을 나가는 것 말고는 길이 없다. 실측
+  /// (2026-08-09)에서 멀쩡한 한국어가 세 번 연달아 막혔다.
+  int _consecutiveAskBacks = 0;
+  static const int _kMaxConsecutiveAskBacks = 2;
+
   void _log(String tag, String msg) {
     final ts = DateTime.now().toIso8601String().substring(11, 23);
     final line = '[$ts] $tag $msg';
@@ -278,11 +286,11 @@ $kSpokenReplyLengthPolicy
 [ASK BACK INSTEAD OF GUESSING]
 What you receive is speech-recognition output, not typed text, so it can contain
 misrecognized words. You never hear the audio — judge the text itself.
-Do NOT answer, and do NOT repair it by guessing, when any of these holds:
+Judge damage to the text, never the content. Bringing up something new, changing
+the subject, or saying something the scene has not mentioned is normal talk, not
+a recognition error. Do NOT answer, and do NOT repair it by guessing, only when:
 - The line does not hold together as $nativeLang, or breaks off mid-thought.
 - A word sits so oddly that the meaning cannot be recovered from this scene.
-- Making it make sense would require inventing something this scene has never
-  established.
 In that case reply with EXACTLY this one line and nothing else:
 $askBackLine
 Say nothing before or after it. Do not stay in character for this one line, and
@@ -1417,27 +1425,72 @@ never by itself a reason to ask back.
       //   되묻는 말은 소리로만 내보낸다 — 글자로 남기면 지우는 사람이 없어
       //   쌓이고, _recentKoreanConversation()이 그걸 다음 턴 컨텍스트로
       //   넘겨 AI가 따라 되묻는다.
-      if (_isAskBackReply(aiKorean)) {
-        askedBack = true;
-        _turnCounter--;
-        setState(() {
-          _localMessages.remove(hostBubble);
-        });
-        _log('[ASK-BACK]', 'turn=$turnNumber 되묻기 → 유저 발화 폐기(화면/히스토리 미기록)');
-        await _speakKoreanLine(aiKorean);
-        return;
+      String replyKorean = aiKorean;
+      if (_isAskBackReply(replyKorean)) {
+        _consecutiveAskBacks++;
+        if (_consecutiveAskBacks > _kMaxConsecutiveAskBacks) {
+          // 🚪 [ASK-BACK-ESCAPE] 갇혔다. 되묻지 말라고 못 박고 한 번만 다시
+          //   청한다. 평소 턴에는 mini가 1회 그대로이고, 이 경로에만 1회가
+          //   더 나간다 — 유저가 같은 말을 네 번째 반복하는 것보다 싸다.
+          _log('[ASK-BACK-ESCAPE]',
+              'turn=$turnNumber consecutive=$_consecutiveAskBacks → 되묻기 금지 재요청');
+          final forced = await RoleplayBrain.generateKoreanTurn(
+            apiKey: _openAiKey,
+            instructions: '${_buildScenarioMemberInstructions()}\n'
+                '\n'
+                '[OVERRIDE — THIS TURN ONLY]\n'
+                'You already asked the user to repeat themselves '
+                '$_consecutiveAskBacks times in a row and they said essentially '
+                'the same thing again. Asking back once more would strand them. '
+                'Do NOT ask back. Take the line at face value, decide what it '
+                'most likely means in this scene, and answer it in character.',
+            userText: userKorean,
+            recentConversation: recentConversation,
+          );
+          if (!mounted ||
+              !_isConversationActive ||
+              generation != _pipelineGeneration ||
+              turnNumber != _turnCounter) {
+            return;
+          }
+          // 재요청도 되묻거나 비면 그때는 평소 되묻기로 내보낸다.
+          if (forced.trim().isNotEmpty && !_isAskBackReply(forced)) {
+            replyKorean = forced;
+            _consecutiveAskBacks = 0;
+          }
+        }
+        if (_isAskBackReply(replyKorean)) {
+          // 👂 되묻기 턴이면 유저 발화를 버린다. 화면에도 히스토리에도 남기지
+          //   않고 턴 번호도 되돌려, 유저가 다시 말한 것이 이 턴이 되게 한다.
+          //   잘못 들은 문장 위에 장면을 이어 붙이면 그 뒤가 전부 어긋난다.
+          //   되묻는 말은 소리로만 내보낸다 — 글자로 남기면 지우는 사람이 없어
+          //   쌓이고, _recentKoreanConversation()이 그걸 다음 턴 컨텍스트로
+          //   넘겨 AI가 따라 되묻는다.
+          askedBack = true;
+          _turnCounter--;
+          setState(() {
+            _localMessages.remove(hostBubble);
+          });
+          _log('[ASK-BACK]',
+              'turn=$turnNumber 되묻기 → 유저 발화 폐기(화면/히스토리 미기록)');
+          await _speakKoreanLine(replyKorean);
+          return;
+        }
+      } else {
+        _consecutiveAskBacks = 0;
       }
+      final aiKoreanFinal = replyKorean;
 
       setState(() {
         _localMessages.add(<String, dynamic>{
           'role': 'SYSTEM',
-          'target': aiKorean,
+          'target': aiKoreanFinal,
           'original': '',
         });
         aiIndex = _localMessages.length - 1;
       });
       _scrollToBottom();
-      await _speakKoreanLine(aiKorean);
+      await _speakKoreanLine(aiKoreanFinal);
 
       final hostLine = <String, dynamic>{
         'role': 'HOST',
@@ -1445,7 +1498,7 @@ never by itself a reason to ask back.
       };
       final systemLine = <String, dynamic>{
         'role': 'SYSTEM',
-        'original_text': aiKorean,
+        'original_text': aiKoreanFinal,
       };
       _saveTurnToFirestore(<Map<String, dynamic>>[hostLine, systemLine]);
       await _saveHistoryMessages(<Map<String, dynamic>>[hostLine, systemLine]);
