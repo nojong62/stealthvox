@@ -17,6 +17,11 @@ import '/auth/account_discovery_service.dart';
 
 enum IntroScreen { welcome, auth, accountDiscovery }
 
+/// 워드마크 줄이 실제로 차지하는 높이는 36인데, 그 위에 비스듬히 얹은 Duo 배지가
+/// 훨씬 넓게 그려진다. 줄 높이를 이만큼 늘려 배지 주변까지 탭이 닿게 하고,
+/// 늘어난 만큼(= 이 값 - 36)은 바로 아래 여백에서 뺀다.
+const double _kBrandRowTapHeight = 64;
+
 class IntroMaster extends StatefulWidget {
   const IntroMaster({
     super.key,
@@ -995,9 +1000,35 @@ class _IntroMasterState extends State<IntroMaster> {
                   Stack(
                     clipBehavior: Clip.none,
                     children: [
+                      // Stack 높이를 워드마크(36)보다 넉넉히 잡아 둔다. 배지는
+                      // 45° 돌아가 있어서 자기 자리보다 훨씬 크게 그려지는데,
+                      // Stack 밖으로 넘친 부분은 그려지기만 하고 탭을 못 받는다
+                      // — 부모 크기를 벗어난 좌표에서 히트 테스트가 끊기기
+                      // 때문이다. 그래서 "AD" 쪽 끝을 눌러도 아무 일이 없었다.
+                      // 늘린 높이만큼은 아래 여백에서 빼서 화면은 그대로 둔다.
                       SizedBox(
                         width: double.infinity,
-                        child: _buildBrandMark(),
+                        height: _kBrandRowTapHeight,
+                        child: Align(
+                          alignment: Alignment.topLeft,
+                          child: _buildBrandMark(),
+                        ),
+                      ),
+                      // 배지 주변까지 받아 주는 탭 판정 영역. 배지보다 먼저
+                      // 놓아 아래에 깔아 둔다 — 히트 테스트는 뒤에서부터라
+                      // 배지 본체를 누르면 잉크 반응이 그대로 살고, 빗나간
+                      // 손가락만 이 사각형이 받는다. 워드마크와는 겹치지 않는
+                      // 오른쪽 끝에만 둔다.
+                      Positioned(
+                        top: 0,
+                        right: 0,
+                        bottom: 0,
+                        width: 132,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: _showDuoPromo,
+                          child: const SizedBox.expand(),
+                        ),
                       ),
                       Positioned(
                         top: -2,
@@ -1009,7 +1040,9 @@ class _IntroMasterState extends State<IntroMaster> {
                       ),
                     ],
                   ),
-                  SizedBox(height: compact ? 56 : 78),
+                  SizedBox(
+                    height: (compact ? 56 : 78) - (_kBrandRowTapHeight - 36),
+                  ),
                   Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
