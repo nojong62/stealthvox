@@ -221,15 +221,12 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   }
 
   // 📦 [Box 5: 룸 입장 관리 (Mutex Lock 적용)]
-  void _handleEnterRoom(BuildContext context, var appState) async {
+  void _handleEnterRoom(BuildContext context) async {
     if (_isActionLocked) return;
     _isActionLocked = true;
     try {
       FocusScope.of(context).unfocus();
-      if (appState.hasConfirmedZeroTime) {
-        context.pushNamed('Store');
-        return;
-      }
+      if (!guardBillingEntry(context)) return;
       if (currentUserReference == null) return;
 
       // DB 통신 분리: 대화방 히스토리 문서 생성
@@ -764,7 +761,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 24, vertical: 10),
                         child: GestureDetector(
-                          onTap: () => _handleEnterRoom(context, appState),
+                          onTap: () => _handleEnterRoom(context),
                           child: Container(
                             height: 64,
                             decoration: BoxDecoration(

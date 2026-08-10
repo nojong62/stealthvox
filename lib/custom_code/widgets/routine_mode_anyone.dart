@@ -871,6 +871,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   @override
   void initState() {
     super.initState();
+    // 잔여시간이 0이 되면 StealthRoom이 바깥에서 방을 닫는다. 화면만 되돌리면
+    // 히스토리 저장과 빈 방 삭제가 빠지므로, 그 경로를 여기에 걸어 둔다.
+    StealthRoomMaster.saveAndExitCurrentMode = _handleAutoSaveAndExit;
     BillingTicker.instance.appInForeground.addListener(_onForegroundChanged);
     _audioRecorder = widget.preparedAudioRecorder ?? AudioRecorder();
     _ownsAudioRecorder = widget.preparedAudioRecorder == null;
@@ -946,6 +949,11 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     // 🧹 [DISPOSE-GUARD] dispose 중에는 setState가 금지된다(위젯이 이미 defunct).
     //   이 플래그를 먼저 세워 _stopEverything의 setState를 건너뛴다.
     _isDisposing = true;
+    // 다음 모드가 이미 자기 것을 걸었을 수 있다(새 위젯의 initState가 옛
+    // 위젯의 dispose보다 먼저 돈다). 내 것일 때만 지운다.
+    if (StealthRoomMaster.saveAndExitCurrentMode == _handleAutoSaveAndExit) {
+      StealthRoomMaster.saveAndExitCurrentMode = null;
+    }
     BillingTicker.instance.appInForeground.removeListener(_onForegroundChanged);
     _costTracker.logSnapshot(reason: 'dispose');
     disposeTrialTimer();

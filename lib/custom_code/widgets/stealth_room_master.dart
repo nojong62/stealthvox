@@ -43,6 +43,13 @@ class StealthRoomMaster extends StatefulWidget {
 
   static void Function()? exitCurrentMode;
 
+  /// 지금 열려 있는 모드의 저장·정리 경로(`_handleAutoSaveAndExit`).
+  ///
+  /// [exitCurrentMode]는 화면만 메뉴로 되돌린다 — 그것만 부르면 방을 강제로
+  /// 닫을 때 히스토리 저장과 빈 방 삭제가 통째로 빠진다. 잔여시간 소진처럼
+  /// 바깥에서 방을 닫아야 할 때는 각 모드가 스스로 등록해 둔 이 경로를 쓴다.
+  static Future<void> Function()? saveAndExitCurrentMode;
+
   @override
   _StealthRoomMasterState createState() => _StealthRoomMasterState();
 }
@@ -90,6 +97,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       unawaited(_refreshAnyonePrewarmAfterExit());
     };
     AppsFlyerManager.duoInviteSignal.addListener(_onDuoInviteSignal);
+    BillingTicker.instance.balanceExhausted.addListener(_onBalanceExhausted);
     _anyoneAudioReady = _prepareAnyoneAudioInput();
     unawaited(_prepareFirstUserResponse());
 
@@ -190,6 +198,45 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     }
   }
 
+  /// 저장이 몇 초 걸리는 사이에 신호가 또 와서 두 번 나가는 것을 막는다.
+  bool _handlingExhaustion = false;
+
+  /// 방 안에서 잔여시간이 0이 됐을 때 — 네 모드 전부 여기서 닫는다.
+  ///
+  /// 모드마다 따로 붙이지 않는 이유는 나가는 순서 때문이다. 모드가 스스로
+  /// 스토어로 이동하면 방이 그 아래 살아남아 마이크와 소켓이 물려 있고, 반대로
+  /// 여기서 화면만 메뉴로 되돌리면 히스토리 저장이 빠진다. 모드가 등록해 둔
+  /// 저장 경로를 **먼저 끝내고** 그 다음에 스토어로 보낸다.
+  Future<void> _onBalanceExhausted() async {
+    if (!BillingTicker.instance.balanceExhausted.value) return;
+    // 메뉴·설정 화면은 과금하지 않으니 내보낼 이유가 없다.
+    if (_currentMode == null) return;
+    if (_handlingExhaustion) return;
+    _handlingExhaustion = true;
+    debugPrint('[StealthRoom] balance exhausted — closing mode $_currentMode');
+    try {
+      final saveAndExit = StealthRoomMaster.saveAndExitCurrentMode;
+      if (saveAndExit != null) {
+        await saveAndExit();
+      } else {
+        // 등록이 없는 모드는 없지만, 남아 있으면 무료로 계속 도는 쪽이 더
+        // 나쁘다. 저장은 포기하더라도 방은 닫는다.
+        BillingTicker.instance.pause();
+        StealthRoomMaster.exitCurrentMode?.call();
+      }
+      if (!mounted) return;
+      dismissRoutesAbove(context);
+      showBillingBlockedNotice(
+        context,
+        message: '잔여 시간이 모두 소진되어 대화를 저장하고 종료했습니다.',
+        offerStore: false,
+      );
+      context.pushNamed('Store');
+    } finally {
+      _handlingExhaustion = false;
+    }
+  }
+
   /// 딥링크 신호 수신 후 StealthRoom 메뉴에서 Duo로 진입한다.
   void _onDuoInviteSignal() {
     if (!mounted) return;
@@ -207,6 +254,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   @override
   void dispose() {
     AppsFlyerManager.duoInviteSignal.removeListener(_onDuoInviteSignal);
+    BillingTicker.instance.balanceExhausted.removeListener(_onBalanceExhausted);
     WidgetsBinding.instance.removeObserver(this);
     StealthRoomMaster.exitCurrentMode = null;
     _circleController.dispose();
@@ -227,6 +275,9 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   }
 
   void _switchMode(int newMode) {
+    // 모드 진입 = 과금 시작이다. 카드를 누르는 지점에서 막아, 서클·시나리오를
+    // 다 채워 넣은 뒤에 되돌려보내는 일이 없게 한다.
+    if (!guardBillingEntry(context)) return;
     if (newMode == 2) {
       setState(() => _circleSetupOpen = true);
       // 비어 있으면 첫 제안을 미리 받아 둔다. (Scenario Talk과 같은 규칙)
@@ -246,6 +297,9 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   }
 
   void _enterCircleTalk(String description) {
+    // 설정 화면을 열어 둔 사이에 시간이 바닥날 수 있다(다른 기기에서 소진 등).
+    // 실제로 과금이 시작되는 이 문에서 한 번 더 본다.
+    if (!guardBillingEntry(context)) return;
     final clean = description.replaceAll(RegExp(r'\s+'), ' ').trim();
     if (clean.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -375,6 +429,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   }
 
   void _enterScenarioTalk() {
+    if (!guardBillingEntry(context)) return;
     final situation = _situationController.text.trim();
     final aiRole = _aiRoleController.text.trim();
     final userRole = _userRoleController.text.trim();

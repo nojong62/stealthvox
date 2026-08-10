@@ -270,6 +270,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   @override
   void initState() {
     super.initState();
+    // 잔여시간 소진 시 StealthRoom이 이 경로로 방을 닫는다(호스트만 해당 —
+    // 게스트는 과금 대상이 아니라 소진 신호 자체가 뜨지 않는다).
+    StealthRoomMaster.saveAndExitCurrentMode = _handleAutoSaveAndExit;
     WidgetsBinding.instance.addObserver(this);
     _fetchKeys();
     _audioPlayer.setVolume(1.0);
@@ -318,6 +321,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
   @override
   void dispose() {
+    if (StealthRoomMaster.saveAndExitCurrentMode == _handleAutoSaveAndExit) {
+      StealthRoomMaster.saveAndExitCurrentMode = null;
+    }
     WidgetsBinding.instance.removeObserver(this);
     _partnerJoinedSubscription?.cancel();
     _messageSubscription?.cancel(); // 🆕 메시지 채널 구독 해제

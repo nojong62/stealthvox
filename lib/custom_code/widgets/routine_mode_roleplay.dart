@@ -606,6 +606,8 @@ never by itself a reason to ask back.
   @override
   void initState() {
     super.initState();
+    // 잔여시간 소진 시 StealthRoom이 이 경로로 방을 닫는다(저장·정리 포함).
+    StealthRoomMaster.saveAndExitCurrentMode = _handleAutoSaveAndExit;
     BillingTicker.instance.appInForeground.addListener(_onForegroundChanged);
     _ttsQueueManager = TtsQueueManager(onPlayStart: () {
       if (_swTTS.isRunning) {
@@ -659,6 +661,9 @@ never by itself a reason to ask back.
 
   @override
   void dispose() {
+    if (StealthRoomMaster.saveAndExitCurrentMode == _handleAutoSaveAndExit) {
+      StealthRoomMaster.saveAndExitCurrentMode = null;
+    }
     BillingTicker.instance.appInForeground.removeListener(_onForegroundChanged);
     _rolloverNoticeTimer?.cancel();
     _clearIdleTimers();

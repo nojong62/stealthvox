@@ -17,6 +17,7 @@ import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '/custom_code/widgets/trial/trial_flow_state.dart';
 
 /// FlutterFlow Custom Action 등록용 더미 함수.
 Future billingTicker() async {}
@@ -122,7 +123,46 @@ class BillingTicker with WidgetsBindingObserver {
       FFAppState().remainingTimeLoaded &&
       !FFAppState().hasConfirmedZeroTime;
 
+  /// 잔여시간이 0으로 **확정된** 유료 회원인가.
+  ///
+  /// 문 앞에서 막는 [guardBillingEntry]와 방 안에서 내보내는
+  /// [balanceExhausted]가 이 하나를 같이 본다 — 판정이 두 벌이면 한쪽만
+  /// 고쳐져 문이 열린다. [_isActuallyBilling]이 표시등과 차감을 묶어 둔 것과
+  /// 같은 이유다.
+  ///
+  /// 아래 둘은 애초에 차감 대상이 아니라 여기서 빠진다. 막아 봐야 갈 곳이
+  /// 없고 정상 흐름만 끊긴다.
+  ///   · 진행 중인 체험 — 60초 체험은 잔여시간과 무관하다
+  ///   · Duo 게스트 — 회원이든 아니든 초대한 호스트만 부담한다
+  ///
+  /// "익명이면 전부 통과"로 넓히지 않는다. 체험이 끝났거나 시작도 안 한 익명
+  /// 유저까지 열어 주면 잔여 0으로 방에 들어가 무료로 쓰게 된다.
+  bool get isBillingBlocked {
+    if (FirebaseAuth.instance.currentUser == null) return false;
+    if (TrialFlowState.instance.isTrial) return false;
+    if (FFAppState().isGuestSession) return false;
+    return FFAppState().hasConfirmedZeroTime;
+  }
+
+  /// 잔여시간이 0으로 떨어졌다는 신호. 과금 화면이 이걸 보고 스스로 정리하고
+  /// 나간다.
+  ///
+  /// 차감을 멈추는 것만으로는 부족하다 — [_isActuallyBilling]이 false가 되어도
+  /// STT·LLM·TTS는 그대로 돌아, 0을 찍은 뒤부터는 무제한 무료 이용이 된다.
+  /// 매 초 [_updateBillingState]에서 갱신되므로 다른 기기에서 시간을 다 쓴
+  /// 경우(서버 응답으로 값이 내려오는 경우)도 같이 잡힌다.
+  final ValueNotifier<bool> balanceExhausted = ValueNotifier<bool>(false);
+
   void _updateBillingState() {
+    // ⚠️ 아래 early return보다 먼저 갱신한다. 표시등은 이미 꺼져 있는데
+    //   (로비에서 pause된 채 0이 되는 경우) 소진 신호만 안 나가면, 방에
+    //   들어가 있는 화면이 영영 못 나온다.
+    final blocked = isBillingBlocked;
+    if (balanceExhausted.value != blocked) {
+      balanceExhausted.value = blocked;
+      _addBillingLog('[BILLING] balance=${blocked ? 'exhausted' : 'ok'}');
+    }
+
     final next = _isActuallyBilling ? 2 : 0;
     if (billingState.value == next) return;
     billingState.value = next;
@@ -615,6 +655,61 @@ class BillingTicker with WidgetsBindingObserver {
           'logUsageSession HTTP ${response.statusCode}: ${response.body}');
     }
   }
+}
+
+// =============================================================================
+// 과금 화면 진입 관문
+// =============================================================================
+
+/// 과금 화면 문턱에서 잔여시간을 확인한다. 통과하면 true.
+///
+/// 막을 때는 스토어로 보내고 false를 돌려주므로, 호출부는 `if
+/// (!guardBillingEntry(context)) return;` 한 줄이면 된다.
+///
+/// 과금이 시작되는 지점마다 이 함수를 통과하게 한다 — 예전에는 로비 ENTER와
+/// 공부방 ENTER 두 곳에만 검사가 있어서, 공부방 목록의 스텔스룸 아이콘·대화
+/// 상세·Keepers로 들어가면 잔여 0인 회원이 그대로 통과했다. 들어간 뒤엔 차감이
+/// 안 되니 결과는 무료 이용이었다.
+bool guardBillingEntry(BuildContext context) {
+  if (!BillingTicker.instance.isBillingBlocked) return true;
+  context.pushNamed('Store');
+  return false;
+}
+
+/// 이 화면 위에 떠 있는 다이얼로그·바텀시트를 걷어낸다.
+///
+/// 소진으로 화면을 닫을 때 이걸 빼먹으면, 스토어가 시트 위에 얹히고 방은 그
+/// 아래에 살아남는다(Keepers 튜터링 시트·공부방 다이얼로그가 실제로 그렇다).
+/// 화면만 바뀌고 마이크와 요청은 계속 도는 상태가 된다.
+void dismissRoutesAbove(BuildContext context) {
+  final self = ModalRoute.of(context);
+  if (self == null) return;
+  Navigator.of(context).popUntil((route) => route == self);
+}
+
+/// 잔여시간이 없어 막혔다는 안내.
+///
+/// [offerStore]는 그 자리에서 막기만 할 때(공부방 목록의 Keepers 탭) 켠다 —
+/// 무료 화면에 있던 사람을 갑자기 스토어로 밀어내지 않고 버튼만 준다. 이미
+/// 스토어로 보내는 길목에서는 꺼서 같은 버튼이 두 번 나오지 않게 한다.
+void showBillingBlockedNotice(
+  BuildContext context, {
+  String message = '잔여 시간이 모두 소진되었습니다.',
+  bool offerStore = true,
+}) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      backgroundColor: const Color(0xFF1C1C1E),
+      content: Text(message, style: const TextStyle(color: Colors.white)),
+      action: offerStore
+          ? SnackBarAction(
+              label: '충전',
+              textColor: const Color(0xFF60A5FA),
+              onPressed: () => context.pushNamed('Store'),
+            )
+          : null,
+    ),
+  );
 }
 
 // =============================================================================

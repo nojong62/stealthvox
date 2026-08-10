@@ -122,6 +122,11 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
 
   // ── 필터 전환 + Keepers 과금 경계 제어 ──
   void _switchFilter(String newFilter) {
+    // Keepers는 과금 구간이다. 전체 목록(무과금)에 머무는 것은 막지 않는다.
+    if (newFilter == 'Keepers' && BillingTicker.instance.isBillingBlocked) {
+      showBillingBlockedNotice(context);
+      return;
+    }
     final wasKeepers = _selectedFilter == 'Keepers';
     setState(() {
       _selectedFilter = newFilter;
@@ -179,10 +184,25 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
     super.initState();
     _fetchApiKey();
     // 과금은 Keepers 필터 진입 시에만 시작한다.
+    BillingTicker.instance.balanceExhausted.addListener(_onBalanceExhausted);
+  }
+
+  /// Keepers를 보는 중에 잔여시간이 0이 됐을 때.
+  ///
+  /// 다른 과금 화면과 달리 스토어로 밀어내지 않는다 — 이 페이지는 목록만
+  /// 보는 동안 무과금이라, 무료 화면에 있던 사람을 갑자기 내보내는 셈이 된다.
+  /// 과금 구간인 Keepers만 접고 전체 목록으로 되돌린다.
+  void _onBalanceExhausted() {
+    if (!BillingTicker.instance.balanceExhausted.value) return;
+    if (!mounted || _selectedFilter != 'Keepers') return;
+    dismissRoutesAbove(context); // 열려 있는 튜터링 시트부터 닫는다
+    _switchFilter('All');
+    showBillingBlockedNotice(context);
   }
 
   @override
   void dispose() {
+    BillingTicker.instance.balanceExhausted.removeListener(_onBalanceExhausted);
     _clearIdleTimers();
     BillingTicker.instance.pause();
     _keepersScrollController.dispose();
@@ -286,7 +306,10 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
               padding: EdgeInsets.zero,
               tooltip: '스텔스룸',
               icon: const Icon(Icons.security, color: Colors.white70),
-              onPressed: () => context.pushNamed('StealthRoom'),
+              onPressed: () {
+                if (!guardBillingEntry(context)) return;
+                context.pushNamed('StealthRoom');
+              },
             ),
           ],
         ),
@@ -793,6 +816,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
 
     return GestureDetector(
       onTap: () {
+        // 목록 첫 페이지만 무과금이다. 여기서 안으로 들어가면 과금이 시작된다.
+        if (!guardBillingEntry(context)) return;
         context.pushNamed(
           'ChatDetail',
           queryParameters: {

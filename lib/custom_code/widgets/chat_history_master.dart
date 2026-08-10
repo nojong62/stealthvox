@@ -461,6 +461,27 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _idleElapsedSec = 0;
   }
 
+  bool _handlingExhaustion = false;
+
+  /// 공부방에서 잔여시간이 0이 됐을 때. 차감만 멈추면 STT·LLM·TTS가 그대로
+  /// 돌아 무료 이용이 되므로 화면 자체를 닫는다.
+  ///
+  /// 정산과 usage_logs 저장은 [BillingTicker.pause]가 소유한다 — 여기서 따로
+  /// 저장하지 않는다. 나머지 정리는 [dispose]가 한다.
+  void _onBalanceExhausted() {
+    if (!BillingTicker.instance.balanceExhausted.value) return;
+    if (!mounted || _handlingExhaustion) return;
+    _handlingExhaustion = true;
+    BillingTicker.instance.pause();
+    dismissRoutesAbove(context);
+    showBillingBlockedNotice(
+      context,
+      message: '잔여 시간이 모두 소진되어 공부방을 닫았습니다.',
+      offerStore: false,
+    );
+    context.pushReplacementNamed('Store');
+  }
+
   // 사용자 실제 활동 시작 시 오토포즈 즉시 해제 (중복 방지 포함)
   void _resumeHistoryFromUserAction() {
     _resetIdleTimer();
@@ -491,6 +512,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     BillingTicker.instance.setRate(BillingRate.full);
     BillingTicker.instance.resume();
     BillingTicker.instance.logMode('history');
+    BillingTicker.instance.balanceExhausted.addListener(_onBalanceExhausted);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _resetIdleTimer();
     });
@@ -507,6 +529,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // 📦 [Box 8: 라이프사이클 - dispose]
   @override
   void dispose() {
+    BillingTicker.instance.balanceExhausted.removeListener(_onBalanceExhausted);
     _clearIdleTimers();
     _utteranceSafetyTimer?.cancel();
     _silenceTimer?.cancel();
@@ -4341,11 +4364,7 @@ RULES — follow exactly:
     _isActionLocked = true;
     try {
       FocusScope.of(context).unfocus();
-      final appState = FFAppState();
-      if (appState.hasConfirmedZeroTime) {
-        context.pushNamed('Store');
-        return;
-      }
+      if (!guardBillingEntry(context)) return;
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
       final newHistoryRef = FirebaseFirestore.instance

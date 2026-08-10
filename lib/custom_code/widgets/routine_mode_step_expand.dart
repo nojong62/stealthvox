@@ -647,6 +647,8 @@ line had never been said. Never build the conversation on a line you had to gues
   @override
   void initState() {
     super.initState();
+    // 잔여시간 소진 시 StealthRoom이 이 경로로 방을 닫는다(저장·정리 포함).
+    StealthRoomMaster.saveAndExitCurrentMode = _handleAutoSaveAndExit;
     _ttsQueueManager = TtsQueueManager(onPlayStart: () {
       if (_awaitingAiFirstAudioProbe) {
         _awaitingAiFirstAudioProbe = false;
@@ -676,6 +678,9 @@ line had never been said. Never build the conversation on a line you had to gues
 
   @override
   void dispose() {
+    if (StealthRoomMaster.saveAndExitCurrentMode == _handleAutoSaveAndExit) {
+      StealthRoomMaster.saveAndExitCurrentMode = null;
+    }
     _clearIdleTimers();
     BillingTicker.instance.pause();
     _stopEverything();
