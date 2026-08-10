@@ -3,6 +3,8 @@ import 'dart:convert';
 
 import 'package:web_socket_channel/io.dart';
 
+import 'pcm_audio_utils.dart';
+
 String deepgramLanguageCode(String language) {
   switch (language.trim().toLowerCase()) {
     case 'korean':
@@ -50,7 +52,10 @@ Uri buildAnyoneDeepgramUri(String languageCode) {
     '&utterance_end_ms=1000'
     '&interim_results=true'
     '&encoding=linear16'
-    '&sample_rate=16000'
+    // 🎚️ 마이크 녹음과 반드시 같은 값이어야 한다. Realtime 전사가 24kHz를
+    //   요구해 녹음을 올렸으므로 여기도 같이 올린다 — 한쪽만 바꾸면
+    //   Deepgram이 조용히 엉뚱한 속도로 듣는다.
+    '&sample_rate=$kStealthVoxSttSampleRate'
     '&channels=1'
     '&filler_words=false',
   );

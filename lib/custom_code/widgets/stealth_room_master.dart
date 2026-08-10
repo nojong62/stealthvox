@@ -27,6 +27,8 @@ import 'package:firebase_remote_config/firebase_remote_config.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
 import '/custom_code/services/openai_connection_pool.dart';
+import '/custom_code/services/openai_realtime_prewarm_session.dart';
+import '/custom_code/services/openai_realtime_transcribe_session.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
 import 'trial/trial_flow_state.dart';
@@ -159,10 +161,19 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       }
     }
 
-    if (deepgramKey.isNotEmpty) {
-      final nativeLanguage = FFAppState().nativeLang.isNotEmpty
-          ? FFAppState().nativeLang
-          : 'Korean';
+    // 🔥 [STT-PREWARM] 켜진 엔진 **하나만** 예열한다. 둘 다 열면 소켓도 비용도
+    //   이중이 된다 (Circle Talk의 전사 경로는 한 턴에 하나뿐이다).
+    final nativeLanguage =
+        FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
+    if (kFreeTalkUseRealtimeStt) {
+      if (openAiKey.isNotEmpty) {
+        unawaited(OpenAiRealtimePrewarmSession.instance.prepare(
+          apiKey: openAiKey,
+          languageCode: deepgramLanguageCode(nativeLanguage),
+          onLog: (tag, msg) => debugPrint('$tag $msg'),
+        ));
+      }
+    } else if (deepgramKey.isNotEmpty) {
       unawaited(DeepgramPrewarmSession.instance.prepare(
         apiKey: deepgramKey,
         languageCode: deepgramLanguageCode(nativeLanguage),
@@ -262,6 +273,8 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     _aiRoleController.dispose();
     _userRoleController.dispose();
     unawaited(DeepgramPrewarmSession.instance.discard(reason: 'room_dispose'));
+    unawaited(
+        OpenAiRealtimePrewarmSession.instance.discard(reason: 'room_dispose'));
     unawaited(_anyoneAudioRecorder.dispose());
     super.dispose();
   }
@@ -724,8 +737,7 @@ Return ONLY valid JSON: {"name":"..."}.
           children: [
             Container(
               margin: const EdgeInsets.only(top: 2),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
                 color: const Color(0xFFF59E0B),
                 borderRadius: BorderRadius.circular(10),

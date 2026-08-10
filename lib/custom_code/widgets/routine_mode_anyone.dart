@@ -44,7 +44,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
 import '/custom_code/services/openai_connection_pool.dart';
+import '/custom_code/services/openai_realtime_prewarm_session.dart';
+import '/custom_code/services/openai_realtime_transcribe_session.dart';
 import '/custom_code/services/openai_transcribe_service.dart';
+import '/custom_code/services/pcm_audio_utils.dart';
 import '/custom_code/services/session_rollover_summary.dart';
 import '/custom_code/services/tts_adapter.dart';
 import 'deepgram_confidence_probe.dart';
@@ -54,6 +57,10 @@ import 'trial/trial_anyone_timer_mixin.dart';
 import 'trial/learning_prep_overlay.dart';
 import 'trial/trial_study_page.dart';
 import 'circle_talk_guide.dart';
+
+/// speech_stopped 뒤 최종 전사가 이 시간 안에 안 오면 턴을 놓아준다.
+/// 없으면 `_turnInFlight`가 켜진 채 굳어 30분 롤오버까지 막힌다.
+const int kFreeTalkRealtimeTranscriptTimeoutMs = 8000;
 
 // speech_final 경로 확정 대기창. Deepgram endpointing(700ms)이 이미 침묵을
 // 확인한 뒤에 오는 신호라, 파이프라인 고속화(2026-07-30)에 맞춰 900→700으로
@@ -92,8 +99,8 @@ const int kFreeTalkMaxTtsCharsPerUtterance = 800;
 // 1800ms면 확정 후 약 1.6초를 기다려 실측 도착 범위를 대부분 덮는다.
 // 선택적 gpt-4o-transcribe 정확도 경로는 파일 전사 응답을 넉넉히 기다린다.
 const int kFreeTalkFirstTurnRetranscribeTimeoutMs = 3000;
-// 🎙️ [PCM-TEE] 재전사용 원본 음성 버퍼 상한. 16kHz PCM16 = 32KB/s → 60초.
-const int kFreeTalkTurnPcmBufferMaxBytes = 32000 * 60;
+// 🎙️ [PCM-TEE] 재전사용 원본 음성 버퍼 상한. PCM16 mono 기준 60초.
+const int kFreeTalkTurnPcmBufferMaxBytes = kStealthVoxSttBytesPerMs * 1000 * 60;
 
 // 🧠 [TRANSLATE-ROUTE] 번역 모델 분기 (guide4 6장). 같은 턴에 두 모델을 동시에
 //   호출하지 않는다 — 판정 결과에 따라 처음부터 하나만 쓴다.
@@ -102,6 +109,7 @@ const String kFreeTalkTranslateModelFast = 'gpt-4o-mini';
 enum AnyoneMicOwner {
   none,
   deepgram,
+  openaiRealtime,
 }
 
 class AnyoneCostTracker {
@@ -109,14 +117,20 @@ class AnyoneCostTracker {
 
   final void Function(String tag, String msg) onLog;
   int deepgramAudioMs = 0;
+  int realtimeAudioMs = 0;
   int ttsInputChars = 0;
   int ttsRequestCount = 0;
   int ttsDuplicateBlocked = 0;
   int retranscribeRequestCount = 0;
 
   void addDeepgramBytes(int byteCount) {
-    // PCM16, 16 kHz, mono = 32 bytes/ms.
-    deepgramAudioMs += (byteCount / 32).round();
+    deepgramAudioMs += (byteCount / kStealthVoxSttBytesPerMs).round();
+  }
+
+  // 🎙️ [REALTIME-STT] OpenAI 전사 세션으로 나간 오디오 시간.
+  //   Deepgram 것과 따로 센다 — 한쪽이 0이 아니면 이중 전송이라는 뜻이다.
+  void addRealtimeBytes(int byteCount) {
+    realtimeAudioMs += (byteCount / kStealthVoxSttBytesPerMs).round();
   }
 
   void recordTtsRequest(int inputChars) {
@@ -137,6 +151,7 @@ class AnyoneCostTracker {
     onLog(
       '💰 [COST]',
       'reason=$reason deepgram_audio_ms=$deepgramAudioMs '
+          'realtime_audio_ms=$realtimeAudioMs '
           'tts_input_chars=$ttsInputChars '
           'tts_request_count=$ttsRequestCount '
           'tts_duplicate_blocked=$ttsDuplicateBlocked '
@@ -196,8 +211,33 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   final Set<String> _handledFinalTranscriptIds = <String>{};
   DateTime? _lastListenStartAt;
 
-  // 🎙️ [PCM-TEE] 마이크 원본 PCM(16kHz mono)을 Deepgram 전송과 동시에 여기에도
-  //   담는다. 병렬 전사와 저신뢰 재전사가 이 버퍼를 쓴다 (guide4 3장/4.4).
+  // ── 🎙️ [REALTIME-STT] OpenAI 전사 세션 ─────────────────────────────
+  // 소켓은 대화방 세션 동안 살아 있다. 턴마다 닫고 다시 여는 것은 마이크
+  // 캡처뿐이다 — Android는 녹음 세션이 열려 있으면 AI 음성 출력 라우팅을
+  // 뒤늦게 덮어쓴다(아래 [MIC-ROUTING] 참조).
+  OpenAiRealtimeTranscribeSession? _realtimeStt;
+  AnyonePreparedAudioCapture? _realtimeCapture;
+  StreamSubscription<Uint8List>? _realtimeCaptureSub;
+
+  /// 진행 중인 녹음 정지. 다음 녹음은 이것이 끝난 뒤에만 연다.
+  Future<void>? _realtimeCaptureStopping;
+  bool _realtimeSessionStarting = false;
+
+  /// 직전 시도에서 전사 소켓이 아예 못 붙었는지. 폴백 판단에만 쓴다.
+  bool _realtimeConnectFailed = false;
+
+  /// 처리 완료한 OpenAI item_id. Realtime 경로의 **1차 중복 방어선**이다.
+  final Set<String> _handledRealtimeItemIds = <String>{};
+
+  /// 지금 화면 임시 말풍선을 그리고 있는 item. delta 전용이다.
+  String _realtimeDeltaItemId = '';
+  final StringBuffer _realtimeDeltaBuffer = StringBuffer();
+
+  /// speech_stopped 뒤 최종 전사가 영영 안 올 때 턴을 놓아주는 타이머.
+  Timer? _realtimeTranscriptTimeout;
+
+  // 🎙️ [PCM-TEE] 마이크 원본 PCM(24kHz mono)을 전사 엔진 전송과 동시에 여기에도
+  //   담는다. Realtime 경로에서는 장애 폴백/디버깅용으로만 남는다.
   final List<Uint8List> _turnPcmChunks = <Uint8List>[];
   int _turnPcmBytes = 0;
   // ⏱️ [PERF] 유저 음성이 나오기까지의 구간을 끝까지 재기 위한 기준점.
@@ -507,6 +547,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     final transcript = await OpenAiTranscribeService.transcribePcm16(
       apiKey: _openAiKey,
       pcm: pcm,
+      // 🎚️ 녹음 샘플레이트를 그대로 넘긴다. 기본값(16000)에 기대면 24kHz로 받은
+      //   PCM에 16kHz WAV 헤더가 붙어 소리가 느려지고 전사문이 통째로 망가진다.
+      sampleRate: kStealthVoxSttSampleRate,
       language: _mapLanguageToCode('Korean'),
       model: OpenAiTranscribeService.firstTurnModel,
       timeout:
@@ -793,7 +836,13 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     final anchor = _turnPerfAnchor;
     if (anchor == null) return;
     final ms = DateTime.now().difference(anchor).inMilliseconds;
-    _log('⏱️ [PERF]', '$event=+${ms}ms');
+    // 🎙️ 엔진을 같이 남긴다. 이게 없으면 A/B 실측 로그 두 벌을 나중에 섞어 놓고
+    //   어느 쪽 숫자인지 가릴 수가 없다. 기준점(=발화 종료)은 양쪽 모두
+    //   "앱이 발화가 끝났음을 아는 가장 이른 시점"이라 직접 비교된다.
+    //     realtime → input_audio_buffer.speech_stopped
+    //     deepgram → speech_final / UtteranceEnd
+    final engine = kFreeTalkUseRealtimeStt ? 'realtime' : 'deepgram';
+    _log('⏱️ [PERF]', 'engine=$engine $event=+${ms}ms');
   }
 
   void _logProbeTiming(String event) {
@@ -1020,6 +1069,12 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     if (mounted) _startFreeTalkSession();
   }
 
+  /// 이 모드를 시작할 수 있는 키가 다 왔는지.
+  /// AI 응답·TTS는 어느 경로든 OpenAI를 쓰므로 OpenAI 키는 항상 필수다.
+  bool get _hasSttKeys =>
+      _openAiKey.isNotEmpty &&
+      (kFreeTalkUseRealtimeStt || _deepgramKey.isNotEmpty);
+
   Future<void> _fetchKeys() async {
     final remoteConfig = FirebaseRemoteConfig.instance;
     if (kDebugMode) {
@@ -1032,7 +1087,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     // 앱 시작 시 이미 활성화된 값을 먼저 사용한다. 네트워크 fetch가 실패하거나
     // 지연돼도 두 번째 입장까지 기다리지 않고 첫 입장에서 바로 시작할 수 있다.
     _applyActivatedKeys(remoteConfig);
-    if (_deepgramKey.isNotEmpty) {
+    if (_hasSttKeys) {
       _scheduleStartupRetry(immediate: true);
     }
 
@@ -1093,8 +1148,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     // 🆕 첫 진입 race 방지: 키와 마이크 권한이 "둘 다" 준비됐을 때만 시작한다.
     //    준비 안 된 항목이 있으면 조용히 대기 → 키 로드 콜백(_fetchKeys) 또는
     //    권한 콜백(_initPermissions) 중 늦게 끝나는 쪽이 이 함수를 다시 호출해 시작.
-    //    전사=Deepgram, 번역/응답/TTS=OpenAI라 두 키가 모두 필요하다.
-    if (_deepgramKey.isEmpty || _openAiKey.isEmpty) {
+    //    Realtime 경로는 OpenAI 키 하나면 되고, Deepgram 경로는 두 키가 다 필요하다.
+    if (!_hasSttKeys) {
       _log('🎤 [START-GATE]', '키 미준비 → 시작 보류');
       return;
     }
@@ -1122,7 +1177,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       await _generateAndPlayAnyoneOpener();
       return;
     }
-    await _startDeepgramListening();
+    await _startConfiguredListening();
   }
 
   /// AI가 서클의 일원으로 먼저 건네는 첫 마디.
@@ -1176,7 +1231,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
       // 오프너가 실패해도 마이크는 반드시 열어 대화가 죽지 않게 한다.
       // 위에서 이미 열었으면 중복 호출은 스스로 걸러진다.
-      if (mounted) await _startDeepgramListening();
+      if (mounted) await _startConfiguredListening();
     }
   }
 
@@ -1517,6 +1572,17 @@ $kSpokenReplyLengthPolicy
     _awaitingAiFirstAudioProbe = false;
     _voiceManager?.dispose();
     _voiceManager = null;
+    // 🎙️ [REALTIME-STT] 방을 놓을 때는 소켓까지 닫는다. 턴 사이에는 여기 오지
+    //   않는다 — 이 함수는 방 종료·치명적 오류에서만 불린다.
+    _realtimeTranscriptTimeout?.cancel();
+    _realtimeTranscriptTimeout = null;
+    _handledRealtimeItemIds.clear();
+    _realtimeDeltaItemId = '';
+    _realtimeDeltaBuffer.clear();
+    unawaited(_stopRealtimeCapture(reason: 'stop_everything'));
+    final closingRealtime = _realtimeStt;
+    _realtimeStt = null;
+    if (closingRealtime != null) unawaited(closingRealtime.dispose());
     _setMicOwner(AnyoneMicOwner.none, reason: 'stop_everything');
     // 🔇 늦게 도착한 이전 세대 TTS가 재생되지 않도록 세대를 올려 막는다.
     _ttsAdapter.invalidateGenerationsBefore(_pipelineGeneration);
@@ -1563,7 +1629,21 @@ $kSpokenReplyLengthPolicy
   /// 방이 살아 있는지만 본다.
   void _onForegroundChanged() {
     if (!mounted || _isDisposing) return;
-    if (!BillingTicker.instance.appInForeground.value) return;
+    if (!BillingTicker.instance.appInForeground.value) {
+      // 🎙️ [REALTIME-STT] 백그라운드에서는 녹음과 오디오 전송을 멈춘다.
+      //   소켓은 그대로 둔다 — 서버가 닫으면 복귀 시 재연결한다.
+      //   말하던 도중에 나갔다면 그 턴은 버린다(반쪽 발화를 확정하지 않는다).
+      if (_realtimeCapture != null ||
+          _micOwner == AnyoneMicOwner.openaiRealtime) {
+        _log('🎤 [LISTEN-BG]', '백그라운드 진입 → 마이크/전송 중지');
+        _realtimeStt?.closeAudioGate(reason: 'app_background');
+        unawaited(_stopRealtimeCapture(reason: 'app_background'));
+        _setMicOwner(AnyoneMicOwner.none, reason: 'app_background');
+        _realtimeDeltaItemId = '';
+        _realtimeDeltaBuffer.clear();
+      }
+      return;
+    }
     if (!_isConversationActive) return;
     if (_isSystemBusy || _isPipelineRunning || _turnInFlight) return;
     _log('🎤 [LISTEN-FG]', '포그라운드 복귀 → STT 재연결 시도');
@@ -1577,7 +1657,27 @@ $kSpokenReplyLengthPolicy
       _log('🎤 [LISTEN-SKIP]', 'restart ignored reason=stale_generation');
       return;
     }
-    unawaited(_startDeepgramListening().then<void>((_) {}));
+    unawaited(_startConfiguredListening().then<void>((_) {}));
+  }
+
+  /// 🎙️ 유저 음성 입력 진입점. 여기서 전사 엔진이 갈린다.
+  ///   한 번에 하나만 돈다 — 두 엔진에 동시에 마이크를 물리지 않는다.
+  Future<bool> _startConfiguredListening({bool force = false}) async {
+    if (!kFreeTalkUseRealtimeStt) {
+      return _startDeepgramListening(force: force);
+    }
+    _realtimeConnectFailed = false;
+    final started = await _startRealtimeListening(force: force);
+    if (started) return true;
+    // 🛟 [STT-FALLBACK] 소켓이 **아예 못 붙은 경우에만** 기존 경로로 방을
+    //   살린다. TTS 재생 중·중복 호출·백그라운드 같은 정상적인 skip은 그대로
+    //   두고 다음 기회에 다시 연다 — 그때 Deepgram을 열면 이중 경로가 된다.
+    //
+    //   ⚠️ 이 줄이 로그에 보이면 그 턴의 측정값은 Realtime 실측이 아니다.
+    if (!_realtimeConnectFailed || _deepgramKey.isEmpty) return false;
+    _log('🛟 [STT-FALLBACK]',
+        'realtime_unavailable → deepgram (이 턴은 측정 대상에서 제외)');
+    return _startDeepgramListening(force: true);
   }
 
   Future<bool> _startDeepgramListening({bool force = false}) async {
@@ -1791,6 +1891,475 @@ $kSpokenReplyLengthPolicy
       if (listenGeneration == _listenGeneration) {
         _isStartingListening = false;
       }
+    }
+  }
+
+  // ====================================================================
+  // 🎙️ [REALTIME-STT] OpenAI Realtime transcription 경로
+  // --------------------------------------------------------------------
+  // 소켓은 대화방 세션 동안 유지하고, 턴마다 여닫는 것은 마이크 캡처와
+  // 오디오 게이트뿐이다.
+  //
+  //   방 진입      → 소켓 연결(예열 채택)
+  //   유저 턴 시작 → 녹음 시작 + 게이트 열기
+  //   speech_stopped → 게이트 닫기 + 녹음 정지 (AI 파이프라인은 시작 안 함)
+  //   completed    → 여기서만 기존 후속 파이프라인 진입
+  //   AI TTS 중    → 녹음/게이트 모두 닫힌 상태 (에코 차단)
+  //   방 종료      → 소켓 dispose
+  // ====================================================================
+  Future<bool> _startRealtimeListening({bool force = false}) async {
+    if (_isStartingListening) {
+      _log('🎤 [LISTEN-SKIP]', 'already starting');
+      return false;
+    }
+    if (_isPipelineRunning) {
+      _log('🎤 [LISTEN-SKIP]', 'pipeline running');
+      return false;
+    }
+    // 🔇 [ECHO-GUARD] AI 목소리가 나가는 동안에는 마이크를 열지 않는다.
+    //   Circle Talk은 echoCancel이 꺼져 있어 이 가드가 유일한 방어선이다.
+    if (_ttsAdapter.isBusy) {
+      _log('🎤 [LISTEN-SKIP]', 'tts busy');
+      return false;
+    }
+    // 백그라운드에서 녹음을 열어 봐야 붙지 않는다. 복귀 시 다시 연다.
+    if (!BillingTicker.instance.appInForeground.value) {
+      _log('🎤 [LISTEN-SKIP]', 'app in background');
+      return false;
+    }
+    final now = DateTime.now();
+    if (!force &&
+        _lastListenStartAt != null &&
+        now.difference(_lastListenStartAt!) < const Duration(seconds: 1)) {
+      _log('🎤 [LISTEN-SKIP]', 'called again within 1s');
+      return false;
+    }
+
+    _isStartingListening = true;
+    _lastListenStartAt = now;
+    final int listenGeneration = ++_listenGeneration;
+    _log('🎤 [LISTEN-GEN]',
+        'start generation=$listenGeneration engine=realtime');
+
+    try {
+      if (_openAiKey.isEmpty) return false;
+      bool hasPermission = _micPermissionReady;
+      if (!hasPermission) {
+        try {
+          hasPermission = await _audioRecorder
+              .hasPermission()
+              .timeout(const Duration(seconds: 3));
+        } catch (e) {
+          _log('❌ [LISTEN-PERM]', '마이크 권한 확인 실패/지연: $e');
+        }
+      }
+      if (!hasPermission) return false;
+      _micPermissionReady = true;
+      if (!mounted || listenGeneration != _listenGeneration) return false;
+
+      _resetIdleTimer();
+      _isConversationActive = true;
+      if (mounted) {
+        setState(() {
+          _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+        });
+      }
+
+      final session = await _ensureRealtimeSession();
+      if (session == null) {
+        _log('❌ [LISTEN-ERR]', 'realtime 세션 준비 실패');
+        return false;
+      }
+      if (!mounted || listenGeneration != _listenGeneration) return false;
+
+      _resetTurnPcmBuffer();
+      _realtimeDeltaItemId = '';
+      _realtimeDeltaBuffer.clear();
+
+      final capturing = await _startRealtimeCapture(listenGeneration);
+      if (!capturing) {
+        _log('❌ [LISTEN-ERR]', 'realtime 마이크 캡처 실패');
+        return false;
+      }
+
+      session.openAudioGate(reason: 'turn_start');
+      _setMicOwner(AnyoneMicOwner.openaiRealtime, reason: 'realtime_listening');
+      if (!TrialFlowState.instance.isTrial) {
+        BillingTicker.instance.resumeFromActivity('free_talk_mic_start');
+      }
+      _log('🎤 [LISTEN-05]',
+          'realtime listening 시작 generation=$listenGeneration');
+      _reportListeningReady();
+      return true;
+    } catch (error) {
+      _setMicOwner(AnyoneMicOwner.none, reason: 'realtime_start_failed');
+      _log('❌ [LISTEN-ERR]',
+          'realtime start failed reason=${error.runtimeType}');
+      return false;
+    } finally {
+      if (listenGeneration == _listenGeneration) {
+        _isStartingListening = false;
+      }
+    }
+  }
+
+  /// 방 세션용 전사 소켓. 살아 있으면 그대로 쓴다 — 턴마다 새로 열지 않는다.
+  Future<OpenAiRealtimeTranscribeSession?> _ensureRealtimeSession() async {
+    final existing = _realtimeStt;
+    if (existing != null && existing.isConnected) return existing;
+    if (existing != null) {
+      _realtimeStt = null;
+      await existing.dispose();
+    }
+    if (_realtimeSessionStarting) {
+      // 연결이 진행 중일 뿐 실패한 게 아니다. 폴백을 태우면 두 엔진이 함께 뜬다.
+      _log('🎙️ [RT-STT]', 'connect 진행 중 → 중복 연결 생략');
+      return null;
+    }
+    _realtimeSessionStarting = true;
+    try {
+      const String nativeLang = 'Korean';
+      final String langCode = _mapLanguageToCode(nativeLang);
+      var session = OpenAiRealtimePrewarmSession.instance.take(
+        apiKey: _openAiKey,
+        languageCode: langCode,
+        onLog: _log,
+      );
+      if (session == null) {
+        session = OpenAiRealtimeTranscribeSession(
+          apiKey: _openAiKey,
+          languageCode: langCode,
+          onLog: _log,
+        );
+        final ok = await session.connect();
+        if (!ok) {
+          await session.dispose();
+          // 소켓이 못 붙었다 = 폴백을 태워도 되는 유일한 경우.
+          _realtimeConnectFailed = true;
+          return null;
+        }
+      }
+      if (!mounted || _isDisposing) {
+        await session.dispose();
+        return null;
+      }
+      _bindRealtimeHandlers(session);
+      _realtimeStt = session;
+      return session;
+    } finally {
+      _realtimeSessionStarting = false;
+    }
+  }
+
+  void _bindRealtimeHandlers(OpenAiRealtimeTranscribeSession session) {
+    // 🔌 백그라운드에서는 소켓이 붙지 않는다. Deepgram과 같은 정책이다 —
+    //   복귀 시 _onForegroundChanged가 다시 연결한다.
+    session.shouldReconnect = () =>
+        mounted &&
+        !_isDisposing &&
+        _isConversationActive &&
+        BillingTicker.instance.appInForeground.value;
+    session.onFirstAudioSent =
+        (at) => _markFirstSpeech('FIRST_PCM_SENT_TO_STT', at: at);
+    session.onSpeechStarted = _onRealtimeSpeechStarted;
+    session.onSpeechStopped = _onRealtimeSpeechStopped;
+    session.onTranscriptDelta = _onRealtimeTranscriptDelta;
+    session.onTranscriptCompleted = _onRealtimeTranscriptCompleted;
+    session.onReconnecting =
+        (attempt) => _log('🎤 [LISTEN-RETRY]', 'realtime 재연결 시도 $attempt');
+    session.onGaveUp = () => _log('❌ [LISTEN-GIVEUP]', 'realtime 재연결 포기');
+    session.onFatalError = (reason) {
+      if (!mounted || _isDisposing) return;
+      _log('❌ [LISTEN-ERR]', 'realtime fatal reason=$reason');
+      _stopEverything();
+    };
+  }
+
+  /// 마이크 캡처를 연다. 소켓과 별개 수명이다.
+  Future<bool> _startRealtimeCapture(int listenGeneration) async {
+    await _stopRealtimeCapture(reason: 'restart');
+    try {
+      // 위젯 진입 직후 이미 돌고 있는 선(先)캡처가 있으면 그대로 채택한다.
+      final preparedFuture = _preparedCaptureFuture;
+      _preparedCaptureFuture = null;
+      var capture = await preparedFuture;
+      if (capture != null && identical(_preparedCapture, capture)) {
+        _preparedCapture = null; // 이제 이 경로가 종료 책임을 가진다.
+      }
+      capture ??= await AnyonePreparedAudioCapture.start(
+        recorder: _audioRecorder,
+        onRecordingStarted: (at) =>
+            _markFirstSpeech('LOCAL_RECORDING_STARTED', at: at),
+        onFirstFrame: (at, byteCount) {
+          _markFirstSpeech('FIRST_PCM_CREATED', at: at);
+          _log('🎤 [FIRST-SPEECH]', 'first_pcm_bytes=$byteCount');
+        },
+      );
+      if (!mounted || listenGeneration != _listenGeneration) {
+        await capture.stop();
+        return false;
+      }
+      _realtimeCapture = capture;
+      _realtimeCaptureSub = capture.stream.listen(
+        (bytes) {
+          if (bytes.isEmpty) return;
+          if (listenGeneration != _listenGeneration) return;
+          // 폴백/디버깅용 원본 버퍼. 전사에는 쓰이지 않는다.
+          _appendTurnPcm(bytes);
+          final session = _realtimeStt;
+          if (session == null || !session.audioGateOpen) return;
+          session.appendAudio(bytes);
+          _costTracker.addRealtimeBytes(bytes.length);
+        },
+        onError: (Object e) =>
+            _log('❌ [MIC-ERR-B]', '오디오 스트림 에러: ${e.runtimeType}'),
+      );
+      return true;
+    } catch (error) {
+      _log('❌ [MIC-ERR-C]', 'realtime capture 실패 reason=${error.runtimeType}');
+      return false;
+    }
+  }
+
+  /// [MIC-ROUTING] 녹음 세션을 확실히 닫는다. Android는 녹음이 열려 있으면
+  /// AI 음성(tts-1) 출력 라우팅을 뒤늦게 덮어써 소리가 엉뚱한 곳으로 나간다.
+  ///
+  /// speech_stopped와 transcript completed가 둘 다 정지를 요청하므로, 앞의
+  /// 정지가 끝나기 전에 다음 녹음이 열리지 않도록 한 줄로 세운다.
+  Future<void> _stopRealtimeCapture({required String reason}) {
+    final pending = _realtimeCaptureStopping;
+    final next = pending == null
+        ? _stopRealtimeCaptureInner(reason)
+        : pending.then((_) => _stopRealtimeCaptureInner(reason));
+    _realtimeCaptureStopping = next;
+    return next.whenComplete(() {
+      if (identical(_realtimeCaptureStopping, next)) {
+        _realtimeCaptureStopping = null;
+      }
+    });
+  }
+
+  Future<void> _stopRealtimeCaptureInner(String reason) async {
+    final sub = _realtimeCaptureSub;
+    _realtimeCaptureSub = null;
+    await sub?.cancel();
+    final capture = _realtimeCapture;
+    _realtimeCapture = null;
+    if (capture == null) return;
+    await capture.stop();
+    _log('🎤 [MIC-ROUTING]', 'capture_stopped reason=$reason');
+  }
+
+  bool _isRealtimeTurnOwner() =>
+      mounted &&
+      !_isDisposing &&
+      _isConversationActive &&
+      _micOwner == AnyoneMicOwner.openaiRealtime;
+
+  void _onRealtimeSpeechStarted() {
+    if (!_isRealtimeTurnOwner()) {
+      _log('🎤 [LISTEN-STALE]', 'speech_started ignored');
+      return;
+    }
+    _markConversationActivity();
+    _log('⏱️ [PERF]', 'SPEECH_STARTED');
+  }
+
+  /// ⛔ 발화가 끝났다는 **신호일 뿐이다.** 여기서 AI 파이프라인을 시작하지
+  /// 않는다. 사용자 턴 확정은 오직 transcription.completed 한 곳이다.
+  void _onRealtimeSpeechStopped() {
+    if (!_isRealtimeTurnOwner()) {
+      _log('🎤 [LISTEN-STALE]', 'speech_stopped ignored');
+      return;
+    }
+    // ⏱️ [PERF] 유저가 말을 끝낸 시점. 이후 모든 지연을 이 기준으로 잰다.
+    _turnPerfAnchor = DateTime.now();
+    _log('⏱️ [PERF]', 'SPEECH_STOPPED anchor set');
+    // 전사가 도는 동안 30분 롤오버가 끼어들지 못하게 잡아 둔다.
+    _turnInFlight = true;
+    _realtimeStt?.closeAudioGate(reason: 'speech_stopped');
+    unawaited(_stopRealtimeCapture(reason: 'speech_stopped'));
+    _armRealtimeTranscriptTimeout();
+  }
+
+  void _armRealtimeTranscriptTimeout() {
+    _realtimeTranscriptTimeout?.cancel();
+    final int pipelineGeneration = _pipelineGeneration;
+    _realtimeTranscriptTimeout = Timer(
+      const Duration(milliseconds: kFreeTalkRealtimeTranscriptTimeoutMs),
+      () {
+        _realtimeTranscriptTimeout = null;
+        if (!mounted || pipelineGeneration != _pipelineGeneration) return;
+        if (!_turnInFlight || _isPipelineRunning) return;
+        _log('⚠️ [RT-STT]', 'transcription_timeout → 턴 폐기 후 마이크 재개');
+        _abortRealtimeTurn(
+          reason: 'transcription_timeout',
+          expectedPipelineGeneration: pipelineGeneration,
+        );
+      },
+    );
+  }
+
+  void _abortRealtimeTurn({
+    required String reason,
+    required int expectedPipelineGeneration,
+  }) {
+    _realtimeTranscriptTimeout?.cancel();
+    _realtimeTranscriptTimeout = null;
+    _realtimeDeltaItemId = '';
+    _realtimeDeltaBuffer.clear();
+    _turnInFlight = false;
+    _setMicOwner(AnyoneMicOwner.none, reason: reason);
+    if (mounted) {
+      setState(() {
+        _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+      });
+    }
+    if (_isConversationActive) {
+      _restartConfiguredListening(
+          expectedPipelineGeneration: expectedPipelineGeneration);
+    }
+  }
+
+  /// 🖼️ **UI 전용.** 임시 말풍선만 갱신한다.
+  /// 파이프라인·validator·History·턴 카운트 어디에도 닿지 않는다.
+  void _onRealtimeTranscriptDelta(String itemId, String delta) {
+    if (!_isRealtimeTurnOwner()) return;
+    // 이미 확정 처리한 턴의 늦은 delta는 화면을 되돌리므로 버린다.
+    // (키 형식은 _onRealtimeTranscriptCompleted가 넣는 것과 같아야 한다)
+    if (itemId.isNotEmpty && _handledRealtimeItemIds.contains('rt:$itemId')) {
+      return;
+    }
+    // AI가 답하는 중이면 유저 임시 말풍선을 세우지 않는다.
+    if (_isPipelineRunning) return;
+
+    _markConversationActivity();
+    if (!TrialFlowState.instance.isTrial) {
+      BillingTicker.instance.resumeFromActivity('free_talk_stt_partial');
+    }
+
+    if (_realtimeDeltaItemId != itemId) {
+      _realtimeDeltaItemId = itemId;
+      _realtimeDeltaBuffer.clear();
+    }
+    _realtimeDeltaBuffer.write(delta);
+    final preview = _realtimeDeltaBuffer.toString().trim();
+    if (preview.isEmpty || !mounted) return;
+    setState(() {
+      _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+      _localMessages.add(<String, dynamic>{
+        'role': 'HOST_TEMP',
+        'target': preview,
+        'original': '',
+      });
+    });
+    _scrollToBottom();
+  }
+
+  /// ✅ **사용자 턴이 확정되는 단 하나의 지점.** 한 발화당 정확히 한 번.
+  void _onRealtimeTranscriptCompleted(String itemId, String text) {
+    if (!mounted || _isDisposing || !_isConversationActive) {
+      _log('[ANY-STT]', 'stale_dropped item=$itemId reason=room_closed');
+      return;
+    }
+    // 1차 방어선: OpenAI item_id. 소켓 재연결·롤오버·늦은 이벤트 전부 여기서 걸린다.
+    final String dedupeKey = itemId.isNotEmpty
+        ? 'rt:$itemId'
+        // item_id가 비어 오는 예외 상황에만 보조 방어선(전사문 지문)을 쓴다.
+        : 'rt-hash:${_deepgramSourceTurnId(text, _listenGeneration)}';
+    if (!_handledRealtimeItemIds.add(dedupeKey)) {
+      _log('[ANY-STT]', 'duplicate_dropped item=$itemId len=${text.length}');
+      return;
+    }
+    if (_handledRealtimeItemIds.length > 64) {
+      _handledRealtimeItemIds.remove(_handledRealtimeItemIds.first);
+    }
+    _log('[ANY-STT]',
+        'final_received item=$itemId generation=$_listenGeneration len=${text.length}');
+    unawaited(_processRealtimeFinalTranscript(text, itemId: itemId));
+  }
+
+  /// 최종 전사문을 기존 파이프라인의 `userOriginal` 합류 지점으로 넘긴다.
+  /// 이 아래부터는 Deepgram 경로와 완전히 같은 코드를 탄다.
+  Future<void> _processRealtimeFinalTranscript(
+    String transcript, {
+    required String itemId,
+  }) async {
+    // 🔒 [ONE-TURN] 앞 턴이 아직 AI 응답 중이면 여기서 멈춘다. 마이크는
+    //   speech_stopped에서 닫히므로 정상 흐름에서는 올 수 없는 경우지만,
+    //   서버가 한 버퍼에서 두 구간을 확정하면 유저 턴이 두 개 생긴다.
+    if (_isPipelineRunning) {
+      _log('[TURN-SKIP]', 'reason=pipeline_busy item=$itemId');
+      return;
+    }
+    _realtimeTranscriptTimeout?.cancel();
+    _realtimeTranscriptTimeout = null;
+    final int pipelineGeneration = _pipelineGeneration;
+    _realtimeDeltaItemId = '';
+    _realtimeDeltaBuffer.clear();
+    _setMicOwner(AnyoneMicOwner.none, reason: 'realtime_transcript_committed');
+    _turnInFlight = true;
+    try {
+      // speech_stopped에서 이미 닫혔지만, 이벤트 순서가 뒤집혀도 안전하게.
+      _realtimeStt?.closeAudioGate(reason: 'transcript_completed');
+      await _stopRealtimeCapture(reason: 'transcript_completed');
+
+      final userOriginal = transcript.trim();
+      if (!mounted || pipelineGeneration != _pipelineGeneration) return;
+      if (userOriginal.isEmpty) {
+        _log('⚠️ [STT-ROUTE]', 'realtime transcript empty');
+        _abortRealtimeTurn(
+          reason: 'empty_transcript',
+          expectedPipelineGeneration: pipelineGeneration,
+        );
+        return;
+      }
+
+      _log(
+        '🎧 [STT-ROUTE]',
+        'selected=realtime model=$kRealtimeSttModel item=$itemId '
+            'len=${userOriginal.length}',
+      );
+      if (kDebugMode) {
+        _log('🎧 [STT-RAW]', 'source=realtime text="$userOriginal"');
+      }
+      _logTurnPerf('USER_KOREAN_FINAL');
+      _markConversationActivity();
+      if (!TrialFlowState.instance.isTrial) {
+        BillingTicker.instance.resumeFromActivity('free_talk_stt_result');
+      }
+
+      // 🔇 [NOISE-GATE] Deepgram 경로와 완전히 같은 게이트. 여기서 걸린 발화는
+      //   말풍선·AI 응답·TTS·저장·턴 수 어디에도 닿지 않는다.
+      if (_isNoiseTranscript(userOriginal)) {
+        _log('🔇 [NOISE-GATE]',
+            'mode=circle_talk dropped=true len=${userOriginal.length}');
+        _abortRealtimeTurn(
+          reason: 'noise_transcript',
+          expectedPipelineGeneration: pipelineGeneration,
+        );
+        return;
+      }
+
+      // 🗣️ 확정된 문장으로 임시 말풍선을 갈아 끼운다(delta 미리보기 → 확정문).
+      if (mounted) {
+        setState(() {
+          _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+          _localMessages.add(<String, dynamic>{
+            'role': 'HOST_TEMP',
+            'target': userOriginal,
+            'original': '',
+          });
+        });
+        _scrollToBottom();
+      }
+
+      await _processCircleTalkTurn(
+        userOriginal,
+        expectedPipelineGeneration: pipelineGeneration,
+      );
+    } finally {
+      _turnInFlight = false;
     }
   }
 
@@ -3892,7 +4461,7 @@ class AnyonePreparedAudioCapture {
     final source = await recorder.startStream(
       const RecordConfig(
         encoder: AudioEncoder.pcm16bits,
-        sampleRate: 16000,
+        sampleRate: kStealthVoxSttSampleRate,
         numChannels: 1,
       ),
     );
@@ -4218,7 +4787,7 @@ class DeepgramV2VoiceManager {
             stream = await audioRecorder.startStream(
               const RecordConfig(
                 encoder: AudioEncoder.pcm16bits,
-                sampleRate: 16000,
+                sampleRate: kStealthVoxSttSampleRate,
                 numChannels: 1,
               ),
             );

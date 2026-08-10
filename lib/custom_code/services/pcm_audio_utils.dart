@@ -4,6 +4,18 @@
 
 import 'dart:typed_data';
 
+/// 🎚️ 유저 음성 입력 파이프라인 전체가 쓰는 단 하나의 샘플레이트.
+///
+/// OpenAI Realtime transcription의 입력 PCM이 24kHz 고정이라 여기에 맞춘다.
+/// 마이크 녹음(RecordConfig) · Deepgram URI의 `sample_rate` · 폴백
+/// gpt-4o-transcribe의 WAV 헤더가 **반드시 같은 값**이어야 한다. 한 곳만
+/// 어긋나면 소리가 빨라지거나 느려져 전사문이 통째로 망가지는데, 에러가 아니라
+/// "이상한 문장"으로 나와서 원인을 찾기 어렵다.
+const int kStealthVoxSttSampleRate = 24000;
+
+/// PCM16 mono 기준 1ms당 바이트 수. 과금 로그·버퍼 상한 계산이 쓴다.
+const int kStealthVoxSttBytesPerMs = kStealthVoxSttSampleRate * 2 ~/ 1000;
+
 /// PCM16(LE, interleaved) 원시 바이트를 WAV 컨테이너로 감싼다.
 Uint8List pcm16ToWav(
   Uint8List pcm, {
