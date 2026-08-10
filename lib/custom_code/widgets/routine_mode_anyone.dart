@@ -1706,26 +1706,13 @@ $kSpokenReplyLengthPolicy
             _log('🎤 [LISTEN-STALE]', 'onTranscriptUpdate ignored');
             return;
           }
-          // 🗣️ [PARTIAL] 딥그램 실시간 전사를 말하는 중에 그대로 띄운다.
-          //   interim_results는 이미 켜져 있어 이 문자열이 매번 도착하는데,
-          //   예전에는 받아서 버리고 버블만 지웠다. 그래서 유저는 말이 끝나고
-          //   gpt-4o-transcribe 왕복이 끝날 때까지 빈 화면을 봐야 했다.
-          //   정확한 문장은 여전히 gpt-4o-transcribe 것으로 교체된다.
-          final partial = transcript.trim();
-          if (partial.isNotEmpty && mounted) {
-            final hadPartial =
-                _localMessages.any((m) => m['role'] == 'HOST_TEMP');
+          // 말하는 도중의 부분 전사는 띄우지 않는다. 글자가 계속 고쳐지며
+          // 흔들려 읽기 나쁘다. 문장은 발화가 끝나 확정된 뒤 한 번에 세운다
+          // ([COMMIT-TEXT] 참조).
+          if (transcript.trim().isNotEmpty && mounted) {
             setState(() {
               _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-              _localMessages.add(<String, dynamic>{
-                'role': 'HOST_TEMP',
-                'target': partial,
-                'original': '',
-              });
             });
-            // 글자가 늘어날 때마다 스크롤하면 유저가 위를 보는 것을 방해한다.
-            // 버블이 처음 생길 때만 화면 안으로 들인다.
-            if (!hadPartial) _scrollToBottom();
           }
           _swDeepgram.reset();
           _swDeepgram.start();

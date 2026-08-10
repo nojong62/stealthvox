@@ -1287,6 +1287,22 @@ never by itself a reason to ask back.
       return;
     }
 
+    // 🗣️ [COMMIT-TEXT] 발화가 끝나 확정된 딥그램 문장을 먼저 세운다. 말하는
+    //   도중의 부분 전사는 쓰지 않는다 — 글자가 계속 고쳐지며 흔들린다.
+    //   여기서 세우면 gpt-4o-transcribe 왕복을 기다리지 않고 문장이 뜨고,
+    //   정확한 문장이 오면 아래에서 조용히 갈아 끼운다. (Circle Talk과 동일)
+    if (mounted) {
+      setState(() {
+        _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+        _localMessages.add(<String, dynamic>{
+          'role': 'HOST_TEMP',
+          'target': boundaryTranscript,
+          'original': '',
+        });
+      });
+      _scrollToBottom();
+    }
+
     final pcm = _snapshotTurnPcm();
     final closingManager = _voiceManager;
     _voiceManager = null;
