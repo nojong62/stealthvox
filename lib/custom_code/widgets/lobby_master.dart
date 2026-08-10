@@ -654,7 +654,12 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                             children: [
                               _buildGlassContainer(
                                   child: Column(children: [
-                                Text("REMAINING TIME",
+                                // 자간이 3이라 글자 수가 그대로 폭이 된다.
+                                // "REMAINING TIME"(14자)은 글꼴 배율을 크게 쓰는
+                                // 기기에서 두 줄로 넘어갔다 — 로비는 인트로와
+                                // 달리 배율 상한이 없다.
+                                Text("TIME LEFT",
+                                    maxLines: 1,
                                     style: GoogleFonts.orbitron(
                                         color: const Color(0xFF60A5FA),
                                         fontSize: 12,
