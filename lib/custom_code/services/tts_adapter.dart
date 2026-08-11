@@ -206,6 +206,11 @@ class TtsUtterance {
   final TtsPrefetch? _prefetch;
   TtsUtteranceStatus status = TtsUtteranceStatus.pending;
 
+  /// ⏱️ 큐에 들어온 시각. 요청이 실제로 나가기까지 큐에서 얼마나 묵었는지를
+  /// 재려면 이 기준점이 필요하다 — 큐 대기와 연결 수립과 API 응답이 로그에서
+  /// 뭉뚱그려지면 어느 쪽을 고쳐야 할지 알 수가 없다.
+  final DateTime queuedAt = DateTime.now();
+
   final Completer<void> _firstAudio = Completer<void>();
   final Completer<bool> _done = Completer<bool>();
   bool _cancelRequested = false;
@@ -839,6 +844,16 @@ class TtsAdapter {
           _log('🔊 [TTS-PREFETCH]',
               'playback_attached turnId=${request.turnId}');
         } else {
+          // ⏱️ [TTS-PERF] 요청이 실제로 소켓에 나가는 순간. queuedMs가 크면
+          //   범인은 API가 아니라 큐(앞 발화 재생 대기)다.
+          final int queuedMs =
+              DateTime.now().difference(utterance.queuedAt).inMilliseconds;
+          _log(
+            '⏱️ [TTS-PERF]',
+            'TTS_REQUEST_SENT turnId=${request.turnId} '
+                'queuedMs=$queuedMs chars=${request.text.length} '
+                'attempt=$attempt',
+          );
           final response = await client
               .send(_buildSpeechRequest(
                 apiKey: apiKey,
@@ -886,7 +901,15 @@ class TtsAdapter {
           if (chunk.isEmpty) continue;
 
           historyBuffer.add(chunk);
-          firstByteMs ??= sw.elapsedMilliseconds;
+          if (firstByteMs == null) {
+            firstByteMs = sw.elapsedMilliseconds;
+            // ⏱️ [TTS-PERF] 첫 오디오 바이트 도착. 이 값이 크면 연결 수립이나
+            //   API가 느린 것이고, 작은데 재생이 늦으면 범인은 프리롤이다.
+            _log(
+              '⏱️ [TTS-PERF]',
+              'TTS_FIRST_CHUNK turnId=${request.turnId} ttfbMs=$firstByteMs',
+            );
+          }
 
           // 🎚️ [PREROLL] 재생 시작 전에는 아직 플레이어에 넣지 않고 모은다.
           //   목표량을 채우면 그때 세션을 열고 한꺼번에 밀어넣는다.

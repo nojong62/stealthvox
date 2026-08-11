@@ -2721,6 +2721,12 @@ $kSpokenReplyLengthPolicy
       // ⏱️ [AI-GEN] 턴 뒷구간(생성→합성→재생)에서 여기만 계측이 없었다.
       //   합성·재생은 어댑터가 playback_start의 ttfbMs/startMs로 찍고, 재생
       //   완료는 [GPT-HISTORY]가 표시한다. 이 한 줄이 있어야 셋이 갈린다.
+      // ⏱️ [PERF] 발화 종료 기준 타임라인. 아래 마크들과 어댑터의
+      //   TTS_REQUEST_SENT / TTS_FIRST_CHUNK / playback_start를 이으면
+      //   한 턴이 GPT 생성 · 큐 대기 · 연결+API · 프리롤로 정확히 쪼개진다.
+      //   ⚠️ AI_TEXT_FIRST_TOKEN은 여기서 찍을 수 없다 — 아래 호출이 통짜
+      //   POST라 첫 토큰이라는 사건 자체가 없다. 스트리밍으로 바꾸면 생긴다.
+      _logTurnPerf('AI_REQUEST_START');
       final aiGenSw = Stopwatch()..start();
       final aiOriginal = await UnifiedBrain.generateCircleMemberTurn(
         apiKey: _openAiKey,
@@ -2729,6 +2735,7 @@ $kSpokenReplyLengthPolicy
         history: _recentHistory,
       );
       aiGenSw.stop();
+      _logTurnPerf('AI_TEXT_COMPLETE');
       _log(
           '⏱️ [AI-GEN]',
           'turn=$currentTurnId model=gpt-4o-mini '
@@ -3028,6 +3035,7 @@ $kSpokenReplyLengthPolicy
       }
     }
     _costTracker.recordTtsRequest(spokenText.length);
+    _logTurnPerf('TTS_ENQUEUE');
     final utterance = _ttsAdapter.speak(TtsRequest(
       text: spokenText,
       voiceId: voice,
