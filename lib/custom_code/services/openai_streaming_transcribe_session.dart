@@ -1,13 +1,22 @@
 // ====================================================================
-// 🎙️ [REALTIME-STT] OpenAI Realtime transcription 세션
+// 🎙️ [STREAMING-STT] 유저 음성 스트리밍 전사 세션
 // --------------------------------------------------------------------
+// ⚠️ 이름 주의 — 이 앱에서 "리얼타임"은 쓰지 않는다.
+//   전사 모델은 예전과 같은 **gpt-4o-transcribe**다. 바뀐 것은 그 모델에
+//   음성을 건네는 방법뿐이다: 녹음이 끝난 뒤 WAV 파일을 올리던 것을,
+//   말하는 동안 소켓으로 흘려보내는 방식으로 바꿨다.
+//
+//   그 소켓의 주소가 OpenAI 쪽 이름으로 `/v1/realtime`일 뿐이고,
+//   2026-08-08에 걷어낸 **Realtime 음성 대화(WebRTC, gpt-realtime)와는
+//   다른 물건이다.** AI 응답은 지금도 gpt-4o-mini + tts-1이 만든다.
+//
 // 이 파일이 하는 일은 셋뿐이다.
 //   1. 유저 마이크 PCM을 OpenAI로 흘려보낸다
 //   2. OpenAI Server VAD가 발화 시작/종료를 잡는다
 //   3. 최종 전사문을 돌려준다
 //
 // 하지 않는 일:
-//   · AI 답변 생성 (Realtime conversation 아님 — 전사 전용 세션이다)
+//   · AI 답변 생성 — 전사 전용 세션이다
 //   · 마이크 제어 (앱이 녹음하고, 이 클래스는 받은 바이트를 보낼 뿐이다)
 //   · TTS
 //
@@ -33,22 +42,26 @@ import 'pcm_audio_utils.dart';
 // ====================================================================
 // 🎚️ [PHASE-1 FLAG] Circle Talk 유저 음성 전사 엔진 전환 스위치
 // --------------------------------------------------------------------
-//   ON  → OpenAI Realtime transcription (Server VAD + 스트리밍 전사)
+//   ON  → 스트리밍 전사 (Server VAD + gpt-4o-transcribe)
 //   OFF → 기존 Deepgram Nova-3 경계 + gpt-4o-transcribe 파일 전사
+//
+// 양쪽 다 글자를 만드는 모델은 gpt-4o-transcribe로 같다. 갈리는 것은
+// 발화 종료를 누가 잡느냐(OpenAI Server VAD vs Deepgram)와
+// 음성을 어떻게 보내느냐(스트리밍 vs 파일 업로드) 둘뿐이다.
 //
 // **둘은 절대 동시에 돌지 않는다.** 한 턴에 STT 경로는 하나뿐이고,
 // 소켓 예열도 켜진 쪽만 한다. 실기기 A/B 측정은 이 값을 뒤집어서 한다:
-//   flutter run --dart-define=FREETALK_REALTIME_STT=false
+//   flutter run --dart-define=FREETALK_STREAMING_STT=false
 //
 // 바뀌는 것은 전사 공급자뿐이다. 노이즈 게이트·AI 응답·TTS·History·
 // billing·30분 롤오버는 `userOriginal` 합류 지점부터 기존 코드를 탄다.
 // ====================================================================
-const bool kFreeTalkUseRealtimeStt =
-    bool.fromEnvironment('FREETALK_REALTIME_STT', defaultValue: true);
+const bool kFreeTalkUseStreamingStt =
+    bool.fromEnvironment('FREETALK_STREAMING_STT', defaultValue: true);
 
 /// 전사 전용 세션 엔드포인트. `intent=transcription`이 붙어야 음성 응답용
 /// conversation 세션이 아니라 전사 세션으로 열린다.
-const String kRealtimeSttEndpoint =
+const String kStreamingSttEndpoint =
     'wss://api.openai.com/v1/realtime?intent=transcription';
 
 /// 전사 모델. **여기 한 줄만 바꾸면 모델이 바뀐다** — 다른 곳에 박지 않는다.
@@ -57,31 +70,31 @@ const String kRealtimeSttEndpoint =
 /// (Deepgram VAD + WAV 업로드 → Server VAD + 스트리밍)만 바꿔야 속도·정확도·
 /// 비용 변화의 원인을 분리할 수 있기 때문이다.
 /// 공식 가이드가 권장하는 저지연 스트리밍 모델은 `gpt-live-transcribe`다.
-const String kRealtimeSttModel = 'gpt-4o-transcribe';
+const String kStreamingSttModel = 'gpt-4o-transcribe';
 
 // ── Server VAD 초기값 ────────────────────────────────────────────────
 // 고정 정책이 아니라 실기기 측정 시작점이다. 500 / 600 / 700을 비교한다.
 //   · 문장 중간 잘림 발생률
 //   · speech_stopped → transcription.completed
 //   · speech_stopped → AI 첫 소리
-const double kRealtimeVadThreshold = 0.5;
-const int kRealtimeVadPrefixPaddingMs = 300;
-const int kRealtimeVadSilenceDurationMs = 600;
+const double kStreamingSttVadThreshold = 0.5;
+const int kStreamingSttVadPrefixPaddingMs = 300;
+const int kStreamingSttVadSilenceDurationMs = 600;
 
-const Duration kRealtimeSttConnectTimeout = Duration(seconds: 6);
+const Duration kStreamingSttConnectTimeout = Duration(seconds: 6);
 
 /// `session.update`를 서버가 받아들였다는 확인을 기다리는 시간.
 /// 확인 없이 오디오를 흘리면 설정이 반영 안 된 세션에 말이 들어간다.
-const Duration kRealtimeSttConfigTimeout = Duration(seconds: 4);
+const Duration kStreamingSttConfigTimeout = Duration(seconds: 4);
 
-const int kRealtimeSttMaxRetries = 5;
+const int kStreamingSttMaxRetries = 5;
 
 /// 전사 세션 하나. 대화방 세션 동안 살아 있고, 턴마다 새로 만들지 않는다.
 ///
 /// **연결과 마이크 입력은 분리되어 있다.** 소켓은 유지한 채
 /// [openAudioGate] / [closeAudioGate]로 오디오 전송만 여닫는다.
-class OpenAiRealtimeTranscribeSession {
-  OpenAiRealtimeTranscribeSession({
+class OpenAiStreamingTranscribeSession {
+  OpenAiStreamingTranscribeSession({
     required this.apiKey,
     required this.languageCode,
     this.onLog,
@@ -142,9 +155,9 @@ class OpenAiRealtimeTranscribeSession {
     final sw = Stopwatch()..start();
     try {
       final socket = await WebSocket.connect(
-        kRealtimeSttEndpoint,
+        kStreamingSttEndpoint,
         headers: {'Authorization': 'Bearer $apiKey'},
-      ).timeout(kRealtimeSttConnectTimeout);
+      ).timeout(kStreamingSttConnectTimeout);
       if (_disposed) {
         unawaited(socket.close());
         return false;
@@ -164,11 +177,11 @@ class OpenAiRealtimeTranscribeSession {
       _sendSessionUpdate();
 
       final ok = await configured.future.timeout(
-        kRealtimeSttConfigTimeout,
+        kStreamingSttConfigTimeout,
         onTimeout: () => false,
       );
       if (!ok) {
-        _lg('❌ [RT-STT]',
+        _lg('❌ [STREAM-STT]',
             'session_update_unconfirmed elapsedMs=${sw.elapsedMilliseconds}');
         await _teardownSocket();
         return false;
@@ -176,17 +189,17 @@ class OpenAiRealtimeTranscribeSession {
       _connectedAt = DateTime.now();
       _retryCount = 0;
       _lg(
-        '✅ [RT-STT]',
-        'connected model=$kRealtimeSttModel lang=$languageCode '
+        '✅ [STREAM-STT]',
+        'connected model=$kStreamingSttModel lang=$languageCode '
             'rate=$kStealthVoxSttSampleRate vad=server_vad '
-            'threshold=$kRealtimeVadThreshold '
-            'prefixMs=$kRealtimeVadPrefixPaddingMs '
-            'silenceMs=$kRealtimeVadSilenceDurationMs '
+            'threshold=$kStreamingSttVadThreshold '
+            'prefixMs=$kStreamingSttVadPrefixPaddingMs '
+            'silenceMs=$kStreamingSttVadSilenceDurationMs '
             'connectMs=${sw.elapsedMilliseconds}',
       );
       return true;
     } catch (e) {
-      _lg('❌ [RT-STT]',
+      _lg('❌ [STREAM-STT]',
           'connect_failed(${e.runtimeType}) elapsedMs=${sw.elapsedMilliseconds}');
       await _teardownSocket();
       return false;
@@ -207,15 +220,15 @@ class OpenAiRealtimeTranscribeSession {
               'rate': kStealthVoxSttSampleRate,
             },
             'transcription': {
-              'model': kRealtimeSttModel,
+              'model': kStreamingSttModel,
               'language': languageCode,
             },
             // 발화 경계는 전적으로 서버가 잡는다. 앱에서 commit하지 않는다.
             'turn_detection': {
               'type': 'server_vad',
-              'threshold': kRealtimeVadThreshold,
-              'prefix_padding_ms': kRealtimeVadPrefixPaddingMs,
-              'silence_duration_ms': kRealtimeVadSilenceDurationMs,
+              'threshold': kStreamingSttVadThreshold,
+              'prefix_padding_ms': kStreamingSttVadPrefixPaddingMs,
+              'silence_duration_ms': kStreamingSttVadSilenceDurationMs,
             },
           },
         },
@@ -227,7 +240,7 @@ class OpenAiRealtimeTranscribeSession {
   void openAudioGate({required String reason}) {
     if (_disposed || _audioGateOpen) return;
     _audioGateOpen = true;
-    _lg('🎙️ [RT-GATE]', 'open reason=$reason');
+    _lg('🎙️ [STREAM-GATE]', 'open reason=$reason');
   }
 
   /// 오디오 전송을 닫는다. **소켓은 살려 둔다** — 다음 턴에 다시 열기 위해서다.
@@ -235,7 +248,7 @@ class OpenAiRealtimeTranscribeSession {
   void closeAudioGate({required String reason}) {
     if (!_audioGateOpen) return;
     _audioGateOpen = false;
-    _lg('🎙️ [RT-GATE]', 'close reason=$reason');
+    _lg('🎙️ [STREAM-GATE]', 'close reason=$reason');
   }
 
   /// 마이크 PCM 한 조각. 게이트가 닫혀 있으면 조용히 버린다(버퍼링하지 않는다 —
@@ -251,7 +264,7 @@ class OpenAiRealtimeTranscribeSession {
     if (!_firstAudioSent) {
       _firstAudioSent = true;
       final at = DateTime.now();
-      _lg('📡 [RT-FIRST-SEND]',
+      _lg('📡 [STREAM-FIRST-SEND]',
           'at=${at.toIso8601String()} bytes=${pcm.length}');
       onFirstAudioSent?.call(at);
     }
@@ -293,7 +306,7 @@ class OpenAiRealtimeTranscribeSession {
       case 'error':
         // 세션 설정이 거부됐는지, 턴 하나가 실패했는지 갈라야 한다. 원문을
         // 그대로 남긴다 — 여기서 요약하면 스펙 불일치를 영영 못 찾는다.
-        _lg('❌ [RT-STT-ERR]',
+        _lg('❌ [STREAM-STT-ERR]',
             raw.length > 800 ? '${raw.substring(0, 800)}…' : raw);
         final pending = _configured;
         if (pending != null && !pending.isCompleted) {
@@ -302,18 +315,18 @@ class OpenAiRealtimeTranscribeSession {
         return;
 
       case 'input_audio_buffer.speech_started':
-        _lg('📡 [RT-VAD]', 'speech_started');
+        _lg('📡 [STREAM-VAD]', 'speech_started');
         onSpeechStarted?.call();
         return;
 
       case 'input_audio_buffer.speech_stopped':
-        _lg('📡 [RT-VAD]', 'speech_stopped');
+        _lg('📡 [STREAM-VAD]', 'speech_stopped');
         onSpeechStopped?.call();
         return;
 
       case 'input_audio_buffer.committed':
         // 서버가 발화 구간을 확정했다는 신호일 뿐이다. 전사는 그 뒤에 온다.
-        _lg('📡 [RT-VAD]', 'committed item=${event['item_id']}');
+        _lg('📡 [STREAM-VAD]', 'committed item=${event['item_id']}');
         return;
 
       case 'conversation.item.input_audio_transcription.delta':
@@ -327,14 +340,14 @@ class OpenAiRealtimeTranscribeSession {
       case 'conversation.item.input_audio_transcription.done':
         final itemId = event['item_id']?.toString() ?? '';
         final text = event['transcript']?.toString() ?? '';
-        _lg('📡 [RT-STT]',
+        _lg('📡 [STREAM-STT]',
             'transcription_completed item=$itemId len=${text.length}');
         onTranscriptCompleted?.call(itemId, text);
         return;
 
       case 'conversation.item.input_audio_transcription.failed':
         _lg(
-            '❌ [RT-STT]',
+            '❌ [STREAM-STT]',
             'transcription_failed item=${event['item_id']} '
                 'reason=${event['error']}');
         return;
@@ -352,7 +365,7 @@ class OpenAiRealtimeTranscribeSession {
 
   void _onSocketLost(String reason) {
     if (_disposed) return;
-    _lg('⚠️ [RT-STT]', 'socket_lost reason=$reason');
+    _lg('⚠️ [STREAM-STT]', 'socket_lost reason=$reason');
     _completeConfigured(false);
     unawaited(_reconnect(reason));
   }
@@ -366,11 +379,11 @@ class OpenAiRealtimeTranscribeSession {
       await _teardownSocket();
       final gate = shouldReconnect;
       if (gate != null && !gate()) {
-        _lg('🎙️ [RT-STT]', 'reconnect_skipped reason=gate_closed');
+        _lg('🎙️ [STREAM-STT]', 'reconnect_skipped reason=gate_closed');
         return;
       }
-      if (_retryCount >= kRealtimeSttMaxRetries) {
-        _lg('❌ [RT-STT]', 'reconnect_gave_up after=$_retryCount');
+      if (_retryCount >= kStreamingSttMaxRetries) {
+        _lg('❌ [STREAM-STT]', 'reconnect_gave_up after=$_retryCount');
         onGaveUp?.call();
         onFatalError?.call(reason);
         return;
@@ -381,7 +394,8 @@ class OpenAiRealtimeTranscribeSession {
       await Future<void>.delayed(delay);
       if (_disposed) return;
       if (gate != null && !gate()) {
-        _lg('🎙️ [RT-STT]', 'reconnect_skipped reason=gate_closed_after_delay');
+        _lg('🎙️ [STREAM-STT]',
+            'reconnect_skipped reason=gate_closed_after_delay');
         return;
       }
       _reconnectInProgress = false; // connect 실패 시 다음 이벤트를 다시 받는다
@@ -415,7 +429,7 @@ class OpenAiRealtimeTranscribeSession {
     _disposed = true;
     _audioGateOpen = false;
     _completeConfigured(false);
-    _lg('🎙️ [RT-STT]', 'dispose sentAudioMs=$sentAudioMs');
+    _lg('🎙️ [STREAM-STT]', 'dispose sentAudioMs=$sentAudioMs');
     await _teardownSocket();
   }
 }

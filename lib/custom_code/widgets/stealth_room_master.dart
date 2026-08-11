@@ -27,8 +27,8 @@ import 'package:firebase_remote_config/firebase_remote_config.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
 import '/custom_code/services/openai_connection_pool.dart';
-import '/custom_code/services/openai_realtime_prewarm_session.dart';
-import '/custom_code/services/openai_realtime_transcribe_session.dart';
+import '/custom_code/services/openai_streaming_transcribe_prewarm.dart';
+import '/custom_code/services/openai_streaming_transcribe_session.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
 import 'trial/trial_flow_state.dart';
@@ -81,7 +81,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   late Future<void> _anyoneAudioReady;
   DateTime? _anyoneMicInputAt;
   // 🎤 [ENTRY-GATE] Circle Talk은 서클 선택 후 입장하고, 준비가 끝나는 즉시
-  //   Deepgram 청취와 Realtime verse 응답을 시작한다.
+  //   유저 음성 청취와 AI 첫 마디를 시작한다.
   // 초대 링크에서 소비한 roomId (1회용 — build에서 Duo 생성자에 전달)
   String? _pendingDuoRoomId;
 
@@ -165,9 +165,9 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     //   이중이 된다 (Circle Talk의 전사 경로는 한 턴에 하나뿐이다).
     final nativeLanguage =
         FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
-    if (kFreeTalkUseRealtimeStt) {
+    if (kFreeTalkUseStreamingStt) {
       if (openAiKey.isNotEmpty) {
-        unawaited(OpenAiRealtimePrewarmSession.instance.prepare(
+        unawaited(OpenAiStreamingTranscribePrewarm.instance.prepare(
           apiKey: openAiKey,
           languageCode: deepgramLanguageCode(nativeLanguage),
           onLog: (tag, msg) => debugPrint('$tag $msg'),
@@ -273,8 +273,8 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     _aiRoleController.dispose();
     _userRoleController.dispose();
     unawaited(DeepgramPrewarmSession.instance.discard(reason: 'room_dispose'));
-    unawaited(
-        OpenAiRealtimePrewarmSession.instance.discard(reason: 'room_dispose'));
+    unawaited(OpenAiStreamingTranscribePrewarm.instance
+        .discard(reason: 'room_dispose'));
     unawaited(_anyoneAudioRecorder.dispose());
     super.dispose();
   }

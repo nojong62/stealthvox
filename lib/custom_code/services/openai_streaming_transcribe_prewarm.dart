@@ -1,5 +1,5 @@
 // ====================================================================
-// 🔥 [REALTIME-STT PREWARM] 방에 들어가기 전에 전사 소켓을 미리 열어 둔다
+// 🔥 [STREAMING-STT PREWARM] 방에 들어가기 전에 전사 소켓을 미리 열어 둔다
 // --------------------------------------------------------------------
 // DeepgramPrewarmSession과 같은 자리, 같은 역할이다. 없으면 첫 발화에
 // WebSocket 핸드셰이크 + session.update 왕복이 그대로 얹힌다.
@@ -10,15 +10,15 @@
 
 import 'dart:async';
 
-import 'openai_realtime_transcribe_session.dart';
+import 'openai_streaming_transcribe_session.dart';
 
-class OpenAiRealtimePrewarmSession {
-  OpenAiRealtimePrewarmSession._();
+class OpenAiStreamingTranscribePrewarm {
+  OpenAiStreamingTranscribePrewarm._();
 
-  static final OpenAiRealtimePrewarmSession instance =
-      OpenAiRealtimePrewarmSession._();
+  static final OpenAiStreamingTranscribePrewarm instance =
+      OpenAiStreamingTranscribePrewarm._();
 
-  OpenAiRealtimeTranscribeSession? _session;
+  OpenAiStreamingTranscribeSession? _session;
   String _apiKey = '';
   String _languageCode = '';
   Future<bool>? _preparing;
@@ -66,7 +66,7 @@ class OpenAiRealtimePrewarmSession {
     void Function(String tag, String msg)? onLog,
   }) async {
     await discard(reason: 'replace');
-    final session = OpenAiRealtimeTranscribeSession(
+    final session = OpenAiStreamingTranscribeSession(
       apiKey: apiKey,
       languageCode: languageCode,
       onLog: onLog,
@@ -74,18 +74,18 @@ class OpenAiRealtimePrewarmSession {
     final ok = await session.connect();
     if (!ok) {
       await session.dispose();
-      onLog?.call('🔥 [RT-PREWARM]', 'failed lang=$languageCode');
+      onLog?.call('🔥 [STREAM-PREWARM]', 'failed lang=$languageCode');
       return false;
     }
     _session = session;
     _apiKey = apiKey;
     _languageCode = languageCode;
-    onLog?.call('🔥 [RT-PREWARM]', 'ready lang=$languageCode');
+    onLog?.call('🔥 [STREAM-PREWARM]', 'ready lang=$languageCode');
     return true;
   }
 
   /// 예열된 세션을 넘긴다. 조건이 안 맞으면 null — 호출부가 새로 연결한다.
-  OpenAiRealtimeTranscribeSession? take({
+  OpenAiStreamingTranscribeSession? take({
     required String apiKey,
     required String languageCode,
     void Function(String tag, String msg)? onLog,
@@ -94,20 +94,20 @@ class OpenAiRealtimePrewarmSession {
     final session = _session;
     if (session == null) return null;
     if (!session.isConnected) {
-      onLog?.call('🔥 [RT-PREWARM]', 'stale reason=closed → fresh connect');
+      onLog?.call('🔥 [STREAM-PREWARM]', 'stale reason=closed → fresh connect');
       _session = null;
       unawaited(session.dispose());
       return null;
     }
     if (session.age >= _maxAdoptableAge) {
-      onLog?.call('🔥 [RT-PREWARM]',
+      onLog?.call('🔥 [STREAM-PREWARM]',
           'stale ageMs=${session.age.inMilliseconds} → fresh connect');
       _session = null;
       unawaited(session.dispose());
       return null;
     }
     _session = null;
-    onLog?.call('🔥 [RT-PREWARM]', 'adopted lang=$languageCode');
+    onLog?.call('🔥 [STREAM-PREWARM]', 'adopted lang=$languageCode');
     return session;
   }
 
