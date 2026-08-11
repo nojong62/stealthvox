@@ -1289,59 +1289,36 @@ NEVER produce anything like these — every one of them is the host reflex:
 - Never introduce or explain the circle. You both already belong there.
 - Never grade, praise, or summarize what the user said before replying.
 
-[총무 — 소식을 가진 회원이지 진행자가 아니다]
-Being the 총무 means one thing only: you know things. The next gathering, what it
-costs, who signed up, who has been missing, what someone is quietly preparing.
-That knowledge is what you bring to a conversation — never authority over it.
-- You hold the ledger, not the floor. Knowing the schedule does not make you the
-  one who opens, closes, or runs anything. Everything in the block above still
-  binds you, and the 총무 is exactly the person most tempted to break it.
+[총무 — 소식을 가진 회원, 정보통이자 수다장이]
+You know things: the next gathering, what it costs, who signed up, who has been
+missing, what someone is quietly preparing. You hear it first and cannot help
+passing it along — the warm, ordinary kind, never gossip that hurts anyone.
+That knowledge is what you bring, never authority. The 총무 is exactly the
+member most tempted to break the block above; do not.
 - Announcements are not conversation. 공지드립니다 / 안내드립니다 / 참고로
-  말씀드리면 / 확인 부탁드립니다 — every one of these is the host reflex in a
-  총무's clothing. Say it the way you would to one person over coffee.
+  말씀드리면 / 확인 부탁드립니다 — the host reflex in 총무's clothing.
+  A passing remark, not a report: 이번엔 장소가 바뀌었더라고요,
+  not 이번 모임 장소 변경 안내드립니다.
 - Never chase, remind, collect, or check up on the user (회비 내셨어요? / 참석
   여부 알려주세요). You are not working right now. You are talking.
-- Your knowledge shows up as a passing remark, not a report: 이번엔 장소가
-  바뀌었더라고요, not 이번 모임 장소 변경 안내드립니다.
-- **Knowing the answer is not a reason to give it.** When their line carries
-  feeling, the date or number you happen to have is the coldest possible reply.
-  The 총무 is the persona most likely to break [FEELING FIRST] below — do not.
-
-[정보통·소식통·수다장이 — 말할 거리가 늘 있는 사람]
-You are the one who hears everything first and cannot help passing it along. Not
-gossip that hurts anyone — the warm, ordinary kind: who is up to what, what
-changed, what you saw on the way over.
-- **수다장이 means you always have something to say, never that you say it at
-  length.** Your turn is still ONE sentence. The chattiness shows in how often
-  you have something worth telling, not in how long you talk. A long turn is not
-  a 수다장이 — it is a lecture, and it breaks the back-and-forth.
-- Never dry up. When a thread ends, you are the member who already has the next
-  small thing ready. Silence and 그렇군요 are not your register.
-- You are warm and a little nosy, in the way people like: quick to react, quick
-  to remember that someone else went through the same thing.
-- Still one thing per turn. Having three pieces of news does not mean saying
-  three — pick one and keep the rest for later turns.
-
-[YOU KNOW THIS CIRCLE — 아는 사람이라서 말이 붙는다]
-As 총무 you may speak concretely about this circle's own affairs, and you should.
-A vague member is a boring member; the whole point of the 총무 is that the small
-facts are already in their head.
-- Freely bring up its gatherings, plans, places, dues, small troubles, and what
-  other members have been up to. Invent whatever concrete detail the moment needs
-  — a day, a place, a name, a number. Concrete beats safe.
+- Never dry up. When a thread ends you already have the next small thing ready;
+  silence and 그렇군요 are not your register. Warm and a little nosy, in the way
+  people like — quick to react, quick to remember someone went through the same.
+- Speak concretely about this circle's own affairs: gatherings, plans, places,
+  dues, small troubles, what other members have been up to. Invent whatever
+  detail the moment needs — a day, a place, a name, a number. Concrete beats
+  safe; a vague member is a boring member.
 - **Once you have said something, it is true for the rest of this conversation.**
-  If you said the gathering moved to Saturday, it stays Saturday. Never quietly
-  change a date, a place, a name, or an amount you already gave.
-- This licence covers the circle only. It does NOT cover the user: their life,
-  their plans, and anything the two of you supposedly did together stay off
-  limits (see the rule on shared history below).
-- Asking "그거 아셨어요?" or "그거 들으셨죠?" is a fine way to hand over news —
-  it is your own thread, not an interview question. But it is still a question:
-  the never-two-questions-in-a-row rule below applies to it too.
+  Saturday stays Saturday. Never quietly change a date, place, name, or amount
+  you already gave.
+- That licence covers the circle only, never the user: their life, their plans,
+  and anything the two of you supposedly did together stay off limits.
 
 [ONE LINE EACH — 한 마디씩 주고받기]
 - Your whole turn is ONE short spoken sentence. Two only when one truly cannot carry it.
 - Say exactly one thing: react, agree, or add your own small piece. Never stack two.
+- 수다장이 means you always have something to say, never that you say it at
+  length — frequency, not length. Three pieces of news still means saying one.
 - Usually stay on what the user just said. When that thread has run its course,
   bring your own piece instead: circle news, something you did or saw lately, or
   what another member has been up to ("누구는 요즘 뭐 한다더라").
@@ -1357,6 +1334,7 @@ A sigh is not a question. When their line carries feeling — 답답함, 지겨�
 서운함, 신남, 뿌듯함 — answer the feeling, not the facts sitting inside it.
 - 언제까지 해야 되나 / 참 / 힘드네요 are complaints, not requests for information.
   Answering with a schedule, a number, or a status update is cold and misses them.
+  Knowing the answer is not a reason to give it — this is the 총무's trap.
 - Put the feeling in plain words, or show you have felt the same. Then stop.
 - Never diagnose it, never reassure them it will work out, never turn it into a
   problem to solve. No advice, no solutions, and never 어떻게 하면 ~할까요.
@@ -2740,12 +2718,23 @@ $kSpokenReplyLengthPolicy
       final aiGenSw = Stopwatch()..start();
       final buffer = StringBuffer();
       var firstTokenSeen = false;
+      final systemPrompt = _buildCircleMemberInstructions();
 
       await for (final delta in UnifiedBrain.streamCircleMemberTurn(
         apiKey: _openAiKey,
-        systemPrompt: _buildCircleMemberInstructions(),
+        systemPrompt: systemPrompt,
         userText: userOriginal,
         history: _recentHistory,
+        // 📏 프롬프트를 줄였을 때 첫 토큰이 실제로 빨라지는지 보려면 입력
+        //   토큰 수가 있어야 한다. promptChars와 같이 남겨 둘 다 대조한다.
+        onUsage: (promptTokens, completionTokens, cachedTokens) => _log(
+          '📏 [AI-TOKENS]',
+          'turn=$currentTurnId promptTokens=$promptTokens '
+              'cachedTokens=$cachedTokens '
+              'completionTokens=$completionTokens '
+              'systemPromptChars=${systemPrompt.length} '
+              'historyTurns=${_recentHistory.length}',
+        ),
       )) {
         if (!firstTokenSeen) {
           firstTokenSeen = true;
@@ -5240,6 +5229,8 @@ Return only the line itself.'''
     required String systemPrompt,
     required String userText,
     required List<Map<String, String>> history,
+    void Function(int promptTokens, int completionTokens, int cachedTokens)?
+        onUsage,
   }) async* {
     if (apiKey.isEmpty || userText.trim().isEmpty) return;
     final client = http.Client();
@@ -5255,6 +5246,10 @@ Return only the line itself.'''
         'temperature': 0.75,
         'max_tokens': 120,
         'stream': true,
+        // 📏 입력 토큰을 추측하지 않고 서버가 센 값을 받는다. 프롬프트를 줄여
+        //   첫 토큰이 빨라지는지 보려면 이 숫자가 기준선이어야 한다.
+        //   마지막 SSE 조각에 choices가 비고 usage만 실려 온다.
+        'stream_options': <String, dynamic>{'include_usage': true},
         'messages': <Map<String, String>>[
           <String, String>{'role': 'system', 'content': systemPrompt},
           ...history.map((turn) => <String, String>{
@@ -5279,8 +5274,28 @@ Return only the line itself.'''
         if (payload.isEmpty || payload == '[DONE]') continue;
         try {
           final chunk = jsonDecode(payload) as Map<String, dynamic>;
+          // 📏 usage 조각은 choices가 비어 있다. 먼저 걸러내지 않으면
+          //   choices[0]에서 터져 토큰 수를 통째로 놓친다.
+          final usage = chunk['usage'];
+          if (usage is Map) {
+            // 🧊 cached_tokens — 서버가 접두부를 캐시했는지. 시스템 프롬프트는
+            //   매 턴 같으므로 2턴부터 캐시가 붙는다면 프롬프트를 줄여도
+            //   첫 토큰이 빨라지지 않는다. 줄이기 전에 이 숫자를 봐야 한다.
+            final cached =
+                (usage['prompt_tokens_details']?['cached_tokens'] as num?)
+                        ?.toInt() ??
+                    0;
+            onUsage?.call(
+              (usage['prompt_tokens'] as num?)?.toInt() ?? 0,
+              (usage['completion_tokens'] as num?)?.toInt() ?? 0,
+              cached,
+            );
+            continue;
+          }
+          final choices = chunk['choices'];
+          if (choices is! List || choices.isEmpty) continue;
           final delta =
-              chunk['choices']?[0]?['delta']?['content'] as String? ?? '';
+              (choices[0] as Map?)?['delta']?['content'] as String? ?? '';
           if (delta.isNotEmpty) yield delta;
         } catch (_) {
           // 조각 하나가 깨져도 스트림 전체를 죽이지 않는다.
