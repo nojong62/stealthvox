@@ -58,6 +58,7 @@ import '/custom_code/services/openai_streaming_transcribe_session.dart';
 import '/custom_code/services/openai_transcribe_service.dart';
 import '/custom_code/services/pcm_audio_utils.dart';
 import '/custom_code/services/session_rollover_summary.dart';
+import '/custom_code/services/tts_adapter.dart';
 import 'first_utterance_context_judge.dart'; // 3모드 공통 응답 길이 규칙
 
 // ====================================================================
@@ -356,26 +357,22 @@ never by itself a reason to ask back.
   Future<void> _speakKoreanLine(String text) async {
     final spoken = text.trim();
     if (spoken.isEmpty || _openAiKey.isEmpty) return;
-    _ttsQueueManager.setUserTurn(false);
-    _ttsQueueManager.setAiPaused(false);
-    final fetcher = ChunkedTtsFetcher(
-      _openAiKey,
-      _ttsQueueManager,
-      _aiVoice,
-      language: 'ko',
-      isUser: false,
-      onLog: _log,
-    );
-    fetcher.addText(spoken);
-    int ticks = 0;
-    while ((fetcher.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
-        mounted &&
-        _isConversationActive) {
-      await Future.delayed(const Duration(milliseconds: 50));
-      if (++ticks > 400) {
-        _log('[KOREAN-TTS-TIMEOUT]', 'Scenario Talk TTS exceeded 20s');
-        break;
-      }
+    _swTTS
+      ..reset()
+      ..start();
+    final utterance = _aiTtsAdapter.speak(TtsRequest(
+      text: spoken,
+      voiceId: _aiVoice,
+      speakerType: TtsSpeakerType.ai,
+      turnId: 'scenario-${DateTime.now().microsecondsSinceEpoch}',
+      generationId: _pipelineGeneration,
+      playbackCategory: 'scenario_ai',
+    ));
+    try {
+      await utterance.done.timeout(const Duration(seconds: 20));
+    } on TimeoutException {
+      utterance.cancel();
+      _log('[KOREAN-TTS-TIMEOUT]', 'Scenario Talk PCM TTS exceeded 20s');
     }
   }
 
@@ -445,7 +442,7 @@ never by itself a reason to ask back.
   // ─────────────────────────────────────────────────────────────────────────
 
   bool get _isSystemBusy {
-    return _ttsQueueManager.isBusy || _aiTurnActive;
+    return _ttsQueueManager.isBusy || _aiTtsAdapter.isBusy || _aiTurnActive;
   }
 
   void _resetIdleTimer() {
@@ -625,6 +622,7 @@ never by itself a reason to ask back.
   DeepgramV2VoiceManager? _voiceManager;
   final AudioRecorder _audioRecorder = AudioRecorder();
   late final TtsQueueManager _ttsQueueManager;
+  late final TtsAdapter _aiTtsAdapter;
   late HybridTtsPlayer hybridTtsPlayer;
 
   // ⏱️ 성능 측정용 초시계
@@ -654,6 +652,28 @@ never by itself a reason to ask back.
         }
       }
     });
+    // 실제 Scenario Talk 경로의 AI 음성은 Circle Talk에서 검증된 공용
+    // tts-1 PCM 어댑터로 재생한다. 응답 전체 MP3 다운로드를 기다리지 않고
+    // 안전 프리롤만 채워지는 즉시 첫 소리를 낸다.
+    _aiTtsAdapter = TtsAdapter(
+      apiKeyProvider: () => _openAiKey,
+      onLog: _log,
+      onPlaybackStart: (_) {
+        BillingTicker.instance.resumeFromActivity('roleplay_ai_pcm_tts_start');
+        if (_swTTS.isRunning) {
+          _swTTS.stop();
+          if (mounted) {
+            setState(() {
+              _debugResult =
+                  "⏱️ 확정: ${_swDeepgram.elapsedMilliseconds}ms | 뇌: ${_swOpenAI.elapsedMilliseconds}ms | 입: ${_swTTS.elapsedMilliseconds}ms";
+            });
+          }
+        }
+      },
+      onPlaybackEnd: (_, __) {
+        BillingTicker.instance.resumeFromActivity('roleplay_ai_pcm_tts_end');
+      },
+    );
 
     _initPermissions();
     _fetchKeysAndInit();
@@ -707,6 +727,7 @@ never by itself a reason to ask back.
     _voiceManager?.dispose();
     _audioRecorder.dispose();
     _ttsQueueManager.stop();
+    unawaited(_aiTtsAdapter.dispose());
     _scrollController.dispose();
     super.dispose();
   }
@@ -880,6 +901,8 @@ never by itself a reason to ask back.
     final closingStreamingStt = _streamingStt;
     _streamingStt = null;
     if (closingStreamingStt != null) unawaited(closingStreamingStt.dispose());
+    _aiTtsAdapter.invalidateGenerationsBefore(_pipelineGeneration);
+    _aiTtsAdapter.stopAll(reason: 'scenario_stop_everything');
     _ttsQueueManager.stop();
     if (mounted) setState(() {});
   }
@@ -928,32 +951,10 @@ never by itself a reason to ask back.
       });
       _scrollToBottom();
 
-      _ttsQueueManager.setUserTurn(false);
-      _ttsQueueManager.setAiPaused(false);
-      final fetcher = ChunkedTtsFetcher(
-        _openAiKey,
-        _ttsQueueManager,
-        _aiVoice,
-        language: 'ko',
-        isUser: false,
-        onLog: _log,
-      );
-      fetcher.addText(aiKorean);
-
       // 🎤 마이크는 첫 대사가 끝난 뒤 아래 finally에서 연다. 동시에 열어 봤더니
       //   스피커로 나가는 AI 목소리를 echoCancel이 지우면서 유저 입력까지 통째로
       //   눌려, Deepgram이 빈 전사만 돌려줬다. 바지인보다 입력이 먼저다.
-      int ticks = 0;
-      while ((fetcher.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
-          mounted &&
-          _isConversationActive &&
-          !fetcher.isCancelled) {
-        await Future.delayed(const Duration(milliseconds: 50));
-        if (++ticks > 400) {
-          _log('⚠️ [OPENER-TTS-TIMEOUT]', '첫 대사 음성 20초 초과');
-          break;
-        }
-      }
+      await _speakKoreanLine(aiKorean);
       await _saveHistoryMessages(<Map<String, dynamic>>[
         <String, dynamic>{
           'role': 'SYSTEM',
