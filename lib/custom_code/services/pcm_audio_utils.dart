@@ -6,7 +6,7 @@ import 'dart:typed_data';
 
 /// 🎚️ 유저 음성 입력 파이프라인 전체가 쓰는 단 하나의 샘플레이트.
 ///
-/// OpenAI Realtime transcription의 입력 PCM이 24kHz 고정이라 여기에 맞춘다.
+/// OpenAI 스트리밍 전사 소켓의 입력 PCM이 24kHz 고정이라 여기에 맞춘다.
 /// 마이크 녹음(RecordConfig) · Deepgram URI의 `sample_rate` · 폴백
 /// gpt-4o-transcribe의 WAV 헤더가 **반드시 같은 값**이어야 한다. 한 곳만
 /// 어긋나면 소리가 빨라지거나 느려져 전사문이 통째로 망가지는데, 에러가 아니라
