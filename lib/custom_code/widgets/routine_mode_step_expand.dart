@@ -55,7 +55,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/openai_connection_pool.dart';
+import '/custom_code/services/openai_streaming_transcribe_prewarm.dart';
+import '/custom_code/services/openai_streaming_transcribe_session.dart';
 import '/custom_code/services/openai_transcribe_service.dart';
+import '/custom_code/services/pcm_audio_utils.dart';
 import '/custom_code/services/korean_turn_validator.dart';
 import 'deepgram_confidence_probe.dart';
 import 'first_utterance_context_judge.dart';
@@ -277,6 +280,24 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   double? _activeSttConfidence;
   int _pipelineGeneration = 0;
   bool _aiTurnActive = false;
+
+  // 🎙️ 메인 한국어 대화 전용 OpenAI 스트리밍 전사. 완성문장 뒤의 외국어
+  // 따라 말하기 Practice는 아래 기존 Deepgram 16kHz 경로를 계속 쓴다.
+  OpenAiStreamingTranscribeSession? _streamingStt;
+  StreamSubscription<Uint8List>? _streamingCaptureSub;
+  Future<void>? _streamingCaptureStopping;
+  bool _streamingCaptureOpen = false;
+  bool _streamingSessionStarting = false;
+  bool _streamingConnectFailed = false;
+  bool _streamingTurnInFlight = false;
+  bool _streamingPipelineRunning = false;
+  int _listenGeneration = 0;
+  final Set<String> _handledStreamingItemIds = <String>{};
+  String _streamingDeltaItemId = '';
+  final StringBuffer _streamingDeltaBuffer = StringBuffer();
+  int _streamingDeltaCount = 0;
+  Timer? _streamingTranscriptTimeout;
+  static const int _kStreamingTranscriptTimeoutMs = 8000;
 
   /// 게이트가 연달아 반려한 횟수. 통과하면 0으로 돌아간다. [GATE-ESCAPE] 참조.
   int _consecutiveGateRejects = 0;
@@ -649,6 +670,7 @@ line had never been said. Never build the conversation on a line you had to gues
     super.initState();
     // 잔여시간 소진 시 StealthRoom이 이 경로로 방을 닫는다(저장·정리 포함).
     StealthRoomMaster.saveAndExitCurrentMode = _handleAutoSaveAndExit;
+    BillingTicker.instance.appInForeground.addListener(_onForegroundChanged);
     _ttsQueueManager = TtsQueueManager(onPlayStart: () {
       if (_awaitingAiFirstAudioProbe) {
         _awaitingAiFirstAudioProbe = false;
@@ -681,6 +703,7 @@ line had never been said. Never build the conversation on a line you had to gues
     if (StealthRoomMaster.saveAndExitCurrentMode == _handleAutoSaveAndExit) {
       StealthRoomMaster.saveAndExitCurrentMode = null;
     }
+    BillingTicker.instance.appInForeground.removeListener(_onForegroundChanged);
     _clearIdleTimers();
     BillingTicker.instance.pause();
     _stopEverything();
@@ -1893,6 +1916,21 @@ line had never been said. Never build the conversation on a line you had to gues
     _activeProbeDgFinalAt = null;
     _awaitingAiFirstTextProbe = false;
     _awaitingAiFirstAudioProbe = false;
+    // 메인 대화의 스트리밍 소켓은 턴 사이에는 유지하지만, 방/주제 종료와
+    // Practice 진입에서는 마이크와 함께 완전히 닫는다.
+    _listenGeneration++;
+    _streamingTranscriptTimeout?.cancel();
+    _streamingTranscriptTimeout = null;
+    _handledStreamingItemIds.clear();
+    _streamingDeltaItemId = '';
+    _streamingDeltaBuffer.clear();
+    _streamingDeltaCount = 0;
+    _streamingTurnInFlight = false;
+    _streamingPipelineRunning = false;
+    unawaited(_stopStreamingCapture(reason: 'stop_everything'));
+    final closingStreamingStt = _streamingStt;
+    _streamingStt = null;
+    if (closingStreamingStt != null) unawaited(closingStreamingStt.dispose());
     _voiceManager?.dispose();
     _voiceManager = null;
     _ttsQueueManager.setAiPaused(false); // 🔧 [v3.6] TTS 대기 플래그 초기화
@@ -1929,10 +1967,20 @@ line had never been said. Never build the conversation on a line you had to gues
     return false;
   }
 
-  /// Deepgram은 발화 종료만 판단하고, 녹음 PCM은 매 턴 gpt-4o-transcribe로
-  /// 확정한다. 확정된 한국어는 일반 Realtime 대화가 아니라 Step Expand 전용
-  /// 누적 문장·핵심 질문 파이프라인으로 전달한다.
+  /// 메인 한국어 대화의 STT 진입점. 기본은 Circle Talk과 같은 OpenAI
+  /// Server VAD + 스트리밍 전사이고, 소켓 연결 자체가 실패할 때만 기존
+  /// Deepgram 경계 + WAV 재전사 경로로 폴백한다.
   Future<void> _startUserListening() async {
+    if (!kFreeTalkUseStreamingStt) {
+      await _startDeepgramListening();
+      return;
+    }
+    _streamingConnectFailed = false;
+    await _startStreamingListening();
+    if (_streamingCaptureOpen) return;
+    if (!_streamingConnectFailed || _deepgramKey.isEmpty) return;
+    _log('🛟 [STT-FALLBACK]',
+        'streaming_stt_unavailable → deepgram (이 턴은 측정 대상에서 제외)');
     await _startDeepgramListening();
   }
 
@@ -1963,6 +2011,364 @@ line had never been said. Never build the conversation on a line you had to gues
     }
     if (mounted && _isConversationActive && !_isSessionComplete) {
       await _startUserListening();
+    }
+  }
+
+  Future<void> _startStreamingListening() async {
+    if (_streamingCaptureOpen) {
+      _log('🎤 [LISTEN-SKIP]', '이미 듣는 중 → 중복 오픈 무시');
+      return;
+    }
+    if (_isSessionComplete || _isPracticeMode) return;
+    if (_aiTurnActive || _ttsQueueManager.isBusy) {
+      _log('🎤 [LISTEN-SKIP]', 'turn/tts busy');
+      return;
+    }
+    if (_openAiKey.isEmpty || !(await _audioRecorder.hasPermission())) return;
+    if (!BillingTicker.instance.appInForeground.value) {
+      _log('🎤 [LISTEN-SKIP]', 'app in background');
+      return;
+    }
+
+    final int listenGeneration = ++_listenGeneration;
+    _resetIdleTimer();
+    _isConversationActive = true;
+    _resetTurnPcmBuffer();
+    _streamingDeltaItemId = '';
+    _streamingDeltaBuffer.clear();
+    _streamingDeltaCount = 0;
+    if (mounted) {
+      setState(() {
+        _debugResult = '⏱️ 듣는 중...';
+        _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+      });
+    }
+
+    final session = await _ensureStreamingSession();
+    if (session == null) {
+      _log('❌ [LISTEN-ERR]', '스트리밍 전사 세션 준비 실패');
+      return;
+    }
+    if (!mounted || listenGeneration != _listenGeneration) return;
+    if (!await _startStreamingCapture(listenGeneration)) {
+      _log('❌ [LISTEN-ERR]', '스트리밍 전사 마이크 캡처 실패');
+      return;
+    }
+    session.openAudioGate(reason: 'turn_start');
+    BillingTicker.instance.resumeFromActivity('step_expand_mic_start');
+    _reportListeningReady();
+    _log('🎤 [LISTEN-05]',
+        'OpenAI streaming listening 시작 generation=$listenGeneration');
+  }
+
+  Future<OpenAiStreamingTranscribeSession?> _ensureStreamingSession() async {
+    final existing = _streamingStt;
+    if (existing != null && existing.isConnected) return existing;
+    if (existing != null) {
+      _streamingStt = null;
+      await existing.dispose();
+    }
+    if (_streamingSessionStarting) {
+      _log('🎙️ [STREAM-STT]', 'connect 진행 중 → 중복 연결 생략');
+      return null;
+    }
+    _streamingSessionStarting = true;
+    try {
+      var session = OpenAiStreamingTranscribePrewarm.instance.take(
+        apiKey: _openAiKey,
+        languageCode: 'ko',
+        onLog: _log,
+      );
+      if (session == null) {
+        session = OpenAiStreamingTranscribeSession(
+          apiKey: _openAiKey,
+          languageCode: 'ko',
+          onLog: _log,
+        );
+        if (!await session.connect()) {
+          await session.dispose();
+          _streamingConnectFailed = true;
+          return null;
+        }
+      }
+      if (!mounted) {
+        await session.dispose();
+        return null;
+      }
+      _bindStreamingHandlers(session);
+      _streamingStt = session;
+      return session;
+    } finally {
+      _streamingSessionStarting = false;
+    }
+  }
+
+  void _bindStreamingHandlers(OpenAiStreamingTranscribeSession session) {
+    session.onLog = _log;
+    session.shouldReconnect = () =>
+        mounted &&
+        _isConversationActive &&
+        BillingTicker.instance.appInForeground.value &&
+        !_isPracticeMode &&
+        !_isSessionComplete;
+    session.onSpeechStarted = _onStreamingSpeechStarted;
+    session.onSpeechStopped = _onStreamingSpeechStopped;
+    session.onTranscriptDelta = _onStreamingTranscriptDelta;
+    session.onTranscriptCompleted = _onStreamingTranscriptCompleted;
+    session.onReconnecting =
+        (attempt) => _log('🎤 [LISTEN-RETRY]', '스트리밍 전사 재연결 시도 $attempt');
+    session.onGaveUp = () => _log('❌ [LISTEN-GIVEUP]', '스트리밍 전사 재연결 포기');
+    session.onFatalError = (reason) {
+      if (!mounted) return;
+      _log('❌ [LISTEN-ERR]', '스트리밍 전사 fatal reason=$reason');
+      _stopEverything();
+    };
+  }
+
+  Future<bool> _startStreamingCapture(int listenGeneration) async {
+    await _stopStreamingCapture(reason: 'restart');
+    try {
+      try {
+        if (await _audioRecorder.isRecording()) await _audioRecorder.stop();
+      } catch (_) {}
+      final stream = await _audioRecorder.startStream(
+        const RecordConfig(
+          encoder: AudioEncoder.pcm16bits,
+          sampleRate: kStealthVoxSttSampleRate,
+          numChannels: 1,
+          // Step Expand의 기존 메인 입력 특성을 유지한다.
+          echoCancel: true,
+          noiseSuppress: true,
+        ),
+      );
+      if (!mounted || listenGeneration != _listenGeneration) {
+        try {
+          await _audioRecorder.stop();
+        } catch (_) {}
+        return false;
+      }
+      _streamingCaptureOpen = true;
+      _streamingCaptureSub = stream.listen(
+        (data) {
+          if (data.isEmpty || listenGeneration != _listenGeneration) return;
+          final session = _streamingStt;
+          if (session == null || !session.audioGateOpen) return;
+          session.appendAudio(data);
+        },
+        onError: (Object error) =>
+            _log('❌ [MIC-ERR-B]', '오디오 스트림 에러: ${error.runtimeType}'),
+      );
+      return true;
+    } catch (error) {
+      _log('❌ [MIC-ERR-C]', '스트리밍 전사 capture 실패 reason=${error.runtimeType}');
+      return false;
+    }
+  }
+
+  Future<void> _stopStreamingCapture({required String reason}) {
+    final pending = _streamingCaptureStopping;
+    final next = pending == null
+        ? _stopStreamingCaptureInner(reason)
+        : pending.then((_) => _stopStreamingCaptureInner(reason));
+    _streamingCaptureStopping = next;
+    return next.whenComplete(() {
+      if (identical(_streamingCaptureStopping, next)) {
+        _streamingCaptureStopping = null;
+      }
+    });
+  }
+
+  Future<void> _stopStreamingCaptureInner(String reason) async {
+    final sub = _streamingCaptureSub;
+    _streamingCaptureSub = null;
+    await sub?.cancel();
+    if (!_streamingCaptureOpen) return;
+    _streamingCaptureOpen = false;
+    try {
+      if (await _audioRecorder.isRecording()) await _audioRecorder.stop();
+    } catch (_) {}
+    _log('🎤 [MIC-ROUTING]', 'capture_stopped reason=$reason');
+  }
+
+  void _onForegroundChanged() {
+    if (!mounted || !kFreeTalkUseStreamingStt) return;
+    if (!BillingTicker.instance.appInForeground.value) {
+      if (_streamingCaptureOpen) {
+        _log('🎤 [LISTEN-BG]', '백그라운드 진입 → 마이크/전송 중지');
+        _streamingStt?.closeAudioGate(reason: 'app_background');
+        unawaited(_stopStreamingCapture(reason: 'app_background'));
+        _streamingDeltaItemId = '';
+        _streamingDeltaBuffer.clear();
+        _streamingDeltaCount = 0;
+      }
+      return;
+    }
+    if (!_isConversationActive ||
+        _isSessionComplete ||
+        _isPracticeMode ||
+        _streamingPipelineRunning ||
+        _aiTurnActive ||
+        _ttsQueueManager.isBusy ||
+        _streamingCaptureOpen) {
+      return;
+    }
+    _log('🎤 [LISTEN-FG]', '포그라운드 복귀 → STT 재개');
+    unawaited(_startUserListening());
+  }
+
+  bool _isStreamingTurnOwner() =>
+      mounted && _isConversationActive && _streamingCaptureOpen;
+
+  void _onStreamingSpeechStarted() {
+    if (!_isStreamingTurnOwner()) {
+      _log('🎤 [LISTEN-STALE]', 'speech_started ignored');
+      return;
+    }
+    _resetIdleTimer();
+    _swDeepgram
+      ..reset()
+      ..start();
+    _log('⏱️ [PERF]', 'SPEECH_STARTED');
+  }
+
+  /// 발화 종료 신호일 뿐이다. 사용자 턴 확정은 completed 한 곳에서만 한다.
+  void _onStreamingSpeechStopped() {
+    if (!_isStreamingTurnOwner()) {
+      _log('🎤 [LISTEN-STALE]', 'speech_stopped ignored');
+      return;
+    }
+    _log('⏱️ [PERF]', 'SPEECH_STOPPED');
+    _streamingTurnInFlight = true;
+    _streamingStt?.closeAudioGate(reason: 'speech_stopped');
+    unawaited(_stopStreamingCapture(reason: 'speech_stopped'));
+    _armStreamingTranscriptTimeout();
+  }
+
+  void _armStreamingTranscriptTimeout() {
+    _streamingTranscriptTimeout?.cancel();
+    final int generation = _pipelineGeneration;
+    _streamingTranscriptTimeout = Timer(
+      const Duration(milliseconds: _kStreamingTranscriptTimeoutMs),
+      () {
+        _streamingTranscriptTimeout = null;
+        if (!mounted || generation != _pipelineGeneration) return;
+        if (!_streamingTurnInFlight) return;
+        _log('⚠️ [STREAM-STT]', 'transcription_timeout → 턴 폐기 후 마이크 재개');
+        _abortStreamingTurn(reason: 'transcription_timeout');
+      },
+    );
+  }
+
+  void _abortStreamingTurn({required String reason}) {
+    _streamingTranscriptTimeout?.cancel();
+    _streamingTranscriptTimeout = null;
+    _streamingDeltaItemId = '';
+    _streamingDeltaBuffer.clear();
+    _streamingDeltaCount = 0;
+    _streamingTurnInFlight = false;
+    if (mounted) {
+      setState(() {
+        _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+      });
+    }
+    _log('🎙️ [STREAM-STT]', 'turn_aborted reason=$reason');
+    if (_isConversationActive && !_isSessionComplete && !_isPracticeMode) {
+      unawaited(_startUserListening());
+    }
+  }
+
+  /// UI 미리보기 전용. 확장·저장·턴 카운트에는 절대 사용하지 않는다.
+  void _onStreamingTranscriptDelta(String itemId, String delta) {
+    if (!mounted || !_isConversationActive || _isPracticeMode) return;
+    if (itemId.isNotEmpty && _handledStreamingItemIds.contains('rt:$itemId')) {
+      return;
+    }
+    if (_aiTurnActive || _ttsQueueManager.isBusy) return;
+    BillingTicker.instance.resumeFromActivity('step_expand_stt_partial');
+    if (_streamingDeltaItemId != itemId) {
+      _streamingDeltaItemId = itemId;
+      _streamingDeltaBuffer.clear();
+      _streamingDeltaCount = 0;
+      _log('🖼️ [STREAM-DELTA]', 'first item=$itemId');
+    }
+    _streamingDeltaCount++;
+    _streamingDeltaBuffer.write(delta);
+    final preview = _streamingDeltaBuffer.toString().trim();
+    if (preview.isEmpty) return;
+    setState(() {
+      _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+      _localMessages.add(<String, dynamic>{
+        'role': 'HOST_TEMP',
+        'target': preview,
+        'original': '',
+      });
+    });
+    _scrollToBottom();
+  }
+
+  void _onStreamingTranscriptCompleted(String itemId, String text) {
+    if (!mounted || !_isConversationActive || _isPracticeMode) {
+      _log('[STEP-STT]', 'stale_dropped item=$itemId reason=room_closed');
+      return;
+    }
+    final dedupeKey = itemId.isNotEmpty
+        ? 'rt:$itemId'
+        : 'rt-hash:${text.trim().hashCode.toUnsigned(32).toRadixString(16)}';
+    if (!_handledStreamingItemIds.add(dedupeKey)) {
+      _log('[STEP-STT]', 'duplicate_dropped item=$itemId len=${text.length}');
+      return;
+    }
+    if (_handledStreamingItemIds.length > 64) {
+      _handledStreamingItemIds.remove(_handledStreamingItemIds.first);
+    }
+    _log('[STEP-STT]',
+        'final_received item=$itemId generation=$_listenGeneration len=${text.length}');
+    unawaited(_processStreamingFinalTranscript(text, itemId: itemId));
+  }
+
+  Future<void> _processStreamingFinalTranscript(
+    String transcript, {
+    required String itemId,
+  }) async {
+    if (_streamingPipelineRunning || _aiTurnActive) {
+      _log('[TURN-SKIP]', 'reason=pipeline_busy item=$itemId');
+      return;
+    }
+    _streamingPipelineRunning = true;
+    _streamingTranscriptTimeout?.cancel();
+    _streamingTranscriptTimeout = null;
+    final int generation = _pipelineGeneration;
+    final int deltaCount = _streamingDeltaCount;
+    _streamingDeltaItemId = '';
+    _streamingDeltaBuffer.clear();
+    _streamingDeltaCount = 0;
+    _streamingTurnInFlight = true;
+    try {
+      _streamingStt?.closeAudioGate(reason: 'transcript_completed');
+      await _stopStreamingCapture(reason: 'transcript_completed');
+      final userKorean = transcript.trim();
+      if (!mounted || generation != _pipelineGeneration) return;
+      if (userKorean.isEmpty) {
+        _abortStreamingTurn(reason: 'empty_transcript');
+        return;
+      }
+      if (_swDeepgram.isRunning) _swDeepgram.stop();
+      BillingTicker.instance.resumeFromActivity('step_expand_stt_result');
+      _log(
+        '[STT-ROUTE]',
+        'selected=streaming model=$kStreamingSttModel item=$itemId '
+            'len=${userKorean.length} deltas=$deltaCount',
+      );
+      if (kDebugMode) {
+        _log('🎧 [STT-RAW]', 'source=streaming text="$userKorean"');
+      }
+      _cancelSpeculativeTranslation();
+      _prefetchedFirstTurnTranscribe = null;
+      _prefetchedFirstTurnPcmBytes = 0;
+      await _processFinalUserKorean(userKorean, generation: generation);
+    } finally {
+      _streamingTurnInFlight = false;
+      _streamingPipelineRunning = false;
     }
   }
 
@@ -2145,6 +2551,18 @@ line had never been said. Never build the conversation on a line you had to gues
     }
     _log('[STT-ROUTE]',
         'selected=gpt-4o-transcribe every_turn=true len=${userKorean.length}');
+    _runMeaningProbe(userKorean);
+
+    await _processFinalUserKorean(userKorean, generation: generation);
+  }
+
+  /// 전사 엔진들의 단일 합류점. 여기부터는 Step Expand 고유의 검증·한국어
+  /// 문장 병합·질문 생성·5턴 저장 로직이며, 스트리밍 이식으로 변경하지 않는다.
+  Future<void> _processFinalUserKorean(
+    String userKorean, {
+    required int generation,
+  }) async {
+    if (!mounted || generation != _pipelineGeneration) return;
 
     // 🔇 [NOISE-GATE] 로컬 잡음 검열은 화면과 API보다 먼저 온다. 뒤에 두면
     //   잡음에도 임시 말풍선이 먼저 뜨고 validator·합치기 왕복이 나간다.
@@ -2162,8 +2580,6 @@ line had never been said. Never build the conversation on a line you had to gues
       if (_isConversationActive && !_isSessionComplete) _startUserListening();
       return;
     }
-
-    _runMeaningProbe(userKorean);
 
     // 🟠 [FAST-DISSATISFIED] 질문 불만은 전사 오류가 아니다. 검증기보다 먼저
     //    본다. 뒤에 두면 "이거 아까 질문하고 똑같잖아" 같은 말이
@@ -4479,8 +4895,8 @@ line had never been said. Never build the conversation on a line you had to gues
             children: [
               Padding(
                 padding: EdgeInsets.only(top: 2),
-                child:
-                    Icon(Icons.auto_awesome, color: Color(0xFFFBBF24), size: 15),
+                child: Icon(Icons.auto_awesome,
+                    color: Color(0xFFFBBF24), size: 15),
               ),
               SizedBox(width: 6),
               Flexible(
