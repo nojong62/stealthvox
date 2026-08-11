@@ -233,6 +233,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   String _streamingDeltaItemId = '';
   final StringBuffer _streamingDeltaBuffer = StringBuffer();
 
+  /// 이번 발화에 도착한 부분 전사 조각 수. 0이면 화면에 미리보기가 없었다는 뜻.
+  int _streamingDeltaCount = 0;
+
   /// speech_stopped 뒤 최종 전사가 영영 안 올 때 턴을 놓아주는 타이머.
   Timer? _streamingTranscriptTimeout;
 
@@ -2328,7 +2331,12 @@ $kSpokenReplyLengthPolicy
     if (_streamingDeltaItemId != itemId) {
       _streamingDeltaItemId = itemId;
       _streamingDeltaBuffer.clear();
+      _streamingDeltaCount = 0;
+      // 🖼️ 부분 전사가 실제로 도착하는지 눈이 아니라 로그로 갈린다. 첫 조각만
+      //   찍는다 — 조각마다 찍으면 한 발화에 수십 줄이 쌓여 다른 로그를 덮는다.
+      _log('🖼️ [STREAM-DELTA]', 'first item=$itemId');
     }
+    _streamingDeltaCount++;
     _streamingDeltaBuffer.write(delta);
     final preview = _streamingDeltaBuffer.toString().trim();
     if (preview.isEmpty || !mounted) return;
@@ -2382,8 +2390,12 @@ $kSpokenReplyLengthPolicy
     _streamingTranscriptTimeout?.cancel();
     _streamingTranscriptTimeout = null;
     final int pipelineGeneration = _pipelineGeneration;
+    // 미리보기가 몇 조각 왔는지는 아래 [STT-ROUTE]에 싣는다 — 0이면 유저는
+    // 말이 끝날 때까지 빈 화면을 본 것이다.
+    final int deltaCount = _streamingDeltaCount;
     _streamingDeltaItemId = '';
     _streamingDeltaBuffer.clear();
+    _streamingDeltaCount = 0;
     _setMicOwner(AnyoneMicOwner.none, reason: 'streaming_transcript_committed');
     _turnInFlight = true;
     try {
@@ -2405,7 +2417,7 @@ $kSpokenReplyLengthPolicy
       _log(
         '🎧 [STT-ROUTE]',
         'selected=streaming model=$kStreamingSttModel item=$itemId '
-            'len=${userOriginal.length}',
+            'len=${userOriginal.length} deltas=$deltaCount',
       );
       if (kDebugMode) {
         _log('🎧 [STT-RAW]', 'source=streaming text="$userOriginal"');
