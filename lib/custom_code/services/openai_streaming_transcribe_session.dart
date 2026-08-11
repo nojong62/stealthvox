@@ -102,7 +102,11 @@ class OpenAiStreamingTranscribeSession {
 
   final String apiKey;
   final String languageCode;
-  final void Function(String tag, String msg)? onLog;
+
+  /// 로그 훅. **final이 아니다** — 예열 소켓을 방이 물려받을 때 방의 로거로
+  /// 갈아 끼워야 한다. 예열 쪽 로거는 시각도 안 붙이고 앱 내부 로그 원장에도
+  /// 안 들어가서, 채택된 뒤의 이벤트가 실기기 로그에서 통째로 익명이 된다.
+  void Function(String tag, String msg)? onLog;
 
   // ── 늦게 묶는 핸들러 ───────────────────────────────────────────────
   // 예열 단계에서는 소켓만 열어 두고, 방에 들어온 뒤 콜백을 붙인다.
