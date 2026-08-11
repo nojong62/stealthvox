@@ -1130,6 +1130,13 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       _applyActivatedKeys(FirebaseRemoteConfig.instance);
       await _startFreeTalkSession();
       if (!mounted || _isConversationActive) return;
+      // 🔇 오프너가 도는 동안은 실패로 세지 않는다. 마이크는 오프너가 끝나며
+      //   스스로 열린다 — 그 사이 재시도 예산(12회 × 750ms ≈ 9초)을 태우면
+      //   오프너 길이와 맞물려, 정작 진짜 실패했을 때 남는 재시도가 없다.
+      if (_isAiOpenerPlaying) {
+        _scheduleStartupRetry();
+        return;
+      }
       if (_startupRetryCount++ < _maxStartupRetries) {
         _scheduleStartupRetry();
       } else {
@@ -1145,6 +1152,11 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     if (!mounted) return;
     if (_isConversationActive) return; // 중복 시작 방지
     if (_isStartingListening) return;
+    // 🔇 [ECHO-GUARD] 오프너가 진행 중이면 여기서 멈춘다. 이 가드가 없으면
+    //   두 번째 호출이 `_openerDone == true`를 보고 곧장 마이크로 직행한다
+    //   (_fetchKeys가 _scheduleStartupRetry를 두 번 부른다). 실기기에서
+    //   마이크가 오프너보다 7.7초 먼저 열렸다 — 2026-08-11 실측.
+    if (_isAiOpenerPlaying) return;
     // 🆕 첫 진입 race 방지: 키와 마이크 권한이 "둘 다" 준비됐을 때만 시작한다.
     //    준비 안 된 항목이 있으면 조용히 대기 → 키 로드 콜백(_fetchKeys) 또는
     //    권한 콜백(_initPermissions) 중 늦게 끝나는 쪽이 이 함수를 다시 호출해 시작.
@@ -1725,6 +1737,15 @@ $kSpokenReplyLengthPolicy
   /// 🎙️ 유저 음성 입력 진입점. 여기서 전사 엔진이 갈린다.
   ///   한 번에 하나만 돈다 — 두 엔진에 동시에 마이크를 물리지 않는다.
   Future<bool> _startConfiguredListening({bool force = false}) async {
+    // 🔇 [ECHO-GUARD] AI 첫 마디가 도는 동안에는 어떤 경로로 불려도 열지 않는다.
+    //   `_ttsAdapter.isBusy`만으로는 못 막는다 — 오프너 문장을 gpt-4o-mini가
+    //   만드는 구간에는 아직 재생 전이라 isBusy가 false다. 그 틈이 실기기에서
+    //   7.7초였다. Circle Talk은 echoCancel이 꺼져 있어 그대로 새어 들어간다.
+    //   오프너의 finally가 이 플래그를 내린 뒤에 스스로 마이크를 연다.
+    if (_isAiOpenerPlaying) {
+      _log('🎤 [LISTEN-SKIP]', 'ai opener playing');
+      return false;
+    }
     if (!kFreeTalkUseStreamingStt) {
       return _startDeepgramListening(force: force);
     }
@@ -2115,6 +2136,9 @@ $kSpokenReplyLengthPolicy
   }
 
   void _bindStreamingHandlers(OpenAiStreamingTranscribeSession session) {
+    // 예열 소켓은 StealthRoom의 debugPrint 로거를 달고 온다. 방으로 넘어온
+    // 뒤의 이벤트는 이 모드의 로거로 찍혀야 시각이 붙고 로그 원장에도 남는다.
+    session.onLog = _log;
     // 🔌 백그라운드에서는 소켓이 붙지 않는다. Deepgram과 같은 정책이다 —
     //   복귀 시 _onForegroundChanged가 다시 연결한다.
     session.shouldReconnect = () =>
