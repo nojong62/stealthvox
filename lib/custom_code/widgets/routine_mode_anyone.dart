@@ -2718,28 +2718,78 @@ $kSpokenReplyLengthPolicy
         _scrollToBottom();
       }
 
-      // ⏱️ [AI-GEN] 턴 뒷구간(생성→합성→재생)에서 여기만 계측이 없었다.
-      //   합성·재생은 어댑터가 playback_start의 ttfbMs/startMs로 찍고, 재생
-      //   완료는 [GPT-HISTORY]가 표시한다. 이 한 줄이 있어야 셋이 갈린다.
-      // ⏱️ [PERF] 발화 종료 기준 타임라인. 아래 마크들과 어댑터의
-      //   TTS_REQUEST_SENT / TTS_FIRST_CHUNK / playback_start를 이으면
-      //   한 턴이 GPT 생성 · 큐 대기 · 연결+API · 프리롤로 정확히 쪼개진다.
-      //   ⚠️ AI_TEXT_FIRST_TOKEN은 여기서 찍을 수 없다 — 아래 호출이 통짜
-      //   POST라 첫 토큰이라는 사건 자체가 없다. 스트리밍으로 바꾸면 생긴다.
+      // ⏱️ [PERF] 발화 종료 기준 타임라인. 어댑터의 TTS_REQUEST_SENT /
+      //   TTS_FIRST_CHUNK / playback_start와 이으면 한 턴이 GPT 생성 ·
+      //   큐 대기 · 연결+API · 프리롤로 쪼개진다.
+      //
+      // 🗣️ [SEGMENT-SPEAK] 응답을 통째로 기다리지 않는다. 첫 의미단위가
+      //   완성되는 즉시 TTS를 걸어, GPT 생성과 TTS 합성을 겹친다.
+      //   실측(2026-08-11)에서 둘이 직렬로 2.2초였다.
+      //   답변 내용은 그대로다 — 도착 방식만 바뀐다.
       _logTurnPerf('AI_REQUEST_START');
       final aiGenSw = Stopwatch()..start();
-      final aiOriginal = await UnifiedBrain.generateCircleMemberTurn(
+      final buffer = StringBuffer(); // 지금까지 받은 전체
+      var spokenUpTo = 0; // 이미 TTS로 보낸 길이
+      var segmentCount = 0;
+      var firstTokenSeen = false;
+
+      await for (final delta in UnifiedBrain.streamCircleMemberTurn(
         apiKey: _openAiKey,
         systemPrompt: _buildCircleMemberInstructions(),
         userText: userOriginal,
         history: _recentHistory,
-      );
+      )) {
+        if (!firstTokenSeen) {
+          firstTokenSeen = true;
+          _logTurnPerf('AI_TEXT_FIRST_TOKEN');
+        }
+        // 방을 나갔거나 턴이 갈렸으면 남은 조각을 버린다.
+        if (!isActivePipelineGeneration(
+              expected: expectedPipelineGeneration,
+              current: _pipelineGeneration,
+              mounted: mounted,
+              conversationActive: _isConversationActive,
+            ) ||
+            currentTurnId != _turnCounter) {
+          return;
+        }
+        buffer.write(delta);
+
+        // 첫 조각만 미리 끊는다. 뒤는 어차피 앞 조각을 읽는 동안 다 도착한다.
+        if (segmentCount == 0) {
+          final pending = buffer.toString().substring(spokenUpTo);
+          final head = _takeSpeakableSegment(pending);
+          if (head != null) {
+            spokenUpTo += pending.indexOf(head) + head.length;
+            segmentCount++;
+            // 소리보다 글자가 늦으면 안 된다 — 읽기 시작하는 조각을 먼저 세운다.
+            setState(() {
+              _localMessages.add({
+                'role': 'SYSTEM',
+                'target': head,
+                'original': '',
+              });
+              aiIndex = _localMessages.length - 1;
+            });
+            _scrollToCurrent(aiIndex);
+            // expectsMore: true — 어댑터가 세션을 열어 둔 채 바이트만 먹이고
+            //   즉시 반환한다. 여기서 재생 완료를 기다리면 겹치기가 무의미하다.
+            _speakSystemSegment(head, continuing: false, expectsMore: true);
+          }
+        }
+      }
       aiGenSw.stop();
       _logTurnPerf('AI_TEXT_COMPLETE');
+
+      final aiOriginal = buffer
+          .toString()
+          .trim()
+          .replaceAll(RegExp(r'^["“”\s]+|["“”\s]+$'), '');
       _log(
           '⏱️ [AI-GEN]',
-          'turn=$currentTurnId model=gpt-4o-mini '
-              'elapsedMs=${aiGenSw.elapsedMilliseconds} len=${aiOriginal.length}');
+          'turn=$currentTurnId model=gpt-4o-mini stream=true '
+              'elapsedMs=${aiGenSw.elapsedMilliseconds} len=${aiOriginal.length} '
+              'preSegments=$segmentCount');
       if (aiOriginal.isEmpty) {
         throw StateError('Circle Talk response did not complete.');
       }
@@ -2753,16 +2803,46 @@ $kSpokenReplyLengthPolicy
         return;
       }
 
-      setState(() {
-        _localMessages.add({
-          'role': 'SYSTEM',
-          'target': aiOriginal,
-          'original': '',
+      if (segmentCount == 0) {
+        // 끊을 자리가 없었다(짧은 한 문장). 예전과 똑같이 통째로 읽는다.
+        setState(() {
+          _localMessages.add({
+            'role': 'SYSTEM',
+            'target': aiOriginal,
+            'original': '',
+          });
+          aiIndex = _localMessages.length - 1;
         });
-        aiIndex = _localMessages.length - 1;
-      });
-      _scrollToCurrent(aiIndex);
-      await _speakSystemLine(aiOriginal);
+        _scrollToCurrent(aiIndex);
+        await _speakSystemLine(aiOriginal);
+      } else {
+        // 말풍선을 완성문으로 갈아 끼우고, 남은 꼬리를 이어 읽는다.
+        if (aiIndex >= 0 && aiIndex < _localMessages.length) {
+          setState(() => _localMessages[aiIndex]['target'] = aiOriginal);
+          _scrollToCurrent(aiIndex);
+        }
+        // ⚠️ 꼬리는 **원본 버퍼**에서 자른다. aiOriginal은 앞뒤 따옴표를 벗겨낸
+        //   문자열이라 앞이 한 글자라도 깎이면 spokenUpTo와 어긋나, 글자를
+        //   빼먹거나 겹쳐 읽는다.
+        final raw = buffer.toString();
+        final tail =
+            raw.length > spokenUpTo ? raw.substring(spokenUpTo).trim() : '';
+        // 분할기가 꼬리를 최소 4글자 보장하므로 여기는 항상 비어 있지 않다.
+        // 마지막 조각이라야 어댑터가 세션을 닫고 재생 완료까지 기다린다 —
+        // 이걸 await해야 마이크가 AI 목소리 위로 열리지 않는다.
+        final closing =
+            _speakSystemSegment(tail, continuing: true, expectsMore: false);
+        if (closing != null) {
+          try {
+            await closing.done.timeout(const Duration(seconds: 20));
+          } on TimeoutException {
+            closing.cancel();
+          }
+        } else {
+          _log('⚠️ [SEGMENT-SPEAK]', 'tail_empty turnId=$currentTurnId');
+          _ttsAdapter.stopAll(reason: 'segment_tail_empty');
+        }
+      }
 
       // 대화방에는 한국어 텍스트만 저장한다. TTS 오디오는 재생 후 폐기하고
       // 파일이나 캐시 형태로 대화 기록에 넣지 않는다.
@@ -3020,6 +3100,73 @@ $kSpokenReplyLengthPolicy
 // ====================================================================
   /// 🔊 안내/시스템 문구 1건을 어댑터로 재생하고 끝날 때까지 기다린다.
   ///   모델·보이스 매핑은 어댑터가 정한다 — 여기서 모델명을 쓰지 않는다.
+  /// 🗣️ [MEANING-UNIT] 스트리밍 중인 문장에서 **먼저 읽어도 되는 앞 조각**을
+  /// 잘라낸다. 자를 곳이 아직 없으면 null.
+  ///
+  /// 마침표만 기다리지 않는다 — 한국어 대화는 쉼표에서도 자연스럽게 끊기고,
+  /// 첫 조각이 짧을수록 TTS가 빨리 나온다. 다만 너무 짧게 자르면("아,")
+  /// 조각 하나 읽고 다음 조각을 기다리며 말이 뚝뚝 끊긴다.
+  static const int _kMinFirstSegmentChars = 8;
+  static const int _kMaxFirstSegmentChars = 28;
+
+  /// ⚠️ 꼬리가 반드시 남아야 한다. 어댑터는 **마지막 조각(`expectsMore: false`)이
+  /// 와야만** 재생 세션을 닫고 재생 완료까지 기다린다. 앞 조각이 문장을 다
+  /// 삼켜 꼬리가 비면 세션이 열린 채 남고, 마이크가 AI 목소리 위로 열린다.
+  /// 그래서 잘라낸 뒤 공백 아닌 글자가 이만큼 남을 때만 조각을 낸다.
+  static const int _kMinTailChars = 4;
+
+  bool _hasEnoughTail(String text, int cutEnd) =>
+      text.substring(cutEnd).replaceAll(RegExp(r'\s'), '').length >=
+      _kMinTailChars;
+
+  String? _takeSpeakableSegment(String pending) {
+    final text = pending.trimLeft();
+    if (text.length < _kMinFirstSegmentChars) return null;
+
+    // 구두점에서 끊는다. 최소 길이를 넘긴 첫 구두점을 쓴다.
+    for (final match in kTtsDelimiterPattern.allMatches(text)) {
+      final end = match.end;
+      if (end < _kMinFirstSegmentChars) continue;
+      final head = text.substring(0, end).trim();
+      if (head.isEmpty) continue;
+      if (!_hasEnoughTail(text, end)) return null;
+      return head;
+    }
+
+    // 구두점 없이 길어지면 어절 경계에서 끊는다. 여기까지 왔다는 건 모델이
+    // 쉼표 없이 길게 쓰고 있다는 뜻이라, 더 기다려도 이득이 없다.
+    if (text.length >= _kMaxFirstSegmentChars) {
+      final cut = text.lastIndexOf(' ', _kMaxFirstSegmentChars);
+      if (cut >= _kMinFirstSegmentChars && _hasEnoughTail(text, cut)) {
+        return text.substring(0, cut).trim();
+      }
+    }
+    return null;
+  }
+
+  /// 한 발화를 조각으로 나눠 읽는다. 첫 조각은 생성이 끝나기 전에 나가고,
+  /// 나머지는 [TtsRequest.continuesPreviousSegment]로 이어 붙어 공백이 없다.
+  TtsUtterance? _speakSystemSegment(
+    String text, {
+    required bool continuing,
+    required bool expectsMore,
+  }) {
+    final spoken = text.trim();
+    if (!mounted || spoken.isEmpty) return null;
+    _costTracker.recordTtsRequest(spoken.length);
+    if (!continuing) _logTurnPerf('TTS_ENQUEUE');
+    return _ttsAdapter.speak(TtsRequest(
+      text: spoken,
+      voiceId: _aiVoice,
+      speakerType: TtsSpeakerType.system,
+      turnId: 'sys-${DateTime.now().microsecondsSinceEpoch}',
+      generationId: _pipelineGeneration,
+      playbackCategory: 'system',
+      continuesPreviousSegment: continuing,
+      expectsMoreSegments: expectsMore,
+    ));
+  }
+
   Future<void> _speakSystemLine(String text,
       {Duration timeout = const Duration(seconds: 15)}) async {
     if (!mounted || text.trim().isEmpty) return;
@@ -5188,6 +5335,72 @@ Return only the line itself.'''
       return text.replaceAll(RegExp(r'^["“”\s]+|["“”\s]+$'), '');
     } catch (_) {
       return '';
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Circle Talk regular turn, **streamed**.
+  ///
+  /// 모델·프롬프트·온도·토큰 상한은 [generateCircleMemberTurn]과 한 글자도 다르지
+  /// 않다. 바뀐 것은 `stream: true` 하나뿐이다 — 답변 내용이 아니라 도착 방식을
+  /// 바꿔, 첫 의미단위가 완성되는 즉시 TTS를 걸 수 있게 하려는 것이다.
+  ///
+  /// 실측(2026-08-11): 통짜 POST는 생성 1.0초를 다 기다린 뒤에야 TTS 요청이
+  /// 나가서, GPT 1.0초 + TTS 1.2초가 직렬로 2.2초였다.
+  static Stream<String> streamCircleMemberTurn({
+    required String apiKey,
+    required String systemPrompt,
+    required String userText,
+    required List<Map<String, String>> history,
+  }) async* {
+    if (apiKey.isEmpty || userText.trim().isEmpty) return;
+    final client = http.Client();
+    try {
+      final request = http.Request(
+        'POST',
+        Uri.parse('https://api.openai.com/v1/chat/completions'),
+      );
+      request.headers['Authorization'] = 'Bearer $apiKey';
+      request.headers['Content-Type'] = 'application/json; charset=utf-8';
+      request.body = jsonEncode(<String, dynamic>{
+        'model': 'gpt-4o-mini',
+        'temperature': 0.75,
+        'max_tokens': 120,
+        'stream': true,
+        'messages': <Map<String, String>>[
+          <String, String>{'role': 'system', 'content': systemPrompt},
+          ...history.map((turn) => <String, String>{
+                'role': turn['role'] == 'assistant' ? 'assistant' : 'user',
+                'content': turn['content'] ?? '',
+              }),
+          <String, String>{'role': 'user', 'content': userText.trim()},
+        ],
+      });
+
+      final response = await OpenAiConnectionPool.instance.client
+          .send(request)
+          .timeout(const Duration(seconds: 12));
+      if (response.statusCode != 200) return;
+
+      await for (final line in response.stream
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .timeout(const Duration(seconds: 12))) {
+        if (!line.startsWith('data:')) continue;
+        final payload = line.substring(5).trim();
+        if (payload.isEmpty || payload == '[DONE]') continue;
+        try {
+          final chunk = jsonDecode(payload) as Map<String, dynamic>;
+          final delta =
+              chunk['choices']?[0]?['delta']?['content'] as String? ?? '';
+          if (delta.isNotEmpty) yield delta;
+        } catch (_) {
+          // 조각 하나가 깨져도 스트림 전체를 죽이지 않는다.
+        }
+      }
+    } catch (_) {
+      // 호출부가 빈 스트림을 폴백 신호로 읽는다.
     } finally {
       client.close();
     }
