@@ -53,6 +53,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/korean_turn_validator.dart';
+import '/custom_code/services/deepgram_prewarm_session.dart';
 import '/custom_code/services/openai_streaming_transcribe_prewarm.dart';
 import '/custom_code/services/openai_streaming_transcribe_session.dart';
 import '/custom_code/services/openai_transcribe_service.dart';
@@ -188,43 +189,12 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     return RegExp('^[\\s.,!?;:\'"\\[\\]{}()\\-]+\$').hasMatch(t);
   }
 
-  // 🌐 [v3.1] 로비에서 선택한 언어 이름 → Deepgram/OpenAI 언어 코드 매핑
-  String _mapLanguageToCode(String lang) {
-    switch (lang.trim().toLowerCase()) {
-      case 'korean':
-        return 'ko';
-      case 'japanese':
-        return 'ja';
-      case 'chinese':
-        return 'zh';
-      case 'spanish':
-        return 'es';
-      case 'french':
-        return 'fr';
-      case 'german':
-        return 'de';
-      case 'italian':
-        return 'it';
-      case 'portuguese':
-        return 'pt';
-      case 'russian':
-        return 'ru';
-      case 'vietnamese':
-        return 'vi';
-      case 'thai':
-        return 'th';
-      case 'indonesian':
-        return 'id';
-      case 'hindi':
-        return 'hi';
-      case 'arabic':
-        return 'ar';
-      case 'dutch':
-        return 'nl';
-      default:
-        return 'en'; // English 포함
-    }
-  }
+  String _nativeLangName() =>
+      resolveNativeLanguageName(FFAppState().nativeLang);
+
+  String _nativeLangCode() => deepgramLanguageCode(_nativeLangName());
+
+  String _mapLanguageToCode(String lang) => deepgramLanguageCode(lang);
 
   void _resetTurnPcmBuffer() {
     _turnPcmChunks.clear();
@@ -260,7 +230,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
       // 🎚️ 녹음 샘플레이트를 그대로 넘긴다. 기본값(16000)에 기대면 24kHz PCM에
       //   16kHz WAV 헤더가 붙어 소리가 느려지고 전사문이 통째로 망가진다.
       sampleRate: kStealthVoxSttSampleRate,
-      language: 'ko',
+      language: _nativeLangCode(),
       model: OpenAiTranscribeService.firstTurnModel,
       timeout: _accurateTranscribeTimeout,
       onLog: _log,
@@ -290,6 +260,9 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
 
   String _buildScenarioMemberInstructions() {
     final nativeLang = resolveNativeLanguageName(FFAppState().nativeLang);
+    final registerPolicy = nativeLang == 'Korean'
+        ? kKoreanPoliteSpeechPolicy
+        : 'Use the everyday polite spoken register of $nativeLang unless the established roles clearly require another register.';
     final askBackLine = nativeLang == 'Korean'
         ? kScenarioAskBackLine
         : 'the $nativeLang equivalent of "I think I misheard what you just said. Could you say it again?" — one plain spoken sentence, nothing else';
@@ -313,7 +286,7 @@ ${buildNativeOutputLanguagePolicy(FFAppState().nativeLang)}
 - Do not translate, teach, coach, narrate, or mention being an AI.
 - Do not output stage directions, labels, brackets, or explanations.
 
-$kKoreanPoliteSpeechPolicy
+$registerPolicy
 
 $kSpokenReplyLengthPolicy
 - In character, this means answering like a real person in that situation would: briefly.
@@ -930,13 +903,19 @@ never by itself a reason to ask back.
     var aiIndex = -1;
     if (mounted) setState(() {});
     try {
-      var aiKorean = await RoleplayBrain.generateKoreanOpener(
+      final nativeLang = _nativeLangName();
+      var aiKorean = await RoleplayBrain.generateOpener(
         apiKey: _openAiKey,
         situation: _scenarioSituation,
         aiRole: _roleplayPartnerLabel.trim(),
         userRole: _roleplayUserLabel.trim(),
+        languageName: nativeLang,
       );
       if (aiKorean.isEmpty) {
+        if (nativeLang != 'Korean') {
+          _log('[OPENER-FALLBACK]', '첫 대사 비어 있음 language=$nativeLang');
+          return;
+        }
         aiKorean = '그래서 지금 어떻게 하실 생각이세요?';
         _log('[OPENER-FALLBACK]', 'gpt-4o-mini 첫 대사 비어 있음');
       }
@@ -961,7 +940,8 @@ never by itself a reason to ask back.
           'original_text': aiKorean,
         },
       ]);
-      _log('[OPENER]', 'model=gpt-4o-mini voice=$_aiVoice lang=ko');
+      _log('[OPENER]',
+          'model=gpt-4o-mini voice=$_aiVoice lang=${_nativeLangCode()}');
     } catch (error) {
       _log('[OPENER-ERR]', 'reason=${error.runtimeType}');
       if (mounted && aiIndex >= 0 && aiIndex < _localMessages.length) {
@@ -1190,8 +1170,8 @@ never by itself a reason to ask back.
 
     // 🌐 [v3.1] 로비에서 유저가 선택한 모국어(nativeLang)로 Deepgram 인식
     // 유저가 한국어로 말하면 Deepgram이 한국어로 인식 → Brain이 영어로 번역
-    const String dgLangCode = 'ko';
-    _log('🌐 [LANG]', 'Deepgram boundary language=ko');
+    final String dgLangCode = _nativeLangCode();
+    _log('🌐 [LANG]', 'Deepgram boundary language=$dgLangCode');
 
     _voiceManager = DeepgramV2VoiceManager(
       apiKey: _deepgramKey,
@@ -1334,15 +1314,16 @@ never by itself a reason to ask back.
     }
     _streamingSessionStarting = true;
     try {
+      final languageCode = _nativeLangCode();
       var session = OpenAiStreamingTranscribePrewarm.instance.take(
         apiKey: _openAiKey,
-        languageCode: 'ko',
+        languageCode: languageCode,
         onLog: _log,
       );
       if (session == null) {
         session = OpenAiStreamingTranscribeSession(
           apiKey: _openAiKey,
-          languageCode: 'ko',
+          languageCode: languageCode,
           onLog: _log,
         );
         if (!await session.connect()) {
@@ -2212,6 +2193,7 @@ never by itself a reason to ask back.
       final userStream = RoleplayBrain.streamUserTranslation(
         apiKey: _openAiKey,
         textOriginal: finalTranscript,
+        originLang: _nativeLangName(),
         targetLang: targetLangName,
         contextStr: contextStr,
         userRole: _scenarioUserRole,
@@ -2562,7 +2544,7 @@ never by itself a reason to ask back.
           _openAiKey,
           _ttsQueueManager,
           _aiVoice,
-          language: 'ko',
+          language: _nativeLangCode(),
           isUser: false,
           onLog: _log,
         );
@@ -2982,7 +2964,7 @@ never by itself a reason to ask back.
         'is_pinned': false,
         'msg_count': 0,
         // 세션 생성 당시 언어 식별값 보존(History 동일 언어 판정용)
-        'native_lang': 'Korean',
+        'native_lang': _nativeLangName(),
         'target_lang': FFAppState().targetLang,
       });
       _myHistoryRef = newRef;
@@ -4696,11 +4678,12 @@ class RoleplayBrain {
   // Realtime이 만들던 자리다. Realtime은 시크릿 발급이 막히면 첫 마디가
   // 통째로 사라져 대화가 시작조차 안 됐다. 짧은 한 줄이라 스트리밍도 필요 없다.
   // ==================================================================
-  static Future<String> generateKoreanOpener({
+  static Future<String> generateOpener({
     required String apiKey,
     required String situation,
     required String aiRole,
     required String userRole,
+    required String languageName,
   }) async {
     if (apiKey.isEmpty) return '';
     final client = http.Client();
@@ -4723,10 +4706,10 @@ class RoleplayBrain {
                       '''You are "$aiRole" inside this scene, speaking to "$userRole".
 Situation: $situation
 
-Speak exactly ONE short opening line in Korean — the line this character would really say first, right now, inside this situation.
+Speak exactly ONE short opening line in $languageName — the line this character would really say first, right now, inside this situation.
 Never act as a host, guide, or narrator. Do not greet the user to a roleplay, explain the setup, or invite them to start.
-Do not use English, do not describe the scene, do not use quotation marks or emoji.
-Natural spoken Korean 해요체 존댓말, one sentence. Never use 반말.
+Do not use another language, describe the scene, use quotation marks, or emoji.
+Use a natural everyday polite spoken register in $languageName, one sentence.
 Return only the line itself.'''
                 },
                 {
@@ -5161,6 +5144,7 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
   static Stream<String> streamUserTranslation({
     required String apiKey,
     required String textOriginal,
+    required String originLang,
     required String targetLang,
     required String contextStr,
     String userRole = '',
@@ -5170,11 +5154,36 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
   }) async* {
     final client = http.Client();
     try {
+      final source = textOriginal.trim();
+      if (source.isEmpty) {
+        yield '[EVAPORATE]';
+        return;
+      }
+      if (originLang.trim().toLowerCase() == targetLang.trim().toLowerCase()) {
+        yield source;
+        return;
+      }
       final roleContext = userRole.isNotEmpty
           ? '\nThe user is playing the role of "$userRole"${situation.isNotEmpty ? ' in a "$situation" scenario' : ''}.'
           : '';
-      final sysPrompt =
-          """You are an expert real-time Korean-to-$targetLang translator for a live roleplay conversation.$roleContext
+      final genericPrompt =
+          '''You translate live roleplay speech from $originLang to $targetLang.$roleContext
+Use the scenario and history to recover omissions, idioms, word order, and
+references only when supported. Preserve the user's role, viewpoint, meaning,
+names, register, and emotion. Never invent a key fact.
+
+Judge corrections and dissatisfaction by intent rather than a fixed phrase list.
+If the user replaces the previous utterance, output [CORRECTION]. If they only
+complain that it was misheard, output [MISHEARD]. If they step out of character
+to reject the AI's last reply without replacement content, output [DISSATISFIED].
+${isCorrectionRetry ? 'This is a correction retry: strip correction framing and output only the corrected content; never output a bracketed tag.' : ''}
+${disableHeardConfirmation ? 'The wording was confirmed; do not ask for confirmation again.' : 'If a core word is unrecoverable, ask one short specific confirmation question in $originLang.'}
+If a referent is genuinely ambiguous, output [CLARIFY] followed by one short
+in-character question in $originLang. For noise output [EVAPORATE]. Otherwise
+output only natural $targetLang.''';
+      final sysPrompt = originLang.toLowerCase() != 'korean'
+          ? genericPrompt
+          : """You are an expert real-time Korean-to-$targetLang translator for a live roleplay conversation.$roleContext
 ${isCorrectionRetry ? '''
 [CORRECTION RESTATEMENT - ABSOLUTE TOP PRIORITY, applies to THIS input]
 This input is the user RE-STATING what they actually meant. The wrong exchange is already deleted.
@@ -5293,7 +5302,7 @@ NEVER break character when asking.
           {
             'role': 'user',
             'content':
-                'Conversation so far:\n$contextStr\n\nTranslate: "$textOriginal"',
+                'Conversation so far:\n$contextStr\n\nTranslate: "$source"',
           },
         ],
       });

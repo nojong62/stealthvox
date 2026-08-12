@@ -55,6 +55,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/openai_connection_pool.dart';
+import '/custom_code/services/deepgram_prewarm_session.dart';
 import '/custom_code/services/openai_streaming_transcribe_prewarm.dart';
 import '/custom_code/services/openai_streaming_transcribe_session.dart';
 import '/custom_code/services/openai_transcribe_service.dart';
@@ -405,7 +406,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     return OpenAiTranscribeService.transcribePcm16(
       apiKey: _openAiKey,
       pcm: pcm,
-      language: 'ko',
+      language: _nativeLangCode(),
       model: OpenAiTranscribeService.firstTurnModel,
       timeout: _accurateTranscribeTimeout,
       onLog: _log,
@@ -434,6 +435,9 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
   /// 덧붙였다. 세션이 사라진 지금은 매 턴 이걸 같이 보내야 한다.
   String _buildStepExpandSystemInstructions() {
     final nativeLang = resolveNativeLanguageName(FFAppState().nativeLang);
+    final registerPolicy = nativeLang == 'Korean'
+        ? kKoreanPoliteSpeechPolicy
+        : 'Use the everyday polite spoken register of $nativeLang unless the user clearly establishes another register.';
     final askBackLine = nativeLang == 'Korean'
         ? kStepExpandAskBackLine
         : 'the $nativeLang equivalent of "I think I misheard what you just said. Could you say it again?" — one plain spoken sentence, nothing else';
@@ -492,7 +496,7 @@ But it must stay a question a real person would actually ask in conversation.
 Never reach for an unusual angle just to be different, and never ask something
 that would sound odd out loud.
 
-$kKoreanPoliteSpeechPolicy
+$registerPolicy
 
 $kSpokenReplyLengthPolicy
 - Always two parts, in this order and nothing more:
@@ -569,43 +573,12 @@ line had never been said. Never build the conversation on a line you had to gues
     return normalize(left) == normalize(right);
   }
 
-  // 🌐 [v3.1] 로비에서 선택한 언어 이름 → Deepgram/OpenAI 언어 코드 매핑
-  String _mapLanguageToCode(String lang) {
-    switch (lang.trim().toLowerCase()) {
-      case 'korean':
-        return 'ko';
-      case 'japanese':
-        return 'ja';
-      case 'chinese':
-        return 'zh';
-      case 'spanish':
-        return 'es';
-      case 'french':
-        return 'fr';
-      case 'german':
-        return 'de';
-      case 'italian':
-        return 'it';
-      case 'portuguese':
-        return 'pt';
-      case 'russian':
-        return 'ru';
-      case 'vietnamese':
-        return 'vi';
-      case 'thai':
-        return 'th';
-      case 'indonesian':
-        return 'id';
-      case 'hindi':
-        return 'hi';
-      case 'arabic':
-        return 'ar';
-      case 'dutch':
-        return 'nl';
-      default:
-        return 'en'; // English 포함
-    }
-  }
+  String _nativeLangName() =>
+      resolveNativeLanguageName(FFAppState().nativeLang);
+
+  String _nativeLangCode() => deepgramLanguageCode(_nativeLangName());
+
+  String _mapLanguageToCode(String lang) => deepgramLanguageCode(lang);
 
   // 🌱 스텝익스팬드 전용 상태
   static const int MAX_TURNS = 5; // 5턴 자동 마무리 룰
@@ -805,12 +778,19 @@ line had never been said. Never build the conversation on a line you had to gues
   Future<void> _speakOpeningOnce() async {
     if (_hasSpokenOpening || !mounted) return;
     _hasSpokenOpening = true;
-    final opening = await StepExpandBrain.generateKoreanOpening(
+    final nativeLang = _nativeLangName();
+    final opening = await StepExpandBrain.generateOpening(
       apiKey: _openAiKey,
-      fallback: _openingNudgeText,
+      languageName: nativeLang,
+      fallback: nativeLang == 'Korean' ? _openingNudgeText : '',
     );
     // 문구를 기다리는 동안 유저가 먼저 입을 열었으면 첫 마디는 접는다.
-    if (!mounted || !_isConversationActive || _turnCounter != 0) return;
+    if (!mounted ||
+        !_isConversationActive ||
+        _turnCounter != 0 ||
+        opening.isEmpty) {
+      return;
+    }
     if (_pendingTranscript.isNotEmpty) {
       _log('🗣️ [OPENING-SKIP]', '유저가 먼저 말함 → 첫 마디 생략');
       return;
@@ -1743,7 +1723,7 @@ line had never been said. Never build the conversation on a line you had to gues
       _openAiKey,
       _ttsQueueManager,
       _aiVoice,
-      language: 'ko',
+      language: _nativeLangCode(),
       cacheEnabled: false,
       isUser: false,
       onLog: _log,
@@ -1840,7 +1820,7 @@ line had never been said. Never build the conversation on a line you had to gues
       _openAiKey,
       _ttsQueueManager,
       _aiVoice,
-      language: 'ko',
+      language: _nativeLangCode(),
       cacheEnabled: false,
       isUser: false,
       onLog: _log,
@@ -1997,7 +1977,7 @@ line had never been said. Never build the conversation on a line you had to gues
       _openAiKey,
       _ttsQueueManager,
       _aiVoice,
-      language: 'ko',
+      language: _nativeLangCode(),
       cacheEnabled: false,
       isUser: false,
       onLog: _log,
@@ -2074,15 +2054,16 @@ line had never been said. Never build the conversation on a line you had to gues
     }
     _streamingSessionStarting = true;
     try {
+      final languageCode = _nativeLangCode();
       var session = OpenAiStreamingTranscribePrewarm.instance.take(
         apiKey: _openAiKey,
-        languageCode: 'ko',
+        languageCode: languageCode,
         onLog: _log,
       );
       if (session == null) {
         session = OpenAiStreamingTranscribeSession(
           apiKey: _openAiKey,
-          languageCode: 'ko',
+          languageCode: languageCode,
           onLog: _log,
         );
         if (!await session.connect()) {
@@ -2397,8 +2378,8 @@ line had never been said. Never build the conversation on a line you had to gues
 
     // 🌐 [v3.1] 로비에서 유저가 선택한 모국어(nativeLang)로 Deepgram 인식
     // 유저가 한국어로 말하면 Deepgram이 한국어로 인식 → Brain이 영어로 번역
-    const String dgLangCode = 'ko';
-    _log('🌐 [LANG]', 'Deepgram boundary language=ko');
+    final String dgLangCode = _nativeLangCode();
+    _log('🌐 [LANG]', 'Deepgram boundary language=$dgLangCode');
 
     _voiceManager = DeepgramV2VoiceManager(
       apiKey: _deepgramKey,
@@ -3125,6 +3106,7 @@ line had never been said. Never build the conversation on a line you had to gues
     _specSub = StepExpandBrain.streamUserTranslation(
       apiKey: _openAiKey,
       textOriginal: text,
+      originLang: _nativeLangName(),
       targetLang: targetLangName,
       contextStr: '',
       disableCorrection: false,
@@ -3186,7 +3168,7 @@ line had never been said. Never build the conversation on a line you had to gues
         _openAiKey,
         _ttsQueueManager,
         _aiVoice,
-        language: 'ko',
+        language: _nativeLangCode(),
         cacheEnabled: false,
         isUser: false,
         onLog: _log,
@@ -3225,7 +3207,7 @@ line had never been said. Never build the conversation on a line you had to gues
       _openAiKey,
       _ttsQueueManager,
       _aiVoice,
-      language: 'ko',
+      language: _nativeLangCode(),
       cacheEnabled: false,
       isUser: false,
       onLog: _log,
@@ -3565,6 +3547,7 @@ line had never been said. Never build the conversation on a line you had to gues
           StepExpandBrain.streamUserTranslation(
             apiKey: _openAiKey,
             textOriginal: finalTranscript,
+            originLang: _nativeLangName(),
             targetLang: targetLangName,
             contextStr: contextStr,
             disableCorrection: isCorrectionRetry,
@@ -3849,7 +3832,7 @@ line had never been said. Never build the conversation on a line you had to gues
           _openAiKey,
           _ttsQueueManager,
           _aiVoice,
-          language: 'ko',
+          language: _nativeLangCode(),
           cacheEnabled: false,
           isUser: false,
           onLog: _log,
@@ -3915,7 +3898,7 @@ line had never been said. Never build the conversation on a line you had to gues
           _openAiKey,
           _ttsQueueManager,
           _aiVoice,
-          language: 'ko',
+          language: _nativeLangCode(),
           cacheEnabled: false,
           isUser: false,
           onLog: _log,
@@ -3962,7 +3945,7 @@ line had never been said. Never build the conversation on a line you had to gues
           _openAiKey,
           _ttsQueueManager,
           _aiVoice,
-          language: 'ko',
+          language: _nativeLangCode(),
           cacheEnabled: false,
           isUser: false,
           onLog: _log,
@@ -4100,7 +4083,7 @@ line had never been said. Never build the conversation on a line you had to gues
         _openAiKey,
         _ttsQueueManager,
         _aiVoice,
-        language: 'ko',
+        language: _nativeLangCode(),
         cacheEnabled: false, // 실시간 한국어 음성은 히스토리 영어 캐시에 남기지 않음
         isUser: false, // AI 큐로 분리
         onLog: _log,
@@ -4396,7 +4379,7 @@ line had never been said. Never build the conversation on a line you had to gues
         'last_message': '',
         'msg_count': 0,
         // 세션 생성 당시 언어 식별값 보존(History 동일 언어 판정용)
-        'native_lang': 'Korean',
+        'native_lang': _nativeLangName(),
         'target_lang': FFAppState().targetLang,
       });
       BillingTicker.instance.setSessionIdentifiers(
@@ -6334,6 +6317,7 @@ class StepExpandBrain {
   static Stream<String> streamUserTranslation({
     required String apiKey,
     required String textOriginal,
+    required String originLang,
     required String targetLang,
     required String contextStr,
     bool disableCorrection = false,
@@ -6343,6 +6327,13 @@ class StepExpandBrain {
   }) async* {
     final client = OpenAiConnectionPool.instance.client;
     try {
+      final source = textOriginal.trim();
+      if (source.isEmpty) {
+        yield '[EVAPORATE]';
+        return;
+      }
+      // Step Expand는 같은 언어 조합에서도 2턴부터 누적 문장을 다시 조립해야
+      // 한다. 이 호출은 단순 번역기가 아니라 확장 엔진이므로 생략하지 않는다.
       final String correctionBlock = disableCorrection
           ? "NEVER output [CORRECTION] or [MISHEARD] or any bracket token. This input is the user RE-STATING what they actually meant. Output ONLY the actual intended content as natural $targetLang. STRIP all correction framing: lead-ins (\"아니\" / \"아니지\" / \"내 말은\" / \"내 말은요\" / \"그게 아니라\" / \"내가 말한 건\") AND quote-report frames (\"~라고 했어요\" / \"~라고 했어\" / \"~라고 말했어요\" / \"~라고 말했고\" / \"I said\" / \"I also said\" / \"what I said was\"). When multiple quoted statements are reported, merge them into natural connected $targetLang. Examples: \"아니 내 말은요 당신 잘못이라고요\" -> \"It's clearly your fault.\" | \"나는 빨리 구해 주세요라고 했어요 휴지가 없어요라고 말했고\" -> \"Please rescue me quickly, and there's no toilet paper.\""
           : """[CASE CORRECTION] — Check this FIRST, but only when History contains at least one 'User:' line
@@ -6362,9 +6353,30 @@ Signs:
 If this is a bare mishearing complaint, output EXACTLY: [MISHEARD]
 If the complaint INCLUDES the corrected content, use [CORRECTION] instead.""";
 
-      final sysPrompt =
-          """You are a [Step Expand Translator] translating Korean to $targetLang.
-You help the user grow ONE English sentence across multiple turns, adding details each turn.
+      final genericPrompt =
+          '''You are a Step Expand translator from $originLang to $targetLang.
+The user grows one $targetLang sentence across turns. Use History to recover
+omissions, idioms, word order, and references only when supported. Never invent
+a subject, action, feeling, or fact. Preserve meaning, names, viewpoint, register,
+and emotion.
+
+Judge correction, mishearing, and dissatisfaction by intent, not fixed phrases.
+Use [CORRECTION] when the user replaces the prior utterance, [MISHEARD] for a bare
+mishearing complaint, and [DISSATISFIED] only when they reject the AI question.
+${disableCorrection ? 'This is a correction retry: strip correction framing and output only corrected content; do not emit correction tags.' : ''}
+${disableHeardConfirmation ? 'The wording was confirmed; do not ask again.' : 'If a core word is unrecoverable, ask one short confirmation question in $originLang.'}
+
+When History is empty, output one natural $targetLang seed sentence only.
+When History exists, output exactly two parts separated by a blank line: first
+the new input translated to $targetLang, then one natural $targetLang sentence
+merging the previous grown sentence with only the new information. If the input
+is clear but unrelated to the last question, output [RESTATE]. If it is garbled,
+output [GARBLED]. If a referent is ambiguous, output [CLARIFY] plus one short
+question in $originLang. For noise output [EVAPORATE]. Output nothing else.''';
+      final sysPrompt = originLang.toLowerCase() != 'korean'
+          ? genericPrompt
+          : """You are a [Step Expand Translator] translating Korean to $targetLang.
+You help the user grow ONE $targetLang sentence across multiple turns, adding details each turn.
 
 Read the 'History' carefully to determine the user's current turn, restore omitted Korean subjects from context, and preserve the speaker's intended viewpoint.
 
@@ -6520,8 +6532,7 @@ Output: [GARBLED]
 - Output [RETRY] ONLY when the user's answer shows they did not understand the AI's question itself, so re-asking the same thing would not help.
 - Output [DISSATISFIED] only when History contains an AI question and the user expresses dissatisfaction, complaint, or rejection about that QUESTION itself (not about the topic). Signs: "다른 질문 해줘" / "그 질문 싫어" / "질문 바꿔" / "무슨 질문이 그래" / "별로야" / "그건 좀" / "다른 거 물어봐" / "change the question" / "ask something else" / "I don't like that question". MILD signs ALSO count: "별로" / "별론데" / "아 그건 좀" / "에이" / "그런 거 말고" / "그건 없어" / "재미없어" / "이상하네" / "뭐야 그게" / "meh" / "not really" / "hmm, not that one". REPETITION COMPLAINT signs ALSO count: "아까 말했잖아" / "이미 대답했잖아" / "방금 말했는데" / "이미 얘기했어" / "똑같은 질문" / "같은 걸 또" / "already said" / "already answered" / "I already told you". Even slight or indirect displeasure aimed at the QUESTION itself counts. Do NOT output [DISSATISFIED] when History is empty or when the user is simply answering negatively (e.g., "아니, 안 갔어" = a valid negative answer).""";
 
-      final String userContent =
-          'History:\n$contextStr\n\nInput: $textOriginal';
+      final String userContent = 'History:\n$contextStr\n\nInput: $source';
 
       final request = http.Request(
         'POST',
@@ -6628,8 +6639,9 @@ Output: [GARBLED]
   // 들려서, 첫 마디부터 사람이 건네는 말이 되게 모델에 맡긴다.
   // 실패하면 기존 고정 문구로 떨어진다 — 첫 소리는 무슨 일이 있어도 난다.
   // ==================================================================
-  static Future<String> generateKoreanOpening({
+  static Future<String> generateOpening({
     required String apiKey,
+    required String languageName,
     required String fallback,
   }) async {
     if (apiKey.isEmpty) return fallback;
@@ -6650,13 +6662,13 @@ Output: [GARBLED]
                 {
                   'role': 'system',
                   'content':
-                      '''You open a Step Expand practice session by speaking first, in Korean.
+                      '''You open a Step Expand practice session by speaking first, in $languageName.
 The user will answer out loud, and their answer becomes the seed sentence they then grow one piece at a time.
 Ask exactly ONE short, warm question that invites them to name any one real moment from their day.
 It must be answerable in a few words by someone who is quiet or still gathering their thoughts.
 Never ask a yes/no question. Never mention English, practice, study, sentences, AI, or how this works.
 No greeting, no preamble, no explanation, no emoji.
-Natural spoken 해요체, 4-12 spacing units, one sentence only.
+Use a natural everyday polite spoken register in $languageName, one short sentence only.
 Return only the question text.'''
                 },
                 {

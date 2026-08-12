@@ -864,16 +864,16 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   /// 예전에는 'English'로 박혀 있어, 로비에서 일본어를 골라도 서클룸만 영어로
   /// 말하고 히스토리에도 English로 기록됐다. 나머지 세 모드는 모두 로비 값을
   /// 쓰므로 여기만 어긋나 있었다.
-  String _targetLangName() => FFAppState().targetLang.isNotEmpty
-      ? FFAppState().targetLang
-      : 'English';
+  String _targetLangName() =>
+      FFAppState().targetLang.isNotEmpty ? FFAppState().targetLang : 'English';
 
   /// 🌐 [LANG] 이 방의 대화 언어(ORIGIN). **로비에서 고른 값을 그대로 따른다.**
   ///
   /// 예전에는 'Korean'으로 박혀 있어, 로비에서 일본어를 골라도 전사기만 한국어로
   /// 돌았다. AI 응답 프롬프트는 이미 로비 값을 쓰고 있었으므로(1292행
   /// `buildNativeOutputLanguagePolicy`), 전사기만 어긋난 상태였다.
-  String _nativeLangName() => resolveNativeLanguageName(FFAppState().nativeLang);
+  String _nativeLangName() =>
+      resolveNativeLanguageName(FFAppState().nativeLang);
 
   /// 전사기에 넘길 ORIGIN 언어 코드. 예열(`stealth_room_master`)이 쓰는 것과
   /// **같은 함수**라야 `take()`가 예열 세션을 채택한다.
@@ -1189,11 +1189,18 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     var aiIndex = -1;
     if (mounted) setState(() {});
     try {
-      var aiText = await UnifiedBrain.generateKoreanOpener(
+      final nativeLang = _nativeLangName();
+      var aiText = await UnifiedBrain.generateOpener(
         apiKey: _openAiKey,
         circleDescription: widget.circleDescription,
+        languageName: nativeLang,
       );
       if (aiText.isEmpty) {
+        if (nativeLang != 'Korean') {
+          _log('[OPENER-FALLBACK]', '첫 마디 비어 있음 language=$nativeLang');
+          await _startConfiguredListening();
+          return;
+        }
         final circle = widget.circleDescription.trim();
         aiText = circle.isEmpty
             ? '요즘 우리 모임에서는 어떤 이야기가 제일 많이 나와요?'
@@ -1221,7 +1228,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       //   눌려, Deepgram이 빈 전사만 돌려줬다. 바지인보다 입력이 먼저다.
       // 보이스·모델 매핑은 어댑터가 정한다 — 여기서 모델명을 쓰지 않는다.
       await _speakSystemLine(aiText);
-      _log('[OPENER]', 'model=gpt-4o-mini lang=ko text_only_history=true');
+      _log('[OPENER]',
+          'model=gpt-4o-mini lang=${_nativeLangCode()} text_only_history=true');
     } catch (error) {
       _log('[OPENER-ERR]', 'reason=${error.runtimeType}');
       if (mounted && aiIndex >= 0 && aiIndex < _localMessages.length) {
@@ -1242,6 +1250,9 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
         .replaceAll('>', '）')
         .replaceAll(RegExp(r'[\r\n]+'), ' ')
         .trim();
+    final koreanRegisterPolicy = _nativeLangName() == 'Korean'
+        ? kKoreanPoliteSpeechPolicy
+        : 'Use the everyday polite spoken register of the selected language unless the user clearly establishes another register.';
     return '''You are ONE real participating member of the circle below, talking
 with ANOTHER member. You have no staff, host, moderator, or organizer role.
 You are well-connected — an 정보통 and 소식통, a bit of a 수다장이 — but that is
@@ -1437,7 +1448,7 @@ GOOD — just stays there with them:
 GOOD — member who sees it a little differently, and leaves it there:
   저는 좀 다르게 봐요. 이런 건 원래 티 안 나게 쌓이는 것 같더라고요.
 
-$kKoreanPoliteSpeechPolicy
+$koreanRegisterPolicy
 
 $kSpokenReplyLengthPolicy
 
@@ -2088,8 +2099,7 @@ $kSpokenReplyLengthPolicy
     }
     _streamingSessionStarting = true;
     try {
-      const String nativeLang = 'Korean';
-      final String langCode = _mapLanguageToCode(nativeLang);
+      final String langCode = _nativeLangCode();
       var session = OpenAiStreamingTranscribePrewarm.instance.take(
         apiKey: _openAiKey,
         languageCode: langCode,
@@ -2990,6 +3000,7 @@ $kSpokenReplyLengthPolicy
     _specSub = FreeTalkBrain.streamUserTranslation(
       apiKey: _openAiKey,
       textOriginal: text,
+      originLang: _nativeLangName(),
       targetLang: targetLangName,
       contextStr: '',
       disableCorrection: false,
@@ -3354,6 +3365,7 @@ $kSpokenReplyLengthPolicy
           FreeTalkBrain.streamUserTranslation(
             apiKey: _openAiKey,
             textOriginal: finalTranscript,
+            originLang: _nativeLangName(),
             targetLang: targetLangName,
             contextStr: contextStr,
             model: translationModel,
@@ -3702,7 +3714,8 @@ $kSpokenReplyLengthPolicy
       // 상대방의 정체와 관계가 단기 기억에서 확실해진 뒤에만 질문을 허용한다.
       final bool allowAiQuestion =
           _characterShortTermMemory.contains('CONFIDENCE: HIGH');
-      final bool forceNaturalPolite = !_mayUseCasualRegister();
+      final bool forceNaturalPolite =
+          _nativeLangName() == 'Korean' && !_mayUseCasualRegister();
       _log(
           '🎙️ [LEAD]',
           'turn=$currentTurnId allow_question=$allowAiQuestion '
@@ -3712,7 +3725,7 @@ $kSpokenReplyLengthPolicy
         apiKey: _openAiKey,
         userTargetText: finalTranscript,
         contextStr: latestContextStr,
-        myTarget: 'Korean',
+        myTarget: _nativeLangName(),
         circleDescription: widget.circleDescription,
         allowQuestion: allowAiQuestion,
         forceNaturalPolite: forceNaturalPolite,
@@ -3772,9 +3785,10 @@ $kSpokenReplyLengthPolicy
 
         if (forceNaturalPolite && _needsNaturalPoliteRewrite(aiOriginalText)) {
           final beforeRewrite = aiOriginalText;
-          final rewritten = await FreeTalkBrain.rewriteToNaturalPoliteKorean(
+          final rewritten = await FreeTalkBrain.rewriteToNaturalRegister(
             apiKey: _openAiKey,
             text: beforeRewrite,
+            languageName: _nativeLangName(),
           );
           if (!isActivePipelineGeneration(
                 expected: pipelineGeneration,
@@ -3796,9 +3810,10 @@ $kSpokenReplyLengthPolicy
         }
 
         if (aiOriginalText.trim().isNotEmpty) {
-          aiTargetFuture = FreeTalkBrain.translateKoreanToTarget(
+          aiTargetFuture = FreeTalkBrain.translateOriginalToTarget(
             apiKey: _openAiKey,
-            koreanText: aiOriginalText,
+            originalText: aiOriginalText,
+            originLang: _nativeLangName(),
             targetLang: targetLangName,
           );
           characterMemoryFuture = FreeTalkBrain.updateCharacterMemory(
@@ -3823,7 +3838,7 @@ $kSpokenReplyLengthPolicy
         ));
         _log(
           '🚀 [AI-TTS-PREFETCH]',
-          'started language=Korean voice=$voice len=${aiTtsText.length}',
+          'started language=${_nativeLangName()} voice=$voice len=${aiTtsText.length}',
         );
       });
 
@@ -3866,9 +3881,10 @@ $kSpokenReplyLengthPolicy
       if (aiOriginalText.trim().isNotEmpty) {
         try {
           aiTargetText = await (aiTargetFuture ??
-              FreeTalkBrain.translateKoreanToTarget(
+              FreeTalkBrain.translateOriginalToTarget(
                 apiKey: _openAiKey,
-                koreanText: aiOriginalText,
+                originalText: aiOriginalText,
+                originLang: _nativeLangName(),
                 targetLang: targetLangName,
               ));
           _log('🔤 [AI-TARGET]', 'AI 영어 번역 완료 → UI 반영 및 저장');
@@ -4127,10 +4143,7 @@ $kSpokenReplyLengthPolicy
         // 실제 대화가 쓰는 값과 반드시 같아야 한다 — 어긋나면 히스토리가
         // 엉뚱한 언어로 타겟 문장을 만든다.
         //
-        // native는 아직 'Korean' 고정이다. 서클룸의 유저 음성 전사(1842·2120행)와
-        // 유저 발화 번역 프롬프트가 모두 한국어를 전제로 돌기 때문이다.
-        // 그 셋을 같이 풀기 전에는 여기만 로비 값으로 바꾸면 기록이 거짓말이 된다.
-        'native_lang': 'Korean',
+        'native_lang': _nativeLangName(),
         'target_lang': _targetLangName(),
       });
       BillingTicker.instance.setSessionIdentifiers(
@@ -5163,9 +5176,10 @@ class UnifiedBrain {
   // Realtime이 만들던 자리다. Realtime은 시크릿 발급이 막히면 첫 마디가
   // 통째로 사라져 대화가 시작조차 안 됐다. 한 줄이라 스트리밍이 필요 없다.
   // ==================================================================
-  static Future<String> generateKoreanOpener({
+  static Future<String> generateOpener({
     required String apiKey,
     required String circleDescription,
+    required String languageName,
   }) async {
     if (apiKey.isEmpty) return '';
     final circle = circleDescription.trim().isEmpty
@@ -5192,7 +5206,7 @@ class UnifiedBrain {
 You have no host, staff, moderator, or organizer role. You are simply a
 well-connected 정보통 and 소식통, a bit of a 수다장이. The circle's plans and work
 also concern you personally. You have just run into another member. Speak exactly
-ONE short opening line in Korean — what you yourself would really say first.
+ONE short opening line in $languageName — what you yourself would really say first.
 
 Best is a small piece of circle news only you would know yet: a gathering that
 moved, a place that changed, what someone has been up to. Invent the concrete
@@ -5201,8 +5215,8 @@ circle's daily life.
 Say it the way you would over coffee, never as a notice: 이번엔 장소가 바뀌었더라고요,
 not 장소 변경 안내드립니다. Never chase dues or attendance.
 Never act as a host, guide, or narrator. Do not welcome anyone, explain the circle, or invite them to start talking.
-Do not use English, quotation marks, or emoji.
-Natural spoken Korean 해요체 존댓말, one sentence. Never use 반말.
+Do not use any other language, quotation marks, or emoji.
+Use a natural everyday polite spoken register in $languageName, one sentence.
 Return only the line itself.'''
                 },
                 {
@@ -6570,10 +6584,30 @@ Rewrite the given long English sentence as ONE "easy but elegant" spoken sentenc
   /// 🎙️ [SPEECH-FIRST] 번역 시스템 프롬프트 빌더. 전사 텍스트에 의존하지 않으므로
   /// 발화가 끝나는 즉시(전사 전에) Realtime 응답 instructions로도 쓸 수 있다.
   static String buildTranslationSysPrompt({
+    required String originLang,
     required String targetLang,
     bool disableCorrection = false,
     bool disableHeardConfirmation = false,
   }) {
+    if (originLang.toLowerCase() != 'korean') {
+      return '''You translate live conversational speech from $originLang to $targetLang.
+The input is an ASR transcript, not typed text. Use the conversation history to
+recover omitted information, word order, idioms, and references only when the
+context supports them. Preserve meaning, names, viewpoint, register, and emotion.
+Never invent a key subject, object, action, or fact.
+
+Judge correction by intent, not by a fixed phrase list. If the user intends to
+correct, deny, or replace the previous exchange and history exists, output exactly
+[CORRECTION]. If they only complain that they were misheard without providing the
+replacement, output exactly [MISHEARD]. If they reject the AI's last reply and
+provide no replacement content, output exactly [DISSATISFIED].
+${disableCorrection ? 'For this retry, never output a bracketed correction tag. Remove the correction framing and translate only the corrected content.' : ''}
+
+${disableHeardConfirmation ? 'The user already confirmed the wording; do not ask for hearing confirmation again.' : 'If a core word is genuinely unrecoverable from the transcript and history, do not guess. Ask one short, specific confirmation question in $originLang, with no tag or extra text.'}
+If a required referent is genuinely ambiguous, output [CLARIFY] followed by one
+short natural question in $originLang. If the input is noise, output [EVAPORATE].
+Otherwise output only the natural $targetLang translation.''';
+    }
     final String correctionBlock = disableCorrection
         ? '''Never output [CORRECTION], [MISHEARD], or [DISSATISFIED].
 The user is restating their intended meaning after rejecting the previous user/AI exchange.
@@ -6676,8 +6710,18 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
   /// 않는다. 필요한 안전 태그와 한국어 주어 복원만 남겨 입력 처리 시간을 줄이고,
   /// 자연스러운 첫 구절 경계를 만들어 TTS를 번역 완료 전에 시작할 수 있게 한다.
   static String buildFirstTurnTranslationSysPrompt({
+    required String originLang,
     required String targetLang,
   }) {
+    if (originLang.toLowerCase() != 'korean') {
+      return '''Translate the first $originLang utterance of a live conversation into natural $targetLang.
+The input is an ASR transcript. Preserve exact meaning, names, viewpoint, speech
+register, idioms, and emotion. Recover omissions only when the sentence supports
+them; never invent a key fact. If the wording is broken and cannot be recovered,
+ask one short specific confirmation question in $originLang. If a required
+referent is ambiguous, output [CLARIFY] and a short question in $originLang.
+For noise output [EVAPORATE]. Otherwise output only the translation.''';
+    }
     return '''Translate the first Korean utterance of a live conversation into natural $targetLang.
 The input is an ASR transcript, not typed text.
 
@@ -6694,6 +6738,7 @@ Rules:
   static Stream<String> streamUserTranslation({
     required String apiKey,
     required String textOriginal,
+    required String originLang,
     required String targetLang,
     required String contextStr,
     // 🧠 [TRANSLATE-ROUTE] guide4 6장 분기 결과. 이 턴은 이 모델 하나만 호출한다.
@@ -6704,22 +6749,30 @@ Rules:
   }) async* {
     final client = OpenAiConnectionPool.instance.client;
     try {
-      final sysPrompt = fastFirstTurn
-          ? buildFirstTurnTranslationSysPrompt(targetLang: targetLang)
-          : buildTranslationSysPrompt(
-              targetLang: targetLang,
-              disableCorrection: disableCorrection,
-              disableHeardConfirmation: disableHeardConfirmation,
-            );
-
       final String source = textOriginal.trim();
       if (source.isEmpty) {
         yield '[EVAPORATE]';
         return;
       }
+      if (originLang.trim().toLowerCase() == targetLang.trim().toLowerCase()) {
+        yield source;
+        return;
+      }
+      final sysPrompt = fastFirstTurn
+          ? buildFirstTurnTranslationSysPrompt(
+              originLang: originLang,
+              targetLang: targetLang,
+            )
+          : buildTranslationSysPrompt(
+              originLang: originLang,
+              targetLang: targetLang,
+              disableCorrection: disableCorrection,
+              disableHeardConfirmation: disableHeardConfirmation,
+            );
+
       final String userContent = fastFirstTurn
           ? 'Translate: "$source"'
-          : 'Conversation so far:\n$contextStr\n\nTranslate this Korean utterance: "$source"';
+          : 'Conversation so far:\n$contextStr\n\nTranslate this $originLang utterance: "$source"';
 
       final request = http.Request(
         'POST',
@@ -6763,15 +6816,18 @@ Rules:
     }
   }
 
-  /// AI가 대화방에서 말한 한국어를 화면·히스토리용 목표 언어로 변환한다.
-  /// 제어 태그나 대화 판정 없이 번역만 수행하므로 한국어 음성 생성과 병렬 실행한다.
-  static Future<String> translateKoreanToTarget({
+  /// AI의 ORIGIN 문장을 화면·히스토리용 TARGET 언어로 변환한다.
+  static Future<String> translateOriginalToTarget({
     required String apiKey,
-    required String koreanText,
+    required String originalText,
+    required String originLang,
     required String targetLang,
   }) async {
-    final source = koreanText.trim();
+    final source = originalText.trim();
     if (source.isEmpty) return '';
+    if (originLang.trim().toLowerCase() == targetLang.trim().toLowerCase()) {
+      return source;
+    }
     for (int attempt = 0; attempt < 2; attempt++) {
       final client = http.Client();
       try {
@@ -6789,7 +6845,7 @@ Rules:
                 'messages': [
                   {
                     'role': 'system',
-                    'content': 'Translate the Korean dialogue line into natural spoken '
+                    'content': 'Translate the $originLang dialogue line into natural spoken '
                         '$targetLang. Preserve meaning, relationship, emotion, '
                         'speech register, and names. Output only the translation.'
                   },
@@ -6964,9 +7020,10 @@ Update the private memory:'''
 
   /// 캐릭터와 관계가 확정되기 전의 AI 답변을 자연스러운 해요체로만 바꾼다.
   /// 의미, 관점, 사실은 그대로 두고 말끝만 교정하며 실패하면 원문을 보존한다.
-  static Future<String> rewriteToNaturalPoliteKorean({
+  static Future<String> rewriteToNaturalRegister({
     required String apiKey,
     required String text,
+    required String languageName,
   }) async {
     final source = text.trim();
     if (source.isEmpty || apiKey.isEmpty) return source;
@@ -6986,13 +7043,18 @@ Update the private memory:'''
               'messages': [
                 {
                   'role': 'system',
-                  'content': '''Rewrite the Korean reply in natural spoken 해요체.
+                  'content': languageName.toLowerCase() == 'korean'
+                      ? '''Rewrite the Korean reply in natural spoken 해요체.
 Keep its exact meaning, first-person viewpoint, character, facts, and sentence count.
 Change only the speech register.
 Every sentence must end naturally and politely with -요 style.
 Do not use stiff -습니다/-습니까 style.
 Do not add a question, greeting, explanation, subject, detail, or new fact.
 Do not answer the reply. Output only the rewritten Korean reply.'''
+                      : '''Rewrite the $languageName reply in its natural everyday polite spoken register.
+Keep its exact meaning, viewpoint, character, facts, and sentence count. Change
+only the register. Do not add a question, greeting, explanation, or fact. Output
+only the rewritten $languageName reply.'''
                 },
                 {'role': 'user', 'content': source},
               ],
@@ -7035,7 +7097,9 @@ Do not answer the reply. Output only the rewritten Korean reply.'''
           : "- The character is not yet understood with high confidence. Do NOT ask the user any question. Respond naturally and stop.";
       // 존댓말은 턴 조건이 아니라 항상이다. 예전에는 forceNaturalPolite일 때만
       // 걸어서, 유저가 반말로 말하면 몇 턴 만에 AI도 반말로 흘렀다.
-      const String registerRule = kKoreanPoliteSpeechPolicy;
+      final String registerRule = myTarget.toLowerCase() == 'korean'
+          ? kKoreanPoliteSpeechPolicy
+          : 'Use the everyday polite spoken register of $myTarget unless the established relationship clearly calls for a casual register.';
       final String rejectedBlock = rejectedReply.trim().isEmpty
           ? ""
           : "\n- IMPORTANT: The user disliked your previous reply: \"${rejectedReply.trim()}\". Give a COMPLETELY DIFFERENT reply this time — different angle, different wording. Do NOT repeat or rephrase it.";
