@@ -746,17 +746,35 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       final original = (data['original_text'] ?? '').toString().trim();
       final translated = (data['translated_text'] ?? '').toString().trim();
       if (original.isEmpty || translated.isNotEmpty) continue;
-      unawaited(_generateAndCacheHistoryTarget(doc.reference, original));
+      unawaited(_generateAndCacheHistoryTarget(
+        doc.reference,
+        original,
+        _sourceLangForMessage(data),
+      ));
     }
+  }
+
+  /// 이 줄의 원문이 무슨 언어인지.
+  ///
+  /// Duo 직접 대화는 두 사람이 서로 다른 언어로 말하므로 줄마다 `source_lang`이
+  /// 실려 온다. 그 값이 없으면 방 단위 Origin, 그것도 없으면 한국어로 본다
+  /// (Origin을 저장하지 않던 시절 기록과의 호환).
+  String _sourceLangForMessage(Map<String, dynamic>? data) {
+    final perMessage = (data?['source_lang'] ?? '').toString().trim();
+    if (perMessage.isNotEmpty) return perMessage;
+    final session = (_sessionNativeLang ?? '').trim();
+    return session.isNotEmpty ? session : 'Korean';
   }
 
   Future<bool> _generateAndCacheHistoryTarget(
     DocumentReference messageRef,
     String originalText,
+    String sourceLanguage,
   ) {
     final existing = _targetTranslationInFlight[messageRef.id];
     if (existing != null) return existing;
-    final future = _performHistoryTargetGeneration(messageRef, originalText);
+    final future =
+        _performHistoryTargetGeneration(messageRef, originalText, sourceLanguage);
     _targetTranslationInFlight[messageRef.id] = future;
     return future.whenComplete(() {
       if (identical(_targetTranslationInFlight[messageRef.id], future)) {
@@ -768,12 +786,18 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   Future<bool> _performHistoryTargetGeneration(
     DocumentReference messageRef,
     String originalText,
+    String sourceLanguage,
   ) async {
     final source = originalText.trim();
     if (source.isEmpty || _apiKey.isEmpty) return false;
     try {
       final targetLanguage = (_sessionTargetLang ?? 'English').trim();
-      final sameLanguage = _recordSameLang == true;
+      final sourceName =
+          sourceLanguage.trim().isEmpty ? 'Korean' : sourceLanguage.trim();
+      // 원문과 타겟이 같은 언어면 번역할 게 없다. 방 단위 판정(_recordSameLang)에
+      // 더해 줄 단위 출발 언어도 본다 — Duo 직접 대화는 줄마다 언어가 다르다.
+      final sameLanguage = _recordSameLang == true ||
+          _normLangCode(sourceName) == _normLangCode(targetLanguage);
       String targetText = source;
       if (!sameLanguage) {
         final response = await http
@@ -790,7 +814,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
                 'messages': <Map<String, String>>[
                   <String, String>{
                     'role': 'system',
-                    'content': 'Translate the Korean conversation line into natural spoken $targetLanguage. '
+                    'content': 'Translate the $sourceName conversation line into natural spoken $targetLanguage. '
                         'Preserve the speaker viewpoint, meaning, tone, and relationship. '
                         'Return only the translated sentence with no label or explanation.',
                   },
@@ -836,7 +860,11 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       final original = (data['original_text'] ?? '').toString().trim();
       final translated = (data['translated_text'] ?? '').toString().trim();
       if (original.isNotEmpty && translated.isEmpty) {
-        tasks.add(_generateAndCacheHistoryTarget(doc.reference, original));
+        tasks.add(_generateAndCacheHistoryTarget(
+          doc.reference,
+          original,
+          _sourceLangForMessage(data),
+        ));
       }
     }
     if (tasks.isNotEmpty) await Future.wait(tasks);
@@ -8058,9 +8086,17 @@ RULES — follow exactly:
     return '';
   }
 
+  /// 원문만 저장해 두고 타겟 문장은 **히스토리에서 처음 열 때 만드는** 모드들.
+  ///
+  /// Duo는 두 방식이 한 컬렉션에 섞인다. 만능 통역 줄은 대화 중에 이미
+  /// `translated_text`가 채워져 있어 생성 대상에서 자동으로 빠지고(호출부가
+  /// 비어 있는 줄만 고른다), 직접 대화 줄만 여기서 타겟을 얻는다.
   bool get _usesDeferredHistoryTargets {
     final mode = _inferHistoryMode(_cachedRoomData);
-    return mode == 'free_talk' || mode == 'roleplay' || mode == 'step_expand';
+    return mode == 'free_talk' ||
+        mode == 'roleplay' ||
+        mode == 'step_expand' ||
+        mode == 'duo';
   }
 
   String _historyModeKey(Map<String, dynamic>? data) {
