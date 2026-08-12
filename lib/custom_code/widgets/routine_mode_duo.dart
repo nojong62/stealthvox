@@ -2166,7 +2166,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                       borderRadius: BorderRadius.circular(13),
                     ),
                     child: Icon(
-                      isDirect ? Icons.call_rounded : Icons.translate_rounded,
+                      isDirect ? Icons.call_rounded : Icons.graphic_eq_rounded,
                       size: 23,
                       color: selected ? Colors.white : const Color(0xFFB9C5D8),
                     ),
@@ -2359,7 +2359,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         border: Border.all(color: const Color(0xFF2563EB), width: 1.2),
       ),
       child: Row(children: [
-        Icon(direct ? Icons.record_voice_over : Icons.translate,
+        Icon(direct ? Icons.record_voice_over : Icons.graphic_eq_rounded,
             size: 20, color: const Color(0xFF93C5FD)),
         const SizedBox(width: 12),
         Expanded(

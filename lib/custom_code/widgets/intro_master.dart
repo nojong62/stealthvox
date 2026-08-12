@@ -1335,7 +1335,7 @@ class _IntroMasterState extends State<IntroMaster> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   _languageDropdown(
-                    label: '모국어',
+                    label: '대화 언어',
                     value: nativeLang,
                     items: languages,
                     onChanged: (value) =>
