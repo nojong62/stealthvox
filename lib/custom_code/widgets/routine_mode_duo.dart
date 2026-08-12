@@ -31,7 +31,25 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 import '/custom_code/actions/billing_ticker.dart';
+import '/custom_code/services/duo_direct_audio.dart';
+import '/custom_code/services/duo_pcm_relay_client.dart';
+import '/custom_code/services/openai_streaming_transcribe_session.dart';
 import 'first_turn_realtime_voice.dart';
+// 마이크 캡처는 Circle Talk과 **같은 구현 한 벌**을 쓴다. 복제하면 sample rate ·
+// 권한 · 종료 처리가 두 군데로 갈라진다.
+import 'routine_mode_anyone.dart' show AnyonePreparedAudioCapture;
+
+// ============================================================================
+// 🗣️ [DUO-MODE] Duo는 두 가지 방식으로 갈린다.
+//   direct      — 사람 목소리 그대로 오가는 통화. AI가 끼지 않는다.
+//                 마이크 PCM을 릴레이로 보내고, 같은 PCM을 전사에도 흘려
+//                 History용 텍스트만 뒤에서 만든다.
+//   interpreter — 기존 Duo. PTT로 말하면 STT→번역→TTS로 상대에게 들려준다.
+//
+// 저장 id는 이 두 문자열이다. 표시명이 바뀌어도 여기는 바꾸지 않는다.
+// ============================================================================
+const String kDuoModeDirect = 'direct';
+const String kDuoModeInterpreter = 'interpreter';
 
 class RoutineModeDuo extends StatefulWidget {
   const RoutineModeDuo({
@@ -56,6 +74,53 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   // ============================================================================
   String _openAiKey = "";
   bool _isConversationActive = false;
+
+  // ── 🆕 [직접 대화] 모드 상태 ─────────────────────────────────────────────
+  // 기본값은 기존 동작(만능 통역)이다. 게스트가 입장 팝업에서 고른 값이
+  // duo_sessions 문서에 실리고, 호스트는 세션 리스너로 같은 값을 받는다.
+  String _duoMode = kDuoModeInterpreter;
+  bool get _isDirectMode => _duoMode == kDuoModeDirect;
+
+  /// 게스트가 입장 팝업에서 초대 방식을 읽어오는 중인지.
+  bool _pendingModeLoading = false;
+
+  /// 세션 문서의 `mode`를 표준화한다. 값이 없거나 모르는 값이면 기존 Duo 동작인
+  /// 만능 통역으로 떨어진다 — mode 필드가 없던 시절 세션과의 호환이다.
+  static String _normalizeDuoMode(Object? raw) =>
+      raw?.toString().trim() == kDuoModeDirect
+          ? kDuoModeDirect
+          : kDuoModeInterpreter;
+
+  // 릴레이 접속 정보 (Remote Config → 없으면 --dart-define)
+  String _relayUrl = kDuoRelayUrlFromEnv;
+  String _relayToken = kDuoRelayTokenFromEnv;
+
+  // 직접 대화 한 통화의 부속들. 통화가 끝나면 전부 버리고 새로 만든다.
+  DuoPcmRelayClient? _relayClient;
+  StreamSubscription<Uint8List>? _relayInboundSub;
+  DuoPcmJitterPlayer? _jitterPlayer;
+  AnyonePreparedAudioCapture? _directCapture;
+  StreamSubscription<Uint8List>? _directCaptureSub;
+  OpenAiStreamingTranscribeSession? _directStt;
+
+  /// 통화 세대값. 방을 나가거나 재입장하면 올라가고, 이전 세대의 늦은
+  /// 콜백(전사 완료·릴레이 프레임)은 전부 무시된다.
+  int _directGeneration = 0;
+  bool _directCallActive = false;
+  bool _relayConnected = false;
+  bool _partnerRelayConnected = false;
+  bool _micActive = false;
+  bool _sttActive = false;
+  bool _directStarting = false;
+  DateTime? _directCaptureFirstFrameAt;
+
+  /// 화자별 발화 일련번호와 발화 시작 시각. History 순서 복원용이다.
+  int _directSeq = 0;
+  DateTime? _directSpeechStartedAt;
+
+  /// History에 실제로 쓴 메시지 수. 직접 대화는 말풍선을 만들지 않으므로
+  /// `_localMessages`로 저장 여부를 판단하면 히스토리가 통째로 지워진다.
+  int _historyMessageCount = 0;
 
   // 🆕 [게스트 언어 오버레이] 초대 게스트(회원·비회원)가 입장 전 언어쌍 선택
   bool _showLangOverlay = false;
@@ -167,7 +232,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   StreamSubscription? _partnerJoinedSubscription;
 
   // ── 🆕 [양방향 통역] 역할/메시지 채널 상태 ────────────────────────────────
-  // _amIHost: 게스트로 합류했으면 false, 아니면 호스트(true)
+  // _amIHost: 이 방에서 내가 호스트인지.
+  //
+  // **세션 진입 경로 하나로만 정해진다.**
+  //   · 초대 링크(roomId)를 타고 들어옴 → 게스트  (initState / _joinAsGuest)
+  //   · 그 외(스텔스룸 메뉴로 직접 진입) → 호스트 (아래 기본값)
+  // UI 액션으로는 절대 바뀌지 않는다. 이 값이 senderRole · 릴레이 hello의
+  // role · 과금 대상 판정을 모두 좌우하므로, 여기가 흔들리면 세 곳이 같이 어긋난다.
   bool _amIHost = true;
   // _myUid: 메시지 발신자 식별용 (호스트=firebase uid, 게스트=합류 시 부여된 uid)
   String _myUid = '';
@@ -287,6 +358,18 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     _stopDuoBilling();
     _billingStarted = false;
 
+    // 🔒 [역할 확정] 진입 경로만으로 역할을 정한다. 초대 링크(roomId)를 들고
+    //    들어왔으면 게스트다. 첫 프레임을 그리기 전에 정해야 호스트용 UI(초대
+    //    버튼)가 한 프레임도 게스트에게 보이지 않는다.
+    //    ※ 과금 초기화(_stopDuoBilling)는 이 줄 위에서 끝내 둔다 — 그 함수가
+    //      _amIHost를 보고 갈라지기 때문이다.
+    if (_resolveGuestRoomId() != null) {
+      _amIHost = false;
+      debugPrint('[Duo] role=GUEST (invite entry)');
+    } else {
+      debugPrint('[Duo] role=HOST (direct entry)');
+    }
+
     _ttsPlayer.onPlayerComplete.listen((_) {
       _isTtsActive = false;
       if (_ttsCompleter != null && !_ttsCompleter!.isCompleted) {
@@ -295,13 +378,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // widget.roomId 우선 사용, 없으면 FFAppState 폴백
-      final String? pendingRoomId = (widget.roomId != null &&
-              widget.roomId!.isNotEmpty)
-          ? widget.roomId
-          : (FFAppState().isGuestSession && FFAppState().duoRoomId.isNotEmpty
-              ? FFAppState().duoRoomId
-              : null);
+      final String? pendingRoomId = _resolveGuestRoomId();
       if (pendingRoomId != null) {
         debugPrint(
             '[Duo] initState — guest entry, show lang overlay: $pendingRoomId');
@@ -313,9 +390,33 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           setState(() {
             _pendingJoinRoomId = pendingRoomId;
             _showLangOverlay = true;
+            _pendingModeLoading = true;
           });
         }
+        // 🆕 대화 방식은 딥링크가 아니라 **세션 문서**가 기준이다. 팝업을 띄운
+        //    뒤 곧바로 방 문서를 읽어 호스트가 정한 방식을 표시한다.
+        unawaited(_loadInvitedMode(pendingRoomId));
       }
+    });
+  }
+
+  /// 초대받은 방의 대화 방식을 읽어 온다(게스트 입장 팝업용).
+  Future<void> _loadInvitedMode(String roomId) async {
+    String mode = kDuoModeInterpreter;
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('duo_sessions')
+          .doc(roomId)
+          .get();
+      mode = _normalizeDuoMode(snap.data()?['mode']);
+      _lgDuo('[MODE]', 'invited mode=$mode room=$roomId');
+    } catch (e) {
+      _lgDuo('[MODE]', 'invited_mode_read_failed(${e.runtimeType}) → 기본값 사용');
+    }
+    if (!mounted) return;
+    setState(() {
+      _duoMode = mode;
+      _pendingModeLoading = false;
     });
   }
 
@@ -327,6 +428,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     WidgetsBinding.instance.removeObserver(this);
     _partnerJoinedSubscription?.cancel();
     _messageSubscription?.cancel(); // 🆕 메시지 채널 구독 해제
+    // 🆕 직접 대화 통화 경로(마이크·릴레이·전사·재생) 즉시 정리
+    unawaited(_stopDirectCall('dispose'));
     _silenceTimer?.cancel();
     _cancelAudio();
     _audioRecorder.dispose();
@@ -357,9 +460,61 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           fetchTimeout: const Duration(seconds: 10),
           minimumFetchInterval: const Duration(minutes: 1)));
       await remoteConfig.fetchAndActivate();
-      if (mounted)
-        setState(() => _openAiKey = remoteConfig.getString('OpenAIAPIKey'));
+      final String relayUrl = remoteConfig.getString('DuoRelayUrl').trim();
+      final String relayToken = remoteConfig.getString('DuoRelayToken').trim();
+      if (mounted) {
+        setState(() {
+          _openAiKey = remoteConfig.getString('OpenAIAPIKey');
+          // Remote Config가 1순위, 비어 있으면 빌드 타임 값을 유지한다.
+          if (relayUrl.isNotEmpty) _relayUrl = relayUrl;
+          if (relayToken.isNotEmpty) _relayToken = relayToken;
+        });
+      }
     } catch (e) {}
+  }
+
+  void _lgDuo(String tag, String msg) => debugPrint('[Duo]$tag $msg');
+
+  /// 초대받아 들어온 방 id. null이면 이 화면을 직접 연 호스트다.
+  /// widget.roomId 우선, 없으면 딥링크가 남긴 FFAppState 값을 본다.
+  String? _resolveGuestRoomId() {
+    final String? fromWidget = widget.roomId;
+    if (fromWidget != null && fromWidget.isNotEmpty) return fromWidget;
+    if (FFAppState().isGuestSession && FFAppState().duoRoomId.isNotEmpty) {
+      return FFAppState().duoRoomId;
+    }
+    return null;
+  }
+
+  // 전사 세션이 요구하는 언어 코드. 직접 대화에서는 **내가 말하는 언어**,
+  // 즉 내 ORIGIN(대화 언어)을 넘긴다.
+  String _mapLanguageToCode(String lang) {
+    switch (lang.trim().toLowerCase()) {
+      case 'korean':
+        return 'ko';
+      case 'japanese':
+        return 'ja';
+      case 'chinese':
+        return 'zh';
+      case 'spanish':
+        return 'es';
+      case 'french':
+        return 'fr';
+      case 'german':
+        return 'de';
+      case 'italian':
+        return 'it';
+      case 'portuguese':
+        return 'pt';
+      case 'russian':
+        return 'ru';
+      case 'hindi':
+        return 'hi';
+      case 'dutch':
+        return 'nl';
+      default:
+        return 'en';
+    }
   }
 
   Future<void> _initPermissions() async {
@@ -411,8 +566,354 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     return done.future;
   }
 
+  // ============================================================================
+  // 📦 [4-D. 직접 대화 (DIRECT CALL)]
+  // 마이크 PCM 한 줄기를 두 갈래로 나눈다.
+  //
+  //   record.startStream(pcm16 24kHz mono)
+  //        ├─→ DuoPcmRelayClient  → 릴레이 → 상대 폰 AudioTrack (실제 목소리)
+  //        └─→ OpenAiStreaming…   → 전사문 → 공유 채널 + History (화면 표시 없음)
+  //
+  // 두 갈래는 서로를 기다리지 않는다. 전사가 늦거나 죽어도 목소리는 그대로 간다.
+  // 이 경로에는 GPT 번역·TTS-1·Realtime·Nova가 **하나도** 들어오지 않는다.
+  // ============================================================================
+
+  /// 직접 대화 전사문 중 버릴 것. 만능 통역 쪽 필터는 건드리지 않는다.
+  bool _isNoiseTranscript(String raw) {
+    final String trimmed = raw.trim();
+    if (trimmed.length <= 2) return true;
+    final String lower = trimmed.toLowerCase();
+    final String clean = lower.replaceAll(RegExp(r'[^\w\s가-힣]'), '').trim();
+    if (clean.isEmpty) return true;
+    const List<String> hardGhosts = [
+      'thank you for watching',
+      'thanks for watching',
+      'please subscribe',
+      'subtitles by',
+      '시청해 주셔서',
+      '시청해주셔서',
+      '구독과 좋아요',
+    ];
+    return hardGhosts.any((g) => lower.contains(g));
+  }
+
+  bool _isDirectGenerationCurrent(int generation) =>
+      mounted &&
+      !_isExiting &&
+      _directCallActive &&
+      generation == _directGeneration;
+
+  void _onDirectMicToggle() {
+    if (_directCallActive) {
+      unawaited(_stopDirectCall('user_tap'));
+    } else {
+      unawaited(_startDirectCall());
+    }
+  }
+
+  Future<void> _startDirectCall() async {
+    if (_directCallActive || _directStarting || _isExiting) return;
+    if (_relayUrl.trim().isEmpty) {
+      _lgDuo('[DIRECT]', 'start_blocked reason=no_relay_url');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('직접 대화 서버 주소가 설정되지 않았습니다.'),
+        ));
+      }
+      return;
+    }
+    final String? roomId = _duoSessionRef?.id ?? widget.roomId;
+    if (roomId == null || roomId.isEmpty) {
+      _lgDuo('[DIRECT]', 'start_blocked reason=no_room');
+      return;
+    }
+    if (!await _audioRecorder.hasPermission()) {
+      _lgDuo('[DIRECT]', 'start_blocked reason=no_mic_permission');
+      return;
+    }
+
+    // 🔒 [모드 잠금] 오디오 경로를 여는 마지막 순간에 방 문서를 다시 읽는다.
+    //    호스트와 게스트가 서로 다른 모드로 파이프라인을 여는 일을 여기서 막는다.
+    //    (리스너를 놓쳤거나 화면 진입 후 모드가 바뀐 경우가 여기 걸린다)
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('duo_sessions')
+          .doc(roomId)
+          .get();
+      final String authoritative = _normalizeDuoMode(snap.data()?['mode']);
+      if (authoritative != kDuoModeDirect) {
+        _lgDuo('[MODE]',
+            'direct_start_blocked session_mode=$authoritative (문서가 기준)');
+        if (mounted) setState(() => _duoMode = authoritative);
+        return;
+      }
+    } catch (e) {
+      // 문서를 못 읽으면 통화를 열지 않는다. 모드가 어긋난 채 여는 것보다 낫다.
+      _lgDuo('[MODE]', 'direct_start_blocked reason=mode_read_failed');
+      return;
+    }
+
+    _directStarting = true;
+    final int generation = ++_directGeneration;
+    _directCallActive = true;
+    if (mounted) setState(() => _isConversationActive = true);
+    _setDuoState('live');
+    BillingTicker.instance.resumeFromActivity('duo_direct_start');
+
+    try {
+      // ① 재생기 먼저 — 상대 소리가 언제 와도 받을 수 있게 열어 둔다.
+      final player = DuoPcmJitterPlayer(onLog: _lgDuo);
+      final playerOk = await player.start();
+      if (!_isDirectGenerationCurrent(generation)) {
+        await player.stop();
+        return;
+      }
+      _jitterPlayer = playerOk ? player : null;
+      if (!playerOk) {
+        // Android 외 플랫폼은 PCM 재생 채널이 없다. 상대 목소리를 낼 방법이
+        // 없으므로 반쪽짜리 통화를 여는 대신 시작 자체를 막는다.
+        _lgDuo('[DIRECT]', 'start_failed reason=pcm_player_unavailable');
+        await _stopDirectCall('pcm_player_unavailable');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('이 기기에서는 아직 직접 대화를 지원하지 않습니다.'),
+          ));
+        }
+        return;
+      }
+
+      // ② 릴레이 접속. 회원이면 ID 토큰을 같이 보내 서버가 uid 소유를 확인한다.
+      String idToken = '';
+      try {
+        idToken =
+            await FirebaseAuth.instance.currentUser?.getIdToken() ?? '';
+      } catch (_) {}
+      if (!_isDirectGenerationCurrent(generation)) return;
+      final relay = DuoPcmRelayClient(
+        url: _relayUrl,
+        roomId: roomId,
+        uid: _myUid,
+        role: _myRole,
+        sessionId: '$roomId#$generation',
+        token: _relayToken,
+        idToken: idToken,
+        onLog: _lgDuo,
+        onPartnerPresence: (present) {
+          if (!_isDirectGenerationCurrent(generation)) return;
+          if (mounted) setState(() => _partnerRelayConnected = present);
+          // 상대가 끊겼다 붙으면 밀린 조각은 버리고 새 소리부터 재생한다.
+          if (!present) _jitterPlayer?.resetBuffer('partner_left');
+        },
+      );
+      _relayClient = relay;
+      _relayInboundSub = relay.inbound.listen((pcm) {
+        if (!_isDirectGenerationCurrent(generation)) return;
+        _jitterPlayer?.add(pcm);
+      });
+      final relayOk = await relay.connect();
+      if (!_isDirectGenerationCurrent(generation)) {
+        await relay.dispose();
+        return;
+      }
+      if (mounted) {
+        setState(() {
+          _relayConnected = relayOk;
+          _partnerRelayConnected = relay.partnerPresent;
+        });
+      }
+      if (!relayOk) {
+        await _stopDirectCall('relay_connect_failed');
+        return;
+      }
+
+      // ③ 전사 세션 — 실패해도 통화는 계속한다(History 텍스트만 포기).
+      await _startDirectStt(generation);
+
+      // ④ 마이크 한 개를 열어 두 갈래로 흘린다.
+      final capture = await AnyonePreparedAudioCapture.start(
+        recorder: _audioRecorder,
+        onRecordingStarted: (at) =>
+            _lgDuo('[PCM_CAPTURE]', 'recording_started at=${at.toIso8601String()}'),
+        onFirstFrame: (at, byteCount) {
+          _directCaptureFirstFrameAt = at;
+          // 지터버퍼 크기를 정하려면 이 chunk 크기를 알아야 한다.
+          _lgDuo(
+              '[PCM_CAPTURE]',
+              'first_frame_bytes=$byteCount (~${byteCount ~/ kDuoDirectBytesPerMs}ms) '
+                  'at=${at.toIso8601String()}');
+        },
+      );
+      if (!_isDirectGenerationCurrent(generation)) {
+        await capture.stop();
+        return;
+      }
+      _directCapture = capture;
+      _directCaptureSub = capture.stream.listen(
+        (bytes) {
+          if (bytes.isEmpty) return;
+          if (generation != _directGeneration) return;
+          // 갈래 1 — 상대에게 보내는 실제 목소리. 전사를 기다리지 않는다.
+          _relayClient?.sendPcm(bytes);
+          // 갈래 2 — History용 전사. 실패해도 위 한 줄에 영향이 없다.
+          final stt = _directStt;
+          if (stt != null && stt.audioGateOpen) stt.appendAudio(bytes);
+        },
+        onError: (Object e) =>
+            _lgDuo('[DIRECT]', 'capture_error=${e.runtimeType}'),
+      );
+      if (mounted) setState(() => _micActive = true);
+      _lgDuo(
+          '[DIRECT]',
+          'call_started gen=$generation room=$roomId role=$_myRole '
+              'micActive=true sttActive=$_sttActive '
+              'relayConnected=$_relayConnected '
+              'partnerRelayConnected=$_partnerRelayConnected '
+              'captureFirstFrameAt=${_directCaptureFirstFrameAt?.toIso8601String()}');
+    } catch (e) {
+      _lgDuo('[DIRECT]', 'start_error=${e.runtimeType}');
+      await _stopDirectCall('start_error');
+    } finally {
+      _directStarting = false;
+    }
+  }
+
+  Future<void> _startDirectStt(int generation) async {
+    if (_openAiKey.isEmpty) {
+      _lgDuo('[DIRECT-STT]', 'skipped reason=no_api_key');
+      return;
+    }
+    final session = OpenAiStreamingTranscribeSession(
+      apiKey: _openAiKey,
+      languageCode: _mapLanguageToCode(_myNative()),
+      onLog: (tag, msg) => _lgDuo('[DIRECT-STT]$tag', msg),
+    );
+    session.shouldReconnect = () => _isDirectGenerationCurrent(generation);
+    // 발화 순서는 전사 응답이 돌아온 순서가 아니라 **말을 시작한 시각** 기준이다.
+    // 서버 VAD가 speech_started를 줄 때 찍어 두고, completed에 그대로 붙인다.
+    session.onSpeechStarted = () {
+      if (!_isDirectGenerationCurrent(generation)) return;
+      _directSpeechStartedAt = DateTime.now();
+    };
+    session.onTranscriptCompleted = (itemId, text) {
+      if (!_isDirectGenerationCurrent(generation)) return;
+      unawaited(_handleDirectTranscript(generation, text, itemId));
+    };
+    session.onFatalError = (reason) {
+      _lgDuo('[DIRECT-STT]', 'fatal=$reason (통화는 계속된다)');
+      if (mounted && _isDirectGenerationCurrent(generation)) {
+        setState(() => _sttActive = false);
+      }
+    };
+    final ok = await session.connect();
+    if (!_isDirectGenerationCurrent(generation)) {
+      await session.dispose();
+      return;
+    }
+    if (!ok) {
+      await session.dispose();
+      _lgDuo('[DIRECT-STT]', 'connect_failed (통화는 계속된다)');
+      return;
+    }
+    session.openAudioGate(reason: 'direct_call');
+    _directStt = session;
+    if (mounted) setState(() => _sttActive = true);
+  }
+
+  /// 내 발화 전사문 하나. **화면에는 아무것도 그리지 않는다.**
+  /// 상대 폰이 자기 History를 채울 수 있도록 기존 텍스트 채널로도 올린다.
+  ///
+  /// 순서 보장: 전사 응답 도착 순서가 아니라 발화 시작 시각(`spokenAt`)과
+  /// 화자별 로컬 일련번호(`seq`)를 같이 남긴다. History는 나중에 이 둘로
+  /// 두 사람의 발화를 하나의 대화 순서로 합칠 수 있다.
+  Future<void> _handleDirectTranscript(
+      int generation, String text, String itemId) async {
+    if (!_isDirectGenerationCurrent(generation)) return;
+    final String trimmed = text.trim();
+    if (trimmed.isEmpty || _isNoiseTranscript(trimmed)) return;
+    final int seq = ++_directSeq;
+    final DateTime spokenAt = _directSpeechStartedAt ?? DateTime.now();
+    _directSpeechStartedAt = null;
+    _lgDuo('[DIRECT-STT]',
+        'completed seq=$seq item=$itemId len=${trimmed.length}');
+    _uploadMyMessage(
+      trimmed,
+      _myNative(),
+      mode: kDuoModeDirect,
+      seq: seq,
+      spokenAt: spokenAt,
+    );
+    // 원문 자리에 전사문을 넣는다. 타겟 문장과 소리는 히스토리에서 만든다.
+    await _saveHistoryMessage(
+      '',
+      trimmed,
+      'HOST',
+      mode: kDuoModeDirect,
+      seq: seq,
+      spokenAt: spokenAt,
+      speakerUid: _myUid,
+      sourceLang: _myNative(),
+    );
+  }
+
+  Future<void> _stopDirectCall(String reason) async {
+    if (!_directCallActive && _relayClient == null && _directCapture == null) {
+      return;
+    }
+    ++_directGeneration; // 이 시점 이후의 늦은 콜백은 전부 남의 세대다.
+    _directCallActive = false;
+    _directCaptureFirstFrameAt = null;
+
+    final captureSub = _directCaptureSub;
+    _directCaptureSub = null;
+    await captureSub?.cancel();
+
+    final capture = _directCapture;
+    _directCapture = null;
+    await capture?.stop();
+
+    final stt = _directStt;
+    _directStt = null;
+    stt?.closeAudioGate(reason: reason);
+    await stt?.dispose();
+
+    final relaySub = _relayInboundSub;
+    _relayInboundSub = null;
+    await relaySub?.cancel();
+
+    final relay = _relayClient;
+    _relayClient = null;
+    await relay?.dispose();
+
+    final player = _jitterPlayer;
+    _jitterPlayer = null;
+    await player?.stop();
+
+    if (mounted && !_isExiting) {
+      setState(() {
+        _micActive = false;
+        _sttActive = false;
+        _relayConnected = false;
+        _partnerRelayConnected = false;
+      });
+      _setDuoState('idle');
+    } else {
+      _micActive = false;
+      _sttActive = false;
+      _relayConnected = false;
+      _partnerRelayConnected = false;
+      _duoState = 'idle';
+    }
+    _lgDuo('[DIRECT]',
+        'call_stopped reason=$reason relayRttMs=${relay?.lastRoundTripMs} '
+        'playFirstLatencyMs=${player?.firstPlayLatencyMs} '
+        'sentBytes=${relay?.sentBytes} recvBytes=${relay?.receivedBytes} '
+        'playedBytes=${player?.writtenBytes} droppedBytes=${player?.droppedBytes}');
+  }
+
   Future<void> _startWhisperRecording() async {
     if (_openAiKey.isEmpty) return;
+    // 직접 대화는 m4a/whisper PTT 경로를 타지 않는다. 마이크는 통화가 쥔다.
+    if (_isDirectMode) return;
     // 🆕 [PTT] idle 상태가 아니면 시작 금지 (TTS·처리·쿨다운·이미 녹음 중 차단)
     if (_duoState != 'idle') return;
     if (_isTtsActive || _isDrainingIncoming) return;
@@ -805,7 +1306,16 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
   }
 
   // 🆕 [채널 업로드] 내 원문을 duo_sessions/{roomId}/messages 에 기록
-  Future<void> _uploadMyMessage(String raw, String srcLang) async {
+  //
+  // mode/seq/spokenAt은 직접 대화에서만 채워진다(기존 통역 경로는 호출부가
+  // 그대로라 필드가 붙지 않는다 — 기존 문서 모양을 깨지 않는다).
+  Future<void> _uploadMyMessage(
+    String raw,
+    String srcLang, {
+    String? mode,
+    int? seq,
+    DateTime? spokenAt,
+  }) async {
     if (_duoSessionRef == null || raw.trim().isEmpty) return;
     try {
       // 🆕 내 메시지 doc id를 업로드 전에 _processedMsgIds에 선등록한다.
@@ -819,6 +1329,9 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         'text': raw,
         'srcLang': srcLang,
         'createdAt': FieldValue.serverTimestamp(),
+        if (mode != null) 'duoMode': mode,
+        if (seq != null) 'seq': seq,
+        if (spokenAt != null) 'spokenAt': spokenAt.millisecondsSinceEpoch,
       });
     } catch (e) {
       debugPrint('[Duo] upload message error: $e');
@@ -876,7 +1389,10 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     while (_incomingQueue.isNotEmpty) {
       // 녹음뿐 아니라 내 발화의 Realtime/폴백 처리 중에도 상대 턴을 보류한다.
       // Android PCM 채널과 MP3 플레이어는 한 턴씩만 소유해야 음성이 겹치지 않는다.
-      if (_duoState != 'idle') break;
+      //
+      // 직접 대화는 예외다. 상대 메시지가 소리를 재생하지 않고 History 텍스트만
+      // 남기므로 통화 중(_duoState='live')에도 그대로 처리한다.
+      if (!_isDirectMode && _duoState != 'idle') break;
       final data = _incomingQueue.removeAt(0);
       await _handleIncomingMessage(data);
     }
@@ -889,6 +1405,27 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     final String raw = data['text']?.toString() ?? '';
     final String srcLang = data['srcLang']?.toString() ?? 'English';
     if (raw.trim().isEmpty) return;
+
+    // 🆕 [직접 대화] 상대 목소리는 이미 릴레이로 실시간 재생됐다. 여기 오는 건
+    // 그 발화의 전사문뿐이므로 번역·TTS·말풍선 없이 History에만 남긴다.
+    if (_isDirectMode) {
+      final int? seq = (data['seq'] as num?)?.toInt();
+      final int? spokenMs = (data['spokenAt'] as num?)?.toInt();
+      await _saveHistoryMessage(
+        '',
+        raw.trim(),
+        'SYSTEM',
+        mode: kDuoModeDirect,
+        seq: seq,
+        spokenAt: spokenMs == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(spokenMs),
+        speakerUid: data['senderUid']?.toString(),
+        // 상대가 말한 언어는 상대의 ORIGIN이다. 채널에 실려 온 값을 그대로 쓴다.
+        sourceLang: srcLang,
+      );
+      return;
+    }
 
     // 상대 발화를 들려주는 동안 내 녹음 일시 정지 (스피커 음성이 마이크에 새는 것 방지)
     _silenceTimer?.cancel();
@@ -1004,6 +1541,11 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     if (!_isConversationActive) {
       setState(() => _isConversationActive = true);
     }
+    // 직접 대화의 마이크 버튼은 통화 시작/종료 토글이다. PTT가 아니다.
+    if (_isDirectMode) {
+      _onDirectMicToggle();
+      return;
+    }
     if (_duoState == 'idle') {
       _startWhisperRecording(); // 꺼짐 -> 켜기
     } else if (_duoState == 'recording') {
@@ -1015,6 +1557,13 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
 
   // 🆕 [토글] 버튼 상태별 표시 문구
   String _pttLabel() {
+    if (_isDirectMode) {
+      if (!_directCallActive) return 'Tap to call';
+      if (!_relayConnected || !_micActive) return 'Connecting…';
+      if (!_partnerRelayConnected) return 'Waiting…';
+      // 전사가 끊겨도 통화는 계속된다. 그 사실을 화면에서 구분할 수 있게 둔다.
+      return _sttActive ? 'Live' : 'Live (no record)';
+    }
     switch (_duoState) {
       case 'recording':
         return '';
@@ -1093,23 +1642,58 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     }
   }
 
+  /// 히스토리 메시지 한 줄.
+  ///
+  /// **만능 통역**은 대화 중에 이미 타겟 문장을 만들었으므로 그대로 저장한다.
+  /// **직접 대화**는 번역을 하지 않는다. 전사한 원문만 `original_text`로 남기고
+  /// `translated_text`는 비워 둔다 — 나머지 세 모드와 같은 방식으로, 히스토리를
+  /// 열 때 그 방의 `target_lang`으로 타겟 문장과 소리가 1차 생성·캐싱된다.
+  /// (chat_history_master의 `_scheduleMissingTargetGeneration`이 받는다)
   Future<void> _saveHistoryMessage(
-      String target, String original, String role) async {
-    if (target.trim().isEmpty) return;
+    String target,
+    String original,
+    String role, {
+    String? mode,
+    int? seq,
+    DateTime? spokenAt,
+    String? speakerUid,
+    String? sourceLang,
+  }) async {
+    final bool deferTarget = mode == kDuoModeDirect;
+    // 직접 대화는 타겟이 비어 있는 게 정상이다. 통역은 타겟이 본문이라 없으면 버린다.
+    if (deferTarget ? original.trim().isEmpty : target.trim().isEmpty) return;
+    // 방을 나간 뒤 늦게 도착한 전사가 지워진 히스토리를 되살리지 않게 막는다.
+    if (_isExiting) {
+      _lgDuo('[HISTORY]', 'save_skipped reason=exiting role=$role');
+      return;
+    }
     await _ensureHistoryRef();
     if (_myHistoryRef == null) return;
     try {
       await _myHistoryRef!.collection('messages').add({
         'role': role,
-        'translated_text': target,
-        'original_text': (FFAppState().nativeLang.isNotEmpty &&
-                FFAppState().nativeLang == FFAppState().targetLang)
-            ? ''
-            : original,
-        'created_at': FieldValue.serverTimestamp()
+        'translated_text': deferTarget ? '' : target,
+        'original_text': deferTarget
+            ? original
+            : ((FFAppState().nativeLang.isNotEmpty &&
+                    FFAppState().nativeLang == FFAppState().targetLang)
+                ? ''
+                : original),
+        'created_at': FieldValue.serverTimestamp(),
+        // ↓ 직접 대화에서만 붙는 필드. 기존 문서 모양은 그대로다.
+        if (mode != null) 'duo_mode': mode,
+        if (seq != null) 'speaker_seq': seq,
+        if (spokenAt != null) 'spoken_at_ms': spokenAt.millisecondsSinceEpoch,
+        if (speakerUid != null && speakerUid.isNotEmpty)
+          'speaker_uid': speakerUid,
+        // 발화자마다 말한 언어가 다르다(내 ORIGIN ≠ 상대 ORIGIN). 나중에
+        // 타겟을 만들 때 출발 언어를 추측하지 않도록 줄마다 남긴다.
+        if (sourceLang != null && sourceLang.isNotEmpty)
+          'source_lang': sourceLang,
       });
+      _historyMessageCount++;
       await _myHistoryRef!.update({
-        'last_message': target,
+        'last_message': deferTarget ? original : target,
         'last_active': FieldValue.serverTimestamp(),
         'last_message_time': FieldValue.serverTimestamp(),
         'msg_count': FieldValue.increment(1),
@@ -1120,9 +1704,25 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
   Future<void> _shareInviteCode() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
+    // 🆕 [모드 결정권] 대화 방식은 **초대를 만드는 호스트가 세션당 한 번** 정한다.
+    //    고른 값은 세션 문서의 `mode` 필드로 들어가고, 그 문서가 모드의 유일한
+    //    기준이 된다(딥링크 파라미터는 기준이 아니다).
+    //
+    // ⚠️ 세션이 살아 있는 동안에는 방식을 바꾸지 않는다. 바꾸려면 방을 나가
+    //    새 초대를 만들어야 한다 — 통화 도중 모드가 갈리면 두 사람의 오디오
+    //    경로가 어긋나기 때문이다. 그래서 재초대(같은 방에 링크를 다시 공유)
+    //    에서는 선택 창을 띄우지 않는다.
+    final bool isNewSession = _duoSessionRef == null;
+    String chosenMode = _duoMode;
+    if (isNewSession) {
+      final String? picked = await _showHostModePicker();
+      if (picked == null) return; // 사용자가 취소
+      chosenMode = picked;
+      if (mounted) setState(() => _duoMode = picked);
+    }
     try {
-      // 1) 세션이 없으면 생성
-      if (_duoSessionRef == null) {
+      // 1) 세션이 없으면 생성 — `mode`는 **이 순간에만** 쓰인다.
+      if (isNewSession) {
         _duoSessionRef =
             FirebaseFirestore.instance.collection('duo_sessions').doc();
         await _duoSessionRef!.set({
@@ -1130,15 +1730,29 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
           'createdAt': FieldValue.serverTimestamp(),
           'isDuoEnabled': false,
           'isPartnerJoined': false,
+          'mode': chosenMode,
         });
+      } else {
+        // 같은 방에 다시 초대: 저장된 모드를 그대로 따른다(덮어쓰지 않는다).
+        try {
+          final snap = await _duoSessionRef!.get();
+          chosenMode = _normalizeDuoMode(
+              (snap.data() as Map<String, dynamic>?)?['mode']);
+          if (mounted && chosenMode != _duoMode) {
+            setState(() => _duoMode = chosenMode);
+          }
+        } catch (e) {
+          _lgDuo('[MODE]', 'reinvite_mode_read_failed(${e.runtimeType})');
+        }
       }
-      // 🆕 호스트 식별 확정 + uid 확보
-      _amIHost = true;
+      // 역할은 여기서 바꾸지 않는다. 이 버튼은 호스트에게만 보이고, 호스트는
+      // 방 진입 시점부터 이미 _amIHost=true다. UI 액션으로 역할이 승격되는
+      // 경로를 남겨 두면 게스트가 호스트로 뒤집힐 수 있다.
       _myUid = user.uid;
       // 2) listener 항상 재등록 (cancel 후 재등록으로 중복 구독 방지)
       _listenForPartnerJoined();
       _listenForMessages(); // 🆕 공유 메시지 채널 리스너 시작
-      // 3) 세션 활성화
+      // 3) 세션 활성화 — `mode`는 건드리지 않는다(생성 시 값이 끝까지 간다).
       await _duoSessionRef!.update({
         'isDuoEnabled': true,
         'updatedAt': FieldValue.serverTimestamp(),
@@ -1176,10 +1790,10 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         subject: 'StealthVox Duo 초대',
       );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('초대 링크가 복사되었고 공유창이 열렸습니다.'),
-          backgroundColor: Color(0xFF2563EB),
-          duration: Duration(seconds: 3),
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('${_modeTitle(chosenMode)}로 초대했습니다. 링크가 복사되었습니다.'),
+          backgroundColor: const Color(0xFF2563EB),
+          duration: const Duration(seconds: 3),
         ));
       }
     } catch (e) {
@@ -1237,6 +1851,14 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         roomId: roomId,
       );
 
+      // 🆕 대화 방식의 최종값은 **방 문서**다. 게스트는 쓰지 않고 읽기만 한다.
+      //    (딥링크 파라미터가 유실·변조돼도 여기서 바로잡힌다)
+      final String sessionMode = _normalizeDuoMode(data['mode']);
+      if (sessionMode != _duoMode) {
+        _lgDuo('[MODE]', 'guest_sync $_duoMode → $sessionMode');
+      }
+      _duoMode = sessionMode;
+
       await _duoSessionRef!.update({
         'isPartnerJoined': true,
         'partnerUid': guestUid,
@@ -1292,6 +1914,18 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       final data = snap.data() as Map<String, dynamic>?;
       if (data == null) return;
       final bool partnerJoined = data['isPartnerJoined'] == true;
+
+      // 🛡️ [방어 전용] 정상 UX에서는 세션 도중 mode가 바뀌지 않는다 —
+      //    방식은 초대를 만들 때 한 번 정해지고, 바꾸려면 방을 나가 새 초대를
+      //    만들어야 한다. 그래도 문서가 밖에서(콘솔·다른 기기·이상 동작)
+      //    바뀌면 문서 값을 따르고 직전 모드의 오디오 경로를 즉시 끊는다.
+      final String sessionMode = _normalizeDuoMode(data['mode']);
+      if (sessionMode != _duoMode) {
+        _lgDuo('[MODE]',
+            '⚠️ unexpected_session_mode_change $_duoMode → $sessionMode');
+        unawaited(_stopDirectCall('mode_changed'));
+        if (mounted) setState(() => _duoMode = sessionMode);
+      }
       debugPrint(
           '[Duo][Billing] partnerJoined=$partnerJoined amIHost=$_amIHost '
           'paused=${BillingTicker.instance.isPaused} '
@@ -1339,6 +1973,10 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     _messageSubscription?.cancel(); // 🆕 메시지 채널 구독도 해제
     _messageSubscription = null;
 
+    // 🆕 [직접 대화] 방을 나가는 순간 PCM 송수신을 먼저 끊는다. 이 뒤에 도착하는
+    //    릴레이 프레임·전사 완료는 세대값이 달라 전부 무시된다.
+    await _stopDirectCall('room_exit');
+
     _cancelAudio();
     _silenceTimer?.cancel();
     if (mounted) setState(() => _isConversationActive = false);
@@ -1368,11 +2006,14 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     }
 
     if (_myHistoryRef != null) {
-      if (_localMessages.isEmpty) {
+      // 직접 대화는 말풍선을 만들지 않으므로 _localMessages가 늘 비어 있다.
+      // 실제로 저장한 메시지 수로 판단해야 히스토리가 통째로 지워지지 않는다.
+      if (_localMessages.isEmpty && _historyMessageCount == 0) {
         await _myHistoryRef!.delete();
       } else {
-        String lastText =
-            _localMessages.last['target']?.toString() ?? "대화 기록 저장";
+        String lastText = _localMessages.isNotEmpty
+            ? (_localMessages.last['target']?.toString() ?? "대화 기록 저장")
+            : "대화 기록 저장";
         await _myHistoryRef!.update({
           'last_message': lastText.isNotEmpty ? lastText : "대화 기록 저장",
           'last_message_time': FieldValue.serverTimestamp(),
@@ -1427,11 +2068,16 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                   _buildTopBar(),
                   Expanded(
                     child: Stack(children: [
-                      _localMessages.isEmpty
-                          ? const Center(
-                              child: Text("마이크를 탭하면 시작됩니다.\n말이 끝나면 자동으로 전송됩니다.",
+                      // 직접 대화는 실시간 자막을 만들지 않는다. 화면은 통화
+                      // 상태만 보여주고, 전사문은 뒤에서 History로만 간다.
+                      _isDirectMode || _localMessages.isEmpty
+                          ? Center(
+                              child: Text(
+                                  _isDirectMode
+                                      ? "마이크를 탭하면 통화가 시작됩니다.\n서로의 실제 목소리로 대화하세요."
+                                      : "마이크를 탭하면 시작됩니다.\n말이 끝나면 자동으로 전송됩니다.",
                                   textAlign: TextAlign.center,
-                                  style: TextStyle(
+                                  style: const TextStyle(
                                       color: Colors.white54, height: 1.5)))
                           : ListView.builder(
                               reverse: true,
@@ -1463,6 +2109,153 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
           ),
           if (_showLangOverlay) _buildGuestLangOverlay(),
         ]));
+  }
+
+  static String _modeTitle(String mode) =>
+      mode == kDuoModeDirect ? '직접 대화' : '만능 통역';
+
+  static String _modeDesc(String mode) => mode == kDuoModeDirect
+      ? '서로의 실제 목소리로 통화합니다.'
+      : '상대의 말을 통역 음성으로 들려줍니다.';
+
+  /// 🆕 [모드 선택 — 호스트 전용] 초대장을 만들기 직전에 뜬다.
+  /// 여기서 고른 값만이 세션 문서의 `mode`가 된다.
+  Future<String?> _showHostModePicker() {
+    String picked = _duoMode;
+    return showDialog<String>(
+      context: context,
+      barrierColor: Colors.black54,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, setS) {
+        Widget tile(String mode) {
+          final bool selected = picked == mode;
+          return GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => setS(() => picked = mode),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+              decoration: BoxDecoration(
+                color: selected
+                    ? const Color(0xFF2563EB).withValues(alpha: 0.18)
+                    : Colors.black.withValues(alpha: 0.4),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                    color: selected ? const Color(0xFF2563EB) : Colors.white24,
+                    width: selected ? 1.6 : 1.0),
+              ),
+              child: Row(children: [
+                Icon(
+                    selected
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_off,
+                    size: 20,
+                    color: selected
+                        ? const Color(0xFF60A5FA)
+                        : Colors.white38),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(_modeTitle(mode),
+                          style: TextStyle(
+                              color: selected ? Colors.white : Colors.white70,
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 3),
+                      Text(_modeDesc(mode),
+                          style: const TextStyle(
+                              color: Colors.white38,
+                              fontSize: 12,
+                              height: 1.3)),
+                    ],
+                  ),
+                ),
+              ]),
+            ),
+          );
+        }
+
+        return AlertDialog(
+          backgroundColor: const Color(0xFF1C1C1E),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+              side: const BorderSide(color: Color(0xFF2563EB), width: 1.2)),
+          title: const Text('대화 방식 선택',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold)),
+          contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            tile(kDuoModeDirect),
+            tile(kDuoModeInterpreter),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text('상대는 이 방식으로 초대됩니다.',
+                  style: TextStyle(color: Colors.white38, fontSize: 11)),
+            ),
+          ]),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child:
+                  const Text('취소', style: TextStyle(color: Colors.white54)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2563EB),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10))),
+              onPressed: () => Navigator.pop(ctx, picked),
+              child: const Text('초대하기',
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      }),
+    );
+  }
+
+  /// 🆕 [모드 표시 — 게스트 전용] 호스트가 정한 방식을 **읽기 전용**으로 보여준다.
+  /// 게스트는 이 값을 바꿀 수 없다. 언어만 고른다.
+  Widget _buildInvitedModeBadge() {
+    final bool loading = _pendingModeLoading;
+    final bool direct = _duoMode == kDuoModeDirect;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF2563EB).withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF2563EB), width: 1.2),
+      ),
+      child: Row(children: [
+        Icon(direct ? Icons.record_voice_over : Icons.translate,
+            size: 20, color: const Color(0xFF93C5FD)),
+        const SizedBox(width: 12),
+        Expanded(
+          child: loading
+              ? const Text('초대 방식 확인 중…',
+                  style: TextStyle(color: Colors.white54, fontSize: 13))
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('${_modeTitle(_duoMode)} 초대',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 3),
+                    Text(_modeDesc(_duoMode),
+                        style: const TextStyle(
+                            color: Colors.white38, fontSize: 12, height: 1.3)),
+                  ],
+                ),
+        ),
+      ]),
+    );
   }
 
   // 🆕 [게스트 언어 오버레이] 초대 게스트 입장 전 ORIGIN/TARGET 선택 게이트
@@ -1587,9 +2380,11 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                           fontSize: 20,
                           fontWeight: FontWeight.bold)),
                   const SizedBox(height: 6),
-                  const Text("내 언어와 통역받을 언어를 선택하세요.",
+                  const Text("초대받은 대화 방식을 확인하고 언어를 선택하세요.",
                       style: TextStyle(color: Colors.white54, fontSize: 13)),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 20),
+                  _buildInvitedModeBadge(),
+                  const SizedBox(height: 22),
                   dropdown("ORIGIN", native, const Color(0xFF93C5FD), (val) {
                     if (val != null)
                       setState(() => FFAppState().nativeLang = val);
@@ -1672,14 +2467,18 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                   constraints:
                       const BoxConstraints(minWidth: 56, minHeight: 56),
                   onPressed: _handleAutoSaveAndExit),
-              IconButton(
-                icon: const Icon(Icons.person_add_alt_1,
-                    color: Colors.white70, size: 22),
-                tooltip: 'Duo 초대장 발행',
-                onPressed: _shareInviteCode,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-              ),
+              // 초대는 방을 만든 호스트만 낼 수 있다. 게스트에게는 버튼 자체를
+              // 노출하지 않는다 — 눌러서 역할이 뒤집히는 경로를 없앤다.
+              if (_amIHost)
+                IconButton(
+                  icon: const Icon(Icons.person_add_alt_1,
+                      color: Colors.white70, size: 22),
+                  tooltip: 'Duo 초대장 발행',
+                  onPressed: _shareInviteCode,
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 36, minHeight: 36),
+                ),
               _buildPartnerIndicator(),
             ],
           ),
@@ -1739,12 +2538,16 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
   }
 
   Widget _buildControlArea(double bottomPadding) {
-    final bool isRec = _duoState == 'recording';
-    final bool isFinishing = _duoState == 'finishing';
-    final bool isBusy = isFinishing ||
-        _duoState == 'processing' ||
-        _duoState == 'playing' ||
-        _duoState == 'cooldown';
+    // 직접 대화: 통화 중이면 마이크가 계속 켜져 있다(초록). 탭하면 끊는다.
+    final bool isRec =
+        _isDirectMode ? _directCallActive : _duoState == 'recording';
+    final bool isFinishing = !_isDirectMode && _duoState == 'finishing';
+    final bool isBusy = _isDirectMode
+        ? _directStarting
+        : (isFinishing ||
+            _duoState == 'processing' ||
+            _duoState == 'playing' ||
+            _duoState == 'cooldown');
     final Color accent = isRec
         ? const Color(0xFF34D399)
         : (isBusy ? Colors.white38 : const Color(0xFF2563EB));
@@ -1754,7 +2557,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          if (!isRec)
+          if (!isRec || _isDirectMode)
             Text(_pttLabel(),
                 style: const TextStyle(
                     color: Colors.white54,

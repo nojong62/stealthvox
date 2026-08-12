@@ -1,0 +1,17 @@
+{
+  "name": "duo-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "StealthVox Duo direct-talk PCM relay (forward only, no storage)",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.10.0",
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": "22"
+  }
+}
