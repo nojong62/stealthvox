@@ -553,7 +553,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       // 🎚️ 녹음 샘플레이트를 그대로 넘긴다. 기본값(16000)에 기대면 24kHz로 받은
       //   PCM에 16kHz WAV 헤더가 붙어 소리가 느려지고 전사문이 통째로 망가진다.
       sampleRate: kStealthVoxSttSampleRate,
-      language: _mapLanguageToCode('Korean'),
+      language: _nativeLangCode(),
       model: OpenAiTranscribeService.firstTurnModel,
       timeout:
           const Duration(milliseconds: kFreeTalkFirstTurnRetranscribeTimeoutMs),
@@ -794,8 +794,8 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       results: List<DeepgramTurnResult>.from(_pendingDeepgramResults),
     );
     _pendingDeepgramResults.clear();
-    const nativeLanguage = 'Korean';
-    final languageCode = _mapLanguageToCode(nativeLanguage);
+    final nativeLanguage = _nativeLangName();
+    final languageCode = _nativeLangCode();
     // Decision/classification logic always runs (keeps the probe pathway live).
     final probe = DeepgramConfidenceProbe.evaluate(
       turn,
@@ -859,42 +859,28 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   }
 
   // 🌐 [v3.1] 로비에서 선택한 언어 이름 → Deepgram/OpenAI 언어 코드 매핑
-  String _mapLanguageToCode(String lang) {
-    switch (lang.trim().toLowerCase()) {
-      case 'korean':
-        return 'ko';
-      case 'japanese':
-        return 'ja';
-      case 'chinese':
-        return 'zh';
-      case 'spanish':
-        return 'es';
-      case 'french':
-        return 'fr';
-      case 'german':
-        return 'de';
-      case 'italian':
-        return 'it';
-      case 'portuguese':
-        return 'pt';
-      case 'russian':
-        return 'ru';
-      case 'vietnamese':
-        return 'vi';
-      case 'thai':
-        return 'th';
-      case 'indonesian':
-        return 'id';
-      case 'hindi':
-        return 'hi';
-      case 'arabic':
-        return 'ar';
-      case 'dutch':
-        return 'nl';
-      default:
-        return 'en'; // English 포함
-    }
-  }
+  /// 🌐 [LANG] 이 방의 학습 언어. **로비에서 고른 TARGET을 그대로 따른다.**
+  ///
+  /// 예전에는 'English'로 박혀 있어, 로비에서 일본어를 골라도 서클룸만 영어로
+  /// 말하고 히스토리에도 English로 기록됐다. 나머지 세 모드는 모두 로비 값을
+  /// 쓰므로 여기만 어긋나 있었다.
+  String _targetLangName() => FFAppState().targetLang.isNotEmpty
+      ? FFAppState().targetLang
+      : 'English';
+
+  /// 🌐 [LANG] 이 방의 대화 언어(ORIGIN). **로비에서 고른 값을 그대로 따른다.**
+  ///
+  /// 예전에는 'Korean'으로 박혀 있어, 로비에서 일본어를 골라도 전사기만 한국어로
+  /// 돌았다. AI 응답 프롬프트는 이미 로비 값을 쓰고 있었으므로(1292행
+  /// `buildNativeOutputLanguagePolicy`), 전사기만 어긋난 상태였다.
+  String _nativeLangName() => resolveNativeLanguageName(FFAppState().nativeLang);
+
+  /// 전사기에 넘길 ORIGIN 언어 코드. 예열(`stealth_room_master`)이 쓰는 것과
+  /// **같은 함수**라야 `take()`가 예열 세션을 채택한다.
+  String _nativeLangCode() => deepgramLanguageCode(_nativeLangName());
+
+  /// 표시명 → API 언어 코드. 표는 한 곳(`deepgramLanguageCode`)에만 둔다.
+  String _mapLanguageToCode(String lang) => deepgramLanguageCode(lang);
 
   // 대화 컨텍스트용 슬라이딩 히스토리 (파이프라인에서 사용 — 유지)
   final List<Map<String, String>> _recentHistory = [];
@@ -1823,9 +1809,9 @@ $kSpokenReplyLengthPolicy
         _voiceManager = null;
       }
 
-      // Anyone 대화방의 실제 대화 언어는 항상 한국어다.
-      const String nativeLang = 'Korean';
-      final String dgLangCode = _mapLanguageToCode(nativeLang);
+      // 대화방의 실제 대화 언어 = 로비 ORIGIN.
+      final String nativeLang = _nativeLangName();
+      final String dgLangCode = _nativeLangCode();
       _log('🌐 [LANG]',
           'nativeLang="$nativeLang" → Deepgram code="$dgLangCode"');
 
@@ -2999,7 +2985,7 @@ $kSpokenReplyLengthPolicy
     final controller = StreamController<String>();
     _specController = controller;
     // 첫 턴은 대화 컨텍스트가 없으므로 contextStr은 빈 문자열(파이프라인과 동일).
-    const String targetLangName = 'English';
+    final String targetLangName = _targetLangName();
     _log('🚀 [SPEC-START]', 'first-turn 투기 번역 시작: len=${text.length}');
     _specSub = FreeTalkBrain.streamUserTranslation(
       apiKey: _openAiKey,
@@ -3351,8 +3337,7 @@ $kSpokenReplyLengthPolicy
 
       String userTargetText = "";
 
-      // Anyone 화면과 히스토리 연습의 목표 언어는 항상 영어다.
-      const String targetLangName = 'English';
+      final String targetLangName = _targetLangName();
 
       // 첫 정상 턴에 이전 문맥이 없을 때만 짧은 전용 프롬프트를 쓴다.
       // 정정/확인 규칙이 필요한 이후 턴은 기존 정밀 프롬프트를 그대로 유지한다.
@@ -4138,9 +4123,15 @@ $kSpokenReplyLengthPolicy
         'expand_partner_type': 'free_talk',
         'is_pinned': false,
         'msg_count': 0,
-        // 세션 생성 당시 언어 식별값 보존(History 동일 언어 판정용)
+        // 세션 생성 당시 언어 식별값 보존(History 동일 언어 판정 + 타겟 생성용).
+        // 실제 대화가 쓰는 값과 반드시 같아야 한다 — 어긋나면 히스토리가
+        // 엉뚱한 언어로 타겟 문장을 만든다.
+        //
+        // native는 아직 'Korean' 고정이다. 서클룸의 유저 음성 전사(1842·2120행)와
+        // 유저 발화 번역 프롬프트가 모두 한국어를 전제로 돌기 때문이다.
+        // 그 셋을 같이 풀기 전에는 여기만 로비 값으로 바꾸면 기록이 거짓말이 된다.
         'native_lang': 'Korean',
-        'target_lang': 'English',
+        'target_lang': _targetLangName(),
       });
       BillingTicker.instance.setSessionIdentifiers(
         sessionDocId: _sessionDocId,
