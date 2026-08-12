@@ -623,7 +623,7 @@ Return ONLY valid JSON: {"name":"..."}.
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          _buildManualItem('Duo Connect', '초청인 대화',
+                          _buildManualItem('Duo Connect', '초청 직접 대화\n초청 만능 통역',
                               '초청 링크를 통해 파트너와 함께 모국어로 대화하면, 실시간으로 통역해주는 글로벌 만능 통역 모드입니다.'),
                           const Divider(color: Colors.white12, height: 24),
                           _buildManualItem('Circle Talk', '커뮤니티 대화',
@@ -949,7 +949,7 @@ Return ONLY valid JSON: {"name":"..."}.
               )
             ]),
             const SizedBox(height: 30),
-            _buildMenuCard(1, "Duo Connect", "초청인 대화\n만능 통역", Icons.people,
+            _buildMenuCard(1, "Duo Connect", "초청 직접 대화\n초청 만능 통역", Icons.people,
                 const Color(0xFF2563EB)),
             _buildMenuCard(2, "Circle Talk", "서클 구성원 대화", Icons.groups_rounded,
                 const Color(0xFF9333EA)),

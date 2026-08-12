@@ -709,7 +709,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                                             (val) => setState(() =>
                                                 appState.nativeLang = val!),
                                             labelColor: const Color(0xFF4ADE80),
-                                            subtitle: "(My Language)",
+                                            subtitle: "(Chat Lang)",
                                             subtitleBelow: false),
                                         const SizedBox(height: 20),
                                         _buildSleekLangSelector(
@@ -725,9 +725,8 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                                                   }
                                                 }),
                                             labelColor: const Color(0xFF4ADE80),
-                                            subtitle:
-                                                "(Listening Language or Learning Language)",
-                                            subtitleBelow: true),
+                                            subtitle: "(Learn Lang)",
+                                            subtitleBelow: false),
                                         const SizedBox(height: 32),
                                         const Text("AI STYLE",
                                             style: TextStyle(
