@@ -89,7 +89,9 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   // ====================================================================
   String _deepgramKey = "";
   String _openAiKey = "";
-  static const String _aiVoice = 'nova';
+
+  /// Scenario Talk AI 음성은 로비 설정과 무관하게 tts-1 + onyx로 고정한다.
+  static const String _aiVoice = 'onyx';
   static const Duration _accurateTranscribeTimeout = Duration(seconds: 12);
   bool _isConversationActive = false;
   double _fontScale = 1.0;
@@ -327,6 +329,22 @@ never by itself a reason to ask back.
       utterance.cancel();
       _log('[KOREAN-TTS-TIMEOUT]', 'Scenario Talk PCM TTS exceeded 20s');
     }
+  }
+
+  /// 스트리밍 답변에서 첫 자연스러운 문장이 끝나는 위치를 찾는다.
+  /// 쉼표나 토큰 단위로 자르면 TTS 억양이 무너지므로 문장 종결부호만 쓴다.
+  int? _firstScenarioSentenceEnd(String text) {
+    final match = RegExp(r'[.!?。！？][\"”’」』】)]*').firstMatch(text);
+    return match?.end;
+  }
+
+  /// `[HEARD_CONFIRM]`가 여러 SSE 조각으로 나뉘어 와도 제어 신호인지
+  /// 확정되기 전에는 화면이나 TTS로 내보내지 않는다.
+  bool _scenarioReplyMayBeControlSignal(String text) {
+    final leading = text.trimLeft();
+    if (leading.isEmpty) return true;
+    const signal = '[HEARD_CONFIRM]';
+    return signal.startsWith(leading) || leading.startsWith(signal);
   }
 
   // 🎭 롤플레이 시나리오
@@ -1826,6 +1844,8 @@ never by itself a reason to ask back.
     final turnNumber = _turnCounter;
     var aiIndex = -1;
     var askedBack = false;
+    var responseCompleted = false;
+    TtsUtterance? earlyUtterance;
     final recentConversation = _recentKoreanConversation();
     // 되묻기가 나오면 이 말풍선을 도로 걷어내야 하므로 참조를 들고 간다.
     final hostBubble = <String, dynamic>{
@@ -1841,12 +1861,78 @@ never by itself a reason to ask back.
       });
       _scrollToBottom();
 
-      final aiKorean = await RoleplayBrain.generateKoreanTurn(
+      final responseBuffer = StringBuffer();
+      String? firstSpokenSegment;
+      final ttsTurnId =
+          'scenario-$turnNumber-${DateTime.now().microsecondsSinceEpoch}';
+
+      await for (final chunk in RoleplayBrain.streamKoreanTurn(
         apiKey: _openAiKey,
         instructions: _buildScenarioMemberInstructions(),
         userText: userKorean,
         recentConversation: recentConversation,
-      );
+      )) {
+        if (!mounted ||
+            !_isConversationActive ||
+            generation != _pipelineGeneration ||
+            turnNumber != _turnCounter) {
+          earlyUtterance?.cancel();
+          return;
+        }
+        responseBuffer.write(chunk);
+        final streamedReply = responseBuffer.toString().trimLeft();
+
+        // 제어 태그일 가능성이 남아 있는 동안에는 어떤 조각도 노출하지 않는다.
+        if (_scenarioReplyMayBeControlSignal(streamedReply)) continue;
+
+        if (aiIndex < 0) {
+          setState(() {
+            _localMessages.add(<String, dynamic>{
+              'role': 'SYSTEM',
+              'target': streamedReply,
+              'original': '',
+            });
+            aiIndex = _localMessages.length - 1;
+          });
+          _scrollToBottom();
+        } else {
+          setState(() {
+            _localMessages[aiIndex]['target'] = streamedReply;
+          });
+        }
+
+        // 첫 문장 뒤의 실제 텍스트까지 도착하면 후속 문장이 확정된 것이다.
+        // 그때 첫 문장을 재생하고 PCM 세션을 열어 둔 뒤, GPT가 끝나면
+        // 나머지 TTS를 선요청해 같은 세션에 이어 붙인다.
+        if (earlyUtterance == null) {
+          final sentenceEnd = _firstScenarioSentenceEnd(streamedReply);
+          if (sentenceEnd != null &&
+              streamedReply.substring(sentenceEnd).trim().isNotEmpty) {
+            firstSpokenSegment = streamedReply.substring(0, sentenceEnd).trim();
+            if (firstSpokenSegment.isNotEmpty) {
+              _swTTS
+                ..reset()
+                ..start();
+              earlyUtterance = _aiTtsAdapter.speak(TtsRequest(
+                text: firstSpokenSegment,
+                voiceId: _aiVoice,
+                speakerType: TtsSpeakerType.ai,
+                turnId: ttsTurnId,
+                generationId: generation,
+                playbackCategory: 'scenario_ai',
+                expectsMoreSegments: true,
+              ));
+              _log('[SCENARIO-PIPELINE]',
+                  'first_sentence_tts_started len=${firstSpokenSegment.length}');
+            }
+          }
+        }
+      }
+
+      final aiKorean = responseBuffer
+          .toString()
+          .trim()
+          .replaceAll(RegExp(r'^["“”\s]+|["“”\s]+$'), '');
       if (aiKorean.isEmpty) {
         throw StateError('Scenario Talk response did not complete.');
       }
@@ -1854,8 +1940,10 @@ never by itself a reason to ask back.
           !_isConversationActive ||
           generation != _pipelineGeneration ||
           turnNumber != _turnCounter) {
+        earlyUtterance?.cancel();
         return;
       }
+      responseCompleted = true;
 
       // 👂 되묻기 턴이면 유저 발화를 버린다. 화면에도 히스토리에도 남기지
       //   않고 턴 번호도 되돌려, 유저가 다시 말한 것이 이 턴이 되게 한다.
@@ -1922,15 +2010,51 @@ never by itself a reason to ask back.
       final aiKoreanFinal = replyKorean;
 
       setState(() {
-        _localMessages.add(<String, dynamic>{
-          'role': 'SYSTEM',
-          'target': aiKoreanFinal,
-          'original': '',
-        });
-        aiIndex = _localMessages.length - 1;
+        if (aiIndex < 0) {
+          _localMessages.add(<String, dynamic>{
+            'role': 'SYSTEM',
+            'target': aiKoreanFinal,
+            'original': '',
+          });
+          aiIndex = _localMessages.length - 1;
+        } else {
+          _localMessages[aiIndex]['target'] = aiKoreanFinal;
+        }
       });
       _scrollToBottom();
-      await _speakKoreanLine(aiKoreanFinal);
+      final spokenHead = firstSpokenSegment;
+      final headUtterance = earlyUtterance;
+      if (spokenHead != null &&
+          headUtterance != null &&
+          aiKoreanFinal.startsWith(spokenHead)) {
+        final remaining = aiKoreanFinal.substring(spokenHead.length).trim();
+        if (remaining.isNotEmpty) {
+          final tailPrefetch = _aiTtsAdapter.prefetch(TtsRequest(
+            text: remaining,
+            voiceId: _aiVoice,
+            speakerType: TtsSpeakerType.ai,
+            turnId: ttsTurnId,
+            generationId: generation,
+            playbackCategory: 'scenario_ai',
+            continuesPreviousSegment: true,
+          ));
+          final tailUtterance = _aiTtsAdapter.speakPrefetched(tailPrefetch);
+          try {
+            await tailUtterance.done.timeout(const Duration(seconds: 20));
+          } on TimeoutException {
+            headUtterance.cancel();
+            tailUtterance.cancel();
+            _log('[KOREAN-TTS-TIMEOUT]',
+                'Scenario Talk segmented PCM TTS exceeded 20s');
+          }
+        } else {
+          headUtterance.cancel();
+          await _speakKoreanLine(aiKoreanFinal);
+        }
+      } else {
+        headUtterance?.cancel();
+        await _speakKoreanLine(aiKoreanFinal);
+      }
 
       final hostLine = <String, dynamic>{
         'role': 'HOST',
@@ -1946,11 +2070,16 @@ never by itself a reason to ask back.
           'turn=$turnNumber model=gpt-4o-mini voice=$_aiVoice tts=true');
     } catch (error) {
       _log('[PIPE-ERR]', 'turn=$turnNumber reason=${error.runtimeType}');
-      if (mounted && aiIndex >= 0 && aiIndex < _localMessages.length) {
+      if (!responseCompleted) {
+        earlyUtterance?.cancel();
+        _aiTtsAdapter.stopAll(reason: 'scenario_gpt_stream_failed');
+      }
+      if (!responseCompleted &&
+          mounted &&
+          aiIndex >= 0 &&
+          aiIndex < _localMessages.length) {
         setState(() {
-          if ((_localMessages[aiIndex]['target'] ?? '').toString().isEmpty) {
-            _localMessages.removeAt(aiIndex);
-          }
+          _localMessages.removeAt(aiIndex);
         });
       }
     } finally {
@@ -4749,6 +4878,73 @@ Return only the line itself.'''
       return text.replaceAll(RegExp(r'^["“”\s]+|["“”\s]+$'), '');
     } catch (_) {
       return '';
+    } finally {
+      client.close();
+    }
+  }
+
+  /// Scenario Talk 운영 경로용 GPT 스트림. 제어 태그 판정과 문장 경계 처리는
+  /// 소비부가 담당하며, 여기서는 SSE content delta를 순서대로 전달한다.
+  static Stream<String> streamKoreanTurn({
+    required String apiKey,
+    required String instructions,
+    required String userText,
+    required String recentConversation,
+  }) async* {
+    if (apiKey.isEmpty || userText.trim().isEmpty) return;
+    final client = http.Client();
+    try {
+      final request = http.Request(
+        'POST',
+        Uri.parse('https://api.openai.com/v1/chat/completions'),
+      );
+      request.headers.addAll(<String, String>{
+        'Authorization': 'Bearer $apiKey',
+        'Content-Type': 'application/json; charset=utf-8',
+      });
+      request.body = jsonEncode(<String, dynamic>{
+        'model': 'gpt-4o-mini',
+        'stream': true,
+        'temperature': 0.75,
+        'max_tokens': 120,
+        'messages': <Map<String, String>>[
+          <String, String>{'role': 'system', 'content': instructions},
+          if (recentConversation.trim().isNotEmpty)
+            <String, String>{
+              'role': 'system',
+              'content':
+                  'Recent scene dialogue (continue it consistently):\n$recentConversation',
+            },
+          <String, String>{
+            'role': 'user',
+            'content': userText.trim(),
+          },
+        ],
+      });
+
+      final response =
+          await client.send(request).timeout(const Duration(seconds: 12));
+      if (response.statusCode != 200) {
+        final body = await response.stream.bytesToString();
+        throw StateError(
+            'Scenario Talk GPT HTTP ${response.statusCode}: $body');
+      }
+
+      await for (final line in response.stream
+          .transform(utf8.decoder)
+          .transform(const LineSplitter())
+          .timeout(const Duration(seconds: 12))) {
+        if (!line.startsWith('data: ') || line == 'data: [DONE]') continue;
+        try {
+          final decoded = jsonDecode(line.substring(6));
+          final delta = decoded['choices']?[0]?['delta']?['content'];
+          if (delta != null && delta.toString().isNotEmpty) {
+            yield delta.toString();
+          }
+        } catch (_) {
+          // 한 SSE 줄의 JSON이 비정상이면 다음 정상 delta를 계속 받는다.
+        }
+      }
     } finally {
       client.close();
     }

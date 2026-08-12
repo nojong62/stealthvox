@@ -35,7 +35,7 @@ class TtsAdapterConfig {
 
   /// 현재 TTS 모델. 교체 시 여기만 바꾼다 — 대화방 코드는 손대지 않는다.
   ///
-  /// 3모드 AI 음성은 tts-1 + nova가 스펙이다. 한때 gpt-4o-mini-tts로 바꿨더니
+  /// 대화 모드 음성은 tts-1이 스펙이다. 한때 gpt-4o-mini-tts로 바꿨더니
   /// 한국어를 또박또박 읽어 영어보다 눈에 띄게 처졌다. tts-1은 가볍고 빠르며
   /// `speed` 파라미터가 실제로 먹는다(gpt-4o-mini-tts는 `instructions`로만
   /// 움직인다). 바꾸려면 speed/instructions 지원 여부부터 확인할 것.
@@ -469,9 +469,9 @@ class TtsAdapter {
 
     final apiKey = apiKeyProvider();
     if (apiKey.isEmpty) return false;
-    final voice = request.speakerType == TtsSpeakerType.ai
-        ? TtsAdapterConfig.aiVoice
-        : TtsAdapterConfig.mapVoice(request.voiceId);
+    // 모드별 AI 보이스(Circle=shimmer, Scenario=onyx 등)를 실시간 재생과
+    // 히스토리 캐시에서 동일하게 유지한다.
+    final voice = TtsAdapterConfig.mapVoice(request.voiceId);
     final sw = Stopwatch()..start();
     Object? lastError;
 
