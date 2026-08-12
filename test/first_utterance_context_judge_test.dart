@@ -251,23 +251,73 @@ void main() {
       );
       expect(hasHeardConfirmSignal('제가 잘못 들었나요?'), isFalse);
       expect(hasHeardConfirmSignal('I may have misheard you.'), isFalse);
+      expect(
+        hasHeardConfirmSignal('Normal text [HEARD_CONFIRM]\nquestion'),
+        isFalse,
+      );
+      expect(
+        hasHeardConfirmSignal('\n  [HEARD_CONFIRM]\r\nQuestion?'),
+        isTrue,
+      );
     });
 
     test('hides partial streamed signal and strips the complete signal', () {
+      expect(isHeardConfirmSignalPrefix('['), isTrue);
       expect(isHeardConfirmSignalPrefix('[HEARD_'), isTrue);
+      expect(isHeardConfirmSignalPrefix('[HEARD_CONFIRM'), isTrue);
       expect(isHeardConfirmSignalPrefix('[HEARD_CONFIRM]'), isTrue);
+      expect(isHeardConfirmSignalPrefix('\r\n [HEARD_'), isTrue);
       expect(isHeardConfirmSignalPrefix('普通の文です。'), isFalse);
       expect(
         stripHeardConfirmSignal('[HEARD_CONFIRM]\nDid you say "train"?'),
         'Did you say "train"?',
       );
+      expect(
+        stripHeardConfirmSignal('\r\n [HEARD_CONFIRM]\r\nもう一度お願いします。'),
+        'もう一度お願いします。',
+      );
+      expect(stripHeardConfirmSignal('[HEARD_CONFIRM]'), isEmpty);
     });
 
-    test('provides short retry lines for supported origins', () {
+    test('waits for the completed stream before exposing the question', () {
+      final chunks = ['[', 'HEARD_', 'CONFIRM]', '\r\nDid you ', 'say train?'];
+      var accumulated = '';
+      for (var index = 0; index < chunks.length - 1; index++) {
+        accumulated += chunks[index];
+        expect(
+          isHeardConfirmSignalPrefix(accumulated) ||
+              hasHeardConfirmSignal(accumulated),
+          isTrue,
+        );
+      }
+      accumulated += chunks.last;
+      expect(hasHeardConfirmSignal(accumulated), isTrue);
+      expect(stripHeardConfirmSignal(accumulated), 'Did you say train?');
+    });
+
+    test('provides non-empty retry lines for all 12 lobby origins', () {
+      const supportedOrigins = <String>[
+        'English',
+        'Japanese',
+        'Chinese',
+        'Spanish',
+        'French',
+        'German',
+        'Korean',
+        'Hindi',
+        'Russian',
+        'Portuguese',
+        'Italian',
+        'Dutch',
+      ];
+      final lines = supportedOrigins.map(originRetryLine).toList();
+      expect(lines, everyElement(isNotEmpty));
+      expect(lines.toSet(), hasLength(supportedOrigins.length));
       expect(originRetryLine('Korean'), contains('다시'));
       expect(originRetryLine('Japanese'), contains('もう一度'));
       expect(originRetryLine('English'), contains('Please'));
       expect(originRetryLine('unknown'), originRetryLine('English'));
+      expect(originRetryLine(''), originRetryLine('Korean'));
       expect(localizedSeedGuidanceLine('Japanese'), contains('出来事'));
       expect(
         localizedSeedGuidanceLine('unknown'),
