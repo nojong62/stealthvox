@@ -47,10 +47,12 @@ void main() {
       expect(verdict.failedOpen, isFalse);
     });
 
+    // 문구는 badd82a6에서 의도적으로 바꿨다 — 발화 전체가 아니라 일부만 못
+    // 알아들었다는 쪽이 실제 반려 상황에 가깝다. 3모드가 이 상수 하나를 쓴다.
     test('uses the shared Korean retry line', () {
       expect(
         KoreanTurnValidator.retryLine,
-        '제가 잘 못 들은 것 같아요. 다시 말씀해 주세요.',
+        '제가 잘못들은 부분이 있는 것 같아요. 다시 말씀해 주세요.',
       );
     });
   });
