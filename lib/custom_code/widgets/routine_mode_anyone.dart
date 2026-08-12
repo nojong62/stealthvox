@@ -4599,16 +4599,27 @@ class AnyonePreparedAudioCapture {
   final StreamController<Uint8List> _controller;
   bool _stopped = false;
 
+  /// [echoCancel] / [noiseSuppress]는 **기본이 꺼짐**이다. Circle Talk은
+  /// 이대로여야 한다 — echoCancel을 켜면 AI 목소리가 스피커로 나가는 동안
+  /// 유저 입력까지 통째로 눌려 빈 전사만 돌아온다(위 ECHO-GUARD 주석 참고).
+  ///
+  /// Duo 직접 대화만 둘 다 켠다. 거기는 통화라서 상대가 말하는 동안에도
+  /// 마이크를 닫을 수 없고, 스피커로 나간 상대 목소리를 마이크가 도로 잡아
+  /// 되먹임이 생긴다. 그건 가드로 못 막고 AEC로만 지운다.
   static Future<AnyonePreparedAudioCapture> start({
     required AudioRecorder recorder,
     required void Function(DateTime at) onRecordingStarted,
     required void Function(DateTime at, int byteCount) onFirstFrame,
+    bool echoCancel = false,
+    bool noiseSuppress = false,
   }) async {
     final source = await recorder.startStream(
-      const RecordConfig(
+      RecordConfig(
         encoder: AudioEncoder.pcm16bits,
         sampleRate: kStealthVoxSttSampleRate,
         numChannels: 1,
+        echoCancel: echoCancel,
+        noiseSuppress: noiseSuppress,
       ),
     );
     onRecordingStarted(DateTime.now());

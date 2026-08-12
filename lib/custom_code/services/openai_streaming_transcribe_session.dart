@@ -37,6 +37,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import 'pcm_audio_utils.dart';
 
 // ====================================================================
@@ -82,6 +84,11 @@ const int kStreamingSttVadPrefixPaddingMs = 300;
 const int kStreamingSttVadSilenceDurationMs = 600;
 
 const Duration kStreamingSttConnectTimeout = Duration(seconds: 6);
+
+/// 종료 직전, 아직 안 돌아온 마지막 전사문을 기다리는 상한.
+/// 실측에서 speech_stopped → completed가 350~800ms였다. 2초면 충분하고,
+/// 넘으면 통화 종료가 눈에 띄게 늦어지므로 여기서 끊는다.
+const Duration kStreamingSttFlushTimeout = Duration(seconds: 2);
 
 /// `session.update`를 서버가 받아들였다는 확인을 기다리는 시간.
 /// 확인 없이 오디오를 흘리면 설정이 반영 안 된 세션에 말이 들어간다.
@@ -139,6 +146,68 @@ class OpenAiStreamingTranscribeSession {
       !_disposed && _socket != null && _socket!.readyState == WebSocket.open;
 
   bool get audioGateOpen => _audioGateOpen;
+
+  // ── 진행 중 발화 추적 ──────────────────────────────────────────────
+  // 통화를 끊을 때 "지금 말하던 문장"이 아직 서버에 있는지 알아야 한다.
+  // 모르면 기다릴 이유도 없는데 매번 2초를 버리거나, 기다려야 할 때
+  // 그냥 끊어 마지막 문장을 잃는다.
+  //
+  //   speech_started            → 말하는 중 (_speechInFlight)
+  //   input_audio_buffer.committed → 구간 확정, 전사 대기 (_pendingItemIds)
+  //   transcription.completed   → 그 item 처리 끝
+  bool _speechInFlight = false;
+  final Set<String> _pendingItemIds = <String>{};
+  Completer<void>? _drained;
+
+  /// 아직 결과가 안 돌아온 발화가 있는가.
+  bool get hasPendingUtterance => _speechInFlight || _pendingItemIds.isNotEmpty;
+
+  /// 종료 직전에 부른다. 진행 중인 발화가 있으면 **마지막 버퍼를 명시적으로
+  /// 확정**하고 전사문이 돌아올 때까지 [timeout]까지 기다린다.
+  ///
+  /// 반환값은 "기다렸는가"다. 진행 중 발화가 없으면 아무것도 안 하고 즉시
+  /// false를 돌려주므로, 말하지 않고 끈 경우 종료가 느려지지 않는다.
+  ///
+  /// ⚠️ 게이트를 먼저 닫는다. 열어 둔 채 commit하면 확정 직후 들어온 PCM이
+  /// 다음 버퍼를 열어 또 하나의 발화가 생긴다.
+  Future<bool> flushPendingUtterance({
+    required String reason,
+    Duration timeout = kStreamingSttFlushTimeout,
+  }) async {
+    closeAudioGate(reason: reason);
+    if (_disposed || !hasPendingUtterance) return false;
+
+    // 서버 VAD가 아직 발화 종료를 못 잡은 상태면 우리가 끊어 준다. 이미
+    // committed까지 간 발화는 서버가 확정했으므로 다시 commit하지 않는다
+    // (빈 버퍼 commit은 error 이벤트만 만든다 — 로그만 더러워진다).
+    if (_speechInFlight && isConnected) {
+      _lg('🎙️ [STREAM-FLUSH]', 'commit reason=$reason');
+      _send({'type': 'input_audio_buffer.commit'});
+    }
+
+    final drained = Completer<void>();
+    _drained = drained;
+    final sw = Stopwatch()..start();
+    try {
+      await drained.future.timeout(timeout, onTimeout: () {});
+    } finally {
+      sw.stop();
+      if (identical(_drained, drained)) _drained = null;
+    }
+    final bool done = !hasPendingUtterance;
+    _lg('🎙️ [STREAM-FLUSH]',
+        'drained=$done waitedMs=${sw.elapsedMilliseconds} reason=$reason');
+    return true;
+  }
+
+  void _clearPending(String? itemId) {
+    if (itemId != null) _pendingItemIds.remove(itemId);
+    if (!hasPendingUtterance) {
+      final drained = _drained;
+      _drained = null;
+      if (drained != null && !drained.isCompleted) drained.complete();
+    }
+  }
 
   /// 마이크에서 보낸 총 오디오 시간(ms). 과금 로그용.
   int get sentAudioMs => kStealthVoxSttBytesPerMs <= 0
@@ -316,21 +385,32 @@ class OpenAiStreamingTranscribeSession {
         if (pending != null && !pending.isCompleted) {
           _completeConfigured(false);
         }
+        // flush 중에 온 error는 대개 "빈 버퍼 commit"이다. 그 발화는 영영
+        // 안 오므로 대기를 풀어 준다. 안 풀면 종료가 상한까지 늘어진다.
+        if (_drained != null) {
+          _speechInFlight = false;
+          _clearPending(null);
+        }
         return;
 
       case 'input_audio_buffer.speech_started':
+        _speechInFlight = true;
         _lg('📡 [STREAM-VAD]', 'speech_started');
         onSpeechStarted?.call();
         return;
 
       case 'input_audio_buffer.speech_stopped':
+        // 아직 committed 전이다. 여기서 대기를 풀면 전사문을 놓친다.
         _lg('📡 [STREAM-VAD]', 'speech_stopped');
         onSpeechStopped?.call();
         return;
 
       case 'input_audio_buffer.committed':
         // 서버가 발화 구간을 확정했다는 신호일 뿐이다. 전사는 그 뒤에 온다.
-        _lg('📡 [STREAM-VAD]', 'committed item=${event['item_id']}');
+        final committedId = event['item_id']?.toString() ?? '';
+        _speechInFlight = false;
+        if (committedId.isNotEmpty) _pendingItemIds.add(committedId);
+        _lg('📡 [STREAM-VAD]', 'committed item=$committedId');
         return;
 
       case 'conversation.item.input_audio_transcription.delta':
@@ -347,6 +427,7 @@ class OpenAiStreamingTranscribeSession {
         _lg('📡 [STREAM-STT]',
             'transcription_completed item=$itemId len=${text.length}');
         onTranscriptCompleted?.call(itemId, text);
+        _clearPending(itemId);
         return;
 
       case 'conversation.item.input_audio_transcription.failed':
@@ -354,6 +435,8 @@ class OpenAiStreamingTranscribeSession {
             '❌ [STREAM-STT]',
             'transcription_failed item=${event['item_id']} '
                 'reason=${event['error']}');
+        // 실패해도 대기는 풀어야 한다. 안 그러면 flush가 상한까지 논다.
+        _clearPending(event['item_id']?.toString());
         return;
 
       default:
@@ -433,7 +516,16 @@ class OpenAiStreamingTranscribeSession {
     _disposed = true;
     _audioGateOpen = false;
     _completeConfigured(false);
+    // 대기 중인 flush가 있으면 풀어 준다. 소켓을 닫아 놓고 재우면 상한까지 논다.
+    _speechInFlight = false;
+    _pendingItemIds.clear();
+    _clearPending(null);
     _lg('🎙️ [STREAM-STT]', 'dispose sentAudioMs=$sentAudioMs');
     await _teardownSocket();
   }
+
+  /// 소켓 없이 이벤트 처리를 검증하기 위한 진입점. 테스트 전용이다.
+  @visibleForTesting
+  void debugHandleEvent(Map<String, dynamic> event) =>
+      _handleEvent(jsonEncode(event));
 }

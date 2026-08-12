@@ -49,6 +49,10 @@ import 'routine_mode_anyone.dart' show AnyonePreparedAudioCapture;
 // 저장 id는 이 두 문자열이다. 표시명이 바뀌어도 여기는 바꾸지 않는다.
 // ============================================================================
 const String kDuoModeDirect = 'direct';
+
+/// 종료 직전 마지막 전사문의 History·채널 저장을 기다리는 상한.
+/// Firestore 쓰기가 걸려도 통화 종료가 무한정 늘어지면 안 된다.
+const Duration kDuoDirectSaveTimeout = Duration(seconds: 3);
 const String kDuoModeInterpreter = 'interpreter';
 const String kInterpreterPartnerTtsVoice = 'alloy';
 
@@ -119,6 +123,19 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   int _directSeq = 0;
   DateTime? _directSpeechStartedAt;
 
+  /// 종료 처리가 도는 중. 연속 탭으로 두 번 들어오는 것을 막는다.
+  bool _directStopping = false;
+
+  /// 종료 직전 마지막 전사문을 기다리는 창. 이 동안 도착한 전사문은
+  /// 세대가 아직 살아 있으므로 정상 경로로 저장된다.
+  bool _directFlushing = false;
+
+  /// 아직 안 끝난 History/채널 저장들. 종료 전에 이것들을 기다린다.
+  final Set<Future<void>> _directSaves = <Future<void>>{};
+
+  /// 이미 저장한 전사 item. 같은 발화가 두 번 들어와도 한 번만 남긴다.
+  final Set<String> _savedDirectItemIds = <String>{};
+
   /// History에 실제로 쓴 메시지 수. 직접 대화는 말풍선을 만들지 않으므로
   /// `_localMessages`로 저장 여부를 판단하면 히스토리가 통째로 지워진다.
   int _historyMessageCount = 0;
@@ -126,6 +143,39 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   // 🆕 [게스트 언어 오버레이] 초대 게스트(회원·비회원)가 입장 전 언어쌍 선택
   bool _showLangOverlay = false;
   String? _pendingJoinRoomId;
+
+  /// 게스트 언어 오버레이가 고를 수 있는 언어. 드롭다운 목록이자
+  /// 저장값이 유효한지 판정하는 기준이다.
+  static const List<String> _kGuestLangs = [
+    'English',
+    'Japanese',
+    'Chinese',
+    'Spanish',
+    'French',
+    'German',
+    'Korean',
+    'Hindi',
+    'Russian',
+    'Portuguese',
+    'Italian',
+    'Dutch'
+  ];
+
+  /// 게스트 언어 오버레이를 띄우기 전에 값을 목록 안의 값으로 맞춘다.
+  /// **이 폰에 저장된 값이 목록에 있으면 그대로 둔다.** 비어 있거나 목록 밖의
+  /// 값일 때만 기본값 — ORIGIN=Korean, TARGET=English — 으로 채운다.
+  ///
+  /// 화면에만 기본값을 보여 주고 저장값은 옛 값으로 남는 어긋남을 여기서
+  /// 없앤다. 게스트가 아무것도 안 건드리고 입장해도 보이는 값과 실제로
+  /// 쓰는 값(전사 언어·통역 프롬프트)이 같다.
+  void _normalizeGuestLangs() {
+    if (!_kGuestLangs.contains(FFAppState().nativeLang)) {
+      FFAppState().nativeLang = 'Korean';
+    }
+    if (!_kGuestLangs.contains(FFAppState().targetLang)) {
+      FFAppState().targetLang = 'English';
+    }
+  }
 
   // 🆕 [PTT] Duo 무전기 상태기계
   // idle: 대기 / recording: 녹음 중 / finishing: 마이크 종료 표시 /
@@ -381,9 +431,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         debugPrint(
             '[Duo] initState — guest entry, show lang overlay: $pendingRoomId');
         // 🆕 입장 전 언어 선택 오버레이 — 기본값 보정 후 표시
-        if (FFAppState().nativeLang.isEmpty) FFAppState().nativeLang = 'Korean';
-        if (FFAppState().targetLang.isEmpty)
-          FFAppState().targetLang = 'English';
+        _normalizeGuestLangs();
         if (mounted) {
           setState(() {
             _pendingJoinRoomId = pendingRoomId;
@@ -601,6 +649,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _directCallActive &&
       generation == _directGeneration;
 
+  /// 전사문을 저장해도 되는 세대인가. 통화 중이거나, **종료 직전 flush 창**이면
+  /// 저장한다. `mounted`는 보지 않는다 — 저장은 Firestore 쓰기뿐이라 위젯이
+  /// 살아 있을 필요가 없고, 그 조건을 걸면 마지막 문장을 또 잃는다.
+  bool _canSaveDirectTranscript(int generation) =>
+      generation == _directGeneration && (_directCallActive || _directFlushing);
+
   void _onDirectMicToggle() {
     if (_directCallActive) {
       unawaited(_stopDirectCall('user_tap'));
@@ -610,7 +664,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   }
 
   Future<void> _startDirectCall() async {
-    if (_directCallActive || _directStarting || _isExiting) return;
+    if (_directCallActive || _directStarting || _directStopping || _isExiting) {
+      return;
+    }
     if (_relayUrl.trim().isEmpty) {
       _lgDuo('[DIRECT]', 'start_blocked reason=no_relay_url');
       if (mounted) {
@@ -729,6 +785,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       // ④ 마이크 한 개를 열어 두 갈래로 흘린다.
       final capture = await AnyonePreparedAudioCapture.start(
         recorder: _audioRecorder,
+        // 🔇 [DUO-DIRECT] 통화라 상대가 말하는 동안에도 마이크를 닫을 수 없다.
+        //   스피커로 나간 상대 목소리를 마이크가 도로 잡아 되먹임이 생기므로
+        //   AEC로 지운다. 잡음 억제는 무음 구간에 실려 가던 생마이크
+        //   노이즈("쉐" 소리)를 깎는다. 재생기를 먼저 통화 모드로 열어 둔
+        //   뒤에 마이크를 여는 순서(①→④)를 지켜야 AEC가 참조를 잡는다.
+        echoCancel: true,
+        noiseSuppress: true,
         onRecordingStarted: (at) => _lgDuo(
             '[PCM_CAPTURE]', 'recording_started at=${at.toIso8601String()}'),
         onFirstFrame: (at, byteCount) {
@@ -792,8 +855,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _directSpeechStartedAt = DateTime.now();
     };
     session.onTranscriptCompleted = (itemId, text) {
-      if (!_isDirectGenerationCurrent(generation)) return;
-      unawaited(_handleDirectTranscript(generation, text, itemId));
+      if (!_canSaveDirectTranscript(generation)) return;
+      // 종료 대기가 이 future를 기다린다 — unawaited로 흘려보내면 안 된다.
+      final save = _handleDirectTranscript(generation, text, itemId);
+      _directSaves.add(save);
+      unawaited(save.whenComplete(() => _directSaves.remove(save)));
     };
     session.onFatalError = (reason) {
       _lgDuo('[DIRECT-STT]', 'fatal=$reason (통화는 계속된다)');
@@ -824,15 +890,25 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 두 사람의 발화를 하나의 대화 순서로 합칠 수 있다.
   Future<void> _handleDirectTranscript(
       int generation, String text, String itemId) async {
-    if (!_isDirectGenerationCurrent(generation)) return;
+    if (!_canSaveDirectTranscript(generation)) return;
     final String trimmed = text.trim();
     if (trimmed.isEmpty || _isNoiseTranscript(trimmed)) return;
+    // 중복 저장 가드. 같은 item이 두 번 오면(재전달·flush 겹침) 한 번만 남긴다.
+    if (itemId.isNotEmpty && !_savedDirectItemIds.add(itemId)) {
+      _lgDuo('[DIRECT-STT]', 'duplicate_skipped item=$itemId');
+      return;
+    }
+    if (_savedDirectItemIds.length > 200) {
+      _savedDirectItemIds.remove(_savedDirectItemIds.first);
+    }
     final int seq = ++_directSeq;
     final DateTime spokenAt = _directSpeechStartedAt ?? DateTime.now();
     _directSpeechStartedAt = null;
     _lgDuo('[DIRECT-STT]',
         'completed seq=$seq item=$itemId len=${trimmed.length}');
-    _uploadMyMessage(
+    // 상대 채널 업로드도 기다린다. 흘려보내면 종료 때 마지막 문장이
+    // 내 History에만 남고 상대 History에는 안 간다.
+    await _uploadMyMessage(
       trimmed,
       _myNative(),
       mode: kDuoModeDirect,
@@ -852,14 +928,27 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     );
   }
 
+  /// 통화를 끊는다. **순서가 전부다.**
+  ///
+  /// 예전에는 맨 먼저 `++_directGeneration`을 올리고 곧바로 STT를 dispose했다.
+  /// 그러면 말하는 도중에 끈 발화는 전사문이 도착해도 세대가 어긋나 버려지고,
+  /// 애초에 기다리지도 않아서 **마지막 문장이 통째로 사라졌다.**
+  ///
+  /// 지금 순서:
+  ///   ① 마이크 PCM 추가 전송 차단 (구독 취소 + 녹음 정지)
+  ///   ② 진행 중 발화가 있으면 마지막 버퍼를 확정하고 전사문을 최대 2초 대기
+  ///   ③ 그 전사문의 History·채널 저장이 끝날 때까지 대기
+  ///   ④ 그다음에야 세대 증가 + 세션 dispose
+  /// 진행 중 발화가 없으면 ②③은 즉시 통과한다(말없이 끄면 안 느려진다).
   Future<void> _stopDirectCall(String reason) async {
+    if (_directStopping) return; // 중복 종료 가드 (연속 두 번 탭)
     if (!_directCallActive && _relayClient == null && _directCapture == null) {
       return;
     }
-    ++_directGeneration; // 이 시점 이후의 늦은 콜백은 전부 남의 세대다.
-    _directCallActive = false;
+    _directStopping = true;
     _directCaptureFirstFrameAt = null;
 
+    // ① 추가 PCM부터 끊는다. 확정 직후 들어온 소리가 새 발화를 열면 안 된다.
     final captureSub = _directCaptureSub;
     _directCaptureSub = null;
     await captureSub?.cancel();
@@ -868,9 +957,36 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     _directCapture = null;
     await capture?.stop();
 
+    // ②③ 마지막 발화 확정 → 전사문 대기 → 저장 완료까지.
+    //     `_directCallActive`와 세대는 아직 그대로다. 이 창 안에서 도착한
+    //     전사문은 정상 경로로 저장된다.
     final stt = _directStt;
     _directStt = null;
-    stt?.closeAudioGate(reason: reason);
+    if (stt != null) {
+      _directFlushing = true;
+      try {
+        final waited = await stt.flushPendingUtterance(reason: reason);
+        if (waited) {
+          await _awaitDirectSaves();
+          // 상한을 넘겨 전사문이 끝내 안 왔으면 **그 문장은 어느 History에도
+          // 없다.** 조용히 넘어가면 나중에 "왜 마지막 말이 없지"를 로그로
+          // 못 찾는다. 여기서 분명히 남긴다.
+          if (stt.hasPendingUtterance) {
+            _lgDuo('⚠️ [DIRECT-STT]',
+                'last_utterance_lost reason=$reason — flush 상한 내 전사문 미도착. '
+                    '이 발화는 내 History와 상대 채널 어디에도 저장되지 않았다.');
+          }
+        }
+      } catch (e) {
+        _lgDuo('[DIRECT]', 'flush_failed(${e.runtimeType}) — 종료는 계속한다');
+      } finally {
+        _directFlushing = false;
+      }
+    }
+
+    // ④ 이제부터 도착하는 늦은 콜백은 전부 남의 세대다.
+    ++_directGeneration;
+    _directCallActive = false;
     await stt?.dispose();
 
     final relaySub = _relayInboundSub;
@@ -906,6 +1022,22 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
             'playFirstLatencyMs=${player?.firstPlayLatencyMs} '
             'sentBytes=${relay?.sentBytes} recvBytes=${relay?.receivedBytes} '
             'playedBytes=${player?.writtenBytes} droppedBytes=${player?.droppedBytes}');
+    _directStopping = false;
+  }
+
+  /// 진행 중인 History/채널 저장이 끝날 때까지 기다린다. 저장이 걸려도 통화
+  /// 종료가 무한정 늦어지면 안 되므로 상한을 둔다.
+  Future<void> _awaitDirectSaves() async {
+    if (_directSaves.isEmpty) return;
+    try {
+      await Future.wait(List<Future<void>>.of(_directSaves))
+          .timeout(kDuoDirectSaveTimeout);
+    } catch (e) {
+      _lgDuo('⚠️ [DIRECT-STT]',
+          'save_wait_timeout(${e.runtimeType}) — 마지막 문장의 History/채널 '
+              '저장이 상한 안에 안 끝났다. 저장 자체는 계속 진행되지만 '
+              '실패했을 수 있다.');
+    }
   }
 
   Future<void> _startWhisperRecording() async {
@@ -2387,20 +2519,8 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
 
   // 🆕 [게스트 언어 오버레이] 초대 게스트 입장 전 ORIGIN/TARGET 선택 게이트
   Widget _buildGuestLangOverlay() {
-    const List<String> langs = [
-      'English',
-      'Japanese',
-      'Chinese',
-      'Spanish',
-      'French',
-      'German',
-      'Korean',
-      'Hindi',
-      'Russian',
-      'Portuguese',
-      'Italian',
-      'Dutch'
-    ];
+    const List<String> langs = _kGuestLangs;
+    // 열릴 때 이미 보정했지만, 다른 경로로 값이 바뀐 채 다시 그려질 수도 있다.
     String native = langs.contains(FFAppState().nativeLang)
         ? FFAppState().nativeLang
         : 'Korean';
@@ -2532,6 +2652,11 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                             borderRadius: BorderRadius.circular(12))),
                     onPressed: () {
                       final String? roomId = _pendingJoinRoomId;
+                      // 손대지 않은 드롭다운의 표시값을 그대로 확정한다.
+                      FFAppState().nativeLang = native;
+                      FFAppState().targetLang = target;
+                      _lgDuo('[GUEST-LANG]',
+                          'entered origin=$native target=$target sttLang=${_mapLanguageToCode(native)}');
                       setState(() {
                         _showLangOverlay = false;
                         _pendingJoinRoomId = null;

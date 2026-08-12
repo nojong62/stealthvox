@@ -78,7 +78,14 @@ class DuoPcmJitterPlayer {
     try {
       final ok = await _channel.invokeMethod<bool>(
         'start',
-        <String, dynamic>{'sampleRate': sampleRate},
+        <String, dynamic>{
+          'sampleRate': sampleRate,
+          // 🎧 통화 경로로 연다. 네이티브가 AudioManager를 MODE_IN_COMMUNICATION
+          //   으로 돌려야 마이크쪽 echoCancel이 지울 대상(재생 신호)을 받는다.
+          //   이 재생기는 직접 대화 전용이라 항상 true다 — 같은 채널을 쓰는
+          //   첫 턴 Realtime 음성은 인자를 안 보내므로 미디어 재생 그대로다.
+          'voiceCall': true,
+        },
       );
       _started = ok ?? false;
     } catch (e) {

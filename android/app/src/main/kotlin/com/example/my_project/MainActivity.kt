@@ -26,6 +26,15 @@ class MainActivity: FlutterActivity() {
     private var pcmPlaying = false
     private var audioManager: AudioManager? = null
 
+    // 🎧 [DUO-DIRECT] 통화 모드로 연 트랙인지. Duo 직접 대화만 true다.
+    //   true면 재생이 USAGE_VOICE_COMMUNICATION으로 나가고 AudioManager를
+    //   MODE_IN_COMMUNICATION으로 돌린다. 안드로이드 AEC는 이 모드일 때만
+    //   재생 신호를 참조로 받아 마이크에서 지울 수 있다 — 녹음 쪽 echoCancel만
+    //   켜면 지울 대상을 몰라 효과가 없다.
+    private var pcmVoiceCall = false
+    private var savedAudioMode = AudioManager.MODE_NORMAL
+    private var savedSpeakerphoneOn = false
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(
@@ -67,7 +76,10 @@ class MainActivity: FlutterActivity() {
             when (call.method) {
                 "start" -> {
                     val sampleRate = call.argument<Int>("sampleRate") ?: 24000
-                    startPcmStream(sampleRate, result)
+                    // 인자를 안 보내는 기존 호출(첫 턴 Realtime 음성)은 false —
+                    // 미디어 재생 그대로 두고 Duo 직접 대화만 통화 모드로 연다.
+                    val voiceCall = call.argument<Boolean>("voiceCall") ?: false
+                    startPcmStream(sampleRate, voiceCall, result)
                 }
                 "append" -> {
                     val bytes = call.arguments as? ByteArray
@@ -88,7 +100,11 @@ class MainActivity: FlutterActivity() {
         }
     }
 
-    private fun startPcmStream(sampleRate: Int, result: MethodChannel.Result) {
+    private fun startPcmStream(
+        sampleRate: Int,
+        voiceCall: Boolean,
+        result: MethodChannel.Result
+    ) {
         val generation = ++pcmGeneration
         pcmExecutor.execute {
             releasePcmTrack()
@@ -102,7 +118,13 @@ class MainActivity: FlutterActivity() {
                 val track = AudioTrack.Builder()
                     .setAudioAttributes(
                         AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setUsage(
+                                if (voiceCall) {
+                                    AudioAttributes.USAGE_VOICE_COMMUNICATION
+                                } else {
+                                    AudioAttributes.USAGE_MEDIA
+                                }
+                            )
                             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                             .build()
                     )
@@ -126,12 +148,30 @@ class MainActivity: FlutterActivity() {
                 pcmSampleRate = sampleRate
                 pcmFramesWritten = 0L
                 pcmPlaying = false
-                audioManager =
+                val manager =
                     getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                audioManager = manager
+                pcmVoiceCall = voiceCall
+                if (voiceCall) {
+                    // 되돌릴 값을 먼저 저장한다. 통화가 끝나면 원래대로 돌린다.
+                    savedAudioMode = manager.mode
+                    @Suppress("DEPRECATION")
+                    savedSpeakerphoneOn = manager.isSpeakerphoneOn
+                    manager.mode = AudioManager.MODE_IN_COMMUNICATION
+                    // 통화 모드는 기본이 수화부다. Duo는 폰을 놓고 쓰는 화면이라
+                    // 스피커폰을 켜 지금 들리던 방식을 유지한다. AEC는 스피커폰
+                    // 상태에서도 동작한다(핸즈프리 통화와 같은 경로).
+                    @Suppress("DEPRECATION")
+                    manager.isSpeakerphoneOn = true
+                }
                 @Suppress("DEPRECATION")
-                audioManager?.requestAudioFocus(
+                manager.requestAudioFocus(
                     null,
-                    AudioManager.STREAM_MUSIC,
+                    if (voiceCall) {
+                        AudioManager.STREAM_VOICE_CALL
+                    } else {
+                        AudioManager.STREAM_MUSIC
+                    },
                     AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
                 )
                 runOnUiThread { result.success(true) }
@@ -224,8 +264,20 @@ class MainActivity: FlutterActivity() {
             } catch (_: Exception) {
             }
         }
+        val manager = audioManager
         @Suppress("DEPRECATION")
-        audioManager?.abandonAudioFocus(null)
+        manager?.abandonAudioFocus(null)
+        if (manager != null && pcmVoiceCall) {
+            // 통화 모드를 남겨 두면 앱의 다른 소리(TTS·효과음)까지 통화 경로로
+            // 나가고 볼륨 키도 통화 볼륨을 잡는다. 반드시 되돌린다.
+            try {
+                @Suppress("DEPRECATION")
+                manager.isSpeakerphoneOn = savedSpeakerphoneOn
+                manager.mode = savedAudioMode
+            } catch (_: Exception) {
+            }
+        }
+        pcmVoiceCall = false
         audioManager = null
     }
 
