@@ -50,6 +50,7 @@ import 'routine_mode_anyone.dart' show AnyonePreparedAudioCapture;
 // ============================================================================
 const String kDuoModeDirect = 'direct';
 const String kDuoModeInterpreter = 'interpreter';
+const String kInterpreterPartnerTtsVoice = 'alloy';
 
 class RoutineModeDuo extends StatefulWidget {
   const RoutineModeDuo({
@@ -289,16 +290,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       voice: voice,
       enableStreamingPlayback: true,
       onStreamingAudioStart: () {
-        if (!mounted ||
-            _isExiting ||
-            !identical(_activeDuoRealtime, session)) {
+        if (!mounted || _isExiting || !identical(_activeDuoRealtime, session)) {
           return;
         }
         _setDuoState('playing');
         BillingTicker.instance.resumeFromActivity('duo_realtime_audio_start');
       },
-      onLog: (tag, message) =>
-          debugPrint('[Duo][Realtime] $tag $message'),
+      onLog: (tag, message) => debugPrint('[Duo][Realtime] $tag $message'),
     );
     return session;
   }
@@ -685,8 +683,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       // ② 릴레이 접속. 회원이면 ID 토큰을 같이 보내 서버가 uid 소유를 확인한다.
       String idToken = '';
       try {
-        idToken =
-            await FirebaseAuth.instance.currentUser?.getIdToken() ?? '';
+        idToken = await FirebaseAuth.instance.currentUser?.getIdToken() ?? '';
       } catch (_) {}
       if (!_isDirectGenerationCurrent(generation)) return;
       final relay = DuoPcmRelayClient(
@@ -732,8 +729,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       // ④ 마이크 한 개를 열어 두 갈래로 흘린다.
       final capture = await AnyonePreparedAudioCapture.start(
         recorder: _audioRecorder,
-        onRecordingStarted: (at) =>
-            _lgDuo('[PCM_CAPTURE]', 'recording_started at=${at.toIso8601String()}'),
+        onRecordingStarted: (at) => _lgDuo(
+            '[PCM_CAPTURE]', 'recording_started at=${at.toIso8601String()}'),
         onFirstFrame: (at, byteCount) {
           _directCaptureFirstFrameAt = at;
           // 지터버퍼 크기를 정하려면 이 chunk 크기를 알아야 한다.
@@ -903,11 +900,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _partnerRelayConnected = false;
       _duoState = 'idle';
     }
-    _lgDuo('[DIRECT]',
+    _lgDuo(
+        '[DIRECT]',
         'call_stopped reason=$reason relayRttMs=${relay?.lastRoundTripMs} '
-        'playFirstLatencyMs=${player?.firstPlayLatencyMs} '
-        'sentBytes=${relay?.sentBytes} recvBytes=${relay?.receivedBytes} '
-        'playedBytes=${player?.writtenBytes} droppedBytes=${player?.droppedBytes}');
+            'playFirstLatencyMs=${player?.firstPlayLatencyMs} '
+            'sentBytes=${relay?.sentBytes} recvBytes=${relay?.receivedBytes} '
+            'playedBytes=${player?.writtenBytes} droppedBytes=${player?.droppedBytes}');
   }
 
   Future<void> _startWhisperRecording() async {
@@ -1120,14 +1118,12 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
 
     if (!useRealtime) {
       final fallback = await fallbackFuture;
-      final fallbackTarget =
-          (fallback?['target'] ?? '').trim().isNotEmpty
-              ? fallback!['target']!.trim()
-              : raw;
-      final fallbackOriginal =
-          (fallback?['original'] ?? '').trim().isNotEmpty
-              ? fallback!['original']!.trim()
-              : originalFallback;
+      final fallbackTarget = (fallback?['target'] ?? '').trim().isNotEmpty
+          ? fallback!['target']!.trim()
+          : raw;
+      final fallbackOriginal = (fallback?['original'] ?? '').trim().isNotEmpty
+          ? fallback!['original']!.trim()
+          : originalFallback;
       return _DuoResolvedTurn(
         target: fallbackTarget,
         original: fallbackOriginal,
@@ -1180,14 +1176,12 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       session.cancel();
     }
 
-    final fallbackTarget =
-        (fallback?['target'] ?? '').trim().isNotEmpty
-            ? fallback!['target']!.trim()
-            : raw;
-    final fallbackOriginal =
-        (fallback?['original'] ?? '').trim().isNotEmpty
-            ? fallback!['original']!.trim()
-            : originalFallback;
+    final fallbackTarget = (fallback?['target'] ?? '').trim().isNotEmpty
+        ? fallback!['target']!.trim()
+        : raw;
+    final fallbackOriginal = (fallback?['original'] ?? '').trim().isNotEmpty
+        ? fallback!['original']!.trim()
+        : originalFallback;
 
     debugPrint(
       '[Duo][Realtime] resolved generation=$generation '
@@ -1224,8 +1218,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
           await session.playbackDone;
         } else if (turn.realtimeWav?.isNotEmpty ?? false) {
           _setDuoState('playing');
-          BillingTicker.instance
-              .resumeFromActivity('duo_realtime_audio_start');
+          BillingTicker.instance.resumeFromActivity('duo_realtime_audio_start');
           await _playSerialized(turn.realtimeWav);
         }
         BillingTicker.instance.resumeFromActivity('duo_realtime_audio_end');
@@ -1270,8 +1263,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       voice: _myVoice(),
       originalFallback: finalTranscript,
       useRealtime: useRealtime,
-      prewarmed:
-          useRealtime ? _takePrewarmedDuoRealtime(_myVoice()) : null,
+      prewarmed: useRealtime ? _takePrewarmedDuoRealtime(_myVoice()) : null,
     );
 
     if (!_isConversationActive || _turnCounter != currentTurnId) return;
@@ -1436,16 +1428,18 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
 
     final String myTarget = _myTarget();
     final String myNative = _myNative();
-    final bool useRealtime = ++_duoConversationTurnCounter == 1;
+    // 만능 통역에서 상대 발화는 첫 턴도 Realtime 음성을 쓰지 않는다.
+    // 아래 폴백 경로가 `/v1/audio/speech`의 tts-1 + alloy를 일관되게 사용한다.
+    ++_duoConversationTurnCounter;
 
     final resolved = await _resolveDuoTurn(
       raw: raw,
       srcLang: srcLang,
       targetLang: myTarget,
       nativeLang: myNative,
-      voice: 'nova',
+      voice: kInterpreterPartnerTtsVoice,
       originalFallback: '',
-      useRealtime: useRealtime,
+      useRealtime: false,
     );
 
     if (!mounted || _isExiting) return;
@@ -1462,13 +1456,13 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     }
     await _saveHistoryMessage(tgt, org, 'SYSTEM');
 
-    // 세션 첫 PTT면 Realtime, 이후 상대 발화는 기존 nova TTS-1로 재생한다.
+    // 상대 발화는 모든 턴에서 tts-1 + alloy로 재생한다.
     _rememberGenerated(tgt);
     _rememberGenerated(org);
     if (_isConversationActive && !_isExiting) {
       await _playDuoResolvedTurn(
         resolved,
-        fallbackVoice: 'nova',
+        fallbackVoice: kInterpreterPartnerTtsVoice,
       );
     }
     // 🆕 [PTT] 상대 발화 재생 후에도 자동 재녹음 금지 — 쿨다운 후 대기 복귀
@@ -2114,9 +2108,8 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
   static String _modeTitle(String mode) =>
       mode == kDuoModeDirect ? '직접 대화' : '만능 통역';
 
-  static String _modeDesc(String mode) => mode == kDuoModeDirect
-      ? '서로의 실제 목소리로 통화합니다.'
-      : '상대의 말을 통역 음성으로 들려줍니다.';
+  static String _modeDesc(String mode) =>
+      mode == kDuoModeDirect ? '서로의 실제 목소리로 통화합니다.' : '상대의 말을 통역 음성으로 들려줍니다.';
 
   /// 🆕 [모드 선택 — 호스트 전용] 초대장을 만들기 직전에 뜬다.
   /// 여기서 고른 값만이 세션 문서의 `mode`가 된다.
@@ -2124,96 +2117,230 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     String picked = _duoMode;
     return showDialog<String>(
       context: context,
-      barrierColor: Colors.black54,
+      barrierColor: Colors.black.withValues(alpha: 0.72),
       builder: (ctx) => StatefulBuilder(builder: (ctx, setS) {
         Widget tile(String mode) {
           final bool selected = picked == mode;
-          return GestureDetector(
-            behavior: HitTestBehavior.opaque,
+          final bool isDirect = mode == kDuoModeDirect;
+          return InkWell(
+            borderRadius: BorderRadius.circular(18),
             onTap: () => setS(() => picked = mode),
             child: AnimatedContainer(
-              duration: const Duration(milliseconds: 160),
-              margin: const EdgeInsets.only(bottom: 10),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOutCubic,
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: selected
-                    ? const Color(0xFF2563EB).withValues(alpha: 0.18)
-                    : Colors.black.withValues(alpha: 0.4),
-                borderRadius: BorderRadius.circular(14),
+                    ? const Color(0xFF253B63)
+                    : const Color(0xFF2A3445),
+                borderRadius: BorderRadius.circular(18),
                 border: Border.all(
-                    color: selected ? const Color(0xFF2563EB) : Colors.white24,
-                    width: selected ? 1.6 : 1.0),
-              ),
-              child: Row(children: [
-                Icon(
-                    selected
-                        ? Icons.radio_button_checked
-                        : Icons.radio_button_off,
-                    size: 20,
-                    color: selected
-                        ? const Color(0xFF60A5FA)
-                        : Colors.white38),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(_modeTitle(mode),
-                          style: TextStyle(
-                              color: selected ? Colors.white : Colors.white70,
-                              fontSize: 15,
-                              fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 3),
-                      Text(_modeDesc(mode),
-                          style: const TextStyle(
-                              color: Colors.white38,
-                              fontSize: 12,
-                              height: 1.3)),
-                    ],
-                  ),
+                  color: selected
+                      ? const Color(0xFF5B9BFF)
+                      : const Color(0xFF445066),
+                  width: selected ? 1.8 : 1.0,
                 ),
-              ]),
+                boxShadow: selected
+                    ? [
+                        BoxShadow(
+                          color:
+                              const Color(0xFF2563EB).withValues(alpha: 0.22),
+                          blurRadius: 18,
+                          offset: const Offset(0, 6),
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? const Color(0xFF3B82F6)
+                          : const Color(0xFF39465B),
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                    child: Icon(
+                      isDirect ? Icons.call_rounded : Icons.translate_rounded,
+                      size: 23,
+                      color: selected ? Colors.white : const Color(0xFFB9C5D8),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _modeTitle(mode),
+                          style: const TextStyle(
+                            color: Color(0xFFF8FAFC),
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.2,
+                          ),
+                        ),
+                        const SizedBox(height: 5),
+                        Text(
+                          _modeDesc(mode),
+                          style: const TextStyle(
+                            color: Color(0xFFBCC7D9),
+                            fontSize: 13,
+                            height: 1.45,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 160),
+                      child: Icon(
+                        selected
+                            ? Icons.check_circle_rounded
+                            : Icons.circle_outlined,
+                        key: ValueKey(selected),
+                        size: 23,
+                        color: selected
+                            ? const Color(0xFF69A7FF)
+                            : const Color(0xFF718096),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           );
         }
 
-        return AlertDialog(
-          backgroundColor: const Color(0xFF1C1C1E),
-          shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20),
-              side: const BorderSide(color: Color(0xFF2563EB), width: 1.2)),
-          title: const Text('대화 방식 선택',
-              style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold)),
-          contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-          content: Column(mainAxisSize: MainAxisSize.min, children: [
-            tile(kDuoModeDirect),
-            tile(kDuoModeInterpreter),
-            const Align(
-              alignment: Alignment.centerLeft,
-              child: Text('상대는 이 방식으로 초대됩니다.',
-                  style: TextStyle(color: Colors.white38, fontSize: 11)),
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding:
+              const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: const Color(0xFF202938),
+                borderRadius: BorderRadius.circular(26),
+                border: Border.all(color: const Color(0xFF3C4A60)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.42),
+                    blurRadius: 32,
+                    offset: const Offset(0, 16),
+                  ),
+                ],
+              ),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '대화 방식 선택',
+                      style: TextStyle(
+                        color: Color(0xFFF8FAFC),
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      '초대할 대화 방식을 골라주세요.',
+                      style: TextStyle(
+                        color: Color(0xFFAEBACD),
+                        fontSize: 13,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    tile(kDuoModeDirect),
+                    tile(kDuoModeInterpreter),
+                    const SizedBox(height: 2),
+                    const Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: EdgeInsets.only(top: 1),
+                          child: Icon(
+                            Icons.info_outline_rounded,
+                            size: 16,
+                            color: Color(0xFF91A1B8),
+                          ),
+                        ),
+                        SizedBox(width: 7),
+                        Expanded(
+                          child: Text(
+                            '상대방도 선택한 방식으로 초대됩니다.',
+                            style: TextStyle(
+                              color: Color(0xFFAEBACD),
+                              fontSize: 12,
+                              height: 1.4,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 22),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextButton(
+                            style: TextButton.styleFrom(
+                              foregroundColor: const Color(0xFFCBD5E1),
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(13),
+                              ),
+                            ),
+                            onPressed: () => Navigator.pop(ctx),
+                            child: const Text(
+                              '취소',
+                              style: TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          flex: 2,
+                          child: ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              elevation: 0,
+                              backgroundColor: const Color(0xFF3478F6),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(13),
+                              ),
+                            ),
+                            onPressed: () => Navigator.pop(ctx, picked),
+                            icon: const Icon(
+                              Icons.person_add_alt_1_rounded,
+                              size: 19,
+                            ),
+                            label: const Text(
+                              '초대하기',
+                              style: TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
             ),
-          ]),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child:
-                  const Text('취소', style: TextStyle(color: Colors.white54)),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF2563EB),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10))),
-              onPressed: () => Navigator.pop(ctx, picked),
-              child: const Text('초대하기',
-                  style: TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.bold)),
-            ),
-          ],
+          ),
         );
       }),
     );
