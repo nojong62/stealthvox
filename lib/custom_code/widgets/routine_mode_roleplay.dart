@@ -52,7 +52,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
-import '/custom_code/services/korean_turn_validator.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
 import '/custom_code/services/openai_streaming_transcribe_prewarm.dart';
 import '/custom_code/services/openai_streaming_transcribe_session.dart';
@@ -237,37 +236,18 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
     );
   }
 
-  /// 👂 되묻기 문구. 세 모드가 같은 한 문장을 쓴다 — 전사 검증에서 걸리든
-  /// 모델이 스스로 되묻든 유저에게는 똑같이 들려야 한다. 태그는 쓸 수 없어
-  /// (음성으로 새어 나간다) 고정 문장 자체가 신호다. [_isAskBackReply] 참조.
-  static const String kScenarioAskBackLine = KoreanTurnValidator.retryLine;
-
-  /// 되묻기 판정용. Step Expand와 같은 방식으로 공백을 지운 앞머리에서
-  /// 특징 어절을 찾는다.
-  ///
-  /// ⚠️ 원어가 한국어가 아니면 모델은 그 언어로 되묻고 이 매칭이 빗나간다.
-  /// 그때는 되묻는 말은 정상적으로 나가지만 유저 발화가 화면·히스토리에
-  /// 남는다. 다국어 STT를 붙일 때 세 모드를 같이 해결한다.
-  static String _askBackProbe(String text) {
-    final compact = text.replaceAll(RegExp(r'\s'), '');
-    return compact.length > 24 ? compact.substring(0, 24) : compact;
-  }
-
-  static bool _isAskBackReply(String text) {
-    final probe = _askBackProbe(text);
-    return probe.contains('잘못들') || probe.contains('잘못알아들');
-  }
+  /// 👂 세 모드 공통 내부 신호만 판정한다. 실제 질문 문장은 ORIGIN 언어로
+  /// 생성되며, 화면·TTS·히스토리에 전달하기 전에 신호를 제거한다.
+  static bool _isAskBackReply(String text) => hasHeardConfirmSignal(text);
 
   String _buildScenarioMemberInstructions() {
     final nativeLang = resolveNativeLanguageName(FFAppState().nativeLang);
     final registerPolicy = nativeLang == 'Korean'
         ? kKoreanPoliteSpeechPolicy
         : 'Use the everyday polite spoken register of $nativeLang unless the established roles clearly require another register.';
-    final askBackLine = nativeLang == 'Korean'
-        ? kScenarioAskBackLine
-        : 'the $nativeLang equivalent of "I think I misheard what you just said. Could you say it again?" — one plain spoken sentence, nothing else';
+    final askBackOutputRule = buildHeardConfirmOutputRule(nativeLang);
     return '''
-You are the assigned character inside a live Korean scenario conversation.
+You are the assigned character inside a live $nativeLang scenario conversation.
 Situation: ${_scenarioSituation.trim()}
 Your role: ${_roleplayPartnerLabel.trim()}
 User role: ${_roleplayUserLabel.trim()}
@@ -299,9 +279,9 @@ the subject, or saying something the scene has not mentioned is normal talk, not
 a recognition error. Do NOT answer, and do NOT repair it by guessing, only when:
 - The line does not hold together as $nativeLang, or breaks off mid-thought.
 - A word sits so oddly that the meaning cannot be recovered from this scene.
-In that case reply with EXACTLY this one line and nothing else:
-$askBackLine
-Say nothing before or after it. Do not stay in character for this one line, and
+In that case follow this output format exactly:
+$askBackOutputRule
+Say nothing before or after those two lines. Do not stay in character for the question, and
 do not add a reaction or a question of your own. Once the user says it again,
 continue the scene from their new words as if the unclear line had never been
 said. Never build the scene on a line you had to guess.
@@ -1930,7 +1910,10 @@ never by itself a reason to ask back.
             _localMessages.remove(hostBubble);
           });
           _log('[ASK-BACK]', 'turn=$turnNumber 되묻기 → 유저 발화 폐기(화면/히스토리 미기록)');
-          await _speakKoreanLine(replyKorean);
+          final spokenQuestion = stripHeardConfirmSignal(replyKorean);
+          await _speakKoreanLine(spokenQuestion.isEmpty
+              ? originRetryLine(_nativeLangName())
+              : spokenQuestion);
           return;
         }
       } else {
@@ -2246,15 +2229,16 @@ never by itself a reason to ask back.
         }
         // 👂 [HEARD-CONFIRM] 전사가 깨져 뜻을 복원할 수 없음
         //   → 추측 번역 금지. 화면에 적기 전에 말로 먼저 확인한다.
-        if (!heardConfirmation &&
-            (userTargetText.contains("[HEARD_CONFIRM]") ||
-                userTargetText.trimLeft().startsWith('제가 잘못 들었나요?'))) {
+        if (!heardConfirmation && hasHeardConfirmSignal(userTargetText)) {
           heardConfirmation = true;
           _log('[HEARD-CONFIRM]', '단어 확인 필요 → 스트림 완료 후 처리 예정');
         }
         // 되묻기/확인 중에는 유저 버블에 아무것도 쓰지 않는다. 이 텍스트는
         // 유저가 한 말이 아니라 AI의 되물음이라 그대로 적으면 오해를 만든다.
-        if (mounted && !clarified && !heardConfirmation)
+        if (mounted &&
+            !clarified &&
+            !heardConfirmation &&
+            !isHeardConfirmSignalPrefix(userTargetText))
           setState(() =>
               _localMessages[hostIndex]['target'] = _cleanText(userTargetText));
         _scrollToCurrentTop(hostIndex);
@@ -2490,32 +2474,18 @@ never by itself a reason to ask back.
       //   추측해서 적어 놓으면 유저는 자기가 하지도 않은 말을 보게 된다.
       if (heardConfirmation) {
         _turnCounter--;
-        // 프롬프트가 확인 문장을 통째로 낸 경우와 [HEARD_CONFIRM] 태그 뒤에
-        // 의심 단어만 낸 경우 둘 다 받는다.
-        final spokenPrompt = userTargetText.trimLeft().startsWith('제가 잘못 들었나요?')
-            ? userTargetText.trim().replaceAll(RegExp(r'[\r\n]+'), ' ')
-            : '';
-        final candidate = spokenPrompt.isNotEmpty
-            ? ''
-            : userTargetText
-                .replaceFirst(RegExp(r'^.*?\[HEARD_CONFIRM\]\s*'), '')
-                .trim()
-                .replaceAll(RegExp(r'[\r\n]+'), ' ');
+        final spokenPrompt = stripHeardConfirmSignal(userTargetText)
+            .replaceAll(RegExp(r'[\r\n]+'), ' ');
         _pendingHeardConfirmation = finalTranscript.trim();
         _heardConfirmationAttempts++;
         // 두 번 되물어도 안 풀리면 단어 확인을 접고 통째로 다시 말해 달라고 한다.
         // 세 번째부터는 되묻기가 대화를 막는 쪽으로 작동하기 때문이다.
         final tooManyAttempts = _heardConfirmationAttempts > 2 ||
             _pendingHeardConfirmation!.isEmpty ||
-            (candidate.isEmpty && spokenPrompt.isEmpty);
-        final prompt = tooManyAttempts
-            ? '죄송해요. 문장을 조금 천천히 다시 말씀해 주세요.'
-            : spokenPrompt.isNotEmpty
-                ? spokenPrompt
-                : "제가 잘못 들었나요? '$candidate'라고 말씀하신 게 맞나요?";
-        final promptTarget = tooManyAttempts
-            ? 'Sorry. Please say the sentence again a little more slowly.'
-            : "Did I hear you correctly? Did you say '$candidate'?";
+            spokenPrompt.isEmpty;
+        final prompt =
+            tooManyAttempts ? originRetryLine(_nativeLangName()) : spokenPrompt;
+        final promptTarget = prompt;
         if (tooManyAttempts) {
           _pendingHeardConfirmation = null;
           _heardConfirmationAttempts = 0;
@@ -5177,7 +5147,7 @@ If the user replaces the previous utterance, output [CORRECTION]. If they only
 complain that it was misheard, output [MISHEARD]. If they step out of character
 to reject the AI's last reply without replacement content, output [DISSATISFIED].
 ${isCorrectionRetry ? 'This is a correction retry: strip correction framing and output only the corrected content; never output a bracketed tag.' : ''}
-${disableHeardConfirmation ? 'The wording was confirmed; do not ask for confirmation again.' : 'If a core word is unrecoverable, ask one short specific confirmation question in $originLang.'}
+${disableHeardConfirmation ? 'The wording was confirmed; do not ask for confirmation again.' : 'If a core word is unrecoverable, ${buildHeardConfirmOutputRule(originLang)}'}
 If a referent is genuinely ambiguous, output [CLARIFY] followed by one short
 in-character question in $originLang. For noise output [EVAPORATE]. Otherwise
 output only natural $targetLang.''';
@@ -5233,9 +5203,10 @@ Do NOT translate, and do NOT repair it by guessing, when any of these holds:
 - A word sits so oddly that the intended meaning cannot be recovered from the scenario and the conversation so far.
 - Making it make sense would require you to invent a subject, object, or verb that the context does not supply.
 
-In that case output EXACTLY in Korean: 제가 잘못 들었나요? '<the exact word or short phrase you doubt>'라고 말씀하신 게 맞나요?
+In that case:
+${buildHeardConfirmOutputRule(originLang)}
 
-This one line is spoken OUT of character on purpose. Checking what you heard is not a scene break — translating something the user never said is.
+The question is spoken OUT of character on purpose. Checking what you heard is not a scene break — translating something the user never said is.
 
 Being short is NOT by itself a reason to ask — "먼저 시켜놔." is complete and clear. Ask only when the text itself does not hold together. Accents, fillers, and casual grammar are fine; translate those normally.
 

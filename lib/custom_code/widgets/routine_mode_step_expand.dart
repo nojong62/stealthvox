@@ -413,17 +413,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     );
   }
 
-  /// 👂 되묻기 고정 문장(한국어). 이 문장이 그대로 TTS로 나가므로 [CLARIFY]
-  /// 같은 태그를 쓰면 태그가 소리로 새어 나간다. 그래서 태그 대신 이 문장
-  /// 자체를 신호로 쓴다 — [_isAskBackReply]가 이 문장을 보고 되묻기를 알아챈다.
-  ///
-  /// ⚠️ 원어가 한국어가 아니면 모델은 그 언어로 되묻고, 아래 [_isAskBackReply]
-  /// 의 한국어 어절 매칭이 빗나간다. 그때는 되묻는 말은 정상적으로 나가지만
-  /// 유저 발화가 화면·히스토리에 남는다. 다국어 STT를 붙일 때 같이 해결한다.
-  /// 되묻기는 세 모드가 한 문장만 쓴다. 전사 검증 실패든, 문장 합치기 실패든,
-  /// 모델이 스스로 되묻든 유저에게는 똑같이 들려야 한다.
-  static const String kStepExpandAskBackLine = KoreanTurnValidator.retryLine;
-
   /// 🌱 마지막 턴 고정 마무리 문장. 마지막 턴에는 더 물을 것이 없어 되묻기가
   /// 의미를 잃는데, "묻지 말라"는 지시에도 모델이 되묻는 말을 내놓을 때가 있다.
   /// 그대로 두면 [_isAskBackReply]가 턴을 되돌려 완성문장이 영영 나오지 않으므로,
@@ -438,9 +427,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand> {
     final registerPolicy = nativeLang == 'Korean'
         ? kKoreanPoliteSpeechPolicy
         : 'Use the everyday polite spoken register of $nativeLang unless the user clearly establishes another register.';
-    final askBackLine = nativeLang == 'Korean'
-        ? kStepExpandAskBackLine
-        : 'the $nativeLang equivalent of "I think I misheard what you just said. Could you say it again?" — one plain spoken sentence, nothing else';
+    final askBackOutputRule = buildHeardConfirmOutputRule(nativeLang);
     return '''
 You are the conversation partner for Step Expand practice.
 
@@ -516,9 +503,9 @@ Do NOT answer, and do NOT repair it by guessing, when any of these holds:
 - The line does not hold together as $nativeLang, or breaks off mid-thought.
 - A word sits so oddly that the meaning cannot be recovered from this session.
 - Making it make sense would require inventing a subject, object, or verb.
-In that case reply with EXACTLY this one line and nothing else:
-$askBackLine
-Say nothing before or after it. Do not add a reaction or a question of your own.
+In that case follow this output format exactly:
+$askBackOutputRule
+Say nothing before or after those two lines. Do not add a reaction or another question.
 Being short is not by itself a reason to ask back — a clear short line is fine.
 Once the user says it again, continue from their new words as if the unclear
 line had never been said. Never build the conversation on a line you had to guess.
@@ -1844,6 +1831,10 @@ line had never been said. Never build the conversation on a line you had to gues
     final guide = await StepExpandBrain.generateSeedGuidance(
       apiKey: _openAiKey,
       rejectedText: rejectedText,
+      originLang: _nativeLangName(),
+      targetLang: FFAppState().targetLang.isNotEmpty
+          ? FFAppState().targetLang
+          : 'English',
     );
     if (!mounted ||
         !_isConversationActive ||
@@ -1853,10 +1844,10 @@ line had never been said. Never build the conversation on a line you had to gues
     }
     final englishQuestion = guide['english_question']?.trim().isNotEmpty == true
         ? guide['english_question']!.trim()
-        : 'What specific moment would you like to describe?';
+        : localizedSeedGuidanceLine(FFAppState().targetLang);
     final koreanQuestion = guide['korean_question']?.trim().isNotEmpty == true
         ? guide['korean_question']!.trim()
-        : '어떤 구체적인 순간을 말해 볼까요?';
+        : localizedSeedGuidanceLine(_nativeLangName());
     setState(() {
       _localMessages.removeWhere((message) =>
           message['role'] == 'HOST_TEMP' || message['seed_guide'] == true);
@@ -2632,7 +2623,7 @@ line had never been said. Never build the conversation on a line you had to gues
           setState(() {
             _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
           });
-          await _speakLiveKorean(KoreanTurnValidator.retryLine);
+          await _speakLiveKorean(originRetryLine(_nativeLangName()));
           if (mounted && _isConversationActive && !_isSessionComplete) {
             _startUserListening();
           }
@@ -2823,7 +2814,7 @@ line had never been said. Never build the conversation on a line you had to gues
           _turnCounter--;
           // 되묻기는 소리로만 나간다(위 검증 반려와 같은 이유).
           _log('[EXPAND-UNCLEAR]', 'turn=$turnNumber 되묻기 → 유저 발화 보류');
-          await _speakLiveKorean(kStepExpandAskBackLine);
+          await _speakLiveKorean(originRetryLine(_nativeLangName()));
           return;
         }
         if (mergeResult.failedOpen || merged.isEmpty) {
@@ -2953,7 +2944,10 @@ line had never been said. Never build the conversation on a line you had to gues
           _localMessages.remove(hostBubble);
         });
         _log('[ASK-BACK]', 'turn=$turnNumber 되묻기 → 유저 발화 폐기(화면/히스토리 미기록)');
-        await _speakAiKorean(aiKorean);
+        final spokenQuestion = stripHeardConfirmSignal(aiKorean);
+        await _speakAiKorean(spokenQuestion.isEmpty
+            ? originRetryLine(_nativeLangName())
+            : spokenQuestion);
         return;
       }
 
@@ -3029,7 +3023,7 @@ line had never been said. Never build the conversation on a line you had to gues
         // 유저에게는 실패 원인이 아니라 다시 말해 달라는 말만 필요하고, 그
         // 말은 소리로만 나간다. 진짜 원인은 위 [GPT-PIPE-ERR] 로그에 남는다.
         // 글자로 남기면 API가 흔들린 턴마다 말풍선이 쌓인다.
-        await _speakLiveKorean(kStepExpandAskBackLine);
+        await _speakLiveKorean(originRetryLine(_nativeLangName()));
       }
     } finally {
       _aiTurnActive = false;
@@ -3073,17 +3067,8 @@ line had never been said. Never build the conversation on a line you had to gues
         'answer can attach to. $focus';
   }
 
-  /// 되묻기 판정용. 태그를 쓸 수 없어(음성으로 샌다) 고정 문장의 특징 어절로
-  /// 판단한다.
-  static String _askBackProbe(String text) {
-    final compact = text.replaceAll(RegExp(r'\s'), '');
-    return compact.length > 24 ? compact.substring(0, 24) : compact;
-  }
-
-  static bool _isAskBackReply(String text) {
-    final probe = _askBackProbe(text);
-    return probe.contains('잘못들') || probe.contains('잘못알아들');
-  }
+  /// 되묻기 판정은 언어와 무관한 공통 내부 신호만 사용한다.
+  static bool _isAskBackReply(String text) => hasHeardConfirmSignal(text);
 
   // ====================================================================
   // 🚀 [SPEC-FIRST-TURN] 첫 턴(seed) 투기적 선(先)시작
@@ -3197,6 +3182,7 @@ line had never been said. Never build the conversation on a line you had to gues
       turnNumber: _turnCounter,
       maxTurns: MAX_TURNS,
       myTarget: targetLangName,
+      originLang: _nativeLangName(),
       userId: FirebaseAuth.instance.currentUser?.uid ?? '',
       isRetry: !isDifferent && !isMisheard,
       isDifferent: isDifferent,
@@ -3612,9 +3598,7 @@ line had never been said. Never build the conversation on a line you had to gues
           clarified = true;
           _log('❓ [CLARIFY]', '되묻기 감지 → 스트림 완료 후 처리 예정');
         }
-        if (!heardConfirmation &&
-            (userTargetText.contains("[HEARD_CONFIRM]") ||
-                userTargetText.trimLeft().startsWith('제가 잘못 들었나요?'))) {
+        if (!heardConfirmation && hasHeardConfirmSignal(userTargetText)) {
           heardConfirmation = true;
           _log('[HEARD-CONFIRM]', '단어 확인 필요');
         }
@@ -3635,6 +3619,7 @@ line had never been said. Never build the conversation on a line you had to gues
         if (mounted &&
             !clarified &&
             !heardConfirmation &&
+            !isHeardConfirmSignalPrefix(userTargetText) &&
             hostIndex < _localMessages.length) {
           setState(() => _localMessages[hostIndex]['target'] = userTargetText);
         }
@@ -3851,28 +3836,16 @@ line had never been said. Never build the conversation on a line you had to gues
       if (heardConfirmation) {
         await _deleteLastExchangeFromHistory();
         _turnCounter--;
-        final spokenPrompt = userTargetText.trimLeft().startsWith('제가 잘못 들었나요?')
-            ? userTargetText.trim().replaceAll(RegExp(r'[\r\n]+'), ' ')
-            : '';
-        final candidate = spokenPrompt.isNotEmpty
-            ? ''
-            : userTargetText
-                .replaceFirst(RegExp(r'^.*?\[HEARD_CONFIRM\]\s*'), '')
-                .trim()
-                .replaceAll(RegExp(r'[\r\n]+'), ' ');
+        final spokenPrompt = stripHeardConfirmSignal(userTargetText)
+            .replaceAll(RegExp(r'[\r\n]+'), ' ');
         _pendingHeardConfirmation = finalTranscript.trim();
         _heardConfirmationAttempts++;
         final tooManyAttempts = _heardConfirmationAttempts > 2 ||
             _pendingHeardConfirmation!.isEmpty ||
-            (candidate.isEmpty && spokenPrompt.isEmpty);
-        final prompt = tooManyAttempts
-            ? '죄송해요. 문장을 조금 천천히 다시 말씀해 주세요.'
-            : spokenPrompt.isNotEmpty
-                ? spokenPrompt
-                : "제가 잘못 들었나요? '$candidate'라고 말씀하신 게 맞나요?";
-        final promptTarget = tooManyAttempts
-            ? 'Sorry. Please say the sentence again a little more slowly.'
-            : "Did I hear you correctly? Did you say '$candidate'?";
+            spokenPrompt.isEmpty;
+        final prompt =
+            tooManyAttempts ? originRetryLine(_nativeLangName()) : spokenPrompt;
+        final promptTarget = prompt;
         if (tooManyAttempts) {
           _pendingHeardConfirmation = null;
           _heardConfirmationAttempts = 0;
@@ -4115,6 +4088,7 @@ line had never been said. Never build the conversation on a line you had to gues
         turnNumber: _turnCounter,
         maxTurns: MAX_TURNS,
         myTarget: targetLangName, // 🌐 [v3.1] 유저가 선택한 타겟 언어
+        originLang: _nativeLangName(),
         userId: FirebaseAuth.instance.currentUser?.uid ?? '',
       );
 
@@ -6364,7 +6338,7 @@ Judge correction, mishearing, and dissatisfaction by intent, not fixed phrases.
 Use [CORRECTION] when the user replaces the prior utterance, [MISHEARD] for a bare
 mishearing complaint, and [DISSATISFIED] only when they reject the AI question.
 ${disableCorrection ? 'This is a correction retry: strip correction framing and output only corrected content; do not emit correction tags.' : ''}
-${disableHeardConfirmation ? 'The wording was confirmed; do not ask again.' : 'If a core word is unrecoverable, ask one short confirmation question in $originLang.'}
+${disableHeardConfirmation ? 'The wording was confirmed; do not ask again.' : 'If a core word is unrecoverable, ${buildHeardConfirmOutputRule(originLang)}'}
 
 When History is empty, output one natural $targetLang seed sentence only.
 When History exists, output exactly two parts separated by a blank line: first
@@ -6403,7 +6377,7 @@ $correctionBlock
 
 [HEARING CONFIDENCE GUARD — CHECK BEFORE TRANSLATING]
 ${disableHeardConfirmation ? "The user has explicitly confirmed the previously heard wording. Do NOT ask another hearing-confirmation question for this turn." : """If one important word or short phrase in the utterance is genuinely uncertain because the audio/transcription could plausibly represent another word, do not guess and do not grow the sentence yet.
-Output EXACTLY in Korean: 제가 잘못 들었나요? '<the exact word or short phrase you think you heard>'라고 말씀하신 게 맞나요?
+${buildHeardConfirmOutputRule(originLang)}
 Use this only when the uncertain wording changes the core meaning. Do not use it for accents, fillers, minor grammar, or wording whose meaning is recoverable from History."""}
 
 [KOREAN BODY IDIOM GUIDE — physical, not emotional]
@@ -6703,10 +6677,12 @@ Return only the question text.'''
   static Future<Map<String, String>> generateSeedGuidance({
     required String apiKey,
     required String rejectedText,
+    required String originLang,
+    required String targetLang,
   }) async {
-    const fallback = <String, String>{
-      'english_question': 'What specific moment would you like to describe?',
-      'korean_question': '어떤 구체적인 순간을 말해 볼까요?',
+    final fallback = <String, String>{
+      'english_question': localizedSeedGuidanceLine(targetLang),
+      'korean_question': localizedSeedGuidanceLine(originLang),
     };
     if (apiKey.isEmpty) return fallback;
     final client = http.Client();
@@ -6727,12 +6703,12 @@ Return only the question text.'''
                 {
                   'role': 'system',
                   'content':
-                      '''You guide a Korean user to provide one usable seed statement for Step Expand.
+                      '''You guide a $originLang user to provide one usable seed statement for Step Expand.
 The previous utterance was too vague, fragmentary, meta, or otherwise unsuitable as a sentence seed.
 Ask exactly ONE short, low-pressure question that helps the user say a concrete action, event, thought, feeling, or intention as a complete statement.
 Use any meaningful topic in their utterance, but never quote, display, judge, or save the rejected utterance.
-The Korean question must be natural 해요체, 4–10 spacing units, with no reaction or preamble.
-Return only JSON: {"english_question":"...","korean_question":"..."}.'''
+The target-language question must be natural $targetLang. The spoken question must be natural, polite $originLang, with no reaction or preamble.
+Return only JSON: {"english_question":"<$targetLang question>","korean_question":"<$originLang question>"}.'''
                 },
                 {
                   'role': 'user',
@@ -7038,6 +7014,7 @@ Return only JSON: {"english_question":"...","korean_question":"..."}.'''
     required int turnNumber,
     required int maxTurns,
     required String myTarget,
+    required String originLang,
     String userId = '',
     bool isRetry = false,
     bool isDifferent = false,
@@ -7090,7 +7067,7 @@ TRAILING relative clauses are fine and linear — a sentence-final, comma-led "w
 [RULES]
 - The user's lines in History may contain speech recognition errors due to unclear pronunciation. Infer the most likely intended meaning from context — do not quote garbled words literally.
 - Reflect the user's intended meaning. Do not invent new facts beyond reasonable inference.
-- Fluent, natural spoken English — not overly academic.
+- Fluent, natural spoken $myTarget — not overly academic.
 - Keep the sentence 25–40 words.
 - Each meaning unit should be speakable in one breath, usually 5–7 words.
 - Use commas or natural connectors to make breath groups clear.
@@ -7100,8 +7077,8 @@ TRAILING relative clauses are fine and linear — a sentence-final, comma-led "w
 [OUTPUT FORMAT - STRICT]
 Output EXACTLY two parts separated by ONE empty line.
 PART 1: "Expanded Sentence: " + your synthesized sentence (25–40 words) + newline + "Connectors used: [list]"
-PART 2: A natural Korean conversational translation of the synthesized sentence.
-PART 2 must use natural everyday Korean 해요체 throughout. Every sentence must end in polite -요 style. Never use casual speech or stiff -습니다/-습니까 style."""
+PART 2: A natural spoken $originLang version of the synthesized sentence.
+PART 2 must use the everyday polite spoken register of $originLang."""
           : """You are a Step Expand conversation guide. You are on turn $turnNumber of $maxTurns.
 
 Read the conversation History carefully.
@@ -7110,13 +7087,13 @@ Read the conversation History carefully.
 You are a warm, skilled conversation coach — not a grammar teacher. Your job is to ask ONE short, natural question that makes the user want to share one more detail about their story. The detail they share will naturally grow the sentence, but you NEVER mention grammar.
 
 [SESSION GOAL — HIGHEST PRIORITY]
-- The live conversation is in Korean, while the screen records the target-language English.
+- The live conversation is in $originLang, while the screen records $myTarget.
 - Across exactly five user turns, collect one useful sentence-building detail per turn and keep joining those details into one coherent expanded sentence.
 - Stay warmly focused on obtaining the next attachable detail. Do not drift into jokes, wordplay, trivia, long reactions, or entertaining banter that does not help complete the expanded sentence.
 - The user's LAST answer is the center of the next turn. Identify its single core action, feeling, reason, or result, then ask for the ONE missing detail that most directly grows the current expanded sentence.
 - Do not react to, praise, summarize, acknowledge, or answer the user's statement. Ask the next question only.
-- PART 2 is the actual Korean line spoken aloud to the user with the Marin voice. It must sound like natural, friendly Korean conversation, not a stiff literal translation.
-- PART 2 must always use natural everyday Korean 해요체. End every sentence politely in -요 style, even when the user speaks casually. Never use casual speech or stiff -습니다/-습니까 style.
+- PART 2 is the actual $originLang line spoken aloud to the user. It must sound like natural, friendly conversation, not a stiff literal translation.
+- PART 2 must use the everyday polite spoken register of $originLang.
 - PART 1 and PART 2 must ask the same single question and must not add different facts.
 
 [TWO-LAYER DESIGN — MANDATORY]
@@ -7169,7 +7146,7 @@ NEVER reveal this reasoning in the output.
 LAYER 2 — OUTPUT (the only thing you say):
 ONE question. 5 to 8 words. Warm and direct. No preamble.
 Output the question alone — nothing before it, nothing after it (except the PART 2 translation).
-PART 2 must also be ONE short Korean question only, preferably 4–8 Korean spacing units and never more than 12. No reaction sentence before it.
+PART 2 must also be ONE short $originLang question only. No reaction sentence before it.
 
 [TURN GOAL]
 $grammarHint
@@ -7342,8 +7319,8 @@ User: Too many deadlines piling up.
 
 [OUTPUT FORMAT - STRICT]
 Output EXACTLY two parts separated by ONE empty line.
-PART 1: Your English question (follow all rules above).
-PART 2: ONE short Korean question that will actually be spoken aloud. Keep the same meaning as PART 1, use natural everyday Korean 해요체, and end in -요. Prefer 4–8 Korean spacing units; never exceed 12. No acknowledgement, reaction, explanation, or second sentence.""";
+PART 1: Your $myTarget question (follow all rules above).
+PART 2: ONE short $originLang question that will actually be spoken aloud. Keep the same meaning as PART 1 and use the everyday polite spoken register of $originLang. No acknowledgement, reaction, explanation, or second sentence.""";
 
       final request = http.Request(
         'POST',

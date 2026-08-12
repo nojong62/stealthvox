@@ -243,6 +243,39 @@ void main() {
     });
   });
 
+  group('language-neutral heard confirmation', () {
+    test('detects only the structural first-line signal', () {
+      expect(
+        hasHeardConfirmSignal('[HEARD_CONFIRM]\nもう一度お願いします。'),
+        isTrue,
+      );
+      expect(hasHeardConfirmSignal('제가 잘못 들었나요?'), isFalse);
+      expect(hasHeardConfirmSignal('I may have misheard you.'), isFalse);
+    });
+
+    test('hides partial streamed signal and strips the complete signal', () {
+      expect(isHeardConfirmSignalPrefix('[HEARD_'), isTrue);
+      expect(isHeardConfirmSignalPrefix('[HEARD_CONFIRM]'), isTrue);
+      expect(isHeardConfirmSignalPrefix('普通の文です。'), isFalse);
+      expect(
+        stripHeardConfirmSignal('[HEARD_CONFIRM]\nDid you say "train"?'),
+        'Did you say "train"?',
+      );
+    });
+
+    test('provides short retry lines for supported origins', () {
+      expect(originRetryLine('Korean'), contains('다시'));
+      expect(originRetryLine('Japanese'), contains('もう一度'));
+      expect(originRetryLine('English'), contains('Please'));
+      expect(originRetryLine('unknown'), originRetryLine('English'));
+      expect(localizedSeedGuidanceLine('Japanese'), contains('出来事'));
+      expect(
+        localizedSeedGuidanceLine('unknown'),
+        localizedSeedGuidanceLine('English'),
+      );
+    });
+  });
+
   group('final transcript deduplication', () {
     test('ignores only an identical normalized final transcript', () {
       expect(

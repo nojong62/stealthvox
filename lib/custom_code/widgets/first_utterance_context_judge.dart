@@ -13,6 +13,99 @@ enum FirstUtteranceRoute { excluded, judge, bypass }
 
 const Duration kDuplicateFinalTranscriptWindow = Duration(milliseconds: 250);
 
+/// 언어와 무관한 내부 되묻기 제어 신호. 모델 출력의 첫 줄에서만 판정하고,
+/// 화면·TTS·히스토리에는 반드시 제거한 실제 질문만 전달한다.
+const String kHeardConfirmSignal = '[HEARD_CONFIRM]';
+
+bool hasHeardConfirmSignal(String text) =>
+    text.trimLeft().startsWith(kHeardConfirmSignal);
+
+bool isHeardConfirmSignalPrefix(String text) {
+  final prefix = text.trimLeft();
+  return prefix.isNotEmpty && kHeardConfirmSignal.startsWith(prefix);
+}
+
+String stripHeardConfirmSignal(String text) {
+  final trimmed = text.trimLeft();
+  if (!trimmed.startsWith(kHeardConfirmSignal)) return text.trim();
+  return trimmed
+      .substring(kHeardConfirmSignal.length)
+      .replaceFirst(RegExp(r'^\s*'), '')
+      .trim();
+}
+
+String buildHeardConfirmOutputRule(String originLanguage) {
+  final language = resolveNativeLanguageName(originLanguage);
+  return '''Output exactly two lines:
+$kHeardConfirmSignal
+<one short, specific confirmation question in $language>
+The first line is an internal control signal. Put the complete user-facing question on the second line.''';
+}
+
+/// 모델 결과를 쓸 수 없는 오류 경로용 짧은 재시도 문장.
+/// 로비가 제공하는 12개 ORIGIN만 관리하며 알 수 없는 값은 English로 안전 폴백한다.
+String originRetryLine(String originLanguage) {
+  switch (resolveNativeLanguageName(originLanguage).toLowerCase()) {
+    case 'korean':
+      return '제가 잘못 들은 것 같아요. 다시 말씀해 주세요.';
+    case 'japanese':
+      return '聞き間違えたかもしれません。もう一度お願いします。';
+    case 'chinese':
+      return '我可能听错了，请再说一遍。';
+    case 'spanish':
+      return 'Puede que haya oído mal. Repítalo, por favor.';
+    case 'french':
+      return 'J’ai peut-être mal entendu. Pouvez-vous répéter ?';
+    case 'german':
+      return 'Vielleicht habe ich Sie falsch verstanden. Bitte sagen Sie es noch einmal.';
+    case 'hindi':
+      return 'शायद मैंने गलत सुना। कृपया फिर से कहें।';
+    case 'russian':
+      return 'Возможно, я неправильно расслышал. Пожалуйста, повторите.';
+    case 'portuguese':
+      return 'Talvez eu tenha ouvido errado. Por favor, diga novamente.';
+    case 'italian':
+      return 'Forse ho capito male. Per favore, ripeta.';
+    case 'dutch':
+      return 'Misschien heb ik u verkeerd verstaan. Zeg het alstublieft nog eens.';
+    case 'english':
+    default:
+      return 'I may have misheard you. Please say that again.';
+  }
+}
+
+/// Step Expand의 첫 씨앗이 불명확할 때 쓰는 짧은 유도 질문.
+/// 같은 문구 표를 ORIGIN 음성과 TARGET 화면 폴백에 함께 사용한다.
+String localizedSeedGuidanceLine(String language) {
+  switch (resolveNativeLanguageName(language).toLowerCase()) {
+    case 'korean':
+      return '어떤 구체적인 순간을 말해 볼까요?';
+    case 'japanese':
+      return 'どんな具体的な出来事について話したいですか？';
+    case 'chinese':
+      return '您想描述哪个具体的时刻？';
+    case 'spanish':
+      return '¿Qué momento concreto le gustaría describir?';
+    case 'french':
+      return 'Quel moment précis aimeriez-vous décrire ?';
+    case 'german':
+      return 'Welchen konkreten Moment möchten Sie beschreiben?';
+    case 'hindi':
+      return 'आप किस खास पल का वर्णन करना चाहेंगे?';
+    case 'russian':
+      return 'Какой конкретный момент вы хотели бы описать?';
+    case 'portuguese':
+      return 'Que momento específico você gostaria de descrever?';
+    case 'italian':
+      return 'Quale momento specifico vorrebbe descrivere?';
+    case 'dutch':
+      return 'Welk specifiek moment wilt u beschrijven?';
+    case 'english':
+    default:
+      return 'What specific moment would you like to describe?';
+  }
+}
+
 const String kStepExpandOpeningNudgeText = '오늘은 어떤 순간을 영어로 풀어 볼까요?';
 
 /// Anyone 자유대화 답변 전 내부 숙고 지시.

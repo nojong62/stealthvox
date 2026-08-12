@@ -3423,13 +3423,14 @@ $kSpokenReplyLengthPolicy
           clarified = true;
           _log('❓ [CLARIFY]', '되묻기 감지 → 스트림 완료 후 처리 예정');
         }
-        if (!heardConfirmation &&
-            (userTargetText.contains("[HEARD_CONFIRM]") ||
-                userTargetText.trimLeft().startsWith('제가 잘못 들었나요?'))) {
+        if (!heardConfirmation && hasHeardConfirmSignal(userTargetText)) {
           heardConfirmation = true;
           _log('[HEARD-CONFIRM]', '단어 확인 필요');
         }
-        if (mounted && !clarified && !heardConfirmation) {
+        if (mounted &&
+            !clarified &&
+            !heardConfirmation &&
+            !isHeardConfirmSignalPrefix(userTargetText)) {
           setState(() => _localMessages[hostIndex]['target'] = userTargetText);
         }
       }
@@ -3586,25 +3587,15 @@ $kSpokenReplyLengthPolicy
       if (heardConfirmation) {
         _turnCounter--;
         final String source = finalTranscript.trim();
-        final spokenPrompt = userTargetText.trimLeft().startsWith('제가 잘못 들었나요?')
-            ? userTargetText.trim().replaceAll(RegExp(r'[\r\n]+'), ' ')
-            : '';
-        final candidate = spokenPrompt.isNotEmpty
-            ? ''
-            : userTargetText
-                .replaceFirst(RegExp(r'^.*?\[HEARD_CONFIRM\]\s*'), '')
-                .trim()
-                .replaceAll(RegExp(r'[\r\n]+'), ' ');
+        final spokenPrompt = stripHeardConfirmSignal(userTargetText)
+            .replaceAll(RegExp(r'[\r\n]+'), ' ');
         _pendingHeardConfirmation = source;
         _heardConfirmationAttempts++;
         final tooManyAttempts = _heardConfirmationAttempts > 2 ||
             source.isEmpty ||
-            (candidate.isEmpty && spokenPrompt.isEmpty);
-        final prompt = tooManyAttempts
-            ? '죄송해요. 문장을 조금 천천히 다시 말씀해 주세요.'
-            : spokenPrompt.isNotEmpty
-                ? spokenPrompt
-                : "제가 잘못 들었나요? '$candidate'라고 말씀하신 게 맞나요?";
+            spokenPrompt.isEmpty;
+        final prompt =
+            tooManyAttempts ? originRetryLine(_nativeLangName()) : spokenPrompt;
         if (tooManyAttempts) {
           _pendingHeardConfirmation = null;
           _heardConfirmationAttempts = 0;
@@ -6603,7 +6594,7 @@ replacement, output exactly [MISHEARD]. If they reject the AI's last reply and
 provide no replacement content, output exactly [DISSATISFIED].
 ${disableCorrection ? 'For this retry, never output a bracketed correction tag. Remove the correction framing and translate only the corrected content.' : ''}
 
-${disableHeardConfirmation ? 'The user already confirmed the wording; do not ask for hearing confirmation again.' : 'If a core word is genuinely unrecoverable from the transcript and history, do not guess. Ask one short, specific confirmation question in $originLang, with no tag or extra text.'}
+${disableHeardConfirmation ? 'The user already confirmed the wording; do not ask for hearing confirmation again.' : 'If a core word is genuinely unrecoverable from the transcript and history, do not guess. ${buildHeardConfirmOutputRule(originLang)}'}
 If a required referent is genuinely ambiguous, output [CLARIFY] followed by one
 short natural question in $originLang. If the input is noise, output [EVAPORATE].
 Otherwise output only the natural $targetLang translation.''';
@@ -6655,7 +6646,8 @@ Do NOT translate, and do NOT repair it by guessing, when any of these holds:
 - A word sits so oddly that the intended meaning cannot be recovered from the conversation so far.
 - Making it make sense would require you to invent a subject, object, or verb that the context does not supply.
 
-In that case output EXACTLY in Korean: 제가 잘못 들었나요? '<the exact word or short phrase you doubt>'라고 말씀하신 게 맞나요?
+In that case:
+${buildHeardConfirmOutputRule(originLang)}
 
 Being short is NOT by itself a reason to ask — "먼저 시켜놔." is complete and clear. Ask only when the text itself does not hold together. Accents, fillers, and casual grammar are fine; translate those normally.
 
@@ -6718,7 +6710,7 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
 The input is an ASR transcript. Preserve exact meaning, names, viewpoint, speech
 register, idioms, and emotion. Recover omissions only when the sentence supports
 them; never invent a key fact. If the wording is broken and cannot be recovered,
-ask one short specific confirmation question in $originLang. If a required
+${buildHeardConfirmOutputRule(originLang)} If a required
 referent is ambiguous, output [CLARIFY] and a short question in $originLang.
 For noise output [EVAPORATE]. Otherwise output only the translation.''';
     }
@@ -6729,8 +6721,8 @@ Rules:
 - Preserve the exact meaning, proper names, speech register, and emotion.
 - Restore an omitted Korean subject or object only when it is clear from the sentence. Never invent one.
 - If the text is meaningless noise or has under 2 meaningful characters, output exactly: [EVAPORATE]
-- If the transcript is broken Korean and its intended wording cannot be recovered, output exactly in Korean:
-제가 잘못 들었나요? '<the exact doubtful word or short phrase>'라고 말씀하신 게 맞나요?
+- If the transcript is broken Korean and its intended wording cannot be recovered:
+${buildHeardConfirmOutputRule(originLang)}
 - If a required subject or object is genuinely ambiguous, output: [CLARIFY] <one short clarification question in $targetLang>
 - Otherwise output only the translation. No explanation, prefix, quotes, or Korean.''';
   }
