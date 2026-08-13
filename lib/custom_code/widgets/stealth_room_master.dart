@@ -33,6 +33,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
 import 'trial/trial_flow_state.dart';
 import 'circle_talk_guide.dart';
+import 'scenario_talk_guide.dart';
 
 class StealthRoomMaster extends StatefulWidget {
   const StealthRoomMaster({
@@ -1000,6 +1001,14 @@ Return ONLY valid JSON: {"name":"..."}.
                     icon: const Icon(Icons.arrow_back_ios_new,
                         color: Colors.white, size: 22),
                     tooltip: '대화 모드 선택으로 돌아가기',
+                  ),
+                  // Circle Talk 설정 페이지와 같은 자리에 같은 아이콘을 둔다.
+                  // 방에 들어가기 전에도 사용법을 볼 수 있어야 한다.
+                  IconButton(
+                    onPressed: () => showScenarioTalkGuide(context),
+                    icon: const Icon(Icons.menu_book_rounded,
+                        color: kScenarioGuideAccent, size: 25),
+                    tooltip: 'Scenario Talk 사용설명서',
                   ),
                 ],
               ),

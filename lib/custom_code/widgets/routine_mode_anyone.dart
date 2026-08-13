@@ -56,7 +56,6 @@ import 'trial/trial_flow_state.dart';
 import 'trial/trial_anyone_timer_mixin.dart';
 import 'trial/learning_prep_overlay.dart';
 import 'trial/trial_study_page.dart';
-import 'circle_talk_guide.dart';
 
 /// speech_stopped 뒤 최종 전사가 이 시간 안에 안 오면 턴을 놓아준다.
 /// 없으면 `_turnInFlight`가 켜진 채 굳어 30분 롤오버까지 막힌다.
@@ -4359,15 +4358,8 @@ $kSpokenReplyLengthPolicy
             child: Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                IconButton(
-                  icon: const Icon(Icons.menu_book_rounded,
-                      color: Color(0xFFB46CFF), size: 23),
-                  tooltip: 'Circle Talk 사용설명서',
-                  padding: EdgeInsets.zero,
-                  constraints:
-                      const BoxConstraints(minWidth: 40, minHeight: 40),
-                  onPressed: () => showCircleTalkGuide(context),
-                ),
+                // 사용설명서는 **입장 전 설정 페이지에만** 둔다. 방 안에서는
+                // 대화가 목적이라 상단 자리를 글자 크기·나가기에 내준다.
                 IconButton(
                   icon: Icon(
                     Icons.format_size,

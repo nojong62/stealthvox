@@ -3185,41 +3185,6 @@ never by itself a reason to ask back.
   // ====================================================================
   // 📦 [Box 6: UI]
   // ====================================================================
-  void _showScenarioTalkGuide() {
-    showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A1A),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: const Row(
-          children: [
-            Icon(Icons.menu_book_rounded, color: Color(0xFF4ADE80)),
-            SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'Scenario Talk 사용설명서',
-                style: TextStyle(color: Colors.white, fontSize: 18),
-              ),
-            ),
-          ],
-        ),
-        content: const SingleChildScrollView(
-          child: Text(
-            '실제 상황처럼 역할을 나누어 AI와 대화하는 모드입니다.\n\n'
-            '시작 전 시나리오와 AI·사용자 역할을 확인하거나 직접 수정할 수 있습니다.\n\n'
-            'Start 버튼을 누른 뒤, 화면에 표시된 역할의 인물처럼 자연스럽게 말해 보세요. AI도 지정된 역할을 유지하며 대화합니다.',
-            style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.55),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('확인', style: TextStyle(color: Color(0xFF4ADE80))),
-          ),
-        ],
-      ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -3314,15 +3279,8 @@ never by itself a reason to ask back.
             child: Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                IconButton(
-                  icon: const Icon(Icons.menu_book_rounded,
-                      color: Color(0xFF4ADE80), size: 23),
-                  tooltip: 'Scenario Talk 사용설명서',
-                  padding: EdgeInsets.zero,
-                  constraints:
-                      const BoxConstraints(minWidth: 40, minHeight: 40),
-                  onPressed: _showScenarioTalkGuide,
-                ),
+                // 사용설명서는 **입장 전 설정 페이지에만** 둔다. 방 안에서는
+                // 대화가 목적이라 상단 자리를 글자 크기·나가기에 내준다.
                 IconButton(
                   icon: Icon(
                     Icons.format_size,
