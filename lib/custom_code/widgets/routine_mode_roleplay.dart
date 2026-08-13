@@ -1438,6 +1438,9 @@ never by itself a reason to ask back.
         return false;
       }
       _streamingCaptureOpen = true;
+      // 🔁 [LATE-CONTINUATION] 새 유저 턴 = 이 턴의 AI 음성은 아직 없다.
+      //   안 내리면 안내 음성이 세운 플래그가 남아 복구 창이 안 열린다.
+      _aiPlaybackStarted = false;
       _streamingCaptureSub = stream.listen(
         (data) {
           if (data.isEmpty) return;

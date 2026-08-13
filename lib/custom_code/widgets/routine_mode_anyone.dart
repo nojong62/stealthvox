@@ -2148,6 +2148,11 @@ $kSpokenReplyLengthPolicy
       session.openAudioGate(reason: 'turn_start');
       _setMicOwner(AnyoneMicOwner.openaiStreaming,
           reason: 'streaming_stt_listening');
+      // 🔁 [LATE-CONTINUATION] 새 유저 턴이 열렸다 = 이 턴의 AI 음성은 아직
+      //   없다. 여기서 안 내리면 **오프너·안내 문구가 재생된 뒤 첫 유저 턴은
+      //   복구 창이 아예 안 열린다** — 그 재생이 세운 플래그가 남기 때문이다
+      //   (2026-08-14 실기기 로그에서 확인: 1턴 CONT-WINDOW 없음).
+      _aiPlaybackStarted = false;
       if (!TrialFlowState.instance.isTrial) {
         BillingTicker.instance.resumeFromActivity('free_talk_mic_start');
       }
