@@ -81,9 +81,14 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   bool _isConversationActive = false;
 
   // ── 🆕 [직접 대화] 모드 상태 ─────────────────────────────────────────────
-  // 기본값은 기존 동작(만능 통역)이다. 게스트가 입장 팝업에서 고른 값이
-  // duo_sessions 문서에 실리고, 호스트는 세션 리스너로 같은 값을 받는다.
-  String _duoMode = kDuoModeInterpreter;
+  // 기본값은 **직접 대화**다. 초대 팝업이 이 값으로 열리므로, 호스트가 아무것도
+  // 안 고르고 "초대하기"를 누르면 직접 통화로 초대된다. 만능 통역은 팝업에서
+  // 골라야 한다.
+  //
+  // ⚠️ 이건 **화면 기본값**일 뿐이다. 실제 방의 방식은 duo_sessions 문서의
+  //   `mode`가 정하고, 그 해석은 `_normalizeDuoMode`가 전담한다 — `mode`가
+  //   없는 옛 방은 지금도 만능 통역으로 읽힌다.
+  String _duoMode = kDuoModeDirect;
   bool get _isDirectMode => _duoMode == kDuoModeDirect;
 
   /// 게스트가 입장 팝업에서 초대 방식을 읽어오는 중인지.
@@ -448,7 +453,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
   /// 초대받은 방의 대화 방식을 읽어 온다(게스트 입장 팝업용).
   Future<void> _loadInvitedMode(String roomId) async {
-    String mode = kDuoModeInterpreter;
+    // 못 읽었을 때 게스트 팝업에 보여 줄 값. 방의 진짜 방식은 아래에서 문서를
+    // 읽어 덮어쓰고, 통화를 여는 순간 한 번 더 문서로 확인한다.
+    String mode = kDuoModeDirect;
     try {
       final snap = await FirebaseFirestore.instance
           .collection('duo_sessions')
@@ -1912,7 +1919,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       // 5) 클립보드 복사 + 공유 시트
       await Clipboard.setData(ClipboardData(text: inviteLink));
       await Share.share(
-        '저와 함께 Duo 대화 연습해요! 👉 $inviteLink',
+        'StealthVox Duo 초대 - 저와 함께 Duo 대화해요!\n$inviteLink',
         subject: 'StealthVox Duo 초대',
       );
       if (mounted) {
@@ -2212,9 +2219,16 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                       _isDirectMode || _localMessages.isEmpty
                           ? Center(
                               child: Text(
-                                  _isDirectMode
-                                      ? "마이크를 탭하면 통화가 시작됩니다.\n서로의 실제 목소리로 대화하세요."
-                                      : "마이크를 탭하면 시작됩니다.\n말이 끝나면 자동으로 전송됩니다.",
+                                  !_isDirectMode
+                                      ? "마이크를 탭하면 시작됩니다.\n말이 끝나면 자동으로 전송됩니다."
+                                      // 🆕 통화를 켰는데 상대가 아직 안 붙은
+                                      //   구간을 화면에 알린다. 안 알리면 혼자
+                                      //   허공에 말하다 고장으로 오해한다
+                                      //   (실측에서 25초 동안 그랬다).
+                                      : (_directCallActive &&
+                                              !_partnerRelayConnected)
+                                          ? "상대가 아직 통화에 참여하지 않았습니다.\n상대도 마이크를 켜면 바로 연결됩니다."
+                                          : "마이크를 탭하면 통화가 시작됩니다.\n서로의 실제 목소리로 대화하세요.",
                                   textAlign: TextAlign.center,
                                   style: const TextStyle(
                                       color: Colors.white54, height: 1.5)))
