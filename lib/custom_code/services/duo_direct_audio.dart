@@ -58,14 +58,21 @@ class DuoPcmJitterPlayer {
 
   bool _started = false;
   bool _priming = true;
+  /// 드리프트 계산용 창(窓) 카운터. [resetBuffer]가 0으로 되돌린다 —
+  /// `_playbackStartedAt`과 **반드시 같이** 리셋돼야 경과시간 대비가 맞는다.
   int _writtenBytes = 0;
+
+  /// 통화 전체 누적. **리셋하지 않는다.** 종료 로그가 이 값을 읽는다.
+  /// 예전에는 위 창 카운터를 그대로 내보내서, 상대가 나가며 buffer_reset이
+  /// 돌면 49초를 재생하고도 `playedBytes=0`으로 찍혔다(2026-08-14 실측).
+  int _lifetimeWrittenBytes = 0;
   int _droppedBytes = 0;
   DateTime? _playbackStartedAt;
   DateTime? _firstChunkAt;
   int _firstPlayLatencyMs = -1;
 
   bool get isStarted => _started;
-  int get writtenBytes => _writtenBytes;
+  int get writtenBytes => _lifetimeWrittenBytes;
   int get droppedBytes => _droppedBytes;
 
   /// 첫 상대 PCM 도착 → 첫 재생 지시까지 걸린 시간(ms). -1이면 아직 없음.
@@ -95,6 +102,7 @@ class DuoPcmJitterPlayer {
     if (_started) {
       _priming = true;
       _writtenBytes = 0;
+      _lifetimeWrittenBytes = 0;
       _droppedBytes = 0;
       _playbackStartedAt = null;
       _firstChunkAt = null;
@@ -158,6 +166,7 @@ class DuoPcmJitterPlayer {
 
   void _write(Uint8List pcm) {
     _writtenBytes += pcm.length;
+    _lifetimeWrittenBytes += pcm.length;
     // ⚠️ 여기서 await하면 안 된다. 네이티브 `append`는 조각을 pcmExecutor
     // (단일 스레드)에 넘기고 즉시 반환하며, 실제 `AudioTrack.write`는
     // WRITE_BLOCKING이라 그 스레드에서 재생 속도만큼 막힌다. 기다리면
@@ -194,6 +203,6 @@ class DuoPcmJitterPlayer {
       await _channel.invokeMethod<void>('stop');
     } catch (_) {}
     _lg('⏹️ [DUO-PLAY]',
-        'stopped writtenBytes=$_writtenBytes droppedBytes=$_droppedBytes');
+        'stopped writtenBytes=$_lifetimeWrittenBytes droppedBytes=$_droppedBytes');
   }
 }

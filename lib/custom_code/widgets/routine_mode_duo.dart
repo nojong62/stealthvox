@@ -1778,7 +1778,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       if (!_directCallActive) {
         if (_directStarting) return 'Connecting…';
         // 상대가 없으면 기다리는 게 정상이다 — 실패가 아니다.
-        if (!_isPartnerOnline) return 'Waiting for partner…';
+        if (!_isPartnerOnline) return 'Waiting…';
         // 상대는 있는데 안 붙었다 = 자동 연결이 실패했다.
         // 이 문구가 곧 재시도 안내다(탭하면 다시 붙는다).
         return 'Tap to reconnect';
@@ -2326,14 +2326,12 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                               child: Text(
                                   !_isDirectMode
                                       ? "마이크를 탭하면 시작됩니다.\n말이 끝나면 자동으로 전송됩니다."
-                                      // 🆕 통화를 켰는데 상대가 아직 안 붙은
-                                      //   구간을 화면에 알린다. 안 알리면 혼자
-                                      //   허공에 말하다 고장으로 오해한다
-                                      //   (실측에서 25초 동안 그랬다).
-                                      : (_directCallActive &&
-                                              !_partnerRelayConnected)
-                                          ? "상대가 아직 통화에 참여하지 않았습니다.\n상대도 마이크를 켜면 바로 연결됩니다."
-                                          : "마이크를 탭하면 통화가 시작됩니다.\n서로의 실제 목소리로 대화하세요.",
+                                      // 🔴 [DUO-LIVE] 연결은 상대가 들어오면
+                                      //   자동이다. "마이크를 탭하라"·"상대도
+                                      //   마이크를 켜면"은 더 이상 사실이
+                                      //   아니라서 지웠다. 지금 왜 소리가
+                                      //   안 가는지는 버튼 옆 라벨이 말한다.
+                                      : "서로의 실제 목소리로 대화하세요.",
                                   textAlign: TextAlign.center,
                                   style: const TextStyle(
                                       color: Colors.white54, height: 1.5)))
