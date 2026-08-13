@@ -2154,6 +2154,19 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         FFAppState().inviterUid = '';
         FFAppState().duoRoomId = '';
         FFAppState().pendingInviteType = '';
+        // 🆕 정식 회원이 초대를 받아 들어온 경우, 대화가 끝나면 게스트 딱지를
+        //   뗀다. 안 떼면 Intro가 회원 계정이 살아 있어도 로그인 화면에 붙잡아
+        //   둬서, 방금 나눈 대화를 자기 History에서 못 본다(기록은 이미 자기
+        //   uid 아래 저장돼 있다).
+        //   익명 계정으로 들어온 비회원 게스트는 그대로 둔다 — 볼 수 있는
+        //   Lobby도 없고, Intro의 가입 유도가 의도된 흐름이다.
+        final guestUser = FirebaseAuth.instance.currentUser;
+        if (guestUser != null && !guestUser.isAnonymous) {
+          FFAppState().isGuestSession = false;
+          _lgDuo('[GUEST-EXIT]', 'member guest — isGuestSession 해제');
+        } else {
+          _lgDuo('[GUEST-EXIT]', 'anonymous guest — Intro에 남긴다');
+        }
         FFAppState().update(() {});
         context.goNamed('Intro');
       } else if (StealthRoomMaster.exitCurrentMode != null) {
