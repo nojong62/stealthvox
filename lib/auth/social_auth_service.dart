@@ -169,20 +169,13 @@ class SocialAuthService {
   }
 
   static void _assertSameUid(String expected, String? actual,
-      {required String stage}) {
-    if (actual != expected) {
-      throw StateError(
-          'Google auth aborted at $stage: uid changed. Nothing was written.');
-    }
-  }
+          {required String stage}) =>
+      GoogleLinkGuards.assertSameUid(expected, actual, stage: stage);
 
-  static void _assertGoogleProvider(User? user, {required String stage}) {
-    final has =
-        user?.providerData.any((p) => p.providerId == 'google.com') ?? false;
-    if (!has) {
-      throw StateError('Google auth aborted at $stage: google.com not linked.');
-    }
-  }
+  static void _assertGoogleProvider(User? user, {required String stage}) =>
+      GoogleLinkGuards.assertGoogleLinked(
+          user?.providerData.map((p) => p.providerId),
+          stage: stage);
 
   static Future<Map<String, dynamic>> _callLinkOrCreate(
     String provider, {

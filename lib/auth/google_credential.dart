@@ -32,6 +32,35 @@ class GoogleCredentialBundle {
   final String? idToken;
 }
 
+/// 로그인·연결 결과가 **약속한 UID 그대로인지, google.com이 실제로 붙었는지**
+/// 검사한다. 이 기능은 UID 보존이 전부라, 어긋나면 사용자 데이터를 건드리기
+/// 전에 멈춰야 한다. 순수 함수로 빼 둬 단위 테스트로 규칙을 고정한다.
+class GoogleLinkGuards {
+  const GoogleLinkGuards._();
+
+  /// 연결 전후 UID가 같아야 한다. 다르면 던진다.
+  static void assertSameUid(String expected, String? actual,
+      {required String stage}) {
+    if (actual == null || actual.isEmpty) {
+      throw StateError('Google auth aborted at $stage: no uid. Nothing written.');
+    }
+    if (actual != expected) {
+      throw StateError(
+          'Google auth aborted at $stage: uid changed. Nothing was written.');
+    }
+  }
+
+  /// providerData에 google.com이 실제로 있어야 한다.
+  /// [providerIds]는 `user.providerData`의 providerId 목록이다.
+  static void assertGoogleLinked(Iterable<String>? providerIds,
+      {required String stage}) {
+    final linked = providerIds?.contains('google.com') ?? false;
+    if (!linked) {
+      throw StateError('Google auth aborted at $stage: google.com not linked.');
+    }
+  }
+}
+
 /// 계정 선택 UI를 띄우고 자격증명을 만든다. 사용자가 취소하면 null.
 ///
 /// 이전 세션이 남아 있으면 계정 선택이 안 뜨고 지난 계정으로 조용히 진행되는

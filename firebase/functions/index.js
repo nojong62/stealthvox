@@ -796,6 +796,7 @@ exports.linkOrCreateAccount = functions
 
     let email = null;
     let displayName = null;
+    let googleSub = null;
 
     if (provider === "google") {
       const idToken = data.idToken;
@@ -821,6 +822,7 @@ exports.linkOrCreateAccount = functions
         }
         email = payload.email || null;
         displayName = payload.name || null;
+        googleSub = payload.sub || null;
       } catch (e) {
         throw new functions.https.HttpsError(
           "unauthenticated",
@@ -845,14 +847,40 @@ exports.linkOrCreateAccount = functions
     }
 
     let existingUser = null;
-    try {
-      existingUser = await admin.auth().getUserByEmail(email);
-    } catch (e) {
-      if (e.code !== "auth/user-not-found") {
-        throw new functions.https.HttpsError(
-          "internal",
-          "Failed to check existing account: " + String(e)
-        );
+    let matchedBy = null;
+
+    // Google은 **등록된 회원 매핑이 1순위**다. provider_uid_map은 Google의
+    // 불변 sub로 키가 잡혀 있어 이메일이 바뀌어도 같은 회원을 가리킨다.
+    // 이메일만으로 찾으면 이메일 가입 계정까지 Google 로그인에 딸려온다.
+    if (provider === "google" && googleSub) {
+      try {
+        const mapped = await resolveMappedDiscoveryUid("google", googleSub);
+        if (mapped) {
+          existingUser = await admin.auth().getUser(mapped);
+          matchedBy = "provider_map";
+        }
+      } catch (e) {
+        // 매핑이 이미 사라진 UID를 가리키는 경우가 있다(실측 26건 중 2건).
+        // 그때는 아래 이메일 조회로 넘어간다.
+        functions.logger.warn("linkOrCreateAccount: stale provider mapping", {
+          provider: provider,
+          error: String(e),
+        });
+        existingUser = null;
+      }
+    }
+
+    if (!existingUser) {
+      try {
+        existingUser = await admin.auth().getUserByEmail(email);
+        matchedBy = "email";
+      } catch (e) {
+        if (e.code !== "auth/user-not-found") {
+          throw new functions.https.HttpsError(
+            "internal",
+            "Failed to check existing account: " + String(e)
+          );
+        }
       }
     }
 
@@ -863,9 +891,9 @@ exports.linkOrCreateAccount = functions
       });
 
       functions.logger.info("linkOrCreateAccount: existing user matched", {
-        email: email,
         uid: existingUser.uid,
         provider: provider,
+        matchedBy: matchedBy,
       });
 
       return { token: token, isNewUser: false };
