@@ -122,6 +122,15 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   bool _micActive = false;
   bool _sttActive = false;
   bool _directStarting = false;
+
+  /// 🔇 [DUO-MUTE] 내 소리를 보내지 않는 상태. **연결은 살아 있다** —
+  /// 릴레이도 붙어 있고 상대 목소리도 계속 들린다. 마이크 PCM만 버린다.
+  bool _directMuted = false;
+
+  /// 🔴 [DUO-LIVE] 자동 연결을 이미 시도한 방인지. 실패한 뒤 스냅샷이 또
+  /// 떨어질 때마다 자동으로 재시도하면, 권한을 거부한 유저에게 권한 창이
+  /// 반복해서 뜬다. 자동은 한 번만 하고 그 뒤는 버튼(수동)에 맡긴다.
+  bool _autoStartAttempted = false;
   DateTime? _directCaptureFirstFrameAt;
 
   /// 화자별 발화 일련번호와 발화 시작 시각. History 순서 복원용이다.
@@ -631,6 +640,20 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   // 이 경로에는 GPT 번역·TTS-1·Realtime·Nova가 **하나도** 들어오지 않는다.
   // ============================================================================
 
+  /// 🔇 [DUO-GHOST] 이 시간보다 짧게 소리 난 발화는 전사문이 뭐라고 나오든
+  /// 버린다. **글자로는 못 거른다** — 지어낸 문장이 멀쩡한 한국어라서다.
+  ///
+  /// 2026-08-13 실기기(SM S931N) 65초 통화 9건 실측:
+  ///   실제 말   1,323 / 2,200 / 2,999ms  → 14~23자
+  ///   클릭 잡음    41 /    42 /    44ms  → 3~7자 ("급습했다." 등 전부 환청)
+  /// 같은 방에서 두 폰을 스피커로 켜 두면 음향 되먹임이 생기고, 그 클릭 하나를
+  /// Server VAD가 발화로 잡아 전사 모델이 문장을 지어낸다.
+  ///
+  /// 150ms는 잡음(44ms)의 3.4배이면서 짧은 실제 응답("네" 약 200~300ms)은
+  /// 살리는 값이다. 유효 발화가 잘려 나가면 올리지 말고 **먼저 로그의
+  /// `voicedMs`를 확인할 것** — 진짜 짧은 말인지 클릭인지 그 숫자가 가른다.
+  static const int kDuoMinVoicedMs = 150;
+
   /// 직접 대화 전사문 중 버릴 것. 만능 통역 쪽 필터는 건드리지 않는다.
   bool _isNoiseTranscript(String raw) {
     final String trimmed = raw.trim();
@@ -662,12 +685,48 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   bool _canSaveDirectTranscript(int generation) =>
       generation == _directGeneration && (_directCallActive || _directFlushing);
 
+  /// 🔴 [DUO-LIVE] 마이크 버튼. 통화가 붙어 있으면 **음소거 토글**이고,
+  /// 안 붙어 있으면 **연결 재시도**다.
+  ///
+  /// 통화 시작은 상대가 들어오는 순간 자동으로 이뤄진다
+  /// ([_maybeAutoStartDirectCall]). 그래도 이 버튼의 재시도 경로를 남기는
+  /// 이유는 하나다 — **자동 연결이 실패하거나 마이크 권한이 거부되면 통화를
+  /// 시작할 방법이 아예 사라지기 때문이다.** 그때 유저에게 남는 손잡이가 이것뿐이다.
+  ///
+  /// 통화를 끝내는 것은 이 버튼이 아니라 방을 나가는 것이다(대칭 종료).
   void _onDirectMicToggle() {
-    if (_directCallActive) {
-      unawaited(_stopDirectCall('user_tap'));
-    } else {
+    if (!_directCallActive) {
+      if (_directStarting || _directStopping) {
+        _lgDuo('[DUO-LIVE]', 'retry_ignored reason=busy');
+        return;
+      }
+      _lgDuo('[DUO-LIVE]',
+          'manual_retry partnerOnline=$_isPartnerOnline role=$_myRole');
       unawaited(_startDirectCall());
+      return;
     }
+    setState(() => _directMuted = !_directMuted);
+    _lgDuo('[DUO-MUTE]', 'muted=$_directMuted');
+  }
+
+  /// 🔴 [DUO-LIVE] 상대가 방에 있으면 양쪽이 알아서 붙고 송신을 시작한다.
+  ///
+  /// 혼자 있는 동안에는 마이크를 열지 않는다 — 들을 사람이 없는데 녹음할
+  /// 이유가 없다.
+  ///
+  /// **재진입 차단이 핵심이다.** 양쪽이 거의 동시에 들어오면 Firestore 스냅샷이
+  /// 연달아 떨어져 이 함수가 여러 번 불린다. `_startDirectCall`에 자체 가드가
+  /// 있지만 그 앞에서 한 번 더 좁히고, 자동 시도는 방마다 한 번으로 묶는다
+  /// (실패 후 무한 재시도로 권한 창이 반복해 뜨는 것을 막는다).
+  void _maybeAutoStartDirectCall(String reason) {
+    if (!_isDirectMode) return;
+    if (!_isPartnerOnline) return;
+    if (!mounted || _isExiting) return;
+    if (_directCallActive || _directStarting || _directStopping) return;
+    if (_autoStartAttempted) return;
+    _autoStartAttempted = true;
+    _lgDuo('[DUO-LIVE]', 'auto_start reason=$reason role=$_myRole');
+    unawaited(_startDirectCall());
   }
 
   Future<void> _startDirectCall() async {
@@ -819,6 +878,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         (bytes) {
           if (bytes.isEmpty) return;
           if (generation != _directGeneration) return;
+          // 🔇 [DUO-MUTE] 음소거는 **내 소리를 안 보내는 것**이다. 릴레이 연결과
+          //   상대 음성 수신은 그대로 살아 있다 — 여기서 내 조각만 버린다.
+          //   전사도 같이 막는다. 안 그러면 음소거 중에 한 말이 History에 남는다.
+          if (_directMuted) return;
           // 갈래 1 — 상대에게 보내는 실제 목소리. 전사를 기다리지 않는다.
           _relayClient?.sendPcm(bytes);
           // 갈래 2 — History용 전사. 실패해도 위 한 줄에 영향이 없다.
@@ -863,8 +926,20 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     };
     session.onTranscriptCompleted = (itemId, text) {
       if (!_canSaveDirectTranscript(generation)) return;
+      // 🔇 [DUO-GHOST] 소리가 난 시간을 여기서 읽는다. 전사문이 도착한 뒤에는
+      //   이 값이 유일하게 남은 "진짜 말이었는가"의 근거다.
+      final voicedMs = session.utteranceVoicedMsOf(itemId);
+      final voicedSrc = session.utteranceVoicedSourceOf(itemId) ?? 'none';
+      if (voicedMs != null && voicedMs < kDuoMinVoicedMs) {
+        _lgDuo(
+            '[DUO-GHOST]',
+            'dropped item=$itemId voicedMs=$voicedMs src=$voicedSrc '
+                'len=${text.trim().length}');
+        return;
+      }
       // 종료 대기가 이 future를 기다린다 — unawaited로 흘려보내면 안 된다.
-      final save = _handleDirectTranscript(generation, text, itemId);
+      final save = _handleDirectTranscript(generation, text, itemId,
+          voicedMs: voicedMs);
       _directSaves.add(save);
       unawaited(save.whenComplete(() => _directSaves.remove(save)));
     };
@@ -896,7 +971,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 화자별 로컬 일련번호(`seq`)를 같이 남긴다. History는 나중에 이 둘로
   /// 두 사람의 발화를 하나의 대화 순서로 합칠 수 있다.
   Future<void> _handleDirectTranscript(
-      int generation, String text, String itemId) async {
+      int generation, String text, String itemId,
+      {int? voicedMs}) async {
     if (!_canSaveDirectTranscript(generation)) return;
     final String trimmed = text.trim();
     if (trimmed.isEmpty || _isNoiseTranscript(trimmed)) return;
@@ -911,8 +987,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     final int seq = ++_directSeq;
     final DateTime spokenAt = _directSpeechStartedAt ?? DateTime.now();
     _directSpeechStartedAt = null;
-    _lgDuo('[DIRECT-STT]',
-        'completed seq=$seq item=$itemId len=${trimmed.length}');
+    _lgDuo(
+        '[DIRECT-STT]',
+        'completed seq=$seq item=$itemId len=${trimmed.length} '
+            'voicedMs=${voicedMs ?? -1}');
     // 상대 채널 업로드도 기다린다. 흘려보내면 종료 때 마지막 문장이
     // 내 History에만 남고 상대 History에는 안 간다.
     await _uploadMyMessage(
@@ -1008,12 +1086,15 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     _jitterPlayer = null;
     await player?.stop();
 
+    // 🔇 [DUO-MUTE] 다음 통화는 음소거 아닌 상태로 시작한다. 이전 통화의
+    //   음소거를 물려받으면 유저가 모르는 채로 말하게 된다.
     if (mounted && !_isExiting) {
       setState(() {
         _micActive = false;
         _sttActive = false;
         _relayConnected = false;
         _partnerRelayConnected = false;
+        _directMuted = false;
       });
       _setDuoState('idle');
     } else {
@@ -1021,6 +1102,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _sttActive = false;
       _relayConnected = false;
       _partnerRelayConnected = false;
+      _directMuted = false;
       _duoState = 'idle';
     }
     _lgDuo(
@@ -1691,7 +1773,17 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
   // 🆕 [토글] 버튼 상태별 표시 문구
   String _pttLabel() {
     if (_isDirectMode) {
-      if (!_directCallActive) return 'Tap to call';
+      // 🔴 [DUO-LIVE] 연결은 자동이라 유저가 할 일이 없다. 그래서 화면은
+      //   "지금 왜 소리가 안 가는지"를 말해 줘야 한다.
+      if (!_directCallActive) {
+        if (_directStarting) return 'Connecting…';
+        // 상대가 없으면 기다리는 게 정상이다 — 실패가 아니다.
+        if (!_isPartnerOnline) return 'Waiting for partner…';
+        // 상대는 있는데 안 붙었다 = 자동 연결이 실패했다.
+        // 이 문구가 곧 재시도 안내다(탭하면 다시 붙는다).
+        return 'Tap to reconnect';
+      }
+      if (_directMuted) return 'Muted — tap to unmute';
       if (!_relayConnected || !_micActive) return 'Connecting…';
       if (!_partnerRelayConnected) return 'Waiting…';
       // 전사가 끊겨도 통화는 계속된다. 그 사실을 화면에서 구분할 수 있게 둔다.
@@ -2020,7 +2112,10 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         });
       }
       // 🆕 [과금정책] 게스트 본인 입장 성공 — 과금은 호스트 리스너에서만 시작
-      // 🆕 [PTT] 세션만 열고 녹음은 버튼으로 시작 — 자동 녹음 제거
+      // 🔴 [DUO-LIVE] **게스트 쪽 자동 시작은 여기가 유일한 자리다.**
+      //   게스트는 `_listenForPartnerJoined`를 걸지 않는다(호스트만 건다).
+      //   입장에 성공한 이 시점이 곧 "상대(호스트)가 있다"는 확정이다.
+      _maybeAutoStartDirectCall('guest_joined');
     } catch (e) {
       debugPrint('[Duo] Guest join error: $e');
       if (mounted) {
@@ -2080,8 +2175,18 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         } else {
           _stopDuoBilling();
         }
-        // 🆕 [PTT] 입장 시 자동 녹음 제거 — 버튼으로만 시작
-        // 게스트 퇴장 → 호스트 강제 종료 (1:1 대칭 종료 모델)
+        // 🔴 [DUO-LIVE] 상대가 들어오면 양쪽이 자동으로 붙는다. 각자 마이크를
+        //   눌러야 소리가 가던 구조는 라이브 통화가 아니라 "각자 통화 참가"였다.
+        //   마이크 버튼은 이제 음소거 토글이다(연결 실패 시에는 재시도).
+        if (partnerJoined) {
+          _maybeAutoStartDirectCall('partner_joined');
+        } else {
+          // 상대가 없는 동안 자동 시도 기록을 놓는다. 다음에 상대가 들어오면
+          // 그때 한 번 더 자동으로 붙는다.
+          _autoStartAttempted = false;
+        }
+        // 게스트 퇴장 → 호스트 강제 종료 (1:1 대칭 종료 모델).
+        // 재통화는 새 초대로 시작한다 — 과금도 그 기준에 맞춰져 있다.
         if (guestJustLeft) _handleAutoSaveAndExit();
       }
     });
@@ -2659,17 +2764,15 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                   const SizedBox(height: 20),
                   _buildInvitedModeBadge(),
                   const SizedBox(height: 22),
-                  dropdown("ORIGIN", native, const Color(0xFF93C5FD), (val) {
+                  dropdown("Original", native, const Color(0xFF93C5FD), (val) {
                     if (val != null)
                       setState(() => FFAppState().nativeLang = val);
-                  }, subtitle: "(My Language)", subtitleBelow: false),
+                  }, subtitle: "(Chat Lang)", subtitleBelow: false),
                   const SizedBox(height: 18),
-                  dropdown("TARGET", target, const Color(0xFF4ADE80), (val) {
+                  dropdown("Target", target, const Color(0xFF4ADE80), (val) {
                     if (val != null)
                       setState(() => FFAppState().targetLang = val);
-                  },
-                      subtitle: "(Listening Language or Learning Language)",
-                      subtitleBelow: true),
+                  }, subtitle: "(Learn Lang)", subtitleBelow: true),
                   const SizedBox(height: 28),
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(
@@ -2817,9 +2920,12 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
   }
 
   Widget _buildControlArea(double bottomPadding) {
-    // 직접 대화: 통화 중이면 마이크가 계속 켜져 있다(초록). 탭하면 끊는다.
-    final bool isRec =
-        _isDirectMode ? _directCallActive : _duoState == 'recording';
+    // 🔴 [DUO-LIVE] 직접 대화: 소리가 실제로 나가는 동안만 초록이다.
+    //   음소거 중에는 통화가 붙어 있어도 초록이 아니어야 한다 — 초록인데 내
+    //   말이 안 가면 유저는 원인을 찾을 수 없다. 탭은 음소거 토글이다.
+    final bool isRec = _isDirectMode
+        ? (_directCallActive && !_directMuted)
+        : _duoState == 'recording';
     final bool isFinishing = !_isDirectMode && _duoState == 'finishing';
     final bool isBusy = _isDirectMode
         ? _directStarting
