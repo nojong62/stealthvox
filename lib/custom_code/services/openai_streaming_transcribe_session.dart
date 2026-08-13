@@ -159,8 +159,46 @@ class OpenAiStreamingTranscribeSession {
   final Set<String> _pendingItemIds = <String>{};
   Completer<void>? _drained;
 
+  // ── 발화 순번 ──────────────────────────────────────────────────────
+  // ⚠️ **transcription.completed의 도착 순서는 발화 순서가 아니다.** 전사는
+  //   발화마다 따로 도는 비동기 작업이라, 짧은 뒷말이 긴 앞말보다 먼저 끝나
+  //   먼저 도착할 수 있다. 도착 순서로 문장을 이으면 앞뒤가 뒤집힌다.
+  //
+  //   발화 순서를 아는 곳은 `input_audio_buffer.committed`다 — 서버 VAD가
+  //   구간을 확정하는 이벤트라 말한 순서대로 온다. 여기서 item_id에 순번을
+  //   박아 두고, 호출부는 [utteranceOrderOf]로 그 순번을 읽어 정렬한다.
+  int _utteranceSeq = 0;
+  final Map<String, int> _utteranceOrder = <String, int>{};
+
+  /// 이 item이 몇 번째 발화인지. 모르면 null.
+  int? utteranceOrderOf(String itemId) => _utteranceOrder[itemId];
+
+  int _assignUtteranceOrder(String itemId) {
+    if (itemId.isEmpty) return ++_utteranceSeq;
+    final existing = _utteranceOrder[itemId];
+    if (existing != null) return existing;
+    final order = ++_utteranceSeq;
+    _utteranceOrder[itemId] = order;
+    // 한 방에 수백 발화가 쌓이므로 오래된 것부터 놓는다. 진행 중인 턴은
+    // 많아야 몇 조각이라 32개면 넉넉하다.
+    if (_utteranceOrder.length > 32) {
+      final oldest = _utteranceOrder.entries.reduce(
+        (a, b) => a.value <= b.value ? a : b,
+      );
+      _utteranceOrder.remove(oldest.key);
+    }
+    return order;
+  }
+
   /// 아직 결과가 안 돌아온 발화가 있는가.
   bool get hasPendingUtterance => _speechInFlight || _pendingItemIds.isNotEmpty;
+
+  /// **지금 유저가 말하는 중인가.** `speech_started` 뒤 `committed` 전이다.
+  ///
+  /// [hasPendingUtterance]와 따로 낸다. 둘을 하나로 묶어 쓰면 "말하는 중"이
+  /// "전사 대기 중"에 가려져, 나중에 이 getter의 정의가 바뀔 때 호출부가
+  /// 조용히 깨진다 — 말하는 중인 유저를 잘라 버리는 쪽으로.
+  bool get isUserSpeaking => _speechInFlight;
 
   /// 종료 직전에 부른다. 진행 중인 발화가 있으면 **마지막 버퍼를 명시적으로
   /// 확정**하고 전사문이 돌아올 때까지 [timeout]까지 기다린다.
@@ -407,10 +445,13 @@ class OpenAiStreamingTranscribeSession {
 
       case 'input_audio_buffer.committed':
         // 서버가 발화 구간을 확정했다는 신호일 뿐이다. 전사는 그 뒤에 온다.
+        // **발화 순서가 확정되는 곳이 여기다** — 전사 도착 순서가 아니다.
         final committedId = event['item_id']?.toString() ?? '';
         _speechInFlight = false;
         if (committedId.isNotEmpty) _pendingItemIds.add(committedId);
-        _lg('📡 [STREAM-VAD]', 'committed item=$committedId');
+        final committedOrder = _assignUtteranceOrder(committedId);
+        _lg('📡 [STREAM-VAD]',
+            'committed item=$committedId order=$committedOrder');
         return;
 
       case 'conversation.item.input_audio_transcription.delta':
@@ -424,8 +465,11 @@ class OpenAiStreamingTranscribeSession {
       case 'conversation.item.input_audio_transcription.done':
         final itemId = event['item_id']?.toString() ?? '';
         final text = event['transcript']?.toString() ?? '';
+        // committed를 못 본 item이면(이벤트 유실·순서 역전) 지금이라도 순번을
+        // 준다. 순번 없는 조각이 생기면 정렬이 무너진다.
+        final order = _assignUtteranceOrder(itemId);
         _lg('📡 [STREAM-STT]',
-            'transcription_completed item=$itemId len=${text.length}');
+            'transcription_completed item=$itemId order=$order len=${text.length}');
         onTranscriptCompleted?.call(itemId, text);
         _clearPending(itemId);
         return;
@@ -519,6 +563,7 @@ class OpenAiStreamingTranscribeSession {
     // 대기 중인 flush가 있으면 풀어 준다. 소켓을 닫아 놓고 재우면 상한까지 논다.
     _speechInFlight = false;
     _pendingItemIds.clear();
+    _utteranceOrder.clear();
     _clearPending(null);
     _lg('🎙️ [STREAM-STT]', 'dispose sentAudioMs=$sentAudioMs');
     await _teardownSocket();

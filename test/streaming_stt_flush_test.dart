@@ -84,6 +84,61 @@ void main() {
     });
   });
 
+  group('발화 순번 (transcription.completed 도착 순서와 별개)', () {
+    test('committed 순서가 곧 발화 순서다', () {
+      final s = _session();
+      s.debugHandleEvent(_speechStarted());
+      s.debugHandleEvent(_committed('item_A'));
+      s.debugHandleEvent(_speechStarted());
+      s.debugHandleEvent(_committed('item_B'));
+
+      final a = s.utteranceOrderOf('item_A');
+      final b = s.utteranceOrderOf('item_B');
+      expect(a, isNotNull);
+      expect(b, isNotNull);
+      expect(a! < b!, isTrue, reason: '먼저 말한 쪽의 순번이 작아야 한다');
+    });
+
+    test('전사가 역순으로 도착해도 순번은 발화 순서를 지킨다', () {
+      final s = _session();
+      final arrived = <String>[];
+      s.onTranscriptCompleted = (itemId, _) => arrived.add(itemId);
+
+      s.debugHandleEvent(_speechStarted());
+      s.debugHandleEvent(_committed('item_A'));
+      s.debugHandleEvent(_speechStarted());
+      s.debugHandleEvent(_committed('item_B'));
+      // 뒷말이 짧아 전사가 먼저 끝났다.
+      s.debugHandleEvent(_completed('item_B', '야구장에 가려고 해요'));
+      s.debugHandleEvent(_completed('item_A', '주말에는 친구하고'));
+
+      expect(arrived, ['item_B', 'item_A'], reason: '도착은 역순이었다');
+      expect(s.utteranceOrderOf('item_A')! < s.utteranceOrderOf('item_B')!,
+          isTrue, reason: '순번은 여전히 발화 순서다');
+    });
+
+    test('같은 item의 순번은 몇 번을 봐도 그대로다', () {
+      final s = _session();
+      s.debugHandleEvent(_committed('item_A'));
+      final first = s.utteranceOrderOf('item_A');
+      s.debugHandleEvent(_completed('item_A', '한 번만'));
+      expect(s.utteranceOrderOf('item_A'), first);
+    });
+
+    test('committed를 못 본 item도 완료 시점에 순번을 받는다', () {
+      final s = _session();
+      s.debugHandleEvent(_completed('item_orphan', '고아 전사'));
+      expect(s.utteranceOrderOf('item_orphan'), isNotNull);
+    });
+
+    test('dispose하면 순번 장부를 놓는다', () async {
+      final s = _session();
+      s.debugHandleEvent(_committed('item_A'));
+      await s.dispose();
+      expect(s.utteranceOrderOf('item_A'), isNull);
+    });
+  });
+
   group('flushPendingUtterance', () {
     test('말하지 않고 끄면 기다리지 않고 즉시 끝난다', () async {
       final s = _session();
