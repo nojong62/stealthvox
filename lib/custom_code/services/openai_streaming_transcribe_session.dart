@@ -170,8 +170,43 @@ class OpenAiStreamingTranscribeSession {
   int _utteranceSeq = 0;
   final Map<String, int> _utteranceOrder = <String, int>{};
 
+  // ── 발화 길이 ──────────────────────────────────────────────────────
+  // 이 값 하나가 **환청과 실제 발화를 가른다.**
+  //
+  // 2026-08-13 Duo 실측(SM S931N, 65초 통화 9건):
+  //   실제 말   1,323 / 2,200 / 2,999ms  → 14~23자
+  //   클릭 잡음    41 /    42 /    44ms  → 3~7자  ← 전부 지어낸 문장
+  // "급습했다." 같은 문장이 42ms짜리 클릭 하나에서 나왔다. 글자 수·단어
+  // 목록으로는 절대 못 거른다 — 지어낸 문장은 멀쩡한 한국어라서다.
+  //
+  // ⚠️ 재는 방법이 둘이고 **정확도가 다르다.**
+  //
+  //   server — `speech_started.audio_start_ms`와 `speech_stopped.audio_end_ms`.
+  //            서버가 오디오 버퍼 기준으로 찍은 값이라 소켓 지연·앱 스케줄링이
+  //            섞이지 않고, 침묵 판정 시간을 뺄 필요도 없다. **이쪽이 옳다.**
+  //   local  — 이벤트가 앱에 도착한 시각의 차에서 침묵 판정 시간을 뺀 값.
+  //            서버가 그 필드를 안 줄 때만 쓰는 폴백이라 오차가 섞인다.
+  //
+  // 어느 쪽으로 쟀는지 로그에 남긴다 — 150ms 근처의 짧은 정상 응답이 잘리는지
+  // 판단하려면 그 숫자가 무엇으로 잰 값인지부터 알아야 한다.
+  DateTime? _speechStartedAt;
+  int? _speechStartedAudioMs;
+  int? _serverVoicedMs;
+  final Map<String, int> _utteranceVoicedMs = <String, int>{};
+  final Map<String, String> _utteranceVoicedSource = <String, String>{};
+
   /// 이 item이 몇 번째 발화인지. 모르면 null.
   int? utteranceOrderOf(String itemId) => _utteranceOrder[itemId];
+
+  /// 이 발화에서 **실제로 소리가 난 시간(ms)**. 모르면 null.
+  ///
+  /// 서버가 준 `audio_start_ms`/`audio_end_ms` 차가 우선이고, 그게 없으면
+  /// 로컬 시계에서 무음 판정 시간을 뺀 값이다.
+  int? utteranceVoicedMsOf(String itemId) => _utteranceVoicedMs[itemId];
+
+  /// 위 값을 무엇으로 쟀는지 — `'server'` 또는 `'local'`.
+  String? utteranceVoicedSourceOf(String itemId) =>
+      _utteranceVoicedSource[itemId];
 
   int _assignUtteranceOrder(String itemId) {
     if (itemId.isEmpty) return ++_utteranceSeq;
@@ -186,6 +221,8 @@ class OpenAiStreamingTranscribeSession {
         (a, b) => a.value <= b.value ? a : b,
       );
       _utteranceOrder.remove(oldest.key);
+      _utteranceVoicedMs.remove(oldest.key);
+      _utteranceVoicedSource.remove(oldest.key);
     }
     return order;
   }
@@ -433,13 +470,38 @@ class OpenAiStreamingTranscribeSession {
 
       case 'input_audio_buffer.speech_started':
         _speechInFlight = true;
-        _lg('📡 [STREAM-VAD]', 'speech_started');
+        // 발화 길이를 재려면 시작점이 필요하다. 서버 값이 있으면 그것을 쓰고,
+        // 없을 때를 대비해 로컬 시각도 같이 찍어 둔다. 한 발화의 committed는
+        // 다음 speech_started보다 항상 먼저 오므로(실측 확인) 값 하나면 된다.
+        _speechStartedAt = DateTime.now();
+        _speechStartedAudioMs = (event['audio_start_ms'] as num?)?.toInt();
+        _lg('📡 [STREAM-VAD]',
+            'speech_started audioStartMs=${_speechStartedAudioMs ?? -1}');
         onSpeechStarted?.call();
         return;
 
       case 'input_audio_buffer.speech_stopped':
         // 아직 committed 전이다. 여기서 대기를 풀면 전사문을 놓친다.
-        _lg('📡 [STREAM-VAD]', 'speech_stopped');
+        // 서버가 발화 끝을 오디오 기준으로 찍어 주면 여기서 길이가 확정된다 —
+        // 침묵 판정 시간을 뺄 필요도, 로컬 지연을 걱정할 필요도 없다.
+        final endAudioMs = (event['audio_end_ms'] as num?)?.toInt();
+        final startAudioMs = _speechStartedAudioMs;
+        if (endAudioMs != null && startAudioMs != null) {
+          final span = endAudioMs - startAudioMs;
+          // ⚠️ 음수는 **0으로 눌러선 안 된다.** 0은 "소리가 안 났다"는 뜻이라
+          //   길이 게이트가 그 발화를 잡음으로 버린다. 값이 이상하면 그건
+          //   "짧았다"가 아니라 "모른다"다 — 서버 값을 버리고 로컬 폴백으로
+          //   넘겨, 근거 없는 차단이 일어나지 않게 한다.
+          if (span >= 0) {
+            _serverVoicedMs = span;
+          } else {
+            _lg('⚠️ [STREAM-VAD]',
+                'audio_ms_out_of_order start=$startAudioMs end=$endAudioMs → local fallback');
+          }
+        }
+        _lg('📡 [STREAM-VAD]',
+            'speech_stopped audioEndMs=${endAudioMs ?? -1} '
+                'serverVoicedMs=${_serverVoicedMs ?? -1}');
         onSpeechStopped?.call();
         return;
 
@@ -450,8 +512,40 @@ class OpenAiStreamingTranscribeSession {
         _speechInFlight = false;
         if (committedId.isNotEmpty) _pendingItemIds.add(committedId);
         final committedOrder = _assignUtteranceOrder(committedId);
-        _lg('📡 [STREAM-VAD]',
-            'committed item=$committedId order=$committedOrder');
+        final startedAt = _speechStartedAt;
+        final serverVoiced = _serverVoicedMs;
+        _speechStartedAt = null;
+        _speechStartedAudioMs = null;
+        _serverVoicedMs = null;
+        int? voicedMs;
+        String source = 'none';
+        if (serverVoiced != null) {
+          // 서버가 오디오 기준으로 잰 값. 로컬 지연이 섞이지 않는다.
+          voicedMs = serverVoiced;
+          source = 'server';
+        } else if (startedAt != null) {
+          // 폴백. 이벤트 도착 시각 차라 소켓·스케줄링 지연이 섞인다.
+          final spanMs = DateTime.now().difference(startedAt).inMilliseconds;
+          final local = spanMs - kStreamingSttVadSilenceDurationMs;
+          // 여기도 음수를 0으로 누르지 않는다. VAD가 침묵을 확인하고 끊은
+          // 이상 span은 침묵 시간보다 길어야 정상이다. 짧다면 잰 값이
+          // 틀린 것이지 발화가 짧았던 게 아니다 → 모르는 것으로 둔다.
+          if (local >= 0) {
+            voicedMs = local;
+            source = 'local';
+          } else {
+            _lg('⚠️ [STREAM-VAD]',
+                'local_span_too_short spanMs=$spanMs → voicedMs unknown');
+          }
+        }
+        if (voicedMs != null && committedId.isNotEmpty) {
+          _utteranceVoicedMs[committedId] = voicedMs;
+          _utteranceVoicedSource[committedId] = source;
+        }
+        _lg(
+            '📡 [STREAM-VAD]',
+            'committed item=$committedId order=$committedOrder '
+                'voicedMs=${voicedMs ?? -1} src=$source');
         return;
 
       case 'conversation.item.input_audio_transcription.delta':
@@ -564,6 +658,11 @@ class OpenAiStreamingTranscribeSession {
     _speechInFlight = false;
     _pendingItemIds.clear();
     _utteranceOrder.clear();
+    _utteranceVoicedMs.clear();
+    _utteranceVoicedSource.clear();
+    _speechStartedAt = null;
+    _speechStartedAudioMs = null;
+    _serverVoicedMs = null;
     _clearPending(null);
     _lg('🎙️ [STREAM-STT]', 'dispose sentAudioMs=$sentAudioMs');
     await _teardownSocket();

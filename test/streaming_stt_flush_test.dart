@@ -139,6 +139,140 @@ void main() {
     });
   });
 
+  group('발화 길이 (환청과 실제 발화를 가르는 근거)', () {
+    // 2026-08-13 Duo 실측: 실제 말 1,323~2,999ms / 클릭 잡음 41~44ms.
+    // 이벤트 사이 시간을 실제로 흘려보내며 잰다.
+    test('짧은 클릭은 로컬 폴백에서도 150ms 미만으로 나온다', () async {
+      final s = _session();
+      s.debugHandleEvent(_speechStarted());
+      // VAD는 침묵 600ms를 확인한 뒤에 commit한다. 그래서 40ms짜리 클릭의
+      // 실제 span은 640ms다 — 40ms가 아니다.
+      await Future<void>.delayed(
+        const Duration(milliseconds: kStreamingSttVadSilenceDurationMs + 40),
+      );
+      s.debugHandleEvent(_committed('item_click'));
+
+      final voiced = s.utteranceVoicedMsOf('item_click');
+      expect(voiced, isNotNull);
+      expect(voiced, lessThan(150), reason: '150ms 게이트에 걸려야 하는 값이다');
+      expect(s.utteranceVoicedSourceOf('item_click'), 'local');
+    });
+
+    test('실제 발화 길이는 침묵 시간을 뺀 값으로 나온다', () async {
+      final s = _session();
+      s.debugHandleEvent(_speechStarted());
+      // 침묵 판정(600ms) + 실제 음성 250ms를 흉내 낸다.
+      await Future<void>.delayed(
+        const Duration(milliseconds: kStreamingSttVadSilenceDurationMs + 250),
+      );
+      s.debugHandleEvent(_committed('item_speech'));
+
+      final voiced = s.utteranceVoicedMsOf('item_speech')!;
+      expect(voiced, greaterThanOrEqualTo(150),
+          reason: '짧은 실제 응답("네")도 살아야 한다');
+      expect(voiced, lessThan(600), reason: '침묵 시간이 빠졌다');
+    });
+
+    test('committed를 못 본 item은 길이를 모른다 — 게이트를 태우지 않는다', () {
+      final s = _session();
+      s.debugHandleEvent(_completed('item_orphan', '고아 전사'));
+      expect(s.utteranceVoicedMsOf('item_orphan'), isNull);
+    });
+
+    test('speech_started 없이 committed만 오면 길이를 지어내지 않는다', () {
+      final s = _session();
+      s.debugHandleEvent(_committed('item_bare'));
+      expect(s.utteranceVoicedMsOf('item_bare'), isNull);
+    });
+
+    test('발화가 이어져도 각 item의 길이가 섞이지 않는다', () async {
+      final s = _session();
+      s.debugHandleEvent(_speechStarted());
+      await Future<void>.delayed(
+        const Duration(milliseconds: kStreamingSttVadSilenceDurationMs + 30),
+      );
+      s.debugHandleEvent(_committed('item_a'));
+      s.debugHandleEvent(_speechStarted());
+      await Future<void>.delayed(
+        const Duration(milliseconds: kStreamingSttVadSilenceDurationMs + 200),
+      );
+      s.debugHandleEvent(_committed('item_b'));
+
+      expect(s.utteranceVoicedMsOf('item_a')!, lessThan(150));
+      expect(s.utteranceVoicedMsOf('item_b')!, greaterThanOrEqualTo(150));
+    });
+
+    test('서버 값은 audio_end_ms - audio_start_ms 순서로 잰다', () {
+      final s = _session();
+      s.debugHandleEvent(<String, dynamic>{
+        'type': 'input_audio_buffer.speech_started',
+        'audio_start_ms': 10000,
+      });
+      s.debugHandleEvent(<String, dynamic>{
+        'type': 'input_audio_buffer.speech_stopped',
+        'audio_end_ms': 11800,
+      });
+      s.debugHandleEvent(_committed('item_server'));
+
+      expect(s.utteranceVoicedMsOf('item_server'), 1800,
+          reason: '끝 - 시작. 뒤집히면 음수가 나온다');
+      expect(s.utteranceVoicedSourceOf('item_server'), 'server');
+    });
+
+    test('서버 값이 짧으면 그대로 짧게 나온다 (침묵 시간을 빼지 않는다)', () {
+      final s = _session();
+      s.debugHandleEvent(<String, dynamic>{
+        'type': 'input_audio_buffer.speech_started',
+        'audio_start_ms': 5000,
+      });
+      s.debugHandleEvent(<String, dynamic>{
+        'type': 'input_audio_buffer.speech_stopped',
+        'audio_end_ms': 5042,
+      });
+      s.debugHandleEvent(_committed('item_click'));
+
+      expect(s.utteranceVoicedMsOf('item_click'), 42,
+          reason: '실측 클릭 잡음과 같은 값');
+    });
+
+    test('서버 타임스탬프가 뒤집혀 오면 그 값을 쓰지 않는다 — 근거 없는 차단 금지', () {
+      final s = _session();
+      s.debugHandleEvent(<String, dynamic>{
+        'type': 'input_audio_buffer.speech_started',
+        'audio_start_ms': 9000,
+      });
+      s.debugHandleEvent(<String, dynamic>{
+        'type': 'input_audio_buffer.speech_stopped',
+        'audio_end_ms': 3000, // 끝이 시작보다 앞이다 = 비정상
+      });
+      s.debugHandleEvent(_committed('item_bad'));
+
+      // 0으로 눌러 저장하면 길이 게이트가 정상 발화를 잡음으로 버린다.
+      expect(s.utteranceVoicedSourceOf('item_bad'), isNot('server'));
+      final v = s.utteranceVoicedMsOf('item_bad');
+      expect(v == null || v >= 0, isTrue);
+    });
+
+    test('길이를 모르면 null이다 — 호출부가 게이트를 태우지 않는다', () {
+      final s = _session();
+      // speech_started 없이 speech_stopped만 온 경우(이벤트 유실).
+      s.debugHandleEvent(<String, dynamic>{
+        'type': 'input_audio_buffer.speech_stopped',
+        'audio_end_ms': 3000,
+      });
+      s.debugHandleEvent(_committed('item_unknown'));
+      expect(s.utteranceVoicedMsOf('item_unknown'), isNull);
+    });
+
+    test('dispose하면 길이 장부도 놓는다', () async {
+      final s = _session();
+      s.debugHandleEvent(_speechStarted());
+      s.debugHandleEvent(_committed('item_a'));
+      await s.dispose();
+      expect(s.utteranceVoicedMsOf('item_a'), isNull);
+    });
+  });
+
   group('flushPendingUtterance', () {
     test('말하지 않고 끄면 기다리지 않고 즉시 끝난다', () async {
       final s = _session();
