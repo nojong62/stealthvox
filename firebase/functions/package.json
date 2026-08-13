@@ -24,6 +24,7 @@
   },
   "scripts": {
     "lint": "./node_modules/.bin/eslint --max-warnings=0 .",
+    "test": "node --test test/*.test.js",
     "serve": "firebase -P stealth-vox-3p3rq3 emulators:start --only functions",
     "shell": "firebase -P stealth-vox-3p3rq3 functions:shell",
     "start": "npm run shell",

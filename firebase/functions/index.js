@@ -15,6 +15,7 @@ const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
 const crypto = require("crypto");
 const { defineSecret } = require("firebase-functions/params");
+const { resolveLegacyGoogleAccount } = require("./legacy_google_account");
 const revenueCatWebhookSecret = defineSecret("REVENUECAT_WEBHOOK_SECRET");
 const openAiApiKey = defineSecret("OPENAI_API_KEY");
 
@@ -846,41 +847,49 @@ exports.linkOrCreateAccount = functions
       );
     }
 
-    let existingUser = null;
-    let matchedBy = null;
+    // ── Google: 매핑만으로 판정한다. 이메일 폴백 없음 ────────────────────
+    if (provider === "google") {
+      const verdict = await resolveLegacyGoogleAccount({
+        googleSub: googleSub,
+        lookupMapping: (sub) => resolveMappedDiscoveryUid("google", sub),
+        getUser: (uid) => admin.auth().getUser(uid),
+      });
 
-    // Google은 **등록된 회원 매핑이 1순위**다. provider_uid_map은 Google의
-    // 불변 sub로 키가 잡혀 있어 이메일이 바뀌어도 같은 회원을 가리킨다.
-    // 이메일만으로 찾으면 이메일 가입 계정까지 Google 로그인에 딸려온다.
-    if (provider === "google" && googleSub) {
-      try {
-        const mapped = await resolveMappedDiscoveryUid("google", googleSub);
-        if (mapped) {
-          existingUser = await admin.auth().getUser(mapped);
-          matchedBy = "provider_map";
-        }
-      } catch (e) {
-        // 매핑이 이미 사라진 UID를 가리키는 경우가 있다(실측 26건 중 2건).
-        // 그때는 아래 이메일 조회로 넘어간다.
-        functions.logger.warn("linkOrCreateAccount: stale provider mapping", {
-          provider: provider,
-          error: String(e),
-        });
-        existingUser = null;
+      if (verdict.status === "stale") {
+        // 과거 연결 흔적이 있는데 계정이 없다. 이메일로 다른 UID를 집어오거나
+        // 새 계정을 만들면 안 된다 — 조사가 필요한 상태다.
+        functions.logger.error("linkOrCreateAccount: stale google mapping");
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "This Google account has a stale mapping. Contact support."
+        );
       }
+
+      if (verdict.status === "none") {
+        // 등록된 기존 회원이 아니다. 서버는 아무것도 만들지 않고, 앱이 공식
+        // Firebase Google 로그인으로 새 계정을 만든다.
+        functions.logger.info("linkOrCreateAccount: no legacy google mapping");
+        return { token: null, isNewUser: true, legacyAccount: false };
+      }
+
+      const token = await admin.auth().createCustomToken(verdict.uid, {
+        provider: provider,
+        linked: true,
+      });
+      functions.logger.info("linkOrCreateAccount: legacy google member matched");
+      return { token: token, isNewUser: false, legacyAccount: true };
     }
 
-    if (!existingUser) {
-      try {
-        existingUser = await admin.auth().getUserByEmail(email);
-        matchedBy = "email";
-      } catch (e) {
-        if (e.code !== "auth/user-not-found") {
-          throw new functions.https.HttpsError(
-            "internal",
-            "Failed to check existing account: " + String(e)
-          );
-        }
+    // ── email 경로: 기존 동작 유지 ───────────────────────────────────────
+    let existingUser = null;
+    try {
+      existingUser = await admin.auth().getUserByEmail(email);
+    } catch (e) {
+      if (e.code !== "auth/user-not-found") {
+        throw new functions.https.HttpsError(
+          "internal",
+          "Failed to check existing account: " + String(e)
+        );
       }
     }
 
@@ -891,22 +900,10 @@ exports.linkOrCreateAccount = functions
       });
 
       functions.logger.info("linkOrCreateAccount: existing user matched", {
-        uid: existingUser.uid,
         provider: provider,
-        matchedBy: matchedBy,
       });
 
       return { token: token, isNewUser: false };
-    }
-
-    // Google은 **마이그레이션 전용**이다. 기존 계정이 없으면 여기서 계정을
-    // 만들지 않는다 — 신규 가입은 앱이 Firebase 공식 signInWithCredential로
-    // 처리하고, 그래야 google.com provider가 제대로 붙는다.
-    if (provider === "google") {
-      functions.logger.info("linkOrCreateAccount: no legacy google account", {
-        provider: provider,
-      });
-      return { token: null, isNewUser: true, legacyAccount: false };
     }
 
     const newUser = await admin.auth().createUser({
@@ -920,8 +917,6 @@ exports.linkOrCreateAccount = functions
     });
 
     functions.logger.info("linkOrCreateAccount: new user created", {
-      email: email,
-      uid: newUser.uid,
       provider: provider,
     });
 
