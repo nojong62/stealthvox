@@ -18,6 +18,23 @@ const { defineSecret } = require("firebase-functions/params");
 const revenueCatWebhookSecret = defineSecret("REVENUECAT_WEBHOOK_SECRET");
 const openAiApiKey = defineSecret("OPENAI_API_KEY");
 
+// Google ID Token을 받아 줄 audience 화이트리스트. StealthVox가 발급한 OAuth
+// 클라이언트만 통과시킨다. GoogleSignIn(Android)이 만든 ID Token의 aud는 보통
+// web client(type=3)이고, 구성에 따라 Android client(type=1)가 될 수도 있어
+// 둘 다 넣는다. 값은 비밀이 아니다(google-services.json에 그대로 들어 있다).
+const GOOGLE_ALLOWED_AUDIENCES = [
+  "450483026108-j5nmgab8pebqlfu2ilm5dfbq78j6jv4r.apps.googleusercontent.com",
+];
+
+let _googleOAuthClient = null;
+function googleOAuthClient() {
+  if (!_googleOAuthClient) {
+    const { OAuth2Client } = require("google-auth-library");
+    _googleOAuthClient = new OAuth2Client();
+  }
+  return _googleOAuthClient;
+}
+
 const realtimeModes = new Set(["anyone", "roleplay", "duo", "step_first_turn"]);
 const realtimeRequestTimestamps = new Map();
 
@@ -789,21 +806,21 @@ exports.linkOrCreateAccount = functions
         );
       }
 
+      // Google 공식 검증 라이브러리로 서명·issuer·audience·만료를 한 번에
+      // 검사한다. 예전의 tokeninfo HTTP 조회는 audience를 제한하지 않아,
+      // 다른 앱에서 발급된 토큰도 통과할 수 있었다.
       try {
-        const tokenInfoResp = await fetch(
-          "https://oauth2.googleapis.com/tokeninfo?id_token=" +
-            encodeURIComponent(idToken)
-        );
-        if (!tokenInfoResp.ok) {
-          throw new Error("Google token rejected (status " + tokenInfoResp.status + ")");
-        }
-
-        const tokenInfo = await tokenInfoResp.json();
-        if (tokenInfo.email_verified !== "true" && tokenInfo.email_verified !== true) {
+        const ticket = await googleOAuthClient().verifyIdToken({
+          idToken: idToken,
+          audience: GOOGLE_ALLOWED_AUDIENCES,
+        });
+        const payload = ticket.getPayload();
+        if (!payload) throw new Error("empty payload");
+        if (payload.email_verified !== true) {
           throw new Error("Google email is not verified.");
         }
-        email = tokenInfo.email || null;
-        displayName = tokenInfo.name || null;
+        email = payload.email || null;
+        displayName = payload.name || null;
       } catch (e) {
         throw new functions.https.HttpsError(
           "unauthenticated",
@@ -852,6 +869,16 @@ exports.linkOrCreateAccount = functions
       });
 
       return { token: token, isNewUser: false };
+    }
+
+    // Google은 **마이그레이션 전용**이다. 기존 계정이 없으면 여기서 계정을
+    // 만들지 않는다 — 신규 가입은 앱이 Firebase 공식 signInWithCredential로
+    // 처리하고, 그래야 google.com provider가 제대로 붙는다.
+    if (provider === "google") {
+      functions.logger.info("linkOrCreateAccount: no legacy google account", {
+        provider: provider,
+      });
+      return { token: null, isNewUser: true, legacyAccount: false };
     }
 
     const newUser = await admin.auth().createUser({
