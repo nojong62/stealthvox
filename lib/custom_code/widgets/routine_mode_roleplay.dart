@@ -25,7 +25,8 @@ import 'package:flutter/foundation.dart'; // 🎧 [STT-RAW] kDebugMode
 
 import 'index.dart'; // Imports other custom widgets
 
-import '/custom_code/widgets/index.dart';
+// (같은 파일을 '/custom_code/widgets/index.dart'로 한 번 더 임포트하던 줄을
+//  지웠다 — 위 index.dart와 같은 파일이다.)
 import '/custom_code/actions/index.dart';
 import '/flutter_flow/custom_functions.dart';
 import 'package:flutter/services.dart'; // 🔬 [v3.1] Clipboard용
@@ -53,6 +54,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
+// 🔁 [LATE-CONTINUATION] 판정·합치기·말풍선 규칙은 Circle Talk과 **같은
+//   함수**를 쓴다. 여기에 규칙을 다시 구현하면 한쪽만 고쳐지고 다른 쪽은 남는다.
+import '/custom_code/services/late_continuation.dart';
 import '/custom_code/services/openai_streaming_transcribe_prewarm.dart';
 import '/custom_code/services/openai_streaming_transcribe_session.dart';
 import '/custom_code/services/openai_transcribe_service.dart';
@@ -158,6 +162,38 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   /// speech_stopped 뒤 최종 전사가 이 시간 안에 안 오면 턴을 놓아준다.
   /// 없으면 `_turnInFlight`가 켜진 채 굳어 30분 롤오버까지 막힌다.
   static const int _kStreamingTranscriptTimeoutMs = 8000;
+
+  // ── 🔁 [LATE-CONTINUATION] 늦은 이어 말하기 (Circle Talk과 같은 규칙) ──
+  // 판정·합치기·말풍선 규칙은 `routine_mode_anyone.dart`의 공용 함수를 그대로
+  // 쓴다. 두 모드가 다른 규칙으로 갈리면 한쪽만 고쳐지고 다른 쪽은 남는다.
+  //
+  // ⚠️ 시나리오톡만의 경계 — **AI 첫 문장을 조기 재생한다.** GPT가 아직
+  //   스트리밍 중인데도 첫 문장 TTS가 나간다. 그래서 복구 창을 닫는 자리는
+  //   "응답 완성 후 TTS"가 아니라 **가장 이른 TTS enqueue**여야 한다.
+  int _userTurnSeq = 0;
+  int _activeUserTurnId = 0;
+  final List<UserTurnSegment> _turnSegments = <UserTurnSegment>[];
+  String _pendingUserTranscript = '';
+  int _fallbackSegmentOrder = 0;
+
+  bool _continuationWindowOpen = false;
+  DateTime? _speechStoppedAt;
+  DateTime? _continuationWaitStartedAt;
+  int _continuationWindowSeq = 0;
+  int _continuationCandidate = 0;
+  int _continuationCandidateSeq = 0;
+  bool _aiPlaybackStarted = false;
+  Timer? _continuationWindowTimer;
+  Timer? _continuationTranscriptTimeout;
+
+  bool get _continuationCandidateAlive => _continuationCandidate != 0;
+
+  /// 취소 손잡이. 조기 재생 조각과 꼬리 조각이 따로 나가므로 모아 둔다.
+  final List<TtsUtterance> _activeUtterances = <TtsUtterance>[];
+
+  int _bubbleSeq = 0;
+  String _activeHostBubbleId = '';
+  String _activeAiBubbleId = '';
 
   /// 🚪 [ASK-BACK-ESCAPE] 연속 되묻기 횟수. 정상 응답이 나오면 0으로 돌아간다.
   ///
@@ -312,6 +348,9 @@ never by itself a reason to ask back.
   Future<void> _speakKoreanLine(String text) async {
     final spoken = text.trim();
     if (spoken.isEmpty || _openAiKey.isEmpty) return;
+    // 🔁 [LATE-CONTINUATION] 되묻기 문구도 이 길로 나간다. 소리가 나기 전에
+    //   마이크를 닫아야 [MIC-ROUTING]이 지켜진다.
+    _closeContinuationWindow(reason: 'tts_enqueue');
     _swTTS
       ..reset()
       ..start();
@@ -323,6 +362,7 @@ never by itself a reason to ask back.
       generationId: _pipelineGeneration,
       playbackCategory: 'scenario_ai',
     ));
+    _activeUtterances.add(utterance);
     try {
       await utterance.done.timeout(const Duration(seconds: 20));
     } on TimeoutException {
@@ -630,6 +670,11 @@ never by itself a reason to ask back.
       apiKeyProvider: () => _openAiKey,
       onLog: _log,
       onPlaybackStart: (_) {
+        // 🔁 [LATE-CONTINUATION] **실제로 소리가 나기 시작한 순간.** 조기 재생
+        //   조각이든 꼬리든 여기를 지난다. 이 턴의 복구 창을 확실히 닫는다 —
+        //   평소에는 enqueue에서 이미 닫히므로 최종 안전판이다.
+        _aiPlaybackStarted = true;
+        _closeContinuationWindow(reason: 'ai_playback_started');
         BillingTicker.instance.resumeFromActivity('roleplay_ai_pcm_tts_start');
         if (_swTTS.isRunning) {
           _swTTS.stop();
@@ -874,7 +919,13 @@ never by itself a reason to ask back.
     if (closingStreamingStt != null) unawaited(closingStreamingStt.dispose());
     _aiTtsAdapter.invalidateGenerationsBefore(_pipelineGeneration);
     _aiTtsAdapter.stopAll(reason: 'scenario_stop_everything');
+    // 레거시 폴백 경로의 음성도 방 종료에서는 함께 정리한다.
     _ttsQueueManager.stop();
+    // 🔁 [LATE-CONTINUATION] 타이머와 잠정 상태를 놓는다. 남겨 두면 화면을
+    //   떠난 뒤 타이머가 깨어나 defunct 위젯에 손을 댄다.
+    _turnInFlight = false;
+    _closeContinuationWindow(reason: 'stop_everything');
+    _resetContinuationState();
     if (mounted) setState(() {});
   }
 
@@ -1445,6 +1496,7 @@ never by itself a reason to ask back.
     }
     _resetIdleTimer();
     _log('⏱️ [PERF]', 'SPEECH_STARTED');
+    _maybeStartContinuation();
   }
 
   /// ⛔ 발화가 끝났다는 **신호일 뿐이다.** 여기서 AI 파이프라인을 시작하지
@@ -1455,11 +1507,248 @@ never by itself a reason to ask back.
       return;
     }
     _log('⏱️ [PERF]', 'SPEECH_STOPPED');
+    final now = DateTime.now();
+    _speechStoppedAt = now;
+    if (_continuationCandidateAlive) {
+      // 뒷말이 방금 끝났다 — 전사를 기다릴 시간과 하드캡을 다시 잰다.
+      _continuationWaitStartedAt = now;
+      _armContinuationTranscriptTimeout();
+    }
     // 전사가 도는 동안 30분 롤오버가 끼어들지 못하게 잡아 둔다.
     _turnInFlight = true;
-    _streamingStt?.closeAudioGate(reason: 'speech_stopped');
-    unawaited(_stopStreamingCapture(reason: 'speech_stopped'));
+    // 🔁 [LATE-CONTINUATION] 여기서 마이크를 닫으면 뒷말이 서버에 도달하지
+    //   못해 두 번째 speech_started 자체가 생기지 않는다. 복구 창이 만료되거나
+    //   TTS를 걸기 직전까지 녹음과 게이트를 살려 둔다.
+    _openContinuationWindow();
     _armStreamingTranscriptTimeout();
+  }
+
+  // ====================================================================
+  // 🔁 [LATE-CONTINUATION] 복구 창 — 규칙은 Circle Talk과 같다
+  // ====================================================================
+
+  void _openContinuationWindow() {
+    if (!_isStreamingTurnOwner() || _aiPlaybackStarted) {
+      _closeContinuationWindow(reason: 'not_eligible');
+      return;
+    }
+    _continuationWindowTimer?.cancel();
+    final int windowSeq = ++_continuationWindowSeq;
+    _continuationWindowOpen = true;
+    _continuationWindowTimer = Timer(
+      const Duration(milliseconds: kFreeTalkContinuationWindowMs),
+      () {
+        _continuationWindowTimer = null;
+        if (!mounted || windowSeq != _continuationWindowSeq) return;
+        if (!_continuationWindowOpen) return;
+        // 후보가 이미 잡혔으면 그 발화가 끝날 때까지 마이크를 열어 둔다.
+        if (_continuationCandidateAlive) {
+          _log('🔁 [CONT-WINDOW]', 'expiry_deferred reason=candidate_alive');
+          return;
+        }
+        _closeContinuationWindow(reason: 'window_expired');
+      },
+    );
+    _log('🔁 [CONT-WINDOW]',
+        'open seq=$windowSeq windowMs=$kFreeTalkContinuationWindowMs');
+  }
+
+  /// 창을 닫고 녹음·게이트를 정리한다. **[MIC-ROUTING] 규칙을 지키는 자리다** —
+  /// Android는 녹음이 열린 채 재생이 시작되면 출력 라우팅을 덮어쓴다.
+  /// 후보 상태는 건드리지 않는다(창은 마이크 수명, 후보는 자격이다).
+  void _closeContinuationWindow({required String reason}) {
+    final bool wasOpen = _continuationWindowOpen;
+    _continuationWindowTimer?.cancel();
+    _continuationWindowTimer = null;
+    _continuationWindowOpen = false;
+    _streamingStt?.closeAudioGate(reason: reason);
+    unawaited(_stopStreamingCapture(reason: reason));
+    if (wasOpen) {
+      _log('🔁 [CONT-WINDOW]', 'close seq=$_continuationWindowSeq reason=$reason');
+    }
+  }
+
+  void _clearContinuationCandidate() {
+    _continuationCandidate = 0;
+    _continuationWaitStartedAt = null;
+    _continuationTranscriptTimeout?.cancel();
+    _continuationTranscriptTimeout = null;
+  }
+
+  /// 자격은 오직 "복구 창 안에서 다시 말하기 시작했는가"다. 앞 발화의 전사가
+  /// 아직 안 왔어도 후보는 성립한다 — 붙일 문장은 나중에 도착한다.
+  void _maybeStartContinuation() {
+    final stoppedAt = _speechStoppedAt;
+    final int elapsed = stoppedAt == null
+        ? -1
+        : DateTime.now().difference(stoppedAt).inMilliseconds;
+    if (!shouldTreatAsLateContinuation(
+      msSinceSpeechStopped: elapsed,
+      candidateAlive: _continuationCandidateAlive,
+      aiPlaybackStarted: _aiPlaybackStarted,
+    )) {
+      return;
+    }
+    _continuationCandidate = ++_continuationCandidateSeq;
+    _continuationWaitStartedAt = DateTime.now();
+    _log('🔁 [CONT-DETECT]',
+        'candidate=$_continuationCandidate afterMs=$elapsed '
+            'gen=$_pipelineGeneration segments=${_turnSegments.length}');
+    // 이미 답변을 만들기 시작했다면 즉시 무효화한다. 시나리오톡은 첫 문장을
+    // 조기 재생하므로, 기다렸다가 무효화하면 그 사이 소리가 나가 버린다.
+    if (_isSystemBusy || _turnSegments.isNotEmpty) {
+      _invalidateAssistantTurn(reason: 'late_continuation');
+    }
+    _armContinuationTranscriptTimeout();
+  }
+
+  void _armContinuationTranscriptTimeout() {
+    _continuationTranscriptTimeout?.cancel();
+    final int candidate = _continuationCandidate;
+    if (candidate == 0) return;
+    _continuationTranscriptTimeout = Timer(
+      const Duration(milliseconds: kFreeTalkContinuationTranscriptTimeoutMs),
+      () {
+        _continuationTranscriptTimeout = null;
+        if (!mounted || candidate != _continuationCandidate) return;
+        final bool speaking = _streamingStt?.isUserSpeaking ?? false;
+        final bool serverBusy = _streamingStt?.hasPendingUtterance ?? false;
+        final waitStart = _continuationWaitStartedAt;
+        final int waitedMs = waitStart == null
+            ? 0
+            : DateTime.now().difference(waitStart).inMilliseconds;
+        if (decideContinuationWait(
+              isUserSpeaking: speaking,
+              serverHasPendingUtterance: serverBusy,
+              msSinceWaitStarted: waitedMs,
+            ) ==
+            ContinuationWaitAction.keepWaiting) {
+          _log('🔁 [CONT-TIMEOUT]',
+              'extended candidate=$candidate waitedMs=$waitedMs speaking=$speaking');
+          _armContinuationTranscriptTimeout();
+          return;
+        }
+        _log('🔁 [CONT-TIMEOUT]',
+            'candidate=$candidate segments=${_turnSegments.length} → 확보분으로 진행');
+        _resolveContinuation(
+            safetyExpired: true, reason: 'continuation_timeout');
+      },
+    );
+  }
+
+  /// 진행 중인 assistant 결과를 통째로 무효화한다.
+  ///
+  /// 주 경로의 AI 음성은 `_aiTtsAdapter` 하나다(`TtsQueueManager`는 레거시
+  /// 폴백 경로). 조기 재생 조각과 꼬리 조각이 따로 나가므로 손잡이를 모아 두고
+  /// 한꺼번에 끊는다.
+  void _invalidateAssistantTurn({required String reason}) {
+    _pipelineGeneration++;
+    _aiTtsAdapter.invalidateGenerationsBefore(_pipelineGeneration);
+    for (final u in _activeUtterances) {
+      u.cancel();
+    }
+    _activeUtterances.clear();
+    _aiTtsAdapter.stopAll(reason: reason);
+    _aiTurnActive = false;
+    // 확정하지 않은 AI 말풍선을 걷어낸다. 되묻기 판정은 응답이 완성된 뒤에
+    // 돌기 때문에, 여기서 지우면 앞 조각만 보고 만든 되묻기도 함께 사라진다.
+    _removeBubbleById(_activeAiBubbleId);
+    _activeAiBubbleId = '';
+    _log('🔁 [CONT-INVALIDATE]',
+        'reason=$reason newGen=$_pipelineGeneration');
+  }
+
+  void _resolveContinuation({
+    required bool safetyExpired,
+    required String reason,
+  }) {
+    if (!mounted || !_isConversationActive) return;
+    final bool speaking = _streamingStt?.isUserSpeaking ?? false;
+    final bool serverBusy = _streamingStt?.hasPendingUtterance ?? false;
+    final bool hasMeaningful =
+        _turnSegments.any((s) => !isHesitationOnlyTranscript(s.text));
+    final decision = decideContinuationNext(
+      isUserSpeaking: speaking,
+      serverHasPendingUtterance: serverBusy,
+      hasMeaningfulSegment: hasMeaningful,
+      safetyExpired: safetyExpired,
+    );
+    _log(
+        '🔁 [CONT-RESOLVE]',
+        'candidate=$_continuationCandidate decision=${decision.name} '
+            'speaking=$speaking serverBusy=$serverBusy '
+            'meaningful=$hasMeaningful expired=$safetyExpired '
+            'segments=${_turnSegments.length}');
+    switch (decision) {
+      case ContinuationDecision.wait:
+        _armContinuationTranscriptTimeout();
+        return;
+      case ContinuationDecision.startAssistant:
+        final merged = _pendingUserTranscript;
+        _clearContinuationCandidate();
+        _closeContinuationWindow(reason: reason);
+        _updateBubbleText(_activeHostBubbleId, merged);
+        BillingTicker.instance.resumeFromActivity('roleplay_stt_result');
+        _startAssistantTurn(merged, reason: reason);
+        return;
+      case ContinuationDecision.abandon:
+        _clearContinuationCandidate();
+        _closeContinuationWindow(reason: reason);
+        _abortStreamingTurn(reason: reason);
+        return;
+    }
+  }
+
+  /// 합친 문장으로 답변을 다시 만든다. 이전 파이프라인의 종료를 기다리지
+  /// 않는다 — 세대가 갈린 순간부터 그쪽은 전역 상태를 못 만진다.
+  ///
+  /// **되묻기도 여기서 다시 판정된다.** `_isAskBackReply`는
+  /// `_processScenarioTalkTurn` 안에서 응답이 완성된 뒤 돌기 때문에, 합친
+  /// 문장으로 다시 부르면 앞 조각만 보고 내린 되묻기는 남지 않는다.
+  void _startAssistantTurn(String userKorean, {required String reason}) {
+    if (!mounted || !_isConversationActive) return;
+    _aiPlaybackStarted = false;
+    _turnInFlight = true;
+    final int generation = _pipelineGeneration;
+    _log('🔁 [CONT-RESTART]', 'gen=$generation reason=$reason');
+    unawaited(_processScenarioTalkTurn(userKorean, generation: generation));
+  }
+
+  void _resetContinuationState() {
+    _continuationWindowTimer?.cancel();
+    _continuationWindowTimer = null;
+    _continuationTranscriptTimeout?.cancel();
+    _continuationTranscriptTimeout = null;
+    _continuationWindowOpen = false;
+    _continuationCandidate = 0;
+    _continuationWaitStartedAt = null;
+    _turnSegments.clear();
+    _pendingUserTranscript = '';
+    _speechStoppedAt = null;
+    _activeUserTurnId = 0;
+    _aiPlaybackStarted = false;
+    _activeUtterances.clear();
+    _activeHostBubbleId = '';
+    _activeAiBubbleId = '';
+  }
+
+  String _nextBubbleId(String prefix) => '$prefix-${++_bubbleSeq}';
+
+  int _bubbleIndexById(String id) => bubbleIndexById(_localMessages, id);
+
+  void _removeBubbleById(String id) {
+    if (!mounted) {
+      removeBubbleById(_localMessages, id);
+      return;
+    }
+    setState(() => removeBubbleById(_localMessages, id));
+  }
+
+  bool _updateBubbleText(String id, String text) {
+    if (!mounted) return updateBubbleTextById(_localMessages, id, text);
+    var updated = false;
+    setState(() => updated = updateBubbleTextById(_localMessages, id, text));
+    return updated;
   }
 
   void _armStreamingTranscriptTimeout() {
@@ -1484,6 +1773,8 @@ never by itself a reason to ask back.
     _streamingDeltaBuffer.clear();
     _streamingDeltaCount = 0;
     _turnInFlight = false;
+    _closeContinuationWindow(reason: reason);
+    _resetContinuationState();
     if (mounted) {
       setState(() {
         _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
@@ -1539,9 +1830,14 @@ never by itself a reason to ask back.
     if (_handledStreamingItemIds.length > 64) {
       _handledStreamingItemIds.remove(_handledStreamingItemIds.first);
     }
+    // 🔁 발화 순서는 소켓의 committed 순번이 원본이다. 도착 순서로 이으면
+    //   뒷말이 먼저 끝났을 때 문장이 뒤집힌다.
+    final int order =
+        _streamingStt?.utteranceOrderOf(itemId) ?? (++_fallbackSegmentOrder);
     _log('[SCN-STT]',
-        'final_received item=$itemId generation=$_listenGeneration len=${text.length}');
-    unawaited(_processStreamingFinalTranscript(text, itemId: itemId));
+        'final_received item=$itemId order=$order generation=$_listenGeneration len=${text.length}');
+    unawaited(
+        _processStreamingFinalTranscript(text, itemId: itemId, order: order));
   }
 
   /// 최종 전사문을 기존 `_processScenarioTalkTurn` 합류 지점으로 넘긴다.
@@ -1549,10 +1845,17 @@ never by itself a reason to ask back.
   Future<void> _processStreamingFinalTranscript(
     String transcript, {
     required String itemId,
+    required int order,
   }) async {
-    // 🔒 [ONE-TURN] 앞 턴이 아직 AI 응답 중이면 멈춘다. 마이크는 speech_stopped
-    //   에서 닫히므로 정상 흐름에는 없지만, 서버가 한 버퍼에서 두 구간을
-    //   확정하면 유저 턴이 두 개 생긴다.
+    // 🔁 [LATE-CONTINUATION] 후보가 살아 있으면 조각은 전부 여기로 온다.
+    //   **아래 [ONE-TURN] 가드를 타면 안 된다** — 후보가 살아 있다는 건 유저가
+    //   복구 창 안에서 이미 다시 말했다는 뜻이고, 그 말은 버릴 수 없다.
+    if (_continuationCandidateAlive) {
+      _ingestContinuationSegment(transcript, itemId: itemId, order: order);
+      return;
+    }
+    // 🔒 [ONE-TURN] 앞 턴이 아직 AI 응답 중이면 멈춘다. 복구 창 밖에서 서버가
+    //   한 버퍼에서 두 구간을 확정하면 유저 턴이 두 개 생긴다.
     if (_isSystemBusy) {
       _log('[TURN-SKIP]', 'reason=system_busy item=$itemId');
       return;
@@ -1595,23 +1898,98 @@ never by itself a reason to ask back.
         return;
       }
 
-      // 🗣️ 확정 문장으로 임시 말풍선을 갈아 끼운다. 되묻기 분기가 이것을 걷어낸다.
-      if (mounted) {
-        setState(() {
-          _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-          _localMessages.add(<String, dynamic>{
-            'role': 'HOST_TEMP',
-            'target': userKorean,
-            'original': '',
-          });
-        });
-        _scrollToBottom();
-      }
+      // 🔁 [LATE-CONTINUATION] 잠정 사용자 턴으로 접수한다. 복구 창이 닫힐
+      //   때까지 이 문장은 아직 바뀔 수 있다.
+      _turnSegments.clear();
+      mergeUserTurnSegments(
+        _turnSegments,
+        UserTurnSegment(itemId: itemId, order: order, text: userKorean),
+      );
+      _pendingUserTranscript =
+          composeUserTurnText(_turnSegments.map((s) => s.text));
+      _ensureUserTurnOpen();
 
-      await _processScenarioTalkTurn(userKorean, generation: generation);
+      // 🗣️ 확정 문장으로 임시 말풍선을 갈아 끼운다. 되묻기 분기가 이것을 걷어낸다.
+      _updatePendingUserPreview();
+
+      await _processScenarioTalkTurn(_pendingUserTranscript,
+          generation: generation);
     } finally {
-      _turnInFlight = false;
+      // 🔐 [GEN-OWNERSHIP] 세대가 갈렸으면 이 턴은 주인이 아니다. 이어 말하기를
+      //   기다리는 중에도 놓지 않는다 — 놓으면 30분 롤오버가 끼어든다.
+      if (generation == _pipelineGeneration && !_continuationCandidateAlive) {
+        _turnInFlight = false;
+      }
     }
+  }
+
+  /// 🔁 [LATE-CONTINUATION] 후보가 살아 있는 동안 도착한 조각을 받는다.
+  /// 앞말이든 뒷말이든, 도착 순서와 무관하게 전부 여기로 온다.
+  void _ingestContinuationSegment(
+    String transcript, {
+    required String itemId,
+    required int order,
+  }) {
+    final next = transcript.trim();
+    _streamingTranscriptTimeout?.cancel();
+    _streamingTranscriptTimeout = null;
+    _streamingDeltaItemId = '';
+    _streamingDeltaBuffer.clear();
+    _streamingDeltaCount = 0;
+    if (!mounted || !_isConversationActive) return;
+
+    if (next.isEmpty) {
+      _log('🔁 [CONT-INGEST]', 'item=$itemId dropped=empty');
+      _resolveContinuation(safetyExpired: false, reason: 'continuation_empty');
+      return;
+    }
+    if (_isNoiseTranscript(next) && !isHesitationOnlyTranscript(next)) {
+      _log('🔁 [CONT-INGEST]', 'item=$itemId dropped=noise');
+      _resolveContinuation(safetyExpired: false, reason: 'continuation_noise');
+      return;
+    }
+    // ⛔ 같은 item_id의 재수신만 막는다. 글자가 같다는 이유로는 버리지 않는다.
+    if (!mergeUserTurnSegments(
+      _turnSegments,
+      UserTurnSegment(itemId: itemId, order: order, text: next),
+    )) {
+      _log('🔁 [CONT-INGEST]', 'item=$itemId duplicate_item → 무시');
+      return;
+    }
+    _pendingUserTranscript =
+        composeUserTurnText(_turnSegments.map((s) => s.text));
+    _ensureUserTurnOpen();
+    _updateBubbleText(_activeHostBubbleId, _pendingUserTranscript);
+    _updatePendingUserPreview();
+    _log(
+        '🔁 [CONT-INGEST]',
+        'item=$itemId order=$order segments=${_turnSegments.length} '
+            'len=${_pendingUserTranscript.length}');
+    _resolveContinuation(safetyExpired: false, reason: 'continuation_merged');
+  }
+
+  bool _ensureUserTurnOpen() {
+    if (_activeUserTurnId != 0) return false;
+    _userTurnSeq++;
+    _activeUserTurnId = _userTurnSeq;
+    _aiPlaybackStarted = false;
+    return true;
+  }
+
+  /// 확정 말풍선이 아직 없을 때 임시 말풍선으로 지금까지의 문장을 보여 준다.
+  void _updatePendingUserPreview() {
+    if (!mounted) return;
+    if (_bubbleIndexById(_activeHostBubbleId) >= 0) return;
+    if (_pendingUserTranscript.isEmpty) return;
+    setState(() {
+      _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+      _localMessages.add(<String, dynamic>{
+        'role': 'HOST_TEMP',
+        'target': _pendingUserTranscript,
+        'original': '',
+      });
+    });
+    _scrollToBottom();
   }
 
   // speechFinal 여부에 따른 조건부 commit 대기 시간 계산
@@ -1848,10 +2226,16 @@ never by itself a reason to ask back.
     TtsUtterance? earlyUtterance;
     final recentConversation = _recentKoreanConversation();
     // 되묻기가 나오면 이 말풍선을 도로 걷어내야 하므로 참조를 들고 간다.
+    // 🔁 [LATE-CONTINUATION] id도 같이 박는다. 이어 말하기로 문장이 자라면
+    //   새 말풍선을 만들지 않고 이 id로 찾아 글자만 바꾼다.
+    if (_bubbleIndexById(_activeHostBubbleId) < 0) {
+      _activeHostBubbleId = _nextBubbleId('host');
+    }
     final hostBubble = <String, dynamic>{
       'role': 'HOST',
       'target': userKorean,
       'original': '',
+      'msgId': _activeHostBubbleId,
     };
     try {
       setState(() {
@@ -1886,11 +2270,15 @@ never by itself a reason to ask back.
         if (_scenarioReplyMayBeControlSignal(streamedReply)) continue;
 
         if (aiIndex < 0) {
+          // 🔁 [LATE-CONTINUATION] 취소 시 이 id로 정확히 집어 걷어낸다.
+          //   인덱스는 앞 말풍선이 지워지면 밀린다.
+          _activeAiBubbleId = _nextBubbleId('ai');
           setState(() {
             _localMessages.add(<String, dynamic>{
               'role': 'SYSTEM',
               'target': streamedReply,
               'original': '',
+              'msgId': _activeAiBubbleId,
             });
             aiIndex = _localMessages.length - 1;
           });
@@ -1913,6 +2301,14 @@ never by itself a reason to ask back.
               _swTTS
                 ..reset()
                 ..start();
+              // 🔁 [LATE-CONTINUATION] **시나리오톡에서 가장 이른 TTS다.**
+              //   GPT가 아직 스트리밍 중인데 첫 문장이 여기서 나간다. 그래서
+              //   복구 창은 응답 완성 때가 아니라 이 자리에서 닫아야 한다 —
+              //   [MIC-ROUTING] Android는 녹음이 열린 채 재생이 시작되면 출력
+              //   라우팅을 덮어쓴다.
+              if (generation == _pipelineGeneration) {
+                _closeContinuationWindow(reason: 'tts_enqueue_first_sentence');
+              }
               earlyUtterance = _aiTtsAdapter.speak(TtsRequest(
                 text: firstSpokenSegment,
                 voiceId: _aiVoice,
@@ -1922,6 +2318,7 @@ never by itself a reason to ask back.
                 playbackCategory: 'scenario_ai',
                 expectsMoreSegments: true,
               ));
+              _activeUtterances.add(earlyUtterance);
               _log('[SCENARIO-PIPELINE]',
                   'first_sentence_tts_started len=${firstSpokenSegment.length}');
             }
