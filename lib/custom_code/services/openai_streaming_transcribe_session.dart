@@ -564,8 +564,14 @@ class OpenAiStreamingTranscribeSession {
         final order = _assignUtteranceOrder(itemId);
         _lg('📡 [STREAM-STT]',
             'transcription_completed item=$itemId order=$order len=${text.length}');
-        onTranscriptCompleted?.call(itemId, text);
+        // ⚠️ **콜백보다 먼저 장부에서 지운다.** 순서가 반대면, 호출부가
+        //   콜백 안에서 `hasPendingUtterance`를 읽을 때 **방금 도착한 그
+        //   item이 아직 남아 있어** 항상 "서버가 더 물고 있다"로 보인다.
+        //   이어 말하기가 그 값을 보고 계속 기다리다 안전 타임아웃(2.5초)에서야
+        //   답변을 시작했다 — 실기기 로그에서 매 병합마다 2.5초를 버렸다
+        //   (2026-08-14, [CONT-RESOLVE] decision=wait serverBusy=true).
         _clearPending(itemId);
+        onTranscriptCompleted?.call(itemId, text);
         return;
 
       case 'conversation.item.input_audio_transcription.failed':
