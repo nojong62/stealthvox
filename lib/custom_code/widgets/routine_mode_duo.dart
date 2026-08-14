@@ -655,9 +655,15 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   static const int kDuoMinVoicedMs = 150;
 
   /// 직접 대화 전사문 중 버릴 것. 만능 통역 쪽 필터는 건드리지 않는다.
+  ///
+  /// ⚠️ **글자 수로 버리지 않는다.** 예전에는 2자 이하를 무조건 잡음으로 봤는데,
+  ///   "네"·"응"·"왜?" 같은 정상 대답이 1초 넘게 말해도 그대로 사라졌다
+  ///   (2026-08-14 실측: 31건 중 5건 유실, order=3은 voicedMs=1164였다).
+  ///   환청과 짧은 대답을 가르는 것은 글자 수가 아니라 **소리 난 시간**이고,
+  ///   그건 호출부의 voicedMs 게이트가 이미 판단한다.
   bool _isNoiseTranscript(String raw) {
     final String trimmed = raw.trim();
-    if (trimmed.length <= 2) return true;
+    if (trimmed.isEmpty) return true;
     final String lower = trimmed.toLowerCase();
     final String clean = lower.replaceAll(RegExp(r'[^\w\s가-힣]'), '').trim();
     if (clean.isEmpty) return true;
@@ -857,7 +863,16 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         //   노이즈("쉐" 소리)를 깎는다. 재생기를 먼저 통화 모드로 열어 둔
         //   뒤에 마이크를 여는 순서(①→④)를 지켜야 AEC가 참조를 잡는다.
         echoCancel: true,
-        noiseSuppress: true,
+        // 🎧 [STT-QUALITY] **잡음 억제는 끈다.** AEC와 NS는 별개 효과인데,
+        //   글자를 망치는 쪽은 NS다 — 무엇이 잡음인지 추측해서 깎기 때문에
+        //   ㅅ·ㅊ·ㅎ 같은 마찰음과 문장 끝을 같이 먹는다. 그 깎인 소리가
+        //   그대로 gpt-4o-transcribe에 들어가 Circle Talk보다 전사가 나빴다
+        //   (2026-08-14 실장님 확인). AEC는 "내가 방금 재생한 신호"라는 정답을
+        //   알고 빼는 것이라 훨씬 덜 해치므로 되먹임 방지용으로 남긴다.
+        //
+        //   NS를 끄면 무음 구간 생마이크 노이즈가 늘 수 있으나, 그건
+        //   voicedMs 150ms 게이트가 이미 막는다.
+        noiseSuppress: false,
         onRecordingStarted: (at) => _lgDuo(
             '[PCM_CAPTURE]', 'recording_started at=${at.toIso8601String()}'),
         onFirstFrame: (at, byteCount) {
@@ -975,7 +990,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       {int? voicedMs}) async {
     if (!_canSaveDirectTranscript(generation)) return;
     final String trimmed = text.trim();
-    if (trimmed.isEmpty || _isNoiseTranscript(trimmed)) return;
+    if (trimmed.isEmpty || _isNoiseTranscript(trimmed)) {
+      // 예전에는 여기서 로그 없이 사라졌다. 무엇이 왜 버려졌는지 남지 않아
+      // 실기기에서 "빠진 대사"를 추적할 수가 없었다.
+      _lgDuo('[DUO-DROP]',
+          'noise_gate item=$itemId len=${trimmed.length} voicedMs=${voicedMs ?? -1}');
+      return;
+    }
     // 중복 저장 가드. 같은 item이 두 번 오면(재전달·flush 겹침) 한 번만 남긴다.
     if (itemId.isNotEmpty && !_savedDirectItemIds.add(itemId)) {
       _lgDuo('[DIRECT-STT]', 'duplicate_skipped item=$itemId');
