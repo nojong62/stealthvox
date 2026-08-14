@@ -187,7 +187,7 @@ class RoutineModeAnyone extends StatefulWidget {
 }
 
 class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
-    with TrialAnyoneTimerMixin<RoutineModeAnyone> {
+    with TrialAnyoneTimerMixin<RoutineModeAnyone>, SingleTickerProviderStateMixin {
   // ====================================================================
   // 📦 [Box 3: 상태 변수 및 초기화]
   // ====================================================================
@@ -1062,6 +1062,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
   @override
   void dispose() {
+    _continuationPulse.dispose();
     // 🧹 [DISPOSE-GUARD] dispose 중에는 setState가 금지된다(위젯이 이미 defunct).
     //   이 플래그를 먼저 세워 _stopEverything의 setState를 건너뛴다.
     _isDisposing = true;
@@ -2646,9 +2647,28 @@ $kSpokenReplyLengthPolicy
   bool get _continuationListening =>
       _continuationWindowOpen && !_aiPlaybackStarted;
 
+  /// 🔁 [LATE-CONTINUATION] 복구 창 동안 점을 **반복해서 뛰게** 한다.
+  ///
+  /// 크기만 12→16px로 키워 봤더니 화면에서는 4픽셀이라, 말풍선을 보고 있으면
+  /// 주변시로 거의 안 잡혔다(실장님 확인). 사람 눈은 크기 차이보다 **반복
+  /// 움직임**을 훨씬 잘 잡는다. 창이 열려 있는 동안만 돌리고 닫히면 세운다 —
+  /// 늘 돌리면 쓸데없이 매 프레임을 그린다.
+  late final AnimationController _continuationPulse = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 620),
+  );
+
   /// 창 상태가 바뀌면 위 표시를 다시 그린다.
   void _repaintContinuationHint() {
     if (!mounted) return;
+    if (_continuationListening) {
+      if (!_continuationPulse.isAnimating) {
+        _continuationPulse.repeat(reverse: true);
+      }
+    } else if (_continuationPulse.isAnimating) {
+      _continuationPulse.stop();
+      _continuationPulse.value = 0;
+    }
     setState(() {});
   }
 
@@ -5151,36 +5171,43 @@ $kSpokenReplyLengthPolicy
                 alignment: Alignment.center,
                 // 🔁 [LATE-CONTINUATION] 복구 창이 열려 있으면 점이 커지고
                 //   보라로 살아난다 — "아직 듣고 있다"를 글자 없이 알린다.
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 160),
-                  curve: Curves.easeOut,
-                  width: _continuationListening ? 16 : 12,
-                  height: _continuationListening ? 16 : 12,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: _continuationListening
-                        ? const Color(0xFFB46CFF)
-                        : (_isConversationActive
-                            ? const Color(0xFFFBBF24)
-                            : Colors.transparent),
-                    border: Border.all(
-                      color: _continuationListening
-                          ? const Color(0xFFB46CFF)
-                          : (_isConversationActive
-                              ? const Color(0xFFFBBF24)
-                              : Colors.white24),
-                      width: 1.5,
-                    ),
-                    boxShadow: _continuationListening
-                        ? const <BoxShadow>[
-                            BoxShadow(
-                              color: Color(0x66B46CFF),
-                              blurRadius: 8,
-                              spreadRadius: 2,
-                            ),
-                          ]
-                        : null,
-                  ),
+                child: AnimatedBuilder(
+                  animation: _continuationPulse,
+                  builder: (context, _) {
+                    final double t = _continuationListening
+                        ? Curves.easeInOut.transform(_continuationPulse.value)
+                        : 0.0;
+                    final double size = 12 + (18 - 12) * t;
+                    return Container(
+                      width: size,
+                      height: size,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: _continuationListening
+                            ? const Color(0xFFB46CFF)
+                            : (_isConversationActive
+                                ? const Color(0xFFFBBF24)
+                                : Colors.transparent),
+                        border: Border.all(
+                          color: _continuationListening
+                              ? const Color(0xFFB46CFF)
+                              : (_isConversationActive
+                                  ? const Color(0xFFFBBF24)
+                                  : Colors.white24),
+                          width: 1.5,
+                        ),
+                        boxShadow: _continuationListening
+                            ? <BoxShadow>[
+                                BoxShadow(
+                                  color: const Color(0x66B46CFF),
+                                  blurRadius: 6 + 6 * t,
+                                  spreadRadius: 1 + 2 * t,
+                                ),
+                              ]
+                            : null,
+                      ),
+                    );
+                  },
                 ),
               ),
             ],
