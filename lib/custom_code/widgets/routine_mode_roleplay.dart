@@ -431,6 +431,11 @@ never by itself a reason to ask back.
 
   /// 발화 확정부터 AI 답변 저장까지 켜져 있는 턴 가드. 롤오버가 이 사이에
   /// 끼어들면 한 턴이 두 History로 갈린다.
+  /// 🧹 [DISPOSE-GUARD] dispose 진행 중. 위젯이 이미 defunct라 setState가
+  /// 금지된다. GPT 스트리밍 중에 방을 나가면 늦게 도착한 조각이 화면을
+  /// 건드리려다 예외를 낸다 — Circle Talk에는 있던 가드가 여기엔 없었다.
+  bool _isDisposing = false;
+
   bool _turnInFlight = false;
 
   /// **지금 열려 있는 History 문서**가 유저 발화를 하나라도 받았는지.
@@ -736,6 +741,7 @@ never by itself a reason to ask back.
 
   @override
   void dispose() {
+    _isDisposing = true;
     _continuationPulse.dispose();
     if (StealthRoomMaster.saveAndExitCurrentMode == _handleAutoSaveAndExit) {
       StealthRoomMaster.saveAndExitCurrentMode = null;
@@ -1749,7 +1755,7 @@ never by itself a reason to ask back.
 
   /// 창 상태가 바뀌면 위 표시를 다시 그린다.
   void _repaintContinuationHint() {
-    if (!mounted) return;
+    if (!mounted || _isDisposing) return;
     if (_continuationListening) {
       if (!_continuationPulse.isAnimating) {
         _continuationPulse.repeat(reverse: true);
@@ -1784,7 +1790,7 @@ never by itself a reason to ask back.
   int _bubbleIndexById(String id) => bubbleIndexById(_localMessages, id);
 
   void _removeBubbleById(String id) {
-    if (!mounted) {
+    if (!mounted || _isDisposing) {
       removeBubbleById(_localMessages, id);
       return;
     }
@@ -1792,7 +1798,9 @@ never by itself a reason to ask back.
   }
 
   bool _updateBubbleText(String id, String text) {
-    if (!mounted) return updateBubbleTextById(_localMessages, id, text);
+    if (!mounted || _isDisposing) {
+      return updateBubbleTextById(_localMessages, id, text);
+    }
     var updated = false;
     setState(() => updated = updateBubbleTextById(_localMessages, id, text));
     return updated;
@@ -2025,7 +2033,7 @@ never by itself a reason to ask back.
 
   /// 확정 말풍선이 아직 없을 때 임시 말풍선으로 지금까지의 문장을 보여 준다.
   void _updatePendingUserPreview() {
-    if (!mounted) return;
+    if (!mounted || _isDisposing) return;
     if (_bubbleIndexById(_activeHostBubbleId) >= 0) return;
     if (_pendingUserTranscript.isEmpty) return;
     setState(() {
@@ -2483,13 +2491,20 @@ never by itself a reason to ask back.
             continuesPreviousSegment: true,
           ));
           final tailUtterance = _aiTtsAdapter.speakPrefetched(tailPrefetch);
+          _activeUtterances.add(tailUtterance);
           try {
             await tailUtterance.done.timeout(const Duration(seconds: 20));
           } on TimeoutException {
-            headUtterance.cancel();
+            // ⚠️ **머리는 건드리지 않는다.** 큐가 FIFO라 tail.done은 머리
+            //   재생이 끝난 뒤에야 완료된다 — 즉 이 상한을 넘겼다는 것은
+            //   "꼬리가 늦다"는 뜻이지 "머리가 잘못됐다"는 뜻이 아니다.
+            //   예전에는 여기서 headUtterance까지 취소해서, 멀쩡히 재생 중이던
+            //   앞 문장이 뚝 끊겼다("마지막 AI 대사 짤림", 2026-08-14 실기기).
             tailUtterance.cancel();
-            _log('[KOREAN-TTS-TIMEOUT]',
-                'Scenario Talk segmented PCM TTS exceeded 20s');
+            _log(
+                '[KOREAN-TTS-TIMEOUT]',
+                'tail exceeded 20s headLen=${spokenHead.length} '
+                    'tailLen=${remaining.length} (head kept)');
           }
         } else {
           headUtterance.cancel();
