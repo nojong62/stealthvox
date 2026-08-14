@@ -126,7 +126,14 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
   int _idleElapsedSec = 0;
 
   bool get _isSystemBusy {
-    return _ttsQueueManager.isBusy || _aiTurnActive;
+    // 🔊 [IDLE] 연습 재생도 "작동 중"이다. 이 둘이 빠져 있어서, 문장을
+    //   반복해 들으며 공부하는 동안 유휴 카운터가 올라가 60초 뒤 과금이
+    //   멈췄다 — 가만히 듣기만 하는 연습이 정확히 그 구간이다.
+    //   Circle Talk·Scenario Talk은 재생기가 모두 포함돼 있어 이 문제가 없다.
+    return _ttsQueueManager.isBusy ||
+        _aiTurnActive ||
+        _isAiFullPlaying ||
+        _isUserFullPlaying;
   }
 
   void _resetIdleTimer() {
@@ -282,6 +289,11 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
   bool _awaitingAiFirstAudioProbe = false;
   double? _activeSttConfidence;
   int _pipelineGeneration = 0;
+  /// 🧹 [DISPOSE-GUARD] dispose 진행 중. 위젯이 이미 defunct라 setState가
+  /// 금지된다. GPT 스트리밍 중에 방을 나가면 늦게 도착한 조각이 화면을
+  /// 건드리려다 예외를 낸다 — Circle Talk에는 있던 가드가 여기엔 없었다.
+  bool _isDisposing = false;
+
   bool _aiTurnActive = false;
 
   // 🎙️ 메인 한국어 대화 전용 OpenAI 스트리밍 전사. 완성문장 뒤의 외국어
@@ -707,6 +719,7 @@ line had never been said. Never build the conversation on a line you had to gues
 
   @override
   void dispose() {
+    _isDisposing = true;
     _continuationPulse.dispose();
     if (StealthRoomMaster.saveAndExitCurrentMode == _handleAutoSaveAndExit) {
       StealthRoomMaster.saveAndExitCurrentMode = null;
@@ -2494,7 +2507,7 @@ line had never been said. Never build the conversation on a line you had to gues
 
   /// 창 상태가 바뀌면 위 표시를 다시 그린다.
   void _repaintContinuationHint() {
-    if (!mounted) return;
+    if (!mounted || _isDisposing) return;
     if (_continuationListening) {
       if (!_continuationPulse.isAnimating) {
         _continuationPulse.repeat(reverse: true);
@@ -2528,7 +2541,7 @@ line had never been said. Never build the conversation on a line you had to gues
   int _bubbleIndexById(String id) => bubbleIndexById(_localMessages, id);
 
   void _removeBubbleById(String id) {
-    if (!mounted) {
+    if (!mounted || _isDisposing) {
       removeBubbleById(_localMessages, id);
       return;
     }
@@ -2536,7 +2549,9 @@ line had never been said. Never build the conversation on a line you had to gues
   }
 
   bool _updateBubbleText(String id, String text) {
-    if (!mounted) return updateBubbleTextById(_localMessages, id, text);
+    if (!mounted || _isDisposing) {
+      return updateBubbleTextById(_localMessages, id, text);
+    }
     var updated = false;
     setState(() => updated = updateBubbleTextById(_localMessages, id, text));
     return updated;
@@ -3380,6 +3395,9 @@ line had never been said. Never build the conversation on a line you had to gues
         return;
       }
 
+      // 🧹 [DISPOSE-GUARD] GPT 스트리밍을 기다리는 동안 방을 나갔을 수 있다.
+      //   defunct 위젯에 setState하면 예외가 나고 아래 정리까지 건너뛴다.
+      if (!mounted || _isDisposing) return;
       setState(() {
         // 델타가 한 번도 안 왔으면(전체가 finalText로만 도착) 여기서 만든다.
         if (aiIndex < 0) {
