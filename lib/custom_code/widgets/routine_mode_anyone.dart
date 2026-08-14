@@ -538,50 +538,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
   Widget _buildIdleOverlay() => const SizedBox.shrink();
 
-  /// 🔁 [LATE-CONTINUATION] "아직 듣고 있어요" 표시.
-  ///
-  /// 복구 창이 열려 있는 동안만 뜬다. 유저가 말을 멈추면 화면에 글자가 뜨는데,
-  /// 그때 "이미 보내진 건가?" 하고 멈칫하는 것을 막는 게 목적이다.
-  /// 숫자(1.2초)도 내부 동작(다시 만든다)도 말하지 않는다 — 유저가 할 일만.
-  Widget _buildContinuationHint() {
-    final bool visible = _continuationWindowOpen && !_aiPlaybackStarted;
-    return AnimatedOpacity(
-      opacity: visible ? 1 : 0,
-      duration: const Duration(milliseconds: 140),
-      child: IgnorePointer(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-          decoration: BoxDecoration(
-            color: const Color(0xCC1C1C1E),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: const Color(0x66B46CFF)),
-          ),
-          child: const Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.mic_rounded, size: 15, color: Color(0xFFB46CFF)),
-              SizedBox(width: 7),
-              Text(
-                '이어서 말해도 됩니다',
-                style: TextStyle(
-                  color: Colors.white70,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// 창 상태가 바뀌면 위 표시를 다시 그린다. 창을 여닫는 곳은 setState를
-  /// 부르지 않으므로 여기서 한 번만 묶어 둔다.
-  void _repaintContinuationHint() {
-    if (!mounted || _isDisposing) return;
-    setState(() {});
-  }
   // ─────────────────────────────────────────────────────────────────────────
 
   // 🔧 [v3.4 발화 합치기] 유저 더듬거림 대응
@@ -2680,6 +2636,22 @@ $kSpokenReplyLengthPolicy
   }
 
   /// 이어 말하기 상태를 모두 놓는다. 턴이 끝나거나 방이 닫힐 때 부른다.
+
+  /// 🔁 [LATE-CONTINUATION] 복구 창이 열려 있는 동안 마이크 표시를 살려 둔다.
+  ///
+  /// 떠 있는 안내 알약을 쓰다가 걷어냈다 — 최대 1.2초, 그것도 말을 멈춘 뒤에만
+  /// 떠서 정작 이어 말하려는 사람은 볼 틈이 없었다. 대신 이미 보고 있던
+  /// 마이크 점을 **꺼지지 않게** 두는 쪽이 자연스럽다: 점이 살아 있으면
+  /// 아직 듣고 있다는 뜻이고, 유저는 설명을 읽지 않아도 안다.
+  bool get _continuationListening =>
+      _continuationWindowOpen && !_aiPlaybackStarted;
+
+  /// 창 상태가 바뀌면 위 표시를 다시 그린다.
+  void _repaintContinuationHint() {
+    if (!mounted) return;
+    setState(() {});
+  }
+
   void _resetContinuationState() {
     _continuationWindowTimer?.cancel();
     _continuationWindowTimer = null;
@@ -4956,15 +4928,6 @@ $kSpokenReplyLengthPolicy
                   child: SessionSavedNotice(visible: _rolloverNoticeVisible),
                 ),
               ),
-              // 🔁 [LATE-CONTINUATION] 복구 창이 열려 있는 동안만 뜬다.
-              //   "지금 이어 말해도 된다"를 **글이 아니라 상태로** 알린다 —
-              //   안내문으로 "1초 안에 이으세요"라고 적으면 유저가 초를 센다.
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 12,
-                child: Center(child: _buildContinuationHint()),
-              ),
             ]),
           ),
           _buildControlArea(bottomPad),
@@ -5186,20 +5149,37 @@ $kSpokenReplyLengthPolicy
                 width: 44,
                 height: 44,
                 alignment: Alignment.center,
-                child: Container(
-                  width: 12,
-                  height: 12,
+                // 🔁 [LATE-CONTINUATION] 복구 창이 열려 있으면 점이 커지고
+                //   보라로 살아난다 — "아직 듣고 있다"를 글자 없이 알린다.
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  curve: Curves.easeOut,
+                  width: _continuationListening ? 16 : 12,
+                  height: _continuationListening ? 16 : 12,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: _isConversationActive
-                        ? const Color(0xFFFBBF24)
-                        : Colors.transparent,
+                    color: _continuationListening
+                        ? const Color(0xFFB46CFF)
+                        : (_isConversationActive
+                            ? const Color(0xFFFBBF24)
+                            : Colors.transparent),
                     border: Border.all(
-                      color: _isConversationActive
-                          ? const Color(0xFFFBBF24)
-                          : Colors.white24,
+                      color: _continuationListening
+                          ? const Color(0xFFB46CFF)
+                          : (_isConversationActive
+                              ? const Color(0xFFFBBF24)
+                              : Colors.white24),
                       width: 1.5,
                     ),
+                    boxShadow: _continuationListening
+                        ? const <BoxShadow>[
+                            BoxShadow(
+                              color: Color(0x66B46CFF),
+                              blurRadius: 8,
+                              spreadRadius: 2,
+                            ),
+                          ]
+                        : null,
                   ),
                 ),
               ),

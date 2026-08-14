@@ -94,8 +94,12 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay> {
   String _deepgramKey = "";
   String _openAiKey = "";
 
-  /// Scenario Talk AI 음성은 로비 설정과 무관하게 tts-1 + onyx로 고정한다.
-  static const String _aiVoice = 'onyx';
+  /// Scenario Talk AI 음성은 로비 설정과 무관하게 tts-1 + echo로 고정한다.
+  ///
+  /// onyx는 굵고 낮아 나이 든 인상이었다. 역할극 상대로는 젊고 경쾌한 쪽이
+  /// 맞아 echo로 바꿨다(2026-08-14). tts-1이 주는 남성 목소리는 onyx·echo
+  /// 둘뿐이고, fable은 영국식 화자 톤이라 배역이 튄다.
+  static const String _aiVoice = 'echo';
   static const Duration _accurateTranscribeTimeout = Duration(seconds: 12);
   bool _isConversationActive = false;
   double _fontScale = 1.0;
@@ -1568,6 +1572,7 @@ never by itself a reason to ask back.
     unawaited(_stopStreamingCapture(reason: reason));
     if (wasOpen) {
       _log('🔁 [CONT-WINDOW]', 'close seq=$_continuationWindowSeq reason=$reason');
+      _repaintContinuationHint();
     }
   }
 
@@ -1715,6 +1720,24 @@ never by itself a reason to ask back.
     final int generation = _pipelineGeneration;
     _log('🔁 [CONT-RESTART]', 'gen=$generation reason=$reason');
     unawaited(_processScenarioTalkTurn(userKorean, generation: generation));
+  }
+
+
+
+
+  /// 🔁 [LATE-CONTINUATION] 복구 창이 열려 있는 동안 마이크 표시를 살려 둔다.
+  ///
+  /// 떠 있는 안내 알약을 쓰다가 걷어냈다 — 최대 1.2초, 그것도 말을 멈춘 뒤에만
+  /// 떠서 정작 이어 말하려는 사람은 볼 틈이 없었다. 대신 이미 보고 있던
+  /// 마이크 점을 **꺼지지 않게** 두는 쪽이 자연스럽다: 점이 살아 있으면
+  /// 아직 듣고 있다는 뜻이고, 유저는 설명을 읽지 않아도 안다.
+  bool get _continuationListening =>
+      _continuationWindowOpen && !_aiPlaybackStarted;
+
+  /// 창 상태가 바뀌면 위 표시를 다시 그린다.
+  void _repaintContinuationHint() {
+    if (!mounted) return;
+    setState(() {});
   }
 
   void _resetContinuationState() {
@@ -3939,20 +3962,37 @@ never by itself a reason to ask back.
                     width: 44,
                     height: 44,
                     alignment: Alignment.center,
-                    child: Container(
-                      width: 12,
-                      height: 12,
+                    // 🔁 [LATE-CONTINUATION] 복구 창이 열려 있으면 점이 커지고
+                    //   초록으로 살아난다 — "아직 듣고 있다"를 글자 없이 알린다.
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 160),
+                      curve: Curves.easeOut,
+                      width: _continuationListening ? 16 : 12,
+                      height: _continuationListening ? 16 : 12,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: _isConversationActive
-                            ? const Color(0xFFFBBF24)
-                            : Colors.transparent,
+                        color: _continuationListening
+                            ? const Color(0xFF4ADE80)
+                            : (_isConversationActive
+                                ? const Color(0xFFFBBF24)
+                                : Colors.transparent),
                         border: Border.all(
-                          color: _isConversationActive
-                              ? const Color(0xFFFBBF24)
-                              : Colors.white24,
+                          color: _continuationListening
+                              ? const Color(0xFF4ADE80)
+                              : (_isConversationActive
+                                  ? const Color(0xFFFBBF24)
+                                  : Colors.white24),
                           width: 1.5,
                         ),
+                        boxShadow: _continuationListening
+                            ? const <BoxShadow>[
+                                BoxShadow(
+                                  color: Color(0x664ADE80),
+                                  blurRadius: 8,
+                                  spreadRadius: 2,
+                                ),
+                              ]
+                            : null,
                       ),
                     ),
                   ),

@@ -2323,6 +2323,7 @@ line had never been said. Never build the conversation on a line you had to gues
     if (wasOpen) {
       _log('🔁 [CONT-WINDOW]',
           'close seq=$_continuationWindowSeq reason=$reason');
+      _repaintContinuationHint();
     }
   }
 
@@ -2464,6 +2465,24 @@ line had never been said. Never build the conversation on a line you had to gues
     final int generation = _pipelineGeneration;
     _log('🔁 [CONT-RESTART]', 'gen=$generation reason=$reason');
     unawaited(_processFinalUserKorean(userKorean, generation: generation));
+  }
+
+
+
+
+  /// 🔁 [LATE-CONTINUATION] 복구 창이 열려 있는 동안 마이크 표시를 살려 둔다.
+  ///
+  /// 떠 있는 안내 알약을 쓰다가 걷어냈다 — 최대 1.2초, 그것도 말을 멈춘 뒤에만
+  /// 떠서 정작 이어 말하려는 사람은 볼 틈이 없었다. 대신 이미 보고 있던
+  /// 마이크 점을 **꺼지지 않게** 두는 쪽이 자연스럽다: 점이 살아 있으면
+  /// 아직 듣고 있다는 뜻이고, 유저는 설명을 읽지 않아도 안다.
+  bool get _continuationListening =>
+      _continuationWindowOpen && !_aiPlaybackStarted;
+
+  /// 창 상태가 바뀌면 위 표시를 다시 그린다.
+  void _repaintContinuationHint() {
+    if (!mounted) return;
+    setState(() {});
   }
 
   void _resetContinuationState() {
@@ -5665,20 +5684,37 @@ line had never been said. Never build the conversation on a line you had to gues
                 fontWeight: FontWeight.bold),
           ),
           // 작동 중 노란 불빛 인디케이터
-          Container(
-            width: 10,
-            height: 10,
+          // 🔁 [LATE-CONTINUATION] 복구 창이 열려 있으면 점이 커지고 초록으로
+          //   살아난다 — "아직 듣고 있다"를 글자 없이 알린다.
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.easeOut,
+            width: _continuationListening ? 14 : 10,
+            height: _continuationListening ? 14 : 10,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: _isConversationActive
-                  ? const Color(0xFFFBBF24)
-                  : Colors.transparent,
+              color: _continuationListening
+                  ? const Color(0xFF4ADE80)
+                  : (_isConversationActive
+                      ? const Color(0xFFFBBF24)
+                      : Colors.transparent),
               border: Border.all(
-                color: _isConversationActive
-                    ? const Color(0xFFFBBF24)
-                    : Colors.white24,
+                color: _continuationListening
+                    ? const Color(0xFF4ADE80)
+                    : (_isConversationActive
+                        ? const Color(0xFFFBBF24)
+                        : Colors.white24),
                 width: 1.5,
               ),
+              boxShadow: _continuationListening
+                  ? const <BoxShadow>[
+                      BoxShadow(
+                        color: Color(0x664ADE80),
+                        blurRadius: 8,
+                        spreadRadius: 2,
+                      ),
+                    ]
+                  : null,
             ),
           ),
         ],
