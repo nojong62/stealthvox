@@ -537,6 +537,51 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   // ──────────────────────────────────────────────────────────────────
 
   Widget _buildIdleOverlay() => const SizedBox.shrink();
+
+  /// 🔁 [LATE-CONTINUATION] "아직 듣고 있어요" 표시.
+  ///
+  /// 복구 창이 열려 있는 동안만 뜬다. 유저가 말을 멈추면 화면에 글자가 뜨는데,
+  /// 그때 "이미 보내진 건가?" 하고 멈칫하는 것을 막는 게 목적이다.
+  /// 숫자(1.2초)도 내부 동작(다시 만든다)도 말하지 않는다 — 유저가 할 일만.
+  Widget _buildContinuationHint() {
+    final bool visible = _continuationWindowOpen && !_aiPlaybackStarted;
+    return AnimatedOpacity(
+      opacity: visible ? 1 : 0,
+      duration: const Duration(milliseconds: 140),
+      child: IgnorePointer(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+          decoration: BoxDecoration(
+            color: const Color(0xCC1C1C1E),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: const Color(0x66B46CFF)),
+          ),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.mic_rounded, size: 15, color: Color(0xFFB46CFF)),
+              SizedBox(width: 7),
+              Text(
+                '이어서 말해도 됩니다',
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 창 상태가 바뀌면 위 표시를 다시 그린다. 창을 여닫는 곳은 setState를
+  /// 부르지 않으므로 여기서 한 번만 묶어 둔다.
+  void _repaintContinuationHint() {
+    if (!mounted || _isDisposing) return;
+    setState(() {});
+  }
   // ─────────────────────────────────────────────────────────────────────────
 
   // 🔧 [v3.4 발화 합치기] 유저 더듬거림 대응
@@ -2412,6 +2457,7 @@ $kSpokenReplyLengthPolicy
     );
     _log('🔁 [CONT-WINDOW]',
         'open seq=$windowSeq windowMs=$kFreeTalkContinuationWindowMs');
+    _repaintContinuationHint();
   }
 
   /// 창을 닫고 녹음·게이트를 정리한다. **여기가 [MIC-ROUTING] 규칙을 지키는
@@ -2437,6 +2483,7 @@ $kSpokenReplyLengthPolicy
     if (wasOpen) {
       _log('🔁 [CONT-WINDOW]',
           'close seq=$_continuationWindowSeq turn=$_activeUserTurnId reason=$reason');
+      _repaintContinuationHint();
     }
   }
 
@@ -4908,6 +4955,15 @@ $kSpokenReplyLengthPolicy
                 child: Center(
                   child: SessionSavedNotice(visible: _rolloverNoticeVisible),
                 ),
+              ),
+              // 🔁 [LATE-CONTINUATION] 복구 창이 열려 있는 동안만 뜬다.
+              //   "지금 이어 말해도 된다"를 **글이 아니라 상태로** 알린다 —
+              //   안내문으로 "1초 안에 이으세요"라고 적으면 유저가 초를 센다.
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 12,
+                child: Center(child: _buildContinuationHint()),
               ),
             ]),
           ),

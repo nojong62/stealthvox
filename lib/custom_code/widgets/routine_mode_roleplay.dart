@@ -2483,6 +2483,15 @@ never by itself a reason to ask back.
         });
       }
     } finally {
+      // 🔁 [LATE-CONTINUATION] **턴이 끝나면 잠정 상태를 반드시 놓는다.**
+      //   이게 빠져 있어서 AI 첫 재생이 세운 _aiPlaybackStarted가 영구히
+      //   남았고, 복구 창이 두 번 다시 열리지 않았다(2026-08-14 실기기 로그:
+      //   시나리오톡 CONT 마커 0건). 조각·말풍선 id도 다음 턴으로 새어
+      //   앞 턴 문장에 새 말이 붙는다.
+      //   세대가 갈렸으면 이 파이프라인은 주인이 아니므로 건드리지 않는다.
+      if (generation == _pipelineGeneration && !_continuationCandidateAlive) {
+        _resetContinuationState();
+      }
       // 되묻기 턴은 _turnCounter를 되돌렸으므로 turnNumber와 어긋난다.
       // 그 경우에도 마이크는 반드시 다시 열어야 대화가 이어진다.
       if (mounted &&

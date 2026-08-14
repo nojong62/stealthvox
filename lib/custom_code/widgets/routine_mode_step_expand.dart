@@ -3425,6 +3425,15 @@ line had never been said. Never build the conversation on a line you had to gues
         _log('[GEN-OWNERSHIP]',
             'stale finally skipped asyncTurn=$asyncTurnId gen=$generation');
       }
+      // 🔁 [LATE-CONTINUATION] **턴이 끝나면 잠정 상태를 반드시 놓는다.**
+      //   빠지면 AI 첫 재생이 세운 _aiPlaybackStarted가 영구히 남아 복구 창이
+      //   두 번 다시 열리지 않고, 조각·말풍선 id가 다음 턴으로 새어 앞 턴
+      //   문장에 새 말이 붙는다. 주인일 때만 정리한다.
+      if (generation == _pipelineGeneration &&
+          asyncTurnId == _activeAsyncTurnId &&
+          !_continuationCandidateAlive) {
+        _resetContinuationState();
+      }
       // 되묻기 턴은 _turnCounter를 되돌렸으므로 turnNumber와 어긋난다.
       // 그 경우에도 마이크는 반드시 다시 열어야 대화가 이어진다.
       if (mounted &&
