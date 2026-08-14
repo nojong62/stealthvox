@@ -42,6 +42,7 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
+import '/custom_code/actions/billing_idle_mixin.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
 import '/custom_code/services/openai_connection_pool.dart';
 import '/custom_code/services/openai_streaming_transcribe_prewarm.dart';
@@ -187,7 +188,10 @@ class RoutineModeAnyone extends StatefulWidget {
 }
 
 class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
-    with TrialAnyoneTimerMixin<RoutineModeAnyone>, SingleTickerProviderStateMixin {
+    with
+        TrialAnyoneTimerMixin<RoutineModeAnyone>,
+        SingleTickerProviderStateMixin,
+        BillingIdleMixin<RoutineModeAnyone> {
   // ====================================================================
   // 📦 [Box 3: 상태 변수 및 초기화]
   // ====================================================================
@@ -333,9 +337,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   //  - AI 작동 = _ttsAdapter.isBusy (TTS 재생/대기)
   //  - 유저 작동 = _voiceManager != null (마이크 연결/녹음)
   // 1초 주기 감시 타이머가 작동 여부를 보고 idle 누적초를 증감한다.
-  Timer? _idlePauseTimer;
-  bool _isIdlePaused = false;
-  int _idleElapsedSec = 0;
 
   // ── 30분 세션 롤오버 ──────────────────────────────────────────────────────
   bool _rolloverInFlight = false;
@@ -361,75 +362,40 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   static const int _kRolloverKeepEntries = 8;
   // ─────────────────────────────────────────────────────────────────────────
 
-  bool get _isSystemBusy {
-    return _ttsAdapter.isBusy || _aiTurnActive;
-  }
+  @override
+  String get billingModeName => 'free_talk';
 
-  void _markConversationActivity() {
-    _idleElapsedSec = 0;
-    if (_isIdlePaused) {
-      _isIdlePaused = false;
-      if (mounted) setState(() {});
-      if (!TrialFlowState.instance.isTrial) {
-        BillingTicker.instance.resume();
-        // idle 복귀다. 30분 시계는 이어서 간다 — 여기서 되감으면 잠깐 쉴 때마다
-        // 세션이 처음으로 돌아가 롤오버가 영영 오지 않는다.
-        BillingTicker.instance
-            .logMode('free_talk', startNewConversation: false);
-      }
-    }
-  }
-
-  void _resetIdleTimer() {
-    _markConversationActivity();
-    _idlePauseTimer?.cancel();
-    _idlePauseTimer =
-        Timer.periodic(const Duration(seconds: 1), (_) => _idleTick());
-  }
-
-  void _idleTick() {
-    if (!mounted) return;
-    // 🔒 [오토포즈 가드] 최상단 active route가 아니면(다른 페이지가 위에) idle 누적 금지
-    if (ModalRoute.of(context)?.isCurrent == false) {
-      _idleElapsedSec = 0;
-      return;
-    }
-    if (_isIdlePaused) return;
-    // ⏱️ [ROLLOVER] 30분 경계. 지금 말하는 중이면 끝날 때까지 기다렸다가 넘긴다.
-    //   대기하는 동안 idle 누적을 0으로 붙잡아 둔다 — 정산 직전에 idle pause가
-    //   끼어들면 같은 30분이 두 구간으로 갈려 저장된다.
+  /// 롤오버와 체험 종료는 유휴보다 먼저 본다. 말하는 중이면 끝날 때까지
+  /// 기다렸다 넘기고, 그동안 유휴 누적을 붙잡아 둔다.
+  @override
+  bool onBillingIdleTick() {
     if (BillingTicker.instance.sessionRolloverDue.value) {
-      if (!_isSystemBusy &&
+      if (!isBillingBusy &&
           !_isPipelineRunning &&
           !_turnInFlight &&
           !_rolloverInFlight) {
         unawaited(_performSessionRollover());
       }
-      _idleElapsedSec = 0;
-      return;
-    }
-    // 유저나 AI가 작동 중이면 idle 누적을 멈추고 리셋
-    if (_isSystemBusy) {
-      _idleElapsedSec = 0;
-      return;
+      holdBillingIdle();
+      return true;
     }
     if (trialMode && isTrialTimeUp) {
       unawaited(_handleTrialEnd());
-      return;
+      return true;
     }
-    _idleElapsedSec++;
-    if (_idleElapsedSec >= 60) {
-      _handleIdlePause();
-    }
+    return false;
   }
 
-  void _handleIdlePause() {
-    if (!mounted || _isIdlePaused) return;
-    _isIdlePaused = true;
-    _idleElapsedSec = 0;
-    BillingTicker.instance.pause();
-    if (mounted) setState(() {});
+  @override
+  bool get isBillingBusy {
+    return _ttsAdapter.isBusy || _aiTurnActive;
   }
+
+  /// 체험 중에는 차감 대상이 아니다. 유휴에서 돌아와도 과금을 켜지 않는다.
+  @override
+  bool get isBillingEnabled => !TrialFlowState.instance.isTrial;
+
+  void _markConversationActivity() => resetBillingIdle();
 
   // ── 30분 세션 롤오버 ──────────────────────────────────────────────────────
   // 방에서 내보내지 않는다. 저장·과금·문맥 묶음만 새로 연다.
@@ -529,11 +495,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   }
   // ─────────────────────────────────────────────────────────────────────────
 
-  void _clearIdleTimers() {
-    _idlePauseTimer?.cancel();
-    _idlePauseTimer = null;
-    _idleElapsedSec = 0;
-  }
   // ──────────────────────────────────────────────────────────────────
 
   Widget _buildIdleOverlay() => const SizedBox.shrink();
@@ -1056,7 +1017,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       BillingTicker.instance.logMode('free_talk');
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _resetIdleTimer();
+      if (mounted) resetBillingIdle();
     });
   }
 
@@ -1076,7 +1037,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     disposeTrialTimer();
     _startupRetryTimer?.cancel();
     _rolloverNoticeTimer?.cancel();
-    _clearIdleTimers();
+    clearBillingIdle();
     BillingTicker.instance.pause();
     _stopEverything();
     _voiceManager?.dispose();
@@ -1801,7 +1762,7 @@ $kSpokenReplyLengthPolicy
       return;
     }
     if (!_isConversationActive) return;
-    if (_isSystemBusy || _isPipelineRunning || _turnInFlight) return;
+    if (isBillingBusy || _isPipelineRunning || _turnInFlight) return;
     _log('🎤 [LISTEN-FG]', '포그라운드 복귀 → STT 재연결 시도');
     _restartConfiguredListening(
         expectedPipelineGeneration: _pipelineGeneration);
@@ -1890,7 +1851,7 @@ $kSpokenReplyLengthPolicy
       }
       _micPermissionReady = true;
       if (!mounted || listenGeneration != _listenGeneration) return false;
-      _resetIdleTimer();
+      resetBillingIdle();
       _isConversationActive = true;
       if (mounted) {
         setState(() {
@@ -2122,7 +2083,7 @@ $kSpokenReplyLengthPolicy
       _micPermissionReady = true;
       if (!mounted || listenGeneration != _listenGeneration) return false;
 
-      _resetIdleTimer();
+      resetBillingIdle();
       _isConversationActive = true;
       if (mounted) {
         setState(() {
@@ -3034,7 +2995,7 @@ $kSpokenReplyLengthPolicy
     String transcript, {
     bool speechFinal = false,
   }) async {
-    _resetIdleTimer();
+    resetBillingIdle();
     final clean = transcript.trim();
     final source = speechFinal ? 'speech_final' : 'utterance_end';
     // 🚀 [FIRST-TURN] 아직 완료된 턴이 없으면(_turnCounter==0) 첫 유저 발화 →
@@ -3102,7 +3063,7 @@ $kSpokenReplyLengthPolicy
   // 문장은 매 턴 PCM 원본을 gpt-4o-transcribe에 보내 새로 확정한다.
   /// 턴 하나를 통째로 감싸 30분 롤오버가 중간에 끼어들지 못하게 한다.
   ///
-  /// `_isSystemBusy`는 TTS 재생만 본다(`_aiTurnActive`를 true로 켜는 곳이 없다).
+  /// `isBillingBusy`는 TTS 재생만 본다(`_aiTurnActive`를 true로 켜는 곳이 없다).
   /// 그래서 전사·검증·응답 생성 구간이 가드에서 비어 있었다. 그 사이 롤오버가
   /// 끼면 방금 한 말과 그 답이 서로 다른 History 문서로 갈린다.
   void _commitAndProcess() async {
@@ -3885,7 +3846,7 @@ $kSpokenReplyLengthPolicy
     }
 
     _logProbeTiming('PIPELINE_START');
-    _resetIdleTimer();
+    resetBillingIdle();
     final ignoreWithoutConsumingFirstTurn =
         _firstUtteranceJudge.shouldIgnoreWithoutConsumingFirstTurn(
       finalTranscript,
@@ -5056,7 +5017,7 @@ $kSpokenReplyLengthPolicy
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             BillingSessionDot(
-                              onTapWhenPaused: _resetIdleTimer,
+                              onTapWhenPaused: resetBillingIdle,
                             ),
                             const SizedBox(width: 6),
                             // 평소엔 전체 보유시간(HH:MM), 세션 종료 30초 전에만

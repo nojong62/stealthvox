@@ -31,6 +31,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 import '/custom_code/actions/billing_ticker.dart';
+import '/custom_code/actions/billing_idle_mixin.dart';
 import '/custom_code/services/duo_direct_audio.dart';
 import '/custom_code/services/duo_pcm_relay_client.dart';
 import '/custom_code/services/openai_streaming_transcribe_session.dart';
@@ -72,7 +73,7 @@ class RoutineModeDuo extends StatefulWidget {
 }
 
 class _RoutineModeDuoState extends State<RoutineModeDuo>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, BillingIdleMixin<RoutineModeDuo> {
   // ============================================================================
   // 📦 [1. 상태 변수 (STATE VARIABLES)]
   // 앱의 전반적인 상태, UI 설정, 데이터 보관용 변수 모음
@@ -206,6 +207,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     );
     BillingTicker.instance.setRate(BillingRate.full);
     BillingTicker.instance.start();
+    // 💰 [BILLING-IDLE] 통화가 1분간 조용하면 정지, 다시 말하면 재개.
+    //   예전에는 Duo만 유휴 타이머가 없어 켜 둔 채 잊으면 계속 차감됐다.
+    resetBillingIdle();
     if (!_billingStarted) {
       _billingStarted = true;
       BillingTicker.instance.logMode('duo');
@@ -218,7 +222,54 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   void _stopDuoBilling() {
     if (!_amIHost) return;
     _billingStarted = false;
+    clearBillingIdle();
     BillingTicker.instance.pause();
+  }
+
+  // ── 💰 [BILLING-IDLE] Duo의 "대화 중" 판정 ────────────────────────
+  // 다른 방과 달리 재생기 상태로는 알 수 없다. 릴레이는 침묵도 계속 보내서
+  // "수신 중"이 곧 "대화 중"이 아니기 때문이다. 그래서 **양쪽 목소리를
+  // 따로 본다** — 내 말은 Server VAD가, 상대 말은 들어온 PCM의 진폭이 알려
+  // 준다. 상대만 말하는 동안 호스트가 유휴로 빠지면, 대화가 이어지는데도
+  // 과금이 멈춘다.
+  DateTime? _lastPartnerVoiceAt;
+
+  /// 상대 목소리로 볼 최소 진폭(PCM16). 생마이크 노이즈는 이보다 훨씬 작다.
+  static const int _kPartnerVoiceThreshold = 1200;
+
+  /// 마지막 목소리 이후 이 시간까지는 "대화 중"으로 본다. 말 사이의 자연스러운
+  /// 끊김에서 유휴로 떨어지지 않게 하는 여유다.
+  static const Duration _kVoiceActivityWindow = Duration(seconds: 3);
+
+  void _noteInboundAudio(Uint8List pcm) {
+    // 16bit little-endian. 두 바이트씩 훑되 전부 볼 필요는 없다 —
+    // 매 프레임 수천 샘플이라 띄엄띄엄 봐도 큰 소리는 걸린다.
+    for (int i = 0; i + 1 < pcm.length; i += 64) {
+      final int v = (pcm[i + 1] << 8) | pcm[i];
+      final int sample = v >= 0x8000 ? v - 0x10000 : v;
+      if (sample.abs() >= _kPartnerVoiceThreshold) {
+        _lastPartnerVoiceAt = DateTime.now();
+        return;
+      }
+    }
+  }
+
+  @override
+  String get billingModeName => 'duo';
+
+  /// 게스트는 무료다. 초대한 호스트만 부담한다 — 유휴에서 돌아올 때도
+  /// 게스트 쪽에서 과금이 켜지면 안 된다.
+  @override
+  bool get isBillingEnabled => _amIHost;
+
+  @override
+  bool get isBillingBusy {
+    if (_directStt?.isUserSpeaking == true) return true;
+    final at = _lastPartnerVoiceAt;
+    if (at != null && DateTime.now().difference(at) < _kVoiceActivityWindow) {
+      return true;
+    }
+    return false;
   }
 
   // 🆕 [PTT 에코 차단] 최근 앱이 생성/표시한 문장 보관 (target/original 혼합, 최대 10개)
@@ -833,6 +884,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _relayClient = relay;
       _relayInboundSub = relay.inbound.listen((pcm) {
         if (!_isDirectGenerationCurrent(generation)) return;
+        _noteInboundAudio(pcm);
         _jitterPlayer?.add(pcm);
       });
       final relayOk = await relay.connect();

@@ -31,6 +31,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter/services.dart';
 import 'routine_mode_roleplay.dart' show TtsCache;
 import '/custom_code/actions/billing_ticker.dart';
+import '/custom_code/actions/billing_idle_mixin.dart';
 
 const String _historyListenTtsModel = 'tts-1';
 const String _historyListenTtsVoice = 'nova';
@@ -134,7 +135,7 @@ class ChatHistoryMaster extends StatefulWidget {
 }
 
 class _ChatHistoryMasterState extends State<ChatHistoryMaster>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, BillingIdleMixin<ChatHistoryMaster> {
   // 📦 [Box 3: 상태 변수 - 기본 UI 및 로딩]
   bool isPracticeMode = false;
   bool isPaused = false;
@@ -395,12 +396,11 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   // ── Idle Timeout (무반응 과금 정지, History: 자동 이동 없음) ──────────────
   // 🔧 틱 방식: 1초마다 활동 여부 확인. 튜터링/녹음/오디오 재생 중엔 카운터 0 유지.
-  Timer? _idlePauseTimer;
-  bool _isIdlePaused = false;
-  int _idleElapsedSec = 0;
+  @override
+  String get billingModeName => 'history';
 
-  // 유저나 AI가 작동 중인지 판단 (활동 중이면 idle 누적 안 함)
-  bool get _isSystemBusy {
+  @override
+  bool get isBillingBusy {
     return _isTutorPlaying ||
         isPlaying ||
         _appIsRecording ||
@@ -416,50 +416,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         _polishedUnitAIPlaying;
   }
 
-  void _resetIdleTimer() {
-    _idleElapsedSec = 0;
-    if (_isIdlePaused) {
-      _isIdlePaused = false;
-      if (mounted) setState(() {});
-      BillingTicker.instance.resume();
-      BillingTicker.instance.logMode('history');
-    }
-    _idlePauseTimer?.cancel();
-    _idlePauseTimer =
-        Timer.periodic(const Duration(seconds: 1), (_) => _idleTick());
-  }
-
-  void _idleTick() {
-    if (!mounted) return;
-    // 🔒 [오토포즈 가드] 최상단 active route가 아니면(다른 페이지가 위에) idle 누적 금지
-    if (ModalRoute.of(context)?.isCurrent == false) {
-      _idleElapsedSec = 0;
-      return;
-    }
-    if (_isIdlePaused) return;
-    if (_isSystemBusy) {
-      _idleElapsedSec = 0;
-      return;
-    }
-    _idleElapsedSec++;
-    if (_idleElapsedSec >= 60) {
-      _handleIdlePause();
-    }
-  }
-
-  void _handleIdlePause() {
-    if (!mounted || _isIdlePaused) return;
-    _isIdlePaused = true;
-    _idleElapsedSec = 0;
-    BillingTicker.instance.pause();
-    if (mounted) setState(() {});
-  }
-
-  void _clearIdleTimers() {
-    _idlePauseTimer?.cancel();
-    _idlePauseTimer = null;
-    _idleElapsedSec = 0;
-  }
 
   bool _handlingExhaustion = false;
 
@@ -484,7 +440,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   // 사용자 실제 활동 시작 시 오토포즈 즉시 해제 (중복 방지 포함)
   void _resumeHistoryFromUserAction() {
-    _resetIdleTimer();
+    resetBillingIdle();
     BillingTicker.instance.resumeFromActivity('history_user_action');
   }
 
@@ -509,12 +465,11 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _remoteConfigFuture = _fetchRemoteConfig();
     _fetchRoomData();
     _initPermissions();
-    BillingTicker.instance.setRate(BillingRate.full);
-    BillingTicker.instance.resume();
-    BillingTicker.instance.logMode('history');
+    // 💰 [BILLING-IDLE] 입장 즉시 과금 + 60초 유휴 감시. 규칙은 공용이다.
+    startBillingRoom();
     BillingTicker.instance.balanceExhausted.addListener(_onBalanceExhausted);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _resetIdleTimer();
+      if (mounted) resetBillingIdle();
     });
 
     _playerStateSub = audioPlayer.onPlayerStateChanged.listen((state) {
@@ -530,7 +485,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   @override
   void dispose() {
     BillingTicker.instance.balanceExhausted.removeListener(_onBalanceExhausted);
-    _clearIdleTimers();
+    clearBillingIdle();
     _utteranceSafetyTimer?.cancel();
     _silenceTimer?.cancel();
     _roleBubbleTimer?.cancel();
@@ -1224,7 +1179,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   // 🆕 [TUTOR] 사용자가 종료/중단할 때 호출
   void _stopTutorPlayback() {
-    _resetIdleTimer();
+    resetBillingIdle();
     _tutorAudioPlayer?.stop();
     if (mounted) {
       setState(() {
@@ -4387,7 +4342,7 @@ RULES — follow exactly:
 
   // 로비 ENTER 버튼과 동일한 로직: 잔여 시간 확인 후 StealthRoom 입장
   void _handleEnterRoom() async {
-    _resetIdleTimer();
+    resetBillingIdle();
     if (_isActionLocked) return;
     _isActionLocked = true;
     try {
@@ -4453,7 +4408,7 @@ RULES — follow exactly:
           ValueListenableBuilder<int>(
             valueListenable: BillingTicker.instance.billingState,
             builder: (_, s, __) => GestureDetector(
-              onTap: s == 0 ? _resetIdleTimer : null,
+              onTap: s == 0 ? resetBillingIdle : null,
               child: Padding(
                 padding: const EdgeInsets.only(left: 4, right: 6),
                 child: CustomPaint(
@@ -5919,7 +5874,7 @@ RULES — follow exactly:
                   ValueListenableBuilder<int>(
                     valueListenable: BillingTicker.instance.billingState,
                     builder: (_, s, __) => GestureDetector(
-                      onTap: s == 0 ? _resetIdleTimer : null,
+                      onTap: s == 0 ? resetBillingIdle : null,
                       child: Padding(
                         padding: const EdgeInsets.only(left: 4, right: 6),
                         child: CustomPaint(
@@ -7478,7 +7433,7 @@ RULES — follow exactly:
                   ValueListenableBuilder<int>(
                     valueListenable: BillingTicker.instance.billingState,
                     builder: (_, s, __) => GestureDetector(
-                      onTap: s == 0 ? _resetIdleTimer : null,
+                      onTap: s == 0 ? resetBillingIdle : null,
                       child: Padding(
                         padding: const EdgeInsets.only(left: 4, right: 6),
                         child: CustomPaint(

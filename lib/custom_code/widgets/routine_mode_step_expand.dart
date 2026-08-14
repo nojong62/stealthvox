@@ -54,6 +54,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
+import '/custom_code/actions/billing_idle_mixin.dart';
 import '/custom_code/services/openai_connection_pool.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
 import '/custom_code/services/openai_streaming_transcribe_prewarm.dart';
@@ -84,7 +85,7 @@ class RoutineModeStepExpand extends StatefulWidget {
 }
 
 class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, BillingIdleMixin<RoutineModeStepExpand> {
   // ====================================================================
   // 📦 [Box 3: 상태 변수 및 초기화]
   // ====================================================================
@@ -121,11 +122,11 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
   //  - AI 작동 = _ttsQueueManager.isBusy (TTS 재생/대기)
   //  - 유저 작동 = _voiceManager != null (마이크 연결/녹음)
   // 1초 주기 감시 타이머가 작동 여부를 보고 idle 누적초를 증감한다.
-  Timer? _idlePauseTimer;
-  bool _isIdlePaused = false;
-  int _idleElapsedSec = 0;
+  @override
+  String get billingModeName => 'study_room';
 
-  bool get _isSystemBusy {
+  @override
+  bool get isBillingBusy {
     // 🔊 [IDLE] 연습 재생도 "작동 중"이다. 이 둘이 빠져 있어서, 문장을
     //   반복해 들으며 공부하는 동안 유휴 카운터가 올라가 60초 뒤 과금이
     //   멈췄다 — 가만히 듣기만 하는 연습이 정확히 그 구간이다.
@@ -136,51 +137,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
         _isUserFullPlaying;
   }
 
-  void _resetIdleTimer() {
-    _idleElapsedSec = 0;
-    if (_isIdlePaused) {
-      _isIdlePaused = false;
-      if (mounted) setState(() {});
-      BillingTicker.instance.resume();
-      BillingTicker.instance.logMode('study_room');
-    }
-    _idlePauseTimer?.cancel();
-    _idlePauseTimer =
-        Timer.periodic(const Duration(seconds: 1), (_) => _idleTick());
-  }
-
-  void _idleTick() {
-    if (!mounted) return;
-    // 🔒 [오토포즈 가드] 최상단 active route가 아니면(다른 페이지가 위에) idle 누적 금지
-    if (ModalRoute.of(context)?.isCurrent == false) {
-      _idleElapsedSec = 0;
-      return;
-    }
-    if (_isIdlePaused) return;
-    // 유저나 AI가 작동 중이면 idle 누적을 멈추고 리셋
-    if (_isSystemBusy) {
-      _idleElapsedSec = 0;
-      return;
-    }
-    _idleElapsedSec++;
-    if (_idleElapsedSec >= 60) {
-      _handleIdlePause();
-    }
-  }
-
-  void _handleIdlePause() {
-    if (!mounted || _isIdlePaused) return;
-    _isIdlePaused = true;
-    _idleElapsedSec = 0;
-    BillingTicker.instance.pause();
-    if (mounted) setState(() {});
-  }
-
-  void _clearIdleTimers() {
-    _idlePauseTimer?.cancel();
-    _idlePauseTimer = null;
-    _idleElapsedSec = 0;
-  }
   // ──────────────────────────────────────────────────────────────────
 
   // ── [FAST-LANE] 로컬 질문 불만 판정 ───────────────────────────────
@@ -709,11 +665,10 @@ line had never been said. Never build the conversation on a line you had to gues
     _initPermissions();
     _fetchKeys();
     BillingTicker.instance.setSessionIdentifiers();
-    BillingTicker.instance.setRate(BillingRate.full);
-    BillingTicker.instance.resume();
-    BillingTicker.instance.logMode('study_room');
+    // 💰 [BILLING-IDLE] 입장 즉시 과금 + 60초 유휴 감시. 규칙은 공용이다.
+    startBillingRoom();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _resetIdleTimer();
+      if (mounted) resetBillingIdle();
     });
   }
 
@@ -725,7 +680,7 @@ line had never been said. Never build the conversation on a line you had to gues
       StealthRoomMaster.saveAndExitCurrentMode = null;
     }
     BillingTicker.instance.appInForeground.removeListener(_onForegroundChanged);
-    _clearIdleTimers();
+    clearBillingIdle();
     BillingTicker.instance.pause();
     _stopEverything();
     _voiceManager?.dispose();
@@ -807,7 +762,7 @@ line had never been said. Never build the conversation on a line you had to gues
   Future<void> _startSessionWaitingForUserSeed() async {
     if (_openAiKey.isEmpty || !mounted) return;
     if (_isSessionComplete) return;
-    _resetIdleTimer();
+    resetBillingIdle();
     _isConversationActive = true;
 
     _ttsQueueManager.setUserTurn(false);
@@ -2071,7 +2026,7 @@ line had never been said. Never build the conversation on a line you had to gues
     }
 
     final int listenGeneration = ++_listenGeneration;
-    _resetIdleTimer();
+    resetBillingIdle();
     _isConversationActive = true;
     _resetTurnPcmBuffer();
     _streamingDeltaItemId = '';
@@ -2268,7 +2223,7 @@ line had never been said. Never build the conversation on a line you had to gues
       _log('🎤 [LISTEN-STALE]', 'speech_started ignored');
       return;
     }
-    _resetIdleTimer();
+    resetBillingIdle();
     _swDeepgram
       ..reset()
       ..start();
@@ -2786,7 +2741,7 @@ line had never been said. Never build the conversation on a line you had to gues
     if (_deepgramKey.isEmpty || !(await _audioRecorder.hasPermission())) return;
     // 🌱 5턴 완료 시 마이크 잠김 (유저가 "새 주제" 버튼 눌러야 리셋됨)
     if (_isSessionComplete) return;
-    _resetIdleTimer();
+    resetBillingIdle();
     _isConversationActive = true;
     _resetTurnPcmBuffer();
     if (mounted) {
@@ -2855,7 +2810,7 @@ line had never been said. Never build the conversation on a line you had to gues
   // → 완전히 끝나면 파이프라인 시작
   // speechFinal은 인자로 직접 받아 이 함수 안에서만 사용 (상태 필드 미사용)
   void _stopMicAndProcess(String transcript, {bool speechFinal = false}) async {
-    _resetIdleTimer();
+    resetBillingIdle();
     final clean = transcript.trim();
     final source = speechFinal ? 'speech_final' : 'utterance_end';
     // 🚀 [FIRST-TURN] 아직 완료된 턴이 없으면(_turnCounter==0) 첫 유저 발화 →
@@ -3883,7 +3838,7 @@ line had never been said. Never build the conversation on a line you had to gues
       _log('[HEARD-CONFIRM]', 'corrected_with_content → 새 발화 판정');
     }
     _logProbeTiming('PIPELINE_START');
-    _resetIdleTimer();
+    resetBillingIdle();
     _turnCounter++;
     final int currentTurnId = _turnCounter;
     _log('🧠 [PIPE-01]',
@@ -5041,7 +4996,7 @@ line had never been said. Never build the conversation on a line you had to gues
                   ValueListenableBuilder<int>(
                     valueListenable: BillingTicker.instance.billingState,
                     builder: (_, s, __) => GestureDetector(
-                      onTap: s == 0 ? _resetIdleTimer : null,
+                      onTap: s == 0 ? resetBillingIdle : null,
                       child: CustomPaint(
                         size: const Size(14, 14),
                         painter: BillingDotPainter(s),

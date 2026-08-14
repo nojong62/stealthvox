@@ -53,6 +53,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
+import '/custom_code/actions/billing_idle_mixin.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
 // 🔁 [LATE-CONTINUATION] 판정·합치기·말풍선 규칙은 Circle Talk과 **같은
 //   함수**를 쓴다. 여기에 규칙을 다시 구현하면 한쪽만 고쳐지고 다른 쪽은 남는다.
@@ -88,7 +89,7 @@ class RoutineModeRoleplay extends StatefulWidget {
 }
 
 class _RoutineModeRoleplayState extends State<RoutineModeRoleplay>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, BillingIdleMixin<RoutineModeRoleplay> {
   // ====================================================================
   // 📦 [Box 3: 상태 변수 및 초기화]
   // ====================================================================
@@ -419,10 +420,7 @@ never by itself a reason to ask back.
   //  - AI 작동 = _ttsQueueManager.isBusy (TTS 재생/대기)
   //  - 유저 작동 = _voiceManager != null (마이크 연결/녹음)
   // 1초 주기 감시 타이머가 작동 여부를 보고 idle 누적초를 증감한다.
-  Timer? _idlePauseTimer;
   List<String> _lastExchangeMsgIds = []; // [정정] 직전 교환 messages docId
-  bool _isIdlePaused = false;
-  int _idleElapsedSec = 0;
 
   // ── 30분 세션 롤오버 ──────────────────────────────────────────────────────
   bool _rolloverInFlight = false;
@@ -462,60 +460,25 @@ never by itself a reason to ask back.
   String _rolloverSummary = '';
   // ─────────────────────────────────────────────────────────────────────────
 
-  bool get _isSystemBusy {
+  @override
+  String get billingModeName => 'roleplay';
+
+  /// 30분 롤오버는 유휴보다 먼저 본다. 지금 말하는 중이면 끝날 때까지
+  /// 기다렸다 넘기고, 그동안 유휴 누적을 붙잡아 둔다 — 정산 직전에 일시정지가
+  /// 끼어들면 같은 30분이 두 구간으로 갈려 저장된다.
+  @override
+  bool onBillingIdleTick() {
+    if (!BillingTicker.instance.sessionRolloverDue.value) return false;
+    if (!isBillingBusy && !_turnInFlight && !_rolloverInFlight) {
+      unawaited(_performSessionRollover());
+    }
+    holdBillingIdle();
+    return true;
+  }
+
+  @override
+  bool get isBillingBusy {
     return _ttsQueueManager.isBusy || _aiTtsAdapter.isBusy || _aiTurnActive;
-  }
-
-  void _resetIdleTimer() {
-    _idleElapsedSec = 0;
-    if (_isIdlePaused) {
-      _isIdlePaused = false;
-      if (mounted) setState(() {});
-      BillingTicker.instance.resume();
-      // idle 복귀다. 30분 시계는 이어서 간다 — 여기서 되감으면 잠깐 쉴 때마다
-      // 세션이 처음으로 돌아가 롤오버가 영영 오지 않는다.
-      BillingTicker.instance.logMode('roleplay', startNewConversation: false);
-    }
-    _idlePauseTimer?.cancel();
-    _idlePauseTimer =
-        Timer.periodic(const Duration(seconds: 1), (_) => _idleTick());
-  }
-
-  void _idleTick() {
-    if (!mounted) return;
-    // 🔒 [오토포즈 가드] 최상단 active route가 아니면(다른 페이지가 위에) idle 누적 금지
-    if (ModalRoute.of(context)?.isCurrent == false) {
-      _idleElapsedSec = 0;
-      return;
-    }
-    if (_isIdlePaused) return;
-    // ⏱️ [ROLLOVER] 30분 경계. 지금 말하는 중이면 끝날 때까지 기다렸다가 넘긴다.
-    //   대기하는 동안 idle 누적을 0으로 붙잡아 둔다 — 정산 직전에 idle pause가
-    //   끼어들면 같은 30분이 두 구간으로 갈려 저장된다.
-    if (BillingTicker.instance.sessionRolloverDue.value) {
-      if (!_isSystemBusy && !_turnInFlight && !_rolloverInFlight) {
-        unawaited(_performSessionRollover());
-      }
-      _idleElapsedSec = 0;
-      return;
-    }
-    // 유저나 AI가 작동 중이면 idle 누적을 멈추고 리셋
-    if (_isSystemBusy) {
-      _idleElapsedSec = 0;
-      return;
-    }
-    _idleElapsedSec++;
-    if (_idleElapsedSec >= 60) {
-      _handleIdlePause();
-    }
-  }
-
-  void _handleIdlePause() {
-    if (!mounted || _isIdlePaused) return;
-    _isIdlePaused = true;
-    _idleElapsedSec = 0;
-    BillingTicker.instance.pause();
-    if (mounted) setState(() {});
   }
 
   // ── 30분 세션 롤오버 ──────────────────────────────────────────────────────
@@ -623,11 +586,6 @@ never by itself a reason to ask back.
   }
   // ─────────────────────────────────────────────────────────────────────────
 
-  void _clearIdleTimers() {
-    _idlePauseTimer?.cancel();
-    _idlePauseTimer = null;
-    _idleElapsedSec = 0;
-  }
   // ──────────────────────────────────────────────────────────────────
 
   Widget _buildIdleBanner() => const SizedBox.shrink();
@@ -708,7 +666,7 @@ never by itself a reason to ask back.
     BillingTicker.instance.resume();
     BillingTicker.instance.logMode('roleplay');
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _resetIdleTimer();
+      if (mounted) resetBillingIdle();
     });
   }
 
@@ -748,7 +706,7 @@ never by itself a reason to ask back.
     }
     BillingTicker.instance.appInForeground.removeListener(_onForegroundChanged);
     _rolloverNoticeTimer?.cancel();
-    _clearIdleTimers();
+    clearBillingIdle();
     BillingTicker.instance.pause();
     _forceSaveToFirestore();
     _stopEverything();
@@ -804,7 +762,7 @@ never by itself a reason to ask back.
         _isConversationActive) {
       return;
     }
-    _resetIdleTimer();
+    resetBillingIdle();
     setState(() => _isConversationActive = true);
     _generateAndPlayAiOpener();
   }
@@ -1192,7 +1150,7 @@ never by itself a reason to ask back.
       return;
     }
     if (!_isConversationActive) return;
-    if (_isSystemBusy || _turnInFlight) return;
+    if (isBillingBusy || _turnInFlight) return;
     // ⚠️ `_voiceManager != null`을 "듣는 중"으로 읽으면 안 된다. 백그라운드에서
     //   소켓이 끊겨도 객체는 그대로 남아, 그걸 살아 있다고 보면 복구가 영영
     //   막힌다. 소켓 상태를 직접 본다.
@@ -1217,7 +1175,7 @@ never by itself a reason to ask back.
       return;
     }
     if (_deepgramKey.isEmpty || !(await _audioRecorder.hasPermission())) return;
-    _resetIdleTimer();
+    resetBillingIdle();
     _isConversationActive = true;
     _resetTurnPcmBuffer();
     if (mounted) {
@@ -1272,7 +1230,7 @@ never by itself a reason to ask back.
       shouldReconnect: () =>
           _isConversationActive &&
           BillingTicker.instance.appInForeground.value &&
-          !_isSystemBusy,
+          !isBillingBusy,
     );
     _log('🎤 [LISTEN-04]', 'connectAndStart 호출 직전');
     await _voiceManager!.connectAndStart();
@@ -1314,12 +1272,12 @@ never by itself a reason to ask back.
       return;
     }
     // 🔇 [ECHO-GUARD] AI가 말하는 동안에는 열지 않는다. 첫 대사를 만드는
-    //   구간은 아직 재생 전이라 `_isSystemBusy`가 false이므로 따로 본다.
+    //   구간은 아직 재생 전이라 `isBillingBusy`가 false이므로 따로 본다.
     if (_isAiOpenerPlaying) {
       _log('🎤 [LISTEN-SKIP]', 'ai opener playing');
       return;
     }
-    if (_isSystemBusy) {
+    if (isBillingBusy) {
       _log('🎤 [LISTEN-SKIP]', 'tts busy');
       return;
     }
@@ -1331,7 +1289,7 @@ never by itself a reason to ask back.
     if (!(await _audioRecorder.hasPermission())) return;
 
     final int listenGeneration = ++_listenGeneration;
-    _resetIdleTimer();
+    resetBillingIdle();
     _isConversationActive = true;
     _resetTurnPcmBuffer();
     _streamingDeltaItemId = '';
@@ -1509,7 +1467,7 @@ never by itself a reason to ask back.
       _log('🎤 [LISTEN-STALE]', 'speech_started ignored');
       return;
     }
-    _resetIdleTimer();
+    resetBillingIdle();
     _log('⏱️ [PERF]', 'SPEECH_STARTED');
     _maybeStartContinuation();
   }
@@ -1612,7 +1570,7 @@ never by itself a reason to ask back.
             'gen=$_pipelineGeneration segments=${_turnSegments.length}');
     // 이미 답변을 만들기 시작했다면 즉시 무효화한다. 시나리오톡은 첫 문장을
     // 조기 재생하므로, 기다렸다가 무효화하면 그 사이 소리가 나가 버린다.
-    if (_isSystemBusy || _turnSegments.isNotEmpty) {
+    if (isBillingBusy || _turnSegments.isNotEmpty) {
       _invalidateAssistantTurn(reason: 'late_continuation');
     }
     _armContinuationTranscriptTimeout();
@@ -1846,7 +1804,7 @@ never by itself a reason to ask back.
     if (itemId.isNotEmpty && _handledStreamingItemIds.contains('rt:$itemId')) {
       return;
     }
-    if (_isSystemBusy) return; // AI가 말하는 중이면 유저 말풍선을 세우지 않는다
+    if (isBillingBusy) return; // AI가 말하는 중이면 유저 말풍선을 세우지 않는다
     BillingTicker.instance.resumeFromActivity('roleplay_stt_partial');
     if (_streamingDeltaItemId != itemId) {
       _streamingDeltaItemId = itemId;
@@ -1911,7 +1869,7 @@ never by itself a reason to ask back.
     }
     // 🔒 [ONE-TURN] 앞 턴이 아직 AI 응답 중이면 멈춘다. 복구 창 밖에서 서버가
     //   한 버퍼에서 두 구간을 확정하면 유저 턴이 두 개 생긴다.
-    if (_isSystemBusy) {
+    if (isBillingBusy) {
       _log('[TURN-SKIP]', 'reason=system_busy item=$itemId');
       return;
     }
@@ -2058,7 +2016,7 @@ never by itself a reason to ask back.
   // 🔧 [v3.4] Deepgram speech_final/UtteranceEnd 수신 시 호출됨
   // 조건부 대기창 안에서 추가 발화 합치기 → 완전히 끝나면 파이프라인 시작
   void _stopMicAndProcess(String transcript) async {
-    _resetIdleTimer();
+    resetBillingIdle();
     final clean = transcript.trim();
     _log('🔀 [STOP-01]', 'speech_final 수신: "$clean" (len=${clean.length})');
 
@@ -2131,7 +2089,7 @@ never by itself a reason to ask back.
 
   /// 턴 하나를 통째로 감싸 30분 롤오버가 중간에 끼어들지 못하게 한다.
   ///
-  /// `_isSystemBusy`는 TTS 재생만 본다(`_aiTurnActive`를 true로 켜는 곳이 없다).
+  /// `isBillingBusy`는 TTS 재생만 본다(`_aiTurnActive`를 true로 켜는 곳이 없다).
   /// 그래서 전사·검증·응답 생성 구간이 가드에서 비어 있었다. 그 사이 롤오버가
   /// 끼면 방금 한 말과 그 답이 서로 다른 History 문서로 갈린다.
   void _commitAndProcess() async {
@@ -2684,7 +2642,7 @@ never by itself a reason to ask back.
       // 내용이 담긴 답 → 유저가 다시 설명한 것이므로 이번 발화를 새 발화로 본다
       _log('[HEARD-CONFIRM]', 'corrected_with_content → 새 발화 판정');
     }
-    _resetIdleTimer();
+    resetBillingIdle();
     _turnCounter++;
     final int currentTurnId = _turnCounter;
     _log('🧠 [PIPE-01]',
@@ -3798,7 +3756,7 @@ never by itself a reason to ask back.
                         fit: BoxFit.scaleDown,
                         child: Row(mainAxisSize: MainAxisSize.min, children: [
                           BillingSessionDot(
-                            onTapWhenPaused: _resetIdleTimer,
+                            onTapWhenPaused: resetBillingIdle,
                           ),
                           const SizedBox(width: 6),
                           // 🐞 [잔여시간] 예전에는 billingState 리스너 안에서
@@ -3985,7 +3943,7 @@ never by itself a reason to ask back.
                 GestureDetector(
                   onTap: () {
                     if (_deepgramKey.isEmpty) return;
-                    _resetIdleTimer();
+                    resetBillingIdle();
                     setState(
                         () => _isConversationActive = !_isConversationActive);
                     if (_isConversationActive) {

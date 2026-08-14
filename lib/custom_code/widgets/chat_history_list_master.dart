@@ -24,6 +24,7 @@ import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:record/record.dart';
 import 'routine_mode_roleplay.dart' show TtsCache;
 import '/custom_code/actions/billing_ticker.dart';
+import '/custom_code/actions/billing_idle_mixin.dart';
 
 const String _historyListTtsModel = 'tts-1';
 const String _historyListTtsVoice = 'nova';
@@ -54,67 +55,29 @@ class ChatHistoryListMaster extends StatefulWidget {
   _ChatHistoryListMasterState createState() => _ChatHistoryListMasterState();
 }
 
-class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
+class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
+    with BillingIdleMixin<ChatHistoryListMaster> {
   String _selectedFilter = 'All';
   Set<String> _selectedDocIds = {};
 
   // ── Idle Timeout (무반응 과금 정지, History List: 자동 이동 없음) ──────────
   // 🔧 틱 방식: 1초마다 활동 여부 확인. 키퍼 재생/튜터링/녹음 중엔 카운터 0 유지.
-  Timer? _idlePauseTimer;
-  bool _isIdlePaused = false;
-  int _idleElapsedSec = 0;
 
   // 유저나 AI가 작동 중인지 판단 (활동 중이면 idle 누적 안 함)
-  bool get _isSystemBusy {
+  @override
+  String get billingModeName => 'history_list';
+
+  /// 🆓 전체 목록은 **유일한 무과금 화면**이다. Keepers 필터로 들어가는
+  /// 순간부터만 차감한다 — 거기서부터는 실제 학습 기능이 돌기 때문이다.
+  @override
+  bool get isBillingEnabled => _selectedFilter == 'Keepers';
+
+  @override
+  bool get isBillingBusy {
     return _keeperTutoringLoading ||
         _keeperIsRecording ||
         _isPlayingKeeper ||
         _keeperIsPlayingCorrected;
-  }
-
-  void _resetIdleTimer() {
-    _idleElapsedSec = 0;
-    if (_isIdlePaused) {
-      _isIdlePaused = false;
-      if (mounted) setState(() {});
-      BillingTicker.instance.resume();
-      BillingTicker.instance.logMode('history_list');
-    }
-    _idlePauseTimer?.cancel();
-    _idlePauseTimer =
-        Timer.periodic(const Duration(seconds: 1), (_) => _idleTick());
-  }
-
-  void _idleTick() {
-    if (!mounted) return;
-    // 🔒 [오토포즈 가드] 최상단 active route가 아니면(다른 페이지가 위에) idle 누적 금지
-    if (ModalRoute.of(context)?.isCurrent == false) {
-      _idleElapsedSec = 0;
-      return;
-    }
-    if (_isIdlePaused) return;
-    if (_isSystemBusy) {
-      _idleElapsedSec = 0;
-      return;
-    }
-    _idleElapsedSec++;
-    if (_idleElapsedSec >= 60) {
-      _handleIdlePause();
-    }
-  }
-
-  void _handleIdlePause() {
-    if (!mounted || _isIdlePaused) return;
-    _isIdlePaused = true;
-    _idleElapsedSec = 0;
-    BillingTicker.instance.pause();
-    if (mounted) setState(() {});
-  }
-
-  void _clearIdleTimers() {
-    _idlePauseTimer?.cancel();
-    _idlePauseTimer = null;
-    _idleElapsedSec = 0;
   }
 
   Widget _buildIdleOverlay() => const SizedBox.shrink();
@@ -135,13 +98,11 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
 
     final isKeepers = newFilter == 'Keepers';
     if (isKeepers && !wasKeepers) {
-      BillingTicker.instance.setRate(BillingRate.full);
-      BillingTicker.instance.resume();
-      BillingTicker.instance.logMode('history_list');
-      _resetIdleTimer();
+      // 💰 [BILLING-IDLE] Keepers로 들어가는 순간부터 과금 + 유휴 감시.
+      startBillingRoom();
     } else if (!isKeepers && wasKeepers) {
-      _clearIdleTimers();
-      _isIdlePaused = false;
+      // 전체 목록으로 돌아왔다 = 무과금 화면. 감시도 과금도 멈춘다.
+      clearBillingIdle();
       BillingTicker.instance.pause();
     }
   }
@@ -203,7 +164,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
   @override
   void dispose() {
     BillingTicker.instance.balanceExhausted.removeListener(_onBalanceExhausted);
-    _clearIdleTimers();
+    clearBillingIdle();
     BillingTicker.instance.pause();
     _keepersScrollController.dispose();
     _keeperAudioPlayer?.dispose();
@@ -368,7 +329,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
             valueListenable: BillingTicker.instance.billingState,
             builder: (_, s, __) => GestureDetector(
               onTap: s == 0 && _selectedFilter == 'Keepers'
-                  ? _resetIdleTimer
+                  ? resetBillingIdle
                   : null,
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -1038,7 +999,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster> {
   //  Keepers 소리듣기
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Future<void> _playKeeperAudio(String keeperId, String text) async {
-    _resetIdleTimer();
+    resetBillingIdle();
     if (text.isEmpty || _apiKey.isEmpty) return;
 
     // 이미 재생 중이면 정지
