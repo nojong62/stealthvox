@@ -120,6 +120,8 @@ class BillingTicker with WidgetsBindingObserver {
   /// 않아 한 푼도 안 나가는 동안에도 초록불이 켜져 있었다.
   bool get _isActuallyBilling =>
       !_paused &&
+      !TrialFlowState.instance.isTrial &&
+      !FFAppState().isGuestSession &&
       FFAppState().remainingTimeLoaded &&
       !FFAppState().hasConfirmedZeroTime;
 
@@ -132,7 +134,7 @@ class BillingTicker with WidgetsBindingObserver {
   ///
   /// 아래 둘은 애초에 차감 대상이 아니라 여기서 빠진다. 막아 봐야 갈 곳이
   /// 없고 정상 흐름만 끊긴다.
-  ///   · 진행 중인 체험 — 60초 체험은 잔여시간과 무관하다
+  ///   · 진행 중인 체험 — Duo 3분과 연결 공부방 5분은 잔여시간과 무관하다
   ///   · Duo 게스트 — 회원이든 아니든 초대한 호스트만 부담한다
   ///
   /// "익명이면 전부 통과"로 넓히지 않는다. 체험이 끝났거나 시작도 안 한 익명
@@ -542,7 +544,8 @@ class BillingTicker with WidgetsBindingObserver {
     }
     if (remaining <= 0 && !sessionRolloverDue.value) {
       sessionRolloverDue.value = true;
-      _addBillingLog('[BILLING-SEG] rollover_due elapsed=$_sessionElapsedSeconds');
+      _addBillingLog(
+          '[BILLING-SEG] rollover_due elapsed=$_sessionElapsedSeconds');
     }
   }
 

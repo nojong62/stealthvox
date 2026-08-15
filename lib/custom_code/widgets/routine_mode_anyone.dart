@@ -1001,13 +1001,6 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     );
 
     TrialFlowState.instance.restoreFromAppState();
-    if (TrialFlowState.instance.isTrialAnyone) {
-      trialMode = true;
-      trialSeconds = 60;
-      _myHistoryRef = TrialFlowState.instance.myHistoryRef;
-      startTrialTimer();
-    }
-
     _initPermissions();
     _fetchKeys();
     BillingTicker.instance.setSessionIdentifiers();
@@ -2434,7 +2427,8 @@ $kSpokenReplyLengthPolicy
     // 대기 시작점. 유저가 지금 말하기 시작했으므로 하드캡은 이 말이 끝난 뒤
     // (아래 speech_stopped)부터 다시 잰다.
     _continuationWaitStartedAt = DateTime.now();
-    _log('🔁 [CONT-DETECT]',
+    _log(
+        '🔁 [CONT-DETECT]',
         'candidate=$_continuationCandidate afterMs=$elapsed '
             'turn=$_activeUserTurnId gen=$_pipelineGeneration '
             'segments=${_turnSegments.length}');
@@ -2676,7 +2670,6 @@ $kSpokenReplyLengthPolicy
     setState(() => updated = updateBubbleTextById(_localMessages, id, text));
     return updated;
   }
-
 
   void _armStreamingTranscriptTimeout() {
     _streamingTranscriptTimeout?.cancel();

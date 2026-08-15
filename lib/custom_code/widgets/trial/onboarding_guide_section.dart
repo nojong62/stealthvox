@@ -33,7 +33,7 @@ class OnboardingGuideSection extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           const Text(
-            '1분 동안\nCircle Talk을\n체험해 보세요',
+            '친구와 3분 동안\nDuo 직접 통화를\n체험해 보세요',
             style: TextStyle(
               color: Colors.white,
               fontSize: 17,
@@ -43,7 +43,7 @@ class OnboardingGuideSection extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           const Text(
-            '대화가 끝나면 방금 그 대화가\n영어 교재로 바뀝니다.',
+            '대화가 끝나면 같은 히스토리 공부방을\n5분 동안 이용할 수 있습니다.',
             style: TextStyle(color: Color(0xFFB0B0B0), fontSize: 13),
           ),
           const SizedBox(height: 10),

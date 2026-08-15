@@ -13,11 +13,11 @@ class TrialFlowState {
   /// 체험 상태는 익명 유저에게만 유효하다.
   ///
   /// `step`은 SharedPreferences(`ff_trialStep`)에 저장되는 **기기 값**이라
-  /// 로그아웃해도 지워지지 않는다. 체험을 1분 완주하지 못하고 나가면 step=1이
+  /// 로그아웃해도 지워지지 않는다. 체험 Duo를 끝내지 못하고 나가면 step=1이
   /// 그대로 남고, 그 뒤 정식 회원으로 로그인하면 아래가 전부 오작동했다.
   ///
-  ///   · StealthRoom이 메뉴를 건너뛰고 서클톡으로 바로 들어감
-  ///   · 서클톡이 60초 체험 타이머를 걸어 1분 만에 방이 닫힘
+  ///   · StealthRoom이 메뉴를 건너뛰고 Duo로 바로 들어감
+  ///   · Duo가 3분 체험 타이머를 걸어 방을 닫음
   ///   · 대화가 남의 체험 문서(`myHistoryRef`)에 쌓임
   ///   · `isTrial`이 true라 과금 티커가 안 돌아 유료 시간이 안 깎임
   ///
@@ -29,7 +29,7 @@ class TrialFlowState {
   }
 
   bool get isTrial => _isAnonymousUser && step > 0 && step < 4;
-  bool get isTrialAnyone => _isAnonymousUser && step == 1;
+  bool get isTrialDuo => _isAnonymousUser && step == 1;
   bool get isTrialStudy => _isAnonymousUser && (step == 2 || step == 3);
 
   void saveToAppState() {

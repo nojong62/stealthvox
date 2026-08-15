@@ -38,7 +38,11 @@ import '/custom_code/services/openai_streaming_transcribe_session.dart';
 // 상대 발화 재생은 Circle Talk과 **같은 재생기 한 벌**을 쓴다. tts-1 PCM을
 // 받는 대로 트는 구조라, mp3를 다 받고 재생하던 예전 경로보다 첫 소리가 빠르다.
 import '/custom_code/services/tts_adapter.dart';
+import 'duo_stage.dart';
 import 'first_turn_realtime_voice.dart';
+import 'trial/learning_prep_overlay.dart';
+import 'trial/trial_flow_state.dart';
+import 'trial/trial_study_page.dart';
 // 마이크 캡처는 Circle Talk과 **같은 구현 한 벌**을 쓴다. 복제하면 sample rate ·
 // 권한 · 종료 처리가 두 군데로 갈라진다.
 import 'routine_mode_anyone.dart' show AnyonePreparedAudioCapture;
@@ -59,6 +63,7 @@ const String kDuoModeDirect = 'direct';
 const Duration kDuoDirectSaveTimeout = Duration(seconds: 3);
 const String kDuoModeInterpreter = 'interpreter';
 const String kInterpreterPartnerTtsVoice = 'alloy';
+const int kDuoTrialCallSeconds = 180;
 
 class RoutineModeDuo extends StatefulWidget {
   const RoutineModeDuo({
@@ -192,6 +197,47 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// `_localMessages`로 저장 여부를 판단하면 히스토리가 통째로 지워진다.
   int _historyMessageCount = 0;
 
+  // ── 3분 Duo 맛보기 ─────────────────────────────────────────────────────
+  Timer? _trialCallTimer;
+  int _trialCallRemaining = kDuoTrialCallSeconds;
+  bool _trialCallStarted = false;
+  bool _isTrialPreviewRoom = false;
+
+  bool get _isTrialHost => _amIHost && TrialFlowState.instance.isTrialDuo;
+  bool get _hasTrialCallLimit => _isTrialHost || _isTrialPreviewRoom;
+
+  void _startTrialCallIfNeeded() {
+    if (!_hasTrialCallLimit || _trialCallStarted || _isExiting) return;
+    _trialCallStarted = true;
+    _trialCallRemaining = kDuoTrialCallSeconds;
+
+    // 무료 초대권은 게스트가 실제 입장한 순간 소비된다. 타이머가 끝날 때까지
+    // 미루면 중간에 방을 나가거나 앱을 종료해 같은 1회권을 다시 쓸 수 있다.
+    final user = FirebaseAuth.instance.currentUser;
+    if (_isTrialHost || (user?.isAnonymous ?? false)) {
+      FFAppState().trialCompleted = true;
+      TrialFlowState.instance.saveToAppState();
+    }
+    _lgDuo('[TRIAL]', 'consumed_on_guest_join seconds=$kDuoTrialCallSeconds');
+
+    _trialCallTimer?.cancel();
+    _trialCallTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || _isExiting) {
+        _trialCallTimer?.cancel();
+        return;
+      }
+      setState(() => _trialCallRemaining--);
+      if (_trialCallRemaining <= 0) {
+        _trialCallRemaining = 0;
+        _trialCallTimer?.cancel();
+        unawaited(
+          _handleAutoSaveAndExit(openTrialStudy: _isTrialHost),
+        );
+      }
+    });
+    if (mounted) setState(() {});
+  }
+
   // 🆕 [게스트 언어 오버레이] 초대 게스트(회원·비회원)가 입장 전 언어쌍 선택
   bool _showLangOverlay = false;
   String? _pendingJoinRoomId;
@@ -237,7 +283,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   bool _billingStarted = false;
   void _startDuoBilling() {
     // 🆕 [과금정책] 게스트(회원·비회원 무관)는 차감 안 함 — 초대한 호스트만 과금
-    if (!_amIHost) return;
+    if (!_amIHost || _isTrialHost) return;
     BillingTicker.instance.setSessionIdentifiers(
       sessionDocId: _myHistoryRef?.id,
       roomId: _duoSessionRef?.id ?? widget.roomId,
@@ -297,7 +343,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 게스트는 무료다. 초대한 호스트만 부담한다 — 유휴에서 돌아올 때도
   /// 게스트 쪽에서 과금이 켜지면 안 된다.
   @override
-  bool get isBillingEnabled => _amIHost;
+  bool get isBillingEnabled => _amIHost && !_isTrialHost;
 
   @override
   bool get isBillingBusy {
@@ -369,6 +415,21 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   }
 
   bool _isPartnerOnline = false;
+
+  /// 상대가 쓰는 대화 언어. 만능 통역 화면의 언어쌍 표시에 쓴다.
+  ///
+  /// 첫 메시지가 오기 전에도 보여줘야 하므로 세션 문서(`hostLang`/`partnerLang`)로
+  /// 주고받는다. 문서에 없는 옛 방을 위해 수신 메시지의 `srcLang`으로도 채운다.
+  String? _partnerChatLang;
+
+  void _notePartnerChatLang(String? lang, String from) {
+    final String v = (lang ?? '').trim();
+    if (v.isEmpty || v == _partnerChatLang) return;
+    _partnerChatLang = v;
+    _lgDuo('[LANG-PAIR]', 'partner=$v from=$from');
+    if (mounted) setState(() {});
+  }
+
   bool _isExiting = false;
   int _turnCounter = 0;
   int _duoConversationTurnCounter = 0;
@@ -430,6 +491,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       FFAppState().targetLang.isNotEmpty ? FFAppState().targetLang : 'English';
   String _myNative() =>
       FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
+
   /// ⚠️ 잠든 경로 전용. 내 발화를 내 목소리로 다시 읽어주던 시절의 값이다.
   /// 상대 발화는 `kInterpreterPartnerTtsVoice`로 읽는다.
   // ignore: unused_element
@@ -525,6 +587,15 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       debugPrint('[Duo] role=HOST (direct entry)');
     }
 
+    TrialFlowState.instance.restoreFromAppState();
+    if (_isTrialHost) {
+      _duoMode = kDuoModeDirect;
+      _isTrialPreviewRoom = true;
+      _myHistoryRef = TrialFlowState.instance.myHistoryRef;
+      _trialCallRemaining = kDuoTrialCallSeconds;
+      _lgDuo('[TRIAL]', 'host_ready history=${_myHistoryRef?.path}');
+    }
+
     _ttsPlayer.onPlayerComplete.listen((_) {
       if (_ttsCompleter != null && !_ttsCompleter!.isCompleted) {
         _ttsCompleter!.complete();
@@ -580,6 +651,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       StealthRoomMaster.saveAndExitCurrentMode = null;
     }
     WidgetsBinding.instance.removeObserver(this);
+    _trialCallTimer?.cancel();
     _partnerJoinedSubscription?.cancel();
     _messageSubscription?.cancel(); // 🆕 메시지 채널 구독 해제
     // 🆕 직접 대화 통화 경로(마이크·릴레이·전사·재생) 즉시 정리
@@ -604,6 +676,16 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_isTrialHost && _trialCallStarted) {
+      if (state == AppLifecycleState.paused ||
+          state == AppLifecycleState.hidden ||
+          state == AppLifecycleState.detached) {
+        unawaited(_handleAutoSaveAndExit());
+      } else if (state == AppLifecycleState.resumed && _isExiting && mounted) {
+        context.goNamed('Intro');
+      }
+      return;
+    }
     if (!FFAppState().isGuestSession) return;
 
     if (state == AppLifecycleState.paused) {
@@ -1065,8 +1147,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         return;
       }
       // 종료 대기가 이 future를 기다린다 — unawaited로 흘려보내면 안 된다.
-      final save = _handleDirectTranscript(generation, text, itemId,
-          voicedMs: voicedMs);
+      final save =
+          _handleDirectTranscript(generation, text, itemId, voicedMs: voicedMs);
       _directSaves.add(save);
       unawaited(save.whenComplete(() => _directSaves.remove(save)));
     };
@@ -1190,7 +1272,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           // 없다.** 조용히 넘어가면 나중에 "왜 마지막 말이 없지"를 로그로
           // 못 찾는다. 여기서 분명히 남긴다.
           if (stt.hasPendingUtterance) {
-            _lgDuo('⚠️ [DIRECT-STT]',
+            _lgDuo(
+                '⚠️ [DIRECT-STT]',
                 'last_utterance_lost reason=$reason — flush 상한 내 전사문 미도착. '
                     '이 발화는 내 History와 상대 채널 어디에도 저장되지 않았다.');
           }
@@ -1255,7 +1338,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       await Future.wait(List<Future<void>>.of(_directSaves))
           .timeout(kDuoDirectSaveTimeout);
     } catch (e) {
-      _lgDuo('⚠️ [DIRECT-STT]',
+      _lgDuo(
+          '⚠️ [DIRECT-STT]',
           'save_wait_timeout(${e.runtimeType}) — 마지막 문장의 History/채널 '
               '저장이 상한 안에 안 끝났다. 저장 자체는 계속 진행되지만 '
               '실패했을 수 있다.');
@@ -1360,12 +1444,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         // 🎧 [STT-QUALITY] 잡음 억제는 끈다 — 무엇이 잡음인지 추측해서 깎기
         //   때문에 마찰음과 문장 끝을 같이 먹는다(직접 대화와 같은 이유).
         noiseSuppress: false,
-        onRecordingStarted: (at) => _lgDuo('[INTERP-MIC]',
-            'recording_started at=${at.toIso8601String()}'),
+        onRecordingStarted: (at) => _lgDuo(
+            '[INTERP-MIC]', 'recording_started at=${at.toIso8601String()}'),
         // 첫 프레임 시각은 "버튼을 눌러서 실제로 소리가 흐르기까지"를 재는
         // 유일한 기준점이다. 느리다는 신고가 들어오면 여기부터 본다.
-        onFirstFrame: (at, byteCount) => _lgDuo(
-            '[INTERP-MIC]',
+        onFirstFrame: (at, byteCount) => _lgDuo('[INTERP-MIC]',
             'first_frame_bytes=$byteCount at=${at.toIso8601String()}'),
       );
       if (generation != _interpGeneration || _isExiting) {
@@ -1457,7 +1540,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     }
     // 전사문이 끝내 안 오면 여기서 풀어 준다. 아니면
     // `_onInterpreterTranscript`가 이미 다음 상태로 넘겼다.
-    if (_duoState == 'processing' && (_interpStt?.hasPendingUtterance ?? false)) {
+    if (_duoState == 'processing' &&
+        (_interpStt?.hasPendingUtterance ?? false)) {
       _lgDuo('⚠️ [INTERP-STT]', 'commit_no_transcript — 이 발화는 사라졌다');
       _setDuoState('idle');
       if (_incomingQueue.isNotEmpty) _drainIncoming();
@@ -1931,6 +2015,8 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     final String raw = data['text']?.toString() ?? '';
     final String srcLang = data['srcLang']?.toString() ?? 'English';
     if (raw.trim().isEmpty) return;
+    // 세션 문서에 언어가 없던 옛 방을 위한 폴백.
+    _notePartnerChatLang(srcLang, 'message');
 
     // 🆕 [직접 대화] 상대 목소리는 이미 릴레이로 실시간 재생됐다. 여기 오는 건
     // 그 발화의 전사문뿐이므로 번역·TTS·말풍선 없이 History에만 남긴다.
@@ -1981,7 +2067,9 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       // 번역이 실패해도 상대 말을 통째로 잃지는 않는다. 못 알아들을지언정
       // 원문이라도 남기는 편이, 아무 일도 없었던 것처럼 조용히 사라지는
       // 것보다 낫다 — 사라지면 상대는 자기 말이 갔는지도 모른다.
-      spoken = (translated ?? '').trim().isNotEmpty ? translated!.trim() : raw.trim();
+      spoken = (translated ?? '').trim().isNotEmpty
+          ? translated!.trim()
+          : raw.trim();
       if (translated == null) {
         _lgDuo('⚠️ [INTERP-TRANSLATE]',
             'failed src=$srcLang to=$myNative — 원문 그대로 재생한다');
@@ -2286,11 +2374,16 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     //    에서는 선택 창을 띄우지 않는다.
     final bool isNewSession = _duoSessionRef == null;
     String chosenMode = _duoMode;
-    if (isNewSession) {
+    if (isNewSession && !_isTrialHost) {
       final String? picked = await _showHostModePicker();
       if (picked == null) return; // 사용자가 취소
       chosenMode = picked;
       if (mounted) setState(() => _duoMode = picked);
+    } else if (_isTrialHost) {
+      chosenMode = kDuoModeDirect;
+      if (mounted && _duoMode != chosenMode) {
+        setState(() => _duoMode = chosenMode);
+      }
     }
     try {
       // 1) 세션이 없으면 생성 — `mode`는 **이 순간에만** 쓰인다.
@@ -2303,6 +2396,10 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
           'isDuoEnabled': false,
           'isPartnerJoined': false,
           'mode': chosenMode,
+          if (_isTrialHost) 'trialPreview': true,
+          // 상대 화면의 언어쌍 표시용. 첫 메시지 전에도 알아야 하므로
+          // 세션 문서로 주고받는다.
+          'hostLang': _myNative(),
         });
       } else {
         // 같은 방에 다시 초대: 저장된 모드를 그대로 따른다(덮어쓰지 않는다).
@@ -2430,12 +2527,25 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         _lgDuo('[MODE]', 'guest_sync $_duoMode → $sessionMode');
       }
       _duoMode = sessionMode;
+      _isTrialPreviewRoom = data['trialPreview'] == true;
 
       await _duoSessionRef!.update({
         'isPartnerJoined': true,
         'partnerUid': guestUid,
         'partnerJoinedAt': FieldValue.serverTimestamp(),
+        'partnerLang': _myNative(),
+        if (_isTrialPreviewRoom)
+          'trialPreviewStartedAt': FieldValue.serverTimestamp(),
+        if (_isTrialPreviewRoom)
+          'trialPreviewEndsAt': Timestamp.fromDate(
+            DateTime.now().add(
+              const Duration(seconds: kDuoTrialCallSeconds),
+            ),
+          ),
       });
+      // 호스트 언어는 방 문서에 이미 있다(옛 방에는 없을 수 있다 — 그때는
+      // 첫 메시지의 srcLang이 채운다).
+      _notePartnerChatLang(data['hostLang']?.toString(), 'session_doc');
       await AppsFlyerManager.markDuoInviteCompleted(roomId);
 
       // 입장 성공 후 방 초대 정보만 정리한다. isGuestSession은 대화 종료 뒤에도
@@ -2463,6 +2573,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       //   게스트는 `_listenForPartnerJoined`를 걸지 않는다(호스트만 건다).
       //   입장에 성공한 이 시점이 곧 "상대(호스트)가 있다"는 확정이다.
       _maybeAutoStartDirectCall('guest_joined');
+      _startTrialCallIfNeeded();
       // 만능 통역은 자동으로 붙지 않는다(버튼으로 말한다). 대신 소켓만 미리 연다.
       _maybePrewarmInterpreterStt('guest_joined');
     } catch (e) {
@@ -2491,6 +2602,8 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       final data = snap.data() as Map<String, dynamic>?;
       if (data == null) return;
       final bool partnerJoined = data['isPartnerJoined'] == true;
+      // 게스트가 입장하며 자기 대화 언어를 남긴다. 호스트는 여기서 받는다.
+      _notePartnerChatLang(data['partnerLang']?.toString(), 'session_doc');
 
       // 🛡️ [방어 전용] 정상 UX에서는 세션 도중 mode가 바뀌지 않는다 —
       //    방식은 초대를 만들 때 한 번 정해지고, 바꾸려면 방을 나가 새 초대를
@@ -2520,6 +2633,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         });
         // 🆕 [과금정책] 게스트 입장 확정 시 과금 시작 / 퇴장 시 정지
         if (partnerJoined) {
+          _startTrialCallIfNeeded();
           _startDuoBilling();
         } else {
           _stopDuoBilling();
@@ -2542,9 +2656,12 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     });
   }
 
-  Future<void> _handleAutoSaveAndExit() async {
+  Future<void> _handleAutoSaveAndExit({bool openTrialStudy = false}) async {
     if (_isExiting) return;
     _isExiting = true;
+    final bool isTrialHost = _isTrialHost;
+    final bool trialWasConsumed = FFAppState().trialCompleted;
+    _trialCallTimer?.cancel();
     final bool isInviteGuest = FFAppState().isGuestSession;
     final String? guestRoomId = _duoSessionRef?.id ??
         widget.roomId ??
@@ -2603,7 +2720,9 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     if (_myHistoryRef != null) {
       // 직접 대화는 말풍선을 만들지 않으므로 _localMessages가 늘 비어 있다.
       // 실제로 저장한 메시지 수로 판단해야 히스토리가 통째로 지워지지 않는다.
-      if (_localMessages.isEmpty && _historyMessageCount == 0) {
+      if (_localMessages.isEmpty &&
+          _historyMessageCount == 0 &&
+          !(isTrialHost && trialWasConsumed)) {
         await _myHistoryRef!.delete();
       } else {
         String lastText = _localMessages.isNotEmpty
@@ -2612,10 +2731,44 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         await _myHistoryRef!.update({
           'last_message': lastText.isNotEmpty ? lastText : "대화 기록 저장",
           'last_message_time': FieldValue.serverTimestamp(),
-          'last_active': FieldValue.serverTimestamp()
+          'last_active': FieldValue.serverTimestamp(),
+          if (isTrialHost) 'status': 'completed',
         });
       }
     }
+    if (!mounted) return;
+
+    if (isTrialHost) {
+      final historyRef = _myHistoryRef ?? TrialFlowState.instance.myHistoryRef;
+      if (!trialWasConsumed) {
+        TrialFlowState.instance.reset();
+        context.goNamed('Intro');
+        return;
+      }
+      if (!openTrialStudy || historyRef == null) {
+        TrialFlowState.instance.advanceTo(4);
+        context.goNamed('Intro');
+        return;
+      }
+
+      TrialFlowState.instance.myHistoryRef = historyRef;
+      TrialFlowState.instance.advanceTo(2);
+      await LearningPrepOverlay.show(
+        context,
+        historyRef: historyRef,
+        onReady: (ref) {
+          if (!mounted) return;
+          TrialFlowState.instance.myHistoryRef = ref;
+          TrialFlowState.instance.advanceTo(3);
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => TrialStudyPage(historyRef: ref)),
+          );
+        },
+      );
+      return;
+    }
+
     if (mounted) {
       if (isInviteGuest) {
         // 게스트에게 StealthRoom 메뉴를 노출하지 않고 라우트 스택을 Intro로
@@ -2674,24 +2827,19 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
               child: Column(
                 children: [
                   _buildTopBar(),
-                  Expanded(
-                    child: Stack(children: [
-                      // 직접 대화는 실시간 자막을 만들지 않는다. 화면은 통화
-                      // 상태만 보여주고, 전사문은 뒤에서 History로만 간다.
-                      _isDirectMode || _localMessages.isEmpty
-                          ? Center(
-                              child: Text(
-                                  !_isDirectMode
-                                      ? "마이크를 탭하면 시작됩니다.\n말이 끝나면 자동으로 전송됩니다."
-                                      // 🔴 [DUO-LIVE] 연결은 상대가 들어오면
-                                      //   자동이다. "마이크를 탭하라"·"상대도
-                                      //   마이크를 켜면"은 더 이상 사실이
-                                      //   아니라서 지웠다. 지금 왜 소리가
-                                      //   안 가는지는 버튼 옆 라벨이 말한다.
-                                      : "서로의 실제 목소리로 대화하세요.",
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(
-                                      color: Colors.white54, height: 1.5)))
+                  // 🖼️ 두 방식은 화면이 하는 일이 다르다.
+                  //   직접 대화 — 자막을 만들지 않는다. 두 폰이 붙어 있다는
+                  //     것만 그림으로 보여준다. 마이크는 양쪽이 들어오면
+                  //     자동으로 켜지므로 안내 문구도 필요 없다.
+                  //   만능 통역 — 어느 언어에서 어느 언어로 가는지가 가장
+                  //     중요하다. 언어쌍을 위에 고정하고 말풍선을 그 아래 쌓는다.
+                  if (_isDirectMode)
+                    Expanded(child: _buildDirectStage())
+                  else ...[
+                    _buildLangPairBar(),
+                    Expanded(
+                      child: _localMessages.isEmpty
+                          ? _buildInterpreterStage()
                           : ListView.builder(
                               reverse: true,
                               controller: _scrollController,
@@ -2699,7 +2847,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                               padding: EdgeInsets.only(
                                   left: 8,
                                   right: 8,
-                                  top: MediaQuery.of(context).size.height * 0.4,
+                                  top: MediaQuery.of(context).size.height * 0.3,
                                   bottom: 40),
                               itemCount: _localMessages.length,
                               itemBuilder: (context, index) {
@@ -2713,8 +2861,8 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                                       _buildTextBlock(_localMessages[realIdx]),
                                 );
                               }),
-                    ]),
-                  ),
+                    ),
+                  ],
                   _buildControlArea(effectiveBottomPadding),
                 ],
               ),
@@ -2723,6 +2871,20 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
           if (_showLangOverlay) _buildGuestLangOverlay(),
         ]));
   }
+
+  // 🖼️ 무대 그림은 `duo_stage.dart`에 있다. Firebase도 앱 상태도 모르는
+  //   순수 위젯이라 화면 없이 띄워 눈으로 확인할 수 있다.
+  Widget _buildDirectStage() => DuoDirectStage(
+        callActive: _directCallActive,
+        muted: _directMuted,
+        partnerOnline: _isPartnerOnline,
+      );
+
+  Widget _buildLangPairBar() =>
+      DuoLangPairBar(mine: _myNative(), theirs: _partnerChatLang);
+
+  Widget _buildInterpreterStage() =>
+      DuoInterpreterStage(recording: _duoState == 'recording');
 
   static String _modeTitle(String mode) =>
       mode == kDuoModeDirect ? '직접 대화' : '만능 통역';
@@ -3241,34 +3403,75 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
             ),
           ]),
           const SizedBox(width: 4),
-          ValueListenableBuilder<int>(
-              valueListenable: BillingTicker.instance.remainingSecondsNotifier,
-              builder: (context, remaining, child) {
-                return Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                    decoration: BoxDecoration(
-                        color: const Color(0xFF2563EB),
-                        borderRadius: BorderRadius.circular(20)),
-                    child: Row(children: [
-                      ValueListenableBuilder<int>(
-                        valueListenable: BillingTicker.instance.billingState,
-                        builder: (_, s, __) => CustomPaint(
-                          size: const Size(14, 14),
-                          painter: BillingDotPainter(s),
+          if (_hasTrialCallLimit)
+            _buildTrialCountdownChip()
+          else
+            ValueListenableBuilder<int>(
+                valueListenable:
+                    BillingTicker.instance.remainingSecondsNotifier,
+                builder: (context, remaining, child) {
+                  return Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 8),
+                      decoration: BoxDecoration(
+                          color: const Color(0xFF2563EB),
+                          borderRadius: BorderRadius.circular(20)),
+                      child: Row(children: [
+                        ValueListenableBuilder<int>(
+                          valueListenable: BillingTicker.instance.billingState,
+                          builder: (_, s, __) => CustomPaint(
+                            size: const Size(14, 14),
+                            painter: BillingDotPainter(s),
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 6),
-                      Text(() {
-                        final int s = remaining.clamp(0, 999999);
-                        final int h = s ~/ 3600;
-                        final int m = (s % 3600) ~/ 60;
-                        return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
-                      }(),
-                          style: const TextStyle(
-                              color: Colors.white, fontWeight: FontWeight.bold))
-                    ]));
-              }),
+                        const SizedBox(width: 6),
+                        Text(() {
+                          final int s = remaining.clamp(0, 999999);
+                          final int h = s ~/ 3600;
+                          final int m = (s % 3600) ~/ 60;
+                          return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+                        }(),
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold))
+                      ]));
+                }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTrialCountdownChip() {
+    final int remaining = _trialCallRemaining.clamp(0, kDuoTrialCallSeconds);
+    final String value =
+        '${(remaining ~/ 60).toString().padLeft(2, '0')}:${(remaining % 60).toString().padLeft(2, '0')}';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: remaining <= 10 && _trialCallStarted
+            ? const Color(0xFFE5484D)
+            : const Color(0xFF2563EB),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            _trialCallStarted
+                ? Icons.call_rounded
+                : Icons.hourglass_top_rounded,
+            size: 15,
+            color: Colors.white,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            _trialCallStarted ? value : '게스트 대기',
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
+          ),
         ],
       ),
     );
@@ -3473,7 +3676,8 @@ class DuoBrain {
         debugPrint('[Duo][SpeechTranslate] status=${res.statusCode}');
         return null;
       }
-      final body = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      final body =
+          jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
       final choices = body['choices'] as List? ?? const <dynamic>[];
       if (choices.isEmpty) return null;
       final message = (choices.first as Map<String, dynamic>)['message']

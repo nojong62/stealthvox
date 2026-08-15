@@ -61,6 +61,7 @@ class _IntroMasterState extends State<IntroMaster> {
   bool _showEmailForm = false;
   bool _trialStarting = false;
   int _trialRequestGeneration = 0;
+  bool _trialCompletionNoticeShown = false;
   bool _isValidatingDuoInvite = false;
   String _trialNativeLang = 'Korean';
   String _trialTargetLang = 'English';
@@ -92,6 +93,11 @@ class _IntroMasterState extends State<IntroMaster> {
       _currentScreen = IntroScreen.auth;
     } else {
       _currentScreen = IntroScreen.welcome;
+    }
+    if (FFAppState().trialCompleted) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _showTrialCompletedNotice(),
+      );
     }
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkEntryStatus());
     const trialLanguages = [
@@ -240,6 +246,10 @@ class _IntroMasterState extends State<IntroMaster> {
     debugPrint(
         '[TrialDebug] _startTrial enter, currentUser=${FirebaseAuth.instance.currentUser?.uid}, isAnonymous=${FirebaseAuth.instance.currentUser?.isAnonymous}, time=${DateTime.now().toIso8601String()}');
     if (_trialStarting) return;
+    if (FFAppState().trialCompleted) {
+      await _showTrialCompletedNotice(force: true);
+      return;
+    }
     _trialStarting = true;
     final requestGeneration = ++_trialRequestGeneration;
     var authNotificationSuppressed = false;
@@ -259,8 +269,7 @@ class _IntroMasterState extends State<IntroMaster> {
       // 언어 선택은 익명 로그인보다 먼저 띄운다. 첫 익명 로그인에서 인증 상태가
       // 바뀌며 Intro가 재구성되더라도 첫 탭의 사용자 흐름이 끊기지 않게 한다.
       final languageConfirmed = await _showLanguageSettingDialog();
-      if (!languageConfirmed ||
-          !_isCurrentTrialRequest(requestGeneration)) {
+      if (!languageConfirmed || !_isCurrentTrialRequest(requestGeneration)) {
         return;
       }
       debugPrint(
@@ -315,7 +324,14 @@ class _IntroMasterState extends State<IntroMaster> {
         .doc();
     await historyRef.set({
       'created_at': FieldValue.serverTimestamp(),
+      'last_active': FieldValue.serverTimestamp(),
+      'last_message_time': FieldValue.serverTimestamp(),
+      'room_name': 'Duo 직접 통화 맛보기',
       'is_pinned': false,
+      'msg_count': 0,
+      'mode': 'duo',
+      'duo_mode': 'direct',
+      'trial_preview': true,
       // 세션 생성 당시 언어 식별값 보존(History 동일 언어 판정용)
       'native_lang': FFAppState().nativeLang,
       'target_lang': FFAppState().targetLang,
@@ -335,6 +351,37 @@ class _IntroMasterState extends State<IntroMaster> {
           ParamType.DocumentReference,
         ),
       }.withoutNulls,
+    );
+  }
+
+  Future<void> _showTrialCompletedNotice({bool force = false}) async {
+    if (!mounted || (_trialCompletionNoticeShown && !force)) return;
+    _trialCompletionNoticeShown = true;
+    if (_currentScreen != IntroScreen.auth) {
+      setState(() {
+        _currentScreen = IntroScreen.auth;
+        _showEmailForm = false;
+      });
+    }
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E22),
+        title: const Text(
+          '듀오 맛보기가 종료되었습니다',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+        ),
+        content: const Text(
+          '3분 직접 통화와 연결된 공부방은 1회만 이용할 수 있습니다. 회원가입 후 계속 이용해 주세요.',
+          style: TextStyle(color: Color(0xFFBFC1C9), height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('로그인 방법 선택하기'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -364,8 +411,7 @@ class _IntroMasterState extends State<IntroMaster> {
           );
         }
       }
-      // trialCompleted trigger moved to routine_mode_anyone.dart (Anyone 1-min timer natural expiry)
-      // see: fix/trial-completed-trigger-point branch
+      // Duo 맛보기는 게스트가 입장하는 순간 1회 사용 완료로 기록한다.
       FFAppState().lastAuthProvider = 'email';
       if (!isLoginMode) {
         await _grantSignupBonusIfPossible();
@@ -693,7 +739,7 @@ class _IntroMasterState extends State<IntroMaster> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Text(
-                '1분 체험 알아보기',
+                '3분 듀오 맛보기 알아보기',
                 style: TextStyle(
                   color: Color(0xFFF9FAFC),
                   fontSize: 17,
@@ -1177,7 +1223,7 @@ class _IntroMasterState extends State<IntroMaster> {
                   ),
                   const SizedBox(height: 12),
                   const Text(
-                    '1분 동안 편하게 말하면,\n방금 대화가 영어 복습으로 이어집니다.',
+                    '친구를 초대해 3분 동안 직접 통화하면,\n같은 대화로 5분 공부방이 이어집니다.',
                     style: TextStyle(
                       color: Color(0xFFA7ABB5),
                       fontSize: 15,
@@ -1222,10 +1268,7 @@ class _IntroMasterState extends State<IntroMaster> {
     );
   }
 
-  /// Circle Talk 이용 방법 안내. 팝업이 아니라 가이드 페이지에 그대로 얹는다.
-  /// 문구는 `circle_talk_guide.dart`(방 안 사용설명서)와 같은 내용을 체험 상황에
-  /// 맞춰 줄인 것이다. 체험은 서클 선택을 건너뛰고 기본 서클로 들어가므로
-  /// (`stealth_room_master.dart` 트라이얼 자동 진입) 서클을 입력하라고 쓰지 않는다.
+  /// Duo 직접 통화 맛보기 안내. 팝업이 아니라 가이드 페이지에 그대로 얹는다.
   Widget _buildUsageGuideSection() {
     return Container(
       width: double.infinity,
@@ -1260,7 +1303,7 @@ class _IntroMasterState extends State<IntroMaster> {
               const SizedBox(width: 10),
               const Expanded(
                 child: Text(
-                  'Circle Talk 이용 방법',
+                  'Duo 직접 통화 맛보기',
                   style: TextStyle(
                     color: Color(0xFFF7F8FA),
                     fontSize: 17,
@@ -1274,20 +1317,22 @@ class _IntroMasterState extends State<IntroMaster> {
           const SizedBox(height: 18),
           _buildGuideStep(
             number: 1,
-            title: 'AI가 서클 구성원으로 기다립니다',
-            description: '체험은 편안한 일상 대화 커뮤니티에서 시작합니다. AI가 그 서클의 구성원이 되어 먼저 말을 겁니다.',
+            title: '대화할 친구를 초대하세요',
+            description: '비회원도 초대 링크로 참여할 수 있습니다. 직접 통화 방식은 PCM Relay로 연결됩니다.',
           ),
           const SizedBox(height: 16),
           _buildGuideStep(
             number: 2,
-            title: '실제 동료와 이야기하듯 말하세요',
-            description: 'AI가 서클의 분위기와 말투를 반영해 대답합니다. 관심사에 맞는 표현을 자유롭게 써 보세요.',
+            title: '게스트 입장 후 3분간 통화하세요',
+            description:
+                '게스트가 Duo 방에 입장하는 순간 1회 맛보기가 사용 처리되고, 실제 목소리로 3분 동안 통화할 수 있습니다.',
           ),
           const SizedBox(height: 16),
           _buildGuideStep(
             number: 3,
-            title: '대화가 끝나면 영어로 복습하세요',
-            description: '방금 나눈 이야기가 영어 표현과 복습 자료로 자동 정리됩니다.',
+            title: '연결된 공부방에서 5분간 복습하세요',
+            description:
+                '3분이 끝나면 방금 대화의 히스토리 공부방으로 자동 연결됩니다. 이 공부방 안의 모든 기능을 5분 동안 이용할 수 있습니다.',
           ),
         ],
       ),
@@ -2075,7 +2120,7 @@ class _IntroMasterState extends State<IntroMaster> {
   }
 
   List<Widget> _buildAuthHeader() {
-    // 1분 체험을 마친 사용자는 재방문 계정 기록과 관계없이
+    // 1회 Duo 맛보기를 사용한 사람은 재방문 계정 기록과 관계없이
     // 세 가지 가입/로그인 방법을 모두 선택할 수 있어야 한다.
     final lastProvider =
         _requiresAuthOnlyIntro ? null : _validLastAuthProvider();
@@ -2301,8 +2346,7 @@ class _IntroMasterState extends State<IntroMaster> {
     try {
       await _cleanupTrialSandbox();
       await authFn();
-      // trialCompleted trigger moved to routine_mode_anyone.dart (Anyone 1-min timer natural expiry)
-      // see: fix/trial-completed-trigger-point branch
+      // Duo 맛보기 완료 상태는 가입 후에도 재사용되지 않도록 유지한다.
       if (provider.isNotEmpty) {
         FFAppState().lastAuthProvider = provider;
       }
@@ -2718,8 +2762,7 @@ class _IntroMasterState extends State<IntroMaster> {
     FFAppState().trialStep = 0;
     FFAppState().trialHistoryPath = '';
 
-    // trialCompleted trigger moved to routine_mode_anyone.dart (Anyone 1-min timer natural expiry)
-    // see: fix/trial-completed-trigger-point branch
+    // trialCompleted는 1회 사용 기록이므로 여기서 되돌리지 않는다.
 
     debugPrint('[TrialCleanup] sandbox cleanup complete');
   }
@@ -2956,7 +2999,7 @@ class _IntroMasterState extends State<IntroMaster> {
           ),
           const SizedBox(height: 16),
           const Text(
-            '1분만 말해 보세요',
+            '친구와 3분간 직접 통화해 보세요',
             style: TextStyle(
               color: Color(0xFFF7F8FA),
               fontSize: 24,
@@ -2966,7 +3009,7 @@ class _IntroMasterState extends State<IntroMaster> {
           ),
           const SizedBox(height: 8),
           const Text(
-            '방금 나눈 대화를 역할 교환 영어 대화와 맞춤 튜터링으로 이어가며, 더 다양한 표현을 익혀보세요.',
+            'PCM Relay로 실제 목소리를 연결하고, 방금 나눈 대화를 같은 히스토리 공부방에서 바로 복습해 보세요.',
             style: TextStyle(
               color: Color(0xFFA7ABB5),
               fontSize: 14,
@@ -2976,14 +3019,14 @@ class _IntroMasterState extends State<IntroMaster> {
           const SizedBox(height: 20),
           featureRow(
             Icons.forum_outlined,
-            '1분 대화',
-            '떠오르는 사람과 편하게 대화',
+            '3분 Duo 직접 통화',
+            '비회원도 초대 링크로 참여 가능',
           ),
           const SizedBox(height: 13),
           featureRow(
             Icons.auto_stories_outlined,
-            '2분 복습',
-            '방금 대화를 영어로 다시 학습',
+            '5분 공부방',
+            '연결된 히스토리 방의 모든 기능 체험',
           ),
           const SizedBox(height: 13),
           featureRow(
@@ -2994,7 +3037,7 @@ class _IntroMasterState extends State<IntroMaster> {
           if (onTrialPressed != null) ...[
             const SizedBox(height: 22),
             _buildPrimaryAction(
-              label: '1분 무료 체험 시작',
+              label: '3분 Duo 맛보기 시작',
               icon: Icons.mic_rounded,
               onPressed: onTrialPressed,
             ),

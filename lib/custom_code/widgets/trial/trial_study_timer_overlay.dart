@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 class TrialStudyTimerOverlay extends StatefulWidget {
   const TrialStudyTimerOverlay({
     super.key,
-    this.durationSeconds = 120,
+    this.durationSeconds = 300,
     required this.onTimeUp,
   });
 
@@ -95,7 +95,7 @@ class _TrialStudyTimerOverlayState extends State<TrialStudyTimerOverlay> {
               Icon(Icons.bookmark_added, size: 48, color: Color(0xFFD4AF37)),
               SizedBox(height: 16),
               Text(
-                'Your conversation was saved.\nRecharge to keep studying.',
+                '5분 공부방 체험이 끝났습니다.\n회원가입 후 계속 이용해 주세요.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Colors.white,
@@ -106,7 +106,7 @@ class _TrialStudyTimerOverlayState extends State<TrialStudyTimerOverlay> {
               ),
               SizedBox(height: 8),
               Text(
-                'Moving to sign up...',
+                '로그인 방법 선택 화면으로 이동합니다...',
                 style: TextStyle(color: Color(0xFFB0B0B0), fontSize: 13),
               ),
             ],
