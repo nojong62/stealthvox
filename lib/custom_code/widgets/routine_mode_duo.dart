@@ -61,6 +61,7 @@ const String kDuoModeDirect = 'direct';
 /// 종료 직전 마지막 전사문의 History·채널 저장을 기다리는 상한.
 /// Firestore 쓰기가 걸려도 통화 종료가 무한정 늘어지면 안 된다.
 const Duration kDuoDirectSaveTimeout = Duration(seconds: 3);
+const Duration kDuoDirectCurateTimeout = Duration(seconds: 15);
 const String kDuoModeInterpreter = 'interpreter';
 const String kInterpreterPartnerTtsVoice = 'alloy';
 const int kDuoTrialCallSeconds = 180;
@@ -2321,7 +2322,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     // 타겟을 미루는 줄은 원문이 본문이다. 아니면 타겟이 본문이다.
     if (defer ? original.trim().isEmpty : target.trim().isEmpty) return;
     // 방을 나간 뒤 늦게 도착한 전사가 지워진 히스토리를 되살리지 않게 막는다.
-    if (_isExiting) {
+    if (_isExiting && !(mode == kDuoModeDirect && _directFlushing)) {
       _lgDuo('[HISTORY]', 'save_skipped reason=exiting role=$role');
       return;
     }
@@ -2359,6 +2360,94 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         'msg_count': FieldValue.increment(1),
       });
     } catch (e) {}
+  }
+
+  /// 직접 통화 전사문을 공부방용 대화로 가볍게 정리한다.
+  ///
+  /// 화자와 시간 순서는 그대로 두고, 단독 인사·맞장구·말버릇·중복처럼
+  /// 연습 가치가 낮은 줄만 걷어낸다. AI는 남길 줄 선택과 최소한의 전사문
+  /// 교정만 할 수 있다. 실패하면 원문을 잃지 않도록 보수적인 로컬 필터 결과를
+  /// 사용한다. 만능 통역에는 이 경로가 전혀 적용되지 않는다.
+  Future<void> _curateDirectHistoryForStudy() async {
+    final historyRef = _myHistoryRef;
+    if (!_isDirectMode || historyRef == null) return;
+
+    try {
+      final snapshot = await historyRef
+          .collection('messages')
+          .get()
+          .timeout(const Duration(seconds: 6));
+      final docs = snapshot.docs.where((doc) {
+        final data = doc.data();
+        return data['duo_mode']?.toString() == kDuoModeDirect &&
+            data['original_text']?.toString().trim().isNotEmpty == true;
+      }).toList();
+      if (docs.isEmpty) return;
+
+      int spokenAt(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
+        final data = doc.data();
+        final directTime = (data['spoken_at_ms'] as num?)?.toInt();
+        if (directTime != null) return directTime;
+        return (data['created_at'] as Timestamp?)?.millisecondsSinceEpoch ?? 0;
+      }
+
+      docs.sort((a, b) => spokenAt(a).compareTo(spokenAt(b)));
+      final turns = <Map<String, dynamic>>[
+        for (int i = 0; i < docs.length; i++)
+          {
+            'index': i,
+            'role': docs[i].data()['role']?.toString() ?? 'UNKNOWN',
+            'text': docs[i].data()['original_text']?.toString().trim() ?? '',
+          }
+      ];
+
+      final fallback = DuoBrain.filterDirectStudyTurns(turns);
+      Map<int, String> kept = fallback;
+      if (_openAiKey.isNotEmpty && fallback.length >= 2) {
+        final curated = await DuoBrain.curateDirectStudyTurns(
+          key: _openAiKey,
+          turns: [
+            for (final turn in turns)
+              if (fallback.containsKey(turn['index'])) turn,
+          ],
+        ).timeout(kDuoDirectCurateTimeout, onTimeout: () => null);
+        if (curated != null) kept = curated;
+      }
+
+      // 한 배치의 제한보다 긴 통화도 처리할 수 있도록 400개씩 나눈다.
+      for (int start = 0; start < docs.length; start += 400) {
+        final batch = FirebaseFirestore.instance.batch();
+        final int end = start + 400 < docs.length ? start + 400 : docs.length;
+        for (int i = start; i < end; i++) {
+          final cleaned = kept[i]?.trim();
+          if (cleaned == null || cleaned.isEmpty) {
+            batch.delete(docs[i].reference);
+          } else {
+            batch.update(docs[i].reference, {
+              'original_text': cleaned,
+              'translated_text': '',
+              'study_curated': true,
+            });
+          }
+        }
+        await batch.commit();
+      }
+
+      _historyMessageCount = kept.length;
+      final lastText = kept.isEmpty ? '의미 있는 대화가 없습니다' : kept.values.last;
+      await historyRef.update({
+        'msg_count': kept.length,
+        'last_message': lastText,
+        'direct_study_curated': true,
+        'direct_study_curated_at': FieldValue.serverTimestamp(),
+        'direct_study_removed_count': docs.length - kept.length,
+      });
+      _lgDuo('[DIRECT-CURATE]',
+          'done total=${docs.length} kept=${kept.length} removed=${docs.length - kept.length}');
+    } catch (e) {
+      // 정리에 실패했다고 원본 공부방까지 막으면 안 된다.
+      _lgDuo('[DIRECT-CURATE]', 'failed=${e.runtimeType} — 원문 유지');
+    }
   }
 
   Future<void> _shareInviteCode() async {
@@ -2681,6 +2770,10 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     // 🆕 [직접 대화] 방을 나가는 순간 PCM 송수신을 먼저 끊는다. 이 뒤에 도착하는
     //    릴레이 프레임·전사 완료는 세대값이 달라 전부 무시된다.
     await _stopDirectCall('room_exit');
+
+    // 직접 통화의 원시 전사문을 그대로 공부방에 쏟지 않는다. 마지막 발화 저장이
+    // 끝난 뒤 의미 있는 대화 중심으로 정리하고 나서 히스토리를 연다.
+    await _curateDirectHistoryForStudy();
 
     // 🆕 [만능 통역] 같은 이유로 마이크와 전사 소켓을 여기서 내린다. 세대를
     //    먼저 올려야 늦게 오는 전사 완료가 나간 방의 히스토리를 되살리지 않는다.
@@ -3478,19 +3571,37 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
   }
 
   Widget _buildControlArea(double bottomPadding) {
-    // 🔴 [DUO-LIVE] 직접 대화: 소리가 실제로 나가는 동안만 초록이다.
-    //   음소거 중에는 통화가 붙어 있어도 초록이 아니어야 한다 — 초록인데 내
-    //   말이 안 가면 유저는 원인을 찾을 수 없다. 탭은 음소거 토글이다.
-    final bool isRec = _isDirectMode
-        ? (_directCallActive && !_directMuted)
-        : _duoState == 'recording';
-    final bool isFinishing = !_isDirectMode && _duoState == 'finishing';
-    final bool isBusy = _isDirectMode
-        ? _directStarting
-        : (isFinishing ||
-            _duoState == 'processing' ||
-            _duoState == 'playing' ||
-            _duoState == 'cooldown');
+    // 직접 통화는 게스트 입장 시 마이크가 자동으로 열린다. 이 자리에 마이크
+    // 버튼을 두면 눌러야 통화가 시작되는 화면으로 오해할 수 있으므로 상태
+    // 문구만 남긴다. 기존 버튼 높이는 유지해 화면의 세로 배치가 흔들리지 않는다.
+    if (_isDirectMode) {
+      return Container(
+        padding: EdgeInsets.fromLTRB(24, 16, 24, bottomPadding),
+        decoration: const BoxDecoration(color: Color(0xFF121212)),
+        child: SizedBox(
+          height: 76,
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              _pttLabel(),
+              style: const TextStyle(
+                color: Colors.white54,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1.0,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    final bool isRec = _duoState == 'recording';
+    final bool isFinishing = _duoState == 'finishing';
+    final bool isBusy = isFinishing ||
+        _duoState == 'processing' ||
+        _duoState == 'playing' ||
+        _duoState == 'cooldown';
     final Color accent = isRec
         ? const Color(0xFF34D399)
         : (isBusy ? Colors.white38 : const Color(0xFF2563EB));
@@ -3500,7 +3611,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          if (!isRec || _isDirectMode)
+          if (!isRec)
             Text(_pttLabel(),
                 style: const TextStyle(
                     color: Colors.white54,
@@ -3627,6 +3738,115 @@ class _DuoResolvedTurn {
 // ============================================================================
 class DuoBrain {
   static final http.Client client = http.Client();
+
+  /// 네트워크가 없거나 AI 정리가 실패했을 때 쓰는 보수적인 직접 통화 필터.
+  /// 짧다는 이유만으로 "네/아니요" 같은 실제 답변을 버리지는 않는다.
+  static Map<int, String> filterDirectStudyTurns(
+      List<Map<String, dynamic>> turns) {
+    final kept = <int, String>{};
+    String previous = '';
+    for (final turn in turns) {
+      final index = turn['index'] as int?;
+      final text = turn['text']?.toString().trim() ?? '';
+      if (index == null || text.isEmpty) continue;
+      final normalized =
+          text.toLowerCase().replaceAll(RegExp(r'[^a-z0-9가-힣ぁ-んァ-ン一-龥]'), '');
+      if (normalized.isEmpty ||
+          RegExp(
+            r'^(아|어|음|으음|흠|저기|그|그게|uh|um|umm|hmm|er|ah|hello|hi|hey|안녕|안녕하세요|여보세요|bye|goodbye|잘가)$',
+            caseSensitive: false,
+          ).hasMatch(normalized) ||
+          normalized == previous) {
+        continue;
+      }
+      kept[index] = text;
+      previous = normalized;
+    }
+    return kept;
+  }
+
+  /// 직접 통화의 실제 발화 중 공부할 가치가 있는 줄만 고른다.
+  /// null은 호출/파싱 실패, 빈 map은 의미 있는 발화가 없다는 정상 결과다.
+  static Future<Map<int, String>?> curateDirectStudyTurns({
+    required String key,
+    required List<Map<String, dynamic>> turns,
+  }) async {
+    if (key.isEmpty || turns.isEmpty) return null;
+    try {
+      final uri = Uri.parse('https://api.openai.com/v1/chat/completions');
+      const prompt =
+          '''You prepare a two-person DIRECT VOICE CALL transcript for a language-study room.
+
+Keep the real conversation, speakers, language, meaning, and chronological order. Do not summarize the whole conversation and do not translate it.
+
+Remove only low-value turns such as standalone greetings, fillers, empty acknowledgements, abandoned fragments with no meaning, accidental noise, and repetitions where a more complete version already exists.
+Keep questions, informative answers, opinions, reasons, plans, experiences, useful expressions, and any short answer needed to understand a nearby turn.
+For kept turns, make only light transcript cleanup: spacing, punctuation, obvious stutter removal, or an unmistakable speech-to-text typo. Never add facts, merge speakers, rewrite style, complete uncertain fragments, or make the speaker sound more fluent than they were.
+
+Return strict JSON only:
+{"turns":[{"index":0,"text":"cleaned original-language utterance"}]}
+Use only supplied indexes, at most once each, in original order. An empty turns array is valid when nothing is useful.''';
+      final response = await client
+          .post(
+            uri,
+            headers: {
+              'Authorization': 'Bearer $key',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.1,
+              'max_tokens': 2400,
+              'response_format': {'type': 'json_object'},
+              'messages': [
+                {'role': 'system', 'content': prompt},
+                {
+                  'role': 'user',
+                  'content': jsonEncode({'turns': turns})
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 12));
+      if (response.statusCode != 200) {
+        debugPrint('[Duo][DirectCurate] status=${response.statusCode}');
+        return null;
+      }
+      final body = jsonDecode(utf8.decode(response.bodyBytes));
+      final content = body['choices']?[0]?['message']?['content']?.toString();
+      if (content == null || content.trim().isEmpty) return null;
+      final decoded = jsonDecode(_cleanJsonString(content));
+      final output = decoded['turns'];
+      if (output is! List) return null;
+
+      final supplied = <int, String>{
+        for (final turn in turns)
+          if (turn['index'] is int)
+            (turn['index'] as int): turn['text']?.toString().trim() ?? '',
+      };
+      final curated = <int, String>{};
+      int lastIndex = -1;
+      for (final item in output) {
+        if (item is! Map) return null;
+        final index = (item['index'] as num?)?.toInt();
+        final text = item['text']?.toString().trim() ?? '';
+        final original = index == null ? null : supplied[index];
+        if (index == null ||
+            original == null ||
+            index <= lastIndex ||
+            text.isEmpty ||
+            text.length > (original.length * 2 + 40).clamp(80, 600)) {
+          return null;
+        }
+        curated[index] = text;
+        lastIndex = index;
+      }
+      return curated;
+    } catch (e) {
+      debugPrint('[Duo][DirectCurate] failed=${e.runtimeType}');
+      return null;
+    }
+  }
 
   /// 통화 중 **재생용** 번역. 한 언어만 만든다.
   ///
