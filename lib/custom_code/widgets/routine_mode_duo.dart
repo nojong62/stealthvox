@@ -395,6 +395,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       FFAppState().targetLang.isNotEmpty ? FFAppState().targetLang : 'English';
   String _myNative() =>
       FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
+  /// ⚠️ 잠든 경로 전용. 내 발화를 내 목소리로 다시 읽어주던 시절의 값이다.
+  /// 상대 발화는 `kInterpreterPartnerTtsVoice`로 읽는다.
+  // ignore: unused_element
   String _myVoice() =>
       FFAppState().aiVoice.isNotEmpty ? FFAppState().aiVoice : 'echo';
 
@@ -416,6 +419,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     return session;
   }
 
+  /// ⚠️ 잠든 경로. `_resolveDuoTurn` 주석 참고.
+  // ignore: unused_element
   void _prewarmDuoRealtime(String voice) {
     if (_openAiKey.isEmpty || _isExiting) return;
     final existing = _prewarmedDuoRealtime;
@@ -427,6 +432,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     unawaited(session.prewarm());
   }
 
+  /// ⚠️ 잠든 경로. `_resolveDuoTurn` 주석 참고.
+  // ignore: unused_element
   FirstTurnRealtimeVoice? _takePrewarmedDuoRealtime(String voice) {
     final session = _prewarmedDuoRealtime;
     _prewarmedDuoRealtime = null;
@@ -629,6 +636,17 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         return 'en';
     }
   }
+
+  /// 두 사람이 같은 대화 언어를 쓰는가.
+  ///
+  /// ⚠️ **`_mapLanguageToCode`로 비교하면 안 된다.** 그 함수는 목록에 없는
+  /// 언어를 전부 `'en'`으로 떨어뜨린다(위 `default`). 베트남어와 태국어를
+  /// 넣으면 둘 다 `'en'`이 나와 "같은 언어"로 판정되고, 번역 없이 베트남어가
+  /// 태국어 사용자 귀에 그대로 간다. 에러가 아니라 **조용히 틀리는** 종류라
+  /// 실기기에서 원인을 못 찾는다. 여기서는 이름 문자열만 정규화해서 본다
+  /// (히스토리의 `_normLangCode`와 같은 방식).
+  bool _isSameChatLang(String a, String b) =>
+      a.trim().toLowerCase() == b.trim().toLowerCase();
 
   Future<void> _initPermissions() async {
     await [Permission.microphone].request();
@@ -1223,9 +1241,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
                 encoder: AudioEncoder.aacLc, sampleRate: 16000, numChannels: 1),
             path: path);
         _setDuoState('recording');
-        if (_duoConversationTurnCounter == 0) {
-          _prewarmDuoRealtime(_myVoice());
-        }
         _silenceTimer?.cancel();
         // [토글] 발화 후 1.5초 침묵하면 자동 전송. 버튼 탭으로도 즉시 전송 가능.
         // 무발화로 오래 켜져 있으면 안전 종료하여 마이크 점유와 과금을 방지한다.
@@ -1392,6 +1407,14 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
 ''';
   }
 
+  /// ⚠️ **지금은 호출되지 않는다.** 만능 통역이 배울 언어를 통화 중에 만들던
+  /// 시절의 경로다. 이제 대화 중에는 각자 자기 대화 언어로만 말하고 듣고,
+  /// 배울 언어는 공부방이 만든다. 첫 턴 Realtime 음성(`FirstTurnRealtimeVoice`)도
+  /// 내 발화를 다시 읽어줄 때만 쓰였으므로 같이 잠들었다.
+  ///
+  /// 지우지 않고 남긴 이유: 되살릴지 말지는 실기기에서 새 경로를 확인한 뒤에
+  /// 정할 일이다.
+  // ignore: unused_element
   Future<_DuoResolvedTurn> _resolveDuoTurn({
     required String raw,
     required String srcLang,
@@ -1492,6 +1515,8 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     );
   }
 
+  /// ⚠️ 잠든 경로. `_resolveDuoTurn` 주석 참고.
+  // ignore: unused_element
   Future<void> _playDuoResolvedTurn(
     _DuoResolvedTurn turn, {
     required String fallbackVoice,
@@ -1533,59 +1558,61 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     BillingTicker.instance.resumeFromActivity('duo_tts_end');
   }
 
-  // 🚀 [내 발화 처리] 내가 말한 것을 내 폰에 즉시 띄우고, 내 타겟으로 통역/TTS, 채널 업로드
+  /// 🚀 [내 발화 처리] 내가 한 말을 상대에게 넘기고, 화면과 히스토리에 남긴다.
+  ///
+  /// **내 말을 나에게 다시 읽어주지 않는다.** 방금 내가 한 말이다. 예전에는
+  /// 여기서 GPT로 내 배울 언어를 만들고 TTS로 읽어줬는데, 그 두 번의 왕복이
+  /// 끝날 때까지 다음 말을 할 수 없었고 상대에게 가는 것도 늦어졌다.
+  /// 배울 언어는 이제 공부방(히스토리)이 맡는다.
+  ///
+  /// 순서가 중요하다 — **업로드가 가장 먼저다.** 상대가 기다리는 건 그것뿐이고,
+  /// 화면·히스토리는 내 폰 사정이라 상대를 붙잡을 이유가 없다.
   Future<void> _processRelayPipeline(String finalTranscript) async {
     _turnCounter++;
     final int currentTurnId = _turnCounter;
-    final bool useRealtime = ++_duoConversationTurnCounter == 1;
-    final String myTarget = _myTarget();
+    ++_duoConversationTurnCounter;
     final String myNative = _myNative();
+    final String spoken = finalTranscript.trim();
+    if (spoken.isEmpty) return;
 
-    // 1. 즉시 표시 제거 - 번역 완료 후 단계 4에서 새 말풍선으로 표시
-
-    // 2. 공유 채널 업로드 — 상대 폰이 이 원문을 받아 자기 언어쌍으로 통역함 (백그라운드)
-    _uploadMyMessage(finalTranscript, myNative);
-
-    if (!_isConversationActive || _turnCounter != currentTurnId) return;
-
-    // 3. 세션의 첫 PTT만 Realtime 우선. 이후 턴은 기존 GPT JSON + TTS-1.
-    final resolved = await _resolveDuoTurn(
-      raw: finalTranscript,
-      srcLang: myNative,
-      targetLang: myTarget,
-      nativeLang: myNative,
-      voice: _myVoice(),
-      originalFallback: finalTranscript,
-      useRealtime: useRealtime,
-      prewarmed: useRealtime ? _takePrewarmedDuoRealtime(_myVoice()) : null,
-    );
+    // 1. 상대에게 넘긴다. 번역하지 않은 내 말 그대로 — 상대 폰이 자기 대화
+    //    언어로 옮긴다(두 사람의 대화 언어가 다를 수 있으므로 내가 옮기면 안 된다).
+    final DateTime uploadStartedAt = DateTime.now();
+    await _uploadMyMessage(spoken, myNative);
+    _lgDuo(
+        '[INTERP-TURN]',
+        'outgoing turn=$_duoConversationTurnCounter lang=$myNative '
+            'len=${spoken.length} '
+            'uploadMs=${DateTime.now().difference(uploadStartedAt).inMilliseconds}');
 
     if (!_isConversationActive || _turnCounter != currentTurnId) return;
 
-    final String tgt = resolved.target;
-    final String org = resolved.original;
-
-    // 4. 번역 완료 후 내 말풍선을 [타겟 + 오리지널]로 새 말풍선에 표시
+    // 2. 내 말풍선 — 내가 한 말 그대로.
     if (mounted) {
       setState(() {
-        _localMessages.add({'role': 'HOST', 'target': tgt, 'original': org});
+        _localMessages.add({'role': 'HOST', 'target': spoken, 'original': ''});
       });
       _scrollToCurrentTop(_localMessages.length - 1);
     }
-    await _saveHistoryMessage(tgt, org, 'HOST');
 
-    // 5. 첫 PTT는 Realtime PCM/WAV 우선, 이후 턴은 기존 TTS-1로 재생한다.
-    _rememberGenerated(tgt);
-    _rememberGenerated(org);
-    if (_isConversationActive && _turnCounter == currentTurnId) {
-      await _playDuoResolvedTurn(
-        resolved,
-        fallbackVoice: _myVoice(),
-      );
-    }
+    // 3. 히스토리 — 원문만. 배울글·배울소리는 공부방에서 만든다.
+    await _saveHistoryMessage(
+      '',
+      spoken,
+      'HOST',
+      mode: kDuoModeInterpreter,
+      sourceLang: myNative,
+      deferTarget: true,
+    );
+
+    // 내 발화는 앱이 소리 내지 않으므로 에코 목록에 넣을 이유가 없다.
+    // 그래도 남겨 둔다 — 상대 폰의 TTS가 스피커폰으로 내 마이크에 되돌아오는
+    // 경우가 있고, 그 문장은 내가 한 말과 같은 언어다.
+    _rememberGenerated(spoken);
+
     // 🆕 [PTT] 자동 재녹음 제거 — 쿨다운 후 대기 상태로 복귀
     _setDuoState('cooldown');
-    await Future.delayed(const Duration(milliseconds: 800));
+    await Future.delayed(const Duration(milliseconds: 300));
     _setDuoState('idle');
     // 🆕 내 발화 처리 끝 → 보류돼 있던 상대 메시지 처리 재개
     if (_incomingQueue.isNotEmpty) _drainIncoming();
@@ -1713,55 +1740,86 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       return;
     }
 
-    // 상대 발화를 들려주는 동안 내 녹음 일시 정지 (스피커 음성이 마이크에 새는 것 방지)
+    // 상대 발화를 들려주는 동안 내 녹음 일시 정지.
+    //
+    // 🔇 [ECHO] 예전에는 앱이 **내 배울 언어**로 읽어서, 마이크에 새어 들어와도
+    //   내가 말한 언어와 달라 티가 났다. 이제 앱도 나와 같은 대화 언어로
+    //   말한다. 스피커폰이면 앱 목소리가 그대로 내 발화로 오인될 수 있으므로,
+    //   **재생 중에는 마이크를 아예 열지 않는 것**이 1차 방어선이다.
     _silenceTimer?.cancel();
     try {
       await _audioRecorder.stop();
     } catch (_) {}
     _setDuoState('processing');
 
-    final String myTarget = _myTarget();
     final String myNative = _myNative();
-    // 만능 통역에서 상대 발화는 첫 턴도 Realtime 음성을 쓰지 않는다.
-    // 아래 폴백 경로가 `/v1/audio/speech`의 tts-1 + alloy를 일관되게 사용한다.
     ++_duoConversationTurnCounter;
 
-    final resolved = await _resolveDuoTurn(
-      raw: raw,
-      srcLang: srcLang,
-      targetLang: myTarget,
-      nativeLang: myNative,
-      voice: kInterpreterPartnerTtsVoice,
-      originalFallback: '',
-      useRealtime: false,
-    );
+    // 대화 중에는 **내 대화 언어**로 듣는다. 배울 언어는 공부방이 맡는다.
+    //
+    // 상대가 이미 내 대화 언어로 말했으면 번역할 것이 없다 — GPT 왕복을
+    // 통째로 건너뛴다(첫 토큰까지만 0.6~1.4초가 걸리던 자리다).
+    final bool sameLang = _isSameChatLang(srcLang, myNative);
+    String spoken = raw.trim();
+    if (!sameLang) {
+      final translated = await DuoBrain.translateForSpeech(
+        key: _openAiKey,
+        text: raw,
+        srcLang: srcLang,
+        toLang: myNative,
+      );
+      // 번역이 실패해도 상대 말을 통째로 잃지는 않는다. 못 알아들을지언정
+      // 원문이라도 남기는 편이, 아무 일도 없었던 것처럼 조용히 사라지는
+      // 것보다 낫다 — 사라지면 상대는 자기 말이 갔는지도 모른다.
+      spoken = (translated ?? '').trim().isNotEmpty ? translated!.trim() : raw.trim();
+      if (translated == null) {
+        _lgDuo('⚠️ [INTERP-TRANSLATE]',
+            'failed src=$srcLang to=$myNative — 원문 그대로 재생한다');
+      }
+    }
+    _lgDuo('[INTERP-TURN]',
+        'incoming src=$srcLang mine=$myNative same=$sameLang gptCalls=${sameLang ? 0 : 1}');
 
     if (!mounted || _isExiting) return;
 
-    final String tgt = resolved.target;
-    final String org = resolved.original;
-
-    // 상대 말풍선: 좌측 (role='SYSTEM')
+    // 상대 말풍선: 좌측 (role='SYSTEM'). 큰 줄은 내가 알아들을 말,
+    // 작은 줄은 상대가 실제로 한 말(같은 언어면 중복이라 생략).
     if (mounted) {
       setState(() {
-        _localMessages.add({'role': 'SYSTEM', 'target': tgt, 'original': org});
+        _localMessages.add({
+          'role': 'SYSTEM',
+          'target': spoken,
+          'original': sameLang ? '' : raw.trim(),
+        });
       });
       _scrollToCurrent(_localMessages.length - 1);
     }
-    await _saveHistoryMessage(tgt, org, 'SYSTEM');
 
-    // 상대 발화는 모든 턴에서 tts-1 + alloy로 재생한다.
-    _rememberGenerated(tgt);
-    _rememberGenerated(org);
+    // 히스토리 — 원문 자리에는 내가 들은 말(내 대화 언어)을 넣는다.
+    // 상대가 말한 언어가 마침 내 배울 언어면 그 원문이 곧 배울 문장이므로
+    // 타겟까지 여기서 채운다. 번역의 번역이 아니라 상대가 실제로 한 말이
+    // 배울글이 되고, 공부방이 API를 부를 일도 없다.
+    final bool rawIsMyTargetLang = _isSameChatLang(srcLang, _myTarget());
+    await _saveHistoryMessage(
+      rawIsMyTargetLang ? raw.trim() : '',
+      spoken,
+      'SYSTEM',
+      mode: kDuoModeInterpreter,
+      sourceLang: myNative,
+      deferTarget: !rawIsMyTargetLang,
+    );
+
+    // 🔇 [ECHO] 앱이 소리 낼 문장을 기억해 둔다. 스피커폰에서 이 소리가
+    //   마이크로 되돌아오면 내 발화로 오인되는데, 이제 나와 같은 언어라
+    //   언어만으로는 구분되지 않는다.
+    _rememberGenerated(spoken);
     if (_isConversationActive && !_isExiting) {
-      await _playDuoResolvedTurn(
-        resolved,
-        fallbackVoice: kInterpreterPartnerTtsVoice,
-      );
+      await _playSerialized(
+          await _fetchTTSBytes(spoken, kInterpreterPartnerTtsVoice));
     }
     // 🆕 [PTT] 상대 발화 재생 후에도 자동 재녹음 금지 — 쿨다운 후 대기 복귀
     _setDuoState('cooldown');
-    await Future.delayed(const Duration(milliseconds: 800));
+    await Future.delayed(const Duration(milliseconds: 300));
     _setDuoState('idle');
   }
 
@@ -1942,11 +2000,15 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
 
   /// 히스토리 메시지 한 줄.
   ///
-  /// **만능 통역**은 대화 중에 이미 타겟 문장을 만들었으므로 그대로 저장한다.
-  /// **직접 대화**는 번역을 하지 않는다. 전사한 원문만 `original_text`로 남기고
-  /// `translated_text`는 비워 둔다 — 나머지 세 모드와 같은 방식으로, 히스토리를
-  /// 열 때 그 방의 `target_lang`으로 타겟 문장과 소리가 1차 생성·캐싱된다.
+  /// **듀오 두 방식이 같은 규칙을 쓴다.** 대화 중에는 각자 자기 대화 언어로
+  /// 말하고 들을 뿐이고, 배울 언어(타겟)는 히스토리를 열 때 그 방의
+  /// `target_lang`으로 만든다 — 나머지 세 모드와 같다.
   /// (chat_history_master의 `_scheduleMissingTargetGeneration`이 받는다)
+  ///
+  /// 예외가 하나 있다: 상대가 말한 언어가 마침 **내 배울 언어와 같으면**,
+  /// 그 원문이 곧 배울 문장이다. 그때는 `target`에 실어 보내 `deferTarget`을
+  /// 끈다. 번역의 번역이 아니라 상대가 실제로 한 말이 배울글이 되고,
+  /// 공부방에서 API를 부를 필요도 없다.
   Future<void> _saveHistoryMessage(
     String target,
     String original,
@@ -1956,10 +2018,12 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     DateTime? spokenAt,
     String? speakerUid,
     String? sourceLang,
+    bool? deferTarget,
   }) async {
-    final bool deferTarget = mode == kDuoModeDirect;
-    // 직접 대화는 타겟이 비어 있는 게 정상이다. 통역은 타겟이 본문이라 없으면 버린다.
-    if (deferTarget ? original.trim().isEmpty : target.trim().isEmpty) return;
+    // 호출부가 명시하지 않으면 예전 규칙(직접 대화만 미룸)을 그대로 따른다.
+    final bool defer = deferTarget ?? (mode == kDuoModeDirect);
+    // 타겟을 미루는 줄은 원문이 본문이다. 아니면 타겟이 본문이다.
+    if (defer ? original.trim().isEmpty : target.trim().isEmpty) return;
     // 방을 나간 뒤 늦게 도착한 전사가 지워진 히스토리를 되살리지 않게 막는다.
     if (_isExiting) {
       _lgDuo('[HISTORY]', 'save_skipped reason=exiting role=$role');
@@ -1970,15 +2034,17 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     try {
       await _myHistoryRef!.collection('messages').add({
         'role': role,
-        'translated_text': deferTarget ? '' : target,
-        'original_text': deferTarget
+        'translated_text': defer ? '' : target,
+        'original_text': defer
             ? original
             : ((FFAppState().nativeLang.isNotEmpty &&
                     FFAppState().nativeLang == FFAppState().targetLang)
                 ? ''
                 : original),
         'created_at': FieldValue.serverTimestamp(),
-        // ↓ 직접 대화에서만 붙는 필드. 기존 문서 모양은 그대로다.
+        // ↓ 듀오에서만 붙는 필드. 다른 모드의 문서 모양은 그대로다.
+        //   `duo_mode`는 지금 읽는 곳이 없지만, 두 방식이 한 컬렉션에 섞이므로
+        //   나중에 "어느 방식에서 생긴 줄인지"를 데이터만 보고 가릴 수 있어야 한다.
         if (mode != null) 'duo_mode': mode,
         if (seq != null) 'speaker_seq': seq,
         if (spokenAt != null) 'spoken_at_ms': spokenAt.millisecondsSinceEpoch,
@@ -1991,7 +2057,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       });
       _historyMessageCount++;
       await _myHistoryRef!.update({
-        'last_message': deferTarget ? original : target,
+        'last_message': defer ? original : target,
         'last_active': FieldValue.serverTimestamp(),
         'last_message_time': FieldValue.serverTimestamp(),
         'msg_count': FieldValue.increment(1),
@@ -3140,6 +3206,67 @@ class _DuoResolvedTurn {
 // ============================================================================
 class DuoBrain {
   static final http.Client client = http.Client();
+
+  /// 통화 중 **재생용** 번역. 한 언어만 만든다.
+  ///
+  /// `processTranslation`은 배울 언어와 대화 언어를 JSON 두 칸으로 한꺼번에
+  /// 만든다. 통화 중에 필요한 건 **내 대화 언어 한 칸뿐**이다(배울 언어는
+  /// 공부방이 히스토리를 열 때 만든다). 그래서 여기서는 JSON도 쓰지 않고
+  /// 평문 한 줄만 받는다 — 나올 글자가 절반 이하로 줄고, 파싱 실패라는
+  /// 실패 모드 자체가 없어진다.
+  static Future<String?> translateForSpeech({
+    required String key,
+    required String text,
+    required String srcLang,
+    required String toLang,
+  }) async {
+    final String source = text.trim();
+    if (key.isEmpty || source.isEmpty) return null;
+    try {
+      final Uri uri = Uri.parse('https://api.openai.com/v1/chat/completions');
+      final String prompt =
+          "You are a translation engine for a live interpreter app.\n"
+          "You are NOT a chat assistant. NEVER reply, comment, answer, or ask "
+          "questions. NEVER continue the conversation.\n\n"
+          "Translate the utterance from $srcLang into natural spoken $toLang.\n"
+          "Preserve tone, intent, names, and numbers exactly. Do not add or "
+          "remove meaning.\n"
+          "If the utterance is unclear or empty, output nothing.\n"
+          "Return ONLY the translated sentence — no quotes, no label, no "
+          "explanation.";
+      final res = await client
+          .post(uri,
+              headers: {
+                'Authorization': 'Bearer $key',
+                'Content-Type': 'application/json; charset=utf-8'
+              },
+              body: jsonEncode({
+                'model': 'gpt-4o-mini',
+                'temperature': 0.2,
+                // 한 문장이면 충분하다. 400은 JSON 두 칸 시절의 값이다.
+                'max_tokens': 200,
+                'messages': [
+                  {'role': 'system', 'content': prompt},
+                  {'role': 'user', 'content': source},
+                ]
+              }))
+          .timeout(const Duration(seconds: 10));
+      if (res.statusCode != 200) {
+        debugPrint('[Duo][SpeechTranslate] status=${res.statusCode}');
+        return null;
+      }
+      final body = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      final choices = body['choices'] as List? ?? const <dynamic>[];
+      if (choices.isEmpty) return null;
+      final message = (choices.first as Map<String, dynamic>)['message']
+          as Map<String, dynamic>?;
+      final out = (message?['content'] ?? '').toString().trim();
+      return out.isEmpty ? null : out;
+    } catch (e) {
+      debugPrint('[Duo][SpeechTranslate] failed=${e.runtimeType}');
+      return null;
+    }
+  }
 
   static Future<Map<String, String>?> processTranslation({
     required String key,
