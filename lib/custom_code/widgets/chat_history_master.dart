@@ -374,6 +374,13 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   List<DocumentSnapshot> _cachedDocs = [];
   final Map<String, Future<bool>> _targetTranslationInFlight =
       <String, Future<bool>>{};
+  /// 타겟 문장을 끝내 못 만든 줄. docId → 실패 종류(`_targetFailureLabel` 참고).
+  ///
+  /// 예전에는 실패가 아무 데도 남지 않았다. 화면에서는 원문만 있는 줄이 정상인
+  /// 줄과 똑같이 보였고, 연습에 들어가면 그 줄은 말없이 빠졌다(`_enterShadowingFromRoom`).
+  /// 어느 쪽도 사용자에게 이유를 알려주지 않았다. 여기 남겨서 말풍선에 배지를
+  /// 띄우고 다시 시도할 수 있게 한다.
+  final Map<String, String> _targetFailures = <String, String>{};
   String _apiKey = "";
   String _deepgramKey = "";
   Future<void>? _remoteConfigFuture;
@@ -675,9 +682,17 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     if (mounted) setState(() => isLoadingRoom = false);
   }
 
-  Future<void> _fetchRemoteConfig() async {
+  Future<void> _fetchRemoteConfig({bool force = false}) async {
     try {
       final remoteConfig = FirebaseRemoteConfig.instance;
+      if (force) {
+        // 사용자가 직접 누른 재시도다. 앱 시작 때 잡아 둔 1시간 캐시 간격에
+        // 걸리면 같은 빈 키를 또 받아와서, 재시도 버튼이 아무 일도 안 한다.
+        await remoteConfig.setConfigSettings(RemoteConfigSettings(
+          fetchTimeout: const Duration(seconds: 20),
+          minimumFetchInterval: Duration.zero,
+        ));
+      }
       await remoteConfig.fetchAndActivate();
       if (mounted) {
         setState(() {
@@ -692,7 +707,13 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   }
 
   void _scheduleMissingTargetGeneration(List<DocumentSnapshot> docs) {
-    if (!_usesDeferredHistoryTargets || _apiKey.isEmpty || docs.isEmpty) {
+    if (!_usesDeferredHistoryTargets || docs.isEmpty) return;
+    // 키를 아직 못 받았다. 원격 설정이 안 내려온 것뿐이라 곧 풀릴 수도 있지만,
+    // 그 사이 화면은 "번역이 없는 줄"을 정상인 것처럼 보여준다. 실패로 표시해
+    // 두면 배지가 뜨고, `_fetchRemoteConfig`가 성공하면 다시 이 함수가 불려
+    // 저절로 지워진다.
+    if (_apiKey.isEmpty) {
+      _markMissingTargetsFailed(docs, 'no_key');
       return;
     }
     for (final doc in docs) {
@@ -706,6 +727,60 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         original,
         _sourceLangForMessage(data),
       ));
+    }
+  }
+
+  /// 타겟이 비어 있는 줄을 한꺼번에 실패로 찍는다(요청조차 못 보낸 경우).
+  void _markMissingTargetsFailed(List<DocumentSnapshot> docs, String kind) {
+    bool changed = false;
+    for (final doc in docs) {
+      final data = doc.data() as Map<String, dynamic>?;
+      if (data == null) continue;
+      final original = (data['original_text'] ?? '').toString().trim();
+      final translated = (data['translated_text'] ?? '').toString().trim();
+      if (original.isEmpty || translated.isNotEmpty) continue;
+      if (_targetFailures[doc.id] == kind) continue;
+      _targetFailures[doc.id] = kind;
+      changed = true;
+    }
+    if (changed && mounted) setState(() {});
+  }
+
+  void _recordTargetFailure(String docId, String kind) {
+    if (_targetFailures[docId] == kind) return;
+    _targetFailures[docId] = kind;
+    if (mounted) setState(() {});
+  }
+
+  void _clearTargetFailure(String docId) {
+    if (_targetFailures.remove(docId) != null && mounted) setState(() {});
+  }
+
+  /// HTTP 응답 코드를 사용자에게 설명할 수 있는 실패 종류로 바꾼다.
+  /// 401/403과 429는 원인이 다르다 — 하나는 키가 막힌 것, 하나는 한도다.
+  String _targetFailureKindForStatus(int status) {
+    if (status == 401 || status == 403) return 'auth';
+    if (status == 429) return 'quota';
+    if (status >= 500) return 'server';
+    return 'http';
+  }
+
+  String _targetFailureLabel(String kind) {
+    switch (kind) {
+      case 'no_key':
+        return '설정을 못 받았어요';
+      case 'auth':
+        return '번역 사용이 막혔어요';
+      case 'quota':
+        return '번역 한도를 넘었어요';
+      case 'server':
+        return '번역 서버가 응답하지 않아요';
+      case 'network':
+        return '연결이 끊겼어요';
+      case 'empty':
+        return '번역 결과가 비었어요';
+      default:
+        return '번역을 만들지 못했어요';
     }
   }
 
@@ -731,11 +806,44 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     final future =
         _performHistoryTargetGeneration(messageRef, originalText, sourceLanguage);
     _targetTranslationInFlight[messageRef.id] = future;
+    // 진행 중 표시("번역 중")를 띄우고 지우기 위한 rebuild. 이 맵은 원래
+    // 중복 요청 방지용이었고 화면에는 전혀 드러나지 않았다.
+    if (mounted) setState(() {});
     return future.whenComplete(() {
       if (identical(_targetTranslationInFlight[messageRef.id], future)) {
         _targetTranslationInFlight.remove(messageRef.id);
       }
+      if (mounted) setState(() {});
     });
+  }
+
+  /// 배지의 "다시 시도". 실패 원인에 따라 되짚는 자리가 다르다.
+  ///
+  /// 키를 못 받아 실패했으면 번역 요청을 다시 보내봐야 소용없다. 원격 설정부터
+  /// 강제로 다시 받아야 한다.
+  Future<void> _retryHistoryTarget(DocumentSnapshot doc) async {
+    final data = doc.data() as Map<String, dynamic>?;
+    if (data == null) return;
+    final original = (data['original_text'] ?? '').toString().trim();
+    if (original.isEmpty) return;
+    _resumeHistoryFromUserAction();
+    if (_apiKey.isEmpty) {
+      await _fetchRemoteConfig(force: true);
+      if (!mounted) return;
+      if (_apiKey.isEmpty) {
+        _showRoomEntryToast('설정을 아직 받지 못했습니다. 잠시 후 다시 시도해 주세요');
+        return;
+      }
+    }
+    _clearTargetFailure(doc.id); // 배지 → "번역 중"으로 바뀐다
+    final ok = await _generateAndCacheHistoryTarget(
+      doc.reference,
+      original,
+      _sourceLangForMessage(data),
+    );
+    if (!mounted || ok) return;
+    _showRoomEntryToast(
+        '번역을 다시 만들지 못했습니다 · ${_targetFailureLabel(_targetFailures[doc.id] ?? '')}');
   }
 
   Future<bool> _performHistoryTargetGeneration(
@@ -744,7 +852,11 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     String sourceLanguage,
   ) async {
     final source = originalText.trim();
-    if (source.isEmpty || _apiKey.isEmpty) return false;
+    if (source.isEmpty) return false;
+    if (_apiKey.isEmpty) {
+      _recordTargetFailure(messageRef.id, 'no_key');
+      return false;
+    }
     try {
       final targetLanguage = (_sessionTargetLang ?? 'English').trim();
       final sourceName =
@@ -781,6 +893,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         if (response.statusCode != 200) {
           debugPrint(
               '[HISTORY-TARGET] status=${response.statusCode} msg=${messageRef.id}');
+          _recordTargetFailure(
+              messageRef.id, _targetFailureKindForStatus(response.statusCode));
           return false;
         }
         final body = jsonDecode(response.body) as Map<String, dynamic>;
@@ -790,7 +904,10 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         final message = firstChoice?['message'] as Map<String, dynamic>?;
         targetText = (message?['content'] ?? '').toString().trim();
       }
-      if (targetText.isEmpty) return false;
+      if (targetText.isEmpty) {
+        _recordTargetFailure(messageRef.id, 'empty');
+        return false;
+      }
       await messageRef.update(<String, dynamic>{
         'translated_text': targetText,
         'target_generated_by': sameLanguage ? 'copy' : 'gpt-4o-mini',
@@ -798,10 +915,12 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       });
       debugPrint(
           '[HISTORY-TARGET] generated msg=${messageRef.id} model=${sameLanguage ? 'copy' : 'gpt-4o-mini'}');
+      _clearTargetFailure(messageRef.id);
       return true;
     } catch (error) {
       debugPrint(
           '[HISTORY-TARGET] failed msg=${messageRef.id} reason=${error.runtimeType}');
+      _recordTargetFailure(messageRef.id, 'network');
       return false;
     }
   }
@@ -917,6 +1036,20 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       _cachedDocs = messageDocs;
       if (!mounted) return;
 
+      // 타겟을 끝내 못 만든 줄이 몇 개인지 먼저 센다.
+      //
+      // ⚠️ 아래 `?? original_text` 폴백은 **필드가 null일 때만** 돈다. Duo 직접
+      //    대화는 `translated_text`를 빈 문자열로 저장하므로 폴백이 돌지 않고,
+      //    그 줄은 아래 `where`에서 조용히 빠진다. 모국어를 따라 읽히지 않는
+      //    결과 자체는 옳으니 동작은 그대로 두고, **몇 줄이 빠졌는지 알린다.**
+      final int untranslatedCount = _usesDeferredHistoryTargets
+          ? messageDocs.where((doc) {
+              final d = doc.data() as Map<String, dynamic>;
+              return (d['translated_text'] ?? '').toString().trim().isEmpty &&
+                  (d['original_text'] ?? '').toString().trim().isNotEmpty;
+            }).length
+          : 0;
+
       final tutorLines = messageDocs
           .map((doc) {
             final d = doc.data() as Map<String, dynamic>;
@@ -930,8 +1063,16 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
           .toList();
 
       if (tutorLines.isEmpty) {
-        _showRoomEntryToast("아직 연습할 대화가 없습니다");
+        // 대화는 멀쩡히 쌓여 있는데 번역만 실패한 경우를 "대화가 없다"고
+        // 말하면 안 된다. 사용자는 기록이 날아간 줄 안다.
+        _showRoomEntryToast(untranslatedCount > 0
+            ? "번역이 안 돼 연습할 수 없습니다. 대화 화면에서 '다시 시도'를 눌러 주세요"
+            : "아직 연습할 대화가 없습니다");
         return;
+      }
+
+      if (untranslatedCount > 0) {
+        _showRoomEntryToast("$untranslatedCount개 줄은 번역이 안 돼 연습에서 빠졌습니다");
       }
 
       _tutorLines = tutorLines;
@@ -4634,6 +4775,77 @@ RULES — follow exactly:
   }
 
   // 📦 [Box 22: UI - 대화 말풍선 리스트 (Shadow 진입 버튼 추가)]
+  /// 타겟 문장이 아직/끝내 없는 줄에 붙는 배지.
+  ///
+  /// 이 줄은 원문(모국어)이 배울글 자리를 대신 채우고 있다. 배지가 없으면
+  /// 정상인 줄과 구별되지 않아, 영어를 배우는 줄 알고 한국어를 따라 읽게 된다.
+  /// 실패면 원인과 "다시 시도"를, 진행 중이면 "번역 중"을 보여준다.
+  Widget _buildTargetStatusBadge(DocumentSnapshot doc, bool isHost) {
+    final String? failure = _targetFailures[doc.id];
+    final bool pending =
+        failure == null || _targetTranslationInFlight.containsKey(doc.id);
+    final MainAxisAlignment align =
+        isHost ? MainAxisAlignment.end : MainAxisAlignment.start;
+
+    if (pending) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 6),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: align,
+          children: [
+            const SizedBox(
+              width: 11,
+              height: 11,
+              child: CircularProgressIndicator(
+                  strokeWidth: 1.6, color: Colors.white38),
+            ),
+            const SizedBox(width: 6),
+            Text('번역 중',
+                style: TextStyle(
+                    color: Colors.white38, fontSize: 11 * _fontScale)),
+          ],
+        ),
+      );
+    }
+
+    const Color warn = Color(0xFFF59E0B);
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: align,
+        children: [
+          const Icon(Icons.error_outline, color: warn, size: 13),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              '원문 그대로 · ${_targetFailureLabel(failure)}',
+              style: TextStyle(color: warn, fontSize: 11 * _fontScale),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 2),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => _retryHistoryTarget(doc),
+            child: Padding(
+              // 배지 글씨가 작아서 그냥 두면 손가락으로 못 누른다.
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+              child: Text('다시 시도',
+                  style: TextStyle(
+                      color: warn,
+                      fontSize: 11 * _fontScale,
+                      fontWeight: FontWeight.bold,
+                      decoration: TextDecoration.underline,
+                      decorationColor: warn)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildChatBubbles(List<DocumentSnapshot> docs) {
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
@@ -4658,6 +4870,13 @@ RULES — follow exactly:
             (translated.isNotEmpty &&
                 original.isNotEmpty &&
                 _normLangText(original) == _normLangText(translated));
+
+        // 타겟을 히스토리에서 만드는 방(Duo 직접 대화 등)인데 그 자리가 비었다.
+        // 동일 언어 방은 원문이 곧 타겟이라 알릴 게 없다.
+        final bool showTargetBadge = _usesDeferredHistoryTargets &&
+            !collapseSame &&
+            translated.isEmpty &&
+            original.isNotEmpty;
 
         Widget controlButtons = Column(
           mainAxisSize: MainAxisSize.min,
@@ -4729,7 +4948,8 @@ RULES — follow exactly:
                               ? CrossAxisAlignment.end
                               : CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
-                          children: collapseSame
+                          children: [
+                            ...(collapseSame
                               // Origin=Target 동일 언어(또는 레거시 동일 텍스트):
                               // 같은 문장이 두 번 나오지 않도록 Target 한 줄만 표시한다.
                               // Target이 비어 있으면 Origin을 fallback으로 쓴다.
@@ -4751,7 +4971,10 @@ RULES — follow exactly:
                                 ]
                               : [
                                   // 영어(타겟) 표시: mode 0,1 에서 보임
-                                  if (_langDisplayMode != 2) ...[
+                                  // 배지가 붙는 줄은 타겟이 아예 없다 — 빈 줄만
+                                  // 남기지 말고 자리를 배지에 넘긴다.
+                                  if (_langDisplayMode != 2 &&
+                                      !showTargetBadge) ...[
                                     Text(translated,
                                         textAlign: isHost
                                             ? TextAlign.right
@@ -4765,7 +4988,10 @@ RULES — follow exactly:
                                             height: 1.4)),
                                   ],
                                   // 한글(원어) 표시: mode 0,2 에서 보임
-                                  if (_langDisplayMode != 1 &&
+                                  // 타겟만 보는 mode 1이라도, 배지가 붙는 줄은
+                                  // 원문을 감추면 말풍선이 통째로 빈다.
+                                  if ((_langDisplayMode != 1 ||
+                                          showTargetBadge) &&
                                       original.isNotEmpty) ...[
                                     if (_langDisplayMode == 0)
                                       const SizedBox(height: 8),
@@ -4786,7 +5012,10 @@ RULES — follow exactly:
                                                 ? FontWeight.bold
                                                 : FontWeight.normal)),
                                   ],
-                                ],
+                                ]),
+                            if (showTargetBadge)
+                              _buildTargetStatusBadge(docs[index], isHost),
+                          ],
                         ),
                       ),
                     ),
