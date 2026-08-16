@@ -1221,18 +1221,13 @@ class _IntroMasterState extends State<IntroMaster> {
                       letterSpacing: -0.9,
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    '친구를 초대해 10분 동안 직접 통화하면,\n같은 대화로 5분 공부방이 이어집니다.',
-                    style: TextStyle(
-                      color: Color(0xFFA7ABB5),
-                      fontSize: 15,
-                      height: 1.5,
-                    ),
-                  ),
                   SizedBox(height: compact ? 22 : 30),
-                  _buildTrialGuideCard(
-                    onTrialPressed: () {
+                  // 제목 바로 아래가 시작 버튼이다. 사이에 있던 부제·소개
+                  // 카드는 아래 안내 1·2·3과 같은 말을 반복하고 있었다.
+                  _buildPrimaryAction(
+                    label: '10분 Duo 맛보기 시작',
+                    icon: Icons.mic_rounded,
+                    onPressed: () {
                       debugPrint(
                         '[TrialDebug] trial button tapped, time=${DateTime.now().toIso8601String()}',
                       );
@@ -1284,41 +1279,10 @@ class _IntroMasterState extends State<IntroMaster> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFFC857).withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(11),
-                ),
-                alignment: Alignment.center,
-                child: const Icon(
-                  Icons.lightbulb_rounded,
-                  color: Color(0xFFFFC857),
-                  size: 18,
-                ),
-              ),
-              const SizedBox(width: 10),
-              const Expanded(
-                child: Text(
-                  'Duo 직접 통화 맛보기',
-                  style: TextStyle(
-                    color: Color(0xFFF7F8FA),
-                    fontSize: 17,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.3,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
           _buildGuideStep(
             number: 1,
             title: '대화할 친구를 초대하세요',
-            description: '비회원도 초대 링크로 참여할 수 있습니다. 직접 통화 방식은 PCM Relay로 연결됩니다.',
+            description: '비회원도 초대 링크로 참여할 수 있습니다.',
           ),
           const SizedBox(height: 16),
           _buildGuideStep(
@@ -2894,156 +2858,6 @@ class _IntroMasterState extends State<IntroMaster> {
           ),
         );
       }),
-    );
-  }
-
-  Widget _buildTrialGuideCard({VoidCallback? onTrialPressed}) {
-    Widget featureRow(IconData icon, String title, String detail) {
-      return Row(
-        children: [
-          Container(
-            width: 38,
-            height: 38,
-            decoration: BoxDecoration(
-              color: const Color(0xFF756BE8).withValues(alpha: 0.11),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            alignment: Alignment.center,
-            child: Icon(
-              icon,
-              size: 19,
-              color: const Color(0xFFB9B4FF),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text.rich(
-              TextSpan(
-                children: [
-                  TextSpan(
-                    text: title,
-                    style: const TextStyle(
-                      color: Color(0xFFEFF0F3),
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  TextSpan(
-                    text: '  $detail',
-                    style: const TextStyle(
-                      color: Color(0xFF969AA5),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      );
-    }
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 18),
-      decoration: BoxDecoration(
-        color: const Color(0xFF15171D),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.075),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF58D6BD).withValues(alpha: 0.10),
-                  borderRadius: BorderRadius.circular(99),
-                ),
-                child: const Text(
-                  '무료 체험',
-                  style: TextStyle(
-                    color: Color(0xFF70DFC9),
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-              const Spacer(),
-              const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.mic_none_rounded,
-                    size: 15,
-                    color: Color(0xFF8E929C),
-                  ),
-                  SizedBox(width: 5),
-                  Text(
-                    '마이크 사용',
-                    style: TextStyle(
-                      color: Color(0xFF8E929C),
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          const Text(
-            '친구와 10분간 직접 통화해 보세요',
-            style: TextStyle(
-              color: Color(0xFFF7F8FA),
-              fontSize: 24,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.6,
-            ),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'PCM Relay로 실제 목소리를 연결하고, 방금 나눈 대화를 같은 히스토리 공부방에서 바로 복습해 보세요.',
-            style: TextStyle(
-              color: Color(0xFFA7ABB5),
-              fontSize: 14,
-              height: 1.5,
-            ),
-          ),
-          const SizedBox(height: 20),
-          featureRow(
-            Icons.forum_outlined,
-            '10분 Duo 직접 통화',
-            '비회원도 초대 링크로 참여 가능',
-          ),
-          const SizedBox(height: 13),
-          featureRow(
-            Icons.auto_stories_outlined,
-            '5분 공부방',
-            '연결된 히스토리 방의 모든 기능 체험',
-          ),
-          const SizedBox(height: 13),
-          featureRow(
-            Icons.person_outline_rounded,
-            '가입 없이',
-            '바로 체험 후 계정 선택',
-          ),
-          if (onTrialPressed != null) ...[
-            const SizedBox(height: 22),
-            _buildPrimaryAction(
-              label: '10분 Duo 맛보기 시작',
-              icon: Icons.mic_rounded,
-              onPressed: onTrialPressed,
-            ),
-          ],
-        ],
-      ),
     );
   }
 
