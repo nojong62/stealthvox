@@ -372,7 +372,7 @@ class _IntroMasterState extends State<IntroMaster> {
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
         ),
         content: const Text(
-          '3분 직접 통화와 연결된 공부방은 1회만 이용할 수 있습니다. 회원가입 후 계속 이용해 주세요.',
+          '10분 직접 통화와 연결된 5분 공부방은 폰 한 대에 1번만 이용할 수 있습니다. 회원가입 후 계속 이용해 주세요.',
           style: TextStyle(color: Color(0xFFBFC1C9), height: 1.5),
         ),
         actions: [
@@ -739,7 +739,7 @@ class _IntroMasterState extends State<IntroMaster> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Text(
-                '3분 듀오 맛보기 알아보기',
+                '10분 듀오 맛보기 알아보기',
                 style: TextStyle(
                   color: Color(0xFFF9FAFC),
                   fontSize: 17,
@@ -1223,7 +1223,7 @@ class _IntroMasterState extends State<IntroMaster> {
                   ),
                   const SizedBox(height: 12),
                   const Text(
-                    '친구를 초대해 3분 동안 직접 통화하면,\n같은 대화로 5분 공부방이 이어집니다.',
+                    '친구를 초대해 10분 동안 직접 통화하면,\n같은 대화로 5분 공부방이 이어집니다.',
                     style: TextStyle(
                       color: Color(0xFFA7ABB5),
                       fontSize: 15,
@@ -1323,16 +1323,16 @@ class _IntroMasterState extends State<IntroMaster> {
           const SizedBox(height: 16),
           _buildGuideStep(
             number: 2,
-            title: '게스트 입장 후 3분간 통화하세요',
+            title: '게스트 입장 후 10분간 통화하세요',
             description:
-                '게스트가 Duo 방에 입장하는 순간 1회 맛보기가 사용 처리되고, 실제 목소리로 3분 동안 통화할 수 있습니다.',
+                '게스트가 Duo 방에 입장하는 순간 1회 맛보기가 사용 처리되고, 실제 목소리로 10분 동안 통화할 수 있습니다.',
           ),
           const SizedBox(height: 16),
           _buildGuideStep(
             number: 3,
             title: '연결된 공부방에서 5분간 복습하세요',
             description:
-                '3분이 끝나면 방금 대화의 히스토리 공부방으로 자동 연결됩니다. 이 공부방 안의 모든 기능을 5분 동안 이용할 수 있습니다.',
+                '10분이 끝나거나 그전에 통화를 끊으면, 방금 대화의 히스토리 공부방으로 자동 연결됩니다. 이 공부방 안의 모든 기능을 5분 동안 이용할 수 있습니다.',
           ),
         ],
       ),
@@ -2999,7 +2999,7 @@ class _IntroMasterState extends State<IntroMaster> {
           ),
           const SizedBox(height: 16),
           const Text(
-            '친구와 3분간 직접 통화해 보세요',
+            '친구와 10분간 직접 통화해 보세요',
             style: TextStyle(
               color: Color(0xFFF7F8FA),
               fontSize: 24,
@@ -3019,7 +3019,7 @@ class _IntroMasterState extends State<IntroMaster> {
           const SizedBox(height: 20),
           featureRow(
             Icons.forum_outlined,
-            '3분 Duo 직접 통화',
+            '10분 Duo 직접 통화',
             '비회원도 초대 링크로 참여 가능',
           ),
           const SizedBox(height: 13),
@@ -3037,7 +3037,7 @@ class _IntroMasterState extends State<IntroMaster> {
           if (onTrialPressed != null) ...[
             const SizedBox(height: 22),
             _buildPrimaryAction(
-              label: '3분 Duo 맛보기 시작',
+              label: '10분 Duo 맛보기 시작',
               icon: Icons.mic_rounded,
               onPressed: onTrialPressed,
             ),

@@ -64,7 +64,8 @@ const Duration kDuoDirectSaveTimeout = Duration(seconds: 3);
 const Duration kDuoDirectCurateTimeout = Duration(seconds: 15);
 const String kDuoModeInterpreter = 'interpreter';
 const String kInterpreterPartnerTtsVoice = 'alloy';
-const int kDuoTrialCallSeconds = 180;
+/// 맛보기 직접 통화 길이. 폰 한 대에 딱 한 번만 주어진다.
+const int kDuoTrialCallSeconds = 600;
 
 /// 한 줄 요약을 만들 때 AI에 보낼 최근 발화 수의 상한.
 /// 긴 통화라고 토큰이 함께 늘면 곤란하다 — 미리보기 한 줄이면 충분하다.
@@ -202,7 +203,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// `_localMessages`로 저장 여부를 판단하면 히스토리가 통째로 지워진다.
   int _historyMessageCount = 0;
 
-  // ── 3분 Duo 맛보기 ─────────────────────────────────────────────────────
+  // ── 10분 Duo 맛보기 ────────────────────────────────────────────────────
   Timer? _trialCallTimer;
   int _trialCallRemaining = kDuoTrialCallSeconds;
   bool _trialCallStarted = false;
@@ -235,9 +236,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       if (_trialCallRemaining <= 0) {
         _trialCallRemaining = 0;
         _trialCallTimer?.cancel();
-        unawaited(
-          _handleAutoSaveAndExit(openTrialStudy: _isTrialHost),
-        );
+        unawaited(_handleAutoSaveAndExit());
       }
     });
     if (mounted) setState(() {});
@@ -2680,7 +2679,14 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     });
   }
 
-  Future<void> _handleAutoSaveAndExit({bool openTrialStudy = false}) async {
+  /// 방을 떠나는 유일한 통로. 10분 타이머 만료, 뒤로가기, 게스트 퇴장이
+  /// 모두 여기로 모인다.
+  ///
+  /// 🆕 [맛보기] 세 경로 중 어느 쪽으로 끝나든 **똑같이 공부방으로 잇는다.**
+  /// 예전에는 타이머가 만료된 경우에만 공부방으로 보내서, 10분을 다 채우지
+  /// 않고 먼저 끊은 사람은 방금 나눈 대화를 두고 Intro로 튕겼다. 맛보기는
+  /// 폰 한 대에 한 번뿐이라 그 길로 나가면 다시 볼 방법이 없었다.
+  Future<void> _handleAutoSaveAndExit() async {
     if (_isExiting) return;
     _isExiting = true;
     final bool isTrialHost = _isTrialHost;
@@ -2780,7 +2786,9 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         context.goNamed('Intro');
         return;
       }
-      if (!openTrialStudy || historyRef == null) {
+      // 남길 대화가 있어야 공부방이 의미가 있다. 게스트가 들어오기만 하고
+      // 한 마디도 오가지 않았으면 열어 봐야 빈 방이라 Intro로 보낸다.
+      if (historyRef == null || _historyMessageCount == 0) {
         TrialFlowState.instance.advanceTo(4);
         context.goNamed('Intro');
         return;

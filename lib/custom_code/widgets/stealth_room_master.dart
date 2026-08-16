@@ -120,7 +120,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     }
 
     // 트라이얼 Duo 직접 통화 진입 — 모드 메뉴와 방식 선택을 건너뛴다.
-    // 실제 3분은 이 화면 진입이 아니라 초대한 게스트가 방에 들어온 순간부터
+    // 실제 10분은 이 화면 진입이 아니라 초대한 게스트가 방에 들어온 순간부터
     // RoutineModeDuo에서 시작한다.
     TrialFlowState.instance.restoreFromAppState();
     if (TrialFlowState.instance.isTrialDuo) {
