@@ -68,6 +68,11 @@ const String kInterpreterPartnerTtsVoice = 'alloy';
 /// 맛보기 직접 통화 길이. 폰 한 대에 딱 한 번만 주어진다.
 const int kDuoTrialCallSeconds = 600;
 
+/// 재생이 끝난 뒤 이만큼 안에 들어온 전사문만 에코로 의심한다.
+/// 스피커 소리가 마이크로 돌아오는 데 걸리는 시간은 길어야 한두 순간이다.
+/// 이 창을 넘어서면 근거 없이 막는 것이 되므로 그냥 통과시킨다.
+const Duration _kEchoWindow = Duration(seconds: 6);
+
 /// 한 줄 요약을 만들 때 AI에 보낼 최근 발화 수의 상한.
 /// 긴 통화라고 토큰이 함께 늘면 곤란하다 — 미리보기 한 줄이면 충분하다.
 const int _kSummaryMaxLines = 60;
@@ -392,14 +397,44 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     return uni == 0 ? 0.0 : inter / uni;
   }
 
+  /// 이 폰이 마지막으로 소리를 낸 시각.
+  ///
+  /// 재생 경로가 둘이라 둘 다 봐야 한다 — 스트리밍 TTS(`_speakPartner`)는
+  /// `_interpTtsEndedAt`을, 예전 MP3/Realtime 경로는 `_lastTtsEndAt`을 남긴다.
+  /// 한쪽만 보면 다른 쪽으로 재생했을 때 "소리 낸 적 없음"으로 잘못 읽는다.
+  DateTime? _latestTtsEnd() {
+    final a = _interpTtsEndedAt;
+    final b = _lastTtsEndAt;
+    if (a == null) return b;
+    if (b == null) return a;
+    return a.isAfter(b) ? a : b;
+  }
+
+  /// 방금 앱이 읽은 문장이 마이크로 되돌아온 것인지.
+  ///
+  /// 🔇 **에코는 이 폰에서 소리가 나왔을 때만 성립한다.** 스피커가 조용했으면
+  ///   되돌아올 소리도 없다. 예전에는 이 전제를 확인하지 않아서, 몇 분 동안
+  ///   아무 소리도 내지 않은 상태에서 사용자가 **같은 말을 두 번 하면 두 번째가
+  ///   에코로 버려졌다**(업로드조차 되지 않아 상대는 그 말을 듣지 못했다).
+  ///   `_recentGenerated`에는 내가 한 말도 들어가는데 목록에 시간 제한이 없어,
+  ///   열 턴 전에 한 말까지 계속 막고 있었다.
+  ///
+  ///   그래서 재생 직후 [_kEchoWindow] 안에서만 따진다. 진짜 에코는 재생과
+  ///   겹치거나 바로 뒤에 오므로 이 창이면 충분하고, 창 밖에서는 근거 없이
+  ///   막지 않는다 — 짧고 유효한 발화를 소리 없이 삼키는 쪽이 더 나쁘다.
   bool _looksLikeEcho(String transcript) {
     final t = transcript.trim();
     if (t.length < 4) return false;
+
+    final DateTime? spokeAt = _latestTtsEnd();
+    if (spokeAt == null) return false;
+    final int sinceTtsMs = DateTime.now().difference(spokeAt).inMilliseconds;
+    if (sinceTtsMs > _kEchoWindow.inMilliseconds) return false;
+
     final tn = _normForEcho(t);
 
     // TTS 종료 직후 1.2초는 엄격 모드(임계값 완화 → 더 잘 버림)
-    final bool strict = _lastTtsEndAt != null &&
-        DateTime.now().difference(_lastTtsEndAt!).inMilliseconds < 1200;
+    final bool strict = sinceTtsMs < 1200;
     final double simThreshold = strict ? 0.6 : 0.8;
 
     for (final g in _recentGenerated) {
@@ -1608,10 +1643,14 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         isShortGhost ||
         isEcho ||
         trimmed.length <= 2) {
+      // 버린 이유를 나중에 로그만 보고 가릴 수 있어야 한다. 특히 에코는
+      // "이 폰이 언제 소리를 냈는가"가 유일한 근거이므로 그 값을 함께 남긴다.
+      final DateTime? spokeAt = _latestTtsEnd();
       _lgDuo(
           '[INTERP-DROP]',
           'item=$itemId len=${trimmed.length} '
-              'ghost=${isHardGhost || isShortGhost} echo=$isEcho');
+              'ghost=${isHardGhost || isShortGhost} echo=$isEcho '
+              'sinceTtsMs=${spokeAt == null ? 'never' : DateTime.now().difference(spokeAt).inMilliseconds}');
       _setDuoState('idle'); // 조용히 대기 복귀(자동 재녹음 금지)
       if (_incomingQueue.isNotEmpty) _drainIncoming();
       return;
@@ -3387,6 +3426,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                   onPressed: _handleAutoSaveAndExit),
               // 초대는 방을 만든 호스트만 낼 수 있다. 게스트에게는 버튼 자체를
               // 노출하지 않는다 — 눌러서 역할이 뒤집히는 경로를 없앤다.
+              //
               if (_amIHost)
                 IconButton(
                   icon: const Icon(Icons.person_add_alt_1,
