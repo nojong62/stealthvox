@@ -891,71 +891,96 @@ Return ONLY valid JSON: {"name":"..."}.
   // ============================================================================
   Widget _buildMenu() {
     return SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              Row(children: [
-                IconButton(
-                    icon: const Icon(Icons.home_rounded,
-                        color: Colors.white70, size: 26),
-                    onPressed: () => context.pushNamed('Lobby')),
-                IconButton(
-                    icon: const Icon(Icons.arrow_back_ios_new,
-                        color: Colors.white, size: 22),
-                    tooltip: '이전 단계',
-                    padding: EdgeInsets.zero,
-                    alignment: Alignment.centerLeft,
-                    constraints:
-                        const BoxConstraints(minWidth: 64, minHeight: 56),
-                    onPressed: () => context.pop()),
-              ]),
-              GestureDetector(
-                  onTap: () => context.pushNamed('ChatHistory'),
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                    decoration: BoxDecoration(
-                        color: const Color(0xFF3B82F6).withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                            color: const Color(0xFF3B82F6)
-                                .withValues(alpha: 0.5))),
-                    child: const Text("Study Room",
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12)),
-                  ))
-            ]),
-            const SizedBox(height: 10),
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              const Text("대화 모드 선택",
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 26,
-                      fontWeight: FontWeight.bold,
-                      height: 1.3)),
-              // 💡 도움말 아이콘 (클릭 시 _showManualDialog 실행)
-              IconButton(
-                onPressed: _showManualDialog,
-                icon: const Icon(Icons.help_outline,
-                    color: Colors.amberAccent, size: 30),
-              )
-            ]),
-            const SizedBox(height: 30),
-            _buildMenuCard(1, "Duo Connect", "초청 직접 대화\n초청 만능 통역", Icons.people,
-                const Color(0xFF2563EB)),
-            _buildMenuCard(2, "Circle Talk", "서클 구성원 대화", Icons.groups_rounded,
-                const Color(0xFF9333EA)),
-            _buildMenuCard(3, "Scenario Talk", "실전 상황 대화", Icons.smart_toy,
-                const Color(0xFF16A34A)),
-            _buildMenuCard(4, "Step Expand", "점진적 문장 확장", Icons.trending_up,
-                const Color(0xFFEA580C)),
-          ],
-        ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // 상단 줄은 좌우 여백 바깥에 둔다 — 아래 구분선이 화면 끝까지
+          // 이어져야 본문과 갈라져 보인다.
+          _buildMenuTopBar(),
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text("대화 모드 선택",
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 25,
+                          fontWeight: FontWeight.bold,
+                          height: 1.3)),
+                  const SizedBox(height: 22),
+                  _buildMenuCard(1, "Duo Connect", "초청 직접 대화\n초청 만능 통역",
+                      Icons.people, const Color(0xFF3B82F6)),
+                  _buildMenuCard(2, "Circle Talk", "서클 구성원 대화",
+                      Icons.groups_rounded, const Color(0xFFA855F7)),
+                  _buildMenuCard(3, "Scenario Talk", "실전 상황 대화",
+                      Icons.smart_toy, const Color(0xFF22C55E)),
+                  _buildMenuCard(4, "Step Expand", "점진적 문장 확장",
+                      Icons.trending_up, const Color(0xFFF97316)),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 홈·뒤로 / Study Room / 사용설명서.
+  ///
+  /// 옮긴 것은 자리뿐이다 — 가는 곳(`Lobby`·`pop`·`ChatHistory`)도, 도움말
+  /// 팝업(`_showManualDialog`)도 예전에 쓰던 것 그대로다. 도움말만 제목 옆에서
+  /// 이 줄 오른쪽 끝으로 자리를 옮겼다.
+  Widget _buildMenuTopBar() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(6, 4, 10, 4),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: Color(0x14FFFFFF))),
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.home_outlined,
+                color: Color(0xFF22D3EE), size: 26),
+            tooltip: '로비로',
+            onPressed: () => context.pushNamed('Lobby'),
+          ),
+          IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                color: Color(0xFF22D3EE), size: 22),
+            tooltip: '이전 단계',
+            onPressed: () => context.pop(),
+          ),
+          const Spacer(),
+          GestureDetector(
+            onTap: () => context.pushNamed('ChatHistory'),
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: const Color(0x33FFFFFF)),
+              ),
+              child: const Text(
+                "STUDY ROOM",
+                maxLines: 1,
+                style: TextStyle(
+                  color: Color(0xFFE7E9EE),
+                  fontWeight: FontWeight.w600,
+                  fontSize: 12,
+                  letterSpacing: 1.2,
+                ),
+              ),
+            ),
+          ),
+          IconButton(
+            onPressed: _showManualDialog,
+            tooltip: '사용 설명서',
+            icon: const Icon(Icons.help_outline,
+                color: Colors.amberAccent, size: 28),
+          ),
+        ],
       ),
     );
   }
@@ -1232,44 +1257,74 @@ Return ONLY valid JSON: {"name":"..."}.
     );
   }
 
+  /// 모드 카드 한 장.
+  ///
+  /// 색은 테두리를 두르는 대신 **위쪽 띠 하나**로만 쓴다. 네 장이 저마다 다른
+  /// 색으로 사방을 두르면 화면이 색으로 가득 차서, 정작 눌러야 할 곳이 어디인지
+  /// 가 흐려졌다. 아이콘 원도 색을 옅게 깔고 아이콘만 제 색으로 남긴다.
+  ///
+  /// 🖐️ **카드 전체가 눌린다.** 예전에는 글자와 화살표만 눌렸고 아이콘 자리는
+  ///   죽어 있었다 — 가장 크고 눈에 띄는 곳이 반응하지 않았다.
   Widget _buildMenuCard(
       int mode, String title, String desc, IconData icon, Color color) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(20),
+      margin: const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
-          color: const Color(0xFF1E1E1E),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: color, width: 1.5)),
-      child: Row(children: [
-        Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-            child: Icon(icon, color: Colors.white, size: 28)),
-        const SizedBox(width: 16),
-        Expanded(
-            child: GestureDetector(
-                onTap: () => _switchMode(mode),
-                child: Container(
-                    color: Colors.transparent,
-                    child: Column(
+        color: const Color(0xFF16181D),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0x14FFFFFF)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () => _switchMode(mode),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(height: 4, color: color),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: 0.16),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(icon, color: color, size: 24),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(title,
                               style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 16,
-                                  fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 4),
+                                  fontWeight: FontWeight.w700)),
+                          const SizedBox(height: 3),
                           Text(desc,
                               style: const TextStyle(
-                                  color: Colors.white54, fontSize: 12))
-                        ])))),
-        GestureDetector(
-            onTap: () => _switchMode(mode),
-            child: const Icon(Icons.arrow_forward_ios,
-                color: Colors.white30, size: 16))
-      ]),
+                                  color: Color(0xFF8C93A1),
+                                  fontSize: 12.5,
+                                  height: 1.45)),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Icon(Icons.chevron_right,
+                        color: Color(0xFF6B7280), size: 24),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
