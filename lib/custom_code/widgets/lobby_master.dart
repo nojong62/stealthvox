@@ -13,7 +13,6 @@ import 'package:flutter/material.dart';
 import 'index.dart'; // Imports other custom widgets
 
 // 📦 [Box 1: Imports 및 패키지]
-import 'dart:ui';
 import '/auth/firebase_auth/auth_util.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -33,6 +32,33 @@ import 'routine_mode_roleplay.dart' show TtsCache; // 캐시 정리 진입점
 
 import 'package:purchases_flutter/purchases_flutter.dart';
 import 'dart:io' show Platform;
+
+// ============================================================================
+// 🎨 [Lobby 색] 화면 전체가 쓰는 색을 한곳에 모은다. 예전에는 같은 파랑이
+//   0xFF3B82F6으로 열몇 군데 흩어져 있어서, 강조색 하나 바꾸려면 전부 찾아야
+//   했다. **여기 있는 건 색뿐이다 — 어떤 값도 상태가 아니다.**
+// ============================================================================
+const Color _kLobbyBgTop = Color(0xFF05070D);
+const Color _kLobbyBgMid = Color(0xFF0B1120);
+const Color _kLobbySurface = Color(0xFF12151D);
+const Color _kLobbySurfaceHi = Color(0xFF1A1F2A);
+const Color _kLobbyBorder = Color(0x14FFFFFF);
+const Color _kLobbyCyan = Color(0xFF22D3EE);
+const Color _kLobbyBlue = Color(0xFF3B82F6);
+const Color _kLobbyBlueLine = Color(0xFF60A5FA);
+const Color _kLobbyViolet = Color(0xFFA78BFA);
+const Color _kLobbyTextHi = Color(0xFFF1F5F9);
+const Color _kLobbyTextMid = Color(0xFF94A3B8);
+const Color _kLobbyTextLow = Color(0xFF64748B);
+const Color _kLobbyDanger = Color(0xFFFF453A);
+
+/// 넓은 화면(태블릿·웹)에서 본문이 끝없이 늘어나지 않게 잡는 상한.
+/// 폰에서는 화면 폭이 이보다 좁아 아무 영향이 없다.
+const double _kLobbyMaxContentWidth = 560;
+
+/// ENTER와 하단 줄을 고정한 채로 그릴 수 있는 최소 높이.
+/// 이보다 짧으면 화면째 스크롤로 넘어간다(실제 폰에서는 닿지 않는 값이다).
+const double _kLobbyMinPinnedHeight = 380;
 
 /// 📦 [Box 2: 클래스 선언부]
 class LobbyMaster extends StatefulWidget {
@@ -372,173 +398,327 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   }
 
   // 📦 [Box 7: UI 컴포넌트 헬퍼]
-  Widget _buildGlassContainer(
-      {required Widget child, double? width, Color? borderColor}) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(24),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
-        child: Container(
-          width: width ?? double.infinity,
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  Colors.white.withValues(alpha: 0.06),
-                  Colors.white.withValues(alpha: 0.02)
-                ]),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-                color: borderColor ?? Colors.white.withValues(alpha: 0.1),
-                width: 1.5),
-            boxShadow: [
-              BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.3),
-                  blurRadius: 40,
-                  offset: const Offset(0, 10))
-            ],
+  //
+  // 여기 아래는 **그리는 코드만** 있다. 상태·콜백·이동은 Box 3~6이 그대로
+  // 쥐고 있고, 이 아래에서는 그것들을 부르기만 한다. 새 상태를 만들거나
+  // 기존 상태를 복제하지 않는다.
+
+  /// 카드 한 장.
+  ///
+  /// 예전 `_buildGlassContainer`의 `BackdropFilter`를 걷어냈다. 카드가 겹칠
+  /// 때마다 블러가 한 겹씩 더 도는 구조였는데, 그 값이 웹과 저사양 안드로이드에서
+  /// 비쌌다. 어두운 배경 위 어두운 면이라 블러가 만들던 차이도 거의 없었다.
+  Widget _buildSurfaceCard({
+    required Widget child,
+    EdgeInsetsGeometry padding = const EdgeInsets.all(18),
+    Color? borderColor,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: padding,
+      decoration: BoxDecoration(
+        color: _kLobbySurface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: borderColor ?? _kLobbyBorder),
+      ),
+      child: child,
+    );
+  }
+
+  /// 섹션 제목(LANGUAGE / AI STYLE / AI TONE).
+  Widget _buildSectionLabel(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 4, bottom: 9),
+      child: Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          color: _kLobbyTextMid,
+          fontSize: 11,
+          letterSpacing: 1.6,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+
+  /// Store / Study Room.
+  ///
+  /// ⚠️ 모양만 세그먼트 컨트롤을 빌렸을 뿐, **토글이 아니다.** 누르면 그 자리에서
+  /// 선택이 바뀌는 게 아니라 각자 다른 화면으로 넘어간다. 지금 화면이 로비이므로
+  /// 강조는 로비에서 이어지는 Study Room 쪽에 둔다(기존 화면과 같다).
+  Widget _buildTopSegments() {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: _kLobbySurface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _kLobbyBorder),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _buildSegment(
+              icon: Icons.storefront_rounded,
+              label: 'Store',
+              highlighted: false,
+              onTap: () => context.pushNamed('Store'),
+            ),
           ),
-          child: child,
+          const SizedBox(width: 4),
+          Expanded(
+            child: _buildSegment(
+              icon: Icons.auto_stories_rounded,
+              label: 'Study Room',
+              highlighted: true,
+              onTap: () => context.pushNamed('ChatHistory'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSegment({
+    required IconData icon,
+    required String label,
+    required bool highlighted,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: highlighted ? _kLobbySurfaceHi : Colors.transparent,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 8),
+          // 글꼴 배율을 크게 쓰는 기기에서 "Study Room"이 밀려 나가지 않게
+          // 폭이 모자라면 글자를 줄인다. 잘라내지는 않는다.
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon,
+                    size: 15,
+                    color: highlighted ? _kLobbyCyan : _kLobbyTextLow),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  maxLines: 1,
+                  style: TextStyle(
+                    color: highlighted ? _kLobbyTextHi : _kLobbyTextMid,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildTopNavBtn(
-      {IconData? icon,
-      required String label,
-      required VoidCallback onTap,
-      bool isHighlight = false}) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-            color: isHighlight
-                ? const Color(0xFF3B82F6).withValues(alpha: 0.15)
-                : Colors.white.withValues(alpha: 0.05),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-                color: isHighlight
-                    ? const Color(0xFF3B82F6).withValues(alpha: 0.5)
-                    : Colors.white12)),
-        child: Row(
-          children: [
-            if (icon != null) ...[
-              Icon(icon,
-                  color: isHighlight ? const Color(0xFF93C5FD) : Colors.white54,
-                  size: 14),
-              const SizedBox(width: 6),
-            ],
-            Text(label,
-                style: TextStyle(
-                    color: isHighlight ? Colors.white : Colors.white70,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12)),
-          ],
+  /// 남은 시간.
+  ///
+  /// 값과 규칙은 예전 그대로다 — `remainingTime`을 **시:분**으로 읽고,
+  /// 아직 Firestore에서 못 받았으면 숫자 대신 스피너를, 60초 이하이면 빨강을
+  /// 쓴다. 바뀐 건 숫자에 입힌 그라디언트뿐이다(경고 색일 때는 입히지 않는다).
+  ///
+  /// 📐 라벨과 숫자를 **한 줄에** 놓는다. 위아래로 쌓으면 카드 하나가 세로를
+  ///   너무 많이 먹어서, 글꼴 배율이 큰 기기(화면 확대를 켠 폰)에서는 첫
+  ///   화면에 이 카드와 드롭다운 하나밖에 안 들어왔다. 정보는 그대로다.
+  Widget _buildTimeLeftCard(FFAppState appState, String displayTime) {
+    final bool isLow = appState.remainingTime <= 60;
+
+    Widget numberText(Color color) => Text(
+          displayTime,
+          maxLines: 1,
+          style: GoogleFonts.orbitron(
+            color: color,
+            fontSize: 30,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 1.5,
+          ),
+        );
+
+    Widget value;
+    if (!appState.remainingTimeLoaded) {
+      value = const SizedBox(
+        height: 30,
+        width: 30,
+        child: Center(
+          child: SizedBox(
+            width: 20,
+            height: 20,
+            child:
+                CircularProgressIndicator(strokeWidth: 2, color: _kLobbyCyan),
+          ),
         ),
+      );
+    } else if (isLow) {
+      value = numberText(_kLobbyDanger);
+    } else {
+      value = ShaderMask(
+        shaderCallback: (rect) => const LinearGradient(
+          colors: [_kLobbyCyan, Color(0xFFBFDBFE), _kLobbyViolet],
+        ).createShader(rect),
+        blendMode: BlendMode.srcIn,
+        child: numberText(Colors.white),
+      );
+    }
+
+    return _buildSurfaceCard(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Flexible(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                'TIME LEFT',
+                maxLines: 1,
+                style: GoogleFonts.orbitron(
+                  color: _kLobbyTextMid,
+                  fontSize: 11,
+                  letterSpacing: 2.5,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 14),
+          Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: value)),
+        ],
       ),
     );
   }
 
-  Widget _buildSleekLangSelector(
-      String label, String value, Function(String?) onChanged,
-      {Color labelColor = Colors.white54,
-      String? subtitle,
-      bool subtitleBelow = false}) {
-    Widget labelWidget;
-    if (subtitle != null && !subtitleBelow) {
-      labelWidget = Row(
+  /// ORIGIN / TARGET 한 칸.
+  ///
+  /// 선택지(`languages`)도 저장 위치(`FFAppState`)도 예전 그대로다.
+  /// [onChanged]는 호출부가 넘겨준 기존 콜백을 그대로 받는다.
+  Widget _buildLangField(
+    String label,
+    String subtitle,
+    String value,
+    ValueChanged<String?> onChanged,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
           crossAxisAlignment: CrossAxisAlignment.baseline,
           textBaseline: TextBaseline.alphabetic,
           children: [
-            Text(label,
-                style: TextStyle(
-                    color: labelColor,
-                    fontSize: 11,
-                    letterSpacing: 1.5,
-                    fontWeight: FontWeight.bold)),
-            const SizedBox(width: 6),
-            Text(subtitle,
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                    color: Colors.white38, fontSize: 9, letterSpacing: 0.5)),
-          ]);
-    } else if (subtitle != null && subtitleBelow) {
-      labelWidget =
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label,
-            style: TextStyle(
-                color: labelColor,
-                fontSize: 11,
-                letterSpacing: 1.5,
-                fontWeight: FontWeight.bold)),
-        const SizedBox(height: 2),
-        Text(subtitle,
-            style: const TextStyle(
-                color: Colors.white38, fontSize: 9, letterSpacing: 0.3)),
-      ]);
-    } else {
-      labelWidget = Text(label,
-          style: TextStyle(
-              color: labelColor,
-              fontSize: 11,
-              letterSpacing: 1.5,
-              fontWeight: FontWeight.bold));
-    }
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      labelWidget,
-      const SizedBox(height: 10),
-      Container(
-          height: 54,
-          padding: const EdgeInsets.symmetric(horizontal: 20),
+                  color: _kLobbyTextMid,
+                  fontSize: 11,
+                  letterSpacing: 1.4,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: _kLobbyTextLow, fontSize: 11),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
           decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.5),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.white12)),
+            color: _kLobbySurfaceHi,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: _kLobbyBorder),
+          ),
           child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-            value: languages.contains(value) ? value : languages[0],
-            dropdownColor: const Color(0xFF1E1E1E),
-            isExpanded: true,
-            icon: const Icon(Icons.unfold_more_rounded,
-                color: Colors.white54, size: 20),
-            style: const TextStyle(
-                color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
-            items: languages
-                .map((String lang) =>
-                    DropdownMenuItem<String>(value: lang, child: Text(lang)))
-                .toList(),
-            onChanged: onChanged,
-          ))),
-    ]);
+            child: DropdownButton<String>(
+              value: languages.contains(value) ? value : languages[0],
+              dropdownColor: _kLobbySurfaceHi,
+              isExpanded: true,
+              icon: const Icon(Icons.keyboard_arrow_down_rounded,
+                  color: _kLobbyTextMid, size: 22),
+              style: const TextStyle(
+                color: _kLobbyTextHi,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+              ),
+              items: languages
+                  .map((String lang) => DropdownMenuItem<String>(
+                        value: lang,
+                        child: Text(lang,
+                            maxLines: 1, overflow: TextOverflow.ellipsis),
+                      ))
+                  .toList(),
+              onChanged: onChanged,
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
-  Widget _buildPillToggle(String label, bool isSelected, VoidCallback onTap) {
-    return Expanded(
-        child: GestureDetector(
-            onTap: onTap,
-            child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                decoration: BoxDecoration(
-                    color: isSelected
-                        ? const Color(0xFF3B82F6)
-                        : Colors.black.withValues(alpha: 0.4),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                        color: isSelected
-                            ? const Color(0xFF60A5FA)
-                            : Colors.white12,
-                        width: 1)),
-                child: Center(
-                    child: Text(label,
-                        style: TextStyle(
-                            color: isSelected ? Colors.white : Colors.white54,
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold))))));
+  /// 고른 것 하나만 은은하게 빛난다.
+  Widget _buildPill(String label, bool isSelected, VoidCallback onTap) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      decoration: BoxDecoration(
+        color: isSelected ? _kLobbyBlue : _kLobbySurfaceHi,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: isSelected ? _kLobbyBlueLine : _kLobbyBorder),
+        boxShadow: isSelected
+            ? [
+                BoxShadow(
+                  color: _kLobbyBlue.withValues(alpha: 0.32),
+                  blurRadius: 16,
+                  spreadRadius: 1,
+                )
+              ]
+            : null,
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 8),
+            child: Center(
+              // 360dp에서 한 줄에 세 칸이 들어가야 한다. 폭이 모자라면
+              // 잘라내지 말고 글자를 줄인다 — "American"이 기준이다.
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  style: TextStyle(
+                    color: isSelected ? Colors.white : _kLobbyTextMid,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   List<String> _availableAiStyles(String targetLanguage) =>
@@ -546,29 +726,57 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           ? const ['Standard', 'American', 'British', 'Native']
           : const ['Standard', 'Native'];
 
-  Widget _buildPillToggleGrid(
+  /// AI STYLE 배치.
+  ///
+  /// **선택지는 `_availableAiStyles()`가 정하고, 여기서는 줄만 나눈다.**
+  ///   · 4개(TARGET == English) — 첫 줄에 셋, 둘째 줄에 Native 하나가 전체 폭
+  ///   · 2개(그 외)             — 한 줄에 같은 폭 둘
+  /// 폭에 맡겨 흘려 담지 않는다. 개수가 그 둘이 아니게 되더라도 화면이 깨지지
+  /// 않도록 2열로 담는 길을 남겨 둔다.
+  Widget _buildAiStyleSelector(
     List<String> options,
     String selectedValue,
     ValueChanged<String> onSelected,
   ) {
-    return Column(
-      children: [
-        for (var index = 0; index < options.length; index += 2) ...[
-          if (index > 0) const SizedBox(height: 12),
+    Widget pill(String option) =>
+        _buildPill(option, selectedValue == option, () => onSelected(option));
+
+    if (options.length == 4) {
+      return Column(
+        children: [
           Row(
             children: [
-              _buildPillToggle(
-                options[index],
-                selectedValue == options[index],
-                () => onSelected(options[index]),
-              ),
-              const SizedBox(width: 12),
-              if (index + 1 < options.length)
-                _buildPillToggle(
-                  options[index + 1],
-                  selectedValue == options[index + 1],
-                  () => onSelected(options[index + 1]),
-                )
+              Expanded(child: pill(options[0])),
+              const SizedBox(width: 10),
+              Expanded(child: pill(options[1])),
+              const SizedBox(width: 10),
+              Expanded(child: pill(options[2])),
+            ],
+          ),
+          const SizedBox(height: 10),
+          SizedBox(width: double.infinity, child: pill(options[3])),
+        ],
+      );
+    }
+    if (options.length == 2) {
+      return Row(
+        children: [
+          Expanded(child: pill(options[0])),
+          const SizedBox(width: 10),
+          Expanded(child: pill(options[1])),
+        ],
+      );
+    }
+    return Column(
+      children: [
+        for (int i = 0; i < options.length; i += 2) ...[
+          if (i > 0) const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(child: pill(options[i])),
+              const SizedBox(width: 10),
+              if (i + 1 < options.length)
+                Expanded(child: pill(options[i + 1]))
               else
                 const Spacer(),
             ],
@@ -578,18 +786,151 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildFooterLink(String label, VoidCallback onTap) {
-    return TextButton(
-      onPressed: onTap,
-      child: Text(label,
-          style: const TextStyle(
-              color: Colors.white30,
-              fontSize: 12,
-              decoration: TextDecoration.underline)),
+  /// AI TONE — 언제나 둘, 같은 폭.
+  Widget _buildAiToneSelector(
+      String selectedValue, ValueChanged<String> onSelected) {
+    const List<String> options = ['Formal', 'Casual'];
+    return Row(
+      children: [
+        Expanded(
+          child: _buildPill(options[0], selectedValue == options[0],
+              () => onSelected(options[0])),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _buildPill(options[1], selectedValue == options[1],
+              () => onSelected(options[1])),
+        ),
+      ],
+    );
+  }
+
+  /// 이 화면에서 가장 중요한 버튼. 누르면 기존 `_handleEnterRoom`이 그대로 돈다
+  /// (중복탭 잠금 → 잔여시간 확인 → 히스토리 문서 생성 → StealthRoom).
+  Widget _buildEnterButton() {
+    return SizedBox(
+      height: 58,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [_kLobbyCyan, _kLobbyBlue, _kLobbyViolet],
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+          ),
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: _kLobbyBlue.withValues(alpha: 0.35),
+              blurRadius: 22,
+              offset: const Offset(0, 8),
+            )
+          ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () => _handleEnterRoom(context),
+            borderRadius: BorderRadius.circular(18),
+            child: const Center(
+              child: Text(
+                'ENTER',
+                maxLines: 1,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 4,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 화면 맨 아래 고정 줄.
+  ///
+  /// 기능은 예전 푸터 링크 셋과 **완전히 같다** — 다이얼로그 둘과 로그아웃
+  /// 클로저를 그대로 부른다. 제스처 바 영역은 여기서 직접 피한다(본문 쪽
+  /// `SafeArea`는 `bottom: false`라 아래를 비워 두지 않는다).
+  Widget _buildBottomBar() {
+    return Container(
+      decoration: const BoxDecoration(
+        color: _kLobbySurface,
+        border: Border(top: BorderSide(color: _kLobbyBorder)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: _buildBottomBarItem(
+                  Icons.help_outline_rounded,
+                  '사용 설명서',
+                  () => _showUsageGuideDialog(context),
+                ),
+              ),
+              Expanded(
+                child: _buildBottomBarItem(
+                  Icons.logout_rounded,
+                  '로그아웃',
+                  () async {
+                    FFAppState().remainingTime = 0;
+                    FFAppState().remainingTimeLoaded = false;
+                    LobbyBrain.lastSyncedUid = null;
+                    await FirebaseAuth.instance.signOut();
+                    if (!mounted) return;
+                    context.goNamed('Intro');
+                  },
+                ),
+              ),
+              Expanded(
+                child: _buildBottomBarItem(
+                  Icons.person_remove_alt_1_outlined,
+                  '회원 탈퇴',
+                  () => _showDeleteAccountDialog(context),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBottomBarItem(IconData icon, String label, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 19, color: _kLobbyTextMid),
+            const SizedBox(height: 4),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                label,
+                maxLines: 1,
+                style: const TextStyle(color: _kLobbyTextMid, fontSize: 11),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
   // 📦 [Box 8: 메인 화면 빌더]
+  //
+  // 세로 구성은 위에서부터 **워드마크 → 탭 → 스크롤 본문 → ENTER → 하단 줄**이다.
+  // ENTER와 하단 줄은 고정이고, 그 위 본문만 스크롤한다. 그래서 화면이 아무리
+  // 짧아도 ENTER가 하단 줄에 가리거나 스크롤 밖으로 밀려나지 않는다.
   @override
   Widget build(BuildContext context) {
     var appState = FFAppState();
@@ -604,217 +945,143 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
       height: widget.height,
       decoration: const BoxDecoration(
         gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFF020617), Color(0xFF0F172A), Color(0xFF000000)]),
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [_kLobbyBgTop, _kLobbyBgMid, _kLobbyBgTop],
+        ),
       ),
       child: Scaffold(
         backgroundColor: Colors.transparent,
         body: SafeArea(
-            child: (isLoading || _isDuoInvitePending)
-                ? const Center(
-                    child: CircularProgressIndicator(color: Color(0xFF3B82F6)))
-                : Column(children: [
-                    Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 24, vertical: 16),
-                        child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              _buildTopNavBtn(
-                                  icon: Icons.storefront_rounded,
-                                  label: "Store",
-                                  onTap: () => context.pushNamed('Store')),
-                              GestureDetector(
-                                onTap: () => context.pushNamed('ChatHistory'),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 14, vertical: 8),
-                                  decoration: BoxDecoration(
-                                      color: const Color(0xFF3B82F6)
-                                          .withValues(alpha: 0.15),
-                                      borderRadius: BorderRadius.circular(16),
-                                      border: Border.all(
-                                          color: const Color(0xFF3B82F6)
-                                              .withValues(alpha: 0.5))),
-                                  child: const Text("Study Room",
-                                      style: TextStyle(
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 12)),
-                                ),
-                              ),
-                            ])),
-                    Expanded(
-                      child: SingleChildScrollView(
-                        physics: const BouncingScrollPhysics(),
-                        padding: const EdgeInsets.symmetric(horizontal: 24),
-                        child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              _buildGlassContainer(
-                                  child: Column(children: [
-                                // 자간이 3이라 글자 수가 그대로 폭이 된다.
-                                // "REMAINING TIME"(14자)은 글꼴 배율을 크게 쓰는
-                                // 기기에서 두 줄로 넘어갔다 — 로비는 인트로와
-                                // 달리 배율 상한이 없다.
-                                Text("TIME LEFT",
-                                    maxLines: 1,
-                                    style: GoogleFonts.orbitron(
-                                        color: const Color(0xFF60A5FA),
-                                        fontSize: 12,
-                                        letterSpacing: 3,
-                                        fontWeight: FontWeight.bold)),
-                                const SizedBox(height: 8),
-                                appState.remainingTimeLoaded
-                                    ? Text(displayTime,
-                                        style: GoogleFonts.orbitron(
-                                            color: appState.remainingTime > 60
-                                                ? Colors.white
-                                                : const Color(0xFFFF453A),
-                                            fontSize: 48,
-                                            fontWeight: FontWeight.bold,
-                                            shadows: [
-                                              Shadow(
-                                                  color: const Color(0xFF3B82F6)
-                                                      .withValues(alpha: 0.5),
-                                                  blurRadius: 20)
-                                            ]))
-                                    : const SizedBox(
-                                        width: 48,
-                                        height: 48,
-                                        child: Center(
-                                          child: SizedBox(
-                                            width: 24,
-                                            height: 24,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                              color: Color(0xFF60A5FA),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                              ])),
-                              const SizedBox(height: 20),
-                              _buildGlassContainer(
-                                  borderColor: const Color(0xFF3B82F6)
-                                      .withValues(alpha: 0.3),
-                                  child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                        _buildSleekLangSelector(
-                                            "ORIGIN",
-                                            appState.nativeLang,
-                                            (val) => setState(() =>
-                                                appState.nativeLang = val!),
-                                            labelColor: const Color(0xFF4ADE80),
-                                            subtitle: "(Chat Lang)",
-                                            subtitleBelow: false),
-                                        const SizedBox(height: 20),
-                                        _buildSleekLangSelector(
-                                            "TARGET",
-                                            appState.targetLang,
-                                            (val) => setState(() {
-                                                  appState.targetLang = val!;
-                                                  if (!_availableAiStyles(val)
-                                                      .contains(
-                                                          appState.aiStyle)) {
-                                                    appState.aiStyle =
-                                                        'Standard';
-                                                  }
-                                                }),
-                                            labelColor: const Color(0xFF4ADE80),
-                                            subtitle: "(Learn Lang)",
-                                            subtitleBelow: false),
-                                        const SizedBox(height: 32),
-                                        const Text("AI STYLE",
-                                            style: TextStyle(
-                                                color: Color(0xFF4ADE80),
-                                                fontSize: 12,
-                                                letterSpacing: 1,
-                                                fontWeight: FontWeight.bold)),
-                                        const SizedBox(height: 12),
-                                        _buildPillToggleGrid(
-                                          _availableAiStyles(
-                                              appState.targetLang),
-                                          appState.aiStyle,
-                                          (style) => setState(
-                                              () => appState.aiStyle = style),
-                                        ),
-                                        const SizedBox(height: 32),
-                                        const Text("AI TONE",
-                                            style: TextStyle(
-                                                color: Color(0xFF4ADE80),
-                                                fontSize: 12,
-                                                letterSpacing: 1,
-                                                fontWeight: FontWeight.bold)),
-                                        const SizedBox(height: 12),
-                                        _buildPillToggleGrid(
-                                          const ["Formal", "Casual"],
-                                          appState.tone,
-                                          (tone) => setState(
-                                              () => appState.tone = tone),
-                                        ),
-                                      ])),
-                              const SizedBox(height: 30),
-                            ]),
-                      ),
-                    ),
-                    Padding(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 24, vertical: 10),
-                        child: GestureDetector(
-                          onTap: () => _handleEnterRoom(context),
-                          child: Container(
-                            height: 64,
-                            decoration: BoxDecoration(
-                                gradient: const LinearGradient(
-                                    colors: [
-                                      Color(0xFF3B82F6),
-                                      Color(0xFF2563EB)
-                                    ],
-                                    begin: Alignment.topLeft,
-                                    end: Alignment.bottomRight),
-                                borderRadius: BorderRadius.circular(20),
-                                boxShadow: [
-                                  BoxShadow(
-                                      color: const Color(0xFF3B82F6)
-                                          .withValues(alpha: 0.4),
-                                      blurRadius: 20,
-                                      offset: const Offset(0, 8))
-                                ]),
-                            child: const Center(
-                                child: Text("ENTER",
-                                    style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold,
-                                        letterSpacing: 3))),
+          // 아래는 하단 줄이 직접 피한다 — 그래야 줄의 배경이 제스처 바까지
+          // 이어지고, 그 위 콘텐츠는 줄에 가리지 않는다.
+          bottom: false,
+          child: (isLoading || _isDuoInvitePending)
+              ? const Center(
+                  child: CircularProgressIndicator(color: _kLobbyCyan))
+              : Center(
+                  child: ConstrainedBox(
+                    constraints:
+                        const BoxConstraints(maxWidth: _kLobbyMaxContentWidth),
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final Widget content =
+                            _buildLobbyBody(appState, displayTime);
+                        // 세로가 아주 짧으면(창을 줄인 웹, 분할 화면) 고정
+                        // 영역만으로도 화면을 넘긴다. 그때는 고정을 포기하고
+                        // 화면째 스크롤한다 — ENTER가 잘려 보이는 것보다
+                        // 스크롤해서라도 온전히 닿는 편이 낫다.
+                        if (constraints.maxHeight >= _kLobbyMinPinnedHeight) {
+                          return content;
+                        }
+                        return SingleChildScrollView(
+                          child: SizedBox(
+                            height: _kLobbyMinPinnedHeight,
+                            child: content,
                           ),
-                        )),
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 16),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                        children: [
-                          _buildFooterLink(
-                              "사용 설명서", () => _showUsageGuideDialog(context)),
-                          _buildFooterLink("로그아웃", () async {
-                            FFAppState().remainingTime = 0;
-                            FFAppState().remainingTimeLoaded = false;
-                            LobbyBrain.lastSyncedUid = null;
-                            await FirebaseAuth.instance.signOut();
-                            if (!context.mounted) return;
-                            context.goNamed('Intro');
-                          }),
-                          _buildFooterLink(
-                              "회원 탈퇴", () => _showDeleteAccountDialog(context)),
-                        ],
-                      ),
+                        );
+                      },
                     ),
-                  ])),
+                  ),
+                ),
+        ),
       ),
+    );
+  }
+
+  /// 로비 본문 한 벌. 세로가 짧을 때 통째로 스크롤에 담기 위해 갈라 뒀다.
+  Widget _buildLobbyBody(FFAppState appState, String displayTime) {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+          child: Row(
+            children: [
+              ShaderMask(
+                shaderCallback: (rect) =>
+                    const LinearGradient(colors: [_kLobbyCyan, _kLobbyViolet])
+                        .createShader(rect),
+                blendMode: BlendMode.srcIn,
+                child: const Text(
+                  'StealthVox',
+                  maxLines: 1,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.3,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+          child: _buildTopSegments(),
+        ),
+        Expanded(
+          child: SingleChildScrollView(
+            physics: const ClampingScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _buildTimeLeftCard(appState, displayTime),
+                const SizedBox(height: 22),
+                _buildSectionLabel('LANGUAGE'),
+                _buildSurfaceCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _buildLangField(
+                        'ORIGIN',
+                        '(Chat Lang)',
+                        appState.nativeLang,
+                        (val) => setState(() => appState.nativeLang = val!),
+                      ),
+                      const SizedBox(height: 18),
+                      _buildLangField(
+                        'TARGET',
+                        '(Learn Lang)',
+                        appState.targetLang,
+                        // ⚠️ 예전 로직 그대로. TARGET을 바꾸면 지금
+                        //   고른 AI STYLE이 새 언어에서 쓸 수 없는
+                        //   값일 수 있어 Standard로 되돌린다.
+                        (val) => setState(() {
+                          appState.targetLang = val!;
+                          if (!_availableAiStyles(val)
+                              .contains(appState.aiStyle)) {
+                            appState.aiStyle = 'Standard';
+                          }
+                        }),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 22),
+                _buildSectionLabel('AI STYLE'),
+                _buildAiStyleSelector(
+                  _availableAiStyles(appState.targetLang),
+                  appState.aiStyle,
+                  (style) => setState(() => appState.aiStyle = style),
+                ),
+                const SizedBox(height: 22),
+                _buildSectionLabel('AI TONE'),
+                _buildAiToneSelector(
+                  appState.tone,
+                  (tone) => setState(() => appState.tone = tone),
+                ),
+              ],
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
+          child: _buildEnterButton(),
+        ),
+        _buildBottomBar(),
+      ],
     );
   }
 }
