@@ -3427,16 +3427,28 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
               // 초대는 방을 만든 호스트만 낼 수 있다. 게스트에게는 버튼 자체를
               // 노출하지 않는다 — 눌러서 역할이 뒤집히는 경로를 없앤다.
               //
+              // 👆 [터치 영역] 36×36이라 눌리는 자리가 아이콘보다 겨우 컸다.
+              //   안드로이드 권장 최소가 48이고, 방을 시작하려면 반드시 거쳐야
+              //   하는 버튼이라 뒤로가기와 같은 56으로 넓힌다. 어디를 눌러야
+              //   하는지 보이도록 옅은 원도 깐다 — 아이콘만 떠 있으면 눌러도
+              //   되는 곳인지 알기 어렵다.
               if (_amIHost)
                 IconButton(
                   icon: const Icon(Icons.person_add_alt_1,
-                      color: Colors.white70, size: 22),
+                      color: Colors.white, size: 24),
                   tooltip: 'Duo 초대장 발행',
                   onPressed: _shareInviteCode,
                   padding: EdgeInsets.zero,
                   constraints:
-                      const BoxConstraints(minWidth: 36, minHeight: 36),
+                      const BoxConstraints(minWidth: 56, minHeight: 56),
+                  style: IconButton.styleFrom(
+                    backgroundColor:
+                        const Color(0xFF2563EB).withValues(alpha: 0.22),
+                    shape: const CircleBorder(),
+                    minimumSize: const Size(44, 44),
+                  ),
                 ),
+              const SizedBox(width: 4),
               _buildPartnerIndicator(),
             ],
           ),
