@@ -64,6 +64,7 @@ const Duration kDuoDirectSaveTimeout = Duration(seconds: 3);
 const Duration kDuoDirectCurateTimeout = Duration(seconds: 15);
 const String kDuoModeInterpreter = 'interpreter';
 const String kInterpreterPartnerTtsVoice = 'alloy';
+
 /// 맛보기 직접 통화 길이. 폰 한 대에 딱 한 번만 주어진다.
 const int kDuoTrialCallSeconds = 600;
 
@@ -2289,7 +2290,8 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     );
     if (summary == null || summary.isEmpty) return;
     try {
-      await ref.update({'last_message': summary, 'conversation_summary': summary});
+      await ref
+          .update({'last_message': summary, 'conversation_summary': summary});
       debugPrint('[Duo][Summary] written len=${summary.length}');
     } catch (e) {
       debugPrint('[Duo][Summary] write failed=${e.runtimeType}');
@@ -2876,12 +2878,13 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                   //     글자를 띄우지 않는다. 오간 말은 오리지널만 히스토리로
                   //     보내고, 배울글(타겟)과 배울소리는 공부방이 만든다.
                   // 그래서 말풍선·글자 크기·원어 보기가 통째로 없다.
-                  if (_isDirectMode)
-                    Expanded(child: _buildDirectStage())
-                  else ...[
-                    _buildLangPairBar(),
-                    Expanded(child: _buildInterpreterStage()),
-                  ],
+                  // 위에 있던 "나 / 상대" 언어 칩도 없앴다 — 두 방식 모두
+                  // 그림 한 장만 두고, 그림이 무대를 꽉 채운다.
+                  Expanded(
+                    child: _isDirectMode
+                        ? _buildDirectStage()
+                        : _buildInterpreterStage(),
+                  ),
                   _buildControlArea(effectiveBottomPadding),
                 ],
               ),
@@ -2898,9 +2901,6 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         muted: _directMuted,
         partnerOnline: _isPartnerOnline,
       );
-
-  Widget _buildLangPairBar() =>
-      DuoLangPairBar(mine: _myNative(), theirs: _partnerChatLang);
 
   Widget _buildInterpreterStage() =>
       DuoInterpreterStage(recording: _duoState == 'recording');
@@ -3572,7 +3572,6 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       ),
     );
   }
-
 }
 
 class _DuoResolvedTurn {
@@ -3911,4 +3910,3 @@ Use only supplied indexes, at most once each, in original order. An empty turns 
     return clean.trim();
   }
 }
-
