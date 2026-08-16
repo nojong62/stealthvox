@@ -66,6 +66,10 @@ const String kDuoModeInterpreter = 'interpreter';
 const String kInterpreterPartnerTtsVoice = 'alloy';
 const int kDuoTrialCallSeconds = 180;
 
+/// 한 줄 요약을 만들 때 AI에 보낼 최근 발화 수의 상한.
+/// 긴 통화라고 토큰이 함께 늘면 곤란하다 — 미리보기 한 줄이면 충분하다.
+const int _kSummaryMaxLines = 60;
+
 class RoutineModeDuo extends StatefulWidget {
   const RoutineModeDuo({
     Key? key,
@@ -434,13 +438,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   bool _isExiting = false;
   int _turnCounter = 0;
   int _duoConversationTurnCounter = 0;
-  double _fontScale = 1.0;
-  bool _showOriginal = true;
 
-  final ScrollController _scrollController = ScrollController();
-  final List<Map<String, dynamic>> _localMessages = [];
-  final Map<int, GlobalKey> _itemKeys = {}; // 상단 고정 렌더링을 위한 추적기
-  DateTime? _lastScrollThrottle; // 스크롤 throttle 타임스탬프 (Roleplay 이식)
+  // 자막을 만들지 않으므로 말풍선 목록·스크롤·글자 크기 상태가 전부 없다.
+  // 아래는 화면용이 아니라 나갈 때 만들 한 줄 요약의 재료다.
+  final List<String> _summaryLines = [];
 
   DocumentReference? _myHistoryRef;
   DocumentReference? _duoSessionRef;
@@ -671,7 +672,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     _audioPlayer.dispose();
     _ttsPlayer.dispose();
     BillingTicker.instance.pause();
-    _scrollController.dispose();
     super.dispose();
   }
 
@@ -1885,15 +1885,8 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
 
     if (!_isConversationActive || _turnCounter != currentTurnId) return;
 
-    // 2. 내 말풍선 — 내가 한 말 그대로.
-    if (mounted) {
-      setState(() {
-        _localMessages.add({'role': 'HOST', 'target': spoken, 'original': ''});
-      });
-      _scrollToCurrentTop(_localMessages.length - 1);
-    }
-
-    // 3. 히스토리 — 원문만. 배울글·배울소리는 공부방에서 만든다.
+    // 2. 히스토리 — 오리지널(내가 말한 대화 언어)만. 배울글(타겟)과 배울소리는
+    //    공부방에서 만든다. 화면에는 아무것도 띄우지 않는다.
     await _saveHistoryMessage(
       '',
       spoken,
@@ -2081,19 +2074,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
 
     if (!mounted || _isExiting) return;
 
-    // 상대 말풍선: 좌측 (role='SYSTEM'). 큰 줄은 내가 알아들을 말,
-    // 작은 줄은 상대가 실제로 한 말(같은 언어면 중복이라 생략).
-    if (mounted) {
-      setState(() {
-        _localMessages.add({
-          'role': 'SYSTEM',
-          'target': spoken,
-          'original': sameLang ? '' : raw.trim(),
-        });
-      });
-      _scrollToCurrent(_localMessages.length - 1);
-    }
-
+    // 상대 말은 소리로만 전한다 — 화면에 말풍선을 만들지 않는다.
     // 히스토리 — 원문 자리에는 내가 들은 말(내 대화 언어)을 넣는다.
     // 상대가 말한 언어가 마침 내 배울 언어면 그 원문이 곧 배울 문장이므로
     // 타겟까지 여기서 채운다. 번역의 번역이 아니라 상대가 실제로 한 말이
@@ -2122,63 +2103,9 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
   }
 
 // ============================================================================
-  // 📦 [6. 데이터베이스 및 스크롤 관리 (DB & SCROLL)]
-  // 히스토리 저장 및 화면 상단 고정 제어
+  // 📦 [6. 데이터베이스 (DB)]
+  // 히스토리 저장. 화면에 글자를 띄우지 않으므로 스크롤 제어가 없다.
   // ============================================================================
-  // 최신 메시지(position 0 = 하단)로 스크롤
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(0,
-            duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
-      }
-    });
-  }
-
-  // 250ms throttle — 연속 setState 중 스크롤 남발 방지 (Roleplay 이식)
-  void _scrollToBottomThrottled() {
-    final now = DateTime.now();
-    if (_lastScrollThrottle == null ||
-        now.difference(_lastScrollThrottle!) >=
-            const Duration(milliseconds: 250)) {
-      _lastScrollThrottle = now;
-      _scrollToBottom();
-    }
-  }
-
-  // 현재 말풍선을 화면 중앙에 고정 — 상대 응답 추가 시 사용 (Roleplay 이식)
-  void _scrollToCurrent(int index) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollController.hasClients) return;
-      final key = _itemKeys[index];
-      if (key == null) return;
-      final ctx = key.currentContext;
-      if (ctx == null) return;
-      Scrollable.ensureVisible(
-        ctx,
-        alignment: 0.5,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
-    });
-  }
-
-  // 현재 말풍선을 화면 상단에 고정 — 내 발화 추가 시 사용 (Roleplay 이식)
-  // reversed list에서 alignment 0.98 = 화면 상단 2%
-  void _scrollToCurrentTop(int index) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final key = _itemKeys[index];
-      if (key == null) return;
-      final ctx = key.currentContext;
-      if (ctx == null) return;
-      Scrollable.ensureVisible(
-        ctx,
-        alignment: 0.98,
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOut,
-      );
-    });
-  }
 
   // 🆕 [토글] 마이크 버튼: idle이면 시작 / recording이면 종료·전송
   void _onMicToggle() {
@@ -2231,42 +2158,6 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       default:
         return 'Tap to talk';
     }
-  }
-
-  void _showFontSizeDialog() {
-    double tempScale = _fontScale;
-    showDialog(
-      context: context,
-      barrierColor: Colors.black38,
-      builder: (_) => StatefulBuilder(builder: (ctx, setS) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF1E1E1E),
-          title: const Text('글자 크기',
-              style: TextStyle(color: Colors.white, fontSize: 16)),
-          content: Slider(
-            value: tempScale,
-            min: 0.8,
-            max: 1.5,
-            divisions: 7,
-            label: '${(tempScale * 100).round()}%',
-            activeColor: const Color(0xFF2563EB),
-            onChanged: (v) {
-              setS(() => tempScale = v);
-              setState(() => _fontScale = v);
-            },
-          ),
-          contentPadding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
-          actionsPadding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child:
-                  const Text('확인', style: TextStyle(color: Color(0xFF2563EB))),
-            ),
-          ],
-        );
-      }),
-    );
   }
 
   Future<void> _ensureHistoryRef() async {
@@ -2353,6 +2244,9 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
           'source_lang': sourceLang,
       });
       _historyMessageCount++;
+      // 나갈 때 만들 한 줄 요약의 재료. 화면에 쓰지 않으므로 그리지 않는다.
+      // 저장에 성공한 줄만 담아 실제 히스토리와 어긋나지 않게 한다.
+      _rememberSummaryLine(role, defer ? original : target);
       await _myHistoryRef!.update({
         'last_message': defer ? original : target,
         'last_active': FieldValue.serverTimestamp(),
@@ -2360,6 +2254,47 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         'msg_count': FieldValue.increment(1),
       });
     } catch (e) {}
+  }
+
+  /// 요약 재료 한 줄. 통화가 길어져도 메모리와 토큰이 함께 늘지 않도록
+  /// 최근 [_kSummaryMaxLines]줄만 들고 있는다 — 미리보기 한 줄을 만드는 데
+  /// 통화 첫머리의 인사까지 필요하지는 않다.
+  void _rememberSummaryLine(String role, String text) {
+    final String line = text.trim();
+    if (line.isEmpty) return;
+    _summaryLines.add('${role == 'HOST' ? '나' : '상대'}: '
+        '${line.length > 200 ? '${line.substring(0, 200)}…' : line}');
+    if (_summaryLines.length > _kSummaryMaxLines) {
+      _summaryLines.removeRange(0, _summaryLines.length - _kSummaryMaxLines);
+    }
+  }
+
+  /// 목록 미리보기를 "마지막 한 마디"에서 "무슨 얘기를 했는지"로 바꾼다.
+  ///
+  /// **나가는 길을 붙잡지 않는다.** 위젯이 사라진 뒤에 끝나도 되는 일이라
+  /// `static`으로 두고 `unawaited`로 던진다. 실패하면 아무것도 쓰지 않는다 —
+  /// 그러면 `_saveHistoryMessage`가 넣어 둔 마지막 원문이 그대로 남아서
+  /// 미리보기가 빈 칸이 되는 일은 없다.
+  static Future<void> _writeConversationSummary({
+    required DocumentReference ref,
+    required String key,
+    required List<String> lines,
+    required String lang,
+  }) async {
+    // 두세 마디짜리 통화는 요약해 봐야 원문보다 나을 게 없다.
+    if (key.isEmpty || lines.length < 4) return;
+    final String? summary = await DuoBrain.summarizeConversation(
+      key: key,
+      lines: lines,
+      lang: lang,
+    );
+    if (summary == null || summary.isEmpty) return;
+    try {
+      await ref.update({'last_message': summary, 'conversation_summary': summary});
+      debugPrint('[Duo][Summary] written len=${summary.length}');
+    } catch (e) {
+      debugPrint('[Duo][Summary] write failed=${e.runtimeType}');
+    }
   }
 
   /// 직접 통화 전사문을 공부방용 대화로 가볍게 정리한다.
@@ -2811,22 +2746,29 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     }
 
     if (_myHistoryRef != null) {
-      // 직접 대화는 말풍선을 만들지 않으므로 _localMessages가 늘 비어 있다.
-      // 실제로 저장한 메시지 수로 판단해야 히스토리가 통째로 지워지지 않는다.
-      if (_localMessages.isEmpty &&
-          _historyMessageCount == 0 &&
-          !(isTrialHost && trialWasConsumed)) {
+      // 두 방식 다 말풍선을 만들지 않는다. 실제로 저장한 메시지 수로만
+      // 판단해야 히스토리가 통째로 지워지지 않는다.
+      if (_historyMessageCount == 0 && !(isTrialHost && trialWasConsumed)) {
         await _myHistoryRef!.delete();
       } else {
-        String lastText = _localMessages.isNotEmpty
-            ? (_localMessages.last['target']?.toString() ?? "대화 기록 저장")
-            : "대화 기록 저장";
         await _myHistoryRef!.update({
-          'last_message': lastText.isNotEmpty ? lastText : "대화 기록 저장",
+          // 줄이 하나라도 저장됐으면 `_saveHistoryMessage`가 이미 마지막 원문을
+          // 넣어 놨다. 여기서 덮어쓰면 목록에 실제 말 대신 안내 문구가 남는다.
+          if (_historyMessageCount == 0) 'last_message': "대화 기록 저장",
           'last_message_time': FieldValue.serverTimestamp(),
           'last_active': FieldValue.serverTimestamp(),
           if (isTrialHost) 'status': 'completed',
         });
+        // 목록 미리보기를 요약으로 올려둔다. 기다리지 않는다 — 사용자는 이미
+        // 목록으로 나가 있고, 요약이 도착하면 스트림이 카드를 갱신한다.
+        // 직접 통화는 위의 정리(`_curateDirectHistoryForStudy`)가 끝난 뒤라
+        // 정리가 써 둔 마지막 줄 위에 요약이 덮인다.
+        unawaited(_writeConversationSummary(
+          ref: _myHistoryRef!,
+          key: _openAiKey,
+          lines: List<String>.of(_summaryLines),
+          lang: _myNative(),
+        ));
       }
     }
     if (!mounted) return;
@@ -2896,7 +2838,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
 
   // ============================================================================
   // 📦 [7. UI 빌더 (UI BUILDERS)]
-  // 화면 레이아웃 (TopBar, ControlArea, TextBlock)
+  // 화면 레이아웃 (TopBar, Stage, ControlArea)
   // ============================================================================
   @override
   Widget build(BuildContext context) {
@@ -2920,41 +2862,17 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
               child: Column(
                 children: [
                   _buildTopBar(),
-                  // 🖼️ 두 방식은 화면이 하는 일이 다르다.
-                  //   직접 대화 — 자막을 만들지 않는다. 두 폰이 붙어 있다는
-                  //     것만 그림으로 보여준다. 마이크는 양쪽이 들어오면
-                  //     자동으로 켜지므로 안내 문구도 필요 없다.
-                  //   만능 통역 — 어느 언어에서 어느 언어로 가는지가 가장
-                  //     중요하다. 언어쌍을 위에 고정하고 말풍선을 그 아래 쌓는다.
+                  // 🖼️ 두 방식 모두 자막을 만들지 않는다. 화면은 그림 한 장이다.
+                  //   직접 대화 — 두 폰이 붙어 있다는 것만 보여준다.
+                  //   만능 통역 — 각자 자기 대화 언어로 말하고 듣는다. 화면에
+                  //     글자를 띄우지 않는다. 오간 말은 오리지널만 히스토리로
+                  //     보내고, 배울글(타겟)과 배울소리는 공부방이 만든다.
+                  // 그래서 말풍선·글자 크기·원어 보기가 통째로 없다.
                   if (_isDirectMode)
                     Expanded(child: _buildDirectStage())
                   else ...[
                     _buildLangPairBar(),
-                    Expanded(
-                      child: _localMessages.isEmpty
-                          ? _buildInterpreterStage()
-                          : ListView.builder(
-                              reverse: true,
-                              controller: _scrollController,
-                              physics: const BouncingScrollPhysics(),
-                              padding: EdgeInsets.only(
-                                  left: 8,
-                                  right: 8,
-                                  top: MediaQuery.of(context).size.height * 0.3,
-                                  bottom: 40),
-                              itemCount: _localMessages.length,
-                              itemBuilder: (context, index) {
-                                final realIdx =
-                                    _localMessages.length - 1 - index;
-                                if (!_itemKeys.containsKey(realIdx))
-                                  _itemKeys[realIdx] = GlobalKey();
-                                return Container(
-                                  key: _itemKeys[realIdx],
-                                  child:
-                                      _buildTextBlock(_localMessages[realIdx]),
-                                );
-                              }),
-                    ),
+                    Expanded(child: _buildInterpreterStage()),
                   ],
                   _buildControlArea(effectiveBottomPadding),
                 ],
@@ -3475,26 +3393,8 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
             ],
           ),
           const Spacer(),
-          Row(children: [
-            IconButton(
-              icon: const Icon(Icons.format_size,
-                  color: Colors.white70, size: 26),
-              tooltip: '글자 크기 조절',
-              onPressed: _showFontSizeDialog,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-            ),
-            IconButton(
-              icon: CustomPaint(
-                size: const Size(26, 26),
-                painter: _LangIconPainter(active: _showOriginal),
-              ),
-              tooltip: _showOriginal ? '원어 숨기기' : '원어 보기',
-              onPressed: () => setState(() => _showOriginal = !_showOriginal),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-            ),
-          ]),
+          // 글자 크기·원어 보기 버튼은 없다. 두 방식 다 화면에 글자를 띄우지
+          // 않으므로 조절할 대상 자체가 없다.
           const SizedBox(width: 4),
           if (_hasTrialCallLimit)
             _buildTrialCountdownChip()
@@ -3665,52 +3565,6 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     );
   }
 
-  Widget _buildTextBlock(Map<String, dynamic> msg) {
-    String target = msg['target']?.toString() ?? '';
-    String original = msg['original']?.toString() ?? '';
-    bool isHost = msg['role'] == 'HOST'; // 'HOST'=내 말(우측) / 그 외=상대 말(좌측)
-
-    if (target.isEmpty) return const SizedBox.shrink();
-    return Align(
-      alignment: isHost ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          color: isHost
-              ? const Color(0xFF2C2C2E)
-              : const Color(0xFF2563EB).withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        constraints:
-            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.8),
-        child: Column(
-            crossAxisAlignment:
-                isHost ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-            children: [
-              Text(target,
-                  textAlign: isHost ? TextAlign.right : TextAlign.left,
-                  style: TextStyle(
-                      color: isHost ? Colors.white : const Color(0xFF93C5FD),
-                      fontSize: 16 * _fontScale,
-                      fontWeight: FontWeight.w600,
-                      height: 1.3)),
-              if (_showOriginal &&
-                  !(FFAppState().nativeLang.isNotEmpty &&
-                      FFAppState().nativeLang == FFAppState().targetLang) &&
-                  original.trim().isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text(original,
-                    textAlign: isHost ? TextAlign.right : TextAlign.left,
-                    style: TextStyle(
-                        color: Colors.white70,
-                        fontSize: 14 * _fontScale,
-                        height: 1.3))
-              ]
-            ]),
-      ),
-    );
-  }
 }
 
 class _DuoResolvedTurn {
@@ -3910,6 +3764,67 @@ Use only supplied indexes, at most once each, in original order. An empty turns 
     }
   }
 
+  /// 통화 전체를 공부방 목록의 미리보기 한 줄로 줄인다.
+  ///
+  /// 요약은 **읽는 사람의 대화 언어**로 만든다 — 목록을 보는 건 나 하나뿐이고,
+  /// 상대가 무슨 언어로 말했든 나는 내 말로 읽어야 방을 알아본다.
+  /// 통화 중이 아니라 나간 뒤에 한 번 도는 호출이라 지연은 문제가 되지 않는다.
+  static Future<String?> summarizeConversation({
+    required String key,
+    required List<String> lines,
+    required String lang,
+  }) async {
+    if (key.isEmpty || lines.isEmpty) return null;
+    try {
+      final Uri uri = Uri.parse('https://api.openai.com/v1/chat/completions');
+      final String prompt =
+          "You label a finished two-person conversation for a history list.\n"
+          "Write ONE short phrase in $lang naming what they talked about — "
+          "the topic, not the wording. Aim for 6 to 15 words.\n"
+          "Do not quote any line, do not name the speakers, do not translate "
+          "the transcript, do not add commentary or punctuation at the end.\n"
+          "If the conversation has no discernible topic, output nothing.\n"
+          "Return ONLY the phrase.";
+      final res = await client
+          .post(uri,
+              headers: {
+                'Authorization': 'Bearer $key',
+                'Content-Type': 'application/json; charset=utf-8'
+              },
+              body: jsonEncode({
+                'model': 'gpt-4o-mini',
+                'temperature': 0.3,
+                'max_tokens': 80,
+                'messages': [
+                  {'role': 'system', 'content': prompt},
+                  {'role': 'user', 'content': lines.join('\n')},
+                ]
+              }))
+          .timeout(const Duration(seconds: 12));
+      if (res.statusCode != 200) {
+        debugPrint('[Duo][Summary] status=${res.statusCode}');
+        return null;
+      }
+      final body =
+          jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      final choices = body['choices'] as List? ?? const <dynamic>[];
+      if (choices.isEmpty) return null;
+      final message = (choices.first as Map<String, dynamic>)['message']
+          as Map<String, dynamic>?;
+      String out = (message?['content'] ?? '').toString().trim();
+      // 목록 카드는 한 줄만 그린다. 줄바꿈이 섞이면 잘려 보인다.
+      out = out
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .replaceAll(RegExp(r"""^["“”']|["“”']$"""), '')
+          .trim();
+      if (out.length > 80) out = '${out.substring(0, 80)}…';
+      return out.isEmpty ? null : out;
+    } catch (e) {
+      debugPrint('[Duo][Summary] failed=${e.runtimeType}');
+      return null;
+    }
+  }
+
   static Future<Map<String, String>?> processTranslation({
     required String key,
     required String text,
@@ -3989,101 +3904,3 @@ Use only supplied indexes, at most once each, in original order. An empty turns 
   }
 }
 
-class _LangIconPainter extends CustomPainter {
-  final bool active;
-  const _LangIconPainter({required this.active});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final r = size.width / 2;
-    final center = Offset(r, r);
-
-    canvas
-        .clipPath(Path()..addOval(Rect.fromCircle(center: center, radius: r)));
-
-    canvas.drawRect(
-        Rect.fromLTWH(0, 0, size.width, size.height),
-        Paint()
-          ..color = active ? const Color(0xFF1E7DB5) : const Color(0xFF2A2A2A));
-
-    if (active) {
-      canvas.drawPath(
-        Path()
-          ..moveTo(size.width * 0.05, size.height)
-          ..lineTo(size.width, size.height * 0.05)
-          ..lineTo(size.width, size.height)
-          ..close(),
-        Paint()..color = const Color(0xFF0B4870),
-      );
-    }
-
-    canvas.drawLine(
-      Offset(size.width * 0.04, size.height * 0.96),
-      Offset(size.width * 0.96, size.height * 0.04),
-      Paint()
-        ..color = active ? const Color(0xFFD4AF37) : Colors.white12
-        ..strokeWidth = 2.0
-        ..strokeCap = StrokeCap.round,
-    );
-
-    canvas.drawCircle(
-      center,
-      r - 1.5,
-      Paint()
-        ..color = active ? const Color(0xFFD4AF37) : Colors.white24
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.5,
-    );
-
-    // 상단 좌측 "T" (원어) — 비활성 시 거의 투명
-    _drawText(canvas, 'T', Offset(size.width * 0.09, size.height * 0.06),
-        size.width * 0.34, active ? Colors.white : const Color(0x22FFFFFF));
-
-    if (active) {
-      final dotC = Offset(size.width * 0.63, size.height * 0.23);
-      final dotR = size.width * 0.105;
-      canvas.drawCircle(dotC, dotR, Paint()..color = const Color(0xFFE03030));
-      canvas.drawCircle(
-          dotC, dotR * 0.45, Paint()..color = const Color(0xFFFF6060));
-      canvas.drawCircle(
-          dotC,
-          dotR,
-          Paint()
-            ..color = const Color(0xBBFFFFFF)
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 0.8);
-    } else {
-      // 원어 숨김 표시 — 소형 X
-      final xPaint = Paint()
-        ..color = Colors.redAccent.withValues(alpha: 0.65)
-        ..strokeWidth = 1.2
-        ..strokeCap = StrokeCap.round;
-      canvas.drawLine(Offset(size.width * 0.53, size.height * 0.11),
-          Offset(size.width * 0.74, size.height * 0.32), xPaint);
-      canvas.drawLine(Offset(size.width * 0.74, size.height * 0.11),
-          Offset(size.width * 0.53, size.height * 0.32), xPaint);
-    }
-
-    // 하단 우측 "T" (타겟) — 항상 흰색
-    _drawText(canvas, 'T', Offset(size.width * 0.55, size.height * 0.58),
-        size.width * 0.34, Colors.white);
-  }
-
-  void _drawText(
-      Canvas canvas, String text, Offset offset, double fontSize, Color color) {
-    final tp = TextPainter(
-      text: TextSpan(
-          text: text,
-          style: TextStyle(
-              color: color,
-              fontSize: fontSize,
-              fontWeight: FontWeight.bold,
-              height: 1.0)),
-      textDirection: ui.TextDirection.ltr,
-    )..layout();
-    tp.paint(canvas, offset);
-  }
-
-  @override
-  bool shouldRepaint(_LangIconPainter old) => old.active != active;
-}
