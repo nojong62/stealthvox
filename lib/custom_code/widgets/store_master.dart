@@ -26,6 +26,77 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '/components/social_login_modal.dart';
 // 💡 에러의 원인이었던 외부 패키지 삭제 완료! Firebase로 대체합니다.
 
+/// 스토어 상품 정의. **상품 ID·제목·초·가격의 유일한 출처다.**
+///
+/// 화면 안에만 두면 구매이력 제목 복원([resolvePurchaseTitle])에서 쓸 수도,
+/// 테스트로 확인할 수도 없어서 최상위로 뺐다. 값은 예전 그대로다.
+/// `id`는 Play 콘솔·RevenueCat·Cloud Functions의 `PRODUCTS` 키와 같아야 한다.
+final List<Map<String, dynamic>> kStorePlans = [
+  {
+    'id': 'stealthvox_10m',
+    'title': '10 Minutes',
+    'subtitle': '체험권',
+    'seconds': 600,
+    'price_text': '₩400',
+    'theme_color': const Color(0xFF60A5FA),
+    'icon': Icons.bolt_rounded,
+  },
+  {
+    'id': 'stealthvox_1h',
+    'title': '1 Hour',
+    'subtitle': '기본권',
+    'seconds': 3600,
+    'price_text': '₩2,000',
+    'theme_color': const Color(0xFF34D399),
+    'icon': Icons.hourglass_top_rounded,
+  },
+  {
+    'id': 'stealthvox_5h',
+    'title': '5 Hours',
+    'subtitle': '추천권',
+    'seconds': 18000,
+    'price_text': '₩9,000',
+    'theme_color': const Color(0xFFFBBF24),
+    'icon': Icons.star_rounded,
+  },
+  {
+    'id': 'stealthvox_10h',
+    'title': '10 Hours',
+    'subtitle': '프리미엄권',
+    'seconds': 36000,
+    'price_text': '₩17,000',
+    'theme_color': const Color(0xFFA78BFA),
+    'icon': Icons.diamond_rounded,
+  },
+];
+
+/// 구매이력 카드에 띄울 상품 이름.
+///
+/// **2026-06-13부터 구매 기록을 RevenueCat 웹훅이 쓴다.** 그 문서에는
+/// `product_id`와 `seconds_added`만 있고 `product_title`이 없어서 화면이
+/// `Unknown Item`을 띄웠다. 옛 클라이언트 기록에는 제목이 들어 있다.
+///
+/// 그래서 순서를 셋으로 둔다 — 저장된 제목 → `product_id`로 [plans]에서
+/// 복원 → 그래도 모르면 `Unknown Item`. 이렇게 하면 **이미 쌓인 기록도
+/// Firestore를 건드리지 않고** 제대로 보인다.
+String resolvePurchaseTitle(
+  Map<String, dynamic> data,
+  List<Map<String, dynamic>> plans,
+) {
+  final String savedTitle = data['product_title']?.toString().trim() ?? '';
+  if (savedTitle.isNotEmpty) return savedTitle;
+
+  final String productId = data['product_id']?.toString().trim() ?? '';
+  if (productId.isNotEmpty) {
+    for (final plan in plans) {
+      if (plan['id']?.toString() != productId) continue;
+      final String planTitle = plan['title']?.toString().trim() ?? '';
+      if (planTitle.isNotEmpty) return planTitle;
+    }
+  }
+  return 'Unknown Item';
+}
+
 class StoreMaster extends StatefulWidget {
   const StoreMaster({
     Key? key,
@@ -110,44 +181,9 @@ class _StoreMasterState extends State<StoreMaster> {
     AppLogLedger.instance.add('STORE', '$tag $msg');
   }
 
-  final List<Map<String, dynamic>> storePlans = [
-    {
-      'id': 'stealthvox_10m',
-      'title': '10 Minutes',
-      'subtitle': '체험권',
-      'seconds': 600,
-      'price_text': '₩400',
-      'theme_color': const Color(0xFF60A5FA),
-      'icon': Icons.bolt_rounded,
-    },
-    {
-      'id': 'stealthvox_1h',
-      'title': '1 Hour',
-      'subtitle': '기본권',
-      'seconds': 3600,
-      'price_text': '₩2,000',
-      'theme_color': const Color(0xFF34D399),
-      'icon': Icons.hourglass_top_rounded,
-    },
-    {
-      'id': 'stealthvox_5h',
-      'title': '5 Hours',
-      'subtitle': '추천권',
-      'seconds': 18000,
-      'price_text': '₩9,000',
-      'theme_color': const Color(0xFFFBBF24),
-      'icon': Icons.star_rounded,
-    },
-    {
-      'id': 'stealthvox_10h',
-      'title': '10 Hours',
-      'subtitle': '프리미엄권',
-      'seconds': 36000,
-      'price_text': '₩17,000',
-      'theme_color': const Color(0xFFA78BFA),
-      'icon': Icons.diamond_rounded,
-    },
-  ];
+  /// 상품 정의는 최상위 [kStorePlans] 하나뿐이다. 화면 코드가 예전 이름을
+  /// 그대로 쓰도록 여기서는 그 목록을 가리키기만 한다.
+  List<Map<String, dynamic>> get storePlans => kStorePlans;
 
   @override
   void initState() {
@@ -567,8 +603,8 @@ class _StoreMasterState extends State<StoreMaster> {
                                               CrossAxisAlignment.start,
                                           children: [
                                             Text(
-                                                data['product_title'] ??
-                                                    'Unknown Item',
+                                                resolvePurchaseTitle(
+                                                    data, storePlans),
                                                 maxLines: 1,
                                                 overflow: TextOverflow.ellipsis,
                                                 style: const TextStyle(

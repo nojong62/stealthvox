@@ -363,17 +363,21 @@ exports.grantSignupBonus = functions.https.onCall(async (data, context) => {
 //   2. Authorization header must match the configured webhook secret.
 //   3. Only INITIAL_PURCHASE / NON_RENEWING_PURCHASE events are processed.
 //   4. Only PRODUCTION environment grants time (SANDBOX is acknowledged, ignored).
-//   5. product_id must be in PRODUCT_SECONDS map (unknown products ignored).
+//   5. product_id must be in PRODUCTS map (unknown products ignored).
 //   6. Idempotent on event.id (RevenueCat may deliver the same event twice).
 //   7. Transactional credit (mirrors deductRemainingTime's pattern).
 // ----------------------------------------------------------------------------
 
-// product_id -> seconds to credit (StealthVox consumable packages)
-const PRODUCT_SECONDS = {
-  stealthvox_10m: 600,
-  stealthvox_1h: 3600,
-  stealthvox_5h: 18000,
-  stealthvox_10h: 36000,
+// product_id -> { seconds to credit, display title } (StealthVox consumables)
+//
+// Titles must match lib/custom_code/widgets/store_master.dart (kStorePlans), so
+// the Purchase History sheet shows the same name the Store sells. Keeping
+// seconds and title side by side stops the two from drifting apart.
+const PRODUCTS = {
+  stealthvox_10m: { seconds: 600, title: "10 Minutes" },
+  stealthvox_1h: { seconds: 3600, title: "1 Hour" },
+  stealthvox_5h: { seconds: 18000, title: "5 Hours" },
+  stealthvox_10h: { seconds: 36000, title: "10 Hours" },
 };
 
 exports.revenueCatWebhook = functions
@@ -430,7 +434,8 @@ exports.revenueCatWebhook = functions
     }
 
     // 3c. Known product only
-    const seconds = PRODUCT_SECONDS[productId];
+    const product = PRODUCTS[productId];
+    const seconds = product ? product.seconds : undefined;
     if (!seconds) {
       functions.logger.info("revenueCatWebhook: unknown product ignored", {
         eventId: eventId,
@@ -479,6 +484,10 @@ exports.revenueCatWebhook = functions
         tx.set(purchaseRef, {
           rc_event_id: eventId,
           product_id: productId,
+          // Purchase History reads this. Without it the app falls back to the
+          // product_id lookup, and older rows written before this field
+          // existed keep showing through that fallback.
+          product_title: product.title,
           seconds_added: seconds,
           source: "revenuecat_webhook",
           event_type: eventType,
