@@ -60,6 +60,14 @@ const double _kLobbyMaxContentWidth = 560;
 /// 이보다 짧으면 화면째 스크롤로 넘어간다(실제 폰에서는 닿지 않는 값이다).
 const double _kLobbyMinPinnedHeight = 380;
 
+/// AI STYLE 선택지. **영어 전용 설정이라 언제나 이 넷뿐이다.**
+/// 비영어 TARGET에서는 선택지를 줄이는 게 아니라 영역째 감춘다
+/// ([_kAiStyleTargetLang] 참고).
+const List<String> _kAiStyles = ['Standard', 'American', 'British', 'Native'];
+
+/// AI STYLE을 보여 주는 유일한 TARGET 언어.
+const String _kAiStyleTargetLang = 'English';
+
 /// 📦 [Box 2: 클래스 선언부]
 class LobbyMaster extends StatefulWidget {
   const LobbyMaster({
@@ -142,8 +150,9 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   void _initAppState() {
     if (FFAppState().tone == null || FFAppState().tone.isEmpty)
       setState(() => FFAppState().tone = "Casual");
-    if (!["Standard", "American", "British", "Native"]
-        .contains(FFAppState().aiStyle)) {
+    // ⚠️ TARGET과 무관하게 4개 전부를 유효값으로 본다. 비영어 TARGET으로
+    //   앱을 껐다 켜도 마지막 영어 선택값(American 등)이 살아남아야 한다.
+    if (!_kAiStyles.contains(FFAppState().aiStyle)) {
       setState(() => FFAppState().aiStyle = "Standard");
     }
     if (FFAppState().nativeLang == null || FFAppState().nativeLang.isEmpty)
@@ -721,18 +730,13 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     );
   }
 
-  List<String> _availableAiStyles(String targetLanguage) =>
-      targetLanguage == 'English'
-          ? const ['Standard', 'American', 'British', 'Native']
-          : const ['Standard', 'Native'];
-
   /// AI STYLE 배치.
   ///
-  /// **선택지는 `_availableAiStyles()`가 정하고, 여기서는 줄만 나눈다.**
-  ///   · 4개(TARGET == English) — 첫 줄에 셋, 둘째 줄에 Native 하나가 전체 폭
-  ///   · 2개(그 외)             — 한 줄에 같은 폭 둘
-  /// 폭에 맡겨 흘려 담지 않는다. 개수가 그 둘이 아니게 되더라도 화면이 깨지지
-  /// 않도록 2열로 담는 길을 남겨 둔다.
+  /// **선택지는 언제나 [_kAiStyles] 넷이다**(영어에서만 보이는 설정이라
+  /// 언어별로 갈릴 일이 없다). 여기서는 줄만 나눈다 — 첫 줄에 셋,
+  /// 둘째 줄에 Native 하나가 전체 폭. 폭에 맡겨 흘려 담지 않는다.
+  /// 개수가 넷이 아니게 되더라도 화면이 깨지지 않도록 2열로 담는 길은
+  /// 남겨 둔다.
   Widget _buildAiStyleSelector(
     List<String> options,
     String selectedValue,
@@ -755,15 +759,6 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           ),
           const SizedBox(height: 10),
           SizedBox(width: double.infinity, child: pill(options[3])),
-        ],
-      );
-    }
-    if (options.length == 2) {
-      return Row(
-        children: [
-          Expanded(child: pill(options[0])),
-          const SizedBox(width: 10),
-          Expanded(child: pill(options[1])),
         ],
       );
     }
@@ -1045,27 +1040,26 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                         'TARGET',
                         '(Learn Lang)',
                         appState.targetLang,
-                        // ⚠️ 예전 로직 그대로. TARGET을 바꾸면 지금
-                        //   고른 AI STYLE이 새 언어에서 쓸 수 없는
-                        //   값일 수 있어 Standard로 되돌린다.
-                        (val) => setState(() {
-                          appState.targetLang = val!;
-                          if (!_availableAiStyles(val)
-                              .contains(appState.aiStyle)) {
-                            appState.aiStyle = 'Standard';
-                          }
-                        }),
+                        // ⚠️ AI STYLE은 여기서 건드리지 않는다. 비영어로
+                        //   가면 아래 영역이 통째로 사라지지만, 저장값은
+                        //   마지막 영어 선택 그대로 남겨 뒀다가 다시
+                        //   English로 돌아왔을 때 복원한다.
+                        (val) => setState(() => appState.targetLang = val!),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 22),
-                _buildSectionLabel('AI STYLE'),
-                _buildAiStyleSelector(
-                  _availableAiStyles(appState.targetLang),
-                  appState.aiStyle,
-                  (style) => setState(() => appState.aiStyle = style),
-                ),
+                // AI STYLE은 영어 대화에만 쓰는 설정이다. TARGET이 영어가
+                // 아니면 영역째 감춘다(선택지를 줄이지 않는다).
+                if (appState.targetLang == _kAiStyleTargetLang) ...[
+                  const SizedBox(height: 22),
+                  _buildSectionLabel('AI STYLE'),
+                  _buildAiStyleSelector(
+                    _kAiStyles,
+                    appState.aiStyle,
+                    (style) => setState(() => appState.aiStyle = style),
+                  ),
+                ],
                 const SizedBox(height: 22),
                 _buildSectionLabel('AI TONE'),
                 _buildAiToneSelector(

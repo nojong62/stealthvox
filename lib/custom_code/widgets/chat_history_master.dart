@@ -3415,7 +3415,20 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     );
   }
 
-  /// 로비의 aiStyle 설정에서 고르지 않은 나머지 스타일들.
+  /// 이 세션에서 실제로 적용되는 AI STYLE.
+  ///
+  /// AI STYLE은 **영어 대화 전용 설정**이다. 세션 타겟이 영어가 아니면
+  /// 저장값(American 등)이 무엇이든 `Standard`로 취급한다. 전역
+  /// `FFAppState().aiStyle` 자체는 건드리지 않는다 — 영어로 돌아왔을 때
+  /// 마지막 선택을 그대로 복원해야 하기 때문이다.
+  String _effectiveAiStyle() {
+    final targetLanguage = (_sessionTargetLang ?? 'English').trim();
+    if (targetLanguage != 'English') return 'Standard';
+    final saved = FFAppState().aiStyle.trim();
+    return saved.isEmpty ? 'Standard' : saved;
+  }
+
+  /// 지금 적용 중인 스타일([_effectiveAiStyle])을 뺀 나머지 스타일들.
   /// 영어가 타겟일 때만 American/British가 존재한다(로비와 같은 규칙).
   /// 순서는 Standard → American → British → Native로 고정한다.
   List<String> _otherAiStyles() {
@@ -3423,7 +3436,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     const canonical = ['Standard', 'American', 'British', 'Native'];
     final available =
         targetLanguage == 'English' ? canonical : const ['Standard', 'Native'];
-    final current = FFAppState().aiStyle.trim();
+    final current = _effectiveAiStyle();
     return available.where((style) => style != current).toList();
   }
 
@@ -3543,7 +3556,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
                   final data = snapshot.data ?? <String, String>{};
                   // 맨 위는 지금 설정된 스타일과 원래 문장, 그 아래로 나머지.
                   final entries = <MapEntry<String, String>>[
-                    MapEntry(FFAppState().aiStyle, baseText.trim()),
+                    MapEntry(_effectiveAiStyle(), baseText.trim()),
                     ...styles
                         .where(data.containsKey)
                         .map((s) => MapEntry(s, data[s]!)),
