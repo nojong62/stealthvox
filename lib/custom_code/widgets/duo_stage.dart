@@ -58,16 +58,29 @@ class DuoDirectStage extends StatelessWidget {
 /// 📐 [DuoDirectStage]와 같은 규칙이다. 폰 주위가 투명이라 줄여 잡을 이유가
 ///   없고, `contain`이라 비율도 그대로다. 두 방식의 그림 크기가 같아야
 ///   방식을 오갈 때 화면이 덜컹거리지 않는다.
+///
+/// 🔵 밝기의 기준은 **"지금 말해도 되는가"**다. 예전에는 `recording`(마이크를
+///   눌러 녹음 중인가)을 봤는데, 마이크가 세션 내내 열려 있는 지금은 그런
+///   순간이 따로 없다. 아래 마이크 상태등과 같은 값을 받아 화면 전체가 한
+///   가지 대답만 하게 한다.
 class DuoInterpreterStage extends StatelessWidget {
-  const DuoInterpreterStage({super.key, required this.recording});
+  const DuoInterpreterStage({
+    super.key,
+    required this.ready,
+    required this.partnerSpeaking,
+  });
 
-  final bool recording;
+  /// 게이트가 열려 있어 지금 말하면 전사로 들어간다.
+  final bool ready;
+
+  /// 상대 말을 통역해 들려주는 중 — 내 차례가 아니다.
+  final bool partnerSpeaking;
 
   @override
   Widget build(BuildContext context) {
     return AnimatedOpacity(
       duration: const Duration(milliseconds: 260),
-      opacity: recording ? 1 : 0.72,
+      opacity: partnerSpeaking ? 0.82 : (ready ? 1 : 0.6),
       child: SizedBox.expand(
         child: Image.asset(
           'assets/images/duo_interpreter.png',

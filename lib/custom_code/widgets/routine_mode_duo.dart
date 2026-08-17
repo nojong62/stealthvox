@@ -77,6 +77,55 @@ const Duration _kEchoWindow = Duration(seconds: 6);
 /// 긴 통화라고 토큰이 함께 늘면 곤란하다 — 미리보기 한 줄이면 충분하다.
 const int _kSummaryMaxLines = 60;
 
+/// 🔇 [INTERP-GATE] 상대 발화 재생이 끝나고 이만큼 지난 뒤에 오디오 게이트를
+/// 다시 연다.
+///
+/// **이 값이 만능 통역 always-on의 유일한 에코 방어선이다.** 마이크는 세션
+/// 내내 열려 있고, 앱이 읽어 주는 문장은 나와 **같은 언어**라 텍스트 필터
+/// ([_looksLikeEcho])만으로는 못 가른다. 재생이 끝난 직후 스피커에 남는
+/// 잔향이 마이크로 돌아오는 시간만큼은 STT로 보내지 않는 것이 1차 방어다.
+///
+/// 조정 근거는 로그다 — `[ECHO-GUARD] gate_reopened sinceTtsEndMs=...`와
+/// `[INTERP-DROP] ... sinceTtsMs=...`를 같이 본다. 드롭 로그의 echo=true가
+/// 이 값보다 짧은 간격에서만 나오면 값을 키우고, 그보다 한참 뒤에도 나오면
+/// 잔향이 아니라 다른 원인이다.
+const Duration kInterpGateReopenTail = Duration(milliseconds: 350);
+
+/// item_id 없이 도착한 전사문의 중복 판정 창.
+/// `completed`와 `done`이 같은 발화로 연달아 오는 간격은 수 ms다. 반대로
+/// 사람이 같은 문장을 정말 두 번 말하려면 VAD 침묵 구간(수백 ms)에 발화
+/// 시간까지 더해지므로, 이 창이 둘을 가른다.
+const Duration _kEmptyIdDedupeWindow = Duration(seconds: 2);
+
+/// 🔵 [INTERP-PHASE] 만능 통역의 **내 마이크** 국면.
+///
+/// 상대 발화 처리([InterpPartnerPhase])와 반드시 따로 둔다. 예전에는
+/// `_duoState` 문자열 하나가 두 축을 겸했는데, 마이크가 세션 내내 열려 있는
+/// 지금은 "나는 듣는 중이면서 동시에 상대 말을 재생 중"이 정상 상태라
+/// 한 변수로는 표현이 안 된다(둘 중 하나가 반드시 지워진다).
+enum InterpMicPhase {
+  /// 상대가 아직 없다. 마이크를 열지 않는다.
+  waitingPartner,
+
+  /// 상대는 들어왔고 소켓·캡처를 준비하는 중이다.
+  preparing,
+
+  /// 게이트가 열려 있다 — **이제 그냥 말하면 된다.**
+  listening,
+
+  /// 서버 VAD가 발화 시작을 봤다.
+  speaking,
+
+  /// 상대 말을 재생하는 동안 게이트를 닫아 뒀다. 캡처는 살아 있다.
+  gated,
+
+  /// 상대가 나갔거나 준비에 실패했다.
+  ended,
+}
+
+/// 🔵 [INTERP-PHASE] 상대 발화 처리 국면. 내 마이크와 독립이다.
+enum InterpPartnerPhase { idle, translating, playing }
+
 class RoutineModeDuo extends StatefulWidget {
   const RoutineModeDuo({
     Key? key,
@@ -93,7 +142,10 @@ class RoutineModeDuo extends StatefulWidget {
 }
 
 class _RoutineModeDuoState extends State<RoutineModeDuo>
-    with WidgetsBindingObserver, BillingIdleMixin<RoutineModeDuo> {
+    with
+        WidgetsBindingObserver,
+        SingleTickerProviderStateMixin,
+        BillingIdleMixin<RoutineModeDuo> {
   // ============================================================================
   // 📦 [1. 상태 변수 (STATE VARIABLES)]
   // 앱의 전반적인 상태, UI 설정, 데이터 보관용 변수 모음
@@ -174,17 +226,54 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   AnyonePreparedAudioCapture? _interpCapture;
   StreamSubscription<Uint8List>? _interpCaptureSub;
 
-  /// 이번 턴에서 이미 확정한 전사문 id. 같은 item이 두 번 오면 한 번만 쓴다.
+  /// 이번 세션에서 이미 확정한 전사문 id. 같은 item이 두 번 오면 한 번만 쓴다.
+  /// 마이크가 세션 내내 열려 있으므로 턴 경계에서 비우지 않는다 — 비우면
+  /// 재전달된 item이 두 번째 발화로 살아난다.
   final Set<String> _interpHandledItemIds = <String>{};
-
-  /// 마이크를 연 채 아무 말도 없을 때 안전하게 닫기 위한 시계.
-  /// 서버 VAD는 "말이 있었다"를 전제로 끝을 알려주므로, 애초에 말이 없으면
-  /// 아무 신호도 오지 않는다. 마이크 점유와 과금을 막는 것은 앱 몫이다.
-  Timer? _interpNoSpeechTimer;
 
   /// 전사 세션 세대값. 방을 나가거나 재연결하면 올라가고, 이전 세대의 늦은
   /// 전사 완료는 무시된다.
   int _interpGeneration = 0;
+
+  // ── 🔵 [만능 통역 Always-on] 마이크 수명과 상태 축 ───────────────────────
+  // 마이크는 상대가 들어온 뒤 **한 번만** 열고 세션이 끝날 때까지 유지한다.
+  // 턴 경계는 서버 VAD와 오디오 게이트가 전담한다 — recorder를 턴마다
+  // stop/start하지 않는다(그 왕복이 첫 소리 지연의 정체였다).
+
+  /// 캡처를 여는 중. 스냅샷이 연달아 떨어져도 마이크를 두 번 열지 않는다.
+  bool _interpStarting = false;
+
+  /// 이 상대 세션에서 자동 시작을 이미 시도했는가. 직접 대화의
+  /// `_autoStartAttempted`와 같은 정책이다 — 실패 후 무한 재시도로 권한 창이
+  /// 반복해 뜨는 것을 막고, 상대가 나가면 풀어 다음 상대에 다시 시도한다.
+  bool _interpAutoStartAttempted = false;
+
+  /// 준비가 실패로 끝났다. 화면이 "준비 중"에 영원히 머무는 대신 왜 말이
+  /// 안 가는지 말해 줘야 한다.
+  bool _interpStartFailed = false;
+
+  /// 내 마이크 국면. **UI 마이크 등은 오직 이 값과 [_interpReady]만 본다.**
+  InterpMicPhase _interpMicPhase = InterpMicPhase.waitingPartner;
+
+  /// 상대 발화 처리 국면. 내 마이크와 독립이다.
+  InterpPartnerPhase _interpPartnerPhase = InterpPartnerPhase.idle;
+
+  /// 게이트를 다시 열 예정인 타이머. 재생이 연달아 오면 앞선 예약은 버린다.
+  Timer? _interpGateReopenTimer;
+
+  /// 내 발화 일련번호와 발화 시작 시각. History 순서 복원용이다
+  /// (직접 대화의 `_directSeq`/`_directSpeechStartedAt`과 같은 목적).
+  int _interpSeq = 0;
+  DateTime? _interpSpeechStartedAt;
+
+  /// item_id 없이 도착한 마지막 전사문과 그 시각. 중복 판정용이다
+  /// ([_isDuplicateEmptyIdTranscript] 참고).
+  String _lastEmptyIdTranscript = '';
+  DateTime? _lastEmptyIdTranscriptAt;
+
+  /// 상태등의 약한 맥박. **발화 중에만 돈다** — 가만히 있는 화면에서 프레임을
+  /// 계속 태우지 않기 위해 [_setInterpMicPhase]가 켜고 끈다.
+  late final AnimationController _interpPulse;
 
   /// 상대 발화 재생기. tts-1 PCM을 받는 대로 튼다(mp3 통파일 대기 없음).
   TtsAdapter? _interpTts;
@@ -288,6 +377,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   // 🆕 [PTT] Duo 무전기 상태기계
   // idle: 대기 / recording: 녹음 중 / finishing: 마이크 종료 표시 /
   // processing: STT·번역 중 / playing: TTS 재생 중 / cooldown: 재생 후 짧은 잠금
+  //
+  // ⚠️ **읽는 곳이 남아 있지 않다.** 만능 통역이 always-on으로 바뀌면서
+  //   [InterpMicPhase]/[InterpPartnerPhase] 두 축으로 갈라졌고, 이 문자열의
+  //   마지막 독자였던 PTT 마이크 버튼이 사라졌다. 직접 대화가 쓰던 쓰기
+  //   (`'live'`/`'idle'`)만 남아 있는데, 그 경로를 이번 작업에서 건드리지
+  //   않기로 해서 필드째로 남긴다. 직접 대화 화면을 손볼 때 같이 걷어낼 것.
+  // ignore: unused_field
   String _duoState = 'idle';
   // 🆕 [과금정책] 게스트 입장 후에만 과금 시작 (호스트 대기 중 정지)
   bool _billingStarted = false;
@@ -355,9 +451,21 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   @override
   bool get isBillingEnabled => _amIHost && !_isTrialHost;
 
+  /// ⚠️ **기준은 "마이크가 열려 있는가"가 아니라 "실제로 말하고 있는가"다.**
+  /// 만능 통역이 always-on이 되면서 마이크는 세션 내내 열려 있으므로, 열림을
+  /// 기준으로 삼으면 유휴 판정이 영영 서지 않는다. 두 방식 모두 서버 VAD가
+  /// 잡은 `isUserSpeaking`만 본다.
   @override
   bool get isBillingBusy {
     if (_directStt?.isUserSpeaking == true) return true;
+    // 게이트가 열려 있을 때만 본다. 닫힌 채 굳은 `isUserSpeaking`으로 유휴
+    // 판정이 막히는 일이 없게 하는 이중 안전장치다(1차 방어는 닫을 때의 flush).
+    final interp = _interpStt;
+    if (interp != null && interp.isUserSpeaking && interp.audioGateOpen) {
+      return true;
+    }
+    // 상대 말을 통역해 들려주는 중이면 대화가 도는 중이다.
+    if (_interpPartnerPhase != InterpPartnerPhase.idle) return true;
     final at = _lastPartnerVoiceAt;
     if (at != null && DateTime.now().difference(at) < _kVoiceActivityWindow) {
       return true;
@@ -449,9 +557,135 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     return false;
   }
 
+  /// ⚠️ **직접 대화 전용으로 남은 값이다.** 만능 통역은 이 문자열을 더 이상
+  /// 쓰지 않는다 — 마이크와 상대 재생을 [InterpMicPhase]/[InterpPartnerPhase]
+  /// 두 축으로 따로 관리한다.
   void _setDuoState(String s) {
     if (!mounted) return;
     setState(() => _duoState = s);
+  }
+
+  // ── 🔵 [만능 통역 Always-on] readiness와 국면 전환 ───────────────────────
+
+  /// **화면의 마이크 등이 밝아도 되는가.**
+  ///
+  /// 요구사항의 핵심이다 — 이 getter가 참인 것과 실제로 PCM이 STT로 흘러갈
+  /// 수 있는 것이 **같은 뜻이어야 한다.** 그래서 조건을 UI용으로 따로 두지
+  /// 않고, PCM이 지나가는 길목에 실제로 놓인 것들만 그대로 나열한다:
+  /// 상대가 있고 / 소켓이 붙어 있고 / 캡처가 살아 있고 / 게이트가 열려 있다.
+  bool get _interpReady =>
+      !_isDirectMode &&
+      !_isExiting &&
+      _isPartnerOnline &&
+      (_interpStt?.isConnected ?? false) &&
+      _interpCapture != null &&
+      (_interpStt?.audioGateOpen ?? false);
+
+  void _setInterpMicPhase(InterpMicPhase phase) {
+    if (!mounted || _interpMicPhase == phase) return;
+    setState(() => _interpMicPhase = phase);
+    if (phase == InterpMicPhase.speaking) {
+      if (!_interpPulse.isAnimating) _interpPulse.repeat(reverse: true);
+    } else {
+      _interpPulse.stop();
+      _interpPulse.value = 0;
+    }
+    _lgDuo('[INTERP-PHASE]', 'mic=${phase.name} ready=$_interpReady');
+  }
+
+  void _setInterpPartnerPhase(InterpPartnerPhase phase) {
+    if (!mounted || _interpPartnerPhase == phase) return;
+    setState(() => _interpPartnerPhase = phase);
+    _lgDuo('[INTERP-PHASE]', 'partner=${phase.name}');
+  }
+
+  /// 게이트를 연다. 여는 조건은 [_interpReady]의 게이트 항목을 뺀 나머지와
+  /// 같다 — 여기서 열면 그 즉시 [_interpReady]가 참이 된다.
+  void _openInterpGate(String reason) {
+    _interpGateReopenTimer?.cancel();
+    _interpGateReopenTimer = null;
+    if (_isDirectMode || _isExiting || !mounted) return;
+    if (!_isPartnerOnline) return;
+    final stt = _interpStt;
+    if (stt == null || !stt.isConnected || _interpCapture == null) return;
+    stt.openAudioGate(reason: reason);
+    // 닫을 때 진행 중이던 발화는 확정시켰으므로, 여는 순간은 언제나 "듣는
+    // 중"에서 시작한다. 다음 `speech_started`가 오면 그때 발화 중으로 간다.
+    _setInterpMicPhase(InterpMicPhase.listening);
+  }
+
+  /// 게이트를 닫는다. **캡처 객체는 건드리지 않는다** — recorder를 살려 두는
+  /// 것이 always-on의 전부다. 여기서 stop을 부르면 다음 발화의 첫 소리에
+  /// 다시 마이크 기동 시간이 붙는다.
+  ///
+  /// ⚠️ **말하는 도중에 닫히는 경우를 반드시 같이 처리한다.** 서버 VAD는
+  /// 오디오가 계속 들어와야 발화 끝(`speech_stopped`→`committed`)을 찍는다.
+  /// 그냥 게이트만 닫으면 서버는 그 발화를 영영 확정하지 못하고, 세션의
+  /// `isUserSpeaking`이 참으로 굳는다 — 그러면 유휴 판정이 서지 않아
+  /// **과금이 영영 안 멈춘다.** 그래서 진행 중인 발화가 있으면 여기서
+  /// 명시적으로 확정시킨다. 덤으로 유저가 이미 한 말도 잃지 않는다.
+  void _closeInterpGate(String reason) {
+    _interpGateReopenTimer?.cancel();
+    _interpGateReopenTimer = null;
+    final stt = _interpStt;
+    if (stt == null) return;
+    // ⚠️ **이미 닫혀 있으면 flush하지 않는다.** 상대 메시지가 연달아 오면
+    //   이 함수가 재생마다 불리는데, 앞 재생이 닫아 둔 상태에서 또 flush하면
+    //   `input_audio_buffer.commit`이 한 번 더 나간다. 서버가 이미 확정한
+    //   버퍼에 대한 commit은 "빈 버퍼" error 이벤트가 되어 돌아온다.
+    final bool wasOpen = stt.audioGateOpen;
+    final bool wasSpeaking = wasOpen && stt.hasPendingUtterance;
+    stt.closeAudioGate(reason: reason);
+    if (wasSpeaking) {
+      _lgDuo('[INTERP-GATE]', 'flush_on_close reason=$reason — 말하던 중이었다');
+      // 기다리지 않는다. 전사문이 오면 평소 경로(`_onInterpreterTranscript`)로
+      // 흘러가고, 안 와도 세션이 상한에서 대기를 풀어 준다.
+      unawaited(stt
+          .flushPendingUtterance(reason: reason)
+          .catchError((Object e) {
+        _lgDuo('⚠️ [INTERP-GATE]', 'flush_failed=${e.runtimeType}');
+        return false;
+      }));
+    }
+    if (!_isDirectMode && _interpCapture != null) {
+      _setInterpMicPhase(InterpMicPhase.gated);
+    }
+  }
+
+  /// item_id 없이 온 전사문이 방금 처리한 것과 같은가.
+  ///
+  /// 정상 경로에서는 서버가 item_id를 준다. 이 함수는 그것이 비어 도착했을
+  /// 때만 쓰는 그물이다 — `completed`와 `done`이 같은 발화로 연달아 들어오는
+  /// 경우를 잡는다(두 이벤트 사이는 수 ms다). 창을 짧게 둬서, 사람이 같은
+  /// 문장을 실제로 두 번 말한 경우까지 삼키지 않게 한다.
+  bool _isDuplicateEmptyIdTranscript(String trimmed) {
+    if (trimmed.isEmpty) return false;
+    final DateTime now = DateTime.now();
+    final DateTime? last = _lastEmptyIdTranscriptAt;
+    final bool duplicate = trimmed == _lastEmptyIdTranscript &&
+        last != null &&
+        now.difference(last) < _kEmptyIdDedupeWindow;
+    _lastEmptyIdTranscript = trimmed;
+    _lastEmptyIdTranscriptAt = now;
+    return duplicate;
+  }
+
+  /// 재생이 끝난 뒤 [kInterpGateReopenTail]만큼 기다렸다가 연다.
+  /// 그 사이에 다음 재생이 시작되면 [_closeInterpGate]가 이 예약을 취소한다.
+  void _scheduleInterpGateReopen(String reason) {
+    _interpGateReopenTimer?.cancel();
+    final int generation = _interpGeneration;
+    _interpGateReopenTimer = Timer(kInterpGateReopenTail, () {
+      _interpGateReopenTimer = null;
+      if (generation != _interpGeneration) return;
+      final DateTime? ttsEnd = _interpTtsEndedAt;
+      // 🔇 [ECHO] tail 값을 정하는 근거가 이 숫자다. 필드 주석 참고.
+      _lgDuo(
+          '[ECHO-GUARD]',
+          'gate_reopened reason=$reason sinceTtsEndMs='
+              '${ttsEnd == null ? -1 : DateTime.now().difference(ttsEnd).inMilliseconds}');
+      _openInterpGate(reason);
+    });
   }
 
   bool _isPartnerOnline = false;
@@ -599,6 +833,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     // 게스트는 과금 대상이 아니라 소진 신호 자체가 뜨지 않는다).
     StealthRoomMaster.saveAndExitCurrentMode = _handleAutoSaveAndExit;
     WidgetsBinding.instance.addObserver(this);
+    // 상태등 맥박. 발화 중에만 돈다(`_setInterpMicPhase`가 켜고 끈다).
+    _interpPulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    );
     _fetchKeys();
     _audioPlayer.setVolume(1.0);
     _ttsPlayer.setVolume(1.0);
@@ -696,12 +935,14 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     // 🆕 만능 통역 경로(마이크·전사 소켓·재생기)도 같이 내린다. 세대를 먼저
     //    올려 늦게 도착하는 전사 완료가 지워진 화면을 건드리지 못하게 한다.
     ++_interpGeneration;
-    _interpNoSpeechTimer?.cancel();
+    _interpGateReopenTimer?.cancel();
+    _interpGateReopenTimer = null;
     unawaited(_stopInterpreterCapture('dispose'));
     unawaited(_interpStt?.dispose());
     _interpStt = null;
     unawaited(_interpTts?.dispose());
     _interpTts = null;
+    _interpPulse.dispose();
     _cancelAudio();
     _audioRecorder.dispose();
     _audioPlayer.dispose();
@@ -749,6 +990,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           if (relayUrl.isNotEmpty) _relayUrl = relayUrl;
           if (relayToken.isNotEmpty) _relayToken = relayToken;
         });
+        // 🔵 [INTERP-LIVE] 키가 늦게 도착했을 때의 유일한 구제 지점이다.
+        //   상대가 이미 들어와 있는데 키가 없어서 마이크를 못 열었다면
+        //   (`start_blocked reason=no_api_key`) 다시 시도할 계기가 여기뿐이다
+        //   — 게스트에게는 그 뒤로 아무 스냅샷도 떨어지지 않는다.
+        _maybeAutoStartInterpreter('keys_ready');
       }
     } catch (e) {}
   }
@@ -929,6 +1175,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 시작할 방법이 아예 사라지기 때문이다.** 그때 유저에게 남는 손잡이가 이것뿐이다.
   ///
   /// 통화를 끝내는 것은 이 버튼이 아니라 방을 나가는 것이다(대칭 종료).
+  ///
+  /// ⚠️ **지금은 호출부가 없다.** 직접 대화 화면에서 마이크 버튼을 걷어낸
+  /// 뒤로(자동 연결이라 누를 일이 없다) 이 핸들러만 남았다. 지우지 않는 이유는
+  /// 위 문단 그대로다 — 음소거와 수동 재연결은 버튼이 돌아오면 곧바로 필요한
+  /// 동작이고, 로직은 지금도 맞다. 만능 통역 always-on 작업에서 직접 대화
+  /// 동작을 바꾸지 않기 위해 그대로 둔다.
+  // ignore: unused_element
   void _onDirectMicToggle() {
     if (!_directCallActive) {
       if (_directStarting || _directStopping) {
@@ -1402,11 +1655,21 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     );
     session.shouldReconnect = () =>
         !_isExiting && _isConversationActive && generation == _interpGeneration;
+    // 발화 시작/종료는 **화면과 History 순서용**이다. 파이프라인은 여전히
+    // `transcription.completed`에서만 열린다(한 발화가 두 번 처리되지 않는다).
     session.onSpeechStarted = () {
       if (generation != _interpGeneration) return;
-      // 말이 시작됐으니 "아무 말도 없었다"는 안전 종료는 취소한다.
-      _interpNoSpeechTimer?.cancel();
-      _interpNoSpeechTimer = null;
+      _interpSpeechStartedAt = DateTime.now();
+      if (_interpStt?.audioGateOpen ?? false) {
+        _setInterpMicPhase(InterpMicPhase.speaking);
+      }
+    };
+    session.onSpeechStopped = () {
+      if (generation != _interpGeneration) return;
+      if (_interpMicPhase != InterpMicPhase.speaking) return;
+      _setInterpMicPhase((_interpStt?.audioGateOpen ?? false)
+          ? InterpMicPhase.listening
+          : InterpMicPhase.gated);
     };
     session.onTranscriptCompleted = (itemId, text) {
       if (generation != _interpGeneration) return;
@@ -1416,7 +1679,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _lgDuo('⚠️ [INTERP-STT]', 'fatal=$reason — 마이크를 닫고 대기로 돌린다');
       if (generation != _interpGeneration) return;
       unawaited(_stopInterpreterCapture('stt_fatal'));
-      _setDuoState('idle');
+      // 자동 시도 기록을 풀어 둔다. 상대가 아직 방에 있으므로 다음 스냅샷이
+      // 다시 붙여 볼 수 있다 — 여기서 잠가 버리면 복구할 손잡이가 없다.
+      _interpAutoStartAttempted = false;
+      if (mounted) setState(() => _interpStartFailed = true);
+      _setInterpMicPhase(InterpMicPhase.preparing);
     };
     final ok = await session.connect();
     if (generation != _interpGeneration || _isExiting) {
@@ -1432,49 +1699,68 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     return true;
   }
 
-  /// 상대가 들어온 시점에 전사 소켓을 미리 열어 둔다.
+  /// 🔵 [INTERP-LIVE] 상대가 방에 있으면 마이크를 자동으로 연다.
   ///
-  /// 열지 않아도 첫 탭에서 `_startInterpreterTurn`이 열지만, 그러면 **연결
-  /// 수립 시간이 첫 발화 지연에 그대로 붙는다.** 세션 첫 요청이 유독 느린
-  /// 이유가 그것이고, 미리 열어 두면 그 값이 0이 된다.
-  void _maybePrewarmInterpreterStt(String reason) {
-    if (_isDirectMode || _isExiting || _openAiKey.isEmpty) return;
-    if (_interpStt?.isConnected ?? false) return;
-    _lgDuo('[INTERP-STT]', 'prewarm reason=$reason');
-    unawaited(_ensureInterpreterStt());
+  /// 직접 대화의 [_maybeAutoStartDirectCall]과 같은 정책이다 — 혼자 있는
+  /// 동안에는 열지 않고(들을 사람이 없는데 STT로 PCM을 보낼 이유가 없다),
+  /// 자동 시도는 상대 한 명당 한 번으로 묶는다(실패 후 권한 창이 반복해서
+  /// 뜨는 것을 막는다). 상대가 나가면 기록을 풀어 다음 상대에 다시 시도한다.
+  void _maybeAutoStartInterpreter(String reason) {
+    if (_isDirectMode) return;
+    if (!_isPartnerOnline) return;
+    if (!mounted || _isExiting) return;
+    if (_interpCapture != null || _interpStarting) return;
+    if (_interpAutoStartAttempted) return;
+    _interpAutoStartAttempted = true;
+    _lgDuo('[INTERP-LIVE]', 'auto_start reason=$reason role=$_myRole');
+    unawaited(_startInterpreterCapture(reason));
   }
 
-  /// 🆕 [PTT] 마이크를 연다. 소켓은 이미 열려 있고, 여기서 여는 것은
-  /// 마이크와 오디오 게이트뿐이다.
-  Future<void> _startInterpreterTurn() async {
-    if (_openAiKey.isEmpty) return;
-    // 직접 대화는 이 경로를 타지 않는다. 마이크는 통화가 쥔다.
-    if (_isDirectMode) return;
-    // 🆕 [PTT] idle 상태가 아니면 시작 금지 (재생·처리·쿨다운·이미 녹음 중 차단)
-    if (_duoState != 'idle') return;
-    if (_isDrainingIncoming) return;
-    if (_interpCapture != null) return;
-    // 🔇 [ECHO] 앱이 나와 같은 대화 언어로 말하게 됐다. 재생이 끝나기 전에
-    //   마이크가 열리면 앱 목소리가 내 발화로 들어온다.
-    if (_interpTts?.isBusy ?? false) {
-      _lgDuo('[ECHO-GUARD]', 'mic_open_blocked reason=tts_busy');
+  /// 🔵 [INTERP-LIVE] 마이크를 **한 번** 연다. 세션이 끝날 때까지 유지한다.
+  ///
+  /// 예전에는 탭 한 번이 한 턴이었고 턴마다 recorder를 stop/start 했다.
+  /// 지금은 여기서 연 캡처가 방을 나갈 때까지 살아 있고, 턴 경계는 서버 VAD와
+  /// 오디오 게이트가 전담한다. **화면의 마이크 등이 밝아지는 순간은 이 함수가
+  /// 게이트를 여는 마지막 줄이다** — 그래야 "밝다 = 지금 말하면 들어간다"가
+  /// 거짓이 되지 않는다.
+  Future<void> _startInterpreterCapture(String reason) async {
+    if (_isDirectMode || _isExiting || !mounted) return;
+    if (_interpCapture != null || _interpStarting) return;
+    if (_openAiKey.isEmpty) {
+      // 키는 Remote Config가 늦게 물어다 준다. 이건 실패가 아니라 "아직"이므로
+      // 자동 시도 기록을 도로 풀어 `_fetchKeys`가 다시 부를 수 있게 둔다.
+      _lgDuo('[INTERP-LIVE]', 'start_deferred reason=no_api_key');
+      _interpAutoStartAttempted = false;
       return;
     }
-    if (!await _audioRecorder.hasPermission()) return;
+    if (!await _audioRecorder.hasPermission()) {
+      _lgDuo('⚠️ [INTERP-LIVE]', 'start_blocked reason=no_mic_permission');
+      if (mounted) setState(() => _interpStartFailed = true);
+      _setInterpMicPhase(InterpMicPhase.ended);
+      return;
+    }
 
+    _interpStarting = true;
+    if (mounted) setState(() => _interpStartFailed = false);
+    _setInterpMicPhase(InterpMicPhase.preparing);
     BillingTicker.instance.resumeFromActivity('duo_mic_start');
-    final bool sttReady = await _ensureInterpreterStt();
-    if (!sttReady) {
-      _lgDuo('⚠️ [INTERP-STT]', 'turn_aborted reason=no_session');
-      _setDuoState('idle');
-      return;
-    }
-    final int generation = _interpGeneration;
     try {
+      final bool sttReady = await _ensureInterpreterStt();
+      if (!sttReady) {
+        _lgDuo('⚠️ [INTERP-LIVE]', 'start_failed reason=no_stt_session');
+        if (mounted) setState(() => _interpStartFailed = true);
+        _setInterpMicPhase(InterpMicPhase.preparing);
+        return;
+      }
+      // ⚠️ 세대값은 `_ensureInterpreterStt` **뒤에** 읽는다. 그 안에서 소켓을
+      //   새로 만들면 세대가 올라가므로, 먼저 읽으면 방금 만든 세션을 남의
+      //   세대로 오인해 캡처를 곧바로 버린다.
+      final int generation = _interpGeneration;
       final capture = await AnyonePreparedAudioCapture.start(
         recorder: _audioRecorder,
-        // 🔇 [ECHO] 마이크는 재생이 끝난 뒤에만 열리지만, 스피커폰에서는 앞선
-        //   재생의 잔향이 남는다. AEC는 "방금 내가 재생한 신호"라는 정답을
+        // 🔇 [ECHO] always-on이라 상대 말이 재생되는 동안에도 마이크는 열려
+        //   있다(게이트만 닫는다). 스피커폰으로 나간 앱 목소리가 마이크로
+        //   돌아오는 것을 AEC가 지운다 — "방금 내가 재생한 신호"라는 정답을
         //   알고 빼므로 글자를 덜 해친다.
         echoCancel: true,
         // 🎧 [STT-QUALITY] 잡음 억제는 끈다 — 무엇이 잡음인지 추측해서 깎기
@@ -1482,56 +1768,48 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         noiseSuppress: false,
         onRecordingStarted: (at) => _lgDuo(
             '[INTERP-MIC]', 'recording_started at=${at.toIso8601String()}'),
-        // 첫 프레임 시각은 "버튼을 눌러서 실제로 소리가 흐르기까지"를 재는
-        // 유일한 기준점이다. 느리다는 신고가 들어오면 여기부터 본다.
         onFirstFrame: (at, byteCount) => _lgDuo('[INTERP-MIC]',
             'first_frame_bytes=$byteCount at=${at.toIso8601String()}'),
       );
-      if (generation != _interpGeneration || _isExiting) {
+      if (generation != _interpGeneration || _isExiting || !mounted) {
         await capture.stop();
         return;
       }
       _interpCapture = capture;
-      _interpHandledItemIds.clear();
       _interpCaptureSub = capture.stream.listen(
         (bytes) {
           if (bytes.isEmpty || generation != _interpGeneration) return;
           final stt = _interpStt;
+          // 게이트가 닫혀 있으면 조각을 그냥 버린다. **캡처는 계속 돈다** —
+          // 이것이 always-on과 "마이크를 껐다 켠다"의 차이다.
           if (stt != null && stt.audioGateOpen) stt.appendAudio(bytes);
         },
         onError: (Object e) =>
             _lgDuo('[INTERP-STT]', 'capture_error=${e.runtimeType}'),
       );
-      _interpStt?.openAudioGate(reason: 'interpreter_turn');
-      _setDuoState('recording');
-      // 🔇 [ECHO] 에코 신고가 들어오면 이 숫자부터 본다. 필드 주석 참고.
-      final DateTime? ttsEnd = _interpTtsEndedAt;
+      // 마지막 줄에서 연다. 이 줄이 곧 화면이 밝아지는 순간이다.
+      _openInterpGate('capture_started');
       _lgDuo(
-          '[ECHO-GUARD]',
-          'mic_opened sinceTtsEndMs='
-              '${ttsEnd == null ? -1 : DateTime.now().difference(ttsEnd).inMilliseconds}');
-
-      // 말이 한 번도 없이 오래 켜져 있으면 안전 종료(전송 안 함).
-      // 서버 VAD는 말이 있어야 끝을 알려주므로 이건 앱이 지켜야 한다.
-      _interpNoSpeechTimer?.cancel();
-      _interpNoSpeechTimer = Timer(const Duration(seconds: 15), () {
-        if (generation != _interpGeneration) return;
-        if (_interpStt?.isUserSpeaking ?? false) return;
-        _lgDuo('[INTERP-STT]', 'auto_closed reason=no_speech_15s');
-        unawaited(_stopInterpreterCapture('no_speech'));
-        _setDuoState('idle');
-      });
+          '[INTERP-LIVE]',
+          'capture_started reason=$reason gen=$generation role=$_myRole '
+              'ready=$_interpReady');
     } catch (e) {
-      _lgDuo('⚠️ [INTERP-STT]', 'mic_start_failed=${e.runtimeType}');
+      _lgDuo('⚠️ [INTERP-LIVE]', 'mic_start_failed=${e.runtimeType}');
       await _stopInterpreterCapture('mic_start_failed');
-      _setDuoState('idle');
+      if (mounted) setState(() => _interpStartFailed = true);
+      _setInterpMicPhase(InterpMicPhase.preparing);
+    } finally {
+      _interpStarting = false;
     }
   }
 
-  /// 마이크만 닫는다. **소켓은 그대로 둔다** — 다음 턴에 다시 쓴다.
+  /// 마이크를 닫는다. **소켓은 그대로 둔다.**
+  ///
+  /// always-on에서는 턴 경계가 아니라 **세션 경계**에서만 불린다 —
+  /// 상대 이탈, 방 나가기, dispose, STT 치명 오류 넷뿐이다.
   Future<void> _stopInterpreterCapture(String reason) async {
-    _interpNoSpeechTimer?.cancel();
-    _interpNoSpeechTimer = null;
+    _interpGateReopenTimer?.cancel();
+    _interpGateReopenTimer = null;
     final sub = _interpCaptureSub;
     _interpCaptureSub = null;
     await sub?.cancel();
@@ -1543,66 +1821,73 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _lgDuo('[INTERP-STT]', 'mic_closed reason=$reason');
     }
     _interpStt?.closeAudioGate(reason: reason);
+    if (!_isDirectMode) _setInterpMicPhase(InterpMicPhase.ended);
+  }
+
+  /// 🔵 [INTERP-LIVE] 상대가 사라졌다. 마이크 등을 끄고 오디오 경로를 접는다.
+  ///
+  /// 직접 대화는 릴레이 presence가 이 일을 하지만 만능 통역에는 릴레이가
+  /// 없다. 호출부는 둘 — 호스트의 세션 스냅샷(게스트 퇴장)과 게스트의 세션
+  /// 스냅샷(문서 삭제 = 호스트 퇴장)이다.
+  Future<void> _handleInterpreterPartnerLeft(String reason) async {
+    if (_isDirectMode) return;
+    _lgDuo('[INTERP-LIVE]', 'partner_left reason=$reason');
+    _interpGateReopenTimer?.cancel();
+    _interpGateReopenTimer = null;
+    _incomingQueue.clear();
+    _interpTts?.stopAll(reason: reason);
+    _setInterpPartnerPhase(InterpPartnerPhase.idle);
+    // 다음 상대가 들어오면 다시 자동으로 붙을 수 있게 기록을 푼다.
+    _interpAutoStartAttempted = false;
+    if (mounted) {
+      setState(() {
+        _isPartnerOnline = false;
+        _interpStartFailed = false;
+      });
+    }
+    await _stopInterpreterCapture(reason);
   }
 
 // ============================================================================
   // 📦 [5. 핵심 양방향 통역 파이프라인 (CORE INTERPRETER LOGIC)]
-  // 내 발화: STT → 내 폰 즉시 렌더 → 내 타겟 통역/TTS → 공유 채널 업로드
-  // 상대 발화: 채널 리스너 수신 → 내 언어쌍으로 통역 → 좌측 렌더 + 내 타겟 TTS
+  // 내 발화: Server VAD → 전사 확정 → 공유 채널 업로드 → History(원문)
+  // 상대 발화: 채널 리스너 수신 → 내 ORIGIN으로 통역 → 게이트 닫고 TTS 재생
   // ============================================================================
-  /// 🆕 [PTT] 버튼으로 턴을 끝낸다. 서버 VAD가 아직 끝을 못 봤으면 여기서
-  /// 마지막 버퍼를 확정시키고 전사문을 기다린다.
-  Future<void> _commitInterpreterTurn() async {
-    // 화면에서는 마이크가 자연스럽게 꺼지는 짧은 전환을 보여준다.
-    _setDuoState('finishing');
-    await _stopInterpreterCapture('user_commit');
-    final stt = _interpStt;
-    if (stt == null) {
-      _setDuoState('idle');
-      if (_incomingQueue.isNotEmpty) _drainIncoming();
-      return;
-    }
-    if (!stt.hasPendingUtterance) {
-      // 말이 없었거나 이미 확정돼 처리 중이다.
-      if (_duoState == 'finishing') _setDuoState('idle');
-      if (_incomingQueue.isNotEmpty) _drainIncoming();
-      return;
-    }
-    _setDuoState('processing');
-    try {
-      await stt.flushPendingUtterance(reason: 'user_commit');
-    } catch (e) {
-      _lgDuo('⚠️ [INTERP-STT]', 'flush_failed=${e.runtimeType}');
-    }
-    // 전사문이 끝내 안 오면 여기서 풀어 준다. 아니면
-    // `_onInterpreterTranscript`가 이미 다음 상태로 넘겼다.
-    if (_duoState == 'processing' &&
-        (_interpStt?.hasPendingUtterance ?? false)) {
-      _lgDuo('⚠️ [INTERP-STT]', 'commit_no_transcript — 이 발화는 사라졌다');
-      _setDuoState('idle');
-      if (_incomingQueue.isNotEmpty) _drainIncoming();
-    }
-  }
-
   /// 서버 VAD가 발화 끝을 보고 전사문을 돌려준 자리. **유저 턴은 여기서만
   /// 확정된다** — `speech_stopped`는 종료 신호일 뿐이라 파이프라인을 열지 않는다.
+  ///
+  /// 🔵 always-on: **여기서 마이크를 닫지 않는다.** 예전에는 전사가 확정될
+  /// 때마다 캡처를 stop했고 다음 턴은 버튼이 열었다 — 그 한 줄이 연속 발화를
+  /// 막던 장본인이다. 이제 캡처도 게이트도 그대로 두고 다음 발화를 받는다.
   Future<void> _onInterpreterTranscript(
       int generation, String itemId, String text) async {
     if (generation != _interpGeneration || _isExiting) return;
-    // 같은 item이 두 번 오면(재전달·flush 겹침) 한 번만 쓴다.
-    if (itemId.isNotEmpty && !_interpHandledItemIds.add(itemId)) {
-      _lgDuo('[INTERP-STT]', 'duplicate_skipped item=$itemId');
+    final String trimmed = text.trim();
+
+    // ── 한 발화는 한 번만 처리한다 ─────────────────────────────────────────
+    // 전사 세션은 `transcription.completed`와 `transcription.done`을 **같은
+    // 자리에서** 콜백으로 흘려보낸다. 둘 다 오는 스펙이면 같은 발화가 두 번
+    // 들어오고, 그대로 두면 번역·TTS·Firestore가 두 벌씩 생긴다.
+    // (강제 commit인 `flushPendingUtterance`는 전사문을 만들지 않는다 —
+    //  버퍼를 일찍 확정시킬 뿐이라 completed는 여전히 서버에서 한 번 온다.)
+    if (itemId.isNotEmpty) {
+      if (!_interpHandledItemIds.add(itemId)) {
+        _lgDuo('[INTERP-STT]', 'duplicate_skipped item=$itemId');
+        return;
+      }
+      if (_interpHandledItemIds.length > 50) {
+        _interpHandledItemIds.remove(_interpHandledItemIds.first);
+      }
+    } else if (_isDuplicateEmptyIdTranscript(trimmed)) {
+      // item_id가 비어 오면 위 집합이 무력하다. 짧은 창 안의 같은 문장은
+      // 중복으로 본다 — 사람이 같은 말을 두 번 하려면 VAD 침묵 구간을 지나야
+      // 하므로 이 창보다 한참 오래 걸린다.
+      _lgDuo('[INTERP-STT]', 'duplicate_skipped item=<empty> len=${trimmed.length}');
       return;
     }
-    if (_interpHandledItemIds.length > 50) {
-      _interpHandledItemIds.remove(_interpHandledItemIds.first);
-    }
+
     BillingTicker.instance.resumeFromActivity('duo_stt_result');
 
-    // 말이 끝났으니 마이크를 닫는다. 다음 턴은 버튼으로 연다.
-    await _stopInterpreterCapture('turn_committed');
-
-    final String trimmed = text.trim();
     final String lowerRaw = trimmed.toLowerCase();
     final String lowerClean =
         lowerRaw.replaceAll(RegExp(r'[^\w\s가-힣]'), '').trim();
@@ -1651,16 +1936,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           'item=$itemId len=${trimmed.length} '
               'ghost=${isHardGhost || isShortGhost} echo=$isEcho '
               'sinceTtsMs=${spokeAt == null ? 'never' : DateTime.now().difference(spokeAt).inMilliseconds}');
-      _setDuoState('idle'); // 조용히 대기 복귀(자동 재녹음 금지)
+      // 버린 발화다. 마이크는 그대로 열려 있고 다음 말을 계속 받는다.
       if (_incomingQueue.isNotEmpty) _drainIncoming();
       return;
     }
-    _setDuoState('processing');
     await _processRelayPipeline(trimmed);
-  }
-
-  Future<void> _handleContextualError() async {
-    _setDuoState('idle'); // AI 사과 없음, 자동 재녹음 없음 — 조용히 대기 복귀
   }
 
   /// 상대 발화를 **내 대화 언어로** 읽어 준다.
@@ -1668,12 +1948,23 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 예전에는 `/v1/audio/speech`의 mp3를 통째로 받아 다 받은 뒤에 틀었다.
   /// 여기서는 Circle Talk과 같은 `TtsAdapter`를 쓴다 — 같은 tts-1이지만 PCM을
   /// 받는 대로 틀기 때문에 첫 소리가 빠르다(프리롤만큼만 모으고 시작한다).
+  ///
+  /// 🔇 [ECHO] **에코 게이트가 여기 있다.** 소리를 내기 직전에 게이트를 닫고,
+  /// 재생이 끝난 뒤 [kInterpGateReopenTail]만큼 지나서 연다. 마이크(캡처)는
+  /// 그동안에도 계속 돌아간다 — 닫는 것은 STT로 가는 통로뿐이다.
+  ///
+  /// 이 창 동안 유저가 실제로 한 말은 잘린다. 1차 구현에서는 그것을 감수한다
+  /// — 검증되지 않은 barge-in을 새로 만드는 것보다 무한 통역 루프를 확실히
+  /// 막는 쪽이 먼저다.
   Future<void> _speakPartner(String text) async {
     final String spoken = text.trim();
     if (spoken.isEmpty || _openAiKey.isEmpty) return;
     final adapter = _ensureInterpreterTts();
     if (adapter == null) return;
-    _setDuoState('playing');
+    // ⚠️ 순서가 중요하다 — `speak`보다 **먼저** 닫는다. 재생은 프리롤을 모은
+    //   뒤 비동기로 시작하지만, 그 사이에 첫 소리가 나가면 이미 늦는다.
+    _closeInterpGate('tts_playing');
+    _setInterpPartnerPhase(InterpPartnerPhase.playing);
     BillingTicker.instance.resumeFromActivity('duo_tts_start');
     final utterance = adapter.speak(TtsRequest(
       text: spoken,
@@ -1693,6 +1984,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     }
     _interpTtsEndedAt = DateTime.now();
     BillingTicker.instance.resumeFromActivity('duo_tts_end');
+    // 재생이 어떻게 끝났든(정상·타임아웃·실패) 게이트는 반드시 다시 열린다.
+    // 여기서 빠지면 마이크가 영원히 닫힌 채 화면만 밝아 보인다.
+    _scheduleInterpGateReopen('tts_finished');
   }
 
   TtsAdapter? _ensureInterpreterTts() {
@@ -1912,13 +2206,26 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     final String spoken = finalTranscript.trim();
     if (spoken.isEmpty) return;
 
+    // 🔵 always-on: 마이크가 계속 열려 있어 발화가 연달아 확정된다. 순서를
+    //    시각으로만 복원하면 Firestore 서버 시각의 해상도에 기대게 되므로,
+    //    화자별 일련번호와 발화 시작 시각을 함께 싣는다(직접 대화와 같은 규칙).
+    final int seq = ++_interpSeq;
+    final DateTime spokenAt = _interpSpeechStartedAt ?? DateTime.now();
+    _interpSpeechStartedAt = null;
+
     // 1. 상대에게 넘긴다. 번역하지 않은 내 말 그대로 — 상대 폰이 자기 대화
     //    언어로 옮긴다(두 사람의 대화 언어가 다를 수 있으므로 내가 옮기면 안 된다).
     final DateTime uploadStartedAt = DateTime.now();
-    await _uploadMyMessage(spoken, myNative);
+    await _uploadMyMessage(
+      spoken,
+      myNative,
+      mode: kDuoModeInterpreter,
+      seq: seq,
+      spokenAt: spokenAt,
+    );
     _lgDuo(
         '[INTERP-TURN]',
-        'outgoing turn=$_duoConversationTurnCounter lang=$myNative '
+        'outgoing turn=$_duoConversationTurnCounter seq=$seq lang=$myNative '
             'len=${spoken.length} '
             'uploadMs=${DateTime.now().difference(uploadStartedAt).inMilliseconds}');
 
@@ -1931,6 +2238,8 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       spoken,
       'HOST',
       mode: kDuoModeInterpreter,
+      seq: seq,
+      spokenAt: spokenAt,
       sourceLang: myNative,
       deferTarget: true,
     );
@@ -1940,11 +2249,8 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     // 경우가 있고, 그 문장은 내가 한 말과 같은 언어다.
     _rememberGenerated(spoken);
 
-    // 🆕 [PTT] 자동 재녹음 제거 — 쿨다운 후 대기 상태로 복귀
-    _setDuoState('cooldown');
-    await Future.delayed(const Duration(milliseconds: 300));
-    _setDuoState('idle');
-    // 🆕 내 발화 처리 끝 → 보류돼 있던 상대 메시지 처리 재개
+    // 🔵 always-on: 쿨다운도 대기 복귀도 없다. 마이크는 내내 열려 있고 다음
+    //    말은 서버 VAD가 알아서 잡는다.
     if (_incomingQueue.isNotEmpty) _drainIncoming();
   }
 
@@ -2026,16 +2332,17 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     _drainIncoming();
   }
 
+  /// 상대 메시지를 **한 번에 하나씩** 처리한다. 재생이 겹치지 않는 근거는
+  /// 이 while 루프의 직렬성이다(`_handleIncomingMessage`를 await한다).
+  ///
+  /// 🔵 always-on: 예전에는 여기서 `_duoState != 'idle'`이면 큐를 멈췄다.
+  /// 마이크가 세션 내내 열려 있는 지금 그 조건을 두면 **내가 말하는 동안
+  /// 상대 말이 큐에 갇힌 채 영영 안 나온다** — 내 마이크 사정으로 상대 턴을
+  /// 막지 않는다. 내 마이크는 재생 구간에 게이트로만 닫힌다.
   Future<void> _drainIncoming() async {
     if (_isDrainingIncoming) return;
     _isDrainingIncoming = true;
     while (_incomingQueue.isNotEmpty) {
-      // 녹음뿐 아니라 내 발화의 Realtime/폴백 처리 중에도 상대 턴을 보류한다.
-      // Android PCM 채널과 MP3 플레이어는 한 턴씩만 소유해야 음성이 겹치지 않는다.
-      //
-      // 직접 대화는 예외다. 상대 메시지가 소리를 재생하지 않고 History 텍스트만
-      // 남기므로 통화 중(_duoState='live')에도 그대로 처리한다.
-      if (!_isDirectMode && _duoState != 'idle') break;
       final data = _incomingQueue.removeAt(0);
       await _handleIncomingMessage(data);
     }
@@ -2072,14 +2379,11 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       return;
     }
 
-    // 상대 발화를 들려주는 동안 내 마이크를 닫는다.
-    //
-    // 🔇 [ECHO] 예전에는 앱이 **내 배울 언어**로 읽어서, 마이크에 새어 들어와도
-    //   내가 말한 언어와 달라 티가 났다. 이제 앱도 나와 같은 대화 언어로
-    //   말한다. 스피커폰이면 앱 목소리가 그대로 내 발화로 오인될 수 있으므로,
-    //   **재생 중에는 마이크를 아예 열지 않는 것**이 1차 방어선이다.
-    await _stopInterpreterCapture('partner_turn');
-    _setDuoState('processing');
+    // 🔵 always-on: 여기서 마이크를 닫지 않는다. 번역이 도는 동안에는 아직
+    //   소리가 나지 않으므로 내 말은 계속 받는다. 게이트는 실제로 소리를 내는
+    //   [_speakPartner]가 그 직전에 닫는다 — 마이크가 막히는 구간을 재생
+    //   구간으로만 좁히기 위해서다.
+    _setInterpPartnerPhase(InterpPartnerPhase.translating);
 
     final String myNative = _myNative();
     ++_duoConversationTurnCounter;
@@ -2124,6 +2428,12 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       spoken,
       'SYSTEM',
       mode: kDuoModeInterpreter,
+      // 상대가 실어 보낸 순서 정보를 그대로 옮긴다. 없으면(옛 방) 생략된다.
+      seq: (data['seq'] as num?)?.toInt(),
+      spokenAt: (data['spokenAt'] as num?) == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(
+              (data['spokenAt'] as num).toInt()),
       sourceLang: myNative,
       deferTarget: !rawIsMyTargetLang,
     );
@@ -2133,12 +2443,11 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     //   언어만으로는 구분되지 않는다.
     _rememberGenerated(spoken);
     if (_isConversationActive && !_isExiting) {
+      // 게이트 열고 닫기는 `_speakPartner` 안에 있다. 재생이 어떻게 끝나든
+      // 거기서 재개 예약까지 걸고 돌아온다.
       await _speakPartner(spoken);
     }
-    // 🆕 [PTT] 상대 발화 재생 후에도 자동 재녹음 금지 — 쿨다운 후 대기 복귀
-    _setDuoState('cooldown');
-    await Future.delayed(const Duration(milliseconds: 300));
-    _setDuoState('idle');
+    _setInterpPartnerPhase(InterpPartnerPhase.idle);
   }
 
 // ============================================================================
@@ -2146,57 +2455,39 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
   // 히스토리 저장. 화면에 글자를 띄우지 않으므로 스크롤 제어가 없다.
   // ============================================================================
 
-  // 🆕 [토글] 마이크 버튼: idle이면 시작 / recording이면 종료·전송
-  void _onMicToggle() {
-    if (!_isConversationActive) {
-      setState(() => _isConversationActive = true);
+  /// 🔴 [DUO-LIVE] 직접 대화의 상태 문구. 연결은 자동이라 유저가 할 일이
+  /// 없고, 그래서 화면은 "지금 왜 소리가 안 가는지"를 말해 줘야 한다.
+  String _pttLabel() {
+    if (!_directCallActive) {
+      if (_directStarting) return 'Connecting…';
+      // 상대가 없으면 기다리는 게 정상이다 — 실패가 아니다.
+      if (!_isPartnerOnline) return 'Waiting…';
+      return 'Reconnecting…';
     }
-    // 직접 대화의 마이크 버튼은 통화 시작/종료 토글이다. PTT가 아니다.
-    if (_isDirectMode) {
-      _onDirectMicToggle();
-      return;
-    }
-    if (_duoState == 'idle') {
-      _startInterpreterTurn(); // 꺼짐 -> 마이크 열기
-    } else if (_duoState == 'recording') {
-      _commitInterpreterTurn(); // 켜짐 -> 지금 확정하고 보내기
-    }
-    // processing/playing/cooldown 중에는 무시
+    if (_directMuted) return 'Muted';
+    if (!_relayConnected || !_micActive) return 'Connecting…';
+    if (!_partnerRelayConnected) return 'Waiting…';
+    // 전사가 끊겨도 통화는 계속된다. 그 사실을 화면에서 구분할 수 있게 둔다.
+    return _sttActive ? 'Live' : 'Live (no record)';
   }
 
-  // 🆕 [토글] 버튼 상태별 표시 문구
-  String _pttLabel() {
-    if (_isDirectMode) {
-      // 🔴 [DUO-LIVE] 연결은 자동이라 유저가 할 일이 없다. 그래서 화면은
-      //   "지금 왜 소리가 안 가는지"를 말해 줘야 한다.
-      if (!_directCallActive) {
-        if (_directStarting) return 'Connecting…';
-        // 상대가 없으면 기다리는 게 정상이다 — 실패가 아니다.
-        if (!_isPartnerOnline) return 'Waiting…';
-        // 상대는 있는데 안 붙었다 = 자동 연결이 실패했다.
-        // 이 문구가 곧 재시도 안내다(탭하면 다시 붙는다).
-        return 'Tap to reconnect';
-      }
-      if (_directMuted) return 'Muted — tap to unmute';
-      if (!_relayConnected || !_micActive) return 'Connecting…';
-      if (!_partnerRelayConnected) return 'Waiting…';
-      // 전사가 끊겨도 통화는 계속된다. 그 사실을 화면에서 구분할 수 있게 둔다.
-      return _sttActive ? 'Live' : 'Live (no record)';
+  /// 🔵 [INTERP-LIVE] 만능 통역 상태등의 문구.
+  ///
+  /// **[_interpReady]와 어긋나면 안 된다.** "대화를 시작하세요"는 오직
+  /// 게이트가 실제로 열려 있을 때만 나온다.
+  String _interpStatusLabel() {
+    if (_isExiting) return '대화를 마치는 중';
+    if (!_isPartnerOnline) {
+      return _interpMicPhase == InterpMicPhase.ended
+          ? '상대방 연결 종료'
+          : '상대방을 기다리는 중';
     }
-    switch (_duoState) {
-      case 'recording':
-        return '';
-      case 'finishing':
-        return '';
-      case 'processing':
-        return 'Processing…';
-      case 'playing':
-        return 'Playing…';
-      case 'cooldown':
-        return '…';
-      default:
-        return 'Tap to talk';
+    if (_interpStartFailed) return '마이크를 열지 못했습니다';
+    if (_interpPartnerPhase == InterpPartnerPhase.playing) {
+      return '상대방 말 전달 중';
     }
+    if (_interpReady) return '대화를 시작하세요';
+    return '통역 준비 중';
   }
 
   Future<void> _ensureHistoryRef() async {
@@ -2638,8 +2929,12 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       //   입장에 성공한 이 시점이 곧 "상대(호스트)가 있다"는 확정이다.
       _maybeAutoStartDirectCall('guest_joined');
       _startTrialCallIfNeeded();
-      // 만능 통역은 자동으로 붙지 않는다(버튼으로 말한다). 대신 소켓만 미리 연다.
-      _maybePrewarmInterpreterStt('guest_joined');
+      // 🔵 [INTERP-LIVE] 만능 통역도 여기서 자동으로 붙는다. 예전에는 소켓만
+      //   미리 열고 마이크는 버튼을 기다렸다.
+      _maybeAutoStartInterpreter('guest_joined');
+      // 🔵 만능 통역 게스트에게만 세션 문서 리스너를 건다 — 호스트 이탈을
+      //   알 방법이 이것뿐이다(직접 대화는 릴레이 presence가 대신한다).
+      _listenForHostExitAsInterpreterGuest();
     } catch (e) {
       debugPrint('[Duo] Guest join error: $e');
       if (mounted) {
@@ -2649,6 +2944,34 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         StealthRoomMaster.exitCurrentMode?.call();
       }
     }
+  }
+
+  /// 🔵 [INTERP-LIVE] **만능 통역 게스트 전용** 호스트 이탈 감지.
+  ///
+  /// 호스트는 방을 나갈 때 세션 문서를 지운다(1:1 대칭 종료). 직접 대화는
+  /// 릴레이 presence가 그 사실을 즉시 알려주지만 만능 통역에는 릴레이가
+  /// 없어서, 게스트는 호스트가 사라진 줄도 모른 채 마이크를 열어 두고 있었다.
+  ///
+  /// ⚠️ **직접 대화에서는 걸지 않는다.** 그쪽 종료 경로를 건드리지 않기 위해
+  /// 호스트용 [_listenForPartnerJoined]와 구독 필드만 공유하고 로직은 나눈다
+  /// (게스트에게 `isPartnerJoined`는 자기 자신을 가리키므로 그대로 못 쓴다).
+  void _listenForHostExitAsInterpreterGuest() {
+    if (_isDirectMode || _amIHost || _duoSessionRef == null) return;
+    _partnerJoinedSubscription?.cancel();
+    _partnerJoinedSubscription = _duoSessionRef!.snapshots().listen((snap) {
+      if (_isExiting || !mounted) return;
+      if (!snap.exists) {
+        _lgDuo('[INTERP-LIVE]', 'host_left reason=session_deleted');
+        unawaited(_handleInterpreterPartnerLeft('host_left').then((_) {
+          if (mounted && !_isExiting) _handleAutoSaveAndExit();
+        }));
+        return;
+      }
+      final data = snap.data() as Map<String, dynamic>?;
+      if (data == null) return;
+      // 게스트에게 상대는 호스트다. 호스트의 ORIGIN은 `hostLang`에 있다.
+      _notePartnerChatLang(data['hostLang']?.toString(), 'session_doc');
+    });
   }
 
   void _listenForPartnerJoined() {
@@ -2707,15 +3030,22 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         //   마이크 버튼은 이제 음소거 토글이다(연결 실패 시에는 재시도).
         if (partnerJoined) {
           _maybeAutoStartDirectCall('partner_joined');
-          _maybePrewarmInterpreterStt('partner_joined');
+          // 🔵 [INTERP-LIVE] 만능 통역도 여기서 마이크까지 자동으로 연다.
+          _maybeAutoStartInterpreter('partner_joined');
         } else {
           // 상대가 없는 동안 자동 시도 기록을 놓는다. 다음에 상대가 들어오면
           // 그때 한 번 더 자동으로 붙는다.
           _autoStartAttempted = false;
+          _interpAutoStartAttempted = false;
         }
         // 게스트 퇴장 → 호스트 강제 종료 (1:1 대칭 종료 모델).
         // 재통화는 새 초대로 시작한다 — 과금도 그 기준에 맞춰져 있다.
-        if (guestJustLeft) _handleAutoSaveAndExit();
+        if (guestJustLeft) {
+          // 🔵 [INTERP-LIVE] 방을 닫기 전에 마이크 등부터 끈다. 종료 처리가
+          //   도는 동안 화면이 "대화를 시작하세요"로 남아 있으면 안 된다.
+          unawaited(_handleInterpreterPartnerLeft('guest_left'));
+          _handleAutoSaveAndExit();
+        }
       }
     });
   }
@@ -2941,8 +3271,12 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         partnerOnline: _isPartnerOnline,
       );
 
-  Widget _buildInterpreterStage() =>
-      DuoInterpreterStage(recording: _duoState == 'recording');
+  // 무대 그림도 마이크 등과 같은 값을 본다. 화면 어디를 봐도 "지금 말해도
+  // 되는가"에 대한 대답이 하나여야 한다.
+  Widget _buildInterpreterStage() => DuoInterpreterStage(
+        ready: _interpReady,
+        partnerSpeaking: _interpPartnerPhase == InterpPartnerPhase.playing,
+      );
 
   static String _modeTitle(String mode) =>
       mode == kDuoModeDirect ? '직접 대화' : '만능 통역';
@@ -3556,72 +3890,80 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       );
     }
 
-    final bool isRec = _duoState == 'recording';
-    final bool isFinishing = _duoState == 'finishing';
-    final bool isBusy = isFinishing ||
-        _duoState == 'processing' ||
-        _duoState == 'playing' ||
-        _duoState == 'cooldown';
-    final Color accent = isRec
-        ? const Color(0xFF34D399)
-        : (isBusy ? Colors.white38 : const Color(0xFF2563EB));
     return Container(
       padding: EdgeInsets.fromLTRB(24, 16, 24, bottomPadding),
       decoration: const BoxDecoration(color: Color(0xFF121212)),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          if (!isRec)
-            Text(_pttLabel(),
-                style: const TextStyle(
-                    color: Colors.white54,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.0))
-          else
-            const SizedBox.shrink(),
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            // [토글] 처리·재생·쿨다운 중에는 탭 무시
-            onTap: isBusy ? null : _onMicToggle,
-            child: AnimatedContainer(
-                duration: const Duration(milliseconds: 220),
-                curve: Curves.easeOutCubic,
-                width: isRec ? 76 : 72,
-                height: isRec ? 76 : 72,
-                decoration: BoxDecoration(
-                    // 녹음 중에는 초록 마이크와 은은한 활성 링으로 표시한다.
-                    color: isRec
-                        ? accent.withValues(alpha: 0.16)
-                        : accent.withValues(alpha: 0.12),
-                    shape: BoxShape.circle,
-                    border: Border.all(color: accent, width: isRec ? 3.0 : 2.0),
-                    boxShadow: isRec
-                        ? [
-                            BoxShadow(
-                                color: accent.withValues(alpha: 0.28),
-                                blurRadius: 20,
-                                spreadRadius: 4)
-                          ]
-                        : null),
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 180),
-                  transitionBuilder: (child, animation) =>
-                      FadeTransition(opacity: animation, child: child),
-                  child: Icon(
-                    isRec
-                        ? Icons.mic_rounded
-                        : (isFinishing
-                            ? Icons.mic_off_rounded
-                            : Icons.mic_none_rounded),
-                    key: ValueKey<String>(_duoState),
-                    color: accent,
-                    size: isRec ? 40 : 36,
-                  ),
-                )),
+          Expanded(
+            child: Text(
+              _interpStatusLabel(),
+              style: TextStyle(
+                color: _interpReady ? Colors.white70 : Colors.white38,
+                fontSize: 17,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.5,
+              ),
+            ),
           ),
+          const SizedBox(width: 12),
+          _buildInterpreterMicIndicator(),
         ],
       ),
+    );
+  }
+
+  /// 🔵 [INTERP-LIVE] 마이크 **상태등**. 버튼이 아니다.
+  ///
+  /// 누를 수 없게 만든 것이 핵심이다 — `GestureDetector`가 없으므로 탭해도
+  /// 아무 일도 일어나지 않고, 그래서 "눌러야 시작되는 화면"으로 오해할 수
+  /// 없다. 밝기의 근거는 오직 [_interpReady] 하나이고, 그 값은 PCM이 실제로
+  /// STT로 갈 수 있는 조건과 같은 것을 본다.
+  Widget _buildInterpreterMicIndicator() {
+    final bool ready = _interpReady;
+    final bool speaking = _interpMicPhase == InterpMicPhase.speaking;
+    final bool playing = _interpPartnerPhase == InterpPartnerPhase.playing;
+
+    // 발화 중 초록 / 준비 완료 파랑 / 그 외 회색.
+    final Color accent = speaking
+        ? const Color(0xFF34D399)
+        : (ready ? const Color(0xFF2563EB) : Colors.white24);
+    // 상대 말이 나가는 동안에는 glow를 줄여 "지금은 내 차례가 아니다"를 보인다.
+    final double glow = speaking ? 0.30 : (ready ? 0.18 : 0.0);
+
+    return AnimatedBuilder(
+      animation: _interpPulse,
+      builder: (context, child) {
+        // 맥박은 발화 중에만 돈다(`_setInterpMicPhase`가 켜고 끈다).
+        final double pulse = speaking ? _interpPulse.value : 0;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          width: 72,
+          height: 72,
+          decoration: BoxDecoration(
+            color: accent.withValues(alpha: ready ? 0.14 : 0.06),
+            shape: BoxShape.circle,
+            border: Border.all(color: accent, width: ready ? 2.4 : 1.4),
+            boxShadow: glow <= 0
+                ? null
+                : [
+                    BoxShadow(
+                      color: accent
+                          .withValues(alpha: playing ? glow * 0.4 : glow),
+                      blurRadius: 18 + pulse * 8,
+                      spreadRadius: 2 + pulse * 3,
+                    ),
+                  ],
+          ),
+          child: Icon(
+            ready ? Icons.mic_rounded : Icons.mic_off_rounded,
+            color: accent,
+            size: 34,
+          ),
+        );
+      },
     );
   }
 }
