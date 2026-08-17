@@ -620,7 +620,12 @@ Return ONLY valid JSON: {"name":"..."}.
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          _buildManualItem('Duo Connect', '초청 직접 대화\n초청 만능 통역',
+                          // Duo는 초대할 때 호스트가 두 방식 중 하나를 고른다.
+                          // 설명서에도 그 갈림길이 그대로 보이게 둘을 나눠 쓴다.
+                          _buildManualItem('Duo Connect', '초청 직접 대화',
+                              '초청 링크로 부른 상대와 서로의 실제 목소리로 자연스럽게 통화하면서, 그 통화에서 어학 공부 자료를 수집하는 기능입니다. 통화가 끝나면 오간 말 중 연습할 가치가 있는 문장만 정리되어 공부방으로 이어지고, 방금 나눈 진짜 대화로 복습합니다.'),
+                          const Divider(color: Colors.white12, height: 24),
+                          _buildManualItem('Duo Connect', '초청 만능 통역',
                               '초청 링크를 통해 파트너와 함께 모국어로 대화하면, 실시간으로 통역해주는 글로벌 만능 통역 모드입니다.'),
                           const Divider(color: Colors.white12, height: 24),
                           _buildManualItem('Circle Talk', '커뮤니티 대화',
