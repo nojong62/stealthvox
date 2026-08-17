@@ -1187,7 +1187,8 @@ never by itself a reason to ask back.
 
     _log('🎤 [LISTEN-01]', '_startDeepgramListening 진입, VoiceManager 생성');
 
-    // 🌐 [v3.1] 로비에서 유저가 선택한 모국어(nativeLang)로 Deepgram 인식
+    // 🌐 [v3.1] 로비에서 유저가 고른 ORIGIN(대화 언어)으로 Deepgram 인식.
+    //   변수명이 `nativeLang`이지만 모국어가 아니라 **지금 말하고 듣는 언어**다.
     // 유저가 한국어로 말하면 Deepgram이 한국어로 인식 → Brain이 영어로 번역
     final String dgLangCode = _nativeLangCode();
     _log('🌐 [LANG]', 'Deepgram boundary language=$dgLangCode');

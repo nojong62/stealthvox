@@ -2555,12 +2555,22 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       await _myHistoryRef!.collection('messages').add({
         'role': role,
         'translated_text': defer ? '' : target,
-        'original_text': defer
-            ? original
-            : ((FFAppState().nativeLang.isNotEmpty &&
-                    FFAppState().nativeLang == FFAppState().targetLang)
-                ? ''
-                : original),
+        // 🔤 [ORIGIN 보존] **언어 조합과 무관하게 실제 발화를 그대로 남긴다.**
+        //
+        //   예전에는 ORIGIN == TARGET일 때 이 자리를 빈 문자열로 저장했다.
+        //   히스토리 화면의 "비어 있으면 안 그림" 규칙을 이용해 자막을 한 줄만
+        //   보이게 하려던 것인데(2026-06-06 `6b30e66b`), **표시 문제를 저장
+        //   데이터를 지워서 푼 것**이라 원문이 어디에도 남지 않았다.
+        //
+        //   같은 편법이 4개 모드에 들어갔다가 `88dc179e`(2026-08-02)에서
+        //   Roleplay·StepExpand·Anyone은 걷어냈고 Duo만 남아 있었다. 이제
+        //   그 셋과 같은 모양으로 맞춘다. 중복 표시를 피하는 일은 표시 계층이
+        //   한다 — 히스토리는 방 문서의 `native_lang`/`target_lang`으로 이미
+        //   동일 언어를 판정한다(`chat_history_master._recordSameLang`).
+        //
+        //   ⚠️ `translated_text`의 `defer`는 그대로 둔다. 그쪽은 편법이 아니라
+        //   "배울글은 공부방이 만든다"는 실제 정책이다.
+        'original_text': original,
         'created_at': FieldValue.serverTimestamp(),
         // ↓ 듀오에서만 붙는 필드. 다른 모드의 문서 모양은 그대로다.
         //   `duo_mode`는 지금 읽는 곳이 없지만, 두 방식이 한 컬렉션에 섞이므로

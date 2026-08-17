@@ -193,6 +193,16 @@ class FFAppState extends ChangeNotifier {
     prefs.setString('ff_aiRole', value);
   }
 
+  /// ⚠️ **이름과 의미가 다르다. "모국어"로 읽지 말 것.**
+  ///
+  /// 제품 의미는 **ORIGIN = Chat Language** — 사용자가 실제로 말하고 듣는
+  /// 언어다. 배우는 언어는 [targetLang]이다. 로비 화면도 이 값을
+  /// `ORIGIN (Chat Lang)`으로 표시한다.
+  ///
+  /// `nativeLang`과 저장 키 `ff_nativeLang`은 FlutterFlow 시절부터 내려온
+  /// **레거시 이름**이다(이 저장소의 첫 커밋에 이미 이 형태로 존재한다).
+  /// 이름을 바꾸면 기존 사용자의 저장값이 통째로 사라지므로 그대로 둔다.
+  /// 앱 코드는 `_myNative()` · `_nativeLangName()` 같은 래퍼를 통해 쓴다.
   String _nativeLang = 'Korean';
   String get nativeLang => _nativeLang;
   set nativeLang(String value) {
