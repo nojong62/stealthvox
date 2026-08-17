@@ -360,19 +360,24 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     'Dutch'
   ];
 
+  /// 게스트 언어 오버레이의 기본 언어쌍.
+  /// **초대받는 쪽은 영어권 이용자를 기준으로 본다** — 팝업 문구도 영어다.
+  static const String _kGuestDefaultNativeLang = 'English';
+  static const String _kGuestDefaultTargetLang = 'Korean';
+
   /// 게스트 언어 오버레이를 띄우기 전에 값을 목록 안의 값으로 맞춘다.
   /// **이 폰에 저장된 값이 목록에 있으면 그대로 둔다.** 비어 있거나 목록 밖의
-  /// 값일 때만 기본값 — ORIGIN=Korean, TARGET=English — 으로 채운다.
+  /// 값일 때만 기본값 — ORIGIN=English, TARGET=Korean — 으로 채운다.
   ///
   /// 화면에만 기본값을 보여 주고 저장값은 옛 값으로 남는 어긋남을 여기서
   /// 없앤다. 게스트가 아무것도 안 건드리고 입장해도 보이는 값과 실제로
   /// 쓰는 값(전사 언어·통역 프롬프트)이 같다.
   void _normalizeGuestLangs() {
     if (!_kGuestLangs.contains(FFAppState().nativeLang)) {
-      FFAppState().nativeLang = 'Korean';
+      FFAppState().nativeLang = _kGuestDefaultNativeLang;
     }
     if (!_kGuestLangs.contains(FFAppState().targetLang)) {
-      FFAppState().targetLang = 'English';
+      FFAppState().targetLang = _kGuestDefaultTargetLang;
     }
   }
 
@@ -2826,19 +2831,79 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         subject: 'StealthVox Duo 초대',
       );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('${_modeTitle(chosenMode)}로 초대했습니다. 링크가 복사되었습니다.'),
-          backgroundColor: const Color(0xFF2563EB),
-          duration: const Duration(seconds: 3),
-        ));
+        _showDuoSnack(
+          icon: Icons.check_circle_rounded,
+          accent: const Color(0xFF60A5FA),
+          title: '${_modeTitle(chosenMode)}로 초대했습니다',
+          detail: '초대 링크를 복사해 뒀어요.',
+        );
       }
     } catch (e) {
       debugPrint('[Duo] Share invite error: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('초대 링크 발행에 실패했습니다. 다시 시도해주세요.')));
+        _showDuoSnack(
+          icon: Icons.error_outline_rounded,
+          accent: const Color(0xFFF87171),
+          title: '초대 링크를 만들지 못했습니다',
+          detail: '잠시 후 다시 시도해 주세요.',
+        );
       }
     }
+  }
+
+  /// Duo 안내 스낵바 한 벌.
+  ///
+  /// 예전에는 파란 바탕(`0xFF2563EB`)에 테마 기본 글자색이 얹혀 검은 글씨가
+  /// 나왔다. 어두운 카드 + 강조선 + 흰 글씨로 바꿔 대비를 살린다.
+  /// 화면 밑에 붙지 않고 떠 있게(floating) 두어 하단 버튼을 가리지 않는다.
+  void _showDuoSnack({
+    required IconData icon,
+    required Color accent,
+    required String title,
+    String? detail,
+  }) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 18),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+        backgroundColor: const Color(0xFF111827),
+        elevation: 10,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: accent.withValues(alpha: 0.55), width: 1.2),
+        ),
+        duration: const Duration(seconds: 3),
+        content: Row(
+          children: [
+            Icon(icon, color: accent, size: 21),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: const TextStyle(
+                          color: Color(0xFFF8FAFC),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          height: 1.25)),
+                  if (detail != null) ...[
+                    const SizedBox(height: 2),
+                    Text(detail,
+                        style: const TextStyle(
+                            color: Color(0xFF94A3B8),
+                            fontSize: 12,
+                            height: 1.3)),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ));
   }
 
   Future<void> _joinAsGuest(String roomId) async {
@@ -2854,7 +2919,8 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         }
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('초대된 방을 찾을 수 없습니다.')),
+            // 게스트 입장 경로의 안내는 팝업과 같은 영어로 맞춘다.
+            const SnackBar(content: Text("We couldn't find that room.")),
           );
           StealthRoomMaster.exitCurrentMode?.call();
         }
@@ -2868,7 +2934,8 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         }
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('이 방은 현재 사용할 수 없습니다.')),
+            const SnackBar(
+                content: Text('This room is not available right now.')),
           );
           StealthRoomMaster.exitCurrentMode?.call();
         }
@@ -2951,7 +3018,9 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       debugPrint('[Duo] Guest join error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('연결 중 오류가 발생했습니다. 다시 시도해주세요.')),
+          const SnackBar(
+              content: Text('Something went wrong while connecting. '
+                  'Please try again.')),
         );
         StealthRoomMaster.exitCurrentMode?.call();
       }
@@ -3296,6 +3365,16 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
   static String _modeDesc(String mode) =>
       mode == kDuoModeDirect ? '서로의 실제 목소리로 통화합니다.' : '상대의 말을 통역 음성으로 들려줍니다.';
 
+  /// 게스트 팝업 전용 영어 표시명. 초대받는 쪽은 한국어를 못 읽을 수 있다.
+  /// 저장 id(`kDuoModeDirect`/`kDuoModeInterpreter`)와 호스트 화면의
+  /// 한국어 표시명([_modeTitle]/[_modeDesc])은 그대로 둔다.
+  static String _modeTitleEn(String mode) =>
+      mode == kDuoModeDirect ? 'Direct Call' : 'Live Interpreter';
+
+  static String _modeDescEn(String mode) => mode == kDuoModeDirect
+      ? "You'll talk in each other's real voices."
+      : "You'll hear the other person as interpreted speech.";
+
   /// 🆕 [모드 선택 — 호스트 전용] 초대장을 만들기 직전에 뜬다.
   /// 여기서 고른 값만이 세션 문서의 `mode`가 된다.
   Future<String?> _showHostModePicker() {
@@ -3549,18 +3628,18 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         const SizedBox(width: 12),
         Expanded(
           child: loading
-              ? const Text('초대 방식 확인 중…',
+              ? const Text('Checking the invitation…',
                   style: TextStyle(color: Colors.white54, fontSize: 13))
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('${_modeTitle(_duoMode)} 초대',
+                    Text('${_modeTitleEn(_duoMode)} invitation',
                         style: const TextStyle(
                             color: Colors.white,
                             fontSize: 15,
                             fontWeight: FontWeight.bold)),
                     const SizedBox(height: 3),
-                    Text(_modeDesc(_duoMode),
+                    Text(_modeDescEn(_duoMode),
                         style: const TextStyle(
                             color: Colors.white38, fontSize: 12, height: 1.3)),
                   ],
@@ -3576,10 +3655,10 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     // 열릴 때 이미 보정했지만, 다른 경로로 값이 바뀐 채 다시 그려질 수도 있다.
     String native = langs.contains(FFAppState().nativeLang)
         ? FFAppState().nativeLang
-        : 'Korean';
+        : _kGuestDefaultNativeLang;
     String target = langs.contains(FFAppState().targetLang)
         ? FFAppState().targetLang
-        : 'English';
+        : _kGuestDefaultTargetLang;
 
     Widget dropdown(String label, String value, Color labelColor,
         ValueChanged<String?> onChanged,
@@ -3674,13 +3753,14 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Text("대화 언어 설정",
+                  const Text("Conversation Languages",
                       style: TextStyle(
                           color: Colors.white,
                           fontSize: 20,
                           fontWeight: FontWeight.bold)),
                   const SizedBox(height: 6),
-                  const Text("초대받은 대화 방식을 확인하고 언어를 선택하세요.",
+                  const Text(
+                      "Check how you were invited, then choose your languages.",
                       style: TextStyle(color: Colors.white54, fontSize: 13)),
                   const SizedBox(height: 20),
                   _buildInvitedModeBadge(),
@@ -3716,7 +3796,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                         _joinAsGuest(roomId);
                       }
                     },
-                    child: const Text("입장하기",
+                    child: const Text("Enter",
                         style: TextStyle(
                             color: Colors.white,
                             fontSize: 16,
