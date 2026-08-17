@@ -66,7 +66,9 @@ const String kDuoModeInterpreter = 'interpreter';
 const String kInterpreterPartnerTtsVoice = 'alloy';
 
 /// 맛보기 직접 통화 길이. 폰 한 대에 딱 한 번만 주어진다.
-const int kDuoTrialCallSeconds = 600;
+/// ⚠️ [임시] 통화 종료 → 히스토리 이동 확인용으로 60초로 낮춰 뒀다.
+///    테스트가 끝나면 600으로 되돌릴 것.
+const int kDuoTrialCallSeconds = 60;
 
 /// 재생이 끝난 뒤 이만큼 안에 들어온 전사문만 에코로 의심한다.
 /// 스피커 소리가 마이크로 돌아오는 데 걸리는 시간은 길어야 한두 순간이다.
