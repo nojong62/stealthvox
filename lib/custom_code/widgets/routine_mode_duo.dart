@@ -63,6 +63,220 @@ const String kDuoModeDirect = 'direct';
 const Duration kDuoDirectSaveTimeout = Duration(seconds: 3);
 const Duration kDuoDirectCurateTimeout = Duration(seconds: 15);
 const String kDuoModeInterpreter = 'interpreter';
+
+/// 호스트가 초대를 만드는 동안 보는 문구 — 대화 방식 선택 시트와,
+/// 그 직후 화면 밑에서 올라오는 초대 완료·실패 알림([_showDuoSnack]).
+///
+/// **로비의 ORIGIN(대화 언어 = `FFAppState().nativeLang`)으로 고른다.**
+/// 초대를 만드는 사람이 실제로 말하고 듣는 언어가 ORIGIN이라서, 배우는
+/// 언어(TARGET)가 아니라 이쪽을 기준으로 잡는다.
+///
+/// 키는 로비 드롭다운이 쓰는 언어 이름 표기 그대로다(`Korean`, `English` …).
+/// 목록에 없는 값이 들어오면 [_kModePickerFallbackLang]으로 떨어진다.
+/// 저장 id(`kDuoModeDirect`/`kDuoModeInterpreter`)는 여기에 없다 — 표시명만 둔다.
+const Map<String, Map<String, String>> kModePickerText = {
+  'Korean': {
+    'title': '대화 방식 선택',
+    'subtitle': '초대할 대화 방식을 골라주세요.',
+    'directTitle': '직접 대화',
+    'directDesc': '서로의 실제 목소리로 통화합니다.',
+    'interpTitle': '만능 통역',
+    'interpDesc': '상대의 말을 통역 음성으로 들려줍니다.',
+    'note': '상대방도 선택한 방식으로 초대됩니다.',
+    'cancel': '취소',
+    'invite': '초대하기',
+    'inviteDoneDirect': '직접 대화로 초대했습니다',
+    'inviteDoneInterp': '만능 통역으로 초대했습니다',
+    'inviteDoneDetail': '초대 링크를 복사해 뒀어요.',
+    'inviteFailTitle': '초대 링크를 만들지 못했습니다',
+    'inviteFailDetail': '잠시 후 다시 시도해 주세요.',
+  },
+  'English': {
+    'title': 'Choose a call type',
+    'subtitle': 'Pick how you want to talk on this invitation.',
+    'directTitle': 'Direct Call',
+    'directDesc': "You'll talk in each other's real voices.",
+    'interpTitle': 'Live Interpreter',
+    'interpDesc': "You'll hear the other person as interpreted speech.",
+    'note': 'The person you invite joins with the same call type.',
+    'cancel': 'Cancel',
+    'invite': 'Invite',
+    'inviteDoneDirect': 'Invited to a Direct Call',
+    'inviteDoneInterp': 'Invited to Live Interpreter',
+    'inviteDoneDetail': 'The invite link is copied.',
+    'inviteFailTitle': "Couldn't create the invite link",
+    'inviteFailDetail': 'Please try again in a moment.',
+  },
+  'Japanese': {
+    'title': '通話方法を選ぶ',
+    'subtitle': '招待する通話方法を選んでください。',
+    'directTitle': '直接通話',
+    'directDesc': 'お互いの実際の声で通話します。',
+    'interpTitle': '万能通訳',
+    'interpDesc': '相手の話を通訳音声で聞きます。',
+    'note': '相手も選んだ方法で招待されます。',
+    'cancel': 'キャンセル',
+    'invite': '招待する',
+    'inviteDoneDirect': '直接通話で招待しました',
+    'inviteDoneInterp': '万能通訳で招待しました',
+    'inviteDoneDetail': '招待リンクをコピーしました。',
+    'inviteFailTitle': '招待リンクを作成できませんでした',
+    'inviteFailDetail': 'しばらくしてからもう一度お試しください。',
+  },
+  'Chinese': {
+    'title': '选择通话方式',
+    'subtitle': '请选择邀请使用的通话方式。',
+    'directTitle': '直接通话',
+    'directDesc': '用彼此真实的声音通话。',
+    'interpTitle': '万能翻译',
+    'interpDesc': '对方的话会以翻译语音播放。',
+    'note': '对方也会以所选方式收到邀请。',
+    'cancel': '取消',
+    'invite': '邀请',
+    'inviteDoneDirect': '已用直接通话发出邀请',
+    'inviteDoneInterp': '已用万能翻译发出邀请',
+    'inviteDoneDetail': '邀请链接已复制。',
+    'inviteFailTitle': '无法生成邀请链接',
+    'inviteFailDetail': '请稍后再试。',
+  },
+  'Spanish': {
+    'title': 'Elige el tipo de llamada',
+    'subtitle': 'Elige cómo quieres hablar en esta invitación.',
+    'directTitle': 'Llamada directa',
+    'directDesc': 'Hablarán con sus propias voces reales.',
+    'interpTitle': 'Intérprete en vivo',
+    'interpDesc': 'Oirás a la otra persona con voz interpretada.',
+    'note': 'La persona invitada entra con el mismo tipo de llamada.',
+    'cancel': 'Cancelar',
+    'invite': 'Invitar',
+    'inviteDoneDirect': 'Invitación de llamada directa enviada',
+    'inviteDoneInterp': 'Invitación de intérprete en vivo enviada',
+    'inviteDoneDetail': 'El enlace de invitación está copiado.',
+    'inviteFailTitle': 'No se pudo crear el enlace de invitación',
+    'inviteFailDetail': 'Inténtalo de nuevo en un momento.',
+  },
+  'French': {
+    'title': "Choisissez le type d'appel",
+    'subtitle': 'Choisissez comment vous voulez parler pour cette invitation.',
+    'directTitle': 'Appel direct',
+    'directDesc': 'Vous vous parlez avec vos vraies voix.',
+    'interpTitle': 'Interprète en direct',
+    'interpDesc': "Vous entendez l'autre personne en voix interprétée.",
+    'note': 'La personne invitée rejoint avec le même type d\'appel.',
+    'cancel': 'Annuler',
+    'invite': 'Inviter',
+    'inviteDoneDirect': 'Invitation en appel direct envoyée',
+    'inviteDoneInterp': 'Invitation avec interprète en direct envoyée',
+    'inviteDoneDetail': "Le lien d'invitation est copié.",
+    'inviteFailTitle': "Impossible de créer le lien d'invitation",
+    'inviteFailDetail': 'Réessayez dans un instant.',
+  },
+  'German': {
+    'title': 'Gesprächsart wählen',
+    'subtitle': 'Wähle, wie ihr in dieser Einladung sprechen wollt.',
+    'directTitle': 'Direktes Gespräch',
+    'directDesc': 'Ihr sprecht mit euren echten Stimmen.',
+    'interpTitle': 'Live-Dolmetscher',
+    'interpDesc': 'Du hörst die andere Person als gedolmetschte Stimme.',
+    'note': 'Die eingeladene Person nimmt mit derselben Gesprächsart teil.',
+    'cancel': 'Abbrechen',
+    'invite': 'Einladen',
+    'inviteDoneDirect': 'Zu einem direkten Gespräch eingeladen',
+    'inviteDoneInterp': 'Zum Live-Dolmetscher eingeladen',
+    'inviteDoneDetail': 'Der Einladungslink ist kopiert.',
+    'inviteFailTitle': 'Einladungslink konnte nicht erstellt werden',
+    'inviteFailDetail': 'Bitte versuche es gleich noch einmal.',
+  },
+  'Hindi': {
+    'title': 'कॉल का तरीका चुनें',
+    'subtitle': 'इस न्योते के लिए बातचीत का तरीका चुनें।',
+    'directTitle': 'सीधी कॉल',
+    'directDesc': 'आप दोनों अपनी असली आवाज़ में बात करेंगे।',
+    'interpTitle': 'लाइव अनुवादक',
+    'interpDesc': 'सामने वाले की बात अनुवाद की आवाज़ में सुनाई देगी।',
+    'note': 'न्योता पाने वाला भी इसी तरीके से जुड़ेगा।',
+    'cancel': 'रद्द करें',
+    'invite': 'न्योता भेजें',
+    'inviteDoneDirect': 'सीधी कॉल का न्योता भेजा गया',
+    'inviteDoneInterp': 'लाइव अनुवादक का न्योता भेजा गया',
+    'inviteDoneDetail': 'न्योते का लिंक कॉपी हो गया।',
+    'inviteFailTitle': 'न्योते का लिंक नहीं बन सका',
+    'inviteFailDetail': 'थोड़ी देर बाद फिर कोशिश करें।',
+  },
+  'Russian': {
+    'title': 'Выберите тип звонка',
+    'subtitle': 'Выберите, как вы хотите общаться в этом приглашении.',
+    'directTitle': 'Прямой звонок',
+    'directDesc': 'Вы говорите своими настоящими голосами.',
+    'interpTitle': 'Живой переводчик',
+    'interpDesc': 'Собеседника вы услышите переведённым голосом.',
+    'note': 'Приглашённый присоединится с тем же типом звонка.',
+    'cancel': 'Отмена',
+    'invite': 'Пригласить',
+    'inviteDoneDirect': 'Приглашение на прямой звонок отправлено',
+    'inviteDoneInterp': 'Приглашение с живым переводчиком отправлено',
+    'inviteDoneDetail': 'Ссылка-приглашение скопирована.',
+    'inviteFailTitle': 'Не удалось создать ссылку-приглашение',
+    'inviteFailDetail': 'Попробуйте ещё раз через минуту.',
+  },
+  'Portuguese': {
+    'title': 'Escolha o tipo de chamada',
+    'subtitle': 'Escolha como vocês vão conversar neste convite.',
+    'directTitle': 'Chamada direta',
+    'directDesc': 'Vocês falam com as próprias vozes reais.',
+    'interpTitle': 'Intérprete ao vivo',
+    'interpDesc': 'Você ouve a outra pessoa com voz interpretada.',
+    'note': 'A pessoa convidada entra com o mesmo tipo de chamada.',
+    'cancel': 'Cancelar',
+    'invite': 'Convidar',
+    'inviteDoneDirect': 'Convite de chamada direta enviado',
+    'inviteDoneInterp': 'Convite de intérprete ao vivo enviado',
+    'inviteDoneDetail': 'O link do convite foi copiado.',
+    'inviteFailTitle': 'Não foi possível criar o link do convite',
+    'inviteFailDetail': 'Tente novamente em instantes.',
+  },
+  'Italian': {
+    'title': 'Scegli il tipo di chiamata',
+    'subtitle': 'Scegli come volete parlare in questo invito.',
+    'directTitle': 'Chiamata diretta',
+    'directDesc': 'Parlate con le vostre voci reali.',
+    'interpTitle': 'Interprete in diretta',
+    'interpDesc': "Senti l'altra persona con voce tradotta.",
+    'note': 'La persona invitata entra con lo stesso tipo di chiamata.',
+    'cancel': 'Annulla',
+    'invite': 'Invita',
+    'inviteDoneDirect': 'Invito a una chiamata diretta inviato',
+    'inviteDoneInterp': 'Invito con interprete in diretta inviato',
+    'inviteDoneDetail': "Il link dell'invito è stato copiato.",
+    'inviteFailTitle': "Impossibile creare il link dell'invito",
+    'inviteFailDetail': 'Riprova tra un momento.',
+  },
+  'Dutch': {
+    'title': 'Kies het gesprekstype',
+    'subtitle': 'Kies hoe jullie willen praten in deze uitnodiging.',
+    'directTitle': 'Direct gesprek',
+    'directDesc': 'Jullie praten met je eigen echte stem.',
+    'interpTitle': 'Live tolk',
+    'interpDesc': 'Je hoort de ander als getolkte stem.',
+    'note': 'De uitgenodigde persoon doet mee met hetzelfde gesprekstype.',
+    'cancel': 'Annuleren',
+    'invite': 'Uitnodigen',
+    'inviteDoneDirect': 'Uitnodiging voor direct gesprek verstuurd',
+    'inviteDoneInterp': 'Uitnodiging voor live tolk verstuurd',
+    'inviteDoneDetail': 'De uitnodigingslink is gekopieerd.',
+    'inviteFailTitle': 'Kon de uitnodigingslink niet maken',
+    'inviteFailDetail': 'Probeer het zo meteen opnieuw.',
+  },
+};
+
+/// ORIGIN이 [kModePickerText]에 없을 때 쓰는 언어.
+const String _kModePickerFallbackLang = 'English';
+
+/// ORIGIN 언어 이름으로 대화 방식 선택 시트 문구를 고른다.
+/// 빈 값·모르는 언어는 영어로 떨어진다 — 시트가 빈 채로 뜨는 일은 없다.
+Map<String, String> modePickerTextFor(String originLang) =>
+    kModePickerText[originLang.trim()] ??
+    kModePickerText[_kModePickerFallbackLang]!;
 const String kInterpreterPartnerTtsVoice = 'alloy';
 
 /// 맛보기 직접 통화 길이. 폰 한 대에 딱 한 번만 주어진다.
@@ -2831,21 +3045,27 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         subject: 'StealthVox Duo 초대',
       );
       if (mounted) {
+        // 방식 선택 시트와 같은 언어(로비 ORIGIN)로 말한다. 모드 이름에
+        // 조사를 붙이지 않고 언어별 완성 문장을 그대로 쓴다.
+        final t = modePickerTextFor(FFAppState().nativeLang);
         _showDuoSnack(
           icon: Icons.check_circle_rounded,
           accent: const Color(0xFF60A5FA),
-          title: '${_modeTitle(chosenMode)}로 초대했습니다',
-          detail: '초대 링크를 복사해 뒀어요.',
+          title: chosenMode == kDuoModeDirect
+              ? t['inviteDoneDirect']!
+              : t['inviteDoneInterp']!,
+          detail: t['inviteDoneDetail']!,
         );
       }
     } catch (e) {
       debugPrint('[Duo] Share invite error: $e');
       if (mounted) {
+        final t = modePickerTextFor(FFAppState().nativeLang);
         _showDuoSnack(
           icon: Icons.error_outline_rounded,
           accent: const Color(0xFFF87171),
-          title: '초대 링크를 만들지 못했습니다',
-          detail: '잠시 후 다시 시도해 주세요.',
+          title: t['inviteFailTitle']!,
+          detail: t['inviteFailDetail']!,
         );
       }
     }
@@ -3359,15 +3579,10 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         partnerSpeaking: _interpPartnerPhase == InterpPartnerPhase.playing,
       );
 
-  static String _modeTitle(String mode) =>
-      mode == kDuoModeDirect ? '직접 대화' : '만능 통역';
-
-  static String _modeDesc(String mode) =>
-      mode == kDuoModeDirect ? '서로의 실제 목소리로 통화합니다.' : '상대의 말을 통역 음성으로 들려줍니다.';
-
-  /// 게스트 팝업 전용 영어 표시명. 초대받는 쪽은 한국어를 못 읽을 수 있다.
-  /// 저장 id(`kDuoModeDirect`/`kDuoModeInterpreter`)와 호스트 화면의
-  /// 한국어 표시명([_modeTitle]/[_modeDesc])은 그대로 둔다.
+  /// 게스트 팝업 전용 영어 표시명. 초대받는 쪽은 아직 자기 언어를 고르기
+  /// 전이라 로비 ORIGIN을 쓸 수 없어서 영어로 고정한다. 호스트가 보는 쪽
+  /// (방식 선택 시트·초대 알림)은 [kModePickerText]가 ORIGIN으로 맞춘다.
+  /// 저장 id(`kDuoModeDirect`/`kDuoModeInterpreter`)는 어느 쪽도 건드리지 않는다.
   static String _modeTitleEn(String mode) =>
       mode == kDuoModeDirect ? 'Direct Call' : 'Live Interpreter';
 
@@ -3379,6 +3594,10 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
   /// 여기서 고른 값만이 세션 문서의 `mode`가 된다.
   Future<String?> _showHostModePicker() {
     String picked = _duoMode;
+    // 이 시트만 로비 ORIGIN(대화 언어)으로 쓴다. 초대를 만드는 사람이
+    // 실제로 말하는 언어가 그것이다. 시트를 여는 순간 한 번 고르고,
+    // 여는 동안 언어가 바뀌는 경로는 없다.
+    final Map<String, String> t = modePickerTextFor(FFAppState().nativeLang);
     return showDialog<String>(
       context: context,
       barrierColor: Colors.black.withValues(alpha: 0.72),
@@ -3441,7 +3660,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          _modeTitle(mode),
+                          isDirect ? t['directTitle']! : t['interpTitle']!,
                           style: const TextStyle(
                             color: Color(0xFFF8FAFC),
                             fontSize: 16,
@@ -3451,7 +3670,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                         ),
                         const SizedBox(height: 5),
                         Text(
-                          _modeDesc(mode),
+                          isDirect ? t['directDesc']! : t['interpDesc']!,
                           style: const TextStyle(
                             color: Color(0xFFBCC7D9),
                             fontSize: 13,
@@ -3509,9 +3728,9 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      '대화 방식 선택',
-                      style: TextStyle(
+                    Text(
+                      t['title']!,
+                      style: const TextStyle(
                         color: Color(0xFFF8FAFC),
                         fontSize: 22,
                         fontWeight: FontWeight.w800,
@@ -3519,9 +3738,9 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                       ),
                     ),
                     const SizedBox(height: 6),
-                    const Text(
-                      '초대할 대화 방식을 골라주세요.',
-                      style: TextStyle(
+                    Text(
+                      t['subtitle']!,
+                      style: const TextStyle(
                         color: Color(0xFFAEBACD),
                         fontSize: 13,
                         height: 1.4,
@@ -3531,10 +3750,10 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                     tile(kDuoModeDirect),
                     tile(kDuoModeInterpreter),
                     const SizedBox(height: 2),
-                    const Row(
+                    Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Padding(
+                        const Padding(
                           padding: EdgeInsets.only(top: 1),
                           child: Icon(
                             Icons.info_outline_rounded,
@@ -3542,11 +3761,11 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                             color: Color(0xFF91A1B8),
                           ),
                         ),
-                        SizedBox(width: 7),
+                        const SizedBox(width: 7),
                         Expanded(
                           child: Text(
-                            '상대방도 선택한 방식으로 초대됩니다.',
-                            style: TextStyle(
+                            t['note']!,
+                            style: const TextStyle(
                               color: Color(0xFFAEBACD),
                               fontSize: 12,
                               height: 1.4,
@@ -3568,9 +3787,10 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                               ),
                             ),
                             onPressed: () => Navigator.pop(ctx),
-                            child: const Text(
-                              '취소',
-                              style: TextStyle(fontWeight: FontWeight.w600),
+                            child: Text(
+                              t['cancel']!,
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w600),
                             ),
                           ),
                         ),
@@ -3592,9 +3812,10 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                               Icons.person_add_alt_1_rounded,
                               size: 19,
                             ),
-                            label: const Text(
-                              '초대하기',
-                              style: TextStyle(fontWeight: FontWeight.w700),
+                            label: Text(
+                              t['invite']!,
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w700),
                             ),
                           ),
                         ),
