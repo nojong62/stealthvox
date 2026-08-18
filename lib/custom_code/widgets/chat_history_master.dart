@@ -2404,6 +2404,63 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     _prefetchAllChunkAI();
   }
 
+  /// 🔙 [STEP-BACK] 진행 중인 Step Expand 연습을 접고 **P1/P2/P3 고르는 자리로**
+  /// 돌아간다. 방을 나가지 않는다 — 실행 중 X는 "그만두겠다"가 아니라
+  /// "다시 고르겠다"는 뜻이라, 방까지 닫으면 히스토리 목록부터 되짚어
+  /// 들어와야 했다. 방을 나가는 X는 고르는 화면에 그대로 있다.
+  ///
+  /// 이 방의 재료(`_stepExpandTurns`·완성문장·P3 청크)는 손대지 않는다.
+  /// 지운 것은 이번 회차의 흔적뿐이라 곧바로 다시 시작할 수 있다.
+  void _backToStepExpandSelect() {
+    unawaited(_deleteUserRecordings());
+    _stopTutorPlayback();
+    _stopAutoVADRecording();
+    _utteranceSafetyTimer?.cancel();
+    _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
+    _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
+    _shadowAmpTimer?.cancel(); // [P2-PROXY]
+    unawaited(_stopShadowAiPlayback()); // [P2-SHADOW-AI]
+    unawaited(_stopShadowRecording()); // [P2-SHADOW-REC]
+    unawaited(_stopP3Shadowing(resetSelection: true));
+    _stopDeepgramListening();
+    audioPlayer.stop();
+    if (!mounted) return;
+    setState(() {
+      _phase = ShadowingPhase.variantSelect;
+      isPaused = false;
+      _tutorLines = [];
+      currentIndex = 0;
+      _tutorCurrentIdx = 0;
+      _isAutoRecording = false;
+      _tutorAiSpeaking = false;
+      _tutorUserRecording = false;
+      _tutorPlayingFullback = false;
+      _tutorAwaitingStart = true;
+      _swapRoles = false;
+      _showRetryHint = false;
+      _isListening = false;
+      _isRerecordingSingle = false;
+      _isPlayingFullUser = false;
+      _isPlayingFullAI = false;
+      _fullUserPlayIdx = 0;
+      _isReplayMode = false;
+      _aiChunkPlaying = false;
+      _aiChunkLoading = false;
+      _currentChunkIdx = 0;
+      // [P2-REPEAT] 보이스·횟수를 다시 고르게 비운다. 그 두 개를 고르는
+      //   것이 곧 시작 신호라, 남겨 두면 돌아오자마자 저절로 시작한다.
+      _selectedMeaningUnitVoice = null;
+      _shadowRepeatCount = null;
+      _shadowPass = 0;
+      _shadowStarted = false;
+      _shadowWords = [];
+      _shadowWordIdx = -1;
+      _shadowRereadCount = 0;
+      _showEchoingOverlay = false;
+    });
+    _echoingOverlayTimer?.cancel();
+  }
+
   void _exitShadowing() {
     _stepP3PreparationGeneration++;
     _deleteUserRecordings(); // 🆕 Practice 임시 녹음 파일 정리
@@ -6157,7 +6214,11 @@ RULES — follow exactly:
                 children: [
                   IconButton(
                     icon: const Icon(Icons.close, color: Colors.white70),
-                    onPressed: _exitShadowing,
+                    // 🔙 [STEP-BACK] Step Expand 방에서는 방을 닫지 않고
+                    //   P1/P2/P3 고르는 자리로 돌아간다.
+                    onPressed: _isStepExpandRoom
+                        ? _backToStepExpandSelect
+                        : _exitShadowing,
                   ),
                   Expanded(
                     child: Row(
@@ -7606,7 +7667,10 @@ RULES — follow exactly:
             children: [
               IconButton(
                 icon: const Icon(Icons.close, color: Colors.white70),
-                onPressed: _exitShadowing,
+                // 🔙 [STEP-BACK] P1/P2와 같은 규칙 — 고르는 자리로 되돌린다.
+                onPressed: _isStepExpandRoom
+                    ? _backToStepExpandSelect
+                    : _exitShadowing,
               ),
               const Expanded(
                 child: Text(
