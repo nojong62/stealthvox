@@ -862,18 +862,39 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     final idx = docs.indexWhere((d) => d.reference.id == messageRef.id);
     if (idx < 0) return '';
     const int window = 4;
+    // 🧭 [CAST] 등장인물은 대화 첫머리에서 정해진다("둘째가 집에 들어와 있어").
+    //   창이 뒤로 밀려 그 줄이 빠지면, 주어를 생략한 뒷줄이 전부 말한 사람
+    //   얘기로 번역된다("지금 취업 준비 중이야" → "I'm preparing..."). 그래서
+    //   앞머리는 창 밖이어도 항상 싣는다.
+    const int openingLines = 2;
     final int start = idx - window < 0 ? 0 : idx - window;
     final int end =
         idx + window + 1 > docs.length ? docs.length : idx + window + 1;
-    final buffer = StringBuffer();
+    final picked = <int>{};
+    for (int i = 0; i < openingLines && i < docs.length; i++) {
+      picked.add(i);
+    }
     for (int i = start; i < end; i++) {
-      if (i == idx) continue;
+      picked.add(i);
+    }
+    final ordered = picked.toList()..sort();
+    final buffer = StringBuffer();
+    int? previous;
+    for (final i in ordered) {
+      // 번역할 줄 자체는 빼되, 자리는 이어진 것으로 친다(생략 표시 방지).
+      if (i == idx) {
+        previous = i;
+        continue;
+      }
       final data = docs[i].data() as Map<String, dynamic>?;
       if (data == null) continue;
       final text = (data['original_text'] ?? '').toString().trim();
       if (text.isEmpty) continue;
+      // 앞머리와 창 사이가 떨어져 있으면 끊긴 자리를 알려 준다.
+      if (previous != null && i > previous + 1) buffer.writeln('...');
       final role = (data['role'] ?? '').toString().toUpperCase();
       buffer.writeln('${role == 'HOST' ? 'USER' : 'AI'}: $text');
+      previous = i;
     }
     return buffer.toString().trim();
   }
@@ -943,8 +964,15 @@ CORRECTED $sourceName LINE — rules:
 - If nothing is clearly wrong, return the line EXACTLY as given.
 
 TRANSLATION — natural spoken $targetLanguage of the corrected line. Preserve the speaker viewpoint, meaning, tone, and relationship.
+
+WHO THE LINE IS ABOUT — read this before you translate:
+- $sourceName leaves out the subject and the object whenever they are already understood. $targetLanguage cannot. You must supply them, and SURROUNDING CONVERSATION is where they are.
+- Whoever the conversation is currently about stays the subject until the speaker moves to someone else. A line with no subject continues to be about that person — NOT about the speaker.
+- Never fall back on "I" just because the subject is missing. Use "I" only when the line is genuinely about the speaker.
+- The people in this conversation are introduced in its opening lines. Settle who they are there first, then keep them straight through every line.
+- Keep each person's relationship to the speaker exactly as stated. Do not promote, demote, or merge them, and do not invent one who was never mentioned.
 ${expandedSource.isEmpty ? '' : '''
-GROWING SENTENCE — the speaker is building ONE sentence across several turns, and GROWING SENTENCE is how far it has grown by this line. Translate it into natural spoken $targetLanguage as ONE sentence. Keep it a single flowing sentence — never a comma-separated list of facts. Add nothing that is not in it.
+GROWING SENTENCE — the speaker is building ONE sentence across several turns, and GROWING SENTENCE is how far it has grown by this line. Translate it into natural spoken $targetLanguage as ONE sentence. Keep it a single flowing sentence — never a comma-separated list of facts. Add nothing that is not in it. The subject rules above apply to every clause in it.
 '''}
 Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetLanguage translation>"${expandedSource.isEmpty ? '' : ', "expanded": "<$targetLanguage translation of GROWING SENTENCE>"'}}''',
                   },
