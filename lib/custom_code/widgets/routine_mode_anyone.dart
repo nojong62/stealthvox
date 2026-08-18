@@ -45,6 +45,7 @@ import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
 import '/custom_code/services/openai_connection_pool.dart';
+import '/custom_code/services/origin_language_session.dart';
 import '/custom_code/services/openai_streaming_transcribe_prewarm.dart';
 import '/custom_code/services/openai_streaming_transcribe_session.dart';
 import '/custom_code/services/openai_transcribe_service.dart';
@@ -582,7 +583,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       // 🎚️ 녹음 샘플레이트를 그대로 넘긴다. 기본값(16000)에 기대면 24kHz로 받은
       //   PCM에 16kHz WAV 헤더가 붙어 소리가 느려지고 전사문이 통째로 망가진다.
       sampleRate: kStealthVoxSttSampleRate,
-      language: _nativeLangCode(),
+      language: _sttLangCode(),
       model: OpenAiTranscribeService.firstTurnModel,
       timeout:
           const Duration(milliseconds: kFreeTalkFirstTurnRetranscribeTimeoutMs),
@@ -901,12 +902,69 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   /// 예전에는 'Korean'으로 박혀 있어, 로비에서 일본어를 골라도 전사기만 한국어로
   /// 돌았다. AI 응답 프롬프트는 이미 로비 값을 쓰고 있었으므로(1292행
   /// `buildNativeOutputLanguagePolicy`), 전사기만 어긋난 상태였다.
-  String _nativeLangName() =>
-      resolveNativeLanguageName(FFAppState().nativeLang);
+  /// 🌐 [ORIGIN-RESOLVE] 로비값이 아니라 **이 세션에서 확정된 ORIGIN**을 준다.
+  ///   유저가 첫 마디를 로비 설정과 다른 언어로 했으면 그 언어가 여기서
+  ///   나온다. 세션 한정이라 방을 나가면 로비값으로 돌아간다.
+  String _nativeLangName() => resolveNativeLanguageName(
+      OriginLanguageSession.instance.resolve(FFAppState().nativeLang));
 
   /// 전사기에 넘길 ORIGIN 언어 코드. 예열(`stealth_room_master`)이 쓰는 것과
   /// **같은 함수**라야 `take()`가 예열 세션을 채택한다.
   String _nativeLangCode() => deepgramLanguageCode(_nativeLangName());
+
+  /// 첫 발화 전사에 넘길 언어 코드. 판정 전에는 **빈 문자열 = 자동 감지**다.
+  /// 언어를 박아 두면 다른 언어 발화가 그 언어 문자로 음차되어 나와,
+  /// 어긋났다는 사실 자체가 전사문에서 사라진다.
+  String _sttLangCode() =>
+      OriginLanguageSession.instance.settled ? _nativeLangCode() : '';
+
+  /// 🌐 [ORIGIN-RESOLVE] 첫 발화 전사문으로 이 세션의 ORIGIN을 확정한다.
+  ///
+  /// **세션당 딱 한 번만 돈다.** 대화 도중 유저가 외국어를 한 마디 섞어도
+  /// 다시 뒤집히지 않는다 — 뒤집히면 화면 언어가 턴마다 요동친다.
+  ///
+  /// 확정 뒤에는 전사 소켓에도 그 언어를 박는다. 자동 감지로 계속 두면 짧은
+  /// 발화("네", "그렇죠")에서 언어가 흔들려 전사 정확도가 떨어진다.
+  Future<void> _settleOriginLanguage(String transcript) async {
+    final session = OriginLanguageSession.instance;
+    if (session.settled) return;
+    final lobbyOrigin = resolveNativeLanguageName(FFAppState().nativeLang);
+    final detected = await resolveOriginFromFirstUtterance(
+      apiKey: _openAiKey,
+      transcript: transcript,
+      lobbyOrigin: lobbyOrigin,
+      onLog: _log,
+    );
+    // 근거가 약해도 확정은 해 둔다 — 안 그러면 매 턴 판정이 다시 돈다.
+    session.adopt(detected);
+    // 확정 뒤에는 소켓에도 언어를 박는다(지금까지는 자동 감지 상태였다).
+    // 자동 감지로 계속 두면 짧은 발화("네", "그렇죠")에서 언어가 흔들린다.
+    unawaited(_streamingStt?.switchLanguage(_nativeLangCode()) ??
+        Future<bool>.value(false));
+    if (detected == null) return;
+    _log('🌐 [ORIGIN-RESOLVE]',
+        'session origin $lobbyOrigin → $detected (this room only)');
+    _showOriginSwitchedNotice(detected);
+  }
+
+  /// 로비 설정을 바꿔 달라는 안내 말풍선. 세션당 한 번만 뜬다.
+  /// **감지된 언어로** 적는다 — 로비값으로 적으면 읽어야 할 사람이 못 읽는다.
+  void _showOriginSwitchedNotice(String detectedLanguage) {
+    if (!OriginLanguageSession.instance.takeNoticeSlot()) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(originLanguageSwitchedNoticeLine(detectedLanguage)),
+          duration: const Duration(seconds: 7),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ),
+      );
+    });
+  }
 
   /// 표시명 → API 언어 코드. 표는 한 곳(`deepgramLanguageCode`)에만 둔다.
   String _mapLanguageToCode(String lang) => deepgramLanguageCode(lang);
@@ -938,6 +996,10 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   @override
   void initState() {
     super.initState();
+    // 🌐 [ORIGIN-RESOLVE] 이 방의 ORIGIN 판정을 처음 상태로 되돌린다.
+    //   전환은 **세션 한정**이다 — prefs에는 쓰지 않으므로 방을 나가면
+    //   로비값 그대로다. 여기서 비워야 다음 입장이 새로 판정한다.
+    OriginLanguageSession.instance.begin();
     // 잔여시간이 0이 되면 StealthRoom이 바깥에서 방을 닫는다. 화면만 되돌리면
     // 히스토리 저장과 빈 방 삭제가 빠지므로, 그 경로를 여기에 걸어 둔다.
     StealthRoomMaster.saveAndExitCurrentMode = _handleAutoSaveAndExit;
@@ -1304,7 +1366,7 @@ do not mention that time passed, and do not summarize it back to them:
 
 ${_voiceCharacterInstruction(_aiVoice)}
 
-${buildNativeOutputLanguagePolicy(FFAppState().nativeLang)}
+${buildNativeOutputLanguagePolicy(_nativeLangName())}
 
 [YOU ARE A MEMBER, NEVER THE HOST — THIS IS THE WHOLE POINT]
 A host runs the room: welcomes people, invites them to speak, keeps the floor
@@ -2143,7 +2205,7 @@ $kSpokenReplyLengthPolicy
     }
     _streamingSessionStarting = true;
     try {
-      final String langCode = _nativeLangCode();
+      final String langCode = _sttLangCode();
       var session = OpenAiStreamingTranscribePrewarm.instance.take(
         apiKey: _openAiKey,
         languageCode: langCode,
@@ -2789,6 +2851,11 @@ $kSpokenReplyLengthPolicy
     required String itemId,
     required int order,
   }) async {
+    // 🌐 [ORIGIN-RESOLVE] 이 세션의 ORIGIN을 확정하는 자리. 아래 파이프라인이
+    //   전부 ORIGIN에 기대므로 무엇보다 먼저 끝나야 한다. 두 번째 턴부터는
+    //   이미 확정돼 있어 즉시 반환한다.
+    await _settleOriginLanguage(transcript);
+    if (!mounted || _isDisposing) return;
     // 🔁 [LATE-CONTINUATION] 후보가 살아 있으면 조각은 전부 여기로 온다.
     //   **아래 [ONE-TURN] 가드를 타면 안 된다** — 그 가드는 파이프라인이 도는
     //   중이면 전사를 버리는데, 후보가 살아 있다는 건 유저가 창 안에서 이미
@@ -3127,6 +3194,12 @@ $kSpokenReplyLengthPolicy
     final userOriginal =
         (await _transcribeAccurately(pcmOverride: pcm))?.trim() ?? '';
     if (!mounted || pipelineGeneration != _pipelineGeneration) return;
+    // 🌐 [ORIGIN-RESOLVE] Deepgram 폴백 경로도 같은 자리에서 ORIGIN을 정한다.
+    //   전사문은 방금 gpt-4o-transcribe가 자동 감지로 만든 것이다.
+    if (userOriginal.isNotEmpty) {
+      await _settleOriginLanguage(userOriginal);
+      if (!mounted || pipelineGeneration != _pipelineGeneration) return;
+    }
     if (userOriginal.isEmpty) {
       _log('⚠️ [STT-ROUTE]',
           'gpt-4o-transcribe failed; Deepgram text discarded');

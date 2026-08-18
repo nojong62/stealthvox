@@ -166,7 +166,12 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       if (openAiKey.isNotEmpty) {
         unawaited(OpenAiStreamingTranscribePrewarm.instance.prepare(
           apiKey: openAiKey,
-          languageCode: deepgramLanguageCode(nativeLanguage),
+          // 🌐 [ORIGIN-RESOLVE] 언어를 박지 않고 예열한다(빈 값 = 자동 감지).
+          //   첫 발화는 유저가 실제로 쓴 언어 그대로 받아야, 로비 ORIGIN이
+          //   기본값 그대로인 유저를 가려낼 수 있다. 언어가 확정되면 방이
+          //   `switchLanguage`로 갈아 끼운다 — 소켓은 그대로 산다.
+          //   모드 쪽 `take()`도 같은 빈 값으로 물어보므로 채택이 어긋나지 않는다.
+          languageCode: '',
           onLog: (tag, msg) => debugPrint('$tag $msg'),
         ));
       }

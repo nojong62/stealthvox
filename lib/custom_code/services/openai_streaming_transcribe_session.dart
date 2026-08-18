@@ -103,12 +103,21 @@ const int kStreamingSttMaxRetries = 5;
 class OpenAiStreamingTranscribeSession {
   OpenAiStreamingTranscribeSession({
     required this.apiKey,
-    required this.languageCode,
+    required String languageCode,
     this.onLog,
-  });
+  }) : _languageCode = languageCode;
 
   final String apiKey;
-  final String languageCode;
+
+  /// 전사기에 박을 언어 코드. **final이 아니다** — 첫 발화의 실제 언어가
+  /// 로비 ORIGIN과 다르면 [switchLanguage]로 갈아 끼운다.
+  ///
+  /// **빈 문자열은 "언어를 박지 않는다" = 자동 감지**를 뜻한다. 첫 발화는
+  /// 이 상태로 받아야 유저가 실제로 쓴 언어가 전사문에 남는다. 언어를 박아
+  /// 두면 다른 언어 발화도 그 언어 문자로 음차되어 나와, 어긋났다는 사실
+  /// 자체가 사라진다.
+  String _languageCode;
+  String get languageCode => _languageCode;
 
   /// 로그 훅. **final이 아니다** — 예열 소켓을 방이 물려받을 때 방의 로거로
   /// 갈아 끼워야 한다. 예열 쪽 로거는 시각도 안 붙이고 앱 내부 로그 원장에도
@@ -338,7 +347,8 @@ class OpenAiStreamingTranscribeSession {
       _retryCount = 0;
       _lg(
         '✅ [STREAM-STT]',
-        'connected model=$kStreamingSttModel lang=$languageCode '
+        'connected model=$kStreamingSttModel '
+            'lang=${_languageCode.isEmpty ? 'auto' : _languageCode} '
             'rate=$kStealthVoxSttSampleRate vad=server_vad '
             'threshold=$kStreamingSttVadThreshold '
             'prefixMs=$kStreamingSttVadPrefixPaddingMs '
@@ -369,7 +379,8 @@ class OpenAiStreamingTranscribeSession {
             },
             'transcription': {
               'model': kStreamingSttModel,
-              'language': languageCode,
+              // 빈 값이면 키를 통째로 뺀다. 서버는 그때만 언어를 스스로 잡는다.
+              if (_languageCode.isNotEmpty) 'language': _languageCode,
             },
             // 발화 경계는 전적으로 서버가 잡는다. 앱에서 commit하지 않는다.
             'turn_detection': {
@@ -382,6 +393,38 @@ class OpenAiStreamingTranscribeSession {
         },
       },
     });
+  }
+
+  /// 전사 언어를 갈아 끼운다. **소켓은 그대로 둔다** — `session.update`만 다시
+  /// 보내면 되므로 재연결 비용(핸드셰이크 + 설정 왕복)이 들지 않는다.
+  ///
+  /// 첫 발화를 자동 감지로 받아 실제 언어를 알아낸 직후에 부른다. 두 번째
+  /// 턴부터는 언어가 박혀 있어야 짧은 발화의 전사 정확도가 돌아온다.
+  Future<bool> switchLanguage(String code) async {
+    if (_disposed || code.isEmpty || code == _languageCode) return false;
+    if (!isConnected) {
+      // 소켓이 없으면 값만 바꿔 둔다. 다음 connect()가 이 값으로 연다.
+      _languageCode = code;
+      return false;
+    }
+    final previous = _languageCode;
+    _languageCode = code;
+    final configured = Completer<bool>();
+    _configured = configured;
+    _sendSessionUpdate();
+    final ok = await configured.future.timeout(
+      kStreamingSttConfigTimeout,
+      onTimeout: () => false,
+    );
+    if (!ok) {
+      // 갈아 끼우기가 실패해도 전사 자체는 계속 돌아야 한다. 서버가 어떤
+      // 언어로 돌고 있는지 모르게 되는 것이 가장 나쁘므로 값을 되돌린다.
+      _languageCode = previous;
+      _lg('⚠️ [STREAM-STT]', 'lang_switch_failed $previous←$code');
+      return false;
+    }
+    _lg('🌐 [STREAM-STT]', 'lang_switched $previous→$code');
+    return true;
   }
 
   /// 오디오 전송을 연다. 소켓은 건드리지 않는다.

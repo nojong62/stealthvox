@@ -74,6 +74,79 @@ String originRetryLine(String originLanguage) {
   }
 }
 
+/// 👂 [HEARD-CONFIRM] 되묻기에 대한 유저의 답이 셋 중 무엇인가.
+enum HeardConfirmReply {
+  /// "네" — 제대로 들은 게 맞다. 보류해 둔 발화를 그대로 재개한다.
+  affirmed,
+
+  /// "아니요" — 틀렸는데 고쳐 주지는 않았다. 보류 발화를 버리고 다시 듣는다.
+  denied,
+
+  /// 내용을 담아 다시 말했다. 이것을 새 발화로 본다.
+  corrected,
+}
+
+const Set<String> _kHeardConfirmAffirmatives = <String>{
+  '네', '예', '응', '어', '맞아', '맞아요', '맞습니다', '그래', '그래요',
+  'yes', 'yeah', 'yep', 'right', 'correct',
+};
+
+const Set<String> _kHeardConfirmBareNegatives = <String>{
+  '아니', '아니요', '아뇨', '아닙니다', '틀려', '틀렸어', '틀렸어요',
+  'no', 'nope', 'wrong',
+};
+
+/// 되묻기에 대한 답을 셋으로 가른다.
+///
+/// **모드마다 따로 두면 반드시 어긋난다.** 서클톡과 시나리오톡이 같은 표를
+/// 보도록 여기 한 곳에만 둔다.
+HeardConfirmReply classifyHeardConfirmReply(String transcript) {
+  final reply =
+      transcript.trim().toLowerCase().replaceAll(RegExp(r'[\s.!?~,]'), '');
+  if (_kHeardConfirmAffirmatives.contains(reply)) {
+    return HeardConfirmReply.affirmed;
+  }
+  if (_kHeardConfirmBareNegatives.contains(reply)) {
+    return HeardConfirmReply.denied;
+  }
+  return HeardConfirmReply.corrected;
+}
+
+/// 👂 [ASK-BACK] 되묻기로 대화에 반영되지 않은 유저 말풍선에 붙는 한 줄.
+///
+/// 말풍선 자체는 화면에 남긴다 — 자기가 한 말이 흔적도 없이 사라지면 유저는
+/// 무엇을 고쳐 말해야 할지 알 수 없다. 이 문구는 "적히긴 했지만 대화에는
+/// 안 들어갔다"를 알려 준다.
+String unheardBubbleHintLine(String originLanguage) {
+  switch (resolveNativeLanguageName(originLanguage).toLowerCase()) {
+    case 'korean':
+      return '이렇게 들었어요 — 다시 말씀해 주세요';
+    case 'japanese':
+      return 'こう聞こえました — もう一度お願いします';
+    case 'chinese':
+      return '我听成了这样 — 请再说一遍';
+    case 'spanish':
+      return 'Esto es lo que oí — dígalo otra vez, por favor';
+    case 'french':
+      return 'Voici ce que j’ai entendu — répétez, s’il vous plaît';
+    case 'german':
+      return 'So habe ich es verstanden — bitte noch einmal';
+    case 'hindi':
+      return 'मैंने ऐसा सुना — कृपया फिर से कहें';
+    case 'russian':
+      return 'Вот что я услышал — повторите, пожалуйста';
+    case 'portuguese':
+      return 'Foi isto que ouvi — diga novamente, por favor';
+    case 'italian':
+      return 'Ho sentito così — ripeta, per favore';
+    case 'dutch':
+      return 'Dit hoorde ik — zeg het alstublieft nog eens';
+    case 'english':
+    default:
+      return 'This is what I heard — please say it again';
+  }
+}
+
 /// Step Expand의 첫 씨앗이 불명확할 때 쓰는 짧은 유도 질문.
 /// 같은 문구 표를 ORIGIN 음성과 TARGET 화면 폴백에 함께 사용한다.
 String localizedSeedGuidanceLine(String language) {
@@ -103,6 +176,54 @@ String localizedSeedGuidanceLine(String language) {
     case 'english':
     default:
       return 'What specific moment would you like to describe?';
+  }
+}
+
+/// 로비 ORIGIN과 실제 발화 언어가 달라 이 세션만 ORIGIN을 갈아 끼웠을 때 뜨는
+/// 안내 말풍선. **감지된 언어로** 적는다 — 로비값으로 적으면 정작 읽어야 할
+/// 사람이 못 읽는다.
+///
+/// 이 전환은 방을 나가면 사라지므로, 다음부터는 로비에서 직접 맞춰 달라고
+/// 부탁하는 것이 이 문구의 전부다.
+String originLanguageSwitchedNoticeLine(String detectedLanguage) {
+  switch (resolveNativeLanguageName(detectedLanguage).toLowerCase()) {
+    case 'korean':
+      return '한국어로 말씀하시는 것 같아 이번 대화는 한국어로 진행할게요. '
+          '다음에는 로비에서 대화 언어를 한국어로 맞춰 주세요.';
+    case 'japanese':
+      return '日本語でお話しのようなので、今回の会話は日本語で進めます。'
+          '次回はロビーで会話の言語を日本語に設定してください。';
+    case 'chinese':
+      return '看起来您在说中文，本次对话将使用中文。'
+          '下次请在大厅将对话语言设置为中文。';
+    case 'spanish':
+      return 'Parece que habla español, así que esta conversación será en español. '
+          'La próxima vez, seleccione español como idioma de conversación en el lobby.';
+    case 'french':
+      return 'Vous semblez parler français, cette conversation se fera donc en français. '
+          'La prochaine fois, choisissez le français comme langue de conversation dans le lobby.';
+    case 'german':
+      return 'Sie sprechen offenbar Deutsch, daher läuft dieses Gespräch auf Deutsch. '
+          'Bitte stellen Sie die Gesprächssprache beim nächsten Mal in der Lobby auf Deutsch.';
+    case 'hindi':
+      return 'लगता है आप हिंदी बोल रहे हैं, इसलिए यह बातचीत हिंदी में होगी। '
+          'अगली बार लॉबी में बातचीत की भाषा हिंदी चुनें।';
+    case 'russian':
+      return 'Похоже, вы говорите по-русски, поэтому этот разговор будет на русском. '
+          'В следующий раз выберите русский язык общения в лобби.';
+    case 'portuguese':
+      return 'Parece que você fala português, então esta conversa será em português. '
+          'Da próxima vez, selecione português como idioma de conversa no lobby.';
+    case 'italian':
+      return 'Sembra che parli italiano, quindi questa conversazione sarà in italiano. '
+          'La prossima volta seleziona l\'italiano come lingua di conversazione nella lobby.';
+    case 'dutch':
+      return 'U lijkt Nederlands te spreken, dus dit gesprek gaat in het Nederlands verder. '
+          'Stel de gesprekstaal de volgende keer in de lobby in op Nederlands.';
+    case 'english':
+    default:
+      return 'You seem to be speaking English, so this conversation will continue in English. '
+          'Next time, please set your chat language to English in the lobby.';
   }
 }
 
@@ -156,7 +277,7 @@ String resolveNativeLanguageName(String nativeLang) {
 String buildNativeOutputLanguagePolicy(String nativeLang) {
   final lang = resolveNativeLanguageName(nativeLang);
   return '''OUTPUT LANGUAGE: Natural spoken $lang only.
-- The user's own language is $lang — they chose it in the lobby. Treat every incoming text as their actual $lang utterance.
+- The user's own language is $lang. Treat every incoming text as their actual $lang utterance.
 - Speak and write $lang only. Never switch languages, never translate, never place a second language beside it.
 - Do NOT use the user's target practice language in this room. Target-language practice happens later in History, never here.''';
 }

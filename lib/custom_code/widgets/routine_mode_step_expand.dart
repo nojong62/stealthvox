@@ -57,6 +57,7 @@ import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
 import '/custom_code/services/openai_connection_pool.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
+import '/custom_code/services/origin_language_session.dart';
 import '/custom_code/services/openai_streaming_transcribe_prewarm.dart';
 import '/custom_code/services/late_continuation.dart';
 import '/custom_code/services/openai_streaming_transcribe_session.dart';
@@ -339,9 +340,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
       results: List<DeepgramTurnResult>.from(_pendingDeepgramResults),
     );
     _pendingDeepgramResults.clear();
-    final nativeLanguage =
-        FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
-    final languageCode = _mapLanguageToCode(nativeLanguage);
+    final languageCode = _nativeLangCode();
     // Decision/classification logic always runs (keeps the probe pathway live).
     final probe = DeepgramConfidenceProbe.evaluate(
       turn,
@@ -417,7 +416,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
     return OpenAiTranscribeService.transcribePcm16(
       apiKey: _openAiKey,
       pcm: pcm,
-      language: _nativeLangCode(),
+      language: _sttLangCode(),
       model: OpenAiTranscribeService.firstTurnModel,
       timeout: _accurateTranscribeTimeout,
       onLog: _log,
@@ -434,7 +433,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
   /// 예전에는 Realtime 세션을 열 때 한 번만 걸어 두고 턴마다 짧은 지시만
   /// 덧붙였다. 세션이 사라진 지금은 매 턴 이걸 같이 보내야 한다.
   String _buildStepExpandSystemInstructions() {
-    final nativeLang = resolveNativeLanguageName(FFAppState().nativeLang);
+    final nativeLang = _nativeLangName();
     final registerPolicy = nativeLang == 'Korean'
         ? kKoreanPoliteSpeechPolicy
         : 'Use the everyday polite spoken register of $nativeLang unless the user clearly establishes another register.';
@@ -442,7 +441,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
     return '''
 You are the conversation partner for Step Expand practice.
 
-${buildNativeOutputLanguagePolicy(FFAppState().nativeLang)}
+${buildNativeOutputLanguagePolicy(_nativeLangName())}
 
 [WHAT THIS PRACTICE IS]
 The user is building ONE sentence, a small piece at a time. Whatever they answer
@@ -571,10 +570,59 @@ line had never been said. Never build the conversation on a line you had to gues
     return normalize(left) == normalize(right);
   }
 
-  String _nativeLangName() =>
-      resolveNativeLanguageName(FFAppState().nativeLang);
+  /// 🌐 [ORIGIN-RESOLVE] 로비값이 아니라 **이 세션에서 확정된 ORIGIN**을 준다.
+  ///   유저가 첫 마디를 로비 설정과 다른 언어로 했으면 그 언어가 여기서
+  ///   나온다. 세션 한정이라 방을 나가면 로비값으로 돌아간다.
+  String _nativeLangName() => resolveNativeLanguageName(
+      OriginLanguageSession.instance.resolve(FFAppState().nativeLang));
 
   String _nativeLangCode() => deepgramLanguageCode(_nativeLangName());
+
+  /// 첫 발화 전사에 넘길 언어 코드. 판정 전에는 **빈 문자열 = 자동 감지**다.
+  /// 언어를 박아 두면 다른 언어 발화가 그 언어 문자로 음차되어 나와,
+  /// 어긋났다는 사실 자체가 전사문에서 사라진다.
+  String _sttLangCode() =>
+      OriginLanguageSession.instance.settled ? _nativeLangCode() : '';
+
+  /// 🌐 [ORIGIN-RESOLVE] 첫 발화 전사문으로 이 세션의 ORIGIN을 확정한다.
+  /// **세션당 딱 한 번만 돈다** — 대화 도중 외국어가 한 마디 섞여도 안 뒤집힌다.
+  Future<void> _settleOriginLanguage(String transcript) async {
+    final session = OriginLanguageSession.instance;
+    if (session.settled) return;
+    final lobbyOrigin = resolveNativeLanguageName(FFAppState().nativeLang);
+    final detected = await resolveOriginFromFirstUtterance(
+      apiKey: _openAiKey,
+      transcript: transcript,
+      lobbyOrigin: lobbyOrigin,
+      onLog: _log,
+    );
+    session.adopt(detected);
+    // 확정 뒤에는 소켓에도 언어를 박는다. 자동 감지로 계속 두면 짧은 발화에서
+    // 언어가 흔들려 전사 정확도가 떨어진다.
+    unawaited(_streamingStt?.switchLanguage(_nativeLangCode()) ??
+        Future<bool>.value(false));
+    if (detected == null) return;
+    _log('🌐 [ORIGIN-RESOLVE]',
+        'session origin $lobbyOrigin → $detected (this room only)');
+    _showOriginSwitchedNotice(detected);
+  }
+
+  /// 로비 설정을 바꿔 달라는 안내 말풍선. 세션당 한 번, **감지된 언어로** 뜬다.
+  void _showOriginSwitchedNotice(String detectedLanguage) {
+    if (!OriginLanguageSession.instance.takeNoticeSlot()) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(originLanguageSwitchedNoticeLine(detectedLanguage)),
+          duration: const Duration(seconds: 7),
+          behavior: SnackBarBehavior.floating,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        ),
+      );
+    });
+  }
 
   String _mapLanguageToCode(String lang) => deepgramLanguageCode(lang);
 
@@ -639,6 +687,10 @@ line had never been said. Never build the conversation on a line you had to gues
   @override
   void initState() {
     super.initState();
+    // 🌐 [ORIGIN-RESOLVE] 이 방의 ORIGIN 판정을 처음 상태로 되돌린다.
+    //   전환은 **세션 한정**이다 — prefs에는 쓰지 않으므로 방을 나가면
+    //   로비값 그대로다. 여기서 비워야 다음 입장이 새로 판정한다.
+    OriginLanguageSession.instance.begin();
     // 잔여시간 소진 시 StealthRoom이 이 경로로 방을 닫는다(저장·정리 포함).
     StealthRoomMaster.saveAndExitCurrentMode = _handleAutoSaveAndExit;
     BillingTicker.instance.appInForeground.addListener(_onForegroundChanged);
@@ -1261,7 +1313,7 @@ line had never been said. Never build the conversation on a line you had to gues
       final polished = await StepExpandBrain.polishNativeSentence(
         apiKey: _openAiKey,
         originalSentence: expandedSentence,
-        languageName: resolveNativeLanguageName(FFAppState().nativeLang),
+        languageName: _nativeLangName(),
       );
       if (!mounted) return;
       setState(() {
@@ -2069,7 +2121,7 @@ line had never been said. Never build the conversation on a line you had to gues
     }
     _streamingSessionStarting = true;
     try {
-      final languageCode = _nativeLangCode();
+      final languageCode = _sttLangCode();
       var session = OpenAiStreamingTranscribePrewarm.instance.take(
         apiKey: _openAiKey,
         languageCode: languageCode,
@@ -2660,6 +2712,11 @@ line had never been said. Never build the conversation on a line you had to gues
     required String itemId,
     required int order,
   }) async {
+    // 🌐 [ORIGIN-RESOLVE] 이 세션의 ORIGIN을 확정하는 자리. 아래 파이프라인이
+    //   전부 ORIGIN에 기대므로 무엇보다 먼저 끝나야 한다. 두 번째 턴부터는
+    //   이미 확정돼 있어 즉시 반환한다.
+    await _settleOriginLanguage(transcript);
+    if (!mounted || _isDisposing) return;
     // 🔁 [LATE-CONTINUATION] 후보가 살아 있으면 조각은 전부 이리로 온다.
     //   **아래 가드를 타면 안 된다** — 유저가 복구 창 안에서 이미 다시 말했고,
     //   그 말은 버릴 수 없다.
@@ -3035,7 +3092,7 @@ line had never been said. Never build the conversation on a line you had to gues
       apiKey: _openAiKey,
       previousExpanded: previousExpandedNow,
       newUtterances: <String>[..._pendingNativeParts, userKorean],
-      languageName: resolveNativeLanguageName(FFAppState().nativeLang),
+      languageName: _nativeLangName(),
     );
 
     _log('🔀 [COMMIT-03]', '전사 확정 → 합치기 게이트 → Step Expand 질문 생성');
@@ -3178,7 +3235,7 @@ line had never been said. Never build the conversation on a line you had to gues
               apiKey: _openAiKey,
               previousExpanded: previousExpanded,
               newUtterances: mergeInputs,
-              languageName: resolveNativeLanguageName(FFAppState().nativeLang),
+              languageName: _nativeLangName(),
             ));
         if (!mounted ||
             !_isConversationActive ||
@@ -5384,8 +5441,9 @@ line had never been said. Never build the conversation on a line you had to gues
                       fontSize: 16 * _fontScale,
                       fontWeight: FontWeight.bold)),
               if (_showOriginal &&
-                  !(FFAppState().nativeLang.isNotEmpty &&
-                      FFAppState().nativeLang == FFAppState().targetLang) &&
+                  // ORIGIN과 TARGET이 같으면 원문 줄이 배울글과 똑같아진다.
+                  // 세션에서 확정된 ORIGIN으로 봐야 한다 — 로비값과 다를 수 있다.
+                  _nativeLangName() != FFAppState().targetLang &&
                   effectiveOriginal.isNotEmpty) ...[
                 const SizedBox(height: 6),
                 Text(effectiveOriginal,
