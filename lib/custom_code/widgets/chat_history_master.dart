@@ -296,6 +296,12 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   String? _selectedMeaningUnitVoice = 'cedar';
   // P2 학습 Voice는 Cedar를 기본값으로 사용한다.
   bool _shadowStarted = false;
+  // [P2-REPEAT] 한 줄을 몇 번 들려줄지. null이면 아직 안 골랐다 — 보이스와
+  //   이 값을 **둘 다** 골라야 연습이 시작된다.
+  //   2번 = 1회차 듣기 + 2회차 쉐도잉. 1번 = 쉐도잉 하나.
+  int? _shadowRepeatCount;
+  // [P2-REPEAT] 지금 이 줄의 몇 회차인지(0부터). 줄이 바뀌면 0으로 돌아간다.
+  int _shadowPass = 0;
   // [P2-PROXY] Local amplitude proxy for spoken-ratio checks. No Whisper cost.
   Timer? _shadowAmpTimer;
   int _shadowVoicedTicks = 0;
@@ -1552,9 +1558,22 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
   }
 
   // ============================================================================
-  // [P2-SHADOW] Highlight read-along. P2 only, no recording.
+  // [P2-SHADOW] Highlight read-along.
   // ============================================================================
+
+  /// [P2-REPEAT] 마지막 회차가 쉐도잉이다. **녹음은 여기서만 돈다** — 듣기
+  /// 회차까지 녹음하면 한 줄에 파일이 둘 생기고 뒤엣것이 앞엣것을 덮는다.
+  bool get _isShadowingPass => _shadowPass >= (_shadowRepeatCount ?? 1) - 1;
+
+  /// 새 줄을 연다. 회차는 처음부터 센다.
   void _startShadowHighlight() {
+    _shadowPass = 0;
+    _beginShadowPass();
+  }
+
+  /// [P2-REPEAT] 한 회차를 연다. 듣기 회차를 마치고 같은 줄을 쉐도잉으로
+  /// 다시 열 때도, 다시 말하기로 쉐도잉만 되돌릴 때도 이리 온다.
+  void _beginShadowPass() {
     _shadowHighlightTimer?.cancel();
     _shadowAdvanceTimer?.cancel();
     if (!mounted || !isPracticeMode || currentIndex >= _tutorLines.length) {
@@ -1582,12 +1601,16 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
           currentIndex != lineIdx) {
         return;
       }
-      await _startShadowRecording(lineIdx);
-      if (!mounted ||
-          _phase != ShadowingPhase.part2Practice ||
-          isPaused ||
-          currentIndex != lineIdx) {
-        return;
+      // [P2-REPEAT] 듣기 회차에는 마이크를 열지 않는다. 유저 목소리는
+      //   쉐도잉 회차에서 딱 한 번만 남는다.
+      if (_isShadowingPass) {
+        await _startShadowRecording(lineIdx);
+        if (!mounted ||
+            _phase != ShadowingPhase.part2Practice ||
+            isPaused ||
+            currentIndex != lineIdx) {
+          return;
+        }
       }
       _startShadowLineGlide(lineIdx, words);
       // [P2-SHADOW-AI] Play the AI voice and drive the highlight from the audio
@@ -1673,6 +1696,21 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     }
     if (mounted) setState(() => _shadowWordIdx = _shadowWords.length);
     _shadowAdvanceTimer?.cancel();
+    // [P2-REPEAT] 듣기 회차가 끝났다 → 같은 줄을 쉐도잉으로 한 번 더 연다.
+    //   녹음도 평가도 여기서는 하지 않는다.
+    if (!_isShadowingPass) {
+      _shadowAdvanceTimer = Timer(const Duration(milliseconds: 600), () {
+        if (!mounted ||
+            _phase != ShadowingPhase.part2Practice ||
+            isPaused ||
+            currentIndex != lineIdx) {
+          return;
+        }
+        _shadowPass++;
+        _beginShadowPass();
+      });
+      return;
+    }
     _shadowAdvanceTimer = Timer(const Duration(milliseconds: 700), () async {
       if (!mounted || _phase != ShadowingPhase.part2Practice || isPaused) {
         return;
@@ -1853,7 +1891,10 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
                           if (mounted &&
                               _phase == ShadowingPhase.part2Practice &&
                               !isPaused) {
-                            _startShadowHighlight();
+                            // [P2-REPEAT] 다시 말하기는 쉐도잉 회차만 되돌린다.
+                            //   듣기부터 다시 틀면 방금 들은 문장을 또 듣는다.
+                            _shadowPass = (_shadowRepeatCount ?? 1) - 1;
+                            _beginShadowPass();
                           }
                         },
                         child: const Padding(
@@ -8340,6 +8381,9 @@ RULES — follow exactly:
         // 첫 화면은 보이스를 고르기 전까지 기다린다. 미리 골라 두면 상단
         // 선택기가 깜빡이지 않고, 고르는 순간 시작하는 흐름도 죽는다.
         _selectedMeaningUnitVoice = null;
+        // [P2-REPEAT] 횟수도 같이 비운다 — 보이스와 둘 다 골라야 시작한다.
+        _shadowRepeatCount = null;
+        _shadowPass = 0;
         _shadowStarted = false;
         _shadowRereadCount = 0; // [P2-PROXY]
         _showEchoingOverlay = false;
@@ -8975,10 +9019,78 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     );
   }
 
-  // P2 상단 오른쪽: 의미단위 쉐도잉 전용 학습 Voice.
+  /// [P2-REPEAT] 보이스와 횟수를 **둘 다** 고른 순간이 시작 신호다.
+  /// 하나만 골라 두고 시작하면 나머지는 영영 못 고른다 — 연습이 이미 굴러간다.
+  void _maybeStartP2() {
+    if (_shadowStarted) return;
+    if (_selectedMeaningUnitVoice == null || _shadowRepeatCount == null) return;
+    setState(() => _shadowStarted = true);
+    unawaited(_prefetchNextMeaningUnitAudio());
+    if (_phase == ShadowingPhase.part2Practice && !isPaused) {
+      // 다 고른 순간이 곧 시작 신호다 — 카운트다운 없음.
+      _startP2Practice();
+    }
+  }
+
+  /// [P2-REPEAT] 한 줄을 몇 번 들려줄지 고르는 칩.
+  /// 2번은 듣기 한 번 + 쉐도잉 한 번, 1번은 쉐도잉 하나다. 어느 쪽이든
+  /// 유저 목소리는 쉐도잉 회차에서만 녹음된다.
+  Widget _buildShadowRepeatChip(int count, String label, bool busy) {
+    final bool selected = _shadowRepeatCount == count;
+    final bool pending = _shadowRepeatCount == null;
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: busy
+              ? null
+              : () {
+                  if (_shadowRepeatCount == count) return;
+                  setState(() => _shadowRepeatCount = count);
+                  _maybeStartP2();
+                },
+          child: Container(
+            height: 36,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: selected
+                  ? Colors.amber.withValues(alpha: 0.22)
+                  : (pending
+                      ? Colors.amber.withValues(alpha: 0.12)
+                      : Colors.white.withValues(alpha: 0.06)),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: selected || pending ? Colors.amber : Colors.white24,
+                width: selected ? 1.5 : 1,
+              ),
+            ),
+            child: Text(
+              '$count번',
+              style: TextStyle(
+                color: busy
+                    ? Colors.white38
+                    : (selected ? Colors.amber : Colors.white70),
+                fontSize: 12,
+                fontWeight: selected ? FontWeight.bold : FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // P2 상단 오른쪽: 의미단위 쉐도잉 전용 학습 Voice + 반복 횟수.
   Widget _buildMeaningUnitVoiceSelector() {
     final busy = _shadowAiPlayer != null || _shadowRecording;
-    final needsSelection = _selectedMeaningUnitVoice == null;
+    // [P2-REPEAT] 둘 중 하나라도 안 골랐으면 아직 시작 전이다.
+    final needsSelection =
+        _selectedMeaningUnitVoice == null || _shadowRepeatCount == null;
     final selector = Padding(
       padding: const EdgeInsets.fromLTRB(12, 2, 16, 6),
       child: Row(
@@ -8986,7 +9098,7 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
         children: [
           Flexible(
             child: Text(
-              '학습용 의미단위 쉐도잉 보이스 선택',
+              '쉐도잉',
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: needsSelection ? Colors.amber : Colors.white54,
@@ -9000,6 +9112,10 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
               ),
             ),
           ),
+          const SizedBox(width: 8),
+          _buildShadowRepeatChip(2, '두 번 말하기 · 처음은 듣기, 두 번째가 쉐도잉', busy),
+          const SizedBox(width: 6),
+          _buildShadowRepeatChip(1, '한 번 말하기 · 쉐도잉', busy),
           const SizedBox(width: 8),
           Container(
             height: 36,
@@ -9053,18 +9169,13 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
                             voice == _selectedMeaningUnitVoice) {
                           return;
                         }
-                        final firstSelection = !_shadowStarted;
-                        setState(() {
-                          _selectedMeaningUnitVoice = voice;
-                          if (firstSelection) _shadowStarted = true;
-                        });
-                        unawaited(_prefetchNextMeaningUnitAudio());
-                        if (firstSelection &&
-                            _phase == ShadowingPhase.part2Practice &&
-                            !isPaused) {
-                          // 고른 순간이 곧 시작 신호다 — 카운트다운 없음.
-                          _startP2Practice();
+                        setState(() => _selectedMeaningUnitVoice = voice);
+                        // 이미 굴러가는 중이면 보이스만 갈아 끼운다.
+                        if (_shadowStarted) {
+                          unawaited(_prefetchNextMeaningUnitAudio());
+                          return;
                         }
+                        _maybeStartP2();
                       },
               ),
             ),
