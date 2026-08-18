@@ -58,6 +58,7 @@ import '/custom_code/services/deepgram_prewarm_session.dart';
 // 🔁 [LATE-CONTINUATION] 판정·합치기·말풍선 규칙은 Circle Talk과 **같은
 //   함수**를 쓴다. 여기에 규칙을 다시 구현하면 한쪽만 고쳐지고 다른 쪽은 남는다.
 import '/custom_code/services/late_continuation.dart';
+import '/custom_code/services/origin_language_session.dart';
 import '/custom_code/services/openai_streaming_transcribe_prewarm.dart';
 import '/custom_code/services/openai_streaming_transcribe_session.dart';
 import '/custom_code/services/openai_transcribe_service.dart';
@@ -206,8 +207,37 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay>
   /// 되묻기는 "유저가 다시 말하면 풀린다"는 전제인데, 모델이 같은 문장을 계속
   /// 같게 판정하면 그 전제가 깨져 방을 나가는 것 말고는 길이 없다. 실측
   /// (2026-08-09)에서 멀쩡한 한국어가 세 번 연달아 막혔다.
-  int _consecutiveAskBacks = 0;
-  static const int _kMaxConsecutiveAskBacks = 2;
+  /// 👂 [HEARD-CONFIRM] 연속 되묻기 상한. 서클톡과 같은 값을 쓴다 —
+  /// 두 모드가 다르게 굴 이유가 없다. 횟수 자체는 `_heardConfirmationAttempts`
+  /// (117행, 레거시 경로와 공유)에 센다.
+  static const int _kMaxHeardConfirmAttempts = 2;
+
+  /// 👂 [ASK-BACK] 직전 유저 발화의 유효 발화 길이(ms). 모르면 null.
+  int? _lastTurnVoicedMs;
+
+  /// 👂 [ASK-BACK] 이 글자 수 미만이면 전사가 부실하다고 본다.
+  static const int _kAskBackThinTranscriptChars = 6;
+
+  /// 👂 [ASK-BACK] 이 시간 미만으로 말했으면 전사가 부실하다고 본다.
+  static const int _kAskBackThinVoicedMs = 700;
+
+  /// 👂 [ASK-BACK] 되묻기를 받아들일 **독립 근거**가 있는가.
+  ///
+  /// 예전에는 대화 상대 AI가 혼자 "못 알아들었다"고 하면 그대로 따랐다.
+  /// 그런데 그 판정은 전사 품질이 아니라 **장면 문맥**을 보고 내려진다 —
+  /// 장면이 쌓일수록 "이 말은 지금 상황에 안 맞는다"고 볼 여지가 늘어, 3~4턴
+  /// 부터 멀쩡한 발화가 계속 지워졌다(2026-08-18 실기기 턴5: len=15
+  /// deltas=10 voiced 2828ms인데 폐기).
+  ///
+  /// 그래서 전사 쪽에 실제로 부실한 구석이 있을 때만 되묻기를 인정한다.
+  /// 근거가 없으면 되묻는 말을 그냥 **장면 속 대사**로 취급한다 — 사람이
+  /// "뭐라고요?" 하는 건 자연스러운 대사이지, 상대의 말을 지울 이유가 아니다.
+  bool _askBackHasEvidence(String transcript) {
+    if (transcript.trim().length < _kAskBackThinTranscriptChars) return true;
+    final voiced = _lastTurnVoicedMs;
+    if (voiced != null && voiced < _kAskBackThinVoicedMs) return true;
+    return false;
+  }
 
   void _log(String tag, String msg) {
     final ts = DateTime.now().toIso8601String().substring(11, 23);
@@ -232,10 +262,73 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay>
     return RegExp('^[\\s.,!?;:\'"\\[\\]{}()\\-]+\$').hasMatch(t);
   }
 
-  String _nativeLangName() =>
-      resolveNativeLanguageName(FFAppState().nativeLang);
+  /// 🌐 [ORIGIN-RESOLVE] 로비값이 아니라 **이 세션에서 확정된 ORIGIN**을 준다.
+  ///   유저가 첫 마디를 로비 설정과 다른 언어로 했으면 그 언어가 여기서
+  ///   나온다. 세션 한정이라 방을 나가면 로비값으로 돌아간다.
+  String _nativeLangName() => resolveNativeLanguageName(
+      OriginLanguageSession.instance.resolve(FFAppState().nativeLang));
 
   String _nativeLangCode() => deepgramLanguageCode(_nativeLangName());
+
+  /// 첫 발화 전사에 넘길 언어 코드. 판정 전에는 **빈 문자열 = 자동 감지**다.
+  /// 언어를 박아 두면 다른 언어 발화가 그 언어 문자로 음차되어 나와,
+  /// 어긋났다는 사실 자체가 전사문에서 사라진다.
+  String _sttLangCode() =>
+      OriginLanguageSession.instance.settled ? _nativeLangCode() : '';
+
+  /// 🌐 [ORIGIN-RESOLVE] 첫 발화 전사문으로 이 세션의 ORIGIN을 확정한다.
+  /// **세션당 딱 한 번만 돈다** — 대화 도중 외국어가 한 마디 섞여도 안 뒤집힌다.
+  Future<void> _settleOriginLanguage(String transcript) async {
+    final session = OriginLanguageSession.instance;
+    if (session.settled) return;
+    final lobbyOrigin = resolveNativeLanguageName(FFAppState().nativeLang);
+    final detected = await resolveOriginFromFirstUtterance(
+      apiKey: _openAiKey,
+      transcript: transcript,
+      lobbyOrigin: lobbyOrigin,
+      onLog: _log,
+    );
+    session.adopt(detected);
+    // 확정 뒤에는 소켓에도 언어를 박는다. 자동 감지로 계속 두면 짧은 발화에서
+    // 언어가 흔들려 전사 정확도가 떨어진다.
+    unawaited(_streamingStt?.switchLanguage(_nativeLangCode()) ??
+        Future<bool>.value(false));
+    if (detected == null) return;
+    _log('🌐 [ORIGIN-RESOLVE]',
+        'session origin $lobbyOrigin → $detected (this room only)');
+    _showOriginSwitchedNotice(detected);
+  }
+
+  /// 로비 설정을 바꿔 달라는 안내 말풍선. 세션당 한 번, **감지된 언어로** 뜬다.
+  void _showOriginSwitchedNotice(String detectedLanguage) {
+    if (!OriginLanguageSession.instance.takeNoticeSlot()) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(originLanguageSwitchedNoticeLine(detectedLanguage)),
+          duration: const Duration(seconds: 7),
+          behavior: SnackBarBehavior.floating,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        ),
+      );
+    });
+  }
+
+  /// 👂 [ASK-BACK] 못 알아들은 말풍선에 붙는 안내. 유저의 ORIGIN으로 적는다.
+  String _unheardBubbleHint() => unheardBubbleHintLine(_nativeLangName());
+
+  /// 👂 [HEARD-CONFIRM] 확인이 끝났으니 되묻기 흔적을 걷어낸다.
+  ///
+  /// **`setState` 안에서 부른다.** 흐린 유저 말풍선과 되묻는 말풍선은 한 쌍이라
+  /// 둘을 같이 지운다 — 하나만 남으면 화면에 맥락 없는 조각이 떠 있게 된다.
+  void _clearHeardConfirmBubbles() {
+    _localMessages.removeWhere((m) {
+      final role = m['role']?.toString() ?? '';
+      return role == 'HOST_UNHEARD' || role == 'SYSTEM_ASKBACK';
+    });
+  }
 
   String _mapLanguageToCode(String lang) => deepgramLanguageCode(lang);
 
@@ -273,7 +366,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay>
       // 🎚️ 녹음 샘플레이트를 그대로 넘긴다. 기본값(16000)에 기대면 24kHz PCM에
       //   16kHz WAV 헤더가 붙어 소리가 느려지고 전사문이 통째로 망가진다.
       sampleRate: kStealthVoxSttSampleRate,
-      language: _nativeLangCode(),
+      language: _sttLangCode(),
       model: OpenAiTranscribeService.firstTurnModel,
       timeout: _accurateTranscribeTimeout,
       onLog: _log,
@@ -285,7 +378,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay>
   static bool _isAskBackReply(String text) => hasHeardConfirmSignal(text);
 
   String _buildScenarioMemberInstructions() {
-    final nativeLang = resolveNativeLanguageName(FFAppState().nativeLang);
+    final nativeLang = _nativeLangName();
     final registerPolicy = nativeLang == 'Korean'
         ? kKoreanPoliteSpeechPolicy
         : 'Use the everyday polite spoken register of $nativeLang unless the established roles clearly require another register.';
@@ -301,7 +394,7 @@ instructions). You already lived through this — stay in character, do not gree
 the user again, do not mention that time passed, and do not recap it to them:
 <earlier>$_rolloverSummary</earlier>
 '''}
-${buildNativeOutputLanguagePolicy(FFAppState().nativeLang)}
+${buildNativeOutputLanguagePolicy(_nativeLangName())}
 - You are NOT a host, moderator, narrator, facilitator, guide, or coach.
 - Never introduce the scenario, welcome the user to an activity, explain what will happen, or invite the user to begin.
 - Speak only as "${_roleplayPartnerLabel.trim()}" would actually speak to "${_roleplayUserLabel.trim()}" inside this exact situation.
@@ -617,6 +710,10 @@ never by itself a reason to ask back.
   @override
   void initState() {
     super.initState();
+    // 🌐 [ORIGIN-RESOLVE] 이 방의 ORIGIN 판정을 처음 상태로 되돌린다.
+    //   전환은 **세션 한정**이다 — prefs에는 쓰지 않으므로 방을 나가면
+    //   로비값 그대로다. 여기서 비워야 다음 입장이 새로 판정한다.
+    OriginLanguageSession.instance.begin();
     // 잔여시간 소진 시 StealthRoom이 이 경로로 방을 닫는다(저장·정리 포함).
     StealthRoomMaster.saveAndExitCurrentMode = _handleAutoSaveAndExit;
     BillingTicker.instance.appInForeground.addListener(_onForegroundChanged);
@@ -1334,7 +1431,7 @@ never by itself a reason to ask back.
     }
     _streamingSessionStarting = true;
     try {
-      final languageCode = _nativeLangCode();
+      final languageCode = _sttLangCode();
       var session = OpenAiStreamingTranscribePrewarm.instance.take(
         apiKey: _openAiKey,
         languageCode: languageCode,
@@ -1848,8 +1945,17 @@ never by itself a reason to ask back.
     //   뒷말이 먼저 끝났을 때 문장이 뒤집힌다.
     final int order =
         _streamingStt?.utteranceOrderOf(itemId) ?? (++_fallbackSegmentOrder);
-    _log('[SCN-STT]',
-        'final_received item=$itemId order=$order generation=$_listenGeneration len=${text.length}');
+    // 👂 [ASK-BACK] 되묻기가 근거 있는 것인지 판단할 때 쓴다. 유효 발화가
+    //   얼마나 길었는지는 전사기만 아는 정보이고, 여기가 그것을 잡을 수 있는
+    //   유일한 자리다(itemId가 살아 있는 지점).
+    _lastTurnVoicedMs = _streamingStt?.utteranceVoicedMsOf(itemId);
+    // 전사문을 그대로 남긴다. 글자 수만 찍던 탓에 "앱이 단어를 바꾼다"는 제보를
+    // 로그로 가릴 수가 없었다(2026-08-18). 레거시 경로는 이미 전문을 찍는다.
+    _log(
+        '[SCN-STT]',
+        'final_received item=$itemId order=$order '
+            'generation=$_listenGeneration voicedMs=${_lastTurnVoicedMs ?? -1} '
+            'text="$text"');
     unawaited(
         _processStreamingFinalTranscript(text, itemId: itemId, order: order));
   }
@@ -1861,6 +1967,11 @@ never by itself a reason to ask back.
     required String itemId,
     required int order,
   }) async {
+    // 🌐 [ORIGIN-RESOLVE] 이 세션의 ORIGIN을 확정하는 자리. 아래 파이프라인이
+    //   전부 ORIGIN에 기대므로 무엇보다 먼저 끝나야 한다. 두 번째 턴부터는
+    //   이미 확정돼 있어 즉시 반환한다.
+    await _settleOriginLanguage(transcript);
+    if (!mounted || _isDisposing) return;
     // 🔁 [LATE-CONTINUATION] 후보가 살아 있으면 조각은 전부 여기로 온다.
     //   **아래 [ONE-TURN] 가드를 타면 안 된다** — 후보가 살아 있다는 건 유저가
     //   복구 창 안에서 이미 다시 말했다는 뜻이고, 그 말은 버릴 수 없다.
@@ -2223,14 +2334,50 @@ never by itself a reason to ask back.
     _processRelayPipeline(committed);
   }
 
+  /// [understandingConfirmed]가 true면 유저가 "네"로 확인해 준 발화를 재개하는
+  /// 것이므로, 같은 문장을 두고 또 되묻지 않는다. 안 그러면 확인–되묻기가
+  /// 서로를 부르는 고리가 된다.
   Future<void> _processScenarioTalkTurn(
     String userKorean, {
     required int generation,
+    bool understandingConfirmed = false,
   }) async {
     if (!mounted ||
         !_isConversationActive ||
         generation != _pipelineGeneration) {
       return;
+    }
+    // 👂 [HEARD-CONFIRM] 되묻기를 걸어 둔 상태면, 이번 발화는 새 대화가 아니라
+    //   그 되물음에 대한 답이다. 서클톡과 같은 흐름이다
+    //   (`routine_mode_anyone.dart` `_processRelayPipeline` 머리).
+    //
+    //   **`_turnCounter++`보다 먼저 판정한다.** 뒤로 미루면 "네" 한 마디가
+    //   턴 하나를 먹고, 아래 재귀가 한 번 더 올려 번호가 어긋난다.
+    final pendingHeard = _pendingHeardConfirmation;
+    if (pendingHeard != null && !understandingConfirmed) {
+      _pendingHeardConfirmation = null;
+      switch (classifyHeardConfirmReply(userKorean)) {
+        case HeardConfirmReply.affirmed:
+          _heardConfirmationAttempts = 0;
+          _log('[HEARD-CONFIRM]', 'affirmed → 보류 발화 재개 "$pendingHeard"');
+          // 확인이 끝났으니 되묻기 흔적을 걷어낸다. 보류 발화가 아래에서
+          // 정식 HOST 말풍선으로 다시 선다.
+          setState(_clearHeardConfirmBubbles);
+          return _processScenarioTalkTurn(pendingHeard,
+              generation: generation, understandingConfirmed: true);
+        case HeardConfirmReply.denied:
+          _heardConfirmationAttempts = 0;
+          _log('[HEARD-CONFIRM]', 'denied_without_correction → 재청취');
+          setState(_clearHeardConfirmBubbles);
+          await _speakRetryAndListen();
+          return;
+        case HeardConfirmReply.corrected:
+          // 유저가 내용을 담아 다시 말했다. 이것을 새 발화로 본다.
+          _heardConfirmationAttempts = 0;
+          _log('[HEARD-CONFIRM]', 'corrected_with_content → 새 발화 판정');
+          setState(_clearHeardConfirmBubbles);
+          break;
+      }
     }
     _turnCounter++;
     final turnNumber = _turnCounter;
@@ -2358,66 +2505,83 @@ never by itself a reason to ask back.
 
       // 👂 되묻기 턴이면 유저 발화를 버린다. 화면에도 히스토리에도 남기지
       //   않고 턴 번호도 되돌려, 유저가 다시 말한 것이 이 턴이 되게 한다.
-      //   잘못 들은 문장 위에 장면을 이어 붙이면 그 뒤가 전부 어긋난다.
-      //   되묻는 말은 소리로만 내보낸다 — 글자로 남기면 지우는 사람이 없어
-      //   쌓이고, _recentKoreanConversation()이 그걸 다음 턴 컨텍스트로
-      //   넘겨 AI가 따라 되묻는다.
       String replyKorean = aiKorean;
-      if (_isAskBackReply(replyKorean)) {
-        _consecutiveAskBacks++;
-        if (_consecutiveAskBacks > _kMaxConsecutiveAskBacks) {
-          // 🚪 [ASK-BACK-ESCAPE] 갇혔다. 되묻지 말라고 못 박고 한 번만 다시
-          //   청한다. 평소 턴에는 mini가 1회 그대로이고, 이 경로에만 1회가
-          //   더 나간다 — 유저가 같은 말을 네 번째 반복하는 것보다 싸다.
-          _log('[ASK-BACK-ESCAPE]',
-              'turn=$turnNumber consecutive=$_consecutiveAskBacks → 되묻기 금지 재요청');
-          final forced = await RoleplayBrain.generateKoreanTurn(
-            apiKey: _openAiKey,
-            instructions: '${_buildScenarioMemberInstructions()}\n'
-                '\n'
-                '[OVERRIDE — THIS TURN ONLY]\n'
-                'You already asked the user to repeat themselves '
-                '$_consecutiveAskBacks times in a row and they said essentially '
-                'the same thing again. Asking back once more would strand them. '
-                'Do NOT ask back. Take the line at face value, decide what it '
-                'most likely means in this scene, and answer it in character.',
-            userText: userKorean,
-            recentConversation: recentConversation,
-          );
-          if (!mounted ||
-              !_isConversationActive ||
-              generation != _pipelineGeneration ||
-              turnNumber != _turnCounter) {
-            return;
-          }
-          // 재요청도 되묻거나 비면 그때는 평소 되묻기로 내보낸다.
-          if (forced.trim().isNotEmpty && !_isAskBackReply(forced)) {
-            replyKorean = forced;
-            _consecutiveAskBacks = 0;
-          }
+      // 👂 [ASK-BACK-OVERRIDE] 되묻기를 **전사 근거**로 한 번 거른다.
+      //
+      //   서클톡은 유저 말의 번역문을 보고 되묻는다 — 즉 판정 근거가 전사
+      //   품질이다. 시나리오톡은 장면 상대 AI의 응답을 보고 되물어서, 장면이
+      //   쌓일수록 "이 말은 상황에 안 맞는다"는 이유로 멀쩡한 발화가 계속
+      //   지워졌다(3~4턴부터 악화). 두 모드를 같은 근거 위에 세운다.
+      //
+      //   근거가 없으면 신호만 떼고 **평범한 대사로** 흘려보낸다. 사람이
+      //   "뭐라고요?" 하는 건 자연스러운 대사이지 상대의 말을 지울 이유가 아니다.
+      if (_isAskBackReply(replyKorean) && !_askBackHasEvidence(userKorean)) {
+        final asDialogue = stripHeardConfirmSignal(replyKorean);
+        if (asDialogue.isNotEmpty) {
+          _log(
+              '[ASK-BACK-OVERRIDE]',
+              'turn=$turnNumber len=${userKorean.trim().length} '
+                  'voicedMs=${_lastTurnVoicedMs ?? -1} → 되묻기 무시, 유저 발화 유지');
+          replyKorean = asDialogue;
+          _heardConfirmationAttempts = 0;
         }
-        if (_isAskBackReply(replyKorean)) {
-          // 👂 되묻기 턴이면 유저 발화를 버린다. 화면에도 히스토리에도 남기지
-          //   않고 턴 번호도 되돌려, 유저가 다시 말한 것이 이 턴이 되게 한다.
-          //   잘못 들은 문장 위에 장면을 이어 붙이면 그 뒤가 전부 어긋난다.
-          //   되묻는 말은 소리로만 내보낸다 — 글자로 남기면 지우는 사람이 없어
-          //   쌓이고, _recentKoreanConversation()이 그걸 다음 턴 컨텍스트로
-          //   넘겨 AI가 따라 되묻는다.
-          askedBack = true;
-          _turnCounter--;
-          setState(() {
-            _localMessages.remove(hostBubble);
-          });
-          _log('[ASK-BACK]', 'turn=$turnNumber 되묻기 → 유저 발화 폐기(화면/히스토리 미기록)');
-          final spokenQuestion = stripHeardConfirmSignal(replyKorean);
-          await _speakKoreanLine(spokenQuestion.isEmpty
-              ? originRetryLine(_nativeLangName())
-              : spokenQuestion);
-          return;
-        }
-      } else {
-        _consecutiveAskBacks = 0;
       }
+      if (_isAskBackReply(replyKorean) && !understandingConfirmed) {
+        // 👂 [HEARD-CONFIRM] 서클톡과 같은 모양으로 되묻는다
+        //   (`routine_mode_anyone.dart` `heardConfirmation` 분기).
+        //
+        //   두 가지가 예전과 다르다:
+        //   1) 되묻는 말을 **화면에도 세운다**. 소리로만 내보내면 유저 눈에는
+        //      아무 일도 없이 자기 말만 사라진 것으로 보인다.
+        //   2) 유저 발화를 **보류해 둔다**. "네" 한 마디면 그대로 재개되므로
+        //      같은 말을 처음부터 다시 할 필요가 없다.
+        askedBack = true;
+        _turnCounter--;
+        _heardConfirmationAttempts++;
+        final spokenQuestion = stripHeardConfirmSignal(replyKorean)
+            .replaceAll(RegExp(r'[\r\n]+'), ' ');
+        // 서클톡과 같은 상한. 갇히면 짧은 재시도 문장으로 빠져나온다.
+        final tooManyAttempts =
+            _heardConfirmationAttempts > _kMaxHeardConfirmAttempts ||
+                spokenQuestion.isEmpty;
+        final prompt =
+            tooManyAttempts ? originRetryLine(_nativeLangName()) : spokenQuestion;
+        // 상한을 넘겼으면 보류하지 않는다 — 되살릴 발화를 들고 있으면
+        // 확인–되묻기가 끝없이 서로를 부른다. 그때는 통째로 다시 듣는다.
+        _pendingHeardConfirmation = tooManyAttempts ? null : userKorean.trim();
+        if (tooManyAttempts) _heardConfirmationAttempts = 0;
+        setState(() {
+          // 👂 유저 발화는 화면에서 지우지 않는다. 역할만 갈아 끼워 문맥·
+          //   히스토리에서만 빠지게 한다 — `_recentKoreanConversation()`과
+          //   `_rolloverContextTurns()`는 'HOST'/'SYSTEM'만 보고,
+          //   `_removeOrphanedHostBubbles()`도 'HOST'만 걷어낸다.
+          //   예전에는 통째로 remove해서, 전사가 멀쩡히 도착한 발화까지 흔적
+          //   없이 사라졌다(2026-08-18 실기기 턴5: len=15 deltas=10
+          //   voiced 2828ms인데 화면·히스토리 둘 다 무기록).
+          hostBubble['role'] = 'HOST_UNHEARD';
+          // 되묻는 말도 'SYSTEM'이 아닌 역할로 세운다. 'SYSTEM'으로 두면
+          // `_recentKoreanConversation()`이 다음 턴 문맥으로 넘겨, AI가 자기
+          // 되묻기를 보고 따라 되묻는 고리가 생긴다.
+          _localMessages.add(<String, dynamic>{
+            'role': 'SYSTEM_ASKBACK',
+            'target': prompt,
+            'original': '',
+          });
+        });
+        _scrollToBottom();
+        // 🔁 이 말풍선은 더 이상 '자라는 말풍선'이 아니다. id를 놓지 않으면
+        //   이어 말하기가 폐기된 말풍선에 다음 발화를 덧붙인다.
+        _activeHostBubbleId = '';
+        _log(
+            '[HEARD-CONFIRM]',
+            'turn=$turnNumber attempts=$_heardConfirmationAttempts '
+                'len=${userKorean.trim().length} voicedMs=${_lastTurnVoicedMs ?? -1} '
+                'pending=${_pendingHeardConfirmation != null} '
+                'heard="${userKorean.trim()}" ask="$prompt"');
+        await _speakKoreanLine(prompt);
+        return;
+      }
+      _heardConfirmationAttempts = 0;
       final aiKoreanFinal = replyKorean;
 
       setState(() {
@@ -3799,7 +3963,17 @@ never by itself a reason to ask back.
 
   Widget _buildTextBlock(Map<String, dynamic> msg) {
     final role = (msg['role'] ?? '').toString();
-    final bool isHost = role == 'HOST' || role == 'HOST_TEMP';
+    // 👂 [ASK-BACK] 되묻기로 히스토리에 안 남긴 유저 발화. **화면에서는 지우지
+    //   않는다** — 자기가 한 말이 흔적도 없이 사라지는 것이 가장 나쁜 경험이고,
+    //   무엇을 잘못 들었는지 눈으로 봐야 유저가 고쳐 말할 수 있다.
+    //   역할 이름이 'HOST'가 아니라서 `_recentKoreanConversation()`·
+    //   `_rolloverContextTurns()`·`_removeOrphanedHostBubbles()`가 전부 건너뛴다
+    //   — 화면에만 남고 AI 문맥과 히스토리에는 닿지 않는다.
+    final bool isUnheard = role == 'HOST_UNHEARD';
+    // 👂 되묻는 말. 상대 쪽에 세우되 'SYSTEM'이 아니라서 문맥·히스토리에는
+    //   안 들어간다 — 자기 되묻기를 보고 따라 되묻는 고리를 끊는 자리다.
+    final bool isAskBack = role == 'SYSTEM_ASKBACK';
+    final bool isHost = role == 'HOST' || role == 'HOST_TEMP' || isUnheard;
     final rawTarget = (msg['target'] ?? '').toString();
     final bool isThinking = (role == 'SYSTEM' && rawTarget.isEmpty) ||
         (role == 'HOST_TEMP' && rawTarget == '...') ||
@@ -3824,9 +3998,12 @@ never by itself a reason to ask back.
             bottomRight: Radius.circular(isHost ? 4 : 16),
           ),
           border: Border.all(
-            color: isHost
-                ? const Color(0xFF3B82F6).withValues(alpha: 0.18)
-                : const Color(0xFF22C55E).withValues(alpha: 0.25),
+            // 못 알아들은 말풍선과 되묻는 말은 주황으로 묶어 한 쌍으로 읽히게 한다.
+            color: (isUnheard || isAskBack)
+                ? const Color(0xFFF59E0B).withValues(alpha: 0.55)
+                : isHost
+                    ? const Color(0xFF3B82F6).withValues(alpha: 0.18)
+                    : const Color(0xFF22C55E).withValues(alpha: 0.25),
             width: 1,
           ),
         ),
@@ -3837,13 +4014,24 @@ never by itself a reason to ask back.
             Text(displayTarget,
                 textAlign: isHost ? TextAlign.right : TextAlign.left,
                 style: TextStyle(
-                    color: Colors.white,
+                    // 흐리게 — 이 말은 대화에 반영되지 않았다는 표시다.
+                    color: isUnheard ? const Color(0xFF94A3B8) : Colors.white,
                     fontSize: 16 * _fontScale,
                     fontWeight: FontWeight.bold,
                     height: 1.4)),
+            if (isUnheard) ...[
+              const SizedBox(height: 6),
+              Text(_unheardBubbleHint(),
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                      color: const Color(0xFFF59E0B),
+                      fontSize: 11 * _fontScale,
+                      height: 1.3)),
+            ],
             if (_showOriginal &&
-                !(FFAppState().nativeLang.isNotEmpty &&
-                    FFAppState().nativeLang == FFAppState().targetLang) &&
+                // ORIGIN과 TARGET이 같으면 원문 줄이 배울글과 똑같아진다.
+                // 세션에서 확정된 ORIGIN으로 봐야 한다 — 로비값과 다를 수 있다.
+                _nativeLangName() != FFAppState().targetLang &&
                 !isThinking &&
                 msg['original'] != null &&
                 msg['original'].toString().isNotEmpty) ...[
