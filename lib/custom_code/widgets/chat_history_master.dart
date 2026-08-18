@@ -846,6 +846,32 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         '번역을 다시 만들지 못했습니다 · ${_targetFailureLabel(_targetFailures[doc.id] ?? '')}');
   }
 
+  /// 원문 교정에 쓸 앞뒤 대화.
+  ///
+  /// 한 줄만 보고는 "우리 병 중에서"가 잘못 적힌 것인지 알 수 없다. 앞뒤에
+  /// 총무·작가 이야기가 있어야 "병"이 "반"이었음을 복원할 수 있다.
+  /// 지금 줄 자체는 뺀다 — 고쳐야 할 대상이지 근거가 아니다.
+  String _historyRepairContext(DocumentReference messageRef) {
+    final docs = _cachedDocs;
+    final idx = docs.indexWhere((d) => d.reference.id == messageRef.id);
+    if (idx < 0) return '';
+    const int window = 4;
+    final int start = idx - window < 0 ? 0 : idx - window;
+    final int end =
+        idx + window + 1 > docs.length ? docs.length : idx + window + 1;
+    final buffer = StringBuffer();
+    for (int i = start; i < end; i++) {
+      if (i == idx) continue;
+      final data = docs[i].data() as Map<String, dynamic>?;
+      if (data == null) continue;
+      final text = (data['original_text'] ?? '').toString().trim();
+      if (text.isEmpty) continue;
+      final role = (data['role'] ?? '').toString().toUpperCase();
+      buffer.writeln('${role == 'HOST' ? 'USER' : 'AI'}: $text');
+    }
+    return buffer.toString().trim();
+  }
+
   Future<bool> _performHistoryTargetGeneration(
     DocumentReference messageRef,
     String originalText,
@@ -866,6 +892,12 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       final sameLanguage = _recordSameLang == true ||
           _normLangCode(sourceName) == _normLangCode(targetLanguage);
       String targetText = source;
+      // 문맥으로 되살린 원문. 교정할 게 없으면 source와 같게 돌아온다.
+      String repairedOriginal = '';
+      final String context = _historyRepairContext(messageRef);
+      final String userContent = context.isEmpty
+          ? 'LINE: $source'
+          : 'SURROUNDING CONVERSATION:\n$context\n\nLINE: $source';
       if (!sameLanguage) {
         final response = await http
             .post(
@@ -878,14 +910,28 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
                 'model': 'gpt-4o-mini',
                 'temperature': 0.0,
                 'max_tokens': 220,
+                'response_format': <String, String>{'type': 'json_object'},
                 'messages': <Map<String, String>>[
                   <String, String>{
                     'role': 'system',
-                    'content': 'Translate the $sourceName conversation line into natural spoken $targetLanguage. '
-                        'Preserve the speaker viewpoint, meaning, tone, and relationship. '
-                        'Return only the translated sentence with no label or explanation.',
+                    'content': '''You are preparing ONE line of a saved voice conversation for a language-learning review screen.
+
+The line came from speech recognition, so a word may have been misheard. Use the surrounding lines to restore what the speaker actually said, then translate that.
+
+CORRECTED $sourceName LINE — rules:
+- Fix ONLY words speech recognition clearly got wrong. The signal is a word that makes no sense in this conversation.
+- Never rephrase, polish, shorten, expand, or change the speaker's wording, style, tone, or politeness level.
+- Never add or remove information, and never invent a name, number, or fact.
+- If nothing is clearly wrong, return the line EXACTLY as given.
+
+TRANSLATION — natural spoken $targetLanguage of the corrected line. Preserve the speaker viewpoint, meaning, tone, and relationship.
+
+Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetLanguage translation>"}''',
                   },
-                  <String, String>{'role': 'user', 'content': source},
+                  <String, String>{
+                    'role': 'user',
+                    'content': userContent,
+                  },
                 ],
               }),
             )
@@ -897,22 +943,48 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
               messageRef.id, _targetFailureKindForStatus(response.statusCode));
           return false;
         }
-        final body = jsonDecode(response.body) as Map<String, dynamic>;
+        final body =
+            jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
         final choices = body['choices'] as List? ?? const <dynamic>[];
         final firstChoice =
             choices.isEmpty ? null : choices.first as Map<String, dynamic>?;
         final message = firstChoice?['message'] as Map<String, dynamic>?;
-        targetText = (message?['content'] ?? '').toString().trim();
+        final content = (message?['content'] ?? '').toString().trim();
+        // JSON이 깨져 오면 교정은 포기하고 번역만 살린다. 원문을 못 고치는
+        // 것보다 줄이 통째로 비는 쪽이 훨씬 나쁘다.
+        try {
+          final parsed = jsonDecode(content) as Map<String, dynamic>;
+          targetText = (parsed['target'] ?? '').toString().trim();
+          repairedOriginal = (parsed['original'] ?? '').toString().trim();
+        } catch (_) {
+          debugPrint('[HISTORY-TARGET] json_parse_failed msg=${messageRef.id}');
+          targetText = content;
+        }
       }
       if (targetText.isEmpty) {
         _recordTargetFailure(messageRef.id, 'empty');
         return false;
       }
+      // 📝 [ORIGIN-REPAIR] 전사가 잘못 들은 낱말을 문맥으로 되살린다.
+      //   대화방에서는 손대지 않는다 — 실장님 지시(2026-08-18). 히스토리는
+      //   학습 자료라, 원문이 깨진 채로 남으면 그걸 보고 외우게 된다.
+      //
+      //   **원본 전사는 지우지 않는다.** `original_text_raw`에 남겨 두어야
+      //   교정이 잘못됐을 때 되짚을 수 있고, 무엇이 어떻게 들렸는지도 남는다.
+      final bool repaired =
+          repairedOriginal.isNotEmpty && repairedOriginal != source;
       await messageRef.update(<String, dynamic>{
         'translated_text': targetText,
+        if (repaired) 'original_text': repairedOriginal,
+        if (repaired) 'original_text_raw': source,
+        if (repaired) 'original_repaired_at': FieldValue.serverTimestamp(),
         'target_generated_by': sameLanguage ? 'copy' : 'gpt-4o-mini',
         'target_generated_at': FieldValue.serverTimestamp(),
       });
+      if (repaired) {
+        debugPrint('[ORIGIN-REPAIR] msg=${messageRef.id} '
+            '"$source" → "$repairedOriginal"');
+      }
       debugPrint(
           '[HISTORY-TARGET] generated msg=${messageRef.id} model=${sameLanguage ? 'copy' : 'gpt-4o-mini'}');
       _clearTargetFailure(messageRef.id);
