@@ -306,11 +306,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   int? _shadowRepeatCount;
   // [P2-REPEAT] 지금 이 줄의 몇 회차인지(0부터). 줄이 바뀌면 0으로 돌아간다.
   int _shadowPass = 0;
-  // [P2-PROXY] Local amplitude proxy for spoken-ratio checks. No Whisper cost.
-  Timer? _shadowAmpTimer;
-  int _shadowVoicedTicks = 0;
-  int _shadowTotalTicks = 0;
-  int _shadowRereadCount = 0;
   // [P2-SHADOW-REC] User-line audio captured for Play all. No scoring/STT.
   bool _shadowRecording = false;
   int _shadowRecordLineIdx = -1;
@@ -1569,15 +1564,23 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
   /// 회차까지 녹음하면 한 줄에 파일이 둘 생기고 뒤엣것이 앞엣것을 덮는다.
   bool get _isShadowingPass => _shadowPass >= (_shadowRepeatCount ?? 1) - 1;
 
-  /// 새 줄을 연다. 회차는 처음부터 센다.
+  /// 🪜 [P2-LADDER] 계단과 계단 사이에 두는 숨. 한 계단을 다 읽자마자 다음
+  /// 계단이 밀고 들어오면 문장이 자란 자리가 안 보인다.
+  static const Duration _kShadowStepGap = Duration(seconds: 2);
+
+  /// [P2-REPEAT] 같은 계단의 듣기 → 쉐도잉 사이. 계단이 바뀌는 게 아니라
+  /// 방금 들은 문장을 곧바로 따라 하는 자리라 짧게 잡는다.
+  static const Duration _kShadowPassGap = Duration(milliseconds: 600);
+
+  /// 새 계단을 연다. 회차는 처음부터 센다.
   void _startShadowHighlight() {
     _shadowPass = 0;
-    _beginShadowPass();
+    _beginShadowPass(lead: _kShadowStepGap);
   }
 
-  /// [P2-REPEAT] 한 회차를 연다. 듣기 회차를 마치고 같은 줄을 쉐도잉으로
-  /// 다시 열 때도, 다시 말하기로 쉐도잉만 되돌릴 때도 이리 온다.
-  void _beginShadowPass() {
+  /// [P2-REPEAT] 한 회차를 연다. 듣기 회차를 마치고 같은 계단을 쉐도잉으로
+  /// 다시 열 때도 이리 온다.
+  void _beginShadowPass({Duration lead = _kShadowStepGap}) {
     _shadowHighlightTimer?.cancel();
     _shadowAdvanceTimer?.cancel();
     if (!mounted || !isPracticeMode || currentIndex >= _tutorLines.length) {
@@ -1598,7 +1601,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     }
     final int lineIdx = currentIndex;
     _pinShadowLineToTop(lineIdx);
-    _shadowHighlightTimer = Timer(const Duration(seconds: 1), () async {
+    _shadowHighlightTimer = Timer(lead, () async {
       if (!mounted ||
           _phase != ShadowingPhase.part2Practice ||
           isPaused ||
@@ -1703,7 +1706,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     // [P2-REPEAT] 듣기 회차가 끝났다 → 같은 줄을 쉐도잉으로 한 번 더 연다.
     //   녹음도 평가도 여기서는 하지 않는다.
     if (!_isShadowingPass) {
-      _shadowAdvanceTimer = Timer(const Duration(milliseconds: 600), () {
+      _shadowAdvanceTimer = Timer(_kShadowPassGap, () {
         if (!mounted ||
             _phase != ShadowingPhase.part2Practice ||
             isPaused ||
@@ -1711,15 +1714,15 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
           return;
         }
         _shadowPass++;
-        _beginShadowPass();
+        _beginShadowPass(lead: Duration.zero);
       });
       return;
     }
-    _shadowAdvanceTimer = Timer(const Duration(milliseconds: 700), () async {
+    _shadowAdvanceTimer = Timer(const Duration(milliseconds: 500), () async {
       if (!mounted || _phase != ShadowingPhase.part2Practice || isPaused) {
         return;
       }
-      await _stopShadowRecordingAndEvaluate();
+      await _finishShadowStep();
     });
   }
 
@@ -1747,15 +1750,10 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
   void _stepShadowHighlight(int idx) {
     if (!mounted || _phase != ShadowingPhase.part2Practice || isPaused) return;
     if (idx >= _shadowWords.length) {
-      if (mounted) setState(() => _shadowWordIdx = _shadowWords.length);
-      // [P2-PROXY] Stop recording after 700ms, then advance or show retry popup.
-      _shadowAdvanceTimer?.cancel();
-      _shadowAdvanceTimer = Timer(const Duration(milliseconds: 700), () async {
-        if (!mounted || _phase != ShadowingPhase.part2Practice || isPaused) {
-          return;
-        }
-        await _stopShadowRecordingAndEvaluate();
-      });
+      // 소리 없이 하이라이트만 돌던 경우다(오프라인·키 없음). 끝나는 처리는
+      // 음성이 있을 때와 같은 자리를 쓴다 — 회차 판정이 여기서만 달라지면
+      // 듣기 회차가 쉐도잉 없이 다음 계단으로 넘어간다.
+      _onShadowAiComplete(currentIndex);
       return;
     }
     if (mounted) setState(() => _shadowWordIdx = idx);
@@ -1797,26 +1795,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       );
       _shadowRecording = true;
       _shadowRecordLineIdx = lineIdx;
-      // [P2-PROXY] Sample amplitude every 100ms to estimate spoken ratio.
-      _shadowVoicedTicks = 0;
-      _shadowTotalTicks = 0;
-      _shadowAmpTimer?.cancel();
-      _shadowAmpTimer =
-          Timer.periodic(const Duration(milliseconds: 100), (t) async {
-        if (!mounted || !_shadowRecording) {
-          t.cancel();
-          return;
-        }
-        try {
-          if (await appAudioRecorder.isRecording()) {
-            final amp = await appAudioRecorder.getAmplitude();
-            _shadowTotalTicks++;
-            if (amp.current > -25.0) _shadowVoicedTicks++;
-          }
-        } catch (_) {
-          t.cancel();
-        }
-      });
     } catch (e) {
       debugPrint('[startShadowRecording] $e');
       _shadowRecording = false;
@@ -1838,129 +1816,16 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     _shadowRecordLineIdx = -1;
   }
 
-  // [P2-PROXY] Evaluate spoken ratio after the read-along recording ends.
-  Future<void> _stopShadowRecordingAndEvaluate() async {
-    _shadowAmpTimer?.cancel();
-    final double ratio =
-        _shadowTotalTicks == 0 ? 0.0 : _shadowVoicedTicks / _shadowTotalTicks;
+  /// 🪜 [P2-LADDER] 한 계단을 마친다. 녹음을 닫고 곧바로 다음 계단으로 간다.
+  ///
+  /// 예전에는 마이크 진폭으로 "덜 읽었다"를 재서 "조금 더 크게 읽어볼까요?"
+  /// 팝업으로 붙잡았다. 걷어냈다 — 진폭은 목소리 크기지 읽었는지가 아니라,
+  /// 조용히 정확히 따라 읽은 사람을 계단마다 세웠다. 계단 사이 숨은
+  /// [_kShadowStepGap]이 준다.
+  Future<void> _finishShadowStep() async {
     await _stopShadowRecording();
     if (!mounted || _phase != ShadowingPhase.part2Practice || isPaused) return;
-    if (ratio < 0.5 && _shadowRereadCount < 3) {
-      _showShadowRetryDialog();
-    } else {
-      _shadowRereadCount = 0;
-      Future.delayed(const Duration(milliseconds: 800), () {
-        if (mounted && _phase == ShadowingPhase.part2Practice && !isPaused) {
-          _nextTurn();
-        }
-      });
-    }
-  }
-
-  // [P2-PROXY] Retry popup when the local spoken-ratio proxy is too low.
-  void _showShadowRetryDialog() {
-    if (!mounted) return;
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1C2E1C),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
-          side: BorderSide(color: Colors.amber.withValues(alpha: 0.5)),
-        ),
-        contentPadding: const EdgeInsets.fromLTRB(20, 24, 20, 12),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              "조금 더 크게 읽어볼까요?",
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white70, fontSize: 14),
-            ),
-            const SizedBox(height: 18),
-            Row(
-              children: [
-                Expanded(
-                  child: Semantics(
-                    button: true,
-                    label: '다시 말하기',
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(14),
-                        onTap: () {
-                          Navigator.of(ctx).pop();
-                          _shadowRereadCount++;
-                          if (mounted &&
-                              _phase == ShadowingPhase.part2Practice &&
-                              !isPaused) {
-                            // [P2-REPEAT] 다시 말하기는 쉐도잉 회차만 되돌린다.
-                            //   듣기부터 다시 틀면 방금 들은 문장을 또 듣는다.
-                            _shadowPass = (_shadowRepeatCount ?? 1) - 1;
-                            _beginShadowPass();
-                          }
-                        },
-                        child: const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 14),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.replay_rounded,
-                                  color: Colors.amber, size: 34),
-                              SizedBox(height: 6),
-                              Text("다시 말하기",
-                                  style: TextStyle(
-                                      color: Colors.amber, fontSize: 12)),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Semantics(
-                    button: true,
-                    label: '다음 진행',
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(14),
-                        onTap: () {
-                          Navigator.of(ctx).pop();
-                          _shadowRereadCount = 0;
-                          if (mounted &&
-                              _phase == ShadowingPhase.part2Practice &&
-                              !isPaused) {
-                            _nextTurn();
-                          }
-                        },
-                        child: const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 14),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.arrow_forward_rounded,
-                                  color: Colors.greenAccent, size: 34),
-                              SizedBox(height: 6),
-                              Text("다음 진행",
-                                  style: TextStyle(
-                                      color: Colors.greenAccent, fontSize: 12)),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
+    _nextTurn();
   }
 
   Future<void> _checkAndPlayAILine() async {
@@ -2422,7 +2287,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     _utteranceSafetyTimer?.cancel();
     _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
     _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
-    _shadowAmpTimer?.cancel(); // [P2-PROXY]
     unawaited(_stopShadowAiPlayback()); // [P2-SHADOW-AI]
     unawaited(_stopShadowRecording()); // [P2-SHADOW-REC]
     unawaited(_stopP3Shadowing(resetSelection: true));
@@ -2459,7 +2323,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       _shadowStarted = false;
       _shadowWords = [];
       _shadowWordIdx = -1;
-      _shadowRereadCount = 0;
       _showEchoingOverlay = false;
     });
     _echoingOverlayTimer?.cancel();
@@ -8413,21 +8276,17 @@ RULES — follow exactly:
     if (_stepExpandTurns.isEmpty) return;
     final lines = <Map<String, dynamic>>[];
     final totalTurns = _stepExpandTurns.length;
-    // 유저가 먼저 말하고 AI가 받는다. 마지막 턴의 누적 문장은 완성문장 그
-    // 자체라 여기서 빼 둔다 — 그건 P3가 통째로 다룬다.
-    for (int i = 0; i < totalTurns; i++) {
+    // 🪜 [P2-LADDER] P2는 **유저 말이 자라는 것만** 본다. AI 질문은 넣지
+    //   않는다 — 대화를 다시 듣는 자리가 아니라 한 문장이 1계단에서 4계단으로
+    //   길어지는 것을 몸에 붙이는 자리다(P1이 대화를 맡는다).
+    //   마지막 턴의 누적 문장은 완성문장 그 자체라 빼 둔다 — 그건 P3 몫이다.
+    for (int i = 0; i < totalTurns - 1; i++) {
       final turn = _stepExpandTurns[i];
-      if (i < totalTurns - 1) {
-        final part2 = (turn['part2'] as String).isNotEmpty
-            ? turn['part2'] as String
-            : turn['part1'] as String;
-        if (part2.trim().isNotEmpty) {
-          lines.add({'role': 'USER', 'text': part2});
-        }
-      }
-      final aiText = (turn['aiText'] as String).trim();
-      if (aiText.isNotEmpty) {
-        lines.add({'role': 'HOST', 'text': aiText});
+      final part2 = (turn['part2'] as String).isNotEmpty
+          ? turn['part2'] as String
+          : turn['part1'] as String;
+      if (part2.trim().isNotEmpty) {
+        lines.add({'role': 'USER', 'text': part2});
       }
     }
     if (mounted) {
@@ -8453,7 +8312,6 @@ RULES — follow exactly:
         _shadowRepeatCount = null;
         _shadowPass = 0;
         _shadowStarted = false;
-        _shadowRereadCount = 0; // [P2-PROXY]
         _showEchoingOverlay = false;
       });
       _echoingOverlayTimer?.cancel();
