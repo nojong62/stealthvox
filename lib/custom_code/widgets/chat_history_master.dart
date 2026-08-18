@@ -726,6 +726,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         doc.reference,
         original,
         _sourceLangForMessage(data),
+        expandedText: (data['expanded_sentence'] ?? '').toString().trim(),
       ));
     }
   }
@@ -799,12 +800,16 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   Future<bool> _generateAndCacheHistoryTarget(
     DocumentReference messageRef,
     String originalText,
-    String sourceLanguage,
-  ) {
+    String sourceLanguage, {
+    // 🌱 [EXPAND-LADDER] Step Expand 유저 줄이 들고 있는 누적 문장(원어).
+    //   같은 왕복에서 함께 번역한다 — 줄마다 API를 한 번 더 태우지 않는다.
+    String expandedText = '',
+  }) {
     final existing = _targetTranslationInFlight[messageRef.id];
     if (existing != null) return existing;
-    final future =
-        _performHistoryTargetGeneration(messageRef, originalText, sourceLanguage);
+    final future = _performHistoryTargetGeneration(
+        messageRef, originalText, sourceLanguage,
+        expandedText: expandedText);
     _targetTranslationInFlight[messageRef.id] = future;
     // 진행 중 표시("번역 중")를 띄우고 지우기 위한 rebuild. 이 맵은 원래
     // 중복 요청 방지용이었고 화면에는 전혀 드러나지 않았다.
@@ -840,6 +845,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       doc.reference,
       original,
       _sourceLangForMessage(data),
+      expandedText: (data['expanded_sentence'] ?? '').toString().trim(),
     );
     if (!mounted || ok) return;
     _showRoomEntryToast(
@@ -875,9 +881,11 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   Future<bool> _performHistoryTargetGeneration(
     DocumentReference messageRef,
     String originalText,
-    String sourceLanguage,
-  ) async {
+    String sourceLanguage, {
+    String expandedText = '',
+  }) async {
     final source = originalText.trim();
+    final expandedSource = expandedText.trim();
     if (source.isEmpty) return false;
     if (_apiKey.isEmpty) {
       _recordTargetFailure(messageRef.id, 'no_key');
@@ -894,10 +902,18 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       String targetText = source;
       // 문맥으로 되살린 원문. 교정할 게 없으면 source와 같게 돌아온다.
       String repairedOriginal = '';
+      // 🌱 [EXPAND-LADDER] 이 턴까지 자란 문장의 배울글. 같은 왕복에서 받는다.
+      //   같은 언어면 번역할 게 없어 원어가 곧 배울글이고, 다른 언어인데 모델이
+      //   안 돌려주면 **빈 채로 둔다** — 원어를 그 자리에 넣으면 P2 한복판에
+      //   한국어 줄이 하나 섞인다.
+      String expandedTargetText = sameLanguage ? expandedSource : '';
       final String context = _historyRepairContext(messageRef);
-      final String userContent = context.isEmpty
+      final String lineBlock = expandedSource.isEmpty
           ? 'LINE: $source'
-          : 'SURROUNDING CONVERSATION:\n$context\n\nLINE: $source';
+          : 'LINE: $source\n\nGROWING SENTENCE: $expandedSource';
+      final String userContent = context.isEmpty
+          ? lineBlock
+          : 'SURROUNDING CONVERSATION:\n$context\n\n$lineBlock';
       if (!sameLanguage) {
         final response = await http
             .post(
@@ -909,7 +925,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
               body: jsonEncode(<String, dynamic>{
                 'model': 'gpt-4o-mini',
                 'temperature': 0.0,
-                'max_tokens': 220,
+                // 누적 문장이 실리면 마지막 턴은 한 줄이 아니라 다섯 턴이
+                // 합쳐진 문장이다. 220으로는 번역이 중간에서 잘린다.
+                'max_tokens': expandedSource.isEmpty ? 220 : 520,
                 'response_format': <String, String>{'type': 'json_object'},
                 'messages': <Map<String, String>>[
                   <String, String>{
@@ -925,8 +943,10 @@ CORRECTED $sourceName LINE — rules:
 - If nothing is clearly wrong, return the line EXACTLY as given.
 
 TRANSLATION — natural spoken $targetLanguage of the corrected line. Preserve the speaker viewpoint, meaning, tone, and relationship.
-
-Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetLanguage translation>"}''',
+${expandedSource.isEmpty ? '' : '''
+GROWING SENTENCE — the speaker is building ONE sentence across several turns, and GROWING SENTENCE is how far it has grown by this line. Translate it into natural spoken $targetLanguage as ONE sentence. Keep it a single flowing sentence — never a comma-separated list of facts. Add nothing that is not in it.
+'''}
+Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetLanguage translation>"${expandedSource.isEmpty ? '' : ', "expanded": "<$targetLanguage translation of GROWING SENTENCE>"'}}''',
                   },
                   <String, String>{
                     'role': 'user',
@@ -956,6 +976,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
           final parsed = jsonDecode(content) as Map<String, dynamic>;
           targetText = (parsed['target'] ?? '').toString().trim();
           repairedOriginal = (parsed['original'] ?? '').toString().trim();
+          final expandedReply = (parsed['expanded'] ?? '').toString().trim();
+          if (expandedReply.isNotEmpty) expandedTargetText = expandedReply;
         } catch (_) {
           debugPrint('[HISTORY-TARGET] json_parse_failed msg=${messageRef.id}');
           targetText = content;
@@ -975,6 +997,9 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
           repairedOriginal.isNotEmpty && repairedOriginal != source;
       await messageRef.update(<String, dynamic>{
         'translated_text': targetText,
+        // 🌱 [EXPAND-LADDER] 누적 문장의 배울글. P2가 이 값으로 사다리를 읽는다.
+        if (expandedTargetText.isNotEmpty)
+          'expanded_translated': expandedTargetText,
         if (repaired) 'original_text': repairedOriginal,
         if (repaired) 'original_text_raw': source,
         if (repaired) 'original_repaired_at': FieldValue.serverTimestamp(),
@@ -1010,6 +1035,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
           doc.reference,
           original,
           _sourceLangForMessage(data),
+          expandedText: (data['expanded_sentence'] ?? '').toString().trim(),
         ));
       }
     }

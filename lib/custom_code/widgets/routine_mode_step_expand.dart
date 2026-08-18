@@ -3323,6 +3323,9 @@ line had never been said. Never build the conversation on a line you had to gues
         final finalHostLine = <String, dynamic>{
           'role': 'HOST',
           'original_text': userKorean,
+          // 🌱 [EXPAND-LADDER] 이 턴까지 자란 문장. 말풍선에 올린 것과 같은
+          //   값이다 — 히스토리가 방에서 본 사다리를 그대로 재현한다.
+          'expanded_sentence': bubbleText,
         };
         try {
           await _saveTurnToFirestore(<Map<String, dynamic>>[finalHostLine]);
@@ -3435,6 +3438,9 @@ line had never been said. Never build the conversation on a line you had to gues
       final hostLine = <String, dynamic>{
         'role': 'HOST',
         'original_text': userKorean,
+        // 🌱 [EXPAND-LADDER] 이 턴까지 자란 문장. 말풍선에 올린 것과 같은
+        //   값이다 — 히스토리가 방에서 본 사다리를 그대로 재현한다.
+        'expanded_sentence': bubbleText,
       };
       final systemLine = <String, dynamic>{
         'role': 'SYSTEM',
@@ -4855,10 +4861,16 @@ line had never been said. Never build the conversation on a line you had to gues
       for (final line in chatLines) {
         final original = (line['original_text'] ?? '').toString().trim();
         if (original.isEmpty) continue;
+        // 🌱 [EXPAND-LADDER] 이 턴까지 자란 원어 문장. 유저 줄에만 실린다.
+        //   히스토리 P2가 이 값으로 확장 사다리를 재현한다 — 없으면 조각
+        //   문장으로 폴백해 P1과 똑같아진다.
+        final expanded = (line['expanded_sentence'] ?? '').toString().trim();
         final addedRef = await _myHistoryRef!.collection('messages').add({
           'role': line['role'] ?? '',
           // Target은 History 진입 시 gpt-4o-mini로 최초 1회 생성한다.
           'original_text': original,
+          // 누적 문장의 배울글도 같은 자리에서 함께 만든다.
+          if (expanded.isNotEmpty) 'expanded_sentence': expanded,
           'created_at': FieldValue.serverTimestamp(),
         });
         savedIds.add(addedRef.id);
