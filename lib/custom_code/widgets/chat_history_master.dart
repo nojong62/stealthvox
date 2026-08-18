@@ -8165,20 +8165,34 @@ RULES — follow exactly:
   // ============================================================================
 
   /// messages 서브컬렉션 docs → _stepExpandTurns 파싱
+  ///
+  /// 한 턴은 **유저가 먼저 말하고 AI가 받는다**. 대화방이 저장하는 순서도
+  /// `[HOST, SYSTEM]`이므로 HOST를 열고 뒤따르는 SYSTEM으로 닫는다.
+  /// 예전에는 SYSTEM을 먼저 받아 두고 **뒤에 오는** HOST와 짝지었다. 그러면
+  /// 짝지을 AI가 앞에 없는 **첫 유저 발화(씨앗)가 통째로 버려지고**, 연습이
+  /// AI 질문부터 시작했다. 마지막 턴은 AI가 답하지 않으므로(`aiText` 빈 값)
+  /// 짝이 없는 채로 닫는다.
   List<Map<String, dynamic>> _parseStepExpandTurns(
       List<DocumentSnapshot> docs) {
     final turns = <Map<String, dynamic>>[];
-    String? pendingAiText;
+    Map<String, dynamic>? openTurn;
     for (final doc in docs) {
       final data = doc.data() as Map<String, dynamic>;
       final role = (data['role'] as String?) ?? '';
       final translatedText = (data['translated_text'] as String?) ?? '';
       final originalText = (data['original_text'] as String?) ?? '';
       final text = translatedText.isNotEmpty ? translatedText : originalText;
-      if (role == 'SYSTEM') {
-        pendingAiText = text.trim();
-      } else if (role == 'HOST' && pendingAiText != null) {
-        final expandedField = (data['expanded_sentence'] as String?) ?? '';
+      if (role == 'HOST') {
+        // AI 답 없이 유저 발화가 연달아 오면 앞 턴을 그대로 닫는다.
+        if (openTurn != null) turns.add(openTurn);
+        // 🌱 [EXPAND-LADDER] part2는 part1과 **같은 언어**여야 한다. part1이
+        //   배울글(`translated_text`)이면 누적 문장도 배울글 쪽을 쓴다.
+        //   배울글이 아직 안 만들어졌으면 빈 값으로 두고 아래에서 part1으로
+        //   폴백시킨다 — 원어를 끼워 넣으면 P2에 한국어 줄이 섞인다.
+        final expandedField = (translatedText.isNotEmpty
+                ? (data['expanded_translated'] as String?)
+                : (data['expanded_sentence'] as String?)) ??
+            '';
         final parts = text.split('\n\n');
         final part1 = parts[0].trim();
         String part2;
@@ -8187,19 +8201,31 @@ RULES — follow exactly:
         } else {
           part2 = parts.length >= 2 ? parts.sublist(1).join('\n\n').trim() : '';
         }
-        turns.add({'aiText': pendingAiText, 'part1': part1, 'part2': part2});
-        pendingAiText = null;
+        openTurn = {'aiText': '', 'part1': part1, 'part2': part2};
+      } else if (role == 'SYSTEM' && openTurn != null) {
+        openTurn['aiText'] = text.trim();
+        turns.add(openTurn);
+        openTurn = null;
       }
     }
+    if (openTurn != null) turns.add(openTurn);
     return turns;
   }
 
   Future<void> _startPart1Practice() async {
     if (_stepExpandTurns.isEmpty) return;
     final lines = <Map<String, dynamic>>[];
+    // 유저가 먼저 말하고 AI가 받는다 — 대화방에서 실제로 오간 순서다.
     for (final turn in _stepExpandTurns) {
-      lines.add({'role': 'HOST', 'text': turn['aiText'] as String});
-      lines.add({'role': 'USER', 'text': turn['part1'] as String});
+      final userText = (turn['part1'] as String).trim();
+      if (userText.isNotEmpty) {
+        lines.add({'role': 'USER', 'text': userText});
+      }
+      // 마지막 턴은 AI가 답하지 않는다. 빈 말풍선을 만들지 않는다.
+      final aiText = (turn['aiText'] as String).trim();
+      if (aiText.isNotEmpty) {
+        lines.add({'role': 'HOST', 'text': aiText});
+      }
     }
     if (mounted) {
       setState(() {
@@ -8224,14 +8250,21 @@ RULES — follow exactly:
     if (_stepExpandTurns.isEmpty) return;
     final lines = <Map<String, dynamic>>[];
     final totalTurns = _stepExpandTurns.length;
+    // 유저가 먼저 말하고 AI가 받는다. 마지막 턴의 누적 문장은 완성문장 그
+    // 자체라 여기서 빼 둔다 — 그건 P3가 통째로 다룬다.
     for (int i = 0; i < totalTurns; i++) {
       final turn = _stepExpandTurns[i];
-      lines.add({'role': 'HOST', 'text': turn['aiText'] as String});
       if (i < totalTurns - 1) {
         final part2 = (turn['part2'] as String).isNotEmpty
             ? turn['part2'] as String
             : turn['part1'] as String;
-        lines.add({'role': 'USER', 'text': part2});
+        if (part2.trim().isNotEmpty) {
+          lines.add({'role': 'USER', 'text': part2});
+        }
+      }
+      final aiText = (turn['aiText'] as String).trim();
+      if (aiText.isNotEmpty) {
+        lines.add({'role': 'HOST', 'text': aiText});
       }
     }
     if (mounted) {
