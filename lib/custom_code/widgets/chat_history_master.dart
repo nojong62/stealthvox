@@ -95,13 +95,17 @@ Delivery — natural native flow:
 - Use full connected speech across the sentence: weak forms, reductions, and linking.
 - Sound like someone talking, not like a model reading for study.''';
 
-const String _meaningUnitTtsInstructions = '''
-$_meaningUnitCore
-
-$_learningUnitDelivery
-
-This is one turn of a spoken conversation. Keep it sounding like natural speech addressed to another person.
-''';
+/// 🪜 [P2-LADDER] P2 낭독 지시. 실장님 지정 문구다(2026-08-18).
+///
+/// 의미단위로 쪼개 읽던 예전 지시(`_meaningUnitCore` + `_learningUnitDelivery`)를
+/// 걷어냈다 — P2가 대화 한 턴이 아니라 **한 문장이 계단마다 길어지는 것**을
+/// 다루는 자리로 바뀌었고, 덩어리마다 끊어 읽으면 자란 자리가 아니라 끊긴
+/// 자리만 들린다. 두 지시는 P3가 그대로 쓰므로 남겨 둔다.
+const String _meaningUnitTtsInstructions =
+    'General American accent, slightly slower than normal conversational speed, '
+    'clear and natural intonation with slightly emphasized sentence stress, '
+    'a warm relaxed conversational tone, and moderate controlled emotional '
+    'expressiveness.';
 const String _p3LearningShadowingTtsInstructions = '''
 $_meaningUnitCore
 
@@ -3472,7 +3476,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
   }
 
   String _meaningUnitCacheVoice(String voice) =>
-      '${_historyPracticeTtsModel}_unit_style_v5_$voice';
+      '${_historyPracticeTtsModel}_unit_style_v6_$voice';
 
   Future<Uint8List?> _fetchMeaningUnitTTS(String text, String voice) =>
       _fetchOpenAITTS(
@@ -3481,7 +3485,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
         voice,
         model: _historyPracticeTtsModel,
         instructions: _meaningUnitTtsInstructions,
-        instructionTag: 'p2_learning_unit_style_v5',
+        instructionTag: 'p2_ladder_voice_v6',
       );
 
   Future<Uint8List?> _getMeaningUnitTTS(String text, String voice) {
