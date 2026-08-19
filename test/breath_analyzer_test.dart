@@ -201,6 +201,74 @@ void main() {
     });
   });
 
+  group('buildGappedPcm', () {
+    List<BreathSegment> threeSegments() => const <BreathSegment>[
+          BreathSegment(
+              startMs: 0, endMs: 1000, speechStartMs: 0, speechEndMs: 900),
+          BreathSegment(
+              startMs: 1000, endMs: 2000, speechStartMs: 1100, speechEndMs: 1900),
+          BreathSegment(
+              startMs: 2000, endMs: 3000, speechStartMs: 2100, speechEndMs: 3000),
+        ];
+
+    test('gap 0이면 원본을 그대로 돌려준다', () {
+      final pcm = _speech(3000);
+      final out = buildGappedPcm(pcm, threeSegments(),
+          extraGapMs: 0, sampleRate: _sampleRate);
+      expect(identical(out, pcm), isTrue);
+    });
+
+    test('호흡이 하나면 삽입 지점이 없어 원본 그대로', () {
+      final pcm = _speech(2000);
+      final out = buildGappedPcm(
+        pcm,
+        const <BreathSegment>[
+          BreathSegment(
+              startMs: 0, endMs: 2000, speechStartMs: 0, speechEndMs: 2000),
+        ],
+        extraGapMs: 500,
+        sampleRate: _sampleRate,
+      );
+      expect(identical(out, pcm), isTrue);
+    });
+
+    test('호흡 3개 + gap 500 → 정확히 2회분이 늘어난다', () {
+      final pcm = _speech(3000);
+      final out = buildGappedPcm(pcm, threeSegments(),
+          extraGapMs: 500, sampleRate: _sampleRate);
+      expect(out.length, pcm.length + 2 * 500 * _bytesPerMs);
+    });
+
+    test('원본 샘플을 삭제하지 않는다 — 앞부분이 그대로 보존된다', () {
+      final pcm = _speech(3000);
+      final out = buildGappedPcm(pcm, threeSegments(),
+          extraGapMs: 300, sampleRate: _sampleRate);
+      // 첫 삽입 지점(1000ms) 전까지는 바이트가 동일해야 한다.
+      const head = 1000 * _bytesPerMs;
+      for (int i = 0; i < head; i += 997) {
+        expect(out[i], pcm[i], reason: 'offset $i에서 원본이 바뀌었다');
+      }
+    });
+
+    test('삽입된 구간은 무음(0)이다', () {
+      final pcm = _speech(3000);
+      const gap = 300;
+      final out = buildGappedPcm(pcm, threeSegments(),
+          extraGapMs: gap, sampleRate: _sampleRate);
+      const start = 1000 * _bytesPerMs;
+      for (int i = start; i < start + gap * _bytesPerMs; i += 101) {
+        expect(out[i], 0, reason: '삽입 구간에 소리가 있다 (offset $i)');
+      }
+    });
+
+    test('빈 segment 목록에서 crash하지 않는다', () {
+      final pcm = _speech(500);
+      final out = buildGappedPcm(pcm, const <BreathSegment>[],
+          extraGapMs: 500, sampleRate: _sampleRate);
+      expect(identical(out, pcm), isTrue);
+    });
+  });
+
   group('pcmFromWav', () {
     test('헤더를 벗겨 원본 PCM을 돌려준다', () {
       final pcm = _speech(300);

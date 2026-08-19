@@ -75,7 +75,15 @@ class _LabCombo {
   int get hashCode => key.hashCode;
 }
 
-enum _LabStatus { idle, generating, playing, ready, error }
+enum _LabStatus {
+  idle,
+  generating,
+  playing,
+  ready,
+  error,
+  recording,
+  recordReady,
+}
 
 class P2VoiceLabPage extends StatefulWidget {
   const P2VoiceLabPage({super.key});
@@ -150,6 +158,38 @@ class _P2VoiceLabPageState extends State<P2VoiceLabPage> {
   int? _micLatencyMs;
   bool _probing = false;
 
+  // ── Echo / Shadow ─────────────────────────────────────────────────
+  /// 🚧 Lab 실험값. 최종 제품 정책이 아니다.
+  /// 후보는 +300 / +500 / +700 / +900. 실기기에서 말해보고 정한다.
+  int _gapMs = 500;
+
+  /// Lab 전용 recorder. **`appAudioRecorder`(chat_history_master 소유)를
+  /// 건드리지 않는다.** 이 화면이 만들고 이 화면이 닫는다.
+  AudioRecorder? _labRecorder;
+
+  /// 녹음은 어느 시점에도 하나만. 중복 start를 막는다.
+  bool _recording = false;
+
+  /// Echo와 Shadow를 **따로 보관한다.** 한 파일을 덮어쓰면 둘을 같은 조건에서
+  /// 비교할 수 없다(한쪽을 들으려면 다른 쪽을 다시 녹음해야 한다).
+  String? _echoRecordPath;
+  String? _shadowRecordPath;
+
+  /// 진행 중인 Echo/Shadow 회차. STOP·Voice 변경이 이 값을 올려 취소한다.
+  int _echoShadowGeneration = 0;
+
+  Timer? _silenceTimer;
+  bool _hasSpoken = false;
+  int _silenceTicks = 0;
+
+  /// 🚧 Lab 테스트용. 앱이 이미 쓰는 값을 그대로 가져왔다
+  /// (`_startAutoVADRecording`: 100ms 폴링 · -25dBFS · 무음 15틱).
+  /// **P3 실사용 final recording 값으로 확정된 것이 아니다** — 긴 문장 중간에
+  /// 생각하느라 쉬는 사용자가 있어서, Phase 4에서 따로 잡아야 한다.
+  static const double _kSpeechDbfs = -25.0;
+  static const int _kSilenceTicksToStop = 15; // 1,500ms
+  static const int _kNoSpeechTicksToGiveUp = 100; // 10s (Lab 안전장치)
+
   // ── Auth 감시 ─────────────────────────────────────────────────────
   /// 🔐 로그아웃·계정 전환을 **기다리지 않고 곧바로** 받기 위한 구독.
   ///
@@ -221,12 +261,23 @@ class _P2VoiceLabPageState extends State<P2VoiceLabPage> {
     _authSub?.cancel();
     _authSub = null;
     _completeSub?.cancel();
+    _silenceTimer?.cancel();
+    _silenceTimer = null;
     final player = _player;
     _player = null;
     if (player != null) {
       unawaited(player.stop().catchError((_) {}));
       unawaited(player.dispose().catchError((_) {}));
     }
+    // Lab이 만든 recorder는 Lab이 닫는다. 임시 녹음도 남기지 않는다.
+    final recorder = _labRecorder;
+    _labRecorder = null;
+    _recording = false;
+    if (recorder != null) {
+      unawaited(recorder.stop().then((_) {}).catchError((_) {}));
+      unawaited(recorder.dispose().then((_) {}).catchError((_) {}));
+    }
+    _deleteRecordings();
     super.dispose();
   }
 
@@ -556,16 +607,44 @@ class _P2VoiceLabPageState extends State<P2VoiceLabPage> {
     });
   }
 
+  /// 재생이 끝날 때까지 기다린다.
+  ///
+  /// ⚠️ **`onPlayerComplete.first`를 쓰면 안 된다.** 플레이어를 dispose하면
+  /// 그 스트림이 *아무것도 내보내지 않고* 닫히는데, 그때 `first`는
+  /// `Bad state: No element`를 던진다. 그 예외가 try 밖으로 새어 나가면
+  /// 대기 사슬이 통째로 무너진다 — 9.15초짜리 FULL SHADOW가 1초 만에
+  /// 끝나던 원인이 이것이었다(2026-08-20 실기기 로그로 확인).
+  ///
+  /// 구독을 직접 들고 `finally`에서 취소하면, 중간에 STOP을 눌러 dispose가
+  /// 나도 `onDone`으로 조용히 풀린다.
+  Future<void> _awaitPlayback(AudioPlayer player, Duration limit) async {
+    final completer = Completer<void>();
+    void finish() {
+      if (!completer.isCompleted) completer.complete();
+    }
+
+    final sub = player.onPlayerComplete.listen(
+      (_) => finish(),
+      onDone: finish,
+      onError: (Object _) => finish(),
+      cancelOnError: false,
+    );
+    try {
+      await completer.future.timeout(limit, onTimeout: finish);
+    } finally {
+      await sub.cancel();
+    }
+  }
+
   /// 바이트를 재생하고 **끝날 때까지 기다린다.** 순차 재생·probe가 쓴다.
   Future<void> _playBytesAwait(Uint8List bytes, {int expectedMs = 0}) async {
     await _stopPlayback();
     final player = AudioPlayer();
     _player = player;
-    final done = player.onPlayerComplete.first;
     try {
       await player.play(BytesSource(bytes));
-      await done.timeout(Duration(milliseconds: expectedMs + 5000),
-          onTimeout: () {});
+      await _awaitPlayback(
+          player, Duration(milliseconds: expectedMs + 5000));
     } catch (e) {
       debugPrint('[P2-LAB] segment play $e');
     }
@@ -694,6 +773,306 @@ class _P2VoiceLabPageState extends State<P2VoiceLabPage> {
     }
   }
 
+  // ══════════════════════════════════════════════════════════════════
+  // Echo / Shadow
+  // ══════════════════════════════════════════════════════════════════
+
+  /// Lab 전용 recorder를 확보한다. 권한이 없으면 null.
+  Future<AudioRecorder?> _ensureRecorder() async {
+    final existing = _labRecorder;
+    if (existing != null) return existing;
+    final recorder = AudioRecorder();
+    try {
+      if (!await recorder.hasPermission()) {
+        await recorder.dispose();
+        if (mounted) {
+          setState(() {
+            _status = _LabStatus.error;
+            _error = '마이크 권한 없음 — Echo/Shadow 녹음을 할 수 없다';
+          });
+        }
+        return null;
+      }
+    } catch (e) {
+      try {
+        await recorder.dispose();
+      } catch (_) {}
+      if (mounted) {
+        setState(() {
+          _status = _LabStatus.error;
+          _error = 'recorder 초기화 실패: $e';
+        });
+      }
+      return null;
+    }
+    _labRecorder = recorder;
+    return recorder;
+  }
+
+  Future<String?> _startLabRecording(String tag) async {
+    if (_recording) return null;
+    final recorder = await _ensureRecorder();
+    if (recorder == null) return null;
+    try {
+      final dir = await getTemporaryDirectory();
+      final path = '${dir.path}/p2lab_${tag}_'
+          '${DateTime.now().millisecondsSinceEpoch}.m4a';
+      await recorder.start(
+        const RecordConfig(
+          encoder: AudioEncoder.aacLc,
+          sampleRate: 16000,
+          numChannels: 1,
+        ),
+        path: path,
+      );
+      _recording = true;
+      return path;
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _status = _LabStatus.error;
+          _error = '녹음 시작 실패: $e';
+        });
+      }
+      return null;
+    }
+  }
+
+  /// 녹음을 닫고 실제 파일 경로를 돌려준다.
+  Future<String?> _stopLabRecording() async {
+    _silenceTimer?.cancel();
+    _silenceTimer = null;
+    if (!_recording) return null;
+    _recording = false;
+    try {
+      return await _labRecorder?.stop();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 유저 발화 종료 감시. 앱의 기존 VAD와 같은 판정식이다.
+  ///
+  /// [onDone]의 `spoke`가 false면 **한 번도 발화가 감지되지 않은 것**이다.
+  /// 그 결과물은 무음(또는 스피커 잔향)뿐이라 녹음으로 취급하면 안 된다.
+  void _watchUserSilence(
+    int generation,
+    void Function(String? path, bool spoke) onDone,
+  ) {
+    _hasSpoken = false;
+    _silenceTicks = 0;
+    _silenceTimer?.cancel();
+    _silenceTimer = Timer.periodic(const Duration(milliseconds: 100),
+        (timer) async {
+      if (!mounted || generation != _echoShadowGeneration || !_recording) {
+        timer.cancel();
+        return;
+      }
+      final recorder = _labRecorder;
+      if (recorder == null) {
+        timer.cancel();
+        return;
+      }
+      try {
+        if (!await recorder.isRecording()) {
+          timer.cancel();
+          return;
+        }
+        final amp = await recorder.getAmplitude();
+        if (amp.current > _kSpeechDbfs) {
+          _hasSpoken = true;
+          _silenceTicks = 0;
+          return;
+        }
+        _silenceTicks++;
+        final bool done = _hasSpoken
+            ? _silenceTicks >= _kSilenceTicksToStop
+            : _silenceTicks >= _kNoSpeechTicksToGiveUp;
+        if (done) {
+          timer.cancel();
+          final spoke = _hasSpoken;
+          final path = await _stopLabRecording();
+          if (!mounted || generation != _echoShadowGeneration) return;
+          onDone(path, spoke);
+        }
+      } catch (_) {
+        timer.cancel();
+      }
+    });
+  }
+
+  /// ② FULL ECHO — AI가 **전부 끝난 뒤** 유저가 혼자 말한다.
+  ///
+  /// 여백은 원본 그대로다(gap 조작 없음). AI 재생 완료와 recorder.start()
+  /// 사이에 **고정 대기를 두지 않는다** — mic start latency가 32ms라
+  /// "듣고 바로 말하기"를 지연시킬 이유가 없다. 실기기 녹음에 스피커 잔향이
+  /// 섞이는 것이 확인되면 그때 guard delay를 넣고 측정값을 보고한다.
+  Future<void> _runFullEcho() async {
+    final wav = _analysisWav;
+    final analysis = _analysis;
+    if (wav == null || analysis == null) return;
+
+    final generation = ++_echoShadowGeneration;
+    await _stopPlayback();
+    await _stopLabRecording();
+    if (!mounted || generation != _echoShadowGeneration) return;
+    setState(() {
+      _status = _LabStatus.playing;
+      _error = null;
+      _lastNote = 'FULL ECHO · AI 재생 중';
+    });
+
+    await _playBytesAwait(wav, expectedMs: analysis.totalMs);
+    if (!mounted || generation != _echoShadowGeneration) return;
+
+    // ★ 지연 없이 곧바로 녹음을 연다.
+    final path = await _startLabRecording('echo');
+    if (!mounted || generation != _echoShadowGeneration || path == null) {
+      await _stopLabRecording();
+      return;
+    }
+    setState(() {
+      _status = _LabStatus.recording;
+      _lastNote = 'FULL ECHO · 지금 전체 문장을 말하세요';
+    });
+
+    _watchUserSilence(generation, (recorded, spoke) {
+      // 말하지 않았으면 녹음이 아니다. 파일을 버리고 버튼도 켜지 않는다 —
+      // 남겨 두면 무음 파일이 "녹음 성공"처럼 보인다.
+      if (!spoke) {
+        _deleteFile(recorded ?? path);
+        setState(() {
+          _status = _LabStatus.error;
+          _error = '발화가 감지되지 않았다 — 녹음을 버렸다';
+          _lastNote = null;
+        });
+        return;
+      }
+      setState(() {
+        _echoRecordPath = recorded ?? path;
+        _status = _LabStatus.recordReady;
+        _lastNote = 'ECHO 녹음 완료';
+      });
+    });
+  }
+
+  /// ③ FULL SHADOW — AI와 **동시에** 겹쳐 말한다.
+  ///
+  /// 호흡 사이 여백만 [_gapMs]만큼 벌린 PCM을 로컬에서 조립해 쓴다.
+  /// **recorder를 먼저 열고 재생을 시작한다** — 반대로 하면 첫 음절이 녹음에서
+  /// 잘린다.
+  Future<void> _runFullShadow() async {
+    final pcm = _analysisPcm;
+    final analysis = _analysis;
+    if (pcm == null || analysis == null || analysis.segments.isEmpty) return;
+
+    final generation = ++_echoShadowGeneration;
+    await _stopPlayback();
+    await _stopLabRecording();
+    if (!mounted || generation != _echoShadowGeneration) return;
+
+    // 로컬 조립. TTS 재호출도 재인코딩도 없다.
+    final gapped = buildGappedPcm(
+      pcm,
+      analysis.segments,
+      extraGapMs: _gapMs,
+      sampleRate: kStealthVoxSttSampleRate,
+    );
+    final wav = pcm16ToWav(gapped, sampleRate: kStealthVoxSttSampleRate);
+    final totalMs = _shadowTotalMs;
+
+    // ★ 녹음 먼저.
+    final path = await _startLabRecording('shadow');
+    if (!mounted || generation != _echoShadowGeneration || path == null) {
+      await _stopLabRecording();
+      return;
+    }
+    setState(() {
+      _status = _LabStatus.recording;
+      _error = null;
+      _lastNote = 'FULL SHADOW · AI와 함께 말하세요';
+    });
+
+    await _playBytesAwait(wav, expectedMs: totalMs);
+    if (!mounted || generation != _echoShadowGeneration) {
+      await _stopLabRecording();
+      return;
+    }
+    // 🚧 Lab 실험값. 기존 P3 코드가 쓰는 700ms를 가져왔다. 최종 정책 아님.
+    await Future<void>.delayed(const Duration(milliseconds: 700));
+    if (!mounted || generation != _echoShadowGeneration) {
+      await _stopLabRecording();
+      return;
+    }
+    final recorded = await _stopLabRecording();
+    if (!mounted || generation != _echoShadowGeneration) return;
+    setState(() {
+      _shadowRecordPath = recorded ?? path;
+      _status = _LabStatus.recordReady;
+      _lastNote = 'SHADOW 녹음 완료 (gap +${_gapMs}ms)';
+    });
+  }
+
+  /// gap을 반영한 전체 길이. 재생 전에 몇 초짜리인지 보여준다.
+  int get _shadowTotalMs {
+    final analysis = _analysis;
+    if (analysis == null) return 0;
+    final inserts = analysis.segments.length - 1;
+    return analysis.totalMs + (inserts > 0 ? inserts * _gapMs : 0);
+  }
+
+  Future<void> _stopEchoShadow() async {
+    _echoShadowGeneration++;
+    await _stopPlayback();
+    await _stopLabRecording();
+    if (!mounted) return;
+    setState(() {
+      _status = _LabStatus.ready;
+      _lastNote = null;
+    });
+  }
+
+  Future<void> _playRecordFile(String? path) async {
+    if (path == null || path.isEmpty) return;
+    final file = File(path);
+    if (!await file.exists()) return;
+    await _stopPlayback();
+    final player = AudioPlayer();
+    _player = player;
+    try {
+      await player.play(DeviceFileSource(path));
+      setState(() => _status = _LabStatus.playing);
+      await _awaitPlayback(player, const Duration(seconds: 60));
+    } catch (e) {
+      debugPrint('[P2-LAB] record playback $e');
+    }
+    if (identical(_player, player)) _player = null;
+    try {
+      await player.stop();
+    } catch (_) {}
+    try {
+      await player.dispose();
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() => _status = _LabStatus.recordReady);
+  }
+
+  void _deleteFile(String? path) {
+    if (path == null || path.isEmpty) return;
+    try {
+      final file = File(path);
+      if (file.existsSync()) file.deleteSync();
+    } catch (_) {}
+  }
+
+  /// 녹음 임시 파일을 지운다. 조합이 바뀌거나 화면을 나갈 때 부른다.
+  void _deleteRecordings() {
+    _deleteFile(_echoRecordPath);
+    _deleteFile(_shadowRecordPath);
+    _echoRecordPath = null;
+    _shadowRecordPath = null;
+  }
+
   /// Style/Voice가 바뀌면 화면의 분석 결과는 더 이상 그 조합의 것이 아니다.
   void _invalidateAnalysis() {
     _analysisWav = null;
@@ -703,6 +1082,16 @@ class _P2VoiceLabPageState extends State<P2VoiceLabPage> {
     _analyzedVoice = null;
     _playingSegmentIndex = null;
     _micLatencyMs = null;
+    // 🔒 녹음도 그 조합에 딸린 것이다. marin에 대고 말한 것이 cedar 결과처럼
+    //   보이면 안 되는 건 분석 결과와 같은 문제다.
+    _echoShadowGeneration++;
+    _silenceTimer?.cancel();
+    _silenceTimer = null;
+    if (_recording) {
+      _recording = false;
+      unawaited(_labRecorder?.stop().then((_) {}).catchError((_) {}));
+    }
+    _deleteRecordings();
   }
 
   void _pushRecent(_LabCombo combo) {
@@ -1201,6 +1590,14 @@ class _P2VoiceLabPageState extends State<P2VoiceLabPage> {
         text = 'error';
         color = _kLabDanger;
         break;
+      case _LabStatus.recording:
+        text = '● recording';
+        color = _kLabDanger;
+        break;
+      case _LabStatus.recordReady:
+        text = 'record ready';
+        color = _kLabBreath;
+        break;
     }
     return Row(
       children: <Widget>[
@@ -1392,6 +1789,8 @@ class _P2VoiceLabPageState extends State<P2VoiceLabPage> {
                 ],
               ),
               const Divider(height: 26, color: _kLabBorder),
+              _buildEchoShadowSection(),
+              const Divider(height: 26, color: _kLabBorder),
               _buildThresholdSteppers(busy),
               const Divider(height: 26, color: _kLabBorder),
               _buildMicProbe(busy, analysis),
@@ -1449,6 +1848,135 @@ class _P2VoiceLabPageState extends State<P2VoiceLabPage> {
                   : (playing ? _kLabBreath : Colors.white38),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// ②③ 실험 구역. Echo와 Shadow를 각각 말해보고 세 소리를 비교한다.
+  Widget _buildEchoShadowSection() {
+    final analysis = _analysis;
+    final busy = _analyzing || _probing;
+    final running =
+        _status == _LabStatus.recording || _status == _LabStatus.playing;
+    final canRun = !busy && !running && analysis != null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        const Text(
+          'ECHO / SHADOW',
+          style: TextStyle(
+              color: Colors.white38, fontSize: 10, letterSpacing: 1.1),
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 40,
+          child: OutlinedButton(
+            style: _breathButtonStyle,
+            onPressed: canRun ? () => unawaited(_runFullEcho()) : null,
+            child: const Text('▶ FULL ECHO  (AI 전체 → 내가 혼자)',
+                style: TextStyle(fontSize: 12)),
+          ),
+        ),
+        const SizedBox(height: 6),
+        SizedBox(
+          height: 40,
+          child: OutlinedButton(
+            style: _breathButtonStyle,
+            onPressed: canRun ? () => unawaited(_runFullShadow()) : null,
+            child: const Text('▶ FULL SHADOW  (AI와 동시에)',
+                style: TextStyle(fontSize: 12)),
+          ),
+        ),
+        _buildStepperRow(
+          'shadow gap',
+          '+${_gapMs}ms',
+          busy || running,
+          () => setState(() => _gapMs = (_gapMs - 100).clamp(0, 2000)),
+          () => setState(() => _gapMs = (_gapMs + 100).clamp(0, 2000)),
+        ),
+        if (analysis != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Text(
+              'shadow 길이 ${_sec(analysis.totalMs)}s → ${_sec(_shadowTotalMs)}s'
+              '  ·  gap 변경은 로컬 재조립만 (API 없음)',
+              style: const TextStyle(color: Colors.white24, fontSize: 10),
+            ),
+          ),
+        if (running) ...<Widget>[
+          const SizedBox(height: 4),
+          SizedBox(
+            height: 36,
+            child: OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _kLabDanger,
+                side: BorderSide(color: _kLabDanger.withValues(alpha: 0.5)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              onPressed: () => unawaited(_stopEchoShadow()),
+              child: const Text('■ STOP', style: TextStyle(fontSize: 12)),
+            ),
+          ),
+        ],
+        const SizedBox(height: 10),
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: _buildComparePlayButton(
+                'AI ORIGINAL',
+                canRun && _analysisWav != null,
+                () => unawaited(_playFull()),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: _buildComparePlayButton(
+                'ECHO',
+                canRun && _echoRecordPath != null,
+                () => unawaited(_playRecordFile(_echoRecordPath)),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: _buildComparePlayButton(
+                'SHADOW',
+                canRun && _shadowRecordPath != null,
+                () => unawaited(_playRecordFile(_shadowRecordPath)),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildComparePlayButton(
+      String label, bool enabled, VoidCallback onTap) {
+    return InkWell(
+      onTap: enabled ? onTap : null,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        height: 38,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: enabled ? 0.06 : 0.02),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: enabled ? _kLabBorder : Colors.white10,
+          ),
+        ),
+        child: Text(
+          '▶ $label',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: enabled ? Colors.white70 : Colors.white24,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
     );

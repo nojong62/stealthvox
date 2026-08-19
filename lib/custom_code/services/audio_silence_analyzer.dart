@@ -294,6 +294,53 @@ Uint8List sliceToWav(
   );
 }
 
+/// 호흡 사이에 [extraGapMs]만큼 무음을 **끼워 넣는다.**
+///
+/// 쉐도잉용이다. 유저가 AI를 따라잡을 여유를 주되, **원본 발성은 한 샘플도
+/// 건드리지 않는다** — 자르는 것이 아니라 삽입이다. 재인코딩도 없다.
+/// 삽입 지점은 [BreathSegment.endMs](padding이 끝난 자리, 무음 한복판)라서
+/// 발성 위에 무음이 얹히지 않는다.
+///
+/// [extraGapMs]가 0 이하거나 호흡이 하나뿐이면 **원본을 그대로 돌려준다.**
+Uint8List buildGappedPcm(
+  Uint8List pcm,
+  List<BreathSegment> segments, {
+  required int extraGapMs,
+  int sampleRate = kStealthVoxSttSampleRate,
+}) {
+  if (extraGapMs <= 0 || segments.length < 2) return pcm;
+
+  final int bytesPerMs = sampleRate * 2 ~/ 1000;
+  final int silenceBytes = extraGapMs * bytesPerMs;
+  if (silenceBytes <= 0) return pcm;
+  final silence = Uint8List(silenceBytes); // PCM16의 무음은 전부 0이다.
+
+  final chunks = <Uint8List>[];
+  int cursor = 0;
+  for (int i = 0; i < segments.length - 1; i++) {
+    int cut = segments[i].endMs * bytesPerMs;
+    cut = cut.clamp(cursor, pcm.length);
+    cut -= cut % 2; // 샘플(2바이트) 경계
+    if (cut < cursor) continue;
+    chunks.add(Uint8List.sublistView(pcm, cursor, cut));
+    chunks.add(silence);
+    cursor = cut;
+  }
+  chunks.add(Uint8List.sublistView(pcm, cursor, pcm.length));
+
+  int total = 0;
+  for (final c in chunks) {
+    total += c.length;
+  }
+  final out = Uint8List(total);
+  int offset = 0;
+  for (final c in chunks) {
+    out.setRange(offset, offset + c.length, c);
+    offset += c.length;
+  }
+  return out;
+}
+
 /// WAV 컨테이너에서 PCM 본문만 떼어낸다.
 ///
 /// Lab 캐시에는 재생 편의를 위해 WAV로 저장하지만, 분석과 slice는 raw PCM
