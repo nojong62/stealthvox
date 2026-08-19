@@ -29,6 +29,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import 'dart:async'; // unawaited
 import 'routine_mode_roleplay.dart' show TtsCache; // 캐시 정리 진입점
+import '/custom_code/services/admin_gate.dart'; // 관리자 판별(UID)
+import 'p2_voice_lab.dart' show P2VoiceLabPage; // 관리자 전용 히든 화면
+// LongPressGestureRecognizer는 material/widgets가 다시 내보내지 않는다.
+import 'package:flutter/gestures.dart' show LongPressGestureRecognizer;
 
 import 'package:purchases_flutter/purchases_flutter.dart';
 import 'dart:io' show Platform;
@@ -982,6 +986,22 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     );
   }
 
+  /// 🔬 [P2-LAB] 'StealthVox' 3초 롱프레스가 닿는 곳.
+  ///
+  /// **관리자가 아니면 아무 일도 일어나지 않는다.** Toast·Snackbar·진동 어느
+  /// 것도 내지 않는다 — 반응이 있으면 그 자체로 숨은 기능의 존재를 알린다.
+  /// 화면 쪽에는 UID를 두지 않는다. 판정은 [AdminGate] 한 곳뿐이다.
+  ///
+  /// go_router에 등록하지 않고 [Navigator.push]로만 연다. 이름이 없으니
+  /// `pushNamed`·딥링크·URL 어느 쪽으로도 이 화면에 닿을 수 없다.
+  void _openP2VoiceLab() {
+    if (!AdminGate.isAdmin) return;
+    if (!mounted) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const P2VoiceLabPage()),
+    );
+  }
+
   /// 로비 본문 한 벌. 세로가 짧을 때 통째로 스크롤에 담기 위해 갈라 뒀다.
   Widget _buildLobbyBody(FFAppState appState, String displayTime) {
     return Column(
@@ -990,19 +1010,37 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
           child: Row(
             children: [
-              ShaderMask(
-                shaderCallback: (rect) =>
-                    const LinearGradient(colors: [_kLobbyCyan, _kLobbyViolet])
-                        .createShader(rect),
-                blendMode: BlendMode.srcIn,
-                child: const Text(
-                  'StealthVox',
-                  maxLines: 1,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 17,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.3,
+              // 🔬 [P2-LAB] 관리자 전용 P2 Voice Lab의 **유일한 문**이다.
+              //   3초 롱프레스 — GestureDetector.onLongPress는 500ms 고정이라
+              //   쓸 수 없어서 recognizer를 직접 만든다.
+              //   RawGestureDetector는 자식 크기를 그대로 통과시키므로 이
+              //   줄의 위치·크기·여백·그라디언트·폰트는 하나도 바뀌지 않는다.
+              RawGestureDetector(
+                gestures: <Type, GestureRecognizerFactory>{
+                  LongPressGestureRecognizer:
+                      GestureRecognizerFactoryWithHandlers<
+                          LongPressGestureRecognizer>(
+                    () => LongPressGestureRecognizer(
+                      duration: const Duration(seconds: 3),
+                    ),
+                    (LongPressGestureRecognizer r) =>
+                        r.onLongPress = _openP2VoiceLab,
+                  ),
+                },
+                child: ShaderMask(
+                  shaderCallback: (rect) =>
+                      const LinearGradient(colors: [_kLobbyCyan, _kLobbyViolet])
+                          .createShader(rect),
+                  blendMode: BlendMode.srcIn,
+                  child: const Text(
+                    'StealthVox',
+                    maxLines: 1,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.3,
+                    ),
                   ),
                 ),
               ),
