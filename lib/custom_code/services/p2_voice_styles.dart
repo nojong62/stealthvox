@@ -76,6 +76,23 @@ const List<String> kP2LabVoices = <String>[
   'cedar',
 ];
 
+/// 🌬️ Breath Echoing Phase 1의 고정 Style.
+///
+/// 호흡 비교는 **instruction을 고정한 채 Voice만 바꿔야** 성립한다. Style이
+/// 섞이면 pause 차이가 Voice 때문인지 지시문 때문인지 알 수 없다.
+const String kP2BreathTestStyleId = 'style_smooth_jazz';
+
+/// 🌬️ Breath Echoing Phase 1의 우선 비교 Voice 4종.
+///
+/// [kP2LabVoices] 13종을 줄이는 것이 아니다 — dropdown은 그대로 13개다.
+/// 이 목록은 "먼저 이 넷을 같은 조건으로 들어본다"는 **순서**일 뿐이다.
+const List<String> kP2BreathTestVoices = <String>[
+  'marin',
+  'echo',
+  'cedar',
+  'verse',
+];
+
 /// TTS 스타일 6종. Voice 13종과 **서로 독립적으로** 조합된다(6 × 13 = 78).
 const List<P2VoiceStyle> kP2VoiceStyles = <P2VoiceStyle>[
   P2VoiceStyle(
@@ -193,3 +210,15 @@ Emotional range: Moderate, subtle, expressive''',
 /// 예) `p2lab_gpt-4o-mini-tts_style_musical_natural_v1_nova`
 String p2LabCacheNamespace(P2VoiceStyle style, String voice) =>
     'p2lab_${kP2LabTtsModel}_${style.id}_${kP2StyleInstructionVersion}_$voice';
+
+/// Breath Analyzer 전용 네임스페이스. 위 mp3 캐시와 **완전히 다른 키**다.
+///
+/// `p2lab_wav_` 접두어로 시작하므로 mp3 쪽 키와 문자열이 겹칠 수 없다.
+/// 기존 6×13 mp3 테스트 결과는 이 기능을 켜도 그대로 살아 있다.
+///
+/// ⚠️ 여기 저장되는 내용은 **WAV**인데 `TtsCache`가 파일 확장자를 `.mp3`로
+/// 고정한다. 즉 `tts_cache/`를 직접 열어보면 `.mp3` 이름의 WAV가 보인다.
+/// `TtsCache`는 확장자를 해석하지 않고 바이트만 다루므로 동작에는 문제가
+/// 없다. 이 이유만으로 실사용이 의존하는 `TtsCache`를 뜯지 않는다.
+String p2LabWavCacheNamespace(P2VoiceStyle style, String voice) =>
+    'p2lab_wav_${kP2LabTtsModel}_${style.id}_${kP2StyleInstructionVersion}_$voice';

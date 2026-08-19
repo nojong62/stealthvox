@@ -16,6 +16,7 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show File;
 import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
@@ -23,9 +24,15 @@ import 'package:firebase_auth/firebase_auth.dart' show FirebaseAuth, User;
 import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart';
 
 import '/custom_code/services/admin_gate.dart';
+import '/custom_code/services/audio_silence_analyzer.dart';
+import '/custom_code/services/breath_segment.dart';
 import '/custom_code/services/p2_voice_styles.dart';
+import '/custom_code/services/pcm_audio_utils.dart'
+    show kStealthVoxSttSampleRate, pcm16ToWav;
 import 'routine_mode_roleplay.dart' show TtsCache;
 
 // ── 색 ────────────────────────────────────────────────────────────────
@@ -35,6 +42,7 @@ const Color _kLabDropdownBg = Color(0xFF232323);
 const Color _kLabBorder = Color(0x22FFFFFF);
 const Color _kLabAccent = Colors.amber;
 const Color _kLabDanger = Color(0xFFFF6B6B);
+const Color _kLabBreath = Color(0xFF7DD3FC);
 
 /// TTS 한 번의 결과. 성공이면 [audio], 실패면 [error]에 원인이 그대로 담긴다.
 class _LabTtsResult {
@@ -107,6 +115,40 @@ class _P2VoiceLabPageState extends State<P2VoiceLabPage> {
 
   String _apiKey = '';
   bool _apiKeyLoaded = false;
+
+  // ── Breath Analyzer ───────────────────────────────────────────────
+  /// 분석에 쓰는 WAV 원본. Full Play가 이걸 그대로 재생한다.
+  Uint8List? _analysisWav;
+
+  /// 위 WAV의 본문(raw PCM). slice와 분석이 이 오프셋을 쓴다.
+  Uint8List? _analysisPcm;
+
+  BreathAnalysis? _analysis;
+  bool _analyzing = false;
+  int? _playingSegmentIndex;
+
+  /// 🔒 **화면의 분석 결과가 어느 조합에서 나왔는지.**
+  ///
+  /// 패널은 현재 dropdown 값이 아니라 **이 값을 표시한다.** marin 결과가
+  /// 남은 채 echo를 고르면 marin 숫자가 echo 것처럼 보이는 사고가 이번
+  /// 비교에서 가장 위험한데, 표시원을 분석 시점 값으로 못박으면 라벨이
+  /// 거짓말을 할 수 없다. 여기에 더해 Style/Voice가 바뀌면 결과를 통째로
+  /// 버린다([_invalidateAnalysis]).
+  String? _analyzedStyleId;
+  String? _analyzedVoice;
+
+  /// 현재 선택과 화면의 분석 결과가 어긋났는가. 정상 흐름에서는 늘 false다.
+  bool get _analysisStale =>
+      _analysis != null &&
+      (_analyzedStyleId != _style.id || _analyzedVoice != _voice);
+
+  /// 🚧 Phase 1 tuning defaults — **최종 Breath 정책이 아니다.**
+  /// 실제 Smooth Jazz PCM을 듣고 정한다.
+  BreathAnalysisConfig _cfg = const BreathAnalysisConfig();
+
+  /// player complete → recorder.start() 실측(ms).
+  int? _micLatencyMs;
+  bool _probing = false;
 
   // ── Auth 감시 ─────────────────────────────────────────────────────
   /// 🔐 로그아웃·계정 전환을 **기다리지 않고 곧바로** 받기 위한 구독.
@@ -250,13 +292,49 @@ class _P2VoiceLabPageState extends State<P2VoiceLabPage> {
     return future;
   }
 
+  /// Breath 분석용 **WAV**를 확보한다. mp3 경로와 캐시가 완전히 갈린다.
+  ///
+  /// OpenAI가 주는 건 헤더 없는 raw PCM16(24kHz·mono)이라, 그대로 두면
+  /// 재생할 수 없다. `pcm16ToWav`로 한 번 감싸 캐시에 넣으면 Full Play는
+  /// 바이트를 그대로 쓰고, 분석·slice는 헤더 44바이트만 건너뛰면 된다.
+  Future<_LabTtsResult> _obtainWav(P2VoiceStyle style, String voice) {
+    final ns = p2LabWavCacheNamespace(style, voice);
+    final existing = _inFlight[ns];
+    if (existing != null) return existing;
+
+    final future = () async {
+      final cached = await TtsCache.get(kP2LabSampleSentence, ns);
+      if (cached != null && cached.isNotEmpty) {
+        return _LabTtsResult(audio: cached, fromCache: true);
+      }
+      final fresh = await _postTts(style, voice, responseFormat: 'pcm');
+      if (!fresh.ok) return fresh;
+      final wav = pcm16ToWav(
+        fresh.audio!,
+        sampleRate: kStealthVoxSttSampleRate,
+      );
+      await TtsCache.put(kP2LabSampleSentence, ns, wav);
+      return _LabTtsResult(audio: wav, fromCache: false);
+    }();
+
+    _inFlight[ns] = future;
+    future.whenComplete(() => _inFlight.remove(ns));
+    return future;
+  }
+
   /// OpenAI `/v1/audio/speech` 직접 호출.
   ///
   /// body는 실사용 P2(`_fetchOpenAITTSInternal`)와 같은 모양이다. 다른 점은
   /// **둘뿐이고, 둘 다 Lab이라서 그렇다**:
   ///   · timeout 10초 → 30초 (긴 문장 + 무거운 지시는 10초를 넘길 수 있다)
   ///   · 실패를 null로 삼키지 않고 status/body를 그대로 올려보낸다
-  Future<_LabTtsResult> _postTts(P2VoiceStyle style, String voice) async {
+  /// [responseFormat]만 다르면 mp3 경로와 PCM 경로가 같은 함수를 쓴다.
+  /// 기본값이 `'mp3'`라 기존 GENERATE & PLAY의 동작은 그대로다.
+  Future<_LabTtsResult> _postTts(
+    P2VoiceStyle style,
+    String voice, {
+    String responseFormat = 'mp3',
+  }) async {
     if (_apiKey.trim().isEmpty) {
       return const _LabTtsResult(
         error: 'OpenAI API key 없음 (Remote Config `OpenAIAPIKey`가 비어 있다)',
@@ -275,6 +353,7 @@ class _P2VoiceLabPageState extends State<P2VoiceLabPage> {
               'model': kP2LabTtsModel,
               'input': kP2LabSampleSentence,
               'voice': voice,
+              'response_format': responseFormat,
               // 선택한 Style의 **전체 지시문**이 여기로 그대로 간다.
               'instructions': style.instruction,
               // speed는 넣지 않는다 — gpt-4o-mini-tts는 무시한다.
@@ -283,16 +362,21 @@ class _P2VoiceLabPageState extends State<P2VoiceLabPage> {
           .timeout(const Duration(seconds: 30));
 
       debugPrint('[P2-LAB] style=${style.id} voice=$voice '
-          'model=$kP2LabTtsModel status=${response.statusCode} '
-          'bytes=${response.bodyBytes.length}');
+          'model=$kP2LabTtsModel fmt=$responseFormat '
+          'status=${response.statusCode} bytes=${response.bodyBytes.length}');
 
       if (response.statusCode == 200 && response.bodyBytes.isNotEmpty) {
         return _LabTtsResult(audio: response.bodyBytes, fromCache: false);
       }
       // 200이 아니면 body에 이유가 들어 있다. 잘라내지 않고 그대로 보여준다.
+      //
+      // ⚠️ PCM이 400을 내더라도 **다른 모델이나 mp3로 몰래 바꾸지 않는다.**
+      //   tts-1은 instructions를 무시하므로 Smooth Jazz가 성립하지 않는다.
+      //   실패는 실패대로 관리자에게 보이고 거기서 멈춘다.
       final body = utf8.decode(response.bodyBytes, allowMalformed: true);
       return _LabTtsResult(
-        error: 'TTS ${response.statusCode} — voice="$voice"\n$body',
+        error: 'TTS ${response.statusCode} — voice="$voice" fmt=$responseFormat'
+            '\n$body',
         fromCache: false,
       );
     } on TimeoutException {
@@ -381,6 +465,246 @@ class _P2VoiceLabPageState extends State<P2VoiceLabPage> {
     await _play(result.audio!);
   }
 
+  // ══════════════════════════════════════════════════════════════════
+  // Breath Analyzer
+  // ══════════════════════════════════════════════════════════════════
+
+  /// PCM 확보 → 무음 분석. **API는 여기서만 호출될 수 있다.**
+  Future<void> _analyzeBreath(P2VoiceStyle style, String voice) async {
+    await _stopPlayback();
+    if (!mounted) return;
+    setState(() {
+      _analyzing = true;
+      _error = null;
+      _lastNote = null;
+      _playingSegmentIndex = null;
+    });
+
+    final result = await _obtainWav(style, voice);
+    if (!mounted) return;
+
+    if (!result.ok) {
+      setState(() {
+        _analyzing = false;
+        _status = _LabStatus.error;
+        _error = result.error;
+      });
+      return;
+    }
+
+    final wav = result.audio!;
+    final pcm = pcmFromWav(wav);
+    setState(() {
+      _analysisWav = wav;
+      _analysisPcm = pcm;
+      // 🔒 분석 시점의 조합을 함께 못박는다. 패널은 이 값을 표시한다.
+      _analyzedStyleId = style.id;
+      _analyzedVoice = voice;
+      _analysis = analyzeBreaths(pcm, _cfg);
+      _analyzing = false;
+      _status = _LabStatus.ready;
+      _cacheProbe[p2LabWavCacheNamespace(style, voice)] = true;
+      _lastNote = result.fromCache
+          ? 'PCM cache hit — API 호출 안 함'
+          : 'PCM ${(wav.length / 1024).round()}KB 생성';
+    });
+  }
+
+  /// Breath 테스트 기본 조합으로 한 번에 맞춘다.
+  ///
+  /// Style은 **Smooth Jazz 고정**이고 Voice만 갈아 끼운다 — Phase 1의 목적이
+  /// "같은 instruction에서 Voice가 만드는 호흡 차이"를 보는 것이라, Style이
+  /// 섞이면 비교가 성립하지 않는다. 13 Voice dropdown과 6 Style dropdown은
+  /// 그대로 살아 있다.
+  void _selectBreathTestVoice(String voice) {
+    final style = kP2VoiceStyles.firstWhere(
+      (s) => s.id == kP2BreathTestStyleId,
+      orElse: () => _style,
+    );
+    setState(() {
+      _style = style;
+      _voice = voice;
+      _status = _LabStatus.idle;
+      _error = null;
+      _lastNote = null;
+      _invalidateAnalysis();
+    });
+    unawaited(_stopPlayback());
+    unawaited(_probeCache(style, voice));
+    unawaited(_probeWavCache(style, voice));
+  }
+
+  /// 이 조합의 PCM이 이미 캐시에 있는지. 눌러보기 전에 API 비용이 드는지
+  /// 알 수 있게 한다.
+  Future<void> _probeWavCache(P2VoiceStyle style, String voice) async {
+    final ns = p2LabWavCacheNamespace(style, voice);
+    if (_cacheProbe.containsKey(ns)) return;
+    final hit = await TtsCache.get(kP2LabSampleSentence, ns);
+    if (!mounted) return;
+    setState(() => _cacheProbe[ns] = hit != null && hit.isNotEmpty);
+  }
+
+  /// threshold를 바꿨을 때. **이미 받아 둔 PCM만 다시 분석한다 — API 없음.**
+  ///
+  /// 이 함수 안에 네트워크 호출이 없다는 것이 그 근거다. `_obtainWav`도
+  /// `_postTts`도 부르지 않는다.
+  void _reanalyze(BreathAnalysisConfig next) {
+    final pcm = _analysisPcm;
+    setState(() {
+      _cfg = next;
+      if (pcm != null) _analysis = analyzeBreaths(pcm, next);
+    });
+  }
+
+  /// 바이트를 재생하고 **끝날 때까지 기다린다.** 순차 재생·probe가 쓴다.
+  Future<void> _playBytesAwait(Uint8List bytes, {int expectedMs = 0}) async {
+    await _stopPlayback();
+    final player = AudioPlayer();
+    _player = player;
+    final done = player.onPlayerComplete.first;
+    try {
+      await player.play(BytesSource(bytes));
+      await done.timeout(Duration(milliseconds: expectedMs + 5000),
+          onTimeout: () {});
+    } catch (e) {
+      debugPrint('[P2-LAB] segment play $e');
+    }
+    if (identical(_player, player)) _player = null;
+    try {
+      await player.stop();
+    } catch (_) {}
+    try {
+      await player.dispose();
+    } catch (_) {}
+  }
+
+  Future<void> _playSegment(int index) async {
+    final pcm = _analysisPcm;
+    final analysis = _analysis;
+    if (pcm == null || analysis == null) return;
+    if (index < 0 || index >= analysis.segments.length) return;
+    final segment = analysis.segments[index];
+    setState(() => _playingSegmentIndex = index);
+    await _playBytesAwait(
+      sliceToWav(pcm, segment, sampleRate: kStealthVoxSttSampleRate),
+      expectedMs: segment.durationMs,
+    );
+    if (!mounted) return;
+    setState(() => _playingSegmentIndex = null);
+  }
+
+  Future<void> _playFull() async {
+    final wav = _analysisWav;
+    final analysis = _analysis;
+    if (wav == null) return;
+    setState(() => _playingSegmentIndex = -1);
+    await _playBytesAwait(wav, expectedMs: analysis?.totalMs ?? 0);
+    if (!mounted) return;
+    setState(() => _playingSegmentIndex = null);
+  }
+
+  /// 관리자 검증용 순차 재생. **실제 P2/P3 UX가 아니다** — 경계가 자연스러운지
+  /// 귀로 확인하는 도구다.
+  Future<void> _playAllSequential() async {
+    final analysis = _analysis;
+    if (analysis == null) return;
+    for (int i = 0; i < analysis.segments.length; i++) {
+      if (!mounted) return;
+      await _playSegment(i);
+      if (!mounted) return;
+    }
+  }
+
+  /// 🎤 player complete → recorder.start() 실측.
+  ///
+  /// **Echo 엔진이 아니다.** 유저 음성을 쓰지도 남기지도 않는다. 권한과 임시
+  /// 디렉터리를 미리 잡아 두고, 순수한 player→recorder 전환 시간만 잰다.
+  /// 측정이 끝나면 recorder를 즉시 닫고 파일도 지운다.
+  Future<void> _runMicLatencyProbe() async {
+    final pcm = _analysisPcm;
+    final analysis = _analysis;
+    if (pcm == null || analysis == null || analysis.segments.isEmpty) return;
+
+    setState(() {
+      _probing = true;
+      _micLatencyMs = null;
+      _error = null;
+    });
+
+    final recorder = AudioRecorder();
+    String? path;
+    try {
+      // 전환 시간에 권한·디렉터리 조회가 섞이지 않게 **미리** 끝내 둔다.
+      if (!await recorder.hasPermission()) {
+        if (!mounted) return;
+        setState(() {
+          _probing = false;
+          _status = _LabStatus.error;
+          _error = '마이크 권한 없음 — probe를 실행할 수 없다';
+        });
+        return;
+      }
+      final dir = await getTemporaryDirectory();
+      path = '${dir.path}/p2lab_probe_'
+          '${DateTime.now().millisecondsSinceEpoch}.m4a';
+
+      final segment = analysis.segments.first;
+      await _playBytesAwait(
+        sliceToWav(pcm, segment, sampleRate: kStealthVoxSttSampleRate),
+        expectedMs: segment.durationMs,
+      );
+
+      // ── 여기부터가 측정 구간이다 ──
+      final watch = Stopwatch()..start();
+      await recorder.start(
+        const RecordConfig(
+          encoder: AudioEncoder.aacLc,
+          sampleRate: 16000,
+          numChannels: 1,
+        ),
+        path: path,
+      );
+      watch.stop();
+      // ── 측정 끝 ──
+
+      final elapsed = watch.elapsedMilliseconds;
+      debugPrint('[P2-LAB] mic start latency = ${elapsed}ms');
+      if (mounted) setState(() => _micLatencyMs = elapsed);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _status = _LabStatus.error;
+          _error = 'probe 실패: $e';
+        });
+      }
+    } finally {
+      try {
+        await recorder.stop();
+      } catch (_) {}
+      try {
+        await recorder.dispose();
+      } catch (_) {}
+      if (path != null) {
+        try {
+          final file = File(path);
+          if (await file.exists()) await file.delete();
+        } catch (_) {}
+      }
+      if (mounted) setState(() => _probing = false);
+    }
+  }
+
+  /// Style/Voice가 바뀌면 화면의 분석 결과는 더 이상 그 조합의 것이 아니다.
+  void _invalidateAnalysis() {
+    _analysisWav = null;
+    _analysisPcm = null;
+    _analysis = null;
+    _analyzedStyleId = null;
+    _analyzedVoice = null;
+    _playingSegmentIndex = null;
+    _micLatencyMs = null;
+  }
+
   void _pushRecent(_LabCombo combo) {
     _recent.remove(combo);
     _recent.insert(0, combo);
@@ -435,6 +759,8 @@ class _P2VoiceLabPageState extends State<P2VoiceLabPage> {
                       const SizedBox(height: 18),
                       _buildActionSection(),
                       const SizedBox(height: 18),
+                      _buildBreathSection(),
+                      if (_analysis != null) const SizedBox(height: 18),
                       _buildRecentSection(),
                     ],
                   ),
@@ -537,6 +863,7 @@ class _P2VoiceLabPageState extends State<P2VoiceLabPage> {
                         _status = _LabStatus.idle;
                         _error = null;
                         _lastNote = null;
+                        _invalidateAnalysis();
                       });
                       unawaited(_stopPlayback());
                       unawaited(_probeCache(next, _voice));
@@ -669,6 +996,7 @@ class _P2VoiceLabPageState extends State<P2VoiceLabPage> {
                         _status = _LabStatus.idle;
                         _error = null;
                         _lastNote = null;
+                        _invalidateAnalysis();
                       });
                       unawaited(_stopPlayback());
                       unawaited(_probeCache(_style, v));
@@ -787,6 +1115,40 @@ class _P2VoiceLabPageState extends State<P2VoiceLabPage> {
               ),
             ),
           ],
+          const Divider(height: 22, color: _kLabBorder),
+          _buildBreathTestPicker(generating || _analyzing),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 44,
+            child: OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _kLabBreath,
+                side: BorderSide(color: _kLabBreath.withValues(alpha: 0.5)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              icon: _analyzing
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: _kLabBreath),
+                    )
+                  : const Icon(Icons.air_rounded, size: 18),
+              label: Text(
+                _analyzing
+                    ? 'ANALYZING…'
+                    : (_cacheProbe[p2LabWavCacheNamespace(_style, _voice)] ==
+                            true
+                        ? 'ANALYZE BREATH  ● cached'
+                        : 'ANALYZE BREATH'),
+              ),
+              onPressed: generating || _analyzing || !_apiKeyLoaded
+                  ? null
+                  : () => unawaited(_analyzeBreath(_style, _voice)),
+            ),
+          ),
           const SizedBox(height: 12),
           _buildStatusLine(),
           if (_error != null) ...<Widget>[
@@ -854,6 +1216,359 @@ class _P2VoiceLabPageState extends State<P2VoiceLabPage> {
             ),
           ),
         ],
+      ],
+    );
+  }
+
+  /// 🌬️ Phase 1 비교용 빠른 선택. Smooth Jazz를 고정하고 Voice만 바꾼다.
+  /// 위의 Style 6종·Voice 13종 dropdown은 그대로 살아 있다.
+  Widget _buildBreathTestPicker(bool busy) {
+    final onSmoothJazz = _style.id == kP2BreathTestStyleId;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Text(
+          'BREATH TEST · Smooth Jazz 고정${onSmoothJazz ? '' : ' (현재 다른 Style)'}',
+          style: TextStyle(
+            color: onSmoothJazz ? Colors.white38 : _kLabAccent,
+            fontSize: 10,
+            letterSpacing: 1.1,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: <Widget>[
+            for (final voice in kP2BreathTestVoices) ...<Widget>[
+              Expanded(
+                child: _buildBreathVoiceChip(voice, busy),
+              ),
+              if (voice != kP2BreathTestVoices.last) const SizedBox(width: 6),
+            ],
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBreathVoiceChip(String voice, bool busy) {
+    final selected = _voice == voice && _style.id == kP2BreathTestStyleId;
+    final style = kP2VoiceStyles.firstWhere(
+      (s) => s.id == kP2BreathTestStyleId,
+      orElse: () => _style,
+    );
+    final cached = _cacheProbe[p2LabWavCacheNamespace(style, voice)] == true;
+    return InkWell(
+      onTap: busy ? null : () => _selectBreathTestVoice(voice),
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        height: 34,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: selected
+              ? _kLabBreath.withValues(alpha: 0.18)
+              : Colors.white.withValues(alpha: 0.04),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: selected ? _kLabBreath : _kLabBorder,
+            width: selected ? 1.4 : 1,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            Text(
+              voice,
+              style: TextStyle(
+                color: busy
+                    ? Colors.white24
+                    : (selected ? _kLabBreath : Colors.white60),
+                fontSize: 11,
+                fontWeight: selected ? FontWeight.bold : FontWeight.w500,
+              ),
+            ),
+            if (cached) ...<Widget>[
+              const SizedBox(width: 4),
+              const Text('●',
+                  style: TextStyle(color: Color(0xFF6EE7B7), fontSize: 8)),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── BREATH ANALYSIS ───────────────────────────────────────────────
+  String _sec(int ms) => (ms / 1000).toStringAsFixed(2);
+
+  String _analyzedStyleLabel() {
+    final id = _analyzedStyleId;
+    if (id == null) return '—';
+    for (final s in kP2VoiceStyles) {
+      if (s.id == id) return s.label;
+    }
+    return id;
+  }
+
+  Widget _buildBreathSection() {
+    final analysis = _analysis;
+    if (analysis == null) return const SizedBox.shrink();
+    final busy = _analyzing || _probing;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        _buildLabel('BREATH ANALYSIS'),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: _surfaceDecoration,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              // 🔒 현재 dropdown이 아니라 **분석 시점에 못박은 조합**을 쓴다.
+              //   이 라벨은 구조적으로 거짓말을 할 수 없다.
+              Text(
+                '${_analyzedStyleLabel()}  +  ${_analyzedVoice ?? '—'}',
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold),
+              ),
+              if (_analysisStale) ...<Widget>[
+                const SizedBox(height: 4),
+                const Text(
+                  '⚠ 현재 선택과 다른 조합의 결과다. ANALYZE BREATH를 다시 눌러라.',
+                  style: TextStyle(color: _kLabDanger, fontSize: 10),
+                ),
+              ],
+              const SizedBox(height: 4),
+              Text(
+                'Full ${_sec(analysis.totalMs)}s · '
+                'Breaths ${analysis.segments.length} · '
+                'WAV ${((_analysisWav?.length ?? 0) / 1024).round()}KB',
+                style: const TextStyle(color: Colors.white38, fontSize: 11),
+              ),
+              const SizedBox(height: 12),
+              if (analysis.segments.isEmpty)
+                const Text(
+                  '발성 구간을 찾지 못했다. 임계값 또는 PCM을 확인할 것.',
+                  style: TextStyle(color: _kLabDanger, fontSize: 12),
+                )
+              else
+                for (int i = 0; i < analysis.segments.length; i++) ...<Widget>[
+                  _buildBreathRow(i, analysis.segments[i], busy),
+                  if (i < analysis.gaps.length)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 26, bottom: 2),
+                      child: Text(
+                        '↓ pause ${analysis.gaps[i].durationMs}ms',
+                        style: const TextStyle(
+                            color: Colors.white24, fontSize: 10),
+                      ),
+                    ),
+                ],
+              const SizedBox(height: 12),
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: OutlinedButton(
+                      style: _breathButtonStyle,
+                      onPressed:
+                          busy ? null : () => unawaited(_playFull()),
+                      child: const Text('▶ PLAY FULL',
+                          style: TextStyle(fontSize: 12)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton(
+                      style: _breathButtonStyle,
+                      onPressed: busy || analysis.segments.isEmpty
+                          ? null
+                          : () => unawaited(_playAllSequential()),
+                      child: const Text('▶ PLAY ALL SEQ',
+                          style: TextStyle(fontSize: 12)),
+                    ),
+                  ),
+                ],
+              ),
+              const Divider(height: 26, color: _kLabBorder),
+              _buildThresholdSteppers(busy),
+              const Divider(height: 26, color: _kLabBorder),
+              _buildMicProbe(busy, analysis),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  ButtonStyle get _breathButtonStyle => OutlinedButton.styleFrom(
+        foregroundColor: _kLabBreath,
+        side: BorderSide(color: _kLabBreath.withValues(alpha: 0.4)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+      );
+
+  Widget _buildBreathRow(int index, BreathSegment s, bool busy) {
+    final playing = _playingSegmentIndex == index;
+    return InkWell(
+      onTap: busy ? null : () => unawaited(_playSegment(index)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          children: <Widget>[
+            SizedBox(
+              width: 22,
+              child: Text(
+                '${index + 1}.',
+                style: TextStyle(
+                  color: playing ? _kLabBreath : Colors.white38,
+                  fontSize: 12,
+                  fontWeight: playing ? FontWeight.bold : FontWeight.normal,
+                ),
+              ),
+            ),
+            Expanded(
+              child: Text(
+                '${_sec(s.startMs)} – ${_sec(s.endMs)}   '
+                '${_sec(s.durationMs)}s',
+                style: TextStyle(
+                  color: playing ? _kLabBreath : Colors.white70,
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                  fontWeight: playing ? FontWeight.bold : FontWeight.normal,
+                ),
+              ),
+            ),
+            Icon(
+              playing ? Icons.volume_up_rounded : Icons.play_arrow_rounded,
+              size: 18,
+              color: busy
+                  ? Colors.white12
+                  : (playing ? _kLabBreath : Colors.white38),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 🚧 Phase 1 tuning defaults를 실기기에서 바로 굴리기 위한 조절기.
+  /// **여기서 값을 바꿔도 API는 호출되지 않는다** — [_reanalyze] 참조.
+  Widget _buildThresholdSteppers(bool busy) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        const Text(
+          'THRESHOLDS (재분석만 · API 호출 없음)',
+          style: TextStyle(
+              color: Colors.white38, fontSize: 10, letterSpacing: 1.1),
+        ),
+        const SizedBox(height: 8),
+        _buildStepperRow(
+          'minSilence',
+          '${_cfg.minSilenceMs}ms',
+          busy,
+          () => _reanalyze(
+              _cfg.copyWith(minSilenceMs: (_cfg.minSilenceMs - 20).clamp(20, 2000))),
+          () => _reanalyze(
+              _cfg.copyWith(minSilenceMs: (_cfg.minSilenceMs + 20).clamp(20, 2000))),
+        ),
+        _buildStepperRow(
+          'minBreath',
+          '${_cfg.minBreathMs}ms',
+          busy,
+          () => _reanalyze(
+              _cfg.copyWith(minBreathMs: (_cfg.minBreathMs - 100).clamp(100, 6000))),
+          () => _reanalyze(
+              _cfg.copyWith(minBreathMs: (_cfg.minBreathMs + 100).clamp(100, 6000))),
+        ),
+        _buildStepperRow(
+          'pad',
+          '${_cfg.padMs}ms',
+          busy,
+          () => _reanalyze(_cfg.copyWith(padMs: (_cfg.padMs - 20).clamp(0, 500))),
+          () => _reanalyze(_cfg.copyWith(padMs: (_cfg.padMs + 20).clamp(0, 500))),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStepperRow(
+    String label,
+    String value,
+    bool busy,
+    VoidCallback onMinus,
+    VoidCallback onPlus,
+  ) {
+    Widget button(IconData icon, VoidCallback action) => InkWell(
+          onTap: busy ? null : action,
+          borderRadius: BorderRadius.circular(6),
+          child: Padding(
+            padding: const EdgeInsets.all(6),
+            child: Icon(icon,
+                size: 18, color: busy ? Colors.white12 : _kLabBreath),
+          ),
+        );
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            child: Text(label,
+                style: const TextStyle(color: Colors.white54, fontSize: 11)),
+          ),
+          button(Icons.remove_rounded, onMinus),
+          SizedBox(
+            width: 62,
+            child: Text(
+              value,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                  color: Colors.white, fontSize: 12, fontFamily: 'monospace'),
+            ),
+          ),
+          button(Icons.add_rounded, onPlus),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMicProbe(bool busy, BreathAnalysis analysis) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        const Text(
+          'MIC START LATENCY (측정만 · 녹음 남기지 않음)',
+          style: TextStyle(
+              color: Colors.white38, fontSize: 10, letterSpacing: 1.1),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: OutlinedButton(
+                style: _breathButtonStyle,
+                onPressed: busy || analysis.segments.isEmpty
+                    ? null
+                    : () => unawaited(_runMicLatencyProbe()),
+                child: Text(_probing ? 'PROBING…' : 'RUN PROBE',
+                    style: const TextStyle(fontSize: 12)),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              _micLatencyMs == null ? '— ms' : '$_micLatencyMs ms',
+              style: TextStyle(
+                color: _micLatencyMs == null ? Colors.white24 : _kLabBreath,
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ],
+        ),
       ],
     );
   }
