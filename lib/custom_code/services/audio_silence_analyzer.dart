@@ -118,21 +118,34 @@ List<bool> voicedFrames(Uint8List pcm, BreathAnalysisConfig cfg) {
   for (int frameStart = 0;
       frameStart + bytesPerFrame <= alignedLength;
       frameStart += bytesPerFrame) {
-    int absoluteSum = 0;
-    int peak = 0;
-    for (int offset = frameStart;
-        offset < frameStart + bytesPerFrame;
-        offset += 2) {
-      final int sample = data.getInt16(offset, Endian.little);
-      final int absolute = sample < 0 ? -sample : sample;
-      absoluteSum += absolute;
-      if (absolute > peak) peak = absolute;
-    }
-    final int meanAbsolute = absoluteSum ~/ samplesPerFrame;
-    frames.add(
-        meanAbsolute >= cfg.meanAbsThreshold || peak >= cfg.peakThreshold);
+    frames.add(isVoicedPcmFrame(data, frameStart, samplesPerFrame, cfg));
   }
   return frames;
+}
+
+/// 프레임 하나가 발성인가.
+///
+/// **판정 규칙은 이 함수 하나뿐이다.** AI 오디오 분석([voicedFrames])과
+/// 유저 마이크 스트림 판정이 같은 자를 쓰게 하려고 떼어냈다 — 둘이 갈라지면
+/// "AI는 말했다는데 유저는 아니라더라" 같은 어긋남이 생긴다.
+/// (임계값 자체는 호출자가 [cfg]로 따로 줄 수 있다.)
+bool isVoicedPcmFrame(
+  ByteData data,
+  int startByte,
+  int samplesPerFrame,
+  BreathAnalysisConfig cfg,
+) {
+  int absoluteSum = 0;
+  int peak = 0;
+  final int end = startByte + samplesPerFrame * 2;
+  for (int offset = startByte; offset < end; offset += 2) {
+    final int sample = data.getInt16(offset, Endian.little);
+    final int absolute = sample < 0 ? -sample : sample;
+    absoluteSum += absolute;
+    if (absolute > peak) peak = absolute;
+  }
+  final int meanAbsolute = absoluteSum ~/ samplesPerFrame;
+  return meanAbsolute >= cfg.meanAbsThreshold || peak >= cfg.peakThreshold;
 }
 
 /// PCM16 mono → 호흡 구간.

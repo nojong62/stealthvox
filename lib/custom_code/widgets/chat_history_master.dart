@@ -32,6 +32,38 @@ import 'package:flutter/services.dart';
 import 'routine_mode_roleplay.dart' show TtsCache;
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
+import '/custom_code/services/audio_silence_analyzer.dart';
+import '/custom_code/services/breath_echoing_engine.dart';
+import '/custom_code/services/breath_segment.dart';
+import '/custom_code/services/p2_voice_styles.dart';
+import '/custom_code/services/practice_replay_builder.dart';
+import '/custom_code/services/pcm_audio_utils.dart'
+    show kStealthVoxSttSampleRate, pcm16ToWav;
+
+// ════════════════════════════════════════════════════════════════════
+// 🌬️ [P2-BREATH] Breath Echoing이 쓰는 값. **한곳에만 둔다.**
+// ════════════════════════════════════════════════════════════════════
+
+/// 🚧 **temporary Breath Echoing default voice — final voice not yet selected.**
+///
+/// Lab 실측에서 cedar가 호흡 경계를 가장 뚜렷하게 냈지만(pause 580/540ms),
+/// 그건 "가장 잘 끊어 읽는다"는 뜻이라 Smooth Jazz의 부드러움과는 오히려
+/// 반대일 수 있다. 실제 P2 문장을 몇 개 돌려본 뒤 marin·echo·verse 중으로
+/// 바꿀 수 있다. **바꿀 때 고칠 곳은 이 한 줄뿐이다.**
+const String _kBreathVoice = 'cedar';
+
+/// Breath TTS는 Lab과 **같은 Smooth Jazz 정의**를 쓴다. 복사본을 만들지
+/// 않는다 — 갈라지면 Lab에서 고른 소리와 실사용 소리가 달라진다.
+P2VoiceStyle get _kBreathStyle => kP2VoiceStyles.firstWhere(
+      (s) => s.id == kP2BreathTestStyleId,
+    );
+
+/// 실사용 Breath PCM 캐시. Lab(`p2lab_wav_`)과 접두어가 달라 섞이지 않는다.
+/// Pattern 시스템이 들어오면 `style_smooth_jazz` 자리에 pattern id가 들어가고,
+/// 같은 instruction·voice면 **캐시가 그대로 재사용된다**(재생성 0회).
+String _breathCacheNamespace(String voice) =>
+    'p2_wav_${_historyPracticeTtsModel}_${_kBreathStyle.id}'
+    '_${kP2StyleInstructionVersion}_$voice';
 
 const String _historyListenTtsModel = 'tts-1';
 const String _historyListenTtsVoice = 'nova';
@@ -229,6 +261,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // 🔧 [STAMPEDE-FIX] 같은 청크에 대한 동시 API 호출 방지
   // key: chunk index, value: 진행 중인 audio fetch Future
   final Map<int, Future<Uint8List?>> _inFlightChunkFetch = {};
+  final Map<String, Future<Uint8List?>> _breathPcmInFlight = {};
   final Map<String, Future<Uint8List?>> _meaningUnitTtsInFlight = {};
   final Map<String, Future<Uint8List?>> _p3MeaningUnitTtsInFlight = {};
   // 모든 연속 TTS 요청은 동일한 요청 키로 하나의 네트워크 Future를 공유한다.
@@ -306,6 +339,22 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   int? _shadowRepeatCount;
   // [P2-REPEAT] 지금 이 줄의 몇 회차인지(0부터). 줄이 바뀌면 0으로 돌아간다.
   int _shadowPass = 0;
+  // ── 🌬️ [P2-BREATH] ──────────────────────────────────────────────
+  /// 계단 하나를 굴리는 엔진. 계단마다 새로 만들지 않고 재사용한다.
+  BreathEchoingEngine? _breathEngine;
+
+  /// 지금 계단의 Full PCM과 호흡 구간. Practice Replay 조립이 이 둘을 쓴다.
+  Uint8List? _breathAiPcm;
+  List<BreathSegment> _breathSegments = const <BreathSegment>[];
+
+  /// 화면 표시용. 몇 번째 호흡인지, AI 차례인지 유저 차례인지.
+  int _breathIndex = 0;
+  int _breathTotal = 0;
+  BreathEchoPhase _breathPhase = BreathEchoPhase.idle;
+
+  /// 계단 준비(PCM 확보+분석) 중. 이 동안에도 과금은 살아 있어야 한다.
+  bool _breathPreparing = false;
+
   // [P2-SHADOW-REC] User-line audio captured for Play all. No scoring/STT.
   bool _shadowRecording = false;
   int _shadowRecordLineIdx = -1;
@@ -425,7 +474,12 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         _aiChunkLoading ||
         _isPlayingFullAI ||
         _isPlayingFullUser ||
-        _polishedUnitAIPlaying;
+        _polishedUnitAIPlaying ||
+        // 🌬️ [P2-BREATH] AI 호흡 재생 · 유저 에코 캡처 · 계단 준비(PCM+분석).
+        //   빠뜨리면 유저가 따라 말하는 동안 유휴로 판정되어 과금이 멈춘다.
+        _breathPreparing ||
+        (_breathEngine?.isAiPlaying ?? false) ||
+        (_breathEngine?.isCapturing ?? false);
   }
 
 
@@ -507,6 +561,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
     _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
     _stopShadowAiPlayback(); // [P2-SHADOW-AI]
+    unawaited(_breathEngine?.stop() ?? Future<void>.value()); // [P2-BREATH]
     _chunkScrollController.dispose();
     _practiceScrollController.dispose();
     _p3ShadowPositionSub?.cancel();
@@ -1533,6 +1588,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     _stopAutoVADRecording();
     audioPlayer.stop();
     _stopShadowAiPlayback(); // [P2-SHADOW-AI] Stop read-along voice on skip.
+    unawaited(_breathEngine?.stop() ?? Future<void>.value()); // [P2-BREATH]
     _nextTurn();
   }
 
@@ -1601,6 +1657,10 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     }
     final int lineIdx = currentIndex;
     _pinShadowLineToTop(lineIdx);
+    // 🌬️ [P2-BREATH] 예전에는 여기서 **녹음을 켜고 그 위로 AI를 재생**했다
+    //   — AI와 유저가 동시에 읽는 방식이었다. 이제는 호흡 하나를 들려주고
+    //   멈춘 뒤 유저가 혼자 따라 한다. 두 경로가 같은 턴에 함께 돌지 않게
+    //   구 경로(`_startShadowAiVoice`)는 여기서 더 이상 부르지 않는다.
     _shadowHighlightTimer = Timer(lead, () async {
       if (!mounted ||
           _phase != ShadowingPhase.part2Practice ||
@@ -1608,23 +1668,138 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
           currentIndex != lineIdx) {
         return;
       }
-      // [P2-REPEAT] 듣기 회차에는 마이크를 열지 않는다. 유저 목소리는
-      //   쉐도잉 회차에서 딱 한 번만 남는다.
-      if (_isShadowingPass) {
-        await _startShadowRecording(lineIdx);
-        if (!mounted ||
-            _phase != ShadowingPhase.part2Practice ||
-            isPaused ||
-            currentIndex != lineIdx) {
-          return;
-        }
-      }
       _startShadowLineGlide(lineIdx, words);
-      // [P2-SHADOW-AI] Play the AI voice and drive the highlight from the audio
-      // playback position. Falls back to the timer stepping if audio is
-      // unavailable (offline / no API key).
-      await _startShadowAiVoice(lineIdx, words);
+      await _startBreathEcho(lineIdx);
     });
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // 🌬️ [P2-BREATH] 한 계단의 호흡 에코
+  // ══════════════════════════════════════════════════════════════════
+
+  /// 계단 문장의 Smooth Jazz PCM을 얻어 호흡으로 가르고 엔진을 돌린다.
+  Future<void> _startBreathEcho(int lineIdx) async {
+    final text = (_tutorLines[lineIdx]['text'] as String).trim();
+    if (text.isEmpty) {
+      _nextTurn();
+      return;
+    }
+    if (mounted) setState(() => _breathPreparing = true);
+
+    Uint8List? pcm;
+    try {
+      pcm = await _getBreathPcm(text);
+    } catch (e) {
+      debugPrint('[P2-BREATH] pcm $e');
+    }
+    if (!mounted ||
+        _phase != ShadowingPhase.part2Practice ||
+        isPaused ||
+        currentIndex != lineIdx) {
+      if (mounted) setState(() => _breathPreparing = false);
+      return;
+    }
+    if (pcm == null || pcm.isEmpty) {
+      // 소리를 못 만들었다. 계단을 붙잡아 두지 않고 넘어간다.
+      setState(() => _breathPreparing = false);
+      _showRoomEntryToast('학습 음성을 만들지 못했습니다');
+      await _finishShadowStep();
+      return;
+    }
+
+    final analysis = analyzeBreaths(pcm, const BreathAnalysisConfig());
+    if (analysis.segments.isEmpty) {
+      setState(() => _breathPreparing = false);
+      await _finishShadowStep();
+      return;
+    }
+
+    _breathAiPcm = pcm;
+    _breathSegments = analysis.segments;
+    final engine = _ensureBreathEngine();
+    if (mounted) {
+      setState(() {
+        _breathPreparing = false;
+        _breathIndex = 0;
+        _breathTotal = analysis.segments.length;
+        _breathPhase = BreathEchoPhase.aiPlaying;
+      });
+    }
+    debugPrint('[P2-BREATH] line=$lineIdx breaths=${analysis.segments.length} '
+        'total=${analysis.totalMs}ms voice=$_kBreathVoice');
+    await engine.start(
+      aiPcm: pcm,
+      segments: analysis.segments,
+      repeatCount: _shadowRepeatCount ?? 1,
+    );
+  }
+
+  BreathEchoingEngine _ensureBreathEngine() {
+    final existing = _breathEngine;
+    if (existing != null) return existing;
+    final engine = BreathEchoingEngine(
+      recorder: appAudioRecorder,
+      onPhase: (phase, index, total) {
+        if (!mounted) return;
+        setState(() {
+          _breathPhase = phase;
+          _breathIndex = index;
+          _breathTotal = total;
+        });
+        if (phase == BreathEchoPhase.userSpeaking) {
+          BillingTicker.instance.resumeFromActivity('p2_breath_user');
+        }
+      },
+      onLineComplete: (userPcm, userVoicedMs) {
+        unawaited(_onBreathLineComplete(userPcm, userVoicedMs));
+      },
+      onError: (message) => debugPrint('[P2-BREATH] $message'),
+    );
+    _breathEngine = engine;
+    return engine;
+  }
+
+  /// 계단의 호흡이 전부 끝났다. 유저 호흡을 이어 Practice Replay를 만든 뒤
+  /// 다음 계단으로 간다.
+  Future<void> _onBreathLineComplete(
+    List<Uint8List?> userPcm,
+    List<int> userVoicedMs,
+  ) async {
+    final lineIdx = currentIndex;
+    final aiPcm = _breathAiPcm;
+    if (aiPcm != null &&
+        _breathSegments.isNotEmpty &&
+        lineIdx < _tutorLines.length) {
+      try {
+        final replay = buildPracticeReplay(
+          aiPcm: aiPcm,
+          segments: _breathSegments,
+          userPcm: userPcm,
+          userVoicedMs: userVoicedMs,
+        );
+        final dir = await getTemporaryDirectory();
+        final path = '${dir.path}/p2replay_${lineIdx}_'
+            '${DateTime.now().millisecondsSinceEpoch}.wav';
+        await File(path).writeAsBytes(
+          practiceReplayToWav(replay),
+          flush: true,
+        );
+        // 기존 Play all·줄별 재생이 읽는 자리다. DeviceFileSource라 WAV도 그대로
+        // 재생된다 — Play all 코드는 손대지 않는다.
+        final old = _tutorLines[lineIdx]['user_record_path'] as String?;
+        if (old != null && old.isNotEmpty && old != path) {
+          unawaited(File(old).delete().catchError((_) => File(old)));
+        }
+        _tutorLines[lineIdx]['user_record_path'] = path;
+        debugPrint('[P2-BREATH] replay line=$lineIdx '
+            'user=${replay.userCount}/${replay.sources.length} '
+            'replaced=${replay.replacedCount}');
+      } catch (e) {
+        debugPrint('[P2-BREATH] replay build $e');
+      }
+    }
+    if (!mounted || _phase != ShadowingPhase.part2Practice || isPaused) return;
+    await _finishShadowStep();
   }
 
   // [P2-SHADOW-AI] Fetch + play the AI voice for the current read-along line and
@@ -2288,6 +2463,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
     _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
     unawaited(_stopShadowAiPlayback()); // [P2-SHADOW-AI]
+    unawaited(_breathEngine?.stop() ?? Future<void>.value()); // [P2-BREATH]
     unawaited(_stopShadowRecording()); // [P2-SHADOW-REC]
     unawaited(_stopP3Shadowing(resetSelection: true));
     _stopDeepgramListening();
@@ -2339,6 +2515,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
     _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
     _stopShadowAiPlayback(); // [P2-SHADOW-AI]
+    unawaited(_breathEngine?.stop() ?? Future<void>.value()); // [P2-BREATH]
     _stopShadowRecording(); // [P2-SHADOW-REC]
     unawaited(_stopP3Shadowing(resetSelection: true));
     _stopDeepgramListening();
@@ -3338,6 +3515,46 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     return future;
   }
 
+  // ══════════════════════════════════════════════════════════════════
+  // 🌬️ [P2-BREATH] Smooth Jazz PCM 확보
+  // ══════════════════════════════════════════════════════════════════
+
+  /// 계단 문장 하나의 Full PCM(24kHz·16bit·mono)을 얻는다.
+  ///
+  /// 캐시에는 재생 가능하도록 WAV로 넣고, 분석·slice는 헤더 44바이트를
+  /// 건너뛴 본문으로 한다. mp3를 만들었다가 PCM으로 바꾸는 경로는 없다.
+  Future<Uint8List?> _getBreathPcm(String text) {
+    final ns = _breathCacheNamespace(_kBreathVoice);
+    final requestKey = '$ns|${text.trim()}';
+    final existing = _breathPcmInFlight[requestKey];
+    if (existing != null) return existing;
+    final future = () async {
+      final cached = await TtsCache.get(text, ns);
+      if (cached != null && cached.length > 44) {
+        return pcmFromWav(cached);
+      }
+      final raw = await _fetchOpenAITTSInternal(
+        text,
+        1.0,
+        _kBreathVoice,
+        model: _historyPracticeTtsModel,
+        instructions: _kBreathStyle.instruction,
+        instructionTag: '${_kBreathStyle.id}_$kP2StyleInstructionVersion',
+        responseFormat: 'pcm',
+      );
+      if (raw == null || raw.isEmpty) return null;
+      await TtsCache.put(
+        text,
+        ns,
+        pcm16ToWav(raw, sampleRate: kStealthVoxSttSampleRate),
+      );
+      return raw;
+    }();
+    _breathPcmInFlight[requestKey] = future;
+    future.whenComplete(() => _breathPcmInFlight.remove(requestKey));
+    return future;
+  }
+
   String _meaningUnitCacheVoice(String voice) =>
       '${_historyPracticeTtsModel}_unit_style_v6_$voice';
 
@@ -3445,6 +3662,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     String model = _historyListenTtsModel,
     String? instructions,
     String? instructionTag,
+    String? responseFormat,
   }) async {
     if (_apiKey.isEmpty || text.trim().isEmpty) return null;
     try {
@@ -3460,11 +3678,13 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
               'input': text,
               'voice': voice,
               if (model == _historyListenTtsModel) 'speed': speed,
+              if (responseFormat != null) 'response_format': responseFormat,
               if (instructions != null && instructions.trim().isNotEmpty)
                 'instructions': instructions,
             }),
           )
-          .timeout(const Duration(seconds: 10));
+          // PCM은 mp3보다 응답이 커서 10초로는 모자랄 수 있다.
+          .timeout(Duration(seconds: responseFormat == 'pcm' ? 30 : 10));
       debugPrint(
           '[HISTORY-TTS] model=$model voice=$voice instruction=${instructionTag ?? 'none'} status=${response.statusCode} chars=${text.trim().length}');
       return response.statusCode == 200 ? response.bodyBytes : null;
@@ -8318,6 +8538,7 @@ RULES — follow exactly:
       _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
       _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
       _stopShadowAiPlayback(); // [P2-SHADOW-AI]
+      unawaited(_breathEngine?.stop() ?? Future<void>.value()); // [P2-BREATH]
       // 시작은 상단 보이스 선택기가 연다(_buildMeaningUnitVoiceSelector).
       _prepareP2StartAudio();
     }
@@ -8863,6 +9084,7 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
     _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
     _stopShadowAiPlayback(); // [P2-SHADOW-AI]
+    unawaited(_breathEngine?.stop() ?? Future<void>.value()); // [P2-BREATH]
     _stopShadowRecording(); // [P2-SHADOW-REC]
     unawaited(_stopP3Shadowing(resetSelection: true));
     if (practiceNum == 1) {
@@ -8907,8 +9129,10 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
         Expanded(
           child: Column(
             children: [
-              if (_phase == ShadowingPhase.part2Practice)
+              if (_phase == ShadowingPhase.part2Practice) ...[
                 _buildMeaningUnitVoiceSelector(),
+                _buildBreathIndicator(),
+              ],
               Expanded(child: _buildTurnPracticeScreen()),
             ],
           ),
@@ -8916,6 +9140,47 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
       ],
     );
   }
+
+  /// 🌬️ [P2-BREATH] 지금 몇 번째 호흡이고 누구 차례인지.
+  ///
+  /// 예전 동시 낭독에서는 AI 소리가 곧 신호였다. 교대 방식에서는 **AI가
+  /// 끝났다는 것을 눈으로 알려주지 않으면 유저가 말할 때를 모른다.**
+  /// 단어 하이라이트를 새로 만들지 않고 이 한 줄만 둔다.
+  Widget _buildBreathIndicator() {
+    if (_breathPreparing) {
+      return _breathBanner('음성 준비 중…', Colors.white38);
+    }
+    if (_breathTotal <= 0) return const SizedBox.shrink();
+    final position = '호흡 ${(_breathIndex + 1).clamp(1, _breathTotal)}/$_breathTotal';
+    switch (_breathPhase) {
+      case BreathEchoPhase.aiPlaying:
+        return _breathBanner('$position · 듣기', Colors.white60);
+      case BreathEchoPhase.waitingForUser:
+      case BreathEchoPhase.userSpeaking:
+        return _breathBanner('$position · 따라 말하세요', Colors.amber);
+      case BreathEchoPhase.advancing:
+        return _breathBanner(position, Colors.white38);
+      case BreathEchoPhase.completed:
+        return _breathBanner('계단 완료', Colors.white38);
+      case BreathEchoPhase.idle:
+      case BreathEchoPhase.cancelled:
+        return const SizedBox.shrink();
+    }
+  }
+
+  Widget _breathBanner(String text, Color color) => Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Text(
+          text,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: color,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.3,
+          ),
+        ),
+      );
 
   Widget _buildPracticeTab(String label, bool isActive, VoidCallback onTap) {
     return GestureDetector(
