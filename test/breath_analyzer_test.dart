@@ -261,6 +261,33 @@ void main() {
       }
     });
 
+    test('P3 gap 3단계(300/500/800)가 정확히 삽입된다', () {
+      final pcm = _speech(3000);
+      final segs = threeSegments();
+      for (final gap in <int>[300, 500, 800]) {
+        final out = buildGappedPcm(pcm, segs,
+            extraGapMs: gap, sampleRate: _sampleRate);
+        // 삽입 지점은 segment 수 - 1 곳
+        expect(out.length, pcm.length + 2 * gap * _bytesPerMs,
+            reason: 'gap $gap 삽입량이 어긋난다');
+      }
+    });
+
+    test('gap을 바꿔도 원본 발성이 그대로 남는다', () {
+      final pcm = _speech(3000);
+      final segs = threeSegments();
+      final tight = buildGappedPcm(pcm, segs,
+          extraGapMs: 300, sampleRate: _sampleRate);
+      final relaxed = buildGappedPcm(pcm, segs,
+          extraGapMs: 800, sampleRate: _sampleRate);
+      // 첫 삽입 지점 전까지는 셋 다 동일해야 한다(속도를 바꾸는 게 아니다).
+      const head = 1000 * _bytesPerMs;
+      for (int i = 0; i < head; i += 977) {
+        expect(tight[i], pcm[i]);
+        expect(relaxed[i], pcm[i]);
+      }
+    });
+
     test('빈 segment 목록에서 crash하지 않는다', () {
       final pcm = _speech(500);
       final out = buildGappedPcm(pcm, const <BreathSegment>[],

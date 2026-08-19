@@ -36,9 +36,9 @@ import '/custom_code/services/audio_silence_analyzer.dart';
 import '/custom_code/services/breath_echoing_engine.dart';
 import '/custom_code/services/breath_segment.dart';
 import '/custom_code/services/p2_voice_styles.dart';
-import '/custom_code/services/practice_replay_builder.dart';
+import '/custom_code/services/sentence_morph.dart';
 import '/custom_code/services/pcm_audio_utils.dart'
-    show kStealthVoxSttSampleRate, pcm16ToWav;
+    show kStealthVoxSttSampleRate, pcm16DurationMs, pcm16ToWav;
 
 // ════════════════════════════════════════════════════════════════════
 // 🌬️ [P2-BREATH] Breath Echoing이 쓰는 값. **한곳에만 둔다.**
@@ -51,6 +51,10 @@ import '/custom_code/services/pcm_audio_utils.dart'
 /// 반대일 수 있다. 실제 P2 문장을 몇 개 돌려본 뒤 marin·echo·verse 중으로
 /// 바꿀 수 있다. **바꿀 때 고칠 곳은 이 한 줄뿐이다.**
 const String _kBreathVoice = 'cedar';
+
+/// 🔤 [P2-MORPH] 달라진 자리에 쓰는 색. 경고처럼 보이지 않게, 본문보다
+/// 한 단계만 밝은 톤으로 둔다.
+const Color _kMorphAccent = Color(0xFF7DD3FC);
 
 /// Breath TTS는 Lab과 **같은 Smooth Jazz 정의**를 쓴다. 복사본을 만들지
 /// 않는다 — 갈라지면 Lab에서 고른 소리와 실사용 소리가 달라진다.
@@ -70,22 +74,6 @@ const String _historyListenTtsVoice = 'nova';
 const String _historyPracticeTtsModel = 'gpt-4o-mini-tts';
 const String _historyPracticeAiVoice = 'nova';
 const String _historyPracticeUserVoice = 'verse';
-const List<String> _meaningUnitVoiceOptions = <String>[
-  'marin',
-  'cedar',
-  'verse',
-  'coral',
-];
-const List<String> _nativeMeaningUnitVoiceOptions = <String>[
-  'verse',
-  'cedar',
-  'coral',
-];
-const List<String> _p3LearningVoiceOptions = <String>[
-  'marin',
-  'cedar',
-  'verse',
-];
 const Color _p3ShadowingAccentColor = Color(0xFF818CF8);
 
 /// 의미단위 낭독의 공통 뼈대. 무엇을 한 덩어리로 볼지, 덩어리 안을 어떻게
@@ -94,38 +82,10 @@ const Color _p3ShadowingAccentColor = Color(0xFF818CF8);
 ///
 /// 속도는 목표가 아니라 결과라서 배속 숫자를 지시하지 않는다. 숫자를 앞에 두면
 /// 모델이 느리게 읽기부터 집행해 밋밋하게 늘어지고 리듬이 뒤로 밀린다.
-const String _meaningUnitCore = '''
-Read in meaning units — groups of words that belong together by grammar and sense.
-Never read word by word.
-
-Inside one unit, keep the words connected with natural linking and normal
-reductions. Never break a unit apart.
-
-Give each unit one clear stress on its key content word, and keep function words light.
-Let intonation carry questions, contrasts, conditions, and corrections.
-
-Never stretch individual words or sounds to change the pace. The pace comes from
-how you treat the boundaries between units.
-
-Do not add explanations, labels, or the words pause or slash. Read only the supplied sentence.''';
 
 /// 학습용 — 구간을 **의도적으로 벌려** 따라 하기 쉽게 만든다.
-const String _learningUnitDelivery = '''
-Delivery — clearly separated units, for a learner who will shadow you:
-- Put a deliberate, clearly audible pause between units. Each boundary must be easy to hear.
-- Hold a steady rhythm: units of similar weight take similar time, and the pauses stay even.
-- Use the same unit boundaries every time, so they can be predicted on a second listen.
-- Stay clear and even rather than expressive. Do not rush a unit just because it is predictable.
-- Do not sound like a pronunciation drill or an audiobook narrator; still sound like a person.''';
 
 /// 원어민식 — 중요하지 않은 곳은 **흘려 붙이고** 핵심만 세운다.
-const String _nativeUnitDelivery = '''
-Delivery — natural native flow:
-- Keep the unit boundaries, but make them soft and short: a slight easing, not a gap.
-- Move quickly through predictable, low-information words and link them tightly.
-- Slow down and lean on what is new, contrastive, or important. Let those words carry the weight.
-- Use full connected speech across the sentence: weak forms, reductions, and linking.
-- Sound like someone talking, not like a model reading for study.''';
 
 /// 🪜 [P2-LADDER] P2 낭독 지시. 실장님 지정 문구다(2026-08-18).
 ///
@@ -133,25 +93,6 @@ Delivery — natural native flow:
 /// 걷어냈다 — P2가 대화 한 턴이 아니라 **한 문장이 계단마다 길어지는 것**을
 /// 다루는 자리로 바뀌었고, 덩어리마다 끊어 읽으면 자란 자리가 아니라 끊긴
 /// 자리만 들린다. 두 지시는 P3가 그대로 쓰므로 남겨 둔다.
-const String _meaningUnitTtsInstructions =
-    'General American accent, slightly slower than normal conversational speed, '
-    'clear and natural intonation with slightly emphasized sentence stress, '
-    'a warm relaxed conversational tone, and moderate controlled emotional '
-    'expressiveness.';
-const String _p3LearningShadowingTtsInstructions = '''
-$_meaningUnitCore
-
-$_learningUnitDelivery
-
-This is a full sentence the learner shadows from start to finish.
-''';
-const String _p3NativeShadowingTtsInstructions = '''
-$_meaningUnitCore
-
-$_nativeUnitDelivery
-
-This is a full sentence the learner listens to as a model of how it actually sounds.
-''';
 
 /// 📦 [Box 2: 위젯 클래스 선언부]
 class ChatHistoryMaster extends StatefulWidget {
@@ -262,8 +203,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // key: chunk index, value: 진행 중인 audio fetch Future
   final Map<int, Future<Uint8List?>> _inFlightChunkFetch = {};
   final Map<String, Future<Uint8List?>> _breathPcmInFlight = {};
-  final Map<String, Future<Uint8List?>> _meaningUnitTtsInFlight = {};
-  final Map<String, Future<Uint8List?>> _p3MeaningUnitTtsInFlight = {};
   // 모든 연속 TTS 요청은 동일한 요청 키로 하나의 네트워크 Future를 공유한다.
   final Map<String, Future<Uint8List?>> _openAiTtsInFlight = {};
   List<PracticeChunk> _chunks = [];
@@ -325,45 +264,35 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   int _turnPracticeRetryCount = 0;
 
   // [P2-MEANING-SHADOW] 의미단위 학습 음성을 동시에 따라 읽는 상태.
-  List<String> _shadowWords = [];
-  int _shadowWordIdx = -1;
   Timer? _shadowHighlightTimer;
   Timer? _shadowAdvanceTimer;
   double _shadowSpeed = 1.0; // 오디오 실패 시 하이라이트 fallback용 고정 속도.
-  String? _selectedMeaningUnitVoice = 'cedar';
   // P2 학습 Voice는 Cedar를 기본값으로 사용한다.
-  bool _shadowStarted = false;
   // [P2-REPEAT] 한 줄을 몇 번 들려줄지. null이면 아직 안 골랐다 — 보이스와
   //   이 값을 **둘 다** 골라야 연습이 시작된다.
   //   2번 = 1회차 듣기 + 2회차 쉐도잉. 1번 = 쉐도잉 하나.
-  int? _shadowRepeatCount;
   // [P2-REPEAT] 지금 이 줄의 몇 회차인지(0부터). 줄이 바뀌면 0으로 돌아간다.
-  int _shadowPass = 0;
-  // ── 🌬️ [P2-BREATH] ──────────────────────────────────────────────
-  /// 계단 하나를 굴리는 엔진. 계단마다 새로 만들지 않고 재사용한다.
-  BreathEchoingEngine? _breathEngine;
+  // ── 🔤 [P2-MORPH] ───────────────────────────────────────────────
+  /// 이번 계단에서 달라진 자리. **화면 강조·TTS 강조·캐시 키가 이 하나를
+  /// 함께 쓴다** — 각자 계산하면 눈과 귀가 어긋난다.
+  MorphChange _morph = MorphChange.none;
 
-  /// 지금 계단의 Full PCM과 호흡 구간. Practice Replay 조립이 이 둘을 쓴다.
-  Uint8List? _breathAiPcm;
-  List<BreathSegment> _breathSegments = const <BreathSegment>[];
+  /// 강조를 켰는가. 문장이 뜨자마자 번쩍이지 않게 한 박자 뒤에 켠다.
+  bool _morphActive = false;
 
-  /// 화면 표시용. 몇 번째 호흡인지, AI 차례인지 유저 차례인지.
-  int _breathIndex = 0;
-  int _breathTotal = 0;
-  BreathEchoPhase _breathPhase = BreathEchoPhase.idle;
+  /// 소리를 받아 오는 중. 이 동안에도 과금은 살아 있어야 한다.
+  bool _morphPreparing = false;
 
-  /// 계단 준비(PCM 확보+분석) 중. 이 동안에도 과금은 살아 있어야 한다.
-  bool _breathPreparing = false;
+  /// 전체 문장을 읽는 중.
+  bool _morphPlaying = false;
 
   // [P2-SHADOW-REC] User-line audio captured for Play all. No scoring/STT.
   bool _shadowRecording = false;
-  int _shadowRecordLineIdx = -1;
   // [P2-SHADOW-AI] AI voice read-along: highlight follows audio playback position.
   AudioPlayer? _shadowAiPlayer;
   StreamSubscription<Duration>? _shadowPosSub;
   StreamSubscription<Duration>? _shadowDurSub;
   StreamSubscription<void>? _shadowCompleteSub;
-  Duration _shadowAudioDuration = Duration.zero;
   // [P-PULSE] Softer indigo pulse for the P3 polished button.
   static const Color _pPulseColor = Color(0xFF818CF8);
 
@@ -375,20 +304,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   bool _isReplayMode = false;
 
   // P3 한 문장 의미단위 쉐도잉 상태.
-  String? _selectedP3LearningVoice;
-  String? _selectedP3NativeVoice;
-  bool? _p3UsesNativeStyle;
-  bool _p3ShadowLoading = false;
-  bool _p3ShadowPlaying = false;
-  bool _p3ShadowRecording = false;
-  bool _p3ShadowComplete = false;
-  int _p3ShadowGeneration = 0;
-  AudioPlayer? _p3ShadowPlayer;
-  String? _p3ShadowRecordPath;
   final ScrollController _p3SentenceScrollController = ScrollController();
   StreamSubscription<Duration>? _p3ShadowPositionSub;
   StreamSubscription<Duration>? _p3ShadowDurationSub;
-  Duration _p3ShadowAudioDuration = Duration.zero;
 
   // 🆕 [CHUNK-PRACTICE] 의미단위 연습 모드 상태
   bool _practicingPolished = false; // false = expanded, true = polished
@@ -450,7 +368,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   Uint8List? _appCorrectedAudio;
   bool _appIsShadowRecording = false;
   bool _isPlayingAppAudio = false;
-  String? _shadowRecordPath;
   String _appTranscript = "";
   // 🆕 Another Sentence 중복 회피: 최근 생성한 한국어 문장(최대 6개) 기억
   final List<String> _appRecentKoSentences = [];
@@ -475,11 +392,10 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         _isPlayingFullAI ||
         _isPlayingFullUser ||
         _polishedUnitAIPlaying ||
-        // 🌬️ [P2-BREATH] AI 호흡 재생 · 유저 에코 캡처 · 계단 준비(PCM+분석).
-        //   빠뜨리면 유저가 따라 말하는 동안 유휴로 판정되어 과금이 멈춘다.
-        _breathPreparing ||
-        (_breathEngine?.isAiPlaying ?? false) ||
-        (_breathEngine?.isCapturing ?? false);
+        // 🔤 [P2-MORPH] 소리를 받는 동안과 읽는 동안. 마이크가 없어 판정이
+        //   단순해졌다 — 이 둘만 보면 된다.
+        _morphPreparing ||
+        _morphPlaying;
   }
 
 
@@ -561,7 +477,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
     _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
     _stopShadowAiPlayback(); // [P2-SHADOW-AI]
-    unawaited(_breathEngine?.stop() ?? Future<void>.value()); // [P2-BREATH]
     _chunkScrollController.dispose();
     _practiceScrollController.dispose();
     _p3ShadowPositionSub?.cancel();
@@ -1588,21 +1503,22 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     _stopAutoVADRecording();
     audioPlayer.stop();
     _stopShadowAiPlayback(); // [P2-SHADOW-AI] Stop read-along voice on skip.
-    unawaited(_breathEngine?.stop() ?? Future<void>.value()); // [P2-BREATH]
     _nextTurn();
   }
 
   void _checkAndStartTurn() {
     if (!mounted || !isPracticeMode || isPaused) return;
     if (currentIndex >= _tutorLines.length) return;
-    // [P2-START] Do not start either AI playback or user highlight until speed is chosen.
-    if (_phase == ShadowingPhase.part2Practice && !_shadowStarted) return;
     final line = _tutorLines[currentIndex];
     final bool isAiTurn = _isAiTurn(line); // 🆕 [BOX-32]
+    if (_phase == ShadowingPhase.part2Practice) {
+      // 🔤 [P2-MORPH] P2는 말하기 자리가 아니다. 고르고 시작하는 게이트도
+      //   없다 — 들어오면 바로 문장이 자라는 것을 보여준다.
+      unawaited(_runMorphStep(currentIndex));
+      return;
+    }
     if (isAiTurn) {
       _checkAndPlayAILine();
-    } else if (_phase == ShadowingPhase.part2Practice) {
-      _startShadowHighlight(); // [P2-SHADOW]
     } else {
       Future.delayed(const Duration(milliseconds: 300), () {
         if (mounted && isPracticeMode && !isPaused && !_isAutoRecording) {
@@ -1616,292 +1532,153 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
   // [P2-SHADOW] Highlight read-along.
   // ============================================================================
 
-  /// [P2-REPEAT] 마지막 회차가 쉐도잉이다. **녹음은 여기서만 돈다** — 듣기
-  /// 회차까지 녹음하면 한 줄에 파일이 둘 생기고 뒤엣것이 앞엣것을 덮는다.
-  bool get _isShadowingPass => _shadowPass >= (_shadowRepeatCount ?? 1) - 1;
+  // ══════════════════════════════════════════════════════════════════
+  // 🔤 [P2-MORPH] Sentence Morphing
+  //
+  //   P2는 **문장이 자라는 모습을 보고 듣는 자리**다. 마이크도 녹음도 없다.
+  //   말하기는 P3가 맡는다.
+  //
+  //   한 계단: 이전 문장과 견주어 달라진 1~3곳을 계산 → 화면에 은은하게 표시
+  //   → 같은 변화를 살짝 살려 읽는 Smooth Jazz 전체 낭독 → 다음 계단
+  // ══════════════════════════════════════════════════════════════════
 
-  /// 🪜 [P2-LADDER] 계단과 계단 사이에 두는 숨. 한 계단을 다 읽자마자 다음
-  /// 계단이 밀고 들어오면 문장이 자란 자리가 안 보인다.
-  static const Duration _kShadowStepGap = Duration(seconds: 2);
+  /// 🪜 계단과 계단 사이에 두는 숨. 한 계단을 다 읽자마자 다음 계단이 밀고
+  /// 들어오면 문장이 자란 자리가 안 보인다.
+  static const Duration _kMorphStepGap = Duration(milliseconds: 900);
 
-  /// [P2-REPEAT] 같은 계단의 듣기 → 쉐도잉 사이. 계단이 바뀌는 게 아니라
-  /// 방금 들은 문장을 곧바로 따라 하는 자리라 짧게 잡는다.
-  static const Duration _kShadowPassGap = Duration(milliseconds: 600);
+  /// 문장이 뜨고 강조가 켜지기까지의 짧은 전환. 나타나자마자 번쩍이면
+  /// "무엇이 달라졌나"가 아니라 깜빡임만 남는다.
+  static const Duration _kMorphHighlightDelay = Duration(milliseconds: 320);
 
-  /// 새 계단을 연다. 회차는 처음부터 센다.
-  void _startShadowHighlight() {
-    _shadowPass = 0;
-    _beginShadowPass(lead: _kShadowStepGap);
-  }
-
-  /// [P2-REPEAT] 한 회차를 연다. 듣기 회차를 마치고 같은 계단을 쉐도잉으로
-  /// 다시 열 때도 이리 온다.
-  void _beginShadowPass({Duration lead = _kShadowStepGap}) {
+  /// 한 계단을 연다.
+  Future<void> _runMorphStep(int lineIdx) async {
     _shadowHighlightTimer?.cancel();
     _shadowAdvanceTimer?.cancel();
-    if (!mounted || !isPracticeMode || currentIndex >= _tutorLines.length) {
-      return;
-    }
-    final text = (_tutorLines[currentIndex]['text'] as String).trim();
-    final words =
-        text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
-    if (words.isEmpty) {
-      _nextTurn();
-      return;
-    }
-    if (mounted) {
-      setState(() {
-        _shadowWords = words;
-        _shadowWordIdx = -1;
-      });
-    }
-    final int lineIdx = currentIndex;
-    _pinShadowLineToTop(lineIdx);
-    // 🌬️ [P2-BREATH] 예전에는 여기서 **녹음을 켜고 그 위로 AI를 재생**했다
-    //   — AI와 유저가 동시에 읽는 방식이었다. 이제는 호흡 하나를 들려주고
-    //   멈춘 뒤 유저가 혼자 따라 한다. 두 경로가 같은 턴에 함께 돌지 않게
-    //   구 경로(`_startShadowAiVoice`)는 여기서 더 이상 부르지 않는다.
-    _shadowHighlightTimer = Timer(lead, () async {
-      if (!mounted ||
-          _phase != ShadowingPhase.part2Practice ||
-          isPaused ||
-          currentIndex != lineIdx) {
-        return;
-      }
-      _startShadowLineGlide(lineIdx, words);
-      await _startBreathEcho(lineIdx);
-    });
-  }
+    if (!mounted || !isPracticeMode || lineIdx >= _tutorLines.length) return;
 
-  // ══════════════════════════════════════════════════════════════════
-  // 🌬️ [P2-BREATH] 한 계단의 호흡 에코
-  // ══════════════════════════════════════════════════════════════════
-
-  /// 계단 문장의 Smooth Jazz PCM을 얻어 호흡으로 가르고 엔진을 돌린다.
-  Future<void> _startBreathEcho(int lineIdx) async {
     final text = (_tutorLines[lineIdx]['text'] as String).trim();
     if (text.isEmpty) {
       _nextTurn();
       return;
     }
-    if (mounted) setState(() => _breathPreparing = true);
+    // 바로 앞 계단이 비교 대상이다. 첫 계단은 견줄 것이 없어 강조가 없다.
+    final previous =
+        lineIdx > 0 ? (_tutorLines[lineIdx - 1]['text'] as String).trim() : '';
+    final morph = computeMorph(previous, text);
+
+    _pinShadowLineToTop(lineIdx);
+    _startShadowLineGlide(
+        lineIdx, text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList());
+    if (mounted) {
+      setState(() {
+        _morph = morph;
+        _morphActive = false;
+        _morphPreparing = true;
+      });
+    }
+
+    // 소리는 미리 받아 둔다. 강조가 켜지는 동안 네트워크를 기다리지 않는다.
+    final audioFuture = _getMorphPcm(text, morph);
+
+    await Future<void>.delayed(_kMorphHighlightDelay);
+    if (!_morphAlive(lineIdx)) return;
+    if (mounted) setState(() => _morphActive = true);
 
     Uint8List? pcm;
     try {
-      pcm = await _getBreathPcm(text);
+      pcm = await audioFuture;
     } catch (e) {
-      debugPrint('[P2-BREATH] pcm $e');
+      debugPrint('[P2-MORPH] tts $e');
     }
-    if (!mounted ||
-        _phase != ShadowingPhase.part2Practice ||
-        isPaused ||
-        currentIndex != lineIdx) {
-      if (mounted) setState(() => _breathPreparing = false);
-      return;
-    }
+    if (!_morphAlive(lineIdx)) return;
+    if (mounted) setState(() => _morphPreparing = false);
+
     if (pcm == null || pcm.isEmpty) {
       // 소리를 못 만들었다. 계단을 붙잡아 두지 않고 넘어간다.
-      setState(() => _breathPreparing = false);
-      _showRoomEntryToast('학습 음성을 만들지 못했습니다');
-      await _finishShadowStep();
+      _scheduleMorphAdvance(lineIdx);
       return;
     }
-
-    final analysis = analyzeBreaths(pcm, const BreathAnalysisConfig());
-    if (analysis.segments.isEmpty) {
-      setState(() => _breathPreparing = false);
-      await _finishShadowStep();
-      return;
-    }
-
-    _breathAiPcm = pcm;
-    _breathSegments = analysis.segments;
-    final engine = _ensureBreathEngine();
-    if (mounted) {
-      setState(() {
-        _breathPreparing = false;
-        _breathIndex = 0;
-        _breathTotal = analysis.segments.length;
-        _breathPhase = BreathEchoPhase.aiPlaying;
-      });
-    }
-    debugPrint('[P2-BREATH] line=$lineIdx breaths=${analysis.segments.length} '
-        'total=${analysis.totalMs}ms voice=$_kBreathVoice');
-    await engine.start(
-      aiPcm: pcm,
-      segments: analysis.segments,
-      repeatCount: _shadowRepeatCount ?? 1,
-    );
+    await _playMorphAudio(pcm, lineIdx);
   }
 
-  BreathEchoingEngine _ensureBreathEngine() {
-    final existing = _breathEngine;
-    if (existing != null) return existing;
-    final engine = BreathEchoingEngine(
-      recorder: appAudioRecorder,
-      onPhase: (phase, index, total) {
-        if (!mounted) return;
-        setState(() {
-          _breathPhase = phase;
-          _breathIndex = index;
-          _breathTotal = total;
-        });
-        if (phase == BreathEchoPhase.userSpeaking) {
-          BillingTicker.instance.resumeFromActivity('p2_breath_user');
-        }
-      },
-      onLineComplete: (userPcm, userVoicedMs) {
-        unawaited(_onBreathLineComplete(userPcm, userVoicedMs));
-      },
-      onError: (message) => debugPrint('[P2-BREATH] $message'),
-    );
-    _breathEngine = engine;
-    return engine;
-  }
+  bool _morphAlive(int lineIdx) =>
+      mounted &&
+      _phase == ShadowingPhase.part2Practice &&
+      !isPaused &&
+      currentIndex == lineIdx;
 
-  /// 계단의 호흡이 전부 끝났다. 유저 호흡을 이어 Practice Replay를 만든 뒤
-  /// 다음 계단으로 간다.
-  Future<void> _onBreathLineComplete(
-    List<Uint8List?> userPcm,
-    List<int> userVoicedMs,
-  ) async {
-    final lineIdx = currentIndex;
-    final aiPcm = _breathAiPcm;
-    if (aiPcm != null &&
-        _breathSegments.isNotEmpty &&
-        lineIdx < _tutorLines.length) {
-      try {
-        final replay = buildPracticeReplay(
-          aiPcm: aiPcm,
-          segments: _breathSegments,
-          userPcm: userPcm,
-          userVoicedMs: userVoicedMs,
-        );
-        final dir = await getTemporaryDirectory();
-        final path = '${dir.path}/p2replay_${lineIdx}_'
-            '${DateTime.now().millisecondsSinceEpoch}.wav';
-        await File(path).writeAsBytes(
-          practiceReplayToWav(replay),
-          flush: true,
-        );
-        // 기존 Play all·줄별 재생이 읽는 자리다. DeviceFileSource라 WAV도 그대로
-        // 재생된다 — Play all 코드는 손대지 않는다.
-        final old = _tutorLines[lineIdx]['user_record_path'] as String?;
-        if (old != null && old.isNotEmpty && old != path) {
-          unawaited(File(old).delete().catchError((_) => File(old)));
-        }
-        _tutorLines[lineIdx]['user_record_path'] = path;
-        debugPrint('[P2-BREATH] replay line=$lineIdx '
-            'user=${replay.userCount}/${replay.sources.length} '
-            'replaced=${replay.replacedCount}');
-      } catch (e) {
-        debugPrint('[P2-BREATH] replay build $e');
-      }
-    }
-    if (!mounted || _phase != ShadowingPhase.part2Practice || isPaused) return;
-    await _finishShadowStep();
-  }
-
-  // [P2-SHADOW-AI] Fetch + play the AI voice for the current read-along line and
-  // sync the word highlight to the audio position. The generated audio itself
-  // carries natural thought-group pauses; playback speed is never manipulated.
-  Future<void> _startShadowAiVoice(int lineIdx, List<String> words) async {
-    final text = (_tutorLines[lineIdx]['text'] as String).trim();
-    final voice = _selectedMeaningUnitVoice;
-    if (voice == null) {
-      _stepShadowHighlight(0);
-      return;
-    }
-    Uint8List? audio;
-    try {
-      audio = await _getMeaningUnitTTS(text, voice);
-    } catch (e) {
-      debugPrint('[startShadowAiVoice] fetch $e');
-    }
-    if (!mounted ||
-        _phase != ShadowingPhase.part2Practice ||
-        isPaused ||
-        currentIndex != lineIdx) {
-      return;
-    }
-    // No audio available → keep the original timer-based read-along.
-    if (audio == null) {
-      _stepShadowHighlight(0);
-      return;
-    }
+  /// 전체 문장을 한 번 읽는다. 재생기는 기존 `_shadowAiPlayer`를 그대로 쓴다 —
+  /// 화면 이탈·뒤로가기 정리 경로가 이미 [_stopShadowAiPlayback]을 부르고 있어
+  /// 새 정리 지점을 만들지 않아도 된다.
+  Future<void> _playMorphAudio(Uint8List pcm, int lineIdx) async {
     await _stopShadowAiPlayback();
+    if (!_morphAlive(lineIdx)) return;
+    final wav = pcm16ToWav(pcm, sampleRate: kStealthVoxSttSampleRate);
     final player = AudioPlayer();
     _shadowAiPlayer = player;
-    _shadowAudioDuration = Duration.zero;
-    _shadowDurSub = player.onDurationChanged.listen((d) {
-      if (d > Duration.zero) _shadowAudioDuration = d;
+    if (mounted) setState(() => _morphPlaying = true);
+    // onPlayerComplete.first는 쓰지 않는다 - dispose 때 스트림이 빈 채로
+    // 닫히며 Bad state: No element가 새어 대기가 무너진다.
+    _shadowCompleteSub = player.onPlayerComplete.listen((_) {
+      if (!mounted) return;
+      setState(() => _morphPlaying = false);
+      _scheduleMorphAdvance(lineIdx);
     });
-    _shadowPosSub = player.onPositionChanged.listen((pos) {
-      if (!mounted ||
-          _phase != ShadowingPhase.part2Practice ||
-          isPaused ||
-          currentIndex != lineIdx) {
-        return;
-      }
-      final total = _shadowAudioDuration.inMilliseconds;
-      if (total <= 0 || words.isEmpty) return;
-      final ratio = (pos.inMilliseconds / total).clamp(0.0, 1.0);
-      final idx = (ratio * words.length).floor().clamp(0, words.length - 1);
-      if (idx != _shadowWordIdx) {
-        setState(() => _shadowWordIdx = idx);
-      }
-    });
-    _shadowCompleteSub =
-        player.onPlayerComplete.listen((_) => _onShadowAiComplete(lineIdx));
     try {
-      await player.play(BytesSource(audio));
+      await player.play(BytesSource(wav));
     } catch (e) {
-      debugPrint('[startShadowAiVoice] play $e');
+      debugPrint('[P2-MORPH] play $e');
       await _stopShadowAiPlayback();
-      if (mounted &&
-          _phase == ShadowingPhase.part2Practice &&
-          !isPaused &&
-          currentIndex == lineIdx) {
-        _stepShadowHighlight(0); // fallback
-      }
+      if (mounted) setState(() => _morphPlaying = false);
+      _scheduleMorphAdvance(lineIdx);
     }
   }
 
-  // [P2-SHADOW-AI] AI voice finished → mark all words read, then reuse the
-  // existing recording-stop + evaluate/advance flow.
-  void _onShadowAiComplete(int lineIdx) {
-    if (!mounted ||
-        _phase != ShadowingPhase.part2Practice ||
-        isPaused ||
-        currentIndex != lineIdx) {
-      return;
-    }
-    if (mounted) setState(() => _shadowWordIdx = _shadowWords.length);
+  void _scheduleMorphAdvance(int lineIdx) {
     _shadowAdvanceTimer?.cancel();
-    // [P2-REPEAT] 듣기 회차가 끝났다 → 같은 줄을 쉐도잉으로 한 번 더 연다.
-    //   녹음도 평가도 여기서는 하지 않는다.
-    if (!_isShadowingPass) {
-      _shadowAdvanceTimer = Timer(_kShadowPassGap, () {
-        if (!mounted ||
-            _phase != ShadowingPhase.part2Practice ||
-            isPaused ||
-            currentIndex != lineIdx) {
-          return;
-        }
-        _shadowPass++;
-        _beginShadowPass(lead: Duration.zero);
-      });
-      return;
-    }
-    _shadowAdvanceTimer = Timer(const Duration(milliseconds: 500), () async {
-      if (!mounted || _phase != ShadowingPhase.part2Practice || isPaused) {
-        return;
-      }
-      await _finishShadowStep();
+    _shadowAdvanceTimer = Timer(_kMorphStepGap, () {
+      if (!_morphAlive(lineIdx)) return;
+      _nextTurn();
     });
   }
 
-  // [P2-SHADOW-AI] Stop + dispose the read-along AI player and its listeners.
+  /// 이번 문장의 소리. **강조 자리가 캐시 키에 들어간다** - 같은 문장이라도
+  /// 달라진 자리가 다르면 다른 소리이므로 같은 오디오를 쓰면 안 된다.
+  Future<Uint8List?> _getMorphPcm(String text, MorphChange morph) {
+    final ns = '${_breathCacheNamespace(_kBreathVoice)}_m${morph.identity}';
+    final requestKey = '$ns|$text';
+    final existing = _breathPcmInFlight[requestKey];
+    if (existing != null) return existing;
+    final future = () async {
+      final cached = await TtsCache.get(text, ns);
+      if (cached != null && cached.length > 44) return pcmFromWav(cached);
+      final raw = await _fetchOpenAITTSInternal(
+        text,
+        1.0,
+        _kBreathVoice,
+        model: _historyPracticeTtsModel,
+        instructions:
+            _kBreathStyle.instruction + morphEmphasisInstruction(morph),
+        instructionTag: '${_kBreathStyle.id}_m${morph.identity}',
+        responseFormat: 'pcm',
+      );
+      if (raw == null || raw.isEmpty) return null;
+      await TtsCache.put(
+        text,
+        ns,
+        pcm16ToWav(raw, sampleRate: kStealthVoxSttSampleRate),
+      );
+      return raw;
+    }();
+    _breathPcmInFlight[requestKey] = future;
+    future.whenComplete(() => _breathPcmInFlight.remove(requestKey));
+    return future;
+  }
+
+
+  /// 낭독 재생기를 닫는다. **P2 Morphing이 이 재생기를 그대로 쓴다** —
+  /// 화면 이탈·뒤로가기 정리 경로가 이미 여기를 부르고 있어 새 정리 지점을
+  /// 만들지 않아도 된다.
   Future<void> _stopShadowAiPlayback() async {
     _shadowPosSub?.cancel();
     _shadowPosSub = null;
@@ -1919,26 +1696,10 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         await p.dispose();
       } catch (_) {}
     }
-    _shadowAudioDuration = Duration.zero;
   }
 
-  void _stepShadowHighlight(int idx) {
-    if (!mounted || _phase != ShadowingPhase.part2Practice || isPaused) return;
-    if (idx >= _shadowWords.length) {
-      // 소리 없이 하이라이트만 돌던 경우다(오프라인·키 없음). 끝나는 처리는
-      // 음성이 있을 때와 같은 자리를 쓴다 — 회차 판정이 여기서만 달라지면
-      // 듣기 회차가 쉐도잉 없이 다음 계단으로 넘어간다.
-      _onShadowAiComplete(currentIndex);
-      return;
-    }
-    if (mounted) setState(() => _shadowWordIdx = idx);
-    _shadowHighlightTimer?.cancel();
-    _shadowHighlightTimer = Timer(
-      Duration(milliseconds: _shadowWordDuration(_shadowWords[idx])),
-      () => _stepShadowHighlight(idx + 1),
-    );
-  }
-
+  /// 단어 하나를 읽는 데 걸리는 대략의 시간. 자동 스크롤
+  /// ([_startShadowLineGlide])이 문장 길이를 가늠하는 데만 쓴다.
   int _shadowWordDuration(String w) {
     final clean = w.replaceAll(RegExp(r'[^A-Za-z]'), '');
     int d = 220 + clean.length * 55;
@@ -1946,61 +1707,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     if (RegExp(r'[.!?]$').hasMatch(w)) d += 320;
     d = (d / _shadowSpeed).round();
     return d.clamp(140, 1100);
-  }
-
-  // [P2-SHADOW-REC] Capture the user's read-along audio for Play all.
-  Future<void> _startShadowRecording(int lineIdx) async {
-    try {
-      if (!await appAudioRecorder.hasPermission()) return;
-      if (_shadowRecording) {
-        try {
-          await appAudioRecorder.stop();
-        } catch (_) {}
-      }
-      final dir = await getTemporaryDirectory();
-      final path =
-          '${dir.path}/p2shadow_${lineIdx}_${DateTime.now().millisecondsSinceEpoch}.m4a';
-      await appAudioRecorder.start(
-        const RecordConfig(
-          encoder: AudioEncoder.aacLc,
-          sampleRate: 16000,
-          numChannels: 1,
-        ),
-        path: path,
-      );
-      _shadowRecording = true;
-      _shadowRecordLineIdx = lineIdx;
-    } catch (e) {
-      debugPrint('[startShadowRecording] $e');
-      _shadowRecording = false;
-    }
-  }
-
-  Future<void> _stopShadowRecording() async {
-    if (!_shadowRecording) return;
-    _shadowRecording = false;
-    try {
-      final path = await appAudioRecorder.stop();
-      if (path != null &&
-          path.isNotEmpty &&
-          _shadowRecordLineIdx >= 0 &&
-          _shadowRecordLineIdx < _tutorLines.length) {
-        _tutorLines[_shadowRecordLineIdx]['user_record_path'] = path;
-      }
-    } catch (_) {}
-    _shadowRecordLineIdx = -1;
-  }
-
-  /// 🪜 [P2-LADDER] 한 계단을 마친다. 녹음을 닫고 곧바로 다음 계단으로 간다.
-  ///
-  /// 예전에는 마이크 진폭으로 "덜 읽었다"를 재서 "조금 더 크게 읽어볼까요?"
-  /// 팝업으로 붙잡았다. 걷어냈다 — 진폭은 목소리 크기지 읽었는지가 아니라,
-  /// 조용히 정확히 따라 읽은 사람을 계단마다 세웠다. 계단 사이 숨은
-  /// [_kShadowStepGap]이 준다.
-  Future<void> _finishShadowStep() async {
-    await _stopShadowRecording();
-    if (!mounted || _phase != ShadowingPhase.part2Practice || isPaused) return;
-    _nextTurn();
   }
 
   Future<void> _checkAndPlayAILine() async {
@@ -2463,8 +2169,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
     _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
     unawaited(_stopShadowAiPlayback()); // [P2-SHADOW-AI]
-    unawaited(_breathEngine?.stop() ?? Future<void>.value()); // [P2-BREATH]
-    unawaited(_stopShadowRecording()); // [P2-SHADOW-REC]
     unawaited(_stopP3Shadowing(resetSelection: true));
     _stopDeepgramListening();
     audioPlayer.stop();
@@ -2491,14 +2195,9 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       _aiChunkPlaying = false;
       _aiChunkLoading = false;
       _currentChunkIdx = 0;
-      // [P2-REPEAT] 보이스·횟수를 다시 고르게 비운다. 그 두 개를 고르는
-      //   것이 곧 시작 신호라, 남겨 두면 돌아오자마자 저절로 시작한다.
-      _selectedMeaningUnitVoice = null;
-      _shadowRepeatCount = null;
-      _shadowPass = 0;
-      _shadowStarted = false;
-      _shadowWords = [];
-      _shadowWordIdx = -1;
+      // 🔤 [P2-MORPH] 돌아왔을 때 이전 계단의 강조가 남지 않게 비운다.
+      _morph = MorphChange.none;
+      _morphActive = false;
       _showEchoingOverlay = false;
     });
     _echoingOverlayTimer?.cancel();
@@ -2515,8 +2214,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
     _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
     _stopShadowAiPlayback(); // [P2-SHADOW-AI]
-    unawaited(_breathEngine?.stop() ?? Future<void>.value()); // [P2-BREATH]
-    _stopShadowRecording(); // [P2-SHADOW-REC]
     unawaited(_stopP3Shadowing(resetSelection: true));
     _stopDeepgramListening();
     audioPlayer.stop();
@@ -3515,120 +3212,6 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     return future;
   }
 
-  // ══════════════════════════════════════════════════════════════════
-  // 🌬️ [P2-BREATH] Smooth Jazz PCM 확보
-  // ══════════════════════════════════════════════════════════════════
-
-  /// 계단 문장 하나의 Full PCM(24kHz·16bit·mono)을 얻는다.
-  ///
-  /// 캐시에는 재생 가능하도록 WAV로 넣고, 분석·slice는 헤더 44바이트를
-  /// 건너뛴 본문으로 한다. mp3를 만들었다가 PCM으로 바꾸는 경로는 없다.
-  Future<Uint8List?> _getBreathPcm(String text) {
-    final ns = _breathCacheNamespace(_kBreathVoice);
-    final requestKey = '$ns|${text.trim()}';
-    final existing = _breathPcmInFlight[requestKey];
-    if (existing != null) return existing;
-    final future = () async {
-      final cached = await TtsCache.get(text, ns);
-      if (cached != null && cached.length > 44) {
-        return pcmFromWav(cached);
-      }
-      final raw = await _fetchOpenAITTSInternal(
-        text,
-        1.0,
-        _kBreathVoice,
-        model: _historyPracticeTtsModel,
-        instructions: _kBreathStyle.instruction,
-        instructionTag: '${_kBreathStyle.id}_$kP2StyleInstructionVersion',
-        responseFormat: 'pcm',
-      );
-      if (raw == null || raw.isEmpty) return null;
-      await TtsCache.put(
-        text,
-        ns,
-        pcm16ToWav(raw, sampleRate: kStealthVoxSttSampleRate),
-      );
-      return raw;
-    }();
-    _breathPcmInFlight[requestKey] = future;
-    future.whenComplete(() => _breathPcmInFlight.remove(requestKey));
-    return future;
-  }
-
-  String _meaningUnitCacheVoice(String voice) =>
-      '${_historyPracticeTtsModel}_unit_style_v6_$voice';
-
-  Future<Uint8List?> _fetchMeaningUnitTTS(String text, String voice) =>
-      _fetchOpenAITTS(
-        text,
-        1.0,
-        voice,
-        model: _historyPracticeTtsModel,
-        instructions: _meaningUnitTtsInstructions,
-        instructionTag: 'p2_ladder_voice_v6',
-      );
-
-  Future<Uint8List?> _getMeaningUnitTTS(String text, String voice) {
-    final requestKey = '$voice|${text.trim()}';
-    final existing = _meaningUnitTtsInFlight[requestKey];
-    if (existing != null) return existing;
-    final future = () async {
-      final cacheVoice = _meaningUnitCacheVoice(voice);
-      var audio = await TtsCache.get(text, cacheVoice);
-      if (audio != null) return audio;
-      audio = await _fetchMeaningUnitTTS(text, voice);
-      if (audio != null) await TtsCache.put(text, cacheVoice, audio);
-      return audio;
-    }();
-    _meaningUnitTtsInFlight[requestKey] = future;
-    future.whenComplete(() => _meaningUnitTtsInFlight.remove(requestKey));
-    return future;
-  }
-
-  String _p3MeaningUnitCacheVoice(
-    String voice, {
-    required bool nativeStyle,
-  }) =>
-      '${_historyPracticeTtsModel}_p3_${nativeStyle ? 'native' : 'learning'}_unit_style_v3_$voice';
-
-  Future<Uint8List?> _getP3MeaningUnitTTS(
-    String text,
-    String voice, {
-    required bool nativeStyle,
-  }) {
-    final requestKey =
-        '${nativeStyle ? 'native' : 'learning'}|$voice|unit_style|${text.trim()}';
-    final existing = _p3MeaningUnitTtsInFlight[requestKey];
-    if (existing != null) return existing;
-    final future = () async {
-      final cacheVoice = _p3MeaningUnitCacheVoice(
-        voice,
-        nativeStyle: nativeStyle,
-      );
-      var audio = await TtsCache.get(text, cacheVoice);
-      if (audio != null) return audio;
-      audio = await _fetchOpenAITTS(
-        text,
-        1.0,
-        voice,
-        model: _historyPracticeTtsModel,
-        // 정제 문장(원어민식)과 완성 문장(학습용)은 읽는 방식이 다르다.
-        // 예전에는 같은 지시문을 쓰고 캐시 키 이름만 갈라 놓아, 화면에서
-        // 방식을 바꿔도 소리가 같았다.
-        instructions: nativeStyle
-            ? _p3NativeShadowingTtsInstructions
-            : _p3LearningShadowingTtsInstructions,
-        instructionTag:
-            '${nativeStyle ? 'p3_native' : 'p3_learning'}_unit_style',
-      );
-      if (audio != null) await TtsCache.put(text, cacheVoice, audio);
-      return audio;
-    }();
-    _p3MeaningUnitTtsInFlight[requestKey] = future;
-    future.whenComplete(() => _p3MeaningUnitTtsInFlight.remove(requestKey));
-    return future;
-  }
-
   Future<Uint8List?> _fetchOpenAITTS(String text, double speed, String voice,
       {String model = _historyListenTtsModel,
       String? instructions,
@@ -4616,7 +4199,6 @@ RULES — follow exactly:
     if (mounted) {
       setState(() {
         _appIsShadowRecording = false;
-        _shadowRecordPath = path;
       });
     }
   }
@@ -6274,16 +5856,55 @@ RULES — follow exactly:
   // 📦 [Box 22-E: 양방향 턴제 연습 화면]
   Widget _buildPracticeLineText(
       Map<String, dynamic> line, bool isCurrent, bool lineIsAi) {
-    return Text(
-      line['text'] as String,
-      textAlign: lineIsAi ? TextAlign.right : TextAlign.left,
-      style: TextStyle(
-        color: isCurrent ? Colors.white : Colors.white60,
-        fontSize: 14 * _fontScale,
-        height: 1.5,
-        fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
-      ),
+    final text = line['text'] as String;
+    final base = TextStyle(
+      color: isCurrent ? Colors.white : Colors.white60,
+      fontSize: 14 * _fontScale,
+      height: 1.5,
+      fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
     );
+    // 🔤 [P2-MORPH] 지금 읽고 있는 계단에서만, 이번에 달라진 자리를 은은하게
+    //   살린다. 문법 설명도 밑줄도 없다 — 색과 굵기만 한 단계 올린다.
+    final spans = _morphSpans(text, isCurrent, base);
+    if (spans == null) {
+      return Text(text,
+          textAlign: lineIsAi ? TextAlign.right : TextAlign.left, style: base);
+    }
+    return Text.rich(
+      TextSpan(children: spans),
+      textAlign: lineIsAi ? TextAlign.right : TextAlign.left,
+      style: base,
+    );
+  }
+
+  /// 강조가 필요 없으면 null을 돌려준다(그때는 평범한 [Text]를 쓴다).
+  List<InlineSpan>? _morphSpans(String text, bool isCurrent, TextStyle base) {
+    if (_phase != ShadowingPhase.part2Practice) return null;
+    if (!isCurrent || !_morphActive) return null;
+    if (_morph.isEmpty || _morph.text != text) return null;
+
+    final accent = base.copyWith(
+      color: _kMorphAccent,
+      fontWeight: FontWeight.w700,
+      backgroundColor: _kMorphAccent.withValues(alpha: 0.10),
+    );
+    final spans = <InlineSpan>[];
+    int cursor = 0;
+    for (final r in _morph.ranges) {
+      final int start = r.start.clamp(0, text.length);
+      final int end = r.end.clamp(start, text.length);
+      if (start > cursor) {
+        spans.add(TextSpan(text: text.substring(cursor, start)));
+      }
+      if (end > start) {
+        spans.add(TextSpan(text: text.substring(start, end), style: accent));
+      }
+      cursor = end;
+    }
+    if (cursor < text.length) {
+      spans.add(TextSpan(text: text.substring(cursor)));
+    }
+    return spans;
   }
 
   Widget _buildTurnPracticeScreen() {
@@ -7313,22 +6934,97 @@ RULES — follow exactly:
     );
   }
 
-  String _p3Sentence({required bool nativeStyle}) {
-    if (nativeStyle && _polishedSentence.trim().isNotEmpty) {
-      return _polishedSentence.trim();
-    }
-    return _expandedSentence.trim();
+  // ══════════════════════════════════════════════════════════════════
+  // 🎤 [P3-SPEAK] Speaking Practice
+  //
+  //   P2가 "문장이 자라는 것을 보고 듣는" 자리라면, P3는 **최종 완성문장을
+  //   실제로 입에 붙이는** 자리다.
+  //
+  //     Stage 1 Breath Echoing — 호흡 하나씩 듣고 혼자 따라 말하기
+  //     Stage 2 Full Echo      — 전체를 듣고, 끝난 뒤 혼자 전체 말하기
+  //     Stage 3 Full Shadow    — 호흡 사이만 벌린 AI와 **동시에** 말하기
+  //     Stage 4 Compare        — AI / ECHO / SHADOW 각각 다시 듣기
+  //
+  //   ⚠️ **TTS는 문장당 딱 한 번이다.** 네 단계가 전부 그 PCM 하나에서 나온다.
+  //   Shadow를 열 번 반복해도 API 호출은 늘지 않는다.
+  // ══════════════════════════════════════════════════════════════════
+
+  /// P3가 대상으로 삼는 최종 문장. 완성문장을 우선한다.
+  String get _p3TargetSentence {
+    final expanded = _expandedSentence.trim();
+    if (expanded.isNotEmpty) return expanded;
+    return _polishedSentence.trim();
   }
 
+  /// 🚧 Shadow 여유. **말하는 속도를 바꾸는 게 아니다** — AI의 발음·억양·속도는
+  /// 그대로 두고 **호흡 사이 빈 자리만** 늘린다. 실기기에서 조정한다.
+  static const Map<P3ShadowGap, int> _kP3ShadowGapMs = <P3ShadowGap, int>{
+    P3ShadowGap.tight: 300,
+    P3ShadowGap.normal: 500,
+    P3ShadowGap.relaxed: 800,
+  };
+
+  static const Map<P3ShadowGap, String> _kP3ShadowGapLabel =
+      <P3ShadowGap, String>{
+    P3ShadowGap.tight: '빠르게',
+    P3ShadowGap.normal: '보통',
+    P3ShadowGap.relaxed: '여유롭게',
+  };
+
+  /// 🚧 P3 전용 timing. **다른 모드의 VAD 값과 무관하다.** 최종값 아님.
+  static const int _kP3EchoSilenceMs = 1800;
+  static const int _kP3EchoNoSpeechMs = 10000;
+  static const int _kP3ShadowTailMs = 700;
+  static const Duration _kP3StageGap = Duration(milliseconds: 600);
+
+  // ── P3 상태 ───────────────────────────────────────────────────────
+  P3Stage _p3Stage = P3Stage.idle;
+  int _p3Generation = 0;
+  Uint8List? _p3FullPcm;
+  List<BreathSegment> _p3Segments = const <BreathSegment>[];
+  int _p3BreathIndex = 0;
+  int _p3BreathTotal = 0;
+  P3ShadowGap _p3Gap = P3ShadowGap.normal;
+  String? _p3EchoPath;
+  String? _p3ShadowPath;
+  String? _p3Error;
+  BreathEchoingEngine? _p3Engine;
+  AudioPlayer? _p3Player;
+  StreamSubscription<void>? _p3PlayerSub;
+  Timer? _p3SilenceTimer;
+  bool _p3Recording = false;
+
+  bool get _p3Busy =>
+      _p3Stage == P3Stage.preparing ||
+      _p3Stage == P3Stage.breathListen ||
+      _p3Stage == P3Stage.breathEcho ||
+      _p3Stage == P3Stage.fullEchoListen ||
+      _p3Stage == P3Stage.fullEchoRecord ||
+      _p3Stage == P3Stage.fullShadowRecord ||
+      _p3Recording ||
+      _p3Player != null;
+
+  int get _p3GapMs => _kP3ShadowGapMs[_p3Gap] ?? 500;
+
+  bool _p3Alive(int generation) =>
+      mounted &&
+      _phase == ShadowingPhase.chunkPractice &&
+      generation == _p3Generation;
+
+  void _setP3Stage(P3Stage stage) {
+    if (!mounted) return;
+    setState(() => _p3Stage = stage);
+  }
+
+  /// 재생·녹음·타이머를 전부 접는다. 화면을 나가는 모든 길이 여기로 온다.
   Future<void> _stopP3Shadowing({bool resetSelection = false}) async {
-    _p3ShadowGeneration++;
-    await _p3ShadowPositionSub?.cancel();
-    await _p3ShadowDurationSub?.cancel();
-    _p3ShadowPositionSub = null;
-    _p3ShadowDurationSub = null;
-    _p3ShadowAudioDuration = Duration.zero;
-    final player = _p3ShadowPlayer;
-    _p3ShadowPlayer = null;
+    _p3Generation++;
+    _p3SilenceTimer?.cancel();
+    _p3SilenceTimer = null;
+    await _p3PlayerSub?.cancel();
+    _p3PlayerSub = null;
+    final player = _p3Player;
+    _p3Player = null;
     if (player != null) {
       try {
         await player.stop();
@@ -7337,33 +7033,313 @@ RULES — follow exactly:
         await player.dispose();
       } catch (_) {}
     }
-    if (_p3ShadowRecording) {
-      _p3ShadowRecording = false;
+    await _p3Engine?.stop();
+    if (_p3Recording) {
+      _p3Recording = false;
       try {
-        final path = await appAudioRecorder.stop();
-        if (path != null && path.isNotEmpty) _p3ShadowRecordPath = path;
+        await appAudioRecorder.stop();
       } catch (_) {}
     }
-    if (!mounted) return;
-    setState(() {
-      _p3ShadowLoading = false;
-      _p3ShadowPlaying = false;
-      if (resetSelection) {
-        _selectedP3LearningVoice = null;
-        _selectedP3NativeVoice = null;
-        _p3UsesNativeStyle = null;
-        _p3ShadowComplete = false;
-        _p3ShadowRecordPath = null;
+    if (resetSelection) {
+      _deleteP3Recordings();
+      _p3FullPcm = null;
+      _p3Segments = const <BreathSegment>[];
+    }
+    if (mounted && resetSelection) {
+      setState(() {
+        _p3Stage = P3Stage.idle;
+        _p3Error = null;
+      });
+    }
+  }
+
+  void _deleteP3Recordings() {
+    _deleteP3File(_p3EchoPath);
+    _deleteP3File(_p3ShadowPath);
+    _p3EchoPath = null;
+    _p3ShadowPath = null;
+  }
+
+  /// 최종 문장의 Smooth Jazz PCM을 얻어 호흡으로 가른 뒤 Stage 1을 연다.
+  ///
+  /// ⚠️ P2와 달리 **Morph 강조 지시문을 넣지 않는다.** 최종 문장을 특정 단어만
+  /// 도드라진 상태로 익히면 안 된다.
+  Future<void> _startP3Speaking() async {
+    final text = _p3TargetSentence;
+    if (text.isEmpty) {
+      _showRoomEntryToast('P3에서 사용할 문장이 없습니다');
+      return;
+    }
+    await _stopP3Shadowing();
+    final generation = ++_p3Generation;
+    if (mounted) {
+      setState(() {
+        _p3Stage = P3Stage.preparing;
+        _p3Error = null;
+      });
+    }
+
+    Uint8List? pcm = _p3FullPcm;
+    if (pcm == null || pcm.isEmpty) {
+      try {
+        pcm = await _getP3OriginalPcm(text);
+      } catch (e) {
+        debugPrint('[P3-SPEAK] tts $e');
       }
+    }
+    if (!_p3Alive(generation)) return;
+    if (pcm == null || pcm.isEmpty) {
+      setState(() {
+        _p3Stage = P3Stage.idle;
+        _p3Error = '학습 음성을 만들지 못했습니다';
+      });
+      return;
+    }
+    final analysis = analyzeBreaths(pcm, const BreathAnalysisConfig());
+    if (analysis.segments.isEmpty) {
+      setState(() {
+        _p3Stage = P3Stage.idle;
+        _p3Error = '호흡 구간을 찾지 못했습니다';
+      });
+      return;
+    }
+    _p3FullPcm = pcm;
+    _p3Segments = analysis.segments;
+    if (mounted) {
+      setState(() {
+        _p3BreathIndex = 0;
+        _p3BreathTotal = analysis.segments.length;
+        _p3Stage = P3Stage.breathListen;
+      });
+    }
+    debugPrint('[P3-SPEAK] breaths=${analysis.segments.length} '
+        'total=${analysis.totalMs}ms voice=$_kBreathVoice');
+    await _ensureP3Engine().start(
+      aiPcm: pcm,
+      segments: analysis.segments,
+      repeatCount: 1,
+    );
+  }
+
+  /// P3 원본 PCM. **Morph 강조가 없는 순수 Smooth Jazz**라 P2 캐시와 키가
+  /// 다르다(P2는 `_m{ranges}`가 붙는다).
+  Future<Uint8List?> _getP3OriginalPcm(String text) {
+    final ns = '${_breathCacheNamespace(_kBreathVoice)}_p3';
+    final requestKey = '$ns|$text';
+    final existing = _breathPcmInFlight[requestKey];
+    if (existing != null) return existing;
+    final future = () async {
+      final cached = await TtsCache.get(text, ns);
+      if (cached != null && cached.length > 44) return pcmFromWav(cached);
+      final raw = await _fetchOpenAITTSInternal(
+        text,
+        1.0,
+        _kBreathVoice,
+        model: _historyPracticeTtsModel,
+        instructions: _kBreathStyle.instruction,
+        instructionTag: '${_kBreathStyle.id}_p3',
+        responseFormat: 'pcm',
+      );
+      if (raw == null || raw.isEmpty) return null;
+      await TtsCache.put(
+          text, ns, pcm16ToWav(raw, sampleRate: kStealthVoxSttSampleRate));
+      return raw;
+    }();
+    _breathPcmInFlight[requestKey] = future;
+    future.whenComplete(() => _breathPcmInFlight.remove(requestKey));
+    return future;
+  }
+
+  BreathEchoingEngine _ensureP3Engine() {
+    final existing = _p3Engine;
+    if (existing != null) return existing;
+    final engine = BreathEchoingEngine(
+      recorder: appAudioRecorder,
+      onPhase: (phase, index, total) {
+        if (!mounted) return;
+        setState(() {
+          _p3BreathIndex = index;
+          _p3BreathTotal = total;
+          if (phase == BreathEchoPhase.aiPlaying) {
+            _p3Stage = P3Stage.breathListen;
+          } else if (phase == BreathEchoPhase.waitingForUser ||
+              phase == BreathEchoPhase.userSpeaking) {
+            _p3Stage = P3Stage.breathEcho;
+          }
+        });
+        if (phase == BreathEchoPhase.userSpeaking) {
+          BillingTicker.instance.resumeFromActivity('p3_breath_user');
+        }
+      },
+      // 🎤 P3는 호흡별 녹음을 쓰지 않는다. 유저 PCM은 턴을 넘기는 판정에만
+      //   쓰이고 여기서 버려진다 — 조립하지도 저장하지도 않는다.
+      onLineComplete: (_, __) => unawaited(_onP3BreathDone()),
+      onError: (message) => debugPrint('[P3-SPEAK] $message'),
+    );
+    _p3Engine = engine;
+    return engine;
+  }
+
+  Future<void> _onP3BreathDone() async {
+    final generation = _p3Generation;
+    await Future<void>.delayed(_kP3StageGap);
+    if (!_p3Alive(generation)) return;
+    await _runP3FullEcho();
+  }
+
+  /// AI 전체를 듣고 **끝난 뒤** 혼자 전체 문장을 말한다. 겹치지 않는다.
+  Future<void> _runP3FullEcho() async {
+    final pcm = _p3FullPcm;
+    if (pcm == null) return;
+    final generation = ++_p3Generation;
+    _setP3Stage(P3Stage.fullEchoListen);
+    await _playP3Pcm(pcm, generation);
+    if (!_p3Alive(generation)) return;
+
+    // AI가 완전히 끝났다. 고정 대기를 두지 않는다 — mic start는 30ms 안쪽이다.
+    final path = await _startP3Recording('echo');
+    if (!_p3Alive(generation) || path == null) {
+      await _stopP3Recording();
+      return;
+    }
+    _setP3Stage(P3Stage.fullEchoRecord);
+    _watchP3Silence(
+      generation,
+      silenceMs: _kP3EchoSilenceMs,
+      noSpeechMs: _kP3EchoNoSpeechMs,
+      onDone: (recorded, spoke) {
+        if (!spoke) {
+          // 말하지 않았다. 빈 파일을 성공한 녹음으로 취급하지 않는다.
+          _deleteP3File(recorded ?? path);
+          setState(() {
+            _p3Error = '발화가 감지되지 않았습니다';
+            _p3Stage = P3Stage.shadowReady;
+          });
+          return;
+        }
+        _deleteP3File(_p3EchoPath);
+        setState(() {
+          _p3EchoPath = recorded ?? path;
+          _p3Error = null;
+          _p3Stage = P3Stage.shadowReady;
+        });
+      },
+    );
+  }
+
+  /// 호흡 사이만 [_p3GapMs]만큼 벌린 AI와 **동시에** 말한다.
+  ///
+  /// **recorder를 먼저 연 뒤 재생을 시작한다** — 반대로 하면 첫 음절이 잘린다.
+  /// 발화 감지로 폐기하지 않는다: 스피커 소리가 마이크에 들어와 유저 목소리와
+  /// 구분되지 않기 때문이다(재생 시간 기준으로 정상 종료).
+  Future<void> _runP3FullShadow() async {
+    final pcm = _p3FullPcm;
+    if (pcm == null || _p3Segments.isEmpty) return;
+    final generation = ++_p3Generation;
+    await _stopP3Playback();
+    if (mounted) setState(() => _p3Error = null);
+
+    final gapped = buildGappedPcm(
+      pcm,
+      _p3Segments,
+      extraGapMs: _p3GapMs,
+      sampleRate: kStealthVoxSttSampleRate,
+    );
+    final path = await _startP3Recording('shadow');
+    if (!_p3Alive(generation) || path == null) {
+      await _stopP3Recording();
+      return;
+    }
+    _setP3Stage(P3Stage.fullShadowRecord);
+    await _playP3Pcm(gapped, generation);
+    if (!_p3Alive(generation)) {
+      await _stopP3Recording();
+      return;
+    }
+    await Future<void>.delayed(
+        const Duration(milliseconds: _kP3ShadowTailMs));
+    if (!_p3Alive(generation)) {
+      await _stopP3Recording();
+      return;
+    }
+    final recorded = await _stopP3Recording();
+    if (!_p3Alive(generation)) return;
+    final old = _p3ShadowPath;
+    if (old != null && old != (recorded ?? path)) _deleteP3File(old);
+    setState(() {
+      _p3ShadowPath = recorded ?? path;
+      _p3Stage = P3Stage.compare;
     });
   }
 
-  Future<void> _startP3ShadowRecording(int generation) async {
-    if (!await appAudioRecorder.hasPermission()) return;
+  Future<void> _stopP3Playback() async {
+    await _p3PlayerSub?.cancel();
+    _p3PlayerSub = null;
+    final player = _p3Player;
+    _p3Player = null;
+    if (player != null) {
+      try {
+        await player.stop();
+      } catch (_) {}
+      try {
+        await player.dispose();
+      } catch (_) {}
+    }
+  }
+
+  /// PCM을 WAV로 감싸 재생하고 **끝날 때까지 기다린다.**
+  /// `onPlayerComplete.first`는 쓰지 않는다 — dispose 때 예외가 새어 나간다.
+  Future<void> _playP3Pcm(Uint8List pcm, int generation) async {
+    await _stopP3Playback();
+    if (!_p3Alive(generation)) return;
+    final wav = pcm16ToWav(pcm, sampleRate: kStealthVoxSttSampleRate);
+    final player = AudioPlayer();
+    _p3Player = player;
+    final completer = Completer<void>();
+    void finish() {
+      if (!completer.isCompleted) completer.complete();
+    }
+
+    final sub = player.onPlayerComplete.listen(
+      (_) => finish(),
+      onDone: finish,
+      onError: (Object _) => finish(),
+      cancelOnError: false,
+    );
+    _p3PlayerSub = sub;
+    final int expectedMs =
+        pcm16DurationMs(pcm.length, sampleRate: kStealthVoxSttSampleRate);
     try {
+      await player.play(BytesSource(wav));
+      await completer.future.timeout(
+        Duration(milliseconds: expectedMs + 8000),
+        onTimeout: finish,
+      );
+    } catch (e) {
+      debugPrint('[P3-SPEAK] play $e');
+    } finally {
+      await sub.cancel();
+      if (identical(_p3PlayerSub, sub)) _p3PlayerSub = null;
+      if (identical(_p3Player, player)) _p3Player = null;
+      try {
+        await player.stop();
+      } catch (_) {}
+      try {
+        await player.dispose();
+      } catch (_) {}
+    }
+  }
+
+  Future<String?> _startP3Recording(String tag) async {
+    if (_p3Recording) return null;
+    try {
+      if (!await appAudioRecorder.hasPermission()) {
+        if (mounted) setState(() => _p3Error = '마이크 권한이 없습니다');
+        return null;
+      }
       final dir = await getTemporaryDirectory();
-      final path =
-          '${dir.path}/p3_shadow_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      final path = '${dir.path}/p3${tag}_'
+          '${DateTime.now().millisecondsSinceEpoch}.m4a';
       await appAudioRecorder.start(
         const RecordConfig(
           encoder: AudioEncoder.aacLc,
@@ -7372,572 +7348,364 @@ RULES — follow exactly:
         ),
         path: path,
       );
-      if (!mounted || generation != _p3ShadowGeneration) {
-        await appAudioRecorder.stop();
+      _p3Recording = true;
+      return path;
+    } catch (e) {
+      if (mounted) setState(() => _p3Error = '녹음을 시작하지 못했습니다: $e');
+      return null;
+    }
+  }
+
+  Future<String?> _stopP3Recording() async {
+    _p3SilenceTimer?.cancel();
+    _p3SilenceTimer = null;
+    if (!_p3Recording) return null;
+    _p3Recording = false;
+    try {
+      return await appAudioRecorder.stop();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 진폭 폴링으로 발화 종료를 본다. **Full Echo에만 쓴다** — Shadow는 AI
+  /// 소리가 섞여 이 판정이 성립하지 않는다.
+  void _watchP3Silence(
+    int generation, {
+    required int silenceMs,
+    required int noSpeechMs,
+    required void Function(String? path, bool spoke) onDone,
+  }) {
+    bool spoke = false;
+    int silentTicks = 0;
+    int elapsedTicks = 0;
+    final int silentLimit = silenceMs ~/ 100;
+    final int giveUpLimit = noSpeechMs ~/ 100;
+    _p3SilenceTimer?.cancel();
+    _p3SilenceTimer =
+        Timer.periodic(const Duration(milliseconds: 100), (timer) async {
+      if (!_p3Alive(generation) || !_p3Recording) {
+        timer.cancel();
         return;
       }
-      setState(() {
-        _p3ShadowRecording = true;
-        _p3ShadowRecordPath = path;
-      });
-    } catch (e) {
-      debugPrint('[P3-SHADOW-REC] start failed: $e');
-    }
-  }
-
-  Future<void> _startP3MeaningUnitShadowing({
-    required bool nativeStyle,
-    required String voice,
-  }) async {
-    await _stopP3Shadowing();
-    if (!mounted || _phase != ShadowingPhase.chunkPractice) return;
-    final text = _p3Sentence(nativeStyle: nativeStyle);
-    if (text.isEmpty) {
-      _showRoomEntryToast('P3에서 사용할 문장이 없습니다');
-      return;
-    }
-    final generation = ++_p3ShadowGeneration;
-    setState(() {
-      _p3UsesNativeStyle = nativeStyle;
-      _p3ShadowLoading = true;
-      _p3ShadowPlaying = false;
-      _p3ShadowComplete = false;
-      _p3ShadowRecordPath = null;
-    });
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_p3SentenceScrollController.hasClients) {
-        _p3SentenceScrollController.jumpTo(0);
-      }
-    });
-
-    final audio = await _getP3MeaningUnitTTS(
-      text,
-      voice,
-      nativeStyle: nativeStyle,
-    );
-    if (!mounted ||
-        generation != _p3ShadowGeneration ||
-        _phase != ShadowingPhase.chunkPractice) {
-      return;
-    }
-    if (audio == null) {
-      setState(() => _p3ShadowLoading = false);
-      _showRoomEntryToast('P3 학습 음성을 만들지 못했습니다');
-      return;
-    }
-
-    final player = AudioPlayer();
-    _p3ShadowPlayer = player;
-    _p3ShadowDurationSub = player.onDurationChanged.listen((duration) {
-      _p3ShadowAudioDuration = duration;
-    });
-    _p3ShadowPositionSub = player.onPositionChanged.listen((position) {
-      final durationMs = _p3ShadowAudioDuration.inMilliseconds;
-      if (durationMs <= 0 || !_p3SentenceScrollController.hasClients) return;
-      final maxExtent = _p3SentenceScrollController.position.maxScrollExtent;
-      if (maxExtent <= 0) return;
-      final progress = position.inMilliseconds / durationMs;
-      final scrollProgress = ((progress - 0.08) / 0.84).clamp(0.0, 1.0);
-      final target = maxExtent * scrollProgress;
-      if ((target - _p3SentenceScrollController.offset).abs() < 4) return;
-      _p3SentenceScrollController.animateTo(
-        target,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.linear,
-      );
-    });
-
-    final playbackComplete = player.onPlayerComplete.first;
-    await _startP3ShadowRecording(generation);
-    if (!mounted || generation != _p3ShadowGeneration) return;
-    setState(() {
-      _p3ShadowLoading = false;
-      _p3ShadowPlaying = true;
-    });
-    try {
-      await player.play(BytesSource(audio));
-      await playbackComplete.timeout(const Duration(seconds: 90));
-      await Future.delayed(const Duration(milliseconds: 700));
-    } catch (e) {
-      debugPrint('[P3-SHADOW] play failed: $e');
-    }
-    if (!mounted || generation != _p3ShadowGeneration) return;
-    if (_p3ShadowRecording) {
-      _p3ShadowRecording = false;
       try {
-        final path = await appAudioRecorder.stop();
-        if (path != null && path.isNotEmpty) _p3ShadowRecordPath = path;
-      } catch (_) {}
-    }
-    if (identical(_p3ShadowPlayer, player)) _p3ShadowPlayer = null;
-    await _p3ShadowPositionSub?.cancel();
-    await _p3ShadowDurationSub?.cancel();
-    _p3ShadowPositionSub = null;
-    _p3ShadowDurationSub = null;
-    await player.dispose();
-    if (mounted && generation == _p3ShadowGeneration) {
-      setState(() {
-        _p3ShadowPlaying = false;
-        _p3ShadowComplete = true;
-      });
-    }
-  }
-
-  void _replaySelectedP3Shadowing() {
-    final nativeStyle = _p3UsesNativeStyle;
-    if (nativeStyle == null) return;
-    final voice =
-        nativeStyle ? _selectedP3NativeVoice : _selectedP3LearningVoice;
-    if (voice == null) return;
-    unawaited(_startP3MeaningUnitShadowing(
-      nativeStyle: nativeStyle,
-      voice: voice,
-    ));
-  }
-
-  Future<void> _playP3ShadowRecording() async {
-    final path = _p3ShadowRecordPath;
-    if (path == null || path.isEmpty || !await File(path).exists()) return;
-    final player = AudioPlayer();
-    try {
-      final complete = player.onPlayerComplete.first;
-      await player.play(DeviceFileSource(path));
-      await complete.timeout(const Duration(seconds: 90));
-    } catch (e) {
-      debugPrint('[P3-SHADOW-REC] playback failed: $e');
-    } finally {
-      await player.dispose();
-    }
-  }
-
-  Widget _buildChunkPracticeScreen() => _buildP3MeaningUnitShadowingScreen();
-
-  Widget _buildP3PracticeControls({
-    required String label,
-    required List<String> options,
-    required String? voice,
-    required ValueChanged<String> onVoiceSelected,
-  }) {
-    Widget menuBox({required Widget child}) => Container(
-          height: 42,
-          padding: const EdgeInsets.only(left: 12, right: 8),
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.28),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-                color: _p3ShadowingAccentColor.withValues(alpha: 0.65)),
-          ),
-          child: DropdownButtonHideUnderline(child: child),
-        );
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-      decoration: BoxDecoration(
-        color: _p3ShadowingAccentColor.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: voice == null
-              ? _p3ShadowingAccentColor
-              : _p3ShadowingAccentColor.withValues(alpha: 0.45),
-          width: voice == null ? 1.7 : 1.2,
-        ),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            flex: 5,
-            child: Text(
-              label,
-              maxLines: 2,
-              style: TextStyle(
-                color: voice == null ? _p3ShadowingAccentColor : Colors.white60,
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            flex: 4,
-            child: menuBox(
-              child: DropdownButton<String>(
-                value: voice,
-                hint: const Text('목소리 선택',
-                    maxLines: 1,
-                    style: TextStyle(
-                        color: _p3ShadowingAccentColor,
-                        fontWeight: FontWeight.bold)),
-                isExpanded: true,
-                dropdownColor: const Color(0xFF232323),
-                icon: const Icon(Icons.keyboard_arrow_down_rounded,
-                    color: _p3ShadowingAccentColor, size: 18),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-                items: options
-                    .map((option) => DropdownMenuItem<String>(
-                          value: option,
-                          child: Text(
-                              '${option[0].toUpperCase()}${option.substring(1)}'),
-                        ))
-                    .toList(),
-                onChanged: (selected) {
-                  if (selected != null) onVoiceSelected(selected);
-                },
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildP3SentenceText(String sentence) {
-    return SizedBox(
-      width: double.infinity,
-      child: Text(
-        sentence,
-        textAlign: TextAlign.left,
-        style: TextStyle(
-          color: Colors.white70,
-          fontSize: 19 * _fontScale,
-          height: 1.65,
-          fontWeight: FontWeight.w500,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildP3FullSentenceCard({
-    required String label,
-    required String sentence,
-    required bool active,
-    required ScrollController scrollController,
-    String emptyMessage = '문장이 준비되지 않았습니다.',
-  }) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 250),
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(18, 16, 18, 20),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1C1C1E),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: active ? _p3ShadowingAccentColor : Colors.white12,
-          width: active ? 1.6 : 1,
-        ),
-      ),
-      child: Column(
-        children: [
-          Text(
-            label,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: active ? _p3ShadowingAccentColor : Colors.white54,
-              fontSize: 13,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Expanded(
-            child: sentence.isEmpty
-                ? Center(
-                    child: Text(
-                      emptyMessage,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.white38),
-                    ),
-                  )
-                : LayoutBuilder(
-                    builder: (context, constraints) => Scrollbar(
-                      controller: scrollController,
-                      thumbVisibility: true,
-                      child: SingleChildScrollView(
-                        controller: scrollController,
-                        padding: const EdgeInsets.fromLTRB(2, 4, 8, 28),
-                        child: ConstrainedBox(
-                          constraints:
-                              BoxConstraints(minHeight: constraints.maxHeight),
-                          child: Align(
-                            alignment: Alignment.topCenter,
-                            child: _buildP3SentenceText(sentence),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _selectP3Variant(SentenceVariant variant) async {
-    if (_selectedVariant == variant) return;
-    await _stopP3Shadowing();
-    if (!mounted) return;
-    setState(() {
-      _selectedVariant = variant;
-      _p3UsesNativeStyle = null;
-      _p3ShadowComplete = false;
-      _p3ShadowRecordPath = null;
-    });
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_p3SentenceScrollController.hasClients) {
-        _p3SentenceScrollController.jumpTo(0);
+        if (!await appAudioRecorder.isRecording()) {
+          timer.cancel();
+          return;
+        }
+        elapsedTicks++;
+        final amp = await appAudioRecorder.getAmplitude();
+        if (amp.current > -25.0) {
+          spoke = true;
+          silentTicks = 0;
+        } else {
+          silentTicks++;
+        }
+        final bool done =
+            spoke ? silentTicks >= silentLimit : elapsedTicks >= giveUpLimit;
+        if (done) {
+          timer.cancel();
+          final path = await _stopP3Recording();
+          if (!_p3Alive(generation)) return;
+          onDone(path, spoke);
+        }
+      } catch (_) {
+        timer.cancel();
       }
     });
   }
 
-  Widget _buildP3VariantSelector() {
-    Widget option(String label, SentenceVariant variant) {
-      final selected = _selectedVariant == variant;
-      return Expanded(
-        child: InkWell(
-          borderRadius: BorderRadius.circular(11),
-          onTap: () => unawaited(_selectP3Variant(variant)),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            height: 42,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: selected
-                  ? _p3ShadowingAccentColor
-                  : Colors.white.withValues(alpha: 0.05),
-              borderRadius: BorderRadius.circular(11),
-            ),
-            child: Text(
-              label,
-              style: TextStyle(
-                color: selected ? Colors.white : Colors.white54,
-                fontSize: 13,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-        ),
-      );
+  void _deleteP3File(String? path) {
+    if (path == null || path.isEmpty) return;
+    try {
+      final f = File(path);
+      if (f.existsSync()) f.deleteSync();
+    } catch (_) {}
+  }
+
+  Future<void> _playP3File(String? path) async {
+    if (path == null || path.isEmpty) return;
+    if (!await File(path).exists()) return;
+    await _stopP3Playback();
+    final player = AudioPlayer();
+    _p3Player = player;
+    final completer = Completer<void>();
+    void finish() {
+      if (!completer.isCompleted) completer.complete();
     }
 
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1C1C1E),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white12),
-      ),
-      child: Row(
-        children: [
-          option('완성 문장', SentenceVariant.expanded),
-          const SizedBox(width: 4),
-          option('정제 문장', SentenceVariant.polished),
-        ],
+    final sub = player.onPlayerComplete.listen(
+      (_) => finish(),
+      onDone: finish,
+      onError: (Object _) => finish(),
+      cancelOnError: false,
+    );
+    _p3PlayerSub = sub;
+    if (mounted) setState(() {});
+    try {
+      await player.play(DeviceFileSource(path));
+      await completer.future
+          .timeout(const Duration(seconds: 90), onTimeout: finish);
+    } catch (e) {
+      debugPrint('[P3-SPEAK] file play $e');
+    } finally {
+      await sub.cancel();
+      if (identical(_p3PlayerSub, sub)) _p3PlayerSub = null;
+      if (identical(_p3Player, player)) _p3Player = null;
+      try {
+        await player.stop();
+      } catch (_) {}
+      try {
+        await player.dispose();
+      } catch (_) {}
+      if (mounted) setState(() {});
+    }
+  }
+
+  /// AI 원본 다시 듣기. TTS를 다시 부르지 않는다.
+  Future<void> _playP3Original() async {
+    final pcm = _p3FullPcm;
+    if (pcm == null) return;
+    await _playP3Pcm(pcm, _p3Generation);
+  }
+
+  /// Full Echo 다시 하기. 이전 녹음은 지운다.
+  Future<void> _retryP3Echo() async {
+    _deleteP3File(_p3EchoPath);
+    if (mounted) setState(() => _p3EchoPath = null);
+    await _runP3FullEcho();
+  }
+
+  // ── P3 화면 ───────────────────────────────────────────────────────
+
+  Widget _buildChunkPracticeScreen() => _buildP3SpeakingScreen();
+
+  String get _p3StageLabel {
+    switch (_p3Stage) {
+      case P3Stage.idle:
+        return '최종 문장을 말해 봅니다';
+      case P3Stage.preparing:
+        return '음성 준비 중…';
+      case P3Stage.breathListen:
+        return '호흡 ${(_p3BreathIndex + 1).clamp(1, _p3BreathTotal)}/$_p3BreathTotal · 듣기';
+      case P3Stage.breathEcho:
+        return '호흡 ${(_p3BreathIndex + 1).clamp(1, _p3BreathTotal)}/$_p3BreathTotal · 따라 말하세요';
+      case P3Stage.fullEchoListen:
+        return '전체 문장을 들어보세요';
+      case P3Stage.fullEchoRecord:
+        return '이제 혼자 말해보세요';
+      case P3Stage.shadowReady:
+        return '이번엔 AI와 같이 말해봅니다';
+      case P3Stage.fullShadowRecord:
+        return 'AI와 함께 말하세요';
+      case P3Stage.compare:
+        return '세 소리를 비교해보세요';
+    }
+  }
+
+  Widget _buildP3SpeakingScreen() {
+    final text = _p3TargetSentence;
+    final bool started = _p3Stage != P3Stage.idle;
+    return MediaQuery.withClampedTextScaling(
+      maxScaleFactor: 1.3,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              _p3StageLabel,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: _p3Stage == P3Stage.breathEcho ||
+                        _p3Stage == P3Stage.fullEchoRecord ||
+                        _p3Stage == P3Stage.fullShadowRecord
+                    ? Colors.amber
+                    : Colors.white54,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.04),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                    color: _p3ShadowingAccentColor.withValues(alpha: 0.35)),
+              ),
+              child: Text(
+                text.isEmpty ? '문장이 없습니다' : text,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16 * _fontScale,
+                  height: 1.6,
+                ),
+              ),
+            ),
+            if (_p3Error != null) ...[
+              const SizedBox(height: 10),
+              Text(
+                _p3Error!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Color(0xFFFF6B6B), fontSize: 12),
+              ),
+            ],
+            const SizedBox(height: 18),
+            if (!started)
+              _p3PrimaryButton('▶ 시작하기', () => unawaited(_startP3Speaking())),
+            if (_p3Stage == P3Stage.shadowReady ||
+                _p3Stage == P3Stage.compare) ...[
+              _buildP3GapPicker(),
+              const SizedBox(height: 10),
+              _p3PrimaryButton(
+                _p3ShadowPath == null ? '▶ 함께 말하기' : '▶ 다시 함께 말하기',
+                _p3Busy ? null : () => unawaited(_runP3FullShadow()),
+              ),
+              const SizedBox(height: 8),
+              _p3SecondaryButton(
+                '전체 말하기 다시',
+                _p3Busy ? null : () => unawaited(_retryP3Echo()),
+              ),
+            ],
+            if (started) ...[
+              const SizedBox(height: 18),
+              _buildP3CompareRow(),
+            ],
+            if (_p3Busy && _p3Stage != P3Stage.compare) ...[
+              const SizedBox(height: 12),
+              _p3SecondaryButton(
+                  '■ 중지', () => unawaited(_stopP3Shadowing(resetSelection: true))),
+            ],
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildP3MeaningUnitShadowingScreen() {
-    final nativeStyle = _selectedVariant == SentenceVariant.polished;
-    final sentence =
-        nativeStyle ? _polishedSentence.trim() : _expandedSentence.trim();
-    final voice =
-        nativeStyle ? _selectedP3NativeVoice : _selectedP3LearningVoice;
-    final busy = _p3ShadowLoading || _p3ShadowPlaying;
-    final focusedReading = _p3ShadowLoading || _p3ShadowPlaying;
-    return Column(
+  /// gap 3단계. **API를 다시 부르지 않는다** — 같은 PCM을 다시 조립할 뿐이다.
+  Widget _buildP3GapPicker() {
+    return Row(
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(4, 8, 8, 2),
-          child: Row(
-            children: [
-              IconButton(
-                icon: const Icon(Icons.close, color: Colors.white70),
-                // 🔙 [STEP-BACK] P1/P2와 같은 규칙 — 고르는 자리로 되돌린다.
-                onPressed: _isStepExpandRoom
-                    ? _backToStepExpandSelect
-                    : _exitShadowing,
-              ),
-              const Expanded(
+        for (final gap in P3ShadowGap.values) ...[
+          Expanded(
+            child: InkWell(
+              onTap: _p3Busy ? null : () => setState(() => _p3Gap = gap),
+              borderRadius: BorderRadius.circular(10),
+              child: Container(
+                height: 38,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: _p3Gap == gap
+                      ? _p3ShadowingAccentColor.withValues(alpha: 0.20)
+                      : Colors.white.withValues(alpha: 0.04),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: _p3Gap == gap
+                        ? _p3ShadowingAccentColor
+                        : Colors.white24,
+                    width: _p3Gap == gap ? 1.4 : 1,
+                  ),
+                ),
                 child: Text(
-                  'P3  Meaning-unit Shadowing',
-                  textAlign: TextAlign.center,
+                  _kP3ShadowGapLabel[gap] ?? '',
                   style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.4,
+                    color: _p3Gap == gap
+                        ? _p3ShadowingAccentColor
+                        : Colors.white60,
+                    fontSize: 12,
+                    fontWeight:
+                        _p3Gap == gap ? FontWeight.bold : FontWeight.w500,
                   ),
                 ),
               ),
-              ValueListenableBuilder<int>(
-                valueListenable: BillingTicker.instance.billingState,
-                builder: (_, state, __) => Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  child: CustomPaint(
-                    size: const Size(16, 16),
-                    painter: BillingDotPainter(state),
-                  ),
-                ),
-              ),
-              IconButton(
-                onPressed: () => setState(() {
-                  _fontScale = _fontScale == 1.0
-                      ? 1.3
-                      : _fontScale == 1.3
-                          ? 0.8
-                          : 1.0;
-                }),
-                icon: const Icon(Icons.format_size, color: Colors.white54),
-              ),
-            ],
-          ),
-        ),
-        if (_isStepExpandRoom) _buildPracticeTabBar(),
-        if (!focusedReading)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-            child: _buildP3VariantSelector(),
-          ),
-        if (!focusedReading)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-            child: _buildP3PracticeControls(
-              label: nativeStyle ? '원어민식 쉐도잉' : '학습용 쉐도잉',
-              options: nativeStyle
-                  ? _nativeMeaningUnitVoiceOptions
-                  : _p3LearningVoiceOptions,
-              voice: voice,
-              onVoiceSelected: (selectedVoice) {
-                setState(() {
-                  if (nativeStyle) {
-                    _selectedP3NativeVoice = selectedVoice;
-                  } else {
-                    _selectedP3LearningVoice = selectedVoice;
-                  }
-                });
-                unawaited(_startP3MeaningUnitShadowing(
-                  nativeStyle: nativeStyle,
-                  voice: selectedVoice,
-                ));
-              },
             ),
           ),
+          if (gap != P3ShadowGap.values.last) const SizedBox(width: 6),
+        ],
+      ],
+    );
+  }
+
+  /// AI / ECHO / SHADOW 각각 독립 재생. 자동 연속 재생은 하지 않는다.
+  Widget _buildP3CompareRow() {
+    return Row(
+      children: [
         Expanded(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 4, 18, 8),
-            child: _buildP3FullSentenceCard(
-              label: nativeStyle ? 'Polished' : 'Expanded',
-              sentence: sentence,
-              active: _p3UsesNativeStyle == nativeStyle,
-              scrollController: _p3SentenceScrollController,
-              emptyMessage: nativeStyle
-                  ? (_isPreparingStepP3
-                      ? 'Polished Sentence 준비 중...'
-                      : 'Polished Sentence가 없습니다.')
-                  : '완성된 확장 문장이 없습니다.',
-            ),
-          ),
+          child: _p3CompareButton('AI', _p3FullPcm != null,
+              () => unawaited(_playP3Original())),
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(18, 2, 18, 12),
-          child: Column(
-            children: [
-              // 📐 상태 문구는 Flexible로 감싼다. 시스템 글자 크기를 크게 쓰면
-              //    이 한 줄이 가로로 넘쳐 하단에 오버플로 줄무늬가 뜬다
-              //    (실기기 1.7배에서 72px 초과 확인).
-              if (_p3ShadowLoading)
-                const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: _p3ShadowingAccentColor),
-                    ),
-                    SizedBox(width: 9),
-                    Flexible(
-                      child: Text('의미단위 음성 준비 중...',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.white60)),
-                    ),
-                  ],
-                )
-              else if (_p3ShadowPlaying)
-                const Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.graphic_eq, color: Colors.greenAccent, size: 20),
-                    SizedBox(width: 8),
-                    Flexible(
-                      child: Text('음성을 들으며 동시에 따라 읽으세요',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.greenAccent)),
-                    ),
-                  ],
-                )
-              else if (_p3ShadowComplete)
-                const Text('쉐도잉 완료',
-                    style: TextStyle(
-                        color: Colors.greenAccent,
-                        fontWeight: FontWeight.bold)),
-              if (_p3UsesNativeStyle != null) ...[
-                const SizedBox(height: 10),
-                // 높이를 46으로 못 박으면 글자가 커졌을 때 라벨이 잘린다.
-                // 최소값으로 두어 글자에 맞춰 자라게 한다.
-                Row(
-                  children: [
-                    Expanded(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(minHeight: 46),
-                        child: ElevatedButton.icon(
-                          onPressed: busy ? null : _replaySelectedP3Shadowing,
-                          icon: Icon(busy
-                              ? Icons.hourglass_top_rounded
-                              : Icons.replay_rounded),
-                          label: Text(busy ? '진행 중' : '다시 쉐도잉',
-                              textAlign: TextAlign.center),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF4F46E5),
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14)),
-                          ),
-                        ),
-                      ),
-                    ),
-                    if (_p3ShadowComplete && _p3ShadowRecordPath != null) ...[
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(minHeight: 46),
-                          child: OutlinedButton.icon(
-                            onPressed: _playP3ShadowRecording,
-                            icon: const Icon(Icons.hearing_rounded),
-                            label:
-                                const Text('내 음성', textAlign: TextAlign.center),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.white70,
-                              side: const BorderSide(color: Colors.white24),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14)),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ],
-            ],
-          ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: _p3CompareButton('ECHO', _p3EchoPath != null,
+              () => unawaited(_playP3File(_p3EchoPath))),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: _p3CompareButton('SHADOW', _p3ShadowPath != null,
+              () => unawaited(_playP3File(_p3ShadowPath))),
         ),
       ],
     );
   }
 
+  Widget _p3CompareButton(String label, bool enabled, VoidCallback onTap) {
+    final bool active = enabled && !_p3Busy;
+    return InkWell(
+      onTap: active ? onTap : null,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        height: 40,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: active ? 0.06 : 0.02),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: active ? Colors.white24 : Colors.white10),
+        ),
+        child: Text(
+          '▶ $label',
+          style: TextStyle(
+            color: active ? Colors.white70 : Colors.white24,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _p3PrimaryButton(String label, VoidCallback? onTap) => SizedBox(
+        height: 48,
+        child: ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _p3ShadowingAccentColor,
+            disabledBackgroundColor: Colors.white12,
+            foregroundColor: Colors.white,
+            disabledForegroundColor: Colors.white38,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12)),
+          ),
+          onPressed: onTap,
+          child: Text(label,
+              style: const TextStyle(
+                  fontSize: 14, fontWeight: FontWeight.bold)),
+        ),
+      );
+
+  Widget _p3SecondaryButton(String label, VoidCallback? onTap) => SizedBox(
+        height: 40,
+        child: OutlinedButton(
+          style: OutlinedButton.styleFrom(
+            foregroundColor: Colors.white70,
+            side: const BorderSide(color: Colors.white24),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10)),
+          ),
+          onPressed: onTap,
+          child: Text(label, style: const TextStyle(fontSize: 12)),
+        ),
+      );
   Widget _buildLegacyChunkPracticeScreen() {
     const Color colorA = Color(0xFF0F2233);
     const Color colorB = Color(0xFF1A0F2E);
@@ -8522,81 +8290,20 @@ RULES — follow exactly:
         _tutorUserRecording = false;
         _tutorPlayingFullback = false;
         _showRetryHint = false;
-        _shadowWords = []; // [P2-SHADOW]
-        _shadowWordIdx = -1; // [P2-SHADOW]
         _shadowSpeed = 1.0;
-        // 첫 화면은 보이스를 고르기 전까지 기다린다. 미리 골라 두면 상단
-        // 선택기가 깜빡이지 않고, 고르는 순간 시작하는 흐름도 죽는다.
-        _selectedMeaningUnitVoice = null;
-        // [P2-REPEAT] 횟수도 같이 비운다 — 보이스와 둘 다 골라야 시작한다.
-        _shadowRepeatCount = null;
-        _shadowPass = 0;
-        _shadowStarted = false;
         _showEchoingOverlay = false;
       });
       _echoingOverlayTimer?.cancel();
-      _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
-      _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
-      _stopShadowAiPlayback(); // [P2-SHADOW-AI]
-      unawaited(_breathEngine?.stop() ?? Future<void>.value()); // [P2-BREATH]
-      // 시작은 상단 보이스 선택기가 연다(_buildMeaningUnitVoiceSelector).
-      _prepareP2StartAudio();
+      _shadowHighlightTimer?.cancel();
+      _shadowAdvanceTimer?.cancel();
+      _stopShadowAiPlayback();
+      // 🔤 [P2-MORPH] 고르고 시작하는 게이트가 없다. 진입하면 첫 계단이
+      //   곧바로 열린다 — 시작 신호는 `_checkAndStartTurn`이 준다.
+      _morph = MorphChange.none;
+      _morphActive = false;
     }
   }
 
-  void _prepareP2StartAudio() {
-    // Voice 선택을 기다리는 동안 첫 AI 문장을 미리 받아 둔다. 고르는 즉시
-    // 시작하므로 여기서 벌어 둔 시간이 그대로 체감 지연을 줄인다.
-    if (_tutorLines.isEmpty) return;
-    final firstText = (_tutorLines.first['text'] ?? '').toString().trim();
-    if (firstText.isEmpty) return;
-    unawaited(() async {
-      final cacheVoice = _practiceCacheVoice(_historyPracticeAiVoice);
-      var audio = await TtsCache.get(firstText, cacheVoice);
-      if (audio == null) {
-        audio = await _getOrFetchPracticeTTS(
-          firstText,
-          _historyPracticeAiVoice,
-        );
-        if (audio != null) TtsCache.put(firstText, cacheVoice, audio);
-      }
-    }());
-  }
-
-  Future<void> _prefetchNextMeaningUnitAudio() async {
-    if (_phase != ShadowingPhase.part2Practice) return;
-    Map<String, dynamic>? nextLine;
-    for (int i = currentIndex; i < _tutorLines.length; i++) {
-      final line = _tutorLines[i];
-      if ((line['role'] as String?) == 'USER') {
-        nextLine = line;
-        break;
-      }
-    }
-    if (nextLine == null) return;
-    final text = (nextLine['text'] ?? '').toString().trim();
-    if (text.isEmpty) return;
-    final voice = _selectedMeaningUnitVoice;
-    if (voice == null) return;
-    await _getMeaningUnitTTS(text, voice);
-  }
-
-  /// 보이스를 고른 순간 P2를 시작한다.
-  ///
-  /// 예전에는 "Three, two, one, start." 낭독을 먼저 재생하고 그 끝을 기다렸다.
-  /// 시작 신호는 보이스를 고르는 행동 자체로 충분해서 소리를 걷어냈고, 그만큼
-  /// 첫 문장이 빨리 나온다.
-  void _startP2Practice() {
-    if (!mounted ||
-        _phase != ShadowingPhase.part2Practice ||
-        !_shadowStarted ||
-        isPaused) {
-      return;
-    }
-    _startTurnPractice();
-  }
-
-  // 🆕 [EXPAND-FROM-CHAT v2] 대화 전체(AI+유저) → 종합 확장 문장 1개 (의미단위 ~5개, 문법 연결)
   String _historyString(Map<String, dynamic>? data, String key) {
     return (data?[key] ?? '').toString().trim();
   }
@@ -9069,11 +8776,12 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
         _phase = ShadowingPhase.chunkPractice;
         _showEchoingOverlay = false;
         _selectedVariant = SentenceVariant.expanded;
-        _selectedP3LearningVoice = null;
-        _selectedP3NativeVoice = null;
-        _p3UsesNativeStyle = null;
-        _p3ShadowComplete = false;
+        // 🎤 [P3-SPEAK] 새 세션으로 연다. 이전 녹음은 남기지 않는다 —
+        //   AI 원본 TTS 캐시는 그대로 재사용된다.
+        _p3Stage = P3Stage.idle;
+        _p3Error = null;
       });
+      unawaited(_stopP3Shadowing(resetSelection: true));
     }
   }
 
@@ -9084,8 +8792,6 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
     _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
     _stopShadowAiPlayback(); // [P2-SHADOW-AI]
-    unawaited(_breathEngine?.stop() ?? Future<void>.value()); // [P2-BREATH]
-    _stopShadowRecording(); // [P2-SHADOW-REC]
     unawaited(_stopP3Shadowing(resetSelection: true));
     if (practiceNum == 1) {
       _startPart1Practice();
@@ -9129,10 +8835,8 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
         Expanded(
           child: Column(
             children: [
-              if (_phase == ShadowingPhase.part2Practice) ...[
-                _buildMeaningUnitVoiceSelector(),
-                _buildBreathIndicator(),
-              ],
+              if (_phase == ShadowingPhase.part2Practice)
+                _buildMorphIndicator(),
               Expanded(child: _buildTurnPracticeScreen()),
             ],
           ),
@@ -9141,46 +8845,36 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     );
   }
 
-  /// 🌬️ [P2-BREATH] 지금 몇 번째 호흡이고 누구 차례인지.
+  /// 🔤 [P2-MORPH] 이번 계단이 무엇을 하고 있는지 한 줄.
   ///
-  /// 예전 동시 낭독에서는 AI 소리가 곧 신호였다. 교대 방식에서는 **AI가
-  /// 끝났다는 것을 눈으로 알려주지 않으면 유저가 말할 때를 모른다.**
-  /// 단어 하이라이트를 새로 만들지 않고 이 한 줄만 둔다.
-  Widget _buildBreathIndicator() {
-    if (_breathPreparing) {
-      return _breathBanner('음성 준비 중…', Colors.white38);
+  /// 화면에 나오는 문장 자체가 주인공이라 여기는 최소한만 둔다.
+  Widget _buildMorphIndicator() {
+    final String text;
+    final Color color;
+    if (_morphPreparing) {
+      text = '음성 준비 중…';
+      color = Colors.white38;
+    } else if (_morph.isEmpty) {
+      text = '문장 듣기';
+      color = Colors.white38;
+    } else {
+      text = '이번에 달라진 곳';
+      color = _kMorphAccent;
     }
-    if (_breathTotal <= 0) return const SizedBox.shrink();
-    final position = '호흡 ${(_breathIndex + 1).clamp(1, _breathTotal)}/$_breathTotal';
-    switch (_breathPhase) {
-      case BreathEchoPhase.aiPlaying:
-        return _breathBanner('$position · 듣기', Colors.white60);
-      case BreathEchoPhase.waitingForUser:
-      case BreathEchoPhase.userSpeaking:
-        return _breathBanner('$position · 따라 말하세요', Colors.amber);
-      case BreathEchoPhase.advancing:
-        return _breathBanner(position, Colors.white38);
-      case BreathEchoPhase.completed:
-        return _breathBanner('계단 완료', Colors.white38);
-      case BreathEchoPhase.idle:
-      case BreathEchoPhase.cancelled:
-        return const SizedBox.shrink();
-    }
-  }
-
-  Widget _breathBanner(String text, Color color) => Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: Text(
-          text,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: color,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.3,
-          ),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: AnimatedDefaultTextStyle(
+        duration: const Duration(milliseconds: 220),
+        style: TextStyle(
+          color: color,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.3,
         ),
-      );
+        child: Text(text, textAlign: TextAlign.center),
+      ),
+    );
+  }
 
   Widget _buildPracticeTab(String label, bool isActive, VoidCallback onTap) {
     return GestureDetector(
@@ -9207,179 +8901,6 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
           ),
         ),
       ),
-    );
-  }
-
-  /// [P2-REPEAT] 보이스와 횟수를 **둘 다** 고른 순간이 시작 신호다.
-  /// 하나만 골라 두고 시작하면 나머지는 영영 못 고른다 — 연습이 이미 굴러간다.
-  void _maybeStartP2() {
-    if (_shadowStarted) return;
-    if (_selectedMeaningUnitVoice == null || _shadowRepeatCount == null) return;
-    setState(() => _shadowStarted = true);
-    unawaited(_prefetchNextMeaningUnitAudio());
-    if (_phase == ShadowingPhase.part2Practice && !isPaused) {
-      // 다 고른 순간이 곧 시작 신호다 — 카운트다운 없음.
-      _startP2Practice();
-    }
-  }
-
-  /// [P2-REPEAT] 한 줄을 몇 번 들려줄지 고르는 칩.
-  /// 2번은 듣기 한 번 + 쉐도잉 한 번, 1번은 쉐도잉 하나다. 어느 쪽이든
-  /// 유저 목소리는 쉐도잉 회차에서만 녹음된다.
-  Widget _buildShadowRepeatChip(int count, String label, bool busy) {
-    final bool selected = _shadowRepeatCount == count;
-    final bool pending = _shadowRepeatCount == null;
-    return Semantics(
-      button: true,
-      selected: selected,
-      label: label,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: busy
-              ? null
-              : () {
-                  if (_shadowRepeatCount == count) return;
-                  setState(() => _shadowRepeatCount = count);
-                  _maybeStartP2();
-                },
-          child: Container(
-            height: 36,
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: selected
-                  ? Colors.amber.withValues(alpha: 0.22)
-                  : (pending
-                      ? Colors.amber.withValues(alpha: 0.12)
-                      : Colors.white.withValues(alpha: 0.06)),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: selected || pending ? Colors.amber : Colors.white24,
-                width: selected ? 1.5 : 1,
-              ),
-            ),
-            child: Text(
-              '$count번',
-              style: TextStyle(
-                color: busy
-                    ? Colors.white38
-                    : (selected ? Colors.amber : Colors.white70),
-                fontSize: 12,
-                fontWeight: selected ? FontWeight.bold : FontWeight.w600,
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  // P2 상단 오른쪽: 의미단위 쉐도잉 전용 학습 Voice + 반복 횟수.
-  Widget _buildMeaningUnitVoiceSelector() {
-    final busy = _shadowAiPlayer != null || _shadowRecording;
-    // [P2-REPEAT] 둘 중 하나라도 안 골랐으면 아직 시작 전이다.
-    final needsSelection =
-        _selectedMeaningUnitVoice == null || _shadowRepeatCount == null;
-    final selector = Padding(
-      padding: const EdgeInsets.fromLTRB(12, 2, 16, 6),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          Flexible(
-            child: Text(
-              '쉐도잉',
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: needsSelection ? Colors.amber : Colors.white54,
-                fontSize: 11,
-                fontWeight: needsSelection ? FontWeight.bold : FontWeight.w500,
-                shadows: needsSelection
-                    ? const [
-                        Shadow(color: Colors.amber, blurRadius: 10),
-                      ]
-                    : null,
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          _buildShadowRepeatChip(2, '두 번 말하기 · 처음은 듣기, 두 번째가 쉐도잉', busy),
-          const SizedBox(width: 6),
-          _buildShadowRepeatChip(1, '한 번 말하기 · 쉐도잉', busy),
-          const SizedBox(width: 8),
-          Container(
-            height: 36,
-            padding: const EdgeInsets.only(left: 12, right: 8),
-            decoration: BoxDecoration(
-              color: needsSelection
-                  ? Colors.amber.withValues(alpha: 0.12)
-                  : Colors.white.withValues(alpha: 0.06),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: needsSelection ? Colors.amber : Colors.white24,
-                width: needsSelection ? 1.5 : 1,
-              ),
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                value: _selectedMeaningUnitVoice,
-                hint: const Text(
-                  '선택',
-                  style: TextStyle(
-                    color: Colors.amber,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                dropdownColor: const Color(0xFF232323),
-                icon: Icon(
-                  Icons.keyboard_arrow_down_rounded,
-                  color: busy ? Colors.white24 : Colors.amber,
-                  size: 18,
-                ),
-                style: TextStyle(
-                  color: busy ? Colors.white38 : Colors.white70,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-                items: _meaningUnitVoiceOptions
-                    .map(
-                      (voice) => DropdownMenuItem<String>(
-                        value: voice,
-                        child: Text(
-                          '${voice[0].toUpperCase()}${voice.substring(1)}',
-                        ),
-                      ),
-                    )
-                    .toList(),
-                onChanged: busy
-                    ? null
-                    : (voice) {
-                        if (voice == null ||
-                            voice == _selectedMeaningUnitVoice) {
-                          return;
-                        }
-                        setState(() => _selectedMeaningUnitVoice = voice);
-                        // 이미 굴러가는 중이면 보이스만 갈아 끼운다.
-                        if (_shadowStarted) {
-                          unawaited(_prefetchNextMeaningUnitAudio());
-                          return;
-                        }
-                        _maybeStartP2();
-                      },
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-    if (!needsSelection) return selector;
-    return AnimatedBuilder(
-      animation: _blinkController,
-      builder: (_, child) =>
-          Opacity(opacity: _blinkOpacity.value, child: child),
-      child: selector,
     );
   }
 
@@ -9694,6 +9215,22 @@ enum ShadowingPhase {
 }
 
 enum SentenceVariant { expanded, polished }
+
+/// 🎤 [P3-SPEAK] 말하기 연습의 단계. bool 조합으로 단계를 짐작하지 않는다.
+enum P3Stage {
+  idle,
+  preparing,
+  breathListen,
+  breathEcho,
+  fullEchoListen,
+  fullEchoRecord,
+  shadowReady,
+  fullShadowRecord,
+  compare,
+}
+
+/// 🎤 [P3-SPEAK] 쉐도잉 여유. **속도가 아니라 호흡 사이 공간이다.**
+enum P3ShadowGap { tight, normal, relaxed }
 
 class PracticeChunk {
   final String text;
