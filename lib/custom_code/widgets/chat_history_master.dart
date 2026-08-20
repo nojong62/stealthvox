@@ -10,8 +10,6 @@ import 'package:flutter/material.dart';
 // Begin custom widget code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
-import 'index.dart'; // Imports other custom widgets
-
 // 📦 [Box 1: Imports 및 패키지]
 import 'dart:async';
 import 'dart:convert';
@@ -19,7 +17,6 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui';
 import 'dart:ui' as ui;
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:record/record.dart';
@@ -177,7 +174,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     return suffix.isEmpty ? display : '$display · $suffix';
   }
 
-  bool _isActionLocked = false;
   bool _isEnteringPractice = false;
   bool _isOpeningAdjacentHistory = false;
   int _openingHistoryOffset = 0;
@@ -186,14 +182,12 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // 📦 [Box 4: 상태 변수 - Shadowing 상태 머신]
   ShadowingPhase _phase = ShadowingPhase.idle;
   SentenceVariant _selectedVariant = SentenceVariant.expanded;
-  String? _entryMessageDocId;
   String _expandedSentence = "";
   String _polishedSentence = "";
   // 완성문장에 한글이 남아 있으면 아직 영어가 안 만들어진 것이다.
   // 8019줄 [HANGUL-GUARD]가 Tutor 경로에서 쓰는 것과 같은 판정이다.
   static final RegExp _stepExpandHangul = RegExp(r'[가-힣ᄀ-ᇿ㄰-㆏]');
   bool _polishedLoadDone = false;
-  String _formattedFullSentence = "";
   // 🔧 [STAMPEDE-FIX] 같은 청크에 대한 동시 API 호출 방지
   // key: chunk index, value: 진행 중인 audio fetch Future
   final Map<int, Future<Uint8List?>> _inFlightChunkFetch = {};
@@ -202,18 +196,15 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   final Map<String, Future<Uint8List?>> _openAiTtsInFlight = {};
   List<PracticeChunk> _chunks = [];
   int _currentChunkIdx = 0;
-  bool _isRerecordingSingle = false;
   bool _isPlayingFullUser = false;
   int _fullUserPlayIdx = 0;
   final Map<String, Uint8List> _fullAIAudioCache = {};
-  String? _tempRecordDir;
   bool _isListening = false;
   Timer? _utteranceSafetyTimer;
 
   // 🆕 [TUTOR] 양측 대화 자동 재생 모드 상태 변수
   bool _isTutorPlaying = false;
   int _tutorCurrentIdx = -1;
-  bool _tutorIsAiTurn = false;
   List<Map<String, dynamic>> _tutorLines = [];
   AudioPlayer? _tutorAudioPlayer;
 
@@ -235,7 +226,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   late Animation<double> _blinkOpacity;
 
   // 에코링 팝업 오버레이
-  bool _showEchoingOverlay = false;
   Timer? _echoingOverlayTimer;
 
   // P2 샤도잉 시작 팝업 오버레이
@@ -287,8 +277,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   StreamSubscription<Duration>? _shadowPosSub;
   StreamSubscription<Duration>? _shadowDurSub;
   StreamSubscription<void>? _shadowCompleteSub;
-  // [P-PULSE] Softer indigo pulse for the P3 polished button.
-  static const Color _pPulseColor = Color(0xFF818CF8);
 
   // 🆕 [P2-INDICATOR] AI 청크 발화 중 여부 (인디케이터 빛남용)
   bool _aiChunkPlaying = false;
@@ -307,7 +295,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   bool _isBuildingExpand = false; // 🆕 [EXPAND-FROM-CHAT] 확장문장 생성 중 플래그
   String _cachedRoomMode = ''; // 🔧 [FREE-TALK-BTN] 버튼 표시 조건용 mode 캐시
   bool _isPlayingFullAI = false; // 전체 AI 듣기 진행 중
-  int _polishedRevealCount = 0;
   Timer? _polishedRevealTimer;
   final ScrollController _chunkScrollController = ScrollController();
   final Map<int, GlobalKey> _itemKeys = {};
@@ -421,8 +408,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     BillingTicker.instance.resumeFromActivity('history_user_action');
   }
 
-  Widget _buildIdleBanner() => const SizedBox.shrink();
-
   Widget _buildIdleOverlay() => const SizedBox.shrink();
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -500,7 +485,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _appCorrectedAudio = null;
     if (_appIsRecording || _shadowRecording || _p3Recording) {
       _p3Recording = false;
-      appAudioRecorder.stop().catchError((_) {});
+      appAudioRecorder.stop().ignore();
     }
     appAudioRecorder.dispose();
     super.dispose();
@@ -612,34 +597,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
           _openingHistoryOffset = 0;
         });
       }
-    }
-  }
-
-  Future<void> _deleteMessage(DocumentReference msgRef) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1C1C1E),
-        title: const Text('메시지 삭제', style: TextStyle(color: Colors.white)),
-        content: const Text('이 메시지를 삭제할까요?',
-            style: TextStyle(color: Colors.white70)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('취소', style: TextStyle(color: Colors.white54)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('삭제', style: TextStyle(color: Colors.redAccent)),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    try {
-      await msgRef.delete();
-    } catch (e) {
-      debugPrint('[deleteMessage] $e');
     }
   }
 
@@ -1107,7 +1064,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         _polishedSentence = polished;
         _expandedSentence = expanded.isNotEmpty ? expanded : polished;
         _polishedLoadDone = true;
-        _entryMessageDocId = null;
         _practicingPolished = false;
 
         // 화면에 이미 로드된 메시지를 재사용하고, 캐시가 없을 때만 다시 조회한다.
@@ -1378,7 +1334,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       if (mounted) {
         setState(() {
           _tutorCurrentIdx = i;
-          _tutorIsAiTurn = lineRepresentsAi;
         });
       }
 
@@ -1392,7 +1347,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       setState(() {
         _isTutorPlaying = false;
         _tutorCurrentIdx = -1;
-        _tutorIsAiTurn = false;
       });
     }
   }
@@ -1449,7 +1403,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       setState(() {
         _isTutorPlaying = false;
         _tutorCurrentIdx = -1;
-        _tutorIsAiTurn = false;
       });
     }
   }
@@ -1530,13 +1483,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     WidgetsBinding.instance
         .addPostFrameCallback((_) => _scrollPracticeToIndex(next));
     _checkAndStartTurn();
-  }
-
-  void _forceNextTurn() {
-    _stopAutoVADRecording();
-    audioPlayer.stop();
-    _stopShadowAiPlayback(); // [P2-SHADOW-AI] Stop read-along voice on skip.
-    _nextTurn();
   }
 
   void _checkAndStartTurn() {
@@ -2112,126 +2058,12 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     }
   }
 
-  // 📦 [Box 11: Shadowing 진입점]
-  Future<void> _enterShadowing(DocumentSnapshot doc, String docId) async {
-    final data = doc.data() as Map<String, dynamic>;
-    final rawText = (data['translated_text'] ?? '').toString();
-    final String directExpanded =
-        (data['expanded_sentence'] ?? '').toString().trim();
-
-    // 디버그 로그 초기화 및 기록
-
-    if (directExpanded.isNotEmpty) {
-      _expandedSentence = directExpanded;
-    } else {
-      final parts = rawText.split(RegExp(r'\n\s*\n'));
-      _expandedSentence = parts.length >= 2
-          ? parts.sublist(1).join('\n\n').trim()
-          : rawText.trim();
-    }
-
-    _polishedSentence = "";
-    _entryMessageDocId = docId;
-    _practicingPolished = false;
-
-    if (mounted) {
-      BillingTicker.instance.setRate(BillingRate.full);
-      setState(() => isPracticeMode = true);
-      _goToChunkPractice();
-    }
-    _loadPolishedSentence();
-  }
-
-  Future<void> _loadPolishedSentence() async {
-    try {
-      final roomDoc = await widget.historyDoc.get();
-      if (!mounted) return;
-      final roomData = roomDoc.data() as Map<String, dynamic>?;
-      if (roomData == null) {
-        if (mounted) setState(() => _polishedLoadDone = true);
-        return;
-      }
-
-      // ── 1순위: polished_sentence 직접 읽기 ──────────────────────
-      final directPolished = roomData['polished_sentence'] as String?;
-
-      if (directPolished != null && directPolished.isNotEmpty) {
-        debugPrint("[loadPolishedSentence] 1순위: polished_sentence 직접 읽기 성공");
-        if (mounted)
-          setState(() {
-            _polishedSentence = directPolished;
-            _polishedLoadDone = true;
-          });
-        return;
-      }
-
-      // ── 2순위: expanded_sentence 직접 읽기 ──────────────────────
-      final directExpanded = roomData['expanded_sentence'] as String?;
-      if (directExpanded != null && directExpanded.isNotEmpty) {
-        debugPrint(
-            "[loadPolishedSentence] 2순위: expanded_sentence → _expandedSentence 보정");
-        if (mounted) setState(() => _expandedSentence = directExpanded);
-      } else {}
-
-      // ── 3순위: session_ref로 refined_sentence fallback 조회 ──────
-      final sessionRef = roomData['session_ref'] as String?;
-      if (sessionRef == null || sessionRef.isEmpty) {
-        debugPrint("[loadPolishedSentence] 3순위: session_ref 없음 → 종료");
-        if (mounted) setState(() => _polishedLoadDone = true);
-        return;
-      }
-
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        if (mounted) setState(() => _polishedLoadDone = true);
-        return;
-      }
-
-      debugPrint("[loadPolishedSentence] 3순위: session_ref=$sessionRef 조회 시도");
-      final sessionDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .collection('sessions')
-          .doc(sessionRef)
-          .get();
-      if (!mounted) return;
-
-      final fallbackPolished =
-          sessionDoc.data()?['refined_sentence'] as String?;
-      if (fallbackPolished != null && fallbackPolished.isNotEmpty) {
-        debugPrint("[loadPolishedSentence] 3순위: refined_sentence fallback 성공");
-        setState(() {
-          _polishedSentence = fallbackPolished;
-          _polishedLoadDone = true;
-        });
-      } else {
-        debugPrint("[loadPolishedSentence] 3순위: refined_sentence 없음");
-        setState(() => _polishedLoadDone = true);
-      }
-    } catch (e) {
-      debugPrint("[loadPolishedSentence] 예외: $e");
-      if (mounted) setState(() => _polishedLoadDone = true);
-    }
-  }
-
   Future<void> _startPracticeWithVariant(SentenceVariant variant) async {
     _selectedVariant = variant;
     final sentence =
         (variant == SentenceVariant.polished && _polishedSentence.isNotEmpty)
             ? _polishedSentence
             : _expandedSentence;
-    _formattedFullSentence = sentence;
-
-    try {
-      final dir = await getApplicationDocumentsDirectory();
-      final folder = Directory('${dir.path}/tts_cache/${widget.historyDoc.id}');
-      if (await folder.exists()) {
-        final files = await folder.list().toList();
-        for (final f in files) {}
-      } else {}
-    } catch (e) {
-      debugPrint("[cacheSnapshot] $e");
-    }
     if (!mounted) return;
 
     await _buildChunks(sentence);
@@ -2278,7 +2110,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       _swapRoles = false;
       _showRetryHint = false;
       _isListening = false;
-      _isRerecordingSingle = false;
       _isPlayingFullUser = false;
       _isPlayingFullAI = false;
       _fullUserPlayIdx = 0;
@@ -2286,7 +2117,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       _aiChunkPlaying = false;
       _aiChunkLoading = false;
       _currentChunkIdx = 0;
-      _showEchoingOverlay = false;
     });
     _echoingOverlayTimer?.cancel();
   }
@@ -2314,15 +2144,12 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         _inFlightChunkFetch.clear(); // 🔧 [STAMPEDE-FIX] 진행 중 fetch 정리
         _currentChunkIdx = 0;
         _isListening = false;
-        _isRerecordingSingle = false;
         _isPlayingFullUser = false;
         _fullUserPlayIdx = 0;
         _fullAIAudioCache.clear();
         _expandedSentence = "";
         _polishedSentence = "";
         _polishedLoadDone = false;
-        _formattedFullSentence = "";
-        _entryMessageDocId = null;
         currentIndex = 0;
         _isAutoRecording = false;
         _aiChunkPlaying = false; // 🆕 [P2-INDICATOR]
@@ -2330,7 +2157,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         _isReplayMode = false; // 🆕 [P2-INDICATOR]
         _practicingPolished = false; // 🆕 [CHUNK-PRACTICE]
         _isPlayingFullAI = false; // 🆕 [CHUNK-PRACTICE]
-        _polishedRevealCount = 0;
         _tutorAwaitingStart = true; // 🆕 [BOX-30]
         _swapRoles = false; // 🆕 [BOX-32]
         _tutorAiSpeaking = false; // 🆕 [BOX-31]
@@ -2347,21 +2173,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
   }
 
   // 📦 [Box 12: 상태 머신 본체]
-
-  // [chunkSplit] HOST 메시지 갯수 조회 → N (1~10 클램프)
-  Future<int> _fetchUserTurnCount() async {
-    try {
-      final snap = await widget.historyDoc.collection('messages').get();
-      final hostCount = snap.docs.where((doc) {
-        return ((doc.data()['role'] ?? '') as String) == 'HOST';
-      }).length;
-      final n = hostCount.clamp(1, 10);
-      return n;
-    } catch (e) {
-      debugPrint("[fetchUserTurnCount] $e");
-      return 0;
-    }
-  }
 
   // [chunkSplit] GPT-4o-mini로 문장을 5~7단어 호흡 단위로 분할
   Future<List<String>?> _splitByBreathGroupsGpt(String sentence) async {
@@ -2737,17 +2548,6 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     _currentChunkIdx = 0;
   }
 
-  void _triggerEchoingOverlay({VoidCallback? onDismiss}) {
-    if (!mounted) return;
-    setState(() => _showEchoingOverlay = true);
-    _echoingOverlayTimer?.cancel();
-    _echoingOverlayTimer = Timer(const Duration(milliseconds: 2000), () {
-      if (!mounted) return;
-      setState(() => _showEchoingOverlay = false);
-      onDismiss?.call();
-    });
-  }
-
   Future<void> _prefetchAllChunkAI() async {
     if (_apiKey.isEmpty) {}
     for (int i = 0; i < _chunks.length; i++) {
@@ -2944,7 +2744,6 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
       setState(() {
         _chunks[doneIdx].userRecordPath = path;
         _chunks[doneIdx].isDone = true;
-        _isRerecordingSingle = false;
       });
       // chunkPractice 모드: 자동으로 다음 청크로 이동
       if (_phase == ShadowingPhase.chunkPractice && !_isReplayMode) {
@@ -3098,7 +2897,6 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
         _currentChunkIdx = idx;
         _chunks[idx].isDone = false;
         _chunks[idx].userRecordPath = null;
-        _isRerecordingSingle = false;
       });
     }
     // 4. AI 음성만 재생
@@ -3137,7 +2935,6 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     if (_currentChunkIdx < _chunks.length - 1) {
       setState(() {
         _currentChunkIdx++;
-        _isRerecordingSingle = false;
       });
       _playCurrentChunkAI();
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -3206,51 +3003,6 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     } catch (e) {
       debugPrint("[playUserChunk] $e");
       if (_isPlayingFullUser) _advanceFullUserPlay();
-    }
-  }
-
-  String _hashText(String text) {
-    final h = text.hashCode.abs().toRadixString(16);
-    return '${h}_${text.length}';
-  }
-
-  // 메인 뷰의 리듬 듣기 (일반 모드)
-  void _playRhythmAudio(String text) async {
-    _resumeHistoryFromUserAction();
-    if (text.isEmpty) return;
-    final historyId = widget.historyDoc.id;
-    final variant =
-        _selectedVariant == SentenceVariant.polished ? 'pol' : 'exp';
-    final cacheKey = 'gpt4omini_nova_full_${variant}_${_hashText(text)}.mp3';
-    // TODO: LRU 정리 — 30개 초과 시 가장 오래된 것부터 제거
-    if (_fullAIAudioCache.containsKey(cacheKey)) {
-      await audioPlayer.play(BytesSource(_fullAIAudioCache[cacheKey]!));
-      return;
-    }
-    // 대화방 공유 캐시(TtsCache) 확인 — 같은 문장을 대화방에서 들었으면 API 0회
-    final cacheVoice = _practiceCacheVoice(_historyPracticeAiVoice);
-    final ttsHit = await TtsCache.get(text, cacheVoice);
-    if (ttsHit != null && mounted) {
-      _fullAIAudioCache[cacheKey] = ttsHit;
-      await audioPlayer.play(BytesSource(ttsHit));
-      return;
-    }
-    final diskHit = await _AudioDiskCache.read(historyId, cacheKey);
-    if (diskHit != null && mounted) {
-      _fullAIAudioCache[cacheKey] = diskHit;
-      await audioPlayer.play(BytesSource(diskHit));
-      return;
-    }
-    // 🔧 [정상속도] formatForSlowRhythm 제거 → 텍스트 그대로 TTS
-    Uint8List? audio = await _getOrFetchPracticeTTS(
-      text,
-      _historyPracticeAiVoice,
-    );
-    if (!mounted) return;
-    if (audio != null) {
-      _fullAIAudioCache[cacheKey] = audio;
-      await _AudioDiskCache.write(historyId, cacheKey, audio);
-      await audioPlayer.play(BytesSource(audio));
     }
   }
 
@@ -3624,7 +3376,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
   void _showTutoringPopup(String docId, String baseText) {
     _resumeHistoryFromUserAction();
     if (_appIsRecording) {
-      appAudioRecorder.stop().catchError((_) {});
+      appAudioRecorder.stop().ignore();
     }
     setState(() {
       activeAppDocId = docId;
@@ -3670,7 +3422,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
           .setRate(BillingRate.full); // 튜터링 종료 (배율은 하나뿐이라 그대로)
       _dialogSetState = null;
       if (_appIsRecording) {
-        appAudioRecorder.stop().catchError((_) {});
+        appAudioRecorder.stop().ignore();
       }
       if (mounted) {
         setState(() {
@@ -3686,7 +3438,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
       {VoidCallback? onClose}) {
     void closeAccordion() {
       if (_appIsRecording) {
-        appAudioRecorder.stop().catchError((_) {});
+        appAudioRecorder.stop().ignore();
       }
       setState(() {
         activeAppDocId = null;
@@ -4419,35 +4171,6 @@ RULES — follow exactly:
         ],
       ),
     );
-  }
-
-  // 로비 ENTER 버튼과 동일한 로직: 잔여 시간 확인 후 StealthRoom 입장
-  void _handleEnterRoom() async {
-    resetBillingIdle();
-    if (_isActionLocked) return;
-    _isActionLocked = true;
-    try {
-      FocusScope.of(context).unfocus();
-      if (!guardBillingEntry(context)) return;
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return;
-      final newHistoryRef = FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .collection('chat_history')
-          .doc();
-      await newHistoryRef.set(
-          {'created_at': FieldValue.serverTimestamp(), 'is_pinned': false});
-      if (mounted) {
-        context.pushNamed('StealthRoom',
-            queryParameters: {
-              'historyRef':
-                  serializeParam(newHistoryRef, ParamType.DocumentReference)
-            }.withoutNulls);
-      }
-    } finally {
-      _isActionLocked = false;
-    }
   }
 
   // 📦 [Box 20: UI - 상단 네비게이션 바]
@@ -6400,7 +6123,7 @@ RULES — follow exactly:
                                       final rp =
                                           l['user_record_path'] as String?;
                                       if (rp != null && rp.isNotEmpty) {
-                                        File(rp).delete().catchError((_) {});
+                                        File(rp).delete().ignore();
                                       }
                                       l.remove('user_record_path');
                                       l.remove('ai_audio_bytes');
@@ -6664,257 +6387,6 @@ RULES — follow exactly:
     );
   }
 
-  // 세련문장 5~7단어 호흡 단위 연습으로 전환 (Expanded와 동일 기준)
-  Future<void> _switchToPolishedPractice() async {
-    if (_polishedSentence.isEmpty) return;
-    if (_isListening) _stopDeepgramListening();
-    audioPlayer.stop();
-    _polishedRevealTimer?.cancel();
-    // 로딩 스피너 먼저 표시 (GPT 분할 대기 중)
-    if (mounted) setState(() => _practicingPolished = true);
-    final units = await _splitSentenceIntoChunks(_polishedSentence, 'polished');
-    if (mounted) {
-      setState(() {
-        _polishedUnits = units.isNotEmpty ? units : [_polishedSentence];
-        _polishedUnitIdx = 0;
-        _polishedUnitAIPlaying = false;
-        _isPlayingFullUser = false;
-        _isPlayingFullAI = false;
-        _aiChunkPlaying = false;
-      });
-    }
-    await _playPolishedUnit(0);
-  }
-
-  // 직독직해 친화적 의미단위 분할
-  List<String> _splitPolishedIntoUnits(String sentence) {
-    final s = sentence.trim();
-    if (s.isEmpty) return [s];
-
-    // 단일 트리거 단어 (이 단어 앞에서 분할)
-    const splitTriggers = {
-      'and',
-      'but',
-      'or',
-      'so',
-      'yet',
-      'because',
-      'since',
-      'although',
-      'though',
-      'while',
-      'when',
-      'before',
-      'after',
-      'if',
-      'unless',
-      'until',
-      'as',
-      'who',
-      'whom',
-      'whose',
-      'which',
-      'where',
-      'that',
-    };
-
-    // 쉼표 뒤 절 시작 대명사 (주절 시작 신호)
-    const clauseStartPronouns = {
-      'i',
-      'you',
-      'he',
-      'she',
-      'we',
-      'they',
-      'it',
-      'there',
-    };
-
-    // 부정사 to 뒤에 오면 분할하지 않는 단어 (전치사구 to)
-    const infToNonVerbs = {
-      'the',
-      'a',
-      'an',
-      'my',
-      'your',
-      'his',
-      'her',
-      'our',
-      'their',
-      'its',
-      'this',
-      'that',
-      'these',
-      'those',
-      'some',
-      'any',
-      'all',
-      'no',
-      'each',
-      'every',
-      'both',
-      'few',
-      'many',
-      'much',
-      'more',
-      'most',
-      'another',
-      'me',
-      'you',
-      'him',
-      'us',
-      'them',
-      'it',
-    };
-
-    // 복합 전치사/접속사 — 첫 단어 앞에서 분할, 내부는 묶음 유지
-    const multiWordPrepList = [
-      'as soon as',
-      'as long as',
-      'as well as',
-      'as if',
-      'as though',
-      'even though',
-      'even if',
-      'in front of',
-      'because of',
-      'instead of',
-      'on top of',
-      'due to',
-      'according to',
-      'in spite of',
-      'in order to',
-      'out of',
-      'apart from',
-      'on behalf of',
-      'as a result of',
-      'in addition to',
-      'with regard to',
-      'in terms of',
-    ];
-
-    // 분사로 오해할 수 있는 일반 단어 제외
-    const participleExclusions = {
-      'need',
-      'said',
-      'would',
-      'could',
-      'should',
-      'indeed',
-      'agreed',
-      'old',
-      'good',
-      'new',
-      'bad',
-      'loved',
-      'named',
-    };
-
-    String cleanWord(String w) => w
-        .replaceAll(RegExp(r'^[,;:]+'), '')
-        .replaceAll(RegExp(r'[.,;:!?]+$'), '')
-        .toLowerCase();
-
-    bool isParticipleWord(String clean) {
-      if (clean.length <= 3 || participleExclusions.contains(clean))
-        return false;
-      return clean.endsWith('ing') ||
-          clean.endsWith('ed') ||
-          clean.endsWith('en');
-    }
-
-    final words = s.split(RegExp(r'\s+'));
-    if (words.isEmpty) return [s];
-
-    // 복합 전치사 위치 사전 계산 (시작 위치 및 내부 위치 마킹)
-    final Set<int> multiPrepStarts = {};
-    final Set<int> insideMultiPrep = {};
-    for (final prep in multiWordPrepList) {
-      final pWords = prep.split(' ');
-      for (int j = 0; j <= words.length - pWords.length; j++) {
-        final slice =
-            words.sublist(j, j + pWords.length).map(cleanWord).join(' ');
-        if (slice == prep) {
-          multiPrepStarts.add(j);
-          for (int k = j + 1; k < j + pWords.length; k++) {
-            insideMultiPrep.add(k);
-          }
-        }
-      }
-    }
-
-    final List<List<String>> units = [[]];
-
-    for (int i = 0; i < words.length; i++) {
-      final word = words[i];
-      final clean = cleanWord(word);
-      final currentUnit = units.last;
-      final wordCount = currentUnit.length;
-
-      // 복합 전치사 내부 단어 — 분할 없이 그냥 추가
-      if (insideMultiPrep.contains(i)) {
-        currentUnit.add(word);
-        continue;
-      }
-
-      // 1. 복합 전치사 시작 앞에서 분할 (현재 단위 ≥2 단어일 때)
-      if (multiPrepStarts.contains(i) && wordCount >= 2) {
-        units.add([word]);
-        continue;
-      }
-
-      // 2. 쉼표 뒤 분할 (현재 단위 ≥2 단어)
-      if (wordCount >= 2) {
-        final lastWord = currentUnit.last;
-        if (lastWord.endsWith(',') || lastWord == ',') {
-          // 2a. 주절 시작 대명사
-          if (clauseStartPronouns.contains(clean)) {
-            units.add([word]);
-            continue;
-          }
-          // 2b. 분사구문 (-ing / -ed / -en)
-          if (isParticipleWord(clean)) {
-            units.add([word]);
-            continue;
-          }
-        }
-      }
-
-      // 3. 접속사 / 관계사 앞에서 분할
-      if (wordCount >= 2 && splitTriggers.contains(clean)) {
-        units.add([word]);
-        continue;
-      }
-
-      // 4. 목적·결과 부정사 to 앞에서 분할
-      if (clean == 'to' && wordCount >= 2 && i + 1 < words.length) {
-        final nextClean = cleanWord(words[i + 1]);
-        if (!infToNonVerbs.contains(nextClean)) {
-          units.add([word]);
-          continue;
-        }
-      }
-
-      currentUnit.add(word);
-    }
-
-    // 2단어 미만 조각은 앞 단위에 합치기
-    final List<List<String>> merged = [];
-    for (final unit in units) {
-      if (unit.isEmpty) continue;
-      if (merged.isNotEmpty && unit.length < 2) {
-        merged.last.addAll(unit);
-      } else {
-        merged.add(unit);
-      }
-    }
-
-    final result =
-        merged.where((u) => u.isNotEmpty).map((u) => u.join(' ')).toList();
-
-    return result.isEmpty ? [s] : result;
-  }
-
   // 의미단위 AI TTS 재생
   // 🔧 [v3.7] TtsCache 우선 조회 → MISS 시 API 호출 후 캐시 저장
   Future<void> _playPolishedUnit(int idx) async {
@@ -6937,118 +6409,6 @@ RULES — follow exactly:
     } else {
       if (mounted) setState(() => _polishedUnitAIPlaying = false);
     }
-  }
-
-  // 전체 AI 순차 재생
-  Future<void> _playAllAI() async {
-    _resumeHistoryFromUserAction();
-    if (_chunks.isEmpty) return;
-    if (_isListening) _stopDeepgramListening();
-    if (mounted)
-      setState(() {
-        _isPlayingFullAI = true;
-        _currentChunkIdx = -1;
-        _aiChunkPlaying = false;
-      });
-    for (int i = 0; i < _chunks.length; i++) {
-      if (!mounted || !_isPlayingFullAI) break;
-      if (mounted) setState(() => _currentChunkIdx = i);
-      await _playChunkAI(i);
-      await Future.doWhile(() async {
-        await Future.delayed(const Duration(milliseconds: 100));
-        return isPlaying && mounted && _isPlayingFullAI;
-      });
-      if (!mounted) break;
-      await Future.delayed(const Duration(milliseconds: 350));
-    }
-    if (mounted)
-      setState(() {
-        _isPlayingFullAI = false;
-        _currentChunkIdx = -1;
-      });
-  }
-
-  // 청크 리스트 마지막 아이템으로 인라인 삽입되는 버튼 영역
-  Widget _buildPracticeButtonsInline() {
-    // 버튼 2개 + 충분한 하단 여백 (마지막 청크가 자동 스크롤로 화면 상단에 올라올 수 있도록)
-    // viewPadding.bottom: 폰 도구 높이 보상, size.height * 0.55: 스크롤 여백
-    final double bottomPad = MediaQuery.of(context).size.height * 0.55 +
-        MediaQuery.of(context).viewPadding.bottom;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(0, 6, 0, bottomPad),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton.icon(
-                  icon: Icon(
-                    _isPlayingFullAI ? Icons.stop_rounded : Icons.volume_up,
-                    size: 16,
-                    color: Colors.amber,
-                  ),
-                  label: Text(
-                    _isPlayingFullAI ? '중지' : 'AI Voice',
-                    style: const TextStyle(color: Colors.amber, fontSize: 13),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.amber.withValues(alpha: 0.1),
-                    side:
-                        BorderSide(color: Colors.amber.withValues(alpha: 0.6)),
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
-                    elevation: 0,
-                  ),
-                  onPressed: _isPlayingFullAI
-                      ? () {
-                          audioPlayer.stop();
-                          if (mounted)
-                            setState(() {
-                              _isPlayingFullAI = false;
-                              _currentChunkIdx = -1;
-                            });
-                        }
-                      : _playAllAI,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: ElevatedButton.icon(
-                  icon: Icon(
-                    _isPlayingFullUser ? Icons.stop_rounded : Icons.person,
-                    size: 16,
-                    color: Colors.greenAccent,
-                  ),
-                  label: Text(
-                    _isPlayingFullUser ? '중지' : 'My Voice',
-                    style: const TextStyle(
-                        color: Colors.greenAccent, fontSize: 13),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.greenAccent.withValues(alpha: 0.08),
-                    side: BorderSide(
-                        color: Colors.greenAccent.withValues(alpha: 0.5)),
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
-                    elevation: 0,
-                  ),
-                  onPressed: _isPlayingFullUser
-                      ? () {
-                          audioPlayer.stop();
-                          if (mounted)
-                            setState(() => _isPlayingFullUser = false);
-                        }
-                      : _playFullUser,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
   }
 
   // 🆕 [KO-FRAG] 청크 한국어 직독 조각 한 줄 — _langDisplayMode 0(영+한)·2(한)에서만 표시
@@ -8364,7 +7724,6 @@ RULES — follow exactly:
         _tutorPlayingFullback = false;
         _showRetryHint = false;
         _shadowSpeed = 1.0;
-        _showEchoingOverlay = false;
       });
       _echoingOverlayTimer?.cancel();
       _shadowHighlightTimer?.cancel();
@@ -8844,7 +8203,6 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
         _showRetryHint = false;
         _currentChunkIdx = -1;
         _phase = ShadowingPhase.chunkPractice;
-        _showEchoingOverlay = false;
         _selectedVariant = SentenceVariant.expanded;
         // 🎤 [P3-SPEAK] 새 세션으로 연다. 이전 녹음은 남기지 않는다 —
         //   AI 원본 TTS 캐시는 그대로 재사용된다.
@@ -9291,15 +8649,6 @@ class _AudioDiskCache {
       debugPrint('[_AudioDiskCache.write] $e');
     }
   }
-
-  static Future<void> clearRoom(String historyId) async {
-    if (historyId.isEmpty) return;
-    try {
-      final dir = await getApplicationDocumentsDirectory();
-      final folder = Directory('${dir.path}/tts_cache/$historyId');
-      if (await folder.exists()) await folder.delete(recursive: true);
-    } catch (_) {}
-  }
 }
 
 // 📦 [Box 25: enum + PracticeChunk 모델 클래스]
@@ -9348,26 +8697,6 @@ class PracticeChunk {
     this.userRecordPath,
     this.isDone = false,
   });
-}
-
-// 말풍선 위쪽 삼각형 화살표 페인터
-class _UpTrianglePainter extends CustomPainter {
-  final Color color;
-  const _UpTrianglePainter({required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = color;
-    final path = Path()
-      ..moveTo(size.width / 2, 0)
-      ..lineTo(0, size.height)
-      ..lineTo(size.width, size.height)
-      ..close();
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(_UpTrianglePainter old) => old.color != color;
 }
 
 class _LangIconPainter extends CustomPainter {
