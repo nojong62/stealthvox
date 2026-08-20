@@ -75,6 +75,9 @@ const String _historyPracticeTtsModel = 'gpt-4o-mini-tts';
 const String _historyPracticeAiVoice = 'nova';
 const String _historyPracticeUserVoice = 'verse';
 const Color _p3ShadowingAccentColor = Color(0xFF818CF8);
+const Color _p3PracticeSurfaceColor = Color(0xFF1C1C1C);
+const Color _p3PracticeBorderColor = Color(0x22FFFFFF);
+const Color _p3BreathAccentColor = Color(0xFF7DD3FC);
 
 /// 의미단위 낭독의 공통 뼈대. 무엇을 한 덩어리로 볼지, 덩어리 안을 어떻게
 /// 붙일지까지만 정한다. **덩어리 사이를 어떻게 다룰지는 아래 두 낭독 방식이
@@ -1545,13 +1548,13 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
   // ============================================================================
 
   // ══════════════════════════════════════════════════════════════════
-  // 🔤 [P2-MORPH] Sentence Morphing
+  // 🔤 [P2-MORPH] Thought Expansion
   //
   //   P2는 **문장이 자라는 모습을 보고 듣는 자리**다. 마이크도 녹음도 없다.
   //   말하기는 P3가 맡는다.
   //
-  //   한 계단: 이전 문장과 견주어 달라진 1~3곳을 계산 → 화면에 은은하게 표시
-  //   → 같은 변화를 살짝 살려 읽는 Smooth Jazz 전체 낭독 → 다음 계단
+  //   한 계단: LCS로 모든 변화를 찾되 핵심 변화 하나만 선택 → 화면에 은은하게
+  //   표시 → 같은 하나만 살려 읽는 Smooth Jazz 전체 낭독 → 다음 계단
   // ══════════════════════════════════════════════════════════════════
 
   /// 🪜 계단과 계단 사이에 두는 숨. 한 계단을 다 읽자마자 다음 계단이 밀고
@@ -1577,6 +1580,11 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     final previous =
         lineIdx > 0 ? (_tutorLines[lineIdx - 1]['text'] as String).trim() : '';
     final morph = computeMorph(previous, text);
+    debugPrint('[P2-THOUGHT]\n'
+        'Previous: ${previous.isEmpty ? '(none)' : previous}\n'
+        'Current: $text\n'
+        'All Changes: ${morph.phrases}\n'
+        'Primary Morph: ${morph.primary?.phrase ?? '(none)'}');
 
     _pinShadowLineToTop(lineIdx);
     _startShadowLineGlide(lineIdx,
@@ -1654,10 +1662,13 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     });
   }
 
-  /// 이번 문장의 소리. **강조 자리가 캐시 키에 들어간다** - 같은 문장이라도
-  /// 달라진 자리가 다르면 다른 소리이므로 같은 오디오를 쓰면 안 된다.
+  /// 이번 문장의 소리. **Primary Morph 하나가 캐시 키에 들어간다** - 같은
+  /// 문장이라도 핵심 변화가 다르면 다른 소리이므로 같은 오디오를 쓰면 안 된다.
   Future<Uint8List?> _getMorphPcm(String text, MorphChange morph) {
-    final ns = '${_breathCacheNamespace(_kBreathVoice)}_m${morph.identity}';
+    const morphInstructionVersion = 'primary_v1';
+    final ns = '${_breathCacheNamespace(_kBreathVoice)}'
+        '_$morphInstructionVersion'
+        '_m${morph.identity}';
     final requestKey = '$ns|$text';
     final existing = _breathPcmInFlight[requestKey];
     if (existing != null) return existing;
@@ -1671,7 +1682,9 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         model: _historyPracticeTtsModel,
         instructions:
             _kBreathStyle.instruction + morphEmphasisInstruction(morph),
-        instructionTag: '${_kBreathStyle.id}_m${morph.identity}',
+        instructionTag: '${_kBreathStyle.id}'
+            '_$morphInstructionVersion'
+            '_m${morph.identity}',
         responseFormat: 'pcm',
       );
       if (raw == null || raw.isEmpty) return null;
@@ -5813,8 +5826,8 @@ RULES — follow exactly:
       height: 1.5,
       fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
     );
-    // 🔤 [P2-MORPH] 지금 읽고 있는 계단에서만, 이번에 달라진 자리를 은은하게
-    //   살린다. 문법 설명도 밑줄도 없다 — 색과 굵기만 한 단계 올린다.
+    // 🔤 [P2-MORPH] 지금 읽는 계단에서 Primary Morph 하나만 은은하게 살린다.
+    //   문법 설명도 밑줄도 없다 — 색·굵기·아주 옅은 tint만 한 단계 올린다.
     final spans = _morphSpans(text, isCurrent, base);
     if (spans == null) {
       return Text(text,
@@ -5833,26 +5846,24 @@ RULES — follow exactly:
     if (!isCurrent || !_morphActive) return null;
     if (_morph.isEmpty || _morph.text != text) return null;
 
+    final primary = _morph.primary;
+    if (primary == null) return null;
     final accent = base.copyWith(
-      color: _kMorphAccent,
-      fontWeight: FontWeight.w700,
-      backgroundColor: _kMorphAccent.withValues(alpha: 0.10),
+      color: _kMorphAccent.withValues(alpha: 0.92),
+      fontWeight: FontWeight.w600,
+      backgroundColor: _kMorphAccent.withValues(alpha: 0.07),
     );
     final spans = <InlineSpan>[];
-    int cursor = 0;
-    for (final r in _morph.ranges) {
-      final int start = r.start.clamp(0, text.length);
-      final int end = r.end.clamp(start, text.length);
-      if (start > cursor) {
-        spans.add(TextSpan(text: text.substring(cursor, start)));
-      }
-      if (end > start) {
-        spans.add(TextSpan(text: text.substring(start, end), style: accent));
-      }
-      cursor = end;
+    final int start = primary.start.clamp(0, text.length);
+    final int end = primary.end.clamp(start, text.length);
+    if (start > 0) {
+      spans.add(TextSpan(text: text.substring(0, start)));
     }
-    if (cursor < text.length) {
-      spans.add(TextSpan(text: text.substring(cursor)));
+    if (end > start) {
+      spans.add(TextSpan(text: text.substring(start, end), style: accent));
+    }
+    if (end < text.length) {
+      spans.add(TextSpan(text: text.substring(end)));
     }
     return spans;
   }
@@ -6958,6 +6969,7 @@ RULES — follow exactly:
   StreamSubscription<void>? _p3PlayerSub;
   Timer? _p3SilenceTimer;
   bool _p3Recording = false;
+  bool _p3UserSpeaking = false;
 
   bool get _p3Busy =>
       _p3Stage == P3Stage.preparing ||
@@ -6978,7 +6990,10 @@ RULES — follow exactly:
 
   void _setP3Stage(P3Stage stage) {
     if (!mounted) return;
-    setState(() => _p3Stage = stage);
+    setState(() {
+      _p3Stage = stage;
+      if (stage != P3Stage.breathEcho) _p3UserSpeaking = false;
+    });
   }
 
   /// 재생·녹음·타이머를 전부 접는다. 화면을 나가는 모든 길이 여기로 온다.
@@ -7014,6 +7029,7 @@ RULES — follow exactly:
       setState(() {
         _p3Stage = P3Stage.idle;
         _p3Error = null;
+        _p3UserSpeaking = false;
       });
     }
   }
@@ -7037,6 +7053,7 @@ RULES — follow exactly:
       _selectedVariant = variant;
       _p3Stage = P3Stage.idle;
       _p3Error = null;
+      _p3UserSpeaking = false;
     });
   }
 
@@ -7056,6 +7073,7 @@ RULES — follow exactly:
       setState(() {
         _p3Stage = P3Stage.preparing;
         _p3Error = null;
+        _p3UserSpeaking = false;
       });
     }
 
@@ -7140,6 +7158,7 @@ RULES — follow exactly:
         setState(() {
           _p3BreathIndex = index;
           _p3BreathTotal = total;
+          _p3UserSpeaking = phase == BreathEchoPhase.userSpeaking;
           if (phase == BreathEchoPhase.aiPlaying) {
             _p3Stage = P3Stage.breathListen;
           } else if (phase == BreathEchoPhase.waitingForUser ||
@@ -7510,23 +7529,7 @@ RULES — follow exactly:
               ),
             ),
             const SizedBox(height: 14),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.04),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                    color: _p3ShadowingAccentColor.withValues(alpha: 0.35)),
-              ),
-              child: Text(
-                text.isEmpty ? '문장이 없습니다' : text,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 16 * _fontScale,
-                  height: 1.6,
-                ),
-              ),
-            ),
+            _buildP3SentencePanel(text),
             if (_p3Error != null) ...[
               const SizedBox(height: 10),
               Text(
@@ -7563,6 +7566,157 @@ RULES — follow exactly:
             ],
           ],
         ),
+      ),
+    );
+  }
+
+  /// Voice Lab의 차분한 surface와 호흡 포인트 컬러를 P3용으로 정리한다.
+  /// 대기만 하고 있을 때는 가만히 있고, VAD가 실제 목소리를 잡은 동안에만
+  /// 문장·테두리·마이크 표시가 살짝 밝아진다.
+  Widget _buildP3SentencePanel(String text) {
+    final bool inBreathEcho =
+        _p3Stage == P3Stage.breathListen || _p3Stage == P3Stage.breathEcho;
+    final bool speaking = inBreathEcho && _p3UserSpeaking;
+    final int safeTotal = _p3BreathTotal.clamp(0, 24);
+    final int safeIndex =
+        safeTotal == 0 ? 0 : _p3BreathIndex.clamp(0, safeTotal - 1);
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      padding: const EdgeInsets.fromLTRB(16, 13, 16, 17),
+      decoration: BoxDecoration(
+        color: speaking
+            ? _p3BreathAccentColor.withValues(alpha: 0.10)
+            : _p3PracticeSurfaceColor,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: speaking
+              ? _p3BreathAccentColor.withValues(alpha: 0.72)
+              : inBreathEcho
+                  ? _p3BreathAccentColor.withValues(alpha: 0.30)
+                  : _p3PracticeBorderColor,
+          width: speaking ? 1.4 : 1,
+        ),
+        boxShadow: speaking
+            ? <BoxShadow>[
+                BoxShadow(
+                  color: _p3BreathAccentColor.withValues(alpha: 0.10),
+                  blurRadius: 18,
+                  spreadRadius: 1,
+                ),
+              ]
+            : const <BoxShadow>[],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 160),
+                child: Icon(
+                  speaking ? Icons.mic_rounded : Icons.air_rounded,
+                  key: ValueKey<bool>(speaking),
+                  color: inBreathEcho ? _p3BreathAccentColor : Colors.white30,
+                  size: 17,
+                ),
+              ),
+              const SizedBox(width: 7),
+              Text(
+                inBreathEcho ? 'BREATH ECHO' : 'SPEAKING PRACTICE',
+                style: TextStyle(
+                  color: inBreathEcho ? _p3BreathAccentColor : Colors.white38,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.3,
+                ),
+              ),
+              const Spacer(),
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 160),
+                child: speaking
+                    ? Container(
+                        key: const ValueKey<String>('p3-speaking'),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: _p3BreathAccentColor.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(99),
+                        ),
+                        child: const Text(
+                          'READING',
+                          style: TextStyle(
+                            color: _p3BreathAccentColor,
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1.0,
+                          ),
+                        ),
+                      )
+                    : inBreathEcho && safeTotal > 0
+                        ? Text(
+                            '${safeIndex + 1} / $safeTotal',
+                            key: const ValueKey<String>('p3-breath-count'),
+                            style: const TextStyle(
+                              color: Colors.white38,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          )
+                        : const SizedBox.shrink(
+                            key: ValueKey<String>('p3-no-status')),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          AnimatedDefaultTextStyle(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            style: TextStyle(
+              color: speaking
+                  ? Colors.white
+                  : Colors.white.withValues(alpha: 0.90),
+              fontSize: 16 * _fontScale,
+              fontWeight: speaking ? FontWeight.w600 : FontWeight.w400,
+              height: 1.6,
+              shadows: speaking
+                  ? <Shadow>[
+                      Shadow(
+                        color: _p3BreathAccentColor.withValues(alpha: 0.18),
+                        blurRadius: 8,
+                      ),
+                    ]
+                  : const <Shadow>[],
+            ),
+            child: Text(text.isEmpty ? '문장이 없습니다' : text),
+          ),
+          if (inBreathEcho && safeTotal > 0) ...<Widget>[
+            const SizedBox(height: 13),
+            Row(
+              children: <Widget>[
+                for (int i = 0; i < safeTotal; i++) ...<Widget>[
+                  Expanded(
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      height: i == safeIndex ? 3 : 2,
+                      decoration: BoxDecoration(
+                        color: i < safeIndex
+                            ? _p3BreathAccentColor.withValues(alpha: 0.34)
+                            : i == safeIndex
+                                ? _p3BreathAccentColor.withValues(
+                                    alpha: speaking ? 0.95 : 0.68)
+                                : Colors.white10,
+                        borderRadius: BorderRadius.circular(99),
+                      ),
+                    ),
+                  ),
+                  if (i < safeTotal - 1) const SizedBox(width: 4),
+                ],
+              ],
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -8386,6 +8540,7 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
         //   AI 원본 TTS 캐시는 그대로 재사용된다.
         _p3Stage = P3Stage.idle;
         _p3Error = null;
+        _p3UserSpeaking = false;
       });
       unawaited(_stopP3Shadowing(resetSelection: true));
     }
@@ -8464,7 +8619,7 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
       text = '문장 듣기';
       color = Colors.white38;
     } else {
-      text = '이번에 달라진 곳';
+      text = '이번 생각의 변화';
       color = _kMorphAccent;
     }
     return Padding(

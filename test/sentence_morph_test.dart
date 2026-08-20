@@ -14,6 +14,9 @@ import 'package:stealth_vox/custom_code/services/sentence_morph.dart';
 List<String> phrasesOf(String prev, String cur) =>
     computeMorph(prev, cur).phrases;
 
+String? primaryOf(String prev, String cur) =>
+    computeMorph(prev, cur).primary?.phrase;
+
 void main() {
   group('computeMorph — 지시문 예문', () {
     test('앞부분 추가 + 표현 교체 (구조 변경)', () {
@@ -34,8 +37,8 @@ void main() {
 
     test('여러 곳 동시 추가', () {
       expect(
-        phrasesOf('I was surprised.',
-            'I was honestly a little surprised at first.'),
+        phrasesOf(
+            'I was surprised.', 'I was honestly a little surprised at first.'),
         <String>['honestly a little', 'at first.'],
       );
     });
@@ -110,8 +113,10 @@ void main() {
     const samples = <List<String>>[
       ["I didn't like the idea.", "At first, I wasn't sure I liked the idea."],
       ['I was surprised.', 'I was honestly a little surprised at first.'],
-      ["Honestly, I didn't really expect that, so I wasn't sure what to say.",
-        "Honestly, I didn't really expect that, and for a moment, I wasn't quite sure what to say."],
+      [
+        "Honestly, I didn't really expect that, so I wasn't sure what to say.",
+        "Honestly, I didn't really expect that, and for a moment, I wasn't quite sure what to say."
+      ],
       ['It was good.', 'It was better.'],
     ];
 
@@ -149,8 +154,8 @@ void main() {
     test('identity는 결정적이다', () {
       const prev = "I didn't like it.";
       const cur = "I wasn't sure I liked it.";
-      expect(computeMorph(prev, cur).identity,
-          computeMorph(prev, cur).identity);
+      expect(
+          computeMorph(prev, cur).identity, computeMorph(prev, cur).identity);
       expect(computeMorph(prev, cur).identity, isNot('none'));
     });
 
@@ -177,16 +182,117 @@ void main() {
     });
   });
 
+  group('Primary Morph selector — Thought Expansion', () {
+    test('1. 단순 추가', () {
+      expect(
+          primaryOf('I like the idea.', 'I really like the idea.'), 'really');
+    });
+
+    test('2. 구조 변경은 단순 prefix보다 핵심 표현 교체를 고른다', () {
+      expect(
+        primaryOf("I didn't like the idea.",
+            "At first, I wasn't sure I liked the idea."),
+        "wasn't sure I liked",
+      );
+    });
+
+    test('3. 방향 전환 절은 첫 핵심 phrase 하나만 고른다', () {
+      expect(
+        primaryOf(
+          "I wasn't sure I liked the idea.",
+          "I wasn't sure I liked the idea, but after hearing the details, I started to see why it could work.",
+        ),
+        'but after hearing the details',
+      );
+    });
+
+    test('4. prefix frame을 작은 부사 삽입보다 우선한다', () {
+      expect(
+        primaryOf(
+          "I didn't know what to say.",
+          "For a moment, I honestly didn't know what to say.",
+        ),
+        'For a moment',
+      );
+    });
+
+    test('5. 핵심 표현 교체', () {
+      expect(
+        primaryOf("I didn't like it.", "I wasn't sure I liked it."),
+        "wasn't sure I liked",
+      );
+    });
+
+    test('6. 한 단어 변화', () {
+      expect(primaryOf('It was good.', 'It was better.'), 'better');
+    });
+
+    test('7. 여러 region 중 최대 하나만 선택한다', () {
+      final morph = computeMorph(
+        'I was surprised.',
+        'I was honestly a little surprised at first.',
+      );
+      expect(morph.ranges.length, greaterThan(1));
+      expect(morph.primary?.phrase, 'at first');
+    });
+
+    test('8. 전면 재작성은 primary가 없다', () {
+      final morph = computeMorph(
+        'I was surprised.',
+        'Looking back on it now, the whole thing turned out completely differently.',
+      );
+      expect(morph.primary, isNull);
+      expect(morph.identity, 'none');
+    });
+
+    test('9. 같은 입력은 같은 primary를 결정한다', () {
+      const previous = 'I thought it was strange.';
+      const current =
+          'I thought it was strange, but after a while I got used to it.';
+      final first = computeMorph(previous, current).primary;
+      for (int i = 0; i < 10; i++) {
+        expect(computeMorph(previous, current).primary, first);
+      }
+    });
+
+    test('10. primary range와 phrase가 current text 안에서 정확히 일치한다', () {
+      const previous = "I didn't like the idea.";
+      const current = "At first, I wasn't sure I liked the idea.";
+      final primary = computeMorph(previous, current).primary!;
+      expect(primary.start, greaterThanOrEqualTo(0));
+      expect(primary.end, lessThanOrEqualTo(current.length));
+      expect(primary.end, greaterThan(primary.start));
+      expect(current.substring(primary.start, primary.end), primary.phrase);
+    });
+  });
+
   group('morphEmphasisInstruction', () {
     test('강조가 없으면 빈 문자열', () {
       expect(morphEmphasisInstruction(computeMorph('', 'Hello.')), '');
     });
 
     test('강조 문구가 지시문에 인용된다', () {
-      final morph = computeMorph("I didn't like it.", "I wasn't sure I liked it.");
+      final morph =
+          computeMorph("I didn't like it.", "I wasn't sure I liked it.");
       final instruction = morphEmphasisInstruction(morph);
       expect(instruction, contains("wasn't sure I liked"));
       expect(instruction, contains('understated'));
+      expect(instruction, contains('entire sentence'));
+      expect(instruction, contains('subtle'));
+    });
+
+    test('all changes가 여러 개여도 TTS에는 primary 하나만 들어간다', () {
+      final morph = computeMorph(
+        "I didn't like the idea.",
+        "At first, I wasn't sure I liked the idea.",
+      );
+      expect(morph.phrases, hasLength(2));
+      expect(morph.primary?.phrase, "wasn't sure I liked");
+
+      final instruction = morphEmphasisInstruction(morph);
+      expect(instruction, contains('"wasn\'t sure I liked"'));
+      expect(instruction, isNot(contains('At first')));
+      expect(morph.identity, morph.primary?.identity);
     });
   });
 }
