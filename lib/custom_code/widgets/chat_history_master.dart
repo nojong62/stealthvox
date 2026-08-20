@@ -459,6 +459,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     //   무효화하고, 소유한 재생·타이머·임시 녹음을 직접 접는다.
     _p3Generation++;
     _p3SilenceTimer?.cancel();
+    _p3ReturnTimer?.cancel();
+    _p3PageScrollController.dispose();
     _p3PlayerSub?.cancel();
     _p3Player?.stop();
     _p3Player?.dispose();
@@ -6496,6 +6498,10 @@ RULES — follow exactly:
   static const int _kP3ShadowTailMs = 700;
   static const Duration _kP3StageGap = Duration(milliseconds: 600);
 
+  /// Start를 누른 뒤 첫 소리까지의 숨. 누르자마자 AI가 튀어나오면 화면을
+  /// 볼 새도 준비할 새도 없다. Echoing·Shadowing 둘 다 같은 값을 쓴다.
+  static const Duration _kP3StartDelay = Duration(seconds: 1);
+
   // ── P3 상태 ───────────────────────────────────────────────────────
   P3Stage _p3Stage = P3Stage.idle;
   P3PracticeMode _p3PracticeMode = P3PracticeMode.echoing;
@@ -6515,6 +6521,18 @@ RULES — follow exactly:
   Timer? _p3SilenceTimer;
   bool _p3Recording = false;
   bool _p3UserSpeaking = false;
+
+  /// 🎤 [P3-ONEPAGE] 메뉴는 늘 맨 위에 있고 연습칸이 그 아래로 이어진다.
+  ///   화면을 갈아 끼우지 않고 **한 페이지를 오르내린다.**
+  final ScrollController _p3PageScrollController = ScrollController();
+
+  /// 연습칸의 시작점. 스크롤이 여기를 화면 위로 올린다.
+  final GlobalKey _p3PracticeKey = GlobalKey();
+
+  /// 한 바퀴가 끝나고 메뉴로 되돌아가기까지의 유예. 이 동안 녹음을 눌러
+  /// 들어볼 수 있고, 그냥 두면 알아서 위로 올라간다.
+  Timer? _p3ReturnTimer;
+  static const Duration _kP3ReturnDelay = Duration(seconds: 3);
 
   bool get _p3Busy =>
       _p3Stage == P3Stage.preparing ||
@@ -6542,7 +6560,43 @@ RULES — follow exactly:
   }
 
   /// 재생·녹음·타이머를 전부 접는다. 화면을 나가는 모든 길이 여기로 온다.
+  /// 연습칸을 화면 위로 끌어올린다. 메뉴는 위로 밀려나지만 사라지지 않는다.
+  void _scrollP3ToPractice() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final ctx = _p3PracticeKey.currentContext;
+      if (ctx == null) return;
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.0,
+        duration: const Duration(milliseconds: 320),
+        curve: Curves.easeOutCubic,
+      );
+    });
+  }
+
+  /// 맨 위 메뉴로 되돌아간다. 연습칸은 아래에 그대로 남는다 — 방금 한 것을
+  /// 지우지 않으므로 녹음도 계속 들어볼 수 있다.
+  void _scrollP3ToMenu() {
+    if (!_p3PageScrollController.hasClients) return;
+    _p3PageScrollController.animateTo(
+      0,
+      duration: const Duration(milliseconds: 420),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  /// 한 바퀴가 끝났다. 바로 튕겨 올리지 않고 [_kP3ReturnDelay]만큼 둔다.
+  void _scheduleP3ReturnToMenu() {
+    _p3ReturnTimer?.cancel();
+    _p3ReturnTimer = Timer(_kP3ReturnDelay, () {
+      if (!mounted || _phase != ShadowingPhase.chunkPractice) return;
+      _scrollP3ToMenu();
+    });
+  }
+
   Future<void> _stopP3Shadowing({bool resetSelection = false}) async {
+    _p3ReturnTimer?.cancel();
     _p3Generation++;
     _p3SilenceTimer?.cancel();
     _p3SilenceTimer = null;
@@ -6589,9 +6643,15 @@ RULES — follow exactly:
   /// 완성/세련 문장은 TTS·호흡·사용자 녹음이 서로 다른 한 벌이다.
   /// 문장을 바꾸면 현재 회차를 완전히 접고 새 선택을 준비한다. 원본 TTS는
   /// text가 캐시 identity에 들어가므로 각 문장별로 재사용된다.
+  ///
+  /// **첫 화면에서는 고르기만 한다** — 시작은 ▶ Start가 연다. 한 번 시작한
+  /// 뒤에는 Start가 화면에 없으므로, 메뉴에서 고르는 것이 곧 다시 시작이다.
+  /// `_stopP3Shadowing`이 stage를 idle로 되돌리므로 **멈추기 전에** 진행
+  /// 중이었는지를 기억해 둬야 한다.
   Future<void> _selectP3Variant(SentenceVariant variant) async {
     if (!_p3VariantAvailable(variant) || _p3Busy) return;
-    if (_selectedVariant == variant && _p3Stage == P3Stage.idle) return;
+    final bool wasStarted = _p3Stage != P3Stage.idle;
+    if (_selectedVariant == variant && !wasStarted) return;
     await _stopP3Shadowing(resetSelection: true);
     if (!mounted || _phase != ShadowingPhase.chunkPractice) return;
     setState(() {
@@ -6600,10 +6660,13 @@ RULES — follow exactly:
       _p3Error = null;
       _p3UserSpeaking = false;
     });
+    if (wasStarted) await _startP3Speaking();
   }
 
   Future<void> _selectP3PracticeMode(P3PracticeMode mode) async {
-    if (_p3PracticeMode == mode || _p3Busy) return;
+    if (_p3Busy) return;
+    final bool wasStarted = _p3Stage != P3Stage.idle;
+    if (_p3PracticeMode == mode && !wasStarted) return;
     await _stopP3Shadowing(resetSelection: true);
     if (!mounted || _phase != ShadowingPhase.chunkPractice) return;
     setState(() {
@@ -6612,6 +6675,14 @@ RULES — follow exactly:
       _p3Error = null;
       _p3UserSpeaking = false;
     });
+    if (wasStarted) await _startP3Speaking();
+  }
+
+  /// ■ Stop — 연습을 접고 맨 위 메뉴로 되돌아간다.
+  Future<void> _stopP3AndReturnToMenu() async {
+    await _stopP3Shadowing(resetSelection: true);
+    if (!mounted) return;
+    _scrollP3ToMenu();
   }
 
   /// 최종 문장의 Smooth Jazz PCM을 얻어 호흡으로 가른 뒤 Stage 1을 연다.
@@ -6632,6 +6703,8 @@ RULES — follow exactly:
         _p3Error = null;
         _p3UserSpeaking = false;
       });
+      // 메뉴는 위에 남고 연습칸이 화면 정면으로 올라온다.
+      _scrollP3ToPractice();
     }
 
     Uint8List? pcm = _p3FullPcm;
@@ -6671,6 +6744,10 @@ RULES — follow exactly:
     }
     debugPrint('[P3-SPEAK] breaths=${analysis.segments.length} '
         'total=${analysis.totalMs}ms voice=$_p3Voice');
+    // 화면이 먼저 자리를 잡고 나서 소리가 난다. 두 모드가 갈리기 전에 한 번만
+    // 기다린다 — 각자 넣으면 값이 갈라진다.
+    await Future<void>.delayed(_kP3StartDelay);
+    if (!_p3Alive(generation)) return;
     if (_p3PracticeMode == P3PracticeMode.echoing) {
       await _ensureP3Engine().start(
         aiPcm: pcm,
@@ -6770,6 +6847,8 @@ RULES — follow exactly:
       generation,
       silenceMs: _kP3EchoSilenceMs,
       noSpeechMs: _kP3EchoNoSpeechMs,
+      // 한 바퀴가 끝나도 화면을 갈아 끼우지 않는다. compare를 그대로 두어
+      //   녹음을 들어볼 수 있게 하고, 3초 뒤 **스크롤만** 메뉴로 올린다.
       onDone: (recorded, spoke) {
         if (!spoke) {
           // 말하지 않았다. 빈 파일을 성공한 녹음으로 취급하지 않는다.
@@ -6777,7 +6856,9 @@ RULES — follow exactly:
           setState(() {
             _p3Error = 'No speech was detected';
             _p3Stage = P3Stage.compare;
+            _p3UserSpeaking = false;
           });
+          _scheduleP3ReturnToMenu();
           return;
         }
         _deleteP3File(_p3EchoPath);
@@ -6785,7 +6866,9 @@ RULES — follow exactly:
           _p3EchoPath = recorded ?? path;
           _p3Error = null;
           _p3Stage = P3Stage.compare;
+          _p3UserSpeaking = false;
         });
+        _scheduleP3ReturnToMenu();
       },
     );
   }
@@ -6831,7 +6914,9 @@ RULES — follow exactly:
     setState(() {
       _p3ShadowPath = recorded ?? path;
       _p3Stage = P3Stage.compare;
+      _p3UserSpeaking = false;
     });
+    _scheduleP3ReturnToMenu();
   }
 
   Future<void> _stopP3Playback() async {
@@ -7058,80 +7143,110 @@ RULES — follow exactly:
     }
   }
 
+  /// 🎤 [P3-ONEPAGE] 첫 화면은 **메뉴 + ▶ Start**만 있는 그대로다.
+  ///
+  /// 시작한 뒤부터 한 페이지가 된다 — 메뉴는 맨 위에 남고 연습칸이 그 아래로
+  /// 이어진다. 그때부터는 Start를 다시 누르지 않는다: 메뉴에서 모드나 문장을
+  /// 고르면 아래 내용이 곧바로 그것으로 바뀌며 진행된다.
   Widget _buildP3SpeakingScreen() {
     final text = _p3TargetSentence;
     final bool started = _p3Stage != P3Stage.idle;
     return MediaQuery.withClampedTextScaling(
       maxScaleFactor: 1.3,
       child: SingleChildScrollView(
+        controller: _p3PageScrollController,
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // ── 메뉴 ── 첫 화면에서도, 연습 중에도 같은 자리에 있다.
             _buildP3VoiceSelector(started: started),
             const SizedBox(height: 10),
             _buildP3PracticeModePicker(),
             const SizedBox(height: 14),
-            if (!started) ...[
-              _buildP3VariantPicker(showPreview: false),
-              if (_p3PracticeMode == P3PracticeMode.shadowing) ...[
-                const SizedBox(height: 12),
-                _buildP3GapPicker(),
-              ],
-              const SizedBox(height: 14),
-              _p3PrimaryButton('▶ Start', () => unawaited(_startP3Speaking())),
-              const SizedBox(height: 14),
-            ] else if (_p3Stage == P3Stage.compare) ...[
-              _buildP3VariantPicker(showPreview: true),
-              const SizedBox(height: 14),
+            _buildP3VariantPicker(showPreview: false),
+            if (_p3PracticeMode == P3PracticeMode.shadowing) ...[
+              const SizedBox(height: 12),
+              _buildP3GapPicker(),
             ],
-            if (started) ...[
-              Text(
-                _p3StageLabel,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: _p3Stage == P3Stage.breathEcho ||
-                          _p3Stage == P3Stage.fullEchoRecord ||
-                          _p3Stage == P3Stage.fullShadowRecord
-                      ? Colors.amber
-                      : Colors.white54,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 14),
-            ],
-            if (started) _buildP3SentencePanel(text),
+
+            // 오류는 연습이 시작되지 못했을 때도 보여야 하므로 밖에 둔다.
             if (_p3Error != null) ...[
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               Text(
                 _p3Error!,
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: Color(0xFFFF6B6B), fontSize: 12),
               ),
             ],
-            if (started) const SizedBox(height: 18),
-            if (_p3Stage == P3Stage.compare) ...[
-              if (_p3PracticeMode == P3PracticeMode.shadowing) ...[
-                _buildP3GapPicker(),
-                const SizedBox(height: 10),
-              ],
-              _p3PrimaryButton(
-                _p3PracticeMode == P3PracticeMode.echoing
-                    ? '▶ Echo Again'
-                    : '▶ Shadow Again',
-                _p3Busy ? null : () => unawaited(_startP3Speaking()),
+
+            // ── 첫 화면 ── 메뉴 밑에 Start 하나. 여기서 한 바퀴가 열린다.
+            if (!started) ...[
+              const SizedBox(height: 14),
+              _p3PrimaryButton('▶ Start', () => unawaited(_startP3Speaking())),
+              const SizedBox(height: 14),
+            ],
+
+            // ── 연습칸 ── 시작한 뒤에만. 메뉴 아래로 이어 붙는다.
+            if (started)
+              Column(
+                key: _p3PracticeKey,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const SizedBox(height: 20),
+                  // 에코잉에서는 진도(Breath n/n · …)를 여기 두지 않는다.
+                  //   귀로 따라오게 하는 연습이라 위쪽에 숫자가 있으면 눈이
+                  //   먼저 간다. 호흡 위치는 문장 패널 안 카운터가 알린다.
+                  if (_p3PracticeMode == P3PracticeMode.echoing)
+                    const Text(
+                      'Try to echo without reading — just trust your ears!',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.white54,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        height: 1.4,
+                      ),
+                    )
+                  else
+                    Text(
+                      _p3StageLabel,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: _p3Stage == P3Stage.fullShadowRecord
+                            ? Colors.amber
+                            : Colors.white54,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  const SizedBox(height: 14),
+                  _buildP3SentencePanel(text),
+
+                  // ── 2) 한 바퀴가 끝난 뒤: 에코잉만 다시 돌린다.
+                  //   모드는 그대로라 쉐도잉으로 넘어가지 않는다. 아래
+                  //   [AI]·[ECHO] 듣기 버튼은 건드리지 않는다.
+                  if (_p3Stage == P3Stage.compare &&
+                      _p3PracticeMode == P3PracticeMode.echoing) ...[
+                    const SizedBox(height: 14),
+                    _p3PrimaryButton(
+                      '↻ Echo Again',
+                      _p3Busy ? null : () => unawaited(_startP3Speaking()),
+                    ),
+                  ],
+                  const SizedBox(height: 18),
+                  _buildP3CompareRow(),
+                  const SizedBox(height: 12),
+                  // 맨 밑 정지 — 연습을 접고 첫 화면으로 돌아간다.
+                  _p3SecondaryButton(
+                    '■ Stop',
+                    () => unawaited(_stopP3AndReturnToMenu()),
+                  ),
+                  // 연습칸이 화면 맨 위까지 올라갈 수 있으려면 아래에 여백이
+                  // 있어야 한다. 없으면 스크롤이 끝에 걸려 메뉴가 안 밀린다.
+                  SizedBox(height: MediaQuery.of(context).size.height * 0.55),
+                ],
               ),
-            ],
-            if (started) ...[
-              const SizedBox(height: 18),
-              _buildP3CompareRow(),
-            ],
-            if (_p3Busy && _p3Stage != P3Stage.compare) ...[
-              const SizedBox(height: 12),
-              _p3SecondaryButton('■ Stop',
-                  () => unawaited(_stopP3Shadowing(resetSelection: true))),
-            ],
           ],
         ),
       ),
@@ -7211,11 +7326,25 @@ RULES — follow exactly:
                 ),
               ),
               const Spacer(),
+              // 본문에 색을 넣지 않으므로 **여기가 유일한 신호다.** 카운터와
+              // READING을 한 자리에서 교대시키면 정작 말하는 동안 몇 번째
+              // 호흡인지가 사라진다. 둘을 나란히 두고 카운터는 항상 남긴다.
+              if (inBreathEcho && safeTotal > 0)
+                Text(
+                  '${safeIndex + 1} / $safeTotal',
+                  style: TextStyle(
+                    color: userTurn ? userTurnAccent : Colors.white54,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.5,
+                  ),
+                ),
               AnimatedSwitcher(
                 duration: const Duration(milliseconds: 160),
                 child: speaking
                     ? Container(
                         key: const ValueKey<String>('p3-speaking'),
+                        margin: const EdgeInsets.only(left: 8),
                         padding: const EdgeInsets.symmetric(
                             horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
@@ -7232,51 +7361,22 @@ RULES — follow exactly:
                           ),
                         ),
                       )
-                    : inBreathEcho && safeTotal > 0
-                        ? Text(
-                            '${safeIndex + 1} / $safeTotal',
-                            key: const ValueKey<String>('p3-breath-count'),
-                            style: const TextStyle(
-                              color: Colors.white38,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          )
-                        : const SizedBox.shrink(
-                            key: ValueKey<String>('p3-no-status')),
+                    : const SizedBox.shrink(
+                        key: ValueKey<String>('p3-no-status')),
               ),
             ],
           ),
           const SizedBox(height: 12),
-          AnimatedDefaultTextStyle(
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeOutCubic,
+          // 🚫 본문은 상태에 따라 변하지 않는다. 문장 전체가 물들면 "지금 어디"를
+          //    알려주지 못하면서 눈만 시끄럽다. 위치는 카운터가 알린다.
+          Text(
+            text.isEmpty ? 'Sentence unavailable' : text,
             style: TextStyle(
-              color: userTurn
-                  ? Color.lerp(
-                      Colors.white,
-                      userTurnAccent,
-                      speaking ? 0.72 : 0.56,
-                    )!
-                  : Colors.white.withValues(alpha: 0.90),
+              color: Colors.white.withValues(alpha: 0.90),
               fontSize: 16 * _fontScale,
-              fontWeight: speaking
-                  ? FontWeight.w600
-                  : userTurn
-                      ? FontWeight.w500
-                      : FontWeight.w400,
+              fontWeight: FontWeight.w400,
               height: 1.6,
-              shadows: userTurn
-                  ? <Shadow>[
-                      Shadow(
-                        color: userTurnAccent.withValues(
-                            alpha: speaking ? 0.26 : 0.14),
-                        blurRadius: 8,
-                      ),
-                    ]
-                  : const <Shadow>[],
             ),
-            child: Text(text.isEmpty ? 'Sentence unavailable' : text),
           ),
         ],
       ),
