@@ -45,17 +45,8 @@ import '/custom_code/services/pcm_audio_utils.dart'
 // 🌬️ [P2-BREATH] Breath Echoing이 쓰는 값. **한곳에만 둔다.**
 // ════════════════════════════════════════════════════════════════════
 
-/// 🚧 **temporary Breath Echoing default voice — final voice not yet selected.**
-///
-/// Lab 실측에서 cedar가 호흡 경계를 가장 뚜렷하게 냈지만(pause 580/540ms),
-/// 그건 "가장 잘 끊어 읽는다"는 뜻이라 Smooth Jazz의 부드러움과는 오히려
-/// 반대일 수 있다. 실제 P2 문장을 몇 개 돌려본 뒤 marin·echo·verse 중으로
-/// 바꿀 수 있다. **바꿀 때 고칠 곳은 이 한 줄뿐이다.**
+/// P3 Breath Echoing의 고정 보이스. P2는 화면의 보이스 선택값을 별도로 쓴다.
 const String _kBreathVoice = 'cedar';
-
-/// 🔤 [P2-MORPH] 달라진 자리에 쓰는 색. 경고처럼 보이지 않게, 본문보다
-/// 한 단계만 밝은 톤으로 둔다.
-const Color _kMorphAccent = Color(0xFF7DD3FC);
 
 /// Breath TTS는 Lab과 **같은 Smooth Jazz 정의**를 쓴다. 복사본을 만들지
 /// 않는다 — 갈라지면 Lab에서 고른 소리와 실사용 소리가 달라진다.
@@ -271,16 +262,13 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   Timer? _shadowHighlightTimer;
   Timer? _shadowAdvanceTimer;
   double _shadowSpeed = 1.0; // 오디오 실패 시 하이라이트 fallback용 고정 속도.
-  // P2 학습 Voice는 Cedar를 기본값으로 사용한다.
+  // P2 학습 Voice는 상단 풀다운에서 고르며 Cedar를 기본값으로 사용한다.
+  String _p2Voice = 'cedar';
   // [P2-REPEAT] 한 줄을 몇 번 들려줄지. null이면 아직 안 골랐다 — 보이스와
   //   이 값을 **둘 다** 골라야 연습이 시작된다.
   //   2번 = 1회차 듣기 + 2회차 쉐도잉. 1번 = 쉐도잉 하나.
   // [P2-REPEAT] 지금 이 줄의 몇 회차인지(0부터). 줄이 바뀌면 0으로 돌아간다.
   // ── 🔤 [P2-MORPH] ───────────────────────────────────────────────
-  /// 이번 계단에서 달라진 핵심 자리. 화면은 GPT 청크 매핑을 사용하고,
-  /// 이 값은 전체 문장의 미세한 TTS 강조와 캐시 키에만 사용한다.
-  MorphChange _morph = MorphChange.none;
-
   /// 소리를 받아 오는 중. 이 동안에도 과금은 살아 있어야 한다.
   bool _morphPreparing = false;
 
@@ -1341,14 +1329,14 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       setState(() {
         _isPreparingStepP3 = false;
         _stepP3PreparationError =
-            expanded.isEmpty ? 'P3에서 사용할 문장이 없습니다.' : null;
+            expanded.isEmpty ? 'No sentence is available for P3.' : null;
       });
     } catch (e) {
       debugPrint('[prepareStepP3] $e');
       if (!mounted || generation != _stepP3PreparationGeneration) return;
       setState(() {
         _isPreparingStepP3 = false;
-        _stepP3PreparationError = 'P3 준비에 실패했습니다. 눌러서 다시 시도하세요.';
+        _stepP3PreparationError = 'P3 preparation failed. Tap to retry.';
       });
     }
   }
@@ -1489,6 +1477,17 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     _startTurnPractice();
   }
 
+  void _startP2Reading() {
+    if (!mounted ||
+        _phase != ShadowingPhase.part2Practice ||
+        !_tutorAwaitingStart) {
+      return;
+    }
+    _resumeHistoryFromUserAction();
+    setState(() => _tutorAwaitingStart = false);
+    _startTurnPractice();
+  }
+
   // ============================================================================
   // 📦 [Box 11-C: 양방향 턴제 연습 엔진 (Turn-Based Practice)]
   // ============================================================================
@@ -1546,8 +1545,9 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     final line = _tutorLines[currentIndex];
     final bool isAiTurn = _isAiTurn(line); // 🆕 [BOX-32]
     if (_phase == ShadowingPhase.part2Practice) {
-      // 🔤 [P2-MORPH] P2는 말하기 자리가 아니다. 고르고 시작하는 게이트도
-      //   없다 — 들어오면 바로 문장이 자라는 것을 보여준다.
+      if (_tutorAwaitingStart) return;
+      // 🔤 [P2-MORPH] 상단에서 보이스를 고른 뒤 See How It Grows를 누르면
+      //   첫 문장부터 자라는 흐름을 시작한다.
       unawaited(_runMorphStep(currentIndex));
       return;
     }
@@ -1572,13 +1572,9 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
   //   P2는 **문장이 자라는 모습을 보고 듣는 자리**다. 마이크도 녹음도 없다.
   //   말하기는 P3가 맡는다.
   //
-  //   화면: GPT의 kept/evolved/new 청크 + Part1 대조 바
+  //   화면: GPT의 kept/evolved/new 청크와 단계별로 짙어지는 문장 테두리
   //   음성: LCS 핵심 변화 하나만 살린 Smooth Jazz 전체 낭독 → 다음 계단
   // ══════════════════════════════════════════════════════════════════
-
-  /// 🪜 계단과 계단 사이에 두는 숨. 한 계단을 다 읽자마자 다음 계단이 밀고
-  /// 들어오면 문장이 자란 자리가 안 보인다.
-  static const Duration _kMorphStepGap = Duration(milliseconds: 900);
 
   /// 문장이 먼저 눈에 들어온 뒤 전체 문장 재생을 시작하는 짧은 전환.
   static const Duration _kMorphHighlightDelay = Duration(milliseconds: 320);
@@ -1609,7 +1605,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList());
     if (mounted) {
       setState(() {
-        _morph = morph;
         _morphPreparing = true;
         _p2ActiveChunkIndex = -1;
         _p2MorphDurationMs = 0;
@@ -1636,8 +1631,27 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       _scheduleMorphAdvance(lineIdx);
       return;
     }
-    await _playMorphAudio(pcm, lineIdx);
+    await _playMorphAudio(_applyP2BreathGap(pcm, lineIdx), lineIdx);
   }
+
+  /// P3 Shadowing과 같은 호흡 분석·gap 삽입을 재사용한다. 첫 문장은 Normal,
+  /// 다음 문장부터는 Relaxed이며 원본 발성 속도는 바꾸지 않는다.
+  Uint8List _applyP2BreathGap(Uint8List pcm, int lineIdx) {
+    final gap = _p2GapForLine(lineIdx);
+    final gapMs = _kP3ShadowGapMs[gap] ?? 500;
+    final analysis = analyzeBreaths(pcm, const BreathAnalysisConfig());
+    debugPrint('[P2-PACE] line=${lineIdx + 1} gap=${_kP3ShadowGapLabel[gap]} '
+        'gapMs=$gapMs breaths=${analysis.segments.length}');
+    return buildGappedPcm(
+      pcm,
+      analysis.segments,
+      extraGapMs: gapMs,
+      sampleRate: kStealthVoxSttSampleRate,
+    );
+  }
+
+  P3ShadowGap _p2GapForLine(int lineIdx) =>
+      lineIdx == 0 ? P3ShadowGap.normal : P3ShadowGap.relaxed;
 
   bool _morphAlive(int lineIdx) =>
       mounted &&
@@ -1705,7 +1719,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
 
   void _scheduleMorphAdvance(int lineIdx) {
     _shadowAdvanceTimer?.cancel();
-    _shadowAdvanceTimer = Timer(_kMorphStepGap, () {
+    final gapMs = _kP3ShadowGapMs[_p2GapForLine(lineIdx)] ?? 500;
+    _shadowAdvanceTimer = Timer(Duration(milliseconds: gapMs), () {
       if (!_morphAlive(lineIdx)) return;
       _nextTurn();
     });
@@ -1715,7 +1730,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
   /// 문장이라도 핵심 변화가 다르면 다른 소리이므로 같은 오디오를 쓰면 안 된다.
   Future<Uint8List?> _getMorphPcm(String text, MorphChange morph) {
     const morphInstructionVersion = 'primary_v1';
-    final ns = '${_breathCacheNamespace(_kBreathVoice)}'
+    final voice = _p2Voice;
+    final ns = '${_breathCacheNamespace(voice)}'
         '_$morphInstructionVersion'
         '_m${morph.identity}';
     final requestKey = '$ns|$text';
@@ -1727,7 +1743,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       final raw = await _fetchOpenAITTSInternal(
         text,
         1.0,
-        _kBreathVoice,
+        voice,
         model: _historyPracticeTtsModel,
         instructions:
             _kBreathStyle.instruction + morphEmphasisInstruction(morph),
@@ -2270,8 +2286,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       _aiChunkPlaying = false;
       _aiChunkLoading = false;
       _currentChunkIdx = 0;
-      // 🔤 [P2-MORPH] 돌아왔을 때 이전 계단의 강조가 남지 않게 비운다.
-      _morph = MorphChange.none;
       _showEchoingOverlay = false;
     });
     _echoingOverlayTimer?.cancel();
@@ -5787,6 +5801,28 @@ RULES — follow exactly:
   }
 
   // 📦 [BOX-34: 완료 후 전체 통합 재생]
+  Future<void> _restartP2Practice() async {
+    _shadowHighlightTimer?.cancel();
+    _shadowAdvanceTimer?.cancel();
+    await _stopShadowAiPlayback();
+    if (!mounted || _phase != ShadowingPhase.part2Practice) return;
+    setState(() {
+      currentIndex = 0;
+      _tutorCurrentIdx = 0;
+      _tutorPlayingFullback = false;
+      _tutorAwaitingStart = false;
+      _morphPreparing = false;
+      _morphPlaying = false;
+      _p2ActiveChunkIndex = -1;
+      _p2MorphDurationMs = 0;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _phase == ShadowingPhase.part2Practice) {
+        _startTurnPractice();
+      }
+    });
+  }
+
   Future<void> _startTurnPracticeFullback() async {
     if (_tutorPlayingFullback) {
       audioPlayer.stop();
@@ -5945,91 +5981,10 @@ RULES — follow exactly:
     );
   }
 
-  Map<String, dynamic>? get _currentP2Line {
-    if (_phase != ShadowingPhase.part2Practice || _tutorLines.isEmpty) {
-      return null;
-    }
-    final index = currentIndex.clamp(0, _tutorLines.length - 1);
-    return _tutorLines[index];
-  }
-
-  Widget _buildP2Part1ReferenceBar() {
-    final line = _currentP2Line;
-    final part1 = (line?['part1'] ?? '').toString().trim();
-    final chunks = line == null ? const <P2Chunk>[] : _p2ChunksForLine(line);
-    P2Chunk? activeChunk;
-    if (_morphPlaying &&
-        _p2ActiveChunkIndex >= 0 &&
-        _p2ActiveChunkIndex < chunks.length) {
-      activeChunk = chunks[_p2ActiveChunkIndex];
-    }
-    final range = activeChunk?.referencesPart1 == true &&
-            activeChunk?.fromStart != null &&
-            activeChunk?.fromEnd != null
-        ? (start: activeChunk!.fromStart!, end: activeChunk.fromEnd!)
-        : null;
-    const base = TextStyle(
-      color: Colors.white38,
-      fontSize: 12.5,
-      height: 1.45,
-      fontWeight: FontWeight.w400,
-    );
-    final spans = <InlineSpan>[];
-    if (part1.isEmpty) {
-      spans.add(const TextSpan(text: '참조할 Part1 문장이 없습니다'));
-    } else if (range == null) {
-      spans.add(TextSpan(text: part1));
-    } else {
-      if (range.start > 0) {
-        spans.add(TextSpan(text: part1.substring(0, range.start)));
-      }
-      spans.add(TextSpan(
-        text: part1.substring(range.start, range.end),
-        style: const TextStyle(
-          color: Color(0xFFB9DFFF),
-          fontWeight: FontWeight.w700,
-          backgroundColor: Color(0x263F9FEA),
-        ),
-      ));
-      if (range.end < part1.length) {
-        spans.add(TextSpan(text: part1.substring(range.end)));
-      }
-    }
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
-      margin: const EdgeInsets.fromLTRB(14, 10, 14, 2),
-      padding: const EdgeInsets.fromLTRB(13, 10, 13, 11),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.035),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: range == null
-              ? Colors.white10
-              : const Color(0xFF64B5F6).withValues(alpha: 0.42),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          const Text(
-            'PART 1 · BEFORE',
-            style: TextStyle(
-              color: Colors.white30,
-              fontSize: 9.5,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 1.1,
-            ),
-          ),
-          const SizedBox(height: 5),
-          Text.rich(TextSpan(children: spans), style: base),
-        ],
-      ),
-    );
-  }
-
   Widget _buildTurnPracticeScreen() {
     final bool isAwaiting = _tutorAwaitingStart;
     final bool isComplete = currentIndex >= _tutorLines.length;
+    final bool isP2Practice = _phase == ShadowingPhase.part2Practice;
 
     return Stack(
       children: [
@@ -6103,19 +6058,46 @@ RULES — follow exactly:
                           ),
                           const SizedBox(width: 8),
                         ],
-                        Text(
-                          isComplete
-                              ? "Practice 완료!"
-                              : (_phase == ShadowingPhase.part1Practice
-                                  ? "Practice 1"
-                                  : _phase == ShadowingPhase.part2Practice
-                                      ? "Practice 2"
-                                      : "Practice"),
-                          style: const TextStyle(
-                              color: Colors.white54,
-                              fontSize: 13,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 1.0),
+                        GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: _phase == ShadowingPhase.part2Practice &&
+                                  isAwaiting &&
+                                  !isComplete
+                              ? _startP2Reading
+                              : null,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 6),
+                            child: AnimatedBuilder(
+                              animation: _blinkController,
+                              builder: (context, child) => Opacity(
+                                opacity:
+                                    _phase == ShadowingPhase.part2Practice &&
+                                            isAwaiting
+                                        ? 0.82 + (_blinkOpacity.value * 0.18)
+                                        : 1.0,
+                                child: child,
+                              ),
+                              child: Text(
+                                isComplete
+                                    ? "Practice 완료!"
+                                    : (_phase == ShadowingPhase.part1Practice
+                                        ? "Practice 1"
+                                        : _phase == ShadowingPhase.part2Practice
+                                            ? "See How It Grows"
+                                            : "Practice"),
+                                style: TextStyle(
+                                    color: _phase ==
+                                                ShadowingPhase.part2Practice &&
+                                            isAwaiting
+                                        ? Colors.lightBlueAccent
+                                        : Colors.white54,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 1.0),
+                              ),
+                            ),
+                          ),
                         ),
                         if (_phase != ShadowingPhase.part2Practice) ...[
                           const SizedBox(width: 8),
@@ -6196,9 +6178,6 @@ RULES — follow exactly:
               minHeight: 3,
             ),
 
-            if (_phase == ShadowingPhase.part2Practice)
-              _buildP2Part1ReferenceBar(),
-
             // 대화 목록
             Expanded(
               child: ListView.builder(
@@ -6221,6 +6200,15 @@ RULES — follow exactly:
                   final bool isPast = i < currentIndex;
                   final Color roleColor =
                       lineIsAi ? Colors.amber : Colors.greenAccent;
+                  final bool isP2 = _phase == ShadowingPhase.part2Practice;
+                  final double growth = _tutorLines.length <= 1
+                      ? 1.0
+                      : i / (_tutorLines.length - 1);
+                  final Color p2BorderColor = Color.lerp(
+                    const Color(0xFFB9E3F8),
+                    const Color(0xFF1565C0),
+                    growth,
+                  )!;
 
                   return Align(
                     alignment: _phase == ShadowingPhase.part2Practice
@@ -6242,13 +6230,21 @@ RULES — follow exactly:
                         margin: const EdgeInsets.only(bottom: 10),
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: isCurrent
-                              ? roleColor.withValues(alpha: 0.1)
-                              : const Color(0xFF1C1C1E),
+                          color: isP2
+                              ? p2BorderColor.withValues(
+                                  alpha: isCurrent ? 0.10 : 0.035)
+                              : isCurrent
+                                  ? roleColor.withValues(alpha: 0.1)
+                                  : const Color(0xFF1C1C1E),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color: isCurrent ? roleColor : Colors.white12,
-                            width: isCurrent ? 2 : 1,
+                            color: isP2
+                                ? p2BorderColor.withValues(
+                                    alpha: isCurrent ? 0.95 : 0.58)
+                                : isCurrent
+                                    ? roleColor
+                                    : Colors.white12,
+                            width: isCurrent ? 2 : (isP2 ? 1.2 : 1),
                           ),
                         ),
                         child: Row(
@@ -6351,32 +6347,35 @@ RULES — follow exactly:
                   children: [
                     Row(
                       children: [
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            icon: Icon(
-                              _tutorPlayingFullback
-                                  ? Icons.stop_rounded
-                                  : Icons.volume_up_rounded,
-                              size: 18,
+                        if (!isP2Practice) ...[
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              icon: Icon(
+                                _tutorPlayingFullback
+                                    ? Icons.stop_rounded
+                                    : Icons.volume_up_rounded,
+                                size: 18,
+                              ),
+                              label: Text(
+                                _tutorPlayingFullback ? "정지" : "Play all",
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor:
+                                    Colors.blue.withValues(alpha: 0.15),
+                                foregroundColor: Colors.blue,
+                                side: const BorderSide(color: Colors.blue),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(16)),
+                              ),
+                              onPressed: _startTurnPracticeFullback,
                             ),
-                            label: Text(
-                              _tutorPlayingFullback ? "정지" : "Play all",
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor:
-                                  Colors.blue.withValues(alpha: 0.15),
-                              foregroundColor: Colors.blue,
-                              side: const BorderSide(color: Colors.blue),
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(16)),
-                            ),
-                            onPressed: _startTurnPracticeFullback,
                           ),
-                        ),
-                        const SizedBox(width: 12),
+                          const SizedBox(width: 12),
+                        ],
                         Expanded(
                           child: ElevatedButton.icon(
                             icon: const Icon(Icons.replay_rounded, size: 18),
@@ -6391,32 +6390,36 @@ RULES — follow exactly:
                               shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(16)),
                             ),
-                            onPressed: () {
-                              audioPlayer.stop();
-                              _tutorAudioPlayer?.stop();
-                              for (final l in _tutorLines) {
-                                // 🆕 [BOX-34-CLEANUP] 실제 파일도 삭제
-                                final rp = l['user_record_path'] as String?;
-                                if (rp != null && rp.isNotEmpty) {
-                                  File(rp).delete().catchError((_) {});
-                                }
-                                l.remove('user_record_path');
-                                l.remove('ai_audio_bytes');
-                              }
-                              if (mounted) {
-                                setState(() {
-                                  currentIndex = 0;
-                                  _tutorCurrentIdx = 0;
-                                  _tutorPlayingFullback = false;
-                                  _tutorAwaitingStart = true;
-                                  _swapRoles = false;
-                                  _tutorAiSpeaking = false;
-                                  _tutorUserRecording = false;
-                                });
-                                WidgetsBinding.instance.addPostFrameCallback(
-                                    (_) => _showRoleSelectBubble());
-                              }
-                            },
+                            onPressed: isP2Practice
+                                ? () => unawaited(_restartP2Practice())
+                                : () {
+                                    audioPlayer.stop();
+                                    _tutorAudioPlayer?.stop();
+                                    for (final l in _tutorLines) {
+                                      // 🆕 [BOX-34-CLEANUP] 실제 파일도 삭제
+                                      final rp =
+                                          l['user_record_path'] as String?;
+                                      if (rp != null && rp.isNotEmpty) {
+                                        File(rp).delete().catchError((_) {});
+                                      }
+                                      l.remove('user_record_path');
+                                      l.remove('ai_audio_bytes');
+                                    }
+                                    if (mounted) {
+                                      setState(() {
+                                        currentIndex = 0;
+                                        _tutorCurrentIdx = 0;
+                                        _tutorPlayingFullback = false;
+                                        _tutorAwaitingStart = true;
+                                        _swapRoles = false;
+                                        _tutorAiSpeaking = false;
+                                        _tutorUserRecording = false;
+                                      });
+                                      WidgetsBinding.instance
+                                          .addPostFrameCallback(
+                                              (_) => _showRoleSelectBubble());
+                                    }
+                                  },
                           ),
                         ),
                       ],
@@ -7101,7 +7104,9 @@ RULES — follow exactly:
           .isNotEmpty;
 
   String _p3VariantLabel(SentenceVariant variant) =>
-      variant == SentenceVariant.polished ? '세련 문장' : '완성 문장';
+      variant == SentenceVariant.polished
+          ? 'Polished Sentence'
+          : 'Complete Sentence';
 
   /// 🚧 Shadow 여유. **말하는 속도를 바꾸는 게 아니다** — AI의 발음·억양·속도는
   /// 그대로 두고 **호흡 사이 빈 자리만** 늘린다. 실기기에서 조정한다.
@@ -7113,9 +7118,9 @@ RULES — follow exactly:
 
   static const Map<P3ShadowGap, String> _kP3ShadowGapLabel =
       <P3ShadowGap, String>{
-    P3ShadowGap.tight: '빠르게',
-    P3ShadowGap.normal: '보통',
-    P3ShadowGap.relaxed: '여유롭게',
+    P3ShadowGap.tight: 'Tight',
+    P3ShadowGap.normal: 'Normal',
+    P3ShadowGap.relaxed: 'Relaxed',
   };
 
   /// 🚧 P3 전용 timing. **다른 모드의 VAD 값과 무관하다.** 최종값 아님.
@@ -7127,6 +7132,7 @@ RULES — follow exactly:
   // ── P3 상태 ───────────────────────────────────────────────────────
   P3Stage _p3Stage = P3Stage.idle;
   P3PracticeMode _p3PracticeMode = P3PracticeMode.echoing;
+  String _p3Voice = _kBreathVoice;
   int _p3Generation = 0;
   Uint8List? _p3FullPcm;
   List<BreathSegment> _p3Segments = const <BreathSegment>[];
@@ -7248,7 +7254,7 @@ RULES — follow exactly:
   Future<void> _startP3Speaking() async {
     final text = _p3TargetSentence;
     if (text.isEmpty) {
-      _showRoomEntryToast('P3에서 사용할 문장이 없습니다');
+      _showRoomEntryToast('No sentence is available for P3');
       return;
     }
     await _stopP3Shadowing();
@@ -7273,7 +7279,7 @@ RULES — follow exactly:
     if (pcm == null || pcm.isEmpty) {
       setState(() {
         _p3Stage = P3Stage.idle;
-        _p3Error = '학습 음성을 만들지 못했습니다';
+        _p3Error = 'Could not create the practice voice';
       });
       return;
     }
@@ -7281,7 +7287,7 @@ RULES — follow exactly:
     if (analysis.segments.isEmpty) {
       setState(() {
         _p3Stage = P3Stage.idle;
-        _p3Error = '호흡 구간을 찾지 못했습니다';
+        _p3Error = 'Could not detect breath groups';
       });
       return;
     }
@@ -7297,7 +7303,7 @@ RULES — follow exactly:
       });
     }
     debugPrint('[P3-SPEAK] breaths=${analysis.segments.length} '
-        'total=${analysis.totalMs}ms voice=$_kBreathVoice');
+        'total=${analysis.totalMs}ms voice=$_p3Voice');
     if (_p3PracticeMode == P3PracticeMode.echoing) {
       await _ensureP3Engine().start(
         aiPcm: pcm,
@@ -7312,7 +7318,8 @@ RULES — follow exactly:
   /// P3 원본 PCM. **Morph 강조가 없는 순수 Smooth Jazz**라 P2 캐시와 키가
   /// 다르다(P2는 `_m{ranges}`가 붙는다).
   Future<Uint8List?> _getP3OriginalPcm(String text) {
-    final ns = '${_breathCacheNamespace(_kBreathVoice)}_p3';
+    final voice = _p3Voice;
+    final ns = '${_breathCacheNamespace(voice)}_p3';
     final requestKey = '$ns|$text';
     final existing = _breathPcmInFlight[requestKey];
     if (existing != null) return existing;
@@ -7322,7 +7329,7 @@ RULES — follow exactly:
       final raw = await _fetchOpenAITTSInternal(
         text,
         1.0,
-        _kBreathVoice,
+        voice,
         model: _historyPracticeTtsModel,
         instructions: _kBreathStyle.instruction,
         instructionTag: '${_kBreathStyle.id}_p3',
@@ -7401,7 +7408,7 @@ RULES — follow exactly:
           // 말하지 않았다. 빈 파일을 성공한 녹음으로 취급하지 않는다.
           _deleteP3File(recorded ?? path);
           setState(() {
-            _p3Error = '발화가 감지되지 않았습니다';
+            _p3Error = 'No speech was detected';
             _p3Stage = P3Stage.compare;
           });
           return;
@@ -7522,7 +7529,9 @@ RULES — follow exactly:
     if (_p3Recording) return null;
     try {
       if (!await appAudioRecorder.hasPermission()) {
-        if (mounted) setState(() => _p3Error = '마이크 권한이 없습니다');
+        if (mounted) {
+          setState(() => _p3Error = 'Microphone permission required');
+        }
         return null;
       }
       final dir = await getTemporaryDirectory();
@@ -7539,7 +7548,7 @@ RULES — follow exactly:
       _p3Recording = true;
       return path;
     } catch (e) {
-      if (mounted) setState(() => _p3Error = '녹음을 시작하지 못했습니다: $e');
+      if (mounted) setState(() => _p3Error = 'Could not start recording: $e');
       return null;
     }
   }
@@ -7666,19 +7675,19 @@ RULES — follow exactly:
       case P3Stage.idle:
         return '';
       case P3Stage.preparing:
-        return '음성 준비 중…';
+        return 'Preparing voice…';
       case P3Stage.breathListen:
-        return '호흡 ${(_p3BreathIndex + 1).clamp(1, _p3BreathTotal)}/$_p3BreathTotal · 듣기';
+        return 'Breath ${(_p3BreathIndex + 1).clamp(1, _p3BreathTotal)}/$_p3BreathTotal · Listen';
       case P3Stage.breathEcho:
-        return '호흡 ${(_p3BreathIndex + 1).clamp(1, _p3BreathTotal)}/$_p3BreathTotal · 따라 말하세요';
+        return 'Breath ${(_p3BreathIndex + 1).clamp(1, _p3BreathTotal)}/$_p3BreathTotal · Your turn';
       case P3Stage.fullEchoListen:
-        return '전체 문장을 들어보세요';
+        return 'Listen to the full sentence';
       case P3Stage.fullEchoRecord:
-        return '이제 혼자 말해보세요';
+        return 'Now say it on your own';
       case P3Stage.fullShadowRecord:
-        return 'AI와 함께 말하세요';
+        return 'Speak along with the AI';
       case P3Stage.compare:
-        return '세 소리를 비교해보세요';
+        return 'Compare the recordings';
     }
   }
 
@@ -7692,19 +7701,21 @@ RULES — follow exactly:
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            _buildP3VoiceSelector(started: started),
+            const SizedBox(height: 10),
             _buildP3PracticeModePicker(),
             const SizedBox(height: 14),
             if (!started) ...[
-              _buildP3VariantPicker(),
+              _buildP3VariantPicker(showPreview: false),
               if (_p3PracticeMode == P3PracticeMode.shadowing) ...[
                 const SizedBox(height: 12),
                 _buildP3GapPicker(),
               ],
               const SizedBox(height: 14),
-              _p3PrimaryButton('▶ 시작하기', () => unawaited(_startP3Speaking())),
+              _p3PrimaryButton('▶ Start', () => unawaited(_startP3Speaking())),
               const SizedBox(height: 14),
             ] else if (_p3Stage == P3Stage.compare) ...[
-              _buildP3VariantPicker(),
+              _buildP3VariantPicker(showPreview: true),
               const SizedBox(height: 14),
             ],
             if (started) ...[
@@ -7723,7 +7734,7 @@ RULES — follow exactly:
               ),
               const SizedBox(height: 14),
             ],
-            _buildP3SentencePanel(text),
+            if (started) _buildP3SentencePanel(text),
             if (_p3Error != null) ...[
               const SizedBox(height: 10),
               Text(
@@ -7740,8 +7751,8 @@ RULES — follow exactly:
               ],
               _p3PrimaryButton(
                 _p3PracticeMode == P3PracticeMode.echoing
-                    ? '▶ 에코잉 다시'
-                    : '▶ 쉐도잉 다시',
+                    ? '▶ Echo Again'
+                    : '▶ Shadow Again',
                 _p3Busy ? null : () => unawaited(_startP3Speaking()),
               ),
             ],
@@ -7751,7 +7762,7 @@ RULES — follow exactly:
             ],
             if (_p3Busy && _p3Stage != P3Stage.compare) ...[
               const SizedBox(height: 12),
-              _p3SecondaryButton('■ 중지',
+              _p3SecondaryButton('■ Stop',
                   () => unawaited(_stopP3Shadowing(resetSelection: true))),
             ],
           ],
@@ -7772,6 +7783,9 @@ RULES — follow exactly:
     final bool speaking = (inBreathEcho && _p3UserSpeaking) ||
         _p3Stage == P3Stage.fullEchoRecord ||
         _p3Stage == P3Stage.fullShadowRecord;
+    final Color userTurnAccent = _p3PracticeMode == P3PracticeMode.echoing
+        ? _p3BreathAccentColor
+        : _p3ShadowingAccentColor;
     final int safeTotal = _p3BreathTotal.clamp(0, 24);
     final int safeIndex =
         safeTotal == 0 ? 0 : _p3BreathIndex.clamp(0, safeTotal - 1);
@@ -7871,11 +7885,13 @@ RULES — follow exactly:
             duration: const Duration(milliseconds: 180),
             curve: Curves.easeOutCubic,
             style: TextStyle(
-              color: speaking
-                  ? Colors.white
-                  : userTurn
-                      ? Color.lerp(Colors.white, _p3BreathAccentColor, 0.24)!
-                      : Colors.white.withValues(alpha: 0.90),
+              color: userTurn
+                  ? Color.lerp(
+                      Colors.white,
+                      userTurnAccent,
+                      speaking ? 0.72 : 0.56,
+                    )!
+                  : Colors.white.withValues(alpha: 0.90),
               fontSize: 16 * _fontScale,
               fontWeight: speaking
                   ? FontWeight.w600
@@ -7883,16 +7899,78 @@ RULES — follow exactly:
                       ? FontWeight.w500
                       : FontWeight.w400,
               height: 1.6,
-              shadows: speaking
+              shadows: userTurn
                   ? <Shadow>[
                       Shadow(
-                        color: _p3BreathAccentColor.withValues(alpha: 0.18),
+                        color: userTurnAccent.withValues(
+                            alpha: speaking ? 0.26 : 0.14),
                         blurRadius: 8,
                       ),
                     ]
                   : const <Shadow>[],
             ),
-            child: Text(text.isEmpty ? '문장이 없습니다' : text),
+            child: Text(text.isEmpty ? 'Sentence unavailable' : text),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildP3VoiceSelector({required bool started}) {
+    final enabled = !started && !_p3Busy;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.035),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: _p3ShadowingAccentColor.withValues(alpha: 0.34),
+        ),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Text(
+            'VOICE',
+            style: TextStyle(
+              color: Colors.white38,
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.1,
+            ),
+          ),
+          const SizedBox(width: 12),
+          DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: _p3Voice,
+              isDense: true,
+              dropdownColor: const Color(0xFF24262A),
+              borderRadius: BorderRadius.circular(12),
+              icon: Icon(
+                Icons.keyboard_arrow_down_rounded,
+                color: enabled ? _p3ShadowingAccentColor : Colors.white24,
+              ),
+              style: TextStyle(
+                color: enabled ? Colors.white : Colors.white38,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+              items: const [
+                DropdownMenuItem(value: 'marin', child: Text('marin (F)')),
+                DropdownMenuItem(value: 'cedar', child: Text('cedar (M)')),
+              ],
+              onChanged: enabled
+                  ? (voice) {
+                      if (voice != null && voice != _p3Voice) {
+                        setState(() {
+                          _p3Voice = voice;
+                          _p3FullPcm = null;
+                          _p3Segments = const <BreathSegment>[];
+                        });
+                      }
+                    }
+                  : null,
+            ),
           ),
         ],
       ),
@@ -7925,7 +8003,7 @@ RULES — follow exactly:
                   ),
                 ),
                 child: Text(
-                  mode == P3PracticeMode.echoing ? '에코잉' : '쉐도잉',
+                  mode == P3PracticeMode.echoing ? 'Echoing' : 'Shadowing',
                   style: TextStyle(
                     color:
                         _p3PracticeMode == mode ? Colors.white : Colors.white54,
@@ -7946,18 +8024,21 @@ RULES — follow exactly:
 
   /// P3의 두 학습 문장. 단순 label만 보여 주면 문장을 바꾸고도
   /// 무엇을 골랐는지 알기 어려워 짧은 preview를 함께 보여 준다.
-  Widget _buildP3VariantPicker() {
+  Widget _buildP3VariantPicker({required bool showPreview}) {
     return Column(
       children: [
         for (final variant in SentenceVariant.values) ...[
-          _buildP3VariantCard(variant),
+          _buildP3VariantCard(variant, showPreview: showPreview),
           if (variant != SentenceVariant.values.last) const SizedBox(height: 8),
         ],
       ],
     );
   }
 
-  Widget _buildP3VariantCard(SentenceVariant variant) {
+  Widget _buildP3VariantCard(
+    SentenceVariant variant, {
+    required bool showPreview,
+  }) {
     final available = _p3VariantAvailable(variant);
     final selected = _selectedVariant == variant;
     final sentence = (variant == SentenceVariant.polished
@@ -8010,17 +8091,19 @@ RULES — follow exactly:
                 ),
               ],
             ),
-            const SizedBox(height: 6),
-            Text(
-              available ? sentence : '문장이 준비되지 않았습니다',
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: available ? Colors.white54 : Colors.white24,
-                fontSize: 11.5,
-                height: 1.35,
+            if (showPreview) ...[
+              const SizedBox(height: 6),
+              Text(
+                available ? sentence : 'Sentence unavailable',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: available ? Colors.white54 : Colors.white24,
+                  fontSize: 11.5,
+                  height: 1.35,
+                ),
               ),
-            ),
+            ],
           ],
         ),
       ),
@@ -8274,7 +8357,7 @@ RULES — follow exactly:
         currentIndex = 0;
         _tutorCurrentIdx = 0;
         _isAutoRecording = false;
-        _tutorAwaitingStart = false; // [P2-SHADOW]
+        _tutorAwaitingStart = true;
         _swapRoles = false;
         _tutorAiSpeaking = false;
         _tutorUserRecording = false;
@@ -8287,16 +8370,7 @@ RULES — follow exactly:
       _shadowHighlightTimer?.cancel();
       _shadowAdvanceTimer?.cancel();
       _stopShadowAiPlayback();
-      // 🔤 [P2-MORPH] 고르고 시작하는 게이트가 없다. 진입하면 첫 계단이
-      //   곧바로 열린다 — 시작 신호는 `_checkAndStartTurn`이 준다.
-      _morph = MorphChange.none;
-      // setState 직후에는 아직 이 프레임의 화면이다. P2 본문이
-      // 붙은 다음 프레임에 첫 계단을 열어야 자동 낭독이 누락되지 않는다.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _phase == ShadowingPhase.part2Practice) {
-          _checkAndStartTurn();
-        }
-      });
+      // 상단에서 보이스를 고르고 See How It Grows를 누를 때 첫 문장을 연다.
     }
   }
 
@@ -8822,53 +8896,71 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     );
   }
 
-  // P2 진입 시 2초간 "Thought-group Shadowing"을 띄우고 본문을 가리던 오버레이가
-  // 있었다. 시작 신호는 보이스 선택으로 충분해서 걷어냈고, 이제 첫 화면이 바로
-  // 보인다.
   Widget _buildStepPracticeWithTabBar() {
     return Column(
       children: [
         _buildPracticeTabBar(),
-        Expanded(
-          child: Column(
-            children: [
-              if (_phase == ShadowingPhase.part2Practice)
-                _buildMorphIndicator(),
-              Expanded(child: _buildTurnPracticeScreen()),
-            ],
-          ),
-        ),
+        if (_phase == ShadowingPhase.part2Practice) _buildP2VoiceSelector(),
+        Expanded(child: _buildTurnPracticeScreen()),
       ],
     );
   }
 
-  /// 🔤 [P2-MORPH] 이번 계단이 무엇을 하고 있는지 한 줄.
-  ///
-  /// 화면에 나오는 문장 자체가 주인공이라 여기는 최소한만 둔다.
-  Widget _buildMorphIndicator() {
-    final String text;
-    final Color color;
-    if (_morphPreparing) {
-      text = '음성 준비 중…';
-      color = Colors.white38;
-    } else if (_morph.isEmpty) {
-      text = '문장 듣기';
-      color = Colors.white38;
-    } else {
-      text = '이번 생각의 변화';
-      color = _kMorphAccent;
-    }
+  Widget _buildP2VoiceSelector() {
+    final enabled = _tutorAwaitingStart;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: AnimatedDefaultTextStyle(
-        duration: const Duration(milliseconds: 220),
-        style: TextStyle(
-          color: color,
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          letterSpacing: 0.3,
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.035),
+          borderRadius: BorderRadius.circular(12),
+          border:
+              Border.all(color: Colors.lightBlueAccent.withValues(alpha: 0.3)),
         ),
-        child: Text(text, textAlign: TextAlign.center),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text(
+              'VOICE',
+              style: TextStyle(
+                color: Colors.white38,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.1,
+              ),
+            ),
+            const SizedBox(width: 12),
+            DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: _p2Voice,
+                isDense: true,
+                dropdownColor: const Color(0xFF24262A),
+                borderRadius: BorderRadius.circular(12),
+                icon: Icon(
+                  Icons.keyboard_arrow_down_rounded,
+                  color: enabled ? Colors.lightBlueAccent : Colors.white24,
+                ),
+                style: TextStyle(
+                  color: enabled ? Colors.white : Colors.white38,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'marin', child: Text('marin (F)')),
+                  DropdownMenuItem(value: 'cedar', child: Text('cedar (M)')),
+                ],
+                onChanged: enabled
+                    ? (voice) {
+                        if (voice != null && voice != _p2Voice) {
+                          setState(() => _p2Voice = voice);
+                        }
+                      }
+                    : null,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -8927,36 +9019,37 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
               ),
             ),
             const Text(
-              "어떤 연습부터 시작할까요?",
+              "Pick Your Practice",
               textAlign: TextAlign.center,
               style: TextStyle(
                   color: Colors.white,
-                  fontSize: 18,
+                  fontSize: 19,
                   fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 24),
             _buildPracticeSelectionCard(
               title: "Practice 1",
-              subtitle: "AI 질문 + 단답 역할교환 (5턴)",
-              color: Colors.greenAccent,
+              subtitle: "Short-answer role swap",
+              color: const Color(0xFF4ADE80),
               icon: Icons.swap_horiz_rounded,
               onTap: hasData ? _startPart1Practice : null,
             ),
             const SizedBox(height: 12),
             _buildPracticeSelectionCard(
-              title: "Practice 2",
-              subtitle: "AI 질문 + 확장문장 역할교환 (4턴+AI)",
-              color: Colors.lightBlueAccent,
+              title: "See How It Grows",
+              subtitle: "Watch and hear each sentence grow",
+              color: const Color(0xFF38BDF8),
               icon: Icons.expand_more_rounded,
+              blinkTitle: true,
               onTap: hasData ? _startPart2Practice : null,
             ),
             const SizedBox(height: 12),
             _buildPracticeSelectionCard(
               title: "Practice 3",
               subtitle: _isPreparingStepP3
-                  ? "P3 준비 중... P1/P2는 바로 시작할 수 있어요"
-                  : (_stepP3PreparationError ?? "전체 문장 의미단위 쉐도잉"),
-              color: Colors.amber,
+                  ? "Preparing P3... P1 and P2 are ready"
+                  : (_stepP3PreparationError ?? "Echoing & Shadowing Practice"),
+              color: const Color(0xFFA78BFA),
               icon: Icons.music_note_rounded,
               isLoading: _isPreparingStepP3,
               onTap: _isPreparingStepP3
@@ -8969,8 +9062,8 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
             const Spacer(),
             TextButton(
               onPressed: _exitShadowing,
-              child: const Text("취소",
-                  style: TextStyle(color: Colors.white38, fontSize: 14)),
+              child: const Text("Cancel",
+                  style: TextStyle(color: Colors.white38, fontSize: 15)),
             ),
           ],
         ),
@@ -8984,6 +9077,7 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     required Color color,
     required IconData icon,
     bool isLoading = false,
+    bool blinkTitle = false,
     VoidCallback? onTap,
   }) {
     final bool enabled = onTap != null || isLoading;
@@ -8997,9 +9091,10 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
           // 원인이다. 라벨이 한 줄에 들어오도록 조금씩 줄여 글자 폭을 벌어 준다.
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
           decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.08),
+            color: color.withValues(alpha: 0.14),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: color.withValues(alpha: 0.5), width: 1.5),
+            border:
+                Border.all(color: color.withValues(alpha: 0.72), width: 1.5),
           ),
           child: Row(
             children: [
@@ -9008,8 +9103,8 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
                 height: 38,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: color.withValues(alpha: 0.15),
-                  border: Border.all(color: color.withValues(alpha: 0.5)),
+                  color: color.withValues(alpha: 0.20),
+                  border: Border.all(color: color.withValues(alpha: 0.72)),
                 ),
                 child: Icon(icon, color: color, size: 20),
               ),
@@ -9018,15 +9113,24 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title,
-                        style: TextStyle(
-                            color: color,
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold)),
+                    AnimatedBuilder(
+                      animation: _blinkController,
+                      builder: (context, child) => Opacity(
+                        opacity: blinkTitle
+                            ? 0.82 + (_blinkOpacity.value * 0.18)
+                            : 1.0,
+                        child: child,
+                      ),
+                      child: Text(title,
+                          style: TextStyle(
+                              color: color,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold)),
+                    ),
                     const SizedBox(height: 3),
                     Text(subtitle,
                         style: const TextStyle(
-                            color: Colors.white54, fontSize: 12, height: 1.3)),
+                            color: Colors.white60, fontSize: 13, height: 1.3)),
                   ],
                 ),
               ),
