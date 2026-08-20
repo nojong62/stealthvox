@@ -519,6 +519,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         await doc.reference.delete();
       }
       await widget.historyDoc.delete();
+      await _AudioDiskCache.clearRoom(widget.historyDoc.id);
     } catch (e) {
       debugPrint('[deleteHistoryRoom] $e');
     }
@@ -8647,6 +8648,19 @@ class _AudioDiskCache {
       await file.writeAsBytes(bytes);
     } catch (e) {
       debugPrint('[_AudioDiskCache.write] $e');
+    }
+  }
+
+  /// 방을 지울 때 그 방의 오디오 폴더도 같이 지운다. 방이 사라지면 이
+  /// historyId는 다시 매칭될 일이 없어, 남겨두면 회수 불가능한 고아가 된다.
+  static Future<void> clearRoom(String historyId) async {
+    if (historyId.isEmpty) return;
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final folder = Directory('${dir.path}/tts_cache/$historyId');
+      if (await folder.exists()) await folder.delete(recursive: true);
+    } catch (e) {
+      debugPrint('[_AudioDiskCache.clearRoom] $e');
     }
   }
 }

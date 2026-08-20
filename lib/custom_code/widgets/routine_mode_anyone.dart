@@ -6386,8 +6386,12 @@ class TtsCache {
   static Future<void> cleanup({int maxBytes = 100 * 1024 * 1024}) async {
     try {
       final dir = Directory(await _getDir());
-      final files =
-          await dir.list().where((e) => e is File).cast<File>().toList();
+      // recursive: true — 방별 오디오는 tts_cache/{historyId}/ 하위에 있다.
+      final files = await dir
+          .list(recursive: true)
+          .where((e) => e is File)
+          .cast<File>()
+          .toList();
       int total = 0;
       final infos = <MapEntry<File, int>>[];
       for (final f in files) {

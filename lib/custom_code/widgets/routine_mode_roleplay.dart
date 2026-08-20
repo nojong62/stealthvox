@@ -4743,11 +4743,19 @@ class TtsCache {
   }
 
   /// 캐시 용량 관리 (100MB 초과 시 오래된 파일부터 제거)
+  ///
+  /// recursive: true가 필수다. 대화방별 오디오는 `tts_cache/{historyId}/`
+  /// 하위에 쌓이는데, 비재귀 목록에서는 그게 File이 아니라 Directory로 잡혀
+  /// `where((e) => e is File)`에 전부 걸러진다. 그러면 열거도 삭제도 안 될 뿐
+  /// 아니라 total에도 안 잡혀서 100MB 상한이 평면 파일만 재게 된다.
   static Future<void> cleanup({int maxBytes = 100 * 1024 * 1024}) async {
     try {
       final dir = Directory(await _getDir());
-      final files =
-          await dir.list().where((e) => e is File).cast<File>().toList();
+      final files = await dir
+          .list(recursive: true)
+          .where((e) => e is File)
+          .cast<File>()
+          .toList();
       final cutoff = DateTime.now()
           .subtract(const Duration(minutes: 10))
           .millisecondsSinceEpoch;
@@ -4776,6 +4784,21 @@ class TtsCache {
           await entry.key.delete();
           total -= sz;
           if (total <= maxBytes * 0.8) break;
+        }
+      }
+      await _removeEmptyDirs(dir);
+    } catch (_) {}
+  }
+
+  /// 파일이 빠져나가 빈 껍데기만 남은 방 폴더를 걷어낸다.
+  static Future<void> _removeEmptyDirs(Directory root) async {
+    try {
+      await for (final e in root.list()) {
+        if (e is! Directory) continue;
+        if (await e.list().isEmpty) {
+          try {
+            await e.delete();
+          } catch (_) {}
         }
       }
     } catch (_) {}
