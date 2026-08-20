@@ -252,12 +252,10 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   Timer? _shadowHighlightTimer;
   Timer? _shadowAdvanceTimer;
   double _shadowSpeed = 1.0; // 오디오 실패 시 하이라이트 fallback용 고정 속도.
-  // P2 학습 Voice는 상단 풀다운에서 고르며 Cedar를 기본값으로 사용한다.
-  String _p2Voice = 'cedar';
-  // [P2-REPEAT] 한 줄을 몇 번 들려줄지. null이면 아직 안 골랐다 — 보이스와
-  //   이 값을 **둘 다** 골라야 연습이 시작된다.
-  //   2번 = 1회차 듣기 + 2회차 쉐도잉. 1번 = 쉐도잉 하나.
-  // [P2-REPEAT] 지금 이 줄의 몇 회차인지(0부터). 줄이 바뀌면 0으로 돌아간다.
+  /// P2 계단은 보이스를 번갈아 읽는다 — 첫 대사 cedar, 다음 marin, 그 다음
+  /// cedar… 같은 목소리가 이어지면 계단이 자란 것인지 같은 문장을 다시 듣는
+  /// 것인지 귀로 구분되지 않는다. 화면 선택은 없애고 순서만 남긴다.
+  String _p2VoiceForLine(int lineIdx) => lineIdx.isEven ? 'cedar' : 'marin';
   // ── 🔤 [P2-MORPH] ───────────────────────────────────────────────
   /// 소리를 받아 오는 중. 이 동안에도 과금은 살아 있어야 한다.
   bool _morphPreparing = false;
@@ -1493,7 +1491,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     final bool isAiTurn = _isAiTurn(line); // 🆕 [BOX-32]
     if (_phase == ShadowingPhase.part2Practice) {
       if (_tutorAwaitingStart) return;
-      // 🔤 [P2-MORPH] 상단에서 보이스를 고른 뒤 See How It Grows를 누르면
+      // 🔤 [P2-MORPH] See How It Grows를 누르면
       //   첫 문장부터 자라는 흐름을 시작한다.
       unawaited(_runMorphStep(currentIndex));
       return;
@@ -1559,7 +1557,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     }
 
     // 소리는 미리 받아 둔다. 강조가 켜지는 동안 네트워크를 기다리지 않는다.
-    final audioFuture = _getMorphPcm(text, morph);
+    final audioFuture = _getMorphPcm(text, morph, lineIdx);
 
     await Future<void>.delayed(_kMorphHighlightDelay);
     if (!_morphAlive(lineIdx)) return;
@@ -1675,9 +1673,9 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
 
   /// 이번 문장의 소리. **Primary Morph 하나가 캐시 키에 들어간다** - 같은
   /// 문장이라도 핵심 변화가 다르면 다른 소리이므로 같은 오디오를 쓰면 안 된다.
-  Future<Uint8List?> _getMorphPcm(String text, MorphChange morph) {
+  Future<Uint8List?> _getMorphPcm(String text, MorphChange morph, int lineIdx) {
     const morphInstructionVersion = 'primary_v1';
-    final voice = _p2Voice;
+    final voice = _p2VoiceForLine(lineIdx);
     final ns = '${_breathCacheNamespace(voice)}'
         '_$morphInstructionVersion'
         '_m${morph.identity}';
@@ -5540,6 +5538,14 @@ RULES — follow exactly:
       _p2ActiveChunkIndex = -1;
       _p2MorphDurationMs = 0;
     });
+    // 목록을 맨 위로 되돌린다. ListView.builder는 화면 밖 아이템을 버리므로
+    // 마지막 계단까지 내려간 상태에서는 `_practiceItemKeys[0]`의 context가
+    // null이다. 그러면 `_scrollPracticeToIndex(0)`도 `_pinShadowLineToTop(0)`도
+    // 조용히 아무것도 하지 않아, 소리만 처음으로 가고 화면은 끝에 남는다.
+    // controller를 직접 0으로 보내면 아이템 0이 다시 만들어져 그 뒤 pin이 먹는다.
+    if (_practiceScrollController.hasClients) {
+      _practiceScrollController.jumpTo(0);
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _phase == ShadowingPhase.part2Practice) {
         _startTurnPractice();
@@ -5798,7 +5804,7 @@ RULES — follow exactly:
                                 opacity:
                                     _phase == ShadowingPhase.part2Practice &&
                                             isAwaiting
-                                        ? 0.82 + (_blinkOpacity.value * 0.18)
+                                        ? 0.35 + (_blinkOpacity.value * 0.65)
                                         : 1.0,
                                 child: child,
                               ),
@@ -7730,7 +7736,7 @@ RULES — follow exactly:
       _shadowHighlightTimer?.cancel();
       _shadowAdvanceTimer?.cancel();
       _stopShadowAiPlayback();
-      // 상단에서 보이스를 고르고 See How It Grows를 누를 때 첫 문장을 연다.
+      // 보이스 선택은 없앴다. See How It Grows를 누를 때 첫 문장을 연다.
     }
   }
 
@@ -8259,68 +8265,8 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     return Column(
       children: [
         _buildPracticeTabBar(),
-        if (_phase == ShadowingPhase.part2Practice) _buildP2VoiceSelector(),
         Expanded(child: _buildTurnPracticeScreen()),
       ],
-    );
-  }
-
-  Widget _buildP2VoiceSelector() {
-    final enabled = _tutorAwaitingStart;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.035),
-          borderRadius: BorderRadius.circular(12),
-          border:
-              Border.all(color: Colors.lightBlueAccent.withValues(alpha: 0.3)),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Text(
-              'VOICE',
-              style: TextStyle(
-                color: Colors.white38,
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1.1,
-              ),
-            ),
-            const SizedBox(width: 12),
-            DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                value: _p2Voice,
-                isDense: true,
-                dropdownColor: const Color(0xFF24262A),
-                borderRadius: BorderRadius.circular(12),
-                icon: Icon(
-                  Icons.keyboard_arrow_down_rounded,
-                  color: enabled ? Colors.lightBlueAccent : Colors.white24,
-                ),
-                style: TextStyle(
-                  color: enabled ? Colors.white : Colors.white38,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
-                items: const [
-                  DropdownMenuItem(value: 'marin', child: Text('marin (F)')),
-                  DropdownMenuItem(value: 'cedar', child: Text('cedar (M)')),
-                ],
-                onChanged: enabled
-                    ? (voice) {
-                        if (voice != null && voice != _p2Voice) {
-                          setState(() => _p2Voice = voice);
-                        }
-                      }
-                    : null,
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -8476,7 +8422,7 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
                       animation: _blinkController,
                       builder: (context, child) => Opacity(
                         opacity: blinkTitle
-                            ? 0.82 + (_blinkOpacity.value * 0.18)
+                            ? 0.35 + (_blinkOpacity.value * 0.65)
                             : 1.0,
                         child: child,
                       ),
