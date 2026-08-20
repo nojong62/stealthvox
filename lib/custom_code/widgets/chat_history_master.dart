@@ -346,6 +346,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   List<DocumentSnapshot> _cachedDocs = [];
   final Map<String, Future<bool>> _targetTranslationInFlight =
       <String, Future<bool>>{};
+
   /// 타겟 문장을 끝내 못 만든 줄. docId → 실패 종류(`_targetFailureLabel` 참고).
   ///
   /// 예전에는 실패가 아무 데도 남지 않았다. 화면에서는 원문만 있는 줄이 정상인
@@ -366,7 +367,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   String _appCorrection = "";
   String _appUsageTip = ""; // 🆕 활용가치 있는 구문/관용구 팁 (있을 때만)
   Uint8List? _appCorrectedAudio;
-  bool _appIsShadowRecording = false;
   bool _isPlayingAppAudio = false;
   String _appTranscript = "";
   // 🆕 Another Sentence 중복 회피: 최근 생성한 한국어 문장(최대 6개) 기억
@@ -382,7 +382,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     return _isTutorPlaying ||
         isPlaying ||
         _appIsRecording ||
-        _appIsShadowRecording ||
         _isPlayingAppAudio ||
         _isAutoRecording ||
         _tutorUserRecording ||
@@ -395,9 +394,11 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         // 🔤 [P2-MORPH] 소리를 받는 동안과 읽는 동안. 마이크가 없어 판정이
         //   단순해졌다 — 이 둘만 보면 된다.
         _morphPreparing ||
-        _morphPlaying;
+        _morphPlaying ||
+        // 🎤 [P3-SPEAK] PCM 준비·Breath Echo·Full Echo·Shadow·재생 중에
+        //   유휴로 잘못 판정해 과금이 멈추지 않게 한다.
+        _p3Busy;
   }
-
 
   bool _handlingExhaustion = false;
 
@@ -477,6 +478,15 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
     _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
     _stopShadowAiPlayback(); // [P2-SHADOW-AI]
+    // 🎤 [P3-SPEAK] dispose에서 async setState가 나오지 않게 회차를 먼저
+    //   무효화하고, 소유한 재생·타이머·임시 녹음을 직접 접는다.
+    _p3Generation++;
+    _p3SilenceTimer?.cancel();
+    _p3PlayerSub?.cancel();
+    _p3Player?.stop();
+    _p3Player?.dispose();
+    _p3Engine?.stop();
+    _deleteP3Recordings();
     _chunkScrollController.dispose();
     _practiceScrollController.dispose();
     _p3ShadowPositionSub?.cancel();
@@ -494,7 +504,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     audioPlayer.dispose();
     _tutorAudioPlayer?.dispose();
     _appCorrectedAudio = null;
-    if (_appIsRecording || _appIsShadowRecording || _shadowRecording) {
+    if (_appIsRecording || _shadowRecording || _p3Recording) {
+      _p3Recording = false;
       appAudioRecorder.stop().catchError((_) {});
     }
     appAudioRecorder.dispose();
@@ -928,7 +939,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
                 'messages': <Map<String, String>>[
                   <String, String>{
                     'role': 'system',
-                    'content': '''You are preparing ONE line of a saved voice conversation for a language-learning review screen.
+                    'content':
+                        '''You are preparing ONE line of a saved voice conversation for a language-learning review screen.
 
 The line came from speech recognition, so a word may have been misheard. Use the surrounding lines to restore what the speaker actually said, then translate that.
 
@@ -1567,8 +1579,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     final morph = computeMorph(previous, text);
 
     _pinShadowLineToTop(lineIdx);
-    _startShadowLineGlide(
-        lineIdx, text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList());
+    _startShadowLineGlide(lineIdx,
+        text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList());
     if (mounted) {
       setState(() {
         _morph = morph;
@@ -1674,7 +1686,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     future.whenComplete(() => _breathPcmInFlight.remove(requestKey));
     return future;
   }
-
 
   /// 낭독 재생기를 닫는다. **P2 Morphing이 이 재생기를 그대로 쓴다** —
   /// 화면 이탈·뒤로가기 정리 경로가 이미 여기를 부르고 있어 새 정리 지점을
@@ -3535,7 +3546,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
   // 📦 [Box 17-A-2: 실전 튜터링 - 팝업 바텀시트]
   void _showTutoringPopup(String docId, String baseText) {
     _resumeHistoryFromUserAction();
-    if (_appIsRecording || _appIsShadowRecording) {
+    if (_appIsRecording) {
       appAudioRecorder.stop().catchError((_) {});
     }
     setState(() {
@@ -3547,7 +3558,6 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
       _appTranscript = "";
       _appIsRecording = false;
       _appCorrectedAudio = null;
-      _appIsShadowRecording = false;
       _isPlayingAppAudio = false;
     });
     _generateAppText(baseText);
@@ -3582,14 +3592,13 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
       BillingTicker.instance
           .setRate(BillingRate.full); // 튜터링 종료 (배율은 하나뿐이라 그대로)
       _dialogSetState = null;
-      if (_appIsRecording || _appIsShadowRecording) {
+      if (_appIsRecording) {
         appAudioRecorder.stop().catchError((_) {});
       }
       if (mounted) {
         setState(() {
           activeAppDocId = null;
           _appIsRecording = false;
-          _appIsShadowRecording = false;
         });
       }
     });
@@ -3599,13 +3608,12 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
   Widget _buildAccordion(String docId, String baseText,
       {VoidCallback? onClose}) {
     void closeAccordion() {
-      if (_appIsRecording || _appIsShadowRecording) {
+      if (_appIsRecording) {
         appAudioRecorder.stop().catchError((_) {});
       }
       setState(() {
         activeAppDocId = null;
         _appIsRecording = false;
-        _appIsShadowRecording = false;
       });
       onClose?.call();
     }
@@ -4142,64 +4150,6 @@ RULES — follow exactly:
     } finally {
       if (mounted) setState(() => _isPlayingAppAudio = false);
       _dialogSetState?.call(() {});
-    }
-  }
-
-  // 📦 [Box 18-E: 실전 튜터링 - 쉐도잉 녹음 시작 (교정 TTS 1회 재생 후 녹음)]
-  Future<void> _startShadowRecord() async {
-    _resumeHistoryFromUserAction();
-    // Step 4-1: 교정 TTS 먼저 1회 재생 후 완료 대기
-    if (_appCorrectedAudio != null && mounted) {
-      final completer = Completer<void>();
-      StreamSubscription? sub;
-      sub = audioPlayer.onPlayerComplete.listen((_) {
-        if (!completer.isCompleted) completer.complete();
-        sub?.cancel();
-      });
-      if (mounted) setState(() => _isPlayingAppAudio = true);
-      try {
-        BillingTicker.instance.resumeFromActivity('history_tutoring_tts_start');
-        await audioPlayer.play(BytesSource(_appCorrectedAudio!));
-        await completer.future
-            .timeout(const Duration(seconds: 20), onTimeout: () {});
-        BillingTicker.instance.resumeFromActivity('history_tutoring_tts_end');
-      } catch (e) {
-        debugPrint("[startShadowRecord TTS] $e");
-      } finally {
-        sub?.cancel();
-        if (mounted) setState(() => _isPlayingAppAudio = false);
-      }
-    }
-    if (!mounted) return;
-
-    // Step 4-2: 녹음 시작
-    final hasPermission = await appAudioRecorder.hasPermission();
-    if (!hasPermission) return;
-    try {
-      final dir = await getTemporaryDirectory();
-      final path =
-          '${dir.path}/shadow_${DateTime.now().millisecondsSinceEpoch}.m4a';
-      await appAudioRecorder.start(
-        const RecordConfig(
-            encoder: AudioEncoder.aacLc, sampleRate: 16000, numChannels: 1),
-        path: path,
-      );
-      if (mounted) setState(() => _appIsShadowRecording = true);
-    } catch (e) {
-      debugPrint("[startShadowRecord] $e");
-    }
-  }
-
-  // 📦 [Box 18-F: 실전 튜터링 - 쉐도잉 녹음 중지]
-  Future<void> _stopShadowRecord() async {
-    _resumeHistoryFromUserAction();
-    final path = await appAudioRecorder.stop();
-    BillingTicker.instance
-        .resumeFromActivity('history_tutoring_shadow_recorded');
-    if (mounted) {
-      setState(() {
-        _appIsShadowRecording = false;
-      });
     }
   }
 
@@ -4856,32 +4806,14 @@ RULES — follow exactly:
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             ...(collapseSame
-                              // Origin=Target 동일 언어(또는 레거시 동일 텍스트):
-                              // 같은 문장이 두 번 나오지 않도록 Target 한 줄만 표시한다.
-                              // Target이 비어 있으면 Origin을 fallback으로 쓴다.
-                              ? [
-                                  Text(
-                                      translated.isNotEmpty
-                                          ? translated
-                                          : original,
-                                      textAlign: isHost
-                                          ? TextAlign.right
-                                          : TextAlign.left,
-                                      style: TextStyle(
-                                          color: isHost
-                                              ? Colors.white
-                                              : const Color(0xFF93C5FD),
-                                          fontSize: 16 * _fontScale,
-                                          fontWeight: FontWeight.bold,
-                                          height: 1.4)),
-                                ]
-                              : [
-                                  // 영어(타겟) 표시: mode 0,1 에서 보임
-                                  // 배지가 붙는 줄은 타겟이 아예 없다 — 빈 줄만
-                                  // 남기지 말고 자리를 배지에 넘긴다.
-                                  if (_langDisplayMode != 2 &&
-                                      !showTargetBadge) ...[
-                                    Text(translated,
+                                // Origin=Target 동일 언어(또는 레거시 동일 텍스트):
+                                // 같은 문장이 두 번 나오지 않도록 Target 한 줄만 표시한다.
+                                // Target이 비어 있으면 Origin을 fallback으로 쓴다.
+                                ? [
+                                    Text(
+                                        translated.isNotEmpty
+                                            ? translated
+                                            : original,
                                         textAlign: isHost
                                             ? TextAlign.right
                                             : TextAlign.left,
@@ -4892,33 +4824,51 @@ RULES — follow exactly:
                                             fontSize: 16 * _fontScale,
                                             fontWeight: FontWeight.bold,
                                             height: 1.4)),
-                                  ],
-                                  // 한글(원어) 표시: mode 0,2 에서 보임
-                                  // 타겟만 보는 mode 1이라도, 배지가 붙는 줄은
-                                  // 원문을 감추면 말풍선이 통째로 빈다.
-                                  if ((_langDisplayMode != 1 ||
-                                          showTargetBadge) &&
-                                      original.isNotEmpty) ...[
-                                    if (_langDisplayMode == 0)
-                                      const SizedBox(height: 8),
-                                    Text(original,
-                                        textAlign: isHost
-                                            ? TextAlign.right
-                                            : TextAlign.left,
-                                        style: TextStyle(
-                                            color: _langDisplayMode == 2
-                                                ? (isHost
-                                                    ? Colors.white
-                                                    : const Color(0xFF93C5FD))
-                                                : Colors.grey,
-                                            fontSize: _langDisplayMode == 2
-                                                ? 16 * _fontScale
-                                                : 12 * _fontScale,
-                                            fontWeight: _langDisplayMode == 2
-                                                ? FontWeight.bold
-                                                : FontWeight.normal)),
-                                  ],
-                                ]),
+                                  ]
+                                : [
+                                    // 영어(타겟) 표시: mode 0,1 에서 보임
+                                    // 배지가 붙는 줄은 타겟이 아예 없다 — 빈 줄만
+                                    // 남기지 말고 자리를 배지에 넘긴다.
+                                    if (_langDisplayMode != 2 &&
+                                        !showTargetBadge) ...[
+                                      Text(translated,
+                                          textAlign: isHost
+                                              ? TextAlign.right
+                                              : TextAlign.left,
+                                          style: TextStyle(
+                                              color: isHost
+                                                  ? Colors.white
+                                                  : const Color(0xFF93C5FD),
+                                              fontSize: 16 * _fontScale,
+                                              fontWeight: FontWeight.bold,
+                                              height: 1.4)),
+                                    ],
+                                    // 한글(원어) 표시: mode 0,2 에서 보임
+                                    // 타겟만 보는 mode 1이라도, 배지가 붙는 줄은
+                                    // 원문을 감추면 말풍선이 통째로 빈다.
+                                    if ((_langDisplayMode != 1 ||
+                                            showTargetBadge) &&
+                                        original.isNotEmpty) ...[
+                                      if (_langDisplayMode == 0)
+                                        const SizedBox(height: 8),
+                                      Text(original,
+                                          textAlign: isHost
+                                              ? TextAlign.right
+                                              : TextAlign.left,
+                                          style: TextStyle(
+                                              color: _langDisplayMode == 2
+                                                  ? (isHost
+                                                      ? Colors.white
+                                                      : const Color(0xFF93C5FD))
+                                                  : Colors.grey,
+                                              fontSize: _langDisplayMode == 2
+                                                  ? 16 * _fontScale
+                                                  : 12 * _fontScale,
+                                              fontWeight: _langDisplayMode == 2
+                                                  ? FontWeight.bold
+                                                  : FontWeight.normal)),
+                                    ],
+                                  ]),
                             if (showTargetBadge)
                               _buildTargetStatusBadge(docs[index], isHost),
                           ],
@@ -6949,12 +6899,27 @@ RULES — follow exactly:
   //   Shadow를 열 번 반복해도 API 호출은 늘지 않는다.
   // ══════════════════════════════════════════════════════════════════
 
-  /// P3가 대상으로 삼는 최종 문장. 완성문장을 우선한다.
+  /// P3가 대상으로 삼는 최종 문장. 완성/세련 두 문장을 각각 같은
+  /// Speaking Practice 흐름으로 열 수 있다.
   String get _p3TargetSentence {
-    final expanded = _expandedSentence.trim();
-    if (expanded.isNotEmpty) return expanded;
-    return _polishedSentence.trim();
+    final preferred = _selectedVariant == SentenceVariant.polished
+        ? _polishedSentence.trim()
+        : _expandedSentence.trim();
+    if (preferred.isNotEmpty) return preferred;
+    return _selectedVariant == SentenceVariant.polished
+        ? _expandedSentence.trim()
+        : _polishedSentence.trim();
   }
+
+  bool _p3VariantAvailable(SentenceVariant variant) =>
+      (variant == SentenceVariant.polished
+              ? _polishedSentence
+              : _expandedSentence)
+          .trim()
+          .isNotEmpty;
+
+  String _p3VariantLabel(SentenceVariant variant) =>
+      variant == SentenceVariant.polished ? '세련 문장' : '완성 문장';
 
   /// 🚧 Shadow 여유. **말하는 속도를 바꾸는 게 아니다** — AI의 발음·억양·속도는
   /// 그대로 두고 **호흡 사이 빈 자리만** 늘린다. 실기기에서 조정한다.
@@ -7058,6 +7023,21 @@ RULES — follow exactly:
     _deleteP3File(_p3ShadowPath);
     _p3EchoPath = null;
     _p3ShadowPath = null;
+  }
+
+  /// 완성/세련 문장은 TTS·호흡·사용자 녹음이 서로 다른 한 벌이다.
+  /// 문장을 바꾸면 현재 회차를 완전히 접고 새 선택을 준비한다. 원본 TTS는
+  /// text가 캐시 identity에 들어가므로 각 문장별로 재사용된다.
+  Future<void> _selectP3Variant(SentenceVariant variant) async {
+    if (!_p3VariantAvailable(variant) || _p3Busy) return;
+    if (_selectedVariant == variant && _p3Stage == P3Stage.idle) return;
+    await _stopP3Shadowing(resetSelection: true);
+    if (!mounted || _phase != ShadowingPhase.chunkPractice) return;
+    setState(() {
+      _selectedVariant = variant;
+      _p3Stage = P3Stage.idle;
+      _p3Error = null;
+    });
   }
 
   /// 최종 문장의 Smooth Jazz PCM을 얻어 호흡으로 가른 뒤 Stage 1을 연다.
@@ -7256,8 +7236,7 @@ RULES — follow exactly:
       await _stopP3Recording();
       return;
     }
-    await Future<void>.delayed(
-        const Duration(milliseconds: _kP3ShadowTailMs));
+    await Future<void>.delayed(const Duration(milliseconds: _kP3ShadowTailMs));
     if (!_p3Alive(generation)) {
       await _stopP3Recording();
       return;
@@ -7513,6 +7492,10 @@ RULES — follow exactly:
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (!started || _p3Stage == P3Stage.compare) ...[
+              _buildP3VariantPicker(),
+              const SizedBox(height: 14),
+            ],
             Text(
               _p3StageLabel,
               textAlign: TextAlign.center,
@@ -7575,9 +7558,92 @@ RULES — follow exactly:
             ],
             if (_p3Busy && _p3Stage != P3Stage.compare) ...[
               const SizedBox(height: 12),
-              _p3SecondaryButton(
-                  '■ 중지', () => unawaited(_stopP3Shadowing(resetSelection: true))),
+              _p3SecondaryButton('■ 중지',
+                  () => unawaited(_stopP3Shadowing(resetSelection: true))),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// P3의 두 학습 문장. 단순 label만 보여 주면 문장을 바꾸고도
+  /// 무엇을 골랐는지 알기 어려워 짧은 preview를 함께 보여 준다.
+  Widget _buildP3VariantPicker() {
+    return Column(
+      children: [
+        for (final variant in SentenceVariant.values) ...[
+          _buildP3VariantCard(variant),
+          if (variant != SentenceVariant.values.last) const SizedBox(height: 8),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildP3VariantCard(SentenceVariant variant) {
+    final available = _p3VariantAvailable(variant);
+    final selected = _selectedVariant == variant;
+    final sentence = (variant == SentenceVariant.polished
+            ? _polishedSentence
+            : _expandedSentence)
+        .trim();
+    return InkWell(
+      onTap: available && !_p3Busy
+          ? () => unawaited(_selectP3Variant(variant))
+          : null,
+      borderRadius: BorderRadius.circular(12),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(13, 11, 13, 12),
+        decoration: BoxDecoration(
+          color: selected
+              ? _p3ShadowingAccentColor.withValues(alpha: 0.16)
+              : Colors.white.withValues(alpha: 0.035),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: selected ? _p3ShadowingAccentColor : Colors.white12,
+            width: selected ? 1.4 : 1,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  selected
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                  color: available
+                      ? (selected ? _p3ShadowingAccentColor : Colors.white38)
+                      : Colors.white12,
+                  size: 17,
+                ),
+                const SizedBox(width: 7),
+                Text(
+                  _p3VariantLabel(variant),
+                  style: TextStyle(
+                    color: available
+                        ? (selected ? Colors.white : Colors.white60)
+                        : Colors.white24,
+                    fontSize: 13,
+                    fontWeight: selected ? FontWeight.bold : FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              available ? sentence : '문장이 준비되지 않았습니다',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: available ? Colors.white54 : Colors.white24,
+                fontSize: 11.5,
+                height: 1.35,
+              ),
+            ),
           ],
         ),
       ),
@@ -7633,8 +7699,8 @@ RULES — follow exactly:
     return Row(
       children: [
         Expanded(
-          child: _p3CompareButton('AI', _p3FullPcm != null,
-              () => unawaited(_playP3Original())),
+          child: _p3CompareButton(
+              'AI', _p3FullPcm != null, () => unawaited(_playP3Original())),
         ),
         const SizedBox(width: 6),
         Expanded(
@@ -7683,13 +7749,13 @@ RULES — follow exactly:
             disabledBackgroundColor: Colors.white12,
             foregroundColor: Colors.white,
             disabledForegroundColor: Colors.white38,
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
           onPressed: onTap,
           child: Text(label,
-              style: const TextStyle(
-                  fontSize: 14, fontWeight: FontWeight.bold)),
+              style:
+                  const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
         ),
       );
 
@@ -7699,480 +7765,13 @@ RULES — follow exactly:
           style: OutlinedButton.styleFrom(
             foregroundColor: Colors.white70,
             side: const BorderSide(color: Colors.white24),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           ),
           onPressed: onTap,
           child: Text(label, style: const TextStyle(fontSize: 12)),
         ),
       );
-  Widget _buildLegacyChunkPracticeScreen() {
-    const Color colorA = Color(0xFF0F2233);
-    const Color colorB = Color(0xFF1A0F2E);
-    const Color colorAActive = Color(0xFF1C3D55);
-    const Color colorBActive = Color(0xFF2E1650);
-
-    return Stack(
-      children: [
-        Column(
-          children: [
-            // 헤더
-            Padding(
-              padding: const EdgeInsets.fromLTRB(4, 10, 12, 4),
-              child: Row(
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.close, color: Colors.white70),
-                    onPressed: _exitShadowing,
-                  ),
-                  Expanded(
-                    child: Center(
-                      child: GestureDetector(
-                        onTap: _practicingPolished
-                            ? () async {
-                                _polishedRevealTimer?.cancel();
-                                audioPlayer.stop();
-                                await _buildChunks(_expandedSentence);
-                                if (!mounted) return;
-                                setState(() {
-                                  _practicingPolished = false;
-                                  _currentChunkIdx = -1;
-                                  _isPlayingFullUser = false;
-                                  _isPlayingFullAI = false;
-                                  _aiChunkPlaying = false;
-                                  _polishedRevealCount = 0;
-                                });
-                              }
-                            : null,
-                        child: Text(
-                          _practicingPolished ? 'Polished' : 'Expanded',
-                          style: TextStyle(
-                            color: _practicingPolished
-                                ? Colors.amber
-                                : Colors.greenAccent,
-                            fontSize: 17,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  // 빌링 상태 인디케이터
-                  ValueListenableBuilder<int>(
-                    valueListenable: BillingTicker.instance.billingState,
-                    builder: (_, s, __) => GestureDetector(
-                      onTap: s == 0 ? resetBillingIdle : null,
-                      child: Padding(
-                        padding: const EdgeInsets.only(left: 4, right: 6),
-                        child: CustomPaint(
-                          size: const Size(16, 16),
-                          painter: BillingDotPainter(s),
-                        ),
-                      ),
-                    ),
-                  ),
-                  // P/E 버튼 — Expanded ↔ Polished 전환
-                  GestureDetector(
-                    onTap: _practicingPolished
-                        ? () async {
-                            _polishedRevealTimer?.cancel();
-                            audioPlayer.stop();
-                            await _buildChunks(_expandedSentence);
-                            if (!mounted) return;
-                            setState(() {
-                              _practicingPolished = false;
-                              _currentChunkIdx = -1;
-                              _isPlayingFullUser = false;
-                              _isPlayingFullAI = false;
-                              _aiChunkPlaying = false;
-                              _polishedRevealCount = 0;
-                            });
-                          }
-                        : (_polishedSentence.isNotEmpty
-                            ? _switchToPolishedPractice
-                            : null),
-                    // [P-PULSE] Glow the available P button in Expanded mode.
-                    child: AnimatedBuilder(
-                      animation: _blinkController,
-                      child: Center(
-                        child: Text(
-                          _practicingPolished ? 'E' : 'P',
-                          style: TextStyle(
-                            color: _practicingPolished
-                                ? Colors.greenAccent
-                                : (_polishedSentence.isNotEmpty
-                                    ? _pPulseColor
-                                    : Colors.white24),
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      builder: (context, child) {
-                        // [P-PULSE] Pulse only when polished practice is available.
-                        final bool pPulse = !_practicingPolished &&
-                            _polishedSentence.isNotEmpty;
-                        final double t = _blinkOpacity.value;
-                        return Container(
-                          width: 40,
-                          height: 40,
-                          margin: const EdgeInsets.only(right: 4),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: _practicingPolished
-                                  ? Colors.greenAccent
-                                  : (_polishedSentence.isNotEmpty
-                                      ? _pPulseColor
-                                      : Colors.white24),
-                              width: 1.5,
-                            ),
-                            boxShadow: pPulse
-                                ? [
-                                    BoxShadow(
-                                      color: _pPulseColor.withValues(
-                                          alpha: 0.10 + 0.35 * t),
-                                      blurRadius: 5 + 8 * t,
-                                      spreadRadius: 1 + 1.5 * t,
-                                    ),
-                                  ]
-                                : null,
-                          ),
-                          child: child,
-                        );
-                      },
-                    ),
-                  ),
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => setState(() {
-                      _fontScale = _fontScale == 1.0
-                          ? 1.3
-                          : _fontScale == 1.3
-                              ? 0.8
-                              : 1.0;
-                    }),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 8),
-                      child: Icon(
-                        Icons.format_size,
-                        color: _fontScale > 1.0
-                            ? const Color(0xFFFBBF24)
-                            : _fontScale < 1.0
-                                ? Colors.white38
-                                : Colors.white54,
-                        size: 22,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // Step Expand 방: Practice 탭 바
-            if (_isStepExpandRoom) _buildPracticeTabBar(),
-
-            // 청크 리스트 + 버튼 영역
-            Expanded(
-              // [P3-INTRO] Hide and block only the body/chunk area during intro. Header/tabs stay visible.
-              child: IgnorePointer(
-                ignoring: _showEchoingOverlay,
-                child: AnimatedOpacity(
-                  opacity: _showEchoingOverlay ? 0.0 : 1.0,
-                  duration: const Duration(milliseconds: 500),
-                  child: _practicingPolished
-                      // ── Polished 의미단위 카드 ──────────────────────────────
-                      ? (_polishedUnits.isEmpty
-                          ? const Center(
-                              child: CircularProgressIndicator(
-                                  color: Colors.amber))
-                          : ListView.builder(
-                              controller: _chunkScrollController,
-                              padding: const EdgeInsets.fromLTRB(14, 4, 14, 8),
-                              itemCount: _polishedUnits.length + 1,
-                              itemBuilder: (context, i) {
-                                if (i == _polishedUnits.length) {
-                                  return _buildPracticeButtonsInline();
-                                }
-                                final unit = _polishedUnits[i];
-                                final bool isCurrent = i == _polishedUnitIdx;
-                                final bool isEven = i % 2 == 0;
-                                final Color bgColor = isCurrent
-                                    ? (isEven ? colorAActive : colorBActive)
-                                    : (isEven ? colorA : colorB);
-                                final Color borderColor = isCurrent
-                                    ? (_polishedUnitAIPlaying
-                                        ? const Color(0xFF5BB8F5)
-                                        : _isListening
-                                            ? Colors.greenAccent
-                                            : Colors.amber)
-                                    : Colors.amber.withValues(alpha: 0.35);
-                                final Color textColor =
-                                    isCurrent ? Colors.white : Colors.white70;
-                                return GestureDetector(
-                                  key: _polishedItemKeys.putIfAbsent(
-                                      i, () => GlobalKey()),
-                                  onTap: () => _onPolishedUnitTapped(i),
-                                  child: AnimatedContainer(
-                                    duration: const Duration(milliseconds: 220),
-                                    margin: const EdgeInsets.only(bottom: 8),
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 14, vertical: 13),
-                                    decoration: BoxDecoration(
-                                      color: bgColor,
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(
-                                          color: borderColor,
-                                          width: isCurrent ? 2 : 1.5),
-                                      boxShadow: isCurrent
-                                          ? [
-                                              BoxShadow(
-                                                  color: borderColor.withValues(
-                                                      alpha: 0.3),
-                                                  blurRadius: 10,
-                                                  spreadRadius: 1)
-                                            ]
-                                          : [],
-                                    ),
-                                    child: Row(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.center,
-                                      children: [
-                                        SizedBox(
-                                          width: 20,
-                                          child: Text('${i + 1}',
-                                              style: TextStyle(
-                                                  color: textColor.withValues(
-                                                      alpha: 0.45),
-                                                  fontSize: 11,
-                                                  fontWeight: FontWeight.bold)),
-                                        ),
-                                        const SizedBox(width: 6),
-                                        Expanded(
-                                          child: Text(
-                                            unit,
-                                            style: TextStyle(
-                                              color: textColor,
-                                              fontSize: 16 * _fontScale,
-                                              fontWeight: isCurrent
-                                                  ? FontWeight.bold
-                                                  : FontWeight.normal,
-                                              height: 1.45,
-                                            ),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 10),
-                                        if (isCurrent && _polishedUnitAIPlaying)
-                                          const Icon(Icons.volume_up,
-                                              color: Color(0xFF5BB8F5),
-                                              size: 22)
-                                        else if (isCurrent && _isListening)
-                                          const Icon(Icons.mic,
-                                              color: Colors.greenAccent,
-                                              size: 22)
-                                        else if (isCurrent)
-                                          const Icon(Icons.play_arrow_rounded,
-                                              color: Colors.amber, size: 22)
-                                        else
-                                          const Icon(Icons.play_arrow_rounded,
-                                              color: Colors.white24, size: 22),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                              },
-                            ))
-                      // ── Expanded 청크 카드 (기존 그대로) ────────────────────
-                      : (_chunks.isEmpty
-                          ? const Center(
-                              child: CircularProgressIndicator(
-                                  color: Colors.amber))
-                          : Builder(builder: (context) {
-                              final int visibleCount = _chunks.length;
-                              final bool showButtons = true;
-                              return ListView.builder(
-                                controller: _chunkScrollController,
-                                cacheExtent: 1500,
-                                padding:
-                                    const EdgeInsets.fromLTRB(14, 4, 14, 8),
-                                itemCount: visibleCount + (showButtons ? 1 : 0),
-                                itemBuilder: (context, i) {
-                                  if (showButtons && i == visibleCount) {
-                                    return _buildPracticeButtonsInline();
-                                  }
-                                  final chunk = _chunks[i];
-                                  final bool isCurrent = i == _currentChunkIdx;
-                                  final bool isDone = chunk.isDone;
-                                  final bool isEven = i % 2 == 0;
-
-                                  final Color bgColor = isCurrent
-                                      ? (isEven ? colorAActive : colorBActive)
-                                      : isDone
-                                          ? (isEven ? colorA : colorB)
-                                              .withValues(alpha: 0.55)
-                                          : (isEven ? colorA : colorB);
-
-                                  final Color borderColor = isCurrent
-                                      ? (_isListening
-                                          ? Colors.greenAccent
-                                          : _aiChunkPlaying
-                                              ? const Color(0xFF5BB8F5)
-                                              : Colors.amber)
-                                      : isDone
-                                          ? Colors.white12
-                                          : Colors.white10;
-
-                                  final Color textColor = isCurrent
-                                      ? Colors.white
-                                      : isDone
-                                          ? Colors.white38
-                                          : Colors.white70;
-
-                                  return GestureDetector(
-                                    key: _itemKeys.putIfAbsent(
-                                        i, () => GlobalKey()),
-                                    onTap: () => _onChunkTapped(i),
-                                    child: AnimatedContainer(
-                                      duration:
-                                          const Duration(milliseconds: 220),
-                                      margin: const EdgeInsets.only(bottom: 8),
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 14, vertical: 13),
-                                      decoration: BoxDecoration(
-                                        color: bgColor,
-                                        borderRadius: BorderRadius.circular(12),
-                                        border: Border.all(
-                                            color: borderColor,
-                                            width: isCurrent ? 2 : 1),
-                                        boxShadow: isCurrent
-                                            ? [
-                                                BoxShadow(
-                                                    color: borderColor
-                                                        .withValues(alpha: 0.3),
-                                                    blurRadius: 10,
-                                                    spreadRadius: 1)
-                                              ]
-                                            : [],
-                                      ),
-                                      child: Row(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.center,
-                                        children: [
-                                          SizedBox(
-                                            width: 20,
-                                            child: Text('${i + 1}',
-                                                style: TextStyle(
-                                                    color: textColor.withValues(
-                                                        alpha: 0.45),
-                                                    fontSize: 11,
-                                                    fontWeight:
-                                                        FontWeight.bold)),
-                                          ),
-                                          const SizedBox(width: 6),
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                Text(
-                                                  chunk.text,
-                                                  style: TextStyle(
-                                                    color: textColor,
-                                                    fontSize: 16 * _fontScale,
-                                                    fontWeight: isCurrent
-                                                        ? FontWeight.bold
-                                                        : FontWeight.normal,
-                                                    height: 1.45,
-                                                  ),
-                                                ),
-                                                _buildChunkKoLine(
-                                                    chunk), // 🆕 [KO-FRAG]
-                                                if (isCurrent &&
-                                                    _aiChunkLoading) ...[
-                                                  const SizedBox(height: 4),
-                                                  const Text(
-                                                    'Thinking...',
-                                                    style: TextStyle(
-                                                        color:
-                                                            Color(0xFF5BB8F5),
-                                                        fontSize: 11),
-                                                  ),
-                                                ],
-                                              ],
-                                            ),
-                                          ),
-                                          const SizedBox(width: 10),
-                                          if (isCurrent && _isListening)
-                                            const Icon(Icons.mic,
-                                                color: Colors.greenAccent,
-                                                size: 22)
-                                          else if (isCurrent && _aiChunkPlaying)
-                                            const Icon(Icons.volume_up,
-                                                color: Color(0xFF5BB8F5),
-                                                size: 22)
-                                          else if (isDone)
-                                            const Icon(Icons.check_circle,
-                                                color: Colors.greenAccent,
-                                                size: 20)
-                                          else
-                                            const Icon(Icons.play_arrow_rounded,
-                                                color: Colors.white24,
-                                                size: 22),
-                                        ],
-                                      ),
-                                    ),
-                                  );
-                                },
-                              );
-                            })),
-                ), // [P3-INTRO] AnimatedOpacity close
-              ), // [P3-INTRO] IgnorePointer close
-            ),
-          ],
-        ),
-        // Do Echoing 팝업 오버레이
-        AnimatedOpacity(
-          opacity: _showEchoingOverlay ? 1.0 : 0.0,
-          duration: const Duration(milliseconds: 600),
-          child: IgnorePointer(
-            ignoring: !_showEchoingOverlay,
-            child: Center(
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 32, vertical: 22),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.80),
-                  borderRadius: BorderRadius.circular(18),
-                  boxShadow: [
-                    BoxShadow(
-                        color: Colors.amber.withValues(alpha: 0.18),
-                        blurRadius: 24,
-                        spreadRadius: 2)
-                  ],
-                ),
-                child: const Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Echo it!',
-                      style: TextStyle(
-                        color: Colors.amber,
-                        fontSize: 26,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1.0,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
 
   // ============================================================================
   // 📦 [Box 11-D: Step Expand Practice 1 & 2 엔진]
@@ -8301,6 +7900,13 @@ RULES — follow exactly:
       //   곧바로 열린다 — 시작 신호는 `_checkAndStartTurn`이 준다.
       _morph = MorphChange.none;
       _morphActive = false;
+      // setState 직후에는 아직 이 프레임의 화면이다. P2 본문이
+      // 붙은 다음 프레임에 첫 계단을 열어야 자동 낭독이 누락되지 않는다.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _phase == ShadowingPhase.part2Practice) {
+          _checkAndStartTurn();
+        }
+      });
     }
   }
 

@@ -17,7 +17,7 @@ class _PreviewApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       home: Scaffold(
-        backgroundColor: kDuoStageBg,
+        backgroundColor: const Color(0xFF121212),
         body: SafeArea(
           child: ListView(
             padding: const EdgeInsets.symmetric(vertical: 12),
@@ -38,20 +38,17 @@ class _PreviewApp extends StatelessWidget {
                     callActive: true, muted: true, partnerOnline: true),
               ),
               _Case(
-                title: '만능 통역 · 언어쌍 + 대기',
-                child: Column(children: [
-                  DuoLangPairBar(mine: '한국어', theirs: 'English'),
-                  SizedBox(height: 12),
-                  DuoInterpreterStage(recording: false),
-                ]),
+                title: '만능 통역 · 대기',
+                child:
+                    DuoInterpreterStage(ready: false, partnerSpeaking: false),
               ),
               _Case(
-                title: '만능 통역 · 상대 언어 모름 + 녹음 중',
-                child: Column(children: [
-                  DuoLangPairBar(mine: '한국어'),
-                  SizedBox(height: 12),
-                  DuoInterpreterStage(recording: true),
-                ]),
+                title: '만능 통역 · 말하기 가능',
+                child: DuoInterpreterStage(ready: true, partnerSpeaking: false),
+              ),
+              _Case(
+                title: '만능 통역 · 상대 발화 중',
+                child: DuoInterpreterStage(ready: false, partnerSpeaking: true),
               ),
             ],
           ),
