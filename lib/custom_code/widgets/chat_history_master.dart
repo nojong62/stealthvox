@@ -68,6 +68,13 @@ const Color _p3PracticeSurfaceColor = Color(0xFF1C1C1C);
 const Color _p3PracticeBorderColor = Color(0x22FFFFFF);
 const Color _p3BreathAccentColor = Color(0xFF7DD3FC);
 
+/// 🗣️ [P3-VOICE] 모드마다 고를 수 있는 목소리가 다르다.
+///   · 에코잉 — 호흡을 끊어 따라 읽는 연습이라 둘만 둔다(성별 표기 유지).
+///   · 쉐도잉 — 겹쳐 말하는 연습이라 결이 다른 셋을 주고, 이름만 보여 준다.
+/// 캐시 키에 목소리가 들어가므로 목록을 늘려도 이미 받아 둔 소리는 그대로다.
+const List<String> _kP3EchoingVoices = <String>['marin', 'cedar'];
+const List<String> _kP3ShadowingVoices = <String>['onyx', 'ballad', 'marin'];
+
 /// 의미단위 낭독의 공통 뼈대. 무엇을 한 덩어리로 볼지, 덩어리 안을 어떻게
 /// 붙일지까지만 정한다. **덩어리 사이를 어떻게 다룰지는 아래 두 낭독 방식이
 /// 갈라서 정한다.**
@@ -6684,6 +6691,7 @@ RULES — follow exactly:
     if (!mounted || _phase != ShadowingPhase.chunkPractice) return;
     setState(() {
       _p3PracticeMode = mode;
+      _coerceP3VoiceForMode();
       _p3Stage = P3Stage.idle;
       _p3Error = null;
       _p3UserSpeaking = false;
@@ -7212,7 +7220,7 @@ RULES — follow exactly:
                   //   먼저 간다. 호흡 위치는 문장 패널 안 카운터가 알린다.
                   if (_p3PracticeMode == P3PracticeMode.echoing)
                     const Text(
-                      'Try to echo without reading — just trust your ears!',
+                      'Read it in one breath',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: Colors.white54,
@@ -7267,8 +7275,9 @@ RULES — follow exactly:
   }
 
   /// Voice Lab의 차분한 surface와 호흡 포인트 컬러를 P3용으로 정리한다.
-  /// 사용자 차례가 오면 본문 색을 살짝 바꾸고, VAD가 실제 목소리를 잡은
-  /// 동안에만 문장·테두리·마이크 표시를 한 단계 더 밝힌다.
+  /// 사용자 차례가 오면 본문 색만 살짝 바꾸고, VAD가 실제 목소리를 잡은
+  /// 동안에만 바탕·테두리·마이크 표시를 한 단계 더 밝힌다.
+  /// 어느 경우에도 자리와 크기는 그대로다 — 읽는 중에 글자가 움직이면 안 된다.
   Widget _buildP3SentencePanel(String text) {
     final bool inBreathEcho =
         _p3Stage == P3Stage.breathListen || _p3Stage == P3Stage.breathEcho;
@@ -7300,7 +7309,9 @@ RULES — follow exactly:
               : inBreathEcho
                   ? _p3BreathAccentColor.withValues(alpha: 0.30)
                   : _p3PracticeBorderColor,
-          width: speaking ? 1.4 : 1,
+          // 굵기는 고정이다. 1 → 1.4로 바뀌면 테두리가 안쪽을 그만큼 먹어
+          // 본문이 미세하게 밀린다 — 읽는 중에 글자가 흔들려 보였다.
+          width: 1.4,
         ),
         boxShadow: speaking
             ? <BoxShadow>[
@@ -7315,77 +7326,85 @@ RULES — follow exactly:
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Row(
-            children: <Widget>[
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 160),
-                child: Icon(
-                  speaking ? Icons.mic_rounded : Icons.air_rounded,
-                  key: ValueKey<bool>(speaking),
-                  color: inBreathEcho ? _p3BreathAccentColor : Colors.white30,
-                  size: 17,
-                ),
-              ),
-              const SizedBox(width: 7),
-              Text(
-                _p3PracticeMode == P3PracticeMode.echoing
-                    ? 'ECHOING'
-                    : 'SHADOWING',
-                style: TextStyle(
-                  color: inBreathEcho ? _p3BreathAccentColor : Colors.white38,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.3,
-                ),
-              ),
-              const Spacer(),
-              // 본문에 색을 넣지 않으므로 **여기가 유일한 신호다.** 카운터와
-              // READING을 한 자리에서 교대시키면 정작 말하는 동안 몇 번째
-              // 호흡인지가 사라진다. 둘을 나란히 두고 카운터는 항상 남긴다.
-              if (inBreathEcho && safeTotal > 0)
-                Text(
-                  '${safeIndex + 1} / $safeTotal',
-                  style: TextStyle(
-                    color: userTurn ? userTurnAccent : Colors.white54,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.5,
+          // 높이를 잡아 둔다. READING 배지가 떴다 사라질 때마다 이 줄이
+          // 커졌다 작아지면서 아래 본문이 통째로 오르내렸다.
+          SizedBox(
+            height: 24,
+            child: Row(
+              children: <Widget>[
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 160),
+                  child: Icon(
+                    speaking ? Icons.mic_rounded : Icons.air_rounded,
+                    key: ValueKey<bool>(speaking),
+                    color: inBreathEcho ? _p3BreathAccentColor : Colors.white30,
+                    size: 17,
                   ),
                 ),
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 160),
-                child: speaking
-                    ? Container(
-                        key: const ValueKey<String>('p3-speaking'),
-                        margin: const EdgeInsets.only(left: 8),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: _p3BreathAccentColor.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(99),
-                        ),
-                        child: const Text(
-                          'READING',
-                          style: TextStyle(
-                            color: _p3BreathAccentColor,
-                            fontSize: 9,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 1.0,
+                const SizedBox(width: 7),
+                Text(
+                  _p3PracticeMode == P3PracticeMode.echoing
+                      ? 'ECHOING'
+                      : 'SHADOWING',
+                  style: TextStyle(
+                    color: inBreathEcho ? _p3BreathAccentColor : Colors.white38,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.3,
+                  ),
+                ),
+                const Spacer(),
+                // 카운터와 READING을 한 자리에서 교대시키면 정작 말하는 동안
+                // 몇 번째 호흡인지가 사라진다. 둘을 나란히 두고 카운터는 늘
+                // 남긴다.
+                if (inBreathEcho && safeTotal > 0)
+                  Text(
+                    '${safeIndex + 1} / $safeTotal',
+                    style: TextStyle(
+                      color: userTurn ? userTurnAccent : Colors.white54,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 160),
+                  child: speaking
+                      ? Container(
+                          key: const ValueKey<String>('p3-speaking'),
+                          margin: const EdgeInsets.only(left: 8),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: _p3BreathAccentColor.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(99),
                           ),
-                        ),
-                      )
-                    : const SizedBox.shrink(
-                        key: ValueKey<String>('p3-no-status')),
-              ),
-            ],
+                          child: const Text(
+                            'READING',
+                            style: TextStyle(
+                              color: _p3BreathAccentColor,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 1.0,
+                            ),
+                          ),
+                        )
+                      : const SizedBox.shrink(
+                          key: ValueKey<String>('p3-no-status')),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 12),
-          // 🚫 본문은 상태에 따라 변하지 않는다. 문장 전체가 물들면 "지금 어디"를
-          //    알려주지 못하면서 눈만 시끄럽다. 위치는 카운터가 알린다.
+          // 🚫 본문은 크기도 굵기도 그대로다 — 읽는 중에 글자가 조금이라도
+          //    움직이면 눈이 줄을 놓친다. 내 차례라는 신호는 색만 살짝 얹는다.
           Text(
             text.isEmpty ? 'Sentence unavailable' : text,
             style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.90),
+              color: userTurn
+                  ? Color.lerp(Colors.white, userTurnAccent, 0.34)!
+                      .withValues(alpha: 0.96)
+                  : Colors.white.withValues(alpha: 0.90),
               fontSize: 16 * _fontScale,
               fontWeight: FontWeight.w400,
               height: 1.6,
@@ -7398,8 +7417,9 @@ RULES — follow exactly:
 
   Widget _buildP3VoiceSelector({required bool started}) {
     final enabled = !started && !_p3Busy;
+    final List<String> voices = _p3VoiceChoices;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.035),
         borderRadius: BorderRadius.circular(12),
@@ -7408,7 +7428,6 @@ RULES — follow exactly:
         ),
       ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
         children: [
           const Text(
             'VOICE',
@@ -7420,41 +7439,102 @@ RULES — follow exactly:
             ),
           ),
           const SizedBox(width: 12),
-          DropdownButtonHideUnderline(
-            child: DropdownButton<String>(
-              value: _p3Voice,
-              isDense: true,
-              dropdownColor: const Color(0xFF24262A),
-              borderRadius: BorderRadius.circular(12),
-              icon: Icon(
-                Icons.keyboard_arrow_down_rounded,
-                color: enabled ? _p3ShadowingAccentColor : Colors.white24,
+          // 남는 폭을 똑같이 나눠 갖는다. 모드에 따라 둘이 되었다 셋이 되는데,
+          // 글자 폭에 맡기면 글꼴을 키운 기기에서 줄이 넘친다.
+          for (int i = 0; i < voices.length; i++) ...[
+            if (i > 0) const SizedBox(width: 8),
+            Expanded(
+              child: _buildP3VoiceChip(
+                id: voices[i],
+                label: _p3VoiceLabel(voices[i]),
+                enabled: enabled,
               ),
-              style: TextStyle(
-                color: enabled ? Colors.white : Colors.white38,
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-              ),
-              items: const [
-                DropdownMenuItem(value: 'marin', child: Text('marin (F)')),
-                DropdownMenuItem(value: 'cedar', child: Text('cedar (M)')),
-              ],
-              onChanged: enabled
-                  ? (voice) {
-                      if (voice != null && voice != _p3Voice) {
-                        setState(() {
-                          _p3Voice = voice;
-                          _p3FullPcm = null;
-                          _p3Segments = const <BreathSegment>[];
-                        });
-                      }
-                    }
-                  : null,
             ),
-          ),
+          ],
         ],
       ),
     );
+  }
+
+  /// 지금 모드에서 고를 수 있는 목소리.
+  List<String> get _p3VoiceChoices => _p3PracticeMode == P3PracticeMode.echoing
+      ? _kP3EchoingVoices
+      : _kP3ShadowingVoices;
+
+  /// 쉐도잉은 이름만 보여 준다 — 성별 표기는 에코잉 둘에만 남는다.
+  String _p3VoiceLabel(String voice) {
+    if (_p3PracticeMode != P3PracticeMode.echoing) return voice;
+    return voice == 'cedar' ? 'cedar (M)' : 'marin (F)';
+  }
+
+  /// 모드를 바꾸면 목소리도 그 모드의 것으로 맞춘다. 남의 모드 목소리가 그대로
+  /// 남으면 어느 칸도 켜지지 않은 채 그 목소리로 소리가 난다.
+  void _coerceP3VoiceForMode() {
+    final choices = _p3VoiceChoices;
+    if (choices.contains(_p3Voice)) return;
+    _p3Voice = choices.first;
+    _p3FullPcm = null;
+    _p3Segments = const <BreathSegment>[];
+  }
+
+  /// 🗣️ [P3-VOICE] 고를 목소리를 한 줄에 나란히 펼쳐 둔다.
+  ///
+  /// 풀다운은 열어 봐야 무엇이 있는지 알 수 있었는데 고를 것은 둘 또는 셋뿐이다.
+  /// 아래 모드/문장 고르는 줄과 같은 생김새로 맞춰, 한 번 눌러 바꾼다.
+  Widget _buildP3VoiceChip({
+    required String id,
+    required String label,
+    required bool enabled,
+  }) {
+    final bool selected = _p3Voice == id;
+    return InkWell(
+      onTap: enabled ? () => _selectP3Voice(id) : null,
+      borderRadius: BorderRadius.circular(9),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        decoration: BoxDecoration(
+          color: selected
+              ? _p3ShadowingAccentColor.withValues(alpha: enabled ? 0.18 : 0.10)
+              : Colors.white.withValues(alpha: 0.035),
+          borderRadius: BorderRadius.circular(9),
+          border: Border.all(
+            color: selected
+                ? _p3ShadowingAccentColor.withValues(
+                    alpha: enabled ? 1.0 : 0.40)
+                : Colors.white12,
+            width: selected ? 1.4 : 1,
+          ),
+        ),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            label,
+            maxLines: 1,
+            style: TextStyle(
+              color: selected
+                  ? (enabled ? Colors.white : Colors.white54)
+                  : (enabled ? Colors.white70 : Colors.white24),
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 목소리를 바꾸면 만들어 둔 소리와 호흡 경계는 버린다 — 그 목소리로 뜬
+  /// 파형이라 다음 재생이 어긋난다. 캐시는 목소리별로 나뉘어 있어 되돌아오면
+  /// 다시 받지 않는다.
+  void _selectP3Voice(String voice) {
+    if (voice == _p3Voice) return;
+    setState(() {
+      _p3Voice = voice;
+      _p3FullPcm = null;
+      _p3Segments = const <BreathSegment>[];
+    });
   }
 
   Widget _buildP3PracticeModePicker() {
