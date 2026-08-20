@@ -995,6 +995,37 @@ Return ONLY valid JSON: {"name":"..."}.
     );
   }
 
+  /// 🏫 [SR] 설정 페이지에서 곧장 공부방으로.
+  ///
+  /// 모드 메뉴의 "STUDY ROOM" 알약과 같은 문이다 — 가는 곳도 같다. 설정 줄은
+  /// 뒤로가기와 사용설명서가 이미 양끝을 잡고 있어 자리가 좁아, 글자만 줄인다.
+  Widget _buildStudyRoomChip() {
+    return Tooltip(
+      message: '공부방 (Study Room)',
+      child: GestureDetector(
+        onTap: () => context.pushNamed('ChatHistory'),
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: const Color(0x33FFFFFF)),
+          ),
+          child: const Text(
+            "SR",
+            maxLines: 1,
+            style: TextStyle(
+              color: Color(0xFFE7E9EE),
+              fontWeight: FontWeight.w600,
+              fontSize: 13,
+              letterSpacing: 1.2,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   /// 설정 페이지 두 곳이 함께 쓰는 자판 대응 높이.
   ///   키보드가 올라온 만큼 높이를 줄인다. 그래야 스크롤 뷰포트가 자판 위쪽으로
   ///   한정돼, 입력란을 탭했을 때 Flutter가 그 칸을 위로 밀어 올린다.
@@ -1035,11 +1066,18 @@ Return ONLY valid JSON: {"name":"..."}.
                   ),
                   // Circle Talk 설정 페이지와 같은 자리에 같은 아이콘을 둔다.
                   // 방에 들어가기 전에도 사용법을 볼 수 있어야 한다.
-                  IconButton(
-                    onPressed: () => showScenarioTalkGuide(context),
-                    icon: const Icon(Icons.menu_book_rounded,
-                        color: kScenarioGuideAccent, size: 25),
-                    tooltip: 'Scenario Talk 사용설명서',
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _buildStudyRoomChip(),
+                      const SizedBox(width: 4),
+                      IconButton(
+                        onPressed: () => showScenarioTalkGuide(context),
+                        icon: const Icon(Icons.menu_book_rounded,
+                            color: kScenarioGuideAccent, size: 25),
+                        tooltip: 'Scenario Talk 사용설명서',
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -1170,11 +1208,18 @@ Return ONLY valid JSON: {"name":"..."}.
                         color: Colors.white, size: 22),
                     tooltip: '대화 모드 선택으로 돌아가기',
                   ),
-                  IconButton(
-                    onPressed: () => showCircleTalkGuide(context),
-                    icon: const Icon(Icons.menu_book_rounded,
-                        color: Color(0xFFB46CFF), size: 25),
-                    tooltip: 'Circle Talk 사용설명서',
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _buildStudyRoomChip(),
+                      const SizedBox(width: 4),
+                      IconButton(
+                        onPressed: () => showCircleTalkGuide(context),
+                        icon: const Icon(Icons.menu_book_rounded,
+                            color: Color(0xFFB46CFF), size: 25),
+                        tooltip: 'Circle Talk 사용설명서',
+                      ),
+                    ],
                   ),
                 ],
               ),

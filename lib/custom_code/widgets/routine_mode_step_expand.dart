@@ -5041,6 +5041,19 @@ line had never been said. Never build the conversation on a line you had to gues
     }
   }
 
+  /// 🏫 [SR] 대화방 → 공부방.
+  ///
+  /// 방을 켜 둔 채 목록만 얹으면 안 된다. 공부방 목록은 dispose에서 과금
+  /// 티커를 멈추므로, 돌아왔을 때 밑에 깔린 이 방의 차감이 죽는다. 뒤로가기와
+  /// 같은 저장·정리 경로를 그대로 태워 방을 닫은 뒤에 옮긴다.
+  /// 라우터는 await 전에 잡아 둔다 — 나온 뒤의 context는 이미 죽어 있다.
+  Future<void> _goToStudyRoom() async {
+    if (_isExiting) return; // 연타·뒤로가기 직후에 목록이 두 번 얹히지 않게
+    final router = GoRouter.of(context);
+    await _handleAutoSaveAndExit();
+    router.pushNamed('ChatHistory');
+  }
+
   // ====================================================================
   // 📦 [Box 6: UI]
   // ====================================================================
@@ -5082,14 +5095,42 @@ line had never been said. Never build the conversation on a line you had to gues
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          IconButton(
-              icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                  color: Colors.white70),
-              tooltip: '이전 단계',
-              padding: EdgeInsets.zero,
-              alignment: Alignment.centerLeft,
-              constraints: const BoxConstraints(minWidth: 72, minHeight: 56),
-              onPressed: _handleAutoSaveAndExit), // 🔧 [히스토리] AutoSave 연결
+          Row(mainAxisSize: MainAxisSize.min, children: [
+            IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                    color: Colors.white70),
+                tooltip: '이전 단계',
+                padding: EdgeInsets.zero,
+                alignment: Alignment.centerLeft,
+                constraints: const BoxConstraints(minWidth: 56, minHeight: 56),
+                onPressed: _handleAutoSaveAndExit), // 🔧 [히스토리] AutoSave 연결
+            // 🏫 [SR] 방금 한 대화를 그대로 들고 공부방으로 건너간다.
+            Tooltip(
+              message: '공부방 (Study Room)',
+              child: GestureDetector(
+                onTap: _goToStudyRoom,
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: const Color(0x33FFFFFF)),
+                  ),
+                  child: const Text(
+                    "SR",
+                    maxLines: 1,
+                    style: TextStyle(
+                      color: Color(0xFFE7E9EE),
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ]),
           Row(children: [
             IconButton(
               icon: Icon(
