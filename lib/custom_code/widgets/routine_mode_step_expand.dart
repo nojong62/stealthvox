@@ -60,6 +60,7 @@ import '/custom_code/services/deepgram_prewarm_session.dart';
 import '/custom_code/services/origin_language_session.dart';
 import '/custom_code/services/openai_streaming_transcribe_prewarm.dart';
 import '/custom_code/services/late_continuation.dart';
+import '/custom_code/services/conversation_cancel_command.dart';
 import '/custom_code/services/openai_streaming_transcribe_session.dart';
 import '/custom_code/services/openai_transcribe_service.dart';
 import '/custom_code/services/pcm_audio_utils.dart';
@@ -86,7 +87,9 @@ class RoutineModeStepExpand extends StatefulWidget {
 }
 
 class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
-    with SingleTickerProviderStateMixin, BillingIdleMixin<RoutineModeStepExpand> {
+    with
+        SingleTickerProviderStateMixin,
+        BillingIdleMixin<RoutineModeStepExpand> {
   // ====================================================================
   // 📦 [Box 3: 상태 변수 및 초기화]
   // ====================================================================
@@ -246,6 +249,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
   bool _awaitingAiFirstAudioProbe = false;
   double? _activeSttConfidence;
   int _pipelineGeneration = 0;
+
   /// 🧹 [DISPOSE-GUARD] dispose 진행 중. 위젯이 이미 defunct라 setState가
   /// 금지된다. GPT 스트리밍 중에 방을 나가면 늦게 도착한 조각이 화면을
   /// 건드리려다 예외를 낸다 — Circle Talk에는 있던 가드가 여기엔 없었다.
@@ -2374,7 +2378,9 @@ line had never been said. Never build the conversation on a line you had to gues
         '🔁 [CONT-DETECT]',
         'candidate=$_continuationCandidate afterMs=$elapsed '
             'gen=$_pipelineGeneration segments=${_turnSegments.length}');
-    if (_streamingPipelineRunning || _aiTurnActive || _turnSegments.isNotEmpty) {
+    if (_streamingPipelineRunning ||
+        _aiTurnActive ||
+        _turnSegments.isNotEmpty) {
       _invalidateAssistantTurn(reason: 'late_continuation');
     }
     _armContinuationTranscriptTimeout();
@@ -2488,9 +2494,6 @@ line had never been said. Never build the conversation on a line you had to gues
     _log('🔁 [CONT-RESTART]', 'gen=$generation reason=$reason');
     unawaited(_processFinalUserKorean(userKorean, generation: generation));
   }
-
-
-
 
   /// 🔁 [LATE-CONTINUATION] 복구 창이 열려 있는 동안 마이크 표시를 살려 둔다.
   ///
@@ -2703,8 +2706,8 @@ line had never been said. Never build the conversation on a line you had to gues
     //   뒷말이 먼저 끝났을 때 문장이 뒤집힌다.
     final int order =
         _streamingStt?.utteranceOrderOf(itemId) ?? (++_fallbackSegmentOrder);
-    unawaited(_processStreamingFinalTranscript(text,
-        itemId: itemId, order: order));
+    unawaited(
+        _processStreamingFinalTranscript(text, itemId: itemId, order: order));
   }
 
   Future<void> _processStreamingFinalTranscript(
@@ -2978,6 +2981,11 @@ line had never been said. Never build the conversation on a line you had to gues
     required int generation,
   }) async {
     if (!mounted || generation != _pipelineGeneration) return;
+
+    if (isConversationCancelCommand(userKorean)) {
+      await _handleConversationCancelCommand(generation);
+      return;
+    }
 
     // 🔇 [NOISE-GATE] 로컬 잡음 검열은 화면과 API보다 먼저 온다. 뒤에 두면
     //   잡음에도 임시 말풍선이 먼저 뜨고 validator·합치기 왕복이 나간다.
@@ -3835,6 +3843,63 @@ line had never been said. Never build the conversation on a line you had to gues
       _log('[HIST-DEL]', '잘못된 교환 ${ids.length}건 히스토리 제거');
     } catch (e) {
       _log('[HIST-DEL-ERR]', '히스토리 제거 실패: $e');
+    }
+  }
+
+  Future<void> _handleConversationCancelCommand(int generation) async {
+    _log('[VOICE-CANCEL]', '직전 사용자 턴부터 삭제 시작');
+    _streamingStt?.closeAudioGate(reason: 'voice_cancel_command');
+    await _stopStreamingCapture(reason: 'voice_cancel_command');
+    _ttsQueueManager.stop();
+    _ttsQueueManager.setUserTurn(false);
+    _ttsQueueManager.setAiPaused(false);
+    _pendingHeardConfirmation = null;
+    _heardConfirmationAttempts = 0;
+    _closeContinuationWindow(reason: 'voice_cancel_command');
+    _resetContinuationState();
+
+    var removedUserTurn = false;
+    if (mounted) {
+      setState(() {
+        _localMessages.removeWhere((message) => message['role'] == 'HOST_TEMP');
+        removedUserTurn = removeFromLastUserTurn(_localMessages);
+        _isSessionComplete = false;
+        _debugResult = '⏱️ 듣는 중...';
+      });
+      if (_localMessages.isNotEmpty) _scrollToBottom();
+    }
+    if (removedUserTurn && _turnCounter > 0) _turnCounter--;
+    _expandedNativeSentence = '';
+    for (var index = _localMessages.length - 1; index >= 0; index--) {
+      if (_localMessages[index]['role'] == 'HOST') {
+        _expandedNativeSentence =
+            (_localMessages[index]['target'] ?? '').toString().trim();
+        break;
+      }
+    }
+    _pendingNativeParts.clear();
+
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (removedUserTurn && user != null) {
+        await rollbackLastPersistedUserTurn(
+          firestore: FirebaseFirestore.instance,
+          uid: user.uid,
+          sessionDocId: _sessionDocId,
+          historyRef: _myHistoryRef,
+        );
+      }
+      _lastExchangeMsgIds = <String>[];
+      _log('[VOICE-CANCEL]', '직전 사용자 턴 삭제 완료 removed=$removedUserTurn');
+    } catch (error) {
+      _log('[VOICE-CANCEL-ERR]', '저장본 삭제 실패 reason=${error.runtimeType}');
+    }
+
+    if (mounted &&
+        _isConversationActive &&
+        generation == _pipelineGeneration &&
+        !_isSessionComplete) {
+      await _startUserListening();
     }
   }
 

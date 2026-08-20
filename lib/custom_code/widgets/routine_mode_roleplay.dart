@@ -58,6 +58,7 @@ import '/custom_code/services/deepgram_prewarm_session.dart';
 // 🔁 [LATE-CONTINUATION] 판정·합치기·말풍선 규칙은 Circle Talk과 **같은
 //   함수**를 쓴다. 여기에 규칙을 다시 구현하면 한쪽만 고쳐지고 다른 쪽은 남는다.
 import '/custom_code/services/late_continuation.dart';
+import '/custom_code/services/conversation_cancel_command.dart';
 import '/custom_code/services/origin_language_session.dart';
 import '/custom_code/services/openai_streaming_transcribe_prewarm.dart';
 import '/custom_code/services/openai_streaming_transcribe_session.dart';
@@ -118,6 +119,7 @@ class _RoutineModeRoleplayState extends State<RoutineModeRoleplay>
 
   String? _sessionDocId; // 🔧 [v3 추가] 첫 대화 후 세션 ID (클론 변경 시 null 리셋)
   DocumentReference? _myHistoryRef; // 🔧 [히스토리] chat_history 문서 참조 (Duo 패턴)
+  Future<void> _pendingTurnPersistence = Future<void>.value();
 
   // 🔧 [v3.4 발화 합치기] 유저 더듬거림 대응
   // speech_final 받아도 바로 파이프라인 시작 안 하고 조건부 대기
@@ -1208,6 +1210,44 @@ never by itself a reason to ask back.
     if (lastHostIdx >= 0) _localMessages.removeAt(lastHostIdx);
   }
 
+  Future<void> _handleConversationCancelCommand() async {
+    _log('[VOICE-CANCEL]', '직전 사용자 턴부터 삭제 시작');
+    _aiTtsAdapter.stopAll(reason: 'voice_cancel_command');
+    _ttsQueueManager.stop();
+    _ttsQueueManager.setUserTurn(false);
+    _ttsQueueManager.setAiPaused(false);
+    _pendingHeardConfirmation = null;
+    _heardConfirmationAttempts = 0;
+    var removedUserTurn = false;
+    if (mounted) {
+      setState(() {
+        _localMessages.removeWhere((message) => message['role'] == 'HOST_TEMP');
+        removedUserTurn = removeFromLastUserTurn(_localMessages);
+      });
+      if (_localMessages.isNotEmpty) _scrollToBottom();
+    }
+    if (removedUserTurn && _turnCounter > 0) _turnCounter--;
+    _currentRoomHasUserTurn =
+        _localMessages.any((message) => message['role'] == 'HOST');
+    try {
+      await _pendingTurnPersistence;
+      final user = FirebaseAuth.instance.currentUser;
+      if (removedUserTurn && user != null) {
+        await rollbackLastPersistedUserTurn(
+          firestore: FirebaseFirestore.instance,
+          uid: user.uid,
+          sessionDocId: _sessionDocId,
+          historyRef: _myHistoryRef,
+        );
+      }
+      _lastExchangeMsgIds = <String>[];
+      _log('[VOICE-CANCEL]', '직전 사용자 턴 삭제 완료 removed=$removedUserTurn');
+    } catch (error) {
+      _log('[VOICE-CANCEL-ERR]', '저장본 삭제 실패 reason=${error.runtimeType}');
+    }
+    if (mounted && _isConversationActive) _startConfiguredListening();
+  }
+
   // AI가 응답하기 전에 중단된 "고아 HOST 버블" 제거
   // 새 턴 시작 전 호출하여 직전 오인식/중단 메시지를 정리
   void _removeOrphanedHostBubbles() {
@@ -1635,7 +1675,8 @@ never by itself a reason to ask back.
     _streamingStt?.closeAudioGate(reason: reason);
     unawaited(_stopStreamingCapture(reason: reason));
     if (wasOpen) {
-      _log('🔁 [CONT-WINDOW]', 'close seq=$_continuationWindowSeq reason=$reason');
+      _log('🔁 [CONT-WINDOW]',
+          'close seq=$_continuationWindowSeq reason=$reason');
       _repaintContinuationHint();
     }
   }
@@ -1663,7 +1704,8 @@ never by itself a reason to ask back.
     }
     _continuationCandidate = ++_continuationCandidateSeq;
     _continuationWaitStartedAt = DateTime.now();
-    _log('🔁 [CONT-DETECT]',
+    _log(
+        '🔁 [CONT-DETECT]',
         'candidate=$_continuationCandidate afterMs=$elapsed '
             'gen=$_pipelineGeneration segments=${_turnSegments.length}');
     // 이미 답변을 만들기 시작했다면 즉시 무효화한다. 시나리오톡은 첫 문장을
@@ -1726,8 +1768,7 @@ never by itself a reason to ask back.
     // 돌기 때문에, 여기서 지우면 앞 조각만 보고 만든 되묻기도 함께 사라진다.
     _removeBubbleById(_activeAiBubbleId);
     _activeAiBubbleId = '';
-    _log('🔁 [CONT-INVALIDATE]',
-        'reason=$reason newGen=$_pipelineGeneration');
+    _log('🔁 [CONT-INVALIDATE]', 'reason=$reason newGen=$_pipelineGeneration');
   }
 
   void _resolveContinuation({
@@ -1785,9 +1826,6 @@ never by itself a reason to ask back.
     _log('🔁 [CONT-RESTART]', 'gen=$generation reason=$reason');
     unawaited(_processScenarioTalkTurn(userKorean, generation: generation));
   }
-
-
-
 
   /// 🔁 [LATE-CONTINUATION] 복구 창이 열려 있는 동안 마이크 표시를 살려 둔다.
   ///
@@ -2347,6 +2385,10 @@ never by itself a reason to ask back.
         generation != _pipelineGeneration) {
       return;
     }
+    if (isConversationCancelCommand(userKorean)) {
+      await _handleConversationCancelCommand();
+      return;
+    }
     // 👂 [HEARD-CONFIRM] 되묻기를 걸어 둔 상태면, 이번 발화는 새 대화가 아니라
     //   그 되물음에 대한 답이다. 서클톡과 같은 흐름이다
     //   (`routine_mode_anyone.dart` `_processRelayPipeline` 머리).
@@ -2544,8 +2586,9 @@ never by itself a reason to ask back.
         final tooManyAttempts =
             _heardConfirmationAttempts > _kMaxHeardConfirmAttempts ||
                 spokenQuestion.isEmpty;
-        final prompt =
-            tooManyAttempts ? originRetryLine(_nativeLangName()) : spokenQuestion;
+        final prompt = tooManyAttempts
+            ? originRetryLine(_nativeLangName())
+            : spokenQuestion;
         // 상한을 넘겼으면 보류하지 않는다 — 되살릴 발화를 들고 있으면
         // 확인–되묻기가 끝없이 서로를 부른다. 그때는 통째로 다시 듣는다.
         _pendingHeardConfirmation = tooManyAttempts ? null : userKorean.trim();
@@ -2646,8 +2689,11 @@ never by itself a reason to ask back.
         'role': 'SYSTEM',
         'original_text': aiKoreanFinal,
       };
-      _saveTurnToFirestore(<Map<String, dynamic>>[hostLine, systemLine]);
-      await _saveHistoryMessages(<Map<String, dynamic>>[hostLine, systemLine]);
+      _pendingTurnPersistence = Future.wait<void>(<Future<void>>[
+        _saveTurnToFirestore(<Map<String, dynamic>>[hostLine, systemLine]),
+        _saveHistoryMessages(<Map<String, dynamic>>[hostLine, systemLine]),
+      ]);
+      await _pendingTurnPersistence;
       _log('[GPT-HISTORY]',
           'turn=$turnNumber model=gpt-4o-mini voice=$_aiVoice tts=true');
     } catch (error) {
@@ -4151,7 +4197,8 @@ never by itself a reason to ask back.
                       animation: _continuationPulse,
                       builder: (context, _) {
                         final double t = _continuationListening
-                            ? Curves.easeInOut.transform(_continuationPulse.value)
+                            ? Curves.easeInOut
+                                .transform(_continuationPulse.value)
                             : 0.0;
                         final double size = 12 + (18 - 12) * t;
                         return Container(

@@ -53,6 +53,7 @@ import '/custom_code/services/pcm_audio_utils.dart';
 import '/custom_code/services/session_rollover_summary.dart';
 import '/custom_code/services/tts_adapter.dart';
 import '/custom_code/services/late_continuation.dart';
+import '/custom_code/services/conversation_cancel_command.dart';
 import 'deepgram_confidence_probe.dart';
 import 'first_utterance_context_judge.dart';
 import 'trial/trial_flow_state.dart';
@@ -332,6 +333,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   int _heardConfirmationAttempts = 0;
   String? _sessionDocId; // 🔧 [v3 추가] 첫 대화 후 세션 ID (클론 변경 시 null 리셋)
   DocumentReference? _myHistoryRef; // 🔧 [히스토리] chat_history 문서 참조 (Duo 패턴)
+  Future<void> _pendingTurnPersistence = Future<void>.value();
 
   // ── Idle Timeout v2 ───────────────────────────────────────────────
   // 기준: "유저도 AI도 아무 작동이 없는 상태"가 연속 60초 지속되면 pause.
@@ -1791,6 +1793,52 @@ $kSpokenReplyLengthPolicy
     if (lastHostIdx >= 0) _localMessages.removeAt(lastHostIdx);
     // 삭제된 대화를 근거로 만든 인물 추론은 다음 턴에 다시 쌓는다.
     _characterShortTermMemory = '';
+  }
+
+  Future<void> _handleConversationCancelCommand(
+      int expectedPipelineGeneration) async {
+    _log('[VOICE-CANCEL]', '직전 사용자 턴부터 삭제 시작');
+    _ttsAdapter.stopAll(reason: 'voice_cancel_command');
+    _pendingHeardConfirmation = null;
+    _heardConfirmationAttempts = 0;
+    _pendingUserTranscript = '';
+    _characterShortTermMemory = '';
+    var removedUserTurn = false;
+    if (mounted) {
+      setState(() {
+        _localMessages.removeWhere((message) => message['role'] == 'HOST_TEMP');
+        removedUserTurn = removeFromLastUserTurn(_localMessages);
+      });
+      if (_localMessages.isNotEmpty) _scrollToBottom();
+    }
+    if (removedUserTurn && _recentHistory.length >= 2) {
+      _recentHistory.removeRange(
+          _recentHistory.length - 2, _recentHistory.length);
+    }
+    _currentRoomHasUserTurn =
+        _localMessages.any((message) => message['role'] == 'HOST');
+    try {
+      await _pendingTurnPersistence;
+      final user = FirebaseAuth.instance.currentUser;
+      if (removedUserTurn && user != null) {
+        await rollbackLastPersistedUserTurn(
+          firestore: FirebaseFirestore.instance,
+          uid: user.uid,
+          sessionDocId: _sessionDocId,
+          historyRef: _myHistoryRef,
+        );
+      }
+      _log('[VOICE-CANCEL]', '직전 사용자 턴 삭제 완료 removed=$removedUserTurn');
+    } catch (error) {
+      _log('[VOICE-CANCEL-ERR]', '저장본 삭제 실패 reason=${error.runtimeType}');
+    }
+    if (expectedPipelineGeneration == _pipelineGeneration) {
+      _turnInFlight = false;
+      _closeContinuationWindow(reason: 'voice_cancel_command');
+      _resetContinuationState();
+      _restartConfiguredListening(
+          expectedPipelineGeneration: expectedPipelineGeneration);
+    }
   }
 
   /// 포그라운드로 돌아왔을 때 끊겨 있던 STT를 되살린다.
@@ -3285,6 +3333,10 @@ $kSpokenReplyLengthPolicy
     )) {
       return;
     }
+    if (isConversationCancelCommand(userOriginal)) {
+      await _handleConversationCancelCommand(expectedPipelineGeneration);
+      return;
+    }
     if (_isNoiseTranscript(userOriginal)) {
       _log('[TURN-SKIP]', 'reason=noise_transcript');
       // 이 이른 반환은 `_isPipelineRunning`을 켜기 전에 나간다. 이어 말하기로
@@ -3453,8 +3505,11 @@ $kSpokenReplyLengthPolicy
         'role': 'SYSTEM',
         'original_text': aiOriginal,
       };
-      _saveTurnToFirestore([hostLine, systemLine]);
-      _saveHistoryMessages([hostLine, systemLine]);
+      _pendingTurnPersistence = Future.wait<void>(<Future<void>>[
+        _saveTurnToFirestore([hostLine, systemLine]),
+        _saveHistoryMessages([hostLine, systemLine]),
+      ]);
+      unawaited(_pendingTurnPersistence);
       _saveRecentHistory(userOriginal, aiOriginal);
       _log('[GPT-HISTORY]', 'turn=$currentTurnId model=gpt-4o-mini tts=true');
     } catch (error) {

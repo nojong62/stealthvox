@@ -16,6 +16,12 @@ Get endless suggestions for creative roles and situations. Practice realistic bu
 Step Expand [Sentence Builder]
 Start with short, simple sentences. Answer the AI's sharp questions to build longer and more professional sentences.
 
+🗣️ [음성 취소 명령]
+
+Circle Talk, Scenario Talk, Step Expand에서 “취소합니다”라고 말하면 방금 한 취소 명령은 대사로 저장되지 않습니다. 앱은 직전 사용자 대사부터 그 뒤의 AI 대사까지 화면과 히스토리에서 삭제하고, 같은 모드에서 곧바로 다시 듣기 시작합니다.
+
+Duo Connect에는 이 음성 취소 명령을 적용하지 않습니다.
+
 🎓 [Study Room: Smart Training Guide]
 
 1. Choose Your Perfect Review Mode

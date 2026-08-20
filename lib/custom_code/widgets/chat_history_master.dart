@@ -4195,7 +4195,14 @@ RULES — follow exactly:
       return Scaffold(
         backgroundColor: const Color(0xFF121212),
         body: Stack(children: [
-          SafeArea(child: _buildChunkPracticeScreen()),
+          SafeArea(
+            child: Column(
+              children: [
+                _buildPracticeTabBar(),
+                Expanded(child: _buildChunkPracticeScreen()),
+              ],
+            ),
+          ),
           Positioned(
               top: 8,
               right: 8,
@@ -6955,6 +6962,7 @@ RULES — follow exactly:
 
   // ── P3 상태 ───────────────────────────────────────────────────────
   P3Stage _p3Stage = P3Stage.idle;
+  P3PracticeMode _p3PracticeMode = P3PracticeMode.echoing;
   int _p3Generation = 0;
   Uint8List? _p3FullPcm;
   List<BreathSegment> _p3Segments = const <BreathSegment>[];
@@ -7057,6 +7065,18 @@ RULES — follow exactly:
     });
   }
 
+  Future<void> _selectP3PracticeMode(P3PracticeMode mode) async {
+    if (_p3PracticeMode == mode || _p3Busy) return;
+    await _stopP3Shadowing(resetSelection: true);
+    if (!mounted || _phase != ShadowingPhase.chunkPractice) return;
+    setState(() {
+      _p3PracticeMode = mode;
+      _p3Stage = P3Stage.idle;
+      _p3Error = null;
+      _p3UserSpeaking = false;
+    });
+  }
+
   /// 최종 문장의 Smooth Jazz PCM을 얻어 호흡으로 가른 뒤 Stage 1을 연다.
   ///
   /// ⚠️ P2와 달리 **Morph 강조 지시문을 넣지 않는다.** 최종 문장을 특정 단어만
@@ -7107,16 +7127,22 @@ RULES — follow exactly:
       setState(() {
         _p3BreathIndex = 0;
         _p3BreathTotal = analysis.segments.length;
-        _p3Stage = P3Stage.breathListen;
+        _p3Stage = _p3PracticeMode == P3PracticeMode.echoing
+            ? P3Stage.breathListen
+            : P3Stage.fullShadowRecord;
       });
     }
     debugPrint('[P3-SPEAK] breaths=${analysis.segments.length} '
         'total=${analysis.totalMs}ms voice=$_kBreathVoice');
-    await _ensureP3Engine().start(
-      aiPcm: pcm,
-      segments: analysis.segments,
-      repeatCount: 1,
-    );
+    if (_p3PracticeMode == P3PracticeMode.echoing) {
+      await _ensureP3Engine().start(
+        aiPcm: pcm,
+        segments: analysis.segments,
+        repeatCount: 1,
+      );
+    } else {
+      await _runP3FullShadow();
+    }
   }
 
   /// P3 원본 PCM. **Morph 강조가 없는 순수 Smooth Jazz**라 P2 캐시와 키가
@@ -7212,7 +7238,7 @@ RULES — follow exactly:
           _deleteP3File(recorded ?? path);
           setState(() {
             _p3Error = '발화가 감지되지 않았습니다';
-            _p3Stage = P3Stage.shadowReady;
+            _p3Stage = P3Stage.compare;
           });
           return;
         }
@@ -7220,7 +7246,7 @@ RULES — follow exactly:
         setState(() {
           _p3EchoPath = recorded ?? path;
           _p3Error = null;
-          _p3Stage = P3Stage.shadowReady;
+          _p3Stage = P3Stage.compare;
         });
       },
     );
@@ -7467,13 +7493,6 @@ RULES — follow exactly:
     await _playP3Pcm(pcm, _p3Generation);
   }
 
-  /// Full Echo 다시 하기. 이전 녹음은 지운다.
-  Future<void> _retryP3Echo() async {
-    _deleteP3File(_p3EchoPath);
-    if (mounted) setState(() => _p3EchoPath = null);
-    await _runP3FullEcho();
-  }
-
   // ── P3 화면 ───────────────────────────────────────────────────────
 
   Widget _buildChunkPracticeScreen() => _buildP3SpeakingScreen();
@@ -7481,7 +7500,7 @@ RULES — follow exactly:
   String get _p3StageLabel {
     switch (_p3Stage) {
       case P3Stage.idle:
-        return '최종 문장을 말해 봅니다';
+        return '';
       case P3Stage.preparing:
         return '음성 준비 중…';
       case P3Stage.breathListen:
@@ -7492,8 +7511,6 @@ RULES — follow exactly:
         return '전체 문장을 들어보세요';
       case P3Stage.fullEchoRecord:
         return '이제 혼자 말해보세요';
-      case P3Stage.shadowReady:
-        return '이번엔 AI와 같이 말해봅니다';
       case P3Stage.fullShadowRecord:
         return 'AI와 함께 말하세요';
       case P3Stage.compare:
@@ -7511,24 +7528,37 @@ RULES — follow exactly:
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (!started || _p3Stage == P3Stage.compare) ...[
+            _buildP3PracticeModePicker(),
+            const SizedBox(height: 14),
+            if (!started) ...[
+              _buildP3VariantPicker(),
+              if (_p3PracticeMode == P3PracticeMode.shadowing) ...[
+                const SizedBox(height: 12),
+                _buildP3GapPicker(),
+              ],
+              const SizedBox(height: 14),
+              _p3PrimaryButton('▶ 시작하기', () => unawaited(_startP3Speaking())),
+              const SizedBox(height: 14),
+            ] else if (_p3Stage == P3Stage.compare) ...[
               _buildP3VariantPicker(),
               const SizedBox(height: 14),
             ],
-            Text(
-              _p3StageLabel,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: _p3Stage == P3Stage.breathEcho ||
-                        _p3Stage == P3Stage.fullEchoRecord ||
-                        _p3Stage == P3Stage.fullShadowRecord
-                    ? Colors.amber
-                    : Colors.white54,
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
+            if (started) ...[
+              Text(
+                _p3StageLabel,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: _p3Stage == P3Stage.breathEcho ||
+                          _p3Stage == P3Stage.fullEchoRecord ||
+                          _p3Stage == P3Stage.fullShadowRecord
+                      ? Colors.amber
+                      : Colors.white54,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
-            const SizedBox(height: 14),
+              const SizedBox(height: 14),
+            ],
             _buildP3SentencePanel(text),
             if (_p3Error != null) ...[
               const SizedBox(height: 10),
@@ -7538,21 +7568,17 @@ RULES — follow exactly:
                 style: const TextStyle(color: Color(0xFFFF6B6B), fontSize: 12),
               ),
             ],
-            const SizedBox(height: 18),
-            if (!started)
-              _p3PrimaryButton('▶ 시작하기', () => unawaited(_startP3Speaking())),
-            if (_p3Stage == P3Stage.shadowReady ||
-                _p3Stage == P3Stage.compare) ...[
-              _buildP3GapPicker(),
-              const SizedBox(height: 10),
+            if (started) const SizedBox(height: 18),
+            if (_p3Stage == P3Stage.compare) ...[
+              if (_p3PracticeMode == P3PracticeMode.shadowing) ...[
+                _buildP3GapPicker(),
+                const SizedBox(height: 10),
+              ],
               _p3PrimaryButton(
-                _p3ShadowPath == null ? '▶ 함께 말하기' : '▶ 다시 함께 말하기',
-                _p3Busy ? null : () => unawaited(_runP3FullShadow()),
-              ),
-              const SizedBox(height: 8),
-              _p3SecondaryButton(
-                '전체 말하기 다시',
-                _p3Busy ? null : () => unawaited(_retryP3Echo()),
+                _p3PracticeMode == P3PracticeMode.echoing
+                    ? '▶ 에코잉 다시'
+                    : '▶ 쉐도잉 다시',
+                _p3Busy ? null : () => unawaited(_startP3Speaking()),
               ),
             ],
             if (started) ...[
@@ -7571,12 +7597,17 @@ RULES — follow exactly:
   }
 
   /// Voice Lab의 차분한 surface와 호흡 포인트 컬러를 P3용으로 정리한다.
-  /// 대기만 하고 있을 때는 가만히 있고, VAD가 실제 목소리를 잡은 동안에만
-  /// 문장·테두리·마이크 표시가 살짝 밝아진다.
+  /// 사용자 차례가 오면 본문 색을 살짝 바꾸고, VAD가 실제 목소리를 잡은
+  /// 동안에만 문장·테두리·마이크 표시를 한 단계 더 밝힌다.
   Widget _buildP3SentencePanel(String text) {
     final bool inBreathEcho =
         _p3Stage == P3Stage.breathListen || _p3Stage == P3Stage.breathEcho;
-    final bool speaking = inBreathEcho && _p3UserSpeaking;
+    final bool userTurn = _p3Stage == P3Stage.breathEcho ||
+        _p3Stage == P3Stage.fullEchoRecord ||
+        _p3Stage == P3Stage.fullShadowRecord;
+    final bool speaking = (inBreathEcho && _p3UserSpeaking) ||
+        _p3Stage == P3Stage.fullEchoRecord ||
+        _p3Stage == P3Stage.fullShadowRecord;
     final int safeTotal = _p3BreathTotal.clamp(0, 24);
     final int safeIndex =
         safeTotal == 0 ? 0 : _p3BreathIndex.clamp(0, safeTotal - 1);
@@ -7624,7 +7655,9 @@ RULES — follow exactly:
               ),
               const SizedBox(width: 7),
               Text(
-                inBreathEcho ? 'BREATH ECHO' : 'SPEAKING PRACTICE',
+                _p3PracticeMode == P3PracticeMode.echoing
+                    ? 'ECHOING'
+                    : 'SHADOWING',
                 style: TextStyle(
                   color: inBreathEcho ? _p3BreathAccentColor : Colors.white38,
                   fontSize: 10,
@@ -7676,9 +7709,15 @@ RULES — follow exactly:
             style: TextStyle(
               color: speaking
                   ? Colors.white
-                  : Colors.white.withValues(alpha: 0.90),
+                  : userTurn
+                      ? Color.lerp(Colors.white, _p3BreathAccentColor, 0.24)!
+                      : Colors.white.withValues(alpha: 0.90),
               fontSize: 16 * _fontScale,
-              fontWeight: speaking ? FontWeight.w600 : FontWeight.w400,
+              fontWeight: speaking
+                  ? FontWeight.w600
+                  : userTurn
+                      ? FontWeight.w500
+                      : FontWeight.w400,
               height: 1.6,
               shadows: speaking
                   ? <Shadow>[
@@ -7691,33 +7730,53 @@ RULES — follow exactly:
             ),
             child: Text(text.isEmpty ? '문장이 없습니다' : text),
           ),
-          if (inBreathEcho && safeTotal > 0) ...<Widget>[
-            const SizedBox(height: 13),
-            Row(
-              children: <Widget>[
-                for (int i = 0; i < safeTotal; i++) ...<Widget>[
-                  Expanded(
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 180),
-                      height: i == safeIndex ? 3 : 2,
-                      decoration: BoxDecoration(
-                        color: i < safeIndex
-                            ? _p3BreathAccentColor.withValues(alpha: 0.34)
-                            : i == safeIndex
-                                ? _p3BreathAccentColor.withValues(
-                                    alpha: speaking ? 0.95 : 0.68)
-                                : Colors.white10,
-                        borderRadius: BorderRadius.circular(99),
-                      ),
-                    ),
-                  ),
-                  if (i < safeTotal - 1) const SizedBox(width: 4),
-                ],
-              ],
-            ),
-          ],
         ],
       ),
+    );
+  }
+
+  Widget _buildP3PracticeModePicker() {
+    return Row(
+      children: [
+        for (final mode in P3PracticeMode.values) ...[
+          Expanded(
+            child: InkWell(
+              onTap:
+                  _p3Busy ? null : () => unawaited(_selectP3PracticeMode(mode)),
+              borderRadius: BorderRadius.circular(11),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                height: 42,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: _p3PracticeMode == mode
+                      ? _p3ShadowingAccentColor.withValues(alpha: 0.18)
+                      : Colors.white.withValues(alpha: 0.035),
+                  borderRadius: BorderRadius.circular(11),
+                  border: Border.all(
+                    color: _p3PracticeMode == mode
+                        ? _p3ShadowingAccentColor
+                        : Colors.white12,
+                    width: _p3PracticeMode == mode ? 1.4 : 1,
+                  ),
+                ),
+                child: Text(
+                  mode == P3PracticeMode.echoing ? '에코잉' : '쉐도잉',
+                  style: TextStyle(
+                    color:
+                        _p3PracticeMode == mode ? Colors.white : Colors.white54,
+                    fontSize: 13,
+                    fontWeight: _p3PracticeMode == mode
+                        ? FontWeight.bold
+                        : FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          if (mode != P3PracticeMode.values.last) const SizedBox(width: 8),
+        ],
+      ],
     );
   }
 
@@ -7858,13 +7917,11 @@ RULES — follow exactly:
         ),
         const SizedBox(width: 6),
         Expanded(
-          child: _p3CompareButton('ECHO', _p3EchoPath != null,
-              () => unawaited(_playP3File(_p3EchoPath))),
-        ),
-        const SizedBox(width: 6),
-        Expanded(
-          child: _p3CompareButton('SHADOW', _p3ShadowPath != null,
-              () => unawaited(_playP3File(_p3ShadowPath))),
+          child: _p3PracticeMode == P3PracticeMode.echoing
+              ? _p3CompareButton('ECHO', _p3EchoPath != null,
+                  () => unawaited(_playP3File(_p3EchoPath)))
+              : _p3CompareButton('SHADOW', _p3ShadowPath != null,
+                  () => unawaited(_playP3File(_p3ShadowPath))),
         ),
       ],
     );
@@ -8977,6 +9034,8 @@ enum ShadowingPhase {
 
 enum SentenceVariant { expanded, polished }
 
+enum P3PracticeMode { echoing, shadowing }
+
 /// 🎤 [P3-SPEAK] 말하기 연습의 단계. bool 조합으로 단계를 짐작하지 않는다.
 enum P3Stage {
   idle,
@@ -8985,7 +9044,6 @@ enum P3Stage {
   breathEcho,
   fullEchoListen,
   fullEchoRecord,
-  shadowReady,
   fullShadowRecord,
   compare,
 }
