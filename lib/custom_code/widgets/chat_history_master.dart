@@ -37,6 +37,7 @@ import '/custom_code/services/breath_echoing_engine.dart';
 import '/custom_code/services/breath_segment.dart';
 import '/custom_code/services/p2_voice_styles.dart';
 import '/custom_code/services/sentence_morph.dart';
+import '/custom_code/services/p2_chunk_mapping.dart';
 import '/custom_code/services/pcm_audio_utils.dart'
     show kStealthVoxSttSampleRate, pcm16DurationMs, pcm16ToWav;
 
@@ -276,18 +277,20 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   //   2번 = 1회차 듣기 + 2회차 쉐도잉. 1번 = 쉐도잉 하나.
   // [P2-REPEAT] 지금 이 줄의 몇 회차인지(0부터). 줄이 바뀌면 0으로 돌아간다.
   // ── 🔤 [P2-MORPH] ───────────────────────────────────────────────
-  /// 이번 계단에서 달라진 자리. **화면 강조·TTS 강조·캐시 키가 이 하나를
-  /// 함께 쓴다** — 각자 계산하면 눈과 귀가 어긋난다.
+  /// 이번 계단에서 달라진 핵심 자리. 화면은 GPT 청크 매핑을 사용하고,
+  /// 이 값은 전체 문장의 미세한 TTS 강조와 캐시 키에만 사용한다.
   MorphChange _morph = MorphChange.none;
-
-  /// 강조를 켰는가. 문장이 뜨자마자 번쩍이지 않게 한 박자 뒤에 켠다.
-  bool _morphActive = false;
 
   /// 소리를 받아 오는 중. 이 동안에도 과금은 살아 있어야 한다.
   bool _morphPreparing = false;
 
   /// 전체 문장을 읽는 중.
   bool _morphPlaying = false;
+
+  /// 전체 문장 PCM의 재생 위치를 단어 비율로 청크에 대응한 시각 인덱스.
+  /// 실제 word timestamp가 아니므로 ±1~2단어 오차를 허용한다.
+  int _p2ActiveChunkIndex = -1;
+  int _p2MorphDurationMs = 0;
 
   // [P2-SHADOW-REC] User-line audio captured for Play all. No scoring/STT.
   bool _shadowRecording = false;
@@ -917,6 +920,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       //   안 돌려주면 **빈 채로 둔다** — 원어를 그 자리에 넣으면 P2 한복판에
       //   한국어 줄이 하나 섞인다.
       String expandedTargetText = sameLanguage ? expandedSource : '';
+      List<P2Chunk> p2Chunks = fallbackP2Chunks(expandedTargetText);
       final String context = _historyRepairContext(messageRef);
       final String lineBlock = expandedSource.isEmpty
           ? 'LINE: $source'
@@ -963,8 +967,14 @@ WHO THE LINE IS ABOUT — read this before you translate:
 - Keep each person's relationship to the speaker exactly as stated. Do not promote, demote, or merge them, and do not invent one who was never mentioned.
 ${expandedSource.isEmpty ? '' : '''
 GROWING SENTENCE — the speaker is building ONE sentence across several turns, and GROWING SENTENCE is how far it has grown by this line. Translate it into natural spoken $targetLanguage as ONE sentence. Keep it a single flowing sentence — never a comma-separated list of facts. Add nothing that is not in it. The subject rules above apply to every clause in it.
+
+P2 CHUNK MAPPING — return a "chunks" JSON array for the translated growing sentence. Split the translated "expanded" sentence into meaningful phrases or clauses, preserving every word exactly once and in order. Classify each chunk as:
+- "kept": expression carried over from the translated "target" line with minimal change
+- "evolved": the same meaning as the translated "target" line but restructured or rephrased
+- "new": content not present in the translated "target" line
+For both "kept" and "evolved", include "from" as an exact contiguous substring of the translated "target" line. For "new", omit "from". Never paraphrase text inside a chunk; concatenating all chunk text must reproduce the translated "expanded" sentence.
 '''}
-Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetLanguage translation>"${expandedSource.isEmpty ? '' : ', "expanded": "<$targetLanguage translation of GROWING SENTENCE>"'}}''',
+Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetLanguage translation>"${expandedSource.isEmpty ? '' : ', "expanded": "<$targetLanguage translation of GROWING SENTENCE>", "chunks": [{"text":"<exact chunk from expanded>","type":"kept|evolved|new","from":"<exact substring from target; kept/evolved only>"}]'}}''',
                   },
                   <String, String>{
                     'role': 'user',
@@ -995,7 +1005,14 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
           targetText = (parsed['target'] ?? '').toString().trim();
           repairedOriginal = (parsed['original'] ?? '').toString().trim();
           final expandedReply = (parsed['expanded'] ?? '').toString().trim();
-          if (expandedReply.isNotEmpty) expandedTargetText = expandedReply;
+          if (expandedReply.isNotEmpty) {
+            expandedTargetText = expandedReply;
+            p2Chunks = parseP2Chunks(
+              parsed['chunks'],
+              expandedTargetText,
+              part1Text: targetText,
+            );
+          }
         } catch (_) {
           debugPrint('[HISTORY-TARGET] json_parse_failed msg=${messageRef.id}');
           targetText = content;
@@ -1018,6 +1035,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         // 🌱 [EXPAND-LADDER] 누적 문장의 배울글. P2가 이 값으로 사다리를 읽는다.
         if (expandedTargetText.isNotEmpty)
           'expanded_translated': expandedTargetText,
+        if (expandedTargetText.isNotEmpty)
+          'p2_chunks': p2Chunks.map((chunk) => chunk.toJson()).toList(),
         if (repaired) 'original_text': repairedOriginal,
         if (repaired) 'original_text_raw': source,
         if (repaired) 'original_repaired_at': FieldValue.serverTimestamp(),
@@ -1553,16 +1572,15 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
   //   P2는 **문장이 자라는 모습을 보고 듣는 자리**다. 마이크도 녹음도 없다.
   //   말하기는 P3가 맡는다.
   //
-  //   한 계단: LCS로 모든 변화를 찾되 핵심 변화 하나만 선택 → 화면에 은은하게
-  //   표시 → 같은 하나만 살려 읽는 Smooth Jazz 전체 낭독 → 다음 계단
+  //   화면: GPT의 kept/evolved/new 청크 + Part1 대조 바
+  //   음성: LCS 핵심 변화 하나만 살린 Smooth Jazz 전체 낭독 → 다음 계단
   // ══════════════════════════════════════════════════════════════════
 
   /// 🪜 계단과 계단 사이에 두는 숨. 한 계단을 다 읽자마자 다음 계단이 밀고
   /// 들어오면 문장이 자란 자리가 안 보인다.
   static const Duration _kMorphStepGap = Duration(milliseconds: 900);
 
-  /// 문장이 뜨고 강조가 켜지기까지의 짧은 전환. 나타나자마자 번쩍이면
-  /// "무엇이 달라졌나"가 아니라 깜빡임만 남는다.
+  /// 문장이 먼저 눈에 들어온 뒤 전체 문장 재생을 시작하는 짧은 전환.
   static const Duration _kMorphHighlightDelay = Duration(milliseconds: 320);
 
   /// 한 계단을 연다.
@@ -1592,8 +1610,9 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     if (mounted) {
       setState(() {
         _morph = morph;
-        _morphActive = false;
         _morphPreparing = true;
+        _p2ActiveChunkIndex = -1;
+        _p2MorphDurationMs = 0;
       });
     }
 
@@ -1602,7 +1621,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
 
     await Future<void>.delayed(_kMorphHighlightDelay);
     if (!_morphAlive(lineIdx)) return;
-    if (mounted) setState(() => _morphActive = true);
 
     Uint8List? pcm;
     try {
@@ -1636,12 +1654,38 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     final wav = pcm16ToWav(pcm, sampleRate: kStealthVoxSttSampleRate);
     final player = AudioPlayer();
     _shadowAiPlayer = player;
-    if (mounted) setState(() => _morphPlaying = true);
+    final chunks = _p2ChunksForLine(_tutorLines[lineIdx]);
+    _p2MorphDurationMs =
+        ((pcm.length / 2) / kStealthVoxSttSampleRate * 1000).round();
+    _shadowDurSub = player.onDurationChanged.listen((duration) {
+      if (duration.inMilliseconds > 0) {
+        _p2MorphDurationMs = duration.inMilliseconds;
+      }
+    });
+    _shadowPosSub = player.onPositionChanged.listen((position) {
+      if (!_morphAlive(lineIdx)) return;
+      final next = p2ChunkIndexAtPosition(
+        chunks,
+        positionMs: position.inMilliseconds,
+        totalMs: _p2MorphDurationMs,
+      );
+      if (next == _p2ActiveChunkIndex) return;
+      setState(() => _p2ActiveChunkIndex = next);
+    });
+    if (mounted) {
+      setState(() {
+        _morphPlaying = true;
+        _p2ActiveChunkIndex = chunks.isEmpty ? -1 : 0;
+      });
+    }
     // onPlayerComplete.first는 쓰지 않는다 - dispose 때 스트림이 빈 채로
     // 닫히며 Bad state: No element가 새어 대기가 무너진다.
     _shadowCompleteSub = player.onPlayerComplete.listen((_) {
       if (!mounted) return;
-      setState(() => _morphPlaying = false);
+      setState(() {
+        _morphPlaying = false;
+        _p2ActiveChunkIndex = -1;
+      });
       _scheduleMorphAdvance(lineIdx);
     });
     try {
@@ -1649,7 +1693,12 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     } catch (e) {
       debugPrint('[P2-MORPH] play $e');
       await _stopShadowAiPlayback();
-      if (mounted) setState(() => _morphPlaying = false);
+      if (mounted) {
+        setState(() {
+          _morphPlaying = false;
+          _p2ActiveChunkIndex = -1;
+        });
+      }
       _scheduleMorphAdvance(lineIdx);
     }
   }
@@ -1710,6 +1759,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     _shadowDurSub = null;
     _shadowCompleteSub?.cancel();
     _shadowCompleteSub = null;
+    _p2ActiveChunkIndex = -1;
+    _p2MorphDurationMs = 0;
     final p = _shadowAiPlayer;
     _shadowAiPlayer = null;
     if (p != null) {
@@ -2221,7 +2272,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       _currentChunkIdx = 0;
       // 🔤 [P2-MORPH] 돌아왔을 때 이전 계단의 강조가 남지 않게 비운다.
       _morph = MorphChange.none;
-      _morphActive = false;
       _showEchoingOverlay = false;
     });
     _echoingOverlayTimer?.cancel();
@@ -5833,46 +5883,148 @@ RULES — follow exactly:
       height: 1.5,
       fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
     );
-    // 🔤 [P2-MORPH] 지금 읽는 계단에서 Primary Morph 하나만 은은하게 살린다.
-    //   문법 설명도 밑줄도 없다 — 색·굵기·아주 옅은 tint만 한 단계 올린다.
-    final spans = _morphSpans(text, isCurrent, base);
-    if (spans == null) {
-      return Text(text,
-          textAlign: lineIsAi ? TextAlign.right : TextAlign.left, style: base);
+    if (_phase == ShadowingPhase.part2Practice) {
+      return _buildP2ChunkLine(line, isCurrent, base);
+    }
+    return Text(text,
+        textAlign: lineIsAi ? TextAlign.right : TextAlign.left, style: base);
+  }
+
+  List<P2Chunk> _p2ChunksForLine(Map<String, dynamic> line) {
+    final mapped = line['p2Chunks'];
+    if (mapped is List<P2Chunk> && mapped.isNotEmpty) return mapped;
+    return fallbackP2Chunks((line['text'] ?? '').toString());
+  }
+
+  Color _p2ChunkAccent(P2Chunk chunk) {
+    switch (chunk.type) {
+      case 'evolved':
+        return const Color(0xFF64B5F6);
+      case 'new':
+        return const Color(0xFF81C784);
+      default:
+        return Colors.white;
+    }
+  }
+
+  Widget _buildP2ChunkLine(
+      Map<String, dynamic> line, bool isCurrent, TextStyle base) {
+    final chunks = _p2ChunksForLine(line);
+    final active = isCurrent ? _p2ActiveChunkIndex : -1;
+    final spans = <InlineSpan>[];
+    for (var index = 0; index < chunks.length; index++) {
+      final chunk = chunks[index];
+      final accent = _p2ChunkAccent(chunk);
+      final isActive = index == active;
+      final isWaiting = active >= 0 && index > active;
+      final backgroundAlpha = chunk.type == 'kept'
+          ? (isActive ? 0.12 : 0.025)
+          : isActive
+              ? 0.30
+              : isWaiting
+                  ? 0.06
+                  : 0.14;
+      if (spans.isNotEmpty) spans.add(const TextSpan(text: ' '));
+      spans.add(TextSpan(
+        text: chunk.text,
+        style: base.copyWith(
+          color: isActive
+              ? Colors.white
+              : isWaiting
+                  ? Colors.white54
+                  : Colors.white.withValues(alpha: 0.88),
+          fontWeight: isActive ? FontWeight.w700 : FontWeight.w400,
+          backgroundColor: accent.withValues(alpha: backgroundAlpha),
+        ),
+      ));
     }
     return Text.rich(
       TextSpan(children: spans),
-      textAlign: lineIsAi ? TextAlign.right : TextAlign.left,
+      textAlign: TextAlign.left,
       style: base,
     );
   }
 
-  /// 강조가 필요 없으면 null을 돌려준다(그때는 평범한 [Text]를 쓴다).
-  List<InlineSpan>? _morphSpans(String text, bool isCurrent, TextStyle base) {
-    if (_phase != ShadowingPhase.part2Practice) return null;
-    if (!isCurrent || !_morphActive) return null;
-    if (_morph.isEmpty || _morph.text != text) return null;
+  Map<String, dynamic>? get _currentP2Line {
+    if (_phase != ShadowingPhase.part2Practice || _tutorLines.isEmpty) {
+      return null;
+    }
+    final index = currentIndex.clamp(0, _tutorLines.length - 1);
+    return _tutorLines[index];
+  }
 
-    final primary = _morph.primary;
-    if (primary == null) return null;
-    final accent = base.copyWith(
-      color: _kMorphAccent.withValues(alpha: 0.92),
-      fontWeight: FontWeight.w600,
-      backgroundColor: _kMorphAccent.withValues(alpha: 0.07),
+  Widget _buildP2Part1ReferenceBar() {
+    final line = _currentP2Line;
+    final part1 = (line?['part1'] ?? '').toString().trim();
+    final chunks = line == null ? const <P2Chunk>[] : _p2ChunksForLine(line);
+    P2Chunk? activeChunk;
+    if (_morphPlaying &&
+        _p2ActiveChunkIndex >= 0 &&
+        _p2ActiveChunkIndex < chunks.length) {
+      activeChunk = chunks[_p2ActiveChunkIndex];
+    }
+    final range = activeChunk?.referencesPart1 == true &&
+            activeChunk?.fromStart != null &&
+            activeChunk?.fromEnd != null
+        ? (start: activeChunk!.fromStart!, end: activeChunk.fromEnd!)
+        : null;
+    const base = TextStyle(
+      color: Colors.white38,
+      fontSize: 12.5,
+      height: 1.45,
+      fontWeight: FontWeight.w400,
     );
     final spans = <InlineSpan>[];
-    final int start = primary.start.clamp(0, text.length);
-    final int end = primary.end.clamp(start, text.length);
-    if (start > 0) {
-      spans.add(TextSpan(text: text.substring(0, start)));
+    if (part1.isEmpty) {
+      spans.add(const TextSpan(text: '참조할 Part1 문장이 없습니다'));
+    } else if (range == null) {
+      spans.add(TextSpan(text: part1));
+    } else {
+      if (range.start > 0) {
+        spans.add(TextSpan(text: part1.substring(0, range.start)));
+      }
+      spans.add(TextSpan(
+        text: part1.substring(range.start, range.end),
+        style: const TextStyle(
+          color: Color(0xFFB9DFFF),
+          fontWeight: FontWeight.w700,
+          backgroundColor: Color(0x263F9FEA),
+        ),
+      ));
+      if (range.end < part1.length) {
+        spans.add(TextSpan(text: part1.substring(range.end)));
+      }
     }
-    if (end > start) {
-      spans.add(TextSpan(text: text.substring(start, end), style: accent));
-    }
-    if (end < text.length) {
-      spans.add(TextSpan(text: text.substring(end)));
-    }
-    return spans;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      margin: const EdgeInsets.fromLTRB(14, 10, 14, 2),
+      padding: const EdgeInsets.fromLTRB(13, 10, 13, 11),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.035),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: range == null
+              ? Colors.white10
+              : const Color(0xFF64B5F6).withValues(alpha: 0.42),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Text(
+            'PART 1 · BEFORE',
+            style: TextStyle(
+              color: Colors.white30,
+              fontSize: 9.5,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.1,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text.rich(TextSpan(children: spans), style: base),
+        ],
+      ),
+    );
   }
 
   Widget _buildTurnPracticeScreen() {
@@ -6044,6 +6196,9 @@ RULES — follow exactly:
               minHeight: 3,
             ),
 
+            if (_phase == ShadowingPhase.part2Practice)
+              _buildP2Part1ReferenceBar(),
+
             // 대화 목록
             Expanded(
               child: ListView.builder(
@@ -6068,15 +6223,21 @@ RULES — follow exactly:
                       lineIsAi ? Colors.amber : Colors.greenAccent;
 
                   return Align(
-                    alignment:
-                        lineIsAi ? Alignment.centerRight : Alignment.centerLeft,
+                    alignment: _phase == ShadowingPhase.part2Practice
+                        ? Alignment.center
+                        : lineIsAi
+                            ? Alignment.centerRight
+                            : Alignment.centerLeft,
                     child: AnimatedOpacity(
                       key: key,
                       duration: const Duration(milliseconds: 300),
                       opacity: isPast ? 0.45 : 1.0,
                       child: Container(
                         constraints: BoxConstraints(
-                          maxWidth: MediaQuery.of(context).size.width * 0.80,
+                          maxWidth: MediaQuery.of(context).size.width *
+                              (_phase == ShadowingPhase.part2Practice
+                                  ? 0.94
+                                  : 0.80),
                         ),
                         margin: const EdgeInsets.only(bottom: 10),
                         padding: const EdgeInsets.all(12),
@@ -6094,29 +6255,32 @@ RULES — follow exactly:
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            AnimatedContainer(
-                              duration: const Duration(milliseconds: 250),
-                              width: 34,
-                              height: 34,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: isCurrent
-                                    ? roleColor.withValues(alpha: 0.2)
-                                    : Colors.white.withValues(alpha: 0.05),
-                                border: Border.all(
-                                  color: isCurrent ? roleColor : Colors.white24,
-                                  width: isCurrent ? 2 : 1,
+                            if (_phase != ShadowingPhase.part2Practice) ...[
+                              AnimatedContainer(
+                                duration: const Duration(milliseconds: 250),
+                                width: 34,
+                                height: 34,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: isCurrent
+                                      ? roleColor.withValues(alpha: 0.2)
+                                      : Colors.white.withValues(alpha: 0.05),
+                                  border: Border.all(
+                                    color:
+                                        isCurrent ? roleColor : Colors.white24,
+                                    width: isCurrent ? 2 : 1,
+                                  ),
+                                ),
+                                child: Icon(
+                                  lineIsAi
+                                      ? Icons.smart_toy_rounded
+                                      : Icons.person_rounded,
+                                  color: isCurrent ? roleColor : Colors.white38,
+                                  size: 17,
                                 ),
                               ),
-                              child: Icon(
-                                lineIsAi
-                                    ? Icons.smart_toy_rounded
-                                    : Icons.person_rounded,
-                                color: isCurrent ? roleColor : Colors.white38,
-                                size: 17,
-                              ),
-                            ),
-                            const SizedBox(width: 10),
+                              const SizedBox(width: 10),
+                            ],
                             Flexible(
                               child: Column(
                                 crossAxisAlignment: lineIsAi
@@ -8025,7 +8189,16 @@ RULES — follow exactly:
         } else {
           part2 = parts.length >= 2 ? parts.sublist(1).join('\n\n').trim() : '';
         }
-        openTurn = {'aiText': '', 'part1': part1, 'part2': part2};
+        openTurn = <String, dynamic>{
+          'aiText': '',
+          'part1': part1,
+          'part2': part2,
+          'p2Chunks': parseP2Chunks(
+            data['p2_chunks'],
+            part2,
+            part1Text: part1,
+          ),
+        };
       } else if (role == 'SYSTEM' && openTurn != null) {
         openTurn['aiText'] = text.trim();
         turns.add(openTurn);
@@ -8084,7 +8257,14 @@ RULES — follow exactly:
           ? turn['part2'] as String
           : turn['part1'] as String;
       if (part2.trim().isNotEmpty) {
-        lines.add({'role': 'USER', 'text': part2});
+        final mapped = turn['p2Chunks'];
+        lines.add(<String, dynamic>{
+          'role': 'USER',
+          'text': part2,
+          'part1': (turn['part1'] ?? '').toString().trim(),
+          'p2Chunks':
+              mapped is List<P2Chunk> ? mapped : fallbackP2Chunks(part2),
+        });
       }
     }
     if (mounted) {
@@ -8110,7 +8290,6 @@ RULES — follow exactly:
       // 🔤 [P2-MORPH] 고르고 시작하는 게이트가 없다. 진입하면 첫 계단이
       //   곧바로 열린다 — 시작 신호는 `_checkAndStartTurn`이 준다.
       _morph = MorphChange.none;
-      _morphActive = false;
       // setState 직후에는 아직 이 프레임의 화면이다. P2 본문이
       // 붙은 다음 프레임에 첫 계단을 열어야 자동 낭독이 누락되지 않는다.
       WidgetsBinding.instance.addPostFrameCallback((_) {
