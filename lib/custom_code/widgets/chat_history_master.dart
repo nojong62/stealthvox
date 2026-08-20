@@ -5790,43 +5790,56 @@ RULES — follow exactly:
                           ),
                           const SizedBox(width: 8),
                         ],
-                        GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: _phase == ShadowingPhase.part2Practice &&
-                                  isAwaiting &&
-                                  !isComplete
-                              ? _startP2Reading
-                              : null,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 6),
-                            child: AnimatedBuilder(
-                              animation: _blinkController,
-                              builder: (context, child) => Opacity(
-                                opacity:
-                                    _phase == ShadowingPhase.part2Practice &&
-                                            isAwaiting
-                                        ? 0.35 + (_blinkOpacity.value * 0.65)
-                                        : 1.0,
-                                child: child,
-                              ),
-                              child: Text(
-                                isComplete
-                                    ? "Practice 완료!"
-                                    : (_phase == ShadowingPhase.part1Practice
-                                        ? "Practice 1"
-                                        : _phase == ShadowingPhase.part2Practice
-                                            ? "See How It Grows"
-                                            : "Practice"),
-                                style: TextStyle(
-                                    color: _phase ==
-                                                ShadowingPhase.part2Practice &&
-                                            isAwaiting
-                                        ? Colors.lightBlueAccent
-                                        : Colors.white54,
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.bold,
-                                    letterSpacing: 1.0),
+                        // 📏 P1 라벨이 "Choose a Character"로 길어졌다. 양옆은
+                        //   인물 아이콘이 잡고 있어 남는 폭이 좁고, 글꼴을
+                        //   키워 둔 기기에서는 그대로 넘친다. 자리에 맞춰
+                        //   줄여 언제나 한 줄로 보이게 한다.
+                        Flexible(
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: _phase == ShadowingPhase.part2Practice &&
+                                    isAwaiting &&
+                                    !isComplete
+                                ? _startP2Reading
+                                : null,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 6),
+                              child: AnimatedBuilder(
+                                animation: _blinkController,
+                                builder: (context, child) => Opacity(
+                                  opacity:
+                                      _phase == ShadowingPhase.part2Practice &&
+                                              isAwaiting
+                                          ? 0.35 + (_blinkOpacity.value * 0.65)
+                                          : 1.0,
+                                  child: child,
+                                ),
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    isComplete
+                                        ? "Practice 완료!"
+                                        : (_phase ==
+                                                ShadowingPhase.part1Practice
+                                            ? "Choose a Character"
+                                            : _phase ==
+                                                    ShadowingPhase.part2Practice
+                                                ? "See How It Grows"
+                                                : "Practice"),
+                                    maxLines: 1,
+                                    style: TextStyle(
+                                        color: _phase ==
+                                                    ShadowingPhase
+                                                        .part2Practice &&
+                                                isAwaiting
+                                            ? Colors.lightBlueAccent
+                                            : Colors.white54,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 1.0),
+                                  ),
+                                ),
                               ),
                             ),
                           ),
@@ -8414,14 +8427,31 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
           children: [
             // 닫기 버튼을 제목과 같은 줄에 두면 좁은 폭에서 제목이 96dp를 뺏겨
             // 두 줄이 된다. 버튼은 위, 제목은 아래 전체 폭으로 내린다.
-            Align(
-              alignment: Alignment.centerLeft,
-              child: IconButton(
-                icon: const Icon(Icons.close, color: Colors.white70),
-                onPressed: _exitShadowing,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-              ),
+            Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white70),
+                  onPressed: _exitShadowing,
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 40, minHeight: 40),
+                ),
+                const Spacer(),
+                // 🛡️ [STEALTH] 공부방 목록에 있는 그 방패다 — 여기서 곧장 새
+                //   대화를 열러 간다. 이 방은 열려 있는 동안 과금이 도니까
+                //   자리를 내주고 간다(뒤로 오면 공부방 목록).
+                IconButton(
+                  icon: const Icon(Icons.security, color: Colors.white70),
+                  tooltip: '스텔스룸',
+                  onPressed: () {
+                    if (!guardBillingEntry(context)) return;
+                    context.pushReplacementNamed('StealthRoom');
+                  },
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 40, minHeight: 40),
+                ),
+              ],
             ),
             const Text(
               "Pick Your Practice",
@@ -8441,11 +8471,10 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
             ),
             const SizedBox(height: 12),
             _buildPracticeSelectionCard(
-              title: "See How It Grows",
+              title: "Practice 2",
               subtitle: "Watch and hear each sentence grow",
               color: const Color(0xFF38BDF8),
               icon: Icons.expand_more_rounded,
-              blinkTitle: true,
               onTap: hasData ? _startPart2Practice : null,
             ),
             const SizedBox(height: 12),
@@ -8482,7 +8511,6 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     required Color color,
     required IconData icon,
     bool isLoading = false,
-    bool blinkTitle = false,
     VoidCallback? onTap,
   }) {
     final bool enabled = onTap != null || isLoading;
@@ -8518,20 +8546,11 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    AnimatedBuilder(
-                      animation: _blinkController,
-                      builder: (context, child) => Opacity(
-                        opacity: blinkTitle
-                            ? 0.35 + (_blinkOpacity.value * 0.65)
-                            : 1.0,
-                        child: child,
-                      ),
-                      child: Text(title,
-                          style: TextStyle(
-                              color: color,
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold)),
-                    ),
+                    Text(title,
+                        style: TextStyle(
+                            color: color,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold)),
                     const SizedBox(height: 3),
                     Text(subtitle,
                         style: const TextStyle(
