@@ -886,7 +886,12 @@ line had never been said. Never build the conversation on a line you had to gues
     _smallTalkLog.add('$who: ${text.trim()}');
     // 잡담이 길어져도 프롬프트는 최근 것만 본다. 오래된 말까지 실어 보내면
     // 토큰만 먹고 AI가 이미 지나간 화제로 되돌아간다.
-    while (_smallTalkLog.length > 10) {
+    //
+    // 10줄에서 16줄로 늘렸다. 실기기(2026-08-21)에서 씨앗이 잡힌 순간
+    // smallTalkLines=10 — 상한에 닿아 **뉴스로 연 초반 화제가 이미 창 밖으로
+    // 밀려난 뒤**였다. 잘못 들은 낱말을 가리는 근거가 그 화제인데, 정작 판정할
+    // 때 그게 없으면 "공약/공격"을 또 놓친다.
+    while (_smallTalkLog.length > 16) {
       _smallTalkLog.removeAt(0);
     }
   }
