@@ -6716,12 +6716,15 @@ RULES — follow exactly:
     if (wasStarted) await _startP3Speaking();
   }
 
+  /// 고르는 것은 **고르기까지만** 한다. 시작은 Start 버튼이다 — 누르지도
+  /// 않았는데 소리가 나면 놀란다.
+  ///
+  /// 화면부터 칠하고 정지는 그 뒤에 기다린다. `_stopP3Shadowing`은 플레이어·
+  /// 엔진·recorder를 모두 await해서 실기기에서 1초 가까이 걸리는데, 그걸
+  /// 기다렸다 칠하니 눌러도 안 바뀌는 것처럼 보였다. 정지가 끝나기 전에는
+  /// `_p3Busy`가 참이라 Start도 눌리지 않는다 — 중간에 끼어들 틈이 없다.
   Future<void> _selectP3PracticeMode(P3PracticeMode mode) async {
-    if (_p3Busy) return;
-    final bool wasStarted = _p3Stage != P3Stage.idle;
-    if (_p3PracticeMode == mode && !wasStarted) return;
-    await _stopP3Shadowing(resetSelection: true);
-    if (!mounted || _phase != ShadowingPhase.chunkPractice) return;
+    if (_p3PracticeMode == mode && _p3Stage == P3Stage.idle) return;
     setState(() {
       _p3PracticeMode = mode;
       _coerceP3VoiceForMode();
@@ -6729,7 +6732,7 @@ RULES — follow exactly:
       _p3Error = null;
       _p3UserSpeaking = false;
     });
-    if (wasStarted) await _startP3Speaking();
+    await _stopP3Shadowing(resetSelection: true);
   }
 
   /// ■ Stop — 연습을 접고 맨 위 메뉴로 되돌아간다.
@@ -7561,13 +7564,10 @@ RULES — follow exactly:
   /// 파형이라 다음 재생이 어긋난다. 캐시는 목소리별로 나뉘어 있어 되돌아오면
   /// 다시 받지 않는다.
   ///
-  /// 이미 한 바퀴 돌린 뒤라면 모드를 바꿀 때와 똑같이 **그 자리에서 다시
-  /// 시작한다.** 고르기만 하고 아무 일도 안 일어나면 바뀐 줄 모른다.
+  /// 모드 고르기와 같은 규칙이다 — 화면부터 칠하고, 정지는 뒤에서 기다리고,
+  /// 시작은 Start 버튼이 한다.
   Future<void> _selectP3Voice(String voice) async {
-    if (_p3Busy || voice == _p3Voice) return;
-    final bool wasStarted = _p3Stage != P3Stage.idle;
-    await _stopP3Shadowing(resetSelection: true);
-    if (!mounted || _phase != ShadowingPhase.chunkPractice) return;
+    if (voice == _p3Voice) return;
     setState(() {
       _p3Voice = voice;
       _p3FullPcm = null;
@@ -7576,7 +7576,7 @@ RULES — follow exactly:
       _p3Error = null;
       _p3UserSpeaking = false;
     });
-    if (wasStarted) await _startP3Speaking();
+    await _stopP3Shadowing(resetSelection: true);
   }
 
   Widget _buildP3PracticeModePicker() {
