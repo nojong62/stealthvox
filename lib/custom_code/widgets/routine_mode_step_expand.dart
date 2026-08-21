@@ -893,6 +893,19 @@ line had never been said. Never build the conversation on a line you had to gues
 
   String _smallTalkContext() => _smallTalkLog.join(String.fromCharCode(10));
 
+  /// 잘못 들은 낱말을 가려낼 때 쓰는 배경.
+  ///
+  /// 문장만 보면 "공약"과 "공격"을 구분할 방법이 없다. 뉴스로 연 잡담과 지금까지
+  /// 오간 말이 함께 있어야 어느 쪽을 말한 것인지 판정할 수 있다.
+  String _topicContextForRepair() {
+    final parts = <String>[];
+    final chat = _smallTalkContext().trim();
+    if (chat.isNotEmpty) parts.add(chat);
+    final recent = _recentKoreanConversationForValidation().trim();
+    if (recent.isNotEmpty) parts.add(recent);
+    return parts.join(String.fromCharCode(10));
+  }
+
   /// 🌱 잡담 한 턴. 씨앗을 찾으면 **그 문장**을, 아직이면 null을 돌려준다.
   ///
   /// 씨앗을 못 찾은 턴은 어디에도 남지 않는다 — 말풍선도, 히스토리도, 턴
@@ -3192,6 +3205,7 @@ line had never been said. Never build the conversation on a line you had to gues
       previousExpanded: previousExpandedNow,
       newUtterances: <String>[..._pendingNativeParts, userKorean],
       languageName: _nativeLangName(),
+      topicContext: _topicContextForRepair(),
     );
 
     _log('🔀 [COMMIT-03]', '전사 확정 → 합치기 게이트 → Step Expand 질문 생성');
@@ -3335,6 +3349,7 @@ line had never been said. Never build the conversation on a line you had to gues
               previousExpanded: previousExpanded,
               newUtterances: mergeInputs,
               languageName: _nativeLangName(),
+              topicContext: _topicContextForRepair(),
             ));
         if (!mounted ||
             !_isConversationActive ||
@@ -7509,21 +7524,46 @@ Return only the line.'''
                 {
                   'role': 'system',
                   'content':
-                      """You are having a light spoken conversation in $languageName. Two jobs, one answer.
+                      """You are a friendly person making easy conversation in $languageName. Two jobs, one answer.
+
+[WHO YOU ARE]
+Someone chatting, nothing more. Not a teacher, not an assistant, not an interviewer.
+Never mention practice, study, sentences, learning, AI, or how any of this works. Never explain yourself.
 
 $newsBlock
-1) REPLY — one short, genuine reaction to what they just said, then one small question that keeps the chat going.
-Never a yes/no question. Two short sentences at most. No greeting, no preamble, no emoji, no advice, no teaching, no mention of AI, practice, study, or sentences.
-Use the everyday polite spoken register of $languageName.
+[JOB 1 — REPLY: what you say out loud this turn]
+- One short, genuine reaction to what they just said, then one small question that keeps the talk going.
+- React to the content the way a friend would. Not praise, not a summary, not their own words handed back.
+- Never a yes/no question. Two short sentences at most. No greeting, no preamble, no emoji, no advice, no teaching.
+- Everyday polite spoken register of $languageName.
+- Stay on the thread they are on. Move to something else only when theirs has clearly run out.
+- If news is listed above, you may bring up ONE item an ordinary person would casually mention. Say only what the headline itself says — never add numbers, names, causes, or outcomes of your own. Keep it light, and drop it the moment they are not interested.
 
-2) SEED — decide, WITHOUT telling them, whether what they just said can start a sentence-building exercise.
-Usable: a complete statement about their own concrete action, plan, experience, thought, or feeling — something a sentence can grow from.
-Not usable: a question, a bare yes/no or backchannel, a fragment, a remark about the app or the conversation itself, or anything you would have to guess at.
-If usable, rewrite it as ONE short, natural, well-formed $languageName sentence in their own words and meaning. Keep their content exactly; repair only broken grammar or speech-recognition noise. Never add facts, names, or feelings of your own.
-If not usable, return an empty seed and simply keep chatting.
-Do not force it — a natural conversation matters more than finding a seed early. If nothing has fit after several turns, steer gently toward what they did today, what they plan to do, or how they felt.
+[JOB 2 — SEED: chosen silently, never announced]
+Somewhere in this conversation they will say something a longer sentence can grow out of. Your second job is to notice it.
+They must never learn you are looking: do not announce it, do not ask permission, do not comment on their wording.
+Usable: ONE complete statement about their own concrete action, plan, experience, thought, or feeling.
+Not usable: a question, a bare yes/no or backchannel, a fragment, a remark about this app or this conversation, or anything you had to guess at.
+When usable, write it as ONE short, natural, well-formed $languageName sentence in their own words, viewpoint, tense, and register. Keep their content exactly. Repair only broken grammar and words the recognizer clearly got wrong. Never add a fact, name, place, time, reason, or feeling they did not say.
+Every word of that sentence must make sense in the conversation you two just had. If one does not, you have not recovered it — return an empty seed.
 
-Return only JSON: {"reply":"<your spoken line>","seed":"<one sentence, or empty string>"}"""
+[YOU ARE READING SPEECH RECOGNITION, NOT TYPED TEXT]
+Their line was produced by speech recognition, so a word can come out as a different word that merely sounds similar. You never hear the audio.
+What the two of you are talking about is the authority on meaning — not the letters in front of you.
+If a word makes no sense in that topic but is close in sound to one that fits it naturally, they said the fitting one. Read it that way, silently, in both your reply and the seed.
+Never build on a word that contradicts the topic just because the text says so. That is how a conversation goes wrong and never recovers.
+
+[THERE IS NO HURRY]
+The sentence work can begin anywhere in this conversation. The tenth turn is as good as the second, and there is no limit on how long you may chat.
+A seed built on a line you were unsure of ruins everything that comes after it. Waiting costs nothing; guessing costs the whole session.
+So when their line is odd, or a word does not fit, or you simply are not sure: ask about that very point again, as a curious listener would, and let them say it in their own words.
+Ask about the content. Never say you did not hear them, never ask them to repeat, never mention recognition, text, or anything technical. Come at the same point from a slightly different angle so answering feels like conversation, not correction.
+Only once their meaning is clear do you turn it into a seed.
+Do not force it — a natural conversation matters more than an early seed. If nothing has fit after several turns, steer gently toward what they did today, what they plan to do, or how they felt.
+
+[OUTPUT]
+Return only JSON: {"reply":"<what you say out loud>","seed":"<one sentence, or empty string>"}
+"reply" is always filled. "seed" stays empty unless you are sure."""
                 },
                 {
                   'role': 'user',
@@ -8547,6 +8587,10 @@ ${_turnFocusLine(turnNumber)}
     required String previousExpanded,
     required List<String> newUtterances,
     required String languageName,
+
+    /// 이 세션이 무슨 이야기를 하고 있었는지. 잘못 들은 낱말을 가려내는
+    /// 유일한 단서다 — 문장만 보면 "공약"과 "공격"을 구분할 방법이 없다.
+    String topicContext = '',
   }) async {
     final additions =
         newUtterances.map((u) => u.trim()).where((u) => u.isNotEmpty).toList();
@@ -8610,10 +8654,17 @@ GOOD (joined into one thought):
 - If the new part repeats what is already in the sentence, keep the sentence
   as it is rather than saying it twice.
 
+[THE TOPIC DECIDES WHAT THEY MEANT]
+The new part is speech-recognition output, so a word can come out as a different
+word that merely sounds similar. Judge every word against what this conversation
+is about. If a word does not belong to that topic but is close in sound to one
+that fits it naturally, they said the fitting one — use it.
+Never carry a word that contradicts the topic into the sentence just because the
+text says so. The sentence you return is what the whole practice is built on.
+
 [WHEN YOU CANNOT ATTACH IT — CHECK THIS FIRST]
-The new part is speech-recognition output, so a word can come out wrong. You are
-the last place that would notice. Do NOT quietly smooth a broken part into
-something that reads well — once you do, nobody downstream can tell.
+You are the last place that would notice a broken part. Do NOT quietly smooth it
+into something that reads well — once you do, nobody downstream can tell.
 Output EXACTLY this token and nothing else — [UNCLEAR] — when any of these holds:
 - The new part does not hold together as $languageName, or breaks off mid-thought.
 - A word sits so oddly against the sentence so far that its meaning cannot be
@@ -8628,6 +8679,11 @@ cannot tell what they meant.
 - Or the single token [UNCLEAR].""";
 
       final addedBlock = additions.map((u) => '- $u').join('\n');
+      final topicBlock = topicContext.trim().isEmpty
+          ? ''
+          : 'What this conversation is about:'
+              '${String.fromCharCode(10)}${topicContext.trim()}'
+              '${String.fromCharCode(10)}${String.fromCharCode(10)}';
       final http.Response res;
       try {
         res = await client
@@ -8648,8 +8704,14 @@ cannot tell what they meant.
                   {'role': 'system', 'content': sysPrompt},
                   {
                     'role': 'user',
-                    'content': 'Sentence so far:\n${previousExpanded.trim()}\n\n'
-                        'The user just added:\n$addedBlock\n\nMerged sentence:'
+                    'content': '$topicBlock'
+                        'Sentence so far:'
+                        '${String.fromCharCode(10)}${previousExpanded.trim()}'
+                        '${String.fromCharCode(10)}${String.fromCharCode(10)}'
+                        'The user just added:'
+                        '${String.fromCharCode(10)}$addedBlock'
+                        '${String.fromCharCode(10)}${String.fromCharCode(10)}'
+                        'Merged sentence:'
                   },
                 ],
               }),
