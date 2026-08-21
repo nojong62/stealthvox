@@ -1479,6 +1479,13 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     if (!mounted || _tutorLines.isEmpty) return;
     currentIndex = 0;
     if (mounted) setState(() => _tutorCurrentIdx = 0);
+    // 목록을 controller로 먼저 맨 위에 되돌린다. 끝까지 내려간 상태에서는
+    // ListView.builder가 아이템 0을 버려 `_practiceItemKeys[0]`의 context가
+    // null이고, 그러면 아래 `_scrollPracticeToIndex(0)`이 조용히 아무것도
+    // 하지 않는다 — 소리는 첫 대사인데 화면만 끝에 남는다(P2에서 겪은 그것).
+    if (_practiceScrollController.hasClients) {
+      _practiceScrollController.jumpTo(0);
+    }
     WidgetsBinding.instance
         .addPostFrameCallback((_) => _scrollPracticeToIndex(0));
     _checkAndStartTurn();
@@ -6210,6 +6217,13 @@ RULES — follow exactly:
                                         _tutorAiSpeaking = false;
                                         _tutorUserRecording = false;
                                       });
+                                      // 역할을 고르기 전부터 첫 대사가 보여야
+                                      // 한다. 여기서 안 돌리면 끝 화면을 본 채
+                                      // 역할을 고르게 된다.
+                                      if (_practiceScrollController
+                                          .hasClients) {
+                                        _practiceScrollController.jumpTo(0);
+                                      }
                                       WidgetsBinding.instance
                                           .addPostFrameCallback(
                                               (_) => _showRoleSelectBubble());
