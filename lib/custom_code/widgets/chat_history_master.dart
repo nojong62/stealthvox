@@ -1183,7 +1183,24 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         _showRoomEntryToast("$untranslatedCount개 줄은 번역이 안 돼 연습에서 빠졌습니다");
       }
 
-      _tutorLines = tutorLines;
+      // 🧹 듀오만 맞장구를 걷어낸다. 저장된 대화는 그대로 두고 연습 재료만
+      //   추린다. 전부 맞장구인 방이면 거르지 않는다 — 연습할 것이 없어진다.
+      var practiceLines = tutorLines;
+      int droppedBackchannels = 0;
+      if (_inferHistoryMode(_cachedRoomData) == 'duo') {
+        final kept = tutorLines
+            .where((m) => !_isBackchannelOnly(m['text'] as String))
+            .toList();
+        if (kept.isNotEmpty) {
+          droppedBackchannels = tutorLines.length - kept.length;
+          practiceLines = kept;
+        }
+      }
+      if (droppedBackchannels > 0 && untranslatedCount == 0) {
+        _showRoomEntryToast('맞장구 $droppedBackchannels줄은 연습에서 뺐습니다');
+      }
+
+      _tutorLines = practiceLines;
       if (mounted) {
         setState(() {
           isPracticeMode = true;
@@ -8110,6 +8127,65 @@ RULES — follow exactly:
         mode == 'roleplay' ||
         mode == 'step_expand' ||
         mode == 'duo';
+  }
+
+  /// 🧹 [DUO-PRACTICE-FILTER] 연습 재료에서 맞장구만 뺀다.
+  ///
+  /// **저장은 손대지 않는다.** 듀오는 말한 것을 그대로 다 남긴다(짧다고 버리면
+  /// "네"·"왜?" 같은 진짜 대답까지 사라진다 — 2026-08-14에 31건 중 5건을 그렇게
+  /// 잃었다). 다만 두 사람이 실제로 주고받은 말이라 맞장구가 그대로 줄이 되고,
+  /// 그것을 따라 말하는 연습은 배울 것이 없다. 그래서 **고를 때만** 뺀다.
+  ///
+  /// 기준은 "줄 전체가 맞장구뿐인가"다. 다른 낱말이 하나라도 섞이면 남긴다 —
+  /// "네, 그건 내일 할게요"는 맥락이 있는 말이다.
+  static final RegExp _kBackchannelStrip = RegExp(r'[^\w\s가-힣]');
+  static final RegExp _kBackchannelSplit = RegExp(r'\s+');
+  static const Set<String> _kBackchannelTokens = <String>{
+    '네',
+    '넹',
+    '넵',
+    '예',
+    '응',
+    '어',
+    '엉',
+    '음',
+    '아',
+    '오',
+    '와',
+    '그래',
+    '그래요',
+    '그렇지',
+    '맞아',
+    '맞아요',
+    '알겠어',
+    '알겠어요',
+    '알았어',
+    'ok',
+    'okay',
+    'yeah',
+    'yep',
+    'yup',
+    'yes',
+    'no',
+    'uh',
+    'um',
+    'hmm',
+    'mhm',
+    'right',
+    'sure',
+    'wow',
+    'oh',
+    'ah',
+  };
+
+  bool _isBackchannelOnly(String text) {
+    final cleaned =
+        text.toLowerCase().replaceAll(_kBackchannelStrip, ' ').trim();
+    if (cleaned.isEmpty) return true;
+    final tokens = cleaned.split(_kBackchannelSplit);
+    // 세 낱말을 넘으면 맞장구만으로 보지 않는다. 볼 것도 없이 남긴다.
+    if (tokens.length > 3) return false;
+    return tokens.every(_kBackchannelTokens.contains);
   }
 
   String _historyModeKey(Map<String, dynamic>? data) {
