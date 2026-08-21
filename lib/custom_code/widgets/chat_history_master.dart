@@ -303,6 +303,10 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   // P3 한 문장 의미단위 쉐도잉 상태.
   final ScrollController _p3SentenceScrollController = ScrollController();
+
+  /// 📜 [P3-READ-SCROLL] 손으로 스크롤한 뒤에는 자동으로 밀지 않는다. 읽는
+  /// 자리를 직접 잡은 사람과 싸우면 안 된다. 다음 Start에서 다시 열린다.
+  bool _p3AutoScrollBlocked = false;
   StreamSubscription<Duration>? _p3ShadowPositionSub;
   StreamSubscription<Duration>? _p3ShadowDurationSub;
 
@@ -6639,6 +6643,27 @@ RULES — follow exactly:
     );
   }
 
+  /// 📜 [P3-READ-SCROLL] 읽는 진행만큼 본문을 올린다. 0이면 첫 줄, 1이면
+  /// 마지막 줄이다.
+  ///
+  /// 글자와 소리를 잇는 지도는 없다 — 호흡 경계는 PCM에서 나온 값이라 몇 번째
+  /// 글자인지 모른다. 그래서 진행률로만 민다. 다 보이는 짧은 문장이면
+  /// maxScrollExtent가 0이라 아무 일도 하지 않는다.
+  void _p3ScrollSentenceTo(double progress) {
+    if (_p3AutoScrollBlocked) return;
+    final c = _p3SentenceScrollController;
+    if (!c.hasClients) return;
+    final double max = c.position.maxScrollExtent;
+    if (max <= 0) return;
+    final double target = max * progress.clamp(0.0, 1.0);
+    if ((target - c.offset).abs() < 6) return;
+    c.animateTo(
+      target,
+      duration: const Duration(milliseconds: 450),
+      curve: Curves.easeOut,
+    );
+  }
+
   /// 한 바퀴가 끝났다. 바로 튕겨 올리지 않고 [_kP3ReturnDelay]만큼 둔다.
   void _scheduleP3ReturnToMenu() {
     _p3ReturnTimer?.cancel();
@@ -6759,7 +6784,12 @@ RULES — follow exactly:
         _p3Stage = P3Stage.preparing;
         _p3Error = null;
         _p3UserSpeaking = false;
+        _p3AutoScrollBlocked = false;
       });
+      // 본문은 첫 줄부터 다시 읽는다.
+      if (_p3SentenceScrollController.hasClients) {
+        _p3SentenceScrollController.jumpTo(0);
+      }
       // 메뉴는 위에 남고 연습칸이 화면 정면으로 올라온다.
       _scrollP3ToPractice();
     }
@@ -6864,6 +6894,11 @@ RULES — follow exactly:
             _p3Stage = P3Stage.breathEcho;
           }
         });
+        // 📜 호흡이 넘어갈 때마다 그만큼 본문을 올린다. 첫 호흡은 0이라
+        //   시작하자마자 움직이지는 않는다.
+        if (phase == BreathEchoPhase.aiPlaying) {
+          _p3ScrollSentenceTo(total <= 1 ? 0 : index / (total - 1));
+        }
         if (phase == BreathEchoPhase.userSpeaking) {
           BillingTicker.instance.resumeFromActivity('p3_breath_user');
         }
@@ -7013,6 +7048,14 @@ RULES — follow exactly:
     _p3PlayerSub = sub;
     final int expectedMs =
         pcm16DurationMs(pcm.length, sampleRate: kStealthVoxSttSampleRate);
+    // 📜 통으로 읽는 구간(풀 에코 듣기·쉐도잉)은 재생 위치가 곧 읽는 자리다.
+    unawaited(_p3ShadowPositionSub?.cancel());
+    _p3ShadowPositionSub = expectedMs <= 0
+        ? null
+        : player.onPositionChanged.listen((pos) {
+            if (!mounted) return;
+            _p3ScrollSentenceTo(pos.inMilliseconds / expectedMs);
+          });
     try {
       await player.play(BytesSource(wav));
       await completer.future.timeout(
@@ -7023,6 +7066,8 @@ RULES — follow exactly:
       debugPrint('[P3-SPEAK] play $e');
     } finally {
       await sub.cancel();
+      await _p3ShadowPositionSub?.cancel();
+      _p3ShadowPositionSub = null;
       if (identical(_p3PlayerSub, sub)) _p3PlayerSub = null;
       if (identical(_p3Player, player)) _p3Player = null;
       try {
@@ -7435,18 +7480,38 @@ RULES — follow exactly:
             ),
           ),
           const SizedBox(height: 12),
-          // 🚫 본문은 크기도 굵기도 그대로다 — 읽는 중에 글자가 조금이라도
-          //    움직이면 눈이 줄을 놓친다. 내 차례라는 신호는 색만 살짝 얹는다.
-          Text(
-            text.isEmpty ? 'Sentence unavailable' : text,
-            style: TextStyle(
-              color: userTurn
-                  ? Color.lerp(Colors.white, userTurnAccent, 0.34)!
-                      .withValues(alpha: 0.96)
-                  : Colors.white.withValues(alpha: 0.90),
-              fontSize: 16 * _fontScale,
-              fontWeight: FontWeight.w400,
-              height: 1.6,
+          // 📜 [P3-READ-SCROLL] 긴 문장은 화면 아래로 넘어가 뒷부분을 못 봤다.
+          //    칸 높이를 화면의 42%로 묶고, 그 안에서 읽는 진행만큼 올린다.
+          //    손으로 스크롤하면 이번 회차는 자동으로 움직이지 않는다.
+          ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.42,
+            ),
+            child: NotificationListener<ScrollStartNotification>(
+              onNotification: (notification) {
+                if (notification.dragDetails != null) {
+                  _p3AutoScrollBlocked = true;
+                }
+                return false;
+              },
+              child: SingleChildScrollView(
+                controller: _p3SentenceScrollController,
+                physics: const ClampingScrollPhysics(),
+                // 🚫 본문은 크기도 굵기도 그대로다 — 읽는 중에 글자가 조금이라도
+                //    움직이면 눈이 줄을 놓친다. 내 차례라는 신호는 색만 얹는다.
+                child: Text(
+                  text.isEmpty ? 'Sentence unavailable' : text,
+                  style: TextStyle(
+                    color: userTurn
+                        ? Color.lerp(Colors.white, userTurnAccent, 0.34)!
+                            .withValues(alpha: 0.96)
+                        : Colors.white.withValues(alpha: 0.90),
+                    fontSize: 16 * _fontScale,
+                    fontWeight: FontWeight.w400,
+                    height: 1.6,
+                  ),
+                ),
+              ),
             ),
           ),
         ],
