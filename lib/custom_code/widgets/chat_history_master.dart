@@ -51,6 +51,15 @@ P2VoiceStyle get _kBreathStyle => kP2VoiceStyles.firstWhere(
       (s) => s.id == kP2BreathTestStyleId,
     );
 
+/// 🎵 P3(에코잉·쉐도잉)가 쓰는 낭독 패턴. **P2 Breath와 다른 한 벌이다** —
+/// P2는 Smooth Jazz 그대로 두고 P3만 Sing-Song Flow로 읽는다.
+P2VoiceStyle get _kP3Style => kP3SpeakingStyle;
+
+/// P3 전용 캐시 칸. 스타일 id가 달라 P2가 만들어 둔 소리와 섞이지 않는다.
+String _p3CacheNamespace(String voice) =>
+    'p2_wav_${_historyPracticeTtsModel}_${_kP3Style.id}'
+    '_${kP2StyleInstructionVersion}_$voice';
+
 /// 실사용 Breath PCM 캐시. Lab(`p2lab_wav_`)과 접두어가 달라 섞이지 않는다.
 /// Pattern 시스템이 들어오면 `style_smooth_jazz` 자리에 pattern id가 들어가고,
 /// 같은 instruction·voice면 **캐시가 그대로 재사용된다**(재생성 0회).
@@ -6806,7 +6815,7 @@ RULES — follow exactly:
   /// 다르다(P2는 `_m{ranges}`가 붙는다).
   Future<Uint8List?> _getP3OriginalPcm(String text) {
     final voice = _p3Voice;
-    final ns = '${_breathCacheNamespace(voice)}_p3';
+    final ns = '${_p3CacheNamespace(voice)}_p3';
     final requestKey = '$ns|$text';
     final existing = _breathPcmInFlight[requestKey];
     if (existing != null) return existing;
@@ -6818,8 +6827,8 @@ RULES — follow exactly:
         1.0,
         voice,
         model: _historyPracticeTtsModel,
-        instructions: _kBreathStyle.instruction,
-        instructionTag: '${_kBreathStyle.id}_p3',
+        instructions: _kP3Style.instruction,
+        instructionTag: '${_kP3Style.id}_p3',
         responseFormat: 'pcm',
       );
       if (raw == null || raw.isEmpty) return null;

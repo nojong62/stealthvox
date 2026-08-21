@@ -93,6 +93,33 @@ const List<String> kP2BreathTestVoices = <String>[
   'verse',
 ];
 
+/// 🎵 P3(에코잉·쉐도잉)가 쓰는 낭독 패턴 — Sing-Song Flow.
+///
+/// Lab 조합표([kP2VoiceStyles])에 넣지 않는다. 조합표는 6 × 13을 비교하는
+/// 실험대이고, 이건 실사용 P3가 **고정으로** 쓰는 한 벌이다. id가 다르므로
+/// 캐시 칸도 따로 서서, P2 Breath(Smooth Jazz)로 만들어 둔 소리는 그대로다.
+///
+/// 문구를 고치면 [kP2StyleInstructionVersion]이 아니라 이 id 뒤에 세대를
+/// 붙여 올린다 — 버전을 올리면 P2 캐시까지 통째로 미아가 된다.
+const P2VoiceStyle kP3SpeakingStyle = P2VoiceStyle(
+  id: 'style_sing_song_flow_p3',
+  label: 'Sing-Song Flow',
+  instruction: '''
+Speak in a clear General American accent with a strongly melodic, almost sing-song flow.
+
+Use noticeable pitch rises and falls, with lively, rhythmic phrasing, but keep the delivery easy to follow for a non-native English learner.
+
+Speak at a medium-slow pace, slightly slower than natural conversation. Give each phrase enough space to be heard and repeated clearly, without sounding unnaturally stretched.
+
+Keep the rhythm strong and musical. Gently emphasize important words, and let unstressed words flow lightly between them.
+
+Use a playful, bright, energetic tone with expressive pitch variation. Make the sentence feel almost like a simple melody, while keeping every word crisp and intelligible.
+
+Avoid rushing, slurring, or compressing words. Prioritize clear rhythm, clear stress, and easy shadowing.''',
+  goal: '영어 억양을 노래처럼 몸에 새기는 훈련용. 호흡마다 따라 말할 자리가 '
+      '남도록 대화보다 조금 느리게 읽고, 강약과 pitch는 확실히 살린다.',
+);
+
 /// TTS 스타일 6종. Voice 13종과 **서로 독립적으로** 조합된다(6 × 13 = 78).
 const List<P2VoiceStyle> kP2VoiceStyles = <P2VoiceStyle>[
   P2VoiceStyle(
