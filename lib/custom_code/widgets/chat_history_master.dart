@@ -52,13 +52,18 @@ P2VoiceStyle get _kBreathStyle => kP2VoiceStyles.firstWhere(
       (s) => s.id == kP2BreathTestStyleId,
     );
 
-/// 🎵 P3(에코잉·쉐도잉)가 쓰는 낭독 패턴. **P2 Breath와 다른 한 벌이다** —
-/// P2는 Smooth Jazz 그대로 두고 P3만 Sing-Song Flow로 읽는다.
-P2VoiceStyle get _kP3Style => kP3SpeakingStyle;
+/// 🎵 P3가 쓰는 낭독 패턴. **P2 Breath와 다른 한 벌이다** — P2는 Smooth Jazz
+/// 그대로 두고, P3는 모드마다 갈린다.
+///   · 에코잉  — Sing-Song Flow (호흡마다 끊어 따라 읽기)
+///   · 쉐도잉  — Story Melody  (이야기하듯 이어 읽어 얹어 말하기)
+/// id가 다르므로 캐시 칸도 따로 선다. 모드를 오가도 이미 받은 소리는 남는다.
+P2VoiceStyle _p3StyleFor(P3PracticeMode mode) =>
+    mode == P3PracticeMode.echoing ? kP3SpeakingStyle : kP3ShadowingStyle;
 
-/// P3 전용 캐시 칸. 스타일 id가 달라 P2가 만들어 둔 소리와 섞이지 않는다.
-String _p3CacheNamespace(String voice) =>
-    'p2_wav_${_historyPracticeTtsModel}_${_kP3Style.id}'
+/// P3 전용 캐시 칸. 스타일 id가 달라 P2가 만들어 둔 소리와도, 두 모드끼리도
+/// 섞이지 않는다.
+String _p3CacheNamespaceFor(P3PracticeMode mode, String voice) =>
+    'p2_wav_${_historyPracticeTtsModel}_${_p3StyleFor(mode).id}'
     '_${kP2StyleInstructionVersion}_$voice';
 
 /// 실사용 Breath PCM 캐시. Lab(`p2lab_wav_`)과 접두어가 달라 섞이지 않는다.
@@ -84,7 +89,7 @@ const Color _p3BreathAccentColor = Color(0xFF7DD3FC);
 /// 어느 쪽도 성별은 적지 않는다. 캐시 키에 목소리가 들어가므로 목록을 바꿔도
 /// 이미 받아 둔 소리는 그대로 남는다.
 const List<String> _kP3EchoingVoices = <String>['coral', 'alloy'];
-const List<String> _kP3ShadowingVoices = <String>['onyx', 'ballad', 'marin'];
+const List<String> _kP3ShadowingVoices = <String>['echo', 'ash', 'coral'];
 
 /// 의미단위 낭독의 공통 뼈대. 무엇을 한 덩어리로 볼지, 덩어리 안을 어떻게
 /// 붙일지까지만 정한다. **덩어리 사이를 어떻게 다룰지는 아래 두 낭독 방식이
@@ -6850,7 +6855,8 @@ RULES — follow exactly:
   /// 다르다(P2는 `_m{ranges}`가 붙는다).
   Future<Uint8List?> _getP3OriginalPcm(String text) {
     final voice = _p3Voice;
-    final ns = '${_p3CacheNamespace(voice)}_p3';
+    final style = _p3StyleFor(_p3PracticeMode);
+    final ns = '${_p3CacheNamespaceFor(_p3PracticeMode, voice)}_p3';
     final requestKey = '$ns|$text';
     final existing = _breathPcmInFlight[requestKey];
     if (existing != null) return existing;
@@ -6862,8 +6868,8 @@ RULES — follow exactly:
         1.0,
         voice,
         model: _historyPracticeTtsModel,
-        instructions: _kP3Style.instruction,
-        instructionTag: '${_kP3Style.id}_p3',
+        instructions: style.instruction,
+        instructionTag: '${style.id}_p3',
         responseFormat: 'pcm',
       );
       if (raw == null || raw.isEmpty) return null;

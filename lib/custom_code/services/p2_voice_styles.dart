@@ -120,6 +120,30 @@ Avoid rushing, slurring, or compressing words. Prioritize clear rhythm, clear st
       '남도록 대화보다 조금 느리게 읽고, 강약과 pitch는 확실히 살린다.',
 );
 
+/// 🎭 P3 쉐도잉이 쓰는 낭독 패턴 — Story Melody.
+///
+/// 에코잉([kP3SpeakingStyle])과 다른 한 벌이다. 끊어 따라 하는 연습과 겹쳐
+/// 말하는 연습은 필요한 읽기가 다르다 — 쉐도잉은 구절 사이를 벌리지 않고
+/// 이어서 읽어야 얹어 말할 수 있다.
+const P2VoiceStyle kP3ShadowingStyle = P2VoiceStyle(
+  id: 'style_story_melody_p3',
+  label: 'Story Melody',
+  instruction: '''
+Speak in a warm, clear General American accent, like a friendly teacher helping a teenage English learner practice by saying, "Listen to me, then say it the same way."
+
+Use natural storytelling-style intonation with smooth rises and falls in pitch. Let each phrase have a gentle melodic shape, with expressive but controlled endings.
+
+Speak slightly slower than normal conversation, at an easy shadowing pace. Leave enough space inside each phrase for the learner to clearly hear the rhythm, stress, and pronunciation, but do not add long pauses between phrases.
+
+Gently emphasize the important words and let the smaller words flow naturally around them. Keep the rhythm smooth and connected, so the learner can imitate the whole phrase rather than pronounce each word separately.
+
+Use a warm, encouraging, engaging tone, with a little dramatic expression as if telling an interesting story. Keep the emotion rich but controlled.
+
+Make the pronunciation very clear and natural. Do not rush, mumble, exaggerate individual sounds, or sound childish. The goal is to make a teenage learner want to immediately copy the speaker's rhythm, melody, and phrasing.''',
+  goal: '이야기하듯 이어 읽어 통째로 얹어 말하게 하는 쉐도잉용. 구절 안에는 '
+      '들을 자리를 주되 구절 사이는 벌리지 않는다.',
+);
+
 /// TTS 스타일 6종. Voice 13종과 **서로 독립적으로** 조합된다(6 × 13 = 78).
 const List<P2VoiceStyle> kP2VoiceStyles = <P2VoiceStyle>[
   P2VoiceStyle(
