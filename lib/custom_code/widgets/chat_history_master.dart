@@ -25,6 +25,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter/rendering.dart'; // RenderAbstractViewport (읽기 스크롤)
 import 'package:flutter/services.dart';
 import 'routine_mode_roleplay.dart' show TtsCache;
 import '/custom_code/actions/billing_ticker.dart';
@@ -307,10 +308,11 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   bool _isReplayMode = false;
 
   // P3 한 문장 의미단위 쉐도잉 상태.
-  final ScrollController _p3SentenceScrollController = ScrollController();
+  /// 📜 [P3-READ-SCROLL] 본문 패널의 자리를 재는 데 쓴다.
+  final GlobalKey _p3SentenceKey = GlobalKey();
 
-  /// 📜 [P3-READ-SCROLL] 손으로 스크롤한 뒤에는 자동으로 밀지 않는다. 읽는
-  /// 자리를 직접 잡은 사람과 싸우면 안 된다. 다음 Start에서 다시 열린다.
+  /// 손으로 스크롤한 뒤에는 자동으로 밀지 않는다. 읽는 자리를 직접 잡은
+  /// 사람과 싸우면 안 된다. 다음 Start에서 다시 열린다.
   bool _p3AutoScrollBlocked = false;
   StreamSubscription<Duration>? _p3ShadowPositionSub;
   StreamSubscription<Duration>? _p3ShadowDurationSub;
@@ -497,7 +499,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _practiceScrollController.dispose();
     _p3ShadowPositionSub?.cancel();
     _p3ShadowDurationSub?.cancel();
-    _p3SentenceScrollController.dispose();
     _playerStateSub?.cancel();
     _playerCompleteSub?.cancel();
     _dgSubscription?.cancel();
@@ -6648,20 +6649,32 @@ RULES — follow exactly:
     );
   }
 
-  /// 📜 [P3-READ-SCROLL] 읽는 진행만큼 본문을 올린다. 0이면 첫 줄, 1이면
-  /// 마지막 줄이다.
+  /// 📜 [P3-READ-SCROLL] 읽는 진행만큼 **페이지를** 민다. 0이면 문장 첫 줄이
+  /// 화면 위, 1이면 문장 끝이 화면 아래에 닿는다.
+  ///
+  /// 스크롤 면은 페이지 하나뿐이다. 문장 칸에 자기 스크롤을 주면 그 위에
+  /// 얹힌 손가락이 갇혀 아래 버튼까지 못 내려간다.
   ///
   /// 글자와 소리를 잇는 지도는 없다 — 호흡 경계는 PCM에서 나온 값이라 몇 번째
-  /// 글자인지 모른다. 그래서 진행률로만 민다. 다 보이는 짧은 문장이면
-  /// maxScrollExtent가 0이라 아무 일도 하지 않는다.
-  void _p3ScrollSentenceTo(double progress) {
+  /// 글자인지 모른다. 그래서 진행률로만 민다. 문장이 한 화면에 다 들어오면
+  /// 밀 거리가 없어 아무 일도 하지 않는다.
+  void _p3ScrollReadingTo(double progress) {
     if (_p3AutoScrollBlocked) return;
-    final c = _p3SentenceScrollController;
+    final c = _p3PageScrollController;
     if (!c.hasClients) return;
+    final ctx = _p3SentenceKey.currentContext;
+    final box = ctx?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return;
+    final viewport = RenderAbstractViewport.maybeOf(box);
+    if (viewport == null) return;
+    // alignment 0 = 패널 위가 화면 위, 1 = 패널 아래가 화면 아래.
+    final double top = viewport.getOffsetToReveal(box, 0.0).offset;
+    final double bottom = viewport.getOffsetToReveal(box, 1.0).offset;
+    if (bottom <= top) return;
     final double max = c.position.maxScrollExtent;
-    if (max <= 0) return;
-    final double target = max * progress.clamp(0.0, 1.0);
-    if ((target - c.offset).abs() < 6) return;
+    final double target =
+        (top + (bottom - top) * progress.clamp(0.0, 1.0)).clamp(0.0, max);
+    if ((target - c.offset).abs() < 8) return;
     c.animateTo(
       target,
       duration: const Duration(milliseconds: 450),
@@ -6791,10 +6804,6 @@ RULES — follow exactly:
         _p3UserSpeaking = false;
         _p3AutoScrollBlocked = false;
       });
-      // 본문은 첫 줄부터 다시 읽는다.
-      if (_p3SentenceScrollController.hasClients) {
-        _p3SentenceScrollController.jumpTo(0);
-      }
       // 메뉴는 위에 남고 연습칸이 화면 정면으로 올라온다.
       _scrollP3ToPractice();
     }
@@ -6903,7 +6912,7 @@ RULES — follow exactly:
         // 📜 호흡이 넘어갈 때마다 그만큼 본문을 올린다. 첫 호흡은 0이라
         //   시작하자마자 움직이지는 않는다.
         if (phase == BreathEchoPhase.aiPlaying) {
-          _p3ScrollSentenceTo(total <= 1 ? 0 : index / (total - 1));
+          _p3ScrollReadingTo(total <= 1 ? 0 : index / (total - 1));
         }
         if (phase == BreathEchoPhase.userSpeaking) {
           BillingTicker.instance.resumeFromActivity('p3_breath_user');
@@ -7060,7 +7069,7 @@ RULES — follow exactly:
         ? null
         : player.onPositionChanged.listen((pos) {
             if (!mounted) return;
-            _p3ScrollSentenceTo(pos.inMilliseconds / expectedMs);
+            _p3ScrollReadingTo(pos.inMilliseconds / expectedMs);
           });
     try {
       await player.play(BytesSource(wav));
@@ -7261,104 +7270,113 @@ RULES — follow exactly:
     final bool started = _p3Stage != P3Stage.idle;
     return MediaQuery.withClampedTextScaling(
       maxScaleFactor: 1.3,
-      child: SingleChildScrollView(
-        controller: _p3PageScrollController,
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // ── 메뉴 ── 첫 화면에서도, 연습 중에도 같은 자리에 있다.
-            _buildP3VoiceSelector(),
-            const SizedBox(height: 10),
-            _buildP3PracticeModePicker(),
-            const SizedBox(height: 14),
-            _buildP3VariantPicker(showPreview: false),
-            if (_p3PracticeMode == P3PracticeMode.shadowing) ...[
-              const SizedBox(height: 12),
-              _buildP3GapPicker(),
-            ],
+      child: NotificationListener<ScrollStartNotification>(
+        // 📜 손으로 끌기 시작하면 자동 스크롤은 물러난다. 우리가 animateTo로
+        //    미는 것은 dragDetails가 없어 여기 걸리지 않는다.
+        onNotification: (notification) {
+          if (notification.dragDetails != null) _p3AutoScrollBlocked = true;
+          return false;
+        },
+        child: SingleChildScrollView(
+          controller: _p3PageScrollController,
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // ── 메뉴 ── 첫 화면에서도, 연습 중에도 같은 자리에 있다.
+              _buildP3VoiceSelector(),
+              const SizedBox(height: 10),
+              _buildP3PracticeModePicker(),
+              const SizedBox(height: 14),
+              _buildP3VariantPicker(showPreview: false),
+              if (_p3PracticeMode == P3PracticeMode.shadowing) ...[
+                const SizedBox(height: 12),
+                _buildP3GapPicker(),
+              ],
 
-            // 오류는 연습이 시작되지 못했을 때도 보여야 하므로 밖에 둔다.
-            if (_p3Error != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                _p3Error!,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Color(0xFFFF6B6B), fontSize: 12),
+              // 오류는 연습이 시작되지 못했을 때도 보여야 하므로 밖에 둔다.
+              if (_p3Error != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  _p3Error!,
+                  textAlign: TextAlign.center,
+                  style:
+                      const TextStyle(color: Color(0xFFFF6B6B), fontSize: 12),
+                ),
+              ],
+
+              // ── Start ── 메뉴 밑에 늘 있다. 첫 화면이면 여기서 한 바퀴가
+              //   열리고, 한 바퀴 돌린 뒤에는 고른 그대로 다시 돌린다.
+              //   도는 중에는 잠근다 — 모드·보이스와 같은 규칙이다.
+              const SizedBox(height: 14),
+              _p3PrimaryButton(
+                started ? '▶ Start again' : '▶ Start',
+                _p3Busy ? null : () => unawaited(_startP3Speaking()),
               ),
-            ],
+              const SizedBox(height: 14),
 
-            // ── Start ── 메뉴 밑에 늘 있다. 첫 화면이면 여기서 한 바퀴가
-            //   열리고, 한 바퀴 돌린 뒤에는 고른 그대로 다시 돌린다.
-            //   도는 중에는 잠근다 — 모드·보이스와 같은 규칙이다.
-            const SizedBox(height: 14),
-            _p3PrimaryButton(
-              started ? '▶ Start again' : '▶ Start',
-              _p3Busy ? null : () => unawaited(_startP3Speaking()),
-            ),
-            const SizedBox(height: 14),
-
-            // ── 연습칸 ── 시작한 뒤에만. 메뉴 아래로 이어 붙는다.
-            if (started)
-              Column(
-                key: _p3PracticeKey,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const SizedBox(height: 20),
-                  // 에코잉에서는 진도(Breath n/n · …)를 여기 두지 않는다.
-                  //   귀로 따라오게 하는 연습이라 위쪽에 숫자가 있으면 눈이
-                  //   먼저 간다. 호흡 위치는 문장 패널 안 카운터가 알린다.
-                  if (_p3PracticeMode == P3PracticeMode.echoing)
-                    const Text(
-                      'Read it in one breath',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: Colors.white54,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        height: 1.4,
+              // ── 연습칸 ── 시작한 뒤에만. 메뉴 아래로 이어 붙는다.
+              if (started)
+                Column(
+                  key: _p3PracticeKey,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const SizedBox(height: 20),
+                    // 에코잉에서는 진도(Breath n/n · …)를 여기 두지 않는다.
+                    //   귀로 따라오게 하는 연습이라 위쪽에 숫자가 있으면 눈이
+                    //   먼저 간다. 호흡 위치는 문장 패널 안 카운터가 알린다.
+                    if (_p3PracticeMode == P3PracticeMode.echoing)
+                      const Text(
+                        'Read it in one breath',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white54,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          height: 1.4,
+                        ),
+                      )
+                    else
+                      Text(
+                        _p3StageLabel,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: _p3Stage == P3Stage.fullShadowRecord
+                              ? Colors.amber
+                              : Colors.white54,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
-                    )
-                  else
-                    Text(
-                      _p3StageLabel,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: _p3Stage == P3Stage.fullShadowRecord
-                            ? Colors.amber
-                            : Colors.white54,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  const SizedBox(height: 14),
-                  _buildP3SentencePanel(text),
-
-                  // ── 2) 한 바퀴가 끝난 뒤: 에코잉만 다시 돌린다.
-                  //   모드는 그대로라 쉐도잉으로 넘어가지 않는다. 아래
-                  //   [AI]·[ECHO] 듣기 버튼은 건드리지 않는다.
-                  if (_p3Stage == P3Stage.compare &&
-                      _p3PracticeMode == P3PracticeMode.echoing) ...[
                     const SizedBox(height: 14),
-                    _p3PrimaryButton(
-                      '↻ Echo Again',
-                      _p3Busy ? null : () => unawaited(_startP3Speaking()),
+                    _buildP3SentencePanel(text),
+
+                    // ── 2) 한 바퀴가 끝난 뒤: 에코잉만 다시 돌린다.
+                    //   모드는 그대로라 쉐도잉으로 넘어가지 않는다. 아래
+                    //   [AI]·[ECHO] 듣기 버튼은 건드리지 않는다.
+                    if (_p3Stage == P3Stage.compare &&
+                        _p3PracticeMode == P3PracticeMode.echoing) ...[
+                      const SizedBox(height: 14),
+                      _p3PrimaryButton(
+                        '↻ Echo Again',
+                        _p3Busy ? null : () => unawaited(_startP3Speaking()),
+                      ),
+                    ],
+                    const SizedBox(height: 18),
+                    _buildP3CompareRow(),
+                    const SizedBox(height: 12),
+                    // 맨 밑 정지 — 연습을 접고 첫 화면으로 돌아간다.
+                    _p3SecondaryButton(
+                      '■ Stop',
+                      () => unawaited(_stopP3AndReturnToMenu()),
                     ),
+                    // 연습칸이 화면 맨 위까지 올라갈 수 있으려면 아래에 여백이
+                    // 있어야 한다. 없으면 스크롤이 끝에 걸려 메뉴가 안 밀린다.
+                    SizedBox(height: MediaQuery.of(context).size.height * 0.55),
                   ],
-                  const SizedBox(height: 18),
-                  _buildP3CompareRow(),
-                  const SizedBox(height: 12),
-                  // 맨 밑 정지 — 연습을 접고 첫 화면으로 돌아간다.
-                  _p3SecondaryButton(
-                    '■ Stop',
-                    () => unawaited(_stopP3AndReturnToMenu()),
-                  ),
-                  // 연습칸이 화면 맨 위까지 올라갈 수 있으려면 아래에 여백이
-                  // 있어야 한다. 없으면 스크롤이 끝에 걸려 메뉴가 안 밀린다.
-                  SizedBox(height: MediaQuery.of(context).size.height * 0.55),
-                ],
-              ),
-          ],
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -7385,6 +7403,7 @@ RULES — follow exactly:
         safeTotal == 0 ? 0 : _p3BreathIndex.clamp(0, safeTotal - 1);
 
     return AnimatedContainer(
+      key: _p3SentenceKey,
       duration: const Duration(milliseconds: 180),
       curve: Curves.easeOutCubic,
       padding: const EdgeInsets.fromLTRB(16, 13, 16, 17),
@@ -7486,38 +7505,22 @@ RULES — follow exactly:
             ),
           ),
           const SizedBox(height: 12),
-          // 📜 [P3-READ-SCROLL] 긴 문장은 화면 아래로 넘어가 뒷부분을 못 봤다.
-          //    칸 높이를 화면의 42%로 묶고, 그 안에서 읽는 진행만큼 올린다.
-          //    손으로 스크롤하면 이번 회차는 자동으로 움직이지 않는다.
-          ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(context).size.height * 0.42,
-            ),
-            child: NotificationListener<ScrollStartNotification>(
-              onNotification: (notification) {
-                if (notification.dragDetails != null) {
-                  _p3AutoScrollBlocked = true;
-                }
-                return false;
-              },
-              child: SingleChildScrollView(
-                controller: _p3SentenceScrollController,
-                physics: const ClampingScrollPhysics(),
-                // 🚫 본문은 크기도 굵기도 그대로다 — 읽는 중에 글자가 조금이라도
-                //    움직이면 눈이 줄을 놓친다. 내 차례라는 신호는 색만 얹는다.
-                child: Text(
-                  text.isEmpty ? 'Sentence unavailable' : text,
-                  style: TextStyle(
-                    color: userTurn
-                        ? Color.lerp(Colors.white, userTurnAccent, 0.34)!
-                            .withValues(alpha: 0.96)
-                        : Colors.white.withValues(alpha: 0.90),
-                    fontSize: 16 * _fontScale,
-                    fontWeight: FontWeight.w400,
-                    height: 1.6,
-                  ),
-                ),
-              ),
+          // 🚫 본문은 크기도 굵기도 그대로다 — 읽는 중에 글자가 조금이라도
+          //    움직이면 눈이 줄을 놓친다. 내 차례라는 신호는 색만 얹는다.
+          //
+          // 📜 [P3-READ-SCROLL] 문장 칸을 따로 스크롤시키지 않는다. 스크롤
+          //    면이 둘이면 손가락이 안쪽에 갇혀 페이지가 안 밀리고, 아래 버튼에
+          //    닿지 못한다. 읽는 진행은 페이지째 민다 — _p3ScrollReadingTo.
+          Text(
+            text.isEmpty ? 'Sentence unavailable' : text,
+            style: TextStyle(
+              color: userTurn
+                  ? Color.lerp(Colors.white, userTurnAccent, 0.34)!
+                      .withValues(alpha: 0.96)
+                  : Colors.white.withValues(alpha: 0.90),
+              fontSize: 16 * _fontScale,
+              fontWeight: FontWeight.w400,
+              height: 1.6,
             ),
           ),
         ],
