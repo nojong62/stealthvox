@@ -4023,6 +4023,28 @@ RULES — follow exactly:
             child: Column(
               children: [
                 _buildPracticeTabBar(),
+                // 🔙 P3 화면 안에는 닫기가 없었다. 탭 바 바로 밑에 한 줄을 둔다
+                //   — 왼쪽 X는 고르는 자리로 돌아가고, 오른쪽 SR은 공부방으로
+                //   나간다. P1·P2는 각자 헤더에 이미 X를 들고 있다.
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 16, 2),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.close, color: Colors.white70),
+                        tooltip: '다시 고르기',
+                        onPressed: _isStepExpandRoom
+                            ? _backToStepExpandSelect
+                            : _exitShadowing,
+                        padding: EdgeInsets.zero,
+                        constraints:
+                            const BoxConstraints(minWidth: 40, minHeight: 40),
+                      ),
+                      const Spacer(),
+                      _buildStudyRoomPill(),
+                    ],
+                  ),
+                ),
                 Expanded(child: _buildChunkPracticeScreen()),
               ],
             ),
@@ -8491,6 +8513,37 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     );
   }
 
+  /// 🏫 [SR] 공부방 목록으로 가는 알약. 설정 페이지·대화방에 단 것과 같다.
+  ///
+  /// 자리를 내주고 간다(`pushReplacement`) — 이 방은 열려 있는 동안 과금이
+  /// 돌아서, 방이 정리되어야 차감이 멈춘다.
+  Widget _buildStudyRoomPill() {
+    return Tooltip(
+      message: '공부방 (Study Room)',
+      child: GestureDetector(
+        onTap: () => context.pushReplacementNamed('ChatHistory'),
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: const Color(0x33FFFFFF)),
+          ),
+          child: const Text(
+            "SR",
+            maxLines: 1,
+            style: TextStyle(
+              color: Color(0xFFE7E9EE),
+              fontWeight: FontWeight.w600,
+              fontSize: 13,
+              letterSpacing: 1.2,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildStepExpandSelectScreen() {
     final bool hasData = _stepExpandTurns.isNotEmpty;
     // 📐 시스템 글자 크기 1.7배 + 화면 확대(density 480→540)를 함께 쓰는 기기에서
@@ -8517,20 +8570,7 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
                       const BoxConstraints(minWidth: 40, minHeight: 40),
                 ),
                 const Spacer(),
-                // 🛡️ [STEALTH] 공부방 목록에 있는 그 방패다 — 여기서 곧장 새
-                //   대화를 열러 간다. 이 방은 열려 있는 동안 과금이 도니까
-                //   자리를 내주고 간다(뒤로 오면 공부방 목록).
-                IconButton(
-                  icon: const Icon(Icons.security, color: Colors.white70),
-                  tooltip: '스텔스룸',
-                  onPressed: () {
-                    if (!guardBillingEntry(context)) return;
-                    context.pushReplacementNamed('StealthRoom');
-                  },
-                  padding: EdgeInsets.zero,
-                  constraints:
-                      const BoxConstraints(minWidth: 40, minHeight: 40),
-                ),
+                _buildStudyRoomPill(),
               ],
             ),
             const Text(
