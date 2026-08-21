@@ -42,8 +42,9 @@ import '/custom_code/services/pcm_audio_utils.dart'
 // 🌬️ [P2-BREATH] Breath Echoing이 쓰는 값. **한곳에만 둔다.**
 // ════════════════════════════════════════════════════════════════════
 
-/// P3 Breath Echoing의 고정 보이스. P2는 화면의 보이스 선택값을 별도로 쓴다.
-const String _kBreathVoice = 'cedar';
+/// P3가 처음 열릴 때의 보이스. 에코잉이 기본 모드라 그 목록의 첫 칸을 든다 —
+/// 목록에 없는 값을 들고 열면 어느 칸도 켜지지 않은 채 소리만 난다.
+const String _kBreathVoice = 'coral';
 
 /// Breath TTS는 Lab과 **같은 Smooth Jazz 정의**를 쓴다. 복사본을 만들지
 /// 않는다 — 갈라지면 Lab에서 고른 소리와 실사용 소리가 달라진다.
@@ -78,10 +79,11 @@ const Color _p3PracticeBorderColor = Color(0x22FFFFFF);
 const Color _p3BreathAccentColor = Color(0xFF7DD3FC);
 
 /// 🗣️ [P3-VOICE] 모드마다 고를 수 있는 목소리가 다르다.
-///   · 에코잉 — 호흡을 끊어 따라 읽는 연습이라 둘만 둔다(성별 표기 유지).
-///   · 쉐도잉 — 겹쳐 말하는 연습이라 결이 다른 셋을 주고, 이름만 보여 준다.
-/// 캐시 키에 목소리가 들어가므로 목록을 늘려도 이미 받아 둔 소리는 그대로다.
-const List<String> _kP3EchoingVoices = <String>['marin', 'cedar'];
+///   · 에코잉 — 호흡을 끊어 따라 읽는 연습이라 둘만 둔다.
+///   · 쉐도잉 — 겹쳐 말하는 연습이라 결이 다른 셋을 준다.
+/// 어느 쪽도 성별은 적지 않는다. 캐시 키에 목소리가 들어가므로 목록을 바꿔도
+/// 이미 받아 둔 소리는 그대로 남는다.
+const List<String> _kP3EchoingVoices = <String>['coral', 'alloy'];
 const List<String> _kP3ShadowingVoices = <String>['onyx', 'ballad', 'marin'];
 
 /// 의미단위 낭독의 공통 뼈대. 무엇을 한 덩어리로 볼지, 덩어리 안을 어떻게
@@ -6737,7 +6739,7 @@ RULES — follow exactly:
     _scrollP3ToMenu();
   }
 
-  /// 최종 문장의 Smooth Jazz PCM을 얻어 호흡으로 가른 뒤 Stage 1을 연다.
+  /// 최종 문장의 Sing-Song Flow PCM을 얻어 호흡으로 가른 뒤 Stage 1을 연다.
   ///
   /// ⚠️ P2와 달리 **Morph 강조 지시문을 넣지 않는다.** 최종 문장을 특정 단어만
   /// 도드라진 상태로 익히면 안 된다.
@@ -7212,7 +7214,7 @@ RULES — follow exactly:
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // ── 메뉴 ── 첫 화면에서도, 연습 중에도 같은 자리에 있다.
-            _buildP3VoiceSelector(started: started),
+            _buildP3VoiceSelector(),
             const SizedBox(height: 10),
             _buildP3PracticeModePicker(),
             const SizedBox(height: 14),
@@ -7232,12 +7234,15 @@ RULES — follow exactly:
               ),
             ],
 
-            // ── 첫 화면 ── 메뉴 밑에 Start 하나. 여기서 한 바퀴가 열린다.
-            if (!started) ...[
-              const SizedBox(height: 14),
-              _p3PrimaryButton('▶ Start', () => unawaited(_startP3Speaking())),
-              const SizedBox(height: 14),
-            ],
+            // ── Start ── 메뉴 밑에 늘 있다. 첫 화면이면 여기서 한 바퀴가
+            //   열리고, 한 바퀴 돌린 뒤에는 고른 그대로 다시 돌린다.
+            //   도는 중에는 잠근다 — 모드·보이스와 같은 규칙이다.
+            const SizedBox(height: 14),
+            _p3PrimaryButton(
+              started ? '▶ Start again' : '▶ Start',
+              _p3Busy ? null : () => unawaited(_startP3Speaking()),
+            ),
+            const SizedBox(height: 14),
 
             // ── 연습칸 ── 시작한 뒤에만. 메뉴 아래로 이어 붙는다.
             if (started)
@@ -7446,8 +7451,10 @@ RULES — follow exactly:
     );
   }
 
-  Widget _buildP3VoiceSelector({required bool started}) {
-    final enabled = !started && !_p3Busy;
+  /// 목소리는 모드와 같은 규칙으로 연다 — 한 바퀴가 끝난 뒤에도 바꿀 수 있고,
+  /// 바꾸면 그 자리에서 다시 시작한다. 도는 중에만 잠근다.
+  Widget _buildP3VoiceSelector() {
+    final enabled = !_p3Busy;
     final List<String> voices = _p3VoiceChoices;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -7477,7 +7484,7 @@ RULES — follow exactly:
             Expanded(
               child: _buildP3VoiceChip(
                 id: voices[i],
-                label: _p3VoiceLabel(voices[i]),
+                label: voices[i],
                 enabled: enabled,
               ),
             ),
@@ -7491,12 +7498,6 @@ RULES — follow exactly:
   List<String> get _p3VoiceChoices => _p3PracticeMode == P3PracticeMode.echoing
       ? _kP3EchoingVoices
       : _kP3ShadowingVoices;
-
-  /// 쉐도잉은 이름만 보여 준다 — 성별 표기는 에코잉 둘에만 남는다.
-  String _p3VoiceLabel(String voice) {
-    if (_p3PracticeMode != P3PracticeMode.echoing) return voice;
-    return voice == 'cedar' ? 'cedar (M)' : 'marin (F)';
-  }
 
   /// 모드를 바꾸면 목소리도 그 모드의 것으로 맞춘다. 남의 모드 목소리가 그대로
   /// 남으면 어느 칸도 켜지지 않은 채 그 목소리로 소리가 난다.
@@ -7519,7 +7520,7 @@ RULES — follow exactly:
   }) {
     final bool selected = _p3Voice == id;
     return InkWell(
-      onTap: enabled ? () => _selectP3Voice(id) : null,
+      onTap: enabled ? () => unawaited(_selectP3Voice(id)) : null,
       borderRadius: BorderRadius.circular(9),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
@@ -7559,13 +7560,23 @@ RULES — follow exactly:
   /// 목소리를 바꾸면 만들어 둔 소리와 호흡 경계는 버린다 — 그 목소리로 뜬
   /// 파형이라 다음 재생이 어긋난다. 캐시는 목소리별로 나뉘어 있어 되돌아오면
   /// 다시 받지 않는다.
-  void _selectP3Voice(String voice) {
-    if (voice == _p3Voice) return;
+  ///
+  /// 이미 한 바퀴 돌린 뒤라면 모드를 바꿀 때와 똑같이 **그 자리에서 다시
+  /// 시작한다.** 고르기만 하고 아무 일도 안 일어나면 바뀐 줄 모른다.
+  Future<void> _selectP3Voice(String voice) async {
+    if (_p3Busy || voice == _p3Voice) return;
+    final bool wasStarted = _p3Stage != P3Stage.idle;
+    await _stopP3Shadowing(resetSelection: true);
+    if (!mounted || _phase != ShadowingPhase.chunkPractice) return;
     setState(() {
       _p3Voice = voice;
       _p3FullPcm = null;
       _p3Segments = const <BreathSegment>[];
+      _p3Stage = P3Stage.idle;
+      _p3Error = null;
+      _p3UserSpeaking = false;
     });
+    if (wasStarted) await _startP3Speaking();
   }
 
   Widget _buildP3PracticeModePicker() {
