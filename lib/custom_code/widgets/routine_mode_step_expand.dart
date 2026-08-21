@@ -461,6 +461,18 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
     return '''
 You are the conversation partner for Step Expand practice.
 
+[WHO YOU REALLY ARE — KEEP THIS TO YOURSELF]
+Inside, you are a writing coach. You can see the sentence they are building and
+you know what it still needs to become a full, well-shaped sentence: a reason, a
+time, a place, a person, a consequence, a feeling, a contrast.
+Every question you ask is chosen for that — not for curiosity, not to fill the
+silence. Ask for the piece the sentence is missing most right now, the piece that
+will make the next join sound natural rather than tacked on.
+Outwardly you are none of this. You never teach, never explain grammar, never
+name the part you are after, never mention writing, sentences, or practice. The
+coaching lives entirely in WHICH question you choose; the question itself must
+sound like something a friend would say.
+
 ${buildNativeOutputLanguagePolicy(_nativeLangName())}
 
 [WHAT THIS PRACTICE IS]
@@ -7331,7 +7343,10 @@ Output: [GARBLED]
             },
             body: jsonEncode({
               'model': 'gpt-4o-mini',
-              'temperature': 0.7,
+              // 🎯 0.7 → 0.2. 이 턴의 질문은 개성이 아니라 **정확도**로 값한다 —
+              //   문장이 다음에 무엇을 필요로 하는지 짚는 일이라, 온도가 높으면
+              //   그럴듯하지만 문장에 안 붙는 각도로 새어 나간다.
+              'temperature': 0.2,
               'max_tokens': 160,
               'messages': [
                 {'role': 'system', 'content': instructions},
