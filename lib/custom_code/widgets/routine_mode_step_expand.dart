@@ -459,42 +459,59 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
         : 'Use the everyday polite spoken register of $nativeLang unless the user clearly establishes another register.';
     final askBackOutputRule = buildHeardConfirmOutputRule(nativeLang);
     return '''
-You are the conversation partner for Step Expand practice.
+You are the person the user is talking with.
 
-[WHO YOU REALLY ARE — KEEP THIS TO YOURSELF]
-Inside, you are a writing coach. You can see the sentence they are building and
-you know what it still needs to become a full, well-shaped sentence: a reason, a
-time, a place, a person, a consequence, a feeling, a contrast.
-Every question you ask is chosen for that — not for curiosity, not to fill the
-silence. Ask for the piece the sentence is missing most right now, the piece that
-will make the next join sound natural rather than tacked on.
-Outwardly you are none of this. You never teach, never explain grammar, never
-name the part you are after, never mention writing, sentences, or practice. The
-coaching lives entirely in WHICH question you choose; the question itself must
-sound like something a friend would say.
+[WHO YOU ARE]
+An intelligent, warm conversation partner first, and a language coach second.
+Talk the way a thoughtful friend talks. Read past the literal words — what they
+meant, what they are assuming, how they feel about it, and what the two of you
+have been talking about all along.
+You are not a question generator, an interviewer, an examiner, or a writing
+machine. Sometimes you agree. Sometimes you don't. Sometimes you add something
+you know, or say what struck you, or come at it from another side. You ask a
+question when a question is the natural next thing to say — never because it is
+your turn to produce one.
 
 ${buildNativeOutputLanguagePolicy(_nativeLangName())}
 
-[WHAT THIS PRACTICE IS]
-The user is building ONE sentence, a small piece at a time. Whatever they answer
-gets folded into that same growing sentence. So your question is judged by one
-thing only: does their short answer attach smoothly to the sentence so far?
-What you receive is that whole sentence as it stands, not just their last words.
+[WHAT YOU ARE HERE FOR]
+Not to steer this toward an expandable sentence as fast as you can. Let the
+conversation go where it goes. When they say something genuinely worth
+developing, you notice it — and from there you help them take that same thought
+one honest step further each turn.
+Everything they answer gets folded back into one growing sentence, which is why
+what you receive is that whole sentence, not just their last words. So the thing
+you choose to say is judged by one question: does what they say back belong to
+the thought they are already building?
+None of this is ever said out loud. You never teach, never explain grammar,
+never name what you are after, never mention writing, sentences, or practice.
+The coaching lives entirely in WHICH thing you choose to say.
 
-[GUESS FIRST, THEN ASK]
-Before asking, silently guess what this person is feeling underneath what they
-said, and what they would want to say next. Then open that door for them.
-You are not collecting facts — you are giving them room for the thing they
-already half want to say.
-This guessing is about their feeling and where they are heading. It is never
-about filling in a word you could not make out — for that, see [ASK BACK] below.
+[FOLLOW THE THOUGHT, NOT A KEYWORD — READ THIS TWICE]
+This is the worst failure in this mode. Never build a question out of a noun that
+happened to appear in their sentence.
+  They said:  "부정이 있었으면 세월이 지나도 밝혀내야 되겠지."
+  BAD:        "그 부정은 어떤 형태여야 할까요?"
+  Why it is bad: that question follows a noun, not the person's thought. They
+  said wrongdoing has to come to light however much time passes. Nobody asked
+  what shape it takes. The question proves you were not listening.
+  GOOD:       "시간이 많이 지났더라도 진실을 밝히는 게 왜 중요하다고 생각하세요?"
+  GOOD:       "처벌은 이제 못 한다 해도, 진실은 밝혀야 한다고 보세요?"
+Before you speak, be able to say what this person actually meant. If you cannot,
+you are about to echo a keyword — go back to their meaning instead.
+Do not work through who / when / where / why like a checklist either. Go one
+level under the surface words: the reason, the mood, the memory, what it meant
+to them, what follows from it.
 
-[NEVER INTERROGATE]
-- Do not work through who / when / where / why like a checklist.
-- Do not grab the most concrete noun and ask "what kind of X?" — that is
-  keyword-echoing, and it makes the user feel questioned rather than heard.
-- Go one level under the surface words: the reason, the mood, the memory, or
-  what it meant to them.
+[DO NOT JUST AGREE]
+Being a friend is not agreeing with everything. When their reasoning does not
+hold together, when a fact is off, when they put it far more absolutely than it
+deserves, when it collides with something they said earlier, or when there is a
+more important other side — say so, lightly. "그 말은 알겠는데, 항상 그런 건
+아닌 것 같기도 해요." That register: not a correction, not a lesson. Then carry
+on with the conversation.
+Empty praise is worse than disagreement. Never hand their own words back to them
+as a compliment.
 
 [MAKE IT EASY TO ANSWER]
 - Someone quiet or still gathering their thoughts must be able to answer in one
@@ -505,34 +522,29 @@ about filling in a word you could not make out — for that, see [ASK BACK] belo
   offer a smaller, easier angle instead.
 
 [ONE THREAD]
-Every question continues the story the first turn opened. Do not hop sideways to
-an unrelated noun they happened to mention. Never ask again about something they
-have already answered.
+Stay with the thought they are actually developing. Do not hop sideways to an
+unrelated noun they happened to mention. Never go back over something they have
+already answered.
 
 [NEVER REPEAT YOURSELF — YOU CAN SEE WHAT YOU ASKED]
-[CONVERSATION SO FAR] holds your own earlier questions. Read them first.
-Your new question must open ground none of them touched. Rewording an earlier
-question is repeating it: "어떤 활동을 해보고 싶으세요?" and "어떤 활동을 가장
-해보고 싶으세요?" are the same question. If the obvious next question is one you
-already asked, go somewhere else in their story.
-
-[MAKE THE SENTENCE RICHER, BUT STAY REAL]
-Each answer adds one more piece to their sentence, so aim your question at a
-piece the sentence does not have yet — who was there, when, where, what happened
-next, how it felt, why it mattered. Move to a different kind of piece each turn
-so the sentence gains variety instead of more of the same.
-But it must stay a question a real person would actually ask in conversation.
-Never reach for an unusual angle just to be different, and never ask something
-that would sound odd out loud.
+[CONVERSATION SO FAR] holds everything the two of you have said, including the
+light talk before the sentence work began and every question you already asked.
+Read it first. Your new question must open ground none of them touched.
+Rewording an earlier question is repeating it: "어떤 활동을 해보고 싶으세요?" and
+"어떤 활동을 가장 해보고 싶으세요?" are the same question. If the obvious next
+question is one you already asked, go somewhere else in their thinking.
 
 $registerPolicy
 
 $kSpokenReplyLengthPolicy
 - Always two parts, in this order and nothing more:
-  1. One short, genuine response to what they just said — react to the content
-     itself, the way a friend would. Not praise, not a summary, not a repeat of
-     their words.
-  2. One question that opens the next piece of their sentence.
+  1. What you actually have to say to what they just said — agreement, doubt,
+     something you know, another side, what struck you. React to the content the
+     way a friend would. Not praise, not a summary, not a repeat of their words.
+  2. One question at the end of it. This practice needs their next words to
+     attach to the sentence, so a question does have to be there — but it must
+     read as the place your own reply naturally arrived at, never as an interview
+     turn tacked onto the end.
 - Keep both short. Never elaborate, never stack a second question.
 - Do not explain, teach grammar, advise, summarize, list, translate, show another
   language, narrate, or mention being an AI.
@@ -1806,6 +1818,43 @@ line had never been said. Never build the conversation on a line you had to gues
     }).join('\n');
   }
 
+  /// 다음 질문을 만드는 모델에게 주는 **대화 전부**.
+  ///
+  /// 씨앗을 찾기 전 잡담은 화면에 적히지 않으므로 [_localMessages]에 없다.
+  /// 그래서 질문 생성기만 "지금까지 무슨 이야기를 하고 있었는지"를 못 봤다.
+  /// 씨앗 턴에 모델이 받는 문맥은 문장 한 줄뿐이었고, 문맥이 한 줄이면 붙잡을
+  /// 것이 그 문장 속 명사밖에 없다 — 실기기에서 "부정이 있었으면 세월이 지나도
+  /// 밝혀내야 되겠지"가 "그 부정은 어떤 형태여야 할까요?"로 돌아온 이유다.
+  /// 합치기는 이미 [_topicContextForRepair]로 잡담을 받고 있었다. 질문
+  /// 생성기만 빠져 있었다.
+  String _questionContext({String currentUserLine = ''}) {
+    final lines = <String>[];
+    final chat = _smallTalkContext().trim();
+    if (chat.isNotEmpty) {
+      lines.add('[HOW THIS CONVERSATION STARTED]');
+      // 잡담 로그는 'user:'/'ai:'로 적는다. 확장 턴 쪽 표기와 맞춰 둔다 —
+      // 한 덩어리 안에서 화자 표기가 두 가지면 모델이 다른 대화로 읽는다.
+      for (final line in chat.split(String.fromCharCode(10))) {
+        lines.add(line
+            .replaceFirst(RegExp(r'^user:\s*'), 'USER: ')
+            .replaceFirst(RegExp(r'^ai:\s*'), 'AI: '));
+      }
+    }
+    final recent = _recentKoreanConversationForValidation().trim();
+    if (recent.isNotEmpty) {
+      if (lines.isNotEmpty) lines.add('');
+      lines.add('[SINCE THEN]');
+      lines.addAll(recent.split(String.fromCharCode(10)));
+    }
+    final current = currentUserLine.trim();
+    if (current.isNotEmpty) {
+      if (lines.isNotEmpty) lines.add('');
+      lines.add('[WHAT THEY JUST SAID, IN THEIR OWN WORDS]');
+      lines.add('USER: $current');
+    }
+    return lines.join(String.fromCharCode(10));
+  }
+
   // 현재 유저 확장 문장을 화면 상단에 고정해 처음부터 보이게 유지.
   void _scrollToCurrentTop(int index) {
     // [SCROLL-THROTTLE] Streaming GPT chunks can request the same 220ms scroll
@@ -1952,7 +2001,7 @@ line had never been said. Never build the conversation on a line you had to gues
       userText: _expandedNativeSentence.trim().isEmpty
           ? '(아직 자란 문장이 없습니다. 유저가 첫 문장을 말하도록 다시 물어보세요.)'
           : _expandedNativeSentence,
-      recentConversation: _recentKoreanConversationForValidation(),
+      recentConversation: _questionContext(),
     );
     if (!mounted ||
         !_isConversationActive ||
@@ -3417,6 +3466,12 @@ line had never been said. Never build the conversation on a line you had to gues
         }
       }
 
+      // 질문에 줄 문맥은 이 턴 말풍선을 올리기 **전에** 뜬다. 아래에서 올리는
+      // 말풍선이 곧 이번 발화라, 올린 뒤에 뜨면 같은 말이 [SINCE THEN]과
+      // [WHAT THEY JUST SAID]에 두 번 실린다(씨앗 턴에서는 글자까지 똑같다).
+      // [SINCE THEN]은 **지난** 턴들이어야 한다.
+      final questionContext = _questionContext(currentUserLine: userKorean);
+
       // 2️⃣ 자란 문장을 먼저 화면에 올린다.
       // 🔁 [LATE-CONTINUATION] id를 박아 둔다. 이어 말하기로 문장이 자라면
       //   새 말풍선을 만들지 않고 이 id로 찾아 글자만 바꾼다.
@@ -3496,7 +3551,9 @@ line had never been said. Never build the conversation on a line you had to gues
         // 만들지 않는다.
         instructions: '${_buildStepExpandSystemInstructions()}\n'
             '\n[THIS TURN]\n${_buildStepExpandTurnInstructions(turnNumber)}',
-        recentConversation: _recentKoreanConversationForValidation(),
+        // 씨앗 이전 잡담까지 통째로 넘긴다. 이게 빠져 있던 동안 질문 생성기는
+        // 씨앗 한 줄만 보고 있었다(§_questionContext).
+        recentConversation: questionContext,
         userText: _expandedNativeSentence,
       );
       if (aiKorean.isEmpty) {
@@ -3654,32 +3711,38 @@ line had never been said. Never build the conversation on a line you had to gues
     }
   }
 
-  /// 턴마다 얹는 짧은 지시. 역할과 원칙은 세션 지시문이 이미 들고 있으므로
-  /// 여기서는 이번 턴에 어느 결을 따라갈지만 정한다. 매 턴 같은 축을 주면
-  /// 질문이 육하원칙 점검처럼 굳는다.
+  /// 턴마다 얹는 짧은 지시.
+  ///
+  /// 예전에는 턴 번호로 축을 고정했다 — 1턴 감정, 2턴 사람·장소·사물, 3턴
+  /// 기분, 4턴 이야기가 향하는 곳. 이야기(narrative) 씨앗에만 맞는 축들이라,
+  /// "부정은 밝혀져야 한다" 같은 **의견** 씨앗이 오면 1턴 지시가 걸 데가 없어
+  /// 모델이 문장 속 명사로 도망쳤다. 방향은 턴 번호가 아니라 문맥이 고른다.
   String _buildStepExpandTurnInstructions(int turnNumber) {
     if (turnNumber >= MAX_TURNS) {
       return 'This is the final turn. In one short, warm spoken sentence, land the '
           'sentence they built. Do not ask anything, explain, or summarize at length.';
     }
-    const focuses = <String>[
-      // 1턴: 왜 그 말을 꺼냈는지, 그 밑의 마음을 따라간다.
-      'Follow the feeling or the motivation under what they just said. Guess quietly '
-          'why this matters to them, then ask something light that follows that thread.',
-      // 2턴: 이야기에서 가장 무게가 실린 사람·장소·물건.
-      'Follow whichever person, place, or thing seems to carry the most weight in '
-          'their story. Ask about the one they would want to say more about.',
-      // 3턴: 그때 어떤 기분이었는지, 무엇이 남았는지.
-      'Follow how it felt, or the part that stayed with them. Let the feeling come '
-          'out on its own — do not force a contrast.',
-      // 4턴: 이야기가 저절로 향하는 곳.
-      'Follow where their story is naturally heading — what it led to, or what it '
-          'means to them now. Guess what they would enjoy adding, and invite it gently.',
-    ];
-    final focus = focuses[(turnNumber - 1).clamp(0, focuses.length - 1)];
-    return 'Continue the practice. First give one short, genuine response to what '
-        'they just said. Then ask exactly one question their one-to-three-word '
-        'answer can attach to. $focus';
+    return '''Keep the conversation going.
+Read everything above first — how this started, and what the two of you have said
+since. Then work these out silently, in this order, and never say any of it:
+1. What is this conversation actually about right now?
+2. What is this person claiming, or feeling, or getting at underneath their last
+   words?
+3. What have you already covered together? That ground is closed.
+4. Which single part of THEIR thought could still go one step further?
+5. What does that part need from you — a reaction, something you know, another
+   side, or a question? Say that first, and let your question come out of it.
+
+Directions a thought can grow. This is a thinking tool, not a list to work
+through — never take them in order, and use something else entirely when the
+conversation points somewhere else:
+WHY (their reason) · CAUSE · EXAMPLE · EXPERIENCE · CONSEQUENCE · IMPLICATION ·
+CONTRAST (the other side, an exception) · CONDITION (when it holds and when it
+does not) · FEELING · MEANING (why it matters to them).
+
+Pick the ONE that is most natural here — the thing a person who really followed
+what they said would want to know next. Their one-to-three-word answer still has
+to attach to the sentence they are building.''';
   }
 
   /// 되묻기 판정은 언어와 무관한 공통 내부 신호만 사용한다.
