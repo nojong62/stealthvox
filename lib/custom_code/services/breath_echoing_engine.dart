@@ -11,6 +11,7 @@
 //   [stop]에서 반드시 놓는다.
 
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
@@ -39,6 +40,8 @@ class BreathEchoTiming {
     this.noSpeechGiveUpMs = 8000,
     this.betweenBreathsMs = 250,
     this.repeatGapMs = 400,
+    this.streamStallMs = 1200,
+    this.echoHardCapMs = 12000,
   });
 
   /// 유저가 말을 멈춘 뒤 다음 호흡으로 넘어가기까지. 기존 앱 값(1,500ms)에서
@@ -54,11 +57,22 @@ class BreathEchoTiming {
   /// 두 번 말하기에서 듣기 재생과 다시 재생 사이.
   final int repeatGapMs;
 
+  /// 마이크에서 조각이 이만큼 안 오면 "조용한" 것이 아니라 **스트림이 멎은**
+  /// 것으로 본다. 정상 캡처에서는 20~100ms마다 조각이 온다.
+  final int streamStallMs;
+
+  /// 한 호흡의 캡처가 아무리 길어도 여기서 끊는다. 실측(2026-08-21)에서
+  /// 유저 발성까지 잡아 놓고 99초가 지나도 안 끝난 호흡이 나왔다 — 소음이
+  /// [userSilenceMs]만큼의 정적을 계속 밀어내면 끝낼 방법이 없었다.
+  final int echoHardCapMs;
+
   BreathEchoTiming copyWith({int? userSilenceMs}) => BreathEchoTiming(
         userSilenceMs: userSilenceMs ?? this.userSilenceMs,
         noSpeechGiveUpMs: noSpeechGiveUpMs,
         betweenBreathsMs: betweenBreathsMs,
         repeatGapMs: repeatGapMs,
+        streamStallMs: streamStallMs,
+        echoHardCapMs: echoHardCapMs,
       );
 }
 
@@ -216,7 +230,8 @@ class BreathEchoingEngine {
     if (!_alive(generation)) return;
     _running = false;
     onPhase(BreathEchoPhase.completed, _segments.length, _segments.length);
-    onLineComplete(List<Uint8List?>.from(_userPcm), List<int>.from(_userVoicedMs));
+    onLineComplete(
+        List<Uint8List?>.from(_userPcm), List<int>.from(_userVoicedMs));
   }
 
   bool _alive(int generation) => _running && generation == _generation;
@@ -228,8 +243,8 @@ class BreathEchoingEngine {
 
   // ── AI 구간 재생 ──────────────────────────────────────────────
   Future<void> _playSegment(BreathSegment segment, int generation) async {
-    final wav = sliceToWav(_aiPcm, segment,
-        sampleRate: analysisConfig.sampleRate);
+    final wav =
+        sliceToWav(_aiPcm, segment, sampleRate: analysisConfig.sampleRate);
     final player = AudioPlayer();
     _player = player;
     final completer = Completer<void>();
@@ -276,6 +291,22 @@ class BreathEchoingEngine {
     final done = Completer<void>();
     _captureDone = done;
 
+    // ⏱️ 프레임 수로만 재면 마이크가 멎었을 때 시간이 멈춘다. 벽시계를 따로
+    //   들고 간다 — 아래 판정 셋이 전부 이 시계를 본다.
+    final DateTime startedAt = DateTime.now();
+    DateTime lastChunkAt = startedAt;
+
+    // 이 호흡을 붙잡고 있을 수 있는 최대 시간. AI가 길게 읽었으면 따라 하는
+    // 데도 그만큼 걸리므로 호흡 길이를 반영하되, 어디서도 echoHardCapMs를
+    // 넘지 않는다.
+    final int maxCaptureMs = math.min(
+      timing.echoHardCapMs,
+      math.max(
+        timing.noSpeechGiveUpMs,
+        segment.durationMs * 2 + timing.userSilenceMs + 1500,
+      ),
+    );
+
     try {
       final stream = await recorder.startStream(
         RecordConfig(
@@ -289,9 +320,15 @@ class BreathEchoingEngine {
         return;
       }
       bool announcedSpeaking = false;
+      // 첫 조각이 오기 전에는 "멎었다"고 볼 수 없다. 스트림을 연 직후에는
+      // 기기에 따라 1초 넘게 조용할 수 있는데, 그걸 정지로 읽으면 첫 호흡을
+      // 통째로 건너뛴다.
+      bool gotAnyChunk = false;
       _micSub = stream.listen(
         (data) {
           if (!_alive(generation)) return;
+          gotAnyChunk = true;
+          lastChunkAt = DateTime.now();
           capture.add(data);
           meter.add(data);
           if (meter.hasSpoken && !announcedSpeaking) {
@@ -314,10 +351,31 @@ class BreathEchoingEngine {
           if (!done.isCompleted) done.complete();
           return;
         }
-        final bool finished = meter.hasSpoken
+        final DateTime now = DateTime.now();
+        final int wallMs = now.difference(startedAt).inMilliseconds;
+        final int sinceChunkMs = now.difference(lastChunkAt).inMilliseconds;
+
+        // ① 평소 경로 — 말을 했으면 정적 1.5초, 아니면 벽시계로 8초.
+        //    없던 시절 `meter.elapsedMs`로 재던 것을 벽시계로 옮겼다. 조각이
+        //    안 오면 그 값이 멈춰, 8초가 영영 오지 않았다.
+        final bool quiet = meter.hasSpoken
             ? meter.trailingSilenceMs >= timing.userSilenceMs
-            : meter.elapsedMs >= timing.noSpeechGiveUpMs;
-        if (finished) {
+            : wallMs >= timing.noSpeechGiveUpMs;
+
+        // ② 스트림이 멎었다 — 조용한 게 아니라 조각 자체가 안 온다.
+        //    한 번이라도 받아 본 뒤에만 따진다(위 gotAnyChunk 주석 참고).
+        final bool stalled =
+            gotAnyChunk && sinceChunkMs >= timing.streamStallMs;
+
+        // ③ 마지막 빗장 — 소음이 정적을 계속 밀어내도 여기서 끊는다.
+        final bool overCap = wallMs >= maxCaptureMs;
+
+        if (quiet || stalled || overCap) {
+          if (!quiet) {
+            debugPrint('[BREATH-ECHO] watchdog breath=$_index '
+                'wall=${wallMs}ms sinceChunk=${sinceChunkMs}ms '
+                'cap=${maxCaptureMs}ms reason=${stalled ? 'stalled' : 'cap'}');
+          }
           timer.cancel();
           if (!done.isCompleted) done.complete();
         }
