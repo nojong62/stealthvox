@@ -640,7 +640,7 @@ Return ONLY valid JSON: {"name":"..."}.
                               '창의적이고 구체적인 역할과 상황을 무한히 추천받고, 현실감 넘치는 실전 비즈니스 및 일상 회화를 연습합니다.'),
                           const Divider(color: Colors.white12, height: 24),
                           _buildManualItem('Step Expand', '점진적 문장 확장',
-                              '짧은 기초 문장부터 시작해, AI의 날카로운 질문에 대답하며 점점 길고 세련된 문장 구조를 만들어가는 집중 훈련입니다.'),
+                              'AI가 오늘의 뉴스나 가벼운 이야기로 먼저 말을 겁니다. 편하게 주고받다 보면 AI가 그중에서 씨앗문장이 될 만한 당신의 한마디를 찾아냅니다. 그 순간부터 그 문장이 화면에 적히고, 이어지는 질문에 답할 때마다 문장이 한 조각씩 자라 다섯 번 만에 길고 세련된 한 문장으로 완성됩니다. 씨앗을 찾기 전 잡담은 화면에 적히지 않습니다.'),
                           const Divider(color: Colors.white12, height: 32),
                           _buildSessionLegend(),
                           const Divider(color: Colors.white12, height: 32),

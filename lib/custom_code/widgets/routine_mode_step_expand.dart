@@ -108,6 +108,22 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
   // 상단 언어 버튼을 누르면 실제 한국어 대화도 함께 확인할 수 있다.
   bool _showOriginal = false;
   int _turnCounter = 0;
+
+  /// 🌱 [SEED-PHASE] 씨앗을 아직 못 찾았으면 잡담 구간이다.
+  ///
+  /// 이 구간에서는 **아무 말도 글로 적지 않는다** — 화면에도, 히스토리에도
+  /// 남기지 않고 턴 번호도 먹지 않는다. 씨앗이 잡히는 순간 그 문장 하나가
+  /// 화면에 적히고, 5턴 사다리는 거기서부터 선다.
+  bool _seedFound = false;
+
+  /// 잡담 구간에서 오간 말. 글로 안 적는 대신 여기에만 쌓아 다음 턴의 문맥으로
+  /// 쓴다. 방을 나가면 사라진다 — 저장되는 것은 씨앗부터다.
+  final List<String> _smallTalkLog = <String>[];
+
+  /// 구글 뉴스 헤드라인. 방에 들어올 때 한 번 받아 잡담 재료로 쓴다.
+  /// 못 받으면 빈 목록이고, 그때는 뉴스 없이 일상 화제로 연다.
+  List<String> _newsHeadlines = const <String>[];
+
   String? _pendingHeardConfirmation;
   int _heardConfirmationAttempts = 0;
   String? _sessionDocId; // 🔧 [v3 추가] 첫 대화 후 세션 ID (클론 변경 시 null 리셋)
@@ -838,10 +854,15 @@ line had never been said. Never build the conversation on a line you had to gues
     if (_hasSpokenOpening || !mounted) return;
     _hasSpokenOpening = true;
     final nativeLang = _nativeLangName();
+    // 📰 구글 뉴스를 잠깐 보고 온다. 못 받아 오면 빈 목록이고, 그때는 뉴스
+    //   없이 일상 화제로 연다 — 소식이 없다고 대화가 멈추면 안 된다.
+    _newsHeadlines = await StepExpandBrain.fetchNewsHeadlines(nativeLang);
+    _log('📰 [NEWS]', 'headlines=${_newsHeadlines.length}');
     final opening = await StepExpandBrain.generateOpening(
       apiKey: _openAiKey,
       languageName: nativeLang,
       fallback: nativeLang == 'Korean' ? _openingNudgeText : '',
+      headlines: _newsHeadlines,
     );
     // 문구를 기다리는 동안 유저가 먼저 입을 열었으면 첫 마디는 접는다.
     if (!mounted ||
@@ -854,16 +875,69 @@ line had never been said. Never build the conversation on a line you had to gues
       _log('🗣️ [OPENING-SKIP]', '유저가 먼저 말함 → 첫 마디 생략');
       return;
     }
-    setState(() {
-      _localMessages.add(<String, dynamic>{
-        'role': 'SYSTEM',
-        'target': opening,
-        'original': '',
-      });
-    });
-    _scrollToBottom();
+    // 🌱 첫 마디도 글로 적지 않는다. 여기는 아직 잡담 구간이다.
+    _rememberSmallTalk('ai', opening);
     _log('🗣️ [OPENING]', 'model=gpt-4o-mini len=${opening.length}');
     await _speakLiveKorean(opening);
+  }
+
+  void _rememberSmallTalk(String who, String text) {
+    if (text.trim().isEmpty) return;
+    _smallTalkLog.add('$who: ${text.trim()}');
+    // 잡담이 길어져도 프롬프트는 최근 것만 본다. 오래된 말까지 실어 보내면
+    // 토큰만 먹고 AI가 이미 지나간 화제로 되돌아간다.
+    while (_smallTalkLog.length > 10) {
+      _smallTalkLog.removeAt(0);
+    }
+  }
+
+  String _smallTalkContext() => _smallTalkLog.join(String.fromCharCode(10));
+
+  /// 🌱 잡담 한 턴. 씨앗을 찾으면 **그 문장**을, 아직이면 null을 돌려준다.
+  ///
+  /// 씨앗을 못 찾은 턴은 어디에도 남지 않는다 — 말풍선도, 히스토리도, 턴
+  /// 번호도 그대로다. AI 대답은 소리로만 나가고 마이크를 다시 연다.
+  Future<String?> _runSmallTalkTurn(
+    String userNative, {
+    required int generation,
+  }) async {
+    if (mounted) {
+      setState(
+          () => _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP'));
+    }
+    _rememberSmallTalk('user', userNative);
+    final result = await StepExpandBrain.smallTalkTurn(
+      apiKey: _openAiKey,
+      languageName: _nativeLangName(),
+      userText: userNative,
+      recentConversation: _smallTalkContext(),
+      headlines: _newsHeadlines,
+    );
+    if (!mounted ||
+        generation != _pipelineGeneration ||
+        !_isConversationActive) {
+      return null;
+    }
+    final seed = (result['seed'] ?? '').trim();
+    if (seed.isNotEmpty) {
+      _log('🌱 [SEED-FOUND]',
+          'len=${seed.length} smallTalkLines=${_smallTalkLog.length}');
+      return seed;
+    }
+    final reply = (result['reply'] ?? '').trim();
+    if (reply.isNotEmpty) {
+      _rememberSmallTalk('ai', reply);
+      await _speakLiveKorean(reply);
+    } else {
+      // 말도 판정도 못 받았다(네트워크·형식 실패). 대화를 세우지는 않는다 —
+      // 조용히 다시 듣고 다음 발화에서 이어 간다.
+      _log('🌱 [SMALLTALK-EMPTY]', 'reply_and_seed_both_empty');
+    }
+    if (!mounted || generation != _pipelineGeneration) return null;
+    if (_isConversationActive && !_isSessionComplete) {
+      await _startUserListening();
+    }
+    return null;
   }
 
   // ====================================================================
@@ -1020,6 +1094,8 @@ line had never been said. Never build the conversation on a line you had to gues
         _sessionDocId = null;
         _myHistoryRef = null; // 🔧 [히스토리] 새 방 생성 준비
         _hasSpokenOpening = false; // 새 주제 진입 시 첫 마디 다시 건넨다
+        _seedFound = false; // 잡담부터 다시 시작한다
+        _smallTalkLog.clear();
         _isSessionComplete = false;
         _isPolishing = false;
         _polishedSentence = "";
@@ -1057,6 +1133,8 @@ line had never been said. Never build the conversation on a line you had to gues
         _sessionDocId = null;
         _myHistoryRef = null; // 🔧 [히스토리] 새 방 생성 준비
         _hasSpokenOpening = false; // 새 문장 진입 시 첫 마디 다시 건넨다
+        _seedFound = false;
+        _smallTalkLog.clear();
         _isSessionComplete = false;
         _isPolishing = false;
         _polishedSentence = "";
@@ -2674,6 +2752,8 @@ line had never been said. Never build the conversation on a line you had to gues
     _streamingDeltaBuffer.write(delta);
     final preview = _streamingDeltaBuffer.toString().trim();
     if (preview.isEmpty) return;
+    // 🌱 씨앗을 찾기 전까지는 글로 적지 않는다. 잡담은 소리로만 오간다.
+    if (!_seedFound) return;
     setState(() {
       _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
       _localMessages.add(<String, dynamic>{
@@ -3012,6 +3092,17 @@ line had never been said. Never build the conversation on a line you had to gues
       _log('🟠 [FAST-DISSATISFIED]', '질문 불만 감지 → 직전 질문 교체');
       await _replaceLastQuestion(generation: generation);
       return;
+    }
+
+    // 🌱 [SEED-PHASE] 아직 씨앗이 없다면 여기는 잡담 구간이다. 이 말은 화면에도
+    //   히스토리에도 남기지 않고, 씨앗이 될 만한지만 조용히 본다. 씨앗을
+    //   찾으면 그 문장이 곧 이 세션의 첫 문장이 되어 아래 정상 경로로 간다.
+    if (!_seedFound) {
+      final seed = await _runSmallTalkTurn(userKorean, generation: generation);
+      if (!mounted || generation != _pipelineGeneration) return;
+      if (seed == null) return;
+      _seedFound = true;
+      userKorean = seed;
     }
 
     // 🗣️ 방금 한 말을 검증·합치기보다 먼저 띄운다. 둘 다 gpt-4o-mini 왕복이라
@@ -3968,6 +4059,18 @@ line had never been said. Never build the conversation on a line you had to gues
     }
     _logProbeTiming('PIPELINE_START');
     resetBillingIdle();
+    // 🌱 [SEED-PHASE] 폴백 통로에서도 규칙은 같다 — 씨앗을 찾기 전까지는
+    //   잡담이고, 화면에도 히스토리에도 아무것도 적지 않는다. 턴도 안 먹는다.
+    if (!_seedFound) {
+      final seed = await _runSmallTalkTurn(
+        finalTranscript.trim(),
+        generation: pipelineGeneration,
+      );
+      if (!mounted || pipelineGeneration != _pipelineGeneration) return;
+      if (seed == null) return;
+      _seedFound = true;
+      finalTranscript = seed;
+    }
     _turnCounter++;
     final int currentTurnId = _turnCounter;
     _log('🧠 [PIPE-01]',
@@ -7238,18 +7341,72 @@ Output: [GARBLED]
   }
 
   // ==================================================================
-  // 📦 [OPENING] 진입 첫 마디 — gpt-4o-mini가 한국어 한 문장으로 만든다.
+  // 📰 [NEWS] 구글 뉴스를 잠깐 보고 온다.
   // ------------------------------------------------------------------
-  // 고정 문구를 그대로 읽던 자리다. 매번 같은 말이면 대화가 아니라 안내문으로
-  // 들려서, 첫 마디부터 사람이 건네는 말이 되게 모델에 맡긴다.
-  // 실패하면 기존 고정 문구로 떨어진다 — 첫 소리는 무슨 일이 있어도 난다.
+  // 모델은 최신 소식을 모른다 — 학습 시점이 지났고 이 앱은 웹을 보지 않는다.
+  // 그냥 "요즘 뉴스"를 말하라고 하면 그럴듯하게 **지어낸다.** 그래서 실제
+  // 헤드라인을 가져와 재료로 넘긴다. 못 가져오면 빈 목록을 주고, 그때는
+  // 뉴스 없이 일상 화제로 연다 — 소식이 없다고 대화가 멈추면 안 된다.
+  //
+  // 공개 RSS라 키가 없다. 응답이 느릴 수 있으므로 상한을 짧게 잡는다.
+  // ==================================================================
+  static const Map<String, String> _kNewsFeedByLanguage = <String, String>{
+    'Korean': 'https://news.google.com/rss?hl=ko&gl=KR&ceid=KR:ko',
+    'English': 'https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en',
+    'Japanese': 'https://news.google.com/rss?hl=ja&gl=JP&ceid=JP:ja',
+    'Chinese': 'https://news.google.com/rss?hl=zh-CN&gl=CN&ceid=CN:zh-Hans',
+    'Spanish': 'https://news.google.com/rss?hl=es-419&gl=US&ceid=US:es-419',
+  };
+
+  static Future<List<String>> fetchNewsHeadlines(String languageName) async {
+    final url = _kNewsFeedByLanguage[languageName];
+    if (url == null) return const <String>[];
+    final client = http.Client();
+    try {
+      final response =
+          await client.get(Uri.parse(url)).timeout(const Duration(seconds: 4));
+      if (response.statusCode != 200) return const <String>[];
+      final xml = utf8.decode(response.bodyBytes);
+      final matches = RegExp(r'<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</title>',
+              dotAll: true)
+          .allMatches(xml);
+      final titles = <String>[];
+      for (final m in matches) {
+        final raw = (m.group(1) ?? '').trim();
+        if (raw.isEmpty) continue;
+        // 첫 <title>은 피드 이름("Google 뉴스")이라 건너뛴다.
+        if (titles.isEmpty && raw.toLowerCase().contains('google')) continue;
+        // 헤드라인 끝의 " - 언론사"는 대화에 쓸모가 없다.
+        final cleaned =
+            raw.replaceAll(RegExp(r'\s+-\s+[^-]{2,20}$'), '').trim();
+        if (cleaned.isEmpty) continue;
+        titles.add(cleaned);
+        if (titles.length >= 6) break;
+      }
+      return titles;
+    } catch (_) {
+      return const <String>[];
+    } finally {
+      client.close();
+    }
+  }
+
+  // ==================================================================
+  // 📦 [OPENING] 진입 첫 마디 — gpt-4o-mini가 만든다.
+  // ------------------------------------------------------------------
+  // 예전에는 "오늘 하루 중 한 순간"을 물어 그 답이 곧 씨앗이 됐다. 지금은
+  // 그냥 가벼운 대화를 연다 — 씨앗은 대화 중에 알아서 찾는다.
+  // 실패하면 고정 문구로 떨어진다 — 첫 소리는 무슨 일이 있어도 난다.
   // ==================================================================
   static Future<String> generateOpening({
     required String apiKey,
     required String languageName,
     required String fallback,
+    List<String> headlines = const <String>[],
   }) async {
     if (apiKey.isEmpty) return fallback;
+    final String newsBlock =
+        headlines.take(5).map((h) => '- $h').join(String.fromCharCode(10));
     final client = http.Client();
     try {
       final response = await client
@@ -7266,15 +7423,25 @@ Output: [GARBLED]
               'messages': [
                 {
                   'role': 'system',
-                  'content':
-                      '''You open a Step Expand practice session by speaking first, in $languageName.
-The user will answer out loud, and their answer becomes the seed sentence they then grow one piece at a time.
-Ask exactly ONE short, warm question that invites them to name any one real moment from their day.
+                  'content': headlines.isEmpty
+                      ? '''You start a light, friendly conversation in $languageName by speaking first.
+Say ONE short, warm line about an easy everyday topic — the weather, the season, weekends, food, feeling busy — and end it with one small question.
 It must be answerable in a few words by someone who is quiet or still gathering their thoughts.
 Never ask a yes/no question. Never mention English, practice, study, sentences, AI, or how this works.
 No greeting, no preamble, no explanation, no emoji.
-Use a natural everyday polite spoken register in $languageName, one short sentence only.
-Return only the question text.'''
+Use a natural everyday polite spoken register in $languageName, one or two short sentences only.
+Return only the line.'''
+                      : '''You start a light, friendly conversation in $languageName by speaking first.
+Here is what the news is saying right now:
+$newsBlock
+
+Pick ONE of those items that an ordinary person would casually bring up, mention it in one short, plain line, and end with one small question asking how they feel about it or whether they heard about it.
+State nothing beyond what the headline itself says — do not add numbers, names, causes, or outcomes of your own.
+Keep it light. Avoid anything grim, political, or upsetting; if every item is like that, drop the news and open with an easy everyday topic instead.
+The question must be answerable in a few words. Never ask a yes/no question.
+Never mention English, practice, study, sentences, AI, or how this works. No greeting, no preamble, no emoji.
+Use a natural everyday polite spoken register in $languageName, two short sentences at most.
+Return only the line.'''
                 },
                 {
                   'role': 'user',
@@ -7295,6 +7462,95 @@ Return only the question text.'''
       return text.replaceAll(RegExp(r'^["“”\s]+|["“”\s]+$'), '');
     } catch (_) {
       return fallback;
+    } finally {
+      client.close();
+    }
+  }
+
+  // ==================================================================
+  // 🌱 [SMALL TALK → SEED] 잡담을 이어가며 씨앗이 될 말을 찾는다.
+  // ------------------------------------------------------------------
+  // 유저에게 이 구간은 그냥 대화다. 화면에 글이 적히지 않으므로, 씨앗이 잡힌
+  // 순간은 **첫 문장이 화면에 적히는 것**으로만 드러난다. 묻지 않고 조용히
+  // 넘어가는 것이 이 모드의 약속이다.
+  //
+  // 말과 판정을 JSON 하나에 담아 한 번의 왕복으로 끝낸다. 두 번 부르면 잡담이
+  // 그만큼 느려지고, 유저는 대화가 끊긴 것으로 느낀다.
+  static Future<Map<String, String>> smallTalkTurn({
+    required String apiKey,
+    required String languageName,
+    required String userText,
+    required String recentConversation,
+    List<String> headlines = const <String>[],
+  }) async {
+    const empty = <String, String>{'reply': '', 'seed': ''};
+    if (apiKey.isEmpty || userText.trim().isEmpty) return empty;
+    final String newsBlock = headlines.isEmpty
+        ? ''
+        : 'Headlines you may keep chatting about:'
+            '${String.fromCharCode(10)}'
+            '${headlines.take(5).map((h) => '- $h').join(String.fromCharCode(10))}'
+            '${String.fromCharCode(10)}';
+    final client = http.Client();
+    try {
+      final response = await client
+          .post(
+            Uri.parse('https://api.openai.com/v1/chat/completions'),
+            headers: {
+              'Authorization': 'Bearer $apiKey',
+              'Content-Type': 'application/json; charset=utf-8',
+            },
+            body: jsonEncode({
+              'model': 'gpt-4o-mini',
+              'temperature': 0.7,
+              'max_tokens': 220,
+              'response_format': {'type': 'json_object'},
+              'messages': [
+                {
+                  'role': 'system',
+                  'content':
+                      """You are having a light spoken conversation in $languageName. Two jobs, one answer.
+
+$newsBlock
+1) REPLY — one short, genuine reaction to what they just said, then one small question that keeps the chat going.
+Never a yes/no question. Two short sentences at most. No greeting, no preamble, no emoji, no advice, no teaching, no mention of AI, practice, study, or sentences.
+Use the everyday polite spoken register of $languageName.
+
+2) SEED — decide, WITHOUT telling them, whether what they just said can start a sentence-building exercise.
+Usable: a complete statement about their own concrete action, plan, experience, thought, or feeling — something a sentence can grow from.
+Not usable: a question, a bare yes/no or backchannel, a fragment, a remark about the app or the conversation itself, or anything you would have to guess at.
+If usable, rewrite it as ONE short, natural, well-formed $languageName sentence in their own words and meaning. Keep their content exactly; repair only broken grammar or speech-recognition noise. Never add facts, names, or feelings of your own.
+If not usable, return an empty seed and simply keep chatting.
+Do not force it — a natural conversation matters more than finding a seed early. If nothing has fit after several turns, steer gently toward what they did today, what they plan to do, or how they felt.
+
+Return only JSON: {"reply":"<your spoken line>","seed":"<one sentence, or empty string>"}"""
+                },
+                {
+                  'role': 'user',
+                  'content': 'Conversation so far:'
+                      '${String.fromCharCode(10)}$recentConversation'
+                      '${String.fromCharCode(10)}${String.fromCharCode(10)}'
+                      'They just said: $userText',
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode != 200) return empty;
+      final body =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      final content =
+          (body['choices']?[0]?['message']?['content'] as String?)?.trim() ??
+              '';
+      if (content.isEmpty) return empty;
+      final parsed = jsonDecode(content) as Map<String, dynamic>;
+      return <String, String>{
+        'reply': (parsed['reply'] ?? '').toString().trim(),
+        'seed': (parsed['seed'] ?? '').toString().trim(),
+      };
+    } catch (error) {
+      debugPrint('[STEP-SMALLTALK] $error');
+      return empty;
     } finally {
       client.close();
     }
