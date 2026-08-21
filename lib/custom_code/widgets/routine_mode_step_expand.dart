@@ -5092,8 +5092,10 @@ line had never been said. Never build the conversation on a line you had to gues
   Widget _buildTopBar() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      // 📏 오른쪽 끝에 붙여 두었더니 잔여시간이 세 자리(274:33)로 길어질 때
+      //   화면 밖으로 잘려 나갔다. 한 줄로 이어 붙여 왼쪽부터 채우고, 남는
+      //   자리는 오른쪽에 둔다. 시간표는 남는 폭 안에서 줄어든다.
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Row(mainAxisSize: MainAxisSize.min, children: [
             IconButton(
@@ -5131,8 +5133,11 @@ line had never been said. Never build the conversation on a line you had to gues
               ),
             ),
           ]),
-          Row(children: [
+          Flexible(
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
             IconButton(
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
               icon: Icon(
                 Icons.format_size,
                 color: _fontScale > 1.0
@@ -5159,50 +5164,55 @@ line had never been said. Never build the conversation on a line you had to gues
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 6),
             // [v3.6] 잔여시간 표시 + 길게 누르면 로그 (개발자용)
-            GestureDetector(
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                    color: const Color(0xFF2563EB),
-                    borderRadius: BorderRadius.circular(20)),
-                child: Row(children: [
-                  ValueListenableBuilder<int>(
-                    valueListenable: BillingTicker.instance.billingState,
-                    builder: (_, s, __) => GestureDetector(
-                      onTap: s == 0 ? resetBillingIdle : null,
-                      child: CustomPaint(
-                        size: const Size(14, 14),
-                        painter: BillingDotPainter(s),
+            Flexible(
+                child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: GestureDetector(
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                      color: const Color(0xFF2563EB),
+                      borderRadius: BorderRadius.circular(20)),
+                  child: Row(children: [
+                    ValueListenableBuilder<int>(
+                      valueListenable: BillingTicker.instance.billingState,
+                      builder: (_, s, __) => GestureDetector(
+                        onTap: s == 0 ? resetBillingIdle : null,
+                        child: CustomPaint(
+                          size: const Size(14, 14),
+                          painter: BillingDotPainter(s),
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 6),
-                  // 🐞 [잔여시간] 예전에는 billingState 리스너 안에서
-                  //   FFAppState().remainingTime을 직접 읽어, 과금 점 색이 바뀔
-                  //   때만 다시 그려졌다. 초 단위로 줄어드는 값인데 화면은 멈춰
-                  //   보였다. 표시만 고친다 — 이 모드는 5턴이 세션 경계라
-                  //   30분 롤오버를 쓰지 않는다.
-                  ValueListenableBuilder<int>(
-                    valueListenable:
-                        BillingTicker.instance.remainingSecondsNotifier,
-                    builder: (_, remaining, __) {
-                      final int s = remaining.clamp(0, 999999);
-                      final int h = s ~/ 3600;
-                      final int m = (s % 3600) ~/ 60;
-                      return Text(
-                        '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}',
-                        style: const TextStyle(
-                            color: Colors.white, fontWeight: FontWeight.bold),
-                      );
-                    },
-                  ),
-                ]),
+                    const SizedBox(width: 6),
+                    // 🐞 [잔여시간] 예전에는 billingState 리스너 안에서
+                    //   FFAppState().remainingTime을 직접 읽어, 과금 점 색이 바뀔
+                    //   때만 다시 그려졌다. 초 단위로 줄어드는 값인데 화면은 멈춰
+                    //   보였다. 표시만 고친다 — 이 모드는 5턴이 세션 경계라
+                    //   30분 롤오버를 쓰지 않는다.
+                    ValueListenableBuilder<int>(
+                      valueListenable:
+                          BillingTicker.instance.remainingSecondsNotifier,
+                      builder: (_, remaining, __) {
+                        final int s = remaining.clamp(0, 999999);
+                        final int h = s ~/ 3600;
+                        final int m = (s % 3600) ~/ 60;
+                        return Text(
+                          '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}',
+                          style: const TextStyle(
+                              color: Colors.white, fontWeight: FontWeight.bold),
+                        );
+                      },
+                    ),
+                  ]),
+                ),
               ),
-            ),
-          ]),
+            )),
+          ])),
         ],
       ),
     );
