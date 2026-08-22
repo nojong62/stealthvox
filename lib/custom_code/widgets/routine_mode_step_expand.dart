@@ -2044,7 +2044,12 @@ line had never been said. Never build the conversation on a line you had to gues
   }
 
   /// AI 턴 응답을 한국어 음성으로 낸다.
-  /// 안내 음성과 달리 barge-in 대상이 아니다 — 답을 끝까지 들려준 뒤 마이크를 연다.
+  /// 확장 턴 질문을 소리로 낸다.
+  ///
+  /// 예전에는 이 길만 barge-in 대상이 아니었다 — 취소할 손잡이를 아무 데도
+  /// 등록하지 않아, 끊고 싶어도 끊을 방법이 없었다. 잡담 쪽([_speakLiveKorean])과
+  /// 같은 자리에 걸어 둔다. 실제로 끊기려면 소리가 나는 동안 마이크가 열려 있어야
+  /// 하는데 그건 아직 아니다(§[BARGE-IN]) — 손잡이만 먼저 맞춰 둔다.
   Future<void> _speakAiKorean(String text) async {
     final spoken = text.trim();
     if (spoken.isEmpty || _openAiKey.isEmpty) return;
@@ -2059,14 +2064,25 @@ line had never been said. Never build the conversation on a line you had to gues
       isUser: false,
       onLog: _log,
     );
+    _guideTtsFetcher?.cancel();
+    _guideTtsFetcher = fetcher;
+    _isInitialGuidePlaying = true;
     fetcher.addText(spoken);
     int ticks = 0;
-    while (
-        (fetcher.pendingRequests > 0 || _ttsQueueManager.isBusy) && mounted) {
-      await Future.delayed(const Duration(milliseconds: 50));
-      if (++ticks > 600) {
-        _log('⚠️ [AI-TTS-TIMEOUT]', 'AI 응답 음성 30초 초과');
-        break;
+    try {
+      while ((fetcher.pendingRequests > 0 || _ttsQueueManager.isBusy) &&
+          mounted &&
+          !fetcher.isCancelled) {
+        await Future.delayed(const Duration(milliseconds: 50));
+        if (++ticks > 600) {
+          _log('⚠️ [AI-TTS-TIMEOUT]', 'AI 응답 음성 30초 초과');
+          break;
+        }
+      }
+    } finally {
+      if (identical(_guideTtsFetcher, fetcher)) {
+        _guideTtsFetcher = null;
+        _isInitialGuidePlaying = false;
       }
     }
   }
