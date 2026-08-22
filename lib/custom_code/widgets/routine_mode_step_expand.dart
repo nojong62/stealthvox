@@ -8818,94 +8818,42 @@ ${_turnFocusLine(turnNumber)}
     final client = OpenAiConnectionPool.instance.client;
     try {
       final sysPrompt =
-          """You are developing ONE thought with someone, in $languageName, across several turns.
+          """You are a $languageName editor. One job: rewrite a developing statement.
 
-You get the thought as it stands and what they just added. Return the thought as
-it should now stand — one natural spoken $languageName sentence.
+[INPUT]
+CURRENT STATEMENT — what the person has been saying so far.
+LATEST REPLY — what they just added.
+CONTEXT — the conversation around it.
 
-[ORDER OF WORK — DO NOT SKIP THIS]
-1. First run the two checks near the bottom: is the new part about the
-   conversation itself ([META]), or is it unrecoverable ([UNCLEAR])?
-2. If either applies, output that token alone and stop. Nothing else happens.
-3. Only when neither applies do you develop the thought below.
+[GATE — RUN THIS FIRST]
+If LATEST REPLY is about this conversation itself — your question, how you asked
+it, what they want you to do differently, or this exchange — output exactly
+[META] and stop.
+If it cannot be read as $languageName at all, or its meaning cannot be recovered,
+output exactly [UNCLEAR] and stop.
+Being short is not a reason. Changing the subject is not a reason.
 
-[THIS IS NOT APPENDING]
-You are not making the sentence longer. You are making the thought better.
-A turn where the sentence gets shorter and says more is a good turn.
-So: keep every idea they deliberately put in, take in whatever is genuinely
-worth keeping from the new part, and rewrite the whole thing freely so it reads
-like one person saying one clear thing.
-  Before: 진실은 세월이 지나도 밝혀져야 해요, 피해자들이 아직 답을 못 들었으니까요.
-  They add: 그래야 같은 일이 반복되지 않죠.
-  BAD:  진실은 세월이 지나도 밝혀져야 해요, 피해자들이 아직 답을 못 들었으니까요,
-        그리고 그래야 같은 일이 반복되지 않을 수도 있으니까 그것도 중요하고요.
-  GOOD: 진실은 세월이 지나도 밝혀져야 해요, 피해자들을 위해서도 그렇고 같은 일이
-        반복되지 않으려면요.
-The GOOD one carries more meaning in fewer words. That is the whole job.
-
-[WHAT TO KEEP FROM WHAT THEY JUST SAID]
-Not all of it. Take only what actually makes the thought better — a reason, a
-condition, a consequence, a limit, a change of mind, a sharper way of putting it.
-Leave out: repetition, fillers, hesitation, anything already in the thought,
-a passing detail that has nothing to do with the point, and anything that would
-only make it longer.
-If the new part adds nothing the thought does not already have, return the
-thought as it is, possibly said better.
-
-[WHAT YOU MAY NOT DO]
-Never drop or reverse an idea they deliberately contributed. Their thought stays
-their thought — you improve how it is said, never what it says.
-Never add a fact, name, place, time, feeling, reason, or judgement they did not
-say. Never answer, react, explain, summarize, or ask anything.
-Keep their viewpoint, tense, and politeness level. Do not translate.
-
-[IT MUST SOUND LIKE A NATIVE SPEAKER SAID IT]
-Read it back as if saying it out loud to a friend. Join the parts with real
-connective endings, the way a person speaks (in Korean: ~아서/어서, ~는데, ~고,
-~니까, ~지만, ~면서). Do NOT set parts side by side with commas — a comma list is
-not a sentence, it reads like reciting separate facts, and it is the one failure
-that makes this practice worthless. Vary the link; do not use the same connective
-twice in one sentence. Chain clauses left to right, never nested.
-BAD  (commas, reads as a list):
-  요즘은 날씨가 뜨거운 것 같애, 지금 집에 있어요, 맛있는 수박을 먹고 싶어요.
-GOOD (joined into one thought):
-  요즘 날씨가 뜨거워서 집에 있는데, 시원한 수박이 먹고 싶어요.
+[THE JOB]
+Work from the POINT, not the words.
+Read CURRENT STATEMENT and LATEST REPLY, decide what this person is actually
+saying overall, and write that — one natural spoken $languageName sentence.
+- Do not attach LATEST REPLY to the end. Write the whole statement again.
+- Keep the ideas they meant. Drop the wording they used.
+- Take from LATEST REPLY only what adds something. Repetition, fillers,
+  hesitation, and passing details do not go in.
+- If it adds nothing, return the statement said better.
+- Shorter than before is a good outcome. Longer is usually a failure.
+- Never add a fact, name, place, time, feeling, or reason they did not say.
+- Never reverse or drop a point they meant. Keep their viewpoint and tense.
+- One sentence, spoken rhythm, joined with real connective endings — never a
+  string of clauses separated by commas.
+- Do not answer, react, explain, or ask anything.
 
 [THE TOPIC DECIDES WHAT THEY MEANT]
-The new part is speech-recognition output, so a word can come out as a different
-word that merely sounds similar. Judge every word against what this conversation
-is about. If a word does not belong to that topic but is close in sound to one
-that fits it naturally, they said the fitting one — use it.
-Never carry a word that contradicts the topic into the sentence just because the
-text says so. The sentence you return is what the whole practice is built on.
-
-[WHEN IT IS NOT PART OF THE STORY — CHECK THIS FIRST]
-Sometimes they stop talking about the topic and talk about the conversation
-itself: your questions, how you are asking them, what they want you to do
-differently, or this whole exchange. That is not a piece of their sentence and it
-must never be joined to one.
-Output EXACTLY this token and nothing else — [META] — when the new part is about:
-- your question or the way you asked it ("자꾸 이렇게 학문적으로 질문하지 말고",
-  "그거는 너무 전문적이야", "질문이 좀 이상해", "다른 거 물어봐")
-- what they want from this conversation ("가벼운 대화가 더 좋을 것 같아")
-- you, this app, or how any of this is going
-Judge it by what the utterance is ABOUT, not by whether it contains a complaint
-word. A sentence that reads as a normal opinion but is aimed at your question
-rather than at the topic is still [META].
-If it is genuinely about the topic they were discussing, it is not [META] —
-attach it normally.
-
-[WHEN YOU CANNOT ATTACH IT]
-You are the last place that would notice a broken part. Do NOT quietly smooth it
-into something that reads well — once you do, nobody downstream can tell.
-Output EXACTLY this token and nothing else — [UNCLEAR] — when any of these holds:
-- The new part does not hold together as $languageName, or breaks off mid-thought.
-- A word sits so oddly against the sentence so far that its meaning cannot be
-  recovered.
-- Attaching it would require you to invent a subject, object, or verb.
-Being short is not a reason on its own. A clear short addition is fine, and so is
-one that changes the subject — people do that. Use [UNCLEAR] only when you truly
-cannot tell what they meant.
+This is speech recognition, so a word can arrive as a different word that sounds
+similar. Judge every word against what the conversation is about. If a word does
+not belong to the topic but sounds like one that does, they said the one that
+fits.
 
 [OUTPUT]
 - Exactly ONE $languageName sentence, nothing else. No quotes, no label.
@@ -8914,7 +8862,7 @@ cannot tell what they meant.
       final addedBlock = additions.map((u) => '- $u').join('\n');
       final topicBlock = topicContext.trim().isEmpty
           ? ''
-          : 'What this conversation is about:'
+          : 'CONTEXT:'
               '${String.fromCharCode(10)}${topicContext.trim()}'
               '${String.fromCharCode(10)}${String.fromCharCode(10)}';
       final http.Response res;
@@ -8928,23 +8876,27 @@ cannot tell what they meant.
               },
               body: jsonEncode({
                 'model': 'gpt-4o-mini',
-                // 0.2에서 올렸다. 프롬프트가 "연결어미를 매번 바꿔라"라고 시키는데
-                // 낮은 온도는 가장 무난한 ~고/~아서만 반복하게 만들어 서로 어긋났다.
-                // 사실 보존 규칙이 흔들리지 않는 선에서 0.5로 잡는다.
-                'temperature': 0.5,
+                // 0.5에서 내렸다. 연결어미를 다양하게 쓰라고 시키던 시절엔
+                // 온도가 필요했지만, 지금 이 호출이 하는 일은 요점을 파악해
+                // 다시 쓰는 편집이다. 여기서 값하는 건 창의성이 아니라 의미
+                // 보존과 압축의 일관성이다.
+                'temperature': 0.25,
                 'max_tokens': 300,
                 'messages': [
                   {'role': 'system', 'content': sysPrompt},
                   {
                     'role': 'user',
+                    // 라벨을 프롬프트의 [INPUT] 이름과 정확히 맞춘다. 예전
+                    // 라벨("Sentence so far" / "Merged sentence")이 그 자체로
+                    // 이어 붙이라는 지시처럼 읽혔다.
                     'content': '$topicBlock'
-                        'Sentence so far:'
+                        'CURRENT STATEMENT:'
                         '${String.fromCharCode(10)}${previousExpanded.trim()}'
                         '${String.fromCharCode(10)}${String.fromCharCode(10)}'
-                        'The user just added:'
+                        'LATEST REPLY:'
                         '${String.fromCharCode(10)}$addedBlock'
                         '${String.fromCharCode(10)}${String.fromCharCode(10)}'
-                        'Merged sentence:'
+                        'REVISED STATEMENT:'
                   },
                 ],
               }),
