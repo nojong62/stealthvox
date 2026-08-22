@@ -1956,7 +1956,14 @@ line had never been said. Never build the conversation on a line you had to gues
   /// 유저가 직전 AI 질문에 불만을 표시했을 때, 그 질문을 지우고 새로 만든다.
   /// 불만 발화 자체는 학습 턴으로 세지 않는다 — 유저는 답을 한 게 아니라
   /// 질문을 물린 것이다. 자란 문장도 건드리지 않는다.
-  Future<void> _replaceLastQuestion({required int generation}) async {
+  Future<void> _replaceLastQuestion({
+    required int generation,
+
+    /// 유저가 질문을 물리면서 실제로 한 말. 있으면 그대로 넘긴다 — "다른 질문을
+    /// 해라"만 시키면 방금 "학문적으로 묻지 말라"고 한 유저에게 또 학문적인
+    /// 질문이 나갈 수 있다. 무엇이 싫었는지는 유저가 이미 말해 줬다.
+    String userAsk = '',
+  }) async {
     var rejected = '';
     setState(() {
       _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
@@ -1968,12 +1975,17 @@ line had never been said. Never build the conversation on a line you had to gues
     });
     _scrollToBottom();
 
+    final askedFor = userAsk.trim().isEmpty
+        ? ''
+        : 'What they said about it: "${userAsk.trim()}"\n'
+            'Take that at face value and give them exactly what they asked for.\n';
     final replacement = await StepExpandBrain.generateKoreanTurn(
       apiKey: _openAiKey,
       instructions: '${_buildStepExpandSystemInstructions()}\n'
           '\n[THIS TURN]\n${_buildStepExpandTurnInstructions(_turnCounter + 1)}\n'
           '\n[THE USER TURNED DOWN YOUR LAST QUESTION]\n'
           'Your previous question was: "$rejected"\n'
+          '$askedFor'
           'They found it repetitive, off, or hard to answer. Ask a completely '
           'different one — different angle, different wording. Never repeat or '
           'rephrase the rejected question. Do not apologize, do not mention '
@@ -3410,6 +3422,7 @@ line had never been said. Never build the conversation on a line you had to gues
             '[EXPAND-GATE]',
             'turn=$turnNumber gate=merge verdict=${mergeResult.isVerdict} '
                 'unclear=${mergeResult.unclear} '
+                'meta=${mergeResult.meta} '
                 'failure=${mergeResult.failure.name} '
                 'failOpen=${mergeResult.failedOpen}');
         // 👂 붙이는 쪽이 못 알아들었다고 하면 거기서 멈춘다. 여기서 어물쩍
@@ -3417,6 +3430,25 @@ line had never been said. Never build the conversation on a line you had to gues
         //   발화는 화면에도 문장에도 넣지 않고 보류한 뒤 다시 듣는다.
         //   장애([failedOpen])는 이 분기에 걸리면 안 된다 — 통신이 끊긴 것을
         //   "못 알아들었다"고 되묻으면 유저가 같은 말을 반복하게 된다.
+        // 🚫 [EXPAND-META] 이야기가 아니라 이 대화·질문에 대한 말이다. 문장에
+        //   넣지 않고, 턴도 먹지 않고, 직전 질문을 갈아 끼운다. 유저는 답을
+        //   한 게 아니라 질문을 물린 것이다. 되묻기와는 다른 자리라
+        //   [_speakStepRetryAndListen] 쪽으로 보내지 않는다.
+        if (mergeResult.meta) {
+          askedBack = true;
+          _turnCounter--;
+          _expandedNativeSentence = previousExpanded;
+          _pendingNativeParts
+            ..clear()
+            ..addAll(previousPending);
+          _log('🚫 [EXPAND-META]',
+              'turn=$turnNumber 대화에 대한 말 → 질문 교체 said="$userKorean"');
+          await _replaceLastQuestion(
+            generation: generation,
+            userAsk: userKorean,
+          );
+          return;
+        }
         if (mergeResult.unclear) {
           askedBack = true;
           _turnCounter--;
@@ -6989,8 +7021,15 @@ class StepExpandMergeResult {
   const StepExpandMergeResult({
     required this.text,
     this.unclear = false,
+    this.meta = false,
     this.failure = StepExpandMergeFailure.none,
   });
+
+  /// 이 발화는 이야기가 아니라 **이 대화나 AI의 질문 자체**에 대한 말이다.
+  /// 못 알아들은 것([unclear])과는 다르다 — 뜻은 멀쩡하고, 다만 문장에
+  /// 들어가서는 안 된다. 실기기에서 "자꾸 이렇게 학문적으로 질문하지 말고"와
+  /// "그거는 너무 전문적이야"가 두 세션 연속 학습 문장에 그대로 붙었다.
+  final bool meta;
 
   /// 합쳐진 문장. [unclear]이거나 장애면 빈 문자열이다.
   final String text;
@@ -8635,6 +8674,9 @@ ${_turnFocusLine(turnNumber)}
   // ==================================================================
   static const String kUnclearToken = '[UNCLEAR]';
 
+  /// 이야기가 아니라 이 대화·질문 자체에 대한 말. 문장에 붙이면 안 된다.
+  static const String kMetaToken = '[META]';
+
   static Future<StepExpandMergeResult> mergeNativeExpansion({
     required String apiKey,
     required String previousExpanded,
@@ -8715,7 +8757,23 @@ that fits it naturally, they said the fitting one — use it.
 Never carry a word that contradicts the topic into the sentence just because the
 text says so. The sentence you return is what the whole practice is built on.
 
-[WHEN YOU CANNOT ATTACH IT — CHECK THIS FIRST]
+[WHEN IT IS NOT PART OF THE STORY — CHECK THIS FIRST]
+Sometimes they stop talking about the topic and talk about the conversation
+itself: your questions, how you are asking them, what they want you to do
+differently, or this whole exchange. That is not a piece of their sentence and it
+must never be joined to one.
+Output EXACTLY this token and nothing else — [META] — when the new part is about:
+- your question or the way you asked it ("자꾸 이렇게 학문적으로 질문하지 말고",
+  "그거는 너무 전문적이야", "질문이 좀 이상해", "다른 거 물어봐")
+- what they want from this conversation ("가벼운 대화가 더 좋을 것 같아")
+- you, this app, or how any of this is going
+Judge it by what the utterance is ABOUT, not by whether it contains a complaint
+word. A sentence that reads as a normal opinion but is aimed at your question
+rather than at the topic is still [META].
+If it is genuinely about the topic they were discussing, it is not [META] —
+attach it normally.
+
+[WHEN YOU CANNOT ATTACH IT]
 You are the last place that would notice a broken part. Do NOT quietly smooth it
 into something that reads well — once you do, nobody downstream can tell.
 Output EXACTLY this token and nothing else — [UNCLEAR] — when any of these holds:
@@ -8729,7 +8787,7 @@ cannot tell what they meant.
 
 [OUTPUT]
 - Exactly ONE $languageName sentence, nothing else. No quotes, no label.
-- Or the single token [UNCLEAR].""";
+- Or the single token [META], or the single token [UNCLEAR].""";
 
       final addedBlock = additions.map((u) => '- $u').join('\n');
       final topicBlock = topicContext.trim().isEmpty
@@ -8800,6 +8858,10 @@ cannot tell what they meant.
           merged = merged.substring(1, merged.length - 1).trim();
         }
         // 토큰만 오지 않고 한마디 덧붙여 오는 경우가 있어 포함 여부로 본다.
+        // [META]를 먼저 본다 — 대화 자체에 대한 말은 못 알아들은 것이 아니다.
+        if (merged.toUpperCase().contains(kMetaToken)) {
+          return const StepExpandMergeResult(text: '', meta: true);
+        }
         if (merged.toUpperCase().contains(kUnclearToken)) {
           return const StepExpandMergeResult(text: '', unclear: true);
         }
