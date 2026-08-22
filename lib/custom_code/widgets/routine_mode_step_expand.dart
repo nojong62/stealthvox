@@ -7539,6 +7539,24 @@ Output: [GARBLED]
     'Spanish': 'https://news.google.com/rss?hl=es-419&gl=US&ceid=US:es-419',
   };
 
+  /// 처음 만난 사람에게 꺼낼 수 없는 소재. 후보 단계에서 아예 뺀다.
+  ///
+  /// "가볍게 골라라"를 프롬프트에 시켜 봤지만 모델은 **가장 자극적인 것**을
+  /// 골랐다 — 실기기에서 첫마디가 "명진스님이 제주에서 프리다이빙하다가
+  /// 숨졌대요"였다(2026-08-22). 판정을 코드로 내린다. 뉴스 기능 자체는
+  /// 그대로다 — 신제품·생활·문화·음식·여행·기술은 좋은 대화 재료다.
+  static final RegExp _kHeavyHeadline = RegExp(
+    '숨져|숨진|사망|별세|유족|빈소|시신|주검|참사|추락|충돌|붕괴|화재|폭발|침몰|실종|'
+    '부상|중상|참변|사고|전쟁|교전|공습|폭격|미사일|드론|무기|핵|테러|피살|살해|'
+    '살인|흉기|성폭|강간|납치|학대|폭행|마약|구속|기소|영장|검찰|경찰|재판|선고|'
+    '징역|유죄|무죄|압수수색|탄핵|대통령|국회|여당|야당|의원|정당|총선|대선|시위|'
+    '규탄|파업|관세|금리|환율|증시|폭락|급락|적자|부도|파산|해고|감원|지진|태풍|'
+    '홍수|폭우|산불|한파|폭염|피해|확진|감염|바이러스|사태|논란|의혹|비리|횡령',
+  );
+
+  static bool isHeavyHeadline(String headline) =>
+      _kHeavyHeadline.hasMatch(headline);
+
   static Future<List<String>> fetchNewsHeadlines(String languageName) async {
     final url = _kNewsFeedByLanguage[languageName];
     if (url == null) return const <String>[];
@@ -7561,6 +7579,7 @@ Output: [GARBLED]
         final cleaned =
             raw.replaceAll(RegExp(r'\s+-\s+[^-]{2,20}$'), '').trim();
         if (cleaned.isEmpty) continue;
+        if (isHeavyHeadline(cleaned)) continue;
         titles.add(cleaned);
         if (titles.length >= 6) break;
       }
@@ -7616,7 +7635,7 @@ You just saw these in the news:
 $newsBlock
 
 First throw out every item about war, weapons, attacks, deaths, accidents, crime, politics, or the economy. Those are not what you say to someone you just met — none of them, no matter how striking. If nothing survives, forget the news entirely and open with something easy off the top of your head.
-From what is left, pick the ONE that made you go "어? 이거 뭐야" and mention it the way you would to a friend — offhand, with your own reaction in it. Not a summary, not a briefing. One short line, then leave it open for them.
+From what is left, pick the ONE you find most interesting and mention it the way you would to a friend — offhand, with your own reaction in it. Not a summary, not a briefing. One short line, then leave it open for them.
 Say nothing beyond what the headline itself says — no numbers, names, causes, or outcomes of your own. You are not informing them about it; you just thought it was worth saying out loud.
 Never a yes/no question. Never mention English, practice, study, sentences, AI, or how this works. No greeting, no preamble, no emoji.
 Everyday polite spoken register of $languageName — warm and close, never stiff, and never casual. In Korean that means 해요체 존댓말, never 반말. Two short sentences at most.
@@ -7709,7 +7728,7 @@ So you do what someone like you does: you talk. About anything — whatever is i
 That is the whole job. A few minutes in, they should feel like talking.
 
 [HOW THIS STARTED]
-Something in the news made you go "어? 이거 뭐야" and you could not help mentioning it. You said it the way you would to a friend — one line, your own reaction in it. Not a summary, not a briefing.
+Something in the news caught your eye and you could not help mentioning it. You said it the way you would to a friend — one line, your own reaction in it. Not a summary, not a briefing.
 $newsBlock
 [HOW YOU TALK]
 - Go first. Say your own thing before you ask about theirs. Someone new answers much more easily once the other person has already gone out on a limb.
