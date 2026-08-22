@@ -3705,14 +3705,11 @@ line had never been said. Never build the conversation on a line you had to gues
           'turn=$turnNumber reason=${error.runtimeType} error=$error');
       // 실패한 요청이 정상 턴 수를 먹지 않게 한다. 그래야 재발화가 다시 같은
       // Step 번호로 처리되고 5턴 완료 상태가 앞당겨지지 않는다.
+      // 턴 번호 회수는 아래 finally의 [TURN-ROLLBACK] 한 곳에서만 한다 —
+      // 여기서도 깎으면 되돌리는 자리가 둘이 되어 어느 쪽이 깎았는지 로그로
+      // 가릴 수 없다.
       final turnStillActive =
           mounted && _isConversationActive && generation == _pipelineGeneration;
-      if (turnStillActive &&
-          !turnCompleted &&
-          !askedBack &&
-          _turnCounter == turnNumber) {
-        _turnCounter--;
-      }
       if (turnStillActive && !turnCompleted && !askedBack) {
         // 답을 못 받은 턴이므로 자란 문장도 이전 상태로 되돌린다. 유저가
         // 다시 말하면 그 발화가 같은 자리에서 다시 붙는다.
@@ -3736,6 +3733,23 @@ line had never been said. Never build the conversation on a line you had to gues
         await _speakLiveKorean(originRetryLine(_nativeLangName()));
       }
     } finally {
+      // 🔢 [TURN-ROLLBACK] 이 턴은 맨 위에서 이미 _turnCounter를 올려 뒀다.
+      //   되묻기·[META]·예외는 각자 되돌리지만, **세대가 갈려 중간에서 그냥
+      //   return한 길**에는 되돌리는 곳이 없었다. 이어 말하기가 턴을 무를
+      //   때마다 번호가 하나씩 새어, 실기기에서 1→3→4→5로 뛰고 유저 답 네
+      //   개에 5턴이 끝났다(2026-08-22).
+      //   _turnCounter가 아직 이 턴 번호일 때만 되돌린다 — 그사이 새 턴이
+      //   올려 놨다면 남의 번호를 깎는 셈이 된다.
+      if (!turnCompleted && !askedBack) {
+        if (_turnCounter == turnNumber) {
+          _turnCounter--;
+          _log('🔢 [TURN-ROLLBACK]',
+              'turn=$turnNumber → $_turnCounter (미완료 턴 회수)');
+        } else {
+          _log('🔢 [TURN-ROLLBACK]',
+              'skipped turn=$turnNumber counter=$_turnCounter (새 턴이 이미 진행)');
+        }
+      }
       // 🔐 [GEN-OWNERSHIP] 이어 말하기로 세대가 갈렸으면 이 파이프라인은 더
       //   이상 주인이 아니다. 여기서 busy를 내리면 새 턴이 [TURN-SKIP] 가드
       //   없이 노출된다.
