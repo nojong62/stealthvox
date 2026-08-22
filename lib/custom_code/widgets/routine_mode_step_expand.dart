@@ -473,19 +473,23 @@ should change in how you sound — do not suddenly turn polite and cautious.
 ${buildNativeOutputLanguagePolicy(_nativeLangName())}
 
 [WHAT IS HAPPENING UNDERNEATH]
-Everything they say from here is being folded back into one growing sentence, so
-what you receive is that whole sentence, not just their last words. You never
-mention this. You never teach, never explain grammar, never name what you are
-after, never mention writing, sentences, or practice.
+One idea of theirs is being developed across this conversation, which is why what
+you receive is that whole developing thought, not just their last words. It is
+not a sentence you are lengthening. It is a thought getting clearer.
+You never mention any of this. You never teach, never explain grammar, never name
+what you are after, never mention writing, sentences, or practice.
 
-[THE ONE THING THAT MATTERS]
-Follow their thought, not a word in it. Never build a question out of a noun that
-happened to appear in their sentence.
+[FOLLOW THE STORYLINE, NOT THE LATEST KEYWORD]
+Never build a question out of a noun that happened to appear in their last reply.
   They said:  "부정이 있었으면 세월이 지나도 밝혀내야 되겠지."
   BAD:        "그 부정은 어떤 형태여야 할까요?"  ← follows a noun, not the person
   GOOD:       "시간이 많이 지났더라도 진실을 밝히는 게 왜 중요하다고 생각하세요?"
-Before you speak, be able to say what they actually meant. If you cannot, you are
-about to echo a keyword.
+And when a small word turns up mid-thought — they say "기록으로라도 남겨야지" while
+arguing that old wrongdoing must come to light — do not chase it. "어떤 기록
+방식을 말하는 건가요?" abandons their argument for a detail. The storyline
+outranks the latest word, every time.
+Before you speak, be able to say what this person is trying to get at overall.
+If you cannot, you are about to echo a keyword.
 
 $registerPolicy
 
@@ -3775,16 +3779,32 @@ line had never been said. Never build the conversation on a line you had to gues
           'sentence they built. Do not ask anything, explain, or summarize at length.';
     }
     return '''Keep the conversation going.
-Read everything above first — how this started, and what the two of you have said
-since. Then, silently: what are they getting at, what have you already covered,
-and which part of THEIR thought could still go one step further?
-Follow that one part — and put it the way you actually talk: surprised, amused,
-a little contrary, curious about the odd corner of it. Better still, do not ask
-straight out. Say what you are wondering as your own thought and leave the gap
-where their answer goes. A safe, obvious question gets a safe, obvious answer,
-and the whole point is the answer.
-Their one-to-three-word answer still has to belong to the sentence they are
-building.''';
+Read everything above first — how this started, everything the two of you have
+said since, and the thought as it now stands. Then work these out silently, in
+this order, and say none of it:
+1. What is this person really trying to say, taking the whole conversation
+   together?
+2. Which of those meanings has already made it into the thought as it stands?
+3. What is still thin, missing, one-sided, or vague in it?
+4. Of those, which ONE thing — if you learned it — would actually make the
+   thought clearer, better reasoned, or more complete? Not more detailed. Better.
+5. If the thought already holds together and needs nothing, do not manufacture a
+   gap. Go for what would sharpen it: what they mean exactly, where they would
+   draw the line, what matters most to them about it.
+
+Directions you may borrow from, when one fits — never in order, never because of
+which turn this is, and never all of them:
+WHY · CAUSE · EXAMPLE · EXPERIENCE · CONSEQUENCE · CONTRAST · CONDITION ·
+FEELING · MEANING · PRIORITY · IMPLICATION.
+If the thought already has a solid reason in it, do not ask why again. If an
+example would not add anything, do not fish for one. Something outside this list
+is fine when the conversation points there.
+
+Then put it the way you actually talk: surprised, amused, a little contrary,
+curious about the odd corner of it. Better still, do not ask straight out — say
+what you are wondering as your own thought and leave the gap where their answer
+goes. A safe, obvious question gets a safe, obvious answer, and the answer is the
+whole point.''';
   }
 
   /// 되묻기 판정은 언어와 무관한 공통 내부 신호만 사용한다.
@@ -8551,7 +8571,14 @@ $languageName speaker actually saying it out loud.
 - Smooth the seams where the pieces were joined.
 - Replace a stiff or repeated connective with one that fits better.
 - Drop repeated subjects and filler that spoken language would leave out.
-- Keep it easy to say in one breath. Spoken rhythm, not written prose.
+- Say the same idea in fewer words wherever you can. If two parts make the same
+  point, say it once. Shorter is better as long as nothing they meant is lost.
+- Keep it easy to say in one breath. Spoken rhythm, not written prose — never
+  essay-like, never textbook-simple.
+
+[LENGTH]
+- One sentence. Two only if one genuinely will not hold it, and then keep both
+  short. A long polished sentence is a failed polished sentence.
 
 [OUTPUT]
 - Exactly ONE $languageName sentence. No quotes, no label, no explanation.""";
@@ -8758,48 +8785,58 @@ ${_turnFocusLine(turnNumber)}
     final client = OpenAiConnectionPool.instance.client;
     try {
       final sysPrompt =
-          """You merge a growing spoken sentence for Step Expand practice.
+          """You are developing ONE thought with someone, in $languageName, across several turns.
 
-The user is building ONE sentence in $languageName across several turns.
-You get the sentence so far and what they just added. Rewrite them as ONE
-natural spoken $languageName sentence that keeps everything already said and
-folds the new part into it.
+You get the thought as it stands and what they just added. Return the thought as
+it should now stand — one natural spoken $languageName sentence.
 
-[HOW TO JOIN — THIS IS THE WHOLE POINT]
-Do NOT set the parts side by side with commas. A comma list is not a sentence —
-it reads like someone reciting separate facts, and it is the one failure that
-makes this practice worthless. Join the parts into ONE flowing thought using real
-connective endings, the way a person actually speaks.
-In $languageName, use its normal linking endings (in Korean: ~아서/어서, ~는데,
-~고, ~니까, ~지만, ~면서, and so on). Choose whichever fits the meaning: cause,
-contrast, sequence, or simultaneity.
-You may reshape the earlier part — change its ending, drop a repeated subject,
-reorder for flow — as long as its meaning survives untouched.
-Vary the link. Do not use the same connective twice in one sentence.
+[ORDER OF WORK — DO NOT SKIP THIS]
+1. First run the two checks near the bottom: is the new part about the
+   conversation itself ([META]), or is it unrecoverable ([UNCLEAR])?
+2. If either applies, output that token alone and stop. Nothing else happens.
+3. Only when neither applies do you develop the thought below.
+
+[THIS IS NOT APPENDING]
+You are not making the sentence longer. You are making the thought better.
+A turn where the sentence gets shorter and says more is a good turn.
+So: keep every idea they deliberately put in, take in whatever is genuinely
+worth keeping from the new part, and rewrite the whole thing freely so it reads
+like one person saying one clear thing.
+  Before: 진실은 세월이 지나도 밝혀져야 해요, 피해자들이 아직 답을 못 들었으니까요.
+  They add: 그래야 같은 일이 반복되지 않죠.
+  BAD:  진실은 세월이 지나도 밝혀져야 해요, 피해자들이 아직 답을 못 들었으니까요,
+        그리고 그래야 같은 일이 반복되지 않을 수도 있으니까 그것도 중요하고요.
+  GOOD: 진실은 세월이 지나도 밝혀져야 해요, 피해자들을 위해서도 그렇고 같은 일이
+        반복되지 않으려면요.
+The GOOD one carries more meaning in fewer words. That is the whole job.
+
+[WHAT TO KEEP FROM WHAT THEY JUST SAID]
+Not all of it. Take only what actually makes the thought better — a reason, a
+condition, a consequence, a limit, a change of mind, a sharper way of putting it.
+Leave out: repetition, fillers, hesitation, anything already in the thought,
+a passing detail that has nothing to do with the point, and anything that would
+only make it longer.
+If the new part adds nothing the thought does not already have, return the
+thought as it is, possibly said better.
+
+[WHAT YOU MAY NOT DO]
+Never drop or reverse an idea they deliberately contributed. Their thought stays
+their thought — you improve how it is said, never what it says.
+Never add a fact, name, place, time, feeling, reason, or judgement they did not
+say. Never answer, react, explain, summarize, or ask anything.
+Keep their viewpoint, tense, and politeness level. Do not translate.
 
 [IT MUST SOUND LIKE A NATIVE SPEAKER SAID IT]
-Read the merged sentence back as if you were saying it out loud to a friend.
-A native speaker would never say it? Then it is wrong, no matter how correct the
-grammar looks. Variety never outranks naturalness — if the fitting connective is
-one you used before, use it again rather than reaching for an odd one.
-BAD  (grammatical but nobody talks like this):
-  ...자연을 느껴보고 싶으면서 나무가 많고 물이 흐르는 계곡도 보고 싶어.
-GOOD (what a person would actually say):
-  ...자연을 느껴보고 싶은데, 나무 많고 물 흐르는 계곡도 보고 싶어.
-
+Read it back as if saying it out loud to a friend. Join the parts with real
+connective endings, the way a person speaks (in Korean: ~아서/어서, ~는데, ~고,
+~니까, ~지만, ~면서). Do NOT set parts side by side with commas — a comma list is
+not a sentence, it reads like reciting separate facts, and it is the one failure
+that makes this practice worthless. Vary the link; do not use the same connective
+twice in one sentence. Chain clauses left to right, never nested.
 BAD  (commas, reads as a list):
   요즘은 날씨가 뜨거운 것 같애, 지금 집에 있어요, 맛있는 수박을 먹고 싶어요.
 GOOD (joined into one thought):
   요즘 날씨가 뜨거워서 집에 있는데, 시원한 수박이 먹고 싶어요.
-
-[RULES]
-- Every clause must trace back to words the user actually said. Never add
-  facts, names, places, times, feelings, reasons, or judgements they did not say.
-- Keep their viewpoint, tense, and politeness level. Do not translate.
-- Chain clauses left to right. Do not nest clauses inside clauses.
-- Do not answer, react, explain, summarize, or ask anything.
-- If the new part repeats what is already in the sentence, keep the sentence
-  as it is rather than saying it twice.
 
 [THE TOPIC DECIDES WHAT THEY MEANT]
 The new part is speech-recognition output, so a word can come out as a different
