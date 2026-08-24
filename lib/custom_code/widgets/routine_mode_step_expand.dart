@@ -617,7 +617,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
   // 오디오 및 UI
   final List<Map<String, dynamic>> _localMessages = [];
   final ScrollController _scrollController = ScrollController();
-  final Map<int, GlobalKey> _itemKeys = {};
   DeepgramV2VoiceManager? _voiceManager;
   final AudioRecorder _audioRecorder = AudioRecorder();
   late final TtsQueueManager _ttsQueueManager;
@@ -3629,91 +3628,71 @@ of it.'''}''';
     );
   }
 
+  /// 🔇 [VOICE-ONLY] 이 방은 글자를 띄우지 않는다.
+  ///
+  /// 코치와 주고받는 말은 소리로만 오간다. 말풍선이 뜨면 눈이 글자를 좇고,
+  /// 유저는 말하는 대신 읽게 된다 — 이 방에서 만들려는 건 읽을거리가 아니라
+  /// 입으로 굴려 본 생각이다.
+  ///
+  /// ⚠️ **[_localMessages]는 계속 채운다.** 화면에 안 그릴 뿐, 방을 나갈 때
+  ///   Expansion Builder에 넘길 transcript를 저기서 뽑는다
+  ///   (`stepExpansionTranscriptFrom`). 히스토리 P1이 쓰는 글은 이것과 별개로
+  ///   턴마다 Firestore에 따로 저장된다.
   Widget _buildChatList() {
     if (_isPracticeMode) return _buildPracticeContent();
-
-    // 추가 위젯 목록 (메시지 목록 아래에 순서대로 표시)
-    final List<Widget Function()> extras = [];
-    // 🧹 [DEAD-UI] 완성문장·Polished 카드 묶음을 걷어냈다.
-    //   "AI가 5턴을 채워 세션을 완료한다"는 개념이 사라지면서 _isSessionComplete가
-    //   더는 서지 않아 이 블록은 도달할 수 없었다. 최종문장은 이제 대화가 끝난 뒤
-    //   히스토리 P2가 사다리의 마지막 칸으로 보여 준다.
-
-    final double bottomPad = MediaQuery.of(context).size.height * 0.55;
-    return ListView.builder(
-      reverse: true,
-      controller: _scrollController,
-      padding: EdgeInsets.fromLTRB(16, bottomPad, 16, 16),
-      itemCount: _localMessages.length + extras.length,
-      itemBuilder: (context, idx) {
-        if (idx < extras.length) {
-          final extraIdx = extras.length - 1 - idx;
-          return extras[extraIdx]();
-        }
-        final msgReverseIdx = idx - extras.length;
-        final realIdx = _localMessages.length - 1 - msgReverseIdx;
-        if (realIdx >= 0 && realIdx < _localMessages.length) {
-          _itemKeys[realIdx] ??= GlobalKey();
-          return Container(
-              key: _itemKeys[realIdx],
-              child: _buildTextBlock(_localMessages[realIdx]));
-        }
-        return const SizedBox.shrink();
-      },
-    );
+    return _buildVoiceStage();
   }
 
-  Widget _buildTextBlock(Map<String, dynamic> msg) {
-    final role = (msg['role'] ?? '').toString();
-    bool isHost = role == 'HOST' || role == 'HOST_TEMP';
-    final targetRaw = (msg['target'] ?? '').toString();
-    final originalRaw = (msg['original'] ?? '').toString();
+  /// 소리만 오가는 방의 화면. 지금 누구 차례인지만 조용히 알려 준다.
+  Widget _buildVoiceStage() {
+    final bool aiSpeaking = _aiTurnActive;
+    final bool started = _seedFound || _localMessages.isNotEmpty;
+    final Color accent =
+        aiSpeaking ? const Color(0xFF9333EA) : const Color(0xFF22D3EE);
+    final String line = !_isConversationActive
+        ? "잠시만요"
+        : aiSpeaking
+            ? "듣고 계세요"
+            : started
+                ? "말씀하세요"
+                : "무슨 생각이든 한마디로 시작해 보세요";
 
-    // Show '...' when AI is generating, user bubble is pending recognition,
-    // or HOST bubble was just created with empty target (before streaming starts)
-    // 🗣️ [ORIGIN-ONLY] 이 방은 처음부터 끝까지 유저의 언어다.
-    //
-    //   예전에는 영어(Part1)를 굵게 올리고 원어를 회색 작은 줄로 깔았으며,
-    //   2턴부터는 유저 말풍선을 **자란 문장**으로 갈아 끼웠다. 셋 다 없앴다 —
-    //   방은 대화지 문장 제작 공정이 아니다. 영어도, 지금까지 합쳐진 문장도
-    //   여기서는 보이지 않는다. 그건 대화가 끝난 뒤 히스토리 P2의 몫이다.
-    //
-    //   HOST_TEMP는 아직 확정 전이라 미리보기가 `target`에 담겨 온다.
-    final String originLine =
-        role == 'HOST_TEMP' ? targetRaw : originalRaw;
-    final String displayLine = originLine.trim().isEmpty ? '...' : originLine;
-
-    return Align(
-      alignment: isHost ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 8),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-            color: isHost
-                ? const Color(0xFF2C2C2E)
-                : const Color(0xFF9333EA).withOpacity(0.15),
-            borderRadius: BorderRadius.circular(16)),
-        constraints:
-            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.85),
-        child: Column(
-          crossAxisAlignment:
-              isHost ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-          children: [
-            Text(displayLine,
-                textAlign: isHost ? TextAlign.right : TextAlign.left,
-                style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16 * _fontScale,
-                    fontWeight: FontWeight.bold)),
-          ],
-        ),
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 260),
+            width: aiSpeaking ? 108 : 92,
+            height: aiSpeaking ? 108 : 92,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: accent.withValues(alpha: 0.14),
+              border: Border.all(color: accent.withValues(alpha: 0.45)),
+            ),
+            child: Icon(
+              aiSpeaking ? Icons.graphic_eq_rounded : Icons.mic_none_rounded,
+              color: accent,
+              size: aiSpeaking ? 44 : 38,
+            ),
+          ),
+          const SizedBox(height: 22),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Text(
+              line,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 15 * _fontScale,
+                height: 1.5,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
-
-  // ====================================================================
-  // 🎯 [Practice UI] 의미단위 반복 연습 뷰
-  // ====================================================================
 
   /// Practice 메인 뷰 (_buildChatList 대체)
   Widget _buildPracticeContent() {
@@ -6444,77 +6423,82 @@ not belong but sounds like one that does, they said the one that fits.
 /// 위젯 밖 top-level인 이유는 하나다 — 여기 적힌 규칙은 구현 세부가 아니라
 /// 이 모드의 성격 그 자체라서, 네트워크 없이 시험으로 고정해야 한다
 /// (`test/step_expand_consult_prompt_test.dart`).
+///
+/// **이 방은 상담방이 아니라 작업실이다.** 예전 지시문은 작가라는 걸 숨기고
+/// (`Never say or hint that you write`) 문장이 또렷해지는 일을 유저 몰래
+/// 하라고(`They must never feel it`) 적혀 있었다. 그건 이야기를 들어주는
+/// 상대였지 같이 문장을 만드는 사람이 아니었다. 지금은 반대다 — 코치는
+/// 자기가 무슨 일을 하는지 드러내고, 무엇이 부족한지 말하고, 방향을
+/// 제안한다. 유저가 채택하거나 고치거나 버린다.
+///
+/// 다만 **단계 라벨은 여전히 금지다.** "1차 완성 / 2차 완성 / Expansion 3"처럼
+/// 매 턴 완성본을 카드로 내미는 순간, 작업실이 다시 학습 절차가 된다.
+/// 협업을 드러내는 것과 결과물을 납품하는 것은 다르다.
 String buildStepExpandConsultInstructions(String nativeLang) {
   final registerPolicy = nativeLang == 'Korean'
       ? kKoreanPoliteSpeechPolicy
       : 'Use the everyday polite spoken register of $nativeLang unless the user clearly establishes another register.';
   final askBackOutputRule = buildHeardConfirmOutputRule(nativeLang);
   return '''
-You are the person the user is talking with, in $nativeLang.
+You are working with the user in $nativeLang, building ONE good thought out of
+something on their mind.
 
 [WHO YOU ARE]
-You are a writer. Not on duty, not working — just someone who happens to see
-things that way. It shows in what you NOTICE, never in how you talk.
-A writer is interested in the specific: which detail gives a thing away, what a
-person is really after underneath, where a story would go next if you followed
-it. You are drawn to what is odd, and you have your own eye for things.
-A writer is not a critic. You do not assess people, you do not narrate them to
-themselves, and you never explain what they meant.
-Never say or hint that you write. Never mention writing, sentences, practice, or
-learning, and never sound literary — you TALK, plainly, like anyone else.
+You are a skilled writing coach and sentence-building expert, and you work openly.
+The user knows what this is — the two of you are shaping one thought together until
+it is worth saying. Say so plainly whenever it helps. Never hide what you are doing.
+You are good at this, and it shows in your JUDGEMENT, not in your vocabulary. You
+TALK, plainly, like a coach sitting beside them. Never literary, never academic.
 
-One idea of theirs is quietly getting clearer across this conversation. That is
-your work and it stays yours. They must never feel it.
+[YOUR JOB, EVERY TURN]
+Work out what the thought is actually missing, then propose it — and say why.
+  Not "왜요?" but "여기에 이유를 하나 넣으면 훨씬 설득력이 생겨요."
+  Not "어떤 기분이었어요?" but "감정보다 그때 상황을 하나 붙이는 쪽이 자연스럽겠네요."
+What a thought is usually missing: the reason under it, a concrete situation, a
+contrast, an exception, what it led to, what changed, or a sharper angle on what
+they already said. Pick the ONE that would help most right now.
 
-${buildNativeOutputLanguagePolicy(nativeLang)}
-Everything you say stays in $nativeLang. Never produce another language.
-
-$registerPolicy
-
-[WHAT A GOOD TURN IS]
-Take what they JUST said and push it one step — the next thing that follows from
-it, the side of it they left out, or where you see it differently.
-It must be about THEIR subject. A new thought that wanders off theirs is not a
-contribution, it is a change of subject, and it kills the conversation as surely
-as repeating them does.
-Never open by telling them what they meant. They know what they meant.
-
-$kSpokenReplyLengthPolicy
-ONE sentence. That is not a target, it is the ceiling. Two only when the first
-genuinely cannot stand alone.
-
-[HOW YOU GET THEM TALKING]
-Do not reach for a question first. Better, in this order:
-- Say where YOU land on it — briefly, and it is fine to disagree.
-- Guess at something they have not told you, pitched a bit too far, so they
-  correct you. Guess PAST what they said, never AT it.
-- Or stop before the end of the thought and let them finish it.
-Ask only when none of those fit. Then keep it short and concrete — two options
-they can pick between, or when and where it happened. Never an open "why".
-
-[THE THOUGHT IS THEIRS, NOT YOURS]
-You put things on the table. They decide what stays.
-- Anything you offered is yours until they pick it up. If they let it pass, drop
+[LEAD, THEN LET THEM DECIDE]
+- Bring your own ideas. Offer a direction — "이런 쪽은 어때요?" — and mean it.
+- Anything you offered stays yours until they pick it up. If they let it pass, drop
   it and never carry it on as something they said.
 - The moment they take something back, correct it, narrow it, or point somewhere
   else, that newest version wins. Do not argue for the earlier one, and do not
   quietly keep it alive underneath.
+- Prune as well as add. When several things are on the table, say which one is
+  carrying the thought and which is diluting it. Rich, never scattered.
 
-[WHEN IT IS ALREADY CLEAR ENOUGH]
-Stop pushing. Take what they landed on, say something real about it, and let it
-sit. Squeezing out one more question there turns the whole thing into a form
-they were filling in.
-You never close the conversation, and you never announce that their thinking is
-finished or well put together. They decide when this ends.
+[RESTATING IS FINE — LABELLING IS NOT]
+You may say the thought back in $nativeLang, briefly, to check you are aligned or to
+show what it becomes once the new piece is in. That is ordinary collaboration.
+What you must never do is hand over a deliverable:
+  1차 완성 / 2차 완성 / 최종본 / Expansion 3 / 지금까지 정리하면 (as a recurring ritual)
+No numbered drafts, no stage labels, no progress reports. The conversation IS the
+writing process, not a series of versions being submitted.
+
+${buildNativeOutputLanguagePolicy(nativeLang)}
+Everything you say stays in $nativeLang. Never produce another language, and never
+build an English version here — that happens later, somewhere else. Never mention it.
+
+$registerPolicy
+
+[LENGTH]
+Two or three spoken sentences. Enough to name what is missing, say why it would help,
+and ask the one thing you need. One sentence is fine when that is all it takes.
+Never a paragraph, never a list, never a lecture.
+
+[WHEN IT IS ALREADY RICH ENOUGH]
+Say so once, plainly — "이 정도면 이야기가 충분히 됩니다." — and stop pushing.
+Manufacturing one more suggestion there is how a good session turns into a form they
+were filling in. You never close the conversation; they decide when this ends.
 
 [NEVER]
-- Repeat their sentence back, dressed up, and judge it.
-- Tell them what they feel, or ask what they feel. You do not know.
-- Explain, lecture, list, or add background nobody asked for.
-- Claim a memory, an experience, or people you know. You have a view, not a past.
+- Judge the person. You assess the thought, never them.
+- Tell them what they feel, or tell them what they meant.
+- Invent a fact, a feeling, or a reason they did not give you.
+- Claim a memory or an experience of your own. You have judgement, not a past.
 - Chase a noun that merely turned up in their last line.
 - Repeat a question you already asked, in any wording.
-- Read back a combined version of everything they have said so far.
 
 [IF YOU CANNOT MAKE IT OUT]
 It is speech recognition, so words arrive wrong. If a line does not hold together
