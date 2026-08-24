@@ -31,6 +31,8 @@ import 'routine_mode_roleplay.dart' show TtsCache;
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
 import '/custom_code/services/ai_style.dart';
+import '/custom_code/services/step_expansion_builder.dart';
+import '/custom_code/services/step_expansion_finalizer.dart';
 import '/custom_code/services/audio_silence_analyzer.dart';
 import '/custom_code/services/breath_echoing_engine.dart';
 import '/custom_code/services/breath_segment.dart';
@@ -266,6 +268,23 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // 📦 [Box 4-C: Step Expand Practice 1 & 2 상태]
   bool _isStepExpandRoom = false;
   List<Map<String, dynamic>> _stepExpandTurns = [];
+
+  // 🌱 [EXPANSION] 대화가 끝난 뒤 만들어진 사다리. **새 세션에만 있다.**
+  //   `_expansionStatus`가 비어 있으면 구 세션이고, 그 방은 예전 P2 경로를
+  //   그대로 탄다. 둘을 한 화면에서 섞지 않는다 — "새 게 없으면 옛 걸로"
+  //   같은 폴백을 두면 어느 사다리를 보고 있는지 아무도 모르게 된다.
+  List<StepExpansionStep> _expansionSteps = const <StepExpansionStep>[];
+  String _expansionStatus = '';
+  String _expansionFailure = '';
+  DateTime? _expansionStartedAt;
+  bool _isRebuildingExpansions = false;
+
+  /// 이 방이 새 방식인가. 필드가 있느냐 없느냐 하나로 가른다.
+  bool get _isExpansionRoom => _expansionStatus.isNotEmpty;
+
+  /// 사다리가 실제로 준비된 방인가.
+  bool get _expansionReady =>
+      _expansionStatus == StepExpansionStatus.ok && _expansionSteps.isNotEmpty;
   bool _isPreparingStepP3 = false;
   String? _stepP3PreparationError;
   int _stepP3PreparationGeneration = 0;
@@ -1092,6 +1111,20 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
 
       final polished = (data['polished_sentence'] as String?) ?? '';
       final expanded = (data['expanded_sentence'] as String?) ?? '';
+      // 🌱 [EXPANSION] 새 Step Expand 방은 대화가 끝난 뒤 사다리를 만들고,
+      //   그 마지막 칸이 최종문장이다. `expansion_status`가 있으면 새 방이다 —
+      //   구 방에는 이 필드가 아예 없어 예전 경로를 그대로 탄다.
+      final expansionStatus =
+          (data['expansion_status'] as String?)?.trim() ?? '';
+      final finalSentence = (data['final_sentence'] as String?)?.trim() ?? '';
+      _expansionStatus = expansionStatus;
+      _expansionFailure =
+          (data['expansion_failure'] as String?)?.trim() ?? '';
+      _expansionStartedAt =
+          (data['expansion_started_at'] as Timestamp?)?.toDate();
+      _expansionSteps = expansionStatus == StepExpansionStatus.ok
+          ? parseStoredExpansions(data['expansions'])
+          : const <StepExpansionStep>[];
       final roomMode =
           _inferHistoryMode(data); // 🆕 [ROUTER-FIX] 버튼 표시 조건용 mode 캐시
       _cachedRoomMode = roomMode;
@@ -1101,7 +1134,13 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       if (roomMode == 'step_expand' ||
           (roomMode.isEmpty && (polished.isNotEmpty || expanded.isNotEmpty))) {
         _polishedSentence = polished;
-        _expandedSentence = expanded.isNotEmpty ? expanded : polished;
+        // P3가 읽는 문장은 하나뿐이다.
+        //   새 방: Builder가 만든 final_sentence. 실패했으면 비어 있고, 그때는
+        //          구경로 값으로 몰래 때우지 않는다 — 실패가 보여야 다시 만든다.
+        //   구 방: 예전대로 expanded_sentence(없으면 polished).
+        _expandedSentence = expansionStatus.isNotEmpty
+            ? finalSentence
+            : (expanded.isNotEmpty ? expanded : polished);
         _polishedLoadDone = true;
         _practicingPolished = false;
 
@@ -1130,7 +1169,12 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
           _isPreparingStepP3 = true;
           _stepP3PreparationError = null;
         });
-        unawaited(_prepareStepP3(_expandedSentence, generation));
+        // 새 방인데 사다리가 아직/영영 없으면 P3에 걸 문장이 없다.
+        //   여기서 억지로 걸면 "P3 준비 실패"가 뜨는데, 실제 원인은 사다리가
+        //   없는 것이다. 화면은 그쪽을 가리켜야 한다.
+        if (_expandedSentence.trim().isNotEmpty) {
+          unawaited(_prepareStepP3(_expandedSentence, generation));
+        }
         return;
       }
 
@@ -5732,7 +5776,40 @@ RULES — follow exactly:
       fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
     );
     if (_phase == ShadowingPhase.part2Practice) {
-      return _buildP2ChunkLine(line, isCurrent, base);
+      final chunkLine = _buildP2ChunkLine(line, isCurrent, base);
+      // 🏁 마지막 칸이 곧 이 세션의 최종문장이다. 여기서 자람이 끝났다는 걸
+      //   알아야 P3에서 다시 만났을 때 "내가 만든 그 문장"으로 읽힌다.
+      //   구 방에는 이 표시가 없다 — `isFinalStep`을 새 방만 싣는다.
+      if (line['isFinalStep'] != true) return chunkLine;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.flag_rounded,
+                    size: 12 * _fontScale,
+                    color: const Color(0xFF81C784)
+                        .withValues(alpha: isCurrent ? 1.0 : 0.5)),
+                const SizedBox(width: 4),
+                Text(
+                  "Where it landed",
+                  style: TextStyle(
+                    color: const Color(0xFF81C784)
+                        .withValues(alpha: isCurrent ? 1.0 : 0.5),
+                    fontSize: 11 * _fontScale,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          chunkLine,
+        ],
+      );
     }
     return Text(text,
         textAlign: lineIsAi ? TextAlign.right : TextAlign.left, style: base);
@@ -5755,14 +5832,51 @@ RULES — follow exactly:
     }
   }
 
+  /// 이번 칸에서 강조할 청크 하나를 고른다. 답은 셋 중 하나다.
+  ///
+  /// * `null` — **구 방이다.** 줄에 `primaryMorph` 칸 자체가 없다. 예전처럼
+  ///   변화 청크를 모두 칠한다. 이 폴백은 오직 여기에만 쓴다.
+  /// * `-1` — 새 방인데 지목이 없거나 문장에서 못 찾았다. **아무 데도 칠하지
+  ///   않는다.** 새 설계의 핵심이 "한 단계당 핵심 변화 하나"라서, 지목이 빈
+  ///   것은 호환 상황이 아니라 Builder 결과 이상이다. 전부 칠해서 덮으면
+  ///   이상이 정상처럼 보인다.
+  /// * `>= 0` — 지목된 청크 하나.
+  ///
+  /// §20의 요구는 분명하다 — **가장 중요한 변화 한 곳**이다. 바뀐 데를 전부
+  /// 칠하면 무엇이 들어왔는지가 오히려 안 보인다.
+  int? _primaryMorphIndex(Map<String, dynamic> line, List<P2Chunk> chunks) {
+    // 칸이 아예 없으면 구 방이다. 빈 문자열(새 방의 이상)과 구분해야 한다.
+    if (!line.containsKey('primaryMorph')) return null;
+    final morph = (line['primaryMorph'] ?? '').toString().trim();
+    if (morph.isEmpty) {
+      debugPrint('[P2-MORPH] step=${line['stepNumber']} 지목 없음 → 강조 생략');
+      return -1;
+    }
+    for (var i = 0; i < chunks.length; i++) {
+      if (chunks[i].text.trim() == morph) return i;
+    }
+    for (var i = 0; i < chunks.length; i++) {
+      if (chunks[i].text.contains(morph)) return i;
+    }
+    debugPrint('[P2-MORPH] step=${line['stepNumber']} 지목이 청크와 안 맞음 → 강조 생략');
+    return -1;
+  }
+
   Widget _buildP2ChunkLine(
       Map<String, dynamic> line, bool isCurrent, TextStyle base) {
     final chunks = _p2ChunksForLine(line);
     final active = isCurrent ? _p2ActiveChunkIndex : -1;
+    // 새 방은 강조가 한 곳뿐이다. 구 방(null)만 예전대로 전부 칠한다.
+    final morphIndex = _primaryMorphIndex(line, chunks);
+    final bool singleMorph = morphIndex != null;
     final spans = <InlineSpan>[];
     for (var index = 0; index < chunks.length; index++) {
       final chunk = chunks[index];
-      final accent = _p2ChunkAccent(chunk);
+      // 강조를 한 곳으로 좁힌 방에서는, 지목되지 않은 변화는 색을 빼
+      // 담담하게 둔다. 그래야 지목된 한 곳이 실제로 눈에 들어온다.
+      final accent = singleMorph && index != morphIndex
+          ? Colors.white
+          : _p2ChunkAccent(chunk);
       final isActive = index == active;
       final isWaiting = active >= 0 && index > active;
       final backgroundAlpha = chunk.type == 'kept'
@@ -7948,6 +8062,44 @@ RULES — follow exactly:
   // 📦 [Box 11-D: Step Expand Practice 1 & 2 엔진]
   // ============================================================================
 
+  /// 사다리 → P2 줄. **새 방 전용이다.**
+  ///
+  /// 예전 P2는 마지막 칸을 빼 두었다("그건 P3 몫") . 여기서는 넣는다 —
+  /// 마지막 칸이 곧 Final이고, 생각이 어디까지 자랐는지를 보여 주는 것이
+  /// 이 화면의 목적이기 때문이다. 대신 마지막임을 표시해 P3에서 다시 만날
+  /// 문장이라는 걸 알 수 있게 한다.
+  void _startPart2FromExpansions() {
+    final lines = <Map<String, dynamic>>[];
+    for (var i = 0; i < _expansionSteps.length; i++) {
+      final step = _expansionSteps[i];
+      lines.add(<String, dynamic>{
+        'role': 'USER',
+        'text': step.text,
+        // 변화를 재는 기준선은 직전 칸이다(예전에는 같은 턴의 짧은 번역문).
+        'part1': step.previousText,
+        'p2Chunks': step.chunks,
+        'primaryMorph': step.primaryMorph,
+        'addedMeaning': step.addedMeaning,
+        'stepNumber': step.step,
+        'isFinalStep': i == _expansionSteps.length - 1,
+      });
+    }
+    if (lines.isEmpty || !mounted) return;
+    setState(() {
+      _phase = ShadowingPhase.part2Practice;
+      _tutorLines = lines;
+      currentIndex = 0;
+      _tutorCurrentIdx = 0;
+      _isAutoRecording = false;
+      _tutorAwaitingStart = true;
+      _swapRoles = false;
+      _tutorAiSpeaking = false;
+      _tutorUserRecording = false;
+      _tutorPlayingFullback = false;
+      _showRetryHint = false;
+    });
+  }
+
   /// messages 서브컬렉션 docs → _stepExpandTurns 파싱
   ///
   /// 한 턴은 **유저가 먼저 말하고 AI가 받는다**. 대화방이 저장하는 순서도
@@ -8040,6 +8192,13 @@ RULES — follow exactly:
   }
 
   Future<void> _startPart2Practice() async {
+    // 🌱 [EXPANSION] 새 방은 사다리를 그대로 읽는다. 대화 턴과 단계는 1:1이
+    //   아니므로(§17) 여기서 턴을 세지 않는다.
+    if (_isExpansionRoom) {
+      if (!_expansionReady) return;
+      _startPart2FromExpansions();
+      return;
+    }
     if (_stepExpandTurns.isEmpty) return;
     final lines = <Map<String, dynamic>>[];
     final totalTurns = _stepExpandTurns.length;
@@ -8734,8 +8893,102 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
     );
   }
 
+  /// 사다리를 다시 만든다.
+  ///
+  /// **원본은 그때 나눈 대화다.** 대화방 로직을 다시 태우지 않고, 구
+  /// `expanded_sentence`도 쳐다보지 않는다. messages 서브컬렉션을 그대로 읽어
+  /// 처음 만들 때와 같은 길로 보낸다.
+  Future<void> _retryExpansionBuild() async {
+    if (_isRebuildingExpansions || _apiKey.isEmpty) return;
+    setState(() => _isRebuildingExpansions = true);
+    try {
+      var docs = _cachedDocs;
+      if (docs.isEmpty) {
+        final snap = await widget.historyDoc
+            .collection('messages')
+            .orderBy('created_at', descending: false)
+            .get();
+        docs = snap.docs;
+        _cachedDocs = docs;
+      }
+      final transcript = stepExpansionTranscriptFromMessages(
+        docs
+            .map((doc) => (doc.data() as Map<String, dynamic>?) ?? const {})
+            .toList(growable: false),
+      );
+      if (!transcript.any((turn) => turn.isUser)) {
+        debugPrint('[EXPANSION-RETRY] 유저 턴 없음 → 다시 만들 것이 없다');
+        return;
+      }
+      await finalizeStepExpansions(
+        roomRef: widget.historyDoc,
+        apiKey: _apiKey,
+        transcript: transcript,
+        originLang: (_sessionNativeLang ?? 'Korean').trim().isEmpty
+            ? 'Korean'
+            : _sessionNativeLang!.trim(),
+        targetLang: _sessionTargetLangName(),
+        onLog: (tag, message) => debugPrint('$tag $message'),
+      );
+      if (!mounted) return;
+      // 방금 쓴 결과를 그대로 다시 읽는다.
+      final fresh = await widget.historyDoc.get();
+      if (!mounted) return;
+      final data = fresh.data() as Map<String, dynamic>? ?? const {};
+      setState(() {
+        _expansionStatus =
+            (data['expansion_status'] as String?)?.trim() ?? '';
+        _expansionFailure =
+            (data['expansion_failure'] as String?)?.trim() ?? '';
+        _expansionStartedAt =
+            (data['expansion_started_at'] as Timestamp?)?.toDate();
+        _expansionSteps = _expansionStatus == StepExpansionStatus.ok
+            ? parseStoredExpansions(data['expansions'])
+            : const <StepExpansionStep>[];
+        _expandedSentence =
+            (data['final_sentence'] as String?)?.trim() ?? '';
+      });
+      if (_expansionReady && _expandedSentence.isNotEmpty) {
+        unawaited(_prepareStepP3(
+            _expandedSentence, ++_stepP3PreparationGeneration));
+      }
+    } catch (error) {
+      debugPrint('[EXPANSION-RETRY] failed reason=${error.runtimeType}');
+    } finally {
+      if (mounted) setState(() => _isRebuildingExpansions = false);
+    }
+  }
+
+  /// 새 방의 P2/P3 카드에 붙일 안내 한 줄. 구 방은 null이라 예전 문구를 쓴다.
+  String? _expansionNotice() {
+    if (!_isExpansionRoom) return null;
+    if (_isRebuildingExpansions) return "Rebuilding your sentence...";
+    if (_expansionStatus == StepExpansionStatus.ok) return null;
+    final retryable = canRetryStepExpansion(
+      status: _expansionStatus,
+      startedAt: _expansionStartedAt,
+    );
+    if (_expansionStatus == StepExpansionStatus.building) {
+      return retryable
+          ? "Sorting your sentence took too long — tap to try again"
+          : "Sorting out what you said...";
+    }
+    return "Couldn't put your sentence together — tap to try again";
+  }
+
   Widget _buildStepExpandSelectScreen() {
-    final bool hasData = _stepExpandTurns.isNotEmpty;
+    // 🌱 [EXPANSION] 새 방과 구 방은 여는 조건이 다르다.
+    //   새 방은 사다리가 준비돼야 열리고, 구 방은 예전대로 턴이 있으면 열린다.
+    final String? expansionNotice = _expansionNotice();
+    final bool expansionRetryable = _isExpansionRoom &&
+        !_isRebuildingExpansions &&
+        canRetryStepExpansion(
+          status: _expansionStatus,
+          startedAt: _expansionStartedAt,
+        );
+    final bool hasData = _isExpansionRoom
+        ? _expansionReady
+        : _stepExpandTurns.isNotEmpty;
     // 📐 시스템 글자 크기 1.7배 + 화면 확대(density 480→540)를 함께 쓰는 기기에서
     //    이 화면이 무너졌다(실기기 확인, 논리 폭 320dp). 제목이 두 줄로 쪼개져
     //    닫기 버튼과 부딪히고 카드 부제가 "역/할교환"처럼 어절 중간에서 끊겼다.
@@ -8777,31 +9030,49 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
               subtitle: "Short-answer role swap",
               color: const Color(0xFF4ADE80),
               icon: Icons.swap_horiz_rounded,
-              onTap: hasData ? _startPart1Practice : null,
+              // P1은 사다리와 무관하다 — 나눈 대화 자체가 자료다.
+              //   사다리를 못 만들어도 P1은 열려 있어야 한다.
+              onTap: _stepExpandTurns.isNotEmpty ? _startPart1Practice : null,
             ),
             const SizedBox(height: 12),
             _buildPracticeSelectionCard(
               title: "Practice 2",
-              subtitle: "Watch and hear each sentence grow",
+              subtitle:
+                  expansionNotice ?? "Watch and hear each sentence grow",
               color: const Color(0xFF38BDF8),
               icon: Icons.expand_more_rounded,
-              onTap: hasData ? _startPart2Practice : null,
+              isLoading: _isRebuildingExpansions ||
+                  (_isExpansionRoom &&
+                      _expansionStatus == StepExpansionStatus.building &&
+                      !expansionRetryable),
+              // 🚫 사다리가 없는 방을 억지로 열지 않는다. 빈 P2를 띄우느니
+              //   왜 없는지 보여 주고 다시 만들 길을 준다.
+              onTap: hasData
+                  ? _startPart2Practice
+                  : (expansionRetryable ? _retryExpansionBuild : null),
             ),
             const SizedBox(height: 12),
             _buildPracticeSelectionCard(
               title: "Practice 3",
-              subtitle: _isPreparingStepP3
-                  ? "Preparing P3... P1 and P2 are ready"
-                  : (_stepP3PreparationError ?? "Echoing & Shadowing Practice"),
+              subtitle: _isExpansionRoom && !_expansionReady
+                  ? (expansionNotice ?? "Echoing & Shadowing Practice")
+                  : _isPreparingStepP3
+                      ? "Preparing P3... P1 and P2 are ready"
+                      : (_stepP3PreparationError ??
+                          "Echoing & Shadowing Practice"),
               color: const Color(0xFFA78BFA),
               icon: Icons.music_note_rounded,
-              isLoading: _isPreparingStepP3,
-              onTap: _isPreparingStepP3
+              isLoading: _isPreparingStepP3 || _isRebuildingExpansions,
+              // 새 방에서 Final이 없다는 건 사다리가 없다는 뜻이다. P3 준비를
+              // 다시 거는 게 아니라 사다리부터 다시 만들어야 한다.
+              onTap: _isPreparingStepP3 || _isRebuildingExpansions
                   ? null
-                  : _stepP3PreparationError != null ||
-                          _expandedSentence.trim().isEmpty
-                      ? _retryStepP3Preparation
-                      : _goToChunkPractice,
+                  : (_isExpansionRoom && !_expansionReady)
+                      ? (expansionRetryable ? _retryExpansionBuild : null)
+                      : _stepP3PreparationError != null ||
+                              _expandedSentence.trim().isEmpty
+                          ? _retryStepP3Preparation
+                          : _goToChunkPractice,
             ),
             const Spacer(),
             TextButton(
