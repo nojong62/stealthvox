@@ -1525,7 +1525,11 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
   /// 오랫동안 "손잡이는 걸어 뒀지만 소리 나는 동안 마이크가 닫혀 있어 끊을 수
   /// 없다"는 상태였다. 이제 [_speakKoreanInternal]이 재생 중에도 마이크를
   /// 열어 두므로 이 길도 실제로 끊긴다(§[BARGE-IN]).
+  /// 코치가 방금 소리 내어 말한 줄. [_looksLikeSelfEcho]가 이걸 본다.
+  String _lastAiSpokenLine = '';
+
   Future<void> _speakAiKorean(String text) async {
+    _lastAiSpokenLine = text;
     await _speakKoreanInternal(text,
         timeoutTag: '⚠️ [AI-TTS-TIMEOUT]', allowBargeIn: true);
   }
@@ -1639,13 +1643,41 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
     widget.onListeningReady?.call();
   }
 
+  /// 지금 잡힌 전사가 **코치 자기 목소리**인가.
+  ///
+  /// 전이중으로 열어 두면 AEC가 약한 기기에서 스피커 소리가 마이크로 새고,
+  /// 그게 유저 발화로 확정되면 대화가 자기 말에 자기가 답하는 꼴이 된다.
+  /// 방금 코치가 한 말과 글자가 겹치는지로 가른다 — 완벽한 판정은 아니지만
+  /// 되먹임은 원문이 거의 그대로 돌아오므로 이걸로 잡힌다.
+  bool _looksLikeSelfEcho(String transcript) {
+    final said = _lastAiSpokenLine.trim();
+    final heard = transcript.trim();
+    if (said.isEmpty || heard.length < 6) return false;
+    final norm = RegExp(r'[^가-힣a-zA-Z0-9]');
+    final a = said.replaceAll(norm, '');
+    final b = heard.replaceAll(norm, '');
+    if (a.isEmpty || b.isEmpty) return false;
+    // 들린 말이 코치 대사 안에 통째로 들어 있으면 되먹임으로 본다.
+    if (a.contains(b)) return true;
+    // 앞 12자가 같아도 마찬가지다(뒤가 잘려 들어온 경우).
+    final head = b.length < 12 ? b : b.substring(0, 12);
+    return head.length >= 8 && a.contains(head);
+  }
+
   Future<void> _startStreamingListening() async {
     if (_streamingCaptureOpen) {
       _log('🎤 [LISTEN-SKIP]', '이미 듣는 중 → 중복 오픈 무시');
       return;
     }
     if (_isSessionComplete || _isPracticeMode) return;
-    if (_aiTurnActive || _ttsQueueManager.isBusy) {
+    // 🙋 [FULL-DUPLEX] 예전에는 코치가 말하는 동안 마이크를 아예 닫았다.
+    //   그래서 [_handleBargeIn]은 손잡이만 있고 잡을 손이 없었다 — 말로
+    //   끼어들 방법이 없는 무전기가 됐다.
+    //
+    //   바지인이 걸려 있는 동안에는 연다. 녹음이 `echoCancel: true`라 스피커로
+    //   나가는 코치 목소리는 지워지고 유저 목소리만 남는 것이 정상 동작이다.
+    //   혹시 새어 들어오면 [_looksLikeSelfEcho]가 그 턴을 버린다.
+    if (!_bargeInArmed && (_aiTurnActive || _ttsQueueManager.isBusy)) {
       _log('🎤 [LISTEN-SKIP]', 'turn/tts busy');
       return;
     }
@@ -2284,6 +2316,17 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
     }
     _log('[STEP-STT]',
         'final_received item=$itemId generation=$_listenGeneration len=${text.length}');
+    // 🔊 [SELF-ECHO] 전이중으로 열어 둔 마이크에 코치 목소리가 새어 들어온
+    //   경우다. 이걸 유저 발화로 확정하면 코치가 자기 말에 자기가 답한다.
+    if (_looksLikeSelfEcho(text)) {
+      _log('🔊 [SELF-ECHO]', 'dropped len=${text.length} text="$text"');
+      return;
+    }
+    // 🙋 [BARGE-IN] 코치가 말하는 중에 잡힌 유저 발화다. 여기서 말을 끊는다 —
+    //   화면 탭과 같은 자리로 보낸다.
+    if (_bargeInArmed && !_bargeInFired) {
+      _handleBargeIn();
+    }
     // 🔁 발화 순서는 소켓의 committed 순번이 원본이다. 도착 순서로 이으면
     //   뒷말이 먼저 끝났을 때 문장이 뒤집힌다.
     final int order =
@@ -2753,11 +2796,47 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
     final previousPending = List<String>.from(_turnGatePendingParts);
     final mergeInputs = <String>[..._turnGatePendingParts, userKorean];
     Map<String, dynamic>? hostBubble;
+    // ⚡ [PARALLEL] 합치기 게이트와 나란히 띄우는 코치 대사. try 밖에 두는
+    //   이유는 하나다 — 게이트 도중에 터져도 catch에서 버릴 수 있어야 한다.
+    //   받을 사람 없는 future의 실패는 잡히지 않은 예외로 새어 나온다.
+    Future<String>? aiKoreanFuture;
+    var aiKoreanClaimed = false;
+    void discardPendingReply() {
+      if (!aiKoreanClaimed) aiKoreanFuture?.ignore();
+    }
     try {
       setState(() {
         _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
       });
 
+      // ⚡ [PARALLEL] 합치기 게이트와 코치 대사를 **동시에** 띄운다.
+      //
+      //   예전에는 줄줄이 기다렸다 — 합치기(0.9~1.2초) 끝나야 대사 생성
+      //   (1.4~1.7초)이 시작하고, 그다음에야 TTS(1.7~2.9초)였다. 실기기에서
+      //   유저가 말을 멈춘 뒤 5초가 비었다.
+      //
+      //   지금은 둘이 서로를 필요로 하지 않는다. Stage 3에서 사다리를
+      //   Expansion Builder가 가져간 뒤로 합치기 결과는 **게이트 판정에만**
+      //   쓰이고, 코치 대사는 유저 발화와 대화 문맥만 본다. 그래서 나란히
+      //   보내고 게이트 결과로 채택 여부만 정한다.
+      //
+      //   반려된 턴에서는 만들어 둔 대사를 버린다. 토큰은 조금 버리지만,
+      //   통과하는 턴이 훨씬 많고 거기서 1초를 통째로 번다.
+      final questionContext = _questionContext(currentUserLine: userKorean);
+      // ❓ [ASK-RATIO] 이 턴의 말풍선을 올리기 **전에** 센다. 아래에서 올리는
+      //   AI placeholder가 목록에 끼면 셈이 한 칸씩 밀린다.
+      final expandMustNotAsk = _expandMustNotAsk();
+      if (expandMustNotAsk) {
+        _log('❓ [ASK-RATIO]', 'turn=$turnNumber 직전 2턴 내 질문 있음 → 이번 턴 질문 금지');
+      }
+      aiKoreanFuture = StepExpandBrain.generateKoreanTurn(
+        apiKey: _openAiKey,
+        instructions: '${_buildStepExpandSystemInstructions()}\n'
+            '\n[THIS TURN]\n'
+            '${_buildStepExpandTurnInstructions(turnNumber, mustNotAsk: expandMustNotAsk)}',
+        recentConversation: questionContext,
+        userText: userKorean,
+      );
       // 1️⃣ 확장 문장을 AI 질문보다 먼저 확정한다. 순서가 뒤집히면 유저는
       //    자기 문장이 어떻게 자랐는지 보기도 전에 다음 질문을 듣게 된다.
       //    1턴은 방금 한 말이 곧 씨앗이라 합치기가 필요 없다.
@@ -2781,6 +2860,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
         if (!mounted ||
             !_isConversationActive ||
             generation != _pipelineGeneration) {
+          discardPendingReply();
           return;
         }
         final merged = mergeResult.text.trim();
@@ -2804,6 +2884,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
         //   한 게 아니라 질문을 물린 것이다. 되묻기와는 다른 자리라
         //   [_speakStepRetryAndListen] 쪽으로 보내지 않는다.
         if (mergeResult.meta) {
+          discardPendingReply();
           askedBack = true;
           _turnCounter--;
           _turnGateSentence = previousExpanded;
@@ -2819,6 +2900,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
           return;
         }
         if (mergeResult.unclear) {
+          discardPendingReply();
           askedBack = true;
           _turnCounter--;
           // 되묻기는 소리로만 나간다(위 검증 반려와 같은 이유).
@@ -2845,18 +2927,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
               'turn=$turnNumber prev="$previousExpanded" add="$userKorean" '
                   'merged="$merged"');
         }
-      }
-
-      // 질문에 줄 문맥은 이 턴 말풍선을 올리기 **전에** 뜬다. 아래에서 올리는
-      // 말풍선이 곧 이번 발화라, 올린 뒤에 뜨면 같은 말이 [SINCE THEN]과
-      // [WHAT THEY JUST SAID]에 두 번 실린다(씨앗 턴에서는 글자까지 똑같다).
-      // [SINCE THEN]은 **지난** 턴들이어야 한다.
-      final questionContext = _questionContext(currentUserLine: userKorean);
-      // ❓ [ASK-RATIO] 이 턴의 말풍선을 올리기 **전에** 센다. 아래에서 올리는
-      //   AI placeholder가 목록에 끼면 셈이 한 칸씩 밀린다.
-      final expandMustNotAsk = _expandMustNotAsk();
-      if (expandMustNotAsk) {
-        _log('❓ [ASK-RATIO]', 'turn=$turnNumber 직전 2턴 내 질문 있음 → 이번 턴 질문 금지');
       }
 
       // 2️⃣ 자란 문장을 먼저 화면에 올린다.
@@ -2898,21 +2968,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
       //    답은 gpt-4.1-mini가 한국어로 만들고, 소리는 아래에서 TTS가 낸다.
       //    방금 한 말이 아니라 지금까지 자란 문장을 통째로 준다. 다음에 무슨
       //    말이 올지 추측하려면 문장 전체가 보여야 한다.
-      String aiKorean = await StepExpandBrain.generateKoreanTurn(
-        apiKey: _openAiKey,
-        // 대화 설계 전문 + 이번 턴 초점. 전문을 빼면 되묻기·한 줄기 유지 같은
-        // 규칙이 통째로 사라져, 모델이 [_isAskBackReply]가 찾는 문장을 아예
-        // 만들지 않는다.
-        // ❓ [ASK-RATIO] 최근 두 턴이 다 질문이었으면 이번 턴은 묻지 않는다.
-        //   말풍선을 올리기 전에 세야 한다 — 이 턴의 AI 말풍선은 아직 없다.
-        instructions: '${_buildStepExpandSystemInstructions()}\n'
-            '\n[THIS TURN]\n'
-            '${_buildStepExpandTurnInstructions(turnNumber, mustNotAsk: expandMustNotAsk)}',
-        // 씨앗 이전 잡담까지 통째로 넘긴다. 이게 빠져 있던 동안 질문 생성기는
-        // 씨앗 한 줄만 보고 있었다(§_questionContext).
-        recentConversation: questionContext,
-        userText: userKorean,
-      );
+      // ⚡ [PARALLEL] 합치기와 나란히 띄워 둔 결과를 여기서 받는다. 게이트가
+      //   통과했으므로 이 대사는 실제로 쓰인다.
+      aiKoreanClaimed = true;
+      String aiKorean = await aiKoreanFuture;
       if (aiKorean.isEmpty) {
         throw StateError('Step Expand reply did not complete.');
       }
@@ -3025,6 +3084,9 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
           'turn=$turnNumber model=gpt-4.1-mini voice=$_aiVoice tts=true');
 
     } catch (error) {
+      // ⚡ [PARALLEL] 게이트 도중에 터졌으면 나란히 띄운 대사가 주인 없이
+      //   남는다. 안 받은 future의 실패는 잡히지 않은 예외로 새어 나온다.
+      discardPendingReply();
       _log('[GPT-PIPE-ERR]',
           'turn=$turnNumber reason=${error.runtimeType} error=$error');
       // 실패한 요청이 정상 턴 수를 먹지 않게 한다. 그래야 재발화가 다시 같은
@@ -3657,39 +3719,108 @@ of it.'''}''';
                 ? "말씀하세요"
                 : "무슨 생각이든 한마디로 시작해 보세요";
 
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 260),
-            width: aiSpeaking ? 108 : 92,
-            height: aiSpeaking ? 108 : 92,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: accent.withValues(alpha: 0.14),
-              border: Border.all(color: accent.withValues(alpha: 0.45)),
-            ),
-            child: Icon(
-              aiSpeaking ? Icons.graphic_eq_rounded : Icons.mic_none_rounded,
-              color: accent,
-              size: aiSpeaking ? 44 : 38,
-            ),
-          ),
-          const SizedBox(height: 22),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
-            child: Text(
-              line,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white70,
-                fontSize: 15 * _fontScale,
-                height: 1.5,
+    // 🙋 [BARGE-IN] 코치가 말하는 동안 화면 아무 데나 누르면 말을 끊는다.
+    //
+    //   말로 끊는 길은 이 모드에서 막혀 있다 — 녹음이 `echoCancel: true`라,
+    //   스피커로 AI 목소리가 나가는 동안에는 입력이 통째로 눌려 유저가 무슨
+    //   말을 해도 아무것도 잡히지 않는다. 그래서 [_handleBargeIn]은 만들어
+    //   두고도 부를 손이 없었다. 손잡이를 화면 전체로 준다.
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: aiSpeaking ? _handleBargeIn : null,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 🖼️ 코치와 나란히 앉아 같이 만든다 — 이 방이 무슨 자리인지
+            //   한 장으로 말한다. 폰에서는 칠판 글씨가 읽히지 않을 만큼
+            //   작게 들어가서, 남는 건 장면뿐이다.
+            //
+            //   테두리는 장식이 아니다. 음성 전용이라 "지금 누구 차례인가"를
+            //   알려 주는 신호가 이것 하나뿐이다.
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 260),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: accent.withValues(alpha: aiSpeaking ? 0.95 : 0.35),
+                    width: aiSpeaking ? 3 : 1.5,
+                  ),
+                  boxShadow: aiSpeaking
+                      ? <BoxShadow>[
+                          BoxShadow(
+                            color: accent.withValues(alpha: 0.35),
+                            blurRadius: 22,
+                            spreadRadius: 1,
+                          ),
+                        ]
+                      : const <BoxShadow>[],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(17),
+                  child: Stack(
+                    children: [
+                      Image.asset(
+                        'assets/images/step_expand_coach.png',
+                        fit: BoxFit.cover,
+                        alignment: const Alignment(0, -0.25),
+                      ),
+                      // 유저 차례일 때는 그림을 한 겹 가라앉힌다. 화면이
+                      // 기다리고 있다는 걸 눈으로도 알 수 있게.
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 260),
+                        color: Colors.black
+                            .withValues(alpha: aiSpeaking ? 0.0 : 0.35),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
-          ),
-        ],
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  aiSpeaking
+                      ? Icons.graphic_eq_rounded
+                      : Icons.mic_none_rounded,
+                  color: accent,
+                  size: 18,
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    line,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 15 * _fontScale,
+                      height: 1.5,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            // 끊을 수 있다는 걸 알려 주지 않으면 아무도 화면을 누르지 않는다.
+            AnimatedOpacity(
+              duration: const Duration(milliseconds: 200),
+              opacity: aiSpeaking ? 1.0 : 0.0,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Text(
+                  "화면을 누르면 말을 끊고 들어요",
+                  style: TextStyle(
+                    color: Colors.white38,
+                    fontSize: 12 * _fontScale,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -5276,7 +5407,9 @@ Output: [GARBLED]
               //   문장 130자까지 갔다 — AI가 유저보다 많이 말했다.
               //   지킬 마음이 없는 규칙은 물리적으로 못 하게 막는 게 낫다.
               //   한국어는 대략 1.5토큰/글자라 80이면 두 문장이 상한이다.
-              'max_tokens': 80,
+              // 한 문장짜리 코치 대사가 중간에서 잘리지 않을 만큼만. 80이던 시절
+              //   실기기에서 '예를 들어, "처음에는…' 하고 끊겼다.
+              'max_tokens': 160,
               'messages': [
                 {'role': 'system', 'content': instructions},
                 {
@@ -6468,6 +6601,13 @@ they already said. Pick the ONE that would help most right now.
 - Prune as well as add. When several things are on the table, say which one is
   carrying the thought and which is diluting it. Rich, never scattered.
 
+[CATCH THEM UP NOW AND THEN]
+Every few turns — when a real piece has just landed, not on a fixed count — say the
+whole thought back as it now stands, in ONE short $nativeLang sentence, then keep
+going. It lets them hear how far it has grown and correct it while it is still cheap.
+  "지금까지는 '환경도 그렇고 길게 보면 돈도 아껴서 천 가방을 쓴다'가 됐네요."
+Do this sparingly. Every turn is a progress report, and that is a different thing.
+
 [RESTATING IS FINE — LABELLING IS NOT]
 You may say the thought back in $nativeLang, briefly, to check you are aligned or to
 show what it becomes once the new piece is in. That is ordinary collaboration.
@@ -6482,15 +6622,27 @@ build an English version here — that happens later, somewhere else. Never ment
 
 $registerPolicy
 
-[LENGTH]
-Two or three spoken sentences. Enough to name what is missing, say why it would help,
-and ask the one thing you need. One sentence is fine when that is all it takes.
-Never a paragraph, never a list, never a lecture.
+[LENGTH — TALK, DO NOT LECTURE]
+ONE short spoken sentence. Two only when the first genuinely cannot stand alone.
+Your suggestion is a nudge, not a critique. Name what is missing in a handful of
+words and stop — they are holding a phone waiting for their turn, and every extra
+clause is time they spend listening instead of thinking.
+  "이유가 하나 있으면 훨씬 살아요. 왜 그렇게 하세요?" — that is a complete turn.
+- Never justify your suggestion at length, never walk through your reasoning.
+- Never hand them example wordings or spell out two options in full.
+- If you catch yourself writing "예를 들어" or a second clause of explanation, cut it.
+  They will ask if they want more.
 
 [WHEN IT IS ALREADY RICH ENOUGH]
 Say so once, plainly — "이 정도면 이야기가 충분히 됩니다." — and stop pushing.
 Manufacturing one more suggestion there is how a good session turns into a form they
 were filling in. You never close the conversation; they decide when this ends.
+
+[WHEN THEY SAY THEY ARE DONE]
+If they say they want to stop — 그만, 됐어, 이제 됐다, 마무리하자 — do not ask for
+anything more and do not talk them out of it. Say the finished thought back to them
+ONE last time, whole, in $nativeLang, as one natural spoken sentence, and stop there.
+No labels, no "최종 정리하면", no farewell speech. Just the thought, once.
 
 [NEVER]
 - Judge the person. You assess the thought, never them.
