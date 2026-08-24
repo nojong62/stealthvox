@@ -943,54 +943,77 @@ Return ONLY valid JSON: {"name":"..."}.
   /// 팝업(`_showManualDialog`)도 예전에 쓰던 것 그대로다. 도움말만 제목 옆에서
   /// 이 줄 오른쪽 끝으로 자리를 옮겼다.
   Widget _buildMenuTopBar() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(6, 4, 10, 4),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: Color(0x14FFFFFF))),
-      ),
-      child: Row(
-        children: [
-          IconButton(
-            icon: const Icon(Icons.home_outlined,
-                color: Color(0xFF22D3EE), size: 26),
-            tooltip: '로비로',
-            onPressed: () => context.pushNamed('Lobby'),
-          ),
-          IconButton(
-            icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                color: Color(0xFF22D3EE), size: 22),
-            tooltip: '이전 단계',
-            onPressed: () => context.pop(),
-          ),
-          const Spacer(),
-          GestureDetector(
-            onTap: () => context.pushNamed('ChatHistory'),
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: const Color(0x33FFFFFF)),
-              ),
-              child: const Text(
-                "STUDY ROOM",
-                maxLines: 1,
-                style: TextStyle(
-                  color: Color(0xFFE7E9EE),
-                  fontWeight: FontWeight.w600,
-                  fontSize: 12,
-                  letterSpacing: 1.2,
+    // 📏 이 줄에서 폭이 늘어나는 건 "STUDY ROOM" 알약 하나뿐이다. 아이콘 셋은
+    //   크기가 고정이라, 폰 글꼴을 크게 써 두면 알약만 부풀어 오른쪽 사용설명서
+    //   버튼을 화면 밖으로 밀어낸다(실기기 S25에서 RIGHT OVERFLOWED BY 14 PIXELS).
+    //
+    //   고치는 방향은 **글자를 줄이는 것이 아니라 자리를 만드는 것**이다.
+    //   "STUDY ROOM"은 줄여 적을 이유가 없는 이름이고, `STUDY R…`로 잘리면
+    //   그게 더 고장 나 보인다. 그래서 두 가지를 한다.
+    //     1. 배율에 천장을 씌운다(§chat_history_list_master 필터 바와 같은 처방).
+    //     2. IconButton 셋의 기본 여백을 걷어 40여 px을 되찾는다. 기본
+    //        IconButton은 48x48 터치 영역을 잡는데 이 줄에는 그만큼이 필요 없다.
+    //   둘을 합치면 알약은 어떤 배율에서도 제 글자를 다 적을 자리를 갖는다.
+    return MediaQuery.withClampedTextScaling(
+      maxScaleFactor: 1.2,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(6, 4, 10, 4),
+        decoration: const BoxDecoration(
+          border: Border(bottom: BorderSide(color: Color(0x14FFFFFF))),
+        ),
+        child: Row(
+          children: [
+            IconButton(
+              icon: const Icon(Icons.home_outlined,
+                  color: Color(0xFF22D3EE), size: 26),
+              tooltip: '로비로',
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+              onPressed: () => context.pushNamed('Lobby'),
+            ),
+            IconButton(
+              icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                  color: Color(0xFF22D3EE), size: 22),
+              tooltip: '이전 단계',
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+              onPressed: () => context.pop(),
+            ),
+            const Spacer(),
+            // 이름은 통째로 적힌다. 잘리지도, 줄임표가 붙지도 않는다.
+            GestureDetector(
+              onTap: () => context.pushNamed('ChatHistory'),
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: const Color(0x33FFFFFF)),
+                ),
+                child: const Text(
+                  "STUDY ROOM",
+                  maxLines: 1,
+                  softWrap: false,
+                  style: TextStyle(
+                    color: Color(0xFFE7E9EE),
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                    letterSpacing: 1.2,
+                  ),
                 ),
               ),
             ),
-          ),
-          IconButton(
-            onPressed: _showManualDialog,
-            tooltip: '사용 설명서',
-            icon: const Icon(Icons.help_outline,
-                color: Colors.amberAccent, size: 28),
-          ),
-        ],
+            IconButton(
+              onPressed: _showManualDialog,
+              tooltip: '사용 설명서',
+              padding: const EdgeInsets.only(left: 8),
+              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+              icon: const Icon(Icons.help_outline,
+                  color: Colors.amberAccent, size: 28),
+            ),
+          ],
+        ),
       ),
     );
   }
