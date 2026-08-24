@@ -29,6 +29,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import 'dart:async'; // unawaited
 import 'routine_mode_roleplay.dart' show TtsCache; // 캐시 정리 진입점
+import '/custom_code/services/ai_style.dart';
 import '/custom_code/services/admin_gate.dart'; // 관리자 판별(UID)
 import 'p2_voice_lab.dart' show P2VoiceLabPage; // 관리자 전용 히든 화면
 // LongPressGestureRecognizer는 material/widgets가 다시 내보내지 않는다.
@@ -67,10 +68,13 @@ const double _kLobbyMinPinnedHeight = 380;
 /// AI STYLE 선택지. **영어 전용 설정이라 언제나 이 넷뿐이다.**
 /// 비영어 TARGET에서는 선택지를 줄이는 게 아니라 영역째 감춘다
 /// ([_kAiStyleTargetLang] 참고).
-const List<String> _kAiStyles = ['Standard', 'American', 'British', 'Native'];
+///
+/// 목록도 스타일의 뜻도 `services/ai_style.dart`가 혼자 들고 있다. 로비에
+/// 따로 적어 두면 화면이 보여 주는 넷과 프롬프트가 아는 넷이 어긋난다.
+const List<String> _kAiStyles = kAiStyles;
 
 /// AI STYLE을 보여 주는 유일한 TARGET 언어.
-const String _kAiStyleTargetLang = 'English';
+const String _kAiStyleTargetLang = kAiStyleTargetLanguage;
 
 /// 📦 [Box 2: 클래스 선언부]
 class LobbyMaster extends StatefulWidget {

@@ -54,6 +54,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
+import '/custom_code/services/ai_style.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
 // 🔁 [LATE-CONTINUATION] 판정·합치기·말풍선 규칙은 Circle Talk과 **같은
 //   함수**를 쓴다. 여기에 규칙을 다시 구현하면 한쪽만 고쳐지고 다른 쪽은 남는다.
@@ -6013,7 +6014,7 @@ ${isCorrectionRetry ? 'This is a correction retry: strip correction framing and 
 ${disableHeardConfirmation ? 'The wording was confirmed; do not ask for confirmation again.' : 'If a core word is unrecoverable, ${buildHeardConfirmOutputRule(originLang)}'}
 If a referent is genuinely ambiguous, output [CLARIFY] followed by one short
 in-character question in $originLang. For noise output [EVAPORATE]. Otherwise
-output only natural $targetLang.''';
+output only natural $targetLang.${aiStylePromptBlock(targetLang: targetLang, scope: 'the $targetLang translation you output')}''';
       final sysPrompt = originLang.toLowerCase() != 'korean'
           ? genericPrompt
           : """You are an expert real-time Korean-to-$targetLang translator for a live roleplay conversation.$roleContext
@@ -6116,7 +6117,7 @@ NEVER break character when asking.
 - Preserve speech register appropriate for${userRole.isNotEmpty ? ' a "$userRole"' : ' the user'}.
 - Insert commas (,) for TTS rhythm.
 - Output ONLY the $targetLang translation.
-- If input is noise (under 2 meaningful chars) OR is completely unrecognizable gibberish that cannot be interpreted as a human utterance in any language, output EXACTLY: [EVAPORATE]""";
+- If input is noise (under 2 meaningful chars) OR is completely unrecognizable gibberish that cannot be interpreted as a human utterance in any language, output EXACTLY: [EVAPORATE]${aiStylePromptBlock(targetLang: targetLang, scope: 'the $targetLang translation you output')}""";
 
       final request = http.Request(
         'POST',
@@ -6288,7 +6289,15 @@ NEVER break character when asking.
                   '- If the user\'s input is completely unintelligible (speech recognition error), output EXACTLY: [RETRY]' +
               (rejectedReply.trim().isEmpty
                   ? ''
-                  : '\n- IMPORTANT: The user disliked your previous reply: "${rejectedReply.trim()}". Give a COMPLETELY DIFFERENT in-character reply this time — different angle, different wording. Do NOT repeat or rephrase it.');
+                  : '\n- IMPORTANT: The user disliked your previous reply: "${rejectedReply.trim()}". Give a COMPLETELY DIFFERENT in-character reply this time — different angle, different wording. Do NOT repeat or rephrase it.') +
+              // 🎨 [AI-STYLE] 세 모드 중 AI가 영어로 **직접** 말하는 유일한
+              //   자리다. 나머지 둘은 한국어로 말하고 번역 단계에서 걸린다.
+              //   캐릭터가 먼저다 — 스타일은 그 배우가 영어를 어떻게 굴리는지만
+              //   정하고, 역할·감정·2문장 상한을 밀어내지 않는다.
+              aiStylePromptBlock(
+                targetLang: myTarget,
+                scope: 'your in-character $myTarget dialogue',
+              );
 
       final request = http.Request(
         'POST',

@@ -30,6 +30,7 @@ import 'package:flutter/services.dart';
 import 'routine_mode_roleplay.dart' show TtsCache;
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
+import '/custom_code/services/ai_style.dart';
 import '/custom_code/services/audio_silence_analyzer.dart';
 import '/custom_code/services/breath_echoing_engine.dart';
 import '/custom_code/services/breath_segment.dart';
@@ -895,6 +896,15 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       //   한국어 줄이 하나 섞인다.
       String expandedTargetText = sameLanguage ? expandedSource : '';
       List<P2Chunk> p2Chunks = fallbackP2Chunks(expandedTargetText);
+      // 🎨 [AI-STYLE] 로비에서 고른 스타일. 영어 타겟이 아니면 빈 문자열이라
+      //   프롬프트가 예전과 한 글자도 달라지지 않는다. 교정된 원어 줄에는
+      //   절대 걸리면 안 되므로 scope로 번역문만 지목한다.
+      final String styleBlock = aiStylePromptBlock(
+        targetLang: targetLanguage,
+        scope: 'the "target" translation'
+            '${expandedSource.isEmpty ? '' : ' and the "expanded" sentence'}, '
+            'never the corrected $sourceName line',
+      );
       final String context = _historyRepairContext(messageRef);
       final String lineBlock = expandedSource.isEmpty
           ? 'LINE: $source'
@@ -948,7 +958,7 @@ P2 CHUNK MAPPING — return a "chunks" JSON array for the translated growing sen
 - "new": content not present in the translated "target" line
 For both "kept" and "evolved", include "from" as an exact contiguous substring of the translated "target" line. For "new", omit "from". Never paraphrase text inside a chunk; concatenating all chunk text must reproduce the translated "expanded" sentence.
 '''}
-Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetLanguage translation>"${expandedSource.isEmpty ? '' : ', "expanded": "<$targetLanguage translation of GROWING SENTENCE>", "chunks": [{"text":"<exact chunk from expanded>","type":"kept|evolved|new","from":"<exact substring from target; kept/evolved only>"}]'}}''',
+Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetLanguage translation>"${expandedSource.isEmpty ? '' : ', "expanded": "<$targetLanguage translation of GROWING SENTENCE>", "chunks": [{"text":"<exact chunk from expanded>","type":"kept|evolved|new","from":"<exact substring from target; kept/evolved only>"}]'}}$styleBlock''',
                   },
                   <String, String>{
                     'role': 'user',
@@ -1252,14 +1262,15 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
                 <String, String>{
                   'role': 'system',
                   'content': 'The user built this Korean sentence step by step in a speaking '
-                      'practice. Translate it into ONE natural spoken $targetLanguage '
+                      'practice. Turn it into ONE natural spoken $targetLanguage '
                       'sentence for shadowing practice.\n'
                       '- Keep the speaker viewpoint, meaning, tense, and tone.\n'
                       '- Do not add or drop information.\n'
                       '- Spoken rhythm, easy to say out loud. Not written prose.\n'
                       '- The result must be 100% $targetLanguage and must NOT contain '
                       'any Korean (Hangul) characters.\n'
-                      'Return only the sentence, with no label or explanation.',
+                      'Return only the sentence, with no label or explanation.'
+                      '${aiStylePromptBlock(targetLang: targetLanguage, scope: 'the $targetLanguage sentence you produce')}',
                 },
                 <String, String>{'role': 'user', 'content': text},
               ],
@@ -3208,41 +3219,31 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
   /// 저장값(American 등)이 무엇이든 `Standard`로 취급한다. 전역
   /// `FFAppState().aiStyle` 자체는 건드리지 않는다 — 영어로 돌아왔을 때
   /// 마지막 선택을 그대로 복원해야 하기 때문이다.
-  String _effectiveAiStyle() {
-    final targetLanguage = (_sessionTargetLang ?? 'English').trim();
-    if (targetLanguage != 'English') return 'Standard';
-    final saved = FFAppState().aiStyle.trim();
-    return saved.isEmpty ? 'Standard' : saved;
+  String _effectiveAiStyle() =>
+      effectiveAiStyle(targetLang: _sessionTargetLangName());
+
+  /// 이 세션의 TARGET 언어 이름. 비어 있으면 영어로 본다(기존 동작).
+  String _sessionTargetLangName() {
+    final name = (_sessionTargetLang ?? '').trim();
+    return name.isEmpty ? 'English' : name;
   }
 
   /// 지금 적용 중인 스타일([_effectiveAiStyle])을 뺀 나머지 스타일들.
   /// 영어가 타겟일 때만 American/British가 존재한다(로비와 같은 규칙).
   /// 순서는 Standard → American → British → Native로 고정한다.
   List<String> _otherAiStyles() {
-    final targetLanguage = (_sessionTargetLang ?? 'English').trim();
-    const canonical = ['Standard', 'American', 'British', 'Native'];
-    final available =
-        targetLanguage == 'English' ? canonical : const ['Standard', 'Native'];
+    final available = isAiStyleTargetLanguage(_sessionTargetLangName())
+        ? kAiStyles
+        : const <String>['Standard', 'Native'];
     final current = _effectiveAiStyle();
     return available.where((style) => style != current).toList();
   }
 
-  String _altStyleBrief(String style) {
-    switch (style) {
-      case 'Standard':
-        return 'neutral, textbook-clear wording that any international speaker would understand';
-      case 'American':
-        return 'American vocabulary, idioms, and spelling as spoken in the US';
-      case 'British':
-        return 'British vocabulary, idioms, and spelling as spoken in the UK';
-      case 'Native':
-        return 'what a native speaker would actually say in relaxed everyday speech, with contractions and natural rhythm';
-      default:
-        return 'natural everyday wording';
-    }
-  }
-
   /// 같은 뜻을 스타일만 바꿔 다시 쓴다. 뜻·화자 시점·존댓말 정도는 유지한다.
+  ///
+  /// 스타일 정의는 한 줄도 여기 적지 않는다 — 전부
+  /// `services/ai_style.dart`에서 가져온다. 여기에 따로 적어 두면 대화방이
+  /// 만드는 Native와 이 팝업이 보여 주는 Native가 서로 다른 물건이 된다.
   Future<Map<String, String>> _fetchAltStyleSentences(
     String baseText,
     List<String> styles,
@@ -3251,8 +3252,12 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     if (_apiKey.isEmpty || source.isEmpty || styles.isEmpty) {
       return <String, String>{};
     }
-    final targetLanguage = (_sessionTargetLang ?? 'English').trim();
-    final guide = styles.map((s) => '- "$s": ${_altStyleBrief(s)}').join('\n');
+    final targetLanguage = _sessionTargetLangName();
+    // 팝업은 여러 스타일을 한 번에 요청하므로, 스타일마다 지시문 전체를
+    // 붙인다. 한 줄 요약만 주면 American과 Native가 같은 문장으로 돌아온다.
+    final guide = styles
+        .map((s) => '### "$s"\n${aiStyleInstruction(s)}')
+        .join('\n\n');
     try {
       final response = await http
           .post(
@@ -3269,10 +3274,11 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
               'messages': <Map<String, String>>[
                 <String, String>{
                   'role': 'system',
-                  'content': 'Rewrite ONE $targetLanguage sentence in different regional/register styles.\n'
-                      'Keep the meaning, the speaker viewpoint, and the politeness level identical. '
-                      'Only the wording and flavour change.\n'
-                      'Styles requested:\n$guide\n'
+                  'content': 'Rewrite ONE $targetLanguage sentence, once per style below.\n'
+                      'Keep the meaning, the speaker viewpoint, and the politeness level identical in every version. '
+                      'The wording and flavour change; the meaning does not.\n'
+                      'The versions must be clearly different from each other — if two styles come out the same, you have not applied them.\n\n'
+                      'Styles requested:\n\n$guide\n\n'
                       'Return ONLY valid JSON whose keys are exactly the style names above '
                       'and whose values are the rewritten sentences. No labels, no explanation.',
                 },
@@ -8338,7 +8344,7 @@ content and gist of the WHOLE conversation.
 - Natural, speakable rhythm — common spoken English only.
 - Capture the overall situation/idea of the conversation, not just one line.
 - Common everyday vocabulary only. Do not add facts not in the transcript.
-- Output exactly ONE sentence. No quotes, no prefixes, no explanation.""";
+- Output exactly ONE sentence. No quotes, no prefixes, no explanation.${aiStylePromptBlock(targetLang: _sessionTargetLangName(), scope: 'the one English sentence you output')}""";
       final response = await http
           .post(
             Uri.parse('https://api.openai.com/v1/chat/completions'),
@@ -8410,7 +8416,7 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
 [OUTPUT]
 - Exactly ONE sentence.
 - No explanation, no quotes, no prefixes.
-- Just the polished sentence.""";
+- Just the polished sentence.${aiStylePromptBlock(targetLang: _sessionTargetLangName(), scope: 'the one polished English sentence you output')}""";
       final response = await http
           .post(
             Uri.parse('https://api.openai.com/v1/chat/completions'),

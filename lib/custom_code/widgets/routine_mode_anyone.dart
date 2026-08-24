@@ -43,6 +43,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
+import '/custom_code/services/ai_style.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
 import '/custom_code/services/openai_connection_pool.dart';
 import '/custom_code/services/origin_language_session.dart';
@@ -7356,7 +7357,7 @@ ${disableCorrection ? 'For this retry, never output a bracketed correction tag. 
 ${disableHeardConfirmation ? 'The user already confirmed the wording; do not ask for hearing confirmation again.' : 'If a core word is genuinely unrecoverable from the transcript and history, do not guess. ${buildHeardConfirmOutputRule(originLang)}'}
 If a required referent is genuinely ambiguous, output [CLARIFY] followed by one
 short natural question in $originLang. If the input is noise, output [EVAPORATE].
-Otherwise output only the natural $targetLang translation.''';
+Otherwise output only the natural $targetLang translation.${aiStylePromptBlock(targetLang: targetLang, scope: 'the $targetLang translation you output')}''';
     }
     final String correctionBlock = disableCorrection
         ? '''Never output [CORRECTION], [MISHEARD], or [DISSATISFIED].
@@ -7453,7 +7454,7 @@ NEVER output [CLARIFY] if the subject can be reasonably inferred from context.
 - Keep emotional nuance (excitement, sarcasm, hesitation) in tone.
 - Insert commas (,) after each natural phrase to create rhythm for TTS shadowing.
 - Output ONLY the $targetLang translation. No explanation, no Korean text, no prefixes.
-- If the input is meaningless noise or filler (under 2 meaningful chars), output EXACTLY: [EVAPORATE]''';
+- If the input is meaningless noise or filler (under 2 meaningful chars), output EXACTLY: [EVAPORATE]${aiStylePromptBlock(targetLang: targetLang, scope: 'the $targetLang translation you output')}''';
     return sysPrompt;
   }
 
@@ -7471,7 +7472,7 @@ register, idioms, and emotion. Recover omissions only when the sentence supports
 them; never invent a key fact. If the wording is broken and cannot be recovered,
 ${buildHeardConfirmOutputRule(originLang)} If a required
 referent is ambiguous, output [CLARIFY] and a short question in $originLang.
-For noise output [EVAPORATE]. Otherwise output only the translation.''';
+For noise output [EVAPORATE]. Otherwise output only the translation.${aiStylePromptBlock(targetLang: targetLang, scope: 'the $targetLang translation you output')}''';
     }
     return '''Translate the first Korean utterance of a live conversation into natural $targetLang.
 The input is an ASR transcript, not typed text.
@@ -7483,7 +7484,7 @@ Rules:
 - If the transcript is broken Korean and its intended wording cannot be recovered:
 ${buildHeardConfirmOutputRule(originLang)}
 - If a required subject or object is genuinely ambiguous, output: [CLARIFY] <one short clarification question in $targetLang>
-- Otherwise output only the translation. No explanation, prefix, quotes, or Korean.''';
+- Otherwise output only the translation. No explanation, prefix, quotes, or Korean.${aiStylePromptBlock(targetLang: targetLang, scope: 'the $targetLang translation you output')}''';
   }
 
   static Stream<String> streamUserTranslation({
@@ -7596,9 +7597,10 @@ ${buildHeardConfirmOutputRule(originLang)}
                 'messages': [
                   {
                     'role': 'system',
-                    'content': 'Translate the $originLang dialogue line into natural spoken '
+                    'content': 'Turn the $originLang dialogue line into natural spoken '
                         '$targetLang. Preserve meaning, relationship, emotion, '
-                        'speech register, and names. Output only the translation.'
+                        'speech register, and names. Output only the $targetLang line.'
+                        '${aiStylePromptBlock(targetLang: targetLang, scope: 'the $targetLang line you output')}'
                   },
                   {'role': 'user', 'content': source},
                 ],
