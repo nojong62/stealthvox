@@ -100,4 +100,59 @@ void main() {
       );
     });
   });
+
+  group('AiStyleReach — 스타일이 닿는 깊이', () {
+    test('기본은 rebuild다 — 이미 붙어 있던 자리는 그대로다', () {
+      final byDefault = aiStylePromptBlock(targetLang: 'English', style: 'Native');
+      final explicit = aiStylePromptBlock(
+        targetLang: 'English',
+        style: 'Native',
+        reach: AiStyleReach.rebuild,
+      );
+      expect(byDefault, explicit);
+      expect(byDefault, contains(aiStyleInstruction('Native')));
+    });
+
+    test('wording이면 Native가 생각을 다시 짜지 못한다', () {
+      final block = aiStylePromptBlock(
+        targetLang: 'English',
+        style: 'Native',
+        reach: AiStyleReach.wording,
+      );
+      // 재구성 지시문 자체가 들어가지 않는다.
+      expect(block, isNot(contains("Do not follow the source")));
+      expect(block, isNot(contains('You may reorder the information')));
+      // 대신 어휘 쪽 Native는 살아 있다.
+      expect(block, contains('STYLE — Native (wording only)'));
+      expect(block, contains('Do NOT rebuild the thought here.'));
+    });
+
+    test('wording이면 스타일 넷 모두에 배열 고정 규칙이 붙는다', () {
+      for (final style in kAiStyles) {
+        final block = aiStylePromptBlock(
+          targetLang: 'English',
+          style: style,
+          reach: AiStyleReach.wording,
+        );
+        expect(block, contains('Style reaches the WORDING only.'));
+        expect(block, contains('Never reorganise the thought.'));
+      }
+    });
+
+    test('rebuild에는 배열 고정 규칙이 붙지 않는다', () {
+      final block = aiStylePromptBlock(targetLang: 'English', style: 'American');
+      expect(block, isNot(contains('Style reaches the WORDING only.')));
+    });
+
+    test('영어 타겟이 아니면 reach와 무관하게 빈 문자열이다', () {
+      expect(
+        aiStylePromptBlock(
+          targetLang: 'Japanese',
+          style: 'Native',
+          reach: AiStyleReach.wording,
+        ),
+        '',
+      );
+    });
+  });
 }
