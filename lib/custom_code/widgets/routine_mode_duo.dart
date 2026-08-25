@@ -2781,8 +2781,8 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         //   보이게 하려던 것인데(2026-06-06 `6b30e66b`), **표시 문제를 저장
         //   데이터를 지워서 푼 것**이라 원문이 어디에도 남지 않았다.
         //
-        //   같은 편법이 4개 모드에 들어갔다가 `88dc179e`(2026-08-02)에서
-        //   Roleplay·StepExpand·Anyone은 걷어냈고 Duo만 남아 있었다. 이제
+        //   같은 편법이 여러 모드에 들어갔다가 `88dc179e`(2026-08-02)에서
+        //   Roleplay·Anyone은 걷어냈고 Duo만 남아 있었다. 이제
         //   그 셋과 같은 모양으로 맞춘다. 중복 표시를 피하는 일은 표시 계층이
         //   한다 — 히스토리는 방 문서의 `native_lang`/`target_lang`으로 이미
         //   동일 언어를 판정한다(`chat_history_master._recordSameLang`).

@@ -638,9 +638,6 @@ Return ONLY valid JSON: {"name":"..."}.
                           const Divider(color: Colors.white12, height: 24),
                           _buildManualItem('Scenario Talk', '실전 상황 대화',
                               '창의적이고 구체적인 역할과 상황을 무한히 추천받고, 현실감 넘치는 실전 비즈니스 및 일상 회화를 연습합니다.'),
-                          const Divider(color: Colors.white12, height: 24),
-                          _buildManualItem('Step Expand', '점진적 문장 확장',
-                              'AI가 오늘의 뉴스나 가벼운 이야기로 먼저 말을 겁니다. 편하게 주고받다 보면 AI가 그중에서 씨앗문장이 될 만한 당신의 한마디를 찾아냅니다. 그 순간부터 그 문장이 화면에 적히고, 이어지는 질문에 답할 때마다 문장이 한 조각씩 자라 다섯 번 만에 길고 세련된 한 문장으로 완성됩니다. 씨앗을 찾기 전 잡담은 화면에 적히지 않습니다.'),
                           const Divider(color: Colors.white12, height: 32),
                           _buildSessionLegend(),
                           const Divider(color: Colors.white12, height: 32),
@@ -861,16 +858,6 @@ Return ONLY valid JSON: {"name":"..."}.
         circleDescription: _selectedCircleDescription ?? '편안한 일상 대화 커뮤니티',
       );
     }
-    if (_currentMode == 4) {
-      // 준비 화면을 거치지 않는다 — 곧바로 페이지로 들어가고, 안내 문구는
-      // 스텝 페이지가 직접 띄운다. onListeningReady를 넘기지 않는 것이 그
-      // 스위치다(routine_mode_step_expand.dart `_startSessionWaitingForUserSeed`).
-      return RoutineModeStepExpand(
-        key: const ValueKey('RoutineModeStepExpand'),
-        width: widget.width,
-        height: widget.height,
-      );
-    }
     if (_currentMode == 1) {
       return RoutineModeDuo(
           key: const ValueKey('RoutineModeDuo'),
@@ -897,7 +884,7 @@ Return ONLY valid JSON: {"name":"..."}.
 
   // ============================================================================
   // 📦 [4. 메뉴 UI 빌더 (MENU UI BUILDERS)]
-  // 초기 메뉴 화면과 4가지 모드 선택 카드 렌더링
+  // 초기 메뉴 화면과 3가지 모드 선택 카드 렌더링
   // ============================================================================
   Widget _buildMenu() {
     return SafeArea(
@@ -926,8 +913,6 @@ Return ONLY valid JSON: {"name":"..."}.
                       Icons.groups_rounded, const Color(0xFFA855F7)),
                   _buildMenuCard(3, "Scenario Talk", "실전 상황 대화",
                       Icons.smart_toy, const Color(0xFF22C55E)),
-                  _buildMenuCard(4, "Step Expand", "점진적 문장 확장",
-                      Icons.trending_up, const Color(0xFFF97316)),
                 ],
               ),
             ),

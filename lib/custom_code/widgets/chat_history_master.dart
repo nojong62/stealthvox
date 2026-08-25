@@ -31,51 +31,33 @@ import 'routine_mode_roleplay.dart' show TtsCache;
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
 import '/custom_code/services/ai_style.dart';
-import '/custom_code/services/step_expand_p1.dart';
-import '/custom_code/services/step_expansion_builder.dart';
-import '/custom_code/services/step_expansion_finalizer.dart';
 import '/custom_code/services/audio_silence_analyzer.dart';
 import '/custom_code/services/breath_echoing_engine.dart';
 import '/custom_code/services/breath_segment.dart';
 import '/custom_code/services/p2_voice_styles.dart';
-import '/custom_code/services/sentence_morph.dart';
-import '/custom_code/services/p2_chunk_mapping.dart';
 import '/custom_code/services/pcm_audio_utils.dart'
     show kStealthVoxSttSampleRate, pcm16DurationMs, pcm16ToWav;
 
 // ════════════════════════════════════════════════════════════════════
-// 🌬️ [P2-BREATH] Breath Echoing이 쓰는 값. **한곳에만 둔다.**
+// 🌬️ [P3-BREATH] Breath Echoing이 쓰는 값. **한곳에만 둔다.**
 // ════════════════════════════════════════════════════════════════════
 
 /// P3가 처음 열릴 때의 보이스. 에코잉이 기본 모드라 그 목록의 첫 칸을 든다 —
 /// 목록에 없는 값을 들고 열면 어느 칸도 켜지지 않은 채 소리만 난다.
 const String _kBreathVoice = 'coral';
 
-/// Breath TTS는 Lab과 **같은 Smooth Jazz 정의**를 쓴다. 복사본을 만들지
-/// 않는다 — 갈라지면 Lab에서 고른 소리와 실사용 소리가 달라진다.
-P2VoiceStyle get _kBreathStyle => kP2VoiceStyles.firstWhere(
-      (s) => s.id == kP2BreathTestStyleId,
-    );
-
-/// 🎵 P3가 쓰는 낭독 패턴. **P2 Breath와 다른 한 벌이다** — P2는 Smooth Jazz
-/// 그대로 두고, P3는 모드마다 갈린다.
+/// 🎵 낭독 패턴. Voice Lab의 Smooth Jazz 한 벌과 달리 **훈련 모드마다**
+/// 갈린다.
 ///   · 에코잉  — Sing-Song Flow (호흡마다 끊어 따라 읽기)
 ///   · 쉐도잉  — Story Melody  (이야기하듯 이어 읽어 얹어 말하기)
 /// id가 다르므로 캐시 칸도 따로 선다. 모드를 오가도 이미 받은 소리는 남는다.
 P2VoiceStyle _p3StyleFor(P3PracticeMode mode) =>
     mode == P3PracticeMode.echoing ? kP3SpeakingStyle : kP3ShadowingStyle;
 
-/// P3 전용 캐시 칸. 스타일 id가 달라 P2가 만들어 둔 소리와도, 두 모드끼리도
+/// 훈련 전용 캐시 칸. 스타일 id가 달라 Lab이 만들어 둔 소리와도, 두 모드끼리도
 /// 섞이지 않는다.
 String _p3CacheNamespaceFor(P3PracticeMode mode, String voice) =>
     'p2_wav_${_historyPracticeTtsModel}_${_p3StyleFor(mode).id}'
-    '_${kP2StyleInstructionVersion}_$voice';
-
-/// 실사용 Breath PCM 캐시. Lab(`p2lab_wav_`)과 접두어가 달라 섞이지 않는다.
-/// Pattern 시스템이 들어오면 `style_smooth_jazz` 자리에 pattern id가 들어가고,
-/// 같은 instruction·voice면 **캐시가 그대로 재사용된다**(재생성 0회).
-String _breathCacheNamespace(String voice) =>
-    'p2_wav_${_historyPracticeTtsModel}_${_kBreathStyle.id}'
     '_${kP2StyleInstructionVersion}_$voice';
 
 const String _historyListenTtsModel = 'tts-1';
@@ -106,13 +88,6 @@ const List<String> _kP3ShadowingVoices = <String>['echo', 'ash', 'coral'];
 /// 학습용 — 구간을 **의도적으로 벌려** 따라 하기 쉽게 만든다.
 
 /// 원어민식 — 중요하지 않은 곳은 **흘려 붙이고** 핵심만 세운다.
-
-/// 🪜 [P2-LADDER] P2 낭독 지시. 실장님 지정 문구다(2026-08-18).
-///
-/// 의미단위로 쪼개 읽던 예전 지시(`_meaningUnitCore` + `_learningUnitDelivery`)를
-/// 걷어냈다 — P2가 대화 한 턴이 아니라 **한 문장이 계단마다 길어지는 것**을
-/// 다루는 자리로 바뀌었고, 덩어리마다 끊어 읽으면 자란 자리가 아니라 끊긴
-/// 자리만 들린다. 두 지시는 P3가 그대로 쓰므로 남겨 둔다.
 
 /// 📦 [Box 2: 위젯 클래스 선언부]
 class ChatHistoryMaster extends StatefulWidget {
@@ -196,8 +171,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     } else if (head.contains('Roleplay') || head.contains('Scenario')) {
       display = 'Scenario Talk';
     } else {
-      display =
-          head.replaceAll(' Mode', '').replaceAll('Step Expand', 'Step.Ex');
+      display = head.replaceAll(' Mode', '');
     }
     return suffix.isEmpty ? display : '$display · $suffix';
   }
@@ -212,9 +186,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   SentenceVariant _selectedVariant = SentenceVariant.expanded;
   String _expandedSentence = "";
   String _nativeEnglish = "";
-  // 완성문장에 한글이 남아 있으면 아직 영어가 안 만들어진 것이다.
-  // 8019줄 [HANGUL-GUARD]가 Tutor 경로에서 쓰는 것과 같은 판정이다.
-  static final RegExp _stepExpandHangul = RegExp(r'[가-힣ᄀ-ᇿ㄰-㆏]');
   bool _nativeEnglishLoadDone = false;
   // 🔧 [STAMPEDE-FIX] 같은 청크에 대한 동시 API 호출 방지
   // key: chunk index, value: 진행 중인 audio fetch Future
@@ -266,64 +237,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   int _silenceCounter = 0;
   bool _hasSpoken = false;
 
-  // 📦 [Box 4-C: Step Expand Practice 1 & 2 상태]
-  bool _isStepExpandRoom = false;
-  List<Map<String, dynamic>> _stepExpandTurns = [];
-  // 🗂️ [P1-PAIRS] 세션이 끝난 뒤 정리된 "질문 ↔ 유저 답" 쌍.
-  //   비어 있으면 옛 방(또는 P1 정리 실패)이라 아래에서 대화 원문으로
-  //   폴백한다 — 그 폴백은 AI가 방에서 한 제안문을 그대로 보여 준다.
-  List<StepExpandP1Pair> _p1Pairs = const <StepExpandP1Pair>[];
-
-  // 🌱 [EXPANSION] 대화가 끝난 뒤 만들어진 사다리. **새 세션에만 있다.**
-  //   `_expansionStatus`가 비어 있으면 구 세션이고, 그 방은 예전 P2 경로를
-  //   그대로 탄다. 둘을 한 화면에서 섞지 않는다 — "새 게 없으면 옛 걸로"
-  //   같은 폴백을 두면 어느 사다리를 보고 있는지 아무도 모르게 된다.
-  List<StepExpansionStep> _expansionSteps = const <StepExpansionStep>[];
-  String _expansionStatus = '';
-  String _expansionFailure = '';
-  DateTime? _expansionStartedAt;
-  bool _isRebuildingExpansions = false;
-
-  /// 이 방이 새 방식인가. 필드가 있느냐 없느냐 하나로 가른다.
-  bool get _isExpansionRoom => _expansionStatus.isNotEmpty;
-
-  /// 사다리가 실제로 준비된 방인가.
-  bool get _expansionReady =>
-      _expansionStatus == StepExpansionStatus.ok && _expansionSteps.isNotEmpty;
-  bool _isPreparingStepP3 = false;
-  String? _stepP3PreparationError;
-  int _stepP3PreparationGeneration = 0;
-  // P1/P2 retry hint visibility
+  // 다시 읽어 달라는 힌트
   bool _showRetryHint = false;
   int _turnPracticeRetryCount = 0;
-
-  // [P2-MEANING-SHADOW] 의미단위 학습 음성을 동시에 따라 읽는 상태.
-  Timer? _shadowHighlightTimer;
-  Timer? _shadowAdvanceTimer;
-  double _shadowSpeed = 1.0; // 오디오 실패 시 하이라이트 fallback용 고정 속도.
-  /// P2 계단은 보이스를 번갈아 읽는다 — 첫 대사 cedar, 다음 marin, 그 다음
-  /// cedar… 같은 목소리가 이어지면 계단이 자란 것인지 같은 문장을 다시 듣는
-  /// 것인지 귀로 구분되지 않는다. 화면 선택은 없애고 순서만 남긴다.
-  String _p2VoiceForLine(int lineIdx) => lineIdx.isEven ? 'cedar' : 'marin';
-  // ── 🔤 [P2-MORPH] ───────────────────────────────────────────────
-  /// 소리를 받아 오는 중. 이 동안에도 과금은 살아 있어야 한다.
-  bool _morphPreparing = false;
-
-  /// 전체 문장을 읽는 중.
-  bool _morphPlaying = false;
-
-  /// 전체 문장 PCM의 재생 위치를 단어 비율로 청크에 대응한 시각 인덱스.
-  /// 실제 word timestamp가 아니므로 ±1~2단어 오차를 허용한다.
-  int _p2ActiveChunkIndex = -1;
-  int _p2MorphDurationMs = 0;
-
-  // [P2-SHADOW-REC] User-line audio captured for Play all. No scoring/STT.
-  bool _shadowRecording = false;
-  // [P2-SHADOW-AI] AI voice read-along: highlight follows audio playback position.
-  AudioPlayer? _shadowAiPlayer;
-  StreamSubscription<Duration>? _shadowPosSub;
-  StreamSubscription<Duration>? _shadowDurSub;
-  StreamSubscription<void>? _shadowCompleteSub;
 
   // 🆕 [P2-INDICATOR] AI 청크 발화 중 여부 (인디케이터 빛남용)
   bool _aiChunkPlaying = false;
@@ -424,10 +340,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         _isPlayingFullAI ||
         _isPlayingFullUser ||
         _nativeEnglishUnitAIPlaying ||
-        // 🔤 [P2-MORPH] 소리를 받는 동안과 읽는 동안. 마이크가 없어 판정이
-        //   단순해졌다 — 이 둘만 보면 된다.
-        _morphPreparing ||
-        _morphPlaying ||
         // 🎤 [P3-SPEAK] PCM 준비·Breath Echo·Full Echo·Shadow·재생 중에
         //   유휴로 잘못 판정해 과금이 멈추지 않게 한다.
         _p3Busy;
@@ -506,9 +418,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _blinkController.dispose();
     _echoingOverlayTimer?.cancel();
     _nativeEnglishRevealTimer?.cancel();
-    _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
-    _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
-    _stopShadowAiPlayback(); // [P2-SHADOW-AI]
     // 🎤 [P3-SPEAK] dispose에서 async setState가 나오지 않게 회차를 먼저
     //   무효화하고, 소유한 재생·타이머·임시 녹음을 직접 접는다.
     _p3Generation++;
@@ -536,7 +445,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     audioPlayer.dispose();
     _tutorAudioPlayer?.dispose();
     _appCorrectedAudio = null;
-    if (_appIsRecording || _shadowRecording || _p3Recording) {
+    if (_appIsRecording || _p3Recording) {
       _p3Recording = false;
       appAudioRecorder.stop().ignore();
     }
@@ -717,7 +626,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         doc.reference,
         original,
         _sourceLangForMessage(data),
-        expandedText: (data['expanded_sentence'] ?? '').toString().trim(),
       ));
     }
   }
@@ -791,16 +699,12 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   Future<bool> _generateAndCacheHistoryTarget(
     DocumentReference messageRef,
     String originalText,
-    String sourceLanguage, {
-    // 🌱 [EXPAND-LADDER] Step Expand 유저 줄이 들고 있는 누적 문장(원어).
-    //   같은 왕복에서 함께 번역한다 — 줄마다 API를 한 번 더 태우지 않는다.
-    String expandedText = '',
-  }) {
+    String sourceLanguage,
+  ) {
     final existing = _targetTranslationInFlight[messageRef.id];
     if (existing != null) return existing;
     final future = _performHistoryTargetGeneration(
-        messageRef, originalText, sourceLanguage,
-        expandedText: expandedText);
+        messageRef, originalText, sourceLanguage);
     _targetTranslationInFlight[messageRef.id] = future;
     // 진행 중 표시("번역 중")를 띄우고 지우기 위한 rebuild. 이 맵은 원래
     // 중복 요청 방지용이었고 화면에는 전혀 드러나지 않았다.
@@ -836,7 +740,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       doc.reference,
       original,
       _sourceLangForMessage(data),
-      expandedText: (data['expanded_sentence'] ?? '').toString().trim(),
     );
     if (!mounted || ok) return;
     _showRoomEntryToast(
@@ -893,11 +796,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   Future<bool> _performHistoryTargetGeneration(
     DocumentReference messageRef,
     String originalText,
-    String sourceLanguage, {
-    String expandedText = '',
-  }) async {
+    String sourceLanguage,
+  ) async {
     final source = originalText.trim();
-    final expandedSource = expandedText.trim();
     if (source.isEmpty) return false;
     if (_apiKey.isEmpty) {
       _recordTargetFailure(messageRef.id, 'no_key');
@@ -914,34 +815,16 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       String targetText = source;
       // 문맥으로 되살린 원문. 교정할 게 없으면 source와 같게 돌아온다.
       String repairedOriginal = '';
-      // 🌱 [EXPAND-LADDER] 이 턴까지 자란 문장의 배울글. 같은 왕복에서 받는다.
-      //   같은 언어면 번역할 게 없어 원어가 곧 배울글이고, 다른 언어인데 모델이
-      //   안 돌려주면 **빈 채로 둔다** — 원어를 그 자리에 넣으면 P2 한복판에
-      //   한국어 줄이 하나 섞인다.
-      String expandedTargetText = sameLanguage ? expandedSource : '';
-      List<P2Chunk> p2Chunks = fallbackP2Chunks(expandedTargetText);
       // 🎨 [AI-STYLE] 로비에서 고른 스타일. 영어 타겟이 아니면 빈 문자열이라
       //   프롬프트가 예전과 한 글자도 달라지지 않는다. 교정된 원어 줄에는
       //   절대 걸리면 안 되므로 scope로 번역문만 지목한다.
-      //
-      //   ⚠️ 이 한 번의 왕복이 **두 가지**를 만든다 — 이 줄의 번역과, 옛 방의
-      //   P2 사다리 칸(`expanded`). 사다리가 걸려 있으면 스타일을 어휘까지로
-      //   묶는다. Native가 정보 배열까지 갈아엎으면 그건 더 이상 유저 생각이
-      //   자란 과정이 아니고, P3 Native English가 보여 줄 차이도 미리 소진된다.
-      //   사다리가 없는 줄은 그냥 번역이라 예전대로 둔다.
       final String styleBlock = aiStylePromptBlock(
         targetLang: targetLanguage,
-        scope: 'the "target" translation'
-            '${expandedSource.isEmpty ? '' : ' and the "expanded" sentence'}, '
+        scope: 'the "target" translation, '
             'never the corrected $sourceName line',
-        reach: expandedSource.isEmpty
-            ? AiStyleReach.rebuild
-            : AiStyleReach.wording,
       );
       final String context = _historyRepairContext(messageRef);
-      final String lineBlock = expandedSource.isEmpty
-          ? 'LINE: $source'
-          : 'LINE: $source\n\nGROWING SENTENCE: $expandedSource';
+      final String lineBlock = 'LINE: $source';
       final String userContent = context.isEmpty
           ? lineBlock
           : 'SURROUNDING CONVERSATION:\n$context\n\n$lineBlock';
@@ -956,9 +839,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
               body: jsonEncode(<String, dynamic>{
                 'model': 'gpt-4o-mini',
                 'temperature': 0.0,
-                // 누적 문장이 실리면 마지막 턴은 한 줄이 아니라 다섯 턴이
-                // 합쳐진 문장이다. 220으로는 번역이 중간에서 잘린다.
-                'max_tokens': expandedSource.isEmpty ? 220 : 520,
+                'max_tokens': 220,
                 'response_format': <String, String>{'type': 'json_object'},
                 'messages': <Map<String, String>>[
                   <String, String>{
@@ -982,16 +863,7 @@ WHO THE LINE IS ABOUT — read this before you translate:
 - Never fall back on "I" just because the subject is missing. Use "I" only when the line is genuinely about the speaker.
 - The people in this conversation are introduced in its opening lines. Settle who they are there first, then keep them straight through every line.
 - Keep each person's relationship to the speaker exactly as stated. Do not promote, demote, or merge them, and do not invent one who was never mentioned.
-${expandedSource.isEmpty ? '' : '''
-GROWING SENTENCE — the speaker is building ONE sentence across several turns, and GROWING SENTENCE is how far it has grown by this line. Translate it into natural spoken $targetLanguage as ONE sentence. Keep it a single flowing sentence — never a comma-separated list of facts. Add nothing that is not in it. The subject rules above apply to every clause in it.
-
-P2 CHUNK MAPPING — return a "chunks" JSON array for the translated growing sentence. Split the translated "expanded" sentence into meaningful phrases or clauses, preserving every word exactly once and in order. Classify each chunk as:
-- "kept": expression carried over from the translated "target" line with minimal change
-- "evolved": the same meaning as the translated "target" line but restructured or rephrased
-- "new": content not present in the translated "target" line
-For both "kept" and "evolved", include "from" as an exact contiguous substring of the translated "target" line. For "new", omit "from". Never paraphrase text inside a chunk; concatenating all chunk text must reproduce the translated "expanded" sentence.
-'''}
-Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetLanguage translation>"${expandedSource.isEmpty ? '' : ', "expanded": "<$targetLanguage translation of GROWING SENTENCE>", "chunks": [{"text":"<exact chunk from expanded>","type":"kept|evolved|new","from":"<exact substring from target; kept/evolved only>"}]'}}$styleBlock''',
+Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetLanguage translation>"}$styleBlock''',
                   },
                   <String, String>{
                     'role': 'user',
@@ -1021,15 +893,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
           final parsed = jsonDecode(content) as Map<String, dynamic>;
           targetText = (parsed['target'] ?? '').toString().trim();
           repairedOriginal = (parsed['original'] ?? '').toString().trim();
-          final expandedReply = (parsed['expanded'] ?? '').toString().trim();
-          if (expandedReply.isNotEmpty) {
-            expandedTargetText = expandedReply;
-            p2Chunks = parseP2Chunks(
-              parsed['chunks'],
-              expandedTargetText,
-              part1Text: targetText,
-            );
-          }
         } catch (_) {
           debugPrint('[HISTORY-TARGET] json_parse_failed msg=${messageRef.id}');
           targetText = content;
@@ -1049,11 +912,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
           repairedOriginal.isNotEmpty && repairedOriginal != source;
       await messageRef.update(<String, dynamic>{
         'translated_text': targetText,
-        // 🌱 [EXPAND-LADDER] 누적 문장의 배울글. P2가 이 값으로 사다리를 읽는다.
-        if (expandedTargetText.isNotEmpty)
-          'expanded_translated': expandedTargetText,
-        if (expandedTargetText.isNotEmpty)
-          'p2_chunks': p2Chunks.map((chunk) => chunk.toJson()).toList(),
         if (repaired) 'original_text': repairedOriginal,
         if (repaired) 'original_text_raw': source,
         if (repaired) 'original_repaired_at': FieldValue.serverTimestamp(),
@@ -1089,7 +947,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
           doc.reference,
           original,
           _sourceLangForMessage(data),
-          expandedText: (data['expanded_sentence'] ?? '').toString().trim(),
         ));
       }
     }
@@ -1101,10 +958,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     await [Permission.microphone].request();
   }
 
-  // 📦 [Box 11-Room: 방 단위 진입 라우터]
-  // 🔧 [TUTOR-FIX] 방 종류에 따라 분기:
-  //   - 완성문장 있음 (Step Expand 방) → 기존 Shadowing variantSelect
-  //   - 완성문장 없음 (Clone/Roleplay/Duo 방) → Tutor 모드
+  // 📦 [Box 11-Room: 방 단위 진입]
+  //   저장된 대화를 역할 교환 Practice로 연다.
   Future<void> _enterShadowingFromRoom() async {
     if (_isEnteringPractice) return;
     _resumeHistoryFromUserAction();
@@ -1112,11 +967,9 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     try {
       // 🔄 [FRESH-ROOM] 캐시를 믿지 않는다.
       //
-      //   P1·사다리는 유저가 **방을 나간 뒤** 백그라운드에서 쓰인다. 반면
-      //   `_cachedRoomData`는 히스토리 화면이 열릴 때 한 번 읽은 값이라,
-      //   그 사이에 쓰인 `p1_pairs`가 없다. 그러면 P1이 "쌍이 없다"고 보고
-      //   대화 원문 폴백으로 떨어져, 코치가 방에서 늘어놓은 후보 셋이 그대로
-      //   AI 줄로 뜬다(실기기 2026-08-25). 문서 하나 더 읽는 값을 치른다.
+      //   방 문서에는 대화가 끝난 뒤 백그라운드에서 쓰이는 값이 있다. 반면
+      //   `_cachedRoomData`는 히스토리 화면이 열릴 때 한 번 읽은 값이라 그
+      //   사이에 쓰인 것이 빠져 있다. 문서 하나 더 읽는 값을 치른다.
       var data = _cachedRoomData;
       try {
         final fresh = await widget.historyDoc.get();
@@ -1141,98 +994,9 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         return;
       }
 
-      // 🇺🇸 [NATIVE-ENGLISH] P3의 두 번째 문장. 예전 이름은 Polished였고
-      //   하는 일도 달랐다(원문을 매끄럽게 다듬기). 지금은 같은 생각을
-      //   원어민이 처음부터 영어로 짰다면 어떻게 말했을지로 다시 쓴다.
-      //   **옛 `polished_sentence`를 이 자리에 싣지 않는다** — 다듬은 문장을
-      //   Native English라고 이름 붙이면 카드가 거짓말을 한다. 비워 두면
-      //   아래 [_prepareStepP3]가 이번 진입에서 한 번 만들어 캐시한다.
-      final nativeEnglish = (data['native_english'] as String?) ?? '';
-      // 구 방 판별과 구 방 P3 문장 폴백에만 쓴다.
-      final legacyPolished = (data['polished_sentence'] as String?) ?? '';
-      final expanded = (data['expanded_sentence'] as String?) ?? '';
-      // 🌱 [EXPANSION] 새 Step Expand 방은 대화가 끝난 뒤 사다리를 만들고,
-      //   그 마지막 칸이 최종문장이다. `expansion_status`가 있으면 새 방이다 —
-      //   구 방에는 이 필드가 아예 없어 예전 경로를 그대로 탄다.
-      final expansionStatus =
-          (data['expansion_status'] as String?)?.trim() ?? '';
-      _p1Pairs = parseStoredP1Pairs(data['p1_pairs']);
-      final finalSentence = (data['final_sentence'] as String?)?.trim() ?? '';
-      _expansionStatus = expansionStatus;
-      _expansionFailure =
-          (data['expansion_failure'] as String?)?.trim() ?? '';
-      _expansionStartedAt =
-          (data['expansion_started_at'] as Timestamp?)?.toDate();
-      _expansionSteps = expansionStatus == StepExpansionStatus.ok
-          ? parseStoredExpansions(data['expansions'])
-          : const <StepExpansionStep>[];
-      final roomMode =
-          _inferHistoryMode(data); // 🆕 [ROUTER-FIX] 버튼 표시 조건용 mode 캐시
-      _cachedRoomMode = roomMode;
+      _cachedRoomMode = _inferHistoryMode(data);
 
-      // 🆕 [ROUTER-FIX] step_expand(또는 mode 없는 구버전+expanded 존재)만 Step Expand 분기.
-      // clone/roleplay는 expanded_sentence가 있어도 아래 Tutor 모드로 진행.
-      if (roomMode == 'step_expand' ||
-          (roomMode.isEmpty &&
-              (legacyPolished.isNotEmpty || expanded.isNotEmpty))) {
-        _nativeEnglish = nativeEnglish;
-        // P3가 읽는 문장은 하나뿐이다.
-        //   새 방: Builder가 만든 final_sentence. 실패했으면 비어 있고, 그때는
-        //          구경로 값으로 몰래 때우지 않는다 — 실패가 보여야 다시 만든다.
-        //   구 방: 예전대로 expanded_sentence(없으면 옛 polished_sentence).
-        _expandedSentence = expansionStatus.isNotEmpty
-            ? finalSentence
-            : (expanded.isNotEmpty ? expanded : legacyPolished);
-        _nativeEnglishLoadDone = nativeEnglish.isNotEmpty;
-        _practicingNativeEnglish = false;
-
-        // 화면에 이미 로드된 메시지를 재사용하고, 캐시가 없을 때만 다시 조회한다.
-        var messageDocs = _cachedDocs;
-        if (messageDocs.isEmpty) {
-          final msgSnap = await widget.historyDoc
-              .collection('messages')
-              .orderBy('created_at', descending: false)
-              .get();
-          messageDocs = msgSnap.docs;
-          _cachedDocs = messageDocs;
-        }
-        _stepExpandTurns = _parseStepExpandTurns(messageDocs);
-        if (!mounted) return;
-
-        // 🗂️ [P1] P1은 Target/Original 둘 다 보여 준다. 배울글이 아직 없는
-        //   줄이 있으면 여기서 채운다 — 다만 **기다리지 않는다.** 선택 화면은
-        //   즉시 떠야 하고, 배울글이 늦게 와도 P1은 원어만으로 성립한다.
-        //   다 만들어지면 아직 선택 화면에 있을 때만 다시 읽는다. 이미 연습에
-        //   들어간 유저의 화면을 도중에 갈아 끼우지 않는다.
-        unawaited(_ensureHistoryTargets(messageDocs)
-            .then((_) => _refreshStepExpandTurns()));
-
-        // P1/P2/P3 선택 화면부터 즉시 표시하고, 느린 P3 청크/번역 생성은
-        // 화면 전환 뒤 백그라운드에서 진행한다.
-        final generation = ++_stepP3PreparationGeneration;
-        BillingTicker.instance.setRate(BillingRate.full);
-        setState(() {
-          _isStepExpandRoom = true;
-          isPracticeMode = true;
-          _phase = ShadowingPhase.variantSelect;
-          _chunks = [];
-          _isPreparingStepP3 = true;
-          _stepP3PreparationError = null;
-        });
-        // 새 방인데 사다리가 아직/영영 없으면 P3에 걸 문장이 없다.
-        //   여기서 억지로 걸면 "P3 준비 실패"가 뜨는데, 실제 원인은 사다리가
-        //   없는 것이다. 화면은 그쪽을 가리켜야 한다.
-        if (_expandedSentence.trim().isNotEmpty) {
-          unawaited(_prepareStepP3(_expandedSentence, generation));
-        } else {
-          // 걸 문장이 없으면 Native English도 만들 수 없다. 스피너를 여기서
-          // 내려야 카드가 영영 도는 채로 남지 않는다.
-          _nativeEnglishLoadDone = true;
-        }
-        return;
-      }
-
-      // Clone / Roleplay / Duo 방: messages 서브컬렉션 → Tutor 모드
+      // messages 서브컬렉션 → Tutor 모드
       await _remoteConfigFuture;
       var messageDocs = _cachedDocs;
       if (messageDocs.isEmpty) {
@@ -1332,141 +1096,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     } finally {
       if (mounted) setState(() => _isEnteringPractice = false);
     }
-  }
-
-  /// 대화방이 넘긴 한국어 완성문장을 P3용 영어로 만든다.
-  ///
-  /// 대화방은 한국어 자료만 넘긴다. 영어는 히스토리가 자기 규칙으로 만드는데,
-  /// 그 자리가 여기 P3 진입 시점이다 — 바로 아래 Native English 생성과 같다.
-  /// `_fetchOpenAITTS`는 받은 글자를 그대로 읽을 뿐 번역하지 않으므로, 이걸
-  /// 건너뛰면 "완성 문장" 탭이 한국어를 띄우고 한국어를 소리내어 읽는다.
-  Future<String?> _translateExpandedToTarget(String source) async {
-    final text = source.trim();
-    if (text.isEmpty || _apiKey.isEmpty) return null;
-    try {
-      final targetLanguage = (_sessionTargetLang ?? 'English').trim();
-      final response = await http
-          .post(
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
-            headers: <String, String>{
-              'Authorization': 'Bearer $_apiKey',
-              'Content-Type': 'application/json; charset=utf-8',
-            },
-            body: jsonEncode(<String, dynamic>{
-              'model': 'gpt-4o-mini',
-              'temperature': 0.0,
-              'max_tokens': 300,
-              'messages': <Map<String, String>>[
-                <String, String>{
-                  'role': 'system',
-                  'content': 'The user built this Korean sentence step by step in a speaking '
-                      'practice. Turn it into ONE natural spoken $targetLanguage '
-                      'sentence for shadowing practice.\n'
-                      '- Keep the speaker viewpoint, meaning, tense, and tone.\n'
-                      '- Do not add or drop information.\n'
-                      '- Spoken rhythm, easy to say out loud. Not written prose.\n'
-                      '- The result must be 100% $targetLanguage and must NOT contain '
-                      'any Korean (Hangul) characters.\n'
-                      'Return only the sentence, with no label or explanation.'
-                      '${aiStylePromptBlock(targetLang: targetLanguage, scope: 'the $targetLanguage sentence you produce', reach: AiStyleReach.wording)}',
-                },
-                <String, String>{'role': 'user', 'content': text},
-              ],
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode != 200) {
-        debugPrint('[P3-EXPAND-TARGET] status=${response.statusCode}');
-        return null;
-      }
-      final body =
-          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-      final choices = body['choices'] as List? ?? const <dynamic>[];
-      final firstChoice =
-          choices.isEmpty ? null : choices.first as Map<String, dynamic>?;
-      final message = firstChoice?['message'] as Map<String, dynamic>?;
-      final translated = (message?['content'] ?? '').toString().trim();
-      return translated.isEmpty ? null : translated;
-    } catch (error) {
-      debugPrint('[P3-EXPAND-TARGET] failed reason=${error.runtimeType}');
-      return null;
-    }
-  }
-
-  Future<void> _prepareStepP3(String sentence, int generation) async {
-    try {
-      if (!mounted || generation != _stepP3PreparationGeneration) return;
-      var expanded = sentence.trim();
-
-      // 한글이 남아 있으면 아직 영어가 안 만들어진 방이다. 여기서 한 번 만들고
-      // 방 문서에 캐시해, 다음 진입부터는 이 API를 다시 타지 않게 한다.
-      if (expanded.isNotEmpty && _stepExpandHangul.hasMatch(expanded)) {
-        final target = await _translateExpandedToTarget(expanded);
-        if (!mounted || generation != _stepP3PreparationGeneration) return;
-        if (target != null) {
-          expanded = target;
-          _expandedSentence = expanded;
-          try {
-            await widget.historyDoc.update({'expanded_sentence': expanded});
-            debugPrint('[P3-EXPAND-TARGET] generated model=gpt-4o-mini');
-          } catch (e) {
-            debugPrint('[prepareStepP3] expanded cache save failed: $e');
-          }
-        } else {
-          debugPrint('[P3-EXPAND-TARGET] failed → 한국어 완성문장 그대로 사용');
-        }
-      }
-
-      // 🇺🇸 [NATIVE-ENGLISH] 두 번째 카드. 옛 방은 `native_english`가 없어
-      //   여기서 처음 만들어지고, 그 뒤로는 캐시를 그대로 쓴다.
-      if (expanded.isNotEmpty && _nativeEnglish.trim().isEmpty) {
-        final rebuilt = await _buildNativeEnglish(
-          expanded,
-          partnerLabel: 'AI',
-        );
-        if (!mounted || generation != _stepP3PreparationGeneration) return;
-        if (rebuilt != null && rebuilt.trim().isNotEmpty) {
-          final readyNativeEnglish = rebuilt.trim();
-          _nativeEnglish = readyNativeEnglish;
-          try {
-            await widget.historyDoc.update({
-              'native_english': readyNativeEnglish,
-              'has_practice': true,
-            });
-          } catch (e) {
-            debugPrint('[prepareStepP3] native_english cache save failed: $e');
-          }
-        }
-      }
-      if (!mounted || generation != _stepP3PreparationGeneration) return;
-      setState(() {
-        // 만들었든 못 만들었든 이번 진입의 시도는 끝났다. 카드가 영영 스피너로
-        // 남지 않게 여기서 한 번만 내린다.
-        _nativeEnglishLoadDone = true;
-        _isPreparingStepP3 = false;
-        _stepP3PreparationError =
-            expanded.isEmpty ? 'No sentence is available for P3.' : null;
-      });
-    } catch (e) {
-      debugPrint('[prepareStepP3] $e');
-      if (!mounted || generation != _stepP3PreparationGeneration) return;
-      setState(() {
-        _nativeEnglishLoadDone = true;
-        _isPreparingStepP3 = false;
-        _stepP3PreparationError = 'P3 preparation failed. Tap to retry.';
-      });
-    }
-  }
-
-  void _retryStepP3Preparation() {
-    if (_isPreparingStepP3 || _expandedSentence.isEmpty) return;
-    final generation = ++_stepP3PreparationGeneration;
-    setState(() {
-      _nativeEnglishLoadDone = _nativeEnglish.trim().isNotEmpty;
-      _isPreparingStepP3 = true;
-      _stepP3PreparationError = null;
-    });
-    unawaited(_prepareStepP3(_expandedSentence, generation));
   }
 
   // 🆕 [TUTOR] 진입/차단 토스트 헬퍼
@@ -1592,17 +1221,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     _startTurnPractice();
   }
 
-  void _startP2Reading() {
-    if (!mounted ||
-        _phase != ShadowingPhase.part2Practice ||
-        !_tutorAwaitingStart) {
-      return;
-    }
-    _resumeHistoryFromUserAction();
-    setState(() => _tutorAwaitingStart = false);
-    _startTurnPractice();
-  }
-
   // ============================================================================
   // 📦 [Box 11-C: 양방향 턴제 연습 엔진 (Turn-Based Practice)]
   // ============================================================================
@@ -1659,13 +1277,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     if (currentIndex >= _tutorLines.length) return;
     final line = _tutorLines[currentIndex];
     final bool isAiTurn = _isAiTurn(line); // 🆕 [BOX-32]
-    if (_phase == ShadowingPhase.part2Practice) {
-      if (_tutorAwaitingStart) return;
-      // 🔤 [P2-MORPH] See How It Grows를 누르면
-      //   첫 문장부터 자라는 흐름을 시작한다.
-      unawaited(_runMorphStep(currentIndex));
-      return;
-    }
     if (isAiTurn) {
       _checkAndPlayAILine();
     } else {
@@ -1675,244 +1286,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         }
       });
     }
-  }
-
-  // ============================================================================
-  // [P2-SHADOW] Highlight read-along.
-  // ============================================================================
-
-  // ══════════════════════════════════════════════════════════════════
-  // 🔤 [P2-MORPH] Thought Expansion
-  //
-  //   P2는 **문장이 자라는 모습을 보고 듣는 자리**다. 마이크도 녹음도 없다.
-  //   말하기는 P3가 맡는다.
-  //
-  //   화면: GPT의 kept/evolved/new 청크와 단계별로 짙어지는 문장 테두리
-  //   음성: LCS 핵심 변화 하나만 살린 Smooth Jazz 전체 낭독 → 다음 계단
-  // ══════════════════════════════════════════════════════════════════
-
-  /// 문장이 먼저 눈에 들어온 뒤 전체 문장 재생을 시작하는 짧은 전환.
-  static const Duration _kMorphHighlightDelay = Duration(milliseconds: 320);
-
-  /// 한 계단을 연다.
-  Future<void> _runMorphStep(int lineIdx) async {
-    _shadowHighlightTimer?.cancel();
-    _shadowAdvanceTimer?.cancel();
-    if (!mounted || !isPracticeMode || lineIdx >= _tutorLines.length) return;
-
-    final text = (_tutorLines[lineIdx]['text'] as String).trim();
-    if (text.isEmpty) {
-      _nextTurn();
-      return;
-    }
-    // 바로 앞 계단이 비교 대상이다. 첫 계단은 견줄 것이 없어 강조가 없다.
-    final previous =
-        lineIdx > 0 ? (_tutorLines[lineIdx - 1]['text'] as String).trim() : '';
-    final morph = computeMorph(previous, text);
-    debugPrint('[P2-THOUGHT]\n'
-        'Previous: ${previous.isEmpty ? '(none)' : previous}\n'
-        'Current: $text\n'
-        'All Changes: ${morph.phrases}\n'
-        'Primary Morph: ${morph.primary?.phrase ?? '(none)'}');
-
-    _pinShadowLineToTop(lineIdx);
-    _startShadowLineGlide(lineIdx,
-        text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList());
-    if (mounted) {
-      setState(() {
-        _morphPreparing = true;
-        _p2ActiveChunkIndex = -1;
-        _p2MorphDurationMs = 0;
-      });
-    }
-
-    // 소리는 미리 받아 둔다. 강조가 켜지는 동안 네트워크를 기다리지 않는다.
-    final audioFuture = _getMorphPcm(text, morph, lineIdx);
-
-    await Future<void>.delayed(_kMorphHighlightDelay);
-    if (!_morphAlive(lineIdx)) return;
-
-    Uint8List? pcm;
-    try {
-      pcm = await audioFuture;
-    } catch (e) {
-      debugPrint('[P2-MORPH] tts $e');
-    }
-    if (!_morphAlive(lineIdx)) return;
-    if (mounted) setState(() => _morphPreparing = false);
-
-    if (pcm == null || pcm.isEmpty) {
-      // 소리를 못 만들었다. 계단을 붙잡아 두지 않고 넘어간다.
-      _scheduleMorphAdvance(lineIdx);
-      return;
-    }
-    await _playMorphAudio(_applyP2BreathGap(pcm, lineIdx), lineIdx);
-  }
-
-  /// P3 Shadowing과 같은 호흡 분석·gap 삽입을 재사용한다. 첫 문장은 Normal,
-  /// 다음 문장부터는 Relaxed이며 원본 발성 속도는 바꾸지 않는다.
-  Uint8List _applyP2BreathGap(Uint8List pcm, int lineIdx) {
-    final gap = _p2GapForLine(lineIdx);
-    final gapMs = _kP3ShadowGapMs[gap] ?? 500;
-    final analysis = analyzeBreaths(pcm, const BreathAnalysisConfig());
-    debugPrint('[P2-PACE] line=${lineIdx + 1} gap=${_kP3ShadowGapLabel[gap]} '
-        'gapMs=$gapMs breaths=${analysis.segments.length}');
-    return buildGappedPcm(
-      pcm,
-      analysis.segments,
-      extraGapMs: gapMs,
-      sampleRate: kStealthVoxSttSampleRate,
-    );
-  }
-
-  P3ShadowGap _p2GapForLine(int lineIdx) =>
-      lineIdx == 0 ? P3ShadowGap.normal : P3ShadowGap.relaxed;
-
-  bool _morphAlive(int lineIdx) =>
-      mounted &&
-      _phase == ShadowingPhase.part2Practice &&
-      !isPaused &&
-      currentIndex == lineIdx;
-
-  /// 전체 문장을 한 번 읽는다. 재생기는 기존 `_shadowAiPlayer`를 그대로 쓴다 —
-  /// 화면 이탈·뒤로가기 정리 경로가 이미 [_stopShadowAiPlayback]을 부르고 있어
-  /// 새 정리 지점을 만들지 않아도 된다.
-  Future<void> _playMorphAudio(Uint8List pcm, int lineIdx) async {
-    await _stopShadowAiPlayback();
-    if (!_morphAlive(lineIdx)) return;
-    final wav = pcm16ToWav(pcm, sampleRate: kStealthVoxSttSampleRate);
-    final player = AudioPlayer();
-    _shadowAiPlayer = player;
-    final chunks = _p2ChunksForLine(_tutorLines[lineIdx]);
-    _p2MorphDurationMs =
-        ((pcm.length / 2) / kStealthVoxSttSampleRate * 1000).round();
-    _shadowDurSub = player.onDurationChanged.listen((duration) {
-      if (duration.inMilliseconds > 0) {
-        _p2MorphDurationMs = duration.inMilliseconds;
-      }
-    });
-    _shadowPosSub = player.onPositionChanged.listen((position) {
-      if (!_morphAlive(lineIdx)) return;
-      final next = p2ChunkIndexAtPosition(
-        chunks,
-        positionMs: position.inMilliseconds,
-        totalMs: _p2MorphDurationMs,
-      );
-      if (next == _p2ActiveChunkIndex) return;
-      setState(() => _p2ActiveChunkIndex = next);
-    });
-    if (mounted) {
-      setState(() {
-        _morphPlaying = true;
-        _p2ActiveChunkIndex = chunks.isEmpty ? -1 : 0;
-      });
-    }
-    // onPlayerComplete.first는 쓰지 않는다 - dispose 때 스트림이 빈 채로
-    // 닫히며 Bad state: No element가 새어 대기가 무너진다.
-    _shadowCompleteSub = player.onPlayerComplete.listen((_) {
-      if (!mounted) return;
-      setState(() {
-        _morphPlaying = false;
-        _p2ActiveChunkIndex = -1;
-      });
-      _scheduleMorphAdvance(lineIdx);
-    });
-    try {
-      await player.play(BytesSource(wav));
-    } catch (e) {
-      debugPrint('[P2-MORPH] play $e');
-      await _stopShadowAiPlayback();
-      if (mounted) {
-        setState(() {
-          _morphPlaying = false;
-          _p2ActiveChunkIndex = -1;
-        });
-      }
-      _scheduleMorphAdvance(lineIdx);
-    }
-  }
-
-  void _scheduleMorphAdvance(int lineIdx) {
-    _shadowAdvanceTimer?.cancel();
-    final gapMs = _kP3ShadowGapMs[_p2GapForLine(lineIdx)] ?? 500;
-    _shadowAdvanceTimer = Timer(Duration(milliseconds: gapMs), () {
-      if (!_morphAlive(lineIdx)) return;
-      _nextTurn();
-    });
-  }
-
-  /// 이번 문장의 소리. **Primary Morph 하나가 캐시 키에 들어간다** - 같은
-  /// 문장이라도 핵심 변화가 다르면 다른 소리이므로 같은 오디오를 쓰면 안 된다.
-  Future<Uint8List?> _getMorphPcm(String text, MorphChange morph, int lineIdx) {
-    const morphInstructionVersion = 'primary_v1';
-    final voice = _p2VoiceForLine(lineIdx);
-    final ns = '${_breathCacheNamespace(voice)}'
-        '_$morphInstructionVersion'
-        '_m${morph.identity}';
-    final requestKey = '$ns|$text';
-    final existing = _breathPcmInFlight[requestKey];
-    if (existing != null) return existing;
-    final future = () async {
-      final cached = await TtsCache.get(text, ns);
-      if (cached != null && cached.length > 44) return pcmFromWav(cached);
-      final raw = await _fetchOpenAITTSInternal(
-        text,
-        1.0,
-        voice,
-        model: _historyPracticeTtsModel,
-        instructions:
-            _kBreathStyle.instruction + morphEmphasisInstruction(morph),
-        instructionTag: '${_kBreathStyle.id}'
-            '_$morphInstructionVersion'
-            '_m${morph.identity}',
-        responseFormat: 'pcm',
-      );
-      if (raw == null || raw.isEmpty) return null;
-      await TtsCache.put(
-        text,
-        ns,
-        pcm16ToWav(raw, sampleRate: kStealthVoxSttSampleRate),
-      );
-      return raw;
-    }();
-    _breathPcmInFlight[requestKey] = future;
-    future.whenComplete(() => _breathPcmInFlight.remove(requestKey));
-    return future;
-  }
-
-  /// 낭독 재생기를 닫는다. **P2 Morphing이 이 재생기를 그대로 쓴다** —
-  /// 화면 이탈·뒤로가기 정리 경로가 이미 여기를 부르고 있어 새 정리 지점을
-  /// 만들지 않아도 된다.
-  Future<void> _stopShadowAiPlayback() async {
-    _shadowPosSub?.cancel();
-    _shadowPosSub = null;
-    _shadowDurSub?.cancel();
-    _shadowDurSub = null;
-    _shadowCompleteSub?.cancel();
-    _shadowCompleteSub = null;
-    _p2ActiveChunkIndex = -1;
-    _p2MorphDurationMs = 0;
-    final p = _shadowAiPlayer;
-    _shadowAiPlayer = null;
-    if (p != null) {
-      try {
-        await p.stop();
-      } catch (_) {}
-      try {
-        await p.dispose();
-      } catch (_) {}
-    }
-  }
-
-  /// 단어 하나를 읽는 데 걸리는 대략의 시간. 자동 스크롤
-  /// ([_startShadowLineGlide])이 문장 길이를 가늠하는 데만 쓴다.
-  int _shadowWordDuration(String w) {
-    final clean = w.replaceAll(RegExp(r'[^A-Za-z]'), '');
-    int d = 220 + clean.length * 55;
-    if (RegExp(r'[,;:]$').hasMatch(w)) d += 160;
-    if (RegExp(r'[.!?]$').hasMatch(w)) d += 320;
-    d = (d / _shadowSpeed).round();
-    return d.clamp(140, 1100);
   }
 
   Future<void> _checkAndPlayAILine() async {
@@ -2201,10 +1574,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         } else {
           _turnPracticeRetryCount++;
           final exceeded = _turnPracticeRetryCount >= 3;
-          if ((_phase == ShadowingPhase.turnPractice ||
-                  _phase == ShadowingPhase.part1Practice ||
-                  _phase == ShadowingPhase.part2Practice) &&
-              mounted) {
+          if (_phase == ShadowingPhase.turnPractice && mounted) {
             setState(() => _showRetryHint = true);
             await _playRetryPrompt();
             await Future.delayed(const Duration(milliseconds: 1200));
@@ -2246,61 +1616,13 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     _prefetchAllChunkAI();
   }
 
-  /// 🔙 [STEP-BACK] 진행 중인 Step Expand 연습을 접고 **P1/P2/P3 고르는 자리로**
-  /// 돌아간다. 방을 나가지 않는다 — 실행 중 X는 "그만두겠다"가 아니라
-  /// "다시 고르겠다"는 뜻이라, 방까지 닫으면 히스토리 목록부터 되짚어
-  /// 들어와야 했다. 방을 나가는 X는 고르는 화면에 그대로 있다.
-  ///
-  /// 이 방의 재료(`_stepExpandTurns`·완성문장·P3 청크)는 손대지 않는다.
-  /// 지운 것은 이번 회차의 흔적뿐이라 곧바로 다시 시작할 수 있다.
-  void _backToStepExpandSelect() {
-    unawaited(_deleteUserRecordings());
-    _stopTutorPlayback();
-    _stopAutoVADRecording();
-    _utteranceSafetyTimer?.cancel();
-    _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
-    _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
-    unawaited(_stopShadowAiPlayback()); // [P2-SHADOW-AI]
-    unawaited(_stopP3Shadowing(resetSelection: true));
-    _stopDeepgramListening();
-    audioPlayer.stop();
-    if (!mounted) return;
-    setState(() {
-      _phase = ShadowingPhase.variantSelect;
-      isPaused = false;
-      _tutorLines = [];
-      currentIndex = 0;
-      _tutorCurrentIdx = 0;
-      _isAutoRecording = false;
-      _tutorAiSpeaking = false;
-      _tutorUserRecording = false;
-      _tutorPlayingFullback = false;
-      _tutorAwaitingStart = true;
-      _swapRoles = false;
-      _showRetryHint = false;
-      _isListening = false;
-      _isPlayingFullUser = false;
-      _isPlayingFullAI = false;
-      _fullUserPlayIdx = 0;
-      _isReplayMode = false;
-      _aiChunkPlaying = false;
-      _aiChunkLoading = false;
-      _currentChunkIdx = 0;
-    });
-    _echoingOverlayTimer?.cancel();
-  }
-
   void _exitShadowing() {
-    _stepP3PreparationGeneration++;
     _deleteUserRecordings(); // 🆕 Practice 임시 녹음 파일 정리
     BillingTicker.instance.setRate(BillingRate.full);
     _stopTutorPlayback();
     _stopAutoVADRecording();
     _utteranceSafetyTimer?.cancel();
     _nativeEnglishRevealTimer?.cancel();
-    _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
-    _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
-    _stopShadowAiPlayback(); // [P2-SHADOW-AI]
     unawaited(_stopP3Shadowing(resetSelection: true));
     _stopDeepgramListening();
     audioPlayer.stop();
@@ -2331,12 +1653,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         _tutorAiSpeaking = false; // 🆕 [BOX-31]
         _tutorUserRecording = false; // 🆕 [BOX-31]
         _tutorPlayingFullback = false; // 🆕 [BOX-34]
-        // Step Expand 리셋
-        _isStepExpandRoom = false;
-        _stepExpandTurns = [];
-        _p1Pairs = const <StepExpandP1Pair>[];
-        _isPreparingStepP3 = false;
-        _stepP3PreparationError = null;
         _showRetryHint = false;
       });
     }
@@ -2679,11 +1995,8 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     }
   }
 
-  Future<void> _buildChunks(String sentence,
-      {int? preparationGeneration}) async {
-    bool isCurrentPreparation() =>
-        preparationGeneration == null ||
-        preparationGeneration == _stepP3PreparationGeneration;
+  Future<void> _buildChunks(String sentence) async {
+    bool isCurrentPreparation() => true;
     if (sentence.isEmpty) {
       if (!isCurrentPreparation()) return;
       _chunks = [];
@@ -2741,9 +2054,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     if (!mounted) return;
     if (_phase == ShadowingPhase.reviewing && _isPlayingFullUser) {
       _advanceFullUserPlay();
-    } else if ((_phase == ShadowingPhase.turnPractice ||
-            _phase == ShadowingPhase.part1Practice ||
-            _phase == ShadowingPhase.part2Practice) &&
+    } else if (_phase == ShadowingPhase.turnPractice &&
         isPracticeMode &&
         !isPaused) {
       if (mounted) setState(() => _tutorAiSpeaking = false); // 🆕 [BOX-31]
@@ -3361,9 +2672,8 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     final targetLanguage = _sessionTargetLangName();
     // 팝업은 여러 스타일을 한 번에 요청하므로, 스타일마다 지시문 전체를
     // 붙인다. 한 줄 요약만 주면 American과 Native가 같은 문장으로 돌아온다.
-    final guide = styles
-        .map((s) => '### "$s"\n${aiStyleInstruction(s)}')
-        .join('\n\n');
+    final guide =
+        styles.map((s) => '### "$s"\n${aiStyleInstruction(s)}').join('\n\n');
     try {
       final response = await http
           .post(
@@ -4179,20 +3489,15 @@ RULES — follow exactly:
           SafeArea(
             child: Column(
               children: [
-                _buildPracticeTabBar(),
-                // 🔙 P3 화면 안에는 닫기가 없었다. 탭 바 바로 밑에 한 줄을 둔다
-                //   — 왼쪽 X는 고르는 자리로 돌아가고, 오른쪽 SR은 공부방으로
-                //   나간다. P1·P2는 각자 헤더에 이미 X를 들고 있다.
+                // 🔙 왼쪽 X는 연습을 닫고, 오른쪽 SR은 공부방으로 나간다.
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 0, 16, 2),
+                  padding: const EdgeInsets.fromLTRB(12, 6, 16, 2),
                   child: Row(
                     children: [
                       IconButton(
                         icon: const Icon(Icons.close, color: Colors.white70),
-                        tooltip: '다시 고르기',
-                        onPressed: _isStepExpandRoom
-                            ? _backToStepExpandSelect
-                            : _exitShadowing,
+                        tooltip: '닫기',
+                        onPressed: _exitShadowing,
                         padding: EdgeInsets.zero,
                         constraints:
                             const BoxConstraints(minWidth: 40, minHeight: 40),
@@ -4274,38 +3579,6 @@ RULES — follow exactly:
         backgroundColor: const Color(0xFF121212),
         body: Stack(children: [
           SafeArea(child: _buildTurnPracticeScreen()),
-          Positioned(
-              top: 8,
-              right: 8,
-              child: SafeArea(
-                  child: GestureDetector(
-                child: const SizedBox(width: 40, height: 40),
-              ))),
-        ]),
-      );
-    }
-
-    if (_phase == ShadowingPhase.part1Practice) {
-      return Scaffold(
-        backgroundColor: const Color(0xFF121212),
-        body: Stack(children: [
-          SafeArea(child: _buildStepPracticeWithTabBar()),
-          Positioned(
-              top: 8,
-              right: 8,
-              child: SafeArea(
-                  child: GestureDetector(
-                child: const SizedBox(width: 40, height: 40),
-              ))),
-        ]),
-      );
-    }
-
-    if (_phase == ShadowingPhase.part2Practice) {
-      return Scaffold(
-        backgroundColor: const Color(0xFF121212),
-        body: Stack(children: [
-          SafeArea(child: _buildStepPracticeWithTabBar()),
           Positioned(
               top: 8,
               right: 8,
@@ -4703,7 +3976,7 @@ RULES — follow exactly:
       itemBuilder: (context, index) {
         var data = docs[index].data() as Map<String, dynamic>;
         bool isHost = data['role'] == 'HOST';
-        // 모든 말풍선: 확장문장 제거 - \n\n 앞의 첫 대답만 표시 (Step Expand HOST 메시지 포함)
+        // 모든 말풍선: \n\n 앞의 첫 대답만 표시
         String translated = (data['translated_text'] ?? '').toString();
         String original = (data['original_text'] ?? '').toString();
         final tParts = translated.split(RegExp(r'\n\s*\n'));
@@ -5016,7 +4289,6 @@ RULES — follow exactly:
 
   // 📦 [Box 22-B: Variant 선택 화면]
   Widget _buildVariantSelectScreen() {
-    if (_isStepExpandRoom) return _buildStepExpandSelectScreen();
     return Padding(
       padding: const EdgeInsets.all(24),
       child: Column(
@@ -5668,15 +4940,9 @@ RULES — follow exactly:
   }
 
   // 📦 [BOX-32: 역할 스왑 - 동적 판정 헬퍼]
-  // 일반 History Practice는 HOST=사용자, SYSTEM=AI 기준으로 판정하고,
-  // Step Expand P1/P2는 생성된 _tutorLines 구조(HOST=AI)를 유지한다.
-  bool _lineRepresentsAi(Map<String, dynamic> line) {
-    final role = line['role'] as String;
-    if (_phase == ShadowingPhase.turnPractice) {
-      return role == 'SYSTEM';
-    }
-    return role == 'HOST';
-  }
+  // History Practice는 HOST=사용자, SYSTEM=AI 기준으로 판정한다.
+  bool _lineRepresentsAi(Map<String, dynamic> line) =>
+      (line['role'] as String) == 'SYSTEM';
 
   String _practiceVoiceForLine(Map<String, dynamic> line) =>
       _lineRepresentsAi(line)
@@ -5685,16 +4951,12 @@ RULES — follow exactly:
 
   bool _isAiTurn(Map<String, dynamic> line) {
     final role = line['role'] as String;
-    if (_phase == ShadowingPhase.turnPractice) {
-      return _swapRoles ? role == 'HOST' : role == 'SYSTEM';
-    }
-    return role == 'HOST';
+    return _swapRoles ? role == 'HOST' : role == 'SYSTEM';
   }
 
   // 📦 [BOX-33: 유저 재녹음 핸들러]
   void _onTutorUserIconTap() {
     if (_tutorAwaitingStart || currentIndex >= _tutorLines.length) return;
-    if (_phase == ShadowingPhase.part2Practice) return; // [P2-SHADOW]
     final line = _tutorLines[currentIndex];
     if (_isAiTurn(line)) {
       return;
@@ -5711,36 +4973,6 @@ RULES — follow exactly:
   }
 
   // 📦 [BOX-34: 완료 후 전체 통합 재생]
-  Future<void> _restartP2Practice() async {
-    _shadowHighlightTimer?.cancel();
-    _shadowAdvanceTimer?.cancel();
-    await _stopShadowAiPlayback();
-    if (!mounted || _phase != ShadowingPhase.part2Practice) return;
-    setState(() {
-      currentIndex = 0;
-      _tutorCurrentIdx = 0;
-      _tutorPlayingFullback = false;
-      _tutorAwaitingStart = false;
-      _morphPreparing = false;
-      _morphPlaying = false;
-      _p2ActiveChunkIndex = -1;
-      _p2MorphDurationMs = 0;
-    });
-    // 목록을 맨 위로 되돌린다. ListView.builder는 화면 밖 아이템을 버리므로
-    // 마지막 계단까지 내려간 상태에서는 `_practiceItemKeys[0]`의 context가
-    // null이다. 그러면 `_scrollPracticeToIndex(0)`도 `_pinShadowLineToTop(0)`도
-    // 조용히 아무것도 하지 않아, 소리만 처음으로 가고 화면은 끝에 남는다.
-    // controller를 직접 0으로 보내면 아이템 0이 다시 만들어져 그 뒤 pin이 먹는다.
-    if (_practiceScrollController.hasClients) {
-      _practiceScrollController.jumpTo(0);
-    }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _phase == ShadowingPhase.part2Practice) {
-        _startTurnPractice();
-      }
-    });
-  }
-
   Future<void> _startTurnPracticeFullback() async {
     if (_tutorPlayingFullback) {
       audioPlayer.stop();
@@ -5837,43 +5069,8 @@ RULES — follow exactly:
       height: 1.5,
       fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
     );
-    if (_phase == ShadowingPhase.part2Practice) {
-      final chunkLine = _buildP2ChunkLine(line, isCurrent, base);
-      // 🏁 마지막 칸이 곧 이 세션의 최종문장이다. 여기서 자람이 끝났다는 걸
-      //   알아야 P3에서 다시 만났을 때 "내가 만든 그 문장"으로 읽힌다.
-      //   구 방에는 이 표시가 없다 — `isFinalStep`을 새 방만 싣는다.
-      if (line['isFinalStep'] != true) return chunkLine;
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.flag_rounded,
-                    size: 12 * _fontScale,
-                    color: const Color(0xFF81C784)
-                        .withValues(alpha: isCurrent ? 1.0 : 0.5)),
-                const SizedBox(width: 4),
-                Text(
-                  "Where it landed",
-                  style: TextStyle(
-                    color: const Color(0xFF81C784)
-                        .withValues(alpha: isCurrent ? 1.0 : 0.5),
-                    fontSize: 11 * _fontScale,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 0.3,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          chunkLine,
-        ],
-      );
-    }
-    // 🗂️ [P1] 배울글 아래에 대화 언어 원문을 함께 둔다. 위는 따라 말할 글,
+
+    // 📖 배울글 아래에 대화 언어 원문을 함께 둔다. 위는 따라 말할 글,
     //   아래는 그때 실제로 오간 말 — 둘이 붙어 있어야 "내 생각이 저 문장이
     //   됐다"가 보인다. 배울글이 없는 줄은 `native`가 비어 있어 예전과 같다.
     final native = (line['native'] ?? '').toString().trim();
@@ -5903,102 +5100,9 @@ RULES — follow exactly:
     );
   }
 
-  List<P2Chunk> _p2ChunksForLine(Map<String, dynamic> line) {
-    final mapped = line['p2Chunks'];
-    if (mapped is List<P2Chunk> && mapped.isNotEmpty) return mapped;
-    return fallbackP2Chunks((line['text'] ?? '').toString());
-  }
-
-  Color _p2ChunkAccent(P2Chunk chunk) {
-    switch (chunk.type) {
-      case 'evolved':
-        return const Color(0xFF64B5F6);
-      case 'new':
-        return const Color(0xFF81C784);
-      default:
-        return Colors.white;
-    }
-  }
-
-  /// 이번 칸에서 강조할 청크 하나를 고른다. 답은 셋 중 하나다.
-  ///
-  /// * `null` — **구 방이다.** 줄에 `primaryMorph` 칸 자체가 없다. 예전처럼
-  ///   변화 청크를 모두 칠한다. 이 폴백은 오직 여기에만 쓴다.
-  /// * `-1` — 새 방인데 지목이 없거나 문장에서 못 찾았다. **아무 데도 칠하지
-  ///   않는다.** 새 설계의 핵심이 "한 단계당 핵심 변화 하나"라서, 지목이 빈
-  ///   것은 호환 상황이 아니라 Builder 결과 이상이다. 전부 칠해서 덮으면
-  ///   이상이 정상처럼 보인다.
-  /// * `>= 0` — 지목된 청크 하나.
-  ///
-  /// §20의 요구는 분명하다 — **가장 중요한 변화 한 곳**이다. 바뀐 데를 전부
-  /// 칠하면 무엇이 들어왔는지가 오히려 안 보인다.
-  int? _primaryMorphIndex(Map<String, dynamic> line, List<P2Chunk> chunks) {
-    // 칸이 아예 없으면 구 방이다. 빈 문자열(새 방의 이상)과 구분해야 한다.
-    if (!line.containsKey('primaryMorph')) return null;
-    final morph = (line['primaryMorph'] ?? '').toString().trim();
-    if (morph.isEmpty) {
-      debugPrint('[P2-MORPH] step=${line['stepNumber']} 지목 없음 → 강조 생략');
-      return -1;
-    }
-    for (var i = 0; i < chunks.length; i++) {
-      if (chunks[i].text.trim() == morph) return i;
-    }
-    for (var i = 0; i < chunks.length; i++) {
-      if (chunks[i].text.contains(morph)) return i;
-    }
-    debugPrint('[P2-MORPH] step=${line['stepNumber']} 지목이 청크와 안 맞음 → 강조 생략');
-    return -1;
-  }
-
-  Widget _buildP2ChunkLine(
-      Map<String, dynamic> line, bool isCurrent, TextStyle base) {
-    final chunks = _p2ChunksForLine(line);
-    final active = isCurrent ? _p2ActiveChunkIndex : -1;
-    // 새 방은 강조가 한 곳뿐이다. 구 방(null)만 예전대로 전부 칠한다.
-    final morphIndex = _primaryMorphIndex(line, chunks);
-    final bool singleMorph = morphIndex != null;
-    final spans = <InlineSpan>[];
-    for (var index = 0; index < chunks.length; index++) {
-      final chunk = chunks[index];
-      // 강조를 한 곳으로 좁힌 방에서는, 지목되지 않은 변화는 색을 빼
-      // 담담하게 둔다. 그래야 지목된 한 곳이 실제로 눈에 들어온다.
-      final accent = singleMorph && index != morphIndex
-          ? Colors.white
-          : _p2ChunkAccent(chunk);
-      final isActive = index == active;
-      final isWaiting = active >= 0 && index > active;
-      final backgroundAlpha = chunk.type == 'kept'
-          ? (isActive ? 0.12 : 0.025)
-          : isActive
-              ? 0.30
-              : isWaiting
-                  ? 0.06
-                  : 0.14;
-      if (spans.isNotEmpty) spans.add(const TextSpan(text: ' '));
-      spans.add(TextSpan(
-        text: chunk.text,
-        style: base.copyWith(
-          color: isActive
-              ? Colors.white
-              : isWaiting
-                  ? Colors.white54
-                  : Colors.white.withValues(alpha: 0.88),
-          fontWeight: isActive ? FontWeight.w700 : FontWeight.w400,
-          backgroundColor: accent.withValues(alpha: backgroundAlpha),
-        ),
-      ));
-    }
-    return Text.rich(
-      TextSpan(children: spans),
-      textAlign: TextAlign.left,
-      style: base,
-    );
-  }
-
   Widget _buildTurnPracticeScreen() {
     final bool isAwaiting = _tutorAwaitingStart;
     final bool isComplete = currentIndex >= _tutorLines.length;
-    final bool isP2Practice = _phase == ShadowingPhase.part2Practice;
 
     return Stack(
       children: [
@@ -6011,169 +5115,124 @@ RULES — follow exactly:
                 children: [
                   IconButton(
                     icon: const Icon(Icons.close, color: Colors.white70),
-                    // 🔙 [STEP-BACK] Step Expand 방에서는 방을 닫지 않고
-                    //   P1/P2/P3 고르는 자리로 돌아간다.
-                    onPressed: _isStepExpandRoom
-                        ? _backToStepExpandSelect
-                        : _exitShadowing,
+                    onPressed: _exitShadowing,
                   ),
                   Expanded(
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        if (_phase != ShadowingPhase.part2Practice) ...[
-                          // 좌측: 유저 아이콘 — 역할 선택(대기) 또는 재녹음
-                          AnimatedBuilder(
-                            animation: _blinkController,
-                            builder: (context, child) => Opacity(
-                              opacity: isAwaiting ? _blinkOpacity.value : 1.0,
-                              child: child,
-                            ),
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: isAwaiting
-                                  ? () => _confirmStart(swap: false)
-                                  : _onTutorUserIconTap,
-                              child: AnimatedContainer(
-                                duration: const Duration(milliseconds: 250),
-                                padding: const EdgeInsets.all(9),
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: _tutorUserRecording
-                                      ? Colors.greenAccent
-                                          .withValues(alpha: 0.15)
-                                      : isAwaiting
-                                          ? Colors.greenAccent
-                                              .withValues(alpha: 0.08)
-                                          : Colors.white
-                                              .withValues(alpha: 0.04),
-                                  border: Border.all(
-                                    color: _tutorUserRecording
-                                        ? Colors.greenAccent
-                                        : isAwaiting
-                                            ? Colors.greenAccent
-                                                .withValues(alpha: 0.65)
-                                            : Colors.white24,
-                                    width: _tutorUserRecording ? 2 : 1.5,
-                                  ),
-                                ),
-                                child: Icon(
-                                  Icons.person_rounded,
-                                  size: 18,
-                                  color: _tutorUserRecording
-                                      ? Colors.greenAccent
-                                      : isAwaiting
-                                          ? Colors.greenAccent
-                                              .withValues(alpha: 0.85)
-                                          : Colors.white38,
-                                ),
-                              ),
-                            ),
+                        // 좌측: 유저 아이콘 — 역할 선택(대기) 또는 재녹음
+                        AnimatedBuilder(
+                          animation: _blinkController,
+                          builder: (context, child) => Opacity(
+                            opacity: isAwaiting ? _blinkOpacity.value : 1.0,
+                            child: child,
                           ),
-                          const SizedBox(width: 8),
-                        ],
-                        // 📏 P1 라벨이 "Choose a Character"로 길어졌다. 양옆은
-                        //   인물 아이콘이 잡고 있어 남는 폭이 좁고, 글꼴을
-                        //   키워 둔 기기에서는 그대로 넘친다. 자리에 맞춰
-                        //   줄여 언제나 한 줄로 보이게 한다.
-                        Flexible(
                           child: GestureDetector(
                             behavior: HitTestBehavior.opaque,
-                            onTap: _phase == ShadowingPhase.part2Practice &&
-                                    isAwaiting &&
-                                    !isComplete
-                                ? _startP2Reading
-                                : null,
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 6),
-                              child: AnimatedBuilder(
-                                animation: _blinkController,
-                                builder: (context, child) => Opacity(
-                                  opacity:
-                                      _phase == ShadowingPhase.part2Practice &&
-                                              isAwaiting
-                                          ? 0.35 + (_blinkOpacity.value * 0.65)
-                                          : 1.0,
-                                  child: child,
+                            onTap: isAwaiting
+                                ? () => _confirmStart(swap: false)
+                                : _onTutorUserIconTap,
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 250),
+                              padding: const EdgeInsets.all(9),
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: _tutorUserRecording
+                                    ? Colors.greenAccent.withValues(alpha: 0.15)
+                                    : isAwaiting
+                                        ? Colors.greenAccent
+                                            .withValues(alpha: 0.08)
+                                        : Colors.white.withValues(alpha: 0.04),
+                                border: Border.all(
+                                  color: _tutorUserRecording
+                                      ? Colors.greenAccent
+                                      : isAwaiting
+                                          ? Colors.greenAccent
+                                              .withValues(alpha: 0.65)
+                                          : Colors.white24,
+                                  width: _tutorUserRecording ? 2 : 1.5,
                                 ),
-                                child: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: Text(
-                                    isComplete
-                                        ? "Practice 완료!"
-                                        : (_phase ==
-                                                ShadowingPhase.part1Practice
-                                            ? "Choose a Character"
-                                            : _phase ==
-                                                    ShadowingPhase.part2Practice
-                                                ? "See How It Grows"
-                                                : "Practice"),
-                                    maxLines: 1,
-                                    style: TextStyle(
-                                        color: _phase ==
-                                                    ShadowingPhase
-                                                        .part2Practice &&
-                                                isAwaiting
-                                            ? Colors.lightBlueAccent
-                                            : Colors.white54,
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.bold,
-                                        letterSpacing: 1.0),
-                                  ),
-                                ),
+                              ),
+                              child: Icon(
+                                Icons.person_rounded,
+                                size: 18,
+                                color: _tutorUserRecording
+                                    ? Colors.greenAccent
+                                    : isAwaiting
+                                        ? Colors.greenAccent
+                                            .withValues(alpha: 0.85)
+                                        : Colors.white38,
                               ),
                             ),
                           ),
                         ),
-                        if (_phase != ShadowingPhase.part2Practice) ...[
-                          const SizedBox(width: 8),
-                          // 우측: AI 아이콘 — 역할 선택(대기)
-                          AnimatedBuilder(
-                            animation: _blinkController,
-                            builder: (context, child) => Opacity(
-                              opacity: isAwaiting ? _blinkOpacity.value : 1.0,
-                              child: child,
-                            ),
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: isAwaiting
-                                  ? () => _confirmStart(swap: true)
-                                  : null,
-                              child: AnimatedContainer(
-                                duration: const Duration(milliseconds: 250),
-                                padding: const EdgeInsets.all(9),
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: _tutorAiSpeaking
-                                      ? Colors.blue.withValues(alpha: 0.15)
-                                      : isAwaiting
-                                          ? Colors.blue.withValues(alpha: 0.08)
-                                          : Colors.white
-                                              .withValues(alpha: 0.04),
-                                  border: Border.all(
-                                    color: _tutorAiSpeaking
-                                        ? Colors.blue
-                                        : isAwaiting
-                                            ? Colors.blue
-                                                .withValues(alpha: 0.65)
-                                            : Colors.white24,
-                                    width: _tutorAiSpeaking ? 2 : 1.5,
-                                  ),
-                                ),
-                                child: Icon(
-                                  Icons.smart_toy_rounded,
-                                  size: 18,
-                                  color: _tutorAiSpeaking
-                                      ? Colors.blue
-                                      : isAwaiting
-                                          ? Colors.blue.withValues(alpha: 0.85)
-                                          : Colors.white38,
-                                ),
+                        const SizedBox(width: 8),
+                        // 📏 글꼴을 크게 써 둔 기기에서도 한 줄로 보이게
+                        //   자리에 맞춰 줄인다. 양옆은 인물 아이콘이 잡고 있어
+                        //   남는 폭이 좁다.
+                        Flexible(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 6),
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                isComplete ? "Practice 완료!" : "Practice",
+                                maxLines: 1,
+                                style: const TextStyle(
+                                    color: Colors.white54,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 1.0),
                               ),
                             ),
                           ),
-                        ],
+                        ),
+                        const SizedBox(width: 8),
+                        // 우측: AI 아이콘 — 역할 선택(대기)
+                        AnimatedBuilder(
+                          animation: _blinkController,
+                          builder: (context, child) => Opacity(
+                            opacity: isAwaiting ? _blinkOpacity.value : 1.0,
+                            child: child,
+                          ),
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: isAwaiting
+                                ? () => _confirmStart(swap: true)
+                                : null,
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 250),
+                              padding: const EdgeInsets.all(9),
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: _tutorAiSpeaking
+                                    ? Colors.blue.withValues(alpha: 0.15)
+                                    : isAwaiting
+                                        ? Colors.blue.withValues(alpha: 0.08)
+                                        : Colors.white.withValues(alpha: 0.04),
+                                border: Border.all(
+                                  color: _tutorAiSpeaking
+                                      ? Colors.blue
+                                      : isAwaiting
+                                          ? Colors.blue.withValues(alpha: 0.65)
+                                          : Colors.white24,
+                                  width: _tutorAiSpeaking ? 2 : 1.5,
+                                ),
+                              ),
+                              child: Icon(
+                                Icons.smart_toy_rounded,
+                                size: 18,
+                                color: _tutorAiSpeaking
+                                    ? Colors.blue
+                                    : isAwaiting
+                                        ? Colors.blue.withValues(alpha: 0.85)
+                                        : Colors.white38,
+                              ),
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -6227,83 +5286,57 @@ RULES — follow exactly:
                   final bool isPast = i < currentIndex;
                   final Color roleColor =
                       lineIsAi ? Colors.amber : Colors.greenAccent;
-                  final bool isP2 = _phase == ShadowingPhase.part2Practice;
-                  final double growth = _tutorLines.length <= 1
-                      ? 1.0
-                      : i / (_tutorLines.length - 1);
-                  final Color p2BorderColor = Color.lerp(
-                    const Color(0xFFB9E3F8),
-                    const Color(0xFF1565C0),
-                    growth,
-                  )!;
 
                   return Align(
-                    alignment: _phase == ShadowingPhase.part2Practice
-                        ? Alignment.center
-                        : lineIsAi
-                            ? Alignment.centerRight
-                            : Alignment.centerLeft,
+                    alignment:
+                        lineIsAi ? Alignment.centerRight : Alignment.centerLeft,
                     child: AnimatedOpacity(
                       key: key,
                       duration: const Duration(milliseconds: 300),
                       opacity: isPast ? 0.45 : 1.0,
                       child: Container(
                         constraints: BoxConstraints(
-                          maxWidth: MediaQuery.of(context).size.width *
-                              (_phase == ShadowingPhase.part2Practice
-                                  ? 0.94
-                                  : 0.80),
+                          maxWidth: MediaQuery.of(context).size.width * 0.80,
                         ),
                         margin: const EdgeInsets.only(bottom: 10),
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: isP2
-                              ? p2BorderColor.withValues(
-                                  alpha: isCurrent ? 0.10 : 0.035)
-                              : isCurrent
-                                  ? roleColor.withValues(alpha: 0.1)
-                                  : const Color(0xFF1C1C1E),
+                          color: isCurrent
+                              ? roleColor.withValues(alpha: 0.1)
+                              : const Color(0xFF1C1C1E),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color: isP2
-                                ? p2BorderColor.withValues(
-                                    alpha: isCurrent ? 0.95 : 0.58)
-                                : isCurrent
-                                    ? roleColor
-                                    : Colors.white12,
-                            width: isCurrent ? 2 : (isP2 ? 1.2 : 1),
+                            color: isCurrent ? roleColor : Colors.white12,
+                            width: isCurrent ? 2 : 1,
                           ),
                         ),
                         child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            if (_phase != ShadowingPhase.part2Practice) ...[
-                              AnimatedContainer(
-                                duration: const Duration(milliseconds: 250),
-                                width: 34,
-                                height: 34,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: isCurrent
-                                      ? roleColor.withValues(alpha: 0.2)
-                                      : Colors.white.withValues(alpha: 0.05),
-                                  border: Border.all(
-                                    color:
-                                        isCurrent ? roleColor : Colors.white24,
-                                    width: isCurrent ? 2 : 1,
-                                  ),
-                                ),
-                                child: Icon(
-                                  lineIsAi
-                                      ? Icons.smart_toy_rounded
-                                      : Icons.person_rounded,
-                                  color: isCurrent ? roleColor : Colors.white38,
-                                  size: 17,
+                            AnimatedContainer(
+                              duration: const Duration(milliseconds: 250),
+                              width: 34,
+                              height: 34,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: isCurrent
+                                    ? roleColor.withValues(alpha: 0.2)
+                                    : Colors.white.withValues(alpha: 0.05),
+                                border: Border.all(
+                                  color: isCurrent ? roleColor : Colors.white24,
+                                  width: isCurrent ? 2 : 1,
                                 ),
                               ),
-                              const SizedBox(width: 10),
-                            ],
+                              child: Icon(
+                                lineIsAi
+                                    ? Icons.smart_toy_rounded
+                                    : Icons.person_rounded,
+                                color: isCurrent ? roleColor : Colors.white38,
+                                size: 17,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
                             Flexible(
                               child: Column(
                                 crossAxisAlignment: lineIsAi
@@ -6374,35 +5407,32 @@ RULES — follow exactly:
                   children: [
                     Row(
                       children: [
-                        if (!isP2Practice) ...[
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              icon: Icon(
-                                _tutorPlayingFullback
-                                    ? Icons.stop_rounded
-                                    : Icons.volume_up_rounded,
-                                size: 18,
-                              ),
-                              label: Text(
-                                _tutorPlayingFullback ? "정지" : "Play all",
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold),
-                              ),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor:
-                                    Colors.blue.withValues(alpha: 0.15),
-                                foregroundColor: Colors.blue,
-                                side: const BorderSide(color: Colors.blue),
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 14),
-                                shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(16)),
-                              ),
-                              onPressed: _startTurnPracticeFullback,
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            icon: Icon(
+                              _tutorPlayingFullback
+                                  ? Icons.stop_rounded
+                                  : Icons.volume_up_rounded,
+                              size: 18,
                             ),
+                            label: Text(
+                              _tutorPlayingFullback ? "정지" : "Play all",
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor:
+                                  Colors.blue.withValues(alpha: 0.15),
+                              foregroundColor: Colors.blue,
+                              side: const BorderSide(color: Colors.blue),
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16)),
+                            ),
+                            onPressed: _startTurnPracticeFullback,
                           ),
-                          const SizedBox(width: 12),
-                        ],
+                        ),
+                        const SizedBox(width: 12),
                         Expanded(
                           child: ElevatedButton.icon(
                             icon: const Icon(Icons.replay_rounded, size: 18),
@@ -6417,43 +5447,38 @@ RULES — follow exactly:
                               shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(16)),
                             ),
-                            onPressed: isP2Practice
-                                ? () => unawaited(_restartP2Practice())
-                                : () {
-                                    audioPlayer.stop();
-                                    _tutorAudioPlayer?.stop();
-                                    for (final l in _tutorLines) {
-                                      // 🆕 [BOX-34-CLEANUP] 실제 파일도 삭제
-                                      final rp =
-                                          l['user_record_path'] as String?;
-                                      if (rp != null && rp.isNotEmpty) {
-                                        File(rp).delete().ignore();
-                                      }
-                                      l.remove('user_record_path');
-                                      l.remove('ai_audio_bytes');
-                                    }
-                                    if (mounted) {
-                                      setState(() {
-                                        currentIndex = 0;
-                                        _tutorCurrentIdx = 0;
-                                        _tutorPlayingFullback = false;
-                                        _tutorAwaitingStart = true;
-                                        _swapRoles = false;
-                                        _tutorAiSpeaking = false;
-                                        _tutorUserRecording = false;
-                                      });
-                                      // 역할을 고르기 전부터 첫 대사가 보여야
-                                      // 한다. 여기서 안 돌리면 끝 화면을 본 채
-                                      // 역할을 고르게 된다.
-                                      if (_practiceScrollController
-                                          .hasClients) {
-                                        _practiceScrollController.jumpTo(0);
-                                      }
-                                      WidgetsBinding.instance
-                                          .addPostFrameCallback(
-                                              (_) => _showRoleSelectBubble());
-                                    }
-                                  },
+                            onPressed: () {
+                              audioPlayer.stop();
+                              _tutorAudioPlayer?.stop();
+                              for (final l in _tutorLines) {
+                                // 🆕 [BOX-34-CLEANUP] 실제 파일도 삭제
+                                final rp = l['user_record_path'] as String?;
+                                if (rp != null && rp.isNotEmpty) {
+                                  File(rp).delete().ignore();
+                                }
+                                l.remove('user_record_path');
+                                l.remove('ai_audio_bytes');
+                              }
+                              if (mounted) {
+                                setState(() {
+                                  currentIndex = 0;
+                                  _tutorCurrentIdx = 0;
+                                  _tutorPlayingFullback = false;
+                                  _tutorAwaitingStart = true;
+                                  _swapRoles = false;
+                                  _tutorAiSpeaking = false;
+                                  _tutorUserRecording = false;
+                                });
+                                // 역할을 고르기 전부터 첫 대사가 보여야
+                                // 한다. 여기서 안 돌리면 끝 화면을 본 채
+                                // 역할을 고르게 된다.
+                                if (_practiceScrollController.hasClients) {
+                                  _practiceScrollController.jumpTo(0);
+                                }
+                                WidgetsBinding.instance.addPostFrameCallback(
+                                    (_) => _showRoleSelectBubble());
+                              }
+                            },
                           ),
                         ),
                       ],
@@ -6470,9 +5495,7 @@ RULES — follow exactly:
               ),
 
             // 🔒 Tutor history modes do not generate Expanded Sentence here.
-            if (!_blocksHistoryExpandedSentence(_cachedRoomMode) &&
-                _phase != ShadowingPhase.part1Practice &&
-                _phase != ShadowingPhase.part2Practice)
+            if (!_blocksHistoryExpandedSentence(_cachedRoomMode))
               Padding(
                 padding: EdgeInsets.fromLTRB(
                   20,
@@ -6567,52 +5590,6 @@ RULES — follow exactly:
     });
   }
 
-  // [P2-TELEPROMPTER] 긴 대사는 시작할 때 반드시 첫 줄부터 보이게 한다.
-  void _pinShadowLineToTop(int idx) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted ||
-          _phase != ShadowingPhase.part2Practice ||
-          currentIndex != idx) {
-        return;
-      }
-      final context = _practiceItemKeys[idx]?.currentContext;
-      if (context == null) return;
-      Scrollable.ensureVisible(
-        context,
-        alignment: 0.0,
-        duration: Duration.zero,
-      );
-    });
-  }
-
-  // [P2-TELEPROMPTER] 단어 하이라이트 총시간에 맞춰 마지막 줄까지 선형 이동한다.
-  void _startShadowLineGlide(int idx, List<String> words) {
-    final durationMs = words.fold<int>(
-      0,
-      (total, word) => total + _shadowWordDuration(word),
-    );
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted ||
-          _phase != ShadowingPhase.part2Practice ||
-          currentIndex != idx ||
-          !_practiceScrollController.hasClients) {
-        return;
-      }
-      final context = _practiceItemKeys[idx]?.currentContext;
-      final renderObject = context?.findRenderObject();
-      if (context == null || renderObject is! RenderBox) return;
-      final viewportHeight =
-          _practiceScrollController.position.viewportDimension;
-      if (renderObject.size.height <= viewportHeight * 0.9) return;
-      Scrollable.ensureVisible(
-        context,
-        alignment: 1.0,
-        duration: Duration(milliseconds: durationMs.clamp(1200, 60000)),
-        curve: Curves.linear,
-      );
-    });
-  }
-
   // 🆕 [BOX-34-SCROLL] Practice 화면에서 현재 인덱스 아이템을 스크롤
   void _scrollPracticeToIndex(int idx) {
     final key = _practiceItemKeys[idx];
@@ -6621,7 +5598,7 @@ RULES — follow exactly:
         key!.currentContext!,
         duration: const Duration(milliseconds: 350),
         curve: Curves.easeOutCubic,
-        alignment: _phase == ShadowingPhase.part2Practice ? 0.0 : 0.4,
+        alignment: 0.4,
       );
     }
   }
@@ -8146,272 +7123,6 @@ RULES — follow exactly:
         ),
       );
 
-  // ============================================================================
-  // 📦 [Box 11-D: Step Expand Practice 1 & 2 엔진]
-  // ============================================================================
-
-  /// 사다리 → P2 줄. **새 방 전용이다.**
-  ///
-  /// 예전 P2는 마지막 칸을 빼 두었다("그건 P3 몫") . 여기서는 넣는다 —
-  /// 마지막 칸이 곧 Final이고, 생각이 어디까지 자랐는지를 보여 주는 것이
-  /// 이 화면의 목적이기 때문이다. 대신 마지막임을 표시해 P3에서 다시 만날
-  /// 문장이라는 걸 알 수 있게 한다.
-  void _startPart2FromExpansions() {
-    final lines = <Map<String, dynamic>>[];
-    for (var i = 0; i < _expansionSteps.length; i++) {
-      final step = _expansionSteps[i];
-      lines.add(<String, dynamic>{
-        'role': 'USER',
-        'text': step.text,
-        // 변화를 재는 기준선은 직전 칸이다(예전에는 같은 턴의 짧은 번역문).
-        'part1': step.previousText,
-        'p2Chunks': step.chunks,
-        'primaryMorph': step.primaryMorph,
-        'addedMeaning': step.addedMeaning,
-        'stepNumber': step.step,
-        'isFinalStep': i == _expansionSteps.length - 1,
-      });
-    }
-    if (lines.isEmpty || !mounted) return;
-    setState(() {
-      _phase = ShadowingPhase.part2Practice;
-      _tutorLines = lines;
-      currentIndex = 0;
-      _tutorCurrentIdx = 0;
-      _isAutoRecording = false;
-      _tutorAwaitingStart = true;
-      _swapRoles = false;
-      _tutorAiSpeaking = false;
-      _tutorUserRecording = false;
-      _tutorPlayingFullback = false;
-      _showRetryHint = false;
-    });
-  }
-
-  /// messages 서브컬렉션 docs → _stepExpandTurns 파싱
-  ///
-  /// 한 턴은 **유저가 먼저 말하고 AI가 받는다**. 대화방이 저장하는 순서도
-  /// `[HOST, SYSTEM]`이므로 HOST를 열고 뒤따르는 SYSTEM으로 닫는다.
-  /// 예전에는 SYSTEM을 먼저 받아 두고 **뒤에 오는** HOST와 짝지었다. 그러면
-  /// 짝지을 AI가 앞에 없는 **첫 유저 발화(씨앗)가 통째로 버려지고**, 연습이
-  /// AI 질문부터 시작했다. 마지막 턴은 AI가 답하지 않으므로(`aiText` 빈 값)
-  /// 짝이 없는 채로 닫는다.
-  List<Map<String, dynamic>> _parseStepExpandTurns(
-      List<DocumentSnapshot> docs) {
-    final turns = <Map<String, dynamic>>[];
-    Map<String, dynamic>? openTurn;
-    for (final doc in docs) {
-      final data = doc.data() as Map<String, dynamic>;
-      final role = (data['role'] as String?) ?? '';
-      final translatedText = (data['translated_text'] as String?) ?? '';
-      final originalText = (data['original_text'] as String?) ?? '';
-      final text = translatedText.isNotEmpty ? translatedText : originalText;
-      if (role == 'HOST') {
-        // AI 답 없이 유저 발화가 연달아 오면 앞 턴을 그대로 닫는다.
-        if (openTurn != null) turns.add(openTurn);
-        // 🌱 [EXPAND-LADDER] part2는 part1과 **같은 언어**여야 한다. part1이
-        //   배울글(`translated_text`)이면 누적 문장도 배울글 쪽을 쓴다.
-        //   배울글이 아직 안 만들어졌으면 빈 값으로 두고 아래에서 part1으로
-        //   폴백시킨다 — 원어를 끼워 넣으면 P2에 한국어 줄이 섞인다.
-        final expandedField = (translatedText.isNotEmpty
-                ? (data['expanded_translated'] as String?)
-                : (data['expanded_sentence'] as String?)) ??
-            '';
-        final parts = text.split('\n\n');
-        final part1 = parts[0].trim();
-        String part2;
-        if (expandedField.isNotEmpty) {
-          part2 = expandedField.trim();
-        } else {
-          part2 = parts.length >= 2 ? parts.sublist(1).join('\n\n').trim() : '';
-        }
-        // 🗂️ [P1-NATIVE] P1은 **언제나 원어**다. 위 part1/part2는 배울글이
-        //   있으면 배울글을 쓰는데, 그건 P2의 언어 규칙이다. 둘을 한 칸에
-        //   섞어 두면, 히스토리 대화 화면을 먼저 열어 번역이 붙은 방만 P1이
-        //   영어로 보인다 — 같은 자리가 방마다 다른 언어로 보였다.
-        final nativeParts = originalText.split('\n\n');
-        final nativePart1 = nativeParts[0].trim();
-        openTurn = <String, dynamic>{
-          'aiText': '',
-          'aiTextNative': '',
-          'part1': part1,
-          'part1Native': nativePart1.isNotEmpty ? nativePart1 : part1,
-          'part2': part2,
-          'p2Chunks': parseP2Chunks(
-            data['p2_chunks'],
-            part2,
-            part1Text: part1,
-          ),
-        };
-      } else if (role == 'SYSTEM' && openTurn != null) {
-        openTurn['aiText'] = text.trim();
-        // 원어가 비어 있는 줄은 없어야 하지만, 있으면 빈 말풍선보다는 낫다.
-        openTurn['aiTextNative'] = originalText.trim().isNotEmpty
-            ? originalText.trim()
-            : text.trim();
-        turns.add(openTurn);
-        openTurn = null;
-      }
-    }
-    if (openTurn != null) turns.add(openTurn);
-    return turns;
-  }
-
-  /// 배울글이 뒤늦게 채워졌으면 턴을 다시 읽는다.
-  ///
-  /// 선택 화면(P1/P2/P3 고르는 자리)에 있을 때만 한다. 연습 도중에 갈아 끼우면
-  /// 읽고 있던 줄이 발밑에서 바뀐다.
-  Future<void> _refreshStepExpandTurns() async {
-    if (!mounted || !_isStepExpandRoom) return;
-    if (_phase != ShadowingPhase.variantSelect) return;
-    try {
-      final snap = await widget.historyDoc
-          .collection('messages')
-          .orderBy('created_at', descending: false)
-          .get();
-      if (!mounted || _phase != ShadowingPhase.variantSelect) return;
-      _cachedDocs = snap.docs;
-      setState(() => _stepExpandTurns = _parseStepExpandTurns(snap.docs));
-    } catch (e) {
-      debugPrint('[refreshStepExpandTurns] $e');
-    }
-  }
-
-  /// P1 한 줄. **Target과 Original 둘 다 실린다.**
-  ///
-  /// `text`는 연습이 다루는 글이라 배울글이 있으면 배울글이다 — TTS가 읽고,
-  /// 유저가 따라 말하는 것이 그쪽이어야 한다. 원어는 `native`에 실려 그 아래
-  /// 함께 보인다. 배울글이 아직 없으면 원어가 `text`로 올라가고 `native`는
-  /// 비운다 — 같은 문장을 두 번 그리지 않기 위해서다.
-  Map<String, dynamic> _p1Line(String role, String target, String native) {
-    final t = target.trim();
-    final n = native.trim();
-    if (t.isEmpty || t == n) {
-      return <String, dynamic>{'role': role, 'text': n, 'native': ''};
-    }
-    return <String, dynamic>{'role': role, 'text': t, 'native': n};
-  }
-
-  /// 🗂️ [P1] 유저가 자기 글을 한 조각씩 쌓은 기록.
-  ///
-  ///   유저: 회사 그만두고 싶어.
-  ///   AI:   연결하고 싶은 당신의 생각을 말해보세요.
-  ///   유저: 매일 똑같은 일을 반복하는 게 너무 지쳐.
-  ///
-  /// **유저가 먼저 시작한다.** 씨앗 앞에는 AI 줄이 없다 — 아무도 그걸
-  /// 요구하지 않았다. AI 줄은 그 사이에 끼는 짧은 권유일 뿐, 방에서 코치가
-  /// 늘어놓은 후보 셋도 추천도 여기 오지 않는다.
-  ///
-  /// 유저 줄은 **그 턴에 실제로 글에 붙은 문장**이다. "2번이 좋아"가 아니다.
-  /// 방이 턴마다 확정해 둔 누적 글에서 계산으로 나오므로, 지어낼 자리가 없다.
-  ///
-  /// 줄이 없으면 옛 방이거나 사다리가 없는 방이다. 그때만 대화 원문을 그대로
-  /// 보여 준다 — 제안문이 섞이지만, 아무것도 안 보여 주는 것보다는 낫다.
-  Future<void> _startPart1Practice() async {
-    final lines = <Map<String, dynamic>>[];
-    if (_p1Pairs.isNotEmpty) {
-      for (final pair in _p1Pairs) {
-        if (pair.hasPrompt) {
-          lines.add(_p1Line('HOST', pair.promptTarget, pair.prompt));
-        }
-        lines.add(_p1Line('USER', pair.answerTarget, pair.answer));
-      }
-    } else {
-      if (_stepExpandTurns.isEmpty) return;
-      // 유저가 먼저 말하고 AI가 받는다 — 대화방에서 실제로 오간 순서다.
-      // 옛 방에도 두 글을 같이 건다. 새 방과 같은 제품이어야 한다.
-      for (final turn in _stepExpandTurns) {
-        final userNative =
-            (turn['part1Native'] ?? turn['part1'] ?? '').toString().trim();
-        if (userNative.isNotEmpty) {
-          final userTarget = (turn['part1'] ?? '').toString().trim();
-          lines.add(_p1Line(
-              'USER', userTarget == userNative ? '' : userTarget, userNative));
-        }
-        // 마지막 턴은 AI가 답하지 않는다. 빈 말풍선을 만들지 않는다.
-        final aiNative =
-            (turn['aiTextNative'] ?? turn['aiText'] ?? '').toString().trim();
-        if (aiNative.isNotEmpty) {
-          final aiTarget = (turn['aiText'] ?? '').toString().trim();
-          lines.add(_p1Line(
-              'HOST', aiTarget == aiNative ? '' : aiTarget, aiNative));
-        }
-      }
-    }
-    if (lines.isEmpty) return;
-    if (mounted) {
-      setState(() {
-        _phase = ShadowingPhase.part1Practice;
-        _tutorLines = lines;
-        currentIndex = 0;
-        _tutorCurrentIdx = 0;
-        _isAutoRecording = false;
-        _tutorAwaitingStart = true;
-        _swapRoles = false;
-        _tutorAiSpeaking = false;
-        _tutorUserRecording = false;
-        _tutorPlayingFullback = false;
-        _showRetryHint = false;
-      });
-      WidgetsBinding.instance
-          .addPostFrameCallback((_) => _showRoleSelectBubble());
-    }
-  }
-
-  Future<void> _startPart2Practice() async {
-    // 🌱 [EXPANSION] 새 방은 사다리를 그대로 읽는다. 대화 턴과 단계는 1:1이
-    //   아니므로(§17) 여기서 턴을 세지 않는다.
-    if (_isExpansionRoom) {
-      if (!_expansionReady) return;
-      _startPart2FromExpansions();
-      return;
-    }
-    if (_stepExpandTurns.isEmpty) return;
-    final lines = <Map<String, dynamic>>[];
-    final totalTurns = _stepExpandTurns.length;
-    // 🪜 [P2-LADDER] P2는 **유저 말이 자라는 것만** 본다. AI 질문은 넣지
-    //   않는다 — 대화를 다시 듣는 자리가 아니라 한 문장이 1계단에서 4계단으로
-    //   길어지는 것을 몸에 붙이는 자리다(P1이 대화를 맡는다).
-    //   마지막 턴의 누적 문장은 완성문장 그 자체라 빼 둔다 — 그건 P3 몫이다.
-    for (int i = 0; i < totalTurns - 1; i++) {
-      final turn = _stepExpandTurns[i];
-      final part2 = (turn['part2'] as String).isNotEmpty
-          ? turn['part2'] as String
-          : turn['part1'] as String;
-      if (part2.trim().isNotEmpty) {
-        final mapped = turn['p2Chunks'];
-        lines.add(<String, dynamic>{
-          'role': 'USER',
-          'text': part2,
-          'part1': (turn['part1'] ?? '').toString().trim(),
-          'p2Chunks':
-              mapped is List<P2Chunk> ? mapped : fallbackP2Chunks(part2),
-        });
-      }
-    }
-    if (mounted) {
-      setState(() {
-        _phase = ShadowingPhase.part2Practice;
-        _tutorLines = lines;
-        currentIndex = 0;
-        _tutorCurrentIdx = 0;
-        _isAutoRecording = false;
-        _tutorAwaitingStart = true;
-        _swapRoles = false;
-        _tutorAiSpeaking = false;
-        _tutorUserRecording = false;
-        _tutorPlayingFullback = false;
-        _showRetryHint = false;
-        _shadowSpeed = 1.0;
-      });
-      _echoingOverlayTimer?.cancel();
-      _shadowHighlightTimer?.cancel();
-      _shadowAdvanceTimer?.cancel();
-      _stopShadowAiPlayback();
-      // 보이스 선택은 없앴다. See How It Grows를 누를 때 첫 문장을 연다.
-    }
-  }
-
   String _historyString(Map<String, dynamic>? data, String key) {
     return (data?[key] ?? '').toString().trim();
   }
@@ -8429,7 +7140,6 @@ RULES — follow exactly:
   //   저장 id는 절대 바꾸지 않는다. 이미 저장된 문서가 미분류로 떨어진다.
   //     free_talk   ← 표시명 Free Talk → Anyone → Circle Talk 로 변천
   //     roleplay    ← 표시명 Scenario Talk (room_name은 "Roleplay Mode" 유지)
-  //     step_expand ← 표시명 Step Expand
   //   기존 조건은 지우지 말고 OR로 덧붙일 것. 지우면 그 시기 기록이 죽는다.
   String _inferHistoryMode(Map<String, dynamic>? data) {
     final mode = _normalizeHistoryMode(_historyString(data, 'mode'));
@@ -8442,9 +7152,6 @@ RULES — follow exactly:
         room.startsWith('Circle Talk')) return 'free_talk';
     if (room == 'Anyone') return 'free_talk';
     if (room == 'Duo Mode' || room == 'Duo Connect Mode') return 'duo';
-    if (room == 'Step.Ex Mode' || room == 'Step Expand Mode') {
-      return 'step_expand';
-    }
     return '';
   }
 
@@ -8455,10 +7162,7 @@ RULES — follow exactly:
   /// 비어 있는 줄만 고른다), 직접 대화 줄만 여기서 타겟을 얻는다.
   bool get _usesDeferredHistoryTargets {
     final mode = _inferHistoryMode(_cachedRoomData);
-    return mode == 'free_talk' ||
-        mode == 'roleplay' ||
-        mode == 'step_expand' ||
-        mode == 'duo';
+    return mode == 'free_talk' || mode == 'roleplay' || mode == 'duo';
   }
 
   /// 🧹 [DUO-PRACTICE-FILTER] 연습 재료에서 맞장구만 뺀다.
@@ -8859,8 +7563,9 @@ content and gist of the WHOLE conversation.
           partnerLabel: labels['partnerLabel']!,
         );
         if (!mounted) return;
-        nativeEnglish =
-            (rebuilt != null && rebuilt.trim().isNotEmpty) ? rebuilt.trim() : "";
+        nativeEnglish = (rebuilt != null && rebuilt.trim().isNotEmpty)
+            ? rebuilt.trim()
+            : "";
 
         // 캐시 저장 — has_practice + mode stamp(없으면 room_name으로 추론)로
         // 재입장 시 라우터가 expanded만 있는 모호한 방을 Step Expand로 오인하지 않게 보장
@@ -8894,7 +7599,6 @@ content and gist of the WHOLE conversation.
       }
 
       // P3 진입 준비
-      _isStepExpandRoom = false;
       _expandedSentence = expanded;
       _nativeEnglish = nativeEnglish;
       _nativeEnglishLoadDone = true;
@@ -8939,83 +7643,6 @@ content and gist of the WHOLE conversation.
     }
   }
 
-  void _switchToPractice(int practiceNum) {
-    if (!mounted) return;
-    _stopAutoVADRecording();
-    audioPlayer.stop();
-    _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
-    _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
-    _stopShadowAiPlayback(); // [P2-SHADOW-AI]
-    unawaited(_stopP3Shadowing(resetSelection: true));
-    if (practiceNum == 1) {
-      _startPart1Practice();
-    } else if (practiceNum == 2) {
-      _startPart2Practice();
-    } else {
-      _goToChunkPractice();
-    }
-  }
-
-  // ============================================================================
-  // 📦 [Box 22-E: Step Expand Practice 탭 바 & 화면]
-  // ============================================================================
-
-  Widget _buildPracticeTabBar() {
-    final isP1 = _phase == ShadowingPhase.part1Practice;
-    final isP2 = _phase == ShadowingPhase.part2Practice;
-    final isP3 = _phase == ShadowingPhase.chunkPractice;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          _buildPracticeTab('P1', isP1, () => _switchToPractice(1)),
-          const SizedBox(width: 8),
-          _buildPracticeTab('P2', isP2, () => _switchToPractice(2)),
-          const SizedBox(width: 8),
-          _buildPracticeTab('P3', isP3, () => _switchToPractice(3)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStepPracticeWithTabBar() {
-    return Column(
-      children: [
-        _buildPracticeTabBar(),
-        Expanded(child: _buildTurnPracticeScreen()),
-      ],
-    );
-  }
-
-  Widget _buildPracticeTab(String label, bool isActive, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
-        decoration: BoxDecoration(
-          color: isActive
-              ? Colors.amber.withValues(alpha: 0.18)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: isActive ? Colors.amber : Colors.white24,
-            width: isActive ? 1.5 : 1,
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: isActive ? Colors.amber : Colors.white38,
-            fontSize: 13,
-            fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
-          ),
-        ),
-      ),
-    );
-  }
-
   /// 🏫 [SR] 공부방 목록으로 가는 알약. 설정 페이지·대화방에 단 것과 같다.
   ///
   /// 자리를 내주고 간다(`pushReplacement`) — 이 방은 열려 있는 동안 과금이
@@ -9041,273 +7668,6 @@ content and gist of the WHOLE conversation.
               fontSize: 13,
               letterSpacing: 1.2,
             ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// 사다리를 다시 만든다.
-  ///
-  /// **원본은 그때 나눈 대화다.** 대화방 로직을 다시 태우지 않고, 구
-  /// `expanded_sentence`도 쳐다보지 않는다. messages 서브컬렉션을 그대로 읽어
-  /// 처음 만들 때와 같은 길로 보낸다.
-  Future<void> _retryExpansionBuild() async {
-    if (_isRebuildingExpansions || _apiKey.isEmpty) return;
-    setState(() => _isRebuildingExpansions = true);
-    try {
-      var docs = _cachedDocs;
-      if (docs.isEmpty) {
-        final snap = await widget.historyDoc
-            .collection('messages')
-            .orderBy('created_at', descending: false)
-            .get();
-        docs = snap.docs;
-        _cachedDocs = docs;
-      }
-      final ladder = stepExpandLadderFromMessages(
-        docs
-            .map((doc) => (doc.data() as Map<String, dynamic>?) ?? const {})
-            .toList(growable: false),
-      );
-      if (ladder.isEmpty) {
-        debugPrint('[EXPANSION-RETRY] 사다리가 없다 → 다시 만들 것이 없다');
-        return;
-      }
-      await finalizeStepExpansions(
-        roomRef: widget.historyDoc,
-        apiKey: _apiKey,
-        ladder: ladder,
-        originLang: (_sessionNativeLang ?? 'Korean').trim().isEmpty
-            ? 'Korean'
-            : _sessionNativeLang!.trim(),
-        targetLang: _sessionTargetLangName(),
-        onLog: (tag, message) => debugPrint('$tag $message'),
-      );
-      if (!mounted) return;
-      // 방금 쓴 결과를 그대로 다시 읽는다.
-      final fresh = await widget.historyDoc.get();
-      if (!mounted) return;
-      final data = fresh.data() as Map<String, dynamic>? ?? const {};
-      setState(() {
-        _expansionStatus =
-            (data['expansion_status'] as String?)?.trim() ?? '';
-        _expansionFailure =
-            (data['expansion_failure'] as String?)?.trim() ?? '';
-        _expansionStartedAt =
-            (data['expansion_started_at'] as Timestamp?)?.toDate();
-        _expansionSteps = _expansionStatus == StepExpansionStatus.ok
-            ? parseStoredExpansions(data['expansions'])
-            : const <StepExpansionStep>[];
-        _expandedSentence =
-            (data['final_sentence'] as String?)?.trim() ?? '';
-      });
-      if (_expansionReady && _expandedSentence.isNotEmpty) {
-        unawaited(_prepareStepP3(
-            _expandedSentence, ++_stepP3PreparationGeneration));
-      }
-    } catch (error) {
-      debugPrint('[EXPANSION-RETRY] failed reason=${error.runtimeType}');
-    } finally {
-      if (mounted) setState(() => _isRebuildingExpansions = false);
-    }
-  }
-
-  /// 새 방의 P2/P3 카드에 붙일 안내 한 줄. 구 방은 null이라 예전 문구를 쓴다.
-  String? _expansionNotice() {
-    if (!_isExpansionRoom) return null;
-    if (_isRebuildingExpansions) return "Rebuilding your sentence...";
-    if (_expansionStatus == StepExpansionStatus.ok) return null;
-    final retryable = canRetryStepExpansion(
-      status: _expansionStatus,
-      startedAt: _expansionStartedAt,
-    );
-    if (_expansionStatus == StepExpansionStatus.building) {
-      return retryable
-          ? "Sorting your sentence took too long — tap to try again"
-          : "Sorting out what you said...";
-    }
-    return "Couldn't put your sentence together — tap to try again";
-  }
-
-  Widget _buildStepExpandSelectScreen() {
-    // 🌱 [EXPANSION] 새 방과 구 방은 여는 조건이 다르다.
-    //   새 방은 사다리가 준비돼야 열리고, 구 방은 예전대로 턴이 있으면 열린다.
-    final String? expansionNotice = _expansionNotice();
-    final bool expansionRetryable = _isExpansionRoom &&
-        !_isRebuildingExpansions &&
-        canRetryStepExpansion(
-          status: _expansionStatus,
-          startedAt: _expansionStartedAt,
-        );
-    final bool hasData = _isExpansionRoom
-        ? _expansionReady
-        : _stepExpandTurns.isNotEmpty;
-    // 📐 시스템 글자 크기 1.7배 + 화면 확대(density 480→540)를 함께 쓰는 기기에서
-    //    이 화면이 무너졌다(실기기 확인, 논리 폭 320dp). 제목이 두 줄로 쪼개져
-    //    닫기 버튼과 부딪히고 카드 부제가 "역/할교환"처럼 어절 중간에서 끊겼다.
-    //    여기는 문장이 아니라 짧은 라벨만 있는 선택 메뉴라, 이 화면에서만 배율을
-    //    묶어 레이아웃을 지킨다. 본문 낭독 화면들은 배율을 그대로 따른다.
-    return MediaQuery.withClampedTextScaling(
-      maxScaleFactor: 1.3,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // 닫기 버튼을 제목과 같은 줄에 두면 좁은 폭에서 제목이 96dp를 뺏겨
-            // 두 줄이 된다. 버튼은 위, 제목은 아래 전체 폭으로 내린다.
-            Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.close, color: Colors.white70),
-                  onPressed: _exitShadowing,
-                  padding: EdgeInsets.zero,
-                  constraints:
-                      const BoxConstraints(minWidth: 40, minHeight: 40),
-                ),
-                const Spacer(),
-                _buildStudyRoomPill(),
-              ],
-            ),
-            const Text(
-              "Pick Your Practice",
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 19,
-                  fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 24),
-            _buildPracticeSelectionCard(
-              title: "Practice 1",
-              subtitle: "Short-answer role swap",
-              color: const Color(0xFF4ADE80),
-              icon: Icons.swap_horiz_rounded,
-              // P1은 사다리와 무관하다 — 나눈 대화 자체가 자료다.
-              //   사다리를 못 만들어도 P1은 열려 있어야 한다.
-              onTap: (_p1Pairs.isNotEmpty || _stepExpandTurns.isNotEmpty)
-                  ? _startPart1Practice
-                  : null,
-            ),
-            const SizedBox(height: 12),
-            _buildPracticeSelectionCard(
-              title: "Practice 2",
-              subtitle:
-                  expansionNotice ?? "Watch and hear each sentence grow",
-              color: const Color(0xFF38BDF8),
-              icon: Icons.expand_more_rounded,
-              isLoading: _isRebuildingExpansions ||
-                  (_isExpansionRoom &&
-                      _expansionStatus == StepExpansionStatus.building &&
-                      !expansionRetryable),
-              // 🚫 사다리가 없는 방을 억지로 열지 않는다. 빈 P2를 띄우느니
-              //   왜 없는지 보여 주고 다시 만들 길을 준다.
-              onTap: hasData
-                  ? _startPart2Practice
-                  : (expansionRetryable ? _retryExpansionBuild : null),
-            ),
-            const SizedBox(height: 12),
-            _buildPracticeSelectionCard(
-              title: "Practice 3",
-              subtitle: _isExpansionRoom && !_expansionReady
-                  ? (expansionNotice ?? "Echoing & Shadowing Practice")
-                  : _isPreparingStepP3
-                      ? "Preparing P3... P1 and P2 are ready"
-                      : (_stepP3PreparationError ??
-                          "Echoing & Shadowing Practice"),
-              color: const Color(0xFFA78BFA),
-              icon: Icons.music_note_rounded,
-              isLoading: _isPreparingStepP3 || _isRebuildingExpansions,
-              // 새 방에서 Final이 없다는 건 사다리가 없다는 뜻이다. P3 준비를
-              // 다시 거는 게 아니라 사다리부터 다시 만들어야 한다.
-              onTap: _isPreparingStepP3 || _isRebuildingExpansions
-                  ? null
-                  : (_isExpansionRoom && !_expansionReady)
-                      ? (expansionRetryable ? _retryExpansionBuild : null)
-                      : _stepP3PreparationError != null ||
-                              _expandedSentence.trim().isEmpty
-                          ? _retryStepP3Preparation
-                          : _goToChunkPractice,
-            ),
-            const Spacer(),
-            TextButton(
-              onPressed: _exitShadowing,
-              child: const Text("Cancel",
-                  style: TextStyle(color: Colors.white38, fontSize: 15)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPracticeSelectionCard({
-    required String title,
-    required String subtitle,
-    required Color color,
-    required IconData icon,
-    bool isLoading = false,
-    VoidCallback? onTap,
-  }) {
-    final bool enabled = onTap != null || isLoading;
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedOpacity(
-        duration: const Duration(milliseconds: 200),
-        opacity: enabled ? 1.0 : 0.4,
-        child: Container(
-          // 좁은 폭(320dp)에서는 여백·아이콘이 가져가는 자리가 곧 글자가 깨지는
-          // 원인이다. 라벨이 한 줄에 들어오도록 조금씩 줄여 글자 폭을 벌어 준다.
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.14),
-            borderRadius: BorderRadius.circular(14),
-            border:
-                Border.all(color: color.withValues(alpha: 0.72), width: 1.5),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: color.withValues(alpha: 0.20),
-                  border: Border.all(color: color.withValues(alpha: 0.72)),
-                ),
-                child: Icon(icon, color: color, size: 20),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title,
-                        style: TextStyle(
-                            color: color,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 3),
-                    Text(subtitle,
-                        style: const TextStyle(
-                            color: Colors.white60, fontSize: 13, height: 1.3)),
-                  ],
-                ),
-              ),
-              if (isLoading)
-                SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    color: color,
-                    strokeWidth: 2.2,
-                  ),
-                )
-              else
-                Icon(Icons.chevron_right_rounded,
-                    color: color.withValues(alpha: 0.6), size: 20),
-            ],
           ),
         ),
       ),
@@ -9476,8 +7836,6 @@ enum ShadowingPhase {
   tutorPlay,
   turnPractice,
   chunkPractice,
-  part1Practice,
-  part2Practice
 }
 
 enum SentenceVariant { expanded, nativeEnglish }

@@ -205,9 +205,6 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     }
   }
 
-  bool _isExpandRoom(String roomName) =>
-      roomName.contains("Expand") || roomName.contains("Step.Ex");
-
   bool _isAnyoneRoom(String roomName) =>
       roomName.contains("Anyone") ||
       roomName.contains("Free Talk") ||
@@ -217,7 +214,6 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     if (roomName.contains("Duo")) return Icons.people;
     if (roomName.contains("Clone")) return Icons.face;
     if (roomName.contains("Roleplay")) return Icons.smart_toy;
-    if (_isExpandRoom(roomName)) return Icons.trending_up;
     if (roomName.contains("Shadowing")) return Icons.smart_toy;
     if (roomName.contains("NativeSync")) return Icons.mic_external_on;
     if (_isAnyoneRoom(roomName)) return Icons.forum;
@@ -228,7 +224,6 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     if (roomName.contains("Duo")) return const Color(0xFF2563EB);
     if (roomName.contains("Clone")) return const Color(0xFF9333EA);
     if (roomName.contains("Roleplay")) return const Color(0xFF16A34A);
-    if (_isExpandRoom(roomName)) return const Color(0xFFEA580C);
     if (roomName.contains("Shadowing")) return Colors.greenAccent;
     if (roomName.contains("NativeSync")) return Colors.orangeAccent;
     if (_isAnyoneRoom(roomName)) return const Color(0xFF9333EA);
@@ -390,7 +385,6 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
           if (_selectedFilter == 'All') return true;
           if (data['room_name'] == null) return false;
           final rn = data['room_name'].toString();
-          if (_selectedFilter == 'Expand') return _isExpandRoom(rn);
           if (_selectedFilter == 'Anyone') return _isAnyoneRoom(rn);
           return rn.contains(_selectedFilter);
         }).toList();
@@ -593,8 +587,6 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                         'Anyone', _filterLabel('Anyone'), Icons.forum),
                     _buildFilterChip(
                         'Roleplay', _filterLabel('Roleplay'), Icons.smart_toy),
-                    _buildFilterChip(
-                        'Expand', _filterLabel('Expand'), Icons.trending_up),
                     _buildKeepersChip(),
                   ]
                 : [
@@ -2012,11 +2004,10 @@ AI에게 교정과 피드백을 받습니다.
 🔄 Practice — 역할 교환 대화 연습
 AI와 역할을 바꿔가며 실제 대화처럼 연습합니다.
 
-✨ Expand Practice — 쉐도잉 심화 훈련
-Final Sentence와 Native English 문장을
-의미 단위(Chunk)별로 끊어서 쉐도잉 연습.
-AI 발음과 내 발음을 전체 문장으로 비교하며
-AI 발음을 닮아가는 정밀 훈련입니다.
+✨ My Speech · Native English — 심화 훈련
+내가 실제로 말한 것을 하나의 발화로 모은 My Speech와
+같은 생각을 미국인이 처음부터 영어로 짠 Native English를
+의미 단위(Chunk)별로 끊어 에코잉·쉐도잉으로 연습합니다.
 
 🔊 볼륨 — 소리를 줄이고 쉐도잉하세요
 따라 말하는 동안 볼륨을 줄이면

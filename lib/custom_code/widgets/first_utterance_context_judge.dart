@@ -247,13 +247,6 @@ String originLanguageSwitchedNoticeLine(String detectedLanguage) {
   }
 }
 
-/// 방의 첫 마디. 실장님 예시 문구 그대로다(2026-08-25).
-///
-/// 예전에는 어느 작가의 글쓰기 원리를 근거로 든다고 자기소개를 했다. 유저가
-/// 들을 이유가 없는 정보고, 첫 마디에서 말할 것은 하나뿐이다 — 무엇을 하면
-/// 되는지.
-const String kStepExpandOpeningNudgeText = '관심 있는 단어나 문장을 하나 말해 보세요.';
-
 /// Anyone 자유대화 답변 전 내부 숙고 지시.
 /// 응답이 1초 정도 느려지더라도 어중간한 답 대신 구체적인 답과 질문을 뽑는다.
 const String kAnyoneDeliberateReplyPolicy = '''[THINK TWICE BEFORE YOU SPEAK]
@@ -276,7 +269,7 @@ const String kKoreanPoliteSpeechPolicy =
 - The user may speak 반말. Do NOT match it. Stay 존댓말 no matter how they talk, and never comment on their speech level.
 - Keep it warm and spoken, not stiff. Avoid formal -습니다/-습니까 written style.''';
 
-/// 3모드(써클톡·시나리오톡·스탭익스팬드) 공통 응답 길이 규칙.
+/// 3모드(듀오·써클톡·시나리오톡) 공통 응답 길이 규칙.
 /// 유저가 짧게 물으면 짧게 답한다. 가르치듯 길게 적는 것이 가장 흔한 실패라
 /// 한 곳에서 관리하고 세 모드의 Realtime 지시문이 모두 이 상수를 가져다 쓴다.
 const String kSpokenReplyLengthPolicy =
@@ -307,28 +300,6 @@ String buildNativeOutputLanguagePolicy(String nativeLang) {
 - Do NOT use the user's target practice language in this room. Target-language practice happens later in History, never here.''';
 }
 
-String buildStepExpandFirstTurnSeedPolicy(String targetLanguage) {
-  final language = targetLanguage.trim().isEmpty
-      ? 'the requested target language'
-      : targetLanguage.trim();
-  return '''[CASE 1] History is empty (USER'S FIRST TURN — KEEP THE RAW SEED)
-- Start with whatever meaningful material the user gives: a single word, a short phrase, a question, or a complete statement.
-- A bare topic word IS a valid seed. Translate only that word or phrase into $language and keep it deliberately unfinished. The writing coach will help the user discover the subject, action, and point in later turns.
-- If the input is already a complete statement, preserve its meaning and simplify only when useful.
-- Do not turn one word into a made-up sentence. A seed may be incomplete; honesty matters more than grammatical completeness at this stage.
-- Only a greeting, filler, accidental noise, or empty request to begin is not a seed. For those, output EXACTLY: [EVAPORATE].
-  Greetings and empty openers include: "안녕하세요" / "오늘은" / "저기요" / "음 뭐지" / "시작할까". They carry no material to shape.
-- A meaningful noun such as "꿈", "가족", "퇴사", or "외로움" must NEVER be treated as [EVAPORATE].
-- Never invent a name, event, reason, relationship, feeling, or factual detail that the user did not provide.
-- OUTPUT ONE PART ONLY. No empty line, no second sentence, no "expanded" version. There is NOTHING to merge yet — this is the first thing the user has said.
-  Manufacturing a second clause so the output looks expanded is the single worst failure on this turn. It puts words in the user's mouth and every later turn then grows from something they never said.
-  Wrong: "I went to a nice cafe today.\\n\\nI went to a nice cafe today, and I enjoyed my time there."  ← "I enjoyed my time there" was never said
-  Right: "I went to a nice cafe today."
-- The seed grows in LATER turns, from the user's own choices and next words. Not now, and never from your imagination.
-- On this first turn, do not output [DISSATISFIED], [CORRECTION], [MISHEARD], [CLARIFY], [RESTATE], or [GARBLED] when any coherent topic or intent is recoverable. Use [EVAPORATE] only when there is no recoverable meaning.
-- Output ONLY the seed sentence in $language.''';
-}
-
 String normalizeTranscriptForDuplicateCheck(String transcript) {
   return transcript.trim().replaceAll(RegExp(r'\s+'), ' ');
 }
@@ -356,13 +327,6 @@ bool isActivePipelineGeneration({
   required bool conversationActive,
 }) {
   return mounted && conversationActive && expected == current;
-}
-
-bool shouldRunStepQuestionDissatisfactionFastLane({
-  required bool hasPriorAiQuestion,
-  required bool rawDissatisfactionMatch,
-}) {
-  return hasPriorAiQuestion && rawDissatisfactionMatch;
 }
 
 class FirstUtteranceContext {
