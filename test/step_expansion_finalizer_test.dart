@@ -30,9 +30,9 @@ void main() {
     test('아직 글자가 안 온 말풍선과 자리표시자를 버린다', () {
       final turns = stepExpansionTranscriptFrom(<Map<String, dynamic>>[
         <String, dynamic>{'role': 'HOST', 'original': '여행 가고 싶어.'},
-        <String, dynamic>{'role': 'SYSTEM', 'original': ''},
-        <String, dynamic>{'role': 'SYSTEM', 'original': '...'},
-        <String, dynamic>{'role': 'SYSTEM', 'original': '   '},
+        <String, dynamic>{'role': 'SYSTEM', 'original': '', 'target': ''},
+        <String, dynamic>{'role': 'SYSTEM', 'original': '', 'target': '...'},
+        <String, dynamic>{'role': 'SYSTEM', 'original': '', 'target': '   '},
       ]);
       expect(turns, hasLength(1));
     });
@@ -47,6 +47,37 @@ void main() {
         },
       ]);
       expect(turns.single.text, '혼자 여행 가고 싶어.');
+    });
+
+    test('AI 대사는 target 칸에 산다 — 그걸 안 읽으면 AI 턴이 통째로 사라진다', () {
+      // 실제 말풍선 모양이다. 유저는 original, AI는 target.
+      final turns = stepExpansionTranscriptFrom(<Map<String, dynamic>>[
+        <String, dynamic>{
+          'role': 'HOST',
+          'original': '회사 그만두고 싶어.',
+          // 화면에 안 나오는 다리(그 턴까지 자란 문장). 유저 줄에서는 무시된다.
+          'target': '회사를 그만두고 싶다.',
+        },
+        <String, dynamic>{
+          'role': 'SYSTEM',
+          'original': '',
+          'target': '어느 쪽으로 가볼까요?',
+        },
+      ]);
+      expect(turns.map((t) => t.isUser), <bool>[true, false]);
+      expect(turns.first.text, '회사 그만두고 싶어.');
+      expect(turns.last.text, '어느 쪽으로 가볼까요?');
+    });
+
+    test('AI 줄에 original이 채워진 옛 문서는 그쪽을 믿는다', () {
+      final turns = stepExpansionTranscriptFrom(<Map<String, dynamic>>[
+        <String, dynamic>{
+          'role': 'SYSTEM',
+          'original': '무슨 얘기 해볼까요?',
+          'target': '엉뚱한 값',
+        },
+      ]);
+      expect(turns.single.text, '무슨 얘기 해볼까요?');
     });
 
     test('유저 턴이 하나도 없으면 빈 목록이다', () {

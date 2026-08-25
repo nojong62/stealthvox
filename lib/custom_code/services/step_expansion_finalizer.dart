@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'step_expand_p1.dart';
 import 'step_expansion_builder.dart';
 
 // ====================================================================
@@ -13,9 +14,14 @@ import 'step_expansion_builder.dart';
 //
 //   유저 종료 → transcript는 이미 턴마다 저장돼 있다
 //            → 방 문서를 `building`으로 표시하고 Practice를 잠근다
-//            → Builder 실행
+//            → Builder 실행 (P1 정리와 **나란히** 돈다)
 //            → 성공: expansions + final_sentence 저장, Practice 개방
 //              실패: 실패 사유를 남긴다. **구경로로 조용히 대체하지 않는다.**
+//
+// 🗂️ P1도 여기서 만들어진다([StepExpandP1Builder]). 사다리와 같은 transcript를
+// 읽지만 하는 일이 달라서 결과도 따로 산다 — 사다리는 문장이 자란 과정,
+// P1은 생각을 고른 과정이다. **P1이 실패해도 방은 실패가 아니다.** P1 연습은
+// 사다리가 없어도 열리므로, 있으면 얹고 없으면 그냥 안 얹는다.
 //
 // ⚠️ 위젯 생명주기와 끊어서 돈다. 유저는 이미 방을 나갔고, Firestore 쓰기는
 //   화면이 없어도 끝난다. 그래서 이 함수는 State를 만지지 않는다.
@@ -87,6 +93,16 @@ List<StepExpansionTurn> stepExpansionTranscriptFromMessages(
 /// 화면 부스러기를 걸러내는 게 일의 절반이다 — 아직 확정되지 않은
 /// `HOST_TEMP`, 아직 글자가 안 온 빈 AI 말풍선, 되묻기 자리표시자.
 /// 이것들이 섞이면 Builder가 잡담을 의미 발전으로 오해한다.
+///
+/// ⚠️ **말풍선은 역할마다 글자를 다른 칸에 넣는다.** 유저 줄은 `original`에
+/// 실제로 한 말이 들어가고 `target`에는 그 턴까지 자란 문장이 들어간다(화면에
+/// 안 나오는 다리). AI 줄은 반대로 `target`에만 대사가 있고 `original`은
+/// 빈 문자열이다. 그래서 `original`만 읽으면 **AI 턴이 통째로 사라진다** —
+/// 그러면 "AI가 제안했고 유저가 안 받은 생각"을 가릴 근거도, P1이 정리할
+/// 질문도 남지 않는다. 여기서 역할마다 칸을 갈라 읽는 이유다.
+///
+/// AI 줄의 `target`은 영어가 아니다. 방은 원어로만 말한다 — 칸 이름이 옛것일
+/// 뿐이다. 유저 줄에서 `target`을 쳐다보지 않는 것은 그대로다.
 List<StepExpansionTurn> stepExpansionTranscriptFrom(
   List<Map<String, dynamic>> localMessages,
 ) {
@@ -95,9 +111,17 @@ List<StepExpansionTurn> stepExpansionTranscriptFrom(
     final role = (message['role'] ?? '').toString();
     // 확정 전 미리보기는 대화가 아니다.
     if (role != 'HOST' && role != 'SYSTEM') continue;
-    final text = (message['original'] ?? '').toString().trim();
+    final isUser = role == 'HOST';
+    final original = (message['original'] ?? '').toString().trim();
+    // 유저 줄은 `original` 하나뿐이다. AI 줄은 `original`이 채워져 있으면
+    // 그걸 믿고(옛 문서), 비어 있으면 대사가 사는 `target`을 읽는다.
+    final text = isUser
+        ? original
+        : (original.isNotEmpty
+            ? original
+            : (message['target'] ?? '').toString().trim());
     if (text.isEmpty || text == '...') continue;
-    turns.add(StepExpansionTurn(isUser: role == 'HOST', text: text));
+    turns.add(StepExpansionTurn(isUser: isUser, text: text));
   }
   return turns;
 }
@@ -130,12 +154,30 @@ Future<void> finalizeStepExpansions({
     return;
   }
 
-  final result = await StepExpansionBuilder.build(
+  // 두 왕복을 겹친다. 유저는 이미 방을 나갔지만, 다음 진입까지의 시간이
+  // 짧을 수 있다 — 직렬로 돌리면 P1이 늦게 붙어 첫 진입에서 안 보인다.
+  final ladderFuture = StepExpansionBuilder.build(
     apiKey: apiKey,
     transcript: transcript,
     originLang: originLang,
     targetLang: targetLang,
   );
+  final p1Future = StepExpandP1Builder.build(
+    apiKey: apiKey,
+    transcript: transcript,
+    originLang: originLang,
+    // P1도 Target/Original 두 글을 보여 준다. 질문 쪽 Target은 여기서 함께
+    // 만들어 저장한다 — 그 질문은 줄로 남아 있지 않아서(코치의 긴 턴을 줄인
+    // 것이라) 나중에 줄 단위 번역이 대신 만들어 줄 수 없다.
+    targetLang: targetLang,
+  );
+  final result = await ladderFuture;
+  final p1 = await p1Future;
+  if (p1.isUsable) {
+    log('🗂️ [P1-OK]', 'pairs=${p1.pairs.length}');
+  } else {
+    log('⚠️ [P1-SKIP]', 'reason=${p1.failure.name} → P1은 대화 원문으로 폴백한다');
+  }
 
   if (!result.isUsable) {
     // 🚫 [NO-SILENT-FALLBACK] 여기서 대화방이 자라게 하던 문장을 대신
@@ -144,6 +186,8 @@ Future<void> finalizeStepExpansions({
     //   만들 기회도 사라진다. 실패는 실패로 남긴다.
     try {
       await roomRef.update(<String, dynamic>{
+        // 사다리가 없어도 P1은 열린다. 여기서 같이 얹어 둔다.
+        if (p1.isUsable) ...p1.toJson(),
         'expansion_status': StepExpansionStatus.failed,
         'expansion_failure': result.failure.name,
         'has_practice': false,
@@ -160,6 +204,7 @@ Future<void> finalizeStepExpansions({
   try {
     await roomRef.update(<String, dynamic>{
       ...result.toJson(),
+      if (p1.isUsable) ...p1.toJson(),
       'expansion_status': StepExpansionStatus.ok,
       'expansion_failure': FieldValue.delete(),
       'expansion_built_at': FieldValue.serverTimestamp(),
