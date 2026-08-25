@@ -8274,58 +8274,28 @@ RULES — follow exactly:
     return <String, dynamic>{'role': role, 'text': t, 'native': n};
   }
 
-  /// 지금 이 방에 남아 있는 유저 발화를 대화 순서대로. `.originals`는 교정된
-  /// 원어, `.targets`는 같은 자리의 배울글이다(아직 없으면 빈 칸).
+  /// 🗂️ [P1] 유저가 자기 글을 한 조각씩 쌓은 기록.
   ///
-  /// [resolveP1PairAnswers]가 저장된 답을 여기에 대고 다시 맞춘다. 그래서
-  /// 세는 기준이 [stepExpansionTranscriptFrom]과 같아야 한다 — 빈 줄과
-  /// 자리표시자를 똑같이 빼야 번호가 어긋나지 않는다. **두 목록의 자리도
-  /// 서로 맞아야 한다**, 그래서 배울글이 없어도 빈 문자열로 자리를 채운다.
-  (List<String> originals, List<String> targets) _currentP1UserTexts() {
-    final originals = <String>[];
-    final targets = <String>[];
-    for (final turn in _stepExpandTurns) {
-      final native =
-          (turn['part1Native'] ?? turn['part1'] ?? '').toString().trim();
-      if (native.isEmpty || native == '...') continue;
-      originals.add(native);
-      // `part1`은 배울글이 있으면 배울글, 없으면 원어다. 원어와 같으면
-      // 아직 번역이 안 만들어진 것이라 Target이 없는 것으로 친다.
-      final target = (turn['part1'] ?? '').toString().trim();
-      targets.add(target == native ? '' : target);
-    }
-    return (originals, targets);
-  }
-
-  /// 🗂️ [P1] 생각을 **어떻게 골랐는가**의 기록.
+  ///   유저: 회사 그만두고 싶어.
+  ///   AI:   연결하고 싶은 당신의 생각을 말해보세요.
+  ///   유저: 매일 똑같은 일을 반복하는 게 너무 지쳐.
   ///
-  /// 방에서 코치는 발전 방향 두셋을 늘어놓고 하나를 추천했다. **그 제안문은
-  /// 여기 오지 않는다.** 남으면 나중에 다시 봤을 때 "AI가 답을 만들어 줬다"로
-  /// 보이고, 유저가 스스로 생각한 기록이 사라진다. 그래서 세션이 끝난 뒤
-  /// [StepExpandP1Builder]가 실제 AI 턴이 요구한 것만 한 질문으로 정리해
-  /// 두고, 여기서는 그것을 읽기만 한다.
+  /// **유저가 먼저 시작한다.** 씨앗 앞에는 AI 줄이 없다 — 아무도 그걸
+  /// 요구하지 않았다. AI 줄은 그 사이에 끼는 짧은 권유일 뿐, 방에서 코치가
+  /// 늘어놓은 후보 셋도 추천도 여기 오지 않는다.
   ///
-  /// 순서도 방과 다르다 — 방은 유저가 먼저 말하지만, P1은 **질문이 먼저**다.
-  /// 학습 기록으로 읽히려면 물음과 답이 짝으로 보여야 한다.
+  /// 유저 줄은 **그 턴에 실제로 글에 붙은 문장**이다. "2번이 좋아"가 아니다.
+  /// 방이 턴마다 확정해 둔 누적 글에서 계산으로 나오므로, 지어낼 자리가 없다.
   ///
-  /// 쌍이 없으면 옛 방이거나 정리가 실패한 방이다. 그때만 대화 원문을 그대로
+  /// 줄이 없으면 옛 방이거나 사다리가 없는 방이다. 그때만 대화 원문을 그대로
   /// 보여 준다 — 제안문이 섞이지만, 아무것도 안 보여 주는 것보다는 낫다.
   Future<void> _startPart1Practice() async {
     final lines = <Map<String, dynamic>>[];
     if (_p1Pairs.isNotEmpty) {
-      // 📝 저장된 답은 세션이 끝나던 순간의 전사다. 그 뒤 히스토리 대화 화면을
-      //   열었으면 ORIGIN-REPAIR가 잘못 들은 낱말을 고쳐 뒀고, 배울글도 그
-      //   교정본에서 만들어졌다. P1은 그 둘을 따라간다 — 잘못 들린 문장을
-      //   P1에서 보고 외우면 안 된다. 자리만 다시 찾아 붙이는 것이지, 여기서
-      //   요약하거나 다시 쓰지 않는다.
-      final (originals, targets) = _currentP1UserTexts();
-      final resolved = resolveP1PairAnswers(
-        _p1Pairs,
-        originals,
-        currentUserTargets: targets,
-      );
-      for (final pair in resolved) {
-        lines.add(_p1Line('HOST', pair.questionTarget, pair.question));
+      for (final pair in _p1Pairs) {
+        if (pair.hasPrompt) {
+          lines.add(_p1Line('HOST', pair.promptTarget, pair.prompt));
+        }
         lines.add(_p1Line('USER', pair.answerTarget, pair.answer));
       }
     } else {
@@ -9077,19 +9047,19 @@ content and gist of the WHOLE conversation.
         docs = snap.docs;
         _cachedDocs = docs;
       }
-      final transcript = stepExpansionTranscriptFromMessages(
+      final ladder = stepExpandLadderFromMessages(
         docs
             .map((doc) => (doc.data() as Map<String, dynamic>?) ?? const {})
             .toList(growable: false),
       );
-      if (!transcript.any((turn) => turn.isUser)) {
-        debugPrint('[EXPANSION-RETRY] 유저 턴 없음 → 다시 만들 것이 없다');
+      if (ladder.isEmpty) {
+        debugPrint('[EXPANSION-RETRY] 사다리가 없다 → 다시 만들 것이 없다');
         return;
       }
       await finalizeStepExpansions(
         roomRef: widget.historyDoc,
         apiKey: _apiKey,
-        transcript: transcript,
+        ladder: ladder,
         originLang: (_sessionNativeLang ?? 'Korean').trim().isEmpty
             ? 'Korean'
             : _sessionNativeLang!.trim(),
