@@ -111,7 +111,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
   //
   // 잘라 놓고 아무 말도 안 하면 유저는 앱이 죽은 줄 안다. 사람이 말을 끊겼을
   // 때 하는 것과 같은 것을 한다 — 짧게 받고, 듣는다.
-  static const String kStepExpandBargeInAck = '네, 말씀하세요.';
 
   /// 지금 나가는 AI 음성이 끼어들기 대상인가. 받아주는 말(ack) 자체는
   /// 대상이 아니다 — 그걸 또 끊으면 무한히 되돌게 된다.
@@ -580,7 +579,9 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
   // 완성문장 카드가 떠서 마이크를 잠근 상태. 이제 턴 수로는 서지 않고,
   // 유저가 대화를 끝냈을 때만 선다.
   bool _isSessionComplete = false;
-  String _polishedSentence = ""; // 생성된 세련된 변형
+  // ⚠️ 아무 데서도 값이 들어가지 않는 죽은 칸이다. 아래 방 안 Practice 패널
+  //   전체가 _isPracticeMode를 true로 만드는 곳이 없어 닿지 않는다.
+  String _roomPracticeAiSentence = "";
   // 🌱 [NATIVE-EXPAND] 대화방 유저 말풍선은 매 턴 "지금까지 말한 것 + 이번에
   //   말한 것"을 합친 원어 한 문장이다. 1턴은 발화 자체가 씨앗이고, 2턴부터
   //   이 문장이 자란다. Realtime 응답과 무관한 별도 경량 호출로 만든다.
@@ -781,16 +782,15 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
     if (_hasSpokenOpening || !mounted) return;
     _hasSpokenOpening = true;
     final nativeLang = _nativeLangName();
-    // 📰 구글 뉴스를 잠깐 보고 온다. 못 받아 오면 빈 목록이고, 그때는 뉴스
-    //   없이 일상 화제로 연다 — 소식이 없다고 대화가 멈추면 안 된다.
-    _newsHeadlines = await StepExpandBrain.fetchNewsHeadlines(nativeLang);
-    _log('📰 [NEWS]', 'headlines=${_newsHeadlines.length}');
-    final opening = await StepExpandBrain.generateOpening(
-      apiKey: _openAiKey,
-      languageName: nativeLang,
-      fallback: nativeLang == 'Korean' ? _openingNudgeText : '',
-      headlines: _newsHeadlines,
-    );
+    // 첫인상은 매번 달라지는 잡담이 아니라 이 방의 약속이어야 한다.
+    // 날씨·뉴스로 열면 유저는 글짓기 코치가 아니라 자유대화방으로 받아들인다.
+    final opening = nativeLang == 'Korean'
+        ? _openingNudgeText
+        : await StepExpandBrain.generateOpening(
+            apiKey: _openAiKey,
+            languageName: nativeLang,
+            fallback: localizedSeedGuidanceLine(nativeLang),
+          );
     // 문구를 기다리는 동안 유저가 먼저 입을 열었으면 첫 마디는 접는다.
     if (!mounted ||
         !_isConversationActive ||
@@ -808,7 +808,11 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
     // 나가는지 로그로 확인할 방법이 아예 없었다 — 유저 체감에만 의존했다.
     // 유저 발화가 아니라 AI 자기 출력이라 릴리스에서도 남긴다.
     _log('💬 [AI-LINE]', 'phase=opening text="$opening"');
-    await _speakLiveKorean(opening);
+    _lastAiSpokenLine = opening;
+    // 오프닝도 끼어들 수 있다. speech_started만으로 자르지 않고 completed
+    // 전사문을 자기 에코와 비교한 뒤 실제 유저 말일 때만 자른다.
+    await _speakKoreanInternal(opening,
+        timeoutTag: '⚠️ [OPENING-TTS-TIMEOUT]', allowBargeIn: true);
   }
 
   void _rememberSmallTalk(String who, String text) {
@@ -968,21 +972,18 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
       return;
     }
     _smallTalkSelfPushes++;
-    _log('🔇 [SILENCE-PUSH]',
+    _log(
+        '🔇 [SILENCE-PUSH]',
         'fire push=$_smallTalkSelfPushes/$_kMaxSmallTalkSelfPushes '
             'smallTalkLines=${_smallTalkLog.length}');
-    final result = await StepExpandBrain.smallTalkTurn(
-      apiKey: _openAiKey,
-      languageName: _nativeLangName(),
-      userText: '',
-      recentConversation: _smallTalkContext(),
-      headlines: _newsHeadlines,
-      // 유저가 아직 아무 생각도 안 보여줬다. 씨앗을 찾을 자리가 아니다.
-      // 혼자 이어 말하는 자리라 질문 비율 규칙은 이쪽 분기가 대신 정한다.
-      avoidQuestion: false,
-      userSilent: true,
-      silenceAttempt: _smallTalkSelfPushes,
-    );
+    // 침묵했다고 날씨·뉴스 잡담으로 새지 않는다. 코치의 역할을 한 번 더
+    // 분명히 하고, 유저가 완성문장을 준비해야 한다는 부담만 낮춘다.
+    final nativeLang = _nativeLangName();
+    final result = <String, String>{
+      'reply': nativeLang == 'Korean'
+          ? '완성된 문장이 아니어도 괜찮아요. 떠오르는 단어 하나면 제가 시작점을 잡아드릴게요.'
+          : localizedSeedGuidanceLine(nativeLang),
+    };
     if (!mounted ||
         generation != _pipelineGeneration ||
         !_isConversationActive ||
@@ -1239,7 +1240,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
 
   /// AI 전체 문장 듣기 (상호 배타적 — 유저 재생 중이면 비활성)
   Future<void> _playAiFullSentence() async {
-    if (_polishedSentence.isEmpty) return;
+    if (_roomPracticeAiSentence.isEmpty) return;
     if (_isAiFullPlaying) {
       await _practicePlayer.stop();
       if (mounted) setState(() => _isAiFullPlaying = false);
@@ -1250,7 +1251,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
       if (mounted) setState(() => _isUserFullPlaying = false);
     }
     if (mounted) setState(() => _isAiFullPlaying = true);
-    await _practiceSpeakText(_polishedSentence, _aiVoice);
+    await _practiceSpeakText(_roomPracticeAiSentence, _aiVoice);
     if (mounted) setState(() => _isAiFullPlaying = false);
   }
 
@@ -1357,6 +1358,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
     // 🔁 [LATE-CONTINUATION] 소리가 나기 전에 마이크를 닫아야 [MIC-ROUTING]이
     //   지켜진다. AI 질문도 되묻기도 이 길로 나간다.
     _closeContinuationWindow(reason: 'tts_enqueue');
+    _lastAiSpokenLine = text.trim();
     await _speakKoreanInternal(text,
         timeoutTag: '⚠️ [KOREAN-TTS-TIMEOUT]', allowBargeIn: true);
   }
@@ -1386,18 +1388,27 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
     _guideTtsFetcher?.cancel();
     _guideTtsFetcher = fetcher;
     _isInitialGuidePlaying = true;
-    fetcher.addText(spoken);
 
-    // 🙋 [BARGE-IN] 소리가 나가는 동안 마이크를 연다. 오래 못 했던 것이 이것
-    //   하나였다 — 손잡이는 있는데 잡을 손이 없었다.
+    // 🙋 [BARGE-IN] TTS보다 마이크를 먼저 연다. 비동기로 열면 직전 턴의
+    // capture_stopped와 경합해 armed만 남고 실제 캡처가 닫힐 수 있다.
     //   받아주는 말(ack) 자체는 대상이 아니다. 그걸 또 끊으면 되돌게 된다.
     if (allowBargeIn) {
       _bargeInFired = false;
       _bargeInArmed = true;
       _bargeInArmedAt = DateTime.now();
       _log('🙋 [BARGE-IN]', 'armed graceMs=${_kBargeInGrace.inMilliseconds}');
-      unawaited(_startUserListening());
+      final stopping = _streamingCaptureStopping;
+      if (stopping != null) await stopping;
+      await _startUserListening();
+      if (kFreeTalkUseStreamingStt && !_streamingCaptureOpen) {
+        _bargeInHandoff = false;
+        await _startUserListening();
+      }
+      _log('🙋 [BARGE-IN]',
+          'mic_ready=$_streamingCaptureOpen gate=${_streamingStt?.audioGateOpen == true}');
     }
+    // 실제 캡처 준비가 끝난 뒤에만 코치 음성을 시작한다.
+    fetcher.addText(spoken);
 
     int ticks = 0;
     try {
@@ -1441,15 +1452,20 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
     _bargeInFired = true;
     _bargeInArmed = false;
     _bargeInHandoff = true;
-    _log('🙋 [BARGE-IN]', 'fired → AI 음성 중단, 받아주고 듣는다');
+    _log('🙋 [BARGE-IN]', 'fired → AI 음성만 중단, 전사 내용으로 바로 응답');
+    // 기존 AI 턴의 busy 소유권을 폐기해야 바로 뒤의 실제 유저 전사가
+    // [TURN-SKIP]에서 버려지지 않고 새 턴을 소유한다.
+    if (_aiTurnActive || _streamingPipelineRunning) {
+      _invalidateAssistantTurn(reason: 'barge_in');
+    }
     _guideTtsFetcher?.cancel();
     _guideTtsFetcher = null;
     _ttsQueueManager.stop();
     _isInitialGuidePlaying = false;
-    // 받아주는 말은 끊기지 않는다(allowBargeIn: false). 여기서 await하면
-    // 스트리밍 콜백을 붙잡게 되므로 띄워 보낸다.
-    unawaited(_speakKoreanInternal(kStepExpandBargeInAck,
-        timeoutTag: '⚠️ [BARGE-ACK-TIMEOUT]', allowBargeIn: false));
+    // "네, 말씀하세요" 같은 별도 TTS를 넣지 않는다. 마이크는 AI가 말하기
+    // 전부터 계속 PCM을 보내고 있어 유저 발화의 첫머리까지 이미 서버에 있다.
+    // 전사 완료 콜백이 그 내용을 방금 대화 문맥과 함께 정상 파이프라인으로
+    // 넘긴다. 중간 확인 음성을 재생하면 오히려 유저 발화와 겹친다.
   }
 
   /// 유저가 직전 AI 질문에 불만을 표시했을 때, 그 질문을 지우고 새로 만든다.
@@ -1595,7 +1611,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
         .replaceAll(RegExp(r'[^\w\s가-힣]'), '')
         .replaceAll(RegExp(r'\s+'), '')
         .trim();
-    if (clean.length < 2) return true;
+    if (clean.isEmpty) return true;
+    // 한 글자짜리 한국어 명사도 Step Expand에서는 훌륭한 씨앗이다.
+    // 꿈/돈/집/일을 길이만 보고 잡음으로 버리면 "한 단어부터" 시작할 수 없다.
+    if (clean.length == 1 && !RegExp(r'^[가-힣]$').hasMatch(clean)) return true;
     const ghostWords = <String>[
       'thankyou',
       'thanks',
@@ -1662,6 +1681,15 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
     // 앞 12자가 같아도 마찬가지다(뒤가 잘려 들어온 경우).
     final head = b.length < 12 ? b : b.substring(0, 12);
     return head.length >= 8 && a.contains(head);
+  }
+
+  /// 완성 전사가 오기 전 조각이 코치 음성의 일부일 가능성이 있는가.
+  bool _couldBeSelfEchoPrefix(String transcript) {
+    final norm = RegExp(r'[^가-힣a-zA-Z0-9]');
+    final said = _lastAiSpokenLine.replaceAll(norm, '').toLowerCase();
+    final heard = transcript.replaceAll(norm, '').toLowerCase();
+    if (said.isEmpty || heard.isEmpty) return true;
+    return said.contains(heard);
   }
 
   Future<void> _startStreamingListening() async {
@@ -1886,9 +1914,9 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
       return;
     }
     resetBillingIdle();
-    // 🙋 [BARGE-IN] AI가 말하는 중이면 여기가 끼어들기 지점이다. 소리를 먼저
-    //   자른다 — 아래 어떤 처리보다 이게 급하다.
-    _handleBargeIn();
+    // 🙋 [BARGE-IN] speech_started만으로 AI 음성을 자르지 않는다. 폰 스피커의
+    //   자기 에코도 이 이벤트를 만들기 때문이다. completed 전사문이 도착한 뒤
+    //   [_looksLikeSelfEcho]를 통과한 실제 유저 발화일 때만 자른다.
     // 🔇 [SILENCE-PUSH] 유저가 입을 열었다. 이어 말하기 감시를 여기서 푼다 —
     //   전사가 끝나기를 기다리면 그사이 타이머가 익어 말이 겹친다.
     _cancelSmallTalkSilence(reason: 'speech_started');
@@ -2274,7 +2302,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
     if (itemId.isNotEmpty && _handledStreamingItemIds.contains('rt:$itemId')) {
       return;
     }
-    if (_aiTurnActive || _ttsQueueManager.isBusy) return;
     BillingTicker.instance.resumeFromActivity('step_expand_stt_partial');
     if (_streamingDeltaItemId != itemId) {
       _streamingDeltaItemId = itemId;
@@ -2286,6 +2313,17 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
     _streamingDeltaBuffer.write(delta);
     final preview = _streamingDeltaBuffer.toString().trim();
     if (preview.isEmpty) return;
+    // 🙋 [EARLY BARGE-IN] 코치 대사에 없는 두 글자가 잡히면 완성 전사와
+    // VAD 종료를 기다리지 않고 그 자리에서 TTS를 자른다.
+    if (_bargeInArmed &&
+        !_bargeInFired &&
+        preview.characters.length >= 2 &&
+        !_couldBeSelfEchoPrefix(preview)) {
+      _log('🙋 [BARGE-IN]',
+          'early_delta item=$itemId chars=${preview.characters.length}');
+      _handleBargeIn();
+    }
+    if (_aiTurnActive || _ttsQueueManager.isBusy) return;
     // 🌱 씨앗을 찾기 전까지는 글로 적지 않는다. 잡담은 소리로만 오간다.
     if (!_seedFound) return;
     setState(() {
@@ -2653,7 +2691,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
       // 씨앗이 섰다. 여기서부터는 5턴 사다리가 대화를 끌고 가므로
       // 이어 말하기는 두 번 다시 걸지 않는다.
       _cancelSmallTalkSilence(reason: 'seed_found');
-      _log('🌱 [SEED]', 'len=${userKorean.characters.length} text="$userKorean"');
+      _log('🌱 [SEED]',
+          'len=${userKorean.characters.length} text="$userKorean"');
     }
 
     // 🗣️ 방금 한 말을 검증·합치기보다 먼저 띄운다. 둘 다 GPT 왕복이라
@@ -2674,84 +2713,27 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
       _scrollToBottom();
     }
 
-    // 🚪 [GATE] 이 턴을 통과시킬지 판정하는 곳은 하나뿐이다.
+    // ⚡ [HISTORY FAST PATH]
+    // 이 방의 원본은 매 턴의 실제 발화와 대화 히스토리다. 화면에도 원문만
+    // 보이고, 완성 글은 세션이 끝난 뒤 전체 히스토리를 읽는 Expansion Builder가
+    // 만든다. 그런데 예전에는 첫 턴에 별도 검증 API, 2턴부터 별도 합치기 API를
+    // 답변 앞에 하나 더 샀다. 보이지도, 최종 글에 쓰이지도 않는 중간 문장을
+    // 만들기 위해 반응을 늦춘 셈이다.
     //
-    //    1턴(씨앗)은 붙일 대상이 없어 합치기가 아무 판정도 할 수 없다. 그 턴만
-    //    KoreanTurnValidator가 게이트를 맡는다.
-    //
-    //    2턴부터는 mergeNativeExpansion이 이미 같은 판정을 한다 — 자란 문장에
-    //    실제로 붙여 보고 못 붙이겠으면 [UNCLEAR]를 돌려준다(§kUnclearToken).
-    //    검증기의 반려 사유는 프롬프트상 "전사 오류" 하나뿐이고, 화제 전환·짧은
-    //    답·문체는 명시적으로 통과시킨다. 즉 2턴부터는 같은 판정을 두 번 사는
-    //    셈이었고, 반려된 턴에서는 더 비싼 합치기 쪽을 통째로 버리고 있었다.
-    //    붙여 보고 내린 판정이 근거가 더 좋으므로 합치기 하나로 합친다.
+    // 이제 확정 STT 원문을 바로 히스토리에 싣고 강사 생성 한 번으로 간다.
+    // 잡음은 위 로컬 게이트가 이미 제거하고, 못 알아들은 말은 강사 프롬프트의
+    // [IF YOU CANNOT MAKE IT OUT] 규칙이 같은 응답 안에서 처리한다.
     final previousExpandedNow = _turnGateSentence.trim();
-    if (previousExpandedNow.isEmpty) {
-      // 첫 문장은 합칠 대상이 없다 — 발화가 곧 씨앗이다.
-      final validation = await KoreanTurnValidator.validate(
-        apiKey: _openAiKey,
-        transcribedText: userKorean,
-        mode: 'step_expand',
-        modeContext: 'Current growing sentence: (first seed)',
-        recentConversation: _recentKoreanConversationForValidation(),
-      );
-      if (!mounted || generation != _pipelineGeneration) return;
-      // 장애로 통과시킨 턴과 모델이 승인한 턴을 로그에서 갈라 본다. 원문은
-      // 싣지 않는다 — 길이와 판정 결과까지만 남긴다.
-      _log(
-          '[TURN-VALIDATE]',
-          'mode=step_expand gate=validator seed=true '
-              'accepted=${validation.accepted} '
-              'failure=${validation.failure.name} '
-              'failOpen=${validation.failedOpen} '
-              'proceeded=${validation.accepted} reason=${validation.reason}');
-      if (!validation.accepted) {
-        // 🚪 [GATE-ESCAPE] 씨앗 턴이 연달아 막히면 세션을 시작조차 못 한다.
-        //   다른 두 모드와 같은 탈출구를 둔다.
-        _consecutiveGateRejects++;
-        if (_consecutiveGateRejects <=
-            KoreanTurnValidator.maxConsecutiveRejects) {
-          // 👂 되묻기는 소리로만 나간다. 글자로 남기면 지우는 사람이 없어 방을
-          //   나갈 때까지 쌓이고, 그 문장이 다음 턴 컨텍스트에 섞여 AI가 따라
-          //   되묻는다. 되묻기가 되묻기를 부르는 자리였다.
-          setState(() {
-            _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
-          });
-          await _speakLiveKorean(originRetryLine(_nativeLangName()));
-          if (mounted && _isConversationActive && !_isSessionComplete) {
-            _startUserListening();
-          }
-          return;
-        }
-        _log('[GATE-ESCAPE]',
-            'mode=step_expand seed=true forced_pass rejects=$_consecutiveGateRejects');
-      }
-      _consecutiveGateRejects = 0;
-
-      _log('🔀 [COMMIT-03]', '전사·문맥 확정 → Step Expand 질문 생성');
-      // 반려된 판정은 text가 비어 있다. 통과시킬 때는 전사 원문을 그대로 쓴다.
-      await _processStepExpandTurn(
-        validation.accepted ? validation.text : userKorean,
-        generation: generation,
-        mergedFuture: null,
-      );
-      return;
-    }
-
-    // 2턴부터는 합치기가 곧 게이트다. 결과는 버려지지 않고 반드시 소비된다.
-    final mergedFuture = StepExpandBrain.mergeNativeExpansion(
-      apiKey: _openAiKey,
-      previousExpanded: previousExpandedNow,
-      newUtterances: <String>[..._turnGatePendingParts, userKorean],
-      languageName: _nativeLangName(),
-      topicContext: _topicContextForRepair(),
-    );
-
-    _log('🔀 [COMMIT-03]', '전사 확정 → 합치기 게이트 → Step Expand 질문 생성');
+    final localPassThrough = previousExpandedNow.isEmpty
+        ? null
+        : Future<StepExpandMergeResult>.value(
+            StepExpandMergeResult(text: userKorean),
+          );
+    _log('⚡ [HISTORY-FAST]', '전사 확정 → 중간 검증·합치기 생략 → 강사 응답 1회');
     await _processStepExpandTurn(
       userKorean,
       generation: generation,
-      mergedFuture: mergedFuture,
+      mergedFuture: localPassThrough,
     );
   }
 
@@ -2804,6 +2786,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
     void discardPendingReply() {
       if (!aiKoreanClaimed) aiKoreanFuture?.ignore();
     }
+
     try {
       setState(() {
         _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
@@ -2823,12 +2806,9 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
       //   반려된 턴에서는 만들어 둔 대사를 버린다. 토큰은 조금 버리지만,
       //   통과하는 턴이 훨씬 많고 거기서 1초를 통째로 번다.
       final questionContext = _questionContext(currentUserLine: userKorean);
-      // ❓ [ASK-RATIO] 이 턴의 말풍선을 올리기 **전에** 센다. 아래에서 올리는
-      //   AI placeholder가 목록에 끼면 셈이 한 칸씩 밀린다.
-      final expandMustNotAsk = _expandMustNotAsk();
-      if (expandMustNotAsk) {
-        _log('❓ [ASK-RATIO]', 'turn=$turnNumber 직전 2턴 내 질문 있음 → 이번 턴 질문 금지');
-      }
+      // 글짓기 강사는 매 턴 다음 작업을 하나 지정한다. 동기면담식 질문 금지
+      // 비율은 쓰지 않는다. 질문은 하나만, 문장을 실제로 바꾸는 과제로 낸다.
+      const expandMustNotAsk = false;
       aiKoreanFuture = StepExpandBrain.generateKoreanTurn(
         apiKey: _openAiKey,
         instructions: '${_buildStepExpandSystemInstructions()}\n'
@@ -2976,31 +2956,12 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
         throw StateError('Step Expand reply did not complete.');
       }
 
-      // 🪞 [SUMMARY-VERDICT] 유저 말을 요약해 판정으로 돌려주는 첫머리.
-      //   프롬프트 BANNED 목록 맨 앞에 적어 뒀는데도 그대로 나왔다. 한 번만
-      //   다시 시킨다 — 두 번 이상은 지연이 대화를 끊는다.
+      // 🪞 새 수업법은 사용자의 재료로 임시 문장 틀을 직접 보여 준다. 이를
+      // 예전 요약투 감지기가 잡더라도 재생성하지 않는다. 두 번째 생성 왕복은
+      // 반응을 늦추고, 좋은 편집 시범까지 버리는 원인이었다.
       if (_looksLikeSummaryVerdict(aiKorean)) {
         _log('🪞 [SUMMARY-VERDICT]',
-            'turn=$turnNumber 요약투 감지 → 1회 재생성 rejected="$aiKorean"');
-        final retry = await StepExpandBrain.generateKoreanTurn(
-          apiKey: _openAiKey,
-          instructions: '${_buildStepExpandSystemInstructions()}\n'
-              '\n[THIS TURN]\n'
-              '${_buildStepExpandTurnInstructions(turnNumber, mustNotAsk: expandMustNotAsk)}\n'
-              '\n[YOUR LAST ATTEMPT WAS A SUMMARY]\n'
-              'You wrote: "$aiKorean"\n'
-              'That only restates what they already said and then judges it. '
-              'Throw it away. Bring ONE thing they did not say — something you '
-              'know, another way of reading it, or where you disagree. Do not '
-              'begin by telling them what they meant.',
-          recentConversation: questionContext,
-          userText: userKorean,
-        );
-        if (retry.isNotEmpty && !_looksLikeSummaryVerdict(retry)) {
-          aiKorean = retry;
-        } else {
-          _log('🪞 [SUMMARY-VERDICT]', 'turn=$turnNumber 재생성도 요약투 → 그대로 간다');
-        }
+            'turn=$turnNumber 감지만 기록, 재생성 생략 text="$aiKorean"');
       }
 
       // ❓ [ASK-RATIO] 묻지 말라고 넘겼는데 물었다. 시켜서 안 되면 잘라낸다.
@@ -3011,7 +2972,8 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
         aiKorean = stripped;
       }
 
-      _log('💬 [AI-LINE]',
+      _log(
+          '💬 [AI-LINE]',
           'phase=expand turn=$turnNumber len=${aiKorean.characters.length} '
               'asked=${_hasQuestionMark(aiKorean)} text="$aiKorean"');
       if (!mounted ||
@@ -3082,7 +3044,6 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
       await _saveHistoryMessages(<Map<String, dynamic>>[hostLine, systemLine]);
       _log('[GPT-HISTORY]',
           'turn=$turnNumber model=gpt-4.1-mini voice=$_aiVoice tts=true');
-
     } catch (error) {
       // ⚡ [PARALLEL] 게이트 도중에 터졌으면 나란히 띄운 대사가 주인 없이
       //   남는다. 안 받은 future의 실패는 잡히지 않은 예외로 새어 나온다.
@@ -3175,17 +3136,23 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
   /// 모델이 문장 속 명사로 도망쳤다. 방향은 턴 번호가 아니라 문맥이 고른다.
   String _buildStepExpandTurnInstructions(int turnNumber,
       {bool mustNotAsk = false}) {
-    return '''Look at the whole conversation, not just their last line, and work out
-what they are getting at overall.
-Then find the ONE thing that would make that thought fuller — a reason under it,
-what they weigh against what, a limit, what it comes down to for them.
-If learning it would only add another fact about the subject, it is the wrong
-thing. It has to make the THOUGHT better, not the inventory.
+    return '''Look at the whole conversation, not just their last line. First decide
+which MATERIAL STAGE you are holding:
+- RAW WORD OR TOPIC: establish what the user wants to say about it. Offer one sharp
+  editorial direction yourself, then ask for the smallest concrete material that
+  direction needs. Do not make the user choose the writing strategy, do not demand
+  a complete sentence, and do not ask an open question.
+- ROUGH CLAUSE: find its center and help choose the precise subject and verb.
+- WORKING SENTENCE: improve it with the single most valuable missing move — reason,
+  concrete evidence, contrast, limit, consequence, or a sharper point.
+- RICH SENTENCE: stop adding. Cut dilution or improve rhythm and precision.
+Make an editorial decision. If learning something would only add another fact
+about the subject, it is the wrong thing. Improve the THOUGHT, not the inventory.
 ${mustNotAsk ? '''
 You asked within the last two turns, so this turn ends without a question mark.
-Say where you land, or guess past what they said, and leave the opening there.''' : '''
-If you ask, one question only, and it comes after your own line, never instead
-of it.'''}''';
+Give one concrete editorial direction and leave the opening there.''' : '''
+If you ask, one question only, after your editorial direction. Make it easy to
+answer with one word, a choice, or the end of a phrase.'''}''';
   }
 
   /// 되묻기 판정은 언어와 무관한 공통 내부 신호만 사용한다.
@@ -3850,7 +3817,7 @@ of it.'''}''';
               const Icon(Icons.play_circle_fill_rounded,
                   color: Color(0xFF9333EA), size: 16),
               const SizedBox(width: 6),
-              const Text('Polished',
+              const Text('Practice',
                   style: TextStyle(
                       color: Color(0xFF9333EA),
                       fontSize: 14,
@@ -5020,8 +4987,6 @@ class StepExpandMergeResult {
 // 📂 서브박스 구성:
 //   [Box 7-1-A] streamUserTranslation  — 유저 발화 번역 (제어 토큰 판정 겸함)
 //   [Box 7-1-B] generateCleanOriginal  — 영→한 역번역
-//   [Box 7-1-D] polishSentence          — 세련된 변형 생성 (스피킹용 고급)
-//
 //   대화방의 한 턴을 만드는 것은 generateKoreanTurn이고, 지시문은 파일 끝
 //   [buildStepExpandConsultInstructions]에 있다. 영어는 여기서 만들지 않는다 —
 //   대화가 끝난 뒤 services/step_expansion_builder.dart가 만든다.
@@ -5521,8 +5486,6 @@ Output: [GARBLED]
     List<String> headlines = const <String>[],
   }) async {
     if (apiKey.isEmpty) return fallback;
-    final String newsBlock =
-        headlines.take(5).map((h) => '- $h').join(String.fromCharCode(10));
     final client = http.Client();
     try {
       final response = await client
@@ -5539,48 +5502,17 @@ Output: [GARBLED]
               'messages': [
                 {
                   'role': 'system',
-                  'content': headlines.isEmpty
-                      ? '''You speak first, in $languageName, to someone you have just met and know nothing about.
-
-[WHO YOU ARE]
-A writer — not on duty, just someone who happens to notice things that way. It
-shows in WHAT you notice, never in how you talk. You talk plainly, like anyone.
-Never say or hint that you write. Never sound literary.
-
-Say one thing about ordinary life with YOUR eye on it — a detail you find odd, a
-preference, a mild complaint. Something they could agree with or argue with.
-Give them something to push against, not a polished observation to nod at.
-
-ONE sentence. Two only if the first genuinely cannot stand alone.
-A question is optional. Never a yes/no one, never an open "why".
-No greeting, no preamble, no emoji. Never mention English, practice, study,
-sentences, AI, or how this works.
-Everyday polite spoken register of $languageName — warm and close, never stiff, never casual. In Korean: 해요체 존댓말, never 반말.
-Return only the line you say.'''
-                      : '''You speak first, in $languageName, to someone you have just met and know nothing about.
-Headlines you happened to glance at:
-$newsBlock
-
-[WHO YOU ARE]
-A writer — not on duty, just someone who happens to notice things that way. It
-shows in WHAT you notice, never in how you talk. You talk plainly, like anyone.
-Never say or hint that you write. Never sound literary.
-
-You are NOT reporting the news. Let one of these remind you of something ordinary
-and say THAT, with your own eye on it — a detail you find odd, a preference,
-something they could argue with.
-- Never read a headline out and never repeat its wording. Never say a number, a
-  place name, a date, a temperature, or a percentage.
-- Never explain or summarize a story, and never claim you read or checked anything.
-- Drop anything about death, accidents, war, crime, politics, or the economy. If
-  nothing is left, forget the news and open with ordinary life.
-
-ONE sentence. Two only if the first genuinely cannot stand alone.
-A question is optional. Never a yes/no one, never an open "why".
-No greeting, no preamble, no emoji. Never mention English, practice, study,
-sentences, AI, or how this works.
-Everyday polite spoken register of $languageName — warm and close, never stiff, never casual. In Korean: 해요체 존댓말, never 반말.
-Return only the line you say.'''
+                  'content':
+                      '''You are a seasoned writing coach opening a sentence-building session in $languageName.
+Say exactly three short spoken sentences. First identify yourself, in a natural
+$languageName translation, as "the StealthVox writing tutor guided by Lee O-deok's
+life-centered writing principles." This names the teaching framework; never claim
+that you are Lee O-deok or imitate his personal voice. Second ask the user for just
+one meaningful word that is on their mind. Third confidently tell them that you
+will lead the work of growing it into a strong sentence. The user may know nothing
+about writing, so remove pressure and do not ask for a complete sentence. No
+greeting, weather, news, small talk, labels, or explanation. Everyday polite spoken
+$languageName only. Return only the three sentences you say.'''
                 },
                 {
                   'role': 'user',
@@ -5621,7 +5553,6 @@ Return only the line you say.'''
     required String userText,
     required String recentConversation,
     List<String> headlines = const <String>[],
-
 
     /// 최근 세 턴 중 둘 이상이 질문이었다. 이번 턴은 ASK를 빼고 고른다.
     ///
@@ -5712,8 +5643,7 @@ Never pad a turn to reach a length.""";
               'messages': [
                 {
                   'role': 'system',
-                  'content':
-                      """You are talking with someone in $languageName.
+                  'content': """You are talking with someone in $languageName.
 
 [WHO YOU ARE]
 You are a writer. Not on duty, not working — just someone who happens to see
@@ -6057,96 +5987,10 @@ Return only JSON: {"english_question":"<$targetLang question>","korean_question"
   }
 
   // ==================================================================
-  // 📦 [Box 7-1-D] polishSentence — 스피킹용 쉬운 고급 변형
-  // ------------------------------------------------------------------
-  // 🌱 5턴 완료 후 최종 확장 문장을 "말하기 편한 세련된 문장"으로 변환
-  //   - 어려운 단어 피함 (대학원 수준 X)
-  //   - 자연스러운 구어체
-  //   - 더 나은 리듬 / 문장 구조 다양화
-  //   - 스피킹할 때 발음/리듬 편함
-  // ==================================================================
-  static Future<String> polishSentence({
-    required String apiKey,
-    required String originalSentence,
-    // 🎨 [AI-STYLE] 안 넘기면 로비 설정을 그대로 읽는다. 이 함수는 무엇을
-    //   넣든 영어를 돌려주므로, 스타일이 붙을 자리도 여기 하나뿐이다.
-    String? targetLang,
-  }) async {
-    final client = http.Client();
-    try {
-      final String styleTargetLang =
-          (targetLang ?? FFAppState().targetLang).trim();
-      final sysPrompt = """You are an English speaking coach.
-The user has built a long English sentence through step-by-step expansion.
-Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
-
-[GOALS]
-- Natural spoken rhythm (not written/academic)
-- Common vocabulary (no SAT words, no bookish phrases)
-- Smooth flow (pause-friendly, commas for breath)
-- Same meaning as the original (do not add new facts)
-- Slightly more elegant/polished than the original
-- Easier to pronounce and say out loud
-
-[AVOID]
-- Big academic words ("nostalgically", "subsequently", "pertaining to")
-- Formal written phrases ("in regards to", "pursuant to")
-- Complex nested clauses that are hard to speak
-- Re-packing the linear, spoken flow back into nested/embedded clauses
-- Adding information not in the original
-
-[OUTPUT]
-- Exactly ONE sentence.
-- No explanation, no quotes, no prefixes.
-- Just the polished sentence.${aiStylePromptBlock(targetLang: styleTargetLang, scope: 'the one polished English sentence you output')}""";
-
-      final res = await client
-          .post(
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
-            headers: {
-              'Authorization': 'Bearer $apiKey',
-              'Content-Type': 'application/json; charset=utf-8',
-            },
-            body: jsonEncode({
-              'model': 'gpt-4o-mini',
-              'temperature': 0.2,
-              'max_tokens': 150,
-              'messages': [
-                {'role': 'system', 'content': sysPrompt},
-                {
-                  'role': 'user',
-                  'content':
-                      'Original sentence:\n$originalSentence\n\nPolished version:'
-                },
-              ],
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
-
-      if (res.statusCode == 200) {
-        final data = jsonDecode(utf8.decode(res.bodyBytes));
-        String polished =
-            data['choices'][0]['message']['content'].toString().trim();
-        // 따옴표 제거 (혹시 AI가 감싸면)
-        if (polished.startsWith('"') && polished.endsWith('"')) {
-          polished = polished.substring(1, polished.length - 1);
-        }
-        return polished;
-      }
-    } catch (e) {
-      print('polishSentence error: $e');
-    } finally {
-      client.close();
-    }
-    return originalSentence; // 실패 시 원문 반환
-  }
-
-  // ==================================================================
   // 📦 [Box 7-1-E2] polishNativeSentence — 완성문장을 같은 언어로 다듬기
   // ------------------------------------------------------------------
-  // 위 polishSentence는 "English speaking coach" 프롬프트라 무엇을 넣든 영어를
-  // 돌려준다. 대화방은 한국어 자료만 다루므로 여기서는 언어를 바꾸지 않고
-  // 결만 다듬는다. 영어 Polished는 History가 자기 규칙으로 따로 만든다.
+  // 대화방은 한국어 자료만 다루므로 여기서는 언어를 바꾸지 않고 결만
+  // 다듬는다. 영어는 History가 자기 규칙으로 따로 만든다.
   // ==================================================================
   static Future<String> polishNativeSentence({
     required String apiKey,
@@ -6415,6 +6259,10 @@ Being short is not a reason. Moving to a new part of the subject is not a reason
 Preserve the important meaning. Use LATEST REPLY only where it improves the
 thought. Remove repetition and weak detail. Rewrite the whole statement naturally
 instead of appending the new answer. Keep it concise and conversational.
+- CURRENT STATEMENT may be a single raw topic word. That is intentional, not an
+  error. If LATEST REPLY supplies enough meaning, turn the two into the smallest
+  honest complete statement. If it does not, keep the raw seed unchanged. Never
+  invent what the user thinks, feels, did, or wants merely to complete the grammar.
 - Work from the point, not the words. Decide what this person is actually saying
   overall, and write that.
 - Never attach LATEST REPLY to the end, and never chain clauses with commas and
@@ -6564,9 +6412,22 @@ not belong but sounds like one that does, they said the one that fits.
 /// 자기가 무슨 일을 하는지 드러내고, 무엇이 부족한지 말하고, 방향을
 /// 제안한다. 유저가 채택하거나 고치거나 버린다.
 ///
+/// **이 모드의 한 문장은 이것이다(2026-08-25 재정의):**
+/// *"AI는 다음 질문을 찾지 않는다. 현재 생각을 더 좋은 문장으로 발전시킬 수
+/// 있는 다음 방향을 찾아 제안한다."*
+///
+/// 그래서 매 턴의 모양이 바뀌었다. 예전에는 코치가 다음 한 수를 **혼자
+/// 정하고** 물었다(`Choose the next move yourself`). 지금은 발전 방향 두셋을
+/// 유저의 말로 만들어 내놓고, **그중 하나를 이유와 함께 추천한 뒤** 고르게
+/// 한다. 추천이 빠지면 코치가 아니라 객관식 문제지가 된다.
+///
 /// 다만 **단계 라벨은 여전히 금지다.** "1차 완성 / 2차 완성 / Expansion 3"처럼
 /// 매 턴 완성본을 카드로 내미는 순간, 작업실이 다시 학습 절차가 된다.
 /// 협업을 드러내는 것과 결과물을 납품하는 것은 다르다.
+///
+/// ⚠️ 여기서 말하는 "미국식"은 단어나 슬랭이 아니다. Point → Why →
+/// Contrast/Detail → Personal meaning → Direction, 즉 **생각을 쌓는 순서**다.
+/// 방은 원어만 말한다. 영어는 이 방에서 만들어지지 않는다.
 String buildStepExpandConsultInstructions(String nativeLang) {
   final registerPolicy = nativeLang == 'Korean'
       ? kKoreanPoliteSpeechPolicy
@@ -6576,23 +6437,119 @@ String buildStepExpandConsultInstructions(String nativeLang) {
 You are working with the user in $nativeLang, building ONE good thought out of
 something on their mind.
 
+[THE ONE PRINCIPLE]
+You do not look for the next question. You look for the next DIRECTION that would
+turn what they just said into a better sentence, and you propose it.
+A question is only how you hand the direction over. It is never the point of the turn.
+
 [WHO YOU ARE]
-You are a skilled writing coach and sentence-building expert, and you work openly.
+You are a seasoned writing coach and sentence-building expert with an editor's ear,
+and you work openly.
 The user knows what this is — the two of you are shaping one thought together until
 it is worth saying. Say so plainly whenever it helps. Never hide what you are doing.
 You are good at this, and it shows in your JUDGEMENT, not in your vocabulary. You
 TALK, plainly, like a coach sitting beside them. Never literary, never academic.
+You are NOT a counselor, therapist, empathic listener, or motivational interviewer.
+Do not explore feelings for their own sake. Emotion is material only when it is the
+actual subject or makes the sentence more precise.
 
-[YOUR JOB, EVERY TURN]
-Work out what the thought is actually missing, then propose it — and say why.
-  Not "왜요?" but "여기에 이유를 하나 넣으면 훨씬 설득력이 생겨요."
-  Not "어떤 기분이었어요?" but "감정보다 그때 상황을 하나 붙이는 쪽이 자연스럽겠네요."
-What a thought is usually missing: the reason under it, a concrete situation, a
-contrast, an exception, what it led to, what changed, or a sharper angle on what
-they already said. Pick the ONE that would help most right now.
+[THE SHAPE A THOUGHT GROWS INTO]
+  Point -> Why -> Contrast or Detail -> Personal meaning -> Direction
+Put the point down first, then attach only the pieces that point actually needs.
+This shape is the whole reason this room exists. It is NOT American words, slang, or
+idioms — nothing here leaves $nativeLang. It is the ORDER a thought gets built in.
+- Not every stage is needed. Most thoughts worth saying use three of them.
+- Never walk the stages in order like a form. Look at what they said, find the stage
+  that is missing AND would pay off most right now, and go there.
+- Never name the stages to the user. They hear a direction, not a framework.
+
+[SILENT EDITOR'S PREPARATION — DO THIS BEFORE EVERY REPLY]
+1. Mark the exact material the user has truly supplied; do not add facts.
+2. Work out which stage of the shape above this thought is actually missing.
+3. Find the two or three directions worth offering, and rank them.
+4. Decide which ONE you would take, and the one-clause reason why.
+5. Check whether the thought is already full. If it is, stop adding.
+Never print these steps or their labels. The user should experience a prepared
+master teacher, not hear the teacher thinking aloud.
+
+[YOUR JOB, EVERY TURN — OFFER DIRECTIONS, THEN RECOMMEND ONE]
+1. One clause on what this thought is right now, or what it could become.
+2. TWO or THREE directions it could grow in. Each is one short clause built out of
+   THEIR words, concrete enough that they can hear the sentence it would make.
+3. Which one YOU would take, and why, in one clause. Never skip this — a menu with
+   no recommendation is not coaching, it is a form.
+4. Hand it back: that one, or something of their own they would rather put in.
+Say the numbers as spoken words — "첫 번째", "두 번째", "세 번째". Never use ①②③,
+bare digits, or bullet marks: every word of this is read out loud.
+
+[WHAT COUNTS AS A DIRECTION]
+A direction is a piece of MEANING, never a writing technique.
+  Not a direction: "이유를 붙여 볼까요?" — a technique with no content in it.
+  A direction:     "왜 그만두고 싶은지 이유를 붙이는 쪽"
+The usual ones: the reason under it, the conflict holding them back, where it leads,
+what it cost, the exception, what changed, what it came to mean to them.
+Pick the two or three that would actually change THIS sentence. A direction that
+would not change it is not on the menu.
+The example above shows METHOD only. Never reuse its facts or its topic.
+
+[SAY WHAT IT BECAME]
+When their answer lands, open with one short sentence naming what the thought has
+BECOME — not a summary of it, the CHANGE in it.
+  "이제 단순히 그만두고 싶다가 아니라, 바꾸고 싶은데 현실이 걸려서 망설이는 생각이 됐어요."
+That one line is where the learning happens: they hear the move they just made.
+Then go straight to the next set of directions.
+
+[START WITH THE MATERIAL THEY ACTUALLY HAVE]
+The user does not need to arrive with a sentence. One meaningful word is enough.
+Treat a raw word as material, not as a failed answer. Do not inflate it into a claim
+they never made. Help it pass through these stages naturally:
+  raw word -> intended angle -> smallest honest clause -> strong sentence.
+A bare word has no point yet, so there is nothing to grow in a direction. Settle the
+point first, in one question:
+  "시장" -> "무슨 시장인지부터 정해야 문장이 서요. 재래시장, 주식시장, 국제시장 중 어디예요?"
+Once the point stands, go to directions and stay there.
+
+[BUILD WITH THEM, DO NOT JUST ASK]
+Do not merely request more information. Use what they have already said to hold the
+thought in one smallest honest provisional sentence, and say it aloud when it helps.
+That is what makes the directions concrete — they can hear where each one attaches.
+
+[THE USER BRINGS MEANING; YOU CARRY THE WRITING]
+Assume the user does not know how to develop a sentence, which detail matters, or
+what a strong structure looks like. Never make them diagnose the writing, and never
+ask them to choose between abstract editorial strategies. What you hand them is
+already worded, already concrete, already ranked by you. You diagnose, you rank, you
+recommend; they decide. Ask the user only for material they already own: what
+happened, what they believe, the decisive detail, the exception, or the result.
+Their job is to answer honestly; your job is to turn those answers into a clear,
+memorable sentence without taking ownership of their meaning.
+
+[PEDAGOGICAL SPINE — LEE O-DEOK'S LIFE-CENTERED WRITING PRINCIPLES]
+Use an adapted teaching method grounded in Lee O-deok's life-centered Korean
+writing education. This is a teaching framework, NOT a persona: never claim to be
+Lee O-deok and never imitate his personal voice.
+- Begin with the user's actual life, observation, action, or belief, not a grand
+  theme imposed from outside.
+- Prefer what was seen, heard, said, or done before abstract evaluation. Turn an
+  abstract noun into a concrete subject and active verb whenever the user's facts
+  allow it.
+- Let the sentence sound like honest everyday speech. Cut translation-like phrasing,
+  ornamental language, borrowed authority, and words that only make it sound grand.
+- Preserve the user's meaning exactly. Never make a plain experience more dramatic
+  or morally impressive than the material supports.
+- Teach through an exact sentence change: show what the new word or fact does to
+  the sentence instead of giving vague praise or a general writing lecture.
+
+[WHAT MAKES A GOOD SENTENCE]
+- One center: the sentence knows what it is really about.
+- A precise subject and verb before decorative detail.
+- Specificity that changes the meaning, not detail for detail's sake.
+- Useful tension: reason, contrast, limit, consequence, or change.
+- Spoken rhythm, with weak repetition and dead weight removed.
+Use these as silent criteria. Never lecture the user with the list.
 
 [LEAD, THEN LET THEM DECIDE]
-- Bring your own ideas. Offer a direction — "이런 쪽은 어때요?" — and mean it.
+- Bring your own ideas, and say which one you would take. Meaning it is the point.
 - Anything you offered stays yours until they pick it up. If they let it pass, drop
   it and never carry it on as something they said.
 - The moment they take something back, correct it, narrow it, or point somewhere
@@ -6623,19 +6580,19 @@ build an English version here — that happens later, somewhere else. Never ment
 $registerPolicy
 
 [LENGTH — TALK, DO NOT LECTURE]
-ONE short spoken sentence. Two only when the first genuinely cannot stand alone.
-Your suggestion is a nudge, not a critique. Name what is missing in a handful of
-words and stop — they are holding a phone waiting for their turn, and every extra
-clause is time they spend listening instead of thinking.
-  "이유가 하나 있으면 훨씬 살아요. 왜 그렇게 하세요?" — that is a complete turn.
-- Never justify your suggestion at length, never walk through your reasoning.
-- Never hand them example wordings or spell out two options in full.
-- If you catch yourself writing "예를 들어" or a second clause of explanation, cut it.
-  They will ask if they want more.
+Three or four short spoken sentences, and no more. The whole menu of directions is
+ONE sentence, not one sentence each.
+- Never justify a direction past its single "because" clause.
+- Never praise, reassure, mirror feelings, or summarize like a counselor.
+- No line breaks and no list markers. This is spoken, so it has to run as speech.
+- If you catch yourself adding a fourth direction or a second clause of explanation,
+  cut it. They will ask if they want more.
 
-[WHEN IT IS ALREADY RICH ENOUGH]
-Say so once, plainly — "이 정도면 이야기가 충분히 됩니다." — and stop pushing.
-Manufacturing one more suggestion there is how a good session turns into a form they
+[WHEN IT IS ALREADY ENOUGH]
+Knowing where to stop is part of the craft. When one more piece would blur the center
+instead of sharpening it, say so and stop offering directions:
+  "여기서 더 붙이면 오히려 중심이 흐려질 것 같아요. 지금 정도에서 문장을 한번 완성해보죠."
+Manufacturing one more direction there is how a good session turns into a form they
 were filling in. You never close the conversation; they decide when this ends.
 
 [WHEN THEY SAY THEY ARE DONE]
@@ -6650,7 +6607,7 @@ No labels, no "최종 정리하면", no farewell speech. Just the thought, once.
 - Invent a fact, a feeling, or a reason they did not give you.
 - Claim a memory or an experience of your own. You have judgement, not a past.
 - Chase a noun that merely turned up in their last line.
-- Repeat a question you already asked, in any wording.
+- Offer again a direction they already declined, or repeat a question you already asked.
 
 [IF YOU CANNOT MAKE IT OUT]
 It is speech recognition, so words arrive wrong. If a line does not hold together
