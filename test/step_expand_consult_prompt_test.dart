@@ -255,6 +255,56 @@ void main() {
     });
   });
 
+  group('다섯 번째 답으로 끝난다', () {
+    test('마지막 턴이면 모델에게도 알린다', () {
+      final state = buildStepExpandMenuState(
+        growingText: '글.',
+        lastOptions: const <String>[],
+        userLine: '2번',
+        turnNumber: kStepExpandMaxTurns,
+      );
+      expect(state, contains('[THIS IS THE LAST TURN]'));
+      expect(state, contains('Output [DONE] instead of options.'));
+    });
+
+    test('마지막 턴이 아니면 그 줄이 없다', () {
+      final state = buildStepExpandMenuState(
+        growingText: '글.',
+        lastOptions: const <String>[],
+        userLine: '2번',
+        turnNumber: kStepExpandMaxTurns - 1,
+      );
+      expect(state, isNot(contains('LAST TURN')));
+    });
+
+    test('마지막 턴에 후보를 내밀어도 걷어낸다', () {
+      // 그대로 걸면 유저가 고른 뒤에 방이 닫혀, 고른 문장이 어디에도 안 남는다.
+      final offered = parseStepExpandMenuTurn(
+          '[TEXT]\n다 자란 글.\n[OPTIONS]\n1. 하나.\n2. 둘.');
+      final closed =
+          closeStepExpandMenuIfLast(offered, turnNumber: kStepExpandMaxTurns);
+      expect(closed.done, isTrue);
+      expect(closed.options, isEmpty);
+      expect(closed.text, '다 자란 글.');
+    });
+
+    test('아직 마지막이 아니면 그대로 둔다', () {
+      final offered =
+          parseStepExpandMenuTurn('[TEXT]\n글.\n[OPTIONS]\n1. 하나.\n2. 둘.');
+      final kept = closeStepExpandMenuIfLast(offered, turnNumber: 2);
+      expect(kept.done, isFalse);
+      expect(kept.options, hasLength(2));
+    });
+
+    test('되묻기 턴은 마지막이어도 닫지 않는다', () {
+      final ask = parseStepExpandMenuTurn('[HEARD_CONFIRM]\n뭐라고 하셨나요?');
+      final kept =
+          closeStepExpandMenuIfLast(ask, turnNumber: kStepExpandMaxTurns);
+      expect(kept.askBack, isNotEmpty);
+      expect(kept.done, isFalse);
+    });
+  });
+
   group('모델에게 넘기는 상태', () {
     test('직전 후보 셋을 반드시 함께 넘긴다', () {
       // 이게 빠지면 "2번이 좋아"가 무슨 문장인지 모델이 몰라 지어낸다.

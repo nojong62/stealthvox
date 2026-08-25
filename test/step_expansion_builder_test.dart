@@ -3,227 +3,185 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stealth_vox/custom_code/services/step_expansion_builder.dart';
 
-/// 대화가 끝난 뒤 확장 사다리를 재구성하는 자리의 검증 테스트.
+/// 방이 확정해 둔 원어 사다리를 배울글 사다리로 옮기는 자리를 고정한다.
 ///
-/// 네트워크를 태우지 않는다. 여기서 잡으려는 건 모델이 **틀린 모양으로**
-/// 돌려줬을 때 P2가 깨지지 않는지다 — 한글이 섞이거나, 청크가 문장을 덮지
-/// 못하거나, 강조 좌표가 문장 안에 없는 경우.
-String _json(List<Map<String, dynamic>> steps) =>
-    jsonEncode(<String, dynamic>{'steps': steps});
-
+/// **여기는 더 이상 "생각이 어디서 자랐는지"를 찾지 않는다.** 무엇이 붙었는지는
+/// 방이 이미 알고 있고, 남은 일은 옮기는 것뿐이다. 그래서 지켜야 할 규칙도
+/// 하나로 줄었다 — **다음 칸은 앞 칸으로 시작해야 한다.**
 void main() {
-  group('정상 사다리', () {
-    const seed = 'I have been thinking about leaving my job.';
-    const second =
-        'I have been thinking about leaving my job, not because I hate it.';
+  final ladder = <String>[
+    '회사 그만두고 싶어.',
+    '회사 그만두고 싶어. 매일 똑같은 일을 반복하는 게 너무 지쳐.',
+  ];
 
-    final content = _json(<Map<String, dynamic>>[
-      <String, dynamic>{
-        'text': seed,
-        'added_meaning': '회사를 그만둘 생각이 있다',
-        'primary_morph': '',
-      },
-      <String, dynamic>{
-        'text': second,
-        'added_meaning': '일이 싫어서는 아니다',
-        'primary_morph': 'not because I hate it',
-        'chunks': <Map<String, dynamic>>[
-          <String, dynamic>{
-            'text': 'I have been thinking about leaving my job,',
-            'type': 'evolved',
-            'from': 'I have been thinking about leaving my job.',
-          },
-          <String, dynamic>{
-            'text': 'not because I hate it.',
-            'type': 'new',
-          },
-        ],
-      },
-    ]);
+  String json(List<String> steps) => jsonEncode(<String, dynamic>{
+        'steps': steps.map((t) => <String, String>{'text': t}).toList(),
+      });
 
-    test('단계 번호는 1부터, 마지막이 최종문장이다', () {
-      final result = StepExpansionBuilder.parseResponse(content);
+  group('누적 사다리', () {
+    test('칸마다 앞 칸을 품은 배울글이 나온다', () {
+      final result = StepExpansionBuilder.parseResponse(
+        json(<String>[
+          'I want to quit my job.',
+          "I want to quit my job. I'm worn out from doing the same thing every day.",
+        ]),
+        ladder: ladder,
+      );
       expect(result.isUsable, isTrue);
-      expect(result.failure, StepExpansionFailure.none);
-      expect(result.steps.map((s) => s.step), <int>[1, 2]);
-      expect(result.finalSentence, second);
+      expect(result.steps, hasLength(2));
+      expect(result.steps.first.text, 'I want to quit my job.');
+      expect(result.finalSentence, endsWith('every day.'));
     });
 
-    test('첫 칸은 비교 대상이 없어 통째로 new이고 강조가 없다', () {
-      final first = StepExpansionBuilder.parseResponse(content).steps.first;
-      expect(first.chunks, hasLength(1));
-      expect(first.chunks.single.type, 'new');
-      expect(first.chunks.single.text, seed);
-      expect(first.primaryMorph, isEmpty);
+    test('이번 칸에 붙은 원어가 근거로 실린다', () {
+      final result = StepExpansionBuilder.parseResponse(
+        json(<String>['A.', 'A. B.']),
+        ladder: ladder,
+      );
+      expect(result.steps[0].addedMeaning, '회사 그만두고 싶어.');
+      expect(result.steps[1].addedMeaning, '매일 똑같은 일을 반복하는 게 너무 지쳐.');
+    });
+  });
+
+  group('청크는 계산으로 나온다', () {
+    test('앞 칸은 kept, 새로 붙은 곳만 new다', () {
+      final result = StepExpansionBuilder.parseResponse(
+        json(<String>['A.', 'A. B.']),
+        ladder: ladder,
+      );
+      final second = result.steps[1];
+      expect(second.chunks.map((c) => c.type), <String>['kept', 'new']);
+      expect(second.chunks.first.text, 'A.');
+      expect(second.chunks.last.text.trim(), 'B.');
+      // 청크를 이어 붙이면 그 칸 문장이 정확히 복원된다.
+      expect(second.chunks.map((c) => c.text).join(), second.text);
     });
 
-    test('둘째 칸은 직전 문장에 대고 잰다', () {
-      final step2 = StepExpansionBuilder.parseResponse(content).steps[1];
-      expect(step2.chunks.map((c) => c.type), <String>['evolved', 'new']);
-      expect(step2.chunks.first.from, contains('leaving my job'));
-      expect(step2.primaryMorph, 'not because I hate it');
-      expect(step2.addedMeaning, '일이 싫어서는 아니다');
+    test('첫 칸은 통째로 새 문장이다', () {
+      final result = StepExpansionBuilder.parseResponse(
+        json(<String>['A.']),
+        ladder: <String>['가.'],
+      );
+      expect(result.steps.single.chunks.single.type, 'new');
+      expect(result.steps.single.primaryMorph, isEmpty);
     });
 
-    test('Firestore로 나갈 모양에 최종문장이 함께 실린다', () {
-      final json = StepExpansionBuilder.parseResponse(content).toJson();
-      expect(json['final_sentence'], second);
-      expect((json['expansions'] as List), hasLength(2));
+    test('강조는 이번에 붙은 곳이다', () {
+      final result = StepExpansionBuilder.parseResponse(
+        json(<String>['A.', 'A. B.']),
+        ladder: ladder,
+      );
+      expect(result.steps[1].primaryMorph, 'B.');
+      expect(
+          result.steps[1].text.contains(result.steps[1].primaryMorph), isTrue);
+    });
+
+    test('앞 칸을 손댄 칸은 강조를 포기하고 통짜로 둔다', () {
+      // 어디가 새것인지 자신할 수 없다. 엉뚱한 곳을 칠하느니 안 칠한다.
+      final result = StepExpansionBuilder.parseResponse(
+        json(<String>['A.', 'Completely different.']),
+        ladder: ladder,
+      );
+      expect(result.steps[1].primaryMorph, isEmpty);
+      expect(result.steps[1].chunks.map((c) => c.text).join(),
+          result.steps[1].text);
     });
   });
 
   group('망가진 응답을 걸러낸다', () {
     test('JSON이 아니면 parseError', () {
-      expect(
-        StepExpansionBuilder.parseResponse('sorry, I cannot do that').failure,
-        StepExpansionFailure.parseError,
-      );
+      final result =
+          StepExpansionBuilder.parseResponse('전부 옮겼습니다.', ladder: ladder);
+      expect(result.failure, StepExpansionFailure.parseError);
+      expect(result.isUsable, isFalse);
     });
 
-    test('steps가 비면 validationError', () {
-      expect(
-        StepExpansionBuilder.parseResponse('{"steps":[]}').failure,
-        StepExpansionFailure.validationError,
-      );
+    test('steps가 없으면 validationError', () {
+      final result =
+          StepExpansionBuilder.parseResponse('{"result":[]}', ladder: ladder);
+      expect(result.failure, StepExpansionFailure.validationError);
     });
 
-    test('영어 자리에 한글이 남은 칸은 버린다', () {
-      final result = StepExpansionBuilder.parseResponse(_json(
-        <Map<String, dynamic>>[
-          <String, dynamic>{'text': 'I want to travel alone.'},
-          <String, dynamic>{'text': '혼자 여행을 가고 싶다.'},
-        ],
-      ));
+    test('배울글 자리에 한글이 남은 칸은 버린다', () {
+      // P2 한복판에 한국어 줄이 하나 끼는 것보다 칸을 버리는 쪽이 낫다.
+      final result = StepExpansionBuilder.parseResponse(
+        json(<String>['I want to quit my job.', '회사를 그만두고 싶다.']),
+        ladder: ladder,
+      );
       expect(result.steps, hasLength(1));
-      expect(result.finalSentence, 'I want to travel alone.');
     });
 
-    test('한 칸도 못 건지면 validationError로 떨어진다', () {
-      expect(
-        StepExpansionBuilder.parseResponse(
-          _json(<Map<String, dynamic>>[
-            <String, dynamic>{'text': '전부 한국어입니다.'}
-          ]),
-        ).failure,
-        StepExpansionFailure.validationError,
+    test('같은 문장이 두 칸을 차지하면 하나로 접는다', () {
+      final result = StepExpansionBuilder.parseResponse(
+        json(<String>['A.', 'A.']),
+        ladder: ladder,
       );
+      expect(result.steps, hasLength(1));
     });
 
-    test('같은 문장이 두 칸을 차지하지 못한다', () {
-      final result = StepExpansionBuilder.parseResponse(_json(
-        <Map<String, dynamic>>[
-          <String, dynamic>{'text': 'I want to travel alone.'},
-          <String, dynamic>{'text': 'I want to travel alone!'},
-          <String, dynamic>{
-            'text': 'I want to travel alone because I need some quiet.',
-            'chunks': <Map<String, dynamic>>[
-              <String, dynamic>{
-                'text': 'I want to travel alone',
-                'type': 'kept',
-                'from': 'I want to travel alone.',
-              },
-              <String, dynamic>{
-                'text': 'because I need some quiet.',
-                'type': 'new',
-              },
-            ],
-          },
-        ],
-      ));
-      expect(result.steps, hasLength(2));
-      expect(result.steps.last.chunks.last.type, 'new');
-    });
-
-    test('단계 상한을 넘으면 거기서 끊는다', () {
-      final many = List<Map<String, dynamic>>.generate(
-        kMaxStepExpansions + 3,
-        (i) => <String, dynamic>{'text': 'Sentence number $i is here.'},
+    test('쓸 수 있는 칸이 하나도 없으면 validationError', () {
+      final result = StepExpansionBuilder.parseResponse(
+        json(<String>['회사를 그만두고 싶다.']),
+        ladder: <String>['가.'],
       );
-      expect(
-        StepExpansionBuilder.parseResponse(_json(many)).steps,
-        hasLength(kMaxStepExpansions),
-      );
+      expect(result.failure, StepExpansionFailure.validationError);
     });
   });
 
-  group('강조 좌표', () {
-    test('문장에 없는 강조는 새로 들어온 청크로 갈아 끼운다', () {
-      final result = StepExpansionBuilder.parseResponse(_json(
-        <Map<String, dynamic>>[
-          <String, dynamic>{'text': 'I need a break.'},
-          <String, dynamic>{
-            'text': 'I need a break because work has been draining.',
-            // 문장 어디에도 없는 문자열이다 — 그대로 쓰면 P2가 못 칠한다.
-            'primary_morph': 'totally exhausted',
-            'chunks': <Map<String, dynamic>>[
-              <String, dynamic>{
-                'text': 'I need a break',
-                'type': 'kept',
-                'from': 'I need a break.',
-              },
-              <String, dynamic>{
-                'text': 'because work has been draining.',
-                'type': 'new',
-              },
-            ],
-          },
-        ],
-      ));
-      expect(result.steps.last.primaryMorph, 'because work has been draining.');
+  group('사다리 정리', () {
+    test('빈 칸과 제자리걸음을 걷어낸다', () {
+      expect(
+        StepExpansionBuilder.normalizeLadder(
+            <String>['가.', '  ', '가.', '가. 나.']),
+        <String>['가.', '가. 나.'],
+      );
     });
 
-    test('청크가 문장을 덮지 못하면 통짜 fallback으로 내려간다', () {
-      final result = StepExpansionBuilder.parseResponse(_json(
-        <Map<String, dynamic>>[
-          <String, dynamic>{'text': 'I need a break.'},
-          <String, dynamic>{
-            'text': 'I need a break because work has been draining.',
-            'chunks': <Map<String, dynamic>>[
-              // 뒷부분이 통째로 빠져 있다.
-              <String, dynamic>{
-                'text': 'I need a break',
-                'type': 'kept',
-                'from': 'I need a break.',
-              },
-            ],
-          },
-        ],
-      ));
-      final last = result.steps.last;
-      expect(last.chunks, hasLength(1));
-      expect(last.chunks.single.text, last.text);
+    test('상한을 넘기지 않는다', () {
+      final long = List<String>.generate(kMaxStepExpansions + 3, (i) => '칸 $i');
+      expect(StepExpansionBuilder.normalizeLadder(long),
+          hasLength(kMaxStepExpansions));
     });
-  });
 
-  group('transcript 정리', () {
-    test('라벨은 USER / AI 둘뿐이고 줄바꿈은 한 줄로 눕는다', () {
-      final formatted =
-          StepExpansionBuilder.formatTranscript(<StepExpansionTurn>[
-        const StepExpansionTurn(isUser: true, text: '회사\n그만두고  싶어.'),
-        const StepExpansionTurn(isUser: false, text: '어떤 점이 제일 힘드세요?'),
-      ]);
-      expect(formatted, 'USER: 회사 그만두고 싶어.\nAI: 어떤 점이 제일 힘드세요?');
+    test('모델에 넘길 때 번호를 붙인다', () {
+      expect(
+        StepExpansionBuilder.formatLadder(<String>['가.', '가. 나.']),
+        '1. 가.\n2. 가. 나.',
+      );
     });
   });
 
   group('지시문', () {
-    test('유저가 받아들이지 않은 AI 제안을 빼라고 적혀 있다', () {
+    test('다음 칸은 앞 칸으로 시작해야 한다고 못 박는다', () {
       final prompt = StepExpansionBuilder.buildSysPrompt(
           originLang: 'Korean', targetLang: 'English');
-      expect(prompt, contains('the AI raised and the user did not take up'));
-      expect(prompt, contains("Improve the expression, not the user's story."));
+      expect(prompt, contains('[THE ONE RULE]'));
+      expect(prompt, contains('word for word'));
+      expect(prompt, contains('carry everything before it over unchanged'));
     });
 
-    test('턴 수와 단계 수가 1:1이 아니라고 못 박는다', () {
+    test('한 문장으로 합치지 말라고 적혀 있다', () {
       final prompt = StepExpansionBuilder.buildSysPrompt(
           originLang: 'Korean', targetLang: 'English');
-      expect(prompt, contains('NOT one-to-one'));
+      expect(prompt, contains('Do not join the sentences into one long one.'));
+      expect(prompt, contains('Never reorganise the writing'));
     });
 
-    test('영어 TARGET이면 로비 스타일 지시가 함께 실린다', () {
+    test('재구성 시절의 규칙이 남아 있지 않다', () {
+      // 이게 살아 있으면 이 파일이 다시 "생각이 자란 자리를 찾는" 물건이 된다.
+      final prompt = StepExpansionBuilder.buildSysPrompt(
+          originLang: 'Korean', targetLang: 'English');
+      expect(prompt, isNot(contains('WHOSE MEANING COUNTS')));
+      expect(prompt, isNot(contains('NOT one-to-one')));
+      expect(prompt, isNot(contains('primary_morph')));
+    });
+
+    test('영어 TARGET이면 로비 스타일이 어휘까지만 실린다', () {
       final prompt = StepExpansionBuilder.buildSysPrompt(
           originLang: 'Korean', targetLang: 'English');
       expect(prompt, contains('[ENGLISH STYLE'));
+      expect(prompt, contains('Style reaches the WORDING only.'));
+      expect(prompt, isNot(contains('You may reorder the information')));
     });
 
     test('영어가 아니면 스타일이 붙지 않는다', () {
@@ -231,15 +189,18 @@ void main() {
           originLang: 'Korean', targetLang: 'Japanese');
       expect(prompt, isNot(contains('[ENGLISH STYLE')));
     });
+  });
 
-    test('스타일은 어휘까지만 닿는다 — 사다리 배열은 유저 것이다', () {
-      // 로비에서 Native를 골랐다고 P2 사다리와 Final Sentence의 정보 순서까지
-      // 바뀌면, P3 Native English가 보여 줄 차이가 여기서 미리 소진된다.
-      final prompt = StepExpansionBuilder.buildSysPrompt(
-          originLang: 'Korean', targetLang: 'English');
-      expect(prompt, contains('Style reaches the WORDING only.'));
-      expect(prompt, contains('Never reorganise the thought.'));
-      expect(prompt, isNot(contains('You may reorder the information')));
+  group('저장값 다시 읽기', () {
+    test('저장해 둔 사다리를 그대로 되살린다', () {
+      final result = StepExpansionBuilder.parseResponse(
+        json(<String>['A.', 'A. B.']),
+        ladder: ladder,
+      );
+      final stored = result.toJson()['expansions'];
+      final reread = parseStoredExpansions(stored);
+      expect(reread.map((s) => s.text), result.steps.map((s) => s.text));
+      expect(reread[1].primaryMorph, 'B.');
     });
   });
 }

@@ -1,22 +1,24 @@
 // ====================================================================
-// 🌱 [STEP-EXPANSION] 대화가 끝난 뒤 생각의 성장을 영어 문장으로 재구성한다
+// 🌱 [STEP-EXPANSION] 방이 확정한 사다리를 배울글로 옮긴다
 // --------------------------------------------------------------------
-// 지금까지 Step Expand는 **방 안에서** 매 턴 영어 사다리를 만들어 말풍선에
-// 띄웠다. 5턴이 정해져 있었고, 유저는 대화를 하는 게 아니라 문장 제작 절차를
-// 밟았다.
+// **이 파일은 더 이상 "생각이 어디서 자랐는지"를 찾지 않는다.**
 //
-// 이 파일은 그 순서를 뒤집는다. 방은 유저의 언어로 상담만 하고, 영어는
-// **대화가 끝난 뒤 transcript 전체를 읽고** 여기서 한 번에 재구성된다.
+// 예전에는 방이 상담만 하고, 대화가 끝난 뒤 여기서 transcript 전체를 읽어
+// 사다리를 사후 재구성했다. 그럴 수밖에 없었던 이유는 하나였다 — 유저가
+// 자기 말로 답했으니 무엇이 글에 들어갔는지 방도 몰랐다.
 //
-//   방(원어 상담) → transcript 저장 → [여기] → 히스토리 P2 → P3
+// 지금은 방이 안다. AI가 이어 붙일 문장 셋을 써 주고 유저가 고르므로,
+// 무엇이 붙었는지가 매 턴 값으로 확정된다. 그 값이 `expanded_sentence`로
+// 줄마다 저장되고, 이 파일은 그걸 받아 **옮기기만** 한다.
 //
-// **대화 턴 수와 확장 단계 수는 1:1이 아니다.** 8턴을 이야기했어도 생각이
-// 세 번 자랐으면 단계는 셋이다. 맞장구와 잡담은 단계가 되지 않는다.
+//   방(원어, 매 턴 확정) → expanded_sentence → [여기: 번역] → P2 → P3
 //
-// ⚠️ **transcript가 먼저 저장된 뒤에 불린다.** 여기서 실패해도 유저가 나눈
-// 대화는 이미 히스토리에 있다. 그래서 이 함수는 실패를 숨기지 않고 null과
-// [StepExpansionFailure]로 돌려준다 — 호출부가 재시도하거나 P2 없이 방을
-// 남길 수 있어야 한다.
+// 그래서 청크도 모델에게 묻지 않는다. 사다리가 누적형이라 앞 칸이 뒤 칸의
+// 접두사이고, 무엇이 새로 들어왔는지는 계산으로 정확히 나온다.
+//
+// ⚠️ 실패는 숨기지 않는다. 배울글이 없으면 P2에 걸 것이 없으므로
+// [StepExpansionFailure]로 돌려주고, 호출부가 재시도하거나 P2 없이 방을
+// 남긴다.
 // ====================================================================
 
 import 'dart:async';
@@ -150,14 +152,10 @@ List<StepExpansionStep> parseStoredExpansions(dynamic raw) {
   return steps;
 }
 
-/// 단계 수 상한.
-///
-/// 개편안은 단계를 고정하지 말라고 하지만(§14), 상한마저 없으면 잡담이 긴
-/// 세션에서 모델이 열 몇 칸을 만들어 P2가 스크롤 지옥이 된다. 의미가 정말
-/// 여섯 번 자란 대화는 드물다.
+/// 단계 수 상한. 방이 다섯 번쯤에서 닫으므로 여유를 하나 더 둔 값이다.
 const int kMaxStepExpansions = 6;
 
-/// 이 미만이면 대화라고 보지 않는다. 유저 턴 기준이다.
+/// 이 미만이면 사다리라고 보지 않는다.
 const int kMinUserTurnsForExpansion = 1;
 
 final RegExp _hangul = RegExp(r'[가-힣]');
@@ -165,13 +163,16 @@ final RegExp _hangul = RegExp(r'[가-힣]');
 class StepExpansionBuilder {
   StepExpansionBuilder._();
 
-  /// 전체 transcript를 읽고 누적 확장 사다리를 만든다.
+  /// 방이 확정해 둔 원어 사다리를 배울글 사다리로 옮긴다.
   ///
-  /// [transcript]는 방에서 나눈 **원어** 대화 전체다. 요약해서 넘기지 않는다 —
-  /// 어떤 생각이 유저 것이고 어떤 게 AI 제안이었는지는 원문에만 남아 있다.
+  /// **여기는 더 이상 "생각이 어디서 자랐는지"를 찾지 않는다.** 유저가 번호를
+  /// 고를 때마다 무엇이 붙었는지는 방이 이미 알고 있고, 그 값이 [ladder]다.
+  /// 남은 일은 옮기는 것뿐이다.
+  ///
+  /// [ladder]는 **누적형**이다. 다음 칸이 앞 칸을 통째로 품는다.
   static Future<StepExpansionResult> build({
     required String apiKey,
-    required List<StepExpansionTurn> transcript,
+    required List<String> ladder,
     required String originLang,
     required String targetLang,
     String model = 'gpt-4.1-mini',
@@ -181,11 +182,8 @@ class StepExpansionBuilder {
       return const StepExpansionResult.failed(
           StepExpansionFailure.apiKeyMissing);
     }
-    final turns = transcript
-        .where((turn) => turn.text.trim().isNotEmpty)
-        .toList(growable: false);
-    final userTurns = turns.where((turn) => turn.isUser).length;
-    if (userTurns < kMinUserTurnsForExpansion) {
+    final steps = normalizeLadder(ladder);
+    if (steps.isEmpty) {
       return const StepExpansionResult.failed(
           StepExpansionFailure.emptyTranscript);
     }
@@ -201,10 +199,9 @@ class StepExpansionBuilder {
             },
             body: jsonEncode(<String, dynamic>{
               'model': model,
-              // 재구성은 창작이 아니다. 같은 대화에서 매번 다른 사다리가
-              // 나오면 유저는 자기 생각이 자란 과정이 아니라 모델의 기분을
-              // 보게 된다.
-              'temperature': 0.3,
+              // 옮기는 일이다. 같은 사다리에서 매번 다른 영어가 나오면 유저는
+              // 자기 글이 자란 과정이 아니라 모델의 기분을 보게 된다.
+              'temperature': 0.2,
               'max_tokens': 1600,
               'response_format': <String, String>{'type': 'json_object'},
               'messages': <Map<String, String>>[
@@ -217,7 +214,7 @@ class StepExpansionBuilder {
                 },
                 <String, String>{
                   'role': 'user',
-                  'content': formatTranscript(turns),
+                  'content': formatLadder(steps),
                 },
               ],
             }),
@@ -236,7 +233,7 @@ class StepExpansionBuilder {
       final content =
           ((choices.first as Map)['message'] as Map?)?['content']?.toString() ??
               '';
-      return parseResponse(content);
+      return parseResponse(content, ladder: steps);
     } on TimeoutException {
       return const StepExpansionResult.failed(StepExpansionFailure.timeout);
     } catch (_) {
@@ -245,18 +242,48 @@ class StepExpansionBuilder {
     }
   }
 
+  /// 빈 칸과 제자리걸음을 걷어낸 사다리. 상한도 여기서 건다.
+  static List<String> normalizeLadder(List<String> ladder) {
+    final steps = <String>[];
+    for (final raw in ladder) {
+      final text = raw.trim();
+      if (text.isEmpty) continue;
+      // 같은 글이 두 칸이면 유저는 아무 변화도 못 본다.
+      if (steps.isNotEmpty && steps.last == text) continue;
+      steps.add(text);
+      if (steps.length >= kMaxStepExpansions) break;
+    }
+    return steps;
+  }
+
+  /// 모델에 넘길 원어 사다리.
+  static String formatLadder(List<String> ladder) {
+    final buffer = StringBuffer();
+    for (var i = 0; i < ladder.length; i++) {
+      buffer.writeln('${i + 1}. ${ladder[i]}');
+    }
+    return buffer.toString().trimRight();
+  }
+
   /// 모델이 돌려준 JSON을 검증해 사다리로 만든다.
   ///
   /// HTTP와 떼어 둔 이유는 하나다 — **여기가 실제로 틀리는 자리**다. 누적이
-  /// 깨졌는지, 한글이 섞였는지, 강조가 문장 안에 없는지는 네트워크 없이
-  /// 시험할 수 있어야 한다.
-  static StepExpansionResult parseResponse(String content) {
+  /// 깨졌는지, 한글이 섞였는지, 칸 수가 안 맞는지는 네트워크 없이 시험할 수
+  /// 있어야 한다.
+  ///
+  /// 청크는 **모델에게 묻지 않는다.** 사다리가 누적형이라 앞 칸이 뒤 칸의
+  /// 접두사이고, 그러면 무엇이 새로 들어왔는지는 계산으로 정확히 나온다.
+  /// 예전에 모델이 청크를 만들던 시절에는 문장을 못 덮는 청크가 화면까지
+  /// 새어 나갔다.
+  static StepExpansionResult parseResponse(
+    String content, {
+    required List<String> ladder,
+  }) {
     Map<String, dynamic> decoded;
     try {
       decoded = jsonDecode(content) as Map<String, dynamic>;
     } catch (_) {
-      return const StepExpansionResult.failed(
-          StepExpansionFailure.parseError);
+      return const StepExpansionResult.failed(StepExpansionFailure.parseError);
     }
     final raw = decoded['steps'];
     if (raw is! List || raw.isEmpty) {
@@ -264,36 +291,31 @@ class StepExpansionBuilder {
           StepExpansionFailure.validationError);
     }
 
-    final steps = <StepExpansionStep>[];
-    String previousText = '';
-    for (final item in raw) {
-      if (steps.length >= kMaxStepExpansions) break;
-      if (item is! Map) continue;
-      final text = (item['text'] ?? '').toString().trim();
-      // 영어 자리에 한글이 남아 있으면 그 칸은 학습 자료가 아니다. P2 한복판에
-      // 한국어 줄이 하나 끼는 것보다 칸을 버리는 쪽이 낫다.
-      if (text.isEmpty || _hangul.hasMatch(text)) continue;
-      // 같은 문장이 두 칸을 차지하면 유저는 아무 변화도 못 본다(§14).
-      if (previousText.isNotEmpty && _sameSentence(previousText, text)) {
-        continue;
-      }
+    // 원어 쪽에서 이번 칸에 무엇이 붙었는지. 화면에 근거로 실린다.
+    final addedNative = <String>[];
+    var previousNative = '';
+    for (final step in ladder) {
+      addedNative.add(step.startsWith(previousNative) && previousNative.isNotEmpty
+          ? step.substring(previousNative.length).trim()
+          : step);
+      previousNative = step;
+    }
 
-      final chunks = previousText.isEmpty
-          // 첫 칸에는 비교 대상이 없다. 통째로 새 문장이다.
-          ? <P2Chunk>[P2Chunk(text: text, type: 'new')]
-          : parseP2Chunks(item['chunks'], text, part1Text: previousText);
+    final steps = <StepExpansionStep>[];
+    var previousText = '';
+    for (var i = 0; i < raw.length && i < ladder.length; i++) {
+      final item = raw[i];
+      final text = (item is Map ? (item['text'] ?? '') : item).toString().trim();
+      // 배울글 자리에 원어가 남아 있으면 그 칸은 학습 자료가 아니다.
+      if (text.isEmpty || _hangul.hasMatch(text)) continue;
+      if (previousText.isNotEmpty && _sameSentence(previousText, text)) continue;
 
       steps.add(StepExpansionStep(
         step: steps.length + 1,
         text: text,
-        addedMeaning: (item['added_meaning'] ?? '').toString().trim(),
-        chunks: chunks,
-        primaryMorph: _resolvePrimaryMorph(
-          raw: (item['primary_morph'] ?? '').toString().trim(),
-          text: text,
-          chunks: chunks,
-          isFirstStep: previousText.isEmpty,
-        ),
+        addedMeaning: i < addedNative.length ? addedNative[i] : '',
+        chunks: _chunksFor(previous: previousText, text: text),
+        primaryMorph: _addedPart(previous: previousText, text: text),
         previousText: previousText,
       ));
       previousText = text;
@@ -309,103 +331,78 @@ class StepExpansionBuilder {
     );
   }
 
-  /// 강조할 한 덩이를 정한다.
-  ///
-  /// 모델이 준 값을 먼저 믿되, **[text] 안에 실제로 있는 문자열일 때만**
-  /// 쓴다. 없는 문자열을 강조 좌표로 쓰면 P2가 엉뚱한 곳을 칠하거나 아무
-  /// 데도 못 칠한다. 못 믿을 때는 이번에 새로 들어온 청크로 돌아간다.
-  static String _resolvePrimaryMorph({
-    required String raw,
-    required String text,
-    required List<P2Chunk> chunks,
-    required bool isFirstStep,
-  }) {
-    if (raw.isNotEmpty && text.contains(raw)) return raw;
-    // 첫 칸은 문장 전체가 새것이라 강조할 "변화"가 없다.
-    if (isFirstStep) return '';
-    for (final type in const <String>['new', 'evolved']) {
-      for (final chunk in chunks) {
-        if (chunk.type == type && text.contains(chunk.text)) return chunk.text;
-      }
-    }
-    return '';
+  /// 이번 칸에 새로 들어온 부분. 앞 칸을 품고 있지 않으면 빈 문자열이다.
+  static String _addedPart({required String previous, required String text}) {
+    if (previous.isEmpty) return '';
+    if (!text.startsWith(previous)) return '';
+    return text.substring(previous.length).trim();
   }
 
-  static bool _sameSentence(String a, String b) => _normalize(a) == _normalize(b);
+  /// 직전 칸에 대고 잰 변화. 누적형이라 두 조각으로 갈린다.
+  static List<P2Chunk> _chunksFor({
+    required String previous,
+    required String text,
+  }) {
+    // 첫 칸에는 비교 대상이 없다. 통째로 새 문장이다.
+    if (previous.isEmpty) {
+      return <P2Chunk>[P2Chunk(text: text, type: 'new')];
+    }
+    if (!text.startsWith(previous)) {
+      // 모델이 앞 칸을 손댔다. 어디가 새것인지 자신할 수 없으므로 통짜로 둔다.
+      return fallbackP2Chunks(text);
+    }
+    final added = text.substring(previous.length);
+    if (added.trim().isEmpty) return fallbackP2Chunks(text);
+    return <P2Chunk>[
+      P2Chunk(text: previous, type: 'kept', from: previous),
+      P2Chunk(text: added, type: 'new'),
+    ];
+  }
+
+  static bool _sameSentence(String a, String b) =>
+      _normalize(a) == _normalize(b);
 
   static String _normalize(String text) =>
       text.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
 
-  /// 모델에 넘길 대화록. 라벨은 둘뿐이다.
-  ///
-  /// 배역 이름이나 화면 라벨을 그대로 넘기지 않는다 — 모델이 정해야 하는 건
-  /// "이 의미가 유저 것인가"뿐이고, 그 판단에 이름은 방해만 된다.
-  static String formatTranscript(List<StepExpansionTurn> turns) => turns
-      .map((turn) =>
-          '${turn.isUser ? 'USER' : 'AI'}: ${turn.text.trim().replaceAll(RegExp(r'\s+'), ' ')}')
-      .join('\n');
-
-  /// 재구성 지시문.
+  /// 옮기기 지시문.
   ///
   /// 이 프롬프트가 지키려는 한 줄은 이것이다 —
-  /// **"Improve the expression, not the user's story."**
+  /// **"Each step must contain the previous one, word for word."**
   static String buildSysPrompt({
     required String originLang,
     required String targetLang,
   }) {
-    // 🎨 [AI-STYLE] 사다리는 **유저 생각의 배열 그 자체**다. 로비에서 Native를
-    //   골랐다고 여기서 정보 순서와 문장 수까지 갈아엎으면, P3의 Native English
-    //   카드가 보여 줄 차이가 P2에서 미리 소진된다. 스타일은 어휘까지만 닿는다.
     final styleBlock = aiStylePromptBlock(
       targetLang: targetLang,
-      scope: 'every "text" sentence you produce',
+      scope: 'every step you produce',
+      // 🎨 사다리는 **유저 글의 배열 그 자체**다. 로비에서 Native를 골랐다고
+      //   여기서 정보 순서를 갈아엎으면, P3의 Native English가 보여 줄 차이가
+      //   P2에서 미리 소진된다. 스타일은 어휘까지만 닿는다.
       reach: AiStyleReach.wording,
     );
-    return '''You are rebuilding a finished $originLang conversation into the growth of ONE English sentence.
+    return '''The user built one piece of writing in $originLang, one sentence at a time. You are given it as a ladder: each numbered step is the whole text as it stood after that turn, so every step contains the one before it and adds one more sentence at the end.
 
-The user talked through a thought with a conversation partner in $originLang. Your job is NOT to translate that conversation. Your job is to find how the user's thought actually grew, and to show that growth as a short ladder of cumulative $targetLang sentences.
+Put that same ladder into $targetLang.
 
-[STEP 1 — WHOSE MEANING COUNTS]
-- Keep only what the USER expressed, or clearly accepted when the AI offered it.
-- An idea the AI raised and the user did not take up is NOT the user's meaning. Drop it.
-- Drop small talk, agreement noises, repetitions, and anything the user explicitly rejected or removed.
+[THE ONE RULE]
+Step 2 must begin with your step 1, word for word. Step 3 must begin with your step 2, word for word. And so on.
+The user watches this text grow on screen. If an earlier part changes wording between steps, they cannot see what they just added — the whole screen moves instead.
+So: translate the NEW sentence at each step, and carry everything before it over unchanged.
 
-[STEP 2 — WHERE THE THOUGHT ACTUALLY GREW]
-- Conversation turns and ladder steps are NOT one-to-one. Eight turns with three real developments make THREE steps.
-- A step exists only where a genuinely new piece of meaning enters — a reason, a feeling, a condition, a contrast, a consequence, a change of mind.
-- Rewording the same meaning is not a step. Never pad the ladder.
-- Produce between 1 and $kMaxStepExpansions steps. Fewer honest steps beat more shallow ones.
-
-[STEP 3 — BUILD THE LADDER, CUMULATIVE]
-- Step 1 is the seed: the smallest honest version of what the user was getting at.
-- Every later step must CONTAIN the previous step's meaning and add the next piece:
-    step 2 = step 1 + B
-    step 3 = step 2 + C
-- Steps are not alternative sentences. They are one sentence growing.
-- The LAST step is the final sentence. There only, you may reorganise the whole sentence so it reads as one natural spoken English thought, as long as no meaning is lost or added.
-- The final sentence must be something one person can say in a single comfortable breath-flow in real conversation. Do not let it sprawl.
-
-[STEP 4 — ENGLISH, NOT TRANSLATED $originLang]
-- Do not carry $originLang word order or connective habits into English.
-- Organise the thought the way an English speaker would, using relations that fit: because, but, even though, not because A but because B, lately, part of me..., which is why..., it made me realize..., I guess..., I feel like...
-- Everyday spoken English the user could actually say. Not written prose, not showy vocabulary.
+[HOW TO TRANSLATE EACH NEW SENTENCE]
+- Everyday spoken $targetLang the user could actually say out loud. Not written prose, not showy vocabulary.
+- Keep their meaning, viewpoint, tense, and how strongly they put it.
+- Never add a fact, a feeling, or a reason. Never drop one.
+- Keep it short. They said one short sentence; give back one short sentence.
+- Do not join the sentences into one long one. It stays a series of short sentences, the way they built it.
 
 [NEVER]
-- Never invent an event, a feeling, a reason, or an attitude the user did not express.
-- Never exaggerate what the user meant, and never soften or flip their stance.
-- Improve the expression, not the user's story.
+- Never reorganise the writing, and never improve on it.
+- Never leave $originLang characters in a step.
+- Never produce more or fewer steps than you were given.
 
-[FOR EACH STEP, ALSO REPORT]
-- "added_meaning": ONE short line, written in $originLang, naming the new piece of meaning this step brings in. For step 1, describe the seed.
-- "chunks": split THIS step's sentence into consecutive pieces covering it exactly once, in order. Classify each piece against the PREVIOUS step's sentence:
-    "kept"    — carried over with little or no change
-    "evolved" — same meaning as before but restructured or reworded
-    "new"     — meaning that was not in the previous step
-  For "kept" and "evolved", include "from": an exact contiguous substring of the PREVIOUS step's sentence. Omit "from" for "new".
-  Concatenating every chunk's text must reproduce this step's sentence exactly. Step 1 has no previous sentence — give it a single "new" chunk holding the whole sentence.
-- "primary_morph": the ONE piece of this step's sentence that best shows what just entered the thought. It must be an exact substring of this step's sentence. Choose a meaning-carrying piece, not a bare connective. Leave it "" for step 1.
-
-Reply as JSON only:
-{"steps":[{"text":"<$targetLang sentence>","added_meaning":"<one line in $originLang>","primary_morph":"<exact substring or empty>","chunks":[{"text":"<piece>","type":"kept|evolved|new","from":"<exact substring of previous step; kept/evolved only>"}]}]}$styleBlock''';
+Reply as JSON only, one entry per numbered step, in the same order:
+{"steps":[{"text":"<the whole text so far, in $targetLang>"}]}$styleBlock''';
   }
 }

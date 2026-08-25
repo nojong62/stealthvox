@@ -2817,6 +2817,7 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
           growingText: previousExpanded,
           lastOptions: _lastMenuOptions,
           userLine: userKorean,
+          turnNumber: turnNumber,
         ),
       );
       // 유저 말풍선에 걸 글. 누적 글은 아래에서 모델 응답을 읽은 뒤 확정된다.
@@ -2868,7 +2869,10 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
       if (rawReply.isEmpty) {
         throw StateError('Step Expand reply did not complete.');
       }
-      final menu = parseStepExpandMenuTurn(rawReply);
+      final menu = closeStepExpandMenuIfLast(
+        parseStepExpandMenuTurn(rawReply),
+        turnNumber: turnNumber,
+      );
       _log(
           '🧩 [MENU-TURN]',
           'turn=$turnNumber options=${menu.options.length} pick=${menu.pick} '
@@ -3395,7 +3399,7 @@ answer with one word, a choice, or the end of a phrase.'''}''';
             unawaited(finalizeStepExpansions(
               roomRef: roomRef,
               apiKey: apiKey,
-              transcript: transcript,
+              ladder: stepExpandLadderFrom(_localMessages),
               originLang: originLang,
               targetLang: targetLang,
               onLog: _log,
@@ -6463,6 +6467,13 @@ your own. The frame sentences the user hears are added afterwards; do not write 
 ''';
 }
 
+/// 유저가 붙일 수 있는 문장 수. 다섯 번째 답으로 이 방은 끝난다.
+///
+/// 지시문에도 "다섯 개쯤"이라고 적어 두지만, 그것만으로는 안 지켜진다 —
+/// 지킬 마음이 없는 규칙은 물리적으로 못 하게 막는 쪽이 낫다. 그래서 방이
+/// 직접 센다.
+const int kStepExpandMaxTurns = 5;
+
 /// 한 턴에서 AI가 실제로 내놓은 것.
 ///
 /// 모델은 자유 문장이 아니라 [TEXT]/[OPTIONS]/[PICK] 틀로 답한다. 그래야
@@ -6623,6 +6634,8 @@ String buildStepExpandMenuState({
   required String growingText,
   required List<String> lastOptions,
   required String userLine,
+  /// 이번 턴이 몇 번째인가(1부터). 마지막 턴이면 모델도 알고 닫는다.
+  int turnNumber = 0,
 }) {
   final buffer = StringBuffer();
   final text = growingText.trim();
@@ -6638,5 +6651,23 @@ String buildStepExpandMenuState({
   buffer.writeln();
   buffer.writeln('[WHAT THEY JUST SAID]');
   buffer.writeln(userLine.trim());
+  if (turnNumber >= kStepExpandMaxTurns) {
+    buffer.writeln();
+    buffer.writeln(
+        '[THIS IS THE LAST TURN] The text is full. Output [DONE] instead of options.');
+  }
   return buffer.toString().trimRight();
+}
+
+/// 마지막 턴이면 후보를 걷어내고 마무리로 바꾼다.
+///
+/// 모델에게 "이번이 마지막"이라고 알려도 후보 셋을 내놓는 일이 있다. 그때
+/// 그대로 걸면 유저가 고른 뒤에 방이 닫혀, 고른 문장이 어디에도 안 남는다.
+StepExpandMenuTurn closeStepExpandMenuIfLast(
+  StepExpandMenuTurn turn, {
+  required int turnNumber,
+}) {
+  if (turn.done || turn.askBack.isNotEmpty) return turn;
+  if (turnNumber < kStepExpandMaxTurns) return turn;
+  return StepExpandMenuTurn(text: turn.text, done: true);
 }

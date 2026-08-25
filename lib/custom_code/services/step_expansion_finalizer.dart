@@ -126,6 +126,38 @@ List<StepExpansionTurn> stepExpansionTranscriptFrom(
   return turns;
 }
 
+/// 방 안에서 확정된 사다리. **유저 줄에만 실린다.**
+///
+/// 유저가 번호를 고르면 그 문장이 누적 글 끝에 붙는다. 그 값이 곧 사다리
+/// 한 칸이라, 대화가 끝난 뒤 다시 추측할 것이 없다. `original_text`("2번이
+/// 좋아")를 읽으면 안 되는 이유이기도 하다.
+List<String> stepExpandLadderFromMessages(
+  List<Map<String, dynamic>> messages,
+) {
+  final ladder = <String>[];
+  for (final data in messages) {
+    if ((data['role'] ?? '').toString() != 'HOST') continue;
+    final text = (data['expanded_sentence'] ?? '').toString().trim();
+    if (text.isEmpty) continue;
+    ladder.add(text);
+  }
+  return ladder;
+}
+
+/// 화면이 들고 있던 말풍선에서 같은 사다리를 읽는다.
+///
+/// 유저 말풍선의 `target`이 그 턴까지 자란 글이다(`original`은 실제 발화).
+List<String> stepExpandLadderFrom(List<Map<String, dynamic>> localMessages) {
+  final ladder = <String>[];
+  for (final message in localMessages) {
+    if ((message['role'] ?? '').toString() != 'HOST') continue;
+    final text = (message['target'] ?? '').toString().trim();
+    if (text.isEmpty || text == '...') continue;
+    ladder.add(text);
+  }
+  return ladder;
+}
+
 /// 방 문서에 사다리를 박는다. 성공했을 때만 Practice가 열린다.
 ///
 /// [roomRef]는 `users/{uid}/chat_history/{roomId}`다. 방 위젯이 들고 있는
@@ -134,7 +166,8 @@ List<StepExpansionTurn> stepExpansionTranscriptFrom(
 Future<void> finalizeStepExpansions({
   required DocumentReference<Object?> roomRef,
   required String apiKey,
-  required List<StepExpansionTurn> transcript,
+  /// 방이 턴마다 확정해 둔 누적 글. **P1도 P2도 여기서 나온다.**
+  required List<String> ladder,
   required String originLang,
   required String targetLang,
   void Function(String tag, String message)? onLog,
@@ -158,17 +191,17 @@ Future<void> finalizeStepExpansions({
   // 짧을 수 있다 — 직렬로 돌리면 P1이 늦게 붙어 첫 진입에서 안 보인다.
   final ladderFuture = StepExpansionBuilder.build(
     apiKey: apiKey,
-    transcript: transcript,
+    ladder: ladder,
     originLang: originLang,
     targetLang: targetLang,
   );
+  // 🗂️ P1의 유저 줄은 **대화록에서 오지 않는다.** 거기 있는 건 "2번이 좋아"고,
+  //   실제로 글에 붙은 문장은 방이 확정해 둔 사다리의 차이다. 권유 한 줄과
+  //   배울글만 모델이 채운다.
   final p1Future = StepExpandP1Builder.build(
     apiKey: apiKey,
-    transcript: transcript,
+    ladder: ladder,
     originLang: originLang,
-    // P1도 Target/Original 두 글을 보여 준다. 질문 쪽 Target은 여기서 함께
-    // 만들어 저장한다 — 그 질문은 줄로 남아 있지 않아서(코치의 긴 턴을 줄인
-    // 것이라) 나중에 줄 단위 번역이 대신 만들어 줄 수 없다.
     targetLang: targetLang,
   );
   final result = await ladderFuture;
@@ -197,7 +230,7 @@ Future<void> finalizeStepExpansions({
       return;
     }
     log('⚠️ [EXPANSION-FAILED]',
-        'reason=${result.failure.name} turns=${transcript.length} → 재시도 가능');
+        'reason=${result.failure.name} steps=${ladder.length} → 재시도 가능');
     return;
   }
 
