@@ -1627,6 +1627,14 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
     if (closingStreamingStt != null) unawaited(closingStreamingStt.dispose());
     _voiceManager?.dispose();
     _voiceManager = null;
+    // 🔇 [TTS-INFLIGHT] 큐를 비우는 것만으로는 부족하다. **아직 날아오는 중인
+    //   TTS 요청**이 남아 있으면, 응답이 도착하는 순간 큐에 다시 들어가 재생된다.
+    //   실기기(2026-08-25): 방을 나가고 1.8초 뒤에 첫 마디가 울렸고, 더 나쁜
+    //   경우 앞 방의 후보 셋이 **새로 들어간 방에서** 흘러나왔다.
+    //   fetcher를 취소하면 완료 콜백이 `_cancelled`를 보고 그냥 버린다.
+    _guideTtsFetcher?.cancel();
+    _guideTtsFetcher = null;
+    _isInitialGuidePlaying = false;
     _ttsQueueManager.setAiPaused(false); // 🔧 [v3.6] TTS 대기 플래그 초기화
     _ttsQueueManager.setUserTurn(false);
     _ttsQueueManager.stop();
