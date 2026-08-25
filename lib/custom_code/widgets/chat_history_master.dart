@@ -1110,7 +1110,25 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     _resumeHistoryFromUserAction();
     if (mounted) setState(() => _isEnteringPractice = true);
     try {
+      // 🔄 [FRESH-ROOM] 캐시를 믿지 않는다.
+      //
+      //   P1·사다리는 유저가 **방을 나간 뒤** 백그라운드에서 쓰인다. 반면
+      //   `_cachedRoomData`는 히스토리 화면이 열릴 때 한 번 읽은 값이라,
+      //   그 사이에 쓰인 `p1_pairs`가 없다. 그러면 P1이 "쌍이 없다"고 보고
+      //   대화 원문 폴백으로 떨어져, 코치가 방에서 늘어놓은 후보 셋이 그대로
+      //   AI 줄로 뜬다(실기기 2026-08-25). 문서 하나 더 읽는 값을 치른다.
       var data = _cachedRoomData;
+      try {
+        final fresh = await widget.historyDoc.get();
+        if (!mounted) return;
+        final freshData = fresh.data() as Map<String, dynamic>?;
+        if (freshData != null) {
+          data = freshData;
+          _cachedRoomData = freshData;
+        }
+      } catch (e) {
+        debugPrint('[enterShadowing] room refetch $e');
+      }
       if (data == null) {
         final snap = await widget.historyDoc.get();
         if (!mounted) return;
