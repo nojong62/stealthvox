@@ -656,14 +656,17 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
       // 🔁 [LATE-CONTINUATION] **실제로 소리가 나기 시작한 순간.** 이 턴의
       //   복구 창을 확실히 닫는다 — 평소에는 enqueue에서 이미 닫힌다.
       _aiPlaybackStarted = true;
-      // 🙋 [BARGE-IN] 끼어들 수 있는 대사면 마이크를 닫지 않는다. 녹음이
-      //   echoCancel이라 스피커로 나가는 코치 목소리는 지워지고, 새어 들어와도
-      //   [_looksLikeSelfEcho]가 그 턴을 버린다. 유저가 안내 도중에 말을
-      //   시작하면 그 첫머리부터 서버에 쌓여, 끊고 들어가도 말이 잘리지 않는다.
-      _closeContinuationWindow(
-        reason: 'ai_playback_started',
-        keepListening: _bargeInArmed,
-      );
+      // 🙋 [BARGE-IN] **여기서 캡처를 열어 두려고 하지 말 것.**
+      //   2026-08-25에 `keepListening: _bargeInArmed`로 열어 뒀더니, 재생이
+      //   끝난 뒤 다시 열려는 호출이 `_streamingCaptureOpen`을 보고 "이미 듣는
+      //   중"으로 건너뛰었다. 깃발은 서 있는데 레코더는 소리를 안 보내
+      //   133초 동안 서버로 간 오디오가 10초였고, speech_started가 한 번도
+      //   오지 않았다(실기기 로그 `sentAudioMs=10240`).
+      //
+      //   캡처의 주인이 둘이라서 생기는 일이다 — TTS 경로와 턴 경로가 각자
+      //   열고 닫는다. 안내 도중 끼어들기를 살리려면 그 둘을 먼저 하나로
+      //   정리해야 한다. 깃발만 바꿔서는 마이크가 죽는다.
+      _closeContinuationWindow(reason: 'ai_playback_started');
       if (_awaitingAiFirstAudioProbe) {
         _awaitingAiFirstAudioProbe = false;
         _logProbeTiming('AI_FIRST_AUDIO');
@@ -2008,24 +2011,13 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
 
   /// 창을 닫고 녹음·게이트를 정리한다. **[MIC-ROUTING] 규칙을 지키는 자리다.**
   /// 후보 상태는 건드리지 않는다 — 창은 마이크 수명, 후보는 자격이다.
-  /// [keepListening]이면 창만 닫고 **마이크는 그대로 둔다.**
-  ///
-  /// 끼어들기가 걸려 있는 동안 쓴다. 예전에는 AI 재생이 시작되는 순간 여기서
-  /// 캡처까지 닫았고, 그래서 `[BARGE-IN] armed`는 찍히는데 실제로 끊고 들어갈
-  /// 방법이 없었다(실기기 2026-08-25: armed 직후 `capture_stopped
-  /// reason=ai_playback_started`). 손잡이만 있고 잡을 손이 없었던 셈이다.
-  void _closeContinuationWindow({
-    required String reason,
-    bool keepListening = false,
-  }) {
+  void _closeContinuationWindow({required String reason}) {
     final bool wasOpen = _continuationWindowOpen;
     _continuationWindowTimer?.cancel();
     _continuationWindowTimer = null;
     _continuationWindowOpen = false;
-    if (!keepListening) {
-      _streamingStt?.closeAudioGate(reason: reason);
-      unawaited(_stopStreamingCapture(reason: reason));
-    }
+    _streamingStt?.closeAudioGate(reason: reason);
+    unawaited(_stopStreamingCapture(reason: reason));
     if (wasOpen) {
       _log('🔁 [CONT-WINDOW]',
           'close seq=$_continuationWindowSeq reason=$reason');
