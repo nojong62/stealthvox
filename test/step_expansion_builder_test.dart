@@ -231,5 +231,15 @@ void main() {
           originLang: 'Korean', targetLang: 'Japanese');
       expect(prompt, isNot(contains('[ENGLISH STYLE')));
     });
+
+    test('스타일은 어휘까지만 닿는다 — 사다리 배열은 유저 것이다', () {
+      // 로비에서 Native를 골랐다고 P2 사다리와 Final Sentence의 정보 순서까지
+      // 바뀌면, P3 Native English가 보여 줄 차이가 여기서 미리 소진된다.
+      final prompt = StepExpansionBuilder.buildSysPrompt(
+          originLang: 'Korean', targetLang: 'English');
+      expect(prompt, contains('Style reaches the WORDING only.'));
+      expect(prompt, contains('Never reorganise the thought.'));
+      expect(prompt, isNot(contains('You may reorder the information')));
+    });
   });
 }

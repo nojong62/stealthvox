@@ -5697,69 +5697,6 @@ content and gist of the WHOLE conversation.
     }
   }
 
-  // 🆕 [EXPAND-EXIT] 확장 문장 → 쉽고 세련된 한 문장 (Polished)
-  static Future<String?> polishSentence(
-    String apiKey,
-    String originalSentence, {
-    String partnerLabel = 'the roleplay partner',
-  }) async {
-    if (apiKey.isEmpty || originalSentence.trim().isEmpty) return null;
-    try {
-      final safePartnerLabel = partnerLabel.trim().isNotEmpty
-          ? partnerLabel.trim()
-          : 'the roleplay partner';
-      final sysPrompt = """You are an English speaking coach.
-Rewrite the given long English sentence as ONE "easy but elegant" spoken sentence.
-
-[GOALS]
-- Natural spoken rhythm (not written/academic)
-- Common vocabulary (no SAT words, no bookish phrases)
-- Smooth flow (pause-friendly, commas for breath)
-- Same meaning as the original (do not add new facts)
-- Easier to pronounce and say out loud
-- Render every participant name, role label, and situation in English (translate role or description phrases; romanize real personal names). Never keep Korean text.
-- The final sentence must be 100% English and must NOT contain any Korean (Hangul) characters.
-- Do not replace $safePartnerLabel with AI, assistant, chatbot, or bot.
-
-[OUTPUT]
-- Exactly ONE sentence. No explanation, no quotes, no prefixes.""";
-      final response = await http
-          .post(
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
-            headers: {
-              'Authorization': 'Bearer $apiKey',
-              'Content-Type': 'application/json; charset=utf-8',
-            },
-            body: jsonEncode({
-              'model': 'gpt-4o-mini',
-              'temperature': 0.2,
-              'max_tokens': 150,
-              'messages': [
-                {'role': 'system', 'content': sysPrompt},
-                {
-                  'role': 'user',
-                  'content':
-                      'Original sentence:\n$originalSentence\n\nPolished version:'
-                },
-              ],
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode != 200) return originalSentence;
-      final body =
-          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-      String p =
-          ((body['choices'] as List).first['message']['content'] as String)
-              .trim();
-      if (p.startsWith('"') && p.endsWith('"'))
-        p = p.substring(1, p.length - 1);
-      return p.isEmpty ? originalSentence : p;
-    } catch (e) {
-      debugPrint("[RoleplayBrain.polishSentence] $e");
-      return originalSentence;
-    }
-  }
-
   // 📋 [200개 기초 상황 — 카테고리 5종 × 40개] (v4 추가)
   /// 회원별 시나리오 순회 커서 키. 뒤에 uid를 붙여 저장한다.
   /// 기기 로컬(SharedPreferences)이라 앱을 지우거나 기기를 바꾸면 0부터

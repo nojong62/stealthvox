@@ -7263,66 +7263,6 @@ content and gist of the WHOLE conversation.
     }
   }
 
-  // 🆕 [EXPAND-EXIT] 확장 문장 → 쉽고 세련된 한 문장 (Polished)
-  static Future<String?> polishSentence(
-    String apiKey,
-    String originalSentence, {
-    String partnerLabel = 'AI partner',
-  }) async {
-    if (apiKey.isEmpty || originalSentence.trim().isEmpty) return null;
-    try {
-      const sysPrompt = """You are an English speaking coach.
-Rewrite the given long English sentence as ONE "easy but elegant" spoken sentence.
-
-[GOALS]
-- Natural spoken rhythm (not written/academic)
-- Common vocabulary (no SAT words, no bookish phrases)
-- Smooth flow (pause-friendly, commas for breath)
-- Same meaning as the original (do not add new facts)
-- Easier to pronounce and say out loud
-- Render every participant name, role label, and situation in English (translate role or description phrases; romanize real personal names). Never keep Korean text.
-- The final sentence must be 100% English and must NOT contain any Korean (Hangul) characters.
-
-[OUTPUT]
-- Exactly ONE sentence. No explanation, no quotes, no prefixes.""";
-      final response = await http
-          .post(
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
-            headers: {
-              'Authorization': 'Bearer $apiKey',
-              'Content-Type': 'application/json; charset=utf-8',
-            },
-            body: jsonEncode({
-              'model': 'gpt-4o-mini',
-              'temperature': 0.2,
-              'max_tokens': 150,
-              'messages': [
-                {'role': 'system', 'content': sysPrompt},
-                {
-                  'role': 'user',
-                  'content':
-                      'Original sentence:\n$originalSentence\n\nPolished version:'
-                },
-              ],
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode != 200) return originalSentence;
-      final body =
-          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-      String p =
-          ((body['choices'] as List).first['message']['content'] as String)
-              .trim();
-      if (p.startsWith('"') && p.endsWith('"')) {
-        p = p.substring(1, p.length - 1);
-      }
-      return p.isEmpty ? originalSentence : p;
-    } catch (e) {
-      debugPrint("[FreeTalkBrain.polishSentence] $e");
-      return originalSentence;
-    }
-  }
-
   // ==================================================================
   // ==================================================================
   // 📦 [Box 7-1-B] streamUserTranslation — CoT 2단계 번역 스트림

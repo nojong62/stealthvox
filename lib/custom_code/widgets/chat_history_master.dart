@@ -31,6 +31,7 @@ import 'routine_mode_roleplay.dart' show TtsCache;
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
 import '/custom_code/services/ai_style.dart';
+import '/custom_code/services/step_expand_p1.dart';
 import '/custom_code/services/step_expansion_builder.dart';
 import '/custom_code/services/step_expansion_finalizer.dart';
 import '/custom_code/services/audio_silence_analyzer.dart';
@@ -210,11 +211,11 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   ShadowingPhase _phase = ShadowingPhase.idle;
   SentenceVariant _selectedVariant = SentenceVariant.expanded;
   String _expandedSentence = "";
-  String _polishedSentence = "";
+  String _nativeEnglish = "";
   // 완성문장에 한글이 남아 있으면 아직 영어가 안 만들어진 것이다.
   // 8019줄 [HANGUL-GUARD]가 Tutor 경로에서 쓰는 것과 같은 판정이다.
   static final RegExp _stepExpandHangul = RegExp(r'[가-힣ᄀ-ᇿ㄰-㆏]');
-  bool _polishedLoadDone = false;
+  bool _nativeEnglishLoadDone = false;
   // 🔧 [STAMPEDE-FIX] 같은 청크에 대한 동시 API 호출 방지
   // key: chunk index, value: 진행 중인 audio fetch Future
   final Map<int, Future<Uint8List?>> _inFlightChunkFetch = {};
@@ -268,6 +269,10 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // 📦 [Box 4-C: Step Expand Practice 1 & 2 상태]
   bool _isStepExpandRoom = false;
   List<Map<String, dynamic>> _stepExpandTurns = [];
+  // 🗂️ [P1-PAIRS] 세션이 끝난 뒤 정리된 "질문 ↔ 유저 답" 쌍.
+  //   비어 있으면 옛 방(또는 P1 정리 실패)이라 아래에서 대화 원문으로
+  //   폴백한다 — 그 폴백은 AI가 방에서 한 제안문을 그대로 보여 준다.
+  List<StepExpandP1Pair> _p1Pairs = const <StepExpandP1Pair>[];
 
   // 🌱 [EXPANSION] 대화가 끝난 뒤 만들어진 사다리. **새 세션에만 있다.**
   //   `_expansionStatus`가 비어 있으면 구 세션이고, 그 방은 예전 P2 경로를
@@ -338,22 +343,22 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   StreamSubscription<Duration>? _p3ShadowDurationSub;
 
   // 🆕 [CHUNK-PRACTICE] 의미단위 연습 모드 상태
-  bool _practicingPolished = false; // false = expanded, true = polished
+  bool _practicingNativeEnglish = false; // false = Final, true = Native English
   bool _isBuildingExpand = false; // 🆕 [EXPAND-FROM-CHAT] 확장문장 생성 중 플래그
   String _cachedRoomMode = ''; // 🔧 [FREE-TALK-BTN] 버튼 표시 조건용 mode 캐시
   bool _isPlayingFullAI = false; // 전체 AI 듣기 진행 중
-  Timer? _polishedRevealTimer;
+  Timer? _nativeEnglishRevealTimer;
   final ScrollController _chunkScrollController = ScrollController();
   final Map<int, GlobalKey> _itemKeys = {};
   // 🆕 [BOX-34-SCROLL] Practice 화면 스크롤 컨트롤러 & 아이템 키
   final ScrollController _practiceScrollController = ScrollController();
   final Map<int, GlobalKey> _practiceItemKeys = {};
-  final Map<int, GlobalKey> _polishedItemKeys = {};
+  final Map<int, GlobalKey> _nativeEnglishItemKeys = {};
 
-  // 🆕 [POLISHED-UNITS] 세련문장 2-3 의미단위 콜앤리스폰 연습
-  List<String> _polishedUnits = [];
-  int _polishedUnitIdx = -1;
-  bool _polishedUnitAIPlaying = false;
+  // 🆕 [NATIVE-UNITS] Native English 문장의 의미단위 콜앤리스폰 연습
+  List<String> _nativeEnglishUnits = [];
+  int _nativeEnglishUnitIdx = -1;
+  bool _nativeEnglishUnitAIPlaying = false;
 
   // 📦 [Box 5: 상태 변수 - 오디오 플레이어 및 마이크]
   late AudioPlayer audioPlayer;
@@ -418,7 +423,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         _aiChunkLoading ||
         _isPlayingFullAI ||
         _isPlayingFullUser ||
-        _polishedUnitAIPlaying ||
+        _nativeEnglishUnitAIPlaying ||
         // 🔤 [P2-MORPH] 소리를 받는 동안과 읽는 동안. 마이크가 없어 판정이
         //   단순해졌다 — 이 둘만 보면 된다.
         _morphPreparing ||
@@ -500,7 +505,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _roleBubbleTimer?.cancel();
     _blinkController.dispose();
     _echoingOverlayTimer?.cancel();
-    _polishedRevealTimer?.cancel();
+    _nativeEnglishRevealTimer?.cancel();
     _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
     _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
     _stopShadowAiPlayback(); // [P2-SHADOW-AI]
@@ -918,11 +923,20 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       // 🎨 [AI-STYLE] 로비에서 고른 스타일. 영어 타겟이 아니면 빈 문자열이라
       //   프롬프트가 예전과 한 글자도 달라지지 않는다. 교정된 원어 줄에는
       //   절대 걸리면 안 되므로 scope로 번역문만 지목한다.
+      //
+      //   ⚠️ 이 한 번의 왕복이 **두 가지**를 만든다 — 이 줄의 번역과, 옛 방의
+      //   P2 사다리 칸(`expanded`). 사다리가 걸려 있으면 스타일을 어휘까지로
+      //   묶는다. Native가 정보 배열까지 갈아엎으면 그건 더 이상 유저 생각이
+      //   자란 과정이 아니고, P3 Native English가 보여 줄 차이도 미리 소진된다.
+      //   사다리가 없는 줄은 그냥 번역이라 예전대로 둔다.
       final String styleBlock = aiStylePromptBlock(
         targetLang: targetLanguage,
         scope: 'the "target" translation'
             '${expandedSource.isEmpty ? '' : ' and the "expanded" sentence'}, '
             'never the corrected $sourceName line',
+        reach: expandedSource.isEmpty
+            ? AiStyleReach.rebuild
+            : AiStyleReach.wording,
       );
       final String context = _historyRepairContext(messageRef);
       final String lineBlock = expandedSource.isEmpty
@@ -1089,8 +1103,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
 
   // 📦 [Box 11-Room: 방 단위 진입 라우터]
   // 🔧 [TUTOR-FIX] 방 종류에 따라 분기:
-  //   - polished/expanded 있음 (Step Expand 방) → 기존 Shadowing variantSelect
-  //   - polished/expanded 없음 (Clone/Roleplay/Duo 방) → Tutor 모드
+  //   - 완성문장 있음 (Step Expand 방) → 기존 Shadowing variantSelect
+  //   - 완성문장 없음 (Clone/Roleplay/Duo 방) → Tutor 모드
   Future<void> _enterShadowingFromRoom() async {
     if (_isEnteringPractice) return;
     _resumeHistoryFromUserAction();
@@ -1109,13 +1123,22 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         return;
       }
 
-      final polished = (data['polished_sentence'] as String?) ?? '';
+      // 🇺🇸 [NATIVE-ENGLISH] P3의 두 번째 문장. 예전 이름은 Polished였고
+      //   하는 일도 달랐다(원문을 매끄럽게 다듬기). 지금은 같은 생각을
+      //   원어민이 처음부터 영어로 짰다면 어떻게 말했을지로 다시 쓴다.
+      //   **옛 `polished_sentence`를 이 자리에 싣지 않는다** — 다듬은 문장을
+      //   Native English라고 이름 붙이면 카드가 거짓말을 한다. 비워 두면
+      //   아래 [_prepareStepP3]가 이번 진입에서 한 번 만들어 캐시한다.
+      final nativeEnglish = (data['native_english'] as String?) ?? '';
+      // 구 방 판별과 구 방 P3 문장 폴백에만 쓴다.
+      final legacyPolished = (data['polished_sentence'] as String?) ?? '';
       final expanded = (data['expanded_sentence'] as String?) ?? '';
       // 🌱 [EXPANSION] 새 Step Expand 방은 대화가 끝난 뒤 사다리를 만들고,
       //   그 마지막 칸이 최종문장이다. `expansion_status`가 있으면 새 방이다 —
       //   구 방에는 이 필드가 아예 없어 예전 경로를 그대로 탄다.
       final expansionStatus =
           (data['expansion_status'] as String?)?.trim() ?? '';
+      _p1Pairs = parseStoredP1Pairs(data['p1_pairs']);
       final finalSentence = (data['final_sentence'] as String?)?.trim() ?? '';
       _expansionStatus = expansionStatus;
       _expansionFailure =
@@ -1132,17 +1155,18 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       // 🆕 [ROUTER-FIX] step_expand(또는 mode 없는 구버전+expanded 존재)만 Step Expand 분기.
       // clone/roleplay는 expanded_sentence가 있어도 아래 Tutor 모드로 진행.
       if (roomMode == 'step_expand' ||
-          (roomMode.isEmpty && (polished.isNotEmpty || expanded.isNotEmpty))) {
-        _polishedSentence = polished;
+          (roomMode.isEmpty &&
+              (legacyPolished.isNotEmpty || expanded.isNotEmpty))) {
+        _nativeEnglish = nativeEnglish;
         // P3가 읽는 문장은 하나뿐이다.
         //   새 방: Builder가 만든 final_sentence. 실패했으면 비어 있고, 그때는
         //          구경로 값으로 몰래 때우지 않는다 — 실패가 보여야 다시 만든다.
-        //   구 방: 예전대로 expanded_sentence(없으면 polished).
+        //   구 방: 예전대로 expanded_sentence(없으면 옛 polished_sentence).
         _expandedSentence = expansionStatus.isNotEmpty
             ? finalSentence
-            : (expanded.isNotEmpty ? expanded : polished);
-        _polishedLoadDone = true;
-        _practicingPolished = false;
+            : (expanded.isNotEmpty ? expanded : legacyPolished);
+        _nativeEnglishLoadDone = nativeEnglish.isNotEmpty;
+        _practicingNativeEnglish = false;
 
         // 화면에 이미 로드된 메시지를 재사용하고, 캐시가 없을 때만 다시 조회한다.
         var messageDocs = _cachedDocs;
@@ -1156,6 +1180,14 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         }
         _stepExpandTurns = _parseStepExpandTurns(messageDocs);
         if (!mounted) return;
+
+        // 🗂️ [P1] P1은 Target/Original 둘 다 보여 준다. 배울글이 아직 없는
+        //   줄이 있으면 여기서 채운다 — 다만 **기다리지 않는다.** 선택 화면은
+        //   즉시 떠야 하고, 배울글이 늦게 와도 P1은 원어만으로 성립한다.
+        //   다 만들어지면 아직 선택 화면에 있을 때만 다시 읽는다. 이미 연습에
+        //   들어간 유저의 화면을 도중에 갈아 끼우지 않는다.
+        unawaited(_ensureHistoryTargets(messageDocs)
+            .then((_) => _refreshStepExpandTurns()));
 
         // P1/P2/P3 선택 화면부터 즉시 표시하고, 느린 P3 청크/번역 생성은
         // 화면 전환 뒤 백그라운드에서 진행한다.
@@ -1174,6 +1206,10 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         //   없는 것이다. 화면은 그쪽을 가리켜야 한다.
         if (_expandedSentence.trim().isNotEmpty) {
           unawaited(_prepareStepP3(_expandedSentence, generation));
+        } else {
+          // 걸 문장이 없으면 Native English도 만들 수 없다. 스피너를 여기서
+          // 내려야 카드가 영영 도는 채로 남지 않는다.
+          _nativeEnglishLoadDone = true;
         }
         return;
       }
@@ -1283,7 +1319,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
   /// 대화방이 넘긴 한국어 완성문장을 P3용 영어로 만든다.
   ///
   /// 대화방은 한국어 자료만 넘긴다. 영어는 히스토리가 자기 규칙으로 만드는데,
-  /// 그 자리가 여기 P3 진입 시점이다 — 바로 아래 Polished 생성과 같은 자리다.
+  /// 그 자리가 여기 P3 진입 시점이다 — 바로 아래 Native English 생성과 같다.
   /// `_fetchOpenAITTS`는 받은 글자를 그대로 읽을 뿐 번역하지 않으므로, 이걸
   /// 건너뛰면 "완성 문장" 탭이 한국어를 띄우고 한국어를 소리내어 읽는다.
   Future<String?> _translateExpandedToTarget(String source) async {
@@ -1314,7 +1350,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
                       '- The result must be 100% $targetLanguage and must NOT contain '
                       'any Korean (Hangul) characters.\n'
                       'Return only the sentence, with no label or explanation.'
-                      '${aiStylePromptBlock(targetLang: targetLanguage, scope: 'the $targetLanguage sentence you produce')}',
+                      '${aiStylePromptBlock(targetLang: targetLanguage, scope: 'the $targetLanguage sentence you produce', reach: AiStyleReach.wording)}',
                 },
                 <String, String>{'role': 'user', 'content': text},
               ],
@@ -1363,27 +1399,32 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         }
       }
 
-      if (expanded.isNotEmpty && _polishedSentence.trim().isEmpty) {
-        final polished = await _polishExpandedSentence(
+      // 🇺🇸 [NATIVE-ENGLISH] 두 번째 카드. 옛 방은 `native_english`가 없어
+      //   여기서 처음 만들어지고, 그 뒤로는 캐시를 그대로 쓴다.
+      if (expanded.isNotEmpty && _nativeEnglish.trim().isEmpty) {
+        final rebuilt = await _buildNativeEnglish(
           expanded,
           partnerLabel: 'AI',
         );
         if (!mounted || generation != _stepP3PreparationGeneration) return;
-        if (polished != null && polished.trim().isNotEmpty) {
-          final readyPolished = polished.trim();
-          _polishedSentence = readyPolished;
+        if (rebuilt != null && rebuilt.trim().isNotEmpty) {
+          final readyNativeEnglish = rebuilt.trim();
+          _nativeEnglish = readyNativeEnglish;
           try {
             await widget.historyDoc.update({
-              'polished_sentence': readyPolished,
+              'native_english': readyNativeEnglish,
               'has_practice': true,
             });
           } catch (e) {
-            debugPrint('[prepareStepP3] polished cache save failed: $e');
+            debugPrint('[prepareStepP3] native_english cache save failed: $e');
           }
         }
       }
       if (!mounted || generation != _stepP3PreparationGeneration) return;
       setState(() {
+        // 만들었든 못 만들었든 이번 진입의 시도는 끝났다. 카드가 영영 스피너로
+        // 남지 않게 여기서 한 번만 내린다.
+        _nativeEnglishLoadDone = true;
         _isPreparingStepP3 = false;
         _stepP3PreparationError =
             expanded.isEmpty ? 'No sentence is available for P3.' : null;
@@ -1392,6 +1433,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       debugPrint('[prepareStepP3] $e');
       if (!mounted || generation != _stepP3PreparationGeneration) return;
       setState(() {
+        _nativeEnglishLoadDone = true;
         _isPreparingStepP3 = false;
         _stepP3PreparationError = 'P3 preparation failed. Tap to retry.';
       });
@@ -1402,6 +1444,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     if (_isPreparingStepP3 || _expandedSentence.isEmpty) return;
     final generation = ++_stepP3PreparationGeneration;
     setState(() {
+      _nativeEnglishLoadDone = _nativeEnglish.trim().isNotEmpty;
       _isPreparingStepP3 = true;
       _stepP3PreparationError = null;
     });
@@ -2169,8 +2212,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
   Future<void> _startPracticeWithVariant(SentenceVariant variant) async {
     _selectedVariant = variant;
     final sentence =
-        (variant == SentenceVariant.polished && _polishedSentence.isNotEmpty)
-            ? _polishedSentence
+        (variant == SentenceVariant.nativeEnglish && _nativeEnglish.isNotEmpty)
+            ? _nativeEnglish
             : _expandedSentence;
     if (!mounted) return;
 
@@ -2236,7 +2279,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     _stopTutorPlayback();
     _stopAutoVADRecording();
     _utteranceSafetyTimer?.cancel();
-    _polishedRevealTimer?.cancel();
+    _nativeEnglishRevealTimer?.cancel();
     _shadowHighlightTimer?.cancel(); // [P2-SHADOW]
     _shadowAdvanceTimer?.cancel(); // [P2-SHADOW]
     _stopShadowAiPlayback(); // [P2-SHADOW-AI]
@@ -2256,14 +2299,14 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         _fullUserPlayIdx = 0;
         _fullAIAudioCache.clear();
         _expandedSentence = "";
-        _polishedSentence = "";
-        _polishedLoadDone = false;
+        _nativeEnglish = "";
+        _nativeEnglishLoadDone = false;
         currentIndex = 0;
         _isAutoRecording = false;
         _aiChunkPlaying = false; // 🆕 [P2-INDICATOR]
         _aiChunkLoading = false;
         _isReplayMode = false; // 🆕 [P2-INDICATOR]
-        _practicingPolished = false; // 🆕 [CHUNK-PRACTICE]
+        _practicingNativeEnglish = false; // 🆕 [CHUNK-PRACTICE]
         _isPlayingFullAI = false; // 🆕 [CHUNK-PRACTICE]
         _tutorAwaitingStart = true; // 🆕 [BOX-30]
         _swapRoles = false; // 🆕 [BOX-32]
@@ -2273,6 +2316,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         // Step Expand 리셋
         _isStepExpandRoom = false;
         _stepExpandTurns = [];
+        _p1Pairs = const <StepExpandP1Pair>[];
         _isPreparingStepP3 = false;
         _stepP3PreparationError = null;
         _showRetryHint = false;
@@ -2403,7 +2447,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     return step2.isEmpty ? chunks : step2;
   }
 
-  // [chunkSplit] 캐시 조회 → GPT → Fallback 통합 분할 (Expanded·Polished 공통)
+  // [chunkSplit] 캐시 조회 → GPT → Fallback 통합 분할 (Final·Native English 공통)
   Future<List<String>> _splitSentenceIntoChunks(
       String sentence, String variant) async {
     if (sentence.isEmpty) return [];
@@ -2628,9 +2672,9 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
       _currentChunkIdx = 0;
       return;
     }
-    final isPolished =
-        _polishedSentence.isNotEmpty && sentence == _polishedSentence;
-    final variant = isPolished ? 'polished' : 'expanded';
+    final isNativeEnglish =
+        _nativeEnglish.isNotEmpty && sentence == _nativeEnglish;
+    final variant = isNativeEnglish ? 'native' : 'expanded';
     final result = await _splitSentenceIntoChunks(sentence, variant);
 
     // 🆕 [KO-FRAG] 영어 청크에 1:1 한국어 직독 조각 부착 (캐시 → GPT).
@@ -2686,9 +2730,9 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
         !isPaused) {
       if (mounted) setState(() => _tutorAiSpeaking = false); // 🆕 [BOX-31]
       _nextTurn();
-    } else if (_practicingPolished && _polishedUnitAIPlaying) {
+    } else if (_practicingNativeEnglish && _nativeEnglishUnitAIPlaying) {
       // 세련문장 의미단위 AI 재생 완료 → 사용자 녹음 시작
-      if (mounted) setState(() => _polishedUnitAIPlaying = false);
+      if (mounted) setState(() => _nativeEnglishUnitAIPlaying = false);
       _startDualCapture();
     } else if (_phase == ShadowingPhase.chunkPractice) {
       if (_isPlayingFullUser) {
@@ -2828,15 +2872,15 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     if (!mounted) return;
     if (!_isListening) return;
 
-    // Polished 의미단위 모드: 녹음 완료 → 다음 유닛으로 자동 이동
-    if (_practicingPolished) {
+    // Native English 의미단위 모드: 녹음 완료 → 다음 유닛으로 자동 이동
+    if (_practicingNativeEnglish) {
       await _stopDualCaptureAndSave();
       if (!mounted) return;
-      final nextIdx = _polishedUnitIdx + 1;
-      if (nextIdx < _polishedUnits.length) {
+      final nextIdx = _nativeEnglishUnitIdx + 1;
+      if (nextIdx < _nativeEnglishUnits.length) {
         Future.delayed(const Duration(milliseconds: 600), () {
-          if (mounted && _practicingPolished) {
-            _onPolishedUnitTapped(nextIdx);
+          if (mounted && _practicingNativeEnglish) {
+            _onNativeEnglishUnitTapped(nextIdx);
           }
         });
       }
@@ -2918,7 +2962,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
     final chunk = _chunks[idx];
     final historyId = widget.historyDoc.id;
     final variant =
-        _selectedVariant == SentenceVariant.polished ? 'pol' : 'exp';
+        _selectedVariant == SentenceVariant.nativeEnglish ? 'nat' : 'exp';
     final cacheKey = 'gpt4omini_nova_chunk_${variant}_$idx.mp3';
     if (chunk.aiAudio != null) {
       return chunk.aiAudio;
@@ -5001,7 +5045,7 @@ RULES — follow exactly:
                       Icon(Icons.trending_up,
                           color: Colors.greenAccent, size: 18),
                       SizedBox(width: 8),
-                      Text("🌱 Polished",
+                      Text("🌱 Final Sentence",
                           style: TextStyle(
                               color: Colors.greenAccent,
                               fontSize: 14,
@@ -5025,14 +5069,14 @@ RULES — follow exactly:
 
           const SizedBox(height: 16),
 
-          // Polished variant card
+          // Native English variant card
           GestureDetector(
-            onTap: _polishedSentence.isNotEmpty
-                ? () => _startPracticeWithVariant(SentenceVariant.polished)
+            onTap: _nativeEnglish.isNotEmpty
+                ? () => _startPracticeWithVariant(SentenceVariant.nativeEnglish)
                 : null,
             child: AnimatedOpacity(
               duration: const Duration(milliseconds: 300),
-              opacity: _polishedSentence.isNotEmpty ? 1.0 : 0.4,
+              opacity: _nativeEnglish.isNotEmpty ? 1.0 : 0.4,
               child: Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
@@ -5048,7 +5092,7 @@ RULES — follow exactly:
                       children: [
                         Icon(Icons.auto_awesome, color: Colors.amber, size: 18),
                         SizedBox(width: 8),
-                        Text("✨ Polished",
+                        Text("✨ Native English",
                             style: TextStyle(
                                 color: Colors.amber,
                                 fontSize: 14,
@@ -5056,17 +5100,17 @@ RULES — follow exactly:
                       ],
                     ),
                     const SizedBox(height: 12),
-                    _polishedSentence.isNotEmpty
+                    _nativeEnglish.isNotEmpty
                         ? Text(
-                            _polishedSentence,
+                            _nativeEnglish,
                             style: TextStyle(
                                 color: Colors.white,
                                 fontSize: 15 * _fontScale,
                                 height: 1.5),
                           )
-                        : _polishedLoadDone
+                        : _nativeEnglishLoadDone
                             ? const Text(
-                                "Polished 문장이 없습니다.\n(세션에서 Polish 버튼을 눌러주세요)",
+                                "Native English 문장을 준비하지 못했습니다.\n연습에 다시 들어오면 만들어집니다.",
                                 style: TextStyle(
                                     color: Colors.white38,
                                     fontSize: 13,
@@ -5811,8 +5855,34 @@ RULES — follow exactly:
         ],
       );
     }
-    return Text(text,
-        textAlign: lineIsAi ? TextAlign.right : TextAlign.left, style: base);
+    // 🗂️ [P1] 배울글 아래에 대화 언어 원문을 함께 둔다. 위는 따라 말할 글,
+    //   아래는 그때 실제로 오간 말 — 둘이 붙어 있어야 "내 생각이 저 문장이
+    //   됐다"가 보인다. 배울글이 없는 줄은 `native`가 비어 있어 예전과 같다.
+    final native = (line['native'] ?? '').toString().trim();
+    if (native.isEmpty || native == text) {
+      return Text(text,
+          textAlign: lineIsAi ? TextAlign.right : TextAlign.left, style: base);
+    }
+    return Column(
+      crossAxisAlignment:
+          lineIsAi ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(text,
+            textAlign: lineIsAi ? TextAlign.right : TextAlign.left,
+            style: base),
+        const SizedBox(height: 4),
+        Text(
+          native,
+          textAlign: lineIsAi ? TextAlign.right : TextAlign.left,
+          style: TextStyle(
+            color: isCurrent ? Colors.white54 : Colors.white38,
+            fontSize: 12 * _fontScale,
+            height: 1.45,
+          ),
+        ),
+      ],
+    );
   }
 
   List<P2Chunk> _p2ChunksForLine(Map<String, dynamic> line) {
@@ -6464,18 +6534,18 @@ RULES — follow exactly:
     });
   }
 
-  void _onPolishedUnitTapped(int idx) {
+  void _onNativeEnglishUnitTapped(int idx) {
     if (_isListening) _stopDeepgramListening();
     audioPlayer.stop();
     if (mounted) {
       setState(() {
-        _polishedUnitIdx = idx;
-        _polishedUnitAIPlaying = false;
+        _nativeEnglishUnitIdx = idx;
+        _nativeEnglishUnitAIPlaying = false;
       });
     }
-    _playPolishedUnit(idx);
+    _playNativeEnglishUnit(idx);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _scrollCurrentPolishedUnitToCenter();
+      if (mounted) _scrollCurrentNativeEnglishUnitToCenter();
     });
   }
 
@@ -6580,10 +6650,10 @@ RULES — follow exactly:
     );
   }
 
-  // Polished 현재 단위가 화면 중앙에 오도록 스크롤
-  void _scrollCurrentPolishedUnitToCenter() {
-    if (_polishedUnitIdx < 0) return;
-    final key = _polishedItemKeys[_polishedUnitIdx];
+  // Native English 현재 단위가 화면 중앙에 오도록 스크롤
+  void _scrollCurrentNativeEnglishUnitToCenter() {
+    if (_nativeEnglishUnitIdx < 0) return;
+    final key = _nativeEnglishItemKeys[_nativeEnglishUnitIdx];
     if (key?.currentContext != null) {
       Scrollable.ensureVisible(
         key!.currentContext!,
@@ -6597,7 +6667,7 @@ RULES — follow exactly:
     const double estimatedItemHeight = 90.0;
     final double viewportHeight =
         _chunkScrollController.position.viewportDimension;
-    final double targetOffset = (_polishedUnitIdx * estimatedItemHeight) -
+    final double targetOffset = (_nativeEnglishUnitIdx * estimatedItemHeight) -
         (viewportHeight / 2 - estimatedItemHeight / 2);
     final double clamped = targetOffset.clamp(
       0.0,
@@ -6612,11 +6682,11 @@ RULES — follow exactly:
 
   // 의미단위 AI TTS 재생
   // 🔧 [v3.7] TtsCache 우선 조회 → MISS 시 API 호출 후 캐시 저장
-  Future<void> _playPolishedUnit(int idx) async {
+  Future<void> _playNativeEnglishUnit(int idx) async {
     _resumeHistoryFromUserAction();
-    if (!mounted || idx >= _polishedUnits.length) return;
-    if (mounted) setState(() => _polishedUnitAIPlaying = true);
-    final text = _polishedUnits[idx];
+    if (!mounted || idx >= _nativeEnglishUnits.length) return;
+    if (mounted) setState(() => _nativeEnglishUnitAIPlaying = true);
+    final text = _nativeEnglishUnits[idx];
     final cacheVoice = _practiceCacheVoice(_historyPracticeAiVoice);
     Uint8List? audio = await TtsCache.get(text, cacheVoice);
     if (audio != null) {
@@ -6630,7 +6700,7 @@ RULES — follow exactly:
     if (audio != null) {
       await audioPlayer.play(BytesSource(audio));
     } else {
-      if (mounted) setState(() => _polishedUnitAIPlaying = false);
+      if (mounted) setState(() => _nativeEnglishUnitAIPlaying = false);
     }
   }
 
@@ -6667,29 +6737,29 @@ RULES — follow exactly:
   //   Shadow를 열 번 반복해도 API 호출은 늘지 않는다.
   // ══════════════════════════════════════════════════════════════════
 
-  /// P3가 대상으로 삼는 최종 문장. 완성/세련 두 문장을 각각 같은
-  /// Speaking Practice 흐름으로 열 수 있다.
+  /// P3가 대상으로 삼는 문장. Final Sentence와 Native English 두 벌을 각각
+  /// 같은 Speaking Practice 흐름으로 열 수 있다.
   String get _p3TargetSentence {
-    final preferred = _selectedVariant == SentenceVariant.polished
-        ? _polishedSentence.trim()
+    final preferred = _selectedVariant == SentenceVariant.nativeEnglish
+        ? _nativeEnglish.trim()
         : _expandedSentence.trim();
     if (preferred.isNotEmpty) return preferred;
-    return _selectedVariant == SentenceVariant.polished
+    return _selectedVariant == SentenceVariant.nativeEnglish
         ? _expandedSentence.trim()
-        : _polishedSentence.trim();
+        : _nativeEnglish.trim();
   }
 
   bool _p3VariantAvailable(SentenceVariant variant) =>
-      (variant == SentenceVariant.polished
-              ? _polishedSentence
+      (variant == SentenceVariant.nativeEnglish
+              ? _nativeEnglish
               : _expandedSentence)
           .trim()
           .isNotEmpty;
 
   String _p3VariantLabel(SentenceVariant variant) =>
-      variant == SentenceVariant.polished
-          ? 'Polished Sentence'
-          : 'Complete Sentence';
+      variant == SentenceVariant.nativeEnglish
+          ? 'Native English'
+          : 'Final Sentence';
 
   /// 🚧 Shadow 여유. **말하는 속도를 바꾸는 게 아니다** — AI의 발음·억양·속도는
   /// 그대로 두고 **호흡 사이 빈 자리만** 늘린다. 실기기에서 조정한다.
@@ -7868,8 +7938,8 @@ RULES — follow exactly:
   }) {
     final available = _p3VariantAvailable(variant);
     final selected = _selectedVariant == variant;
-    final sentence = (variant == SentenceVariant.polished
-            ? _polishedSentence
+    final sentence = (variant == SentenceVariant.nativeEnglish
+            ? _nativeEnglish
             : _expandedSentence)
         .trim();
     return InkWell(
@@ -8137,9 +8207,17 @@ RULES — follow exactly:
         } else {
           part2 = parts.length >= 2 ? parts.sublist(1).join('\n\n').trim() : '';
         }
+        // 🗂️ [P1-NATIVE] P1은 **언제나 원어**다. 위 part1/part2는 배울글이
+        //   있으면 배울글을 쓰는데, 그건 P2의 언어 규칙이다. 둘을 한 칸에
+        //   섞어 두면, 히스토리 대화 화면을 먼저 열어 번역이 붙은 방만 P1이
+        //   영어로 보인다 — 같은 자리가 방마다 다른 언어로 보였다.
+        final nativeParts = originalText.split('\n\n');
+        final nativePart1 = nativeParts[0].trim();
         openTurn = <String, dynamic>{
           'aiText': '',
+          'aiTextNative': '',
           'part1': part1,
+          'part1Native': nativePart1.isNotEmpty ? nativePart1 : part1,
           'part2': part2,
           'p2Chunks': parseP2Chunks(
             data['p2_chunks'],
@@ -8149,6 +8227,10 @@ RULES — follow exactly:
         };
       } else if (role == 'SYSTEM' && openTurn != null) {
         openTurn['aiText'] = text.trim();
+        // 원어가 비어 있는 줄은 없어야 하지만, 있으면 빈 말풍선보다는 낫다.
+        openTurn['aiTextNative'] = originalText.trim().isNotEmpty
+            ? originalText.trim()
+            : text.trim();
         turns.add(openTurn);
         openTurn = null;
       }
@@ -8157,21 +8239,118 @@ RULES — follow exactly:
     return turns;
   }
 
-  Future<void> _startPart1Practice() async {
-    if (_stepExpandTurns.isEmpty) return;
-    final lines = <Map<String, dynamic>>[];
-    // 유저가 먼저 말하고 AI가 받는다 — 대화방에서 실제로 오간 순서다.
+  /// 배울글이 뒤늦게 채워졌으면 턴을 다시 읽는다.
+  ///
+  /// 선택 화면(P1/P2/P3 고르는 자리)에 있을 때만 한다. 연습 도중에 갈아 끼우면
+  /// 읽고 있던 줄이 발밑에서 바뀐다.
+  Future<void> _refreshStepExpandTurns() async {
+    if (!mounted || !_isStepExpandRoom) return;
+    if (_phase != ShadowingPhase.variantSelect) return;
+    try {
+      final snap = await widget.historyDoc
+          .collection('messages')
+          .orderBy('created_at', descending: false)
+          .get();
+      if (!mounted || _phase != ShadowingPhase.variantSelect) return;
+      _cachedDocs = snap.docs;
+      setState(() => _stepExpandTurns = _parseStepExpandTurns(snap.docs));
+    } catch (e) {
+      debugPrint('[refreshStepExpandTurns] $e');
+    }
+  }
+
+  /// P1 한 줄. **Target과 Original 둘 다 실린다.**
+  ///
+  /// `text`는 연습이 다루는 글이라 배울글이 있으면 배울글이다 — TTS가 읽고,
+  /// 유저가 따라 말하는 것이 그쪽이어야 한다. 원어는 `native`에 실려 그 아래
+  /// 함께 보인다. 배울글이 아직 없으면 원어가 `text`로 올라가고 `native`는
+  /// 비운다 — 같은 문장을 두 번 그리지 않기 위해서다.
+  Map<String, dynamic> _p1Line(String role, String target, String native) {
+    final t = target.trim();
+    final n = native.trim();
+    if (t.isEmpty || t == n) {
+      return <String, dynamic>{'role': role, 'text': n, 'native': ''};
+    }
+    return <String, dynamic>{'role': role, 'text': t, 'native': n};
+  }
+
+  /// 지금 이 방에 남아 있는 유저 발화를 대화 순서대로. `.originals`는 교정된
+  /// 원어, `.targets`는 같은 자리의 배울글이다(아직 없으면 빈 칸).
+  ///
+  /// [resolveP1PairAnswers]가 저장된 답을 여기에 대고 다시 맞춘다. 그래서
+  /// 세는 기준이 [stepExpansionTranscriptFrom]과 같아야 한다 — 빈 줄과
+  /// 자리표시자를 똑같이 빼야 번호가 어긋나지 않는다. **두 목록의 자리도
+  /// 서로 맞아야 한다**, 그래서 배울글이 없어도 빈 문자열로 자리를 채운다.
+  (List<String> originals, List<String> targets) _currentP1UserTexts() {
+    final originals = <String>[];
+    final targets = <String>[];
     for (final turn in _stepExpandTurns) {
-      final userText = (turn['part1'] as String).trim();
-      if (userText.isNotEmpty) {
-        lines.add({'role': 'USER', 'text': userText});
+      final native =
+          (turn['part1Native'] ?? turn['part1'] ?? '').toString().trim();
+      if (native.isEmpty || native == '...') continue;
+      originals.add(native);
+      // `part1`은 배울글이 있으면 배울글, 없으면 원어다. 원어와 같으면
+      // 아직 번역이 안 만들어진 것이라 Target이 없는 것으로 친다.
+      final target = (turn['part1'] ?? '').toString().trim();
+      targets.add(target == native ? '' : target);
+    }
+    return (originals, targets);
+  }
+
+  /// 🗂️ [P1] 생각을 **어떻게 골랐는가**의 기록.
+  ///
+  /// 방에서 코치는 발전 방향 두셋을 늘어놓고 하나를 추천했다. **그 제안문은
+  /// 여기 오지 않는다.** 남으면 나중에 다시 봤을 때 "AI가 답을 만들어 줬다"로
+  /// 보이고, 유저가 스스로 생각한 기록이 사라진다. 그래서 세션이 끝난 뒤
+  /// [StepExpandP1Builder]가 실제 AI 턴이 요구한 것만 한 질문으로 정리해
+  /// 두고, 여기서는 그것을 읽기만 한다.
+  ///
+  /// 순서도 방과 다르다 — 방은 유저가 먼저 말하지만, P1은 **질문이 먼저**다.
+  /// 학습 기록으로 읽히려면 물음과 답이 짝으로 보여야 한다.
+  ///
+  /// 쌍이 없으면 옛 방이거나 정리가 실패한 방이다. 그때만 대화 원문을 그대로
+  /// 보여 준다 — 제안문이 섞이지만, 아무것도 안 보여 주는 것보다는 낫다.
+  Future<void> _startPart1Practice() async {
+    final lines = <Map<String, dynamic>>[];
+    if (_p1Pairs.isNotEmpty) {
+      // 📝 저장된 답은 세션이 끝나던 순간의 전사다. 그 뒤 히스토리 대화 화면을
+      //   열었으면 ORIGIN-REPAIR가 잘못 들은 낱말을 고쳐 뒀고, 배울글도 그
+      //   교정본에서 만들어졌다. P1은 그 둘을 따라간다 — 잘못 들린 문장을
+      //   P1에서 보고 외우면 안 된다. 자리만 다시 찾아 붙이는 것이지, 여기서
+      //   요약하거나 다시 쓰지 않는다.
+      final (originals, targets) = _currentP1UserTexts();
+      final resolved = resolveP1PairAnswers(
+        _p1Pairs,
+        originals,
+        currentUserTargets: targets,
+      );
+      for (final pair in resolved) {
+        lines.add(_p1Line('HOST', pair.questionTarget, pair.question));
+        lines.add(_p1Line('USER', pair.answerTarget, pair.answer));
       }
-      // 마지막 턴은 AI가 답하지 않는다. 빈 말풍선을 만들지 않는다.
-      final aiText = (turn['aiText'] as String).trim();
-      if (aiText.isNotEmpty) {
-        lines.add({'role': 'HOST', 'text': aiText});
+    } else {
+      if (_stepExpandTurns.isEmpty) return;
+      // 유저가 먼저 말하고 AI가 받는다 — 대화방에서 실제로 오간 순서다.
+      // 옛 방에도 두 글을 같이 건다. 새 방과 같은 제품이어야 한다.
+      for (final turn in _stepExpandTurns) {
+        final userNative =
+            (turn['part1Native'] ?? turn['part1'] ?? '').toString().trim();
+        if (userNative.isNotEmpty) {
+          final userTarget = (turn['part1'] ?? '').toString().trim();
+          lines.add(_p1Line(
+              'USER', userTarget == userNative ? '' : userTarget, userNative));
+        }
+        // 마지막 턴은 AI가 답하지 않는다. 빈 말풍선을 만들지 않는다.
+        final aiNative =
+            (turn['aiTextNative'] ?? turn['aiText'] ?? '').toString().trim();
+        if (aiNative.isNotEmpty) {
+          final aiTarget = (turn['aiText'] ?? '').toString().trim();
+          lines.add(_p1Line(
+              'HOST', aiTarget == aiNative ? '' : aiTarget, aiNative));
+        }
       }
     }
+    if (lines.isEmpty) return;
     if (mounted) {
       setState(() {
         _phase = ShadowingPhase.part1Practice;
@@ -8439,12 +8618,12 @@ RULES — follow exactly:
   bool _canUseCachedNamedPartnerExpand(
     Map<String, dynamic>? data,
     String expanded,
-    String polished,
+    String nativeEnglish,
     Map<String, String> labels,
   ) {
-    // 🆕 [HANGUL-GUARD] 캐시된 확장/세련문장에 한글이 섞여 있으면 거부 → 재생성 유도
+    // 🆕 [HANGUL-GUARD] 캐시된 완성/Native 문장에 한글이 섞여 있으면 거부 → 재생성 유도
     final hangul = RegExp(r'[가-힣ᄀ-ᇿ㄰-㆏]');
-    if (hangul.hasMatch('$expanded $polished')) return false;
+    if (hangul.hasMatch('$expanded $nativeEnglish')) return false;
     final mode = labels['mode'] ?? '';
     if (mode != 'clone' && mode != 'roleplay') return expanded.isNotEmpty;
     if (_historyString(data, 'expand_schema_version') != 'named_partner_v1') {
@@ -8455,7 +8634,7 @@ RULES — follow exactly:
     if (savedPartner.isNotEmpty && savedPartner != labels['partnerLabel']) {
       return false;
     }
-    if (_mentionsGenericAiPartner('$expanded $polished')) return false;
+    if (_mentionsGenericAiPartner('$expanded $nativeEnglish')) return false;
     return expanded.isNotEmpty;
   }
 
@@ -8503,7 +8682,7 @@ content and gist of the WHOLE conversation.
 - Natural, speakable rhythm — common spoken English only.
 - Capture the overall situation/idea of the conversation, not just one line.
 - Common everyday vocabulary only. Do not add facts not in the transcript.
-- Output exactly ONE sentence. No quotes, no prefixes, no explanation.${aiStylePromptBlock(targetLang: _sessionTargetLangName(), scope: 'the one English sentence you output')}""";
+- Output exactly ONE sentence. No quotes, no prefixes, no explanation.${aiStylePromptBlock(targetLang: _sessionTargetLangName(), scope: 'the one English sentence you output', reach: AiStyleReach.wording)}""";
       final response = await http
           .post(
             Uri.parse('https://api.openai.com/v1/chat/completions'),
@@ -8542,40 +8721,23 @@ content and gist of the WHOLE conversation.
     }
   }
 
-  // 🆕 [EXPAND-FROM-CHAT] 확장문장 → 쉽고 세련된 한 문장 (StepExpandBrain.polishSentence 동일 로직 복제)
-  Future<String?> _polishExpandedSentence(
+  // 🇺🇸 [NATIVE-ENGLISH] 완성문장 → 같은 생각을 원어민이 처음부터 영어로
+  //   짰다면 어떻게 말했을지. 지시문 본문은 로비 Native 스타일 바로 옆에
+  //   산다([buildNativeEnglishSentenceInstructions]) — 앱 안에서 Native가
+  //   두 가지 뜻을 갖지 않게 하려는 것이다.
+  //
+  //   ⚠️ 실패하면 **null이다.** 예전에는 원문을 그대로 돌려줬는데, 그러면
+  //   P3에 똑같은 문장이 두 카드로 뜬다. Final과 Native가 같은 글자면
+  //   유저가 배울 것이 아무것도 없다.
+  Future<String?> _buildNativeEnglish(
     String originalSentence, {
     String partnerLabel = 'the partner',
   }) async {
     if (_apiKey.isEmpty || originalSentence.trim().isEmpty) return null;
     try {
-      final safePartnerLabel =
-          partnerLabel.trim().isNotEmpty ? partnerLabel.trim() : 'the partner';
-      final sysPrompt = """You are an English speaking coach.
-The user has built a long English sentence through step-by-step expansion.
-Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
-
-[GOALS]
-- Natural spoken rhythm (not written/academic)
-- Common vocabulary (no SAT words, no bookish phrases)
-- Smooth flow (pause-friendly, commas for breath)
-- Same meaning as the original (do not add new facts)
-- Slightly more elegant/polished than the original
-- Easier to pronounce and say out loud
-- Render every participant name, clone name, role label, and situation in English (translate role or description phrases; romanize real personal names). Never keep Korean text.
-- The final sentence must be 100% English and must NOT contain any Korean (Hangul) characters.
-- Do not replace $safePartnerLabel with AI, assistant, chatbot, or bot.
-
-[AVOID]
-- Big academic words
-- Formal written phrases
-- Complex nested clauses that are hard to speak
-- Adding information not in the original
-
-[OUTPUT]
-- Exactly ONE sentence.
-- No explanation, no quotes, no prefixes.
-- Just the polished sentence.${aiStylePromptBlock(targetLang: _sessionTargetLangName(), scope: 'the one polished English sentence you output')}""";
+      final sysPrompt = buildNativeEnglishSentenceInstructions(
+        partnerLabel: partnerLabel,
+      );
       final response = await http
           .post(
             Uri.parse('https://api.openai.com/v1/chat/completions'),
@@ -8584,37 +8746,39 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
               'Content-Type': 'application/json; charset=utf-8',
             },
             body: jsonEncode({
-              'model': 'gpt-4o-mini',
-              'temperature': 0.2,
-              'max_tokens': 150,
+              // 다듬기가 아니라 재구성이라 4o-mini로는 원문 배열을 그대로
+              // 되돌려주는 일이 잦다. 사다리를 만드는 모델과 같은 급을 쓴다.
+              'model': 'gpt-4.1-mini',
+              'temperature': 0.4,
+              'max_tokens': 300,
               'messages': [
                 {'role': 'system', 'content': sysPrompt},
                 {
                   'role': 'user',
                   'content':
-                      'Original sentence:\n$originalSentence\n\nPolished version:'
+                      'The sentence as the user built it:\n$originalSentence'
                 },
               ],
             }),
           )
           .timeout(const Duration(seconds: 15));
-      if (response.statusCode != 200) return originalSentence;
+      if (response.statusCode != 200) return null;
       final body =
           jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-      String polished =
+      String rebuilt =
           ((body['choices'] as List).first['message']['content'] as String)
               .trim();
-      if (polished.startsWith('"') && polished.endsWith('"')) {
-        polished = polished.substring(1, polished.length - 1);
+      if (rebuilt.startsWith('"') && rebuilt.endsWith('"')) {
+        rebuilt = rebuilt.substring(1, rebuilt.length - 1).trim();
       }
-      return polished.isEmpty ? originalSentence : polished;
+      return rebuilt.isEmpty ? null : rebuilt;
     } catch (e) {
-      debugPrint("[polishExpandedSentence] $e");
-      return originalSentence;
+      debugPrint("[buildNativeEnglish] $e");
+      return null;
     }
   }
 
-  // 🆕 [EXPAND-FROM-CHAT v2] 저장된 expanded/polished 우선 → 없으면 전체 대화로 생성+캐시 → P3 이동
+  // 🆕 [EXPAND-FROM-CHAT v2] 저장된 완성/Native 문장 우선 → 없으면 전체 대화로 생성+캐시 → P3 이동
   Future<void> _buildExpandFromConversation() async {
     if (_isBuildingExpand) return;
     if (mounted) setState(() => _isBuildingExpand = true);
@@ -8622,9 +8786,9 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
       audioPlayer.stop();
       _stopAutoVADRecording();
 
-      // 1순위: 방 문서에 이미 저장된 expanded/polished (+ mode/room_name 확보)
+      // 1순위: 방 문서에 이미 저장된 완성/Native 문장 (+ mode/room_name 확보)
       String expanded = "";
-      String polished = "";
+      String nativeEnglish = "";
       String existingMode = "";
       String roomName = "";
       Map<String, dynamic>? historyData;
@@ -8640,7 +8804,7 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
         final d = snap.data() as Map<String, dynamic>?;
         historyData = d;
         expanded = (d?['expanded_sentence'] as String?)?.trim() ?? "";
-        polished = (d?['polished_sentence'] as String?)?.trim() ?? "";
+        nativeEnglish = (d?['native_english'] as String?)?.trim() ?? "";
         existingMode = _inferHistoryMode(d);
         roomName = (d?['room_name'] as String?)?.trim() ?? "";
         labels = await _resolveHistoryExpandLabels(d);
@@ -8655,9 +8819,9 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
       }
 
       if (!_canUseCachedNamedPartnerExpand(
-          historyData, expanded, polished, labels)) {
+          historyData, expanded, nativeEnglish, labels)) {
         expanded = "";
-        polished = "";
+        nativeEnglish = "";
       }
 
       // 2순위(fallback): 저장값 없으면 전체 대화로 즉석 생성 후 캐시
@@ -8702,12 +8866,13 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
           return;
         }
         expanded = gen;
-        final pol = await _polishExpandedSentence(
+        final rebuilt = await _buildNativeEnglish(
           expanded,
           partnerLabel: labels['partnerLabel']!,
         );
         if (!mounted) return;
-        polished = (pol != null && pol.trim().isNotEmpty) ? pol.trim() : "";
+        nativeEnglish =
+            (rebuilt != null && rebuilt.trim().isNotEmpty) ? rebuilt.trim() : "";
 
         // 캐시 저장 — has_practice + mode stamp(없으면 room_name으로 추론)로
         // 재입장 시 라우터가 expanded만 있는 모호한 방을 Step Expand로 오인하지 않게 보장
@@ -8724,7 +8889,7 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
         try {
           await widget.historyDoc.update({
             'expanded_sentence': expanded,
-            if (polished.isNotEmpty) 'polished_sentence': polished,
+            if (nativeEnglish.isNotEmpty) 'native_english': nativeEnglish,
             'has_practice': true,
             'expand_source': 'fallback',
             'expand_generated_at': FieldValue.serverTimestamp(),
@@ -8743,10 +8908,11 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
       // P3 진입 준비
       _isStepExpandRoom = false;
       _expandedSentence = expanded;
-      _polishedSentence = polished;
-      _practicingPolished = false;
-      _polishedUnits = [];
-      _polishedUnitIdx = -1;
+      _nativeEnglish = nativeEnglish;
+      _nativeEnglishLoadDone = true;
+      _practicingNativeEnglish = false;
+      _nativeEnglishUnits = [];
+      _nativeEnglishUnitIdx = -1;
 
       setState(() => _isBuildingExpand = false);
       _goToChunkPractice();
@@ -9032,7 +9198,9 @@ Your job: Rewrite it as ONE "easy but elegant" spoken English sentence.
               icon: Icons.swap_horiz_rounded,
               // P1은 사다리와 무관하다 — 나눈 대화 자체가 자료다.
               //   사다리를 못 만들어도 P1은 열려 있어야 한다.
-              onTap: _stepExpandTurns.isNotEmpty ? _startPart1Practice : null,
+              onTap: (_p1Pairs.isNotEmpty || _stepExpandTurns.isNotEmpty)
+                  ? _startPart1Practice
+                  : null,
             ),
             const SizedBox(height: 12),
             _buildPracticeSelectionCard(
@@ -9324,7 +9492,7 @@ enum ShadowingPhase {
   part2Practice
 }
 
-enum SentenceVariant { expanded, polished }
+enum SentenceVariant { expanded, nativeEnglish }
 
 enum P3PracticeMode { echoing, shadowing }
 

@@ -353,9 +353,13 @@ class StepExpansionBuilder {
     required String originLang,
     required String targetLang,
   }) {
+    // 🎨 [AI-STYLE] 사다리는 **유저 생각의 배열 그 자체**다. 로비에서 Native를
+    //   골랐다고 여기서 정보 순서와 문장 수까지 갈아엎으면, P3의 Native English
+    //   카드가 보여 줄 차이가 P2에서 미리 소진된다. 스타일은 어휘까지만 닿는다.
     final styleBlock = aiStylePromptBlock(
       targetLang: targetLang,
       scope: 'every "text" sentence you produce',
+      reach: AiStyleReach.wording,
     );
     return '''You are rebuilding a finished $originLang conversation into the growth of ONE English sentence.
 

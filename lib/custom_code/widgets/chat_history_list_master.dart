@@ -2013,7 +2013,7 @@ AI에게 교정과 피드백을 받습니다.
 AI와 역할을 바꿔가며 실제 대화처럼 연습합니다.
 
 ✨ Expand Practice — 쉐도잉 심화 훈련
-확장 문장과 Polished 문장을
+Final Sentence와 Native English 문장을
 의미 단위(Chunk)별로 끊어서 쉐도잉 연습.
 AI 발음과 내 발음을 전체 문장으로 비교하며
 AI 발음을 닮아가는 정밀 훈련입니다.
