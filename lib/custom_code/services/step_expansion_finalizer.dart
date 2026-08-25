@@ -207,7 +207,12 @@ Future<void> finalizeStepExpansions({
   final result = await ladderFuture;
   final p1 = await p1Future;
   if (p1.isUsable) {
-    log('🗂️ [P1-OK]', 'pairs=${p1.pairs.length}');
+    // 권유 글자를 함께 남긴다. 개수만 찍던 동안은 모델이 시킨 대로 짧은
+    // 권유를 냈는지, 내용을 나르는 문장을 냈는지 확인할 방법이 없었다.
+    final prompts = p1.pairs
+        .map((pair) => pair.hasPrompt ? '"${pair.prompt}"' : '(none)')
+        .join(' | ');
+    log('🗂️ [P1-OK]', 'pairs=${p1.pairs.length} prompts=$prompts');
   } else {
     log('⚠️ [P1-SKIP]', 'reason=${p1.failure.name} → P1은 대화 원문으로 폴백한다');
   }

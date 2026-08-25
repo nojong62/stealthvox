@@ -130,6 +130,14 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
 
   /// 이만큼 지난 뒤부터 끼어들기를 받는다.
   static const Duration _kBargeInGrace = Duration(milliseconds: 700);
+
+  /// AI 음성이 끝나기를 기다리는 상한. 50ms마다 한 틱이므로 20틱이 1초다.
+  ///
+  /// 30초(600틱)였다. 코치가 한마디만 하던 시절의 값이라, 한 턴이 누적 글
+  /// 되짚기 + 후보 셋 + 추천으로 바뀐 뒤로는 2턴부터 상한에 닿았다(실기기
+  /// 2026-08-25: 233자 27초). 5턴이면 400자를 읽으므로 45초쯤 걸린다.
+  /// 대사를 줄이는 대신 기다려 주기로 했다 — 이 방은 AI가 길게 말해도 된다.
+  static const int _kAiSpeechWaitTicks = 2400; // 120초
   // 🎤 [BARGE-IN] 지금 울리고 있는 안내 음성. 유저가 입을 열면 이걸 끊는다.
   ChunkedTtsFetcher? _guideTtsFetcher;
   bool _isConversationActive = false;
@@ -648,7 +656,14 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
       // 🔁 [LATE-CONTINUATION] **실제로 소리가 나기 시작한 순간.** 이 턴의
       //   복구 창을 확실히 닫는다 — 평소에는 enqueue에서 이미 닫힌다.
       _aiPlaybackStarted = true;
-      _closeContinuationWindow(reason: 'ai_playback_started');
+      // 🙋 [BARGE-IN] 끼어들 수 있는 대사면 마이크를 닫지 않는다. 녹음이
+      //   echoCancel이라 스피커로 나가는 코치 목소리는 지워지고, 새어 들어와도
+      //   [_looksLikeSelfEcho]가 그 턴을 버린다. 유저가 안내 도중에 말을
+      //   시작하면 그 첫머리부터 서버에 쌓여, 끊고 들어가도 말이 잘리지 않는다.
+      _closeContinuationWindow(
+        reason: 'ai_playback_started',
+        keepListening: _bargeInArmed,
+      );
       if (_awaitingAiFirstAudioProbe) {
         _awaitingAiFirstAudioProbe = false;
         _logProbeTiming('AI_FIRST_AUDIO');
@@ -1422,8 +1437,16 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
           mounted &&
           !fetcher.isCancelled) {
         await Future.delayed(const Duration(milliseconds: 50));
-        if (++ticks > 600) {
-          _log(timeoutTag, 'AI 음성 30초 초과');
+        if (++ticks > _kAiSpeechWaitTicks) {
+          // ⛔ 그냥 빠져나오면 큐는 계속 바쁘다. 그러면 호출부가 마이크를 다시
+          //   열 때 [_startStreamingListening]이 `turn/tts busy`로 되돌아가고,
+          //   **방이 그 자리에서 죽는다** — 실기기(2026-08-25)에서 2턴 대사가
+          //   27초였고, 상한에 걸린 뒤 3턴이 영영 오지 않았다. 상한은 이제
+          //   넉넉하지만, 걸리는 날에도 대화는 이어져야 한다.
+          _log(timeoutTag,
+              'AI 음성 ${_kAiSpeechWaitTicks ~/ 20}초 초과 → 재생을 끊고 마이크를 되돌린다');
+          fetcher.cancel();
+          _ttsQueueManager.stop();
           break;
         }
       }
@@ -1985,13 +2008,24 @@ class _RoutineModeStepExpandState extends State<RoutineModeStepExpand>
 
   /// 창을 닫고 녹음·게이트를 정리한다. **[MIC-ROUTING] 규칙을 지키는 자리다.**
   /// 후보 상태는 건드리지 않는다 — 창은 마이크 수명, 후보는 자격이다.
-  void _closeContinuationWindow({required String reason}) {
+  /// [keepListening]이면 창만 닫고 **마이크는 그대로 둔다.**
+  ///
+  /// 끼어들기가 걸려 있는 동안 쓴다. 예전에는 AI 재생이 시작되는 순간 여기서
+  /// 캡처까지 닫았고, 그래서 `[BARGE-IN] armed`는 찍히는데 실제로 끊고 들어갈
+  /// 방법이 없었다(실기기 2026-08-25: armed 직후 `capture_stopped
+  /// reason=ai_playback_started`). 손잡이만 있고 잡을 손이 없었던 셈이다.
+  void _closeContinuationWindow({
+    required String reason,
+    bool keepListening = false,
+  }) {
     final bool wasOpen = _continuationWindowOpen;
     _continuationWindowTimer?.cancel();
     _continuationWindowTimer = null;
     _continuationWindowOpen = false;
-    _streamingStt?.closeAudioGate(reason: reason);
-    unawaited(_stopStreamingCapture(reason: reason));
+    if (!keepListening) {
+      _streamingStt?.closeAudioGate(reason: reason);
+      unawaited(_stopStreamingCapture(reason: reason));
+    }
     if (wasOpen) {
       _log('🔁 [CONT-WINDOW]',
           'close seq=$_continuationWindowSeq reason=$reason');
@@ -6587,7 +6621,7 @@ StepExpandMenuTurn parseStepExpandMenuTurn(String raw) {
   );
 }
 
-/// 유저가 실제로 듣고 보는 대사. 틀 문장은 여기서 붙인다.
+/// 유저가 보고 듣는 대사. 틀 문장은 여기서 붙인다.
 ///
 /// 모델에게 틀까지 맡기면 매 턴 조금씩 다른 말로 흘러서, 유저가 화면의 어디를
 /// 봐야 하는지 매번 다시 찾아야 한다. 틀은 고정하고 모델은 내용만 낸다.
