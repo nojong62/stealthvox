@@ -247,9 +247,12 @@ String originLanguageSwitchedNoticeLine(String detectedLanguage) {
   }
 }
 
-const String kStepExpandOpeningNudgeText =
-    '저는 이오덕의 삶 중심 글쓰기 원리를 바탕으로 돕는 StealthVox 글쓰기 조교입니다. '
-    '떠오르는 단어 하나만 말씀해 주세요. 문장으로 키우는 일은 제가 이끌겠습니다.';
+/// 방의 첫 마디. 실장님 예시 문구 그대로다(2026-08-25).
+///
+/// 예전에는 어느 작가의 글쓰기 원리를 근거로 든다고 자기소개를 했다. 유저가
+/// 들을 이유가 없는 정보고, 첫 마디에서 말할 것은 하나뿐이다 — 무엇을 하면
+/// 되는지.
+const String kStepExpandOpeningNudgeText = '관심 있는 단어나 문장을 하나 말해 보세요.';
 
 /// Anyone 자유대화 답변 전 내부 숙고 지시.
 /// 응답이 1초 정도 느려지더라도 어중간한 답 대신 구체적인 답과 질문을 뽑는다.

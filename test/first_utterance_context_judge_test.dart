@@ -438,10 +438,10 @@ void main() {
 
   group('Step Expand first-turn seed policy', () {
     test('opening explicitly allows one word as raw material', () {
-      expect(kStepExpandOpeningNudgeText, startsWith('저는 이오덕의 삶 중심 글쓰기 원리를'));
-      expect(kStepExpandOpeningNudgeText, contains('StealthVox 글쓰기 조교'));
-      expect(kStepExpandOpeningNudgeText, contains('떠오르는 단어 하나만'));
-      expect(kStepExpandOpeningNudgeText, contains('제가 이끌겠습니다'));
+      expect(kStepExpandOpeningNudgeText, '관심 있는 단어나 문장을 하나 말해 보세요.');
+      // 어느 작가의 원리를 따른다는 자기소개는 첫 마디에 들어가지 않는다.
+      expect(kStepExpandOpeningNudgeText, isNot(contains('이오덕')));
+      expect(kStepExpandOpeningNudgeText, isNot(contains('조교')));
     });
 
     test('accepts a meaningful word or phrase as the raw seed', () {
