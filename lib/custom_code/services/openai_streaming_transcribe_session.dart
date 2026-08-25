@@ -542,7 +542,8 @@ class OpenAiStreamingTranscribeSession {
                 'audio_ms_out_of_order start=$startAudioMs end=$endAudioMs → local fallback');
           }
         }
-        _lg('📡 [STREAM-VAD]',
+        _lg(
+            '📡 [STREAM-VAD]',
             'speech_stopped audioEndMs=${endAudioMs ?? -1} '
                 'serverVoicedMs=${_serverVoicedMs ?? -1}');
         onSpeechStopped?.call();
@@ -672,7 +673,6 @@ class OpenAiStreamingTranscribeSession {
             'reconnect_skipped reason=gate_closed_after_delay');
         return;
       }
-      _reconnectInProgress = false; // connect 실패 시 다음 이벤트를 다시 받는다
       final ok = await connect();
       if (ok && wasGateOpen) {
         // 끊기기 전에 듣고 있었다면 그대로 다시 듣는다. 끊긴 동안의 발화는
@@ -680,7 +680,13 @@ class OpenAiStreamingTranscribeSession {
         // 만들어 내는 것보다 한 턴을 잃는 쪽이 낫다).
         openAudioGate(reason: 'reconnected');
       }
-      if (!ok) onFatalError?.call('reconnect_failed');
+      if (!ok) {
+        // A single failed reconnect must not bypass the configured retry ladder.
+        // Leave this critical section, then schedule the next backoff attempt.
+        _lg('[STREAM-STT]', 'reconnect_attempt_failed attempt=$_retryCount');
+        _reconnectInProgress = false;
+        unawaited(Future<void>(() => _reconnect(reason)));
+      }
     } finally {
       _reconnectInProgress = false;
     }

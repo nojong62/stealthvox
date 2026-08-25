@@ -87,13 +87,33 @@ enum HeardConfirmReply {
 }
 
 const Set<String> _kHeardConfirmAffirmatives = <String>{
-  '네', '예', '응', '어', '맞아', '맞아요', '맞습니다', '그래', '그래요',
-  'yes', 'yeah', 'yep', 'right', 'correct',
+  '네',
+  '예',
+  '응',
+  '어',
+  '맞아',
+  '맞아요',
+  '맞습니다',
+  '그래',
+  '그래요',
+  'yes',
+  'yeah',
+  'yep',
+  'right',
+  'correct',
 };
 
 const Set<String> _kHeardConfirmBareNegatives = <String>{
-  '아니', '아니요', '아뇨', '아닙니다', '틀려', '틀렸어', '틀렸어요',
-  'no', 'nope', 'wrong',
+  '아니',
+  '아니요',
+  '아뇨',
+  '아닙니다',
+  '틀려',
+  '틀렸어',
+  '틀렸어요',
+  'no',
+  'nope',
+  'wrong',
 };
 
 /// 되묻기에 대한 답을 셋으로 가른다.
@@ -227,7 +247,9 @@ String originLanguageSwitchedNoticeLine(String detectedLanguage) {
   }
 }
 
-const String kStepExpandOpeningNudgeText = '오늘은 어떤 순간을 영어로 풀어 볼까요?';
+const String kStepExpandOpeningNudgeText =
+    '저는 이오덕의 삶 중심 글쓰기 원리를 바탕으로 돕는 StealthVox 글쓰기 조교입니다. '
+    '떠오르는 단어 하나만 말씀해 주세요. 문장으로 키우는 일은 제가 이끌겠습니다.';
 
 /// Anyone 자유대화 답변 전 내부 숙고 지시.
 /// 응답이 1초 정도 느려지더라도 어중간한 답 대신 구체적인 답과 질문을 뽑는다.
@@ -286,22 +308,20 @@ String buildStepExpandFirstTurnSeedPolicy(String targetLanguage) {
   final language = targetLanguage.trim().isEmpty
       ? 'the requested target language'
       : targetLanguage.trim();
-  return '''[CASE 1] History is empty (USER'S FIRST TURN — CREATE A SEED)
-- Whatever meaningful content the user gives, turn its core meaning into ONE short, complete, natural spoken seed sentence in $language that can grow in later turns.
-- Keep one clear subject and one main idea. Prefer a brief, simple clause over details or complex grammar.
+  return '''[CASE 1] History is empty (USER'S FIRST TURN — KEEP THE RAW SEED)
+- Start with whatever meaningful material the user gives: a single word, a short phrase, a question, or a complete statement.
+- A bare topic word IS a valid seed. Translate only that word or phrase into $language and keep it deliberately unfinished. The writing coach will help the user discover the subject, action, and point in later turns.
 - If the input is already a complete statement, preserve its meaning and simplify only when useful.
-- A fragment, question, reaction, vague thought, bare topic, greeting, filler, or request to begin is NOT a seed. Output EXACTLY: [EVAPORATE]. Do not repair it by inventing a subject, action, opinion, feeling, or intent.
-- A SEED MUST BE GROWABLE — a statement about something that happened, something the user did, thinks, or wants. It needs a subject and a verb.
-  Greetings and openers are NOT growable content: "안녕하세요" / "오늘은" / "저기요" / "음 뭐지" / "시작할까". They carry no fact to grow from.
-  When the input is only a greeting, an opener, or a bare noun with no statement around it, output EXACTLY: [EVAPORATE]
-  Do NOT dress it up into a fake seed. "안녕하세요" must never become "Hello, today." — that seed cannot grow, and every later turn will drag it along.
-  It is far better to let the user speak once more than to plant a seed that poisons the whole session.
+- Do not turn one word into a made-up sentence. A seed may be incomplete; honesty matters more than grammatical completeness at this stage.
+- Only a greeting, filler, accidental noise, or empty request to begin is not a seed. For those, output EXACTLY: [EVAPORATE].
+  Greetings and empty openers include: "안녕하세요" / "오늘은" / "저기요" / "음 뭐지" / "시작할까". They carry no material to shape.
+- A meaningful noun such as "꿈", "가족", "퇴사", or "외로움" must NEVER be treated as [EVAPORATE].
 - Never invent a name, event, reason, relationship, feeling, or factual detail that the user did not provide.
 - OUTPUT ONE PART ONLY. No empty line, no second sentence, no "expanded" version. There is NOTHING to merge yet — this is the first thing the user has said.
   Manufacturing a second clause so the output looks expanded is the single worst failure on this turn. It puts words in the user's mouth and every later turn then grows from something they never said.
   Wrong: "I went to a nice cafe today.\\n\\nI went to a nice cafe today, and I enjoyed my time there."  ← "I enjoyed my time there" was never said
   Right: "I went to a nice cafe today."
-- The sentence grows in LATER turns, from the user's own next words. Not now, and never from your imagination.
+- The seed grows in LATER turns, from the user's own choices and next words. Not now, and never from your imagination.
 - On this first turn, do not output [DISSATISFIED], [CORRECTION], [MISHEARD], [CLARIFY], [RESTATE], or [GARBLED] when any coherent topic or intent is recoverable. Use [EVAPORATE] only when there is no recoverable meaning.
 - Output ONLY the seed sentence in $language.''';
 }

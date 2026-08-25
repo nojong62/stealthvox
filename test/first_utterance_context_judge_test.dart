@@ -437,18 +437,22 @@ void main() {
   });
 
   group('Step Expand first-turn seed policy', () {
-    test('opening text stays a single short question', () {
-      expect(kStepExpandOpeningNudgeText, '오늘은 어떤 순간을 영어로 풀어 볼까요?');
+    test('opening explicitly allows one word as raw material', () {
+      expect(kStepExpandOpeningNudgeText, startsWith('저는 이오덕의 삶 중심 글쓰기 원리를'));
+      expect(kStepExpandOpeningNudgeText, contains('StealthVox 글쓰기 조교'));
+      expect(kStepExpandOpeningNudgeText, contains('떠오르는 단어 하나만'));
+      expect(kStepExpandOpeningNudgeText, contains('제가 이끌겠습니다'));
     });
 
-    test('accepts only a complete growable first statement as the seed', () {
+    test('accepts a meaningful word or phrase as the raw seed', () {
       final policy = buildStepExpandFirstTurnSeedPolicy('English');
-      expect(policy, contains('CREATE A SEED'));
-      expect(policy, contains('Whatever meaningful'));
+      expect(policy, contains('KEEP THE RAW SEED'));
+      expect(policy, contains('whatever meaningful'));
       expect(policy, contains('seed sentence in English'));
-      expect(policy, contains('brief, simple clause'));
+      expect(policy, contains('single word'));
       expect(policy, contains('complete statement'));
-      expect(policy, contains('bare topic'));
+      expect(policy, contains('bare topic word IS a valid seed'));
+      expect(policy, contains('꿈'));
       expect(policy, contains('[EVAPORATE]'));
       expect(policy, contains('Never invent'));
       expect(policy, contains('Output ONLY'));
