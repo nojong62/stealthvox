@@ -210,7 +210,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   // 🆕 [TUTOR] 양측 대화 자동 재생 모드 상태 변수
   bool _isTutorPlaying = false;
-  int _tutorCurrentIdx = -1;
   List<Map<String, dynamic>> _tutorLines = [];
   AudioPlayer? _tutorAudioPlayer;
 
@@ -387,7 +386,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     BillingTicker.instance.resumeFromActivity('history_user_action');
   }
 
-  Widget _buildIdleOverlay() => const SizedBox.shrink();
   // ─────────────────────────────────────────────────────────────────────────
 
   // 📦 [Box 7: 라이프사이클 - initState]
@@ -1113,7 +1111,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
           _mySpeechError = null;
           _nativeEnglishError = null;
           currentIndex = 0;
-          _tutorCurrentIdx = 0;
           _isAutoRecording = false;
           _tutorAwaitingStart = true;
           _swapRoles = false;
@@ -1141,82 +1138,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     );
   }
 
-  // 🆕 [TUTOR] chat_lines 처음부터 끝까지 TTS 자동 재생
-  Future<void> _startTutorPlayback() async {
-    if (!mounted) return;
-    _resumeHistoryFromUserAction();
-    if (mounted) setState(() => _isTutorPlaying = true);
-
-    for (int i = 0; i < _tutorLines.length; i++) {
-      if (!mounted || !_isTutorPlaying) break;
-      final line = _tutorLines[i];
-      final text = line['text'] as String;
-      final bool lineRepresentsAi = _lineRepresentsAi(line);
-
-      if (mounted) {
-        setState(() {
-          _tutorCurrentIdx = i;
-        });
-      }
-
-      await _playTutorLineTTS(text, lineRepresentsAi);
-
-      if (!mounted || !_isTutorPlaying) break;
-      await Future.delayed(const Duration(milliseconds: 600));
-    }
-
-    if (mounted) {
-      setState(() {
-        _isTutorPlaying = false;
-        _tutorCurrentIdx = -1;
-      });
-    }
-  }
-
-  // 🆕 [TUTOR] OpenAI TTS API 직접 호출 → 로컬 AudioPlayer 재생 (끝까지 대기)
-  // 🔧 [v3.7] TtsCache 우선 조회 → MISS 시 API 호출 후 캐시 저장
-  Future<void> _playTutorLineTTS(String text, bool isAi) async {
-    if (_apiKey.isEmpty || text.trim().isEmpty) return;
-    final voice = isAi ? _historyPracticeAiVoice : _historyPracticeUserVoice;
-    try {
-      final audio = await _getOrFetchPracticeTTS(text, voice);
-      if (!mounted || !_isTutorPlaying || audio == null) return;
-
-      final completer = Completer<void>();
-      final player = AudioPlayer();
-      _tutorAudioPlayer = player;
-
-      StreamSubscription? stateSub;
-      StreamSubscription? completeSub;
-
-      stateSub = player.onPlayerStateChanged.listen((state) {
-        if (state == PlayerState.stopped) {
-          if (!completer.isCompleted) completer.complete();
-          stateSub?.cancel();
-        }
-      });
-      completeSub = player.onPlayerComplete.listen((_) {
-        if (!completer.isCompleted) completer.complete();
-        completeSub?.cancel();
-      });
-
-      try {
-        BillingTicker.instance.resumeFromActivity('history_tutor_tts_start');
-        await player.play(BytesSource(audio));
-        await completer.future
-            .timeout(const Duration(seconds: 30), onTimeout: () {});
-        BillingTicker.instance.resumeFromActivity('history_tutor_tts_end');
-      } finally {
-        stateSub.cancel();
-        completeSub.cancel();
-        await player.dispose();
-        _tutorAudioPlayer = null;
-      }
-    } catch (e) {
-      debugPrint("[playTutorLineTTS] $e");
-    }
-  }
-
   // 🆕 [TUTOR] 사용자가 종료/중단할 때 호출
   void _stopTutorPlayback() {
     resetBillingIdle();
@@ -1224,7 +1145,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     if (mounted) {
       setState(() {
         _isTutorPlaying = false;
-        _tutorCurrentIdx = -1;
       });
     }
   }
@@ -1260,7 +1180,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     _resumeHistoryFromUserAction();
     if (!mounted || _tutorLines.isEmpty) return;
     currentIndex = 0;
-    if (mounted) setState(() => _tutorCurrentIdx = 0);
+    // currentIndex는 화면이 읽는 값이라 여기서 한 번 다시 그린다.
+    if (mounted) setState(() {});
     // 목록을 controller로 먼저 맨 위에 되돌린다. 끝까지 내려간 상태에서는
     // ListView.builder가 아이템 0을 버려 `_practiceItemKeys[0]`의 context가
     // null이고, 그러면 아래 `_scrollPracticeToIndex(0)`이 조용히 아무것도
@@ -1281,7 +1202,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       if (mounted) {
         setState(() {
           currentIndex = next;
-          _tutorCurrentIdx = next;
           _turnPracticeRetryCount = 0;
           _showRetryHint = false;
         });
@@ -1294,7 +1214,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     if (mounted)
       setState(() {
         currentIndex = next;
-        _tutorCurrentIdx = next;
         _turnPracticeRetryCount = 0;
         _showRetryHint = false;
       });
@@ -1675,11 +1594,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
 
   void _onAudioComplete() {
     if (!mounted) return;
-    if (_phase == ShadowingPhase.reviewing && _isPlayingFullUser) {
-      _advanceFullUserPlay();
-    } else if (_phase == ShadowingPhase.turnPractice &&
-        isPracticeMode &&
-        !isPaused) {
+    if (_phase == ShadowingPhase.turnPractice && isPracticeMode && !isPaused) {
       if (mounted) setState(() => _tutorAiSpeaking = false); // 🆕 [BOX-31]
       _nextTurn();
     } else if (_practicingNativeEnglish && _nativeEnglishUnitAIPlaying) {
@@ -1839,8 +1754,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       return;
     }
 
-    if (_phase != ShadowingPhase.practicing &&
-        _phase != ShadowingPhase.chunkPractice) return;
+    if (_phase != ShadowingPhase.chunkPractice) return;
     final path = await _stopDualCaptureAndSave();
     if (!mounted) return;
     if (path != null && _currentChunkIdx < _chunks.length) {
@@ -1937,12 +1851,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     return audio;
   }
 
-  // 📦 [Box 14: AI 청크 재생]
-  Future<void> _playCurrentChunkAI() async {
-    if (_currentChunkIdx >= _chunks.length) return;
-    await _playChunkAI(_currentChunkIdx);
-  }
-
   Future<void> _playChunkAI(int idx) async {
     _resumeHistoryFromUserAction();
     if (idx >= _chunks.length) return;
@@ -1980,104 +1888,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
           _aiChunkLoading = false;
         });
     }
-  }
-
-  // 🆕 [P2-REPLAY] 사용자가 청크 ▶ 아이콘을 다시 탭했을 때 호출
-  //   - 진행 중인 모든 동작(녹음/AI재생) 즉시 취소
-  //   - 그 청크의 AI 음성만 재생, 끝나면 정지 (마이크 자동 활성 X)
-  Future<void> _replayChunkAI(int idx) async {
-    _resumeHistoryFromUserAction();
-    if (idx >= _chunks.length) return;
-    // 1. 진행 중인 녹음 즉시 취소
-    if (_isListening) {
-      _stopDeepgramListening();
-    }
-    // 2. 진행 중인 AI 재생 중지
-    await audioPlayer.stop();
-    // 3. Replay 모드 활성화 + 청크 이동 및 리셋
-    if (mounted) {
-      setState(() {
-        _isReplayMode = true;
-        _currentChunkIdx = idx;
-        _chunks[idx].isDone = false;
-        _chunks[idx].userRecordPath = null;
-      });
-    }
-    // 4. AI 음성만 재생
-    await _playChunkAI(idx);
-  }
-
-  // 🆕 [P2-REPLAY] 사용자가 마이크 버튼을 명시적으로 눌렀을 때 호출
-  //   - Replay 모드 해제 후 일반 녹음 시작
-  void _userTriggeredRecord() {
-    if (mounted) {
-      setState(() {
-        _isReplayMode = false;
-      });
-    }
-    _startDualCapture();
-  }
-
-  // 📦 [Box 15: 아이콘 탭 핸들러]
-  void _onUserIconTap() {
-    if (_phase != ShadowingPhase.practicing) return;
-    if (_isListening) {
-      _onUserUtteranceEnd();
-    } else {
-      audioPlayer.stop();
-      _userTriggeredRecord(); // 🆕 [P2-REPLAY] Replay 모드 해제 후 녹음
-    }
-  }
-
-  void _onAIIconTap() {
-    if (_phase != ShadowingPhase.practicing) return;
-    _replayChunkAI(_currentChunkIdx); // 🆕 [P2-REPLAY] 진행 중 취소 + AI만 재생
-  }
-
-  // 📦 [Box 16: 청크 전진/완료]
-  void _advanceChunk() {
-    if (_currentChunkIdx < _chunks.length - 1) {
-      setState(() {
-        _currentChunkIdx++;
-      });
-      _playCurrentChunkAI();
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _scrollCurrentChunkToCenter();
-      });
-    } else {
-      _completeShadowing();
-    }
-  }
-
-  void _completeShadowing() {
-    _stopDeepgramListening();
-    audioPlayer.stop();
-    if (mounted) setState(() => _phase = ShadowingPhase.reviewing);
-  }
-
-  // 📦 [Box 16-A: Review 기능]
-  Future<void> _playFullAI() async {
-    _resumeHistoryFromUserAction();
-    for (int i = 0; i < _chunks.length; i++) {
-      if (!mounted || _phase != ShadowingPhase.reviewing) break;
-      await _playChunkAI(i);
-      await Future.doWhile(() async {
-        await Future.delayed(const Duration(milliseconds: 100));
-        return isPlaying && mounted;
-      });
-      if (!mounted) break;
-      await Future.delayed(const Duration(milliseconds: 300));
-    }
-  }
-
-  Future<void> _playFullUser() async {
-    _resumeHistoryFromUserAction();
-    if (mounted)
-      setState(() {
-        _isPlayingFullUser = true;
-        _fullUserPlayIdx = 0;
-      });
-    _playUserChunk(0);
   }
 
   void _advanceFullUserPlay() {
@@ -3146,58 +2956,6 @@ RULES — follow exactly:
       );
     }
 
-    if (_phase == ShadowingPhase.practicing) {
-      return Scaffold(
-        backgroundColor: const Color(0xFF121212),
-        body: SafeArea(
-          child: Column(children: [
-            _buildTopBar(),
-            _buildPracticeHeaderIndicator(), // 🆕 [P2-INDICATOR]
-            _buildPracticeIconBar(),
-            Expanded(
-              child: Stack(children: [
-                _buildShadowingPracticeBody(),
-                _buildIdleOverlay(),
-              ]),
-            ),
-            _buildPracticeControl(),
-          ]),
-        ),
-      );
-    }
-
-    if (_phase == ShadowingPhase.reviewing) {
-      return Scaffold(
-        backgroundColor: const Color(0xFF121212),
-        body: Stack(children: [
-          SafeArea(child: _buildReviewScreen()),
-          Positioned(
-              top: 8,
-              right: 8,
-              child: SafeArea(
-                  child: GestureDetector(
-                child: const SizedBox(width: 40, height: 40),
-              ))),
-        ]),
-      );
-    }
-
-    if (_phase == ShadowingPhase.tutorPlay) {
-      return Scaffold(
-        backgroundColor: const Color(0xFF121212),
-        body: Stack(children: [
-          SafeArea(child: _buildTutorScreen()),
-          Positioned(
-              top: 8,
-              right: 8,
-              child: SafeArea(
-                  child: GestureDetector(
-                child: const SizedBox(width: 40, height: 40),
-              ))),
-        ]),
-      );
-    }
-
     if (_phase == ShadowingPhase.turnPractice) {
       return Scaffold(
         backgroundColor: const Color(0xFF121212),
@@ -3282,9 +3040,7 @@ RULES — follow exactly:
           ),
           Expanded(
             child: Text(
-              _phase == ShadowingPhase.practicing
-                  ? "Shadowing  ${_currentChunkIdx + 1} / ${_chunks.length}"
-                  : _displayRoomTitle(roomName),
+              _displayRoomTitle(roomName),
               textAlign: TextAlign.center,
               style: const TextStyle(
                   color: Colors.white,
@@ -3369,151 +3125,6 @@ RULES — follow exactly:
                         _enterShadowingFromRoom();
                       }
                     },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // 📦 [Box 21: UI - 진행 아이콘바 (enum 비교)]
-  Widget _buildPracticeIconBar() {
-    final bool isUserActive =
-        _phase == ShadowingPhase.practicing && _isListening;
-    final bool isAIActive =
-        _phase == ShadowingPhase.practicing && isPlaying && !_isListening;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-      decoration: const BoxDecoration(
-        color: Color(0xFF1C1C1E),
-        border: Border(bottom: BorderSide(color: Colors.white12)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          // 유저 아이콘 (좌)
-          GestureDetector(
-            onTap: _onUserIconTap,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 250),
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: isUserActive
-                        ? Colors.greenAccent.withValues(alpha: 0.15)
-                        : Colors.white.withValues(alpha: 0.05),
-                    border: Border.all(
-                      color: isUserActive ? Colors.greenAccent : Colors.white24,
-                      width: isUserActive ? 2.5 : 1.0,
-                    ),
-                    boxShadow: isUserActive
-                        ? [
-                            BoxShadow(
-                                color:
-                                    Colors.greenAccent.withValues(alpha: 0.35),
-                                blurRadius: 16,
-                                spreadRadius: 2)
-                          ]
-                        : [],
-                  ),
-                  child: Icon(Icons.mic_rounded,
-                      color: isUserActive ? Colors.greenAccent : Colors.white38,
-                      size: 30),
-                ),
-                const SizedBox(height: 6),
-                Text('You',
-                    style: TextStyle(
-                        color:
-                            isUserActive ? Colors.greenAccent : Colors.white38,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold)),
-                SizedBox(
-                  height: 18,
-                  child: isUserActive
-                      ? const Icon(Icons.graphic_eq,
-                          color: Colors.greenAccent, size: 14)
-                      : null,
-                ),
-              ],
-            ),
-          ),
-
-          // 중앙 청크 진행 표시
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                "${_currentChunkIdx + 1} / ${_chunks.length}",
-                style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                _isListening
-                    ? "🎙 Recording..."
-                    : isPlaying
-                        ? "🎧 AI Playing"
-                        : _chunks.isNotEmpty &&
-                                _currentChunkIdx < _chunks.length &&
-                                _chunks[_currentChunkIdx].isDone
-                            ? "✅ Done"
-                            : "Tap mic to record",
-                style: const TextStyle(color: Colors.white38, fontSize: 11),
-              ),
-            ],
-          ),
-
-          // AI 아이콘 (우)
-          GestureDetector(
-            onTap: _onAIIconTap,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 250),
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: isAIActive
-                        ? Colors.amber.withValues(alpha: 0.15)
-                        : Colors.white.withValues(alpha: 0.05),
-                    border: Border.all(
-                      color: isAIActive ? Colors.amber : Colors.white24,
-                      width: isAIActive ? 2.5 : 1.0,
-                    ),
-                    boxShadow: isAIActive
-                        ? [
-                            BoxShadow(
-                                color: Colors.amber.withValues(alpha: 0.35),
-                                blurRadius: 16,
-                                spreadRadius: 2)
-                          ]
-                        : [],
-                  ),
-                  child: Icon(Icons.volume_up_rounded,
-                      color: isAIActive ? Colors.amber : Colors.white38,
-                      size: 30),
-                ),
-                const SizedBox(height: 6),
-                Text('AI',
-                    style: TextStyle(
-                        color: isAIActive ? Colors.amber : Colors.white38,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold)),
-                SizedBox(
-                  height: 18,
-                  child: isAIActive
-                      ? const Icon(Icons.volume_up,
-                          color: Colors.amber, size: 14)
-                      : null,
-                ),
-              ],
             ),
           ),
         ],
@@ -4117,509 +3728,6 @@ RULES — follow exactly:
     );
   }
 
-  // 🆕 [P2-INDICATOR] 청크 텍스트 색상 분기: 완료=회색, 현재=노란, 대기=흰색
-  Color _chunkTextColor(int i) {
-    if (i < _currentChunkIdx) return Colors.white38;
-    if (i == _currentChunkIdx) return const Color(0xFFFFC107);
-    return Colors.white;
-  }
-
-  // 🆕 [P2-INDICATOR] 상단 "👤 Practice 🤖" 턴 인디케이터
-  Widget _buildPracticeHeaderIndicator() {
-    final bool userActive = _isListening;
-    final bool aiActive = _aiChunkPlaying;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          // 좌측: User 아이콘
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 250),
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: userActive
-                  ? Colors.greenAccent.withValues(alpha: 0.15)
-                  : Colors.white.withValues(alpha: 0.05),
-              border: Border.all(
-                color: userActive ? Colors.greenAccent : Colors.white24,
-                width: userActive ? 2 : 1,
-              ),
-              boxShadow: userActive
-                  ? [
-                      BoxShadow(
-                          color: Colors.greenAccent.withValues(alpha: 0.4),
-                          blurRadius: 12,
-                          spreadRadius: 2)
-                    ]
-                  : [],
-            ),
-            child: Text(
-              "👤",
-              style: TextStyle(
-                  fontSize: 18,
-                  color: userActive ? Colors.greenAccent : Colors.white38),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Text(
-            "Practice",
-            style: TextStyle(
-              color: Colors.white54,
-              fontSize: 13,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 1.2,
-            ),
-          ),
-          const SizedBox(width: 10),
-          // 우측: AI 아이콘
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 250),
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: aiActive
-                  ? Colors.blue.withValues(alpha: 0.15)
-                  : Colors.white.withValues(alpha: 0.05),
-              border: Border.all(
-                color: aiActive ? Colors.blue : Colors.white24,
-                width: aiActive ? 2 : 1,
-              ),
-              boxShadow: aiActive
-                  ? [
-                      BoxShadow(
-                          color: Colors.blue.withValues(alpha: 0.4),
-                          blurRadius: 12,
-                          spreadRadius: 2)
-                    ]
-                  : [],
-            ),
-            child: Text(
-              "🤖",
-              style: TextStyle(
-                  fontSize: 18, color: aiActive ? Colors.blue : Colors.white38),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // 📦 [Box 22-C: Shadowing 진행 화면 — 전체 청크 리스트 표시]
-  Widget _buildShadowingPracticeBody() {
-    if (_chunks.isEmpty) {
-      return const Center(
-          child: CircularProgressIndicator(color: Colors.amber));
-    }
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      itemCount: _chunks.length + 1,
-      itemBuilder: (context, i) {
-        if (i == _chunks.length) {
-          return Container(
-            height: 120,
-            decoration: const BoxDecoration(color: Colors.transparent),
-          );
-        }
-        final chunk = _chunks[i];
-        final bool isCurrent = i == _currentChunkIdx;
-        final bool isDone = chunk.isDone;
-        return AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          margin: const EdgeInsets.only(bottom: 10),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          decoration: BoxDecoration(
-            color: isCurrent ? const Color(0xFF1C1C1E) : Colors.transparent,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: isCurrent
-                  ? (_isListening
-                      ? Colors.greenAccent
-                      : _aiChunkPlaying
-                          ? Colors.blue
-                          : Colors.white24)
-                  : Colors.white12,
-              width: isCurrent ? 2 : 1,
-            ),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      chunk.text,
-                      style: TextStyle(
-                        color: _chunkTextColor(i), // 🆕 [P2-INDICATOR]
-                        fontSize: 18 * _fontScale,
-                        fontWeight:
-                            isCurrent ? FontWeight.bold : FontWeight.normal,
-                        height: 1.5,
-                      ),
-                    ),
-                    _buildChunkKoLine(chunk), // 🆕 [KO-FRAG]
-                    if (isCurrent) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        _isListening
-                            ? "🎙 Recording..."
-                            : _aiChunkPlaying
-                                ? "🎧 Listen carefully..."
-                                : isDone
-                                    ? "✅ Recorded — tap ▶ to replay"
-                                    : "Tap 🎤 or ▶ to start",
-                        style: TextStyle(
-                          color: _isListening
-                              ? Colors.greenAccent
-                              : _aiChunkPlaying
-                                  ? Colors.blue
-                                  : Colors.white38,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              // 청크별 ▶ 아이콘 — _replayChunkAI 연결 [P2-REPLAY]
-              GestureDetector(
-                onTap: () => _replayChunkAI(i),
-                child: Icon(
-                  isDone
-                      ? Icons.replay_rounded
-                      : Icons.play_circle_outline_rounded,
-                  color: isCurrent
-                      ? (isDone ? Colors.greenAccent : Colors.amber)
-                      : Colors.white24,
-                  size: 22,
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  // 📦 [Box 22-D: Review 화면]
-  Widget _buildReviewScreen() {
-    return Column(
-      children: [
-        // 헤더
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              IconButton(
-                icon: const Icon(Icons.close, color: Colors.white70),
-                onPressed: _exitShadowing,
-              ),
-              const Expanded(
-                child: Text(
-                  "🎉 Practice Complete!",
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold),
-                ),
-              ),
-              const SizedBox(width: 48),
-            ],
-          ),
-        ),
-
-        // 전체 재생 버튼들
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              Expanded(
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.volume_up, size: 16),
-                  label: const Text("AI Voice"),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.amber.withValues(alpha: 0.15),
-                    foregroundColor: Colors.amber,
-                    side: const BorderSide(color: Colors.amber),
-                  ),
-                  onPressed: _playFullAI,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.person, size: 16),
-                  label: const Text("My Voice"),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.greenAccent.withValues(alpha: 0.1),
-                    foregroundColor: Colors.greenAccent,
-                    side: const BorderSide(color: Colors.greenAccent),
-                  ),
-                  onPressed: _playFullUser,
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        const SizedBox(height: 8),
-
-        // 청크별 리스트
-        Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: _chunks.length,
-            itemBuilder: (context, i) {
-              final chunk = _chunks[i];
-              final bool hasUser = chunk.userRecordPath != null &&
-                  chunk.userRecordPath!.isNotEmpty;
-              final bool isCurrentUser =
-                  _isPlayingFullUser && _fullUserPlayIdx == i;
-
-              return Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: isCurrentUser
-                      ? Colors.greenAccent.withValues(alpha: 0.1)
-                      : const Color(0xFF1C1C1E),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                      color:
-                          isCurrentUser ? Colors.greenAccent : Colors.white12),
-                ),
-                child: Row(
-                  children: [
-                    Text(
-                      "${i + 1}",
-                      style:
-                          const TextStyle(color: Colors.white38, fontSize: 12),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            chunk.text,
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 14 * _fontScale,
-                                height: 1.4),
-                          ),
-                          _buildChunkKoLine(chunk), // 🆕 [KO-FRAG]
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.volume_up,
-                          color: Colors.amber, size: 20),
-                      tooltip: "AI 듣기",
-                      onPressed: () => _playChunkAI(i),
-                    ),
-                    if (hasUser)
-                      IconButton(
-                        icon: const Icon(Icons.person,
-                            color: Colors.greenAccent, size: 20),
-                        tooltip: "내 녹음",
-                        onPressed: () => _playUserChunk(i),
-                      )
-                    else
-                      const SizedBox(
-                        width: 40,
-                        height: 40,
-                        child: Center(
-                          child: Icon(Icons.mic_off,
-                              color: Colors.white24, size: 18),
-                        ),
-                      ),
-                  ],
-                ),
-              );
-            },
-          ),
-        ),
-
-        // 완료 버튼
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.amber,
-                foregroundColor: const Color(0xFF121212),
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30)),
-              ),
-              onPressed: _exitShadowing,
-              child: const Text("완료",
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  // 🆕 [TUTOR] Tutor 모드 화면
-  Widget _buildTutorScreen() {
-    return Column(
-      children: [
-        // 헤더
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              const SizedBox(width: 48),
-              const Expanded(
-                child: Text(
-                  "🎧 Tutor 모드",
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold),
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.close, color: Colors.white70),
-                onPressed: _exitShadowing,
-              ),
-            ],
-          ),
-        ),
-
-        // 대화 목록
-        Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: _tutorLines.length + 1,
-            itemBuilder: (context, i) {
-              if (i == _tutorLines.length) {
-                return Container(
-                  height: 100,
-                  decoration: const BoxDecoration(color: Colors.transparent),
-                );
-              }
-              final line = _tutorLines[i];
-              final bool isAi = (line['role'] as String) == 'HOST';
-              final bool isCurrent = _tutorCurrentIdx == i;
-              final Color highlightColor =
-                  isAi ? Colors.blue : Colors.greenAccent;
-              final text = line['text'] as String;
-
-              return Align(
-                alignment: isAi ? Alignment.centerRight : Alignment.centerLeft,
-                child: Container(
-                  constraints: BoxConstraints(
-                    maxWidth: MediaQuery.of(context).size.width * 0.93,
-                  ),
-                  margin: const EdgeInsets.only(bottom: 12),
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: isCurrent
-                        ? highlightColor.withValues(alpha: 0.15)
-                        : const Color(0xFF1C1C1E),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                        color: isCurrent ? highlightColor : Colors.white12,
-                        width: isCurrent ? 2 : 1),
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 250),
-                        width: 36,
-                        height: 36,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: isCurrent
-                              ? highlightColor.withValues(alpha: 0.2)
-                              : Colors.white.withValues(alpha: 0.05),
-                          border: Border.all(
-                              color:
-                                  isCurrent ? highlightColor : Colors.white24,
-                              width: isCurrent ? 2.5 : 1),
-                        ),
-                        child: Icon(
-                          isAi ? Icons.volume_up_rounded : Icons.person_rounded,
-                          color: isCurrent ? highlightColor : Colors.white38,
-                          size: 18,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Flexible(
-                        child: Text(
-                          text,
-                          textAlign: isAi ? TextAlign.right : TextAlign.left,
-                          style: TextStyle(
-                              color: isCurrent ? Colors.white : Colors.white70,
-                              fontSize: 15,
-                              height: 1.5,
-                              fontWeight: isCurrent
-                                  ? FontWeight.bold
-                                  : FontWeight.normal),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-
-        // 하단 제어 버튼
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: _isTutorPlaying
-              ? SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.stop_rounded, size: 20),
-                    label: const Text("중지",
-                        style: TextStyle(fontWeight: FontWeight.bold)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red.withValues(alpha: 0.8),
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16)),
-                    ),
-                    onPressed: _stopTutorPlayback,
-                  ),
-                )
-              : SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.replay_rounded, size: 20),
-                    label: const Text("다시 재생",
-                        style: TextStyle(fontWeight: FontWeight.bold)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.amber,
-                      foregroundColor: const Color(0xFF121212),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16)),
-                    ),
-                    onPressed:
-                        _tutorLines.isNotEmpty ? _startTutorPlayback : null,
-                  ),
-                ),
-        ),
-      ],
-    );
-  }
-
   // 📦 [BOX-32: 역할 스왑 - 동적 판정 헬퍼]
   // History Practice는 HOST=사용자, SYSTEM=AI 기준으로 판정한다.
   bool _lineRepresentsAi(Map<String, dynamic> line) =>
@@ -5143,7 +4251,6 @@ RULES — follow exactly:
                               if (mounted) {
                                 setState(() {
                                   currentIndex = 0;
-                                  _tutorCurrentIdx = 0;
                                   _tutorPlayingFullback = false;
                                   _tutorAwaitingStart = true;
                                   _swapRoles = false;
@@ -5339,24 +4446,6 @@ RULES — follow exactly:
     } else {
       if (mounted) setState(() => _nativeEnglishUnitAIPlaying = false);
     }
-  }
-
-  // 🆕 [KO-FRAG] 청크 한국어 직독 조각 한 줄 — _langDisplayMode 0(영+한)·2(한)에서만 표시
-  Widget _buildChunkKoLine(PracticeChunk chunk) {
-    if (_langDisplayMode == 1) return const SizedBox.shrink();
-    final ko = chunk.korean;
-    if (ko == null || ko.trim().isEmpty) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(top: 3),
-      child: Text(
-        ko,
-        style: TextStyle(
-          color: Colors.white54,
-          fontSize: 12 * _fontScale,
-          height: 1.3,
-        ),
-      ),
-    );
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -7081,7 +6170,6 @@ RULES — follow exactly:
     setState(() {
       _phase = ShadowingPhase.turnPractice;
       currentIndex = 0;
-      _tutorCurrentIdx = 0;
       _isAutoRecording = false;
       _tutorAwaitingStart = true;
       _swapRoles = false;
@@ -7355,66 +6443,6 @@ RULES — follow exactly:
       ),
     );
   }
-
-  Widget _buildPracticeControl() {
-    if (_phase != ShadowingPhase.practicing) return const SizedBox.shrink();
-
-    final bool hasRecording = _chunks.isNotEmpty &&
-        _currentChunkIdx < _chunks.length &&
-        _chunks[_currentChunkIdx].isDone;
-    final bool isLastChunk = _currentChunkIdx == _chunks.length - 1;
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
-      decoration: const BoxDecoration(
-          color: Color(0xFF1C1C1E),
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          // AI 재생 버튼
-          IconButton(
-            icon: const Icon(Icons.volume_up_rounded,
-                color: Colors.amber, size: 32),
-            onPressed: () => _replayChunkAI(_currentChunkIdx), // 🆕 [P2-REPLAY]
-          ),
-
-          // 녹음 버튼 (메인)
-          GestureDetector(
-            onTap: _onUserIconTap,
-            child: Container(
-              width: 60,
-              height: 60,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: _isListening
-                    ? Colors.greenAccent.withValues(alpha: 0.2)
-                    : Colors.white.withValues(alpha: 0.08),
-                border: Border.all(
-                    color: _isListening ? Colors.greenAccent : Colors.white38,
-                    width: _isListening ? 2.5 : 1.5),
-              ),
-              child: Icon(
-                _isListening ? Icons.stop_rounded : Icons.mic_rounded,
-                color: _isListening ? Colors.greenAccent : Colors.white70,
-                size: 30,
-              ),
-            ),
-          ),
-
-          // 다음 버튼
-          IconButton(
-            icon: Icon(
-              isLastChunk ? Icons.check_circle_outline : Icons.skip_next,
-              color: hasRecording ? Colors.white : Colors.white24,
-              size: 32,
-            ),
-            onPressed: hasRecording ? _advanceChunk : null,
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 // 📦 [Box 24: API Brain - 쉐도잉 포맷팅용 HTTP 통신 정적 클래스]
@@ -7515,10 +6543,12 @@ enum ShadowingPhase {
 
   /// 학습 경로 셋을 나란히 고르는 자리. History Study의 첫 화면이다.
   studySelect,
-  practicing,
-  reviewing,
-  tutorPlay,
+
+  /// PRACTICE — 역할 교환 대화 연습.
   turnPractice,
+
+  /// MY SPEECH · NATIVE ENGLISH 훈련(Echoing / Shadowing).
+  /// 이름은 옛것이다 — 지금 이 자리는 청크를 쓰지 않는다.
   chunkPractice,
 }
 
