@@ -546,8 +546,11 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   ///
   /// 📐 한때 라벨과 숫자를 한 줄에 뉘었다 — 쌓으면 세로를 너무 먹어서 글꼴
   ///   배율이 큰 기기에서 첫 화면에 이 카드와 드롭다운 하나밖에 안 들어왔다.
-  ///   지금은 다시 쌓는다. ORIGIN/TARGET이 좌우로 나란해지고 AI 설정이 톱니
-  ///   뒤로 들어가면서 세로가 200px 가까이 남았기 때문이다.
+  ///   지금은 다시 쌓는다. AI 설정이 톱니 뒤로 들어가면서 세로가 남았다.
+  ///
+  /// 📏 값은 **시:분**이다(271:37 = 271시간 37분). 한때 아래에
+  ///   `HOURS : MINUTES` 캡션을 달았지만 자리를 먹어 지웠다 — 단위를 적을
+  ///   자리가 다시 필요하면 `TIME LEFT` 라벨 쪽에 붙이는 편이 낫다.
   Widget _buildTimeLeftCard(FFAppState appState, String displayTime) {
     final bool isLow = appState.remainingTime <= 60;
 
@@ -589,7 +592,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     }
 
     return _buildSurfaceCard(
-      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -608,28 +611,12 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           ),
           const SizedBox(height: 10),
           FittedBox(fit: BoxFit.scaleDown, child: value),
-          const SizedBox(height: 8),
-          // 값이 `시:분`이라 캡션도 그렇게 적는다. 시안의 "MINUTES
-          // REMAINING"을 그대로 쓰면 42:15를 42분으로 읽게 된다.
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              'HOURS : MINUTES',
-              maxLines: 1,
-              style: const TextStyle(
-                color: _kLobbyTextLow,
-                fontSize: 10,
-                letterSpacing: 2.0,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
         ],
       ),
     );
   }
 
-  /// ORIGIN / TARGET 한 칸. **좌우로 나란히 서므로 폭이 절반이다.**
+  /// ORIGIN / TARGET 한 칸. **전체 폭을 쓴다.**
   ///
   /// 선택지(`languages`)도 저장 위치(`FFAppState`)도 예전 그대로다.
   ///
@@ -644,7 +631,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     ValueChanged<String?> onChanged,
   ) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 11, 10, 6),
+      padding: const EdgeInsets.fromLTRB(16, 12, 12, 6),
       decoration: BoxDecoration(
         color: _kLobbySurfaceHi,
         borderRadius: BorderRadius.circular(16),
@@ -654,28 +641,35 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: _kLobbyTextMid,
-              fontSize: 10,
-              letterSpacing: 1.4,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            subtitle,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: _kLobbyCyan.withValues(alpha: 0.72),
-              fontSize: 10,
-              letterSpacing: 0.6,
-              fontWeight: FontWeight.w600,
-            ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(
+                label,
+                maxLines: 1,
+                style: const TextStyle(
+                  color: _kLobbyTextMid,
+                  fontSize: 11,
+                  letterSpacing: 1.4,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(width: 7),
+              Flexible(
+                child: Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: _kLobbyCyan.withValues(alpha: 0.72),
+                    fontSize: 11,
+                    letterSpacing: 0.4,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
           ),
           DropdownButtonHideUnderline(
             child: DropdownButton<String>(
@@ -724,7 +718,10 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           }
 
           return Container(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+            // 제스처 바만큼 더 띄운다. 안 띄우면 마지막 알약(Casual)이
+            // 화면 밑에 잘린다(실기기 확인, 2026-08-27).
+            padding: EdgeInsets.fromLTRB(
+                20, 20, 20, 28 + MediaQuery.of(sheetContext).padding.bottom),
             decoration: const BoxDecoration(
               color: _kLobbySurface,
               borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -736,10 +733,11 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('AI 설정',
+                    const Text('AI SETTINGS',
                         style: TextStyle(
                             color: _kLobbyTextHi,
                             fontSize: 16,
+                            letterSpacing: 1.6,
                             fontWeight: FontWeight.w800)),
                     IconButton(
                       icon: const Icon(Icons.close_rounded,
@@ -763,7 +761,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                   Padding(
                     padding: const EdgeInsets.only(left: 4, bottom: 18),
                     child: Text(
-                      'AI STYLE은 TARGET이 English일 때만 쓰는 설정입니다.',
+                      'AI STYLE applies only when TARGET is English.',
                       style: TextStyle(
                           color: _kLobbyTextLow, fontSize: 12, height: 1.4),
                     ),
@@ -1212,38 +1210,30 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                         ],
                       ),
                       const SizedBox(height: 4),
-                      // 원어 → 배울 말. 화살표가 방향을 말한다.
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          Expanded(
-                            child: _buildLangField(
-                              'ORIGIN',
-                              '(Chat Lang)',
-                              appState.nativeLang,
-                              (val) =>
-                                  setState(() => appState.nativeLang = val!),
-                            ),
-                          ),
-                          const Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 8),
-                            child: Icon(Icons.arrow_forward_rounded,
-                                color: _kLobbyTextMid, size: 20),
-                          ),
-                          Expanded(
-                            child: _buildLangField(
-                              'TARGET',
-                              '(Learn Lang)',
-                              appState.targetLang,
-                              // ⚠️ AI STYLE은 여기서 건드리지 않는다. 비영어로
-                              //   가면 그 칸이 시트에서 사라지지만, 저장값은
-                              //   마지막 영어 선택 그대로 남겨 뒀다가 다시
-                              //   English로 돌아왔을 때 복원한다.
-                              (val) =>
-                                  setState(() => appState.targetLang = val!),
-                            ),
-                          ),
-                        ],
+                      // 📐 위아래로 쌓는다. 좌우로 나란히 뒀더니 폭이 절반이라
+                      //   "(Chat L…"·"Ko…"처럼 라벨도 언어 이름도 잘렸다
+                      //   (실기기 확인, 2026-08-27). 방향은 가운데 화살표가
+                      //   말한다 — 아래를 가리키면 원어 → 배울 말이다.
+                      _buildLangField(
+                        'ORIGIN',
+                        '(Chat Lang)',
+                        appState.nativeLang,
+                        (val) => setState(() => appState.nativeLang = val!),
+                      ),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 6),
+                        child: Icon(Icons.arrow_downward_rounded,
+                            color: _kLobbyTextMid, size: 18),
+                      ),
+                      _buildLangField(
+                        'TARGET',
+                        '(Learn Lang)',
+                        appState.targetLang,
+                        // ⚠️ AI STYLE은 여기서 건드리지 않는다. 비영어로 가면
+                        //   그 칸이 시트에서 사라지지만, 저장값은 마지막 영어
+                        //   선택 그대로 남겨 뒀다가 English로 돌아왔을 때
+                        //   복원한다.
+                        (val) => setState(() => appState.targetLang = val!),
                       ),
                     ],
                   ),
