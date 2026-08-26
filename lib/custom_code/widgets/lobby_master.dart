@@ -26,6 +26,7 @@ import 'package:http/http.dart' as http;
 import 'package:appsflyer_sdk/appsflyer_sdk.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'account_sheet.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import 'dart:async'; // unawaited
 import 'routine_mode_scenario_talk.dart' show TtsCache; // 캐시 정리 진입점
@@ -475,19 +476,19 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
         children: [
           Expanded(
             child: _buildSegment(
-              icon: Icons.storefront_rounded,
-              label: 'Store',
-              highlighted: false,
-              onTap: () => context.pushNamed('Store'),
+              icon: Icons.auto_stories_rounded,
+              label: 'Study Room',
+              highlighted: true,
+              onTap: () => context.pushNamed('ChatHistory'),
             ),
           ),
           const SizedBox(width: 4),
           Expanded(
             child: _buildSegment(
-              icon: Icons.auto_stories_rounded,
-              label: 'Study Room',
-              highlighted: true,
-              onTap: () => context.pushNamed('ChatHistory'),
+              icon: Icons.storefront_rounded,
+              label: 'Store',
+              highlighted: false,
+              onTap: () => context.pushNamed('Store'),
             ),
           ),
         ],
@@ -543,9 +544,10 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   /// 아직 Firestore에서 못 받았으면 숫자 대신 스피너를, 60초 이하이면 빨강을
   /// 쓴다. 바뀐 건 숫자에 입힌 그라디언트뿐이다(경고 색일 때는 입히지 않는다).
   ///
-  /// 📐 라벨과 숫자를 **한 줄에** 놓는다. 위아래로 쌓으면 카드 하나가 세로를
-  ///   너무 많이 먹어서, 글꼴 배율이 큰 기기(화면 확대를 켠 폰)에서는 첫
-  ///   화면에 이 카드와 드롭다운 하나밖에 안 들어왔다. 정보는 그대로다.
+  /// 📐 한때 라벨과 숫자를 한 줄에 뉘었다 — 쌓으면 세로를 너무 먹어서 글꼴
+  ///   배율이 큰 기기에서 첫 화면에 이 카드와 드롭다운 하나밖에 안 들어왔다.
+  ///   지금은 다시 쌓는다. ORIGIN/TARGET이 좌우로 나란해지고 AI 설정이 톱니
+  ///   뒤로 들어가면서 세로가 200px 가까이 남았기 때문이다.
   Widget _buildTimeLeftCard(FFAppState appState, String displayTime) {
     final bool isLow = appState.remainingTime <= 60;
 
@@ -587,92 +589,106 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     }
 
     return _buildSurfaceCard(
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
+      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Flexible(
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                'TIME LEFT',
-                maxLines: 1,
-                style: GoogleFonts.orbitron(
-                  color: _kLobbyTextMid,
-                  fontSize: 11,
-                  letterSpacing: 2.5,
-                  fontWeight: FontWeight.bold,
-                ),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              'TIME LEFT',
+              maxLines: 1,
+              style: GoogleFonts.orbitron(
+                color: _kLobbyTextMid,
+                fontSize: 11,
+                letterSpacing: 2.5,
+                fontWeight: FontWeight.bold,
               ),
             ),
           ),
-          const SizedBox(width: 14),
-          Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: value)),
+          const SizedBox(height: 10),
+          FittedBox(fit: BoxFit.scaleDown, child: value),
+          const SizedBox(height: 8),
+          // 값이 `시:분`이라 캡션도 그렇게 적는다. 시안의 "MINUTES
+          // REMAINING"을 그대로 쓰면 42:15를 42분으로 읽게 된다.
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              'HOURS : MINUTES',
+              maxLines: 1,
+              style: const TextStyle(
+                color: _kLobbyTextLow,
+                fontSize: 10,
+                letterSpacing: 2.0,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  /// ORIGIN / TARGET 한 칸.
+  /// ORIGIN / TARGET 한 칸. **좌우로 나란히 서므로 폭이 절반이다.**
   ///
   /// 선택지(`languages`)도 저장 위치(`FFAppState`)도 예전 그대로다.
-  /// [onChanged]는 호출부가 넘겨준 기존 콜백을 그대로 받는다.
+  ///
+  /// 📐 부제(`(Chat Lang)` / `(Learn Lang)`)는 **튀지 않게 강조한다.**
+  ///   회색으로 두면 눈에 안 들어오고(실기기에서 확인), 밝게 하면 정작
+  ///   골라야 하는 언어 이름보다 세진다. 그래서 청록을 옅게 깔고 자간만
+  ///   벌린다 — 색이 아니라 결로 도드라지게.
   Widget _buildLangField(
     String label,
     String subtitle,
     String value,
     ValueChanged<String?> onChanged,
   ) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
-          children: [
-            Flexible(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: _kLobbyTextMid,
-                  fontSize: 11,
-                  letterSpacing: 1.4,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 11, 10, 6),
+      decoration: BoxDecoration(
+        color: _kLobbySurfaceHi,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _kLobbyBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: _kLobbyTextMid,
+              fontSize: 10,
+              letterSpacing: 1.4,
+              fontWeight: FontWeight.w800,
             ),
-            const SizedBox(width: 6),
-            Flexible(
-              child: Text(
-                subtitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: _kLobbyTextLow, fontSize: 11),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
-          decoration: BoxDecoration(
-            color: _kLobbySurfaceHi,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: _kLobbyBorder),
           ),
-          child: DropdownButtonHideUnderline(
+          const SizedBox(height: 2),
+          Text(
+            subtitle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: _kLobbyCyan.withValues(alpha: 0.72),
+              fontSize: 10,
+              letterSpacing: 0.6,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          DropdownButtonHideUnderline(
             child: DropdownButton<String>(
               value: languages.contains(value) ? value : languages[0],
               dropdownColor: _kLobbySurfaceHi,
               isExpanded: true,
+              isDense: true,
               icon: const Icon(Icons.keyboard_arrow_down_rounded,
-                  color: _kLobbyTextMid, size: 22),
+                  color: _kLobbyTextMid, size: 20),
               style: const TextStyle(
                 color: _kLobbyTextHi,
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
               ),
               items: languages
                   .map((String lang) => DropdownMenuItem<String>(
@@ -684,8 +700,85 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
               onChanged: onChanged,
             ),
           ),
-        ),
-      ],
+        ],
+      ),
+    );
+  }
+
+  /// ⚙️ AI 설정 — STYLE과 TONE.
+  ///
+  /// 로비 본문에 늘어놓았더니 ENTER 아래로 밀려 **화면에서 사라졌다**
+  /// (실기기 확인, 2026-08-27). 자주 바꾸는 값이 아니라 톱니 뒤로 옮긴다.
+  /// 생김새는 로비와 같은 알약 그대로다 — 다른 화면처럼 보이면 안 된다.
+  void _openAiSettingsSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheetState) {
+          final appState = FFAppState();
+          void apply(VoidCallback change) {
+            setState(change);
+            setSheetState(() {});
+          }
+
+          return Container(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+            decoration: const BoxDecoration(
+              color: _kLobbySurface,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('AI 설정',
+                        style: TextStyle(
+                            color: _kLobbyTextHi,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800)),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded,
+                          color: _kLobbyTextMid),
+                      onPressed: () => Navigator.pop(sheetContext),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                // AI STYLE은 영어 대화에만 쓰는 설정이다. TARGET이 영어가
+                // 아니면 영역째 감춘다(선택지를 줄이지 않는다).
+                if (appState.targetLang == _kAiStyleTargetLang) ...[
+                  _buildSectionLabel('AI STYLE'),
+                  _buildAiStyleSelector(
+                    _kAiStyles,
+                    appState.aiStyle,
+                    (style) => apply(() => appState.aiStyle = style),
+                  ),
+                  const SizedBox(height: 22),
+                ] else ...[
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4, bottom: 18),
+                    child: Text(
+                      'AI STYLE은 TARGET이 English일 때만 쓰는 설정입니다.',
+                      style: TextStyle(
+                          color: _kLobbyTextLow, fontSize: 12, height: 1.4),
+                    ),
+                  ),
+                ],
+                _buildSectionLabel('AI TONE'),
+                _buildAiToneSelector(
+                  appState.tone,
+                  (tone) => apply(() => appState.tone = tone),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 
@@ -833,15 +926,22 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
             onTap: () => _handleEnterRoom(context),
             borderRadius: BorderRadius.circular(18),
             child: const Center(
-              child: Text(
-                'ENTER',
-                maxLines: 1,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 17,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 4,
-                ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'ENTER',
+                    maxLines: 1,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 4,
+                    ),
+                  ),
+                  SizedBox(width: 10),
+                  Icon(Icons.login_rounded, color: Colors.white, size: 20),
+                ],
               ),
             ),
           ),
@@ -874,6 +974,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                   () => _showUsageGuideDialog(context),
                 ),
               ),
+              _bottomBarDivider(),
               Expanded(
                 child: _buildBottomBarItem(
                   Icons.logout_rounded,
@@ -888,6 +989,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                   },
                 ),
               ),
+              _bottomBarDivider(),
               Expanded(
                 child: _buildBottomBarItem(
                   Icons.person_remove_alt_1_outlined,
@@ -901,6 +1003,13 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
       ),
     );
   }
+
+  /// 하단 줄 사이의 얇은 세로 선. 셋이 서로 다른 일을 한다는 표시다.
+  Widget _bottomBarDivider() => Container(
+        width: 1,
+        height: 20,
+        color: _kLobbyBorder,
+      );
 
   Widget _buildBottomBarItem(IconData icon, String label, VoidCallback onTap) {
     return InkWell(
@@ -1048,6 +1157,22 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                   ),
                 ),
               ),
+              const Spacer(),
+              // 👤 등록 정보 — 스텔스룸 아래 줄에 있는 것과 같은 시트다.
+              Material(
+                color: _kLobbySurfaceHi,
+                shape:
+                    const CircleBorder(side: BorderSide(color: _kLobbyBorder)),
+                clipBehavior: Clip.antiAlias,
+                child: InkWell(
+                  onTap: () => showAccountSheet(context),
+                  child: const Padding(
+                    padding: EdgeInsets.all(9),
+                    child: Icon(Icons.person_outline_rounded,
+                        color: _kLobbyTextMid, size: 20),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -1064,47 +1189,64 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
               children: [
                 _buildTimeLeftCard(appState, displayTime),
                 const SizedBox(height: 22),
-                _buildSectionLabel('LANGUAGE'),
                 _buildSurfaceCard(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      _buildLangField(
-                        'ORIGIN',
-                        '(Chat Lang)',
-                        appState.nativeLang,
-                        (val) => setState(() => appState.nativeLang = val!),
+                      Row(
+                        children: [
+                          Expanded(child: _buildSectionLabel('LANGUAGE')),
+                          // ⚙️ AI STYLE·TONE은 이 뒤에 있다. 로비 본문에
+                          //   두었더니 ENTER 아래로 밀려 안 보였다.
+                          SizedBox(
+                            width: 34,
+                            height: 34,
+                            child: IconButton(
+                              padding: EdgeInsets.zero,
+                              tooltip: 'AI 설정',
+                              icon: const Icon(Icons.settings_outlined,
+                                  color: _kLobbyTextMid, size: 19),
+                              onPressed: _openAiSettingsSheet,
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 18),
-                      _buildLangField(
-                        'TARGET',
-                        '(Learn Lang)',
-                        appState.targetLang,
-                        // ⚠️ AI STYLE은 여기서 건드리지 않는다. 비영어로
-                        //   가면 아래 영역이 통째로 사라지지만, 저장값은
-                        //   마지막 영어 선택 그대로 남겨 뒀다가 다시
-                        //   English로 돌아왔을 때 복원한다.
-                        (val) => setState(() => appState.targetLang = val!),
+                      const SizedBox(height: 4),
+                      // 원어 → 배울 말. 화살표가 방향을 말한다.
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Expanded(
+                            child: _buildLangField(
+                              'ORIGIN',
+                              '(Chat Lang)',
+                              appState.nativeLang,
+                              (val) =>
+                                  setState(() => appState.nativeLang = val!),
+                            ),
+                          ),
+                          const Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 8),
+                            child: Icon(Icons.arrow_forward_rounded,
+                                color: _kLobbyTextMid, size: 20),
+                          ),
+                          Expanded(
+                            child: _buildLangField(
+                              'TARGET',
+                              '(Learn Lang)',
+                              appState.targetLang,
+                              // ⚠️ AI STYLE은 여기서 건드리지 않는다. 비영어로
+                              //   가면 그 칸이 시트에서 사라지지만, 저장값은
+                              //   마지막 영어 선택 그대로 남겨 뒀다가 다시
+                              //   English로 돌아왔을 때 복원한다.
+                              (val) =>
+                                  setState(() => appState.targetLang = val!),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
-                ),
-                // AI STYLE은 영어 대화에만 쓰는 설정이다. TARGET이 영어가
-                // 아니면 영역째 감춘다(선택지를 줄이지 않는다).
-                if (appState.targetLang == _kAiStyleTargetLang) ...[
-                  const SizedBox(height: 22),
-                  _buildSectionLabel('AI STYLE'),
-                  _buildAiStyleSelector(
-                    _kAiStyles,
-                    appState.aiStyle,
-                    (style) => setState(() => appState.aiStyle = style),
-                  ),
-                ],
-                const SizedBox(height: 22),
-                _buildSectionLabel('AI TONE'),
-                _buildAiToneSelector(
-                  appState.tone,
-                  (tone) => setState(() => appState.tone = tone),
                 ),
               ],
             ),
