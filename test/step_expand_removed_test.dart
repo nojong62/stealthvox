@@ -89,6 +89,38 @@ void main() {
       }
     });
 
+    test('세 경로는 나란하다 — 어느 하나가 다른 하나의 관문이 아니다', () {
+      // History Study의 첫 화면이 경로를 고르는 자리다. Practice로 곧장
+      // 들어가 버리면 My Speech가 다시 "Practice 다음 단계"가 된다.
+      expect(history, contains('ShadowingPhase.studySelect'));
+      expect(history, contains('_buildStudySelectScreen'));
+      for (final opener in <String>[
+        '_openPracticeStudy',
+        '_openMySpeechStudy',
+        '_openNativeEnglishStudy',
+      ]) {
+        expect(history, contains(opener), reason: opener);
+      }
+      // Practice 완료 여부에 묶인 문이 없어야 한다.
+      expect(history, isNot(contains('isComplete ? _open')));
+    });
+
+    test('Native English는 My Speech를 거치지 않고 만들어지지 않는다', () {
+      final start = history.indexOf('Future<void> _openNativeEnglishStudy');
+      expect(start, greaterThan(-1));
+      final block = history.substring(start, start + 600);
+      expect(block, contains('_ensureMySpeech'));
+      expect(block, contains('_ensureNativeEnglish'));
+      // 생성기 자체가 transcript를 받을 수 없는 서명이라 한 번 더 막힌다.
+      final builder =
+          File('lib/custom_code/services/speech_reconstruction.dart')
+              .readAsStringSync();
+      final ne = builder
+          .substring(builder.indexOf('class NativeEnglishSpeechBuilder'));
+      expect(ne, isNot(contains('SpeechTranscriptTurn')));
+      expect(ne, isNot(contains('formatSpeechTranscript')));
+    });
+
     test('저장 칸은 my_speech · native_english다', () {
       expect(history, contains("'my_speech'"));
       expect(history, contains("'native_english'"));

@@ -194,7 +194,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   /// Native English 자리에 한글이 남아 있으면 만들다 만 값이다.
   static final RegExp _hangul = RegExp(r'[가-힣ᄀ-ᇿ㄰-㆏]');
-  bool _nativeEnglishLoadDone = false;
   // 🔧 [STAMPEDE-FIX] 같은 청크에 대한 동시 API 호출 방지
   // key: chunk index, value: 진행 중인 audio fetch Future
   final Map<int, Future<Uint8List?>> _inFlightChunkFetch = {};
@@ -243,11 +242,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   int _silenceCounter = 0;
   bool _hasSpoken = false;
 
-  /// 🇺🇸 [NATIVE-ENGLISH] 만들기 회차. 늦게 도착한 결과가 화면을 덮지
-  ///   않도록 회차가 다르면 버린다.
-  int _nativeEnglishGeneration = 0;
-
-  /// Native English를 못 만든 이유. null이면 실패한 적이 없다.
+  /// 못 만든 이유. null이면 실패한 적이 없다. 카드에 그대로 뜬다.
+  String? _mySpeechError;
   String? _nativeEnglishError;
   // 다시 읽어 달라는 힌트
   bool _showRetryHint = false;
@@ -274,7 +270,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   bool _practicingNativeEnglish =
       false; // false = My Speech, true = Native English
   bool _isBuildingMySpeech = false; // 🗣️ [MY-SPEECH] 만드는 중
-  String _cachedRoomMode = ''; // 🔧 [FREE-TALK-BTN] 버튼 표시 조건용 mode 캐시
+  bool _isBuildingNativeEnglish = false; // 🇺🇸 [NATIVE-ENGLISH] 만드는 중
+  /// 이 방의 저장 모드. 학습 경로 카드를 무엇까지 띄울지 여기서 가른다.
+  String _cachedRoomMode = '';
   bool _isPlayingFullAI = false; // 전체 AI 듣기 진행 중
   Timer? _nativeEnglishRevealTimer;
   final ScrollController _chunkScrollController = ScrollController();
@@ -1088,23 +1086,37 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       }
 
       _tutorLines = practiceLines;
+
+      // 🗂️ 저장돼 있으면 카드에 미리 보인다. 판이 다른 옛 값은 안 읽는다 —
+      //   이름 있는 상대까지 보는 정밀 검사는 카드를 누를 때 한 번 더 한다.
+      final bool storedSchemaOk =
+          _historyString(data, 'speech_schema_version') ==
+              _kSpeechSchemaVersion;
+      final String storedMySpeech =
+          storedSchemaOk ? _historyString(data, 'my_speech') : '';
+      final String storedNativeEnglish =
+          storedSchemaOk ? _historyString(data, 'native_english') : '';
+
       if (mounted) {
         setState(() {
           isPracticeMode = true;
-          _phase = ShadowingPhase.turnPractice;
+          _phase = ShadowingPhase.studySelect;
+          _mySpeech = storedMySpeech;
+          _nativeEnglish =
+              _canReuseStoredNativeEnglish(storedNativeEnglish, storedMySpeech)
+                  ? storedNativeEnglish
+                  : '';
+          _mySpeechError = null;
+          _nativeEnglishError = null;
           currentIndex = 0;
           _tutorCurrentIdx = 0;
           _isAutoRecording = false;
-          // 🆕 [BOX-30] 자동 시작 대신 선택 화면 노출
           _tutorAwaitingStart = true;
           _swapRoles = false;
           _tutorAiSpeaking = false;
           _tutorUserRecording = false;
           _tutorPlayingFullback = false;
         });
-        // 역할 선택 말풍선 (2.8초 후 자동 사라짐)
-        WidgetsBinding.instance
-            .addPostFrameCallback((_) => _showRoleSelectBubble());
       }
     } catch (e) {
       _showRoomEntryToast("연습 진입 실패: $e");
@@ -1613,7 +1625,6 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
   }
 
   void _exitShadowing() {
-    _nativeEnglishGeneration++;
     _deleteUserRecordings(); // 🆕 Practice 임시 녹음 파일 정리
     BillingTicker.instance.setRate(BillingRate.full);
     _stopTutorPlayback();
@@ -1637,7 +1648,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         _fullAIAudioCache.clear();
         _mySpeech = "";
         _nativeEnglish = "";
-        _nativeEnglishLoadDone = false;
+        _mySpeechError = null;
         currentIndex = 0;
         _isAutoRecording = false;
         _aiChunkPlaying = false; // 🆕 [P2-INDICATOR]
@@ -3074,11 +3085,11 @@ RULES — follow exactly:
           body: Center(child: CircularProgressIndicator()));
     }
 
-    if (_phase == ShadowingPhase.variantSelect) {
+    if (_phase == ShadowingPhase.studySelect) {
       return Scaffold(
         backgroundColor: const Color(0xFF121212),
         body: Stack(children: [
-          SafeArea(child: _buildVariantSelectScreen()),
+          SafeArea(child: _buildStudySelectScreen()),
           Positioned(
               top: 8,
               right: 8,
@@ -3106,7 +3117,7 @@ RULES — follow exactly:
                       IconButton(
                         icon: const Icon(Icons.close, color: Colors.white70),
                         tooltip: '다시 고르기',
-                        onPressed: _backToSpeechSelect,
+                        onPressed: _backToStudySelect,
                         padding: EdgeInsets.zero,
                         constraints:
                             const BoxConstraints(minWidth: 40, minHeight: 40),
@@ -3897,106 +3908,101 @@ RULES — follow exactly:
   }
 
   // ══════════════════════════════════════════════════════════════════
-  // 📦 [Box 22-B: MY SPEECH / NATIVE ENGLISH 고르는 자리]
+  // 📦 [Box 22-B: 학습 경로 고르는 자리 — History Study의 첫 화면]
   //
-  //   PRACTICE → MY SPEECH → NATIVE ENGLISH.
-  //   Practice가 끝난 뒤 이 화면이 뜨고, 고른 쪽이 그대로 Echoing/Shadowing
-  //   훈련(P3 엔진)으로 들어간다.
+  //   PRACTICE | MY SPEECH | NATIVE ENGLISH 셋을 나란히 둔다.
+  //   **어느 하나가 다른 하나의 관문이 아니다.** Practice는 몇 번이고 다시
+  //   들어오는 자리고, 나머지 둘은 대화 전체를 한 벌의 발화로 다루는 자리다.
   //
-  //   ⚠️ 두 카드는 **절대 같은 글자를 보이지 않는다.** Native English를 못
-  //      만들었으면 그 카드는 비어 있고 "다시 시도"만 있다. My Speech를
-  //      베껴 채우지 않는다 — 같은 문장 둘을 나란히 두면 배울 것이 없다.
+  //   ⚠️ 두 발화 카드는 **절대 같은 글자를 보이지 않는다.** Native English를
+  //      못 만들었으면 그 카드는 비어 있고 "다시 시도"만 있다.
   // ══════════════════════════════════════════════════════════════════
-  Widget _buildVariantSelectScreen() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              IconButton(
-                icon: const Icon(Icons.close, color: Colors.white70),
-                onPressed: _exitShadowing,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-              ),
-              const Spacer(),
-              _buildStudyRoomPill(),
-            ],
-          ),
-          const Text(
-            "무엇으로 연습할까요?",
-            textAlign: TextAlign.center,
-            style: TextStyle(
-                color: Colors.white, fontSize: 19, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 20),
-          Expanded(
-            child: SingleChildScrollView(
-              physics: const BouncingScrollPhysics(),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _buildMySpeechCard(),
-                  const SizedBox(height: 16),
-                  _buildNativeEnglishCard(),
-                ],
-              ),
-            ),
-          ),
-          TextButton(
-            onPressed: _exitShadowing,
-            child: const Text("취소",
-                style: TextStyle(color: Colors.white38, fontSize: 14)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 🗣️ MY SPEECH — 내가 실제로 한 말을 하나의 발화로 모은 것.
-  Widget _buildMySpeechCard() {
-    final ready = _mySpeech.trim().isNotEmpty;
-    return GestureDetector(
-      onTap: ready ? () => _openSpeechStage(SentenceVariant.mySpeech) : null,
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1C2E1C),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-              color: Colors.greenAccent.withValues(alpha: ready ? 0.5 : 0.2),
-              width: 1.5),
-        ),
+  Widget _buildStudySelectScreen() {
+    final bool busy = _isBuildingMySpeech || _isBuildingNativeEnglish;
+    // 대화가 남지 않는 방이면 전체 발화 학습 자체가 성립하지 않는다. 눌러 보고
+    // 실패를 읽게 하지 말고 아예 띄우지 않는다.
+    final bool speechReady = _supportsSpeechPractice(_cachedRoomMode);
+    // 📐 시스템 글자 크기를 크게 써 둔 기기에서 짧은 라벨이 어절 중간에서
+    //    끊기지 않게, 이 선택 화면에서만 배율에 천장을 씌운다.
+    return MediaQuery.withClampedTextScaling(
+      maxScaleFactor: 1.3,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Row(
+            Row(
               children: [
-                Icon(Icons.record_voice_over_rounded,
-                    color: Colors.greenAccent, size: 18),
-                SizedBox(width: 8),
-                Text("MY SPEECH",
-                    style: TextStyle(
-                        color: Colors.greenAccent,
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 0.6)),
+                IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white70),
+                  onPressed: _exitShadowing,
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 40, minHeight: 40),
+                ),
+                const Spacer(),
+                _buildStudyRoomPill(),
               ],
             ),
-            const SizedBox(height: 4),
             const Text(
-              "내가 대화에서 실제로 한 말",
-              style: TextStyle(color: Colors.white38, fontSize: 12),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              ready ? _mySpeech : "(아직 만들어지지 않았습니다)",
+              "무엇으로 공부할까요?",
+              textAlign: TextAlign.center,
               style: TextStyle(
-                  color: ready ? Colors.white : Colors.white38,
-                  fontSize: 15 * _fontScale,
-                  height: 1.5),
+                  color: Colors.white,
+                  fontSize: 19,
+                  fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 20),
+            Expanded(
+              child: SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _buildStudyPathCard(
+                      title: "PRACTICE",
+                      subtitle: "역할을 바꿔 가며 대화 연습",
+                      icon: Icons.swap_horiz_rounded,
+                      color: const Color(0xFF4ADE80),
+                      onTap: busy ? null : _openPracticeStudy,
+                    ),
+                    if (speechReady) ...[
+                      const SizedBox(height: 12),
+                      _buildStudyPathCard(
+                        title: "MY SPEECH",
+                        subtitle: "내가 대화에서 실제로 한 말",
+                        icon: Icons.record_voice_over_rounded,
+                        color: const Color(0xFF38BDF8),
+                        preview: _mySpeech,
+                        emptyHint: "눌러서 만들기",
+                        error: _mySpeechError,
+                        isLoading: _isBuildingMySpeech,
+                        onTap:
+                            busy ? null : () => unawaited(_openMySpeechStudy()),
+                      ),
+                      const SizedBox(height: 12),
+                      _buildStudyPathCard(
+                        title: "NATIVE ENGLISH",
+                        subtitle: "같은 생각을 미국인이 처음부터 영어로",
+                        icon: Icons.auto_awesome,
+                        color: const Color(0xFFFBBF24),
+                        preview: _nativeEnglish,
+                        emptyHint: "눌러서 만들기",
+                        error: _nativeEnglishError,
+                        isLoading: _isBuildingNativeEnglish,
+                        onTap: busy
+                            ? null
+                            : () => unawaited(_openNativeEnglishStudy()),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: _exitShadowing,
+              child: const Text("나가기",
+                  style: TextStyle(color: Colors.white38, fontSize: 14)),
             ),
           ],
         ),
@@ -4004,86 +4010,102 @@ RULES — follow exactly:
     );
   }
 
-  /// 🇺🇸 NATIVE ENGLISH — 같은 생각을 미국인이 처음부터 영어로 짰다면.
+  /// 학습 경로 카드 한 장.
   ///
-  /// 실패는 실패로 보인다. 스피너가 영영 도는 카드도, My Speech를 베낀
-  /// 카드도 만들지 않는다.
-  Widget _buildNativeEnglishCard() {
-    final ready = _nativeEnglish.trim().isNotEmpty;
-    final failed = !ready && _nativeEnglishLoadDone;
+  /// [preview]가 있으면 그 글을 세 줄까지 보여 준다 — 무엇을 연습하게 되는지
+  /// 누르기 전에 보이는 편이 낫다. 없으면 [emptyHint], 실패했으면 [error]다.
+  /// 셋은 서로 배타적이라 카드가 거짓말을 하지 않는다.
+  Widget _buildStudyPathCard({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Color color,
+    VoidCallback? onTap,
+    String preview = '',
+    String emptyHint = '',
+    String? error,
+    bool isLoading = false,
+  }) {
+    final String body = preview.trim();
     return GestureDetector(
-      onTap: ready
-          ? () => _openSpeechStage(SentenceVariant.nativeEnglish)
-          : (failed ? _retryNativeEnglish : null),
+      onTap: onTap,
       child: AnimatedOpacity(
-        duration: const Duration(milliseconds: 300),
-        opacity: ready ? 1.0 : 0.55,
+        duration: const Duration(milliseconds: 200),
+        opacity: onTap == null && !isLoading ? 0.45 : 1.0,
         child: Container(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           decoration: BoxDecoration(
-            color: const Color(0xFF1A1A2E),
+            color: color.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-                color: Colors.amber.withValues(alpha: ready ? 0.5 : 0.25),
-                width: 1.5),
+            border:
+                Border.all(color: color.withValues(alpha: 0.65), width: 1.5),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Row(
+              Row(
                 children: [
-                  Icon(Icons.auto_awesome, color: Colors.amber, size: 18),
-                  SizedBox(width: 8),
-                  Text("NATIVE ENGLISH",
-                      style: TextStyle(
-                          color: Colors.amber,
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 0.6)),
+                  Icon(icon, color: color, size: 19),
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Text(title,
+                        style: TextStyle(
+                            color: color,
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.6)),
+                  ),
+                  if (isLoading)
+                    SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                          color: color, strokeWidth: 2.2),
+                    )
+                  else
+                    Icon(Icons.chevron_right_rounded,
+                        color: color.withValues(alpha: 0.6), size: 20),
                 ],
               ),
-              const SizedBox(height: 4),
-              const Text(
-                "같은 생각을 미국인이 처음부터 영어로 짰다면",
-                style: TextStyle(color: Colors.white38, fontSize: 12),
-              ),
-              const SizedBox(height: 12),
-              if (ready)
+              const SizedBox(height: 5),
+              Text(subtitle,
+                  style: const TextStyle(color: Colors.white38, fontSize: 12)),
+              if (isLoading) ...[
+                const SizedBox(height: 10),
+                const Text("만드는 중...",
+                    style: TextStyle(color: Colors.white54, fontSize: 13)),
+              ] else if (body.isNotEmpty) ...[
+                const SizedBox(height: 10),
                 Text(
-                  _nativeEnglish,
+                  body,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                       color: Colors.white,
-                      fontSize: 15 * _fontScale,
+                      fontSize: 14 * _fontScale,
                       height: 1.5),
-                )
-              else if (failed)
+                ),
+              ] else if (error != null) ...[
+                const SizedBox(height: 10),
                 Row(
                   children: [
-                    const Icon(Icons.refresh_rounded,
-                        color: Colors.amber, size: 16),
-                    const SizedBox(width: 8),
+                    Icon(Icons.refresh_rounded, color: color, size: 15),
+                    const SizedBox(width: 7),
                     Expanded(
-                      child: Text(
-                        "${_nativeEnglishError ?? '만들지 못했습니다'} — 눌러서 다시 시도",
-                        style: const TextStyle(
-                            color: Colors.white54, fontSize: 13, height: 1.4),
-                      ),
+                      child: Text("$error — 눌러서 다시 시도",
+                          style: const TextStyle(
+                              color: Colors.white54,
+                              fontSize: 12,
+                              height: 1.4)),
                     ),
                   ],
-                )
-              else
-                const Row(
-                  children: [
-                    SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                            color: Colors.amber, strokeWidth: 2)),
-                    SizedBox(width: 12),
-                    Text("만드는 중...",
-                        style: TextStyle(color: Colors.white54, fontSize: 14)),
-                  ],
                 ),
+              ] else if (emptyHint.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Text(emptyHint,
+                    style: TextStyle(
+                        color: color.withValues(alpha: 0.85), fontSize: 13)),
+              ],
             ],
           ),
         ),
@@ -4769,7 +4791,8 @@ RULES — follow exactly:
                 children: [
                   IconButton(
                     icon: const Icon(Icons.close, color: Colors.white70),
-                    onPressed: _exitShadowing,
+                    tooltip: '학습 경로 다시 고르기',
+                    onPressed: _backToStudySelect,
                   ),
                   Expanded(
                     child: Row(
@@ -5145,47 +5168,6 @@ RULES — follow exactly:
                               TextStyle(color: Colors.white38, fontSize: 14)),
                     ),
                   ],
-                ),
-              ),
-
-            // 🗣️ [MY-SPEECH] Practice 다음 단계로 가는 문. 세 대화 모드가
-            //   모두 여기서 MY SPEECH → NATIVE ENGLISH로 넘어간다.
-            if (_supportsSpeechPractice(_cachedRoomMode))
-              Padding(
-                padding: EdgeInsets.fromLTRB(
-                  20,
-                  6,
-                  20,
-                  (isComplete ? 6 : 12) +
-                      MediaQuery.of(context).viewPadding.bottom,
-                ),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    icon: _isBuildingMySpeech
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.amber),
-                          )
-                        : const Icon(Icons.auto_awesome_rounded, size: 18),
-                    label: Text(
-                      _isBuildingMySpeech ? "만드는 중..." : "MY SPEECH",
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.amber.withValues(alpha: 0.12),
-                      foregroundColor: Colors.amber,
-                      side: const BorderSide(color: Colors.amber),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16)),
-                    ),
-                    onPressed: _isBuildingMySpeech
-                        ? null
-                        : _buildMySpeechFromConversation,
-                  ),
                 ),
               ),
           ],
@@ -7033,17 +7015,87 @@ RULES — follow exactly:
     }
   }
 
-  /// 🗣️ [MY-SPEECH] Practice 다음 단계. 대화 전체 → MY SPEECH → NATIVE ENGLISH.
+  // ══════════════════════════════════════════════════════════════════
+  // 🎓 [STUDY] 나란한 세 학습 경로
+  //
+  //   PRACTICE  — 역할을 바꿔 가며 대화를 다시 해 보는 자리. **끝이 없다.**
+  //               몇 번이고 다시 들어온다.
+  //   MY SPEECH — 대화 전체에서 유저가 실제로 표현한 것만 모은 한 벌.
+  //   NATIVE ENGLISH — 그 My Speech를 미국식 사고 배열로 다시 세운 한 벌.
+  //
+  //   셋은 **서로의 전제가 아니다.** Practice를 끝내야 My Speech가 열리는
+  //   식이면 "계속 반복하는 연습"과 "전체 발화 학습"이 한 줄에 꿰여, 둘 다
+  //   제 성격을 잃는다. 어느 카드든 언제나 누를 수 있다.
+  //
+  //   다만 **생성 순서는 하나뿐이다** — Conversation → My Speech →
+  //   Native English. NATIVE ENGLISH를 먼저 눌러도 My Speech가 먼저 선다.
+  // ══════════════════════════════════════════════════════════════════
+
+  /// 🔄 PRACTICE — 역할 교환 대화 연습. 재료는 진입할 때 이미 실려 있다.
+  void _openPracticeStudy() {
+    if (_tutorLines.isEmpty) {
+      _showRoomEntryToast('연습할 대화가 없습니다');
+      return;
+    }
+    _resumeHistoryFromUserAction();
+    // 다시 들어올 때마다 새 회차다. 지난 회차의 녹음을 들고 시작하면 방금
+    // 말한 것처럼 보인다. 재료(`_tutorLines`)는 그대로 두고 흔적만 지운다.
+    for (final line in _tutorLines) {
+      final path = line['user_record_path'] as String?;
+      if (path != null && path.isNotEmpty) File(path).delete().ignore();
+      line.remove('user_record_path');
+      line.remove('ai_audio_bytes');
+    }
+    if (!mounted) return;
+    setState(() {
+      _phase = ShadowingPhase.turnPractice;
+      currentIndex = 0;
+      _tutorCurrentIdx = 0;
+      _isAutoRecording = false;
+      _tutorAwaitingStart = true;
+      _swapRoles = false;
+      _tutorAiSpeaking = false;
+      _tutorUserRecording = false;
+      _tutorPlayingFullback = false;
+      _showRetryHint = false;
+    });
+    // 역할 선택 말풍선 (2.8초 후 자동 사라짐)
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _showRoleSelectBubble());
+  }
+
+  /// 🗣️ MY SPEECH — 없으면 만들고, 그대로 훈련으로 들어간다.
+  Future<void> _openMySpeechStudy() async {
+    if (_isBuildingMySpeech || _isBuildingNativeEnglish) return;
+    if (_mySpeech.trim().isEmpty && !await _ensureMySpeech()) return;
+    if (!mounted) return;
+    _openSpeechStage(SentenceVariant.mySpeech);
+  }
+
+  /// 🇺🇸 NATIVE ENGLISH — My Speech가 없으면 그것부터 만든 뒤 이어서 만든다.
+  Future<void> _openNativeEnglishStudy() async {
+    if (_isBuildingMySpeech || _isBuildingNativeEnglish) return;
+    if (_nativeEnglish.trim().isEmpty) {
+      if (_mySpeech.trim().isEmpty && !await _ensureMySpeech()) return;
+      if (!mounted) return;
+      if (!await _ensureNativeEnglish()) return;
+    }
+    if (!mounted) return;
+    _openSpeechStage(SentenceVariant.nativeEnglish);
+  }
+
+  /// 대화 전체에서 MY SPEECH 한 벌을 확보한다. 이미 있으면 그대로 쓴다.
   ///
-  /// 순서를 지킨다. Native English는 **언제나 My Speech를 입력으로** 받는다 —
-  /// 대화 원문에서 바로 만들면 상대방이 한 말이 섞여 들어올 길이 열린다.
-  ///
-  /// ⚠️ 한쪽이 실패해도 다른 쪽 글자를 복사해 채우지 않는다. 두 카드가 같은
-  ///    문장이면 견줄 것이 없어 학습이 죽는다. 실패는 실패로 남기고 카드에서
-  ///    다시 시도하게 한다.
-  Future<void> _buildMySpeechFromConversation() async {
-    if (_isBuildingMySpeech) return;
-    if (mounted) setState(() => _isBuildingMySpeech = true);
+  /// 실패하면 **false다.** 상대방 말을 섞거나 아무 문장이나 만들어 채우지
+  /// 않는다. 이유는 카드에 그대로 적힌다.
+  Future<bool> _ensureMySpeech() async {
+    if (_isBuildingMySpeech) return false;
+    if (mounted) {
+      setState(() {
+        _isBuildingMySpeech = true;
+        _mySpeechError = null;
+      });
+    }
     try {
       audioPlayer.stop();
       _stopAutoVADRecording();
@@ -7059,148 +7111,143 @@ RULES — follow exactly:
       } catch (e) {
         debugPrint('[MY-SPEECH] room fetch $e');
       }
-      if (!mounted) return;
+      if (!mounted) return false;
 
       final mode = _inferHistoryMode(roomData);
       _cachedRoomMode = mode;
       if (!_supportsSpeechPractice(mode)) {
-        _showRoomEntryToast('이 방에서는 MY SPEECH를 만들 수 없습니다');
-        return;
+        setState(() => _mySpeechError = '이 방에서는 만들 수 없습니다');
+        return false;
       }
 
       final labels = await _resolveHistoryExpandLabels(roomData);
-      if (!mounted) return;
+      if (!mounted) return false;
 
       var mySpeech = _historyString(roomData, 'my_speech');
-      var nativeEnglish = _historyString(roomData, 'native_english');
-      if (!_canReuseStoredMySpeech(roomData, mySpeech, labels)) {
-        mySpeech = '';
-        nativeEnglish = '';
+      if (_canReuseStoredMySpeech(roomData, mySpeech, labels)) {
+        final stored = _historyString(roomData, 'native_english');
+        setState(() {
+          _mySpeech = mySpeech;
+          _nativeEnglish =
+              _canReuseStoredNativeEnglish(stored, mySpeech) ? stored : '';
+        });
+        return true;
       }
 
-      // 1) MY SPEECH — 유저가 실제로 표현한 의미만 모은다.
-      if (mySpeech.isEmpty) {
-        final result = await MySpeechBuilder.build(
-          apiKey: _apiKey,
-          turns: _speechTranscriptTurns(),
-          targetLang: _sessionTargetLangName(),
-          userLabel: labels['userLabel'] ?? '',
-          partnerLabel: labels['partnerLabel'] ?? '',
-          situation: labels['situation'] ?? '',
-          onLog: (tag, message) => debugPrint('$tag $message'),
-        );
-        if (!mounted) return;
-        if (!result.isUsable) {
-          _showRoomEntryToast(
-              'MY SPEECH — ${_speechFailureMessage(result.failure)}');
-          return;
-        }
-        mySpeech = result.text;
-        nativeEnglish = '';
-        try {
-          await widget.historyDoc.update(<String, dynamic>{
-            'my_speech': mySpeech,
-            'speech_schema_version': _kSpeechSchemaVersion,
-            'speech_generated_at': FieldValue.serverTimestamp(),
-            'speech_user_label': labels['userLabel'],
-            'speech_partner_name': labels['partnerLabel'],
-            'speech_partner_type': labels['partnerType'],
-            'has_practice': true,
-          });
-        } catch (e) {
-          debugPrint('[MY-SPEECH] cache write $e');
-        }
-        if (!mounted) return;
+      final result = await MySpeechBuilder.build(
+        apiKey: _apiKey,
+        turns: _speechTranscriptTurns(),
+        targetLang: _sessionTargetLangName(),
+        userLabel: labels['userLabel'] ?? '',
+        partnerLabel: labels['partnerLabel'] ?? '',
+        situation: labels['situation'] ?? '',
+        onLog: (tag, message) => debugPrint('$tag $message'),
+      );
+      if (!mounted) return false;
+      if (!result.isUsable) {
+        setState(() => _mySpeechError = _speechFailureMessage(result.failure));
+        return false;
       }
-
-      if (!_canReuseStoredNativeEnglish(nativeEnglish, mySpeech)) {
-        nativeEnglish = '';
-      }
-
-      _mySpeech = mySpeech;
-      _nativeEnglish = nativeEnglish;
-      _nativeEnglishLoadDone = nativeEnglish.isNotEmpty;
-      _nativeEnglishError = null;
-      _practicingNativeEnglish = false;
-      _nativeEnglishUnits = <String>[];
-      _nativeEnglishUnitIdx = -1;
-      _selectedVariant = SentenceVariant.mySpeech;
-
+      mySpeech = result.text;
       setState(() {
-        _isBuildingMySpeech = false;
-        isPracticeMode = true;
-        _phase = ShadowingPhase.variantSelect;
+        _mySpeech = mySpeech;
+        // 새로 만든 My Speech에는 짝이 없다. 옛 Native English를 그대로
+        // 걸어 두면 서로 다른 두 생각이 한 쌍인 척한다.
+        _nativeEnglish = '';
+        _nativeEnglishError = null;
+        _practicingNativeEnglish = false;
+        _nativeEnglishUnits = <String>[];
+        _nativeEnglishUnitIdx = -1;
       });
-      // 2) NATIVE ENGLISH — 같은 의미를 미국식 사고 배열로 다시 세운다.
-      //    화면은 먼저 뜬다. 이 카드만 뒤늦게 채워진다.
-      if (nativeEnglish.isEmpty) {
-        unawaited(_prepareNativeEnglish(mySpeech, ++_nativeEnglishGeneration));
+      try {
+        await widget.historyDoc.update(<String, dynamic>{
+          'my_speech': mySpeech,
+          'native_english': FieldValue.delete(),
+          'speech_schema_version': _kSpeechSchemaVersion,
+          'speech_generated_at': FieldValue.serverTimestamp(),
+          'speech_user_label': labels['userLabel'],
+          'speech_partner_name': labels['partnerLabel'],
+          'speech_partner_type': labels['partnerType'],
+          'has_practice': true,
+        });
+      } catch (e) {
+        debugPrint('[MY-SPEECH] cache write $e');
       }
+      return true;
     } catch (e) {
       debugPrint('[MY-SPEECH] $e');
-      if (mounted) _showRoomEntryToast('오류: $e');
+      if (mounted) setState(() => _mySpeechError = '오류: $e');
+      return false;
     } finally {
-      if (mounted && _isBuildingMySpeech) {
-        setState(() => _isBuildingMySpeech = false);
-      }
+      if (mounted) setState(() => _isBuildingMySpeech = false);
     }
   }
 
-  /// 🇺🇸 [NATIVE-ENGLISH] My Speech를 입력으로 두 번째 카드를 만든다.
+  /// 🇺🇸 [NATIVE-ENGLISH] **입력은 언제나 My Speech다.**
   ///
-  /// 실패하면 **빈 채로 둔다.** My Speech를 복사해 넣지 않는다.
-  Future<void> _prepareNativeEnglish(String mySpeech, int generation) async {
-    if (mySpeech.trim().isEmpty) return;
+  /// 대화 원문을 직접 읽지 않는다 — 그러면 상대방이 한 말이 섞여 들어올 길이
+  /// 열린다. 실패하면 false이고, 그 자리는 **빈 채로 둔다.** My Speech를
+  /// 복사해 채우면 두 카드가 같은 글자가 되어 견줄 것이 사라진다.
+  Future<bool> _ensureNativeEnglish() async {
+    final source = _mySpeech.trim();
+    if (source.isEmpty || _isBuildingNativeEnglish) return false;
     if (mounted) {
       setState(() {
-        _nativeEnglishLoadDone = false;
+        _isBuildingNativeEnglish = true;
         _nativeEnglishError = null;
       });
     }
-    final result = await NativeEnglishSpeechBuilder.build(
-      apiKey: _apiKey,
-      mySpeech: mySpeech,
-      onLog: (tag, message) => debugPrint('$tag $message'),
-    );
-    if (!mounted || generation != _nativeEnglishGeneration) return;
-    if (!result.isUsable) {
-      setState(() {
-        _nativeEnglishLoadDone = true;
-        _nativeEnglishError = _speechFailureMessage(result.failure);
-      });
-      return;
-    }
-    final text = result.text;
-    setState(() {
-      _nativeEnglish = text;
-      _nativeEnglishLoadDone = true;
-      _nativeEnglishError = null;
-    });
     try {
-      await widget.historyDoc.update(<String, dynamic>{
-        'native_english': text,
-        'speech_schema_version': _kSpeechSchemaVersion,
-        'has_practice': true,
+      final result = await NativeEnglishSpeechBuilder.build(
+        apiKey: _apiKey,
+        mySpeech: source,
+        onLog: (tag, message) => debugPrint('$tag $message'),
+      );
+      if (!mounted) return false;
+      if (!result.isUsable) {
+        setState(
+            () => _nativeEnglishError = _speechFailureMessage(result.failure));
+        return false;
+      }
+      final text = result.text;
+      setState(() {
+        _nativeEnglish = text;
+        _nativeEnglishError = null;
+        _nativeEnglishUnits = <String>[];
+        _nativeEnglishUnitIdx = -1;
       });
+      try {
+        await widget.historyDoc.update(<String, dynamic>{
+          'native_english': text,
+          'speech_schema_version': _kSpeechSchemaVersion,
+          'has_practice': true,
+        });
+      } catch (e) {
+        debugPrint('[NATIVE-ENGLISH] cache write $e');
+      }
+      return true;
     } catch (e) {
-      debugPrint('[NATIVE-ENGLISH] cache write $e');
+      debugPrint('[NATIVE-ENGLISH] $e');
+      if (mounted) setState(() => _nativeEnglishError = '오류: $e');
+      return false;
+    } finally {
+      if (mounted) setState(() => _isBuildingNativeEnglish = false);
     }
   }
 
-  /// Native English 카드의 "다시 시도".
-  void _retryNativeEnglish() {
-    if (_mySpeech.trim().isEmpty) return;
-    unawaited(_prepareNativeEnglish(_mySpeech, ++_nativeEnglishGeneration));
-  }
-
-  /// P3에서 X를 누르면 두 문장 고르는 자리로 돌아간다. 방을 닫지 않는다.
-  void _backToSpeechSelect() {
+  /// 훈련 중 X는 방을 닫지 않고 **학습 경로 고르는 자리로** 돌아간다.
+  /// 어느 경로에서 나가든 같은 자리로 돌아와야 셋이 나란해 보인다.
+  void _backToStudySelect() {
+    _stopTutorPlayback();
+    _stopAutoVADRecording();
+    _utteranceSafetyTimer?.cancel();
+    _stopDeepgramListening();
     unawaited(_stopP3Shadowing(resetSelection: true));
     _echoingOverlayTimer?.cancel();
     audioPlayer.stop();
     if (!mounted) return;
     setState(() {
-      _phase = ShadowingPhase.variantSelect;
+      _phase = ShadowingPhase.studySelect;
       _isListening = false;
       _isPlayingFullUser = false;
       _isPlayingFullAI = false;
@@ -7434,7 +7481,9 @@ class _AudioDiskCache {
 // 📦 [Box 25: enum + PracticeChunk 모델 클래스]
 enum ShadowingPhase {
   idle,
-  variantSelect,
+
+  /// 학습 경로 셋을 나란히 고르는 자리. History Study의 첫 화면이다.
+  studySelect,
   practicing,
   reviewing,
   tutorPlay,
