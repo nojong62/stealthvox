@@ -35,6 +35,7 @@ import '/custom_code/services/audio_silence_analyzer.dart';
 import '/custom_code/services/breath_echoing_engine.dart';
 import '/custom_code/services/breath_segment.dart';
 import '/custom_code/services/p2_voice_styles.dart';
+import '/custom_code/services/speech_reconstruction.dart';
 import '/custom_code/services/pcm_audio_utils.dart'
     show kStealthVoxSttSampleRate, pcm16DurationMs, pcm16ToWav;
 
@@ -183,9 +184,16 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   // 📦 [Box 4: 상태 변수 - Shadowing 상태 머신]
   ShadowingPhase _phase = ShadowingPhase.idle;
-  SentenceVariant _selectedVariant = SentenceVariant.expanded;
-  String _expandedSentence = "";
+  SentenceVariant _selectedVariant = SentenceVariant.mySpeech;
+
+  /// 🗣️ [MY-SPEECH] 대화에서 유저가 실제로 표현한 것만 모은 한 벌.
+  String _mySpeech = "";
+
+  /// 🇺🇸 [NATIVE-ENGLISH] 같은 의미를 미국식 사고 배열로 다시 세운 한 벌.
   String _nativeEnglish = "";
+
+  /// Native English 자리에 한글이 남아 있으면 만들다 만 값이다.
+  static final RegExp _hangul = RegExp(r'[가-힣ᄀ-ᇿ㄰-㆏]');
   bool _nativeEnglishLoadDone = false;
   // 🔧 [STAMPEDE-FIX] 같은 청크에 대한 동시 API 호출 방지
   // key: chunk index, value: 진행 중인 audio fetch Future
@@ -227,8 +235,6 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // 에코링 팝업 오버레이
   Timer? _echoingOverlayTimer;
 
-  // P2 샤도잉 시작 팝업 오버레이
-
   // 📦 [Box 4-B: 양방향 턴제 연습 엔진 상태]
   int currentIndex = 0;
 
@@ -237,6 +243,12 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   int _silenceCounter = 0;
   bool _hasSpoken = false;
 
+  /// 🇺🇸 [NATIVE-ENGLISH] 만들기 회차. 늦게 도착한 결과가 화면을 덮지
+  ///   않도록 회차가 다르면 버린다.
+  int _nativeEnglishGeneration = 0;
+
+  /// Native English를 못 만든 이유. null이면 실패한 적이 없다.
+  String? _nativeEnglishError;
   // 다시 읽어 달라는 힌트
   bool _showRetryHint = false;
   int _turnPracticeRetryCount = 0;
@@ -259,8 +271,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   StreamSubscription<Duration>? _p3ShadowDurationSub;
 
   // 🆕 [CHUNK-PRACTICE] 의미단위 연습 모드 상태
-  bool _practicingNativeEnglish = false; // false = Final, true = Native English
-  bool _isBuildingExpand = false; // 🆕 [EXPAND-FROM-CHAT] 확장문장 생성 중 플래그
+  bool _practicingNativeEnglish =
+      false; // false = My Speech, true = Native English
+  bool _isBuildingMySpeech = false; // 🗣️ [MY-SPEECH] 만드는 중
   String _cachedRoomMode = ''; // 🔧 [FREE-TALK-BTN] 버튼 표시 조건용 mode 캐시
   bool _isPlayingFullAI = false; // 전체 AI 듣기 진행 중
   Timer? _nativeEnglishRevealTimer;
@@ -959,7 +972,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
   }
 
   // 📦 [Box 11-Room: 방 단위 진입]
-  //   저장된 대화를 역할 교환 Practice로 연다.
+  //   저장된 대화를 역할 교환 Practice로 연다. 그 다음 단계인
+  //   MY SPEECH / NATIVE ENGLISH는 Practice 화면의 버튼에서 시작한다.
   Future<void> _enterShadowingFromRoom() async {
     if (_isEnteringPractice) return;
     _resumeHistoryFromUserAction();
@@ -996,7 +1010,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
 
       _cachedRoomMode = _inferHistoryMode(data);
 
-      // messages 서브컬렉션 → Tutor 모드
+      // 대화 재생 연습(Practice)으로 들어간다. MY SPEECH / NATIVE ENGLISH는
+      // Practice가 끝난 뒤 [_buildMySpeechFromConversation]이 만든다.
       await _remoteConfigFuture;
       var messageDocs = _cachedDocs;
       if (messageDocs.isEmpty) {
@@ -1233,7 +1248,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     // 목록을 controller로 먼저 맨 위에 되돌린다. 끝까지 내려간 상태에서는
     // ListView.builder가 아이템 0을 버려 `_practiceItemKeys[0]`의 context가
     // null이고, 그러면 아래 `_scrollPracticeToIndex(0)`이 조용히 아무것도
-    // 하지 않는다 — 소리는 첫 대사인데 화면만 끝에 남는다(P2에서 겪은 그것).
+    // 하지 않는다 — 소리는 첫 대사인데 화면만 끝에 남는다.
     if (_practiceScrollController.hasClients) {
       _practiceScrollController.jumpTo(0);
     }
@@ -1597,26 +1612,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     }
   }
 
-  Future<void> _startPracticeWithVariant(SentenceVariant variant) async {
-    _selectedVariant = variant;
-    final sentence =
-        (variant == SentenceVariant.nativeEnglish && _nativeEnglish.isNotEmpty)
-            ? _nativeEnglish
-            : _expandedSentence;
-    if (!mounted) return;
-
-    await _buildChunks(sentence);
-
-    if (_chunks.isEmpty) {
-    } else {
-      for (int i = 0; i < _chunks.length; i++) {}
-    }
-
-    if (mounted) setState(() => _phase = ShadowingPhase.practicing);
-    _prefetchAllChunkAI();
-  }
-
   void _exitShadowing() {
+    _nativeEnglishGeneration++;
     _deleteUserRecordings(); // 🆕 Practice 임시 녹음 파일 정리
     BillingTicker.instance.setRate(BillingRate.full);
     _stopTutorPlayback();
@@ -1638,7 +1635,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         _isPlayingFullUser = false;
         _fullUserPlayIdx = 0;
         _fullAIAudioCache.clear();
-        _expandedSentence = "";
+        _mySpeech = "";
         _nativeEnglish = "";
         _nativeEnglishLoadDone = false;
         currentIndex = 0;
@@ -1653,402 +1650,13 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         _tutorAiSpeaking = false; // 🆕 [BOX-31]
         _tutorUserRecording = false; // 🆕 [BOX-31]
         _tutorPlayingFullback = false; // 🆕 [BOX-34]
+        _nativeEnglishError = null;
         _showRetryHint = false;
       });
     }
   }
 
   // 📦 [Box 12: 상태 머신 본체]
-
-  // [chunkSplit] GPT-4o-mini로 문장을 5~7단어 호흡 단위로 분할
-  Future<List<String>?> _splitByBreathGroupsGpt(String sentence) async {
-    if (_apiKey.isEmpty || sentence.isEmpty) return null;
-    try {
-      const sysPrompt =
-          'You are a speaking practice assistant. Split the given English sentence '
-          'into natural breath groups for speaking practice.\n'
-          'Return ONLY a JSON array of strings with no extra text or explanation.\n'
-          'Requirements:\n'
-          '- Target 5–7 words per chunk.\n'
-          '- Never exceed 8 words per chunk unless absolutely unavoidable.\n'
-          '- Avoid chunks shorter than 3 words unless it is a very natural phrase.\n'
-          '- Prefer splitting at: commas, conjunctions (and/but/so/because/when/while/'
-          'although/if/since/after/before), relative clauses (who/which/that/where), '
-          'prepositional phrases, infinitive phrases (to + verb).\n'
-          '- Do not rewrite the sentence. Do not omit or add words. '
-          'Preserve the original word order.\n'
-          'Example: ["I wanted to practice English every day", '
-          '"because I felt nervous", "when speaking with foreigners", '
-          '"but I slowly became more confident", "after using the app"]';
-      final response = await http
-          .post(
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
-            headers: {
-              'Authorization': 'Bearer $_apiKey',
-              'Content-Type': 'application/json',
-            },
-            body: jsonEncode({
-              'model': 'gpt-4o-mini',
-              'messages': [
-                {'role': 'system', 'content': sysPrompt},
-                {'role': 'user', 'content': 'Sentence: "$sentence"'},
-              ],
-              'temperature': 0.0,
-              'max_tokens': 400,
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode != 200) return null;
-      final body = jsonDecode(response.body) as Map<String, dynamic>;
-      final content =
-          ((body['choices'] as List).first['message']['content'] as String)
-              .trim();
-      final jsonMatch = RegExp(r'\[[\s\S]*\]').firstMatch(content);
-      if (jsonMatch == null) return null;
-      final list = jsonDecode(jsonMatch.group(0)!) as List;
-      final raw = list
-          .map((e) => e.toString().trim())
-          .where((s) => s.isNotEmpty)
-          .toList();
-      return _postProcessChunks(raw);
-    } catch (e) {
-      debugPrint("[splitByBreathGroupsGpt] $e");
-      return null;
-    }
-  }
-
-  // [chunkSplit] 긴 청크(9단어↑)를 자연 분할 위치에서 재분할
-  List<String> _splitLongChunkByWords(List<String> words) {
-    if (words.length <= 8) return [words.join(' ')];
-    const splitWords = {
-      'because',
-      'when',
-      'while',
-      'although',
-      'if',
-      'since',
-      'after',
-      'before',
-      'who',
-      'which',
-      'that',
-      'where',
-      'and',
-      'but',
-      'so',
-      'to'
-    };
-    // 4~7 위치에서 자연 분할 위치 탐색
-    for (int i = 5; i >= 3; i--) {
-      if (i < words.length) {
-        final w = words[i].toLowerCase().replaceAll(RegExp(r'[.,;:!?]+$'), '');
-        if (splitWords.contains(w)) {
-          return [
-            words.sublist(0, i).join(' '),
-            words.sublist(i).join(' '),
-          ];
-        }
-      }
-    }
-    // 자연 위치 없으면 중간 분할
-    final mid = (words.length / 2).round().clamp(4, words.length - 1);
-    return [words.sublist(0, mid).join(' '), words.sublist(mid).join(' ')];
-  }
-
-  // [chunkSplit] GPT 결과 후처리: 9단어↑ 재분할, 1~2단어 병합
-  List<String> _postProcessChunks(List<String> chunks) {
-    if (chunks.isEmpty) return chunks;
-    // Step 1: 9단어 이상 청크 재분할
-    final List<String> step1 = [];
-    for (final chunk in chunks) {
-      final words = chunk.trim().split(RegExp(r'\s+'));
-      if (words.length >= 9) {
-        step1.addAll(_splitLongChunkByWords(words));
-      } else {
-        step1.add(chunk);
-      }
-    }
-    // Step 2: 1~2단어 청크를 앞 청크에 병합
-    final List<String> step2 = [];
-    for (final chunk in step1) {
-      final wordCount = chunk.trim().split(RegExp(r'\s+')).length;
-      if (wordCount <= 2 && step2.isNotEmpty) {
-        step2[step2.length - 1] = '${step2.last} $chunk';
-      } else {
-        step2.add(chunk);
-      }
-    }
-    return step2.isEmpty ? chunks : step2;
-  }
-
-  // [chunkSplit] 캐시 조회 → GPT → Fallback 통합 분할 (Final·Native English 공통)
-  Future<List<String>> _splitSentenceIntoChunks(
-      String sentence, String variant) async {
-    if (sentence.isEmpty) return [];
-    // 1. 디스크 캐시 확인 (v2)
-    final cached = await _readChunkCache(variant, sentence);
-    if (cached != null && cached.isNotEmpty) return cached;
-    // 2. GPT 5~7단어 분할
-    final gptChunks = await _splitByBreathGroupsGpt(sentence);
-    if (gptChunks != null && gptChunks.isNotEmpty) {
-      await _writeChunkCache(variant, sentence, gptChunks);
-      return gptChunks;
-    }
-    // 3. Fallback: 정규식 분할
-    return _buildChunksLegacyList(sentence);
-  }
-
-  // [chunkSplit] 정규식 분할 + 8단어 상한 후처리 (fallback용)
-  List<String> _buildChunksLegacyList(String sentence) {
-    const abbrevs = ['Mr', 'Mrs', 'Ms', 'Dr', 'Prof', 'Sr', 'Jr', 'St'];
-    String temp = sentence;
-    for (final abbr in abbrevs) {
-      temp = temp.replaceAll('$abbr.', '$abbr․');
-    }
-    final splitRe = RegExp(
-      r'(?<=[,.!?])\s+|'
-      r'\s+(?=(?:who|whom|whose|which|that|where|when|while|because|since|although|though|if|unless|but|and|so|for|with|about|after|before|in|on|at|to)\b)',
-      caseSensitive: false,
-    );
-    final rawParts = temp
-        .split(splitRe)
-        .map((s) => s.trim().replaceAll('․', '.'))
-        .where((s) => s.isNotEmpty)
-        .toList();
-    // 1차 병합: 3단어 미만 조각을 앞 청크에 붙이기
-    final merged = <String>[];
-    for (final part in rawParts) {
-      final wordCount = part.trim().split(RegExp(r'\s+')).length;
-      if (wordCount < 3 && merged.isNotEmpty) {
-        merged[merged.length - 1] = '${merged.last} $part';
-      } else {
-        merged.add(part);
-      }
-    }
-    if (merged.length >= 2 &&
-        merged[0].trim().split(RegExp(r'\s+')).length < 3) {
-      merged[1] = '${merged[0]} ${merged[1]}';
-      merged.removeAt(0);
-    }
-    // 2차: 8단어 초과 청크 재분할
-    final List<String> step2 = [];
-    for (final chunk in merged) {
-      final words = chunk.trim().split(RegExp(r'\s+'));
-      if (words.length >= 9) {
-        step2.addAll(_splitLongChunkByWords(words));
-      } else {
-        step2.add(chunk);
-      }
-    }
-    // 3차: 재분할 후 생긴 1~2단어 조각 재병합
-    final List<String> result = [];
-    for (final chunk in step2) {
-      final wc = chunk.trim().split(RegExp(r'\s+')).length;
-      if (wc <= 2 && result.isNotEmpty) {
-        result[result.length - 1] = '${result.last} $chunk';
-      } else {
-        result.add(chunk);
-      }
-    }
-    return result.isEmpty ? merged : result;
-  }
-
-  // [chunkCache] 문장 내용 기반 8자리 해시 (캐시 키용)
-  String _chunkTextHash(String text) {
-    int hash = 5381;
-    for (final c in text.codeUnits) {
-      hash = ((hash << 5) + hash) ^ c;
-      hash &= 0xFFFFFFFF;
-    }
-    return hash.toRadixString(16).padLeft(8, '0').substring(0, 8);
-  }
-
-  // [chunkCache] 디스크에서 분할 결과 읽기 (v2: 5~7단어 기준)
-  Future<List<String>?> _readChunkCache(String variant, String sentence) async {
-    try {
-      final dir = await getApplicationDocumentsDirectory();
-      final roomId = widget.historyDoc.id;
-      final hash = _chunkTextHash(sentence);
-      final file = File(
-          '${dir.path}/chunk_cache/chunk_split_v2_${roomId}_${variant}_$hash.json');
-      if (!await file.exists()) return null;
-      final content = await file.readAsString();
-      final list = jsonDecode(content) as List;
-      final result =
-          list.map((e) => e.toString()).where((s) => s.isNotEmpty).toList();
-      return result;
-    } catch (e) {
-      debugPrint("[readChunkCache] $e");
-      return null;
-    }
-  }
-
-  // [chunkCache] 디스크에 분할 결과 저장 (v2: 5~7단어 기준)
-  Future<void> _writeChunkCache(
-      String variant, String sentence, List<String> chunks) async {
-    try {
-      final dir = await getApplicationDocumentsDirectory();
-      final roomId = widget.historyDoc.id;
-      final hash = _chunkTextHash(sentence);
-      final folder = Directory('${dir.path}/chunk_cache');
-      if (!await folder.exists()) await folder.create(recursive: true);
-      final file =
-          File('${folder.path}/chunk_split_v2_${roomId}_${variant}_$hash.json');
-      await file.writeAsString(jsonEncode(chunks));
-    } catch (e) {
-      debugPrint("[writeChunkCache] $e");
-    }
-  }
-
-  // 🆕 [KO-FRAG] 영어 청크 리스트 → 영어어순 직독 한국어 조각 (개수·순서 1:1)
-  Future<List<String>?> _generateKoFragmentsGpt(List<String> enChunks) async {
-    if (_apiKey.isEmpty || enChunks.isEmpty) return null;
-    try {
-      const sysPrompt =
-          """You are a Korean sight-translation (jikdokjikhae) helper.
-You receive an English sentence already split into ordered chunks as a JSON array.
-For EACH chunk, output ONE short Korean reading fragment that follows the English word order.
-These are intentionally incomplete connecting fragments, NOT a polished full translation.
-
-[RULES]
-- Output ONLY a JSON array of Korean strings. No markdown, no extra text, no code fences.
-- The array length MUST equal the number of input chunks, in the same order.
-- Each fragment expresses ONLY that chunk, in English order. Do not reorder across chunks.
-- Use natural Korean connective endings that fit each chunk role
-  (reason: ~이니까/~여서, thinking: ~라고 생각해서, time: ~할 때, contrast: ~지만, purpose: ~하려고).
-- Apply correct particles (이/가, 은/는, 을/를, 한테/에게). Use honorific ~시 only if present in English.
-- Keep each fragment short, one breath. Do not add information not in the chunk.
-- Korean only inside the strings.
-
-Example input: ["I think","that the price","went up","because of the weather"]
-Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때문에"]""";
-      final response = await http
-          .post(
-            Uri.parse("https://api.openai.com/v1/chat/completions"),
-            headers: {
-              "Authorization": "Bearer $_apiKey",
-              "Content-Type": "application/json",
-            },
-            body: jsonEncode({
-              "model": "gpt-4o-mini",
-              "messages": [
-                {"role": "system", "content": sysPrompt},
-                {"role": "user", "content": jsonEncode(enChunks)},
-              ],
-              "temperature": 0.2,
-              "max_tokens": 600,
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode != 200) return null;
-      final body =
-          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-      final content =
-          ((body["choices"] as List).first["message"]["content"] as String)
-              .trim();
-      final jsonMatch = RegExp(r'\[[\s\S]*\]').firstMatch(content);
-      if (jsonMatch == null) return null;
-      final list = jsonDecode(jsonMatch.group(0)!) as List;
-      final ko = list.map((e) => e.toString().trim()).toList();
-      if (ko.length != enChunks.length) {
-        return null;
-      }
-      return ko;
-    } catch (e) {
-      debugPrint("[generateKoFragmentsGpt] $e");
-      return null;
-    }
-  }
-
-  // 🆕 [KO-FRAG] 디스크 캐시 읽기 (영어 청크 캐시와 파일명 분리: kofrag_v1)
-  Future<List<String>?> _readKoFragCache(
-      String variant, String sentence) async {
-    try {
-      final dir = await getApplicationDocumentsDirectory();
-      final roomId = widget.historyDoc.id;
-      final hash = _chunkTextHash(sentence);
-      final file = File(
-          '${dir.path}/chunk_cache/kofrag_v1_${roomId}_${variant}_$hash.json');
-      if (!await file.exists()) return null;
-      final list = jsonDecode(await file.readAsString()) as List;
-      return list.map((e) => e.toString()).toList();
-    } catch (e) {
-      debugPrint("[readKoFragCache] $e");
-      return null;
-    }
-  }
-
-  // 🆕 [KO-FRAG] 디스크 캐시 쓰기
-  Future<void> _writeKoFragCache(
-      String variant, String sentence, List<String> ko) async {
-    try {
-      final dir = await getApplicationDocumentsDirectory();
-      final roomId = widget.historyDoc.id;
-      final hash = _chunkTextHash(sentence);
-      final folder = Directory('${dir.path}/chunk_cache');
-      if (!await folder.exists()) await folder.create(recursive: true);
-      final file =
-          File('${folder.path}/kofrag_v1_${roomId}_${variant}_$hash.json');
-      await file.writeAsString(jsonEncode(ko));
-    } catch (e) {
-      debugPrint("[writeKoFragCache] $e");
-    }
-  }
-
-  Future<void> _buildChunks(String sentence) async {
-    bool isCurrentPreparation() => true;
-    if (sentence.isEmpty) {
-      if (!isCurrentPreparation()) return;
-      _chunks = [];
-      _currentChunkIdx = 0;
-      return;
-    }
-    final isNativeEnglish =
-        _nativeEnglish.isNotEmpty && sentence == _nativeEnglish;
-    final variant = isNativeEnglish ? 'native' : 'expanded';
-    final result = await _splitSentenceIntoChunks(sentence, variant);
-
-    // 🆕 [KO-FRAG] 영어 청크에 1:1 한국어 직독 조각 부착 (캐시 → GPT).
-    //   실패/개수 불일치 시 ko=null → 영어 청크만 정상 표시 (영어 경로 영향 0).
-    List<String>? ko = await _readKoFragCache(variant, sentence);
-    if (ko == null || ko.length != result.length) {
-      ko = await _generateKoFragmentsGpt(result);
-      if (ko != null && ko.length == result.length) {
-        await _writeKoFragCache(variant, sentence, ko);
-      } else {
-        ko = null;
-      }
-    }
-
-    if (!isCurrentPreparation()) return;
-    _chunks = List.generate(
-      result.length,
-      (i) => PracticeChunk(
-        text: result[i],
-        korean: (ko != null && i < ko.length) ? ko[i] : null,
-      ),
-    );
-    _currentChunkIdx = 0;
-  }
-
-  Future<void> _prefetchAllChunkAI() async {
-    if (_apiKey.isEmpty) {}
-    for (int i = 0; i < _chunks.length; i++) {
-      if (!mounted ||
-          (_phase != ShadowingPhase.practicing &&
-              _phase != ShadowingPhase.chunkPractice)) {
-        break;
-      }
-      if (_chunks[i].aiAudio != null) {
-        continue;
-      }
-      try {
-        await _getOrFetchChunkAudio(i);
-      } catch (e) {
-        debugPrint("[prefetchAllChunkAI] $e");
-      }
-    }
-  }
 
   void _onAudioComplete() {
     if (!mounted) return;
@@ -2060,7 +1668,7 @@ Example output: ["나는 생각해","그 가격이","올랐다고","날씨 때�
       if (mounted) setState(() => _tutorAiSpeaking = false); // 🆕 [BOX-31]
       _nextTurn();
     } else if (_practicingNativeEnglish && _nativeEnglishUnitAIPlaying) {
-      // 세련문장 의미단위 AI 재생 완료 → 사용자 녹음 시작
+      // Native English 의미단위 AI 재생 완료 → 사용자 녹음 시작
       if (mounted) setState(() => _nativeEnglishUnitAIPlaying = false);
       _startDualCapture();
     } else if (_phase == ShadowingPhase.chunkPractice) {
@@ -3489,15 +3097,16 @@ RULES — follow exactly:
           SafeArea(
             child: Column(
               children: [
-                // 🔙 왼쪽 X는 연습을 닫고, 오른쪽 SR은 공부방으로 나간다.
+                // 🔙 왼쪽 X는 두 문장 고르는 자리로 돌아가고, 오른쪽 SR은
+                //   공부방으로 나간다.
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 6, 16, 2),
                   child: Row(
                     children: [
                       IconButton(
                         icon: const Icon(Icons.close, color: Colors.white70),
-                        tooltip: '닫기',
-                        onPressed: _exitShadowing,
+                        tooltip: '다시 고르기',
+                        onPressed: _backToSpeechSelect,
                         padding: EdgeInsets.zero,
                         constraints:
                             const BoxConstraints(minWidth: 40, minHeight: 40),
@@ -4287,10 +3896,20 @@ RULES — follow exactly:
     }
   }
 
-  // 📦 [Box 22-B: Variant 선택 화면]
+  // ══════════════════════════════════════════════════════════════════
+  // 📦 [Box 22-B: MY SPEECH / NATIVE ENGLISH 고르는 자리]
+  //
+  //   PRACTICE → MY SPEECH → NATIVE ENGLISH.
+  //   Practice가 끝난 뒤 이 화면이 뜨고, 고른 쪽이 그대로 Echoing/Shadowing
+  //   훈련(P3 엔진)으로 들어간다.
+  //
+  //   ⚠️ 두 카드는 **절대 같은 글자를 보이지 않는다.** Native English를 못
+  //      만들었으면 그 카드는 비어 있고 "다시 시도"만 있다. My Speech를
+  //      베껴 채우지 않는다 — 같은 문장 둘을 나란히 두면 배울 것이 없다.
+  // ══════════════════════════════════════════════════════════════════
   Widget _buildVariantSelectScreen() {
     return Padding(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -4299,139 +3918,175 @@ RULES — follow exactly:
               IconButton(
                 icon: const Icon(Icons.close, color: Colors.white70),
                 onPressed: _exitShadowing,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
               ),
-              const Expanded(
-                child: Text(
-                  "어떤 문장으로 연습할까요?",
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold),
-                ),
-              ),
-              const SizedBox(width: 48),
+              const Spacer(),
+              _buildStudyRoomPill(),
             ],
           ),
-          const SizedBox(height: 32),
-
-          // Expanded variant card
-          GestureDetector(
-            onTap: () => _startPracticeWithVariant(SentenceVariant.expanded),
-            child: Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1C2E1C),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                    color: Colors.greenAccent.withValues(alpha: 0.5),
-                    width: 1.5),
-              ),
+          const Text(
+            "무엇으로 연습할까요?",
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                color: Colors.white, fontSize: 19, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 20),
+          Expanded(
+            child: SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Row(
-                    children: [
-                      Icon(Icons.trending_up,
-                          color: Colors.greenAccent, size: 18),
-                      SizedBox(width: 8),
-                      Text("🌱 Final Sentence",
-                          style: TextStyle(
-                              color: Colors.greenAccent,
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold)),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    _expandedSentence.isNotEmpty
-                        ? _expandedSentence
-                        : "(문장 없음)",
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 15 * _fontScale,
-                        height: 1.5),
-                  ),
+                  _buildMySpeechCard(),
+                  const SizedBox(height: 16),
+                  _buildNativeEnglishCard(),
                 ],
               ),
             ),
           ),
-
-          const SizedBox(height: 16),
-
-          // Native English variant card
-          GestureDetector(
-            onTap: _nativeEnglish.isNotEmpty
-                ? () => _startPracticeWithVariant(SentenceVariant.nativeEnglish)
-                : null,
-            child: AnimatedOpacity(
-              duration: const Duration(milliseconds: 300),
-              opacity: _nativeEnglish.isNotEmpty ? 1.0 : 0.4,
-              child: Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1A1A2E),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                      color: Colors.amber.withValues(alpha: 0.5), width: 1.5),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Row(
-                      children: [
-                        Icon(Icons.auto_awesome, color: Colors.amber, size: 18),
-                        SizedBox(width: 8),
-                        Text("✨ Native English",
-                            style: TextStyle(
-                                color: Colors.amber,
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold)),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    _nativeEnglish.isNotEmpty
-                        ? Text(
-                            _nativeEnglish,
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 15 * _fontScale,
-                                height: 1.5),
-                          )
-                        : _nativeEnglishLoadDone
-                            ? const Text(
-                                "Native English 문장을 준비하지 못했습니다.\n연습에 다시 들어오면 만들어집니다.",
-                                style: TextStyle(
-                                    color: Colors.white38,
-                                    fontSize: 13,
-                                    height: 1.5),
-                              )
-                            : const Row(
-                                children: [
-                                  SizedBox(
-                                      width: 16,
-                                      height: 16,
-                                      child: CircularProgressIndicator(
-                                          color: Colors.amber, strokeWidth: 2)),
-                                  SizedBox(width: 12),
-                                  Text("불러오는 중...",
-                                      style: TextStyle(
-                                          color: Colors.white54, fontSize: 14)),
-                                ],
-                              ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-
-          const Spacer(),
           TextButton(
             onPressed: _exitShadowing,
             child: const Text("취소",
                 style: TextStyle(color: Colors.white38, fontSize: 14)),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 🗣️ MY SPEECH — 내가 실제로 한 말을 하나의 발화로 모은 것.
+  Widget _buildMySpeechCard() {
+    final ready = _mySpeech.trim().isNotEmpty;
+    return GestureDetector(
+      onTap: ready ? () => _openSpeechStage(SentenceVariant.mySpeech) : null,
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1C2E1C),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+              color: Colors.greenAccent.withValues(alpha: ready ? 0.5 : 0.2),
+              width: 1.5),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.record_voice_over_rounded,
+                    color: Colors.greenAccent, size: 18),
+                SizedBox(width: 8),
+                Text("MY SPEECH",
+                    style: TextStyle(
+                        color: Colors.greenAccent,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.6)),
+              ],
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              "내가 대화에서 실제로 한 말",
+              style: TextStyle(color: Colors.white38, fontSize: 12),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              ready ? _mySpeech : "(아직 만들어지지 않았습니다)",
+              style: TextStyle(
+                  color: ready ? Colors.white : Colors.white38,
+                  fontSize: 15 * _fontScale,
+                  height: 1.5),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 🇺🇸 NATIVE ENGLISH — 같은 생각을 미국인이 처음부터 영어로 짰다면.
+  ///
+  /// 실패는 실패로 보인다. 스피너가 영영 도는 카드도, My Speech를 베낀
+  /// 카드도 만들지 않는다.
+  Widget _buildNativeEnglishCard() {
+    final ready = _nativeEnglish.trim().isNotEmpty;
+    final failed = !ready && _nativeEnglishLoadDone;
+    return GestureDetector(
+      onTap: ready
+          ? () => _openSpeechStage(SentenceVariant.nativeEnglish)
+          : (failed ? _retryNativeEnglish : null),
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 300),
+        opacity: ready ? 1.0 : 0.55,
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1A1A2E),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+                color: Colors.amber.withValues(alpha: ready ? 0.5 : 0.25),
+                width: 1.5),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.auto_awesome, color: Colors.amber, size: 18),
+                  SizedBox(width: 8),
+                  Text("NATIVE ENGLISH",
+                      style: TextStyle(
+                          color: Colors.amber,
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.6)),
+                ],
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                "같은 생각을 미국인이 처음부터 영어로 짰다면",
+                style: TextStyle(color: Colors.white38, fontSize: 12),
+              ),
+              const SizedBox(height: 12),
+              if (ready)
+                Text(
+                  _nativeEnglish,
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 15 * _fontScale,
+                      height: 1.5),
+                )
+              else if (failed)
+                Row(
+                  children: [
+                    const Icon(Icons.refresh_rounded,
+                        color: Colors.amber, size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "${_nativeEnglishError ?? '만들지 못했습니다'} — 눌러서 다시 시도",
+                        style: const TextStyle(
+                            color: Colors.white54, fontSize: 13, height: 1.4),
+                      ),
+                    ),
+                  ],
+                )
+              else
+                const Row(
+                  children: [
+                    SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                            color: Colors.amber, strokeWidth: 2)),
+                    SizedBox(width: 12),
+                    Text("만드는 중...",
+                        style: TextStyle(color: Colors.white54, fontSize: 14)),
+                  ],
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -5069,7 +4724,6 @@ RULES — follow exactly:
       height: 1.5,
       fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
     );
-
     // 📖 배울글 아래에 대화 언어 원문을 함께 둔다. 위는 따라 말할 글,
     //   아래는 그때 실제로 오간 말 — 둘이 붙어 있어야 "내 생각이 저 문장이
     //   됐다"가 보인다. 배울글이 없는 줄은 `native`가 비어 있어 예전과 같다.
@@ -5494,8 +5148,9 @@ RULES — follow exactly:
                 ),
               ),
 
-            // 🔒 Tutor history modes do not generate Expanded Sentence here.
-            if (!_blocksHistoryExpandedSentence(_cachedRoomMode))
+            // 🗣️ [MY-SPEECH] Practice 다음 단계로 가는 문. 세 대화 모드가
+            //   모두 여기서 MY SPEECH → NATIVE ENGLISH로 넘어간다.
+            if (_supportsSpeechPractice(_cachedRoomMode))
               Padding(
                 padding: EdgeInsets.fromLTRB(
                   20,
@@ -5507,7 +5162,7 @@ RULES — follow exactly:
                 child: SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
-                    icon: _isBuildingExpand
+                    icon: _isBuildingMySpeech
                         ? const SizedBox(
                             width: 18,
                             height: 18,
@@ -5516,7 +5171,7 @@ RULES — follow exactly:
                           )
                         : const Icon(Icons.auto_awesome_rounded, size: 18),
                     label: Text(
-                      _isBuildingExpand ? "불러오는 중..." : "Expanded Sentence",
+                      _isBuildingMySpeech ? "만드는 중..." : "MY SPEECH",
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                     style: ElevatedButton.styleFrom(
@@ -5527,8 +5182,9 @@ RULES — follow exactly:
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16)),
                     ),
-                    onPressed:
-                        _isBuildingExpand ? null : _buildExpandFromConversation,
+                    onPressed: _isBuildingMySpeech
+                        ? null
+                        : _buildMySpeechFromConversation,
                   ),
                 ),
               ),
@@ -5720,8 +5376,8 @@ RULES — follow exactly:
   // ══════════════════════════════════════════════════════════════════
   // 🎤 [P3-SPEAK] Speaking Practice
   //
-  //   P2가 "문장이 자라는 것을 보고 듣는" 자리라면, P3는 **최종 완성문장을
-  //   실제로 입에 붙이는** 자리다.
+  //   고른 한 벌(MY SPEECH 또는 NATIVE ENGLISH)을 **실제로 입에 붙이는**
+  //   자리다. 두 벌 모두 같은 흐름을 그대로 쓴다.
   //
   //     Stage 1 Breath Echoing — 호흡 하나씩 듣고 혼자 따라 말하기
   //     Stage 2 Full Echo      — 전체를 듣고, 끝난 뒤 혼자 전체 말하기
@@ -5732,29 +5388,22 @@ RULES — follow exactly:
   //   Shadow를 열 번 반복해도 API 호출은 늘지 않는다.
   // ══════════════════════════════════════════════════════════════════
 
-  /// P3가 대상으로 삼는 문장. Final Sentence와 Native English 두 벌을 각각
-  /// 같은 Speaking Practice 흐름으로 열 수 있다.
-  String get _p3TargetSentence {
-    final preferred = _selectedVariant == SentenceVariant.nativeEnglish
-        ? _nativeEnglish.trim()
-        : _expandedSentence.trim();
-    if (preferred.isNotEmpty) return preferred;
-    return _selectedVariant == SentenceVariant.nativeEnglish
-        ? _expandedSentence.trim()
-        : _nativeEnglish.trim();
-  }
+  /// 훈련이 대상으로 삼는 문장. MY SPEECH와 NATIVE ENGLISH 두 벌을 각각
+  /// 같은 Speaking Practice 흐름으로 연다.
+  ///
+  /// ⚠️ **없으면 빈 문자열이다.** 고른 쪽이 비었다고 다른 쪽을 대신 걸지
+  ///    않는다 — 두 카드가 같은 문장이 되면 견줄 것이 사라진다. 카드 자체가
+  ///    [_p3VariantAvailable]로 잠기므로 빈 채로 들어올 일도 없다.
+  String get _p3TargetSentence => _speechFor(_selectedVariant).trim();
+
+  String _speechFor(SentenceVariant variant) =>
+      variant == SentenceVariant.nativeEnglish ? _nativeEnglish : _mySpeech;
 
   bool _p3VariantAvailable(SentenceVariant variant) =>
-      (variant == SentenceVariant.nativeEnglish
-              ? _nativeEnglish
-              : _expandedSentence)
-          .trim()
-          .isNotEmpty;
+      _speechFor(variant).trim().isNotEmpty;
 
   String _p3VariantLabel(SentenceVariant variant) =>
-      variant == SentenceVariant.nativeEnglish
-          ? 'Native English'
-          : 'Final Sentence';
+      variant == SentenceVariant.nativeEnglish ? 'NATIVE ENGLISH' : 'MY SPEECH';
 
   /// 🚧 Shadow 여유. **말하는 속도를 바꾸는 게 아니다** — AI의 발음·억양·속도는
   /// 그대로 두고 **호흡 사이 빈 자리만** 늘린다. 실기기에서 조정한다.
@@ -6003,7 +5652,7 @@ RULES — follow exactly:
 
   /// 최종 문장의 Sing-Song Flow PCM을 얻어 호흡으로 가른 뒤 Stage 1을 연다.
   ///
-  /// ⚠️ P2와 달리 **Morph 강조 지시문을 넣지 않는다.** 최종 문장을 특정 단어만
+  /// ⚠️ **특정 단어만 세워 읽는 강조 지시문을 넣지 않는다.** 문장을 특정 단어만
   /// 도드라진 상태로 익히면 안 된다.
   Future<void> _startP3Speaking() async {
     final text = _p3TargetSentence;
@@ -6076,8 +5725,7 @@ RULES — follow exactly:
     }
   }
 
-  /// P3 원본 PCM. **Morph 강조가 없는 순수 Smooth Jazz**라 P2 캐시와 키가
-  /// 다르다(P2는 `_m{ranges}`가 붙는다).
+  /// 원본 PCM. **강조 지시가 없는 순수 낭독**이라 Lab 캐시와 키가 다르다.
   Future<Uint8List?> _getP3OriginalPcm(String text) {
     final voice = _p3Voice;
     final style = _p3StyleFor(_p3PracticeMode);
@@ -6933,10 +6581,7 @@ RULES — follow exactly:
   }) {
     final available = _p3VariantAvailable(variant);
     final selected = _selectedVariant == variant;
-    final sentence = (variant == SentenceVariant.nativeEnglish
-            ? _nativeEnglish
-            : _expandedSentence)
-        .trim();
+    final sentence = _speechFor(variant).trim();
     return InkWell(
       onTap: available && !_p3Busy
           ? () => unawaited(_selectP3Variant(variant))
@@ -7131,11 +6776,6 @@ RULES — follow exactly:
     return mode.trim().toLowerCase().replaceAll('-', '_').replaceAll(' ', '_');
   }
 
-  bool _blocksHistoryExpandedSentence(String mode) {
-    final normalized = _normalizeHistoryMode(mode);
-    return normalized != 'step_expand';
-  }
-
   // 🏷️ [모드 별칭 해석표 — 표시명이 바뀔 때 여기만 한 줄씩 추가한다]
   //   저장 id는 절대 바꾸지 않는다. 이미 저장된 문서가 미분류로 떨어진다.
   //     free_talk   ← 표시명 Free Talk → Anyone → Circle Talk 로 변천
@@ -7301,322 +6941,287 @@ RULES — follow exactly:
     };
   }
 
-  bool _mentionsGenericAiPartner(String sentence) {
-    return RegExp(r'\b(the\s+AI|AI|assistant|chatbot|bot)\b',
-            caseSensitive: false)
-        .hasMatch(sentence);
-  }
+  /// 🗣️ [MY-SPEECH] 이 방이 MY SPEECH / NATIVE ENGLISH를 만들 수 있는 방인가.
+  ///
+  /// **세 대화 모드가 전부 만든다.** 사람이 실제로 나눈 대화가 있는 방이면
+  /// 그 대화가 곧 재료다. 옛 Clone 방도 같은 모양이라 함께 연다.
+  static const Set<String> _kSpeechPracticeModes = <String>{
+    'duo',
+    'free_talk',
+    'roleplay',
+    'clone',
+  };
 
-  bool _canUseCachedNamedPartnerExpand(
+  bool _supportsSpeechPractice(String mode) =>
+      _kSpeechPracticeModes.contains(_normalizeHistoryMode(mode));
+
+  /// 저장 모양의 판. 규칙이 바뀌면 이 값을 올려 옛 결과를 다시 만들게 한다.
+  static const String _kSpeechSchemaVersion = 'my_speech_v1';
+
+  /// 저장된 MY SPEECH를 그대로 써도 되는가.
+  ///
+  /// 판이 다르면 옛 규칙(대화 전체 요약 한 문장)으로 만든 글이라 쓰지 않는다.
+  /// 이름 있는 상대가 바뀐 방도 마찬가지다 — 그 이름으로 다시 만들어야 한다.
+  bool _canReuseStoredMySpeech(
     Map<String, dynamic>? data,
-    String expanded,
-    String nativeEnglish,
+    String mySpeech,
     Map<String, String> labels,
   ) {
-    // 🆕 [HANGUL-GUARD] 캐시된 완성/Native 문장에 한글이 섞여 있으면 거부 → 재생성 유도
-    final hangul = RegExp(r'[가-힣ᄀ-ᇿ㄰-㆏]');
-    if (hangul.hasMatch('$expanded $nativeEnglish')) return false;
+    if (mySpeech.trim().isEmpty) return false;
+    if (_historyString(data, 'speech_schema_version') !=
+        _kSpeechSchemaVersion) {
+      return false;
+    }
     final mode = labels['mode'] ?? '';
-    if (mode != 'clone' && mode != 'roleplay') return expanded.isNotEmpty;
-    if (_historyString(data, 'expand_schema_version') != 'named_partner_v1') {
-      return false;
-    }
-    if (_historyString(data, 'expand_partner_type') != mode) return false;
-    final savedPartner = _historyString(data, 'expand_partner_name');
-    if (savedPartner.isNotEmpty && savedPartner != labels['partnerLabel']) {
-      return false;
-    }
-    if (_mentionsGenericAiPartner('$expanded $nativeEnglish')) return false;
-    return expanded.isNotEmpty;
-  }
-
-  Future<String?> _generateExpandedFromConversation(
-    String transcript, {
-    String userLabel = 'User',
-    String partnerLabel = 'AI',
-    String mode = '',
-    String situation = '',
-  }) async {
-    if (_apiKey.isEmpty || transcript.trim().isEmpty) return null;
-    try {
-      final safeUserLabel =
-          userLabel.trim().isNotEmpty ? userLabel.trim() : 'the user';
-      final safePartnerLabel =
-          partnerLabel.trim().isNotEmpty ? partnerLabel.trim() : 'the partner';
-      final modeLine = mode == 'clone'
-          ? 'For clone mode: conversation is between $safeUserLabel and $safePartnerLabel, a named clone/persona.'
-          : mode == 'roleplay'
-              ? 'For roleplay mode: conversation is between $safeUserLabel and $safePartnerLabel, a roleplay character.'
-              : 'The transcript labels identify the participants.';
-      final situationLine = situation.trim().isNotEmpty
-          ? 'Situation: ${situation.trim()}. Use it only if supported by the transcript.'
-          : '';
-      final sysPrompt = """You are an English speaking coach.
-You are given a short conversation transcript.
-$modeLine
-$safePartnerLabel is not AI.
-$situationLine
-Your job: compose ONE long, natural English sentence that synthesizes the overall
-content and gist of the WHOLE conversation.
-
-[RULES]
-- Never call $safePartnerLabel AI, assistant, chatbot, or bot.
-- Use $safePartnerLabel or a natural role phrase when referring to the partner.
-- If any name, role label, or situation appears in Korean, render it in natural English (translate role or description phrases to their English equivalent; romanize real personal names). Never copy Korean text into the sentence.
-- The final sentence must be 100% English and must NOT contain any Korean (Hangul) characters.
-- It must be ONE single sentence (do not split it into multiple sentences).
-- Keep it 25–40 words.
-- Build it from about 5 meaning units joined with varied grammatical connectives
-  (because, so, while, which, after, even though, and, etc.).
-- Each meaning unit should be speakable in one breath, usually 5–7 words.
-- Use commas or natural connectors to make breath groups clear.
-- Do not create a sentence with one very long clause.
-- Natural, speakable rhythm — common spoken English only.
-- Capture the overall situation/idea of the conversation, not just one line.
-- Common everyday vocabulary only. Do not add facts not in the transcript.
-- Output exactly ONE sentence. No quotes, no prefixes, no explanation.${aiStylePromptBlock(targetLang: _sessionTargetLangName(), scope: 'the one English sentence you output', reach: AiStyleReach.wording)}""";
-      final response = await http
-          .post(
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
-            headers: {
-              'Authorization': 'Bearer $_apiKey',
-              'Content-Type': 'application/json; charset=utf-8',
-            },
-            body: jsonEncode({
-              'model': 'gpt-4o-mini',
-              'temperature': 0.2,
-              'max_tokens': 250,
-              'messages': [
-                {'role': 'system', 'content': sysPrompt},
-                {
-                  'role': 'user',
-                  'content':
-                      "Conversation:\n$transcript\n\nOne synthesized sentence:"
-                },
-              ],
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode != 200) return null;
-      final body =
-          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-      String s =
-          ((body['choices'] as List).first['message']['content'] as String)
-              .trim();
-      if (s.startsWith('"') && s.endsWith('"')) {
-        s = s.substring(1, s.length - 1);
+    if (mode == 'clone' || mode == 'roleplay') {
+      if (_historyString(data, 'speech_partner_type') != mode) return false;
+      final savedPartner = _historyString(data, 'speech_partner_name');
+      if (savedPartner.isNotEmpty && savedPartner != labels['partnerLabel']) {
+        return false;
       }
-      return s.isEmpty ? null : s;
-    } catch (e) {
-      debugPrint("[generateExpandedFromConversation] $e");
-      return null;
+    }
+    return true;
+  }
+
+  /// 저장된 NATIVE ENGLISH를 그대로 써도 되는가.
+  ///
+  /// 이 카드는 언제나 영어다. 한글이 섞여 있으면 만들다 만 값이라 버린다.
+  /// 두 카드가 같은 글자여도 버린다 — 견줄 것이 없으면 배울 것도 없다.
+  bool _canReuseStoredNativeEnglish(String nativeEnglish, String mySpeech) {
+    final text = nativeEnglish.trim();
+    if (text.isEmpty) return false;
+    if (_hangul.hasMatch(text)) return false;
+    if (text == mySpeech.trim()) return false;
+    return true;
+  }
+
+  /// messages 서브컬렉션 → My Speech가 읽을 대화록.
+  ///
+  /// **교정된 원어(`original_text`)를 쓴다.** 배울글은 번역을 한 번 거친 글이라
+  /// 유저가 실제로 무슨 뜻으로 말했는지가 옅어진다. 뜻의 근거는 유저가 자기
+  /// 말로 한 그 문장이어야 한다. 원어가 비어 있는 줄만 배울글로 받는다.
+  ///
+  /// HOST가 유저, SYSTEM이 상대다 — 세 모드가 같은 규칙으로 저장한다.
+  List<SpeechTranscriptTurn> _speechTranscriptTurns() {
+    final turns = <SpeechTranscriptTurn>[];
+    for (final doc in _cachedDocs) {
+      final data = doc.data() as Map<String, dynamic>?;
+      if (data == null) continue;
+      var text = _historyString(data, 'original_text');
+      if (text.isEmpty) text = _historyString(data, 'translated_text');
+      if (text.isEmpty) continue;
+      final role = (data['role'] as String?) ?? 'HOST';
+      turns.add(SpeechTranscriptTurn(isUser: role == 'HOST', text: text));
+    }
+    return turns;
+  }
+
+  /// 실패 종류를 유저 말로 옮긴다. 무엇을 다시 해야 하는지가 보여야 한다.
+  String _speechFailureMessage(SpeechBuildFailure failure) {
+    switch (failure) {
+      case SpeechBuildFailure.apiKeyMissing:
+        return 'API 키가 없어 만들 수 없습니다';
+      case SpeechBuildFailure.emptyTranscript:
+        return '내가 말한 내용이 없어 만들 수 없습니다';
+      case SpeechBuildFailure.timeout:
+        return '시간이 오래 걸려 멈췄습니다 — 다시 시도해 주세요';
+      case SpeechBuildFailure.httpError:
+      case SpeechBuildFailure.emptyReply:
+      case SpeechBuildFailure.transportError:
+      case SpeechBuildFailure.none:
+        return '만들지 못했습니다 — 다시 시도해 주세요';
     }
   }
 
-  // 🇺🇸 [NATIVE-ENGLISH] 완성문장 → 같은 생각을 원어민이 처음부터 영어로
-  //   짰다면 어떻게 말했을지. 지시문 본문은 로비 Native 스타일 바로 옆에
-  //   산다([buildNativeEnglishSentenceInstructions]) — 앱 안에서 Native가
-  //   두 가지 뜻을 갖지 않게 하려는 것이다.
-  //
-  //   ⚠️ 실패하면 **null이다.** 예전에는 원문을 그대로 돌려줬는데, 그러면
-  //   P3에 똑같은 문장이 두 카드로 뜬다. Final과 Native가 같은 글자면
-  //   유저가 배울 것이 아무것도 없다.
-  Future<String?> _buildNativeEnglish(
-    String originalSentence, {
-    String partnerLabel = 'the partner',
-  }) async {
-    if (_apiKey.isEmpty || originalSentence.trim().isEmpty) return null;
-    try {
-      final sysPrompt = buildNativeEnglishSentenceInstructions(
-        partnerLabel: partnerLabel,
-      );
-      final response = await http
-          .post(
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
-            headers: {
-              'Authorization': 'Bearer $_apiKey',
-              'Content-Type': 'application/json; charset=utf-8',
-            },
-            body: jsonEncode({
-              // 다듬기가 아니라 재구성이라 4o-mini로는 원문 배열을 그대로
-              // 되돌려주는 일이 잦다. 사다리를 만드는 모델과 같은 급을 쓴다.
-              'model': 'gpt-4.1-mini',
-              'temperature': 0.4,
-              'max_tokens': 300,
-              'messages': [
-                {'role': 'system', 'content': sysPrompt},
-                {
-                  'role': 'user',
-                  'content':
-                      'The sentence as the user built it:\n$originalSentence'
-                },
-              ],
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode != 200) return null;
-      final body =
-          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-      String rebuilt =
-          ((body['choices'] as List).first['message']['content'] as String)
-              .trim();
-      if (rebuilt.startsWith('"') && rebuilt.endsWith('"')) {
-        rebuilt = rebuilt.substring(1, rebuilt.length - 1).trim();
-      }
-      return rebuilt.isEmpty ? null : rebuilt;
-    } catch (e) {
-      debugPrint("[buildNativeEnglish] $e");
-      return null;
-    }
-  }
-
-  // 🆕 [EXPAND-FROM-CHAT v2] 저장된 완성/Native 문장 우선 → 없으면 전체 대화로 생성+캐시 → P3 이동
-  Future<void> _buildExpandFromConversation() async {
-    if (_isBuildingExpand) return;
-    if (mounted) setState(() => _isBuildingExpand = true);
+  /// 🗣️ [MY-SPEECH] Practice 다음 단계. 대화 전체 → MY SPEECH → NATIVE ENGLISH.
+  ///
+  /// 순서를 지킨다. Native English는 **언제나 My Speech를 입력으로** 받는다 —
+  /// 대화 원문에서 바로 만들면 상대방이 한 말이 섞여 들어올 길이 열린다.
+  ///
+  /// ⚠️ 한쪽이 실패해도 다른 쪽 글자를 복사해 채우지 않는다. 두 카드가 같은
+  ///    문장이면 견줄 것이 없어 학습이 죽는다. 실패는 실패로 남기고 카드에서
+  ///    다시 시도하게 한다.
+  Future<void> _buildMySpeechFromConversation() async {
+    if (_isBuildingMySpeech) return;
+    if (mounted) setState(() => _isBuildingMySpeech = true);
     try {
       audioPlayer.stop();
       _stopAutoVADRecording();
 
-      // 1순위: 방 문서에 이미 저장된 완성/Native 문장 (+ mode/room_name 확보)
-      String expanded = "";
-      String nativeEnglish = "";
-      String existingMode = "";
-      String roomName = "";
-      Map<String, dynamic>? historyData;
-      Map<String, String> labels = {
-        'mode': '',
-        'userLabel': 'User',
-        'partnerLabel': 'AI',
-        'partnerType': '',
-        'situation': '',
-      };
+      Map<String, dynamic>? roomData = _cachedRoomData;
       try {
         final snap = await widget.historyDoc.get();
-        final d = snap.data() as Map<String, dynamic>?;
-        historyData = d;
-        expanded = (d?['expanded_sentence'] as String?)?.trim() ?? "";
-        nativeEnglish = (d?['native_english'] as String?)?.trim() ?? "";
-        existingMode = _inferHistoryMode(d);
-        roomName = (d?['room_name'] as String?)?.trim() ?? "";
-        labels = await _resolveHistoryExpandLabels(d);
+        final fresh = snap.data() as Map<String, dynamic>?;
+        if (fresh != null) {
+          roomData = fresh;
+          _cachedRoomData = fresh;
+        }
       } catch (e) {
-        debugPrint("[buildExpand] doc fetch $e");
+        debugPrint('[MY-SPEECH] room fetch $e');
       }
       if (!mounted) return;
 
-      if (_blocksHistoryExpandedSentence(existingMode)) {
-        if (mounted) setState(() => _isBuildingExpand = false);
+      final mode = _inferHistoryMode(roomData);
+      _cachedRoomMode = mode;
+      if (!_supportsSpeechPractice(mode)) {
+        _showRoomEntryToast('이 방에서는 MY SPEECH를 만들 수 없습니다');
         return;
       }
 
-      if (!_canUseCachedNamedPartnerExpand(
-          historyData, expanded, nativeEnglish, labels)) {
-        expanded = "";
-        nativeEnglish = "";
+      final labels = await _resolveHistoryExpandLabels(roomData);
+      if (!mounted) return;
+
+      var mySpeech = _historyString(roomData, 'my_speech');
+      var nativeEnglish = _historyString(roomData, 'native_english');
+      if (!_canReuseStoredMySpeech(roomData, mySpeech, labels)) {
+        mySpeech = '';
+        nativeEnglish = '';
       }
 
-      // 2순위(fallback): 저장값 없으면 전체 대화로 즉석 생성 후 캐시
-      if (expanded.isEmpty) {
-        if (_apiKey.isEmpty) {
-          setState(() => _isBuildingExpand = false);
-          _showRoomEntryToast("API 키가 없어 생성할 수 없습니다");
-          return;
-        }
-        final transcript = _tutorLines
-            .map((l) {
-              final t = (l['text'] as String? ?? '').trim();
-              if (t.isEmpty) return null;
-              final role = (l['role'] as String?) ?? '';
-              final namedMode =
-                  labels['mode'] == 'clone' || labels['mode'] == 'roleplay';
-              final who = namedMode
-                  ? (role == 'SYSTEM'
-                      ? labels['partnerLabel']!
-                      : labels['userLabel']!)
-                  : (role == 'HOST' ? 'AI' : 'User');
-              return "$who: $t";
-            })
-            .whereType<String>()
-            .join("\n");
-        if (transcript.isEmpty) {
-          setState(() => _isBuildingExpand = false);
-          _showRoomEntryToast("연습할 대화가 없습니다");
-          return;
-        }
-        final gen = await _generateExpandedFromConversation(
-          transcript,
-          userLabel: labels['userLabel']!,
-          partnerLabel: labels['partnerLabel']!,
-          mode: labels['mode']!,
-          situation: labels['situation']!,
+      // 1) MY SPEECH — 유저가 실제로 표현한 의미만 모은다.
+      if (mySpeech.isEmpty) {
+        final result = await MySpeechBuilder.build(
+          apiKey: _apiKey,
+          turns: _speechTranscriptTurns(),
+          targetLang: _sessionTargetLangName(),
+          userLabel: labels['userLabel'] ?? '',
+          partnerLabel: labels['partnerLabel'] ?? '',
+          situation: labels['situation'] ?? '',
+          onLog: (tag, message) => debugPrint('$tag $message'),
         );
         if (!mounted) return;
-        if (gen == null || gen.isEmpty) {
-          setState(() => _isBuildingExpand = false);
-          _showRoomEntryToast("확장문장 생성 실패");
+        if (!result.isUsable) {
+          _showRoomEntryToast(
+              'MY SPEECH — ${_speechFailureMessage(result.failure)}');
           return;
         }
-        expanded = gen;
-        final rebuilt = await _buildNativeEnglish(
-          expanded,
-          partnerLabel: labels['partnerLabel']!,
-        );
-        if (!mounted) return;
-        nativeEnglish = (rebuilt != null && rebuilt.trim().isNotEmpty)
-            ? rebuilt.trim()
-            : "";
-
-        // 캐시 저장 — has_practice + mode stamp(없으면 room_name으로 추론)로
-        // 재입장 시 라우터가 expanded만 있는 모호한 방을 Step Expand로 오인하지 않게 보장
-        String stampMode = existingMode;
-        if (stampMode.isEmpty) {
-          if (roomName == "Clone Mode") {
-            stampMode = "clone";
-          } else if (roomName == "Roleplay Mode") {
-            stampMode = "roleplay";
-          } else {
-            stampMode = "clone"; // 안전 기본값: step_expand만 아니면 Tutor로 라우팅됨
-          }
-        }
+        mySpeech = result.text;
+        nativeEnglish = '';
         try {
-          await widget.historyDoc.update({
-            'expanded_sentence': expanded,
-            if (nativeEnglish.isNotEmpty) 'native_english': nativeEnglish,
+          await widget.historyDoc.update(<String, dynamic>{
+            'my_speech': mySpeech,
+            'speech_schema_version': _kSpeechSchemaVersion,
+            'speech_generated_at': FieldValue.serverTimestamp(),
+            'speech_user_label': labels['userLabel'],
+            'speech_partner_name': labels['partnerLabel'],
+            'speech_partner_type': labels['partnerType'],
             'has_practice': true,
-            'expand_source': 'fallback',
-            'expand_generated_at': FieldValue.serverTimestamp(),
-            'expand_user_label': labels['userLabel'],
-            'expand_partner_name': labels['partnerLabel'],
-            'expand_partner_type': labels['partnerType'],
-            'expand_schema_version': 'named_partner_v1',
-            if (existingMode.isEmpty) 'mode': stampMode,
           });
         } catch (e) {
-          debugPrint("[buildExpand] cache write $e");
+          debugPrint('[MY-SPEECH] cache write $e');
         }
         if (!mounted) return;
       }
 
-      // P3 진입 준비
-      _expandedSentence = expanded;
-      _nativeEnglish = nativeEnglish;
-      _nativeEnglishLoadDone = true;
-      _practicingNativeEnglish = false;
-      _nativeEnglishUnits = [];
-      _nativeEnglishUnitIdx = -1;
+      if (!_canReuseStoredNativeEnglish(nativeEnglish, mySpeech)) {
+        nativeEnglish = '';
+      }
 
-      setState(() => _isBuildingExpand = false);
-      _goToChunkPractice();
+      _mySpeech = mySpeech;
+      _nativeEnglish = nativeEnglish;
+      _nativeEnglishLoadDone = nativeEnglish.isNotEmpty;
+      _nativeEnglishError = null;
+      _practicingNativeEnglish = false;
+      _nativeEnglishUnits = <String>[];
+      _nativeEnglishUnitIdx = -1;
+      _selectedVariant = SentenceVariant.mySpeech;
+
+      setState(() {
+        _isBuildingMySpeech = false;
+        isPracticeMode = true;
+        _phase = ShadowingPhase.variantSelect;
+      });
+      // 2) NATIVE ENGLISH — 같은 의미를 미국식 사고 배열로 다시 세운다.
+      //    화면은 먼저 뜬다. 이 카드만 뒤늦게 채워진다.
+      if (nativeEnglish.isEmpty) {
+        unawaited(_prepareNativeEnglish(mySpeech, ++_nativeEnglishGeneration));
+      }
     } catch (e) {
-      debugPrint("[buildExpandFromConversation] $e");
-      if (mounted) {
-        setState(() => _isBuildingExpand = false);
-        _showRoomEntryToast("오류: $e");
+      debugPrint('[MY-SPEECH] $e');
+      if (mounted) _showRoomEntryToast('오류: $e');
+    } finally {
+      if (mounted && _isBuildingMySpeech) {
+        setState(() => _isBuildingMySpeech = false);
       }
     }
   }
 
+  /// 🇺🇸 [NATIVE-ENGLISH] My Speech를 입력으로 두 번째 카드를 만든다.
+  ///
+  /// 실패하면 **빈 채로 둔다.** My Speech를 복사해 넣지 않는다.
+  Future<void> _prepareNativeEnglish(String mySpeech, int generation) async {
+    if (mySpeech.trim().isEmpty) return;
+    if (mounted) {
+      setState(() {
+        _nativeEnglishLoadDone = false;
+        _nativeEnglishError = null;
+      });
+    }
+    final result = await NativeEnglishSpeechBuilder.build(
+      apiKey: _apiKey,
+      mySpeech: mySpeech,
+      onLog: (tag, message) => debugPrint('$tag $message'),
+    );
+    if (!mounted || generation != _nativeEnglishGeneration) return;
+    if (!result.isUsable) {
+      setState(() {
+        _nativeEnglishLoadDone = true;
+        _nativeEnglishError = _speechFailureMessage(result.failure);
+      });
+      return;
+    }
+    final text = result.text;
+    setState(() {
+      _nativeEnglish = text;
+      _nativeEnglishLoadDone = true;
+      _nativeEnglishError = null;
+    });
+    try {
+      await widget.historyDoc.update(<String, dynamic>{
+        'native_english': text,
+        'speech_schema_version': _kSpeechSchemaVersion,
+        'has_practice': true,
+      });
+    } catch (e) {
+      debugPrint('[NATIVE-ENGLISH] cache write $e');
+    }
+  }
+
+  /// Native English 카드의 "다시 시도".
+  void _retryNativeEnglish() {
+    if (_mySpeech.trim().isEmpty) return;
+    unawaited(_prepareNativeEnglish(_mySpeech, ++_nativeEnglishGeneration));
+  }
+
+  /// P3에서 X를 누르면 두 문장 고르는 자리로 돌아간다. 방을 닫지 않는다.
+  void _backToSpeechSelect() {
+    unawaited(_stopP3Shadowing(resetSelection: true));
+    _echoingOverlayTimer?.cancel();
+    audioPlayer.stop();
+    if (!mounted) return;
+    setState(() {
+      _phase = ShadowingPhase.variantSelect;
+      _isListening = false;
+      _isPlayingFullUser = false;
+      _isPlayingFullAI = false;
+      _isReplayMode = false;
+      _aiChunkPlaying = false;
+      _aiChunkLoading = false;
+      _currentChunkIdx = 0;
+    });
+  }
+
+  /// MY SPEECH / NATIVE ENGLISH 카드 하나를 골라 훈련으로 들어간다.
+  void _openSpeechStage(SentenceVariant variant) {
+    _selectedVariant = variant;
+    _goToChunkPractice();
+  }
+
+  /// 고른 문장으로 Speaking Practice(에코잉·쉐도잉)를 연다.
+  ///
+  /// ⚠️ 여기서 `_selectedVariant`를 손대지 않는다. 어느 카드를 눌렀는지는
+  ///    [_openSpeechStage]가 이미 정해 두었고, 여기서 다시 덮으면 NATIVE
+  ///    ENGLISH를 눌러도 MY SPEECH가 열린다.
   void _goToChunkPractice() {
     if (!mounted) return;
     _silenceTimer?.cancel();
@@ -7632,7 +7237,6 @@ content and gist of the WHOLE conversation.
         _showRetryHint = false;
         _currentChunkIdx = -1;
         _phase = ShadowingPhase.chunkPractice;
-        _selectedVariant = SentenceVariant.expanded;
         // 🎤 [P3-SPEAK] 새 세션으로 연다. 이전 녹음은 남기지 않는다 —
         //   AI 원본 TTS 캐시는 그대로 재사용된다.
         _p3Stage = P3Stage.idle;
@@ -7838,7 +7442,8 @@ enum ShadowingPhase {
   chunkPractice,
 }
 
-enum SentenceVariant { expanded, nativeEnglish }
+/// 두 학습 문장. 화면 이름은 MY SPEECH / NATIVE ENGLISH다.
+enum SentenceVariant { mySpeech, nativeEnglish }
 
 enum P3PracticeMode { echoing, shadowing }
 

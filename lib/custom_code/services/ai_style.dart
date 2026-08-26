@@ -137,12 +137,12 @@ Write clear, natural, neutral international English.
   }
 }
 
-/// 🇺🇸 [NATIVE-ENGLISH] P3 두 번째 문장을 만드는 지시문.
+/// 🇺🇸 [NATIVE-ENGLISH] 두 번째 학습 문장을 만드는 지시문.
 ///
 /// 예전 이름은 **Polished**였고, 하는 일도 달랐다 — 원문을 조금 더 매끄럽게
-/// 다듬는 것이었다. 그러면 P2 마지막 칸(Final Sentence)과 차이가 거의 없다.
-/// 같은 정보 배열에 단어만 조금 나은 문장이 하나 더 생길 뿐이라, 유저는
-/// "단어가 이렇게 바뀌었구나"까지만 배우고 끝났다.
+/// 다듬는 것이었다. 그러면 앞 카드와 차이가 거의 없다. 같은 정보 배열에 단어만
+/// 조금 나은 글이 하나 더 생길 뿐이라, 유저는 "단어가 이렇게 바뀌었구나"까지만
+/// 배우고 끝났다.
 ///
 /// 그래서 이름과 함께 일을 바꿨다. StealthVox에서 Native의 정의는 하나다 —
 /// **영어처럼 번역하는 것이 아니라, 영어로 다시 생각해서 표현하는 것.**
@@ -150,48 +150,64 @@ Write clear, natural, neutral international English.
 /// 안에 박아 쓴다. 두 곳에 따로 적히기 시작하면 앱 안에서 Native가 서로 다른
 /// 두 가지 뜻을 갖게 된다.
 ///
-/// ⚠️ **로비 스타일 블록([aiStylePromptBlock])을 붙이지 않는다.** 유저가
-/// British를 골랐다고 "Native English" 카드가 영국식이 되면 카드 이름이
-/// 거짓말이 된다. 로비 스타일을 받는 자리는 Final Sentence 쪽이다.
+/// 입력은 **My Speech 한 벌 전체**다. 한 문장이 아니라 여러 문장일 수 있고,
+/// 문장 수가 바뀌어도 된다 — 바뀌어야 할 때가 더 많다.
 ///
-/// [partnerLabel]은 대화 상대의 이름이다. 비어 있지 않으면 그 이름을 AI나
-/// assistant로 바꿔치기하지 말라고 못 박는다.
-String buildNativeEnglishSentenceInstructions({String partnerLabel = ''}) {
-  final label = partnerLabel.trim();
-  final partnerRule = label.isEmpty
-      ? ''
-      : '\n- Do not replace $label with AI, assistant, chatbot, or bot.';
-  return '''You are rebuilding ONE finished thought as English.
+/// ⚠️ **로비 스타일 블록([aiStylePromptBlock])을 붙이지 않는다.** 유저가
+/// British를 골랐다고 "NATIVE ENGLISH" 카드가 영국식이 되면 카드 이름이
+/// 거짓말이 된다. 로비 스타일을 받는 자리는 My Speech 쪽이다.
+String buildNativeEnglishSpeechInstructions() {
+  return '''You are rebuilding ONE complete personal speech as Native English.
 
-What you are given is a sentence the user built step by step and then carried into
-English. The meaning is theirs and the facts are theirs, but the information is still
-arranged the way they originally thought it.
+What you are given is My Speech: a faithful reconstruction of what the user themselves
+expressed across a conversation. The meaning is already complete and belongs entirely
+to the user.
 
-Your job is NOT to translate it, and NOT to polish it. Write what a US native speaker
-would say if this thought had been theirs from the start — thought out in English,
-not carried over into English.
+Your job is NOT to translate it and NOT to polish it.
+Write what a US native English speaker would naturally say if this entire thought had
+originally been formed in English from the start.
 
 ${aiStyleInstruction('Native')}
 
-[HOW A NATIVE ORGANISES IT]
-- Lead with where they actually stand, then put what sits behind it.
-- Let the tension land as a real turn: what they want against what holds them back.
-- Close on their own reading of it — what they make of it — when the material
-  already supports one. Never manufacture a conclusion to close on.
-- Reorder, merge, or split as needed. The sentence count may change.
+[THINK IN ENGLISH]
+Do not preserve the source information order merely because it appears in that order.
+Organize the thought the way a US native speaker would naturally develop it.
+Commonly this means finding the most natural relationship among things such as:
+- where the speaker actually stands
+- what is behind that position
+- the most relevant reason or detail
+- a real contrast or tension
+- what the speaker personally makes of it
+- where the thought naturally lands
+These are not mandatory stages. Never force every speech through the same formula.
+Choose only the structure that naturally fits the user's actual material.
+
+[REBUILD FREELY, WITHIN THE SAME MEANING]
+You may reorder ideas, merge ideas, split sentences, shorten repeated material, move the
+main point earlier, turn a weak chronological sequence into a clearer spoken argument,
+make contrast or tension land naturally, and change the number of sentences.
 
 [HARD LIMITS]
-- Use only the meaning, facts, feelings, and stance already in what you are given.
-- Never add a fact, reason, feeling, or conclusion the user did not express.
-- Never drop something they did express, and never flip or soften their position.
-- Everyday spoken English. No SAT words, no written prose, no piled-up idioms.
-- Render every participant name, role label, and situation in English (translate role
-  or description phrases; romanize real personal names).
-- The result must be 100% English and must NOT contain any Hangul characters.$partnerRule
+Use only meaning already contained in My Speech.
+Never add a new fact, reason, feeling, opinion, motivation, plan, or conclusion.
+Never remove an important meaning the user expressed.
+Never change or soften the user's stance.
+Never turn uncertainty into certainty.
+Never manufacture a conclusion merely to make the speech sound complete.
+
+[US NATIVE SPOKEN ENGLISH]
+Use everyday US spoken English. Prefer ordinary verbs, natural collocations,
+contractions, clear spoken rhythm, and phrases a real person could comfortably say aloud.
+Avoid SAT vocabulary, literary prose, formal essay language, excessive idioms, and slang
+inserted merely to sound American.
+Native means native thought organization, not decorative American vocabulary.
+Render every participant name, role label, and situation in English (translate role or
+description phrases; romanize real personal names). The result must be 100% English and
+must NOT contain any Hangul characters.
 
 [OUTPUT]
-- One to three short spoken sentences. It has to be sayable out loud in one go.
-- No explanation, no quotes, no labels. Just the sentences.''';
+Output only the Native English speech.
+No explanation. No labels. No quotation marks. No comparison commentary.''';
 }
 
 /// 스타일이 문장의 어디까지 닿는가.
