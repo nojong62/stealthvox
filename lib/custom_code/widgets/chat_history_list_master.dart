@@ -1160,6 +1160,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
               onPressed: () => Navigator.pop(context),
               child: const Text("취소", style: TextStyle(color: Colors.grey))),
           TextButton(
+              // 지우면 그 줄이 목록에서 곧바로 사라진다. 그게 이미 대답이라
+              // 알림을 겹쳐 띄우지 않는다 — 물어보고, 누르면, 사라진다.
               onPressed: () async {
                 Navigator.pop(context);
                 try {
@@ -1167,13 +1169,6 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                     'is_deleted': true,
                     'deleted_at': FieldValue.serverTimestamp()
                   });
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                        content: Text("삭제되었습니다.",
-                            style: TextStyle(fontWeight: FontWeight.bold)),
-                        backgroundColor: Colors.redAccent,
-                        duration: Duration(seconds: 1)));
-                  }
                 } catch (e) {
                   debugPrint('[Keepers] delete error: $e');
                 }
