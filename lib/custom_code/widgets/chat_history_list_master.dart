@@ -249,15 +249,11 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
         backgroundColor: const Color(0xFF1A1A1A),
         automaticallyImplyLeading: false,
         leadingWidth: 96,
+        // 🔖 스토어는 스텔스룸 상단 줄로 옮겼다. 이 자리는 이 화면에서 자주
+        //   쓰는 것에 내준다 — 스텔스룸(대화하러 가기)과 Keepers(모아 둔 문장).
         leading: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            IconButton(
-              padding: EdgeInsets.zero,
-              tooltip: '스토어',
-              icon: const Icon(Icons.storefront_rounded, color: Colors.white70),
-              onPressed: () => context.pushNamed('Store'),
-            ),
             IconButton(
               padding: EdgeInsets.zero,
               tooltip: '스텔스룸',
@@ -266,6 +262,20 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                 if (!guardBillingEntry(context)) return;
                 context.pushNamed('StealthRoom');
               },
+            ),
+            IconButton(
+              padding: EdgeInsets.zero,
+              tooltip: _selectedFilter == 'Keepers' ? '전체 대화 보기' : 'Keepers',
+              icon: Icon(
+                Icons.bookmark_rounded,
+                // 켜져 있을 때는 아래 필터칩과 같은 색으로 물든다. 지금 무엇을
+                // 보고 있는지가 두 자리에서 같은 신호로 읽혀야 한다.
+                color: _selectedFilter == 'Keepers'
+                    ? _keepersColor
+                    : Colors.white70,
+              ),
+              onPressed: () => _switchFilter(
+                  _selectedFilter == 'Keepers' ? 'All' : 'Keepers'),
             ),
           ],
         ),

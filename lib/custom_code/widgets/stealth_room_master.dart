@@ -956,13 +956,17 @@ Return ONLY valid JSON: {"name":"..."}.
               constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
               onPressed: () => context.pushNamed('Lobby'),
             ),
+            // 🛒 예전에는 여기가 뒤로가기(`context.pop()`)였다. 이 줄에는
+            //   로비·공부방으로 곧장 가는 문이 이미 있어서 "이전 단계"가
+            //   갈 곳이 겹쳤다. 그 자리를 스토어에 내준다 — 히스토리 목록에
+            //   있던 것과 같은 아이콘이라 두 화면에서 같은 문으로 읽힌다.
             IconButton(
-              icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                  color: Color(0xFF22D3EE), size: 22),
-              tooltip: '이전 단계',
+              icon: const Icon(Icons.storefront_rounded,
+                  color: Color(0xFF22D3EE), size: 24),
+              tooltip: '스토어',
               padding: const EdgeInsets.symmetric(horizontal: 8),
               constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-              onPressed: () => context.pop(),
+              onPressed: () => context.pushNamed('Store'),
             ),
             const Spacer(),
             // 이름은 통째로 적힌다. 잘리지도, 줄임표가 붙지도 않는다.
