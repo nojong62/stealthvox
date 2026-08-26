@@ -260,6 +260,10 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   /// 📜 [P3-READ-SCROLL] 본문 패널의 자리를 재는 데 쓴다.
   final GlobalKey _p3SentenceKey = GlobalKey();
 
+  /// 📜 [P3-READ-SCROLL] 본문 **아래** 컨트롤 묶음([AI]·[ECHO]·[SHADOW]
+  /// 듣기와 Stop). 다 읽었을 때 여기까지 화면에 들어와야 한다.
+  final GlobalKey _p3ControlsKey = GlobalKey();
+
   /// 손으로 스크롤한 뒤에는 자동으로 밀지 않는다. 읽는 자리를 직접 잡은
   /// 사람과 싸우면 안 된다. 다음 Start에서 다시 열린다.
   bool _p3AutoScrollBlocked = false;
@@ -5497,7 +5501,12 @@ RULES — follow exactly:
   }
 
   /// 📜 [P3-READ-SCROLL] 읽는 진행만큼 **페이지를** 민다. 0이면 문장 첫 줄이
-  /// 화면 위, 1이면 문장 끝이 화면 아래에 닿는다.
+  /// 화면 위, 1이면 **문장 끝과 그 아래 버튼까지** 화면 안에 들어온다.
+  ///
+  /// 끝점을 문장 패널 하단으로 잡으면 패널 바로 밑의 [AI]·[ECHO]·[SHADOW]
+  /// 듣기 줄과 Stop이 화면 밖에 남는다. 한 문장짜리 시절에는 패널이 작아
+  /// 애초에 다 보였지만, My Speech는 여러 문장이라 패널이 화면을 채운다.
+  /// 그래서 끝점을 **컨트롤 묶음 하단**까지 넓힌다.
   ///
   /// 스크롤 면은 페이지 하나뿐이다. 문장 칸에 자기 스크롤을 주면 그 위에
   /// 얹힌 손가락이 갇혀 아래 버튼까지 못 내려간다.
@@ -5516,7 +5525,17 @@ RULES — follow exactly:
     if (viewport == null) return;
     // alignment 0 = 패널 위가 화면 위, 1 = 패널 아래가 화면 아래.
     final double top = viewport.getOffsetToReveal(box, 0.0).offset;
-    final double bottom = viewport.getOffsetToReveal(box, 1.0).offset;
+    double bottom = viewport.getOffsetToReveal(box, 1.0).offset;
+    // 아래 버튼까지가 끝이다. 둘 중 더 아래를 끝점으로 삼는다.
+    final controlsBox =
+        _p3ControlsKey.currentContext?.findRenderObject() as RenderBox?;
+    if (controlsBox != null && controlsBox.hasSize) {
+      final double controlsBottom =
+          viewport.getOffsetToReveal(controlsBox, 1.0).offset;
+      if (controlsBottom > bottom) bottom = controlsBottom;
+    }
+    // 본문과 버튼이 통째로 한 화면에 들어오면 `bottom <= top`이라 여기서
+    // 멈춘다 — 짧은 문장은 예전처럼 한 번도 움직이지 않는다.
     if (bottom <= top) return;
     final double max = c.position.maxScrollExtent;
     final double target =
@@ -5796,6 +5815,10 @@ RULES — follow exactly:
       return;
     }
     _setP3Stage(P3Stage.fullEchoRecord);
+    // 📜 방금 낭독이 끝난 자리는 문장 **끝**이다. 이제 유저가 처음부터 통째로
+    //    말할 차례라 첫 줄로 되돌린다. 이 구간에는 진행을 알려 줄 소리가 없어
+    //    자동으로 밀지 않는다 — 그 뒤로는 손으로 끄는 대로 둔다.
+    _p3ScrollReadingTo(0);
     _watchP3Silence(
       generation,
       silenceMs: _kP3EchoSilenceMs,
@@ -6209,12 +6232,20 @@ RULES — follow exactly:
                       ),
                     ],
                     const SizedBox(height: 18),
-                    _buildP3CompareRow(),
-                    const SizedBox(height: 12),
-                    // 맨 밑 정지 — 연습을 접고 첫 화면으로 돌아간다.
-                    _p3SecondaryButton(
-                      '■ Stop',
-                      () => unawaited(_stopP3AndReturnToMenu()),
+                    // 📜 [P3-READ-SCROLL] 다 읽었을 때 화면에 들어와야 하는
+                    //    끝자락이다. 자동 스크롤이 이 묶음을 기준으로 멈춘다.
+                    Column(
+                      key: _p3ControlsKey,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _buildP3CompareRow(),
+                        const SizedBox(height: 12),
+                        // 맨 밑 정지 — 연습을 접고 첫 화면으로 돌아간다.
+                        _p3SecondaryButton(
+                          '■ Stop',
+                          () => unawaited(_stopP3AndReturnToMenu()),
+                        ),
+                      ],
                     ),
                     // 연습칸이 화면 맨 위까지 올라갈 수 있으려면 아래에 여백이
                     // 있어야 한다. 없으면 스크롤이 끝에 걸려 메뉴가 안 밀린다.
