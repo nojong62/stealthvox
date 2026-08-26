@@ -626,77 +626,116 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   ///   회색으로 두면 눈에 안 들어오고(실기기에서 확인), 밝게 하면 정작
   ///   골라야 하는 언어 이름보다 세진다. 그래서 청록을 옅게 깔고 자간만
   ///   벌린다 — 색이 아니라 결로 도드라지게.
+  /// ORIGIN / TARGET 한 칸. **전체 폭을 쓴다.**
+  ///
+  /// 선택지(`languages`)도 저장 위치(`FFAppState`)도 예전 그대로다.
+  ///
+  /// 👆 [터치 영역] **칸 전체가 버튼이다.** 예전에는 드롭다운이 아랫줄만
+  ///   차지해서, 라벨(`ORIGIN (Chat Lang)`)이나 칸 가장자리를 누르면 아무
+  ///   일도 일어나지 않았다 — 눌리는 자리가 눈에 보이는 상자보다 작았다.
+  ///   라벨을 `selectedItemBuilder` 안으로 넣어 상자와 버튼을 같은 크기로
+  ///   맞춘다. 이제 어디를 눌러도 목록이 열린다.
+  ///
+  /// 📐 부제(`(Chat Lang)` / `(Learn Lang)`)는 **튀지 않게 강조한다.**
+  ///   회색으로 두면 눈에 안 들어오고, 밝게 하면 정작 골라야 하는 언어
+  ///   이름보다 세진다. 그래서 청록을 옅게 깔고 자간만 벌린다.
   Widget _buildLangField(
     String label,
     String subtitle,
     String value,
     ValueChanged<String?> onChanged,
   ) {
+    Widget labelRow() => Row(
+          crossAxisAlignment: CrossAxisAlignment.baseline,
+          textBaseline: TextBaseline.alphabetic,
+          children: [
+            Text(
+              label,
+              maxLines: 1,
+              style: const TextStyle(
+                color: _kLobbyTextMid,
+                fontSize: 11,
+                letterSpacing: 1.4,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(width: 7),
+            Flexible(
+              child: Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: _kLobbyCyan.withValues(alpha: 0.72),
+                  fontSize: 11,
+                  letterSpacing: 0.4,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        );
+
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 12, 6),
       decoration: BoxDecoration(
         color: _kLobbySurfaceHi,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: _kLobbyBorder),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text(
-                label,
-                maxLines: 1,
-                style: const TextStyle(
-                  color: _kLobbyTextMid,
-                  fontSize: 11,
-                  letterSpacing: 1.4,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(width: 7),
-              Flexible(
-                child: Text(
-                  subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: _kLobbyCyan.withValues(alpha: 0.72),
-                    fontSize: 11,
-                    letterSpacing: 0.4,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: languages.contains(value) ? value : languages[0],
+          dropdownColor: _kLobbySurfaceHi,
+          isExpanded: true,
+          // 닫혀 있을 때 상자 안에 그릴 것 — 라벨과 고른 언어를 함께 둔다.
+          // 이 위젯이 곧 버튼의 크기라, 라벨까지 누르는 자리가 된다.
+          selectedItemBuilder: (context) => languages
+              .map((String lang) => Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 4, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        labelRow(),
+                        const SizedBox(height: 2),
+                        Text(
+                          lang,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: _kLobbyTextHi,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ))
+              .toList(),
+          icon: const Padding(
+            padding: EdgeInsets.only(right: 12),
+            child: Icon(Icons.keyboard_arrow_down_rounded,
+                color: _kLobbyTextMid, size: 22),
           ),
-          DropdownButtonHideUnderline(
-            child: DropdownButton<String>(
-              value: languages.contains(value) ? value : languages[0],
-              dropdownColor: _kLobbySurfaceHi,
-              isExpanded: true,
-              isDense: true,
-              icon: const Icon(Icons.keyboard_arrow_down_rounded,
-                  color: _kLobbyTextMid, size: 20),
-              style: const TextStyle(
-                color: _kLobbyTextHi,
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-              ),
-              items: languages
-                  .map((String lang) => DropdownMenuItem<String>(
-                        value: lang,
-                        child: Text(lang,
-                            maxLines: 1, overflow: TextOverflow.ellipsis),
-                      ))
-                  .toList(),
-              onChanged: onChanged,
-            ),
+          // 목록 쪽 글자. 닫힌 상자는 위 builder가 그리므로 여기 값은
+          // 펼친 목록에만 쓰인다.
+          style: const TextStyle(
+            color: _kLobbyTextHi,
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
           ),
-        ],
+          itemHeight: 52,
+          borderRadius: BorderRadius.circular(16),
+          items: languages
+              .map((String lang) => DropdownMenuItem<String>(
+                    value: lang,
+                    child: Text(lang,
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ))
+              .toList(),
+          onChanged: onChanged,
+        ),
       ),
     );
   }
@@ -1198,16 +1237,26 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                           Expanded(child: _buildSectionLabel('LANGUAGE')),
                           // ⚙️ AI STYLE·TONE은 이 뒤에 있다. 로비 본문에
                           //   두었더니 ENTER 아래로 밀려 안 보였다.
-                          SizedBox(
-                            width: 34,
-                            height: 34,
-                            child: IconButton(
-                              padding: EdgeInsets.zero,
-                              tooltip: 'AI 설정',
-                              icon: const Icon(Icons.settings_outlined,
-                                  color: _kLobbyTextMid, size: 19),
-                              onPressed: _openAiSettingsSheet,
+                          //
+                          // 👆 [터치 영역] 34×34이라 눌리는 자리가 아이콘보다
+                          //   겨우 컸다. 안드로이드 권장 최소가 48이고, 이
+                          //   뒤에 있는 설정으로 가는 유일한 문이라 넓힌다.
+                          //   옅은 원도 깐다 — 아이콘만 떠 있으면 눌러도 되는
+                          //   곳인지 알기 어렵다(Duo 초대 버튼과 같은 처방).
+                          IconButton(
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                                minWidth: 48, minHeight: 48),
+                            tooltip: 'AI 설정',
+                            icon: const Icon(Icons.settings_outlined,
+                                color: _kLobbyTextMid, size: 20),
+                            style: IconButton.styleFrom(
+                              backgroundColor: _kLobbySurfaceHi,
+                              shape: const CircleBorder(
+                                  side: BorderSide(color: _kLobbyBorder)),
+                              minimumSize: const Size(44, 44),
                             ),
+                            onPressed: _openAiSettingsSheet,
                           ),
                         ],
                       ),
