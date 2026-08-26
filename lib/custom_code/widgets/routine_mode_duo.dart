@@ -4097,15 +4097,24 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              IconButton(
-                  icon: const Icon(Icons.arrow_back_ios_new_rounded,
-                      color: Colors.white70),
-                  tooltip: '이전 단계',
-                  padding: EdgeInsets.zero,
-                  alignment: Alignment.centerLeft,
-                  constraints:
-                      const BoxConstraints(minWidth: 56, minHeight: 56),
-                  onPressed: _handleAutoSaveAndExit),
+              // 🚪 나가는 문은 **한 화면에 하나다.** 상대를 기다리는 동안은
+              //   아래에 `Cancel Connection`이 크게 서 있어서, 같은 곳으로
+              //   가는 이 화살표를 함께 두면 문이 둘로 보인다. 기다리는
+              //   동안만 접는다 — 상대가 들어오면 아래 버튼이 상태 문구로
+              //   바뀌고 이 자리가 다시 유일한 문이 된다.
+              //
+              //   ⚠️ 접어도 갇히지 않는다. `PopScope`가 시스템 뒤로가기를
+              //   받아 같은 `_handleAutoSaveAndExit()`을 부른다.
+              if (_isPartnerOnline)
+                IconButton(
+                    icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                        color: Colors.white70),
+                    tooltip: '이전 단계',
+                    padding: EdgeInsets.zero,
+                    alignment: Alignment.centerLeft,
+                    constraints:
+                        const BoxConstraints(minWidth: 56, minHeight: 56),
+                    onPressed: _handleAutoSaveAndExit),
               // 초대는 방을 만든 호스트만 낼 수 있다. 게스트에게는 버튼 자체를
               // 노출하지 않는다 — 눌러서 역할이 뒤집히는 경로를 없앤다.
               //
