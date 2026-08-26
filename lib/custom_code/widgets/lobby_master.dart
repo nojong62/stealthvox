@@ -157,8 +157,10 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   }
 
   void _initAppState() {
+    // 처음 들어온 사람의 기본값은 Standard · Formal이다. 배우는 자리라
+    // 격식 있는 쪽에서 시작하고, 편하게 바꾸는 건 유저가 고른다.
     if (FFAppState().tone == null || FFAppState().tone.isEmpty)
-      setState(() => FFAppState().tone = "Casual");
+      setState(() => FFAppState().tone = "Formal");
     // ⚠️ TARGET과 무관하게 4개 전부를 유효값으로 본다. 비영어 TARGET으로
     //   앱을 껐다 켜도 마지막 영어 선택값(American 등)이 살아남아야 한다.
     if (!_kAiStyles.contains(FFAppState().aiStyle)) {

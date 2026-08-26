@@ -136,7 +136,7 @@ class FFAppState extends ChangeNotifier {
   }
 
   /// Formal
-  String _tone = '';
+  String _tone = 'Formal';
   String get tone => _tone;
   set tone(String value) {
     _tone = value;
