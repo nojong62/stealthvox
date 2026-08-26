@@ -861,9 +861,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _lgDuo('[INTERP-GATE]', 'flush_on_close reason=$reason — 말하던 중이었다');
       // 기다리지 않는다. 전사문이 오면 평소 경로(`_onInterpreterTranscript`)로
       // 흘러가고, 안 와도 세션이 상한에서 대기를 풀어 준다.
-      unawaited(stt
-          .flushPendingUtterance(reason: reason)
-          .catchError((Object e) {
+      unawaited(
+          stt.flushPendingUtterance(reason: reason).catchError((Object e) {
         _lgDuo('⚠️ [INTERP-GATE]', 'flush_failed=${e.runtimeType}');
         return false;
       }));
@@ -2103,7 +2102,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       // item_id가 비어 오면 위 집합이 무력하다. 짧은 창 안의 같은 문장은
       // 중복으로 본다 — 사람이 같은 말을 두 번 하려면 VAD 침묵 구간을 지나야
       // 하므로 이 창보다 한참 오래 걸린다.
-      _lgDuo('[INTERP-STT]', 'duplicate_skipped item=<empty> len=${trimmed.length}');
+      _lgDuo('[INTERP-STT]',
+          'duplicate_skipped item=<empty> len=${trimmed.length}');
       return;
     }
 
@@ -3566,18 +3566,53 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
 
   // 🖼️ 무대 그림은 `duo_stage.dart`에 있다. Firebase도 앱 상태도 모르는
   //   순수 위젯이라 화면 없이 띄워 눈으로 확인할 수 있다.
-  Widget _buildDirectStage() => DuoDirectStage(
-        callActive: _directCallActive,
-        muted: _directMuted,
-        partnerOnline: _isPartnerOnline,
-      );
+  Widget _buildDirectStage() => _isPartnerOnline
+      ? DuoDirectStage(
+          callActive: _directCallActive,
+          muted: _directMuted,
+          partnerOnline: _isPartnerOnline,
+        )
+      : _buildWaitingStage('assets/images/duo_direct_call.png');
 
   // 무대 그림도 마이크 등과 같은 값을 본다. 화면 어디를 봐도 "지금 말해도
   // 되는가"에 대한 대답이 하나여야 한다.
-  Widget _buildInterpreterStage() => DuoInterpreterStage(
-        ready: _interpReady,
-        partnerSpeaking: _interpPartnerPhase == InterpPartnerPhase.playing,
-      );
+  Widget _buildInterpreterStage() => _isPartnerOnline
+      ? DuoInterpreterStage(
+          ready: _interpReady,
+          partnerSpeaking: _interpPartnerPhase == InterpPartnerPhase.playing,
+        )
+      : _buildWaitingStage('assets/images/duo_interpreter.png');
+
+  /// 📡 상대가 아직 안 들어왔다. 두 방식 모두 같은 화면을 쓴다 — 기다리는
+  ///   동안에는 직접 대화든 통역이든 유저가 할 일이 똑같이 없다.
+  Widget _buildWaitingStage(String backdropAsset) {
+    return Column(
+      children: [
+        Expanded(child: DuoWaitingStage(backdropAsset: backdropAsset)),
+        const SizedBox(height: 18),
+        const Text(
+          'Waiting...',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 25,
+            fontWeight: FontWeight.bold,
+            letterSpacing: -0.4,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Establishing secure StealthVox connection',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.38),
+            fontSize: 13,
+            height: 1.4,
+          ),
+        ),
+        const SizedBox(height: 20),
+      ],
+    );
+  }
 
   /// 게스트 팝업 전용 영어 표시명. 초대받는 쪽은 아직 자기 언어를 고르기
   /// 전이라 로비 ORIGIN을 쓸 수 없어서 영어로 고정한다. 호스트가 보는 쪽
@@ -4178,6 +4213,41 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
   }
 
   Widget _buildControlArea(double bottomPadding) {
+    // 📡 기다리는 동안에는 상태 문구가 무대에 이미 크게 적혀 있다. 여기에
+    //   또 적으면 같은 말이 두 번이라, 그 자리를 유일하게 할 수 있는 일에
+    //   내준다 — 그만두기. 위 `<`와 같은 곳으로 가지만, 기다리는 화면에서
+    //   구석의 화살표는 눈에 잘 안 띈다.
+    if (!_isPartnerOnline) {
+      return Container(
+        padding: EdgeInsets.fromLTRB(24, 8, 24, bottomPadding),
+        decoration: const BoxDecoration(color: Color(0xFF121212)),
+        child: SizedBox(
+          height: 76,
+          child: Center(
+            child: OutlinedButton.icon(
+              onPressed: () => unawaited(_handleAutoSaveAndExit()),
+              icon: const Icon(Icons.cancel_outlined, size: 19),
+              label: const Text(
+                'Cancel Connection',
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 1.2),
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF3B82F6),
+                side: const BorderSide(color: Color(0xFF3B82F6)),
+                backgroundColor: const Color(0xFF1C1C1E).withValues(alpha: 0.5),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                shape: const StadiumBorder(),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     // 직접 통화는 게스트 입장 시 마이크가 자동으로 열린다. 이 자리에 마이크
     // 버튼을 두면 눌러야 통화가 시작되는 화면으로 오해할 수 있으므로 상태
     // 문구만 남긴다. 기존 버튼 높이는 유지해 화면의 세로 배치가 흔들리지 않는다.
@@ -4263,8 +4333,8 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                 ? null
                 : [
                     BoxShadow(
-                      color: accent
-                          .withValues(alpha: playing ? glow * 0.4 : glow),
+                      color:
+                          accent.withValues(alpha: playing ? glow * 0.4 : glow),
                       blurRadius: 18 + pulse * 8,
                       spreadRadius: 2 + pulse * 3,
                     ),
