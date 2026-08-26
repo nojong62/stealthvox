@@ -24,6 +24,8 @@ import 'package:firebase_auth/firebase_auth.dart'; // 회원별 커서 분리
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:firebase_remote_config/firebase_remote_config.dart';
+import 'usage_sheet.dart';
+import 'account_sheet.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
 import '/custom_code/services/openai_connection_pool.dart';
@@ -888,6 +890,9 @@ Return ONLY valid JSON: {"name":"..."}.
   // ============================================================================
   Widget _buildMenu() {
     return SafeArea(
+      // 아래는 하단 줄이 직접 피한다 — 그래야 줄의 배경이 제스처 바까지
+      // 이어지고, 그 위 카드가 줄에 가리지 않는다(로비와 같은 처방).
+      bottom: false,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -896,7 +901,8 @@ Return ONLY valid JSON: {"name":"..."}.
           _buildMenuTopBar(),
           Expanded(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+              physics: const BouncingScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(20, 22, 20, 28),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -906,7 +912,7 @@ Return ONLY valid JSON: {"name":"..."}.
                           fontSize: 25,
                           fontWeight: FontWeight.bold,
                           height: 1.3)),
-                  const SizedBox(height: 22),
+                  const SizedBox(height: 20),
                   _buildMenuCard(1, "Duo Connect", "초청 직접 대화\n초청 만능 통역",
                       Icons.people, const Color(0xFF3B82F6)),
                   _buildMenuCard(2, "Circle Talk", "서클 구성원 대화",
@@ -917,7 +923,97 @@ Return ONLY valid JSON: {"name":"..."}.
               ),
             ),
           ),
+          _buildBottomNav(),
         ],
+      ),
+    );
+  }
+
+  /// 🧭 아래 줄 — 이 앱에서 자주 가는 네 곳.
+  ///
+  ///   모드 · 스토어 · 사용 내역 · 등록 정보
+  ///
+  /// 첫 칸은 지금 보고 있는 화면이라 켜진 채로 둔다. 나머지 셋은 스토어
+  /// 안에 흩어져 있던 것을 꺼내 왔다 — 시간을 사고, 얼마나 썼는지 보고,
+  /// 어떤 계정인지 확인하는 일은 대화를 고르는 것만큼 자주 한다.
+  Widget _buildBottomNav() {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFF0E0F12),
+        border: Border(top: BorderSide(color: Color(0x14FFFFFF))),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Row(
+            children: [
+              Expanded(
+                child: _buildBottomNavItem(
+                  Icons.grid_view_rounded,
+                  '모드',
+                  active: true,
+                ),
+              ),
+              Expanded(
+                child: _buildBottomNavItem(
+                  Icons.storefront_rounded,
+                  '스토어',
+                  onTap: () => context.pushNamed('Store'),
+                ),
+              ),
+              Expanded(
+                child: _buildBottomNavItem(
+                  Icons.history_rounded,
+                  '사용 내역',
+                  onTap: () => showUsageSheet(context),
+                ),
+              ),
+              Expanded(
+                child: _buildBottomNavItem(
+                  Icons.person_outline_rounded,
+                  '등록 정보',
+                  onTap: () => showAccountSheet(context),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBottomNavItem(
+    IconData icon,
+    String label, {
+    bool active = false,
+    VoidCallback? onTap,
+  }) {
+    final Color color =
+        active ? const Color(0xFF3B82F6) : const Color(0xFF8C93A1);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 22, color: color),
+            const SizedBox(height: 4),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                label,
+                maxLines: 1,
+                style: TextStyle(
+                    color: color,
+                    fontSize: 11,
+                    fontWeight: active ? FontWeight.w700 : FontWeight.w400),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -955,18 +1051,6 @@ Return ONLY valid JSON: {"name":"..."}.
               padding: const EdgeInsets.symmetric(horizontal: 8),
               constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
               onPressed: () => context.pushNamed('Lobby'),
-            ),
-            // 🛒 예전에는 여기가 뒤로가기(`context.pop()`)였다. 이 줄에는
-            //   로비·공부방으로 곧장 가는 문이 이미 있어서 "이전 단계"가
-            //   갈 곳이 겹쳤다. 그 자리를 스토어에 내준다 — 히스토리 목록에
-            //   있던 것과 같은 아이콘이라 두 화면에서 같은 문으로 읽힌다.
-            IconButton(
-              icon: const Icon(Icons.storefront_rounded,
-                  color: Color(0xFF22D3EE), size: 24),
-              tooltip: '스토어',
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-              onPressed: () => context.pushNamed('Store'),
             ),
             const Spacer(),
             // 이름은 통째로 적힌다. 잘리지도, 줄임표가 붙지도 않는다.
@@ -1332,13 +1416,19 @@ Return ONLY valid JSON: {"name":"..."}.
   ///
   /// 🖐️ **카드 전체가 눌린다.** 예전에는 글자와 화살표만 눌렸고 아이콘 자리는
   ///   죽어 있었다 — 가장 크고 눈에 띄는 곳이 반응하지 않았다.
+  /// 모드 카드 한 장.
+  ///
+  /// 아이콘이 위, 제목과 설명이 그 아래로 흐른다. 색은 **원형 아이콘에만**
+  /// 얹는다 — 셋이 나란히 있어 카드를 통째로 물들이면 눈이 쉴 곳이 없다.
+  /// 모드 색은 히스토리·로비와 같은 값이다. 아이콘 하나만 봐도 어느 모드인지
+  /// 알아야 한다(DESIGN.md §1).
   Widget _buildMenuCard(
       int mode, String title, String desc, IconData icon, Color color) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 14),
+      margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
         color: const Color(0xFF16181D),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(color: const Color(0x14FFFFFF)),
       ),
       clipBehavior: Clip.antiAlias,
@@ -1346,49 +1436,34 @@ Return ONLY valid JSON: {"name":"..."}.
         color: Colors.transparent,
         child: InkWell(
           onTap: () => _switchMode(mode),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(height: 4, color: color),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: color.withValues(alpha: 0.16),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(icon, color: color, size: 24),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(title,
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w700)),
-                          const SizedBox(height: 3),
-                          Text(desc,
-                              style: const TextStyle(
-                                  color: Color(0xFF8C93A1),
-                                  fontSize: 12.5,
-                                  height: 1.45)),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    const Icon(Icons.chevron_right,
-                        color: Color(0xFF6B7280), size: 24),
-                  ],
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 22),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.16),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: color.withValues(alpha: 0.45)),
+                  ),
+                  child: Icon(icon, color: color, size: 26),
                 ),
-              ),
-            ],
+                const SizedBox(height: 16),
+                Text(title,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold)),
+                const SizedBox(height: 6),
+                Text(desc,
+                    style: const TextStyle(
+                        color: Color(0xFF8C93A1), fontSize: 14, height: 1.5)),
+              ],
+            ),
           ),
         ),
       ),

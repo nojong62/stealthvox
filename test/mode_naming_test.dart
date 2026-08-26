@@ -58,10 +58,16 @@ void main() {
     });
 
     test('유저에게 보이는 이름에 Roleplay가 없다', () {
-      final store =
-          File('lib/custom_code/widgets/store_master.dart').readAsStringSync();
-      expect(store, contains("'🎬 Scenario Talk'"));
-      expect(store, isNot(contains("'🎬 Roleplay'")));
+      // 화면에 실제로 뜨는 자리는 히스토리의 방 이름 표시다. store_master에
+      // 있던 매퍼는 아무도 부르지 않는 죽은 코드라 2026-08-27에 지웠다.
+      final history = File('lib/custom_code/widgets/chat_history_master.dart')
+          .readAsStringSync();
+      expect(history, contains("display = 'Scenario Talk'"));
+      expect(history, contains("display = 'Circle Talk'"));
+      for (final file in libFiles) {
+        expect(file.readAsStringSync(), isNot(contains("'🎬 Roleplay'")),
+            reason: file.path);
+      }
     });
   });
 

@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
 import 'index.dart'; // Imports other custom widgets
+import 'usage_sheet.dart';
 import '/custom_code/actions/billing_ticker.dart';
 
 import '/auth/firebase_auth/auth_util.dart';
@@ -383,34 +384,6 @@ class _StoreMasterState extends State<StoreMaster> {
     }
   }
 
-  /// Firestore mode 값을 사용자 친화적 이름으로 변환하는 헬퍼
-  /// billing_ticker.dart의 logMode() 호출값과 매핑
-  String _modeDisplayName(String mode) {
-    switch (mode) {
-      case 'duo':
-        return '🎭 Duo Mode';
-      case 'roleplay':
-        return '🎬 Scenario Talk';
-      case 'study_room':
-      case 'stealth_room':
-        return '🕵️ Stealth Room';
-      case 'free_talk':
-        return '💬 Circle Talk';
-      case 'clone':
-        return '🤖 AI Clone';
-      case 'history':
-        return '📖 Chat History';
-      case 'history_list':
-        return '📋 History List';
-      case 'ai_practice':
-        return '🧠 AI Practice';
-      default:
-        return mode.isNotEmpty ? mode : 'Unknown';
-    }
-  }
-
-  /// 초 단위를 보기 좋은 문자열로 변환하는 헬퍼 (관리자용 상세)
-  /// 예: 65 → "1m 5s", 3600 → "1h 0m", 0 이하 → "0s"
   String _formatDurationFromSeconds(int seconds) {
     if (seconds <= 0) return '0s';
     final h = seconds ~/ 3600;
@@ -421,88 +394,7 @@ class _StoreMasterState extends State<StoreMaster> {
     return '${s}s';
   }
 
-  /// 사용자용 시간 표시 — 분 단위 중심, 1시간 이상은 h+m
-  /// 예: 45 → "45s", 74 → "1m", 134 → "2m", 3600 → "1h", 4500 → "1h 15m"
-  String _formatUsageDurationForUser(int seconds) {
-    if (seconds <= 0) return '0s';
-    if (seconds < 60) return '${seconds}s';
-    final h = seconds ~/ 3600;
-    final mRaw = (seconds % 3600) ~/ 60;
-    final mRounded = ((seconds % 3600 + 30) ~/ 60);
-    if (h > 0) return mRaw > 0 ? '${h}h ${mRaw}m' : '${h}h';
-    return '${mRounded}m';
-  }
-
-  /// mode 문자열을 'talk' 또는 'study' 그룹으로 분류
-  String _modeGroup(String mode) {
-    const talkModes = {'duo', 'stealth_room'};
-    return talkModes.contains(mode) ? 'talk' : 'study';
-  }
-
-  /// 사용자용 그룹 표시명
-  String _modeGroupName(String mode) =>
-      _modeGroup(mode) == 'talk' ? '대화방' : '공부방';
-
-  /// 사용자 Usage — Today/ThisWeek 요약 카드
-  Widget _buildUsageSummaryCard({
-    required String title,
-    required int talkSeconds,
-    required int studySeconds,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        color: Colors.black,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white10),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title,
-              style: const TextStyle(
-                  color: Colors.white38,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 1.2)),
-          const SizedBox(height: 10),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('대화방',
-                  style: TextStyle(color: Colors.white70, fontSize: 13)),
-              Text(
-                talkSeconds > 0
-                    ? _formatUsageDurationForUser(talkSeconds)
-                    : '-',
-                style: const TextStyle(
-                    color: Color(0xFF60A5FA),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('공부방',
-                  style: TextStyle(color: Colors.white70, fontSize: 13)),
-              Text(
-                studySeconds > 0
-                    ? _formatUsageDurationForUser(studySeconds)
-                    : '-',
-                style: const TextStyle(
-                    color: Color(0xFF60A5FA),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
+  // 📊 Usage가 쓰던 헬퍼들은 `widgets/usage_sheet.dart`로 옮겼다.
 
   void _openReceiptSheet() {
     showModalBottomSheet(
@@ -653,225 +545,8 @@ class _StoreMasterState extends State<StoreMaster> {
     );
   }
 
-  // ── 사용자용 Usage 화면 (요약형) ──────────────────────────────────────────
-  void _openUsageSheet() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        return Container(
-          height: MediaQuery.of(context).size.height * 0.75,
-          padding: const EdgeInsets.all(24),
-          decoration: const BoxDecoration(
-            color: Color(0xFF222222),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text("📊 Usage",
-                      style: GoogleFonts.orbitron(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold)),
-                  IconButton(
-                    icon:
-                        const Icon(Icons.close_rounded, color: Colors.white54),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ],
-              ),
-              const Divider(color: Colors.white12, height: 24),
-              Expanded(
-                child: currentUserReference == null
-                    ? const Center(
-                        child: Text("로그인 후 이용해 주세요.",
-                            style: TextStyle(color: Colors.white54)))
-                    : StreamBuilder<QuerySnapshot>(
-                        stream: currentUserReference!
-                            .collection('usage_logs')
-                            .orderBy('created_at', descending: true)
-                            .limit(200)
-                            .snapshots(),
-                        builder: (context, snapshot) {
-                          if (!snapshot.hasData) {
-                            return const Center(
-                                child: CircularProgressIndicator(
-                                    color: Color(0xFF60A5FA)));
-                          }
-
-                          // ── 10초 미만 기록 제외 ──────────────────────────
-                          final records = snapshot.data!.docs.where((doc) {
-                            final d = doc.data() as Map<String, dynamic>;
-                            final int sec = (d['actual_seconds'] as int?) ??
-                                (d['seconds_used'] as int?) ??
-                                0;
-                            return sec >= 10;
-                          }).toList();
-
-                          if (records.isEmpty) {
-                            return const Center(
-                              child: Padding(
-                                padding: EdgeInsets.all(24.0),
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(Icons.access_time_rounded,
-                                        color: Colors.white24, size: 48),
-                                    SizedBox(height: 16),
-                                    Text("아직 사용 내역이 없습니다.",
-                                        style: TextStyle(
-                                            color: Colors.white54,
-                                            fontSize: 14)),
-                                    SizedBox(height: 8),
-                                    Text(
-                                      "대화를 시작하면 사용 시간이 이곳에 표시됩니다.",
-                                      style: TextStyle(
-                                          color: Colors.white38, fontSize: 12),
-                                      textAlign: TextAlign.center,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          }
-
-                          // ── 날짜 범위 계산 ───────────────────────────────
-                          final now = DateTime.now();
-                          final todayStart =
-                              DateTime(now.year, now.month, now.day);
-                          final weekStart = todayStart
-                              .subtract(Duration(days: todayStart.weekday - 1));
-
-                          // ── 그룹별 합산 헬퍼 ─────────────────────────────
-                          int sumGroup(String group, DateTime rangeStart) {
-                            int total = 0;
-                            for (final doc in records) {
-                              final d = doc.data() as Map<String, dynamic>;
-                              final DateTime ts = d['created_at'] != null
-                                  ? (d['created_at'] as Timestamp).toDate()
-                                  : now;
-                              if (ts.isBefore(rangeStart)) continue;
-                              final String mode = (d['mode'] as String?) ?? '';
-                              if (_modeGroup(mode) != group) continue;
-                              total += (d['actual_seconds'] as int?) ??
-                                  (d['seconds_used'] as int?) ??
-                                  0;
-                            }
-                            return total;
-                          }
-
-                          // ── Recent Sessions (최대 5개) ───────────────────
-                          final recentSessions = records.take(5).toList();
-
-                          return SingleChildScrollView(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                // ── Today 요약 ──────────────────────────────
-                                _buildUsageSummaryCard(
-                                  title: 'Today',
-                                  talkSeconds: sumGroup('talk', todayStart),
-                                  studySeconds: sumGroup('study', todayStart),
-                                ),
-                                const SizedBox(height: 10),
-                                // ── This Week 요약 ──────────────────────────
-                                _buildUsageSummaryCard(
-                                  title: 'This Week',
-                                  talkSeconds: sumGroup('talk', weekStart),
-                                  studySeconds: sumGroup('study', weekStart),
-                                ),
-                                const SizedBox(height: 20),
-                                // ── Recent Sessions ─────────────────────────
-                                const Text(
-                                  'Recent Sessions',
-                                  style: TextStyle(
-                                      color: Colors.white54,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                      letterSpacing: 1.1),
-                                ),
-                                const SizedBox(height: 10),
-                                ...recentSessions.map((doc) {
-                                  final d = doc.data() as Map<String, dynamic>;
-                                  final DateTime ts = d['created_at'] != null
-                                      ? (d['created_at'] as Timestamp).toDate()
-                                      : now;
-                                  final String dateStr =
-                                      DateFormat('yyyy.MM.dd HH:mm').format(ts);
-                                  final String modeRaw =
-                                      (d['mode'] as String?) ?? '';
-                                  final String groupName =
-                                      _modeGroupName(modeRaw);
-                                  final int actualSec =
-                                      (d['actual_seconds'] as int?) ??
-                                          (d['seconds_used'] as int?) ??
-                                          0;
-                                  final int usedSec =
-                                      (d['seconds_used'] as int?) ?? 0;
-                                  final bool isDiff =
-                                      (actualSec - usedSec).abs() > 5 &&
-                                          usedSec > 0;
-
-                                  return Padding(
-                                    padding: const EdgeInsets.only(bottom: 10),
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 16, vertical: 12),
-                                      decoration: BoxDecoration(
-                                        color: Colors.black,
-                                        borderRadius: BorderRadius.circular(14),
-                                        border:
-                                            Border.all(color: Colors.white10),
-                                      ),
-                                      child: Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment:
-                                                  CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  isDiff
-                                                      ? '$groupName  ·  실제 ${_formatUsageDurationForUser(actualSec)} 사용  ·  ${_formatUsageDurationForUser(usedSec)} 차감'
-                                                      : '$groupName  ·  ${_formatUsageDurationForUser(actualSec)}',
-                                                  style: const TextStyle(
-                                                      color: Color(0xFF60A5FA),
-                                                      fontSize: 13,
-                                                      fontWeight:
-                                                          FontWeight.w600),
-                                                ),
-                                                const SizedBox(height: 4),
-                                                Text(dateStr,
-                                                    style: const TextStyle(
-                                                        color: Colors.white38,
-                                                        fontSize: 11)),
-                                              ],
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  );
-                                }),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
+  // 📊 사용 내역 시트는 `widgets/usage_sheet.dart`가 그린다.
+  //   스텔스룸 아래 줄도 같은 화면을 열어야 해서 밖으로 뺐다.
 
   // ── 관리자용 Admin Time Log (STORE 제목 long press 진입) ──────────────────
   void _openAdminLogLedgerSheet() {
@@ -1200,7 +875,7 @@ class _StoreMasterState extends State<StoreMaster> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             IconButton(
-                              onPressed: _openUsageSheet,
+                              onPressed: () => showUsageSheet(context),
                               tooltip: 'Usage',
                               icon: const Icon(Icons.access_time_rounded,
                                   color: Color(0xFF60A5FA), size: 22),
