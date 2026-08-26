@@ -2,14 +2,14 @@
 // 🔉 [DUO-DIRECT] 직접 대화 수신측 재생기
 // --------------------------------------------------------------------
 // 마이크 캡처는 **여기서 새로 만들지 않는다.** Circle Talk이 쓰는
-// `AnyonePreparedAudioCapture`(routine_mode_anyone.dart)를 그대로 쓴다.
+// `PreparedAudioCapture`(routine_mode_circle_talk.dart)를 그대로 쓴다.
 // 같은 설정(pcm16bits / 24kHz / mono)과 같은 lifecycle을 한 벌만 두기
 // 위해서다 — 복제해 두면 나중에 sample rate·권한·종료 처리가 두 군데로
 // 갈라진다.
 //
 // 직접 대화의 팬아웃 구조:
 //
-//   AnyonePreparedAudioCapture (broadcast, sync)
+//   PreparedAudioCapture (broadcast, sync)
 //        ├─→ OpenAI 스트리밍 전사  (History용 텍스트)
 //        └─→ DuoPcmRelayClient     (상대 폰에서 실제 목소리로 재생)
 //

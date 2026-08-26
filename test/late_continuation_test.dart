@@ -13,7 +13,7 @@
 // 뺄 수 없어 실기기 시나리오로 남긴다.
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:stealth_vox/custom_code/widgets/routine_mode_anyone.dart';
+import 'package:stealth_vox/custom_code/widgets/routine_mode_circle_talk.dart';
 import 'package:stealth_vox/custom_code/services/late_continuation.dart';
 
 /// 위젯의 이어 말하기 배선을 이벤트 단위로 재현한다.

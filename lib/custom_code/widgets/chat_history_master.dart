@@ -27,7 +27,7 @@ import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter/rendering.dart'; // RenderAbstractViewport (읽기 스크롤)
 import 'package:flutter/services.dart';
-import 'routine_mode_roleplay.dart' show TtsCache;
+import 'routine_mode_scenario_talk.dart' show TtsCache;
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
 import '/custom_code/services/ai_style.dart';

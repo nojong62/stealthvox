@@ -12,14 +12,15 @@ import 'package:flutter/foundation.dart';
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
 // ====================================================================
-// 🏷️ [용어 대응표] 이 파일은 이름이 3개다. 헷갈리지 말 것.
-//   · 파일/클래스 이름 : anyone       (코드에서 쓰는 이름)
-//   · Firestore 저장 id : free_talk   (mode 필드에 박히는 값)
-//   · 화면 표시명       : Circle Talk (유저가 보는 이름)
+// 🏷️ [용어 대응표] 이름이 두 층이다. 헷갈리지 말 것.
+//   · 코드(파일·클래스·변수) : circle_talk / CircleTalk
+//   · 화면 표시명            : Circle Talk
+//   · Firestore 저장 id      : free_talk  ← **여기만 옛 이름이다**
 //
-//   표시명은 Free Talk → Anyone → Circle Talk 순으로 바뀌어 왔지만,
-//   저장 id는 처음부터 free_talk 하나로 유지했다. 과거 대화 기록이
-//   살아있는 이유가 이것이다. 절대 저장 id를 바꾸지 말 것.
+//   표시명은 Free Talk → Anyone → Circle Talk 순으로 바뀌어 왔고,
+//   코드도 2026-08-26에 표시명에 맞춰 통일했다. 그러나 저장 id는
+//   처음부터 free_talk 하나였고 앞으로도 그대로다 — 과거 대화 기록의
+//   분류 키라서, 바꾸면 이미 저장된 방이 미분류로 떨어진다.
 //   별칭 해석 테이블: chat_history_master.dart _inferHistoryMode()
 // ====================================================================
 
@@ -58,7 +59,7 @@ import '/custom_code/services/conversation_cancel_command.dart';
 import 'deepgram_confidence_probe.dart';
 import 'first_utterance_context_judge.dart';
 import 'trial/trial_flow_state.dart';
-import 'trial/trial_anyone_timer_mixin.dart';
+import 'trial/trial_circle_talk_timer_mixin.dart';
 import 'trial/learning_prep_overlay.dart';
 import 'trial/trial_study_page.dart';
 
@@ -110,14 +111,14 @@ const int kFreeTalkTurnPcmBufferMaxBytes = kStealthVoxSttBytesPerMs * 1000 * 60;
 //   호출하지 않는다 — 판정 결과에 따라 처음부터 하나만 쓴다.
 const String kFreeTalkTranslateModelFast = 'gpt-4o-mini';
 
-enum AnyoneMicOwner {
+enum CircleTalkMicOwner {
   none,
   deepgram,
   openaiStreaming,
 }
 
-class AnyoneCostTracker {
-  AnyoneCostTracker(this.onLog);
+class CircleTalkCostTracker {
+  CircleTalkCostTracker(this.onLog);
 
   final void Function(String tag, String msg) onLog;
   int deepgramAudioMs = 0;
@@ -167,8 +168,8 @@ class AnyoneCostTracker {
 /// ==================================================================== [Box
 /// 2: 클래스 선언부]
 /// ====================================================================
-class RoutineModeAnyone extends StatefulWidget {
-  const RoutineModeAnyone({
+class RoutineModeCircleTalk extends StatefulWidget {
+  const RoutineModeCircleTalk({
     super.key,
     this.width,
     this.height,
@@ -187,14 +188,14 @@ class RoutineModeAnyone extends StatefulWidget {
   final String circleDescription;
 
   @override
-  State<RoutineModeAnyone> createState() => _RoutineModeAnyoneState();
+  State<RoutineModeCircleTalk> createState() => _RoutineModeCircleTalkState();
 }
 
-class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
+class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
     with
-        TrialAnyoneTimerMixin<RoutineModeAnyone>,
+        TrialCircleTalkTimerMixin<RoutineModeCircleTalk>,
         SingleTickerProviderStateMixin,
-        BillingIdleMixin<RoutineModeAnyone> {
+        BillingIdleMixin<RoutineModeCircleTalk> {
   // ====================================================================
   // 📦 [Box 3: 상태 변수 및 초기화]
   // ====================================================================
@@ -214,7 +215,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   int _startupRetryCount = 0;
   static const int _maxStartupRetries = 12;
   int _listenGeneration = 0;
-  AnyoneMicOwner _micOwner = AnyoneMicOwner.none;
+  CircleTalkMicOwner _micOwner = CircleTalkMicOwner.none;
   final Set<String> _handledFinalTranscriptIds = <String>{};
   DateTime? _lastListenStartAt;
 
@@ -223,7 +224,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   // 캡처뿐이다 — Android는 녹음 세션이 열려 있으면 AI 음성 출력 라우팅을
   // 뒤늦게 덮어쓴다(아래 [MIC-ROUTING] 참조).
   OpenAiStreamingTranscribeSession? _streamingStt;
-  AnyonePreparedAudioCapture? _streamingCapture;
+  PreparedAudioCapture? _streamingCapture;
   StreamSubscription<Uint8List>? _streamingCaptureSub;
 
   /// 진행 중인 녹음 정지. 다음 녹음은 이것이 끝난 뒤에만 연다.
@@ -739,7 +740,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     widget.onListeningReady?.call();
   }
 
-  bool _setMicOwner(AnyoneMicOwner next, {required String reason}) {
+  bool _setMicOwner(CircleTalkMicOwner next, {required String reason}) {
     final previous = _micOwner;
     if (previous != next) {
       _micOwner = next;
@@ -773,7 +774,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
       );
       return;
     }
-    if (_micOwner != AnyoneMicOwner.deepgram) {
+    if (_micOwner != CircleTalkMicOwner.deepgram) {
       _log(
         '[ANY-MIC]',
         'ownership_conflict current=${_micOwner.name} turnId=$sourceTurnId',
@@ -982,14 +983,14 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
   DeepgramV2VoiceManager? _voiceManager;
   late final AudioRecorder _audioRecorder;
   late final bool _ownsAudioRecorder;
-  Future<AnyonePreparedAudioCapture?>? _preparedCaptureFuture;
-  AnyonePreparedAudioCapture? _preparedCapture;
+  Future<PreparedAudioCapture?>? _preparedCaptureFuture;
+  PreparedAudioCapture? _preparedCapture;
   late final DateTime _micInputAt;
   final Set<String> _firstSpeechMarks = <String>{};
   // 🔊 [TTS-ADAPTER] 유저 번역 음성·AI 응답 음성·안내 음성 전부 이 어댑터 하나로
   //   나간다 (guide4 8장). 모델명/보이스 매핑은 어댑터 설정에만 있다.
   late final TtsAdapter _ttsAdapter;
-  late final AnyoneCostTracker _costTracker;
+  late final CircleTalkCostTracker _costTracker;
 
   // ⏱️ 성능 측정용 초시계
   final Stopwatch _swDeepgram = Stopwatch();
@@ -1012,7 +1013,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     _micInputAt = widget.micInputAt ?? DateTime.now();
     _markFirstSpeech('MIC_INPUT', at: _micInputAt);
     _preparedCaptureFuture = _startImmediateLocalCapture();
-    _costTracker = AnyoneCostTracker(_log);
+    _costTracker = CircleTalkCostTracker(_log);
     _ttsAdapter = TtsAdapter(
       apiKeyProvider: () => _openAiKey,
       onLog: _log,
@@ -1125,12 +1126,12 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     );
   }
 
-  Future<AnyonePreparedAudioCapture?> _startImmediateLocalCapture() async {
+  Future<PreparedAudioCapture?> _startImmediateLocalCapture() async {
     try {
       await widget.audioPreparation;
       final hasPermission = await _audioRecorder.hasPermission();
       if (!hasPermission || !mounted) return null;
-      final capture = await AnyonePreparedAudioCapture.start(
+      final capture = await PreparedAudioCapture.start(
         recorder: _audioRecorder,
         onRecordingStarted: (at) =>
             _markFirstSpeech('LOCAL_RECORDING_STARTED', at: at),
@@ -1273,7 +1274,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
     //   오프너가 끝나면 그 안에서 마이크를 연다.
     if (!_openerDone) {
       _openerDone = true;
-      await _generateAndPlayAnyoneOpener();
+      await _generateAndPlayCircleTalkOpener();
       return;
     }
     await _startConfiguredListening();
@@ -1281,7 +1282,7 @@ class _RoutineModeAnyoneState extends State<RoutineModeAnyone>
 
   /// AI가 서클의 일원으로 먼저 건네는 첫 마디.
   /// 진행자·안내원이 아니라 이미 그 서클 안에 있는 사람으로 말한다.
-  Future<void> _generateAndPlayAnyoneOpener() async {
+  Future<void> _generateAndPlayCircleTalkOpener() async {
     if (_isAiOpenerPlaying) return;
     _isAiOpenerPlaying = true;
     var aiIndex = -1;
@@ -1640,7 +1641,7 @@ $kSpokenReplyLengthPolicy
 
   /// 모델이 시스템 프롬프트를 어겨 되묻기를 붙이더라도 번역, TTS, 저장 전에
   /// 제거한다. 캐릭터 확정 전에는 질문 자체를 허용하지 않는다.
-  String _guardAnyoneAiReply(
+  String _guardCircleTalkAiReply(
     String text, {
     required bool allowQuestion,
   }) {
@@ -1758,7 +1759,7 @@ $kSpokenReplyLengthPolicy
     final closingStreamingStt = _streamingStt;
     _streamingStt = null;
     if (closingStreamingStt != null) unawaited(closingStreamingStt.dispose());
-    _setMicOwner(AnyoneMicOwner.none, reason: 'stop_everything');
+    _setMicOwner(CircleTalkMicOwner.none, reason: 'stop_everything');
     // 🔇 늦게 도착한 이전 세대 TTS가 재생되지 않도록 세대를 올려 막는다.
     _ttsAdapter.invalidateGenerationsBefore(_pipelineGeneration);
     _ttsAdapter.stopAll(reason: 'stop_everything');
@@ -1855,11 +1856,11 @@ $kSpokenReplyLengthPolicy
       //   소켓은 그대로 둔다 — 서버가 닫으면 복귀 시 재연결한다.
       //   말하던 도중에 나갔다면 그 턴은 버린다(반쪽 발화를 확정하지 않는다).
       if (_streamingCapture != null ||
-          _micOwner == AnyoneMicOwner.openaiStreaming) {
+          _micOwner == CircleTalkMicOwner.openaiStreaming) {
         _log('🎤 [LISTEN-BG]', '백그라운드 진입 → 마이크/전송 중지');
         _streamingStt?.closeAudioGate(reason: 'app_background');
         unawaited(_stopStreamingCapture(reason: 'app_background'));
-        _setMicOwner(AnyoneMicOwner.none, reason: 'app_background');
+        _setMicOwner(CircleTalkMicOwner.none, reason: 'app_background');
         _streamingDeltaItemId = '';
         _streamingDeltaBuffer.clear();
       }
@@ -2098,7 +2099,7 @@ $kSpokenReplyLengthPolicy
         _voiceManager = null;
         return false;
       }
-      if (!_setMicOwner(AnyoneMicOwner.deepgram,
+      if (!_setMicOwner(CircleTalkMicOwner.deepgram,
           reason: 'deepgram_connected')) {
         await _voiceManager?.dispose();
         _voiceManager = null;
@@ -2113,7 +2114,7 @@ $kSpokenReplyLengthPolicy
     } catch (error) {
       await _voiceManager?.dispose();
       _voiceManager = null;
-      _setMicOwner(AnyoneMicOwner.none, reason: 'deepgram_connect_failed');
+      _setMicOwner(CircleTalkMicOwner.none, reason: 'deepgram_connect_failed');
       _log('❌ [LISTEN-ERR]',
           'Deepgram start failed reason=${error.runtimeType}');
       return false;
@@ -2213,7 +2214,7 @@ $kSpokenReplyLengthPolicy
       }
 
       session.openAudioGate(reason: 'turn_start');
-      _setMicOwner(AnyoneMicOwner.openaiStreaming,
+      _setMicOwner(CircleTalkMicOwner.openaiStreaming,
           reason: 'streaming_stt_listening');
       // 🔁 [LATE-CONTINUATION] 새 유저 턴이 열렸다 = 이 턴의 AI 음성은 아직
       //   없다. 여기서 안 내리면 **오프너·안내 문구가 재생된 뒤 첫 유저 턴은
@@ -2228,7 +2229,8 @@ $kSpokenReplyLengthPolicy
       _reportListeningReady();
       return true;
     } catch (error) {
-      _setMicOwner(AnyoneMicOwner.none, reason: 'streaming_stt_start_failed');
+      _setMicOwner(CircleTalkMicOwner.none,
+          reason: 'streaming_stt_start_failed');
       _log(
           '❌ [LISTEN-ERR]', '스트리밍 전사 start failed reason=${error.runtimeType}');
       return false;
@@ -2324,7 +2326,7 @@ $kSpokenReplyLengthPolicy
       if (capture != null && identical(_preparedCapture, capture)) {
         _preparedCapture = null; // 이제 이 경로가 종료 책임을 가진다.
       }
-      capture ??= await AnyonePreparedAudioCapture.start(
+      capture ??= await PreparedAudioCapture.start(
         recorder: _audioRecorder,
         onRecordingStarted: (at) =>
             _markFirstSpeech('LOCAL_RECORDING_STARTED', at: at),
@@ -2392,7 +2394,7 @@ $kSpokenReplyLengthPolicy
       mounted &&
       !_isDisposing &&
       _isConversationActive &&
-      _micOwner == AnyoneMicOwner.openaiStreaming;
+      _micOwner == CircleTalkMicOwner.openaiStreaming;
 
   void _onStreamingSpeechStarted() {
     if (!_isStreamingTurnOwner()) {
@@ -2499,8 +2501,8 @@ $kSpokenReplyLengthPolicy
     _continuationWindowOpen = false;
     _streamingStt?.closeAudioGate(reason: reason);
     unawaited(_stopStreamingCapture(reason: reason));
-    if (_micOwner == AnyoneMicOwner.openaiStreaming) {
-      _setMicOwner(AnyoneMicOwner.none, reason: reason);
+    if (_micOwner == CircleTalkMicOwner.openaiStreaming) {
+      _setMicOwner(CircleTalkMicOwner.none, reason: reason);
     }
     if (wasOpen) {
       _log('🔁 [CONT-WINDOW]',
@@ -2811,7 +2813,7 @@ $kSpokenReplyLengthPolicy
     _turnInFlight = false;
     _closeContinuationWindow(reason: reason);
     _resetContinuationState();
-    _setMicOwner(AnyoneMicOwner.none, reason: reason);
+    _setMicOwner(CircleTalkMicOwner.none, reason: reason);
     if (mounted) {
       setState(() {
         _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
@@ -3224,7 +3226,7 @@ $kSpokenReplyLengthPolicy
     final pcm = _snapshotTurnPcm();
     final closingVoiceManager = _voiceManager;
     _voiceManager = null;
-    _setMicOwner(AnyoneMicOwner.none, reason: 'vad_boundary_committed');
+    _setMicOwner(CircleTalkMicOwner.none, reason: 'vad_boundary_committed');
     if (closingVoiceManager != null) {
       // Android 녹음 세션이 완전히 닫힌 뒤 AI 음성(tts-1)을 재생해야
       // 녹음 라우팅이 뒤늦게 스피커 출력을 다시 덮지 않는다.
@@ -3588,7 +3590,7 @@ $kSpokenReplyLengthPolicy
     //   참조를 먼저 끊으므로 이후 콜백은 세대 가드에서 걸러진다.
     final closingVoiceManager = _voiceManager;
     _voiceManager = null;
-    _setMicOwner(AnyoneMicOwner.none, reason: 'transcript_committed');
+    _setMicOwner(CircleTalkMicOwner.none, reason: 'transcript_committed');
     if (closingVoiceManager != null) {
       unawaited(closingVoiceManager.dispose());
     }
@@ -4026,7 +4028,7 @@ $kSpokenReplyLengthPolicy
     }
 
     _log('[PIPE-PATH]',
-        'anyone_nova3 turnId=$currentTurnId translateModel=$translationModel');
+        'circle_talk_nova3 turnId=$currentTurnId translateModel=$translationModel');
 
     _isPipelineRunning = true;
     TtsUtterance? aiUtterance;
@@ -4497,7 +4499,7 @@ $kSpokenReplyLengthPolicy
           return;
         }
 
-        aiOriginalText = _guardAnyoneAiReply(
+        aiOriginalText = _guardCircleTalkAiReply(
           aiOriginalText,
           allowQuestion: allowAiQuestion,
         );
@@ -4518,7 +4520,7 @@ $kSpokenReplyLengthPolicy
               _turnCounter != currentTurnId) {
             return;
           }
-          aiOriginalText = _guardAnyoneAiReply(
+          aiOriginalText = _guardCircleTalkAiReply(
             rewritten,
             allowQuestion: allowAiQuestion,
           );
@@ -5327,8 +5329,8 @@ final RegExp kTtsDelimiterPattern = RegExp(r'[,\.?!;:。、！？…，；：\n]
 /// 들어온 PCM은 보관하지 않고 폐기하며, 서버 전송 소비자가 붙은 뒤 들어오는
 /// 새 PCM만 전달한다. 오래된 무음이 실시간 발화보다 먼저 전송되면 입력이 그
 /// 시간만큼 밀리기 때문이다.
-class AnyonePreparedAudioCapture {
-  AnyonePreparedAudioCapture._({
+class PreparedAudioCapture {
+  PreparedAudioCapture._({
     required this.recorder,
     required this.stream,
     required StreamSubscription<Uint8List> sourceSubscription,
@@ -5349,7 +5351,7 @@ class AnyonePreparedAudioCapture {
   /// Duo 직접 대화만 둘 다 켠다. 거기는 통화라서 상대가 말하는 동안에도
   /// 마이크를 닫을 수 없고, 스피커로 나간 상대 목소리를 마이크가 도로 잡아
   /// 되먹임이 생긴다. 그건 가드로 못 막고 AEC로만 지운다.
-  static Future<AnyonePreparedAudioCapture> start({
+  static Future<PreparedAudioCapture> start({
     required AudioRecorder recorder,
     required void Function(DateTime at) onRecordingStarted,
     required void Function(DateTime at, int byteCount) onFirstFrame,
@@ -5387,7 +5389,7 @@ class AnyonePreparedAudioCapture {
         if (!controller.isClosed) unawaited(controller.close());
       },
     );
-    return AnyonePreparedAudioCapture._(
+    return PreparedAudioCapture._(
       recorder: recorder,
       stream: controller.stream,
       sourceSubscription: sourceSubscription,
@@ -5469,7 +5471,7 @@ class DeepgramV2VoiceManager {
   final String apiKey;
   final AudioRecorder audioRecorder;
   final String langCode;
-  final AnyoneCostTracker? costTracker;
+  final CircleTalkCostTracker? costTracker;
   final VoidCallback onConnected;
   final Function(String) onTranscriptUpdate;
   final void Function(String, {bool speechFinal}) onTurnEnded;
@@ -5486,8 +5488,8 @@ class DeepgramV2VoiceManager {
 
   IOWebSocketChannel? _channel;
   IOWebSocketChannel? _preconnectedChannel;
-  AnyonePreparedAudioCapture? _preparedCapture;
-  AnyonePreparedAudioCapture? _activePreparedCapture;
+  PreparedAudioCapture? _preparedCapture;
+  PreparedAudioCapture? _activePreparedCapture;
   StreamSubscription? _audioSub;
   StreamSubscription? _wsSub;
   String _currentTranscript = '';
@@ -5525,7 +5527,7 @@ class DeepgramV2VoiceManager {
     this.onFirstPcmSent,
     this.onFirstPartial,
     IOWebSocketChannel? preconnectedChannel,
-    AnyonePreparedAudioCapture? preparedCapture,
+    PreparedAudioCapture? preparedCapture,
   })  : _preconnectedChannel = preconnectedChannel,
         _preparedCapture = preparedCapture;
 
@@ -5615,7 +5617,7 @@ class DeepgramV2VoiceManager {
     _keepAliveTimer = null;
     _lg('🎤 [MIC-01]', '_connect 진입');
     try {
-      final uri = buildAnyoneDeepgramUri(langCode);
+      final uri = buildCircleTalkDeepgramUri(langCode);
 
       final preconnectedChannel = _preconnectedChannel;
       _preconnectedChannel = null;
@@ -6704,7 +6706,7 @@ class ChunkedTtsFetcher {
   final String language;
   final bool isUser; // 🔧 [v3.5] true=유저 큐, false=AI 큐
   final void Function(String tag, String msg)? onLog; // 🔬 [v3.1] 로그 훅
-  final AnyoneCostTracker? costTracker;
+  final CircleTalkCostTracker? costTracker;
 
   int _requestCounter = 0;
   int _readyCounter = 0;

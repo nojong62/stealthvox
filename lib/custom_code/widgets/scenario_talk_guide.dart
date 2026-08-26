@@ -3,7 +3,7 @@
 // ----------------------------------------------------------------------------
 // 두 곳에서 연다.
 //   · 입장 전 Scenario Talk Settings 페이지 (stealth_room_master.dart)
-//   · 대화방 안 상단 (routine_mode_roleplay.dart)
+//   · 대화방 안 상단 (routine_mode_scenario_talk.dart)
 //
 // 예전에는 방 위젯의 private 메서드라 앞 페이지에서 부를 수 없었다. 거기서
 // 다시 쓰면 같은 설명이 두 벌이 되어 한쪽만 고쳐지는 일이 생긴다.

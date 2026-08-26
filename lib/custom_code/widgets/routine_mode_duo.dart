@@ -45,7 +45,7 @@ import 'trial/trial_flow_state.dart';
 import 'trial/trial_study_page.dart';
 // 마이크 캡처는 Circle Talk과 **같은 구현 한 벌**을 쓴다. 복제하면 sample rate ·
 // 권한 · 종료 처리가 두 군데로 갈라진다.
-import 'routine_mode_anyone.dart' show AnyonePreparedAudioCapture;
+import 'routine_mode_circle_talk.dart' show PreparedAudioCapture;
 
 // ============================================================================
 // 🗣️ [DUO-MODE] Duo는 두 가지 방식으로 갈린다.
@@ -398,7 +398,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   DuoPcmRelayClient? _relayClient;
   StreamSubscription<Uint8List>? _relayInboundSub;
   DuoPcmJitterPlayer? _jitterPlayer;
-  AnyonePreparedAudioCapture? _directCapture;
+  PreparedAudioCapture? _directCapture;
   StreamSubscription<Uint8List>? _directCaptureSub;
   OpenAiStreamingTranscribeSession? _directStt;
 
@@ -439,7 +439,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   // 이제 말하는 동안 PCM이 계속 흘러가고 발화 종료는 서버 VAD가 판단한다 —
   // 직접 대화가 이미 쓰는 세션과 같은 것이다.
   OpenAiStreamingTranscribeSession? _interpStt;
-  AnyonePreparedAudioCapture? _interpCapture;
+  PreparedAudioCapture? _interpCapture;
   StreamSubscription<Uint8List>? _interpCaptureSub;
 
   /// 이번 세션에서 이미 확정한 전사문 id. 같은 item이 두 번 오면 한 번만 쓴다.
@@ -1559,7 +1559,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       await _startDirectStt(generation);
 
       // ④ 마이크 한 개를 열어 두 갈래로 흘린다.
-      final capture = await AnyonePreparedAudioCapture.start(
+      final capture = await PreparedAudioCapture.start(
         recorder: _audioRecorder,
         // 🔇 [DUO-DIRECT] 통화라 상대가 말하는 동안에도 마이크를 닫을 수 없다.
         //   스피커로 나간 상대 목소리를 마이크가 도로 잡아 되먹임이 생기므로
@@ -1977,7 +1977,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       //   새로 만들면 세대가 올라가므로, 먼저 읽으면 방금 만든 세션을 남의
       //   세대로 오인해 캡처를 곧바로 버린다.
       final int generation = _interpGeneration;
-      final capture = await AnyonePreparedAudioCapture.start(
+      final capture = await PreparedAudioCapture.start(
         recorder: _audioRecorder,
         // 🔇 [ECHO] always-on이라 상대 말이 재생되는 동안에도 마이크는 열려
         //   있다(게이트만 닫는다). 스피커폰으로 나간 앱 목소리가 마이크로

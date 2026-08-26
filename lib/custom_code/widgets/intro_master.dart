@@ -291,7 +291,7 @@ class _IntroMasterState extends State<IntroMaster> {
       FFAppState().nativeLang = _trialNativeLang;
       FFAppState().targetLang = _trialTargetLang;
 
-      await _enterTrialAnyone(requestGeneration);
+      await _enterTrialCircleTalk(requestGeneration);
     } catch (e) {
       final errorContext = mounted ? context : appNavigatorKey.currentContext;
       if (errorContext != null && errorContext.mounted) {
@@ -314,7 +314,7 @@ class _IntroMasterState extends State<IntroMaster> {
         (ModalRoute.of(context)?.isCurrent ?? false);
   }
 
-  Future<void> _enterTrialAnyone(int requestGeneration) async {
+  Future<void> _enterTrialCircleTalk(int requestGeneration) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || !_isCurrentTrialRequest(requestGeneration)) return;
     final historyRef = FirebaseFirestore.instance

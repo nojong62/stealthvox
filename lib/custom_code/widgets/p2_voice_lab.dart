@@ -33,7 +33,7 @@ import '/custom_code/services/breath_segment.dart';
 import '/custom_code/services/p2_voice_styles.dart';
 import '/custom_code/services/pcm_audio_utils.dart'
     show kStealthVoxSttSampleRate, pcm16ToWav;
-import 'routine_mode_roleplay.dart' show TtsCache;
+import 'routine_mode_scenario_talk.dart' show TtsCache;
 
 // ── 색 ────────────────────────────────────────────────────────────────
 const Color _kLabBg = Color(0xFF121212);

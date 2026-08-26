@@ -134,8 +134,8 @@ void main() {
     test('대화방 파일 셋이 살아 있다', () {
       for (final path in <String>[
         'lib/custom_code/widgets/routine_mode_duo.dart',
-        'lib/custom_code/widgets/routine_mode_anyone.dart',
-        'lib/custom_code/widgets/routine_mode_roleplay.dart',
+        'lib/custom_code/widgets/routine_mode_circle_talk.dart',
+        'lib/custom_code/widgets/routine_mode_scenario_talk.dart',
       ]) {
         expect(File(path).existsSync(), isTrue, reason: path);
       }
@@ -157,8 +157,8 @@ void main() {
       // 유도하거나 재료를 모으려 들면 그건 다시 Step Expand다.
       for (final path in <String>[
         'lib/custom_code/widgets/routine_mode_duo.dart',
-        'lib/custom_code/widgets/routine_mode_anyone.dart',
-        'lib/custom_code/widgets/routine_mode_roleplay.dart',
+        'lib/custom_code/widgets/routine_mode_circle_talk.dart',
+        'lib/custom_code/widgets/routine_mode_scenario_talk.dart',
       ]) {
         final text = File(path).readAsStringSync();
         expect(text, isNot(contains('My Speech')), reason: path);

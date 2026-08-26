@@ -42,7 +42,7 @@ String deepgramLanguageCode(String language) {
   }
 }
 
-Uri buildAnyoneDeepgramUri(String languageCode) {
+Uri buildCircleTalkDeepgramUri(String languageCode) {
   return Uri.parse(
     'wss://api.deepgram.com/v1/listen'
     '?model=nova-3'
@@ -120,7 +120,7 @@ class DeepgramPrewarmSession {
     final sw = Stopwatch()..start();
     try {
       final channel = IOWebSocketChannel.connect(
-        buildAnyoneDeepgramUri(languageCode),
+        buildCircleTalkDeepgramUri(languageCode),
         headers: {'Authorization': 'Token $apiKey'},
         pingInterval: const Duration(seconds: 10),
       );

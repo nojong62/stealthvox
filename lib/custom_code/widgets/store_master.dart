@@ -390,7 +390,7 @@ class _StoreMasterState extends State<StoreMaster> {
       case 'duo':
         return '🎭 Duo Mode';
       case 'roleplay':
-        return '🎬 Roleplay';
+        return '🎬 Scenario Talk';
       case 'study_room':
       case 'stealth_room':
         return '🕵️ Stealth Room';

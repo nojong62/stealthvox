@@ -419,20 +419,20 @@ void main() {
 
   group('Anyone deliberate reply policy', () {
     test('trades a beat of latency for a committed, specific reply', () {
-      expect(kAnyoneDeliberateReplyPolicy, contains('Take an extra beat'));
-      expect(kAnyoneDeliberateReplyPolicy, contains('two different replies'));
-      expect(kAnyoneDeliberateReplyPolicy, contains('hedging or generic'));
+      expect(kCircleTalkDeliberateReplyPolicy, contains('Take an extra beat'));
+      expect(kCircleTalkDeliberateReplyPolicy, contains('two different replies'));
+      expect(kCircleTalkDeliberateReplyPolicy, contains('hedging or generic'));
     });
 
     test('demands one sharp question instead of a vague one', () {
-      expect(kAnyoneDeliberateReplyPolicy, contains('must earn its place'));
-      expect(kAnyoneDeliberateReplyPolicy, contains('One sharp, specific'));
-      expect(kAnyoneDeliberateReplyPolicy, contains('Never a vague'));
+      expect(kCircleTalkDeliberateReplyPolicy, contains('must earn its place'));
+      expect(kCircleTalkDeliberateReplyPolicy, contains('One sharp, specific'));
+      expect(kCircleTalkDeliberateReplyPolicy, contains('Never a vague'));
     });
 
     test('keeps the deliberation hidden from the streamed output', () {
-      expect(kAnyoneDeliberateReplyPolicy, contains('Never show your drafts'));
-      expect(kAnyoneDeliberateReplyPolicy, contains('only the final reply'));
+      expect(kCircleTalkDeliberateReplyPolicy, contains('Never show your drafts'));
+      expect(kCircleTalkDeliberateReplyPolicy, contains('only the final reply'));
     });
   });
 }

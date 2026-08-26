@@ -21,7 +21,7 @@ class TrialFlowState {
   ///   · 대화가 남의 체험 문서(`myHistoryRef`)에 쌓임
   ///   · `isTrial`이 true라 과금 티커가 안 돌아 유료 시간이 안 깎임
   ///
-  /// 체험 진입(`intro_master._enterTrialAnyone`)은 익명 로그인이 끝난 뒤에만
+  /// 체험 진입(`intro_master._enterTrialCircleTalk`)은 익명 로그인이 끝난 뒤에만
   /// 일어나므로, 익명 여부로 거르면 정상 체험은 그대로 살아 있다.
   bool get _isAnonymousUser {
     final user = FirebaseAuth.instance.currentUser;

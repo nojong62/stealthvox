@@ -3,7 +3,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
-mixin TrialAnyoneTimerMixin<T extends StatefulWidget> on State<T> {
+mixin TrialCircleTalkTimerMixin<T extends StatefulWidget> on State<T> {
   bool trialMode = false;
   int trialSeconds = 60;
 

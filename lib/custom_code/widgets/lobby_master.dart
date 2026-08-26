@@ -28,7 +28,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import 'dart:async'; // unawaited
-import 'routine_mode_roleplay.dart' show TtsCache; // 캐시 정리 진입점
+import 'routine_mode_scenario_talk.dart' show TtsCache; // 캐시 정리 진입점
 import '/custom_code/services/ai_style.dart';
 import '/custom_code/services/admin_gate.dart'; // 관리자 판별(UID)
 import 'p2_voice_lab.dart' show P2VoiceLabPage; // 관리자 전용 히든 화면

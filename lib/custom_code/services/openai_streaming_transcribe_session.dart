@@ -21,7 +21,7 @@
 //   · TTS
 //
 // 기존 Deepgram 경로를 대체하되, 콜백 모양을 최대한 비슷하게 맞춰
-// 호출부(routine_mode_anyone.dart)의 변경을 앞단으로만 한정한다.
+// 호출부(routine_mode_circle_talk.dart)의 변경을 앞단으로만 한정한다.
 //
 // 공식 스펙 근거 (2026-08 확인):
 //   · 연결      wss://api.openai.com/v1/realtime?intent=transcription

@@ -22,7 +22,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:http/http.dart' as http;
 import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:record/record.dart';
-import 'routine_mode_roleplay.dart' show TtsCache;
+import 'routine_mode_scenario_talk.dart' show TtsCache;
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
 
@@ -205,7 +205,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     }
   }
 
-  bool _isAnyoneRoom(String roomName) =>
+  bool _isCircleTalkRoom(String roomName) =>
       roomName.contains("Anyone") ||
       roomName.contains("Free Talk") ||
       roomName.contains("Circle Talk");
@@ -216,7 +216,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     if (roomName.contains("Roleplay")) return Icons.smart_toy;
     if (roomName.contains("Shadowing")) return Icons.smart_toy;
     if (roomName.contains("NativeSync")) return Icons.mic_external_on;
-    if (_isAnyoneRoom(roomName)) return Icons.forum;
+    if (_isCircleTalkRoom(roomName)) return Icons.forum;
     return Icons.chat_bubble_outline;
   }
 
@@ -226,7 +226,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     if (roomName.contains("Roleplay")) return const Color(0xFF16A34A);
     if (roomName.contains("Shadowing")) return Colors.greenAccent;
     if (roomName.contains("NativeSync")) return Colors.orangeAccent;
-    if (_isAnyoneRoom(roomName)) return const Color(0xFF9333EA);
+    if (_isCircleTalkRoom(roomName)) return const Color(0xFF9333EA);
     return Colors.white54;
   }
 
@@ -385,7 +385,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
           if (_selectedFilter == 'All') return true;
           if (data['room_name'] == null) return false;
           final rn = data['room_name'].toString();
-          if (_selectedFilter == 'Anyone') return _isAnyoneRoom(rn);
+          if (_selectedFilter == 'Anyone') return _isCircleTalkRoom(rn);
           return rn.contains(_selectedFilter);
         }).toList();
 

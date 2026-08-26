@@ -78,9 +78,9 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   final TextEditingController _situationController = TextEditingController();
   final TextEditingController _aiRoleController = TextEditingController();
   final TextEditingController _userRoleController = TextEditingController();
-  final AudioRecorder _anyoneAudioRecorder = AudioRecorder();
-  late Future<void> _anyoneAudioReady;
-  DateTime? _anyoneMicInputAt;
+  final AudioRecorder _circleAudioRecorder = AudioRecorder();
+  late Future<void> _circleAudioReady;
+  DateTime? _circleMicInputAt;
   // 🎤 [ENTRY-GATE] Circle Talk은 서클 선택 후 입장하고, 준비가 끝나는 즉시
   //   유저 음성 청취와 AI 첫 마디를 시작한다.
   // 초대 링크에서 소비한 roomId (1회용 — build에서 Duo 생성자에 전달)
@@ -97,11 +97,11 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
         _scenarioSetupOpen = false;
         _selectedCircleDescription = null;
       });
-      unawaited(_refreshAnyonePrewarmAfterExit());
+      unawaited(_refreshCirclePrewarmAfterExit());
     };
     AppsFlyerManager.duoInviteSignal.addListener(_onDuoInviteSignal);
     BillingTicker.instance.balanceExhausted.addListener(_onBalanceExhausted);
-    _anyoneAudioReady = _prepareAnyoneAudioInput();
+    _circleAudioReady = _prepareCircleAudioInput();
     unawaited(_prepareFirstUserResponse());
 
     // Duo 초대 링크 자동 진입 처리
@@ -131,11 +131,11 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     }
   }
 
-  Future<void> _refreshAnyonePrewarmAfterExit() async {
+  Future<void> _refreshCirclePrewarmAfterExit() async {
     // 이전 Anyone의 recorder/소켓 정리가 끝난 뒤 다음 입장을 다시 준비한다.
     await Future.delayed(const Duration(milliseconds: 300));
     if (!mounted || _currentMode != null) return;
-    _anyoneAudioReady = _prepareAnyoneAudioInput();
+    _circleAudioReady = _prepareCircleAudioInput();
     unawaited(_prepareFirstUserResponse());
   }
 
@@ -191,7 +191,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
   }
 
   /// 메뉴 진입 시 권한 요청과 record 플러그인 채널 초기화를 끝낸다.
-  Future<void> _prepareAnyoneAudioInput() async {
+  Future<void> _prepareCircleAudioInput() async {
     final stopwatch = Stopwatch()..start();
     try {
       final permission = await Permission.microphone.request();
@@ -199,8 +199,8 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
         debugPrint('[ANY-INPUT-PREWARM] permission_denied');
         return;
       }
-      await _anyoneAudioRecorder.hasPermission();
-      await _anyoneAudioRecorder.isRecording();
+      await _circleAudioRecorder.hasPermission();
+      await _circleAudioRecorder.isRecording();
       debugPrint(
           '[ANY-INPUT-PREWARM] ready elapsedMs=${stopwatch.elapsedMilliseconds}');
     } catch (error) {
@@ -277,7 +277,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
     unawaited(DeepgramPrewarmSession.instance.discard(reason: 'room_dispose'));
     unawaited(OpenAiStreamingTranscribePrewarm.instance
         .discard(reason: 'room_dispose'));
-    unawaited(_anyoneAudioRecorder.dispose());
+    unawaited(_circleAudioRecorder.dispose());
     super.dispose();
   }
 
@@ -322,9 +322,9 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       );
       return;
     }
-    _anyoneMicInputAt = DateTime.now();
+    _circleMicInputAt = DateTime.now();
     debugPrint(
-        '[FIRST-SPEECH] event=MIC_INPUT at=${_anyoneMicInputAt!.toIso8601String()} deltaMs=0');
+        '[FIRST-SPEECH] event=MIC_INPUT at=${_circleMicInputAt!.toIso8601String()} deltaMs=0');
     setState(() {
       _selectedCircleDescription =
           clean.length > 200 ? clean.substring(0, 200) : clean;
@@ -423,7 +423,7 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       }
       if (apiKey.isEmpty) throw StateError('OpenAI key unavailable');
 
-      final result = await RoleplayBrain.generateDramaticScenario(apiKey);
+      final result = await ScenarioBrain.generateDramaticScenario(apiKey);
       if (result == null) throw const FormatException('empty scenario');
       if (!mounted) return;
       setState(() {
@@ -455,9 +455,9 @@ class _StealthRoomMasterState extends State<StealthRoomMaster>
       return;
     }
     // 방은 이 홀더를 읽어 시나리오를 세팅한다(재진입 보존과 같은 경로).
-    RoleplayScenarioStore.situation = situation;
-    RoleplayScenarioStore.aiRole = aiRole;
-    RoleplayScenarioStore.userRole = userRole;
+    ScenarioStore.situation = situation;
+    ScenarioStore.aiRole = aiRole;
+    ScenarioStore.userRole = userRole;
     setState(() {
       _scenarioSetupOpen = false;
       _currentMode = 3;
@@ -848,13 +848,13 @@ Return ONLY valid JSON: {"name":"..."}.
   @override
   Widget build(BuildContext context) {
     if (_currentMode == 2) {
-      return RoutineModeAnyone(
-        key: const ValueKey('RoutineModeAnyone'),
+      return RoutineModeCircleTalk(
+        key: const ValueKey('RoutineModeCircleTalk'),
         width: widget.width,
         height: widget.height,
-        preparedAudioRecorder: _anyoneAudioRecorder,
-        audioPreparation: _anyoneAudioReady,
-        micInputAt: _anyoneMicInputAt,
+        preparedAudioRecorder: _circleAudioRecorder,
+        audioPreparation: _circleAudioReady,
+        micInputAt: _circleMicInputAt,
         circleDescription: _selectedCircleDescription ?? '편안한 일상 대화 커뮤니티',
       );
     }
@@ -865,8 +865,8 @@ Return ONLY valid JSON: {"name":"..."}.
           height: widget.height,
           roomId: _pendingDuoRoomId);
     } else if (_currentMode == 3) {
-      return RoutineModeRoleplay(
-          key: const ValueKey('RoutineModeRoleplay'),
+      return RoutineModeScenarioTalk(
+          key: const ValueKey('RoutineModeScenarioTalk'),
           width: widget.width,
           height: widget.height);
     }
