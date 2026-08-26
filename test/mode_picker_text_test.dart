@@ -90,6 +90,31 @@ void main() {
     });
   });
 
+  /// 초대 흐름(방식 선택 팝업 · 초대 완료·실패 알림)은 **영어 하나**를 쓴다.
+  /// 로비 ORIGIN을 따라 갈리던 것을 2026-08-27에 통일했다.
+  ///
+  /// 언어별 표는 지우지 않았다 — 되돌릴 때 `kDuoInviteUiLang`만 바꾸면
+  /// 그대로 돌아오고, 위 시험들이 12개 언어를 계속 지킨다.
+  group('초대 흐름은 영어 하나', () {
+    test('kDuoInviteUiLang이 English다', () {
+      expect(kDuoInviteUiLang, 'English');
+      expect(modePickerTextFor(kDuoInviteUiLang), kModePickerText['English']);
+    });
+
+    test('영어 문구가 시안대로 짧다', () {
+      final en = kModePickerText['English']!;
+      expect(en['title'], 'Choose Call Mode');
+      expect(en['subtitle'], "Pick how you'd like to talk.");
+      expect(en['directTitle'], 'Direct Call');
+      expect(en['directDesc'], 'Talk with your real voices.');
+      expect(en['interpTitle'], 'Live Translation');
+      expect(en['interpDesc'], 'Hear their words in your language.');
+      expect(en['note'], 'The guest will join in this mode.');
+      expect(en['cancel'], 'Cancel');
+      expect(en['invite'], 'Invite');
+    });
+  });
+
   group('modePickerTextFor', () {
     test('ORIGIN 언어의 문구를 준다', () {
       expect(modePickerTextFor('Korean')['title'], '대화 방식 선택');

@@ -92,13 +92,13 @@ const Map<String, Map<String, String>> kModePickerText = {
     'inviteFailDetail': '잠시 후 다시 시도해 주세요.',
   },
   'English': {
-    'title': 'Choose a call type',
-    'subtitle': 'Pick how you want to talk on this invitation.',
+    'title': 'Choose Call Mode',
+    'subtitle': "Pick how you'd like to talk.",
     'directTitle': 'Direct Call',
-    'directDesc': "You'll talk in each other's real voices.",
-    'interpTitle': 'Live Interpreter',
-    'interpDesc': "You'll hear the other person as interpreted speech.",
-    'note': 'The person you invite joins with the same call type.',
+    'directDesc': 'Talk with your real voices.',
+    'interpTitle': 'Live Translation',
+    'interpDesc': 'Hear their words in your language.',
+    'note': 'The guest will join in this mode.',
     'cancel': 'Cancel',
     'invite': 'Invite',
     'inviteDoneDirect': 'Invited to a Direct Call',
@@ -277,6 +277,18 @@ const String _kModePickerFallbackLang = 'English';
 Map<String, String> modePickerTextFor(String originLang) =>
     kModePickerText[originLang.trim()] ??
     kModePickerText[_kModePickerFallbackLang]!;
+
+/// 🌐 [DUO-INVITE-LANG] 초대 흐름의 글자는 **영어 하나로 통일한다**
+/// (실장님 지시, 2026-08-27).
+///
+/// 방식 선택 팝업과 초대 완료·실패 알림 셋이 이 값을 함께 본다. 예전에는
+/// 로비 ORIGIN을 따라 12개 언어로 갈렸는데, 초대는 **상대가 어느 나라
+/// 사람일지 모르는 자리**라 보내는 사람 언어로만 적어 둘 이유가 약하다.
+///
+/// 언어별 표([kModePickerText])는 지우지 않는다 — 되돌릴 때 이 값을
+/// `FFAppState().nativeLang`으로 바꾸면 그대로 돌아온다. 표가 12개 언어를
+/// 다 덮는지는 `test/mode_picker_text_test.dart`가 계속 지킨다.
+const String kDuoInviteUiLang = 'English';
 const String kInterpreterPartnerTtsVoice = 'alloy';
 
 /// 맛보기 직접 통화 길이. 폰 한 대에 딱 한 번만 주어진다.
@@ -3045,9 +3057,8 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         subject: 'StealthVox Duo 초대',
       );
       if (mounted) {
-        // 방식 선택 시트와 같은 언어(로비 ORIGIN)로 말한다. 모드 이름에
-        // 조사를 붙이지 않고 언어별 완성 문장을 그대로 쓴다.
-        final t = modePickerTextFor(FFAppState().nativeLang);
+        // 방식 선택 팝업과 같은 말을 쓴다([kDuoInviteUiLang]).
+        final t = modePickerTextFor(kDuoInviteUiLang);
         _showDuoSnack(
           icon: Icons.check_circle_rounded,
           accent: const Color(0xFF60A5FA),
@@ -3060,7 +3071,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     } catch (e) {
       debugPrint('[Duo] Share invite error: $e');
       if (mounted) {
-        final t = modePickerTextFor(FFAppState().nativeLang);
+        final t = modePickerTextFor(kDuoInviteUiLang);
         _showDuoSnack(
           icon: Icons.error_outline_rounded,
           accent: const Color(0xFFF87171),
@@ -3619,20 +3630,19 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
   /// (방식 선택 시트·초대 알림)은 [kModePickerText]가 ORIGIN으로 맞춘다.
   /// 저장 id(`kDuoModeDirect`/`kDuoModeInterpreter`)는 어느 쪽도 건드리지 않는다.
   static String _modeTitleEn(String mode) =>
-      mode == kDuoModeDirect ? 'Direct Call' : 'Live Interpreter';
+      mode == kDuoModeDirect ? 'Direct Call' : 'Live Translation';
 
   static String _modeDescEn(String mode) => mode == kDuoModeDirect
-      ? "You'll talk in each other's real voices."
-      : "You'll hear the other person as interpreted speech.";
+      ? 'Talk with your real voices.'
+      : 'Hear their words in your language.';
 
   /// 🆕 [모드 선택 — 호스트 전용] 초대장을 만들기 직전에 뜬다.
   /// 여기서 고른 값만이 세션 문서의 `mode`가 된다.
   Future<String?> _showHostModePicker() {
     String picked = _duoMode;
-    // 이 시트만 로비 ORIGIN(대화 언어)으로 쓴다. 초대를 만드는 사람이
-    // 실제로 말하는 언어가 그것이다. 시트를 여는 순간 한 번 고르고,
-    // 여는 동안 언어가 바뀌는 경로는 없다.
-    final Map<String, String> t = modePickerTextFor(FFAppState().nativeLang);
+    // 글자는 [kDuoInviteUiLang] 하나를 따른다 — 초대 흐름 셋이 같은 말을
+    // 쓴다(팝업 · 초대 완료 알림 · 실패 알림).
+    final Map<String, String> t = modePickerTextFor(kDuoInviteUiLang);
     return showDialog<String>(
       context: context,
       barrierColor: Colors.black.withValues(alpha: 0.72),

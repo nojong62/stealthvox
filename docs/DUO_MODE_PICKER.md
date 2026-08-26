@@ -97,31 +97,33 @@
 
 ---
 
-## 4. 글자는 로비 ORIGIN을 따른다
+## 4. 글자는 영어 하나다
 
-**이 팝업만 로비의 ORIGIN(대화 언어)으로 적힌다.** 초대를 만드는 사람이
-실제로 말하는 언어가 그것이기 때문이다. 나머지 화면은 다른 규칙을 쓴다.
+**초대 흐름 셋이 같은 말을 쓴다** — 방식 선택 팝업 · 초대 완료 알림 ·
+초대 실패 알림. 2026-08-27에 영어로 통일했다.
 
-문구는 `kModePickerText`(`routine_mode_duo.dart`)에 언어별로 들어 있고,
-로비가 고를 수 있는 **12개 언어를 모두 덮는다.** 모르는 값이 들어오면
-영어로 떨어진다(`modePickerTextFor`).
-
-한국어 기준:
+예전에는 로비 ORIGIN을 따라 12개 언어로 갈렸다. 초대는 **상대가 어느 나라
+사람일지 모르는 자리**라 보내는 사람 언어로만 적어 둘 이유가 약했다.
 
 | 키 | 글 |
 |---|---|
-| `title` | 대화 방식 선택 |
-| `subtitle` | 초대할 대화 방식을 골라주세요. |
-| `directTitle` | 직접 대화 |
-| `directDesc` | 서로의 실제 목소리로 통화합니다. |
-| `interpTitle` | 만능 통역 |
-| `interpDesc` | 상대의 말을 통역 음성으로 들려줍니다. |
-| `note` | 상대방도 선택한 방식으로 초대됩니다. |
-| `cancel` | 취소 |
-| `invite` | 초대하기 |
+| `title` | Choose Call Mode |
+| `subtitle` | Pick how you'd like to talk. |
+| `directTitle` | Direct Call |
+| `directDesc` | Talk with your real voices. |
+| `interpTitle` | Live Translation |
+| `interpDesc` | Hear their words in your language. |
+| `note` | The guest will join in this mode. |
+| `cancel` | Cancel |
+| `invite` | Invite |
 
-`test/mode_picker_text_test.dart`가 지킨다 — 12개 언어가 다 있는지, 칸이
-비지 않았는지, 두 모드의 초대 완료 문장이 서로 다른지.
+게스트가 보는 쪽(`_modeTitleEn` / `_modeDescEn`)도 같은 말로 맞췄다.
+
+### 되돌리려면
+
+`kDuoInviteUiLang` 한 값만 `FFAppState().nativeLang`으로 바꾸면 12개 언어가
+그대로 돌아온다. **언어별 표(`kModePickerText`)는 지우지 않았고**,
+`test/mode_picker_text_test.dart`가 12개 언어에 칸이 다 찼는지 계속 지킨다.
 
 ---
 
