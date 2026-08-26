@@ -31,6 +31,7 @@ import 'routine_mode_scenario_talk.dart' show TtsCache;
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
 import '/custom_code/services/ai_style.dart';
+import 'alt_style_popup.dart';
 import '/custom_code/services/audio_silence_analyzer.dart';
 import '/custom_code/services/breath_echoing_engine.dart';
 import '/custom_code/services/breath_segment.dart';
@@ -2046,31 +2047,11 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     );
   }
 
-  // 📦 [Box 17-B: 다른 표현 보기 - 말풍선 옆 버튼]
-  Widget _buildAltStyleBtn(String baseText) {
-    return IconButton(
-      padding: const EdgeInsets.all(8),
-      constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
-      // translate 아이콘은 글리프에 한자(文)가 들어 있어 쓰지 않는다.
-      // 글자 없는 교체 화살표로 "같은 뜻 다른 표현"을 나타낸다.
-      icon: const Icon(
-        Icons.swap_horiz_rounded,
-        color: Color(0xFF38BDF8),
-        size: 26,
-      ),
-      onPressed: () => _showAltStylePopup(baseText),
-      tooltip: "다른 표현 보기",
-    );
-  }
-
-  /// 이 세션에서 실제로 적용되는 AI STYLE.
-  ///
-  /// AI STYLE은 **영어 대화 전용 설정**이다. 세션 타겟이 영어가 아니면
-  /// 저장값(American 등)이 무엇이든 `Standard`로 취급한다. 전역
-  /// `FFAppState().aiStyle` 자체는 건드리지 않는다 — 영어로 돌아왔을 때
-  /// 마지막 선택을 그대로 복원해야 하기 때문이다.
-  String _effectiveAiStyle() =>
-      effectiveAiStyle(targetLang: _sessionTargetLangName());
+  // 📦 [Box 17-B: 다른 표현 보기]
+  //   버튼도 팝업도 Keepers와 함께 쓴다 — `widgets/alt_style_popup.dart`.
+  //   화면마다 사본을 두면 같은 이름의 Native가 서로 다른 문장이 된다.
+  Widget _buildAltStyleBtn(String baseText) =>
+      buildAltStyleButton(onPressed: () => _showAltStylePopup(baseText));
 
   /// 이 세션의 TARGET 언어 이름. 비어 있으면 영어로 본다(기존 동작).
   String _sessionTargetLangName() {
@@ -2078,205 +2059,14 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     return name.isEmpty ? 'English' : name;
   }
 
-  /// 지금 적용 중인 스타일([_effectiveAiStyle])을 뺀 나머지 스타일들.
-  /// 영어가 타겟일 때만 American/British가 존재한다(로비와 같은 규칙).
-  /// 순서는 Standard → American → British → Native로 고정한다.
-  List<String> _otherAiStyles() {
-    final available = isAiStyleTargetLanguage(_sessionTargetLangName())
-        ? kAiStyles
-        : const <String>['Standard', 'Native'];
-    final current = _effectiveAiStyle();
-    return available.where((style) => style != current).toList();
-  }
-
-  /// 같은 뜻을 스타일만 바꿔 다시 쓴다. 뜻·화자 시점·존댓말 정도는 유지한다.
-  ///
-  /// 스타일 정의는 한 줄도 여기 적지 않는다 — 전부
-  /// `services/ai_style.dart`에서 가져온다. 여기에 따로 적어 두면 대화방이
-  /// 만드는 Native와 이 팝업이 보여 주는 Native가 서로 다른 물건이 된다.
-  Future<Map<String, String>> _fetchAltStyleSentences(
-    String baseText,
-    List<String> styles,
-  ) async {
-    final source = baseText.trim();
-    if (_apiKey.isEmpty || source.isEmpty || styles.isEmpty) {
-      return <String, String>{};
-    }
-    final targetLanguage = _sessionTargetLangName();
-    // 팝업은 여러 스타일을 한 번에 요청하므로, 스타일마다 지시문 전체를
-    // 붙인다. 한 줄 요약만 주면 American과 Native가 같은 문장으로 돌아온다.
-    final guide =
-        styles.map((s) => '### "$s"\n${aiStyleInstruction(s)}').join('\n\n');
-    try {
-      final response = await http
-          .post(
-            Uri.parse('https://api.openai.com/v1/chat/completions'),
-            headers: <String, String>{
-              'Authorization': 'Bearer $_apiKey',
-              'Content-Type': 'application/json; charset=utf-8',
-            },
-            body: jsonEncode(<String, dynamic>{
-              'model': 'gpt-4o-mini',
-              'temperature': 0.4,
-              'max_tokens': 400,
-              'response_format': <String, String>{'type': 'json_object'},
-              'messages': <Map<String, String>>[
-                <String, String>{
-                  'role': 'system',
-                  'content': 'Rewrite ONE $targetLanguage sentence, once per style below.\n'
-                      'Keep the meaning, the speaker viewpoint, and the politeness level identical in every version. '
-                      'The wording and flavour change; the meaning does not.\n'
-                      'The versions must be clearly different from each other — if two styles come out the same, you have not applied them.\n\n'
-                      'Styles requested:\n\n$guide\n\n'
-                      'Return ONLY valid JSON whose keys are exactly the style names above '
-                      'and whose values are the rewritten sentences. No labels, no explanation.',
-                },
-                <String, String>{'role': 'user', 'content': source},
-              ],
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode != 200) {
-        debugPrint('[ALT-STYLE] status=${response.statusCode}');
-        return <String, String>{};
-      }
-      final content = jsonDecode(utf8.decode(response.bodyBytes))['choices'][0]
-              ['message']['content']
-          .toString();
-      final parsed = jsonDecode(content) as Map<String, dynamic>;
-      final result = <String, String>{};
-      for (final style in styles) {
-        final line = parsed[style]?.toString().trim() ?? '';
-        if (line.isNotEmpty) result[style] = line;
-      }
-      return result;
-    } catch (e) {
-      debugPrint('[ALT-STYLE] failed: $e');
-      return <String, String>{};
-    }
-  }
-
-  // 📦 [Box 17-B-2: 다른 표현 보기 - 팝업]
-  //   팝업 아무 곳이나 누르면 닫힌다(유저 요청). 바깥을 눌러도 닫힌다.
+  /// 같은 뜻을 스타일만 바꿔 늘어놓는다. 목록도 생성 규칙도 공용이다.
   void _showAltStylePopup(String baseText) {
     _resumeHistoryFromUserAction();
-    final styles = _otherAiStyles();
-    if (styles.isEmpty) return;
-    final future = _fetchAltStyleSentences(baseText, styles);
-    showDialog<void>(
+    showAltStylePopup(
       context: context,
-      barrierDismissible: true,
-      builder: (dialogContext) => GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () => Navigator.of(dialogContext).pop(),
-        child: Dialog(
-          backgroundColor: const Color(0xFF1E1E1E),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          insetPadding:
-              const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
-          // 문장이 길면 4개가 화면을 넘긴다. 높이를 화면의 75%로 묶고
-          // 안쪽을 스크롤시켜 마지막 스타일까지 볼 수 있게 한다.
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(dialogContext).size.height * 0.75,
-            ),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-              child: FutureBuilder<Map<String, String>>(
-                future: future,
-                builder: (ctx, snapshot) {
-                  if (snapshot.connectionState != ConnectionState.done) {
-                    return const SizedBox(
-                      height: 90,
-                      child: Center(
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Color(0xFF38BDF8)),
-                      ),
-                    );
-                  }
-                  final data = snapshot.data ?? <String, String>{};
-                  // 맨 위는 지금 설정된 스타일과 원래 문장, 그 아래로 나머지.
-                  final entries = <MapEntry<String, String>>[
-                    MapEntry(_effectiveAiStyle(), baseText.trim()),
-                    ...styles
-                        .where(data.containsKey)
-                        .map((s) => MapEntry(s, data[s]!)),
-                  ];
-                  return Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        '다른 표현 보기',
-                        style: TextStyle(
-                          color: Color(0xFF38BDF8),
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      if (data.isEmpty)
-                        const Text(
-                          '표현을 불러오지 못했습니다. 다시 시도해 주세요.',
-                          style: TextStyle(color: Colors.white70, fontSize: 14),
-                        )
-                      else
-                        Flexible(
-                          child: SingleChildScrollView(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              // 스타일 이름 한 줄, 다음 줄에 문장.
-                              children: entries
-                                  .map(
-                                    (e) => Padding(
-                                      padding:
-                                          const EdgeInsets.only(bottom: 14),
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            e.key,
-                                            style: const TextStyle(
-                                              color: Color(0xFFB46CFF),
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 3),
-                                          Text(
-                                            e.value,
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 15,
-                                              height: 1.35,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  )
-                                  .toList(),
-                            ),
-                          ),
-                        ),
-                      const SizedBox(height: 2),
-                      const Center(
-                        child: Text(
-                          '탭하면 닫힙니다',
-                          style: TextStyle(color: Colors.white24, fontSize: 11),
-                        ),
-                      ),
-                    ],
-                  );
-                },
-              ),
-            ),
-          ),
-        ),
-      ),
+      apiKey: _apiKey,
+      baseText: baseText,
+      targetLang: _sessionTargetLangName(),
     );
   }
 

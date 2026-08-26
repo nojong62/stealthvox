@@ -23,6 +23,7 @@ import 'package:http/http.dart' as http;
 import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:record/record.dart';
 import 'routine_mode_scenario_talk.dart' show TtsCache;
+import 'alt_style_popup.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
 
@@ -958,7 +959,15 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                 onTap: () => _showKeeperTutoringPopup(doc.id, translated),
               ),
               const SizedBox(width: 4),
-              // 3) 맨 위로 올리기
+              // 3) 다른 표현 보기 — 히스토리 말풍선과 같은 팝업이다
+              _buildKeeperAction(
+                icon: Icons.swap_horiz_rounded,
+                color: kAltStyleAccent,
+                tooltip: '다른 표현 보기',
+                onTap: () => _showKeeperAltStylePopup(translated),
+              ),
+              const SizedBox(width: 4),
+              // 4) 맨 위로 올리기
               _buildKeeperAction(
                 icon: Icons.keyboard_double_arrow_up_rounded,
                 color: _keepersColor,
@@ -966,7 +975,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                 onTap: () => _togglePinKeeper(doc),
               ),
               const SizedBox(width: 4),
-              // 4) 삭제
+              // 5) 삭제
               _buildKeeperAction(
                 icon: Icons.delete_outline_rounded,
                 color: Colors.redAccent.withValues(alpha: 0.7),
@@ -1174,6 +1183,31 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                       color: Colors.redAccent, fontWeight: FontWeight.bold))),
         ],
       ),
+    );
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  //  Keepers 다른 표현 보기 — 히스토리 말풍선과 **같은 팝업**
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  //
+  //  타겟 언어는 로비에서 고른 값(`FFAppState().targetLang`)을 쓴다. Keeper
+  //  문서에는 언어가 안 실려 있고, 지금 배우는 언어로 견주는 것이 이 기능의
+  //  뜻이라 그쪽이 맞다.
+  void _showKeeperAltStylePopup(String baseText) {
+    if (_apiKey.isEmpty || baseText.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('다른 표현을 불러올 수 없습니다.',
+            style: TextStyle(fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.orangeAccent,
+      ));
+      return;
+    }
+    resetBillingIdle();
+    showAltStylePopup(
+      context: context,
+      apiKey: _apiKey,
+      baseText: baseText,
+      targetLang: FFAppState().targetLang,
     );
   }
 
