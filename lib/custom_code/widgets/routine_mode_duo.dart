@@ -3670,8 +3670,12 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                       ]
                     : null,
               ),
+              // 📐 아이콘·글·표시를 **세로 가운데**로 맞춘다. 예전에는 위로
+              //   붙여 놓아서, 설명이 두 줄이 되면 아이콘만 덩그러니 위에
+              //   남고 칸이 길어졌다. 가운데로 모으면 칸이 짧아지고 세 요소가
+              //   한 줄로 읽힌다.
               child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   AnimatedContainer(
                     duration: const Duration(milliseconds: 180),
@@ -3716,20 +3720,17 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                     ),
                   ),
                   const SizedBox(width: 10),
-                  Padding(
-                    padding: const EdgeInsets.only(top: 10),
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 160),
-                      child: Icon(
-                        selected
-                            ? Icons.check_circle_rounded
-                            : Icons.circle_outlined,
-                        key: ValueKey(selected),
-                        size: 23,
-                        color: selected
-                            ? const Color(0xFF69A7FF)
-                            : const Color(0xFF718096),
-                      ),
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 160),
+                    child: Icon(
+                      selected
+                          ? Icons.check_circle_rounded
+                          : Icons.circle_outlined,
+                      key: ValueKey(selected),
+                      size: 24,
+                      color: selected
+                          ? const Color(0xFF69A7FF)
+                          : const Color(0xFF718096),
                     ),
                   ),
                 ],
@@ -3738,125 +3739,136 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
           );
         }
 
-        return Dialog(
-          backgroundColor: Colors.transparent,
-          insetPadding:
-              const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: const Color(0xFF202938),
-                borderRadius: BorderRadius.circular(26),
-                border: Border.all(color: const Color(0xFF3C4A60)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.42),
-                    blurRadius: 32,
-                    offset: const Offset(0, 16),
-                  ),
-                ],
-              ),
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      t['title']!,
-                      style: const TextStyle(
-                        color: Color(0xFFF8FAFC),
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.5,
-                      ),
+        // 📐 라벨만 있는 고르는 자리라 배율에 천장을 씌운다. 글꼴을 크게
+        //   써 둔 기기에서는 두 칸과 버튼이 한 화면에 안 들어와 팝업 안이
+        //   스크롤됐다(실기기 확인, 2026-08-27).
+        return MediaQuery.withClampedTextScaling(
+          maxScaleFactor: 1.3,
+          child: Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding:
+                const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: const Color(0xFF202938),
+                  borderRadius: BorderRadius.circular(26),
+                  border: Border.all(color: const Color(0xFF3C4A60)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.42),
+                      blurRadius: 32,
+                      offset: const Offset(0, 16),
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      t['subtitle']!,
-                      style: const TextStyle(
-                        color: Color(0xFFAEBACD),
-                        fontSize: 13,
-                        height: 1.4,
+                  ],
+                ),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // 제목과 부제는 가운데. 고를 것이 둘뿐이라 왼쪽으로
+                      // 붙이면 팝업이 한쪽으로 쏠려 보인다.
+                      Text(
+                        t['title']!,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Color(0xFFF8FAFC),
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.5,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 20),
-                    tile(kDuoModeDirect),
-                    tile(kDuoModeInterpreter),
-                    const SizedBox(height: 2),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Padding(
-                          padding: EdgeInsets.only(top: 1),
-                          child: Icon(
+                      const SizedBox(height: 6),
+                      Text(
+                        t['subtitle']!,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Color(0xFFAEBACD),
+                          fontSize: 13,
+                          height: 1.4,
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      tile(kDuoModeDirect),
+                      tile(kDuoModeInterpreter),
+                      const SizedBox(height: 2),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          const Icon(
                             Icons.info_outline_rounded,
                             size: 16,
                             color: Color(0xFF91A1B8),
                           ),
-                        ),
-                        const SizedBox(width: 7),
-                        Expanded(
-                          child: Text(
-                            t['note']!,
-                            style: const TextStyle(
-                              color: Color(0xFFAEBACD),
-                              fontSize: 12,
-                              height: 1.4,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 22),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextButton(
-                            style: TextButton.styleFrom(
-                              foregroundColor: const Color(0xFFCBD5E1),
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(13),
-                              ),
-                            ),
-                            onPressed: () => Navigator.pop(ctx),
+                          const SizedBox(width: 7),
+                          Flexible(
                             child: Text(
-                              t['cancel']!,
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.w600),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          flex: 2,
-                          child: ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              elevation: 0,
-                              backgroundColor: const Color(0xFF3478F6),
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(13),
+                              t['note']!,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Color(0xFFAEBACD),
+                                fontSize: 12,
+                                height: 1.4,
                               ),
                             ),
-                            onPressed: () => Navigator.pop(ctx, picked),
-                            icon: const Icon(
-                              Icons.person_add_alt_1_rounded,
-                              size: 19,
-                            ),
-                            label: Text(
-                              t['invite']!,
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 22),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextButton(
+                              style: TextButton.styleFrom(
+                                foregroundColor: const Color(0xFFCBD5E1),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(13),
+                                ),
+                              ),
+                              onPressed: () => Navigator.pop(ctx),
+                              child: Text(
+                                t['cancel']!,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w600),
+                              ),
                             ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ],
+                          const SizedBox(width: 10),
+                          Expanded(
+                            flex: 2,
+                            child: ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                elevation: 0,
+                                backgroundColor: const Color(0xFF3478F6),
+                                foregroundColor: Colors.white,
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(13),
+                                ),
+                              ),
+                              onPressed: () => Navigator.pop(ctx, picked),
+                              icon: const Icon(
+                                Icons.person_add_alt_1_rounded,
+                                size: 19,
+                              ),
+                              label: Text(
+                                t['invite']!,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w700),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
