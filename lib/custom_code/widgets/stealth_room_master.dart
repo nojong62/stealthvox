@@ -1134,10 +1134,35 @@ Return ONLY valid JSON: {"name":"..."}.
   }
 
   /// Scenario Talk 설정 페이지 — 써클톡과 같은 구조/여백/자판 처리.
-  Widget _buildScenarioSetup() {
+  // ══════════════════════════════════════════════════════════════════
+  // 🎛️ [SETUP] 두 대화방의 설정 화면.
+  //
+  //   뼈대는 하나다 — 머리줄 · 제목 · 안내 · 추천 알약 · 입력칸 · 시작 버튼.
+  //   갈리는 것은 **색과 칸 수**뿐이다(서클톡 보라 1칸, 시나리오톡 초록 3칸).
+  //   두 화면이 다르게 생기면 같은 앱에서 두 제품을 쓰는 것처럼 보인다.
+  //
+  //   📐 시작 버튼은 스크롤에 딸려 가지 않고 **바닥에 붙는다.** 예전에는
+  //     입력칸 다음에 그냥 이어 붙였는데, 자판이 올라오면 화면 밖으로
+  //     밀려 "시작"이 안 보였다.
+  // ══════════════════════════════════════════════════════════════════
+
+  /// 설정 화면 한 벌. [fields]와 색만 갈아 끼우면 다른 모드가 된다.
+  Widget _buildSetupScaffold({
+    required Color accent,
+    required VoidCallback onBack,
+    required String backTooltip,
+    required VoidCallback onGuide,
+    required String title,
+    required String subtitle,
+    required String recommendLabel,
+    required bool recommending,
+    required VoidCallback? onRecommend,
+    required List<Widget> fields,
+    required String startLabel,
+    required VoidCallback onStart,
+  }) {
     final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
     final visibleHeight = _setupVisibleHeight(keyboardInset);
-    const accent = Color(0xFF16A34A);
     return Container(
       width: widget.width,
       height: visibleHeight,
@@ -1146,133 +1171,208 @@ Return ONLY valid JSON: {"name":"..."}.
       // 그 패딩을 그대로 두면 좁아진 화면을 더 밀어낸다.
       child: SafeArea(
         bottom: keyboardInset == 0,
-        child: SingleChildScrollView(
-          padding: EdgeInsets.fromLTRB(24, 12, 24, keyboardInset > 0 ? 16 : 32),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // ── 머리줄 ──
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 16, 0),
+              child: Row(
                 children: [
                   IconButton(
-                    onPressed: () => setState(() => _scenarioSetupOpen = false),
+                    onPressed: onBack,
                     icon: const Icon(Icons.arrow_back_ios_new,
                         color: Colors.white, size: 22),
-                    tooltip: '대화 모드 선택으로 돌아가기',
+                    tooltip: backTooltip,
                   ),
-                  // Circle Talk 설정 페이지와 같은 자리에 같은 아이콘을 둔다.
-                  // 방에 들어가기 전에도 사용법을 볼 수 있어야 한다.
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _buildStudyRoomChip(),
-                      const SizedBox(width: 4),
-                      IconButton(
-                        onPressed: () => showScenarioTalkGuide(context),
-                        icon: const Icon(Icons.menu_book_rounded,
-                            color: kScenarioGuideAccent, size: 25),
-                        tooltip: 'Scenario Talk 사용설명서',
-                      ),
-                    ],
+                  const Spacer(),
+                  _buildStudyRoomChip(),
+                  const Spacer(),
+                  // 📖 아이콘 대신 글자로 적는다. 이 줄에서 유일하게 색이
+                  //   있는 자리라, 그림보다 이름이 무엇을 여는지 분명하다.
+                  TextButton(
+                    onPressed: onGuide,
+                    style: TextButton.styleFrom(
+                      foregroundColor: accent,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      minimumSize: const Size(0, 40),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text('Guide',
+                        style: TextStyle(
+                            fontSize: 15, fontWeight: FontWeight.bold)),
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
-              Text(
-                'Scenario Talk Settings',
-                style: GoogleFonts.poppins(
-                  color: Colors.white,
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
+            ),
+            Expanded(
+              child: SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(24, 14, 24, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      title,
+                      style: GoogleFonts.poppins(
+                        color: Colors.white,
+                        fontSize: 30,
+                        height: 1.25,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                          color: Colors.white54, fontSize: 14, height: 1.5),
+                    ),
+                    const SizedBox(height: 26),
+                    // 추천 알약은 글자 폭만 쓴다 — 전체 폭을 채우면 아래
+                    // 시작 버튼과 무게가 같아져 무엇이 결론인지 흐려진다.
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: OutlinedButton(
+                        onPressed: recommending ? null : onRecommend,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: accent,
+                          side: BorderSide(color: accent, width: 1.4),
+                          shape: const StadiumBorder(),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 22, vertical: 13),
+                        ),
+                        child: recommending
+                            ? SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: accent),
+                              )
+                            : Text(recommendLabel,
+                                style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 0.4)),
+                      ),
+                    ),
+                    const SizedBox(height: 26),
+                    ...fields,
+                  ],
                 ),
               ),
-              const SizedBox(height: 8),
-              const Text(
-                '추천을 받거나 원하는 상황과 역할을 직접 입력해도 됩니다.',
-                style: TextStyle(color: Colors.white60, fontSize: 14),
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                height: 52,
-                child: OutlinedButton(
-                  onPressed:
-                      _isRecommendingScenario ? null : _recommendScenario,
-                  style: OutlinedButton.styleFrom(
+            ),
+            // ── 결론 ── 바닥에 붙어 자판 위로 밀린다.
+            Padding(
+              padding:
+                  EdgeInsets.fromLTRB(24, 6, 24, keyboardInset > 0 ? 12 : 24),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: accent.withValues(alpha: 0.32),
+                      blurRadius: 22,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: FilledButton(
+                  onPressed: onStart,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: accent,
                     foregroundColor: Colors.white,
-                    side: const BorderSide(color: accent),
+                    minimumSize: const Size.fromHeight(56),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14)),
+                        borderRadius: BorderRadius.circular(16)),
                   ),
-                  child: _isRecommendingScenario
-                      ? const SizedBox(
-                          width: 19,
-                          height: 19,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: accent,
-                          ),
-                        )
-                      : const Text('상황 추천',
-                          style: TextStyle(fontWeight: FontWeight.bold)),
+                  child: Text(startLabel,
+                      style: const TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.bold)),
                 ),
               ),
-              const SizedBox(height: 12),
-              _scenarioField(_situationController, '상황', '예: 카페에서 음료 고르기'),
-              const SizedBox(height: 10),
-              _scenarioField(_aiRoleController, 'AI 역할', '예: 바리스타'),
-              const SizedBox(height: 10),
-              _scenarioField(_userRoleController, '내 역할', '예: 단골 손님'),
-              const SizedBox(height: 12),
-              FilledButton.icon(
-                onPressed: _enterScenarioTalk,
-                style: FilledButton.styleFrom(
-                  backgroundColor: accent,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 15),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14)),
-                ),
-                icon: const Icon(Icons.smart_toy_rounded),
-                label: const Text('상황 대화 시작',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _scenarioField(
-      TextEditingController controller, String label, String hint) {
+  Widget _buildScenarioSetup() {
+    const accent = Color(0xFF16A34A);
+    return _buildSetupScaffold(
+      accent: accent,
+      onBack: () => setState(() => _scenarioSetupOpen = false),
+      backTooltip: '대화 모드 선택으로 돌아가기',
+      onGuide: () => showScenarioTalkGuide(context),
+      title: 'Scenario Talk\nSettings',
+      subtitle: '추천을 받거나 원하는 상황과 역할을 직접 입력해도 됩니다.',
+      recommendLabel: '상황 추천',
+      recommending: _isRecommendingScenario,
+      onRecommend: _recommendScenario,
+      fields: [
+        _setupField(_situationController, accent, '상황', '예: 카페에서 음료 고르기'),
+        const SizedBox(height: 18),
+        _setupField(_aiRoleController, accent, 'AI 역할', '예: 바리스타'),
+        const SizedBox(height: 18),
+        _setupField(_userRoleController, accent, '내 역할', '예: 단골 손님'),
+      ],
+      startLabel: '상황 대화 시작',
+      onStart: _enterScenarioTalk,
+    );
+  }
+
+  Widget _buildCircleSetup() {
+    const accent = Color(0xFF9333EA);
+    return _buildSetupScaffold(
+      accent: accent,
+      onBack: () => setState(() => _circleSetupOpen = false),
+      backTooltip: '대화 모드 선택으로 돌아가기',
+      onGuide: () => showCircleTalkGuide(context),
+      title: 'Circle Talk\nSettings',
+      subtitle: '추천을 받거나 원하는 서클을 직접 입력해도 됩니다.',
+      recommendLabel: '서클 추천',
+      recommending: _isRecommendingCircle,
+      onRecommend: _recommendCircle,
+      fields: [
+        _setupField(_circleController, accent, '서클', '서클 이름을 입력하세요'),
+      ],
+      startLabel: '서클 대화 시작',
+      onStart: () => _enterCircleTalk(_circleController.text),
+    );
+  }
+
+  /// 입력칸 한 줄. 라벨은 칸 **위**에 둔다 — placeholder 안에 넣으면
+  /// 입력하는 순간 무엇을 적는 칸이었는지 사라진다.
+  Widget _setupField(TextEditingController controller, Color accent,
+      String label, String hint) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(label,
-            style: const TextStyle(color: Colors.white54, fontSize: 12)),
-        const SizedBox(height: 5),
+            style: const TextStyle(
+                color: Colors.white54, fontSize: 13, height: 1.4)),
+        const SizedBox(height: 8),
         TextField(
           controller: controller,
           maxLength: 60,
           maxLines: 1,
-          style: const TextStyle(color: Colors.white),
+          style: const TextStyle(color: Colors.white, fontSize: 15),
           textInputAction: TextInputAction.next,
           decoration: InputDecoration(
             hintText: hint,
-            hintStyle: const TextStyle(color: Colors.white30),
+            hintStyle: const TextStyle(color: Colors.white30, fontSize: 15),
             filled: true,
-            fillColor: const Color(0xFF1E1E1E),
+            fillColor: const Color(0xFF1A1A1A),
             counterText: '',
             contentPadding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
+                const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
             enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: Colors.white24),
+              borderRadius: BorderRadius.circular(16),
+              borderSide: const BorderSide(color: Color(0x1FFFFFFF)),
             ),
             focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide:
-                  const BorderSide(color: Color(0xFF16A34A), width: 1.5),
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide(color: accent, width: 1.5),
             ),
           ),
         ),
@@ -1280,148 +1380,6 @@ Return ONLY valid JSON: {"name":"..."}.
     );
   }
 
-  Widget _buildCircleSetup() {
-    final keyboardInset = MediaQuery.of(context).viewInsets.bottom;
-    final visibleHeight = _setupVisibleHeight(keyboardInset);
-    return Container(
-      width: widget.width,
-      height: visibleHeight,
-      color: const Color(0xFF121212),
-      child: SafeArea(
-        child: SingleChildScrollView(
-          // 자판이 떠 있을 때는 하단 여백을 조금 더 줘서 마지막 버튼까지
-          // 가려지지 않게 한다.
-          padding: EdgeInsets.fromLTRB(24, 12, 24, keyboardInset > 0 ? 16 : 32),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  IconButton(
-                    onPressed: () => setState(() => _circleSetupOpen = false),
-                    icon: const Icon(Icons.arrow_back_ios_new,
-                        color: Colors.white, size: 22),
-                    tooltip: '대화 모드 선택으로 돌아가기',
-                  ),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _buildStudyRoomChip(),
-                      const SizedBox(width: 4),
-                      IconButton(
-                        onPressed: () => showCircleTalkGuide(context),
-                        icon: const Icon(Icons.menu_book_rounded,
-                            color: Color(0xFFB46CFF), size: 25),
-                        tooltip: 'Circle Talk 사용설명서',
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Circle Talk Settings',
-                style: GoogleFonts.poppins(
-                  color: Colors.white,
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                '원하는 서클을 직접 입력해도 됩니다.',
-                style: TextStyle(
-                  color: Colors.white60,
-                  fontSize: 14,
-                ),
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                height: 52,
-                child: OutlinedButton(
-                  onPressed: _isRecommendingCircle ? null : _recommendCircle,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    side: const BorderSide(color: Color(0xFF9333EA)),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14)),
-                  ),
-                  child: _isRecommendingCircle
-                      ? const SizedBox(
-                          width: 19,
-                          height: 19,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Color(0xFFB46CFF),
-                          ),
-                        )
-                      : const Text('서클 추천',
-                          style: TextStyle(fontWeight: FontWeight.bold)),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _circleController,
-                maxLength: 200,
-                maxLines: 1,
-                style: const TextStyle(color: Colors.white),
-                textInputAction: TextInputAction.done,
-                onSubmitted: _enterCircleTalk,
-                decoration: InputDecoration(
-                  hintText: '서클 이름을 입력하세요',
-                  hintStyle: const TextStyle(color: Colors.white30),
-                  filled: true,
-                  fillColor: const Color(0xFF1E1E1E),
-                  counterText: '',
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 17),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    borderSide: const BorderSide(color: Colors.white24),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    borderSide:
-                        const BorderSide(color: Color(0xFF9333EA), width: 1.5),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              FilledButton.icon(
-                onPressed: () => _enterCircleTalk(_circleController.text),
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF9333EA),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 15),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14)),
-                ),
-                icon: const Icon(Icons.forum_rounded),
-                label: const Text('서클 대화 시작',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// 모드 카드 한 장.
-  ///
-  /// 색은 테두리를 두르는 대신 **위쪽 띠 하나**로만 쓴다. 네 장이 저마다 다른
-  /// 색으로 사방을 두르면 화면이 색으로 가득 차서, 정작 눌러야 할 곳이 어디인지
-  /// 가 흐려졌다. 아이콘 원도 색을 옅게 깔고 아이콘만 제 색으로 남긴다.
-  ///
-  /// 🖐️ **카드 전체가 눌린다.** 예전에는 글자와 화살표만 눌렸고 아이콘 자리는
-  ///   죽어 있었다 — 가장 크고 눈에 띄는 곳이 반응하지 않았다.
-  /// 모드 카드 한 장.
-  ///
-  /// 아이콘이 위, 제목과 설명이 그 아래로 흐른다. 색은 **원형 아이콘에만**
-  /// 얹는다 — 셋이 나란히 있어 카드를 통째로 물들이면 눈이 쉴 곳이 없다.
-  /// 모드 색은 히스토리·로비와 같은 값이다. 아이콘 하나만 봐도 어느 모드인지
-  /// 알아야 한다(DESIGN.md §1).
   Widget _buildMenuCard(
       int mode, String title, String desc, IconData icon, Color color) {
     return Container(
