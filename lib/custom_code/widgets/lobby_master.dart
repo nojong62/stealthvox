@@ -1266,7 +1266,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                       //   (실기기 확인, 2026-08-27). 방향은 가운데 화살표가
                       //   말한다 — 아래를 가리키면 원어 → 배울 말이다.
                       _buildLangField(
-                        'ORIGIN',
+                        'Origin',
                         '(Chat Lang)',
                         appState.nativeLang,
                         (val) => setState(() => appState.nativeLang = val!),
@@ -1277,7 +1277,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                             color: _kLobbyTextMid, size: 18),
                       ),
                       _buildLangField(
-                        'TARGET',
+                        'Target',
                         '(Learn Lang)',
                         appState.targetLang,
                         // ⚠️ AI STYLE은 여기서 건드리지 않는다. 비영어로 가면
