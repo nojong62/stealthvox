@@ -54,7 +54,7 @@ class _IntroMasterState extends State<IntroMaster>
 
   // ── 🎙️ [TAGLINE-PITCH] 타원을 누르면 뜨는 말풍선 ────────────────────
   //   같은 말을 세 가지로 바꿔 가며 보여 준다. 누를 때마다 다음 것으로
-  //   넘어가고, 3초 뒤 저절로 사라진다. 말풍선을 누르면 그 자리에서 사라진다.
+  //   넘어가고, 5초 뒤 저절로 사라진다. 말풍선을 누르면 그 자리에서 사라진다.
   //
   //   레이아웃에 끼우지 않고 Overlay로 띄운다 — 웰컴 화면은 Spacer로 자리를
   //   나눠 쓰고 있어서, 말풍선이 줄 하나를 차지하면 버튼과 문구가 통째로
@@ -73,7 +73,7 @@ class _IntroMasterState extends State<IntroMaster>
       '강의 없이, 대화로만 외국어를 익히세요.\n10시간 ₩17,000 · 쓴 만큼만 차감',
     ],
   ];
-  static const Duration _kTaglineBubbleLife = Duration(seconds: 3);
+  static const Duration _kTaglineBubbleLife = Duration(seconds: 5);
   final GlobalKey _taglineKey = GlobalKey();
   OverlayEntry? _taglineBubble;
   Timer? _taglineBubbleTimer;
@@ -3185,7 +3185,7 @@ class _IntroOrbitPainter extends CustomPainter {
 /// 🎙️ 타원을 누르면 그 아래 뜨는 한마디.
 ///
 /// 살짝 떠오르며 나타나고, 누르면 그 자리에서 사라진다. 사라지는 애니메이션은
-/// 두지 않는다 — 3초짜리 알림이라 나가는 모습까지 보고 있을 이유가 없다.
+/// 두지 않는다 — 잠깐 뜨는 알림이라 나가는 모습까지 보고 있을 이유가 없다.
 class _TaglinePitchBubble extends StatelessWidget {
   const _TaglinePitchBubble({
     required this.title,
