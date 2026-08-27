@@ -31,6 +31,7 @@ import 'routine_mode_scenario_talk.dart' show TtsCache;
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
 import '/custom_code/services/ai_style.dart';
+import '/custom_code/services/transcript_repair_guard.dart';
 import 'alt_style_popup.dart';
 import '/custom_code/services/audio_silence_analyzer.dart';
 import '/custom_code/services/breath_echoing_engine.dart';
@@ -625,8 +626,92 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     }
   }
 
+  /// 이미 다시 쓰인 원문을 되돌린 줄. 한 세션에 한 줄당 한 번이다.
+  final Set<String> _originRepairReverted = <String>{};
+
+  /// 📝 [ORIGIN-REPAIR-REVERT] 예전에 모델이 통째로 다시 써 버린 원문을
+  /// 전사 원문으로 되돌린다.
+  ///
+  /// 되돌릴 근거는 `original_text_raw`에 그대로 남아 있다. 교정이라 부를 만한
+  /// 작은 손질이면 그대로 두고, 문장이 바뀐 줄만 되돌린다.
+  ///
+  /// **배울글도 함께 비운다.** 그 번역은 다시 쓰인 문장에서 나온 것이라,
+  /// 원문만 되돌리면 두 줄이 서로 다른 이야기를 하게 된다. 비워 두면 아래
+  /// 생성기가 되돌린 원문으로 곧바로 다시 만든다.
+  void _revertOverreachingOriginRepairs(List<DocumentSnapshot> docs) {
+    for (final doc in docs) {
+      final data = doc.data() as Map<String, dynamic>?;
+      if (data == null) continue;
+      final raw = (data['original_text_raw'] ?? '').toString().trim();
+      if (raw.isEmpty) continue;
+      final current = (data['original_text'] ?? '').toString().trim();
+      if (current.isEmpty || current == raw) continue;
+      if (isMinimalTranscriptRepair(raw, current)) continue;
+      if (!_originRepairReverted.add(doc.id)) continue;
+      debugPrint('[ORIGIN-REPAIR] reverted msg=${doc.id} '
+          '"$current" → "$raw"');
+      unawaited(doc.reference.update(<String, dynamic>{
+        'original_text': raw,
+        'translated_text': '',
+        'origin_repair_reverted_at': FieldValue.serverTimestamp(),
+      }).catchError((Object e) {
+        debugPrint('[ORIGIN-REPAIR] revert_failed msg=${doc.id} $e');
+      }));
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // 🔎 [HISTORY-DIAG] 배울글이 **어디서** 잘못 실렸는지 남긴다.
+  //
+  //   화면만 보고는 세 가지를 가릴 수 없다.
+  //     ① 대화방이 저장할 때 이미 원문이 배울글 자리에 실려 있었다
+  //        → `by=none` (공부방이 만든 적이 없다)
+  //     ② 공부방이 "번역할 게 없다"고 보고 원문을 복사했다
+  //        → `by=copy`
+  //     ③ 공부방이 번역을 불렀는데 원문 언어가 돌아왔다
+  //        → `by=gpt-4o-mini`
+  //
+  //   본문은 앞 24자까지만 찍는다 — 로그가 대화록이 되면 안 된다.
+  // ══════════════════════════════════════════════════════════════════
+  final Set<String> _diagLoggedDocs = <String>{};
+  bool _diagLoggedRoom = false;
+
+  static String _diagCut(Object? value) {
+    final text = (value ?? '').toString().replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (text.isEmpty) return '';
+    return text.length <= 24 ? text : '${text.substring(0, 24)}…';
+  }
+
+  void _logHistoryDiagnostics(List<DocumentSnapshot> docs) {
+    // 방 문서가 아직 안 왔으면 언어 값이 비어 찍힌다. 다음 스냅샷에 다시 본다.
+    if (!_diagLoggedRoom && _cachedRoomData != null) {
+      _diagLoggedRoom = true;
+      debugPrint('[HISTORY-DIAG] room=${widget.historyDoc.id} '
+          'mode=${_inferHistoryMode(_cachedRoomData)} '
+          'native=${_sessionNativeLang ?? '-'} '
+          'target=${_sessionTargetLang ?? '-'} '
+          'roomSameLang=$_recordSameLang '
+          'deferred=$_usesDeferredHistoryTargets '
+          'key=${_apiKey.isEmpty ? 'missing' : 'ok'}');
+    }
+    for (final doc in docs) {
+      final data = doc.data() as Map<String, dynamic>?;
+      if (data == null) continue;
+      if (!_diagLoggedDocs.add(doc.id)) continue;
+      debugPrint('[HISTORY-DIAG] msg=${doc.id} '
+          'role=${data['role'] ?? '-'} '
+          'duo=${data['duo_mode'] ?? '-'} '
+          'src=${data['source_lang'] ?? '-'} '
+          'by=${data['target_generated_by'] ?? 'none'} '
+          'tgt="${_diagCut(data['translated_text'])}" '
+          'org="${_diagCut(data['original_text'])}" '
+          'raw="${_diagCut(data['original_text_raw'])}"');
+    }
+  }
+
   void _scheduleMissingTargetGeneration(List<DocumentSnapshot> docs) {
     if (!_usesDeferredHistoryTargets || docs.isEmpty) return;
+    _revertOverreachingOriginRepairs(docs);
     // 키를 아직 못 받았다. 원격 설정이 안 내려온 것뿐이라 곧 풀릴 수도 있지만,
     // 그 사이 화면은 "번역이 없는 줄"을 정상인 것처럼 보여준다. 실패로 표시해
     // 두면 배지가 뜨고, `_fetchRemoteConfig`가 성공하면 다시 이 함수가 불려
@@ -872,6 +957,8 @@ CORRECTED $sourceName LINE — rules:
 - Fix ONLY words speech recognition clearly got wrong. The signal is a word that makes no sense in this conversation.
 - Never rephrase, polish, shorten, expand, or change the speaker's wording, style, tone, or politeness level.
 - Never add or remove information, and never invent a name, number, or fact.
+- Keep the word count identical. Replace at most one or two clearly misheard words, each with a similar-sounding word. If more than that looks off, the line was NOT misheard — return it EXACTLY as given.
+- Changing a particle, an ending, the word order, the subject, or who does what to whom is NOT a correction. It is a rewrite, and a rewrite is forbidden here.
 - If nothing is clearly wrong, return the line EXACTLY as given.
 
 TRANSLATION — natural spoken $targetLanguage of the corrected line. Preserve the speaker viewpoint, meaning, tone, and relationship.
@@ -882,6 +969,7 @@ WHO THE LINE IS ABOUT — read this before you translate:
 - Never fall back on "I" just because the subject is missing. Use "I" only when the line is genuinely about the speaker.
 - The people in this conversation are introduced in its opening lines. Settle who they are there first, then keep them straight through every line.
 - Keep each person's relationship to the speaker exactly as stated. Do not promote, demote, or merge them, and do not invent one who was never mentioned.
+- These subject rules serve the TRANSLATION only. Never reach back and change the corrected $sourceName line to match them.
 Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetLanguage translation>"}$styleBlock''',
                   },
                   <String, String>{
@@ -927,8 +1015,19 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       //
       //   **원본 전사는 지우지 않는다.** `original_text_raw`에 남겨 두어야
       //   교정이 잘못됐을 때 되짚을 수 있고, 무엇이 어떻게 들렸는지도 남는다.
-      final bool repaired =
-          repairedOriginal.isNotEmpty && repairedOriginal != source;
+      // 🛡️ 받은 교정문이 **교정인지 다시 쓴 문장인지**를 본다. 프롬프트로
+      //   못 박아도 모델은 종종 문장을 통째로 바꾼다. 그때는 전사 원문을
+      //   지킨다 — 못 고친 낱말이 남는 편이, 하지 않은 말이 남는 것보다 낫다.
+      final bool overreach = repairedOriginal.isNotEmpty &&
+          repairedOriginal != source &&
+          !isMinimalTranscriptRepair(source, repairedOriginal);
+      if (overreach) {
+        debugPrint('[ORIGIN-REPAIR] rejected msg=${messageRef.id} '
+            '"$source" ↛ "$repairedOriginal"');
+      }
+      final bool repaired = repairedOriginal.isNotEmpty &&
+          repairedOriginal != source &&
+          !overreach;
       await messageRef.update(<String, dynamic>{
         'translated_text': targetText,
         if (repaired) 'original_text': repairedOriginal,
@@ -941,8 +1040,10 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         debugPrint('[ORIGIN-REPAIR] msg=${messageRef.id} '
             '"$source" → "$repairedOriginal"');
       }
-      debugPrint(
-          '[HISTORY-TARGET] generated msg=${messageRef.id} model=${sameLanguage ? 'copy' : 'gpt-4o-mini'}');
+      debugPrint('[HISTORY-TARGET] generated msg=${messageRef.id} '
+          'model=${sameLanguage ? 'copy' : 'gpt-4o-mini'} '
+          'src=$sourceName tgt=$targetLanguage '
+          'roomSameLang=$_recordSameLang repaired=$repaired');
       _clearTargetFailure(messageRef.id);
       return true;
     } catch (error) {
@@ -2802,6 +2903,7 @@ RULES — follow exactly:
                     WidgetsBinding.instance.addPostFrameCallback((_) {
                       if (mounted) {
                         _cachedDocs = docs;
+                        _logHistoryDiagnostics(docs);
                         _scheduleMissingTargetGeneration(docs);
                       }
                     });
