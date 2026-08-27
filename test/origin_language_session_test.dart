@@ -116,4 +116,32 @@ void main() {
       expect(s.resolve('Korean'), 'Korean');
     });
   });
+
+  // 2026-08-28 실기기: 게스트 줄이 src=English로 실려 와 배울언어(English)와
+  // 같아지는 바람에 한국어가 배울글 자리에 복사됐다. 선언이 아니라 글자를 본다.
+  group('선언 대신 글자로 확인한다', () {
+    test('한글 문장은 Korean이 맞고 English는 아니다', () {
+      expect(textIsLanguage('책 얘기도 하고 그랬어', 'Korean'), isTrue);
+      expect(textContradictsLanguage('책 얘기도 하고 그랬어', 'English'), isTrue);
+    });
+
+    test('라틴 문자는 글자로 못 가른다 — 선언을 뒤집지 않는다', () {
+      expect(textIsLanguage('I deleted the old one', 'English'), isFalse);
+      expect(
+          textContradictsLanguage('I deleted the old one', 'Spanish'), isFalse);
+    });
+
+    test('짧은 맞장구로는 뒤집지 않는다', () {
+      expect(textContradictsLanguage('네', 'English'), isFalse);
+    });
+
+    test('언어 이름이 비면 판정하지 않는다', () {
+      expect(textIsLanguage('안녕하세요 반갑습니다', ''), isFalse);
+      expect(textContradictsLanguage('안녕하세요 반갑습니다', '  '), isFalse);
+    });
+
+    test('대소문자는 무시한다', () {
+      expect(textIsLanguage('어제 친구랑 카페에 갔어요', 'korean'), isTrue);
+    });
+  });
 }

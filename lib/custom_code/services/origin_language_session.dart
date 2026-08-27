@@ -197,6 +197,40 @@ OriginScriptVerdict detectOriginScript(String text) {
   );
 }
 
+// ────────────────────────────────────────────────────────────────────
+// 🔤 [SCRIPT-CHECK] 선언된 언어가 아니라 **실제 글자**로 확인한다.
+//
+//   로비의 ORIGIN/TARGET은 유저가 적어 둔 선언일 뿐이다. 그 선언이 실제
+//   발화와 어긋나면(영어로 적어 두고 한국어로 말한다) "이 줄은 이미 배울
+//   언어다"라는 지름길이 잘못 열려, 원문이 배울글 자리에 그대로 복사된다.
+//   2026-08-28 실기기 로그가 그 자리를 찍었다:
+//     [HISTORY-TARGET] generated model=copy src=English tgt=English
+//     → 본문은 한국어("책 얘기도 하고")였다.
+//
+//   라틴 문자를 쓰는 일곱 언어끼리는 글자로 가릴 수 없다. 그때는 둘 다
+//   false다 — **근거 없이 선언을 뒤집지 않는다.**
+// ────────────────────────────────────────────────────────────────────
+
+/// 글자로 보아 [text]가 확실히 [language]인가.
+bool textIsLanguage(String text, String language) {
+  final lang = language.trim();
+  if (lang.isEmpty) return false;
+  final verdict = detectOriginScript(text);
+  final decided = verdict.language;
+  if (!verdict.decisive || decided == null) return false;
+  return decided.toLowerCase() == lang.toLowerCase();
+}
+
+/// 글자로 보아 [text]가 [language]가 **아님이 분명한가.**
+bool textContradictsLanguage(String text, String language) {
+  final lang = language.trim();
+  if (lang.isEmpty) return false;
+  final verdict = detectOriginScript(text);
+  final decided = verdict.language;
+  if (!verdict.decisive || decided == null) return false;
+  return decided.toLowerCase() != lang.toLowerCase();
+}
+
 /// 라틴 문자 전사문이 어느 ORIGIN인지 모델에게 묻는다.
 /// 실패·타임아웃·목록 밖 응답은 전부 null — 그러면 로비값을 그대로 쓴다.
 Future<String?> _judgeLatinOrigin({

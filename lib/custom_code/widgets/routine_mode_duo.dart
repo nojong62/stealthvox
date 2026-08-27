@@ -33,6 +33,8 @@ import 'package:share_plus/share_plus.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
 import '/custom_code/services/duo_direct_audio.dart';
+import '/custom_code/services/origin_language_session.dart'
+    show detectOriginScript, textIsLanguage, textContradictsLanguage;
 import '/custom_code/services/duo_pcm_relay_client.dart';
 import '/custom_code/services/openai_streaming_transcribe_session.dart';
 // 상대 발화 재생은 Circle Talk과 **같은 재생기 한 벌**을 쓴다. tts-1 PCM을
@@ -2582,12 +2584,29 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     _isDrainingIncoming = false;
   }
 
+  /// 상대 발화가 무슨 언어인지. **적혀 온 값 → 글자 → 세션 문서 → 내 대화 언어**
+  /// 순으로 본다.
+  ///
+  /// 예전에는 값이 없으면 곧장 'English'로 넘겨짚었다. 그 넘겨짚은 값이 마침
+  /// 내 **배울 언어**이면 "상대가 배울 언어로 말했다"로 읽혀, 상대 원문이
+  /// 배울글 자리에 그대로 실린다. 마지막 자리는 내 대화 언어다 — 모르면
+  /// "배울 언어"라고 말하지 않는다.
+  String _resolvePartnerSrcLang(Map<String, dynamic> data, String raw) {
+    final String declared = (data['srcLang'] ?? '').toString().trim();
+    if (declared.isNotEmpty) return declared;
+    final verdict = detectOriginScript(raw);
+    if (verdict.decisive && verdict.language != null) return verdict.language!;
+    final String partner = (_partnerChatLang ?? '').trim();
+    if (partner.isNotEmpty) return partner;
+    return _myNative();
+  }
+
   // 🆕 [상대 발화 처리] 원문을 내 언어쌍으로 통역 → 좌측 말풍선 + 내 타겟 TTS
   Future<void> _handleIncomingMessage(Map<String, dynamic> data) async {
     if (!mounted || _isExiting) return;
     final String raw = data['text']?.toString() ?? '';
-    final String srcLang = data['srcLang']?.toString() ?? 'English';
     if (raw.trim().isEmpty) return;
+    final String srcLang = _resolvePartnerSrcLang(data, raw);
     // 세션 문서에 언어가 없던 옛 방을 위한 폴백.
     _notePartnerChatLang(srcLang, 'message');
 
@@ -2625,7 +2644,10 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     //
     // 상대가 이미 내 대화 언어로 말했으면 번역할 것이 없다 — GPT 왕복을
     // 통째로 건너뛴다(첫 토큰까지만 0.6~1.4초가 걸리던 자리다).
-    final bool sameLang = _isSameChatLang(srcLang, myNative);
+    // 선언보다 글자가 우선이다. 상대가 로비에 적어 둔 언어와 다른 언어로
+    // 말하면 여기서 한국어를 한국어로 옮기는 헛돌이가 돈다.
+    final bool sameLang =
+        _isSameChatLang(srcLang, myNative) || textIsLanguage(raw, myNative);
     String spoken = raw.trim();
     if (!sameLang) {
       final translated = await DuoBrain.translateForSpeech(
@@ -2655,7 +2677,12 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     // 상대가 말한 언어가 마침 내 배울 언어면 그 원문이 곧 배울 문장이므로
     // 타겟까지 여기서 채운다. 번역의 번역이 아니라 상대가 실제로 한 말이
     // 배울글이 되고, 공부방이 API를 부를 일도 없다.
-    final bool rawIsMyTargetLang = _isSameChatLang(srcLang, _myTarget());
+    //   ⚠️ 선언만 믿지 않는다. 글자가 배울 언어와 어긋나면 배울글로 싣지
+    //   않고 예전처럼 공부방에 넘긴다 — 한국어가 배울글 자리에 앉는 길이다.
+    final bool rawIsMyTargetLang =
+        (_isSameChatLang(srcLang, _myTarget()) ||
+                textIsLanguage(raw, _myTarget())) &&
+            !textContradictsLanguage(raw, _myTarget());
     await _saveHistoryMessage(
       rawIsMyTargetLang ? raw.trim() : '',
       spoken,

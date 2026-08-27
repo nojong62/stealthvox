@@ -31,6 +31,8 @@ import 'routine_mode_scenario_talk.dart' show TtsCache;
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
 import '/custom_code/services/ai_style.dart';
+import '/custom_code/services/origin_language_session.dart'
+    show detectOriginScript, textContradictsLanguage;
 import '/custom_code/services/transcript_repair_guard.dart';
 import 'alt_style_popup.dart';
 import '/custom_code/services/audio_silence_analyzer.dart';
@@ -723,12 +725,10 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     for (final doc in docs) {
       final data = doc.data() as Map<String, dynamic>?;
       if (data == null) continue;
-      final original = (data['original_text'] ?? '').toString().trim();
-      final translated = (data['translated_text'] ?? '').toString().trim();
-      if (original.isEmpty || translated.isNotEmpty) continue;
+      if (!_historyTargetNeedsWork(doc.id, data)) continue;
       unawaited(_generateAndCacheHistoryTarget(
         doc.reference,
-        original,
+        (data['original_text'] ?? '').toString().trim(),
         _sourceLangForMessage(data),
       ));
     }
@@ -793,11 +793,48 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   /// Duo 직접 대화는 두 사람이 서로 다른 언어로 말하므로 줄마다 `source_lang`이
   /// 실려 온다. 그 값이 없으면 방 단위 Origin, 그것도 없으면 한국어로 본다
   /// (Origin을 저장하지 않던 시절 기록과의 호환).
+  ///
+  /// ⚠️ **선언보다 글자가 우선이다.** `source_lang`은 말한 사람이 로비에 적어
+  /// 둔 값일 뿐이라, 상대가 그 설정과 다른 언어로 말하면 그대로 어긋난다.
+  /// 한국어로 말한 줄이 English로 실려 오면 배울언어(English)와 같아져
+  /// "번역할 게 없다"로 판정되고, 한국어가 배울글 자리에 복사된다.
+  /// 2026-08-28 실기기에서 게스트 줄 하나가 정확히 그렇게 찍혔다
+  /// (`model=copy src=English tgt=English`, 본문은 "책 얘기도 하고").
+  /// 한글·가나·한자·키릴처럼 글자만으로 확정되는 경우에는 글자를 따르고,
+  /// 라틴 문자끼리는 가릴 수 없으므로 선언을 그대로 쓴다.
   String _sourceLangForMessage(Map<String, dynamic>? data) {
+    final text = (data?['original_text'] ?? '').toString();
+    final verdict = detectOriginScript(text);
+    if (verdict.decisive && verdict.language != null) return verdict.language!;
     final perMessage = (data?['source_lang'] ?? '').toString().trim();
     if (perMessage.isNotEmpty) return perMessage;
     final session = (_sessionNativeLang ?? '').trim();
     return session.isNotEmpty ? session : 'Korean';
+  }
+
+  /// 잘못 실린 배울글을 고쳐 쓴 줄. **한 세션에 한 줄당 한 번뿐이다.**
+  ///
+  /// 고쳐 쓰면 문서가 바뀌고, 바뀐 문서는 StreamBuilder를 다시 돌린다. 그
+  /// 자리에서 또 "어긋난다"고 판정하면 무한히 다시 만들게 된다 — 돈이 도는
+  /// 자리라 반드시 한 번으로 끊는다.
+  final Set<String> _targetRepairAttempted = <String>{};
+
+  /// 이 줄의 배울글을 (다시) 만들어야 하는가.
+  ///
+  /// 비어 있으면 만든다. **채워져 있어도 그 글자가 배울 언어가 아니면 잘못
+  /// 실린 것이다** — 위 선언 문제로 원문이 그대로 복사된 줄이 이미 저장되어
+  /// 있다. 고쳐 쓰는 대상은 듀오 줄로 좁힌다(`duo_mode`). 다른 모드의 배울글은
+  /// 대화 중에 이미 배울 언어로 만들어졌다.
+  bool _historyTargetNeedsWork(String docId, Map<String, dynamic> data) {
+    final original = (data['original_text'] ?? '').toString().trim();
+    if (original.isEmpty) return false;
+    final translated = (data['translated_text'] ?? '').toString().trim();
+    if (translated.isEmpty) return true;
+    if ((data['duo_mode'] ?? '').toString().trim().isEmpty) return false;
+    if (_recordSameLang == true) return false;
+    final target = (_sessionTargetLang ?? '').trim();
+    if (!textContradictsLanguage(translated, target)) return false;
+    return _targetRepairAttempted.add(docId);
   }
 
   Future<bool> _generateAndCacheHistoryTarget(
@@ -1060,12 +1097,10 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     for (final doc in docs) {
       final data = doc.data() as Map<String, dynamic>?;
       if (data == null) continue;
-      final original = (data['original_text'] ?? '').toString().trim();
-      final translated = (data['translated_text'] ?? '').toString().trim();
-      if (original.isNotEmpty && translated.isEmpty) {
+      if (_historyTargetNeedsWork(doc.id, data)) {
         tasks.add(_generateAndCacheHistoryTarget(
           doc.reference,
-          original,
+          (data['original_text'] ?? '').toString().trim(),
           _sourceLangForMessage(data),
         ));
       }
