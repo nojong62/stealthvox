@@ -3037,6 +3037,38 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         if (curated != null) kept = curated;
       }
 
+      // 🧭 [CAST-ANCHOR] **첫머리 두 줄은 무슨 일이 있어도 남긴다.**
+      //   히스토리가 배울글을 만들 때 등장인물을 대화 첫머리에서 정한다
+      //   (`chat_history_master`의 `openingLines`). 정리가 그 줄을 지우면
+      //   닻이 사라지고, 주어를 생략한 한국어 뒷줄이 전부 말한 사람 얘기로
+      //   번역된다.
+      //
+      //   게다가 이 정리는 **두 폰에서 따로 돈다.** 호스트에서 지운 줄과
+      //   게스트에서 지운 줄이 다르면 두 사람의 배울글이 서로 다른 맥락 위에서
+      //   만들어져 주어가 갈린다(2026-08-28 실장님 확인). 첫 두 줄을 양쪽 다
+      //   고정으로 남기면 적어도 닻은 같아진다.
+      const int kCastAnchorTurns = 2;
+      final anchored = Map<int, String>.of(kept);
+      var anchors = 0;
+      for (var i = 0; i < turns.length && anchors < kCastAnchorTurns; i++) {
+        final String raw = (turns[i]['text'] as String).trim();
+        if (raw.isEmpty) continue;
+        anchors++;
+        // 추린 결과에 살아 있으면 그 글을 쓴다. 지워졌으면 원문을 되살린다.
+        final String? survived = anchored[i]?.trim();
+        if (survived == null || survived.isEmpty) anchored[i] = raw;
+      }
+      if (anchored.length != kept.length) {
+        _lgDuo('[DIRECT-CURATE]',
+            'cast_anchor_restored added=${anchored.length - kept.length}');
+      }
+      // 되살린 줄은 뒤에 붙는다. 아래에서 `kept.values.last`를 목록 미리보기로
+      // 쓰므로 **반드시 말한 순서로 되돌린다** — 안 그러면 첫마디가 마지막 줄로
+      // 올라간다.
+      kept = <int, String>{
+        for (final i in anchored.keys.toList()..sort()) i: anchored[i]!
+      };
+
       // 한 배치의 제한보다 긴 통화도 처리할 수 있도록 400개씩 나눈다.
       for (int start = 0; start < docs.length; start += 400) {
         final batch = FirebaseFirestore.instance.batch();
