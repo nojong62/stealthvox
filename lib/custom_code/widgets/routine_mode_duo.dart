@@ -588,10 +588,50 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     'Dutch'
   ];
 
-  /// 게스트 언어 오버레이의 기본 언어쌍.
+  /// 폰 시스템 언어를 못 읽거나 목록 밖일 때 쓰는 ORIGIN.
   /// **초대받는 쪽은 영어권 이용자를 기준으로 본다** — 팝업 문구도 영어다.
   static const String _kGuestDefaultNativeLang = 'English';
+
+  /// ORIGIN이 영어일 때의 짝. 아래 [_guestTargetFor]가 쓴다.
   static const String _kGuestDefaultTargetLang = 'Korean';
+
+  /// 시스템 언어 코드 → 로비 언어 이름. 목록 밖 언어는 여기 없다.
+  static const Map<String, String> _kLocaleToGuestLang = <String, String>{
+    'en': 'English',
+    'ja': 'Japanese',
+    'zh': 'Chinese',
+    'es': 'Spanish',
+    'fr': 'French',
+    'de': 'German',
+    'ko': 'Korean',
+    'hi': 'Hindi',
+    'ru': 'Russian',
+    'pt': 'Portuguese',
+    'it': 'Italian',
+    'nl': 'Dutch',
+  };
+
+  /// 이 폰의 시스템 언어. 목록 밖이면 [_kGuestDefaultNativeLang].
+  ///
+  /// 초대를 받은 사람은 **자기 폰 언어로 말한다**고 보는 것이 넘겨짚기보다
+  /// 정확하다. 로비를 한 번도 안 열어 본 게스트에게 이 값이 쓰인다.
+  static String _guestNativeFromDevice() {
+    final String code = WidgetsBinding
+        .instance.platformDispatcher.locale.languageCode
+        .trim()
+        .toLowerCase();
+    return _kLocaleToGuestLang[code] ?? _kGuestDefaultNativeLang;
+  }
+
+  /// ORIGIN의 짝이 되는 TARGET. **절대 ORIGIN과 같지 않다.**
+  ///
+  /// 예전에는 TARGET 기본값이 'Korean' 하나로 박혀 있었다. 저장된 TARGET은
+  /// 처음 설치하면 빈 문자열이라 목록 밖으로 걸려 항상 이 값으로 채워졌고,
+  /// 한국어 폰 게스트는 ORIGIN=Korean · TARGET=Korean으로 입장했다 —
+  /// **배울 언어가 자기 모국어**가 되는 상태다. 그러면 히스토리의 두 줄이
+  /// 같은 글이 되어 나란히 둘 이유가 사라진다.
+  static String _guestTargetFor(String native) =>
+      native == 'English' ? _kGuestDefaultTargetLang : 'English';
 
   /// 게스트 언어 오버레이를 띄우기 전에 값을 목록 안의 값으로 맞춘다.
   /// **이 폰에 저장된 값이 목록에 있으면 그대로 둔다.** 비어 있거나 목록 밖의
@@ -601,12 +641,24 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 없앤다. 게스트가 아무것도 안 건드리고 입장해도 보이는 값과 실제로
   /// 쓰는 값(전사 언어·통역 프롬프트)이 같다.
   void _normalizeGuestLangs() {
-    if (!_kGuestLangs.contains(FFAppState().nativeLang)) {
-      FFAppState().nativeLang = _kGuestDefaultNativeLang;
+    final app = FFAppState();
+    // 한 번도 고른 적이 없으면 저장 키 자체가 없다. 그때만 폰 언어를 따른다
+    // — 앱 초기값('Korean')은 유저가 고른 값과 구분되지 않으므로, 저장 키가
+    // 있으면(=직접 골랐거나 이미 쓰던 값이면) 건드리지 않는다.
+    final bool neverChoseNative = !app.prefs.containsKey('ff_nativeLang');
+    if (neverChoseNative || !_kGuestLangs.contains(app.nativeLang)) {
+      app.nativeLang = _guestNativeFromDevice();
     }
-    if (!_kGuestLangs.contains(FFAppState().targetLang)) {
-      FFAppState().targetLang = _kGuestDefaultTargetLang;
+    // TARGET은 ORIGIN과 같으면 안 된다. 배울 언어가 모국어가 되면 두 줄이
+    // 같은 글이 된다.
+    if (!_kGuestLangs.contains(app.targetLang) ||
+        app.targetLang == app.nativeLang) {
+      app.targetLang = _guestTargetFor(app.nativeLang);
     }
+    _lgDuo('[GUEST-LANG]',
+        'origin=${app.nativeLang} target=${app.targetLang} '
+        'device=${WidgetsBinding.instance.platformDispatcher.locale.languageCode} '
+        'firstTime=$neverChoseNative');
   }
 
   // 🆕 [PTT] Duo 무전기 상태기계
