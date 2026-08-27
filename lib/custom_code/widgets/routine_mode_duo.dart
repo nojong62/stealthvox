@@ -2600,10 +2600,14 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
   /// 배울글 자리에 그대로 실린다. 마지막 자리는 내 대화 언어다 — 모르면
   /// "배울 언어"라고 말하지 않는다.
   String _resolvePartnerSrcLang(Map<String, dynamic> data, String raw) {
-    final String declared = (data['srcLang'] ?? '').toString().trim();
-    if (declared.isNotEmpty) return declared;
+    // 글자가 확정되면 선언보다 우선이다. 상대가 로비에 영어라고 적어 두고
+    // 한국어로 말하면 `srcLang='English'`가 실려 오는데, 그 값을 그대로
+    // 저장하면 내 배울 언어(English)와 같아져 공부방이 "번역할 게 없다"고
+    // 본다. 공부방도 같은 규칙으로 읽는다(`_sourceLangForMessage`).
     final verdict = detectOriginScript(raw);
     if (verdict.decisive && verdict.language != null) return verdict.language!;
+    final String declared = (data['srcLang'] ?? '').toString().trim();
+    if (declared.isNotEmpty) return declared;
     final String partner = (_partnerChatLang ?? '').trim();
     if (partner.isNotEmpty) return partner;
     return _myNative();
