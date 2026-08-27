@@ -11,7 +11,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:math' as math;
-import 'dart:ui' show ImageFilter;
 import 'trial/trial_flow_state.dart';
 import 'auth_progress_view.dart';
 import '/auth/social_auth_service.dart';
@@ -942,21 +941,9 @@ class _IntroMasterState extends State<IntroMaster>
   Widget _buildHtmlWelcomeHeader() {
     return SizedBox(
       height: 64,
-      child: Stack(
-        alignment: Alignment.center,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: IconButton(
-              onPressed: _showDuoPromo,
-              tooltip: 'Duo Snapshot',
-              style: IconButton.styleFrom(
-                foregroundColor: const Color(0xFF67E9D9),
-                minimumSize: const Size(48, 48),
-              ),
-              icon: const Icon(Icons.menu_rounded, size: 27),
-            ),
-          ),
           Text(
             'STEALTHVOX',
             maxLines: 1,
@@ -968,22 +955,19 @@ class _IntroMasterState extends State<IntroMaster>
               letterSpacing: 3.1,
             ),
           ),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton(
-              onPressed: _openAuthScreen,
-              style: TextButton.styleFrom(
-                foregroundColor: const Color(0xFF67E9D9),
-                minimumSize: const Size(52, 48),
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-              ),
-              child: const Text(
-                'LOGIN',
-                style: TextStyle(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.7,
-                ),
+          TextButton(
+            onPressed: _openAuthScreen,
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFF67E9D9),
+              minimumSize: const Size(52, 48),
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+            ),
+            child: const Text(
+              'LOGIN',
+              style: TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.7,
               ),
             ),
           ),
@@ -1100,50 +1084,36 @@ class _IntroMasterState extends State<IntroMaster>
                     ),
                   ),
                 ),
-                Positioned(
-                  bottom: 2,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(99),
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 9,
-                        ),
-                        decoration: BoxDecoration(
-                          color:
-                              const Color(0xFF131313).withValues(alpha: 0.56),
-                          borderRadius: BorderRadius.circular(99),
-                          border: Border.all(
-                            color:
-                                const Color(0xFF4BCDBD).withValues(alpha: 0.54),
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.12),
-                              blurRadius: 24,
-                            ),
-                          ],
-                        ),
-                        child: const Text(
-                          '말한 순간, 바로 복습으로',
-                          style: TextStyle(
-                            color: Color(0xFF45CDBD),
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            letterSpacing: 0.1,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
               ],
             ),
           ),
         );
       },
+    );
+  }
+
+  Widget _buildWelcomeTagline() {
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFF131313).withValues(alpha: 0.72),
+          borderRadius: BorderRadius.circular(99),
+          border: Border.all(
+            color: const Color(0xFF4BCDBD).withValues(alpha: 0.54),
+          ),
+        ),
+        child: const Text(
+          'Speak freely. Pick it up naturally',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Color(0xFF45CDBD),
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.1,
+          ),
+        ),
+      ),
     );
   }
 
@@ -1233,6 +1203,8 @@ class _IntroMasterState extends State<IntroMaster>
                   Center(
                     child: _buildHtmlSoundOrb(orbSize),
                   ),
+                  SizedBox(height: veryCompact ? 6 : 12),
+                  _buildWelcomeTagline(),
                   SizedBox(height: veryCompact ? 10 : 22),
                   Text.rich(
                     TextSpan(
@@ -1254,17 +1226,6 @@ class _IntroMasterState extends State<IntroMaster>
                       fontWeight: FontWeight.w800,
                       height: 1.34,
                       letterSpacing: -0.55,
-                    ),
-                  ),
-                  SizedBox(height: veryCompact ? 6 : 12),
-                  const Text(
-                    'StealthVox uses advanced AI to turn your natural\n'
-                    'conversation into structured learning material instantly.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Color(0xFFB7BAC3),
-                      fontSize: 14,
-                      height: 1.48,
                     ),
                   ),
                   const Spacer(),
