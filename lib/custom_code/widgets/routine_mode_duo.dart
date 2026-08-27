@@ -48,6 +48,8 @@ import 'trial/trial_study_page.dart';
 // 마이크 캡처는 Circle Talk과 **같은 구현 한 벌**을 쓴다. 복제하면 sample rate ·
 // 권한 · 종료 처리가 두 군데로 갈라진다.
 import 'routine_mode_circle_talk.dart' show PreparedAudioCapture;
+// 릴레이 송신 게이트 — 내가 말하지 않는 동안은 상대에게 보내지 않는다.
+import '/custom_code/services/duo_relay_gate.dart';
 
 // ============================================================================
 // 🗣️ [DUO-MODE] Duo는 두 가지 방식으로 갈린다.
@@ -429,6 +431,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 🔇 [DUO-MUTE] 내 소리를 보내지 않는 상태. **연결은 살아 있다** —
   /// 릴레이도 붙어 있고 상대 목소리도 계속 들린다. 마이크 PCM만 버린다.
   bool _directMuted = false;
+
+  /// 🔊 [DUO-RELAY-GATE] 말하지 않는 동안 릴레이를 닫아 되먹임 고리를 끊는다.
+  /// 통화를 열 때 새로 만든다 — 앞소리 버퍼가 이전 통화 것을 물고 있으면 안 된다.
+  DuoRelayGate? _relayGate;
 
   /// 🔴 [DUO-LIVE] 자동 연결을 이미 시도한 방인지. 실패한 뒤 스냅샷이 또
   /// 떨어질 때마다 자동으로 재시도하면, 권한을 거부한 유저에게 권한 창이
@@ -1658,6 +1664,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         return;
       }
       _directCapture = capture;
+      final gate = DuoRelayGate(
+        bytesPerMs: kDuoDirectBytesPerMs,
+        onGateChanged: (open, rms) => _lgDuo('[RELAY-GATE]',
+            '${open ? 'open' : 'close'} rms=${rms.toStringAsFixed(4)}'),
+      );
+      _relayGate = gate;
       _directCaptureSub = capture.stream.listen(
         (bytes) {
           if (bytes.isEmpty) return;
@@ -1667,8 +1679,14 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           //   전사도 같이 막는다. 안 그러면 음소거 중에 한 말이 History에 남는다.
           if (_directMuted) return;
           // 갈래 1 — 상대에게 보내는 실제 목소리. 전사를 기다리지 않는다.
-          _relayClient?.sendPcm(bytes);
+          //   🔊 [RELAY-GATE] 내가 말하는 동안만 내보낸다. 침묵을 그대로 흘리면
+          //   벽 너머로 들어온 상대 목소리가 되돌아가 울린다(2026-08-28 안방↔거실).
+          for (final out in gate.accept(bytes)) {
+            _relayClient?.sendPcm(out);
+          }
           // 갈래 2 — History용 전사. 실패해도 위 한 줄에 영향이 없다.
+          //   **게이트를 거치지 않는다.** 전사는 서버 VAD가 따로 보고 있고,
+          //   여기까지 막으면 어렵게 되찾은 전사 품질이 같이 무너진다.
           final stt = _directStt;
           if (stt != null && stt.audioGateOpen) stt.appendAudio(bytes);
         },
@@ -1900,12 +1918,17 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _directMuted = false;
       _duoState = 'idle';
     }
+    final gate = _relayGate;
+    _relayGate = null;
     _lgDuo(
         '[DIRECT]',
         'call_stopped reason=$reason relayRttMs=${relay?.lastRoundTripMs} '
             'playFirstLatencyMs=${player?.firstPlayLatencyMs} '
             'sentBytes=${relay?.sentBytes} recvBytes=${relay?.receivedBytes} '
-            'playedBytes=${player?.writtenBytes} droppedBytes=${player?.droppedBytes}');
+            'playedBytes=${player?.writtenBytes} droppedBytes=${player?.droppedBytes} '
+            // 게이트가 막아 세운 양. 문턱이 맞는지는 이 값으로 되짚는다 —
+            // 0이면 게이트가 한 번도 안 닫힌 것이고, 전체와 비슷하면 너무 닫힌 것이다.
+            'gateHeldBytes=${gate?.heldBytes}');
     _directStopping = false;
   }
 
