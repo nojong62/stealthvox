@@ -3518,6 +3518,10 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
   Future<void> _handleAutoSaveAndExit() async {
     if (_isExiting) return;
     _isExiting = true;
+    // 🚪 [EXIT-BUSY] 정리에 3초 넘게 걸린다. 눌렸다는 것을 먼저 그린다 —
+    //   이 한 줄이 없으면 화면이 멈춘 것처럼 보여 유저가 계속 누르고,
+    //   그 탭은 위의 `if (_isExiting) return`이 전부 삼킨다.
+    if (mounted) setState(() {});
     final bool isTrialHost = _isTrialHost;
     final bool trialWasConsumed = FFAppState().trialCompleted;
     _trialCallTimer?.cancel();
@@ -3718,8 +3722,47 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
             ),
           ),
           if (_showLangOverlay) _buildGuestLangOverlay(),
+          // 🚪 [EXIT-BUSY] 나가기는 한 번에 끝나지 않는다 — 마지막 발화를
+          //   흘려보내고, 대화를 추리고, 방을 닫는 데까지 실기기에서 3.1초가
+          //   걸렸다(2026-08-28 실측: 08:26:27.06 → 08:26:30.2). 그동안 화면이
+          //   그대로라 유저는 안 눌린 줄 알고 네 번을 더 눌렀다. 첫 탭이 먹었다는
+          //   것을 바로 보여주고, 그 위의 탭은 이 막이 받아 삼킨다.
+          if (_isExiting) _buildExitingOverlay(),
         ]));
   }
+
+  /// 나가는 동안 덮는 막. 진행을 막으려는 게 아니라 **눌렸다는 것을 보이려는**
+  /// 것이다. 여기서 시간을 줄이지는 못한다 — 정리를 건너뛰면 공부방에 원시
+  /// 전사가 그대로 남는다.
+  Widget _buildExitingOverlay() => Positioned.fill(
+        child: AbsorbPointer(
+          child: Container(
+            color: const Color(0xFF121212).withValues(alpha: 0.72),
+            child: const Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2.5, color: Colors.white70),
+                  ),
+                  SizedBox(height: 16),
+                  Text(
+                    'Wrapping up…',
+                    style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.6),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
 
   // 🖼️ 무대 그림은 `duo_stage.dart`에 있다. Firebase도 앱 상태도 모르는
   //   순수 위젯이라 화면 없이 띄워 눈으로 확인할 수 있다.
