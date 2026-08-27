@@ -2292,16 +2292,22 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Row(children: [
-                      Icon(Icons.check_circle_outline,
-                          color: Colors.greenAccent, size: 14),
-                      SizedBox(width: 6),
-                      Text("Correction Result",
-                          style: TextStyle(
-                              color: Colors.greenAccent,
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold)),
-                    ]),
+                    const Row(crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Padding(
+                            padding: EdgeInsets.only(top: 1),
+                            child: Icon(Icons.check_circle_outline,
+                                color: Colors.greenAccent, size: 14),
+                          ),
+                          SizedBox(width: 6),
+                          Flexible(
+                            child: Text("Correction Result",
+                                style: TextStyle(
+                                    color: Colors.greenAccent,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold)),
+                          ),
+                        ]),
                     const SizedBox(height: 8),
                     Text(_appCorrection,
                         style: const TextStyle(
@@ -2325,16 +2331,22 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Row(children: [
-                        Icon(Icons.lightbulb_outline,
-                            color: Colors.amber, size: 14),
-                        SizedBox(width: 6),
-                        Text("더 자연스러운 표현",
-                            style: TextStyle(
-                                color: Colors.amber,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold)),
-                      ]),
+                      const Row(crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Padding(
+                              padding: EdgeInsets.only(top: 1),
+                              child: Icon(Icons.lightbulb_outline,
+                                  color: Colors.amber, size: 14),
+                            ),
+                            SizedBox(width: 6),
+                            Flexible(
+                              child: Text("더 자연스러운 표현",
+                                  style: TextStyle(
+                                      color: Colors.amber,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold)),
+                            ),
+                          ]),
                       const SizedBox(height: 8),
                       Text(_appUsageTip,
                           style: const TextStyle(
@@ -2949,9 +2961,11 @@ RULES — follow exactly:
                   strokeWidth: 1.6, color: Colors.white38),
             ),
             const SizedBox(width: 6),
-            Text('번역 중',
-                style: TextStyle(
-                    color: Colors.white38, fontSize: 11 * _fontScale)),
+            Flexible(
+              child: Text('번역 중',
+                  style: TextStyle(
+                      color: Colors.white38, fontSize: 11 * _fontScale)),
+            ),
           ],
         ),
       );
@@ -5508,14 +5522,16 @@ RULES — follow exactly:
                   size: 17,
                 ),
                 const SizedBox(width: 7),
-                Text(
-                  _p3VariantLabel(variant),
-                  style: TextStyle(
-                    color: available
-                        ? (selected ? Colors.white : Colors.white60)
-                        : Colors.white24,
-                    fontSize: 13,
-                    fontWeight: selected ? FontWeight.bold : FontWeight.w600,
+                Flexible(
+                  child: Text(
+                    _p3VariantLabel(variant),
+                    style: TextStyle(
+                      color: available
+                          ? (selected ? Colors.white : Colors.white60)
+                          : Colors.white24,
+                      fontSize: 13,
+                      fontWeight: selected ? FontWeight.bold : FontWeight.w600,
+                    ),
                   ),
                 ),
               ],

@@ -3947,16 +3947,22 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
             crossAxisAlignment: CrossAxisAlignment.baseline,
             textBaseline: TextBaseline.alphabetic,
             children: [
-              Text(label,
-                  style: TextStyle(
-                      color: labelColor,
-                      fontSize: 12,
-                      letterSpacing: 1,
-                      fontWeight: FontWeight.bold)),
+              Flexible(
+                child: Text(label,
+                    style: TextStyle(
+                        color: labelColor,
+                        fontSize: 12,
+                        letterSpacing: 1,
+                        fontWeight: FontWeight.bold)),
+              ),
               const SizedBox(width: 6),
-              Text(subtitle,
-                  style: const TextStyle(
-                      color: Colors.white38, fontSize: 10, letterSpacing: 0.5)),
+              Flexible(
+                child: Text(subtitle,
+                    style: const TextStyle(
+                        color: Colors.white38,
+                        fontSize: 10,
+                        letterSpacing: 0.5)),
+              ),
             ]);
       } else if (subtitle != null && subtitleBelow) {
         labelWidget =
@@ -4230,12 +4236,14 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
             color: Colors.white,
           ),
           const SizedBox(width: 6),
-          Text(
-            _trialCallStarted ? value : '게스트 대기',
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontFeatures: [FontFeature.tabularFigures()],
+          Flexible(
+            child: Text(
+              _trialCallStarted ? value : '게스트 대기',
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
             ),
           ),
         ],

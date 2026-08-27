@@ -45,17 +45,26 @@ Widget _summaryCard({
   required int talkSeconds,
   required int studySeconds,
 }) {
+  // 글꼴 배율이 큰 기기에서는 라벨과 값이 한 줄을 같이 못 쓴다. 둘 다
+  // Flexible로 묶어 남는 폭을 나눠 쓰게 한다.
   Widget row(String label, int seconds) => Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label,
-              style: const TextStyle(color: Colors.white70, fontSize: 13)),
-          Text(
-            seconds > 0 ? formatUsageDuration(seconds) : '-',
-            style: const TextStyle(
-                color: _kUsageAccent,
-                fontSize: 13,
-                fontWeight: FontWeight.w600),
+          Flexible(
+            child: Text(label,
+                style: const TextStyle(color: Colors.white70, fontSize: 13)),
+          ),
+          const SizedBox(width: 12),
+          Flexible(
+            child: Text(
+              seconds > 0 ? formatUsageDuration(seconds) : '-',
+              textAlign: TextAlign.right,
+              style: const TextStyle(
+                  color: _kUsageAccent,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600),
+            ),
           ),
         ],
       );
@@ -105,11 +114,13 @@ void showUsageSheet(BuildContext context) {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text("📊 Usage",
-                    style: GoogleFonts.orbitron(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold)),
+                Flexible(
+                  child: Text("📊 Usage",
+                      style: GoogleFonts.orbitron(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold)),
+                ),
                 IconButton(
                   icon: const Icon(Icons.close_rounded, color: Colors.white54),
                   onPressed: () => Navigator.pop(sheetContext),

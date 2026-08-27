@@ -640,12 +640,14 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
             Icon(Icons.bookmark_rounded,
                 size: 16, color: isSelected ? _keepersColor : Colors.white54),
             const SizedBox(width: 6),
-            Text(
-              'Keepers',
-              style: TextStyle(
-                color: isSelected ? _keepersColor : Colors.white54,
-                fontSize: 13,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+            Flexible(
+              child: Text(
+                'Keepers',
+                style: TextStyle(
+                  color: isSelected ? _keepersColor : Colors.white54,
+                  fontSize: 13,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                ),
               ),
             ),
           ],
@@ -680,13 +682,15 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                     ? const Color(0xFF9E9E9E)
                     : Colors.white54),
             const SizedBox(width: 6),
-            Text("선택삭제",
-                style: TextStyle(
-                    color: _selectedDocIds.isNotEmpty
-                        ? const Color(0xFF9E9E9E)
-                        : Colors.white54,
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold)),
+            Flexible(
+              child: Text("선택삭제",
+                  style: TextStyle(
+                      color: _selectedDocIds.isNotEmpty
+                          ? const Color(0xFF9E9E9E)
+                          : Colors.white54,
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold)),
+            ),
             if (_selectedDocIds.isNotEmpty) ...[
               const SizedBox(width: 6),
               Container(
@@ -738,12 +742,14 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
             Icon(icon,
                 size: 16, color: isSelected ? baseColor : Colors.white54),
             const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                color: isSelected ? baseColor : Colors.white54,
-                fontSize: 13,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+            Flexible(
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: isSelected ? baseColor : Colors.white54,
+                  fontSize: 13,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                ),
               ),
             ),
           ],
@@ -1436,14 +1442,16 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                         size: 20,
                       ),
                       const SizedBox(width: 8),
-                      Text(
-                        _keeperIsRecording ? "녹음 중지" : "내 입으로 말하기",
-                        style: TextStyle(
-                          color: _keeperIsRecording
-                              ? Colors.redAccent
-                              : Colors.orangeAccent,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
+                      Flexible(
+                        child: Text(
+                          _keeperIsRecording ? "녹음 중지" : "내 입으로 말하기",
+                          style: TextStyle(
+                            color: _keeperIsRecording
+                                ? Colors.redAccent
+                                : Colors.orangeAccent,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
                         ),
                       ),
                     ],
@@ -1512,16 +1520,22 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Row(children: [
-                      Icon(Icons.lightbulb_outline,
-                          color: Colors.amber, size: 14),
-                      SizedBox(width: 6),
-                      Text("더 자연스러운 표현",
-                          style: TextStyle(
-                              color: Colors.amber,
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold)),
-                    ]),
+                    const Row(crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Padding(
+                            padding: EdgeInsets.only(top: 1),
+                            child: Icon(Icons.lightbulb_outline,
+                                color: Colors.amber, size: 14),
+                          ),
+                          SizedBox(width: 6),
+                          Flexible(
+                            child: Text("더 자연스러운 표현",
+                                style: TextStyle(
+                                    color: Colors.amber,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold)),
+                          ),
+                        ]),
                     const SizedBox(height: 8),
                     Text(_keeperTutoringUsageTip,
                         style: const TextStyle(
@@ -1559,12 +1573,14 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                         size: 20,
                       ),
                       const SizedBox(width: 8),
-                      Text(
-                        _keeperIsPlayingCorrected ? "재생 중지" : "교정 문장 듣기",
-                        style: const TextStyle(
-                          color: Colors.amberAccent,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
+                      Flexible(
+                        child: Text(
+                          _keeperIsPlayingCorrected ? "재생 중지" : "교정 문장 듣기",
+                          style: const TextStyle(
+                            color: Colors.amberAccent,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
                         ),
                       ),
                     ],
@@ -1616,11 +1632,13 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                   color: color, fontSize: 11, fontWeight: FontWeight.bold)),
         ),
         const SizedBox(width: 8),
-        Text(label,
-            style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 13,
-                fontWeight: FontWeight.bold)),
+        Flexible(
+          child: Text(label,
+              style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold)),
+        ),
       ],
     );
   }

@@ -331,11 +331,13 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
         title: Row(children: const [
           Icon(Icons.menu_book_outlined, color: Color(0xFF0A84FF)),
           SizedBox(width: 8),
-          Text("[ 사용 설명서 ]",
-              style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold)),
+          Flexible(
+            child: Text("[ 사용 설명서 ]",
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold)),
+          ),
         ]),
         content: const SingleChildScrollView(
           child: Text(
@@ -374,11 +376,13 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
         title: Row(children: const [
           Icon(Icons.warning_amber_rounded, color: Color(0xFFFF453A)),
           SizedBox(width: 8),
-          Text("회원 탈퇴",
-              style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold)),
+          Flexible(
+            child: Text("회원 탈퇴",
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold)),
+          ),
         ]),
         content: const Text(
             "정말 탈퇴하시겠습니까?\n모든 정보(잔여 시간, 히스토리 등)가 영구적으로 삭제되며 복구할 수 없습니다.",
@@ -774,12 +778,14 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('AI SETTINGS',
-                        style: TextStyle(
-                            color: _kLobbyTextHi,
-                            fontSize: 16,
-                            letterSpacing: 1.6,
-                            fontWeight: FontWeight.w800)),
+                    const Flexible(
+                      child: Text('AI SETTINGS',
+                          style: TextStyle(
+                              color: _kLobbyTextHi,
+                              fontSize: 16,
+                              letterSpacing: 1.6,
+                              fontWeight: FontWeight.w800)),
+                    ),
                     IconButton(
                       icon: const Icon(Icons.close_rounded,
                           color: _kLobbyTextMid),
