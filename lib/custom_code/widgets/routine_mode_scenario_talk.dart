@@ -126,6 +126,11 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   DocumentReference? _myHistoryRef; // 🔧 [히스토리] chat_history 문서 참조 (Duo 패턴)
   Future<void> _pendingTurnPersistence = Future<void>.value();
 
+  /// 문맥 정정 판정만 끄는 복구 스위치. false로 바꾸면 명시적 로컬 정정은
+  /// 유지하고, 기존 GPT 응답 안의 문맥 판정만 즉시 비활성화할 수 있다.
+  static const bool _kContextualCorrectionEnabled = true;
+  Future<void>? _pendingCorrectionRollback;
+
   // 🔧 [v3.4 발화 합치기] 유저 더듬거림 대응
   // speech_final 받아도 바로 파이프라인 시작 안 하고 조건부 대기
   // 대기 중 새 발화 오면 합쳐서 처리 (최종 한 덩어리로)
@@ -384,6 +389,69 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   /// 생성되며, 화면·TTS·히스토리에 전달하기 전에 신호를 제거한다.
   static bool _isAskBackReply(String text) => hasHeardConfirmSignal(text);
 
+  ({String corrected, String reply})? _contextualScenarioCorrection(
+      String output) {
+    if (!_kContextualCorrectionEnabled) return null;
+    final match = RegExp(
+      r'^\[CORRECTION\]\s*([\s\S]*?)\s*\[REPLY\]\s*([\s\S]+)$',
+      caseSensitive: false,
+    ).firstMatch(output.trim());
+    final corrected = match
+            ?.group(1)
+            ?.trim()
+            .replaceAll(RegExp(r'^["“”\s]+|["“”\s]+$'), '') ??
+        '';
+    final reply = match
+            ?.group(2)
+            ?.trim()
+            .replaceAll(RegExp(r'^["“”\s]+|["“”\s]+$'), '') ??
+        '';
+    return corrected.isEmpty || reply.isEmpty
+        ? null
+        : (corrected: corrected, reply: reply);
+  }
+
+  /// 잘못 저장된 직전 교환을 백그라운드에서 지운다. 새 답변 생성·TTS는 이
+  /// 작업을 기다리지 않고 시작하고, 새 교환을 저장하기 직전에만 완료를
+  /// 보장한다. 따라서 Firestore 왕복 시간이 체감 응답 속도에 붙지 않는다.
+  void _queueScenarioCorrectionRollback() {
+    final previousTurnPersistence = _pendingTurnPersistence;
+    final previousRollback = _pendingCorrectionRollback ?? Future<void>.value();
+    late final Future<void> rollback;
+    rollback = () async {
+      try {
+        await previousRollback;
+        await previousTurnPersistence;
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          final removed = await rollbackLastPersistedUserTurn(
+            firestore: FirebaseFirestore.instance,
+            uid: user.uid,
+            sessionDocId: _sessionDocId,
+            historyRef: _myHistoryRef,
+          );
+          _log('[CORRECTION-PERSIST]',
+              'sessions·history 교체 준비 removed=$removed');
+        }
+        _lastExchangeMsgIds = <String>[];
+      } catch (error) {
+        // 저장 정리에 실패해도 화면과 실제 대화는 정정된 뜻으로 계속 진행한다.
+        _log('[CORRECTION-PERSIST-ERR]',
+            '직전 저장본 삭제 실패 reason=${error.runtimeType}');
+      }
+    }();
+    _pendingCorrectionRollback = rollback;
+  }
+
+  Future<void> _waitForScenarioCorrectionRollback() async {
+    final pending = _pendingCorrectionRollback;
+    if (pending == null) return;
+    await pending;
+    if (identical(_pendingCorrectionRollback, pending)) {
+      _pendingCorrectionRollback = null;
+    }
+  }
+
   /// 사용자가 직전 발화를 실제 뜻으로 갈아 끼우는 문장인지 앱에서 먼저 잡는다.
   ///
   /// Scenario Talk의 운영 파이프라인은 번역 단계를 거치지 않으므로, 예전
@@ -473,12 +541,31 @@ ${buildNativeOutputLanguagePolicy(_nativeLangName())}
 - Stay fully in character and react directly to the user's latest line.
 - Preserve the established situation, roles, relationship, and conversation memory.
 - Do not translate, teach, coach, narrate, or mention being an AI.
-- Do not output stage directions, labels, brackets, or explanations.
+- Do not output stage directions, labels, brackets, or explanations, except for
+  an exact internal control format explicitly required below.
 
 $registerPolicy
 
 $kSpokenReplyLengthPolicy
 - In character, this means answering like a real person in that situation would: briefly.
+
+${_kContextualCorrectionEnabled ? '''
+[CORRECTION REPLACEMENT — CHECK BEFORE ANSWERING]
+Use the recent scene dialogue as evidence. If the latest user line explicitly
+rejects or corrects how their OWN immediately previous line was understood, and
+also supplies the replacement meaning, do not answer in character yet. Output
+exactly four lines:
+[CORRECTION]
+<the replacement meaning as one natural standalone line in $nativeLang>
+[REPLY]
+<the brief in-character reply to that replacement meaning in $nativeLang>
+
+Remove framing such as "아니", "내 말은", "그게 아니라", "I mean", or
+"what I said was". For reported questions, restore the direct question.
+Do NOT use this control for an ordinary in-character no/refusal, a new detail, a
+change of mind, a correction of the character's factual claim, or dissatisfaction
+with the character's reply. If there is no replacement content, continue normally.
+''' : ''}
 
 [ASK BACK INSTEAD OF GUESSING]
 What you receive is speech-recognition output, not typed text, so it can contain
@@ -549,13 +636,16 @@ never by itself a reason to ask back.
     return match?.end;
   }
 
-  /// `[HEARD_CONFIRM]`가 여러 SSE 조각으로 나뉘어 와도 제어 신호인지
+  /// 내부 제어 태그가 여러 SSE 조각으로 나뉘어 와도 제어 신호인지
   /// 확정되기 전에는 화면이나 TTS로 내보내지 않는다.
   bool _scenarioReplyMayBeControlSignal(String text) {
     final leading = text.trimLeft();
     if (leading.isEmpty) return true;
-    const signal = '[HEARD_CONFIRM]';
-    return signal.startsWith(leading) || leading.startsWith(signal);
+    const signals = _kContextualCorrectionEnabled
+        ? <String>['[HEARD_CONFIRM]', '[CORRECTION]']
+        : <String>['[HEARD_CONFIRM]'];
+    return signals.any(
+        (signal) => signal.startsWith(leading) || leading.startsWith(signal));
   }
 
   // 🎭 롤플레이 시나리오
@@ -2522,25 +2612,7 @@ never by itself a reason to ask back.
       _activeHostBubbleId = '';
       _activeAiBubbleId = '';
       _turnCounter = (_turnCounter - 1).clamp(0, 1 << 30).toInt();
-      try {
-        await _pendingTurnPersistence;
-        final user = FirebaseAuth.instance.currentUser;
-        if (user != null) {
-          final removed = await rollbackLastPersistedUserTurn(
-            firestore: FirebaseFirestore.instance,
-            uid: user.uid,
-            sessionDocId: _sessionDocId,
-            historyRef: _myHistoryRef,
-          );
-          _log('[CORRECTION-PERSIST]',
-              '화면·sessions·history 교체 준비 removed=$removed');
-        }
-        _lastExchangeMsgIds = <String>[];
-      } catch (error) {
-        // 저장 정리에 실패해도 화면 대화는 실제 뜻으로 계속 진행한다.
-        _log('[CORRECTION-PERSIST-ERR]',
-            '직전 저장본 삭제 실패 reason=${error.runtimeType}');
-      }
+      _queueScenarioCorrectionRollback();
       return _processScenarioTalkTurn(
         correctedContent,
         generation: generation,
@@ -2552,6 +2624,7 @@ never by itself a reason to ask back.
     final turnNumber = _turnCounter;
     var aiIndex = -1;
     var askedBack = false;
+    var handledContextualCorrection = false;
     var responseCompleted = false;
     TtsUtterance? earlyUtterance;
     final recentConversation = _recentKoreanConversation();
@@ -2668,6 +2741,74 @@ never by itself a reason to ask back.
           generation != _pipelineGeneration ||
           turnNumber != _turnCounter) {
         earlyUtterance?.cancel();
+        return;
+      }
+
+      // 정해진 말투로 잡지 못한 표현은 이미 진행 중인 GPT 응답이 최근 문맥을
+      // 보고 판정한다. 제어 태그는 위 스트리밍 동안 화면/TTS에 한 글자도
+      // 노출하지 않았으므로, 여기서 직전 교환을 걷고 실제 뜻만 다시 처리한다.
+      final contextualCorrection =
+          !isCorrectionRetry ? _contextualScenarioCorrection(aiKorean) : null;
+      if (!isCorrectionRetry &&
+          _kContextualCorrectionEnabled &&
+          aiKorean.trimLeft().toUpperCase().startsWith('[CORRECTION]') &&
+          contextualCorrection == null) {
+        // 불완전한 제어문을 역할 대사로 화면이나 TTS에 흘리지 않는다.
+        throw StateError('Scenario correction control was incomplete.');
+      }
+      if (contextualCorrection != null) {
+        handledContextualCorrection = true;
+        earlyUtterance?.cancel();
+        _aiTtsAdapter.stopAll(reason: 'scenario_contextual_correction');
+        _ttsQueueManager.stop();
+        setState(() {
+          _localMessages.removeWhere((message) =>
+              identical(message, hostBubble) ||
+              message['msgId'] == hostBubble['msgId'] ||
+              (_activeAiBubbleId.isNotEmpty &&
+                  message['msgId'] == _activeAiBubbleId));
+          _removeLastExchange();
+          _activeHostBubbleId = _nextBubbleId('host');
+          _activeAiBubbleId = _nextBubbleId('ai');
+          _localMessages.add(<String, dynamic>{
+            'role': 'HOST',
+            'target': contextualCorrection.corrected,
+            'original': '',
+            'msgId': _activeHostBubbleId,
+          });
+          _localMessages.add(<String, dynamic>{
+            'role': 'SYSTEM',
+            'target': contextualCorrection.reply,
+            'original': '',
+            'msgId': _activeAiBubbleId,
+          });
+        });
+        _scrollToBottom();
+        _activeHostBubbleId = '';
+        _activeAiBubbleId = '';
+        // 방금 받은 정정 입력은 새 턴이 아니라 직전 턴의 교체본이다.
+        _turnCounter = (_turnCounter - 1).clamp(0, 1 << 30).toInt();
+        _queueScenarioCorrectionRollback();
+        _log('[CORRECTION-CONTEXT]',
+            '문맥 교체 corrected_len=${contextualCorrection.corrected.length}');
+        responseCompleted = true;
+        await _speakKoreanLine(contextualCorrection.reply);
+        await _waitForScenarioCorrectionRollback();
+        final correctedHostLine = <String, dynamic>{
+          'role': 'HOST',
+          'original_text': contextualCorrection.corrected,
+        };
+        final correctedSystemLine = <String, dynamic>{
+          'role': 'SYSTEM',
+          'original_text': contextualCorrection.reply,
+        };
+        _pendingTurnPersistence = Future.wait<void>(<Future<void>>[
+          _saveTurnToFirestore(
+              <Map<String, dynamic>>[correctedHostLine, correctedSystemLine]),
+          _saveHistoryMessages(
+              <Map<String, dynamic>>[correctedHostLine, correctedSystemLine]),
+        ]);
+        await _pendingTurnPersistence;
         return;
       }
       responseCompleted = true;
@@ -2816,6 +2957,9 @@ never by itself a reason to ask back.
         'role': 'SYSTEM',
         'original_text': aiKoreanFinal,
       };
+      // 정정 전 기록 삭제와 정정 후 기록 저장이 서로 추월하지 않게 한다.
+      // 보통은 GPT 생성·TTS가 진행되는 동안 이미 끝나므로 체감 대기는 없다.
+      await _waitForScenarioCorrectionRollback();
       _pendingTurnPersistence = Future.wait<void>(<Future<void>>[
         _saveTurnToFirestore(<Map<String, dynamic>>[hostLine, systemLine]),
         _saveHistoryMessages(<Map<String, dynamic>>[hostLine, systemLine]),
@@ -2852,7 +2996,9 @@ never by itself a reason to ask back.
       if (mounted &&
           _isConversationActive &&
           generation == _pipelineGeneration &&
-          (askedBack || turnNumber == _turnCounter)) {
+          (askedBack ||
+              handledContextualCorrection ||
+              turnNumber == _turnCounter)) {
         _startConfiguredListening();
       }
     }
