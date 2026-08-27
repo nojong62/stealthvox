@@ -1,4 +1,10 @@
-# StealthVox 인트로 웰컴 화면
+# StealthVox 이전 인트로 웰컴 화면
+
+> 보관 상태: 2026-08-27 HTML 시안 적용 직전 화면<br>
+> 복원 브랜치: `archive/intro-welcome-before-html-redesign-20260827`<br>
+> 기준 커밋: `bb58adb7`
+
+이 문서는 새 HTML 기반 인트로로 교체하기 전 화면을 보존하기 위한 기록이다.
 
 ## 1. 문서 목적
 

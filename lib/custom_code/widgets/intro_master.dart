@@ -10,17 +10,14 @@ import 'package:flutter/gestures.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'dart:math' as math;
+import 'dart:ui' show ImageFilter;
 import 'trial/trial_flow_state.dart';
 import 'auth_progress_view.dart';
 import '/auth/social_auth_service.dart';
 import '/auth/account_discovery_service.dart';
 
 enum IntroScreen { welcome, auth, accountDiscovery }
-
-/// 워드마크 줄이 실제로 차지하는 높이는 36인데, 그 위에 비스듬히 얹은 Duo 배지가
-/// 훨씬 넓게 그려진다. 줄 높이를 이만큼 늘려 배지 주변까지 탭이 닿게 하고,
-/// 늘어난 만큼(= 이 값 - 36)은 바로 아래 여백에서 뺀다.
-const double _kBrandRowTapHeight = 64;
 
 class IntroMaster extends StatefulWidget {
   const IntroMaster({
@@ -40,7 +37,8 @@ class IntroMaster extends StatefulWidget {
   State<IntroMaster> createState() => _IntroMasterState();
 }
 
-class _IntroMasterState extends State<IntroMaster> {
+class _IntroMasterState extends State<IntroMaster>
+    with SingleTickerProviderStateMixin {
   static const String _termsUrl =
       'https://docs.google.com/document/d/1KE4xrb63SDw1ZkiNQ_wxQjH7iyY6msTuVtazCTnR7KY/edit';
   static const String _privacyUrl =
@@ -52,6 +50,7 @@ class _IntroMasterState extends State<IntroMaster> {
   final FocusNode _passwordFocusNode = FocusNode();
   late final TapGestureRecognizer _termsTapRecognizer;
   late final TapGestureRecognizer _privacyTapRecognizer;
+  late final AnimationController _welcomeMotionController;
 
   bool isLoginMode = true;
   bool isLoading = false;
@@ -85,6 +84,10 @@ class _IntroMasterState extends State<IntroMaster> {
       ..onTap = () => launchURL(_termsUrl);
     _privacyTapRecognizer = TapGestureRecognizer()
       ..onTap = () => launchURL(_privacyUrl);
+    _welcomeMotionController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 6),
+    )..repeat();
     _emailFocusNode.addListener(_onFocusChange);
     _passwordFocusNode.addListener(_onFocusChange);
     _clearInvalidLastAuthProvider();
@@ -169,6 +172,7 @@ class _IntroMasterState extends State<IntroMaster> {
     _passwordFocusNode.dispose();
     _termsTapRecognizer.dispose();
     _privacyTapRecognizer.dispose();
+    _welcomeMotionController.dispose();
     emailController.dispose();
     passwordController.dispose();
     super.dispose();
@@ -565,77 +569,6 @@ class _IntroMasterState extends State<IntroMaster> {
     );
   }
 
-  Widget _buildDuoPromoBadge() {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: _showDuoPromo,
-        borderRadius: BorderRadius.circular(99),
-        child: Ink(
-          padding: const EdgeInsets.fromLTRB(7, 6, 11, 6),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [
-                Color(0xFF2D2760),
-                Color(0xFF173F66),
-              ],
-            ),
-            borderRadius: BorderRadius.circular(99),
-            border: Border.all(
-              color: const Color(0xFF7B71F4).withValues(alpha: 0.58),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFF6A60E8).withValues(alpha: 0.18),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: const Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  color: Color(0xFFE96479),
-                  borderRadius: BorderRadius.all(Radius.circular(99)),
-                ),
-                child: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  child: Text(
-                    'AD',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 8,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.4,
-                    ),
-                  ),
-                ),
-              ),
-              SizedBox(width: 6),
-              Icon(
-                Icons.photo_camera_rounded,
-                size: 13,
-                color: Color(0xFF9EDFF5),
-              ),
-              SizedBox(width: 4),
-              Text(
-                'Duo 한 컷',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.2,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   void _showDuoPromo() {
     showGeneralDialog<void>(
       context: context,
@@ -701,62 +634,64 @@ class _IntroMasterState extends State<IntroMaster> {
   }
 
   Widget _buildWelcomeTrialAction() {
-    return Container(
-      width: double.infinity,
-      height: 60,
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.centerLeft,
-          end: Alignment.centerRight,
-          colors: [
-            Color(0xFF45CDBD),
-            Color(0xFF5C9DDB),
-            Color(0xFF765EEB),
-          ],
-          stops: [0.0, 0.52, 1.0],
-        ),
-        borderRadius: BorderRadius.circular(19),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF53CBBB).withValues(alpha: 0.14),
-            blurRadius: 24,
-            offset: const Offset(-8, 10),
-          ),
-          BoxShadow(
-            color: const Color(0xFF755FE9).withValues(alpha: 0.16),
-            blurRadius: 24,
-            offset: const Offset(8, 10),
-          ),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(19),
-        child: InkWell(
-          onTap: _goToGuidePage,
-          borderRadius: BorderRadius.circular(19),
-          child: const Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                '10분 듀오 맛보기 알아보기',
-                style: TextStyle(
-                  color: Color(0xFFF9FAFC),
-                  fontSize: 17,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.35,
-                ),
-              ),
-              SizedBox(width: 17),
-              Icon(
-                Icons.arrow_forward_rounded,
-                size: 25,
-                color: Color(0xFFF9FAFC),
+    return AnimatedBuilder(
+      animation: _welcomeMotionController,
+      builder: (context, child) {
+        final shift = _welcomeMotionController.value * 4 - 3;
+        return Container(
+          width: double.infinity,
+          height: 60,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment(shift, 0),
+              end: Alignment(shift + 2, 0),
+              colors: const [
+                Color(0xFF45CDBD),
+                Color(0xFF765EEB),
+                Color(0xFF45CDBD),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(99),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF765EEB).withValues(alpha: 0.20),
+                blurRadius: 22,
+                offset: const Offset(0, 10),
               ),
             ],
           ),
-        ),
-      ),
+          child: Material(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(99),
+            child: InkWell(
+              onTap: _goToGuidePage,
+              borderRadius: BorderRadius.circular(99),
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 24),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      '10분 듀오 맛보기 알아보기',
+                      style: TextStyle(
+                        color: Color(0xFFF9FAFC),
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.35,
+                      ),
+                    ),
+                    Icon(
+                      Icons.arrow_forward_rounded,
+                      size: 25,
+                      color: Color(0xFFF9FAFC),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -929,23 +864,16 @@ class _IntroMasterState extends State<IntroMaster> {
     return Container(
       width: widget.width,
       height: widget.height,
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Color(0xFF0C0D12),
-            Color(0xFF050608),
-            Color(0xFF030405),
-          ],
-          stops: [0.0, 0.52, 1.0],
-        ),
-      ),
+      color: const Color(0xFF131313),
       child: Scaffold(
         backgroundColor: Colors.transparent,
         resizeToAvoidBottomInset: false,
-        body: isLoading
-            ? const SafeArea(
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            const _IntroAmbientBackground(),
+            if (isLoading)
+              const SafeArea(
                 child: Center(
                   child: Padding(
                     padding: EdgeInsets.symmetric(horizontal: 28),
@@ -953,7 +881,8 @@ class _IntroMasterState extends State<IntroMaster> {
                   ),
                 ),
               )
-            : SafeArea(
+            else
+              SafeArea(
                 child: MediaQuery(
                   data: MediaQuery.of(context).copyWith(
                     textScaler: const TextScaler.linear(1.0),
@@ -982,6 +911,8 @@ class _IntroMasterState extends State<IntroMaster> {
                   ),
                 ),
               ),
+          ],
+        ),
       ),
     );
   }
@@ -1008,108 +939,301 @@ class _IntroMasterState extends State<IntroMaster> {
     );
   }
 
+  Widget _buildHtmlWelcomeHeader() {
+    return SizedBox(
+      height: 64,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: IconButton(
+              onPressed: _showDuoPromo,
+              tooltip: 'Duo Snapshot',
+              style: IconButton.styleFrom(
+                foregroundColor: const Color(0xFF67E9D9),
+                minimumSize: const Size(48, 48),
+              ),
+              icon: const Icon(Icons.menu_rounded, size: 27),
+            ),
+          ),
+          Text(
+            'STEALTHVOX',
+            maxLines: 1,
+            textScaler: _cappedScaler(context, 1.0),
+            style: GoogleFonts.orbitron(
+              color: const Color(0xFF67E9D9),
+              fontSize: 17,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 3.1,
+            ),
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: _openAuthScreen,
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF67E9D9),
+                minimumSize: const Size(52, 48),
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+              ),
+              child: const Text(
+                'LOGIN',
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.7,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDuoSnapshotBadge() {
+    return AnimatedBuilder(
+      animation: _welcomeMotionController,
+      builder: (context, child) {
+        final phase = _welcomeMotionController.value * math.pi * 2;
+        return Transform.translate(
+          offset: Offset(0, math.sin(phase) * 5),
+          child: Transform.rotate(
+            angle: -0.0872665 + math.sin(phase) * 0.014,
+            child: child,
+          ),
+        );
+      },
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: _showDuoPromo,
+          borderRadius: BorderRadius.circular(9),
+          child: Ink(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: const Color(0xFF393939),
+              borderRadius: BorderRadius.circular(9),
+              border: Border.all(
+                color: const Color(0xFF765EEB).withValues(alpha: 0.34),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF765EEB).withValues(alpha: 0.32),
+                  blurRadius: 20,
+                ),
+                BoxShadow(
+                  color: const Color(0xFF67E9D9).withValues(alpha: 0.16),
+                  blurRadius: 24,
+                ),
+              ],
+            ),
+            child: const Text(
+              'Duo Snapshot',
+              style: TextStyle(
+                color: Color(0xFF76F7E6),
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 0.25,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHtmlSoundOrb(double size) {
+    final coreSize = size * 0.60;
+    return AnimatedBuilder(
+      animation: _welcomeMotionController,
+      builder: (context, child) {
+        final phase = _welcomeMotionController.value * math.pi * 2;
+        final pulse = 1 + math.sin(phase) * 0.025;
+        return Transform.translate(
+          offset: Offset(0, math.sin(phase) * 5),
+          child: SizedBox(
+            width: size,
+            height: size,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Positioned.fill(
+                  child: CustomPaint(
+                    painter: _IntroOrbitPainter(
+                      progress: _welcomeMotionController.value,
+                    ),
+                  ),
+                ),
+                Transform.scale(
+                  scale: pulse,
+                  child: Container(
+                    width: coreSize,
+                    height: coreSize,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        center: const Alignment(-0.25, -0.25),
+                        radius: 0.95,
+                        colors: [
+                          const Color(0xFF45CDBD).withValues(alpha: 0.32),
+                          const Color(0xFF765EEB).withValues(alpha: 0.17),
+                          const Color(0xFF1F1F1F),
+                        ],
+                        stops: const [0, 0.56, 1],
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color:
+                              const Color(0xFF45CDBD).withValues(alpha: 0.14),
+                          blurRadius: 52,
+                          spreadRadius: 4,
+                        ),
+                      ],
+                    ),
+                    child: Center(
+                      child: _buildAnimatedOrbBars(
+                        phase: phase,
+                        height: coreSize * 0.36,
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  bottom: 2,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(99),
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 9,
+                        ),
+                        decoration: BoxDecoration(
+                          color:
+                              const Color(0xFF131313).withValues(alpha: 0.56),
+                          borderRadius: BorderRadius.circular(99),
+                          border: Border.all(
+                            color:
+                                const Color(0xFF4BCDBD).withValues(alpha: 0.54),
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.12),
+                              blurRadius: 24,
+                            ),
+                          ],
+                        ),
+                        child: const Text(
+                          '말한 순간, 바로 복습으로',
+                          style: TextStyle(
+                            color: Color(0xFF45CDBD),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.1,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildAnimatedOrbBars({
+    required double phase,
+    required double height,
+  }) {
+    const colors = <Color>[
+      Color(0xFF45CDBD),
+      Color(0xFF62D8C9),
+      Color(0xFF765EEB),
+      Color(0xFF76F7E6),
+      Color(0xFF67E9D9),
+    ];
+    const factors = <double>[0.50, 0.84, 0.62, 0.98, 0.40];
+    return SizedBox(
+      height: height,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: List.generate(colors.length, (index) {
+          final movement =
+              0.84 + math.sin(phase * (1.1 + index * 0.09) + index) * 0.16;
+          return Container(
+            width: 6,
+            height: height * factors[index] * movement,
+            margin: const EdgeInsets.symmetric(horizontal: 3),
+            decoration: BoxDecoration(
+              color: colors[index],
+              borderRadius: BorderRadius.circular(99),
+              boxShadow: [
+                BoxShadow(
+                  color: colors[index].withValues(alpha: 0.28),
+                  blurRadius: 9,
+                ),
+              ],
+            ),
+          );
+        }),
+      ),
+    );
+  }
+
   Widget _buildWelcomeStoryPage() {
     return LayoutBuilder(
       key: const ValueKey('welcome-story'),
       builder: (context, constraints) {
-        final compact = constraints.maxHeight < 660;
-        final headlineSize = constraints.maxWidth < 340 ? 33.0 : 36.0;
+        final compact = constraints.maxHeight < 720;
+        final veryCompact = constraints.maxHeight < 620;
+        final headlineSize = constraints.maxWidth < 350 ? 24.0 : 28.0;
         final storyGradient = const LinearGradient(
           begin: Alignment.centerLeft,
           end: Alignment.centerRight,
           colors: [
-            Color(0xFF48CEBD),
-            Color(0xFF4FAFCE),
-            Color(0xFF7763E9),
+            Color(0xFF45CDBD),
+            Color(0xFF765EEB),
           ],
-        ).createShader(const Rect.fromLTWH(82, 0, 132, 52));
+        ).createShader(const Rect.fromLTWH(70, 0, 160, 44));
+        final orbSize = veryCompact
+            ? 190.0
+            : compact
+                ? 224.0
+                : 286.0;
 
         return SingleChildScrollView(
           padding: EdgeInsets.fromLTRB(
             24,
-            compact ? 20 : 33,
+            0,
             24,
-            compact ? 14 : 18,
+            compact ? 12 : 18,
           ),
           child: ConstrainedBox(
             constraints: BoxConstraints(
-              minHeight: constraints.maxHeight - (compact ? 30 : 38),
+              minHeight: constraints.maxHeight - (compact ? 12 : 18),
             ),
             child: IntrinsicHeight(
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // 배지를 워드마크와 같은 Row에 두면 둘이 폭을 나눠 갖고,
-                  // 상표인 "StealthVox"가 "StealthV…"로 잘렸다. 배지를 Stack
-                  // 위로 띄워 코너에 비스듬히 붙인다 — 우표처럼. 그러면 워드마크는
-                  // 줄 전체를 쓰고, 배지는 흐름에서 폭을 가져가지 않는다.
-                  Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      // Stack 높이를 워드마크(36)보다 넉넉히 잡아 둔다. 배지는
-                      // 45° 돌아가 있어서 자기 자리보다 훨씬 크게 그려지는데,
-                      // Stack 밖으로 넘친 부분은 그려지기만 하고 탭을 못 받는다
-                      // — 부모 크기를 벗어난 좌표에서 히트 테스트가 끊기기
-                      // 때문이다. 그래서 "AD" 쪽 끝을 눌러도 아무 일이 없었다.
-                      // 늘린 높이만큼은 아래 여백에서 빼서 화면은 그대로 둔다.
-                      SizedBox(
-                        width: double.infinity,
-                        height: _kBrandRowTapHeight,
-                        child: Align(
-                          alignment: Alignment.topLeft,
-                          child: _buildBrandMark(),
-                        ),
-                      ),
-                      // 배지 주변까지 받아 주는 탭 판정 영역. 배지보다 먼저
-                      // 놓아 아래에 깔아 둔다 — 히트 테스트는 뒤에서부터라
-                      // 배지 본체를 누르면 잉크 반응이 그대로 살고, 빗나간
-                      // 손가락만 이 사각형이 받는다. 워드마크와는 겹치지 않는
-                      // 오른쪽 끝에만 둔다.
-                      Positioned(
-                        top: 0,
-                        right: 0,
-                        bottom: 0,
-                        width: 132,
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: _showDuoPromo,
-                          child: const SizedBox.expand(),
-                        ),
-                      ),
-                      Positioned(
-                        top: -2,
-                        right: -8,
-                        child: Transform.rotate(
-                          angle: -0.7853981633974483, // -45°
-                          child: _buildDuoPromoBadge(),
-                        ),
-                      ),
-                    ],
+                  _buildHtmlWelcomeHeader(),
+                  SizedBox(height: veryCompact ? 0 : 5),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: _buildDuoSnapshotBadge(),
                   ),
-                  SizedBox(
-                    height: (compact ? 56 : 78) - (_kBrandRowTapHeight - 36),
+                  SizedBox(height: veryCompact ? 2 : 6),
+                  Center(
+                    child: _buildHtmlSoundOrb(orbSize),
                   ),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF43CCBD).withValues(alpha: 0.035),
-                      borderRadius: BorderRadius.circular(99),
-                      border: Border.all(
-                        color: const Color(0xFF4BCDBD).withValues(alpha: 0.54),
-                      ),
-                    ),
-                    child: const Text(
-                      '말한 순간, 바로 복습으로',
-                      style: TextStyle(
-                        color: Color(0xFF62D8C9),
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w500,
-                        letterSpacing: -0.2,
-                      ),
-                    ),
-                  ),
-                  SizedBox(height: compact ? 26 : 35),
+                  SizedBox(height: veryCompact ? 10 : 22),
                   Text.rich(
                     TextSpan(
                       children: [
@@ -1120,34 +1244,37 @@ class _IntroMasterState extends State<IntroMaster> {
                             foreground: Paint()..shader = storyGradient,
                           ),
                         ),
-                        const TextSpan(
-                          text: '가\n최고의 영어 교재가\n됩니다',
-                        ),
+                        const TextSpan(text: '가\n최고의 영어 교재가 됩니다'),
                       ],
                     ),
+                    textAlign: TextAlign.center,
                     style: TextStyle(
                       color: const Color(0xFFF7F8FA),
                       fontSize: headlineSize,
                       fontWeight: FontWeight.w800,
-                      height: 1.16,
-                      letterSpacing: -1.4,
+                      height: 1.34,
+                      letterSpacing: -0.55,
                     ),
                   ),
-                  SizedBox(height: compact ? 16 : 20),
-                  SizedBox(
-                    width: double.infinity,
-                    height: compact ? 58 : 72,
-                    child: Center(child: _buildWaveform()),
+                  SizedBox(height: veryCompact ? 6 : 12),
+                  const Text(
+                    'StealthVox uses advanced AI to turn your natural\n'
+                    'conversation into structured learning material instantly.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Color(0xFFB7BAC3),
+                      fontSize: 14,
+                      height: 1.48,
+                    ),
                   ),
                   const Spacer(),
-                  SizedBox(height: compact ? 22 : 34),
-                  _buildWelcomeTrialAction(),
-                  SizedBox(height: compact ? 8 : 14),
-                  _buildWelcomeLoginAction(),
-                  SizedBox(height: compact ? 8 : 13),
+                  SizedBox(height: veryCompact ? 14 : 24),
                   Center(child: _buildPageIndicator(0, tealActive: true)),
-                  SizedBox(height: compact ? 10 : 17),
-                  _buildWelcomePageFooter('옆으로 밀어 계속하기'),
+                  SizedBox(height: veryCompact ? 18 : 34),
+                  _buildWelcomeTrialAction(),
+                  SizedBox(height: compact ? 8 : 12),
+                  _buildWelcomeLoginAction(),
+                  SizedBox(height: compact ? 2 : 6),
                 ],
               ),
             ),
@@ -2784,83 +2911,6 @@ class _IntroMasterState extends State<IntroMaster> {
     );
   }
 
-  Widget _buildWaveform() {
-    final heights = [
-      5.0,
-      4.0,
-      8.0,
-      11.0,
-      8.0,
-      6.0,
-      5.0,
-      7.0,
-      12.0,
-      23.0,
-      35.0,
-      49.0,
-      57.0,
-      52.0,
-      43.0,
-      31.0,
-      20.0,
-      12.0,
-      9.0,
-      15.0,
-      24.0,
-      31.0,
-      27.0,
-      20.0,
-      13.0,
-      9.0,
-      7.0,
-      6.0,
-      8.0,
-      14.0,
-      27.0,
-      36.0,
-      42.0,
-      34.0,
-      23.0,
-      14.0,
-      9.0,
-      7.0,
-      11.0,
-      15.0,
-      10.0,
-      6.0,
-      5.0,
-    ];
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: List.generate(heights.length, (index) {
-        final progress = index / (heights.length - 1);
-        final color = Color.lerp(
-          const Color(0xFF45D1C0),
-          const Color(0xFF7963EA),
-          progress,
-        )!;
-        final edgeOpacity = 0.30 + (heights[index] / 57 * 0.35);
-        return Container(
-          width: index % 3 == 0 ? 2.4 : 2.0,
-          height: heights[index] * 0.68,
-          margin: const EdgeInsets.symmetric(horizontal: 1.25),
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: edgeOpacity),
-            borderRadius: BorderRadius.circular(99),
-            boxShadow: heights[index] > 20
-                ? [
-                    BoxShadow(
-                      color: color.withValues(alpha: 0.08),
-                      blurRadius: 8,
-                    ),
-                  ]
-                : null,
-          ),
-        );
-      }),
-    );
-  }
-
   Widget _buildTextField(
     TextEditingController controller,
     String hint,
@@ -2914,6 +2964,118 @@ class _IntroMasterState extends State<IntroMaster> {
       ),
     );
   }
+}
+
+class _IntroAmbientBackground extends StatelessWidget {
+  const _IntroAmbientBackground();
+
+  @override
+  Widget build(BuildContext context) {
+    return const IgnorePointer(
+      child: CustomPaint(
+        painter: _IntroAmbientPainter(),
+        child: SizedBox.expand(),
+      ),
+    );
+  }
+}
+
+class _IntroAmbientPainter extends CustomPainter {
+  const _IntroAmbientPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawRect(
+      Offset.zero & size,
+      Paint()..color = const Color(0xFF131313),
+    );
+    canvas.drawRect(
+      Offset.zero & size,
+      Paint()
+        ..shader = RadialGradient(
+          center: const Alignment(-1.05, -1.05),
+          radius: 1.15,
+          colors: [
+            const Color(0xFF45CDBD).withValues(alpha: 0.075),
+            Colors.transparent,
+          ],
+        ).createShader(Offset.zero & size),
+    );
+    canvas.drawRect(
+      Offset.zero & size,
+      Paint()
+        ..shader = RadialGradient(
+          center: const Alignment(1.12, 1.05),
+          radius: 1.28,
+          colors: [
+            const Color(0xFF765EEB).withValues(alpha: 0.075),
+            Colors.transparent,
+          ],
+        ).createShader(Offset.zero & size),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _IntroAmbientPainter oldDelegate) => false;
+}
+
+class _IntroOrbitPainter extends CustomPainter {
+  const _IntroOrbitPainter({required this.progress});
+
+  final double progress;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    final outerRadius = size.shortestSide * 0.49;
+    final innerRadius = size.shortestSide * 0.43;
+    final outerPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..strokeCap = StrokeCap.round
+      ..color = const Color(0xFF45CDBD).withValues(alpha: 0.25);
+    final innerPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1
+      ..color = const Color(0xFF765EEB).withValues(alpha: 0.32);
+
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+    canvas.rotate(progress * math.pi * 2);
+    const dashCount = 54;
+    const gapRatio = 0.48;
+    const sweep = math.pi * 2 / dashCount;
+    final rect = Rect.fromCircle(center: Offset.zero, radius: outerRadius);
+    for (var index = 0; index < dashCount; index++) {
+      canvas.drawArc(
+        rect,
+        index * sweep,
+        sweep * gapRatio,
+        false,
+        outerPaint,
+      );
+    }
+    canvas.restore();
+
+    canvas.save();
+    canvas.translate(center.dx, center.dy);
+    canvas.rotate(-progress * math.pi * 2 * 0.72);
+    canvas.drawCircle(Offset.zero, innerRadius, innerPaint);
+    canvas.drawArc(
+      Rect.fromCircle(center: Offset.zero, radius: innerRadius),
+      0,
+      math.pi * 0.44,
+      false,
+      innerPaint
+        ..strokeWidth = 1.6
+        ..color = const Color(0xFF67E9D9).withValues(alpha: 0.42),
+    );
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _IntroOrbitPainter oldDelegate) =>
+      oldDelegate.progress != progress;
 }
 
 // ====================================================================
