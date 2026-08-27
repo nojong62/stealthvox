@@ -4359,7 +4359,14 @@ RULES — follow exactly:
   Timer? _p3ReturnTimer;
   static const Duration _kP3ReturnDelay = Duration(seconds: 3);
 
+  /// 문장을 갈아 끼우는 동안만 참. 없는 문장은 여기서 만들어 오느라 몇 초가
+  /// 걸리는데, 그 사이 두 번째 탭이 들어오면 두 벌이 겹쳐 돈다.
+  bool _p3VariantSwitching = false;
+
   bool get _p3Busy =>
+      // 문장을 갈아 끼우는 동안은 Start·모드·보이스를 함께 잠근다. 문장 카드는
+      // 제 잠금(`_p3VariantSwitching`)을 따로 본다 — 그래야 갈아탈 수 있다.
+      _p3VariantSwitching ||
       _p3Stage == P3Stage.preparing ||
       _p3Stage == P3Stage.breathListen ||
       _p3Stage == P3Stage.breathEcho ||
@@ -4521,20 +4528,80 @@ RULES — follow exactly:
   /// 뒤에는 Start가 화면에 없으므로, 메뉴에서 고르는 것이 곧 다시 시작이다.
   /// `_stopP3Shadowing`이 stage를 idle로 되돌리므로 **멈추기 전에** 진행
   /// 중이었는지를 기억해 둬야 한다.
+  ///
+  /// 🔁 **듣는 중에도 갈아탈 수 있다.** 돌고 있다고 잠가 두면 X로 나갔다
+  /// 학습 경로에서 다시 들어오는 수밖에 없었다 — 두 문장을 번갈아 보는 것이
+  /// 이 화면의 전부인데 그 길이 막혀 있었다. 누르면 돌던 회차를 접고 그
+  /// 자리에서 새 문장으로 다시 돈다.
+  ///
+  /// 아직 만들지 않은 문장도 여기서 만든다. 순서는 [_ensureSpeechVariant]가
+  /// 지킨다 — NATIVE ENGLISH의 재료는 언제나 My Speech다.
+  ///
+  /// 모드·보이스와 같은 규칙으로 **화면부터 칠한다.** `_stopP3Shadowing`이
+  /// 실기기에서 1초 가까이 걸려서, 그걸 기다렸다 칠하니 눌러도 안 바뀌는
+  /// 것처럼 보였다. 다만 **아직 없는 문장은 미리 칠하지 않는다** — 빈 문장을
+  /// 고른 상태가 한 순간도 생기면 안 된다. 그쪽은 카드의 스피너가 알린다.
   Future<void> _selectP3Variant(SentenceVariant variant) async {
-    if (!_p3VariantAvailable(variant) || _p3Busy) return;
+    if (_p3VariantSwitching) return;
     final bool wasStarted = _p3Stage != P3Stage.idle;
-    if (_selectedVariant == variant && !wasStarted) return;
-    await _stopP3Shadowing(resetSelection: true);
-    if (!mounted || _phase != ShadowingPhase.chunkPractice) return;
+    final bool hasSentence = _p3VariantAvailable(variant);
+    if (_selectedVariant == variant && !wasStarted && hasSentence) return;
     setState(() {
-      _selectedVariant = variant;
-      _p3Stage = P3Stage.idle;
-      _p3Error = null;
-      _p3UserSpeaking = false;
+      _p3VariantSwitching = true;
+      if (hasSentence) {
+        _selectedVariant = variant;
+        _p3Stage = P3Stage.idle;
+        _p3Error = null;
+        _p3UserSpeaking = false;
+      }
     });
-    if (wasStarted) await _startP3Speaking();
+    bool ready = hasSentence;
+    try {
+      await _stopP3Shadowing(resetSelection: true);
+      if (!mounted || _phase != ShadowingPhase.chunkPractice) return;
+      if (!ready) {
+        final bool built = await _ensureSpeechVariant(variant);
+        if (!mounted || _phase != ShadowingPhase.chunkPractice) return;
+        if (!built) {
+          setState(() => _p3Error = _variantBuildError(variant));
+          return;
+        }
+        setState(() {
+          _selectedVariant = variant;
+          _p3Stage = P3Stage.idle;
+          _p3Error = null;
+          _p3UserSpeaking = false;
+        });
+        ready = true;
+      }
+    } finally {
+      // 다시 도는 동안까지 잠가 두면 그 회차 내내 갈아탈 수 없다. 잠금은
+      // 여기서 풀고, 시작은 밖에서 한다.
+      if (mounted) {
+        setState(() => _p3VariantSwitching = false);
+      } else {
+        _p3VariantSwitching = false;
+      }
+    }
+    if (ready && wasStarted) await _startP3Speaking();
   }
+
+  /// 고른 쪽이 비어 있으면 만들어 온다. 생성 순서는 하나뿐이다 —
+  /// Conversation → My Speech → Native English. 실패하면 false이고 그 자리는
+  /// 빈 채로 둔다 — 다른 쪽 문장을 대신 걸지 않는다.
+  Future<bool> _ensureSpeechVariant(SentenceVariant variant) async {
+    if (_mySpeech.trim().isEmpty && !await _ensureMySpeech()) return false;
+    if (!mounted) return false;
+    if (variant == SentenceVariant.mySpeech) return _mySpeech.trim().isNotEmpty;
+    if (_nativeEnglish.trim().isNotEmpty) return true;
+    return _ensureNativeEnglish();
+  }
+
+  String _variantBuildError(SentenceVariant variant) =>
+      (variant == SentenceVariant.nativeEnglish
+          ? _nativeEnglishError ?? _mySpeechError
+          : _mySpeechError) ??
+      '만들지 못했습니다 — 다시 시도해 주세요';
 
   /// 고르는 것은 **고르기까지만** 한다. 시작은 Start 버튼이다 — 누르지도
   /// 않았는데 소리가 나면 놀란다.
@@ -5068,7 +5135,9 @@ RULES — follow exactly:
               const SizedBox(height: 10),
               _buildP3PracticeModePicker(),
               const SizedBox(height: 14),
-              _buildP3VariantPicker(showPreview: false),
+              // 라벨만 있으면 갈아타도 점 하나 옮겨진 것 말고는 달라진 게
+              // 없어 보인다. 어느 문장으로 가는지 글자로 보여 준다.
+              _buildP3VariantPicker(showPreview: true),
               if (_p3PracticeMode == P3PracticeMode.shadowing) ...[
                 const SizedBox(height: 12),
                 _buildP3GapPicker(),
@@ -5504,12 +5573,21 @@ RULES — follow exactly:
     required bool showPreview,
   }) {
     final available = _p3VariantAvailable(variant);
+    final building = variant == SentenceVariant.nativeEnglish
+        ? _isBuildingNativeEnglish
+        : _isBuildingMySpeech;
     final selected = _selectedVariant == variant;
     final sentence = _speechFor(variant).trim();
+    // 아직 없는 문장이라고 잠그지 않는다 — 누르면 그 자리에서 만든다.
+    final String? note = building
+        ? '만드는 중…'
+        : !available
+            ? '눌러서 만들기'
+            : (showPreview ? sentence : null);
     return InkWell(
-      onTap: available && !_p3Busy
-          ? () => unawaited(_selectP3Variant(variant))
-          : null,
+      onTap: building || _p3VariantSwitching
+          ? null
+          : () => unawaited(_selectP3Variant(variant)),
       borderRadius: BorderRadius.circular(12),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
@@ -5534,9 +5612,9 @@ RULES — follow exactly:
                   selected
                       ? Icons.radio_button_checked
                       : Icons.radio_button_unchecked,
-                  color: available
-                      ? (selected ? _p3ShadowingAccentColor : Colors.white38)
-                      : Colors.white12,
+                  color: building
+                      ? Colors.white24
+                      : (selected ? _p3ShadowingAccentColor : Colors.white38),
                   size: 17,
                 ),
                 const SizedBox(width: 7),
@@ -5544,24 +5622,37 @@ RULES — follow exactly:
                   child: Text(
                     _p3VariantLabel(variant),
                     style: TextStyle(
-                      color: available
-                          ? (selected ? Colors.white : Colors.white60)
-                          : Colors.white24,
+                      color: building
+                          ? Colors.white38
+                          : (selected ? Colors.white : Colors.white60),
                       fontSize: 13,
                       fontWeight: selected ? FontWeight.bold : FontWeight.w600,
                     ),
                   ),
                 ),
+                if (building) ...[
+                  const SizedBox(width: 8),
+                  const SizedBox(
+                    width: 13,
+                    height: 13,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.6,
+                      color: Colors.white38,
+                    ),
+                  ),
+                ],
               ],
             ),
-            if (showPreview) ...[
+            if (note != null) ...[
               const SizedBox(height: 6),
               Text(
-                available ? sentence : 'Sentence unavailable',
+                note,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  color: available ? Colors.white54 : Colors.white24,
+                  color: available && !building
+                      ? Colors.white54
+                      : Colors.white38,
                   fontSize: 11.5,
                   height: 1.35,
                 ),
