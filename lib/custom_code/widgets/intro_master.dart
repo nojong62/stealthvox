@@ -10,6 +10,7 @@ import 'package:flutter/gestures.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'dart:async';
 import 'dart:math' as math;
 import 'trial/trial_flow_state.dart';
 import 'auth_progress_view.dart';
@@ -50,6 +51,33 @@ class _IntroMasterState extends State<IntroMaster>
   late final TapGestureRecognizer _termsTapRecognizer;
   late final TapGestureRecognizer _privacyTapRecognizer;
   late final AnimationController _welcomeMotionController;
+
+  // ── 🎙️ [TAGLINE-PITCH] 타원을 누르면 뜨는 말풍선 ────────────────────
+  //   같은 말을 세 가지로 바꿔 가며 보여 준다. 누를 때마다 다음 것으로
+  //   넘어가고, 3초 뒤 저절로 사라진다. 말풍선을 누르면 그 자리에서 사라진다.
+  //
+  //   레이아웃에 끼우지 않고 Overlay로 띄운다 — 웰컴 화면은 Spacer로 자리를
+  //   나눠 쓰고 있어서, 말풍선이 줄 하나를 차지하면 버튼과 문구가 통째로
+  //   밀린다. 떠 있는 동안에도 화면은 그대로 만질 수 있어야 한다.
+  static const List<List<String>> _kTaglinePitches = <List<String>>[
+    <String>[
+      '🎙️ AI 실전 외국어 연습장',
+      '문법 강의도, 패턴 드릴도 없습니다.\n오직 대화, 오직 실전.\n₩17,000 = 10시간 | 쓴 만큼만 차감',
+    ],
+    <String>[
+      '🎙️ 수업은 없고, 실전만 있습니다',
+      'AI와 진짜 대화하는 외국어 연습장.\n10시간 ₩17,000 — 안 쓰면 안 빠져요.',
+    ],
+    <String>[
+      '🎙️ 나만의 AI 실전 연습장',
+      '강의 없이, 대화로만 외국어를 익히세요.\n10시간 ₩17,000 · 쓴 만큼만 차감',
+    ],
+  ];
+  static const Duration _kTaglineBubbleLife = Duration(seconds: 3);
+  final GlobalKey _taglineKey = GlobalKey();
+  OverlayEntry? _taglineBubble;
+  Timer? _taglineBubbleTimer;
+  int _taglinePitchIndex = 0;
 
   bool isLoginMode = true;
   bool isLoading = false;
@@ -172,6 +200,7 @@ class _IntroMasterState extends State<IntroMaster>
     _passwordFocusNode.dispose();
     _termsTapRecognizer.dispose();
     _privacyTapRecognizer.dispose();
+    _hideTaglineBubble();
     _welcomeMotionController.dispose();
     emailController.dispose();
     passwordController.dispose();
@@ -510,6 +539,7 @@ class _IntroMasterState extends State<IntroMaster>
 
   void _goBackToStory() {
     if (_welcomePage == 0) return;
+    _hideTaglineBubble();
     setState(() {
       _welcomeForward = false;
       _welcomePage = 0;
@@ -954,6 +984,7 @@ class _IntroMasterState extends State<IntroMaster>
 
   void _goToGuidePage() {
     if (_welcomePage == 1) return;
+    _hideTaglineBubble();
     setState(() {
       _welcomeForward = true;
       _welcomePage = 1;
@@ -1041,26 +1072,85 @@ class _IntroMasterState extends State<IntroMaster>
     );
   }
 
+  /// 타원 전체가 버튼이다 — 글자만 눌리면 눌러도 안 되는 것처럼 보인다.
+  /// 숨 쉬듯 아주 조금 움직여서 "눌러도 되는 것"임을 알린다(소리 구슬과 같은
+  /// 시계를 쓴다 — 화면에서 두 움직임이 어긋나지 않게).
   Widget _buildWelcomeTagline() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 10),
-      decoration: BoxDecoration(
-        color: const Color(0xFF171719),
-        borderRadius: BorderRadius.circular(99),
-        border: Border.all(color: const Color(0xFFD8D8DC), width: 1),
-      ),
-      child: Text(
-        'Speak freely, Pick it up naturally',
-        maxLines: 1,
-        textScaler: _cappedScaler(context, 1.0),
-        style: const TextStyle(
-          color: Color(0xFF52D4C3),
-          fontSize: 11.5,
-          fontWeight: FontWeight.w700,
-          letterSpacing: 1.0,
+    return AnimatedBuilder(
+      animation: _welcomeMotionController,
+      builder: (context, child) {
+        final phase = _welcomeMotionController.value * math.pi * 2;
+        return Transform.translate(
+          offset: Offset(0, math.sin(phase) * 2.2),
+          child: Transform.scale(
+            scale: 1 + math.sin(phase) * 0.012,
+            child: child,
+          ),
+        );
+      },
+      child: GestureDetector(
+        key: _taglineKey,
+        behavior: HitTestBehavior.opaque,
+        onTap: _showNextTaglinePitch,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFF171719),
+            borderRadius: BorderRadius.circular(99),
+            border: Border.all(color: const Color(0xFFD8D8DC), width: 1),
+          ),
+          child: Text(
+            'Speak freely, Pick it up naturally',
+            maxLines: 1,
+            textScaler: _cappedScaler(context, 1.0),
+            style: const TextStyle(
+              color: Color(0xFF52D4C3),
+              fontSize: 11.5,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.0,
+            ),
+          ),
         ),
       ),
     );
+  }
+
+  /// 누를 때마다 다음 한마디로 넘어간다. 떠 있는 말풍선은 먼저 걷는다 —
+  /// 두 장이 겹쳐 뜨면 뒤엣것이 앞엣것을 가린다.
+  void _showNextTaglinePitch() {
+    _hideTaglineBubble();
+    final anchor =
+        _taglineKey.currentContext?.findRenderObject() as RenderBox?;
+    final overlay = Overlay.maybeOf(context);
+    if (anchor == null || !anchor.hasSize || overlay == null) return;
+    final Offset topLeft = anchor.localToGlobal(Offset.zero);
+    final double top = topLeft.dy + anchor.size.height + 10;
+    final List<String> pitch = _kTaglinePitches[_taglinePitchIndex];
+    // 다음 차례를 미리 올려 둔다. 저절로 사라졌든 눌러서 껐든, 다음에 누르면
+    // 언제나 그다음 한마디가 나온다.
+    _taglinePitchIndex = (_taglinePitchIndex + 1) % _kTaglinePitches.length;
+    final entry = OverlayEntry(
+      builder: (overlayContext) => Positioned(
+        left: 16,
+        right: 16,
+        top: top,
+        child: _TaglinePitchBubble(
+          title: pitch[0],
+          body: pitch[1],
+          onTap: _hideTaglineBubble,
+        ),
+      ),
+    );
+    overlay.insert(entry);
+    _taglineBubble = entry;
+    _taglineBubbleTimer = Timer(_kTaglineBubbleLife, _hideTaglineBubble);
+  }
+
+  void _hideTaglineBubble() {
+    _taglineBubbleTimer?.cancel();
+    _taglineBubbleTimer = null;
+    _taglineBubble?.remove();
+    _taglineBubble = null;
   }
 
   Widget _buildDuoSnapshotBadge() {
@@ -1249,7 +1339,7 @@ class _IntroMasterState extends State<IntroMaster>
                         const TextSpan(text: '가\n최고의 영어 교재가\n됩니다'),
                       ],
                     ),
-                    textAlign: TextAlign.center,
+                    textAlign: TextAlign.left,
                     textScaler: headlineScaler,
                     style: TextStyle(
                       color: const Color(0xFFF7F8FA),
@@ -3092,6 +3182,122 @@ class _IntroOrbitPainter extends CustomPainter {
 //   두 손가락으로 벌리거나 두 번 두드리면 커지고, 커진 채로 끌어서
 //   구석까지 볼 수 있다.
 // ====================================================================
+/// 🎙️ 타원을 누르면 그 아래 뜨는 한마디.
+///
+/// 살짝 떠오르며 나타나고, 누르면 그 자리에서 사라진다. 사라지는 애니메이션은
+/// 두지 않는다 — 3초짜리 알림이라 나가는 모습까지 보고 있을 이유가 없다.
+class _TaglinePitchBubble extends StatelessWidget {
+  const _TaglinePitchBubble({
+    required this.title,
+    required this.body,
+    required this.onTap,
+  });
+
+  final String title;
+  final String body;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      builder: (context, t, child) => Opacity(
+        opacity: t,
+        child: Transform.translate(
+          offset: Offset(0, (1 - t) * -8),
+          child: Transform.scale(scale: 0.96 + t * 0.04, child: child),
+        ),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 꼭지. 타원이 화면 한가운데 있으므로 여기도 가운데다.
+              CustomPaint(
+                size: const Size(18, 9),
+                painter: _TaglineBubbleTailPainter(),
+              ),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(18, 15, 18, 16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF171719),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: const Color(0xFF52D4C3).withValues(alpha: 0.35),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.45),
+                      blurRadius: 22,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        color: Color(0xFF52D4C3),
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w800,
+                        height: 1.35,
+                      ),
+                    ),
+                    const SizedBox(height: 9),
+                    Text(
+                      body,
+                      style: const TextStyle(
+                        color: Color(0xFFD8D8DC),
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w500,
+                        height: 1.55,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TaglineBubbleTailPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = Path()
+      ..moveTo(size.width / 2, 0)
+      ..lineTo(size.width, size.height)
+      ..lineTo(0, size.height)
+      ..close();
+    canvas.drawPath(
+      path,
+      Paint()..color = const Color(0xFF52D4C3).withValues(alpha: 0.35),
+    );
+    final inner = Path()
+      ..moveTo(size.width / 2, 1.6)
+      ..lineTo(size.width - 1.6, size.height)
+      ..lineTo(1.6, size.height)
+      ..close();
+    canvas.drawPath(inner, Paint()..color = const Color(0xFF171719));
+  }
+
+  @override
+  bool shouldRepaint(covariant _TaglineBubbleTailPainter oldDelegate) => false;
+}
+
 class _DuoPromoViewer extends StatefulWidget {
   const _DuoPromoViewer();
 
