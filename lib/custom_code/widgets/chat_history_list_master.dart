@@ -812,25 +812,34 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
         ),
         child: Row(
           children: [
+            // 👆 [터치 영역] 네모가 18px이라 그 자리를 정확히 짚어야 했다.
+            //   네모는 그대로 두고 **누르는 자리만** 넓힌다 — 바깥 상자가
+            //   탭을 받고, 안쪽 Checkbox는 IgnorePointer로 그림만 그린다.
+            //   둘 다 탭을 받으면 한 번 누른 것이 두 번으로 셈해진다.
             if (showCheckbox)
-              Padding(
-                padding: const EdgeInsets.only(right: 12),
-                child: Checkbox(
-                  value: isChecked,
-                  activeColor: const Color(0xFF757575),
-                  checkColor: Colors.white,
-                  side: const BorderSide(color: Colors.white54, width: 1.5),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(4)),
-                  onChanged: (bool? value) {
-                    setState(() {
-                      if (value == true) {
-                        _selectedDocIds.add(doc.id);
-                      } else {
-                        _selectedDocIds.remove(doc.id);
-                      }
-                    });
-                  },
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => setState(() {
+                  if (isChecked) {
+                    _selectedDocIds.remove(doc.id);
+                  } else {
+                    _selectedDocIds.add(doc.id);
+                  }
+                }),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(4, 10, 14, 10),
+                  child: IgnorePointer(
+                    child: Checkbox(
+                      value: isChecked,
+                      activeColor: const Color(0xFF757575),
+                      checkColor: Colors.white,
+                      side: const BorderSide(color: Colors.white54, width: 1.5),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(4)),
+                      visualDensity: VisualDensity.standard,
+                      onChanged: (_) {},
+                    ),
+                  ),
                 ),
               ),
             Container(
