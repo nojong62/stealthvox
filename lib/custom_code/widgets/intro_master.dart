@@ -78,7 +78,8 @@ class _IntroMasterState extends State<IntroMaster>
   void initState() {
     super.initState();
     debugPrint(
-        '[TrialDebug] IntroMaster initState, time=${DateTime.now().toIso8601String()}');
+      '[TrialDebug] IntroMaster initState, time=${DateTime.now().toIso8601String()}',
+    );
     _termsTapRecognizer = TapGestureRecognizer()
       ..onTap = () => launchURL(_termsUrl);
     _privacyTapRecognizer = TapGestureRecognizer()
@@ -107,7 +108,7 @@ class _IntroMasterState extends State<IntroMaster>
       'English',
       'Japanese',
       'Chinese',
-      'Spanish'
+      'Spanish',
     ];
     _trialNativeLang = trialLanguages.contains(FFAppState().nativeLang)
         ? FFAppState().nativeLang
@@ -179,7 +180,8 @@ class _IntroMasterState extends State<IntroMaster>
 
   Future<void> _checkEntryStatus() async {
     debugPrint(
-        '[TrialDebug] _checkEntryStatus enter, currentUser=${FirebaseAuth.instance.currentUser?.uid}, isAnonymous=${FirebaseAuth.instance.currentUser?.isAnonymous}, time=${DateTime.now().toIso8601String()}');
+      '[TrialDebug] _checkEntryStatus enter, currentUser=${FirebaseAuth.instance.currentUser?.uid}, isAnonymous=${FirebaseAuth.instance.currentUser?.isAnonymous}, time=${DateTime.now().toIso8601String()}',
+    );
     // 1순위: Play 설치 referrer의 최신 초대를 먼저 복구한다.
     // Android 자동 백업이 과거 FFAppState 초대를 되살리는 경우보다 우선해야 한다.
     await AppsFlyerManager.recoverPlayInstallInvite();
@@ -187,7 +189,8 @@ class _IntroMasterState extends State<IntroMaster>
 
     // 저장된 초대는 서버에 활성 방이 있을 때만 사용한다.
     debugPrint(
-        '[Intro] pendingInviteType=${FFAppState().pendingInviteType}, duoRoomId=${FFAppState().duoRoomId}');
+      '[Intro] pendingInviteType=${FFAppState().pendingInviteType}, duoRoomId=${FFAppState().duoRoomId}',
+    );
     if (FFAppState().pendingInviteType == 'duo' &&
         FFAppState().duoRoomId.isNotEmpty) {
       final isValid = await AppsFlyerManager.validatePendingDuoInvite();
@@ -213,13 +216,15 @@ class _IntroMasterState extends State<IntroMaster>
     final user = FirebaseAuth.instance.currentUser;
     if (user != null && !user.isAnonymous) {
       debugPrint(
-          '[TrialDebug] _checkEntryStatus  routing non-anonymous user to Lobby via _routeAfterAuth, time=${DateTime.now().toIso8601String()}');
+        '[TrialDebug] _checkEntryStatus  routing non-anonymous user to Lobby via _routeAfterAuth, time=${DateTime.now().toIso8601String()}',
+      );
       _routeAfterAuth();
       return;
     }
     if (user != null && user.isAnonymous) {
       debugPrint(
-          '[TrialDebug] _checkEntryStatus  anonymous user stays on Intro, trialCompleted=${FFAppState().trialCompleted}');
+        '[TrialDebug] _checkEntryStatus  anonymous user stays on Intro, trialCompleted=${FFAppState().trialCompleted}',
+      );
     }
     // 4순위: 비회원은 Intro에서 로그인 가능 상태로 대기
   }
@@ -247,7 +252,8 @@ class _IntroMasterState extends State<IntroMaster>
 
   Future<void> _startTrial() async {
     debugPrint(
-        '[TrialDebug] _startTrial enter, currentUser=${FirebaseAuth.instance.currentUser?.uid}, isAnonymous=${FirebaseAuth.instance.currentUser?.isAnonymous}, time=${DateTime.now().toIso8601String()}');
+      '[TrialDebug] _startTrial enter, currentUser=${FirebaseAuth.instance.currentUser?.uid}, isAnonymous=${FirebaseAuth.instance.currentUser?.isAnonymous}, time=${DateTime.now().toIso8601String()}',
+    );
     if (_trialStarting) return;
     if (FFAppState().trialCompleted) {
       await _showTrialCompletedNotice(force: true);
@@ -264,7 +270,8 @@ class _IntroMasterState extends State<IntroMaster>
       if (existingUser != null && existingUser.isAnonymous != true) {
         // 정식 회원은 체험 불가 -> signOut 하지 않고 Lobby로 이동
         debugPrint(
-            '[Trial] existing member tried trial, redirecting to Lobby: ${existingUser.uid}');
+          '[Trial] existing member tried trial, redirecting to Lobby: ${existingUser.uid}',
+        );
         if (mounted) context.goNamed('Lobby');
         return;
       }
@@ -276,7 +283,8 @@ class _IntroMasterState extends State<IntroMaster>
         return;
       }
       debugPrint(
-          '[TrialDebug] language dialog confirmed, native=$_trialNativeLang, target=$_trialTargetLang');
+        '[TrialDebug] language dialog confirmed, native=$_trialNativeLang, target=$_trialTargetLang',
+      );
       setState(() => isLoading = true);
 
       // 정책 A: 체험 확정 -> pending invite 초기화 (체험과 Duo는 분리)
@@ -290,7 +298,8 @@ class _IntroMasterState extends State<IntroMaster>
       }
       if (!_isCurrentTrialRequest(requestGeneration)) return;
       debugPrint(
-          '[TrialDebug] anonymous auth ready, uid=${FirebaseAuth.instance.currentUser?.uid}, stateMounted=$mounted');
+        '[TrialDebug] anonymous auth ready, uid=${FirebaseAuth.instance.currentUser?.uid}, stateMounted=$mounted',
+      );
       FFAppState().nativeLang = _trialNativeLang;
       FFAppState().targetLang = _trialTargetLang;
 
@@ -298,9 +307,9 @@ class _IntroMasterState extends State<IntroMaster>
     } catch (e) {
       final errorContext = mounted ? context : appNavigatorKey.currentContext;
       if (errorContext != null && errorContext.mounted) {
-        ScaffoldMessenger.of(errorContext).showSnackBar(
-          SnackBar(content: Text('체험을 시작할 수 없습니다: $e')),
-        );
+        ScaffoldMessenger.of(
+          errorContext,
+        ).showSnackBar(SnackBar(content: Text('체험을 시작할 수 없습니다: $e')));
       }
     } finally {
       if (authNotificationSuppressed) {
@@ -349,10 +358,7 @@ class _IntroMasterState extends State<IntroMaster>
     context.pushNamed(
       'StealthRoom',
       queryParameters: {
-        'historyRef': serializeParam(
-          historyRef,
-          ParamType.DocumentReference,
-        ),
+        'historyRef': serializeParam(historyRef, ParamType.DocumentReference),
       }.withoutNulls,
     );
   }
@@ -427,9 +433,13 @@ class _IntroMasterState extends State<IntroMaster>
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(e.message ?? "오류가 발생했습니다.",
-              style: const TextStyle(
-                  fontWeight: FontWeight.bold, color: Colors.white)),
+          content: Text(
+            e.message ?? "오류가 발생했습니다.",
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
           backgroundColor: Colors.redAccent,
         ),
       );
@@ -442,8 +452,11 @@ class _IntroMasterState extends State<IntroMaster>
     if (emailController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text("위에 이메일을 먼저 입력해주세요.",
-                style: TextStyle(fontWeight: FontWeight.bold))),
+          content: Text(
+            "위에 이메일을 먼저 입력해주세요.",
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+        ),
       );
       return;
     }
@@ -454,26 +467,24 @@ class _IntroMasterState extends State<IntroMaster>
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("재설정 메일을 보냈습니다! 메일함(혹시 스팸함)을 확인하세요.",
-              style: TextStyle(fontWeight: FontWeight.bold)),
+          content: Text(
+            "재설정 메일을 보냈습니다! 메일함(혹시 스팸함)을 확인하세요.",
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
           backgroundColor: Colors.green,
         ),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("전송 실패: ${e.toString()}")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("전송 실패: ${e.toString()}")));
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        _buildMain(context),
-      ],
-    );
+    return Stack(children: [_buildMain(context)]);
   }
 
   Widget _buildMain(BuildContext context) {
@@ -598,10 +609,7 @@ class _IntroMasterState extends State<IntroMaster>
     );
   }
 
-  Widget _buildPageIndicator(
-    int activeIndex, {
-    bool tealActive = false,
-  }) {
+  Widget _buildPageIndicator(int activeIndex, {bool tealActive = false}) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: List.generate(2, (index) {
@@ -614,8 +622,8 @@ class _IntroMasterState extends State<IntroMaster>
           decoration: BoxDecoration(
             color: active
                 ? (tealActive
-                    ? const Color(0xFF52D4C3)
-                    : const Color(0xFF7B71F4))
+                      ? const Color(0xFF52D4C3)
+                      : const Color(0xFF7B71F4))
                 : Colors.white.withValues(alpha: 0.18),
             borderRadius: BorderRadius.circular(99),
             boxShadow: active && tealActive
@@ -643,7 +651,6 @@ class _IntroMasterState extends State<IntroMaster>
           //   되면서 52를 넘는다(실기기 2.0배에서 가로 106px 초과,
           //   2026-08-27). 최소 높이만 두고 내용만큼 자라게 한다.
           constraints: const BoxConstraints(minHeight: 52),
-          margin: const EdgeInsets.symmetric(horizontal: 16),
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment(shift, 0),
@@ -672,7 +679,8 @@ class _IntroMasterState extends State<IntroMaster>
               child: const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     // 라벨이 남는 폭을 쓰고, 모자라면 줄을 바꾼다.
                     // 화살표는 크기가 정해져 있어 그대로 둔다.
@@ -688,7 +696,7 @@ class _IntroMasterState extends State<IntroMaster>
                         ),
                       ),
                     ),
-                    SizedBox(width: 10),
+                    SizedBox(width: 12),
                     Icon(
                       Icons.arrow_forward_rounded,
                       size: 22,
@@ -758,8 +766,9 @@ class _IntroMasterState extends State<IntroMaster>
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             backgroundColor: const Color(0xFF756BE8),
             foregroundColor: const Color(0xFFF9F9FB),
-            disabledBackgroundColor:
-                const Color(0xFF756BE8).withValues(alpha: 0.45),
+            disabledBackgroundColor: const Color(
+              0xFF756BE8,
+            ).withValues(alpha: 0.45),
             disabledForegroundColor: Colors.white54,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(18),
@@ -775,7 +784,8 @@ class _IntroMasterState extends State<IntroMaster>
             mainAxisSize: MainAxisSize.min,
             children: [
               Flexible(
-                  child: Text(label, maxLines: 2, textAlign: TextAlign.center)),
+                child: Text(label, maxLines: 2, textAlign: TextAlign.center),
+              ),
               const SizedBox(width: 8),
               Icon(icon, size: 19),
             ],
@@ -800,9 +810,7 @@ class _IntroMasterState extends State<IntroMaster>
           style: OutlinedButton.styleFrom(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             foregroundColor: const Color(0xFFD9DAE1),
-            side: BorderSide(
-              color: Colors.white.withValues(alpha: 0.13),
-            ),
+            side: BorderSide(color: Colors.white.withValues(alpha: 0.13)),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
             ),
@@ -820,7 +828,8 @@ class _IntroMasterState extends State<IntroMaster>
                 const SizedBox(width: 8),
               ],
               Flexible(
-                  child: Text(label, maxLines: 2, textAlign: TextAlign.center)),
+                child: Text(label, maxLines: 2, textAlign: TextAlign.center),
+              ),
             ],
           ),
         ),
@@ -966,46 +975,41 @@ class _IntroMasterState extends State<IntroMaster>
   }
 
   Widget _buildHtmlWelcomeHeader() {
-    return ConstrainedBox(
-      // 📐 높이는 최소값만 정한다. LOGIN 글자가 배율을 따라 커지면 64를 넘는다.
-      constraints: const BoxConstraints(minHeight: 64),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return SizedBox(
+      height: 86,
+      child: Stack(
+        clipBehavior: Clip.none,
         children: [
-          // 워드마크는 배율에 묶여 있어도 남는 폭이 줄면 잘려야 한다.
-          Flexible(
-            child: Text(
-              'STEALTHVOX',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textScaler: _cappedScaler(context, 1.0),
-              style: GoogleFonts.orbitron(
-                color: const Color(0xFF67E9D9),
-                fontSize: 17,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 3.1,
-              ),
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 15,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _buildWelcomeWaveMark(),
+                const SizedBox(width: 17),
+                Text(
+                  'StealthVox',
+                  maxLines: 1,
+                  textScaler: _cappedScaler(context, 1.0),
+                  style: const TextStyle(
+                    color: Color(0xFFF7F7F8),
+                    fontSize: 36,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -2.3,
+                    height: 1,
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(width: 8),
-          TextButton(
-            onPressed: _openAuthScreen,
-            style: TextButton.styleFrom(
-              foregroundColor: const Color(0xFF67E9D9),
-              minimumSize: const Size(52, 48),
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-            ),
-            // 📐 LOGIN은 폭이 정해진 조각이다. 여기만 배율을 안 묶어 두어
-            //   2.0배에서 워드마크를 밀어냈다(실기기 확인, 2026-08-27).
-            child: Text(
-              'LOGIN',
-              maxLines: 1,
-              textScaler: _cappedScaler(context, 1.3),
-              style: const TextStyle(
-                fontSize: 13.5,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.7,
-              ),
+          Positioned(
+            right: -17,
+            top: 2,
+            child: Transform.rotate(
+              angle: -math.pi / 4,
+              child: _buildDuoSnapshotBadge(),
             ),
           ),
         ],
@@ -1013,54 +1017,75 @@ class _IntroMasterState extends State<IntroMaster>
     );
   }
 
-  Widget _buildDuoSnapshotBadge() {
-    return AnimatedBuilder(
-      animation: _welcomeMotionController,
-      builder: (context, child) {
-        final phase = _welcomeMotionController.value * math.pi * 2;
-        return Transform.translate(
-          offset: Offset(0, math.sin(phase) * 5),
-          child: Transform.rotate(
-            angle: -0.0872665 + math.sin(phase) * 0.014,
-            child: child,
-          ),
-        );
-      },
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: _showDuoPromo,
-          borderRadius: BorderRadius.circular(9),
-          child: Ink(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: const Color(0xFF393939),
-              borderRadius: BorderRadius.circular(9),
-              border: Border.all(
-                color: const Color(0xFF765EEB).withValues(alpha: 0.34),
+  Widget _buildWelcomeWaveMark() {
+    const heights = <double>[13, 24, 31, 21, 11];
+    return SizedBox(
+      width: 26,
+      height: 34,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: heights
+            .map(
+              (height) => Container(
+                width: 3,
+                height: height,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF52D4C3),
+                  borderRadius: BorderRadius.circular(99),
+                ),
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFF765EEB).withValues(alpha: 0.32),
-                  blurRadius: 20,
-                ),
-                BoxShadow(
-                  color: const Color(0xFF67E9D9).withValues(alpha: 0.16),
-                  blurRadius: 24,
-                ),
-              ],
-            ),
-            // 📐 이름표라 줄바꿈이 어울리지 않는다. 배율만 묶는다 —
-            //   2.0배에서 오브 자리를 침범할 만큼 커졌다(2026-08-27).
+            )
+            .toList(),
+      ),
+    );
+  }
+
+  Widget _buildWelcomeTagline() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF171719),
+        borderRadius: BorderRadius.circular(99),
+        border: Border.all(color: const Color(0xFFD8D8DC), width: 1),
+      ),
+      child: Text(
+        'Speak freely, Pick it up naturally',
+        maxLines: 1,
+        textScaler: _cappedScaler(context, 1.0),
+        style: const TextStyle(
+          color: Color(0xFF52D4C3),
+          fontSize: 11.5,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 1.0,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDuoSnapshotBadge() {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: _showDuoPromo,
+        borderRadius: BorderRadius.circular(5),
+        child: Ink(
+          width: 126,
+          height: 27,
+          decoration: BoxDecoration(
+            color: const Color(0xFF7661EA),
+            borderRadius: BorderRadius.circular(5),
+          ),
+          child: Center(
             child: Text(
-              'Duo Snapshot',
+              'AD · Duo Snapshot',
               maxLines: 1,
-              textScaler: _cappedScaler(context, 1.3),
-              style: TextStyle(
-                color: Color(0xFF76F7E6),
-                fontSize: 12,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 0.25,
+              textScaler: _cappedScaler(context, 1.0),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.1,
               ),
             ),
           ),
@@ -1110,8 +1135,9 @@ class _IntroMasterState extends State<IntroMaster>
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color:
-                              const Color(0xFF45CDBD).withValues(alpha: 0.14),
+                          color: const Color(
+                            0xFF45CDBD,
+                          ).withValues(alpha: 0.14),
                           blurRadius: 52,
                           spreadRadius: 4,
                         ),
@@ -1179,37 +1205,25 @@ class _IntroMasterState extends State<IntroMaster>
       builder: (context, constraints) {
         final compact = constraints.maxHeight < 720;
         final veryCompact = constraints.maxHeight < 620;
-        final headlineSize = constraints.maxWidth < 350 ? 24.0 : 28.0;
-        final scaledHeadline =
-            MediaQuery.textScalerOf(context).scale(headlineSize);
-        final storyGradient = const LinearGradient(
-          begin: Alignment.centerLeft,
-          end: Alignment.centerRight,
-          colors: [
-            Color(0xFF45CDBD),
-            Color(0xFF765EEB),
-          ],
-        ).createShader(
-          // '이야기'는 '당신의 ' 뒤에서 시작한다.
-          // 📐 글자 폭은 **배율이 곱해진 크기**를 따른다. headlineSize만 쓰면
-          //   기기 배율이 클수록 어긋나, 2.0배에서는 그라데이션이 글자를
-          //   한참 벗어났다(실기기 확인, 2026-08-27).
-          Rect.fromLTWH(scaledHeadline * 3.2, 0, scaledHeadline * 3,
-              scaledHeadline * 1.6),
-        );
-        final orbSize = veryCompact
-            ? 190.0
-            : compact
-                ? 224.0
-                : 286.0;
+        final headlineSize = constraints.maxWidth < 350 ? 25.0 : 28.0;
+        final headlineScaler = _cappedScaler(context, 1.15);
+        final scaledHeadline = headlineScaler.scale(headlineSize);
+        final storyGradient =
+            const LinearGradient(
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+              colors: [Color(0xFF45CDBD), Color(0xFF765EEB)],
+            ).createShader(
+              Rect.fromLTWH(
+                scaledHeadline * 3.2,
+                0,
+                scaledHeadline * 3,
+                scaledHeadline * 1.6,
+              ),
+            );
 
         return SingleChildScrollView(
-          padding: EdgeInsets.fromLTRB(
-            24,
-            0,
-            24,
-            compact ? 12 : 18,
-          ),
+          padding: EdgeInsets.fromLTRB(20, 0, 20, compact ? 12 : 18),
           child: ConstrainedBox(
             constraints: BoxConstraints(
               minHeight: constraints.maxHeight - (compact ? 12 : 18),
@@ -1219,19 +1233,9 @@ class _IntroMasterState extends State<IntroMaster>
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   _buildHtmlWelcomeHeader(),
-                  SizedBox(height: veryCompact ? 0 : 5),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: _buildDuoSnapshotBadge(),
-                  ),
-                  SizedBox(height: veryCompact ? 2 : 6),
-                  // 배지 아래 여백과 헤드라인 아래 여백을 1:2로 나눠
-                  // 오브가 화면 위쪽으로 쏠리지 않게 잡는다.
-                  const Spacer(flex: 1),
-                  Center(
-                    child: _buildHtmlSoundOrb(orbSize),
-                  ),
-                  SizedBox(height: veryCompact ? 12 : 26),
+                  SizedBox(height: veryCompact ? 8 : 18),
+                  Center(child: _buildWelcomeTagline()),
+                  SizedBox(height: veryCompact ? 30 : 52),
                   Text.rich(
                     TextSpan(
                       children: [
@@ -1242,25 +1246,27 @@ class _IntroMasterState extends State<IntroMaster>
                             foreground: Paint()..shader = storyGradient,
                           ),
                         ),
-                        const TextSpan(text: '가\n최고의 영어 교재가 됩니다'),
+                        const TextSpan(text: '가\n최고의 영어 교재가\n됩니다'),
                       ],
                     ),
                     textAlign: TextAlign.center,
+                    textScaler: headlineScaler,
                     style: TextStyle(
                       color: const Color(0xFFF7F8FA),
                       fontSize: headlineSize,
                       fontWeight: FontWeight.w800,
-                      height: 1.34,
+                      height: 1.38,
                       letterSpacing: -0.55,
                     ),
                   ),
-                  const Spacer(flex: 2),
-                  SizedBox(height: veryCompact ? 10 : 16),
-                  Center(child: _buildPageIndicator(0, tealActive: true)),
-                  SizedBox(height: veryCompact ? 16 : 26),
+                  const Spacer(flex: 5),
                   _buildWelcomeTrialAction(),
                   SizedBox(height: compact ? 6 : 10),
                   _buildWelcomeLoginAction(),
+                  const Spacer(flex: 2),
+                  Center(child: _buildPageIndicator(0, tealActive: true)),
+                  const Spacer(flex: 2),
+                  _buildWelcomePageFooter('옆으로 밀어 계속하기'),
                   SizedBox(height: compact ? 2 : 6),
                 ],
               ),
@@ -1299,8 +1305,9 @@ class _IntroMasterState extends State<IntroMaster>
                         tooltip: '이전',
                         style: IconButton.styleFrom(
                           foregroundColor: const Color(0xFFE6E7EA),
-                          backgroundColor:
-                              Colors.white.withValues(alpha: 0.045),
+                          backgroundColor: Colors.white.withValues(
+                            alpha: 0.045,
+                          ),
                           minimumSize: const Size(44, 44),
                         ),
                         icon: const Icon(Icons.arrow_back_rounded, size: 21),
@@ -1361,10 +1368,7 @@ class _IntroMasterState extends State<IntroMaster>
                   const Text(
                     '체험 시작 시 마이크 권한을 요청합니다.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Color(0xFF737680),
-                      fontSize: 11.5,
-                    ),
+                    style: TextStyle(color: Color(0xFF737680), fontSize: 11.5),
                   ),
                   const SizedBox(height: 10),
                   _buildWelcomePageFooter('옆으로 밀면 이전 화면으로'),
@@ -1385,9 +1389,7 @@ class _IntroMasterState extends State<IntroMaster>
       decoration: BoxDecoration(
         color: const Color(0xFF17191F),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.07),
-        ),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -1443,16 +1445,20 @@ class _IntroMasterState extends State<IntroMaster>
           builder: (dialogContext, setDialogState) {
             return AlertDialog(
               backgroundColor: const Color(0xFF161616),
-              insetPadding:
-                  const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 24,
+                vertical: 24,
+              ),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(20),
                 side: const BorderSide(color: Color(0xFF2A3A36), width: 1),
               ),
               title: const Text(
                 '언어 설정',
-                style:
-                    TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -1480,14 +1486,18 @@ class _IntroMasterState extends State<IntroMaster>
                   // 📐 높이 고정 해제 — 기기 글자 배율이 크면 라벨이 버튼 밖으로
                   //   잘렸다(2.0배 순회, 2026-08-27). 최소 높이만 둔다.
                   constraints: const BoxConstraints(
-                      minHeight: 46, minWidth: double.infinity),
+                    minHeight: 46,
+                    minWidth: double.infinity,
+                  ),
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.transparent,
                       shadowColor: Colors.transparent,
                       elevation: 0,
                       side: const BorderSide(
-                          color: Color(0xFF7F77DD), width: 1.5),
+                        color: Color(0xFF7F77DD),
+                        width: 1.5,
+                      ),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
@@ -1504,8 +1514,9 @@ class _IntroMasterState extends State<IntroMaster>
                     child: const Text(
                       '확인',
                       style: TextStyle(
-                          color: Color(0xFFCECBF6),
-                          fontWeight: FontWeight.bold),
+                        color: Color(0xFFCECBF6),
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ),
@@ -1548,10 +1559,9 @@ class _IntroMasterState extends State<IntroMaster>
               underline: const SizedBox(),
               style: const TextStyle(color: Colors.white, fontSize: 15),
               items: items
-                  .map((item) => DropdownMenuItem(
-                        value: item,
-                        child: Text(item),
-                      ))
+                  .map(
+                    (item) => DropdownMenuItem(value: item, child: Text(item)),
+                  )
                   .toList(),
               onChanged: (value) {
                 if (value != null) onChanged(value);
@@ -1618,18 +1628,16 @@ class _IntroMasterState extends State<IntroMaster>
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.035),
         borderRadius: BorderRadius.circular(15),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.07),
-        ),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.07)),
       ),
       child: TextButton.icon(
         onPressed: isLoading
             ? null
             : () => setState(() {
-                  _currentScreen = IntroScreen.accountDiscovery;
-                  _showEmailForm = false;
-                  _accountDiscoveryMessage = '';
-                }),
+                _currentScreen = IntroScreen.accountDiscovery;
+                _showEmailForm = false;
+                _accountDiscoveryMessage = '';
+              }),
         style: TextButton.styleFrom(
           minimumSize: const Size.fromHeight(52),
           foregroundColor: const Color(0xFFBFD8FF),
@@ -1641,18 +1649,16 @@ class _IntroMasterState extends State<IntroMaster>
         label: const Text(
           '로그인 방법이 기억나지 않나요?  계정 찾기',
           textAlign: TextAlign.center,
-          style: TextStyle(
-            fontSize: 13.5,
-            fontWeight: FontWeight.w700,
-          ),
+          style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
         ),
       ),
     );
   }
 
   Widget _buildAccountDiscoveryView(BuildContext context) {
-    final foundResults =
-        _accountDiscoveryResults.where((r) => r.found).toList();
+    final foundResults = _accountDiscoveryResults
+        .where((r) => r.found)
+        .toList();
     return _buildAuthScaffold(
       context: context,
       child: Column(
@@ -1683,8 +1689,11 @@ class _IntroMasterState extends State<IntroMaster>
           const Text(
             '이전에 사용했던 로그인 방법을 하나씩 확인해 보세요. 계정은 자동으로 합쳐지지 않으며, 남은 시간과 학습 기록은 별도로 유지됩니다.',
             textAlign: TextAlign.center,
-            style:
-                TextStyle(color: Color(0xFFB7B7C2), fontSize: 13, height: 1.55),
+            style: TextStyle(
+              color: Color(0xFFB7B7C2),
+              fontSize: 13,
+              height: 1.55,
+            ),
           ),
           const SizedBox(height: 28),
           _buildDiscoveryActionButton(
@@ -1729,7 +1738,10 @@ class _IntroMasterState extends State<IntroMaster>
               _accountDiscoveryMessage,
               textAlign: TextAlign.center,
               style: const TextStyle(
-                  color: Color(0xFFD7D7DE), fontSize: 13, height: 1.45),
+                color: Color(0xFFD7D7DE),
+                fontSize: 13,
+                height: 1.45,
+              ),
             ),
           ],
           if (foundResults.isNotEmpty) ...[
@@ -1738,7 +1750,10 @@ class _IntroMasterState extends State<IntroMaster>
               const Text(
                 '두 개 이상의 기존 계정을 찾았습니다. 각 계정의 남은 시간과 학습 기록은 서로 합쳐지지 않습니다. 사용할 계정을 직접 선택해 주세요.',
                 style: TextStyle(
-                    color: Color(0xFFB7B7C2), fontSize: 13, height: 1.45),
+                  color: Color(0xFFB7B7C2),
+                  fontSize: 13,
+                  height: 1.45,
+                ),
               ),
               const SizedBox(height: 12),
             ],
@@ -1764,8 +1779,9 @@ class _IntroMasterState extends State<IntroMaster>
                 : () => launchURL('mailto:support@stealthvox.app'),
             icon: const Icon(Icons.support_agent, size: 18),
             label: const Text('고객지원 문의'),
-            style:
-                TextButton.styleFrom(foregroundColor: const Color(0xFFB9D7FF)),
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFFB9D7FF),
+            ),
           ),
         ],
       ),
@@ -1792,7 +1808,9 @@ class _IntroMasterState extends State<IntroMaster>
                 width: 18,
                 height: 18,
                 child: CircularProgressIndicator(
-                    strokeWidth: 2, color: foregroundColor),
+                  strokeWidth: 2,
+                  color: foregroundColor,
+                ),
               )
             : icon,
         label: Text(label),
@@ -1801,8 +1819,9 @@ class _IntroMasterState extends State<IntroMaster>
           foregroundColor: foregroundColor,
           disabledBackgroundColor: backgroundColor.withValues(alpha: 0.55),
           disabledForegroundColor: foregroundColor.withValues(alpha: 0.65),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
           textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
         ),
       ),
@@ -1820,8 +1839,9 @@ class _IntroMasterState extends State<IntroMaster>
       decoration: BoxDecoration(
         color: const Color(0xFF1F242A),
         borderRadius: BorderRadius.circular(8),
-        border:
-            Border.all(color: const Color(0xFF4A90D9).withValues(alpha: 0.34)),
+        border: Border.all(
+          color: const Color(0xFF4A90D9).withValues(alpha: 0.34),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1829,7 +1849,10 @@ class _IntroMasterState extends State<IntroMaster>
           Text(
             account.providerLabel,
             style: const TextStyle(
-                color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800),
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+            ),
           ),
           const SizedBox(height: 8),
           Text(
@@ -1842,24 +1865,30 @@ class _IntroMasterState extends State<IntroMaster>
           Text(
             '남은 시간: $minutes분\n학습 기록: ${account.historyCount}개\n마지막 사용: $lastUsed',
             style: const TextStyle(
-                color: Color(0xFFB7B7C2), fontSize: 13, height: 1.55),
+              color: Color(0xFFB7B7C2),
+              fontSize: 13,
+              height: 1.55,
+            ),
           ),
           if (account.parentConsentPending) ...[
             const SizedBox(height: 8),
             const Text(
               '보호자 동의 대기 중',
               style: TextStyle(
-                  color: Color(0xFFFFD166),
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700),
+                color: Color(0xFFFFD166),
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ],
           const SizedBox(height: 14),
           ConstrainedBox(
             // 📐 높이 고정 해제 — 기기 글자 배율이 크면 라벨이 버튼 밖으로
             //   잘렸다(2.0배 순회, 2026-08-27). 최소 높이만 둔다.
-            constraints:
-                const BoxConstraints(minHeight: 44, minWidth: double.infinity),
+            constraints: const BoxConstraints(
+              minHeight: 44,
+              minWidth: double.infinity,
+            ),
             child: ElevatedButton(
               onPressed: isLoading
                   ? null
@@ -1867,12 +1896,15 @@ class _IntroMasterState extends State<IntroMaster>
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF4A90D9),
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
               child: const Text(
                 '이 계정으로 계속하기',
-                style:
-                    TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ),
@@ -1893,9 +1925,11 @@ class _IntroMasterState extends State<IntroMaster>
       final result = await lookup();
       if (!mounted) return;
       setState(() {
-        _accountDiscoveryResults.removeWhere((item) =>
-            item.provider == result.provider &&
-            item.maskedIdentifier == result.maskedIdentifier);
+        _accountDiscoveryResults.removeWhere(
+          (item) =>
+              item.provider == result.provider &&
+              item.maskedIdentifier == result.maskedIdentifier,
+        );
         if (result.found) {
           _accountDiscoveryResults.add(result);
           _accountDiscoveryMessage =
@@ -1921,7 +1955,8 @@ class _IntroMasterState extends State<IntroMaster>
   }
 
   Future<void> _continueWithDiscoveredAccount(
-      AccountDiscoveryResult account) async {
+    AccountDiscoveryResult account,
+  ) async {
     setState(() => isLoading = true);
     AppStateNotifier.instance.updateNotifyOnAuthChange(false);
     try {
@@ -1938,9 +1973,9 @@ class _IntroMasterState extends State<IntroMaster>
       debugPrint('[AccountDiscovery] final login failed: $e');
       debugPrint('[AccountDiscovery] stack: $stack');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('계정으로 계속할 수 없습니다: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('계정으로 계속할 수 없습니다: $e')));
       }
     } finally {
       AppStateNotifier.instance.updateNotifyOnAuthChange(true);
@@ -2068,17 +2103,15 @@ class _IntroMasterState extends State<IntroMaster>
           ),
         );
         onTap = () => _handleUnifiedAuth(
-              SocialAuthService.signInWithKakao,
-              provider: 'kakao',
-            );
+          SocialAuthService.signInWithKakao,
+          provider: 'kakao',
+        );
         break;
       case 'google':
         label = 'Google로 계속하기';
         backgroundColor = const Color(0xFFF7F7F8);
         foregroundColor = const Color(0xFF17181B);
-        border = Border.all(
-          color: Colors.white.withValues(alpha: 0.12),
-        );
+        border = Border.all(color: Colors.white.withValues(alpha: 0.12));
         icon = Image.asset(
           'assets/images/google_logo.png',
           width: 20,
@@ -2090,17 +2123,15 @@ class _IntroMasterState extends State<IntroMaster>
           ),
         );
         onTap = () => _handleUnifiedAuth(
-              SocialAuthService.signInWithGoogle,
-              provider: 'google',
-            );
+          SocialAuthService.signInWithGoogle,
+          provider: 'google',
+        );
         break;
       case 'email':
         label = _showEmailForm ? '이메일 입력 닫기' : '이메일로 계속하기';
         backgroundColor = const Color(0xFF24262D);
         foregroundColor = const Color(0xFFF2F3F6);
-        border = Border.all(
-          color: Colors.white.withValues(alpha: 0.08),
-        );
+        border = Border.all(color: Colors.white.withValues(alpha: 0.08));
         icon = const Icon(
           Icons.email_outlined,
           size: 20,
@@ -2125,10 +2156,7 @@ class _IntroMasterState extends State<IntroMaster>
               color: backgroundColor,
               borderRadius: BorderRadius.circular(16),
               border: isRecent && provider != 'kakao'
-                  ? Border.all(
-                      color: const Color(0xFF8B82F5),
-                      width: 1.3,
-                    )
+                  ? Border.all(color: const Color(0xFF8B82F5), width: 1.3)
                   : border,
             ),
             // 높이를 56으로 못 박으면 배율이 큰 기기에서 라벨이 한 줄에
@@ -2144,7 +2172,9 @@ class _IntroMasterState extends State<IntroMaster>
                     // 아이콘 오른쪽 끝이 40이라 48이면 겹치지 않는다.
                     // 56에서 줄여 라벨이 쓸 폭을 넓혔다.
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 48, vertical: 10),
+                      horizontal: 48,
+                      vertical: 10,
+                    ),
                     child: Text(
                       label,
                       maxLines: 2,
@@ -2206,8 +2236,9 @@ class _IntroMasterState extends State<IntroMaster>
   List<Widget> _buildAuthHeader() {
     // 1회 Duo 맛보기를 사용한 사람은 재방문 계정 기록과 관계없이
     // 세 가지 가입/로그인 방법을 모두 선택할 수 있어야 한다.
-    final lastProvider =
-        _requiresAuthOnlyIntro ? null : _validLastAuthProvider();
+    final lastProvider = _requiresAuthOnlyIntro
+        ? null
+        : _validLastAuthProvider();
     if (lastProvider == null) {
       return [
         _authSectionTitle(
@@ -2226,8 +2257,9 @@ class _IntroMasterState extends State<IntroMaster>
   }
 
   List<Widget> _buildProviderButtons() {
-    final lastProvider =
-        _requiresAuthOnlyIntro ? null : _validLastAuthProvider();
+    final lastProvider = _requiresAuthOnlyIntro
+        ? null
+        : _validLastAuthProvider();
     if (lastProvider != null) {
       return [_providerButton(lastProvider)];
     }
@@ -2246,11 +2278,7 @@ class _IntroMasterState extends State<IntroMaster>
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [
-            Color(0xFF0C0D12),
-            Color(0xFF050608),
-            Color(0xFF030405),
-          ],
+          colors: [Color(0xFF0C0D12), Color(0xFF050608), Color(0xFF030405)],
         ),
       ),
       child: Scaffold(
@@ -2293,9 +2321,7 @@ class _IntroMasterState extends State<IntroMaster>
       decoration: BoxDecoration(
         color: const Color(0xFF15171D),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.075),
-        ),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.075)),
       ),
       child: Column(
         children: [
@@ -2368,10 +2394,7 @@ class _IntroMasterState extends State<IntroMaster>
               ),
               child: const Text(
                 '비밀번호를 잊으셨나요?',
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w600,
-                ),
+                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
               ),
             ),
           ],
@@ -2435,7 +2458,8 @@ class _IntroMasterState extends State<IntroMaster>
         FFAppState().lastAuthProvider = provider;
       }
       debugPrint(
-          '[Auth] authFn complete, currentUser=${FirebaseAuth.instance.currentUser?.uid}');
+        '[Auth] authFn complete, currentUser=${FirebaseAuth.instance.currentUser?.uid}',
+      );
       // provider가 달라도 같은 계정이면 재방문자.
       // signup_bonus_given 서버 플래그로 판정 (grantSignupBonus CF의 idempotency 보장).
       final currentUser = FirebaseAuth.instance.currentUser;
@@ -2483,9 +2507,9 @@ class _IntroMasterState extends State<IntroMaster>
       debugPrint('[Auth] _handleUnifiedAuth exception: $e');
       debugPrint('[Auth] stack: $stack');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('로그인 실패: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('로그인 실패: $e')));
       }
     } finally {
       // GoRouter 알림 복원
@@ -2609,7 +2633,9 @@ class _IntroMasterState extends State<IntroMaster>
                   // 📐 높이 고정 해제 — 기기 글자 배율이 크면 라벨이 버튼 밖으로
                   //   잘렸다(2.0배 순회, 2026-08-27). 최소 높이만 둔다.
                   constraints: const BoxConstraints(
-                      minHeight: 46, minWidth: double.infinity),
+                    minHeight: 46,
+                    minWidth: double.infinity,
+                  ),
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF4A90D9),
@@ -2640,8 +2666,9 @@ class _IntroMasterState extends State<IntroMaster>
     if (user == null) return false;
 
     final age = currentYear - selectedYear;
-    final userRef =
-        FirebaseFirestore.instance.collection('users').doc(user.uid);
+    final userRef = FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid);
 
     if (age >= 14) {
       await userRef.set({'birthYear': selectedYear}, SetOptions(merge: true));
@@ -2703,8 +2730,10 @@ class _IntroMasterState extends State<IntroMaster>
           ConstrainedBox(
             // 📐 높이 고정 해제 — 기기 글자 배율이 크면 라벨이 버튼 밖으로
             //   잘렸다(2.0배 순회, 2026-08-27). 최소 높이만 둔다.
-            constraints:
-                const BoxConstraints(minHeight: 46, minWidth: double.infinity),
+            constraints: const BoxConstraints(
+              minHeight: 46,
+              minWidth: double.infinity,
+            ),
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF4A90D9),
@@ -2774,8 +2803,10 @@ class _IntroMasterState extends State<IntroMaster>
                     borderRadius: BorderRadius.circular(12),
                     borderSide: BorderSide.none,
                   ),
-                  prefixIcon:
-                      const Icon(Icons.email_outlined, color: Colors.white38),
+                  prefixIcon: const Icon(
+                    Icons.email_outlined,
+                    color: Colors.white38,
+                  ),
                 ),
               ),
             ],
@@ -2783,10 +2814,7 @@ class _IntroMasterState extends State<IntroMaster>
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(null),
-              child: const Text(
-                '나중에',
-                style: TextStyle(color: Colors.white38),
-              ),
+              child: const Text('나중에', style: TextStyle(color: Colors.white38)),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
@@ -2824,7 +2852,8 @@ class _IntroMasterState extends State<IntroMaster>
 
     TrialFlowState.instance.restoreFromAppState();
     final historyRef = TrialFlowState.instance.myHistoryRef;
-    final hasTrialState = historyRef != null ||
+    final hasTrialState =
+        historyRef != null ||
         TrialFlowState.instance.isTrial ||
         FFAppState().trialCompleted ||
         FFAppState().trialStep > 0;
@@ -2857,8 +2886,9 @@ class _IntroMasterState extends State<IntroMaster>
 
   Future<void> _grantSignupBonusIfPossible() async {
     try {
-      final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
-          .httpsCallable('grantSignupBonus');
+      final callable = FirebaseFunctions.instanceFor(
+        region: 'us-central1',
+      ).httpsCallable('grantSignupBonus');
       final result = await callable.call<Map<String, dynamic>>({});
       final remainingTime = (result.data['remainingTime'] as num?)?.toInt();
       final granted = result.data['granted'] == true;
@@ -2872,7 +2902,8 @@ class _IntroMasterState extends State<IntroMaster>
         LobbyBrain.lastSyncedUid = null;
       }
       debugPrint(
-          '[SignupBonus] grantSignupBonus complete, granted=$granted, remainingTime=$remainingTime');
+        '[SignupBonus] grantSignupBonus complete, granted=$granted, remainingTime=$remainingTime',
+      );
     } catch (e, stack) {
       debugPrint('[SignupBonus] grantSignupBonus failed: $e');
       debugPrint('[SignupBonus] stack: $stack');
@@ -2923,41 +2954,26 @@ class _IntroMasterState extends State<IntroMaster>
       focusNode: focusNode,
       textInputAction: textInputAction,
       onSubmitted: onSubmitted,
-      style: const TextStyle(
-        color: Color(0xFFF2F3F5),
-        fontSize: 14.5,
-      ),
+      style: const TextStyle(color: Color(0xFFF2F3F5), fontSize: 14.5),
       decoration: InputDecoration(
-        prefixIcon: Icon(
-          icon,
-          color: const Color(0xFF8F929C),
-          size: 20,
-        ),
+        prefixIcon: Icon(icon, color: const Color(0xFF8F929C), size: 20),
         hintText: hint,
-        hintStyle: const TextStyle(
-          color: Color(0xFF6F727C),
-          fontSize: 14,
-        ),
+        hintStyle: const TextStyle(color: Color(0xFF6F727C), fontSize: 14),
         filled: true,
         fillColor: Colors.black.withValues(alpha: 0.24),
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 15,
+        ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(13),
-          borderSide: BorderSide(
-            color: Colors.white.withValues(alpha: 0.07),
-          ),
+          borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.07)),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(13),
-          borderSide: const BorderSide(
-            color: Color(0xFF756BE8),
-            width: 1.3,
-          ),
+          borderSide: const BorderSide(color: Color(0xFF756BE8), width: 1.3),
         ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(13),
-        ),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(13)),
       ),
     );
   }
@@ -3044,13 +3060,7 @@ class _IntroOrbitPainter extends CustomPainter {
     const sweep = math.pi * 2 / dashCount;
     final rect = Rect.fromCircle(center: Offset.zero, radius: outerRadius);
     for (var index = 0; index < dashCount; index++) {
-      canvas.drawArc(
-        rect,
-        index * sweep,
-        sweep * gapRatio,
-        false,
-        outerPaint,
-      );
+      canvas.drawArc(rect, index * sweep, sweep * gapRatio, false, outerPaint);
     }
     canvas.restore();
 
