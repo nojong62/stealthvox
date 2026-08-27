@@ -4146,8 +4146,10 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                     tooltip: '이전 단계',
                     padding: EdgeInsets.zero,
                     alignment: Alignment.centerLeft,
+                    // 아이콘 모양은 그대로 두고 오른쪽의 빈 공간까지 눌리게 한다.
+                    // 통화를 마친 뒤 엄지로 누를 때 56dp는 가장자리에서 빗나갔다.
                     constraints:
-                        const BoxConstraints(minWidth: 56, minHeight: 56),
+                        const BoxConstraints(minWidth: 72, minHeight: 56),
                     onPressed: _handleAutoSaveAndExit),
               // 초대는 방을 만든 호스트만 낼 수 있다. 게스트에게는 버튼 자체를
               // 노출하지 않는다 — 눌러서 역할이 뒤집히는 경로를 없앤다.
