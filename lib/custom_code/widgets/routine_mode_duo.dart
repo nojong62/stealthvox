@@ -3611,13 +3611,19 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
           ),
         ),
         const SizedBox(height: 6),
-        Text(
-          'Establishing secure StealthVox connection',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: Colors.white.withValues(alpha: 0.38),
-            fontSize: 13,
-            height: 1.4,
+        // 📐 좌우 여백을 준다. 없으면 기기 글자 크기를 키웠을 때 이 한 줄이
+        //   화면 양 끝에 닿아 글자가 가장자리에 붙어 버린다(실기기 2.0배
+        //   확인, 2026-08-27).
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 28),
+          child: Text(
+            'Establishing secure StealthVox connection',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.38),
+              fontSize: 13,
+              height: 1.4,
+            ),
           ),
         ),
         const SizedBox(height: 20),

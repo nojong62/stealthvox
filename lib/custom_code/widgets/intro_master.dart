@@ -639,7 +639,11 @@ class _IntroMasterState extends State<IntroMaster>
         final shift = _welcomeMotionController.value * 4 - 3;
         return Container(
           width: double.infinity,
-          height: 60,
+          // 📐 높이를 못 박지 않는다. 기기 글자 배율이 크면 라벨이 두 줄이
+          //   되면서 52를 넘는다(실기기 2.0배에서 가로 106px 초과,
+          //   2026-08-27). 최소 높이만 두고 내용만큼 자라게 한다.
+          constraints: const BoxConstraints(minHeight: 52),
+          margin: const EdgeInsets.symmetric(horizontal: 16),
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment(shift, 0),
@@ -666,22 +670,28 @@ class _IntroMasterState extends State<IntroMaster>
               onTap: _goToGuidePage,
               borderRadius: BorderRadius.circular(99),
               child: const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 24),
+                padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      '10분 듀오 맛보기 알아보기',
-                      style: TextStyle(
-                        color: Color(0xFFF9FAFC),
-                        fontSize: 17,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.35,
+                    // 라벨이 남는 폭을 쓰고, 모자라면 줄을 바꾼다.
+                    // 화살표는 크기가 정해져 있어 그대로 둔다.
+                    Flexible(
+                      child: Text(
+                        '10분 듀오 맛보기',
+                        maxLines: 2,
+                        style: TextStyle(
+                          color: Color(0xFFF9FAFC),
+                          fontSize: 15.5,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.35,
+                        ),
                       ),
                     ),
+                    SizedBox(width: 10),
                     Icon(
                       Icons.arrow_forward_rounded,
-                      size: 25,
+                      size: 22,
                       color: Color(0xFFF9FAFC),
                     ),
                   ],
@@ -734,34 +744,42 @@ class _IntroMasterState extends State<IntroMaster>
     required VoidCallback? onPressed,
     IconData icon = Icons.arrow_forward_rounded,
   }) {
-    return SizedBox(
-      width: double.infinity,
-      height: 56,
-      child: ElevatedButton(
-        onPressed: onPressed,
-        style: ElevatedButton.styleFrom(
-          elevation: 0,
-          backgroundColor: const Color(0xFF756BE8),
-          foregroundColor: const Color(0xFFF9F9FB),
-          disabledBackgroundColor:
-              const Color(0xFF756BE8).withValues(alpha: 0.45),
-          disabledForegroundColor: Colors.white54,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
+    return ConstrainedBox(
+      // 📐 높이를 못 박으면 라벨이 두 줄이 될 때 버튼 밖으로 잘린다
+      //   (실기기 2.0배: "10분 Duo 맛보기 시작"의 '시작'이 사라졌다,
+      //   2026-08-27). 최소 높이만 두고 내용만큼 자라게 한다.
+      constraints: const BoxConstraints(minHeight: 56),
+      child: SizedBox(
+        width: double.infinity,
+        child: ElevatedButton(
+          onPressed: onPressed,
+          style: ElevatedButton.styleFrom(
+            elevation: 0,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            backgroundColor: const Color(0xFF756BE8),
+            foregroundColor: const Color(0xFFF9F9FB),
+            disabledBackgroundColor:
+                const Color(0xFF756BE8).withValues(alpha: 0.45),
+            disabledForegroundColor: Colors.white54,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+            ),
+            textStyle: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.2,
+            ),
           ),
-          textStyle: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.2,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                  child: Text(label, maxLines: 2, textAlign: TextAlign.center)),
+              const SizedBox(width: 8),
+              Icon(icon, size: 19),
+            ],
           ),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Flexible(child: Text(label)),
-            const SizedBox(width: 8),
-            Icon(icon, size: 19),
-          ],
         ),
       ),
     );
@@ -772,33 +790,39 @@ class _IntroMasterState extends State<IntroMaster>
     required VoidCallback? onPressed,
     IconData? icon,
   }) {
-    return SizedBox(
-      width: double.infinity,
-      height: 50,
-      child: OutlinedButton(
-        onPressed: onPressed,
-        style: OutlinedButton.styleFrom(
-          foregroundColor: const Color(0xFFD9DAE1),
-          side: BorderSide(
-            color: Colors.white.withValues(alpha: 0.13),
+    return ConstrainedBox(
+      // 📐 위 _buildPrimaryAction과 같은 이유로 높이를 열어 둔다.
+      constraints: const BoxConstraints(minHeight: 50),
+      child: SizedBox(
+        width: double.infinity,
+        child: OutlinedButton(
+          onPressed: onPressed,
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            foregroundColor: const Color(0xFFD9DAE1),
+            side: BorderSide(
+              color: Colors.white.withValues(alpha: 0.13),
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            textStyle: const TextStyle(
+              fontSize: 14.5,
+              fontWeight: FontWeight.w700,
+            ),
           ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          textStyle: const TextStyle(
-            fontSize: 14.5,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (icon != null) ...[
-              Icon(icon, size: 18),
-              const SizedBox(width: 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (icon != null) ...[
+                Icon(icon, size: 18),
+                const SizedBox(width: 8),
+              ],
+              Flexible(
+                  child: Text(label, maxLines: 2, textAlign: TextAlign.center)),
             ],
-            Text(label),
-          ],
+          ),
         ),
       ),
     );
@@ -882,31 +906,34 @@ class _IntroMasterState extends State<IntroMaster>
               )
             else
               SafeArea(
-                child: MediaQuery(
-                  data: MediaQuery.of(context).copyWith(
-                    textScaler: const TextScaler.linear(1.0),
-                  ),
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onHorizontalDragEnd: _onWelcomeHorizontalDragEnd,
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 280),
-                      switchInCurve: Curves.easeOutCubic,
-                      switchOutCurve: Curves.easeInCubic,
-                      transitionBuilder: (child, animation) => FadeTransition(
-                        opacity: animation,
-                        child: SlideTransition(
-                          position: Tween<Offset>(
-                            begin: Offset(_welcomeForward ? 0.16 : -0.16, 0),
-                            end: Offset.zero,
-                          ).animate(animation),
-                          child: child,
-                        ),
+                // 📐 [배율] 예전에는 여기서 웰컴 화면 전체를
+                //   TextScaler.linear(1.0)으로 묶었다. 배율을 크게 쓰는
+                //   기기에서 줄이 샐져나가는 걸 막으려던 것인데, 읽을
+                //   글까지 통째로 고정돼 크게 보려는 사용자가 아무것도
+                //   얻지 못했다. 이제 본문은 기기 설정을 그대로 따르고,
+                //   폭이 정해진 조각(워드마크·버튼 라벨)만 _cappedScaler로
+                //   따로 묶는다. 넘치는 높이는 스토리 페이지의 스크롤이
+                //   받아낸다.
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onHorizontalDragEnd: _onWelcomeHorizontalDragEnd,
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 280),
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeInCubic,
+                    transitionBuilder: (child, animation) => FadeTransition(
+                      opacity: animation,
+                      child: SlideTransition(
+                        position: Tween<Offset>(
+                          begin: Offset(_welcomeForward ? 0.16 : -0.16, 0),
+                          end: Offset.zero,
+                        ).animate(animation),
+                        child: child,
                       ),
-                      child: _welcomePage == 0
-                          ? _buildWelcomeStoryPage()
-                          : _buildWelcomeGuidePage(),
                     ),
+                    child: _welcomePage == 0
+                        ? _buildWelcomeStoryPage()
+                        : _buildWelcomeGuidePage(),
                   ),
                 ),
               ),
@@ -939,22 +966,28 @@ class _IntroMasterState extends State<IntroMaster>
   }
 
   Widget _buildHtmlWelcomeHeader() {
-    return SizedBox(
-      height: 64,
+    return ConstrainedBox(
+      // 📐 높이는 최소값만 정한다. LOGIN 글자가 배율을 따라 커지면 64를 넘는다.
+      constraints: const BoxConstraints(minHeight: 64),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            'STEALTHVOX',
-            maxLines: 1,
-            textScaler: _cappedScaler(context, 1.0),
-            style: GoogleFonts.orbitron(
-              color: const Color(0xFF67E9D9),
-              fontSize: 17,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 3.1,
+          // 워드마크는 배율에 묶여 있어도 남는 폭이 줄면 잘려야 한다.
+          Flexible(
+            child: Text(
+              'STEALTHVOX',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textScaler: _cappedScaler(context, 1.0),
+              style: GoogleFonts.orbitron(
+                color: const Color(0xFF67E9D9),
+                fontSize: 17,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 3.1,
+              ),
             ),
           ),
+          const SizedBox(width: 8),
           TextButton(
             onPressed: _openAuthScreen,
             style: TextButton.styleFrom(
@@ -962,9 +995,13 @@ class _IntroMasterState extends State<IntroMaster>
               minimumSize: const Size(52, 48),
               padding: const EdgeInsets.symmetric(horizontal: 4),
             ),
-            child: const Text(
+            // 📐 LOGIN은 폭이 정해진 조각이다. 여기만 배율을 안 묶어 두어
+            //   2.0배에서 워드마크를 밀어냈다(실기기 확인, 2026-08-27).
+            child: Text(
               'LOGIN',
-              style: TextStyle(
+              maxLines: 1,
+              textScaler: _cappedScaler(context, 1.3),
+              style: const TextStyle(
                 fontSize: 13.5,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 0.7,
@@ -1013,8 +1050,12 @@ class _IntroMasterState extends State<IntroMaster>
                 ),
               ],
             ),
-            child: const Text(
+            // 📐 이름표라 줄바꿈이 어울리지 않는다. 배율만 묶는다 —
+            //   2.0배에서 오브 자리를 침범할 만큼 커졌다(2026-08-27).
+            child: Text(
               'Duo Snapshot',
+              maxLines: 1,
+              textScaler: _cappedScaler(context, 1.3),
               style: TextStyle(
                 color: Color(0xFF76F7E6),
                 fontSize: 12,
@@ -1092,31 +1133,6 @@ class _IntroMasterState extends State<IntroMaster>
     );
   }
 
-  Widget _buildWelcomeTagline() {
-    return Center(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-        decoration: BoxDecoration(
-          color: const Color(0xFF131313).withValues(alpha: 0.72),
-          borderRadius: BorderRadius.circular(99),
-          border: Border.all(
-            color: const Color(0xFF4BCDBD).withValues(alpha: 0.54),
-          ),
-        ),
-        child: const Text(
-          'Speak freely. Pick it up naturally',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: Color(0xFF45CDBD),
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.1,
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildAnimatedOrbBars({
     required double phase,
     required double height,
@@ -1164,6 +1180,8 @@ class _IntroMasterState extends State<IntroMaster>
         final compact = constraints.maxHeight < 720;
         final veryCompact = constraints.maxHeight < 620;
         final headlineSize = constraints.maxWidth < 350 ? 24.0 : 28.0;
+        final scaledHeadline =
+            MediaQuery.textScalerOf(context).scale(headlineSize);
         final storyGradient = const LinearGradient(
           begin: Alignment.centerLeft,
           end: Alignment.centerRight,
@@ -1171,7 +1189,14 @@ class _IntroMasterState extends State<IntroMaster>
             Color(0xFF45CDBD),
             Color(0xFF765EEB),
           ],
-        ).createShader(const Rect.fromLTWH(70, 0, 160, 44));
+        ).createShader(
+          // '이야기'는 '당신의 ' 뒤에서 시작한다.
+          // 📐 글자 폭은 **배율이 곱해진 크기**를 따른다. headlineSize만 쓰면
+          //   기기 배율이 클수록 어긋나, 2.0배에서는 그라데이션이 글자를
+          //   한참 벗어났다(실기기 확인, 2026-08-27).
+          Rect.fromLTWH(scaledHeadline * 3.2, 0, scaledHeadline * 3,
+              scaledHeadline * 1.6),
+        );
         final orbSize = veryCompact
             ? 190.0
             : compact
@@ -1200,12 +1225,13 @@ class _IntroMasterState extends State<IntroMaster>
                     child: _buildDuoSnapshotBadge(),
                   ),
                   SizedBox(height: veryCompact ? 2 : 6),
+                  // 배지 아래 여백과 헤드라인 아래 여백을 1:2로 나눠
+                  // 오브가 화면 위쪽으로 쏠리지 않게 잡는다.
+                  const Spacer(flex: 1),
                   Center(
                     child: _buildHtmlSoundOrb(orbSize),
                   ),
-                  SizedBox(height: veryCompact ? 6 : 12),
-                  _buildWelcomeTagline(),
-                  SizedBox(height: veryCompact ? 10 : 22),
+                  SizedBox(height: veryCompact ? 12 : 26),
                   Text.rich(
                     TextSpan(
                       children: [
@@ -1228,12 +1254,12 @@ class _IntroMasterState extends State<IntroMaster>
                       letterSpacing: -0.55,
                     ),
                   ),
-                  const Spacer(),
-                  SizedBox(height: veryCompact ? 14 : 24),
+                  const Spacer(flex: 2),
+                  SizedBox(height: veryCompact ? 10 : 16),
                   Center(child: _buildPageIndicator(0, tealActive: true)),
-                  SizedBox(height: veryCompact ? 18 : 34),
+                  SizedBox(height: veryCompact ? 16 : 26),
                   _buildWelcomeTrialAction(),
-                  SizedBox(height: compact ? 8 : 12),
+                  SizedBox(height: compact ? 6 : 10),
                   _buildWelcomeLoginAction(),
                   SizedBox(height: compact ? 2 : 6),
                 ],
@@ -1450,9 +1476,11 @@ class _IntroMasterState extends State<IntroMaster>
               ),
               actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
               actions: [
-                SizedBox(
-                  width: double.infinity,
-                  height: 46,
+                ConstrainedBox(
+                  // 📐 높이 고정 해제 — 기기 글자 배율이 크면 라벨이 버튼 밖으로
+                  //   잘렸다(2.0배 순회, 2026-08-27). 최소 높이만 둔다.
+                  constraints: const BoxConstraints(
+                      minHeight: 46, minWidth: double.infinity),
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.transparent,
@@ -1753,8 +1781,10 @@ class _IntroMasterState extends State<IntroMaster>
     Color foregroundColor = Colors.white,
   }) {
     final busy = _accountDiscoveryBusyProvider == provider;
-    return SizedBox(
-      height: 50,
+    return ConstrainedBox(
+      // 📐 높이 고정 해제 — 기기 글자 배율이 크면 라벨이 버튼 밖으로
+      //   잘렸다(2.0배 순회, 2026-08-27). 최소 높이만 둔다.
+      constraints: const BoxConstraints(minHeight: 50),
       child: ElevatedButton.icon(
         onPressed: _accountDiscoveryBusyProvider.isNotEmpty ? null : onTap,
         icon: busy
@@ -1825,9 +1855,11 @@ class _IntroMasterState extends State<IntroMaster>
             ),
           ],
           const SizedBox(height: 14),
-          SizedBox(
-            width: double.infinity,
-            height: 44,
+          ConstrainedBox(
+            // 📐 높이 고정 해제 — 기기 글자 배율이 크면 라벨이 버튼 밖으로
+            //   잘렸다(2.0배 순회, 2026-08-27). 최소 높이만 둔다.
+            constraints:
+                const BoxConstraints(minHeight: 44, minWidth: double.infinity),
             child: ElevatedButton(
               onPressed: isLoading
                   ? null
@@ -2573,9 +2605,11 @@ class _IntroMasterState extends State<IntroMaster>
                 ),
               ),
               actions: [
-                SizedBox(
-                  width: double.infinity,
-                  height: 46,
+                ConstrainedBox(
+                  // 📐 높이 고정 해제 — 기기 글자 배율이 크면 라벨이 버튼 밖으로
+                  //   잘렸다(2.0배 순회, 2026-08-27). 최소 높이만 둔다.
+                  constraints: const BoxConstraints(
+                      minHeight: 46, minWidth: double.infinity),
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF4A90D9),
@@ -2666,9 +2700,11 @@ class _IntroMasterState extends State<IntroMaster>
           style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.5),
         ),
         actions: [
-          SizedBox(
-            width: double.infinity,
-            height: 46,
+          ConstrainedBox(
+            // 📐 높이 고정 해제 — 기기 글자 배율이 크면 라벨이 버튼 밖으로
+            //   잘렸다(2.0배 순회, 2026-08-27). 최소 높이만 둔다.
+            constraints:
+                const BoxConstraints(minHeight: 46, minWidth: double.infinity),
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF4A90D9),

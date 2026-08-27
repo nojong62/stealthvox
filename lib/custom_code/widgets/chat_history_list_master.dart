@@ -953,6 +953,9 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
           ],
           const SizedBox(height: 12),
           // ── 하단: 액션 아이콘들 ──
+          // 📐 48dp 터치 영역 5개(240dp)는 카드 안에 들어간다. 아이콘
+          //   사이에 4dp 고정 간격까지 넣으면 256dp가 되어 320dp 화면의
+          //   실제 카드 안 폭(254dp)을 2dp 넘기므로 별도 간격은 두지 않는다.
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
@@ -965,7 +968,6 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                 tooltip: '소리 듣기',
                 onTap: () => _playKeeperAudio(doc.id, translated),
               ),
-              const SizedBox(width: 4),
               // 2) 튜터링
               _buildKeeperAction(
                 icon: Icons.school_rounded,
@@ -973,7 +975,6 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                 tooltip: '실전 튜터링',
                 onTap: () => _showKeeperTutoringPopup(doc.id, translated),
               ),
-              const SizedBox(width: 4),
               // 3) 다른 표현 보기 — 히스토리 말풍선과 같은 팝업이다
               _buildKeeperAction(
                 icon: Icons.swap_horiz_rounded,
@@ -981,7 +982,6 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                 tooltip: '다른 표현 보기',
                 onTap: () => _showKeeperAltStylePopup(translated),
               ),
-              const SizedBox(width: 4),
               // 4) 맨 위로 올리기
               _buildKeeperAction(
                 icon: Icons.keyboard_double_arrow_up_rounded,
@@ -989,7 +989,6 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                 tooltip: '맨 위로 올리기',
                 onTap: () => _togglePinKeeper(doc),
               ),
-              const SizedBox(width: 4),
               // 5) 삭제
               _buildKeeperAction(
                 icon: Icons.delete_outline_rounded,
@@ -1520,7 +1519,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Row(crossAxisAlignment: CrossAxisAlignment.start,
+                    const Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Padding(
                             padding: EdgeInsets.only(top: 1),
@@ -1816,7 +1816,13 @@ RULES — follow exactly:
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      // 📌 다이얼로그 context는 `dialogContext`로 따로 받는다. 예전에는 이
+      //   자리도 `context`라 바깥(State)의 것을 가렸고, 아래에서 pop 뒤에
+      //   그 죽은 context로 ScaffoldMessenger를 찾다가
+      //   "Looking up a deactivated widget's ancestor" 예외가 났다.
+      //   기록은 지워지는데 "삭제되었습니다"만 안 떴다(실기기 로그,
+      //   2026-08-27). `if (mounted)`는 State만 보므로 이걸 못 막는다.
+      builder: (dialogContext) => AlertDialog(
         backgroundColor: const Color(0xFF333333),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text("선택 기록 삭제",
@@ -1826,26 +1832,29 @@ RULES — follow exactly:
             style: const TextStyle(color: Colors.white70, height: 1.5)),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.pop(dialogContext),
               child: const Text("취소", style: TextStyle(color: Colors.grey))),
           TextButton(
               onPressed: () async {
-                Navigator.pop(context);
+                // 스낵바를 띄울 상대는 다이얼로그가 아니라 화면이다.
+                // 닫기 전에 잡아 두어야 지운 뒤에도 살아 있다.
+                final messenger = ScaffoldMessenger.of(context);
+                Navigator.pop(dialogContext);
                 for (String docId in _selectedDocIds) {
                   await currentUserReference!
                       .collection('chat_history')
                       .doc(docId)
                       .delete();
                 }
+                if (!mounted) return;
                 setState(() {
                   _selectedDocIds.clear();
                 });
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                      content: Text("선택한 기록이 삭제되었습니다.",
-                          style: TextStyle(fontWeight: FontWeight.bold)),
-                      backgroundColor: Colors.redAccent));
-                }
+
+                messenger.showSnackBar(const SnackBar(
+                    content: Text("선택한 기록이 삭제되었습니다.",
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                    backgroundColor: Colors.redAccent));
               },
               child: const Text("삭제",
                   style: TextStyle(
@@ -1863,8 +1872,11 @@ RULES — follow exactly:
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (context) => Container(
         padding: const EdgeInsets.all(20),
-        height: 220,
+        // 📐 높이를 220으로 못 박으면 기기 글자 배율이 큰 기기에서 아래
+        //   메뉴가 시트 밖으로 밀린다(2.0배 순회, 2026-08-27).
+        //   내용만큼 잡고, 그래도 모자라면 스크롤이 받아낸다.
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
             Container(
                 width: 40,

@@ -862,14 +862,24 @@ class _StoreMasterState extends State<StoreMaster> {
                               const BoxConstraints(minWidth: 64, minHeight: 56),
                           onPressed: () => Navigator.pop(context),
                         ),
-                        GestureDetector(
-                          onLongPress: _openAdminTimeLogSheet,
-                          child: Text("STORE",
-                              style: GoogleFonts.orbitron(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                  letterSpacing: 2)),
+                        // 📐 제목은 남는 폭에 맞춰 줄어든다. 기기 글자 배율이
+                        //   크면 뒤로가기·아이콘 사이에서 헤더가 넘쳤다
+                        //   (실기기 2.0배 2.1px 초과, 2026-08-27).
+                        //   상한을 씌우지 않고 자리가 있을 때는 제 크기로 둔다.
+                        Flexible(
+                          child: GestureDetector(
+                            onLongPress: _openAdminTimeLogSheet,
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text("STORE",
+                                  maxLines: 1,
+                                  style: GoogleFonts.orbitron(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                      letterSpacing: 2)),
+                            ),
+                          ),
                         ),
                         Row(
                           mainAxisSize: MainAxisSize.min,
@@ -986,12 +996,19 @@ class _StoreMasterState extends State<StoreMaster> {
                                                           FontWeight.bold)),
                                             ),
                                             const SizedBox(height: 4),
-                                            Text(plan['subtitle'],
-                                                style: const TextStyle(
-                                                    color: Colors.white54,
-                                                    fontSize: 11),
-                                                overflow: TextOverflow.ellipsis,
-                                                maxLines: 1),
+                                            // 📐 제목과 같이 줄여서 담는다.
+                                            //   자르기만 하면 "프리미엄권"이
+                                            //   "프리미엄…"이 됐다(실기기
+                                            //   2.0배, 2026-08-27).
+                                            FittedBox(
+                                              fit: BoxFit.scaleDown,
+                                              alignment: Alignment.centerLeft,
+                                              child: Text(plan['subtitle'],
+                                                  style: const TextStyle(
+                                                      color: Colors.white54,
+                                                      fontSize: 11),
+                                                  maxLines: 1),
+                                            ),
                                           ],
                                         ),
                                       ),

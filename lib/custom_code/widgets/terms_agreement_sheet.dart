@@ -169,8 +169,10 @@ class _TermsAgreementSheetState extends State<TermsAgreementSheet> {
               onChanged: (value) => setState(() => _marketingAccepted = value),
             ),
             const SizedBox(height: 22),
-            SizedBox(
-              height: 52,
+            ConstrainedBox(
+              // 📐 높이 고정 해제 — 배율이 크면 '계속하기'가 잘렸다.
+              constraints: const BoxConstraints(
+                  minHeight: 52, minWidth: double.infinity),
               child: ElevatedButton(
                 onPressed: _requiredAccepted ? _submit : null,
                 style: ElevatedButton.styleFrom(

@@ -52,12 +52,17 @@ class _StoreWidgetState extends State<StoreWidget> {
         body: Column(
           mainAxisSize: MainAxisSize.max,
           children: [
-            Container(
-              width: MediaQuery.sizeOf(context).width * 1.0,
-              height: MediaQuery.sizeOf(context).height * 1.0,
-              child: custom_widgets.StoreMaster(
+            // ⌨️ 화면 전체 높이를 박지 않는다. Scaffold body는 상태바와
+            //    자판만큼 줄어드는데 이 칸만 전체 높이를 고집하면 아래가
+            //    넘친다(실기기: 로비에서 배율과 무관하게 상시 25px 초과,
+            //    2026-08-27). stealth_room_widget.dart이 쓰는 것과 같은 모양.
+            Expanded(
+              child: SizedBox(
                 width: MediaQuery.sizeOf(context).width * 1.0,
-                height: MediaQuery.sizeOf(context).height * 1.0,
+                child: custom_widgets.StoreMaster(
+                  width: MediaQuery.sizeOf(context).width * 1.0,
+                  height: MediaQuery.sizeOf(context).height * 1.0,
+                ),
               ),
             ),
           ],

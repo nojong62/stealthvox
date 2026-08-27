@@ -6,6 +6,7 @@ import '/flutter_flow/flutter_flow_util.dart';
 import 'index.dart'; // Imports other custom actions
 import '/flutter_flow/custom_functions.dart'; // Imports custom functions
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 // Begin custom action code
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
@@ -155,20 +156,41 @@ class BillingTicker with WidgetsBindingObserver {
   /// 경우(서버 응답으로 값이 내려오는 경우)도 같이 잡힌다.
   final ValueNotifier<bool> balanceExhausted = ValueNotifier<bool>(false);
 
+  /// 📌 [빌드 도중 알림 금지] 이 두 notifier는 화면이 듣고 있다
+  ///   (`ValueListenableBuilder`). 프레임을 그리는 중에 값을 바꾸면 그걸
+  ///   듣는 위젯이 "setState() called during build"로 터진다. 방에 들어갈
+  ///   때(`initState` → resume)도, 나올 때(`dispose` → pause)도 났다
+  ///   (실기기 로그, 2026-08-27). 호출부마다 프레임을 미루는 대신 여기서
+  ///   한 번 막는다 — 새 화면이 늘어도 같은 실수를 되풀이하지 않는다.
+  ///
+  ///   미루는 건 **표시등 갱신뿐**이다. 차감 계산은 이미 끝나 있고 값도
+  ///   그대로다. 늦어야 한 프레임(≈16ms)이다.
+  void _setNotifier<T>(ValueNotifier<T> notifier, T next, String log) {
+    if (notifier.value == next) return;
+    final phase = SchedulerBinding.instance.schedulerPhase;
+    final midFrame = phase == SchedulerPhase.persistentCallbacks ||
+        phase == SchedulerPhase.midFrameMicrotasks;
+    if (midFrame) {
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (notifier.value != next) notifier.value = next;
+      });
+    } else {
+      notifier.value = next;
+    }
+    _addBillingLog(log);
+  }
+
   void _updateBillingState() {
     // ⚠️ 아래 early return보다 먼저 갱신한다. 표시등은 이미 꺼져 있는데
     //   (로비에서 pause된 채 0이 되는 경우) 소진 신호만 안 나가면, 방에
     //   들어가 있는 화면이 영영 못 나온다.
     final blocked = isBillingBlocked;
-    if (balanceExhausted.value != blocked) {
-      balanceExhausted.value = blocked;
-      _addBillingLog('[BILLING] balance=${blocked ? 'exhausted' : 'ok'}');
-    }
+    _setNotifier(balanceExhausted, blocked,
+        '[BILLING] balance=${blocked ? 'exhausted' : 'ok'}');
 
     final next = _isActuallyBilling ? 2 : 0;
-    if (billingState.value == next) return;
-    billingState.value = next;
-    _addBillingLog('[BILLING] indicator=${next == 2 ? 'on' : 'off'}');
+    _setNotifier(
+        billingState, next, '[BILLING] indicator=${next == 2 ? 'on' : 'off'}');
   }
 
   Timer? _tickTimer;

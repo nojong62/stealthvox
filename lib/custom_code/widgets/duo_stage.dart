@@ -191,7 +191,20 @@ class _DuoWaitingStageState extends State<DuoWaitingStage>
                           fit: BoxFit.cover,
                           filterQuality: FilterQuality.medium),
                     ),
-                    _buildCardBody(),
+                    // 📐 카드 폭은 남은 세로에서 나온다(9/16). 그런데 안에
+                    //   든 비콘·목업 버튼은 고정 픽셀이라, 세로가 줄어 카드가
+                    //   좁아지면 가로로 넘쳤다(실기기 대기 화면 64px 초과,
+                    //   2026-08-27). 설계 크기대로 그린 다음 카드에 맞춰
+                    //   통째로 줄인다 — 눌리지 않는 그림이라 비율만 지키면
+                    //   된다.
+                    FittedBox(
+                      fit: BoxFit.contain,
+                      child: SizedBox(
+                        width: 280,
+                        height: 280 * 16 / 9,
+                        child: _buildCardBody(),
+                      ),
+                    ),
                   ],
                 ),
               ),

@@ -649,9 +649,14 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
     String value,
     ValueChanged<String?> onChanged,
   ) {
-    Widget labelRow() => Row(
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
+    // 📐 한 줄에 나란히 두되, 폭이 모자라면 부제를 아랫줄로 내린다.
+    //   예전에는 Row + ellipsis라 기기 글자 배율이 크면 "(Chat La…"처럼
+    //   잘려서 무슨 말인지 사라졌다(실기기 2.0배, 2026-08-27).
+    //   Wrap은 자리가 있으면 한 줄, 없으면 두 줄로 알아서 바뀐다.
+    Widget labelRow() => Wrap(
+          spacing: 7,
+          runSpacing: 2,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             Text(
               label,
@@ -663,18 +668,14 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
                 fontWeight: FontWeight.w800,
               ),
             ),
-            const SizedBox(width: 7),
-            Flexible(
-              child: Text(
-                subtitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: _kLobbyCyan.withValues(alpha: 0.72),
-                  fontSize: 11,
-                  letterSpacing: 0.4,
-                  fontWeight: FontWeight.w600,
-                ),
+            Text(
+              subtitle,
+              maxLines: 1,
+              style: TextStyle(
+                color: _kLobbyCyan.withValues(alpha: 0.72),
+                fontSize: 11,
+                letterSpacing: 0.4,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ],
@@ -729,13 +730,22 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
             fontSize: 16,
             fontWeight: FontWeight.w600,
           ),
-          itemHeight: 52,
+          // 📐 [높이] 예전에는 52로 못 박았다. 닫힌 상자 안에는 라벨줄과
+          //   언어 이름이 위아래로 쌓이는데, 기기 글자 크기를 키우면 그 둘이
+          //   52를 넘어 상자 바닥을 뚫었다(실기기 확인, 2026-08-27).
+          //   null로 두면 상자도 목록도 내용만큼 높아진다. 대신 목록 줄은
+          //   손가락이 짚을 수 있게 아래 minHeight로 따로 받쳐 준다.
+          itemHeight: null,
           borderRadius: BorderRadius.circular(16),
           items: languages
               .map((String lang) => DropdownMenuItem<String>(
                     value: lang,
-                    child: Text(lang,
-                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                    child: Container(
+                      constraints: const BoxConstraints(minHeight: 44),
+                      alignment: Alignment.centerLeft,
+                      child: Text(lang,
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
+                    ),
                   ))
               .toList(),
           onChanged: onChanged,
@@ -948,7 +958,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   /// (중복탭 잠금 → 잔여시간 확인 → 히스토리 문서 생성 → StealthRoom).
   Widget _buildEnterButton() {
     return SizedBox(
-      height: 58,
+      height: 54,
       child: DecoratedBox(
         decoration: BoxDecoration(
           gradient: const LinearGradient(
@@ -1009,7 +1019,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
       child: SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
+          padding: const EdgeInsets.symmetric(vertical: 2),
           child: Row(
             children: [
               Expanded(
@@ -1052,7 +1062,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
   /// 하단 줄 사이의 얇은 세로 선. 셋이 서로 다른 일을 한다는 표시다.
   Widget _bottomBarDivider() => Container(
         width: 1,
-        height: 20,
+        height: 18,
         color: _kLobbyBorder,
       );
 
@@ -1061,18 +1071,18 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 19, color: _kLobbyTextMid),
-            const SizedBox(height: 4),
+            Icon(icon, size: 17, color: _kLobbyTextMid),
+            const SizedBox(height: 3),
             FittedBox(
               fit: BoxFit.scaleDown,
               child: Text(
                 label,
                 maxLines: 1,
-                style: const TextStyle(color: _kLobbyTextMid, fontSize: 11),
+                style: const TextStyle(color: _kLobbyTextMid, fontSize: 10),
               ),
             ),
           ],
@@ -1300,7 +1310,7 @@ class _LobbyMasterState extends State<LobbyMaster> with WidgetsBindingObserver {
           ),
         ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
+          padding: const EdgeInsets.fromLTRB(28, 10, 28, 12),
           child: _buildEnterButton(),
         ),
         _buildBottomBar(),

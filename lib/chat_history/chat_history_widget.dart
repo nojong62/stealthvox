@@ -48,9 +48,10 @@ class _ChatHistoryWidgetState extends State<ChatHistoryWidget> {
       child: Scaffold(
         key: scaffoldKey,
         backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
-        body: Container(
+        // ⌨️ 높이를 박지 않는다 — body가 받은 만큼만 쓴다.
+        //    (전체 높이를 고집하면 상태바·자판 높이만큼 아래가 넘친다.)
+        body: SizedBox(
           width: MediaQuery.sizeOf(context).width * 1.0,
-          height: MediaQuery.sizeOf(context).height * 1.0,
           child: custom_widgets.ChatHistoryListMaster(
             width: MediaQuery.sizeOf(context).width * 1.0,
             height: MediaQuery.sizeOf(context).height * 1.0,

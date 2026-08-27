@@ -405,11 +405,16 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _remoteConfigFuture = _fetchRemoteConfig();
     _fetchRoomData();
     _initPermissions();
-    // 💰 [BILLING-IDLE] 입장 즉시 과금 + 60초 유휴 감시. 규칙은 공용이다.
-    startBillingRoom();
     BillingTicker.instance.balanceExhausted.addListener(_onBalanceExhausted);
+    // 💰 [BILLING-IDLE] 입장 즉시 과금 + 60초 유휴 감시. 규칙은 공용이다.
+    //   첫 프레임 뒤로 미룬다 — initState에서 바로 부르면 resume()이
+    //   billingState(ValueNotifier)를 빌드 도중에 고쳐서, 그걸 듣는
+    //   ValueListenableBuilder가 "setState during build"로 터졌다
+    //   (실기기 로그, 2026-08-27). 한 프레임(≈16ms) 늦어질 뿐이다.
+    //   startBillingRoom()이 안에서 resetBillingIdle()을 부르므로,
+    //   여기서 따로 부르던 것도 같이 정리한다.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) resetBillingIdle();
+      if (mounted) startBillingRoom();
     });
 
     _playerStateSub = audioPlayer.onPlayerStateChanged.listen((state) {
@@ -3938,6 +3943,13 @@ RULES — follow exactly:
                                 children: [
                                   _buildPracticeLineText(
                                       line, isCurrent, lineIsAi),
+                                  // 📐 아래 세 줄 안내(녹음 중 / 다시 읽어
+                                  //   주세요 / AI 재생 중)는 Icon + Text를
+                                  //   Row에 나란히 둔다. Text를 그냥 두면
+                                  //   기기 글자 크기를 키웠을 때 말풍선 폭을
+                                  //   넘어 가로로 터졌다(실기기 1.7배에서
+                                  //   37px 초과, 2026-08-27). Flexible로
+                                  //   감싸 남는 폭에 맞춰 줄바꿈하게 한다.
                                   if (isCurrent &&
                                       !lineIsAi &&
                                       _isAutoRecording) ...[
@@ -3946,10 +3958,12 @@ RULES — follow exactly:
                                       Icon(Icons.graphic_eq,
                                           color: Colors.greenAccent, size: 15),
                                       SizedBox(width: 5),
-                                      Text("녹음 중...",
-                                          style: TextStyle(
-                                              color: Colors.greenAccent,
-                                              fontSize: 11)),
+                                      Flexible(
+                                        child: Text("녹음 중...",
+                                            style: TextStyle(
+                                                color: Colors.greenAccent,
+                                                fontSize: 11)),
+                                      ),
                                     ]),
                                   ],
                                   if (isCurrent &&
@@ -3960,10 +3974,12 @@ RULES — follow exactly:
                                       Icon(Icons.mic_off,
                                           color: Colors.orange, size: 15),
                                       SizedBox(width: 5),
-                                      Text("끝까지 다시 읽어 주세요 🎙",
-                                          style: TextStyle(
-                                              color: Colors.orange,
-                                              fontSize: 11)),
+                                      Flexible(
+                                        child: Text("끝까지 다시 읽어 주세요 🎙",
+                                            style: TextStyle(
+                                                color: Colors.orange,
+                                                fontSize: 11)),
+                                      ),
                                     ]),
                                   ],
                                   if (isCurrent && lineIsAi && isPlaying) ...[
@@ -3972,10 +3988,12 @@ RULES — follow exactly:
                                       Icon(Icons.volume_up,
                                           color: Colors.amber, size: 15),
                                       SizedBox(width: 5),
-                                      Text("AI 재생 중...",
-                                          style: TextStyle(
-                                              color: Colors.amber,
-                                              fontSize: 11)),
+                                      Flexible(
+                                        child: Text("AI 재생 중...",
+                                            style: TextStyle(
+                                                color: Colors.amber,
+                                                fontSize: 11)),
+                                      ),
                                     ]),
                                   ],
                                 ],
@@ -5625,7 +5643,8 @@ RULES — follow exactly:
       onTap: active ? onTap : null,
       borderRadius: BorderRadius.circular(10),
       child: Container(
-        height: 40,
+        // 📐 최소 높이로 바꿔 라벨이 커져도 잘리지 않게 한다.
+        constraints: const BoxConstraints(minHeight: 40),
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: active ? 0.06 : 0.02),
@@ -5644,8 +5663,9 @@ RULES — follow exactly:
     );
   }
 
-  Widget _p3PrimaryButton(String label, VoidCallback? onTap) => SizedBox(
-        height: 48,
+  Widget _p3PrimaryButton(String label, VoidCallback? onTap) => ConstrainedBox(
+        // 📐 높이 고정 해제 — 배율이 크면 라벨이 버튼 밖으로 잘렸다.
+        constraints: const BoxConstraints(minHeight: 48),
         child: ElevatedButton(
           style: ElevatedButton.styleFrom(
             backgroundColor: _p3ShadowingAccentColor,
@@ -5662,8 +5682,10 @@ RULES — follow exactly:
         ),
       );
 
-  Widget _p3SecondaryButton(String label, VoidCallback? onTap) => SizedBox(
-        height: 40,
+  Widget _p3SecondaryButton(String label, VoidCallback? onTap) =>
+      ConstrainedBox(
+        // 📐 위와 같은 이유로 최소 높이만 둔다.
+        constraints: const BoxConstraints(minHeight: 40),
         child: OutlinedButton(
           style: OutlinedButton.styleFrom(
             foregroundColor: Colors.white70,

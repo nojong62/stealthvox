@@ -119,77 +119,96 @@ class _AccountSheetState extends State<_AccountSheet> {
     final createdAt = user?.metadata.creationTime;
 
     return Container(
-      padding: EdgeInsets.only(
-        left: 24,
-        right: 24,
-        top: 24,
-        bottom: 24 + MediaQuery.of(context).viewInsets.bottom,
-      ),
       decoration: const BoxDecoration(
         color: _kSheetBg,
         borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      // 📐 [스크롤] 이름을 고치려고 키보드를 올리면 남는 높이가 확 준다.
+      //   예전에는 Column 하나뿐이라 갈 곳 없는 내용이 아래로 넘쳤다
+      //   (실기기 글자 1.7배에서 15px 초과, 로그아웃 줄이 잘렸다,
+      //   2026-08-27). 스크롤을 주면 모자란 만큼 밀어 올려 볼 수 있다.
+      //   키보드 높이는 스크롤 안쪽 패딩으로 넣는다 — 바깥에 두면 스크롤
+      //   범위가 키보드를 못 넘어간다.
+      //
+      //   SafeArea(top: false)로 아래 시스템 내비게이션 바를 비켜 준다.
+      //   없으면 마지막 줄(로그아웃)이 내비 바에 반쯤 걸쳐 잘려 보인다
+      //   (실기기 확인, 2026-08-27). SafeArea는 `padding`을 보므로 키보드가
+      //   올라오면 알아서 0이 된다 — 아래 viewInsets와 겹쳐 밀지 않는다.
+      child: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: EdgeInsets.only(
+            left: 24,
+            right: 24,
+            top: 24,
+            bottom: 24 + MediaQuery.of(context).viewInsets.bottom,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('등록 정보',
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold)),
-              IconButton(
-                icon: const Icon(Icons.close_rounded, color: Colors.white54),
-                onPressed: () => Navigator.pop(context),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Flexible(
+                    child: Text('등록 정보',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold)),
+                  ),
+                  IconButton(
+                    icon:
+                        const Icon(Icons.close_rounded, color: Colors.white54),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+              const Divider(color: Colors.white12, height: 20),
+
+              // ── 프로필 + 표시 이름 ──
+              Row(
+                children: [
+                  _avatar(),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: _editing ? _nameField() : _nameDisplay(),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+
+              // ── 로그인 정보 (바꿀 수 없는 것들) ──
+              _infoRow(Icons.mail_outline_rounded, '이메일',
+                  currentUserEmail.isEmpty ? '-' : currentUserEmail),
+              const SizedBox(height: 8),
+              _infoRow(
+                  Icons.vpn_key_outlined, '로그인 방법', describeSignInMethod(user)),
+              const SizedBox(height: 8),
+              _infoRow(
+                Icons.event_outlined,
+                '가입일',
+                createdAt == null
+                    ? '-'
+                    : DateFormat('yyyy.MM.dd').format(createdAt.toLocal()),
+              ),
+              const SizedBox(height: 18),
+
+              SizedBox(
+                width: double.infinity,
+                child: TextButton.icon(
+                  onPressed: _saving ? null : _signOut,
+                  icon: const Icon(Icons.logout_rounded, size: 18),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.white60,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  label: const Text('로그아웃'),
+                ),
               ),
             ],
           ),
-          const Divider(color: Colors.white12, height: 20),
-
-          // ── 프로필 + 표시 이름 ──
-          Row(
-            children: [
-              _avatar(),
-              const SizedBox(width: 14),
-              Expanded(
-                child: _editing ? _nameField() : _nameDisplay(),
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
-
-          // ── 로그인 정보 (바꿀 수 없는 것들) ──
-          _infoRow(Icons.mail_outline_rounded, '이메일',
-              currentUserEmail.isEmpty ? '-' : currentUserEmail),
-          const SizedBox(height: 8),
-          _infoRow(
-              Icons.vpn_key_outlined, '로그인 방법', describeSignInMethod(user)),
-          const SizedBox(height: 8),
-          _infoRow(
-            Icons.event_outlined,
-            '가입일',
-            createdAt == null
-                ? '-'
-                : DateFormat('yyyy.MM.dd').format(createdAt.toLocal()),
-          ),
-          const SizedBox(height: 18),
-
-          SizedBox(
-            width: double.infinity,
-            child: TextButton.icon(
-              onPressed: _saving ? null : _signOut,
-              icon: const Icon(Icons.logout_rounded, size: 18),
-              style: TextButton.styleFrom(
-                foregroundColor: Colors.white60,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-              ),
-              label: const Text('로그아웃'),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

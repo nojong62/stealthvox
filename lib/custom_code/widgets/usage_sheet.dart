@@ -157,6 +157,11 @@ void showUsageSheet(BuildContext context) {
                         }).toList();
 
                         if (records.isEmpty) {
+                          // 📐 한글은 아무 글자에서나 줄이 바뀐다. 기기 글자
+                          //   크기를 키우면 "없습니 / 다."처럼 낱말 한가운데가
+                          //   끊겼다(실기기 2.0배 확인, 2026-08-27).
+                          //   제목 줄은 FittedBox로 줄여 한 줄에 담고, 설명
+                          //   줄은 폭을 좁혀 끊기는 자리를 낫게 만든다.
                           return const Center(
                             child: Padding(
                               padding: EdgeInsets.all(24.0),
@@ -166,9 +171,14 @@ void showUsageSheet(BuildContext context) {
                                   Icon(Icons.access_time_rounded,
                                       color: Colors.white24, size: 48),
                                   SizedBox(height: 16),
-                                  Text("아직 사용 내역이 없습니다.",
-                                      style: TextStyle(
-                                          color: Colors.white54, fontSize: 14)),
+                                  FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Text("아직 사용 내역이 없습니다.",
+                                        maxLines: 1,
+                                        style: TextStyle(
+                                            color: Colors.white54,
+                                            fontSize: 14)),
+                                  ),
                                   SizedBox(height: 8),
                                   Text(
                                     "대화를 시작하면 사용 시간이 이곳에 표시됩니다.",
