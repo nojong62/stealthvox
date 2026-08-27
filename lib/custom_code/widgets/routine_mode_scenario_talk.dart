@@ -384,6 +384,71 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   /// 생성되며, 화면·TTS·히스토리에 전달하기 전에 신호를 제거한다.
   static bool _isAskBackReply(String text) => hasHeardConfirmSignal(text);
 
+  /// 사용자가 직전 발화를 실제 뜻으로 갈아 끼우는 문장인지 앱에서 먼저 잡는다.
+  ///
+  /// Scenario Talk의 운영 파이프라인은 번역 단계를 거치지 않으므로, 예전
+  /// Relay 파이프라인의 [CORRECTION] 판정이 더 이상 실행되지 않는다. 그 결과
+  /// "아니, 쉬는 시간이 없냐고 물어본 거야"도 새 턴으로 저장됐다. 평범한
+  /// 부정 답변("아니, 안 갔어요")은 건드리지 않고, 말/뜻/질문의 교체를
+  /// 명시한 문장만 정정으로 확정한다.
+  String? _explicitScenarioCorrectionContent(String transcript) {
+    final source = transcript.trim();
+    final hasDirectReplacement = RegExp(
+      r'(그게\s*아니라|그런\s*뜻이\s*아니|내\s*(말|뜻)은|'
+      r'내가\s*(말|뜻)한\s*건|다시\s*말하면|I\s+mean|'
+      r'what\s+I\s+mean\s+is|that.?s\s+not\s+what\s+I\s+meant)',
+      caseSensitive: false,
+    ).hasMatch(source);
+    final hasReportedReplacement = RegExp(
+      r'^(아니(요|라고)?|아\s+그게\s+아니라|그게\s+아니라).{1,80}'
+      r'(물어본|물은|질문한|말한|말하려던|얘기한|뜻한)\s*'
+      r'(거|것)',
+      caseSensitive: false,
+    ).hasMatch(source);
+    if (!hasDirectReplacement && !hasReportedReplacement) return null;
+
+    var cleaned = source;
+    cleaned = cleaned.replaceFirst(
+      RegExp(
+        r'^(아니(요|라고)?[,.!\s]*|아\s*)?'
+        r'(그게|그런\s*게|그런\s*뜻이|내\s*(말|뜻)이?)\s*'
+        r'아니(?:라|고|야|에요|예요|었고|었다)?[,.!\s]*',
+        caseSensitive: false,
+      ),
+      '',
+    );
+    cleaned = cleaned.replaceFirst(
+      RegExp(
+        r'^(아니(요|라고)?[,.!\s]*|내\s*(말|뜻)은|'
+        r'내가\s*(말|뜻)한\s*건|그러니까|다시\s*말하면|'
+        r'I\s+mean|what\s+I\s+mean\s+is|'
+        r'that.?s\s+not\s+what\s+I\s+meant)[,:.!\s]*',
+        caseSensitive: false,
+      ),
+      '',
+    );
+
+    // "X냐고 물어본 거야"는 화면과 History에 메타 설명이 아니라 실제로
+    // 교체할 질문 "X냐?"로 남긴다.
+    cleaned = cleaned.replaceFirst(
+      RegExp(
+        r'냐고\s*(물어본|물은|질문한)\s*(거|것)(야|예요|이에요|라고)?[.!?\s]*$',
+        caseSensitive: false,
+      ),
+      '냐?',
+    );
+    cleaned = cleaned.replaceFirst(
+      RegExp(
+        r'(라고|다고)\s*(말한|말하려던|얘기한|뜻한)\s*'
+        r'(거|것)(야|예요|이에요|라고)?[.!?\s]*$',
+        caseSensitive: false,
+      ),
+      '',
+    );
+    cleaned = cleaned.trim();
+    return cleaned.isEmpty ? null : cleaned;
+  }
+
   String _buildScenarioMemberInstructions() {
     final nativeLang = _nativeLangName();
     final registerPolicy = nativeLang == 'Korean'
@@ -2384,6 +2449,7 @@ never by itself a reason to ask back.
     String userKorean, {
     required int generation,
     bool understandingConfirmed = false,
+    bool isCorrectionRetry = false,
   }) async {
     if (!mounted ||
         !_isConversationActive ||
@@ -2426,6 +2492,62 @@ never by itself a reason to ask back.
           break;
       }
     }
+
+    // 🔄 새 운영 파이프라인에는 예전 Relay의 [CORRECTION] 분기가 닿지 않는다.
+    // 명시적인 교체 문장은 GPT 답변을 만들기 전에 앱이 잡아, 직전 교환을
+    // 화면과 두 저장소에서 함께 걷어낸 뒤 실제 뜻만 같은 턴으로 다시 처리한다.
+    final currentRoomMessages = _currentRoomMessages;
+    final hasPreviousExchange =
+        currentRoomMessages.any((message) => message['role'] == 'HOST') &&
+            currentRoomMessages.any((message) => message['role'] == 'SYSTEM');
+    final correctedContent = !isCorrectionRetry && hasPreviousExchange
+        ? _explicitScenarioCorrectionContent(userKorean)
+        : null;
+    if (correctedContent != null) {
+      _log(
+        '[CORRECTION-LOCAL]',
+        '직전 교환 교체 corrected_len=${correctedContent.length}',
+      );
+      _aiTtsAdapter.stopAll(reason: 'scenario_explicit_correction');
+      _ttsQueueManager.stop();
+      if (mounted) {
+        setState(() {
+          _localMessages.removeWhere((message) =>
+              message['role'] == 'HOST_TEMP' ||
+              message['role'] == 'SYSTEM_ASKBACK');
+          _removeLastExchange();
+        });
+        if (_localMessages.isNotEmpty) _scrollToBottom();
+      }
+      _activeHostBubbleId = '';
+      _activeAiBubbleId = '';
+      _turnCounter = (_turnCounter - 1).clamp(0, 1 << 30).toInt();
+      try {
+        await _pendingTurnPersistence;
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          final removed = await rollbackLastPersistedUserTurn(
+            firestore: FirebaseFirestore.instance,
+            uid: user.uid,
+            sessionDocId: _sessionDocId,
+            historyRef: _myHistoryRef,
+          );
+          _log('[CORRECTION-PERSIST]',
+              '화면·sessions·history 교체 준비 removed=$removed');
+        }
+        _lastExchangeMsgIds = <String>[];
+      } catch (error) {
+        // 저장 정리에 실패해도 화면 대화는 실제 뜻으로 계속 진행한다.
+        _log('[CORRECTION-PERSIST-ERR]',
+            '직전 저장본 삭제 실패 reason=${error.runtimeType}');
+      }
+      return _processScenarioTalkTurn(
+        correctedContent,
+        generation: generation,
+        isCorrectionRetry: true,
+      );
+    }
+
     _turnCounter++;
     final turnNumber = _turnCounter;
     var aiIndex = -1;
