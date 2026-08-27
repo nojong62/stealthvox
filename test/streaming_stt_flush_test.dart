@@ -381,4 +381,36 @@ void main() {
       expect(await flush, isTrue);
     });
   });
+
+  // 듀오는 폰을 손에 들지 않는 자리라 마이크가 멀다. 그 한 모드만 문턱을
+  // 낮춰 잡고, 나머지 모드는 잘 되던 값 그대로 둔다.
+  group('Server VAD 프로필', () {
+    test('부르는 쪽이 값을 안 주면 공용 초기값이다', () {
+      final s = OpenAiStreamingTranscribeSession(apiKey: 'k', languageCode: '');
+      expect(s.vadThreshold, kStreamingSttVadThreshold);
+      expect(s.vadPrefixPaddingMs, kStreamingSttVadPrefixPaddingMs);
+      expect(s.vadSilenceDurationMs, kStreamingSttVadSilenceDurationMs);
+    });
+
+    test('듀오 값은 셋 다 공용과 다르다 — 먼 소리를 잡는 쪽으로만', () {
+      expect(kDuoSttVadThreshold, lessThan(kStreamingSttVadThreshold));
+      expect(kDuoSttVadPrefixPaddingMs,
+          greaterThan(kStreamingSttVadPrefixPaddingMs));
+      expect(kDuoSttVadSilenceDurationMs,
+          greaterThan(kStreamingSttVadSilenceDurationMs));
+    });
+
+    test('넘긴 값이 그대로 실린다', () {
+      final s = OpenAiStreamingTranscribeSession(
+        apiKey: 'k',
+        languageCode: '',
+        vadThreshold: kDuoSttVadThreshold,
+        vadPrefixPaddingMs: kDuoSttVadPrefixPaddingMs,
+        vadSilenceDurationMs: kDuoSttVadSilenceDurationMs,
+      );
+      expect(s.vadThreshold, kDuoSttVadThreshold);
+      expect(s.vadPrefixPaddingMs, kDuoSttVadPrefixPaddingMs);
+      expect(s.vadSilenceDurationMs, kDuoSttVadSilenceDurationMs);
+    });
+  });
 }

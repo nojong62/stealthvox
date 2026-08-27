@@ -1648,6 +1648,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       apiKey: _openAiKey,
       languageCode: _mapLanguageToCode(_myNative()),
       onLog: (tag, msg) => _lgDuo('[DIRECT-STT]$tag', msg),
+      // 🎙️ 폰을 손에 들지 않는 자리다. 먼 소리를 잡고 첫 음절을 지킨다.
+      vadThreshold: kDuoSttVadThreshold,
+      vadPrefixPaddingMs: kDuoSttVadPrefixPaddingMs,
+      vadSilenceDurationMs: kDuoSttVadSilenceDurationMs,
     );
     session.shouldReconnect = () => _isDirectGenerationCurrent(generation);
     // 발화 순서는 전사 응답이 돌아온 순서가 아니라 **말을 시작한 시각** 기준이다.
@@ -1886,6 +1890,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       apiKey: _openAiKey,
       languageCode: _mapLanguageToCode(_myNative()),
       onLog: (tag, msg) => _lgDuo('[INTERP-STT]$tag', msg),
+      // 직접 대화와 같은 자리, 같은 값이다.
+      vadThreshold: kDuoSttVadThreshold,
+      vadPrefixPaddingMs: kDuoSttVadPrefixPaddingMs,
+      vadSilenceDurationMs: kDuoSttVadSilenceDurationMs,
     );
     session.shouldReconnect = () =>
         !_isExiting && _isConversationActive && generation == _interpGeneration;

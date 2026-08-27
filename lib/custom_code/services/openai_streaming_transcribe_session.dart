@@ -83,6 +83,26 @@ const double kStreamingSttVadThreshold = 0.5;
 const int kStreamingSttVadPrefixPaddingMs = 300;
 const int kStreamingSttVadSilenceDurationMs = 600;
 
+// ── 듀오 전용 Server VAD ─────────────────────────────────────────────
+// **듀오만 다르다.** 다른 모드는 폰을 손에 들고 입 가까이에서 말하지만,
+// 듀오는 통화처럼 책상에 두거나 스피커폰으로 쓴다. 입과 마이크가 멀어
+// 소리가 공용 문턱(0.5) 언저리를 오르내리고, 그러면 한 문장이 여러 조각으로
+// 끊긴 채 조각마다 앞이 잘려 들어간다.
+//
+// 2026-08-28 실기기 한 통(직접 대화, 73발화) 실측:
+//   · 1초 넘게 말했는데 4글자 이하로 끝난 발화가 24건(32%)
+//   · 초당 글자수 중앙값 3.7자 — 편한 한국어는 5~7자
+//   · 버려진 발화는 0건이었다. 못 잡은 게 아니라 잘린 것이다.
+//
+// 문턱을 내려 먼 소리를 잡고, 앞소리를 더 보관해 첫 음절을 지키고, 침묵
+// 판정을 늦춰 천천히 말해도 문장 중간에 끊기지 않게 한다. 대가는 턴 종료가
+// 200ms 늦는 것인데, 한 턴 병목은 GPT+TTS 2.2초라 체감에 묻힌다.
+//
+// **다른 모드에는 손대지 않는다** — 잘 되고 있는 자리를 같이 흔들지 않는다.
+const double kDuoSttVadThreshold = 0.35;
+const int kDuoSttVadPrefixPaddingMs = 500;
+const int kDuoSttVadSilenceDurationMs = 800;
+
 const Duration kStreamingSttConnectTimeout = Duration(seconds: 6);
 
 /// 종료 직전, 아직 안 돌아온 마지막 전사문을 기다리는 상한.
@@ -105,9 +125,18 @@ class OpenAiStreamingTranscribeSession {
     required this.apiKey,
     required String languageCode,
     this.onLog,
+    this.vadThreshold = kStreamingSttVadThreshold,
+    this.vadPrefixPaddingMs = kStreamingSttVadPrefixPaddingMs,
+    this.vadSilenceDurationMs = kStreamingSttVadSilenceDurationMs,
   }) : _languageCode = languageCode;
 
   final String apiKey;
+
+  // ── Server VAD. 기본값은 공용이고, 부르는 쪽이 갈아 끼울 수 있다.
+  //   듀오처럼 마이크가 먼 자리만 [kDuoSttVadThreshold] 한 벌을 넘긴다.
+  final double vadThreshold;
+  final int vadPrefixPaddingMs;
+  final int vadSilenceDurationMs;
 
   /// 전사기에 박을 언어 코드. **final이 아니다** — 첫 발화의 실제 언어가
   /// 로비 ORIGIN과 다르면 [switchLanguage]로 갈아 끼운다.
@@ -350,9 +379,9 @@ class OpenAiStreamingTranscribeSession {
         'connected model=$kStreamingSttModel '
             'lang=${_languageCode.isEmpty ? 'auto' : _languageCode} '
             'rate=$kStealthVoxSttSampleRate vad=server_vad '
-            'threshold=$kStreamingSttVadThreshold '
-            'prefixMs=$kStreamingSttVadPrefixPaddingMs '
-            'silenceMs=$kStreamingSttVadSilenceDurationMs '
+            'threshold=$vadThreshold '
+            'prefixMs=$vadPrefixPaddingMs '
+            'silenceMs=$vadSilenceDurationMs '
             'connectMs=${sw.elapsedMilliseconds}',
       );
       return true;
@@ -385,9 +414,9 @@ class OpenAiStreamingTranscribeSession {
             // 발화 경계는 전적으로 서버가 잡는다. 앱에서 commit하지 않는다.
             'turn_detection': {
               'type': 'server_vad',
-              'threshold': kStreamingSttVadThreshold,
-              'prefix_padding_ms': kStreamingSttVadPrefixPaddingMs,
-              'silence_duration_ms': kStreamingSttVadSilenceDurationMs,
+              'threshold': vadThreshold,
+              'prefix_padding_ms': vadPrefixPaddingMs,
+              'silence_duration_ms': vadSilenceDurationMs,
             },
           },
         },
@@ -570,7 +599,7 @@ class OpenAiStreamingTranscribeSession {
         } else if (startedAt != null) {
           // 폴백. 이벤트 도착 시각 차라 소켓·스케줄링 지연이 섞인다.
           final spanMs = DateTime.now().difference(startedAt).inMilliseconds;
-          final local = spanMs - kStreamingSttVadSilenceDurationMs;
+          final local = spanMs - vadSilenceDurationMs;
           // 여기도 음수를 0으로 누르지 않는다. VAD가 침묵을 확인하고 끊은
           // 이상 span은 침묵 시간보다 길어야 정상이다. 짧다면 잰 값이
           // 틀린 것이지 발화가 짧았던 게 아니다 → 모르는 것으로 둔다.
