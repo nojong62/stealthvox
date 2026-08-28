@@ -2994,6 +2994,18 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
   /// 연습 가치가 낮은 줄만 걷어낸다. AI는 남길 줄 선택과 최소한의 전사문
   /// 교정만 할 수 있다. 실패하면 원문을 잃지 않도록 보수적인 로컬 필터 결과를
   /// 사용한다. 만능 통역에는 이 경로가 전혀 적용되지 않는다.
+  /// 이 줄이 **등장인물의 닻**이 될 수 있는가.
+  ///
+  /// "둘째가 집에 들어와 있어"처럼 누가 누구인지 정해 주는 줄이라야 닻이다.
+  /// "의뢰인은"처럼 끊긴 토막은 뒤 문장의 주어를 하나도 알려 주지 못하면서
+  /// 공부 자료에 남기만 한다. 두 어절 이상 · 글자 여섯 자 이상을 본다.
+  static bool _canAnchorCast(String text) {
+    if (text.trim().split(RegExp(r'\s+')).length < 2) return false;
+    final letters =
+        text.replaceAll(RegExp(r'[^a-zA-Z0-9가-힣ぁ-んァ-ン一-龥]'), '');
+    return letters.length >= 6;
+  }
+
   Future<void> _curateDirectHistoryForStudy() async {
     final historyRef = _myHistoryRef;
     if (!_isDirectMode || historyRef == null) return;
@@ -3050,12 +3062,18 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       //   게스트에서 지운 줄이 다르면 두 사람의 배울글이 서로 다른 맥락 위에서
       //   만들어져 주어가 갈린다(2026-08-28 실장님 확인). 첫 두 줄을 양쪽 다
       //   고정으로 남기면 적어도 닻은 같아진다.
+      //   ⚠️ **닻이 될 수 있는 줄만 되살린다.** 첫 두 줄을 조건 없이 살렸더니
+      //   "의뢰인은" 같은 토막이 되살아났다(2026-08-28 실측, added=2). 정리가
+      //   버린 게 옳은 줄인데 도로 끌어와 공부 자료를 더럽혔다. 등장인물을
+      //   정하려면 최소한 문장 꼴은 돼야 하므로, 앞에서부터 훑되 **뜻을 가진
+      //   줄 두 개**를 찾아 그것만 지킨다.
       const int kCastAnchorTurns = 2;
       final anchored = Map<int, String>.of(kept);
       var anchors = 0;
       for (var i = 0; i < turns.length && anchors < kCastAnchorTurns; i++) {
         final String raw = (turns[i]['text'] as String).trim();
         if (raw.isEmpty) continue;
+        if (!_canAnchorCast(raw)) continue;
         anchors++;
         // 추린 결과에 살아 있으면 그 글을 쓴다. 지워졌으면 원문을 되살린다.
         final String? survived = anchored[i]?.trim();
