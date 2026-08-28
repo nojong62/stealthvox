@@ -31,7 +31,15 @@ import 'dart:typed_data';
 
 /// 말로 칠 최소 세기(RMS, 0.0~1.0). 마이크가 먼 자리를 감안해 낮게 잡는다 —
 /// 잘못 열리면 울림이 조금 남을 뿐이지만, 잘못 닫히면 말이 안 간다.
-const double kDuoRelayGateRms = 0.010;
+///
+/// 2026-08-28 실기기(안방↔거실, 78초 통화) 실측으로 0.010 → 0.004로 내렸다:
+///   · 말할 때  0.0130 · 0.0149 · 0.0763
+///   · 조용할 때 0.0000 (정확히 0 — 무음은 디지털 무음으로 들어온다)
+/// 0.010에서는 낮은 발화가 문턱의 1.3배밖에 안 돼, 조금만 작게 말하면
+/// 문이 안 열려 **말이 통째로 안 나간다.** 실제로 게스트가 못 들은 말이
+/// 있었다. 무음이 0이라 0.004로 내려도 조용할 때는 그대로 닫혀 있고,
+/// 여유만 1.3배 → 3.3배로 늘어난다.
+const double kDuoRelayGateRms = 0.004;
 
 /// 말이 시작될 때 되돌려 보낼 앞소리 길이.
 const int kDuoRelayGatePrefixMs = 500;
@@ -85,6 +93,15 @@ class DuoRelayGate {
   int get heldBytes => _heldBytes;
   int _heldBytes = 0;
 
+  /// 🔍 게이트가 **닫혀 있는 동안** 본 가장 큰 세기.
+  ///
+  /// 울림의 정체를 가른다. 벽 넘어온 상대 목소리가 마이크에 실제로 들어오고
+  /// 있다면 이 값이 문턱 언저리까지 올라간다 — 그러면 되먹임이 맞고 문턱을
+  /// 내리는 건 위험하다. 0에 가깝다면 마이크로는 아무것도 안 들어오는
+  /// 것이므로, 들리는 울림은 릴레이가 아니라 스피커·방 공명이다.
+  double get peakClosedRms => _peakClosedRms;
+  double _peakClosedRms = 0;
+
   List<Uint8List> accept(Uint8List frame) {
     if (frame.isEmpty) return const <Uint8List>[];
     final double rms = duoFrameRms(frame);
@@ -115,6 +132,7 @@ class DuoRelayGate {
     }
 
     // 닫힌 동안에도 최근 [prefixMs]만큼은 물고 있는다.
+    if (rms > _peakClosedRms) _peakClosedRms = rms;
     _heldBytes += frame.lengthInBytes;
     _prefix.add(frame);
     _prefixBytes += frame.lengthInBytes;
@@ -131,5 +149,6 @@ class DuoRelayGate {
     _open = false;
     _silentMs = 0;
     _heldBytes = 0;
+    _peakClosedRms = 0;
   }
 }

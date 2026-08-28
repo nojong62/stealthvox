@@ -120,6 +120,24 @@ void main() {
       expect(events, <bool>[true, false]);
     });
 
+    test('닫혀 있는 동안 본 가장 큰 소리를 기억한다 — 울림의 정체를 가르는 값', () {
+      final gate = build(threshold: 0.05);
+      gate.accept(frame(0.0));
+      gate.accept(frame(0.02)); // 문턱 아래지만 무음은 아니다
+      gate.accept(frame(0.01));
+      expect(gate.isOpen, isFalse);
+      expect(gate.peakClosedRms, closeTo(0.02 / math.sqrt2, 0.002));
+    });
+
+    test('문턱 0.004에서도 무음은 문을 못 연다 — 낮춰도 막는 힘은 그대로다', () {
+      final gate = build(threshold: 0.004);
+      for (var i = 0; i < 20; i++) {
+        expect(gate.accept(frame(0.0)), isEmpty);
+      }
+      // 실기기에서 가장 작았던 발화(RMS 0.0130)는 열어야 한다.
+      expect(gate.accept(frame(0.0130 * math.sqrt2)), isNotEmpty);
+    });
+
     test('reset이 앞소리까지 버린다 — 지난 통화 소리가 새 통화로 새면 안 된다', () {
       final gate = build();
       for (var i = 0; i < 10; i++) {

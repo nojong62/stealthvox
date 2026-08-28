@@ -1928,7 +1928,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
             'playedBytes=${player?.writtenBytes} droppedBytes=${player?.droppedBytes} '
             // 게이트가 막아 세운 양. 문턱이 맞는지는 이 값으로 되짚는다 —
             // 0이면 게이트가 한 번도 안 닫힌 것이고, 전체와 비슷하면 너무 닫힌 것이다.
-            'gateHeldBytes=${gate?.heldBytes}');
+            'gateHeldBytes=${gate?.heldBytes} '
+            // 닫혀 있는 동안 마이크가 본 가장 큰 소리. 벽 넘어온 상대 목소리가
+            // 실제로 들어오는지를 이 값이 말해 준다 — 울림의 정체를 가른다.
+            'gatePeakClosedRms=${gate?.peakClosedRms.toStringAsFixed(4)}');
     _directStopping = false;
   }
 
