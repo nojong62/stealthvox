@@ -48,5 +48,8 @@ adb_logcat_*.txt
 # Replay probe에 손으로 넣어 두는 OpenAI 키. 절대 커밋하지 않는다.
 tool/.openai_key
 
+# 실기기에서 뽑아 온 실제 통화 기록 — 대화 내용이라 커밋하지 않는다.
+tool/replay_samples/real_*
+
 # 규칙 검증 하네스가 받아 오는 것. 소스만 커밋한다.
 tool/rules_test/node_modules/
