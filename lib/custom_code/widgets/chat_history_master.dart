@@ -690,6 +690,12 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       if (data == null) continue;
       final raw = (data['original_text_raw'] ?? '').toString().trim();
       if (raw.isEmpty) continue;
+      // 🧩 [CANONICAL 소유] 통화 정돈이 세운 줄은 여기서 되돌리지 않는다.
+      //   그쪽은 토막을 문장으로 세우는 것이 **하는 일**이라, 이 판정이
+      //   보기에는 언제나 "너무 많이 고친 줄"이다. 되돌리면 정돈이 매번
+      //   무효가 된다. 이 규칙이 잡으려는 것은 공부방 교정 경로가 원문을
+      //   통째로 다시 써 버린 옛 줄이다.
+      if (data['canonical_version'] != null) continue;
       final current = (data['original_text'] ?? '').toString().trim();
       if (current.isEmpty || current == raw) continue;
       if (isMinimalTranscriptRepair(raw, current)) continue;
@@ -758,8 +764,16 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   void _scheduleMissingTargetGeneration(List<DocumentSnapshot> docs) {
     if (!_usesDeferredHistoryTargets || docs.isEmpty) return;
     // 🎫 배울글은 GPT가 만든다 = 새 비용이다. 못 만드는 사람에게는 원문이
-    //   그대로 남고 배지만 붙는다 — 자기가 한 말은 그대로 보인다.
-    if (!_paidStudySilentlyAllowed('target_generation')) return;
+    //   그대로 남는다 — 자기가 한 말은 그대로 보인다.
+    //
+    //   ⚠️ **여기서 그냥 돌아가면 안 된다.** 배지가 실패로 안 찍히면 화면은
+    //   `번역 중` 물레방아를 영영 돌린다. 곧 나올 것처럼 보이는데 아무도
+    //   만들지 않는 상태다(실기기 게스트 공부방에서 확인, 2026-08-29).
+    //   잠긴 것은 잠겼다고 적는다.
+    if (!_paidStudySilentlyAllowed('target_generation')) {
+      _markMissingTargetsFailed(docs, 'locked');
+      return;
+    }
     _revertOverreachingOriginRepairs(docs);
     // 키를 아직 못 받았다. 원격 설정이 안 내려온 것뿐이라 곧 풀릴 수도 있지만,
     // 그 사이 화면은 "번역이 없는 줄"을 정상인 것처럼 보여준다. 실패로 표시해
@@ -818,6 +832,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   String _targetFailureLabel(String kind) {
     switch (kind) {
+      // 실패가 아니라 **잠긴 것**이다. 이유는 study_access가 쥐고 있다.
+      case 'locked':
+        return _studyAccess.gateLabel;
       case 'no_key':
         return '설정을 못 받았어요';
       case 'auth':
