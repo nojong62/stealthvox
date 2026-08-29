@@ -926,7 +926,7 @@ class _IntroMasterState extends State<IntroMaster>
     return Container(
       width: widget.width,
       height: widget.height,
-      color: const Color(0xFF131313),
+      color: const Color(0xFF121212),
       child: Scaffold(
         backgroundColor: Colors.transparent,
         resizeToAvoidBottomInset: false,
@@ -1019,7 +1019,7 @@ class _IntroMasterState extends State<IntroMaster>
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 _buildWelcomeWaveMark(),
-                const SizedBox(width: 17),
+                const SizedBox(width: 15),
                 Text(
                   'StealthVox',
                   maxLines: 1,
@@ -1048,43 +1048,63 @@ class _IntroMasterState extends State<IntroMaster>
     );
   }
 
+  /// 상단 마크. 막대 다섯이 브랜드 그러데이션(민트→보라)을 타고 숨 쉰다.
+  /// 파형은 소리를 뜻하니 멈춰 있으면 죽은 그림이 된다 — 다만 옆 워드마크를
+  /// 이기면 안 되므로 진폭은 얕게 두고, 시계는 타원과 같은 것을 쓴다.
   Widget _buildWelcomeWaveMark() {
-    const heights = <double>[13, 24, 31, 21, 11];
-    return SizedBox(
-      width: 26,
-      height: 34,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: heights
-            .map(
-              (height) => Container(
-                width: 3,
-                height: height,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF52D4C3),
-                  borderRadius: BorderRadius.circular(99),
-                ),
-              ),
-            )
-            .toList(),
-      ),
+    const heights = <double>[11, 20, 30, 22, 13];
+    return AnimatedBuilder(
+      animation: _welcomeMotionController,
+      builder: (context, _) {
+        final phase = _welcomeMotionController.value * math.pi * 2;
+        return SizedBox(
+          width: 30,
+          height: 34,
+          child: ShaderMask(
+            blendMode: BlendMode.srcIn,
+            shaderCallback: (rect) => const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFF52D4C3), Color(0xFF7661EA)],
+            ).createShader(rect),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: List.generate(heights.length, (index) {
+                final swing = math.sin(phase + index * 0.9) * 3;
+                return Container(
+                  width: 2.5,
+                  height: (heights[index] + swing).clamp(6.0, 34.0),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                );
+              }),
+            ),
+          ),
+        );
+      },
     );
   }
 
   /// 타원 전체가 버튼이다 — 글자만 눌리면 눌러도 안 되는 것처럼 보인다.
-  /// 숨 쉬듯 아주 조금 움직여서 "눌러도 되는 것"임을 알린다(소리 구슬과 같은
-  /// 시계를 쓴다 — 화면에서 두 움직임이 어긋나지 않게).
+  /// 숨 쉬는 결(세로·크기)에 좌우로 살짝 흔들리는 결을 얹어 "눌러도 되는 것"
+  /// 임을 알린다. 흔들림은 숨보다 두 배 빠르되 ±1.6px·±0.9°로 얕게 둔다 —
+  /// 크게 흔들면 글자가 읽히지 않는다(소리 구슬과 같은 시계를 쓴다).
   Widget _buildWelcomeTagline() {
     return AnimatedBuilder(
       animation: _welcomeMotionController,
       builder: (context, child) {
         final phase = _welcomeMotionController.value * math.pi * 2;
         return Transform.translate(
-          offset: Offset(0, math.sin(phase) * 2.2),
-          child: Transform.scale(
-            scale: 1 + math.sin(phase) * 0.012,
-            child: child,
+          offset: Offset(math.sin(phase * 2) * 1.6, math.sin(phase) * 2.2),
+          child: Transform.rotate(
+            angle: math.sin(phase * 2 + 0.7) * 0.016,
+            child: Transform.scale(
+              scale: 1 + math.sin(phase) * 0.012,
+              child: child,
+            ),
           ),
         );
       },
@@ -3090,7 +3110,7 @@ class _IntroAmbientPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     canvas.drawRect(
       Offset.zero & size,
-      Paint()..color = const Color(0xFF131313),
+      Paint()..color = const Color(0xFF121212),
     );
     canvas.drawRect(
       Offset.zero & size,
