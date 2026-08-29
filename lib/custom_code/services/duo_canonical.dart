@@ -304,14 +304,27 @@ Judge every turn by its CONVERSATIONAL FUNCTION in context, never by its length 
 
 States you may assign:
   included    - a real turn in the conversation. THIS IS THE DEFAULT.
-  merged      - a fragment of one sentence that you joined into a neighbouring turn of the SAME speaker. Only when no real turn by the other speaker sits between them.
+  merged      - a fragment you joined into a neighbouring turn of the SAME speaker. Only when no real turn by the other speaker sits between them.
   hesitation  - real voice, but only filling the speaker's own pause; no reply, question, reaction or agreement.
   echo        - this speaker's phone picked up the OTHER speaker's voice from the loudspeaker. Requires the other speaker to have a near-identical line at almost the same time. A person genuinely repeating what they heard is NOT echo.
   duplicate   - the same moment stored twice by the recognizer. Matching words alone never justify this.
 
 If you are unsure, choose "included". Wrongly keeping a line costs little; wrongly hiding one loses what a person said.
 
-For turns you keep, tidy only the surface: spacing, punctuation, and a mis-hearing that the surrounding turns clearly settle. Never add facts, fix the speaker's grammar, improve their style, complete an uncertain fragment, summarize, compress, or translate.
+Write the turns you keep as READABLE SENTENCES, not as transcript fragments. The person on the other end heard a sentence; the reader should see one too.
+
+You may:
+- Put a sentence that arrived in pieces back together as that one sentence.
+- Finish a turn that is plainly unfinished, when the call itself already settles how it ends - the reply, or that speaker's own next words.
+- Fix spacing, punctuation, and a mis-heard word that the surrounding turns clearly settle.
+
+You may NOT:
+- Add a fact, a plan, a reason or a feeling that was never spoken.
+- Decide something the two left undecided, or make an answer more certain than it was.
+- Rewrite a turn that already reads fine, polish someone's style, or make them sound more fluent.
+- Summarise, compress, drop a real turn, or translate.
+
+When you cannot tell how a turn was meant to end, leave it exactly as it is. A rough line costs little; an invented one costs the whole point of studying your own call.
 
 Return strict JSON only:
 {"turns":[{"ids":["<source id>"],"role":"HOST","text":"...","state":"included"}]}
@@ -529,10 +542,19 @@ Future<bool> applyDuoCanonicalToHistory({
     // 내 방의 줄을 채널 문서 id로 찾을 수 있어야 옮길 수 있다.
     final msgSnap = await historyRef.collection('messages').get();
     final byChannelId = <String, DocumentReference<Map<String, dynamic>>>{};
+    // 갈아 끼우기 전의 글자. 이미 한 번 남겨 뒀으면 그것이 원문이다.
+    final rawTextById = <String, String>{};
     for (final doc in msgSnap.docs) {
+      final data = doc.data();
       final String channelId =
-          (doc.data()['channel_msg_id'] ?? '').toString().trim();
-      if (channelId.isNotEmpty) byChannelId[channelId] = doc.reference;
+          (data['channel_msg_id'] ?? '').toString().trim();
+      if (channelId.isEmpty) continue;
+      byChannelId[channelId] = doc.reference;
+      final String existingRaw =
+          (data[kOriginalRawField] ?? '').toString().trim();
+      rawTextById[channelId] = existingRaw.isNotEmpty
+          ? existingRaw
+          : (data['original_text'] ?? '').toString().trim();
     }
     if (byChannelId.isEmpty) return false;
 
@@ -543,8 +565,16 @@ Future<bool> applyDuoCanonicalToHistory({
       // 이은 줄은 첫 조각이 대표가 되고, 나머지는 그 줄에 흡수됐다고 적는다.
       final head = byChannelId[turn.sourceIds.first];
       if (head != null) {
+        // 🔤 [원문 보존] 정돈이 글자를 갈아 끼우기 전의 전사 원문을 남긴다.
+        //   문장으로 세우는 일을 열어 준 만큼, **실제로 들린 글자**가
+        //   어디에도 안 남는 상태를 만들면 안 된다. 이미 있으면 덮지 않는다 —
+        //   가장 처음 것이 원문이다.
+        final headRaw =
+            (rawTextById[turn.sourceIds.first] ?? '').toString().trim();
         batch.update(head, <String, dynamic>{
           'original_text': turn.text,
+          if (headRaw.isNotEmpty && headRaw != turn.text)
+            kOriginalRawField: headRaw,
           kStudyStateField: turn.state,
           'canonical_version': version,
         });
