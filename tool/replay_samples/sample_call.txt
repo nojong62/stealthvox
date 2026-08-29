@@ -1,0 +1,20 @@
+# 손으로 적은 견본. 실제 통화 기록을 넣기 전에 규칙이 도는지 보는 용도다.
+# Firestore 콘솔의 duo_sessions/{roomId}/canonical/current 또는 messages를 보고
+# 이 모양으로 옮겨 적으면 그대로 돌릴 수 있다.
+#
+#   HOST  = 방을 만든 사람    GUEST = 초대받아 들어온 사람
+#
+# 아래는 두 사람이 각자 자기 언어로 말한 통화다. Replay는 이 섞임을 그대로
+# 두어야 한다 — 한쪽으로 옮기면 그건 번역이지 복원이 아니다.
+
+HOST: 내일... 어, 내일 몇 시쯤 올 거야?
+GUEST: Well, um... probably around six?
+HOST: 아 그래? 그러면
+HOST: 저녁 같이 먹자.
+GUEST: Sounds good to me.
+GUEST: Sounds good to me.
+HOST: 음...
+HOST: 아 맞다, 지난번 그 식당 어땠어?
+GUEST: The one near the station? It was pretty good.
+HOST: 어.
+GUEST: 어.

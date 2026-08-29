@@ -44,3 +44,6 @@ node_modules/
 *.log
 *_logcat*.txt
 adb_logcat_*.txt
+
+# Replay probe에 손으로 넣어 두는 OpenAI 키. 절대 커밋하지 않는다.
+tool/.openai_key
