@@ -28,6 +28,8 @@ import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
 // 보기와 비용 기능을 가르는 판정 한 벌. 공부방·과금 티커와 같은 자리를 본다.
 import '/custom_code/services/study_access.dart';
+// 직접 통화 방을 가리는 필드 이름. 목록이 Replay 표를 붙일 때 본다.
+import '/custom_code/services/duo_canonical.dart';
 
 const String _historyListTtsModel = 'tts-1';
 const String _historyListTtsVoice = 'nova';
@@ -807,6 +809,10 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     }
 
     String previewText = data['last_message'] ?? "(대화 내용 없음)";
+    // 🎬 직접 통화 방만 Replay가 붙는다. 만능 통역은 같은 이름으로 저장되지만
+    //   남는 글이 **내가 들은 번역문**이라 되살릴 통화가 없다.
+    //   `duo_mode`가 없는 옛 방에는 표가 안 붙는다 — 소급하지 않는다.
+    final bool isDuoDirect = (data[kDuoModeField] ?? '') == 'direct';
     bool isChecked = _selectedDocIds.contains(doc.id);
     bool showCheckbox = _selectedFilter != 'All';
 
@@ -896,11 +902,40 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                           fontWeight: FontWeight.bold,
                           fontSize: 15)),
                   const SizedBox(height: 6),
-                  Text(previewText,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style:
-                          const TextStyle(color: Colors.white54, fontSize: 12)),
+                  // 미리보기 한 줄 앞에 표를 붙인다. 줄을 새로 만들지 않는다 —
+                  // 목록 카드의 높이가 방마다 달라지면 훑어보기가 나빠진다.
+                  Row(
+                    children: [
+                      if (isDuoDirect) ...[
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF52D4C3)
+                                .withValues(alpha: 0.16),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text(
+                            'Replay',
+                            style: TextStyle(
+                              color: Color(0xFF52D4C3),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.2,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                      ],
+                      Expanded(
+                        child: Text(previewText,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                color: Colors.white54, fontSize: 12)),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),

@@ -58,11 +58,25 @@ import '/custom_code/services/history_text_model.dart';
 import '/custom_code/services/duo_canonical.dart';
 
 // ============================================================================
-// 🗣️ [DUO-MODE] Duo는 두 가지 방식으로 갈린다.
+// 🗣️ [DUO-MODE] Duo는 두 가지 방식으로 갈린다. **통신 로직 자체가 다르다** —
+// 이름만 다른 두 화면이 아니다.
+//
 //   direct      — 사람 목소리 그대로 오가는 통화. AI가 끼지 않는다.
-//                 마이크 PCM을 릴레이로 보내고, 같은 PCM을 전사에도 흘려
-//                 History용 텍스트만 뒤에서 만든다.
-//   interpreter — 기존 Duo. PTT로 말하면 STT→번역→TTS로 상대에게 들려준다.
+//                 마이크 PCM을 릴레이(`duo_pcm_relay_client`)로 보내고, 같은
+//                 PCM을 전사에도 흘려 History용 텍스트만 뒤에서 만든다.
+//                 → 소리는 실시간, 글자는 부산물.
+//
+//   interpreter — 기존 Duo. **서클톡과 같은 통신 로직이다.** 릴레이를 쓰지
+//                 않는다. 내 말을 STT로 글자로 만들어 채널에 올리고, 상대
+//                 글자를 받아 GPT로 번역해 TTS로 들려준다. 마이크 캡처
+//                 (`PreparedAudioCapture`)·전사 세션·재생기(`TtsAdapter`)
+//                 세 벌 모두 서클톡과 같은 구현을 쓴다.
+//                 → 글자가 본체, 소리는 그것을 읽어 주는 것.
+//
+// **그래서 Replay·canonical은 direct에만 있다.** interpreter는 오간 것이
+// 애초에 글자이고 상대에게 들린 것은 번역문이라, "실제로 나눈 대화를 다시
+// 세운다"가 성립하지 않는다. 통화가 끝나면 세션 문서도 지운다 — 남길 공유
+// 결과가 없기 때문이다(`_handleAutoSaveAndExit`의 delete 갈래).
 //
 // 저장 id는 이 두 문자열이다. 표시명이 바뀌어도 여기는 바꾸지 않는다.
 // ============================================================================
@@ -2875,6 +2889,11 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         //   찾아 옮길 수 있다.** 게스트는 입장 순서 때문에 이 시점에 아직
         //   없을 수 있어, 종료 때 한 번 더 채운다.
         if (_currentRoomId != null) kDuoRoomIdField: _currentRoomId,
+        // 🏷️ 어느 방식의 통화였나. 두 방식은 같은 이름(`Duo Connect Mode`)으로
+        //   저장되지만 **남는 글이 다르다** — 직접 대화는 두 사람이 실제로 한
+        //   말이고, 만능 통역은 내가 들은 번역문이다. 히스토리 목록이 이 값을
+        //   보고 Replay가 붙는 방을 가린다.
+        kDuoModeField: _duoMode,
       });
       BillingTicker.instance.setSessionIdentifiers(
         sessionDocId: _myHistoryRef?.id,

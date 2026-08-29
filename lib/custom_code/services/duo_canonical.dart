@@ -28,6 +28,11 @@ import 'duo_study_state.dart';
 //
 // **canonical은 요약이 아니다.** 오간 순서를 그대로 두고, 갈라진 조각을 잇고,
 // 되먹임·중복·말 고르는 소리만 감춘다. 무엇이 중요한 말인지는 판단하지 않는다.
+//
+// ⚠️ **직접 대화(`direct`) 전용이다.** 만능 통역은 릴레이 없이 STT→번역→TTS로
+// 도는 서클톡과 같은 통신 로직이라, 상대에게 들린 것이 번역문이고 오간 것이
+// 애초에 글자다. 정돈할 "두 사람의 실제 발화 한 시간축"이 없다.
+// [readDuoSourceTimeline]이 `duoMode == 'direct'`만 읽는 것도 그래서다.
 // ====================================================================
 
 /// 세션 문서에 참가자별로 찍는 "나는 더 이상 말을 안 올린다" 표시.
@@ -48,6 +53,16 @@ const String kDuoCanonicalDoc = 'current';
 /// 개인 히스토리 방이 어느 통화였는지 가리키는 고리.
 /// **이 값이 없는 방은 옛 방이다** — canonical을 쓰지 않고 예전 방식으로 둔다.
 const String kDuoRoomIdField = 'duo_room_id';
+
+/// 개인 히스토리 방에 적는 통화 방식(`direct` · `interpreter`).
+///
+/// 두 방식은 방 이름이 같아서 목록에서 구별되지 않는다. 그런데 남는 글이
+/// 다르다 — 직접 대화는 두 사람이 **실제로 한 말**이고, 만능 통역은 내가
+/// **들은 번역문**이다. Replay가 걸리는 쪽도 직접 대화뿐이다.
+///
+/// **이 값이 없는 방은 옛 방이다.** 그때는 [kDuoCanonicalVersionField]가
+/// 있는지로 가린다 — 그 값은 직접 대화에만 붙는다.
+const String kDuoModeField = 'duo_mode';
 const String kDuoCanonicalVersionField = 'duo_canonical_version';
 const String kDuoCanonicalAppliedAtField = 'duo_canonical_applied_at';
 
