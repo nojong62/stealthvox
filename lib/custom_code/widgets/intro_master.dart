@@ -62,15 +62,15 @@ class _IntroMasterState extends State<IntroMaster>
   static const List<List<String>> _kTaglinePitches = <List<String>>[
     <String>[
       '🎙️ AI 실전 외국어 연습장',
-      '문법 강의도, 패턴 드릴도 없습니다.\n오직 대화, 오직 실전.\n₩17,000 = 10시간 | 쓴 만큼만 차감',
+      '문법 강의도, 패턴 드릴도 없습니다.\n오직 대화, 오직 실전.\n이용 시간만큼만 차감',
     ],
     <String>[
       '🎙️ 수업은 없고, 실전만 있습니다',
-      'AI와 진짜 대화하는 외국어 연습장.\n10시간 ₩17,000 — 안 쓰면 안 빠져요.',
+      'AI와 진짜 대화하는 외국어 연습장.\n이용 시간만큼만 차감',
     ],
     <String>[
       '🎙️ 나만의 AI 실전 연습장',
-      '강의 없이, 대화로만 외국어를 익히세요.\n10시간 ₩17,000 · 쓴 만큼만 차감',
+      '강의 없이, 대화로만 외국어를 익히세요.\n이용 시간만큼만 차감',
     ],
   ];
   static const Duration _kTaglineBubbleLife = Duration(seconds: 5);
