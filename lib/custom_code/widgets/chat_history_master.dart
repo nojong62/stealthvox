@@ -43,6 +43,7 @@ import '/custom_code/services/speech_reconstruction.dart';
 import '/custom_code/services/duo_study_state.dart';
 import '/custom_code/services/history_text_model.dart';
 import '/custom_code/services/duo_canonical.dart';
+import '/custom_code/services/study_access.dart';
 import '/custom_code/services/pcm_audio_utils.dart'
     show kStealthVoxSttSampleRate, pcm16DurationMs, pcm16ToWav;
 
@@ -756,6 +757,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   void _scheduleMissingTargetGeneration(List<DocumentSnapshot> docs) {
     if (!_usesDeferredHistoryTargets || docs.isEmpty) return;
+    // 🎫 배울글은 GPT가 만든다 = 새 비용이다. 못 만드는 사람에게는 원문이
+    //   그대로 남고 배지만 붙는다 — 자기가 한 말은 그대로 보인다.
+    if (!_paidStudySilentlyAllowed('target_generation')) return;
     _revertOverreachingOriginRepairs(docs);
     // 키를 아직 못 받았다. 원격 설정이 안 내려온 것뿐이라 곧 풀릴 수도 있지만,
     // 그 사이 화면은 "번역이 없는 줄"을 정상인 것처럼 보여준다. 실패로 표시해
@@ -906,6 +910,10 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   /// 키를 못 받아 실패했으면 번역 요청을 다시 보내봐야 소용없다. 원격 설정부터
   /// 강제로 다시 받아야 한다.
   Future<void> _retryHistoryTarget(DocumentSnapshot doc) async {
+    // 🎫 배지 자체는 잠긴 사람에게도 보인다(그 줄에 배울글이 없는 것은 사실
+    //   이므로). 다만 "다시 시도"는 GPT를 부르는 자리라, 여기서 이유를
+    //   말한다 — 눌러 봐야 "만들지 못했습니다"만 나오면 왜인지 알 수 없다.
+    if (!_guardPaidStudy()) return;
     final data = doc.data() as Map<String, dynamic>?;
     if (data == null) return;
     final original = (data['original_text'] ?? '').toString().trim();
@@ -982,6 +990,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     String originalText,
     String sourceLanguage,
   ) async {
+    if (!_paidStudySilentlyAllowed('target_generation')) return false;
     final source = originalText.trim();
     if (source.isEmpty) return false;
     if (_apiKey.isEmpty) {
@@ -1161,6 +1170,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
   //   MY SPEECH / NATIVE ENGLISH는 Practice 화면의 버튼에서 시작한다.
   Future<void> _enterShadowingFromRoom() async {
     if (_isEnteringPractice) return;
+    if (!_guardPaidStudy()) return;
     _resumeHistoryFromUserAction();
     if (mounted) setState(() => _isEnteringPractice = true);
     try {
@@ -1321,6 +1331,43 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         backgroundColor: const Color(0xFF2C2C2E),
       ),
     );
+  }
+
+  // ── 🎫 [STUDY-GATE] 보기는 열고, 새 비용만 막는다 ──────────────────────
+  //
+  //   대화 내용·타임라인·이미 만들어 둔 소리는 누구에게나 보인다. 막는 것은
+  //   **지금 새로 돈이 나가는 동작**뿐이다 — TTS 생성, GPT 재가공, 녹음 전사,
+  //   에코잉·쉐도잉·연습.
+  //
+  //   두 겹으로 막는다.
+  //     ① 눈에 보이는 겹 — 버튼을 흐리게 두고 누르면 이유를 말한다.
+  //        눌러도 아무 일이 없는 버튼은 만들지 않는다.
+  //     ② 손에 잡히는 겹 — 실제로 API를 부르는 함수 앞에서 한 번 더 막는다.
+  //        자동으로 도는 것(빠진 배울글 생성 등)은 버튼을 거치지 않는다.
+  //
+  //   판정은 `services/study_access.dart` 한 곳에서 온다. 과금 티커도 같은
+  //   자리를 보므로 "버튼은 열렸는데 차감만 막힌" 구간이 생기지 않는다.
+
+  StudyAccess get _studyAccess => currentStudyAccess();
+
+  bool get _paidStudyAllowed => _studyAccess.canUsePaidStudy;
+
+  /// 눌린 버튼에서 부른다. 막혔으면 이유를 알리고 false.
+  bool _guardPaidStudy() {
+    final access = _studyAccess;
+    if (access.canUsePaidStudy) return true;
+    _showRoomEntryToast(access.gateLabel);
+    debugPrint('[STUDY-GATE] blocked reason=${access.reason.name}');
+    return false;
+  }
+
+  /// 자동 경로·네트워크 함수 앞에서 부른다. 조용히 막는다 — 화면이 스스로
+  /// 부른 일이라 알릴 사람이 없다.
+  bool _paidStudySilentlyAllowed(String what) {
+    if (_paidStudyAllowed) return true;
+    debugPrint('[STUDY-GATE] skipped $what '
+        'reason=${_studyAccess.reason.name}');
+    return false;
   }
 
   // 🆕 [TUTOR] 사용자가 종료/중단할 때 호출
@@ -1484,6 +1531,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
 
   Future<void> _startAutoVADRecording() async {
     if (!mounted || !isPracticeMode || isPaused || _isAutoRecording) return;
+    // 🎫 녹음은 곧 전사(STT) 요청이다.
+    if (!_paidStudySilentlyAllowed('practice_recording')) return;
     final hasPermission = await appAudioRecorder.hasPermission();
     if (!hasPermission) return;
     if (mounted)
@@ -1669,6 +1718,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
   Future<void> _processAutoVADRecording(String path) async {
     if (!mounted || !isPracticeMode || currentIndex >= _tutorLines.length)
       return;
+    if (!_paidStudySilentlyAllowed('practice_stt')) return;
     final targetText = (_tutorLines[currentIndex]['text'] as String).trim();
     try {
       final uri = Uri.parse('https://api.openai.com/v1/audio/transcriptions');
@@ -1805,6 +1855,9 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
 
   // 📦 [Box 13: 듀얼 캡처 - Deepgram + WAV 파일]
   Future<void> _startDualCapture() async {
+    // 🎫 소켓이 열리는 순간부터 전사 비용이 나간다. 이 자리는 버튼이 아니라
+    //   재생 완료 콜백(`_onAudioComplete`)이 부르므로 자체 빗장이 필요하다.
+    if (!_paidStudySilentlyAllowed('shadow_stt')) return;
     if (_deepgramKey.isEmpty) {
       return;
     }
@@ -2109,6 +2162,16 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
   Future<void> _playMsgAudio(String msgId, String text) async {
     _resumeHistoryFromUserAction();
     if (text.isEmpty || _apiKey.isEmpty) return;
+    // 🎫 이미 받아 둔 소리는 그대로 들려준다. 아래 캐시가 비었을 때만
+    //   새로 만들게 되고, 그 자리는 [_fetchOpenAITTSInternal]이 막는다.
+    if (!_paidStudyAllowed) {
+      final cached = await _AudioDiskCache.read(
+          widget.historyDoc.id, 'tts1_nova_native_$msgId.mp3');
+      if (cached == null) {
+        _guardPaidStudy();
+        return;
+      }
+    }
     final historyId = widget.historyDoc.id;
     final cacheKey = 'tts1_nova_native_$msgId.mp3';
     final diskHit = await _AudioDiskCache.read(historyId, cacheKey);
@@ -2186,6 +2249,9 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     String? instructionTag,
     String? responseFormat,
   }) async {
+    // 🎫 소리를 **새로 만드는** 유일한 자리다. 여기만 막으면 이미 받아 둔
+    //   소리는 그대로 들리고, 새 비용만 나가지 않는다.
+    if (!_paidStudySilentlyAllowed('tts_generate')) return null;
     if (_apiKey.isEmpty || text.trim().isEmpty) return null;
     try {
       var response = await http
@@ -2245,6 +2311,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
 
   /// 같은 뜻을 스타일만 바꿔 늘어놓는다. 목록도 생성 규칙도 공용이다.
   void _showAltStylePopup(String baseText) {
+    if (!_guardPaidStudy()) return;
     _resumeHistoryFromUserAction();
     showAltStylePopup(
       context: context,
@@ -2256,6 +2323,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
 
   // 📦 [Box 17-A-2: 실전 튜터링 - 팝업 바텀시트]
   void _showTutoringPopup(String docId, String baseText) {
+    if (!_guardPaidStudy()) return;
     _resumeHistoryFromUserAction();
     if (_appIsRecording) {
       appAudioRecorder.stop().ignore();
@@ -2649,6 +2717,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
 
   // 📦 [Box 18: AI 튜터링 - 응용 문장 생성 API 호출]
   Future<void> _generateAppText(String baseText) async {
+    if (!_paidStudySilentlyAllowed('tutoring_text')) return;
     _resumeHistoryFromUserAction();
     if (!mounted) return;
     setState(() => isGeneratingApp = true);
@@ -2711,6 +2780,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
 
   // 📦 [Box 18-B: 실전 튜터링 - 녹음 시작]
   Future<void> _startAppRecording() async {
+    if (!_guardPaidStudy()) return;
     _resumeHistoryFromUserAction();
     final hasPermission = await appAudioRecorder.hasPermission();
     if (!hasPermission) return;
@@ -2733,6 +2803,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
   // 📦 [Box 18-C: 실전 튜터링 - 녹음 중지 → STT → GPT 교정]
   Future<void> _stopAppRecordAndProcess(
       String targetKo, String targetEn) async {
+    if (!_paidStudySilentlyAllowed('tutoring_stt')) return;
     _resumeHistoryFromUserAction();
     final path = await appAudioRecorder.stop();
     if (mounted) setState(() => _appIsRecording = false);
@@ -3099,10 +3170,15 @@ RULES — follow exactly:
                     )
                   : Icon(
                       isPracticeMode ? Icons.close : Icons.record_voice_over,
-                      color: Colors.amber,
+                      // 🎫 잠긴 상태를 색으로 먼저 알린다. 누르면 이유가 나온다.
+                      color: _paidStudyAllowed
+                          ? Colors.amber
+                          : Colors.amber.withValues(alpha: 0.35),
                       size: 28,
                     ),
-              tooltip: isPracticeMode ? "연습 종료" : "쉐도잉 연습 시작",
+              tooltip: isPracticeMode
+                  ? "연습 종료"
+                  : (_paidStudyAllowed ? "쉐도잉 연습 시작" : _studyAccess.gateLabel),
               onPressed: _isEnteringPractice
                   ? null
                   : () {
@@ -3225,22 +3301,28 @@ RULES — follow exactly:
             translated.isEmpty &&
             original.isNotEmpty;
 
-        Widget controlButtons = Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              padding: const EdgeInsets.all(8),
-              constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
-              icon: const Icon(Icons.play_circle,
-                  color: Colors.amberAccent, size: 28),
-              onPressed: () => _playMsgAudio(docs[index].id, translated),
-              tooltip: "소리 듣기",
-            ),
-            const SizedBox(height: 4),
-            _buildAppBtn(docs[index].id, translated),
-            const SizedBox(height: 4),
-            _buildAltStyleBtn(translated),
-          ],
+        // 🎫 비용이 드는 세 가지(소리 듣기·실전 튜터링·다른 표현)는 잠기면
+        //   흐려진다. **대화 글자는 그대로 보인다** — 못 쓰는 것은 새로 만드는
+        //   동작뿐이다. 탭은 살려 둔다: 눌러야 이유를 알 수 있다.
+        Widget controlButtons = Opacity(
+          opacity: _paidStudyAllowed ? 1.0 : 0.4,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                padding: const EdgeInsets.all(8),
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                icon: const Icon(Icons.play_circle,
+                    color: Colors.amberAccent, size: 28),
+                onPressed: () => _playMsgAudio(docs[index].id, translated),
+                tooltip: _paidStudyAllowed ? "소리 듣기" : _studyAccess.gateLabel,
+              ),
+              const SizedBox(height: 4),
+              _buildAppBtn(docs[index].id, translated),
+              const SizedBox(height: 4),
+              _buildAltStyleBtn(translated),
+            ],
+          ),
         );
 
         final String docId = docs[index].id;
@@ -3523,6 +3605,10 @@ RULES — follow exactly:
   // ══════════════════════════════════════════════════════════════════
   Widget _buildStudySelectScreen() {
     final bool busy = _isBuildingMySpeech || _isBuildingNativeEnglish;
+    // 🎫 잠겨 있어도 카드를 감추지 않는다. 무엇이 있는지 보이고, 왜 지금은
+    //   못 쓰는지 적힌다. 탭은 살려 둔다 — 눌러야 이유가 나온다.
+    final StudyAccess access = _studyAccess;
+    final bool locked = !access.canUsePaidStudy;
     // 대화가 남지 않는 방이면 전체 발화 학습 자체가 성립하지 않는다. 눌러 보고
     // 실패를 읽게 하지 말고 아예 띄우지 않는다.
     final bool speechReady = _supportsSpeechPractice(_cachedRoomMode);
@@ -3568,6 +3654,8 @@ RULES — follow exactly:
                       subtitle: "역할을 바꿔 가며 대화 연습",
                       icon: Icons.swap_horiz_rounded,
                       color: const Color(0xFF4ADE80),
+                      locked: locked,
+                      emptyHint: locked ? access.gateLabel : '',
                       onTap: busy ? null : _openPracticeStudy,
                     ),
                     if (speechReady) ...[
@@ -3578,8 +3666,9 @@ RULES — follow exactly:
                         icon: Icons.record_voice_over_rounded,
                         color: const Color(0xFF38BDF8),
                         preview: _mySpeech,
-                        emptyHint: "눌러서 만들기",
+                        emptyHint: locked ? access.gateLabel : "눌러서 만들기",
                         error: _mySpeechError,
+                        locked: locked,
                         isLoading: _isBuildingMySpeech,
                         onTap:
                             busy ? null : () => unawaited(_openMySpeechStudy()),
@@ -3591,8 +3680,9 @@ RULES — follow exactly:
                         icon: Icons.auto_awesome,
                         color: const Color(0xFFFBBF24),
                         preview: _nativeEnglish,
-                        emptyHint: "눌러서 만들기",
+                        emptyHint: locked ? access.gateLabel : "눌러서 만들기",
                         error: _nativeEnglishError,
+                        locked: locked,
                         isLoading: _isBuildingNativeEnglish,
                         onTap: busy
                             ? null
@@ -3629,13 +3719,16 @@ RULES — follow exactly:
     String emptyHint = '',
     String? error,
     bool isLoading = false,
+    bool locked = false,
   }) {
-    final String body = preview.trim();
+    // 잠긴 카드는 미리보기를 지운다 — 만들어 둔 문장이 있으면 쓸 수 있는
+    // 것처럼 보인다. 자리에는 [emptyHint]로 들어온 이유가 대신 앉는다.
+    final String body = locked ? '' : preview.trim();
     return GestureDetector(
       onTap: onTap,
       child: AnimatedOpacity(
         duration: const Duration(milliseconds: 200),
-        opacity: onTap == null && !isLoading ? 0.45 : 1.0,
+        opacity: (onTap == null && !isLoading) || locked ? 0.45 : 1.0,
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           decoration: BoxDecoration(
@@ -4814,6 +4907,7 @@ RULES — follow exactly:
   /// ⚠️ **특정 단어만 세워 읽는 강조 지시문을 넣지 않는다.** 문장을 특정 단어만
   /// 도드라진 상태로 익히면 안 된다.
   Future<void> _startP3Speaking() async {
+    if (!_guardPaidStudy()) return;
     final text = _p3TargetSentence;
     if (text.isEmpty) {
       _showRoomEntryToast('No sentence is available for P3');
@@ -6252,6 +6346,7 @@ RULES — follow exactly:
 
   /// 🔄 PRACTICE — 역할 교환 대화 연습. 재료는 진입할 때 이미 실려 있다.
   void _openPracticeStudy() {
+    if (!_guardPaidStudy()) return;
     if (_tutorLines.isEmpty) {
       _showRoomEntryToast('연습할 대화가 없습니다');
       return;
@@ -6284,6 +6379,7 @@ RULES — follow exactly:
 
   /// 🗣️ MY SPEECH — 없으면 만들고, 그대로 훈련으로 들어간다.
   Future<void> _openMySpeechStudy() async {
+    if (!_guardPaidStudy()) return;
     if (_isBuildingMySpeech || _isBuildingNativeEnglish) return;
     if (_mySpeech.trim().isEmpty && !await _ensureMySpeech()) return;
     if (!mounted) return;
@@ -6292,6 +6388,7 @@ RULES — follow exactly:
 
   /// 🇺🇸 NATIVE ENGLISH — My Speech가 없으면 그것부터 만든 뒤 이어서 만든다.
   Future<void> _openNativeEnglishStudy() async {
+    if (!_guardPaidStudy()) return;
     if (_isBuildingMySpeech || _isBuildingNativeEnglish) return;
     if (_nativeEnglish.trim().isEmpty) {
       if (_mySpeech.trim().isEmpty && !await _ensureMySpeech()) return;
@@ -6307,6 +6404,7 @@ RULES — follow exactly:
   /// 실패하면 **false다.** 상대방 말을 섞거나 아무 문장이나 만들어 채우지
   /// 않는다. 이유는 카드에 그대로 적힌다.
   Future<bool> _ensureMySpeech() async {
+    if (!_paidStudySilentlyAllowed('my_speech')) return false;
     if (_isBuildingMySpeech) return false;
     if (mounted) {
       setState(() {
@@ -6407,6 +6505,7 @@ RULES — follow exactly:
   /// 열린다. 실패하면 false이고, 그 자리는 **빈 채로 둔다.** My Speech를
   /// 복사해 채우면 두 카드가 같은 글자가 되어 견줄 것이 사라진다.
   Future<bool> _ensureNativeEnglish() async {
+    if (!_paidStudySilentlyAllowed('native_english')) return false;
     final source = _mySpeech.trim();
     if (source.isEmpty || _isBuildingNativeEnglish) return false;
     if (mounted) {

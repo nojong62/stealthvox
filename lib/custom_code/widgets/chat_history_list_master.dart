@@ -26,6 +26,8 @@ import 'routine_mode_scenario_talk.dart' show TtsCache;
 import 'alt_style_popup.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
+// 보기와 비용 기능을 가르는 판정 한 벌. 공부방·과금 티커와 같은 자리를 본다.
+import '/custom_code/services/study_access.dart';
 
 const String _historyListTtsModel = 'tts-1';
 const String _historyListTtsVoice = 'nova';
@@ -84,6 +86,24 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
   Widget _buildIdleOverlay() => const SizedBox.shrink();
   // ─────────────────────────────────────────────────────────────────────────
 
+  /// 🎫 비용이 드는 문을 열기 전에 한 번. 막혔으면 이유를 알리고 false.
+  ///
+  /// **목록 보기는 여기를 지나지 않는다.** 자기 대화가 무엇이 있는지는
+  /// 게스트도 비회원도 본다 — 잠그는 것은 새 비용이 나가는 자리뿐이다.
+  bool _guardPaidStudy() {
+    final access = currentStudyAccess();
+    if (access.canUsePaidStudy) return true;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(access.gateLabel),
+        duration: const Duration(seconds: 2),
+        backgroundColor: const Color(0xFF2C2C2E),
+      ),
+    );
+    debugPrint('[STUDY-GATE] list blocked reason=${access.reason.name}');
+    return false;
+  }
+
   // ── 필터 전환 + Keepers 과금 경계 제어 ──
   void _switchFilter(String newFilter) {
     // Keepers는 과금 구간이다. 전체 목록(무과금)에 머무는 것은 막지 않는다.
@@ -91,6 +111,9 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
       showBillingBlockedNotice(context);
       return;
     }
+    // Keepers 안에는 튜터링·소리 만들기가 그대로 들어 있다. 차감이 안 도는
+    // 사람(Duo 게스트·비회원)에게 열면 그 구간이 통째로 무료 API가 된다.
+    if (newFilter == 'Keepers' && !_guardPaidStudy()) return;
     final wasKeepers = _selectedFilter == 'Keepers';
     setState(() {
       _selectedFilter = newFilter;
@@ -261,6 +284,9 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
               icon: const Icon(Icons.security, color: Colors.white70),
               onPressed: () {
                 if (!guardBillingEntry(context)) return;
+                // 대화방은 전부 비용이 나가는 방이다. Duo 게스트가 통화 중
+                // 공부방을 거쳐 여기로 새는 길을 막는다.
+                if (!_guardPaidStudy()) return;
                 context.pushNamed('StealthRoom');
               },
             ),

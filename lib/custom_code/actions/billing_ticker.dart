@@ -19,6 +19,7 @@ import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '/custom_code/widgets/trial/trial_flow_state.dart';
+import '/custom_code/services/study_access.dart';
 
 /// FlutterFlow Custom Action 등록용 더미 함수.
 Future billingTicker() async {}
@@ -121,10 +122,19 @@ class BillingTicker with WidgetsBindingObserver {
   /// 않아 한 푼도 안 나가는 동안에도 초록불이 켜져 있었다.
   bool get _isActuallyBilling =>
       !_paused &&
-      !TrialFlowState.instance.isTrial &&
-      !FFAppState().isGuestSession &&
+      !_billingSuppressed &&
       FFAppState().remainingTimeLoaded &&
       !FFAppState().hasConfirmedZeroTime;
+
+  /// 지금이 **의도된 무료 구간**인가(맛보기·Duo 게스트).
+  ///
+  /// 식은 `services/study_access.dart`에 한 벌만 둔다. 공부방 버튼이 열리는
+  /// 조건과 차감이 도는 조건이 갈리면, 버튼만 열린 구간이 통째로 무료 API
+  /// 호출이 된다. 두 화면이 같은 자리를 보게 하는 것이 요점이다.
+  bool get _billingSuppressed => isDuoBillingSuppressed(
+        isTrial: TrialFlowState.instance.isTrial,
+        isDuoGuest: FFAppState().isGuestSession,
+      );
 
   /// 잔여시간이 0으로 **확정된** 유료 회원인가.
   ///
@@ -142,8 +152,7 @@ class BillingTicker with WidgetsBindingObserver {
   /// 유저까지 열어 주면 잔여 0으로 방에 들어가 무료로 쓰게 된다.
   bool get isBillingBlocked {
     if (FirebaseAuth.instance.currentUser == null) return false;
-    if (TrialFlowState.instance.isTrial) return false;
-    if (FFAppState().isGuestSession) return false;
+    if (_billingSuppressed) return false;
     return FFAppState().hasConfirmedZeroTime;
   }
 
