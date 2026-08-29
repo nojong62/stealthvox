@@ -1,0 +1,9 @@
+{
+  "name": "duo-rules-test",
+  "private": true,
+  "description": "duo_sessions 규칙을 에뮬레이터로 검증한다. 배포 전에 반드시 통과해야 한다.",
+  "type": "commonjs",
+  "dependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1"
+  }
+}

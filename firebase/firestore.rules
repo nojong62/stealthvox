@@ -87,9 +87,25 @@ service cloud.firestore {
     // without breaking either flow above.
     match /duo_sessions/{roomId} {
       function isParticipant() {
+        // get(key, default) 로 읽는다. 아직 게스트가 없는 방에서 partnerUid를
+        // 그냥 읽으면 "필드 없음"이 평가 오류가 되어, 규칙이 아니라 오류로
+        // 거부된다 -- 결과는 같아도 왜 막혔는지 알 수 없게 된다.
         return isAuth()
-          && (resource.data.hostUid == request.auth.uid
-              || resource.data.partnerUid == request.auth.uid);
+          && (resource.data.get('hostUid', '') == request.auth.uid
+              || resource.data.get('partnerUid', '') == request.auth.uid);
+      }
+
+      // 🔒 참가자라도 **주인 자리는 못 바꾼다.**
+      //
+      // 이게 없으면 게스트가 hostUid를 자기 uid로 덮어써서 방을 통째로 가져
+      // 간다. 그 순간 진짜 호스트는 자기 방의 참가자가 아니게 되어 발화도
+      // flush도 canonical도 못 쓰고, 방을 지울 권한까지 넘어간다.
+      // (에뮬레이터 검증에서 실제로 재현됐다 -- 2026-08-29)
+      //
+      // 게스트가 처음 자리를 잡는 경로는 아래 isTakingFreeSeat()이 따로 연다.
+      function ownersUnchanged() {
+        return !request.resource.data.diff(resource.data)
+          .affectedKeys().hasAny(['hostUid', 'partnerUid']);
       }
 
       // A guest taking a free seat. The seat is free when nobody is currently
@@ -98,7 +114,7 @@ service cloud.firestore {
       // itself must not change.
       function isTakingFreeSeat() {
         return isAuth()
-          && resource.data.isPartnerJoined != true
+          && resource.data.get('isPartnerJoined', false) != true
           && request.resource.data.partnerUid == request.auth.uid
           && request.resource.data.hostUid == resource.data.hostUid;
       }
@@ -106,9 +122,10 @@ service cloud.firestore {
       allow read: if isAuth();
       allow create: if isAuth()
         && request.resource.data.hostUid == request.auth.uid;
-      allow update: if isParticipant() || isTakingFreeSeat();
+      allow update: if (isParticipant() && ownersUnchanged())
+        || isTakingFreeSeat();
       allow delete: if isAuth()
-        && resource.data.hostUid == request.auth.uid;
+        && resource.data.get('hostUid', '') == request.auth.uid;
 
       // Each phone's own transcript of the call. Both sides read the whole
       // channel; only the two participants may add to it.
@@ -116,9 +133,9 @@ service cloud.firestore {
         allow read: if isAuth();
         allow write: if isAuth()
           && (get(/databases/$(database)/documents/duo_sessions/$(roomId))
-                .data.hostUid == request.auth.uid
+                .data.get('hostUid', '') == request.auth.uid
               || get(/databases/$(database)/documents/duo_sessions/$(roomId))
-                .data.partnerUid == request.auth.uid);
+                .data.get('partnerUid', '') == request.auth.uid);
       }
 
       // One shared, tidied conversation per call. Both phones read it to
@@ -131,9 +148,9 @@ service cloud.firestore {
         allow read: if isAuth();
         allow write: if isAuth()
           && (get(/databases/$(database)/documents/duo_sessions/$(roomId))
-                .data.hostUid == request.auth.uid
+                .data.get('hostUid', '') == request.auth.uid
               || get(/databases/$(database)/documents/duo_sessions/$(roomId))
-                .data.partnerUid == request.auth.uid);
+                .data.get('partnerUid', '') == request.auth.uid);
       }
     }
 
