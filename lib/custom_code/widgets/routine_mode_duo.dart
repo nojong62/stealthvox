@@ -52,6 +52,8 @@ import 'routine_mode_circle_talk.dart' show PreparedAudioCapture;
 import '/custom_code/services/duo_study_state.dart';
 // 익명 게스트가 끝나고 자기 계정으로 돌아왔을 때 이 통화를 되찾을 표.
 import '/custom_code/services/duo_guest_handoff.dart';
+// 통화가 끝난 게스트가 방금 한 대화를 보는 자리.
+import 'duo_guest_study_page.dart';
 import '/custom_code/services/history_text_model.dart';
 import '/custom_code/services/duo_canonical.dart';
 
@@ -1008,6 +1010,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   DocumentReference? _duoSessionRef;
   StreamSubscription? _partnerJoinedSubscription;
 
+  /// 직접 대화 게스트가 호스트 이탈을 지켜보는 구독. 호스트용
+  /// [_partnerJoinedSubscription]과 **따로 둔다** — 같은 필드를 쓰면 한쪽이
+  /// 다른 쪽을 끊는다.
+  StreamSubscription? _hostExitSubscription;
+
   // ── 🆕 [양방향 통역] 역할/메시지 채널 상태 ────────────────────────────────
   // _amIHost: 이 방에서 내가 호스트인지.
   //
@@ -1221,6 +1228,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     WidgetsBinding.instance.removeObserver(this);
     _trialCallTimer?.cancel();
     _partnerJoinedSubscription?.cancel();
+    _hostExitSubscription?.cancel();
     _messageSubscription?.cancel(); // 🆕 메시지 채널 구독 해제
     // 🆕 직접 대화 통화 경로(마이크·릴레이·전사·재생) 즉시 정리
     unawaited(_stopDirectCall('dispose'));
@@ -3481,8 +3489,11 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       //   미리 열고 마이크는 버튼을 기다렸다.
       _maybeAutoStartInterpreter('guest_joined');
       // 🔵 만능 통역 게스트에게만 세션 문서 리스너를 건다 — 호스트 이탈을
-      //   알 방법이 이것뿐이다(직접 대화는 릴레이 presence가 대신한다).
+      //   알 방법이 이것뿐이다.
       _listenForHostExitAsInterpreterGuest();
+      // 🟢 직접 대화 게스트는 이쪽이다. 릴레이 presence는 소리 길이 끊겼다는
+      //   것만 알려줄 뿐 "통화가 끝났다"를 뜻하지 않는다.
+      _listenForHostExitAsDirectGuest();
     } catch (e) {
       debugPrint('[Duo] Guest join error: $e');
       if (mounted) {
@@ -3521,6 +3532,38 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       if (data == null) return;
       // 게스트에게 상대는 호스트다. 호스트의 ORIGIN은 `hostLang`에 있다.
       _notePartnerChatLang(data['hostLang']?.toString(), 'session_doc');
+    });
+  }
+
+  /// 🟢 [DIRECT-LIVE] **직접 대화 게스트 전용** 호스트 이탈 감지.
+  ///
+  /// 직접 대화는 통화가 끝나도 세션 문서를 **지우지 않는다** — 원본 발화와
+  /// 공유 결과가 그 아래 살아야 하기 때문이다. 그래서 만능 통역처럼
+  /// "문서가 사라졌다"로는 알 수 없고, 호스트가 남기는 [kDuoEndedAtField]를
+  /// 본다.
+  ///
+  /// 예전에는 이 리스너가 없어서 **호스트가 나가도 게스트는 통화 화면에
+  /// 그대로 앉아 있었다.** 상대는 이미 없는데 화면은 통화 중이었다.
+  ///
+  /// 릴레이 presence로 대신하지 않는 이유: presence는 소리 길이 끊겼다는
+  /// 뜻이라 잠깐의 네트워크 끊김에도 내려간다. 그것으로 통화를 끝내면
+  /// 멀쩡한 통화가 혼자 종료된다. 호스트 앱이 그냥 죽은 경우는 이 표시가
+  /// 안 찍히므로 여전히 게스트가 직접 나가야 한다 — 남은 구멍이다.
+  void _listenForHostExitAsDirectGuest() {
+    if (!_isDirectMode || _amIHost || _duoSessionRef == null) return;
+    _hostExitSubscription?.cancel();
+    _hostExitSubscription = _duoSessionRef!.snapshots().listen((snap) {
+      if (_isExiting || !mounted) return;
+      final data = snap.data() as Map<String, dynamic>?;
+      // 문서가 통째로 사라진 경우도 끝난 것으로 본다(옛 방·정리 작업).
+      if (!snap.exists || data == null) {
+        _lgDuo('[DIRECT-LIVE]', 'host_left reason=session_gone');
+        unawaited(_handleAutoSaveAndExit());
+        return;
+      }
+      if (data[kDuoEndedAtField] == null) return;
+      _lgDuo('[DIRECT-LIVE]', 'host_left reason=ended_at');
+      unawaited(_handleAutoSaveAndExit());
     });
   }
 
@@ -3631,6 +3674,8 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     // listener 즉시 해제 — 본인의 Firestore 업데이트가 listener를 재트리거하지 않도록
     _partnerJoinedSubscription?.cancel();
     _partnerJoinedSubscription = null;
+    _hostExitSubscription?.cancel();
+    _hostExitSubscription = null;
     _messageSubscription?.cancel(); // 🆕 메시지 채널 구독도 해제
     _messageSubscription = null;
 
@@ -3792,9 +3837,27 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
           FFAppState().isGuestSession = false;
           _lgDuo('[GUEST-EXIT]', 'member guest — isGuestSession 해제');
         } else {
-          _lgDuo('[GUEST-EXIT]', 'anonymous guest — Intro에 남긴다');
+          _lgDuo('[GUEST-EXIT]', 'anonymous guest — 게스트 상태 유지');
         }
         FFAppState().update(() {});
+        // 🚪 [GUEST-EXIT] **방금 한 대화를 보여주고 끝낸다.**
+        //   예전에는 곧장 Intro였다. 초대받아 처음 써 본 사람에게 남는
+        //   마지막 화면이 로그인 창이었고, 방금 나눈 대화는 어디에도
+        //   없었다. 남길 줄이 있으면 공부방으로 보낸다 — 비용이 드는
+        //   기능은 잠겨 있어도 자기가 한 말은 볼 수 있다.
+        final guestHistoryRef = _myHistoryRef;
+        if (guestHistoryRef != null && _historyMessageCount > 0) {
+          _lgDuo('[GUEST-EXIT]', 'study_room lines=$_historyMessageCount');
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => DuoGuestStudyPage(historyRef: guestHistoryRef),
+            ),
+          );
+          return;
+        }
+        // 한 마디도 오가지 않았으면 열어 봐야 빈 방이다.
+        _lgDuo('[GUEST-EXIT]', 'intro reason=no_lines');
         context.goNamed('Intro');
       } else if (StealthRoomMaster.exitCurrentMode != null) {
         StealthRoomMaster.exitCurrentMode!();
