@@ -1,15 +1,23 @@
 // ====================================================================
-// 🎬 [REPLAY-RULES] "실제로 나눈 대화의 의미는 그대로 두고, 통화 잡음만
-// 걷어내 사람이 다시 읽고 공부할 수 있는 대화로 복원한 것."
+// 🎬 [REPLAY-RULES] "두 사람이 실제로 나눈 대화를, 읽고 공부할 수 있는
+// 대화로 다시 세운 것."
 // --------------------------------------------------------------------
-// **아직 앱에 붙이지 않는다.** 규칙을 실제 통화 몇 건에 돌려 보고, ④ 끊어진
-// 발화 복원과 ⑤ 맥락 연결을 어디까지 열지 눈으로 정한 뒤에 옮긴다.
-// (`tool/replay_probe.dart`가 이 파일을 쓴다)
+// **아직 앱에 붙이지 않는다.** 실제 통화 몇 건에 돌려 보고 눈으로 정한 뒤에
+// 옮긴다. (`tool/replay_probe.dart`가 이 파일을 쓴다)
+//
+// 2026-08-29 방향 조정: 조건을 잘게 달아 두니 결과가 부자연스러웠다. 이제
+// 모델에게 **통화 전체를 먼저 읽고 맥락과 중요한 주고받기 중심으로** 쓰게
+// 한다. 잘라내는 판단은 열되, **없던 사실을 만드는 것만 닫는다.**
 //
 // CANONICAL과 무엇이 다른가.
 //
 //   CANONICAL  줄을 **가린다**. 원문 글자는 그대로 두고 study_state만 바꾼다.
-//   REPLAY     줄을 **세운다**. 토막을 잇고 명백한 것만 되살려 읽히게 만든다.
+//              지운 것이 없으므로 언제나 되돌아갈 자리가 된다.
+//   REPLAY     대화를 **다시 세운다**. 중요하지 않은 주고받기는 빠지고,
+//              토막은 문장이 되고, 읽히는 대화가 남는다.
+//
+// 그래서 Replay가 줄을 버려도 안전하다 — 실제로 한 말은 canonical과 원본
+// 메시지에 그대로 있고, 화면은 그 둘을 오갈 수 있어야 한다(Original Call).
 //
 // 그래서 Replay는 canonical을 덮지 않고 그 위에 따로 산다. 덮으면 "내가 실제로
 // 한 말"이 사라지고, 그건 Duo의 장점 자체를 지우는 일이다.
@@ -66,6 +74,9 @@ const Set<String> kReplayDropReasons = <String>{
   'noise', // 사람이 낸 소리가 아닌 것을 전사기가 글로 만든 줄
   'filler', // 자기 차례를 붙들고 말을 고르던 발성("음…", "uh")
   'duplicate', // 같은 순간이 두 번 저장된 줄
+  // 응답 어디에도 안 적힌 줄. 모델이 대화에 넣지 않기로 한 것으로 본다.
+  // **원본은 canonical에 그대로 있다** — 그래서 여기서 버려도 잃지 않는다.
+  'unlisted',
 };
 
 /// 검토용 경고. **자동으로 막지 않는다** — 사람이 결과를 보고 판단할 재료다.
@@ -94,35 +105,25 @@ class ReplayResult {
 // ====================================================================
 // 🛟 [FALLBACK] Replay는 **개선 계층이지 원본을 대신하는 계층이 아니다.**
 // --------------------------------------------------------------------
-// 앱에 붙일 때도 이 원칙은 그대로 간다. Replay가 실패하거나 미덥지 않으면
-// canonical을 그대로 보여준다 — 조금 지저분한 대화가, 의미가 바뀐 매끈한
-// 대화보다 언제나 낫다.
+// 앱에 붙일 때도 이 원칙은 그대로 간다. Replay가 미덥지 않으면 canonical을
+// 그대로 보여준다 — 조금 지저분한 대화가, 없던 말이 섞인 매끈한 대화보다
+// 언제나 낫다.
 //
-// 무엇이 fallback을 부르는가는 **닫아 둔다.** "AI가 보기에 이상해서"로는
-// 되돌리지 않는다. 셋뿐이다.
+// 되돌리는 이유도 **닫아 둔다.** "AI가 보기에 이상해서"로는 되돌리지 않는다.
 //   · 응답을 읽지 못했다
-//   · 원본 없는 줄을 지어냈다        — 한 줄이라도 용납하지 않는다
-//   · 너무 많이 지웠다·빠뜨렸다      — 남은 것이 원본보다 나을 수 없다
+//   · 남은 대화가 없다
+//   · 원본에 없는 줄을 지어냈다      — 잘라내는 것은 열되 만드는 것은 닫는다
+//   · 한 사람 말만 남았다            — 대화가 아니게 됐다
+//   · 원본보다 줄이 늘었다           — 없던 주고받기를 만든 것이다
 //
-// 아래는 fallback을 부르지 **않는다.** 코드가 이미 안전한 쪽으로 되돌려
-// 놓았거나(화자 이동), 정상 복원에서도 흔히 나올 값이기 때문이다(길어짐).
-// 임계값은 실제 통화를 넣어 보고 정한다 — 지금 값은 잠정이다.
+// **줄을 많이 지운 것은 더 이상 되돌릴 이유가 아니다.** 중요하지 않은
+// 주고받기를 걷어내는 것이 이제 이 계층이 하는 일이고, 원본은 canonical에
+// 그대로 남아 있다.
 // ====================================================================
 
-/// 원본의 이 비율을 넘게 지우면 되돌린다.
-///
-/// ⚠️ **아직 손대지 않는다.** 실제 통화 5~10건의 분포를 보기 전에 만지면
-/// 무엇에 맞춘 값인지 알 수 없게 된다.
-///
-/// 이미 보이는 구멍 하나: **짧은 통화에서 비율은 거칠다.** 네 줄짜리 통화에서
-/// 진짜 잡음 두 줄을 지우면 50%가 되어, 정상 Replay가 되돌아간다. 실제
-/// 분포를 본 뒤 "비율 **또는** 절대 줄 수" 중 무엇으로 갈지 정한다
-/// (예: 비율을 넘더라도 지운 줄이 2줄 이하면 통과).
-const double kReplayMaxDropRatio = 0.4;
-
-/// 모델이 이 비율을 넘게 빠뜨리면(fail-open으로 되살아나도) 되돌린다.
-/// 절반을 흘린 응답은 정돈이 아니라 사고다. 위와 같은 이유로 잠정치다.
-const double kReplayMaxLostRatio = 0.3;
+/// 원본보다 줄이 이 배수를 넘게 늘면 되돌린다. 줄이는 계층이 늘렸다는 것은
+/// 없던 주고받기를 만들었다는 뜻이다.
+const double kReplayMaxTurnInflation = 1.15;
 
 class ReplayVerdict {
   const ReplayVerdict(this.useReplay, this.reasons);
@@ -139,24 +140,23 @@ class ReplayVerdict {
 ReplayVerdict judgeReplay({
   required ReplayResult result,
   required int sourceCount,
+  int sourceSpeakers = 2,
 }) {
   final reasons = <String>[];
   final kinds = result.warnings.map((w) => w.kind).toSet();
 
   if (kinds.contains('parse')) reasons.add('parse_failed');
   if (kinds.contains('invented')) reasons.add('invented_turn');
-  if (result.turns.isEmpty) reasons.add('empty');
-
-  if (sourceCount > 0) {
-    if (result.dropped.length / sourceCount > kReplayMaxDropRatio) {
-      reasons.add('too_much_dropped');
+  if (result.turns.isEmpty) {
+    reasons.add('empty');
+  } else {
+    if (sourceSpeakers > 1 &&
+        result.turns.map((t) => t.role).toSet().length < 2) {
+      reasons.add('speaker_collapsed');
     }
-    final lost = result.warnings
-        .where((w) => w.kind == 'restored_missing')
-        .map((w) => int.tryParse(RegExp(r'\d+').firstMatch(w.detail)?.group(0) ?? '0') ?? 0)
-        .fold<int>(0, (a, b) => a + b);
-    if (lost / sourceCount > kReplayMaxLostRatio) {
-      reasons.add('model_lost_lines');
+    if (sourceCount > 0 &&
+        result.turns.length > sourceCount * kReplayMaxTurnInflation) {
+      reasons.add('turn_inflation');
     }
   }
 
@@ -196,37 +196,44 @@ List<ReplayEdit> replayEdits({
 /// 모델에게 주는 권한은 **좁게** 잡는다. 첫 버전에서 넓히면 무엇이 지나쳤는지
 /// 가릴 수 없다. 애매하면 그대로 두는 쪽이 언제나 기본이다.
 const String kReplayPrompt =
-    '''You are restoring ONE phone call between two people so that it can be read and studied afterwards. Each line was transcribed from that speaker's own phone.
+    '''You are given ONE phone call between two people, already transcribed. Each line came from that speaker's own phone, so it carries everything a real call carries: noise, half-words, repeats, and sounds that were never really speech.
 
-This is NOT translation, NOT summarisation, NOT rewriting.
+Write the call out as a conversation someone can actually read and study.
 
-LANGUAGE RULE — absolute: every turn stays in the language the speaker actually used. If one speaker spoke Korean and the other English, the restored call keeps both, exactly as they were. Never translate a turn, not even partially.
+Read the WHOLE call first. Work out what the two people were doing together - what was asked, what was answered, what was agreed, what was left open. Then write that same conversation the way it would read if the recognizer had not mangled it: the important exchanges, in the order they happened, in clean sentences.
 
-Your only job is to take out what the phone call and the recognizer added, so that what the two people actually said reads as a conversation.
+LANGUAGE RULE - absolute: every turn stays in the language that speaker actually used. If one spoke Korean and the other English, your version keeps both, exactly as they were. Never translate a turn, not even one word inside a sentence.
 
-YOU MAY:
-1. Drop a line that is recognizer noise rather than speech.
-2. Drop a sound that only held the speaker's own turn while they searched for words ("음...", "uh"), when it is not an answer, a question, a reaction or an agreement.
-3. Drop a line the recognizer stored twice for the same moment. Matching words alone never justify this - a person genuinely repeating themselves is not a duplicate.
-4. Join fragments of ONE sentence by the SAME speaker into that sentence, when no real turn by the other speaker sits between them.
-5. Restore a word the surrounding turns make unmistakable - a mis-heard word that the reply plainly settles.
+KEEP:
+- What each person actually meant, and how strongly they meant it.
+- Who said what. Never move a line from one speaker to the other.
+- The order of the conversation, and the exchanges that carry it.
+- Names, places, numbers, times and dates exactly as spoken.
 
-YOU MAY NOT:
-- Translate anything.
-- Improve the wording, fix the speaker's grammar, or make a turn sound more natural, more fluent or more native.
-- Add a reason, a feeling, a detail or a politeness that was not spoken.
-- Summarise, shorten or compress the call.
-- Move words from one speaker to the other, or merge turns by different speakers.
-- Invent a turn that has no source line.
-- Guess at something ambiguous. WHEN IN DOUBT, KEEP THE LINE EXACTLY AS IT IS.
+DROP without hesitation:
+- Sounds that were never speech, and words the recognizer clearly invented.
+- Fillers and false starts that carry nothing.
+- The same thing stored twice.
+- Back-and-forth that only exists because the line was bad ("뭐라고?", "안 들려", "여보세요?").
 
-Keep both speakers in the order they actually spoke. Keep every turn that carries meaning, however short or ordinary: questions, answers, agreements, refusals, reactions, greetings.
+JOIN AND SMOOTH:
+- Put a broken-up sentence back together as one sentence.
+- Finish a turn that is obviously unfinished, using only what the call itself already settles.
+- Write natural, complete sentences instead of transcript fragments.
+
+NEVER:
+- Add a fact, a plan, a reason or a feeling that the two never touched.
+- Decide something they left undecided, or make an answer more certain than it was.
+- Turn a short exchange into a long one, or a long call into a summary of itself.
+- Translate.
+
+If the call is too broken to make sense of, return the lines as they are rather than guessing what the people meant.
 
 Return strict JSON only:
 {"turns":[{"ids":["<source id>"],"role":"HOST","text":"..."}],
  "dropped":[{"id":"<source id>","reason":"noise|filler|duplicate"}]}
 
-"ids" lists every source line that became this turn, in order. Every source id must appear exactly once across "turns" and "dropped".''';
+"ids" lists the source lines that turn came from, in order - your best mapping, several ids for a turn you joined. Put ids you left out in "dropped".''';
 
 Map<String, dynamic> buildReplayPayload(List<ReplaySourceLine> source) =>
     <String, dynamic>{
@@ -246,13 +253,12 @@ Map<String, dynamic> buildReplayPayload(List<ReplaySourceLine> source) =>
 
 /// 모델 응답을 읽고 **규칙을 지켰는지 같이 본다.**
 ///
-/// 빗장은 셋이고, 전부 "잃지 않는 쪽"으로 기운다.
-///   · 빠뜨린 원본은 원문 그대로 되살린다 — 근거 없이 사람 말을 지우지 않는다.
+/// 빗장은 둘이고, 남는 것은 전부 검토용 기록이다.
 ///   · 화자를 옮긴 줄은 원본 화자로 되돌린다 — 남의 말이 내 말이 되면 안 된다.
-///   · 모르는 이유로 지운 줄은 되살린다.
+///   · 원본 없는 줄은 버린다 — 잘라내는 것은 열되 만드는 것은 닫는다.
 ///
-/// 막지는 않되 눈에 띄게 적어 두는 것: 원본보다 훨씬 길어진 줄(지어냈을 수
-/// 있다), 서로 다른 화자를 한 줄로 묶은 것.
+/// 막지 않고 적어만 두는 것: 응답에 안 실린 줄, 원본보다 훨씬 길어진 줄,
+/// 서로 다른 화자를 한 줄로 묶은 것.
 ReplayResult parseReplayResponse({
   required String content,
   required List<ReplaySourceLine> source,
@@ -311,7 +317,9 @@ ReplayResult parseReplayResponse({
     // 원본보다 크게 길어졌다 = 없던 말이 붙었을 수 있다.
     final int sourceLen =
         ids.fold<int>(0, (n, id) => n + byId[id]!.text.trim().length);
-    if (sourceLen > 0 && text.length > sourceLen * 1.6) {
+    // 토막을 문장으로 세우면 길어지는 것이 정상이라 창을 넓게 둔다.
+    // **막지 않는다** — 사람이 보고 판단할 재료다.
+    if (sourceLen > 0 && text.length > sourceLen * 2.5) {
       warnings.add(ReplayWarning('expanded',
           '원본 $sourceLen자 → ${text.length}자: "$text"'));
     }
@@ -333,18 +341,21 @@ ReplayResult parseReplayResponse({
     dropped.add(ReplayDrop(id: id, reason: reason));
   }
 
-  // 🧭 [FAIL-OPEN] 어디에도 안 적힌 원본은 원문 그대로 되살린다. 판단인지
-  //   실수인지 알 수 없고, 근거 없이 사람 말을 감추지 않는다.
-  final missing = <ReplayTurn>[];
+  // 어디에도 안 적힌 원본은 **대화에서 뺀 것으로 본다.**
+  //
+  //   예전에는 여기서 원문 그대로 되살렸다. 정돈만 하던 시절에는 그게 맞았다
+  //   — 빠진 줄은 실수일 가능성이 컸으니까. 지금은 중요하지 않은 주고받기를
+  //   걷어내는 것이 이 계층이 하는 일이라, 되살리면 그 일을 무르는 셈이 된다.
+  //   **실제로 한 말은 canonical과 원본 메시지에 그대로 있다.**
+  var unlisted = 0;
   for (final s in source) {
     if (seen.contains(s.id)) continue;
-    missing.add(
-        ReplayTurn(role: s.role, text: s.text, sourceIds: <String>[s.id]));
+    dropped.add(ReplayDrop(id: s.id, reason: 'unlisted'));
+    unlisted++;
   }
-  if (missing.isNotEmpty) {
-    warnings.add(ReplayWarning(
-        'restored_missing', '${missing.length}줄이 응답에서 빠져 원문으로 되살렸다'));
-    turns.addAll(missing);
+  if (unlisted > 0) {
+    warnings.add(
+        ReplayWarning('unlisted', '$unlisted줄이 응답에 안 실렸다 — 뺀 것으로 본다'));
   }
 
   return ReplayResult(turns: turns, dropped: dropped, warnings: warnings);

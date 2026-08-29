@@ -101,20 +101,22 @@ void main() {
     });
   });
 
-  group('🧭 잃지 않는 쪽으로 기운다', () {
-    test('응답에서 빠진 원본은 원문 그대로 되살린다', () {
+  group('빼는 것은 열고, 만드는 것은 닫는다', () {
+    test('응답에 안 실린 줄은 뺀 것으로 본다 — 되살리지 않는다', () {
+      // 원본은 canonical에 그대로 있다. 여기서 버려도 잃지 않는다.
       final result = parseReplayResponse(
         content: reply(<Map<String, dynamic>>[
           {'ids': ['1'], 'role': 'HOST', 'text': '내일 몇 시쯤 올 거야?'},
         ]),
         source: source,
       );
-      expect(result.turns.length, source.length);
-      expect(result.turns.map((t) => t.text), contains('Sounds good to me.'));
-      expect(result.warnings.map((w) => w.kind), contains('restored_missing'));
+      expect(result.turns.length, 1);
+      expect(result.dropped.length, 4);
+      expect(result.dropped.every((d) => d.reason == 'unlisted'), isTrue);
+      expect(result.warnings.map((w) => w.kind), contains('unlisted'));
     });
 
-    test('아는 이유로만 지운다 — 모르는 이유는 되살린다', () {
+    test('모르는 이유로 지웠다고 해도 결국 뺀 줄로 남는다', () {
       final result = parseReplayResponse(
         content: reply(
           <Map<String, dynamic>>[
@@ -126,13 +128,13 @@ void main() {
         ),
         source: source,
       );
-      expect(result.dropped, isEmpty);
-      expect(result.turns.map((t) => t.text), contains('Sounds good to me.'));
       expect(result.warnings.map((w) => w.kind), contains('unknown_reason'));
+      expect(result.dropped.firstWhere((d) => d.id == '5').reason, 'unlisted');
     });
 
-    test('잡음·추임새·중복 셋만 지울 수 있다', () {
-      expect(kReplayDropReasons, <String>{'noise', 'filler', 'duplicate'});
+    test('지울 수 있는 이유는 네 가지뿐이다', () {
+      expect(kReplayDropReasons,
+          <String>{'noise', 'filler', 'duplicate', 'unlisted'});
     });
 
     test('응답이 JSON이 아니면 원본을 그대로 쓴다', () {
@@ -176,7 +178,7 @@ void main() {
           contains('invented_turn'));
     });
 
-    test('원본의 절반 가까이를 지우면 되돌린다', () {
+    test('많이 지운 것만으로는 되돌리지 않는다 — 걷어내는 것이 이 계층의 일이다', () {
       final r = res(
         <Map<String, dynamic>>[
           {'ids': ['1'], 'role': 'HOST', 'text': '내일 몇 시쯤 올 거야?'},
@@ -188,16 +190,28 @@ void main() {
           {'id': '5', 'reason': 'duplicate'},
         ],
       );
-      expect(judgeReplay(result: r, sourceCount: source.length).reasons,
-          contains('too_much_dropped'));
+      expect(judgeReplay(result: r, sourceCount: source.length).useReplay,
+          isTrue);
     });
 
-    test('모델이 절반을 흘리면 — 되살아나더라도 — 되돌린다', () {
+    test('한 사람 말만 남으면 되돌린다 — 대화가 아니게 됐다', () {
       final r = res(<Map<String, dynamic>>[
         {'ids': ['1'], 'role': 'HOST', 'text': '내일 몇 시쯤 올 거야?'},
+        {'ids': ['3', '4'], 'role': 'HOST', 'text': '아 그래? 그러면 저녁 같이 먹자.'},
       ]);
       expect(judgeReplay(result: r, sourceCount: source.length).reasons,
-          contains('model_lost_lines'));
+          contains('speaker_collapsed'));
+    });
+
+    test('원본보다 줄이 늘면 되돌린다 — 없던 주고받기를 만든 것이다', () {
+      final r = res(<Map<String, dynamic>>[
+        for (var i = 0; i < 4; i++) ...<Map<String, dynamic>>[
+          {'ids': ['1'], 'role': 'HOST', 'text': '내일 몇 시쯤 올 거야? $i'},
+          {'ids': ['2'], 'role': 'GUEST', 'text': 'Around six. $i'},
+        ]
+      ]);
+      expect(judgeReplay(result: r, sourceCount: source.length).reasons,
+          contains('turn_inflation'));
     });
 
     test('길어짐·화자 뒤바뀜은 되돌리지 않는다 — 경고로만 남는다', () {
@@ -255,19 +269,24 @@ void main() {
   });
 
   group('프롬프트가 정책을 그대로 담고 있다', () {
-    test('번역 금지가 명시되어 있다', () {
-      expect(kReplayPrompt, contains('NOT translation'));
+    test('번역 금지가 절대 규칙으로 적혀 있다', () {
+      expect(kReplayPrompt, contains('LANGUAGE RULE - absolute'));
       expect(kReplayPrompt, contains('Never translate a turn'));
     });
 
-    test('세련되게 다듬기·요약·화자 옮기기가 금지되어 있다', () {
-      expect(kReplayPrompt, contains('more native'));
-      expect(kReplayPrompt, contains('Summarise'));
-      expect(kReplayPrompt, contains('Move words from one speaker'));
+    test('전체를 먼저 읽고 중요한 주고받기 중심으로 세우라고 되어 있다', () {
+      expect(kReplayPrompt, contains('Read the WHOLE call first'));
+      expect(kReplayPrompt, contains('the important exchanges'));
     });
 
-    test('애매하면 그대로 두는 것이 기본이다', () {
-      expect(kReplayPrompt, contains('WHEN IN DOUBT, KEEP THE LINE EXACTLY AS IT IS'));
+    test('없던 사실·화자 이동·요약은 금지되어 있다', () {
+      expect(kReplayPrompt, contains('Add a fact'));
+      expect(kReplayPrompt, contains('Never move a line from one speaker'));
+      expect(kReplayPrompt, contains('summary of itself'));
+    });
+
+    test('알아볼 수 없으면 원본을 그대로 두라고 되어 있다', () {
+      expect(kReplayPrompt, contains('return the lines as they are'));
     });
   });
 }
