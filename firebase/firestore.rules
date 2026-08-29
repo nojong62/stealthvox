@@ -74,15 +74,66 @@ service cloud.firestore {
     }
 
     // Duo shared sessions. Anonymous users pass this after signInAnonymously().
+    //
+    // READ stays open to any signed-in user, on purpose: an invited guest must
+    // read the room (mode, isDuoEnabled, hostLang) BEFORE they are recorded as
+    // a participant, and a member who signs in after an anonymous Duo call
+    // restores that call under a uid the room has never seen. Both flows break
+    // the moment reads require participation. Knowing a room id therefore
+    // grants read access -- room ids are random Firestore ids shared only over
+    // the invite link.
+    //
+    // WRITES are participant-only. This is the part that can be tightened
+    // without breaking either flow above.
     match /duo_sessions/{roomId} {
+      function isParticipant() {
+        return isAuth()
+          && (resource.data.hostUid == request.auth.uid
+              || resource.data.partnerUid == request.auth.uid);
+      }
+
+      // A guest taking a free seat. The seat is free when nobody is currently
+      // joined; the host may re-invite someone else after the first guest
+      // leaves, so this cannot require partnerUid to be absent. The host slot
+      // itself must not change.
+      function isTakingFreeSeat() {
+        return isAuth()
+          && resource.data.isPartnerJoined != true
+          && request.resource.data.partnerUid == request.auth.uid
+          && request.resource.data.hostUid == resource.data.hostUid;
+      }
+
       allow read: if isAuth();
-      allow create: if isAuth();
-      allow update: if isAuth();
+      allow create: if isAuth()
+        && request.resource.data.hostUid == request.auth.uid;
+      allow update: if isParticipant() || isTakingFreeSeat();
       allow delete: if isAuth()
         && resource.data.hostUid == request.auth.uid;
 
+      // Each phone's own transcript of the call. Both sides read the whole
+      // channel; only the two participants may add to it.
       match /messages/{msgId} {
-        allow read, write: if isAuth();
+        allow read: if isAuth();
+        allow write: if isAuth()
+          && (get(/databases/$(database)/documents/duo_sessions/$(roomId))
+                .data.hostUid == request.auth.uid
+              || get(/databases/$(database)/documents/duo_sessions/$(roomId))
+                .data.partnerUid == request.auth.uid);
+      }
+
+      // One shared, tidied conversation per call. Both phones read it to
+      // rebuild their own study room, and a guest who signs in to an existing
+      // account afterwards restores that call from here -- so read must stay
+      // open for the same reason as the session document. Only participants
+      // may build it. Rules do not cascade into subcollections, so this block
+      // is required on its own.
+      match /canonical/{docId} {
+        allow read: if isAuth();
+        allow write: if isAuth()
+          && (get(/databases/$(database)/documents/duo_sessions/$(roomId))
+                .data.hostUid == request.auth.uid
+              || get(/databases/$(database)/documents/duo_sessions/$(roomId))
+                .data.partnerUid == request.auth.uid);
       }
     }
 

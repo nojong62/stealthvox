@@ -59,6 +59,9 @@ class FFAppState extends ChangeNotifier {
           prefs.getString('ff_pendingInviteType') ?? _pendingInviteType;
     });
     _safeInit(() {
+      _duoGuestClaim = prefs.getString('ff_duoGuestClaim') ?? _duoGuestClaim;
+    });
+    _safeInit(() {
       _trialStep = prefs.getInt('ff_trialStep') ?? _trialStep;
     });
     _safeInit(() {
@@ -256,6 +259,19 @@ class FFAppState extends ChangeNotifier {
   set pendingInviteType(String value) {
     _pendingInviteType = value;
     prefs.setString('ff_pendingInviteType', value);
+  }
+
+  /// Duo 게스트로 대화한 흔적(JSON 한 줄). **기기에만 남는다.**
+  ///
+  /// 익명으로 초대받아 대화한 사람이 끝나고 자기 기존 계정으로 로그인하면
+  /// uid가 바뀌어 방금 그 대화가 안 보인다. 그때 어느 통화의 누구였는지를
+  /// 증명할 유일한 값이라 [duoRoomId]와 따로 둔다 — 그쪽은 입장하는 순간
+  /// 지워진다. 읽고 쓰는 곳은 `services/duo_guest_handoff.dart` 하나다.
+  String _duoGuestClaim = '';
+  String get duoGuestClaim => _duoGuestClaim;
+  set duoGuestClaim(String value) {
+    _duoGuestClaim = value;
+    prefs.setString('ff_duoGuestClaim', value);
   }
 
   int _trialStep = 0;

@@ -50,6 +50,8 @@ import 'trial/trial_study_page.dart';
 import 'routine_mode_circle_talk.dart' show PreparedAudioCapture;
 // 공부방 표시 여부. 정돈에서 빠진 줄은 지우지 않고 이 상태만 바꾼다.
 import '/custom_code/services/duo_study_state.dart';
+// 익명 게스트가 끝나고 자기 계정으로 돌아왔을 때 이 통화를 되찾을 표.
+import '/custom_code/services/duo_guest_handoff.dart';
 import '/custom_code/services/history_text_model.dart';
 import '/custom_code/services/duo_canonical.dart';
 
@@ -2958,6 +2960,30 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     } catch (e) {}
   }
 
+  /// 🔁 [DUO-HANDOFF] **익명 게스트만** 표를 남긴다.
+  ///
+  /// 회원 게스트는 처음부터 자기 uid 아래 기록이 쌓였으므로 되찾을 것이 없다.
+  /// 익명 게스트 중에도 되찾아야 하는 사람은 "로그아웃 상태로 초대받은 기존
+  /// 회원"뿐인데, 지금 시점에는 그가 회원인지 알 방법이 없다. 그래서 표는
+  /// 익명 전원에게 남기고, 실제 복구 여부는 로그인 뒤에 가린다 —
+  /// 익명 그대로 승격한 사람(uid 유지)은 표만 지워지고 끝난다.
+  ///
+  /// 근거가 되는 공유 결과(canonical)는 직접 대화에만 있다. 만능 통역은
+  /// 되살릴 자리가 없어 표를 남기지 않는다.
+  void _rememberGuestHandoffClaim(String? roomId) {
+    if (roomId == null || roomId.isEmpty || !_isDirectMode) return;
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null || !user.isAnonymous) return;
+    rememberDuoGuestClaim(DuoGuestClaim(
+      roomId: roomId,
+      uid: user.uid,
+      role: _myRole,
+      savedAtMs: DateTime.now().millisecondsSinceEpoch,
+      nativeLang: FFAppState().nativeLang,
+      targetLang: FFAppState().targetLang,
+    ));
+  }
+
   /// 요약 재료 한 줄. 통화가 길어져도 메모리와 토큰이 함께 늘지 않도록
   /// 최근 [_kSummaryMaxLines]줄만 들고 있는다 — 미리보기 한 줄을 만드는 데
   /// 통화 첫머리의 인사까지 필요하지는 않다.
@@ -3598,6 +3624,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         (FFAppState().duoRoomId.isNotEmpty ? FFAppState().duoRoomId : null);
     if (isInviteGuest) {
       await AppsFlyerManager.markDuoInviteCompleted(guestRoomId);
+      _rememberGuestHandoffClaim(guestRoomId);
     }
     _stopDuoBilling();
 

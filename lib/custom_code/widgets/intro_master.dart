@@ -16,6 +16,8 @@ import 'trial/trial_flow_state.dart';
 import 'auth_progress_view.dart';
 import '/auth/social_auth_service.dart';
 import '/auth/account_discovery_service.dart';
+// 익명으로 초대받아 대화한 뒤 기존 계정으로 돌아온 사람의 Duo 기록 복구.
+import '/custom_code/services/duo_guest_handoff.dart';
 
 enum IntroScreen { welcome, auth, accountDiscovery }
 
@@ -2657,6 +2659,37 @@ class _IntroMasterState extends State<IntroMaster>
     } catch (e) {
       debugPrint('[Auth] birthYear check failed (non-blocking): $e');
     }
+
+    // 🎫 [GUEST-EXIT] **복구보다 먼저 게스트 딱지를 뗀다.**
+    //
+    //   순서가 중요하다. `isGuestSession`이 남아 있으면 회원으로 로그인한
+    //   사람이 자기 History에서 공부 기능을 못 쓴다(게스트로 판정되어
+    //   잠긴다). 반대로 딱지가 남은 채 복구된 방을 열면 차감도 안 도는
+    //   무료 구간이 되어 버린다 — 둘 다 같은 플래그에서 나온다.
+    //
+    //   기다리는 초대(pendingInviteType == 'duo')가 있으면 손대지 않는다.
+    //   그 사람은 지금 막 새 통화의 게스트로 들어가는 길이고,
+    //   `_routeAfterAuth`가 StealthRoom으로 보낸다.
+    final bool joiningDuoNext = FFAppState().pendingInviteType == 'duo' &&
+        FFAppState().duoRoomId.isNotEmpty;
+    if (!joiningDuoNext && FFAppState().isGuestSession) {
+      FFAppState().isGuestSession = false;
+      FFAppState().inviterUid = '';
+      FFAppState().duoRoomId = '';
+      debugPrint('[Auth] duo guest flags cleared before restore');
+    }
+
+    // 🔁 [DUO-HANDOFF] 익명으로 Duo 초대를 받아 대화하고, 그 뒤 **자기 기존
+    //   계정**으로 로그인한 경우다. uid가 바뀌어 방금 그 대화가 안 보이므로,
+    //   공유 결과를 근거로 이 계정 아래에 다시 짓는다.
+    //
+    //   기다리지 않는다 — 공유 결과가 아직 안 만들어졌으면 안에서 몇 번 더
+    //   두드리고, 히스토리 목록은 스트림이라 다 지어지면 저절로 나타난다.
+    //   되찾을 표가 없는 보통의 로그인은 첫 줄에서 그대로 빠져나온다.
+    //
+    //   ⚠️ 표(`duoGuestClaim`)는 위에서 지우는 값에 들어 있지 않다. 그것을
+    //   같이 지우면 복구할 근거가 사라진다.
+    unawaited(restoreDuoHistoryAfterLogin(uid: user.uid));
 
     if (mounted) _routeAfterAuth();
   }
