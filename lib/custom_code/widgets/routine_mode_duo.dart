@@ -48,8 +48,10 @@ import 'trial/trial_study_page.dart';
 // 마이크 캡처는 Circle Talk과 **같은 구현 한 벌**을 쓴다. 복제하면 sample rate ·
 // 권한 · 종료 처리가 두 군데로 갈라진다.
 import 'routine_mode_circle_talk.dart' show PreparedAudioCapture;
-// 릴레이 송신 게이트 — 내가 말하지 않는 동안은 상대에게 보내지 않는다.
-import '/custom_code/services/duo_relay_gate.dart';
+// 공부방 표시 여부. 정돈에서 빠진 줄은 지우지 않고 이 상태만 바꾼다.
+import '/custom_code/services/duo_study_state.dart';
+import '/custom_code/services/history_text_model.dart';
+import '/custom_code/services/duo_canonical.dart';
 
 // ============================================================================
 // 🗣️ [DUO-MODE] Duo는 두 가지 방식으로 갈린다.
@@ -431,10 +433,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 🔇 [DUO-MUTE] 내 소리를 보내지 않는 상태. **연결은 살아 있다** —
   /// 릴레이도 붙어 있고 상대 목소리도 계속 들린다. 마이크 PCM만 버린다.
   bool _directMuted = false;
-
-  /// 🔊 [DUO-RELAY-GATE] 말하지 않는 동안 릴레이를 닫아 되먹임 고리를 끊는다.
-  /// 통화를 열 때 새로 만든다 — 앞소리 버퍼가 이전 통화 것을 물고 있으면 안 된다.
-  DuoRelayGate? _relayGate;
 
   /// 🔴 [DUO-LIVE] 자동 연결을 이미 시도한 방인지. 실패한 뒤 스냅샷이 또
   /// 떨어질 때마다 자동으로 재시도하면, 권한을 거부한 유저에게 권한 창이
@@ -1664,12 +1662,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         return;
       }
       _directCapture = capture;
-      final gate = DuoRelayGate(
-        bytesPerMs: kDuoDirectBytesPerMs,
-        onGateChanged: (open, rms) => _lgDuo('[RELAY-GATE]',
-            '${open ? 'open' : 'close'} rms=${rms.toStringAsFixed(4)}'),
-      );
-      _relayGate = gate;
       _directCaptureSub = capture.stream.listen(
         (bytes) {
           if (bytes.isEmpty) return;
@@ -1679,14 +1671,16 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           //   전사도 같이 막는다. 안 그러면 음소거 중에 한 말이 History에 남는다.
           if (_directMuted) return;
           // 갈래 1 — 상대에게 보내는 실제 목소리. 전사를 기다리지 않는다.
-          //   🔊 [RELAY-GATE] 내가 말하는 동안만 내보낸다. 침묵을 그대로 흘리면
-          //   벽 너머로 들어온 상대 목소리가 되돌아가 울린다(2026-08-28 안방↔거실).
-          for (final out in gate.accept(bytes)) {
-            _relayClient?.sendPcm(out);
-          }
+          //
+          //   🚫 [NO-GATE] **여기에 문턱을 두지 않는다.** 2026-08-28에 마이크
+          //   세기로 여닫는 게이트를 걸었다가, 조용한 맞장구 두 건이 전사에는
+          //   남고 상대에게는 한 조각도 못 갔다(`seq=4`·`seq=7`). 세기만으로는
+          //   내 말과 벽 넘어 돌아온 남의 말을 가를 수 없다.
+          //
+          //   울림은 이 자리에서 사람 목소리를 버려서 잡는 것이 아니라 AEC와
+          //   잔향 억제로 잡는다. **사람이 말한 소리는 무조건 나간다.**
+          _relayClient?.sendPcm(bytes);
           // 갈래 2 — History용 전사. 실패해도 위 한 줄에 영향이 없다.
-          //   **게이트를 거치지 않는다.** 전사는 서버 VAD가 따로 보고 있고,
-          //   여기까지 막으면 어렵게 되찾은 전사 품질이 같이 무너진다.
           final stt = _directStt;
           if (stt != null && stt.audioGateOpen) stt.appendAudio(bytes);
         },
@@ -1805,7 +1799,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
             'voicedMs=${voicedMs ?? -1}');
     // 상대 채널 업로드도 기다린다. 흘려보내면 종료 때 마지막 문장이
     // 내 History에만 남고 상대 History에는 안 간다.
-    await _uploadMyMessage(
+    final String? channelId = await _uploadMyMessage(
       trimmed,
       _myNative(),
       mode: kDuoModeDirect,
@@ -1822,6 +1816,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       spokenAt: spokenAt,
       speakerUid: _myUid,
       sourceLang: _myNative(),
+      channelMsgId: channelId,
     );
   }
 
@@ -1918,20 +1913,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _directMuted = false;
       _duoState = 'idle';
     }
-    final gate = _relayGate;
-    _relayGate = null;
     _lgDuo(
         '[DIRECT]',
         'call_stopped reason=$reason relayRttMs=${relay?.lastRoundTripMs} '
             'playFirstLatencyMs=${player?.firstPlayLatencyMs} '
             'sentBytes=${relay?.sentBytes} recvBytes=${relay?.receivedBytes} '
-            'playedBytes=${player?.writtenBytes} droppedBytes=${player?.droppedBytes} '
-            // 게이트가 막아 세운 양. 문턱이 맞는지는 이 값으로 되짚는다 —
-            // 0이면 게이트가 한 번도 안 닫힌 것이고, 전체와 비슷하면 너무 닫힌 것이다.
-            'gateHeldBytes=${gate?.heldBytes} '
-            // 닫혀 있는 동안 마이크가 본 가장 큰 소리. 벽 넘어온 상대 목소리가
-            // 실제로 들어오는지를 이 값이 말해 준다 — 울림의 정체를 가른다.
-            'gatePeakClosedRms=${gate?.peakClosedRms.toStringAsFixed(4)}');
+            'playedBytes=${player?.writtenBytes} droppedBytes=${player?.droppedBytes}');
     _directStopping = false;
   }
 
@@ -2579,14 +2566,16 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
   //
   // mode/seq/spokenAt은 직접 대화에서만 채워진다(기존 통역 경로는 호출부가
   // 그대로라 필드가 붙지 않는다 — 기존 문서 모양을 깨지 않는다).
-  Future<void> _uploadMyMessage(
+  /// 채널에 올린 문서 id를 돌려준다. **canonical이 개인 방 줄과 채널 원본을
+  /// 잇는 고리라서** 이 값이 필요하다. 못 올렸으면 null.
+  Future<String?> _uploadMyMessage(
     String raw,
     String srcLang, {
     String? mode,
     int? seq,
     DateTime? spokenAt,
   }) async {
-    if (_duoSessionRef == null || raw.trim().isEmpty) return;
+    if (_duoSessionRef == null || raw.trim().isEmpty) return null;
     try {
       // 🆕 내 메시지 doc id를 업로드 전에 _processedMsgIds에 선등록한다.
       //    → 리스너(605행)가 내 발화를 항상 스킵하므로, 내 글이 절대
@@ -2603,8 +2592,10 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         if (seq != null) 'seq': seq,
         if (spokenAt != null) 'spokenAt': spokenAt.millisecondsSinceEpoch,
       });
+      return docRef.id;
     } catch (e) {
       debugPrint('[Duo] upload message error: $e');
+      return null;
     }
   }
 
@@ -2635,8 +2626,10 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         if (_processedMsgIds.contains(doc.id)) continue;
         _processedMsgIds.add(doc.id);
 
-        final data = doc.data() as Map<String, dynamic>?;
-        if (data == null) continue;
+        final raw = doc.data() as Map<String, dynamic>?;
+        if (raw == null) continue;
+        // canonical이 개인 방 줄을 찾으려면 채널 문서 id가 끝까지 따라가야 한다.
+        final data = <String, dynamic>{...raw, '__channelMsgId': doc.id};
 
         final String msgRole = data['senderRole']?.toString() ?? '';
         if (msgRole == _myRole) continue; // 내가 올린 것 — 이미 로컬 렌더됨, 스킵
@@ -2710,6 +2703,7 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         raw.trim(),
         'SYSTEM',
         mode: kDuoModeDirect,
+        channelMsgId: data['__channelMsgId']?.toString(),
         seq: seq,
         spokenAt: spokenMs == null
             ? null
@@ -2840,6 +2834,15 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     return '통역 준비 중';
   }
 
+  /// 지금 통화의 방 id. 호스트·게스트 어느 경로로 들어왔든 하나로 모은다.
+  String? get _currentRoomId {
+    final id = _duoSessionRef?.id ??
+        widget.roomId ??
+        _pendingJoinRoomId ??
+        (FFAppState().duoRoomId.isNotEmpty ? FFAppState().duoRoomId : null);
+    return (id == null || id.isEmpty) ? null : id;
+  }
+
   Future<void> _ensureHistoryRef() async {
     final user = FirebaseAuth.instance.currentUser;
     if (_myHistoryRef == null && user != null) {
@@ -2858,6 +2861,10 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         // 세션 생성 당시 언어 식별값 보존(History 동일 언어 판정용)
         'native_lang': FFAppState().nativeLang,
         'target_lang': FFAppState().targetLang,
+        // 🔗 이 방이 어느 통화였는지. **이 값이 있어야 나중에 공유 결과를
+        //   찾아 옮길 수 있다.** 게스트는 입장 순서 때문에 이 시점에 아직
+        //   없을 수 있어, 종료 때 한 번 더 채운다.
+        if (_currentRoomId != null) kDuoRoomIdField: _currentRoomId,
       });
       BillingTicker.instance.setSessionIdentifiers(
         sessionDocId: _myHistoryRef?.id,
@@ -2887,6 +2894,9 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     String? speakerUid,
     String? sourceLang,
     bool? deferTarget,
+    // 🔗 이 줄이 나온 채널 원본 문서 id. canonical이 이 값으로 개인 방 줄을
+    //   찾아 결과를 옮긴다. 없으면 그 줄은 canonical 적용에서 빠진다.
+    String? channelMsgId,
   }) async {
     // 호출부가 명시하지 않으면 예전 규칙(직접 대화만 미룸)을 그대로 따른다.
     final bool defer = deferTarget ?? (mode == kDuoModeDirect);
@@ -2932,6 +2942,8 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         // 타겟을 만들 때 출발 언어를 추측하지 않도록 줄마다 남긴다.
         if (sourceLang != null && sourceLang.isNotEmpty)
           'source_lang': sourceLang,
+        if (channelMsgId != null && channelMsgId.isNotEmpty)
+          'channel_msg_id': channelMsgId,
       });
       _historyMessageCount++;
       // 나갈 때 만들 한 줄 요약의 재료. 화면에 쓰지 않으므로 그리지 않는다.
@@ -2988,24 +3000,10 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     }
   }
 
-  /// 직접 통화 전사문을 공부방용 대화로 가볍게 정리한다.
+  /// 🧹 오간 대화를 **읽기 좋게 정돈한다. 고르지 않는다.**
   ///
-  /// 화자와 시간 순서는 그대로 두고, 단독 인사·맞장구·말버릇·중복처럼
-  /// 연습 가치가 낮은 줄만 걷어낸다. AI는 남길 줄 선택과 최소한의 전사문
-  /// 교정만 할 수 있다. 실패하면 원문을 잃지 않도록 보수적인 로컬 필터 결과를
-  /// 사용한다. 만능 통역에는 이 경로가 전혀 적용되지 않는다.
-  /// 이 줄이 **등장인물의 닻**이 될 수 있는가.
-  ///
-  /// "둘째가 집에 들어와 있어"처럼 누가 누구인지 정해 주는 줄이라야 닻이다.
-  /// "의뢰인은"처럼 끊긴 토막은 뒤 문장의 주어를 하나도 알려 주지 못하면서
-  /// 공부 자료에 남기만 한다. 두 어절 이상 · 글자 여섯 자 이상을 본다.
-  static bool _canAnchorCast(String text) {
-    if (text.trim().split(RegExp(r'\s+')).length < 2) return false;
-    final letters =
-        text.replaceAll(RegExp(r'[^a-zA-Z0-9가-힣ぁ-んァ-ン一-龥]'), '');
-    return letters.length >= 6;
-  }
-
+  /// 화자와 시간 순서는 그대로 둔다. 실패하면 원문을 잃지 않도록 보수적인
+  /// 로컬 폴백을 쓴다. 만능 통역에는 이 경로가 적용되지 않는다.
   Future<void> _curateDirectHistoryForStudy() async {
     final historyRef = _myHistoryRef;
     if (!_isDirectMode || historyRef == null) return;
@@ -3040,7 +3038,9 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       ];
 
       final fallback = DuoBrain.filterDirectStudyTurns(turns);
-      Map<int, String> kept = fallback;
+      Map<int, DuoCleanedTurn> kept = <int, DuoCleanedTurn>{
+        for (final e in fallback.entries) e.key: DuoCleanedTurn(text: e.value)
+      };
       if (_openAiKey.isNotEmpty && fallback.length >= 2) {
         final curated = await DuoBrain.curateDirectStudyTurns(
           key: _openAiKey,
@@ -3052,74 +3052,119 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         if (curated != null) kept = curated;
       }
 
-      // 🧭 [CAST-ANCHOR] **첫머리 두 줄은 무슨 일이 있어도 남긴다.**
-      //   히스토리가 배울글을 만들 때 등장인물을 대화 첫머리에서 정한다
-      //   (`chat_history_master`의 `openingLines`). 정리가 그 줄을 지우면
-      //   닻이 사라지고, 주어를 생략한 한국어 뒷줄이 전부 말한 사람 얘기로
-      //   번역된다.
+      // 🧭 [FAIL-OPEN] **모델이 뺀 줄도 숨기지 않는다.**
+      //   지금 응답은 남길 index만 돌려주므로, 빠진 index가 "기계 잡음이라
+      //   판단했다"인지 "그냥 흘렸다"인지 구별할 근거가 없다. 근거 없이 사람이
+      //   한 말을 감추지 않는다 — 판단이 애매하면 보이는 쪽이다.
       //
-      //   게다가 이 정리는 **두 폰에서 따로 돈다.** 호스트에서 지운 줄과
-      //   게스트에서 지운 줄이 다르면 두 사람의 배울글이 서로 다른 맥락 위에서
-      //   만들어져 주어가 갈린다(2026-08-28 실장님 확인). 첫 두 줄을 양쪽 다
-      //   고정으로 남기면 적어도 닻은 같아진다.
-      //   ⚠️ **닻이 될 수 있는 줄만 되살린다.** 첫 두 줄을 조건 없이 살렸더니
-      //   "의뢰인은" 같은 토막이 되살아났다(2026-08-28 실측, added=2). 정리가
-      //   버린 게 옳은 줄인데 도로 끌어와 공부 자료를 더럽혔다. 등장인물을
-      //   정하려면 최소한 문장 꼴은 돼야 하므로, 앞에서부터 훑되 **뜻을 가진
-      //   줄 두 개**를 찾아 그것만 지킨다.
-      const int kCastAnchorTurns = 2;
-      final anchored = Map<int, String>.of(kept);
-      var anchors = 0;
-      for (var i = 0; i < turns.length && anchors < kCastAnchorTurns; i++) {
+      //   그래서 이번 단계의 정돈은 **글자만 다듬고 줄은 하나도 감추지 않는다.**
+      //   되먹임·중복 판정은 양쪽 타임라인을 합치는 다음 단계에서, 모든 source
+      //   index에 상태와 사유를 명시적으로 받아 붙인다.
+      final restored = Map<int, DuoCleanedTurn>.of(kept);
+      final omitted = <int>[];
+      for (var i = 0; i < turns.length; i++) {
         final String raw = (turns[i]['text'] as String).trim();
         if (raw.isEmpty) continue;
-        if (!_canAnchorCast(raw)) continue;
-        anchors++;
-        // 추린 결과에 살아 있으면 그 글을 쓴다. 지워졌으면 원문을 되살린다.
-        final String? survived = anchored[i]?.trim();
-        if (survived == null || survived.isEmpty) anchored[i] = raw;
+        if ((restored[i]?.text ?? '').trim().isNotEmpty) continue;
+        restored[i] = DuoCleanedTurn(text: raw);
+        omitted.add(i);
       }
-      if (anchored.length != kept.length) {
-        _lgDuo('[DIRECT-CURATE]',
-            'cast_anchor_restored added=${anchored.length - kept.length}');
+      if (omitted.isNotEmpty) {
+        _lgDuo('[DIRECT-CLEANUP]',
+            'kept_omitted count=${omitted.length} indexes=${omitted.join(',')}');
       }
-      // 되살린 줄은 뒤에 붙는다. 아래에서 `kept.values.last`를 목록 미리보기로
-      // 쓰므로 **반드시 말한 순서로 되돌린다** — 안 그러면 첫마디가 마지막 줄로
-      // 올라간다.
-      kept = <int, String>{
-        for (final i in anchored.keys.toList()..sort()) i: anchored[i]!
+      // 되살린 줄은 뒤에 붙는다. 아래에서 마지막 줄을 목록 미리보기로 쓰므로
+      // **반드시 말한 순서로 되돌린다** — 안 그러면 첫마디가 마지막 줄로 간다.
+      kept = <int, DuoCleanedTurn>{
+        for (final i in restored.keys.toList()..sort()) i: restored[i]!
       };
 
-      // 한 배치의 제한보다 긴 통화도 처리할 수 있도록 400개씩 나눈다.
+      // 🔬 [3칸 비교] 실제 말 → 전사가 준 글자 → 정돈이 내놓은 글자.
+      //   어느 층에서 망가졌는지는 이 세 칸을 나란히 놓아야 갈린다. 전사가
+      //   이미 딴 소리를 적었으면 1차(gpt-4o-transcribe) 문제이고, 전사는
+      //   멀쩡한데 최종이 이상하면 2차(정돈) 문제다. 실기기 확인용이다.
+      for (var i = 0; i < turns.length; i++) {
+        final String raw = (turns[i]['text'] as String).trim();
+        if (raw.isEmpty) continue;
+        final DuoCleanedTurn? out = kept[i];
+        final String state = out == null
+            ? kStudyStateHiddenArtifact
+            : (out.hesitation ? kStudyStateHiddenHesitation : kStudyStateIncluded);
+        final String after = out == null ? '' : out.text;
+        _lgDuo(
+            '[DIRECT-CLEANUP]',
+            'i=$i role=${turns[i]['role']} state=$state '
+                'raw="$raw" -> "${after == raw ? '(same)' : after}"');
+      }
+      // 📚 [SOURCE 보존] **정돈에서 빠진 줄을 지우지 않는다.**
+      //   예전에는 빠진 줄을 `batch.delete`로 문서째 지웠다. 실기기 한 통화에서
+      //   14줄 중 7줄이 영구히 사라졌다(2026-08-28). "읽기 좋게 정돈한다"와
+      //   "원본을 지운다"는 전혀 다른 일인데 하나로 구현돼 있었다.
+      //
+      //   이제 표시 여부만 [kStudyStateField]로 적는다. 원본 줄은 그대로 남고,
+      //   공부방은 보이는 줄만 그린다(`chat_history_master._visibleMessages`).
+      //   글을 갈아 끼울 때도 원문을 [kOriginalRawField]에 남긴다 — 히스토리
+      //   교정 경로가 이미 쓰는 방식과 같게 맞춘다.
+      //
+      //   필드가 아예 없는 옛 문서는 보이는 것으로 친다. 마이그레이션은 없다.
       for (int start = 0; start < docs.length; start += 400) {
         final batch = FirebaseFirestore.instance.batch();
         final int end = start + 400 < docs.length ? start + 400 : docs.length;
         for (int i = start; i < end; i++) {
-          final cleaned = kept[i]?.trim();
-          if (cleaned == null || cleaned.isEmpty) {
-            batch.delete(docs[i].reference);
-          } else {
-            batch.update(docs[i].reference, {
-              'original_text': cleaned,
-              'translated_text': '',
-              'study_curated': true,
-            });
+          final DuoCleanedTurn? out = kept[i];
+          final String cleaned = out?.text.trim() ?? '';
+          if (cleaned.isEmpty) {
+            // 위 FAIL-OPEN을 지나고도 빈 줄이면 애초에 글이 없던 문서다.
+            continue;
           }
+          if (out!.hesitation) {
+            // 말 고르던 발성. **글은 손대지 않는다** — 원본 그대로 두고
+            // 화면에서만 감춘다.
+            batch.update(docs[i].reference, <String, dynamic>{
+              'study_curated': true,
+              kStudyStateField: kStudyStateHiddenHesitation,
+            });
+            continue;
+          }
+          final data = docs[i].data();
+          final String source = (data['original_text'] ?? '').toString().trim();
+          final bool rewritten = cleaned != source;
+          final bool rawAlreadyKept =
+              (data[kOriginalRawField] ?? '').toString().trim().isNotEmpty;
+          batch.update(docs[i].reference, <String, dynamic>{
+            'original_text': cleaned,
+            'translated_text': '',
+            'study_curated': true,
+            kStudyStateField: kStudyStateIncluded,
+            // 원문은 한 번만 박아 둔다. 정돈이 두 번 돌아도 첫 전사가 남는다.
+            if (rewritten && !rawAlreadyKept && source.isNotEmpty)
+              kOriginalRawField: source,
+          });
         }
         await batch.commit();
       }
 
-      _historyMessageCount = kept.length;
-      final lastText = kept.isEmpty ? '의미 있는 대화가 없습니다' : kept.values.last;
+      // 목록에 보이는 줄만 센다. 감춘 줄은 문서로 남아 있지만 사용자가
+      // 읽는 대화에는 없으므로 미리보기·개수에 끼면 안 된다.
+      final shown = <String>[
+        for (final e in kept.entries)
+          if (!e.value.hesitation) e.value.text
+      ];
+      _historyMessageCount = shown.length;
+      final lastText = shown.isEmpty ? '의미 있는 대화가 없습니다' : shown.last;
+      final int hidden = kept.length - shown.length;
       await historyRef.update({
-        'msg_count': kept.length,
+        'msg_count': shown.length,
         'last_message': lastText,
         'direct_study_curated': true,
         'direct_study_curated_at': FieldValue.serverTimestamp(),
-        'direct_study_removed_count': docs.length - kept.length,
+        // 지운 개수가 아니라 **감춘 개수**다. 문서는 하나도 안 지운다.
+        'direct_study_hidden_count': hidden,
       });
-      _lgDuo('[DIRECT-CURATE]',
-          'done total=${docs.length} kept=${kept.length} removed=${docs.length - kept.length}');
+      _lgDuo(
+          '[DIRECT-CLEANUP]',
+          'done total=${docs.length} shown=${shown.length} '
+              'hesitation=$hidden model=$kDuoCanonicalModel');
     } catch (e) {
       // 정리에 실패했다고 원본 공부방까지 막으면 안 된다.
       _lgDuo('[DIRECT-CURATE]', 'failed=${e.runtimeType} — 원문 유지');
@@ -3566,9 +3611,34 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     //    릴레이 프레임·전사 완료는 세대값이 달라 전부 무시된다.
     await _stopDirectCall('room_exit');
 
-    // 직접 통화의 원시 전사문을 그대로 공부방에 쏟지 않는다. 마지막 발화 저장이
-    // 끝난 뒤 의미 있는 대화 중심으로 정리하고 나서 히스토리를 연다.
-    await _curateDirectHistoryForStudy();
+    // 🧩 [CANONICAL] 같은 통화는 **하나의 대화 기록**을 가진다.
+    //
+    //   예전에는 두 폰이 각자 자기 방에서 GPT를 불러 정돈했고, 같은 통화인데
+    //   호스트와 게스트의 기록이 서로 달랐다. 이제 공유 자리에서 한 번만 만들고
+    //   양쪽이 그것을 읽어 자기 방에 옮긴다.
+    //
+    //   ⚠️ **이 자리에서 기다리지 않는다.** 만드는 쪽은 상대의 마지막 한마디가
+    //   올라올 때까지 기다려야 하는데(최대 20초), 그동안 나가기 화면을 붙잡고
+    //   있으면 안 된다. 내 마지막 발화는 위 `_stopDirectCall`이 이미 흘려보냈다.
+    final String? canonRoomId = _isDirectMode ? _currentRoomId : null;
+    if (canonRoomId != null && _myUid.isNotEmpty) {
+      // 게스트는 방을 만들 때 roomId를 몰랐을 수 있다. 여기서 채운다.
+      unawaited(_myHistoryRef
+              ?.update(<String, dynamic>{kDuoRoomIdField: canonRoomId}) ??
+          Future<void>.value());
+      // 🚩 내 몫은 다 올렸다는 표시. 상대가 이걸 보고 만들기 시작한다.
+      await markDuoFlushDone(roomId: canonRoomId, uid: _myUid);
+      unawaited(buildDuoCanonical(
+        roomId: canonRoomId,
+        uid: _myUid,
+        isHost: _amIHost,
+        apiKey: _openAiKey,
+        model: kDuoCanonicalModel,
+      ));
+    } else {
+      // 옛 방(공유 고리가 없는 통화)은 예전 방식으로 각자 정돈한다.
+      await _curateDirectHistoryForStudy();
+    }
 
     // 🆕 [만능 통역] 같은 이유로 마이크와 전사 소켓을 여기서 내린다. 세대를
     //    먼저 올려야 늦게 오는 전사 완료가 나간 방의 히스토리를 되살리지 않는다.
@@ -3590,8 +3660,19 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
           final String? hostUid = data?['hostUid']?.toString();
           final String? myUid = FirebaseAuth.instance.currentUser?.uid;
           if (hostUid != null && myUid != null && hostUid == myUid) {
-            // 호스트: 세션 삭제 (1:1 대칭 종료)
-            await _duoSessionRef!.delete();
+            // 🧩 [CANONICAL] 직접 대화는 **문서를 지우지 않는다.**
+            //   원본 발화(`messages`)와 공유 결과(`canonical/current`)가 이
+            //   문서 아래 산다. 지우면 하위 컬렉션이 고아로 남아, 나중에 공부방
+            //   에서 결과를 되찾을 근거가 사라진다. 끝났다는 표시만 남긴다.
+            if (_isDirectMode) {
+              await _duoSessionRef!.set(<String, dynamic>{
+                'isPartnerJoined': false,
+                kDuoEndedAtField: FieldValue.serverTimestamp(),
+              }, SetOptions(merge: true));
+            } else {
+              // 만능 통역은 예전 그대로 — 남길 결과가 없다.
+              await _duoSessionRef!.delete();
+            }
           } else {
             // 게스트: isPartnerJoined=false 업데이트
             await _duoSessionRef!.update({
@@ -4390,6 +4471,16 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
             ],
           ),
           const Spacer(),
+          // 📚 [STUDY-PEEK] 통화 중에 공부방을 잠깐 들여다보는 문.
+          //
+          //   초대받아 들어온 사람은 스텔스룸을 거치지 않아서 히스토리로 가는
+          //   길이 아예 없었다. 방금 오간 말이 글로 쌓이는데도 볼 수가 없다.
+          //
+          //   **`pushNamed`다 — 통화를 끊지 않는다.** 이 화면은 아래에 그대로
+          //   살아 있고, 마이크도 릴레이도 돌아간다. 뒤로 나오면 하던 통화가
+          //   그 자리에 있다. `goNamed`로 갈아치우면 통화가 끊긴다.
+          _buildStudyRoomPill(),
+          const Spacer(),
           // 글자 크기·원어 보기 버튼은 없다. 두 방식 다 화면에 글자를 띄우지
           // 않으므로 조절할 대상 자체가 없다.
           const SizedBox(width: 4),
@@ -4427,6 +4518,39 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                       ]));
                 }),
         ],
+      ),
+    );
+  }
+
+  /// 🏫 [SR] 공부방으로 가는 알약. **모양은 다른 화면과 똑같다** — 설정
+  /// 페이지·대화방·공부방에 단 것과 같은 알약이라 어디서 보든 같은 문이다.
+  ///
+  /// 다만 여기만 `pushNamed`다. 다른 화면은 자리를 내주고 가지만(과금이 도는
+  /// 방이라 정리돼야 차감이 멈춘다), 통화는 **끊으면 안 된다.** 이 화면을
+  /// 아래에 살려 둔 채 위에 얹고, 뒤로 나오면 하던 통화가 그 자리에 있다.
+  Widget _buildStudyRoomPill() {
+    return Tooltip(
+      message: '공부방 (Study Room)',
+      child: GestureDetector(
+        onTap: () => context.pushNamed('ChatHistory'),
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: const Color(0x33FFFFFF)),
+          ),
+          child: const Text(
+            "SR",
+            maxLines: 1,
+            style: TextStyle(
+              color: Color(0xFFE7E9EE),
+              fontWeight: FontWeight.w600,
+              fontSize: 13,
+              letterSpacing: 1.2,
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -4636,33 +4760,36 @@ class DuoBrain {
 
   /// 네트워크가 없거나 AI 정리가 실패했을 때 쓰는 보수적인 직접 통화 필터.
   /// 짧다는 이유만으로 "네/아니요" 같은 실제 답변을 버리지는 않는다.
+  /// 🧹 [CLEANUP] 모델을 못 부를 때 쓰는 규칙 폴백.
+  ///
+  /// **고르지 않는다.** 예전에는 인사·추임새 목록과 "직전과 같은 글"을
+  /// 정규식으로 쳐냈다. 그러면 "네"·"응"·"안녕"처럼 실제로 오간 말이 중요도가
+  /// 낮다는 이유로 사라진다. 대화에서 무엇이 중요한지는 판단하지 않는 것이
+  /// 원칙이다(2026-08-28 실장님 지시).
+  ///
+  /// 여기서 거르는 것은 **글이 아예 없는 줄 하나뿐**이다. 기술적 중복은 저장
+  /// 단계의 `_savedDirectItemIds`가 item id로 이미 막고, 되먹임 중복 판정은
+  /// 양쪽 타임라인을 함께 봐야 하므로 이 자리에서 하지 않는다.
   static Map<int, String> filterDirectStudyTurns(
       List<Map<String, dynamic>> turns) {
     final kept = <int, String>{};
-    String previous = '';
     for (final turn in turns) {
       final index = turn['index'] as int?;
       final text = turn['text']?.toString().trim() ?? '';
       if (index == null || text.isEmpty) continue;
-      final normalized =
-          text.toLowerCase().replaceAll(RegExp(r'[^a-z0-9가-힣ぁ-んァ-ン一-龥]'), '');
-      if (normalized.isEmpty ||
-          RegExp(
-            r'^(아|어|음|으음|흠|저기|그|그게|uh|um|umm|hmm|er|ah|hello|hi|hey|안녕|안녕하세요|여보세요|bye|goodbye|잘가)$',
-            caseSensitive: false,
-          ).hasMatch(normalized) ||
-          normalized == previous) {
-        continue;
-      }
       kept[index] = text;
-      previous = normalized;
     }
     return kept;
   }
 
-  /// 직접 통화의 실제 발화 중 공부할 가치가 있는 줄만 고른다.
-  /// null은 호출/파싱 실패, 빈 map은 의미 있는 발화가 없다는 정상 결과다.
-  static Future<Map<int, String>?> curateDirectStudyTurns({
+  /// 🧹 오간 대화를 **읽기 좋게 정돈한다. 고르지 않는다.**
+  ///
+  /// 두 사람이 실제로 한 말은 짧든 평범하든 전부 남긴다. 빼는 것은 되먹임,
+  /// 중복 전사, 사람 소리가 아닌 전사 잡음뿐이다 — 무엇이 중요한 말인지는
+  /// 판단하지 않는다(2026-08-28 실장님 지시).
+  ///
+  /// null은 호출/파싱 실패, 빈 map은 남길 줄이 하나도 없다는 뜻이다.
+  static Future<Map<int, DuoCleanedTurn>?> curateDirectStudyTurns({
     required String key,
     required List<Map<String, dynamic>> turns,
   }) async {
@@ -4672,15 +4799,27 @@ class DuoBrain {
       const prompt =
           '''You prepare a two-person DIRECT VOICE CALL transcript for a language-study room.
 
-Keep the real conversation, speakers, language, meaning, and chronological order. Do not summarize the whole conversation and do not translate it.
+Your job is CLEANUP, not selection. You never decide what matters in a conversation. Two real people spoke; keep what they said and tidy only the mess speech-to-text made.
 
-Remove only low-value turns such as standalone greetings, fillers, empty acknowledgements, abandoned fragments with no meaning, accidental noise, and repetitions where a more complete version already exists.
-Keep questions, informative answers, opinions, reasons, plans, experiences, useful expressions, and any short answer needed to understand a nearby turn.
-For kept turns, make only light transcript cleanup: spacing, punctuation, obvious stutter removal, or an unmistakable speech-to-text typo. Never add facts, merge speakers, rewrite style, complete uncertain fragments, or make the speaker sound more fluent than they were.
+KEEP EVERY TURN A PERSON ACTUALLY SPOKE, however short or ordinary:
+questions, answers, agreements, refusals, backchannels, reactions, self-corrections, repeated words, greetings, hesitations that carry meaning. "Yeah." "No." "Really?" "Wait." "Okay." "Hey." are real conversation and stay. Never drop a turn because it looks unimportant, low-value, obvious, or not worth studying. Importance is not yours to judge.
+
+Judge every turn by its CONVERSATIONAL FUNCTION in context, never by its length or its wording. A one-syllable turn is often a real reply.
+
+  "Are you going tomorrow?" / "어." -> agreement. included.
+  "Not today, Friday."      / "아." -> realization. included.
+  "What did you say?"       / "어?" -> asking again. included.
+  "I think that..."         / "음... 흠..." while holding your own turn -> only thinking aloud. hesitation.
+
+Mark a turn "hesitation" ONLY when the speaker was filling their own pause and the turn carries no reply, question, reaction, or agreement. When the turn answers, asks, reacts, corrects, or changes what happens next, it is "included" however short. If you are unsure, choose "included".
+
+Leave a turn out of your answer entirely only for machine noise: the identical final transcript stored twice for the same moment, or text with no speech behind it. A person genuinely repeating themselves is NOT a duplicate; matching words alone never justify removal.
+
+For every turn, tidy only the surface: spacing and punctuation, and an unmistakable mis-hearing that the surrounding turns settle. Never add facts, merge different speakers, reorder the conversation, complete an uncertain fragment, fix the speaker's grammar, or make anyone sound more fluent than they were. Do not summarize, compress, or translate.
 
 Return strict JSON only:
-{"turns":[{"index":0,"text":"cleaned original-language utterance"}]}
-Use only supplied indexes, at most once each, in original order. An empty turns array is valid when nothing is useful.''';
+{"turns":[{"index":0,"text":"cleaned original-language utterance","state":"included"}]}
+"state" is "included" or "hesitation". Use only supplied indexes, at most once each, in original order. Return every index you were given unless it is machine noise.''';
       final response = await client
           .post(
             uri,
@@ -4689,7 +4828,7 @@ Use only supplied indexes, at most once each, in original order. An empty turns 
               'Content-Type': 'application/json; charset=utf-8',
             },
             body: jsonEncode({
-              'model': 'gpt-4o-mini',
+              'model': kDuoCanonicalModel,
               'temperature': 0.1,
               'max_tokens': 2400,
               'response_format': {'type': 'json_object'},
@@ -4719,7 +4858,7 @@ Use only supplied indexes, at most once each, in original order. An empty turns 
           if (turn['index'] is int)
             (turn['index'] as int): turn['text']?.toString().trim() ?? '',
       };
-      final curated = <int, String>{};
+      final curated = <int, DuoCleanedTurn>{};
       int lastIndex = -1;
       for (final item in output) {
         if (item is! Map) return null;
@@ -4733,7 +4872,10 @@ Use only supplied indexes, at most once each, in original order. An empty turns 
             text.length > (original.length * 2 + 40).clamp(80, 600)) {
           return null;
         }
-        curated[index] = text;
+        // 모르는 값은 보이는 쪽으로 친다 — 감추는 쪽이 기본이 되면 안 된다.
+        final bool hesitation =
+            item['state']?.toString().trim().toLowerCase() == 'hesitation';
+        curated[index] = DuoCleanedTurn(text: text, hesitation: hesitation);
         lastIndex = index;
       }
       return curated;
@@ -4943,4 +5085,16 @@ Use only supplied indexes, at most once each, in original order. An empty turns 
     }
     return clean.trim();
   }
+}
+
+/// 정돈이 한 줄에 대해 내놓은 결과.
+///
+/// [hesitation]은 **사람이 실제로 낸 소리인데 대화 기능이 없다**는 뜻이다.
+/// 전사 잡음과 다르고, 글자 수나 단어 목록이 아니라 앞뒤 문맥으로 정해진다.
+/// 기본은 false — 모르면 보이는 쪽이다.
+class DuoCleanedTurn {
+  const DuoCleanedTurn({required this.text, this.hesitation = false});
+
+  final String text;
+  final bool hesitation;
 }

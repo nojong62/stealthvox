@@ -40,6 +40,9 @@ import '/custom_code/services/breath_echoing_engine.dart';
 import '/custom_code/services/breath_segment.dart';
 import '/custom_code/services/p2_voice_styles.dart';
 import '/custom_code/services/speech_reconstruction.dart';
+import '/custom_code/services/duo_study_state.dart';
+import '/custom_code/services/history_text_model.dart';
+import '/custom_code/services/duo_canonical.dart';
 import '/custom_code/services/pcm_audio_utils.dart'
     show kStealthVoxSttSampleRate, pcm16DurationMs, pcm16ToWav;
 
@@ -311,6 +314,21 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   // 📦 [Box 6: 상태 변수 - DB 캐시 및 튜터링 팝업]
   List<DocumentSnapshot> _cachedDocs = [];
+
+  /// 📚 [SOURCE / CANONICAL] 공부방이 그리는 줄만 남긴다.
+  ///
+  /// 듀오 정리가 추려낸 줄은 **지워지지 않고** `study_state`만 바뀐 채
+  /// 컬렉션에 남아 있다(2026-08-28부터). 화면·연습·배울글·교정 문맥이 모두
+  /// 이 목록 하나를 보므로, 들어오는 입구에서 한 번만 거른다.
+  ///
+  /// 값이 없는 옛 문서는 그대로 보인다 — 마이그레이션이 필요 없다.
+  List<DocumentSnapshot> _visibleMessages(List<DocumentSnapshot> docs) {
+    return docs.where((doc) {
+      final data = doc.data();
+      if (data is! Map<String, dynamic>) return true;
+      return isStudyVisible(data[kStudyStateField]);
+    }).toList();
+  }
   final Map<String, Future<bool>> _targetTranslationInFlight =
       <String, Future<bool>>{};
 
@@ -596,12 +614,37 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
         // 세션 생성 당시 보존된 언어 식별값(있으면 동일 언어 판정에 사용)
         _sessionNativeLang = data['native_lang'] as String?;
         _sessionTargetLang = data['target_lang'] as String?;
+        // 🧩 [CANONICAL] 이 방이 듀오 통화였다면 공유 결과를 한 번 맞춰 본다.
+        //   통화가 끝나는 순간 못 옮겼어도(앱을 먼저 껐거나 결과가 늦게
+        //   완성됐거나) 방을 열 때 여기서 따라잡는다. 같은 판이면 아무것도
+        //   하지 않는다.
+        unawaited(_syncDuoCanonical(data));
         _scheduleMissingTargetGeneration(_cachedDocs);
       }
     } catch (e) {
       debugPrint("[fetchRoomData] $e");
     }
     if (mounted) setState(() => isLoadingRoom = false);
+  }
+
+  /// 공유 결과를 내 방에 맞춘다. 옛 방(`duo_room_id` 없음)은 그냥 지나간다.
+  Future<void> _syncDuoCanonical(Map<String, dynamic> room) async {
+    final String roomId = (room[kDuoRoomIdField] ?? '').toString().trim();
+    if (roomId.isEmpty) return;
+    final int? applied = (room[kDuoCanonicalVersionField] as num?)?.toInt();
+    final bool changed = await applyDuoCanonicalToHistory(
+      historyRef: widget.historyDoc.withConverter<Map<String, dynamic>>(
+        fromFirestore: (snap, _) => snap.data() ?? <String, dynamic>{},
+        toFirestore: (value, _) => value,
+      ),
+      roomId: roomId,
+      appliedVersion: applied,
+    );
+    if (changed && mounted) {
+      // 줄이 바뀌었으니 배울글을 다시 살펴야 한다. 스트림이 새 문서를
+      // 실어 오면 그때 빠진 타겟을 만든다.
+      debugPrint('[HISTORY] canonical_applied room=$roomId');
+    }
   }
 
   Future<void> _fetchRemoteConfig({bool force = false}) async {
@@ -978,7 +1021,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
                 'Content-Type': 'application/json; charset=utf-8',
               },
               body: jsonEncode(<String, dynamic>{
-                'model': 'gpt-4o-mini',
+                'model': kHistoryRepairModel,
                 'temperature': 0.0,
                 'max_tokens': 220,
                 'response_format': <String, String>{'type': 'json_object'},
@@ -1070,7 +1113,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         if (repaired) 'original_text': repairedOriginal,
         if (repaired) 'original_text_raw': source,
         if (repaired) 'original_repaired_at': FieldValue.serverTimestamp(),
-        'target_generated_by': sameLanguage ? 'copy' : 'gpt-4o-mini',
+        'target_generated_by': sameLanguage ? 'copy' : kHistoryRepairModel,
         'target_generated_at': FieldValue.serverTimestamp(),
       });
       if (repaired) {
@@ -1161,7 +1204,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
             .collection('messages')
             .orderBy('created_at', descending: false)
             .get();
-        messageDocs = messagesSnap.docs;
+        messageDocs = _visibleMessages(messagesSnap.docs);
         _cachedDocs = messageDocs;
       }
       await _ensureHistoryTargets(messageDocs);
@@ -1169,7 +1212,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
           .collection('messages')
           .orderBy('created_at', descending: false)
           .get();
-      messageDocs = refreshedMessages.docs;
+      messageDocs = _visibleMessages(refreshedMessages.docs);
       _cachedDocs = messageDocs;
       if (!mounted) return;
 
@@ -2934,7 +2977,7 @@ RULES — follow exactly:
                     if (!snapshot.hasData) {
                       return const Center(child: CircularProgressIndicator());
                     }
-                    final docs = snapshot.data!.docs;
+                    final docs = _visibleMessages(snapshot.data!.docs);
                     WidgetsBinding.instance.addPostFrameCallback((_) {
                       if (mounted) {
                         _cachedDocs = docs;

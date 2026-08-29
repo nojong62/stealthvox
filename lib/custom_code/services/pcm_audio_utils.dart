@@ -2,6 +2,7 @@
 //   TTS 어댑터(히스토리 저장용 WAV 포장)와 재전사 서비스(gpt-4o-mini-transcribe
 //   업로드용 WAV 포장)가 공유한다. 순수 함수만 둔다 — 상태/플랫폼 의존 금지.
 
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 /// 🎚️ 유저 음성 입력 파이프라인 전체가 쓰는 단 하나의 샘플레이트.
@@ -15,6 +16,27 @@ const int kStealthVoxSttSampleRate = 24000;
 
 /// PCM16 mono 기준 1ms당 바이트 수. 과금 로그·버퍼 상한 계산이 쓴다.
 const int kStealthVoxSttBytesPerMs = kStealthVoxSttSampleRate * 2 ~/ 1000;
+
+/// 🔎 PCM16 한 조각의 RMS를 0.0~1.0으로. **계측 전용이다.**
+///
+/// 이 값으로 소리를 버리지 않는다. 2026-08-28에 이 값에 고정 문턱을 걸어
+/// 릴레이를 여닫았다가 실제 발화 두 건을 상대에게 못 보냈다(전사에는 남아
+/// 있었다). 세기만으로는 "내 말"과 "돌아온 남의 말"을 가를 수 없다 —
+/// 가르려면 같은 순간의 상대 재생 세기와 견줘야 한다.
+///
+/// 지금 쓰임새는 하나뿐이다: 마이크와 재생 쪽 세기를 나란히 로그로 남겨
+/// 실기기에서 반향 처리를 근거로 설계하는 것.
+double pcm16Rms(Uint8List frame) {
+  final int samples = frame.lengthInBytes ~/ 2;
+  if (samples == 0) return 0;
+  final ByteData view = ByteData.sublistView(frame, 0, samples * 2);
+  var sum = 0.0;
+  for (var i = 0; i < samples; i++) {
+    final double v = view.getInt16(i * 2, Endian.little) / 32768.0;
+    sum += v * v;
+  }
+  return math.sqrt(sum / samples);
+}
 
 /// PCM16(LE, interleaved) 원시 바이트를 WAV 컨테이너로 감싼다.
 Uint8List pcm16ToWav(
