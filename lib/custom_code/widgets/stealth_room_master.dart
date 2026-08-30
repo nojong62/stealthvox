@@ -1396,9 +1396,11 @@ Return ONLY valid JSON: {"name":"..."}.
           onTap: () => _switchMode(mode),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 22),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
+            // 🧭 아이콘은 왼쪽, 제목과 설명은 그 오른쪽에 위아래로 놓는다.
+            //   예전에는 아이콘이 제목 위에 얹혀 카드 하나가 세로로 길었고,
+            //   세 모드를 한 화면에서 나란히 견주기가 어려웠다.
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Container(
                   width: 56,
@@ -1410,16 +1412,28 @@ Return ONLY valid JSON: {"name":"..."}.
                   ),
                   child: Icon(icon, color: color, size: 26),
                 ),
-                const SizedBox(height: 16),
-                Text(title,
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold)),
-                const SizedBox(height: 6),
-                Text(desc,
-                    style: const TextStyle(
-                        color: Color(0xFF8C93A1), fontSize: 14, height: 1.5)),
+                const SizedBox(width: 16),
+                // 남는 폭을 전부 글에 준다. 안 그러면 두 줄짜리 설명이
+                // 아이콘 옆에서 넘쳐 잘린다.
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(title,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 6),
+                      Text(desc,
+                          style: const TextStyle(
+                              color: Color(0xFF8C93A1),
+                              fontSize: 14,
+                              height: 1.5)),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
