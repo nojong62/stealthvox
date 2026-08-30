@@ -67,6 +67,29 @@ void main() {
       expect(d().gateLabel, isNotEmpty);
       expect(c().gateLabel, isEmpty);
     });
+
+    test('안내 문구는 **실제로 잠금을 푸는 행동**을 가리킨다', () {
+      // ⚠️ 예전에는 duoGuest에 '통화가 끝나면 연습할 수 있어요'가 붙었다.
+      //    이 문구를 보는 사람은 통화가 이미 끝난 익명 게스트다(회원 게스트는
+      //    통화를 나가며 딱지가 떨어진다). 끝난 통화가 끝나기를 기다리라는
+      //    말이라 '다시 시도'만 반복하게 됐다 — 2026-08-30 실기기 확인.
+      for (final StudyAccess locked in <StudyAccess>[b(), d()]) {
+        expect(locked.canUsePaidStudy, isFalse);
+        expect(locked.gateLabel, contains('로그인'));
+        expect(locked.gateLabel, isNot(contains('통화가 끝나면')));
+      }
+    });
+
+    test('문구만 바뀌었을 뿐 판정은 그대로다', () {
+      // 게스트 구간의 비용은 호스트가 낸다. 그 정책은 손대지 않았다.
+      expect(b().reason, StudyBlockReason.duoGuest);
+      expect(b().canUsePaidStudy, isFalse);
+      expect(
+          resolveStudyAccess(
+                  isTrial: false, isDuoGuest: true, isSignedInMember: true)
+              .canUsePaidStudy,
+          isFalse);
+    });
   });
 
   group('맛보기는 의도된 무료', () {
