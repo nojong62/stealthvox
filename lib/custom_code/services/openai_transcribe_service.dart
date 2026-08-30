@@ -24,14 +24,18 @@ class OpenAiTranscribeService {
     String model = firstTurnModel,
     Duration timeout = const Duration(seconds: 3),
     void Function(String tag, String msg)? onLog,
+    // 🔬 앞쪽 무음을 깎을 것인가. **기본은 예전 그대로 깎는다.**
+    //   끄는 곳은 A/B 비교 하나뿐이다 — 스트리밍 전사는 이 손질을 하지
+    //   않으므로, 같은 소리를 두 경로에 넣어 견주려면 여기도 안 깎아야
+    //   "무엇이 달랐는가"의 답이 손질이 되어 버리지 않는다.
+    bool trimLeadingSilence = true,
   }) async {
     if (apiKey.isEmpty || pcm.isEmpty) return null;
     final sw = Stopwatch()..start();
     try {
-      final preparedPcm = trimLeadingSilencePcm16(
-        pcm,
-        sampleRate: sampleRate,
-      );
+      final preparedPcm = trimLeadingSilence
+          ? trimLeadingSilencePcm16(pcm, sampleRate: sampleRate)
+          : pcm;
       final originalAudioMs =
           pcm16DurationMs(pcm.length, sampleRate: sampleRate);
       final preparedAudioMs =

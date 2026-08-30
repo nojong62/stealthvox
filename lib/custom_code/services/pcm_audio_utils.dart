@@ -38,6 +38,16 @@ double pcm16Rms(Uint8List frame) {
   return math.sqrt(sum / samples);
 }
 
+/// 🔉 선형 세기(0.0~1.0)를 dBFS로. **세기를 말할 때 쓰는 단 하나의 식이다.**
+///
+/// 전사문을 버릴지 말지를 세기로 가르게 되면서(직접 대화의 low_level 게이트),
+/// 판정하는 쪽과 로그로 보는 쪽이 **반드시 같은 숫자**를 봐야 한다. 식이 두
+/// 벌이면 로그의 −34.9와 게이트의 −35.1이 같은 소리를 가리키게 된다.
+///
+/// 0에 가까운 값은 −160으로 눌러 −무한대를 만들지 않는다.
+double pcm16LinearToDbfs(double linear) =>
+    linear <= 0.0000001 ? -160.0 : 20 * (math.log(linear) / math.ln10);
+
 /// PCM16(LE, interleaved) 원시 바이트를 WAV 컨테이너로 감싼다.
 Uint8List pcm16ToWav(
   Uint8List pcm, {

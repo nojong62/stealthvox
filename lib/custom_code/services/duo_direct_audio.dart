@@ -58,6 +58,7 @@ class DuoPcmJitterPlayer {
 
   bool _started = false;
   bool _priming = true;
+
   /// 드리프트 계산용 창(窓) 카운터. [resetBuffer]가 0으로 되돌린다 —
   /// `_playbackStartedAt`과 **반드시 같이** 리셋돼야 경과시간 대비가 맞는다.
   int _writtenBytes = 0;
@@ -204,5 +205,205 @@ class DuoPcmJitterPlayer {
     } catch (_) {}
     _lg('⏹️ [DUO-PLAY]',
         'stopped writtenBytes=$_lifetimeWrittenBytes droppedBytes=$_droppedBytes');
+  }
+}
+
+// ====================================================================
+// 🎙️ [DUO-FANOUT] 마이크 한 줄기를 두 갈래로 나누는 자리
+// --------------------------------------------------------------------
+//   LocalMicPcm (PreparedAudioCapture, AEC 적용 후 · 릴레이 이전)
+//        ├─→ DuoCallSender          (DuoPcmRelayClient.sendPcm)
+//        └─→ DuoTranscriptionInput  (OpenAiStreamingTranscribeSession)
+//
+//   RemoteRelayPcm ─→ DuoPlayback (DuoPcmJitterPlayer) — **여기서 끝난다.**
+//
+// 이 클래스가 지키는 것은 두 가지다.
+//   1. 통화 갈래가 먼저 간다. 전사 갈래가 던지든 늦든 위 한 줄에 영향이 없다.
+//   2. 전사 갈래로 들어간 PCM은 **항상 이 단말 마이크의 것**이다. 상대에게서
+//      받은 PCM은 이 클래스를 통과할 수 없다(입력이 하나뿐이다).
+//
+// 위젯 안 클로저에 두면 이 두 가지를 시험으로 지킬 수가 없어 밖으로 뺐다.
+// ====================================================================
+
+/// 전사에 들어간 PCM의 출처. 저장 문서(`source`)와 진단 로그가 같은 값을 쓴다.
+/// 이 문자열이 아닌 값이 나오면 어딘가에서 마이크가 아닌 소리를 전사한 것이다.
+const String kDuoSttPcmSourceLocalMic = 'local_mic';
+
+/// 마이크 PCM 팬아웃 한 개 = 통화 한 번.
+class DuoMicPcmFanout {
+  DuoMicPcmFanout({
+    required this.speakerRole,
+    required this.toCall,
+    required this.toStt,
+    this.toLevel,
+    this.toProbe,
+    this.sampleRate = kStealthVoxSttSampleRate,
+    this.isMuted,
+    this.isSttOpen,
+    this.onLog,
+    this.logEveryFrames = 100,
+  });
+
+  /// 'HOST' 또는 'GUEST'. 진단 로그의 `speaker=`가 이 값이다.
+  final String speakerRole;
+
+  /// 갈래 1 — 상대 폰에서 실제 목소리로 나갈 조각.
+  final void Function(Uint8List pcm) toCall;
+
+  /// 갈래 2 — 내 발화를 글자로 만들 조각.
+  final void Function(Uint8List pcm) toStt;
+
+  /// 갈래 3 — **세기 계측.** `DuoUtteranceRmsMeter`가 이 조각으로 발화
+  /// 구간의 평균 세기를 쌓고, 그 값이 low_level 게이트의 근거가 된다.
+  ///
+  /// ⚠️ **진단이 아니다.** release에서도 반드시 돌아야 한다 — A/B 비교나
+  /// WAV 저장이 꺼져 있어도 이 갈래는 살아 있어야 게이트가 동작한다.
+  /// 전사 게이트와도 무관하게 받는다(소켓이 잠깐 닫혀도 세기는 이어 잰다).
+  final void Function(Uint8List pcm)? toLevel;
+
+  /// 갈래 4 — **진단 전용.** 개발 빌드에서 같은 조각을 A/B 비교기에 넘긴다.
+  /// null이면 아무 일도 없다(release가 그렇다).
+  ///
+  /// ⚠️ **전사 게이트와 무관하게 받는다.** 비교기는 발화 시작 전 소리를
+  /// 고리에 담아 두었다가 앞에 붙이는데(pre-roll), 게이트를 따라 끊으면
+  /// 파일 쪽만 첫 음절이 빠진 채 견주게 된다.
+  final void Function(Uint8List pcm)? toProbe;
+
+  final int sampleRate;
+
+  /// 음소거는 **내 소리를 안 보내는 것**이다. 참이면 두 갈래 다 버린다 —
+  /// 음소거 중에 한 말이 History에 남으면 안 되기 때문이다.
+  final bool Function()? isMuted;
+
+  /// 전사 세션이 오디오를 받을 수 있는 상태인가(게이트/연결). 없으면 항상 참.
+  final bool Function()? isSttOpen;
+
+  final void Function(String tag, String msg)? onLog;
+
+  /// 진단 로그 주기(전사로 보낸 프레임 수 기준). 0이면 로그를 남기지 않는다.
+  final int logEveryFrames;
+
+  int _callFrames = 0;
+  int _callBytes = 0;
+  int _sttFrames = 0;
+  int _sttBytes = 0;
+  int _mutedFrames = 0;
+  int _callErrors = 0;
+  int _sttErrors = 0;
+  int _levelFrames = 0;
+  int _levelErrors = 0;
+  int _probeFrames = 0;
+  int _probeErrors = 0;
+
+  int get callFrames => _callFrames;
+  int get callBytes => _callBytes;
+  int get sttFrames => _sttFrames;
+  int get sttBytes => _sttBytes;
+  int get mutedFrames => _mutedFrames;
+  int get callErrors => _callErrors;
+  int get sttErrors => _sttErrors;
+  int get levelFrames => _levelFrames;
+  int get levelErrors => _levelErrors;
+  int get probeFrames => _probeFrames;
+  int get probeErrors => _probeErrors;
+
+  /// 마이크 조각 하나. **await하지 않는다** — 통화 경로가 전사 쪽 future나
+  /// 네트워크 응답을 기다리게 만들지 않는 것이 이 자리의 규칙이다.
+  void add(Uint8List pcm) {
+    if (pcm.isEmpty) return;
+    if (isMuted?.call() ?? false) {
+      _mutedFrames++;
+      return;
+    }
+
+    // 갈래 1 — 통화. 문턱을 두지 않는다. 사람이 말한 소리는 무조건 나간다.
+    try {
+      toCall(pcm);
+      _callFrames++;
+      _callBytes += pcm.length;
+    } catch (e) {
+      _callErrors++;
+      onLog?.call('⚠️ [DuoAudio]', 'call_branch_error=${e.runtimeType}');
+    }
+
+    // 갈래 2 — 전사. 여기서 무슨 일이 나도 위 한 줄은 이미 끝났다.
+    if (isSttOpen?.call() ?? true) {
+      try {
+        toStt(pcm);
+        _sttFrames++;
+        _sttBytes += pcm.length;
+        if (logEveryFrames > 0 && _sttFrames % logEveryFrames == 0) {
+          onLog?.call(
+              '[DuoSTT]',
+              'speaker=$speakerRole source=$kDuoSttPcmSourceLocalMic '
+                  'sampleRate=$sampleRate bytes=$_sttBytes seq=$_sttFrames');
+        }
+      } catch (e) {
+        _sttErrors++;
+        onLog?.call(
+            '⚠️ [DuoSTT]', 'stt_branch_error=${e.runtimeType} (통화는 계속된다)');
+      }
+    }
+
+    // 갈래 3 — 세기 계측. 통화·전사가 지나간 뒤에 선다. 여기서 무슨 일이
+    // 나도 앞의 두 갈래는 이미 끝났다.
+    final level = toLevel;
+    if (level != null) {
+      try {
+        level(pcm);
+        _levelFrames++;
+      } catch (e) {
+        _levelErrors++;
+        onLog?.call('⚠️ [DuoSTT]',
+            'level_branch_error=${e.runtimeType} (통화·전사는 계속된다)');
+      }
+    }
+
+    // 갈래 4 — 진단. 맨 뒤에 서고, 실패해도 아무것도 되돌리지 않는다.
+    final probe = toProbe;
+    if (probe == null) return;
+    try {
+      probe(pcm);
+      _probeFrames++;
+    } catch (e) {
+      _probeErrors++;
+      onLog?.call('⚠️ [DuoSTT-AB]',
+          'probe_branch_error=${e.runtimeType} (통화·전사는 계속된다)');
+    }
+  }
+
+  /// 통화 종료 로그 한 줄. 오디오 내용은 남기지 않는다 — 세는 값만 남긴다.
+  String summary() => 'speaker=$speakerRole source=$kDuoSttPcmSourceLocalMic '
+      'sampleRate=$sampleRate callFrames=$_callFrames callBytes=$_callBytes '
+      'sttFrames=$_sttFrames sttBytes=$_sttBytes mutedFrames=$_mutedFrames '
+      'callErrors=$_callErrors sttErrors=$_sttErrors '
+      'levelFrames=$_levelFrames levelErrors=$_levelErrors '
+      'probeFrames=$_probeFrames probeErrors=$_probeErrors';
+}
+
+/// 상대에게서 받아 **재생만 하는** PCM의 계측기.
+///
+/// 이 클래스에는 전사로 나가는 출구가 없다. 상대 목소리를 내 단말에서 다시
+/// 전사하지 않는다는 규칙이 코드 모양으로 드러나 있어야 해서 따로 둔다.
+class DuoRemotePcmMeter {
+  DuoRemotePcmMeter({this.onLog, this.logEveryFrames = 100});
+
+  final void Function(String tag, String msg)? onLog;
+  final int logEveryFrames;
+
+  int _frames = 0;
+  int _bytes = 0;
+
+  int get frames => _frames;
+  int get bytes => _bytes;
+
+  void note(Uint8List pcm) {
+    if (pcm.isEmpty) return;
+    _frames++;
+    _bytes += pcm.length;
+    if (logEveryFrames > 0 && _frames % logEveryFrames == 0) {
+      onLog?.call(
+          '[DuoAudio]', 'direction=remote_playback bytes=$_bytes seq=$_frames');
+    }
   }
 }

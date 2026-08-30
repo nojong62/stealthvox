@@ -165,6 +165,14 @@ class OpenAiStreamingTranscribeSession {
   void Function()? onGaveUp;
   void Function(DateTime at)? onFirstAudioSent;
 
+  /// 🔬 서버 VAD가 발화 구간을 확정한 순간(`input_audio_buffer.committed`).
+  ///
+  /// **item_id가 정해지는 유일한 자리다.** 진단용 A/B 비교가 "방금 끝난 발화의
+  /// 오디오"를 나중에 도착할 전사문과 이어 붙이려면 이 순간이 필요하다.
+  /// 붙이지 않는 모드에서는 아무 일도 일어나지 않는다.
+  void Function(String itemId, int? voicedMs, String voicedSource)?
+      onUtteranceCommitted;
+
   /// 재연결을 시도해도 되는 상황인지 호출부가 판단한다.
   /// (백그라운드에서는 소켓이 붙지 않으므로 재시도를 태우면 안 된다)
   bool Function()? shouldReconnect;
@@ -619,6 +627,7 @@ class OpenAiStreamingTranscribeSession {
             '📡 [STREAM-VAD]',
             'committed item=$committedId order=$committedOrder '
                 'voicedMs=${voicedMs ?? -1} src=$source');
+        onUtteranceCommitted?.call(committedId, voicedMs, source);
         return;
 
       case 'conversation.item.input_audio_transcription.delta':

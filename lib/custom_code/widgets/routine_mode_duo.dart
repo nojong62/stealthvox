@@ -32,7 +32,14 @@ import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
+// 진단 로그를 개발 빌드에서만 남기기 위한 것. 이 파일의 다른 import들과
+// 이름이 겹쳐 `kDebugMode`가 그냥은 안 잡히므로 접두사로 가져온다.
+import 'package:flutter/foundation.dart' as foundation;
 import '/custom_code/services/duo_direct_audio.dart';
+import '/custom_code/services/duo_transcript_gate.dart';
+import '/custom_code/services/duo_stt_ab_probe.dart';
+import '/custom_code/services/pcm_audio_utils.dart'
+    show kStealthVoxSttSampleRate;
 import '/custom_code/services/origin_language_session.dart'
     show detectOriginScript, textIsLanguage, textContradictsLanguage;
 import '/custom_code/services/duo_pcm_relay_client.dart';
@@ -437,6 +444,31 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   PreparedAudioCapture? _directCapture;
   StreamSubscription<Uint8List>? _directCaptureSub;
   OpenAiStreamingTranscribeSession? _directStt;
+
+  /// 마이크 한 줄기를 통화·전사 두 갈래로 나누는 자리. 전사로 들어가는 PCM은
+  /// 여기를 반드시 지나므로, 출처가 로컬 마이크인지가 이 한 곳에서 보장된다.
+  DuoMicPcmFanout? _directFanout;
+
+  /// 상대에게서 받은 PCM의 계측기. **재생 쪽에만 붙는다** — 전사로 가는
+  /// 출구가 없다는 사실이 코드 모양으로 남아 있어야 한다.
+  DuoRemotePcmMeter? _remotePcmMeter;
+
+  /// 🔉 [DUO-LEVEL] 발화 구간의 평균 세기를 재는 계측기.
+  ///
+  /// ⚠️ **진단이 아니다.** low_level 게이트의 근거라서 release에서도 반드시
+  /// 만들어진다. 아래 진단기(`_sttAbProbe`)와 수명만 같을 뿐 서로 모른다.
+  DuoUtteranceRmsMeter? _utteranceRms;
+
+  /// 🔬 [DUO-AB] 같은 발화를 실시간 스트리밍과 파일 전사에 나란히 넣어
+  /// 견주는 진단기. **개발 빌드에서만 만들어진다.** null이면 아무 일도 없다.
+  DuoSttAbProbe? _sttAbProbe;
+
+  /// 진단용 WAV를 남길 자리. 통화 시작 때 만들고 비운다.
+  Directory? _sttAbWavDir;
+
+  /// 🎙️ [DUO-AB-CALL] 통화 한 통을 통째로 남기는 녹음기. 발화 단위 비교로는
+  /// **Server VAD 분절 문제를 못 가리므로** 통짜 파일이 따로 필요하다.
+  DuoAbCallRecorder? _sttAbCallRecorder;
 
   /// 통화 세대값. 방을 나가거나 재입장하면 올라가고, 이전 세대의 늦은
   /// 콜백(전사 완료·릴레이 프레임)은 전부 무시된다.
@@ -1315,6 +1347,54 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
   void _lgDuo(String tag, String msg) => debugPrint('[Duo]$tag $msg');
 
+  /// 🔬 [DUO-DIAG] 진단이 켜져 있는가. **이 한 곳만 본다** — 여기저기서
+  /// `kDebugMode`를 따로 물으면 나중에 한쪽만 바뀌어 반쪽만 켜진다.
+  ///
+  /// 평소에는 개발 빌드에서만 참이다. release에서 참이 되는 경우는
+  /// `--dart-define=DUO_STT_DIAG=true`로 **일부러 켠 진단 빌드**뿐이고,
+  /// 그 빌드는 진단이 끝나면 내린다([kDuoSttDiagForced] 주석 참고).
+  static bool get _duoDiagOn => foundation.kDebugMode || kDuoSttDiagForced;
+
+  /// 🔬 [DUO-DIAG] 진단 전용 로그. **전사문 원문이 실려 나간다.**
+  /// 꺼져 있으면 한 글자도 찍지 않는다. 저장도 하지 않는다 — 이 줄들은
+  /// `flutter run`/`adb logcat` 창에만 살고 어디에도 남지 않는다.
+  void _lgDuoDev(String tag, String msg) {
+    if (!_duoDiagOn) return;
+    debugPrint('[Duo]$tag $msg');
+  }
+
+  /// 🔬 [DUO-DIAG] GPT가 돌려준 **가공 전** 전사문 한 줄.
+  ///
+  /// 이 로그의 존재 이유 하나다: `[DuoSTT-DECISION]`과 나란히 놓았을 때
+  /// "GPT가 이미 틀렸다"와 "앱이 버렸다/고쳤다"가 갈려야 한다.
+  void _lgDirectSttRaw({
+    required String itemId,
+    required String text,
+    required int? voicedMs,
+    required String voicedSrc,
+    required String languageCode,
+  }) {
+    _lgDuoDev(
+        '[DuoSTT-RAW]',
+        'speaker=$_myRole language=${languageCode.isEmpty ? 'auto' : languageCode} '
+            'voicedMs=${voicedMs ?? -1} voicedSrc=$voicedSrc '
+            'item=$itemId len=${text.trim().length} text="${text.trim()}"');
+  }
+
+  /// 🔬 [DUO-DIAG] 그 전사문을 앱이 어떻게 했는가.
+  /// [reason]은 [_kDirectDropReasons]의 값 중 하나다.
+  void _lgDirectSttDecision({
+    required String itemId,
+    required bool accepted,
+    required String reason,
+    required String finalText,
+  }) {
+    _lgDuoDev(
+        '[DuoSTT-DECISION]',
+        'speaker=$_myRole item=$itemId accepted=$accepted reason=$reason '
+            'finalText="${finalText.trim()}"');
+  }
+
   /// 초대받아 들어온 방 id. null이면 이 화면을 직접 연 호스트다.
   /// widget.roomId 우선, 없으면 딥링크가 남긴 FFAppState 값을 본다.
   String? _resolveGuestRoomId() {
@@ -1450,23 +1530,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   ///   (2026-08-14 실측: 31건 중 5건 유실, order=3은 voicedMs=1164였다).
   ///   환청과 짧은 대답을 가르는 것은 글자 수가 아니라 **소리 난 시간**이고,
   ///   그건 호출부의 voicedMs 게이트가 이미 판단한다.
-  bool _isNoiseTranscript(String raw) {
-    final String trimmed = raw.trim();
-    if (trimmed.isEmpty) return true;
-    final String lower = trimmed.toLowerCase();
-    final String clean = lower.replaceAll(RegExp(r'[^\w\s가-힣]'), '').trim();
-    if (clean.isEmpty) return true;
-    const List<String> hardGhosts = [
-      'thank you for watching',
-      'thanks for watching',
-      'please subscribe',
-      'subtitles by',
-      '시청해 주셔서',
-      '시청해주셔서',
-      '구독과 좋아요',
-    ];
-    return hardGhosts.any((g) => lower.contains(g));
-  }
+  bool _isNoiseTranscript(String raw) => noiseTranscriptReason(raw) != null;
 
   bool _isDirectGenerationCurrent(int generation) =>
       mounted &&
@@ -1584,6 +1648,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
     try {
       // ① 재생기 먼저 — 상대 소리가 언제 와도 받을 수 있게 열어 둔다.
+      // 🔉 세기 계측기는 **진단 여부와 무관하게** 만든다. 게이트가 이 값을 본다.
+      _utteranceRms = DuoUtteranceRmsMeter();
+      _remotePcmMeter =
+          _duoDiagOn ? DuoRemotePcmMeter(onLog: _lgDuo) : DuoRemotePcmMeter();
       final player = DuoPcmJitterPlayer(onLog: _lgDuo);
       final playerOk = await player.start();
       if (!_isDirectGenerationCurrent(generation)) {
@@ -1630,6 +1698,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _relayInboundSub = relay.inbound.listen((pcm) {
         if (!_isDirectGenerationCurrent(generation)) return;
         _noteInboundAudio(pcm);
+        // 🚫 [NO-STT] 상대 PCM은 재생기까지만 간다. 전사 입력으로 넘기지 않는다 —
+        //   상대 발화의 글자는 상대 단말이 자기 마이크로 만들어 채널에 올린다.
+        _remotePcmMeter?.note(pcm);
         _jitterPlayer?.add(pcm);
       });
       final relayOk = await relay.connect();
@@ -1686,27 +1757,47 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         return;
       }
       _directCapture = capture;
+      // 🎙️ [DUO-FANOUT] 마이크 조각을 두 갈래로 나누는 규칙은 위젯이 아니라
+      //   `DuoMicPcmFanout`에 있다(시험으로 지키기 위해서다). 여기서는 그 자리에
+      //   **로컬 마이크 스트림만** 물린다 — 릴레이 수신 PCM은 이 자리에 닿지 않는다.
+      final fanout = DuoMicPcmFanout(
+        speakerRole: _myRole,
+        sampleRate: kStealthVoxSttSampleRate,
+        // 🔇 [DUO-MUTE] 음소거는 **내 소리를 안 보내는 것**이다. 릴레이 연결과
+        //   상대 음성 수신은 그대로 살아 있다 — 여기서 내 조각만 버린다.
+        //   전사도 같이 막는다. 안 그러면 음소거 중에 한 말이 History에 남는다.
+        isMuted: () => _directMuted,
+        isSttOpen: () {
+          final stt = _directStt;
+          return stt != null && stt.audioGateOpen;
+        },
+        // 갈래 1 — 상대에게 보내는 실제 목소리. 전사를 기다리지 않는다.
+        //
+        //   🚫 [NO-GATE] **여기에 문턱을 두지 않는다.** 2026-08-28에 마이크
+        //   세기로 여닫는 게이트를 걸었다가, 조용한 맞장구 두 건이 전사에는
+        //   남고 상대에게는 한 조각도 못 갔다(`seq=4`·`seq=7`). 세기만으로는
+        //   내 말과 벽 넘어 돌아온 남의 말을 가를 수 없다.
+        //
+        //   울림은 이 자리에서 사람 목소리를 버려서 잡는 것이 아니라 AEC와
+        //   잔향 억제로 잡는다. **사람이 말한 소리는 무조건 나간다.**
+        toCall: (bytes) => _relayClient?.sendPcm(bytes),
+        // 갈래 2 — History용 전사. 실패해도 위 한 줄에 영향이 없다.
+        toStt: (bytes) => _directStt?.appendAudio(bytes),
+        // 갈래 3 — 세기 계측. **release에서도 돈다.** 이게 없으면 게이트가
+        //   세기를 모르고, 모르면 통과시키므로 방어선이 사라진다.
+        toLevel: (bytes) => _utteranceRms?.addPcm(bytes),
+        // 갈래 4 — 진단. release에서는 `_sttAbProbe`가 null이라 아무 일도 없다.
+        toProbe: (bytes) {
+          _sttAbProbe?.addPcm(bytes);
+          _sttAbCallRecorder?.add(bytes);
+        },
+        onLog: _duoDiagOn ? _lgDuo : null,
+      );
+      _directFanout = fanout;
       _directCaptureSub = capture.stream.listen(
         (bytes) {
-          if (bytes.isEmpty) return;
           if (generation != _directGeneration) return;
-          // 🔇 [DUO-MUTE] 음소거는 **내 소리를 안 보내는 것**이다. 릴레이 연결과
-          //   상대 음성 수신은 그대로 살아 있다 — 여기서 내 조각만 버린다.
-          //   전사도 같이 막는다. 안 그러면 음소거 중에 한 말이 History에 남는다.
-          if (_directMuted) return;
-          // 갈래 1 — 상대에게 보내는 실제 목소리. 전사를 기다리지 않는다.
-          //
-          //   🚫 [NO-GATE] **여기에 문턱을 두지 않는다.** 2026-08-28에 마이크
-          //   세기로 여닫는 게이트를 걸었다가, 조용한 맞장구 두 건이 전사에는
-          //   남고 상대에게는 한 조각도 못 갔다(`seq=4`·`seq=7`). 세기만으로는
-          //   내 말과 벽 넘어 돌아온 남의 말을 가를 수 없다.
-          //
-          //   울림은 이 자리에서 사람 목소리를 버려서 잡는 것이 아니라 AEC와
-          //   잔향 억제로 잡는다. **사람이 말한 소리는 무조건 나간다.**
-          _relayClient?.sendPcm(bytes);
-          // 갈래 2 — History용 전사. 실패해도 위 한 줄에 영향이 없다.
-          final stt = _directStt;
-          if (stt != null && stt.audioGateOpen) stt.appendAudio(bytes);
+          fanout.add(bytes);
         },
         onError: (Object e) =>
             _lgDuo('[DIRECT]', 'capture_error=${e.runtimeType}'),
@@ -1727,14 +1818,70 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     }
   }
 
+  /// 🔬 [DUO-AB] 진단기를 세운다. **개발 빌드가 아니면 null을 돌려준다.**
+  ///
+  /// 발화마다 전사 요청이 한 번 더 나가므로 release에서는 절대 돌면 안 된다.
+  /// 개발 중에도 끄고 싶으면 `--dart-define=DUO_STT_AB_PROBE=false`.
+  Future<DuoSttAbProbe?> _createSttAbProbe(String languageCode) async {
+    if (!_duoDiagOn || !kDuoSttAbProbeEnabled) return null;
+    if (_openAiKey.isEmpty) return null;
+
+    // 소리를 귀로 확인할 수 있게 WAV도 남긴다. 통화마다 비운다 — 지난 통화의
+    // 파일이 섞이면 어느 발화의 소리인지 알 수 없다.
+    Directory? wavDir;
+    try {
+      final Directory base = await getTemporaryDirectory();
+      wavDir = Directory('${base.path}${Platform.pathSeparator}duo_stt_ab');
+      if (await wavDir.exists()) {
+        await wavDir.delete(recursive: true);
+      }
+      await wavDir.create(recursive: true);
+      _sttAbWavDir = wavDir;
+    } catch (e) {
+      _lgDuo('🔬 [DuoSTT-AB]', 'wav_dir_failed(${e.runtimeType}) — 로그만 남긴다');
+      wavDir = null;
+    }
+
+    final probe = DuoSttAbProbe(
+      apiKey: _openAiKey,
+      speakerRole: _myRole,
+      // 스트리밍 소켓에 박은 것과 **같은 값**이어야 비교가 성립한다.
+      languageCode: languageCode,
+      sampleRate: kStealthVoxSttSampleRate,
+      saveWavDir: wavDir,
+      onLog: _lgDuoDev,
+    );
+    // 통짜 녹음. 발화 조각들이 다 같이 틀렸을 때 "소리가 나쁜가, 분절이
+    // 나쁜가"를 이 파일 하나가 가른다.
+    if (wavDir != null) {
+      final recorder = DuoAbCallRecorder(
+        file: File('${wavDir.path}${Platform.pathSeparator}'
+            '_call_${_myRole.toLowerCase()}.wav'),
+        sampleRate: kStealthVoxSttSampleRate,
+        onLog: _lgDuoDev,
+      );
+      if (await recorder.start()) _sttAbCallRecorder = recorder;
+    }
+
+    _lgDuoDev(
+        '[DuoSTT-AB]',
+        'probe_started speaker=$_myRole language=$languageCode '
+            'preRollMs=$kDuoAbPreRollMs wavDir=${wavDir?.path ?? 'none'} '
+            'callWav=${_sttAbCallRecorder != null}');
+    return probe;
+  }
+
   Future<void> _startDirectStt(int generation) async {
     if (_openAiKey.isEmpty) {
       _lgDuo('[DIRECT-STT]', 'skipped reason=no_api_key');
       return;
     }
+    // 스트리밍 소켓과 진단기가 **같은 언어 값**을 봐야 한다. 두 번 계산하면
+    // 나중에 한쪽만 바뀌어 비교가 조용히 망가진다.
+    final String sttLanguageCode = _mapLanguageToCode(_myNative());
     final session = OpenAiStreamingTranscribeSession(
       apiKey: _openAiKey,
-      languageCode: _mapLanguageToCode(_myNative()),
+      languageCode: sttLanguageCode,
       onLog: (tag, msg) => _lgDuo('[DIRECT-STT]$tag', msg),
       // 🎙️ 폰을 손에 들지 않는 자리다. 먼 소리를 잡고 첫 음절을 지킨다.
       vadThreshold: kDuoSttVadThreshold,
@@ -1747,18 +1894,89 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     session.onSpeechStarted = () {
       if (!_isDirectGenerationCurrent(generation)) return;
       _directSpeechStartedAt = DateTime.now();
+      // 🔉 여기서부터 세기를 쌓는다. 이전 발화의 누적은 버려진다.
+      _utteranceRms?.beginUtterance();
+      // 🔬 같은 순간부터 진단기도 소리를 모은다(고리에 담긴 앞소리 포함).
+      _sttAbProbe?.beginUtterance();
+    };
+    // 🔬 item_id가 정해지는 유일한 자리. 여기서 소리와 전사문을 잇는다.
+    session.onUtteranceCommitted = (itemId, voicedMs, voicedSource) {
+      if (!_isDirectGenerationCurrent(generation)) return;
+      _utteranceRms?.commitUtterance(itemId);
+      _sttAbProbe?.commitUtterance(itemId, voicedMs, voicedSource);
+    };
+    // 🔉 소켓이 끊겼다 붙는 동안의 소리는 어느 발화의 것도 아니다.
+    //   장부를 비워, 끊기기 전 세기가 다음 발화를 통과시키지 못하게 한다.
+    session.onReconnecting = (attempt) {
+      if (!_isDirectGenerationCurrent(generation)) return;
+      _utteranceRms?.reset();
     };
     session.onTranscriptCompleted = (itemId, text) {
-      if (!_canSaveDirectTranscript(generation)) return;
-      // 🔇 [DUO-GHOST] 소리가 난 시간을 여기서 읽는다. 전사문이 도착한 뒤에는
-      //   이 값이 유일하게 남은 "진짜 말이었는가"의 근거다.
       final voicedMs = session.utteranceVoicedMsOf(itemId);
       final voicedSrc = session.utteranceVoicedSourceOf(itemId) ?? 'none';
-      if (voicedMs != null && voicedMs < kDuoMinVoicedMs) {
+      // 🔬 [DUO-DIAG] **가장 먼저 찍는다.** 어떤 이유로 버려지든, GPT가
+      //   무엇을 돌려줬는지는 남아야 앱 필터와 전사기를 갈라 볼 수 있다.
+      _lgDirectSttRaw(
+        itemId: itemId,
+        text: text,
+        voicedMs: voicedMs,
+        voicedSrc: voicedSrc,
+        languageCode: session.languageCode,
+      );
+      // 🔬 [DUO-AB] **어떤 판정보다 먼저 견준다.** 앱이 버릴 발화일수록
+      //   "GPT가 무엇을 들었는가"가 중요하다. 흘려보내므로 통화도 저장도
+      //   이 요청을 기다리지 않는다.
+      final probe = _sttAbProbe;
+      if (probe != null) {
+        unawaited(probe.compare(itemId, text).catchError((Object e) {
+          _lgDuoDev('[DuoSTT-AB]', 'compare_failed(${e.runtimeType})');
+        }));
+      }
+      if (!_canSaveDirectTranscript(generation)) {
+        _lgDirectSttDecision(
+            itemId: itemId,
+            accepted: false,
+            reason: DuoDropReason.staleGeneration,
+            finalText: '');
+        return;
+      }
+      // 🔇 [DUO-GHOST] 소리가 난 시간을 여기서 읽는다. 전사문이 도착한 뒤에는
+      //   이 값이 유일하게 남은 "진짜 말이었는가"의 근거다.
+      if (belowVoicedGate(voicedMs, minMs: kDuoMinVoicedMs)) {
         _lgDuo(
             '[DUO-GHOST]',
             'dropped item=$itemId voicedMs=$voicedMs src=$voicedSrc '
                 'len=${text.trim().length}');
+        _lgDirectSttDecision(
+            itemId: itemId,
+            accepted: false,
+            reason: '${DuoDropReason.voicedMs}(voicedMs=$voicedMs '
+                'min=$kDuoMinVoicedMs src=$voicedSrc)',
+            finalText: '');
+        return;
+      }
+      // 🔉 [DUO-LEVEL] 길이 다음은 세기다. **길이로는 못 거른다** —
+      //   2026-08-30 실기기 두 통에서 환청 10건이 전부 1.3~2.0초였다.
+      //   무음에 가까운 조각에 전사 모델이 문장을 지어내는 것을 여기서 막는다.
+      //   세기를 못 잰 발화(null)는 통과시킨다 — 모르는 것으로 사람 말을
+      //   버리지 않는다.
+      final double? rmsDbfs = _utteranceRms?.rmsDbfsOf(itemId);
+      if (belowLevelGate(rmsDbfs, minDbfs: kDuoMinUtteranceRmsDbfs)) {
+        // release에도 남긴다. **전사문은 싣지 않는다** — 숫자만으로 충분하고,
+        // 문턱을 다시 잡을 근거는 이 숫자다.
+        _lgDuo(
+            '[DUO-DROP]',
+            'reason=${DuoDropReason.lowLevel} speaker=$_myRole item=$itemId '
+                'rmsDbfs=${rmsDbfs!.toStringAsFixed(1)} '
+                'threshold=${kDuoMinUtteranceRmsDbfs.toStringAsFixed(1)} '
+                'voicedMs=${voicedMs ?? -1}');
+        _lgDirectSttDecision(
+            itemId: itemId,
+            accepted: false,
+            reason: '${DuoDropReason.lowLevel}'
+                '(rmsDbfs=${rmsDbfs.toStringAsFixed(1)} '
+                'threshold=${kDuoMinUtteranceRmsDbfs.toStringAsFixed(1)})',
+            finalText: '');
         return;
       }
       // 종료 대기가 이 future를 기다린다 — unawaited로 흘려보내면 안 된다.
@@ -1783,6 +2001,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _lgDuo('[DIRECT-STT]', 'connect_failed (통화는 계속된다)');
       return;
     }
+    // 진단기는 소켓이 붙은 뒤에 만든다. 못 붙었으면 견줄 live 쪽이 없다.
+    _sttAbProbe = await _createSttAbProbe(sttLanguageCode);
     session.openAudioGate(reason: 'direct_call');
     _directStt = session;
     if (mounted) setState(() => _sttActive = true);
@@ -1797,18 +2017,42 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   Future<void> _handleDirectTranscript(
       int generation, String text, String itemId,
       {int? voicedMs}) async {
-    if (!_canSaveDirectTranscript(generation)) return;
+    if (!_canSaveDirectTranscript(generation)) {
+      _lgDirectSttDecision(
+          itemId: itemId,
+          accepted: false,
+          reason: DuoDropReason.staleGeneration,
+          finalText: '');
+      return;
+    }
     final String trimmed = text.trim();
-    if (trimmed.isEmpty || _isNoiseTranscript(trimmed)) {
+    final String? noiseReason = noiseTranscriptReason(trimmed);
+    if (noiseReason != null) {
       // 예전에는 여기서 로그 없이 사라졌다. 무엇이 왜 버려졌는지 남지 않아
       // 실기기에서 "빠진 대사"를 추적할 수가 없었다.
-      _lgDuo('[DUO-DROP]',
-          'noise_gate item=$itemId len=${trimmed.length} voicedMs=${voicedMs ?? -1}');
+      _lgDuo(
+          '[DUO-DROP]',
+          'noise_gate=$noiseReason item=$itemId len=${trimmed.length} '
+              'voicedMs=${voicedMs ?? -1}');
+      _lgDirectSttDecision(
+          itemId: itemId,
+          accepted: false,
+          reason: noiseReason,
+          finalText: '');
       return;
     }
     // 중복 저장 가드. 같은 item이 두 번 오면(재전달·flush 겹침) 한 번만 남긴다.
+    //
+    // ⚠️ **item_id가 빈 채로 오면 이 가드가 통째로 비켜간다.** 전사 세션은
+    //   `completed`와 `done`을 같은 발화로 둘 다 올리므로, 그때는 같은 말이
+    //   두 번 저장된다(만능 통역 쪽은 [_isDuplicateEmptyIdTranscript]가 막는다).
     if (itemId.isNotEmpty && !_savedDirectItemIds.add(itemId)) {
       _lgDuo('[DIRECT-STT]', 'duplicate_skipped item=$itemId');
+      _lgDirectSttDecision(
+          itemId: itemId,
+          accepted: false,
+          reason: DuoDropReason.duplicateItem,
+          finalText: '');
       return;
     }
     if (_savedDirectItemIds.length > 200) {
@@ -1829,6 +2073,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       mode: kDuoModeDirect,
       seq: seq,
       spokenAt: spokenAt,
+      sttSource: kDuoSttPcmSourceLocalMic,
     );
     // 원문 자리에 전사문을 넣는다. 타겟 문장과 소리는 히스토리에서 만든다.
     await _saveHistoryMessage(
@@ -1839,9 +2084,21 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       seq: seq,
       spokenAt: spokenAt,
       speakerUid: _myUid,
+      speakerRole: _myRole,
+      sttSource: kDuoSttPcmSourceLocalMic,
       sourceLang: _myNative(),
       channelMsgId: channelId,
     );
+    // 여기까지 오면 저장 판정은 전부 통과했다. 글자를 손대지 않았으므로
+    // finalText는 GPT raw를 trim한 것과 같아야 한다 — 다르면 위 어딘가에서
+    // 누가 문장을 고친 것이다.
+    _lgDirectSttDecision(
+        itemId: itemId,
+        accepted: true,
+        reason: channelId == null
+            ? '${DuoDropReason.accepted}(channel_upload_failed)'
+            : DuoDropReason.accepted,
+        finalText: trimmed);
   }
 
   /// 통화를 끊는다. **순서가 전부다.**
@@ -1918,6 +2175,33 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     _jitterPlayer = null;
     await player?.stop();
 
+    // 팬아웃·계측기는 통화 한 번짜리다. 다음 통화가 이전 통화의 셈을 물려받거나
+    // 늦게 온 조각이 죽은 릴레이/세션을 두드리지 않도록 여기서 버린다.
+    final fanout = _directFanout;
+    _directFanout = null;
+    final remoteMeter = _remotePcmMeter;
+    _remotePcmMeter = null;
+
+    // 🔉 세기 계측기도 통화 한 번짜리다. 다음 통화가 이전 세기를 물려받으면
+    //   조용한 발화가 남의 세기로 통과한다.
+    _utteranceRms?.reset();
+    _utteranceRms = null;
+
+    // 🔬 진단기도 통화 한 번짜리다. 버퍼를 놓고, 남긴 WAV 자리를 알려 준다.
+    final abProbe = _sttAbProbe;
+    _sttAbProbe = null;
+    if (abProbe != null) {
+      _lgDuoDev(
+          '[DuoSTT-AB]',
+          'probe_stopped savedWavFiles=${abProbe.savedFiles} '
+              'pendingUtterances=${abProbe.pendingCount} '
+              'wavDir=${_sttAbWavDir?.path ?? 'none'}');
+      abProbe.dispose();
+    }
+    final callRecorder = _sttAbCallRecorder;
+    _sttAbCallRecorder = null;
+    if (callRecorder != null) unawaited(callRecorder.stop());
+
     // 🔇 [DUO-MUTE] 다음 통화는 음소거 아닌 상태로 시작한다. 이전 통화의
     //   음소거를 물려받으면 유저가 모르는 채로 말하게 된다.
     if (mounted && !_isExiting) {
@@ -1943,6 +2227,15 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
             'playFirstLatencyMs=${player?.firstPlayLatencyMs} '
             'sentBytes=${relay?.sentBytes} recvBytes=${relay?.receivedBytes} '
             'playedBytes=${player?.writtenBytes} droppedBytes=${player?.droppedBytes}');
+    // 오디오 내용은 남기지 않는다. 세는 값만 남겨 실기기 로그에서 두 갈래가
+    // 각각 몇 조각씩 갔는지 대조할 수 있게 한다.
+    if (fanout != null) _lgDuo('[DuoSTT]', 'call_summary ${fanout.summary()}');
+    if (remoteMeter != null) {
+      _lgDuo(
+          '[DuoAudio]',
+          'call_summary direction=remote_playback '
+              'bytes=${remoteMeter.bytes} seq=${remoteMeter.frames}');
+    }
     _directStopping = false;
   }
 
@@ -2598,6 +2891,9 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     String? mode,
     int? seq,
     DateTime? spokenAt,
+    // 이 글자를 만든 PCM의 출처. 직접 대화만 채운다 —
+    // [kDuoSttPcmSourceLocalMic]이 아니면 마이크가 아닌 소리를 전사한 것이다.
+    String? sttSource,
   }) async {
     if (_duoSessionRef == null || raw.trim().isEmpty) return null;
     try {
@@ -2615,6 +2911,13 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         if (mode != null) 'duoMode': mode,
         if (seq != null) 'seq': seq,
         if (spokenAt != null) 'spokenAt': spokenAt.millisecondsSinceEpoch,
+        // ↓ 직접 대화에서만 붙는다. 기존 통역 경로의 문서 모양은 그대로다.
+        //   방 id는 경로에도 있지만, 상대 폰이 받은 글자 하나만 떼어 봐도
+        //   어느 방·누구·무슨 소리에서 나왔는지 알 수 있어야 한다.
+        if (sttSource != null && sttSource.isNotEmpty) ...<String, dynamic>{
+          'sttSource': sttSource,
+          'roomId': _duoSessionRef!.id,
+        },
       });
       return docRef.id;
     } catch (e) {
@@ -2733,6 +3036,11 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
             ? null
             : DateTime.fromMillisecondsSinceEpoch(spokenMs),
         speakerUid: data['senderUid']?.toString(),
+        // 상대 줄에도 방에서의 자리와 소리 출처를 그대로 옮긴다. 상대 글자는
+        // **상대 단말의 마이크**에서 나온 것이지 내가 받은 PCM에서 나온 것이
+        // 아니라는 사실이 내 기록에도 남아야 한다.
+        speakerRole: data['senderRole']?.toString(),
+        sttSource: data['sttSource']?.toString(),
         // 상대가 말한 언어는 상대의 ORIGIN이다. 채널에 실려 온 값을 그대로 쓴다.
         sourceLang: srcLang,
       );
@@ -2921,6 +3229,12 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     int? seq,
     DateTime? spokenAt,
     String? speakerUid,
+    // 방에서의 자리('HOST'/'GUEST'). 첫 인자 [role]과 다르다 — 그쪽은
+    // **내 히스토리에서 누구 줄인가**(내 말이면 HOST, 상대 말이면 SYSTEM)라서
+    // 두 사람의 기록이 같은 발화에 서로 다른 값을 갖는다. 이 값은 양쪽이 같다.
+    String? speakerRole,
+    // 이 글자를 만든 PCM의 출처. 직접 대화는 언제나 로컬 마이크다.
+    String? sttSource,
     String? sourceLang,
     bool? deferTarget,
     // 🔗 이 줄이 나온 채널 원본 문서 id. canonical이 이 값으로 개인 방 줄을
@@ -2967,6 +3281,10 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         if (spokenAt != null) 'spoken_at_ms': spokenAt.millisecondsSinceEpoch,
         if (speakerUid != null && speakerUid.isNotEmpty)
           'speaker_uid': speakerUid,
+        if (speakerRole != null && speakerRole.isNotEmpty)
+          'speaker_role': speakerRole,
+        // `source_lang`(말한 언어)과 다른 축이다. 이쪽은 **소리의 출처**다.
+        if (sttSource != null && sttSource.isNotEmpty) 'stt_source': sttSource,
         // 발화자마다 말한 언어가 다르다(내 ORIGIN ≠ 상대 ORIGIN). 나중에
         // 타겟을 만들 때 출발 언어를 추측하지 않도록 줄마다 남긴다.
         if (sourceLang != null && sourceLang.isNotEmpty)
@@ -2984,7 +3302,18 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         'last_message_time': FieldValue.serverTimestamp(),
         'msg_count': FieldValue.increment(1),
       });
-    } catch (e) {}
+    } catch (e) {
+      // 예전에는 여기가 빈 catch였다. Firestore 쓰기가 실패하면 그 발화는
+      // 어느 화면에도 안 남는데 **로그조차 없어서** 실기기에서 "빠진 대사"의
+      // 원인을 전사 쪽으로 오해하게 된다. 통화는 계속한다.
+      _lgDuo('⚠️ [HISTORY]',
+          'save_failed(${e.runtimeType}) role=$role mode=${mode ?? '-'}');
+      _lgDuoDev(
+          '[DuoSTT-DECISION]',
+          'speaker=$_myRole accepted=false '
+              'reason=${DuoDropReason.historyWriteFailed} '
+              'finalText="${(defer ? original : target).trim()}"');
+    }
   }
 
   /// 🔁 [DUO-HANDOFF] **익명 게스트만** 표를 남긴다.
