@@ -27,7 +27,7 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
-import 'duo_replay_rules.dart';
+import 'package:stealth_vox/custom_code/services/duo_replay_rules.dart';
 
 const String _model = 'gpt-4.1-mini';
 

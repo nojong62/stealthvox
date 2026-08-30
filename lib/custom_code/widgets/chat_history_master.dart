@@ -43,6 +43,7 @@ import '/custom_code/services/speech_reconstruction.dart';
 import '/custom_code/services/duo_study_state.dart';
 import '/custom_code/services/history_text_model.dart';
 import '/custom_code/services/duo_canonical.dart';
+import '/custom_code/services/duo_replay.dart';
 import '/custom_code/services/study_access.dart';
 import '/custom_code/services/pcm_audio_utils.dart'
     show kStealthVoxSttSampleRate, pcm16DurationMs, pcm16ToWav;
@@ -340,6 +341,27 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   /// 어느 쪽도 사용자에게 이유를 알려주지 않았다. 여기 남겨서 말풍선에 배지를
   /// 띄우고 다시 시도할 수 있게 한다.
   final Map<String, String> _targetFailures = <String, String>{};
+
+  // ── 🎬 [DUO-REPLAY] 학습용 대화 복원층 ────────────────────────────
+  // **읽는 판이다.** 연습·배울글·교정은 전부 Original Call의 문서를 그대로
+  // 본다 — Replay는 그 위에 겹쳐 보여줄 뿐 학습 기능의 입력을 바꾸지 않는다.
+  // 없거나 실패했으면 전환 버튼조차 뜨지 않는다.
+  //
+  // 화면이 지켜야 할 규칙(선택권 유지·같은 판 무시·사라지면 되돌리기)은
+  // 위젯이 아니라 [DuoReplayViewState]가 쥔다 — 시험으로 고정하기 위해서다.
+  final DuoReplayViewState _replayView = DuoReplayViewState();
+
+  /// 🎬 `replay/current` 실시간 구독.
+  ///
+  /// Replay는 통화가 끝난 뒤 canonical → Replay 순으로 만들어져 **20~60초**
+  /// 걸린다. 그동안 공부방이 열려 있으면 첫 조회는 빈손으로 돌아온다.
+  /// 나갔다 다시 들어오게 하지 않으려고, 만들어지는 순간을 이 구독이 잡는다.
+  ///
+  /// **곁가지다.** 권한·네트워크 오류가 나도 Original Call 화면은 그대로다.
+  StreamSubscription<DuoReplayScript?>? _replaySub;
+
+  /// 지금 구독 중인 방. 같은 방으로 다시 들어와도 구독이 둘이 되지 않게 한다.
+  String? _replayRoomId;
   String _apiKey = "";
   String _deepgramKey = "";
   Future<void>? _remoteConfigFuture;
@@ -451,6 +473,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // 📦 [Box 8: 라이프사이클 - dispose]
   @override
   void dispose() {
+    // 🎬 곁가지부터 접는다. 늦게 오는 Replay 이벤트가 내려간 화면에
+    //   setState를 부르면 안 된다.
+    _stopReplayListener();
     BillingTicker.instance.balanceExhausted.removeListener(_onBalanceExhausted);
     clearBillingIdle();
     _utteranceSafetyTimer?.cancel();
@@ -646,6 +671,64 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       // 실어 오면 그때 빠진 타겟을 만든다.
       debugPrint('[HISTORY] canonical_applied room=$roomId');
     }
+    // 🎬 복원된 대본이 있으면 읽어 둔다. **없어도 화면은 그대로 열린다** —
+    //   읽기 실패는 조용히 null이고, 전환 버튼만 안 뜬다.
+    //
+    //   ⚠️ Replay가 걸리는 방(직접 통화)에만 붙는다. 만능 통역·서클톡·
+    //   시나리오톡·일반 히스토리에는 구독을 만들지 않는다.
+    if (!duoRoomHasReplay(room)) return;
+    final script = await readDuoReplay(roomId);
+    if (!mounted) return;
+    if (_replayView.apply(script)) {
+      setState(() {});
+      debugPrint('[HISTORY] replay_loaded room=$roomId '
+          'lines=${script!.lines.length} dropped=${script.droppedCount}');
+    } else {
+      debugPrint('[HISTORY] replay_waiting room=$roomId');
+    }
+    _startReplayListener(roomId);
+  }
+
+  /// 🎬 `replay/current`를 지켜본다. 아직 문서가 없어도 구독은 유지된다.
+  ///
+  /// **Replay 상태만 갱신한다.** 히스토리 재조회·canonical 재적용·배울글
+  /// 재생성·연습 상태 초기화는 하나도 일어나지 않는다 — 여기서 건드리는
+  /// 것은 [_replayView] 하나뿐이다.
+  void _startReplayListener(String roomId) {
+    if (roomId.isEmpty) return;
+    // 같은 방을 이미 보고 있으면 그대로 둔다. rebuild로 구독이 늘지 않는다.
+    if (_replaySub != null && _replayRoomId == roomId) return;
+    _stopReplayListener();
+    _replayRoomId = roomId;
+    debugPrint('[HISTORY] replay_listener_started room=$roomId');
+    _replaySub = watchDuoReplay(roomId).listen(
+      (script) {
+        // 화면이 이미 내려갔으면 아무것도 하지 않는다.
+        if (!mounted || _replayRoomId != roomId) return;
+        if (!_replayView.apply(script)) return; // 같은 판이다. 가만히 둔다.
+        setState(() {});
+        if (script == null) {
+          debugPrint('[HISTORY] replay_failed room=$roomId reason=unusable');
+        } else {
+          debugPrint('[HISTORY] replay_ready room=$roomId '
+              'lines=${script.lines.length} dropped=${script.droppedCount} '
+              'version=${script.canonicalVersion}');
+        }
+      },
+      // 곁가지가 화면을 죽이지 않는다. 원본은 그대로 볼 수 있다.
+      onError: (Object e) =>
+          debugPrint('[HISTORY] replay_listener_error=${e.runtimeType}'),
+      cancelOnError: false,
+    );
+  }
+
+  void _stopReplayListener() {
+    final sub = _replaySub;
+    if (sub == null) return;
+    _replaySub = null;
+    debugPrint('[HISTORY] replay_listener_stopped room=${_replayRoomId ?? "-"}');
+    _replayRoomId = null;
+    unawaited(sub.cancel());
   }
 
   Future<void> _fetchRemoteConfig({bool force = false}) async {
@@ -3055,6 +3138,8 @@ RULES — follow exactly:
             child: Column(
               children: [
                 _buildTopBar(),
+                // 🎬 복원된 대본이 있을 때만 뜬다. 없으면 화면은 예전 그대로다.
+                _buildReplayToggle(),
                 Expanded(
                     child: StreamBuilder<QuerySnapshot>(
                   stream: widget.historyDoc
@@ -3078,6 +3163,11 @@ RULES — follow exactly:
                         child: Text("데이터가 없습니다.",
                             style: TextStyle(color: Colors.white54)),
                       );
+                    }
+                    // 🎬 Replay는 **겹쳐 보여주는 판**이다. 위 `docs`는 그대로
+                    //   두므로 배울글 생성·연습 진입은 원본을 계속 본다.
+                    if (_replayView.showReplay) {
+                      return _buildReplayScript(_replayView.script!);
                     }
                     return _buildChatBubbles(docs);
                   },
@@ -3283,6 +3373,114 @@ RULES — follow exactly:
           ),
         ],
       ),
+    );
+  }
+
+  /// 🎬 Original Call ↔ Conversation Replay 전환 줄.
+  ///
+  /// **복원된 대본이 있을 때만 나타난다.** 없거나 만들다 실패했으면 이 줄이
+  /// 통째로 빠지고, 화면은 예전과 똑같이 원본만 보여준다.
+  Widget _buildReplayToggle() {
+    if (!_replayView.hasReplay) return const SizedBox.shrink();
+    Widget tab(String label, bool selected, VoidCallback onTap) => Expanded(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onTap,
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              decoration: BoxDecoration(
+                color: selected
+                    ? const Color(0xFF52D4C3).withValues(alpha: 0.16)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                label,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: selected ? const Color(0xFF52D4C3) : Colors.white38,
+                  fontSize: 12 * _fontScale,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+        );
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      child: Container(
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1A1C22),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          children: [
+            tab(kOriginalCallLabel, !_replayView.showReplay,
+                () => setState(() => _replayView.select(replay: false))),
+            tab(kConversationReplayLabel, _replayView.showReplay,
+                () => setState(() => _replayView.select(replay: true))),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 🎬 복원된 대본. **읽는 판이라 버튼이 없다** — 연습·배울글은
+  /// Original Call 쪽에서 원본 줄로 한다.
+  Widget _buildReplayScript(DuoReplayScript script) {
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+      itemCount: script.lines.length + 1,
+      itemBuilder: (context, i) {
+        if (i == script.lines.length) {
+          return Padding(
+            padding: const EdgeInsets.only(top: 16),
+            child: Text(
+              '실제로 한 말은 $kOriginalCallLabel에 그대로 있습니다.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  color: Colors.white24, fontSize: 11 * _fontScale),
+            ),
+          );
+        }
+        final line = script.lines[i];
+        final bool mine = line.role == 'HOST';
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Column(
+            crossAxisAlignment:
+                mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            children: [
+              Text(
+                mine ? 'Me' : 'Partner',
+                style: TextStyle(
+                    color: Colors.white30, fontSize: 10 * _fontScale),
+              ),
+              const SizedBox(height: 3),
+              Container(
+                constraints: BoxConstraints(
+                    maxWidth: MediaQuery.of(context).size.width * 0.78),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: mine
+                      ? const Color(0xFF1E3A5F)
+                      : const Color(0xFF1F2229),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Text(
+                  line.text,
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 15 * _fontScale,
+                      height: 1.45),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 

@@ -63,6 +63,7 @@ import '/custom_code/services/duo_guest_handoff.dart';
 import 'duo_guest_study_page.dart';
 import '/custom_code/services/history_text_model.dart';
 import '/custom_code/services/duo_canonical.dart';
+import '/custom_code/services/duo_replay.dart';
 
 // ============================================================================
 // 🗣️ [DUO-MODE] Duo는 두 가지 방식으로 갈린다. **통신 로직 자체가 다르다** —
@@ -4048,13 +4049,27 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
           Future<void>.value());
       // 🚩 내 몫은 다 올렸다는 표시. 상대가 이걸 보고 만들기 시작한다.
       await markDuoFlushDone(roomId: canonRoomId, uid: _myUid);
+      // 🎬 [DUO-REPLAY] canonical이 확정된 **뒤에** 학습용 대본을 한 번 세운다.
+      //   · 입력은 canonical이다. raw transcript를 직접 읽지 않는다.
+      //   · canonical 문서도 개인 History도 건드리지 않는다 — 쓰는 곳은
+      //     `replay/current` 하나뿐이다.
+      //   · 실패하면 조용히 물러난다. 그때 공부방은 원본을 그대로 보여준다.
+      //   canonical을 만든 쪽만 이어서 만든다 — 양쪽이 같이 부르면 같은 판을
+      //   두 번 만든다(`buildDuoReplay`의 판 확인이 한 번 더 막지만, GPT를
+      //   두 번 부르는 낭비까지 여기서 없앤다).
       unawaited(buildDuoCanonical(
         roomId: canonRoomId,
         uid: _myUid,
         isHost: _amIHost,
         apiKey: _openAiKey,
         model: kDuoCanonicalModel,
-      ));
+      ).then((_) => buildDuoReplay(
+            roomId: canonRoomId,
+            apiKey: _openAiKey,
+          )).catchError((Object e) {
+        // canonical과 History는 이미 확정돼 있다. 여기서 잃는 것은 없다.
+        _lgDuo('[DUO-REPLAY]', 'chain_failed=${e.runtimeType}');
+      }));
     } else {
       // 옛 방(공유 고리가 없는 통화)은 예전 방식으로 각자 정돈한다.
       await _curateDirectHistoryForStudy();

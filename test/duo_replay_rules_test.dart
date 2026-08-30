@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 
-import '../tool/duo_replay_rules.dart';
+import 'package:stealth_vox/custom_code/services/duo_replay_rules.dart';
 
 ReplaySourceLine line(String id, String role, String text) =>
     ReplaySourceLine(id: id, role: role, text: text);
@@ -132,9 +132,11 @@ void main() {
       expect(result.dropped.firstWhere((d) => d.id == '5').reason, 'unlisted');
     });
 
-    test('지울 수 있는 이유는 네 가지뿐이다', () {
+    test('지울 수 있는 이유는 정해진 다섯뿐이다', () {
+      // 'context' = 글자는 멀쩡한데 앞뒤 대화와 이어지지 않는 줄.
+      // 모르는 이유로는 아무것도 지우지 않는다(아래 unknown_reason 시험).
       expect(kReplayDropReasons,
-          <String>{'noise', 'filler', 'duplicate', 'unlisted'});
+          <String>{'noise', 'filler', 'duplicate', 'context', 'unlisted'});
     });
 
     test('응답이 JSON이 아니면 원본을 그대로 쓴다', () {
@@ -274,9 +276,48 @@ void main() {
       expect(kReplayPrompt, contains('Never translate a turn'));
     });
 
-    test('전체를 먼저 읽고 중요한 주고받기 중심으로 세우라고 되어 있다', () {
-      expect(kReplayPrompt, contains('Read the WHOLE call first'));
-      expect(kReplayPrompt, contains('the important exchanges'));
+    test('한 줄만 보지 말고 통화 전체를 먼저 읽으라고 되어 있다', () {
+      expect(kReplayPrompt, contains('READ THE WHOLE CALL FIRST'));
+      expect(kReplayPrompt, contains('before you judge any single line'));
+    });
+
+    test('판단 기준이 글자 모양이 아니라 대화에서의 자리다', () {
+      expect(kReplayPrompt,
+          contains('by its PLACE IN THE CONVERSATION, never by how it looks'));
+      // 앞뒤 2~3턴을 같이 보라는 지시.
+      expect(kReplayPrompt,
+          contains('two or three turns before it and the two or three turns after'));
+      // 고립된 줄을 가리키는 이름.
+      expect(kReplayPrompt, contains('stranded'));
+      expect(kReplayPrompt, contains('Drop it as "context"'));
+    });
+
+    test('낱말 목록을 만들지 말라고 못 박혀 있다', () {
+      expect(kReplayPrompt, contains('NEVER keep a list of suspicious words'));
+      // 같은 낱말이 자리에 따라 달라진다는 예시가 둘 다 들어 있다.
+      expect(kReplayPrompt, contains('안녕하세요'));
+      expect(kReplayPrompt, contains('러시아'));
+      expect(kReplayPrompt, contains('KEEP. Never drop it.'));
+    });
+
+    test('애매하면 남기라고 되어 있다', () {
+      expect(kReplayPrompt, contains('WHEN IN DOUBT, KEEP'));
+    });
+
+    test('완벽한 전사를 요구하지 않는다 — 일부가 망가져도 만든다', () {
+      expect(kReplayPrompt, contains('YOU DO NOT NEED A CLEAN TRANSCRIPT'));
+      expect(kReplayPrompt, contains('do not give up because some lines are uncertain'));
+    });
+
+    test('보조 신호는 맥락을 거들 때만 쓰라고 되어 있다', () {
+      expect(kReplayPrompt, contains('rms_dbfs'));
+      expect(kReplayPrompt, contains('stt_source'));
+      expect(kReplayPrompt,
+          contains('never drop a line on a signal alone'));
+    });
+
+    test('없는 질문을 만들지 말라고 되어 있다', () {
+      expect(kReplayPrompt, contains('Add a question nobody asked'));
     });
 
     test('없던 사실·화자 이동·요약은 금지되어 있다', () {

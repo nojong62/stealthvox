@@ -2,8 +2,10 @@
 // 🎬 [REPLAY-RULES] "두 사람이 실제로 나눈 대화를, 읽고 공부할 수 있는
 // 대화로 다시 세운 것."
 // --------------------------------------------------------------------
-// **아직 앱에 붙이지 않는다.** 실제 통화 몇 건에 돌려 보고 눈으로 정한 뒤에
-// 옮긴다. (`tool/replay_probe.dart`가 이 파일을 쓴다)
+// 규칙·프롬프트·빗장만 둔다. **네트워크도 Firestore도 모른다** — 그래야
+// `tool/replay_probe.dart`가 실기기 없이 같은 규칙을 돌려 볼 수 있고,
+// 시험도 모델 없이 빗장만 따로 검사할 수 있다.
+// 실제 호출과 저장은 `duo_replay.dart`가 맡는다.
 //
 // 2026-08-29 방향 조정: 조건을 잘게 달아 두니 결과가 부자연스러웠다. 이제
 // 모델에게 **통화 전체를 먼저 읽고 맥락과 중요한 주고받기 중심으로** 쓰게
@@ -33,12 +35,21 @@
 
 import 'dart:convert';
 
-/// 원본 한 줄. canonical의 줄이든 채널 원문이든 이 모양으로 넣는다.
+/// 원본 한 줄. **canonical의 줄을 넣는다** — raw transcript가 아니다.
+///
+/// 뒤의 값들은 **보조 신호**다. 있으면 모델에게 같이 주고, 없으면 없는 대로
+/// 돈다. 어느 하나도 그것만으로 줄을 지우는 근거가 되지 않는다 — 지우는 판단은
+/// 언제나 앞뒤 맥락이 한다.
 class ReplaySourceLine {
   const ReplaySourceLine({
     required this.id,
     required this.role,
     required this.text,
+    this.spokenAtMs,
+    this.seq,
+    this.state,
+    this.rmsDbfs,
+    this.sttSource,
   });
 
   final String id;
@@ -46,6 +57,23 @@ class ReplaySourceLine {
   /// 'HOST' 또는 'GUEST'. 통화에서의 역할이다.
   final String role;
   final String text;
+
+  /// 말을 시작한 시각. 앞뒤 줄과의 간격이 맥락 판단의 재료가 된다.
+  final int? spokenAtMs;
+
+  /// 화자별 일련번호.
+  final int? seq;
+
+  /// canonical이 붙인 표시(`included` 등). [prepareReplaySource]가 본다.
+  final String? state;
+
+  /// 그 발화 구간의 평균 세기. **낮다고 지우지 않는다** — 맥락이 이미 튄다고
+  /// 볼 때 그 판단을 거드는 정도로만 쓴다. 낮은 세기 자체는
+  /// `low_level` 게이트가 저장 전에 이미 걸렀다.
+  final double? rmsDbfs;
+
+  /// 이 글자를 만든 소리의 출처(`local_mic`). 다른 값이면 마이크가 아닌 소리다.
+  final String? sttSource;
 }
 
 /// 복원된 한 줄.
@@ -78,6 +106,10 @@ const Set<String> kReplayDropReasons = <String>{
   'noise', // 사람이 낸 소리가 아닌 것을 전사기가 글로 만든 줄
   'filler', // 자기 차례를 붙들고 말을 고르던 발성("음…", "uh")
   'duplicate', // 같은 순간이 두 번 저장된 줄
+  // 글자는 멀쩡한데 앞뒤 대화와 이어지지 않는 줄. **모양이 아니라 자리로**
+  // 가린다 — "안녕하세요."는 대화 한복판에서는 튀고, 통화 첫머리에서는
+  // 정상이다. 낱말 목록으로는 절대 못 가르는 종류다.
+  'context',
   // 응답 어디에도 안 적힌 줄. 모델이 대화에 넣지 않기로 한 것으로 본다.
   // **원본은 canonical에 그대로 있다** — 그래서 여기서 버려도 잃지 않는다.
   'unlisted',
@@ -129,6 +161,12 @@ class ReplayResult {
 /// 없던 주고받기를 만들었다는 뜻이다.
 const double kReplayMaxTurnInflation = 1.15;
 
+/// 대화가 남아 있다고 볼 최소 줄 수. **이보다 적으면 대화가 아니다.**
+///
+/// ⚠️ 이건 "원본이 짧으면 만들지 않는다"가 아니다. **결과**가 이보다 적을
+/// 때만 되돌린다. 두 줄짜리 통화는 두 줄짜리 Replay로 성립한다.
+const int kReplayMinTurns = 2;
+
 class ReplayVerdict {
   const ReplayVerdict(this.useReplay, this.reasons);
 
@@ -162,6 +200,12 @@ ReplayVerdict judgeReplay({
         result.turns.length > sourceCount * kReplayMaxTurnInflation) {
       reasons.add('turn_inflation');
     }
+    // 🧭 **줄을 많이 지운 것은 되돌릴 이유가 아니다.** 문맥에서 튄 줄을
+    //   걷어내는 것이 이 계층이 하는 일이고, 원본은 canonical에 그대로 있다.
+    //   대화라고 부를 수 없을 만큼 남지 않았을 때만 되돌린다.
+    if (result.turns.length < kReplayMinTurns && sourceCount >= kReplayMinTurns) {
+      reasons.add('too_few_turns');
+    }
   }
 
   return ReplayVerdict(reasons.isEmpty, reasons);
@@ -194,7 +238,41 @@ List<ReplayEdit> replayEdits({
 }
 
 // ====================================================================
-// 프롬프트
+// ① 결정적 입력 정리 — 모델에게 넘기기 전에 기계가 먼저 치운다
+// ====================================================================
+
+/// canonical이 이미 판단해 둔 것을 걸러 낸다. **여기서는 맥락을 보지 않는다.**
+///
+/// 모델에게 물어볼 필요가 없는 줄을 먼저 빼는 것이 목적이다.
+///   · `merged`      — 이웃 줄에 흡수됐다. 넣으면 같은 말이 두 번 실린다.
+///   · `hidden_echo` — 스피커로 나간 상대 목소리가 되돌아온 줄.
+///   · `hidden_duplicate` — 같은 순간이 두 번 저장된 줄.
+///   · 빈 줄
+///
+/// `hidden_hesitation`은 **넣는다.** 사람이 낸 소리이고, 뺄지 말지는 앞뒤를
+/// 보고 모델이 정할 일이다. 여기서 미리 지우면 맥락 판단의 재료가 준다.
+///
+/// ⚠️ `low_level`로 걸린 발화는 **애초에 저장되지 않았으므로** 여기 오지
+/// 않는다(`kDuoMinUtteranceRmsDbfs` 게이트). 이 함수가 따로 거를 것이 없다.
+List<ReplaySourceLine> prepareReplaySource(List<ReplaySourceLine> source) {
+  const Set<String> skip = <String>{
+    'merged',
+    'hidden_echo',
+    'hidden_duplicate',
+  };
+  final out = <ReplaySourceLine>[];
+  final seenIds = <String>{};
+  for (final line in source) {
+    if (line.text.trim().isEmpty) continue;
+    if (skip.contains((line.state ?? '').trim())) continue;
+    if (!seenIds.add(line.id)) continue;
+    out.add(line);
+  }
+  return out;
+}
+
+// ====================================================================
+// ② 프롬프트 — 맥락으로 판단한다
 // ====================================================================
 
 /// 모델에게 주는 권한은 **좁게** 잡는다. 첫 버전에서 넓히면 무엇이 지나쳤는지
@@ -204,7 +282,34 @@ const String kReplayPrompt =
 
 Write the call out as a conversation someone can actually read and study.
 
-Read the WHOLE call first. Work out what the two people were doing together - what was asked, what was answered, what was agreed, what was left open. Then write that same conversation the way it would read if the recognizer had not mangled it: the important exchanges, in the order they happened, in clean sentences.
+READ THE WHOLE CALL FIRST, before you judge any single line. Work out what the two people were doing together - what was asked, what was answered, what was agreed, what was left open. Then write that same conversation the way it would read if the recognizer had not mangled it.
+
+HOW TO JUDGE A LINE - by its PLACE IN THE CONVERSATION, never by how it looks on its own.
+
+A line can be perfect Korean, perfect English, a perfectly ordinary sentence, and still be something nobody said. The recognizer invents fluent sentences out of silence. The only way to tell is to read the lines around it.
+
+For every line, look at the two or three turns before it and the two or three turns after it, and ask:
+- Does it answer, react to, or follow from what was just said?
+- Does the next turn treat it as something that was actually said?
+- Does the topic, or the language, jump for this one line and jump back right after?
+- Read the same speaker's turns before and after it with this line taken out. Does the conversation read better without it?
+- Is this line the only one in the call that nobody engages with?
+
+If a line is stranded - nothing leads into it and nothing follows from it - it is almost certainly something the recognizer invented. Drop it as "context".
+
+  A: 오늘 뭐 먹을까?
+  B: 김치찌개 어때?
+  A: 안녕하세요.          <- stranded. nobody greets mid-meal-decision. DROP as context.
+  B: 좋아. 그거 먹자.      <- answers B's own suggestion, not the greeting.
+
+But the same words can be perfectly real somewhere else:
+
+  A: 러시아 가 본 적 있어?
+  B: 아니, 아직 없어.      <- "러시아" is what the call is ABOUT. KEEP. Never drop it.
+
+NEVER keep a list of suspicious words. "안녕하세요", "검은색", "그녀는", "러시아" are all ordinary things people say. What decides is whether the conversation around them makes sense with them in it.
+
+WHEN IN DOUBT, KEEP. Dropping a line someone really said costs more than leaving one odd line in.
 
 LANGUAGE RULE - absolute: every turn stays in the language that speaker actually used. If one spoke Korean and the other English, your version keeps both, exactly as they were. Never translate a turn, not even one word inside a sentence.
 
@@ -213,40 +318,62 @@ KEEP:
 - Who said what. Never move a line from one speaker to the other.
 - The order of the conversation, and the exchanges that carry it.
 - Names, places, numbers, times and dates exactly as spoken.
+- Short real replies. "응." "아니." "왜?" "그래." are real conversation when something leads into them.
 
-DROP without hesitation:
-- Sounds that were never speech, and words the recognizer clearly invented.
-- Fillers and false starts that carry nothing.
-- The same thing stored twice.
-- Back-and-forth that only exists because the line was bad ("뭐라고?", "안 들려", "여보세요?").
+DROP:
+- Lines stranded from the conversation around them (reason: context).
+- Sounds that were never speech (reason: noise).
+- Fillers and false starts that carry nothing (reason: filler).
+- The same thing stored twice (reason: duplicate).
+- Back-and-forth that only exists because the line was bad ("뭐라고?", "안 들려", "여보세요?") (reason: noise).
 
 JOIN AND SMOOTH:
-- Put a broken-up sentence back together as one sentence.
+- Put a broken-up sentence back together as one sentence, when the pieces are the SAME speaker in a row and read as one thought.
+  "오늘 저녁에" + "집에 갈 거예요." -> "오늘 저녁에 집에 갈 거예요."
 - Finish a turn that is obviously unfinished, using only what the call itself already settles.
 - Write natural, complete sentences instead of transcript fragments.
 
 NEVER:
 - Add a fact, a plan, a reason or a feeling that the two never touched.
+- Add a question nobody asked.
 - Decide something they left undecided, or make an answer more certain than it was.
 - Turn a short exchange into a long one, or a long call into a summary of itself.
 - Translate.
 
-If the call is too broken to make sense of, return the lines as they are rather than guessing what the people meant.
+YOU DO NOT NEED A CLEAN TRANSCRIPT. Most calls arrive with some lines mangled. If the through-line of the conversation is there, write it out and drop the few lines that are not part of it. Do not refuse, do not return the input unchanged, and do not give up because some lines are uncertain. Only when the call has no through-line at all - when you cannot tell what the two were talking about - return the lines as they are.
+
+SIGNALS you may be given per line, when the app has them. Use them ONLY to support a decision the context already points to; never drop a line on a signal alone:
+- "rms_dbfs": how loud that utterance was. Very low means the recognizer may have had almost no speech to work with.
+- "state": what the preservation layer marked it as.
+- "stt_source": where the audio came from. Anything other than "local_mic" did not come from that speaker's own microphone.
 
 Return strict JSON only:
 {"turns":[{"ids":["<source id>"],"role":"HOST","text":"..."}],
- "dropped":[{"id":"<source id>","reason":"noise|filler|duplicate"}]}
+ "dropped":[{"id":"<source id>","reason":"context|noise|filler|duplicate"}]}
 
-"ids" lists the source lines that turn came from, in order - your best mapping, several ids for a turn you joined. Put ids you left out in "dropped".''';
+"ids" lists the source lines that turn came from, in order - your best mapping, several ids for a turn you joined. Put every id you left out in "dropped", with the reason that fits.''';
 
+/// 모델에게 넘길 몸통. **통화 전체를 한 번에 준다** — 앞뒤를 보고 판단하라고
+/// 시켰으니 줄을 따로따로 보내면 그 지시가 성립하지 않는다.
+///
+/// 보조 신호는 **있을 때만** 싣는다. 빈 값을 채워 보내면 모델이 그 빈 값을
+/// 근거로 읽는다.
 Map<String, dynamic> buildReplayPayload(List<ReplaySourceLine> source) =>
     <String, dynamic>{
-      'turns': <Map<String, String>>[
+      'turns': <Map<String, dynamic>>[
         for (final line in source)
-          <String, String>{
+          <String, dynamic>{
             'id': line.id,
             'role': line.role,
             'text': line.text,
+            if (line.spokenAtMs != null) 'spoken_at_ms': line.spokenAtMs,
+            if (line.seq != null) 'seq': line.seq,
+            if (line.state != null && line.state!.isNotEmpty)
+              'state': line.state,
+            if (line.rmsDbfs != null)
+              'rms_dbfs': double.parse(line.rmsDbfs!.toStringAsFixed(1)),
+            if (line.sttSource != null && line.sttSource!.isNotEmpty)
+              'stt_source': line.sttSource,
           }
       ]
     };

@@ -152,6 +152,22 @@ service cloud.firestore {
               || get(/databases/$(database)/documents/duo_sessions/$(roomId))
                 .data.get('partnerUid', '') == request.auth.uid);
       }
+
+      // The study-facing reconstruction of the same call. It lives beside
+      // canonical, never inside it: canonical keeps every line the two people
+      // actually spoke, and this layer is allowed to leave lines out. Both
+      // phones read it, only participants build it -- exactly the canonical
+      // rule, because it carries the same call and the same participants.
+      // Rules do not cascade into subcollections, so this block is required
+      // on its own.
+      match /replay/{docId} {
+        allow read: if isAuth();
+        allow write: if isAuth()
+          && (get(/databases/$(database)/documents/duo_sessions/$(roomId))
+                .data.get('hostUid', '') == request.auth.uid
+              || get(/databases/$(database)/documents/duo_sessions/$(roomId))
+                .data.get('partnerUid', '') == request.auth.uid);
+      }
     }
 
     // One-device trial guard. Anonymous users are allowed after signInAnonymously().
