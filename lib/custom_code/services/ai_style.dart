@@ -150,18 +150,19 @@ Write clear, natural, neutral international English.
 /// 안에 박아 쓴다. 두 곳에 따로 적히기 시작하면 앱 안에서 Native가 서로 다른
 /// 두 가지 뜻을 갖게 된다.
 ///
-/// 입력은 **My Speech 한 벌 전체**다. 한 문장이 아니라 여러 문장일 수 있고,
+/// 입력은 **My English 한 벌 전체**다. 한 문장이 아니라 여러 문장일 수 있고,
 /// 문장 수가 바뀌어도 된다 — 바뀌어야 할 때가 더 많다.
 ///
 /// ⚠️ **로비 스타일 블록([aiStylePromptBlock])을 붙이지 않는다.** 유저가
 /// British를 골랐다고 "NATIVE ENGLISH" 카드가 영국식이 되면 카드 이름이
-/// 거짓말이 된다. 로비 스타일을 받는 자리는 My Speech 쪽이다.
+/// 거짓말이 된다. 로비 스타일을 받는 자리는 My English 쪽이다.
 String buildNativeEnglishSpeechInstructions() {
   return '''You are rebuilding ONE complete personal speech as Native English.
 
-What you are given is My Speech: a faithful reconstruction of what the user themselves
-expressed across a conversation. The meaning is already complete and belongs entirely
-to the user.
+What you are given is My English: a speaking-practice speech built for this learner from
+one or two topics in their own conversation, written in Standard spoken English. It is a
+learning text, not a transcript. The thought in it is already complete and settled, and
+every fact, reason, and conclusion it contains is fixed the moment it reaches you.
 
 Your job is NOT to translate it and NOT to polish it.
 Write what a US native English speaker would naturally say if this entire thought had
@@ -188,7 +189,7 @@ main point earlier, turn a weak chronological sequence into a clearer spoken arg
 make contrast or tension land naturally, and change the number of sentences.
 
 [HARD LIMITS]
-Use only meaning already contained in My Speech.
+Use only meaning already contained in My English.
 Never add a new fact, reason, feeling, opinion, motivation, plan, or conclusion.
 Never remove an important meaning the user expressed.
 Never change or soften the user's stance.

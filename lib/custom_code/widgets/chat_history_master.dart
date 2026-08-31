@@ -195,7 +195,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   ShadowingPhase _phase = ShadowingPhase.idle;
   SentenceVariant _selectedVariant = SentenceVariant.mySpeech;
 
-  /// 🗣️ [MY-SPEECH] 대화에서 유저가 실제로 표현한 것만 모은 한 벌.
+  /// 🗣️ [MY-ENGLISH] 대화 소재로 지은 말하기 연습용 확장 스피치 한 벌.
   String _mySpeech = "";
 
   /// 🇺🇸 [NATIVE-ENGLISH] 같은 의미를 미국식 사고 배열로 다시 세운 한 벌.
@@ -280,8 +280,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   // 🆕 [CHUNK-PRACTICE] 의미단위 연습 모드 상태
   bool _practicingNativeEnglish =
-      false; // false = My Speech, true = Native English
-  bool _isBuildingMySpeech = false; // 🗣️ [MY-SPEECH] 만드는 중
+      false; // false = My English, true = Native English
+  bool _isBuildingMySpeech = false; // 🗣️ [MY-ENGLISH] 만드는 중
   bool _isBuildingNativeEnglish = false; // 🇺🇸 [NATIVE-ENGLISH] 만드는 중
   /// 이 방의 저장 모드. 학습 경로 카드를 무엇까지 띄울지 여기서 가른다.
   String _cachedRoomMode = '';
@@ -331,6 +331,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       return isStudyVisible(data[kStudyStateField]);
     }).toList();
   }
+
   final Map<String, Future<bool>> _targetTranslationInFlight =
       <String, Future<bool>>{};
 
@@ -726,7 +727,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     final sub = _replaySub;
     if (sub == null) return;
     _replaySub = null;
-    debugPrint('[HISTORY] replay_listener_stopped room=${_replayRoomId ?? "-"}');
+    debugPrint(
+        '[HISTORY] replay_listener_stopped room=${_replayRoomId ?? "-"}');
     _replayRoomId = null;
     unawaited(sub.cancel());
   }
@@ -812,7 +814,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   bool _diagLoggedRoom = false;
 
   static String _diagCut(Object? value) {
-    final text = (value ?? '').toString().replaceAll(RegExp(r'\s+'), ' ').trim();
+    final text =
+        (value ?? '').toString().replaceAll(RegExp(r'\s+'), ' ').trim();
     if (text.isEmpty) return '';
     return text.length <= 24 ? text : '${text.substring(0, 24)}…';
   }
@@ -1267,7 +1270,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
 
   // 📦 [Box 11-Room: 방 단위 진입]
   //   저장된 대화를 역할 교환 Practice로 연다. 그 다음 단계인
-  //   MY SPEECH / NATIVE ENGLISH는 Practice 화면의 버튼에서 시작한다.
+  //   MY ENGLISH / NATIVE ENGLISH는 Practice 화면의 버튼에서 시작한다.
   Future<void> _enterShadowingFromRoom() async {
     if (_isEnteringPractice) return;
     if (!_guardPaidStudy()) return;
@@ -1305,8 +1308,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
 
       _cachedRoomMode = _inferHistoryMode(data);
 
-      // 대화 재생 연습(Practice)으로 들어간다. MY SPEECH / NATIVE ENGLISH는
-      // Practice가 끝난 뒤 [_buildMySpeechFromConversation]이 만든다.
+      // 대화 재생 연습(Practice)으로 들어간다. MY ENGLISH / NATIVE ENGLISH는
+      // 학습 경로 카드를 누를 때 각각 만든다.
       await _remoteConfigFuture;
       var messageDocs = _cachedDocs;
       if (messageDocs.isEmpty) {
@@ -2644,7 +2647,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Row(crossAxisAlignment: CrossAxisAlignment.start,
+                    const Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Padding(
                             padding: EdgeInsets.only(top: 1),
@@ -2683,7 +2687,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Row(crossAxisAlignment: CrossAxisAlignment.start,
+                      const Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Padding(
                               padding: EdgeInsets.only(top: 1),
@@ -3439,8 +3444,8 @@ RULES — follow exactly:
             child: Text(
               '실제로 한 말은 $kOriginalCallLabel에 그대로 있습니다.',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                  color: Colors.white24, fontSize: 11 * _fontScale),
+              style:
+                  TextStyle(color: Colors.white24, fontSize: 11 * _fontScale),
             ),
           );
         }
@@ -3454,8 +3459,8 @@ RULES — follow exactly:
             children: [
               Text(
                 mine ? 'Me' : 'Partner',
-                style: TextStyle(
-                    color: Colors.white30, fontSize: 10 * _fontScale),
+                style:
+                    TextStyle(color: Colors.white30, fontSize: 10 * _fontScale),
               ),
               const SizedBox(height: 3),
               Container(
@@ -3464,9 +3469,8 @@ RULES — follow exactly:
                 padding:
                     const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 decoration: BoxDecoration(
-                  color: mine
-                      ? const Color(0xFF1E3A5F)
-                      : const Color(0xFF1F2229),
+                  color:
+                      mine ? const Color(0xFF1E3A5F) : const Color(0xFF1F2229),
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: Text(
@@ -3811,7 +3815,7 @@ RULES — follow exactly:
   // ══════════════════════════════════════════════════════════════════
   // 📦 [Box 22-B: 학습 경로 고르는 자리 — History Study의 첫 화면]
   //
-  //   PRACTICE | MY SPEECH | NATIVE ENGLISH 셋을 나란히 둔다.
+  //   PRACTICE | MY ENGLISH | NATIVE ENGLISH 셋을 나란히 둔다.
   //   **어느 하나가 다른 하나의 관문이 아니다.** Practice는 몇 번이고 다시
   //   들어오는 자리고, 나머지 둘은 대화 전체를 한 벌의 발화로 다루는 자리다.
   //
@@ -3876,8 +3880,8 @@ RULES — follow exactly:
                     if (speechReady) ...[
                       const SizedBox(height: 12),
                       _buildStudyPathCard(
-                        title: "MY SPEECH",
-                        subtitle: "내가 대화에서 실제로 한 말",
+                        title: "MY ENGLISH",
+                        subtitle: "대화 소재로 만든 말하기 연습문",
                         icon: Icons.record_voice_over_rounded,
                         color: const Color(0xFF38BDF8),
                         preview: _mySpeech,
@@ -4761,7 +4765,7 @@ RULES — follow exactly:
   // ══════════════════════════════════════════════════════════════════
   // 🎤 [P3-SPEAK] Speaking Practice
   //
-  //   고른 한 벌(MY SPEECH 또는 NATIVE ENGLISH)을 **실제로 입에 붙이는**
+  //   고른 한 벌(MY ENGLISH 또는 NATIVE ENGLISH)을 **실제로 입에 붙이는**
   //   자리다. 두 벌 모두 같은 흐름을 그대로 쓴다.
   //
   //     Stage 1 Breath Echoing — 호흡 하나씩 듣고 혼자 따라 말하기
@@ -4773,7 +4777,7 @@ RULES — follow exactly:
   //   Shadow를 열 번 반복해도 API 호출은 늘지 않는다.
   // ══════════════════════════════════════════════════════════════════
 
-  /// 훈련이 대상으로 삼는 문장. MY SPEECH와 NATIVE ENGLISH 두 벌을 각각
+  /// 훈련이 대상으로 삼는 문장. MY ENGLISH와 NATIVE ENGLISH 두 벌을 각각
   /// 같은 Speaking Practice 흐름으로 연다.
   ///
   /// ⚠️ **없으면 빈 문자열이다.** 고른 쪽이 비었다고 다른 쪽을 대신 걸지
@@ -4788,7 +4792,9 @@ RULES — follow exactly:
       _speechFor(variant).trim().isNotEmpty;
 
   String _p3VariantLabel(SentenceVariant variant) =>
-      variant == SentenceVariant.nativeEnglish ? 'NATIVE ENGLISH' : 'MY SPEECH';
+      variant == SentenceVariant.nativeEnglish
+          ? 'NATIVE ENGLISH'
+          : 'MY ENGLISH';
 
   /// 🚧 Shadow 여유. **말하는 속도를 바꾸는 게 아니다** — AI의 발음·억양·속도는
   /// 그대로 두고 **호흡 사이 빈 자리만** 늘린다. 실기기에서 조정한다.
@@ -4911,7 +4917,7 @@ RULES — follow exactly:
   ///
   /// 끝점을 문장 패널 하단으로 잡으면 패널 바로 밑의 [AI]·[ECHO]·[SHADOW]
   /// 듣기 줄과 Stop이 화면 밖에 남는다. 한 문장짜리 시절에는 패널이 작아
-  /// 애초에 다 보였지만, My Speech는 여러 문장이라 패널이 화면을 채운다.
+  /// 애초에 다 보였지만, My English는 여러 문장이라 패널이 화면을 채운다.
   /// 그래서 끝점을 **컨트롤 묶음 하단**까지 넓힌다.
   ///
   /// 스크롤 면은 페이지 하나뿐이다. 문장 칸에 자기 스크롤을 주면 그 위에
@@ -5023,7 +5029,7 @@ RULES — follow exactly:
   /// 자리에서 새 문장으로 다시 돈다.
   ///
   /// 아직 만들지 않은 문장도 여기서 만든다. 순서는 [_ensureSpeechVariant]가
-  /// 지킨다 — NATIVE ENGLISH의 재료는 언제나 My Speech다.
+  /// 지킨다 — NATIVE ENGLISH의 재료는 언제나 My English다.
   ///
   /// 모드·보이스와 같은 규칙으로 **화면부터 칠한다.** `_stopP3Shadowing`이
   /// 실기기에서 1초 가까이 걸려서, 그걸 기다렸다 칠하니 눌러도 안 바뀌는
@@ -5075,7 +5081,7 @@ RULES — follow exactly:
   }
 
   /// 고른 쪽이 비어 있으면 만들어 온다. 생성 순서는 하나뿐이다 —
-  /// Conversation → My Speech → Native English. 실패하면 false이고 그 자리는
+  /// Conversation → My English → Native English. 실패하면 false이고 그 자리는
   /// 빈 채로 둔다 — 다른 쪽 문장을 대신 걸지 않는다.
   Future<bool> _ensureSpeechVariant(SentenceVariant variant) async {
     if (_mySpeech.trim().isEmpty && !await _ensureMySpeech()) return false;
@@ -6139,9 +6145,8 @@ RULES — follow exactly:
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  color: available && !building
-                      ? Colors.white54
-                      : Colors.white38,
+                  color:
+                      available && !building ? Colors.white54 : Colors.white38,
                   fontSize: 11.5,
                   height: 1.35,
                 ),
@@ -6451,7 +6456,7 @@ RULES — follow exactly:
     };
   }
 
-  /// 🗣️ [MY-SPEECH] 이 방이 MY SPEECH / NATIVE ENGLISH를 만들 수 있는 방인가.
+  /// 🗣️ [MY-ENGLISH] 이 방이 MY ENGLISH / NATIVE ENGLISH를 만들 수 있는 방인가.
   ///
   /// **세 대화 모드가 전부 만든다.** 사람이 실제로 나눈 대화가 있는 방이면
   /// 그 대화가 곧 재료다. 옛 Clone 방도 같은 모양이라 함께 연다.
@@ -6466,11 +6471,15 @@ RULES — follow exactly:
       _kSpeechPracticeModes.contains(_normalizeHistoryMode(mode));
 
   /// 저장 모양의 판. 규칙이 바뀌면 이 값을 올려 옛 결과를 다시 만들게 한다.
-  static const String _kSpeechSchemaVersion = 'my_speech_v1';
-
-  /// 저장된 MY SPEECH를 그대로 써도 되는가.
   ///
-  /// 판이 다르면 옛 규칙(대화 전체 요약 한 문장)으로 만든 글이라 쓰지 않는다.
+  /// `my_speech_v1`은 **유저가 실제로 한 말만** 모으던 시절의 결과다. 지금
+  /// My English는 대화를 seed로 삼아 새로 짓는 확장 스피치라, 두 글은 같은
+  /// 칸에 들어 있어도 전혀 다른 물건이다. 판을 올려 옛 글을 안 읽는다.
+  static const String _kSpeechSchemaVersion = 'my_english_v2';
+
+  /// 저장된 MY ENGLISH를 그대로 써도 되는가.
+  ///
+  /// 판이 다르면 옛 규칙으로 만든 글이라 쓰지 않는다.
   /// 이름 있는 상대가 바뀐 방도 마찬가지다 — 그 이름으로 다시 만들어야 한다.
   bool _canReuseStoredMySpeech(
     Map<String, dynamic>? data,
@@ -6505,7 +6514,7 @@ RULES — follow exactly:
     return true;
   }
 
-  /// messages 서브컬렉션 → My Speech가 읽을 대화록.
+  /// messages 서브컬렉션 → My English가 seed로 읽을 대화록.
   ///
   /// **교정된 원어(`original_text`)를 쓴다.** 배울글은 번역을 한 번 거친 글이라
   /// 유저가 실제로 무슨 뜻으로 말했는지가 옅어진다. 뜻의 근거는 유저가 자기
@@ -6548,15 +6557,15 @@ RULES — follow exactly:
   //
   //   PRACTICE  — 역할을 바꿔 가며 대화를 다시 해 보는 자리. **끝이 없다.**
   //               몇 번이고 다시 들어온다.
-  //   MY SPEECH — 대화 전체에서 유저가 실제로 표현한 것만 모은 한 벌.
-  //   NATIVE ENGLISH — 그 My Speech를 미국식 사고 배열로 다시 세운 한 벌.
+  //   MY ENGLISH — 대화에서 고른 소재로 지은 말하기 연습용 확장 스피치.
+  //   NATIVE ENGLISH — 그 My English를 미국식 사고 배열로 다시 세운 한 벌.
   //
-  //   셋은 **서로의 전제가 아니다.** Practice를 끝내야 My Speech가 열리는
+  //   셋은 **서로의 전제가 아니다.** Practice를 끝내야 My English가 열리는
   //   식이면 "계속 반복하는 연습"과 "전체 발화 학습"이 한 줄에 꿰여, 둘 다
   //   제 성격을 잃는다. 어느 카드든 언제나 누를 수 있다.
   //
-  //   다만 **생성 순서는 하나뿐이다** — Conversation → My Speech →
-  //   Native English. NATIVE ENGLISH를 먼저 눌러도 My Speech가 먼저 선다.
+  //   다만 **생성 순서는 하나뿐이다** — Conversation Seed → My English →
+  //   Native English. NATIVE ENGLISH를 먼저 눌러도 My English가 먼저 선다.
   // ══════════════════════════════════════════════════════════════════
 
   /// 🔄 PRACTICE — 역할 교환 대화 연습. 재료는 진입할 때 이미 실려 있다.
@@ -6592,7 +6601,7 @@ RULES — follow exactly:
         .addPostFrameCallback((_) => _showRoleSelectBubble());
   }
 
-  /// 🗣️ MY SPEECH — 없으면 만들고, 그대로 훈련으로 들어간다.
+  /// 🗣️ MY ENGLISH — 없으면 만들고, 그대로 훈련으로 들어간다.
   Future<void> _openMySpeechStudy() async {
     if (!_guardPaidStudy()) return;
     if (_isBuildingMySpeech || _isBuildingNativeEnglish) return;
@@ -6601,7 +6610,7 @@ RULES — follow exactly:
     _openSpeechStage(SentenceVariant.mySpeech);
   }
 
-  /// 🇺🇸 NATIVE ENGLISH — My Speech가 없으면 그것부터 만든 뒤 이어서 만든다.
+  /// 🇺🇸 NATIVE ENGLISH — My English가 없으면 그것부터 만든 뒤 이어서 만든다.
   Future<void> _openNativeEnglishStudy() async {
     if (!_guardPaidStudy()) return;
     if (_isBuildingMySpeech || _isBuildingNativeEnglish) return;
@@ -6614,10 +6623,10 @@ RULES — follow exactly:
     _openSpeechStage(SentenceVariant.nativeEnglish);
   }
 
-  /// 대화 전체에서 MY SPEECH 한 벌을 확보한다. 이미 있으면 그대로 쓴다.
+  /// 대화를 seed로 MY ENGLISH 한 벌을 확보한다. 이미 있으면 그대로 쓴다.
   ///
-  /// 실패하면 **false다.** 상대방 말을 섞거나 아무 문장이나 만들어 채우지
-  /// 않는다. 이유는 카드에 그대로 적힌다.
+  /// 실패하면 **false다.** 아무 문장이나 만들어 채우지 않는다 — 대화와
+  /// 무관한 글은 연습문이 아니다. 이유는 카드에 그대로 적힌다.
   Future<bool> _ensureMySpeech() async {
     if (!_paidStudySilentlyAllowed('my_speech')) return false;
     if (_isBuildingMySpeech) return false;
@@ -6640,7 +6649,7 @@ RULES — follow exactly:
           _cachedRoomData = fresh;
         }
       } catch (e) {
-        debugPrint('[MY-SPEECH] room fetch $e');
+        debugPrint('[MY-ENGLISH] room fetch $e');
       }
       if (!mounted) return false;
 
@@ -6682,7 +6691,7 @@ RULES — follow exactly:
       mySpeech = result.text;
       setState(() {
         _mySpeech = mySpeech;
-        // 새로 만든 My Speech에는 짝이 없다. 옛 Native English를 그대로
+        // 새로 만든 My English에는 짝이 없다. 옛 Native English를 그대로
         // 걸어 두면 서로 다른 두 생각이 한 쌍인 척한다.
         _nativeEnglish = '';
         _nativeEnglishError = null;
@@ -6702,11 +6711,11 @@ RULES — follow exactly:
           'has_practice': true,
         });
       } catch (e) {
-        debugPrint('[MY-SPEECH] cache write $e');
+        debugPrint('[MY-ENGLISH] cache write $e');
       }
       return true;
     } catch (e) {
-      debugPrint('[MY-SPEECH] $e');
+      debugPrint('[MY-ENGLISH] $e');
       if (mounted) setState(() => _mySpeechError = '오류: $e');
       return false;
     } finally {
@@ -6714,11 +6723,11 @@ RULES — follow exactly:
     }
   }
 
-  /// 🇺🇸 [NATIVE-ENGLISH] **입력은 언제나 My Speech다.**
+  /// 🇺🇸 [NATIVE-ENGLISH] **입력은 언제나 My English다.**
   ///
-  /// 대화 원문을 직접 읽지 않는다 — 그러면 상대방이 한 말이 섞여 들어올 길이
-  /// 열린다. 실패하면 false이고, 그 자리는 **빈 채로 둔다.** My Speech를
-  /// 복사해 채우면 두 카드가 같은 글자가 되어 견줄 것이 사라진다.
+  /// 대화 원문을 직접 읽지 않는다 — 그러면 두 단계가 같은 일을 한다. 실패하면
+  /// false이고, 그 자리는 **빈 채로 둔다.** My English를 복사해 채우면 두
+  /// 카드가 같은 글자가 되어 견줄 것이 사라진다.
   Future<bool> _ensureNativeEnglish() async {
     if (!_paidStudySilentlyAllowed('native_english')) return false;
     final source = _mySpeech.trim();
@@ -6790,7 +6799,7 @@ RULES — follow exactly:
     });
   }
 
-  /// MY SPEECH / NATIVE ENGLISH 카드 하나를 골라 훈련으로 들어간다.
+  /// MY ENGLISH / NATIVE ENGLISH 카드 하나를 골라 훈련으로 들어간다.
   void _openSpeechStage(SentenceVariant variant) {
     _selectedVariant = variant;
     _goToChunkPractice();
@@ -6800,7 +6809,7 @@ RULES — follow exactly:
   ///
   /// ⚠️ 여기서 `_selectedVariant`를 손대지 않는다. 어느 카드를 눌렀는지는
   ///    [_openSpeechStage]가 이미 정해 두었고, 여기서 다시 덮으면 NATIVE
-  ///    ENGLISH를 눌러도 MY SPEECH가 열린다.
+  ///    ENGLISH를 눌러도 MY ENGLISH가 열린다.
   void _goToChunkPractice() {
     if (!mounted) return;
     _silenceTimer?.cancel();
@@ -6960,12 +6969,12 @@ enum ShadowingPhase {
   /// PRACTICE — 역할 교환 대화 연습.
   turnPractice,
 
-  /// MY SPEECH · NATIVE ENGLISH 훈련(Echoing / Shadowing).
+  /// MY ENGLISH · NATIVE ENGLISH 훈련(Echoing / Shadowing).
   /// 이름은 옛것이다 — 지금 이 자리는 청크를 쓰지 않는다.
   chunkPractice,
 }
 
-/// 두 학습 문장. 화면 이름은 MY SPEECH / NATIVE ENGLISH다.
+/// 두 학습 문장. 화면 이름은 MY ENGLISH / NATIVE ENGLISH다.
 enum SentenceVariant { mySpeech, nativeEnglish }
 
 enum P3PracticeMode { echoing, shadowing }

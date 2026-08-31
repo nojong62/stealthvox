@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 /// Step Expand는 제품에서 사라졌다.
 ///
 /// 대화는 Duo · Circle Talk · Scenario Talk 셋에서만 한다. 그 뒤에 오는
-/// 학습은 PRACTICE → MY SPEECH → NATIVE ENGLISH다.
+/// 학습은 PRACTICE → MY ENGLISH → NATIVE ENGLISH다.
 ///
 /// 이 시험은 **되살아나는 것**을 막는다. 모드 하나를 지우는 일은 대화방·라우터·
 /// 서비스·히스토리 분기가 함께 걸려 있어, 한 곳만 남아도 죽은 문이 화면에
@@ -72,8 +72,8 @@ void main() {
     final history = File('lib/custom_code/widgets/chat_history_master.dart')
         .readAsStringSync();
 
-    test('유저에게 보이는 이름은 PRACTICE · MY SPEECH · NATIVE ENGLISH다', () {
-      expect(history, contains('"MY SPEECH"'));
+    test('유저에게 보이는 이름은 PRACTICE · MY ENGLISH · NATIVE ENGLISH다', () {
+      expect(history, contains('"MY ENGLISH"'));
       expect(history, contains('"NATIVE ENGLISH"'));
       expect(history, contains('"Practice"'));
     });
@@ -91,7 +91,7 @@ void main() {
 
     test('세 경로는 나란하다 — 어느 하나가 다른 하나의 관문이 아니다', () {
       // History Study의 첫 화면이 경로를 고르는 자리다. Practice로 곧장
-      // 들어가 버리면 My Speech가 다시 "Practice 다음 단계"가 된다.
+      // 들어가 버리면 My English가 다시 "Practice 다음 단계"가 된다.
       expect(history, contains('ShadowingPhase.studySelect'));
       expect(history, contains('_buildStudySelectScreen'));
       for (final opener in <String>[
@@ -105,7 +105,7 @@ void main() {
       expect(history, isNot(contains('isComplete ? _open')));
     });
 
-    test('Native English는 My Speech를 거치지 않고 만들어지지 않는다', () {
+    test('Native English는 My English를 거치지 않고 만들어지지 않는다', () {
       final start = history.indexOf('Future<void> _openNativeEnglishStudy');
       expect(start, greaterThan(-1));
       final block = history.substring(start, start + 600);
@@ -121,6 +121,8 @@ void main() {
       expect(ne, isNot(contains('formatSpeechTranscript')));
     });
 
+    // 저장 칸 이름은 화면 이름과 따로 간다. 화면은 MY ENGLISH지만 칸은
+    // `my_speech` 그대로다 — 저장 id를 바꾸면 옛 방이 전부 끊긴다.
     test('저장 칸은 my_speech · native_english다', () {
       expect(history, contains("'my_speech'"));
       expect(history, contains("'native_english'"));
@@ -141,7 +143,7 @@ void main() {
       }
     });
 
-    test('셋 다 MY SPEECH / NATIVE ENGLISH를 만들 수 있다', () {
+    test('셋 다 MY ENGLISH / NATIVE ENGLISH를 만들 수 있다', () {
       final history = File('lib/custom_code/widgets/chat_history_master.dart')
           .readAsStringSync();
       final start = history.indexOf('_kSpeechPracticeModes');
@@ -152,7 +154,7 @@ void main() {
       }
     });
 
-    test('대화방은 MY SPEECH를 의식하지 않는다', () {
+    test('대화방은 MY ENGLISH를 의식하지 않는다', () {
       // 대화는 대화대로 끝까지 자연스럽게 흘러야 한다. 좋은 문장을 만들려고
       // 유도하거나 재료를 모으려 들면 그건 다시 Step Expand다.
       for (final path in <String>[

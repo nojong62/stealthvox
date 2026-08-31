@@ -11,11 +11,18 @@ import 'package:stealth_vox/custom_code/services/ai_style.dart';
 void main() {
   final prompt = buildNativeEnglishSpeechInstructions();
 
-  group('입력은 문장 하나가 아니라 My Speech 한 벌이다', () {
-    test('My Speech를 입력으로 받는다고 적혀 있다', () {
+  group('입력은 문장 하나가 아니라 My English 한 벌이다', () {
+    test('My English를 입력으로 받는다고 적혀 있다', () {
       expect(prompt, contains('ONE complete personal speech'));
-      expect(prompt, contains('What you are given is My Speech'));
-      expect(prompt, contains('belongs entirely\nto the user'));
+      expect(prompt, contains('What you are given is My English'));
+    });
+
+    test('입력을 "유저가 실제로 한 말"로 설명하지 않는다', () {
+      // My English는 학습용으로 지어낸 확장문이다. 이 단계가 그것을 실제
+      // 발화로 알면 원문에 필요 이상으로 붙는다.
+      expect(prompt, isNot(contains('faithful reconstruction')));
+      expect(prompt, contains('It is a\nlearning text, not a transcript.'));
+      expect(prompt, contains('already complete and settled'));
     });
 
     test('번역도 다듬기도 아니라고 못 박는다', () {
@@ -58,10 +65,10 @@ void main() {
   });
 
   group('유저가 말하지 않은 것은 만들지 않는다', () {
-    test('My Speech에 있는 의미만 쓴다', () {
+    test('My English에 있는 의미만 쓴다', () {
       expect(
         prompt,
-        contains('Use only meaning already contained in My Speech.'),
+        contains('Use only meaning already contained in My English.'),
       );
       expect(
         prompt,
