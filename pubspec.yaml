@@ -122,7 +122,6 @@ dependencies:
   kakao_flutter_sdk_user: 1.10.0
   flutter_webrtc: ^1.5.2
   firebase_app_check: ^0.3.2+7
-  qr_flutter: ^4.1.0
 
 dependency_overrides:
   http: 1.4.0

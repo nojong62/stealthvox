@@ -39,10 +39,6 @@ void main() {
     'inviteDoneDetail',
     'inviteFailTitle',
     'inviteFailDetail',
-    // 마주 앉은 상대에게 내는 초대 QR 다이얼로그
-    'qrTitle',
-    'qrHint',
-    'qrClose',
   ];
 
   group('kModePickerText', () {
