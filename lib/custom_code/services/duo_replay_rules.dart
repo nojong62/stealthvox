@@ -203,7 +203,8 @@ ReplayVerdict judgeReplay({
     // 🧭 **줄을 많이 지운 것은 되돌릴 이유가 아니다.** 문맥에서 튄 줄을
     //   걷어내는 것이 이 계층이 하는 일이고, 원본은 canonical에 그대로 있다.
     //   대화라고 부를 수 없을 만큼 남지 않았을 때만 되돌린다.
-    if (result.turns.length < kReplayMinTurns && sourceCount >= kReplayMinTurns) {
+    if (result.turns.length < kReplayMinTurns &&
+        sourceCount >= kReplayMinTurns) {
       reasons.add('too_few_turns');
     }
   }
@@ -214,7 +215,8 @@ ReplayVerdict judgeReplay({
 /// 원본과 글자가 달라진 줄. **A(의미 보존)를 볼 때 여기만 읽으면 된다** —
 /// 나머지 줄은 손대지 않은 것이므로 의미가 바뀔 수 없다.
 class ReplayEdit {
-  const ReplayEdit({required this.before, required this.after, required this.ids});
+  const ReplayEdit(
+      {required this.before, required this.after, required this.ids});
 
   final String before;
   final String after;
@@ -275,14 +277,23 @@ List<ReplaySourceLine> prepareReplaySource(List<ReplaySourceLine> source) {
 // ② 프롬프트 — 맥락으로 판단한다
 // ====================================================================
 
-/// 모델에게 주는 권한은 **좁게** 잡는다. 첫 버전에서 넓히면 무엇이 지나쳤는지
-/// 가릴 수 없다. 애매하면 그대로 두는 쪽이 언제나 기본이다.
+/// 권한의 방향은 **자리(fit)에만** 넓다. 문맥에 얹히지 않는 줄은 뺀다 —
+/// 실장님 지시(2026-08-31). 첫 판은 "애매하면 남긴다"였는데, 그러면 전사가
+/// 지어낸 문장이 학습용 대본에 그대로 남아 대본이 대본 구실을 못 했다.
+///
+/// **이 권한이 안전한 이유는 하나뿐이다.** 실제로 한 말은 canonical
+/// (Original Call)에 통째로 남아 있고 이 계층은 거기에 손대지 않는다. 여기서
+/// 뺀 줄은 잃은 줄이 아니라 **이 대본에만 안 실린 줄**이다.
+///
+/// ⚠️ 넓힌 것은 **자리**뿐이고 **값어치**가 아니다. 짧다고, 평범하다고,
+/// 안 중요해 보인다고 빼는 것은 여전히 금지다. 그 판단은 이 계층의 일이
+/// 아니다([[duo-history-cleanup-principle]]와 같은 선).
 const String kReplayPrompt =
     '''You are given ONE phone call between two people, already transcribed. Each line came from that speaker's own phone, so it carries everything a real call carries: noise, half-words, repeats, and sounds that were never really speech.
 
-Write the call out as a conversation someone can actually read and study.
+Write the call out as a conversation someone can actually read and study, built ONLY from the lines that belong to it.
 
-READ THE WHOLE CALL FIRST, before you judge any single line. Work out what the two people were doing together - what was asked, what was answered, what was agreed, what was left open. Then write that same conversation the way it would read if the recognizer had not mangled it.
+READ THE WHOLE CALL FIRST, before you judge any single line. Work out what the two people were doing together - what was asked, what was answered, what was agreed, what was left open. That through-line is the script. Then write it the way it would read if the recognizer had not mangled it, and leave out whatever sits outside it.
 
 HOW TO JUDGE A LINE - by its PLACE IN THE CONVERSATION, never by how it looks on its own.
 
@@ -295,7 +306,7 @@ For every line, look at the two or three turns before it and the two or three tu
 - Read the same speaker's turns before and after it with this line taken out. Does the conversation read better without it?
 - Is this line the only one in the call that nobody engages with?
 
-If a line is stranded - nothing leads into it and nothing follows from it - it is almost certainly something the recognizer invented. Drop it as "context".
+If a line is stranded - nothing leads into it and nothing follows from it - it is almost certainly something the recognizer invented. Drop it as "context". Half-belonging is not belonging: if you have to argue for a line's place, it does not have one.
 
   A: 오늘 뭐 먹을까?
   B: 김치찌개 어때?
@@ -309,7 +320,9 @@ But the same words can be perfectly real somewhere else:
 
 NEVER keep a list of suspicious words. "안녕하세요", "검은색", "그녀는", "러시아" are all ordinary things people say. What decides is whether the conversation around them makes sense with them in it.
 
-WHEN IN DOUBT, KEEP. Dropping a line someone really said costs more than leaving one odd line in.
+WHEN A LINE DOES NOT FIT, LEAVE IT OUT. What you are writing is a STUDY SCRIPT, not a record of the call. The record is kept whole somewhere else and you are not touching it, so nothing a person said is lost by leaving it out of this script. Build the script ONLY from the lines that hold together as one conversation. If you cannot place a line in that conversation, drop it as "context" - do not keep it "just in case". One stranded line teaches the learner a sentence nobody said.
+
+That licence is about FIT, not about WORTH. Never leave a line out because it is short, plain, or looks unimportant. A line that answers, asks, reacts, agrees, or refuses belongs in the script however small it is - "응.", "아니.", "왜?", "그래." are the conversation. Deciding which real remarks matter is not your job; deciding which lines belong to the conversation is.
 
 LANGUAGE RULE - absolute: every turn stays in the language that speaker actually used. If one spoke Korean and the other English, your version keeps both, exactly as they were. Never translate a turn, not even one word inside a sentence.
 
@@ -451,8 +464,8 @@ ReplayResult parseReplayResponse({
     // 토막을 문장으로 세우면 길어지는 것이 정상이라 창을 넓게 둔다.
     // **막지 않는다** — 사람이 보고 판단할 재료다.
     if (sourceLen > 0 && text.length > sourceLen * 2.5) {
-      warnings.add(ReplayWarning('expanded',
-          '원본 $sourceLen자 → ${text.length}자: "$text"'));
+      warnings.add(ReplayWarning(
+          'expanded', '원본 $sourceLen자 → ${text.length}자: "$text"'));
     }
 
     seen.addAll(ids);
@@ -465,7 +478,8 @@ ReplayResult parseReplayResponse({
     if (!byId.containsKey(id) || seen.contains(id)) continue;
     final reason = (item['reason'] ?? '').toString().trim().toLowerCase();
     if (!kReplayDropReasons.contains(reason)) {
-      warnings.add(ReplayWarning('unknown_reason', '"$reason"로 지운 줄을 되살렸다: $id'));
+      warnings
+          .add(ReplayWarning('unknown_reason', '"$reason"로 지운 줄을 되살렸다: $id'));
       continue; // seen에 넣지 않는다 → 아래에서 원문 그대로 되살아난다
     }
     seen.add(id);
@@ -485,8 +499,7 @@ ReplayResult parseReplayResponse({
     unlisted++;
   }
   if (unlisted > 0) {
-    warnings.add(
-        ReplayWarning('unlisted', '$unlisted줄이 응답에 안 실렸다 — 뺀 것으로 본다'));
+    warnings.add(ReplayWarning('unlisted', '$unlisted줄이 응답에 안 실렸다 — 뺀 것으로 본다'));
   }
 
   return ReplayResult(turns: turns, dropped: dropped, warnings: warnings);

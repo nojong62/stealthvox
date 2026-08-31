@@ -24,10 +24,26 @@ void main() {
     test('한국어와 영어가 섞인 통화는 섞인 채로 남는다', () {
       final result = parseReplayResponse(
         content: reply(<Map<String, dynamic>>[
-          {'ids': ['1'], 'role': 'HOST', 'text': '내일 몇 시쯤 올 거야?'},
-          {'ids': ['2'], 'role': 'GUEST', 'text': 'Probably around six?'},
-          {'ids': ['3', '4'], 'role': 'HOST', 'text': '아 그래? 그러면 저녁 같이 먹자.'},
-          {'ids': ['5'], 'role': 'GUEST', 'text': 'Sounds good to me.'},
+          {
+            'ids': ['1'],
+            'role': 'HOST',
+            'text': '내일 몇 시쯤 올 거야?'
+          },
+          {
+            'ids': ['2'],
+            'role': 'GUEST',
+            'text': 'Probably around six?'
+          },
+          {
+            'ids': ['3', '4'],
+            'role': 'HOST',
+            'text': '아 그래? 그러면 저녁 같이 먹자.'
+          },
+          {
+            'ids': ['5'],
+            'role': 'GUEST',
+            'text': 'Sounds good to me.'
+          },
         ]),
         source: source,
       );
@@ -40,10 +56,26 @@ void main() {
     test('같은 화자의 토막은 한 줄로 이어지고, 어느 원본에서 왔는지 남는다', () {
       final result = parseReplayResponse(
         content: reply(<Map<String, dynamic>>[
-          {'ids': ['1'], 'role': 'HOST', 'text': '내일 몇 시쯤 올 거야?'},
-          {'ids': ['2'], 'role': 'GUEST', 'text': 'Probably around six?'},
-          {'ids': ['3', '4'], 'role': 'HOST', 'text': '아 그래? 그러면 저녁 같이 먹자.'},
-          {'ids': ['5'], 'role': 'GUEST', 'text': 'Sounds good to me.'},
+          {
+            'ids': ['1'],
+            'role': 'HOST',
+            'text': '내일 몇 시쯤 올 거야?'
+          },
+          {
+            'ids': ['2'],
+            'role': 'GUEST',
+            'text': 'Probably around six?'
+          },
+          {
+            'ids': ['3', '4'],
+            'role': 'HOST',
+            'text': '아 그래? 그러면 저녁 같이 먹자.'
+          },
+          {
+            'ids': ['5'],
+            'role': 'GUEST',
+            'text': 'Sounds good to me.'
+          },
         ]),
         source: source,
       );
@@ -55,7 +87,11 @@ void main() {
     test('모델이 역할을 바꿔 보내면 원본 화자로 되돌리고 적어 둔다', () {
       final result = parseReplayResponse(
         content: reply(<Map<String, dynamic>>[
-          {'ids': ['1'], 'role': 'GUEST', 'text': '내일 몇 시쯤 올 거야?'},
+          {
+            'ids': ['1'],
+            'role': 'GUEST',
+            'text': '내일 몇 시쯤 올 거야?'
+          },
         ]),
         source: <ReplaySourceLine>[source.first],
       );
@@ -66,7 +102,11 @@ void main() {
     test('서로 다른 화자를 한 줄로 묶으면 경고가 남는다', () {
       final result = parseReplayResponse(
         content: reply(<Map<String, dynamic>>[
-          {'ids': ['1', '2'], 'role': 'HOST', 'text': '내일 몇 시? Around six.'},
+          {
+            'ids': ['1', '2'],
+            'role': 'HOST',
+            'text': '내일 몇 시? Around six.'
+          },
         ]),
         source: source,
       );
@@ -92,7 +132,8 @@ void main() {
           {
             'ids': ['5'],
             'role': 'GUEST',
-            'text': 'Sounds good to me, I have been looking forward to it all week.'
+            'text':
+                'Sounds good to me, I have been looking forward to it all week.'
           },
         ]),
         source: <ReplaySourceLine>[source.last],
@@ -106,7 +147,11 @@ void main() {
       // 원본은 canonical에 그대로 있다. 여기서 버려도 잃지 않는다.
       final result = parseReplayResponse(
         content: reply(<Map<String, dynamic>>[
-          {'ids': ['1'], 'role': 'HOST', 'text': '내일 몇 시쯤 올 거야?'},
+          {
+            'ids': ['1'],
+            'role': 'HOST',
+            'text': '내일 몇 시쯤 올 거야?'
+          },
         ]),
         source: source,
       );
@@ -120,7 +165,11 @@ void main() {
       final result = parseReplayResponse(
         content: reply(
           <Map<String, dynamic>>[
-            {'ids': ['1'], 'role': 'HOST', 'text': '내일 몇 시쯤 올 거야?'},
+            {
+              'ids': ['1'],
+              'role': 'HOST',
+              'text': '내일 몇 시쯤 올 거야?'
+            },
           ],
           <Map<String, dynamic>>[
             {'id': '5', 'reason': 'not_useful'},
@@ -140,8 +189,7 @@ void main() {
     });
 
     test('응답이 JSON이 아니면 원본을 그대로 쓴다', () {
-      final result =
-          parseReplayResponse(content: '미안 못 하겠어', source: source);
+      final result = parseReplayResponse(content: '미안 못 하겠어', source: source);
       expect(result.turns.length, source.length);
       expect(result.turns.map((t) => t.text), source.map((s) => s.text));
       expect(result.warnings.single.kind, 'parse');
@@ -155,10 +203,26 @@ void main() {
 
     test('규칙을 지킨 판은 그대로 쓴다', () {
       final r = res(<Map<String, dynamic>>[
-        {'ids': ['1'], 'role': 'HOST', 'text': '내일 몇 시쯤 올 거야?'},
-        {'ids': ['2'], 'role': 'GUEST', 'text': 'Probably around six?'},
-        {'ids': ['3', '4'], 'role': 'HOST', 'text': '아 그래? 그러면 저녁 같이 먹자.'},
-        {'ids': ['5'], 'role': 'GUEST', 'text': 'Sounds good to me.'},
+        {
+          'ids': ['1'],
+          'role': 'HOST',
+          'text': '내일 몇 시쯤 올 거야?'
+        },
+        {
+          'ids': ['2'],
+          'role': 'GUEST',
+          'text': 'Probably around six?'
+        },
+        {
+          'ids': ['3', '4'],
+          'role': 'HOST',
+          'text': '아 그래? 그러면 저녁 같이 먹자.'
+        },
+        {
+          'ids': ['5'],
+          'role': 'GUEST',
+          'text': 'Sounds good to me.'
+        },
       ]);
       final v = judgeReplay(result: r, sourceCount: source.length);
       expect(v.useReplay, isTrue);
@@ -173,7 +237,11 @@ void main() {
 
     test('지어낸 줄이 하나라도 있으면 되돌린다', () {
       final r = res(<Map<String, dynamic>>[
-        {'ids': ['1'], 'role': 'HOST', 'text': '내일 몇 시쯤 올 거야?'},
+        {
+          'ids': ['1'],
+          'role': 'HOST',
+          'text': '내일 몇 시쯤 올 거야?'
+        },
         {'ids': <String>[], 'role': 'HOST', 'text': '그럼 일곱 시에 보자.'},
       ]);
       expect(judgeReplay(result: r, sourceCount: source.length).reasons,
@@ -183,8 +251,16 @@ void main() {
     test('많이 지운 것만으로는 되돌리지 않는다 — 걷어내는 것이 이 계층의 일이다', () {
       final r = res(
         <Map<String, dynamic>>[
-          {'ids': ['1'], 'role': 'HOST', 'text': '내일 몇 시쯤 올 거야?'},
-          {'ids': ['2'], 'role': 'GUEST', 'text': 'Probably around six?'},
+          {
+            'ids': ['1'],
+            'role': 'HOST',
+            'text': '내일 몇 시쯤 올 거야?'
+          },
+          {
+            'ids': ['2'],
+            'role': 'GUEST',
+            'text': 'Probably around six?'
+          },
         ],
         <Map<String, dynamic>>[
           {'id': '3', 'reason': 'filler'},
@@ -192,14 +268,22 @@ void main() {
           {'id': '5', 'reason': 'duplicate'},
         ],
       );
-      expect(judgeReplay(result: r, sourceCount: source.length).useReplay,
-          isTrue);
+      expect(
+          judgeReplay(result: r, sourceCount: source.length).useReplay, isTrue);
     });
 
     test('한 사람 말만 남으면 되돌린다 — 대화가 아니게 됐다', () {
       final r = res(<Map<String, dynamic>>[
-        {'ids': ['1'], 'role': 'HOST', 'text': '내일 몇 시쯤 올 거야?'},
-        {'ids': ['3', '4'], 'role': 'HOST', 'text': '아 그래? 그러면 저녁 같이 먹자.'},
+        {
+          'ids': ['1'],
+          'role': 'HOST',
+          'text': '내일 몇 시쯤 올 거야?'
+        },
+        {
+          'ids': ['3', '4'],
+          'role': 'HOST',
+          'text': '아 그래? 그러면 저녁 같이 먹자.'
+        },
       ]);
       expect(judgeReplay(result: r, sourceCount: source.length).reasons,
           contains('speaker_collapsed'));
@@ -208,8 +292,16 @@ void main() {
     test('원본보다 줄이 늘면 되돌린다 — 없던 주고받기를 만든 것이다', () {
       final r = res(<Map<String, dynamic>>[
         for (var i = 0; i < 4; i++) ...<Map<String, dynamic>>[
-          {'ids': ['1'], 'role': 'HOST', 'text': '내일 몇 시쯤 올 거야? $i'},
-          {'ids': ['2'], 'role': 'GUEST', 'text': 'Around six. $i'},
+          {
+            'ids': ['1'],
+            'role': 'HOST',
+            'text': '내일 몇 시쯤 올 거야? $i'
+          },
+          {
+            'ids': ['2'],
+            'role': 'GUEST',
+            'text': 'Around six. $i'
+          },
         ]
       ]);
       expect(judgeReplay(result: r, sourceCount: source.length).reasons,
@@ -218,9 +310,21 @@ void main() {
 
     test('길어짐·화자 뒤바뀜은 되돌리지 않는다 — 경고로만 남는다', () {
       final r = res(<Map<String, dynamic>>[
-        {'ids': ['1'], 'role': 'GUEST', 'text': '내일 몇 시쯤 올 거야?'},
-        {'ids': ['2'], 'role': 'GUEST', 'text': 'Probably around six?'},
-        {'ids': ['3', '4'], 'role': 'HOST', 'text': '아 그래? 그러면 저녁 같이 먹자.'},
+        {
+          'ids': ['1'],
+          'role': 'GUEST',
+          'text': '내일 몇 시쯤 올 거야?'
+        },
+        {
+          'ids': ['2'],
+          'role': 'GUEST',
+          'text': 'Probably around six?'
+        },
+        {
+          'ids': ['3', '4'],
+          'role': 'HOST',
+          'text': '아 그래? 그러면 저녁 같이 먹자.'
+        },
         {
           'ids': ['5'],
           'role': 'GUEST',
@@ -229,8 +333,8 @@ void main() {
       ]);
       expect(r.warnings.map((w) => w.kind),
           containsAll(<String>['speaker_moved', 'expanded']));
-      expect(judgeReplay(result: r, sourceCount: source.length).useReplay,
-          isTrue);
+      expect(
+          judgeReplay(result: r, sourceCount: source.length).useReplay, isTrue);
     });
   });
 
@@ -238,11 +342,31 @@ void main() {
     test('손대지 않은 줄은 목록에 오르지 않는다', () {
       final r = parseReplayResponse(
         content: reply(<Map<String, dynamic>>[
-          {'ids': ['1'], 'role': 'HOST', 'text': '내일... 어, 내일 몇 시쯤 올 거야?'},
-          {'ids': ['2'], 'role': 'GUEST', 'text': 'Well, um... probably around six?'},
-          {'ids': ['3'], 'role': 'HOST', 'text': '아 그래? 그러면'},
-          {'ids': ['4'], 'role': 'HOST', 'text': '저녁 같이 먹자.'},
-          {'ids': ['5'], 'role': 'GUEST', 'text': 'Sounds good to me.'},
+          {
+            'ids': ['1'],
+            'role': 'HOST',
+            'text': '내일... 어, 내일 몇 시쯤 올 거야?'
+          },
+          {
+            'ids': ['2'],
+            'role': 'GUEST',
+            'text': 'Well, um... probably around six?'
+          },
+          {
+            'ids': ['3'],
+            'role': 'HOST',
+            'text': '아 그래? 그러면'
+          },
+          {
+            'ids': ['4'],
+            'role': 'HOST',
+            'text': '저녁 같이 먹자.'
+          },
+          {
+            'ids': ['5'],
+            'role': 'GUEST',
+            'text': 'Sounds good to me.'
+          },
         ]),
         source: source,
       );
@@ -252,10 +376,26 @@ void main() {
     test('이은 줄과 고친 줄은 앞뒤가 함께 보인다', () {
       final r = parseReplayResponse(
         content: reply(<Map<String, dynamic>>[
-          {'ids': ['1'], 'role': 'HOST', 'text': '내일 몇 시쯤 올 거야?'},
-          {'ids': ['2'], 'role': 'GUEST', 'text': 'Probably around six?'},
-          {'ids': ['3', '4'], 'role': 'HOST', 'text': '아 그래? 그러면 저녁 같이 먹자.'},
-          {'ids': ['5'], 'role': 'GUEST', 'text': 'Sounds good to me.'},
+          {
+            'ids': ['1'],
+            'role': 'HOST',
+            'text': '내일 몇 시쯤 올 거야?'
+          },
+          {
+            'ids': ['2'],
+            'role': 'GUEST',
+            'text': 'Probably around six?'
+          },
+          {
+            'ids': ['3', '4'],
+            'role': 'HOST',
+            'text': '아 그래? 그러면 저녁 같이 먹자.'
+          },
+          {
+            'ids': ['5'],
+            'role': 'GUEST',
+            'text': 'Sounds good to me.'
+          },
         ]),
         source: source,
       );
@@ -285,8 +425,10 @@ void main() {
       expect(kReplayPrompt,
           contains('by its PLACE IN THE CONVERSATION, never by how it looks'));
       // 앞뒤 2~3턴을 같이 보라는 지시.
-      expect(kReplayPrompt,
-          contains('two or three turns before it and the two or three turns after'));
+      expect(
+          kReplayPrompt,
+          contains(
+              'two or three turns before it and the two or three turns after'));
       // 고립된 줄을 가리키는 이름.
       expect(kReplayPrompt, contains('stranded'));
       expect(kReplayPrompt, contains('Drop it as "context"'));
@@ -300,20 +442,40 @@ void main() {
       expect(kReplayPrompt, contains('KEEP. Never drop it.'));
     });
 
-    test('애매하면 남기라고 되어 있다', () {
-      expect(kReplayPrompt, contains('WHEN IN DOUBT, KEEP'));
+    test('문맥에 안 맞으면 빼라고 되어 있다', () {
+      // 2026-08-31 방향이 뒤집혔다. 첫 판은 "애매하면 남긴다"였는데, 그러면
+      // 전사가 지어낸 문장이 학습용 대본에 그대로 남았다. 실제로 한 말은
+      // canonical에 통째로 있으므로 여기서 빼도 잃지 않는다.
+      expect(kReplayPrompt, contains('WHEN A LINE DOES NOT FIT, LEAVE IT OUT'));
+      expect(kReplayPrompt, contains('STUDY SCRIPT, not a record of the call'));
+      expect(kReplayPrompt, contains('do not keep it "just in case"'));
+      expect(kReplayPrompt,
+          contains('Build the script ONLY from the lines that hold together'));
+      expect(kReplayPrompt, isNot(contains('WHEN IN DOUBT, KEEP')));
+    });
+
+    test('넓힌 것은 자리뿐이고 값어치가 아니다', () {
+      // 짧다고 빼기 시작하면 canonical과 같은 잘못을 이 층에서 되풀이한다.
+      expect(kReplayPrompt, contains('about FIT, not about WORTH'));
+      expect(
+        kReplayPrompt,
+        contains(
+            'Never leave a line out because it is short, plain, or looks unimportant'),
+      );
+      expect(kReplayPrompt,
+          contains('Deciding which real remarks matter is not your job'));
     });
 
     test('완벽한 전사를 요구하지 않는다 — 일부가 망가져도 만든다', () {
       expect(kReplayPrompt, contains('YOU DO NOT NEED A CLEAN TRANSCRIPT'));
-      expect(kReplayPrompt, contains('do not give up because some lines are uncertain'));
+      expect(kReplayPrompt,
+          contains('do not give up because some lines are uncertain'));
     });
 
     test('보조 신호는 맥락을 거들 때만 쓰라고 되어 있다', () {
       expect(kReplayPrompt, contains('rms_dbfs'));
       expect(kReplayPrompt, contains('stt_source'));
-      expect(kReplayPrompt,
-          contains('never drop a line on a signal alone'));
+      expect(kReplayPrompt, contains('never drop a line on a signal alone'));
     });
 
     test('없는 질문을 만들지 말라고 되어 있다', () {
