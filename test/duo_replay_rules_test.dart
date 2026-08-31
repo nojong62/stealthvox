@@ -454,6 +454,20 @@ void main() {
       expect(kReplayPrompt, isNot(contains('WHEN IN DOUBT, KEEP')));
     });
 
+    test('통화 꼬리에 붙는 낱말 하나를 가리켜 준다', () {
+      // 실기기에서 한국어 통화 끝에 "Globally" 한 줄이 남았다(2026-08-31).
+      // 전사기는 끊는 순간의 잡음을 말끔한 낱말로 바꾼다 — 그것도 영어로.
+      expect(kReplayPrompt, contains('THE TAIL OF A CALL'));
+      expect(kReplayPrompt, contains('Globally'));
+      expect(kReplayPrompt, contains('is the tail, not a turn'));
+    });
+
+    test('진짜 작별 인사는 꼬리가 아니다', () {
+      // 꼬리를 지우라는 규칙이 넓어지면 "끊을게."까지 사라진다.
+      expect(kReplayPrompt, contains('A real goodbye is not a tail'));
+      expect(kReplayPrompt, contains('끊을게.'));
+    });
+
     test('넓힌 것은 자리뿐이고 값어치가 아니다', () {
       // 짧다고 빼기 시작하면 canonical과 같은 잘못을 이 층에서 되풀이한다.
       expect(kReplayPrompt, contains('about FIT, not about WORTH'));

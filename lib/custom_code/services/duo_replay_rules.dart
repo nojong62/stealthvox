@@ -318,6 +318,10 @@ But the same words can be perfectly real somewhere else:
   A: 러시아 가 본 적 있어?
   B: 아니, 아직 없어.      <- "러시아" is what the call is ABOUT. KEEP. Never drop it.
 
+THE TAIL OF A CALL IS WHERE THE RECOGNIZER GUESSES MOST. The last thing a phone captures is usually half a breath, the hang-up, or room noise, and the recognizer turns that into one tidy word - very often an English one, even when the call was not in English. A final line that nobody answers, that adds nothing to what the two had already settled, and that reads like a stray word or a caption label - "Globally", "Thank you.", "Subscribe", "시청해주셔서 감사합니다" - is the tail, not a turn. Drop it as "noise".
+
+A real goodbye is not a tail. "그럼 이따 봐.", "끊을게.", "Okay, bye." close what came before, and the other person's last turns lead into them. Keep those. What you drop is the piece that has nothing to do with the call it is stuck to.
+
 NEVER keep a list of suspicious words. "안녕하세요", "검은색", "그녀는", "러시아" are all ordinary things people say. What decides is whether the conversation around them makes sense with them in it.
 
 WHEN A LINE DOES NOT FIT, LEAVE IT OUT. What you are writing is a STUDY SCRIPT, not a record of the call. The record is kept whole somewhere else and you are not touching it, so nothing a person said is lost by leaving it out of this script. Build the script ONLY from the lines that hold together as one conversation. If you cannot place a line in that conversation, drop it as "context" - do not keep it "just in case". One stranded line teaches the learner a sentence nobody said.
