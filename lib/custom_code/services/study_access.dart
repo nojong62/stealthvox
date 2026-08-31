@@ -8,6 +8,10 @@
 //   쓰기(paid)   — 서버 비용이 새로 나가는 학습 동작(TTS 생성·GPT 재가공·
 //                  녹음 전사·에코잉·쉐도잉). 비용을 **누군가 부담할 때만**
 //                  연다.
+//   배울글(target) — 그 사이에 하나 더 있다. Duo 직접 대화의 기록은 각자
+//                  자기 말이라, 배울 언어 글자가 없으면 읽을 것이 모국어
+//                  대화록뿐이다. 통화 값은 호스트가 이미 냈고 줄당 한 번만
+//                  만들므로 게스트에게도 연다([StudyAccess.canBuildHistoryTarget]).
 //
 // `isGuestSession == true`는 "Duo 비용을 호스트가 낸다"는 뜻일 뿐,
 // "기록을 못 본다"는 뜻이 아니다. 그 둘을 한 조건으로 묶었다가 게스트가
@@ -51,6 +55,27 @@ class StudyAccess {
   /// "보기도 막히나?"를 묻지 않고 읽을 수 있게 하기 위해서다.
   bool get canReadConversation => true;
 
+  /// 📝 배울글(타겟 문장)을 만들 수 있는가.
+  ///
+  /// **보기와 쓰기 사이에 이것 하나가 더 있다.** Duo 직접 대화의 기록은 두
+  /// 사람이 각자 자기 말로 한 문장이라, 배울 언어 글자는 공부방이 나중에
+  /// 만든다. 그게 없으면 게스트에게 남는 것은 자기 모국어 대화록뿐이고,
+  /// 그건 공부방이 아니라 그냥 통화 기록이다.
+  ///
+  /// 이 통화의 값은 이미 호스트가 냈다. 그 기록을 읽을 수 있는 물건으로
+  /// 만드는 마지막 한 걸음까지가 그 값에 든다고 본다(실장님 지시,
+  /// 2026-08-31). **줄마다 한 번 만들고 저장된다** — 누를 때마다 새로 나가는
+  /// 비용이 아니라서 여는 것이다.
+  ///
+  /// ⚠️ 여는 것은 **이것 하나뿐이다.** 소리 듣기·튜터링·다른 표현·연습
+  /// 녹음·에코잉·My English는 그대로 [canUsePaidStudy]가 쥔다. 그쪽은 누를
+  /// 때마다 값이 나가므로 판정을 섞지 않는다.
+  ///
+  /// 로그인 안 한 **일반** 익명 사용자는 여전히 막힌다 — 그쪽은 이 통화를
+  /// 낸 사람이 없다.
+  bool get canBuildHistoryTarget =>
+      canUsePaidStudy || reason == StudyBlockReason.duoGuest;
+
   /// 잠긴 버튼에 붙일 짧은 한마디. 눌러도 아무 일이 없는 버튼을 두지 않는다.
   String get gateLabel {
     switch (reason) {
@@ -65,21 +90,21 @@ class StudyAccess {
         //   갈래) 이 상태로 공부방에 오지 않는다. 익명은 그대로 남으므로,
         //   끝난 통화가 끝나기를 기다리라는 말을 읽고 '다시 시도'를 반복해
         //   누르게 된다(2026-08-30 실장님 확인). 실제로 잠금을 푸는 행동은
-        //   로그인이고, 로그인하면 그 자리에서 배울글이 만들어진다.
+        //   로그인이다.
         //
-        //   판정(`canUsePaidStudy`)은 손대지 않았다 — 게스트 구간의 비용은
-        //   호스트가 내고, 그 정책은 그대로다. 바뀐 것은 안내 문구뿐이다.
+        //   ⚠️ 이 문구가 가리키는 것은 이제 **연습뿐이다.** 배울글은
+        //   게스트에게도 만들어진다([canBuildHistoryTarget], 2026-08-31).
+        //   판정(`canUsePaidStudy`)은 여전히 손대지 않았다 — 게스트 구간의
+        //   차감은 안 돌고, 그 정책은 그대로다.
         return '로그인하면 연습할 수 있어요';
     }
   }
 }
 
-const StudyAccess _kAllowed =
-    StudyAccess._(true, StudyBlockReason.none);
+const StudyAccess _kAllowed = StudyAccess._(true, StudyBlockReason.none);
 const StudyAccess _kNotSignedIn =
     StudyAccess._(false, StudyBlockReason.notSignedIn);
-const StudyAccess _kDuoGuest =
-    StudyAccess._(false, StudyBlockReason.duoGuest);
+const StudyAccess _kDuoGuest = StudyAccess._(false, StudyBlockReason.duoGuest);
 
 /// 지금 차감을 **하지 않기로 되어 있는** 상태인가.
 ///

@@ -52,7 +52,8 @@ void main() {
     });
 
     test('일반 회원 구간은 차감이 돈다', () {
-      expect(isDuoBillingSuppressed(isTrial: false, isDuoGuest: false), isFalse);
+      expect(
+          isDuoBillingSuppressed(isTrial: false, isDuoGuest: false), isFalse);
     });
   });
 
@@ -116,7 +117,8 @@ void main() {
       expect(duringCall.canUsePaidStudy, isFalse);
       expect(afterLogin.canUsePaidStudy, isTrue);
       expect(isDuoBillingSuppressed(isTrial: false, isDuoGuest: true), isTrue);
-      expect(isDuoBillingSuppressed(isTrial: false, isDuoGuest: false), isFalse);
+      expect(
+          isDuoBillingSuppressed(isTrial: false, isDuoGuest: false), isFalse);
     });
 
     test('딱지가 남으면 회원인데도 잠긴다 — 그래서 복구보다 먼저 내린다', () {
@@ -124,6 +126,44 @@ void main() {
           isTrial: false, isDuoGuest: true, isSignedInMember: true);
       expect(stale.canUsePaidStudy, isFalse);
       expect(stale.reason, StudyBlockReason.duoGuest);
+    });
+  });
+
+  group('📝 배울글은 게스트에게도 만들어진다', () {
+    // Duo 직접 대화는 각자 자기 말로 저장된다. 배울글이 없으면 게스트에게
+    // 남는 것이 모국어 대화록뿐이라 공부방이 성립하지 않는다. 통화 값은
+    // 호스트가 이미 냈고, 이 생성은 줄당 한 번이다(2026-08-31).
+    test('Duo 게스트는 연습은 못 해도 배울글은 만든다', () {
+      for (final isMember in <bool>[true, false]) {
+        final access = resolveStudyAccess(
+          isTrial: false,
+          isDuoGuest: true,
+          isSignedInMember: isMember,
+        );
+        expect(access.canUsePaidStudy, isFalse, reason: 'member=$isMember');
+        expect(access.canBuildHistoryTarget, isTrue,
+            reason: 'member=$isMember');
+      }
+    });
+
+    test('그냥 익명인 사람은 여전히 막힌다 — 이 통화를 낸 사람이 없다', () {
+      final access = resolveStudyAccess(
+        isTrial: false,
+        isDuoGuest: false,
+        isSignedInMember: false,
+      );
+      expect(access.canBuildHistoryTarget, isFalse);
+    });
+
+    test('유료 학습이 열린 사람은 당연히 열려 있다', () {
+      for (final access in <StudyAccess>[
+        resolveStudyAccess(
+            isTrial: true, isDuoGuest: false, isSignedInMember: false),
+        resolveStudyAccess(
+            isTrial: false, isDuoGuest: false, isSignedInMember: true),
+      ]) {
+        expect(access.canBuildHistoryTarget, isTrue);
+      }
     });
   });
 

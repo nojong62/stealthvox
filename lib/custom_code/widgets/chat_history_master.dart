@@ -856,7 +856,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     //   `번역 중` 물레방아를 영영 돌린다. 곧 나올 것처럼 보이는데 아무도
     //   만들지 않는 상태다(실기기 게스트 공부방에서 확인, 2026-08-29).
     //   잠긴 것은 잠겼다고 적는다.
-    if (!_paidStudySilentlyAllowed('target_generation')) {
+    if (!_historyTargetAllowed()) {
       _markMissingTargetsFailed(docs, 'locked');
       return;
     }
@@ -1093,7 +1093,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     String originalText,
     String sourceLanguage,
   ) async {
-    if (!_paidStudySilentlyAllowed('target_generation')) return false;
+    if (!_historyTargetAllowed()) return false;
     final source = originalText.trim();
     if (source.isEmpty) return false;
     if (_apiKey.isEmpty) {
@@ -1461,6 +1461,20 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
     if (access.canUsePaidStudy) return true;
     _showRoomEntryToast(access.gateLabel);
     debugPrint('[STUDY-GATE] blocked reason=${access.reason.name}');
+    return false;
+  }
+
+  /// 📝 배울글 생성만 따로 묻는다. **다른 유료 동작과 판정이 다르다** —
+  /// Duo 게스트에게는 열려 있다(`study_access.canBuildHistoryTarget`).
+  ///
+  /// 게스트 방의 원문은 두 사람이 각자 자기 말로 한 문장이라, 배울글이 없으면
+  /// 공부방에 남는 것이 모국어 대화록뿐이다. 그 통화의 값은 호스트가 이미
+  /// 냈고 이 생성은 줄당 한 번이라, 여기까지만 연다.
+  bool _historyTargetAllowed() {
+    final access = _studyAccess;
+    if (access.canBuildHistoryTarget) return true;
+    debugPrint('[STUDY-GATE] skipped target_generation '
+        'reason=${access.reason.name}');
     return false;
   }
 
