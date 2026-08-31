@@ -30,6 +30,9 @@ import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
+// 초대 링크를 마주 앉은 상대가 찍을 수 있게 그리는 것뿐이다. 순수 Dart라
+// 네이티브 플러그인이 아니고, 권한도 늘지 않는다.
+import 'package:qr_flutter/qr_flutter.dart';
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
 // 진단 로그를 개발 빌드에서만 남기기 위한 것. 이 파일의 다른 import들과
@@ -122,6 +125,9 @@ const Map<String, Map<String, String>> kModePickerText = {
     'inviteDoneDetail': '초대 링크를 복사해 뒀어요.',
     'inviteFailTitle': '초대 링크를 만들지 못했습니다',
     'inviteFailDetail': '잠시 후 다시 시도해 주세요.',
+    'qrTitle': '초대 QR',
+    'qrHint': '상대방 폰 카메라로 이 QR을 찍으면 바로 들어옵니다.',
+    'qrClose': '닫기',
   },
   'English': {
     'title': 'Choose Call Mode',
@@ -138,6 +144,9 @@ const Map<String, Map<String, String>> kModePickerText = {
     'inviteDoneDetail': 'The invite link is copied.',
     'inviteFailTitle': "Couldn't create the invite link",
     'inviteFailDetail': 'Please try again in a moment.',
+    'qrTitle': 'Scan to Join',
+    'qrHint': 'Have your friend scan this with their phone camera.',
+    'qrClose': 'Close',
   },
   'Japanese': {
     'title': '通話方法を選ぶ',
@@ -154,6 +163,9 @@ const Map<String, Map<String, String>> kModePickerText = {
     'inviteDoneDetail': '招待リンクをコピーしました。',
     'inviteFailTitle': '招待リンクを作成できませんでした',
     'inviteFailDetail': 'しばらくしてからもう一度お試しください。',
+    'qrTitle': '招待QR',
+    'qrHint': '相手のスマホのカメラでこのQRを読み取ると参加できます。',
+    'qrClose': '閉じる',
   },
   'Chinese': {
     'title': '选择通话方式',
@@ -170,6 +182,9 @@ const Map<String, Map<String, String>> kModePickerText = {
     'inviteDoneDetail': '邀请链接已复制。',
     'inviteFailTitle': '无法生成邀请链接',
     'inviteFailDetail': '请稍后再试。',
+    'qrTitle': '邀请二维码',
+    'qrHint': '让对方用手机相机扫描这个二维码即可加入。',
+    'qrClose': '关闭',
   },
   'Spanish': {
     'title': 'Elige el tipo de llamada',
@@ -186,6 +201,9 @@ const Map<String, Map<String, String>> kModePickerText = {
     'inviteDoneDetail': 'El enlace de invitación está copiado.',
     'inviteFailTitle': 'No se pudo crear el enlace de invitación',
     'inviteFailDetail': 'Inténtalo de nuevo en un momento.',
+    'qrTitle': 'Escanear para unirse',
+    'qrHint': 'Pide a tu amigo que lo escanee con la cámara de su teléfono.',
+    'qrClose': 'Cerrar',
   },
   'French': {
     'title': "Choisissez le type d'appel",
@@ -202,6 +220,10 @@ const Map<String, Map<String, String>> kModePickerText = {
     'inviteDoneDetail': "Le lien d'invitation est copié.",
     'inviteFailTitle': "Impossible de créer le lien d'invitation",
     'inviteFailDetail': 'Réessayez dans un instant.',
+    'qrTitle': 'Scanner pour rejoindre',
+    'qrHint':
+        'Demandez à votre ami de le scanner avec la caméra de son téléphone.',
+    'qrClose': 'Fermer',
   },
   'German': {
     'title': 'Gesprächsart wählen',
@@ -218,6 +240,9 @@ const Map<String, Map<String, String>> kModePickerText = {
     'inviteDoneDetail': 'Der Einladungslink ist kopiert.',
     'inviteFailTitle': 'Einladungslink konnte nicht erstellt werden',
     'inviteFailDetail': 'Bitte versuche es gleich noch einmal.',
+    'qrTitle': 'Zum Beitreten scannen',
+    'qrHint': 'Lass es deinen Freund mit der Handykamera scannen.',
+    'qrClose': 'Schließen',
   },
   'Hindi': {
     'title': 'कॉल का तरीका चुनें',
@@ -234,6 +259,9 @@ const Map<String, Map<String, String>> kModePickerText = {
     'inviteDoneDetail': 'न्योते का लिंक कॉपी हो गया।',
     'inviteFailTitle': 'न्योते का लिंक नहीं बन सका',
     'inviteFailDetail': 'थोड़ी देर बाद फिर कोशिश करें।',
+    'qrTitle': 'शामिल होने के लिए स्कैन करें',
+    'qrHint': 'अपने दोस्त से इसे फ़ोन कैमरे से स्कैन करने को कहें।',
+    'qrClose': 'बंद करें',
   },
   'Russian': {
     'title': 'Выберите тип звонка',
@@ -250,6 +278,9 @@ const Map<String, Map<String, String>> kModePickerText = {
     'inviteDoneDetail': 'Ссылка-приглашение скопирована.',
     'inviteFailTitle': 'Не удалось создать ссылку-приглашение',
     'inviteFailDetail': 'Попробуйте ещё раз через минуту.',
+    'qrTitle': 'Отсканируйте, чтобы присоединиться',
+    'qrHint': 'Попросите друга отсканировать это камерой телефона.',
+    'qrClose': 'Закрыть',
   },
   'Portuguese': {
     'title': 'Escolha o tipo de chamada',
@@ -266,6 +297,9 @@ const Map<String, Map<String, String>> kModePickerText = {
     'inviteDoneDetail': 'O link do convite foi copiado.',
     'inviteFailTitle': 'Não foi possível criar o link do convite',
     'inviteFailDetail': 'Tente novamente em instantes.',
+    'qrTitle': 'Escaneie para entrar',
+    'qrHint': 'Peça ao seu amigo para escanear com a câmera do celular.',
+    'qrClose': 'Fechar',
   },
   'Italian': {
     'title': 'Scegli il tipo di chiamata',
@@ -282,6 +316,10 @@ const Map<String, Map<String, String>> kModePickerText = {
     'inviteDoneDetail': "Il link dell'invito è stato copiato.",
     'inviteFailTitle': "Impossibile creare il link dell'invito",
     'inviteFailDetail': 'Riprova tra un momento.',
+    'qrTitle': 'Scansiona per unirti',
+    'qrHint':
+        'Chiedi al tuo amico di inquadrarlo con la fotocamera del telefono.',
+    'qrClose': 'Chiudi',
   },
   'Dutch': {
     'title': 'Kies het gesprekstype',
@@ -298,6 +336,9 @@ const Map<String, Map<String, String>> kModePickerText = {
     'inviteDoneDetail': 'De uitnodigingslink is gekopieerd.',
     'inviteFailTitle': 'Kon de uitnodigingslink niet maken',
     'inviteFailDetail': 'Probeer het zo meteen opnieuw.',
+    'qrTitle': 'Scan om deel te nemen',
+    'qrHint': 'Laat je vriend dit scannen met de camera van zijn telefoon.',
+    'qrClose': 'Sluiten',
   },
 };
 
@@ -710,10 +751,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         app.targetLang == app.nativeLang) {
       app.targetLang = _guestTargetFor(app.nativeLang);
     }
-    _lgDuo('[GUEST-LANG]',
+    _lgDuo(
+        '[GUEST-LANG]',
         'origin=${app.nativeLang} target=${app.targetLang} '
-        'device=${WidgetsBinding.instance.platformDispatcher.locale.languageCode} '
-        'firstTime=$neverChoseNative');
+            'device=${WidgetsBinding.instance.platformDispatcher.locale.languageCode} '
+            'firstTime=$neverChoseNative');
   }
 
   // 🆕 [PTT] Duo 무전기 상태기계
@@ -2036,10 +2078,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           'noise_gate=$noiseReason item=$itemId len=${trimmed.length} '
               'voicedMs=${voicedMs ?? -1}');
       _lgDirectSttDecision(
-          itemId: itemId,
-          accepted: false,
-          reason: noiseReason,
-          finalText: '');
+          itemId: itemId, accepted: false, reason: noiseReason, finalText: '');
       return;
     }
     // 중복 저장 가드. 같은 item이 두 번 오면(재전달·flush 겹침) 한 번만 남긴다.
@@ -3096,10 +3135,9 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     // 배울글이 되고, 공부방이 API를 부를 일도 없다.
     //   ⚠️ 선언만 믿지 않는다. 글자가 배울 언어와 어긋나면 배울글로 싣지
     //   않고 예전처럼 공부방에 넘긴다 — 한국어가 배울글 자리에 앉는 길이다.
-    final bool rawIsMyTargetLang =
-        (_isSameChatLang(srcLang, _myTarget()) ||
-                textIsLanguage(raw, _myTarget())) &&
-            !textContradictsLanguage(raw, _myTarget());
+    final bool rawIsMyTargetLang = (_isSameChatLang(srcLang, _myTarget()) ||
+            textIsLanguage(raw, _myTarget())) &&
+        !textContradictsLanguage(raw, _myTarget());
     await _saveHistoryMessage(
       rawIsMyTargetLang ? raw.trim() : '',
       spoken,
@@ -3472,7 +3510,9 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         final DuoCleanedTurn? out = kept[i];
         final String state = out == null
             ? kStudyStateHiddenArtifact
-            : (out.hesitation ? kStudyStateHiddenHesitation : kStudyStateIncluded);
+            : (out.hesitation
+                ? kStudyStateHiddenHesitation
+                : kStudyStateIncluded);
         final String after = out == null ? '' : out.text;
         _lgDuo(
             '[DIRECT-CLEANUP]',
@@ -3554,7 +3594,13 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     }
   }
 
-  Future<void> _shareInviteCode() async {
+  /// 초대장을 낸다.
+  ///
+  /// [asQr]가 참이면 **마지막 한 걸음만** 다르다 — 공유 시트 대신 화면에 QR을
+  /// 띄운다. 방을 만들고 살리고 링크를 짜는 앞의 네 단계는 두 경로가 똑같아야
+  /// 한다. 여기서 갈라 두면 QR로 들어온 게스트만 `isDuoEnabled`가 안 켜진
+  /// 방을 만나는 식으로 어긋난다. 링크를 짜는 자리도 하나뿐이어야 한다.
+  Future<void> _shareInviteCode({bool asQr = false}) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
     // 🆕 [모드 결정권] 대화 방식은 **초대를 만드는 호스트가 세션당 한 번** 정한다.
@@ -3645,7 +3691,13 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
               .replace(queryParameters: _params)
               .toString();
       debugPrint('[Duo] inviteLink: $inviteLink');
-      // 5) 클립보드 복사 + 공유 시트
+      // 5) 내보내기. **여기까지는 두 경로가 같다.**
+      if (asQr) {
+        // 마주 앉은 상대가 자기 폰으로 찍는다. 클립보드도 공유 시트도 열지
+        // 않는다 — QR을 보려던 사람에게 공유 창이 겹쳐 뜨면 방해만 된다.
+        if (mounted) await _showDuoInviteQr(inviteLink);
+        return;
+      }
       await Clipboard.setData(ClipboardData(text: inviteLink));
       await Share.share(
         'StealthVox Duo 초대 - 저와 함께 Duo 대화해요!\n$inviteLink',
@@ -3675,6 +3727,88 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         );
       }
     }
+  }
+
+  /// 🔳 [INVITE-QR] 초대 링크를 **마주 앉은 상대가 찍도록** 띄운다.
+  ///
+  /// 담기는 것은 공유 시트로 내보내는 것과 **똑같은 OneLink 링크**다. 딥링크
+  /// 경로를 새로 만들지 않았으므로, 찍으면 링크를 누른 것과 같은 길로 간다 —
+  /// 앱이 있으면 방으로, 없으면 스토어로.
+  ///
+  /// ⚠️ **QR은 같은 자리에 있는 사람에게만 쓸모가 있다.** 카톡으로 받은
+  /// 사람은 자기 폰 화면의 QR을 자기가 찍을 수 없다. 그쪽은 링크가 답이라
+  /// 공유 시트에 이미지를 붙이지 않는다.
+  ///
+  /// 카메라가 읽는 것은 명암이다. 어두운 통화 화면 위에 그대로 그리면 잘 안
+  /// 찍히므로 **흰 판을 깔고** 그 위에 검은 모듈을 얹는다.
+  Future<void> _showDuoInviteQr(String link) async {
+    final t = modePickerTextFor(kDuoInviteUiLang);
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF111827),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(
+          t['qrTitle']!,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: QrImageView(
+                data: link,
+                version: QrVersions.auto,
+                size: 232,
+                // 기본값은 투명이라 어두운 바탕이 비친다. 위 Container와 같은
+                // 흰색으로 맞춰 이음매 없이 한 장의 흰 판으로 보이게 한다.
+                backgroundColor: Colors.white,
+                eyeStyle: const QrEyeStyle(
+                  eyeShape: QrEyeShape.square,
+                  color: Colors.black,
+                ),
+                dataModuleStyle: const QrDataModuleStyle(
+                  dataModuleShape: QrDataModuleShape.square,
+                  color: Colors.black,
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              t['qrHint']!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Color(0xFFCBD5E1),
+                fontSize: 13,
+                height: 1.4,
+              ),
+            ),
+          ],
+        ),
+        actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text(
+              t['qrClose']!,
+              style: const TextStyle(
+                color: Color(0xFF60A5FA),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Duo 안내 스낵바 한 벌.
@@ -4063,10 +4197,12 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         isHost: _amIHost,
         apiKey: _openAiKey,
         model: kDuoCanonicalModel,
-      ).then((_) => buildDuoReplay(
-            roomId: canonRoomId,
-            apiKey: _openAiKey,
-          )).catchError((Object e) {
+      )
+          .then((_) => buildDuoReplay(
+                roomId: canonRoomId,
+                apiKey: _openAiKey,
+              ))
+          .catchError((Object e) {
         // canonical과 History는 이미 확정돼 있다. 여기서 잃는 것은 없다.
         _lgDuo('[DUO-REPLAY]', 'chain_failed=${e.runtimeType}');
       }));
@@ -4915,6 +5051,24 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                   style: IconButton.styleFrom(
                     backgroundColor:
                         const Color(0xFF2563EB).withValues(alpha: 0.22),
+                    shape: const CircleBorder(),
+                    minimumSize: const Size(44, 44),
+                  ),
+                ),
+              // 🔳 마주 앉은 상대에게 내는 같은 초대장. 옆 버튼과 하는 일이
+              //   같고 **마지막 한 걸음만** 다르다 — 공유 시트 대신 QR이다.
+              //   옅게 두어 기본 문(공유)이 어느 쪽인지 흐려지지 않게 한다.
+              if (_amIHost)
+                IconButton(
+                  icon: const Icon(Icons.qr_code_2_rounded,
+                      color: Colors.white70, size: 22),
+                  tooltip: 'Duo 초대 QR',
+                  onPressed: () => _shareInviteCode(asQr: true),
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 56, minHeight: 56),
+                  style: IconButton.styleFrom(
+                    backgroundColor: Colors.white.withValues(alpha: 0.08),
                     shape: const CircleBorder(),
                     minimumSize: const Size(44, 44),
                   ),
