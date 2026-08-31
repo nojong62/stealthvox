@@ -3520,6 +3520,21 @@ RULES — follow exactly:
             translated.isEmpty &&
             original.isNotEmpty;
 
+        // 📖 원문이 **본문인가 보조인가.**
+        //
+        //   평소 원문은 배울글 밑에 붙는 작은 회색 글씨다. 위에 본문(타겟)이
+        //   있어서 보조로 읽히면 되기 때문이다.
+        //
+        //   그런데 타겟이 아예 없는 줄은 위가 비어 있다. 그 상태로 원문까지
+        //   12px 회색으로 두면, **말풍선에 남는 것이 흐린 잔글씨 한 줄뿐이다.**
+        //   로그인 안 한 Duo 게스트는 모든 줄이 이 상태다 — 방금 자기가 한
+        //   말이 통째로 잔글씨로 깔린다(실장님 확인, 2026-08-31).
+        //
+        //   보기는 누구에게도 막지 않는다는 것이 이 화면의 원칙이고
+        //   (`study_access.dart`), 잠긴 것은 **새로 만드는 동작**뿐이다.
+        //   그러니 타겟이 없으면 원문이 본문 자리를 갖는다.
+        final bool originIsBody = _langDisplayMode == 2 || showTargetBadge;
+
         // 🎫 비용이 드는 세 가지(소리 듣기·실전 튜터링·다른 표현)는 잠기면
         //   흐려진다. **대화 글자는 그대로 보인다** — 못 쓰는 것은 새로 만드는
         //   동작뿐이다. 탭은 살려 둔다: 눌러야 이유를 알 수 있다.
@@ -3648,15 +3663,15 @@ RULES — follow exactly:
                                               ? TextAlign.right
                                               : TextAlign.left,
                                           style: TextStyle(
-                                              color: _langDisplayMode == 2
+                                              color: originIsBody
                                                   ? (isHost
                                                       ? Colors.white
                                                       : const Color(0xFF93C5FD))
                                                   : Colors.grey,
-                                              fontSize: _langDisplayMode == 2
+                                              fontSize: originIsBody
                                                   ? 16 * _fontScale
                                                   : 12 * _fontScale,
-                                              fontWeight: _langDisplayMode == 2
+                                              fontWeight: originIsBody
                                                   ? FontWeight.bold
                                                   : FontWeight.normal)),
                                     ],
