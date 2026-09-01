@@ -3217,16 +3217,24 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         srcLang: srcLang,
         toLang: myNative,
       );
-      // 번역이 실패해도 상대 말을 통째로 잃지는 않는다. 못 알아들을지언정
-      // 원문이라도 남기는 편이, 아무 일도 없었던 것처럼 조용히 사라지는
-      // 것보다 낫다 — 사라지면 상대는 자기 말이 갔는지도 모른다.
-      spoken = (translated ?? '').trim().isNotEmpty
-          ? translated!.trim()
-          : raw.trim();
-      if (translated == null) {
-        _lgDuo('⚠️ [INTERP-TRANSLATE]',
-            'failed src=$srcLang to=$myNative — 원문 그대로 재생한다');
+      // ⚠️ **원문을 그대로 재생하지 않는다.** 예전에는 "못 알아들을지언정
+      //   원문이라도 남기는 편이 낫다"고 보고 raw를 그대로 읽었다. 그런데
+      //   raw는 상대의 언어이고 TTS 목소리는 내 언어다 — 한국어 문장을
+      //   영어 목소리로 읽는 소리가 났다. 실기기에서 두 세션 연속 나왔고
+      //   게스트 쪽에서는 **받은 첫 마디**가 이것이었다(2026-09-01).
+      //   재시도까지 빈 응답이면 이 발화는 옮길 수 없다는 뜻이고, 틀린
+      //   언어로 읽는 것보다 이 턴을 접는 편이 낫다. 히스토리에도 남기지
+      //   않는다 — 원문 자리는 '내 대화 언어로 들은 말'이라 상대 언어
+      //   문장이 앉으면 공부방이 그것으로 배울글을 짓는다.
+      if (translated == null || translated.trim().isEmpty) {
+        _lgDuo(
+            '⚠️ [INTERP-TRANSLATE]',
+            'failed src=$srcLang to=$myNative rawLen=${raw.trim().length} '
+            '— 이 턴은 재생하지 않는다');
+        _setInterpPartnerPhase(InterpPartnerPhase.idle);
+        return;
       }
+      spoken = translated.trim();
     }
     _lgDuo('[INTERP-TURN]',
         'incoming src=$srcLang mine=$myNative same=$sameLang gptCalls=${sameLang ? 0 : 1}');
@@ -5494,19 +5502,29 @@ Return strict JSON only:
     required String text,
     required String srcLang,
     required String toLang,
+    // 빈 응답이 한 번 나오는 것은 흔하다. 두 번 나오면 그건 이 발화 자체다.
+    int maxAttempts = 2,
   }) async {
     final String source = text.trim();
     if (key.isEmpty || source.isEmpty) return null;
-    try {
-      final Uri uri = Uri.parse('https://api.openai.com/v1/chat/completions');
-      final String prompt =
+    // 🔁 빈 응답·오류는 **한 번 더** 물어본다. 여기서 포기하면 호출부가
+    //   그 턴을 통째로 접는다 — 원문 재생 폴백은 제거했다.
+    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        final Uri uri =
+            Uri.parse('https://api.openai.com/v1/chat/completions');
+        final String prompt =
           "You are a translation engine for a live interpreter app.\n"
           "You are NOT a chat assistant. NEVER reply, comment, answer, or ask "
           "questions. NEVER continue the conversation.\n\n"
           "Translate the utterance from $srcLang into natural spoken $toLang.\n"
           "Preserve tone, intent, names, and numbers exactly. Do not add or "
           "remove meaning.\n"
-          "If the utterance is unclear or empty, output nothing.\n"
+          "Always translate whatever words are present — a fragment, a "
+          "single word, or something you are unsure of. Make your best "
+          "attempt and still return a translation.\n"
+          "Return an empty response ONLY if the input contains no words "
+          "at all.\n"
           "Return ONLY the translated sentence — no quotes, no label, no "
           "explanation.";
       final res = await client
@@ -5526,22 +5544,37 @@ Return strict JSON only:
                 ]
               }))
           .timeout(const Duration(seconds: 10));
-      if (res.statusCode != 200) {
-        debugPrint('[Duo][SpeechTranslate] status=${res.statusCode}');
-        return null;
+        if (res.statusCode != 200) {
+          debugPrint('[Duo][SpeechTranslate] status=${res.statusCode} '
+              'attempt=$attempt/$maxAttempts');
+          continue;
+        }
+        final body =
+            jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+        final choices = body['choices'] as List? ?? const <dynamic>[];
+        // ⚠️ 예전에는 아래 두 갈래가 **로그 한 줄 없이** null을 냈다.
+        //   그래서 실기기 로그만 보고는 API가 죽은 것인지 모델이 침묵한
+        //   것인지 가릴 수 없었다. 둘을 갈라 남긴다.
+        if (choices.isEmpty) {
+          debugPrint('[Duo][SpeechTranslate] empty_choices '
+              'attempt=$attempt/$maxAttempts');
+          continue;
+        }
+        final message = (choices.first as Map<String, dynamic>)['message']
+            as Map<String, dynamic>?;
+        final out = (message?['content'] ?? '').toString().trim();
+        if (out.isEmpty) {
+          debugPrint('[Duo][SpeechTranslate] empty_content '
+              'attempt=$attempt/$maxAttempts srcLen=${source.length}');
+          continue;
+        }
+        return out;
+      } catch (e) {
+        debugPrint('[Duo][SpeechTranslate] failed=${e.runtimeType} '
+            'attempt=$attempt/$maxAttempts');
       }
-      final body =
-          jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
-      final choices = body['choices'] as List? ?? const <dynamic>[];
-      if (choices.isEmpty) return null;
-      final message = (choices.first as Map<String, dynamic>)['message']
-          as Map<String, dynamic>?;
-      final out = (message?['content'] ?? '').toString().trim();
-      return out.isEmpty ? null : out;
-    } catch (e) {
-      debugPrint('[Duo][SpeechTranslate] failed=${e.runtimeType}');
-      return null;
     }
+    return null;
   }
 
   /// 통화 전체를 공부방 목록의 미리보기 한 줄로 줄인다.
