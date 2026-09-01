@@ -2317,9 +2317,21 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     session.onSpeechStarted = () {
       if (generation != _interpGeneration) return;
       _interpSpeechStartedAt = DateTime.now();
+      // 🔉 여기서부터 세기를 쌓는다. 직통화(:1931)와 같은 자리, 같은 뜻이다.
+      _utteranceRms?.beginUtterance();
       if (_interpStt?.audioGateOpen ?? false) {
         _setInterpMicPhase(InterpMicPhase.speaking);
       }
+    };
+    // 🔬 item_id가 정해지는 유일한 자리. 여기서 소리와 전사문을 잇는다.
+    session.onUtteranceCommitted = (itemId, voicedMs, voicedSource) {
+      if (generation != _interpGeneration) return;
+      _utteranceRms?.commitUtterance(itemId);
+    };
+    // 🔉 소켓이 끊겼다 붙는 동안의 소리는 어느 발화의 것도 아니다.
+    session.onReconnecting = (attempt) {
+      if (generation != _interpGeneration) return;
+      _utteranceRms?.reset();
     };
     session.onSpeechStopped = () {
       if (generation != _interpGeneration) return;
@@ -2398,6 +2410,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     }
 
     _interpStarting = true;
+    // 🔉 세기 계측기는 **진단 여부와 무관하게** 만든다. 게이트가 이 값을 본다.
+    //   직통화와 같은 물건이고, 두 모드는 동시에 돌지 않는다.
+    _utteranceRms = DuoUtteranceRmsMeter();
     if (mounted) setState(() => _interpStartFailed = false);
     _setInterpMicPhase(InterpMicPhase.preparing);
     BillingTicker.instance.resumeFromActivity('duo_mic_start');
@@ -2447,6 +2462,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
             if (_interpMicPhase != InterpMicPhase.speaking) {
               _aecProbe.addIdle(bytes);
             }
+            // 🔉 세기 계측. **release에서도 돈다.** 이게 없으면 게이트가
+            //   세기를 모르고, 모르면 통과시키므로 방어선이 사라진다.
+            //   (계측기는 발화 구간에서만 누적한다 — 스스로 걸러낸다.)
+            _utteranceRms?.addPcm(bytes);
             stt.appendAudio(bytes);
           } else {
             _aecProbe.addDuringTts(bytes);
@@ -2490,6 +2509,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     }
     // 🎚️ [AEC-PROBE] 마이크가 바뀌면 앞 통화의 소리가 다음 바닥에 섞이면 안 된다.
     _aecProbe.reset();
+    // 🔉 세기 계측기도 통화 한 번짜리다. 다음 통화가 이전 세기를 물려받으면
+    //   조용한 발화가 남의 세기로 통과한다.
+    _utteranceRms?.reset();
+    _utteranceRms = null;
     _interpStt?.closeAudioGate(reason: reason);
     if (!_isDirectMode) _setInterpMicPhase(InterpMicPhase.ended);
   }
@@ -2554,6 +2577,70 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       // 하므로 이 창보다 한참 오래 걸린다.
       _lgDuo('[INTERP-STT]',
           'duplicate_skipped item=<empty> len=${trimmed.length}');
+      return;
+    }
+
+    // ── 🔇 소리의 근거로 먼저 거른다 ────────────────────────────────────
+    // **글자보다 먼저다.** 글자는 짧아도 진짜일 수 있지만, 소리가 없었거나
+    // 너무 조용했으면 그건 전사기가 지어낸 것이다. 여기까지 오는 동안
+    // 만능 통역에는 이 방어선이 **아예 없었다** — `belowVoicedGate`와
+    // `belowLevelGate`의 호출부가 직통화 두 줄뿐이었고,
+    // `onTranscriptCompleted`가 `(itemId, text)`만 넘겨 음향 값이 이 함수에
+    // 닿지도 않았다. 그래서 반 초짜리 잘린 조각이 정상 문장처럼 나갔다
+    // (실측 2026-09-01: 492ms→6글자, 285ms→7글자가 상대에게 전송됐다).
+    //
+    // 판정은 직통화와 **같은 함수·같은 상수**를 쓴다. 두 경로가 다른 기준으로
+    // 버리면 나중에 로그를 나란히 놓고 못 맞춘다.
+    final session = _interpStt;
+    final int? voicedMs = session?.utteranceVoicedMsOf(itemId);
+    final String voicedSrc = session?.utteranceVoicedSourceOf(itemId) ?? 'none';
+    final double? rmsDbfs = _utteranceRms?.rmsDbfsOf(itemId);
+    // 받아들이든 버리든 숫자를 남긴다. **전사문은 싣지 않는다** — 문턱을
+    // 다시 잡을 근거는 이 숫자뿐이고, 숫자만으로 충분하다.
+    _lgDuo(
+        '[INTERP-LEVEL]',
+        'item=$itemId len=${trimmed.length} voicedMs=${voicedMs ?? -1} '
+            'src=$voicedSrc '
+            'rmsDbfs=${rmsDbfs == null ? 'n/a' : rmsDbfs.toStringAsFixed(1)}');
+
+    // 🔇 길이. 직통화와 같은 문턱이다.
+    if (belowVoicedGate(voicedMs, minMs: kDuoMinVoicedMs)) {
+      _lgDuo(
+          '[INTERP-DROP]',
+          'reason=${DuoDropReason.voicedMs} item=$itemId '
+              'voicedMs=$voicedMs min=$kDuoMinVoicedMs src=$voicedSrc '
+              'len=${trimmed.length}');
+      if (_incomingQueue.isNotEmpty) _drainIncoming();
+      return;
+    }
+
+    // 🔇 **길이를 못 쟀다(`src=none`)는 것이 만능 통역에서는 "모른다"가
+    //   아니라 "잘렸다"는 뜻이다.** 직통화는 발화 도중에 마이크를 막지
+    //   않으므로 그쪽에서는 통과시키는 것이 옳다(`duo_transcript_gate.dart`
+    //   의 belowVoicedGate 주석). 여기서는 상대 발화가 재생되기 시작하면
+    //   게이트가 `flush_on_close`로 말하던 중의 버퍼를 강제 확정시키고, 그
+    //   조각이 VAD 침묵 시간(800ms)보다 짧으면 서버도 로컬도 길이를 못 잰다
+    //   (`local_span_too_short`). 즉 이 값이 없다는 것 자체가 근거다.
+    if (voicedMs == null) {
+      _lgDuo(
+          '[INTERP-DROP]',
+          'reason=${DuoDropReason.voicedMs}(unmeasured_truncation) '
+              'item=$itemId src=$voicedSrc len=${trimmed.length}');
+      if (_incomingQueue.isNotEmpty) _drainIncoming();
+      return;
+    }
+
+    // 🔉 길이 다음은 세기다. 직통화와 같은 문턱(-35.0dBFS)이다.
+    //   세기를 못 잰 발화(null)는 통과시킨다 — 모르는 것으로 사람 말을
+    //   버리지 않는다.
+    if (belowLevelGate(rmsDbfs, minDbfs: kDuoMinUtteranceRmsDbfs)) {
+      _lgDuo(
+          '[INTERP-DROP]',
+          'reason=${DuoDropReason.lowLevel} item=$itemId '
+              'rmsDbfs=${rmsDbfs!.toStringAsFixed(1)} '
+              'threshold=${kDuoMinUtteranceRmsDbfs.toStringAsFixed(1)} '
+              'voicedMs=$voicedMs len=${trimmed.length}');
+      if (_incomingQueue.isNotEmpty) _drainIncoming();
       return;
     }
 
