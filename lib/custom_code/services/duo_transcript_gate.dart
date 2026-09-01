@@ -221,3 +221,87 @@ class DuoUtteranceRmsMeter {
     _itemOrder.clear();
   }
 }
+
+// ====================================================================
+// 🎚️ [AEC-PROBE] 에코 제거(AEC)가 실제로 일하는지 재는 자리.
+// --------------------------------------------------------------------
+// 만능 통역은 always-on이라 상대 발화가 **재생되는 동안에도 마이크는 돈다**
+// (닫히는 것은 STT로 가는 통로뿐이다). 그래서 그 버려지는 조각의 세기를 재면
+// 게이트를 한 줄도 건드리지 않고 AEC의 성적표를 얻을 수 있다.
+//
+//   재생 중(게이트 닫힘)                    → addDuringTts()
+//   조용할 때(게이트 열림 + 내가 말하지 않음) → addIdle()
+//
+// 두 값의 차가 작으면 AEC가 스피커 소리를 지우고 있다는 뜻이고, 크면 그대로
+// 새어 들어온다는 뜻이다. **이 계측은 아무것도 막지 않는다** — 게이트는 이
+// 값과 무관하게 지금 그대로 돈다. 재생 중에도 통로를 열어 진짜 끼어들기를
+// 허용할 수 있는지, 그 다음 판단의 재료일 뿐이다.
+//
+// ⚠️ idle 쪽에는 서버 VAD가 발화 시작을 알리기 **전**의 첫 순간이 섞일 수
+//   있다. 그만큼 바닥이 높게 잡히고 차이는 작아 보인다 — 즉 이 계측은
+//   "AEC가 잘 된다" 쪽으로 기운다. **차이가 크게 나오면 그건 진짜다.**
+// ====================================================================
+
+/// 재생 중 마이크와 잡음 바닥의 세기를 따로 모으는 계측기. 통화 한 번에 하나.
+class DuoAecProbe {
+  DuoAecProbe({this.sampleRate = 24000});
+
+  /// 모은 시간을 ms로 환산할 때 쓰는 값. 만능 통역 캡처와 같아야 한다.
+  final int sampleRate;
+
+  double _ttsSumSquares = 0;
+  int _ttsSamples = 0;
+  double _idleSumSquares = 0;
+  int _idleSamples = 0;
+
+  void _add(Uint8List pcm, {required bool duringTts}) {
+    final int samples = pcm.lengthInBytes ~/ 2;
+    if (samples == 0) return;
+    final ByteData view = ByteData.sublistView(pcm, 0, samples * 2);
+    double sum = 0;
+    for (var i = 0; i < samples; i++) {
+      final double v = view.getInt16(i * 2, Endian.little) / 32768.0;
+      sum += v * v;
+    }
+    if (duringTts) {
+      _ttsSumSquares += sum;
+      _ttsSamples += samples;
+    } else {
+      _idleSumSquares += sum;
+      _idleSamples += samples;
+    }
+  }
+
+  /// 상대 발화가 재생되는 동안(게이트가 닫힌 동안) 들어온 조각.
+  void addDuringTts(Uint8List pcm) => _add(pcm, duringTts: true);
+
+  /// 아무도 말하지 않는 동안 들어온 조각. 이것이 잡음 바닥이다.
+  void addIdle(Uint8List pcm) => _add(pcm, duringTts: false);
+
+  /// 이번 재생 구간의 평균 세기(dBFS). 한 조각도 없으면 null.
+  double? get duringTtsDbfs => _ttsSamples == 0
+      ? null
+      : pcm16LinearToDbfs(math.sqrt(_ttsSumSquares / _ttsSamples));
+
+  /// 통화 내내 쌓은 잡음 바닥(dBFS). 한 조각도 없으면 null.
+  double? get idleDbfs => _idleSamples == 0
+      ? null
+      : pcm16LinearToDbfs(math.sqrt(_idleSumSquares / _idleSamples));
+
+  int get duringTtsMs => (_ttsSamples * 1000) ~/ sampleRate;
+  int get idleMs => (_idleSamples * 1000) ~/ sampleRate;
+
+  /// 재생 구간 하나를 보고했다. **바닥은 그대로 두고** 재생 쪽만 비운다 —
+  /// 바닥은 통화 내내 쌓아야 표본이 쌓이고, 재생은 턴마다 따로 봐야 한다.
+  void resetDuringTts() {
+    _ttsSumSquares = 0;
+    _ttsSamples = 0;
+  }
+
+  /// 통화가 끊기거나 캡처가 다시 열릴 때. 둘 다 비운다.
+  void reset() {
+    resetDuringTts();
+    _idleSumSquares = 0;
+    _idleSamples = 0;
+  }
+}

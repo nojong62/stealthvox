@@ -573,6 +573,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 필터가 못 거른다), 간격이 짧거나 음수면 통로 탓이다(마이크가 너무 일찍 열렸다).
   DateTime? _interpTtsEndedAt;
 
+  /// 🎚️ [AEC-PROBE] 재생 중 마이크 세기와 잡음 바닥을 따로 모으는 계측기.
+  /// **아무것도 막지 않는다** — 게이트를 재생 중에도 열 수 있는지 판단할
+  /// 재료를 모을 뿐이다. 자세한 것은 [DuoAecProbe] 주석에 있다.
+  final DuoAecProbe _aecProbe = DuoAecProbe();
+
   /// 아직 안 끝난 History/채널 저장들. 종료 전에 이것들을 기다린다.
   final Set<Future<void>> _directSaves = <Future<void>>{};
 
@@ -1025,8 +1030,35 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           '[ECHO-GUARD]',
           'gate_reopened reason=$reason sinceTtsEndMs='
               '${ttsEnd == null ? -1 : DateTime.now().difference(ttsEnd).inMilliseconds}');
+      _logAecProbe();
       _openInterpGate(reason);
     });
+  }
+
+  /// 🎚️ [AEC-PROBE] 재생 한 구간이 끝났다. 그동안 마이크로 들어온 소리의
+  /// 세기와 통화 내내 쌓은 잡음 바닥을 나란히 남긴다.
+  ///
+  /// 읽는 법은 `delta` 하나다 — 재생 중 마이크가 바닥보다 얼마나 시끄러웠는가.
+  ///
+  ///   delta 0~5dB   AEC가 스피커 소리를 지우고 있다.
+  ///   delta 10dB↑   그대로 새어 들어온다. 게이트가 유일한 방어선이다.
+  ///
+  /// 이 숫자는 **재생 중에도 통로를 열어 진짜 끼어들기를 허용할 수 있는가**를
+  /// 가릴 재료다. 지금 동작은 이 값과 무관하게 바뀌지 않는다.
+  void _logAecProbe() {
+    final double? during = _aecProbe.duringTtsDbfs;
+    final double? idle = _aecProbe.idleDbfs;
+    // 재생 중 조각이 하나도 없으면(=소리가 안 났다) 남길 것이 없다.
+    if (during == null) return;
+    final String deltaText =
+        idle == null ? 'unknown' : '${(during - idle).toStringAsFixed(1)}dB';
+    _lgDuo(
+        '[AEC-PROBE]',
+        'duringTts=${during.toStringAsFixed(1)}dBFS '
+            'idle=${idle == null ? 'n/a' : '${idle.toStringAsFixed(1)}dBFS'} '
+            'delta=$deltaText '
+            'ttsMs=${_aecProbe.duringTtsMs} idleMs=${_aecProbe.idleMs}');
+    _aecProbe.resetDuringTts();
   }
 
   bool _isPartnerOnline = false;
@@ -2407,7 +2439,18 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           final stt = _interpStt;
           // 게이트가 닫혀 있으면 조각을 그냥 버린다. **캡처는 계속 돈다** —
           // 이것이 always-on과 "마이크를 껐다 켠다"의 차이다.
-          if (stt != null && stt.audioGateOpen) stt.appendAudio(bytes);
+          final bool gateOpen = stt != null && stt.audioGateOpen;
+          // 🎚️ [AEC-PROBE] 버려지는 조각도 세기는 잰다. 게이트가 닫혀 있는
+          //   동안은 곧 상대 발화가 재생되는 동안이고(닫는 곳이 그 한 곳뿐이다),
+          //   열려 있는데 내가 말하지 않는 동안은 잡음 바닥이다.
+          if (gateOpen) {
+            if (_interpMicPhase != InterpMicPhase.speaking) {
+              _aecProbe.addIdle(bytes);
+            }
+            stt.appendAudio(bytes);
+          } else {
+            _aecProbe.addDuringTts(bytes);
+          }
         },
         onError: (Object e) =>
             _lgDuo('[INTERP-STT]', 'capture_error=${e.runtimeType}'),
@@ -2445,6 +2488,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       BillingTicker.instance.resumeFromActivity('duo_mic_stop');
       _lgDuo('[INTERP-STT]', 'mic_closed reason=$reason');
     }
+    // 🎚️ [AEC-PROBE] 마이크가 바뀌면 앞 통화의 소리가 다음 바닥에 섞이면 안 된다.
+    _aecProbe.reset();
     _interpStt?.closeAudioGate(reason: reason);
     if (!_isDirectMode) _setInterpMicPhase(InterpMicPhase.ended);
   }
@@ -2587,9 +2632,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     if (spoken.isEmpty || _openAiKey.isEmpty) return;
     final adapter = _ensureInterpreterTts();
     if (adapter == null) return;
-    // ⚠️ 순서가 중요하다 — `speak`보다 **먼저** 닫는다. 재생은 프리롤을 모은
-    //   뒤 비동기로 시작하지만, 그 사이에 첫 소리가 나가면 이미 늦는다.
-    _closeInterpGate('tts_playing');
+    // 🔇 [ECHO] **여기서 닫지 않는다.** 게이트는 실제로 소리가 나기 시작하는
+    //   순간, 즉 어댑터의 `onPlaybackStart`에서 닫는다([_ensureInterpreterTts]).
+    //   번역이 끝나고 TTS를 기다리는 이 구간에는 스피커가 조용하므로 지울
+    //   에코가 없다 — 마이크를 계속 열어 둔다. 화면의 마이크 등도 그동안
+    //   밝은 채로 있고, 그게 사실이다.
     _setInterpPartnerPhase(InterpPartnerPhase.playing);
     BillingTicker.instance.resumeFromActivity('duo_tts_start');
     final utterance = adapter.speak(TtsRequest(
@@ -2622,6 +2669,16 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     final adapter = TtsAdapter(
       apiKeyProvider: () => _openAiKey,
       onLog: (tag, msg) => _lgDuo('[INTERP-TTS]$tag', msg),
+      // 🔇 [ECHO] **게이트는 여기서 닫힌다.** 예전에는 `speak`를 부르기 직전에
+      //   닫았는데, 그 시점은 TTS를 큐에 넣는 순간이지 소리가 나는 순간이
+      //   아니다. 그 사이 1~3초(요청·연결·프리롤)는 스피커가 조용한데도
+      //   마이크가 막혀 있었고, 그때 한 말은 어디에도 남지 않고 사라졌다
+      //   (실측 2026-09-01: 두 통에서 15.6초, 잃은 마이크 시간의 45%).
+      //
+      //   이 콜백은 첫 PCM이 플레이어에 **닿기 전에** 불린다
+      //   (`tts_adapter.dart`의 두 재생 시작 경로 모두 `onPlaybackStart` →
+      //   `_pcmPlayer.feed` 순서다). 그래서 소리보다 항상 먼저 닫힌다.
+      onPlaybackStart: (request) => _closeInterpGate('tts_playing'),
     );
     _interpTts = adapter;
     return adapter;
