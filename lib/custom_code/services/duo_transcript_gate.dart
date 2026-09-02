@@ -158,16 +158,61 @@ bool belowVoicedGate(int? voicedMs, {required int minMs}) =>
 //   통과해 버린다 — 게이트가 있으나 마나가 된다.
 // ====================================================================
 
+/// 🕰️ [DUO-LEVEL-PREROLL] `speech_started`가 **도착하기 전** 소리를 얼마나
+/// 거슬러 올라가 셈에 넣을 것인가.
+///
+/// 서버 VAD의 `prefix_padding_ms`와 같은 뜻이고 같은 크기다
+/// (`kDuoAbPreRollMs`와도 같다 — 세 곳이 같은 소리를 보아야 비교가 성립한다).
+///
+/// **이 값이 0이면 게이트가 실제 발화를 버린다.** 2026-09-02 실기기(SM-S931N)
+/// 릴레이 통화 한 통에서 5건 중 3건이 그렇게 사라졌다:
+///
+///   "지금은"   voicedMs=1460  rmsDbfs=**−160.0**  → low_level로 폐기
+///   "때문에"   voicedMs=1428  rmsDbfs=**−160.0**  → low_level로 폐기
+///
+/// 서버는 1.4초씩 사람 목소리를 들었는데 우리 계측기는 완전 무음을 쟀다.
+/// `speech_started`는 네트워크 왕복과 서버 VAD 지연을 거쳐 **늦게** 오고,
+/// 그 사이 삼성 AEC는 비발화 구간을 정확히 0으로 눌러 버린다. 그래서 계측기가
+/// 실제 음성은 통째로 놓치고 AEC가 0으로 만든 뒷꼬리만 셌다.
+///
+/// 문턱(−42dBFS)의 문제가 아니다 — 실측값이 −160이라 문턱을 아무리 내려도
+/// 안 걸린다. 고칠 곳은 **재는 구간**이다.
+const int kDuoRmsPreRollMs = 600;
+
+/// 이보다 짧은 구간으로는 세기를 판정하지 않는다.
+///
+/// 조각 몇 개로 낸 평균은 발화를 대표하지 못한다. 그런 값으로 사람 말을
+/// 버리는 것보다 **모른다고 말하는 편이 낫다** — `belowLevelGate`는 null을
+/// 통과시킨다. 이것이 "측정 실패"와 "진짜 조용함"을 가르는 자리다.
+const int kDuoRmsMinWindowMs = 150;
+
 /// 발화 구간 평균 세기 계산기. 통화 한 번에 하나.
 class DuoUtteranceRmsMeter {
-  DuoUtteranceRmsMeter({this.maxTrackedItems = 32});
+  DuoUtteranceRmsMeter({
+    this.maxTrackedItems = 32,
+    this.sampleRate = kStealthVoxSttSampleRate,
+  });
 
   /// 값을 들고 있을 발화 수의 상한. 진행 중인 턴은 많아야 몇 개다.
   final int maxTrackedItems;
 
+  /// 고리(pre-roll)와 최소 창을 ms로 환산하는 데 쓴다. 마이크 설정과 같아야 한다.
+  final int sampleRate;
+
   double _sumSquares = 0;
   int _samples = 0;
   bool _active = false;
+
+  /// 🕰️ 아직 발화가 시작되기 전 조각들의 **제곱합과 샘플 수만** 담아 두는 고리.
+  ///
+  /// ⚠️ **PCM은 담지 않는다.** 이 클래스가 통화 길이와 무관하게 메모리가
+  ///   평평한 이유가 그것이고, 그 성질을 pre-roll 때문에 잃으면 안 된다.
+  ///   조각 하나당 double 하나 + int 하나만 쌓인다.
+  final List<_RmsChunk> _preRoll = <_RmsChunk>[];
+  int _preRollSamples = 0;
+
+  int get _preRollMaxSamples => kDuoRmsPreRollMs * sampleRate ~/ 1000;
+  int get _minWindowSamples => kDuoRmsMinWindowMs * sampleRate ~/ 1000;
 
   final Map<String, double> _rmsByItem = <String, double>{};
   final List<String> _itemOrder = <String>[];
@@ -175,30 +220,65 @@ class DuoUtteranceRmsMeter {
   bool get isActive => _active;
   int get trackedItems => _rmsByItem.length;
 
-  /// 서버 VAD가 발화 시작을 알렸다. **이전 누적은 버린다.**
+  /// 지금 고리에 담긴 소리의 길이(ms). 진단용.
+  int get preRollMs => _preRollSamples * 1000 ~/ sampleRate;
+
+  /// 서버 VAD가 발화 시작을 알렸다.
+  ///
+  /// **고리에 담아 둔 직전 소리를 셈의 출발점으로 삼는다.** 서버가 이미
+  /// `prefix_padding_ms`만큼 앞소리를 전사에 쓰고 있으므로, 우리도 같은
+  /// 구간을 봐야 "서버가 들은 소리"와 "우리가 잰 소리"가 같아진다.
   void beginUtterance() {
     _sumSquares = 0;
     _samples = 0;
+    for (final chunk in _preRoll) {
+      _sumSquares += chunk.sumSquares;
+      _samples += chunk.samples;
+    }
+    _preRoll.clear();
+    _preRollSamples = 0;
     _active = true;
   }
 
-  /// 마이크 조각 하나. 누적하지 않는 상태면 아무 일도 안 한다.
+  /// 마이크 조각 하나.
+  ///
+  /// 발화 중이면 곧바로 누적하고, 아니면 고리에 담아 둔다 —
+  /// **발화가 시작되기 전 소리도 곧 필요해진다.**
   void addPcm(Uint8List pcm) {
-    if (!_active || pcm.isEmpty) return;
+    if (pcm.isEmpty) return;
     final int samples = pcm.lengthInBytes ~/ 2;
     if (samples == 0) return;
     final ByteData view = ByteData.sublistView(pcm, 0, samples * 2);
+    double sum = 0;
     for (var i = 0; i < samples; i++) {
       final double v = view.getInt16(i * 2, Endian.little) / 32768.0;
-      _sumSquares += v * v;
+      sum += v * v;
     }
-    _samples += samples;
+
+    if (_active) {
+      _sumSquares += sum;
+      _samples += samples;
+      return;
+    }
+
+    // 발화 전 — 고리에 담고 오래된 것부터 버린다.
+    _preRoll.add(_RmsChunk(sum, samples));
+    _preRollSamples += samples;
+    while (_preRollSamples > _preRollMaxSamples && _preRoll.length > 1) {
+      _preRollSamples -= _preRoll.removeAt(0).samples;
+    }
   }
 
   /// 서버가 구간을 확정했다. 그때까지의 평균 세기를 item에 묶는다.
   ///
-  /// 시작을 못 본 발화(`beginUtterance` 없이 온 committed)나 소리가 한 조각도
-  /// 없던 발화는 **아무것도 남기지 않는다** — 모르는 것은 모르는 채로 둔다.
+  /// **null을 돌려주는 경우가 셋이다. 셋 다 "조용했다"가 아니라 "모른다"다.**
+  ///   · 시작을 못 본 발화(`beginUtterance` 없이 온 committed)
+  ///   · 소리가 한 조각도 없던 발화
+  ///   · 잰 구간이 [kDuoRmsMinWindowMs]보다 짧아 대표성이 없는 경우
+  ///
+  /// 마지막 것이 **측정 실패와 진짜 저음량을 가르는 자리**다. 창이 충분히
+  /// 길었는데도 −160이 나왔다면 그건 정말 무음이고, 무음에서 나온 글자는
+  /// 환청이므로 그대로 걸러야 한다(2026-09-01 실측: 무음에서 4글자).
   double? commitUtterance(String itemId) {
     final bool was = _active;
     final int samples = _samples;
@@ -207,6 +287,8 @@ class DuoUtteranceRmsMeter {
     _sumSquares = 0;
     _samples = 0;
     if (!was || samples == 0 || itemId.isEmpty) return null;
+    // 너무 짧은 창으로는 판정하지 않는다 — 모르는 것으로 사람 말을 버리지 않는다.
+    if (samples < _minWindowSamples) return null;
 
     final double rms = math.sqrt(sum / samples);
     final double dbfs = pcm16LinearToDbfs(rms);
@@ -230,9 +312,19 @@ class DuoUtteranceRmsMeter {
     _sumSquares = 0;
     _samples = 0;
     _active = false;
+    // 고리도 비운다. 끊기기 전 소리가 다음 발화의 pre-roll이 되면 안 된다.
+    _preRoll.clear();
+    _preRollSamples = 0;
     _rmsByItem.clear();
     _itemOrder.clear();
   }
+}
+
+/// 조각 하나의 셈. **PCM은 들고 있지 않다** — 제곱합과 샘플 수뿐이다.
+class _RmsChunk {
+  const _RmsChunk(this.sumSquares, this.samples);
+  final double sumSquares;
+  final int samples;
 }
 
 // ====================================================================

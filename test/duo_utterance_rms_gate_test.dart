@@ -65,11 +65,15 @@ void main() {
     });
   });
 
-  group('문턱 −35 dBFS — 경계를 못 박는다', () {
+  // ⚠️ 문턱은 2026-09-01 실기기 2차 실측에서 −35 → **−42**로 내려갔다
+  //    (커밋 2a4ccea8). −35는 실제 발화보다 위에 있어서, 폰과 거리가 조금만
+  //    벌어져도 사람 말이 잘렸다(−38.5dBFS 발화가 잘린 것을 유저가 확인).
+  //    이 시험이 −35에 멈춰 있어 상수와 어긋난 채였다 — 값에 맞춰 옮긴다.
+  group('문턱 −42 dBFS — 경계를 못 박는다', () {
     const double t = kDuoMinUtteranceRmsDbfs;
 
-    test('문턱 상수가 −35.0이다', () {
-      expect(t, -35.0);
+    test('문턱 상수가 −42.0이다', () {
+      expect(t, -42.0);
     });
 
     test('−25 dBFS 실제 발화는 통과한다', () {
@@ -81,17 +85,25 @@ void main() {
       expect(belowLevelGate(-29.1, minDbfs: t), isFalse);
     });
 
-    test('−34.9 dBFS는 통과한다', () {
-      expect(belowLevelGate(-34.9, minDbfs: t), isFalse);
+    test('−38.5 dBFS는 통과한다 — 잘려서 문턱을 내리게 만든 그 발화다', () {
+      expect(belowLevelGate(-38.5, minDbfs: t), isFalse);
     });
 
-    test('−35.0 dBFS 정확히 문턱이면 **통과**한다 (미만일 때만 버린다)', () {
-      expect(belowLevelGate(-35.0, minDbfs: t), isFalse,
+    test('−41.9 dBFS는 통과한다', () {
+      expect(belowLevelGate(-41.9, minDbfs: t), isFalse);
+    });
+
+    test('−42.0 dBFS 정확히 문턱이면 **통과**한다 (미만일 때만 버린다)', () {
+      expect(belowLevelGate(-42.0, minDbfs: t), isFalse,
           reason: '경계값 포함 여부가 흔들리면 같은 소리가 통마다 다르게 판정된다');
     });
 
-    test('−35.1 dBFS는 버린다', () {
-      expect(belowLevelGate(-35.1, minDbfs: t), isTrue);
+    test('−42.1 dBFS는 버린다', () {
+      expect(belowLevelGate(-42.1, minDbfs: t), isTrue);
+    });
+
+    test('−47.6 dBFS 실측 환청은 버린다', () {
+      expect(belowLevelGate(-47.6, minDbfs: t), isTrue);
     });
 
     test('−45 dBFS는 버린다', () {
@@ -196,12 +208,122 @@ void main() {
       expect(meter.rmsDbfsOf('item_9'), isNotNull);
     });
 
-    test('누적하지 않는 동안 들어온 조각은 무시한다', () {
+    test('오래된 소리는 새 발화에 섞이지 않는다 (고리 밖)', () {
+      // pre-roll은 600ms짜리 고리다. 그보다 앞선 소리는 밀려나므로 다음
+      // 발화의 세기를 물들이지 못한다 — 앞 발화의 큰 소리로 조용한 발화가
+      // 통과하는 일은 여전히 없다.
       final meter = DuoUtteranceRmsMeter();
-      meter.addPcm(toneAt(-10.0));
+      for (var i = 0; i < 10; i++) {
+        meter.addPcm(toneAt(-10.0)); // 1초치 큰 소리 (고리는 600ms만 남긴다)
+      }
+      // 고리를 조용한 소리로 완전히 밀어낸다.
+      for (var i = 0; i < 8; i++) {
+        meter.addPcm(toneAt(-60.0));
+      }
       expect(meter.isActive, isFalse);
       final double? got = measureUtterance(meter, -46.0, itemId: 'a');
-      expect((got! + 46.0).abs(), lessThan(0.5));
+      // 큰 소리(-10)는 밀려났다. -46 발화와 -60 고리가 섞인 값이므로
+      // 발화값보다 조금 낮되, -10 쪽으로 끌려가면 안 된다.
+      expect(got, isNotNull);
+      expect(got!, lessThan(-40.0), reason: '밀려난 큰 소리가 새어 들어왔다');
+    });
+  });
+
+  // ====================================================================
+  // 🕰️ [DUO-LEVEL-PREROLL] 2026-09-02 실기기에서 잡힌 버그를 못 박는다.
+  // --------------------------------------------------------------------
+  // SM-S931N 릴레이 통화 한 통, 5건 중 3건이 이렇게 사라졌다:
+  //
+  //   "지금은"  voicedMs=1460  rmsDbfs=-160.0  → low_level 폐기
+  //   "때문에"  voicedMs=1428  rmsDbfs=-160.0  → low_level 폐기
+  //
+  // 서버는 1.4초씩 사람 목소리를 들었는데 계측기는 완전 무음을 쟀다.
+  // `speech_started`가 늦게 도착하는 사이 삼성 AEC가 비발화 구간을 정확히
+  // 0으로 눌러, 계측기가 실제 음성은 놓치고 그 뒷꼬리만 셌기 때문이다.
+  // ====================================================================
+  group('speech_started가 늦게 와도 실제 발화를 잰다', () {
+    /// AEC가 0으로 눌러 놓은 무음 조각.
+    Uint8List digitalSilence({int ms = 100}) =>
+        Uint8List(ms * kStealthVoxSttSampleRate ~/ 1000 * 2);
+
+    test('발화 직전 소리가 고리에 담겨 셈에 들어간다', () {
+      final meter = DuoUtteranceRmsMeter();
+      // 사람이 말하기 시작했지만 speech_started는 아직 안 왔다.
+      for (var i = 0; i < 4; i++) {
+        meter.addPcm(toneAt(-25.0)); // 400ms 실제 발화
+      }
+      expect(meter.preRollMs, greaterThan(0));
+
+      // 이제야 speech_started가 도착하고, 그 뒤로는 AEC가 0을 내보낸다.
+      meter.beginUtterance();
+      for (var i = 0; i < 4; i++) {
+        meter.addPcm(digitalSilence());
+      }
+      final double? got = meter.commitUtterance('late');
+
+      // 고치기 전에는 여기서 -160이 나와 low_level로 버려졌다.
+      expect(got, isNotNull);
+      expect(got!, greaterThan(kDuoMinUtteranceRmsDbfs),
+          reason: '실제 발화가 문턱 아래로 측정됐다 — 실기기에서 사라진 그 줄이다');
+    });
+
+    test('그 발화가 게이트를 통과한다', () {
+      final meter = DuoUtteranceRmsMeter();
+      for (var i = 0; i < 4; i++) {
+        meter.addPcm(toneAt(-25.0));
+      }
+      meter.beginUtterance();
+      for (var i = 0; i < 4; i++) {
+        meter.addPcm(digitalSilence());
+      }
+      meter.commitUtterance('late');
+      expect(
+          belowLevelGate(meter.rmsDbfsOf('late'),
+              minDbfs: kDuoMinUtteranceRmsDbfs),
+          isFalse);
+    });
+
+    test('고리는 600ms를 넘지 않는다 — 메모리가 늘지 않는다', () {
+      final meter = DuoUtteranceRmsMeter();
+      for (var i = 0; i < 100; i++) {
+        meter.addPcm(toneAt(-25.0)); // 10초치
+      }
+      expect(meter.preRollMs, lessThanOrEqualTo(kDuoRmsPreRollMs));
+    });
+
+    test('reset은 고리도 비운다', () {
+      final meter = DuoUtteranceRmsMeter();
+      meter.addPcm(toneAt(-10.0));
+      meter.reset();
+      expect(meter.preRollMs, 0);
+    });
+  });
+
+  group('측정 실패와 진짜 무음을 가른다', () {
+    Uint8List digitalSilence({int ms = 100}) =>
+        Uint8List(ms * kStealthVoxSttSampleRate ~/ 1000 * 2);
+
+    test('창이 너무 짧으면 판정하지 않는다 (null = 모른다)', () {
+      // 조각 하나로 낸 평균은 발화를 대표하지 못한다. 그런 값으로 사람 말을
+      // 버리는 것보다 모른다고 말하는 편이 낫다.
+      final meter = DuoUtteranceRmsMeter();
+      meter.beginUtterance();
+      meter.addPcm(toneAt(-25.0, ms: 50)); // 최소 창(150ms) 미만
+      expect(meter.commitUtterance('tiny'), isNull);
+    });
+
+    test('충분히 길게 잰 진짜 무음은 그대로 -160이다 — 환청 방어는 그대로', () {
+      // 2026-09-01 실측: 무음에서 4글자가 나왔다. 그건 여전히 걸려야 한다.
+      final meter = DuoUtteranceRmsMeter();
+      meter.beginUtterance();
+      for (var i = 0; i < 5; i++) {
+        meter.addPcm(digitalSilence()); // 500ms, 창은 충분하다
+      }
+      final double? got = meter.commitUtterance('ghost');
+      expect(got, isNotNull, reason: '창이 충분하면 판정을 포기하면 안 된다');
+      expect(
+          belowLevelGate(got, minDbfs: kDuoMinUtteranceRmsDbfs), isTrue,
+          reason: '무음 환청이 게이트를 통과했다');
     });
   });
 
