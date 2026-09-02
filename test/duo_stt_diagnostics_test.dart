@@ -92,7 +92,25 @@ void main() {
     });
 
     test('마이크 조각은 진단 갈래와 별도로 계측 갈래에도 간다', () {
-      expect(duo, contains('toLevel: (bytes) => _utteranceRms?.addPcm(bytes)'));
+      // 지키려는 것은 **게이트가 세기를 받는다**는 사실 하나다. 갈래 안에
+      // 무엇이 더 붙는지는 자유롭게 두되(2026-09-02에 마이크 건강 계측기가
+      // 같은 자리에 붙었다), `toLevel`이 `_utteranceRms`를 먹이는 관계는
+      // 끊기면 안 된다 — 끊기면 게이트가 세기를 몰라 전부 통과시킨다.
+      final int at = duo.indexOf('toLevel:');
+      expect(at, greaterThan(-1), reason: '계측 갈래가 아예 없다');
+      // 갈래 선언부에서 멀지 않은 곳에서 계측기를 먹여야 한다.
+      final String branch = duo.substring(at, at + 400);
+      expect(branch, contains('_utteranceRms?.addPcm(bytes)'),
+          reason: 'toLevel 갈래가 세기 계측기를 먹이지 않는다');
+    });
+
+    test('마이크 건강 계측은 게이트와 섞이지 않는다', () {
+      // 🩺 관찰용 계측기(DuoMicLiveMeter)는 같은 조각을 받지만 **판정에는
+      //   쓰지 않는다.** 이 값이 게이트 조건에 등장하는 순간, 관찰하려고
+      //   만든 숫자가 사람 말을 버리기 시작한다.
+      expect(duo, contains('_micLiveMeter'));
+      expect(duo, isNot(contains('_micLiveMeter?.rmsDbfsOf')));
+      expect(duo, isNot(contains('belowLevelGate(_micLiveMeter')));
     });
 
     test('재접속과 통화 종료에 누적이 비워진다', () {

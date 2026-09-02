@@ -18,6 +18,9 @@
 
 import 'dart:async';
 
+import 'dart:math' as math;
+import 'dart:typed_data';
+
 import 'package:flutter/services.dart';
 
 import 'pcm_audio_utils.dart';
@@ -379,6 +382,131 @@ class DuoMicPcmFanout {
       'callErrors=$_callErrors sttErrors=$_sttErrors '
       'levelFrames=$_levelFrames levelErrors=$_levelErrors '
       'probeFrames=$_probeFrames probeErrors=$_probeErrors';
+}
+
+// ====================================================================
+// 🩺 [DUO-MIC-HEALTH] 마이크가 **실제 소리를 주고 있는가**를 재는 계측기
+// --------------------------------------------------------------------
+// `DuoUtteranceRmsMeter`는 발화 구간(speech_started ~ committed) 안에서만
+// 누적한다. 그래서 "전사가 한 건도 안 나온다"는 상황에서 원인을 못 가른다 —
+// 마이크가 조용한 것인지, 조각은 오는데 **전부 0**인지 알 수가 없다.
+//
+// ⚠️ **`allZeroFrames`가 많다고 곧 고장은 아니다.** 2026-09-02 실기기
+//   (SM-S931N) 릴레이 통화에서 673 프레임 중 587개(87%)가 전부 0이었는데,
+//   그때 AudioRecord는 **하나뿐이라 경합할 상대가 없었다.** 삼성 AEC가
+//   비발화 구간을 정확한 디지털 무음으로 눌러 버리는 정상 동작이었다:
+//
+//     말하기 전   avgDbfs=-160.0  voiced=0   allZero=200/200
+//     말하는 중   avgDbfs=-31.0   voiced=37  allZero=143/200
+//
+//   그러므로 읽는 법은 이렇다.
+//     통화 **전 구간** 100% 0 + voiced=0        → 마이크가 죽었다
+//     말할 때 0이 줄고 voiced가 오른다          → 정상 (AEC가 일하는 것)
+//
+// 그래서 여기서 세는 것은 셋이다.
+//   frames      조각이 오기는 하는가
+//   voiced      사람 목소리 크기의 조각이 있는가  ← **이게 핵심 지표다**
+//   silentAll0  모든 샘플이 0인 조각 (AEC 눌림 + 마이크 죽음 둘 다 여기 온다)
+//
+// 🔒 오디오 내용은 남기지 않는다. 세는 값과 dBFS뿐이다.
+// ====================================================================
+
+/// 사람 목소리로 볼 프레임 세기(dBFS). 게이트 문턱(-42)보다 낮게 잡는다 —
+/// 이건 판정이 아니라 **관찰**이라 조용한 말도 세어야 한다.
+const double kDuoMicVoicedFrameDbfs = -50.0;
+
+/// 마이크 건강 상태를 주기적으로 한 줄 남기는 계측기.
+///
+/// ⚠️ **판정에 쓰지 않는다.** 이 값으로 발화를 버리거나 통화를 끊지 않는다.
+///   전사 게이트는 `DuoUtteranceRmsMeter`가 그대로 맡는다.
+class DuoMicLiveMeter {
+  DuoMicLiveMeter({
+    required this.speakerRole,
+    this.onLog,
+    this.logEveryFrames = 200,
+  });
+
+  final String speakerRole;
+  final void Function(String tag, String msg)? onLog;
+
+  /// 몇 조각마다 한 줄 남길지. 24kHz에서 한 조각이 대략 20~100ms이므로
+  /// 200조각이면 수 초에 한 번이다.
+  final int logEveryFrames;
+
+  int _frames = 0;
+  int _voicedFrames = 0;
+  int _silentAllZeroFrames = 0;
+  double _sumSquares = 0;
+  int _samples = 0;
+
+  int _lifetimeFrames = 0;
+  int _lifetimeVoiced = 0;
+  int _lifetimeAllZero = 0;
+
+  int get lifetimeFrames => _lifetimeFrames;
+  int get lifetimeVoicedFrames => _lifetimeVoiced;
+  int get lifetimeAllZeroFrames => _lifetimeAllZero;
+
+  /// 통화 내내 사람 목소리 크기의 조각이 한 번도 없었는가.
+  ///
+  /// **이것이 마이크 고장의 유일한 판정이다.** `allZeroFrames`가 많은 것은
+  /// AEC가 무음 구간을 누른 정상 동작일 수 있지만, 통화 내내 목소리가 한 번도
+  /// 안 잡혔다면 그건 마이크가 소리를 못 받고 있었다는 뜻이다.
+  bool get neverHeardVoice => _lifetimeFrames > 0 && _lifetimeVoiced == 0;
+
+  void addPcm(Uint8List pcm) {
+    if (pcm.isEmpty) return;
+    final int samples = pcm.lengthInBytes ~/ 2;
+    if (samples == 0) return;
+
+    final ByteData view = ByteData.sublistView(pcm, 0, samples * 2);
+    double frameSum = 0;
+    bool allZero = true;
+    for (var i = 0; i < samples; i++) {
+      final int raw = view.getInt16(i * 2, Endian.little);
+      if (raw != 0) allZero = false;
+      final double v = raw / 32768.0;
+      frameSum += v * v;
+    }
+
+    _frames++;
+    _lifetimeFrames++;
+    _sumSquares += frameSum;
+    _samples += samples;
+    if (allZero) {
+      _silentAllZeroFrames++;
+      _lifetimeAllZero++;
+    }
+    final double frameDbfs =
+        pcm16LinearToDbfs(math.sqrt(frameSum / samples));
+    if (frameDbfs >= kDuoMicVoicedFrameDbfs) {
+      _voicedFrames++;
+      _lifetimeVoiced++;
+    }
+
+    if (logEveryFrames > 0 && _frames >= logEveryFrames) _flush();
+  }
+
+  void _flush() {
+    final double dbfs = _samples == 0
+        ? -160.0
+        : pcm16LinearToDbfs(math.sqrt(_sumSquares / _samples));
+    onLog?.call(
+        '🩺 [DUO-MIC-HEALTH]',
+        'speaker=$speakerRole frames=$_frames '
+            'avgDbfs=${dbfs.toStringAsFixed(1)} '
+            'voicedFrames=$_voicedFrames allZeroFrames=$_silentAllZeroFrames');
+    _frames = 0;
+    _voicedFrames = 0;
+    _silentAllZeroFrames = 0;
+    _sumSquares = 0;
+    _samples = 0;
+  }
+
+  /// 통화 종료 한 줄. 두 AudioRecord가 공존했는지 판정하는 근거다.
+  String summary() => 'speaker=$speakerRole frames=$_lifetimeFrames '
+      'voicedFrames=$_lifetimeVoiced allZeroFrames=$_lifetimeAllZero '
+      '${neverHeardVoice ? '⚠️ 통화 내내 목소리 없음' : 'ok'}';
 }
 
 /// 상대에게서 받아 **재생만 하는** PCM의 계측기.

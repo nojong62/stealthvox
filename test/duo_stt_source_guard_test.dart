@@ -7,6 +7,7 @@
 // 이 시험이 깨지면 먼저 배선을 의심할 것. 이름만 바꿨다면 아래 상수를 고친다.
 
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
 
@@ -63,15 +64,58 @@ void main() {
       expect(around, contains('toProbe:'));
     });
 
-    test('전사 팬아웃에 물리는 스트림은 로컬 마이크 캡처 하나뿐이다', () {
-      // 팬아웃에 조각을 넣는 자리는 마이크 캡처 구독 안에만 있어야 한다.
+    test('전사 팬아웃에 물리는 것은 이 단말 마이크뿐이다 (통로별 하나씩)', () {
+      // 통로가 둘이므로 마이크를 여는 주체도 둘이다. **둘 다 이 단말의
+      // 마이크**이고, 상대 오디오는 어느 쪽에도 닿지 않는다.
+      //
+      //   webrtc — DuoWebrtcMicTap.start(onPcm:)  WebRTC가 연 마이크
+      //   relay  — capture.stream.listen(...)     record가 연 마이크
+      //
+      // 여기서 지키는 것은 개수가 아니라 **출처**다. 새 자리가 생기면 이
+      // 시험이 걸리고, 그때 그 자리가 로컬 마이크인지 사람이 확인하게 된다.
       final Iterable<Match> feeds = RegExp(r'fanout\.add\(').allMatches(source);
-      expect(feeds.length, 1, reason: '팬아웃에 PCM을 넣는 자리가 둘 이상이면 출처가 섞일 수 있다');
+      expect(feeds.length, 2,
+          reason: '팬아웃에 PCM을 넣는 자리가 늘었다 — 새 자리의 출처를 확인할 것');
 
+      final int tapFeed = source.indexOf('onPcm: (bytes) {');
       final int captureSub = source.indexOf('capture.stream.listen(');
-      expect(captureSub, greaterThan(-1));
-      expect(feeds.single.start, greaterThan(captureSub),
-          reason: 'fanout.add는 마이크 캡처 구독 안에서만 불려야 한다');
+      expect(tapFeed, greaterThan(-1), reason: 'WebRTC 마이크 탭 자리가 없다');
+      expect(captureSub, greaterThan(-1), reason: 'record 캡처 구독 자리가 없다');
+
+      // 두 자리 모두 위 두 출처 중 하나 **바로 뒤**에 있어야 한다.
+      for (final feed in feeds) {
+        final String before = source.substring(0, feed.start);
+        final int lastTap = before.lastIndexOf('onPcm: (bytes) {');
+        final int lastCapture = before.lastIndexOf('capture.stream.listen(');
+        expect(math.max(lastTap, lastCapture), greaterThan(-1),
+            reason: 'fanout.add가 마이크 출처 밖에서 불린다');
+      }
+    });
+
+    test('WebRTC 경로도 상대 오디오를 전사에 넣지 않는다', () {
+      // 통로가 바뀌어도 규칙은 그대로다. WebRTC 원격 트랙은 재생만 되고
+      // 우리 Dart 코드에 PCM으로 오지 않는다 — 넣을 방법 자체가 없어야 한다.
+      final int tapStart = source.indexOf('Future<void> _startWebrtcMicTap(');
+      expect(tapStart, greaterThan(-1));
+      // 바로 다음에 오는 멤버 앞까지가 이 함수의 몸통이다.
+      final int tapEnd =
+          source.indexOf('Future<bool> _openRelayTransport(', tapStart);
+      expect(tapEnd, greaterThan(tapStart),
+          reason: '구역 경계를 못 잡았다 — 함수 순서가 바뀌었는지 확인할 것');
+      final String region = source.substring(tapStart, tapEnd);
+
+      // 원격 오디오를 가리키는 이름이 이 구역에 있으면 안 된다.
+      for (final String forbidden in <String>[
+        'remotePcm',
+        'inbound',
+        '_remotePcmMeter',
+        '_jitterPlayer',
+      ]) {
+        expect(region, isNot(contains(forbidden)),
+            reason: '$forbidden 이 전사 갈래를 여는 자리에 있다');
+      }
+      // 붙이는 트랙은 **로컬** 트랙 하나다.
+      expect(region, contains('localAudioTrackId'));
     });
 
     test('전사 세션에 넣는 PCM은 팬아웃을 거쳐서만 들어간다', () {

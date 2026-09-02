@@ -42,7 +42,15 @@ import '/custom_code/services/pcm_audio_utils.dart'
     show kStealthVoxSttSampleRate;
 import '/custom_code/services/origin_language_session.dart'
     show detectOriginScript, textIsLanguage, textContradictsLanguage;
+// 🆔 테스트 기기를 Remote Config 조건으로 고르는 데 쓰는 설치본 ID.
+import 'package:firebase_app_installations/firebase_app_installations.dart';
 import '/custom_code/services/duo_pcm_relay_client.dart';
+// 📞 직접 대화의 새 통화 경로. **직접 대화에서만 만든다** — 만능 통역은
+// 원음을 보내지 않으므로 이 파일에 닿을 일이 없다.
+import '/custom_code/services/duo_webrtc_call.dart';
+// 🎙️ 마이크를 두 번 열지 않기 위한 통로. WebRTC가 잡은 PCM을 전사로 흘린다.
+import '/custom_code/services/duo_webrtc_mic_tap.dart'
+    show DuoWebrtcMicTap, kDuoSttPcmSourceWebrtcMic;
 import '/custom_code/services/openai_streaming_transcribe_session.dart';
 // 상대 발화 재생은 Circle Talk과 **같은 재생기 한 벌**을 쓴다. tts-1 PCM을
 // 받는 대로 트는 구조라, mp3를 다 받고 재생하던 예전 경로보다 첫 소리가 빠르다.
@@ -89,6 +97,29 @@ import '/custom_code/services/duo_replay.dart';
 // 저장 id는 이 두 문자열이다. 표시명이 바뀌어도 여기는 바꾸지 않는다.
 // ============================================================================
 const String kDuoModeDirect = 'direct';
+
+// ============================================================================
+// 🔀 [DUO-TRANSPORT] 직접 대화의 음성 통로
+// ----------------------------------------------------------------------------
+// 두 값 중 하나다. **모드(`mode`)와는 완전히 다른 축이다** — mode는 "직접
+// 대화냐 만능 통역이냐"이고, 이 값은 "직접 대화의 소리를 어느 통로로
+// 나르느냐"다. 만능 통역은 이 값을 아예 보지 않는다(원음을 안 보낸다).
+//
+//   webrtc — **정식 구조.** WebRTC P2P, 실패 시 TURN. 오디오가 앱 코드를
+//            지나지 않고, 마이크도 WebRTC 것 하나만 연다(1-mic fan-out)
+//   relay  — 옛 Cloud Run duo-relay. **긴급 롤백 손잡이일 뿐이다.**
+//            정상 운용 경로가 아니고, 검증이 끝나면 코드째 걷어낸다
+//
+// Remote Config `DuoDirectTransport`가 정한다. **값이 없으면 webrtc다.**
+//
+// 🚫 자동 폴백은 없다. WebRTC가 실패해도 몰래 릴레이로 넘어가지 않는다 —
+//   실패는 실패로 드러나야 한다.
+// ============================================================================
+const String kDuoTransportRelay = 'relay';
+const String kDuoTransportWebrtc = 'webrtc';
+
+/// Remote Config 키. `'relay'`를 넣으면 옛 경로로 되돌린다(긴급 롤백 전용).
+const String kDuoTransportRemoteConfigKey = 'DuoDirectTransport';
 
 /// 종료 직전 마지막 전사문의 History·채널 저장을 기다리는 상한.
 /// Firestore 쓰기가 걸려도 통화 종료가 무한정 늘어지면 안 된다.
@@ -438,8 +469,43 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   String _relayUrl = kDuoRelayUrlFromEnv;
   String _relayToken = kDuoRelayTokenFromEnv;
 
+  /// 🔀 [DUO-TRANSPORT] 직접 대화의 음성 통로.
+  ///
+  /// **기본은 WebRTC다.** 직접 대화의 정식 통신 구조가 WebRTC로 확정됐고,
+  /// 마이크도 그쪽 하나만 연다(1-mic fan-out).
+  ///
+  /// Remote Config `DuoDirectTransport`에 `'relay'`를 넣으면 옛 WebSocket PCM
+  /// 릴레이로 되돌아간다. **그건 긴급 롤백 손잡이일 뿐 정상 경로가 아니다.**
+  ///
+  /// 🚫 **자동 폴백은 없다.** WebRTC가 실패해도 몰래 릴레이로 넘어가지 않는다 —
+  ///    실패는 실패로 드러나야 하고, 조용한 폴백은 어느 통로가 실제로 돌았는지
+  ///    로그로 못 가리게 만든다.
+  ///
+  /// 🚫 이 값은 **직접 대화에만** 쓰인다. 만능 통역은 어느 값이든 통화
+  ///    경로를 열지 않는다(원음을 보내지 않는다).
+  String _directTransport = kDuoTransportWebrtc;
+
+  bool get _useWebrtcTransport => _directTransport == kDuoTransportWebrtc;
+
+  /// 이 글자를 만든 PCM이 어느 마이크에서 왔는가. 저장 문서와 진단 로그가
+  /// 같은 값을 쓴다 — 실기기 로그에서 어느 경로로 만든 글자인지 가리는 근거다.
+  ///
+  /// 둘 다 **이 단말의 마이크**다. 다른 것은 잡은 주체뿐이다
+  /// (`record` 패키지 vs WebRTC). 상대 오디오는 어느 쪽에도 닿지 않는다.
+  String get _directSttSource => _useWebrtcTransport
+      ? kDuoSttPcmSourceWebrtcMic
+      : kDuoSttPcmSourceLocalMic;
+
   // 직접 대화 한 통화의 부속들. 통화가 끝나면 전부 버리고 새로 만든다.
   DuoPcmRelayClient? _relayClient;
+
+  /// 📞 WebRTC 통화 한 벌. **릴레이와 동시에 살지 않는다** —
+  /// `_startDirectCall`이 둘 중 하나만 만든다.
+  DuoWebrtcCall? _webrtcCall;
+
+  /// 🎙️ WebRTC가 연 **하나뿐인 마이크**에서 전사 갈래를 받는 통로.
+  /// 릴레이 경로에서는 null이고, 그때는 `_directCapture`가 그 자리를 맡는다.
+  DuoWebrtcMicTap? _webrtcMicTap;
   StreamSubscription<Uint8List>? _relayInboundSub;
   DuoPcmJitterPlayer? _jitterPlayer;
   PreparedAudioCapture? _directCapture;
@@ -459,6 +525,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// ⚠️ **진단이 아니다.** low_level 게이트의 근거라서 release에서도 반드시
   /// 만들어진다. 아래 진단기(`_sttAbProbe`)와 수명만 같을 뿐 서로 모른다.
   DuoUtteranceRmsMeter? _utteranceRms;
+
+  /// 🩺 [DUO-MIC-HEALTH] STT 마이크가 **실제 소리를 주고 있는가**를 재는
+  /// 계측기. 위 `_utteranceRms`와 달리 발화 구간 밖에서도 돈다.
+  ///
+  /// ⚠️ **판정에 쓰지 않는다.** 두 AudioRecord가 공존하는지를 실기기 로그로
+  /// 가르기 위한 관찰용이다 — 조각은 오는데 전부 0이면 마이크 경합이다.
+  DuoMicLiveMeter? _micLiveMeter;
 
   /// 🔬 [DUO-AB] 같은 발화를 실시간 스트리밍과 파일 전사에 나란히 넣어
   /// 견주는 진단기. **개발 빌드에서만 만들어진다.** null이면 아무 일도 없다.
@@ -1362,13 +1435,36 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       await remoteConfig.fetchAndActivate();
       final String relayUrl = remoteConfig.getString('DuoRelayUrl').trim();
       final String relayToken = remoteConfig.getString('DuoRelayToken').trim();
+      // 🔀 [DUO-TRANSPORT] **'relay'라고 정확히 적혀 있을 때만** 옛 경로로
+      //   돌아간다. 그 외(빈 값·오타·모르는 값)는 전부 WebRTC다 — 정식
+      //   구조가 그쪽이므로, 값을 잘못 넣었을 때 떨어질 곳도 그쪽이어야 한다.
+      final String transport = remoteConfig
+          .getString(kDuoTransportRemoteConfigKey)
+          .trim()
+          .toLowerCase();
       if (mounted) {
         setState(() {
           _openAiKey = remoteConfig.getString('OpenAIAPIKey');
           // Remote Config가 1순위, 비어 있으면 빌드 타임 값을 유지한다.
           if (relayUrl.isNotEmpty) _relayUrl = relayUrl;
           if (relayToken.isNotEmpty) _relayToken = relayToken;
+          _directTransport = transport == kDuoTransportRelay
+              ? kDuoTransportRelay
+              : kDuoTransportWebrtc;
         });
+        _lgDuo('[DUO-TRANSPORT]', 'resolved=$_directTransport raw="$transport"');
+        // 🆔 [DUO-FID] 이 단말의 Firebase Installation ID.
+        //
+        //   Remote Config에서 **특정 테스트 기기만** 골라 조건을 걸려면 이
+        //   값이 필요한데, 앱이 이걸 어디에도 찍지 않아 실기기에서 알아낼
+        //   방법이 없었다. 통로 값 바로 옆에 두어 logcat 한 줄에서 "이 폰이
+        //   무슨 통로로 돌고 있고 ID가 무엇인가"를 같이 읽게 한다.
+        //
+        //   ⚠️ **비밀값은 아니지만 고유 식별자다.** 앱을 지우면 바뀌긴 해도
+        //   특정 설치본을 가리키므로, 운영 배포에서 무조건 남길 값은 아니다.
+        //   WebRTC 검증이 끝나면 진단 게이트 뒤로 넣거나 지운다.
+        //   실패해도 통화와 무관하므로 조용히 넘어간다.
+        unawaited(_logInstallationId());
         // 🔵 [INTERP-LIVE] 키가 늦게 도착했을 때의 유일한 구제 지점이다.
         //   상대가 이미 들어와 있는데 키가 없어서 마이크를 못 열었다면
         //   (`start_blocked reason=no_api_key`) 다시 시도할 계기가 여기뿐이다
@@ -1379,6 +1475,22 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   }
 
   void _lgDuo(String tag, String msg) => debugPrint('[Duo]$tag $msg');
+
+  /// 🆔 [DUO-FID] Remote Config 조건에 넣을 이 설치본의 ID를 한 줄 남긴다.
+  ///
+  /// **지금은 진단 게이트를 걸지 않는다.** 테스트 기기를 고르는 데 필요한
+  /// 값이라 진단 빌드가 아니어도 보여야 하기 때문이다.
+  ///
+  /// 🔻 **WebRTC 검증이 끝나면 이 줄을 [_lgDuoDev]로 내리거나 지운다.**
+  /// 설치본을 가리키는 고유 식별자를 운영 로그에 계속 남길 이유가 없다.
+  Future<void> _logInstallationId() async {
+    try {
+      final String id = await FirebaseInstallations.instance.getId();
+      _lgDuo('🆔 [DUO-FID]', 'installationId=$id role=$_myRole');
+    } catch (e) {
+      _lgDuo('⚠️ [DUO-FID]', 'unavailable(${e.runtimeType})');
+    }
+  }
 
   /// 🔬 [DUO-DIAG] 진단이 켜져 있는가. **이 한 곳만 본다** — 여기저기서
   /// `kDebugMode`를 따로 물으면 나중에 한쪽만 바뀌어 반쪽만 켜진다.
@@ -1605,7 +1717,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       return;
     }
     setState(() => _directMuted = !_directMuted);
-    _lgDuo('[DUO-MUTE]', 'muted=$_directMuted');
+    // 🔇 [DUO-MUTE] 릴레이 경로는 팬아웃이 조각을 버려서 음소거한다. WebRTC는
+    //   오디오가 Dart를 지나지 않으므로 트랙을 꺼야 실제로 소리가 멎는다.
+    //   **전사 갈래는 어느 통로에서든 팬아웃이 계속 막는다** — 음소거 중에 한
+    //   말이 History에 남으면 안 된다는 규칙은 그대로다.
+    _webrtcCall?.setMuted(_directMuted);
+    _lgDuo('[DUO-MUTE]', 'muted=$_directMuted transport=$_directTransport');
   }
 
   /// 🔴 [DUO-LIVE] 상대가 방에 있으면 양쪽이 알아서 붙고 송신을 시작한다.
@@ -1632,7 +1749,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     if (_directCallActive || _directStarting || _directStopping || _isExiting) {
       return;
     }
-    if (_relayUrl.trim().isEmpty) {
+    // 🔀 [DUO-TRANSPORT] 릴레이 주소는 **릴레이 경로에서만** 필요하다.
+    //   WebRTC는 신호를 Firestore로 주고받으므로 이 값이 비어 있어도 된다.
+    if (!_useWebrtcTransport && _relayUrl.trim().isEmpty) {
       _lgDuo('[DIRECT]', 'start_blocked reason=no_relay_url');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -1680,82 +1799,43 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     BillingTicker.instance.resumeFromActivity('duo_direct_start');
 
     try {
-      // ① 재생기 먼저 — 상대 소리가 언제 와도 받을 수 있게 열어 둔다.
       // 🔉 세기 계측기는 **진단 여부와 무관하게** 만든다. 게이트가 이 값을 본다.
+      //    통로가 무엇이든 이 값은 내 마이크에서 나오므로 분기 밖에 둔다.
       _utteranceRms = DuoUtteranceRmsMeter();
-      _remotePcmMeter =
-          _duoDiagOn ? DuoRemotePcmMeter(onLog: _lgDuo) : DuoRemotePcmMeter();
-      final player = DuoPcmJitterPlayer(onLog: _lgDuo);
-      final playerOk = await player.start();
-      if (!_isDirectGenerationCurrent(generation)) {
-        await player.stop();
-        return;
-      }
-      _jitterPlayer = playerOk ? player : null;
-      if (!playerOk) {
-        // Android 외 플랫폼은 PCM 재생 채널이 없다. 상대 목소리를 낼 방법이
-        // 없으므로 반쪽짜리 통화를 여는 대신 시작 자체를 막는다.
-        _lgDuo('[DIRECT]', 'start_failed reason=pcm_player_unavailable');
-        await _stopDirectCall('pcm_player_unavailable');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('이 기기에서는 아직 직접 대화를 지원하지 않습니다.'),
-          ));
-        }
-        return;
-      }
+      // 🩺 마이크 건강 계측기도 통로와 무관하게 돈다. 릴레이 경로의 값이
+      //    WebRTC 경로를 견줄 기준선이 되므로 두 통로에서 모두 필요하다.
+      _micLiveMeter =
+          DuoMicLiveMeter(speakerRole: _myRole, onLog: _lgDuo);
 
-      // ② 릴레이 접속. 회원이면 ID 토큰을 같이 보내 서버가 uid 소유를 확인한다.
-      String idToken = '';
-      try {
-        idToken = await FirebaseAuth.instance.currentUser?.getIdToken() ?? '';
-      } catch (_) {}
+      // ①② 통화 통로를 연다. **둘 중 하나만 산다.**
+      //
+      //   webrtc — 오디오가 앱 코드를 지나지 않는다. 재생기도 지터버퍼도
+      //            없다(WebRTC가 안에서 한다). 그래서 네이티브 AudioTrack
+      //            (`stealthvox/realtime_pcm`)을 열지 않고, 따라서
+      //            MainActivity의 AudioManager 조작도 돌지 않는다 —
+      //            이 구간의 오디오 세션 주인은 flutter_webrtc 하나다.
+      //   relay  — 기존 경로 그대로. 재생기를 먼저 열고 소켓을 붙인다.
+      final bool transportOk = _useWebrtcTransport
+          ? await _openWebrtcTransport(generation, roomId)
+          : await _openRelayTransport(generation, roomId);
       if (!_isDirectGenerationCurrent(generation)) return;
-      final relay = DuoPcmRelayClient(
-        url: _relayUrl,
-        roomId: roomId,
-        uid: _myUid,
-        role: _myRole,
-        sessionId: '$roomId#$generation',
-        token: _relayToken,
-        idToken: idToken,
-        onLog: _lgDuo,
-        onPartnerPresence: (present) {
-          if (!_isDirectGenerationCurrent(generation)) return;
-          if (mounted) setState(() => _partnerRelayConnected = present);
-          // 상대가 끊겼다 붙으면 밀린 조각은 버리고 새 소리부터 재생한다.
-          if (!present) _jitterPlayer?.resetBuffer('partner_left');
-        },
-      );
-      _relayClient = relay;
-      _relayInboundSub = relay.inbound.listen((pcm) {
-        if (!_isDirectGenerationCurrent(generation)) return;
-        _noteInboundAudio(pcm);
-        // 🚫 [NO-STT] 상대 PCM은 재생기까지만 간다. 전사 입력으로 넘기지 않는다 —
-        //   상대 발화의 글자는 상대 단말이 자기 마이크로 만들어 채널에 올린다.
-        _remotePcmMeter?.note(pcm);
-        _jitterPlayer?.add(pcm);
-      });
-      final relayOk = await relay.connect();
-      if (!_isDirectGenerationCurrent(generation)) {
-        await relay.dispose();
-        return;
-      }
-      if (mounted) {
-        setState(() {
-          _relayConnected = relayOk;
-          _partnerRelayConnected = relay.partnerPresent;
-        });
-      }
-      if (!relayOk) {
-        await _stopDirectCall('relay_connect_failed');
-        return;
-      }
+      if (!transportOk) return; // 실패 처리는 각 헬퍼가 이미 했다
 
       // ③ 전사 세션 — 실패해도 통화는 계속한다(History 텍스트만 포기).
       await _startDirectStt(generation);
 
-      // ④ 마이크 한 개를 열어 두 갈래로 흘린다.
+      // ④ 마이크. **통로에 따라 여는 주체가 다르다.**
+      //
+      //   webrtc — 마이크는 ②에서 WebRTC가 이미 열었다. 여기서는 그 트랙에
+      //            귀를 하나 더 붙일 뿐이다(`DuoWebrtcMicTap`). AudioRecord는
+      //            앱을 통틀어 **하나**다.
+      //   relay  — 기존대로 `record`가 연다.
+      //
+      // 어느 쪽이든 조각이 도착하는 자리는 `DuoMicPcmFanout` 하나로 같다.
+      if (_useWebrtcTransport) {
+        await _startWebrtcMicTap(generation);
+        return;
+      }
       final capture = await PreparedAudioCapture.start(
         recorder: _audioRecorder,
         // 🔇 [DUO-DIRECT] 통화라 상대가 말하는 동안에도 마이크를 닫을 수 없다.
@@ -1790,42 +1870,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         return;
       }
       _directCapture = capture;
-      // 🎙️ [DUO-FANOUT] 마이크 조각을 두 갈래로 나누는 규칙은 위젯이 아니라
-      //   `DuoMicPcmFanout`에 있다(시험으로 지키기 위해서다). 여기서는 그 자리에
-      //   **로컬 마이크 스트림만** 물린다 — 릴레이 수신 PCM은 이 자리에 닿지 않는다.
-      final fanout = DuoMicPcmFanout(
-        speakerRole: _myRole,
-        sampleRate: kStealthVoxSttSampleRate,
-        // 🔇 [DUO-MUTE] 음소거는 **내 소리를 안 보내는 것**이다. 릴레이 연결과
-        //   상대 음성 수신은 그대로 살아 있다 — 여기서 내 조각만 버린다.
-        //   전사도 같이 막는다. 안 그러면 음소거 중에 한 말이 History에 남는다.
-        isMuted: () => _directMuted,
-        isSttOpen: () {
-          final stt = _directStt;
-          return stt != null && stt.audioGateOpen;
-        },
-        // 갈래 1 — 상대에게 보내는 실제 목소리. 전사를 기다리지 않는다.
-        //
-        //   🚫 [NO-GATE] **여기에 문턱을 두지 않는다.** 2026-08-28에 마이크
-        //   세기로 여닫는 게이트를 걸었다가, 조용한 맞장구 두 건이 전사에는
-        //   남고 상대에게는 한 조각도 못 갔다(`seq=4`·`seq=7`). 세기만으로는
-        //   내 말과 벽 넘어 돌아온 남의 말을 가를 수 없다.
-        //
-        //   울림은 이 자리에서 사람 목소리를 버려서 잡는 것이 아니라 AEC와
-        //   잔향 억제로 잡는다. **사람이 말한 소리는 무조건 나간다.**
-        toCall: (bytes) => _relayClient?.sendPcm(bytes),
-        // 갈래 2 — History용 전사. 실패해도 위 한 줄에 영향이 없다.
-        toStt: (bytes) => _directStt?.appendAudio(bytes),
-        // 갈래 3 — 세기 계측. **release에서도 돈다.** 이게 없으면 게이트가
-        //   세기를 모르고, 모르면 통과시키므로 방어선이 사라진다.
-        toLevel: (bytes) => _utteranceRms?.addPcm(bytes),
-        // 갈래 4 — 진단. release에서는 `_sttAbProbe`가 null이라 아무 일도 없다.
-        toProbe: (bytes) {
-          _sttAbProbe?.addPcm(bytes);
-          _sttAbCallRecorder?.add(bytes);
-        },
-        onLog: _duoDiagOn ? _lgDuo : null,
-      );
+      final fanout = _buildDirectFanout(kDuoSttPcmSourceLocalMic);
       _directFanout = fanout;
       _directCaptureSub = capture.stream.listen(
         (bytes) {
@@ -1836,19 +1881,250 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
             _lgDuo('[DIRECT]', 'capture_error=${e.runtimeType}'),
       );
       if (mounted) setState(() => _micActive = true);
-      _lgDuo(
-          '[DIRECT]',
-          'call_started gen=$generation room=$roomId role=$_myRole '
-              'micActive=true sttActive=$_sttActive '
-              'relayConnected=$_relayConnected '
-              'partnerRelayConnected=$_partnerRelayConnected '
-              'captureFirstFrameAt=${_directCaptureFirstFrameAt?.toIso8601String()}');
+      _logDirectCallStarted(generation, roomId);
     } catch (e) {
       _lgDuo('[DIRECT]', 'start_error=${e.runtimeType}');
       await _stopDirectCall('start_error');
     } finally {
       _directStarting = false;
     }
+  }
+
+  /// 🎙️ [DUO-FANOUT] 마이크 조각을 나누는 자리. **두 통로가 이것 하나를
+  /// 공유한다** — 조각이 어디서 오든 그 뒤 경로는 완전히 같아야 한다.
+  ///
+  /// 나누는 규칙 자체는 위젯이 아니라 `DuoMicPcmFanout`에 있다(시험으로
+  /// 지키기 위해서다). 여기서는 **이 단말 마이크 스트림만** 물린다 — 상대
+  /// 오디오는 어느 통로에서도 이 자리에 닿지 않는다.
+  DuoMicPcmFanout _buildDirectFanout(String sttSource) => DuoMicPcmFanout(
+        speakerRole: _myRole,
+        sampleRate: kStealthVoxSttSampleRate,
+        // 🔇 [DUO-MUTE] 음소거는 **내 소리를 안 보내는 것**이다. 연결과 상대
+        //   음성 수신은 그대로 살아 있다 — 여기서 내 조각만 버린다. 전사도
+        //   같이 막는다. 안 그러면 음소거 중에 한 말이 History에 남는다.
+        //   (WebRTC 경로는 트랙도 함께 끈다 — `_onDirectMicToggle`)
+        isMuted: () => _directMuted,
+        isSttOpen: () {
+          final stt = _directStt;
+          return stt != null && stt.audioGateOpen;
+        },
+        // 갈래 1 — 상대에게 보내는 실제 목소리.
+        //
+        //   🚫 [NO-GATE] **여기에 문턱을 두지 않는다.** 2026-08-28에 마이크
+        //   세기로 여닫는 게이트를 걸었다가, 조용한 맞장구 두 건이 전사에는
+        //   남고 상대에게는 한 조각도 못 갔다(`seq=4`·`seq=7`).
+        //
+        //   🔀 [DUO-TRANSPORT] **WebRTC 경로에서는 이 갈래가 비어 있다.**
+        //   통화 오디오는 WebRTC 네이티브 파이프라인이 직접 보내므로 Dart를
+        //   지나지 않는다(`_relayClient`가 null이라 자연히 no-op이 된다).
+        //   전사 갈래는 **같은 마이크**를 계속 쓴다 — 그것이 1-mic 구조다.
+        toCall: (bytes) => _relayClient?.sendPcm(bytes),
+        // 갈래 2 — History용 전사. 실패해도 통화에 영향이 없다.
+        toStt: (bytes) => _directStt?.appendAudio(bytes),
+        // 갈래 3 — 세기 계측. **release에서도 돈다.** 이게 없으면 게이트가
+        //   세기를 모르고, 모르면 통과시키므로 방어선이 사라진다.
+        toLevel: (bytes) {
+          _utteranceRms?.addPcm(bytes);
+          _micLiveMeter?.addPcm(bytes);
+        },
+        // 갈래 4 — 진단. release에서는 `_sttAbProbe`가 null이라 아무 일도 없다.
+        toProbe: (bytes) {
+          _sttAbProbe?.addPcm(bytes);
+          _sttAbCallRecorder?.add(bytes);
+        },
+        onLog: _duoDiagOn ? _lgDuo : null,
+      );
+
+  void _logDirectCallStarted(int generation, String roomId) {
+    _lgDuo(
+        '[DIRECT]',
+        'call_started gen=$generation room=$roomId role=$_myRole '
+            'transport=$_directTransport micActive=true sttActive=$_sttActive '
+            'connected=$_relayConnected partnerAudio=$_partnerRelayConnected '
+            'captureFirstFrameAt=${_directCaptureFirstFrameAt?.toIso8601String()}');
+  }
+
+  /// 🎙️ [DUO-MIC-TAP] WebRTC가 이미 연 마이크에 전사 갈래를 붙인다.
+  ///
+  /// **여기서 마이크를 새로 열지 않는다.** 그것이 이 구조의 전부다 —
+  /// AudioRecord는 앱을 통틀어 하나이고, 통화와 전사가 같은 조각을 본다.
+  ///
+  /// 붙이지 못해도 **통화는 계속한다.** 잃는 것은 History 텍스트뿐이고,
+  /// 그건 전사 소켓이 죽었을 때와 같은 취급이다.
+  Future<void> _startWebrtcMicTap(int generation) async {
+    final call = _webrtcCall;
+    final trackId = call?.localAudioTrackId;
+    if (call == null || trackId == null || trackId.isEmpty) {
+      _lgDuo('⚠️ [DUO-MIC-TAP]', 'no_track — 전사 갈래 없이 통화만 진행한다');
+      if (mounted) setState(() => _micActive = true);
+      return;
+    }
+
+    final tap = DuoWebrtcMicTap(onLog: _lgDuo);
+    _webrtcMicTap = tap;
+
+    // 🔇 하드웨어 NS를 끈다. 기존 `noiseSuppress: false` 정책을 지키는 자리다.
+    //   통화 쪽 잡음 억제는 소프트웨어 APM이 이 탭 **뒤에서** 계속 한다.
+    await tap.disableHardwareNoiseSuppressor();
+    if (!_isDirectGenerationCurrent(generation)) {
+      await tap.stop();
+      return;
+    }
+
+    final fanout = _buildDirectFanout(kDuoSttPcmSourceWebrtcMic);
+    _directFanout = fanout;
+
+    final ok = await tap.start(
+      trackId: trackId,
+      onPcm: (bytes) {
+        if (generation != _directGeneration) return;
+        fanout.add(bytes);
+      },
+    );
+    if (!_isDirectGenerationCurrent(generation)) {
+      await tap.stop();
+      return;
+    }
+    if (!ok) {
+      _lgDuo('⚠️ [DUO-MIC-TAP]', 'attach_failed — 전사 없이 통화만 진행한다');
+      _webrtcMicTap = null;
+    }
+    if (mounted) setState(() => _micActive = true);
+  }
+
+  /// 🔀 [DUO-TRANSPORT] 기존 Cloud Run PCM 릴레이로 통화를 연다.
+  ///
+  /// 순서가 뜻이 있다. 재생기를 **먼저** 통화 모드로 열어야 뒤에 열리는
+  /// 마이크의 AEC가 지울 대상(재생 신호)을 잡는다.
+  Future<bool> _openRelayTransport(int generation, String roomId) async {
+    _remotePcmMeter =
+        _duoDiagOn ? DuoRemotePcmMeter(onLog: _lgDuo) : DuoRemotePcmMeter();
+    final player = DuoPcmJitterPlayer(onLog: _lgDuo);
+    final playerOk = await player.start();
+    if (!_isDirectGenerationCurrent(generation)) {
+      await player.stop();
+      return false;
+    }
+    _jitterPlayer = playerOk ? player : null;
+    if (!playerOk) {
+      // Android 외 플랫폼은 PCM 재생 채널이 없다. 상대 목소리를 낼 방법이
+      // 없으므로 반쪽짜리 통화를 여는 대신 시작 자체를 막는다.
+      _lgDuo('[DIRECT]', 'start_failed reason=pcm_player_unavailable');
+      await _stopDirectCall('pcm_player_unavailable');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('이 기기에서는 아직 직접 대화를 지원하지 않습니다.'),
+        ));
+      }
+      return false;
+    }
+
+    // 회원이면 ID 토큰을 같이 보내 서버가 uid 소유를 확인한다.
+    String idToken = '';
+    try {
+      idToken = await FirebaseAuth.instance.currentUser?.getIdToken() ?? '';
+    } catch (_) {}
+    if (!_isDirectGenerationCurrent(generation)) return false;
+    final relay = DuoPcmRelayClient(
+      url: _relayUrl,
+      roomId: roomId,
+      uid: _myUid,
+      role: _myRole,
+      sessionId: '$roomId#$generation',
+      token: _relayToken,
+      idToken: idToken,
+      onLog: _lgDuo,
+      onPartnerPresence: (present) {
+        if (!_isDirectGenerationCurrent(generation)) return;
+        if (mounted) setState(() => _partnerRelayConnected = present);
+        // 상대가 끊겼다 붙으면 밀린 조각은 버리고 새 소리부터 재생한다.
+        if (!present) _jitterPlayer?.resetBuffer('partner_left');
+      },
+    );
+    _relayClient = relay;
+    _relayInboundSub = relay.inbound.listen((pcm) {
+      if (!_isDirectGenerationCurrent(generation)) return;
+      _noteInboundAudio(pcm);
+      // 🚫 [NO-STT] 상대 PCM은 재생기까지만 간다. 전사 입력으로 넘기지 않는다 —
+      //   상대 발화의 글자는 상대 단말이 자기 마이크로 만들어 채널에 올린다.
+      _remotePcmMeter?.note(pcm);
+      _jitterPlayer?.add(pcm);
+    });
+    final relayOk = await relay.connect();
+    if (!_isDirectGenerationCurrent(generation)) {
+      await relay.dispose();
+      return false;
+    }
+    if (mounted) {
+      setState(() {
+        _relayConnected = relayOk;
+        _partnerRelayConnected = relay.partnerPresent;
+      });
+    }
+    if (!relayOk) {
+      await _stopDirectCall('relay_connect_failed');
+      return false;
+    }
+    return true;
+  }
+
+  /// 🔀 [DUO-TRANSPORT] WebRTC로 통화를 연다. P2P 우선, 실패 시 TURN.
+  ///
+  /// **여기서는 재생기를 만들지 않는다.** 상대 목소리는 WebRTC가 자기
+  /// 오디오 트랙으로 직접 낸다 — 우리 Dart 코드에 상대 PCM이 닿는 지점이
+  /// 아예 없어지므로, "상대 오디오를 전사하지 않는다"는 규칙이 더 강하게
+  /// 지켜진다.
+  ///
+  /// 🚫 상대가 없거나 신호가 안 맞아 못 붙으면 **릴레이로 몰래 돌아가지
+  ///    않는다.** 조용한 폴백은 어느 통로가 실제로 돌았는지 로그로 못 가르게
+  ///    만든다. 실패는 실패로 남기고 통화를 접는다.
+  Future<bool> _openWebrtcTransport(int generation, String roomId) async {
+    final call = DuoWebrtcCall(
+      roomId: roomId,
+      uid: _myUid,
+      role: _myRole,
+      sessionId: '$roomId#$generation',
+      // 호스트가 offerer다. 역할이 방 문서로 이미 정해져 있어 다툴 일이 없다.
+      isOfferer: _amIHost,
+      onLog: _lgDuo,
+      onPartnerPresence: (present) {
+        if (!_isDirectGenerationCurrent(generation)) return;
+        // ⚠️ 이 값은 **오디오 연결 상태**다. 통화 종료·과금·참가자 판정은
+        //   여전히 Firestore lifecycle이 한다. 여기서 방을 닫지 않는다.
+        if (mounted) setState(() => _partnerRelayConnected = present);
+      },
+      onFatal: (reason) {
+        if (!_isDirectGenerationCurrent(generation)) return;
+        _lgDuo('❌ [DIRECT]', 'webrtc_fatal=$reason');
+        unawaited(_stopDirectCall('webrtc_$reason'));
+      },
+      // 💰 [BILLING-IDLE] 릴레이 경로에서 `_noteInboundAudio`가 하던 일.
+      //   상대 PCM이 앱에 오지 않으므로 통계로 같은 신호를 받는다. 이게
+      //   없으면 상대만 말하는 동안 호스트가 유휴로 떨어져 과금이 멈춘다.
+      onRemoteVoice: () {
+        if (!_isDirectGenerationCurrent(generation)) return;
+        _lastPartnerVoiceAt = DateTime.now();
+      },
+    );
+    _webrtcCall = call;
+    final ok = await call.connect();
+    if (!_isDirectGenerationCurrent(generation)) {
+      await call.dispose();
+      return false;
+    }
+    if (mounted) {
+      setState(() {
+        _relayConnected = ok;
+        _partnerRelayConnected = call.partnerPresent;
+      });
+    }
+    if (!ok) {
+      await _stopDirectCall('webrtc_connect_failed');
+      return false;
+    }
+    // 음소거 상태를 새 통화에 옮긴다(보통 false다).
+    call.setMuted(_directMuted);
+    return true;
   }
 
   /// 🔬 [DUO-AB] 진단기를 세운다. **개발 빌드가 아니면 null을 돌려준다.**
@@ -2106,7 +2382,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       mode: kDuoModeDirect,
       seq: seq,
       spokenAt: spokenAt,
-      sttSource: kDuoSttPcmSourceLocalMic,
+      sttSource: _directSttSource,
     );
     // 원문 자리에 전사문을 넣는다. 타겟 문장과 소리는 히스토리에서 만든다.
     await _saveHistoryMessage(
@@ -2118,7 +2394,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       spokenAt: spokenAt,
       speakerUid: _myUid,
       speakerRole: _myRole,
-      sttSource: kDuoSttPcmSourceLocalMic,
+      sttSource: _directSttSource,
       sourceLang: _myNative(),
       channelMsgId: channelId,
     );
@@ -2148,7 +2424,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 진행 중 발화가 없으면 ②③은 즉시 통과한다(말없이 끄면 안 느려진다).
   Future<void> _stopDirectCall(String reason) async {
     if (_directStopping) return; // 중복 종료 가드 (연속 두 번 탭)
-    if (!_directCallActive && _relayClient == null && _directCapture == null) {
+    if (!_directCallActive &&
+        _relayClient == null &&
+        _webrtcCall == null &&
+        _webrtcMicTap == null &&
+        _directCapture == null) {
       return;
     }
     _directStopping = true;
@@ -2162,6 +2442,14 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     final capture = _directCapture;
     _directCapture = null;
     await capture?.stop();
+
+    // 🎙️ WebRTC 경로의 마이크 갈래도 여기서 끊는다. **트랙 자체는 아직
+    //   살려 둔다** — 통화 종료는 아래 ④에서 PeerConnection을 접을 때다.
+    //   전사로 가는 조각만 먼저 멈춰, 확정 뒤에 들어온 소리가 새 발화를
+    //   열지 않게 한다(릴레이 경로의 구독 취소와 같은 뜻이다).
+    final micTap = _webrtcMicTap;
+    _webrtcMicTap = null;
+    await micTap?.stop();
 
     // ②③ 마지막 발화 확정 → 전사문 대기 → 저장 완료까지.
     //     `_directCallActive`와 세대는 아직 그대로다. 이 창 안에서 도착한
@@ -2204,6 +2492,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     _relayClient = null;
     await relay?.dispose();
 
+    // 🔀 [DUO-TRANSPORT] WebRTC 통화도 같은 자리에서 접는다. 둘 중 하나만
+    //   살아 있으므로 한쪽은 항상 null이다. dispose 안에서 오디오 세션
+    //   (통화 모드·스피커폰)을 원래대로 돌려놓는다.
+    final webrtc = _webrtcCall;
+    _webrtcCall = null;
+    await webrtc?.dispose();
+
     final player = _jitterPlayer;
     _jitterPlayer = null;
     await player?.stop();
@@ -2219,6 +2514,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     //   조용한 발화가 남의 세기로 통과한다.
     _utteranceRms?.reset();
     _utteranceRms = null;
+
+    // 🩺 마이크 건강 요약. **두 AudioRecord가 실제로 공존했는지가 이 한 줄에서
+    //   갈린다** — 조각은 왔는데 전부 0이었으면 경합이다.
+    final micHealth = _micLiveMeter;
+    _micLiveMeter = null;
 
     // 🔬 진단기도 통화 한 번짜리다. 버퍼를 놓고, 남긴 WAV 자리를 알려 준다.
     final abProbe = _sttAbProbe;
@@ -2256,13 +2556,22 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     }
     _lgDuo(
         '[DIRECT]',
-        'call_stopped reason=$reason relayRttMs=${relay?.lastRoundTripMs} '
+        'call_stopped reason=$reason transport=$_directTransport '
+            'relayRttMs=${relay?.lastRoundTripMs} '
             'playFirstLatencyMs=${player?.firstPlayLatencyMs} '
             'sentBytes=${relay?.sentBytes} recvBytes=${relay?.receivedBytes} '
-            'playedBytes=${player?.writtenBytes} droppedBytes=${player?.droppedBytes}');
+            'playedBytes=${player?.writtenBytes} droppedBytes=${player?.droppedBytes} '
+            // WebRTC 경로의 대응값. 바이트는 앱을 지나지 않으므로 셀 수 없고,
+            // 대신 붙는 데 걸린 시간과 TURN 사용 여부가 진단의 근거가 된다.
+            'rtcConnectMs=${webrtc?.connectMs} rtcTurn=${webrtc?.hasTurn}');
     // 오디오 내용은 남기지 않는다. 세는 값만 남겨 실기기 로그에서 두 갈래가
     // 각각 몇 조각씩 갔는지 대조할 수 있게 한다.
     if (fanout != null) _lgDuo('[DuoSTT]', 'call_summary ${fanout.summary()}');
+    // 🩺 [DUO-MIC-HEALTH] 두 AudioRecord 공존 판정의 근거. 위 DUO-RTC-HEALTH
+    //   줄과 **나란히 읽는다** — 어느 쪽 마이크가 죽었는지 그 둘이 가른다.
+    if (micHealth != null) {
+      _lgDuo('🩺 [DUO-MIC-HEALTH]', 'call_summary ${micHealth.summary()}');
+    }
     if (remoteMeter != null) {
       _lgDuo(
           '[DuoAudio]',
