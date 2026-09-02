@@ -196,6 +196,110 @@ async function main() {
     await assertSucceeds(getDoc(canon(guest)));
   });
 
+  // ── ⑥-B webrtc signaling ────────────────────────────────────────
+  //
+  // 여기만 **읽기가 참가자로 좁혀져 있다.** messages·canonical·replay는
+  // 로그인한 누구나 읽는다(통화 뒤 계정 복구가 그 읽기에 기댄다). 그런데
+  // signaling은 다르다 — offer를 읽을 수 있으면 answer를 만들어 **통화
+  // 오디오에 끼어들 수 있다.** 그래서 이 층만 규칙이 다르고, 그 차이가
+  // 실수로 느슨해지지 않도록 여기서 못 박는다.
+  section('webrtc signaling — offer/answer/ICE 후보');
+
+  const rtc = (db) => doc(db, 'duo_sessions', ROOM, 'webrtc', 'current');
+  const cand = (db) =>
+      collection(db, 'duo_sessions', ROOM, 'webrtc', 'current', 'candidates');
+
+  await check('호스트가 offer를 올린다', () => assertSucceeds(
+      setDoc(rtc(host), {
+        sessionId: `${ROOM}#1`,
+        offer: {sdp: 'v=0...', type: 'offer'},
+        offerUid: HOST,
+        updatedAt: serverTimestamp(),
+      }, {merge: true})));
+
+  await check('게스트가 answer를 올린다', () => assertSucceeds(
+      setDoc(rtc(guest), {
+        sessionId: `${ROOM}#1`,
+        answer: {sdp: 'v=0...', type: 'answer'},
+        answerUid: GUEST,
+        updatedAt: serverTimestamp(),
+      }, {merge: true})));
+
+  await check('두 참가자가 서로의 SDP를 읽는다', async () => {
+    await assertSucceeds(getDoc(rtc(host)));
+    await assertSucceeds(getDoc(rtc(guest)));
+  });
+
+  await check('양쪽이 ICE 후보를 올린다', async () => {
+    await assertSucceeds(addDoc(cand(host), {
+      sessionId: `${ROOM}#1`, role: 'HOST',
+      candidate: 'candidate:1 1 udp ...', sdpMid: '0', sdpMLineIndex: 0,
+      createdAt: serverTimestamp(),
+    }));
+    await assertSucceeds(addDoc(cand(guest), {
+      sessionId: `${ROOM}#1`, role: 'GUEST',
+      candidate: 'candidate:2 1 udp ...', sdpMid: '0', sdpMLineIndex: 0,
+      createdAt: serverTimestamp(),
+    }));
+  });
+
+  // ↓↓↓ 여기부터가 이 층을 따로 둔 이유다 ↓↓↓
+
+  await check('제3자는 offer를 **읽지 못한다** (읽으면 통화에 끼어든다)',
+      () => assertFails(getDoc(rtc(guest2))));
+
+  await check('제3자는 SDP를 못 쓴다', () => assertFails(
+      setDoc(rtc(guest2), {
+        sessionId: `${ROOM}#1`,
+        answer: {sdp: 'hijack', type: 'answer'},
+      }, {merge: true})));
+
+  await check('제3자는 ICE 후보를 못 읽는다', () => assertFails(
+      getDoc(doc(guest2, 'duo_sessions', ROOM, 'webrtc', 'current',
+          'candidates', 'anything'))));
+
+  await check('제3자는 ICE 후보를 못 올린다', () => assertFails(
+      addDoc(cand(guest2), {
+        sessionId: `${ROOM}#1`, role: 'GUEST', candidate: 'hijack',
+      })));
+
+  await check('로그인하지 않으면 signaling에 손도 못 댄다', async () => {
+    await assertFails(getDoc(rtc(anon)));
+    await assertFails(setDoc(rtc(anon), {sessionId: 'x'}, {merge: true}));
+  });
+
+  // 통화 **뒤에** 자기 계정으로 로그인한 회원은 canonical을 읽어 방을
+  // 복구한다(⑦). 그 읽기 권한이 signaling까지 번지면 안 된다 — 그 사람은
+  // 이 방의 참가자가 아니고, 통화 오디오에 낄 이유도 없다.
+  await check('복구하러 온 회원도 signaling은 못 읽는다 (canonical과 다르다)',
+      () => assertFails(getDoc(rtc(member))));
+
+  // 다른 방의 신호에 손대는 경로. roomId가 규칙 경로에 묶여 있으므로
+  // get()이 **그 방** 문서를 보고 참가자인지 따진다.
+  section('webrtc signaling — 다른 방 접근 차단');
+  await check('두 번째 방을 만든다 (주인은 guest2)', () => assertSucceeds(
+      setDoc(doc(guest2, 'duo_sessions', 'room-2'), {
+        hostUid: GUEST2,
+        isDuoEnabled: true,
+        isPartnerJoined: false,
+        mode: 'direct',
+      })));
+
+  await check('room-1 참가자가 room-2의 signaling을 못 읽는다', () => assertFails(
+      getDoc(doc(host, 'duo_sessions', 'room-2', 'webrtc', 'current'))));
+
+  await check('room-1 참가자가 room-2에 offer를 못 심는다', () => assertFails(
+      setDoc(doc(guest, 'duo_sessions', 'room-2', 'webrtc', 'current'), {
+        sessionId: 'room-2#1',
+        offer: {sdp: 'hijack', type: 'offer'},
+      }, {merge: true})));
+
+  await check('room-2 주인은 자기 방 signaling을 쓴다', () => assertSucceeds(
+      setDoc(doc(guest2, 'duo_sessions', 'room-2', 'webrtc', 'current'), {
+        sessionId: 'room-2#1',
+        offer: {sdp: 'v=0...', type: 'offer'},
+      }, {merge: true})));
+
   // ── ⑦ handoff — 통화 뒤 기존 계정으로 로그인한 사람 ────────────────
   section('handoff — 방이 한 번도 본 적 없는 uid의 복구 경로');
   await check('회원이 세션 문서를 읽는다 (참가자 검증에 필요하다)',

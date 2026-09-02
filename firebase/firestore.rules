@@ -168,6 +168,31 @@ service cloud.firestore {
               || get(/databases/$(database)/documents/duo_sessions/$(roomId))
                 .data.get('partnerUid', '') == request.auth.uid);
       }
+
+      // WebRTC signalling for the direct-talk call: offer/answer SDP and ICE
+      // candidates. This carries no conversation content -- only the network
+      // handshake that lets the two phones connect their audio directly.
+      //
+      // Unlike messages/canonical/replay, read is NOT open to any signed-in
+      // user: a third party who reads the offer could try to answer it and
+      // join the call's audio. Both read and write are restricted to the two
+      // participants. Rules do not cascade into subcollections, so the
+      // candidates collection below needs its own identical block.
+      match /webrtc/{docId} {
+        allow read, write: if isAuth()
+          && (get(/databases/$(database)/documents/duo_sessions/$(roomId))
+                .data.get('hostUid', '') == request.auth.uid
+              || get(/databases/$(database)/documents/duo_sessions/$(roomId))
+                .data.get('partnerUid', '') == request.auth.uid);
+
+        match /candidates/{candidateId} {
+          allow read, write: if isAuth()
+            && (get(/databases/$(database)/documents/duo_sessions/$(roomId))
+                  .data.get('hostUid', '') == request.auth.uid
+                || get(/databases/$(database)/documents/duo_sessions/$(roomId))
+                  .data.get('partnerUid', '') == request.auth.uid);
+        }
+      }
     }
 
     // One-device trial guard. Anonymous users are allowed after signInAnonymously().

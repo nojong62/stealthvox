@@ -19,6 +19,26 @@ const { resolveLegacyGoogleAccount } = require("./legacy_google_account");
 const revenueCatWebhookSecret = defineSecret("REVENUECAT_WEBHOOK_SECRET");
 const openAiApiKey = defineSecret("OPENAI_API_KEY");
 
+// ----------------------------------------------------------------------------
+// Duo direct-talk TURN credentials.
+//
+// TURN relays actual call media, so its credentials are billed by bandwidth.
+// A static password shipped inside the APK can be extracted and used by anyone
+// to relay their own traffic on our bill -- so the long-term secret lives ONLY
+// here, and the app receives short-lived credentials derived from it.
+//
+// TURN_SHARED_SECRET  the coturn `static-auth-secret` (REST API / long-term
+//                     credential mechanism). Never leaves the server.
+// TURN_URLS           comma-separated turn: / turns: URLs. Not a secret, but
+//                     kept in config so the provider can change without a
+//                     client release.
+//
+// Both are unset until a TURN provider is chosen. When either is missing this
+// callable returns 'not-found' and the client falls back to STUN-only -- it
+// never invents an address or a password.
+// ----------------------------------------------------------------------------
+const turnSharedSecret = defineSecret("TURN_SHARED_SECRET");
+
 // Google ID Token을 받아 줄 audience 화이트리스트. StealthVox가 발급한 OAuth
 // 클라이언트만 통과시킨다. GoogleSignIn(Android)이 만든 ID Token의 aud는 보통
 // web client(type=3)이고, 구성에 따라 Android client(type=1)가 될 수도 있어
@@ -212,6 +232,103 @@ async function verifyKakaoAccessToken(accessToken) {
     );
   }
 }
+// ----------------------------------------------------------------------------
+// createTurnCredential
+//
+// Mints a short-lived TURN credential for a Duo direct-talk call, using the
+// coturn REST-API (long-term credential) scheme:
+//
+//   username   = "<unix-expiry>:<uid>"
+//   credential = base64( HMAC-SHA1( shared_secret, username ) )
+//
+// The TURN server validates this itself, so no per-call state is kept here.
+// The shared secret never reaches the client.
+//
+// Anonymous Duo guests are allowed: they sign in with signInAnonymously() and
+// are real participants in the call. What is NOT allowed is an unauthenticated
+// caller.
+//
+// Returns 'not-found' when no TURN provider is configured yet. That is a
+// normal state before a provider is chosen -- the client then runs STUN-only
+// and logs that P2P-impossible networks will fail silently.
+// ----------------------------------------------------------------------------
+const TURN_CREDENTIAL_TTL_SECONDS = 600;
+const turnRequestTimestamps = new Map();
+
+function checkTurnRateLimit(uid) {
+  const now = Date.now();
+  const windowMs = 60 * 1000;
+  const recent = (turnRequestTimestamps.get(uid) || []).filter(
+    (timestamp) => now - timestamp < windowMs
+  );
+  if (recent.length >= 10) return false;
+  recent.push(now);
+  turnRequestTimestamps.set(uid, recent);
+  if (turnRequestTimestamps.size > 1000) {
+    for (const [key, values] of turnRequestTimestamps.entries()) {
+      if (values.every((timestamp) => now - timestamp >= windowMs)) {
+        turnRequestTimestamps.delete(key);
+      }
+    }
+  }
+  return true;
+}
+
+exports.createTurnCredential = functions
+  .region("us-central1")
+  .runWith({ secrets: [turnSharedSecret] })
+  .https.onCall(async (data, context) => {
+    if (!context.auth || !context.auth.uid) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "Authentication is required."
+      );
+    }
+    if (!checkTurnRateLimit(context.auth.uid)) {
+      throw new functions.https.HttpsError(
+        "resource-exhausted",
+        "Too many TURN credential requests."
+      );
+    }
+
+    // TURN_URLS is plain config, not a secret. Comma-separated.
+    const urls = String(process.env.TURN_URLS || "")
+      .split(",")
+      .map((u) => u.trim())
+      .filter((u) => u.startsWith("turn:") || u.startsWith("turns:"));
+
+    let secret = "";
+    try {
+      secret = turnSharedSecret.value() || "";
+    } catch (_) {
+      secret = "";
+    }
+
+    if (urls.length === 0 || !secret) {
+      // Not configured yet. Say so plainly instead of returning a broken
+      // credential the client would spend 20 seconds failing on.
+      throw new functions.https.HttpsError(
+        "not-found",
+        "No TURN provider is configured."
+      );
+    }
+
+    const expiry = Math.floor(Date.now() / 1000) + TURN_CREDENTIAL_TTL_SECONDS;
+    const username = expiry + ":" + context.auth.uid;
+    const credential = crypto
+      .createHmac("sha1", secret)
+      .update(username)
+      .digest("base64");
+
+    return {
+      iceServers: [
+        { urls: ["stun:stun.l.google.com:19302"] },
+        { urls, username, credential },
+      ],
+      expiresAt: expiry,
+    };
+  });
+
 // ----------------------------------------------------------------------------
 // onUserDeleted
 // Trigger: Firebase Auth user.delete
