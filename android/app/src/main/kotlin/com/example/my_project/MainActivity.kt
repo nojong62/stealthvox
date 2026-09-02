@@ -35,8 +35,16 @@ class MainActivity: FlutterActivity() {
     private var savedAudioMode = AudioManager.MODE_NORMAL
     private var savedSpeakerphoneOn = false
 
+    // 🎙️ [DUO-MIC-TAP] WebRTC가 잡은 마이크 PCM을 전사 갈래로 흘리는 통로.
+    //   마이크를 두 번 열지 않기 위한 자리다 — 자세한 내용은 그 파일에 있다.
+    private var duoMicTap: DuoWebrtcMicTap? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        duoMicTap = DuoWebrtcMicTap(flutterEngine.dartExecutor.binaryMessenger)
+            .also { it.register() }
+
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             installReferrerChannel
@@ -283,6 +291,8 @@ class MainActivity: FlutterActivity() {
 
     override fun onDestroy() {
         stopPcmStream()
+        duoMicTap?.stop()
+        duoMicTap = null
         pcmExecutor.shutdown()
         super.onDestroy()
     }

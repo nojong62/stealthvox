@@ -85,6 +85,18 @@ flutter {
 }
 
 dependencies {
+    // 🎙️ [DUO-MIC-TAP] `org.webrtc.AudioTrackSink` / `JavaAudioDeviceModule`을
+    //   앱 코드(DuoWebrtcMicTap.kt)에서 참조하기 위해서만 필요하다.
+    //
+    //   flutter_webrtc가 이 라이브러리를 `implementation`으로 들고 있어서
+    //   런타임에는 이미 APK 안에 들어 있지만, `api`가 아니라 앱 모듈의
+    //   **컴파일 클래스패스에는 안 올라온다.** 그래서 compileOnly로만 얹는다 —
+    //   `implementation`으로 넣으면 같은 클래스가 두 번 들어갈 수 있다.
+    //
+    //   ⚠️ **버전은 flutter_webrtc가 쓰는 것과 반드시 같아야 한다.**
+    //   (flutter_webrtc 1.5.2 → io.github.webrtc-sdk:android:144.7559.09)
+    //   플러그인을 올릴 때 이 줄도 같이 확인할 것.
+    compileOnly 'io.github.webrtc-sdk:android:144.7559.09'
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.1.0"
     implementation "com.android.installreferrer:installreferrer:2.2"
