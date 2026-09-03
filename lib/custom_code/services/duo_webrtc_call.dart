@@ -302,12 +302,38 @@ class DuoWebrtcCall {
       //    가장 먼저 봐야 하는 한 줄이라 성공·실패를 모두 남긴다.
       MediaStream stream;
       try {
+        // 🎛️ [GUM-CONSTRAINTS] **`true`를 넘긴다. 맵을 넘기면 안 된다.**
+        //
+        //   예전에는 `{'echoCancellation': true, 'noiseSuppression': true,
+        //   'autoGainControl': true}`를 넘겼다. 읽으면 표준을 그대로 요청하는
+        //   것처럼 보이는데, **그 값들은 네이티브까지 가지 않았다.**
+        //
+        //   flutter_webrtc 1.5.2의 경로가 이렇다:
+        //     GetUserMediaImpl.getUserAudio  — `audio`가 Boolean이 아니면
+        //       `MediaConstraintsUtils.parseMediaConstraints(map)`으로 간다
+        //     parseMediaConstraints           — `"mandatory"`(Map)와
+        //       `"optional"`(Array) **두 열쇠만** 읽는다. 우리 맵에는 둘 다
+        //       없으므로 빈 MediaConstraints가 돌아온다
+        //     → `createAudioSource(빈 제약)`
+        //
+        //   게다가 맵을 넘긴 탓에 `addDefaultAudioConstraints()`가 통째로
+        //   건너뛰어졌다. 그쪽이 넣어 주는 `googEchoCancellation` ·
+        //   `googNoiseSuppression` · `googEchoCancellation2` ·
+        //   `googDAEchoCancellation`을 하나도 못 받은 것이다.
+        //   **적게 요청하려고 명시한 셈이었다.**
+        //
+        //   `true`를 넘기면 플러그인이 자기 기본 제약을 붙인다. 그것이 이
+        //   버전에서 실제로 동작이 검증된 유일한 조합이다.
+        //
+        //   ⚠️ 나중에 `deviceId`를 골라야 해서 맵으로 되돌린다면,
+        //   반드시 `{'mandatory': {...}}` / `{'optional': [...]}` 모양으로
+        //   싸야 한다. 평평한 맵은 조용히 버려진다.
+        //
+        //   🚫 이 값은 **상대에게 가는 소리**에만 닿는다. 우리 전사가 쓰는
+        //   PCM은 MicTap이 소프트웨어 APM **앞에서** 갈라 가므로 여기 제약과
+        //   무관하다(`DuoWebrtcMicTap` 주석 참고).
         stream = await navigator.mediaDevices.getUserMedia(<String, dynamic>{
-          'audio': <String, dynamic>{
-            'echoCancellation': true,
-            'noiseSuppression': true,
-            'autoGainControl': true,
-          },
+          'audio': true,
           'video': false,
         });
       } catch (e) {
