@@ -32,7 +32,7 @@ import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
 import '/custom_code/services/ai_style.dart';
 import '/custom_code/services/origin_language_session.dart'
-    show detectOriginScript, textContradictsLanguage;
+    show detectOriginScript, koreanLanguageDisplayName, textContradictsLanguage;
 import '/custom_code/services/transcript_repair_guard.dart';
 import 'alt_style_popup.dart';
 import '/custom_code/services/audio_silence_analyzer.dart';
@@ -123,7 +123,12 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   bool isPaused = false;
   double _fontScale = 1.0;
 
-  /// 언어 표시 모드: 0=영어+한글, 1=영어만, 2=한글만
+  /// 🌐 언어 표시 모드. 숫자가 가리키는 것은 **언어 이름이 아니라 필드**다.
+  ///   0 = 배울글(`translated_text`) + 원문(`original_text`)
+  ///   1 = 배울글만  (LearnLang = 방 문서 `target_lang`)
+  ///   2 = 원문만    (ChatLang  = 방 문서 `native_lang`)
+  /// 예전 주석은 "0=영어+한글, 1=영어만, 2=한글만"이었는데, 그건 ChatLang이
+  /// 한국어이고 LearnLang이 영어인 사람만 맞는 말이다.
   int _langDisplayMode = 0;
 
   /// 이 History 세션 생성 당시 저장된 언어 식별값.
@@ -138,6 +143,32 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   /// 텍스트 정규화(레거시 fallback 비교용): 대소문자·연속 공백 차이를 흡수한다.
   String _normLangText(String v) =>
       v.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+
+  /// 🏷️ [LANG-LABEL] 언어 토글 버튼의 툴팁.
+  ///
+  /// 방 문서에 저장된 ChatLang(`native_lang`)·LearnLang(`target_lang`)으로
+  /// 짓는다. 표는 `koreanLanguageDisplayName` 하나뿐이다.
+  ///
+  /// 옛 기록에는 두 필드가 없다. 그때는 언어 이름 대신 필드가 무엇인지로
+  /// 적는다 — 없는 언어 이름을 지어내는 것보다 낫다.
+  String _langToggleTooltip() {
+    final String chat = (_sessionNativeLang ?? '').trim();
+    final String learn = (_sessionTargetLang ?? '').trim();
+    if (chat.isEmpty || learn.isEmpty) {
+      return _langDisplayMode == 0
+          ? '배울글만 보기'
+          : _langDisplayMode == 1
+              ? '원문만 보기'
+              : '원문+배울글 보기';
+    }
+    final String chatName = koreanLanguageDisplayName(chat);
+    final String learnName = koreanLanguageDisplayName(learn);
+    return _langDisplayMode == 0
+        ? '$learnName만 보기'
+        : _langDisplayMode == 1
+            ? '$chatName만 보기'
+            : '$chatName+$learnName 보기';
+  }
 
   /// 이 세션이 동일 언어(Origin=Target)인지 — 기록별 언어값 기준.
   /// 기록에 Origin/Target 언어값이 모두 있으면 그것으로 판정하고,
@@ -3271,11 +3302,11 @@ RULES — follow exactly:
               size: const Size(26, 26),
               painter: _LangIconPainter(mode: _langDisplayMode),
             ),
-            tooltip: _langDisplayMode == 0
-                ? '영어만 보기'
-                : _langDisplayMode == 1
-                    ? '한글만 보기'
-                    : '영어+한글 보기',
+            // 🏷️ 눌렀을 때 **가게 될 상태**를 적는다(지금 상태가 아니다).
+            //   언어 이름은 이 방의 ChatLang/LearnLang에서 가져온다 —
+            //   한/영으로 박아 두면 일본어↔스페인어로 쓰는 사람에게
+            //   없는 언어를 말하게 된다.
+            tooltip: _langToggleTooltip(),
             onPressed: () => setState(() {
               _langDisplayMode = (_langDisplayMode + 1) % 3;
             }),
@@ -7040,7 +7071,8 @@ class PracticeChunk {
 }
 
 class _LangIconPainter extends CustomPainter {
-  /// 0=영어+한글, 1=영어만, 2=한글만
+  /// 0=원문+배울글, 1=배울글만, 2=원문만.
+  /// 그림에 적히는 글자는 'T' 둘이라 언어 이름을 타지 않는다.
   final int mode;
   const _LangIconPainter({required this.mode});
 
@@ -7068,7 +7100,7 @@ class _LangIconPainter extends CustomPainter {
         Paint()..color = const Color(0xFF0B4870),
       );
     } else if (mode == 1) {
-      // 영어만: 상단(원어) 어둡게, 하단(타겟) 파란
+      // 배울글만: 상단(원문) 어둡게, 하단(배울글) 파란
       canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height),
           Paint()..color = const Color(0xFF2A2A2A));
       canvas.drawPath(
@@ -7080,7 +7112,7 @@ class _LangIconPainter extends CustomPainter {
         Paint()..color = const Color(0xFF0B4870),
       );
     } else {
-      // 한글만: 상단(원어) 파란, 하단(타겟) 어둡게
+      // 원문만: 상단(원문) 파란, 하단(배울글) 어둡게
       canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height),
           Paint()..color = const Color(0xFF1E7DB5));
       canvas.drawPath(
@@ -7113,7 +7145,7 @@ class _LangIconPainter extends CustomPainter {
         ..strokeWidth = 2.5,
     );
 
-    // ── 상단 좌측 "T" (원어/한글) ──
+    // ── 상단 좌측 "T" (원문 = ChatLang) ──
     final bool origActive = (mode == 0 || mode == 2);
     _drawText(canvas, 'T', Offset(size.width * 0.09, size.height * 0.06),
         size.width * 0.34, origActive ? Colors.white : const Color(0x44FFFFFF));
@@ -7144,7 +7176,7 @@ class _LangIconPainter extends CustomPainter {
           Offset(size.width * 0.53, size.height * 0.32), xPaint);
     }
 
-    // ── 하단 우측 "T" (타겟/영어) ──
+    // ── 하단 우측 "T" (배울글 = LearnLang) ──
     final bool targetActive = (mode == 0 || mode == 1);
     _drawText(
         canvas,

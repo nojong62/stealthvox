@@ -54,6 +54,48 @@ const List<String> kOriginLanguageOptions = <String>[
   'Dutch',
 ];
 
+/// 🏷️ [LANG-LABEL] 저장값(영문 언어명) → 화면에 적을 한국어 이름.
+///
+/// 저장값과 표시명은 **다른 층이다.** 저장값은 `'Japanese'`처럼 영문으로만
+/// 남고(프롬프트·API가 그 이름을 쓴다), 화면 문구는 한국어로 적는다.
+///
+/// 표는 여기 하나뿐이다. 화면마다 따로 만들면 반드시 어긋난다 —
+/// 히스토리 언어 토글은 예전에 '영어만 보기' / '한글만 보기'로 박혀 있어서,
+/// 일본어↔스페인어로 쓰는 사람에게 없는 언어를 말하고 있었다.
+///
+/// 로비가 주는 12개 밖의 값은 **그대로 돌려준다.** 영문 이름이라도 보이는 편이
+/// 엉뚱한 언어로 적히는 것보다 낫다.
+String koreanLanguageDisplayName(String language) {
+  switch (language.trim().toLowerCase()) {
+    case 'korean':
+      return '한국어';
+    case 'english':
+      return '영어';
+    case 'japanese':
+      return '일본어';
+    case 'chinese':
+      return '중국어';
+    case 'spanish':
+      return '스페인어';
+    case 'french':
+      return '프랑스어';
+    case 'german':
+      return '독일어';
+    case 'hindi':
+      return '힌디어';
+    case 'russian':
+      return '러시아어';
+    case 'portuguese':
+      return '포르투갈어';
+    case 'italian':
+      return '이탈리아어';
+    case 'dutch':
+      return '네덜란드어';
+    default:
+      return language.trim();
+  }
+}
+
 /// 라틴 문자를 쓰는 ORIGIN. 문자만으로는 서로 구분되지 않아 모델 판정이 필요하다.
 const Set<String> _kLatinScriptOrigins = <String>{
   'English',
