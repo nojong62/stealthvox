@@ -10,6 +10,8 @@
 //   · 없으면 즉시 끝나는가 (말 안 하고 끄기 · 완료 직후 끄기)
 //   · 실패/에러로도 대기가 풀리는가 (상한까지 노는 일이 없어야 한다)
 
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stealth_vox/custom_code/services/openai_streaming_transcribe_session.dart';
 
@@ -392,25 +394,46 @@ void main() {
       expect(s.vadSilenceDurationMs, kStreamingSttVadSilenceDurationMs);
     });
 
-    test('듀오 값은 셋 다 공용과 다르다 — 먼 소리를 잡는 쪽으로만', () {
-      expect(kDuoSttVadThreshold, lessThan(kStreamingSttVadThreshold));
-      expect(kDuoSttVadPrefixPaddingMs,
-          greaterThan(kStreamingSttVadPrefixPaddingMs));
-      expect(kDuoSttVadSilenceDurationMs,
-          greaterThan(kStreamingSttVadSilenceDurationMs));
+    test('듀오 전용 값은 더 이상 없다 — 모든 모드가 공용값을 쓴다', () {
+      // 한때 듀오만 0.35 / 500 / 800으로 내려 잡았다. 폰이 멀어 먼 소리를
+      // 잡겠다는 이유였는데, 예민해진 VAD가 잡음까지 발화로 잡고 → 전사기가
+      // 없는 말을 지어내고 → 그걸 거르려 만든 세기 게이트가 **진짜 사람 말을
+      // 버렸다**(2026-09-03: 4.9초짜리 발화가 -42.7dBFS로 버려짐).
+      //
+      // 문턱 하나를 손으로 맞추면 그 대가를 다른 문턱으로 갚게 된다.
+      final String svc = File(
+              'lib/custom_code/services/openai_streaming_transcribe_session.dart')
+          .readAsStringSync();
+      expect(svc, isNot(contains('kDuoSttVadThreshold')),
+          reason: '듀오 전용 문턱이 되살아났다');
+      expect(svc, isNot(contains('kDuoSttVadPrefixPaddingMs')));
+      expect(svc, isNot(contains('kDuoSttVadSilenceDurationMs')));
+
+      final String duo = File('lib/custom_code/widgets/routine_mode_duo.dart')
+          .readAsStringSync();
+      expect(duo, isNot(contains('vadThreshold:')),
+          reason: '듀오가 다시 자기 값을 넘기고 있다');
+    });
+
+    test('공용값은 OpenAI 정석 언저리다', () {
+      // 지어낸 숫자가 아니라 문서 기본값(0.5 / 300)을 따른다. 실측 근거 없이
+      // 여기를 다시 만지지 말 것 — 위 시험이 그 이유를 적어 두었다.
+      expect(kStreamingSttVadThreshold, 0.5);
+      expect(kStreamingSttVadPrefixPaddingMs, 300);
+      expect(kStreamingSttVadSilenceDurationMs, 600);
     });
 
     test('넘긴 값이 그대로 실린다', () {
       final s = OpenAiStreamingTranscribeSession(
         apiKey: 'k',
         languageCode: '',
-        vadThreshold: kDuoSttVadThreshold,
-        vadPrefixPaddingMs: kDuoSttVadPrefixPaddingMs,
-        vadSilenceDurationMs: kDuoSttVadSilenceDurationMs,
+        vadThreshold: 0.42,
+        vadPrefixPaddingMs: 321,
+        vadSilenceDurationMs: 654,
       );
-      expect(s.vadThreshold, kDuoSttVadThreshold);
-      expect(s.vadPrefixPaddingMs, kDuoSttVadPrefixPaddingMs);
-      expect(s.vadSilenceDurationMs, kDuoSttVadSilenceDurationMs);
+      expect(s.vadThreshold, 0.42);
+      expect(s.vadPrefixPaddingMs, 321);
+      expect(s.vadSilenceDurationMs, 654);
     });
   });
 }

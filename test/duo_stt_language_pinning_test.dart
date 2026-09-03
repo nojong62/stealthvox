@@ -24,25 +24,120 @@ void main() {
   final String circle = read(_circle);
   final String scenario = read(_scenario);
 
-  group('Duo 직접 대화의 전사 언어는 로비값으로 박힌다', () {
-    test('연결 시점에 _mapLanguageToCode(_myNative())를 박는다', () {
-      expect(duo, contains('languageCode: _mapLanguageToCode(_myNative())'));
+  // ⚠️ **Duo 두 모드의 정책이 다르다.** 2026-09-03에 만능 통역만 첫 발화
+  //   언어 판정을 받았고, 직접 대화는 예전 그대로 로비값을 박는다.
+  //   같이 바꾸지 않은 이유는 그때 직접 대화가 WebRTC 검증 중이어서다 —
+  //   두 변수를 섞으면 실기기 실패의 원인을 가를 수 없다.
+  //
+  //   그래서 아래 두 그룹은 **서로 다른 것을 지킨다.** 나중에 직접 대화까지
+  //   넓히면 첫 그룹을 옮기고 이 주석을 고칠 것.
+
+  group('직접 대화는 로비값을 그대로 박는다 (무변경)', () {
+    /// `_startDirectStt` 안만 본다 — 만능 통역 쪽 코드에 걸리면 안 된다.
+    String directSttRegion() {
+      final start = duo.indexOf('Future<void> _startDirectStt(');
+      expect(start, greaterThan(-1));
+      final end = duo.indexOf('Future<void> _handleDirectTranscript(', start);
+      expect(end, greaterThan(start),
+          reason: '구역 경계를 못 잡았다 — 함수 순서가 바뀌었는지 확인할 것');
+      return duo.substring(start, end);
+    }
+
+    test('연결 시점에 로비값(_myNative)을 그대로 박는다', () {
+      // 진단기와 소켓이 **같은 값**을 봐야 A/B 비교가 성립하므로 지역변수를
+      // 한 번 거친다. 그 변수의 출처가 로비값이라는 것이 여기서 지킬 사실이다.
+      final region = directSttRegion();
+      expect(region,
+          contains('final String sttLanguageCode = _mapLanguageToCode(_myNative());'));
+      expect(region, contains('languageCode: sttLanguageCode'));
     });
 
-    test('⚠️ Duo는 자동 감지로 열지 않는다 — 첫 발화부터 언어가 박힌다', () {
-      // 서클톡/시나리오톡은 판정 전까지 빈 문자열(=자동 감지)로 연다.
-      expect(circle, contains("OriginLanguageSession.instance.settled"));
-      // Duo에는 그 장치가 없다.
-      expect(duo, isNot(contains('OriginLanguageSession')));
+    test('직접 대화는 자동 감지로 열지 않는다', () {
+      // 첫 발화부터 로비 언어가 박힌다. 판정 장치가 이 구역에 없어야 한다.
+      expect(directSttRegion(), isNot(contains('OriginLanguageSession')));
     });
 
-    test('⚠️ Duo는 switchLanguage를 한 번도 부르지 않는다', () {
-      // 서클톡·시나리오톡은 첫 발화 판정 뒤 소켓 언어를 갈아 끼운다.
+    test('직접 대화는 언어를 갈아 끼우지 않는다', () {
+      expect(directSttRegion(), isNot(contains('switchLanguage(')));
+    });
+  });
+
+  // ⚠️ 언어 확인 기능은 **플래그 뒤에 있고 기본이 꺼짐**이다
+  //   (`DUO_INTERP_ORIGIN_CHECK`, 기본 false). 켜고 끄는 이유는 지연 개선과
+  //   원인을 분리해 실기기 검증을 하기 위해서다.
+  group('🚧 플래그 OFF — 만능 통역 STT가 기존 동작 그대로다', () {
+    test('꺼져 있으면 로비값으로 고정한다 (자동 감지 없음)', () {
+      // `!kDuoInterpOriginCheck ||` 가 앞에 있어야 꺼진 빌드에서 항상
+      // 로비값 갈래로 간다. 이 조건이 빠지면 v147이 기존 동작이 아니게 된다.
+      expect(
+          duo,
+          contains('(!kDuoInterpOriginCheck || '
+              'OriginLanguageSession.instance.settled)'),
+          reason: '꺼진 빌드에서 자동 감지로 열릴 수 있다');
+    });
+
+    test('기본값이 false다', () {
+      expect(
+          duo,
+          contains("bool.fromEnvironment('DUO_INTERP_ORIGIN_CHECK', "
+              "defaultValue: false)"),
+          reason: '기본이 켜져 있으면 v147이 두 변경을 함께 검증하게 된다');
+    });
+
+    test('판정 함수가 맨 앞에서 빠져나온다', () {
+      // GPT 판정도 세션 상태도 switchLanguage도 여기서 멈춰야 한다.
+      final int start = duo.indexOf('Future<void> _settleInterpreterOrigin(');
+      expect(start, greaterThan(-1));
+      final String head = duo.substring(start, start + 400);
+      expect(head, contains('if (!kDuoInterpOriginCheck) return;'));
+      // 그 return이 GPT 호출보다 **앞**에 있어야 한다.
+      final int guard = head.indexOf('if (!kDuoInterpOriginCheck) return;');
+      final int call = head.indexOf('resolveOriginFromFirstUtterance');
+      expect(guard, greaterThan(-1));
+      if (call > -1) {
+        expect(guard, lessThan(call), reason: '가드보다 GPT 호출이 먼저다');
+      }
+    });
+
+    test('꺼져 있으면 서클톡의 세션 상태를 건드리지 않는다', () {
+      // 싱글턴이라 남의 판정을 비우고 다니면 안 된다.
+      expect(duo,
+          contains('if (kDuoInterpOriginCheck) OriginLanguageSession.instance.begin()'));
+    });
+
+    test('꺼져 있으면 확인 창이 그려지지 않는다', () {
+      expect(duo,
+          contains('if (kDuoInterpOriginCheck && _originMismatchDetected != null)'));
+    });
+  });
+
+  group('🌐 플래그 ON — 첫 발화 판정 전까지 자동 감지로 연다', () {
+    test('판정 전에는 빈 languageCode(=자동 감지)로 연다', () {
+      // 로비값을 박아 두면 그 언어로 **음차된** 글자가 돌아와 불일치가
+      // 보이지 않는다(한국어로 박힌 채 영어를 말하면 한글 음차).
+      expect(duo, contains('OriginLanguageSession.instance.settled'));
+      expect(
+          duo,
+          contains("? _mapLanguageToCode(_myNative())\n"
+              "              : ''"),
+          reason: '판정 전 자동 감지 갈래가 사라졌다');
+    });
+
+    test('판정이 끝나면 소켓 언어를 갈아 끼운다', () {
+      // 자동 감지로 계속 두면 짧은 발화에서 언어가 흔들려 전사가 나빠진다.
+      expect(duo, contains('switchLanguage('));
+      expect(duo, contains('_settleInterpreterOrigin'));
+    });
+
+    test('방마다 판정을 새로 시작한다', () {
+      // 안 비우면 직전 서클톡 세션의 판정이 남아 첫 발화를 그냥 지나친다.
+      expect(duo, contains('OriginLanguageSession.instance.begin()'));
+    });
+
+    test('서클톡·시나리오톡의 기존 정책은 그대로다', () {
+      expect(circle, contains('OriginLanguageSession.instance.settled'));
       expect(circle, contains('switchLanguage('));
       expect(scenario, contains('switchLanguage('));
-      // Duo는 통화 내내 처음 박은 언어 그대로다. 로비 ORIGIN이 실제 발화
-      // 언어와 어긋나면 통화가 끝날 때까지 어긋난 채로 전사된다.
-      expect(duo, isNot(contains('switchLanguage(')));
     });
   });
 

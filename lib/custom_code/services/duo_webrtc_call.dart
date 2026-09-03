@@ -20,6 +20,7 @@
 // ====================================================================
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
@@ -47,6 +48,11 @@ const String kDuoWebrtcMicNote =
 
 /// 연결 수립 상한. 이 안에 못 붙으면 통화를 열지 않는다(호출부가 폴백한다).
 const Duration kDuoWebrtcConnectTimeout = Duration(seconds: 20);
+
+/// 📨 만능 통역이 글자를 실어 나르는 DataChannel 이름.
+///
+/// 직접 대화는 이 채널을 열지 않는다 — 거기는 소리가 곧 대화다.
+const String kDuoInterpDataChannelLabel = 'duo-interp-text';
 
 /// 통화 중 연결이 흔들릴 때 ICE restart를 걸기까지 기다리는 시간.
 /// `disconnected`는 잠깐의 망 끊김에도 나므로 즉시 재협상하면 멀쩡한 통화를
@@ -93,6 +99,10 @@ class DuoWebrtcCall {
     this.onPartnerPresence,
     this.onFatal,
     this.onRemoteVoice,
+    this.sendAudio = true,
+    this.withDataChannel = false,
+    this.onData,
+    this.onDataChannelState,
   });
 
   final String roomId;
@@ -127,7 +137,34 @@ class DuoWebrtcCall {
   ///    "소리가 났다"는 사실 하나뿐이다 — 상대 오디오는 앱에 닿지 않는다.
   final void Function()? onRemoteVoice;
 
+  /// 🎙️ 내 목소리를 상대에게 **보낼 것인가.**
+  ///
+  /// 직접 대화는 true다 — 그게 통화의 전부다.
+  ///
+  /// 만능 통역은 false다. 통역은 원어를 들려주지 않으므로 오디오를 보낼
+  /// 이유가 없고, 보내면 상대 스피커에서 원어가 그대로 난다. 마이크는 그래도
+  /// 연다 — WebRTC의 AEC/NS/AGC를 태운 PCM을 [DuoWebrtcMicTap]으로 받아
+  /// 전사에 쓰기 때문이다. **트랙을 만들되 PeerConnection에는 안 붙인다.**
+  ///
+  /// ⚠️ 붙이지 않아도 APM(AEC/NS/AGC)이 도는지는 **실기기에서 확인할 일**이다.
+  ///   안 돈다면 붙이고 상대 렌더링만 끄는 쪽으로 바꿔야 한다.
+  final bool sendAudio;
+
+  /// 📨 글자를 실어 나를 DataChannel을 열 것인가.
+  ///
+  /// 만능 통역이 Firestore 대신 쓰는 통로다. 직접 대화는 false — 지금 동작을
+  /// 한 글자도 바꾸지 않는다.
+  final bool withDataChannel;
+
+  /// DataChannel로 들어온 한 건. JSON 객체 하나가 발화 하나다.
+  final void Function(Map<String, dynamic> payload)? onData;
+
+  /// 채널이 열렸는가/닫혔는가. 호출부가 "글자를 보낼 수 있는 상태"를 안다.
+  final void Function(bool open)? onDataChannelState;
+
   RTCPeerConnection? _pc;
+  RTCDataChannel? _dataChannel;
+  bool _dataChannelOpen = false;
   MediaStream? _localStream;
   MediaStreamTrack? _localAudioTrack;
   DuoWebrtcSignaling? _signaling;
@@ -177,7 +214,53 @@ class DuoWebrtcCall {
   /// 마이크를 한 번만 열기 위한 고리다. 아직 안 열렸으면 null.
   String? get localAudioTrackId => _localAudioTrack?.id;
 
+  /// 📨 글자를 지금 보낼 수 있는가.
+  bool get isDataChannelOpen => !_disposed && _dataChannelOpen;
+
+  /// 📨 발화 한 건을 상대에게 보낸다. 보냈으면 true.
+  ///
+  /// **실패를 삼키지 않는다.** 채널이 안 열렸으면 false를 돌려주고, 호출부가
+  /// 그 사실을 로그로 남긴다 — 조용히 Firestore로 되돌아가면 어느 통로가
+  /// 실제로 돌았는지 실기기에서 못 가린다.
+  bool sendData(Map<String, dynamic> payload) {
+    final ch = _dataChannel;
+    if (_disposed || ch == null || !_dataChannelOpen) return false;
+    try {
+      ch.send(RTCDataChannelMessage(jsonEncode(payload)));
+      return true;
+    } catch (e) {
+      _lg('❌ [INTERP-DATA]', 'send_failed(${e.runtimeType})');
+      return false;
+    }
+  }
+
   void _lg(String tag, String msg) => onLog?.call(tag, msg);
+
+  /// 📨 채널 하나에 콜백을 건다. 호스트가 만든 것도, 게스트가 받은 것도
+  /// 여기를 지난다 — 양쪽 동작이 갈라지지 않게 한 자리로 모은다.
+  void _wireDataChannel(RTCDataChannel ch, String origin) {
+    _dataChannel = ch;
+    ch.onDataChannelState = (RTCDataChannelState state) {
+      if (_disposed) return;
+      final bool open = state == RTCDataChannelState.RTCDataChannelOpen;
+      if (open == _dataChannelOpen) return;
+      _dataChannelOpen = open;
+      _lg('[INTERP-DATA]',
+          'channel_state=${open ? 'open' : 'closed'} origin=$origin');
+      onDataChannelState?.call(open);
+    };
+    ch.onMessage = (RTCDataChannelMessage msg) {
+      if (_disposed || msg.isBinary) return;
+      try {
+        final decoded = jsonDecode(msg.text);
+        if (decoded is! Map) return;
+        onData?.call(Map<String, dynamic>.from(decoded));
+      } catch (e) {
+        // 한 건이 깨져도 통화를 흔들지 않는다.
+        _lg('❌ [INTERP-DATA]', 'decode_failed(${e.runtimeType})');
+      }
+    };
+  }
 
   /// 통화를 연다. false면 호출부는 이 경로를 포기한다.
   Future<bool> connect() async {
@@ -255,7 +338,35 @@ class DuoWebrtcCall {
       _localAudioTrack = tracks.first;
       // 음소거 상태로 시작하지 않는다. 호출부가 통화 중에 토글한다.
       _localAudioTrack!.enabled = !_muted;
-      await pc.addTrack(_localAudioTrack!, stream);
+      if (sendAudio) {
+        await pc.addTrack(_localAudioTrack!, stream);
+      } else {
+        // 🎙️ 통역: 마이크는 열되 상대에게 보내지 않는다. 트랙은 살아 있으므로
+        //   [DuoWebrtcMicTap]은 그대로 붙고, 상대 스피커에서는 원어가 안 난다.
+        _lg('[INTERP-WEBRTC]',
+            'mic_ready sendAudio=false — 트랙은 열고 상대에겐 보내지 않는다');
+      }
+
+      // 📨 글자 통로. 호스트가 만들고 게스트가 받는다 — offer/answer와 같은
+      //   주인 규칙이라 양쪽이 서로 만들어 둘이 생기는 일이 없다.
+      if (withDataChannel) {
+        if (isOfferer) {
+          final ch = await pc.createDataChannel(
+            kDuoInterpDataChannelLabel,
+            RTCDataChannelInit()
+              ..ordered = true
+              ..negotiated = false,
+          );
+          _wireDataChannel(ch, 'created');
+          _lg('[INTERP-DATA]', 'channel_created label=$kDuoInterpDataChannelLabel');
+        } else {
+          pc.onDataChannel = (RTCDataChannel ch) {
+            if (_disposed) return;
+            _wireDataChannel(ch, 'received');
+            _lg('[INTERP-DATA]', 'channel_received label=${ch.label ?? '-'}');
+          };
+        }
+      }
 
       _wireConnectionState(pc);
 
@@ -714,6 +825,16 @@ class DuoWebrtcCall {
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
+    final ch = _dataChannel;
+    _dataChannel = null;
+    _dataChannelOpen = false;
+    if (ch != null) {
+      try {
+        await ch.close();
+      } catch (_) {
+        // 닫다 실패해도 통화 정리는 계속한다.
+      }
+    }
     _cancelIceRestart();
     _statsTimer?.cancel();
     _statsTimer = null;

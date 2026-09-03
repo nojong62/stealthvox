@@ -83,25 +83,17 @@ const double kStreamingSttVadThreshold = 0.5;
 const int kStreamingSttVadPrefixPaddingMs = 300;
 const int kStreamingSttVadSilenceDurationMs = 600;
 
-// ── 듀오 전용 Server VAD ─────────────────────────────────────────────
-// **듀오만 다르다.** 다른 모드는 폰을 손에 들고 입 가까이에서 말하지만,
-// 듀오는 통화처럼 책상에 두거나 스피커폰으로 쓴다. 입과 마이크가 멀어
-// 소리가 공용 문턱(0.5) 언저리를 오르내리고, 그러면 한 문장이 여러 조각으로
-// 끊긴 채 조각마다 앞이 잘려 들어간다.
+// ── 듀오도 공용 Server VAD를 쓴다 ────────────────────────────────────
+// 한때 듀오만 문턱 0.35 / 앞소리 500ms / 침묵 800ms로 내려 잡았다. 폰이
+// 책상 위에 있어 입과 마이크가 멀다는 이유였다.
 //
-// 2026-08-28 실기기 한 통(직접 대화, 73발화) 실측:
-//   · 1초 넘게 말했는데 4글자 이하로 끝난 발화가 24건(32%)
-//   · 초당 글자수 중앙값 3.7자 — 편한 한국어는 5~7자
-//   · 버려진 발화는 0건이었다. 못 잡은 게 아니라 잘린 것이다.
+// **그 완화가 뒤에 세 겹의 수습을 낳았다.** 예민해진 VAD가 잡음까지 발화로
+// 잡고 → 잡음이 전사기로 가서 없는 말을 지어내고 → 그 환청을 거르려고
+// 세기 게이트를 달았고 → 그 게이트가 진짜 사람 말을 버렸다.
+// (2026-09-03 실기기: 4.9초짜리 실제 발화가 -42.7dBFS라는 이유로 버려졌다.)
 //
-// 문턱을 내려 먼 소리를 잡고, 앞소리를 더 보관해 첫 음절을 지키고, 침묵
-// 판정을 늦춰 천천히 말해도 문장 중간에 끊기지 않게 한다. 대가는 턴 종료가
-// 200ms 늦는 것인데, 한 턴 병목은 GPT+TTS 2.2초라 체감에 묻힌다.
-//
-// **다른 모드에는 손대지 않는다** — 잘 되고 있는 자리를 같이 흔들지 않는다.
-const double kDuoSttVadThreshold = 0.35;
-const int kDuoSttVadPrefixPaddingMs = 500;
-const int kDuoSttVadSilenceDurationMs = 800;
+// 문턱 하나를 손으로 맞추면 그 대가를 다른 문턱으로 갚게 된다. 특별한 값을
+// 쓸 근거가 실측으로 확인되기 전까지는 공용값을 쓴다.
 
 const Duration kStreamingSttConnectTimeout = Duration(seconds: 6);
 
@@ -133,7 +125,7 @@ class OpenAiStreamingTranscribeSession {
   final String apiKey;
 
   // ── Server VAD. 기본값은 공용이고, 부르는 쪽이 갈아 끼울 수 있다.
-  //   듀오처럼 마이크가 먼 자리만 [kDuoSttVadThreshold] 한 벌을 넘긴다.
+  //   모드별로 다르게 잡을 근거가 생기면 그때 한 벌을 넘긴다.
   final double vadThreshold;
   final int vadPrefixPaddingMs;
   final int vadSilenceDurationMs;

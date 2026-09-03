@@ -247,6 +247,48 @@ String originLanguageSwitchedNoticeLine(String detectedLanguage) {
   }
 }
 
+/// 🌐 [INTERP-ORIGIN] 로비 ORIGIN과 실제 발화 언어가 달라 **확인을 구할 때**
+/// 뜨는 문구. 만능 통역이 쓴다.
+///
+/// 위 [originLanguageSwitchedNoticeLine]과 하는 말이 다르다. 그쪽은 이미
+/// 갈아 끼운 뒤의 통보("이번 대화는 한국어로 진행할게요")이고, 이쪽은 아직
+/// 아무것도 바꾸지 않은 채 묻는 말이다. 두 문구를 섞으면 유저는 바뀌지도
+/// 않은 설정이 바뀌었다고 읽는다.
+///
+/// **감지된 언어로** 적는다 — 로비값으로 적으면 정작 읽어야 할 사람이 못
+/// 읽는다(같은 이유가 위 함수에도 적혀 있다).
+///
+/// 일부러 다른 언어를 연습하는 경우가 있으므로 단정하지 않고 확인만 구한다.
+String originLanguageCheckPromptLine(String detectedLanguage) {
+  switch (resolveNativeLanguageName(detectedLanguage).toLowerCase()) {
+    case 'korean':
+      return '현재 한국어로 말씀하고 계세요. 언어 선택을 확인해 주세요.';
+    case 'japanese':
+      return '現在、日本語でお話しになっています。言語設定をご確認ください。';
+    case 'chinese':
+      return '您正在使用中文交谈。请确认您的语言设置。';
+    case 'spanish':
+      return 'Está hablando español. Revise su selección de idioma.';
+    case 'french':
+      return 'Vous parlez français. Veuillez vérifier votre choix de langue.';
+    case 'german':
+      return 'Sie sprechen Deutsch. Bitte prüfen Sie Ihre Sprachauswahl.';
+    case 'hindi':
+      return 'आप हिंदी बोल रहे हैं। कृपया अपनी भाषा का चयन जाँचें।';
+    case 'russian':
+      return 'Вы говорите по-русски. Проверьте выбор языка.';
+    case 'portuguese':
+      return 'Você está falando português. Verifique a seleção de idioma.';
+    case 'italian':
+      return 'Stai parlando italiano. Controlla la selezione della lingua.';
+    case 'dutch':
+      return 'U spreekt Nederlands. Controleer uw taalkeuze.';
+    case 'english':
+    default:
+      return "You're speaking English. Please check your language selection.";
+  }
+}
+
 /// Anyone 자유대화 답변 전 내부 숙고 지시.
 /// 응답이 1초 정도 느려지더라도 어중간한 답 대신 구체적인 답과 질문을 뽑는다.
 const String kCircleTalkDeliberateReplyPolicy = '''[THINK TWICE BEFORE YOU SPEAK]

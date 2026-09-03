@@ -41,7 +41,17 @@ import '/custom_code/services/duo_stt_ab_probe.dart';
 import '/custom_code/services/pcm_audio_utils.dart'
     show kStealthVoxSttSampleRate;
 import '/custom_code/services/origin_language_session.dart'
-    show detectOriginScript, textIsLanguage, textContradictsLanguage;
+    show
+        detectOriginScript,
+        textIsLanguage,
+        textContradictsLanguage,
+        // 🌐 [INTERP-ORIGIN] 만능 통역의 첫 발화 언어 판정. 서클톡·시나리오톡이
+        //   쓰는 것과 **같은 물건**이다 — 언어 상태를 새로 만들지 않는다.
+        resolveOriginFromFirstUtterance,
+        OriginLanguageSession;
+// 🌐 언어별 확인 문구. 3모드가 같은 표를 쓴다 — 문구표를 새로 만들지 않는다.
+import 'first_utterance_context_judge.dart'
+    show originLanguageCheckPromptLine;
 // 🆔 테스트 기기를 Remote Config 조건으로 고르는 데 쓰는 설치본 ID.
 import 'package:firebase_app_installations/firebase_app_installations.dart';
 import '/custom_code/services/duo_pcm_relay_client.dart';
@@ -49,8 +59,14 @@ import '/custom_code/services/duo_pcm_relay_client.dart';
 // 원음을 보내지 않으므로 이 파일에 닿을 일이 없다.
 import '/custom_code/services/duo_webrtc_call.dart';
 // 🎙️ 마이크를 두 번 열지 않기 위한 통로. WebRTC가 잡은 PCM을 전사로 흘린다.
+// 🔊 통역 경로에서 스피커폰을 켜는 데만 쓴다(`Helper`). 통화 자체는
+// `DuoWebrtcCall`이 감싸고 있어 위젯이 WebRTC를 직접 다루지 않는다.
+import 'package:flutter_webrtc/flutter_webrtc.dart' show Helper;
 import '/custom_code/services/duo_webrtc_mic_tap.dart'
-    show DuoWebrtcMicTap, kDuoSttPcmSourceWebrtcMic;
+    show DuoWebrtcMicTap, kDuoSttPcmSourceWebrtcMic, kDuoMicTapSampleRate;
+// 🌊 만능 통역의 번역 스트리밍 — 읽어도 되는 구절을 떼는 자리와 그 시각표.
+import '/custom_code/services/duo_speech_chunker.dart';
+import '/custom_code/services/duo_interp_latency.dart';
 import '/custom_code/services/openai_streaming_transcribe_session.dart';
 // 상대 발화 재생은 Circle Talk과 **같은 재생기 한 벌**을 쓴다. tts-1 PCM을
 // 받는 대로 트는 구조라, mp3를 다 받고 재생하던 예전 경로보다 첫 소리가 빠르다.
@@ -120,6 +136,86 @@ const String kDuoTransportWebrtc = 'webrtc';
 
 /// Remote Config 키. `'relay'`를 넣으면 옛 경로로 되돌린다(긴급 롤백 전용).
 const String kDuoTransportRemoteConfigKey = 'DuoDirectTransport';
+
+/// 🌊 [INTERP-STREAM] 만능 통역에서 번역을 흘려 받으며 조기 재생할 것인가.
+///
+/// 켜면 번역과 TTS가 시간상 겹친다. 끄면 예전처럼 번역이 다 끝난 뒤 읽는다.
+///
+/// **기존 경로를 지우지 않는 이유가 이 스위치다.** 두 경로의 지연을 같은
+/// 빌드에서 견주려면 둘 다 살아 있어야 한다:
+///   flutter build apk --dart-define=DUO_INTERP_STREAM_TTS=false
+///
+/// ⚠️ 직접 대화에는 아무 영향이 없다 — 거기는 번역도 TTS도 돌지 않는다.
+/// ⚠️ **2026-09-03 실기기 검증에서 효과가 없어 껐다. 코드는 남긴다.**
+///
+/// 10턴을 재어 본 결과:
+///   · `overlapped=false`가 **전부**였다 — 한 번도 겹치지 않았다
+///   · `translateTotalMs − translateTtfbMs`가 55~335ms뿐이다.
+///     GPT가 번역을 찔끔찔끔 주는 게 아니라 **거의 한 덩어리로 뱉는다**
+///     (번역문이 50~150자라 토큰이 몇 개 안 된다). 나눌 시간 자체가 없다.
+///   · 유일하게 나뉜 턴(`ttsChunks=4`)은 조각 넷이 **같은 초에** 확정됐고,
+///     `totalMs=14,486ms`로 한 조각짜리 턴(2.8~4.9초)보다 훨씬 느렸다.
+///     조각마다 붙는 프리롤·요청 비용이 이득을 넘어섰다.
+///
+/// 지우지 않는 이유: 번역 모델이나 문장 길이가 달라지면 전제가 바뀐다.
+/// 다시 켜 보려면 `--dart-define=DUO_INTERP_STREAM_TTS=true`.
+const bool kDuoInterpStreamingTts =
+    bool.fromEnvironment('DUO_INTERP_STREAM_TTS', defaultValue: false);
+
+/// 🌐 [INTERP-ORIGIN] 만능 통역에서 로비 ORIGIN이 실제 발화 언어와 어긋났는지
+/// 확인할 것인가.
+///
+/// **기본이 꺼짐인 것은 의도된 것이다.** 이 기능은 첫 발화의 STT 개방 방식을
+/// 바꾼다(로비값 고정 → 자동 감지). 같은 빌드에서 번역 스트리밍까지 함께
+/// 검증하면, 첫 발화가 이상하거나 통역 시작이 늦어졌을 때 **어느 쪽 탓인지
+/// 가릴 수 없다.** 그래서 지연 개선을 먼저 확인하고 이 값을 켠다.
+///
+///   v147  꺼짐 — 지연 개선만. STT는 예전과 **완전히 같다**
+///   v148  `--dart-define=DUO_INTERP_ORIGIN_CHECK=true` — 언어 확인 추가
+///
+/// ⚠️ 꺼져 있으면 UI만 안 뜨는 것이 아니다. `OriginLanguageSession`도,
+///   자동 감지도, GPT 판정도, `switchLanguage`도 **하나도 돌지 않는다.**
+///   그래야 "꺼진 빌드 = 기존 동작"이 성립한다.
+///
+/// 🚫 직접 대화에는 어느 값이든 영향이 없다 — 그쪽은 이 경로를 안 탄다.
+const bool kDuoInterpOriginCheck =
+    bool.fromEnvironment('DUO_INTERP_ORIGIN_CHECK', defaultValue: false);
+
+/// 📡 [INTERP-WEBRTC] 만능 통역을 직접 대화와 **같은 WebRTC 골격** 위에 올린다.
+///
+/// 켜면 통역의 마이크와 전달 통로가 통째로 바뀐다:
+///
+///   끄면(기존)  record AudioRecord → STT → Firestore messages → 상대
+///   켜면(새것)  WebRTC 마이크(AEC/NS/AGC) → MicTap → STT → DataChannel → 상대
+///
+/// **원어는 상대에게 보내지 않는다**(`sendAudio: false`). 통역에서 상대가
+/// 들어야 하는 것은 번역된 목소리뿐이고, 오디오 트랙을 붙이면 원어가 그대로
+/// 상대 스피커에서 난다. 마이크는 그래도 연다 — WebRTC의 오디오 처리를 태운
+/// PCM을 전사에 쓰는 것이 이 변경의 목적이기 때문이다.
+///
+/// **상대 PCM을 전사하지 않는다.** 이미 깨끗한 내 마이크 PCM이 있는데
+/// Opus 압축·네트워크·지터버퍼·복원을 거친 소리를 전사할 이유가 없다.
+/// 각자 자기 말을 전사해서 **글자만** 보낸다.
+///
+/// ⚠️ 기본값 false. 기존 경로는 지우지 않는다 — 한 빌드에서 A/B가 되어야
+///   "새 마이크가 정말 나은가"를 같은 조건으로 견줄 수 있다.
+const bool kDuoInterpWebrtc =
+    bool.fromEnvironment('DUO_INTERP_WEBRTC', defaultValue: false);
+
+/// 🌐 상대가 실어 보낸 `srcLang`을 **글자 판정으로 뒤집기 위한** 최소 길이.
+///
+/// 이보다 짧으면 선언값을 믿는다. 선언값은 로비 설정에서 오므로 흔들리지
+/// 않지만, 짧은 전사문은 흔들린다.
+///
+/// 📏 값의 근거 (2026-09-03 SM-S931N ↔ SM-F946N 실측 한 통):
+///   len=1, 4, 9   → 아주 작게 말한 조각. 9글자짜리가 한글로 잘못 전사돼
+///                    번역을 건너뛰게 만들었다(rmsDbfs=-40.7)
+///   len=19, 20, 30, 42, 109 → 전부 정상 판정
+/// 12는 그 사이다. 실기기 값이 더 쌓이면 다시 잡는다.
+///
+/// ⚠️ [detectOriginScript] 자체는 건드리지 않는다 — 서클톡·시나리오톡이
+///   같은 함수를 쓰고, 그쪽은 선언값이라는 대안이 없어 지금 문턱이 맞다.
+const int kDuoSrcLangOverrideMinChars = 12;
 
 /// 종료 직전 마지막 전사문의 History·채널 저장을 기다리는 상한.
 /// Firestore 쓰기가 걸려도 통화 종료가 무한정 늘어지면 안 된다.
@@ -506,6 +602,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 🎙️ WebRTC가 연 **하나뿐인 마이크**에서 전사 갈래를 받는 통로.
   /// 릴레이 경로에서는 null이고, 그때는 `_directCapture`가 그 자리를 맡는다.
   DuoWebrtcMicTap? _webrtcMicTap;
+
+  /// ⏱️ [INTERP-LATENCY] 지금 처리 중인 상대 발화 한 턴의 시각표.
+  /// 턴마다 새로 만들고, 로그 한 줄을 남긴 뒤 버린다.
+  DuoInterpLatency? _interpLatency;
   StreamSubscription<Uint8List>? _relayInboundSub;
   DuoPcmJitterPlayer? _jitterPlayer;
   PreparedAudioCapture? _directCapture;
@@ -583,6 +683,20 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   OpenAiStreamingTranscribeSession? _interpStt;
   PreparedAudioCapture? _interpCapture;
   StreamSubscription<Uint8List>? _interpCaptureSub;
+
+  /// 📡 [INTERP-WEBRTC] 통역이 여는 WebRTC 통화. 소리는 안 보내고 글자만
+  /// 보낸다. 직접 대화의 `_webrtcCall`과 **다른 필드**다 — 두 모드는 동시에
+  /// 돌지 않지만, 같은 필드를 쓰면 정리 경로가 서로 얽힌다.
+  DuoWebrtcCall? _interpCall;
+
+  /// 그 통화가 연 마이크에 붙는 전사 탭.
+  DuoWebrtcMicTap? _interpMicTap;
+
+  /// 글자 통로가 열려 있는가. 화면에는 안 쓰고 로그와 판단에만 쓴다.
+  bool _interpDataOpen = false;
+
+  /// 🔊 이 화면이 스피커폰을 **직접 켰는가.** 켠 것만 되돌린다.
+  bool _interpForcedSpeaker = false;
 
   /// 이번 세션에서 이미 확정한 전사문 id. 같은 item이 두 번 오면 한 번만 쓴다.
   /// 마이크가 세션 내내 열려 있으므로 턴 경계에서 비우지 않는다 — 비우면
@@ -2193,9 +2307,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       languageCode: sttLanguageCode,
       onLog: (tag, msg) => _lgDuo('[DIRECT-STT]$tag', msg),
       // 🎙️ 폰을 손에 들지 않는 자리다. 먼 소리를 잡고 첫 음절을 지킨다.
-      vadThreshold: kDuoSttVadThreshold,
-      vadPrefixPaddingMs: kDuoSttVadPrefixPaddingMs,
-      vadSilenceDurationMs: kDuoSttVadSilenceDurationMs,
     );
     session.shouldReconnect = () => _isDirectGenerationCurrent(generation);
     // 발화 순서는 전사 응답이 돌아온 순서가 아니라 **말을 시작한 시각** 기준이다.
@@ -2612,13 +2723,31 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     final int generation = ++_interpGeneration;
     final session = OpenAiStreamingTranscribeSession(
       apiKey: _openAiKey,
-      languageCode: _mapLanguageToCode(_myNative()),
+      // 🌐 [INTERP-ORIGIN] **판정 전까지는 언어를 박지 않는다.**
+      //   박아 두면 로비값이 틀렸을 때 그 언어로 음차된 글자가 돌아와
+      //   (한국어로 박힌 채 영어를 말하면 한글 음차) 불일치가 보이지 않는다.
+      //   판정이 끝나면 `_settleInterpreterOrigin`이 곧바로 박는다.
+      //
+      //   ⚠️ **플래그가 꺼져 있으면 예전과 한 글자도 다르지 않다** —
+      //   로비값을 그대로 박는다. 그래야 v147에서 지연 개선만 순수하게
+      //   볼 수 있다.
+      //
+      //   ⚠️ 직접 대화(`_startDirectStt`)는 어느 경우에도 로비값을 박는다 —
+      //   이번 변경은 만능 통역 전용이다.
+      languageCode:
+          (!kDuoInterpOriginCheck || OriginLanguageSession.instance.settled)
+              ? _mapLanguageToCode(_myNative())
+              : '',
       onLog: (tag, msg) => _lgDuo('[INTERP-STT]$tag', msg),
-      // 직접 대화와 같은 자리, 같은 값이다.
-      vadThreshold: kDuoSttVadThreshold,
-      vadPrefixPaddingMs: kDuoSttVadPrefixPaddingMs,
-      vadSilenceDurationMs: kDuoSttVadSilenceDurationMs,
+      // Server VAD는 공용 초기값을 쓴다 — 직접 대화와 같다.
     );
+    // 🌐 [INTERP-ORIGIN] 소켓을 어떤 언어 상태로 열었는지 한 줄로 남긴다.
+    //   `mode=pinned`이면 이번 세션에서 언어 판정은 더 돌지 않는다.
+    _lgDuo(
+        '[INTERP-ORIGIN]',
+        'stt_open '
+            'mode=${(!kDuoInterpOriginCheck || OriginLanguageSession.instance.settled) ? 'pinned' : 'auto'} '
+            'declared=${_myNative()} flag=${kDuoInterpOriginCheck ? 'on' : 'off'}');
     session.shouldReconnect = () =>
         !_isExiting && _isConversationActive && generation == _interpGeneration;
     // 발화 시작/종료는 **화면과 History 순서용**이다. 파이프라인은 여전히
@@ -2636,11 +2765,23 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     session.onUtteranceCommitted = (itemId, voicedMs, voicedSource) {
       if (generation != _interpGeneration) return;
       _utteranceRms?.commitUtterance(itemId);
+      // 🗣️ [INTERP-YIELD] **내 발화가 끝났다 = 미뤄 둔 상대 음성을 틀 때다.**
+      //   이 자리가 깨우는 훅이다. 별도 타이머로 큐를 들여다보지 않는 이유가
+      //   이것이다 — 말이 끝나는 순간을 이미 서버가 알려 준다.
+      //   (`isUserSpeaking`은 이 콜백 시점에 이미 거짓이다)
+      if (_incomingQueue.isNotEmpty) {
+        _lgDuo('[INTERP-YIELD]',
+            'resume queued=${_incomingQueue.length} reason=utterance_committed');
+        unawaited(_drainIncoming());
+      }
     };
     // 🔉 소켓이 끊겼다 붙는 동안의 소리는 어느 발화의 것도 아니다.
     session.onReconnecting = (attempt) {
       if (generation != _interpGeneration) return;
       _utteranceRms?.reset();
+      // 소켓이 끊기면 `isUserSpeaking`이 참으로 굳을 수 있다. 그 상태로 두면
+      // 미뤄 둔 상대 음성이 영영 안 나온다 — 여기서 한 번 깨워 둔다.
+      if (_incomingQueue.isNotEmpty) unawaited(_drainIncoming());
     };
     session.onSpeechStopped = () {
       if (generation != _interpGeneration) return;
@@ -2690,6 +2831,14 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     if (_interpCapture != null || _interpStarting) return;
     if (_interpAutoStartAttempted) return;
     _interpAutoStartAttempted = true;
+    // 🌐 [INTERP-ORIGIN] 이 방의 판정을 새로 시작한다. **반드시 소켓을 열기
+    //   전이어야 한다** — `_ensureInterpreterStt`가 `settled`를 보고 언어를
+    //   박을지 자동 감지로 둘지 정하기 때문이다. 여기서 안 비우면 직전
+    //   서클톡 세션의 판정이 남아 이 방의 첫 발화를 그냥 지나친다.
+    //
+    //   꺼져 있으면 건드리지 않는다 — 서클톡이 쓰는 싱글턴이라, 안 쓰는
+    //   기능이 남의 상태를 비우고 다니면 안 된다.
+    if (kDuoInterpOriginCheck) OriginLanguageSession.instance.begin();
     _lgDuo('[INTERP-LIVE]', 'auto_start reason=$reason role=$_myRole');
     unawaited(_startInterpreterCapture(reason));
   }
@@ -2737,6 +2886,21 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       //   새로 만들면 세대가 올라가므로, 먼저 읽으면 방금 만든 세션을 남의
       //   세대로 오인해 캡처를 곧바로 버린다.
       final int generation = _interpGeneration;
+
+      // 📡 [INTERP-WEBRTC] 새 경로는 여기서 갈린다. 마이크를 여는 주체가
+      //   `record`에서 WebRTC로 바뀌고, 그 뒤 처리는 그대로다.
+      if (kDuoInterpWebrtc) {
+        final bool ok = await _startInterpreterWebrtc(generation, reason);
+        if (!ok) {
+          // 🚫 조용히 옛 경로로 돌아가지 않는다. 돌아가면 실기기 로그에서
+          //   어느 마이크로 만든 글자인지 못 가린다.
+          _lgDuo('❌ [INTERP-WEBRTC]', 'start_failed — 통역을 시작하지 못했다');
+          if (mounted) setState(() => _interpStartFailed = true);
+          _setInterpMicPhase(InterpMicPhase.preparing);
+        }
+        return;
+      }
+
       final capture = await PreparedAudioCapture.start(
         recorder: _audioRecorder,
         // 🔇 [ECHO] always-on이라 상대 말이 재생되는 동안에도 마이크는 열려
@@ -2758,28 +2922,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       }
       _interpCapture = capture;
       _interpCaptureSub = capture.stream.listen(
-        (bytes) {
-          if (bytes.isEmpty || generation != _interpGeneration) return;
-          final stt = _interpStt;
-          // 게이트가 닫혀 있으면 조각을 그냥 버린다. **캡처는 계속 돈다** —
-          // 이것이 always-on과 "마이크를 껐다 켠다"의 차이다.
-          final bool gateOpen = stt != null && stt.audioGateOpen;
-          // 🎚️ [AEC-PROBE] 버려지는 조각도 세기는 잰다. 게이트가 닫혀 있는
-          //   동안은 곧 상대 발화가 재생되는 동안이고(닫는 곳이 그 한 곳뿐이다),
-          //   열려 있는데 내가 말하지 않는 동안은 잡음 바닥이다.
-          if (gateOpen) {
-            if (_interpMicPhase != InterpMicPhase.speaking) {
-              _aecProbe.addIdle(bytes);
-            }
-            // 🔉 세기 계측. **release에서도 돈다.** 이게 없으면 게이트가
-            //   세기를 모르고, 모르면 통과시키므로 방어선이 사라진다.
-            //   (계측기는 발화 구간에서만 누적한다 — 스스로 걸러낸다.)
-            _utteranceRms?.addPcm(bytes);
-            stt.appendAudio(bytes);
-          } else {
-            _aecProbe.addDuringTts(bytes);
-          }
-        },
+        (bytes) => _feedInterpreterPcm(bytes, generation),
         onError: (Object e) =>
             _lgDuo('[INTERP-STT]', 'capture_error=${e.runtimeType}'),
       );
@@ -2799,6 +2942,217 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     }
   }
 
+  /// 📡 [INTERP-WEBRTC] 통역을 WebRTC 골격 위에서 연다.
+  ///
+  /// 직접 대화와 **같은 [DuoWebrtcCall]**을 쓴다. 다른 점은 둘뿐이다:
+  ///   · `sendAudio: false` — 원어를 상대 스피커로 흘리지 않는다
+  ///   · `withDataChannel: true` — 대신 글자를 보낸다
+  ///
+  /// 마이크 PCM은 [DuoWebrtcMicTap]이 24kHz로 맞춰 준다. 직접 대화가 쓰는
+  /// 바로 그 탭이고, 여기서 새로 만들지 않는다.
+  Future<bool> _startInterpreterWebrtc(int generation, String reason) async {
+    final roomId = _duoSessionRef?.id;
+    if (roomId == null || roomId.isEmpty) {
+      _lgDuo('❌ [INTERP-WEBRTC]', 'no_room — 방 문서가 없다');
+      return false;
+    }
+
+    final call = DuoWebrtcCall(
+      roomId: roomId,
+      uid: _myUid,
+      role: _myRole,
+      sessionId: '$roomId#interp$generation',
+      isOfferer: _amIHost,
+      onLog: _lgDuo,
+      // 🎙️ 원어는 안 보낸다. 상대가 들을 것은 번역된 목소리뿐이다.
+      sendAudio: false,
+      withDataChannel: true,
+      onDataChannelState: (open) {
+        if (generation != _interpGeneration) return;
+        _interpDataOpen = open;
+      },
+      onData: (payload) {
+        if (generation != _interpGeneration || _isExiting || !mounted) return;
+        _onInterpreterData(payload);
+      },
+      onPartnerPresence: (present) {
+        if (generation != _interpGeneration) return;
+        // 문자열을 조립하지 않는다 — 로그를 grep으로 찾는 사람이 소스에서
+        // 같은 낱말을 볼 수 있어야 한다.
+        _lgDuo('[INTERP-WEBRTC]',
+            present ? 'connection_ready role=$_myRole' : 'connection_lost role=$_myRole');
+      },
+      onFatal: (r) {
+        if (generation != _interpGeneration) return;
+        _lgDuo('❌ [INTERP-WEBRTC]', 'fatal=$r');
+      },
+    );
+    _interpCall = call;
+    _lgDuo('[INTERP-WEBRTC]',
+        'connection_started room=$roomId role=$_myRole offerer=$_amIHost');
+
+    final ok = await call.connect();
+    if (generation != _interpGeneration || _isExiting || !mounted) {
+      await call.dispose();
+      return false;
+    }
+    if (!ok) return false;
+
+    await _routeInterpreterAudioOut();
+
+    final trackId = call.localAudioTrackId;
+    if (trackId == null || trackId.isEmpty) {
+      _lgDuo('❌ [INTERP-WEBRTC]', 'no_track — 마이크 트랙이 없다');
+      return false;
+    }
+
+    final tap = DuoWebrtcMicTap(onLog: _lgDuo);
+    _interpMicTap = tap;
+    // 🔇 하드웨어 NS는 끈다 — 기존 `noiseSuppress: false` 정책과 같은 자리다.
+    //   통화 쪽 잡음 억제는 소프트웨어 APM이 이 탭 뒤에서 계속 한다.
+    await tap.disableHardwareNoiseSuppressor();
+    if (generation != _interpGeneration) {
+      await tap.stop();
+      return false;
+    }
+
+    final started = await tap.start(
+      trackId: trackId,
+      onPcm: (bytes) => _feedInterpreterPcm(bytes, generation),
+    );
+    if (generation != _interpGeneration) {
+      await tap.stop();
+      return false;
+    }
+    if (!started) {
+      _lgDuo('❌ [INTERP-WEBRTC]', 'mic_tap_failed — 전사할 소리가 없다');
+      _interpMicTap = null;
+      return false;
+    }
+
+    _lgDuo(
+        '[INTERP-WEBRTC]',
+        'local_pcm source=$kDuoSttPcmSourceWebrtcMic rate=$kDuoMicTapSampleRate '
+            'aec=requested ns=requested agc=requested '
+            '(※ 실제 적용 여부는 플랫폼이 정하며 보고하지 않는다)');
+    // 마지막 줄에서 연다 — 직접 경로와 같은 순서다.
+    _openInterpGate('capture_started');
+    _lgDuo(
+        '[INTERP-LIVE]',
+        'capture_started reason=$reason gen=$generation role=$_myRole '
+            'ready=$_interpReady transport=webrtc');
+    if (mounted) setState(() => _micActive = true);
+    return true;
+  }
+
+  /// 🔊 [INTERP-WEBRTC] 번역 음성이 나갈 곳을 정한다. **통역 경로 전용이다.**
+  ///
+  /// 왜 필요한가 — WebRTC가 마이크를 열면서 안드로이드 오디오 모드가 통화용으로
+  /// 바뀌고, 통화 모드의 기본 출구는 **수화부**다. 직접 대화는 네이티브
+  /// 재생기가 스피커폰을 켜 주지만(`MainActivity.kt`), 통역의 번역 음성은
+  /// `flutter_sound`로 나가 그 경로를 안 탄다. 그냥 두면 번역이 수화부로 새어
+  /// "소리가 안 난다"로 보인다.
+  ///
+  /// 🎧 **이어폰·블루투스를 밀어내지 않는다.** 붙어 있으면 시스템이 고른 곳을
+  ///   그대로 둔다 — 헤드셋을 낀 사람의 소리를 스피커로 끌어내면 그게 더 나쁘다.
+  ///   맨폰일 때만 스피커폰을 켠다.
+  ///
+  /// 🚫 직접 대화의 라우팅은 건드리지 않는다. 이 함수는 새 경로에서만 불린다.
+  Future<void> _routeInterpreterAudioOut() async {
+    String route = 'unknown';
+    bool speakerOn = false;
+    try {
+      // 'wired-headset' / 'bluetooth' / 'speaker' / 'earpiece' 중 **쓸 수 있는**
+      // 것들이 온다. 앞 둘은 꽂혀 있을 때만 나타난다.
+      final outs = await Helper.enumerateDevices('audiooutput');
+      final ids = outs.map((d) => d.deviceId).toSet();
+      if (ids.contains('wired-headset')) {
+        route = 'wired-headset';
+      } else if (ids.contains('bluetooth')) {
+        route = 'bluetooth';
+      } else {
+        await Helper.setSpeakerphoneOn(true);
+        _interpForcedSpeaker = true;
+        route = 'speaker';
+        speakerOn = true;
+      }
+    } catch (e) {
+      // 못 정해도 통화는 진행한다. 소리가 작으면 실기기에서 이 줄이 단서다.
+      _lgDuo('⚠️ [INTERP-WEBRTC]', 'audio_route_failed(${e.runtimeType})');
+    }
+    _lgDuo('[INTERP-WEBRTC]', 'audio_route=$route speakerphone=$speakerOn');
+  }
+
+  /// 🔊 내가 켠 것만 되돌린다. 안 켰으면 아무것도 안 한다 — 남의 라우팅을
+  /// 이 화면이 끄고 나가면 다음 화면의 소리가 엉뚱한 데서 난다.
+  Future<void> _restoreInterpreterAudioOut() async {
+    if (!_interpForcedSpeaker) return;
+    _interpForcedSpeaker = false;
+    try {
+      await Helper.setSpeakerphoneOn(false);
+      await Helper.clearAndroidCommunicationDevice();
+      _lgDuo('[INTERP-WEBRTC]', 'audio_route=restored speakerphone=false');
+    } catch (e) {
+      _lgDuo('⚠️ [INTERP-WEBRTC]', 'audio_restore_failed(${e.runtimeType})');
+    }
+  }
+
+  /// 📨 [INTERP-DATA] 상대가 DataChannel로 보낸 발화 한 건.
+  ///
+  /// **Firestore 리스너와 같은 모양의 맵**으로 넘긴다. 그래야 번역·TTS·큐·
+  /// YIELD가 이미 검증된 경로 그대로 돈다 — 새 경로를 위해 두 번째 파이프라인을
+  /// 만들지 않는다.
+  void _onInterpreterData(Map<String, dynamic> payload) {
+    final String text = payload['text']?.toString().trim() ?? '';
+    if (text.isEmpty) return;
+    final String role = payload['senderRole']?.toString() ?? '';
+    // 내가 보낸 것이 되돌아오는 일은 없어야 하지만, 한 번 더 막는다.
+    if (role == _myRole) return;
+
+    final String key = payload['msgId']?.toString() ?? '';
+    if (key.isNotEmpty) {
+      // 재전송이 와도 두 번 읽지 않는다. Firestore 경로의 `_processedMsgIds`와
+      // 같은 장부를 쓴다 — 같은 발화가 두 통로로 오면 한 번만 처리된다.
+      if (_processedMsgIds.contains(key)) return;
+      _processedMsgIds.add(key);
+    }
+
+    _lgDuo(
+        '[INTERP-DATA]',
+        'receive seq=${payload['seq'] ?? -1} lang=${payload['srcLang'] ?? '-'} '
+            'len=${text.length}');
+    BillingTicker.instance.resumeFromActivity('duo_data_received');
+    _enqueueIncoming(payload);
+  }
+
+  /// 🎙️ 마이크 조각 하나를 전사 갈래로 흘린다.
+  ///
+  /// **두 마이크 경로가 공유한다** — `record`(기존)든 WebRTC 탭(새것)이든
+  /// 조각이 도착한 뒤의 처리는 한 글자도 달라선 안 된다. 그래야 실기기에서
+  /// 견줄 때 "마이크만 바뀌었다"가 참이 된다.
+  void _feedInterpreterPcm(Uint8List bytes, int generation) {
+    if (bytes.isEmpty || generation != _interpGeneration) return;
+    final stt = _interpStt;
+    // 게이트가 닫혀 있으면 조각을 그냥 버린다. **캡처는 계속 돈다** —
+    // 이것이 always-on과 "마이크를 껐다 켠다"의 차이다.
+    final bool gateOpen = stt != null && stt.audioGateOpen;
+    // 🎚️ [AEC-PROBE] 버려지는 조각도 세기는 잰다. 게이트가 닫혀 있는
+    //   동안은 곧 상대 발화가 재생되는 동안이고(닫는 곳이 그 한 곳뿐이다),
+    //   열려 있는데 내가 말하지 않는 동안은 잡음 바닥이다.
+    if (gateOpen) {
+      if (_interpMicPhase != InterpMicPhase.speaking) {
+        _aecProbe.addIdle(bytes);
+      }
+      // 🔉 세기 계측. **release에서도 돈다.** 이게 없으면 게이트가
+      //   세기를 모르고, 모르면 통과시키므로 방어선이 사라진다.
+      //   (계측기는 발화 구간에서만 누적한다 — 스스로 걸러낸다.)
+      _utteranceRms?.addPcm(bytes);
+      stt.appendAudio(bytes);
+    } else {
+      _aecProbe.addDuringTts(bytes);
+    }
+  }
+
   /// 마이크를 닫는다. **소켓은 그대로 둔다.**
   ///
   /// always-on에서는 턴 경계가 아니라 **세션 경계**에서만 불린다 —
@@ -2806,6 +3160,23 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   Future<void> _stopInterpreterCapture(String reason) async {
     _interpGateReopenTimer?.cancel();
     _interpGateReopenTimer = null;
+
+    // 📡 [INTERP-WEBRTC] 새 경로가 연 것들을 먼저 접는다. 탭이 통화보다 먼저다 —
+    //   통화를 먼저 닫으면 탭이 사라진 트랙을 붙들고 있게 된다.
+    final tap = _interpMicTap;
+    _interpMicTap = null;
+    if (tap != null) await tap.stop();
+    final call = _interpCall;
+    _interpCall = null;
+    _interpDataOpen = false;
+    if (call != null) {
+      await call.dispose();
+      // 통화가 닫힌 **뒤에** 되돌린다. 먼저 되돌리면 WebRTC가 정리하면서
+      // 다시 통화 라우팅으로 덮어쓴다.
+      await _restoreInterpreterAudioOut();
+      _lgDuo('[INTERP-WEBRTC]', 'connection_closed reason=$reason');
+    }
+
     final sub = _interpCaptureSub;
     _interpCaptureSub = null;
     await sub?.cancel();
@@ -3035,6 +3406,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     //   밝은 채로 있고, 그게 사실이다.
     _setInterpPartnerPhase(InterpPartnerPhase.playing);
     BillingTicker.instance.resumeFromActivity('duo_tts_start');
+    final lat = _interpLatency;
+    // ⏱️ 기존 경로는 번역이 끝난 뒤에야 여기 온다. 즉 이 시각이 곧
+    //   "첫 TTS 요청"이고, 조각도 하나뿐이다.
+    lat?.firstTtsChunkCommitted ??= DateTime.now();
+    lat?.firstTtsRequestStart ??= DateTime.now();
+    if (lat != null) lat.ttsChunks++;
     final utterance = adapter.speak(TtsRequest(
       text: spoken,
       voiceId: kInterpreterPartnerTtsVoice,
@@ -3042,7 +3419,15 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       turnId: 'duo-partner-${++_interpTtsTurnSeq}',
       generationId: _interpGeneration,
       playbackCategory: 'duo_partner',
+      // 🎚️ [INTERP-PREROLL] 0.75초 → 0.5초. 모든 턴에 붙는 고정 비용이라
+      //   여기를 줄이는 것이 체감에 가장 곧다. 값은 새로 지어낸 것이 아니라
+      //   같은 링버퍼 위에서 이미 쓰이던 것이다(`fastFirstTurnPrerollBytes`).
+      prerollBytes: TtsAdapterConfig.duoPartnerPrerollBytes,
     ));
+    unawaited(utterance.firstAudio.then((_) {
+      lat?.firstTtsAudioReady ??= DateTime.now();
+      lat?.playbackStart ??= DateTime.now();
+    }).catchError((Object _) {}));
     try {
       await utterance.done.timeout(const Duration(seconds: 30));
     } on TimeoutException {
@@ -3056,6 +3441,299 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     // 재생이 어떻게 끝났든(정상·타임아웃·실패) 게이트는 반드시 다시 열린다.
     // 여기서 빠지면 마이크가 영원히 닫힌 채 화면만 밝아 보인다.
     _scheduleInterpGateReopen('tts_finished');
+  }
+
+  /// 🌊 [INTERP-STREAM] 번역을 흘려 받으며 구절이 완성되는 대로 읽는다.
+  ///
+  /// 기존 경로와 다른 것은 **번역과 재생이 시간상 겹친다**는 하나뿐이다.
+  /// 저장하는 글자, 게이트 정책, 실패 처리, 화면 표시는 전부 같다.
+  ///
+  ///   GPT 스트림 ──→ 청커 ──→ 구절 확정 ──→ prefetch(요청 먼저 띄움)
+  ///        │                                    └→ speakPrefetched(큐에 붙임)
+  ///        └→ (계속 읽는다. TTS를 기다리지 않는다)
+  ///
+  /// ⚠️ `speak`가 아니라 **`prefetch` + `speakPrefetched`**를 쓴다. 큐가
+  ///   직렬이라 `speak`만 쓰면 뒤 조각의 **요청 자체**가 앞 조각이 큐에서
+  ///   빠질 때까지 안 나가고, 그만큼 조각 사이에 공백이 생긴다.
+  Future<void> _handleIncomingStreaming(
+    Map<String, dynamic> data,
+    String raw,
+    String srcLang,
+    String myNative,
+    DuoInterpLatency lat,
+  ) async {
+    final adapter = _ensureInterpreterTts();
+    if (adapter == null) {
+      _setInterpPartnerPhase(InterpPartnerPhase.idle);
+      return;
+    }
+    final int generation = _interpGeneration;
+    final String turnId = 'duo-partner-${++_interpTtsTurnSeq}';
+    final chunker = DuoSpeechChunker();
+    final full = StringBuffer();
+    final utterances = <TtsUtterance>[];
+    bool firstChunkSent = false;
+
+    /// 구절 하나를 TTS 큐에 붙인다. **요청은 지금 바로 나간다.**
+    void enqueue(String chunk, {required bool expectsMore}) {
+      if (chunk.trim().isEmpty) return;
+      lat.ttsChunks++;
+      if (!firstChunkSent) {
+        firstChunkSent = true;
+        lat.firstTtsChunkCommitted = DateTime.now();
+        lat.firstTtsRequestStart = DateTime.now();
+        // 🔇 [ECHO] 곧 소리가 날 문장을 미리 기억해 둔다. 첫 조각이
+        //   재생되는 동안 마이크로 되돌아올 수 있다.
+        _rememberGenerated(chunk);
+      }
+      final request = TtsRequest(
+        text: chunk,
+        voiceId: kInterpreterPartnerTtsVoice,
+        speakerType: TtsSpeakerType.system,
+        turnId: turnId,
+        generationId: generation,
+        playbackCategory: 'duo_partner',
+        prerollBytes: TtsAdapterConfig.duoPartnerPrerollBytes,
+        // 🔗 [SEGMENT] 앞 조각이 있으면 재생 세션을 이어 붙인다(공백 없음).
+        continuesPreviousSegment: utterances.isNotEmpty,
+        // 🔗 뒤에 더 오면 세션을 닫지 않는다. 마지막 조각만 false여야 한다.
+        expectsMoreSegments: expectsMore,
+      );
+      final prefetch = adapter.prefetch(request);
+      utterances.add(adapter.speakPrefetched(prefetch));
+    }
+
+    _setInterpPartnerPhase(InterpPartnerPhase.playing);
+    BillingTicker.instance.resumeFromActivity('duo_tts_start');
+    lat.translationRequestStart = DateTime.now();
+
+    try {
+      // ── producer: 번역을 계속 읽는다. TTS를 기다리지 않는다 ──
+      await for (final delta in DuoBrain.translateForSpeechStreaming(
+        key: _openAiKey,
+        text: raw,
+        srcLang: srcLang,
+        toLang: myNative,
+      )) {
+        if (generation != _interpGeneration || _isExiting) return;
+        lat.firstTranslationDelta ??= DateTime.now();
+        full.write(delta);
+        for (final chunk in chunker.add(delta)) {
+          // 아직 스트림이 살아 있으므로 뒤에 더 올 수 있다고 본다.
+          enqueue(chunk, expectsMore: true);
+        }
+      }
+      lat.translationComplete = DateTime.now();
+
+      // 남은 꼬리가 **마지막 조각**이다. 여기서만 세션이 닫힌다.
+      final tail = chunker.flush();
+      if (tail != null) {
+        enqueue(tail, expectsMore: false);
+      } else if (utterances.isNotEmpty) {
+        // 꼬리가 없다 = 마지막으로 보낸 조각이 사실은 마지막이었다.
+        // 세션을 닫기 위해 빈 마무리 조각을 보내는 대신, 어댑터가 턴이
+        // 끝난 것을 알도록 여기서 재생 완료를 기다린 뒤 정리한다.
+        _lgDuo('[INTERP-STREAM]', 'no_tail turnId=$turnId — 마지막 조각이 곧 끝이다');
+      }
+    } catch (e) {
+      _lgDuo('⚠️ [INTERP-STREAM]',
+          'translate_failed=${e.runtimeType} turnId=$turnId');
+    }
+
+    final String spoken = full.toString().trim();
+
+    // ⚠️ 번역이 비면 **원문을 읽지 않는다**(기존 정책 그대로). 다만 이미
+    //   재생된 조각이 있으면 그것까지 되돌리지는 않는다 — 뒤가 실패했다고
+    //   앞에서 들린 말을 없던 일로 만들 수는 없다(지시 13번).
+    if (spoken.isEmpty) {
+      _lgDuo(
+          '⚠️ [INTERP-TRANSLATE]',
+          'failed src=$srcLang to=$myNative rawLen=${raw.trim().length} '
+              'path=stream — 이 턴은 재생하지 않는다');
+      for (final u in utterances) {
+        u.cancel();
+      }
+      _setInterpPartnerPhase(InterpPartnerPhase.idle);
+      _lgDuo('⏱️ [INTERP-LATENCY]', lat.summary());
+      return;
+    }
+
+    _lgDuo('[INTERP-TURN]',
+        'incoming src=$srcLang mine=$myNative same=false gptCalls=1 path=stream');
+
+    // 🔇 [ECHO] 전체 문장도 기억한다. 조각 단위로만 두면 마이크로 돌아온
+    //   통문장이 목록의 어느 항목과도 안 맞아 에코로 못 걸린다.
+    _rememberGenerated(spoken);
+
+    if (!mounted || _isExiting) return;
+
+    // 📚 History는 **전체 번역문 하나**다(지시 10번). 조각을 따로 남기지 않는다.
+    final bool rawIsMyTargetLang = (_isSameChatLang(srcLang, _myTarget()) ||
+            textIsLanguage(raw, _myTarget())) &&
+        !textContradictsLanguage(raw, _myTarget());
+    await _saveHistoryMessage(
+      rawIsMyTargetLang ? raw.trim() : '',
+      spoken,
+      'SYSTEM',
+      mode: kDuoModeInterpreter,
+      seq: (data['seq'] as num?)?.toInt(),
+      spokenAt: (data['spokenAt'] as num?) == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(
+              (data['spokenAt'] as num).toInt()),
+      sourceLang: myNative,
+      deferTarget: !rawIsMyTargetLang,
+    );
+
+    // ── consumer 마무리: 마지막 조각까지 재생이 끝나기를 기다린다 ──
+    //   게이트는 이 뒤에 열린다(지시 14번: 조각 사이에 열리지 않는다).
+    if (utterances.isNotEmpty) {
+      lat.firstTtsAudioReady ??= DateTime.now();
+      try {
+        await utterances.first.firstAudio.timeout(const Duration(seconds: 20));
+        lat.playbackStart = DateTime.now();
+      } catch (_) {}
+      try {
+        await utterances.last.done.timeout(const Duration(seconds: 30));
+      } on TimeoutException {
+        utterances.last.cancel();
+        _lgDuo('⚠️ [INTERP-STREAM]', 'playback_timeout turnId=$turnId');
+      } catch (e) {
+        _lgDuo('⚠️ [INTERP-STREAM]', 'playback_failed=${e.runtimeType}');
+      }
+      lat.lastPlaybackComplete = DateTime.now();
+    }
+
+    _interpTtsEndedAt = DateTime.now();
+    BillingTicker.instance.resumeFromActivity('duo_tts_end');
+    _scheduleInterpGateReopen('tts_finished');
+    _setInterpPartnerPhase(InterpPartnerPhase.idle);
+    _lgDuo('⏱️ [INTERP-LATENCY]', lat.summary());
+  }
+
+  // ==========================================================================
+  // 🌐 [INTERP-ORIGIN] 로비 ORIGIN이 실제 발화 언어와 어긋났는지 확인한다
+  // --------------------------------------------------------------------------
+  // **만능 통역 전용이다.** 직접 대화는 건드리지 않는다 — 그쪽은 WebRTC 검증
+  // 중이라 STT 개방 방식을 같이 흔들면 다음 실패의 원인을 못 가른다.
+  //
+  // 여기가 필요한 이유: ORIGIN이 틀리면 통역은 **번역 방향 자체가 틀린다.**
+  // 한국어로 설정한 사람이 영어를 말하면 상대는 영어를 영어로 옮긴 말을
+  // 듣는다. 직접 대화에서는 History 글자만 어긋나지만 여기서는 대화가 깨진다.
+  //
+  // 판정은 **세션당 한 번**이다(`OriginLanguageSession.settled`). 대화 도중
+  // 일부러 다른 언어를 섞는 것까지 감시하지 않는다 — 그건 사용자의 자유다.
+  //
+  // 🚫 **자동으로 바꾸지 않는다.** 서클톡은 조용히 갈아 끼우지만 여기서는
+  //   물어본다. 일부러 다른 언어를 연습하는 경우가 있기 때문이다.
+  // ==========================================================================
+
+  /// 언어 확인 오버레이를 띄울 것인가. 띄운 언어가 담긴다.
+  String? _originMismatchDetected;
+
+  /// 첫 발화로 ORIGIN을 판정한다. **세션당 한 번만 돈다.**
+  Future<void> _settleInterpreterOrigin(String transcript) async {
+    // 🚧 꺼져 있으면 **아무것도 하지 않는다.** GPT 판정도, 세션 상태도,
+    //   `switchLanguage`도 여기서 멈춘다 — 꺼진 빌드는 기존 동작 그대로다.
+    if (!kDuoInterpOriginCheck) return;
+    if (_isDirectMode) return; // 직접 대화는 이번 범위가 아니다
+    final session = OriginLanguageSession.instance;
+    if (session.settled) return;
+
+    final String lobbyOrigin = _myNative();
+    final String text = transcript.trim();
+
+    // 📏 짧은 말·고유명사·코드스위칭으로는 판정하지 않는다. 위 게이트를
+    //   통과한 글자만 여기 오지만, 그래도 한두 낱말짜리는 근거가 못 된다.
+    //   같은 문턱을 상대 발화 판정에도 쓴다(`kDuoSrcLangOverrideMinChars`).
+    if (text.length < kDuoSrcLangOverrideMinChars) {
+      _lgDuo('[INTERP-ORIGIN]',
+          'skipped reason=insufficient textLen=${text.length}');
+      return;
+    }
+
+    // 스크립트만으로 끝나는지, GPT까지 가는지 로그로 가른다.
+    final scriptVerdict = detectOriginScript(text);
+    final sw = Stopwatch()..start();
+    final detected = await resolveOriginFromFirstUtterance(
+      apiKey: _openAiKey,
+      transcript: text,
+      lobbyOrigin: lobbyOrigin,
+      onLog: _lgDuo,
+    );
+    sw.stop();
+    if (scriptVerdict.decisive) {
+      _lgDuo('[INTERP-ORIGIN]',
+          'judge=script result=${scriptVerdict.language ?? 'none'}');
+    } else {
+      _lgDuo('[INTERP-ORIGIN]',
+          'judge=gpt elapsedMs=${sw.elapsedMilliseconds} '
+              'result=${detected ?? 'none'}');
+    }
+
+    // 근거가 약해도 확정은 해 둔다 — 안 그러면 매 턴 판정이 다시 돈다.
+    session.adopt(detected);
+
+    // 판정이 끝났으니 소켓에 언어를 박는다. 여기까지는 자동 감지였다.
+    // 자동 감지로 계속 두면 짧은 발화("네", "그렇죠")에서 언어가 흔들린다.
+    unawaited(_interpStt?.switchLanguage(_mapLanguageToCode(
+            detected ?? lobbyOrigin)) ??
+        Future<bool>.value(false));
+
+    if (detected == null) {
+      _lgDuo('[INTERP-ORIGIN]',
+          'detected=$lobbyOrigin declared=$lobbyOrigin mismatch=false');
+      return; // 로비값과 같거나 근거가 약하다
+    }
+    _lgDuo(
+        '[INTERP-ORIGIN]',
+        'detected=$detected declared=$lobbyOrigin mismatch=true '
+            'confidence=${scriptVerdict.decisive ? 'script' : 'gpt'}');
+
+    // 안내는 세션당 한 번. `takeNoticeSlot`이 그 빗장이다.
+    if (!session.takeNoticeSlot()) {
+      _lgDuo('[INTERP-ORIGIN]', 'suppressed reason=notice_already_used');
+      return;
+    }
+    if (!mounted || _isExiting) return;
+    _lgDuo('[INTERP-ORIGIN]',
+        'overlay_shown detected=$detected declared=$lobbyOrigin');
+    setState(() => _originMismatchDetected = detected);
+  }
+
+  /// Apply — 새 언어를 **영구 반영**하고 통화는 그대로 잇는다.
+  ///
+  /// 사용자가 직접 누른 것이므로 다음 Duo에서 같은 문제가 되풀이되지 않도록
+  /// 로비 설정(`FFAppState().nativeLang`)까지 바꾼다. 세션 한정으로 두면
+  /// 방을 나갈 때마다 같은 경고를 다시 보게 된다.
+  /// [target]이 null이면 **배울 언어는 손대지 않는다.** 사용자가 그 드롭다운을
+  /// 만졌을 때만 값이 넘어온다 — 이 창은 ORIGIN을 고치자고 띄운 것이지 배울
+  /// 언어를 건드리자는 것이 아니다.
+  Future<void> _applyOriginChange(String native, String? target) async {
+    final String previous = _myNative();
+    FFAppState().nativeLang = native;
+    if (target != null) FFAppState().targetLang = target;
+    // 통화를 끊지 않는다. 소켓 언어만 갈아 끼운다.
+    final ok = await _interpStt?.switchLanguage(_mapLanguageToCode(native)) ??
+        false;
+    _lgDuo(
+        '[INTERP-ORIGIN]',
+        'apply origin=$previous->$native '
+            'target=${target ?? 'unchanged'} '
+            'switchLanguage=$ok persisted=true');
+    if (!mounted) return;
+    setState(() => _originMismatchDetected = null);
+  }
+
+  /// Keep Current — 아무것도 바꾸지 않는다.
+  ///
+  /// 재경고가 없는 근거는 `takeNoticeSlot()`이다. 이미 한 번 썼으므로 같은
+  /// 세션에서는 두 번째 슬롯이 나오지 않는다.
+  void _keepCurrentOrigin() {
+    _lgDuo('[INTERP-ORIGIN]',
+        'keep_current origin=${_myNative()} reask=false');
+    if (!mounted) return;
+    setState(() => _originMismatchDetected = null);
   }
 
   TtsAdapter? _ensureInterpreterTts() {
@@ -3075,6 +3753,15 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       //   (`tts_adapter.dart`의 두 재생 시작 경로 모두 `onPlaybackStart` →
       //   `_pcmPlayer.feed` 순서다). 그래서 소리보다 항상 먼저 닫힌다.
       onPlaybackStart: (request) => _closeInterpGate('tts_playing'),
+      // 🎚️ [INTERP-PREROLL] 프리롤을 줄인 대가(언더런)를 같은 줄에서 본다.
+      //   실기기에서는 이 숫자밖에 볼 것이 없으므로, "빨라졌나"와 "끊겼나"가
+      //   한 줄에 같이 있어야 판단이 선다.
+      onPrerollReport: (r) => _lgDuo(
+          '[INTERP-PREROLL]',
+          'turn=${r.turnId} targetMs=${r.targetPrerollMs} '
+              'actualMs=${r.actualPrerollMs} bufferedMs=${r.bufferedMsAtStart} '
+              'ttsTtfbMs=${r.ttsTtfbMs} playbackStartMs=${r.playbackStartMs} '
+              'underruns=${r.underrunCount} recoveries=${r.recoveryCount}'),
     );
     _interpTts = adapter;
     return adapter;
@@ -3285,6 +3972,15 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     final String spoken = finalTranscript.trim();
     if (spoken.isEmpty) return;
 
+    // 🌐 [INTERP-ORIGIN] 이 발화가 **내 마이크**에서 나온 첫 충분한 말이면,
+    //   여기서 로비 ORIGIN이 맞는지 한 번 따진다. 위 게이트(voicedMs·rms·
+    //   잡음 필터)를 다 통과한 글자만 여기 오므로, 짧은 감탄사나 잘린 조각은
+    //   애초에 판정 대상이 되지 않는다.
+    //
+    //   ⚠️ 상대 발화는 이 함수에 오지 않는다(`_handleIncomingMessage`가 따로
+    //   받는다). 그래서 내 언어 판정이 상대 말에 오염될 길이 없다.
+    unawaited(_settleInterpreterOrigin(spoken));
+
     // 🔵 always-on: 마이크가 계속 열려 있어 발화가 연달아 확정된다. 순서를
     //    시각으로만 복원하면 Firestore 서버 시각의 해상도에 기대게 되므로,
     //    화자별 일련번호와 발화 시작 시각을 함께 싣는다(직접 대화와 같은 규칙).
@@ -3294,34 +3990,77 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
 
     // 1. 상대에게 넘긴다. 번역하지 않은 내 말 그대로 — 상대 폰이 자기 대화
     //    언어로 옮긴다(두 사람의 대화 언어가 다를 수 있으므로 내가 옮기면 안 된다).
-    final DateTime uploadStartedAt = DateTime.now();
-    await _uploadMyMessage(
-      spoken,
-      myNative,
-      mode: kDuoModeInterpreter,
-      seq: seq,
-      spokenAt: spokenAt,
-    );
-    _lgDuo(
-        '[INTERP-TURN]',
-        'outgoing turn=$_duoConversationTurnCounter seq=$seq lang=$myNative '
-            'len=${spoken.length} '
-            'uploadMs=${DateTime.now().difference(uploadStartedAt).inMilliseconds}');
+    if (kDuoInterpWebrtc) {
+      // 📨 [INTERP-DATA] 실시간 통로는 DataChannel이다. Firestore는 기록으로만
+      //   남기고 **기다리지 않는다** — 기록이 느리다고 상대 목소리가 늦어지면
+      //   안 된다는 것이 이 구조의 핵심이다.
+      final String msgId =
+          '$_myRole-$seq-${spokenAt.millisecondsSinceEpoch}';
+      final DateTime sendStartedAt = DateTime.now();
+      final bool sent = _interpCall?.sendData(<String, dynamic>{
+            'msgId': msgId,
+            'senderUid': _myUid,
+            'senderRole': _myRole,
+            'text': spoken,
+            'srcLang': myNative,
+            'duoMode': kDuoModeInterpreter,
+            'seq': seq,
+            'spokenAt': spokenAt.millisecondsSinceEpoch,
+          }) ??
+          false;
+      _lgDuo(
+          '[INTERP-DATA]',
+          'send ok=$sent seq=$seq lang=$myNative len=${spoken.length} '
+              'sendMs=${DateTime.now().difference(sendStartedAt).inMilliseconds} '
+              'channelOpen=$_interpDataOpen');
+      // 기록은 뒤에서 따로 간다. 실패해도 통화는 계속된다.
+      unawaited(_uploadMyMessage(
+        spoken,
+        myNative,
+        mode: kDuoModeInterpreter,
+        seq: seq,
+        spokenAt: spokenAt,
+      ));
+      unawaited(_saveHistoryMessage(
+        '',
+        spoken,
+        'HOST',
+        mode: kDuoModeInterpreter,
+        seq: seq,
+        spokenAt: spokenAt,
+        sourceLang: myNative,
+        deferTarget: true,
+      ));
+    } else {
+      final DateTime uploadStartedAt = DateTime.now();
+      await _uploadMyMessage(
+        spoken,
+        myNative,
+        mode: kDuoModeInterpreter,
+        seq: seq,
+        spokenAt: spokenAt,
+      );
+      _lgDuo(
+          '[INTERP-TURN]',
+          'outgoing turn=$_duoConversationTurnCounter seq=$seq lang=$myNative '
+              'len=${spoken.length} '
+              'uploadMs=${DateTime.now().difference(uploadStartedAt).inMilliseconds}');
 
-    if (!_isConversationActive || _turnCounter != currentTurnId) return;
+      if (!_isConversationActive || _turnCounter != currentTurnId) return;
 
-    // 2. 히스토리 — 오리지널(내가 말한 대화 언어)만. 배울글(타겟)과 배울소리는
-    //    공부방에서 만든다. 화면에는 아무것도 띄우지 않는다.
-    await _saveHistoryMessage(
-      '',
-      spoken,
-      'HOST',
-      mode: kDuoModeInterpreter,
-      seq: seq,
-      spokenAt: spokenAt,
-      sourceLang: myNative,
-      deferTarget: true,
-    );
+      // 2. 히스토리 — 오리지널(내가 말한 대화 언어)만. 배울글(타겟)과 배울소리는
+      //    공부방에서 만든다. 화면에는 아무것도 띄우지 않는다.
+      await _saveHistoryMessage(
+        '',
+        spoken,
+        'HOST',
+        mode: kDuoModeInterpreter,
+        seq: seq,
+        spokenAt: spokenAt,
+        sourceLang: myNative,
+        deferTarget: true,
+      );
+    }
 
     // 내 발화는 앱이 소리 내지 않으므로 에코 목록에 넣을 이유가 없다.
     // 그래도 남겨 둔다 — 상대 폰의 TTS가 스피커폰으로 내 마이크에 되돌아오는
@@ -3415,6 +4154,16 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         final String msgRole = data['senderRole']?.toString() ?? '';
         if (msgRole == _myRole) continue; // 내가 올린 것 — 이미 로컬 렌더됨, 스킵
 
+        // 📡 [INTERP-WEBRTC] 새 통역 경로에서는 이 채널이 **기록용일 뿐**이다.
+        //   실제 전달은 DataChannel이 한다. 여기서 다시 큐에 넣으면 같은
+        //   발화를 두 번 번역하고 두 번 읽는다.
+        //   (직접 대화는 어느 경우에도 이 문을 지난다 — 거기 글자는 이 채널로만 온다)
+        if (kDuoInterpWebrtc && !_isDirectMode) {
+          _lgDuo('[INTERP-DATA]',
+              'firestore_skipped reason=webrtc_transport seq=${data['seq'] ?? -1}');
+          continue;
+        }
+
         BillingTicker.instance.resumeFromActivity('duo_message_received');
         _enqueueIncoming(data);
       }
@@ -3434,10 +4183,43 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
   /// 마이크가 세션 내내 열려 있는 지금 그 조건을 두면 **내가 말하는 동안
   /// 상대 말이 큐에 갇힌 채 영영 안 나온다** — 내 마이크 사정으로 상대 턴을
   /// 막지 않는다. 내 마이크는 재생 구간에 게이트로만 닫힌다.
+  /// 🗣️ [INTERP-YIELD] **지금 내가 말하는 중인가.**
+  ///
+  /// 참이면 상대 음성을 재생하지 않고 큐에 둔다. 재생을 시작하면 게이트가
+  /// 닫히고(`_closeInterpGate`), 그 순간 진행 중이던 내 발화가
+  /// `flush_on_close`로 강제 확정돼 **문장이 통째로 찢어지기 때문**이다.
+  ///
+  /// 2026-09-03 실기기 실측 — 영어 한 문장이 이렇게 갈라졌다:
+  ///   11:48:12  speech_started            내가 말하기 시작
+  ///   11:48:15  partner=playing           상대 번역 재생 시작
+  ///   11:48:18  flush_on_close            말하던 중에 마이크가 닫힘
+  ///   → 74자 + 57자 + 5자 세 조각이 각각 따로 올라가 각각 번역됐다.
+  ///
+  /// 판단은 전사 세션의 [OpenAiStreamingTranscribeSession.isUserSpeaking]
+  /// 하나만 본다(`speech_started` 뒤 `committed` 전). `hasPendingUtterance`는
+  /// 쓰지 않는다 — 그건 "전사 대기 중"까지 포함해서, 이미 말을 마친 뒤에도
+  /// 참이라 상대 음성이 필요 이상으로 늦어진다.
+  ///
+  /// 🚫 직접 대화에는 걸지 않는다. 그쪽 `_handleIncomingMessage`는 History에
+  ///   글자만 적고 소리를 내지 않으므로 미룰 이유가 없고, 미루면 저장만 늦는다.
+  bool get _shouldYieldIncomingToMySpeech {
+    if (_isDirectMode) return false;
+    final stt = _interpStt;
+    return stt != null && stt.isUserSpeaking;
+  }
+
   Future<void> _drainIncoming() async {
     if (_isDrainingIncoming) return;
     _isDrainingIncoming = true;
     while (_incomingQueue.isNotEmpty) {
+      // 🗣️ 내가 말하는 중이면 **꺼내지 않고** 멈춘다. 큐에 그대로 남으므로
+      //   순서도 내용도 잃지 않는다. 내 발화가 확정되면
+      //   `onUtteranceCommitted`가 이 함수를 다시 부른다.
+      if (_shouldYieldIncomingToMySpeech) {
+        _lgDuo('[INTERP-YIELD]',
+            'deferred queued=${_incomingQueue.length} reason=user_speaking');
+        break;
+      }
       final data = _incomingQueue.removeAt(0);
       await _handleIncomingMessage(data);
     }
@@ -3452,13 +4234,29 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
   /// 배울글 자리에 그대로 실린다. 마지막 자리는 내 대화 언어다 — 모르면
   /// "배울 언어"라고 말하지 않는다.
   String _resolvePartnerSrcLang(Map<String, dynamic> data, String raw) {
+    final String declared = (data['srcLang'] ?? '').toString().trim();
+
     // 글자가 확정되면 선언보다 우선이다. 상대가 로비에 영어라고 적어 두고
     // 한국어로 말하면 `srcLang='English'`가 실려 오는데, 그 값을 그대로
     // 저장하면 내 배울 언어(English)와 같아져 공부방이 "번역할 게 없다"고
     // 본다. 공부방도 같은 규칙으로 읽는다(`_sourceLangForMessage`).
-    final verdict = detectOriginScript(raw);
-    if (verdict.decisive && verdict.language != null) return verdict.language!;
-    final String declared = (data['srcLang'] ?? '').toString().trim();
+    //
+    // ⚠️ **단, 짧은 글자로는 선언을 뒤집지 않는다.**
+    //   `detectOriginScript`의 문턱은 4글자다. 그건 **자기 전사문**을 볼 때의
+    //   기준이고(그때는 달리 믿을 근거가 없다), 여기서는 상대가 실어 보낸
+    //   선언값이라는 더 나은 근거가 이미 있다.
+    //
+    //   2026-09-03 실기기: 호스트(ORIGIN=English)의 9글자 발화가 아주 작게
+    //   말해져(rmsDbfs=-40.7) 전사기가 한글을 뱉었고, 게스트가 그걸 한국어로
+    //   확정해 `same=true`로 읽었다. 그래서 **번역을 통째로 건너뛰고 원문을
+    //   한국어 목소리로 읽었다** — 유저에게는 "짧은 말이 전달 안 된다"로 보였다.
+    //   같은 통화의 19·109글자 발화는 정상이었다.
+    if (raw.trim().length >= kDuoSrcLangOverrideMinChars || declared.isEmpty) {
+      final verdict = detectOriginScript(raw);
+      if (verdict.decisive && verdict.language != null) {
+        return verdict.language!;
+      }
+    }
     if (declared.isNotEmpty) return declared;
     final String partner = (_partnerChatLang ?? '').trim();
     if (partner.isNotEmpty) return partner;
@@ -3471,6 +4269,14 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     final String raw = data['text']?.toString() ?? '';
     if (raw.trim().isEmpty) return;
     final String srcLang = _resolvePartnerSrcLang(data, raw);
+    // 🌐 [SRC-LANG] 무엇을 근거로 이 언어를 골랐는지 남긴다. 번역을 건너뛰는
+    //   판단(`same=true`)이 여기서 갈리므로, 틀렸을 때 이 한 줄이 유일한
+    //   단서다. **글자는 싣지 않는다** — 길이와 근거만 남긴다.
+    _lgDuo(
+        '[SRC-LANG]',
+        'resolved=$srcLang declared=${(data['srcLang'] ?? '').toString()} '
+            'len=${raw.trim().length} '
+            'overrideAllowed=${raw.trim().length >= kDuoSrcLangOverrideMinChars}');
     // 세션 문서에 언어가 없던 옛 방을 위한 폴백.
     _notePartnerChatLang(srcLang, 'message');
 
@@ -3518,14 +4324,31 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
     // 말하면 여기서 한국어를 한국어로 옮기는 헛돌이가 돈다.
     final bool sameLang =
         _isSameChatLang(srcLang, myNative) || textIsLanguage(raw, myNative);
+
+    // ⏱️ [INTERP-LATENCY] 이 턴의 시각표. 두 경로가 같은 자를 쓴다.
+    final lat = DuoInterpLatency(
+      turnId: 'duo-partner-${_interpTtsTurnSeq + 1}',
+      path: kDuoInterpStreamingTts && !sameLang ? 'stream' : 'blocking',
+    )..sameLangSkip = sameLang;
+    _interpLatency = lat;
+
+    // 🌊 [INTERP-STREAM] 번역을 흘려 받으며 구절이 완성되는 대로 읽는다.
+    //   같은 언어면 번역 자체가 없으므로 이 경로로 오지 않는다(지시 12번).
+    if (kDuoInterpStreamingTts && !sameLang) {
+      await _handleIncomingStreaming(data, raw, srcLang, myNative, lat);
+      return;
+    }
+
     String spoken = raw.trim();
     if (!sameLang) {
+      lat.translationRequestStart = DateTime.now();
       final translated = await DuoBrain.translateForSpeech(
         key: _openAiKey,
         text: raw,
         srcLang: srcLang,
         toLang: myNative,
       );
+      lat.translationComplete = DateTime.now();
       // ⚠️ **원문을 그대로 재생하지 않는다.** 예전에는 "못 알아들을지언정
       //   원문이라도 남기는 편이 낫다"고 보고 raw를 그대로 읽었다. 그런데
       //   raw는 상대의 언어이고 TTS 목소리는 내 언어다 — 한국어 문장을
@@ -3586,6 +4409,9 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       await _speakPartner(spoken);
     }
     _setInterpPartnerPhase(InterpPartnerPhase.idle);
+    // ⏱️ 기존 경로도 **같은 자로** 잰다. 그래야 A/B가 성립한다.
+    lat.lastPlaybackComplete = DateTime.now();
+    _lgDuo('⏱️ [INTERP-LATENCY]', lat.summary());
   }
 
 // ============================================================================
@@ -4738,6 +5564,12 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
             ),
           ),
           if (_showLangOverlay) _buildGuestLangOverlay(),
+          // 🌐 [INTERP-ORIGIN] 로비 ORIGIN이 실제 발화와 어긋났다는 확인 창.
+          //   **통화를 끊지 않는다** — 이 막 뒤에서 대화는 계속 돈다.
+          //   꺼진 빌드에서는 판정 자체가 안 돌아 이 값이 늘 null이지만,
+          //   플래그를 여기서도 본다 — 화면에 뜨는 것만은 한 눈에 보이게.
+          if (kDuoInterpOriginCheck && _originMismatchDetected != null)
+            _buildOriginMismatchOverlay(_originMismatchDetected!),
           // 🚪 [EXIT-BUSY] 나가기는 한 번에 끝나지 않는다 — 마지막 발화를
           //   흘려보내고, 대화를 추리고, 방을 닫는 데까지 실기기에서 3.1초가
           //   걸렸다(2026-08-28 실측: 08:26:27.06 → 08:26:30.2). 그동안 화면이
@@ -5139,6 +5971,145 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
   }
 
   // 🆕 [게스트 언어 오버레이] 초대 게스트 입장 전 ORIGIN/TARGET 선택 게이트
+  /// 🌐 [INTERP-ORIGIN] "지금 말씀하시는 언어가 설정과 다릅니다" 확인 창.
+  ///
+  /// 게스트 입장 오버레이와 **같은 모양**을 쓴다 — 유저가 이미 한 번 본
+  /// 화면이라 무엇을 고르는 자리인지 설명이 필요 없다. 다른 것은 제목과
+  /// 버튼 둘뿐이다.
+  ///
+  /// ⚠️ 통화를 끊지 않는다. 이 막 뒤에서 마이크도 재생도 계속 돈다.
+  Widget _buildOriginMismatchOverlay(String detected) {
+    const List<String> langs = _kGuestLangs;
+    String native = langs.contains(FFAppState().nativeLang)
+        ? FFAppState().nativeLang
+        : _kGuestDefaultNativeLang;
+    String target = langs.contains(FFAppState().targetLang)
+        ? FFAppState().targetLang
+        : _kGuestDefaultTargetLang;
+    // 감지된 언어를 ORIGIN 자리에 **미리 골라 둔다** — 유저가 눌러야 할
+    // 것이 보통 이 값이고, 그대로 Apply만 누르면 끝나야 한다.
+    if (langs.contains(detected)) native = detected;
+
+    // 🎯 [TARGET] **사용자가 실제로 만졌을 때만 저장한다.**
+    //
+    //   안 만졌는데 위 `target` 값을 그대로 되쓰면 두 가지가 조용히 망가진다.
+    //     ① 목록(12개) 밖의 배울 언어를 쓰던 사람은 기본값으로 덮인다
+    //        (`_kGuestDefaultTargetLang`으로 보정한 표시값이 저장된다)
+    //     ② 바꾸지도 않은 값이 prefs에 다시 쓰인다
+    //   이 창은 ORIGIN을 고치자고 띄운 것이지 배울 언어를 건드리자는 것이
+    //   아니다. 만진 것만 저장한다.
+    bool targetTouched = false;
+
+    Widget dropdown(String label, String value, Color color,
+        void Function(String?) onChanged) {
+      return Row(
+        children: [
+          SizedBox(
+            width: 92,
+            child: Text(label,
+                style: TextStyle(
+                    color: color, fontSize: 14, fontWeight: FontWeight.w600)),
+          ),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                  color: const Color(0xFF2C2C2E),
+                  borderRadius: BorderRadius.circular(10)),
+              child: DropdownButton<String>(
+                value: value,
+                isExpanded: true,
+                underline: const SizedBox.shrink(),
+                dropdownColor: const Color(0xFF2C2C2E),
+                style: const TextStyle(color: Colors.white, fontSize: 15),
+                items: langs
+                    .map((l) =>
+                        DropdownMenuItem<String>(value: l, child: Text(l)))
+                    .toList(),
+                onChanged: onChanged,
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Positioned.fill(
+      child: Container(
+        color: Colors.black.withValues(alpha: 0.78),
+        child: Center(
+          child: SingleChildScrollView(
+            child: StatefulBuilder(
+              builder: (context, setLocal) => Container(
+                margin: const EdgeInsets.symmetric(horizontal: 28),
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                    color: const Color(0xFF1C1C1E),
+                    borderRadius: BorderRadius.circular(20),
+                    border:
+                        Border.all(color: const Color(0xFFF59E0B), width: 1.5)),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // 감지된 언어로 적는다 — 로비값으로 적으면 읽어야 할
+                    // 사람이 못 읽는다(서클톡 안내가 같은 이유로 그렇다).
+                    Text(originLanguageCheckPromptLine(detected),
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 17,
+                            fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    const Text(
+                        "Your conversation continues — this only changes "
+                        "your language setting.",
+                        style: TextStyle(color: Colors.white54, fontSize: 13)),
+                    const SizedBox(height: 22),
+                    dropdown("Original", native, const Color(0xFF93C5FD),
+                        (val) {
+                      if (val != null) setLocal(() => native = val);
+                    }),
+                    const SizedBox(height: 18),
+                    dropdown("Target", target, const Color(0xFF4ADE80), (val) {
+                      if (val == null) return;
+                      setLocal(() {
+                        target = val;
+                        targetTouched = true;
+                      });
+                    }),
+                    const SizedBox(height: 26),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF2563EB),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12))),
+                      // 만지지 않은 Target은 넘기지 않는다(null = 그대로 둔다).
+                      onPressed: () => unawaited(_applyOriginChange(
+                          native, targetTouched ? target : null)),
+                      child: const Text("Apply",
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold)),
+                    ),
+                    const SizedBox(height: 10),
+                    TextButton(
+                      onPressed: _keepCurrentOrigin,
+                      child: const Text("Keep Current",
+                          style:
+                              TextStyle(color: Colors.white70, fontSize: 15)),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildGuestLangOverlay() {
     const List<String> langs = _kGuestLangs;
     // 열릴 때 이미 보정했지만, 다른 경로로 값이 바뀐 채 다시 그려질 수도 있다.
@@ -5884,6 +6855,85 @@ Return strict JSON only:
       }
     }
     return null;
+  }
+
+  /// 🌊 [INTERP-STREAM] 같은 번역을 **흘려 받는** 변형.
+  ///
+  /// 위 [translateForSpeech]와 **모델·프롬프트·온도·상한이 모두 같다.** 다른
+  /// 것은 응답을 한 번에 받느냐 델타로 받느냐뿐이다 — 그래야 지연이 줄어든
+  /// 원인을 "스트리밍"으로만 돌릴 수 있다. 모델을 같이 바꾸면 무엇 덕분인지
+  /// 영영 못 가린다.
+  ///
+  /// 기존 함수는 **그대로 둔다.** A/B 비교와 폴백에 쓰인다.
+  ///
+  /// ⚠️ 재시도가 없다. 스트림이 이미 일부 흘러갔는데 다시 물으면 앞 조각을
+  ///   두 번 읽게 된다. 실패는 호출부가 판단한다(빈 결과면 그 턴을 접는다).
+  static Stream<String> translateForSpeechStreaming({
+    required String key,
+    required String text,
+    required String srcLang,
+    required String toLang,
+    Duration timeout = const Duration(seconds: 15),
+  }) async* {
+    final String source = text.trim();
+    if (key.isEmpty || source.isEmpty) return;
+
+    // 프롬프트는 위 함수와 **한 글자도 다르지 않아야 한다.**
+    final String prompt =
+        "You are a translation engine for a live interpreter app.\n"
+        "You are NOT a chat assistant. NEVER reply, comment, answer, or ask "
+        "questions. NEVER continue the conversation.\n\n"
+        "Translate the utterance from $srcLang into natural spoken $toLang.\n"
+        "Preserve tone, intent, names, and numbers exactly. Do not add or "
+        "remove meaning.\n"
+        "Always translate whatever words are present — a fragment, a "
+        "single word, or something you are unsure of. Make your best "
+        "attempt and still return a translation.\n"
+        "Return an empty response ONLY if the input contains no words "
+        "at all.\n"
+        "Return ONLY the translated sentence — no quotes, no label, no "
+        "explanation.";
+
+    final request = http.Request(
+      'POST',
+      Uri.parse('https://api.openai.com/v1/chat/completions'),
+    );
+    request.headers.addAll(<String, String>{
+      'Authorization': 'Bearer $key',
+      'Content-Type': 'application/json; charset=utf-8',
+    });
+    request.body = jsonEncode(<String, dynamic>{
+      'model': 'gpt-4o-mini',
+      'stream': true,
+      'temperature': 0.2,
+      'max_tokens': 200,
+      'messages': <Map<String, String>>[
+        {'role': 'system', 'content': prompt},
+        {'role': 'user', 'content': source},
+      ],
+    });
+
+    // 앱 수명 공유 클라이언트를 쓴다 — 매번 새로 열면 TLS 수립에 1~2초가 나간다.
+    final response = await client.send(request).timeout(timeout);
+    if (response.statusCode != 200) {
+      final body = await response.stream.bytesToString();
+      debugPrint('[Duo][SpeechTranslateStream] status=${response.statusCode} '
+          'body=${body.length > 200 ? body.substring(0, 200) : body}');
+      return;
+    }
+
+    await for (final line in response.stream
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())) {
+      if (!line.startsWith('data: ') || line == 'data: [DONE]') continue;
+      try {
+        final decoded = jsonDecode(line.substring(6));
+        final delta = decoded['choices'][0]['delta']['content'];
+        if (delta != null) yield delta.toString();
+      } catch (_) {
+        // 잘린 JSON 조각은 건너뛴다.
+      }
+    }
   }
 
   /// 통화 전체를 공부방 목록의 미리보기 한 줄로 줄인다.

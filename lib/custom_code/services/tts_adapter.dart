@@ -75,6 +75,21 @@ class TtsAdapterConfig {
   /// 않아 AI 음성 및 이후 턴의 안정성은 그대로 유지한다.
   static const int fastFirstTurnPrerollBytes = 24000;
 
+  /// 🎚️ [INTERP-PREROLL] 만능 통역에서 상대 번역 음성에만 쓰는 프리롤.
+  ///
+  /// 2026-09-03 실기기에서 `toPlaybackMs`가 2.4~3.3초였고 그중 **754ms가
+  /// 프리롤 고정 비용**이었다. 모든 턴에 붙는 값이라 여기를 줄이는 것이
+  /// 조각 나누기보다 효과가 확실하다(조기 TTS는 같은 검증에서 겹치지 않아
+  /// 껐다 — `kDuoInterpStreamingTts` 주석 참고).
+  ///
+  /// 값은 [fastFirstTurnPrerollBytes]와 같은 24,000B(0.5초)다. **새로 지어낸
+  /// 숫자가 아니라 같은 링버퍼 위에서 이미 검증된 값**을 그대로 쓴다.
+  /// 250ms를 아끼면서 근거 없는 모험을 하지 않는 자리다.
+  ///
+  /// 더 줄일지는 실기기 `[INTERP-PREROLL] underruns=` 를 보고 정한다.
+  /// 언더런이 0으로 유지되면 다음 단계에서 18,000B(0.375초)를 시험한다.
+  static const int duoPartnerPrerollBytes = 24000;
+
   /// 네이티브 링버퍼 크기. 작으면 Dart 이벤트 루프 지터나 다음 TTS 조각의
   /// 네트워크 공급 지연 때 언더런이 나 단어 중간이 잘려 들린다.
   ///
@@ -194,6 +209,53 @@ class TtsRequest {
   /// null이면 공통 안전 프리롤을 쓴다. 충분히 큰 링버퍼가 검증된 지연 민감
   /// 요청만 더 작은 값을 명시한다.
   final int? prerollBytes;
+}
+
+// ====================================================================
+// 🎚️ [PREROLL] 한 요청의 프리롤·언더런 성적표
+// --------------------------------------------------------------------
+// 프리롤을 줄이면 첫 소리가 빨라지는 대신 버퍼가 마를 위험이 커진다.
+// **그 둘을 같은 줄에서 봐야** 얼마나 더 줄여도 되는지 알 수 있다.
+//
+// 언더런 판정은 [PcmStreamPlayer.remainingPlaybackMs]가 0이 되는 것으로
+// 한다 — 먹인 오디오 길이보다 흐른 시간이 길다는 뜻이고, 프리롤 값을
+// 처음 정할 때 쓴 것과 **같은 잣대**다(2026-07-30: "재생 벽시계가 오디오
+// 길이보다 0.3~0.7초 길었다").
+// ====================================================================
+class TtsPrerollReport {
+  const TtsPrerollReport({
+    required this.turnId,
+    required this.targetPrerollMs,
+    required this.actualPrerollMs,
+    required this.bufferedMsAtStart,
+    required this.ttsTtfbMs,
+    required this.playbackStartMs,
+    required this.underrunCount,
+    required this.recoveryCount,
+  });
+
+  final String turnId;
+
+  /// 채우려고 한 양(ms).
+  final int targetPrerollMs;
+
+  /// 실제로 채우고 시작한 양(ms). 스트림이 먼저 끝나면 목표보다 작다.
+  final int actualPrerollMs;
+
+  /// 재생을 시작하는 순간 플레이어에 들어간 오디오 길이(ms).
+  final int bufferedMsAtStart;
+
+  /// TTS 첫 바이트까지(ms).
+  final int ttsTtfbMs;
+
+  /// 요청부터 재생 시작까지(ms).
+  final int playbackStartMs;
+
+  /// 재생 중 버퍼가 마른 횟수.
+  final int underrunCount;
+
+  /// 마른 뒤 다시 채워진 횟수. `underrun`보다 작으면 끝까지 못 메운 것이다.
+  final int recoveryCount;
 }
 
 // ====================================================================
@@ -386,11 +448,16 @@ class TtsAdapter {
     this.onPlaybackStart,
     this.onPlaybackEnd,
     this.onHistoryAudioReady,
+    this.onPrerollReport,
   });
 
   final String Function() apiKeyProvider;
   final void Function(String tag, String msg)? onLog;
   final void Function(TtsRequest request)? onPlaybackStart;
+
+  /// 🎚️ [PREROLL] 요청 하나가 끝날 때 프리롤·언더런 성적표를 넘긴다.
+  /// null이면 아무 일도 없다 — 서클톡·시나리오톡은 넘기지 않는다.
+  final void Function(TtsPrerollReport report)? onPrerollReport;
   final void Function(TtsRequest request, bool ok)? onPlaybackEnd;
 
   /// 정상 완료된 음원만 전달된다 (guide4 11장 — 불완전 음원 등록 금지).
@@ -814,6 +881,32 @@ class TtsAdapter {
     bool audioStarted = continuing;
     bool playbackStartNotified = false;
     int? firstByteMs;
+
+    // 🎚️ [PREROLL] 성적표 재료. 여기서 세는 값만으로 "더 줄여도 되는가"를
+    //   판단할 수 있어야 한다 — 실기기에서는 이 숫자밖에 볼 것이 없다.
+    int prerollActualBytes = 0;
+    int bufferedMsAtStart = -1;
+    int playbackStartMs = -1;
+    int underrunCount = 0;
+    int recoveryCount = 0;
+    bool wasDry = false;
+
+    /// 재생이 버퍼를 다 먹고 말랐는지 본다. 먹인 오디오 길이보다 흐른 시간이
+    /// 길면 마른 것이다 — 프리롤 값을 처음 정할 때 쓴 것과 같은 잣대다.
+    void noteBufferHealth() {
+      final int remaining = _pcmPlayer.remainingPlaybackMs();
+      if (remaining <= 0) {
+        if (!wasDry) {
+          wasDry = true;
+          underrunCount++;
+          _log('🎚️ [TTS-PREROLL]',
+              'UNDERRUN turnId=${request.turnId} bufferedMs=$remaining');
+        }
+      } else if (wasDry) {
+        wasDry = false;
+        recoveryCount++;
+      }
+    }
     if (continuing) {
       await _pcmPlayer.setVolume(playbackVolume);
       utterance._settleFirstAudio();
@@ -925,17 +1018,28 @@ class TtsAdapter {
             playbackStartNotified = true;
             onPlaybackStart?.call(request);
             final buffered = preroll.takeBytes();
+            prerollActualBytes = buffered.length;
+            playbackStartMs = sw.elapsedMilliseconds;
             _log(
               '🔊 [TTS-ADAPTER]',
               'playback_start speaker=${request.speakerType.name} '
                   'turnId=${request.turnId} ttfbMs=$firstByteMs '
-                  'startMs=${sw.elapsedMilliseconds} '
+                  'startMs=$playbackStartMs '
                   'prerollMs=${pcm16DurationMs(buffered.length, sampleRate: TtsAdapterConfig.sampleRate)}',
             );
             await _pcmPlayer.feed(buffered);
+            // 플레이어에게 직접 되묻는다. `prerollActualBytes`를 ms로 바꾼
+            // 값과 같아야 정상 — 어긋나면 먹인 바이트가 어딘가에서 샜다.
+            bufferedMsAtStart = _pcmPlayer.remainingPlaybackMs();
             continue;
           }
+          // 🎚️ 먹이기 **직전**이 버퍼가 가장 얇은 순간이다 — 언더런은 여기서
+          //   잡힌다. 먹인 **직후**는 가장 두꺼운 순간이라, 거기서도 말라
+          //   있으면 공급이 재생 속도를 아예 못 따라가는 것이고, 되살아났으면
+          //   회복으로 센다.
+          noteBufferHealth();
           await _pcmPlayer.feed(chunk);
+          noteBufferHealth();
         }
 
         if (utterance._cancelRequested ||
@@ -973,20 +1077,41 @@ class TtsAdapter {
           playbackStartNotified = true;
           onPlaybackStart?.call(request);
           final buffered = preroll.takeBytes();
+          prerollActualBytes = buffered.length;
+          playbackStartMs = sw.elapsedMilliseconds;
           _log(
             '🔊 [TTS-ADAPTER]',
             'playback_start speaker=${request.speakerType.name} '
                 'turnId=${request.turnId} ttfbMs=$firstByteMs '
-                'startMs=${sw.elapsedMilliseconds} '
+                'startMs=$playbackStartMs '
                 'prerollMs=${pcm16DurationMs(buffered.length, sampleRate: TtsAdapterConfig.sampleRate)} '
                 'reason=stream_end',
           );
           await _pcmPlayer.feed(buffered);
+          bufferedMsAtStart = _pcmPlayer.remainingPlaybackMs();
         }
         if (!audioStarted) {
           _log('❌ [TTS-ADAPTER]',
               'empty audio stream attempt=$attempt/$maxAttempts');
           continue;
+        }
+
+        // 🎚️ [PREROLL] 성적표를 넘긴다. **이어붙인 조각은 빼고** 세션을
+        //   새로 연 조각만 낸다 — 이어붙임은 프리롤을 쌓지 않으므로
+        //   0으로 찍히면 "프리롤이 0이어도 됐다"로 잘못 읽힌다.
+        if (!continuing && onPrerollReport != null) {
+          onPrerollReport!(TtsPrerollReport(
+            turnId: request.turnId,
+            targetPrerollMs: pcm16DurationMs(prerollTarget,
+                sampleRate: TtsAdapterConfig.sampleRate),
+            actualPrerollMs: pcm16DurationMs(prerollActualBytes,
+                sampleRate: TtsAdapterConfig.sampleRate),
+            bufferedMsAtStart: bufferedMsAtStart,
+            ttsTtfbMs: firstByteMs ?? -1,
+            playbackStartMs: playbackStartMs,
+            underrunCount: underrunCount,
+            recoveryCount: recoveryCount,
+          ));
         }
 
         // 🔗 [SEGMENT] 뒤에 조각이 더 오면 세션을 닫지 않는다. 이미 먹인
