@@ -177,16 +177,19 @@ void main() {
     });
 
     test('오디오를 이 채널로 보내지 않는다', () {
-      final int at = duo.indexOf("_interpCall?.sendData(");
+      // payload는 sendData 바로 위에서 변수로 만들어진다 — 못 보냈을 때
+      // 그것을 그대로 큐에 넣기 위해서다(`duo_interp_pending_sends_test`).
+      final int at = duo.indexOf("final Map<String, dynamic> payload = ");
       expect(at, greaterThan(-1));
       final String body = duo.substring(at, at + 700);
       expect(body, contains("'text': spoken"));
+      expect(body, contains('_interpCall?.sendData(payload)'));
       expect(body, isNot(contains('pcm')));
       expect(body, isNot(contains('bytes')));
     });
 
     test('상대가 골라 읽을 최소 정보가 실린다', () {
-      final int at = duo.indexOf("_interpCall?.sendData(");
+      final int at = duo.indexOf("final Map<String, dynamic> payload = ");
       final String body = duo.substring(at, at + 700);
       for (final String key in <String>[
         "'msgId'",

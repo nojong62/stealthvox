@@ -52,6 +52,7 @@ import 'first_utterance_context_judge.dart'
     show originLanguageCheckPromptLine, originLanguageResetHintLine;
 // 🆔 테스트 기기를 Remote Config 조건으로 고르는 데 쓰는 설치본 ID.
 import 'package:firebase_app_installations/firebase_app_installations.dart';
+import '/custom_code/services/duo_interp_pending_sends.dart';
 import '/custom_code/services/duo_interp_retry.dart';
 import '/custom_code/services/duo_pcm_relay_client.dart';
 // 📞 직접 대화의 새 통화 경로. **직접 대화에서만 만든다** — 만능 통역은
@@ -777,6 +778,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   // 🚫 실패해도 Firestore로 갈아타지 않는다 — 통로는 통화가 시작될 때 박히고
   //   끝날 때까지 고정이다(`_interpTransport`).
   // ==========================================================================
+
+  /// 📮 [INTERP-PENDING] DataChannel이 안 열려 못 보낸 발화를 잠깐 든다.
+  ///
+  /// **DataChannel 송신 재시도 큐다.** 파이프라인을 다시 돌리는 물건이 아니다 —
+  /// 처음 만든 payload를 그대로 다시 밀어 넣고, `msgId`도 그대로다.
+  /// 규칙(5건·10초)은 `duo_interp_pending_sends.dart`에 있다.
+  final DuoInterpPendingSendQueue _interpPending = DuoInterpPendingSendQueue();
 
   /// 몇 번 걸었고 다음은 언제인가. 통화 한 번짜리다.
   final DuoInterpRetryPolicy _interpRetry = DuoInterpRetryPolicy();
@@ -1512,6 +1520,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     _interpTts = null;
     _interpPulse.dispose();
     _cancelInterpRetry('dispose');
+    _clearInterpPendingSends('dispose');
     _cancelAudio();
     _audioRecorder.dispose();
     BillingTicker.instance.pause();
@@ -2802,6 +2811,72 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     return true;
   }
 
+  // ==========================================================================
+  // 📮 [INTERP-PENDING] 못 보낸 발화를 채널이 열릴 때 다시 민다
+  // ==========================================================================
+
+  /// 못 보낸 payload를 큐에 넣는다. **WebRTC 통화에서만 쓴다.**
+  void _queueInterpPendingSend(Map<String, dynamic> payload) {
+    if (!_useInterpWebrtc) return;
+    final DuoInterpPendingSend item = DuoInterpPendingSend(
+      payload: payload,
+      queuedAt: DateTime.now(),
+      generation: _interpGeneration,
+    );
+    final DuoInterpPendingSend? evicted = _interpPending.add(item);
+    if (evicted != null) {
+      _lgDuo(
+          '[INTERP-DATA]',
+          'pending_drop reason=overflow msgId=${evicted.msgId} '
+              'ageMs=${evicted.ageMs(item.queuedAt)}');
+    }
+    _lgDuo('[INTERP-DATA]',
+        'pending_added msgId=${item.msgId} queued=${_interpPending.length}');
+  }
+
+  /// 채널이 **실제로 열렸을 때** 큐를 민다.
+  ///
+  /// 🎯 기준은 peer connected가 아니라 **DataChannel OPEN**이다. 둘은 시점이
+  ///   다르고, 그 사이가 바로 이 큐가 막으려는 창이다.
+  void _flushInterpPendingSends(String reason) {
+    if (!_useInterpWebrtc) return;
+    if (_interpPending.isEmpty) return;
+    final DuoWebrtcCall? call = _interpCall;
+    if (call == null || !call.isDataChannelOpen) {
+      _lgDuo('[INTERP-DATA]',
+          'pending_flush_blocked reason=channel_closed queued=${_interpPending.length}');
+      return;
+    }
+    _lgDuo('[INTERP-DATA]',
+        'pending_flush_start reason=$reason queued=${_interpPending.length}');
+    final DateTime now = DateTime.now();
+    final DuoInterpPendingFlushResult result = _interpPending.flush(
+      now: now,
+      generation: _interpGeneration,
+      send: call.sendData,
+    );
+    for (final DuoInterpPendingDropped d in result.dropped) {
+      _lgDuo(
+          '[INTERP-DATA]',
+          'pending_drop reason=${d.reason.name} msgId=${d.item.msgId} '
+              'ageMs=${d.item.ageMs(now)}');
+    }
+    for (final String id in result.sent) {
+      _lgDuo('[INTERP-DATA]', 'pending_sent msgId=$id');
+    }
+    if (result.blocked) {
+      _lgDuo('[INTERP-DATA]',
+          'pending_flush_blocked reason=send_failed remaining=${result.remaining}');
+    }
+  }
+
+  /// 큐를 비운다. 지난 통화의 말이 다음 통화로 넘어가면 안 된다.
+  void _clearInterpPendingSends(String reason) {
+    if (_interpPending.isEmpty) return;
+    final int gone = _interpPending.clear().length;
+    _lgDuo('[INTERP-DATA]', 'pending_cleared reason=$reason dropped=$gone');
+  }
+
   /// 🔁 [INTERP-RETRY] 다음 재시도를 예약한다. **WebRTC 통화에서만 돈다.**
   ///
   /// [generation]은 예약 당시의 세대다. 시계가 울릴 때 이 값이 달라져 있으면
@@ -3039,6 +3114,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       onDataChannelState: (open) {
         if (generation != _interpGeneration) return;
         _interpDataOpen = open;
+        // 📮 [INTERP-PENDING] **여기가 flush의 유일한 기준이다.** peer가 붙은
+        //   시점(`connect()` 반환)이 아니라 채널이 실제로 열린 이 순간이다.
+        if (open) _flushInterpPendingSends('channel_open');
       },
       onData: (payload) {
         if (generation != _interpGeneration || _isExiting || !mounted) return;
@@ -3232,6 +3310,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     // 🔁 마이크를 접는 자리다. 예약된 재시도가 살아 있으면 닫은 통역을 다시
     //   열려 든다.
     _cancelInterpRetry(reason);
+    // 📮 못 보낸 말도 여기서 버린다. 다음 통화로 넘어가면 안 된다.
+    _clearInterpPendingSends(reason);
     _interpGateReopenTimer?.cancel();
     _interpGateReopenTimer = null;
 
@@ -3968,17 +4048,22 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       final String msgId =
           '$_myRole-$seq-${spokenAt.millisecondsSinceEpoch}';
       final DateTime sendStartedAt = DateTime.now();
-      final bool sent = _interpCall?.sendData(<String, dynamic>{
-            'msgId': msgId,
-            'senderUid': _myUid,
-            'senderRole': _myRole,
-            'text': spoken,
-            'srcLang': myNative,
-            'duoMode': kDuoModeInterpreter,
-            'seq': seq,
-            'spokenAt': spokenAt.millisecondsSinceEpoch,
-          }) ??
-          false;
+      // 📮 payload를 **변수로 먼저 만든다.** 못 보내면 이것을 그대로 큐에
+      //   넣고, 채널이 열릴 때 같은 것을 다시 민다 — `msgId`도 그대로다.
+      final Map<String, dynamic> payload = <String, dynamic>{
+        'msgId': msgId,
+        'senderUid': _myUid,
+        'senderRole': _myRole,
+        'text': spoken,
+        'srcLang': myNative,
+        'duoMode': kDuoModeInterpreter,
+        'seq': seq,
+        'spokenAt': spokenAt.millisecondsSinceEpoch,
+      };
+      final bool sent = _interpCall?.sendData(payload) ?? false;
+      // 🚫 못 보냈다고 Firestore로 갈아타지 않는다. 받는 쪽이 그 스냅샷을
+      //   건너뛰므로 소용이 없고, 통로 고정 원칙도 깨진다.
+      if (!sent) _queueInterpPendingSend(payload);
       _lgDuo(
           '[INTERP-DATA]',
           'send ok=$sent seq=$seq lang=$myNative len=${spoken.length} '
@@ -5349,6 +5434,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
     // 🆕 [만능 통역] 같은 이유로 마이크와 전사 소켓을 여기서 내린다. 세대를
     //    먼저 올려야 늦게 오는 전사 완료가 나간 방의 히스토리를 되살리지 않는다.
+    // 📮 세대를 올리기 **전에** 비운다. 올린 뒤에 비우면 로그의 세대가
+    //   버려진 항목의 세대와 어긋나 보인다.
+    _clearInterpPendingSends('generation_changed');
     ++_interpGeneration;
     await _stopInterpreterCapture('room_exit');
     final interpStt = _interpStt;
