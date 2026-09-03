@@ -3210,7 +3210,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       return;
     }
 
-    // 🔉 길이 다음은 세기다. 직통화와 같은 문턱(-35.0dBFS)이다.
+    // 🔉 길이 다음은 세기다. 직통화와 같은 문턱(-42.0dBFS)이다.
     //   세기를 못 잰 발화(null)는 통과시킨다 — 모르는 것으로 사람 말을
     //   버리지 않는다.
     if (belowLevelGate(rmsDbfs, minDbfs: kDuoMinUtteranceRmsDbfs)) {
