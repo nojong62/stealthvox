@@ -52,6 +52,7 @@ import 'first_utterance_context_judge.dart'
     show originLanguageCheckPromptLine, originLanguageResetHintLine;
 // 🆔 테스트 기기를 Remote Config 조건으로 고르는 데 쓰는 설치본 ID.
 import 'package:firebase_app_installations/firebase_app_installations.dart';
+import '/custom_code/services/duo_interp_retry.dart';
 import '/custom_code/services/duo_pcm_relay_client.dart';
 // 📞 직접 대화의 새 통화 경로. **직접 대화에서만 만든다** — 만능 통역은
 // 원음을 보내지 않으므로 이 파일에 닿을 일이 없다.
@@ -767,6 +768,41 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 안 가는지 말해 줘야 한다.
   bool _interpStartFailed = false;
 
+  // ==========================================================================
+  // 🔁 [INTERP-RETRY] 못 붙었을 때 다시 붙는다
+  // --------------------------------------------------------------------------
+  // 규칙은 `duo_interp_retry.dart`에 있고 여기서는 시계만 건다. 자동 3회
+  // (2·5·10초)가 다 지나면 화면의 "다시 시도"로 넘긴다.
+  //
+  // 🚫 실패해도 Firestore로 갈아타지 않는다 — 통로는 통화가 시작될 때 박히고
+  //   끝날 때까지 고정이다(`_interpTransport`).
+  // ==========================================================================
+
+  /// 몇 번 걸었고 다음은 언제인가. 통화 한 번짜리다.
+  final DuoInterpRetryPolicy _interpRetry = DuoInterpRetryPolicy();
+
+  /// 예약된 재시도. null이면 지금 기다리는 것이 없다.
+  Timer? _interpRetryTimer;
+
+  /// 통역 마이크가 **실제로 살아 있는가.**
+  ///
+  /// `_interpCapture`만 보면 안 된다 — WebRTC 경로는 그 필드를 채우지 않고
+  /// `_interpMicTap`을 채운다. 한쪽만 보면 이미 도는 통역 위에 두 번째 시작을
+  /// 얹게 된다.
+  bool get _interpCaptureLive =>
+      _interpCapture != null || _interpMicTap != null;
+
+  /// 화면에 "다시 시도"를 띄울 것인가. 자동 재시도가 다 끝났을 때만이다.
+  bool get _interpShowManualRetry =>
+      !_isDirectMode &&
+      _interpStartFailed &&
+      _interpRetryTimer == null &&
+      _isPartnerOnline &&
+      !_isExiting &&
+      _useInterpWebrtc &&
+      !_interpCaptureLive &&
+      !_interpStarting;
+
   /// 내 마이크 국면. **UI 마이크 등은 오직 이 값과 [_interpReady]만 본다.**
   InterpMicPhase _interpMicPhase = InterpMicPhase.waitingPartner;
 
@@ -1475,6 +1511,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     unawaited(_interpTts?.dispose());
     _interpTts = null;
     _interpPulse.dispose();
+    _cancelInterpRetry('dispose');
     _cancelAudio();
     _audioRecorder.dispose();
     BillingTicker.instance.pause();
@@ -2765,6 +2802,84 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     return true;
   }
 
+  /// 🔁 [INTERP-RETRY] 다음 재시도를 예약한다. **WebRTC 통화에서만 돈다.**
+  ///
+  /// [generation]은 예약 당시의 세대다. 시계가 울릴 때 이 값이 달라져 있으면
+  /// 그 사이 방이 바뀐 것이므로 조용히 버린다.
+  void _scheduleInterpRetry(int generation) {
+    // 🔒 [INTERP-TRANSPORT] firestore로 박힌 통화는 이 실패 갈래 자체를 안
+    //   타지만, 통로가 바뀌면 여기가 조용히 살아나므로 한 번 더 막는다.
+    if (!_useInterpWebrtc) {
+      _lgDuo('[INTERP-RETRY]', 'skipped reason=firestore_transport');
+      return;
+    }
+    _cancelInterpRetry('reschedule');
+    final Duration? delay = _interpRetry.takeNextDelay();
+    if (delay == null) {
+      _lgDuo('[INTERP-RETRY]',
+          'exhausted attempts=${_interpRetry.attempts} — 수동 재시도만 남았다');
+      if (mounted) setState(() {});
+      return;
+    }
+    final int attempt = _interpRetry.attempts;
+    _lgDuo(
+        '[INTERP-RETRY]',
+        'scheduled attempt=$attempt/${kDuoInterpRetryDelays.length} '
+            'inMs=${delay.inMilliseconds} gen=$generation');
+    _interpRetryTimer = Timer(delay, () {
+      _interpRetryTimer = null;
+      // 아래 넷 중 하나라도 걸리면 **아무것도 하지 않는다.** 늦게 울린 시계가
+      // 나간 방이나 이미 도는 통역을 건드리면 안 된다.
+      if (!mounted || _isExiting) {
+        _lgDuo('[INTERP-RETRY]', 'dropped reason=disposed_or_exiting');
+        return;
+      }
+      if (generation != _interpGeneration) {
+        _lgDuo('[INTERP-RETRY]', 'dropped reason=stale_generation');
+        return;
+      }
+      if (!_isPartnerOnline) {
+        _lgDuo('[INTERP-RETRY]', 'dropped reason=partner_offline');
+        return;
+      }
+      if (_interpCaptureLive || _interpStarting) {
+        _lgDuo('[INTERP-RETRY]', 'dropped reason=already_live');
+        return;
+      }
+      _lgDuo('[INTERP-RETRY]', 'firing attempt=$attempt');
+      unawaited(_startInterpreterCapture('retry_$attempt'));
+    });
+    if (mounted) setState(() {});
+  }
+
+  /// 예약을 접는다. 붙었을 때·방을 나갈 때·상대가 나갔을 때 부른다.
+  void _cancelInterpRetry(String reason) {
+    final Timer? timer = _interpRetryTimer;
+    if (timer == null) return;
+    timer.cancel();
+    _interpRetryTimer = null;
+    _lgDuo('[INTERP-RETRY]', 'cancelled reason=$reason');
+  }
+
+  /// 붙었다. 예약을 접고 다음 실패를 위해 횟수를 되돌린다.
+  void _noteInterpStartSucceeded() {
+    _cancelInterpRetry('started');
+    _interpRetry.reset();
+  }
+
+  /// 🔁 [INTERP-RETRY] 화면의 "다시 시도". 자동 3회가 끝난 뒤에만 보인다.
+  ///
+  /// 자동 경로와 **같은 문을 쓴다** — 횟수를 되돌리고 다시 처음부터 센다.
+  /// 통로는 손대지 않는다(WebRTC로 박힌 통화에서만 이 버튼이 뜬다).
+  void _retryInterpreterNow() {
+    if (!_interpShowManualRetry) return;
+    _cancelInterpRetry('manual');
+    _interpRetry.reset();
+    _lgDuo('[INTERP-RETRY]', 'manual role=$_myRole gen=$_interpGeneration');
+    if (mounted) setState(() => _interpStartFailed = false);
+    unawaited(_startInterpreterCapture('manual_retry'));
+  }
+
   /// 🔵 [INTERP-LIVE] 상대가 방에 있으면 마이크를 자동으로 연다.
   ///
   /// 직접 대화의 [_maybeAutoStartDirectCall]과 같은 정책이다 — 혼자 있는
@@ -2848,6 +2963,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           _lgDuo('❌ [INTERP-WEBRTC]', 'start_failed — 통역을 시작하지 못했다');
           if (mounted) setState(() => _interpStartFailed = true);
           _setInterpMicPhase(InterpMicPhase.preparing);
+          // 🔁 한 번 못 붙었다고 끝내지 않는다. 2·5·10초 뒤에 다시 붙어 본다.
+          _scheduleInterpRetry(generation);
         }
         return;
       }
@@ -2879,6 +2996,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       );
       // 마지막 줄에서 연다. 이 줄이 곧 화면이 밝아지는 순간이다.
       _openInterpGate('capture_started');
+      _noteInterpStartSucceeded();
       _lgDuo(
           '[INTERP-LIVE]',
           'capture_started reason=$reason gen=$generation role=$_myRole '
@@ -2988,6 +3106,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
             '(※ 실제 적용 여부는 플랫폼이 정하며 보고하지 않는다)');
     // 마지막 줄에서 연다 — 직접 경로와 같은 순서다.
     _openInterpGate('capture_started');
+    // 🔁 붙었다. 예약된 재시도가 뒤늦게 울려 두 번째 시작을 얹지 않게 접는다.
+    _noteInterpStartSucceeded();
     _lgDuo(
         '[INTERP-LIVE]',
         'capture_started reason=$reason gen=$generation role=$_myRole '
@@ -3109,6 +3229,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// always-on에서는 턴 경계가 아니라 **세션 경계**에서만 불린다 —
   /// 상대 이탈, 방 나가기, dispose, STT 치명 오류 넷뿐이다.
   Future<void> _stopInterpreterCapture(String reason) async {
+    // 🔁 마이크를 접는 자리다. 예약된 재시도가 살아 있으면 닫은 통역을 다시
+    //   열려 든다.
+    _cancelInterpRetry(reason);
     _interpGateReopenTimer?.cancel();
     _interpGateReopenTimer = null;
 
@@ -3163,6 +3286,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     _setInterpPartnerPhase(InterpPartnerPhase.idle);
     // 다음 상대가 들어오면 다시 자동으로 붙을 수 있게 기록을 푼다.
     _interpAutoStartAttempted = false;
+    // 재시도 횟수도 상대마다 새로 센다. 앞 상대에게 세 번 실패했다고 다음
+    // 상대에게 한 번도 안 걸어 보면 안 된다.
+    _interpRetry.reset();
     if (mounted) {
       setState(() {
         _isPartnerOnline = false;
@@ -4296,7 +4422,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           ? '상대방 연결 종료'
           : '상대방을 기다리는 중';
     }
-    if (_interpStartFailed) return '마이크를 열지 못했습니다';
+    if (_interpStartFailed) {
+      // 재시도가 예약돼 있으면 "실패"가 아니라 "다시 붙는 중"이다.
+      return _interpRetryTimer != null ? '다시 연결하는 중' : '마이크를 열지 못했습니다';
+    }
     if (_interpPartnerPhase == InterpPartnerPhase.playing) {
       return '상대방 말 전달 중';
     }
@@ -6414,6 +6543,22 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
               ),
             ),
           ),
+          // 🔁 [INTERP-RETRY] 자동 3회가 다 끝났을 때만 나온다. 그 전에는
+          //   시계가 알아서 다시 걸므로 누를 것이 없다.
+          if (_interpShowManualRetry) ...[
+            const SizedBox(width: 8),
+            TextButton(
+              onPressed: _retryInterpreterNow,
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF93C5FD),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                minimumSize: const Size(0, 44),
+              ),
+              child: const Text('다시 시도',
+                  style:
+                      TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+            ),
+          ],
           const SizedBox(width: 12),
           _buildInterpreterMicIndicator(),
         ],
