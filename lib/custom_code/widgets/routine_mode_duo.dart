@@ -1769,6 +1769,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// `voicedMs`를 확인할 것** — 진짜 짧은 말인지 클릭인지 그 숫자가 가른다.
   static const int kDuoMinVoicedMs = 150;
 
+  /// 🔎 [LEVEL] dBFS 한 칸을 로그에 적는 서식. **`n/a`와 값을 구별한다** —
+  /// 못 잰 것과 0dB은 완전히 다른 뜻인데 둘 다 숫자로 적으면 섞인다.
+  static String _fmtDb(double? v) =>
+      v == null ? 'n/a' : v.toStringAsFixed(1);
+
   /// 직접 대화 전사문 중 버릴 것. 만능 통역 쪽 필터는 건드리지 않는다.
   ///
   /// ⚠️ **글자 수로 버리지 않는다.** 예전에는 2자 이하를 무조건 잡음으로 봤는데,
@@ -2352,6 +2357,25 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
             finalText: '');
         return;
       }
+      // 🔎 [DIRECT-LEVEL] **받아들이든 버리든 여기서 한 줄 남긴다.**
+      //
+      //   예전에는 버릴 때만(`[DUO-DROP]`) 세기를 남겼다. 그래서 "가까운
+      //   목소리는 몇 dBFS이고 먼 소리는 몇인가"를 알 방법이 없었고, 문턱을
+      //   고치려면 감으로 해야 했다. 만능 통역의 `[INTERP-LEVEL]`과 같은
+      //   모양으로 맞춰, 두 경로를 나란히 놓고 읽을 수 있게 한다.
+      //
+      //   **글자는 싣지 않는다** — 숫자만으로 충분하고, 로그가 대화록이
+      //   되면 안 된다.
+      //
+      //   🚫 이 줄은 아무것도 가르지 않는다. 아래 게이트는 예전 그대로다.
+      _lgDuo(
+          '[DIRECT-LEVEL]',
+          'item=$itemId len=${text.trim().length} '
+              'voicedMs=${voicedMs ?? -1} src=$voicedSrc '
+              'rmsDbfs=${_fmtDb(_utteranceRms?.rmsDbfsOf(itemId))} '
+              'floorDbfs=${_fmtDb(_utteranceRms?.noiseFloorDbfsOf(itemId))} '
+              'snrDb=${_fmtDb(_utteranceRms?.snrDbOf(itemId))}');
+
       // 🔇 [DUO-GHOST] 소리가 난 시간을 여기서 읽는다. 전사문이 도착한 뒤에는
       //   이 값이 유일하게 남은 "진짜 말이었는가"의 근거다.
       if (belowVoicedGate(voicedMs, minMs: kDuoMinVoicedMs)) {
@@ -3437,7 +3461,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         '[INTERP-LEVEL]',
         'item=$itemId len=${trimmed.length} voicedMs=${voicedMs ?? -1} '
             'src=$voicedSrc '
-            'rmsDbfs=${rmsDbfs == null ? 'n/a' : rmsDbfs.toStringAsFixed(1)}');
+            'rmsDbfs=${_fmtDb(rmsDbfs)} '
+            'floorDbfs=${_fmtDb(_utteranceRms?.noiseFloorDbfsOf(itemId))} '
+            'snrDb=${_fmtDb(_utteranceRms?.snrDbOf(itemId))}');
 
     // 🔇 길이. 직통화와 같은 문턱이다.
     if (belowVoicedGate(voicedMs, minMs: kDuoMinVoicedMs)) {

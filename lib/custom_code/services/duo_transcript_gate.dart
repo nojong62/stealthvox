@@ -186,6 +186,15 @@ const int kDuoRmsPreRollMs = 600;
 /// 통과시킨다. 이것이 "측정 실패"와 "진짜 조용함"을 가르는 자리다.
 const int kDuoRmsMinWindowMs = 150;
 
+/// 🔎 [LEVEL-FLOOR] 지금 환경의 **바닥 소리**를 재는 창.
+///
+/// 발화가 아닌 구간만 모아서 평균을 낸다. pre-roll(600ms)보다 길게 잡는 이유는
+/// 그쪽이 이미 말이 시작되는 소리를 품고 있어 바닥이 못 되기 때문이다.
+///
+/// ⚠️ **판정에 쓰지 않는다.** 지금은 로그로만 나간다 — 절대 문턱을 상대
+///   문턱으로 옮길지는 이 숫자가 실기기에서 쌓인 뒤에 정한다.
+const int kDuoRmsIdleWindowMs = 3000;
+
 /// 발화 구간 평균 세기 계산기. 통화 한 번에 하나.
 class DuoUtteranceRmsMeter {
   DuoUtteranceRmsMeter({
@@ -211,10 +220,27 @@ class DuoUtteranceRmsMeter {
   final List<_RmsChunk> _preRoll = <_RmsChunk>[];
   int _preRollSamples = 0;
 
+  /// 🔎 [LEVEL-FLOOR] 발화가 아닌 구간만 담는 별도 고리.
+  ///
+  /// [_preRoll]과 나눠 두는 이유가 둘이다.
+  ///   ① pre-roll은 `beginUtterance`가 **먹어 치운다**(발화 셈의 출발점이 된다)
+  ///   ② pre-roll 600ms는 말이 시작되는 소리를 이미 품고 있어 바닥이 아니다
+  ///
+  /// 발화 중에는 채우지 않는다 — 그래야 "말하기 직전의 조용함"이 얼어붙는다.
+  final List<_RmsChunk> _idle = <_RmsChunk>[];
+  int _idleSamples = 0;
+
+  /// 이 발화가 시작될 때의 바닥. `commitUtterance`가 item에 묶는다.
+  double? _floorAtStart;
+
   int get _preRollMaxSamples => kDuoRmsPreRollMs * sampleRate ~/ 1000;
+  int get _idleMaxSamples => kDuoRmsIdleWindowMs * sampleRate ~/ 1000;
   int get _minWindowSamples => kDuoRmsMinWindowMs * sampleRate ~/ 1000;
 
   final Map<String, double> _rmsByItem = <String, double>{};
+
+  /// 🔎 [LEVEL-FLOOR] 발화별 바닥. [_rmsByItem]과 같은 열쇠를 쓰고 같이 버려진다.
+  final Map<String, double> _floorByItem = <String, double>{};
   final List<String> _itemOrder = <String>[];
 
   bool get isActive => _active;
@@ -222,6 +248,17 @@ class DuoUtteranceRmsMeter {
 
   /// 지금 고리에 담긴 소리의 길이(ms). 진단용.
   int get preRollMs => _preRollSamples * 1000 ~/ sampleRate;
+
+  /// 🔎 [LEVEL-FLOOR] 지금 환경의 바닥(dBFS). 모아 둔 조용한 구간이
+  /// 없으면 null이다 — **0이 아니라 "모른다"다.**
+  double? get idleFloorDbfs {
+    if (_idleSamples == 0) return null;
+    var sum = 0.0;
+    for (final chunk in _idle) {
+      sum += chunk.sumSquares;
+    }
+    return pcm16LinearToDbfs(math.sqrt(sum / _idleSamples));
+  }
 
   /// 서버 VAD가 발화 시작을 알렸다.
   ///
@@ -237,6 +274,9 @@ class DuoUtteranceRmsMeter {
     }
     _preRoll.clear();
     _preRollSamples = 0;
+    // 🔎 [LEVEL-FLOOR] 말이 시작되는 순간의 바닥을 찍어 둔다. 발화 중에는
+    //   고리를 안 채우므로 이 값은 통화 내내 흔들리지 않는다.
+    _floorAtStart = idleFloorDbfs;
     _active = true;
   }
 
@@ -267,6 +307,14 @@ class DuoUtteranceRmsMeter {
     while (_preRollSamples > _preRollMaxSamples && _preRoll.length > 1) {
       _preRollSamples -= _preRoll.removeAt(0).samples;
     }
+
+    // 🔎 [LEVEL-FLOOR] 같은 조각을 바닥 고리에도 담는다. 창이 더 길고
+    //   `beginUtterance`가 먹지 않는다는 것만 다르다.
+    _idle.add(_RmsChunk(sum, samples));
+    _idleSamples += samples;
+    while (_idleSamples > _idleMaxSamples && _idle.length > 1) {
+      _idleSamples -= _idle.removeAt(0).samples;
+    }
   }
 
   /// 서버가 구간을 확정했다. 그때까지의 평균 세기를 item에 묶는다.
@@ -294,8 +342,14 @@ class DuoUtteranceRmsMeter {
     final double dbfs = pcm16LinearToDbfs(rms);
     if (!_rmsByItem.containsKey(itemId)) _itemOrder.add(itemId);
     _rmsByItem[itemId] = dbfs;
+    // 🔎 [LEVEL-FLOOR] 세기와 **같은 열쇠로** 묶는다. 둘이 따로 놀면 나중에
+    //   "이 발화의 바닥"을 못 찾는다.
+    final double? floor = _floorAtStart;
+    if (floor != null) _floorByItem[itemId] = floor;
     while (_itemOrder.length > maxTrackedItems) {
-      _rmsByItem.remove(_itemOrder.removeAt(0));
+      final String gone = _itemOrder.removeAt(0);
+      _rmsByItem.remove(gone);
+      _floorByItem.remove(gone);
     }
     return dbfs;
   }
@@ -306,6 +360,22 @@ class DuoUtteranceRmsMeter {
   /// 읽으면서 지우면 두 번째가 세기를 모른 채 게이트를 통과한다.
   double? rmsDbfsOf(String itemId) => _rmsByItem[itemId];
 
+  /// 🔎 [LEVEL-FLOOR] 이 발화가 시작될 때의 바닥(dBFS). 모르면 null.
+  ///
+  /// **판정에 쓰지 않는다.** 로그로만 나간다 — 절대 문턱을 상대 문턱으로
+  /// 옮길지는 이 숫자가 실기기에서 쌓인 뒤에 정한다.
+  double? noiseFloorDbfsOf(String itemId) => _floorByItem[itemId];
+
+  /// 🔎 [LEVEL-FLOOR] 바닥 위로 이 발화가 얼마나 솟았나(dB). 둘 중 하나라도
+  /// 모르면 null이다. 가까운 말과 먼 소리를 가르는 후보 지표이지, 지금은
+  /// 아무것도 가르지 않는다.
+  double? snrDbOf(String itemId) {
+    final double? rms = _rmsByItem[itemId];
+    final double? floor = _floorByItem[itemId];
+    if (rms == null || floor == null) return null;
+    return rms - floor;
+  }
+
   /// 통화가 끊기거나 전사 소켓이 재접속할 때. **누적과 장부를 모두 비운다.**
   /// 끊긴 동안의 소리가 다음 발화에 섞이면 안 된다.
   void reset() {
@@ -315,7 +385,11 @@ class DuoUtteranceRmsMeter {
     // 고리도 비운다. 끊기기 전 소리가 다음 발화의 pre-roll이 되면 안 된다.
     _preRoll.clear();
     _preRollSamples = 0;
+    _idle.clear();
+    _idleSamples = 0;
+    _floorAtStart = null;
     _rmsByItem.clear();
+    _floorByItem.clear();
     _itemOrder.clear();
   }
 }
