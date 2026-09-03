@@ -294,7 +294,9 @@ const String _canonicalPrompt =
 
 Your job is CLEANUP, not selection. You never decide what matters in a conversation. Keep what they said and tidy only the mess speech-to-text made.
 
-KEEP EVERY TURN A PERSON ACTUALLY SPOKE, however short or ordinary: questions, answers, agreements, refusals, reactions, greetings, self-corrections. Never drop a turn because it looks unimportant or not worth studying. Importance is not yours to judge. Keep the two speakers in the order they actually spoke; never merge different speakers and never reorder the call.
+KEEP EVERY TURN A PERSON ACTUALLY SPOKE, however short or ordinary: questions, answers, agreements, refusals, reactions, greetings, self-corrections. Never drop a turn because it looks unimportant or not worth studying. Importance is not yours to judge. Never merge different speakers.
+
+ORDER: the two lines came from two different phones whose clocks do not agree, so the order you are given can be wrong. Return the turns in the order the two people ACTUALLY spoke them, as the conversation itself shows: a question comes before its answer, an answer before the reply to it. Move a turn ONLY when the conversation makes the true position plain. If you cannot tell, leave it exactly where it is - a slightly odd order costs little; an invented order rewrites the call.
 
 Judge every turn by its CONVERSATIONAL FUNCTION in context, never by its length or wording:
   "Are you going tomorrow?" / "어."  -> agreement. included
@@ -304,12 +306,13 @@ Judge every turn by its CONVERSATIONAL FUNCTION in context, never by its length 
 
 States you may assign:
   included    - a real turn in the conversation. THIS IS THE DEFAULT.
+  artifact    - the recognizer wrote words nobody spoke. Requires the line to be plainly impossible in context: it answers nothing, is answered by nothing, and belongs to no topic in this call. Stock phrases the recognizer invents in silence ("thank you for watching", "시청해 주셔서 감사합니다") are the clearest case. A real remark is NOT an artifact just because it changes the subject, is blunt, or reads oddly - people do that.
   merged      - a fragment you joined into a neighbouring turn of the SAME speaker. Only when no real turn by the other speaker sits between them.
   hesitation  - real voice, but only filling the speaker's own pause; no reply, question, reaction or agreement.
   echo        - this speaker's phone picked up the OTHER speaker's voice from the loudspeaker. Requires the other speaker to have a near-identical line at almost the same time. A person genuinely repeating what they heard is NOT echo.
   duplicate   - the same moment stored twice by the recognizer. Matching words alone never justify this.
 
-If you are unsure, choose "included". Wrongly keeping a line costs little; wrongly hiding one loses what a person said.
+If you are unsure, choose "included". Wrongly keeping a line costs little; wrongly hiding one loses what a person said. This applies to "artifact" above all: a person saying something unexpected is a person speaking, not a machine error.
 
 Write the turns you keep as READABLE SENTENCES, not as transcript fragments. The person on the other end heard a sentence; the reader should see one too.
 
@@ -403,9 +406,17 @@ Future<List<DuoCanonicalTurn>?> reconcileDuoConversation({
       ));
     }
 
+    // 🧭 [ORDER] **모델이 돌려준 순서를 그대로 쓴다.**
+    //
+    //   예전에는 여기서 `spokenAtMs`로 다시 정렬했다. 그러면 모델이 맥락으로
+    //   바로잡은 순서가 그 자리에서 도로 지워진다 — 두 폰의 시계가 어긋나서
+    //   생긴 뒤엉킴을 고치라고 시켜 놓고, 고친 결과를 버리고 있었다.
+    //
+    //   시각은 이제 **빠진 줄을 끼워 넣을 자리를 찾는 데에만** 쓴다.
+
     // 🧭 [FAIL-OPEN] 모델이 통째로 빠뜨린 원본은 **원문 그대로 되살린다.**
     //   빠진 것이 판단인지 실수인지 알 수 없고, 근거 없이 사람 말을 감추지
-    //   않는다. 되살린 줄은 말한 순서 자리로 돌아간다.
+    //   않는다.
     final missing = <DuoCanonicalTurn>[];
     for (final u in source) {
       if (seen.contains(u.id)) continue;
@@ -419,14 +430,43 @@ Future<List<DuoCanonicalTurn>?> reconcileDuoConversation({
     }
     if (missing.isNotEmpty) {
       debugPrint('[DUO-CANON] restored_missing=${missing.length}');
-      turns.addAll(missing);
+      // 되살린 줄은 시각으로 자리를 찾는다. 모델이 이미 세운 순서는 흔들지
+      // 않고, 그 사이에 끼워 넣기만 한다.
+      for (final m in missing) {
+        turns.insert(_insertionIndexByTime(turns, m.spokenAtMs), m);
+      }
     }
-    turns.sort((a, b) => (a.spokenAtMs ?? 0).compareTo(b.spokenAtMs ?? 0));
+    // 🔎 모델이 순서를 얼마나 바꿨는지 한 줄로 남긴다. 실기기에서 "왜 순서가
+    //   이런가"를 물을 때 볼 것이 이 숫자뿐이다.
+    debugPrint('[DUO-CANON] turns=${turns.length} '
+        'reordered=${_countOutOfTimeOrder(turns)}');
     return turns.isEmpty ? null : turns;
   } catch (e) {
     debugPrint('[DUO-CANON] gpt_failed=${e.runtimeType}');
     return null;
   }
+}
+
+/// 시각으로 끼워 넣을 자리. 이미 선 순서는 건드리지 않는다.
+///
+/// 모델이 맥락으로 순서를 바꿨으면 `spokenAtMs`는 더 이상 오름차순이 아니다.
+/// 그래도 **처음으로 더 늦은 줄 앞**이 사람이 기대하는 자리다.
+int _insertionIndexByTime(List<DuoCanonicalTurn> turns, int? spokenAtMs) {
+  final int at = spokenAtMs ?? 0;
+  for (int i = 0; i < turns.length; i++) {
+    if ((turns[i].spokenAtMs ?? 0) > at) return i;
+  }
+  return turns.length;
+}
+
+/// 시각순과 어긋난 줄이 몇 개인가. **경고가 아니라 계측이다** —
+/// 두 폰의 시계가 어긋났으면 이 값이 0이 아닌 것이 정상이다.
+int _countOutOfTimeOrder(List<DuoCanonicalTurn> turns) {
+  var moved = 0;
+  for (int i = 1; i < turns.length; i++) {
+    if ((turns[i].spokenAtMs ?? 0) < (turns[i - 1].spokenAtMs ?? 0)) moved++;
+  }
+  return moved;
 }
 
 String _stateFromModel(Object? raw) {
@@ -439,6 +479,8 @@ String _stateFromModel(Object? raw) {
       return kStudyStateHiddenEcho;
     case 'duplicate':
       return kStudyStateHiddenDuplicate;
+    case 'artifact':
+      return kStudyStateHiddenArtifact;
     default:
       // 모르는 값은 보이는 쪽. 감추는 쪽이 기본이 되면 안 된다.
       return kStudyStateIncluded;
