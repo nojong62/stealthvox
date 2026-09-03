@@ -52,6 +52,22 @@ void main() {
           reason: '기본이 꺼져 있으면 아무 빌드도 이 경로를 안 탄다');
     });
 
+    test('분기는 상수가 아니라 세션이 확정한 값을 본다', () {
+      // 상수를 직접 보는 자리가 하나라도 남으면 Remote Config로 되돌렸을 때
+      // 그 자리만 옛 값으로 돌아 캡처와 가드가 어긋난다.
+      final int decl = duo.indexOf('bool get _useInterpWebrtc');
+      for (final String site in <String>[
+        'if (_useInterpWebrtc) {',
+        '_useInterpWebrtc && !_isDirectMode',
+      ]) {
+        expect(duo, contains(site), reason: '\$site 자리가 없다');
+      }
+      // 선언·주석·폴백 게터 밖에서 상수를 읽지 않는다.
+      final int fallback = duo.indexOf('String get _fallbackInterpTransport');
+      expect(fallback, greaterThan(-1));
+      expect(decl, greaterThan(-1));
+    });
+
     test('롤백 경로를 지우지 않았다', () {
       // `--dart-define=DUO_INTERP_WEBRTC=false`로 돌아갈 자리가 있어야 한다.
       expect(duo, contains('PreparedAudioCapture.start('));
@@ -68,7 +84,7 @@ void main() {
     });
 
     test('꺼지면 마이크를 여는 주체가 예전 그대로다', () {
-      final int at = duo.indexOf('if (kDuoInterpWebrtc) {',
+      final int at = duo.indexOf('if (_useInterpWebrtc) {',
           duo.indexOf('Future<void> _startInterpreterCapture('));
       expect(at, greaterThan(-1), reason: '분기가 없다');
       final int prepared =
@@ -193,7 +209,7 @@ void main() {
       final int end = duo.indexOf('void _enqueueIncoming(', at);
       expect(end, greaterThan(at));
       final String body = duo.substring(at, end);
-      final int guard = body.indexOf('kDuoInterpWebrtc && !_isDirectMode');
+      final int guard = body.indexOf('_useInterpWebrtc && !_isDirectMode');
       final int enqueue = body.indexOf('_enqueueIncoming(data)');
       expect(guard, greaterThan(-1), reason: '제외 조건이 없다');
       expect(enqueue, greaterThan(-1));
@@ -204,7 +220,7 @@ void main() {
 
     test('직접 대화는 어느 경우에도 Firestore 경로를 지난다', () {
       // 직접 대화의 글자는 이 채널로만 온다. 같이 막으면 History가 빈다.
-      final int at = duo.indexOf('kDuoInterpWebrtc && !_isDirectMode');
+      final int at = duo.indexOf('_useInterpWebrtc && !_isDirectMode');
       expect(at, greaterThan(-1));
       expect(duo.substring(at - 200, at + 100), contains('_isDirectMode'));
     });
@@ -234,7 +250,7 @@ void main() {
   group('📝 기록이 통화를 붙잡지 않는다', () {
     test('새 경로에서 History 쓰기를 기다리지 않는다', () {
       // Firestore가 2초 걸려도 상대 목소리가 늦어지면 안 된다.
-      final int at = duo.indexOf('if (kDuoInterpWebrtc) {',
+      final int at = duo.indexOf('if (_useInterpWebrtc) {',
           duo.indexOf('Future<void> _processRelayPipeline('));
       expect(at, greaterThan(-1));
       final int end = duo.indexOf('    } else {', at);
@@ -247,7 +263,7 @@ void main() {
     });
 
     test('실시간 전달이 기록보다 먼저다', () {
-      final int at = duo.indexOf('if (kDuoInterpWebrtc) {',
+      final int at = duo.indexOf('if (_useInterpWebrtc) {',
           duo.indexOf('Future<void> _processRelayPipeline('));
       final String body = duo.substring(at, at + 1800);
       final int send = body.indexOf('sendData(');

@@ -212,6 +212,39 @@ const bool kDuoInterpOriginCheck =
 const bool kDuoInterpWebrtc =
     bool.fromEnvironment('DUO_INTERP_WEBRTC', defaultValue: true);
 
+// ============================================================================
+// 🔀 [INTERP-TRANSPORT] 만능 통역의 글자 통로 — 런타임 손잡이
+// ----------------------------------------------------------------------------
+// [kDuoInterpWebrtc]는 빌드에 박히는 값이라, 배포한 뒤 문제가 나면 되돌리는 데
+// 스토어 새 빌드가 필요했다. 직접 대화가 `DuoDirectTransport`로 그 문제를 이미
+// 푼 자리가 있으므로 **같은 모양**을 하나 더 둔다.
+//
+//   webrtc     WebRTC 마이크 → MicTap → STT → DataChannel
+//   firestore  record 마이크 → STT → duo_sessions/{room}/messages
+//
+// 🔒 **한 통화에서 이 값은 딱 한 번 정해진다.** 통화 도중 Remote Config가
+//   바뀌어도 지금 통화는 그대로 간다 — 다음 통화부터 새 값이다.
+//
+//   그래야 하는 이유가 이 기능의 전부다. 마이크는 WebRTC로 열렸는데 Firestore
+//   가드가 다른 값을 보면 **한 발화를 두 번 번역하고 두 번 읽는다.** 거꾸로면
+//   상대 발화를 아예 못 받는다. 두 사고 다 조용히 일어나서 로그를 봐야만
+//   보인다. 그래서 판단하는 자리마다 Remote Config를 다시 읽지 않고,
+//   세션이 확정한 `_interpTransport` **하나만** 본다.
+//
+// 🚫 직접 대화의 `DuoDirectTransport`는 건드리지 않는다. 축이 다르다 —
+//   그쪽은 "소리를 어느 통로로 나르나"이고 이쪽은 "글자를 어느 통로로 나르나"다.
+// ============================================================================
+const String kDuoInterpTransportWebrtc = 'webrtc';
+const String kDuoInterpTransportFirestore = 'firestore';
+
+/// Remote Config 키. 두 값만 알아듣는다 — 빈 값·오타·모르는 값·fetch 실패는
+/// 전부 [kDuoInterpWebrtc]가 정하는 빌드 타임 기본값으로 떨어진다.
+///
+/// ⚠️ 직접 대화(`DuoDirectTransport`)와 달리 **양쪽 값을 모두 명시로 받는다.**
+///   그쪽은 'relay'만 알아듣고 나머지를 전부 webrtc로 보내는데, 여기서는
+///   되돌리는 쪽(`firestore`)도 오타로 무시되면 안 되기 때문이다.
+const String kDuoInterpTransportRemoteConfigKey = 'DuoInterpreterTransport';
+
 /// 🌐 상대가 실어 보낸 `srcLang`을 **글자 판정으로 뒤집기 위한** 최소 길이.
 ///
 /// 이보다 짧으면 선언값을 믿는다. 선언값은 로비 설정에서 오므로 흔들리지
@@ -1487,6 +1520,14 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           .getString(kDuoTransportRemoteConfigKey)
           .trim()
           .toLowerCase();
+      // 🔀 [INTERP-TRANSPORT] 통역 통로. **여기서는 읽어 두기만 한다** —
+      //   실제 판단은 통화가 시작될 때 `_pinInterpTransport`가 한 번 한다.
+      //   fetch가 실패해 이 줄에 못 닿아도 빈 문자열 그대로라, 빌드 타임
+      //   기본값으로 조용히 떨어진다(통역이 안 켜지는 일은 없다).
+      final String interpTransport = remoteConfig
+          .getString(kDuoInterpTransportRemoteConfigKey)
+          .trim()
+          .toLowerCase();
       if (mounted) {
         setState(() {
           _openAiKey = remoteConfig.getString('OpenAIAPIKey');
@@ -1496,8 +1537,14 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           _directTransport = transport == kDuoTransportRelay
               ? kDuoTransportRelay
               : kDuoTransportWebrtc;
+          // 이미 통화가 시작돼 통로가 박혔으면 **덮지 않는다.** 다음 통화부터다.
+          _interpTransportRaw = interpTransport;
         });
         _lgDuo('[DUO-TRANSPORT]', 'resolved=$_directTransport raw="$transport"');
+        _lgDuo(
+            '[INTERP-TRANSPORT]',
+            'raw="$interpTransport" '
+                'pinned=${_interpTransport ?? 'not_yet'}');
         // 🆔 [DUO-FID] 이 단말의 Firebase Installation ID.
         //
         //   Remote Config에서 **특정 테스트 기기만** 골라 조건을 걸려면 이
@@ -2767,6 +2814,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       return;
     }
 
+    // 🔀 [INTERP-TRANSPORT] 리스너가 이미 박았으면 그 값을 그대로 쓴다.
+    //   여기서 다시 정하면 캡처와 가드가 어긋날 수 있다.
+    _pinInterpTransport('interp_capture');
+
     _interpStarting = true;
     // 🔉 세기 계측기는 **진단 여부와 무관하게** 만든다. 게이트가 이 값을 본다.
     //   직통화와 같은 물건이고, 두 모드는 동시에 돌지 않는다.
@@ -2789,7 +2840,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
       // 📡 [INTERP-WEBRTC] 새 경로는 여기서 갈린다. 마이크를 여는 주체가
       //   `record`에서 WebRTC로 바뀌고, 그 뒤 처리는 그대로다.
-      if (kDuoInterpWebrtc) {
+      if (_useInterpWebrtc) {
         final bool ok = await _startInterpreterWebrtc(generation, reason);
         if (!ok) {
           // 🚫 조용히 옛 경로로 돌아가지 않는다. 돌아가면 실기기 로그에서
@@ -3534,6 +3585,50 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 언어 확인 오버레이를 띄울 것인가. 띄운 언어가 담긴다.
   String? _originMismatchDetected;
 
+  // ==========================================================================
+  // 🔀 [INTERP-TRANSPORT] 이 통화의 글자 통로를 한 번만 정한다
+  // ==========================================================================
+
+  /// Remote Config에서 읽은 원문. **판단에 직접 쓰지 않는다.**
+  /// `_pinInterpTransport`가 이 값을 한 번 읽어 [_interpTransport]에 박는다.
+  String _interpTransportRaw = '';
+
+  /// 이 통화가 실제로 쓰는 통로. **한 번 박히면 통화가 끝날 때까지 안 바뀐다.**
+  /// null이면 아직 안 박혔다는 뜻이고, 그때는 빌드 타임 기본값으로 읽는다.
+  String? _interpTransport;
+
+  /// Remote Config를 못 읽었을 때 떨어질 자리.
+  String get _fallbackInterpTransport => kDuoInterpWebrtc
+      ? kDuoInterpTransportWebrtc
+      : kDuoInterpTransportFirestore;
+
+  /// 🎯 **통로를 묻는 자리는 여기 하나뿐이다.**
+  ///
+  /// 캡처 분기·Firestore 스킵 가드·업로드 경로가 전부 이 게터를 본다.
+  /// 어느 하나라도 `kDuoInterpWebrtc`를 직접 보면 두 값이 어긋날 수 있고,
+  /// 그 순간 한 발화가 두 번 읽히거나 아예 안 온다.
+  bool get _useInterpWebrtc =>
+      (_interpTransport ?? _fallbackInterpTransport) ==
+      kDuoInterpTransportWebrtc;
+
+  /// 통로를 **한 번만** 박는다. 두 번째 호출부터는 아무것도 하지 않는다.
+  ///
+  /// 부르는 자리가 둘인 것은 순서 때문이다. 메시지 리스너는 마이크보다 먼저
+  /// 붙으므로(방을 만들 때), 리스너가 스냅샷을 보기 전에 값이 있어야 한다.
+  void _pinInterpTransport(String reason) {
+    if (_interpTransport != null) return;
+    final String raw = _interpTransportRaw;
+    final String resolved =
+        (raw == kDuoInterpTransportWebrtc || raw == kDuoInterpTransportFirestore)
+            ? raw
+            : _fallbackInterpTransport;
+    _interpTransport = resolved;
+    _lgDuo(
+        '[INTERP-TRANSPORT]',
+        'pinned=$resolved raw="$raw" reason=$reason '
+            'buildDefault=$_fallbackInterpTransport');
+  }
+
   /// 첫 발화로 ORIGIN을 판정한다. **세션당 한 번만 돈다.**
   Future<void> _settleInterpreterOrigin(String transcript) async {
     // 🚧 꺼져 있으면 **아무것도 하지 않는다.** GPT 판정도, 세션 상태도,
@@ -3740,7 +3835,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
     // 1. 상대에게 넘긴다. 번역하지 않은 내 말 그대로 — 상대 폰이 자기 대화
     //    언어로 옮긴다(두 사람의 대화 언어가 다를 수 있으므로 내가 옮기면 안 된다).
-    if (kDuoInterpWebrtc) {
+    if (_useInterpWebrtc) {
       // 📨 [INTERP-DATA] 실시간 통로는 DataChannel이다. Firestore는 기록으로만
       //   남기고 **기다리지 않는다** — 기록이 느리다고 상대 목소리가 늦어지면
       //   안 된다는 것이 이 구조의 핵심이다.
@@ -3872,6 +3967,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   // 🆕 [상대 발화 리스너] 공유 채널 구독 → 상대(senderRole≠나) 메시지만 처리
   void _listenForMessages() {
     if (_duoSessionRef == null) return;
+    // 🔀 [INTERP-TRANSPORT] **스냅샷을 보기 전에** 통로를 박는다. 리스너는
+    //   마이크보다 먼저 붙으므로, 여기서 안 박으면 첫 상대 발화를 빌드 타임
+    //   기본값으로 판단하게 된다 — 그 값이 Remote Config와 다르면 그 한 건이
+    //   두 번 읽히거나 사라진다.
+    _pinInterpTransport('listen_messages');
     _messageSubscription?.cancel();
     _messagesPrimed = false;
     _messageSubscription = _duoSessionRef!
@@ -3908,7 +4008,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         //   실제 전달은 DataChannel이 한다. 여기서 다시 큐에 넣으면 같은
         //   발화를 두 번 번역하고 두 번 읽는다.
         //   (직접 대화는 어느 경우에도 이 문을 지난다 — 거기 글자는 이 채널로만 온다)
-        if (kDuoInterpWebrtc && !_isDirectMode) {
+        if (_useInterpWebrtc && !_isDirectMode) {
           _lgDuo('[INTERP-DATA]',
               'firestore_skipped reason=webrtc_transport seq=${data['seq'] ?? -1}');
           continue;
