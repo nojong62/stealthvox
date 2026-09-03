@@ -814,10 +814,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     //   `duo_mode`가 없는 옛 방에는 표가 안 붙는다 — 소급하지 않는다.
     //
     //   ⚠️ 글자를 'Replay'에서 'Direct'로 바꿨다. 이 표는 "이 방은 직접
-    //   통화다"라는 뜻이지 "복원된 대본이 여기 있다"가 아닌데, 실제
-    //   Conversation Replay가 생기면서 같은 낱말이 두 가지를 가리키게 됐다.
-    //   복원된 대본은 방 안에서 `Original Call ↔ Conversation Replay`
-    //   전환으로 본다(`chat_history_master._buildReplayToggle`).
+    //   통화다"라는 뜻이다. 방 안에 다른 판이 따로 있다는 뜻이 아니다 —
+    //   정돈된 결과가 곧 그 방의 히스토리다(2026-09-04).
     final bool isDuoDirect = (data[kDuoModeField] ?? '') == 'direct';
     bool isChecked = _selectedDocIds.contains(doc.id);
     bool showCheckbox = _selectedFilter != 'All';
