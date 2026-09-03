@@ -40,23 +40,34 @@ void main() {
   }
 
   // ==========================================================================
-  group('🚧 플래그 — 꺼진 빌드는 기존 동작 그대로다', () {
-    test('기본값이 false다', () {
+  group('🚧 플래그 — 켜짐이 기본이고, 끄면 옛 경로 그대로다', () {
+    test('기본값이 true다 — 빌드 명령을 외워야 도는 구조가 아니다', () {
+      // v150 이전에는 false였고, 저장소 어디에도 `--dart-define`을 주는
+      // 자리가 없었다. 그래서 debug APK·release APK·AAB 어느 것도 이 경로를
+      // 타지 않았다. 기본값이 곧 실행 경로다.
       expect(
           duo,
           contains("bool.fromEnvironment('DUO_INTERP_WEBRTC', "
-              "defaultValue: false)"),
-          reason: '한 빌드에서 A/B가 되어야 견줄 수 있다');
+              "defaultValue: true)"),
+          reason: '기본이 꺼져 있으면 아무 빌드도 이 경로를 안 탄다');
     });
 
-    test('기존 경로를 지우지 않았다', () {
-      // 새 경로가 실기기에서 무너지면 돌아갈 자리가 있어야 한다.
+    test('롤백 경로를 지우지 않았다', () {
+      // `--dart-define=DUO_INTERP_WEBRTC=false`로 돌아갈 자리가 있어야 한다.
       expect(duo, contains('PreparedAudioCapture.start('));
       expect(duo, contains('_listenForMessages'));
       expect(duo, contains('_uploadMyMessage('));
     });
 
-    test('꺼져 있으면 마이크를 여는 주체가 예전 그대로다', () {
+    test('롤백이 빌드 타임이라는 사실이 선언 옆에 적혀 있다', () {
+      // Remote Config가 아니다 — 되돌리려면 새 빌드가 필요하다.
+      final int at = duo.indexOf("bool.fromEnvironment('DUO_INTERP_WEBRTC'");
+      final String head = duo.substring(at - 1400, at);
+      expect(head, contains('DUO_INTERP_WEBRTC=false'),
+          reason: '되돌리는 방법이 선언 옆에 없으면 급할 때 못 찾는다');
+    });
+
+    test('꺼지면 마이크를 여는 주체가 예전 그대로다', () {
       final int at = duo.indexOf('if (kDuoInterpWebrtc) {',
           duo.indexOf('Future<void> _startInterpreterCapture('));
       expect(at, greaterThan(-1), reason: '분기가 없다');

@@ -198,10 +198,22 @@ const bool kDuoInterpOriginCheck =
 /// Opus 압축·네트워크·지터버퍼·복원을 거친 소리를 전사할 이유가 없다.
 /// 각자 자기 말을 전사해서 **글자만** 보낸다.
 ///
-/// ⚠️ 기본값 false. 기존 경로는 지우지 않는다 — 한 빌드에서 A/B가 되어야
-///   "새 마이크가 정말 나은가"를 같은 조건으로 견줄 수 있다.
+/// ✅ **v150부터 기본 켜짐.** 그 전까지는 `--dart-define`을 붙인 빌드에서만
+///   돌았고, 붙이는 자리가 저장소 어디에도 없어서 debug APK·release APK·AAB
+///   어느 것도 이 경로를 타지 않았다. 기본값을 바꾸는 것이 "빌드 명령을 외워야
+///   하는 구조"를 없애는 가장 짧은 길이다.
+///
+/// 🔙 **롤백은 빌드 타임이다.** `--dart-define=DUO_INTERP_WEBRTC=false`를 주면
+///   record + Firestore 경로가 그대로 돌아온다. 기존 경로는 지우지 않았다.
+///   다만 Remote Config가 아니므로 되돌리려면 **새 빌드가 필요하다** —
+///   직접 대화(`DuoDirectTransport`)처럼 런타임에 되돌릴 수는 없다.
+///
+/// ⚠️ 켜진 경로가 실패하면 **조용히 옛 경로로 돌아가지 않는다**
+///   (`_startInterpreterCapture`). 그건 의도된 것이었다 — 어느 마이크로 만든
+///   글자인지 로그에서 가리기 위해서다. 기본이 된 지금은 그 성질이 곧
+///   "WebRTC가 안 붙으면 통역이 시작되지 않는다"는 뜻이기도 하다.
 const bool kDuoInterpWebrtc =
-    bool.fromEnvironment('DUO_INTERP_WEBRTC', defaultValue: false);
+    bool.fromEnvironment('DUO_INTERP_WEBRTC', defaultValue: true);
 
 /// 🌐 상대가 실어 보낸 `srcLang`을 **글자 판정으로 뒤집기 위한** 최소 길이.
 ///
