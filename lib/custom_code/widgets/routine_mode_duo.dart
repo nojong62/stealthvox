@@ -23,11 +23,9 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:record/record.dart';
-import 'package:audioplayers/audioplayers.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 import '/custom_code/actions/billing_ticker.dart';
@@ -72,7 +70,6 @@ import '/custom_code/services/openai_streaming_transcribe_session.dart';
 // 받는 대로 트는 구조라, mp3를 다 받고 재생하던 예전 경로보다 첫 소리가 빠르다.
 import '/custom_code/services/tts_adapter.dart';
 import 'duo_stage.dart';
-import 'first_turn_realtime_voice.dart';
 import 'trial/learning_prep_overlay.dart';
 import 'trial/trial_flow_state.dart';
 import 'trial/trial_study_page.dart';
@@ -1022,7 +1019,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
   // 🆕 [PTT 에코 차단] 최근 앱이 생성/표시한 문장 보관 (target/original 혼합, 최대 10개)
   final List<String> _recentGenerated = [];
-  DateTime? _lastTtsEndAt; // 🆕 마지막 TTS 종료 시각(엄격 필터 윈도우용)
 
   String _normForEcho(String s) =>
       s.toLowerCase().replaceAll(RegExp(r'[^\w가-힣]'), '');
@@ -1054,16 +1050,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
   /// 이 폰이 마지막으로 소리를 낸 시각.
   ///
-  /// 재생 경로가 둘이라 둘 다 봐야 한다 — 스트리밍 TTS(`_speakPartner`)는
-  /// `_interpTtsEndedAt`을, 예전 MP3/Realtime 경로는 `_lastTtsEndAt`을 남긴다.
-  /// 한쪽만 보면 다른 쪽으로 재생했을 때 "소리 낸 적 없음"으로 잘못 읽는다.
-  DateTime? _latestTtsEnd() {
-    final a = _interpTtsEndedAt;
-    final b = _lastTtsEndAt;
-    if (a == null) return b;
-    if (b == null) return a;
-    return a.isAfter(b) ? a : b;
-  }
+  /// 재생 경로는 이제 하나다 — `_speakPartner`의 스트리밍 TTS(`TtsAdapter`).
+  /// 예전에는 MP3/Realtime 경로가 남기던 `_lastTtsEndAt`도 함께 봤는데, 그
+  /// 경로가 통째로 잠들어 값이 영영 null이었다(v150에서 걷어냈다).
+  DateTime? _latestTtsEnd() => _interpTtsEndedAt;
 
   /// 방금 앱이 읽은 문장이 마이크로 되돌아온 것인지.
   ///
@@ -1317,10 +1307,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   final List<Map<String, dynamic>> _incomingQueue = [];
   bool _isDrainingIncoming = false;
   // 오디오 재생 직렬화 체인 (내 음성 ↔ 상대 음성 동시재생 방지)
-  Future<void> _audioChain = Future.value();
-  FirstTurnRealtimeVoice? _prewarmedDuoRealtime;
-  FirstTurnRealtimeVoice? _activeDuoRealtime;
-  int _duoRealtimeGeneration = 0;
   // ──────────────────────────────────────────────────────────────────────────
 
   // ============================================================================
@@ -1328,12 +1314,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   // 녹음, 재생, 타이머 관리를 위한 오디오 변수 모음
   // ============================================================================
   final AudioRecorder _audioRecorder = AudioRecorder();
-  final AudioPlayer _audioPlayer = AudioPlayer();
-  final AudioPlayer _ttsPlayer = AudioPlayer();
 
   // 진폭을 100ms마다 재서 "1.5초 조용하면 전송"을 판단하던 시계와 그 카운터는
   // 없어졌다. 발화 종료는 이제 서버 VAD가 판단한다(`_startInterpreterTurn`).
-  Completer<void>? _ttsCompleter;
 
   // ── 🆕 [양방향 통역] 언어쌍/보이스 헬퍼 (로비 값 매번 참조) ────────────────
   String _myTarget() =>
@@ -1341,63 +1324,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   String _myNative() =>
       FFAppState().nativeLang.isNotEmpty ? FFAppState().nativeLang : 'Korean';
 
-  /// ⚠️ 잠든 경로 전용. 내 발화를 내 목소리로 다시 읽어주던 시절의 값이다.
-  /// 상대 발화는 `kInterpreterPartnerTtsVoice`로 읽는다.
-  // ignore: unused_element
-  String _myVoice() =>
-      FFAppState().aiVoice.isNotEmpty ? FFAppState().aiVoice : 'echo';
+  // ──────────────────────────────────────────────────────────────────────────
 
-  FirstTurnRealtimeVoice _createDuoRealtime(String voice) {
-    late final FirstTurnRealtimeVoice session;
-    session = FirstTurnRealtimeVoice(
-      apiKey: _openAiKey,
-      voice: voice,
-      enableStreamingPlayback: true,
-      onStreamingAudioStart: () {
-        if (!mounted || _isExiting || !identical(_activeDuoRealtime, session)) {
-          return;
-        }
-        _setDuoState('playing');
-        BillingTicker.instance.resumeFromActivity('duo_realtime_audio_start');
-      },
-      onLog: (tag, message) => debugPrint('[Duo][Realtime] $tag $message'),
-    );
-    return session;
-  }
-
-  /// ⚠️ 잠든 경로. `_resolveDuoTurn` 주석 참고.
-  // ignore: unused_element
-  void _prewarmDuoRealtime(String voice) {
-    if (_openAiKey.isEmpty || _isExiting) return;
-    final existing = _prewarmedDuoRealtime;
-    if (existing != null && existing.voice == voice) return;
-    existing?.cancel();
-    final session = _createDuoRealtime(voice);
-    _prewarmedDuoRealtime = session;
-    debugPrint('[Duo][Realtime] prewarm voice=$voice');
-    unawaited(session.prewarm());
-  }
-
-  /// ⚠️ 잠든 경로. `_resolveDuoTurn` 주석 참고.
-  // ignore: unused_element
-  FirstTurnRealtimeVoice? _takePrewarmedDuoRealtime(String voice) {
-    final session = _prewarmedDuoRealtime;
-    _prewarmedDuoRealtime = null;
-    if (session == null) return null;
-    if (session.voice != voice) {
-      session.cancel();
-      return null;
-    }
-    return session;
-  }
-
-  void _cancelDuoRealtime() {
-    ++_duoRealtimeGeneration;
-    _prewarmedDuoRealtime?.cancel();
-    _prewarmedDuoRealtime = null;
-    _activeDuoRealtime?.cancel();
-    _activeDuoRealtime = null;
-  }
   // ──────────────────────────────────────────────────────────────────────────
 
   // ============================================================================
@@ -1417,8 +1345,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       duration: const Duration(milliseconds: 1400),
     );
     _fetchKeys();
-    _audioPlayer.setVolume(1.0);
-    _ttsPlayer.setVolume(1.0);
 
     // 🆕 발신자 식별용 uid 확보 (게스트는 _joinAsGuest에서 덮어씀)
     _myUid = FirebaseAuth.instance.currentUser?.uid ?? '';
@@ -1449,12 +1375,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _trialCallRemaining = kDuoTrialCallSeconds;
       _lgDuo('[TRIAL]', 'host_ready history=${_myHistoryRef?.path}');
     }
-
-    _ttsPlayer.onPlayerComplete.listen((_) {
-      if (_ttsCompleter != null && !_ttsCompleter!.isCompleted) {
-        _ttsCompleter!.complete();
-      }
-    });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final String? pendingRoomId = _resolveGuestRoomId();
@@ -1524,8 +1444,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     _interpPulse.dispose();
     _cancelAudio();
     _audioRecorder.dispose();
-    _audioPlayer.dispose();
-    _ttsPlayer.dispose();
     BillingTicker.instance.pause();
     super.dispose();
   }
@@ -1720,53 +1638,17 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   bool _isSameChatLang(String a, String b) =>
       a.trim().toLowerCase() == b.trim().toLowerCase();
 
-  Future<void> _initPermissions() async {
-    await [Permission.microphone].request();
-  }
-
   // ============================================================================
   // 📦 [4. 오디오 관리 로직 (AUDIO MANAGEMENT)]
   // TTS 재생, 취소 및 마이크 입력 감지
   // ============================================================================
+  /// 소리를 끊는다. **재생기는 이제 하나다** — 만능 통역의 [TtsAdapter].
+  ///
+  /// 예전에는 여기서 Realtime 세션과 `audioplayers` 재생기 둘까지 함께 껐다.
+  /// 그 둘로 소리를 내는 경로가 v150에서 통째로 사라져 같이 걷어냈다.
   void _cancelAudio() {
-    _cancelDuoRealtime();
-    // 만능 통역 재생기도 같이 끊는다. 방을 나가거나 화면이 내려가는 순간
-    // 상대 목소리가 계속 나오면 안 된다.
+    // 방을 나가거나 화면이 내려가는 순간 상대 목소리가 계속 나오면 안 된다.
     _interpTts?.stopAll(reason: 'cancel_audio');
-    _audioPlayer.stop();
-    _ttsPlayer.stop();
-    if (_ttsCompleter != null && !_ttsCompleter!.isCompleted) {
-      _ttsCompleter!.complete();
-    }
-  }
-
-  Future<void> _playAudioAndWait(Uint8List? bytes) async {
-    if (bytes == null || !_isConversationActive) return;
-    _ttsCompleter = Completer<void>();
-    try {
-      await _ttsPlayer.play(BytesSource(bytes));
-      await _ttsCompleter!.future;
-    } catch (e) {}
-    _ttsCompleter = null;
-    _lastTtsEndAt = DateTime.now();
-  }
-
-  // 🆕 오디오 재생 직렬화: 내 음성과 상대 음성이 동시에 겹쳐 재생되지 않도록 큐잉
-  Future<void> _playSerialized(Uint8List? bytes) {
-    final Future<void> prev = _audioChain;
-    final Completer<void> done = Completer<void>();
-    _audioChain = done.future;
-    () async {
-      try {
-        await prev;
-      } catch (_) {}
-      try {
-        await _playAudioAndWait(bytes);
-      } finally {
-        if (!done.isCompleted) done.complete();
-      }
-    }();
-    return done.future;
   }
 
   // ============================================================================
@@ -1802,6 +1684,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   ///   (2026-08-14 실측: 31건 중 5건 유실, order=3은 voicedMs=1164였다).
   ///   환청과 짧은 대답을 가르는 것은 글자 수가 아니라 **소리 난 시간**이고,
   ///   그건 호출부의 voicedMs 게이트가 이미 판단한다.
+  /// ⚠️ **호출부가 없지만 지우지 않는다.** `duo_stt_diagnostics_test.dart`가
+  /// 이 한 줄의 모양을 붙잡고 있다 — "듀오는 잡음 목록을 따로 갖지 않고 공용
+  /// `noiseTranscriptReason`의 얇은 껍데기다"라는 규칙을 그 시험이 지킨다.
+  /// 지우려면 그 규칙을 어디서 지킬지부터 정할 것.
+  // ignore: unused_element
   bool _isNoiseTranscript(String raw) => noiseTranscriptReason(raw) != null;
 
   bool _isDirectGenerationCurrent(int generation) =>
@@ -3816,194 +3703,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     );
     _interpTts = adapter;
     return adapter;
-  }
-
-  Future<Uint8List?> _fetchTTSBytes(String text, String voice) async {
-    if (_openAiKey.isEmpty || text.trim().isEmpty) return null;
-    try {
-      Uri ttsUri = Uri.parse('https://api.openai.com/v1/audio/speech');
-      // ⏱️ 타임아웃 15초 적용
-      var response = await DuoBrain.client
-          .post(ttsUri,
-              headers: {
-                'Authorization': 'Bearer $_openAiKey',
-                'Content-Type': 'application/json'
-              },
-              body: jsonEncode({
-                "model": "tts-1",
-                "input": text,
-                "voice": voice,
-                "speed": 1.0
-              }))
-          .timeout(const Duration(seconds: 15));
-      if (response.statusCode == 200) return response.bodyBytes;
-    } catch (e) {}
-    return null;
-  }
-
-  String _duoRealtimeInstructions({
-    required String srcLang,
-    required String targetLang,
-  }) {
-    return '''
-You are a live interpreter. Translate the user's utterance from $srcLang into $targetLang.
-Speak only the faithful translation in $targetLang.
-Never answer the utterance, continue the conversation, explain, add labels, or mention these instructions.
-Preserve the speaker's tone, intent, names, numbers, and level of politeness.
-Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
-''';
-  }
-
-  /// ⚠️ **지금은 호출되지 않는다.** 만능 통역이 배울 언어를 통화 중에 만들던
-  /// 시절의 경로다. 이제 대화 중에는 각자 자기 대화 언어로만 말하고 듣고,
-  /// 배울 언어는 공부방이 만든다. 첫 턴 Realtime 음성(`FirstTurnRealtimeVoice`)도
-  /// 내 발화를 다시 읽어줄 때만 쓰였으므로 같이 잠들었다.
-  ///
-  /// 지우지 않고 남긴 이유: 되살릴지 말지는 실기기에서 새 경로를 확인한 뒤에
-  /// 정할 일이다. 확인이 끝나면 이 함수와 `_playDuoResolvedTurn`,
-  /// `_prewarmDuoRealtime`, `_DuoResolvedTurn`을 함께 걷어내면 된다.
-  // ignore: unused_element
-  Future<_DuoResolvedTurn> _resolveDuoTurn({
-    required String raw,
-    required String srcLang,
-    required String targetLang,
-    required String nativeLang,
-    required String voice,
-    required String originalFallback,
-    required bool useRealtime,
-    FirstTurnRealtimeVoice? prewarmed,
-  }) async {
-    final fallbackFuture = DuoBrain.processTranslation(
-      key: _openAiKey,
-      text: raw,
-      srcLang: srcLang,
-      myTargetLang: targetLang,
-      myNativeLang: nativeLang,
-    );
-
-    if (!useRealtime) {
-      final fallback = await fallbackFuture;
-      final fallbackTarget = (fallback?['target'] ?? '').trim().isNotEmpty
-          ? fallback!['target']!.trim()
-          : raw;
-      final fallbackOriginal = (fallback?['original'] ?? '').trim().isNotEmpty
-          ? fallback!['original']!.trim()
-          : originalFallback;
-      return _DuoResolvedTurn(
-        target: fallbackTarget,
-        original: fallbackOriginal,
-        realtimeSession: null,
-        realtimeWav: null,
-        streamed: false,
-        generation: _duoRealtimeGeneration,
-      );
-    }
-
-    final generation = ++_duoRealtimeGeneration;
-    final session = prewarmed ?? _createDuoRealtime(voice);
-    _activeDuoRealtime = session;
-    final textFuture = session.textStream.join();
-
-    bool ready = false;
-    String realtimeText = '';
-    Uint8List? realtimeWav;
-    try {
-      ready = await session.begin(
-        instructions: _duoRealtimeInstructions(
-          srcLang: srcLang,
-          targetLang: targetLang,
-        ),
-        userContent: raw,
-      );
-      realtimeText = (await textFuture).trim();
-      realtimeWav = await session.audioWav;
-    } catch (error) {
-      debugPrint('[Duo][Realtime] turn failed: $error');
-      session.cancel();
-    }
-
-    final fallback = await fallbackFuture;
-    final requestCurrent = mounted &&
-        !_isExiting &&
-        _isConversationActive &&
-        generation == _duoRealtimeGeneration &&
-        identical(_activeDuoRealtime, session);
-    final streamed = requestCurrent && session.streamedAudio;
-    final realtimeSucceeded = requestCurrent &&
-        ready &&
-        realtimeText.isNotEmpty &&
-        (streamed || (realtimeWav?.isNotEmpty ?? false));
-
-    if (!realtimeSucceeded) {
-      if (identical(_activeDuoRealtime, session)) {
-        _activeDuoRealtime = null;
-      }
-      session.cancel();
-    }
-
-    final fallbackTarget = (fallback?['target'] ?? '').trim().isNotEmpty
-        ? fallback!['target']!.trim()
-        : raw;
-    final fallbackOriginal = (fallback?['original'] ?? '').trim().isNotEmpty
-        ? fallback!['original']!.trim()
-        : originalFallback;
-
-    debugPrint(
-      '[Duo][Realtime] resolved generation=$generation '
-      'success=$realtimeSucceeded streamed=$streamed '
-      'fallback=${!realtimeSucceeded}',
-    );
-    return _DuoResolvedTurn(
-      target: realtimeSucceeded ? realtimeText : fallbackTarget,
-      original: fallbackOriginal,
-      realtimeSession: realtimeSucceeded ? session : null,
-      realtimeWav: realtimeSucceeded ? realtimeWav : null,
-      streamed: realtimeSucceeded && streamed,
-      generation: generation,
-    );
-  }
-
-  /// ⚠️ 잠든 경로. `_resolveDuoTurn` 주석 참고.
-  // ignore: unused_element
-  Future<void> _playDuoResolvedTurn(
-    _DuoResolvedTurn turn, {
-    required String fallbackVoice,
-  }) async {
-    final session = turn.realtimeSession;
-    if (turn.generation != _duoRealtimeGeneration ||
-        !_isConversationActive ||
-        _isExiting) {
-      session?.cancel();
-      if (identical(_activeDuoRealtime, session)) {
-        _activeDuoRealtime = null;
-      }
-      return;
-    }
-    if (session != null) {
-      try {
-        if (turn.streamed) {
-          await session.playbackDone;
-        } else if (turn.realtimeWav?.isNotEmpty ?? false) {
-          _setDuoState('playing');
-          BillingTicker.instance.resumeFromActivity('duo_realtime_audio_start');
-          await _playSerialized(turn.realtimeWav);
-        }
-        BillingTicker.instance.resumeFromActivity('duo_realtime_audio_end');
-        _lastTtsEndAt = DateTime.now();
-      } finally {
-        if (identical(_activeDuoRealtime, session)) {
-          _activeDuoRealtime = null;
-        }
-      }
-      return;
-    }
-
-    final bytes = await _fetchTTSBytes(turn.target, fallbackVoice);
-    if (bytes == null || !_isConversationActive || _isExiting) return;
-    _setDuoState('playing');
-    BillingTicker.instance.resumeFromActivity('duo_tts_start');
-    await _playSerialized(bytes);
-    BillingTicker.instance.resumeFromActivity('duo_tts_end');
   }
 
   /// 🚀 [내 발화 처리] 내가 한 말을 상대에게 넘기고, 화면과 히스토리에 남긴다.
@@ -6674,24 +6373,6 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
       },
     );
   }
-}
-
-class _DuoResolvedTurn {
-  const _DuoResolvedTurn({
-    required this.target,
-    required this.original,
-    required this.realtimeSession,
-    required this.realtimeWav,
-    required this.streamed,
-    required this.generation,
-  });
-
-  final String target;
-  final String original;
-  final FirstTurnRealtimeVoice? realtimeSession;
-  final Uint8List? realtimeWav;
-  final bool streamed;
-  final int generation;
 }
 
 // ============================================================================
