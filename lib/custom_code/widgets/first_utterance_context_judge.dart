@@ -199,61 +199,14 @@ String localizedSeedGuidanceLine(String language) {
   }
 }
 
-/// 로비 ORIGIN과 실제 발화 언어가 달라 이 세션만 ORIGIN을 갈아 끼웠을 때 뜨는
-/// 안내 말풍선. **감지된 언어로** 적는다 — 로비값으로 적으면 정작 읽어야 할
-/// 사람이 못 읽는다.
-///
-/// 이 전환은 방을 나가면 사라지므로, 다음부터는 로비에서 직접 맞춰 달라고
-/// 부탁하는 것이 이 문구의 전부다.
-String originLanguageSwitchedNoticeLine(String detectedLanguage) {
-  switch (resolveNativeLanguageName(detectedLanguage).toLowerCase()) {
-    case 'korean':
-      return '한국어로 말씀하시는 것 같아 이번 대화는 한국어로 진행할게요. '
-          '다음에는 로비에서 대화 언어를 한국어로 맞춰 주세요.';
-    case 'japanese':
-      return '日本語でお話しのようなので、今回の会話は日本語で進めます。'
-          '次回はロビーで会話の言語を日本語に設定してください。';
-    case 'chinese':
-      return '看起来您在说中文，本次对话将使用中文。'
-          '下次请在大厅将对话语言设置为中文。';
-    case 'spanish':
-      return 'Parece que habla español, así que esta conversación será en español. '
-          'La próxima vez, seleccione español como idioma de conversación en el lobby.';
-    case 'french':
-      return 'Vous semblez parler français, cette conversation se fera donc en français. '
-          'La prochaine fois, choisissez le français comme langue de conversation dans le lobby.';
-    case 'german':
-      return 'Sie sprechen offenbar Deutsch, daher läuft dieses Gespräch auf Deutsch. '
-          'Bitte stellen Sie die Gesprächssprache beim nächsten Mal in der Lobby auf Deutsch.';
-    case 'hindi':
-      return 'लगता है आप हिंदी बोल रहे हैं, इसलिए यह बातचीत हिंदी में होगी। '
-          'अगली बार लॉबी में बातचीत की भाषा हिंदी चुनें।';
-    case 'russian':
-      return 'Похоже, вы говорите по-русски, поэтому этот разговор будет на русском. '
-          'В следующий раз выберите русский язык общения в лобби.';
-    case 'portuguese':
-      return 'Parece que você fala português, então esta conversa será em português. '
-          'Da próxima vez, selecione português como idioma de conversa no lobby.';
-    case 'italian':
-      return 'Sembra che parli italiano, quindi questa conversazione sarà in italiano. '
-          'La prossima volta seleziona l\'italiano come lingua di conversazione nella lobby.';
-    case 'dutch':
-      return 'U lijkt Nederlands te spreken, dus dit gesprek gaat in het Nederlands verder. '
-          'Stel de gesprekstaal de volgende keer in de lobby in op Nederlands.';
-    case 'english':
-    default:
-      return 'You seem to be speaking English, so this conversation will continue in English. '
-          'Next time, please set your chat language to English in the lobby.';
-  }
-}
-
 /// 🌐 [INTERP-ORIGIN] 로비 ORIGIN과 실제 발화 언어가 달라 **확인을 구할 때**
 /// 뜨는 문구. 만능 통역이 쓴다.
 ///
-/// 위 [originLanguageSwitchedNoticeLine]과 하는 말이 다르다. 그쪽은 이미
-/// 갈아 끼운 뒤의 통보("이번 대화는 한국어로 진행할게요")이고, 이쪽은 아직
-/// 아무것도 바꾸지 않은 채 묻는 말이다. 두 문구를 섞으면 유저는 바뀌지도
-/// 않은 설정이 바뀌었다고 읽는다.
+/// **묻는 말이지 통보가 아니다.** 이 시점에는 아직 아무것도 바뀌지 않았다.
+/// 예전에는 짝으로 "이번 대화는 한국어로 진행할게요"라는 통보 문구를 함께
+/// 두었는데(`originLanguageSwitchedNoticeLine`), 그 말대로 ORIGIN을 조용히
+/// 갈아 끼우면 **유저가 고르지도 않은 언어가 히스토리에 남는다.** 문구와
+/// 함께 그 동작을 걷어냈다(2026-09-04).
 ///
 /// **감지된 언어로** 적는다 — 로비값으로 적으면 정작 읽어야 할 사람이 못
 /// 읽는다(같은 이유가 위 함수에도 적혀 있다).
@@ -286,6 +239,107 @@ String originLanguageCheckPromptLine(String detectedLanguage) {
     case 'english':
     default:
       return "You're speaking English. Please check your language selection.";
+  }
+}
+
+/// 🌐 [ORIGIN-RESET] 언어 확인 창의 부제. **권유이지 통보가 아니다.**
+///
+/// 위 [originLanguageCheckPromptLine]이 "지금 이 언어로 말씀하고 계세요"라고
+/// 알리고, 이 줄이 "설정을 다시 잡으셔도 된다"고 권한을 준다. 두 줄이 한 쌍이라
+/// 따로 쓰지 않는다.
+///
+/// **감지된 언어로 적는다** — 로비값으로 적으면 읽어야 할 사람이 못 읽는다.
+/// 대화는 이 창 뒤에서 그대로 돌아가므로 "끊긴다"로 읽히지 않게 뒤 문장을 붙인다.
+String originLanguageResetHintLine(String detectedLanguage) {
+  switch (resolveNativeLanguageName(detectedLanguage).toLowerCase()) {
+    case 'korean':
+      return '설정 언어를 재설정하셔도 됩니다. 대화는 그대로 이어집니다.';
+    case 'japanese':
+      return '設定言語を変更してもかまいません。会話はそのまま続きます。';
+    case 'chinese':
+      return '您可以重新设置语言。对话会继续进行。';
+    case 'spanish':
+      return 'Puede volver a elegir su idioma. La conversación continúa.';
+    case 'french':
+      return 'Vous pouvez redéfinir votre langue. La conversation continue.';
+    case 'german':
+      return 'Sie können Ihre Sprache neu einstellen. Das Gespräch läuft weiter.';
+    case 'hindi':
+      return 'आप अपनी भाषा फिर से चुन सकते हैं। बातचीत जारी रहेगी।';
+    case 'russian':
+      return 'Вы можете заново выбрать язык. Разговор продолжится.';
+    case 'portuguese':
+      return 'Você pode redefinir seu idioma. A conversa continua.';
+    case 'italian':
+      return 'Puoi reimpostare la tua lingua. La conversazione continua.';
+    case 'dutch':
+      return 'U kunt uw taal opnieuw instellen. Het gesprek gaat door.';
+    case 'english':
+    default:
+      return 'You can re-set your language. The conversation continues.';
+  }
+}
+
+/// 언어 확인 창의 확정 버튼. 창의 다른 글자와 **같은 언어**라야 한다 —
+/// 안내는 감지된 언어인데 버튼만 영어면 무엇을 누르는 자리인지 안 보인다.
+String originLanguageApplyLabel(String detectedLanguage) {
+  switch (resolveNativeLanguageName(detectedLanguage).toLowerCase()) {
+    case 'korean':
+      return '이 설정으로 바꾸기';
+    case 'japanese':
+      return 'この設定に変更';
+    case 'chinese':
+      return '使用此设置';
+    case 'spanish':
+      return 'Aplicar';
+    case 'french':
+      return 'Appliquer';
+    case 'german':
+      return 'Übernehmen';
+    case 'hindi':
+      return 'लागू करें';
+    case 'russian':
+      return 'Применить';
+    case 'portuguese':
+      return 'Aplicar';
+    case 'italian':
+      return 'Applica';
+    case 'dutch':
+      return 'Toepassen';
+    case 'english':
+    default:
+      return 'Apply';
+  }
+}
+
+/// 언어 확인 창의 유지 버튼. 아무것도 바꾸지 않고 닫는다.
+String originLanguageKeepLabel(String detectedLanguage) {
+  switch (resolveNativeLanguageName(detectedLanguage).toLowerCase()) {
+    case 'korean':
+      return '그대로 두기';
+    case 'japanese':
+      return 'このままにする';
+    case 'chinese':
+      return '保持不变';
+    case 'spanish':
+      return 'Mantener';
+    case 'french':
+      return 'Conserver';
+    case 'german':
+      return 'Beibehalten';
+    case 'hindi':
+      return 'वैसा ही रखें';
+    case 'russian':
+      return 'Оставить как есть';
+    case 'portuguese':
+      return 'Manter';
+    case 'italian':
+      return 'Mantieni';
+    case 'dutch':
+      return 'Houden';
+    case 'english':
+    default:
+      return 'Keep current';
   }
 }
 

@@ -77,41 +77,65 @@ void main() {
       final s = OriginLanguageSession.instance;
       s.adopt(null);
       expect(s.settled, isTrue);
+      expect(s.mismatched, isFalse);
       expect(s.switched, isFalse);
       expect(s.resolve('Korean'), 'Korean');
     });
 
-    test('채택하면 그 언어가 로비값을 이긴다', () {
+    // 🚫 2026-09-04: 판정이 ORIGIN을 이기던 시절의 반대편이다.
+    //   그때는 유저가 고르지도 않은 언어가 히스토리 `native_lang`에 남았다.
+    test('판정은 로비값을 이기지 못한다 — 물어볼 근거로만 남는다', () {
       final s = OriginLanguageSession.instance;
       s.adopt('Japanese');
+      expect(s.detected, 'Japanese');
+      expect(s.mismatched, isTrue);
+      expect(s.switched, isFalse);
+      expect(s.resolve('Korean'), 'Korean');
+    });
+
+    test('유저가 확정해야 ORIGIN이 바뀐다', () {
+      final s = OriginLanguageSession.instance;
+      s.adopt('Japanese');
+      s.override('Japanese');
+      expect(s.switched, isTrue);
       expect(s.resolve('Korean'), 'Japanese');
     });
 
-    test('로비 목록 밖 언어는 채택하지 않는다', () {
+    test('유저는 판정과 다른 언어로도 확정할 수 있다', () {
+      final s = OriginLanguageSession.instance;
+      s.adopt('Japanese');
+      s.override('French'); // 일부러 다른 언어를 연습하는 경우
+      expect(s.resolve('Korean'), 'French');
+    });
+
+    test('로비 목록 밖 언어는 판정으로 치지 않는다', () {
       final s = OriginLanguageSession.instance;
       s.adopt('Klingon');
+      expect(s.mismatched, isFalse);
       expect(s.switched, isFalse);
       expect(s.resolve('Korean'), 'Korean');
     });
 
-    test('안내 말풍선은 세션당 한 번만 나간다', () {
+    test('확인 창은 세션당 한 번만 뜬다', () {
       final s = OriginLanguageSession.instance;
       s.adopt('Japanese');
       expect(s.takeNoticeSlot(), isTrue);
       expect(s.takeNoticeSlot(), isFalse);
     });
 
-    test('전환이 없으면 안내도 없다', () {
+    test('어긋난 것이 없으면 묻지도 않는다', () {
       final s = OriginLanguageSession.instance;
       s.adopt(null);
       expect(s.takeNoticeSlot(), isFalse);
     });
 
-    test('begin()이 세션 전환을 되돌린다 — 다음 입장은 로비값에서 시작한다', () {
+    test('begin()이 확정까지 되돌린다 — 다음 입장은 로비값에서 시작한다', () {
       final s = OriginLanguageSession.instance;
       s.adopt('Japanese');
+      s.override('Japanese');
       s.begin();
       expect(s.settled, isFalse);
+      expect(s.mismatched, isFalse);
       expect(s.switched, isFalse);
       expect(s.resolve('Korean'), 'Korean');
     });

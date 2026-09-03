@@ -16,7 +16,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stealth_vox/custom_code/services/origin_language_session.dart';
 import 'package:stealth_vox/custom_code/widgets/first_utterance_context_judge.dart'
-    show originLanguageCheckPromptLine, originLanguageSwitchedNoticeLine;
+    show originLanguageCheckPromptLine;
 
 const String _duo = 'lib/custom_code/widgets/routine_mode_duo.dart';
 
@@ -83,9 +83,19 @@ void main() {
     test('로비값과 같으면(null) 확정만 하고 묻지 않는다', () {
       OriginLanguageSession.instance.adopt(null);
       expect(OriginLanguageSession.instance.settled, isTrue);
+      expect(OriginLanguageSession.instance.mismatched, isFalse);
       expect(OriginLanguageSession.instance.switched, isFalse);
       // 물을 슬롯이 아예 나오지 않는다.
       expect(OriginLanguageSession.instance.takeNoticeSlot(), isFalse);
+    });
+
+    test('판정만으로는 ORIGIN이 바뀌지 않는다 — 물을 거리가 생길 뿐이다', () {
+      OriginLanguageSession.instance.adopt('English');
+      expect(OriginLanguageSession.instance.mismatched, isTrue,
+          reason: '물어볼 근거는 생겨야 한다');
+      expect(OriginLanguageSession.instance.switched, isFalse,
+          reason: '유저가 고르지도 않았는데 ORIGIN이 바뀌면 안 된다');
+      expect(OriginLanguageSession.instance.resolve('Korean'), 'Korean');
     });
 
     test('Keep Current 뒤에는 같은 세션에서 다시 묻지 않는다', () {
@@ -102,13 +112,15 @@ void main() {
       OriginLanguageSession.instance.takeNoticeSlot();
       OriginLanguageSession.instance.begin(); // 새 방
       expect(OriginLanguageSession.instance.settled, isFalse);
+      expect(OriginLanguageSession.instance.mismatched, isFalse);
       expect(OriginLanguageSession.instance.switched, isFalse);
     });
 
-    test('목록에 없는 언어는 채택하지 않는다', () {
+    test('목록에 없는 언어는 판정으로 치지 않는다', () {
       OriginLanguageSession.instance.adopt('Swahili');
-      expect(OriginLanguageSession.instance.switched, isFalse,
-          reason: '문구표가 없는 언어로 갈아 끼우면 안내가 영어로 떨어진다');
+      expect(OriginLanguageSession.instance.mismatched, isFalse,
+          reason: '문구표가 없는 언어로 물으면 안내가 영어로 떨어진다');
+      expect(OriginLanguageSession.instance.switched, isFalse);
     });
   });
 
@@ -197,12 +209,12 @@ void main() {
   });
 
   // ==========================================================================
-  group('🚧 플래그 — 꺼진 빌드는 기존 동작 그대로다', () {
-    test('기본값이 false다', () {
+  group('🚧 플래그 — 켜짐이 기본이고, 끄면 기존 동작 그대로다', () {
+    test('기본값이 true다 — 꺼져 있으면 언어 확인 창이 아무 빌드에도 안 뜬다', () {
       expect(
           duo,
           contains("bool.fromEnvironment('DUO_INTERP_ORIGIN_CHECK', "
-              "defaultValue: false)"));
+              "defaultValue: true)"));
     });
 
     test('꺼지면 UI만이 아니라 판정 자체가 안 돈다', () {
@@ -244,13 +256,13 @@ void main() {
       expect(originLanguageCheckPromptLine('Japanese'), contains('日本語'));
     });
 
-    test('확인 문구와 자동전환 통보 문구는 다른 말이다', () {
-      // 통보 문구를 쓰면 바뀌지도 않은 설정이 바뀌었다고 읽힌다.
+    test('확인 문구는 통보가 아니다 — 이 시점에는 아무것도 안 바뀌었다', () {
+      // 자동 전환 통보 문구(`originLanguageSwitchedNoticeLine`)는 그 동작과
+      // 함께 걷어냈다(2026-09-04). ORIGIN은 유저가 창에서 확정할 때만 바뀐다.
       final check = originLanguageCheckPromptLine('Korean');
-      final switched = originLanguageSwitchedNoticeLine('Korean');
-      expect(check, isNot(switched));
       expect(check, isNot(contains('진행할게요')),
           reason: '아직 아무것도 안 바꿨는데 바꿨다고 말하면 안 된다');
+      expect(check, contains('확인'), reason: '통보가 아니라 확인을 구해야 한다');
     });
 
     test('모르는 언어는 영어 문구로 떨어진다', () {

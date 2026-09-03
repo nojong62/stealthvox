@@ -51,7 +51,7 @@ import '/custom_code/services/origin_language_session.dart'
         OriginLanguageSession;
 // 🌐 언어별 확인 문구. 3모드가 같은 표를 쓴다 — 문구표를 새로 만들지 않는다.
 import 'first_utterance_context_judge.dart'
-    show originLanguageCheckPromptLine;
+    show originLanguageCheckPromptLine, originLanguageResetHintLine;
 // 🆔 테스트 기기를 Remote Config 조건으로 고르는 데 쓰는 설치본 ID.
 import 'package:firebase_app_installations/firebase_app_installations.dart';
 import '/custom_code/services/duo_pcm_relay_client.dart';
@@ -165,13 +165,14 @@ const bool kDuoInterpStreamingTts =
 /// 🌐 [INTERP-ORIGIN] 만능 통역에서 로비 ORIGIN이 실제 발화 언어와 어긋났는지
 /// 확인할 것인가.
 ///
-/// **기본이 꺼짐인 것은 의도된 것이다.** 이 기능은 첫 발화의 STT 개방 방식을
-/// 바꾼다(로비값 고정 → 자동 감지). 같은 빌드에서 번역 스트리밍까지 함께
-/// 검증하면, 첫 발화가 이상하거나 통역 시작이 늦어졌을 때 **어느 쪽 탓인지
-/// 가릴 수 없다.** 그래서 지연 개선을 먼저 확인하고 이 값을 켠다.
+/// 이 기능은 첫 발화의 STT 개방 방식을 바꾼다(로비값 고정 → 자동 감지).
+/// 그래서 지연 개선과 한 빌드에서 섞이지 않도록 한동안 꺼 두었다.
 ///
 ///   v147  꺼짐 — 지연 개선만. STT는 예전과 **완전히 같다**
 ///   v148  `--dart-define=DUO_INTERP_ORIGIN_CHECK=true` — 언어 확인 추가
+///   v150  **기본 켜짐.** 지연 개선은 실기기에서 확인이 끝났고, 꺼져 있는
+///         동안에는 언어 확인 창이 아무 빌드에도 뜨지 않았다. 되돌리려면
+///         `--dart-define=DUO_INTERP_ORIGIN_CHECK=false`.
 ///
 /// ⚠️ 꺼져 있으면 UI만 안 뜨는 것이 아니다. `OriginLanguageSession`도,
 ///   자동 감지도, GPT 판정도, `switchLanguage`도 **하나도 돌지 않는다.**
@@ -179,7 +180,7 @@ const bool kDuoInterpStreamingTts =
 ///
 /// 🚫 직접 대화에는 어느 값이든 영향이 없다 — 그쪽은 이 경로를 안 탄다.
 const bool kDuoInterpOriginCheck =
-    bool.fromEnvironment('DUO_INTERP_ORIGIN_CHECK', defaultValue: false);
+    bool.fromEnvironment('DUO_INTERP_ORIGIN_CHECK', defaultValue: true);
 
 /// 📡 [INTERP-WEBRTC] 만능 통역을 직접 대화와 **같은 WebRTC 골격** 위에 올린다.
 ///
@@ -3624,8 +3625,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   // 판정은 **세션당 한 번**이다(`OriginLanguageSession.settled`). 대화 도중
   // 일부러 다른 언어를 섞는 것까지 감시하지 않는다 — 그건 사용자의 자유다.
   //
-  // 🚫 **자동으로 바꾸지 않는다.** 서클톡은 조용히 갈아 끼우지만 여기서는
-  //   물어본다. 일부러 다른 언어를 연습하는 경우가 있기 때문이다.
+  // 🚫 **자동으로 바꾸지 않는다.** 기준은 언제나 유저가 로비에서 확정한
+  //   ORIGIN이고, 판정은 확인 창을 띄우는 근거일 뿐이다. 일부러 다른 언어를
+  //   연습하는 경우가 있어 묻지 않고 뒤집으면 안 되고, 조용히 뒤집으면
+  //   유저가 고르지도 않은 언어가 히스토리에 남는다.
+  //   3모드(서클톡·시나리오톡·만능통역)가 같은 규칙을 쓴다.
   // ==========================================================================
 
   /// 언어 확인 오버레이를 띄울 것인가. 띄운 언어가 담긴다.
@@ -3672,12 +3676,16 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     }
 
     // 근거가 약해도 확정은 해 둔다 — 안 그러면 매 턴 판정이 다시 돈다.
+    // 여기서 ORIGIN이 바뀌지는 않는다. 판정값을 적어 둘 뿐이다.
     session.adopt(detected);
 
     // 판정이 끝났으니 소켓에 언어를 박는다. 여기까지는 자동 감지였다.
     // 자동 감지로 계속 두면 짧은 발화("네", "그렇죠")에서 언어가 흔들린다.
-    unawaited(_interpStt?.switchLanguage(_mapLanguageToCode(
-            detected ?? lobbyOrigin)) ??
+    //
+    // 🎯 박는 값은 **판정값이 아니라 유저가 확정한 ORIGIN**이다. 판정값을
+    //   박으면 통역의 번역 방향(`_myNative`)과 전사 언어가 어긋난다 —
+    //   유저가 창에서 바꾸겠다고 하면 `_applyOriginChange`가 그때 다시 박는다.
+    unawaited(_interpStt?.switchLanguage(_mapLanguageToCode(_myNative())) ??
         Future<bool>.value(false));
 
     if (detected == null) {
@@ -3713,9 +3721,15 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     final String previous = _myNative();
     FFAppState().nativeLang = native;
     if (target != null) FFAppState().targetLang = target;
+    // 이 방의 ORIGIN도 고른 값으로 다시 잡는다 — 판정과 다른 언어를 고를 수
+    // 있고(일부러 다른 언어를 연습하는 경우), 그러면 전사기가 판정값에
+    // 묶여 있으면 안 된다.
+    OriginLanguageSession.instance.override(native);
     // 통화를 끊지 않는다. 소켓 언어만 갈아 끼운다.
     final ok = await _interpStt?.switchLanguage(_mapLanguageToCode(native)) ??
         false;
+    // 📚 이미 만들어진 히스토리 방 문서의 언어값도 같이 맞춘다.
+    await _syncHistoryRoomLanguages();
     _lgDuo(
         '[INTERP-ORIGIN]',
         'apply origin=$previous->$native '
@@ -3725,7 +3739,32 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     setState(() => _originMismatchDetected = null);
   }
 
-  /// Keep Current — 아무것도 바꾸지 않는다.
+  /// 📚 [HISTORY-LANG] 이미 만들어진 히스토리 방 문서의 언어값을 지금 설정에
+  /// 맞춘다. 방을 먼저 만들고 나중에 설정을 고쳤을 때, 저장된 값이 옛 설정에
+  /// 머무는 것을 막는다.
+  ///
+  /// 방 문서가 아직 없으면 아무것도 하지 않는다 — `_ensureHistoryRef`가
+  /// 만들 때 지금 설정을 그대로 적는다.
+  Future<void> _syncHistoryRoomLanguages() async {
+    final ref = _myHistoryRef;
+    if (ref == null) return;
+    try {
+      await ref.update({
+        'native_lang': _myNative(),
+        'target_lang': _myTarget(),
+      });
+      _lgDuo('[HISTORY-LANG]',
+          'room=${ref.id} native=${_myNative()} target=${_myTarget()}');
+    } catch (e) {
+      _lgDuo('⚠️ [HISTORY-LANG]', 'sync_failed=${e.runtimeType}');
+    }
+  }
+
+  /// Keep Current — **아무것도 바꾸지 않는다.**
+  ///
+  /// ORIGIN은 로비 설정 그대로다. 감지된 언어는 이 창을 띄우려고 쓴 정보일
+  /// 뿐이라, 유저가 두겠다고 하면 세션에도 히스토리에도 한 글자도 남지
+  /// 않는다 — 고르지도 않은 언어가 기록에 남으면 안 된다.
   ///
   /// 재경고가 없는 근거는 `takeNoticeSlot()`이다. 이미 한 번 썼으므로 같은
   /// 세션에서는 두 번째 슬롯이 나오지 않는다.
@@ -4479,8 +4518,14 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
         'is_pinned': false,
         'msg_count': 0,
         // 세션 생성 당시 언어 식별값 보존(History 동일 언어 판정용)
-        'native_lang': FFAppState().nativeLang,
-        'target_lang': FFAppState().targetLang,
+        // 🌐 [HISTORY-LANG] 로비값을 그대로 박지 않는다. 이 값은 히스토리가
+        //   **어느 언어에서 배울글을 만들지**를 정하는 값이라, 통역이 실제로
+        //   쓰는 언어(`_myNative`)와 반드시 같아야 한다. 어긋나면 원문이
+        //   배울글 자리에 그대로 복사된다.
+        //   방을 만든 뒤에 언어 확인 창에서 설정을 바꾸면
+        //   `_syncHistoryRoomLanguages`가 이 두 줄을 다시 맞춘다.
+        'native_lang': _myNative(),
+        'target_lang': _myTarget(),
         // 🔗 이 방이 어느 통화였는지. **이 값이 있어야 나중에 공유 결과를
         //   찾아 옮길 수 있다.** 게스트는 입장 순서 때문에 이 시점에 아직
         //   없을 수 있어, 종료 때 한 번 더 채운다.
@@ -6060,10 +6105,12 @@ Do not output markdown, quotes, JSON, control tags, or surrounding commentary.
                             fontSize: 17,
                             fontWeight: FontWeight.bold)),
                     const SizedBox(height: 8),
-                    const Text(
-                        "Your conversation continues — this only changes "
-                        "your language setting.",
-                        style: TextStyle(color: Colors.white54, fontSize: 13)),
+                    // "재설정하셔도 됩니다" — 위 줄과 한 쌍이라 같은 언어로 적는다.
+                    //   영어로 박아 두었더니 안내만 감지된 언어고 설명은 영어인
+                    //   잡탕이었다.
+                    Text(originLanguageResetHintLine(detected),
+                        style: const TextStyle(
+                            color: Colors.white54, fontSize: 13, height: 1.35)),
                     const SizedBox(height: 22),
                     dropdown("Original", native, const Color(0xFF93C5FD),
                         (val) {

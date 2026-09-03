@@ -69,6 +69,7 @@ import '/custom_code/services/pcm_audio_utils.dart';
 import '/custom_code/services/session_rollover_summary.dart';
 import '/custom_code/services/tts_adapter.dart';
 import 'first_utterance_context_judge.dart'; // 3모드 공통 응답 길이 규칙
+import 'origin_language_recheck_dialog.dart'; // 🌐 [ORIGIN-RECHECK] 언어 확인 창
 
 // ====================================================================
 // 🛡️ [v4] 시나리오 재진입 보존용 static 홀더 (App State 대체)
@@ -282,14 +283,33 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
 
   String _nativeLangCode() => deepgramLanguageCode(_nativeLangName());
 
+  /// 🎯 [LANG] 이 방의 배울 언어(LearnLang = 로비 Target). 비어 있으면 English다.
+  ///
+  /// 서클톡(`_targetLangName`)·만능통역(`_myTarget`)과 **같은 보정**을 쓴다.
+  /// 여기만 로비값을 날것으로 읽고 있어서, 빈 값이 그대로 히스토리
+  /// `target_lang`에 저장될 수 있었다. 그 필드가 비면 히스토리가 동일 언어
+  /// 판정을 못 하고(`chat_history_master._recordSameLang`) 글자 비교로
+  /// 떨어진다.
+  String _targetLangName() =>
+      FFAppState().targetLang.isNotEmpty ? FFAppState().targetLang : 'English';
+
   /// 첫 발화 전사에 넘길 언어 코드. 판정 전에는 **빈 문자열 = 자동 감지**다.
   /// 언어를 박아 두면 다른 언어 발화가 그 언어 문자로 음차되어 나와,
   /// 어긋났다는 사실 자체가 전사문에서 사라진다.
   String _sttLangCode() =>
       OriginLanguageSession.instance.settled ? _nativeLangCode() : '';
 
-  /// 🌐 [ORIGIN-RESOLVE] 첫 발화 전사문으로 이 세션의 ORIGIN을 확정한다.
-  /// **세션당 딱 한 번만 돈다** — 대화 도중 외국어가 한 마디 섞여도 안 뒤집힌다.
+  /// 🌐 [ORIGIN-RESOLVE] 첫 발화 전사문으로 실제 발화 언어를 **판정만** 한다.
+  ///
+  /// **세션당 딱 한 번만 돈다.** 대화 도중 유저가 외국어를 한 마디 섞어도
+  /// 다시 묻지 않는다.
+  ///
+  /// 🚫 판정 결과로 ORIGIN을 갈아 끼우지 않는다. 기준은 언제나 유저가 확정한
+  ///   로비 설정이고, 판정은 확인 창을 띄우는 근거일 뿐이다. 바꿀지 말지는
+  ///   유저가 그 창에서 고른다(`_promptOriginRecheck`).
+  ///
+  /// 판정이 끝나면 전사 소켓에 **로비 ORIGIN을** 박는다. 자동 감지로 계속
+  /// 두면 짧은 발화("네", "그렇죠")에서 언어가 흔들려 전사 정확도가 떨어진다.
   Future<void> _settleOriginLanguage(String transcript) async {
     final session = OriginLanguageSession.instance;
     if (session.settled) return;
@@ -300,32 +320,85 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
       lobbyOrigin: lobbyOrigin,
       onLog: _log,
     );
+    // 여기서 ORIGIN이 바뀌지는 않는다. 판정값을 적어 둘 뿐이다.
     session.adopt(detected);
-    // 확정 뒤에는 소켓에도 언어를 박는다. 자동 감지로 계속 두면 짧은 발화에서
-    // 언어가 흔들려 전사 정확도가 떨어진다.
+    // 소켓에는 **로비 ORIGIN을** 박는다. `_nativeLangCode()`는 유저가
+    // 확정하기 전까지 로비값을 그대로 낸다.
     unawaited(_streamingStt?.switchLanguage(_nativeLangCode()) ??
         Future<bool>.value(false));
     if (detected == null) return;
     _log('🌐 [ORIGIN-RESOLVE]',
-        'session origin $lobbyOrigin → $detected (this room only)');
-    _showOriginSwitchedNotice(detected);
+        'mismatch lobby=$lobbyOrigin detected=$detected → ask (origin unchanged)');
+    unawaited(_promptOriginRecheck(detected));
   }
 
-  /// 로비 설정을 바꿔 달라는 안내 말풍선. 세션당 한 번, **감지된 언어로** 뜬다.
-  void _showOriginSwitchedNotice(String detectedLanguage) {
+  // ==========================================================================
+  // 🌐 [ORIGIN-RECHECK] 로비 설정을 **그 자리에서** 다시 잡게 한다
+  // --------------------------------------------------------------------------
+  // 예전에는 말풍선 한 줄("다음엔 로비에서 맞춰 주세요")만 띄웠다. 그 말은
+  // **지금 할 수 있는 일을 주지 않는다** — 로비로 돌아가려면 방을 나가야 하고,
+  // 나가면 이 대화는 사라진다. 서클톡과 같은 창, 같은 규칙이다.
+  //
+  // ⚠️ 대화를 끊지 않는다. 이 막 뒤에서 마이크도 재생도 계속 돌아간다.
+  // ==========================================================================
+
+  /// 언어 확인 창을 띄운다. **세션당 한 번**이다(`takeNoticeSlot`).
+  Future<void> _promptOriginRecheck(String detectedLanguage) async {
     if (!OriginLanguageSession.instance.takeNoticeSlot()) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(originLanguageSwitchedNoticeLine(detectedLanguage)),
-          duration: const Duration(seconds: 7),
-          behavior: SnackBarBehavior.floating,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        ),
-      );
-    });
+    if (!mounted) return;
+    final result = await showOriginLanguageRecheckDialog(
+      context: context,
+      detected: detectedLanguage,
+      currentNative: resolveNativeLanguageName(FFAppState().nativeLang),
+      currentTarget: _targetLangName(),
+    );
+    if (result == null || !result.applied) {
+      _log('🌐 [ORIGIN-RECHECK]',
+          'keep_current lobby=${FFAppState().nativeLang} session=$detectedLanguage');
+      return;
+    }
+    await _applyOriginRecheck(result.native, result.target);
+  }
+
+  /// 고른 설정을 **로비까지 영구 반영**한다. 세션 한정으로 두면 방을 드나들
+  /// 때마다 같은 창을 다시 보게 된다.
+  ///
+  /// [target]이 null이면 배울 언어는 손대지 않는다 — 유저가 그 드롭다운을
+  /// 만졌을 때만 값이 넘어온다.
+  Future<void> _applyOriginRecheck(String native, String? target) async {
+    final String previous = FFAppState().nativeLang;
+    FFAppState().nativeLang = native;
+    if (target != null) FFAppState().targetLang = target;
+    // 이 방의 ORIGIN도 고른 값으로 다시 잡는다 — 판정과 다른 언어를 고를 수
+    // 있고, 그러면 전사기도 히스토리도 그 값을 따라야 한다.
+    OriginLanguageSession.instance.override(native);
+    final ok =
+        await _streamingStt?.switchLanguage(_nativeLangCode()) ?? false;
+    await _syncHistoryRoomLanguages();
+    _log(
+        '🌐 [ORIGIN-RECHECK]',
+        'apply origin=$previous->$native '
+            'target=${target ?? 'unchanged'} '
+            'switchLanguage=$ok persisted=true');
+    if (mounted) setState(() {});
+  }
+
+  /// 📚 [HISTORY-LANG] 이미 만들어진 히스토리 방 문서의 언어값을 지금 설정에
+  /// 맞춘다. 방 문서의 `native_lang`이 대화가 실제로 쓰는 언어와 어긋나면
+  /// 원문이 배울글 자리에 그대로 복사된다.
+  Future<void> _syncHistoryRoomLanguages() async {
+    final ref = _myHistoryRef;
+    if (ref == null) return;
+    try {
+      await ref.update({
+        'native_lang': _nativeLangName(),
+        'target_lang': _targetLangName(),
+      });
+      _log('📚 [HISTORY-LANG]',
+          'room=${ref.id} native=${_nativeLangName()} target=${_targetLangName()}');
+    } catch (e) {
+      _log('❌ [HISTORY-LANG]', 'sync 실패: $e');
+    }
   }
 
   /// 👂 [ASK-BACK] 못 알아들은 말풍선에 붙는 안내. 유저의 ORIGIN으로 적는다.
@@ -3972,9 +4045,10 @@ never by itself a reason to ask back.
         'partner_label': _scenarioPartnerLabel,
         'is_pinned': false,
         'msg_count': 0,
-        // 세션 생성 당시 언어 식별값 보존(History 동일 언어 판정용)
+        // 세션 생성 당시 언어 식별값 보존(History 동일 언어 판정용).
+        //   native_lang = ChatLang(로비 Origin), target_lang = LearnLang(로비 Target).
         'native_lang': _nativeLangName(),
-        'target_lang': FFAppState().targetLang,
+        'target_lang': _targetLangName(),
       });
       _myHistoryRef = newRef;
       BillingTicker.instance.setSessionIdentifiers(

@@ -1,5 +1,5 @@
 // ====================================================================
-// 🌐 [ORIGIN-RESOLVE] 유저가 실제로 말한 언어를 이 세션의 ORIGIN으로 삼는다
+// 🌐 [ORIGIN-RESOLVE] 첫 발화가 로비 ORIGIN과 다른 언어인지 **알아만 둔다**
 // --------------------------------------------------------------------
 // 로비 ORIGIN 기본값은 'Korean'이다(app_state.dart). 설정을 모르는 유저가
 // 그대로 두고 자기 언어로 말하면, 전사기에 language=ko가 박혀 있어서 일본어
@@ -7,14 +7,26 @@
 // 자료의 출발점이 된다.
 //
 // 그래서 **첫 발화만 언어를 박지 않고 자동 감지로 전사**한 뒤, 그 전사문에서
-// 실제 언어를 판정한다. 판정이 로비값과 다르면 이 세션 동안만 ORIGIN을
-// 갈아 끼운다.
+// 실제 언어를 판정한다.
+//
+// 🚫 **판정 결과로 ORIGIN을 갈아 끼우지 않는다.**
+//
+//   예전에는 갈아 끼웠다(2026-09-04 이전). 유저가 로비 설정과 다른 말로
+//   시작하면 이 세션 동안만 그 언어를 ORIGIN으로 삼고, "이번 대화는 한국어로
+//   진행할게요"라고 통보했다. 그러면 **유저가 고르지도 않은 언어가 히스토리
+//   메타데이터(`native_lang`)에 남는다.** 로비에서 분명히 골라 둔 값이 있는데
+//   말 한마디로 조용히 뒤집히는 것이라, 유저는 자기 설정이 왜 안 먹는지 알 수
+//   없었다.
+//
+//   기준은 언제나 **유저가 확정한 ORIGIN**이다. 판정값은 [detected]에 적어
+//   두고, 확인 창(`origin_language_recheck_dialog.dart`)을 띄우는 데에만 쓴다.
+//   유저가 그 창에서 확정해야 비로소 [override]로 값이 바뀐다.
 //
 // **저장하지 않는다.** `FFAppState().nativeLang`의 setter는 prefs에 즉시
-// 쓰므로 여기서는 건드리지 않는다. 방을 나가면 로비값 그대로다.
+// 쓰므로 여기서는 건드리지 않는다. 확정은 호출부가 두 곳에 함께 적는다.
 //
 // 판정은 **세션당 딱 한 번**이다. 대화 중간에 유저가 한 마디 외국어를 섞어도
-// 다시 뒤집히지 않는다.
+// 다시 묻지 않는다.
 // ====================================================================
 
 import 'dart:async';
@@ -346,31 +358,49 @@ Future<String?> resolveOriginFromFirstUtterance({
   return judged;
 }
 
-/// 이 세션에만 사는 ORIGIN 덮어쓰기.
+/// 이 세션의 ORIGIN 상태. **유저가 확정한 값만 로비값을 이긴다.**
 ///
-/// 방에 들어올 때 [begin]으로 비우고, 첫 발화에서 [adopt]한다. 방을 나가면
-/// 다시 [begin]이 불려 로비값으로 돌아온다. prefs에는 한 글자도 쓰지 않는다.
+/// 방에 들어올 때 [begin]으로 비우고, 첫 발화에서 [adopt]로 판정만 적어 둔다.
+/// 판정은 [resolve]에 영향을 주지 않는다 — 확인 창을 띄울지 정할 뿐이다.
+/// prefs에는 한 글자도 쓰지 않는다.
 class OriginLanguageSession {
   OriginLanguageSession._();
 
   static final OriginLanguageSession instance = OriginLanguageSession._();
 
+  /// 유저가 확인 창에서 확정한 ORIGIN. 확정 전에는 null이다.
   String? _override;
+
+  /// 첫 발화에서 판정된 언어. **ORIGIN이 아니다** — 물어볼 근거일 뿐이다.
+  String? _detected;
+
   bool _settled = false;
   bool _noticeShown = false;
 
   /// 판정이 끝났는가. 세션당 한 번만 판정하기 위한 빗장이다.
   bool get settled => _settled;
 
-  /// 로비값과 다른 언어로 갈아 끼웠는가.
+  /// 첫 발화가 로비값과 다른 언어로 판정됐는가. 그 언어가 담긴다.
+  ///
+  /// ⚠️ 이 값을 ORIGIN으로 쓰지 말 것. 전사기·히스토리·번역 방향은 전부
+  ///   [resolve]를 본다.
+  String? get detected => _detected;
+
+  /// 물어볼 것이 있는가 — 판정이 로비값과 달랐는가.
+  bool get mismatched => _detected != null;
+
+  /// 유저가 확인 창에서 ORIGIN을 실제로 바꿨는가.
   bool get switched => _override != null;
 
-  /// 갈아 끼운 언어. 안 바뀌었으면 null.
+  /// 유저가 확정한 언어. 확정이 없었으면 null.
   String? get adopted => _override;
 
-  /// 안내 말풍선을 아직 안 띄웠으면 true를 한 번만 돌려준다.
+  /// 확인 창을 아직 안 띄웠으면 true를 한 번만 돌려준다.
+  ///
+  /// [switched]가 아니라 [mismatched]를 본다. 확정은 유저가 창에서 하는
+  /// 것이므로, 창을 띄우기 전에는 아직 아무것도 바뀌어 있지 않다.
   bool takeNoticeSlot() {
-    if (!switched || _noticeShown) return false;
+    if (!mismatched || _noticeShown) return false;
     _noticeShown = true;
     return true;
   }
@@ -378,18 +408,44 @@ class OriginLanguageSession {
   /// 방 입장·퇴장 시 호출. 세션 한정을 보장하는 자리다.
   void begin() {
     _override = null;
+    _detected = null;
     _settled = false;
     _noticeShown = false;
   }
 
-  /// 판정 결과를 세션에 반영한다. [languageName]이 null이면 로비값 유지로 확정.
+  /// 첫 발화 판정 결과를 **적어만 둔다.** [languageName]이 null이면 로비값과
+  /// 같거나 근거가 약했다는 뜻이라, 물을 것도 없이 확정만 한다.
+  ///
+  /// 🚫 [resolve]가 내는 값은 여기서 바뀌지 않는다. 기준은 유저가 확정한
+  ///   ORIGIN이고, 판정은 확인 창을 띄우는 근거일 뿐이다.
   void adopt(String? languageName) {
     _settled = true;
     if (languageName == null) return;
     if (!kOriginLanguageOptions.contains(languageName)) return;
+    _detected = languageName;
+  }
+
+  /// 🌐 [ORIGIN-RECHECK] **유저가 확인 창에서 확정한 값**으로 ORIGIN을 잡는다.
+  ///
+  /// [adopt]와 하는 일이 다르다. 그쪽은 기계가 내린 판정을 적어 두는 것이고,
+  /// 이쪽은 유저가 손으로 고른 값이라 **이것만이 ORIGIN을 바꾼다.**
+  /// 판정과 다른 언어를 골랐을 수도 있으므로(일부러 다른 언어를 연습하는
+  /// 경우) 고른 값을 그대로 따른다.
+  ///
+  /// 호출부는 같은 값을 `FFAppState().nativeLang`과 히스토리 방 문서에도
+  /// 함께 적는다 — 세 곳이 어긋나면 히스토리가 엉뚱한 언어로 배울글을 만든다.
+  ///
+  /// 목록(12개) 밖의 값은 무시한다 — 고정 문구표가 그 12개에만 있어서
+  /// 벗어나면 되묻기만 영어로 나오는 잡탕이 된다.
+  void override(String languageName) {
+    _settled = true;
+    if (!kOriginLanguageOptions.contains(languageName)) return;
     _override = languageName;
   }
 
-  /// 이 세션에서 실제로 쓸 ORIGIN. 덮어쓴 값이 없으면 로비값 그대로다.
+  /// 이 세션에서 실제로 쓸 ORIGIN.
+  ///
+  /// **유저가 확정하지 않았으면 로비값 그대로다.** 첫 발화가 다른 언어였어도
+  /// 여기서는 아무 일도 일어나지 않는다.
   String resolve(String lobbyOrigin) => _override ?? lobbyOrigin;
 }

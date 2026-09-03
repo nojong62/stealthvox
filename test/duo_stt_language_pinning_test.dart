@@ -62,9 +62,9 @@ void main() {
     });
   });
 
-  // ⚠️ 언어 확인 기능은 **플래그 뒤에 있고 기본이 꺼짐**이다
-  //   (`DUO_INTERP_ORIGIN_CHECK`, 기본 false). 켜고 끄는 이유는 지연 개선과
-  //   원인을 분리해 실기기 검증을 하기 위해서다.
+  // ⚠️ 언어 확인 기능은 플래그 뒤에 있다(`DUO_INTERP_ORIGIN_CHECK`, v150부터
+  //   기본 true). 끄면(`=false`) 만능 통역 STT가 v147과 한 글자도 다르지 않아야
+  //   한다 — 아래 검사가 그 갈래를 지킨다.
   group('🚧 플래그 OFF — 만능 통역 STT가 기존 동작 그대로다', () {
     test('꺼져 있으면 로비값으로 고정한다 (자동 감지 없음)', () {
       // `!kDuoInterpOriginCheck ||` 가 앞에 있어야 꺼진 빌드에서 항상
@@ -76,12 +76,14 @@ void main() {
           reason: '꺼진 빌드에서 자동 감지로 열릴 수 있다');
     });
 
-    test('기본값이 false다', () {
+    test('기본값이 true다', () {
+      // v150부터 켜짐이 기본이다. 지연 개선은 실기기 확인이 끝났고, 꺼져
+      // 있는 동안에는 언어 확인 창이 아무 빌드에도 뜨지 않았다.
       expect(
           duo,
           contains("bool.fromEnvironment('DUO_INTERP_ORIGIN_CHECK', "
-              "defaultValue: false)"),
-          reason: '기본이 켜져 있으면 v147이 두 변경을 함께 검증하게 된다');
+              "defaultValue: true)"),
+          reason: '기본이 꺼져 있으면 언어 확인 창을 아무도 못 본다');
     });
 
     test('판정 함수가 맨 앞에서 빠져나온다', () {
