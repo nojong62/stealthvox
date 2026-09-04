@@ -3543,17 +3543,26 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     // 🔇 [ECHO] 앱이 방금 읽은 문장과 거의 같으면 버린다. 이제 앱과 내가
     //   같은 대화 언어를 쓰므로, 언어만으로는 구분되지 않는 유일한 방어선이다.
     final bool isEcho = _looksLikeEcho(trimmed);
-    if (lowerClean.isEmpty ||
-        isHardGhost ||
-        isShortGhost ||
-        isEcho ||
-        trimmed.length <= 2) {
+    // 🚫 [LEN] **글자 수로 버리지 않는다.** 예전에는 `trimmed.length <= 2`가
+    //   여기 있었다. "네"·"응"·"왜"(1자)와 "맞아"·"그래"(2자)를 통째로
+    //   버렸다 — 통역에서 가장 흔한 대답들이다.
+    //
+    //   같은 규칙이 직접 대화에는 없다(`noiseTranscriptReason`은 글자 수를
+    //   안 본다). 한 앱의 두 모드가 다른 정책을 쓰고 있었고, 통역 쪽이
+    //   2026-08-28에 못 박은 원칙("글자 수·단어 목록 기반 규칙 금지")을
+    //   어기고 있었다.
+    //
+    //   짧은 대답과 환청을 가르는 것은 글자 수가 아니라 **소리 난 시간과
+    //   세기**다. 그 판정은 위에서 이미 끝났다(voicedMs ≥ 150 · rmsDbfs ≥
+    //   -42.0 · voicedMs가 null이면 잘린 것으로 보고 버림).
+    if (lowerClean.isEmpty || isHardGhost || isShortGhost || isEcho) {
       // 버린 이유를 나중에 로그만 보고 가릴 수 있어야 한다. 특히 에코는
       // "이 폰이 언제 소리를 냈는가"가 유일한 근거이므로 그 값을 함께 남긴다.
       final DateTime? spokeAt = _latestTtsEnd();
       _lgDuo(
           '[INTERP-DROP]',
           'item=$itemId len=${trimmed.length} '
+              'empty=${lowerClean.isEmpty} '
               'ghost=${isHardGhost || isShortGhost} echo=$isEcho '
               'sinceTtsMs=${spokeAt == null ? 'never' : DateTime.now().difference(spokeAt).inMilliseconds}');
       // 버린 발화다. 마이크는 그대로 열려 있고 다음 말을 계속 받는다.
