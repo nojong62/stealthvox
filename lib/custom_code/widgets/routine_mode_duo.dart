@@ -1196,7 +1196,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       !_isExiting &&
       _isPartnerOnline &&
       (_interpStt?.isConnected ?? false) &&
-      _interpCapture != null &&
+      // 🎙️ WebRTC 경로는 `_interpCapture`를 안 채운다. 한쪽만 보면 탭이
+      //   멀쩡히 도는데도 "준비 안 됨"이 되어 화면에 마이크가 잠긴다.
+      _interpCaptureLive &&
       (_interpStt?.audioGateOpen ?? false);
 
   void _setInterpMicPhase(InterpMicPhase phase) {
@@ -1225,7 +1227,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     if (_isDirectMode || _isExiting || !mounted) return;
     if (!_isPartnerOnline) return;
     final stt = _interpStt;
-    if (stt == null || !stt.isConnected || _interpCapture == null) return;
+    // 🎙️ 두 경로를 다 본다. `_interpCapture`만 보면 WebRTC에서는 여기서
+    //   그냥 돌아나가 게이트가 영영 안 열린다 — 탭이 PCM을 올려도 전부
+    //   버려지고 화면은 `preparing`에 멈춘다. (2026-09-04 실기기에서 그랬다)
+    if (stt == null || !stt.isConnected || !_interpCaptureLive) return;
     stt.openAudioGate(reason: reason);
     // 닫을 때 진행 중이던 발화는 확정시켰으므로, 여는 순간은 언제나 "듣는
     // 중"에서 시작한다. 다음 `speech_started`가 오면 그때 발화 중으로 간다.
@@ -1264,7 +1269,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         return false;
       }));
     }
-    if (!_isDirectMode && _interpCapture != null) {
+    if (!_isDirectMode && _interpCaptureLive) {
       _setInterpMicPhase(InterpMicPhase.gated);
     }
   }
@@ -3013,7 +3018,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     if (_isDirectMode) return;
     if (!_isPartnerOnline) return;
     if (!mounted || _isExiting) return;
-    if (_interpCapture != null || _interpStarting) return;
+    if (_interpCaptureLive || _interpStarting) return;
     if (_interpAutoStartAttempted) return;
     _interpAutoStartAttempted = true;
     // 🌐 [INTERP-ORIGIN] 이 방의 판정을 새로 시작한다. **반드시 소켓을 열기
@@ -3037,7 +3042,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 거짓이 되지 않는다.
   Future<void> _startInterpreterCapture(String reason) async {
     if (_isDirectMode || _isExiting || !mounted) return;
-    if (_interpCapture != null || _interpStarting) return;
+    if (_interpCaptureLive || _interpStarting) return;
     if (_openAiKey.isEmpty) {
       // 키는 Remote Config가 늦게 물어다 준다. 이건 실패가 아니라 "아직"이므로
       // 자동 시도 기록을 도로 풀어 `_fetchKeys`가 다시 부를 수 있게 둔다.
