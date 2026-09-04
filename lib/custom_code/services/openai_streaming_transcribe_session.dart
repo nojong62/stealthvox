@@ -106,7 +106,52 @@ const Duration kStreamingSttFlushTimeout = Duration(seconds: 2);
 /// 확인 없이 오디오를 흘리면 설정이 반영 안 된 세션에 말이 들어간다.
 const Duration kStreamingSttConfigTimeout = Duration(seconds: 4);
 
-const int kStreamingSttMaxRetries = 5;
+/// 🔁 [RECONNECT] 재연결 간격의 **상한**. 지수 증가가 여기서 멈춘다.
+///
+/// 예전에는 5회(0.5·1·2·4·8초 = 15.5초)를 쓰고 포기했다. 그러면 **이동 중
+/// 15초 끊김 한 번에 전사가 영구히 끝난다** — 셀룰러에서는 반드시 걸린다.
+/// (2026-09-04 실기기: 5G 호스트에서 소켓과 WebRTC가 같은 순간 끊겼고,
+///  재시도 5회가 다 실패하자 마이크까지 닫혔다.)
+///
+/// 이제 **통화가 살아 있는 동안은 계속 붙어 본다.** 끝내는 것은 횟수가 아니라
+/// `shouldReconnect` 게이트다 — 방을 나가면 그 게이트가 닫히고 재연결도 멈춘다.
+const Duration kStreamingSttBackoffCeiling = Duration(seconds: 10);
+
+/// 이 횟수를 넘으면 실패 로그를 줄인다. **포기하는 횟수가 아니다.**
+/// 10초 간격으로 계속 붙어 보므로, 긴 끊김에서 로그가 폭주하지 않게 한다.
+const int kStreamingSttQuietLogAfter = 5;
+
+/// 🔁 [RECONNECT] [attempt]번째 재시도 전에 기다릴 시간.
+///
+/// `0.5 → 1 → 2 → 4 → 8 → 10 → 10초…` 로 늘다가 상한에서 멈춘다.
+/// **사다리에 끝은 없다.** 끝내는 것은 횟수가 아니라 `shouldReconnect`
+/// 게이트이고, 그 게이트는 방을 나갈 때만 닫힌다.
+Duration streamingSttBackoff(int attempt) {
+  if (attempt <= 1) return const Duration(milliseconds: 500);
+  // 1 << 31 부터는 int가 넘칠 자리다. 그 훨씬 앞에서 이미 상한이다.
+  if (attempt >= 32) return kStreamingSttBackoffCeiling;
+  final int ms = 500 * (1 << (attempt - 1));
+  return ms >= kStreamingSttBackoffCeiling.inMilliseconds
+      ? kStreamingSttBackoffCeiling
+      : Duration(milliseconds: ms);
+}
+
+/// 🚫 재시도로 **풀리지 않는** 실패면 그 이유, 아니면 null.
+///
+/// 끊김(`SocketException`)·서버 흔들림(5xx)·한도(429)는 다시 붙으면 풀린다.
+/// 열쇠가 틀린 것(401)과 권한이 없는 것(403)은 10초마다 영원히 두드려도
+/// 그대로다 — 이런 것만 갈라서 기존 fatal 정책으로 보낸다.
+///
+/// `dart:io`의 핸드셰이크 실패는 `WebSocketException(message, httpStatusCode)`
+/// 로 **상태 코드를 실어서** 온다(dart-sdk `_http/websocket_impl.dart`).
+/// 문자열을 뒤질 필요가 없다.
+String? streamingSttPermanentReason(Object error) {
+  if (error is WebSocketException) {
+    final int? code = error.httpStatusCode;
+    if (code == 401 || code == 403) return 'auth_$code';
+  }
+  return null;
+}
 
 /// 전사 세션 하나. 대화방 세션 동안 살아 있고, 턴마다 새로 만들지 않는다.
 ///
@@ -154,6 +199,10 @@ class OpenAiStreamingTranscribeSession {
   void Function(String itemId, String text)? onTranscriptCompleted;
   void Function(String reason)? onFatalError;
   void Function(int attempt)? onReconnecting;
+
+  /// 🔁 [RECONNECT] 소켓이 (다시) 붙었다. 화면의 "연결 중" 표시를 내리는 자리다.
+  /// 첫 연결에도 불리므로, 호출부는 상태가 켜져 있을 때만 내리면 된다.
+  void Function()? onConnected;
   void Function()? onGaveUp;
   void Function(DateTime at)? onFirstAudioSent;
 
@@ -177,6 +226,10 @@ class OpenAiStreamingTranscribeSession {
   bool _firstAudioSent = false;
   bool _reconnectInProgress = false;
   int _retryCount = 0;
+
+  /// 🚫 재시도로 안 풀리는 실패의 이유. 차면 재연결 루프를 끝낸다.
+  /// 일시적 끊김은 절대 여기 오지 않는다 — 그건 계속 붙어 봐야 한다.
+  String? _permanentFailure;
   int _sentAudioBytes = 0;
   DateTime? _connectedAt;
 
@@ -338,6 +391,12 @@ class OpenAiStreamingTranscribeSession {
   Future<bool> connect() async {
     if (_disposed) return false;
     if (isConnected) return true;
+    if (apiKey.trim().isEmpty) {
+      // 설정 문제다. 10초마다 빈 열쇠로 두드려 봐야 결과가 같다.
+      _permanentFailure = 'no_api_key';
+      _lg('❌ [STREAM-STT]', 'connect_failed reason=no_api_key');
+      return false;
+    }
     final sw = Stopwatch()..start();
     try {
       final socket = await WebSocket.connect(
@@ -374,6 +433,8 @@ class OpenAiStreamingTranscribeSession {
       }
       _connectedAt = DateTime.now();
       _retryCount = 0;
+      _permanentFailure = null;
+      onConnected?.call();
       _lg(
         '✅ [STREAM-STT]',
         'connected model=$kStreamingSttModel '
@@ -386,8 +447,14 @@ class OpenAiStreamingTranscribeSession {
       );
       return true;
     } catch (e) {
-      _lg('❌ [STREAM-STT]',
-          'connect_failed(${e.runtimeType}) elapsedMs=${sw.elapsedMilliseconds}');
+      // 재시도로 풀릴 실패인지 여기서 가른다. 아니라면 재연결 루프가
+      // 이 표식을 보고 멈춘다 — 그 판단을 루프에 흩어 두지 않는다.
+      _permanentFailure = streamingSttPermanentReason(e);
+      _lg(
+          '❌ [STREAM-STT]',
+          'connect_failed(${e.runtimeType}) '
+              'elapsedMs=${sw.elapsedMilliseconds} '
+              'permanent=${_permanentFailure ?? 'no'}');
       await _teardownSocket();
       return false;
     } finally {
@@ -687,15 +754,17 @@ class OpenAiStreamingTranscribeSession {
         _lg('🎙️ [STREAM-STT]', 'reconnect_skipped reason=gate_closed');
         return;
       }
-      if (_retryCount >= kStreamingSttMaxRetries) {
-        _lg('❌ [STREAM-STT]', 'reconnect_gave_up after=$_retryCount');
-        onGaveUp?.call();
-        onFatalError?.call(reason);
+      // 🔁 [RECONNECT] **횟수로 포기하지 않는다.** 위 `gate()`가 이미
+      //   "이 세션을 아직 원하는가"를 판정했고, 그것이 유일한 종료 조건이다.
+      //   방을 나가거나 세대가 바뀌면 게이트가 닫히고 여기 오지도 않는다.
+      if (_permanentFailure != null) {
+        _endReconnectLoop();
         return;
       }
       _retryCount++;
       onReconnecting?.call(_retryCount);
-      final delay = Duration(milliseconds: 500 * (1 << (_retryCount - 1)));
+      // 지수로 늘리되 상한에서 멈춘다. 끊김이 길어도 10초마다 계속 두드린다.
+      final delay = streamingSttBackoff(_retryCount);
       await Future<void>.delayed(delay);
       if (_disposed) return;
       if (gate != null && !gate()) {
@@ -711,15 +780,36 @@ class OpenAiStreamingTranscribeSession {
         openAudioGate(reason: 'reconnected');
       }
       if (!ok) {
-        // A single failed reconnect must not bypass the configured retry ladder.
-        // Leave this critical section, then schedule the next backoff attempt.
-        _lg('[STREAM-STT]', 'reconnect_attempt_failed attempt=$_retryCount');
+        if (_permanentFailure != null) {
+          _endReconnectLoop();
+          return;
+        }
+        // 한 번 실패했다고 사다리를 건너뛰지 않는다. 이 구역을 빠져나간 뒤
+        // 다음 백오프를 예약한다.
+        // 긴 끊김에서 로그가 폭주하지 않게, 초반 몇 번만 매번 남기고
+        // 그 뒤로는 10번에 한 번만 남긴다. **재시도는 계속된다.**
+        if (_retryCount <= kStreamingSttQuietLogAfter || _retryCount % 10 == 0) {
+          _lg(
+              '[STREAM-STT]',
+              'reconnect_attempt_failed attempt=$_retryCount '
+                  'nextInMs=${streamingSttBackoff(_retryCount + 1).inMilliseconds}');
+        }
         _reconnectInProgress = false;
         unawaited(Future<void>(() => _reconnect(reason)));
       }
     } finally {
       _reconnectInProgress = false;
     }
+  }
+
+  /// 🚫 재시도로 안 풀리는 실패에서만 부른다. 여기서만 기존 fatal 정책으로
+  /// 넘어간다 — 통화 중 끊김은 이 길로 오지 않는다.
+  void _endReconnectLoop() {
+    final String why = _permanentFailure ?? 'permanent';
+    _lg('❌ [STREAM-STT]',
+        'reconnect_stopped reason=$why attempts=$_retryCount — 재시도로는 안 풀린다');
+    onGaveUp?.call();
+    onFatalError?.call(why);
   }
 
   Future<void> _teardownSocket() async {

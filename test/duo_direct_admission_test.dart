@@ -133,12 +133,17 @@ void main() {
     });
 
     test('소켓 사고는 다른 태그로 남는다', () {
-      // `[STREAM-STT] socket_lost` / `reconnect_gave_up`은 전사 세션 쪽이다.
+      // `[STREAM-STT] socket_lost` / `reconnect_*`는 전사 세션 쪽이다.
       // 이걸 세기 문제로 읽으면 엉뚱한 문턱을 만지게 된다.
+      //
+      // 🔁 `reconnect_gave_up`은 없어졌다. 이제 횟수로 포기하지 않는다
+      //   (`duo_stt_reconnect_test.dart`). 끊김은 `reconnect_attempt_failed`로
+      //   남고, 재시도로 안 풀리는 실패만 `reconnect_stopped`로 끝난다.
       final String stt =
           _read('lib/custom_code/services/openai_streaming_transcribe_session.dart');
       expect(stt, contains('socket_lost'));
-      expect(stt, contains('reconnect_gave_up'));
+      expect(stt, contains('reconnect_attempt_failed'));
+      expect(stt, contains('reconnect_stopped'));
       expect(stt, isNot(contains('lowLevel')),
           reason: '두 사고가 같은 태그를 쓰면 실기기에서 못 가린다');
     });

@@ -768,6 +768,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 안 가는지 말해 줘야 한다.
   bool _interpStartFailed = false;
 
+  /// 🔁 [RECONNECT] 전사 소켓이 끊겨 다시 붙는 중. **실패가 아니다** —
+  /// 통화가 살아 있는 동안은 계속 붙어 보므로, 화면도 "실패"가 아니라
+  /// "연결 중"이라고 적어야 한다.
+  bool _interpSttReconnecting = false;
+
   // ==========================================================================
   // 🔁 [INTERP-RETRY] 못 붙었을 때 다시 붙는다
   // --------------------------------------------------------------------------
@@ -2791,14 +2796,6 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         unawaited(_drainIncoming());
       }
     };
-    // 🔉 소켓이 끊겼다 붙는 동안의 소리는 어느 발화의 것도 아니다.
-    session.onReconnecting = (attempt) {
-      if (generation != _interpGeneration) return;
-      _utteranceRms?.reset();
-      // 소켓이 끊기면 `isUserSpeaking`이 참으로 굳을 수 있다. 그 상태로 두면
-      // 미뤄 둔 상대 음성이 영영 안 나온다 — 여기서 한 번 깨워 둔다.
-      if (_incomingQueue.isNotEmpty) unawaited(_drainIncoming());
-    };
     session.onSpeechStopped = () {
       if (generation != _interpGeneration) return;
       if (_interpMicPhase != InterpMicPhase.speaking) return;
@@ -2810,14 +2807,42 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       if (generation != _interpGeneration) return;
       unawaited(_onInterpreterTranscript(generation, itemId, text));
     };
+    // 🔁 [RECONNECT] 소켓이 끊겼다 붙는 동안 화면에 그 사실을 적는다.
+    //   마이크는 **닫지 않는다** — 끊긴 동안 한 말은 서버에 안 닿지만, 붙는
+    //   순간 다음 말을 바로 받아야 한다. 닫으면 스스로 안 돌아온다.
+    session.onReconnecting = (attempt) {
+      if (generation != _interpGeneration) return;
+      _utteranceRms?.reset();
+      if (mounted && !_interpSttReconnecting) {
+        setState(() => _interpSttReconnecting = true);
+      }
+      // 소켓이 끊기면 `isUserSpeaking`이 참으로 굳을 수 있다. 그 상태로 두면
+      // 미뤄 둔 상대 음성이 영영 안 나온다 — 여기서 한 번 깨워 둔다.
+      if (_incomingQueue.isNotEmpty) unawaited(_drainIncoming());
+    };
+    session.onConnected = () {
+      if (generation != _interpGeneration) return;
+      if (mounted && _interpSttReconnecting) {
+        setState(() => _interpSttReconnecting = false);
+      }
+    };
     session.onFatalError = (reason) {
-      _lgDuo('⚠️ [INTERP-STT]', 'fatal=$reason — 마이크를 닫고 대기로 돌린다');
+      // 🚫 여기는 이제 **재시도로 안 풀리는 실패**에서만 온다 — 열쇠가
+      //   틀렸거나(401) 권한이 없거나(403) 열쇠가 비었을 때다.
+      //   통화 중 끊김은 위 `onReconnecting`이 받고, 재연결은 통화가 살아
+      //   있는 동안 계속 돈다. 방을 나가면 `shouldReconnect`가 닫히고
+      //   루프는 조용히 멈춘다 — 그때도 여기는 안 온다.
+      _lgDuo('⚠️ [INTERP-STT]', 'fatal=$reason — 재시도로는 안 풀린다');
       if (generation != _interpGeneration) return;
       unawaited(_stopInterpreterCapture('stt_fatal'));
-      // 자동 시도 기록을 풀어 둔다. 상대가 아직 방에 있으므로 다음 스냅샷이
-      // 다시 붙여 볼 수 있다 — 여기서 잠가 버리면 복구할 손잡이가 없다.
       _interpAutoStartAttempted = false;
-      if (mounted) setState(() => _interpStartFailed = true);
+      if (mounted) {
+        setState(() {
+          _interpStartFailed = true;
+          // "다시 잇는 중"을 지운다. 더 잇지 않는다.
+          _interpSttReconnecting = false;
+        });
+      }
       _setInterpMicPhase(InterpMicPhase.preparing);
     };
     final ok = await session.connect();
@@ -3371,6 +3396,15 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     _utteranceRms?.reset();
     _utteranceRms = null;
     _interpStt?.closeAudioGate(reason: reason);
+    // 마이크를 접었으니 "다시 잇는 중"도 지운다. 남겨 두면 닫힌 통역이
+    // 계속 이어 붙는 중인 것처럼 보인다.
+    if (_interpSttReconnecting) {
+      if (mounted) {
+        setState(() => _interpSttReconnecting = false);
+      } else {
+        _interpSttReconnecting = false;
+      }
+    }
     if (!_isDirectMode) _setInterpMicPhase(InterpMicPhase.ended);
   }
 
@@ -4541,6 +4575,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           ? '상대방 연결 종료'
           : '상대방을 기다리는 중';
     }
+    // 🔁 소켓이 끊겨 다시 붙는 중이면 그 사실을 먼저 말한다. 마이크는 열려
+    //   있고 재연결도 돌고 있으므로 "준비 중"이라고 적으면 유저가 멈춘 줄 안다.
+    if (_interpSttReconnecting) return '연결이 끊겨 다시 잇는 중';
     if (_interpStartFailed) {
       // 재시도가 예약돼 있으면 "실패"가 아니라 "다시 붙는 중"이다.
       return _interpRetryTimer != null ? '다시 연결하는 중' : '마이크를 열지 못했습니다';
