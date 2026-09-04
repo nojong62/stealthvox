@@ -240,6 +240,25 @@ const bool kDuoInterpWebrtc =
 /// 이 열쇠가 붙은 메시지는 히스토리에도, 번역에도, 과금에도 가지 않는다.
 const String kInterpDataKindSpoke = 'spoke';
 
+/// 🗣️ [DUO-VAD] 듀오에서 발화가 끝났다고 볼 무음의 길이.
+///
+/// 기본값(600ms)은 서클톡·시나리오톡의 값이다. 그 두 모드에는 갈린 조각을
+/// 다시 붙이는 장치가 있다 — `late_continuation.dart`의 1200ms 창이다.
+/// **듀오에는 그 장치가 없다.** 그래서 600ms에 갈린 조각이 그대로 말풍선
+/// 여러 개가 되고, 두세 글자짜리는 번역이 비어 통째로 사라지기까지 한다.
+///
+/// 2026-09-04 실기기에서 잰 실제 쉼:
+///   · 한 문장 안의 숨 고르기 — 617 · 629 · 760 · 834 · **1164** ms
+///   · 진짜 턴 전환          — **4957** · 5813 ms 이상
+/// 1.2초와 5초 사이가 비어 있다. 1500이면 앞을 다 덮고 뒤와는 3초 이상 뜬다.
+///
+/// 대가는 턴마다 전사가 0.9초 늦어지는 것뿐이다. 목소리는 WebRTC로 이미
+/// 실시간이므로 대화 속도는 이 값과 무관하다.
+///
+/// 🚫 서클톡·시나리오톡은 600 그대로 둔다. 그쪽은 이어 붙이는 장치가 이미
+///   있어서 올릴 이유가 없고, 올리면 AI 응답만 늦어진다.
+const int kDuoVadSilenceDurationMs = 1500;
+
 const String kDuoInterpTransportWebrtc = 'webrtc';
 const String kDuoInterpTransportFirestore = 'firestore';
 
@@ -1199,6 +1218,53 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 하는 일은 그 전사문이 사람이 한 말인지 상대 폰이 낸 소리인지 가르는
   /// 것뿐이다 — 그래서 이 창 동안에도 진짜 발화는 살아서 지나간다.
   bool _looksLikePartnerEcho(String t) => _partnerEcho.matches(t);
+
+  /// 📝 [KEEP-ALL] 큐에 남은 상대 발화를 **글자로만** 히스토리에 남기고 비운다.
+  ///
+  /// 방이 끝나는 자리에서만 부른다. 번역도 재생도 하지 않는다 — 여기서 GPT를
+  /// 기다리면 정리가 늦어지고, 옮기지 못한 글자는 공부방이 맡는다.
+  Future<void> _drainQueueToHistory(String reason) async {
+    if (_isDirectMode || _incomingQueue.isEmpty) {
+      _incomingQueue.clear();
+      return;
+    }
+    final List<Map<String, dynamic>> left =
+        List<Map<String, dynamic>>.from(_incomingQueue);
+    _incomingQueue.clear();
+    _lgDuo('[KEEP-ALL]', 'queue_to_history reason=$reason left=${left.length}');
+    for (final data in left) {
+      final String raw = data['text']?.toString() ?? '';
+      if (raw.trim().isEmpty) continue;
+      await _saveUntranslatedIncoming(
+          data, raw, _resolvePartnerSrcLang(data, raw), 'room_end');
+    }
+  }
+
+  /// 📝 [KEEP-ALL] 옮기지 못한 상대 발화를 **상대 언어 그대로** 남긴다.
+  ///
+  /// 원문 자리에 상대 언어를 넣고 `sourceLang`에 그 언어를 적는다. 직접
+  /// 대화가 상대 발화를 저장하는 모양과 같다 — 공부방이 "내 언어가 아니다"를
+  /// 알고 제대로 옮긴다. 배울글 자리는 비워 두고 [deferTarget]으로 넘긴다.
+  Future<void> _saveUntranslatedIncoming(
+      Map<String, dynamic> data, String raw, String srcLang, String why) async {
+    final int? spokenMs = (data['spokenAt'] as num?)?.toInt();
+    _lgDuo('[KEEP-ALL]',
+        'saved_untranslated why=$why src=$srcLang len=${raw.trim().length}');
+    await _saveHistoryMessage(
+      '',
+      raw.trim(),
+      'SYSTEM',
+      mode: kDuoModeInterpreter,
+      seq: (data['seq'] as num?)?.toInt(),
+      spokenAt: spokenMs == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(spokenMs),
+      speakerUid: data['senderUid']?.toString(),
+      speakerRole: data['senderRole']?.toString(),
+      sourceLang: srcLang,
+      deferTarget: true,
+    );
+  }
 
   /// 📢 상대가 "이 문장을 소리 낸다"고 알려 왔다.
   void _notePartnerSpoke(String text) {
@@ -2372,6 +2438,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       languageCode: sttLanguageCode,
       onLog: (tag, msg) => _lgDuo('[DIRECT-STT]$tag', msg),
       // 🎙️ 폰을 손에 들지 않는 자리다. 먼 소리를 잡고 첫 음절을 지킨다.
+      // 🗣️ 한 문장을 조각내지 않는다. 직접 대화의 글자는 History로만 가므로
+      //   늦어져도 대화 자체는 릴레이 음성이라 그대로다.
+      vadSilenceDurationMs: kDuoVadSilenceDurationMs,
     );
     session.shouldReconnect = () => _isDirectGenerationCurrent(generation);
     // 발화 순서는 전사 응답이 돌아온 순서가 아니라 **말을 시작한 시각** 기준이다.
@@ -2807,6 +2876,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     final int generation = ++_interpGeneration;
     final session = OpenAiStreamingTranscribeSession(
       apiKey: _openAiKey,
+      // 🗣️ 한 문장을 조각내지 않는다. 조각이 나면 두세 글자짜리가 생기고,
+      //   그것은 번역이 비어 통째로 버려진다(2026-09-04 실기기 seq=2).
+      vadSilenceDurationMs: kDuoVadSilenceDurationMs,
       // 🌐 [INTERP-ORIGIN] **판정 전까지는 언어를 박지 않는다.**
       //   박아 두면 로비값이 틀렸을 때 그 언어로 음차된 글자가 돌아와
       //   (한국어로 박힌 채 영어를 말하면 한글 음차) 불일치가 보이지 않는다.
@@ -3491,7 +3563,15 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     _lgDuo('[INTERP-LIVE]', 'partner_left reason=$reason');
     _interpGateReopenTimer?.cancel();
     _interpGateReopenTimer = null;
-    _incomingQueue.clear();
+    // 📝 [KEEP-ALL] **비우기 전에 남긴다.** 상대가 마지막 말을 하고 곧바로
+    //   나가면 그 말은 아직 큐에 있다 — 앞 턴을 읽는 중이면 꺼내지도 못한다.
+    //   2026-09-04 실기기: 게스트의 13글자 마지막 말(seq=10)이 도착 2초 뒤
+    //   `partner_left`로 이 자리에서 지워졌다. 게스트 폰에는 남고 호스트
+    //   폰에는 없었던 그 말이다.
+    //
+    //   소리는 내지 않는다(방이 끝났다). 번역도 하지 않는다 — 지금 GPT를
+    //   부르면 정리가 그만큼 늦어지고, 못 옮긴 글자는 공부방이 맡는다.
+    await _drainQueueToHistory(reason);
     _interpTts?.stopAll(reason: reason);
     _setInterpPartnerPhase(InterpPartnerPhase.idle);
     // 다음 상대가 들어오면 다시 자동으로 붙을 수 있게 기록을 푼다.
@@ -4560,15 +4640,24 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       //   영어 목소리로 읽는 소리가 났다. 실기기에서 두 세션 연속 나왔고
       //   게스트 쪽에서는 **받은 첫 마디**가 이것이었다(2026-09-01).
       //   재시도까지 빈 응답이면 이 발화는 옮길 수 없다는 뜻이고, 틀린
-      //   언어로 읽는 것보다 이 턴을 접는 편이 낫다. 히스토리에도 남기지
-      //   않는다 — 원문 자리는 '내 대화 언어로 들은 말'이라 상대 언어
-      //   문장이 앉으면 공부방이 그것으로 배울글을 짓는다.
+      //   언어로 읽는 것보다 이 턴을 접는 편이 낫다.
+      //
+      // 📝 **그렇다고 글자까지 버리지는 않는다.** 소리를 못 내는 것과 말이
+      //   없었던 것으로 하는 것은 다르다. 2026-09-04 실기기에서 게스트의
+      //   5글자 발화(seq=2)가 이 자리에서 통째로 사라졌다 — 게스트 폰에는
+      //   있고 호스트 폰에는 없었다.
+      //
+      //   원문 자리에 **상대 언어 그대로** 넣고 `sourceLang`에 그 언어를
+      //   적는다. 직접 대화가 상대 발화를 저장하는 모양과 같다. 그러면
+      //   공부방이 "이건 내 언어가 아니다"를 알고 제대로 옮긴다 — 예전에
+      //   걱정하던 '한국어가 배울글 자리에 앉는' 길이 아니다.
       if (translated == null || translated.trim().isEmpty) {
         _lgDuo(
             '⚠️ [INTERP-TRANSLATE]',
             'failed src=$srcLang to=$myNative rawLen=${raw.trim().length} '
-            '— 이 턴은 재생하지 않는다');
+            '— 재생은 접고 글자만 남긴다');
         _setInterpPartnerPhase(InterpPartnerPhase.idle);
+        await _saveUntranslatedIncoming(data, raw, srcLang, 'translate_failed');
         return;
       }
       spoken = translated.trim();

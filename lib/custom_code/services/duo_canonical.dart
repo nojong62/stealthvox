@@ -32,7 +32,12 @@ import 'duo_study_state.dart';
 // ⚠️ **직접 대화(`direct`) 전용이다.** 만능 통역은 릴레이 없이 STT→번역→TTS로
 // 도는 서클톡과 같은 통신 로직이라, 상대에게 들린 것이 번역문이고 오간 것이
 // 애초에 글자다. 정돈할 "두 사람의 실제 발화 한 시간축"이 없다.
-// [readDuoSourceTimeline]이 `duoMode == 'direct'`만 읽는 것도 그래서다.
+// [readDuoSourceTimeline]은 직접 대화와 만능 통역을 **둘 다** 읽는다.
+//
+// 예전에는 `direct`만 읽었다. 그래서 통역 히스토리에는 정돈이 아예 돌지
+// 않았고, 맥락에 안 맞는 두세 글자("Quickly", "No.")가 그대로 남았다.
+// 통역이야말로 정돈이 필요한 쪽이다 — 상대 폰 스피커 소리와 잘린 조각이
+// 섞여 들어오는 유일한 모드다(2026-09-04 실기기).
 // ====================================================================
 
 /// 세션 문서에 참가자별로 찍는 "나는 더 이상 말을 안 올린다" 표시.
@@ -255,7 +260,13 @@ Future<List<DuoSourceUtterance>> readDuoSourceTimeline(String roomId) async {
     final data = doc.data();
     final String text = (data['text'] ?? '').toString().trim();
     if (text.isEmpty) continue;
-    if ((data['duoMode'] ?? '').toString() != 'direct') continue;
+    // 📝 [KEEP-ALL] 듀오의 두 모드를 다 읽는다. 받는 문턱은 낮추고 지우는
+    //   일은 여기서 맥락을 보고 한다 — 잡아 두고 나중에 고르는 쪽이,
+    //   들어올 때 버려서 유저가 한 말을 잃는 것보다 낫다.
+    //   값은 `routine_mode_duo.dart`의 kDuoModeDirect / kDuoModeInterpreter다.
+    //   그 상수는 위젯에 있고 서비스가 위젯을 부르지 않는다 — 글자로 적는다.
+    final String mode = (data['duoMode'] ?? '').toString();
+    if (mode != 'direct' && mode != 'interpreter') continue;
     list.add(DuoSourceUtterance(
       id: doc.id,
       role: (data['senderRole'] ?? '').toString(),
