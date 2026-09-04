@@ -191,12 +191,32 @@ void main() {
 
   // ── 위젯 배선 ───────────────────────────────────────────────────────
   group('소리 내기 직전에 상대에게 알린다', () {
-    test('재생할 문장을 그대로 건넨다', () {
-      expect(duo, contains('_announceSpokenToPartner(spoken);'));
+    test('재생하는 갈래가 둘이고, 둘 다 알린다', () {
+      // ⚠️ 2026-09-04 실기기에서 한쪽만 걸어 두고 놓쳤다. 로그에
+      //   `[INTERP-TURN] incoming ... gptCalls=1`은 나오는데 `path=stream`이
+      //   없었다 — 실제로 도는 갈래는 훅이 없는 쪽이었고, 알림이 한 줄도
+      //   안 나갔다. 둘 다 거는 것을 여기서 못 박는다.
+      expect(
+          RegExp(r'_announceSpokenToPartner\(spoken\);').allMatches(duo).length,
+          2,
+          reason: '재생하는 자리마다 알려야 한다');
       // 내 에코 목록에 넣는 그 자리다 — 같은 문장, 같은 순간.
-      final int remember = duo.indexOf('_rememberGenerated(spoken);\n'
-          '    // 📢 [PARTNER-ECHO]');
-      expect(remember, greaterThan(-1));
+      expect(
+          RegExp(r'_rememberGenerated\(spoken\);\n'
+                  r'    // 📢 \[PARTNER-ECHO\]')
+              .allMatches(duo)
+              .length,
+          2);
+    });
+
+    test('실기기에서 도는 갈래에 붙어 있다', () {
+      // `same=$sameLang gptCalls=${sameLang ? 0 : 1}`을 찍는 쪽이 그 갈래다.
+      final int live = duo.indexOf(r'same=$sameLang gptCalls=');
+      expect(live, greaterThan(-1));
+      final String after = duo.substring(live);
+      final int announce = after.indexOf('_announceSpokenToPartner(spoken);');
+      expect(announce, greaterThan(-1),
+          reason: '도는 갈래에 알림이 없으면 이 방어선 전체가 죽은 코드다');
     });
 
     test('이미 있는 글자 채널로 보낸다 — 새 통로가 없다', () {

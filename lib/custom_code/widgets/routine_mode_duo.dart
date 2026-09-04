@@ -4608,6 +4608,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     //   마이크로 되돌아오면 내 발화로 오인되는데, 이제 나와 같은 언어라
     //   언어만으로는 구분되지 않는다.
     _rememberGenerated(spoken);
+    // 📢 [PARTNER-ECHO] 같은 문장을 상대에게도 건넨다. 내 스피커 소리가
+    //   상대 마이크로 들어가도 상대가 그것을 알아보고 버릴 수 있게.
+    //   ⚠️ **재생이 실제로 도는 갈래는 여기다.** 위 `path=stream` 쪽에도
+    //   같은 줄이 있지만 실기기 로그에는 그 갈래가 안 나온다
+    //   (2026-09-04: `incoming ... gptCalls=1`에 `path=stream`이 없다).
+    _announceSpokenToPartner(spoken);
     if (_isConversationActive && !_isExiting) {
       // 게이트 열고 닫기는 `_speakPartner` 안에 있다. 재생이 어떻게 끝나든
       // 거기서 재개 예약까지 걸고 돌아온다.
