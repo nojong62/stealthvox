@@ -111,13 +111,37 @@ void main() {
           reason: '직접 대화 호출부를 건드리면 회귀다');
     });
 
-    test('보내지 않을 때도 트랙 자체는 만든다', () {
-      // MicTap이 붙을 대상이 그 트랙이다. 안 만들면 전사할 소리가 없다.
-      final int at = call.indexOf('_localAudioTrack = tracks.first;');
-      expect(at, greaterThan(-1));
-      final String body = call.substring(at, at + 900);
-      expect(body, contains('if (sendAudio) {'));
-      expect(body, contains('pc.addTrack('));
+    test('트랙은 어느 경우에도 얹는다 — 안 얹으면 녹음이 안 돈다', () {
+      // 2026-09-04 실기기: 통역 frames=0, 같은 폰 직접통화 frames=7439.
+      // libwebrtc의 ADM은 **보낼 트랙이 있을 때** AudioRecord를 시작한다.
+      // addTrack을 건너뛰면 마이크가 통째로 굶는다.
+      expect(call, contains('await pc.addTrack(_localAudioTrack!, stream);'));
+      final int at = call.indexOf('await pc.addTrack(_localAudioTrack!, stream);');
+      expect(call.substring(at - 200, at), isNot(contains('if (sendAudio) {')),
+          reason: 'addTrack이 다시 조건 뒤로 들어갔다');
+    });
+
+    test('대신 트랙을 꺼서 원어를 막는다', () {
+      final int at = call.indexOf('await pc.addTrack(_localAudioTrack!, stream);');
+      final String body = call.substring(at, at + 400);
+      expect(body, contains('if (!sendAudio) {'));
+      expect(body, contains('_localAudioTrack!.enabled = false;'));
+    });
+
+    test('음소거 토글이 통역 트랙을 되살리지 않는다', () {
+      // 켜면 원어가 상대 스피커로 그대로 샌다.
+      final int at = call.indexOf('void setMuted(bool muted)');
+      final String body = call.substring(at, at + 700);
+      final int guard = body.indexOf('if (!sendAudio) {');
+      final int enable = body.indexOf('track.enabled = !muted;');
+      expect(guard, greaterThan(-1), reason: '통역을 막는 빗장이 없다');
+      expect(enable, greaterThan(guard), reason: '빗장보다 먼저 켜면 소용없다');
+    });
+
+    test('탭이 enabled보다 앞이라는 전제를 적어 뒀다', () {
+      // 이 성질이 깨지면 통역 마이크가 조용히 죽는다.
+      expect(call, contains('onWebRtcAudioRecordSamplesReady'));
+      expect(call, contains('flutter_webrtc 1.5.2'));
     });
 
     test('상대 PCM을 전사하는 자리를 만들지 않았다', () {

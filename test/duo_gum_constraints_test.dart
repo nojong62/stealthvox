@@ -85,8 +85,11 @@ void main() {
     });
 
     test('통역은 여전히 원음을 안 보낸다', () {
-      expect(call, contains('if (sendAudio) {'));
+      // 트랙은 얹되(녹음을 시작시키려고) 꺼 둔다. 자세한 근거는
+      // `duo_interp_webrtc_test.dart`.
       expect(call, contains('await pc.addTrack(_localAudioTrack!, stream);'));
+      expect(call, contains('if (!sendAudio) {'));
+      expect(call, contains('_localAudioTrack!.enabled = false;'));
     });
 
     test('통화 모드 설정은 마이크보다 먼저다', () {

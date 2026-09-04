@@ -363,14 +363,35 @@ class DuoWebrtcCall {
               '(※ 실제 적용 여부는 플랫폼이 정하며 보고하지 않는다)');
       _localAudioTrack = tracks.first;
       // 음소거 상태로 시작하지 않는다. 호출부가 통화 중에 토글한다.
+      //   ⚠️ 통역(`sendAudio: false`)은 바로 아래에서 다시 끈다 — 그쪽은
+      //   음소거가 아니라 "원어를 안 보낸다"는 뜻이라 통화 내내 꺼져 있다.
       _localAudioTrack!.enabled = !_muted;
-      if (sendAudio) {
-        await pc.addTrack(_localAudioTrack!, stream);
-      } else {
-        // 🎙️ 통역: 마이크는 열되 상대에게 보내지 않는다. 트랙은 살아 있으므로
-        //   [DuoWebrtcMicTap]은 그대로 붙고, 상대 스피커에서는 원어가 안 난다.
+      // 🎙️ **트랙은 어느 경우에도 얹는다.**
+      //
+      //   예전에는 통역(`sendAudio: false`)에서 `addTrack`을 통째로 건너뛰었다.
+      //   "마이크는 열되 상대에겐 안 보낸다"는 뜻이었는데, **그러면 마이크가
+      //   아예 안 돈다.**
+      //
+      //   libwebrtc의 `JavaAudioDeviceModule`은 PeerConnection에 **보낼 오디오
+      //   트랙이 있을 때** AudioRecord를 시작한다. 얹지 않으면 녹음이 시작되지
+      //   않고, `SamplesReadyCallback`도 안 불리고, [DuoWebrtcMicTap]에 PCM이
+      //   한 조각도 안 온다.
+      //   (2026-09-04 실기기: 통역 `frames=0 bytes=0`, 같은 폰 직접통화
+      //    `frames=7439`. 차이는 이 분기 하나뿐이었다.)
+      //
+      //   그래서 얹고 **트랙을 끈다.** 두 가지가 동시에 성립한다:
+      //     · ADM이 녹음을 시작한다      → 탭에 PCM이 온다 → 전사·번역·TTS
+      //     · 인코더로는 무음이 나간다   → 상대 스피커에서 원어가 안 난다
+      //
+      //   ⚠️ 탭이 `enabled`보다 **앞**이라 이것이 가능하다.
+      //   `LocalAudioTrack.onWebRtcAudioRecordSamplesReady`는 ADM 콜백을 그대로
+      //   싱크에 흘리고 `enabled`를 보지 않는다(flutter_webrtc 1.5.2). 이 성질이
+      //   깨지면 통역 마이크가 조용히 죽으므로, 플러그인을 올릴 때 확인할 것.
+      await pc.addTrack(_localAudioTrack!, stream);
+      if (!sendAudio) {
+        _localAudioTrack!.enabled = false;
         _lg('[INTERP-WEBRTC]',
-            'mic_ready sendAudio=false — 트랙은 열고 상대에겐 보내지 않는다');
+            'mic_ready sendAudio=false — 트랙은 얹고 껐다. 녹음은 돌고 원어는 안 나간다');
       }
 
       // 📨 글자 통로. 호스트가 만들고 게스트가 받는다 — offer/answer와 같은
@@ -844,6 +865,14 @@ class DuoWebrtcCall {
     _muted = muted;
     final track = _localAudioTrack;
     if (track == null) return;
+    // 🎙️ 통역은 **어느 경우에도 트랙을 켜지 않는다.** 여기서 켜면 원어가
+    //   상대 스피커로 그대로 새어 나간다. 그쪽의 꺼짐은 음소거가 아니라
+    //   "원어를 안 보낸다"는 뜻이라 통화 내내 유지돼야 한다.
+    //   녹음은 트랙을 얹은 것만으로 돌고 있으므로 전사에는 영향이 없다.
+    if (!sendAudio) {
+      _lg('🔇 [DUO-RTC]', 'mute_ignored reason=interpreter_never_sends_origin');
+      return;
+    }
     track.enabled = !muted;
     _lg('🔇 [DUO-RTC]', 'micTrackEnabled=${!muted}');
   }
