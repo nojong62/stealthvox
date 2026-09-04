@@ -27,8 +27,20 @@ void main() {
   // ==========================================================================
   group('① 맥락상 명백한 STT 오류를 뺀다', () {
     test('artifact를 모델이 고를 수 있다', () {
-      expect(canon, contains('  artifact    - the recognizer wrote words nobody spoke.'),
+      expect(canon,
+          contains("  artifact    - not something either speaker said into their own phone."),
           reason: '프롬프트에 상태가 없으면 모델이 절대 안 고른다');
+    });
+
+    test('artifact가 네 갈래를 다 덮는다', () {
+      for (final String kind in <String>[
+        'words the recognizer invented out of silence',
+        'a television, a radio, or another person in the room',
+        'a fragment cut so short that it carries no meaning',
+        'a plain mis-recognition that connects to nothing anywhere in the call',
+      ]) {
+        expect(canon, contains(kind), reason: '빼야 할 갈래가 빠졌다: \$kind');
+      }
     });
 
     test('artifact가 상태로 매핑된다', () {
@@ -43,16 +55,29 @@ void main() {
     });
 
     test('근거를 좁게 요구한다 — 뜬금없다는 이유로는 못 뺀다', () {
-      expect(canon, contains('answers nothing, is answered by nothing'));
+      expect(canon, contains('connects to nothing, answers nothing, is answered by nothing'));
       expect(
           canon,
-          contains('A real remark is NOT an artifact just because it changes '
-              'the subject, is blunt, or reads oddly'),
+          contains('Awkward wording is not a reason to remove anything, '
+              'and neither is changing the subject'),
           reason: '이 문장이 없으면 사람 말이 환청으로 지워진다');
     });
 
-    test('애매하면 보이는 쪽이 artifact에도 적용된다', () {
-      expect(canon, contains('This applies to "artifact" above all'));
+    test('애매하면 남기고 그 자리에 둔다', () {
+      expect(canon,
+          contains('When you cannot tell, keep the line and leave it where it is.'));
+    });
+
+    test('줄 단위가 아니라 전체 맥락을 먼저 본다', () {
+      expect(canon, contains('READ THE WHOLE CALL BEFORE YOU DECIDE ANYTHING'));
+      expect(canon, contains('Never judge a line on its own'));
+    });
+
+    test('판단 기준이 한 문장으로 서 있다', () {
+      expect(
+          canon,
+          contains('"Does this stand as something a real person actually '
+              'said in THIS conversation?"'));
     });
   });
 
@@ -95,18 +120,22 @@ void main() {
 
   // ==========================================================================
   group('넓히면 안 되는 선은 그대로다', () {
-    test('중요도로 고르지 않는다', () {
-      expect(canon, contains('Importance is not yours to judge'));
-      expect(canon, contains('Never drop a turn because it looks unimportant'));
+    test('짧거나 평범하다는 이유로 빼지 않는다', () {
+      // 2026-09-04: "Importance is not yours to judge"를 글자 그대로 지키다
+      // 명백한 기계 오인식까지 살리고 있었다. 기준을 "사람이 실제로 한 말로
+      // 성립하는가"로 바꾸되, 스타일을 이유로 빼는 길은 그대로 막는다.
+      expect(canon,
+          contains('however short, ordinary, blunt, or off-topic'));
+      expect(canon, contains('people do both all the time'));
     });
 
     test('화자를 섞지 않는다', () {
-      expect(canon, contains('Never merge different speakers'));
+      expect(canon, contains('- Merge different speakers.'));
     });
 
     test('없던 말을 지어내지 않는다', () {
       expect(canon, contains('Add a fact, a plan, a reason or a feeling that was never spoken'));
-      expect(canon, contains('Summarise, compress, drop a real turn, or translate'));
+      expect(canon, contains('- Summarise, compress, or translate.'));
     });
 
     test('모델이 빠뜨린 줄은 원문 그대로 되살린다', () {
@@ -125,6 +154,24 @@ void main() {
       ]) {
         expect(canon, isNot(contains(gone)));
       }
+    });
+
+    test('원문이 바뀌면 옛 배울글을 비운다', () {
+      // 안 비우면 원문과 배울글이 서로 다른 문장을 가리킨 채 남는다.
+      // 비우면 공부방이 `_historyTargetNeedsWork`로 최종 원문에서 다시 만든다.
+      expect(canon, contains("if (textChanged) 'translated_text': '',"));
+      expect(canon, contains('final bool textChanged ='));
+    });
+
+    test('안 바뀐 줄의 배울글은 건드리지 않는다', () {
+      // 통째로 비우면 안 바뀐 줄까지 GPT를 다시 부른다.
+      expect(canon, contains("curText.isNotEmpty && curText != turn.text"));
+    });
+
+    test('바뀌기 직전 글자를 맨 처음 원문과 구별해 든다', () {
+      // 두 번째 정돈에서 original_text_raw는 맨 처음 것이라 지금 글자와 다르다.
+      expect(canon, contains('final curTextById = <String, String>{};'));
+      expect(canon, contains('curTextById[channelId] = currentText;'));
     });
 
     test('개인 히스토리 줄에 그대로 쓴다', () {

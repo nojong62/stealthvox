@@ -292,27 +292,36 @@ List<DuoCanonicalTurn> fallbackCanonical(List<DuoSourceUtterance> source) => [
 const String _canonicalPrompt =
     '''You are given ONE phone call between two people, already transcribed. Each line came from that speaker's own phone.
 
-Your job is CLEANUP, not selection. You never decide what matters in a conversation. Keep what they said and tidy only the mess speech-to-text made.
+READ THE WHOLE CALL BEFORE YOU DECIDE ANYTHING. Never judge a line on its own. What a line is - a real remark, an echo, a fragment, something the machine invented - only shows against the rest of the conversation.
 
-KEEP EVERY TURN A PERSON ACTUALLY SPOKE, however short or ordinary: questions, answers, agreements, refusals, reactions, greetings, self-corrections. Never drop a turn because it looks unimportant or not worth studying. Importance is not yours to judge. Never merge different speakers.
+Give back that same call as a conversation a person can read again: the two speakers, what they actually said, in the order they actually said it. You are not writing a new conversation and you are not summarising this one.
 
-ORDER: the two lines came from two different phones whose clocks do not agree, so the order you are given can be wrong. Return the turns in the order the two people ACTUALLY spoke them, as the conversation itself shows: a question comes before its answer, an answer before the reply to it. Move a turn ONLY when the conversation makes the true position plain. If you cannot tell, leave it exactly where it is - a slightly odd order costs little; an invented order rewrites the call.
+THE ONE QUESTION, asked of every line:
+  "Does this stand as something a real person actually said in THIS conversation?"
 
-Judge every turn by its CONVERSATIONAL FUNCTION in context, never by its length or wording:
-  "Are you going tomorrow?" / "어."  -> agreement. included
-  "Not today, Friday."      / "아."  -> realization. included
-  "What did you say?"       / "어?"  -> asking again. included
-  "I think that..."         / "음... 흠..." while holding your own turn -> thinking aloud. hesitation
+If yes, keep it - however short, ordinary, blunt, or off-topic. Awkward wording is not a reason to remove anything, and neither is changing the subject; people do both all the time.
+
+If no - it connects to nothing, answers nothing, is answered by nothing, and no one in this call would plausibly have said it - then it came from the machine or from the room, and it goes.
 
 States you may assign:
   included    - a real turn in the conversation. THIS IS THE DEFAULT.
-  artifact    - the recognizer wrote words nobody spoke. Requires the line to be plainly impossible in context: it answers nothing, is answered by nothing, and belongs to no topic in this call. Stock phrases the recognizer invents in silence ("thank you for watching", "시청해 주셔서 감사합니다") are the clearest case. A real remark is NOT an artifact just because it changes the subject, is blunt, or reads oddly - people do that.
   merged      - a fragment you joined into a neighbouring turn of the SAME speaker. Only when no real turn by the other speaker sits between them.
-  hesitation  - real voice, but only filling the speaker's own pause; no reply, question, reaction or agreement.
+  hesitation  - real voice that only fills that speaker's own pause; no reply, question, reaction or agreement ("음...", "어...").
   echo        - this speaker's phone picked up the OTHER speaker's voice from the loudspeaker. Requires the other speaker to have a near-identical line at almost the same time. A person genuinely repeating what they heard is NOT echo.
-  duplicate   - the same moment stored twice by the recognizer. Matching words alone never justify this.
+  duplicate   - the recognizer stored the same moment twice. Matching words alone never justify this.
+  artifact    - not something either speaker said into their own phone. Four kinds:
+                  - words the recognizer invented out of silence ("thank you for watching", "시청해 주셔서 감사합니다")
+                  - a television, a radio, or another person in the room that the microphone caught
+                  - a fragment cut so short that it carries no meaning and joins no neighbouring turn
+                  - a plain mis-recognition that connects to nothing anywhere in the call
 
-If you are unsure, choose "included". Wrongly keeping a line costs little; wrongly hiding one loses what a person said. This applies to "artifact" above all: a person saying something unexpected is a person speaking, not a machine error.
+Judge every line by its CONVERSATIONAL FUNCTION in context, never by its length or its wording:
+  "Are you going tomorrow?" / "어."  -> agreement. included
+  "Not today, Friday."      / "아."  -> realization. included
+  "What did you say?"       / "어?"  -> asking again. included
+  "I think that..."         / "음... 흠..." while holding your own turn -> hesitation
+
+ORDER: the two lines came from two different phones whose clocks do not agree, so the order you are given can be wrong. Return the turns in the order the two people ACTUALLY spoke them, as the conversation itself shows: a question comes before its answer, an answer before the reply to it. Move a turn ONLY when the conversation makes the true position plain. If you cannot tell, leave it exactly where it is - a slightly odd order costs little; an invented order rewrites the call.
 
 Write the turns you keep as READABLE SENTENCES, not as transcript fragments. The person on the other end heard a sentence; the reader should see one too.
 
@@ -325,9 +334,10 @@ You may NOT:
 - Add a fact, a plan, a reason or a feeling that was never spoken.
 - Decide something the two left undecided, or make an answer more certain than it was.
 - Rewrite a turn that already reads fine, polish someone's style, or make them sound more fluent.
-- Summarise, compress, drop a real turn, or translate.
+- Merge different speakers.
+- Summarise, compress, or translate.
 
-When you cannot tell how a turn was meant to end, leave it exactly as it is. A rough line costs little; an invented one costs the whole point of studying your own call.
+When you cannot tell, keep the line and leave it where it is. A rough line costs little; an invented one costs the whole point of studying your own call.
 
 Return strict JSON only:
 {"turns":[{"ids":["<source id>"],"role":"HOST","text":"...","state":"included"}]}
@@ -586,6 +596,9 @@ Future<bool> applyDuoCanonicalToHistory({
     final byChannelId = <String, DocumentReference<Map<String, dynamic>>>{};
     // 갈아 끼우기 전의 글자. 이미 한 번 남겨 뒀으면 그것이 원문이다.
     final rawTextById = <String, String>{};
+    // 갈아 끼우기 **직전**의 글자. `rawTextById`와 다르다 — 그쪽은 맨 처음
+    // 원문이라 두 번째 정돈에서는 지금 글자와 다를 수 있다.
+    final curTextById = <String, String>{};
     for (final doc in msgSnap.docs) {
       final data = doc.data();
       final String channelId =
@@ -594,9 +607,12 @@ Future<bool> applyDuoCanonicalToHistory({
       byChannelId[channelId] = doc.reference;
       final String existingRaw =
           (data[kOriginalRawField] ?? '').toString().trim();
-      rawTextById[channelId] = existingRaw.isNotEmpty
-          ? existingRaw
-          : (data['original_text'] ?? '').toString().trim();
+      final String currentText = (data['original_text'] ?? '').toString().trim();
+      rawTextById[channelId] =
+          existingRaw.isNotEmpty ? existingRaw : currentText;
+      // 🎯 [TARGET-SYNC] 지금 화면에 있는 글자. 정돈이 이걸 바꾸면 그 줄의
+      //   배울글은 더 이상 그 줄의 번역이 아니다.
+      curTextById[channelId] = currentText;
     }
     if (byChannelId.isEmpty) return false;
 
@@ -613,10 +629,18 @@ Future<bool> applyDuoCanonicalToHistory({
         //   가장 처음 것이 원문이다.
         final headRaw =
             (rawTextById[turn.sourceIds.first] ?? '').toString().trim();
+        // 🎯 [TARGET-SYNC] 원문이 실제로 바뀌었는가. 바뀌었으면 옛 원문으로
+        //   만든 배울글은 그 줄의 번역이 아니게 되므로 비운다 — 공부방이
+        //   빈 배울글을 보고 최종 원문으로 다시 만든다
+        //   (`_historyTargetNeedsWork`). 안 비우면 원문과 배울글이 서로
+        //   다른 문장을 가리킨 채 남는다.
+        final String curText = curTextById[turn.sourceIds.first] ?? '';
+        final bool textChanged = curText.isNotEmpty && curText != turn.text;
         batch.update(head, <String, dynamic>{
           'original_text': turn.text,
           if (headRaw.isNotEmpty && headRaw != turn.text)
             kOriginalRawField: headRaw,
+          if (textChanged) 'translated_text': '',
           kStudyStateField: turn.state,
           'canonical_version': version,
         });
