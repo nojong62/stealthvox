@@ -34,6 +34,7 @@ import '/custom_code/actions/billing_idle_mixin.dart';
 // 이름이 겹쳐 `kDebugMode`가 그냥은 안 잡히므로 접두사로 가져온다.
 import 'package:flutter/foundation.dart' as foundation;
 import '/custom_code/services/duo_direct_audio.dart';
+import '/custom_code/services/duo_partner_echo.dart';
 import '/custom_code/services/duo_transcript_gate.dart';
 import '/custom_code/services/duo_stt_ab_probe.dart';
 import '/custom_code/services/pcm_audio_utils.dart'
@@ -235,6 +236,10 @@ const bool kDuoInterpWebrtc =
 // 🚫 직접 대화의 `DuoDirectTransport`는 건드리지 않는다. 축이 다르다 —
 //   그쪽은 "소리를 어느 통로로 나르나"이고 이쪽은 "글자를 어느 통로로 나르나"다.
 // ============================================================================
+/// 📢 [PARTNER-ECHO] 발화가 아니라 "지금 이걸 소리 낸다"는 알림이다.
+/// 이 열쇠가 붙은 메시지는 히스토리에도, 번역에도, 과금에도 가지 않는다.
+const String kInterpDataKindSpoke = 'spoke';
+
 const String kDuoInterpTransportWebrtc = 'webrtc';
 const String kDuoInterpTransportFirestore = 'firestore';
 
@@ -503,6 +508,7 @@ const int kDuoTrialCallSeconds = 60;
 /// 스피커 소리가 마이크로 돌아오는 데 걸리는 시간은 길어야 한두 순간이다.
 /// 이 창을 넘어서면 근거 없이 막는 것이 되므로 그냥 통과시킨다.
 const Duration _kEchoWindow = Duration(seconds: 6);
+
 
 /// 한 줄 요약을 만들 때 AI에 보낼 최근 발화 수의 상한.
 /// 긴 통화라고 토큰이 함께 늘면 곤란하다 — 미리보기 한 줄이면 충분하다.
@@ -1101,6 +1107,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   // 🆕 [PTT 에코 차단] 최근 앱이 생성/표시한 문장 보관 (target/original 혼합, 최대 10개)
   final List<String> _recentGenerated = [];
 
+  /// 📢 [PARTNER-ECHO] **상대 폰이** 방금 소리 낸 문장들.
+  ///
+  /// `_recentGenerated`와 갈라 둔다. 저건 내 폰이 낸 소리이고 시간 기준이
+  /// 내 재생 종료(`_latestTtsEnd`)인데, 이쪽은 기준이 상대의 알림이다.
+  /// 한 상자에 섞으면 어느 시계로 재야 할지 알 수 없다.
+  final PartnerEchoMemory _partnerEcho = PartnerEchoMemory();
+
   String _normForEcho(String s) =>
       s.toLowerCase().replaceAll(RegExp(r'[^\w가-힣]'), '');
 
@@ -1152,6 +1165,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     final t = transcript.trim();
     if (t.length < 4) return false;
 
+    // 📢 [PARTNER-ECHO] 상대 폰 스피커가 낸 소리부터 본다. 아래 검사는 **내**
+    //   TTS가 끝난 시각을 기준으로 하므로, 내가 아무 소리도 안 낸 동안 들어온
+    //   상대 스피커 소리는 거기까지 가지도 못하고 통과했다.
+    if (_looksLikePartnerEcho(t)) return true;
+
     final DateTime? spokeAt = _latestTtsEnd();
     if (spokeAt == null) return false;
     final int sinceTtsMs = DateTime.now().difference(spokeAt).inMilliseconds;
@@ -1173,6 +1191,46 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       if (_jaccard(g, t) >= simThreshold) return true;
     }
     return false;
+  }
+
+  /// 📢 [PARTNER-ECHO] 상대 폰 스피커가 방금 낸 문장인가.
+  ///
+  /// **마이크를 닫지 않는다.** 소리는 그대로 들어오고 전사도 된다. 여기서
+  /// 하는 일은 그 전사문이 사람이 한 말인지 상대 폰이 낸 소리인지 가르는
+  /// 것뿐이다 — 그래서 이 창 동안에도 진짜 발화는 살아서 지나간다.
+  bool _looksLikePartnerEcho(String t) => _partnerEcho.matches(t);
+
+  /// 📢 상대가 "이 문장을 소리 낸다"고 알려 왔다.
+  void _notePartnerSpoke(String text) {
+    final String t = text.trim();
+    if (t.isEmpty) return;
+    _partnerEcho.note(t);
+    _lgDuo('[PARTNER-ECHO]',
+        'heard_announce len=${t.length} kept=${_partnerEcho.length}');
+  }
+
+  /// 📢 내가 지금 소리 낼 문장을 상대에게 알린다.
+  ///
+  /// 마주 앉는 것이 이 모드의 정상 사용이다. 그러면 **내 스피커 소리가 상대
+  /// 마이크로 들어간다.** 2026-09-04 실기기에서 2m 떨어져 있을 때는 −47~−60
+  /// dBFS로 들어와 세기 게이트(−42.0)가 다 걸렀지만, 50cm면 그 문턱을 넘는다.
+  ///
+  /// 게이트로 막지 않는 이유: 상대 마이크를 닫으면 그동안 상대가 실제로 한
+  /// 말이 잘리고, 알림이 유실되면 마이크가 닫힌 채로 남는다. 대신 문장을
+  /// 미리 건네 두고 **들어온 뒤에 골라낸다** — 거리와 무관하고, 알림이 못
+  /// 가면 지금 동작(세기 게이트)으로 그대로 떨어진다.
+  void _announceSpokenToPartner(String spoken) {
+    final String t = spoken.trim();
+    if (t.isEmpty || !_useInterpWebrtc) return;
+    final bool sent = _interpCall?.sendData(<String, dynamic>{
+          'kind': kInterpDataKindSpoke,
+          'senderRole': _myRole,
+          'text': t,
+        }) ??
+        false;
+    // 📮 못 보내도 큐에 넣지 않는다. 이 알림은 **지금 이 순간에만** 쓸모가
+    //   있다 — 늦게 도착하면 상대의 엉뚱한 발화를 지운다.
+    _lgDuo('[PARTNER-ECHO]', 'announce ok=$sent len=${t.length}');
   }
 
   /// ⚠️ **직접 대화 전용으로 남은 값이다.** 만능 통역은 이 문자열을 더 이상
@@ -3311,6 +3369,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     // 내가 보낸 것이 되돌아오는 일은 없어야 하지만, 한 번 더 막는다.
     if (role == _myRole) return;
 
+    // 📢 [PARTNER-ECHO] 발화가 아니라 "지금 이걸 소리 낸다"는 알림이다.
+    //   **여기서 끝낸다** — 번역·재생·히스토리·과금 어디로도 가지 않는다.
+    if (payload['kind']?.toString() == kInterpDataKindSpoke) {
+      _notePartnerSpoke(text);
+      return;
+    }
+
     final String key = payload['msgId']?.toString() ?? '';
     if (key.isNotEmpty) {
       // 재전송이 와도 두 번 읽지 않는다. Firestore 경로의 `_processedMsgIds`와
@@ -3394,6 +3459,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       BillingTicker.instance.resumeFromActivity('duo_mic_stop');
       _lgDuo('[INTERP-STT]', 'mic_closed reason=$reason');
     }
+    // 📢 [PARTNER-ECHO] 앞 통화에서 상대가 낸 문장이 다음 통화까지 남으면
+    //   엉뚱한 발화를 지운다. 통화 한 번짜리다.
+    _partnerEcho.clear();
     // 🎚️ [AEC-PROBE] 마이크가 바뀌면 앞 통화의 소리가 다음 바닥에 섞이면 안 된다.
     _aecProbe.reset();
     // 🔉 세기 계측기도 통화 한 번짜리다. 다음 통화가 이전 세기를 물려받으면
@@ -3794,6 +3862,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     // 🔇 [ECHO] 전체 문장도 기억한다. 조각 단위로만 두면 마이크로 돌아온
     //   통문장이 목록의 어느 항목과도 안 맞아 에코로 못 걸린다.
     _rememberGenerated(spoken);
+    // 📢 [PARTNER-ECHO] 같은 문장을 상대에게도 건넨다. 내 스피커 소리가
+    //   상대 마이크로 들어가도 상대가 그것을 알아보고 버릴 수 있게.
+    _announceSpokenToPartner(spoken);
 
     if (!mounted || _isExiting) return;
 
