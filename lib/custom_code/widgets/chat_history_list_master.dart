@@ -808,7 +808,13 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
       }
     }
 
-    String previewText = data['last_message'] ?? "(대화 내용 없음)";
+    // 📋 값이 **비어 있는** 방과 **없는** 방은 다르다.
+    //   · 없는 방 = 대사가 한 번도 없던 방. 위 filteredDocs가 이미 걸러낸다.
+    //   · 빈 방   = 대화가 있었는데 사용자가 공부방에서 다 지운 방. 목록에
+    //     남아야 다시 들어가 보거나 방째 지울 수 있다. 새 문구를 만들지 않고
+    //     여기 있던 fallback을 그대로 쓴다.
+    final String storedPreview = (data['last_message'] ?? '').toString().trim();
+    String previewText = storedPreview.isEmpty ? "(대화 내용 없음)" : storedPreview;
     // 🎬 직접 통화 방을 가리는 표. 만능 통역은 같은 이름으로 저장되지만
     //   남는 글이 **내가 들은 번역문**이라 되살릴 통화가 없다.
     //   `duo_mode`가 없는 옛 방에는 표가 안 붙는다 — 소급하지 않는다.
@@ -915,8 +921,8 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
                           padding: const EdgeInsets.symmetric(
                               horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF52D4C3)
-                                .withValues(alpha: 0.16),
+                            color:
+                                const Color(0xFF52D4C3).withValues(alpha: 0.16),
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: const Text(
@@ -2134,6 +2140,25 @@ RULES — follow exactly:
 const String _kManualText = r'''
 스터디룸에서는 대화방의 자료를 전달받아, 
 입을 열어 말하는 훈련을 합니다.
+
+📝 대사 수정 — 대화방 첫 페이지에서
+대화가 끝나면 첫 페이지에서 내가 한 말을 한 번 훑어보고,
+잘못 들린 문장은 고치고 공부할 것이 아닌 줄은 비웁니다.
+말풍선의 연필 아이콘을 누르면 그 자리에서 문장을 고칠 수 있습니다.
+
+대사 하나를 빼고 싶을 때도 같은 자리입니다.
+삭제 버튼은 따로 없고, 수정에서 내용을 모두 지운 뒤 저장하면
+그 대사가 화면과 학습 자료에서 빠집니다.
+
+✅ 최종 수정 완료 — 한 번만 누를 수 있습니다
+검수를 마치고 [최종 수정 완료]를 누르면 대사가 잠깁니다.
+확정한 뒤에는 다시 수정할 수 없으니
+고칠 곳을 모두 손본 다음에 눌러 주세요.
+
+확정한 문장이 이후 모든 학습 자료의 재료가 됩니다.
+그래서 확정하기 전에는 다음 단계인 Practice로 들어갈 수 없습니다.
+확정 전에 Practice를 누르면 확인 팝업이 뜨고,
+거기서 [최종 확정]을 누르면 그대로 Practice로 넘어갑니다.
 
 🎧 소리 듣기 — 쉐도잉 연습
 저장된 대화의 영어 문장을 원어민 발음으로 들으며

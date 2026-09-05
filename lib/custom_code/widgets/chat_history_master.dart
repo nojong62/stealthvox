@@ -33,6 +33,7 @@ import '/custom_code/actions/billing_idle_mixin.dart';
 import '/custom_code/services/ai_style.dart';
 import '/custom_code/services/origin_language_session.dart'
     show detectOriginScript, koreanLanguageDisplayName, textContradictsLanguage;
+import '/custom_code/services/history_finalize.dart';
 import '/custom_code/services/transcript_repair_guard.dart';
 import 'alt_style_popup.dart';
 import '/custom_code/services/audio_silence_analyzer.dart';
@@ -373,6 +374,21 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   /// 띄우고 다시 시도할 수 있게 한다.
   final Map<String, String> _targetFailures = <String, String>{};
 
+  // ── ✏️ [HISTORY-EDIT] 최종 원고 검수 ────────────────────────────────────
+  //   대화가 끝나면 이 화면이 **공부할 대화를 마지막으로 정리하는 자리**다.
+  //   확정(`history_finalize.dart`) 전까지 원문을 고치고 지울 수 있고, 확정한
+  //   원문 하나만이 그 뒤 모든 학습 자료의 재료가 된다.
+
+  /// 지금 편집 중인 줄. **한 번에 한 줄만 연다** — 여러 줄을 동시에 열면
+  /// 저장 안 한 글이 화면 곳곳에 남는다.
+  String? _editingDocId;
+  final TextEditingController _editController = TextEditingController();
+  bool _isSavingEdit = false;
+  bool _isFinalizing = false;
+
+  /// 이 방이 아직 검수 중인가. 편집이 열리고 AI 생성은 전부 막힌다.
+  bool get _historyIsDraft => historyEditAllowed(_cachedRoomData);
+
   String _apiKey = "";
   String _deepgramKey = "";
   Future<void>? _remoteConfigFuture;
@@ -490,6 +506,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _silenceTimer?.cancel();
     _roleBubbleTimer?.cancel();
     _blinkController.dispose();
+    _editController.dispose();
     _echoingOverlayTimer?.cancel();
     _nativeEnglishRevealTimer?.cancel();
     // 🎤 [P3-SPEAK] dispose에서 async setState가 나오지 않게 회차를 먼저
@@ -673,6 +690,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       ),
       roomId: roomId,
       appliedVersion: applied,
+      // 🛡️ 확정한 방은 정돈이 한 줄도 못 건드린다. 이미 읽어 둔 문서를
+      //   그대로 넘겨 안에서 한 번 더 읽지 않게 한다.
+      roomData: room,
     );
     if (changed && mounted) {
       // 줄이 바뀌었으니 배울글을 다시 살펴야 한다. 스트림이 새 문서를
@@ -718,6 +738,11 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   /// 원문만 되돌리면 두 줄이 서로 다른 이야기를 하게 된다. 비워 두면 아래
   /// 생성기가 되돌린 원문으로 곧바로 다시 만든다.
   void _revertOverreachingOriginRepairs(List<DocumentSnapshot> docs) {
+    // 📝 [사용자 확정본 우선] 새 흐름으로 만들어진 방(`history_state`가 있는
+    //   방)에서는 이 되돌리기가 돌지 않는다. 확정 전에는 교정 자체가 없고,
+    //   확정 뒤의 원문은 **사용자가 직접 고른 글**이다. 이 규칙이 잡으려는
+    //   것은 그 전에 쌓인 옛 방의 줄이다.
+    if (historyStateIsExplicit(_cachedRoomData)) return;
     for (final doc in docs) {
       final data = doc.data() as Map<String, dynamic>?;
       if (data == null) continue;
@@ -729,6 +754,8 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       //   무효가 된다. 이 규칙이 잡으려는 것은 공부방 교정 경로가 원문을
       //   통째로 다시 써 버린 옛 줄이다.
       if (data['canonical_version'] != null) continue;
+      // 사용자가 직접 고친 줄은 어떤 자동 규칙도 되돌리지 않는다.
+      if (data[kMessageUserEditedAtField] != null) continue;
       final current = (data['original_text'] ?? '').toString().trim();
       if (current.isEmpty || current == raw) continue;
       if (isMinimalTranscriptRepair(raw, current)) continue;
@@ -796,6 +823,11 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   }
 
   void _scheduleMissingTargetGeneration(List<DocumentSnapshot> docs) {
+    // 📝 [DRAFT-GATE] 확정 전에는 **아무것도 만들지 않는다.** 사용자가 다음
+    //   줄을 고치는 순간 버려질 번역이고, 그 사이 화면은 "곧 나온다"고
+    //   거짓말을 한다. 실패로도 찍지 않는다 — 실패한 것이 아니라 아직
+    //   시작하지 않은 것이다.
+    if (_historyIsDraft) return;
     if (!_usesDeferredHistoryTargets || docs.isEmpty) return;
     // 🎫 배울글은 GPT가 만든다 = 새 비용이다. 못 만드는 사람에게는 원문이
     //   그대로 남는다 — 자기가 한 말은 그대로 보인다.
@@ -1165,9 +1197,13 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
         debugPrint('[ORIGIN-REPAIR] rejected msg=${messageRef.id} '
             '"$source" ↛ "$repairedOriginal"');
       }
+      // 📝 [확정본 우선] 새 흐름 방에서는 원문을 **한 글자도 바꾸지 않는다.**
+      //   사용자가 방금 눈으로 훑고 확정한 글이라, 전사 교정이 끼어들 자리가
+      //   아니다. 배울글만 만든다.
       final bool repaired = repairedOriginal.isNotEmpty &&
           repairedOriginal != source &&
-          !overreach;
+          !overreach &&
+          !historyStateIsExplicit(_cachedRoomData);
       await messageRef.update(<String, dynamic>{
         'translated_text': targetText,
         if (repaired) 'original_text': repairedOriginal,
@@ -1195,6 +1231,8 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
   }
 
   Future<void> _ensureHistoryTargets(List<DocumentSnapshot> docs) async {
+    // 📝 [DRAFT-GATE] 확정 전에는 만들지 않는다(`_scheduleMissingTargetGeneration`).
+    if (_historyIsDraft) return;
     if (!_usesDeferredHistoryTargets || _apiKey.isEmpty) return;
     final tasks = <Future<bool>>[];
     for (final doc in docs) {
@@ -1255,6 +1293,18 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       }
 
       _cachedRoomMode = _inferHistoryMode(data);
+
+      // 📝 [DRAFT-GATE] 확정 전 대화로는 연습을 열지 않는다. 지금 연습을
+      //   만들어 봐야 사용자가 다음 줄을 고치면 다른 대화가 된다.
+      //
+      //   막고 끝내지 않는다 — **여기서 바로 확정을 묻는다.** 아래로
+      //   내려가 버튼을 찾아 누르고 다시 올라오는 걸음이 사라진다. 대신
+      //   되돌릴 수 없는 동작이므로 확정 버튼과 같은 말로 한 번 묻는다.
+      if (!historyGenerationAllowed(data)) {
+        if (!await _confirmFinalizeForPractice()) return;
+        if (!mounted) return;
+        data = _cachedRoomData ?? data;
+      }
 
       // 대화 재생 연습(Practice)으로 들어간다. MY ENGLISH / NATIVE ENGLISH는
       // 학습 경로 카드를 누를 때 각각 만든다.
@@ -2224,6 +2274,12 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
   }
 
   // 히스토리 말풍선 소리듣기 — msgId 기반 디스크 캐시 우선
+  //
+  // 🔇 첫 화면에서는 더 이상 부르지 않는다. 그 자리는 이제 최종 원고 검수라
+  //   수정 아이콘이 가져갔고, 소리는 Practice에서 듣는다. 재생기 자체는
+  //   남긴다 — 줄 단위 캐시(`_AudioDiskCache`) 규칙이 여기 있고, 말풍선에
+  //   소리를 다시 붙일 일이 생기면 이 함수가 그대로 쓰인다.
+  // ignore: unused_element
   Future<void> _playMsgAudio(String msgId, String text) async {
     _resumeHistoryFromUserAction();
     if (text.isEmpty || _apiKey.isEmpty) return;
@@ -3124,9 +3180,19 @@ RULES — follow exactly:
                       }
                     });
                     if (docs.isEmpty) {
-                      return const Center(
-                        child: Text("데이터가 없습니다.",
-                            style: TextStyle(color: Colors.white54)),
+                      // 여기 오는 방은 둘이다 — 애초에 빈 방과, 검수하다
+                      // 모든 줄을 지운 방. 어느 쪽이든 나가기·앞뒤 이동·방
+                      // 삭제는 되어야 한다.
+                      return ListView(
+                        padding: const EdgeInsets.fromLTRB(16, 24, 16, 32),
+                        children: [
+                          const Center(
+                            child: Text("데이터가 없습니다.",
+                                style: TextStyle(color: Colors.white54)),
+                          ),
+                          const SizedBox(height: 24),
+                          _buildHistoryFooter(hasLines: false),
+                        ],
                       );
                     }
                     return _buildChatBubbles(docs);
@@ -3269,6 +3335,10 @@ RULES — follow exactly:
   /// 정상인 줄과 구별되지 않아, 영어를 배우는 줄 알고 한국어를 따라 읽게 된다.
   /// 실패면 원인과 "다시 시도"를, 진행 중이면 "번역 중"을 보여준다.
   Widget _buildTargetStatusBadge(DocumentSnapshot doc, bool isHost) {
+    // 📝 [DRAFT] 확정 전에는 배울글을 아예 만들지 않으므로 "번역 중"도
+    //   "실패"도 거짓말이다. 아무것도 적지 않는다 — 지금 이 화면의 일은
+    //   원문 검수뿐이고, 안내는 아래 확정 버튼이 한 줄로 한다.
+    if (_historyIsDraft) return const SizedBox.shrink();
     final String? failure = _targetFailures[doc.id];
     final bool pending =
         failure == null || _targetTranslationInFlight.containsKey(doc.id);
@@ -3346,6 +3416,9 @@ RULES — follow exactly:
         // 모든 말풍선: \n\n 앞의 첫 대답만 표시
         String translated = (data['translated_text'] ?? '').toString();
         String original = (data['original_text'] ?? '').toString();
+        // ✏️ 화면에 보이는 원문은 아래에서 첫 문단만 남게 잘린다. **편집은
+        //   저장된 글 전체를 연다** — 잘린 글을 저장하면 뒷부분이 사라진다.
+        final String rawOriginal = original;
         final tParts = translated.split(RegExp(r'\n\s*\n'));
         if (tParts.length > 1) translated = tParts.first.trim();
         final oParts = original.split(RegExp(r'\n\s*\n'));
@@ -3383,31 +3456,34 @@ RULES — follow exactly:
         //   그러니 타겟이 없으면 원문이 본문 자리를 갖는다.
         final bool originIsBody = _langDisplayMode == 2 || showTargetBadge;
 
-        // 🎫 비용이 드는 세 가지(소리 듣기·실전 튜터링·다른 표현)는 잠기면
-        //   흐려진다. **대화 글자는 그대로 보인다** — 못 쓰는 것은 새로 만드는
-        //   동작뿐이다. 탭은 살려 둔다: 눌러야 이유를 알 수 있다.
-        Widget controlButtons = Opacity(
-          opacity: _paidStudyAllowed ? 1.0 : 0.4,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                padding: const EdgeInsets.all(8),
-                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
-                icon: const Icon(Icons.play_circle,
-                    color: Colors.amberAccent, size: 28),
-                onPressed: () => _playMsgAudio(docs[index].id, translated),
-                tooltip: _paidStudyAllowed ? "소리 듣기" : _studyAccess.gateLabel,
+        // 🎛️ 줄마다 아이콘은 **셋 그대로다.** 소리 듣기가 있던 자리를 수정이
+        //   가져갔다 — 이 화면의 일이 듣기가 아니라 최종 원고 검수가 됐기
+        //   때문이다. 소리는 Practice에서 듣는다.
+        //
+        //   🎫 비용이 드는 둘(실전 튜터링·다른 표현)만 잠기면 흐려진다.
+        //   **편집은 비용이 없다** — 잠금과 무관하게 열려 있다. 대화 글자도
+        //   그대로 보인다: 못 쓰는 것은 새로 만드는 동작뿐이다.
+        Widget controlButtons = Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildEditBtn(docs[index], rawOriginal),
+            const SizedBox(height: 4),
+            Opacity(
+              opacity: _paidStudyAllowed ? 1.0 : 0.4,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _buildAppBtn(docs[index].id, translated),
+                  const SizedBox(height: 4),
+                  _buildAltStyleBtn(translated),
+                ],
               ),
-              const SizedBox(height: 4),
-              _buildAppBtn(docs[index].id, translated),
-              const SizedBox(height: 4),
-              _buildAltStyleBtn(translated),
-            ],
-          ),
+            ),
+          ],
         );
 
         final String docId = docs[index].id;
+        final bool isEditing = _editingDocId == docId;
         final bool isLast = index == docs.length - 1;
         return Column(
           mainAxisSize: MainAxisSize.min,
@@ -3433,16 +3509,21 @@ RULES — follow exactly:
                   Flexible(
                     child: GestureDetector(
                       behavior: HitTestBehavior.opaque,
-                      onLongPress: () => _saveToKeepers(
-                        messageDocId: docId,
-                        translatedText: translated,
-                        originalText: original,
-                        speakerRole: isHost ? 'HOST' : 'USER',
-                      ),
+                      // 편집 중에는 길게 누르기를 재운다 — 글을 고치다 손이
+                      // 머무는 것만으로 Keepers에 쌓이면 안 된다.
+                      onLongPress: isEditing
+                          ? null
+                          : () => _saveToKeepers(
+                                messageDocId: docId,
+                                translatedText: translated,
+                                originalText: original,
+                                speakerRole: isHost ? 'HOST' : 'USER',
+                              ),
                       child: Container(
                         padding: const EdgeInsets.all(16),
                         constraints: BoxConstraints(
-                            maxWidth: MediaQuery.of(context).size.width * 0.75),
+                            maxWidth: MediaQuery.of(context).size.width *
+                                (isEditing ? 0.92 : 0.75)),
                         decoration: BoxDecoration(
                           color: isHost
                               ? const Color(0xFF2C2C2E)
@@ -3454,80 +3535,85 @@ RULES — follow exactly:
                                   color: const Color(0xFF2563EB)
                                       .withValues(alpha: 0.3)),
                         ),
-                        child: Column(
-                          crossAxisAlignment: isHost
-                              ? CrossAxisAlignment.end
-                              : CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            ...(collapseSame
-                                // Origin=Target 동일 언어(또는 레거시 동일 텍스트):
-                                // 같은 문장이 두 번 나오지 않도록 Target 한 줄만 표시한다.
-                                // Target이 비어 있으면 Origin을 fallback으로 쓴다.
-                                ? [
-                                    Text(
-                                        translated.isNotEmpty
-                                            ? translated
-                                            : original,
-                                        textAlign: isHost
-                                            ? TextAlign.right
-                                            : TextAlign.left,
-                                        style: TextStyle(
-                                            color: isHost
-                                                ? Colors.white
-                                                : const Color(0xFF93C5FD),
-                                            fontSize: 16 * _fontScale,
-                                            fontWeight: FontWeight.bold,
-                                            height: 1.4)),
-                                  ]
-                                : [
-                                    // 영어(타겟) 표시: mode 0,1 에서 보임
-                                    // 배지가 붙는 줄은 타겟이 아예 없다 — 빈 줄만
-                                    // 남기지 말고 자리를 배지에 넘긴다.
-                                    if (_langDisplayMode != 2 &&
-                                        !showTargetBadge) ...[
-                                      Text(translated,
-                                          textAlign: isHost
-                                              ? TextAlign.right
-                                              : TextAlign.left,
-                                          style: TextStyle(
-                                              color: isHost
-                                                  ? Colors.white
-                                                  : const Color(0xFF93C5FD),
-                                              fontSize: 16 * _fontScale,
-                                              fontWeight: FontWeight.bold,
-                                              height: 1.4)),
-                                    ],
-                                    // 한글(원어) 표시: mode 0,2 에서 보임
-                                    // 타겟만 보는 mode 1이라도, 배지가 붙는 줄은
-                                    // 원문을 감추면 말풍선이 통째로 빈다.
-                                    if ((_langDisplayMode != 1 ||
-                                            showTargetBadge) &&
-                                        original.isNotEmpty) ...[
-                                      if (_langDisplayMode == 0)
-                                        const SizedBox(height: 8),
-                                      Text(original,
-                                          textAlign: isHost
-                                              ? TextAlign.right
-                                              : TextAlign.left,
-                                          style: TextStyle(
-                                              color: originIsBody
-                                                  ? (isHost
+                        child: isEditing
+                            ? _buildInlineEditor(docs[index])
+                            : Column(
+                                crossAxisAlignment: isHost
+                                    ? CrossAxisAlignment.end
+                                    : CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  ...(collapseSame
+                                      // Origin=Target 동일 언어(또는 레거시 동일 텍스트):
+                                      // 같은 문장이 두 번 나오지 않도록 Target 한 줄만 표시한다.
+                                      // Target이 비어 있으면 Origin을 fallback으로 쓴다.
+                                      ? [
+                                          Text(
+                                              translated.isNotEmpty
+                                                  ? translated
+                                                  : original,
+                                              textAlign: isHost
+                                                  ? TextAlign.right
+                                                  : TextAlign.left,
+                                              style: TextStyle(
+                                                  color: isHost
                                                       ? Colors.white
-                                                      : const Color(0xFF93C5FD))
-                                                  : Colors.grey,
-                                              fontSize: originIsBody
-                                                  ? 16 * _fontScale
-                                                  : 12 * _fontScale,
-                                              fontWeight: originIsBody
-                                                  ? FontWeight.bold
-                                                  : FontWeight.normal)),
-                                    ],
-                                  ]),
-                            if (showTargetBadge)
-                              _buildTargetStatusBadge(docs[index], isHost),
-                          ],
-                        ),
+                                                      : const Color(0xFF93C5FD),
+                                                  fontSize: 16 * _fontScale,
+                                                  fontWeight: FontWeight.bold,
+                                                  height: 1.4)),
+                                        ]
+                                      : [
+                                          // 영어(타겟) 표시: mode 0,1 에서 보임
+                                          // 배지가 붙는 줄은 타겟이 아예 없다 — 빈 줄만
+                                          // 남기지 말고 자리를 배지에 넘긴다.
+                                          if (_langDisplayMode != 2 &&
+                                              !showTargetBadge) ...[
+                                            Text(translated,
+                                                textAlign: isHost
+                                                    ? TextAlign.right
+                                                    : TextAlign.left,
+                                                style: TextStyle(
+                                                    color: isHost
+                                                        ? Colors.white
+                                                        : const Color(
+                                                            0xFF93C5FD),
+                                                    fontSize: 16 * _fontScale,
+                                                    fontWeight: FontWeight.bold,
+                                                    height: 1.4)),
+                                          ],
+                                          // 한글(원어) 표시: mode 0,2 에서 보임
+                                          // 타겟만 보는 mode 1이라도, 배지가 붙는 줄은
+                                          // 원문을 감추면 말풍선이 통째로 빈다.
+                                          if ((_langDisplayMode != 1 ||
+                                                  showTargetBadge) &&
+                                              original.isNotEmpty) ...[
+                                            if (_langDisplayMode == 0)
+                                              const SizedBox(height: 8),
+                                            Text(original,
+                                                textAlign: isHost
+                                                    ? TextAlign.right
+                                                    : TextAlign.left,
+                                                style: TextStyle(
+                                                    color: originIsBody
+                                                        ? (isHost
+                                                            ? Colors.white
+                                                            : const Color(
+                                                                0xFF93C5FD))
+                                                        : Colors.grey,
+                                                    fontSize: originIsBody
+                                                        ? 16 * _fontScale
+                                                        : 12 * _fontScale,
+                                                    fontWeight: originIsBody
+                                                        ? FontWeight.bold
+                                                        : FontWeight.normal)),
+                                          ],
+                                        ]),
+                                  if (showTargetBadge)
+                                    _buildTargetStatusBadge(
+                                        docs[index], isHost),
+                                ],
+                              ),
                       ),
                     ),
                   ),
@@ -3539,72 +3625,417 @@ RULES — follow exactly:
                 ],
               ),
             ),
-            if (isLast) ...[
-              Padding(
-                padding: const EdgeInsets.fromLTRB(8, 0, 0, 4),
-                child: Row(
-                  children: [
-                    IconButton(
-                      onPressed: _isOpeningAdjacentHistory
-                          ? null
-                          : () => _openAdjacentHistoryInSameMode(-1),
-                      tooltip: '같은 모드의 이전 대화',
-                      icon: _isOpeningAdjacentHistory &&
-                              _openingHistoryOffset == -1
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.amber,
-                              ),
-                            )
-                          : const Icon(
-                              Icons.arrow_back_rounded,
-                              color: Colors.amber,
-                              size: 24,
-                            ),
-                    ),
-                    IconButton(
-                      onPressed: _isOpeningAdjacentHistory
-                          ? null
-                          : () => _openAdjacentHistoryInSameMode(1),
-                      tooltip: '같은 모드의 다음 대화',
-                      icon: _isOpeningAdjacentHistory &&
-                              _openingHistoryOffset == 1
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.amber,
-                              ),
-                            )
-                          : const Icon(
-                              Icons.arrow_forward_rounded,
-                              color: Colors.amber,
-                              size: 24,
-                            ),
-                    ),
-                    const Spacer(),
-                    IconButton(
-                      onPressed: _deleteHistoryRoom,
-                      tooltip: '대화 삭제',
-                      icon: const Icon(
-                        Icons.delete_outline_rounded,
-                        color: Colors.white54,
-                        size: 22,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: double.infinity, height: 64),
-            ],
+            if (isLast) _buildHistoryFooter(hasLines: true),
           ],
         );
       },
     );
+  }
+
+  /// 대화 끝(또는 줄이 하나도 없는 방)에 붙는 하단 바.
+  ///
+  /// 🧭 **줄이 없는 방에서도 그린다.** 사용자가 검수하다 모든 줄을 지우면
+  ///   화면에 그릴 말풍선이 없는데, 예전에는 이 바가 말풍선의 마지막 줄에
+  ///   딸려 있어서 함께 사라졌다. 그러면 그 방은 들어가도 지울 수 없고
+  ///   앞뒤로 옮길 수도 없는 막다른 화면이 된다.
+  Widget _buildHistoryFooter({required bool hasLines}) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 0, 0, 4),
+          child: Row(
+            children: [
+              IconButton(
+                onPressed: _isOpeningAdjacentHistory
+                    ? null
+                    : () => _openAdjacentHistoryInSameMode(-1),
+                tooltip: '같은 모드의 이전 대화',
+                icon: _isOpeningAdjacentHistory && _openingHistoryOffset == -1
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.amber,
+                        ),
+                      )
+                    : const Icon(
+                        Icons.arrow_back_rounded,
+                        color: Colors.amber,
+                        size: 24,
+                      ),
+              ),
+              IconButton(
+                onPressed: _isOpeningAdjacentHistory
+                    ? null
+                    : () => _openAdjacentHistoryInSameMode(1),
+                tooltip: '같은 모드의 다음 대화',
+                icon: _isOpeningAdjacentHistory && _openingHistoryOffset == 1
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.amber,
+                        ),
+                      )
+                    : const Icon(
+                        Icons.arrow_forward_rounded,
+                        color: Colors.amber,
+                        size: 24,
+                      ),
+              ),
+              const Spacer(),
+              IconButton(
+                onPressed: _deleteHistoryRoom,
+                tooltip: '대화 삭제',
+                icon: const Icon(
+                  Icons.delete_outline_rounded,
+                  color: Colors.white54,
+                  size: 22,
+                ),
+              ),
+            ],
+          ),
+        ),
+        _buildFinalizeSection(hasLines: hasLines),
+        const SizedBox(width: double.infinity, height: 64),
+      ],
+    );
+  }
+
+  // ══════════════════════════════════════════════════
+  // ✏️ [HISTORY-EDIT] 줄 하나를 고치는 자리
+  //
+  //   별도 편집 화면을 만들지 않는다. 고치려는 줄이 그 자리에서 입력란이
+  //   되는 편이 **무엇을 고치는지** 눈에서 떠나지 않는다.
+  // ══════════════════════════════════════════════════
+
+  /// 소리 듣기가 있던 자리. 아이콘 수도 크기도 그대로 셋이다.
+  Widget _buildEditBtn(DocumentSnapshot doc, String rawOriginal) {
+    final bool editable = _historyIsDraft;
+    return IconButton(
+      padding: const EdgeInsets.all(8),
+      constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+      icon: Icon(
+        Icons.edit_outlined,
+        // 확정된 방에서는 흐린 채로 남는다. 감추면 아이콘이 둘로 줄어
+        // 말풍선 줄이 방마다 다르게 보인다.
+        color: editable ? Colors.white70 : Colors.white24,
+        size: 24,
+      ),
+      onPressed: editable ? () => _beginEditMessage(doc, rawOriginal) : null,
+      tooltip: editable ? '대사 수정' : '확정된 대화입니다',
+    );
+  }
+
+  void _beginEditMessage(DocumentSnapshot doc, String rawOriginal) {
+    if (!_historyIsDraft) return;
+    _resumeHistoryFromUserAction();
+    if (!mounted) return;
+    setState(() {
+      _editingDocId = doc.id;
+      _editController.text = rawOriginal;
+      _editController.selection =
+          TextSelection.collapsed(offset: rawOriginal.length);
+    });
+  }
+
+  void _cancelEditMessage() {
+    if (!mounted) return;
+    setState(() {
+      _editingDocId = null;
+      _editController.clear();
+    });
+  }
+
+  /// 저장. **내용을 다 지웠으면 그 줄을 지운 것으로 본다.**
+  ///
+  /// 문서를 실제로 지우지는 않는다 — `study_state`만 바뀌고 원본은 남는다
+  /// (`history_finalize.dart`, `duo_study_state.dart`). 화면·배울글·Practice·
+  /// My/Native English가 모두 `_visibleMessages` 하나를 보므로, 그 한 값이
+  /// 다섯 곳에서 동시에 빠진다.
+  Future<void> _saveEditedMessage(DocumentSnapshot doc) async {
+    if (_isSavingEdit) return;
+    if (!_historyIsDraft) return;
+    final String input = _editController.text;
+    setState(() => _isSavingEdit = true);
+    try {
+      final Object stamp = FieldValue.serverTimestamp();
+      final bool deleting = editedOriginalMeansDelete(input);
+      // 📋 목록 미리보기는 **지금 보이는 마지막 줄**이어야 한다. 줄을 쓰기
+      //   전에 계산해 둔다 — 스트림이 새 스냅샷을 실어 오기를 기다리면 그
+      //   사이 목록에는 방금 지운 문장이 그대로 떠 있다.
+      final String? preview = recomputeLastMessage(
+        visibleOriginals: visibleOriginalsForPreview(_cachedDocs.map((d) =>
+            (d.data() as Map<String, dynamic>?) ?? const <String, dynamic>{})),
+        changedIndex: _cachedDocs.indexWhere((d) => d.id == doc.id),
+        deleted: deleting,
+        editedText: input,
+      );
+      await doc.reference.update(deleting
+          ? historyMessageDeletePatch(editedAt: stamp)
+          : historyMessageEditPatch(text: input, editedAt: stamp));
+      // null이면 중간 줄이라 미리보기가 그대로다 — 방 문서를 건드리지 않는다.
+      if (preview != null) {
+        // 남은 줄이 없으면 **빈 문자열**이다. 필드를 지우면 목록이 그 방을
+        // 통째로 걸러내(`chat_history_list_master`의 `last_message == null`)
+        // 다시 들어가 지울 수도 볼 수도 없는 유령 방이 된다. 값이 있되 빈
+        // 방은 목록에 남고 "(대화 내용 없음)"으로 그려진다.
+        await widget.historyDoc
+            .update(<String, dynamic>{'last_message': preview});
+      }
+      if (!mounted) return;
+      setState(() {
+        _editingDocId = null;
+        _editController.clear();
+      });
+      if (deleting) _showRoomEntryToast('대사를 지웠습니다.');
+    } catch (e) {
+      debugPrint('[HISTORY-EDIT] save $e');
+      _showRoomEntryToast('저장하지 못했습니다. 다시 시도해 주세요.');
+    } finally {
+      if (mounted) setState(() => _isSavingEdit = false);
+    }
+  }
+
+  Widget _buildInlineEditor(DocumentSnapshot doc) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        TextField(
+          controller: _editController,
+          autofocus: true,
+          // 긴 대사도 잘리지 않게 줄 수를 열어 둔다.
+          maxLines: null,
+          minLines: 1,
+          keyboardType: TextInputType.multiline,
+          textInputAction: TextInputAction.newline,
+          style: TextStyle(
+              color: Colors.white, fontSize: 16 * _fontScale, height: 1.4),
+          cursorColor: Colors.amber,
+          decoration: InputDecoration(
+            isDense: true,
+            border: InputBorder.none,
+            contentPadding: EdgeInsets.zero,
+            hintText: '내용을 모두 지우면 이 대사가 삭제됩니다',
+            hintStyle:
+                TextStyle(color: Colors.white30, fontSize: 13 * _fontScale),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            TextButton(
+              onPressed: _isSavingEdit ? null : _cancelEditMessage,
+              child: const Text('취소',
+                  style: TextStyle(color: Colors.white54, fontSize: 13)),
+            ),
+            TextButton(
+              onPressed: _isSavingEdit ? null : () => _saveEditedMessage(doc),
+              child: _isSavingEdit
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.amber))
+                  : const Text('저장',
+                      style: TextStyle(
+                          color: Colors.amber,
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // ══════════════════════════════════════════════════
+  // ✅ [FINALIZE] 대화 끝에 한 번만 있는 자리
+  //
+  //   여기를 누르면 원문이 잠기고, 그때부터 학습 자료가 만들어진다.
+  //   **되돌리는 문은 만들지 않는다** — 마음에 안 들면 방을 지우고 새로
+  //   시작한다. 옛 방(`history_state` 없음)에는 이 자리가 아예 없다.
+  // ══════════════════════════════════════════════════
+  Widget _buildFinalizeSection({required bool hasLines}) {
+    if (!historyStateIsExplicit(_cachedRoomData)) {
+      return const SizedBox.shrink();
+    }
+    final bool draft = _historyIsDraft;
+    // 🚫 공부할 줄이 하나도 없는 대화는 확정할 것이 없다([hasLines]).
+    //   확정해 버리면 빈 대화가 잠긴 채 남아, 지우는 것 말고는 할 수 있는
+    //   일이 없어진다. 값은 화면이 **지금 그리는** 줄에서 오고 캐시를 보지
+    //   않는다 — `_cachedDocs`는 프레임 뒤에 채워져 한 박자 늦는다.
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 20, 8, 4),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: (draft && hasLines && !_isFinalizing)
+                  ? _confirmFinalizeHistory
+                  : null,
+              icon: _isFinalizing
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Color(0xFF121212)))
+                  : Icon(draft ? Icons.check_rounded : Icons.check_circle,
+                      size: 18),
+              label: const Text('최종 수정 완료',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+              style: ElevatedButton.styleFrom(
+                // 앱의 기본 강조 버튼과 같은 옷을 입는다(튜터링 팝업·스토어).
+                backgroundColor: Colors.amber,
+                foregroundColor: const Color(0xFF121212),
+                disabledBackgroundColor: Colors.white10,
+                disabledForegroundColor: Colors.white38,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          ),
+          if (draft)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                  hasLines ? '완료 후에는 대화를 수정할 수 없습니다.' : '남은 대사가 없어 확정할 수 없습니다.',
+                  style: const TextStyle(color: Colors.white38, fontSize: 12)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 되돌릴 수 없는 동작이라 한 번 묻는다. 방 삭제와 같은 모양의 창을 쓴다.
+  Future<void> _confirmFinalizeHistory() async {
+    if (!canFinalizeHistory(_cachedRoomData)) return;
+    _resumeHistoryFromUserAction();
+    final bool ok = await _askFinalize(
+      title: '이 대화를 최종 확정할까요?',
+      body: '확정 후에는 Original 대사를 수정할 수 없습니다.',
+    );
+    if (!ok) return;
+    await _finalizeHistory();
+  }
+
+  /// Practice를 눌렀는데 아직 검수 중인 방이었다.
+  ///
+  /// **막기만 하지 않는다.** 확정은 Practice로 가는 길목이라, 아래로 내려가
+  /// 버튼을 찾는 대신 이 자리에서 묻고 그대로 이어 간다. 다만 되돌릴 수
+  /// 없다는 말은 확정 버튼이 하는 말 그대로다([_askFinalize]).
+  ///
+  /// 확정까지 마쳤으면 true다 — 부르는 쪽은 연습을 계속 연다. 취소했거나
+  /// 확정할 대사가 없으면 false이고, 방은 검수 중 그대로 남는다.
+  Future<bool> _confirmFinalizeForPractice() async {
+    if (!canFinalizeHistory(_cachedRoomData)) return false;
+    _resumeHistoryFromUserAction();
+    // 🚫 남은 대사가 없는 방은 확정할 것이 없다 — 확정 버튼과 같은 규칙이다
+    //   (`_buildFinalizeSection`의 `hasLines`). 여기서만 예외를 두면 빈 방이
+    //   잠긴 채 남아, 지우는 것 말고는 할 수 있는 일이 없어진다.
+    var docs = _cachedDocs;
+    if (docs.isEmpty) {
+      final snap = await widget.historyDoc
+          .collection('messages')
+          .orderBy('created_at', descending: false)
+          .get();
+      if (!mounted) return false;
+      docs = _visibleMessages(snap.docs);
+      _cachedDocs = docs;
+    }
+    if (docs.isEmpty) {
+      _showRoomEntryToast('남은 대사가 없어 확정할 수 없습니다.');
+      return false;
+    }
+    final bool ok = await _askFinalize(
+      title: 'Practice를 시작할까요?',
+      body: '최종 확정하시면 더 이상 내용 수정을 할 수 없습니다.\n'
+          '고칠 대사가 남았다면 먼저 대사를 수정해 주세요.',
+      cancelLabel: '대사 수정하기',
+    );
+    if (!ok) return false;
+    await _finalizeHistory();
+    // 확정이 실패하면(쓰기 오류) 방은 검수 중 그대로다. 방 문서가 진실이고,
+    // "눌렀다"는 사실은 진실이 아니다.
+    return historyIsUserFinalized(_cachedRoomData);
+  }
+
+  /// 확정을 묻는 창. 확정 버튼과 Practice 두 자리가 이 창 하나를 쓴다 —
+  /// 되돌릴 수 없다는 말이 자리마다 달라지면 안 된다.
+  Future<bool> _askFinalize({
+    required String title,
+    required String body,
+    String cancelLabel = '취소',
+  }) async {
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1C1C1E),
+        title: Text(title,
+            style: const TextStyle(color: Colors.white, fontSize: 17)),
+        content: Text(body,
+            style: const TextStyle(color: Colors.white70, height: 1.5)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(cancelLabel,
+                style: const TextStyle(color: Colors.white54)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('최종 확정',
+                style: TextStyle(
+                    color: Colors.amber, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+    return ok == true;
+  }
+
+  /// 확정은 **1회성이다.**
+  ///
+  /// ⚠️ 확정 뒤 생성이 실패해도 **DRAFT로 되돌리지 않는다.** 원문은 이미
+  ///   확정된 것이고, 못 만든 것은 다음에 다시 만들면 된다. 되돌리면 그
+  ///   사이 만들어진 자료가 어느 원문에서 나온 것인지 알 수 없게 된다.
+  Future<void> _finalizeHistory() async {
+    if (_isFinalizing) return;
+    // 두 번 눌러도 한 번만 처리된다 — 창을 두 번 띄운 경우까지 여기서 막힌다.
+    if (!canFinalizeHistory(_cachedRoomData)) return;
+    setState(() => _isFinalizing = true);
+    try {
+      await widget.historyDoc.update(
+          historyFinalizePatch(finalizedAt: FieldValue.serverTimestamp()));
+      final next = Map<String, dynamic>.from(
+          _cachedRoomData ?? const <String, dynamic>{});
+      next[kHistoryStateField] = kHistoryStateFinalized;
+      _cachedRoomData = next;
+      if (!mounted) return;
+      setState(() {
+        _editingDocId = null;
+        _editController.clear();
+      });
+      debugPrint('[HISTORY-FINALIZE] room=${widget.historyDoc.id} '
+          'msgs=${_cachedDocs.length}');
+      // 여기서부터 생성이 열린다. 확정한 원문 하나만이 재료다.
+      _scheduleMissingTargetGeneration(_cachedDocs);
+      _showRoomEntryToast('대화를 확정했습니다.');
+    } catch (e) {
+      debugPrint('[HISTORY-FINALIZE] $e');
+      _showRoomEntryToast('확정하지 못했습니다. 다시 시도해 주세요.');
+    } finally {
+      if (mounted) setState(() => _isFinalizing = false);
+    }
   }
 
   // 📦 [Keepers: 대사 → Keepers 복사 저장 + 중복 방지]
@@ -6516,6 +6947,12 @@ RULES — follow exactly:
       }
       if (!mounted) return false;
 
+      // 📝 [DRAFT-GATE] 확정한 원문만 재료가 된다.
+      if (!historyGenerationAllowed(roomData)) {
+        setState(() => _mySpeechError = '먼저 대화를 최종 확정해 주세요');
+        return false;
+      }
+
       final mode = _inferHistoryMode(roomData);
       _cachedRoomMode = mode;
       if (!_supportsSpeechPractice(mode)) {
@@ -6593,6 +7030,14 @@ RULES — follow exactly:
   /// 카드가 같은 글자가 되어 견줄 것이 사라진다.
   Future<bool> _ensureNativeEnglish() async {
     if (!_paidStudySilentlyAllowed('native_english')) return false;
+    // 📝 [DRAFT-GATE] 확정 전에는 만들지 않는다. My English를 거쳐 오므로
+    //   보통 여기까지 오지 않지만, 캐시가 남은 방에서 곧장 들어올 수 있다.
+    if (!historyGenerationAllowed(_cachedRoomData)) {
+      if (mounted) {
+        setState(() => _nativeEnglishError = '먼저 대화를 최종 확정해 주세요');
+      }
+      return false;
+    }
     final source = _mySpeech.trim();
     if (source.isEmpty || _isBuildingNativeEnglish) return false;
     if (mounted) {

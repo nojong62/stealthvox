@@ -38,6 +38,7 @@ import 'package:flutter/foundation.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import 'duo_canonical.dart';
 import 'duo_study_state.dart';
+import 'history_finalize.dart';
 
 /// 통화 당시의 나를 증명하는 표. 기기에만 남는다.
 @immutable
@@ -492,6 +493,9 @@ Future<DuoRestoreOutcome> _restore({
     kDuoCanonicalAppliedAtField: FieldValue.serverTimestamp(),
     kDuoRestoreExpectedField: rows.length,
     kDuoRestoreCompleteField: false,
+    // 📝 되찾은 방도 검수부터다. 정돈된 줄이 곳 정답은 아니다 — 자기가 한 말을
+    // 한 번 훑고 확정하는 자리를 거치는 것은 새 방과 같다.
+    ...historyDraftSeed(),
   });
 
   for (final chunk in chunkForBatch(rows)) {

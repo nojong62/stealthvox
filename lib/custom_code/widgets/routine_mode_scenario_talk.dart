@@ -57,6 +57,7 @@ import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
 import '/custom_code/services/ai_style.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
+import '/custom_code/services/history_finalize.dart';
 // 🔁 [LATE-CONTINUATION] 판정·합치기·말풍선 규칙은 Circle Talk과 **같은
 //   함수**를 쓴다. 여기에 규칙을 다시 구현하면 한쪽만 고쳐지고 다른 쪽은 남는다.
 import '/custom_code/services/late_continuation.dart';
@@ -4049,6 +4050,8 @@ never by itself a reason to ask back.
         //   native_lang = ChatLang(로비 Origin), target_lang = LearnLang(로비 Target).
         'native_lang': _nativeLangName(),
         'target_lang': _targetLangName(),
+        // 📝 새 방은 검수 대기다. 공부방 첫 화면에서 확정해야 생성이 열린다.
+        ...historyDraftSeed(),
       });
       _myHistoryRef = newRef;
       BillingTicker.instance.setSessionIdentifiers(

@@ -53,6 +53,17 @@ const String kStudyStateMerged = 'merged';
 /// 히스토리 교정 경로가 이미 쓰던 이름을 그대로 쓴다.
 const String kOriginalRawField = 'original_text_raw';
 
+/// 🙋 사용자가 공부방 첫 화면에서 **직접 지운 줄.**
+///
+/// 위의 상태들과 **범주가 다르다.** 그쪽은 기계가 만든 찌꺼기를 가리는 판정이고
+/// 이것은 사람이 내린 결정이다. 그래서 [kStudyStateHidden]에 넣지 않는다 —
+/// 그 집합의 "전부 기술적 사유다"라는 약속을 깨지 않기 위해서다. 대신
+/// [isStudyVisible]이 이 값을 따로 본다.
+///
+/// **문서는 남는다.** 보이지 않을 뿐이라, 듀오 원본과 대조하거나 되짚을 길이
+/// 그대로 있다.
+const String kStudyStateDeletedByUser = 'deleted_by_user';
+
 /// 공부방이 그리지 않는 상태들. **전부 기술적 사유다** — 말의 중요도로
 /// 숨기는 상태는 여기에 만들지 않는다.
 const Set<String> kStudyStateHidden = <String>{
@@ -70,5 +81,7 @@ const Set<String> kStudyStateHidden = <String>{
 bool isStudyVisible(Object? studyState) {
   final String state = (studyState ?? '').toString().trim();
   if (state.isEmpty) return true;
+  // 사람이 직접 지운 줄. 모르는 값은 그려도, 이건 명시적인 뜻이다.
+  if (state == kStudyStateDeletedByUser) return false;
   return !kStudyStateHidden.contains(state);
 }

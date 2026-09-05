@@ -32,6 +32,7 @@ import 'dart:async'; // unawaited
 import 'routine_mode_scenario_talk.dart' show TtsCache; // 캐시 정리 진입점
 import '/custom_code/services/ai_style.dart';
 import '/custom_code/services/admin_gate.dart'; // 관리자 판별(UID)
+import '/custom_code/services/history_finalize.dart';
 import 'p2_voice_lab.dart' show P2VoiceLabPage; // 관리자 전용 히든 화면
 // LongPressGestureRecognizer는 material/widgets가 다시 내보내지 않는다.
 import 'package:flutter/gestures.dart' show LongPressGestureRecognizer;
@@ -1386,6 +1387,8 @@ class LobbyBrain {
       // 세션 생성 당시 언어 식별값 보존(History 동일 언어 판정용)
       'native_lang': FFAppState().nativeLang,
       'target_lang': FFAppState().targetLang,
+      // 📝 새 방은 검수 대기다(`history_finalize.dart`).
+      ...historyDraftSeed(),
     });
     return newHistoryRef;
   }

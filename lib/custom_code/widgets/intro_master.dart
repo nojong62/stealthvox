@@ -18,6 +18,7 @@ import '/auth/social_auth_service.dart';
 import '/auth/account_discovery_service.dart';
 // 익명으로 초대받아 대화한 뒤 기존 계정으로 돌아온 사람의 Duo 기록 복구.
 import '/custom_code/services/duo_guest_handoff.dart';
+import '/custom_code/services/history_finalize.dart';
 
 enum IntroScreen { welcome, auth, accountDiscovery }
 
@@ -378,6 +379,8 @@ class _IntroMasterState extends State<IntroMaster>
       // 세션 생성 당시 언어 식별값 보존(History 동일 언어 판정용)
       'native_lang': FFAppState().nativeLang,
       'target_lang': FFAppState().targetLang,
+      // 📝 새 방은 검수 대기다(`history_finalize.dart`).
+      ...historyDraftSeed(),
     });
     TrialFlowState.instance.myHistoryRef = historyRef;
     TrialFlowState.instance.advanceTo(1);

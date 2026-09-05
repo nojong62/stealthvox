@@ -35,6 +35,7 @@ import '/custom_code/actions/billing_idle_mixin.dart';
 import 'package:flutter/foundation.dart' as foundation;
 import '/custom_code/services/duo_direct_audio.dart';
 import '/custom_code/services/duo_partner_echo.dart';
+import '/custom_code/services/history_finalize.dart';
 import '/custom_code/services/duo_transcript_gate.dart';
 import '/custom_code/services/duo_stt_ab_probe.dart';
 import '/custom_code/services/pcm_audio_utils.dart'
@@ -4802,6 +4803,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         //   말이고, 만능 통역은 내가 들은 번역문이다. 히스토리 목록이 이 값을
         //   보고 Replay가 붙는 방을 가린다.
         kDuoModeField: _duoMode,
+        // 📝 새 방은 검수 대기다. 공부방 첫 화면에서 사용자가 원문을 확정해야
+        //   배울글·연습 자료가 만들어진다.
+        ...historyDraftSeed(),
       });
       BillingTicker.instance.setSessionIdentifiers(
         sessionDocId: _myHistoryRef?.id,

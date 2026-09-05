@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import 'duo_study_state.dart';
+import 'history_finalize.dart';
 
 // ====================================================================
 // 🧩 [DUO-CANONICAL] 한 통화 = 하나의 대화 기록.
@@ -582,13 +583,32 @@ Future<void> buildDuoCanonical({
 /// 못 옮겼어도 나중에 방을 열 때 이 함수가 다시 맞춘다.
 ///
 /// 원본 메시지 문서는 **지우지 않는다.** 보일지 말지와 글자만 맞춘다.
+///
+/// 🛡️ [사용자 편집 보호] 가드가 두 겹이다.
+///   ① 방 — 사용자가 확정한 방은 한 줄도 건드리지 않는다([roomData]).
+///   ② 줄 — 사용자가 손댄 줄은 확정 전이라도 덮지 않는다.
+/// 두 겹이어야 하는 이유: 방 가드만 두면 DRAFT에서 한 줄을 고친 **직후**
+/// 새 판이 도착할 때 그 수정이 조용히 지워진다.
+///
+/// [roomData]는 호출부가 이미 읽어 둔 방 문서다. 안 넘기면 여기서 한 번 읽는다.
 Future<bool> applyDuoCanonicalToHistory({
   required DocumentReference<Map<String, dynamic>> historyRef,
   required String roomId,
   int? appliedVersion,
+  Map<String, dynamic>? roomData,
 }) async {
   if (roomId.isEmpty) return false;
   try {
+    var room = roomData;
+    if (room == null) {
+      try {
+        room = (await historyRef.get()).data();
+      } catch (_) {}
+    }
+    if (!duoCanonicalMayApplyToRoom(room)) {
+      debugPrint('[DUO-CANON] skip_finalized room=$roomId');
+      return false;
+    }
     final snap = await duoCanonicalRef(roomId).get();
     final data = snap.data();
     if (data == null) return false;
@@ -610,11 +630,14 @@ Future<bool> applyDuoCanonicalToHistory({
     // 갈아 끼우기 **직전**의 글자. `rawTextById`와 다르다 — 그쪽은 맨 처음
     // 원문이라 두 번째 정돈에서는 지금 글자와 다를 수 있다.
     final curTextById = <String, String>{};
+    // 🛡️ 사용자가 손댄 줄. 확정 전이라도 정돈이 덮지 못한다.
+    final userLocked = <String>{};
     for (final doc in msgSnap.docs) {
       final data = doc.data();
       final String channelId =
           (data['channel_msg_id'] ?? '').toString().trim();
       if (channelId.isEmpty) continue;
+      if (!duoCanonicalMayApplyToMessage(data)) userLocked.add(channelId);
       byChannelId[channelId] = doc.reference;
       final String existingRaw =
           (data[kOriginalRawField] ?? '').toString().trim();
@@ -632,7 +655,9 @@ Future<bool> applyDuoCanonicalToHistory({
     for (final turn in turns) {
       if (turn.sourceIds.isEmpty) continue;
       // 이은 줄은 첫 조각이 대표가 되고, 나머지는 그 줄에 흡수됐다고 적는다.
-      final head = byChannelId[turn.sourceIds.first];
+      final head = userLocked.contains(turn.sourceIds.first)
+          ? null
+          : byChannelId[turn.sourceIds.first];
       if (head != null) {
         // 🔤 [원문 보존] 정돈이 글자를 갈아 끼우기 전의 전사 원문을 남긴다.
         //   문장으로 세우는 일을 열어 준 만큼, **실제로 들린 글자**가
@@ -658,6 +683,8 @@ Future<bool> applyDuoCanonicalToHistory({
         applied++;
       }
       for (final id in turn.sourceIds.skip(1)) {
+        // 흡수 표시도 덮어쓰기다 — 사용자가 남기기로 한 줄을 감추게 된다.
+        if (userLocked.contains(id)) continue;
         final ref = byChannelId[id];
         if (ref == null) continue;
         batch.update(ref, <String, dynamic>{

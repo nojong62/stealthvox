@@ -46,6 +46,7 @@ import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
 import '/custom_code/services/ai_style.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
+import '/custom_code/services/history_finalize.dart';
 import '/custom_code/services/openai_connection_pool.dart';
 import '/custom_code/services/origin_language_session.dart';
 import '/custom_code/services/openai_streaming_transcribe_prewarm.dart';
@@ -4926,6 +4927,8 @@ $kSpokenReplyLengthPolicy
         //
         'native_lang': _nativeLangName(),
         'target_lang': _targetLangName(),
+        // 📝 새 방은 검수 대기다. 공부방 첫 화면에서 확정해야 생성이 열린다.
+        ...historyDraftSeed(),
       });
       BillingTicker.instance.setSessionIdentifiers(
         sessionDocId: _sessionDocId,
