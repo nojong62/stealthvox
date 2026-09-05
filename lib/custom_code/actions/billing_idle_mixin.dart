@@ -48,7 +48,7 @@ mixin BillingIdleMixin<T extends StatefulWidget> on State<T> {
   /// 유휴 감시 자체는 계속 돈다(화면 상태 표시에 쓰인다).
   bool get isBillingEnabled => true;
 
-  /// 모드별 추가 검사(30분 롤오버·체험 종료 등).
+  /// 모드별 추가 검사(10분 롤오버·체험 종료 등).
   ///
   /// `true`를 돌려주면 이번 tick은 여기서 끝난다(유휴 누적 없음).
   /// 기본은 아무것도 하지 않는다.
@@ -79,7 +79,7 @@ mixin BillingIdleMixin<T extends StatefulWidget> on State<T> {
       if (mounted) setState(() {});
       if (isBillingEnabled) {
         BillingTicker.instance.resume();
-      // 30분 시계는 이어서 간다 — 여기서 되감으면 잠깐 쉴 때마다 세션이
+      // 10분 시계는 이어서 간다 — 여기서 되감으면 잠깐 쉴 때마다 세션이
       // 처음으로 돌아가 롤오버가 영영 오지 않는다.
         BillingTicker.instance
             .logMode(billingModeName, startNewConversation: false);

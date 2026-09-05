@@ -181,7 +181,7 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   Timer? _streamingTranscriptTimeout;
 
   /// speech_stopped 뒤 최종 전사가 이 시간 안에 안 오면 턴을 놓아준다.
-  /// 없으면 `_turnInFlight`가 켜진 채 굳어 30분 롤오버까지 막힌다.
+  /// 없으면 `_turnInFlight`가 켜진 채 굳어 10분 롤오버까지 막힌다.
   static const int _kStreamingTranscriptTimeoutMs = 8000;
 
   // ── 🔁 [LATE-CONTINUATION] 늦은 이어 말하기 (Circle Talk과 같은 규칙) ──
@@ -751,7 +751,7 @@ never by itself a reason to ask back.
   // 1초 주기 감시 타이머가 작동 여부를 보고 idle 누적초를 증감한다.
   List<String> _lastExchangeMsgIds = []; // [정정] 직전 교환 messages docId
 
-  // ── 30분 세션 롤오버 ──────────────────────────────────────────────────────
+  // ── 10분 세션 롤오버 ──────────────────────────────────────────────────────
   bool _rolloverInFlight = false;
   bool _rolloverNoticeVisible = false;
   Timer? _rolloverNoticeTimer;
@@ -783,7 +783,7 @@ never by itself a reason to ask back.
   List<Map<String, dynamic>> get _currentRoomMessages => _localMessages
       .sublist(_currentRoomStartIndex.clamp(0, _localMessages.length));
 
-  /// 직전 30분 세션 요약. 시스템 프롬프트로만 넘긴다.
+  /// 직전 10분 세션 요약. 시스템 프롬프트로만 넘긴다.
   /// 최근 턴은 [_recentKoreanConversation]이 이미 12개(6교환)로 잘라 주므로
   /// 여기서 따로 들고 있지 않는다.
   String _rolloverSummary = '';
@@ -792,9 +792,9 @@ never by itself a reason to ask back.
   @override
   String get billingModeName => 'roleplay';
 
-  /// 30분 롤오버는 유휴보다 먼저 본다. 지금 말하는 중이면 끝날 때까지
+  /// 10분 롤오버는 유휴보다 먼저 본다. 지금 말하는 중이면 끝날 때까지
   /// 기다렸다 넘기고, 그동안 유휴 누적을 붙잡아 둔다 — 정산 직전에 일시정지가
-  /// 끼어들면 같은 30분이 두 구간으로 갈려 저장된다.
+  /// 끼어들면 같은 10분이 두 구간으로 갈려 저장된다.
   @override
   bool onBillingIdleTick() {
     if (!BillingTicker.instance.sessionRolloverDue.value) return false;
@@ -810,17 +810,17 @@ never by itself a reason to ask back.
     return _ttsQueueManager.isBusy || _aiTtsAdapter.isBusy || _aiTurnActive;
   }
 
-  // ── 30분 세션 롤오버 ──────────────────────────────────────────────────────
+  // ── 10분 세션 롤오버 ──────────────────────────────────────────────────────
   // 방에서 내보내지 않는다. 저장·과금·문맥 묶음만 새로 연다.
   //
   // 순서가 곧 정확성이다. usage_logs는 방 id를 같이 싣기 때문에, 정산보다 먼저
-  // History를 새로 만들면 직전 30분 이력이 새 방 id로 붙는다.
+  // History를 새로 만들면 직전 10분 이력이 새 방 id로 붙는다.
   //   ① 정산(옛 방 id) → ② 요약 → ③ 새 History → ④ 새 방 id → ⑤ 문맥 이월
   Future<void> _performSessionRollover() async {
     if (_rolloverInFlight) return;
     _rolloverInFlight = true;
     try {
-      // ① 정산. 실패하면 여기서 멈춘다 — History를 먼저 갈아치우면 이 30분의
+      // ① 정산. 실패하면 여기서 멈춘다 — History를 먼저 갈아치우면 이 10분의
       //    사용 이력이 영영 옛 방에 붙지 못한다. 엔진이 쿨다운 뒤 재시도한다.
       final settled = await BillingTicker.instance.rollSegment();
       if (!settled) {
@@ -1859,7 +1859,7 @@ never by itself a reason to ask back.
       _continuationWaitStartedAt = now;
       _armContinuationTranscriptTimeout();
     }
-    // 전사가 도는 동안 30분 롤오버가 끼어들지 못하게 잡아 둔다.
+    // 전사가 도는 동안 10분 롤오버가 끼어들지 못하게 잡아 둔다.
     _turnInFlight = true;
     // 🔁 [LATE-CONTINUATION] 여기서 마이크를 닫으면 뒷말이 서버에 도달하지
     //   못해 두 번째 speech_started 자체가 생기지 않는다. 복구 창이 만료되거나
@@ -2313,7 +2313,7 @@ never by itself a reason to ask back.
           generation: generation);
     } finally {
       // 🔐 [GEN-OWNERSHIP] 세대가 갈렸으면 이 턴은 주인이 아니다. 이어 말하기를
-      //   기다리는 중에도 놓지 않는다 — 놓으면 30분 롤오버가 끼어든다.
+      //   기다리는 중에도 놓지 않는다 — 놓으면 10분 롤오버가 끼어든다.
       if (generation == _pipelineGeneration && !_continuationCandidateAlive) {
         _turnInFlight = false;
       }
@@ -2471,7 +2471,7 @@ never by itself a reason to ask back.
     return false;
   }
 
-  /// 턴 하나를 통째로 감싸 30분 롤오버가 중간에 끼어들지 못하게 한다.
+  /// 턴 하나를 통째로 감싸 10분 롤오버가 중간에 끼어들지 못하게 한다.
   ///
   /// `isBillingBusy`는 TTS 재생만 본다(`_aiTurnActive`를 true로 켜는 곳이 없다).
   /// 그래서 전사·검증·응답 생성 구간이 가드에서 비어 있었다. 그 사이 롤오버가

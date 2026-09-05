@@ -56,7 +56,7 @@ import 'pcm_audio_utils.dart';
 //   flutter run --dart-define=FREETALK_STREAMING_STT=false
 //
 // 바뀌는 것은 전사 공급자뿐이다. 노이즈 게이트·AI 응답·TTS·History·
-// billing·30분 롤오버는 `userOriginal` 합류 지점부터 기존 코드를 탄다.
+// billing·10분 롤오버는 `userOriginal` 합류 지점부터 기존 코드를 탄다.
 // ====================================================================
 const bool kFreeTalkUseStreamingStt =
     bool.fromEnvironment('FREETALK_STREAMING_STT', defaultValue: true);

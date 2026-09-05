@@ -64,33 +64,37 @@ class BillingTicker with WidgetsBindingObserver {
   /// 1은 예전 quarter 배율 자리였다. 배율이 하나로 합쳐져 더 이상 쓰지 않는다.
   ///
   /// ⚠️ 이 계약에 값을 추가하지 말 것. 7개 화면이 구독하는데 그중 다섯(히스토리·
-  /// 히스토리 목록·스토어·스텔스룸 등)은 30분 대화 세션 자체가 없다. 세션 임박
+  /// 히스토리 목록·스토어·스텔스룸 등)은 10분 대화 세션 자체가 없다. 세션 임박
   /// 표시는 [sessionRemainingNotifier]로 따로 내보낸다.
   final ValueNotifier<int> billingState = ValueNotifier<int>(0);
 
-  // ── 30분 대화 세션 ────────────────────────────────────────────────────────
+  // ── 10분 대화 세션 ────────────────────────────────────────────────────────
   // 과금 구간(usage_logs)과 다른 축이다. 과금 구간은 백그라운드·idle마다 이미
-  // 쪼개지지만, 대화 세션은 30분 롤오버에서만 끊긴다. 둘을 같은 값으로 묶으면
-  // 잠깐 앱을 내렸다 올린 것만으로 30분 시계가 되감긴다.
+  // 쪼개지지만, 대화 세션은 10분 롤오버에서만 끊긴다. 둘을 같은 값으로 묶으면
+  // 잠깐 앱을 내렸다 올린 것만으로 10분 시계가 되감긴다.
+  //
+  // ⚠️ **보유 이용시간과 아무 상관이 없다.** 1시간을 산 사람은 여전히 1시간을
+  //   쓴다 — 그 1시간이 10분짜리 기록 여섯 개로 나뉠 뿐이다. 상품의 `seconds`
+  //   (store_master)는 이 값을 보지 않는다.
   /// 🧪 디버그 빌드에서만 세션 길이를 줄여 롤오버를 실제로 밟아 볼 수 있게 한다.
-  /// 30분을 그대로 두면 경합(롤오버 × 백그라운드 × idle) 검증이 사실상 불가능하다.
+  /// 10분을 그대로 두면 경합(롤오버 × 백그라운드 × idle) 검증이 사실상 불가능하다.
   ///   flutter run --dart-define=SESSION_SECONDS=45
-  /// 릴리스 빌드는 이 값을 무시하고 항상 30분이다.
+  /// 릴리스 빌드는 이 값을 무시하고 항상 10분이다.
   static const int _kDebugSessionSecondsOverride =
       int.fromEnvironment('SESSION_SECONDS');
 
   static int get kSessionSeconds =>
       (kDebugMode && _kDebugSessionSecondsOverride > 0)
           ? _kDebugSessionSecondsOverride
-          : 30 * 60;
+          : 10 * 60;
 
-  /// 현재 30분 세션의 잔여 초. 실제로 차감이 일어난 초에만 줄어든다
-  /// (idle·백그라운드로 멈춘 동안은 그대로) — 그래야 "30분 과금분"과 세션이
+  /// 현재 10분 세션의 잔여 초. 실제로 차감이 일어난 초에만 줄어든다
+  /// (idle·백그라운드로 멈춘 동안은 그대로) — 그래야 "10분 과금분"과 세션이
   /// 일치한다. 대화방 2곳만 구독한다.
   final ValueNotifier<int> sessionRemainingNotifier =
       ValueNotifier<int>(kSessionSeconds);
 
-  /// 30분 경계에 도달했다는 신호. 엔진은 신호만 세우고 롤오버는 하지 않는다 —
+  /// 10분 경계에 도달했다는 신호. 엔진은 신호만 세우고 롤오버는 하지 않는다 —
   /// "진행 중인 발화·답변이 끝날 때까지 기다림"은 모드만 아는 상태이고, 엔진에
   /// UI·파이프라인을 넣지 않는다는 원칙을 지킨다.
   final ValueNotifier<bool> sessionRolloverDue = ValueNotifier<bool>(false);
@@ -289,7 +293,7 @@ class BillingTicker with WidgetsBindingObserver {
       appInForeground.value = true;
       _addBillingLog('[BILLING] foreground resumed wasRunning=$wasRunning');
       if (wasRunning) {
-        // 포그라운드 복귀: 과금 구간만 새로 연다. 30분 시계는 그대로 둔다 —
+        // 포그라운드 복귀: 과금 구간만 새로 연다. 10분 시계는 그대로 둔다 —
         // 앱을 잠깐 내렸다 올린 것으로 세션이 되감기면 안 된다.
         //
         // 단, 직전 종료가 저장에 실패했다면 기준선을 붙잡아 둔다. 백그라운드로
@@ -325,9 +329,9 @@ class BillingTicker with WidgetsBindingObserver {
   /// 현재 모드 로그 기록 + 세션 시작 상태 캡처
   /// 반드시 setRate() 이후에 호출해야 rate가 정확히 기록됨
   ///
-  /// [startNewConversation]은 30분 시계를 처음으로 되돌릴지다. 방에 새로 들어올
+  /// [startNewConversation]은 10분 시계를 처음으로 되돌릴지다. 방에 새로 들어올
   /// 때만 true다. **idle 복귀에서도 이 함수가 불리므로**(대화방 두 곳이 그렇다)
-  /// 거기서는 반드시 false를 넘겨야 한다 — 60초 쉬었다 돌아올 때마다 30분이
+  /// 거기서는 반드시 false를 넘겨야 한다 — 60초 쉬었다 돌아올 때마다 10분이
   /// 되감기면 롤오버가 영영 오지 않는다.
   void logMode(String mode, {bool startNewConversation = true}) {
     AppLogLedger.instance.onSessionStart(mode);
@@ -359,7 +363,7 @@ class BillingTicker with WidgetsBindingObserver {
 
   /// 과금 구간 하나를 닫는다. usage_logs에 쓰는 유일한 경로.
   ///
-  /// [reopen]이 true면 과금을 멈추지 않고 구간만 교체한다(30분 롤오버).
+  /// [reopen]이 true면 과금을 멈추지 않고 구간만 교체한다(10분 롤오버).
   /// 반환값이 false면 정산이 실패한 것이다 — 호출부는 History를 교체하면 안 된다.
   Future<bool> _closeSegment(String reason, {required bool reopen}) async {
     if (_segmentClosing) {
@@ -431,7 +435,7 @@ class BillingTicker with WidgetsBindingObserver {
     }
   }
 
-  /// 30분 시계를 처음으로 되돌린다. 방 진입과 롤오버 성공에서만 부른다.
+  /// 10분 시계를 처음으로 되돌린다. 방 진입과 롤오버 성공에서만 부른다.
   void resetConversationSession() {
     _sessionElapsedSeconds = 0;
     _lastRolloverAttemptAt = null;
@@ -441,10 +445,10 @@ class BillingTicker with WidgetsBindingObserver {
     if (sessionRolloverDue.value) sessionRolloverDue.value = false;
   }
 
-  /// 30분 경계에서 모드가 부른다. 과금을 멈추지 않고 구간만 교체한다.
+  /// 10분 경계에서 모드가 부른다. 과금을 멈추지 않고 구간만 교체한다.
   ///
   /// false면 정산이 실패했거나 재시도 대기 중이다. 그때 호출부는 History를
-  /// 새로 만들면 안 된다 — 직전 30분 이력이 새 방 id로 붙어 버린다.
+  /// 새로 만들면 안 된다 — 직전 10분 이력이 새 방 id로 붙어 버린다.
   Future<bool> rollSegment() async {
     final lastAttempt = _lastRolloverAttemptAt;
     if (lastAttempt != null &&
@@ -503,8 +507,8 @@ class BillingTicker with WidgetsBindingObserver {
       return;
     }
 
-    // 과금 구간만 새로 연다. 30분 시계는 건드리지 않는다 — idle로 잠깐 멈춘
-    // 것이 30분 세션을 되감으면 안 된다.
+    // 과금 구간만 새로 연다. 10분 시계는 건드리지 않는다 — idle로 잠깐 멈춘
+    // 것이 10분 세션을 되감으면 안 된다.
     _openSegment(reason);
     _addBillingLog('[BILLING-RECOVER] reason=$reason');
     resume();
@@ -555,8 +559,8 @@ class BillingTicker with WidgetsBindingObserver {
         'deducted': whole,
         'remaining': next,
       });
-      // 30분 시계는 실제로 차감된 초만 센다. 벽시계로 재면 idle·백그라운드로
-      // 멈춘 시간까지 흘러가서 "30분 과금분"과 세션이 어긋난다.
+      // 10분 시계는 실제로 차감된 초만 센다. 벽시계로 재면 idle·백그라운드로
+      // 멈춘 시간까지 흘러가서 "10분 과금분"과 세션이 어긋난다.
       _advanceConversationSession(whole);
     }
 
@@ -756,10 +760,10 @@ void showBillingBlockedNotice(
 class BillingDotPainter extends CustomPainter {
   final int state;
 
-  /// 30분 세션 종료 임박(10초 이하). 차감 중인 점만 주황으로 바꾼다.
+  /// 10분 세션 종료 임박(10초 이하). 차감 중인 점만 주황으로 바꾼다.
   ///
   /// 기본값이 false라 이 값을 넘기지 않는 화면(히스토리·목록·스토어·스텔스룸)은
-  /// 그대로다. 30분 세션이 없는 화면에 주황이 새면 안 되므로 billingState에
+  /// 그대로다. 10분 세션이 없는 화면에 주황이 새면 안 되므로 billingState에
   /// 값을 더하는 대신 이 플래그로 받는다.
   final bool warning;
 
@@ -799,10 +803,10 @@ class BillingDotPainter extends CustomPainter {
 }
 
 // =============================================================================
-// 30분 세션 표시 (대화방 전용)
+// 10분 세션 표시 (대화방 전용)
 // =============================================================================
 // 기존 HH:MM은 전체 보유시간이라 의미가 다르다. 그 자리를 덮지 않고 옆에 붙는다.
-// 30분 세션이 없는 화면(히스토리·목록·스토어·스텔스룸)은 이 위젯을 쓰지 않으므로
+// 10분 세션이 없는 화면(히스토리·목록·스토어·스텔스룸)은 이 위젯을 쓰지 않으므로
 // 아무 영향이 없다.
 
 /// 마지막 10초 동안 주황으로 깜박이는 과금 점.
@@ -849,7 +853,7 @@ class BillingSessionDot extends StatelessWidget {
 /// 과금 배지의 시간 칸 하나. 새 요소를 옆에 붙이지 않고 이 칸을 나눠 쓴다 —
 /// 상단 바가 좁아 배지를 하나 더 달면 큰 글꼴에서 바로 넘친다.
 ///
-/// 평소에는 전체 보유시간(HH:MM). 30분 세션이 30초 남으면 그 30초 동안만
+/// 평소에는 전체 보유시간(HH:MM). 10분 세션이 30초 남으면 그 30초 동안만
 /// 카운트다운 숫자로 바뀌고, 새 세션이 시작되면 곧바로 보유시간으로 돌아온다.
 /// 보유시간의 의미는 그대로다 — 잠깐 자리를 빌려줄 뿐이다.
 class BillingTimeLabel extends StatelessWidget {

@@ -66,7 +66,7 @@ import 'trial/learning_prep_overlay.dart';
 import 'trial/trial_study_page.dart';
 
 /// speech_stopped 뒤 최종 전사가 이 시간 안에 안 오면 턴을 놓아준다.
-/// 없으면 `_turnInFlight`가 켜진 채 굳어 30분 롤오버까지 막힌다.
+/// 없으면 `_turnInFlight`가 켜진 채 굳어 10분 롤오버까지 막힌다.
 const int kFreeTalkStreamingTranscriptTimeoutMs = 8000;
 
 // speech_final 경로 확정 대기창. Deepgram endpointing(700ms)이 이미 침묵을
@@ -345,7 +345,7 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
   //  - 유저 작동 = _voiceManager != null (마이크 연결/녹음)
   // 1초 주기 감시 타이머가 작동 여부를 보고 idle 누적초를 증감한다.
 
-  // ── 30분 세션 롤오버 ──────────────────────────────────────────────────────
+  // ── 10분 세션 롤오버 ──────────────────────────────────────────────────────
   bool _rolloverInFlight = false;
   bool _rolloverNoticeVisible = false;
   Timer? _rolloverNoticeTimer;
@@ -361,7 +361,7 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
   /// 때마다 리셋되는 이 플래그가 그 방의 실제 내용을 가리킨다.
   bool _currentRoomHasUserTurn = false;
 
-  /// 직전 30분 세션 요약. 시스템 프롬프트로만 넘긴다 — [_recentHistory]는 그대로
+  /// 직전 10분 세션 요약. 시스템 프롬프트로만 넘긴다 — [_recentHistory]는 그대로
   /// messages 배열이 되므로 여기에 'system' 역할을 섞으면 안 된다.
   String _rolloverSummary = '';
 
@@ -404,17 +404,17 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
 
   void _markConversationActivity() => resetBillingIdle();
 
-  // ── 30분 세션 롤오버 ──────────────────────────────────────────────────────
+  // ── 10분 세션 롤오버 ──────────────────────────────────────────────────────
   // 방에서 내보내지 않는다. 저장·과금·문맥 묶음만 새로 연다.
   //
   // 순서가 곧 정확성이다. usage_logs는 방 id를 같이 싣기 때문에, 정산보다 먼저
-  // History를 새로 만들면 직전 30분 이력이 새 방 id로 붙는다.
+  // History를 새로 만들면 직전 10분 이력이 새 방 id로 붙는다.
   //   ① 정산(옛 방 id) → ② 요약 → ③ 새 History → ④ 새 방 id → ⑤ 문맥 이월
   Future<void> _performSessionRollover() async {
     if (_rolloverInFlight) return;
     _rolloverInFlight = true;
     try {
-      // ① 정산. 실패하면 여기서 멈춘다 — History를 먼저 갈아치우면 이 30분의
+      // ① 정산. 실패하면 여기서 멈춘다 — History를 먼저 갈아치우면 이 10분의
       //    사용 이력이 영영 옛 방에 붙지 못한다. 엔진이 쿨다운 뒤 재시도한다.
       final settled = await BillingTicker.instance.rollSegment();
       if (!settled) {
@@ -2490,7 +2490,7 @@ $kSpokenReplyLengthPolicy
     }
     // 이어 말하기 자격을 재는 기준점. **이 시각 하나가 자격을 정한다.**
     _speechStoppedAt = now;
-    // 전사가 도는 동안 30분 롤오버가 끼어들지 못하게 잡아 둔다.
+    // 전사가 도는 동안 10분 롤오버가 끼어들지 못하게 잡아 둔다.
     _turnInFlight = true;
     // 🔁 [LATE-CONTINUATION] 여기서 마이크를 닫으면 뒷말이 서버에 도달하지
     //   못해 두 번째 speech_started 자체가 생기지 않는다. 복구 창이 만료되거나
@@ -3055,7 +3055,7 @@ $kSpokenReplyLengthPolicy
       // 🔐 [GEN-OWNERSHIP] 세대가 갈렸으면 이 turn은 더 이상 주인이 아니다.
       //   여기서 전역 플래그를 내리면 방금 시작한 새 파이프라인이 롤오버·
       //   마이크 재시작에 노출된다. 이어 말하기를 기다리는 중에도 놓지 않는다 —
-      //   놓으면 그 사이에 30분 롤오버가 끼어들어 한 턴이 두 방으로 갈린다.
+      //   놓으면 그 사이에 10분 롤오버가 끼어들어 한 턴이 두 방으로 갈린다.
       if (pipelineGeneration == _pipelineGeneration &&
           !_continuationCandidateAlive) {
         _turnInFlight = false;
@@ -3233,7 +3233,7 @@ $kSpokenReplyLengthPolicy
 
   // Deepgram 텍스트는 발화 종료 신호를 묶는 데까지만 사용한다. 최종 사용자
   // 문장은 매 턴 PCM 원본을 gpt-4o-transcribe에 보내 새로 확정한다.
-  /// 턴 하나를 통째로 감싸 30분 롤오버가 중간에 끼어들지 못하게 한다.
+  /// 턴 하나를 통째로 감싸 10분 롤오버가 중간에 끼어들지 못하게 한다.
   ///
   /// `isBillingBusy`는 TTS 재생만 본다(`_aiTurnActive`를 true로 켜는 곳이 없다).
   /// 그래서 전사·검증·응답 생성 구간이 가드에서 비어 있었다. 그 사이 롤오버가
@@ -3406,7 +3406,7 @@ $kSpokenReplyLengthPolicy
       // 이 이른 반환은 `_isPipelineRunning`을 켜기 전에 나간다. 이어 말하기로
       // 들어온 경우 이전 파이프라인이 아직 매달려 있을 수 있는데, 그쪽은
       // 주인이 아니라 아무것도 못 내린다 — 여기서 놓지 않으면 `_turnInFlight`가
-      // 켜진 채 굳어 30분 롤오버가 영영 안 온다.
+      // 켜진 채 굳어 10분 롤오버가 영영 안 온다.
       if (expectedPipelineGeneration == _pipelineGeneration) {
         _turnInFlight = false;
         _closeContinuationWindow(reason: 'noise_transcript');
@@ -3600,7 +3600,7 @@ $kSpokenReplyLengthPolicy
         _isPipelineRunning = false;
         // 이어 말하기로 파이프라인이 갈리면 이 턴을 시작한
         // _processStreamingFinalTranscript의 finally는 주인이 아니라 이 값을
-        // 내리지 못한다. 켜진 채 굳으면 30분 롤오버가 영영 안 온다.
+        // 내리지 못한다. 켜진 채 굳으면 10분 롤오버가 영영 안 온다.
         _turnInFlight = false;
         _closeContinuationWindow(reason: 'turn_finished');
         _resetContinuationState();

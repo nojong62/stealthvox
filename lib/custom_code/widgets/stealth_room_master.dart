@@ -702,14 +702,14 @@ Return ONLY valid JSON: {"name":"..."}.
     );
   }
 
-  /// 30분 세션 안내. "끊긴다"가 아니라 "저장된다"로 읽히게 쓴다 — 실제로도
+  /// 10분 세션 안내. "끊긴다"가 아니라 "저장된다"로 읽히게 쓴다 — 실제로도
   /// 방에서 나가지 않고 같은 화면에서 대화가 이어진다.
   Widget _buildSessionLegend() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          '대화 세션 (30분)',
+          '대화 세션 (10분)',
           style: TextStyle(
             color: Colors.white,
             fontWeight: FontWeight.bold,
@@ -718,7 +718,7 @@ Return ONLY valid JSON: {"name":"..."}.
         ),
         const SizedBox(height: 12),
         const Text(
-          '대화방은 30분 단위 세션으로 운영됩니다. 30분이 지나도 대화가 끊기거나 '
+          '대화방은 10분 단위 세션으로 운영됩니다. 10분이 지나도 대화가 끊기거나 '
           '방에서 나가지 않습니다 — 지금까지의 대화가 기록에 저장되고, 같은 '
           '화면에서 이어서 계속 대화할 수 있습니다.',
           style: TextStyle(
@@ -729,7 +729,7 @@ Return ONLY valid JSON: {"name":"..."}.
         ),
         const SizedBox(height: 10),
         const Text(
-          '말하는 도중에 30분이 되어도 하던 말과 AI의 답변이 끝난 뒤에 저장되므로, '
+          '말하는 도중에 10분이 되어도 하던 말과 AI의 답변이 끝난 뒤에 저장되므로, '
           '한 번의 대화가 둘로 잘리지 않습니다.',
           style: TextStyle(
             color: Colors.white70,
