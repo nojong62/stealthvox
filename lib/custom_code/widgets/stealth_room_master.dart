@@ -737,6 +737,17 @@ Return ONLY valid JSON: {"name":"..."}.
             height: 1.5,
           ),
         ),
+        const SizedBox(height: 10),
+        // 세 대화 모드가 같은 신호를 쓴다(`BillingSessionDot`·`BillingTimeLabel`).
+        const Text(
+          '세션이 끝나기 30초 전부터 상단 시간 표시가 남은 초를 세고, '
+          '10초 전부터는 점이 주황으로 깜빡입니다.',
+          style: TextStyle(
+            color: Colors.white70,
+            fontSize: 12,
+            height: 1.5,
+          ),
+        ),
         const SizedBox(height: 12),
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,

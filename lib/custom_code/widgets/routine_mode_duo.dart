@@ -6690,36 +6690,25 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           if (_hasTrialCallLimit)
             _buildTrialCountdownChip()
           else
-            ValueListenableBuilder<int>(
-                valueListenable:
-                    BillingTicker.instance.remainingSecondsNotifier,
-                builder: (context, remaining, child) {
-                  return Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 8),
-                      decoration: BoxDecoration(
-                          color: const Color(0xFF2563EB),
-                          borderRadius: BorderRadius.circular(20)),
-                      child: Row(children: [
-                        ValueListenableBuilder<int>(
-                          valueListenable: BillingTicker.instance.billingState,
-                          builder: (_, s, __) => CustomPaint(
-                            size: const Size(14, 14),
-                            painter: BillingDotPainter(s),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(() {
-                          final int s = remaining.clamp(0, 999999);
-                          final int h = s ~/ 3600;
-                          final int m = (s % 3600) ~/ 60;
-                          return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
-                        }(),
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold))
-                      ]));
-                }),
+            // ⏳ [SESSION] 10분 세션이 끝나 가는 것을 여기서도 알린다.
+            //
+            //   예전에는 이 배지가 보유시간만 보여 줬다. 세 대화 모드 중
+            //   Duo만 세션 잔여 초를 구독하지 않아, 통화하다 10분이 끝나도
+            //   미리 알 방법이 없었다. Circle Talk·Scenario Talk가 쓰는 그
+            //   위젯을 그대로 쓴다 — 같은 신호가 모드마다 다르면 안 된다.
+            //     · 30초 전 — 시간 칸이 남은 초를 센다
+            //     · 10초 전 — 점이 주황으로 깜빡인다
+            Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                    color: const Color(0xFF2563EB),
+                    borderRadius: BorderRadius.circular(20)),
+                child: Row(children: [
+                  BillingSessionDot(onTapWhenPaused: resetBillingIdle),
+                  const SizedBox(width: 6),
+                  const BillingTimeLabel(),
+                ])),
         ],
       ),
     );

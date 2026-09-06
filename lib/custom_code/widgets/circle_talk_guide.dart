@@ -89,6 +89,32 @@ Future<void> showCircleTalkGuide(BuildContext context) {
                         _CircleGuideTip(
                             '대화가 이어질수록 AI는 서클의 맥락을 반영해 더욱 자연스럽게 대화합니다.'),
                         SizedBox(height: 22),
+                        _CircleGuideHeading('대화 세션 (10분)'),
+                        SizedBox(height: 10),
+                        Text(
+                          '대화방은 10분 단위 세션으로 운영됩니다. 10분이 지나도 대화가 끊기거나 방에서 나가지 않습니다 — 지금까지의 대화가 기록에 저장되고, 같은 화면에서 이어서 계속 대화할 수 있습니다.',
+                          style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 14,
+                              height: 1.55),
+                        ),
+                        SizedBox(height: 10),
+                        Text(
+                          '말하는 도중에 10분이 되어도 하던 말과 AI의 답변이 끝난 뒤에 저장되므로, 한 번의 대화가 둘로 잘리지 않습니다.',
+                          style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 14,
+                              height: 1.55),
+                        ),
+                        SizedBox(height: 10),
+                        Text(
+                          '세션이 끝나기 30초 전부터 상단 시간 표시가 남은 초를 세고, 10초 전부터는 점이 주황으로 깜빡입니다.',
+                          style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 14,
+                              height: 1.55),
+                        ),
+                        SizedBox(height: 22),
                         Text(
                           '당신만의 서클을 만들고, 그 안에서 자연스러운 영어 대화를 경험해 보세요.',
                           style: TextStyle(
