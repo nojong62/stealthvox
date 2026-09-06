@@ -196,9 +196,9 @@ void main() {
   group('🔌 Deepgram 연결 규격', () {
     final uri = buildDuoDeepgramEndpointUri('ko');
 
-    test('UtteranceEnd를 1500ms로 잡는다 — 지원 범위 1000~5000ms 안이다', () {
-      expect(kDuoUtteranceEndMs, 1500);
-      expect(uri.queryParameters['utterance_end_ms'], '1500');
+    test('UtteranceEnd를 1800ms로 잡는다 — 지원 범위 1000~5000ms 안이다', () {
+      expect(kDuoUtteranceEndMs, 1800);
+      expect(uri.queryParameters['utterance_end_ms'], '1800');
     });
 
     test('UtteranceEnd와 SpeechStarted가 오도록 둘을 켠다', () {

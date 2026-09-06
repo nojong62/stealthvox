@@ -199,11 +199,12 @@ void main() {
 
     test('듀오의 두 경로가 같은 종료 기준을 쓴다', () {
       // 침묵을 재는 주체가 OpenAI Server VAD에서 Deepgram으로 옮겼다.
-      // 값은 같은 뜻으로 이어진다 — 한 문장 안의 600~1100ms 쉼에서 끊기지
-      // 않게 하는 것이 목적이다.
+      // 값은 같은 뜻으로 이어진다 — 한 문장 안의 쉼에서 끊기지 않게 하는
+      // 것이 목적이다. 실측된 가장 긴 쉼(1164ms) 위로 여유를 더 두려고
+      // Deepgram 쪽만 1800으로 올렸다.
       final endpoint =
           _read('lib/custom_code/services/duo_deepgram_endpoint.dart');
-      expect(endpoint, contains('const int kDuoUtteranceEndMs = 1500;'));
+      expect(endpoint, contains('const int kDuoUtteranceEndMs = 1800;'));
       expect(endpoint,
           contains(r"'&utterance_end_ms=$kDuoUtteranceEndMs'"));
       // 직접 대화와 통역이 같은 파이프라인을 쓰므로 값도 하나다.
