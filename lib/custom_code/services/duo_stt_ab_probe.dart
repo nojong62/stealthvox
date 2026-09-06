@@ -1,27 +1,31 @@
 // ====================================================================
-// 🔬 [DUO-AB] 같은 발화를 두 경로에 넣어 견주는 진단 장치.
+// 🔬 [DUO-OBSERVE] **GPT에 실제로 보낸 그 소리**를 귀와 눈으로 확인하는 자리
 // --------------------------------------------------------------------
-// 답해야 하는 질문은 하나다:
+// 예전 이름은 A/B 비교였다. 스트리밍(live)과 파일(file) 두 경로에 같은 소리를
+// 넣어 어느 쪽이 틀렸는지 가리는 장치였고, 그래서 소리도 **자기가 따로**
+// 모았다.
 //
-//   "한국어를 정확히 말했는데 [DuoSTT-RAW]가 틀렸다. 소리가 나쁜가,
-//    실시간 스트리밍이 나쁜가?"
+// 이제 전사 경로는 하나뿐이다(Deepgram 경계 → gpt-transcribe). 비교할 상대가
+// 없어졌으므로 이 장치의 일도 바뀐다.
 //
-// 그래서 **완전히 같은 PCM**을 둘로 보낸다.
+//   "전사가 틀렸다. 소리가 나빴나, 모델이 틀렸나?"
 //
-//   A. live  — 지금 그대로. 마이크 → 스트리밍 소켓 → Server VAD → gpt-4o-transcribe
-//   B. file  — 같은 구간을 WAV로 묶어 → /v1/audio/transcriptions → gpt-4o-transcribe
+// 답하려면 **모델이 받은 바로 그 소리**를 들어 봐야 한다.
 //
-// 두 갈래의 모델은 같다. 다른 것은 **전달 방식과 발화 분절**뿐이다. 따라서
+// 🚫 그래서 **소리를 다시 모으지 않는다.** 버퍼를 따로 두면 이벤트 순서나
+//   조각 전달이 한 번만 어긋나도
 //
-//   file이 맞고 live가 틀림 → 스트리밍 전달/Server VAD 분절 문제
-//   둘 다 틀림             → 마이크 PCM 품질(AEC·리샘플·클리핑) 또는 모델 한계
-//   둘 다 맞음             → 이 발화는 문제가 아니다
+//       본선이 보낸 PCM  ≠  진단이 저장한 PCM
 //
-// ⚠️ **개발 빌드 전용이다.** 발화마다 전사 요청이 한 번 더 나가므로 비용이
-//   두 배가 된다. release에서는 만들어지지도 않는다([kDuoSttAbProbeEnabled]).
+//   이 되고, 그러면 "WAV는 멀쩡한데 전사만 틀렸다"는 관찰 자체를 믿을 수
+//   없다. 확정은 본선(`DuoUtteranceCapture`)에서 **한 번만** 일어나고,
+//   여기는 그 결과를 건네받아 보기만 한다.
 //
-// 통화 경로에는 손대지 않는다. 이 클래스가 던지든 늦든 릴레이 송신과 실시간
-// 전사는 이미 지나간 뒤다([DuoMicPcmFanout]의 세 번째 갈래).
+// ⚠️ **개발 빌드 전용이다.** WAV를 남기고 전사문 원문을 로그에 싣는다.
+//   release에서는 만들어지지도 않는다([kDuoSttAbProbeEnabled]).
+//
+// 통화 경로에는 손대지 않는다. 이 클래스가 던지든 늦든 릴레이 송신과 전사는
+// 이미 지나간 뒤다.
 // ====================================================================
 
 import 'dart:async';
@@ -29,7 +33,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import 'openai_transcribe_service.dart';
+import 'duo_utterance_capture.dart';
 import 'pcm_audio_utils.dart';
 
 /// A/B 비교를 켤 것인가. 개발 빌드에서 끄고 싶을 때 쓴다.
@@ -187,21 +191,16 @@ typedef DuoAbFileTranscriber = Future<String?> Function({
 /// 한 통화짜리 A/B 비교기.
 class DuoSttAbProbe {
   DuoSttAbProbe({
-    required this.apiKey,
     required this.speakerRole,
     required this.languageCode,
     this.sampleRate = kStealthVoxSttSampleRate,
     this.onLog,
     this.saveWavDir,
-    DuoAbFileTranscriber? transcribeFile,
-  }) : transcribeFile =
-            transcribeFile ?? OpenAiTranscribeService.transcribePcm16;
+  });
 
-  final String apiKey;
   final String speakerRole;
 
-  /// 스트리밍 소켓에 박힌 것과 **같은 값**을 파일 쪽에도 넘긴다. 다르면
-  /// 비교가 성립하지 않는다.
+  /// 최종 전사에 넘긴 것과 **같은 값**. 로그에서 어느 언어로 들었는지 본다.
   final String languageCode;
 
   final int sampleRate;
@@ -211,23 +210,7 @@ class DuoSttAbProbe {
   /// 남기면 **GPT가 실제로 받은 소리를 귀로** 확인할 수 있다.
   final Directory? saveWavDir;
 
-  final DuoAbFileTranscriber transcribeFile;
-
-  int get _bytesPerMs => sampleRate * 2 ~/ 1000;
-
-  // 발화 시작 전 소리를 담아 두는 고리. speech_started는 소리가 난 뒤에 오므로
-  // 이게 없으면 첫 음절이 파일 쪽에만 빠진다.
-  final List<Uint8List> _preRoll = <Uint8List>[];
-  int _preRollBytes = 0;
-
-  final List<Uint8List> _current = <Uint8List>[];
-  int _currentBytes = 0;
-  int _currentFrames = 0;
-  bool _capturing = false;
-  DateTime? _lastFrameAt;
-  int _maxFrameGapMs = 0;
-
-  /// 확정됐지만 아직 전사문이 안 온 발화들. 도착 순서가 아니라 item_id로 잇는다.
+  /// 확정됐지만 아직 전사문이 안 온 발화들. 도착 순서가 아니라 발화 id로 잇는다.
   final Map<String, DuoAbUtterance> _pending = <String, DuoAbUtterance>{};
   final List<String> _pendingOrder = <String>[];
 
@@ -236,111 +219,52 @@ class DuoSttAbProbe {
 
   int get pendingCount => _pending.length;
   int get savedFiles => _savedFiles;
-  bool get isCapturing => _capturing;
 
   void _lg(String tag, String msg) => onLog?.call(tag, msg);
 
-  /// 마이크 조각 하나. **여기서는 아무것도 기다리지 않는다.**
-  void addPcm(Uint8List pcm) {
-    if (_disposed || pcm.isEmpty) return;
-
-    final DateTime now = DateTime.now();
-    final DateTime? last = _lastFrameAt;
-    if (last != null && _capturing) {
-      final int gap = now.difference(last).inMilliseconds;
-      if (gap > _maxFrameGapMs) _maxFrameGapMs = gap;
-    }
-    _lastFrameAt = now;
-
-    if (_capturing) {
-      _current.add(pcm);
-      _currentBytes += pcm.length;
-      _currentFrames++;
-      // 상한을 넘으면 앞쪽을 버린다. 진단이 메모리를 먹어 통화를 죽이면 안 된다.
-      final int maxBytes = kDuoAbMaxUtteranceMs * _bytesPerMs;
-      while (_currentBytes > maxBytes && _current.length > 1) {
-        _currentBytes -= _current.removeAt(0).length;
-      }
-      return;
-    }
-
-    _preRoll.add(pcm);
-    _preRollBytes += pcm.length;
-    final int maxPreRoll = kDuoAbPreRollMs * _bytesPerMs;
-    while (_preRollBytes > maxPreRoll && _preRoll.length > 1) {
-      _preRollBytes -= _preRoll.removeAt(0).length;
-    }
-  }
-
-  /// 서버 VAD가 발화 시작을 알렸다. 고리에 담아 둔 앞소리를 발화에 붙인다.
-  void beginUtterance() {
-    if (_disposed || _capturing) return;
-    _capturing = true;
-    _current
-      ..clear()
-      ..addAll(_preRoll);
-    _currentBytes = _preRollBytes;
-    _currentFrames = _preRoll.length;
-    _maxFrameGapMs = 0;
-    _preRoll.clear();
-    _preRollBytes = 0;
-  }
-
-  /// 서버가 구간을 확정했다. 그 소리를 item_id에 묶어 세워 둔다.
-  void commitUtterance(String itemId, int? voicedMs, String voicedSource) {
-    if (_disposed) return;
-    final bool was = _capturing;
-    _capturing = false;
-    if (!was || itemId.isEmpty || _currentBytes == 0) {
-      _current.clear();
-      _currentBytes = 0;
-      _currentFrames = 0;
-      return;
-    }
-
-    final Uint8List pcm = Uint8List(_currentBytes);
-    var offset = 0;
-    for (final chunk in _current) {
-      pcm.setRange(offset, offset + chunk.length, chunk);
-      offset += chunk.length;
-    }
-    _current.clear();
-    _currentBytes = 0;
-
-    _pending[itemId] = DuoAbUtterance(
-      itemId: itemId,
-      pcm: pcm,
-      sampleRate: sampleRate,
+  /// 본선이 **확정한 그 발화**를 건네받는다. 소리를 다시 모으지 않는다.
+  ///
+  /// 여기 들어온 PCM은 `gpt-transcribe`에 간 것과 **같은 바이트**다. 그래야
+  /// 나중에 저장된 WAV를 듣고 "모델이 이걸 듣고 그렇게 적었다"고 말할 수 있다.
+  void observe(
+    DuoCapturedUtterance utterance, {
+    int? voicedMs,
+    String voicedSource = 'local',
+  }) {
+    if (_disposed || utterance.isEmpty) return;
+    _pending[utterance.utteranceId] = DuoAbUtterance(
+      itemId: utterance.utteranceId,
+      pcm: utterance.pcm,
+      sampleRate: utterance.sampleRate,
       voicedMs: voicedMs,
       voicedSource: voicedSource,
-      frames: _currentFrames,
-      maxFrameGapMs: _maxFrameGapMs,
+      frames: utterance.frames,
+      maxFrameGapMs: utterance.maxFrameGapMs,
     );
-    _pendingOrder.add(itemId);
-    _currentFrames = 0;
+    _pendingOrder.add(utterance.utteranceId);
     while (_pendingOrder.length > kDuoAbMaxPending) {
       _pending.remove(_pendingOrder.removeAt(0));
     }
   }
 
-  /// 실시간 전사문이 도착했다. 같은 소리를 파일 전사에도 넣어 견준다.
+  /// 최종 전사문이 나왔다. 소리의 상태를 남기고 WAV를 떨군다.
   ///
   /// **호출부는 흘려보내면 된다.** 결과는 로그로만 나온다 — 통화도 저장도
   /// 이 future를 기다리지 않는다.
-  Future<void> compare(String itemId, String liveText) async {
+  Future<void> noteTranscript(String utteranceId, String text) async {
     if (_disposed) return;
-    final DuoAbUtterance? utterance = _pending.remove(itemId);
-    _pendingOrder.remove(itemId);
+    final DuoAbUtterance? utterance = _pending.remove(utteranceId);
+    _pendingOrder.remove(utteranceId);
     if (utterance == null) {
-      _lg('🔬 [DuoSTT-AB]', 'skipped item=$itemId reason=no_audio_buffered');
+      _lg('🔬 [DuoSTT-OBS]', 'skipped utt=$utteranceId reason=no_audio');
       return;
     }
 
     final DuoAbPcmStats stats = measurePcm16(utterance.pcm);
-    // 소리의 상태부터 남긴다. 파일 전사가 실패해도 이 줄은 남아야 한다.
+    // 소리의 상태부터 남긴다. WAV 저장이 실패해도 이 줄은 남아야 한다.
     _lg(
         '🔬 [DuoSTT-PCM]',
-        'speaker=$speakerRole item=$itemId rate=$sampleRate '
+        'speaker=$speakerRole utt=$utteranceId rate=$sampleRate '
             'bytes=${utterance.pcm.length} durationMs=${utterance.durationMs} '
             'voicedMs=${utterance.voicedMs ?? -1} src=${utterance.voicedSource} '
             'frames=${utterance.frames} maxFrameGapMs=${utterance.maxFrameGapMs} '
@@ -348,42 +272,14 @@ class DuoSttAbProbe {
 
     final String? wavPath = await _saveWav(utterance);
     if (wavPath != null) {
-      _lg('🔬 [DuoSTT-WAV]', 'item=$itemId path=$wavPath');
+      _lg('🔬 [DuoSTT-WAV]', 'utt=$utteranceId path=$wavPath');
     }
 
-    String? fileText;
-    try {
-      fileText = await transcribeFile(
-        apiKey: apiKey,
-        pcm: utterance.pcm,
-        sampleRate: sampleRate,
-        language: languageCode.isEmpty ? null : languageCode,
-        model: OpenAiTranscribeService.firstTurnModel,
-        timeout: kDuoAbFileTimeout,
-        onLog: null,
-        // 스트리밍은 앞 무음을 안 깎는다. 같은 소리를 넣어야 비교가 선다.
-        trimLeadingSilence: false,
-      );
-    } catch (e) {
-      _lg('🔬 [DuoSTT-AB]',
-          'file_transcribe_error item=$itemId ${e.runtimeType}');
-    }
-
-    if (fileText == null) {
-      _lg(
-          '🔬 [DuoSTT-AB]',
-          'speaker=$speakerRole item=$itemId language=$languageCode '
-              'file=UNAVAILABLE live="${liveText.trim()}"');
-      return;
-    }
-
-    final bool match = sameTranscript(liveText, fileText);
     _lg(
-        '🔬 [DuoSTT-AB]',
-        'speaker=$speakerRole item=$itemId language=$languageCode '
-            'match=$match durationMs=${utterance.durationMs}\n'
-            '    live="${liveText.trim()}"\n'
-            '    file="${fileText.trim()}"');
+        '🔬 [DuoSTT-OBS]',
+        'speaker=$speakerRole utt=$utteranceId language=$languageCode '
+            'durationMs=${utterance.durationMs} '
+            'text="${text.trim()}"');
   }
 
   Future<String?> _saveWav(DuoAbUtterance utterance) async {
@@ -407,10 +303,6 @@ class DuoSttAbProbe {
 
   void dispose() {
     _disposed = true;
-    _preRoll.clear();
-    _preRollBytes = 0;
-    _current.clear();
-    _currentBytes = 0;
     _pending.clear();
     _pendingOrder.clear();
   }

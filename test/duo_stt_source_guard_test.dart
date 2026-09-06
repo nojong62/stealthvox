@@ -53,15 +53,21 @@ void main() {
       expect(body, isNot(contains('_sttAbProbe')));
     });
 
-    test('A/B 진단기에 PCM을 넣는 자리도 로컬 마이크 하나뿐이다', () {
+    test('진단기는 소리를 스스로 모으지 않는다 — 본선이 확정한 것만 본다', () {
+      // 진단이 자기 버퍼를 따로 두면 이벤트 순서 하나만 어긋나도
+      //   본선이 보낸 PCM ≠ 진단이 저장한 PCM
+      // 이 되어, WAV를 들어도 무엇을 확인한 것인지 알 수 없다.
+      expect(source, isNot(contains('_sttAbProbe?.addPcm(')),
+          reason: '진단기가 소리를 다시 모으면 비교 대상이 갈라진다');
       final Iterable<Match> feeds =
-          RegExp(r'_sttAbProbe\?\.addPcm\(').allMatches(source);
-      expect(feeds.length, 1,
-          reason: '진단기에 두 곳에서 소리를 넣으면 비교 대상이 뒤섞인다');
-      // 그 한 곳은 팬아웃의 세 번째 갈래다 = 마이크 스트림에서만 온다.
-      final int at = feeds.single.start;
-      final String around = source.substring(at - 200, at + 60);
-      expect(around, contains('toProbe:'));
+          RegExp(r'_sttAbProbe\?\.observe\(').allMatches(source);
+      expect(feeds.length, 2,
+          reason: '직접 대화와 만능 통역 각각의 발화 확정 자리 하나씩');
+      // 두 자리 모두 **소리가 닫히는 그 순간**이다.
+      for (final m in feeds) {
+        final String around = source.substring(m.start - 300, m.start);
+        expect(around, contains('onUtteranceClosed'));
+      }
     });
 
     test('전사 팬아웃에 물리는 것은 이 단말 마이크뿐이다 (통로별 하나씩)', () {

@@ -197,11 +197,18 @@ void main() {
       expect(duo, contains('const int kDuoVadSilenceDurationMs = 1500;'));
     });
 
-    test('듀오의 두 세션이 다 그 값을 넘긴다', () {
+    test('듀오의 두 경로가 같은 종료 기준을 쓴다', () {
+      // 침묵을 재는 주체가 OpenAI Server VAD에서 Deepgram으로 옮겼다.
+      // 값은 같은 뜻으로 이어진다 — 한 문장 안의 600~1100ms 쉼에서 끊기지
+      // 않게 하는 것이 목적이다.
+      final endpoint =
+          _read('lib/custom_code/services/duo_deepgram_endpoint.dart');
+      expect(endpoint, contains('const int kDuoUtteranceEndMs = 1500;'));
+      expect(endpoint,
+          contains(r"'&utterance_end_ms=$kDuoUtteranceEndMs'"));
+      // 직접 대화와 통역이 같은 파이프라인을 쓰므로 값도 하나다.
       expect(
-          RegExp(r'vadSilenceDurationMs: kDuoVadSilenceDurationMs,')
-              .allMatches(duo)
-              .length,
+          RegExp(r'DuoSttPipeline\(').allMatches(duo).length,
           2,
           reason: '직접 대화와 통역 둘 다 같은 사람의 같은 말버릇을 듣는다');
     });

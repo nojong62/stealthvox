@@ -68,9 +68,10 @@ void main() {
   });
 
   group('내 발화가 끝나면 다시 깨운다', () {
-    test('onUtteranceCommitted가 깨우는 훅이다', () {
-      // 새 폴링 타이머를 만들지 않는 근거 — 말이 끝나는 순간을 서버가 알려 준다.
-      final int at = duo.indexOf('session.onUtteranceCommitted =',
+    test('소리가 닫히는 순간이 깨우는 훅이다', () {
+      // 새 폴링 타이머를 만들지 않는 근거 — 말이 끝나는 순간을 경계 센서가
+      // 알려 준다(`UtteranceEnd`). 훅의 이름만 바뀌었고 자리는 그대로다.
+      final int at = duo.indexOf('session.onUtteranceClosed =',
           duo.indexOf('Future<bool> _ensureInterpreterStt('));
       expect(at, greaterThan(-1));
       final String body = duo.substring(at, at + 700);

@@ -49,7 +49,9 @@ void main() {
       final region = directSttRegion();
       expect(region,
           contains('final String sttLanguageCode = _mapLanguageToCode(_myNative());'));
-      expect(region, contains('languageCode: sttLanguageCode'));
+      // 옛 경로는 소켓을 열 때 한 번 굳혔다. 새 경로는 발화마다 읽지만
+      // **돌려주는 값은 언제나 그 지역변수**다 — 직접 대화는 로비값 고정이다.
+      expect(region, contains('originLanguageCode: () => sttLanguageCode'));
     });
 
     test('직접 대화는 자동 감지로 열지 않는다', () {

@@ -38,6 +38,7 @@ import '/custom_code/services/duo_partner_echo.dart';
 import '/custom_code/services/history_finalize.dart';
 import '/custom_code/services/duo_transcript_gate.dart';
 import '/custom_code/services/duo_stt_ab_probe.dart';
+import '/custom_code/services/duo_stt_pipeline.dart';
 import '/custom_code/services/pcm_audio_utils.dart'
     show kStealthVoxSttSampleRate;
 import '/custom_code/services/origin_language_session.dart'
@@ -680,7 +681,16 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   DuoPcmJitterPlayer? _jitterPlayer;
   PreparedAudioCapture? _directCapture;
   StreamSubscription<Uint8List>? _directCaptureSub;
-  OpenAiStreamingTranscribeSession? _directStt;
+  DuoSttPipeline? _directStt;
+
+  /// 📡 발화 경계를 재는 Deepgram 키. **글자를 만드는 데 쓰지 않는다.**
+  String _deepgramKey = "";
+
+  /// 발화 id → 그 발화의 `voicedMs`. 소리가 닫힐 때 적고 전사문이 올 때 읽는다.
+  ///
+  /// 옛 Server VAD는 세션이 이 장부를 들고 있었다. 경계가 앱으로 넘어왔으니
+  /// 장부도 여기로 온다.
+  final Map<String, int?> _directVoicedMs = <String, int?>{};
 
   /// 마이크 한 줄기를 통화·전사 두 갈래로 나누는 자리. 전사로 들어가는 PCM은
   /// 여기를 반드시 지나므로, 출처가 로컬 마이크인지가 이 한 곳에서 보장된다.
@@ -750,7 +760,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   // 말이 끝나야 비로소 보내기 시작하니, 길게 말할수록 파일도 업로드도 커졌다.
   // 이제 말하는 동안 PCM이 계속 흘러가고 발화 종료는 서버 VAD가 판단한다 —
   // 직접 대화가 이미 쓰는 세션과 같은 것이다.
-  OpenAiStreamingTranscribeSession? _interpStt;
+  DuoSttPipeline? _interpStt;
   PreparedAudioCapture? _interpCapture;
   StreamSubscription<Uint8List>? _interpCaptureSub;
 
@@ -1711,6 +1721,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       if (mounted) {
         setState(() {
           _openAiKey = remoteConfig.getString('OpenAIAPIKey');
+          // 📡 발화 경계 센서용. 글자는 만들지 않는다(`DuoDeepgramEndpointSensor`).
+          _deepgramKey = remoteConfig.getString('DeepgramAPIKey');
           // Remote Config가 1순위, 비어 있으면 빌드 타임 값을 유지한다.
           if (relayUrl.isNotEmpty) _relayUrl = relayUrl;
           if (relayToken.isNotEmpty) _relayToken = relayToken;
@@ -2173,9 +2185,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           _utteranceRms?.addPcm(bytes);
           _micLiveMeter?.addPcm(bytes);
         },
-        // 갈래 4 — 진단. release에서는 `_sttAbProbe`가 null이라 아무 일도 없다.
+        // 갈래 4 — 통짜 녹음. 발화 단위 진단은 이제 소리를 따로 모으지 않고
+        //   본선이 확정한 PCM을 건네받는다(`DuoSttAbProbe.observe`).
         toProbe: (bytes) {
-          _sttAbProbe?.addPcm(bytes);
           _sttAbCallRecorder?.add(bytes);
         },
         onLog: _duoDiagOn ? _lgDuo : null,
@@ -2398,9 +2410,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     }
 
     final probe = DuoSttAbProbe(
-      apiKey: _openAiKey,
       speakerRole: _myRole,
-      // 스트리밍 소켓에 박은 것과 **같은 값**이어야 비교가 성립한다.
+      // 최종 전사에 넘긴 것과 **같은 값**이어야 로그가 맞는다.
       languageCode: languageCode,
       sampleRate: kStealthVoxSttSampleRate,
       saveWavDir: wavDir,
@@ -2434,41 +2445,54 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     // 스트리밍 소켓과 진단기가 **같은 언어 값**을 봐야 한다. 두 번 계산하면
     // 나중에 한쪽만 바뀌어 비교가 조용히 망가진다.
     final String sttLanguageCode = _mapLanguageToCode(_myNative());
-    final session = OpenAiStreamingTranscribeSession(
-      apiKey: _openAiKey,
-      languageCode: sttLanguageCode,
+    // 📡 [DUO-ENDPOINT] 경계는 Deepgram이, 글자는 gpt-transcribe가 맡는다.
+    //   Server VAD가 하던 두 일(경계 판정 + 전사)을 갈라 놓은 것이 이 줄이다.
+    final session = DuoSttPipeline(
+      openAiKey: _openAiKey,
+      deepgramKey: _deepgramKey,
+      idPrefix: 'duo_direct',
+      mode: 'direct',
+      // 🌐 직접 대화의 Origin은 로비 설정 그대로다. 통역과 달리 첫 발화로
+      //   판정하지 않는다.
+      originLanguageCode: () => sttLanguageCode,
       onLog: (tag, msg) => _lgDuo('[DIRECT-STT]$tag', msg),
-      // 🎙️ 폰을 손에 들지 않는 자리다. 먼 소리를 잡고 첫 음절을 지킨다.
-      // 🗣️ 한 문장을 조각내지 않는다. 직접 대화의 글자는 History로만 가므로
-      //   늦어져도 대화 자체는 릴레이 음성이라 그대로다.
-      vadSilenceDurationMs: kDuoVadSilenceDurationMs,
     );
+    // 🔁 소켓이 끊겨도 통화가 살아 있으면 다시 잇는다. 안 이으면 그 뒤의
+    //   말이 통째로 History에 안 남는다.
     session.shouldReconnect = () => _isDirectGenerationCurrent(generation);
-    // 발화 순서는 전사 응답이 돌아온 순서가 아니라 **말을 시작한 시각** 기준이다.
-    // 서버 VAD가 speech_started를 줄 때 찍어 두고, completed에 그대로 붙인다.
-    session.onSpeechStarted = () {
-      if (!_isDirectGenerationCurrent(generation)) return;
-      _directSpeechStartedAt = DateTime.now();
-      // 🔉 여기서부터 세기를 쌓는다. 이전 발화의 누적은 버려진다.
-      _utteranceRms?.beginUtterance();
-      // 🔬 같은 순간부터 진단기도 소리를 모은다(고리에 담긴 앞소리 포함).
-      _sttAbProbe?.beginUtterance();
-    };
-    // 🔬 item_id가 정해지는 유일한 자리. 여기서 소리와 전사문을 잇는다.
-    session.onUtteranceCommitted = (itemId, voicedMs, voicedSource) {
-      if (!_isDirectGenerationCurrent(generation)) return;
-      _utteranceRms?.commitUtterance(itemId);
-      _sttAbProbe?.commitUtterance(itemId, voicedMs, voicedSource);
-    };
-    // 🔉 소켓이 끊겼다 붙는 동안의 소리는 어느 발화의 것도 아니다.
-    //   장부를 비워, 끊기기 전 세기가 다음 발화를 통과시키지 못하게 한다.
+    // 🔉 다시 잇는 동안의 소리는 어느 발화의 것도 아니다. 장부를 비워,
+    //   끊기기 전 세기가 다음 발화를 통과시키지 못하게 한다.
     session.onReconnecting = (attempt) {
       if (!_isDirectGenerationCurrent(generation)) return;
       _utteranceRms?.reset();
     };
-    session.onTranscriptCompleted = (itemId, text) {
-      final voicedMs = session.utteranceVoicedMsOf(itemId);
-      final voicedSrc = session.utteranceVoicedSourceOf(itemId) ?? 'none';
+    // 발화 순서는 전사 응답이 돌아온 순서가 아니라 **말을 시작한 시각** 기준이다.
+    session.onSpeechStarted = (utteranceId) {
+      if (!_isDirectGenerationCurrent(generation)) return;
+      _directSpeechStartedAt = DateTime.now();
+      // 🔉 여기서부터 세기를 쌓는다. 이전 발화의 누적은 버려진다.
+      _utteranceRms?.beginUtterance();
+    };
+    // 🔬 소리가 닫히는 유일한 자리. 세기를 여기서 멈추고, 진단기는 **본선이
+    //   확정한 바로 그 PCM**을 건네받는다(자기가 다시 모으지 않는다).
+    session.onUtteranceClosed = (utteranceId, utterance, voicedMs) {
+      if (!_isDirectGenerationCurrent(generation)) return;
+      _utteranceRms?.commitUtterance(utteranceId);
+      _sttAbProbe?.observe(utterance, voicedMs: voicedMs);
+      _directVoicedMs[utteranceId] = voicedMs;
+    };
+    session.onFailed = (utteranceId, reason) {
+      if (!_isDirectGenerationCurrent(generation)) return;
+      _directVoicedMs.remove(utteranceId);
+      _lgDuo('[DIRECT-STT]', 'transcribe_failed utt=$utteranceId $reason');
+    };
+    session.onTranscript = (result) {
+      final String itemId = result.utteranceId;
+      final String text = result.text;
+      final voicedMs = _directVoicedMs.remove(itemId);
+      // 옛 Server VAD의 `server`/`local` 두 갈래 중 로컬 폴백과 같은 식이다
+      //   (`DuoSttPipeline._voicedMsOf`). 이름을 그대로 둬 로그가 이어진다.
+      const String voicedSrc = 'local';
       // 🔬 [DUO-DIAG] **가장 먼저 찍는다.** 어떤 이유로 버려지든, GPT가
       //   무엇을 돌려줬는지는 남아야 앱 필터와 전사기를 갈라 볼 수 있다.
       _lgDirectSttRaw(
@@ -2476,15 +2500,15 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         text: text,
         voicedMs: voicedMs,
         voicedSrc: voicedSrc,
-        languageCode: session.languageCode,
+        languageCode: result.languageCode,
       );
-      // 🔬 [DUO-AB] **어떤 판정보다 먼저 견준다.** 앱이 버릴 발화일수록
+      // 🔬 [DUO-OBSERVE] **어떤 판정보다 먼저 남긴다.** 앱이 버릴 발화일수록
       //   "GPT가 무엇을 들었는가"가 중요하다. 흘려보내므로 통화도 저장도
       //   이 요청을 기다리지 않는다.
       final probe = _sttAbProbe;
       if (probe != null) {
-        unawaited(probe.compare(itemId, text).catchError((Object e) {
-          _lgDuoDev('[DuoSTT-AB]', 'compare_failed(${e.runtimeType})');
+        unawaited(probe.noteTranscript(itemId, text).catchError((Object e) {
+          _lgDuoDev('[DuoSTT-OBS]', 'note_failed(${e.runtimeType})');
         }));
       }
       if (!_canSaveDirectTranscript(generation)) {
@@ -2663,6 +2687,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       sourceLang: _myNative(),
       channelMsgId: channelId,
     );
+    // 🧭 [DUO-CONTEXT] **수용된 말만** 다음 발화의 낱말 힌트가 된다.
+    //   버려진 글자를 힌트로 주면 다음 전사가 그쪽으로 끌려간다.
+    _directStt?.noteAccepted(trimmed);
     // 여기까지 오면 저장 판정은 전부 통과했다. 글자를 손대지 않았으므로
     // finalText는 GPT raw를 trim한 것과 같아야 한다 — 다르면 위 어딘가에서
     // 누가 문장을 고친 것이다.
@@ -2875,28 +2902,30 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _interpStt = null;
     }
     final int generation = ++_interpGeneration;
-    final session = OpenAiStreamingTranscribeSession(
-      apiKey: _openAiKey,
-      // 🗣️ 한 문장을 조각내지 않는다. 조각이 나면 두세 글자짜리가 생기고,
-      //   그것은 번역이 비어 통째로 버려진다(2026-09-04 실기기 seq=2).
-      vadSilenceDurationMs: kDuoVadSilenceDurationMs,
+    // 📡 [DUO-ENDPOINT] 직접 대화와 **같은 파이프라인**이다. 두 모드가 같은
+    //   마이크 PCM을 쓰고 같은 문제를 푼다 — 경계는 Deepgram이, 글자는
+    //   gpt-transcribe가 맡는다. 갈리는 것은 이 뒤(번역·TTS·양보)뿐이다.
+    final session = DuoSttPipeline(
+      openAiKey: _openAiKey,
+      deepgramKey: _deepgramKey,
+      idPrefix: 'duo_interp',
+      mode: 'interpreter',
       // 🌐 [INTERP-ORIGIN] **판정 전까지는 언어를 박지 않는다.**
       //   박아 두면 로비값이 틀렸을 때 그 언어로 음차된 글자가 돌아와
       //   (한국어로 박힌 채 영어를 말하면 한글 음차) 불일치가 보이지 않는다.
       //   판정이 끝나면 `_settleInterpreterOrigin`이 곧바로 박는다.
       //
-      //   ⚠️ **플래그가 꺼져 있으면 예전과 한 글자도 다르지 않다** —
-      //   로비값을 그대로 박는다. 그래야 v147에서 지연 개선만 순수하게
-      //   볼 수 있다.
+      //   ⚠️ **발화를 확정하는 순간 읽는다.** 옛 경로는 소켓을 열 때 한 번
+      //   굳혔지만, 여기서는 매 발화가 그 시점의 판정 상태를 본다 — 판정이
+      //   끝난 다음 발화부터 곧바로 확정된 Origin으로 전사된다.
       //
       //   ⚠️ 직접 대화(`_startDirectStt`)는 어느 경우에도 로비값을 박는다 —
-      //   이번 변경은 만능 통역 전용이다.
-      languageCode:
+      //   이 갈래는 만능 통역 전용이다.
+      originLanguageCode: () =>
           (!kDuoInterpOriginCheck || OriginLanguageSession.instance.settled)
               ? _mapLanguageToCode(_myNative())
               : '',
       onLog: (tag, msg) => _lgDuo('[INTERP-STT]$tag', msg),
-      // Server VAD는 공용 초기값을 쓴다 — 직접 대화와 같다.
     );
     // 🌐 [INTERP-ORIGIN] 소켓을 어떤 언어 상태로 열었는지 한 줄로 남긴다.
     //   `mode=pinned`이면 이번 세션에서 언어 판정은 더 돌지 않는다.
@@ -2905,11 +2934,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         'stt_open '
             'mode=${(!kDuoInterpOriginCheck || OriginLanguageSession.instance.settled) ? 'pinned' : 'auto'} '
             'declared=${_myNative()} flag=${kDuoInterpOriginCheck ? 'on' : 'off'}');
-    session.shouldReconnect = () =>
-        !_isExiting && _isConversationActive && generation == _interpGeneration;
     // 발화 시작/종료는 **화면과 History 순서용**이다. 파이프라인은 여전히
-    // `transcription.completed`에서만 열린다(한 발화가 두 번 처리되지 않는다).
-    session.onSpeechStarted = () {
+    // 전사문이 도착할 때만 열린다(한 발화가 두 번 처리되지 않는다).
+    session.onSpeechStarted = (utteranceId) {
       if (generation != _interpGeneration) return;
       _interpSpeechStartedAt = DateTime.now();
       // 🔉 여기서부터 세기를 쌓는다. 직통화(:1931)와 같은 자리, 같은 뜻이다.
@@ -2918,10 +2945,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         _setInterpMicPhase(InterpMicPhase.speaking);
       }
     };
-    // 🔬 item_id가 정해지는 유일한 자리. 여기서 소리와 전사문을 잇는다.
-    session.onUtteranceCommitted = (itemId, voicedMs, voicedSource) {
+    // 🔬 소리가 닫히는 유일한 자리. 여기서 소리와 전사문을 잇는다.
+    session.onUtteranceClosed = (itemId, utterance, voicedMs) {
       if (generation != _interpGeneration) return;
       _utteranceRms?.commitUtterance(itemId);
+      _sttAbProbe?.observe(utterance, voicedMs: voicedMs);
       // 🗣️ [INTERP-YIELD] **내 발화가 끝났다 = 미뤄 둔 상대 음성을 틀 때다.**
       //   이 자리가 깨우는 훅이다. 별도 타이머로 큐를 들여다보지 않는 이유가
       //   이것이다 — 말이 끝나는 순간을 이미 서버가 알려 준다.
@@ -2939,10 +2967,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           ? InterpMicPhase.listening
           : InterpMicPhase.gated);
     };
-    session.onTranscriptCompleted = (itemId, text) {
+    session.onTranscript = (result) {
       if (generation != _interpGeneration) return;
-      unawaited(_onInterpreterTranscript(generation, itemId, text));
+      unawaited(_onInterpreterTranscript(
+          generation, result.utteranceId, result.text));
     };
+    session.shouldReconnect = () =>
+        !_isExiting && _isConversationActive && generation == _interpGeneration;
     // 🔁 [RECONNECT] 소켓이 끊겼다 붙는 동안 화면에 그 사실을 적는다.
     //   마이크는 **닫지 않는다** — 끊긴 동안 한 말은 서버에 안 닿지만, 붙는
     //   순간 다음 말을 바로 받아야 한다. 닫으면 스스로 안 돌아온다.
@@ -3695,6 +3726,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     }
 
     BillingTicker.instance.resumeFromActivity('duo_stt_result');
+    // 🧭 [DUO-CONTEXT] 소리의 근거를 통과한 말만 다음 발화의 낱말 힌트가 된다.
+    _interpStt?.noteAccepted(trimmed);
 
     final String lowerRaw = trimmed.toLowerCase();
     final String lowerClean =
@@ -4481,7 +4514,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   ///   11:48:18  flush_on_close            말하던 중에 마이크가 닫힘
   ///   → 74자 + 57자 + 5자 세 조각이 각각 따로 올라가 각각 번역됐다.
   ///
-  /// 판단은 전사 세션의 [OpenAiStreamingTranscribeSession.isUserSpeaking]
+  /// 판단은 전사 파이프라인의 [DuoSttPipeline.isUserSpeaking]
   /// 하나만 본다(`speech_started` 뒤 `committed` 전). `hasPendingUtterance`는
   /// 쓰지 않는다 — 그건 "전사 대기 중"까지 포함해서, 이미 말을 마친 뒤에도
   /// 참이라 상대 음성이 필요 이상으로 늦어진다.
