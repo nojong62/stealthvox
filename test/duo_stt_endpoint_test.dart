@@ -16,11 +16,9 @@ import 'package:stealth_vox/custom_code/services/openai_transcribe_service.dart'
 import 'package:stealth_vox/custom_code/services/pcm_audio_utils.dart';
 
 /// [ms] 길이의 조각 하나. 값은 중요하지 않고 길이만 본다.
-Uint8List frame(int ms) =>
-    Uint8List(ms * kStealthVoxSttSampleRate * 2 ~/ 1000);
+Uint8List frame(int ms) => Uint8List(ms * kStealthVoxSttSampleRate * 2 ~/ 1000);
 
-String utteranceEnd({num lastWordEnd = 3.2}) =>
-    jsonEncode(<String, dynamic>{
+String utteranceEnd({num lastWordEnd = 3.2}) => jsonEncode(<String, dynamic>{
       'type': 'UtteranceEnd',
       'last_word_end': lastWordEnd,
     });
@@ -217,8 +215,23 @@ void main() {
     });
 
     test('언어를 그대로 싣는다', () {
-      expect(buildDuoDeepgramEndpointUri('ja').queryParameters['language'],
-          'ja');
+      expect(
+          buildDuoDeepgramEndpointUri('ja').queryParameters['language'], 'ja');
+    });
+
+    test('모델을 생략하지 않는다 — 빼면 base-general이 붙는다', () {
+      // 글자를 쓰지는 않지만 UtteranceEnd가 그 글자의 마지막 단어 시각에
+      // 기댄다. 단어를 잘 잡는 모델일수록 경계도 안정적이다.
+      expect(uri.queryParameters['model'], 'nova-3');
+    });
+
+    test('언어를 모를 때 빈 값을 보내지 않는다', () {
+      // Deepgram의 기본은 en이다. 한국어를 말하는데 영어 모델로 들으면
+      // 단어가 확정되지 않고, UtteranceEnd가 제때 오지 않는다.
+      expect(buildDuoDeepgramEndpointUri('').queryParameters['language'],
+          kDuoDeepgramAutoLanguage);
+      expect(buildDuoDeepgramEndpointUri('   ').queryParameters['language'],
+          isNot(''));
     });
   });
 

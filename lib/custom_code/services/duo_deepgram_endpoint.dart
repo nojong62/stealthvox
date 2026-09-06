@@ -50,13 +50,29 @@ import 'pcm_audio_utils.dart';
 /// **빨리 띄우는 것보다 한 문장을 지키는 것이 앞선다.**
 const int kDuoUtteranceEndMs = 1500;
 
+/// 언어를 아직 모를 때 쓰는 값. **비워 두면 안 된다** — Deepgram의 기본은
+/// `en`이라, 한국어를 말하는데 영어 모델로 듣게 된다. 그러면 단어가 확정되지
+/// 않고, 마지막 단어 시각에 기대는 UtteranceEnd가 제때 오지 않는다.
+///
+/// 만능 통역이 첫 발화로 Origin을 판정하기 전까지 여기에 머문다. 판정이
+/// 끝나면 `switchLanguage`가 실제 언어로 소켓을 다시 연다.
+const String kDuoDeepgramAutoLanguage = 'multi';
+
 /// 직접 대화와 만능 통역이 같은 값으로 시작한다. 두 모드의 성질이 실제로
 /// 다르다는 것이 로그로 확인되면 그때 갈라 잡는다.
+///
+/// 🎯 **모델을 생략하지 않는다.** 빼면 최신 모델이 아니라 `base-general`이
+///   붙는다. Deepgram의 글자를 최종 결과로 쓰지는 않지만, UtteranceEnd가
+///   **그 글자의 마지막 단어 시각**에 기대므로 단어를 안정적으로 잡는
+///   모델일수록 경계도 안정적이다. Nova-3는 한국어(ko)를 정식 지원한다.
 Uri buildDuoDeepgramEndpointUri(String languageCode) {
+  final String language = languageCode.trim().isEmpty
+      ? kDuoDeepgramAutoLanguage
+      : languageCode.trim();
   return Uri.parse(
     'wss://api.deepgram.com/v1/listen'
     '?model=nova-3'
-    '&language=$languageCode'
+    '&language=$language'
     // 🔇 글자를 쓰지 않으므로 꾸밈은 필요 없다. 다만 끄면 안 되는 것이 둘이다.
     //   · interim_results — UtteranceEnd가 단어 시각을 이걸로 잡는다
     //   · vad_events      — SpeechStarted가 여기서 온다
@@ -141,7 +157,8 @@ class DuoDeepgramEndpointSensor {
         cancelOnError: false,
       );
       _closed = false;
-      _lg('connected lang=$languageCode utteranceEndMs=$kDuoUtteranceEndMs');
+      _lg('connected model=nova-3 lang=${uri.queryParameters['language']} '
+          'utteranceEndMs=$kDuoUtteranceEndMs');
       return true;
     } catch (e) {
       _lg('connect_failed ${e.runtimeType}');
