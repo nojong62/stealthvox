@@ -104,8 +104,11 @@ void main() {
     });
 
     test('히스토리 필터칩 키는 room_name 매칭용이라 옛 이름이다', () {
+      // 줄바꿈을 맞춰 읽는다. Windows 체크아웃은 CRLF라, 그대로 읽으면
+      // 코드가 멀쩡한데도 여러 줄에 걸친 기대가 어긋난다.
       final list = File('lib/custom_code/widgets/chat_history_list_master.dart')
-          .readAsStringSync();
+          .readAsStringSync()
+          .replaceAll('\r\n', '\n');
       expect(list, contains("case 'Anyone':\n        return 'Circle';"));
       expect(list, contains("case 'Roleplay':\n        return 'Scenario';"));
     });
