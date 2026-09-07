@@ -12,16 +12,18 @@ import 'package:flutter/foundation.dart';
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
 // ====================================================================
-// 🏷️ [용어 대응표] 이름이 두 층이다. 헷갈리지 말 것.
+// 🏷️ [용어] 이름이 이제 한 층이다.
 //   · 코드(파일·클래스·변수) : circle_talk / CircleTalk
 //   · 화면 표시명            : Circle Talk
-//   · Firestore 저장 id      : free_talk  ← **여기만 옛 이름이다**
+//   · Firestore 저장 id      : circle_talk
 //
-//   표시명은 Free Talk → Anyone → Circle Talk 순으로 바뀌어 왔고,
-//   코드도 2026-08-26에 표시명에 맞춰 통일했다. 그러나 저장 id는
-//   처음부터 free_talk 하나였고 앞으로도 그대로다 — 과거 대화 기록의
-//   분류 키라서, 바꾸면 이미 저장된 방이 미분류로 떨어진다.
-//   별칭 해석 테이블: chat_history_master.dart _inferHistoryMode()
+//   표시명은 Free Talk → Anyone → Circle Talk 순으로 바뀌어 왔고, 코드는
+//   2026-08-26에 표시명을 따라갔다. 저장 id만 `free_talk`으로 남아 있었는데,
+//   그것도 2026-09-07에 맞췄다 — 세 층이 갈려 있는 동안 읽는 사람마다 다른
+//   이름을 기억해야 했고, 실제로 그 때문에 오독이 났다.
+//
+//   ⚠️ **그 전에 저장된 방은 미분류로 떨어진다.** 테스트 기간이라 보존할
+//   기록이 없다는 판단으로 옛 별칭을 남기지 않았다(실장님 결정).
 // ====================================================================
 
 import 'package:flutter/services.dart'; // 🔬 [v3.1] Clipboard용
@@ -369,7 +371,7 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
   // ─────────────────────────────────────────────────────────────────────────
 
   @override
-  String get billingModeName => 'free_talk';
+  String get billingModeName => 'circle_talk';
 
   /// 롤오버와 체험 종료는 유휴보다 먼저 본다. 말하는 중이면 끝날 때까지
   /// 기다렸다 넘기고, 그동안 유휴 누적을 붙잡아 둔다.
@@ -1092,8 +1094,8 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
         if (!TrialFlowState.instance.isTrial) {
           BillingTicker.instance.resumeFromActivity(
               request.speakerType == TtsSpeakerType.user
-                  ? 'free_talk_user_tts_start'
-                  : 'free_talk_ai_tts_start');
+                  ? 'circle_talk_user_tts_start'
+                  : 'circle_talk_ai_tts_start');
         }
         // ⏱️ [PERF] 유저/AI 첫 PCM 시점 — 이게 실제로 소리가 시작되는 순간이다.
         _logTurnPerf(request.speakerType == TtsSpeakerType.user
@@ -1112,8 +1114,8 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
         if (!TrialFlowState.instance.isTrial) {
           BillingTicker.instance.resumeFromActivity(
               request.speakerType == TtsSpeakerType.user
-                  ? 'free_talk_user_tts_end'
-                  : 'free_talk_ai_tts_end');
+                  ? 'circle_talk_user_tts_end'
+                  : 'circle_talk_ai_tts_end');
         }
       },
       // 🔊 [TTS-HIST] 정상 완료된 음원만 온다 (guide4 11장). 히스토리 캐시에
@@ -1133,7 +1135,7 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
     BillingTicker.instance.setRate(BillingRate.full);
     if (!TrialFlowState.instance.isTrial) {
       BillingTicker.instance.resume();
-      BillingTicker.instance.logMode('free_talk');
+      BillingTicker.instance.logMode('circle_talk');
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) resetBillingIdle();
@@ -2091,7 +2093,7 @@ $kSpokenReplyLengthPolicy
         onTranscriptUpdate: (transcript) {
           _markConversationActivity();
           if (!TrialFlowState.instance.isTrial) {
-            BillingTicker.instance.resumeFromActivity('free_talk_stt_partial');
+            BillingTicker.instance.resumeFromActivity('circle_talk_stt_partial');
           }
           if (!isCurrentGeneration()) {
             _log('🎤 [LISTEN-STALE]', 'onTranscriptUpdate ignored');
@@ -2112,7 +2114,7 @@ $kSpokenReplyLengthPolicy
         onTurnEnded: (transcript, {bool speechFinal = false}) {
           _markConversationActivity();
           if (!TrialFlowState.instance.isTrial) {
-            BillingTicker.instance.resumeFromActivity('free_talk_stt_result');
+            BillingTicker.instance.resumeFromActivity('circle_talk_stt_result');
           }
           if (!isCurrentGeneration()) {
             _log('🎤 [LISTEN-STALE]', 'onTurnEnded ignored');
@@ -2166,7 +2168,7 @@ $kSpokenReplyLengthPolicy
         return false;
       }
       if (!TrialFlowState.instance.isTrial) {
-        BillingTicker.instance.resumeFromActivity('free_talk_mic_start');
+        BillingTicker.instance.resumeFromActivity('circle_talk_mic_start');
       }
       _log('🎤 [LISTEN-05]', 'connectAndStart 완료');
       _reportListeningReady();
@@ -2282,7 +2284,7 @@ $kSpokenReplyLengthPolicy
       //   (2026-08-14 실기기 로그에서 확인: 1턴 CONT-WINDOW 없음).
       _aiPlaybackStarted = false;
       if (!TrialFlowState.instance.isTrial) {
-        BillingTicker.instance.resumeFromActivity('free_talk_mic_start');
+        BillingTicker.instance.resumeFromActivity('circle_talk_mic_start');
       }
       _log('🎤 [LISTEN-05]',
           '스트리밍 전사 listening 시작 generation=$listenGeneration');
@@ -2728,7 +2730,7 @@ $kSpokenReplyLengthPolicy
         _logTurnPerf('USER_KOREAN_FINAL_MERGED');
         _markConversationActivity();
         if (!TrialFlowState.instance.isTrial) {
-          BillingTicker.instance.resumeFromActivity('free_talk_stt_result');
+          BillingTicker.instance.resumeFromActivity('circle_talk_stt_result');
         }
         _startAssistantTurn(merged, reason: reason);
         return;
@@ -2899,7 +2901,7 @@ $kSpokenReplyLengthPolicy
 
     _markConversationActivity();
     if (!TrialFlowState.instance.isTrial) {
-      BillingTicker.instance.resumeFromActivity('free_talk_stt_partial');
+      BillingTicker.instance.resumeFromActivity('circle_talk_stt_partial');
     }
 
     if (_streamingDeltaItemId != itemId) {
@@ -3015,7 +3017,7 @@ $kSpokenReplyLengthPolicy
       _logTurnPerf('USER_KOREAN_FINAL');
       _markConversationActivity();
       if (!TrialFlowState.instance.isTrial) {
-        BillingTicker.instance.resumeFromActivity('free_talk_stt_result');
+        BillingTicker.instance.resumeFromActivity('circle_talk_stt_result');
       }
 
       // 🔇 [NOISE-GATE] Deepgram 경로와 완전히 같은 게이트. 여기서 걸린 발화는
@@ -3114,7 +3116,7 @@ $kSpokenReplyLengthPolicy
       _logTurnPerf('USER_KOREAN_FINAL');
       _markConversationActivity();
       if (!TrialFlowState.instance.isTrial) {
-        BillingTicker.instance.resumeFromActivity('free_talk_stt_result');
+        BillingTicker.instance.resumeFromActivity('circle_talk_stt_result');
       }
     }
     _updateBubbleText(_activeHostBubbleId, _pendingUserTranscript);
@@ -4848,7 +4850,7 @@ $kSpokenReplyLengthPolicy
 
         final newSession = await userDocRef.collection('sessions').add({
           'session_no': nextSessionNo,
-          'mode': 'free_talk',
+          'mode': 'circle_talk',
           'circle_description': widget.circleDescription,
           'user_label': 'the user',
           'partner_label': 'AI partner',
@@ -4913,11 +4915,11 @@ $kSpokenReplyLengthPolicy
       await _myHistoryRef!.set({
         'created_at': FieldValue.serverTimestamp(),
         'room_name': "Circle Talk · ${widget.circleDescription}",
-        'mode': 'free_talk',
+        'mode': 'circle_talk',
         'circle_description': widget.circleDescription,
         'user_label': 'the user',
         'partner_label': 'Circle member',
-        'expand_partner_type': 'free_talk',
+        'expand_partner_type': 'circle_talk',
         'is_pinned': false,
         'msg_count': 0,
         // 세션 생성 당시 언어 식별값 보존(History 동일 언어 판정 + 타겟 생성용).
@@ -5045,7 +5047,7 @@ $kSpokenReplyLengthPolicy
             'last_message_time': FieldValue.serverTimestamp(),
             'msg_count': _localMessages.length,
             'last_active': FieldValue.serverTimestamp(),
-            'mode': 'free_talk',
+            'mode': 'circle_talk',
             'circle_description': widget.circleDescription,
             'user_label': 'the user',
             'partner_label': 'Circle member',

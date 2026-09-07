@@ -12,16 +12,18 @@ import 'package:flutter/foundation.dart'; // 🎧 [STT-RAW] kDebugMode
 // DO NOT REMOVE OR MODIFY THE CODE ABOVE!
 
 // ====================================================================
-// 🏷️ [용어 대응표] 이름이 두 층이다. 헷갈리지 말 것.
+// 🏷️ [용어] 이름이 이제 한 층이다.
 //   · 코드(파일·클래스·변수) : scenario_talk / ScenarioTalk
 //   · 화면 표시명            : Scenario Talk
-//   · Firestore 저장 id      : roleplay          ← **옛 이름 그대로**
-//   · room_name              : "Roleplay Mode"   ← **옛 이름 그대로**
+//   · Firestore 저장 id      : scenario_talk
+//   · room_name              : "Scenario Talk Mode"
 //
-//   표시명과 코드는 Scenario Talk으로 통일했다(2026-08-26). 저장 id와
-//   room_name 둘은 과거 대화 기록의 분류 키라서 바꾸면 기록이 미분류로
-//   떨어진다. 절대 건드리지 말 것.
-//   별칭 해석 테이블: chat_history_master.dart _inferHistoryMode()
+//   표시명과 코드는 2026-08-26에 Scenario Talk으로 통일했고, 저장 id와
+//   room_name에 남아 있던 `roleplay` / "Roleplay Mode"도 2026-09-07에
+//   맞췄다. 세 층이 갈려 있는 동안 읽는 사람마다 다른 이름을 기억해야 했다.
+//
+//   ⚠️ **그 전에 저장된 방은 미분류로 떨어진다.** 테스트 기간이라 보존할
+//   기록이 없다는 판단으로 옛 별칭을 남기지 않았다(실장님 결정).
 // ====================================================================
 
 import 'index.dart'; // Imports other custom widgets
@@ -790,7 +792,7 @@ never by itself a reason to ask back.
   // ─────────────────────────────────────────────────────────────────────────
 
   @override
-  String get billingModeName => 'roleplay';
+  String get billingModeName => 'scenario_talk';
 
   /// 10분 롤오버는 유휴보다 먼저 본다. 지금 말하는 중이면 끝날 때까지
   /// 기다렸다 넘기고, 그동안 유휴 누적을 붙잡아 둔다 — 정산 직전에 일시정지가
@@ -976,7 +978,7 @@ never by itself a reason to ask back.
         //   평소에는 enqueue에서 이미 닫히므로 최종 안전판이다.
         _aiPlaybackStarted = true;
         _closeContinuationWindow(reason: 'ai_playback_started');
-        BillingTicker.instance.resumeFromActivity('roleplay_ai_pcm_tts_start');
+        BillingTicker.instance.resumeFromActivity('scenario_talk_ai_pcm_tts_start');
         if (_swTTS.isRunning) {
           _swTTS.stop();
           if (mounted) {
@@ -988,7 +990,7 @@ never by itself a reason to ask back.
         }
       },
       onPlaybackEnd: (_, __) {
-        BillingTicker.instance.resumeFromActivity('roleplay_ai_pcm_tts_end');
+        BillingTicker.instance.resumeFromActivity('scenario_talk_ai_pcm_tts_end');
       },
     );
 
@@ -997,7 +999,7 @@ never by itself a reason to ask back.
     BillingTicker.instance.setSessionIdentifiers();
     BillingTicker.instance.setRate(BillingRate.full);
     BillingTicker.instance.resume();
-    BillingTicker.instance.logMode('roleplay');
+    BillingTicker.instance.logMode('scenario_talk');
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) resetBillingIdle();
     });
@@ -1573,7 +1575,7 @@ never by itself a reason to ask back.
         _log('✅ [LISTEN-02]', 'onConnected 콜백 실행');
       },
       onTranscriptUpdate: (transcript) {
-        BillingTicker.instance.resumeFromActivity('roleplay_stt_partial');
+        BillingTicker.instance.resumeFromActivity('scenario_talk_stt_partial');
         if (transcript.trim().isNotEmpty && mounted) {
           setState(() {
             _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
@@ -1584,7 +1586,7 @@ never by itself a reason to ask back.
       },
       onAudioData: _appendTurnPcm,
       onTurnEnded: (transcript, {bool speechFinal = false}) {
-        BillingTicker.instance.resumeFromActivity('roleplay_stt_result');
+        BillingTicker.instance.resumeFromActivity('scenario_talk_stt_result');
         _lastTurnWasSpeechFinal = speechFinal;
         _log('🔀 [LISTEN-03]',
             'onTurnEnded 콜백 수신: "$transcript" speechFinal=$speechFinal');
@@ -1606,7 +1608,7 @@ never by itself a reason to ask back.
     );
     _log('🎤 [LISTEN-04]', 'connectAndStart 호출 직전');
     await _voiceManager!.connectAndStart();
-    BillingTicker.instance.resumeFromActivity('roleplay_mic_start');
+    BillingTicker.instance.resumeFromActivity('scenario_talk_mic_start');
     _log('🎤 [LISTEN-05]', 'connectAndStart 완료');
   }
 
@@ -1686,7 +1688,7 @@ never by itself a reason to ask back.
       return;
     }
     session.openAudioGate(reason: 'turn_start');
-    BillingTicker.instance.resumeFromActivity('roleplay_mic_start');
+    BillingTicker.instance.resumeFromActivity('scenario_talk_mic_start');
     _log('🎤 [LISTEN-05]', '스트리밍 전사 listening 시작 generation=$listenGeneration');
   }
 
@@ -2035,7 +2037,7 @@ never by itself a reason to ask back.
         _clearContinuationCandidate();
         _closeContinuationWindow(reason: reason);
         _updateBubbleText(_activeHostBubbleId, merged);
-        BillingTicker.instance.resumeFromActivity('roleplay_stt_result');
+        BillingTicker.instance.resumeFromActivity('scenario_talk_stt_result');
         _startAssistantTurn(merged, reason: reason);
         return;
       case ContinuationDecision.abandon:
@@ -2175,7 +2177,7 @@ never by itself a reason to ask back.
       return;
     }
     if (isBillingBusy) return; // AI가 말하는 중이면 유저 말풍선을 세우지 않는다
-    BillingTicker.instance.resumeFromActivity('roleplay_stt_partial');
+    BillingTicker.instance.resumeFromActivity('scenario_talk_stt_partial');
     if (_streamingDeltaItemId != itemId) {
       _streamingDeltaItemId = itemId;
       _streamingDeltaBuffer.clear();
@@ -2277,7 +2279,7 @@ never by itself a reason to ask back.
         return;
       }
 
-      BillingTicker.instance.resumeFromActivity('roleplay_stt_result');
+      BillingTicker.instance.resumeFromActivity('scenario_talk_stt_result');
       _log(
         '[STT-ROUTE]',
         'selected=streaming model=$kStreamingSttModel item=$itemId '
@@ -3972,7 +3974,7 @@ never by itself a reason to ask back.
 
         final newSession = await userDocRef.collection('sessions').add({
           'session_no': nextSessionNo,
-          'mode': 'roleplay',
+          'mode': 'scenario_talk',
           'scenario_info': {
             'keyword': _scenarioKeyword,
             'situation': _scenarioSituation,
@@ -4036,8 +4038,8 @@ never by itself a reason to ask back.
           .doc();
       await newRef.set({
         'created_at': FieldValue.serverTimestamp(),
-        'room_name': "Roleplay Mode",
-        'mode': 'roleplay', // 🆕 [ROUTER-FIX] 라우터가 Step Expand로 오인 방지
+        'room_name': "Scenario Talk Mode",
+        'mode': 'scenario_talk', // 🆕 [ROUTER-FIX] 라우터가 Step Expand로 오인 방지
         'scenario_situation': _scenarioSituation,
         'scenario_keyword': _scenarioKeyword,
         'user_role': _scenarioUserRole,
@@ -4143,7 +4145,7 @@ never by itself a reason to ask back.
             'last_active': FieldValue.serverTimestamp(),
             'chat_json': jsonEncode(roomMessages),
             'is_completed': false,
-            'mode': 'roleplay',
+            'mode': 'scenario_talk',
             'scenario_situation': _scenarioSituation,
             'scenario_keyword': _scenarioKeyword,
             'user_role': _scenarioUserRole,
@@ -5283,13 +5285,13 @@ class TtsQueueManager {
 
       try {
         BillingTicker.instance.resumeFromActivity(_currentChunkIsUser
-            ? 'roleplay_user_tts_start'
-            : 'roleplay_ai_tts_start');
+            ? 'scenario_talk_user_tts_start'
+            : 'scenario_talk_ai_tts_start');
         await _player.play(BytesSource(bytes));
         await _completer!.future.timeout(estimatedDuration);
         BillingTicker.instance.resumeFromActivity(_currentChunkIsUser
-            ? 'roleplay_user_tts_end'
-            : 'roleplay_ai_tts_end');
+            ? 'scenario_talk_user_tts_end'
+            : 'scenario_talk_ai_tts_end');
       } catch (_) {
       } finally {
         if (_completer != null && !_completer!.isCompleted) {
@@ -6050,7 +6052,7 @@ content and gist of the WHOLE conversation.
   /// 회원별 시나리오 순회 커서 키. 뒤에 uid를 붙여 저장한다.
   /// 기기 로컬(SharedPreferences)이라 앱을 지우거나 기기를 바꾸면 0부터
   /// 다시 시작한다. 기기 간 이어보기가 필요해지면 Firestore로 옮긴다.
-  static const String _scenarioCursorPrefix = 'roleplay_scenario_cursor_';
+  static const String _scenarioCursorPrefix = 'scenario_talk_cursor_';
 
   // 🗣️ 일상 100개 — 평범한 하루에 실제로 일어나는 두 사람의 대화.
   //   예전 목록은 200개가 전부 사고·응급 상황이라 "평범한 장면" 지시와

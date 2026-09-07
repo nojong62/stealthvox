@@ -6715,18 +6715,17 @@ RULES — follow exactly:
   // 🏷️ [모드 별칭 해석표 — 표시명이 바뀔 때 여기만 한 줄씩 추가한다]
   //   저장 id는 절대 바꾸지 않는다. 이미 저장된 문서가 미분류로 떨어진다.
   //     free_talk   ← 표시명 Free Talk → Anyone → Circle Talk 로 변천
-  //     roleplay    ← 표시명 Scenario Talk (room_name은 "Roleplay Mode" 유지)
+  //     scenario_talk  ← room_name "Scenario Talk Mode"
   //   기존 조건은 지우지 말고 OR로 덧붙일 것. 지우면 그 시기 기록이 죽는다.
   String _inferHistoryMode(Map<String, dynamic>? data) {
     final mode = _normalizeHistoryMode(_historyString(data, 'mode'));
     if (mode.isNotEmpty) return mode;
     final room = _historyString(data, 'room_name');
     if (room == 'Clone Mode') return 'clone';
-    if (room == 'Roleplay Mode') return 'roleplay';
+    if (room == 'Scenario Talk Mode') return 'scenario_talk';
     if (room == 'FreeTalk Mode' ||
         room == 'Free Talk Mode' ||
-        room.startsWith('Circle Talk')) return 'free_talk';
-    if (room == 'Anyone') return 'free_talk';
+        room.startsWith('Circle Talk')) return 'circle_talk';
     if (room == 'Duo Mode' || room == 'Duo Connect Mode') return 'duo';
     return '';
   }
@@ -6738,7 +6737,7 @@ RULES — follow exactly:
   /// 비어 있는 줄만 고른다), 직접 대화 줄만 여기서 타겟을 얻는다.
   bool get _usesDeferredHistoryTargets {
     final mode = _inferHistoryMode(_cachedRoomData);
-    return mode == 'free_talk' || mode == 'roleplay' || mode == 'duo';
+    return mode == 'circle_talk' || mode == 'scenario_talk' || mode == 'duo';
   }
 
   /// 🧹 [DUO-PRACTICE-FILTER] 연습 재료에서 맞장구만 뺀다.
@@ -6847,7 +6846,7 @@ RULES — follow exactly:
         'situation': '',
       };
     }
-    if (mode == 'roleplay') {
+    if (mode == 'scenario_talk') {
       String partner = _historyString(data, 'partner_label');
       if (partner.isEmpty) partner = _historyString(data, 'ai_role');
       if (partner.isEmpty)
@@ -6861,10 +6860,10 @@ RULES — follow exactly:
           ? _historyString(data, 'scenario_situation')
           : _historyString(data, 'scenario_keyword');
       return {
-        'mode': 'roleplay',
+        'mode': 'scenario_talk',
         'userLabel': user,
         'partnerLabel': partner,
-        'partnerType': 'roleplay',
+        'partnerType': 'scenario_talk',
         'situation': situation,
       };
     }
@@ -6883,8 +6882,8 @@ RULES — follow exactly:
   /// 그 대화가 곧 재료다. 옛 Clone 방도 같은 모양이라 함께 연다.
   static const Set<String> _kSpeechPracticeModes = <String>{
     'duo',
-    'free_talk',
-    'roleplay',
+    'circle_talk',
+    'scenario_talk',
     'clone',
   };
 
@@ -6913,7 +6912,7 @@ RULES — follow exactly:
       return false;
     }
     final mode = labels['mode'] ?? '';
-    if (mode == 'clone' || mode == 'roleplay') {
+    if (mode == 'clone' || mode == 'scenario_talk') {
       if (_historyString(data, 'speech_partner_type') != mode) return false;
       final savedPartner = _historyString(data, 'speech_partner_name');
       if (savedPartner.isNotEmpty && savedPartner != labels['partnerLabel']) {

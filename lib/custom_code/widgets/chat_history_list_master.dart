@@ -215,32 +215,22 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
     }
   }
 
-  // 🏷️ [필터칩 표시명] 화면에 보이는 이름만 바꾼다.
-  //   filterKey는 room_name 매칭에 그대로 쓰이므로(_selectedFilter로
-  //   rn.contains 비교) 절대 바꾸면 안 된다. 키를 'Scenario'로 바꾸면
-  //   저장된 "Roleplay Mode" 방들이 필터에서 통째로 사라진다.
-  //     Anyone   → Circle   (Circle Talk)
-  //     Roleplay → Scenario (Scenario Talk)
-  String _filterLabel(String filterKey) {
-    switch (filterKey) {
-      case 'Anyone':
-        return 'Circle';
-      case 'Roleplay':
-        return 'Scenario';
-      default:
-        return filterKey;
-    }
-  }
+  // 🏷️ [필터칩] filterKey가 곧 화면에 뜨는 이름이고, 동시에 `room_name`에
+  //   대고 찾는 글자다(`rn.contains(_selectedFilter)`).
+  //
+  //   예전에는 둘이 달라서 키를 옛 이름('Anyone' · 'Roleplay')으로 두고
+  //   표시명만 바꿔 주는 함수가 따로 있었다. 2026-09-07에 저장 이름을
+  //   표시명으로 맞추면서 그 층이 사라졌다 — 이제 키가 곧 이름이다.
+  //
+  //   ⚠️ 그 전에 저장된 방은 안 잡힌다. 테스트 기간이라 보존할 기록이
+  //   없다는 판단이다(실장님 결정).
 
-  bool _isCircleTalkRoom(String roomName) =>
-      roomName.contains("Anyone") ||
-      roomName.contains("Free Talk") ||
-      roomName.contains("Circle Talk");
+  bool _isCircleTalkRoom(String roomName) => roomName.contains("Circle Talk");
 
   IconData _getIconForRoom(String roomName) {
     if (roomName.contains("Duo")) return Icons.people;
     if (roomName.contains("Clone")) return Icons.face;
-    if (roomName.contains("Roleplay")) return Icons.smart_toy;
+    if (roomName.contains("Scenario Talk")) return Icons.smart_toy;
     if (roomName.contains("Shadowing")) return Icons.smart_toy;
     if (roomName.contains("NativeSync")) return Icons.mic_external_on;
     if (_isCircleTalkRoom(roomName)) return Icons.forum;
@@ -250,7 +240,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
   Color _getColorForRoom(String roomName) {
     if (roomName.contains("Duo")) return const Color(0xFF2563EB);
     if (roomName.contains("Clone")) return const Color(0xFF9333EA);
-    if (roomName.contains("Roleplay")) return const Color(0xFF16A34A);
+    if (roomName.contains("Scenario Talk")) return const Color(0xFF16A34A);
     if (roomName.contains("Shadowing")) return Colors.greenAccent;
     if (roomName.contains("NativeSync")) return Colors.orangeAccent;
     if (_isCircleTalkRoom(roomName)) return const Color(0xFF9333EA);
@@ -425,7 +415,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
           if (_selectedFilter == 'All') return true;
           if (data['room_name'] == null) return false;
           final rn = data['room_name'].toString();
-          if (_selectedFilter == 'Anyone') return _isCircleTalkRoom(rn);
+          if (_selectedFilter == 'Circle') return _isCircleTalkRoom(rn);
           return rn.contains(_selectedFilter);
         }).toList();
 
@@ -622,18 +612,18 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
           child: Row(
             children: _selectedFilter == 'All' || _selectedFilter == 'Keepers'
                 ? [
-                    _buildFilterChip('Duo', _filterLabel('Duo'), Icons.people),
+                    _buildFilterChip('Duo', 'Duo', Icons.people),
                     _buildFilterChip(
-                        'Anyone', _filterLabel('Anyone'), Icons.forum),
+                        'Circle', 'Circle', Icons.forum),
                     _buildFilterChip(
-                        'Roleplay', _filterLabel('Roleplay'), Icons.smart_toy),
+                        'Scenario', 'Scenario', Icons.smart_toy),
                     _buildKeepersChip(),
                   ]
                 : [
                     _buildDeleteActionChip(),
                     _buildFilterChip(
                         _selectedFilter,
-                        _filterLabel(_selectedFilter),
+                        _selectedFilter,
                         _getIconForRoom(_selectedFilter)),
                   ],
           ),

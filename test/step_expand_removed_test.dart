@@ -149,7 +149,7 @@ void main() {
       final start = history.indexOf('_kSpeechPracticeModes');
       expect(start, greaterThan(-1));
       final block = history.substring(start, start + 220);
-      for (final mode in <String>['duo', 'free_talk', 'roleplay']) {
+      for (final mode in <String>['duo', 'circle_talk', 'scenario_talk']) {
         expect(block, contains("'$mode'"), reason: mode);
       }
     });
