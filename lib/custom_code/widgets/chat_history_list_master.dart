@@ -28,6 +28,7 @@ import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
 // 보기와 비용 기능을 가르는 판정 한 벌. 공부방·과금 티커와 같은 자리를 본다.
 import '/custom_code/services/study_access.dart';
+import '/custom_code/services/openai_transcribe_service.dart';
 // 직접 통화 방을 가리는 필드 이름. 목록이 Replay 표를 붙일 때 본다.
 import '/custom_code/services/duo_canonical.dart';
 
@@ -1770,7 +1771,7 @@ class _ChatHistoryListMasterState extends State<ChatHistoryListMaster>
       var request = http.MultipartRequest(
           'POST', Uri.parse('https://api.openai.com/v1/audio/transcriptions'));
       request.headers['Authorization'] = 'Bearer $_apiKey';
-      request.fields['model'] = 'gpt-4o-mini-transcribe';
+      request.fields['model'] = OpenAiTranscribeService.model;
       request.fields['language'] = 'en';
       request.files.add(http.MultipartFile.fromBytes('file', audioBytes,
           filename: 'audio.m4a'));

@@ -34,6 +34,7 @@ import '/custom_code/services/ai_style.dart';
 import '/custom_code/services/origin_language_session.dart'
     show detectOriginScript, koreanLanguageDisplayName, textContradictsLanguage;
 import '/custom_code/services/history_finalize.dart';
+import '/custom_code/services/openai_transcribe_service.dart';
 import '/custom_code/services/transcript_repair_guard.dart';
 import 'alt_style_popup.dart';
 import '/custom_code/services/audio_silence_analyzer.dart';
@@ -2962,7 +2963,7 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
       final uri = Uri.parse('https://api.openai.com/v1/audio/transcriptions');
       final request = http.MultipartRequest('POST', uri);
       request.headers['Authorization'] = 'Bearer $_apiKey';
-      request.fields['model'] = 'gpt-4o-mini-transcribe';
+      request.fields['model'] = OpenAiTranscribeService.model;
       request.fields['language'] = 'en';
       request.files.add(await http.MultipartFile.fromPath('file', path));
       final streamed =

@@ -277,14 +277,17 @@ void main() {
   });
 
   group('🎯 최종 전사 모델', () {
-    test('Duo만 gpt-transcribe를 쓴다', () {
+    test('Duo는 gpt-transcribe를 쓴다', () {
       expect(OpenAiTranscribeService.duoFinalModel, 'gpt-transcribe');
     });
 
-    test('공용 기본값은 그대로다 — Circle·Scenario가 함께 쓴다', () {
-      expect(OpenAiTranscribeService.firstTurnModel, 'gpt-4o-transcribe');
+    test('이제 모든 모드가 같은 모델을 쓴다 — 파일 전사는 하나다', () {
+      // Duo만 먼저 옮겨 가느라 갈라 뒀던 값을 2026-09-07에 합쳤다.
+      expect(OpenAiTranscribeService.model, 'gpt-transcribe');
+      expect(OpenAiTranscribeService.firstTurnModel,
+          OpenAiTranscribeService.model);
       expect(OpenAiTranscribeService.duoFinalModel,
-          isNot(OpenAiTranscribeService.firstTurnModel));
+          OpenAiTranscribeService.model);
     });
   });
 }

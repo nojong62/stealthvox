@@ -104,7 +104,7 @@ const int kFreeTalkMaxTtsCharsPerUtterance = 800;
 // 7차 실측에서 1200ms는 실패였다 — 확정까지 210ms가 이미 흘러 남은 예산이
 // 980ms였고, mini(도착 604~1406ms)가 못 들어와 그 대기를 통째로 낭비했다.
 // 1800ms면 확정 후 약 1.6초를 기다려 실측 도착 범위를 대부분 덮는다.
-// 선택적 gpt-4o-transcribe 정확도 경로는 파일 전사 응답을 넉넉히 기다린다.
+// 선택적 gpt-transcribe 정확도 경로는 파일 전사 응답을 넉넉히 기다린다.
 const int kFreeTalkFirstTurnRetranscribeTimeoutMs = 3000;
 // 🎙️ [PCM-TEE] 재전사용 원본 음성 버퍼 상한. PCM16 mono 기준 60초.
 const int kFreeTalkTurnPcmBufferMaxBytes = kStealthVoxSttBytesPerMs * 1000 * 60;
@@ -526,7 +526,7 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
   static const int _commitWaitUncertainMs =
       kFreeTalkCommitWaitUncertainMs; // UtteranceEnd: 500ms
   // 📦 [Meaning Confidence Probe] Deepgram 결과의 전사 신뢰도를 측정한다.
-  // 낮은 confidence는 선택적 gpt-4o-transcribe 재전사 조건으로 사용한다.
+  // 낮은 confidence는 선택적 gpt-transcribe 재전사 조건으로 사용한다.
   static const String _probeMode = 'ANYONE';
   final List<DeepgramTurnResult> _pendingDeepgramResults = [];
   DateTime? _activeProbeDgFinalAt;
@@ -576,7 +576,7 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
     return out;
   }
 
-  /// 정확도가 필요한 턴을 gpt-4o-transcribe로 다시 전사한다.
+  /// 정확도가 필요한 턴을 gpt-transcribe로 다시 전사한다.
   Future<String?> _transcribeAccurately({Uint8List? pcmOverride}) async {
     final pcm = pcmOverride ?? _snapshotTurnPcm();
     if (pcm == null || _openAiKey.isEmpty) return null;
@@ -620,7 +620,7 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
   }
 
   /// Deepgram은 모든 턴의 발화 종료 판단을 담당한다. 아래 신호가 하나라도
-  /// 있으면 그 턴의 최종 문장만 gpt-4o-transcribe 결과로 교체한다.
+  /// 있으면 그 턴의 최종 문장만 gpt-transcribe 결과로 교체한다.
   List<String> _accurateTranscriptionReasons(
     String transcript, {
     required bool isFirstTurn,
@@ -3213,7 +3213,7 @@ $kSpokenReplyLengthPolicy
           '합치기: len=${_pendingTranscript.length} (${waitMs}ms 대기창 리셋, source=$source)');
     }
 
-    // Deepgram은 발화 종료 경계만 잡는다. gpt-4o-transcribe가 확정한
+    // Deepgram은 발화 종료 경계만 잡는다. gpt-transcribe가 확정한
     // 한국어 문장이 나오기 전에는 임시 말풍선(점 3개)을 표시하지 않는다.
     if (mounted) {
       setState(() {
@@ -3232,7 +3232,7 @@ $kSpokenReplyLengthPolicy
   }
 
   // Deepgram 텍스트는 발화 종료 신호를 묶는 데까지만 사용한다. 최종 사용자
-  // 문장은 매 턴 PCM 원본을 gpt-4o-transcribe에 보내 새로 확정한다.
+  // 문장은 매 턴 PCM 원본을 gpt-transcribe에 보내 새로 확정한다.
   /// 턴 하나를 통째로 감싸 10분 롤오버가 중간에 끼어들지 못하게 한다.
   ///
   /// `isBillingBusy`는 TTS 재생만 본다(`_aiTurnActive`를 true로 켜는 곳이 없다).
@@ -3270,7 +3270,7 @@ $kSpokenReplyLengthPolicy
     _logTurnPerf('COMMIT');
 
     // 🗣️ [COMMIT-TEXT] 경계에서 확정된 딥그램 문장을 먼저 세워 둔다. 실시간
-    //   전사의 마지막 조각보다 온전하고, 무엇보다 gpt-4o-transcribe 왕복을
+    //   전사의 마지막 조각보다 온전하고, 무엇보다 gpt-transcribe 왕복을
     //   기다리지 않는다. 정확한 문장이 오면 아래에서 조용히 갈아 끼운다.
     if (mounted) {
       setState(() {
@@ -3295,7 +3295,7 @@ $kSpokenReplyLengthPolicy
     }
 
     if (pcm == null || pcm.isEmpty) {
-      _log('⚠️ [STT-ROUTE]', 'gpt-4o-transcribe skipped reason=empty_pcm');
+      _log('⚠️ [STT-ROUTE]', 'gpt-transcribe skipped reason=empty_pcm');
       if (_isConversationActive) {
         _restartConfiguredListening(
             expectedPipelineGeneration: pipelineGeneration);
@@ -3307,14 +3307,14 @@ $kSpokenReplyLengthPolicy
         (await _transcribeAccurately(pcmOverride: pcm))?.trim() ?? '';
     if (!mounted || pipelineGeneration != _pipelineGeneration) return;
     // 🌐 [ORIGIN-RESOLVE] Deepgram 폴백 경로도 같은 자리에서 ORIGIN을 정한다.
-    //   전사문은 방금 gpt-4o-transcribe가 자동 감지로 만든 것이다.
+    //   전사문은 방금 gpt-transcribe가 자동 감지로 만든 것이다.
     if (userOriginal.isNotEmpty) {
       await _settleOriginLanguage(userOriginal);
       if (!mounted || pipelineGeneration != _pipelineGeneration) return;
     }
     if (userOriginal.isEmpty) {
       _log('⚠️ [STT-ROUTE]',
-          'gpt-4o-transcribe failed; Deepgram text discarded');
+          'gpt-transcribe failed; Deepgram text discarded');
       if (_isConversationActive) {
         _restartConfiguredListening(
             expectedPipelineGeneration: pipelineGeneration);
@@ -3323,7 +3323,7 @@ $kSpokenReplyLengthPolicy
     }
 
     _log('🎧 [STT-ROUTE]',
-        'selected=gpt-4o-transcribe every_turn=true len=${userOriginal.length}');
+        'selected=gpt-transcribe every_turn=true len=${userOriginal.length}');
     // 🎧 [STT-RAW] 전사 원문. 길이만 찍던 동안은 오인식이 났을 때 화면을 캡처해
     //   눈으로 읽어야 원인을 짚을 수 있었다. 버리는 Deepgram 문장도 같이 남긴다
     //   — 귀가 둘이라 서로 다르게 들었는지가 그 자리에서 갈린다.
@@ -3662,7 +3662,7 @@ $kSpokenReplyLengthPolicy
     _runMeaningProbe(committed);
 
     // ── 전사 선택 ───────────────────────────────────────────────────
-    //   · 첫 턴/불확실 신호 → gpt-4o-transcribe
+    //   · 첫 턴/불확실 신호 → gpt-transcribe
     //   · 그 외             → Deepgram Nova-3
     String effectiveTranscript = committed;
     final accurateReasons = _accurateTranscriptionReasons(
@@ -3684,25 +3684,25 @@ $kSpokenReplyLengthPolicy
           // 다시 말하는 동안 입력이 사라지는 연쇄 실패를 만들었다.
           _log(
             '⚠️ [FIRST-TURN-STT]',
-            'gpt-4o-transcribe failed fallback=nova3 '
+            'gpt-transcribe failed fallback=nova3 '
                 'deepgramLen=${committed.length}',
           );
         }
         // 이후 턴은 정확 전사가 실패해도 이미 확정된 Deepgram 문장을 보존한다.
         _log(
           '⚠️ [STT-ROUTE]',
-          'gpt-4o-transcribe failed fallback=nova3 '
+          'gpt-transcribe failed fallback=nova3 '
               'reasons=${accurateReasons.join(",")}',
         );
       } else {
         effectiveTranscript = accurateTranscript;
         if (kDebugMode) {
           _log('🎧 [STT-RAW]',
-              'source=gpt-4o-transcribe text="$accurateTranscript"');
+              'source=gpt-transcribe text="$accurateTranscript"');
         }
         _log(
           '🎧 [STT-ROUTE]',
-          'selected=gpt-4o-transcribe turn=$_turnCounter '
+          'selected=gpt-transcribe turn=$_turnCounter '
               'reasons=${accurateReasons.join(",")}',
         );
       }

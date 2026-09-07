@@ -159,7 +159,7 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
 
   // ── 🎙️ [STREAMING-STT] OpenAI 스트리밍 전사 (Circle Talk과 같은 구조) ──
   // 소켓은 대화방 세션 동안 살아 있고, 턴마다 여닫는 것은 녹음과 오디오
-  // 게이트뿐이다. 전사 모델은 Deepgram 경로와 같은 gpt-4o-transcribe다 —
+  // 게이트뿐이다. 전사 모델은 Deepgram 경로와 같은 gpt-transcribe다 —
   // 갈리는 것은 발화 종료를 누가 잡느냐와 음성을 어떻게 보내느냐뿐이다.
   OpenAiStreamingTranscribeSession? _streamingStt;
   StreamSubscription<Uint8List>? _streamingCaptureSub;
@@ -2486,7 +2486,7 @@ never by itself a reason to ask back.
   }
 
   // Deepgram 텍스트는 발화 종료 경계에만 사용한다. 실제 한국어 문장은
-  // 녹음 PCM 전체를 gpt-4o-transcribe에 전달해 매 턴 새로 확정한다.
+  // 녹음 PCM 전체를 gpt-transcribe에 전달해 매 턴 새로 확정한다.
   Future<void> _commitAndProcessInner() async {
     final generation = _pipelineGeneration;
     final boundaryTranscript = _pendingTranscript.trim();
@@ -2499,7 +2499,7 @@ never by itself a reason to ask back.
 
     // 🗣️ [COMMIT-TEXT] 발화가 끝나 확정된 딥그램 문장을 먼저 세운다. 말하는
     //   도중의 부분 전사는 쓰지 않는다 — 글자가 계속 고쳐지며 흔들린다.
-    //   여기서 세우면 gpt-4o-transcribe 왕복을 기다리지 않고 문장이 뜨고,
+    //   여기서 세우면 gpt-transcribe 왕복을 기다리지 않고 문장이 뜨고,
     //   정확한 문장이 오면 아래에서 조용히 갈아 끼운다. (Circle Talk과 동일)
     if (mounted) {
       setState(() {
@@ -2518,7 +2518,7 @@ never by itself a reason to ask back.
     _voiceManager = null;
     if (closingManager != null) unawaited(closingManager.dispose());
     if (pcm == null || pcm.isEmpty) {
-      _log('[STT-ROUTE]', 'gpt-4o-transcribe skipped reason=empty_pcm');
+      _log('[STT-ROUTE]', 'gpt-transcribe skipped reason=empty_pcm');
       if (_isConversationActive) _startConfiguredListening();
       return;
     }
@@ -2526,12 +2526,12 @@ never by itself a reason to ask back.
     final userKorean = (await _transcribeTurn(pcm))?.trim() ?? '';
     if (!mounted || generation != _pipelineGeneration) return;
     if (userKorean.isEmpty) {
-      _log('[STT-ROUTE]', 'gpt-4o-transcribe failed; Deepgram text discarded');
+      _log('[STT-ROUTE]', 'gpt-transcribe failed; Deepgram text discarded');
       if (_isConversationActive) _startConfiguredListening();
       return;
     }
     _log('[STT-ROUTE]',
-        'selected=gpt-4o-transcribe every_turn=true len=${userKorean.length}');
+        'selected=gpt-transcribe every_turn=true len=${userKorean.length}');
     // 🎧 [STT-RAW] Circle Talk과 같은 형식. 이 모드는 앞 패딩이 300 그대로라
     //   같은 문장을 두 방에서 말해 300 대 600을 바로 대조할 수 있다.
     //   유저 발화 내용이므로 디버그 빌드에서만 남긴다.

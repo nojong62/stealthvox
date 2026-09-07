@@ -13,14 +13,24 @@ import 'pcm_audio_utils.dart';
 class OpenAiTranscribeService {
   OpenAiTranscribeService._();
 
-  static const String firstTurnModel = 'gpt-4o-transcribe';
-
-  /// 🎯 Duo 최종 전사 모델. **여기 한 줄만 Duo가 쓴다.**
+  /// 🎯 **앱 전체가 쓰는 단 하나의 파일 전사 모델.**
   ///
-  /// [firstTurnModel]을 바꾸지 않는 이유는 그 값을 Circle Talk과
-  /// Scenario Talk이 함께 쓰기 때문이다. 한 상수를 고치면 이번 작업 범위
-  /// 밖의 두 모드까지 조용히 바뀐다.
-  static const String duoFinalModel = 'gpt-transcribe';
+  /// 예전에는 Duo만 `gpt-transcribe`를 쓰고 Circle Talk·Scenario Talk은
+  /// `gpt-4o-transcribe`에 머물러 있었다. Duo가 먼저 옮겨 갈 때 다른 모드까지
+  /// 조용히 바꾸지 않으려고 일부러 갈라 둔 것이고, Duo 실기기 검증이 끝나
+  /// 이제 하나로 합친다(2026-09-07).
+  ///
+  /// ⚠️ **스트리밍 소켓은 이 값을 쓰지 않는다.** 그쪽은 전혀 다른 엔드포인트
+  ///   (`wss://api.openai.com/v1/realtime?intent=transcription`)라 받는 모델
+  ///   목록이 다르고, 값은 `kStreamingSttModel`이 따로 쥐고 있다.
+  static const String model = 'gpt-transcribe';
+
+  /// Circle Talk·Scenario Talk이 부르는 이름. [model]과 같은 값이다 —
+  /// 호출부를 한꺼번에 고치지 않으려고 이름만 남겨 둔다.
+  static const String firstTurnModel = model;
+
+  /// Duo가 부르는 이름. [model]과 같은 값이다.
+  static const String duoFinalModel = model;
 
   /// PCM16 버퍼를 전사한다. 실패/타임아웃이면 null.
   static Future<String?> transcribePcm16({
