@@ -57,6 +57,26 @@ import 'pcm_audio_utils.dart';
 /// **빨리 띄우는 것보다 한 문장을 통째로 gpt-transcribe에 넣는 것이 앞선다.**
 const int kDuoUtteranceEndMs = 1800;
 
+/// 🕰️ [STALE-SPEECH] 발화가 열린 뒤 **단어가 하나도 안 잡히면** 얼마 만에
+/// "말하는 중"을 내릴 것인가.
+///
+/// SpeechStarted는 VAD가 내는 신호라 잡음에도 열린다. 그런데 UtteranceEnd는
+/// **마지막으로 확정된 단어** 뒤의 공백을 재므로, 단어가 하나도 안 잡히면
+/// 종료 신호가 영영 오지 않는다. 그 발화는 열린 채로 굳는다.
+///
+/// 2026-09-07 실기기 통역에서 그 일이 났다. 마이크가 무음(outLevel=0.000)인데
+/// 발화가 열린 채 굳었고(`started=3 ended=2`), "말하는 중"을 보고 상대 목소리를
+/// 미루는 INTERP-YIELD가 **세 마디를 끝까지 안 틀었다.**
+///
+/// ⚠️ **소리는 버리지 않는다.** 여기서 내리는 것은 "말하는 중" 표시뿐이고,
+///   담기는 그대로 이어진다. 조용히 말한 진짜 발화였다면 단어가 늦게라도
+///   잡히고, 그때 UtteranceEnd가 평소대로 확정한다.
+/// 🕰️ **[kDuoUtteranceEndMs]보다 길어야 한다.** 정상 발화에서는 마지막 단어가
+///   두 시계를 나란히 세운다 — UtteranceEnd는 1800ms 뒤, 이 값은 3000ms 뒤다.
+///   순서가 뒤집히면 멀쩡한 발화가 확정되기 전에 굳었다고 판정되고, 상대
+///   목소리가 내 말 위로 끼어든다.
+const int kDuoSpeechStaleMs = 3000;
+
 /// 언어를 아직 모를 때 쓰는 값. **비워 두면 안 된다** — Deepgram의 기본은
 /// `en`이라, 한국어를 말하는데 영어 모델로 듣게 된다. 그러면 단어가 확정되지
 /// 않고, 마지막 단어 시각에 기대는 UtteranceEnd가 제때 오지 않는다.
@@ -121,6 +141,10 @@ class DuoDeepgramEndpointSensor {
   /// 고착되어 통역의 TTS·양보가 영영 안 열린다.
   void Function(String reason)? onClosed;
 
+  /// 🕰️ 열린 발화에서 [kDuoSpeechStaleMs] 동안 단어가 하나도 안 잡혔다.
+  /// **발화를 닫는 것이 아니라 "말하는 중"만 내린다** — 소리는 계속 담긴다.
+  void Function()? onSpeechStale;
+
   IOWebSocketChannel? _channel;
   StreamSubscription<dynamic>? _sub;
   bool _closed = false;
@@ -129,12 +153,24 @@ class DuoDeepgramEndpointSensor {
   /// 시작 없이 끝만 오는 이벤트로 빈 발화를 만들지 않기 위해서다.
   bool _speechOpen = false;
 
+  /// 🕰️ 열려는 있으나 단어가 안 잡혀 "말하는 중"을 내린 상태.
+  /// 단어가 하나라도 잡히면 곧바로 풀린다.
+  bool _speechStale = false;
+  Timer? _staleTimer;
+
   int _speechStartedCount = 0;
+  int _staleCount = 0;
   int _utteranceEndCount = 0;
   int _ignoredEndCount = 0;
 
   bool get isOpen => _channel != null && !_closed;
   bool get isSpeechOpen => _speechOpen;
+
+  /// 🗣️ 사람이 **지금 말하고 있는가.** [isSpeechOpen]과 다르다 — 열려는
+  /// 있으나 단어가 안 잡혀 굳은 발화는 여기서 거짓이다. 통역의 양보
+  /// (INTERP-YIELD)가 이 값을 본다.
+  bool get isUserSpeaking => _speechOpen && !_speechStale;
+  int get staleCount => _staleCount;
   int get speechStartedCount => _speechStartedCount;
   int get utteranceEndCount => _utteranceEndCount;
 
@@ -193,6 +229,8 @@ class DuoDeepgramEndpointSensor {
   void _failOpenSpeech(String reason) {
     if (_closed) return;
     _speechOpen = false;
+    _speechStale = false;
+    _cancelStaleTimer();
     onClosed?.call(reason);
   }
 
@@ -210,7 +248,9 @@ class DuoDeepgramEndpointSensor {
       // 이미 열려 있으면 무시한다 — 한 발화는 하나다.
       if (_speechOpen) return;
       _speechOpen = true;
+      _speechStale = false;
       _speechStartedCount++;
+      _armStaleTimer();
       onSpeechStarted?.call();
       return;
     }
@@ -231,6 +271,8 @@ class DuoDeepgramEndpointSensor {
         return;
       }
       _speechOpen = false;
+      _speechStale = false;
+      _cancelStaleTimer();
       _utteranceEndCount++;
       onUtteranceEnd?.call();
       return;
@@ -239,6 +281,48 @@ class DuoDeepgramEndpointSensor {
     // 🗑️ Results(글자)는 여기서 끝난다. **밖으로 내보내지 않는다.**
     //   Deepgram이 경계를 재려면 글자가 필요할 뿐이고, 최종 전사문의
     //   책임자는 gpt-transcribe 하나다.
+    //
+    //   ⚠️ 다만 **단어가 잡혔다는 사실 하나**는 읽는다. UtteranceEnd가 기대는
+    //   것이 바로 그 신호라, 단어가 안 잡히는 발화는 영영 안 닫힌다
+    //   ([kDuoSpeechStaleMs]). 글자 자체는 여전히 이 함수 밖으로 안 나간다.
+    if (type == 'Results' && _speechOpen && _hasWord(data)) _noteWord();
+  }
+
+  /// 이 응답에 실제 단어가 실려 있는가. **글자는 읽되 내보내지 않는다.**
+  bool _hasWord(Map<String, dynamic> data) {
+    final channel = data['channel'];
+    if (channel is! Map) return false;
+    final alternatives = channel['alternatives'];
+    if (alternatives is! List || alternatives.isEmpty) return false;
+    final first = alternatives.first;
+    if (first is! Map) return false;
+    return (first['transcript'] ?? '').toString().trim().isNotEmpty;
+  }
+
+  /// 단어가 잡혔다 = 사람이 실제로 말하고 있다. 굳었던 표시를 되돌린다.
+  void _noteWord() {
+    if (_speechStale) {
+      _speechStale = false;
+      _lg('speech_unstale — 단어가 잡혔다, 다시 말하는 중이다');
+    }
+    _armStaleTimer();
+  }
+
+  void _armStaleTimer() {
+    _cancelStaleTimer();
+    _staleTimer = Timer(const Duration(milliseconds: kDuoSpeechStaleMs), () {
+      if (_closed || !_speechOpen || _speechStale) return;
+      _speechStale = true;
+      _staleCount++;
+      _lg('speech_stale afterMs=$kDuoSpeechStaleMs — 단어가 안 잡힌다. '
+          '말하는 중을 내린다(소리는 계속 담는다)');
+      onSpeechStale?.call();
+    });
+  }
+
+  void _cancelStaleTimer() {
+    _staleTimer?.cancel();
+    _staleTimer = null;
   }
 
   /// 통화가 끝났다.
@@ -246,8 +330,10 @@ class DuoDeepgramEndpointSensor {
     if (_closed) return;
     _closed = true;
     _speechOpen = false;
+    _speechStale = false;
+    _cancelStaleTimer();
     _lg('closing started=$_speechStartedCount ended=$_utteranceEndCount '
-        'ignored=$_ignoredEndCount');
+        'ignored=$_ignoredEndCount stale=$_staleCount');
     try {
       _channel?.sink.add(jsonEncode(<String, String>{'type': 'CloseStream'}));
     } catch (_) {}

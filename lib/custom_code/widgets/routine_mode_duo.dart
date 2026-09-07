@@ -2960,6 +2960,25 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         unawaited(_drainIncoming());
       }
     };
+    // 🕰️ [STALE-SPEECH] 발화가 열린 채 단어가 안 잡혀 굳었다. **소리는 계속
+    //   담기지만 "말하는 중"은 내려갔다.** 미뤄 둔 상대 목소리를 여기서 푼다.
+    //
+    //   2026-09-07 실기기: 마이크가 무음인데 발화가 열린 채 굳어
+    //   (`started=3 ended=2`) INTERP-YIELD가 상대의 세 마디를 끝까지 안 틀었다.
+    //   UtteranceEnd는 마지막 **단어** 뒤를 재므로 단어가 없으면 영영 안 온다.
+    session.onSpeechStale = () {
+      if (generation != _interpGeneration) return;
+      if (_interpMicPhase == InterpMicPhase.speaking) {
+        _setInterpMicPhase((_interpStt?.audioGateOpen ?? false)
+            ? InterpMicPhase.listening
+            : InterpMicPhase.gated);
+      }
+      if (_incomingQueue.isNotEmpty) {
+        _lgDuo('[INTERP-YIELD]',
+            'resume queued=${_incomingQueue.length} reason=speech_stale');
+        unawaited(_drainIncoming());
+      }
+    };
     session.onSpeechStopped = () {
       if (generation != _interpGeneration) return;
       if (_interpMicPhase != InterpMicPhase.speaking) return;

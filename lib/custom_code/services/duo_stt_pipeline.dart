@@ -157,6 +157,14 @@ class DuoSttPipeline {
   /// 말이 끝났다(소리가 닫힌 것과 같은 순간이다).
   void Function()? onSpeechStopped;
 
+  /// 🕰️ 열린 발화에서 단어가 한동안 하나도 안 잡혔다. **발화를 닫는 것이
+  /// 아니라 "말하는 중"만 내린 것이다** — 소리는 계속 담기고, 단어가 늦게라도
+  /// 잡히면 평소대로 확정된다.
+  ///
+  /// 통역이 미뤄 둔 상대 목소리를 여기서 풀어야 한다. 안 풀면 굳은 발화 하나가
+  /// 상대의 남은 말을 통째로 막는다(2026-09-07 실기기).
+  void Function()? onSpeechStale;
+
   bool get isConnected => _sensor?.isOpen ?? false;
 
   int _reconnectAttempt = 0;
@@ -184,7 +192,12 @@ class DuoSttPipeline {
     return _openSensor();
   }
 
-  bool get isUserSpeaking => _sensor?.isSpeechOpen ?? false;
+  /// 🗣️ 사람이 **지금 말하고 있는가.**
+  ///
+  /// 열려는 있으나 단어가 안 잡혀 굳은 발화는 여기서 거짓이다
+  /// ([kDuoSpeechStaleMs]). 통역의 양보(INTERP-YIELD)가 이 값을 보므로,
+  /// 굳은 발화를 참으로 두면 상대 목소리가 영영 안 나온다.
+  bool get isUserSpeaking => _sensor?.isUserSpeaking ?? false;
 
   /// 아직 끝나지 않은 발화가 있는가.
   ///
@@ -218,6 +231,14 @@ class DuoSttPipeline {
     );
     sensor.onSpeechStarted = _handleSpeechStarted;
     sensor.onUtteranceEnd = _handleUtteranceEnd;
+    // 🕰️ 굳은 발화를 알린다. **담기는 그대로 이어진다** — 여기서 소리를
+    //   버리지 않는다.
+    sensor.onSpeechStale = () {
+      if (_stopped) return;
+      _lg('mode=$mode utt=${_capture.currentId ?? '-'} speech_stale '
+          'capturedMs=${_capture.currentMs} — 말하는 중을 내린다');
+      onSpeechStale?.call();
+    };
     // 🚨 소켓이 끊기면 **말하는 중 표시가 고착되지 않게** 반드시 내린다.
     //   고착되면 통역이 TTS·INTERP-YIELD를 영영 못 연다.
     sensor.onClosed = _handleSensorClosed;
