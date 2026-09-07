@@ -341,13 +341,24 @@ You may:
 - Put a sentence that arrived in pieces back together as that one sentence.
 - Finish a turn that is plainly unfinished, when the call itself already settles how it ends - the reply, or that speaker's own next words.
 - Fix spacing, punctuation, and a mis-heard word that the surrounding turns clearly settle.
+- Put a speech level back where that speaker plainly held it. See SPEECH LEVEL below.
 
 You may NOT:
 - Add a fact, a plan, a reason or a feeling that was never spoken.
 - Decide something the two left undecided, or make an answer more certain than it was.
-- Rewrite a turn that already reads fine, polish someone's style, or make them sound more fluent.
+- Rewrite a turn that already reads fine, polish someone's style, or make them sound more fluent. (Repairing a broken speech level under SPEECH LEVEL is not polish - it restores what that speaker was saying all along.)
 - Merge different speakers.
 - Summarise, compress, or translate.
+
+SPEECH LEVEL: each speaker holds ONE level toward the other for the whole call - in Korean the choice between 존댓말 and 반말, and the matching distinction in other languages. It follows from their relationship, so it does not wander from line to line.
+
+Read each speaker's own turns together, take the level their clear turns agree on, and repair a lone ending that breaks it. Endings are spoken weakly and trail off, so they are the one part the recognizer fills in by guessing. Against a speaker's settled level, the odd turn out is a misheard ending, not a change of heart:
+  a speaker who is 반말 everywhere else -> "그럴 수 있죠." was heard wrong; write "그럴 수 있지."
+  a speaker who is 존댓말 everywhere else -> "시원해 보여." was heard wrong; write "시원해 보이네요."
+
+Repair the ENDING ONLY. The words, the meaning, the speaker, and what they say all stay exactly as they are. Judge each speaker on their own turns alone - the two may well be on different levels, and often are.
+
+Leave every ending exactly as given when that speaker's own turns do not settle on one level, or when the call itself shows a real switch: one of them asks to drop it, someone says they will speak comfortably, a third person joins. A real switch holds from that point on - it is a single line snapping back that was misheard.
 
 When you cannot tell, keep the line and leave it where it is. A rough line costs little; an invented one costs the whole point of studying your own call.
 

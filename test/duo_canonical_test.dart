@@ -1,6 +1,13 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stealth_vox/custom_code/services/duo_canonical.dart';
 import 'package:stealth_vox/custom_code/services/duo_study_state.dart';
+
+/// 정돈 프롬프트는 private이라 소스를 읽어 규칙의 존재를 붙잡는다.
+/// (`duo_keep_all_test.dart`와 같은 방식이다.)
+String _canonSource() =>
+    File('lib/custom_code/services/duo_canonical.dart').readAsStringSync();
 
 DuoSourceUtterance u(String id, String role, String text, int ms) =>
     DuoSourceUtterance(
@@ -13,6 +20,49 @@ DuoSourceUtterance u(String id, String role, String text, int ms) =>
     );
 
 void main() {
+  // ── 🙇 말투는 사람마다 하나다 ─────────────────────────────────────────
+  group('🙇 말투는 화자마다 하나로 유지된다', () {
+    final String src = _canonSource();
+
+    test('정돈이 말투를 되돌릴 수 있다고 적혀 있다', () {
+      expect(src, contains('SPEECH LEVEL:'));
+      expect(src, contains('Put a speech level back where that speaker plainly held it'));
+    });
+
+    test('화자마다 하나이고 통화 내내 유지된다고 적혀 있다', () {
+      expect(src, contains('each speaker holds ONE level toward the other for the whole call'));
+      expect(src, contains('존댓말'));
+      expect(src, contains('반말'));
+    });
+
+    test('확실히 들린 줄이 기준이고, 어긋난 하나가 잘못 들린 것이다', () {
+      expect(src, contains('take the level their clear turns agree on'));
+      expect(src, contains('the odd turn out is a misheard ending, not a change of heart'));
+    });
+
+    test('어미만 고친다 — 말과 뜻은 그대로다', () {
+      expect(src, contains('Repair the ENDING ONLY'));
+    });
+
+    test('화자를 각각 따로 본다 — 둘이 서로 다른 말투일 수 있다', () {
+      expect(src, contains('Judge each speaker on their own turns alone'));
+    });
+
+    test('진짜로 말을 놓은 경우까지 뭉개지 않는다', () {
+      expect(src, contains('when the call itself shows a real switch'));
+      expect(src, contains('A real switch holds from that point on'));
+    });
+
+    test('"style 손대지 말라"와 부딪히지 않게 예외를 밝혀 뒀다', () {
+      // 이 한 줄이 없으면 두 규칙이 싸워서 모델이 아무것도 안 고친다.
+      expect(src, contains('Repairing a broken speech level under SPEECH LEVEL is not polish'));
+    });
+
+    test('원본(SOURCE)은 그대로다 — 고치는 것은 정돈 결과뿐이다', () {
+      expect(src, contains('canonical을 만들면서 고치지도 지우지도 않는다'));
+    });
+  });
+
   group('fallbackCanonical', () {
     test('GPT가 없어도 오간 말을 하나도 잃지 않는다', () {
       final source = <DuoSourceUtterance>[
