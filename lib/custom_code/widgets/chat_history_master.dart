@@ -1137,9 +1137,12 @@ TRANSLATION — natural spoken $targetLanguage of the corrected line. Preserve t
 
 WHO THE LINE IS ABOUT — read this before you translate:
 - $sourceName leaves out the subject and the object whenever they are already understood. $targetLanguage cannot. You must supply them, and SURROUNDING CONVERSATION is where they are.
-- Whoever the conversation is currently about stays the subject until the speaker moves to someone else. A line with no subject continues to be about that person — NOT about the speaker.
-- Never fall back on "I" just because the subject is missing. Use "I" only when the line is genuinely about the speaker.
-- The people in this conversation are introduced in its opening lines. Settle who they are there first, then keep them straight through every line.
+- This is a call between two people, so nearly every line is about one of those two — the speaker, or the person they are talking to. Reach for "I" and "you" first. Take a third person only when the line actually points at one.
+- THE TWO PEOPLE ON THIS CALL ARE NEVER "he", "she", OR "they". The one speaking is "I". The one being spoken to is "you". There is no wording, no missing subject, and no awkward phrasing that makes a third-person word right for either of them — if you have written one for a person who is on this call, it is wrong, and the line is about "I" or "you".
+- $sourceName says a third person out loud whenever it means one, because the listener could not follow otherwise (그 사람이, 그들이, 선생님이). No such mention, and no third person just handed the topic, means the line is about the speaker or the listener.
+- The one exception: when the turns just before were about a third person and this line plainly carries that same topic on, it is still about that person.
+- When the line IS about a third person, name them by the role or relationship the conversation itself gives — the teacher, the guide, my friend, your mom — or by their name if one was said. A role noun reads the same on every line, so it holds that person steady through the whole conversation.
+- NEVER invent a gender. Write "he" or "she" only where the conversation states which one. Where it does not, the role noun already carries no gender, so use that. Fall back on "they" only when the conversation gives no noun at all — and then use "they" for that person in every line, never switching to "he" or "she" later.
 - Keep each person's relationship to the speaker exactly as stated. Do not promote, demote, or merge them, and do not invent one who was never mentioned.
 - These subject rules serve the TRANSLATION only. Never reach back and change the corrected $sourceName line to match them.
 Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetLanguage translation>"}$styleBlock''',
