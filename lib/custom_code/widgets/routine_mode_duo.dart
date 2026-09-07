@@ -1376,12 +1376,19 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 것이 always-on의 전부다. 여기서 stop을 부르면 다음 발화의 첫 소리에
   /// 다시 마이크 기동 시간이 붙는다.
   ///
-  /// ⚠️ **말하는 도중에 닫히는 경우를 반드시 같이 처리한다.** 서버 VAD는
-  /// 오디오가 계속 들어와야 발화 끝(`speech_stopped`→`committed`)을 찍는다.
-  /// 그냥 게이트만 닫으면 서버는 그 발화를 영영 확정하지 못하고, 세션의
-  /// `isUserSpeaking`이 참으로 굳는다 — 그러면 유휴 판정이 서지 않아
-  /// **과금이 영영 안 멈춘다.** 그래서 진행 중인 발화가 있으면 여기서
-  /// 명시적으로 확정시킨다. 덤으로 유저가 이미 한 말도 잃지 않는다.
+  /// ⚠️ **말하는 도중에 닫히는 경우를 반드시 같이 처리한다.** 그냥 닫으면
+  /// 담고 있던 소리가 버려져 유저가 이미 한 말이 통째로 사라진다.
+  ///
+  /// 🚨 **순서가 전부다 — 확정이 먼저, 닫는 것이 나중이다.**
+  ///
+  /// `closeAudioGate`는 안에서 `_capture.abort()`를 부른다. 닫고 나서
+  /// flush하면 그때는 이미 버려진 뒤라 **아무것도 못 살린다.** 로그에는
+  /// `flush_on_close … 말하던 중이었다`가 남는데 정작 저장되는 것이 없다.
+  ///
+  /// 2026-09-07 실기기 통역에서 그 일이 났다. 게이트가 닫히는 자리는 상대
+  /// 목소리가 재생될 때(`tts_playing`)인데, 게스트는 호스트 말을 듣고 바로
+  /// 대답하니 **정확히 그 순간에 겹친다.** 게스트 발화 두 건이 그렇게 사라졌고
+  /// (`started=2 ended=1`), 호스트에는 한 글자도 안 갔다.
   void _closeInterpGate(String reason) {
     _interpGateReopenTimer?.cancel();
     _interpGateReopenTimer = null;
@@ -1389,21 +1396,21 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     if (stt == null) return;
     // ⚠️ **이미 닫혀 있으면 flush하지 않는다.** 상대 메시지가 연달아 오면
     //   이 함수가 재생마다 불리는데, 앞 재생이 닫아 둔 상태에서 또 flush하면
-    //   `input_audio_buffer.commit`이 한 번 더 나간다. 서버가 이미 확정한
-    //   버퍼에 대한 commit은 "빈 버퍼" error 이벤트가 되어 돌아온다.
+    //   같은 버퍼를 두 번 확정하려 든다.
     final bool wasOpen = stt.audioGateOpen;
     final bool wasSpeaking = wasOpen && stt.hasPendingUtterance;
-    stt.closeAudioGate(reason: reason);
     if (wasSpeaking) {
       _lgDuo('[INTERP-GATE]', 'flush_on_close reason=$reason — 말하던 중이었다');
-      // 기다리지 않는다. 전사문이 오면 평소 경로(`_onInterpreterTranscript`)로
-      // 흘러가고, 안 와도 세션이 상한에서 대기를 풀어 준다.
+      // 🚨 닫기 **전에** 확정한다. 기다리지는 않는다 — 전사문이 오면 평소
+      //   경로(`_onInterpreterTranscript`)로 흘러가고, 안 와도 세션이 상한에서
+      //   대기를 풀어 준다.
       unawaited(
           stt.flushPendingUtterance(reason: reason).catchError((Object e) {
         _lgDuo('⚠️ [INTERP-GATE]', 'flush_failed=${e.runtimeType}');
         return false;
       }));
     }
+    stt.closeAudioGate(reason: reason);
     if (!_isDirectMode && _interpCaptureLive) {
       _setInterpMicPhase(InterpMicPhase.gated);
     }
