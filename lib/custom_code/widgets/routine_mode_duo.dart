@@ -4698,6 +4698,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     }
     _lgDuo('[INTERP-TURN]',
         'incoming src=$srcLang mine=$myNative same=$sameLang gptCalls=${sameLang ? 0 : 1}');
+    // 🔬 [DUO-DIAG] 내가 실제로 **들은 문장**. 통역은 화면에 말풍선을 만들지
+    //   않으므로, 상대 말이 내 언어로 무엇이 되어 도착했는지가 여기 말고는
+    //   어디에도 안 남는다. 진단 빌드에서만 찍는다 — 대화 내용이라 release
+    //   에서는 한 글자도 나가지 않는다(`_lgDuoDev`).
+    _lgDuoDev('[INTERP-HEARD]', 'src=$srcLang text="$spoken"');
 
     if (!mounted || _isExiting) return;
 
