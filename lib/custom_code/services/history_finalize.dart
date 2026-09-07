@@ -50,6 +50,25 @@ const String kHistoryFinalizedAtField = 'history_finalized_at';
 /// 갈아 끼우면 방금 한 수정이 조용히 사라진다.
 const String kMessageUserEditedAtField = 'user_edited_at';
 
+/// 🧭 [SUBJECT-HINT] 이 줄이 **누구 얘기인가**를 적은 참고용 주어.
+///
+/// 한국어는 이미 통하는 주어를 생략한다. 영어는 못 한다. 그래서 배울글을
+/// 만들 때 누군가는 그 자리를 채워야 하고, 지금까지는 GPT가 줄마다 따로
+/// 찍었다 — 같은 사람이 줄마다 he·they로 갈린 이유가 그것이다.
+///
+/// **3자가 나오는 줄에만 값이 있다.** 두 사람의 통화라 거의 모든 줄은 나
+/// 아니면 너이고, 그런 줄은 비어 있다.
+///
+/// ⚠️ **`original_text`에 넣지 않는다.** 확정된 원문 하나가 배울글·Practice·
+/// My English의 재료라, 참고 표시가 거기 섞이면 학습 자료에 괄호가 따라간다.
+/// 화면에서만 줄 앞에 흐리게 붙여 보여준다.
+const String kMessageSubjectHintField = 'subject_hint';
+
+/// 참고 주어를 사용자가 직접 고친 순간. 찍혀 있으면 정돈이 덮지 않는다.
+/// 줄 자체를 고친 것([kMessageUserEditedAtField])과는 별개다 — 글자는 그대로
+/// 두고 주어만 바로잡을 수 있다.
+const String kMessageSubjectHintEditedField = 'subject_hint_edited_at';
+
 /// 히스토리 방이 지금 어느 단계인가.
 enum HistoryEditPhase {
   /// 검수 중 — 편집 가능, 생성 금지.
@@ -125,6 +144,23 @@ Map<String, dynamic> historyMessageEditPatch({
       'original_text': text.trim(),
       'translated_text': '',
       kMessageUserEditedAtField: editedAt,
+    };
+
+/// 🧭 참고 주어만 고쳤을 때 줄 문서에 쓰는 값.
+///
+/// **배울글을 함께 비운다.** 참고 주어는 번역이 주어를 채우는 근거라,
+/// 그것이 바뀌면 옛 번역은 다른 사람 얘기를 하고 있는 셈이 된다.
+///
+/// 원문([kMessageUserEditedAtField])은 건드리지 않는다 — 말은 그대로 두고
+/// 누구 얘기인지만 바로잡는 자리다.
+Map<String, dynamic> historySubjectHintEditPatch({
+  required String subject,
+  required Object editedAt,
+}) =>
+    <String, dynamic>{
+      kMessageSubjectHintField: subject.trim(),
+      'translated_text': '',
+      kMessageSubjectHintEditedField: editedAt,
     };
 
 /// 사용자가 내용을 다 지웠을 때 줄 문서에 쓰는 값.

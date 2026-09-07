@@ -97,6 +97,7 @@ class DuoCanonicalTurn {
     required this.sourceIds,
     required this.state,
     this.spokenAtMs,
+    this.subject = '',
   });
 
   /// 말한 사람. 채널에 실린 `senderRole` 그대로(HOST/GUEST).
@@ -109,12 +110,28 @@ class DuoCanonicalTurn {
   final String state;
   final int? spokenAtMs;
 
+  /// 🧭 [SUBJECT-HINT] 이 줄이 **누구 얘기인가**를 적은 참고용 주어.
+  ///
+  /// 한국어는 이미 통하는 주어를 생략하지만 영어는 못 한다. 그래서 배울글을
+  /// 만들 때 누군가는 그 자리를 채워야 하는데, 지금까지는 GPT가 줄마다 따로
+  /// 찍었고 그래서 같은 사람이 줄마다 he·they로 갈렸다.
+  ///
+  /// **3자가 나오는 줄에만 채운다.** 두 사람의 통화라 거의 모든 줄은 나
+  /// 아니면 너이고, 그런 줄에는 아무것도 붙이지 않는다(붙이면 화면이
+  /// `(나는)`으로 뒤덮인다).
+  ///
+  /// ⚠️ **[text]에 넣지 않는다.** 원문은 실제 발화 그대로 남아야 한다 —
+  /// 확정된 원문 하나가 배울글·Practice·My English의 재료라, 참고 표시가
+  /// 거기 섞이면 학습 자료에 괄호가 따라 들어간다.
+  final String subject;
+
   Map<String, dynamic> toMap() => <String, dynamic>{
         'role': role,
         'text': text,
         'source_ids': sourceIds,
         'state': state,
         if (spokenAtMs != null) 'spoken_at_ms': spokenAtMs,
+        if (subject.isNotEmpty) 'subject': subject,
       };
 
   static DuoCanonicalTurn? fromMap(Object? raw) {
@@ -130,6 +147,7 @@ class DuoCanonicalTurn {
       ],
       state: (raw['state'] ?? kStudyStateIncluded).toString(),
       spokenAtMs: (raw['spoken_at_ms'] as num?)?.toInt(),
+      subject: (raw['subject'] ?? '').toString().trim(),
     );
   }
 }
@@ -360,11 +378,21 @@ Repair the ENDING ONLY. The words, the meaning, the speaker, and what they say a
 
 Leave every ending exactly as given when that speaker's own turns do not settle on one level, or when the call itself shows a real switch: one of them asks to drop it, someone says they will speak comfortably, a third person joins. A real switch holds from that point on - it is a single line snapping back that was misheard.
 
+WHO THE TURN IS ABOUT: this call has two people in it, so almost every turn is about one of those two - the one speaking, or the one being spoken to. Those turns need nothing from you here.
+
+A few turns are about somebody else: a person, or people, who are not on this call. The language of the call names them out loud when it first brings them up, because the listener could not follow otherwise, and then keeps leaving the subject out while the topic stays on them.
+
+For those turns ONLY, add a "subject" - a short noun phrase, in the same language as the turn, naming who the turn is about ("그 학생은", "선생님이", "친구들이"). Take it from what the call actually said, and use the same words every time you name that same person, so every turn about them reads alike.
+
+Leave "subject" out entirely for every turn about the speaker or the listener. Do not write "나는" or "너는" - a screen full of those helps nobody. Leave it out too when you cannot tell who a turn is about.
+
+"subject" is a note beside the turn, never part of it. Never put it into "text", and never change "text" to agree with it.
+
 When you cannot tell, keep the line and leave it where it is. A rough line costs little; an invented one costs the whole point of studying your own call.
 
 Return strict JSON only:
-{"turns":[{"ids":["<source id>"],"role":"HOST","text":"...","state":"included"}]}
-"ids" lists every source id that became this turn, in order. Return every source id exactly once across all turns.''';
+{"turns":[{"ids":["<source id>"],"role":"HOST","text":"...","state":"included","subject":""}]}
+"ids" lists every source id that became this turn, in order. Return every source id exactly once across all turns. "subject" is optional - include it only on turns about someone who is not on this call.''';
 
 /// GPT-4.1-mini로 한 번 정돈한다. 실패하면 null — 호출부가 폴백을 쓴다.
 Future<List<DuoCanonicalTurn>?> reconcileDuoConversation({
@@ -436,6 +464,7 @@ Future<List<DuoCanonicalTurn>?> reconcileDuoConversation({
         sourceIds: ids,
         state: _stateFromModel(item['state']),
         spokenAtMs: byId[ids.first]!.spokenAtMs,
+        subject: (item['subject'] ?? '').toString().trim(),
       ));
     }
 
@@ -643,12 +672,19 @@ Future<bool> applyDuoCanonicalToHistory({
     final curTextById = <String, String>{};
     // 🛡️ 사용자가 손댄 줄. 확정 전이라도 정돈이 덮지 못한다.
     final userLocked = <String>{};
+    // 참고 주어만 따로 잠근다. 줄을 안 고쳤어도 주어는 고쳤을 수 있다.
+    final userLockedSubject = <String>{};
     for (final doc in msgSnap.docs) {
       final data = doc.data();
       final String channelId =
           (data['channel_msg_id'] ?? '').toString().trim();
       if (channelId.isEmpty) continue;
       if (!duoCanonicalMayApplyToMessage(data)) userLocked.add(channelId);
+      // 🧭 참고 주어를 사용자가 직접 고쳤으면 정돈이 덮지 않는다. 줄 자체를
+      //   고친 것과는 별개다 — 글자는 그대로 두고 주어만 바로잡을 수 있다.
+      if (data[kMessageSubjectHintEditedField] != null) {
+        userLockedSubject.add(channelId);
+      }
       byChannelId[channelId] = doc.reference;
       final String existingRaw =
           (data[kOriginalRawField] ?? '').toString().trim();
@@ -688,6 +724,12 @@ Future<bool> applyDuoCanonicalToHistory({
           if (headRaw.isNotEmpty && headRaw != turn.text)
             kOriginalRawField: headRaw,
           if (textChanged) 'translated_text': '',
+          // 🧭 [SUBJECT-HINT] 3자가 나오는 줄에만 값이 있다. 없으면 빈 문자열을
+          //   써서 **지난 판의 값을 지운다** — 정돈이 다시 돌아 "이 줄은 3자
+          //   얘기가 아니었다"고 판단했는데 옛 주어가 남아 있으면, 화면이
+          //   틀린 사람을 가리킨 채 굳는다.
+          if (!userLockedSubject.contains(turn.sourceIds.first))
+            kMessageSubjectHintField: turn.subject,
           kStudyStateField: turn.state,
           'canonical_version': version,
         });

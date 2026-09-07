@@ -1026,6 +1026,19 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   /// 한 줄만 보고는 "우리 병 중에서"가 잘못 적힌 것인지 알 수 없다. 앞뒤에
   /// 총무·작가 이야기가 있어야 "병"이 "반"이었음을 복원할 수 있다.
   /// 지금 줄 자체는 뺀다 — 고쳐야 할 대상이지 근거가 아니다.
+  /// 🧭 [SUBJECT-HINT] 이 줄에 붙은 참고 주어. 없으면 빈 문자열이다.
+  ///
+  /// 3자가 나오는 줄에만 값이 있다 — 두 사람의 통화라 거의 모든 줄은 나
+  /// 아니면 너이고, 그런 줄에는 정돈이 아무것도 붙이지 않는다.
+  String _subjectHintOf(String docId) {
+    for (final doc in _cachedDocs) {
+      if (doc.reference.id != docId) continue;
+      final data = doc.data() as Map<String, dynamic>?;
+      return (data?[kMessageSubjectHintField] ?? '').toString().trim();
+    }
+    return '';
+  }
+
   String _historyRepairContext(DocumentReference messageRef) {
     final docs = _cachedDocs;
     final idx = docs.indexWhere((d) => d.reference.id == messageRef.id);
@@ -1100,7 +1113,13 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
             'never the corrected $sourceName line',
       );
       final String context = _historyRepairContext(messageRef);
-      final String lineBlock = 'LINE: $source';
+      // 🧭 [SUBJECT-HINT] 이 줄이 누구 얘기인지 이미 정해져 있으면 싣는다.
+      //   줄마다 호출이 따로 도는 구조라 GPT 혼자서는 사람을 일관되게 못
+      //   고른다. 정해진 값을 주는 것이 그 흔들림을 없애는 유일한 길이다.
+      final String subjectHint = _subjectHintOf(messageRef.id);
+      final String lineBlock = subjectHint.isEmpty
+          ? 'LINE: $source'
+          : 'SUBJECT: $subjectHint\nLINE: $source';
       final String userContent = context.isEmpty
           ? lineBlock
           : 'SURROUNDING CONVERSATION:\n$context\n\n$lineBlock';
@@ -1144,6 +1163,7 @@ WHO THE LINE IS ABOUT — read this before you translate:
 - When the line IS about a third person, name them by the role or relationship the conversation itself gives — the teacher, the guide, my friend, your mom — or by their name if one was said. A role noun reads the same on every line, so it holds that person steady through the whole conversation.
 - NEVER invent a gender. Write "he" or "she" only where the conversation states which one. Where it does not, the role noun already carries no gender, so use that. Fall back on "they" only when the conversation gives no noun at all — and then use "they" for that person in every line, never switching to "he" or "she" later.
 - Keep each person's relationship to the speaker exactly as stated. Do not promote, demote, or merge them, and do not invent one who was never mentioned.
+- When a SUBJECT line is given below, who this line is about has already been settled. Take it as decided: the line is about that person, name them the way SUBJECT names them, and do not go hunting through the surrounding lines for someone else.
 - These subject rules serve the TRANSLATION only. Never reach back and change the corrected $sourceName line to match them.
 Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetLanguage translation>"}$styleBlock''',
                   },
@@ -3593,6 +3613,8 @@ RULES — follow exactly:
                                               original.isNotEmpty) ...[
                                             if (_langDisplayMode == 0)
                                               const SizedBox(height: 8),
+                                            _buildSubjectHint(
+                                                docs[index], isHost),
                                             Text(original,
                                                 textAlign: isHost
                                                     ? TextAlign.right
@@ -3717,6 +3739,107 @@ RULES — follow exactly:
   // ══════════════════════════════════════════════════
 
   /// 소리 듣기가 있던 자리. 아이콘 수도 크기도 그대로 셋이다.
+  /// 🧭 [SUBJECT-HINT] 이 줄이 누구 얘기인지 줄 앞에 흐리게 적는다.
+  ///
+  /// **말한 글자가 아니다.** 그래서 본문과 같은 색·굵기로 쓰지 않는다 —
+  /// 괄호와 흐린 색이 "이건 참고 표시"라고 말하는 유일한 장치다.
+  ///
+  /// 3자가 나오는 줄에만 붙는다. 두 사람의 통화라 거의 모든 줄은 나 아니면
+  /// 너이고, 그런 줄에는 아무것도 안 붙는다 — 붙이면 화면이 `(나는)`으로
+  /// 뒤덮여 정작 봐야 할 줄이 묻힌다.
+  Widget _buildSubjectHint(DocumentSnapshot doc, bool isHost) {
+    final data = doc.data() as Map<String, dynamic>?;
+    final String hint =
+        (data?[kMessageSubjectHintField] ?? '').toString().trim();
+    if (hint.isEmpty) return const SizedBox.shrink();
+    final bool editable = _historyIsDraft;
+    final Widget label = Text(
+      '(\$hint)',
+      textAlign: isHost ? TextAlign.right : TextAlign.left,
+      style: TextStyle(
+        color: const Color(0xFF9CA3AF),
+        fontSize: 12 * _fontScale,
+        fontStyle: FontStyle.italic,
+        decoration:
+            editable ? TextDecoration.underline : TextDecoration.none,
+        decorationColor: const Color(0xFF6B7280),
+      ),
+    );
+    return Align(
+      alignment: isHost ? Alignment.centerRight : Alignment.centerLeft,
+      child: editable
+          ? InkWell(
+              onTap: () => _editSubjectHint(doc, hint),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: label,
+              ),
+            )
+          : label,
+    );
+  }
+
+  /// 참고 주어만 고친다. **원문은 건드리지 않는다** — 말은 그대로 두고
+  /// 누구 얘기인지만 바로잡는 자리다. 배울글은 비워져 다시 만들어진다
+  /// (`historySubjectHintEditPatch`).
+  Future<void> _editSubjectHint(DocumentSnapshot doc, String current) async {
+    if (!_historyIsDraft) return;
+    _resumeHistoryFromUserAction();
+    final controller = TextEditingController(text: current);
+    final String? next = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1F2937),
+        title: Text('누구 얘기인가요?',
+            style: TextStyle(color: Colors.white, fontSize: 16 * _fontScale)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '이 줄을 영어로 옮길 때 주어로 씁니다.\n말한 내용은 바뀌지 않습니다.',
+              style: TextStyle(
+                  color: Colors.white70, fontSize: 13 * _fontScale),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              style:
+                  TextStyle(color: Colors.white, fontSize: 15 * _fontScale),
+              decoration: const InputDecoration(
+                hintText: '예: 그 학생은',
+                hintStyle: TextStyle(color: Colors.white38),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child:
+                  const Text('취소', style: TextStyle(color: Colors.white54))),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, controller.text),
+              child: const Text('저장',
+                  style: TextStyle(color: Color(0xFF60A5FA)))),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (next == null || !mounted) return;
+    final String trimmed = next.trim();
+    if (trimmed == current) return;
+    try {
+      await doc.reference.update(historySubjectHintEditPatch(
+        subject: trimmed,
+        editedAt: FieldValue.serverTimestamp(),
+      ));
+    } catch (e) {
+      debugPrint('[SUBJECT-HINT] save_failed msg=\${doc.id} \$e');
+    }
+  }
+
   Widget _buildEditBtn(DocumentSnapshot doc, String rawOriginal) {
     final bool editable = _historyIsDraft;
     return IconButton(
