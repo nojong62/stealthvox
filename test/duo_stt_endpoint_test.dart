@@ -12,6 +12,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:stealth_vox/custom_code/services/duo_deepgram_endpoint.dart';
 import 'package:stealth_vox/custom_code/services/duo_transcript_context.dart';
 import 'package:stealth_vox/custom_code/services/duo_utterance_capture.dart';
+import 'package:stealth_vox/custom_code/services/openai_streaming_transcribe_session.dart';
 import 'package:stealth_vox/custom_code/services/openai_transcribe_service.dart';
 import 'package:stealth_vox/custom_code/services/pcm_audio_utils.dart';
 
@@ -279,6 +280,13 @@ void main() {
   group('🎯 최종 전사 모델', () {
     test('Duo는 gpt-transcribe를 쓴다', () {
       expect(OpenAiTranscribeService.duoFinalModel, 'gpt-transcribe');
+    });
+
+    test('스트리밍 소켓도 같은 모델을 쓴다', () {
+      // 서클톡·시나리오톡은 소켓과 파일 전사 중 한 길로만 다닌다
+      // (`kFreeTalkUseStreamingStt`). 길마다 모델이 다르면 같은 말을 해도
+      // 어느 길로 갔느냐에 따라 글자가 달라진다.
+      expect(kStreamingSttModel, OpenAiTranscribeService.model);
     });
 
     test('이제 모든 모드가 같은 모델을 쓴다 — 파일 전사는 하나다', () {

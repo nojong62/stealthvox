@@ -144,7 +144,7 @@ class DeepgramConfidenceProbe {
   static bool get detailedLoggingEnabled => kDebugMode || _diagnosticsOverride;
 
   // Confidence thresholds. Anyone mode also uses the resulting low-confidence
-  // signals to decide whether a turn needs gpt-4o-transcribe verification.
+  // signals to decide whether a turn needs gpt-transcribe verification.
   static const double lowWordConfidenceThreshold = 0.65;
   static const double lowChunkConfidenceThreshold = 0.70;
   static const double veryLowChunkConfidenceThreshold = 0.50;

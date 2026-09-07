@@ -1,5 +1,5 @@
 // 🎚️ [PCM-UTILS] PCM16 ↔ WAV 컨테이너 유틸.
-//   TTS 어댑터(히스토리 저장용 WAV 포장)와 재전사 서비스(gpt-4o-mini-transcribe
+//   TTS 어댑터(히스토리 저장용 WAV 포장)와 재전사 서비스(gpt-transcribe
 //   업로드용 WAV 포장)가 공유한다. 순수 함수만 둔다 — 상태/플랫폼 의존 금지.
 
 import 'dart:math' as math;
@@ -9,7 +9,7 @@ import 'dart:typed_data';
 ///
 /// OpenAI 스트리밍 전사 소켓의 입력 PCM이 24kHz 고정이라 여기에 맞춘다.
 /// 마이크 녹음(RecordConfig) · Deepgram URI의 `sample_rate` · 폴백
-/// gpt-4o-transcribe의 WAV 헤더가 **반드시 같은 값**이어야 한다. 한 곳만
+/// gpt-transcribe의 WAV 헤더가 **반드시 같은 값**이어야 한다. 한 곳만
 /// 어긋나면 소리가 빨라지거나 느려져 전사문이 통째로 망가지는데, 에러가 아니라
 /// "이상한 문장"으로 나와서 원인을 찾기 어렵다.
 const int kStealthVoxSttSampleRate = 24000;

@@ -20,7 +20,7 @@ enum KoreanTurnValidatorFailure {
 /// Three-mode Korean speech gate used after PCM retranscription.
 ///
 /// Deepgram owns only the speech boundary. [transcribedText] is the sentence
-/// produced from the recorded PCM by gpt-4o-transcribe. The model may reject an
+/// produced from the recorded PCM by gpt-transcribe. The model may reject an
 /// obviously broken/contextually impossible transcript, but it must never
 /// rewrite or "repair" the user's words.
 class KoreanTurnValidationResult {

@@ -53,33 +53,6 @@ class SendChatCall {
   }
 }
 
-class VoiceToTextCall {
-  static Future<ApiCallResponse> call({
-    String? file = '',
-    String? apiKey = '',
-  }) async {
-    return ApiManager.instance.makeApiCall(
-      callName: 'VoiceToText',
-      apiUrl: 'https://api.openai.com/v1/audio/transcriptions',
-      callType: ApiCallType.POST,
-      headers: {
-        'Authorization': 'Bearer ${apiKey}',
-      },
-      params: {
-        'file': file,
-        'model': "whisper-1",
-      },
-      bodyType: BodyType.MULTIPART,
-      returnBody: true,
-      encodeBodyUtf8: false,
-      decodeUtf8: false,
-      cache: false,
-      isStreamingApi: false,
-      alwaysAllowBody: false,
-    );
-  }
-}
-
 class TextToSpeechCall {
   static Future<ApiCallResponse> call({
     String? text = 'Hello',

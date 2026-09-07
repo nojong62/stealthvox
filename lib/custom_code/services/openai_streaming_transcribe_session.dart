@@ -2,7 +2,7 @@
 // 🎙️ [STREAMING-STT] 유저 음성 스트리밍 전사 세션
 // --------------------------------------------------------------------
 // ⚠️ 이름 주의 — 이 앱에서 "리얼타임"은 쓰지 않는다.
-//   전사 모델은 예전과 같은 **gpt-4o-transcribe**다. 바뀐 것은 그 모델에
+//   전사 모델은 파일 전사와 같은 **gpt-transcribe**다. 갈리는 것은 그 모델에
 //   음성을 건네는 방법뿐이다: 녹음이 끝난 뒤 WAV 파일을 올리던 것을,
 //   말하는 동안 소켓으로 흘려보내는 방식으로 바꿨다.
 //
@@ -44,10 +44,10 @@ import 'pcm_audio_utils.dart';
 // ====================================================================
 // 🎚️ [PHASE-1 FLAG] Circle Talk 유저 음성 전사 엔진 전환 스위치
 // --------------------------------------------------------------------
-//   ON  → 스트리밍 전사 (Server VAD + gpt-4o-transcribe)
-//   OFF → 기존 Deepgram Nova-3 경계 + gpt-4o-transcribe 파일 전사
+//   ON  → 스트리밍 전사 (Server VAD + gpt-transcribe)
+//   OFF → 기존 Deepgram Nova-3 경계 + gpt-transcribe 파일 전사
 //
-// 양쪽 다 글자를 만드는 모델은 gpt-4o-transcribe로 같다. 갈리는 것은
+// 양쪽 다 글자를 만드는 모델은 gpt-transcribe로 같다. 갈리는 것은
 // 발화 종료를 누가 잡느냐(OpenAI Server VAD vs Deepgram)와
 // 음성을 어떻게 보내느냐(스트리밍 vs 파일 업로드) 둘뿐이다.
 //
@@ -68,11 +68,19 @@ const String kStreamingSttEndpoint =
 
 /// 전사 모델. **여기 한 줄만 바꾸면 모델이 바뀐다** — 다른 곳에 박지 않는다.
 ///
-/// Phase 1은 기존 파일 전사와 같은 `gpt-4o-transcribe`를 유지한다. 전송 방식
-/// (Deepgram VAD + WAV 업로드 → Server VAD + 스트리밍)만 바꿔야 속도·정확도·
-/// 비용 변화의 원인을 분리할 수 있기 때문이다.
-/// 공식 가이드가 권장하는 저지연 스트리밍 모델은 `gpt-live-transcribe`다.
-const String kStreamingSttModel = 'gpt-4o-transcribe';
+/// 파일 전사(`OpenAiTranscribeService.model`)와 **같은 값으로 맞춰 둔다.**
+/// 서클톡·시나리오톡은 이 소켓과 파일 전사 중 한 길로만 다니는데
+/// ([kFreeTalkUseStreamingStt]), 길마다 다른 모델을 쓰면 같은 말을 해도
+/// 어느 길로 갔느냐에 따라 글자가 달라진다. 2026-09-07에 Duo가 옮겨 간
+/// `gpt-transcribe`로 통일했다.
+///
+/// ⚠️ **주소가 달라 받는 모델 목록도 다르다.** 여기는 실시간 소켓
+/// (`wss://…/v1/realtime?intent=transcription`)이고 파일 전사는 HTTP다.
+/// 소켓이 이 모델을 안 받으면 **에러가 아니라 조용히 연결 실패**로 나타나고
+/// (`❌ [STREAM-STT] connect_failed`), 앱은 Deepgram 경계 + 파일 전사 쪽으로
+/// 떨어진다 — 글자는 계속 나오지만 말하는 중 미리보기가 사라지고 느려진다.
+/// 실기기에서 `connected … model=` 줄로 확인할 것.
+const String kStreamingSttModel = 'gpt-transcribe';
 
 // ── Server VAD 초기값 ────────────────────────────────────────────────
 // 고정 정책이 아니라 실기기 측정 시작점이다. 500 / 600 / 700을 비교한다.
