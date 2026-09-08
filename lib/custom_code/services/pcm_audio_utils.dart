@@ -161,3 +161,46 @@ Uint8List trimLeadingSilencePcm16(
   // 확실한 발화를 찾지 못했다면 원본을 유지한다. 잘못된 과도 트림보다 안전하다.
   return Uint8List.sublistView(pcm, 0, alignedLength);
 }
+
+/// WAV 컨테이너에서 PCM16 원시 바이트를 도로 꺼낸다. [pcm16ToWav]의 짝이다.
+///
+/// **파일에는 WAV로 쓰고 읽을 때 여기서 벗긴다.** 헤더 44바이트를 무조건
+/// 잘라내도 우리가 쓴 파일은 읽히지만, 그러면 파일이 조금이라도 다르게
+/// 생겼을 때 소리가 어긋난 채로 전사기에 올라간다. 에러가 아니라 "이상한
+/// 문장"으로 나오는 종류의 고장이라 원인을 찾기 어렵다. 그래서 `data`
+/// 청크를 실제로 찾아 들어간다.
+///
+/// 읽을 수 없으면 **null이다.** 빈 바이트를 돌려주면 호출부가 무음을 전사기에
+/// 올리고 그 결과를 사람 말로 믿게 된다.
+Uint8List? wavToPcm16(Uint8List wav) {
+  // RIFF(4) + size(4) + WAVE(4) = 12, 그 뒤로 최소 하나의 청크 헤더(8).
+  if (wav.lengthInBytes < 20) return null;
+  final ByteData view = ByteData.sublistView(wav);
+  bool tag(int at, String four) {
+    for (var i = 0; i < 4; i++) {
+      if (wav[at + i] != four.codeUnitAt(i)) return false;
+    }
+    return true;
+  }
+
+  if (!tag(0, 'RIFF') || !tag(8, 'WAVE')) return null;
+
+  var offset = 12;
+  while (offset + 8 <= wav.lengthInBytes) {
+    final int size = view.getUint32(offset + 4, Endian.little);
+    final int body = offset + 8;
+    if (tag(offset, 'data')) {
+      // 선언된 크기가 파일보다 크면 실제 남은 만큼만 쓴다 — 중간에 잘린
+      // 파일(강제종료·디스크 가득)에서도 앞부분은 살아 있다.
+      final int end = body + size > wav.lengthInBytes ? wav.lengthInBytes : body + size;
+      if (end <= body) return null;
+      // 홀수 바이트로 끝나면 마지막 반쪽 샘플은 버린다.
+      final int len = (end - body) & ~1;
+      if (len <= 0) return null;
+      return Uint8List.fromList(wav.sublist(body, body + len));
+    }
+    // 청크는 짝수 경계에 정렬된다.
+    offset = body + size + (size.isOdd ? 1 : 0);
+  }
+  return null;
+}

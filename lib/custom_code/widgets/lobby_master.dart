@@ -33,6 +33,7 @@ import 'routine_mode_scenario_talk.dart' show TtsCache; // 캐시 정리 진입�
 import '/custom_code/services/ai_style.dart';
 import '/custom_code/services/admin_gate.dart'; // 관리자 판별(UID)
 import '/custom_code/services/history_finalize.dart';
+import '/custom_code/services/origin_pcm_store.dart';
 import 'p2_voice_lab.dart' show P2VoiceLabPage; // 관리자 전용 히든 화면
 // LongPressGestureRecognizer는 material/widgets가 다시 내보내지 않는다.
 import 'package:flutter/gestures.dart' show LongPressGestureRecognizer;

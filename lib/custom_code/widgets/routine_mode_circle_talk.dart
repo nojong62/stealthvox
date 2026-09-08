@@ -53,6 +53,7 @@ import '/custom_code/services/origin_language_session.dart';
 import '/custom_code/services/openai_streaming_transcribe_prewarm.dart';
 import '/custom_code/services/openai_streaming_transcribe_session.dart';
 import '/custom_code/services/openai_transcribe_service.dart';
+import '/custom_code/services/origin_pcm_store.dart';
 import '/custom_code/services/pcm_audio_utils.dart';
 import '/custom_code/services/session_rollover_summary.dart';
 import '/custom_code/services/tts_adapter.dart';
@@ -131,6 +132,10 @@ class CircleTalkCostTracker {
   int ttsDuplicateBlocked = 0;
   int retranscribeRequestCount = 0;
 
+  /// 💾 창고 실측을 같은 줄에 붙여 찍는다. 붙이지 않으면 비용 로그와 창고
+  ///   로그가 세션 경계에서 어긋나 짝을 맞출 수 없다.
+  void Function()? onOriginPcmSnapshot;
+
   void addDeepgramBytes(int byteCount) {
     deepgramAudioMs += (byteCount / kStealthVoxSttBytesPerMs).round();
   }
@@ -165,6 +170,9 @@ class CircleTalkCostTracker {
           'tts_duplicate_blocked=$ttsDuplicateBlocked '
           'retranscribe_request_count=$retranscribeRequestCount',
     );
+    // 💾 24시간·200MB·40MB는 근거 있는 값이 아니라 보호용 출발점이다.
+    //   이 줄이 쌓여야 실제 값으로 바꿀 수 있다.
+    onOriginPcmSnapshot?.call();
   }
 }
 
@@ -319,6 +327,15 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
   //   담는다. 스트리밍 전사 경로에서는 장애 폴백/디버깅용으로만 남는다.
   final List<Uint8List> _turnPcmChunks = <Uint8List>[];
   int _turnPcmBytes = 0;
+
+  // 💾 [ORIGIN-PCM] 이번 턴의 전사에 실제로 올린 바이트.
+  //   `_turnPcmChunks`는 턴이 끝나면 비워지므로, 히스토리에 줄이 저장되는
+  //   시점까지 살아 있을 사본이 따로 필요하다. **한 턴에 하나뿐이고**, 저장할
+  //   때 비운다 — 같은 소리가 두 번 창고에 들어가지 않게.
+  Uint8List? _lastTurnPcm;
+
+  /// 창고에 쓴 발화 번호. 히스토리 문서의 `pcm_seq`가 이 값을 가리킨다.
+  int _originPcmSeq = 0;
   // ⏱️ [PERF] 유저 음성이 나오기까지의 구간을 끝까지 재기 위한 기준점.
   //   Deepgram final 수신 시각(= 앱이 발화 종료를 아는 가장 이른 시점).
   DateTime? _turnPerfAnchor;
@@ -581,6 +598,9 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
   Future<String?> _transcribeAccurately({Uint8List? pcmOverride}) async {
     final pcm = pcmOverride ?? _snapshotTurnPcm();
     if (pcm == null || _openAiKey.isEmpty) return null;
+    // 💾 전사에 올리는 바로 그 바이트를 붙잡아 둔다. 복사하지 않는다 —
+    //   창고는 히스토리에 줄이 저장될 때 이것을 그대로 받아 쓴다.
+    _lastTurnPcm = pcm;
     _costTracker.recordRetranscribeRequest();
     final requestStartedAt = DateTime.now();
     _markFirstSpeech('FIRST_PCM_SENT_TO_STT', at: requestStartedAt);
@@ -1076,6 +1096,8 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
     _markFirstSpeech('MIC_INPUT', at: _micInputAt);
     _preparedCaptureFuture = _startImmediateLocalCapture();
     _costTracker = CircleTalkCostTracker(_log);
+    _costTracker.onOriginPcmSnapshot =
+        () => OriginPcmStore.instance.logSnapshot(_myHistoryRef?.id ?? '');
     _ttsAdapter = TtsAdapter(
       apiKeyProvider: () => _openAiKey,
       onLog: _log,
@@ -4936,7 +4958,28 @@ $kSpokenReplyLengthPolicy
         roomId: _myHistoryRef?.id,
       );
       _log('📚 [HIST-NEW]', 'chat_history 방 생성: ${_myHistoryRef!.id}');
+      // 💾 방보다 먼저 받아 둔 발화가 있으면 이 방으로 옮긴다. 없으면 즉시
+      //   돌아오므로 방 생성을 늦추지 않는다.
+      unawaited(OriginPcmStore.instance.adoptPending(_myHistoryRef!.id));
     }
+  }
+
+  /// 💾 [ORIGIN-PCM] 이 줄이 유저 발화면 그 소리를 창고에 넣고 번호를 준다.
+  ///
+  /// **AI 줄에는 소리가 없다** — 유저가 낸 소리만 원문 복원의 근거가 된다.
+  /// 소리가 없거나 이미 이번 턴에 넣었으면 null이고, 그러면 문서에 `pcm_seq`
+  /// 필드 자체가 붙지 않는다. 없는 것을 0으로 적으면 복원 쪽이 0번 파일을
+  /// 찾으러 간다.
+  int? _stashTurnPcm(Map<String, dynamic> line) {
+    if (line['role'] != 'HOST') return null;
+    final pcm = _lastTurnPcm;
+    if (pcm == null || pcm.isEmpty) return null;
+    final roomId = _myHistoryRef?.id ?? '';
+    // 한 턴의 소리는 한 줄에만 묶인다. 여기서 비워 두 번 들어가지 않게 한다.
+    _lastTurnPcm = null;
+    final int seq = ++_originPcmSeq;
+    unawaited(OriginPcmStore.instance.put(roomId, seq, pcm));
+    return seq;
   }
 
   /// 턴마다 chat_history/messages 서브컬렉션에 기록 병행 저장
@@ -4953,10 +4996,15 @@ $kSpokenReplyLengthPolicy
         // 이 방에 유저 발화가 실제로 들어간 순간을 표시한다. AI 글만 있는 방은
         // 남기지 않는다는 규칙의 근거가 이 한 줄이다.
         if (line['role'] == 'HOST') _currentRoomHasUserTurn = true;
+        // 💾 [ORIGIN-PCM] 유저가 실제로 낸 소리를 이 줄에 묶어 둔다.
+        //   **두 저장 경로가 여기 하나로 모이므로 배선도 여기 하나뿐이다.**
+        //   기다리지 않는다 — 창고가 늦어도 대화 기록은 제 속도로 저장된다.
+        final int? pcmSeq = _stashTurnPcm(line);
         await _myHistoryRef!.collection('messages').add({
           'role': line['role'] ?? '',
           // Target은 History가 gpt-4o-mini로 최초 1회 생성해 채운다.
           'original_text': original,
+          if (pcmSeq != null) 'pcm_seq': pcmSeq,
           'created_at': FieldValue.serverTimestamp(),
         });
       }
