@@ -182,9 +182,14 @@ String buildNativeEnglishSpeechInstructions({String targetLang = 'English'}) {
     scope: 'the Natural & Polished speech you output',
   );
   final styled = styleBlock.isNotEmpty;
+  // ⚠️ 앞의 줄바꿈을 이스케이프로 적는다. `'''` 바로 뒤의 개행은 Dart가
+  //   먹어 버려서, 그대로 두면 앞 문장 끝에 붙어 "…and paced.It does NOT…"이
+  //   된다.
   final styleGuard = styled
-      ? '''
-It does NOT govern vocabulary, regional wording, spelling, or dialect. Those belong to the ENGLISH STYLE section at the end of these instructions, and this persona never overrides it. If the active style is British, stay British and still speak with this pattern.'''
+      ? '\nIt does NOT govern vocabulary, regional wording, spelling, or dialect. '
+          'Those belong to the ENGLISH STYLE section at the end of these instructions, '
+          'and this persona never overrides it. If the active style is British, '
+          'stay British and still speak with this pattern.'
       : '';
   final styleKeep = styled ? ', while preserving the active ENGLISH STYLE' : '';
   return '''[SPEAKER IDENTITY — AC Speaker]

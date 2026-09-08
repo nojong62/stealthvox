@@ -1,13 +1,13 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stealth_vox/custom_code/services/ai_style.dart';
 
-/// NATIVE ENGLISH 지시문을 고정한다.
+/// NATURAL & POLISHED(저장 칸은 `native_english`) 지시문을 고정한다.
 ///
-/// **Native = 영어처럼 번역하는 것이 아니라, 같은 생각을 미국 영어 화자가
-/// 처음부터 영어로 짰다면 어떻게 말했을지를 다시 만드는 것.**
-/// 이 정의가 로비 AI STYLE의 `STYLE — Native`와 갈라지는 순간, 앱 안에서
-/// Native가 서로 다른 두 가지 뜻을 갖게 된다. 그래서 두 지시문이 실제로 같은
-/// 글자를 공유하는지를 여기서 지킨다.
+/// **2026-09-08 두 축이 갈렸다.** 화자(AC Speaker)는 생각을 푸는 방식·리듬·
+/// 흐름만 지배하고, 어휘·철자·지역 어투는 로비 AI STYLE이 쥔다. 예전에는 이
+/// 프롬프트에 `aiStyleInstruction('Native')`가 하드코딩돼 있어서, 유저가
+/// British를 골라도 "미국식으로 다시 짜라"가 들어갔다. 그 하드코딩을 걷어낸
+/// 것이 이 파일이 지키는 첫 번째 약속이다.
 void main() {
   final prompt = buildNativeEnglishSpeechInstructions();
 
@@ -47,20 +47,88 @@ void main() {
     });
   });
 
-  group('로비 Native와 같은 철학을 공유한다', () {
-    test('로비 스타일 지시문을 통째로 안고 있다', () {
-      // 두 곳에 따로 적히기 시작하면 이 시험이 먼저 깨진다.
-      expect(prompt, contains(aiStyleInstruction('Native')));
-      expect(prompt, contains('STYLE — Native'));
+  group('화자와 스타일은 서로 다른 축이다', () {
+    test('로비 AI STYLE을 실제로 싣는다', () {
+      // 예전에는 이 자리에 'Native'가 박혀 있어서 유저의 선택이 닿지 않았다.
+      expect(prompt, contains('[ENGLISH STYLE'));
+      expect(prompt, contains('STYLE — '));
     });
 
-    test('로비에서 고른 다른 스타일은 절대 섞이지 않는다', () {
-      // 로비에서 British를 골랐다고 NATIVE ENGLISH 카드가 영국식이 되면
-      // 카드 이름이 거짓말이 된다.
-      expect(prompt, isNot(contains('STYLE — British')));
-      expect(prompt, isNot(contains('STYLE — American')));
-      expect(prompt, isNot(contains('STYLE — Standard')));
-      expect(prompt, isNot(contains('[ENGLISH STYLE')));
+    test('인물은 dialect를 강제하지 않는다', () {
+      // Anderson Cooper는 speaking-pattern reference이지 미국 어투의 근거가
+      // 아니다. British를 고른 유저는 British 어휘 그대로 이 패턴을 탄다.
+      expect(prompt, contains('SPEAKING-PATTERN reference'));
+      expect(
+        prompt,
+        contains('It does NOT govern vocabulary, regional wording, spelling, or dialect.'),
+      );
+      expect(prompt, contains('If the active style is British, stay British'));
+      expect(prompt, isNot(contains('Use everyday US spoken English')));
+      expect(prompt, isNot(contains('decorative American vocabulary')));
+    });
+
+    test('스타일 블록이 없는 방에서는 그것을 가리키지 않는다', () {
+      // 비영어 타겟이면 스타일 블록이 빈 문자열이다. 그때도 "ENGLISH STYLE을
+      // 지키라"고 적으면 프롬프트가 없는 절을 가리킨다.
+      final noStyle =
+          buildNativeEnglishSpeechInstructions(targetLang: 'Japanese');
+      expect(noStyle, isNot(contains('[ENGLISH STYLE')));
+      expect(noStyle, isNot(contains('ENGLISH STYLE section')));
+      expect(noStyle, isNot(contains('while preserving the active ENGLISH STYLE')));
+      // 화자 정체성 자체는 그대로 선다.
+      expect(noStyle, contains('SPEAKER IDENTITY — AC Speaker'));
+    });
+
+    test('화자 안내가 앞 문장에 달라붙지 않는다', () {
+      // `'''` 바로 뒤의 개행은 Dart가 먹는다. 그대로 두면 "…and paced.It
+      // does NOT…"이 되어 두 문장이 한 줄로 뭉친다.
+      expect(prompt, isNot(contains('paced.It does NOT')));
+      expect(prompt, contains('paced.\nIt does NOT'));
+    });
+  });
+
+  group('고정 화자', () {
+    test('일회성 문체가 아니라 영구 정체성이다', () {
+      expect(
+        prompt,
+        contains('Treat this as a permanent speaking persona, not a temporary writing style.'),
+      );
+      expect(
+        prompt,
+        contains('Maintain this speaking persona consistently across all topics and all sessions.'),
+      );
+    });
+
+    test('인물 이름을 부르지 않는다', () {
+      expect(prompt, contains('Never mention Anderson Cooper.'));
+      expect(
+        prompt,
+        contains('Never reproduce his quotations, signature phrases, or uniquely identifiable wording.'),
+      );
+    });
+
+    test('어휘 수준을 올리지 않는다', () {
+      // Clear & Easy와의 차이가 어휘라면 두 카드의 구분이 무너진다.
+      expect(
+        prompt,
+        contains("Do not increase the user's vocabulary level unless natural spoken English truly requires it."),
+      );
+      expect(
+        prompt,
+        contains('The words stay just as easy as they were.'),
+      );
+    });
+
+    test('분량을 줄이는 자리가 아니다', () {
+      expect(prompt, contains('THIS IS NOT A CONDENSED VERSION'));
+      expect(
+        prompt,
+        contains('Never shorten the speech, never summarize it, and never drop material to sound more refined.'),
+      );
+      expect(
+        prompt,
+        contains('Never make the speech shorter or thinner than what you were given.'),
+      );
     });
   });
 
@@ -95,13 +163,17 @@ void main() {
     });
   });
 
-  group('미국 구어체이되 장식은 아니다', () {
+  group('구어체이되 장식은 아니다', () {
     test('어려운 단어와 문어체를 막는다', () {
       expect(prompt, contains('Avoid SAT vocabulary'));
       expect(
         prompt,
         contains(
-            'Native means native thought organization, not decorative American vocabulary.'),
+            'Polish means native thought organization, not decorative vocabulary.'),
+      );
+      expect(
+        prompt,
+        contains('Which vocabulary and which regional wording to use is decided by the ENGLISH STYLE'),
       );
     });
 
@@ -110,7 +182,7 @@ void main() {
     });
 
     test('설명·라벨·따옴표 없이 발화만 낸다', () {
-      expect(prompt, contains('Output only the Native English speech.'));
+      expect(prompt, contains('Output only the Natural & Polished speech.'));
       expect(prompt, contains('No explanation. No labels.'));
     });
   });
