@@ -345,7 +345,10 @@ void main() {
         heard: ears(const {}),
       );
       expect(out.corrections, isEmpty);
-      expect(out.stats.pcmMissing, 1);
+      // 소리를 찾아갔다 못 찾은 것이 아니라 **처음부터 검사 대상이 아니다.**
+      // 이 둘을 섞어 세면 pcm_missing으로 창고 상태를 판단할 수 없다.
+      expect(out.stats.skippedNoAudio, 1);
+      expect(out.stats.pcmMissing, 0);
       expect(out.stats.pcmRechecked, 0, reason: '읽을 소리가 없으면 부르지도 않는다');
     });
 
@@ -356,7 +359,9 @@ void main() {
         heard: ears({1: null}),
       );
       expect(out.corrections, isEmpty);
+      // 이쪽은 진짜 장애다 — 열쇠가 있는데 파일을 못 읽었다.
       expect(out.stats.pcmMissing, 1);
+      expect(out.stats.skippedNoAudio, 0);
     });
 
     test('재전사가 던져도 고치지 않고 계속 간다', () async {
@@ -433,6 +438,8 @@ void main() {
         heard: ears({1: '내가 그랬구나'}),
       );
       expect(out.corrections, isEmpty, reason: 'AI 줄에는 소리가 없다');
+      expect(out.stats.skippedNoAudio, 1);
+      expect(out.stats.pcmMissing, 0, reason: 'Duo 상대 발화도 이 갈래다');
     });
   });
 

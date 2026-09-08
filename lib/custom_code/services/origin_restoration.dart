@@ -204,6 +204,7 @@ class RestorationStats {
     this.suspects = 0,
     this.pcmRechecked = 0,
     this.pcmMissing = 0,
+    this.skippedNoAudio = 0,
     this.acousticCandidate = 0,
     this.acousticOriginal = 0,
     this.acousticUnclear = 0,
@@ -218,7 +219,21 @@ class RestorationStats {
   final int turns;
   final int suspects;
   final int pcmRechecked;
+
+  /// 소리를 찾아갔는데 **못 읽은** 횟수. 파일이 없거나, 깨졌거나, 재전사가
+  /// 실패했을 때다.
+  ///
+  /// ⚠️ **애초에 소리가 없는 줄은 여기 들어오지 않는다.** 그쪽은
+  /// [skippedNoAudio]다. 둘을 섞으면 이 값으로 창고가 제대로 붙었는지
+  /// 판단할 수 없게 된다 — Duo는 상대 발화의 절반이 늘 소리가 없으므로,
+  /// 섞는 순간 실제 장애율이 그 안에 묻힌다.
   final int pcmMissing;
+
+  /// 소리가 애초에 없어 검사 대상이 아니었던 횟수.
+  ///
+  /// Duo의 상대 발화가 여기다 — 그 소리는 상대 폰 마이크에서 나왔고 내
+  /// 창고에는 없다. **장애가 아니라 설계다.**
+  final int skippedNoAudio;
 
   /// 다시 들어 보니 후보가 들린 횟수.
   final int acousticCandidate;
@@ -242,6 +257,7 @@ class RestorationStats {
     int? suspects,
     int? pcmRechecked,
     int? pcmMissing,
+    int? skippedNoAudio,
     int? acousticCandidate,
     int? acousticOriginal,
     int? acousticUnclear,
@@ -257,6 +273,7 @@ class RestorationStats {
         suspects: suspects ?? this.suspects,
         pcmRechecked: pcmRechecked ?? this.pcmRechecked,
         pcmMissing: pcmMissing ?? this.pcmMissing,
+        skippedNoAudio: skippedNoAudio ?? this.skippedNoAudio,
         acousticCandidate: acousticCandidate ?? this.acousticCandidate,
         acousticOriginal: acousticOriginal ?? this.acousticOriginal,
         acousticUnclear: acousticUnclear ?? this.acousticUnclear,
@@ -733,9 +750,13 @@ class OriginRestorationEngine {
       // 🚫 소리가 없으면 고치지 않는다. 문맥만으로 고치는 것은 "조금
       //   이상하다"로 원문을 바꾸는 일과 구분되지 않는다.
       //   Duo에서는 이 한 줄이 "상대 발화는 건드리지 않는다"까지 지킨다.
+      //
+      //   ⚠️ **[RestorationStats.pcmMissing]으로 세지 않는다.** 이 줄은 소리를
+      //   찾아갔다 못 찾은 것이 아니라 **처음부터 검사 대상이 아니었다.**
+      //   섞어 세면 그 값으로 창고가 붙었는지 판단할 수 없다.
       if (!turn.hasAudio) {
         out = out.copyWith(
-            pcmMissing: out.pcmMissing + 1, rejected: out.rejected + 1);
+            skippedNoAudio: out.skippedNoAudio + 1, rejected: out.rejected + 1);
         continue;
       }
 
@@ -786,6 +807,7 @@ class OriginRestorationEngine {
     // 🔇 발화 내용은 남기지 않는다. 세는 것만 센다.
     log?.call('[ORIGIN-RESTORE] turns=${s.turns} suspects=${s.suspects} '
         'pcm_rechecked=${s.pcmRechecked} pcm_missing=${s.pcmMissing} '
+        'no_audio=${s.skippedNoAudio} '
         'ac_candidate=${s.acousticCandidate} ac_original=${s.acousticOriginal} '
         'ac_unclear=${s.acousticUnclear} '
         'corrected=${s.corrected} rejected=${s.rejected} '
