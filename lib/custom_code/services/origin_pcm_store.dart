@@ -171,16 +171,23 @@ class OriginPcmStore {
   /// 발화는 복원 때 "PCM 없음"으로 처리되어 원문이 그대로 남는다.
   ///
   /// 호출부는 `unawaited`로 부른다 — 전사를 한 밀리초도 늦추지 않는다.
+  ///
+  /// ⚠️ **여기서 곧바로 WAV로 감싼다.** 쓰기는 큐를 거쳐 나중에 일어나므로,
+  /// 감싸는 일을 뒤로 미루면 그 사이 호출부가 버퍼를 되쓸 때 **전사에 올린
+  /// 소리와 파일에 남는 소리가 갈린다.** 어차피 만들어야 하는 배열이라
+  /// 방어적 복사가 공짜로 딸려온다 — 저장되는 것은 언제나 put을 부른 순간의
+  /// 소리다.
   Future<void> put(String roomId, int seq, Uint8List pcm) {
     if (!enabled || pcm.isEmpty || seq <= 0) return Future<void>.value();
     final key = roomId.trim().isEmpty ? kOriginPcmPendingDir : roomId.trim();
-    return _serialize(key, () => _putInner(key, seq, pcm));
+    final wav = pcm16ToWav(pcm, sampleRate: kStealthVoxSttSampleRate);
+    return _serialize(key, () => _putInner(key, seq, wav));
   }
 
-  Future<void> _putInner(String key, int seq, Uint8List pcm) async {
+  Future<void> _putInner(String key, int seq, Uint8List wavBytes) async {
     try {
       final int used = _bytes[key] ?? await _measure(key);
-      final int wav = pcm.lengthInBytes + 44;
+      final int wav = wavBytes.lengthInBytes;
       if (used + wav > kOriginPcmSessionMaxBytes) {
         // 🚧 상한. **여기서 멈추는 것은 보존뿐이다** — 전사도 대화도 그대로
         //   간다. 이미 써 둔 파일을 지워 자리를 내주지도 않는다.
@@ -196,10 +203,9 @@ class OriginPcmStore {
       }
       final dir = await _dirFor(key);
       final file = File('${dir.path}/${_fileNameOf(seq)}');
-      await file.writeAsBytes(
-        pcm16ToWav(pcm, sampleRate: kStealthVoxSttSampleRate),
-        flush: false,
-      );
+      // flush: true — 복원은 대화가 끝나자마자 시작한다. OS 캐시에만 있는
+      // 파일을 두고 [flush]가 "다 썼다"고 말하면, 그 보장이 반 걸음 모자란다.
+      await file.writeAsBytes(wavBytes, flush: true);
       _bytes[key] = used + wav;
       await _writeManifest(key);
     } catch (error) {
@@ -269,6 +275,33 @@ class OriginPcmStore {
   // ══════════════════════════════════════════════════════════════════
   // 읽기
   // ══════════════════════════════════════════════════════════════════
+
+  /// 이 방의 밀린 쓰기가 전부 끝날 때까지 기다린다.
+  ///
+  /// **복원을 시작하기 직전에 딱 한 번 부른다.** 대화 중에는 절대 부르지
+  /// 않는다 — [put]이 `unawaited`인 이유가 전사를 늦추지 않는 것인데, 여기서
+  /// 기다리면 그 이유가 사라진다.
+  ///
+  /// 이 문이 없으면 마지막 발화에서 진다. `turn_100`의 쓰기가 아직 큐에 있는
+  /// 채로 사용자가 대화를 끝내고, 복원이 곧바로 그 발화를 의심하면
+  /// [read]가 null을 준다. 그러면 **소리가 있는데도 "PCM 없음"으로 강등되어**
+  /// 고칠 수 있었던 낱말이 그대로 남는다. 기다리는 시간은 디스크 쓰기 몇
+  /// 밀리초뿐이고, 그 시점에 사용자는 이미 대화를 끝냈다.
+  Future<void> flush(String roomId) async {
+    final key = roomId.trim().isEmpty ? kOriginPcmPendingDir : roomId.trim();
+    // 기다리는 동안 새 쓰기가 체인에 붙을 수 있다. 체인이 더 자라지 않을
+    // 때까지 따라간다. 대화가 끝난 뒤라 실제로는 한두 바퀴에 끝난다.
+    for (var i = 0; i < 32; i++) {
+      final chain = _chains[key];
+      if (chain == null) return;
+      try {
+        await chain;
+      } catch (_) {}
+      if (identical(_chains[key], chain)) return;
+    }
+    debugPrint('[ORIGIN-PCM] flush_gave_up room=$key '
+        '- 쓰기가 계속 붙는다. 복원은 있는 파일로 진행한다');
+  }
 
   /// 의심 가는 발화 하나를 꺼낸다. **없으면 null이다.**
   ///
