@@ -540,6 +540,8 @@ void main() {
     });
   });
 
+  _stateGroup();
+
   group('대화록 형식', () {
     test('turn id와 역할을 싣는다', () {
       final text = formatRestorationTranscript([
@@ -555,6 +557,125 @@ void main() {
         user('t1', '지금 취업 준비 중이야', hint: 'the user\'s younger sibling'),
       ]);
       expect(text, contains('SUBJECT: the user'));
+    });
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 실패한 방이 영영 닫히지 않는가.
+//
+// 예전에는 네트워크 오류나 JSON 깨짐에도 완료 표시를 찍었다. 한 번 어긋난
+// 방은 다시는 복원되지 않았고, 고칠 수 있었던 낱말이 되살아날 기회가 없었다.
+// ══════════════════════════════════════════════════════════════════════
+void _stateGroup() {
+  group('복원 상태', () {
+    test('한 번도 안 돈 방은 돈다', () {
+      expect(shouldRunRestoration(null), isTrue);
+      expect(shouldRunRestoration(const <String, dynamic>{}), isTrue);
+      expect(
+        shouldRunRestoration(const <String, dynamic>{'room_name': 'x'}),
+        isTrue,
+      );
+    });
+
+    test('정상으로 마친 방은 다시 돌지 않는다', () {
+      expect(
+        shouldRunRestoration(const <String, dynamic>{
+          kOriginRestoreStateField: kOriginRestoreCompleted,
+        }),
+        isFalse,
+      );
+    });
+
+    test('실패한 방은 다시 돈다', () {
+      // 여기가 이 그룹의 핵심이다. timeout 한 번이 방을 영영 닫으면 안 된다.
+      expect(
+        shouldRunRestoration(const <String, dynamic>{
+          kOriginRestoreStateField: kOriginRestoreFailed,
+          kOriginRestoreAttemptsField: 1,
+        }),
+        isTrue,
+      );
+    });
+
+    test('세 번 실패하면 그만둔다', () {
+      expect(
+        shouldRunRestoration(const <String, dynamic>{
+          kOriginRestoreStateField: kOriginRestoreFailed,
+          kOriginRestoreAttemptsField: kOriginRestoreMaxAttempts,
+        }),
+        isFalse,
+      );
+      expect(
+        shouldRunRestoration(const <String, dynamic>{
+          kOriginRestoreStateField: kOriginRestoreFailed,
+          kOriginRestoreAttemptsField: kOriginRestoreMaxAttempts + 5,
+        }),
+        isFalse,
+      );
+    });
+
+    test('상태 칸이 생기기 전에 완료된 방은 완료로 본다', () {
+      // 그때는 그 표시가 완료를 뜻했다. 다시 돌면 고친 글을 원문으로 알고
+      // 또 고치기 시작한다.
+      expect(
+        shouldRunRestoration(const <String, dynamic>{
+          kOriginRestoredAtField: 'ts',
+        }),
+        isFalse,
+      );
+    });
+
+    test('마지막 시도일 때만 소리를 버린다', () {
+      expect(isLastRestorationAttempt(null), isFalse);
+      expect(
+        isLastRestorationAttempt(
+            const <String, dynamic>{kOriginRestoreAttemptsField: 2}),
+        isTrue,
+        reason: '세 번이 상한이므로 이번 실패로 3이 되어 끝난다',
+      );
+      // 아직 기회가 남았으면 소리를 지키고 다음을 기다린다.
+      expect(
+        isLastRestorationAttempt(
+            const <String, dynamic>{kOriginRestoreAttemptsField: 1}),
+        isFalse,
+      );
+      expect(
+        isLastRestorationAttempt(
+            const <String, dynamic>{kOriginRestoreAttemptsField: 0}),
+        isFalse,
+      );
+    });
+  });
+
+  group('실측 계수', () {
+    test('소리가 무엇을 지지했는지 따로 센다', () async {
+      // "많이 고쳤다"가 아니라 "애매한 것은 안 고쳤다"가 성공이라, 원문을
+      // 지켜 낸 횟수와 판정 못 한 횟수가 고친 수만큼 중요하다.
+      final engine = OriginRestorationEngine(
+        roomId: 'r1',
+        detectSuspects: detector([
+          suspect('t1', '네가', '내가'),
+          suspect('t2', '네가', '내가'),
+          suspect('t3', '네가', '내가'),
+        ]),
+        recheckAcoustic: ears({
+          1: '내가 갔어', // 후보 지지
+          2: '네가 갔어', // 원문 지지
+          3: '어제 갔어', // 불명확
+        }),
+        validateTarget: noSuspects,
+      );
+      final out = await engine.run([
+        user('t1', '네가 갔어', seq: 1),
+        user('t2', '네가 갔어', seq: 2),
+        user('t3', '네가 갔어', seq: 3),
+      ]);
+      expect(out.stats.acousticCandidate, 1);
+      expect(out.stats.acousticOriginal, 1);
+      expect(out.stats.acousticUnclear, 1);
+      expect(out.stats.corrected, 1);
+      expect(out.stats.rejected, 2);
     });
   });
 }

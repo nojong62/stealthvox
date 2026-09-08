@@ -31,6 +31,7 @@ import 'routine_mode_scenario_talk.dart' show TtsCache;
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
 import '/custom_code/services/ai_style.dart';
+import '/custom_code/services/origin_restoration.dart';
 import '/custom_code/services/origin_restoration_runner.dart';
 import '/custom_code/services/origin_language_session.dart'
     show detectOriginScript, koreanLanguageDisplayName, textContradictsLanguage;
@@ -709,6 +710,29 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     }
   }
 
+  /// 🔍 [ORIGIN-RESTORE] 대화방에서 끝내지 못한 복원을 이어 받는다.
+  ///
+  /// 정상 경로는 대화방이 나가면서 시작하고 이 화면이 [awaitIfRunning]으로
+  /// 기다리는 것이다. 그런데 대화 직후 앱이 죽거나 네트워크가 끊기면 그 판이
+  /// 없다. **그런 방을 여기서 집어 든다.**
+  ///
+  /// ⚠️ **기다리지 않는다.** 이미 화면이 떠 있는데 10초를 세워 두는 것보다,
+  /// 걸어 두고 다음에 열 때 반영되는 편이 낫다. 사용자가 그 사이 확정해
+  /// 버리면 그 방은 사람이 검수한 원문으로 남고, 그것도 옳은 결말이다.
+  void _recoverOriginRestoration() {
+    final data = _cachedRoomData;
+    if (data == null || _apiKey.isEmpty) return;
+    if (!_historyIsDraft) return;
+    if (!shouldRunRestoration(data)) return;
+    if (OriginRestorationRunner.instance.isRunning(widget.historyDoc.id)) return;
+    OriginRestorationRunner.instance.start(
+      roomRef: widget.historyDoc,
+      apiKey: _apiKey,
+      sourceName: (data['native_lang'] ?? 'Korean').toString(),
+      targetLanguage: (data['target_lang'] ?? 'English').toString(),
+    );
+  }
+
   Future<void> _fetchRemoteConfig({bool force = false}) async {
     try {
       final remoteConfig = FirebaseRemoteConfig.instance;
@@ -726,6 +750,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
           _apiKey = remoteConfig.getString('OpenAIAPIKey');
           _deepgramKey = remoteConfig.getString('DeepgramAPIKey');
         });
+        _recoverOriginRestoration();
         _scheduleMissingTargetGeneration(_cachedDocs);
       }
     } catch (e) {

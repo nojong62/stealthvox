@@ -30,9 +30,6 @@ import 'origin_pcm_store.dart';
 import 'pcm_audio_utils.dart';
 import 'origin_restoration.dart';
 
-/// 복원을 이미 돌린 방이라는 표시. **두 번 돌지 않게 하는 유일한 근거다.**
-const String kOriginRestoredAtField = 'origin_restored_at';
-
 class OriginRestorationRunner {
   OriginRestorationRunner._();
 
@@ -84,14 +81,16 @@ class OriginRestorationRunner {
     required String targetLanguage,
   }) async {
     final roomId = roomRef.id;
+    final started = DateTime.now();
+    Map<String, dynamic>? roomData;
     try {
-      // 이미 돈 방은 다시 돌지 않는다. 두 번째 판은 첫 판이 고친 글을 원문으로
-      // 알고 또 고치기 시작한다.
+      // **정상으로 마친 방만** 건너뛴다. 두 번째 판은 첫 판이 고친 글을
+      // 원문으로 알고 또 고치기 시작하므로 완료된 방은 다시 돌면 안 되지만,
+      // 네트워크가 한 번 끊겼다고 그 방을 영영 포기할 이유는 없다.
       final room = await roomRef.get();
-      final roomData = room.data();
-      if (roomData is Map && roomData.containsKey(kOriginRestoredAtField)) {
-        return;
-      }
+      final raw = room.data();
+      roomData = raw is Map<String, dynamic> ? raw : null;
+      if (!shouldRunRestoration(roomData)) return;
 
       // 🚪 마지막 발화의 쓰기가 아직 큐에 있을 수 있다. 여기서 딱 한 번
       //   기다린다 — 대화 중에는 절대 기다리지 않는다.
@@ -116,7 +115,9 @@ class OriginRestorationRunner {
         ));
       }
       if (turns.isEmpty) {
-        await _seal(roomRef);
+        // 고칠 글이 없는 것은 실패가 아니다.
+        await _markCompleted(roomRef);
+        await OriginPcmStore.instance.discard(roomId);
         return;
       }
 
@@ -156,28 +157,52 @@ class OriginRestorationRunner {
       if (outcome.corrections.isNotEmpty) {
         await _persist(roomRef, snap.docs, outcome.corrections);
       }
-      await _seal(roomRef);
+      await _markCompleted(roomRef);
 
       // 🗑️ 원문이 확정됐으면 소리의 역할은 끝났다. Final Target은 순수
       //   텍스트 작업이라, 그 성공 여부와 삭제를 묶지 않는다.
-      await OriginPcmStore.instance.discard(roomId);
-      debugPrint('[ORIGIN-RESTORE] final_changes=${outcome.corrections.length} '
-          'pcm_discarded=true room=$roomId');
-    } catch (error) {
-      // 복원이 실패해도 대화는 그대로다. 표시만 남겨 다음에 또 돌지 않게 한다.
-      debugPrint('[ORIGIN-RESTORE] failed room=$roomId '
-          'reason=${error.runtimeType}');
+      var discarded = true;
       try {
-        await _seal(roomRef);
         await OriginPcmStore.instance.discard(roomId);
+      } catch (_) {
+        discarded = false;
+      }
+      debugPrint('[ORIGIN-RESTORE] final_changes=${outcome.corrections.length} '
+          'elapsed_ms=${DateTime.now().difference(started).inMilliseconds} '
+          'pcm_discarded=$discarded room=$roomId');
+    } catch (error) {
+      // 복원이 실패해도 대화는 그대로다. **완료로 찍지 않는다** — 한 번의
+      // timeout이 그 방의 복원을 영영 닫아 버리면, 고칠 수 있었던 낱말이
+      // 되살아날 기회가 사라진다.
+      final last = isLastRestorationAttempt(roomData);
+      debugPrint('[ORIGIN-RESTORE] failed room=$roomId '
+          'reason=${error.runtimeType} last_attempt=$last '
+          'elapsed_ms=${DateTime.now().difference(started).inMilliseconds}');
+      try {
+        await _markFailed(roomRef);
       } catch (_) {}
+      // 🎧 **소리는 남긴다.** 다음 기회에 다시 들으려면 있어야 한다. 더 시도할
+      //   일이 없을 때만 버린다(그때도 24시간 청소가 뒤를 받는다).
+      if (last) {
+        try {
+          await OriginPcmStore.instance.discard(roomId);
+        } catch (_) {}
+      }
     }
   }
 
-  /// 복원을 돌렸다는 표시. 성공이든 실패든 남긴다.
-  Future<void> _seal(DocumentReference<Object?> roomRef) =>
+  /// 정상으로 마쳤다. **여기서만 완료 표시가 찍힌다.**
+  Future<void> _markCompleted(DocumentReference<Object?> roomRef) =>
       roomRef.update(<String, dynamic>{
+        kOriginRestoreStateField: kOriginRestoreCompleted,
         kOriginRestoredAtField: FieldValue.serverTimestamp(),
+      });
+
+  /// 실패했다. 시도 횟수를 올려 두고 다음 기회를 남긴다.
+  Future<void> _markFailed(DocumentReference<Object?> roomRef) =>
+      roomRef.update(<String, dynamic>{
+        kOriginRestoreStateField: kOriginRestoreFailed,
+        kOriginRestoreAttemptsField: FieldValue.increment(1),
       });
 
   /// 고쳐진 줄만 되쓴다.

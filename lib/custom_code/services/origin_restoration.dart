@@ -187,6 +187,10 @@ class RestorationOutcome {
 /// 실기기에서 값을 조정할 근거.
 ///
 /// **발화 내용은 담지 않는다.** 세는 것만 센다.
+///
+/// 성공은 "많이 고쳤다"가 아니라 **"잘못된 것은 고치고 애매한 것은 안 고쳤다"**
+/// 이므로, 고친 수만큼이나 [acousticOriginal]과 [acousticUnclear]가 중요하다 —
+/// 소리가 원문을 지켜 낸 횟수와, 판정을 못 한 횟수다.
 @immutable
 class RestorationStats {
   const RestorationStats({
@@ -194,6 +198,9 @@ class RestorationStats {
     this.suspects = 0,
     this.pcmRechecked = 0,
     this.pcmMissing = 0,
+    this.acousticCandidate = 0,
+    this.acousticOriginal = 0,
+    this.acousticUnclear = 0,
     this.corrected = 0,
     this.rejected = 0,
     this.targetSuspects = 0,
@@ -206,6 +213,17 @@ class RestorationStats {
   final int suspects;
   final int pcmRechecked;
   final int pcmMissing;
+
+  /// 다시 들어 보니 후보가 들린 횟수.
+  final int acousticCandidate;
+
+  /// 다시 들어도 원문이 들린 횟수. **복원이 제 일을 한 증거다.**
+  final int acousticOriginal;
+
+  /// 소리로 가리지 못한 횟수. 이 값이 크면 [judgeAcoustic]의 글자 비교가
+  /// 실제 발음 변형(띄어쓰기·조사·`열다섯`↔`15`)을 못 따라가는 것이다.
+  final int acousticUnclear;
+
   final int corrected;
   final int rejected;
   final int targetSuspects;
@@ -218,6 +236,9 @@ class RestorationStats {
     int? suspects,
     int? pcmRechecked,
     int? pcmMissing,
+    int? acousticCandidate,
+    int? acousticOriginal,
+    int? acousticUnclear,
     int? corrected,
     int? rejected,
     int? targetSuspects,
@@ -230,6 +251,9 @@ class RestorationStats {
         suspects: suspects ?? this.suspects,
         pcmRechecked: pcmRechecked ?? this.pcmRechecked,
         pcmMissing: pcmMissing ?? this.pcmMissing,
+        acousticCandidate: acousticCandidate ?? this.acousticCandidate,
+        acousticOriginal: acousticOriginal ?? this.acousticOriginal,
+        acousticUnclear: acousticUnclear ?? this.acousticUnclear,
         corrected: corrected ?? this.corrected,
         rejected: rejected ?? this.rejected,
         targetSuspects: targetSuspects ?? this.targetSuspects,
@@ -237,6 +261,54 @@ class RestorationStats {
         cacheHit: cacheHit ?? this.cacheHit,
         overflow: overflow ?? this.overflow,
       );
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 방의 복원 상태
+// ══════════════════════════════════════════════════════════════════════
+
+/// 복원을 **정상으로 마친** 순간. 실패에는 찍지 않는다.
+const String kOriginRestoredAtField = 'origin_restored_at';
+
+/// 어디까지 갔는가. `completed`가 아니면 다시 돌 수 있다.
+const String kOriginRestoreStateField = 'origin_restore_state';
+
+/// 몇 번 시도했는가. 영원히 다시 시도하지 않게 하는 유일한 빗장.
+const String kOriginRestoreAttemptsField = 'origin_restore_attempts';
+
+const String kOriginRestoreCompleted = 'completed';
+const String kOriginRestoreFailed = 'failed';
+
+/// 이만큼 실패하면 그만둔다. 같은 방에 같은 실패가 계속 나는 것이라,
+/// 더 부르는 것은 비용만 쓴다.
+const int kOriginRestoreMaxAttempts = 3;
+
+/// 이 방을 (다시) 복원해도 되는가.
+///
+/// **정상으로 마친 방만 막는다.** 예전에는 네트워크 오류나 JSON 깨짐에도
+/// 완료 표시를 찍어서, 한 번 어긋난 방은 **영영 복원되지 않았다.** 실패는
+/// 실패로 적고 다음 기회를 남긴다 — 다만 무한히는 아니다.
+///
+/// ⚠️ **`running`을 Firestore에 적지 않는다.** 도는 중에 앱이 죽으면 그
+/// 표시가 남아 방이 영영 막힌다. 지금 도는 판은 메모리에서만 안다.
+bool shouldRunRestoration(Map<String, dynamic>? room) {
+  if (room == null) return true;
+  if (room[kOriginRestoreStateField] == kOriginRestoreCompleted) return false;
+  // 상태 칸이 생기기 전에 완료 표시만 받은 방. 그때는 그것이 완료였다.
+  if (!room.containsKey(kOriginRestoreStateField) &&
+      room.containsKey(kOriginRestoredAtField)) {
+    return false;
+  }
+  final attempts = room[kOriginRestoreAttemptsField];
+  if (attempts is int && attempts >= kOriginRestoreMaxAttempts) return false;
+  return true;
+}
+
+/// 이번 실패로 더는 시도하지 않게 되는가. 그때만 소리를 버린다.
+bool isLastRestorationAttempt(Map<String, dynamic>? room) {
+  final attempts = room?[kOriginRestoreAttemptsField];
+  final done = attempts is int ? attempts : 0;
+  return done + 1 >= kOriginRestoreMaxAttempts;
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -675,8 +747,15 @@ class OriginRestorationEngine {
       }
 
       final verdict = judgeAcoustic(heard, s.span, s.candidate);
-      if (verdict == AcousticVerdict.unavailable) {
-        out = out.copyWith(pcmMissing: out.pcmMissing + 1);
+      switch (verdict) {
+        case AcousticVerdict.unavailable:
+          out = out.copyWith(pcmMissing: out.pcmMissing + 1);
+        case AcousticVerdict.supportsCandidate:
+          out = out.copyWith(acousticCandidate: out.acousticCandidate + 1);
+        case AcousticVerdict.supportsOriginal:
+          out = out.copyWith(acousticOriginal: out.acousticOriginal + 1);
+        case AcousticVerdict.unclear:
+          out = out.copyWith(acousticUnclear: out.acousticUnclear + 1);
       }
       if (!shouldApply(resolveConfidence(verdict, s.confidence))) {
         out = out.copyWith(rejected: out.rejected + 1);
@@ -694,6 +773,8 @@ class OriginRestorationEngine {
     // 🔇 발화 내용은 남기지 않는다. 세는 것만 센다.
     log?.call('[ORIGIN-RESTORE] turns=${s.turns} suspects=${s.suspects} '
         'pcm_rechecked=${s.pcmRechecked} pcm_missing=${s.pcmMissing} '
+        'ac_candidate=${s.acousticCandidate} ac_original=${s.acousticOriginal} '
+        'ac_unclear=${s.acousticUnclear} '
         'corrected=${s.corrected} rejected=${s.rejected} '
         'target_suspects=${s.targetSuspects} second_recheck=${s.secondRecheck} '
         'cache_hit=${s.cacheHit} overflow=${s.overflow}');
