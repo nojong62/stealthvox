@@ -56,7 +56,7 @@ void main() {
     expect(m.turns.length, lessThan(12));
     expect(m.dropped, isNotEmpty);
     // 못 쓴 것은 뒤쪽 번호다.
-    expect(m.dropped.first, greaterThan(m.turns.last.seq));
+    expect(m.dropped.first.compareTo(m.turns.last.key), greaterThan(0));
   });
 
   test('이미 써 둔 발화는 지우지 않는다', () async {
@@ -73,10 +73,10 @@ void main() {
     await fill('roomA', 12, 4 * 1024 * 1024);
 
     final m = await store.manifest('roomA');
-    for (final seq in m.dropped) {
+    for (final key in m.dropped) {
       // dropped에 있는데 파일도 있으면 둘 중 하나가 거짓말이다.
-      expect(m.turnOf(seq), isNull);
-      expect(await store.read('roomA', seq), isNull);
+      expect(m.turnOf(key), isNull);
+      expect(await store.readKeyed('roomA', key), isNull);
     }
   });
 

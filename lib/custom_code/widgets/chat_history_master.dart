@@ -708,6 +708,10 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       // 실어 오면 그때 빠진 타겟을 만든다.
       debugPrint('[HISTORY] canonical_applied room=$roomId');
     }
+    // 🔍 [ORIGIN-RESTORE] **정돈이 끝난 뒤에야 복원이 시작된다.** 먼저 돌면
+    //   곧 canonical이 덮을 글을 고치게 된다. 여기서는 내 마이크에서 나온
+    //   줄(`pcm_key`가 있는 줄)만 손대고, 공유 canonical은 건드리지 않는다.
+    if (mounted) _recoverOriginRestoration();
   }
 
   /// 🔍 [ORIGIN-RESTORE] 대화방에서 끝내지 못한 복원을 이어 받는다.
@@ -724,6 +728,12 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     if (data == null || _apiKey.isEmpty) return;
     if (!_historyIsDraft) return;
     if (!shouldRunRestoration(data)) return;
+    // 🧩 듀오 방은 공유 정돈이 내 줄에 적용된 뒤에만 손댄다. 아직이면
+    //   `_syncDuoCanonical`이 끝나고 다시 부른다.
+    if ((data[kDuoRoomIdField] ?? '').toString().trim().isNotEmpty &&
+        data[kDuoCanonicalAppliedAtField] == null) {
+      return;
+    }
     if (OriginRestorationRunner.instance.isRunning(widget.historyDoc.id)) return;
     OriginRestorationRunner.instance.start(
       roomRef: widget.historyDoc,

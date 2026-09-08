@@ -188,10 +188,10 @@ void main() {
       await store.put('roomA', 3, fakePcm(2400));
 
       final m = await store.manifest('roomA');
-      expect(m.turns.map((t) => t.seq), <int>[1, 3]);
-      expect(m.turnOf(1)!.bytes, 4800 + 44);
-      expect(m.turnOf(1)!.ms, 100, reason: '24kHz 16bit에서 4800바이트는 100ms');
-      expect(m.turnOf(2), isNull);
+      expect(m.turns.map((t) => t.key), <String>['turn_001', 'turn_003']);
+      expect(m.turnOf('turn_001')!.bytes, 4800 + 44);
+      expect(m.turnOf('turn_001')!.ms, 100, reason: '24kHz 16bit에서 4800바이트는 100ms');
+      expect(m.turnOf('turn_002'), isNull);
       expect(m.dropped, isEmpty);
     });
 
@@ -210,7 +210,7 @@ void main() {
       File('${root.path}/$kOriginPcmDirName/roomA/_manifest.json').deleteSync();
 
       final m = await store.manifest('roomA');
-      expect(m.turns.single.seq, 1);
+      expect(m.turns.single.key, 'turn_001');
     });
 
     test('없는 방은 빈 매니페스트다', () async {
@@ -219,16 +219,17 @@ void main() {
       expect(m.totalBytes, 0);
     });
 
-    test('turn 파일이 아닌 것은 세지 않는다', () async {
+    test('소리 파일이 아닌 것은 세지 않는다', () async {
+      // 열쇠는 이제 임의 문자열이라(Duo는 `duo_direct_utt_7`) 이름 모양으로
+      // 거르지 않는다. 거르는 것은 확장자뿐이다.
       await store.put('roomA', 1, fakePcm(480));
       final dir = Directory('${root.path}/$kOriginPcmDirName/roomA');
       File('${dir.path}/notes.txt').writeAsStringSync('x');
-      File('${dir.path}/turn_bad.wav').writeAsStringSync('x');
 
       // 매니페스트 파일을 지워 실제 스캔 경로를 태운다.
       File('${dir.path}/_manifest.json').deleteSync();
       final m = await store.manifest('roomA');
-      expect(m.turns.single.seq, 1);
+      expect(m.turns.single.key, 'turn_001');
     });
 
     test('디스크의 매니페스트가 실제 JSON이다', () async {
@@ -240,6 +241,57 @@ void main() {
       expect(decoded['room_id'], 'roomA');
       expect(decoded['sample_rate'], kStealthVoxSttSampleRate);
       expect((decoded['turns'] as List).length, 1);
+    });
+  });
+
+  group('Duo 발화 열쇠', () {
+    test('발화 id를 그대로 열쇠로 쓴다', () async {
+      // Duo는 이미 `duo_direct_utt_7`로 발화를 가리킨다. 창고 전용 번호를
+      // 새로 매기면 두 이름이 어긋날 자리가 생긴다.
+      await store.putKeyed('roomA', 'duo_direct_utt_7', fakePcm(960, seed: 4));
+
+      expect(
+        File('${root.path}/$kOriginPcmDirName/roomA/duo_direct_utt_7.wav')
+            .existsSync(),
+        isTrue,
+      );
+      expect(await store.readKeyed('roomA', 'duo_direct_utt_7'),
+          orderedEquals(fakePcm(960, seed: 4)));
+    });
+
+    test('직접 대화와 통역이 섞여도 서로를 덮지 않는다', () async {
+      await store.putKeyed('roomA', 'duo_direct_utt_1', fakePcm(480, seed: 1));
+      await store.putKeyed('roomA', 'duo_interp_utt_1', fakePcm(480, seed: 2));
+
+      expect(await store.readKeyed('roomA', 'duo_direct_utt_1'),
+          orderedEquals(fakePcm(480, seed: 1)));
+      expect(await store.readKeyed('roomA', 'duo_interp_utt_1'),
+          orderedEquals(fakePcm(480, seed: 2)));
+    });
+
+    test('열쇠가 없는 줄은 아무것도 읽지 못한다', () async {
+      // Duo의 상대 발화가 이 경우다. 그 소리는 상대 폰에 있고 내 창고에는
+      // 없으므로, 복원이 남의 말을 소리 없이 고칠 길이 없다.
+      expect(await store.readKeyed('roomA', ''), isNull);
+      expect(await store.readKeyed('roomA', '   '), isNull);
+    });
+
+    test('경로를 벗어나는 열쇠는 창고 안에 갇힌다', () {
+      // 이 값이 곧 파일 이름이 된다. 걸러 내지 않으면 창고 밖에 쓴다.
+      expect(sanitizeOriginPcmKey('../../etc/passwd'), isNot(contains('/')));
+      expect(sanitizeOriginPcmKey('../../etc/passwd'), isNot(contains('.')));
+      expect(sanitizeOriginPcmKey('..'), isEmpty);
+      expect(sanitizeOriginPcmKey('.'), isEmpty);
+      expect(sanitizeOriginPcmKey(''), isEmpty);
+      expect(sanitizeOriginPcmKey('  '), isEmpty);
+      // 정상 입력은 한 글자도 바뀌지 않는다.
+      expect(sanitizeOriginPcmKey('duo_direct_utt_7'), 'duo_direct_utt_7');
+      expect(sanitizeOriginPcmKey('turn_001'), 'turn_001');
+    });
+
+    test('너무 긴 열쇠는 잘린다', () {
+      final long = 'a' * 200;
+      expect(sanitizeOriginPcmKey(long).length, 80);
     });
   });
 }

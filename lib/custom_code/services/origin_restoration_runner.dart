@@ -24,6 +24,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import 'duo_study_state.dart';
+import 'history_finalize.dart';
 import 'history_text_model.dart';
 import 'openai_transcribe_service.dart';
 import 'origin_pcm_store.dart';
@@ -105,13 +106,21 @@ class OriginRestorationRunner {
         final data = doc.data();
         final text = (data['original_text'] ?? '').toString().trim();
         if (text.isEmpty) continue;
-        final seq = data['pcm_seq'];
+        // 🎧 소리를 가리키는 열쇠. Duo는 발화 id를, 나머지 모드는 순번을
+        //   적는다. **비어 있으면 내 소리가 아니다** — Duo의 상대 발화가
+        //   그렇고, 그래서 누구 줄인지 따로 판정하지 않아도 된다.
+        final rawKey = data[kMessagePcmKeyField];
+        final legacySeq = data['pcm_seq'];
         turns.add(RestorationTurn(
           id: doc.id,
           isUser: (data['role'] ?? '') == 'HOST',
           text: text,
-          pcmSeq: seq is int ? seq : null,
-          subjectHint: (data['subject_hint'] ?? '').toString(),
+          pcmKey: rawKey is String && rawKey.trim().isNotEmpty
+              ? rawKey.trim()
+              : (legacySeq is int && legacySeq > 0
+                  ? 'turn_${legacySeq.toString().padLeft(3, '0')}'
+                  : ''),
+          subjectHint: (data[kMessageSubjectHintField] ?? '').toString(),
         ));
       }
       if (turns.isEmpty) {
@@ -143,10 +152,10 @@ class OriginRestorationRunner {
           knownTurnIds: ids,
           requireTargetEvidence: true,
         ),
-        recheckAcoustic: (seq) => _recheck(
+        recheckAcoustic: (pcmKey) => _recheck(
           apiKey: apiKey,
           roomId: roomId,
-          pcmSeq: seq,
+          pcmKey: pcmKey,
         ),
         log: debugPrint,
       );
@@ -291,9 +300,9 @@ class OriginRestorationRunner {
   Future<String?> _recheck({
     required String apiKey,
     required String roomId,
-    required int pcmSeq,
+    required String pcmKey,
   }) async {
-    final pcm = await OriginPcmStore.instance.read(roomId, pcmSeq);
+    final pcm = await OriginPcmStore.instance.readKeyed(roomId, pcmKey);
     if (pcm == null || pcm.isEmpty) return null;
     return OpenAiTranscribeService.transcribePcm16(
       apiKey: apiKey,

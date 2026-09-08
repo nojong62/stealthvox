@@ -83,6 +83,8 @@ import 'trial/trial_study_page.dart';
 import 'routine_mode_circle_talk.dart' show PreparedAudioCapture;
 // 공부방 표시 여부. 정돈에서 빠진 줄은 지우지 않고 이 상태만 바꾼다.
 import '/custom_code/services/duo_study_state.dart';
+import '/custom_code/services/origin_pcm_store.dart';
+import '/custom_code/services/origin_restoration.dart';
 // 익명 게스트가 끝나고 자기 계정으로 돌아왔을 때 이 통화를 되찾을 표.
 import '/custom_code/services/duo_guest_handoff.dart';
 // 통화가 끝난 게스트가 방금 한 대화를 보는 자리.
@@ -2496,6 +2498,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     session.onTranscript = (result) {
       final String itemId = result.utteranceId;
       final String text = result.text;
+      // 💾 [ORIGIN-PCM] 전사에 올린 바로 그 소리를 창고에 넣는다.
+      //   **내 마이크에서 나온 것만 여기 있다** — 상대 발화는 그 폰이 전사해
+      //   글자만 건너오므로 창고에 들어올 일이 없고, 그래서 복원도 내 말만
+      //   손댄다.
+      _stashDuoPcm(result);
       final voicedMs = _directVoicedMs.remove(itemId);
       // 옛 Server VAD의 `server`/`local` 두 갈래 중 로컬 폴백과 같은 식이다
       //   (`DuoSttPipeline._voicedMsOf`). 이름을 그대로 둬 로그가 이어진다.
@@ -2690,6 +2697,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       spokenAt: spokenAt,
       speakerUid: _myUid,
       speakerRole: _myRole,
+      // 💾 이 줄의 소리가 창고에 같은 이름으로 들어 있다.
+      pcmKey: itemId,
       sttSource: _directSttSource,
       sourceLang: _myNative(),
       channelMsgId: channelId,
@@ -2995,6 +3004,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     };
     session.onTranscript = (result) {
       if (generation != _interpGeneration) return;
+      // 💾 [ORIGIN-PCM] 직접 대화와 같은 자리, 같은 규칙이다.
+      _stashDuoPcm(result);
       unawaited(_onInterpreterTranscript(
           generation, result.utteranceId, result.text));
     };
@@ -3816,7 +3827,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       if (_incomingQueue.isNotEmpty) _drainIncoming();
       return;
     }
-    await _processRelayPipeline(trimmed);
+    await _processRelayPipeline(trimmed, pcmKey: itemId);
   }
 
   /// 상대 발화를 **내 대화 언어로** 읽어 준다.
@@ -4299,7 +4310,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   ///
   /// 순서가 중요하다 — **업로드가 가장 먼저다.** 상대가 기다리는 건 그것뿐이고,
   /// 화면·히스토리는 내 폰 사정이라 상대를 붙잡을 이유가 없다.
-  Future<void> _processRelayPipeline(String finalTranscript) async {
+  /// [pcmKey]는 이 발화의 소리를 가리키는 열쇠다. 통역 경로도 내 마이크에서
+  /// 나온 말이라, 직접 대화와 같은 규칙으로 창고와 이어 둔다.
+  Future<void> _processRelayPipeline(String finalTranscript,
+      {String pcmKey = ''}) async {
     _turnCounter++;
     final int currentTurnId = _turnCounter;
     ++_duoConversationTurnCounter;
@@ -4369,6 +4383,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         seq: seq,
         spokenAt: spokenAt,
         sourceLang: myNative,
+        pcmKey: pcmKey,
         deferTarget: true,
       ));
     } else {
@@ -4398,6 +4413,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         seq: seq,
         spokenAt: spokenAt,
         sourceLang: myNative,
+        pcmKey: pcmKey,
         deferTarget: true,
       );
     }
@@ -4411,6 +4427,35 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     //    말은 서버 VAD가 알아서 잡는다.
     if (_incomingQueue.isNotEmpty) _drainIncoming();
   }
+
+  /// 💾 [ORIGIN-PCM] 이 발화의 소리를 복원이 끝날 때까지 남긴다.
+  ///
+  /// **발화 id를 그대로 열쇠로 쓴다.** Duo는 이미 `duo_direct_utt_7` 같은
+  /// 이름으로 발화를 가리키고 있어서, 창고 전용 번호를 새로 매길 이유가 없다.
+  /// 대화 기록의 `pcm_key`가 같은 값을 적으므로 둘이 어긋날 여지도 없다.
+  ///
+  /// 기다리지 않는다 — 통화도 전사도 창고를 기다릴 이유가 없다.
+  void _stashDuoPcm(DuoSttResult result) {
+    final ref = _myHistoryRef;
+    if (ref == null) return;
+    final pcm = result.utterance.pcm;
+    if (pcm.isEmpty) return;
+    unawaited(OriginPcmStore.instance
+        .putKeyed(ref.id, result.utteranceId, pcm));
+  }
+
+  // 🔍 [ORIGIN-RESTORE] **통화가 끝나는 자리에서 시작하지 않는다.**
+  //
+  //   서클톡·시나리오톡은 나가면서 복원을 걸지만 Duo는 다르다. 여기서는
+  //   공유 정돈(`buildDuoCanonical`)이 이제 막 시작됐고, 그것이 개인 기록을
+  //   갈아 끼우기 전에 복원이 먼저 돌면 **곧 덮일 글을 고치게 된다.**
+  //
+  //   그래서 Duo의 복원은 공부방이 연다 — canonical이 내 방에 적용된 것을
+  //   확인한 뒤에(`chat_history_master._syncDuoCanonical`).
+  //
+  //   ⚠️ 공유 canonical 자체는 어느 쪽도 건드리지 않는다. 두 폰이 각자 자기
+  //   소리로 자기 개인 기록만 손본다 — 상대 발화에는 `pcm_key`가 없어 손댈
+  //   수도 없다.
 
   // 🆕 [채널 업로드] 내 원문을 duo_sessions/{roomId}/messages 에 기록
   //
@@ -4903,6 +4948,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     String? speakerRole,
     // 이 글자를 만든 PCM의 출처. 직접 대화는 언제나 로컬 마이크다.
     String? sttSource,
+    // 💾 이 줄의 소리를 가리키는 열쇠(발화 id). **내 마이크에서 나온 줄에만
+    //   있다.** 상대 발화는 그 폰이 전사해 글자만 건너오므로 비어 있고,
+    //   그래서 복원이 남의 말을 소리 없이 고치는 일이 생기지 않는다.
+    String? pcmKey,
     String? sourceLang,
     bool? deferTarget,
     // 🔗 이 줄이 나온 채널 원본 문서 id. canonical이 이 값으로 개인 방 줄을
@@ -4959,6 +5008,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           'source_lang': sourceLang,
         if (channelMsgId != null && channelMsgId.isNotEmpty)
           'channel_msg_id': channelMsgId,
+        // 💾 내 마이크에서 나온 줄에만 붙는다. 이 칸이 곧 "복원해도 되는
+        //   줄"이라는 표시다.
+        if (pcmKey != null && pcmKey.trim().isNotEmpty)
+          kMessagePcmKeyField: pcmKey.trim(),
       });
       _historyMessageCount++;
       // 나갈 때 만들 한 줄 요약의 재료. 화면에 쓰지 않으므로 그리지 않는다.

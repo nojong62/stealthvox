@@ -95,7 +95,7 @@ class RestorationTurn {
     required this.id,
     required this.isUser,
     required this.text,
-    this.pcmSeq,
+    this.pcmKey = '',
     this.subjectHint = '',
   });
 
@@ -103,8 +103,14 @@ class RestorationTurn {
   final bool isUser;
   final String text;
 
-  /// 이 발화의 소리를 가리키는 번호. **AI 줄과 상한에 걸린 줄은 null이다.**
-  final int? pcmSeq;
+  /// 이 발화의 소리를 가리키는 열쇠. **비어 있으면 소리가 없다.**
+  ///
+  /// Duo에서 이 값이 곧 "내가 낸 소리"라는 표시다. 상대 발화는 그 폰의
+  /// 마이크에서 나왔으므로 내 창고에 없고, 따라서 이 칸이 비어 있다.
+  /// **누구 발화인지 따로 판정할 필요 없이 여기서 갈린다.**
+  final String pcmKey;
+
+  bool get hasAudio => pcmKey.trim().isNotEmpty;
 
   /// 이 줄이 누구 얘기인지 이미 정해져 있으면 그 값. 3자가 나오는 줄에만 있다.
   final String subjectHint;
@@ -113,7 +119,7 @@ class RestorationTurn {
         id: id,
         isUser: isUser,
         text: next,
-        pcmSeq: pcmSeq,
+        pcmKey: pcmKey,
         subjectHint: subjectHint,
       );
 }
@@ -266,6 +272,13 @@ class RestorationStats {
 // ══════════════════════════════════════════════════════════════════════
 // 방의 복원 상태
 // ══════════════════════════════════════════════════════════════════════
+
+/// 대화 기록 한 줄이 자기 소리를 가리키는 칸.
+///
+/// **이 칸이 비어 있으면 그 줄은 고쳐지지 않는다.** Duo에서는 상대 발화가
+/// 여기 해당한다 — 그 소리는 상대 폰의 마이크에서 나왔으므로 내 창고에 없고,
+/// 소리 없이 남의 말을 고치는 일은 이 파이프라인이 하지 않는다.
+const String kMessagePcmKeyField = 'pcm_key';
 
 /// 복원을 **정상으로 마친** 순간. 실패에는 찍지 않는다.
 const String kOriginRestoredAtField = 'origin_restored_at';
@@ -603,7 +616,7 @@ typedef SuspectDetector = Future<List<OriginSuspect>> Function(
     List<RestorationTurn> turns);
 
 /// 그 발화의 소리를 다시 들어 글로 돌려준다. 못 들으면 null.
-typedef AcousticRechecker = Future<String?> Function(int pcmSeq);
+typedef AcousticRechecker = Future<String?> Function(String pcmKey);
 
 /// 복원 한 판. **모델 호출을 주입받는다** — 판정은 전부 여기 있고 네트워크는
 /// 바깥에 있어서, 테스트가 모든 갈래를 실제로 태울 수 있다.
@@ -719,8 +732,8 @@ class OriginRestorationEngine {
 
       // 🚫 소리가 없으면 고치지 않는다. 문맥만으로 고치는 것은 "조금
       //   이상하다"로 원문을 바꾸는 일과 구분되지 않는다.
-      final seq = turn.pcmSeq;
-      if (seq == null) {
+      //   Duo에서는 이 한 줄이 "상대 발화는 건드리지 않는다"까지 지킨다.
+      if (!turn.hasAudio) {
         out = out.copyWith(
             pcmMissing: out.pcmMissing + 1, rejected: out.rejected + 1);
         continue;
@@ -733,7 +746,7 @@ class OriginRestorationEngine {
         out = out.copyWith(cacheHit: out.cacheHit + 1);
       } else {
         try {
-          heard = await recheckAcoustic(seq);
+          heard = await recheckAcoustic(turn.pcmKey);
         } catch (error) {
           log?.call('[ORIGIN-RESTORE] recheck_failed '
               'reason=${error.runtimeType}');

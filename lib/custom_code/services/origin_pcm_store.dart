@@ -56,23 +56,38 @@ const int kOriginPcmGlobalMaxBytes = 200 * 1024 * 1024;
 /// 이만큼 지난 방 폴더는 주인이 없다고 본다.
 const Duration kOriginPcmMaxAge = Duration(hours: 24);
 
+/// 발화 열쇠를 **파일 이름으로 안전한 글자**만 남긴다.
+///
+/// 이 값이 곧 파일 이름이 되므로, 경로 구분자나 상위 폴더 표기가 섞이면
+/// 창고 밖에 파일을 쓰게 된다. 열쇠는 우리가 만든 발화 id(`duo_direct_utt_7`)
+/// 아니면 순번이라 정상 입력은 한 글자도 안 바뀐다.
+String sanitizeOriginPcmKey(String raw) {
+  final trimmed = raw.trim();
+  if (trimmed.isEmpty) return '';
+  final safe = trimmed.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+  // 점만으로 이뤄진 이름(`.`, `..`)은 폴더를 가리킨다.
+  if (safe.replaceAll('_', '').isEmpty) return '';
+  return safe.length > 80 ? safe.substring(0, 80) : safe;
+}
+
 /// 발화 하나.
 @immutable
 class OriginPcmTurn {
   const OriginPcmTurn({
-    required this.seq,
+    required this.key,
     required this.file,
     required this.ms,
     required this.bytes,
   });
 
-  final int seq;
+  /// 이 발화를 가리키는 열쇠. 대화 기록의 `pcm_key`와 같은 값이다.
+  final String key;
   final String file;
   final int ms;
   final int bytes;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-        'seq': seq,
+        'key': key,
         'file': file,
         'ms': ms,
         'bytes': bytes,
@@ -80,11 +95,16 @@ class OriginPcmTurn {
 
   static OriginPcmTurn? fromJson(Object? raw) {
     if (raw is! Map) return null;
-    final seq = raw['seq'];
+    // 순번만 적던 시절의 매니페스트도 읽는다. 못 읽으면 스캔으로 돌아가므로
+    // 치명적이지는 않지만, 굳이 버릴 이유도 없다.
+    final legacy = raw['seq'];
+    final key = (raw['key'] ??
+            (legacy is int ? 'turn_${legacy.toString().padLeft(3, '0')}' : ''))
+        .toString();
     final file = raw['file'];
-    if (seq is! int || file is! String || file.isEmpty) return null;
+    if (key.isEmpty || file is! String || file.isEmpty) return null;
     return OriginPcmTurn(
-      seq: seq,
+      key: key,
       file: file,
       ms: raw['ms'] is int ? raw['ms'] as int : 0,
       bytes: raw['bytes'] is int ? raw['bytes'] as int : 0,
@@ -104,26 +124,27 @@ class OriginPcmManifest {
 
   const OriginPcmManifest.empty(this.roomId)
       : turns = const <OriginPcmTurn>[],
-        dropped = const <int>[],
+        dropped = const <String>[],
         totalBytes = 0;
 
   final String roomId;
   final List<OriginPcmTurn> turns;
 
-  /// 세션 상한에 걸려 **아예 쓰지 못한** 발화 번호.
+  /// 세션 상한에 걸려 **아예 쓰지 못한** 발화 열쇠.
   ///
   /// "파일이 없다"와 갈라 두는 값이다. 여기 없는데 파일도 없으면 OS가 지운
   /// 것이고, 여기 있으면 우리가 안 쓴 것이다. 로그에서 이 둘이 섞이면 창고가
   /// 새는 것인지 상한이 낮은 것인지 알 수 없다.
-  final List<int> dropped;
+  final List<String> dropped;
 
   final int totalBytes;
 
   bool get isEmpty => turns.isEmpty;
 
-  OriginPcmTurn? turnOf(int seq) {
+  OriginPcmTurn? turnOf(String key) {
+    final clean = sanitizeOriginPcmKey(key);
     for (final t in turns) {
-      if (t.seq == seq) return t;
+      if (t.key == clean) return t;
     }
     return null;
   }
@@ -155,8 +176,8 @@ class OriginPcmStore {
   /// 방별 누적 바이트. 상한 판정이 매번 디렉터리를 훑지 않게 들고 있는다.
   final Map<String, int> _bytes = <String, int>{};
 
-  /// 상한에 걸려 못 쓴 발화 번호.
-  final Map<String, List<int>> _dropped = <String, List<int>>{};
+  /// 상한에 걸려 못 쓴 발화 열쇠.
+  final Map<String, List<String>> _dropped = <String, List<String>>{};
 
   /// 상한에 부딪힌 횟수. 실측 로그로 나간다.
   final Map<String, int> _limitHits = <String, int>{};
@@ -177,21 +198,30 @@ class OriginPcmStore {
   /// 소리와 파일에 남는 소리가 갈린다.** 어차피 만들어야 하는 배열이라
   /// 방어적 복사가 공짜로 딸려온다 — 저장되는 것은 언제나 put을 부른 순간의
   /// 소리다.
-  Future<void> put(String roomId, int seq, Uint8List pcm) {
-    if (!enabled || pcm.isEmpty || seq <= 0) return Future<void>.value();
+  Future<void> put(String roomId, int seq, Uint8List pcm) =>
+      putKeyed(roomId, seq > 0 ? _seqKey(seq) : '', pcm);
+
+  /// 발화를 **문자열 열쇠**로 담는다.
+  ///
+  /// Duo는 이미 `duo_direct_utt_7` 같은 발화 id를 갖고 있다. 그것을 그대로
+  /// 열쇠로 쓰면 번호를 새로 매길 필요가 없고, 창고와 대화 기록이 같은
+  /// 이름으로 같은 발화를 가리킨다.
+  Future<void> putKeyed(String roomId, String pcmKey, Uint8List pcm) {
+    final clean = sanitizeOriginPcmKey(pcmKey);
+    if (!enabled || pcm.isEmpty || clean.isEmpty) return Future<void>.value();
     final key = roomId.trim().isEmpty ? kOriginPcmPendingDir : roomId.trim();
     final wav = pcm16ToWav(pcm, sampleRate: kStealthVoxSttSampleRate);
-    return _serialize(key, () => _putInner(key, seq, wav));
+    return _serialize(key, () => _putInner(key, clean, wav));
   }
 
-  Future<void> _putInner(String key, int seq, Uint8List wavBytes) async {
+  Future<void> _putInner(String key, String pcmKey, Uint8List wavBytes) async {
     try {
       final int used = _bytes[key] ?? await _measure(key);
       final int wav = wavBytes.lengthInBytes;
       if (used + wav > kOriginPcmSessionMaxBytes) {
         // 🚧 상한. **여기서 멈추는 것은 보존뿐이다** — 전사도 대화도 그대로
         //   간다. 이미 써 둔 파일을 지워 자리를 내주지도 않는다.
-        (_dropped[key] ??= <int>[]).add(seq);
+        (_dropped[key] ??= <String>[]).add(pcmKey);
         _limitHits[key] = (_limitHits[key] ?? 0) + 1;
         if (_limitHits[key] == 1) {
           debugPrint('[ORIGIN-PCM] session_limit room=$key '
@@ -202,14 +232,14 @@ class OriginPcmStore {
         return;
       }
       final dir = await _dirFor(key);
-      final file = File('${dir.path}/${_fileNameOf(seq)}');
+      final file = File('${dir.path}/${_fileNameOf(pcmKey)}');
       // flush: true — 복원은 대화가 끝나자마자 시작한다. OS 캐시에만 있는
       // 파일을 두고 [flush]가 "다 썼다"고 말하면, 그 보장이 반 걸음 모자란다.
       await file.writeAsBytes(wavBytes, flush: true);
       _bytes[key] = used + wav;
       await _writeManifest(key);
     } catch (error) {
-      debugPrint('[ORIGIN-PCM] put_failed room=$key seq=$seq '
+      debugPrint('[ORIGIN-PCM] put_failed room=$key key=$pcmKey '
           'reason=${error.runtimeType}');
     }
   }
@@ -236,7 +266,7 @@ class OriginPcmStore {
       for (final entity in entries) {
         if (entity is! File) continue;
         final name = entity.uri.pathSegments.last;
-        if (!name.startsWith('turn_') || !name.endsWith('.wav')) continue;
+        if (!name.endsWith('.wav')) continue;
         final dest = File('${target.path}/$name');
         if (await dest.exists()) continue;
         try {
@@ -257,7 +287,7 @@ class OriginPcmStore {
       } catch (_) {}
       final pendingDropped = _dropped.remove(kOriginPcmPendingDir);
       if (pendingDropped != null && pendingDropped.isNotEmpty) {
-        (_dropped[roomId] ??= <int>[]).addAll(pendingDropped);
+        (_dropped[roomId] ??= <String>[]).addAll(pendingDropped);
       }
       _bytes.remove(kOriginPcmPendingDir);
       _limitHits.remove(kOriginPcmPendingDir);
@@ -307,15 +337,19 @@ class OriginPcmStore {
   ///
   /// 빈 바이트를 돌려주면 호출부가 무음을 전사기에 올리고 그 결과를 사람 말로
   /// 믿게 된다. 없는 것은 없다고 말한다.
-  Future<Uint8List?> read(String roomId, int seq) async {
-    if (roomId.trim().isEmpty || seq <= 0) return null;
+  Future<Uint8List?> read(String roomId, int seq) =>
+      readKeyed(roomId, seq > 0 ? _seqKey(seq) : '');
+
+  Future<Uint8List?> readKeyed(String roomId, String pcmKey) async {
+    final clean = sanitizeOriginPcmKey(pcmKey);
+    if (roomId.trim().isEmpty || clean.isEmpty) return null;
     try {
       final dir = await _roomDir(roomId.trim());
-      final file = File('${dir.path}/${_fileNameOf(seq)}');
+      final file = File('${dir.path}/${_fileNameOf(clean)}');
       if (!await file.exists()) return null;
       return wavToPcm16(await file.readAsBytes());
     } catch (error) {
-      debugPrint('[ORIGIN-PCM] read_failed room=$roomId seq=$seq '
+      debugPrint('[ORIGIN-PCM] read_failed room=$roomId key=$clean '
           'reason=${error.runtimeType}');
       return null;
     }
@@ -336,7 +370,7 @@ class OriginPcmStore {
       return OriginPcmManifest(
         roomId: key,
         turns: await _scanTurns(dir),
-        dropped: List<int>.of(_dropped[key] ?? const <int>[]),
+        dropped: List<String>.of(_dropped[key] ?? const <String>[]),
         totalBytes: await _sizeOf(dir),
       );
     } catch (error) {
@@ -364,8 +398,9 @@ class OriginPcmStore {
       return OriginPcmManifest(
         roomId: key,
         turns: turns,
-        dropped:
-            rawDropped is List ? rawDropped.whereType<int>().toList() : const <int>[],
+        dropped: rawDropped is List
+            ? rawDropped.map((e) => e.toString()).toList()
+            : const <String>[],
         totalBytes: turns.fold<int>(0, (a, t) => a + t.bytes),
       );
     } catch (_) {
@@ -486,7 +521,7 @@ class OriginPcmStore {
     final key = roomId.trim().isEmpty ? kOriginPcmPendingDir : roomId.trim();
     debugPrint('[ORIGIN-PCM] snapshot room=$key '
         'mb=${_mb(_bytes[key] ?? 0)} '
-        'dropped=${(_dropped[key] ?? const <int>[]).length} '
+        'dropped=${(_dropped[key] ?? const <String>[]).length} '
         'limit_hits=${_limitHits[key] ?? 0}');
   }
 
@@ -525,7 +560,10 @@ class OriginPcmStore {
     return dir;
   }
 
-  String _fileNameOf(int seq) => 'turn_${seq.toString().padLeft(3, '0')}.wav';
+  /// 순번을 열쇠로. 세 자리로 채워 폴더가 번호순으로 읽힌다.
+  static String _seqKey(int seq) => 'turn_${seq.toString().padLeft(3, '0')}';
+
+  String _fileNameOf(String pcmKey) => '$pcmKey.wav';
 
   Future<List<OriginPcmTurn>> _scanTurns(Directory dir) async {
     final turns = <OriginPcmTurn>[];
@@ -534,12 +572,10 @@ class OriginPcmStore {
       for (final e in entries) {
         if (e is! File) continue;
         final name = e.uri.pathSegments.last;
-        if (!name.startsWith('turn_') || !name.endsWith('.wav')) continue;
-        final seq = int.tryParse(name.substring(5, name.length - 4));
-        if (seq == null) continue;
+        if (!name.endsWith('.wav')) continue;
         final int bytes = await e.length();
         turns.add(OriginPcmTurn(
-          seq: seq,
+          key: name.substring(0, name.length - 4),
           file: name,
           ms: pcm16DurationMs(
             bytes > 44 ? bytes - 44 : 0,
@@ -549,7 +585,7 @@ class OriginPcmStore {
         ));
       }
     } catch (_) {}
-    turns.sort((a, b) => a.seq.compareTo(b.seq));
+    turns.sort((a, b) => a.key.compareTo(b.key));
     return turns;
   }
 
@@ -564,7 +600,7 @@ class OriginPcmStore {
           'created_at': DateTime.now().millisecondsSinceEpoch,
           'sample_rate': kStealthVoxSttSampleRate,
           'turns': turns.map((t) => t.toJson()).toList(),
-          'dropped': _dropped[key] ?? const <int>[],
+          'dropped': _dropped[key] ?? const <String>[],
         }),
         flush: false,
       );

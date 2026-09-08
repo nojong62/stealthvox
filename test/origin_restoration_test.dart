@@ -14,7 +14,12 @@ import 'package:stealth_vox/custom_code/services/origin_restoration.dart';
 
 RestorationTurn user(String id, String text, {int? seq, String hint = ''}) =>
     RestorationTurn(
-        id: id, isUser: true, text: text, pcmSeq: seq, subjectHint: hint);
+      id: id,
+      isUser: true,
+      text: text,
+      pcmKey: seq == null ? '' : 'turn_$seq',
+      subjectHint: hint,
+    );
 
 RestorationTurn ai(String id, String text) =>
     RestorationTurn(id: id, isUser: false, text: text);
@@ -43,7 +48,8 @@ SuspectDetector detector(List<OriginSuspect> out) =>
 SuspectDetector get noSuspects => detector(const <OriginSuspect>[]);
 
 /// 특정 발화 번호에 대해 정해진 재전사문을 주는 창고.
-AcousticRechecker ears(Map<int, String?> heard) => (seq) async => heard[seq];
+AcousticRechecker ears(Map<int, String?> heard) =>
+    (key) async => heard[int.tryParse(key.replaceAll('turn_', '')) ?? -1];
 
 void main() {
   // ══════════════════════════════════════════════════════════════════
@@ -332,7 +338,7 @@ void main() {
     test('PCM이 없으면 고치지 않는다', () async {
       // AI 줄이거나 상한에 걸려 못 쓴 줄이다.
       final out = await run(
-        [user('t1', '네가 어제 갔잖아', seq: null)],
+        [user('t1', '네가 어제 갔잖아')],
         detect: detector([
           suspect('t1', '네가', '내가', confidence: SuspectConfidence.high)
         ]),
@@ -486,7 +492,7 @@ void main() {
       final engine = OriginRestorationEngine(
         roomId: 'r1',
         detectSuspects: detector([suspect('t1', '네가', '내가')]),
-        recheckAcoustic: (seq) async {
+        recheckAcoustic: (key) async {
           calls++;
           return '네가 어제 갔어'; // 원문을 지지 → 1차에서 기각
         },
