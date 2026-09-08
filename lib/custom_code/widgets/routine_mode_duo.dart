@@ -83,6 +83,7 @@ import 'trial/trial_study_page.dart';
 import 'routine_mode_circle_talk.dart' show PreparedAudioCapture;
 // 공부방 표시 여부. 정돈에서 빠진 줄은 지우지 않고 이 상태만 바꾼다.
 import '/custom_code/services/duo_study_state.dart';
+import '/custom_code/services/duo_robot.dart';
 import '/custom_code/services/origin_pcm_store.dart';
 import '/custom_code/services/origin_restoration.dart';
 // 익명 게스트가 끝나고 자기 계정으로 돌아왔을 때 이 통화를 되찾을 표.
@@ -661,7 +662,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   ///
   /// 둘 다 **이 단말의 마이크**다. 다른 것은 잡은 주체뿐이다
   /// (`record` 패키지 vs WebRTC). 상대 오디오는 어느 쪽에도 닿지 않는다.
-  String get _directSttSource => _useWebrtcTransport
+  /// 🤖 로봇은 설정과 무관하게 릴레이로 열므로 잡는 주체도 `record`다.
+  /// 설정값만 보면 히스토리에 실제와 다른 출처가 남는다.
+  String get _directSttSource => (_useWebrtcTransport && !_robotActive)
       ? kDuoSttPcmSourceWebrtcMic
       : kDuoSttPcmSourceLocalMic;
 
@@ -1051,6 +1054,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   // 🆕 [과금정책] 게스트 입장 후에만 과금 시작 (호스트 대기 중 정지)
   bool _billingStarted = false;
   void _startDuoBilling() {
+    // 🤖 [DUO-ROBOT] 로봇과의 시험 통화는 차감하지 않는다. 수십 분씩 붙들고
+    //   STT를 두들기는 자리라, 실제 통화와 같은 자로 재면 티켓만 녹는다.
+    //   **일반 통화의 과금은 한 줄도 달라지지 않는다** — 이 조건이 켜지는
+    //   것은 디버그 빌드에서 로봇을 켰을 때뿐이다.
+    if (_robotActive) return;
     // 🆕 [과금정책] 게스트(회원·비회원 무관)는 차감 안 함 — 초대한 호스트만 과금
     if (!_amIHost || _isTrialHost) return;
     BillingTicker.instance.setSessionIdentifiers(
@@ -1527,6 +1535,43 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   String _myUid = '';
   // 내 역할 문자열 ('HOST' 또는 'GUEST') — 발신/필터 기준
   String get _myRole => _amIHost ? 'HOST' : 'GUEST';
+
+  // ══════════════════════════════════════════════════════════════════
+  // 🤖 [DUO-ROBOT] 개발 전용 상대. **릴리스에는 없다.**
+  // ══════════════════════════════════════════════════════════════════
+
+  /// 로봇을 켰는가. **[kDuoRobotAvailable] 없이는 켜지지 않는다** —
+  /// 릴리스에서는 이 값이 언제나 false이고, 아래 호출부가 통째로 죽은
+  /// 코드가 되어 빌드에서 빠진다. 빌드 판정은 `duo_robot.dart` 한 곳이
+  /// 쥔다(진단 스위치 `_duoDiagOn`과 같은 규칙).
+  bool _robotOn = false;
+
+  bool get _robotActive => kDuoRobotAvailable && _robotOn;
+
+  DuoRobot? _robot;
+
+  /// 직접 대화에서 로봇 목소리를 내는 어댑터.
+  ///
+  /// 통역이 쓰는 [_interpTts]와 **일부러 갈라 둔다.** 그쪽은 통역 상태
+  /// 머신(게이트·프리롤·지연 계측)이 얽혀 있어, 직접 대화가 끼어들면 통역
+  /// 로그와 마이크 게이트가 서로를 덮는다.
+  TtsAdapter? _robotTts;
+
+  /// 로봇이 말하는 중인가. 겹쳐 말하지 않게 한다.
+  bool _robotSpeaking = false;
+
+  // ══════════════════════════════════════════════════════════════════
+  // 🚪 [DUO-EXIT] 나가는 길은 여럿이고 마무리는 하나다.
+  // ══════════════════════════════════════════════════════════════════
+
+  /// 저장·정돈을 이미 끝냈는가. 두 번 돌면 빈 방 삭제와 정돈이 겹친다.
+  bool _sessionFinalized = false;
+
+  /// 마무리하면서 읽은 값. 화면 이동 쪽이 이어서 쓴다 — 마무리가 끝난 뒤에는
+  /// `FFAppState`가 달라져 있을 수 있어, 그때 다시 읽으면 다른 길로 간다.
+  bool _exitWasTrialHost = false;
+  bool _exitTrialWasConsumed = false;
+  bool _exitWasInviteGuest = false;
   // 공유 메시지 채널(duo_sessions/{roomId}/messages) 구독
   StreamSubscription? _messageSubscription;
   // 이미 처리한 메시지 doc id (중복 렌더 방지)
@@ -1651,9 +1696,22 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
   @override
   void dispose() {
+    // 🤖 [DUO-ROBOT] 남은 재생과 대화 기억을 함께 내린다.
+    _robotTts?.dispose();
+    _robotTts = null;
+    _robot?.reset();
+    _robot = null;
     if (StealthRoomMaster.saveAndExitCurrentMode == _handleAutoSaveAndExit) {
       StealthRoomMaster.saveAndExitCurrentMode = null;
     }
+    // 🚪 [DUO-EXIT] **마지막 그물.** 나가기 버튼도 시스템 뒤로가기도 안 타고
+    //   화면이 사라지는 길이 있다(탭 이동·라우트 교체). 그때도 저장과 공유
+    //   정돈은 끝나야 한다 — 안 그러면 두 사람의 기록이 갈리고 원문 복원이
+    //   시작조차 못 한다(실기기 2026-09-08).
+    //
+    //   이미 마무리했으면 [_finalizeDuoSession]이 첫 줄에서 돌아간다.
+    //   화면은 이미 없으므로 기다리지 않는다.
+    unawaited(_finalizeDuoSession('dispose'));
     WidgetsBinding.instance.removeObserver(this);
     _trialCallTimer?.cancel();
     _partnerJoinedSubscription?.cancel();
@@ -2003,7 +2061,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// (실패 후 무한 재시도로 권한 창이 반복해 뜨는 것을 막는다).
   void _maybeAutoStartDirectCall(String reason) {
     if (!_isDirectMode) return;
-    if (!_isPartnerOnline) return;
+    // 🤖 [DUO-ROBOT] 로봇은 방에 들어오지 않는다. 상대를 기다리면 마이크가
+    //   영영 열리지 않는다.
+    if (!_isPartnerOnline && !_robotActive) return;
     if (!mounted || _isExiting) return;
     if (_directCallActive || _directStarting || _directStopping) return;
     if (_autoStartAttempted) return;
@@ -2018,7 +2078,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     }
     // 🔀 [DUO-TRANSPORT] 릴레이 주소는 **릴레이 경로에서만** 필요하다.
     //   WebRTC는 신호를 Firestore로 주고받으므로 이 값이 비어 있어도 된다.
-    if (!_useWebrtcTransport && _relayUrl.trim().isEmpty) {
+    // 🤖 [DUO-ROBOT] 로봇도 릴레이로 연다(아래 통로 분기 참조). 그래서
+    //   주소가 없으면 로봇도 못 연다.
+    if ((_robotActive || !_useWebrtcTransport) && _relayUrl.trim().isEmpty) {
       _lgDuo('[DIRECT]', 'start_blocked reason=no_relay_url');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -2082,7 +2144,22 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       //            MainActivity의 AudioManager 조작도 돌지 않는다 —
       //            이 구간의 오디오 세션 주인은 flutter_webrtc 하나다.
       //   relay  — 기존 경로 그대로. 재생기를 먼저 열고 소켓을 붙인다.
-      final bool transportOk = _useWebrtcTransport
+      // 🤖 [DUO-ROBOT] **릴레이로 연다.** 통로를 아예 안 열어 봤더니
+      //   마이크가 통째로 없었다(실기기 2026-09-08: `no_track — 전사 갈래
+      //   없이 통화만 진행한다`). 이 구조에서 마이크의 원천은 통로다 —
+      //   WebRTC 경로는 그쪽이 연 마이크에 전사 갈래를 붙이고
+      //   (`_attachWebrtcMicTap`), 릴레이 경로는 앱이 직접 연다.
+      //
+      //   그래서 릴레이를 쓴다. WebRTC는 상대가 있어야 신호 교환이 끝나므로
+      //   혼자서는 붙지 못하고, 릴레이는 저쪽 끝이 비어 있어도 소켓이 선다.
+      //
+      //   ⚠️ 로봇이 릴레이를 쓰는 것은 **여기 한 줄뿐이다.** 일반 통화의
+      //   `_directTransport`는 손대지 않는다.
+      //   ⚠️ 아래 마이크 분기도 **이 값**을 본다. 설정값
+      //   (`_useWebrtcTransport`)을 다시 물으면 릴레이를 열어 놓고 WebRTC
+      //   트랙을 찾아가 `no_track`이 난다(실기기 2026-09-08).
+      final bool useWebrtcNow = !_robotActive && _useWebrtcTransport;
+      final bool transportOk = useWebrtcNow
           ? await _openWebrtcTransport(generation, roomId)
           : await _openRelayTransport(generation, roomId);
       if (!_isDirectGenerationCurrent(generation)) return;
@@ -2099,7 +2176,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       //   relay  — 기존대로 `record`가 연다.
       //
       // 어느 쪽이든 조각이 도착하는 자리는 `DuoMicPcmFanout` 하나로 같다.
-      if (_useWebrtcTransport) {
+      if (useWebrtcNow) {
         await _startWebrtcMicTap(generation);
         return;
       }
@@ -2206,7 +2283,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     _lgDuo(
         '[DIRECT]',
         'call_started gen=$generation room=$roomId role=$_myRole '
-            'transport=$_directTransport micActive=true sttActive=$_sttActive '
+            // 🤖 로봇은 설정과 무관하게 릴레이로 연다. 설정값을 적으면
+            //   로그가 실제로 무엇이 돌았는지를 속인다.
+            'transport=${_robotActive ? kDuoTransportRelay : _directTransport} '
+            'robot=$_robotActive micActive=true sttActive=$_sttActive '
             'connected=$_relayConnected partnerAudio=$_partnerRelayConnected '
             'captureFirstFrameAt=${_directCaptureFirstFrameAt?.toIso8601String()}');
   }
@@ -2703,6 +2783,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       sourceLang: _myNative(),
       channelMsgId: channelId,
     );
+    // 🤖 [DUO-ROBOT] 내 말이 확정됐다. 여기까지는 실제 통화와 한 글자도
+    //   다르지 않다 — 마이크·PCM·발화 경계·전사·저장이 모두 실경로다.
+    _robotRespond(trimmed);
     // 🧭 [DUO-CONTEXT] **수용된 말만** 다음 발화의 낱말 힌트가 된다.
     //   버려진 글자를 힌트로 주면 다음 전사가 그쪽으로 끌려간다.
     _directStt?.noteAccepted(trimmed);
@@ -4386,6 +4469,9 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         pcmKey: pcmKey,
         deferTarget: true,
       ));
+      // 🤖 [DUO-ROBOT] 상대 자리에서 답한다. 번역·TTS·재생은 아래 기존
+      //   경로가 그대로 한다.
+      _robotRespond(spoken);
     } else {
       final DateTime uploadStartedAt = DateTime.now();
       await _uploadMyMessage(
@@ -4416,6 +4502,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         pcmKey: pcmKey,
         deferTarget: true,
       );
+      // 🤖 [DUO-ROBOT] 상대 자리에서 답한다.
+      _robotRespond(spoken);
     }
 
     // 내 발화는 앱이 소리 내지 않으므로 에코 목록에 넣을 이유가 없다.
@@ -4456,6 +4544,153 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   //   ⚠️ 공유 canonical 자체는 어느 쪽도 건드리지 않는다. 두 폰이 각자 자기
   //   소리로 자기 개인 기록만 손본다 — 상대 발화에는 `pcm_key`가 없어 손댈
   //   수도 없다.
+
+  /// 🤖 [DUO-ROBOT] 내가 한 말에 로봇이 답한다.
+  ///
+  /// **기존 경로로 되돌려 준다.** 답변은 실제 Peer 메시지와 같은 모양으로
+  /// [_incomingQueue]에 들어가고, 그 아래는 로봇인지 사람인지 구분하지
+  /// 못한다 — 통역의 번역·TTS·재생도, 히스토리 저장도 전부 그대로 돈다.
+  ///
+  /// 직접 대화만 여기서 소리까지 낸다. 그쪽은 상대 목소리가 릴레이/WebRTC로
+  /// 따로 오는 구조라 [_handleIncomingMessage]가 글자만 저장하기 때문이다.
+  ///
+  /// ⚠️ **기다리지 않는다.** 로봇이 생각하는 동안에도 내 마이크는 열려 있어야
+  /// 하고, 실패해도 다음 발화는 정상으로 받아야 한다.
+  void _robotRespond(String userText) {
+    if (!_robotActive || _isExiting) return;
+    final robot = _robot;
+    if (robot == null) return;
+    final String said = userText.trim();
+    if (said.isEmpty) return;
+    unawaited(() async {
+      final String lang = _robotLanguage();
+      final String? reply = await robot.reply(
+        userText: said,
+        language: lang,
+        isDirect: _isDirectMode,
+      );
+      if (!mounted || _isExiting || !_robotActive) return;
+      if (reply == null || reply.trim().isEmpty) {
+        _lgDuo('[DUO-ROBOT]', 'no_reply mode=$_duoMode lang=$lang');
+        return;
+      }
+      _lgDuo(
+          '[DUO-ROBOT]',
+          'reply mode=$_duoMode lang=$lang turns=${robot.turnCount} '
+              'len=${reply.trim().length}');
+      // 📥 실제 Peer가 올린 메시지와 같은 자리로 돌려보낸다.
+      _incomingQueue.add(DuoRobot.payload(
+        text: reply.trim(),
+        srcLang: lang,
+        duoMode: _duoMode,
+        myRole: _myRole,
+        seq: robot.nextSeq(),
+      ));
+      unawaited(_drainIncoming());
+      // 🔊 직접 대화는 글자만으로는 아무 소리도 나지 않는다. 여기서 낸다.
+      if (_isDirectMode) unawaited(_robotSpeak(reply.trim()));
+    }());
+  }
+
+  /// 로봇이 말할 언어.
+  ///
+  /// **상대 자리에 설정된 언어를 따른다.** 영어로 박아 두면 한↔일 같은 조합을
+  /// 시험할 수 없다. 통역에서는 내가 배울 언어가 곧 상대가 쓰는 언어이고,
+  /// 직접 대화는 둘이 같은 언어로 말하므로 내 대화 언어다.
+  String _robotLanguage() {
+    if (_isDirectMode) return _myNative();
+    final known = (_partnerChatLang ?? '').trim();
+    if (known.isNotEmpty) return known;
+    final target = _myTarget().trim();
+    return target.isEmpty ? 'English' : target;
+  }
+
+  /// 🔊 [DUO-ROBOT] 직접 대화에서 로봇 목소리를 낸다.
+  ///
+  /// ⚠️ **`DuoPcmJitterPlayer`를 거치지 않는다.** 기존 [TtsAdapter]가 자기
+  /// 재생기로 직접 낸다 — 로봇 하나 때문에 공용 TTS 계층에 PCM 출구를 뚫으면,
+  /// 통역이 실제로 쓰는 재생 경로를 시험 코드가 건드리게 된다(실장님 결정,
+  /// 2026-09-08). 그래서 이 모드는 상대 오디오 전송을 검증하지 않는다.
+  Future<void> _robotSpeak(String text) async {
+    if (!_robotActive || _isExiting || _robotSpeaking) return;
+    final adapter = _ensureRobotTts();
+    if (adapter == null) return;
+    _robotSpeaking = true;
+    try {
+      final utterance = adapter.speak(TtsRequest(
+        text: text,
+        voiceId: kInterpreterPartnerTtsVoice,
+        speakerType: TtsSpeakerType.system,
+        turnId: 'robot-${DateTime.now().millisecondsSinceEpoch}',
+        generationId: _directGeneration,
+        // 🎚️ 상대 음성용 프리롤(`duoPartnerPrerollBytes`)을 빌려 쓰지
+        //   않는다. 그 값은 통역의 실기기 숫자를 견주는 기준이라, 시험용
+        //   로봇이 같은 자에 끼면 그 비교가 흐려진다. 기본값에 맡긴다.
+      ));
+      await utterance.done;
+    } catch (error) {
+      _lgDuo('[DUO-ROBOT]', 'tts_failed=${error.runtimeType}');
+    } finally {
+      _robotSpeaking = false;
+      // 실패로 끝났어도 연다. 안 열면 통로가 닫힌 채 남아 그 뒤로 아무 말도
+      // 전사되지 않는다.
+      await _reopenRobotGate();
+    }
+  }
+
+  /// 로봇 전용 TTS. 통역이 쓰는 것과 **따로 만든다**(상태 머신이 얽힌다).
+  TtsAdapter? _ensureRobotTts() {
+    if (!_robotActive) return null;
+    final existing = _robotTts;
+    if (existing != null) return existing;
+    final adapter = TtsAdapter(
+      apiKeyProvider: () => _openAiKey,
+      onLog: (tag, msg) => _lgDuo('[DUO-ROBOT-TTS]$tag', msg),
+      // 🔇 [ECHO] **소리가 나기 직전에 전사 통로를 닫는다.**
+      //
+      //   `TtsAdapter`는 자기 재생기로 소리를 내므로 AEC의 참조 신호가 아니다.
+      //   그래서 로봇 목소리가 마이크로 되들어와 사용자 발화로 전사되고,
+      //   로봇이 자기 말에 또 답하는 무한 루프가 돌았다(실기기 2026-09-08:
+      //   가만히 있어도 다섯 턴이 저절로 이어졌다).
+      //
+      //   통역이 쓰는 방식과 같다([_closeInterpGate]) — 마이크는 계속 열려
+      //   있고, 닫는 것은 STT로 가는 갈래뿐이다.
+      onPlaybackStart: (_) => _closeRobotGate('robot_tts_playing'),
+    );
+    _robotTts = adapter;
+    return adapter;
+  }
+
+  /// 🔇 로봇이 말하는 동안 전사 통로를 닫는다.
+  void _closeRobotGate(String reason) {
+    _directStt?.closeAudioGate(reason: reason);
+  }
+
+  /// 재생이 끝나고 꼬리 시간만큼 지난 뒤 연다.
+  ///
+  /// **곧바로 열면 스피커의 잔향이 그대로 들어온다.** 통역이 쓰는 값을
+  /// 그대로 쓴다([kInterpGateReopenTail]).
+  Future<void> _reopenRobotGate() async {
+    await Future<void>.delayed(kInterpGateReopenTail);
+    if (!mounted || _isExiting || !_robotActive) return;
+    _directStt?.openAudioGate(reason: 'robot_tts_done');
+  }
+
+  /// 🤖 로봇을 켜고 끈다. **디버그 빌드에서만 불린다.**
+  void _setRobot(bool on) {
+    if (!kDuoRobotAvailable) return;
+    if (_robotOn == on) return;
+    setState(() {
+      _robotOn = on;
+      if (on) {
+        _robot = DuoRobot(apiKey: _openAiKey, onLog: _lgDuo);
+      } else {
+        _robot?.reset();
+        _robot = null;
+      }
+    });
+    _lgDuo('[DUO-ROBOT]', on ? 'ON mode=$_duoMode' : 'OFF');
+  }
 
   // 🆕 [채널 업로드] 내 원문을 duo_sessions/{roomId}/messages 에 기록
   //
@@ -5719,7 +5954,22 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// 예전에는 타이머가 만료된 경우에만 공부방으로 보내서, 10분을 다 채우지
   /// 않고 먼저 끊은 사람은 방금 나눈 대화를 두고 Intro로 튕겼다. 맛보기는
   /// 폰 한 대에 한 번뿐이라 그 길로 나가면 다시 볼 방법이 없었다.
-  Future<void> _handleAutoSaveAndExit() async {
+  /// 🚪 [DUO-EXIT] **나가면서 반드시 끝내야 하는 일.** 화면 이동은 없다.
+  ///
+  /// 예전에는 이 일이 [_handleAutoSaveAndExit] 안에만 있었고, 그 함수는
+  /// 화면의 나가기 버튼 하나에서만 불렸다. 그래서 시스템 뒤로가기나 화면이
+  /// 그냥 사라지는 경로로 나가면 **공유 정돈(canonical)이 만들어지지
+  /// 않았다**(실기기 2026-09-08). 정돈이 없으면 두 사람의 기록이 갈리고,
+  /// 그 뒤에 붙는 원문 복원도 시작되지 못한다.
+  ///
+  /// 그래서 저장·정돈만 떼어 여기 둔다. 나가는 경로가 무엇이든 이 함수를
+  /// 지나간다 — 버튼, 시스템 뒤로가기, [dispose] 셋 다.
+  ///
+  /// **한 번만 돈다.** 두 번 돌면 빈 방 삭제와 정돈이 겹친다.
+  Future<void> _finalizeDuoSession(String reason) async {
+    if (_sessionFinalized) return;
+    _sessionFinalized = true;
+    _lgDuo('[DUO-EXIT]', 'finalize reason=$reason');
     if (_isExiting) return;
     _isExiting = true;
     // 🚪 [EXIT-BUSY] 정리에 3초 넘게 걸린다. 눌렸다는 것을 먼저 그린다 —
@@ -5728,8 +5978,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     if (mounted) setState(() {});
     final bool isTrialHost = _isTrialHost;
     final bool trialWasConsumed = FFAppState().trialCompleted;
+    _exitWasTrialHost = isTrialHost;
+    _exitTrialWasConsumed = trialWasConsumed;
     _trialCallTimer?.cancel();
     final bool isInviteGuest = FFAppState().isGuestSession;
+    _exitWasInviteGuest = isInviteGuest;
     final String? guestRoomId = _duoSessionRef?.id ??
         widget.roomId ??
         _pendingJoinRoomId ??
@@ -5867,7 +6120,14 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
         ));
       }
     }
+  }
+
+  Future<void> _handleAutoSaveAndExit() async {
+    await _finalizeDuoSession('exit_button');
     if (!mounted) return;
+    final bool isTrialHost = _exitWasTrialHost;
+    final bool trialWasConsumed = _exitTrialWasConsumed;
+    final bool isInviteGuest = _exitWasInviteGuest;
 
     if (isTrialHost) {
       final historyRef = _myHistoryRef ?? TrialFlowState.instance.myHistoryRef;
@@ -6096,8 +6356,73 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
             ),
           ),
         ),
+        // 🤖 [DUO-ROBOT] **디버그 빌드에서만 존재한다.**
+        //   `kDebugMode`는 컴파일 시점 상수라, 릴리스에서는 이 가지가 통째로
+        //   접혀 버튼도 그 아래 호출도 빌드에 들어가지 않는다.
+        if (kDuoRobotAvailable) _buildRobotToggle(),
         const SizedBox(height: 20),
       ],
+    );
+  }
+
+  /// 🤖 상대를 기다리는 자리에 놓는 개발용 스위치.
+  ///
+  /// 폰 두 대를 준비하지 않고 마이크·발화 경계·전사를 계속 두들겨 보기 위한
+  /// 것이다. 켜면 로봇이 상대 자리에 앉고, 통화가 곧바로 시작된다.
+  Widget _buildRobotToggle() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 18, left: 28, right: 28),
+      child: Column(
+        children: [
+          OutlinedButton.icon(
+            onPressed: () {
+              final bool next = !_robotOn;
+              _setRobot(next);
+              if (next) {
+                // 상대를 기다리던 자리다. 켜는 즉시 마이크를 연다.
+                _autoStartAttempted = false;
+                _maybeAutoStartDirectCall('robot_on');
+              } else {
+                // 끄면 통화도 멈춘다. 안 멈추면 `_directCallActive`가 남아
+                // 다시 켜도 `_maybeAutoStartDirectCall`이 곧바로 돌아간다.
+                unawaited(_stopDirectCall('robot_off'));
+              }
+            },
+            icon: Icon(
+              _robotOn ? Icons.smart_toy : Icons.smart_toy_outlined,
+              size: 18,
+              color: _robotOn ? const Color(0xFF4ADE80) : Colors.white54,
+            ),
+            label: Text(
+              _robotOn ? 'Duo Robot ON' : 'Duo Robot',
+              style: TextStyle(
+                color: _robotOn ? const Color(0xFF4ADE80) : Colors.white54,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(
+                color: _robotOn
+                    ? const Color(0xFF4ADE80).withValues(alpha: 0.6)
+                    : Colors.white24,
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            _robotOn
+                ? '혼자 말해 보세요 · 과금 없음'
+                : '개발용 · 상대 없이 혼자 시험',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.3),
+              fontSize: 11,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
