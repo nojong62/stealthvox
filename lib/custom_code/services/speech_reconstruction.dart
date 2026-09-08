@@ -103,6 +103,57 @@ String sanitizeSpeechOutput(String raw) {
 // 1단계 — MY ENGLISH
 // ════════════════════════════════════════════════════════════════════
 
+/// 🎙️ [LK-SPEAKER] Clear & Easy 카드의 **고정 화자**.
+///
+/// Larry King은 모사 대상이 아니라 **reference persona**다(실장님 지시).
+/// 이름만으로 품질이 나오지 않는다 — 방향을 잡는 앵커일 뿐이고, 실제 품질은
+/// 아래 세부 규칙이 만든다. 그래서 이름을 부르는 것은 금지하고, 인용구·유행어
+/// 흉내도 막는다.
+///
+/// ⚠️ **인물은 dialect reference가 아니라 speaking-pattern reference다**
+/// (실장님 정정, 2026-09-08). 이 페르소나가 지배하는 것은 생각을 푸는 방식,
+/// 직설성, 리듬, 대화의 흐름뿐이다. **어휘·지역 어투·방언은 건드리지 않는다** —
+/// 그건 로비 AI STYLE의 자리이고, 페르소나는 그것을 절대 덮지 않는다. 유저가
+/// British를 골랐으면 British 어휘 그대로 Larry King 계열의 말하기 흐름을 탄다.
+/// 그래서 프롬프트 어디에도 American을 강제하는 말을 두지 않는다.
+///
+/// **일회성 문체 지시가 아니라 영구 화자 정체성으로 못 박는다.** 매번 다른
+/// 스타일로 흔들리는 것을 줄이는 장치다.
+///
+/// ⚠️ **분량을 줄이는 장치가 아니다.** "쉽게"는 어떻게 **말하는가**이지 얼마나
+/// 말하는가가 아니다. 앞의 확장 규칙이 세운 내용은 통째로 남는다.
+///
+/// 영어 타겟일 때만 붙는다 — 스타일 블록이 붙지 않는 방에 "ENGLISH STYLE을
+/// 지키라"고 쓰면 프롬프트가 없는 절을 가리키게 된다.
+const String _kLkSpeakerPersona = '''[SPEAKER IDENTITY — LK Speaker]
+You are not translating the user's words. You are the speaker.
+LK Speaker is a SPEAKING-PATTERN reference built on Larry King's exceptionally direct, plain-spoken conversational manner.
+It governs HOW the thought is organized, paced, and delivered: its directness, its rhythm, its conversational flow.
+It does NOT govern vocabulary, regional wording, spelling, or dialect. Those belong to the ENGLISH STYLE section at the end of these instructions, and this persona never overrides it. If the active style is British, stay British and still speak with this pattern.
+Treat this as a permanent speaking persona, not a temporary writing style.
+Maintain this speaking persona consistently across all topics and all sessions.
+Absorb the user's facts, intention, attitude, and point of view until the thought feels like your own — without changing the user's meaning, facts, attitude, or point of view — and then say it from scratch in your own clear, natural conversational voice, while preserving the active ENGLISH STYLE.
+Do not think like a translator. Do not preserve the source sentence structure.
+Do not improve the user's intelligence or personality. Do not decorate the thought.
+The listener should feel that this is spontaneous speech from a calm, experienced communicator, not a rewritten sentence.
+Before producing the answer, silently ask yourself: "If I had personally thought this, how would I naturally say it out loud?"
+Stay in this speaking identity for every response.
+Never step outside the role to explain what you changed. Never mention Larry King. Never imitate his quotations or catchphrases.
+
+[CLEAR & EASY — WHAT THIS VOICE SOUNDS LIKE]
+Keep individual sentences short.
+Say it directly.
+Make it easy to say out loud.
+Move one thought forward at a time.
+Do not increase the user's vocabulary level unless natural spoken English truly requires it.
+
+[CLEAR & EASY IS NOT A SUMMARY]
+This describes HOW the speech is said, never how much is said.
+Keep the whole speech you build below — every point, reason, detail, example, and conclusion.
+Never condense it, never drop material to make it simpler, and never trade content for ease.
+
+''';
+
 /// 🗣️ [MY-ENGLISH] 대화에서 고른 소재를 **말하기 연습용 확장 스피치**로 세운다.
 ///
 /// **실제 발화의 복원이 아니다**(실장님 결정, 2026-08-31). 예전 My Speech는
@@ -117,6 +168,10 @@ String sanitizeSpeechOutput(String raw) {
 ///   · 원 대화와 **모순되는** 것은 만들지 않는다.
 ///   · 유저의 민감하거나 구체적인 사실을 지어내지 않는다.
 ///   · 대화 요약도, 질문-답변을 이어 붙인 것도 아니다.
+///
+/// 화면 이름은 **Clear & Easy**이고 화자는 [_kLkSpeakerPersona]다. 확장 규칙은
+/// 그대로 두고 그 위에 고정 화자를 얹었다 — 무엇을 말할지는 아래 seed 규칙이,
+/// 어떻게 말할지는 페르소나가 정한다.
 ///
 /// 저장 칸은 `my_speech` 그대로다 — 이름만 바뀌었고 자리는 같다.
 ///
@@ -136,6 +191,8 @@ String buildMySpeechInstructions({
   String situation = '',
 }) {
   final language = targetLang.trim().isEmpty ? 'English' : targetLang.trim();
+  // 🎙️ 화자 정체성은 영어 타겟에서만 성립한다. 비영어 방은 예전 그대로다.
+  final persona = isAiStyleTargetLanguage(language) ? _kLkSpeakerPersona : '';
   final user = userLabel.trim();
   final partner = partnerLabel.trim();
   final whoLine =
@@ -147,7 +204,8 @@ String buildMySpeechInstructions({
       ? ''
       : '\nSituation: ${situation.trim()}. Use it as background when it fits the seed you pick.';
 
-  return '''You are writing ONE speaking-practice speech for a language learner, using their own conversation as the seed.
+  return '''${persona}You are writing ONE speaking-practice speech for a language learner, using their own conversation as the seed.
+**You are the one who will speak it.** Build the speech, then say it in your own voice.
 
 The conversation may contain many turns between the user and another person or AI.
 $whoLine$situationLine
@@ -279,12 +337,16 @@ class MySpeechBuilder {
 // 2단계 — NATIVE ENGLISH
 // ════════════════════════════════════════════════════════════════════
 
-/// 🇺🇸 [NATIVE-ENGLISH] My English와 같은 의미를 **미국 영어 화자가 처음부터
-/// 영어로 생각했다면 어떻게 짰을지**로 다시 만든다.
+/// 🎙️ [NATURAL & POLISHED] My English와 같은 의미를 **원어민이 처음부터 영어로
+/// 생각했다면 어떻게 짰을지**로 다시 만든다. 화자는 AC Speaker다.
 ///
 /// 입력은 언제나 My English다. 대화 원문에서 직접 만들지 않는다 — 그러면
-/// 두 단계가 같은 일을 하게 된다. 여기서 새 내용을 더하지도 않는다. 넓히는
-/// 일은 앞 단계가 이미 끝냈고, 이 단계가 바꾸는 것은 **표현뿐이다.**
+/// 두 단계가 같은 일을 하게 된다. 여기서 새 내용을 더하지도, **줄이지도**
+/// 않는다. 넓히는 일은 앞 단계가 이미 끝냈고, 이 단계가 바꾸는 것은
+/// **말하기 방식뿐이다.**
+///
+/// [targetLang]은 로비 AI STYLE을 프롬프트에 앉히기 위해 받는다. 결과물은
+/// 언제나 영어지만, **어느 지역 어투의 영어인지는 유저가 정한다.**
 class NativeEnglishSpeechBuilder {
   NativeEnglishSpeechBuilder._();
 
@@ -295,6 +357,7 @@ class NativeEnglishSpeechBuilder {
   static Future<SpeechBuildResult> build({
     required String apiKey,
     required String mySpeech,
+    String targetLang = 'English',
     void Function(String tag, String message)? onLog,
   }) async {
     if (apiKey.isEmpty) {
@@ -319,7 +382,9 @@ class NativeEnglishSpeechBuilder {
               'messages': <Map<String, String>>[
                 <String, String>{
                   'role': 'system',
-                  'content': buildNativeEnglishSpeechInstructions(),
+                  'content': buildNativeEnglishSpeechInstructions(
+                    targetLang: targetLang,
+                  ),
                 },
                 <String, String>{
                   'role': 'user',

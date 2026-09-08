@@ -4236,7 +4236,12 @@ RULES — follow exactly:
   // ══════════════════════════════════════════════════════════════════
   // 📦 [Box 22-B: 학습 경로 고르는 자리 — History Study의 첫 화면]
   //
-  //   PRACTICE | MY ENGLISH | NATIVE ENGLISH 셋을 나란히 둔다.
+  //   PRACTICE | CLEAR & EASY | NATURAL & POLISHED 셋을 나란히 둔다.
+  //   뒤 둘의 저장 칸은 여전히 `my_speech` / `native_english`다 —
+  //   **화면 이름만 화자 라벨로 바뀌었다.**
+  //
+  //   🇬🇧 AI STYLE이 British면 윗줄의 미국 인물 이름만 빠진다
+  //      ([_hidesPersonaNames]). 생성은 그대로다.
   //   **어느 하나가 다른 하나의 관문이 아니다.** Practice는 몇 번이고 다시
   //   들어오는 자리고, 나머지 둘은 대화 전체를 한 벌의 발화로 다루는 자리다.
   //
@@ -4252,6 +4257,8 @@ RULES — follow exactly:
     // 대화가 남지 않는 방이면 전체 발화 학습 자체가 성립하지 않는다. 눌러 보고
     // 실패를 읽게 하지 말고 아예 띄우지 않는다.
     final bool speechReady = _supportsSpeechPractice(_cachedRoomMode);
+    // 🇬🇧 British면 윗줄이 통째로 빠진다. 카드는 아랫줄 한 줄로 선다.
+    final bool hidePersona = _hidesPersonaNames;
     // 📐 시스템 글자 크기를 크게 써 둔 기기에서 짧은 라벨이 어절 중간에서
     //    끊기지 않게, 이 선택 화면에서만 배율에 천장을 씌운다.
     return MediaQuery.withClampedTextScaling(
@@ -4301,7 +4308,10 @@ RULES — follow exactly:
                     if (speechReady) ...[
                       const SizedBox(height: 12),
                       _buildStudyPathCard(
-                        title: "MY ENGLISH",
+                        titleTop: hidePersona
+                            ? ""
+                            : "Larry King–style Plain Spoken English",
+                        title: "Clear & Easy",
                         subtitle: "대화 소재로 만든 말하기 연습문",
                         icon: Icons.record_voice_over_rounded,
                         color: const Color(0xFF38BDF8),
@@ -4315,7 +4325,10 @@ RULES — follow exactly:
                       ),
                       const SizedBox(height: 12),
                       _buildStudyPathCard(
-                        title: "NATIVE ENGLISH",
+                        titleTop: hidePersona
+                            ? ""
+                            : "Anderson Cooper–style Polished Conversational English",
+                        title: "Natural & Polished",
                         subtitle: "같은 생각을 미국인이 처음부터 영어로",
                         icon: Icons.auto_awesome,
                         color: const Color(0xFFFBBF24),
@@ -4352,6 +4365,7 @@ RULES — follow exactly:
   Widget _buildStudyPathCard({
     required String title,
     required String subtitle,
+    String titleTop = '',
     required IconData icon,
     required Color color,
     VoidCallback? onTap,
@@ -4385,12 +4399,31 @@ RULES — follow exactly:
                   Icon(icon, color: color, size: 19),
                   const SizedBox(width: 9),
                   Expanded(
-                    child: Text(title,
-                        style: TextStyle(
-                            color: color,
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 0.6)),
+                    // 🏷️ 두 줄 제목. 윗줄은 **어떤 화자를 기준으로 만든
+                    //    영어인가**를 밝히는 긴 줄이라 작게 깔고, 아랫줄이
+                    //    유저가 즉시 알아보는 핵심 라벨이라 강조 크기를
+                    //    그대로 지킨다(실장님 지시).
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (titleTop.isNotEmpty) ...[
+                          Text(titleTop,
+                              style: TextStyle(
+                                  color: color.withValues(alpha: 0.75),
+                                  fontSize: 11,
+                                  height: 1.25,
+                                  fontWeight: FontWeight.w500)),
+                          const SizedBox(height: 2),
+                        ],
+                        Text(title,
+                            style: TextStyle(
+                                color: color,
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.6)),
+                      ],
+                    ),
                   ),
                   if (isLoading)
                     SizedBox(
@@ -5198,8 +5231,9 @@ RULES — follow exactly:
   //   Shadow를 열 번 반복해도 API 호출은 늘지 않는다.
   // ══════════════════════════════════════════════════════════════════
 
-  /// 훈련이 대상으로 삼는 문장. MY ENGLISH와 NATIVE ENGLISH 두 벌을 각각
-  /// 같은 Speaking Practice 흐름으로 연다.
+  /// 훈련이 대상으로 삼는 문장. CLEAR & EASY(`my_speech`)와
+  /// NATURAL & POLISHED(`native_english`) 두 벌을 각각 같은 Speaking
+  /// Practice 흐름으로 연다.
   ///
   /// ⚠️ **없으면 빈 문자열이다.** 고른 쪽이 비었다고 다른 쪽을 대신 걸지
   ///    않는다 — 두 카드가 같은 문장이 되면 견줄 것이 사라진다. 카드 자체가
@@ -5214,8 +5248,8 @@ RULES — follow exactly:
 
   String _p3VariantLabel(SentenceVariant variant) =>
       variant == SentenceVariant.nativeEnglish
-          ? 'NATIVE ENGLISH'
-          : 'MY ENGLISH';
+          ? 'NATURAL & POLISHED'
+          : 'CLEAR & EASY';
 
   /// 🚧 Shadow 여유. **말하는 속도를 바꾸는 게 아니다** — AI의 발음·억양·속도는
   /// 그대로 두고 **호흡 사이 빈 자리만** 늘린다. 실기기에서 조정한다.
@@ -6890,6 +6924,20 @@ RULES — follow exactly:
   bool _supportsSpeechPractice(String mode) =>
       _kSpeechPracticeModes.contains(_normalizeHistoryMode(mode));
 
+  /// 🇬🇧 [BRITISH-TITLE] British를 고른 방에서는 카드 윗줄의 **미국 인물
+  /// 이름을 감춘다.** 영국 영어를 고른 사람에게 Larry King·Anderson Cooper를
+  /// 내걸면 카드가 제 내용과 어긋나 보인다(실장님 지시, 2026-09-08).
+  ///
+  /// ⚠️ **표시만 접는다. 기능은 그대로다.** 두 페르소나의 speaking pattern은
+  /// British에서도 똑같이 돌고, 어휘·철자·관용 표현만 AI STYLE이 정한다.
+  /// 프롬프트는 한 글자도 갈아 끼우지 않는다 — 인물은 애초에 dialect가 아니라
+  /// speaking-pattern reference라서, 이름을 감춰도 잃는 것이 없다.
+  ///
+  /// 이름을 감추는 대신 `British Clear & Easy`처럼 다시 적지도 않는다. 로비
+  /// 에서 이미 고른 값이라, 카드에서 되풀이하면 UI만 무거워진다.
+  bool get _hidesPersonaNames =>
+      effectiveAiStyle(targetLang: _sessionTargetLangName()) == 'British';
+
   /// 저장 모양의 판. 규칙이 바뀌면 이 값을 올려 옛 결과를 다시 만들게 한다.
   ///
   /// `my_speech_v1`은 **유저가 실제로 한 말만** 모으던 시절의 결과다. 지금
@@ -7176,6 +7224,7 @@ RULES — follow exactly:
       final result = await NativeEnglishSpeechBuilder.build(
         apiKey: _apiKey,
         mySpeech: source,
+        targetLang: _sessionTargetLangName(),
         onLog: (tag, message) => debugPrint('$tag $message'),
       );
       if (!mounted) return false;

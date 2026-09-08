@@ -2163,9 +2163,9 @@ AI에게 교정과 피드백을 받습니다.
 🔄 Practice — 역할 교환 대화 연습
 AI와 역할을 바꿔가며 실제 대화처럼 연습합니다.
 
-✨ My Speech · Native English — 심화 훈련
-내가 실제로 말한 것을 하나의 발화로 모은 My Speech와
-같은 생각을 미국인이 처음부터 영어로 짠 Native English를
+✨ Clear & Easy · Natural & Polished — 심화 훈련
+대화 소재로 지은 말하기 연습문을 쉽고 직접적인 영어로 들려주는
+Clear & Easy와, 같은 생각을 더 다듬어 말하는 Natural & Polished를
 의미 단위(Chunk)별로 끊어 에코잉·쉐도잉으로 연습합니다.
 
 🔊 볼륨 — 소리를 줄이고 쉐도잉하세요
