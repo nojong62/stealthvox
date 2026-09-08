@@ -3037,6 +3037,11 @@ $kSpokenReplyLengthPolicy
       if (kDebugMode) {
         _log('🎧 [STT-RAW]', 'source=streaming text="$userOriginal"');
       }
+      // 💾 [ORIGIN-PCM] **스트리밍 경로에도 소리를 남긴다.**
+      //   전사 자체는 소켓이 하므로 파일 전사 함수(`_transcribeAccurately`)를
+      //   지나지 않는다. 그 함수에만 창고를 걸었다가 실기기에서 한 발화도
+      //   저장되지 않았다(2026-09-08). 주 경로는 이쪽이다.
+      _lastTurnPcm ??= _snapshotTurnPcm();
       _logTurnPerf('USER_KOREAN_FINAL');
       _markConversationActivity();
       if (!TrialFlowState.instance.isTrial) {
