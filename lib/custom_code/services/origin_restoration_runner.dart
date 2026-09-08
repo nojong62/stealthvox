@@ -1,0 +1,281 @@
+// ====================================================================
+// 🔍 [ORIGIN-RESTORE] 복원 한 판을 실제로 돌리는 자리
+// --------------------------------------------------------------------
+// 판정은 전부 `origin_restoration.dart`에 있다. 이 파일이 하는 일은 셋뿐이다.
+//
+//   · 모델과 창고에 실제로 말을 건다
+//   · Firestore에서 대화를 읽고 고쳐진 줄만 되쓴다
+//   · 한 방에 두 판이 겹치지 않게 지킨다
+//
+// **대화가 끝나는 자리에서 시작하고**(`_handleAutoSaveAndExit`), 공부방이
+// 열릴 때 그 결과를 기다린다([awaitIfRunning]). 사용자를 세워 두지 않으면서
+// 검수 화면에는 복원된 글이 뜬다.
+//
+// ⚠️ **사용자가 확정하기 전에 끝나야 한다.** 확정본 방은 원문을 한 글자도
+//    고치지 않는다는 것이 기존 결정이고, 그 결정을 뒤집지 않으려면 복원은
+//    사람의 검수보다 앞에 서야 한다.
+// ====================================================================
+
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+
+import 'duo_study_state.dart';
+import 'history_text_model.dart';
+import 'openai_transcribe_service.dart';
+import 'origin_pcm_store.dart';
+import 'pcm_audio_utils.dart';
+import 'origin_restoration.dart';
+
+/// 복원을 이미 돌린 방이라는 표시. **두 번 돌지 않게 하는 유일한 근거다.**
+const String kOriginRestoredAtField = 'origin_restored_at';
+
+class OriginRestorationRunner {
+  OriginRestorationRunner._();
+
+  static final OriginRestorationRunner instance = OriginRestorationRunner._();
+
+  /// 복원을 아예 끈다. 실기기에서 문제가 생기면 여기를 내린다.
+  static bool enabled = true;
+
+  static const Duration _timeout = Duration(seconds: 30);
+
+  /// 방마다 도는 판. 같은 방에 두 판이 겹치면 같은 줄을 두 번 고친다.
+  final Map<String, Future<void>> _running = <String, Future<void>>{};
+
+  /// 대화가 끝나는 자리에서 부른다. **기다리지 않는다.**
+  void start({
+    required DocumentReference<Object?> roomRef,
+    required String apiKey,
+    required String sourceName,
+    required String targetLanguage,
+  }) {
+    if (!enabled || apiKey.isEmpty) return;
+    final id = roomRef.id;
+    if (_running.containsKey(id)) return;
+    final task = _run(
+      roomRef: roomRef,
+      apiKey: apiKey,
+      sourceName: sourceName,
+      targetLanguage: targetLanguage,
+    ).whenComplete(() => _running.remove(id));
+    _running[id] = task;
+    unawaited(task);
+  }
+
+  /// 공부방이 열릴 때 부른다. 돌고 있으면 끝날 때까지, 아니면 즉시.
+  Future<void> awaitIfRunning(String roomId) async {
+    final task = _running[roomId];
+    if (task == null) return;
+    try {
+      await task;
+    } catch (_) {}
+  }
+
+  bool isRunning(String roomId) => _running.containsKey(roomId);
+
+  Future<void> _run({
+    required DocumentReference<Object?> roomRef,
+    required String apiKey,
+    required String sourceName,
+    required String targetLanguage,
+  }) async {
+    final roomId = roomRef.id;
+    try {
+      // 이미 돈 방은 다시 돌지 않는다. 두 번째 판은 첫 판이 고친 글을 원문으로
+      // 알고 또 고치기 시작한다.
+      final room = await roomRef.get();
+      final roomData = room.data();
+      if (roomData is Map && roomData.containsKey(kOriginRestoredAtField)) {
+        return;
+      }
+
+      // 🚪 마지막 발화의 쓰기가 아직 큐에 있을 수 있다. 여기서 딱 한 번
+      //   기다린다 — 대화 중에는 절대 기다리지 않는다.
+      await OriginPcmStore.instance.flush(roomId);
+
+      final snap = await roomRef
+          .collection('messages')
+          .orderBy('created_at')
+          .get();
+      final turns = <RestorationTurn>[];
+      for (final doc in snap.docs) {
+        final data = doc.data();
+        final text = (data['original_text'] ?? '').toString().trim();
+        if (text.isEmpty) continue;
+        final seq = data['pcm_seq'];
+        turns.add(RestorationTurn(
+          id: doc.id,
+          isUser: (data['role'] ?? '') == 'HOST',
+          text: text,
+          pcmSeq: seq is int ? seq : null,
+          subjectHint: (data['subject_hint'] ?? '').toString(),
+        ));
+      }
+      if (turns.isEmpty) {
+        await _seal(roomRef);
+        return;
+      }
+
+      final ids = turns.map((t) => t.id).toSet();
+      final engine = OriginRestorationEngine(
+        roomId: roomId,
+        detectSuspects: (list) => _detect(
+          apiKey: apiKey,
+          turns: list,
+          sourceName: sourceName,
+          instructions: buildOriginSuspectInstructions(sourceName: sourceName),
+          knownTurnIds: ids,
+          requireTargetEvidence: false,
+        ),
+        validateTarget: (list) => _detect(
+          apiKey: apiKey,
+          turns: list,
+          sourceName: sourceName,
+          instructions: buildTargetValidationInstructions(
+            sourceName: sourceName,
+            targetLanguage: targetLanguage,
+          ),
+          knownTurnIds: ids,
+          requireTargetEvidence: true,
+        ),
+        recheckAcoustic: (seq) => _recheck(
+          apiKey: apiKey,
+          roomId: roomId,
+          pcmSeq: seq,
+        ),
+        log: debugPrint,
+      );
+
+      final outcome = await engine.run(turns);
+
+      // ── STEP 9 — Final Canonical Origin ─────────────────────────
+      if (outcome.corrections.isNotEmpty) {
+        await _persist(roomRef, snap.docs, outcome.corrections);
+      }
+      await _seal(roomRef);
+
+      // 🗑️ 원문이 확정됐으면 소리의 역할은 끝났다. Final Target은 순수
+      //   텍스트 작업이라, 그 성공 여부와 삭제를 묶지 않는다.
+      await OriginPcmStore.instance.discard(roomId);
+      debugPrint('[ORIGIN-RESTORE] final_changes=${outcome.corrections.length} '
+          'pcm_discarded=true room=$roomId');
+    } catch (error) {
+      // 복원이 실패해도 대화는 그대로다. 표시만 남겨 다음에 또 돌지 않게 한다.
+      debugPrint('[ORIGIN-RESTORE] failed room=$roomId '
+          'reason=${error.runtimeType}');
+      try {
+        await _seal(roomRef);
+        await OriginPcmStore.instance.discard(roomId);
+      } catch (_) {}
+    }
+  }
+
+  /// 복원을 돌렸다는 표시. 성공이든 실패든 남긴다.
+  Future<void> _seal(DocumentReference<Object?> roomRef) =>
+      roomRef.update(<String, dynamic>{
+        kOriginRestoredAtField: FieldValue.serverTimestamp(),
+      });
+
+  /// 고쳐진 줄만 되쓴다.
+  ///
+  /// **`original_text_raw`는 히스토리 교정 경로가 이미 쓰던 칸이다.** 새 칸을
+  /// 만들지 않는다 — 되돌릴 근거가 두 곳에 흩어지면 어느 것이 원본인지 알 수
+  /// 없어진다.
+  Future<void> _persist(
+    DocumentReference<Object?> roomRef,
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+    Map<String, String> corrections,
+  ) async {
+    final batch = FirebaseFirestore.instance.batch();
+    for (final doc in docs) {
+      final next = corrections[doc.id];
+      if (next == null) continue;
+      final data = doc.data();
+      final raw = (data['original_text'] ?? '').toString();
+      batch.update(doc.reference, <String, dynamic>{
+        'original_text': next,
+        // 이미 raw가 있으면 덮지 않는다. 가장 처음 들린 글이 원본이다.
+        if ((data[kOriginalRawField] ?? '').toString().trim().isEmpty)
+          kOriginalRawField: raw,
+        'original_repaired_at': FieldValue.serverTimestamp(),
+        // 이 줄로 만든 번역은 낡았다. 비워 두면 공부방이 다시 만든다.
+        'translated_text': '',
+      });
+    }
+    await batch.commit();
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // 모델
+  // ══════════════════════════════════════════════════════════════════
+
+  Future<List<OriginSuspect>> _detect({
+    required String apiKey,
+    required List<RestorationTurn> turns,
+    required String sourceName,
+    required String instructions,
+    required Set<String> knownTurnIds,
+    required bool requireTargetEvidence,
+  }) async {
+    final response = await http
+        .post(
+          Uri.parse('https://api.openai.com/v1/chat/completions'),
+          headers: <String, String>{
+            'Authorization': 'Bearer $apiKey',
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+          body: jsonEncode(<String, dynamic>{
+            'model': kHistoryRepairModel,
+            // 판정이라 흔들리면 안 된다. 같은 대화는 같은 의심점을 낸다.
+            'temperature': 0.0,
+            'max_tokens': 700,
+            'response_format': <String, String>{'type': 'json_object'},
+            'messages': <Map<String, String>>[
+              <String, String>{'role': 'system', 'content': instructions},
+              <String, String>{
+                'role': 'user',
+                'content': 'TRANSCRIPT ($sourceName):\n'
+                    '${formatRestorationTranscript(turns)}',
+              },
+            ],
+          }),
+        )
+        .timeout(_timeout);
+    if (response.statusCode != 200) {
+      debugPrint('[ORIGIN-RESTORE] detect_status=${response.statusCode}');
+      return const <OriginSuspect>[];
+    }
+    final body =
+        jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+    final choices = body['choices'] as List? ?? const <dynamic>[];
+    if (choices.isEmpty) return const <OriginSuspect>[];
+    final message =
+        (choices.first as Map<String, dynamic>)['message'] as Map<String, dynamic>?;
+    return parseOriginSuspects(
+      (message?['content'] ?? '').toString(),
+      knownTurnIds: knownTurnIds,
+      requireTargetEvidence: requireTargetEvidence,
+    );
+  }
+
+  /// 그 발화의 소리만 다시 듣는다. **전체 대화를 다시 전사하지 않는다.**
+  Future<String?> _recheck({
+    required String apiKey,
+    required String roomId,
+    required int pcmSeq,
+  }) async {
+    final pcm = await OriginPcmStore.instance.read(roomId, pcmSeq);
+    if (pcm == null || pcm.isEmpty) return null;
+    return OpenAiTranscribeService.transcribePcm16(
+      apiKey: apiKey,
+      pcm: pcm,
+      sampleRate: kStealthVoxSttSampleRate,
+      model: OpenAiTranscribeService.model,
+      timeout: _timeout,
+    );
+  }
+}

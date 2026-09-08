@@ -31,6 +31,7 @@ import 'routine_mode_scenario_talk.dart' show TtsCache;
 import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
 import '/custom_code/services/ai_style.dart';
+import '/custom_code/services/origin_restoration_runner.dart';
 import '/custom_code/services/origin_language_session.dart'
     show detectOriginScript, koreanLanguageDisplayName, textContradictsLanguage;
 import '/custom_code/services/history_finalize.dart';
@@ -658,6 +659,12 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // 📦 [Box 9: 헬퍼 - 룸 데이터 및 원격 키 호출]
   Future<void> _fetchRoomData() async {
     try {
+      // 🔍 [ORIGIN-RESTORE] 대화방이 나가면서 걸어 둔 복원이 아직 돌고 있으면
+      //   여기서 기다린다. **원문을 읽기 전에 기다려야 한다** — 복원 전 글을
+      //   먼저 그리면 사용자가 검수하는 동안 글자가 발밑에서 바뀐다.
+      //   대개는 이미 끝나 있어 즉시 돌아온다.
+      await OriginRestorationRunner.instance
+          .awaitIfRunning(widget.historyDoc.id);
       var doc = await widget.historyDoc.get();
       if (doc.exists && doc.data() != null) {
         var data = doc.data() as Map<String, dynamic>;

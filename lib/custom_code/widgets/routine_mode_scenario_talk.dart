@@ -69,6 +69,7 @@ import '/custom_code/services/openai_streaming_transcribe_prewarm.dart';
 import '/custom_code/services/openai_streaming_transcribe_session.dart';
 import '/custom_code/services/openai_transcribe_service.dart';
 import '/custom_code/services/origin_pcm_store.dart';
+import '/custom_code/services/origin_restoration_runner.dart';
 import '/custom_code/services/pcm_audio_utils.dart';
 import '/custom_code/services/session_rollover_summary.dart';
 import '/custom_code/services/tts_adapter.dart';
@@ -4155,6 +4156,31 @@ never by itself a reason to ask back.
   }
 
   /// 뒤로가기 시: 빈 방 폭파 or last_message 업데이트 후 나가기
+  /// 🔍 [ORIGIN-RESTORE] 원문 복원을 걸어 둔다.
+  ///
+  /// 대화방은 발화 하나를 그 자리에서 전사하고 넘어가므로, 그때는 앞뒤에 무슨
+  /// 말이 오갔는지 아직 없다. 대화가 끝나면 전부 있다 — 그래서 여기서 한 번
+  /// 더 본다. 마지막 줄의 저장이 아직 날아가는 중일 수 있어 그것부터 기다린
+  /// 뒤에 시작한다(복원은 Firestore에서 대화를 읽는다).
+  ///
+  /// **기다리지 않는다.** 사용자는 지금 방을 나가는 중이고, 복원은 공부방이
+  /// 열릴 때까지 뒤에서 돌면 된다. 서클톡과 같은 구조다.
+  void _startOriginRestoration() {
+    final ref = _myHistoryRef;
+    if (ref == null || _openAiKey.isEmpty) return;
+    unawaited(() async {
+      try {
+        await _pendingTurnPersistence;
+      } catch (_) {}
+      OriginRestorationRunner.instance.start(
+        roomRef: ref,
+        apiKey: _openAiKey,
+        sourceName: _nativeLangName(),
+        targetLanguage: _targetLangName(),
+      );
+    }());
+  }
+
   Future<void> _handleAutoSaveAndExit() async {
     BillingTicker.instance.pause();
     try {
@@ -4196,6 +4222,10 @@ never by itself a reason to ask back.
             'partner_label': partnerLabel,
           });
           _log('💾 [HIST-UPD]', 'last_message 저장');
+          // 🔍 [ORIGIN-RESTORE] 대화가 끝났으니 이제 전체 문맥이 있다.
+          //   여기서 시작해 두면 공부방이 열릴 때는 대개 끝나 있다.
+          //   **기다리지 않는다** — 사용자는 지금 방을 나가는 중이다.
+          _startOriginRestoration();
         }
       }
     } catch (e) {
