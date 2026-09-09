@@ -20,7 +20,7 @@ import 'dart:ui' as ui;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:record/record.dart';
-import 'package:audioplayers/audioplayers.dart';
+import 'package:audioplayers/audioplayers.dart' hide Source;
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';
@@ -88,7 +88,7 @@ const Color _p3BreathAccentColor = Color(0xFF7DD3FC);
 ///   · 쉐도잉 — 겹쳐 말하는 연습이라 결이 다른 셋을 준다.
 /// 어느 쪽도 성별은 적지 않는다. 캐시 키에 목소리가 들어가므로 목록을 바꿔도
 /// 이미 받아 둔 소리는 그대로 남는다.
-const List<String> _kP3EchoingVoices = <String>['coral', 'alloy'];
+const List<String> _kP3EchoingVoices = <String>['coral', 'alloy', 'nova'];
 const List<String> _kP3ShadowingVoices = <String>['echo', 'ash', 'coral'];
 
 /// 의미단위 낭독의 공통 뼈대. 무엇을 한 덩어리로 볼지, 덩어리 안을 어떻게
@@ -99,6 +99,17 @@ const List<String> _kP3ShadowingVoices = <String>['echo', 'ash', 'coral'];
 /// 모델이 느리게 읽기부터 집행해 밋밋하게 늘어지고 리듬이 뒤로 밀린다.
 
 /// 학습용 — 구간을 **의도적으로 벌려** 따라 하기 쉽게 만든다.
+
+enum _HistoryPreparationStage {
+  idle,
+  pending,
+  canonicalBuilding,
+  canonicalApplied,
+  restoring,
+  ready,
+  failed,
+  timedOut,
+}
 
 /// 원어민식 — 중요하지 않은 곳은 **흘려 붙이고** 핵심만 세운다.
 
@@ -187,6 +198,23 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
 
   bool isLoadingRoom = true;
   String roomName = "";
+  late Stream<QuerySnapshot> _messagesStream;
+  Timer? _messageSnapshotFallbackTimer;
+  List<DocumentSnapshot>? _messageFallbackDocs;
+  bool _messageSnapshotSeen = false;
+  bool _messageFallbackBusy = false;
+  String? _messageLoadError;
+  _HistoryPreparationStage _duoPreparationStage = _HistoryPreparationStage.idle;
+  String _duoPreparationDetail = '';
+  int _duoPreparationGeneration = 0;
+  static const Duration _duoPreparationTimeout = Duration(minutes: 4);
+
+  /// 🔎 [계측 전용] 이 State 한 벌을 가리키는 값. 화면이 갈아 끼워지면
+  ///   달라진다 — `!mounted` 탈출이 "죽은 판"에서 난 것인지 가리는 열쇠다.
+  late final String _instanceId = identityHashCode(this).toRadixString(16);
+
+  /// 🔎 [계측 전용] dispose 뒤에는 `widget`을 건드리지 않으려고 미리 잡아 둔다.
+  String _historyId = '';
 
   /// 상단 제목에 쓸 표시명. **저장값은 절대 건드리지 않는다** — `room_name`은
   /// 과거 문서의 분류 키라, 히스토리 필터와 모드 추론(`_inferHistoryMode`)이
@@ -467,6 +495,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   @override
   void initState() {
     super.initState();
+    _historyId = widget.historyDoc.id;
+    debugPrint('[HISTORY-LIFECYCLE] init instance=$_instanceId '
+        'history=$_historyId');
     _blinkController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 900),
@@ -476,6 +507,11 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     );
     audioPlayer = AudioPlayer();
     appAudioRecorder = AudioRecorder();
+    // 같은 query라도 snapshots()를 build 안에서 다시 부르면 매번 다른 Stream
+    // 객체가 생긴다. 종료 직후 복원/canonical setState가 이어지는 동안
+    // StreamBuilder가 계속 재구독해 첫 이벤트를 놓치던 실기기 사례가 있었다.
+    // 방 하나가 살아 있는 동안 구독도 한 벌만 유지한다.
+    _messagesStream = _newMessagesStream();
     _remoteConfigFuture = _fetchRemoteConfig();
     _fetchRoomData();
     _initPermissions();
@@ -503,6 +539,9 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   // 📦 [Box 8: 라이프사이클 - dispose]
   @override
   void dispose() {
+    debugPrint('[HISTORY-LIFECYCLE] dispose instance=$_instanceId '
+        'history=$_historyId stage=${_duoPreparationStage.name} '
+        'generation=$_duoPreparationGeneration');
     BillingTicker.instance.balanceExhausted.removeListener(_onBalanceExhausted);
     clearBillingIdle();
     _utteranceSafetyTimer?.cancel();
@@ -512,6 +551,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
     _editController.dispose();
     _echoingOverlayTimer?.cancel();
     _nativeEnglishRevealTimer?.cancel();
+    _messageSnapshotFallbackTimer?.cancel();
     // 🎤 [P3-SPEAK] dispose에서 async setState가 나오지 않게 회차를 먼저
     //   무효화하고, 소유한 재생·타이머·임시 녹음을 직접 접는다.
     _p3Generation++;
@@ -658,39 +698,378 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   }
 
   // 📦 [Box 9: 헬퍼 - 룸 데이터 및 원격 키 호출]
-  Future<void> _fetchRoomData() async {
+  Stream<QuerySnapshot> _newMessagesStream() => widget.historyDoc
+      .collection('messages')
+      .orderBy('created_at', descending: false)
+      .snapshots();
+
+  Query _messagesQuery() => widget.historyDoc
+      .collection('messages')
+      .orderBy('created_at', descending: false);
+
+  /// Firestore listener가 종료 직후 첫 이벤트를 주지 않는 경우를 위한 안전망.
+  /// 방금 저장한 대화는 로컬 Firestore 캐시에 있으므로 먼저 캐시를 읽고,
+  /// 캐시가 비었을 때만 서버를 짧게 확인한다. 이 경로는 데이터를 고치지 않는다.
+  void _armMessageSnapshotFallback() {
+    if (_messageSnapshotSeen ||
+        _messageFallbackDocs != null ||
+        _messageSnapshotFallbackTimer?.isActive == true ||
+        _messageFallbackBusy) {
+      return;
+    }
+    _messageSnapshotFallbackTimer = Timer(const Duration(seconds: 2), () {
+      unawaited(_loadMessagesFallback());
+    });
+  }
+
+  Future<void> _loadMessagesFallback() async {
+    if (!mounted || _messageSnapshotSeen || _messageFallbackBusy) return;
+    _messageFallbackBusy = true;
     try {
-      // 🔍 [ORIGIN-RESTORE] 대화방이 나가면서 걸어 둔 복원이 아직 돌고 있으면
-      //   여기서 기다린다. **원문을 읽기 전에 기다려야 한다** — 복원 전 글을
-      //   먼저 그리면 사용자가 검수하는 동안 글자가 발밑에서 바뀐다.
-      //   대개는 이미 끝나 있어 즉시 돌아온다.
-      await OriginRestorationRunner.instance
-          .awaitIfRunning(widget.historyDoc.id);
+      var snap = await _messagesQuery()
+          .get(const GetOptions(source: Source.cache))
+          .timeout(const Duration(seconds: 2));
+      if (snap.docs.isEmpty) {
+        snap =
+            await _messagesQuery().get().timeout(const Duration(seconds: 10));
+      }
+      if (!mounted || _messageSnapshotSeen) return;
+      debugPrint(
+          '[HISTORY-STREAM] fallback_loaded history=${widget.historyDoc.id} '
+          'count=${snap.docs.length}');
+      setState(() {
+        _messageFallbackDocs = List<DocumentSnapshot>.of(snap.docs);
+        _messageLoadError = null;
+      });
+    } catch (error) {
+      if (!mounted || _messageSnapshotSeen) return;
+      debugPrint(
+          '[HISTORY-STREAM] fallback_failed history=${widget.historyDoc.id} '
+          'reason=${error.runtimeType}');
+      setState(() => _messageLoadError = '대화 기록을 불러오지 못했습니다.');
+    } finally {
+      _messageFallbackBusy = false;
+    }
+  }
+
+  void _retryMessageLoad() {
+    _messageSnapshotFallbackTimer?.cancel();
+    setState(() {
+      _messageSnapshotSeen = false;
+      _messageFallbackDocs = null;
+      _messageLoadError = null;
+      _messagesStream = _newMessagesStream();
+    });
+    _armMessageSnapshotFallback();
+  }
+
+  Future<void> _fetchRoomData() async {
+    debugPrint('[HISTORY-PREP] step=fetch_room_data_enter '
+        'history=$_historyId instance=$_instanceId '
+        'generation=$_duoPreparationGeneration');
+    try {
+      await _remoteConfigFuture;
       var doc = await widget.historyDoc.get();
       if (doc.exists && doc.data() != null) {
         var data = doc.data() as Map<String, dynamic>;
-        _cachedRoomData = data;
-        roomName = data['room_name'] ?? "History Master";
-        // 세션 생성 당시 보존된 언어 식별값(있으면 동일 언어 판정에 사용)
-        _sessionNativeLang = data['native_lang'] as String?;
-        _sessionTargetLang = data['target_lang'] as String?;
-        // 🧩 [CANONICAL] 이 방이 듀오 통화였다면 공유 결과를 한 번 맞춰 본다.
-        //   통화가 끝나는 순간 못 옮겼어도(앱을 먼저 껐거나 결과가 늦게
-        //   완성됐거나) 방을 열 때 여기서 따라잡는다. 같은 판이면 아무것도
-        //   하지 않는다.
-        unawaited(_syncDuoCanonical(data));
+        _cacheRoomData(data);
+
+        final String duoRoomId =
+            (data[kDuoRoomIdField] ?? '').toString().trim();
+        if (duoRoomId.isNotEmpty) {
+          // Duo 상단의 SR은 통화를 끝내지 않고 공부방을 잠깐 보는 문이다.
+          // 진행 중인 세션에는 canonical이 아직 만들어질 수 없으므로 그 완료를
+          // 기다리면 timeout만 난다. 이때는 저장된 실시간 대화만 즉시 보여 주고,
+          // 실제 종료된 세션에만 아래 preparation을 적용한다.
+          final duoSession = await duoSessionRef(duoRoomId).get();
+          final bool sessionEnded =
+              duoSession.data()?[kDuoEndedAtField] != null;
+          if (!sessionEnded) {
+            debugPrint('[HISTORY-PREP] history=${widget.historyDoc.id} '
+                'stage=ready reason=active_duo_peek');
+            if (mounted) {
+              setState(() {
+                isLoadingRoom = false;
+                _duoPreparationStage = _HistoryPreparationStage.ready;
+                _duoPreparationDetail = '';
+              });
+            }
+            _scheduleMissingTargetGeneration(_cachedDocs);
+            return;
+          }
+          if (mounted) {
+            setState(() {
+              isLoadingRoom = false;
+              _duoPreparationStage = _HistoryPreparationStage.pending;
+              _duoPreparationDetail = '대화를 정확하게 정리하고 있습니다…';
+            });
+          }
+          unawaited(_prepareDuoHistory(data));
+          return;
+        }
+
+        // 다른 모드의 기존 복원 순서는 유지하되 runner 대기는 유한하다.
+        final bool restorationWasRunning =
+            OriginRestorationRunner.instance.isRunning(widget.historyDoc.id);
+        await OriginRestorationRunner.instance
+            .awaitIfRunning(widget.historyDoc.id);
+        if (restorationWasRunning) {
+          doc = await widget.historyDoc.get();
+          if (doc.exists && doc.data() != null) {
+            data = doc.data() as Map<String, dynamic>;
+            _cacheRoomData(data);
+          }
+        }
         _scheduleMissingTargetGeneration(_cachedDocs);
       }
     } catch (e) {
-      debugPrint("[fetchRoomData] $e");
+      debugPrint('[fetchRoomData] $e');
     }
     if (mounted) setState(() => isLoadingRoom = false);
   }
 
+  void _setDuoPreparation(
+    int generation,
+    _HistoryPreparationStage stage,
+    String detail,
+  ) {
+    // 🔎 [계측] 판단보다 먼저 찍는다. 조용히 사라지는 return이 둘이라
+    //   어느 쪽이 걸렸는지 로그 없이는 확정할 수 없었다.
+    debugPrint('[HISTORY-PREP-CALL] history=$_historyId '
+        'requestedStage=${stage.name} argGeneration=$generation '
+        'currentGeneration=$_duoPreparationGeneration mounted=$mounted '
+        'instance=$_instanceId');
+    if (!mounted) {
+      debugPrint('[HISTORY-PREP-DROP] reason=unmounted history=$_historyId '
+          'requestedStage=${stage.name} argGeneration=$generation '
+          'currentGeneration=$_duoPreparationGeneration mounted=false '
+          'instance=$_instanceId');
+      return;
+    }
+    if (generation != _duoPreparationGeneration) {
+      debugPrint('[HISTORY-PREP-DROP] reason=generation_mismatch '
+          'history=$_historyId requestedStage=${stage.name} '
+          'argGeneration=$generation '
+          'currentGeneration=$_duoPreparationGeneration mounted=true '
+          'instance=$_instanceId');
+      return;
+    }
+    setState(() {
+      _duoPreparationStage = stage;
+      _duoPreparationDetail = detail;
+    });
+    debugPrint('[HISTORY-PREP] history=${widget.historyDoc.id} '
+        'stage=${stage.name} detail=$detail instance=$_instanceId');
+  }
+
+  Future<void> _prepareDuoHistory(Map<String, dynamic> initialRoom) async {
+    final int previousGeneration = _duoPreparationGeneration;
+    final int generation = ++_duoPreparationGeneration;
+    debugPrint('[HISTORY-GEN] old=$previousGeneration new=$generation '
+        'reason=prepare_duo_history history=$_historyId '
+        'instance=$_instanceId');
+    final String roomId =
+        (initialRoom[kDuoRoomIdField] ?? '').toString().trim();
+    if (roomId.isEmpty) return;
+    var restorationCompletedByRunner = false;
+
+    try {
+      await (() async {
+        _setDuoPreparation(
+          generation,
+          _HistoryPreparationStage.canonicalBuilding,
+          '대화 순서와 문맥을 정리하고 있습니다…',
+        );
+        await _syncDuoCanonical(initialRoom);
+        if (!mounted || generation != _duoPreparationGeneration) return;
+
+        _setDuoPreparation(
+          generation,
+          _HistoryPreparationStage.canonicalApplied,
+          '정리된 대화를 원문과 맞추고 있습니다…',
+        );
+        var refreshed = await widget.historyDoc.get();
+        var freshData = refreshed.data();
+        if (freshData is Map<String, dynamic>) _cacheRoomData(freshData);
+        final Map<String, dynamic>? probeAfterCanonical =
+            freshData is Map<String, dynamic> ? freshData : null;
+        debugPrint('[HISTORY-PREP-STATE] step=after_canonical '
+            'history=$_historyId instance=$_instanceId '
+            'generation=$generation '
+            'restoreState=${probeAfterCanonical?[kOriginRestoreStateField]} '
+            'restoreAttempts=${probeAfterCanonical?[kOriginRestoreAttemptsField]} '
+            'canonicalApplied='
+            '${probeAfterCanonical?[kDuoCanonicalAppliedAtField] != null} '
+            'draft=$_historyIsDraft '
+            'shouldRestore=${shouldRunRestoration(probeAfterCanonical)}');
+
+        if (_historyIsDraft &&
+            freshData is Map<String, dynamic> &&
+            shouldRunRestoration(freshData)) {
+          if (_apiKey.isEmpty) {
+            throw StateError('origin_restore_api_key_missing');
+          }
+          _recoverOriginRestoration(caller: 'prepare_restoring');
+          _setDuoPreparation(
+            generation,
+            _HistoryPreparationStage.restoring,
+            '원문을 다시 확인하고 있습니다…',
+          );
+          debugPrint('[HISTORY-RESTORE-WAIT] begin history=$_historyId '
+              'instance=$_instanceId generation=$generation '
+              'currentGeneration=$_duoPreparationGeneration mounted=$mounted '
+              'runnerRunning='
+              '${OriginRestorationRunner.instance.isRunning(_historyId)} '
+              'restoreState=${freshData[kOriginRestoreStateField]}');
+          final wait = await OriginRestorationRunner.instance.awaitIfRunning(
+            widget.historyDoc.id,
+            timeout: OriginRestorationRunner.waitTimeout,
+          );
+          debugPrint('[HISTORY-RESTORE-WAIT] completed history=$_historyId '
+              'instance=$_instanceId generation=$generation '
+              'currentGeneration=$_duoPreparationGeneration mounted=$mounted '
+              'result=${wait.name} runnerRunning='
+              '${OriginRestorationRunner.instance.isRunning(_historyId)}');
+          if (wait == OriginRestorationWaitResult.timedOut) {
+            throw TimeoutException('origin restoration wait timed out');
+          }
+          if (wait == OriginRestorationWaitResult.failed) {
+            throw StateError('origin restoration failed');
+          }
+          if (wait == OriginRestorationWaitResult.completed) {
+            // The runner completes only after its Firestore completion write has
+            // succeeded. A second get/poll here can itself wait on networking and
+            // leave the first visit stuck even though restoration is finished.
+            restorationCompletedByRunner = true;
+          } else {
+            // The runner may have completed between start() and registration.
+            // Only that race still needs the persisted terminal-state check.
+            await _awaitDuoRestorationTerminal();
+          }
+        }
+
+        if (!restorationCompletedByRunner) {
+          refreshed = await widget.historyDoc.get();
+          freshData = refreshed.data();
+          if (freshData is Map<String, dynamic>) {
+            _cacheRoomData(freshData);
+            if (_historyIsDraft &&
+                freshData[kOriginRestoreStateField] == kOriginRestoreFailed) {
+              throw StateError('origin restoration failed');
+            }
+            if (_historyIsDraft && shouldRunRestoration(freshData)) {
+              throw StateError('origin restoration incomplete');
+            }
+          }
+        }
+      }())
+          .timeout(_duoPreparationTimeout);
+
+      debugPrint('[HISTORY-RESTORE-WAIT] before-ready history=$_historyId '
+          'instance=$_instanceId generation=$generation '
+          'currentGeneration=$_duoPreparationGeneration mounted=$mounted '
+          'completedByRunner=$restorationCompletedByRunner');
+      if (!mounted || generation != _duoPreparationGeneration) return;
+      _setDuoPreparation(
+        generation,
+        _HistoryPreparationStage.ready,
+        '',
+      );
+      debugPrint('[HISTORY-RESTORE-WAIT] after-ready history=$_historyId '
+          'instance=$_instanceId generation=$generation '
+          'stage=${_duoPreparationStage.name}');
+      _scheduleMissingTargetGeneration(_cachedDocs);
+    } on TimeoutException catch (error) {
+      debugPrint('[HISTORY-RESTORE-WAIT] exception kind=timeout '
+          'history=$_historyId instance=$_instanceId generation=$generation '
+          'currentGeneration=$_duoPreparationGeneration mounted=$mounted');
+      debugPrint('[HISTORY-PREP] timeout history=${widget.historyDoc.id} '
+          'room=$roomId reason=$error');
+      _setDuoPreparation(
+        generation,
+        _HistoryPreparationStage.timedOut,
+        '대화 정리가 예상보다 오래 걸리고 있습니다.',
+      );
+    } catch (error) {
+      debugPrint('[HISTORY-RESTORE-WAIT] exception kind=failed '
+          'history=$_historyId instance=$_instanceId generation=$generation '
+          'currentGeneration=$_duoPreparationGeneration mounted=$mounted '
+          'reason=${error.runtimeType}');
+      debugPrint('[HISTORY-PREP] failed history=${widget.historyDoc.id} '
+          'room=$roomId reason=${error.runtimeType}');
+      _setDuoPreparation(
+        generation,
+        _HistoryPreparationStage.failed,
+        '대화를 정리하지 못했습니다.',
+      );
+    }
+  }
+
+  Future<void> _retryDuoPreparation() async {
+    if (_duoPreparationStage != _HistoryPreparationStage.failed &&
+        _duoPreparationStage != _HistoryPreparationStage.timedOut) {
+      return;
+    }
+    final doc = await widget.historyDoc.get();
+    final data = doc.data();
+    if (data is! Map<String, dynamic>) return;
+    _cacheRoomData(data);
+    _setDuoPreparation(
+      _duoPreparationGeneration,
+      _HistoryPreparationStage.pending,
+      '대화를 정확하게 정리하고 있습니다…',
+    );
+    unawaited(_prepareDuoHistory(data));
+  }
+
+  void _cacheRoomData(Map<String, dynamic> data) {
+    _cachedRoomData = data;
+    roomName = data['room_name'] ?? 'History Master';
+    _sessionNativeLang = data['native_lang'] as String?;
+    _sessionTargetLang = data['target_lang'] as String?;
+  }
+
+  /// 종료 직후 canonical GPT가 아직 도는 짧은 구간을 기다린다. 실패 상태나
+  /// 상한에 닿으면 raw Origin으로 여는 fail-open 동작은 그대로다.
+  Future<void> _awaitDuoCanonicalReady(String roomId) async {
+    final snap = await duoCanonicalRef(roomId).snapshots().firstWhere((event) {
+      final status = (event.data()?['status'] ?? '').toString();
+      return status == kCanonicalReady || status == kCanonicalFailed;
+    }).timeout(const Duration(seconds: 75));
+    final status = (snap.data()?['status'] ?? '').toString();
+    if (status != kCanonicalReady) {
+      throw StateError('duo canonical $status');
+    }
+  }
+
   /// 공유 결과를 내 방에 맞춘다. 옛 방(`duo_room_id` 없음)은 그냥 지나간다.
+  Future<void> _awaitDuoRestorationTerminal() async {
+    final deadline = DateTime.now().add(OriginRestorationRunner.waitTimeout);
+    while (DateTime.now().isBefore(deadline)) {
+      final snap = await widget.historyDoc.get();
+      final data = snap.data();
+      if (data is Map<String, dynamic>) {
+        _cacheRoomData(data);
+        if (data[kOriginRestoreStateField] == kOriginRestoreFailed) {
+          throw StateError('origin restoration failed');
+        }
+        if (!shouldRunRestoration(data)) return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
+    throw TimeoutException('origin restoration terminal state timed out');
+  }
+
   Future<void> _syncDuoCanonical(Map<String, dynamic> room) async {
     final String roomId = (room[kDuoRoomIdField] ?? '').toString().trim();
     if (roomId.isEmpty) return;
+    debugPrint('[HISTORY-PREP-STATE] step=canonical_begin history=$_historyId '
+        'instance=$_instanceId room=$roomId '
+        'canonicalApplied=${room[kDuoCanonicalAppliedAtField] != null} '
+        'canonicalVersion=${room[kDuoCanonicalVersionField]}');
+    if (room[kDuoCanonicalAppliedAtField] == null) {
+      await _awaitDuoCanonicalReady(roomId);
+    }
     final int? applied = (room[kDuoCanonicalVersionField] as num?)?.toInt();
     final bool changed = await applyDuoCanonicalToHistory(
       historyRef: widget.historyDoc.withConverter<Map<String, dynamic>>(
@@ -699,19 +1078,26 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       ),
       roomId: roomId,
       appliedVersion: applied,
-      // 🛡️ 확정한 방은 정돈이 한 줄도 못 건드린다. 이미 읽어 둔 문서를
-      //   그대로 넘겨 안에서 한 번 더 읽지 않게 한다.
       roomData: room,
     );
-    if (changed && mounted) {
-      // 줄이 바뀌었으니 배울글을 다시 살펴야 한다. 스트림이 새 문서를
-      // 실어 오면 그때 빠진 타겟을 만든다.
+    if (changed) {
       debugPrint('[HISTORY] canonical_applied room=$roomId');
     }
-    // 🔍 [ORIGIN-RESTORE] **정돈이 끝난 뒤에야 복원이 시작된다.** 먼저 돌면
-    //   곧 canonical이 덮을 글을 고치게 된다. 여기서는 내 마이크에서 나온
-    //   줄(`pcm_key`가 있는 줄)만 손대고, 공유 canonical은 건드리지 않는다.
-    if (mounted) _recoverOriginRestoration();
+
+    // apply 직후 반드시 서버 문서를 다시 읽는다. 인자로 받은 room은
+    // duo_canonical_applied_at=null인 옛 스냅샷이므로 그대로 복원 조건에 쓰면
+    // 첫 진입에서는 skip되고 재입장에서만 도는 버그가 생긴다.
+    final refreshed = await widget.historyDoc.get();
+    final freshData = refreshed.data();
+    if (freshData is Map<String, dynamic>) {
+      _cacheRoomData(freshData);
+    }
+
+    // Duo 복원은 canonical 뒤에서 시작하며, _fetchRoomData가 이 작업을 기다린다.
+    debugPrint('[HISTORY-PREP-STATE] step=canonical_end history=$_historyId '
+        'instance=$_instanceId room=$roomId mounted=$mounted '
+        'generation=$_duoPreparationGeneration');
+    if (mounted) _recoverOriginRestoration(caller: 'sync_canonical');
   }
 
   /// 🔍 [ORIGIN-RESTORE] 대화방에서 끝내지 못한 복원을 이어 받는다.
@@ -723,23 +1109,50 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
   /// ⚠️ **기다리지 않는다.** 이미 화면이 떠 있는데 10초를 세워 두는 것보다,
   /// 걸어 두고 다음에 열 때 반영되는 편이 낫다. 사용자가 그 사이 확정해
   /// 버리면 그 방은 사람이 검수한 원문으로 남고, 그것도 옳은 결말이다.
-  void _recoverOriginRestoration() {
+  void _recoverOriginRestoration({String caller = 'unknown'}) {
     final data = _cachedRoomData;
-    if (data == null || _apiKey.isEmpty) return;
-    if (!_historyIsDraft) return;
-    if (!shouldRunRestoration(data)) return;
+    if (data == null || _apiKey.isEmpty) {
+      debugPrint('[HISTORY-RESTORE-WAIT] recover skipped caller=$caller '
+          'reason=${data == null ? 'no_room_data' : 'no_api_key'} '
+          'history=$_historyId instance=$_instanceId');
+      return;
+    }
+    if (!_historyIsDraft) {
+      debugPrint('[HISTORY-RESTORE-WAIT] recover skipped caller=$caller '
+          'reason=not_draft history=$_historyId instance=$_instanceId');
+      return;
+    }
+    if (!shouldRunRestoration(data)) {
+      debugPrint('[HISTORY-RESTORE-WAIT] recover skipped caller=$caller '
+          'reason=already_done history=$_historyId instance=$_instanceId '
+          'restoreState=${data[kOriginRestoreStateField]}');
+      return;
+    }
     // 🧩 듀오 방은 공유 정돈이 내 줄에 적용된 뒤에만 손댄다. 아직이면
     //   `_syncDuoCanonical`이 끝나고 다시 부른다.
     if ((data[kDuoRoomIdField] ?? '').toString().trim().isNotEmpty &&
         data[kDuoCanonicalAppliedAtField] == null) {
+      debugPrint('[HISTORY-RESTORE-WAIT] recover skipped caller=$caller '
+          'reason=canonical_not_applied history=$_historyId '
+          'instance=$_instanceId');
       return;
     }
-    if (OriginRestorationRunner.instance.isRunning(widget.historyDoc.id)) return;
+    if (OriginRestorationRunner.instance.isRunning(widget.historyDoc.id)) {
+      debugPrint('[HISTORY-RESTORE-WAIT] recover skipped caller=$caller '
+          'reason=already_running history=$_historyId instance=$_instanceId');
+      return;
+    }
+    debugPrint('[HISTORY-RESTORE-WAIT] recover start caller=$caller '
+        'history=$_historyId instance=$_instanceId '
+        'generation=$_duoPreparationGeneration');
     OriginRestorationRunner.instance.start(
       roomRef: widget.historyDoc,
       apiKey: _apiKey,
       sourceName: (data['native_lang'] ?? 'Korean').toString(),
       targetLanguage: (data['target_lang'] ?? 'English').toString(),
+      // 임시 Target은 Duo Direct에서만 I/you/제3자·행위자 모순을 찾는다.
+      // 이름·문체·숫자 교정기는 아니며 저장되지 않는다.
+      targetSubjectOnly: (data[kDuoModeField] ?? '').toString() == 'direct',
     );
   }
 
@@ -760,7 +1173,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
           _apiKey = remoteConfig.getString('OpenAIAPIKey');
           _deepgramKey = remoteConfig.getString('DeepgramAPIKey');
         });
-        _recoverOriginRestoration();
+        _recoverOriginRestoration(caller: 'remote_config');
         _scheduleMissingTargetGeneration(_cachedDocs);
       }
     } catch (e) {
@@ -1466,10 +1879,10 @@ Reply as JSON: {"original": "<corrected $sourceName line>", "target": "<$targetL
           isPracticeMode = true;
           _phase = ShadowingPhase.studySelect;
           _mySpeech = storedMySpeech;
-          _nativeEnglish =
-              _canReuseStoredNativeEnglish(storedNativeEnglish, storedMySpeech)
-                  ? storedNativeEnglish
-                  : '';
+          _nativeEnglish = _canReuseStoredNativeEnglish(
+                  data, storedNativeEnglish, storedMySpeech)
+              ? storedNativeEnglish
+              : '';
           _mySpeechError = null;
           _nativeEnglishError = null;
           currentIndex = 0;
@@ -3137,12 +3550,87 @@ RULES — follow exactly:
   }
 
   // 📦 [Box 19: UI 메인 - Scaffold 및 분기]
+  Widget _buildDuoPreparationScreen() {
+    final bool terminal =
+        _duoPreparationStage == _HistoryPreparationStage.failed ||
+            _duoPreparationStage == _HistoryPreparationStage.timedOut;
+    return Scaffold(
+      backgroundColor: const Color(0xFF121212),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF121212),
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white70),
+          onPressed: () => Navigator.maybePop(context),
+        ),
+        title: Text(
+          _displayRoomTitle(roomName),
+          style: const TextStyle(color: Colors.white, fontSize: 17),
+        ),
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (!terminal)
+                const SizedBox(
+                  width: 30,
+                  height: 30,
+                  child: CircularProgressIndicator(strokeWidth: 2.5),
+                )
+              else
+                Icon(
+                  _duoPreparationStage == _HistoryPreparationStage.timedOut
+                      ? Icons.schedule
+                      : Icons.error_outline,
+                  color: Colors.white54,
+                  size: 34,
+                ),
+              const SizedBox(height: 20),
+              Text(
+                _duoPreparationDetail,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                terminal
+                    ? '완성되지 않은 원문은 표시하지 않습니다.'
+                    : '완료되면 이 화면에서 대화가 자동으로 열립니다.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white54, fontSize: 13),
+              ),
+              if (terminal) ...[
+                const SizedBox(height: 22),
+                OutlinedButton(
+                  onPressed: _retryDuoPreparation,
+                  child: const Text('다시 시도'),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (isLoadingRoom) {
       return const Scaffold(
           backgroundColor: Color(0xFF121212),
           body: Center(child: CircularProgressIndicator()));
+    }
+
+    if (_duoPreparationStage != _HistoryPreparationStage.idle &&
+        _duoPreparationStage != _HistoryPreparationStage.ready) {
+      return _buildDuoPreparationScreen();
     }
 
     if (_phase == ShadowingPhase.studySelect) {
@@ -3229,15 +3717,40 @@ RULES — follow exactly:
                 _buildTopBar(),
                 Expanded(
                     child: StreamBuilder<QuerySnapshot>(
-                  stream: widget.historyDoc
-                      .collection('messages')
-                      .orderBy('created_at', descending: false)
-                      .snapshots(),
+                  stream: _messagesStream,
                   builder: (context, snapshot) {
-                    if (!snapshot.hasData) {
+                    if (snapshot.hasData) {
+                      _messageSnapshotSeen = true;
+                      _messageSnapshotFallbackTimer?.cancel();
+                      _messageLoadError = null;
+                    } else {
+                      _armMessageSnapshotFallback();
+                    }
+                    final rawDocs = snapshot.hasData
+                        ? snapshot.data!.docs
+                        : _messageFallbackDocs;
+                    if (rawDocs == null) {
+                      if (_messageLoadError != null || snapshot.hasError) {
+                        return Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _messageLoadError ?? '대화 기록을 불러오지 못했습니다.',
+                                style: const TextStyle(color: Colors.white70),
+                              ),
+                              const SizedBox(height: 14),
+                              OutlinedButton(
+                                onPressed: _retryMessageLoad,
+                                child: const Text('다시 불러오기'),
+                              ),
+                            ],
+                          ),
+                        );
+                      }
                       return const Center(child: CircularProgressIndicator());
                     }
-                    final docs = _visibleMessages(snapshot.data!.docs);
+                    final docs = _visibleMessages(rawDocs);
                     WidgetsBinding.instance.addPostFrameCallback((_) {
                       if (mounted) {
                         _cachedDocs = docs;
@@ -3803,8 +4316,7 @@ RULES — follow exactly:
         color: const Color(0xFF9CA3AF),
         fontSize: 12 * _fontScale,
         fontStyle: FontStyle.italic,
-        decoration:
-            editable ? TextDecoration.underline : TextDecoration.none,
+        decoration: editable ? TextDecoration.underline : TextDecoration.none,
         decorationColor: const Color(0xFF6B7280),
       ),
     );
@@ -3841,15 +4353,14 @@ RULES — follow exactly:
           children: [
             Text(
               '이 줄을 영어로 옮길 때 주어로 씁니다.\n말한 내용은 바뀌지 않습니다.',
-              style: TextStyle(
-                  color: Colors.white70, fontSize: 13 * _fontScale),
+              style:
+                  TextStyle(color: Colors.white70, fontSize: 13 * _fontScale),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: controller,
               autofocus: true,
-              style:
-                  TextStyle(color: Colors.white, fontSize: 15 * _fontScale),
+              style: TextStyle(color: Colors.white, fontSize: 15 * _fontScale),
               decoration: const InputDecoration(
                 hintText: '예: 그 학생은',
                 hintStyle: TextStyle(color: Colors.white38),
@@ -3860,12 +4371,11 @@ RULES — follow exactly:
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child:
-                  const Text('취소', style: TextStyle(color: Colors.white54))),
+              child: const Text('취소', style: TextStyle(color: Colors.white54))),
           TextButton(
               onPressed: () => Navigator.pop(ctx, controller.text),
-              child: const Text('저장',
-                  style: TextStyle(color: Color(0xFF60A5FA)))),
+              child:
+                  const Text('저장', style: TextStyle(color: Color(0xFF60A5FA)))),
         ],
       ),
     );
@@ -4183,6 +4693,15 @@ RULES — follow exactly:
     if (!canFinalizeHistory(_cachedRoomData)) return;
     setState(() => _isFinalizing = true);
     try {
+      // 버튼을 누른 순간 마지막 복원이 돌고 있어도 먼저 끝낸다. 이후부터는
+      // Final Canonical Origin이 잠겨 더는 AI가 원문을 바꿀 수 없다.
+      await OriginRestorationRunner.instance
+          .awaitIfRunning(widget.historyDoc.id);
+      final refreshed = await widget.historyDoc.get();
+      final freshData = refreshed.data();
+      if (freshData is Map<String, dynamic>) {
+        _cacheRoomData(freshData);
+      }
       await widget.historyDoc.update(
           historyFinalizePatch(finalizedAt: FieldValue.serverTimestamp()));
       final next = Map<String, dynamic>.from(
@@ -4278,7 +4797,7 @@ RULES — follow exactly:
   // ══════════════════════════════════════════════════════════════════
   // 📦 [Box 22-B: 학습 경로 고르는 자리 — History Study의 첫 화면]
   //
-  //   PRACTICE | CLEAR & EASY | NATURAL & POLISHED 셋을 나란히 둔다.
+  //   PRACTICE | CLEAR & EASY | NATURAL & SHARP 셋을 나란히 둔다.
   //   뒤 둘의 저장 칸은 여전히 `my_speech` / `native_english`다 —
   //   **화면 이름만 화자 라벨로 바뀌었다.**
   //
@@ -4369,9 +4888,9 @@ RULES — follow exactly:
                       _buildStudyPathCard(
                         titleTop: hidePersona
                             ? ""
-                            : "Anderson Cooper–style Polished Conversational English",
-                        title: "Natural & Polished",
-                        subtitle: "같은 생각을 미국인이 처음부터 영어로",
+                            : "Trevor Noah–style Natural Conversational English",
+                        title: "Natural & Sharp",
+                        subtitle: "같은 생각을 맥락과 연결로 자연스럽게",
                         icon: Icons.auto_awesome,
                         color: const Color(0xFFFBBF24),
                         preview: _nativeEnglish,
@@ -5274,7 +5793,7 @@ RULES — follow exactly:
   // ══════════════════════════════════════════════════════════════════
 
   /// 훈련이 대상으로 삼는 문장. CLEAR & EASY(`my_speech`)와
-  /// NATURAL & POLISHED(`native_english`) 두 벌을 각각 같은 Speaking
+  /// NATURAL & SHARP(`native_english`) 두 벌을 각각 같은 Speaking
   /// Practice 흐름으로 연다.
   ///
   /// ⚠️ **없으면 빈 문자열이다.** 고른 쪽이 비었다고 다른 쪽을 대신 걸지
@@ -5290,7 +5809,7 @@ RULES — follow exactly:
 
   String _p3VariantLabel(SentenceVariant variant) =>
       variant == SentenceVariant.nativeEnglish
-          ? 'NATURAL & POLISHED'
+          ? 'NATURAL & SHARP'
           : 'CLEAR & EASY';
 
   /// 🚧 Shadow 여유. **말하는 속도를 바꾸는 게 아니다** — AI의 발음·억양·속도는
@@ -6967,7 +7486,7 @@ RULES — follow exactly:
       _kSpeechPracticeModes.contains(_normalizeHistoryMode(mode));
 
   /// 🇬🇧 [BRITISH-TITLE] British를 고른 방에서는 카드 윗줄의 **미국 인물
-  /// 이름을 감춘다.** 영국 영어를 고른 사람에게 Larry King·Anderson Cooper를
+  /// 이름을 감춘다.** 영국 영어를 고른 사람에게 Larry King·Trevor Noah를
   /// 내걸면 카드가 제 내용과 어긋나 보인다(실장님 지시, 2026-09-08).
   ///
   /// ⚠️ **표시만 접는다. 기능은 그대로다.** 두 페르소나의 speaking pattern은
@@ -6986,6 +7505,7 @@ RULES — follow exactly:
   /// My English는 대화를 seed로 삼아 새로 짓는 확장 스피치라, 두 글은 같은
   /// 칸에 들어 있어도 전혀 다른 물건이다. 판을 올려 옛 글을 안 읽는다.
   static const String _kSpeechSchemaVersion = 'my_english_v2';
+  static const String _kNativeEnglishSchemaVersion = 'natural_sharp_trevor_v1';
 
   /// 저장된 MY ENGLISH를 그대로 써도 되는가.
   ///
@@ -7016,9 +7536,17 @@ RULES — follow exactly:
   ///
   /// 이 카드는 언제나 영어다. 한글이 섞여 있으면 만들다 만 값이라 버린다.
   /// 두 카드가 같은 글자여도 버린다 — 견줄 것이 없으면 배울 것도 없다.
-  bool _canReuseStoredNativeEnglish(String nativeEnglish, String mySpeech) {
+  bool _canReuseStoredNativeEnglish(
+    Map<String, dynamic>? data,
+    String nativeEnglish,
+    String mySpeech,
+  ) {
     final text = nativeEnglish.trim();
     if (text.isEmpty) return false;
+    if (_historyString(data, 'native_english_schema_version') !=
+        _kNativeEnglishSchemaVersion) {
+      return false;
+    }
     if (_hangul.hasMatch(text)) return false;
     if (text == mySpeech.trim()) return false;
     return true;
@@ -7185,7 +7713,9 @@ RULES — follow exactly:
         setState(() {
           _mySpeech = mySpeech;
           _nativeEnglish =
-              _canReuseStoredNativeEnglish(stored, mySpeech) ? stored : '';
+              _canReuseStoredNativeEnglish(roomData, stored, mySpeech)
+                  ? stored
+                  : '';
         });
         return true;
       }
@@ -7219,6 +7749,7 @@ RULES — follow exactly:
         await widget.historyDoc.update(<String, dynamic>{
           'my_speech': mySpeech,
           'native_english': FieldValue.delete(),
+          'native_english_schema_version': FieldValue.delete(),
           'speech_schema_version': _kSpeechSchemaVersion,
           'speech_generated_at': FieldValue.serverTimestamp(),
           'speech_user_label': labels['userLabel'],
@@ -7285,6 +7816,7 @@ RULES — follow exactly:
       try {
         await widget.historyDoc.update(<String, dynamic>{
           'native_english': text,
+          'native_english_schema_version': _kNativeEnglishSchemaVersion,
           'speech_schema_version': _kSpeechSchemaVersion,
           'has_practice': true,
         });
