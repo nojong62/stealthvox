@@ -35,6 +35,7 @@ import '/custom_code/actions/billing_idle_mixin.dart';
 import 'package:flutter/foundation.dart' as foundation;
 import '/custom_code/services/duo_direct_audio.dart';
 import '/custom_code/services/duo_partner_echo.dart';
+import '/custom_code/services/duo_interpreter_protocol.dart';
 import '/custom_code/services/history_finalize.dart';
 import '/custom_code/services/duo_transcript_gate.dart';
 import '/custom_code/services/duo_stt_ab_probe.dart';
@@ -1609,6 +1610,8 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   DocumentReference? _myHistoryRef;
   DocumentReference? _duoSessionRef;
   StreamSubscription? _partnerJoinedSubscription;
+  String? _interpreterProtocol;
+  Future<String?>? _interpreterProtocolLock;
 
   /// 직접 대화 게스트가 호스트 이탈을 지켜보는 구독. 호스트용
   /// [_partnerJoinedSubscription]과 **따로 둔다** — 같은 필드를 쓰면 한쪽이
@@ -5741,6 +5744,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           'isDuoEnabled': false,
           'isPartnerJoined': false,
           'mode': chosenMode,
+          // This field is present from the room's first write, so a joined
+          // partner can distinguish a protocol-aware host from an old app.
+          // Callable rollout is disabled in this release.
+          if (chosenMode == kDuoModeInterpreter)
+            kDuoHostCallablePcV2Field: duoInterpreterCallableCapability(
+              remoteCandidate: _interpTransportRaw,
+            ),
           if (_isTrialHost) 'trialPreview': true,
           // 상대 화면의 언어쌍 표시용. 첫 메시지 전에도 알아야 하므로
           // 세션 문서로 주고받는다.
@@ -5944,6 +5954,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       await _duoSessionRef!.update({
         'isPartnerJoined': true,
         'partnerUid': guestUid,
+        // Keep the seat claim and capability in one atomic update. A host can
+        // therefore treat joined=true plus a missing field as an old client;
+        // there is no intermediate new-client snapshot to time out.
+        if (sessionMode == kDuoModeInterpreter)
+          kDuoPartnerCallablePcV2Field: duoInterpreterCallableCapability(
+            remoteCandidate: _interpTransportRaw,
+          ),
         'partnerJoinedAt': FieldValue.serverTimestamp(),
         'partnerLang': _myNative(),
         if (_isTrialPreviewRoom)
@@ -5970,6 +5987,28 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
 
       debugPrint(
           '[Duo] _joinAsGuest success — guestUid: $guestUid, roomId: $roomId');
+
+      if (sessionMode == kDuoModeInterpreter) {
+        final Object? locked = data[kDuoInterpreterProtocolField];
+        if (isKnownDuoInterpreterProtocol(locked)) {
+          if (!_adoptInterpreterProtocol(
+              locked as String, 'guest_join_existing')) {
+            return;
+          }
+        } else if (!data.containsKey(kDuoHostCallablePcV2Field)) {
+          // Old hosts cannot lock a protocol. Use the only compatibility
+          // baseline a new client may infer without negotiation.
+          _adoptOldRoomInterpreterProtocol('guest_join_old_host');
+        } else {
+          // A protocol-aware host is the sole writer. Do not start capture
+          // until its room-scoped value is visible.
+          final String? protocol = await _waitForInterpreterProtocol();
+          if (_isExiting || !mounted || protocol == null) return;
+          if (!_adoptInterpreterProtocol(protocol, 'guest_join_locked')) {
+            return;
+          }
+        }
+      }
 
       // 🆕 공유 메시지 채널 리스너 시작 (게스트도 상대=호스트 발화 수신)
       _listenForMessages();
@@ -6068,10 +6107,124 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     });
   }
 
+  void _adoptOldRoomInterpreterProtocol(String reason) {
+    if (_interpreterProtocol != null) return;
+    _interpreterProtocol = kDuoInterpreterProtocolLegacyWebrtcV1;
+    // An old host cannot publish a room lock. The only protocol a new client
+    // may safely infer is the documented compatibility baseline.
+    _interpTransport = kDuoInterpTransportWebrtc;
+    _lgDuo(
+      '[INTERP-PROTOCOL]',
+      'compat_old_room protocol=$kDuoInterpreterProtocolLegacyWebrtcV1 '
+          'transport=$_interpTransport '
+          'reason=$reason',
+    );
+  }
+
+  bool _adoptInterpreterProtocol(String protocol, String reason) {
+    if (!isKnownDuoInterpreterProtocol(protocol)) return false;
+    final String? current = _interpreterProtocol;
+    if (current != null && current != protocol) {
+      _lgDuo(
+        '❌ [INTERP-PROTOCOL]',
+        'lock_changed old=$current new=$protocol reason=$reason',
+      );
+      return false;
+    }
+    _interpreterProtocol = protocol;
+    if (protocol == kDuoInterpreterProtocolCallablePcV2) {
+      // The room can only choose this after a future rollout enables both
+      // capabilities. Refuse it in this release rather than silently running
+      // one side on a different transport.
+      _lgDuo(
+        '❌ [INTERP-PROTOCOL]',
+        'unsupported protocol=$protocol reason=$reason',
+      );
+      if (mounted) setState(() => _interpStartFailed = true);
+      return false;
+    }
+    // A protocol-aware room overrides the phone-local Remote Config choice.
+    // Both peers now enter the exact same verified legacy implementation.
+    _interpTransport = kDuoInterpTransportWebrtc;
+    _lgDuo(
+      '[INTERP-PROTOCOL]',
+      'adopted protocol=$protocol transport=$_interpTransport reason=$reason',
+    );
+    return true;
+  }
+
+  Future<String?> _waitForInterpreterProtocol() async {
+    final ref = _duoSessionRef;
+    if (ref == null) return null;
+    await for (final snap in ref.snapshots()) {
+      if (_isExiting || !snap.exists) return null;
+      final data = snap.data() as Map<String, dynamic>?;
+      final Object? protocol = data?[kDuoInterpreterProtocolField];
+      if (isKnownDuoInterpreterProtocol(protocol)) {
+        return protocol as String;
+      }
+    }
+    return null;
+  }
+
+  Future<String?> _lockHostInterpreterProtocol(
+      Map<String, dynamic> snapshotData) {
+    final Object? existing = snapshotData[kDuoInterpreterProtocolField];
+    if (isKnownDuoInterpreterProtocol(existing)) {
+      return Future<String?>.value(existing as String);
+    }
+    final inFlight = _interpreterProtocolLock;
+    if (inFlight != null) return inFlight;
+    final ref = _duoSessionRef;
+    if (ref == null || !_amIHost) return Future<String?>.value();
+
+    final lock =
+        FirebaseFirestore.instance.runTransaction<String?>((transaction) async {
+      final snap = await transaction.get(ref);
+      if (!snap.exists) return null;
+      final data = snap.data() as Map<String, dynamic>?;
+      if (data == null ||
+          data['mode']?.toString() != kDuoModeInterpreter ||
+          data['isPartnerJoined'] != true ||
+          data['hostUid']?.toString() != _myUid) {
+        return null;
+      }
+      final Object? already = data[kDuoInterpreterProtocolField];
+      if (isKnownDuoInterpreterProtocol(already)) {
+        return already as String;
+      }
+      final protocol = chooseDuoInterpreterProtocol(
+        hostCallablePcV2: data[kDuoHostCallablePcV2Field] == true,
+        partnerCallablePcV2: data[kDuoPartnerCallablePcV2Field] == true,
+      );
+      transaction.update(ref, <String, dynamic>{
+        kDuoInterpreterProtocolField: protocol,
+        kDuoInterpreterProtocolLockedAtField: FieldValue.serverTimestamp(),
+      });
+      return protocol;
+    }).catchError((Object error) {
+      _lgDuo(
+        '❌ [INTERP-PROTOCOL]',
+        'lock_failed reason=${error.runtimeType}',
+      );
+      return null;
+    });
+    _interpreterProtocolLock = lock;
+    unawaited(lock.whenComplete(() {
+      // Share one in-flight transaction across repeated snapshots, but do not
+      // cache a failed/null result forever. A later room snapshot may retry.
+      if (identical(_interpreterProtocolLock, lock)) {
+        _interpreterProtocolLock = null;
+      }
+    }));
+    return lock;
+  }
+
   void _listenForPartnerJoined() {
     if (_duoSessionRef == null) return;
     _partnerJoinedSubscription?.cancel();
-    _partnerJoinedSubscription = _duoSessionRef!.snapshots().listen((snap) {
+    _partnerJoinedSubscription =
+        _duoSessionRef!.snapshots().listen((snap) async {
       if (_isExiting || !mounted) return;
 
       // 세션 문서가 삭제된 경우 (호스트가 먼저 나가 세션 delete됨)
@@ -6096,6 +6249,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
             '⚠️ unexpected_session_mode_change $_duoMode → $sessionMode');
         unawaited(_stopDirectCall('mode_changed'));
         if (mounted) setState(() => _duoMode = sessionMode);
+      }
+      if (partnerJoined && sessionMode == kDuoModeInterpreter) {
+        final String? protocol = await _lockHostInterpreterProtocol(data);
+        if (_isExiting || !mounted || protocol == null) return;
+        if (!_adoptInterpreterProtocol(protocol, 'host_partner_joined')) {
+          return;
+        }
       }
       debugPrint(
           '[Duo][Billing] partnerJoined=$partnerJoined amIHost=$_amIHost '

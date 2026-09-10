@@ -75,6 +75,7 @@ async function main() {
   }
 
   const room = (db) => doc(db, 'duo_sessions', ROOM);
+  const protocolRoom = (db, id) => doc(db, 'duo_sessions', id);
   const msgs = (db) => collection(db, 'duo_sessions', ROOM, 'messages');
   const canon = (db) => doc(db, 'duo_sessions', ROOM, 'canonical', 'current');
 
@@ -134,6 +135,85 @@ async function main() {
       updateDoc(room(guest), {hostUid: GUEST})));
 
   await dumpRoom('입장 뒤');
+
+  // ── ③-B Interpreter protocol lock ───────────────────────────────
+  section('Interpreter protocol — capability와 host 단일 lock');
+  await check('신규 host capability는 room create와 함께 저장된다',
+      () => assertSucceeds(setDoc(protocolRoom(host, 'protocol-room'), {
+        hostUid: HOST,
+        isDuoEnabled: true,
+        isPartnerJoined: false,
+        mode: 'interpreter',
+        hostInterpreterCallablePcV2: false,
+      })));
+  await check('guest seat claim과 capability는 한 update로 저장된다',
+      () => assertSucceeds(updateDoc(protocolRoom(guest, 'protocol-room'), {
+        isPartnerJoined: true,
+        partnerUid: GUEST,
+        partnerInterpreterCallablePcV2: false,
+      })));
+  await check('guest는 interpreterProtocol을 lock하지 못한다',
+      () => assertFails(updateDoc(protocolRoom(guest, 'protocol-room'), {
+        interpreterProtocol: 'legacy_webrtc_v1',
+        interpreterProtocolLockedAt: serverTimestamp(),
+      })));
+  await check('host는 capability 조합을 legacy로 한 번 lock한다',
+      () => assertSucceeds(updateDoc(protocolRoom(host, 'protocol-room'), {
+        interpreterProtocol: 'legacy_webrtc_v1',
+        interpreterProtocolLockedAt: serverTimestamp(),
+      })));
+  await check('동일 protocol 재확인은 값을 바꾸지 않아 허용된다',
+      () => assertSucceeds(updateDoc(protocolRoom(host, 'protocol-room'), {
+        interpreterProtocol: 'legacy_webrtc_v1',
+      })));
+  await check('lock 뒤 다른 protocol로 변경하지 못한다',
+      () => assertFails(updateDoc(protocolRoom(host, 'protocol-room'), {
+        interpreterProtocol: 'callable_pc_v2',
+        interpreterProtocolLockedAt: serverTimestamp(),
+      })));
+  await check('host capability는 room 생성 뒤 바꾸지 못한다',
+      () => assertFails(updateDoc(protocolRoom(host, 'protocol-room'), {
+        hostInterpreterCallablePcV2: true,
+      })));
+
+  await check('양쪽 capability=true인 별도 room을 만든다', async () => {
+    await assertSucceeds(setDoc(protocolRoom(host, 'callable-room'), {
+      hostUid: HOST,
+      isDuoEnabled: true,
+      isPartnerJoined: false,
+      mode: 'interpreter',
+      hostInterpreterCallablePcV2: true,
+    }));
+    await assertSucceeds(updateDoc(protocolRoom(guest, 'callable-room'), {
+      isPartnerJoined: true,
+      partnerUid: GUEST,
+      partnerInterpreterCallablePcV2: true,
+    }));
+  });
+  await check('양쪽 capability=true일 때만 callable lock이 허용된다',
+      () => assertSucceeds(updateDoc(protocolRoom(host, 'callable-room'), {
+        interpreterProtocol: 'callable_pc_v2',
+        interpreterProtocolLockedAt: serverTimestamp(),
+      })));
+
+  await check('capability 없는 old guest도 기존 방식으로 입장한다', async () => {
+    await assertSucceeds(setDoc(protocolRoom(host, 'old-guest-room'), {
+      hostUid: HOST,
+      isDuoEnabled: true,
+      isPartnerJoined: false,
+      mode: 'interpreter',
+      hostInterpreterCallablePcV2: false,
+    }));
+    await assertSucceeds(updateDoc(protocolRoom(guest, 'old-guest-room'), {
+      isPartnerJoined: true,
+      partnerUid: GUEST,
+    }));
+  });
+  await check('old guest room은 host가 legacy로 lock한다',
+      () => assertSucceeds(updateDoc(protocolRoom(host, 'old-guest-room'), {
+        interpreterProtocol: 'legacy_webrtc_v1',
+        interpreterProtocolLockedAt: serverTimestamp(),
+      })));
 
   // ── ④ 발화 저장 ──────────────────────────────────────────────────
   section('messages — 통화 중 발화 저장');

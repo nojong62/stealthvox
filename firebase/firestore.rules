@@ -119,11 +119,62 @@ service cloud.firestore {
           && request.resource.data.hostUid == resource.data.hostUid;
       }
 
+      function interpreterNegotiationCreateValid() {
+        return !request.resource.data.keys().hasAny([
+            'partnerInterpreterCallablePcV2',
+            'interpreterProtocol',
+            'interpreterProtocolLockedAt'
+          ])
+          && (!request.resource.data.keys().hasAny([
+                'hostInterpreterCallablePcV2'
+              ])
+              || (request.resource.data.get('mode', '') == 'interpreter'
+                  && request.resource.data.hostInterpreterCallablePcV2
+                      is bool));
+      }
+
+      function interpreterNegotiationUpdateValid() {
+        let changed = request.resource.data.diff(resource.data).affectedKeys();
+        let protocolWrite = changed.hasAny([
+          'interpreterProtocol',
+          'interpreterProtocolLockedAt'
+        ]);
+        return !changed.hasAny(['hostInterpreterCallablePcV2'])
+          && (!changed.hasAny(['partnerInterpreterCallablePcV2'])
+              || (isTakingFreeSeat()
+                  && request.resource.data.partnerInterpreterCallablePcV2
+                      is bool))
+          && (!protocolWrite
+              || (request.auth.uid ==
+                    resource.data.get('hostUid', '')
+                  && resource.data.get('mode', '') == 'interpreter'
+                  && resource.data.get('isPartnerJoined', false) == true
+                  && !resource.data.keys().hasAny([
+                    'interpreterProtocol',
+                    'interpreterProtocolLockedAt'
+                  ])
+                  && request.resource.data.interpreterProtocol in [
+                    'legacy_webrtc_v1',
+                    'callable_pc_v2'
+                  ]
+                  && request.resource.data.interpreterProtocolLockedAt
+                      is timestamp
+                  && (request.resource.data.interpreterProtocol ==
+                        'legacy_webrtc_v1'
+                      || (resource.data.get(
+                              'hostInterpreterCallablePcV2', false) == true
+                          && resource.data.get(
+                              'partnerInterpreterCallablePcV2', false) ==
+                            true))));
+      }
+
       allow read: if isAuth();
       allow create: if isAuth()
-        && request.resource.data.hostUid == request.auth.uid;
-      allow update: if (isParticipant() && ownersUnchanged())
-        || isTakingFreeSeat();
+        && request.resource.data.hostUid == request.auth.uid
+        && interpreterNegotiationCreateValid();
+      allow update: if ((isParticipant() && ownersUnchanged())
+          || isTakingFreeSeat())
+        && interpreterNegotiationUpdateValid();
       allow delete: if isAuth()
         && resource.data.get('hostUid', '') == request.auth.uid;
 
