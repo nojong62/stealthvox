@@ -219,6 +219,99 @@ const bool kDuoInterpOriginCheck =
 const bool kDuoInterpWebrtc =
     bool.fromEnvironment('DUO_INTERP_WEBRTC', defaultValue: true);
 
+/// 🔀 [INTERP-STT-KIND] 만능 통역이 쓰는 **전사 엔진**. 통로(`INTERP-TRANSPORT`)와
+/// 다른 축이다 — 그쪽은 글자를 상대에게 어떻게 보내느냐이고, 이쪽은 내 소리를
+/// 무엇이 글자로 만드느냐다.
+///
+///   socket    OpenAI 스트리밍 소켓 하나가 **경계와 글자를 같이** 맡는다
+///   deepgram  Deepgram이 경계를, gpt-transcribe가 글자를 맡는다(09-06 이후)
+///
+/// **기본은 소켓이다.** 09-06에 둘로 가른 뒤 통역에서만 호스트 발화가 전부
+/// `empty_text`로 끝났다. 2026-09-10 실기기에서 확인한 것이 이렇다 —
+/// Deepgram이 연 구간(7.56초·15.84초)에 목소리 프레임이 0개였고, 같은 소리를
+/// 받은 gpt-transcribe는 빈 글을 돌려줬다. **두 엔진의 의견이 갈릴 수 있는
+/// 구조가 그때 생겼다.**
+///
+/// 직접 대화는 이 값을 보지 않는다 — 그쪽은 09-06 구조 그대로 잘 돈다.
+/// Deepgram 경로는 지우지 않는다. 견주려면 둘 다 있어야 한다.
+///
+///   flutter build apk --dart-define=DUO_INTERP_SOCKET_STT=false
+const bool kDuoInterpUseSocketStt =
+    bool.fromEnvironment('DUO_INTERP_SOCKET_STT', defaultValue: true);
+
+/// 🔀 [INTERP-STT-KIND] 두 엔진을 **같은 이름으로** 감싼다.
+///
+/// 부르는 자리 스무 곳을 갈래마다 고쳐 쓰지 않기 위한 얇은 껍데기다. 멤버
+/// 이름이 이미 같으므로 하는 일은 넘겨 주는 것뿐이고, 한쪽에만 있는 것은
+/// 여기서 흡수한다(`noteAccepted`는 소켓에 없다 — 그쪽은 문맥 힌트를 안 쓴다).
+class _InterpSttHandle {
+  _InterpSttHandle.socket(OpenAiStreamingTranscribeSession s)
+      : _socket = s,
+        _pipeline = null;
+  _InterpSttHandle.pipeline(DuoSttPipeline p)
+      : _socket = null,
+        _pipeline = p;
+
+  final OpenAiStreamingTranscribeSession? _socket;
+  final DuoSttPipeline? _pipeline;
+
+  /// 어느 엔진으로 도는가. 로그에서 갈라 읽는 자리다.
+  String get kind => _socket != null ? 'socket' : 'deepgram';
+
+  bool get isConnected => _socket?.isConnected ?? _pipeline!.isConnected;
+  bool get audioGateOpen => _socket?.audioGateOpen ?? _pipeline!.audioGateOpen;
+  bool get isUserSpeaking =>
+      _socket?.isUserSpeaking ?? _pipeline!.isUserSpeaking;
+  bool get hasPendingUtterance =>
+      _socket?.hasPendingUtterance ?? _pipeline!.hasPendingUtterance;
+
+  int? utteranceVoicedMsOf(String itemId) =>
+      _socket?.utteranceVoicedMsOf(itemId) ??
+      _pipeline?.utteranceVoicedMsOf(itemId);
+  String? utteranceVoicedSourceOf(String itemId) =>
+      _socket?.utteranceVoicedSourceOf(itemId) ??
+      _pipeline?.utteranceVoicedSourceOf(itemId);
+
+  void appendAudio(Uint8List pcm) {
+    final s = _socket;
+    if (s != null) {
+      s.appendAudio(pcm);
+      return;
+    }
+    _pipeline!.appendAudio(pcm);
+  }
+
+  void openAudioGate({required String reason}) {
+    final s = _socket;
+    if (s != null) {
+      s.openAudioGate(reason: reason);
+      return;
+    }
+    _pipeline!.openAudioGate(reason: reason);
+  }
+
+  void closeAudioGate({required String reason}) {
+    final s = _socket;
+    if (s != null) {
+      s.closeAudioGate(reason: reason);
+      return;
+    }
+    _pipeline!.closeAudioGate(reason: reason);
+  }
+
+  Future<bool> flushPendingUtterance({required String reason}) =>
+      _socket?.flushPendingUtterance(reason: reason) ??
+      _pipeline!.flushPendingUtterance(reason: reason);
+
+  Future<bool> switchLanguage(String code) =>
+      _socket?.switchLanguage(code) ?? _pipeline!.switchLanguage(code);
+
+  /// 🧭 문맥 힌트. **소켓에는 없다** — 그쪽은 서버가 문맥을 들고 있다.
+  void noteAccepted(String text) => _pipeline?.noteAccepted(text);
+
+  Future<void> dispose() => _socket?.dispose() ?? _pipeline!.dispose();
+}
+
 // ============================================================================
 // 🔀 [INTERP-TRANSPORT] 만능 통역의 글자 통로 — 런타임 손잡이
 // ----------------------------------------------------------------------------
@@ -765,7 +858,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   // 말이 끝나야 비로소 보내기 시작하니, 길게 말할수록 파일도 업로드도 커졌다.
   // 이제 말하는 동안 PCM이 계속 흘러가고 발화 종료는 서버 VAD가 판단한다 —
   // 직접 대화가 이미 쓰는 세션과 같은 것이다.
-  DuoSttPipeline? _interpStt;
+  _InterpSttHandle? _interpStt;
   PreparedAudioCapture? _interpCapture;
   StreamSubscription<Uint8List>? _interpCaptureSub;
 
@@ -3001,6 +3094,103 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _interpStt = null;
     }
     final int generation = ++_interpGeneration;
+    // 🔀 [INTERP-STT-KIND] **소켓 한 벌이 경계와 글자를 같이 맡는다.**
+    //   09-06 이전으로 되돌린 갈래다. 마이크 경로(`DuoWebrtcMicTap` →
+    //   `_feedInterpreterPcm`)와 게이트는 한 글자도 다르지 않고, PCM을 먹는
+    //   쪽만 바뀐다. 전사문 뒤의 번역·TTS·History는 그대로 탄다.
+    if (kDuoInterpUseSocketStt) {
+      final socket = OpenAiStreamingTranscribeSession(
+        apiKey: _openAiKey,
+        vadSilenceDurationMs: kDuoVadSilenceDurationMs,
+        languageCode:
+            (!kDuoInterpOriginCheck || OriginLanguageSession.instance.settled)
+                ? _mapLanguageToCode(_myNative())
+                : '',
+        onLog: (tag, msg) => _lgDuo('[INTERP-STT]$tag', msg),
+      );
+      _lgDuo(
+          '[INTERP-STT-KIND]',
+          'kind=socket vadSilenceMs=$kDuoVadSilenceDurationMs '
+              'declared=${_myNative()}');
+      _lgDuo(
+          '[INTERP-ORIGIN]',
+          'stt_open '
+              'mode=${(!kDuoInterpOriginCheck || OriginLanguageSession.instance.settled) ? 'pinned' : 'auto'} '
+              'declared=${_myNative()} flag=${kDuoInterpOriginCheck ? 'on' : 'off'}');
+      socket.shouldReconnect = () =>
+          !_isExiting && _isConversationActive && generation == _interpGeneration;
+      socket.onSpeechStarted = () {
+        if (generation != _interpGeneration) return;
+        _interpSpeechStartedAt = DateTime.now();
+        _utteranceRms?.beginUtterance();
+        if (_interpStt?.audioGateOpen ?? false) {
+          _setInterpMicPhase(InterpMicPhase.speaking);
+        }
+      };
+      // 🗣️ [INTERP-YIELD] 내 발화가 끝났다 = 미뤄 둔 상대 음성을 틀 때다.
+      socket.onUtteranceCommitted = (itemId, voicedMs, voicedSource) {
+        if (generation != _interpGeneration) return;
+        _utteranceRms?.commitUtterance(itemId);
+        if (_incomingQueue.isNotEmpty) {
+          _lgDuo('[INTERP-YIELD]',
+              'resume queued=${_incomingQueue.length} reason=utterance_committed');
+          unawaited(_drainIncoming());
+        }
+      };
+      socket.onSpeechStopped = () {
+        if (generation != _interpGeneration) return;
+        if (_interpMicPhase != InterpMicPhase.speaking) return;
+        _setInterpMicPhase((_interpStt?.audioGateOpen ?? false)
+            ? InterpMicPhase.listening
+            : InterpMicPhase.gated);
+      };
+      // 🎧 **원문 PCM은 남기지 않는다.** 서버가 잘라 간 덩이라 앱에 없다.
+      //   통역은 원문 복원 3단계를 타지 않으므로 이 갈래에서는 필요 없다.
+      socket.onTranscriptCompleted = (itemId, text) {
+        if (generation != _interpGeneration) return;
+        unawaited(_onInterpreterTranscript(generation, itemId, text));
+      };
+      socket.onReconnecting = (attempt) {
+        if (generation != _interpGeneration) return;
+        _utteranceRms?.reset();
+        if (mounted && !_interpSttReconnecting) {
+          setState(() => _interpSttReconnecting = true);
+        }
+        if (_incomingQueue.isNotEmpty) unawaited(_drainIncoming());
+      };
+      socket.onConnected = () {
+        if (generation != _interpGeneration) return;
+        if (mounted && _interpSttReconnecting) {
+          setState(() => _interpSttReconnecting = false);
+        }
+      };
+      socket.onFatalError = (reason) {
+        _lgDuo('⚠️ [INTERP-STT]', 'fatal=$reason — 재시도로는 안 풀린다');
+        if (generation != _interpGeneration) return;
+        unawaited(_stopInterpreterCapture('stt_fatal'));
+        _interpAutoStartAttempted = false;
+        if (mounted) {
+          setState(() {
+            _interpStartFailed = true;
+            _interpSttReconnecting = false;
+          });
+        }
+        _setInterpMicPhase(InterpMicPhase.preparing);
+      };
+      final socketOk = await socket.connect();
+      if (generation != _interpGeneration || _isExiting) {
+        await socket.dispose();
+        return false;
+      }
+      if (!socketOk) {
+        await socket.dispose();
+        _lgDuo('⚠️ [INTERP-STT]', 'connect_failed kind=socket');
+        return false;
+      }
+      _interpStt = _InterpSttHandle.socket(socket);
+      return true;
+    }
+
     // 📡 [DUO-ENDPOINT] 직접 대화와 **같은 파이프라인**이다. 두 모드가 같은
     //   마이크 PCM을 쓰고 같은 문제를 푼다 — 경계는 Deepgram이, 글자는
     //   gpt-transcribe가 맡는다. 갈리는 것은 이 뒤(번역·TTS·양보)뿐이다.
@@ -3026,6 +3216,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
               : '',
       onLog: (tag, msg) => _lgDuo('[INTERP-STT]$tag', msg),
     )..roleLabel = _myRole;
+    _lgDuo('[INTERP-STT-KIND]', 'kind=deepgram declared=${_myNative()}');
     // 🔎 [계측] 직접 대화(:2575)에는 있고 통역에만 없던 자리. 실패가 조용히
     //   사라져 이유를 볼 수 없었다.
     session.onFailed = (utteranceId, reason) {
@@ -3148,7 +3339,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       _lgDuo('⚠️ [INTERP-STT]', 'connect_failed');
       return false;
     }
-    _interpStt = session;
+    _interpStt = _InterpSttHandle.pipeline(session);
     return true;
   }
 
