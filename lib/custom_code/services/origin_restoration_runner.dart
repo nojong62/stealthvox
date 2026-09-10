@@ -96,17 +96,40 @@ class OriginRestorationRunner {
       runId: runId,
     );
     late final Future<void> task;
-    task = raw.whenComplete(() {
+
+    // ⚠️ **이 정리는 값을 돌려주면 안 된다. 한 줄로 줄이지 말 것.**
+    //
+    //   `whenComplete`는 콜백이 Future를 돌려주면 **그것이 끝날 때까지 자기
+    //   완료를 미룬다.** 그런데 `Map.remove`는 지운 값을 돌려주고, 여기서
+    //   지우는 값이 바로 지금 만들고 있는 `task`다. 그래서
+    //
+    //       .whenComplete(() => _running.remove(id))
+    //
+    //   라고 쓰면 task가 **자기 자신을 기다리며** 영원히 끝나지 않는다.
+    //   `_run`은 멀쩡히 끝나고 맵에서도 지워지는데 기다리는 쪽만 안 풀려서,
+    //   통화를 끝내고 공부방을 처음 열면 3분을 멈춰 있다가 "오래 걸리고
+    //   있습니다"로 떨어졌다(실기기 2026-09-10, 호스트·게스트 양쪽 재현).
+    //
+    //   반환형이 `void`인 **이름 붙인 함수**로 두는 것이 그 방어다. 화살표
+    //   본문으로 되돌리는 순간 같은 결함이 그대로 살아난다.
+    void cleanup() {
       debugPrint('[ORIGIN-RUNNER] finally_enter room=$id runId=$runId '
           'thisFuture=${_fid(task)} rawFuture=${identityHashCode(raw)} '
           'mapFuture=${_fid(_running[id])} '
           'same=${identical(_running[id], task)} '
           'mapRunId=${_registeredRunId[id]}');
-      _running.remove(id);
-      _registeredRunId.remove(id);
+      // 🧹 **내 판이 아직 등록돼 있을 때만 지운다.** 같은 방에 새 판이 올라온
+      //   뒤 늦게 도착한 정리가 그 판을 지워 버리면, 기다리던 쪽은 시작된 적
+      //   없는 판을 기다리게 된다.
+      if (identical(_running[id], task)) {
+        _running.remove(id);
+        _registeredRunId.remove(id);
+      }
       debugPrint('[ORIGIN-RUNNER] finally_exit room=$id runId=$runId '
           'mapAfter=${_fid(_running[id])}');
-    });
+    }
+
+    task = raw.whenComplete(cleanup);
     debugPrint('[ORIGIN-RUNNER] start_new room=$id caller=$caller runId=$runId '
         'rawFuture=${identityHashCode(raw)} wrappedFuture=${_fid(task)}');
     _running[id] = task;
