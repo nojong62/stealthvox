@@ -2545,7 +2545,7 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
       //   판정하지 않는다.
       originLanguageCode: () => sttLanguageCode,
       onLog: (tag, msg) => _lgDuo('[DIRECT-STT]$tag', msg),
-    );
+    )..roleLabel = _myRole;
     // 🔁 소켓이 끊겨도 통화가 살아 있으면 다시 잇는다. 안 이으면 그 뒤의
     //   말이 통째로 History에 안 남는다.
     session.shouldReconnect = () => _isDirectGenerationCurrent(generation);
@@ -3025,7 +3025,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
               ? _mapLanguageToCode(_myNative())
               : '',
       onLog: (tag, msg) => _lgDuo('[INTERP-STT]$tag', msg),
-    );
+    )..roleLabel = _myRole;
+    // 🔎 [계측] 직접 대화(:2575)에는 있고 통역에만 없던 자리. 실패가 조용히
+    //   사라져 이유를 볼 수 없었다.
+    session.onFailed = (utteranceId, reason) {
+      if (generation != _interpGeneration) return;
+      _lgDuo('[INTERP-STT]', 'transcribe_failed utt=$utteranceId $reason');
+    };
     // 🌐 [INTERP-ORIGIN] 소켓을 어떤 언어 상태로 열었는지 한 줄로 남긴다.
     //   `mode=pinned`이면 이번 세션에서 언어 판정은 더 돌지 않는다.
     _lgDuo(

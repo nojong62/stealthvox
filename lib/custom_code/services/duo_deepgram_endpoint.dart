@@ -158,6 +158,14 @@ class DuoDeepgramEndpointSensor {
   bool _speechStale = false;
   Timer? _staleTimer;
 
+  /// 🔎 [계측 전용] 받은 것과 실제로 소켓에 보낸 것.
+  int _micFrames = 0;
+  int _micBytes = 0;
+  int _sentFrames = 0;
+  int _sentBytes = 0;
+  int _droppedFrames = 0;
+  int _lastSendLogAt = 0;
+
   int _speechStartedCount = 0;
   int _staleCount = 0;
   int _utteranceEndCount = 0;
@@ -212,11 +220,33 @@ class DuoDeepgramEndpointSensor {
 
   /// 소리를 흘려보낸다. **되돌아오는 글자는 쓰지 않는다.**
   void addPcm(Uint8List pcm) {
-    if (_closed || pcm.isEmpty) return;
+    if (_closed || pcm.isEmpty) {
+      // 🔎 [계측] 닫힌 소켓으로 온 몫. 동작은 예전과 같다.
+      if (pcm.isNotEmpty) _droppedFrames++;
+      return;
+    }
+    _micFrames++;
+    _micBytes += pcm.lengthInBytes;
     try {
       _channel?.sink.add(pcm);
+      if (_channel == null) {
+        _droppedFrames++;
+      } else {
+        _sentFrames++;
+        _sentBytes += pcm.lengthInBytes;
+      }
     } catch (_) {
       // 소켓이 잠깐 닫힌 것뿐이다. 소리는 이미 캡처가 들고 있다.
+      _droppedFrames++;
+    }
+    // 🔎 [계측] 받은 것과 실제로 보낸 것을 갈라 놓는다. 둘이 벌어지면
+    //   배선이 끊긴 것이고, 나란히 가면 소켓까지는 갔다는 뜻이다.
+    if (_micFrames - _lastSendLogAt >= 100) {
+      _lastSendLogAt = _micFrames;
+      _lg('[DUO-DG-PCM] micFrames=$_micFrames sentFrames=$_sentFrames '
+          'droppedFrames=$_droppedFrames micBytes=$_micBytes '
+          'sentBytes=$_sentBytes socket=${_channel == null ? 'null' : 'open'} '
+          'closed=$_closed speechOpen=$_speechOpen stale=$_speechStale');
     }
   }
 
@@ -334,6 +364,9 @@ class DuoDeepgramEndpointSensor {
     _cancelStaleTimer();
     _lg('closing started=$_speechStartedCount ended=$_utteranceEndCount '
         'ignored=$_ignoredEndCount stale=$_staleCount');
+    _lg('[DUO-DG-PCM] call_summary micFrames=$_micFrames '
+        'sentFrames=$_sentFrames droppedFrames=$_droppedFrames '
+        'micBytes=$_micBytes sentBytes=$_sentBytes');
     try {
       _channel?.sink.add(jsonEncode(<String, String>{'type': 'CloseStream'}));
     } catch (_) {}

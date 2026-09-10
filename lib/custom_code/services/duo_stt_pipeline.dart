@@ -24,11 +24,92 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'dart:math' as math;
+
 import 'duo_deepgram_endpoint.dart';
+import 'duo_direct_audio.dart' show kDuoMicVoicedFrameDbfs;
 import 'duo_transcript_context.dart';
 import 'duo_utterance_capture.dart';
 import 'openai_transcribe_service.dart';
 import 'pcm_audio_utils.dart';
+
+/// 🔎 [계측 전용] STT 입력 PCM 한 창의 통계. **판정에 쓰이지 않는다.**
+class _SttWindow {
+  const _SttWindow(this.frames, this.bytes, this.avgDbfs, this.peakDbfs,
+      this.voiced, this.allZero);
+  final int frames;
+  final int bytes;
+  final double avgDbfs;
+  final double peakDbfs;
+  final int voiced;
+  final int allZero;
+}
+
+/// 🔎 [계측 전용] 목소리 판정은 [kDuoMicVoicedFrameDbfs] 하나를 그대로 쓴다.
+///   여기서 새 임계값을 만들면 직접 대화와 다른 잣대가 된다.
+class _SttInputProbe {
+  static const int _framesPerLog = 100;
+
+  int _frames = 0;
+  int _bytes = 0;
+  int _samples = 0;
+  double _sumSquares = 0;
+  double _peak = 0;
+  int _voiced = 0;
+  int _allZero = 0;
+
+  int lifeFrames = 0;
+  int lifeVoiced = 0;
+  int lifeAllZero = 0;
+
+  bool get due => _frames >= _framesPerLog;
+
+  void note(Uint8List pcm) {
+    final int samples = pcm.lengthInBytes ~/ 2;
+    if (samples == 0) return;
+    final ByteData view = ByteData.sublistView(pcm, 0, samples * 2);
+    double frameSum = 0;
+    bool allZero = true;
+    for (var i = 0; i < samples; i++) {
+      final int raw = view.getInt16(i * 2, Endian.little);
+      if (raw != 0) allZero = false;
+      final double v = raw / 32768.0;
+      frameSum += v * v;
+      final double a = v.abs();
+      if (a > _peak) _peak = a;
+    }
+    _frames++;
+    lifeFrames++;
+    _bytes += pcm.lengthInBytes;
+    _samples += samples;
+    _sumSquares += frameSum;
+    if (allZero) {
+      _allZero++;
+      lifeAllZero++;
+    }
+    final double frameDbfs = pcm16LinearToDbfs(math.sqrt(frameSum / samples));
+    if (frameDbfs >= kDuoMicVoicedFrameDbfs) {
+      _voiced++;
+      lifeVoiced++;
+    }
+  }
+
+  _SttWindow takeWindow() {
+    final double avg = _samples == 0
+        ? -160.0
+        : pcm16LinearToDbfs(math.sqrt(_sumSquares / _samples));
+    final double peak = _peak <= 0 ? -160.0 : pcm16LinearToDbfs(_peak);
+    final w = _SttWindow(_frames, _bytes, avg, peak, _voiced, _allZero);
+    _frames = 0;
+    _bytes = 0;
+    _samples = 0;
+    _sumSquares = 0;
+    _peak = 0;
+    _voiced = 0;
+    _allZero = 0;
+    return w;
+  }
+}
 
 /// 최종 전사에 주는 시간 상한. 발화가 길면 그만큼 오래 걸린다.
 const Duration kDuoTranscribeTimeout = Duration(seconds: 20);
@@ -71,6 +152,20 @@ class DuoSttPipeline {
           sampleRate: sampleRate,
         ),
         context = DuoTranscriptContext();
+
+  /// 🔎 [계측 전용] 이 통로가 호스트 것인가 게스트 것인가. 같은 빌드라도
+  ///   두 역할의 오디오 상태가 다르므로 로그에서 갈라 읽어야 한다.
+  String roleLabel = '?';
+
+  /// 🔎 [계측 전용] **STT로 실제 들어가는 그 PCM**을 잰다. WebRTC stats나
+  ///   다른 미터가 아니라, 아래 [addPcm]이 캡처·Deepgram에 넘기는 바로 그
+  ///   바이트다. 판정 기준은 [kDuoMicVoicedFrameDbfs] 하나를 그대로 쓴다 —
+  ///   여기서 새 임계값을 만들면 직접 대화와 다른 잣대가 된다.
+  final _SttInputProbe _inProbe = _SttInputProbe();
+
+  /// 🔎 [계측 전용] 게이트가 버린 몫. 들어왔는데 STT까지 못 간 소리다.
+  int _gateDroppedFrames = 0;
+  int _gateDroppedBytes = 0;
 
   final String openAiKey;
   final String deepgramKey;
@@ -235,6 +330,7 @@ class DuoSttPipeline {
     //   버리지 않는다.
     sensor.onSpeechStale = () {
       if (_stopped) return;
+      _logSttInput('speech_stale');
       _lg('mode=$mode utt=${_capture.currentId ?? '-'} speech_stale '
           'capturedMs=${_capture.currentMs} — 말하는 중을 내린다');
       onSpeechStale?.call();
@@ -287,9 +383,35 @@ class DuoSttPipeline {
 
   /// 마이크 조각 하나. **두 갈래로 똑같이 보낸다.**
   void addPcm(Uint8List pcm) {
-    if (_stopped || !_gateOpen || pcm.isEmpty) return;
+    if (_stopped || !_gateOpen || pcm.isEmpty) {
+      // 🔎 [계측] 게이트가 닫혀 버려진 몫. 동작은 예전과 같다.
+      if (!_stopped && !_gateOpen && pcm.isNotEmpty) {
+        _gateDroppedFrames++;
+        _gateDroppedBytes += pcm.lengthInBytes;
+      }
+      return;
+    }
+    // 🔎 [계측] **STT가 실제로 먹는 그 바이트**를 여기서 잰다.
+    _inProbe.note(pcm);
+    if (_inProbe.due) _logSttInput('periodic');
     _capture.addPcm(pcm);
     _sensor?.addPcm(pcm);
+  }
+
+  /// 🔎 [계측 전용] STT 입력 PCM 한 판을 찍는다. 발화가 안 열려도 보인다.
+  void _logSttInput(String at) {
+    final w = _inProbe.takeWindow();
+    _lg('mode=$mode [DUO-STT-PCM] at=$at role=$roleLabel '
+        'frames=${w.frames} bytes=${w.bytes} '
+        'avgDbfs=${w.avgDbfs.toStringAsFixed(1)} '
+        'peakDbfs=${w.peakDbfs.toStringAsFixed(1)} '
+        'voiced=${w.voiced} allZero=${w.allZero} '
+        'lifeFrames=${_inProbe.lifeFrames} lifeVoiced=${_inProbe.lifeVoiced} '
+        'lifeAllZero=${_inProbe.lifeAllZero} '
+        'gate=${_gateOpen ? 'open' : 'closed'} '
+        'gateDroppedFrames=$_gateDroppedFrames '
+        'speechOpen=${_sensor?.isSpeechOpen ?? false} '
+        'capturing=${_capture.isCapturing}');
   }
 
   /// 옛 스트리밍 세션과 같은 이름. 호출부(`DuoMicPcmFanout`)가 그대로 쓴다.
@@ -326,6 +448,7 @@ class DuoSttPipeline {
     if (_stopped) return;
     final String id = _capture.begin();
     _speechStartedAt = DateTime.now();
+    _logSttInput('speech_started');
     _lg('mode=$mode utt=$id speech_started '
         'preRollMs=${_capture.preRollBufferedMs}');
     onSpeechStarted?.call(id);
@@ -334,6 +457,7 @@ class DuoSttPipeline {
   void _handleUtteranceEnd() {
     if (_stopped) return;
     final DateTime endedAt = DateTime.now();
+    _logSttInput('utterance_end');
     final DuoCapturedUtterance? utterance = _capture.commit();
     if (utterance == null) {
       _lg('mode=$mode utterance_end_dropped reason=no_audio');
@@ -400,15 +524,21 @@ class DuoSttPipeline {
         // ✂️ **앞을 다시 깎지 않는다.** 600ms 앞 여유를 일부러 확보해 놓고
         //   전사 직전에 잘라내면 그 작업이 통째로 헛것이 된다.
         trimLeadingSilence: false,
-        onLog: null,
+        // 🔎 [계측] 서비스가 HTTP 상태·예외 종류를 이미 안다. 여태 null로
+        //   막아 두어 `transcribe=failed` 한 줄만 남고 이유가 사라졌다.
+        onLog: (tag, msg) => onLog?.call(tag, 'mode=$mode $msg'),
       );
       sw.stop();
       if (_stopped) return;
       if (text == null || text.trim().isEmpty) {
+        // 🔎 [계측] **빈 글인가 호출 실패인가.** 이 둘이 갈려야 경계 문제인지
+        //   전사 호출 문제인지 가른다. 여태 한 이름으로 뭉뚱그려 있었다.
+        final String reason = text == null ? 'transcribe_error' : 'empty_text';
         _lg('mode=$mode utt=${utterance.utteranceId} transcribe=failed '
-            'lang=$language elapsedMs=${sw.elapsedMilliseconds}');
-        onFailed?.call(utterance.utteranceId,
-            text == null ? 'transcribe_error' : 'empty_text');
+            'reason=$reason lang=$language '
+            'audioMs=${utterance.durationMs} bytes=${utterance.pcm.lengthInBytes} '
+            'elapsedMs=${sw.elapsedMilliseconds}');
+        onFailed?.call(utterance.utteranceId, reason);
         return;
       }
       _lg('mode=$mode utt=${utterance.utteranceId} transcribe=ok '
