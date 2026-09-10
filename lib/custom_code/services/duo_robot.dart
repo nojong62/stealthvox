@@ -36,7 +36,14 @@ import 'package:http/http.dart' as http;
 /// 한쪽만 바뀌어 반쪽만 켜진다.
 ///
 /// `const`라서 릴리스에서는 이 값을 보는 가지가 통째로 접힌다.
-const bool kDuoRobotAvailable = kDebugMode;
+///
+/// 🤖 **지금은 내려 두었다.** 폰 두 대로 시험하게 되면서 시험앱 화면에 토글이
+///   남아 있을 이유가 없어졌다. 본체(`DuoRobot`)도 대화방의 호출부 세 곳도
+///   그대로 살아 있고, `const false`라 시험앱에는 그 가지가 실려 나가지도
+///   않는다.
+///
+/// **되살리려면 이 값을 `kDebugMode`로 되돌리면 된다.** 그것뿐이다.
+const bool kDuoRobotAvailable = false;
 
 /// 로봇이 쓰는 가짜 발신자 id. 실제 사람의 uid와 절대 겹치지 않는 모양이다.
 const String kDuoRobotSenderUid = 'duo_robot_debug';
