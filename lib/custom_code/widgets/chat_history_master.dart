@@ -1153,6 +1153,7 @@ class _ChatHistoryMasterState extends State<ChatHistoryMaster>
       // 임시 Target은 Duo Direct에서만 I/you/제3자·행위자 모순을 찾는다.
       // 이름·문체·숫자 교정기는 아니며 저장되지 않는다.
       targetSubjectOnly: (data[kDuoModeField] ?? '').toString() == 'direct',
+      caller: 'history:$caller',
     );
   }
 

@@ -63,6 +63,8 @@ import '/custom_code/services/history_finalize.dart';
 // 🔁 [LATE-CONTINUATION] 판정·합치기·말풍선 규칙은 Circle Talk과 **같은
 //   함수**를 쓴다. 여기에 규칙을 다시 구현하면 한쪽만 고쳐지고 다른 쪽은 남는다.
 import '/custom_code/services/late_continuation.dart';
+import '/custom_code/services/circle_correction_intent.dart'
+    as correction_intent;
 import '/custom_code/services/conversation_cancel_command.dart';
 import '/custom_code/services/origin_language_session.dart';
 import '/custom_code/services/openai_streaming_transcribe_prewarm.dart';
@@ -387,8 +389,7 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
     // 이 방의 ORIGIN도 고른 값으로 다시 잡는다 — 판정과 다른 언어를 고를 수
     // 있고, 그러면 전사기도 히스토리도 그 값을 따라야 한다.
     OriginLanguageSession.instance.override(native);
-    final ok =
-        await _streamingStt?.switchLanguage(_nativeLangCode()) ?? false;
+    final ok = await _streamingStt?.switchLanguage(_nativeLangCode()) ?? false;
     await _syncHistoryRoomLanguages();
     _log(
         '🌐 [ORIGIN-RECHECK]',
@@ -541,71 +542,6 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
     if (identical(_pendingCorrectionRollback, pending)) {
       _pendingCorrectionRollback = null;
     }
-  }
-
-  /// 사용자가 직전 발화를 실제 뜻으로 갈아 끼우는 문장인지 앱에서 먼저 잡는다.
-  ///
-  /// Scenario Talk의 운영 파이프라인은 번역 단계를 거치지 않으므로, 예전
-  /// Relay 파이프라인의 [CORRECTION] 판정이 더 이상 실행되지 않는다. 그 결과
-  /// "아니, 쉬는 시간이 없냐고 물어본 거야"도 새 턴으로 저장됐다. 평범한
-  /// 부정 답변("아니, 안 갔어요")은 건드리지 않고, 말/뜻/질문의 교체를
-  /// 명시한 문장만 정정으로 확정한다.
-  String? _explicitScenarioCorrectionContent(String transcript) {
-    final source = transcript.trim();
-    final hasDirectReplacement = RegExp(
-      r'(그게\s*아니라|그런\s*뜻이\s*아니|내\s*(말|뜻)은|'
-      r'내가\s*(말|뜻)한\s*건|다시\s*말하면|I\s+mean|'
-      r'what\s+I\s+mean\s+is|that.?s\s+not\s+what\s+I\s+meant)',
-      caseSensitive: false,
-    ).hasMatch(source);
-    final hasReportedReplacement = RegExp(
-      r'^(아니(요|라고)?|아\s+그게\s+아니라|그게\s+아니라).{1,80}'
-      r'(물어본|물은|질문한|말한|말하려던|얘기한|뜻한)\s*'
-      r'(거|것)',
-      caseSensitive: false,
-    ).hasMatch(source);
-    if (!hasDirectReplacement && !hasReportedReplacement) return null;
-
-    var cleaned = source;
-    cleaned = cleaned.replaceFirst(
-      RegExp(
-        r'^(아니(요|라고)?[,.!\s]*|아\s*)?'
-        r'(그게|그런\s*게|그런\s*뜻이|내\s*(말|뜻)이?)\s*'
-        r'아니(?:라|고|야|에요|예요|었고|었다)?[,.!\s]*',
-        caseSensitive: false,
-      ),
-      '',
-    );
-    cleaned = cleaned.replaceFirst(
-      RegExp(
-        r'^(아니(요|라고)?[,.!\s]*|내\s*(말|뜻)은|'
-        r'내가\s*(말|뜻)한\s*건|그러니까|다시\s*말하면|'
-        r'I\s+mean|what\s+I\s+mean\s+is|'
-        r'that.?s\s+not\s+what\s+I\s+meant)[,:.!\s]*',
-        caseSensitive: false,
-      ),
-      '',
-    );
-
-    // "X냐고 물어본 거야"는 화면과 History에 메타 설명이 아니라 실제로
-    // 교체할 질문 "X냐?"로 남긴다.
-    cleaned = cleaned.replaceFirst(
-      RegExp(
-        r'냐고\s*(물어본|물은|질문한)\s*(거|것)(야|예요|이에요|라고)?[.!?\s]*$',
-        caseSensitive: false,
-      ),
-      '냐?',
-    );
-    cleaned = cleaned.replaceFirst(
-      RegExp(
-        r'(라고|다고)\s*(말한|말하려던|얘기한|뜻한)\s*'
-        r'(거|것)(야|예요|이에요|라고)?[.!?\s]*$',
-        caseSensitive: false,
-      ),
-      '',
-    );
-    cleaned = cleaned.trim();
-    return cleaned.isEmpty ? null : cleaned;
   }
 
   String _buildScenarioMemberInstructions() {
@@ -993,7 +929,8 @@ never by itself a reason to ask back.
         //   평소에는 enqueue에서 이미 닫히므로 최종 안전판이다.
         _aiPlaybackStarted = true;
         _closeContinuationWindow(reason: 'ai_playback_started');
-        BillingTicker.instance.resumeFromActivity('scenario_talk_ai_pcm_tts_start');
+        BillingTicker.instance
+            .resumeFromActivity('scenario_talk_ai_pcm_tts_start');
         if (_swTTS.isRunning) {
           _swTTS.stop();
           if (mounted) {
@@ -1005,7 +942,8 @@ never by itself a reason to ask back.
         }
       },
       onPlaybackEnd: (_, __) {
-        BillingTicker.instance.resumeFromActivity('scenario_talk_ai_pcm_tts_end');
+        BillingTicker.instance
+            .resumeFromActivity('scenario_talk_ai_pcm_tts_end');
       },
     );
 
@@ -2682,23 +2620,33 @@ never by itself a reason to ask back.
       }
     }
 
-    // 🔄 새 운영 파이프라인에는 예전 Relay의 [CORRECTION] 분기가 닿지 않는다.
-    // 명시적인 교체 문장은 GPT 답변을 만들기 전에 앱이 잡아, 직전 교환을
-    // 화면과 두 저장소에서 함께 걷어낸 뒤 실제 뜻만 같은 턴으로 다시 처리한다.
+    // 🔄 Circle Talk과 같은 공용 판정기로, 답변을 만들기 전에 직전 교환을
+    // 확실히 되돌린다. 정정 내용이 있으면 그 내용만 한 번 다시 처리하고,
+    // 불만만 있으면 이전 교환을 지운 뒤 재청취한다.
     final currentRoomMessages = _currentRoomMessages;
     final hasPreviousExchange =
         currentRoomMessages.any((message) => message['role'] == 'HOST') &&
             currentRoomMessages.any((message) => message['role'] == 'SYSTEM');
-    final correctedContent = !isCorrectionRetry && hasPreviousExchange
-        ? _explicitScenarioCorrectionContent(userKorean)
-        : null;
-    if (correctedContent != null) {
+    final correctionDecision = !isCorrectionRetry
+        ? correction_intent.detectCircleCorrectionIntent(
+            userKorean,
+            hasPreviousExchange: hasPreviousExchange,
+          )
+        : const correction_intent.CircleCorrectionDecision(
+            correction_intent.CircleCorrectionAction.none,
+          );
+    if (correctionDecision.action !=
+        correction_intent.CircleCorrectionAction.none) {
+      final correctedContent = correctionDecision.replacement.trim();
       _log(
         '[CORRECTION-LOCAL]',
-        '직전 교환 교체 corrected_len=${correctedContent.length}',
+        'action=${correctionDecision.action.name} '
+            'corrected_len=${correctedContent.length}',
       );
       _aiTtsAdapter.stopAll(reason: 'scenario_explicit_correction');
       _ttsQueueManager.stop();
+      _ttsQueueManager.setUserTurn(false);
+      _ttsQueueManager.setAiPaused(false);
       if (mounted) {
         setState(() {
           _localMessages.removeWhere((message) =>
@@ -2712,11 +2660,17 @@ never by itself a reason to ask back.
       _activeAiBubbleId = '';
       _turnCounter = (_turnCounter - 1).clamp(0, 1 << 30).toInt();
       _queueScenarioCorrectionRollback();
-      return _processScenarioTalkTurn(
-        correctedContent,
-        generation: generation,
-        isCorrectionRetry: true,
-      );
+      if (correctionDecision.action ==
+              correction_intent.CircleCorrectionAction.replace &&
+          correctedContent.isNotEmpty) {
+        return _processScenarioTalkTurn(
+          correctedContent,
+          generation: generation,
+          isCorrectionRetry: true,
+        );
+      }
+      await _speakRetryAndListen();
+      return;
     }
 
     _turnCounter++;
@@ -4178,6 +4132,7 @@ never by itself a reason to ask back.
         await _pendingTurnPersistence;
       } catch (_) {}
       OriginRestorationRunner.instance.start(
+        caller: 'scenario_talk',
         roomRef: ref,
         apiKey: _openAiKey,
         sourceName: _nativeLangName(),

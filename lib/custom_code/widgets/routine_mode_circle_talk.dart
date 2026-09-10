@@ -60,6 +60,8 @@ import '/custom_code/services/session_rollover_summary.dart';
 import '/custom_code/services/tts_adapter.dart';
 import '/custom_code/services/late_continuation.dart';
 import '/custom_code/services/conversation_cancel_command.dart';
+import '/custom_code/services/circle_correction_intent.dart'
+    as correction_intent;
 import 'deepgram_confidence_probe.dart';
 import 'first_utterance_context_judge.dart';
 import 'origin_language_recheck_dialog.dart';
@@ -698,37 +700,17 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
   }
 
   String _stripCorrectionFraming(String transcript) {
-    var cleaned = transcript.trim();
-    cleaned = cleaned.replaceFirst(
-      RegExp(
-        r'^(아니[요]?[,.!\s]*|아\s*)?'
-        r'(그게|그런\s*게|그런\s*뜻이|내\s*(말|뜻)이?)\s*'
-        r'아니(?:라|고|야|에요|예요|었고|었다)?[,.!\s]*',
-        caseSensitive: false,
-      ),
-      '',
-    );
-    cleaned = cleaned.replaceFirst(
-      RegExp(
-        r'^(내\s*(말|뜻)은|내가\s*말한\s*건|그러니까|다시\s*말하면|'
-        r'I\s+mean|what\s+I\s+mean\s+is|that.?s\s+not\s+what\s+I\s+meant)[,:.\s]*',
-        caseSensitive: false,
-      ),
-      '',
-    );
-    return cleaned.trim();
+    return correction_intent.stripCircleCorrectionFraming(transcript);
   }
 
   String? _explicitCorrectionContent(String transcript) {
-    final hasExplicitReplacementSignal = RegExp(
-      r'(그게\s*아니라|그런\s*뜻이\s*아니|내\s*(말|뜻)은|'
-      r'내가\s*말한\s*건|다시\s*말하면|I\s+mean|what\s+I\s+mean\s+is|'
-      r'that.?s\s+not\s+what\s+I\s+meant)',
-      caseSensitive: false,
-    ).hasMatch(transcript);
-    if (!hasExplicitReplacementSignal) return null;
-    final content = _stripCorrectionFraming(transcript);
-    return content.isEmpty ? null : content;
+    final decision = correction_intent.detectCircleCorrectionIntent(
+      transcript,
+      hasPreviousExchange: true,
+    );
+    return decision.action == correction_intent.CircleCorrectionAction.replace
+        ? decision.replacement
+        : null;
   }
 
   /// 전사가 발화가 아니라 잡음·추임새인지 판정한다. 파이프라인 진입 전 검열이
@@ -1021,8 +1003,7 @@ class _RoutineModeCircleTalkState extends State<RoutineModeCircleTalk>
     // 이 방의 ORIGIN도 고른 값으로 다시 잡는다 — 판정과 다른 언어를 고를 수
     // 있고, 그러면 전사기도 히스토리도 그 값을 따라야 한다.
     OriginLanguageSession.instance.override(native);
-    final ok =
-        await _streamingStt?.switchLanguage(_nativeLangCode()) ?? false;
+    final ok = await _streamingStt?.switchLanguage(_nativeLangCode()) ?? false;
     await _syncHistoryRoomLanguages();
     _log(
         '🌐 [ORIGIN-RECHECK]',
@@ -2116,7 +2097,8 @@ $kSpokenReplyLengthPolicy
         onTranscriptUpdate: (transcript) {
           _markConversationActivity();
           if (!TrialFlowState.instance.isTrial) {
-            BillingTicker.instance.resumeFromActivity('circle_talk_stt_partial');
+            BillingTicker.instance
+                .resumeFromActivity('circle_talk_stt_partial');
           }
           if (!isCurrentGeneration()) {
             _log('🎤 [LISTEN-STALE]', 'onTranscriptUpdate ignored');
@@ -3342,8 +3324,7 @@ $kSpokenReplyLengthPolicy
       if (!mounted || pipelineGeneration != _pipelineGeneration) return;
     }
     if (userOriginal.isEmpty) {
-      _log('⚠️ [STT-ROUTE]',
-          'gpt-transcribe failed; Deepgram text discarded');
+      _log('⚠️ [STT-ROUTE]', 'gpt-transcribe failed; Deepgram text discarded');
       if (_isConversationActive) {
         _restartConfiguredListening(
             expectedPipelineGeneration: pipelineGeneration);
@@ -3414,9 +3395,33 @@ $kSpokenReplyLengthPolicy
     );
   }
 
+  Future<void> _rewindPreviousExchangeForCorrection(String reason) async {
+    if (mounted) {
+      setState(() {
+        _localMessages.removeWhere((m) => m['role'] == 'HOST_TEMP');
+        _removeLastExchange();
+      });
+      if (_localMessages.isNotEmpty) _scrollToBottom();
+    }
+    if (_recentHistory.length >= 2) {
+      _recentHistory.removeRange(
+        _recentHistory.length - 2,
+        _recentHistory.length,
+      );
+    }
+    _ttsAdapter.stopAll(reason: reason);
+    try {
+      await _pendingTurnPersistence;
+    } catch (_) {}
+    await _deleteLastPersistedExchange();
+    _currentRoomHasUserTurn =
+        _localMessages.any((message) => message['role'] == 'HOST');
+  }
+
   Future<void> _processCircleTalkTurn(
     String userOriginal, {
     required int expectedPipelineGeneration,
+    bool isCorrectionRetry = false,
   }) async {
     if (!isActivePipelineGeneration(
       expected: expectedPipelineGeneration,
@@ -3425,6 +3430,43 @@ $kSpokenReplyLengthPolicy
       conversationActive: _isConversationActive,
     )) {
       return;
+    }
+    if (!isCorrectionRetry) {
+      final hasPreviousExchange =
+          _localMessages.any((m) => m['role'] == 'HOST') &&
+              _localMessages.any((m) => m['role'] == 'SYSTEM');
+      final correction = correction_intent.detectCircleCorrectionIntent(
+        userOriginal,
+        hasPreviousExchange: hasPreviousExchange,
+      );
+      if (correction.action != correction_intent.CircleCorrectionAction.none) {
+        _log(
+          '[CORRECTION-LOCAL-STRONG]',
+          'action=${correction.action.name} '
+              'replacement_len=${correction.replacement.length}',
+        );
+        await _rewindPreviousExchangeForCorrection(
+          'strong_${correction.action.name}',
+        );
+        if (!mounted ||
+            expectedPipelineGeneration != _pipelineGeneration ||
+            !_isConversationActive) {
+          return;
+        }
+        if (correction.action ==
+            correction_intent.CircleCorrectionAction.replace) {
+          return _processCircleTalkTurn(
+            correction.replacement,
+            expectedPipelineGeneration: expectedPipelineGeneration,
+            isCorrectionRetry: true,
+          );
+        }
+        _turnInFlight = false;
+        _closeContinuationWindow(reason: 'strong_misheard');
+        _resetContinuationState();
+        await _speakRetryAndListen();
+        return;
+      }
     }
     if (isConversationCancelCommand(userOriginal)) {
       await _handleConversationCancelCommand(expectedPipelineGeneration);
@@ -4788,6 +4830,8 @@ $kSpokenReplyLengthPolicy
 
   Future<void> _deleteLastPersistedExchange() async {
     try {
+      // 직전 교환 저장이 끝나기 전에 조회하면 삭제할 문서를 놓칠 수 있다.
+      await _pendingTurnPersistence;
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
       final firestore = FirebaseFirestore.instance;
@@ -5075,7 +5119,6 @@ $kSpokenReplyLengthPolicy
     );
   }
 
-
   /// 🔍 [ORIGIN-RESTORE] 원문 복원을 걸어 둔다.
   ///
   /// 대화방은 발화 하나를 그 자리에서 전사하고 넘어가므로, 그때는 앞뒤에 무슨
@@ -5093,6 +5136,7 @@ $kSpokenReplyLengthPolicy
         await _pendingTurnPersistence;
       } catch (_) {}
       OriginRestorationRunner.instance.start(
+        caller: 'circle_talk',
         roomRef: ref,
         apiKey: _openAiKey,
         sourceName: _nativeLangName(),
@@ -6556,7 +6600,6 @@ class TtsCache {
     } catch (_) {}
   }
 }
-
 
 // ============================================================================
 

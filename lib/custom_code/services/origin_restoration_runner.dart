@@ -31,6 +31,13 @@ import 'origin_pcm_store.dart';
 import 'pcm_audio_utils.dart';
 import 'origin_restoration.dart';
 
+enum OriginRestorationWaitResult {
+  notRunning,
+  completed,
+  failed,
+  timedOut,
+}
+
 class OriginRestorationRunner {
   OriginRestorationRunner._();
 
@@ -40,9 +47,18 @@ class OriginRestorationRunner {
   static bool enabled = true;
 
   static const Duration _timeout = Duration(seconds: 30);
+  static const Duration waitTimeout = Duration(minutes: 3);
 
   /// 방마다 도는 판. 같은 방에 두 판이 겹치면 같은 줄을 두 번 고친다.
   final Map<String, Future<void>> _running = <String, Future<void>>{};
+
+  /// 🔎 [계측 전용] 판마다 붙는 일련번호와, 지금 등록된 판이 몇 번인지.
+  ///   동작에 쓰이지 않는다 — 로그에서 판을 가리기 위한 이름표다.
+  int _runSeq = 0;
+  final Map<String, int> _registeredRunId = <String, int>{};
+
+  String _fid(Future<void>? f) =>
+      f == null ? 'null' : identityHashCode(f).toString();
 
   /// 대화가 끝나는 자리에서 부른다. **기다리지 않는다.**
   void start({
@@ -50,27 +66,110 @@ class OriginRestorationRunner {
     required String apiKey,
     required String sourceName,
     required String targetLanguage,
+    bool targetSubjectOnly = false,
+    String caller = 'unknown',
   }) {
-    if (!enabled || apiKey.isEmpty) return;
     final id = roomRef.id;
-    if (_running.containsKey(id)) return;
-    final task = _run(
+    debugPrint('[ORIGIN-RUNNER] start_enter room=$id caller=$caller '
+        'enabled=$enabled apiKey=${apiKey.isEmpty ? 'empty' : 'present'} '
+        'existing=${_running.containsKey(id)} '
+        'existingFuture=${_fid(_running[id])} '
+        'existingRunId=${_registeredRunId[id]} '
+        'runner=${identityHashCode(this)}');
+    if (!enabled || apiKey.isEmpty) {
+      debugPrint('[ORIGIN-RUNNER] start_bail room=$id caller=$caller '
+          'reason=${!enabled ? 'disabled' : 'no_api_key'}');
+      return;
+    }
+    if (_running.containsKey(id)) {
+      debugPrint('[ORIGIN-RUNNER] start_reuse room=$id caller=$caller '
+          'runId=${_registeredRunId[id]} future=${_fid(_running[id])}');
+      return;
+    }
+    final int runId = ++_runSeq;
+    final Future<void> raw = _run(
       roomRef: roomRef,
       apiKey: apiKey,
       sourceName: sourceName,
       targetLanguage: targetLanguage,
-    ).whenComplete(() => _running.remove(id));
+      targetSubjectOnly: targetSubjectOnly,
+      runId: runId,
+    );
+    late final Future<void> task;
+    task = raw.whenComplete(() {
+      debugPrint('[ORIGIN-RUNNER] finally_enter room=$id runId=$runId '
+          'thisFuture=${_fid(task)} rawFuture=${identityHashCode(raw)} '
+          'mapFuture=${_fid(_running[id])} '
+          'same=${identical(_running[id], task)} '
+          'mapRunId=${_registeredRunId[id]}');
+      _running.remove(id);
+      _registeredRunId.remove(id);
+      debugPrint('[ORIGIN-RUNNER] finally_exit room=$id runId=$runId '
+          'mapAfter=${_fid(_running[id])}');
+    });
+    debugPrint('[ORIGIN-RUNNER] start_new room=$id caller=$caller runId=$runId '
+        'rawFuture=${identityHashCode(raw)} wrappedFuture=${_fid(task)}');
     _running[id] = task;
+    _registeredRunId[id] = runId;
+    debugPrint('[ORIGIN-RUNNER] registered room=$id runId=$runId '
+        'future=${_fid(task)} mapFuture=${_fid(_running[id])} '
+        'same=${identical(_running[id], task)}');
     unawaited(task);
   }
 
   /// 공부방이 열릴 때 부른다. 돌고 있으면 끝날 때까지, 아니면 즉시.
-  Future<void> awaitIfRunning(String roomId) async {
+  Future<OriginRestorationWaitResult> awaitIfRunning(
+    String roomId, {
+    Duration? timeout,
+  }) async {
+    debugPrint('[ORIGIN-RUNNER-WAIT] enter room=$roomId '
+        'existing=${_running.containsKey(roomId)} '
+        'mapFuture=${_fid(_running[roomId])} '
+        'runId=${_registeredRunId[roomId]} '
+        'timeoutSec=${timeout?.inSeconds ?? -1} '
+        'runner=${identityHashCode(this)}');
     final task = _running[roomId];
-    if (task == null) return;
+    if (task == null) {
+      debugPrint('[ORIGIN-RUNNER-WAIT] not_running room=$roomId');
+      return OriginRestorationWaitResult.notRunning;
+    }
+    debugPrint('[ORIGIN-RUNNER-WAIT] captured room=$roomId '
+        'capturedFuture=${_fid(task)} mapFuture=${_fid(_running[roomId])} '
+        'same=${identical(_running[roomId], task)} '
+        'runId=${_registeredRunId[roomId]}');
+    // 🔎 [계측] timeout 포장을 거치지 않고 **원본 Future에 직접** 귀를 댄다.
+    //   이 줄이 찍히는데 아래 completed가 안 찍히면 문제는 대기 포장에 있고,
+    //   이 줄조차 안 찍히면 Future 자체가 끝나지 않는 것이다.
+    unawaited(task.then(
+      (_) => debugPrint('[ORIGIN-RUNNER-WAIT] probe_then room=$roomId '
+          'capturedFuture=${_fid(task)}'),
+      onError: (Object error) =>
+          debugPrint('[ORIGIN-RUNNER-WAIT] probe_error room=$roomId '
+              'capturedFuture=${_fid(task)} reason=${error.runtimeType}'),
+    ));
     try {
-      await task;
-    } catch (_) {}
+      if (timeout == null) {
+        await task;
+      } else {
+        await task.timeout(timeout);
+      }
+      debugPrint('[ORIGIN-RUNNER-WAIT] completed room=$roomId '
+          'capturedFuture=${_fid(task)}');
+      return OriginRestorationWaitResult.completed;
+    } on TimeoutException {
+      debugPrint('[ORIGIN-RUNNER-WAIT] timeout room=$roomId '
+          'capturedFuture=${_fid(task)} '
+          'currentMapFuture=${_fid(_running[roomId])} '
+          'stillRegistered=${_running.containsKey(roomId)} '
+          'currentRunId=${_registeredRunId[roomId]}');
+      debugPrint('[ORIGIN-RESTORE] wait_timeout room=$roomId '
+          'seconds=${timeout?.inSeconds ?? -1}');
+      return OriginRestorationWaitResult.timedOut;
+    } catch (error) {
+      debugPrint('[ORIGIN-RUNNER-WAIT] failed room=$roomId '
+          'capturedFuture=${_fid(task)} reason=${error.runtimeType}');
+      return OriginRestorationWaitResult.failed;
+    }
   }
 
   bool isRunning(String roomId) => _running.containsKey(roomId);
@@ -80,10 +179,13 @@ class OriginRestorationRunner {
     required String apiKey,
     required String sourceName,
     required String targetLanguage,
+    required bool targetSubjectOnly,
+    int runId = -1,
   }) async {
     final roomId = roomRef.id;
     final started = DateTime.now();
     Map<String, dynamic>? roomData;
+    debugPrint('[ORIGIN-RUNNER] run_enter room=$roomId runId=$runId');
     try {
       // **정상으로 마친 방만** 건너뛴다. 두 번째 판은 첫 판이 고친 글을
       // 원문으로 알고 또 고치기 시작하므로 완료된 방은 다시 돌면 안 되지만,
@@ -91,16 +193,18 @@ class OriginRestorationRunner {
       final room = await roomRef.get();
       final raw = room.data();
       roomData = raw is Map<String, dynamic> ? raw : null;
-      if (!shouldRunRestoration(roomData)) return;
+      if (!shouldRunRestoration(roomData)) {
+        debugPrint('[ORIGIN-RUNNER] run_completed room=$roomId runId=$runId '
+            'reason=already_done');
+        return;
+      }
 
       // 🚪 마지막 발화의 쓰기가 아직 큐에 있을 수 있다. 여기서 딱 한 번
       //   기다린다 — 대화 중에는 절대 기다리지 않는다.
       await OriginPcmStore.instance.flush(roomId);
 
-      final snap = await roomRef
-          .collection('messages')
-          .orderBy('created_at')
-          .get();
+      final snap =
+          await roomRef.collection('messages').orderBy('created_at').get();
       final turns = <RestorationTurn>[];
       for (final doc in snap.docs) {
         final data = doc.data();
@@ -127,6 +231,8 @@ class OriginRestorationRunner {
         // 고칠 글이 없는 것은 실패가 아니다.
         await _markCompleted(roomRef);
         await OriginPcmStore.instance.discard(roomId);
+        debugPrint('[ORIGIN-RUNNER] run_completed room=$roomId runId=$runId '
+            'reason=no_turns');
         return;
       }
 
@@ -137,7 +243,10 @@ class OriginRestorationRunner {
           apiKey: apiKey,
           turns: list,
           sourceName: sourceName,
-          instructions: buildOriginSuspectInstructions(sourceName: sourceName),
+          instructions: buildOriginSuspectInstructions(
+            sourceName: sourceName,
+            excludeProperNouns: targetSubjectOnly,
+          ),
           knownTurnIds: ids,
           requireTargetEvidence: false,
         ),
@@ -148,6 +257,7 @@ class OriginRestorationRunner {
           instructions: buildTargetValidationInstructions(
             sourceName: sourceName,
             targetLanguage: targetLanguage,
+            subjectOnly: targetSubjectOnly,
           ),
           knownTurnIds: ids,
           requireTargetEvidence: true,
@@ -179,6 +289,8 @@ class OriginRestorationRunner {
       debugPrint('[ORIGIN-RESTORE] final_changes=${outcome.corrections.length} '
           'elapsed_ms=${DateTime.now().difference(started).inMilliseconds} '
           'pcm_discarded=$discarded room=$roomId');
+      debugPrint('[ORIGIN-RUNNER] run_completed room=$roomId runId=$runId '
+          'reason=normal');
     } catch (error) {
       // 복원이 실패해도 대화는 그대로다. **완료로 찍지 않는다** — 한 번의
       // timeout이 그 방의 복원을 영영 닫아 버리면, 고칠 수 있었던 낱말이
@@ -197,7 +309,10 @@ class OriginRestorationRunner {
           await OriginPcmStore.instance.discard(roomId);
         } catch (_) {}
       }
+      debugPrint('[ORIGIN-RUNNER] run_failed room=$roomId runId=$runId '
+          'reason=${error.runtimeType}');
     }
+    debugPrint('[ORIGIN-RUNNER] run_exit room=$roomId runId=$runId');
   }
 
   /// 정상으로 마쳤다. **여기서만 완료 표시가 찍힌다.**
@@ -287,8 +402,8 @@ class OriginRestorationRunner {
         jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
     final choices = body['choices'] as List? ?? const <dynamic>[];
     if (choices.isEmpty) return const <OriginSuspect>[];
-    final message =
-        (choices.first as Map<String, dynamic>)['message'] as Map<String, dynamic>?;
+    final message = (choices.first as Map<String, dynamic>)['message']
+        as Map<String, dynamic>?;
     return parseOriginSuspects(
       (message?['content'] ?? '').toString(),
       knownTurnIds: knownTurnIds,
