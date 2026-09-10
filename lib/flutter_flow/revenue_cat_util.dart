@@ -1,6 +1,6 @@
 import 'dart:io' show Platform;
 import 'package:purchases_flutter/purchases_flutter.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 import 'package:flutter/services.dart';
 
 export 'package:purchases_flutter/purchases_flutter.dart'
@@ -34,7 +34,7 @@ Future initialize(
     PurchasesConfiguration configuration;
     if (kIsWeb) {
       if (webKey.isEmpty) {
-        print(
+        debugPrint(
           'RevenueCat web support requires a web API key. '
           'RevenueCat features will be disabled in Test Mode.',
         );
@@ -46,7 +46,7 @@ Future initialize(
     } else if (Platform.isAndroid) {
       configuration = PurchasesConfiguration(playStoreKey);
     } else {
-      print("RevenueCat is not supported on this platform.");
+      debugPrint("RevenueCat is not supported on this platform.");
       return;
     }
 
@@ -65,14 +65,14 @@ Future initialize(
       customerInfo = info;
     });
   } on Exception catch (e) {
-    print("RevenueCat initialization failed: $e");
+    debugPrint("RevenueCat initialization failed: $e");
   }
 }
 
 // Purchase a package.
 Future<bool> purchasePackage(String package) async {
   if (!_isConfigured) {
-    print('RevenueCat is not configured. Cannot purchase package.');
+    debugPrint('RevenueCat is not configured. Cannot purchase package.');
     return false;
   }
   try {
@@ -102,7 +102,7 @@ Future loadOfferings() async {
   try {
     _offerings = await Purchases.getOfferings();
   } on PlatformException catch (e) {
-    print("Error loading offerings info: $e");
+    debugPrint("Error loading offerings info: $e");
   }
 }
 
@@ -113,7 +113,7 @@ Future loadCustomerInfo() async {
   try {
     _customerInfo = await Purchases.getCustomerInfo();
   } on PlatformException catch (e) {
-    print("Error loading purchaser info: $e");
+    debugPrint("Error loading purchaser info: $e");
   }
 }
 
@@ -130,7 +130,7 @@ Future<bool?> isEntitled(String entitlementId) async {
     customerInfo = await Purchases.getCustomerInfo();
     return customerInfo!.entitlements.all[entitlementId]?.isActive ?? false;
   } on Exception catch (e) {
-    print("Unable to check RevenueCat entitlements: $e");
+    debugPrint("Unable to check RevenueCat entitlements: $e");
     return null;
   }
 }
@@ -157,7 +157,7 @@ Future login(String? uid) async {
     }
     _loggedInUid = normalizedUid;
   } on Exception catch (e) {
-    print("Unable to logIn or logOut user in RevenueCat: $e");
+    debugPrint("Unable to logIn or logOut user in RevenueCat: $e");
   }
 }
 
@@ -169,7 +169,7 @@ Future restorePurchases() async {
   // Note: On web, purchases are automatically restored by Web Billing.
   // This method is only needed for iOS/Android.
   if (kIsWeb) {
-    print(
+    debugPrint(
       'Restore purchases is not needed on web - Web Billing handles this automatically.',
     );
     return;
@@ -177,6 +177,6 @@ Future restorePurchases() async {
   try {
     customerInfo = await Purchases.restorePurchases();
   } on PlatformException catch (e) {
-    print("Unable to restore purchases in RevenueCat: $e");
+    debugPrint("Unable to restore purchases in RevenueCat: $e");
   }
 }

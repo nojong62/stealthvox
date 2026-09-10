@@ -1,4 +1,5 @@
 import 'package:firebase_remote_config/firebase_remote_config.dart';
+import 'package:flutter/foundation.dart';
 
 Future initializeFirebaseRemoteConfig() async {
   try {
@@ -11,7 +12,7 @@ Future initializeFirebaseRemoteConfig() async {
     });
     await FirebaseRemoteConfig.instance.fetchAndActivate();
   } catch (error) {
-    print(error);
+    debugPrint('$error');
   }
 }
 

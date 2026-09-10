@@ -178,7 +178,7 @@ class _StoreMasterState extends State<StoreMaster> {
   void _log(String tag, String msg) {
     final ts = DateTime.now().toIso8601String().substring(11, 23);
     final line = '[$ts] $tag $msg';
-    print(line);
+    debugPrint(line);
     AppLogLedger.instance.add('STORE', '$tag $msg');
   }
 
@@ -229,7 +229,7 @@ class _StoreMasterState extends State<StoreMaster> {
     } catch (e) {
       _log('RC_INIT', 'error: $e');
       // 로그인 실패해도 위젯 렌더링에 영향 없음, 로그만 남김
-      print('[RevenueCat] _initRevenueCatUser 오류: $e');
+      debugPrint('[RevenueCat] _initRevenueCatUser 오류: $e');
     }
   }
 

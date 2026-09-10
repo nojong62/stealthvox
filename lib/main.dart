@@ -77,6 +77,15 @@ const double kMaxTextScale = 1.5;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // 🔇 **릴리스에서는 진단 로그를 내보내지 않는다.**
+  //   `debugPrint`는 갈아 끼울 수 있는 최상위 변수라, 부르는 자리 300여 곳을
+  //   하나도 손대지 않고 여기 한 곳에서 막는다. 개발 빌드는 그대로 다 보인다.
+  //   ⚠️ 맨 `print()`는 이 교체가 잡지 못한다 — 그래서 남아 있던 것들을
+  //     `debugPrint`로 옮겨 이 문 아래로 들여놓았다. 새로 쓸 때도 `print`가
+  //     아니라 `debugPrint`를 쓸 것.
+  if (!kDebugMode) {
+    debugPrint = (String? message, {int? wrapWidth}) {};
+  }
   _installOverflowScanner();
   GoRouter.optionURLReflectsImperativeAPIs = true;
   usePathUrlStrategy();

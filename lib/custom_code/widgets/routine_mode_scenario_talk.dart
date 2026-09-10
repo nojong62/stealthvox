@@ -272,7 +272,7 @@ class _RoutineModeScenarioTalkState extends State<RoutineModeScenarioTalk>
   void _log(String tag, String msg) {
     final ts = DateTime.now().toIso8601String().substring(11, 23);
     final line = '[$ts] $tag $msg';
-    print(line);
+    debugPrint(line);
     AppLogLedger.instance.add('ROLEPLAY', '$tag $msg');
   }
 
@@ -1038,7 +1038,7 @@ never by itself a reason to ask back.
         }
       }
     } catch (e) {
-      print('❌ Key Load Error: $e');
+      debugPrint('❌ Key Load Error: $e');
     }
   }
 
@@ -1084,7 +1084,7 @@ never by itself a reason to ask back.
         _maybeAutoStartScenario();
       }
     } catch (e) {
-      print('❌ 시나리오 생성 에러: $e');
+      debugPrint('❌ 시나리오 생성 에러: $e');
     } finally {
       if (mounted) setState(() => _isGeneratingScenario = false);
     }
@@ -5552,12 +5552,12 @@ class RelayPipeline {
       apiKey: deepgramKey,
       audioRecorder: audioRecorder,
       langCode: targetLanguage,
-      onConnected: () => print('[Deepgram] 연결됨'),
+      onConnected: () => debugPrint('[Deepgram] 연결됨'),
       onTranscriptUpdate: (_) {}, // UI에서 오버라이드
       onTurnEnded: _onUserTurnEnded,
-      onError: (e) => print('[Deepgram] 오류: $e'),
-      onReconnecting: (attempt) => print('[Deepgram] 재연결 시도 $attempt/5회'),
-      onGaveUp: () => print('[Deepgram] 재연결 포기'),
+      onError: (e) => debugPrint('[Deepgram] 오류: $e'),
+      onReconnecting: (attempt) => debugPrint('[Deepgram] 재연결 시도 $attempt/5회'),
+      onGaveUp: () => debugPrint('[Deepgram] 재연결 포기'),
     );
   }
 
@@ -5613,7 +5613,7 @@ class RelayPipeline {
         _history.add('assistant', aiResponseBuffer.trim());
       }
     } catch (e) {
-      print('[RelayPipeline] AI 오류: $e');
+      debugPrint('[RelayPipeline] AI 오류: $e');
     }
   }
 
@@ -6285,7 +6285,7 @@ content and gist of the WHOLE conversation.
         };
       }
     } catch (e) {
-      print('generateDramaticScenario Error: $e');
+      debugPrint('generateDramaticScenario Error: $e');
     } finally {
       client.close();
     }
