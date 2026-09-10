@@ -233,6 +233,10 @@ class DuoSttPipeline {
     if (!_gateOpen) return;
     _gateOpen = false;
     _capture.abort();
+    // 🚪 [GATE-SYNC] **앱만 버리면 안 된다.** 문이 닫히면 소리가 Deepgram으로도
+    //   안 가므로, 저쪽에 열린 채 남은 발화는 단어를 못 받아 영영 안 닫힌다.
+    //   그 껍데기가 다음 구간으로 넘어가 실제 말과 경계가 어긋났다.
+    _sensor?.abortOpenSpeech(reason.isEmpty ? 'gate_close' : reason);
     _speechStartedAt = null;
     _lg('mode=$mode audio_gate=close reason=$reason');
   }

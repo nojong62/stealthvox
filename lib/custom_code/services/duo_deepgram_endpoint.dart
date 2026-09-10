@@ -255,6 +255,27 @@ class DuoDeepgramEndpointSensor {
   @visibleForTesting
   void handleMessageForTest(String raw) => _onMessage(raw);
 
+  /// 🚪 [GATE-SYNC] **문이 닫혔다. 열린 발화를 버린다.**
+  ///
+  /// 통역은 상대 목소리를 트는 동안 마이크 문을 닫는다. 그때 앱은
+  /// `_capture.abort()`로 담던 소리를 버리는데, 여기(Deepgram)의 `_speechOpen`은
+  /// 그대로 남아 다음 문이 열린 구간까지 끌려갔다. 그러면 소리를 못 받는
+  /// 동안에는 단어가 없어 UtteranceEnd가 안 오고, 다시 열렸을 때는 이미
+  /// 끝난 발화가 아직 열려 있다고 믿는다 — 실기기에서 `utt=- capturedMs=0`,
+  /// `started=2 ended=2`인데 실제 발화는 더 많았던 것이 그 모습이다(2026-09-10).
+  ///
+  /// **버리기만 하고 커밋하지 않는다.** 앱이 이미 소리를 버렸으므로
+  /// `onUtteranceEnd`를 부르면 빈 종료만 남는다. 소켓은 그대로 둔다 —
+  /// 다시 여는 값보다 잃는 시간이 크다.
+  void abortOpenSpeech(String reason) {
+    if (_closed || !_speechOpen) return;
+    _speechOpen = false;
+    _speechStale = false;
+    _cancelStaleTimer();
+    _lg('[GATE-SYNC] speech_aborted reason=$reason '
+        'started=$_speechStartedCount ended=$_utteranceEndCount');
+  }
+
   /// 소켓이 죽었을 때 열린 발화를 닫는다. **고착을 막는 자리다.**
   void _failOpenSpeech(String reason) {
     if (_closed) return;
