@@ -47,6 +47,7 @@ import '/custom_code/actions/billing_ticker.dart';
 import '/custom_code/actions/billing_idle_mixin.dart';
 import '/custom_code/services/ai_style.dart';
 import '/custom_code/services/deepgram_prewarm_session.dart';
+import '/custom_code/services/dialog_brain_model.dart';
 import '/custom_code/services/history_finalize.dart';
 import '/custom_code/services/openai_connection_pool.dart';
 import '/custom_code/services/origin_language_session.dart';
@@ -3541,14 +3542,19 @@ $kSpokenReplyLengthPolicy
         history: _recentHistory,
         // 📏 프롬프트를 줄였을 때 첫 토큰이 실제로 빨라지는지 보려면 입력
         //   토큰 수가 있어야 한다. promptChars와 같이 남겨 둘 다 대조한다.
-        onUsage: (promptTokens, completionTokens, cachedTokens) => _log(
+        onUsage: (promptTokens, completionTokens, cachedTokens, totalTokens) =>
+            _log(
           '📏 [AI-TOKENS]',
           'turn=$currentTurnId promptTokens=$promptTokens '
               'cachedTokens=$cachedTokens '
               'completionTokens=$completionTokens '
+              'totalTokens=$totalTokens '
               'systemPromptChars=${systemPrompt.length} '
               'historyTurns=${_recentHistory.length}',
         ),
+        // 🧪 [LUNA] status·finish_reason·usage 수신 여부. 실패해도 이전
+        //   모델로 다시 묻지 않으므로 400 본문이 여기로 올라와야 한다.
+        onLog: (message) => _log('🧪 [AI-HTTP]', 'turn=$currentTurnId $message'),
       )) {
         if (!firstTokenSeen) {
           firstTokenSeen = true;
@@ -3575,7 +3581,8 @@ $kSpokenReplyLengthPolicy
           .replaceAll(RegExp(r'^["“”\s]+|["“”\s]+$'), '');
       _log(
           '⏱️ [AI-GEN]',
-          'turn=$currentTurnId model=gpt-4o-mini stream=true '
+          'turn=$currentTurnId model=$kDialogBrainModel '
+              'reasoning=$kDialogBrainReasoningEffort stream=true '
               'elapsedMs=${aiGenSw.elapsedMilliseconds} len=${aiOriginal.length}');
       if (aiOriginal.isEmpty) {
         throw StateError('Circle Talk response did not complete.');
@@ -6188,19 +6195,28 @@ Return only the line itself.'''
 
   /// Circle Talk regular turn, **streamed**.
   ///
-  /// 모델·프롬프트·온도·토큰 상한은 [generateCircleMemberTurn]과 한 글자도 다르지
-  /// 않다. 바뀐 것은 `stream: true` 하나뿐이다 — 답변 내용이 아니라 도착 방식을
-  /// 바꿔, 첫 의미단위가 완성되는 즉시 TTS를 걸 수 있게 하려는 것이다.
+  /// 프롬프트·메시지 구조는 [generateCircleMemberTurn]과 같고, 도착 방식만
+  /// `stream: true`다 — 첫 의미단위가 완성되는 즉시 TTS를 걸 수 있게 하려는
+  /// 것이다.
   ///
   /// 실측(2026-08-11): 통짜 POST는 생성 1.0초를 다 기다린 뒤에야 TTS 요청이
   /// 나가서, GPT 1.0초 + TTS 1.2초가 직렬로 2.2초였다.
+  ///
+  /// 2026-09-12: 모델만 [kDialogBrainModel]로 옮겼다. `temperature`는 뺐고
+  /// `max_tokens`는 `max_completion_tokens`로, 추론은 `reasoning_effort`로
+  /// 준다. 이 함수 하나만 새 모델을 본다 — 다른 호출부는 아직 gpt-4o-mini다.
+  ///
+  /// 실패해도 이전 모델로 다시 묻지 않는다. 400·파싱 오류를 그대로 봐야
+  /// 하는 시험 단계라 [onLog]로 status와 본문을 올린다.
   static Stream<String> streamCircleMemberTurn({
     required String apiKey,
     required String systemPrompt,
     required String userText,
     required List<Map<String, String>> history,
-    void Function(int promptTokens, int completionTokens, int cachedTokens)?
+    void Function(int promptTokens, int completionTokens, int cachedTokens,
+            int totalTokens)?
         onUsage,
+    void Function(String message)? onLog,
   }) async* {
     if (apiKey.isEmpty || userText.trim().isEmpty) return;
     final client = http.Client();
@@ -6212,9 +6228,9 @@ Return only the line itself.'''
       request.headers['Authorization'] = 'Bearer $apiKey';
       request.headers['Content-Type'] = 'application/json; charset=utf-8';
       request.body = jsonEncode(<String, dynamic>{
-        'model': 'gpt-4o-mini',
-        'temperature': 0.75,
-        'max_tokens': 120,
+        'model': kDialogBrainModel,
+        'reasoning_effort': kDialogBrainReasoningEffort,
+        'max_completion_tokens': 120,
         'stream': true,
         // 📏 입력 토큰을 추측하지 않고 서버가 센 값을 받는다. 프롬프트를 줄여
         //   첫 토큰이 빨라지는지 보려면 이 숫자가 기준선이어야 한다.
@@ -6233,15 +6249,31 @@ Return only the line itself.'''
       final response = await OpenAiConnectionPool.instance.client
           .send(request)
           .timeout(const Duration(seconds: 12));
-      if (response.statusCode != 200) return;
+      if (response.statusCode != 200) {
+        // 본문을 버리면 어느 파라미터가 거부됐는지 영영 모른다.
+        final body = await response.stream
+            .bytesToString()
+            .timeout(const Duration(seconds: 5))
+            .catchError((_) => '');
+        onLog?.call('status=${response.statusCode} body=$body');
+        return;
+      }
+      onLog?.call('status=200');
 
+      var usageSeen = false;
+      String? finishReason;
       await for (final line in response.stream
           .transform(utf8.decoder)
           .transform(const LineSplitter())
           .timeout(const Duration(seconds: 12))) {
         if (!line.startsWith('data:')) continue;
         final payload = line.substring(5).trim();
-        if (payload.isEmpty || payload == '[DONE]') continue;
+        if (payload.isEmpty) continue;
+        if (payload == '[DONE]') {
+          onLog?.call('done finish_reason=${finishReason ?? 'null'} '
+              'usage_seen=$usageSeen');
+          continue;
+        }
         try {
           final chunk = jsonDecode(payload) as Map<String, dynamic>;
           // 📏 usage 조각은 choices가 비어 있다. 먼저 걸러내지 않으면
@@ -6255,17 +6287,20 @@ Return only the line itself.'''
                 (usage['prompt_tokens_details']?['cached_tokens'] as num?)
                         ?.toInt() ??
                     0;
+            usageSeen = true;
             onUsage?.call(
               (usage['prompt_tokens'] as num?)?.toInt() ?? 0,
               (usage['completion_tokens'] as num?)?.toInt() ?? 0,
               cached,
+              (usage['total_tokens'] as num?)?.toInt() ?? 0,
             );
             continue;
           }
           final choices = chunk['choices'];
           if (choices is! List || choices.isEmpty) continue;
-          final delta =
-              (choices[0] as Map?)?['delta']?['content'] as String? ?? '';
+          final first = choices[0] as Map?;
+          finishReason = first?['finish_reason'] as String? ?? finishReason;
+          final delta = first?['delta']?['content'] as String? ?? '';
           if (delta.isNotEmpty) yield delta;
         } catch (_) {
           // 조각 하나가 깨져도 스트림 전체를 죽이지 않는다.
