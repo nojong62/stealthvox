@@ -47,7 +47,6 @@ import '/custom_code/services/origin_language_session.dart'
     show
         detectOriginScript,
         textIsLanguage,
-        textContradictsLanguage,
         // 🌐 [INTERP-ORIGIN] 만능 통역의 첫 발화 언어 판정. 서클톡·시나리오톡이
         //   쓰는 것과 **같은 물건**이다 — 언어 상태를 새로 만들지 않는다.
         resolveOriginFromFirstUtterance,
@@ -4317,11 +4316,20 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     if (!mounted || _isExiting) return;
 
     // 📚 History는 **전체 번역문 하나**다(지시 10번). 조각을 따로 남기지 않는다.
-    final bool rawIsMyTargetLang = (_isSameChatLang(srcLang, _myTarget()) ||
-            textIsLanguage(raw, _myTarget())) &&
-        !textContradictsLanguage(raw, _myTarget());
+    // 📝 원문은 **수정이 끝나기 전까지 히스토리에 앉히지 않는다.** 상대가 말한
+    //   언어가 마침 내 배울 언어일 때 그 원문을 그대로 배울글로 싣던 길이
+    //   있었다. 공부방이 API를 부를 일이 없다는 이점 때문이었는데, 그러면
+    //   한 줄에 원문과 번역이 나란히 떠서 어느 쪽이 내가 들은 말인지를
+    //   읽는 사람이 못 가린다(2026-09-11 실기기, 게스트 폰).
+    //
+    //   본문은 언제나 **내가 들은 말 하나뿐**이다. 배울글 자리는 복원·수정이
+    //   끝난 뒤에 채운다.
+    //
+    //   ⚠️ 원문을 **버리는 것은 아니다.** `partner_origin_text`에 그대로 남긴다 —
+    //   저장과 표시를 갈라 두는 것이지, 예전처럼 표시 문제를 데이터를 지워서
+    //   푸는 길로 돌아가지 않는다(위 [ORIGIN 보존] 주석).
     await _saveHistoryMessage(
-      rawIsMyTargetLang ? raw.trim() : '',
+      '',
       spoken,
       'SYSTEM',
       mode: kDuoModeInterpreter,
@@ -4331,7 +4339,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           : DateTime.fromMillisecondsSinceEpoch(
               (data['spokenAt'] as num).toInt()),
       sourceLang: myNative,
-      deferTarget: !rawIsMyTargetLang,
+      deferTarget: true,
+      // 화면에는 안 떠지만 기록에는 남는다.
+      partnerOriginText: raw,
+      partnerOriginLang: srcLang,
     );
 
     // ── consumer 마무리: 마지막 조각까지 재생이 끝나기를 기다린다 ──
@@ -5406,12 +5417,20 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     // 배울글이 되고, 공부방이 API를 부를 일도 없다.
     //   ⚠️ 선언만 믿지 않는다. 글자가 배울 언어와 어긋나면 배울글로 싣지
     //   않고 예전처럼 공부방에 넘긴다 — 한국어가 배울글 자리에 앉는 길이다.
-    final bool rawIsMyTargetLang =
-        (_isSameChatLang(srcLang, _myTarget()) ||
-                textIsLanguage(raw, _myTarget())) &&
-            !textContradictsLanguage(raw, _myTarget());
+    // 📝 원문은 **수정이 끝나기 전까지 히스토리에 앉히지 않는다.** 상대가 말한
+    //   언어가 마침 내 배울 언어일 때 그 원문을 그대로 배울글로 싣던 길이
+    //   있었다. 공부방이 API를 부를 일이 없다는 이점 때문이었는데, 그러면
+    //   한 줄에 원문과 번역이 나란히 떠서 어느 쪽이 내가 들은 말인지를
+    //   읽는 사람이 못 가린다(2026-09-11 실기기, 게스트 폰).
+    //
+    //   본문은 언제나 **내가 들은 말 하나뿐**이다. 배울글 자리는 복원·수정이
+    //   끝난 뒤에 채운다.
+    //
+    //   ⚠️ 원문을 **버리는 것은 아니다.** `partner_origin_text`에 그대로 남긴다 —
+    //   저장과 표시를 갈라 두는 것이지, 예전처럼 표시 문제를 데이터를 지워서
+    //   푸는 길로 돌아가지 않는다(위 [ORIGIN 보존] 주석).
     await _saveHistoryMessage(
-      rawIsMyTargetLang ? raw.trim() : '',
+      '',
       spoken,
       'SYSTEM',
       mode: kDuoModeInterpreter,
@@ -5422,7 +5441,10 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           : DateTime.fromMillisecondsSinceEpoch(
               (data['spokenAt'] as num).toInt()),
       sourceLang: myNative,
-      deferTarget: !rawIsMyTargetLang,
+      deferTarget: true,
+      // 화면에는 안 떠지만 기록에는 남는다.
+      partnerOriginText: raw,
+      partnerOriginLang: srcLang,
     );
 
     // 🔇 [ECHO] 앱이 소리 낼 문장을 기억해 둔다. 스피커폰에서 이 소리가
@@ -5552,10 +5574,13 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
   /// `target_lang`으로 만든다 — 나머지 세 모드와 같다.
   /// (chat_history_master의 `_scheduleMissingTargetGeneration`이 받는다)
   ///
-  /// 예외가 하나 있다: 상대가 말한 언어가 마침 **내 배울 언어와 같으면**,
-  /// 그 원문이 곧 배울 문장이다. 그때는 `target`에 실어 보내 `deferTarget`을
-  /// 끈다. 번역의 번역이 아니라 상대가 실제로 한 말이 배울글이 되고,
-  /// 공부방에서 API를 부를 필요도 없다.
+  /// ⚠️ 예전에는 예외가 하나 있었다 — 상대가 말한 언어가 마침 내 배울
+  /// 언어와 같으면 그 원문을 `target`에 실어 `deferTarget`을 끓는 길이다.
+  /// 공부방이 API를 부를 일이 없다는 이점 때문이었는데, 그러면 한 줄에
+  /// 원문과 번역이 나란히 떠서 어느 쪽이 내가 들은 말인지를 못 가린다.
+  /// 2026-09-11 실기기에서 걸러 걷어냈다. 지금은 **수정이 끝나기 전까지
+  /// 본문은 내가 들은 말 하나뿐**이고, 상대 원문은 화면이 안 읽는
+  /// `partner_origin_text`에 따로 남는다.
   Future<void> _saveHistoryMessage(
     String target,
     String original,
@@ -5576,6 +5601,11 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
     String? pcmKey,
     String? sourceLang,
     bool? deferTarget,
+    // 🗄️ 상대가 **실제로 말한 원문**과 그 언어. 화면은 이 칸을 읽지
+    //   않는다 — 저장과 표시를 갈라 둔다. 복원·수정·학습문 생성이
+    //   나중에 이걸 가져다 쓴다.
+    String? partnerOriginText,
+    String? partnerOriginLang,
     // 🔗 이 줄이 나온 채널 원본 문서 id. canonical이 이 값으로 개인 방 줄을
     //   찾아 결과를 옮긴다. 없으면 그 줄은 canonical 적용에서 빠진다.
     String? channelMsgId,
@@ -5630,6 +5660,12 @@ class _RoutineModeDuoState extends State<RoutineModeDuo>
           'source_lang': sourceLang,
         if (channelMsgId != null && channelMsgId.isNotEmpty)
           'channel_msg_id': channelMsgId,
+        // 🗄️ 표시용이 아니다. 어느 렌더러도 이 칸을 읽지 않는다 —
+        //   수정·확정 단계가 원문을 찾을 때만 쓴다.
+        if (partnerOriginText != null && partnerOriginText.trim().isNotEmpty)
+          'partner_origin_text': partnerOriginText.trim(),
+        if (partnerOriginLang != null && partnerOriginLang.isNotEmpty)
+          'partner_origin_lang': partnerOriginLang,
         // 💾 내 마이크에서 나온 줄에만 붙는다. 이 칸이 곧 "복원해도 되는
         //   줄"이라는 표시다.
         if (pcmKey != null && pcmKey.trim().isNotEmpty)
